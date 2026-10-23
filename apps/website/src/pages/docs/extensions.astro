@@ -1,0 +1,206 @@
+---
+import DocLayout from '../../layouts/DocLayout.astro';
+const base = import.meta.env.BASE_URL;
+const mcpExample = `{
+  "mcpServers": {
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    }
+  }
+}`;
+const httpExample = `{
+  "mcpServers": {
+    "team-tools": {
+      "type": "http",
+      "url": "https://mcp.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}`;
+const skillExample = `mkdir -p .mica/skills/review-checklist
+cat > .mica/skills/review-checklist/SKILL.md <<'EOF'
+---
+name: review-checklist
+description: 按项目约定审查代码，检查正确性、兼容性与测试覆盖
+when_to_use: 用户要求审查代码或准备合并改动时
+argument-hint: [文件或目录]
+---
+
+先阅读项目指令与相关代码，再检查本次 diff。
+优先报告可以定位到文件和行的实际问题，并说明触发条件。
+检查已有测试是否覆盖行为变化，给出最小的验证建议。
+没有发现问题时明确说明审查范围与尚未验证的部分。
+EOF`;
+const roleExample = `mkdir -p "\${MICA_HOME:-$HOME/.mica}/role"
+cat > "\${MICA_HOME:-$HOME/.mica}/role/reviewer.md" <<'EOF'
+你是一名代码审查者。
+先理解修改目标，再检查正确性、边界情况与回归风险。
+每个发现都给出文件位置、触发条件和具体影响。
+默认只阅读代码；需要修改文件或运行会改变状态的命令时，先取得用户同意。
+EOF`;
+---
+
+<DocLayout
+  title="MCP、Skills 与角色"
+  active="extensions"
+  description="用 MCP 接入外部工具，用 Skills 复用工作流程，用角色定义模型的工作方式。"
+>
+  <h1>MCP、Skills 与角色</h1>
+  <p class="lead">
+    工具连接、流程知识和系统提示词分别解决不同问题。按需要组合它们，让 Mica 适应你的项目和团队工作方式。
+  </p>
+
+  <h2>选择扩展方式</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>方式</th>
+          <th>适合放什么</th>
+          <th>入口</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>MCP</td>
+          <td>外部服务和工具，例如文档检索、数据库、团队系统。</td>
+          <td>
+            <code>config.json</code> 的 <code>mcpServers</code>。
+          </td>
+        </tr>
+        <tr>
+          <td>Skills</td>
+          <td>按需读取的任务指南，例如审查清单、发布流程、框架约定。</td>
+          <td>
+            包含 <code>SKILL.md</code> 的目录。
+          </td>
+        </tr>
+        <tr>
+          <td>角色</td>
+          <td>贯穿会话的工作方式，例如审查者、规划者。</td>
+          <td>
+            用户数据目录中的 <code>role/*.md</code>。
+          </td>
+        </tr>
+        <tr>
+          <td>项目指令</td>
+          <td>项目通用的构建方式、代码约定和验证要求。</td>
+          <td>
+            当前工作目录的 <code>AGENT.md</code>、<code>AGENTS.md</code>。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>连接 MCP 工具</h2>
+  <p>
+    在 <code>~/.mica/config.json</code>（或 <code>$MICA_HOME/config.json</code>）中添加 <code>mcpServers</code>
+    ，保留已有 provider 和其他字段。服务器名称由你定义，Mica 会在启动时连接并加载其工具。
+  </p>
+
+  <h3>本地进程：stdio</h3>
+  <p>
+    以下示例使用 Node.js/npm 提供的 <code>npx</code> 启动 Sequential Thinking 服务：
+  </p>
+  <pre><code>{mcpExample}</code></pre>
+  <p>
+    本地服务支持 <code>command</code>、<code>args</code>、<code>env</code> 和 <code>cwd</code> 字段。确保启动 Mica
+    的环境能够找到对应命令；有独立依赖或凭证要求的服务，应按该服务说明配置环境。
+  </p>
+
+  <h3>远程服务：Streamable HTTP</h3>
+  <p>
+    将示例地址替换为实际 MCP 端点。需要认证时通过 <code>headers</code> 提供请求头：
+  </p>
+  <pre><code>{httpExample}</code></pre>
+  <p>
+    这里的 <code>url</code> 必须是服务提供的 MCP 端点，普通网页或 REST API 地址不能直接作为 MCP 服务。
+  </p>
+
+  <h3>检查与重连</h3>
+  <p>
+    重启 Mica 后运行 <code>/mcp</code> 查看服务器与工具。连接中断时可执行{' '}
+    <code>/mcp reconnect sequential-thinking</code>。排查时先检查本地命令、服务地址与凭证，再查看服务器返回的错误。
+  </p>
+  <p>自动化任务可以显式加载 MCP 文件，避免依赖个人设置：</p>
+  <pre><code>mica exec --mcp-config ./mcp.json --strict-mcp-config --mcp-init-timeout-ms 10000 "使用可用工具检查服务状态"</code></pre>
+  <p>
+    <code>mcp.json</code> 采用相同的 <code>mcpServers</code> 结构。不传 <code>--strict-mcp-config</code> 时会合并本地
+    MCP 配置，同名项以显式文件为准；超时按单个服务器的连接与工具发现整体计算。
+  </p>
+
+  <h2>添加一个 Skill</h2>
+  <p>
+    Skill 是一个目录，其中的 <code>SKILL.md</code> 包含名称、说明与任务指导。下面的 POSIX shell
+    示例在当前项目创建代码审查清单：
+  </p>
+  <pre><code>{skillExample}</code></pre>
+  <p>
+    重新启动后用 <code>/skills</code> 检查是否发现该 Skill，再在请求中明确说“使用 review-checklist
+    审查本次改动”。桌面对话框也支持通过斜杠补全插入 Skill 名称。
+  </p>
+  <p>
+    模型先看到 Skills 的名称与说明索引，执行相关任务时通过 <code>Skill</code>{' '}
+    工具按需读取全文。建议让说明准确表达触发场景，正文写清输入、步骤和交付要求；相对路径所需的前提也应说明。
+  </p>
+
+  <h3>Skill 查找位置</h3>
+  <ul>
+    <li>
+      用户级：<code>~/.mica/skills</code>，设置 <code>MICA_HOME</code> 后改为 <code>$MICA_HOME/skills</code>。
+    </li>
+    <li>
+      项目级：当前工作目录下的 <code>.mica/skills</code>、<code>.agents/skills</code>、<code>.deveco/skills</code> 和{' '}
+      <code>.agent_context/skills</code>。
+    </li>
+    <li>
+      共享目录：未设置 <code>MICA_HOME</code> 时，还扫描 <code>~/.agents/skills</code> 与{' '}
+      <code>~/.config/deveco/skills</code>。
+    </li>
+  </ul>
+  <p>
+    使用独立的 <code>MICA_HOME</code> 可以隔离个人 Skills；项目目录中的 Skills 仍会被发现。
+  </p>
+
+  <h2>定义角色</h2>
+  <p>
+    角色用于替换基础系统提示词中的角色内容。把 Markdown 文件放入用户数据目录的 <code>role</code>{' '}
+    子目录，文件名就是角色名。下面创建 <code>reviewer</code>：
+  </p>
+  <pre><code>{roleExample}</code></pre>
+  <p>
+    终端使用 <code>/role</code> 选择，空闲时也可用 <code>Shift+Tab</code>{' '}
+    循环切换。桌面端从输入区角色入口选择；自动化任务可传 <code>--role reviewer</code>。
+  </p>
+  <pre><code>mica exec --role reviewer "审查当前工作区的改动，给出可定位的问题"</code></pre>
+  <p>
+    只加载 <code>.md</code> 文件；内置 <code>default</code> 角色保留，用户的 <code>default.md</code>{' '}
+    不会覆盖它。角色约定用于指导模型行为，不是文件权限或执行沙箱。
+  </p>
+
+  <h2>让项目约定随仓库共享</h2>
+  <p>
+    将适用于所有任务的约定写入项目工作目录的 <code>AGENT.md</code> 或 <code>AGENTS.md</code>
+    ，例如测试命令、目录职责和代码审查要求。两者均存在时都会载入。任务专用的长流程更适合放入
+    Skill，个人工作风格更适合放入角色文件。
+  </p>
+
+  <h2>委派子代理协作</h2>
+  <p>
+    需要并行探索或独立审查时，可以在任务中要求 Mica 委派子代理。例如：“并行检查 API
+    和前端的错误处理，分别给出结论，再汇总需要修复的问题。”主代理通过 <code>Agent</code>{' '}
+    工具派发工作，可以选择等待结果或继续主任务。
+  </p>
+  <p>
+    使用终端的 <code>/task</code>{' '}
+    或桌面的子代理任务详情查看进展。为实现、测试等可写任务明确分配文件范围，可以减少并发修改冲突；探索和审查任务则适合只读执行。
+  </p>
+  <p>
+    配置和运行更多模型服务见 <a href={`${base}docs/configuration`}>模型与配置</a>；需要管理运行中的任务与工具时，见{' '}
+    <a href={`${base}docs/commands`}>终端命令</a>。
+  </p>
+</DocLayout>

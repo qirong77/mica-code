@@ -585,7 +585,10 @@ npm run serve:web         # 构建后运行 Web 运行时
 | `blogs/`               | 想了解实现的读者 | 开发记录，保留写作时的技术栈描述，不回填新结论           |
 | `packages/*/README.md` | 包的使用者       | 单包 API、边界、目录结构                                 |
 
-- README 分区顺序固定：定位 → 核心优势 → 评测 → 快速开始 → 能力一览（内置命令 / 工具与扩展 / 桌面 App）→ 集成与自动化 → 文档 → 开发。新增内容优先并进已有分区，不追加新的一级标题。
+- README 保持使用者视角：定位 → 为什么选择 Mica → 快速开始 → DeepSWE 任务对比 → 终端 / 桌面 / 自动化 → 扩展 → 文档与开发。除用户明确要求重构外，局部更新只修改对应段落；完整配置、命令与协议参考链接到在线文档，不重新堆回 README。
+- 对外文案不得依赖个人路径、未公开项目或会话上下文；不写虚构成果、绝对成本优势或无证据的排行。首页示例与真实产品截图须明确区分。
+- 官网使用共享布局与设计变量；文档导航唯一维护于 `apps/website/src/content/docs.ts`，新增页同步标题、搜索与相邻文章。验证 1440px 桌面和 390px 移动端的导航、搜索、复制、目录、图片与横向溢出。
+- 网站交付检查 `PAGES_BASE_PATH=/mica-code npm run build`，所有内部资源使用 `BASE_URL`；本地根路径构建通过不能代替子路径验证。
 - 命令表必须与代码一致：`ALLOW_DURING_TURN_COMMANDS`（`apps/cli/src/plugins/commands/index.ts`）与 `plugins/command-*.ts` 里的 `allowDuringTurn`。新增、删除、改名命令时同步 README、`apps/website/src/pages/docs/commands.astro`、`packages/mica-builtin-commands/README.md` 三处。
 - 配置字段、CLI 参数、环境变量的口径以 `packages/mica-config` 与 `apps/cli/src/cli/args.ts` 为准；README 只写使用者会用到的字段，内部参数留给 AGENT.md。
 - 文档里不写实现细节（内部函数名、锁文件布局、事件名），那些留在本文件与 `docs/`。
@@ -617,13 +620,14 @@ npm run serve:web         # 构建后运行 Web 运行时
 4. 造会话：`POST /api/invoke`，`{"channel":"chat:start","payload":{"id":"<nodeId>","prompt":"…","cwd":"…","model":"demo/mica-demo"}}`。要截「回合日志」就必须在 turn 运行中截：`payload.id` 必须是页面当前的 node id（在 `uiState.workspace.nodes` 里），否则页面收不到 run 事件。脚本化的 `run_shell` 走真实命令（如 `bun run typecheck`），天然会持续几秒，够截。
 5. 截图：受控浏览器 `POST /remote/control/browser/browsers`（`{url,label}`）→ `GET /remote/control/browser/tabs/<id>/screenshot?raw=true`。窗口默认 1180×800、2x DPR，页面可视区出图 2360×1460，再 `sips -Z 1800` 收到 1800×1113。
 
-- 产物固定三个：`images/app-chat.png`（头图）、`images/app-turn-log.png`、`images/eval-benchmark.svg`；官网副本放 `apps/website/public/screenshots/`，改名或替换时同步 `apps/website/src/pages/index.astro` 的引用。
+- 产物固定三个：`images/app-chat.png`（头图）、`images/app-turn-log.png`、`images/eval-benchmark.svg`；官网副本为 `apps/website/public/screenshots/chat.png`、`turn-log.png`、`eval-benchmark.svg`，改名或替换时同步首页和桌面指南的引用。
 - 截图里的内容只用示例数据，不放真实会话、真实 key、真实私有仓库路径。
 - 只有完成态回合会在重开后保留正文，工具行只属于当前 turn：要展示工具/待办就必须在运行中截。
 
 ### 评测图
 
-- 口径写在图片旁边的正文里（图本身不带标题）：9 个任务、464 项人工检查、模型统一 DeepSeek Flash、每格取 4 次运行的中位数。
-- 数字来自本地 `frontier-harness-eval-benchmark` 的 `data/runs` 取中位数，图表由 `bun scripts/generate-eval-chart.mjs` 生成（1180×276，自带浅底，保证 GitHub 深色主题下可读），不要手改 SVG。改数字时同步 README 结论段与官网首页 `#benchmark` 区块。
-- 通过率一列用 95%–100% 的放大坐标并在图内标注，满格线性画出来五条几乎一样长；未通过项数同时写在轴下方。
-- 不做「看起来更好」的裁剪：通过数、缓存命中率、耗时、轮次四项都放图里，结论按实际差距写（正确率同档、缓存最高、轮次偏多）。
+- 当前任务来源是 FrontierHarness Eval 收录的 9 项 DeepSWE v1.1 任务；不得称为 Terminal-Bench 成绩。464 项为自定义自动化检查，不是人工检查，也不是官方 verifier。
+- 通过项数按任务取重复运行中位数后相加；每个任务-agent 单元样本数为 2–8 次，不写固定四次。检查项通过率不等于完整解决任务的比例。
+- 对外数据唯一来源为 `apps/website/public/benchmark-data.json`；方法与限制见 `apps/website/src/pages/docs/benchmark.astro`。评分与效率样本分别汇总，不能将耗时解释为严格速度排名，也不能承诺完整实验可复现。
+- `bun scripts/generate-eval-chart.mjs` 从公开汇总 JSON 生成 `images/eval-benchmark.svg` 并同步官网副本（1180×276，浅底），不要手改 SVG。改数字同步 README 与首页指标摘要。
+- 图只展示五款 agent，不展示 base；通过率用 95%–100% 放大坐标并标注，保留得分、缓存命中率、耗时汇总与模型请求数。图下解释中位数，不夸大接近的得分差异。

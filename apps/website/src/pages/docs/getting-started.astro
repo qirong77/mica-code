@@ -1,76 +1,131 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
-
 const base = import.meta.env.BASE_URL;
-
-const configExample = `{
-  "providers": [
-    {
-      "id": "deepseek",
-      "name": "DeepSeek",
-      "api_base": "https://api.deepseek.com",
-      "protocol": "openai_chat_completions",
-      "get_model_url": "https://api.deepseek.com/models",
-      "api_key": ""
-    },
-    {
-      "id": "Kimi",
-      "name": "Kimi",
-      "protocol": "openai_chat_completions",
-      "api_base": "https://api.moonshot.cn/v1",
-      "models": ["kimi-k2.7"],
-      "api_key": ""
-    }
-  ],
-  "mcpServers": {
-    "sequential-thinking": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
-    }
-  }
-}`;
 ---
 
-<DocLayout title="快速开始" active="getting-started" description="安装 Mica Code 并配置模型，开始你的第一次对话">
+<DocLayout
+  title="快速开始"
+  active="getting-started"
+  description="安装 Mica Code、连接模型，并在项目中开始第一次编程任务。"
+>
   <h1>快速开始</h1>
+  <p class="lead">
+    从项目目录启动 Mica
+    Code，用自然语言理解代码、实现修改并运行验证。先连接一个支持工具调用的模型，再开始你的第一个任务。
+  </p>
 
-  <h2>安装</h2>
-  <p>从 GitHub Release 下载对应平台的二进制（install.sh 探测 os/arch 并校验 sha256）：</p>
+  <h2>安装 Mica Code</h2>
+  <h3>macOS 与 Linux</h3>
+  <p>安装脚本支持 Apple Silicon、Intel Mac，以及 ARM64、x64 Linux。它会下载对应平台的预构建包，并校验 SHA-256。</p>
   <pre><code>curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
+mica --version</code></pre>
+  <p>
+    默认入口是 <code>~/.local/bin/mica</code>，程序及随包依赖位于 <code>~/.local/lib/mica</code>
+    。如果终端提示找不到命令，将入口目录加入 shell 配置中的 PATH；当前终端可先执行：
+  </p>
+  <pre><code>export PATH="$HOME/.local/bin:$PATH"</code></pre>
+  <p>
+    运行预构建 CLI 无需安装 Bun。PTY 交互工具会启动 Node 子进程，请准备 Node.js 22 或更高版本；默认 MCP 示例使用{' '}
+    <code>npx</code>，也需要 Node.js 与 npm。
+  </p>
+
+  <h3>从源码运行，包括 Windows</h3>
+  <p>准备 Git、Bun 和 Node.js 22+，在终端执行：</p>
+  <pre><code>git clone https://github.com/qirong77/mica-code.git
+cd mica-code
+bun install
+bun run dev</code></pre>
+  <p>
+    Windows 请使用源码入口。发布安装脚本仅支持 macOS 与 Linux；源码构建后的自动安装器会写入 POSIX shell
+    launcher，因此这里不把它作为 Windows 的安装步骤。
+  </p>
+
+  <h2>连接模型</h2>
+  <ol class="steps">
+    <li>
+      运行 <code>mica</code>，输入 <code>/config</code> 打开配置页面。源码运行时使用 <code>bun run dev</code>。
+    </li>
+    <li>
+      为 provider 填写 API 地址、API key 与协议。默认配置提供 DeepSeek 入口；也可以添加支持 OpenAI Chat Completions 或
+      Responses 协议的服务。
+    </li>
+    <li>
+      保存后，用 <code>/model</code> 选择 provider 和模型，再发送消息。界面能启动并不代表 API key 已配置成功。
+    </li>
+  </ol>
+  <p>
+    手动配置、环境变量和兼容服务示例见 <a href={`${base}docs/configuration`}>模型与配置</a>。
+  </p>
+
+  <h2>开始第一个任务</h2>
+  <p>在需要处理的项目目录启动。工作目录决定文件搜索、命令执行和项目指令的范围。</p>
+  <pre><code>cd your-project
 mica</code></pre>
-  <p>安装器把二进制放到 <code>~/.local/lib/mica</code>，并在 <code>~/.local/bin/mica</code> 写入薄 launcher。首次运行会自动创建本地配置文件 <code>~/.mica/config.json</code>；设置 <code>MICA_HOME</code> 时配置路径解析到 <code>$MICA_HOME/config.json</code>。</p>
+  <p>可以先从一个有明确交付物的任务开始：</p>
+  <pre><code>阅读项目结构和测试配置，说明主要模块的职责，找出运行测试的命令。
 
-  <h2>配置模型</h2>
-  <p>在 mica 中运行 <code>/config</code> 可以打开配置页面，或直接编辑配置文件。典型的 provider 配置：</p>
-  <pre><code>{configExample}</code></pre>
+为登录表单补充输入校验，复用现有组件，完成后运行相关测试并说明改动。</code></pre>
+  <p>
+    输入 <code>@</code>{' '}
+    搜索并引用工作区文件。模型执行期间可继续提交补充要求，消息会在工具迭代边界送入当前任务；输入框为空时按{' '}
+    <code>Shift+←</code> 可以撤回尚未发送的排队消息。按 <code>Ctrl+C</code> 中止当前任务。
+  </p>
 
-  <ul>
-    <li><code>protocol</code> 可选：<code>openai_chat_completions</code> 或 <code>openai_responses</code>。不要根据 <code>api_base</code> 猜测协议，按 provider 官方支持选择。</li>
-    <li>provider 配置了 <code>get_model_url</code>，模型列表会在运行时按 OpenAI <code>/models</code> 响应格式拉取；没有动态接口时用静态 <code>models</code> 数组。</li>
-    <li>模型列表也可以通过 <code>/model</code> 命令随时切换，并自动保存「按当前目录记忆」的 provider / model / effort 偏好。</li>
-    <li>当前 provider 缺少 <code>api_key</code> 只是 warning，UI 可以启动，但发送第一条消息前仍需要可用 key。</li>
-  </ul>
+  <h2>继续工作与管理上下文</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>需求</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>继续历史会话</td>
+          <td>
+            使用 <code>/resume</code> 选择会话，或 <code>mica --resume &lt;session-id&gt;</code>。
+          </td>
+        </tr>
+        <tr>
+          <td>检查当前模型和用量</td>
+          <td>
+            <code>/status</code> 查看模型状态，<code>/context</code> 查看上下文占用。
+          </td>
+        </tr>
+        <tr>
+          <td>减小上下文</td>
+          <td>
+            <code>/compact</code> 在本地清理工具结果；<code>/compact llm</code> 使用模型生成摘要。
+          </td>
+        </tr>
+        <tr>
+          <td>另开一条思路</td>
+          <td>
+            <code>/new</code> 创建独立会话，<code>/fork</code> 从当前历史分叉。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 
-  <h2>第一次对话</h2>
-  <pre><code>$ mica
-▸ 你好，帮我看看当前目录的代码结构</code></pre>
-  <ul>
-    <li>输入 <code>@</code> 可搜索当前工作区文件并引用；粘贴图片时也可以用 <code>[Image](路径)</code> 引用剪贴板图片。</li>
-    <li><code>Shift+Tab</code> 在输入框中按列表顺序循环切换 role（agent 运行中会被拒绝，此时表示排队发送）。</li>
-    <li>运行中再发送消息会自动排队，Enter / Tab / Shift+Tab 只有一种时机：<code>after_iteration</code>，在当前工具迭代边界注入当前 turn（本轮没有更多迭代时在 turn 结束后发送）。</li>
-    <li>排队中的消息可以用 <code>Shift+←</code> 撤回到输入框（输入框为空时才触发，否则该键留给选区），终端与桌面端一致。</li>
-  </ul>
-
-  <h2>运行时切换</h2>
-  <ul>
-    <li><code>/model</code> 切换 provider 与模型；<code>/effort</code> 切换推理强度（none / low / medium / high / xhigh）；<code>/role</code> 切换系统提示词。</li>
-    <li>自定义 role 文件放在 <code>~/.mica/role/</code>（或 <code>$MICA_HOME/role/</code>），只加载 <code>.md</code> 文件，文件名作为 role 名。</li>
-    <li><code>/status</code> 随时查看当前 provider / model / effort / role 状态，<code>/context</code> 查看上下文占用。</li>
-  </ul>
-
-  <h2>下一步</h2>
-  <ul>
-    <li>想了解全部内置命令：见 <a href={`${base}docs/commands`}>内置命令</a></li>
-    <li>接入桌面应用 / 自动化脚本：见 <a href={`${base}docs/headless`}>Headless 协议</a></li>
-  </ul>
+  <h2>选择下一步</h2>
+  <div class="card-grid">
+    <a class="doc-card" href={`${base}docs/commands`}>
+      <h3>终端命令</h3>
+      <p>会话、上下文、并行任务与快捷键参考。</p>
+    </a>
+    <a class="doc-card" href={`${base}docs/desktop`}>
+      <h3>桌面与浏览器</h3>
+      <p>在同一工作区管理对话、文件、Git 与终端。</p>
+    </a>
+    <a class="doc-card" href={`${base}docs/extensions`}>
+      <h3>扩展能力</h3>
+      <p>连接 MCP、添加 Skills、定义自己的角色。</p>
+    </a>
+    <a class="doc-card" href={`${base}docs/headless`}>
+      <h3>自动化与集成</h3>
+      <p>将 Mica 接入脚本、编辑器与持续运行的客户端。</p>
+    </a>
+  </div>
 </DocLayout>

@@ -1,186 +1,322 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
-import { features, protocolItems } from '../content/home';
-import markUrl from '../../../desktop/resources/icon.svg?url&no-inline';
-
 const base = import.meta.env.BASE_URL;
-
-const installCmd = `curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
-mica`;
-
-const heroTerm = `$ mica
-▸ Mica Code · model: kimi-k2.7 · effort: medium · role: default
-
-  ▸ 你好，帮我看看这个仓库里 README 的安装步骤是不是完整。
-
-  ● 我先读一下 README，再检查 install.sh 是否一致……
-  ✔ 发现 install.sh 缺少 macOS arm64 的 sha256 校验，已修复
-  ✔ 补上 README 中缺失的 MICA_HOME 说明
-
-  ▸ 提交这些改动，message 用英文。
-
-  ● 收集 git 变更 → 生成 commit message → push
-  ✔ committed 2 files: "add checksum verification to install script"
-  ✔ pushed to origin/main
-
-  上下文占用 12.4K / 200K (6%) · 缓存命中率 97% · 耗时 18s`;
+const workflows = [
+  {
+    number: '01',
+    title: '理解代码，再开始修改',
+    text: '搜索项目、引用文件、查看图片。让 agent 沿着真实代码追踪问题，把上下文交给工具。',
+    tag: '文件搜索 / @ 引用 / 网页检索',
+  },
+  {
+    number: '02',
+    title: '从实现一直走到验证',
+    text: '编辑代码、执行测试、运行交互终端。探索、实现和审查可以交给不同的子代理协作完成。',
+    tag: 'Shell / PTY / 多 Agent',
+  },
+  {
+    number: '03',
+    title: '保留继续工作的余地',
+    text: '恢复会话、分叉思路、回退到检查点。长任务中压缩工具输出，保留对话与工作方向。',
+    tag: 'Resume / Fork / Rewind / Compact',
+  },
+];
 ---
 
 <BaseLayout title="Mica Code">
-  <!-- Hero -->
-  <section class="hero">
-    <div class="container">
-      <img class="hero-logo" src={markUrl} alt="Mica Code logo" />
-      <h1>Mica Code</h1>
-      <div class="tagline">Minimal, Intelligent, Cache-first Agent.</div>
-      <p class="sub">
-        一个轻量、终端原生的 AI coding agent。不离开 shell，用最省 token 的方式
-        帮你读代码、改代码、跑测试和提交。
+  <section class="hero container">
+    <div class="hero-copy">
+      <p class="eyebrow">
+        <span class="status-dot"></span>开源 AI coding agent
+      </p>
+      <h1>
+        让思路成为
+        <br />
+        <span>可运行的代码。</span>
+      </h1>
+      <p class="hero-description">
+        读懂项目，动手修改，运行验证。
+        <br class="desktop-break" />
+        从终端到桌面，Mica 陪你把工作做完。
       </p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href={`${base}docs/getting-started`}>快速开始 →</a>
-        <a class="btn btn-ghost" href="https://github.com/qirong77/mica-code" target="_blank" rel="noopener">GitHub 源码</a>
+        <a class="btn btn-primary" href={`${base}docs/getting-started/`}>
+          开始使用 <span>→</span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/qirong77/mica-code">
+          查看源代码 ↗
+        </a>
       </div>
-
-      <div class="hero-term" aria-hidden="true">
-        <div class="term-bar">
-          <span class="term-dot" style="background:#f87171"></span>
-          <span class="term-dot" style="background:#facc15"></span>
-          <span class="term-dot" style="background:#4ade80"></span>
-          <span class="term-title">mica — terminal</span>
-        </div>
-        <div class="term-body">{heroTerm}</div>
+      <div class="hero-meta">
+        <span>缓存优先</span>
+        <span>多模型接入</span>
+        <span>终端 · 桌面 · 自动化</span>
+      </div>
+    </div>
+    <div class="hero-console" aria-label="安装与使用示例">
+      <div class="console-top">
+        <span class="console-indicator"></span>
+        <span>YOUR TERMINAL, WITH AN AGENT.</span>
+        <span>⌘</span>
+      </div>
+      <pre><code><span class="code-comment"># 安装 Mica Code</span>{'\n'}curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh{'\n\n'}<span class="code-comment"># 在你的项目里开始</span>{'\n'}cd your-project{'\n'}<span class="code-command">mica</span></code></pre>
+      <div class="console-bottom">
+        <span>Node.js 22+ · macOS / Linux</span>
+        <a href={`${base}docs/getting-started/`}>安装指南 ↗</a>
       </div>
     </div>
   </section>
 
-  <!-- 核心优势 -->
-  <section class="section" id="features">
-    <div class="container">
-      <div class="section-title">
-        <div class="kicker">Why Mica</div>
-        <h2>核心优势</h2>
-        <p>围绕「省 token、不离开终端、可回退」三条主线设计</p>
+  <section class="product-preview container" aria-label="产品预览">
+    <div class="preview-label">
+      <span>
+        <span class="status-dot"></span>同一套能力，更适合你的工作界面
+      </span>
+      <span class="preview-label-right">MICA CODE / DESKTOP</span>
+    </div>
+    <figure class="app-frame">
+      <div class="frame-bar">
+        <span class="window-dots">
+          <i></i>
+          <i></i>
+          <i></i>
+        </span>
+        <span>Mica Code — Workspace</span>
+        <span>Agent / Files / Terminal</span>
       </div>
-      <div class="grid">
-        {features.map((f) => (
-          <div class="card">
-            <div class="icon">{f.icon}</div>
-            <h3>{f.title}</h3>
-            <p>{f.desc}</p>
-          </div>
-        ))}
-      </div>
+      <img
+        src={`${base}screenshots/chat.png`}
+        width="1800"
+        height="1113"
+        alt="Mica 桌面工作区：左侧会话列表，右侧展示代码修改说明与测试结果"
+        fetchpriority="high"
+      />
+    </figure>
+    <div class="preview-caption">
+      <span>对话、代码、Git 与终端，在一个工作区里。</span>
+      <a href={`${base}docs/desktop/`}>了解桌面端 →</a>
     </div>
   </section>
 
-  <!-- 评测 -->
-  <section class="section" id="benchmark">
-    <div class="container">
-      <div class="section-title">
-        <div class="kicker">Benchmark</div>
-        <h2>同样的题，五个 agent 各跑一遍</h2>
-        <p>9 个真实仓库的 bugfix / 特性任务、464 项人工检查，模型统一 DeepSeek Flash，每格取 4 次运行的中位数</p>
+  <section class="section container" id="features">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">BUILT FOR THE WHOLE TASK</p>
+        <h2>
+          不止给出答案，
+          <br />
+          也把下一步做完。
+        </h2>
       </div>
-      <figure class="screenshot" style="background:#fdfdfd">
-        <img src={`${base}screenshots/eval-benchmark.svg`} alt="五个 coding agent 的通过率、缓存命中率、耗时与轮次对比" loading="lazy" />
-      </figure>
-      <p class="benchmark-note">
-        五者通过数只差 1.1 个百分点（457–462 项），正确率同档；Mica 的输入侧缓存命中率最高（99.1%），
-        总耗时 86.2 分钟居中，轮次比 Codex / Claude Code 多。通过率一列坐标为 95%–100%，否则看不出差距。
+      <p>
+        从一次代码探索，到跨越多个回合的开发任务。
+        <br />
+        工具、会话和协作，围绕实际工作组织。
       </p>
     </div>
-  </section>
-
-  <!-- 截图 -->
-  <section class="section">
-    <div class="container">
-      <div class="section-title">
-        <div class="kicker">In action</div>
-        <h2>终端与桌面的样子</h2>
-        <p>同一套 turn 循环、同一份会话：TUI 里键盘优先，桌面上多页签与可视化面板</p>
-      </div>
-      <figure class="screenshot">
-        <img src={`${base}screenshots/chat.png`} alt="Mica Code 桌面端对话截图" loading="lazy" />
-      </figure>
-      <figure class="screenshot" style="margin-top:24px">
-        <img src={`${base}screenshots/turn-log.png`} alt="Mica Code 回合日志与待办截图" loading="lazy" />
-      </figure>
+    <div class="workflow-grid">
+      {workflows.map((item) => (
+        <article class="workflow">
+          <span class="workflow-number">{item.number}</span>
+          <h3>{item.title}</h3>
+          <p>{item.text}</p>
+          <div class="workflow-tag">{item.tag}</div>
+        </article>
+      ))}
     </div>
   </section>
 
-  <!-- 工具与能力 -->
-  <section class="section" style="padding-top:20px">
-    <div class="container">
-      <div class="section-title">
-        <div class="kicker">Capabilities</div>
-        <h2>开箱即用的能力</h2>
+  <section class="cache-section" id="cache">
+    <div class="container cache-grid">
+      <div>
+        <p class="eyebrow">CACHE-FIRST BY DESIGN</p>
+        <h2>
+          上下文积累，
+          <br />
+          不必每次从头开始。
+        </h2>
+        <p>
+          稳定的提示词、工具定义与历史前缀，让模型有机会复用已经处理过的输入。上下文吃紧时，先压缩工具输出，再按需生成摘要。
+        </p>
+        <a class="text-link" href={`${base}docs/commands/`}>
+          了解上下文管理 →
+        </a>
       </div>
-      <div class="grid">
-        <div class="card">
-          <div class="icon">🧰</div>
-          <h3>工具可拼装</h3>
-          <p>文件读写、搜索、shell、网页检索、技能（skills）开箱即用；MCP 接入个人脚本与团队服务。</p>
+      <div class="cache-visual">
+        <div class="cache-visual-head">
+          <span>上下文复用示意</span>
+          <span>INPUT PREFIX</span>
         </div>
-        <div class="card">
-          <div class="icon">🤖</div>
-          <h3>多 Agent 协作</h3>
-          <p>/new 与 /fork 分叉出独立 agent，/task 统一管理；后台 subagent 可并行探索、实现、测试。</p>
-        </div>
-        <div class="card">
-          <div class="icon">⏪</div>
-          <h3>可回退、可压缩</h3>
-          <p>/rewind 回到所选历史节点（有文件检查点时连文件一起恢复）；/compact 在上下文吃紧时收束历史。</p>
-        </div>
-        <div class="card">
-          <div class="icon">🎭</div>
-          <h3>Role 即工作流</h3>
-          <p>/role 整段替换 system prompt，写码、审查、规划各用一套人格；Shift+Tab 快速循环切换。</p>
-        </div>
-        <div class="card">
-          <div class="icon">📎</div>
-          <h3>文件引用更快</h3>
-          <p>输入 @ 即可搜索当前工作区文件，方向键选择，Enter 或 Tab 插入，还可附加剪贴板图片。</p>
-        </div>
-        <div class="card">
-          <div class="icon">🔌</div>
-          <h3>可被嵌入调用</h3>
-          <p>提供 Headless NDJSON 协议与常驻 app-server，桌面 App、IDE 插件和自动化脚本都能驱动 mica。</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Headless 协议 -->
-  <section class="section" id="headless" style="background:var(--bg-soft);border-block:1px solid var(--border)">
-    <div class="container">
-      <div class="section-title">
-        <div class="kicker">Headless</div>
-        <h2>不只是终端</h2>
-        <p>mica 可以被桌面应用和自动化工具以 JSON 协议驱动</p>
-      </div>
-      <div class="grid">
-        {protocolItems.map((p) => (
-          <div class="card">
-            <code>{p.cmd}</code>
-            <h3 style="margin-top:12px">{p.title}</h3>
-            <p>{p.desc}</p>
+        <div class="prefix-row">
+          <span>回合 01</span>
+          <div>
+            <i class="prefix-system">指令与工具</i>
+            <i class="prefix-history">对话</i>
+            <i class="prefix-new">新输入</i>
           </div>
-        ))}
+        </div>
+        <div class="prefix-row">
+          <span>回合 02</span>
+          <div>
+            <i class="prefix-system">指令与工具</i>
+            <i class="prefix-history">历史对话</i>
+            <i class="prefix-new">新输入</i>
+          </div>
+        </div>
+        <div class="prefix-row">
+          <span>回合 03</span>
+          <div>
+            <i class="prefix-system">指令与工具</i>
+            <i class="prefix-history">历史对话与工具结果</i>
+            <i class="prefix-new">新输入</i>
+          </div>
+        </div>
+        <div class="prefix-legend">
+          <span>
+            <i></i>保持稳定的前缀
+          </span>
+          <span>
+            <i></i>追加的新内容
+          </span>
+        </div>
+        <p>实际缓存命中取决于模型服务、任务与请求内容。</p>
       </div>
     </div>
   </section>
 
-  <!-- CTA -->
-  <section class="section" style="padding-block:80px;text-align:center">
-    <div class="container">
-      <h2 style="font-size:1.8rem;margin-bottom:10px">现在就试试</h2>
-      <p style="color:var(--text-dim);margin-bottom:26px">一行命令安装，首次运行自动创建本地配置</p>
-      <pre style="max-width:680px;margin:0 auto 26px;text-align:left"><code>{installCmd}</code></pre>
-      <div class="hero-actions" style="margin-bottom:0">
-        <a class="btn btn-primary" href={`${base}docs/getting-started`}>查看使用文档 →</a>
-        <a class="btn btn-ghost" href={`${base}docs/architecture`}>了解架构</a>
+  <section class="section container" id="benchmark">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">BENCHMARK</p>
+        <h2>把表现放到数据里。</h2>
+      </div>
+      <p>
+        基于 DeepSWE v1.1 的九项软件工程任务。
+        <br />
+        对照检查项得分、缓存、耗时与模型请求数。
+      </p>
+    </div>
+    <div class="benchmark-summary">
+      <div>
+        <strong>
+          99.0<span>%</span>
+        </strong>
+        <span>Mica 检查项通过率</span>
+      </div>
+      <div>
+        <strong>
+          99.1<span>%</span>
+        </strong>
+        <span>输入侧缓存命中率</span>
+      </div>
+      <div>
+        <strong>
+          86.2<span> min</span>
+        </strong>
+        <span>所选任务总耗时</span>
+      </div>
+      <a href={`${base}docs/benchmark/`}>
+        查看评测方法
+        <br />
+        <span>数据范围与指标说明 ↗</span>
+      </a>
+    </div>
+    <figure class="benchmark-chart">
+      <img
+        src={`${base}screenshots/eval-benchmark.svg`}
+        width="1180"
+        height="276"
+        alt="五种 agent 的检查项通过率、输入缓存命中率、总耗时和总轮次对比，Mica 的通过率为 99.0%、缓存命中率为 99.1%"
+        loading="lazy"
+      />
+    </figure>
+    <p class="benchmark-note">
+      项目自主评测快照 · 464 个自定义自动化检查项 · 按任务汇总重复运行的中位数。各指标的样本范围与限制见评测说明。
+    </p>
+  </section>
+
+  <section class="section workspace-section container">
+    <div class="workspace-copy">
+      <p class="eyebrow">A WORKSPACE THAT FOLLOWS YOU</p>
+      <h2>
+        专注眼前，
+        <br />
+        也看得见全局。
+      </h2>
+      <p>任务计划、工具执行与用量随时可查。旁问、后台任务和子代理各有位置，主线工作持续向前。</p>
+      <ul class="feature-list">
+        <li>
+          <span>01</span>多会话与项目分组，随时恢复工作
+        </li>
+        <li>
+          <span>02</span>文件、Git diff 与终端，就地查看
+        </li>
+        <li>
+          <span>03</span>桌面与浏览器，接入同一运行时
+        </li>
+      </ul>
+      <a class="text-link" href={`${base}docs/desktop/`}>
+        探索工作区 →
+      </a>
+    </div>
+    <figure class="workspace-image">
+      <img
+        src={`${base}screenshots/turn-log.png`}
+        width="1800"
+        height="1113"
+        alt="运行中的 Mica：任务计划、工具调用与回合日志"
+        loading="lazy"
+      />
+      <figcaption>演示环境截图 · 回合日志与任务计划</figcaption>
+    </figure>
+  </section>
+
+  <section class="integration-section" id="headless">
+    <div class="container integration-grid">
+      <div>
+        <p class="eyebrow">FITS INTO YOUR TOOLCHAIN</p>
+        <h2>
+          接入你的模型，
+          <br />
+          融入你的工具链。
+        </h2>
+        <p>
+          选择兼容 OpenAI 协议的模型服务，用 Skills 固化工作方法，用 MCP 连接外部工具。需要自动化时，同一套 agent
+          也能由脚本驱动。
+        </p>
+        <a class="text-link" href={`${base}docs/extensions/`}>
+          查看扩展指南 →
+        </a>
+      </div>
+      <div class="integration-links">
+        <a href={`${base}docs/configuration/`}>
+          <span class="integration-code">01 / MODELS</span>
+          <strong>模型与 Provider</strong>
+          <span>Chat Completions / Responses ↗</span>
+        </a>
+        <a href={`${base}docs/extensions/`}>
+          <span class="integration-code">02 / EXTENSIONS</span>
+          <strong>Skills、MCP 与角色</strong>
+          <span>把工作习惯带进 agent ↗</span>
+        </a>
+        <a href={`${base}docs/headless/`}>
+          <span class="integration-code">03 / AUTOMATION</span>
+          <strong>Exec 与 App Server</strong>
+          <span>JSONL 事件流 / Codex 兼容协议 ↗</span>
+        </a>
       </div>
     </div>
+  </section>
+
+  <section class="closing container">
+    <p class="eyebrow">YOUR NEXT BUILD STARTS HERE</p>
+    <h2>下一个想法，交给代码。</h2>
+    <p>从安装到完成第一个任务，跟着指南开始。</p>
+    <a class="btn btn-primary" href={`${base}docs/getting-started/`}>
+      阅读快速开始 <span>→</span>
+    </a>
+    <a class="closing-secondary" href="https://github.com/qirong77/mica-code/releases/latest">
+      下载最新版本 ↗
+    </a>
   </section>
 </BaseLayout>

@@ -1,57 +1,234 @@
 ---
-// 文档布局：左侧目录 + 右侧内容
 import BaseLayout from './BaseLayout.astro';
-
+import { docGroups, docPages } from '../content/docs';
 interface Props {
   title: string;
   description?: string;
   active: string;
 }
-
 const { title, description, active } = Astro.props;
 const base = import.meta.env.BASE_URL;
-
-const nav = [
-  { group: '开始', items: [
-    { href: `${base}docs/getting-started`, label: '快速开始', key: 'getting-started' },
-    { href: `${base}docs/commands`, label: '内置命令', key: 'commands' },
-  ]},
-  { group: '协议', items: [
-    { href: `${base}docs/headless`, label: 'Headless 协议', key: 'headless' },
-  ]},
-  { group: '进阶', items: [
-    { href: `${base}docs/architecture`, label: '架构概览', key: 'architecture' },
-    { href: `${base}architecture`, label: '架构图', key: 'architecture-map' },
-  ]},
-];
+const index = docPages.findIndex((page) => page.key === active);
+const previous = docPages[index - 1];
+const next = docPages[index + 1];
+const group = docGroups.find((group) => group.items.some((page) => page.key === active));
 ---
 
 <BaseLayout title={title} description={description}>
-  <div class="container">
-    <div class="doc">
-      <aside class="doc-side">
-        {nav.map((group) => (
-          <div>
-            <h4>{group.group}</h4>
-            <ul>
-              {group.items.map((item) => (
-                <li>
-                  <a
-                    href={item.href}
-                    class:list={{ active: item.key === active }}
-                    aria-current={item.key === active ? 'page' : undefined}
-                  >
-                    {item.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </aside>
+  <div class="docs-shell" data-doc-base={base}>
+    <aside class="doc-side" aria-label="文档导航">
+      <div class="doc-side-head">
+        <a href={`${base}docs/`}>
+          使用文档 <span>GUIDES</span>
+        </a>
+      </div>
+      <button class="search-trigger" type="button">
+        <span>搜索文档</span>
+        <kbd>⌘ K</kbd>
+      </button>
+      <details class="doc-navigation" open>
+        <summary>
+          文档目录 <span aria-hidden="true">＋</span>
+        </summary>
+        <nav aria-label="文档章节">
+          {docGroups.map((section) => (
+            <div class="doc-nav-group">
+              <h2>{section.label}</h2>
+              <ul>
+                {section.items.map((item) => (
+                  <li>
+                    <a
+                      href={`${base}docs/${item.key}/`}
+                      class:list={{ active: active === item.key }}
+                      aria-current={active === item.key ? 'page' : undefined}
+                    >
+                      {item.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          <a class="doc-map-link" href={`${base}architecture/`}>
+            交互架构图 <span>↗</span>
+          </a>
+        </nav>
+      </details>
+      <a class="doc-help" href="https://github.com/qirong77/mica-code/issues">
+        遇到问题？<span>在 GitHub 提交反馈 ↗</span>
+      </a>
+    </aside>
+    <div class="doc-content">
+      <div class="doc-breadcrumb">
+        <a href={base}>Mica Code</a>
+        <span>/</span>
+        <span>{group?.label || '文档'}</span>
+        <span>/</span>
+        <span>{title}</span>
+      </div>
       <article class="doc-main">
         <slot />
       </article>
+      <div class="doc-edit">
+        <span>帮助我们让文档更好</span>
+        <a href={`https://github.com/qirong77/mica-code/edit/main/apps/website/src/pages/docs/${active}.astro`}>
+          编辑此页 ↗
+        </a>
+      </div>
+      <nav class="doc-pagination" aria-label="相邻文档">
+        {previous ? (
+          <a href={`${base}docs/${previous.key}/`}>
+            <span>← 上一篇</span>
+            <strong>{previous.title}</strong>
+          </a>
+        ) : (
+          <div />
+        )}
+        {next && (
+          <a href={`${base}docs/${next.key}/`} class="next">
+            <span>下一篇 →</span>
+            <strong>{next.title}</strong>
+          </a>
+        )}
+      </nav>
     </div>
+    <aside class="doc-toc" aria-label="本页目录">
+      <span>本页内容</span>
+      <nav id="page-toc"></nav>
+      <a class="toc-top" href="#main">
+        回到顶部 ↑
+      </a>
+    </aside>
   </div>
+  <dialog class="search-dialog" aria-label="搜索文档">
+    <div class="search-heading">
+      <label for="docs-query">搜索文档</label>
+      <button type="button" class="search-close" aria-label="关闭搜索">
+        Esc
+      </button>
+    </div>
+    <input id="docs-query" type="search" placeholder="搜索配置、MCP、快捷键…" autocomplete="off" />
+    <div id="search-results" class="search-results" aria-live="polite"></div>
+    <div class="search-footer">搜索标题与正文 · 点击结果跳转</div>
+  </dialog>
+  <script>
+    import { docPages } from '../content/docs';
+    const base = document.querySelector<HTMLElement>('[data-doc-base]')!.dataset.docBase!;
+    const headings = [...document.querySelectorAll<HTMLElement>('.doc-main h2, .doc-main h3')];
+    const ids = new Set<string>();
+    headings.forEach((heading, index) => {
+      const original =
+        heading.id ||
+        heading
+          .textContent!.trim()
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}]+/gu, '-')
+          .replace(/^-|-$/g, '') ||
+        `section-${index}`;
+      let id = original;
+      let suffix = 2;
+      while (ids.has(id)) id = `${original}-${suffix++}`;
+      ids.add(id);
+      heading.id = id;
+      const link = document.createElement('a');
+      link.href = `#${encodeURIComponent(id)}`;
+      link.textContent = heading.textContent;
+      link.dataset.heading = id;
+      if (heading.tagName === 'H3') link.className = 'toc-child';
+      document.getElementById('page-toc')!.append(link);
+    });
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.find((entry) => entry.isIntersecting);
+        if (!visible) return;
+        document.querySelectorAll('#page-toc a').forEach((link) => {
+          if ((link as HTMLElement).dataset.heading === visible.target.id)
+            link.setAttribute('aria-current', 'location');
+          else link.removeAttribute('aria-current');
+        });
+      },
+      { rootMargin: '-80px 0px -65% 0px' },
+    );
+    headings.forEach((heading) => observer.observe(heading));
+    if (location.hash) {
+      try {
+        document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
+      } catch {
+        /* Invalid fragment. */
+      }
+    }
+    const navigation = document.querySelector<HTMLDetailsElement>('.doc-navigation')!;
+    const desktop = matchMedia('(min-width: 1000px)');
+    const setNavigation = () => {
+      navigation.open = desktop.matches;
+    };
+    desktop.addEventListener('change', setNavigation);
+    setNavigation();
+    const dialog = document.querySelector<HTMLDialogElement>('.search-dialog')!;
+    const query = document.querySelector<HTMLInputElement>('#docs-query')!;
+    const results = document.querySelector<HTMLElement>('#search-results')!;
+    type SearchEntry = { title: string; description: string; text: string; url: string };
+    let searchEntries: SearchEntry[] = docPages.map((page) => ({ ...page, text: '', url: `${base}docs/${page.key}/` }));
+    let loading: Promise<void> | undefined;
+    const render = () => {
+      const terms = query.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+      const matches = searchEntries.filter((entry) =>
+        terms.every((term) => `${entry.title} ${entry.description} ${entry.text}`.toLocaleLowerCase().includes(term)),
+      );
+      results.replaceChildren();
+      for (const entry of matches) {
+        const link = document.createElement('a');
+        link.href = entry.url;
+        const title = document.createElement('strong');
+        title.textContent = entry.title;
+        const excerpt = document.createElement('span');
+        const matchAt = terms.length ? entry.text.toLocaleLowerCase().indexOf(terms[0]) : -1;
+        excerpt.textContent =
+          matchAt >= 0 ? `…${entry.text.slice(Math.max(0, matchAt - 24), matchAt + 96)}…` : entry.description;
+        link.append(title, excerpt);
+        results.append(link);
+      }
+      if (!matches.length) results.textContent = '没有找到相关内容，试试其他关键词。';
+    };
+    const loadSearch = () =>
+      (loading ||= Promise.all(
+        searchEntries.map(async (entry) => {
+          try {
+            const response = await fetch(entry.url);
+            if (!response.ok) return entry;
+            const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+            return { ...entry, text: page.querySelector('.doc-main')?.textContent?.replace(/\s+/g, ' ').trim() || '' };
+          } catch {
+            return entry;
+          }
+        }),
+      ).then((entries) => {
+        searchEntries = entries;
+        render();
+      }));
+    const open = () => {
+      dialog.showModal();
+      query.focus();
+      render();
+      void loadSearch();
+    };
+    document.querySelector('.search-trigger')!.addEventListener('click', open);
+    document.querySelector('.search-close')!.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    query.addEventListener('input', render);
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && dialog.open) {
+        event.preventDefault();
+        dialog.close();
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        if (dialog.open) dialog.close();
+        else open();
+      }
+    });
+  </script>
 </BaseLayout>

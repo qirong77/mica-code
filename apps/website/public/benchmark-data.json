@@ -1,0 +1,44 @@
+{
+  "title": "DeepSWE task comparison",
+  "kind": "Project evaluation snapshot; not an official leaderboard result",
+  "source": {
+    "tasks": "DeepSWE v1.1, as included in FrontierHarness Eval v1",
+    "url": "https://github.com/frontier-harness-eval/eval",
+    "upstreamSnapshot": "e837a70bd6beb4e72eeeda62dd06e3bd34f6cb63",
+    "datasetUrl": "https://github.com/datacurve-ai/deep-swe",
+    "modelConfiguration": "DeepSeek Flash"
+  },
+  "methodology": {
+    "correctness": "Sum of per-task medians of passed custom automated checks, divided by 464. Scored samples vary from 2 to 8 per task-agent cell.",
+    "cacheRate": "Sum of per-task median cached input tokens divided by sum of per-task median input tokens.",
+    "duration": "Sum of per-task median wall-clock durations, in minutes.",
+    "requests": "Sum of per-task median captured model request counts. Historical report labels these as turns.",
+    "scope": "Correctness and efficiency were aggregated separately. Efficiency uses successful process exits; these do not imply task correctness. Sample IDs and complete run configurations are not included in this snapshot."
+  },
+  "limitations": [
+    "Custom automated checks, not the official DeepSWE or Terminal-Bench verifier.",
+    "Check pass rate is not the fraction of fully solved tasks.",
+    "Repeated sample counts vary; there is no statistical significance analysis.",
+    "Efficiency samples were not strictly matched to scored run IDs or a single frozen configuration batch.",
+    "Concurrent runs and incomplete environment and version records limit speed comparisons.",
+    "This aggregate snapshot supports regenerating the chart, not reproducing the full experiment."
+  ],
+  "tasks": [
+    { "id": "anko-typed-variable-bindings", "checks": 51 },
+    { "id": "scc-bounded-memory-spilling", "checks": 31 },
+    { "id": "arktype-json-schema-refs-dependencies", "checks": 94 },
+    { "id": "expr-try-catch-errors", "checks": 55 },
+    { "id": "fastapi-deprecation-response-headers", "checks": 47 },
+    { "id": "httpx-multipart-response-parsing", "checks": 56 },
+    { "id": "katex-multicolumn-array-spans", "checks": 45 },
+    { "id": "meriyah-explicit-resource-declarations", "checks": 46 },
+    { "id": "python-statemachine-state-data-scoping", "checks": 39 }
+  ],
+  "results": [
+    { "name": "Codex", "passed": 462, "cachePercent": 98.5, "minutes": 103.7, "requests": 823 },
+    { "name": "Mica Code", "passed": 459.5, "cachePercent": 99.1, "minutes": 86.2, "requests": 957 },
+    { "name": "MiniMax Code", "passed": 459.5, "cachePercent": 96.2, "minutes": 144.1, "requests": 1610 },
+    { "name": "DSH Standard", "passed": 458, "cachePercent": 98.7, "minutes": 83.7, "requests": 779 },
+    { "name": "Claude Code", "passed": 457, "cachePercent": 98.5, "minutes": 83.2, "requests": 752 }
+  ]
+}

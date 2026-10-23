@@ -1,0 +1,127 @@
+---
+import DocLayout from '../../layouts/DocLayout.astro';
+import data from '../../../public/benchmark-data.json';
+const base = import.meta.env.BASE_URL;
+const total = data.tasks.reduce((sum, task) => sum + task.checks, 0);
+---
+
+<DocLayout
+  title="评测方法"
+  description="DeepSWE 任务对比的来源、检查项评分、缓存与耗时统计口径，以及结果的适用范围。"
+  active="benchmark"
+>
+  <h1>评测方法</h1>
+  <p class="lead">
+    以软件工程任务观察不同 coding agent 的表现，同时说明数据从哪里来、指标如何计算，以及哪些结论需要更多证据。
+  </p>
+  <h2>任务与来源</h2>
+  <p>
+    本次对比采用 <a href="https://github.com/frontier-harness-eval/eval">FrontierHarness Eval v1</a> 收录的 9 项{' '}
+    <a href="https://github.com/datacurve-ai/deep-swe">DeepSWE v1.1</a> 任务，模型配置为 DeepSeek Flash。任务覆盖
+    Go、Python 与 JavaScript / TypeScript 项目的功能实现与边界行为修复。
+  </p>
+  <p>
+    上游快照为 <code>{data.source.upstreamSnapshot}</code>。该上游集合还收录 Terminal-Bench 任务，本图采用的是其中的
+    DeepSWE 子集。
+  </p>
+  <div class="callout">
+    <strong>自主评测</strong>
+    <p>评分使用项目编写的自动化行为检查，并非 DeepSWE 或 Terminal-Bench 官方 verifier。这些数字不代表官方榜单成绩。</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>任务</th>
+          <th>检查项</th>
+        </tr>
+      </thead>
+      <tbody>
+        {data.tasks.map((task) => (
+          <tr>
+            <td>
+              <code>{task.id}</code>
+            </td>
+            <td>{task.checks}</td>
+          </tr>
+        ))}
+        <tr>
+          <td>
+            <strong>合计</strong>
+          </td>
+          <td>
+            <strong>{total}</strong>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <h2>结果快照</h2>
+  <p>
+    下表保留本次评测的汇总值。正确性与效率分别聚合，效率样本未严格限定为与评分相同的一组运行记录；各列应按下方定义独立阅读。
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Agent</th>
+        <th>检查项得分</th>
+        <th>通过率</th>
+        <th>缓存命中率</th>
+        <th>耗时汇总</th>
+        <th>模型请求数</th>
+      </tr>
+    </thead>
+    <tbody>
+      {data.results.map((row) => (
+        <tr>
+          <td>
+            <strong>{row.name}</strong>
+          </td>
+          <td>
+            {row.passed}/{total}
+          </td>
+          <td>{((row.passed / total) * 100).toFixed(1)}%</td>
+          <td>{row.cachePercent}%</td>
+          <td>{row.minutes} 分钟</td>
+          <td>{row.requests}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+  <p>图表通过率坐标为 95%–100%，用于显示高分区间的差异。轴的起点经过截取，条形长度应结合刻度和数值阅读。</p>
+  <h2>指标定义</h2>
+  <h3>检查项得分与通过率</h3>
+  <p>
+    每项任务先对重复运行的通过项数取中位数，再将九项任务的中位数相加，最后除以 464。已评分的每个任务与 agent 组合包含
+    2–8 次样本，因此不使用“每格四次”的描述。
+  </p>
+  <p>
+    例如 Mica 的汇总为 459.5 / 464，四舍五入后是
+    99.0%。中位数在偶数样本时可能出现半项；它是聚合统计值。检查项通过率也不等于完整解决任务的比例。
+  </p>
+  <h3>输入侧缓存命中率</h3>
+  <p>
+    分别计算各任务缓存输入 token 与总输入 token
+    的中位数，再用前者之和除以后者之和。该比例用于观察输入复用，不能单独推算费用或响应速度；服务商的缓存策略和价格也会影响实际体验。
+  </p>
+  <h3>耗时与模型请求数</h3>
+  <p>耗时为各任务运行时长中位数之和；请求数为各任务捕获的模型请求数中位数之和。这里的请求数不等于用户对话轮次。</p>
+  <p>效率统计仅纳入进程正常退出的运行。正常退出表示 CLI 以成功状态结束，并不表示任务通过全部检查。</p>
+  <h2>如何理解结果</h2>
+  <ul>
+    <li>结果描述此任务子集上的汇总表现，不能推导到全部软件工程任务。</li>
+    <li>未进行统计显著性检验，接近的得分不足以证明 agent 之间存在稳定排名。</li>
+    <li>评分与效率样本分开汇总，尚未按同一批运行 ID、完整模型配置和 harness 版本冻结。</li>
+    <li>实验存在并发运行，环境负载与版本记录也不完整，因此耗时仅供参考。</li>
+    <li>失败或超时的进程没有被完整纳入当前聚合，不能从本表推导端到端成功率。</li>
+  </ul>
+  <h2>数据与图表</h2>
+  <p>
+    <a href={`${base}benchmark-data.json`}>下载汇总数据 JSON</a>，其中包含任务、指标定义、结果与限制。仓库中的{' '}
+    <a href="https://github.com/qirong77/mica-code/blob/main/scripts/generate-eval-chart.mjs">图表生成脚本</a>{' '}
+    从该文件读取数据，生成 README 与官网共用的 SVG。
+  </p>
+  <p>
+    当前提供的是汇总快照，尚未包含完整原始运行记录、检查脚本与环境锁定信息，因此仅支持重新生成图表，不能据此完整复现实验。
+  </p>
+</DocLayout>

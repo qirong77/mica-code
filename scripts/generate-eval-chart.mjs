@@ -1,27 +1,22 @@
-// 生成 README / 官网用的评测图。数据来自本地 frontier-harness-eval-benchmark 的 data/runs
-// （9 个任务、464 项人工检查、每格 4 次运行取中位数），改数字后重跑本脚本。
-//
-//   bun scripts/generate-eval-chart.mjs
-//
-// 输出 images/eval-benchmark.svg，并同步复制到 apps/website/public/screenshots/。
-//
-// 通过率高档集中在 98.5%–99.6%，线性满格画出来几乎一样长，所以这一列用 95%→100% 的放大坐标，
-// 并在图内标注区间。
+// 从公开的汇总数据生成 README / 官网评测图。
+// 数据口径与限制见 apps/website/public/benchmark-data.json。
+// bun scripts/generate-eval-chart.mjs
 
-import { writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-const TOTAL = 464;
-const rows = [
-  { name: 'Codex', passed: 462, cache: '98.5%', minutes: '103.7 分钟', turns: 823 },
-  { name: 'Mica Code', passed: 459.5, cache: '99.1%', minutes: '86.2 分钟', turns: 957, highlight: true },
-  { name: 'MiniMax Code', passed: 459.5, cache: '96.2%', minutes: '144.1 分钟', turns: 1610 },
-  { name: 'DSH Standard', passed: 458, cache: '98.7%', minutes: '83.7 分钟', turns: 779 },
-  { name: 'Claude Code', passed: 457, cache: '98.5%', minutes: '83.2 分钟', turns: 752 },
-];
+const data = JSON.parse(readFileSync(join(root, 'apps/website/public/benchmark-data.json'), 'utf8'));
+const TOTAL = data.tasks.reduce((sum, task) => sum + task.checks, 0);
+const rows = data.results.map((row) => ({
+  ...row,
+  cache: `${row.cachePercent.toFixed(1)}%`,
+  minutes: `${row.minutes.toFixed(1)} 分钟`,
+  turns: row.requests,
+  highlight: row.name === 'Mica Code',
+}));
 
 const WIDTH = 1180;
 const HEIGHT = 276;
@@ -46,17 +41,17 @@ const barWidth = (passed) =>
 
 const parts = [];
 parts.push(
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="${WIDTH}" height="${HEIGHT}" role="img" aria-label="FrontierHarness 本地评测：五个 agent 在同样 9 个任务、${TOTAL} 项检查上的通过项数、缓存命中率、耗时与轮次对比">`,
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="${WIDTH}" height="${HEIGHT}" role="img" aria-label="DeepSWE 任务自主评测：五款 agent 在 9 项任务、${TOTAL} 个自定义检查项上的得分、缓存命中率、耗时与模型请求数对比">`,
 );
 parts.push(`<rect x="0" y="0" width="${WIDTH}" height="${HEIGHT}" rx="14" fill="#fdfdfd"/>`);
 parts.push(
   `<g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Helvetica Neue',Arial,sans-serif">`,
 );
-parts.push(`<text x="40" y="40" font-size="11.5" fill="${MUTED}" letter-spacing="0.06em">通过项数</text>`);
-parts.push(`<text x="104" y="40" font-size="10.5" fill="${FAINT}">坐标 ${AXIS_MIN}%–${AXIS_MAX}%</text>`);
+parts.push(`<text x="40" y="40" font-size="11.5" fill="${MUTED}" letter-spacing="0.06em">检查项得分</text>`);
+parts.push(`<text x="130" y="40" font-size="10.5" fill="${FAINT}">坐标 ${AXIS_MIN}%–${AXIS_MAX}%</text>`);
 parts.push(`<text x="760" y="40" font-size="11.5" fill="${MUTED}" text-anchor="end">缓存命中率</text>`);
-parts.push(`<text x="930" y="40" font-size="11.5" fill="${MUTED}" text-anchor="end">总耗时</text>`);
-parts.push(`<text x="1060" y="40" font-size="11.5" fill="${MUTED}" text-anchor="end">总轮次</text>`);
+parts.push(`<text x="930" y="40" font-size="11.5" fill="${MUTED}" text-anchor="end">耗时汇总</text>`);
+parts.push(`<text x="1060" y="40" font-size="11.5" fill="${MUTED}" text-anchor="end">模型请求数</text>`);
 
 rows.forEach((row, index) => {
   const y = ROW_TOP + index * ROW_GAP;
@@ -66,7 +61,7 @@ rows.forEach((row, index) => {
   parts.push(`<rect x="${BAR_X}" y="${y}" width="${BAR_W}" height="${BAR_H}" rx="4" fill="${TRACK}"/>`);
   parts.push(
     `<rect x="${BAR_X}" y="${y}" width="${barWidth(row.passed)}" height="${BAR_H}" rx="4" fill="${
-      row.highlight ? '#38bdf8' : '#94a3b8'
+      row.highlight ? '#1287a1' : '#a4b8c2'
     }"/>`,
   );
   parts.push(

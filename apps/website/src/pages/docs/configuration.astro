@@ -1,0 +1,270 @@
+---
+import DocLayout from '../../layouts/DocLayout.astro';
+const base = import.meta.env.BASE_URL;
+const providerExample = `{
+  "providers": [
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "api_base": "https://api.deepseek.com",
+      "api_key": "YOUR_API_KEY",
+      "protocol": "openai_chat_completions",
+      "get_model_url": "https://api.deepseek.com/models"
+    }
+  ],
+  "mcpServers": {}
+}`;
+const responsesExample = `{
+  "providers": [
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "api_base": "https://api.openai.com/v1",
+      "api_key": "YOUR_API_KEY",
+      "protocol": "openai_responses",
+      "get_model_url": "https://api.openai.com/v1/models"
+    }
+  ],
+  "mcpServers": {}
+}`;
+const compatibleExample = `{
+  "id": "local",
+  "name": "Local API",
+  "api_base": "http://127.0.0.1:8000/v1",
+  "api_key": "YOUR_API_KEY",
+  "protocol": "openai_chat_completions",
+  "models": ["your-model-id"],
+  "supportsEffort": false
+}`;
+const envExample = `export MICA_HOME="$HOME/.mica-ci"
+export OPENAI_API_KEY="YOUR_API_KEY"
+export OPENAI_BASE_URL="https://api.openai.com/v1"
+export MICA_PROVIDER_PROTOCOL="openai_responses"
+mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
+---
+
+<DocLayout
+  title="模型与配置"
+  active="configuration"
+  description="配置模型服务、选择 API 协议、管理模型与推理强度，以及在自动化中使用环境变量。"
+>
+  <h1>模型与配置</h1>
+  <p class="lead">
+    Mica 通过 provider 连接模型服务。每个 provider 指定 API
+    地址、认证方式和协议；模型可以由服务动态列出，也可以手动配置。
+  </p>
+
+  <h2>配置文件与入口</h2>
+  <p>
+    在终端输入 <code>/config</code> 打开配置页面，桌面应用中使用设置入口。也可以编辑 <code>~/.mica/config.json</code>
+    。首次启动会创建默认配置；设置 <code>MICA_HOME</code> 后，路径改为 <code>$MICA_HOME/config.json</code>，会话、Skills
+    和角色目录也随之切换。
+  </p>
+  <p>
+    配置文件使用标准 JSON，不支持注释。修改前保留已有 provider、MCP 和其他设置；下面的完整示例适合新建配置。将{' '}
+    <code>YOUR_API_KEY</code> 替换为实际凭证。
+  </p>
+
+  <h2>连接模型服务</h2>
+  <h3>Chat Completions 示例</h3>
+  <p>下面使用仓库默认提供的 DeepSeek API 地址，通过模型列表接口获取可选模型：</p>
+  <pre><code>{providerExample}</code></pre>
+
+  <h3>Responses 示例</h3>
+  <p>
+    连接支持 OpenAI Responses 的服务时，显式选择 <code>openai_responses</code>
+    。动态列表中仍需选择支持该协议和工具调用的模型。
+  </p>
+  <pre><code>{responsesExample}</code></pre>
+
+  <h3>兼容服务与固定模型列表</h3>
+  <p>
+    将以下对象加入 <code>providers</code> 数组，并替换 API 地址、凭证和模型 ID。对没有模型列表接口的服务，使用{' '}
+    <code>models</code>；服务不接受推理强度参数时，将 <code>supportsEffort</code> 设为 <code>false</code>。
+  </p>
+  <pre><code>{compatibleExample}</code></pre>
+
+  <h3>Provider 字段参考</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>字段</th>
+          <th>用途</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <code>id</code>
+          </td>
+          <td>
+            唯一标识，用于 <code>provider/model</code> 形式的模型 ID。建议使用简短、稳定的名称。
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>name</code>
+          </td>
+          <td>可选的界面显示名称。</td>
+        </tr>
+        <tr>
+          <td>
+            <code>api_base</code>
+          </td>
+          <td>
+            服务的 API 根地址，按服务要求保留 <code>/v1</code> 等路径。
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>api_key</code>
+          </td>
+          <td>服务凭证。留空不会阻止界面启动，但请求仍须满足服务的认证要求。</td>
+        </tr>
+        <tr>
+          <td>
+            <code>protocol</code>
+          </td>
+          <td>
+            <code>openai_chat_completions</code> 或 <code>openai_responses</code>，须与服务实际支持的协议一致。
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>get_model_url</code>
+          </td>
+          <td>
+            可选的模型列表接口，返回 OpenAI <code>/models</code> 格式。只为配置了该字段的 provider 动态加载模型。
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>models</code>
+          </td>
+          <td>可选的模型 ID 字符串数组，适用于固定模型列表。</td>
+        </tr>
+        <tr>
+          <td>
+            <code>supportsEffort</code>
+          </td>
+          <td>
+            设为 <code>false</code> 时不向服务发送推理强度参数。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <aside class="callout">
+    <p>
+      API 地址不会决定协议。即使两个服务使用相似的 URL，也应按服务提供的接口说明选择 <code>protocol</code>。
+    </p>
+  </aside>
+
+  <h2>选择模型与推理强度</h2>
+  <p>
+    终端使用 <code>/model</code> 选择模型，用 <code>/effort</code> 选择推理强度。可用值为 <code>none</code>、
+    <code>low</code>、<code>medium</code>、<code>high</code>、<code>xhigh</code>，实际选项取决于模型规则与 provider
+    能力。桌面端在输入区的模型面板中完成同样的操作。
+  </p>
+  <pre><code>mica models
+mica models --json</code></pre>
+  <p>
+    上面的命令列出 <code>provider/model</code> ID；JSON 输出还包含可用推理强度。使用该 ID 指定一次自动化任务的模型：
+  </p>
+  <pre><code>mica exec --model "PROVIDER_ID/MODEL_ID" --variant medium "解释项目的测试策略"</code></pre>
+  <p>
+    模型与推理强度的选择会保存为本地使用偏好。通常无需在 <code>config.json</code> 顶层添加 <code>model</code> 或{' '}
+    <code>effort</code>。已有对话切换 API 协议受到限制；需要切换协议时新建会话。
+  </p>
+
+  <h2>在自动化中使用环境变量</h2>
+  <p>
+    CI 或临时容器可以通过环境变量创建进程内的 <code>openai</code> provider。把 <code>YOUR_MODEL_ID</code>{' '}
+    替换为账户可用的模型名称；以下为 POSIX shell 示例：
+  </p>
+  <pre><code>{envExample}</code></pre>
+  <p>
+    这种方式仅在配置中的所有 provider 都没有非空 API key，且没有 ID 为 <code>openai</code> 的 provider
+    时生效。使用独立的 <code>MICA_HOME</code> 可以避免已有配置影响任务。由环境变量创建的 provider 不会写回配置文件。
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>环境变量</th>
+          <th>行为</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <code>MICA_HOME</code>
+          </td>
+          <td>
+            用户数据根目录，默认 <code>~/.mica</code>。
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>OPENAI_API_KEY</code>
+          </td>
+          <td>环境 provider 的凭证；未设置时不创建该 provider。</td>
+        </tr>
+        <tr>
+          <td>
+            <code>OPENAI_BASE_URL</code>
+          </td>
+          <td>
+            环境 provider 的 API 根地址，默认 <code>https://api.openai.com/v1</code>。
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>MICA_PROVIDER_PROTOCOL</code>
+          </td>
+          <td>
+            仅覆盖环境 provider 的协议，默认 <code>openai_responses</code>。可设为上述两种协议之一。
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>SEARXNG_URL</code>
+          </td>
+          <td>
+            内置网络搜索服务地址；优先级低于配置文件的 <code>searxngUrl</code>。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    JSON 中的 <code>api_key</code> 是字面字符串，不会自动展开 <code>$OPENAI_API_KEY</code>{' '}
+    等占位符。环境认证请使用上面的独立方式。
+  </p>
+
+  <h2>配置网络搜索</h2>
+  <p>
+    内置 <code>web_search</code> 使用 SearXNG 实例，实例需启用 JSON 格式响应。在 <code>config.json</code> 顶层设置{' '}
+    <code>searxngUrl</code>，或在没有该配置时设置 <code>SEARXNG_URL</code>；两者均未提供时使用{' '}
+    <code>http://127.0.0.1:8080</code>。这项配置与模型 API 分开管理。
+  </p>
+
+  <h2>排查连接问题</h2>
+  <ul>
+    <li>
+      模型列表为空：检查 <code>get_model_url</code> 是否可达、是否返回预期格式；也可以改用静态 <code>models</code>。
+    </li>
+    <li>认证失败：检查当前 provider 的 key 与 API 地址，环境变量不会覆盖已有的带凭证配置。</li>
+    <li>
+      接口或参数不受支持：核对 <code>protocol</code>；不支持 reasoning 参数的服务可关闭 <code>supportsEffort</code>。
+    </li>
+    <li>
+      更改配置后仍使用旧连接：重新选择模型，必要时重启当前客户端，并用 <code>/status</code> 确认选择。
+    </li>
+  </ul>
+  <p>
+    接下来可以 <a href={`${base}docs/extensions`}>配置 MCP、Skills 和角色</a>，或查看{' '}
+    <a href={`${base}docs/headless`}>自动化调用方式</a>。
+  </p>
+</DocLayout>

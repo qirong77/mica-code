@@ -1,0 +1,40 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { docGroups } from '../../content/docs';
+const base = import.meta.env.BASE_URL;
+---
+
+<BaseLayout title="使用文档" description="从安装 Mica Code 到模型配置、桌面工作区、扩展与自动化，一站查找使用指南。">
+  <section class="docs-landing container">
+    <p class="eyebrow">MICA CODE / DOCUMENTATION</p>
+    <h1>从这里，开始构建。</h1>
+    <p class="lead">
+      第一次使用，先连接模型并完成一个任务。
+      <br />
+      已经熟悉 Mica？按工作场景查找需要的指南。
+    </p>
+    <a class="btn btn-primary" href={`${base}docs/getting-started/`}>
+      快速开始 <span>→</span>
+    </a>
+    {docGroups.map((group) => (
+      <section class="docs-landing-group">
+        <h2>{group.label}</h2>
+        <div class="guide-grid">
+          {group.items.map((page) => (
+            <a class="guide-card" href={`${base}docs/${page.key}/`}>
+              <span class="guide-arrow" aria-hidden="true">
+                ↗
+              </span>
+              <h3>{page.title}</h3>
+              <p>{page.description}</p>
+            </a>
+          ))}
+        </div>
+      </section>
+    ))}
+    <div class="docs-landing-bottom">
+      <a href={`${base}architecture/`}>交互架构图 ↗</a>
+      <a href="https://github.com/qirong77/mica-code/issues">问题反馈 ↗</a>
+    </div>
+  </section>
+</BaseLayout>

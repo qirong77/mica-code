@@ -1,72 +1,181 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
-
-// 「运行中」= 该命令在 agent 正在跑 turn 时仍可执行；其余命令会被 busy guard 拒绝。
-const commands = [
-  { cmd: '/config', desc: '打开 Mica 配置页面（Config Web），可视化编辑 provider / 模型 / MCP 等配置。', live: true },
-  { cmd: '/cd', desc: '切换到最近 session 使用过的工作目录（从历史会话中收集并去重）。', live: false },
-  { cmd: '/clear', desc: '终止并移除当前 agent 的 subagent，丢弃排队输入，然后新开一个空会话（不清除原会话文件内容）。', live: false },
-  { cmd: '/resume', desc: '恢复历史会话；未正常完成（aborted / error）的会话会标记为（uncompleted）。', live: false },
-  { cmd: '/model', desc: '从包含 provider 信息的模型列表中切换 provider 和模型（打开前会检查 busy 状态）。', live: false },
-  { cmd: '/effort', desc: '切换推理强度 none / low / medium / high / xhigh。', live: false },
-  { cmd: '/role', desc: '切换当前 agent 的系统提示词；自定义 role 放在 ~/.mica/role/ 下，Shift+Tab 可循环切换。', live: false },
-  { cmd: '/status', desc: '显示当前 provider / model / effort / role 状态；/status total 查看本地全部 session 的累计 token。', live: true },
-  { cmd: '/context', desc: '显示当前上下文占用总览（token、缓存命中率、上下文窗口），/context detail 看逐条明细。', live: true },
-  { cmd: '/compact', desc: '默认把工具结果与媒体就地替换为占位符（不改对话文本、可重复执行）；/compact llm 才生成模型摘要 checkpoint。', live: false },
-  { cmd: '/new', desc: '新开一个 agent；/new <text> 后台运行新 agent。', live: true },
-  { cmd: '/fork', desc: '从当前 agent 历史分叉一个新 agent；/fork <text> 后台运行。', live: true },
-  { cmd: '/task', desc: '按终端 session 展示全部 agent、retained subagent 和 active background shell；/task clear 清除空闲 session。', live: true },
-  { cmd: '/btw', desc: '旁问：交给隔离子代理回答，不进入主对话上下文；/btw -continue 追问上一问。', live: true },
-  { cmd: '/rewind', desc: '选择一轮对话，保留该用户输入及该轮回复并删除之后的内容；有文件 checkpoint 时可选恢复文件。', live: false },
-  { cmd: '/loop', desc: '定时循环任务：/loop [间隔] <任务>、/loop stop、/loop status；每轮开始前先做一次本地压缩。', live: false },
-  { cmd: '/mcp', desc: '列出 MCP 服务器和工具；/mcp reconnect <server> 重连指定服务。', live: false },
-  { cmd: '/skills', desc: '列出已安装的 skills（来自 ~/.mica/skills 与项目级 .mica/skills 等目录）。', live: false },
-  { cmd: '/rename', desc: '重命名当前会话。', live: true },
-  { cmd: '/commit', desc: '分析当前 git 变化，只发一次模型请求生成 commit message，然后 add / commit / push；/commit agent 只提交本 agent 改动的文件。', live: true },
-  { cmd: '/exit', desc: '退出程序。', live: true },
+const base = import.meta.env.BASE_URL;
+const groups = [
+  {
+    title: '会话与工作目录',
+    rows: [
+      ['/resume', '选择并恢复历史会话；未完成的任务会有标记。', false],
+      ['/rename', '重命名当前会话。', true],
+      ['/cd', '从历史会话使用过的目录中选择工作目录。', false],
+      ['/clear', '清理当前代理的子任务和排队输入，开始空白会话；原会话文件保留。', false],
+      ['/rewind', '选择一轮对话，回到该轮完成后的状态；有文件快照时可选择恢复文件。', false],
+      ['/exit', '退出程序。', true],
+    ],
+  },
+  {
+    title: '模型与上下文',
+    rows: [
+      ['/config', '打开配置页面，管理 provider、模型和 MCP。', true],
+      ['/model', '选择 provider 与模型。', false],
+      ['/effort', '选择模型支持的推理强度。', false],
+      ['/role', '选择角色提示词。', false],
+      ['/status', '查看当前模型、推理强度、角色与用量；/status total 查看本地会话累计用量。', true],
+      ['/context', '查看上下文占用；/context detail 展示明细。', true],
+      ['/compact', '本地清理工具结果与媒体；/compact llm 使用模型摘要压缩历史。', false],
+    ],
+  },
+  {
+    title: '并行任务与扩展',
+    rows: [
+      ['/new', '创建独立代理；/new <任务描述> 在新代理中后台执行任务。', true],
+      ['/fork', '从当前历史分叉新代理；/fork <任务描述> 在分叉代理中后台执行。', true],
+      ['/task', '查看代理、保留的子代理任务与运行中的后台 shell；/task clear 清理空闲任务。', true],
+      ['/btw', '发起不进入主对话上下文的旁问；/btw -continue 继续上一问。', true],
+      ['/loop', '启动定时任务；/loop status 查看状态，/loop stop 停止。', false],
+      ['/mcp', '查看 MCP 服务器与工具；/mcp reconnect <server> 重连。', false],
+      ['/skills', '查看当前发现的 Skills。', false],
+      ['/commit', '生成提交说明并执行 Git 提交、尝试推送；/commit agent 仅提交当前代理追踪的改动。', true],
+    ],
+  },
 ];
 ---
 
-<DocLayout title="内置命令" active="commands" description="Mica Code 的全部内置斜杠命令参考">
-  <h1>内置命令</h1>
-  <p>所有命令通过斜杠触发。耗时且会修改上下文、文件、配置或 git 状态的命令通过 exclusive task 执行，防止并发切换导致状态抖动；agent 正在跑 turn 时，只有标记为可执行的命令会被放行，其余会被拒绝并给出提示。</p>
+<DocLayout
+  title="命令与快捷键"
+  active="commands"
+  description="Mica 终端的会话、模型、上下文、并行任务命令，以及常用键盘操作。"
+>
+  <h1>命令与快捷键</h1>
+  <p class="lead">
+    在终端输入框中使用斜杠命令管理工作。按任务查找操作，并通过“运行中可用”一列判断是否需要等待当前任务结束。
+  </p>
+  <p>本页命令适用于交互式终端。桌面应用通过模型面板、侧栏和任务面板提供对应操作；桌面对话框不会分派这些终端命令。</p>
 
-  <table>
-    <thead>
-      <tr><th>命令</th><th>说明</th><th>运行中</th></tr>
-    </thead>
-    <tbody>
-      {commands.map((c) => (
+  {groups.map((group) => (
+    <section>
+      <h2>{group.title}</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>命令</th>
+              <th>用途</th>
+              <th>运行中可用</th>
+            </tr>
+          </thead>
+          <tbody>
+            {group.rows.map(([cmd, desc, live]) => (
+              <tr>
+                <td>
+                  <code>{cmd}</code>
+                </td>
+                <td>{desc}</td>
+                <td>{live ? '是' : '否'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  ))}
+  <p>
+    “运行中可用”指主对话任务执行期间可调用；已有配置或 Git
+    等独占操作正在执行时，部分命令仍会提示等待。遇到忙碌提示时，等待操作完成后再试。
+  </p>
+
+  <h2>常用工作流</h2>
+  <h3>保持长任务可继续</h3>
+  <p>
+    先用 <code>/context</code> 检查占用，再按需要压缩。默认 <code>/compact</code>{' '}
+    不调用模型，保留对话与轮次并清理工具结果、媒体和过长的工具参数；<code>/compact llm</code>{' '}
+    会调用模型生成摘要并重写模型历史。压缩保留已有用量统计。
+  </p>
+  <pre><code>/context
+/compact
+/context detail</code></pre>
+
+  <h3>分开处理两条思路</h3>
+  <p>
+    用 <code>/new</code> 从空白会话开始，用 <code>/fork</code> 继承当前上下文，再通过 <code>/task</code>{' '}
+    查看和切换。旁问适合临时问题，不需要把答案放进主任务的上下文。
+  </p>
+  <pre><code>/fork 检查当前实现的边界情况，给出测试建议
+/task
+/btw 这里的乐观锁和互斥锁分别适用于什么情况？</code></pre>
+
+  <h3>定时执行重复任务</h3>
+  <pre><code>/loop 30m 检查测试结果，汇报新增失败
+/loop status
+/loop stop</code></pre>
+  <p>
+    省略间隔时默认每 30 分钟执行；支持 <code>90s</code>、<code>1h30m</code> 和表示秒的纯数字。间隔范围为 10
+    秒至一周。终端循环依赖当前 Mica 进程保持运行，每轮开始前会进行本地上下文清理。
+  </p>
+
+  <h3>提交 Git 改动</h3>
+  <p>
+    <code>/commit</code> 会执行真实 Git 操作，包括暂存、提交与尝试推送。先审阅 <code>git diff</code>
+    ，确认工作区的所有改动都应被提交；多人或多会话共用工作区时尤其要确认范围。<code>/commit agent</code>{' '}
+    使用当前代理的改动追踪来缩小范围。
+  </p>
+
+  <h2>键盘操作</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
         <tr>
-          <td><code>{c.cmd}</code></td>
-          <td>{c.desc}</td>
-          <td>{c.live ? '✓' : '—'}</td>
+          <th>按键</th>
+          <th>行为</th>
         </tr>
-      ))}
-    </tbody>
-  </table>
-
-  <h2>常用快捷键</h2>
-  <table>
-    <thead>
-      <tr><th>按键</th><th>行为</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><code>@</code></td><td>在输入框中触发当前工作区文件搜索，方向键选择，Enter 或 Tab 插入</td></tr>
-      <tr><td><code>Shift+Tab</code></td><td>按列表顺序循环切换 role（agent 运行中拒绝；输入框有内容时与 Enter/Tab 一样按 after_iteration 排队发送）</td></tr>
-      <tr><td><code>Shift+←</code></td><td>把排队等待的消息撤回到输入框（输入框为空时才触发，否则该键留给选区）</td></tr>
-      <tr><td><code>Alt+↑</code> / <code>Alt+↓</code></td><td>翻阅输入历史（CLI 另外支持 Ctrl+P / Ctrl+N），普通方向键只移动光标</td></tr>
-      <tr><td><code>Ctrl+C</code></td><td>中止当前 turn（同步 abort 该 agent 的 running subagent，并保留已展示的部分回复）</td></tr>
-    </tbody>
-  </table>
-
-  <h2>MCP 与 Skills</h2>
-  <ul>
-    <li>MCP 服务器配置在 <code>config.json</code> 的 <code>mcpServers</code>，mica 在启动时并发连接，并把远端工具注册进工具列表。</li>
-    <li>Skills 是带 <code>SKILL.md</code> 的目录，扫描 <code>~/.mica/skills</code>（跟随 <code>MICA_HOME</code>）以及项目级 <code>.mica/skills</code>、<code>.agents/skills</code>、<code>.deveco/skills</code>、<code>.agent_context/skills</code>；system prompt 里只有索引，完整内容通过 <code>Skill</code> 工具按需读取。</li>
-    <li>工具按语义区分只读与可写：只读工具调用失败后 turn 可安全重放，非只读工具调用之后不会盲目重放请求（避免重复修改文件、执行命令或触发外部副作用）。</li>
-  </ul>
-
-  <h2>后台 subagent</h2>
-  <p>mica 内置 <code>Agent</code> 工具，可派发后台 subagent 执行并行任务，支持 <code>run_many</code>（任务图 + depends_on + max_parallel）、<code>join</code> 汇总、路径租约（<code>owned_paths</code>）与只读/可写类型（Explore / Implementer / Reviewer / Tester / Planner / Proposal）。任务记录保留在当前进程内，通过 <code>/task</code> 查看详情。</p>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <code>@</code>
+          </td>
+          <td>搜索工作区文件；使用方向键选择，Enter 或 Tab 插入引用。</td>
+        </tr>
+        <tr>
+          <td>
+            <code>Shift+Tab</code>
+          </td>
+          <td>空闲时循环切换角色；运行中有待发文本时可提交排队消息。</td>
+        </tr>
+        <tr>
+          <td>
+            <code>Enter</code> / <code>Tab</code>
+          </td>
+          <td>运行中提交补充要求，在工具迭代边界发送；补全列表打开时优先完成补全。</td>
+        </tr>
+        <tr>
+          <td>
+            <code>Shift+←</code>
+          </td>
+          <td>输入框为空时将尚未发送的排队消息撤回到输入框。</td>
+        </tr>
+        <tr>
+          <td>
+            <code>Alt+↑</code> / <code>Alt+↓</code>
+          </td>
+          <td>
+            翻阅输入历史；终端也支持 <code>Ctrl+P</code> / <code>Ctrl+N</code>。
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <code>Ctrl+C</code>
+          </td>
+          <td>中止当前任务，同时中止该代理正在运行的子代理。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    排队消息在当前工具迭代结束后进入任务；如果本轮已无后续迭代，则在本轮成功结束后发送。任务失败或被中止时，待发输入会保留，方便撤回后修改。
+  </p>
+  <p>
+    扩展配置见 <a href={`${base}docs/extensions`}>MCP、Skills 与角色</a>。脚本中的命令行调用见{' '}
+    <a href={`${base}docs/headless`}>自动化与协议</a>。
+  </p>
 </DocLayout>
