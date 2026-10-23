@@ -1499,7 +1499,14 @@ async function handleCodexRequest(
         tools: micaTools
           .getCatalog()
           .filter((tool) => tool.source !== 'mcp')
-          .map((tool) => ({ name: tool.name, description: tool.description, source: tool.source }))
+          .map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            source: tool.source,
+            readOnly: tool.readOnly,
+            parameters: tool.parameters,
+            group: tool.group,
+          }))
           .sort((a, b) => a.name.localeCompare(b.name)),
         mcpServers: Object.keys(configuredMcp)
           .sort((a, b) => a.localeCompare(b))

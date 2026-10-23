@@ -4385,6 +4385,55 @@
   background: var(--hover, rgb(255 255 255 / 3%));
 }
 
+/* 工具分组：组头是同一套滑块 + 组名 + 启用计数，点它是整组开关。
+   组内行缩进一格，读起来是「这个组的成员」，但开关仍然逐行可点。 */
+.capability-group + .capability-group,
+.capability-group + .capability-row {
+  border-top: 1px solid var(--line);
+}
+
+.capability-group-head {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+  padding: 0 16px;
+  background: var(--panel-muted);
+}
+
+.capability-group-head.is-disabled {
+  opacity: 0.6;
+}
+
+.capability-group-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-group-count {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.capability-group-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capability-group-items .capability-row {
+  padding-left: 46px;
+}
+
   /* 整行可点开详情：只有滑块改启用状态，正文点击留给「看详情」 */
   .capability-row.is-clickable {
     cursor: pointer;
@@ -4462,6 +4511,26 @@
   gap: 6px;
 }
 
+.capability-detail-fact {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.capability-detail-fact.is-block {
+  display: grid;
+  gap: 4px;
+}
+
+.capability-detail-value {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .capability-detail-label {
   color: var(--text-faint);
   font-size: 11.5px;
@@ -4474,6 +4543,77 @@
   font-size: 13px;
   line-height: 1.75;
   overflow-wrap: anywhere;
+}
+
+/* 入参：名称 / 类型（必填）/ 说明三列，说明单行省略，悬停看全文 */
+.capability-params-block {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.capability-params {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capability-param {
+  display: grid;
+  grid-template-columns: minmax(90px, 160px) auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  min-height: 24px;
+  padding: 2px 0;
+}
+
+.capability-param + .capability-param {
+  border-top: 1px solid var(--line-soft);
+}
+
+.capability-param-name {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-param-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.capability-param-required {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--panel-muted);
+  color: var(--amber);
+  font-family: inherit;
+  font-size: 10.5px;
+}
+
+.capability-param-desc {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-param-desc.is-empty {
+  color: var(--text-faint);
 }
 
 .capability-empty {

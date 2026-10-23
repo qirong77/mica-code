@@ -4860,6 +4860,11 @@ body.is-resizing-btw {
   overflow-wrap: anywhere;
 }
 
+/* 入参列表来自 packages/mica-config-ui（与设置页同一份组件），这里只补与描述之间的间距 */
+.session-cap-detail-params {
+  margin-top: 12px;
+}
+
 .session-settings-actions {
   display: flex;
   align-items: center;

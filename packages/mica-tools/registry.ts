@@ -36,6 +36,69 @@ export type ToolCatalogEntry = {
   /** Original MCP server name for `source: 'mcp'` entries. */
   mcpServer?: string;
   readOnly: boolean;
+  /** 入参摘要：能力面板的详情要能说清这个工具吃什么，不用去翻代码。 */
+  parameters: ToolParameterEntry[];
+  /** 所属分组：能力面板按组展示、按组开关（pty_* 这类工具单独一行没有意义）。 */
+  group: ToolGroupEntry;
+};
+
+export type ToolGroupEntry = {
+  key: string;
+  label: string;
+  /** 面板里的组顺序：目录本身按名字排序，分组后要回到「常用 → 少见」的阅读顺序。 */
+  order: number;
+};
+
+export type ToolParameterEntry = {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+};
+
+/**
+ * 工具分组表：能力面板按组展示与开关的唯一来源。
+ *
+ * 显式名字表优先（同一组的工具未必共享前缀，例如 `run_shell` 与 `kill_task`），
+ * 其次按名字前缀匹配（`pty_*`、`session_*`、`loop_*` 这类插件工具族），最后落进
+ * 「其他工具」。新增工具时优先补 `TOOL_NAMES` 或让名字沿用已有前缀。
+ */
+const TOOL_GROUPS: Record<string, ToolGroupEntry> = {
+  file: { key: 'file', label: '文件读取', order: 10 },
+  edit: { key: 'edit', label: '文件修改', order: 20 },
+  shell: { key: 'shell', label: '命令与后台任务', order: 30 },
+  pty: { key: 'pty', label: '交互终端', order: 40 },
+  web: { key: 'web', label: '联网检索', order: 50 },
+  skill: { key: 'skill', label: '技能', order: 60 },
+  session: { key: 'session', label: '会话自治', order: 70 },
+  loop: { key: 'loop', label: '定时循环', order: 80 },
+  subagent: { key: 'subagent', label: '子代理', order: 90 },
+  todo: { key: 'todo', label: '任务清单', order: 100 },
+  other: { key: 'other', label: '其他工具', order: 1000 },
+};
+
+const TOOL_NAME_GROUPS: Record<string, string> = {
+  read_file: 'file',
+  read_image: 'file',
+  list_files: 'file',
+  grep_search: 'file',
+  write_file: 'edit',
+  apply_patch: 'edit',
+  run_shell: 'shell',
+  background_tasks: 'shell',
+  read_task_output: 'shell',
+  kill_task: 'shell',
+  wait_for: 'shell',
+  web_fetch: 'web',
+  web_search: 'web',
+  pty_spawn: 'pty',
+  pty_send: 'pty',
+  pty_read: 'pty',
+  pty_wait: 'pty',
+  pty_kill: 'pty',
+  Skill: 'skill',
+  Agent: 'subagent',
+  TodoWrite: 'todo',
 };
 
 export type ToolExecutionEvent = {
@@ -166,7 +229,43 @@ export function getToolCatalog(): ToolCatalogEntry[] {
     source: tool.source,
     mcpServer: tool.mcpServer,
     readOnly: tool.readOnly,
+    parameters: toolParameters(tool),
+    group: toolGroup(tool.name),
   }));
+}
+
+/** 名字表 → 前缀族（`session_peers` 之类插件工具）→ 「其他工具」。 */
+function toolGroup(name: string): ToolGroupEntry {
+  const explicit = TOOL_NAME_GROUPS[name];
+  if (explicit) return TOOL_GROUPS[explicit];
+  const prefix = name.includes('_') ? name.slice(0, name.indexOf('_')) : '';
+  if (prefix && TOOL_GROUPS[prefix] && TOOL_GROUPS[prefix].key !== 'other') {
+    return TOOL_GROUPS[prefix];
+  }
+  return TOOL_GROUPS.other;
+}
+
+/**
+ * 入参的展示用摘要（名称 / 类型 / 是否必填 / 说明）。
+ *
+ * schema 里没写 `description` 的工具不少，这里不编文案，交给界面显示占位符；
+ * 类型取不到时按 `any` 展示，避免出现空白列。
+ */
+function toolParameters(tool: MicaTool): ToolParameterEntry[] {
+  const schema = tool.input_schema ?? {};
+  const properties = schema.properties ?? {};
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  return Object.entries(properties).map(([name, property]) => {
+    const rawType = property?.type;
+    const type = Array.isArray(rawType) ? rawType.join(' | ') : rawType;
+    const description = typeof property?.description === 'string' ? property.description : '';
+    return {
+      name,
+      type: type || 'any',
+      required: required.has(name),
+      description,
+    };
+  });
 }
 
 export async function executeTool(

@@ -4,7 +4,9 @@ import { IconAdjustments, IconClock, IconGauge } from '@tabler/icons-react'
 import {
   AutoCompactFields,
   CapabilityList,
+  CapabilityParameters,
   ConfigSwitch as Switch,
+  applyGroupEnabled,
   autoCompactDraftFromSettings,
   autoCompactNumbersFromSettings
 } from '@mica-config-ui/web'
@@ -29,10 +31,11 @@ const SECTIONS = [
   { id: 'loop', label: '定时任务', icon: IconClock }
 ]
 
+// 页签定义直接交给 CapabilityList，字段名必须与它的 CapabilityGroupDef 对齐（`key`）。
 const CAPABILITY_TABS = [
-  { kind: 'tools', label: 'Tools', disabledKey: 'disabledTools' },
-  { kind: 'skills', label: 'Skills', disabledKey: 'disabledSkills' },
-  { kind: 'mcpServers', label: 'MCP', disabledKey: 'disabledMcpServers' }
+  { key: 'tools', label: 'Tools', disabledKey: 'disabledTools' },
+  { key: 'skills', label: 'Skills', disabledKey: 'disabledSkills' },
+  { key: 'mcpServers', label: 'MCP', disabledKey: 'disabledMcpServers' }
 ]
 
 const EMPTY_SELECTION = {
@@ -161,7 +164,7 @@ export function SessionSettingsDialog({
     [nodeId, sessionId, cwd, compact]
   )
 
-  const activeTab = CAPABILITY_TABS.find((entry) => entry.kind === tab) || CAPABILITY_TABS[0]
+  const activeTab = CAPABILITY_TABS.find((entry) => entry.key === tab) || CAPABILITY_TABS[0]
   const items = listItems(catalog, tab)
   const disabled = selection?.[activeTab.disabledKey] || []
 
@@ -176,6 +179,15 @@ export function SessionSettingsDialog({
     if (enabled) current.delete(name)
     else current.add(name)
     void apply({ ...selection, [disabledKey]: [...current] })
+  }
+
+  // 整组开关：一次改写组内全部成员，仍然是同一个禁用名单（能力校验按工具名逐条判定）。
+  function toggleGroup(disabledKey, names, enabled) {
+    if (!selection) return
+    void apply({
+      ...selection,
+      [disabledKey]: applyGroupEnabled(selection[disabledKey], names, enabled)
+    })
   }
 
   // 生效值 → 编辑器草稿（分钟、字符串），默认值 → 「默认 x」提示用的数字表。
@@ -262,16 +274,25 @@ export function SessionSettingsDialog({
                   setDetail(null)
                 }}
                 counts={Object.fromEntries(
-                  CAPABILITY_TABS.map((entry) => [entry.kind, tabCount(catalog, selection, entry)])
+                  CAPABILITY_TABS.map((entry) => [entry.key, tabCount(catalog, selection, entry)])
                 )}
                 items={items.map((item) => ({
                   name: item.name,
-                  description: item.description || ''
+                  description: item.description || '',
+                  group: item.group,
+                  source: item.source,
+                  readOnly: item.readOnly,
+                  parameters: item.parameters
                 }))}
                 countLabel={`${items.filter((item) => !disabled.includes(item.name)).length}/${items.length} 启用`}
                 disabled={running}
                 isEnabled={(name) => !disabled.includes(name)}
                 onToggle={(name, checked) => toggle(name, checked)}
+                onToggleGroup={
+                  tab === 'tools'
+                    ? (names, enabled) => toggleGroup(activeTab.disabledKey, names, enabled)
+                    : null
+                }
                 onOpenDetail={(item) => setDetail({ kind: tab, name: item.name })}
               />
             ) : (
@@ -331,6 +352,10 @@ function CapabilityDetail({ detail, item, enabled, running, onToggle, onClose })
     detail.kind === 'tools'
       ? ['来源', TOOL_SOURCE_LABEL[item.source] || item.source || '未知']
       : null,
+    detail.kind === 'tools' && item.group ? ['分组', item.group.label] : null,
+    detail.kind === 'tools' && typeof item.readOnly === 'boolean'
+      ? ['读写', item.readOnly ? '只读' : '可写']
+      : null,
     detail.kind === 'mcpServers'
       ? ['状态', MCP_STATUS_LABEL[item.status] || item.status || '未知']
       : null
@@ -369,6 +394,12 @@ function CapabilityDetail({ detail, item, enabled, running, onToggle, onClose })
         </div>
       </dl>
       <p className="session-cap-detail-desc">{item.description || '暂无描述'}</p>
+      {/* 入参列表与设置页共用同一份组件与样式，外层补上配置页作用域 */}
+      {item.parameters?.length ? (
+        <div className="mica-config-ui is-embed session-cap-detail-params">
+          <CapabilityParameters parameters={item.parameters} />
+        </div>
+      ) : null}
     </ModalShell>
   )
 }
@@ -419,7 +450,7 @@ function disabledTotal(selection) {
 }
 
 function tabCount(catalog, selection, entry) {
-  const items = listItems(catalog, entry.kind)
+  const items = listItems(catalog, entry.key)
   const disabled = selection?.[entry.disabledKey] || []
   return `${items.filter((item) => !disabled.includes(item.name)).length}/${items.length}`
 }

@@ -244,7 +244,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 命令
 
 - 命令实现放 `mica-builtin-commands/commands/`；装配放 `plugins/command-*.ts`，统一从 `index.ts` 导出。
-- `/capabilities` 是会话设置面板：Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换、不提供全开全关）+ 压缩页签（`+/−` 调阈值，`r` 复位本项、`R` 全部默认）。`/skills`、`/mcp` 显示同一份开关状态，默认值在配置页 Capabilities / Auto Compact 一节。
+- `/capabilities` 是会话设置面板：Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换、不提供全开全关）+ 压缩页签（`+/−` 调阈值，`r` 复位本项、`R` 全部默认）。`/skills`、`/mcp` 显示同一份开关状态，默认值在配置页 Capabilities / Auto Compact 一节。工具分组与组顺序由 `mica-tools/registry.ts` 的 `ToolGroupEntry` 唯一定义（名字表 → 前缀族 → 其他工具）；桌面面板按组展示、组头整组开关，落盘仍是逐工具名，TUI 面板保持逐项切换。
 - quick commands 另由 `apps/cli/src/plugins/commands/index.ts` 注册；新增/删除时检查两条路径与 README。
 - 通过 `CommandRuntimeServices` / active proxy 注入依赖；耗时且改状态、文件、配置或 git 的命令走 exclusive task。交互反馈用 `services.showNotice`。
 - turn 运行中是否可执行由注册时的 `allowDuringTurn` 决定，检查 quick commands 与 `plugins/command-*.ts` 两条路径；exclusive task 期间仅 status、task、agents、new。
@@ -527,7 +527,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 配置页不提供 effort 开关：是否发送 reasoning 参数由模型规则按模型名判定（`model-effort-context` 从 models.dev 取 `reasoning_options`，`resolveModelRequestPatch` 生成每个模型每个协议各自的 patch，provider 上的 `supportsEffort` 只是兜底）。表单不再编辑该字段，旧配置里已有的值原样保留。
 - 表单转换的唯一实现在 `web/configDraft.ts`（纯函数、有测试）：表单只覆盖已知字段，写入时保留未知顶层键与 provider 里的未知字段，已知键按固定顺序排列，可选字段留空即删键（`models: []` 在 `validate-config` 里是错误）。
 - 新增数据动作先声明 `ConfigWebClient`；宿主无能力则方法可选并提供对应降级。Auto Compact 按能力出现，Browser Control / Terminal Control 始终显示说明。
-- Capabilities 页只改 `config.json` 的 `capabilityDefaults`（新会话默认值），不改已有会话；页签顺序 Tools / Skills / MCP servers，列表为「开关 + 名称 + 描述」三列，描述单行省略、点击开详情弹窗，不提供全开/全关；读写实现放在 `mica-config-ui/src/server/capabilityDefaults.ts`，桌面运行时经 `@mica-config-ui/capability-defaults` alias 复用。
+- Capabilities 页只改 `config.json` 的 `capabilityDefaults`（新会话默认值），不改已有会话；页签顺序 Tools / Skills / MCP servers，列表为「开关 + 名称 + 描述」三列，描述单行省略、点击开详情弹窗（含只读与入参摘要），不提供全开/全关；工具行按 `group` 成组、组头滑块是整组开关，技能与 MCP 服务器不分组建行。读写实现放在 `mica-config-ui/src/server/capabilityDefaults.ts`，桌面运行时经 `@mica-config-ui/capability-defaults` alias 复用。
 - 样式限定 `.mica-config-ui`，页面级 html/body/#root 高度链由整页宿主定义，不能覆盖 desktop 窄屏根高度。
 - 配置页新建/删除/放弃操作用 `DialogHost` 的 confirmDialog / promptDialog，不依赖原生 prompt/confirm。
 - 改配置页后运行 `bun run build:config-web`，提交生成的 `generatedStaticAssets.ts`；system prompt 与内置角色直接复用 CLI 模板，跳过用户 default.md。

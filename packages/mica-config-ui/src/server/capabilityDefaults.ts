@@ -25,6 +25,9 @@ export async function getCapabilityDefaultsDetails(): Promise<ConfigWebCapabilit
         name: tool.name,
         description: tool.description,
         source: tool.source as 'builtin' | 'runtime',
+        readOnly: tool.readOnly,
+        parameters: tool.parameters,
+        group: tool.group,
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     mcpServers: Object.keys(mcpConfig).sort((a, b) => a.localeCompare(b)),

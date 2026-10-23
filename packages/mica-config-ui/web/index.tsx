@@ -20,8 +20,14 @@ export type { ConfigWebSection } from '../src/shared/types.js';
  * 就能拿到与设置页完全一致的形态，不用另写一套。
  */
 export { AutoCompactFields } from './components/AutoCompactFields.js';
-export { CapabilityList } from './components/CapabilityList.js';
-export type { CapabilityGroupDef, CapabilityItem } from './components/CapabilityList.js';
+export { CapabilityList, CapabilityParameters } from './components/CapabilityList.js';
+export type {
+  CapabilityGroupDef,
+  CapabilityItem,
+  CapabilityParameter,
+} from './components/CapabilityList.js';
+export { applyGroupEnabled, buildCapabilitySections } from './capabilityGroups.js';
+export type { CapabilityGroupRef, CapabilitySection } from './capabilityGroups.js';
 export { Switch as ConfigSwitch } from './components/Ui.js';
 export {
   AUTO_COMPACT_FIELDS,

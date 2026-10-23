@@ -58,7 +58,7 @@ export { ToolPtyWait } from './pty/ToolPtyWait.js';
 export { ToolPtyKill } from './pty/ToolPtyKill.js';
 export type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
 export type { RuntimeToolRegistrationOptions, ToolFilter } from './registry.js';
-export type { ToolCatalogEntry } from './registry.js';
+export type { ToolCatalogEntry, ToolGroupEntry, ToolParameterEntry } from './registry.js';
 export type { ToolExecutionEvent, ToolExecutionObserver } from './registry.js';
 export { toolResultToText } from './types.js';
 export { mcpToolNamePrefix, sanitizeToolNamePart } from './toolNames.js';

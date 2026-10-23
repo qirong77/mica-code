@@ -166,11 +166,29 @@ export type ConfigWebSkillsDetails = {
  */
 export type ConfigWebCapabilityDefaults = {
   skills: Array<{ name: string; description: string }>;
-  tools: Array<{ name: string; description: string; source: 'builtin' | 'runtime' }>;
+  tools: ConfigWebCapabilityTool[];
   mcpServers: string[];
   disabledSkills: string[];
   disabledTools: string[];
   disabledMcpServers: string[];
+};
+
+/** 工具入参摘要：详情弹窗要能说清这个工具吃什么，不用去翻源码。 */
+export type ConfigWebCapabilityToolParameter = {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+};
+
+export type ConfigWebCapabilityTool = {
+  name: string;
+  description: string;
+  source: 'builtin' | 'runtime';
+  readOnly: boolean;
+  parameters: ConfigWebCapabilityToolParameter[];
+  /** 分组：面板按组展示与按组开关，`{ key, label, order }` 由工具目录给出。 */
+  group: { key: string; label: string; order: number };
 };
 
 export type ConfigWebPlugin = {

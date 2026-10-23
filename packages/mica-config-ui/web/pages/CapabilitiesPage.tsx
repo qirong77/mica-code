@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button } from '../components/Ui.js';
-import { CapabilityList } from '../components/CapabilityList.js';
+import { CapabilityList, CapabilityParameters } from '../components/CapabilityList.js';
+import { applyGroupEnabled } from '../capabilityGroups.js';
 import { Modal } from '../components/Modal.js';
 import { readCapabilityDefaults, writeCapabilityDefaults } from '../api.js';
 import { appIcons } from '../icons.js';
@@ -20,6 +21,11 @@ type Item = {
   name: string;
   description: string;
   meta?: string;
+  /** 所属工具分组；技能与 MCP 服务器没有。 */
+  group?: { key: string; label: string } | null;
+  /** 工具是否只读；skills / MCP server 没有这一项。 */
+  readOnly?: boolean;
+  parameters?: Array<{ name: string; type: string; required: boolean; description: string }>;
 };
 
 const GROUP_LABEL: Record<Group, string> = {
@@ -103,6 +109,9 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
         name: tool.name,
         description: tool.description,
         meta: toolSourceLabel(tool.source),
+        group: tool.group,
+        readOnly: tool.readOnly,
+        parameters: tool.parameters,
       }));
     return details.mcpServers.map((name) => ({ name, description: '' }));
   }, [details, group]);
@@ -117,6 +126,14 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
       if (enabled) next.delete(name);
       else next.add(name);
       return { ...current, [key]: [...next] };
+    });
+  }
+
+  // 整组开关：一次改写组内全部成员，落到同一个禁用名单里（能力校验按工具名逐条判定）。
+  function toggleGroup(names: string[], enabled: boolean) {
+    setDraft((current) => {
+      const key = disabledKey(group);
+      return { ...current, [key]: applyGroupEnabled(current[key], names, enabled) };
     });
   }
 
@@ -178,6 +195,7 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
               status={dirty ? '· 改动未保存' : !dirty && saved ? '· 已保存' : null}
               isEnabled={(name) => !disabled.includes(name)}
               onToggle={(name, checked) => toggle(name, checked)}
+              onToggleGroup={group === 'tools' ? toggleGroup : null}
               onOpenDetail={(item) => setDetail(item)}
             />
           </section>
@@ -194,8 +212,19 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
             wide
           >
             <div className="capability-detail">
-              <span className="capability-detail-label">{GROUP_LABEL[group]} 说明</span>
-              <p className="capability-detail-text">{detail.description || '没有提供描述。'}</p>
+              {detail.readOnly == null ? null : (
+                <div className="capability-detail-fact">
+                  <span className="capability-detail-label">读写</span>
+                  <span className="capability-detail-value">
+                    {detail.readOnly ? '只读 · 不会改动工作区' : '可写 · 会改动文件或执行命令'}
+                  </span>
+                </div>
+              )}
+              <div className="capability-detail-fact is-block">
+                <span className="capability-detail-label">说明</span>
+                <p className="capability-detail-text">{detail.description || '没有提供描述。'}</p>
+              </div>
+              <CapabilityParameters parameters={detail.parameters} />
             </div>
           </Modal>
         ) : null}
