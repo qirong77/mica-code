@@ -47,12 +47,14 @@ import { remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
-import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
+import { ThinkingRow, ToolActivityRow } from './chat-tool-views'
+import { mergeThinkingRuns } from './chat-thinking'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
 import { CodeView } from './CodeView'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 import { canCollapseMessage, measureChatCollapse } from './chat-collapse'
+import { useChatTooltip } from './chat-hover-tooltip'
 
 function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
@@ -371,8 +373,8 @@ function UserMessageText({ text }) {
 /**
  * 长用户消息（自己贴的长文本、模型生成的压缩摘要都以 user 角色落库）默认只展示
  * 10 行：它们常常占满几十屏，把回答推到很远。折叠判定按 `scrollHeight` 与
- * computed `lineHeight` 算，换行与窗口宽度都算数；`title` 挂全量文本，悬停即可
- * 看到被折起的部分。
+ * computed `lineHeight` 算，换行与窗口宽度都算数。折叠态悬停弹浮层看全文
+ * （`chat-hover-tooltip.jsx`，不用原生 title：延迟 1 秒、长文本压成一行、滚不动）。
  */
 function UserMessageBody({ text }) {
   const contentRef = useRef(null)
@@ -399,15 +401,21 @@ function UserMessageBody({ text }) {
   }, [text])
 
   const clipped = collapsed && !expanded
+  const { anchorProps, tooltip } = useChatTooltip({
+    text,
+    enabled: clipped,
+    anchorRef: contentRef
+  })
   return (
     <>
       <div
         ref={contentRef}
         className={`chat-message-collapsible ${clipped ? 'chat-message-collapsible-clipped' : ''}`}
-        title={clipped ? text : undefined}
+        {...anchorProps}
       >
         <UserMessageText text={text} />
       </div>
+      {tooltip}
       {collapsed && (
         <button
           type="button"
@@ -1067,7 +1075,7 @@ function SubagentTranscript({ steps, running, onOpenTool }) {
             {tool ? (
               <ToolActivityRow tool={tool} onOpen={() => onOpenTool(tool)} />
             ) : (
-              <ReasoningRow text={step.text} />
+              <ThinkingRow text={step.text} done={!running} />
             )}
           </div>
         )
@@ -1638,8 +1646,16 @@ export function currentTurnActivityMessages(messages, turnId) {
 }
 
 function TurnLogItemView({ message, now, onOpen }) {
-  if (message.kind === 'reasoning') {
-    return <ReasoningRow text={message.text} />
+  if (message.kind === 'thinking') {
+    return (
+      <ThinkingRow
+        text={message.text}
+        startedAt={message.startedAt}
+        updatedAt={message.updatedAt}
+        done={message.done}
+        now={now}
+      />
+    )
   }
   return <ToolActivityRow tool={message.tool} now={now} onOpen={() => onOpen?.(message)} />
 }
@@ -1649,6 +1665,8 @@ function TurnLogItemView({ message, now, onOpen }) {
 const TurnLogItem = memo(TurnLogItemView, (previous, next) => {
   if (previous.message !== next.message) return false
   if (previous.onOpen !== next.onOpen) return false
+  // 已结束的思考不再按 `now` 重算耗时，和已结束的工具行同样处理。
+  if (next.message?.kind === 'thinking' && next.message.done) return true
   const status = next.message?.tool?.status
   const settled = status && !['pending', 'running'].includes(status)
   return settled ? true : previous.now === next.now
@@ -5195,7 +5213,12 @@ export function ChatView({
     () => currentTurnActivityMessages(messages, activityTurnId),
     [activityTurnId, messages]
   )
-  const visibleTurnLogMessages = running || phase === 'error' ? turnActivityMessages : []
+  // 相邻的 reasoning 片段在渲染前合并成一段思考：分块显示时它们看起来像几段互不
+  // 相干的引用，也看不出是同一段想法（合并规则见 chat-thinking.js）。
+  const visibleTurnLogMessages = useMemo(
+    () => (running || phase === 'error' ? mergeThinkingRuns(turnActivityMessages) : []),
+    [running, phase, turnActivityMessages]
+  )
   // 点开详情时按 id 取当下的那条消息：工具还在跑的时候，输出是流式长出来的。
   const activityDetailMessage = activityDetailId
     ? messages.find((message) => message.id === activityDetailId) || null

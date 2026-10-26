@@ -4,6 +4,8 @@
  * 暴露给 agent 的操作清单也由它生成 —— 于是不会出现「文档写了但路由没实现」或反过来的漂移。
  */
 
+import { withPathParams } from '../shared/endpoint-params.js'
+
 export const BROWSER_SERVICE_APP = 'mica-code-browser'
 export const BROWSER_SERVICE_VERSION = 1
 
@@ -15,7 +17,7 @@ const ownerParam = {
     '归属的会话（Mica 会话 id 或工作区页签 id）。agent 里用 $MICA_BROWSER_OWNER，写进这个头，窗口就会挂到该会话的图标行上。'
 }
 
-export const BROWSER_ENDPOINTS = [
+const RAW_ENDPOINTS = [
   {
     id: 'health',
     method: 'GET',
@@ -341,6 +343,13 @@ export const BROWSER_ENDPOINTS = [
     returns: 'text/event-stream：{ channel: "browser:changed", payload: { browsers } }'
   }
 ]
+
+/**
+ * 路径参数（`:id`）由 `withPathParams` 补齐：MCP 门面按 `params` 摊到 path 上，
+ * 漏声明时 `evaluate` / `screenshot` / `waitFor` 这些按标签页操作的 action 会打到
+ * 字面量 `:id` 上，agent 根本没法用。
+ */
+export const BROWSER_ENDPOINTS = withPathParams(RAW_ENDPOINTS, () => '窗口或标签页 id')
 
 const byId = new Map(BROWSER_ENDPOINTS.map((endpoint) => [endpoint.id, endpoint]))
 

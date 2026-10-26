@@ -4,6 +4,8 @@
  * 不会出现「文档写了但路由没实现」的漂移。
  */
 
+import { withPathParams } from '../shared/endpoint-params.js'
+
 const ownerParam = {
   name: 'x-mica-owner',
   in: 'header',
@@ -12,7 +14,7 @@ const ownerParam = {
     '归属的会话（Mica 会话 id 或工作区页签 id）。agent 里用 $MICA_TERMINAL_OWNER，写进这个头，终端窗口就会挂到该会话下。'
 }
 
-export const TERMINAL_ENDPOINTS = [
+const RAW_ENDPOINTS = [
   {
     id: 'health',
     method: 'GET',
@@ -219,6 +221,9 @@ export const TERMINAL_ENDPOINTS = [
     returns: 'text/event-stream：{ channel: "terminal:output"|"terminal:changed", payload }'
   }
 ]
+
+/** 路径参数（`:id`）由 `withPathParams` 补齐，MCP 门面才能把会话 id 填进 path。 */
+export const TERMINAL_ENDPOINTS = withPathParams(RAW_ENDPOINTS, () => '终端会话 id')
 
 const byId = new Map(TERMINAL_ENDPOINTS.map((endpoint) => [endpoint.id, endpoint]))
 

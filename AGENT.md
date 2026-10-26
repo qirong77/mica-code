@@ -417,8 +417,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 - **自动链接与全角标点**：唯一规则在 `mica-common/autolink.ts.splitAutolinkPunctuation`，自动链接在首个全角标点处截断且校验显示文本，显式 Markdown 链接原样保留。
   desktop 的 `remarkAutolinkPunctuation` 放在 `remarkGfm` / `remarkPathLinks` 前；CLI 用 `splitTerminalLink`。新增标点只改共享集合，同步两端测试。
 - 路径识别在 `chat-paths.js` / `PathToken`：单击目录打开、文件定位，Cmd/Ctrl 或中键在应用内打开，图片单击预览；失败 notice，缺 context 时纯文本。
-- 用户消息超过 10 行默认折叠（贴进来的长文本、`[Mica compact checkpoint]` 摘要都以 user 角色落库）：阈值在 `chat-collapse.js`，按 `scrollHeight` 与 computed `line-height` 判定，折叠态挂 `title` 给全量文本，附「展开全部（共 N 行）」按钮；含 `[Image]` 引用的消息不折叠（缩略图会被裁掉）。
-- 回合日志的工具行一律单行省略（终端同规则），点行开详情弹窗看完整入参/输出（输出封顶 5000 行 / 20 万字符）；思考照旧整段折行，不是日志行。`TurnLogItem` memo，计时更新仅影响运行行。
+- 用户消息超过 10 行默认折叠（贴进来的长文本、`[Mica compact checkpoint]` 摘要都以 user 角色落库）：阈值在 `chat-collapse.js`，按 `scrollHeight` 与 computed `line-height` 判定，附「展开全部（共 N 行）」按钮；含 `[Image]` 引用的消息不折叠（缩略图会被裁掉）。折叠态悬停弹真正的浮层看全文（`chat-hover-tooltip.jsx`：延迟 320ms、离开 160ms 收起、portal 到 body、自己可滚动），**不要用原生 `title`**——它延迟约 1 秒、长文本压成一行、滚不动也选不中，正是「想看被折掉的部分」最需要的两件事。
+- 回合日志的工具行一律单行省略（终端同规则），点行开详情弹窗看完整入参/输出（输出封顶 5000 行 / 20 万字符）。`TurnLogItem` memo，计时更新仅影响运行行。
+- 思考是一条有身份的条目，不是裸文本块：相邻 reasoning 片段先经 `chat-thinking.js.mergeThinkingRuns` 合成一段（中间隔工具调用才断开），标题行给「思考 / 思考中 + 耗时」，正文默认折到 4 行、点标题展开，还在想时不折（日志贴底滚动，读者看的是此刻在想什么）。`chat-tool-views.jsx.ThinkingRow` 是唯一实现，主对话、BTW 抽屉、subagent 详情共用。
 - 详情弹窗统一走 `chat-modal.jsx` 的 `ModalShell`（portal 到 body，head 固定 + meta 行 + body 唯一滚动层），上下文占用/子代理/后台任务/工具调用/思考共用 `.chat-modal-*`，不再单开弹窗样式。
 - Subagent 详情里的活动记录与主对话共用同一套展示件：思考/工具行用 `chat-tool-views.jsx`，提示词是用户消息块、结果与正文是回答块，工具行点开就是同一个 `ToolDetailDialog`（`nested`，不再就地展开）。两边字号靠 `.chat-activity-log` 对齐；`.chat-modal-overlay` 与 `.chat-view` 共用一组 `--chat-*` 排版变量，否则 portal 到 body 后 `var(--chat-user)` 解析成空。
 - 代码块（聊天 markdown 与详情弹窗的参数/输出）统一由 `CodeView` + `code-highlight.js` 渲染：只做只读着色，认得的语言是 json/shell/diff/js/log，其余原样输出；token 色走 `app.css` 的 `--color-*`，不引入编辑器运行时，路径点击仍由 `PathToken` 提供。`displayText` 在显示前对 json 做缩进重排（数字与转义按原文保留，解析失败原样输出），复制带的是屏幕上那段文本。
