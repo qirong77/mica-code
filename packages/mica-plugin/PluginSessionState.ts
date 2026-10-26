@@ -75,7 +75,8 @@ function isJsonValue(value: unknown, depth: number): boolean {
   if (type === 'string' || type === 'boolean') return true;
   if (type === 'number') return Number.isFinite(value as number);
   if (Array.isArray(value)) return value.every((item) => item === undefined || isJsonValue(item, depth + 1));
-  if (isPlainRecord(value)) return Object.values(value).every((item) => item === undefined || isJsonValue(item, depth + 1));
+  if (isPlainRecord(value))
+    return Object.values(value).every((item) => item === undefined || isJsonValue(item, depth + 1));
   return false;
 }
 

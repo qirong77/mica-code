@@ -4,12 +4,20 @@ import { HookRegistry } from './HookRegistry.js';
 describe('HookRegistry.pipelineSync', () => {
   it('pipes synchronous hook results in priority order', () => {
     const hooks = new HookRegistry();
-    hooks.on('system-prompt:build', (event: { prompt: string }) => ({
-      event: { prompt: `${event.prompt} second` },
-    }), { priority: 10 });
-    hooks.on('system-prompt:build', (event: { prompt: string }) => ({
-      event: { prompt: `${event.prompt} first` },
-    }), { priority: 0 });
+    hooks.on(
+      'system-prompt:build',
+      (event: { prompt: string }) => ({
+        event: { prompt: `${event.prompt} second` },
+      }),
+      { priority: 10 },
+    );
+    hooks.on(
+      'system-prompt:build',
+      (event: { prompt: string }) => ({
+        event: { prompt: `${event.prompt} first` },
+      }),
+      { priority: 0 },
+    );
 
     expect(hooks.pipelineSync('system-prompt:build', { prompt: 'base' })).toEqual({
       prompt: 'base first second',

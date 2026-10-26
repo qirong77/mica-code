@@ -1981,9 +1981,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
     // 工具必须在这个进程里注册好，否则模型根本看不到有什么可写。
     await send(host, 99, 'mica/capabilities/get', {});
     const capabilities = await waitFor(host, (m) => m.id === 99, 'capabilities/get (notes)');
-    expect(
-      (capabilities.result as { tools?: { name: string }[] }).tools?.map((tool) => tool.name),
-    ).toContain('session_notes');
+    expect((capabilities.result as { tools?: { name: string }[] }).tools?.map((tool) => tool.name)).toContain(
+      'session_notes',
+    );
 
     // 草稿会话（还没有 session id）就能读写：面板不必等第一条消息才可用。
     await send(host, 1, 'mica/notes/get', {});
@@ -1999,12 +1999,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     // 下一轮请求的 system prompt 末尾必须带上它 —— 这是「压缩不掉」的落点。
     await send(host, 3, 'turn/start', { threadId: '', input: [{ type: 'text', text: '开始干活' }] });
     const started = await waitFor(host, (m) => m.method === 'turn/started', 'notes turn started', 30_000);
-    await waitFor(
-      host,
-      turnCompleted((started.params?.turn as { id?: string }).id!),
-      'notes turn completed',
-      30_000,
-    );
+    await waitFor(host, turnCompleted((started.params?.turn as { id?: string }).id!), 'notes turn completed', 30_000);
     const instructions = mock!.state.requests[0]?.instructions ?? '';
     expect(instructions).toContain('<session-notes>');
     expect(instructions).toContain('- 用 Bun 跑测试');
@@ -2014,9 +2009,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const sessionFile = readdirSync(join(host.home, 'sessions')).filter((f) => f.endsWith('.json'))[0]!;
     const sessionId = sessionFile.replace(/\.json$/, '');
     const persisted = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFile), 'utf8')) as {
-      snapshot?: { notes?: string; messages?: unknown[] };
+      snapshot?: { pluginState?: Record<string, unknown>; messages?: unknown[] };
     };
-    expect(persisted.snapshot?.notes).toBe('# 决策\n\n- 用 Bun 跑测试');
+    expect(persisted.snapshot?.pluginState?.['session-notes']).toBe('# 决策\n\n- 用 Bun 跑测试');
     expect(JSON.stringify(persisted.snapshot?.messages ?? [])).not.toContain('<session-notes>');
 
     // 换一个宿主重开同一会话：笔记跟着回来（resume 走的是快照，不是配置文件）。

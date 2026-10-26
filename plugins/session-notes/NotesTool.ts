@@ -1,8 +1,4 @@
-import {
-  MAX_SESSION_NOTES_LENGTH,
-  normalizeSessionNotes,
-  sessionNotesSummary,
-} from '@packages/mica-common/index.js';
+import { MAX_SESSION_NOTES_LENGTH, normalizeSessionNotes, sessionNotesSummary } from '@packages/mica-common/index.js';
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 
 const TOOL_NAME = 'session_notes';
