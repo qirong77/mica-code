@@ -29,6 +29,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      # 桌面测试会 import 仓库内的 packages/*，它们各自的依赖（nanostores 之类）
+      # 来自仓库根，只跑 apps/desktop 的 npm ci 解析不到。
+      - name: Install repo dependencies
+        working-directory: .
+        run: bun install --frozen-lockfile
       - name: Install dependencies
         run: npm ci
       - name: Test
