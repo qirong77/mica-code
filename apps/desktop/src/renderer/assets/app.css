@@ -2506,9 +2506,7 @@ body.is-resizing.is-resizing-terminal {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
-  /* 右侧与底栏工具条同一组右边距：两行贴在一起读成一块页脚，
-     右边距差一格会显得模型/ctx 那行整体偏内。 */
-  padding: 0 14px 2px 12px;
+  padding: 0 24px 2px 12px;
   color: rgb(255 255 255 / 34%);
   font-family: var(--chat-font);
   font-size: 12px;

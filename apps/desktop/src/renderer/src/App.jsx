@@ -2532,12 +2532,128 @@ export default function App() {
               </button>
             )}
             {view === 'chat' && (
-              <span className="min-w-0 flex-1 truncate text-white/75">
+              <span className="min-w-0 truncate text-white/75">
                 {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
               </span>
             )}
+            {/* 顶栏右侧：受控浏览器与终端控制的窗口图标（各按窗口/会话一个，没有就不出现）、终端面板开关、文件视图开关。 */}
+            <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
+              {/* 会话笔记：本会话的用户/模型共同维护的 markdown，存在会话快照里，
+                  所以压缩不会把它冲掉。窗口类图标按窗口出现，这个是按会话出现。 */}
+              {!shareView && activeNode && (
+                <button
+                  type="button"
+                  title="会话笔记（不会被上下文压缩）"
+                  aria-label="会话笔记"
+                  aria-haspopup="dialog"
+                  aria-expanded={notesOpen}
+                  className={`grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
+                    notesOpen
+                      ? 'bg-white/10 text-white hover:bg-white/15'
+                      : 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                  }`}
+                  onClick={() => setNotesOpen((open) => !open)}
+                >
+                  <IconNotebook size={14} />
+                </button>
+              )}
+              {activeTerminals.map((terminal) => {
+                const owned = isTerminalOwnedByNode(terminal, activeNode)
+                const badge = terminalIconBadge(activeTerminals, terminal)
+                const title = terminalIconTitle(terminal, activeNode)
+                return (
+                  <button
+                    key={terminal.id}
+                    type="button"
+                    title={title}
+                    aria-label={title}
+                    aria-pressed={terminal.windowVisible}
+                    {...longPressHandlers(() => closeTerminalControl(terminal))}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      closeTerminalControl(terminal)
+                    }}
+                    onClick={() => toggleTerminalControl(terminal)}
+                    className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
+                      terminal.windowVisible
+                        ? 'bg-white/10 text-white hover:bg-white/15'
+                        : owned
+                          ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                          : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
+                    }`}
+                  >
+                    <IconTerminal size={14} />
+                    {badge && (
+                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
+                        {badge}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+              {activeBrowsers.map((browser) => {
+                const owned = isOwnedByNode(browser, activeNode)
+                const badge = browserIconBadge(activeBrowsers, browser)
+                const title = browserIconTitle(browser, activeNode)
+                return (
+                  <button
+                    key={browser.id}
+                    type="button"
+                    title={title}
+                    aria-label={title}
+                    aria-pressed={browser.visible}
+                    {...longPressHandlers(() => closeBrowser(browser))}
+                    onContextMenu={(event) => {
+                      event.preventDefault()
+                      closeBrowser(browser)
+                    }}
+                    onClick={() => toggleBrowser(browser)}
+                    className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
+                      browser.visible
+                        ? 'bg-white/10 text-white hover:bg-white/15'
+                        : owned
+                          ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                          : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
+                    }`}
+                  >
+                    <IconWorld
+                      size={14}
+                      className={browser.loading ? 'animate-pulse' : undefined}
+                    />
+                    {badge && (
+                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
+                        {badge}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+              <button
+                type="button"
+                title={terminalVisible ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
+                aria-label={terminalVisible ? '收起终端' : '展开终端'}
+                aria-pressed={terminalVisible}
+                className={`grid size-6 place-items-center rounded-md transition-colors ${
+                  terminalVisible
+                    ? 'bg-white/10 text-white hover:bg-white/15'
+                    : 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                }`}
+                onClick={toggleTerminalPanel}
+              >
+                <IconTerminal2 size={14} />
+              </button>
+              <button
+                type="button"
+                title="在新窗口中打开文件"
+                aria-label="在新窗口中打开文件"
+                className="grid size-6 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                onClick={openFilesWindow}
+              >
+                <IconFile size={14} />
+              </button>
+            </div>
           </header>
-          {/* 笔记弹窗挂在 App 层：入口在底栏工具条，弹窗本身按当前会话读写，
+          {/* 笔记弹窗挂在 App 层：入口在顶栏，弹窗本身按当前会话读写，
               与对话区的滚动/挂载状态无关（切到 Files / Stats 也能开着）。 */}
           {notesOpen && activeNode && (
             <SessionNotesDialog
@@ -2609,7 +2725,7 @@ export default function App() {
               </div>
             )}
           </div>
-          {/* 底部终端面板（VSCode 风格）：底栏终端图标 / Ctrl+` 控制显隐，拖顶边调高度。
+          {/* 底部终端面板（VSCode 风格）：顶栏终端图标 / Ctrl+` 控制显隐，拖顶边调高度。
               收起时留在页面上但不占位（hidden），PTY 与滚动缓冲不会被丢掉。 */}
           {terminalMounted && (
             <section
@@ -2719,7 +2835,7 @@ export default function App() {
               </div>
             </section>
           )}
-          <footer className="safe-bottom no-drag flex h-8 shrink-0 items-center gap-1 border-t border-line bg-canvas pl-2 pr-1 text-xs text-white/65">
+          <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
             {gitIsCurrent && git.status?.root ? (
               <button
                 ref={branchButtonRef}
@@ -2727,7 +2843,10 @@ export default function App() {
                 title="切换或创建 Git 分支"
                 aria-haspopup="dialog"
                 aria-expanded={branchPickerOpen}
-                className="flex h-7 max-w-[40%] shrink-0 items-center gap-1.5 rounded-md px-1.5 text-left transition-colors hover:bg-white/[.08] hover:text-white"
+                // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
+                className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white ${
+                  activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
+                }`}
                 onClick={() => setBranchPickerOpen(true)}
               >
                 <IconGitBranch size={13} className="shrink-0" />
@@ -2743,7 +2862,7 @@ export default function App() {
                     ? activeCwd
                     : `${activeCwd}\n当前目录不存在或已被移动，点击切换正确的项目目录`
                 }
-                className={`min-w-0 flex-1 truncate rounded-md px-1.5 py-1 text-left transition-colors hover:bg-white/[.06] ${
+                className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-white/[.06] ${
                   cwdValid
                     ? 'text-white/35 hover:text-white/75'
                     : 'text-red-400 hover:bg-red-500/[.1] hover:text-red-300'
@@ -2753,127 +2872,6 @@ export default function App() {
                 {activeCwd}
               </button>
             )}
-            {/* 会话/窗口级工具条：原先挂在顶栏最右端，离输入框最远；窗口类图标还会按数量
-                增减把后面的按钮推来推去。现在收进底栏这一条 —— 贴着输入框那一层、位置
-                恒定，命中区从 24px 放大到 28px。发丝线分组：会话文档（文件 / 笔记）、
-                终端（面板 + 终端控制窗口）、受控浏览器。 */}
-            <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
-              <button
-                type="button"
-                title="在新窗口中打开文件"
-                aria-label="在新窗口中打开文件"
-                className="grid size-7 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
-                onClick={openFilesWindow}
-              >
-                <IconFile size={15} />
-              </button>
-              {!shareView && activeNode && (
-                <button
-                  type="button"
-                  title="会话笔记（不会被上下文压缩）"
-                  aria-label="会话笔记"
-                  aria-haspopup="dialog"
-                  aria-expanded={notesOpen}
-                  className={`grid size-7 shrink-0 place-items-center rounded-md transition-colors ${
-                    notesOpen
-                      ? 'bg-white/10 text-white hover:bg-white/15'
-                      : 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                  }`}
-                  onClick={() => setNotesOpen((open) => !open)}
-                >
-                  <IconNotebook size={15} />
-                </button>
-              )}
-              <span className="mx-1 h-3.5 w-px shrink-0 bg-white/12" aria-hidden="true" />
-              <button
-                type="button"
-                title={terminalVisible ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
-                aria-label={terminalVisible ? '收起终端' : '展开终端'}
-                aria-pressed={terminalVisible}
-                className={`grid size-7 place-items-center rounded-md transition-colors ${
-                  terminalVisible
-                    ? 'bg-white/10 text-white hover:bg-white/15'
-                    : 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                }`}
-                onClick={toggleTerminalPanel}
-              >
-                <IconTerminal2 size={15} />
-              </button>
-              {activeTerminals.map((terminal) => {
-                const owned = isTerminalOwnedByNode(terminal, activeNode)
-                const badge = terminalIconBadge(activeTerminals, terminal)
-                const title = terminalIconTitle(terminal, activeNode)
-                return (
-                  <button
-                    key={terminal.id}
-                    type="button"
-                    title={title}
-                    aria-label={title}
-                    aria-pressed={terminal.windowVisible}
-                    {...longPressHandlers(() => closeTerminalControl(terminal))}
-                    onContextMenu={(event) => {
-                      event.preventDefault()
-                      closeTerminalControl(terminal)
-                    }}
-                    onClick={() => toggleTerminalControl(terminal)}
-                    className={`relative grid size-7 shrink-0 place-items-center rounded-md transition-colors ${
-                      terminal.windowVisible
-                        ? 'bg-white/10 text-white hover:bg-white/15'
-                        : owned
-                          ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                          : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
-                    }`}
-                  >
-                    <IconTerminal size={15} />
-                    {badge && (
-                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
-                        {badge}
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-              {activeBrowsers.length > 0 && (
-                <span className="mx-1 h-3.5 w-px shrink-0 bg-white/12" aria-hidden="true" />
-              )}
-              {activeBrowsers.map((browser) => {
-                const owned = isOwnedByNode(browser, activeNode)
-                const badge = browserIconBadge(activeBrowsers, browser)
-                const title = browserIconTitle(browser, activeNode)
-                return (
-                  <button
-                    key={browser.id}
-                    type="button"
-                    title={title}
-                    aria-label={title}
-                    aria-pressed={browser.visible}
-                    {...longPressHandlers(() => closeBrowser(browser))}
-                    onContextMenu={(event) => {
-                      event.preventDefault()
-                      closeBrowser(browser)
-                    }}
-                    onClick={() => toggleBrowser(browser)}
-                    className={`relative grid size-7 shrink-0 place-items-center rounded-md transition-colors ${
-                      browser.visible
-                        ? 'bg-white/10 text-white hover:bg-white/15'
-                        : owned
-                          ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                          : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
-                    }`}
-                  >
-                    <IconWorld
-                      size={15}
-                      className={browser.loading ? 'animate-pulse' : undefined}
-                    />
-                    {badge && (
-                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
-                        {badge}
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
           </footer>
         </main>
       </div>
