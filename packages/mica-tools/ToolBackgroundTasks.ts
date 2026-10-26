@@ -8,6 +8,12 @@ import {
 import { truncateDisplayText } from './utils/display.js';
 import { clampNumber, formatSize } from './utils/outputLimits.js';
 
+const DESCRIPTION = [
+  '列出后台任务：id / 状态 / pid / 已运行时长 / 输出大小 / 命令。',
+  '',
+  '不知道 task_id、或想确认哪些任务还在跑时先用它；读某个任务的输出用 `background_tasks_read`，终止用 `background_tasks_kill`。',
+].join('\n');
+
 const DEFAULT_LIMIT = 50;
 const HARD_LIMIT = 200;
 
@@ -31,7 +37,7 @@ export class ToolBackgroundTasks extends MicaTool {
   constructor() {
     super(
       'background_tasks_list',
-      '列出 run_shell 后台任务。',
+      DESCRIPTION,
       {
         type: 'object' as const,
         properties: {
@@ -65,7 +71,7 @@ export class ToolBackgroundTasks extends MicaTool {
       header,
       ...rows,
       '',
-      '使用 read_task_output(task_id="...") 查看输出；使用 background_tasks_kill(task_id="...") 终止运行中的任务。',
+      '使用 background_tasks_read(task_id="...") 查看输出；使用 background_tasks_kill(task_id="...") 终止运行中的任务。',
     ].join('\n');
   }
 

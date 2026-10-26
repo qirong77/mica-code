@@ -31,6 +31,7 @@ import {
   setupMessageQueue,
   setupMicaCodeAppNotify,
   setupSessionAutonomy,
+  setupSessionNotes,
   TodoPlugin,
 } from '@packages/mica-builtin-commands/index.js';
 import { createHeadlessRuntimeServices } from './headlessRuntimeServices.js';
@@ -166,6 +167,9 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     { id: 'runtime.messageQueue', name: 'Message Queue', setup: setupMessageQueue },
     { id: 'command-memory', name: 'Command Memory', setup: setupCommandMemory },
     { id: 'session-autonomy', name: 'Session Autonomy', setup: setupSessionAutonomy },
+    // 笔记工具与 prompt 注入在 TUI / app-server / exec 三端必须一致：只注册在一处，
+    // 会出现「桌面端能记、headless 记不了」的不对称。
+    { id: 'session-notes', name: 'Session Notes', setup: setupSessionNotes },
     { id: 'builtin.mica-code-app-notify', name: `Built-in ${APP_NAME} App Notify`, setup: setupMicaCodeAppNotify },
   ];
   for (const plugin of builtinPlugins) {

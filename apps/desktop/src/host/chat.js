@@ -1203,6 +1203,16 @@ function handleHostNotification(id, run, notification) {
       })
     }
     return
+  } else if (method === 'mica/notes/updated') {
+    // 面板保存了会话笔记：同一会话的其他窗口刷新编辑器。与能力开关同理，不占 turn。
+    if (run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:notes-updated', {
+        id,
+        sessionId: runSessionId(run),
+        content: typeof params.content === 'string' ? params.content : ''
+      })
+    }
+    return
   } else if (method === 'mica/autoCompact/overrideUpdated') {
     // 会话级压缩覆盖变了：同一会话的其他窗口刷新面板。与能力开关同理，
     // 这条通知不进 turn 事件缓冲。
@@ -1991,6 +2001,27 @@ export function registerChatIpc() {
     if (!ensured.run) return { ok: false, error: ensured.error }
     return unwrapHostResult(
       await hostTaskRequest(ensured.run, 'mica/autoCompact/set', { override })
+    )
+  })
+
+  // 会话笔记：用户与模型共同维护的 markdown，存在会话快照里（不在对话历史里），
+  // 所以压缩不会动它。读写都走常驻 host —— 它手里的快照才是唯一事实来源，
+  // 直接改 session 文件会被下一次保存覆盖。
+  ipcMain.handle('chat:notes', async (event, { id, sessionId, cwd } = {}) => {
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return unwrapHostResult(await hostTaskRequest(ensured.run, 'mica/notes/get', {}))
+  })
+
+  ipcMain.handle('chat:set-notes', async (event, { id, sessionId, cwd, content } = {}) => {
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return unwrapHostResult(
+      await hostTaskRequest(ensured.run, 'mica/notes/set', {
+        content: typeof content === 'string' ? content : ''
+      })
     )
   })
 

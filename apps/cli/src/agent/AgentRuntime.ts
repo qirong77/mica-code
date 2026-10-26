@@ -17,6 +17,8 @@ import {
   cloneCapabilitySelection,
   normalizeAutoCompactOverride,
   normalizeCapabilitySelection,
+  formatSessionNotesSection,
+  normalizeSessionNotes,
 } from '@packages/mica-common/index.js';
 import type { AutoCompactOverride, CapabilitySelection } from '@packages/mica-common/index.js';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
@@ -61,6 +63,11 @@ export type AgentRuntimeSnapshot = {
    * 不写全局配置，默认值仍由调用方（桌面设置页 / AUTO_COMPACT_DEFAULTS）提供。
    */
   autoCompactOverride?: AutoCompactOverride;
+  /**
+   * 本会话的笔记（markdown）。用户与模型共同维护，存在快照里而不是对话历史里，
+   * 所以 compact 改不到它；每轮重新拼进 system prompt 末尾。
+   */
+  notes?: string;
   /** Derived model context window in tokens, used by headless/session tooling. */
   contextWindowSize?: number;
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
@@ -122,6 +129,7 @@ export class AgentRuntime {
   private currentRole = DEFAULT_ROLE_NAME;
   private capabilities: CapabilitySelection = micaConfig.readCapabilityDefaults();
   private autoCompactOverride: AutoCompactOverride = {};
+  private notes = '';
   private lastStatusKey: string | null = null;
   private activeRunStartedAt: number | null = null;
   private activeStatusModuleStartedAt: number | null = null;
@@ -172,6 +180,20 @@ export class AgentRuntime {
   setAutoCompactOverride(input: unknown): AutoCompactOverride {
     this.autoCompactOverride = normalizeAutoCompactOverride(input);
     return this.autoCompactOverrideSelection;
+  }
+
+  /** 本会话的笔记正文（markdown，未写为空串）。 */
+  get sessionNotes(): string {
+    return this.notes;
+  }
+
+  /**
+   * 覆盖本会话的笔记。运行中允许调用：笔记不进对话历史，改它既不会打断在途请求，
+   * 也不会让本轮中途换上下文——下一次请求自然会带上新内容。返回归一化后的正文。
+   */
+  setSessionNotes(input: unknown): string {
+    this.notes = normalizeSessionNotes(input);
+    return this.notes;
   }
 
   /** 当前会话可用的 skills（已应用本会话开关）。 */
@@ -240,7 +262,11 @@ export class AgentRuntime {
       skills: this.availableSkills(),
     });
     const event = this.hooks?.pipelineSync<SystemPromptBuildEvent>('system-prompt:build', { runtime: this, prompt });
-    return event?.prompt ?? prompt;
+    // 笔记固定追加在最末：它是本会话里唯一「每轮可能变」的段落，放在最后才不会让
+    // 前面稳定的 system / AGENT.md / skills / context 跟着一起失效。
+    const notesSection = formatSessionNotesSection(this.notes);
+    const base = event?.prompt ?? prompt;
+    return notesSection ? `${base}\n\n${notesSection}` : base;
   }
 
   setRole(roleName: string): void {
@@ -322,6 +348,9 @@ export class AgentRuntime {
     this.activeAbortController?.abort();
     this.activeAbortController = null;
     this.client?.reset();
+    // /clear 与新建会话都是「这条会话从这里重来」：笔记属于会话，跟着一起清掉，
+    // 否则新会话会莫名其妙继承上一轮的结论。
+    this.notes = '';
     this.emitStatus({ type: 'idle' });
   }
 
@@ -335,6 +364,7 @@ export class AgentRuntime {
       role: this.role,
       capabilitySelection: this.capabilitySelection,
       autoCompactOverride: this.autoCompactOverrideSelection,
+      notes: this.notes,
       contextWindowSize: this.currentConfig.provider.contextWindowSize,
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
@@ -405,6 +435,7 @@ export class AgentRuntime {
     this.currentRole = micaAgent.roles.get(snapshot.role)?.name ?? DEFAULT_ROLE_NAME;
     this.capabilities = normalizeCapabilitySelection(snapshot.capabilitySelection ?? this.capabilities);
     this.autoCompactOverride = normalizeAutoCompactOverride(snapshot.autoCompactOverride);
+    this.notes = normalizeSessionNotes(snapshot.notes);
     this.recreateClient();
     this.client?.loadSnapshot({
       model: snapshot.model,

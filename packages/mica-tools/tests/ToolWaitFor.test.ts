@@ -295,21 +295,12 @@ describe('wait_for http and port conditions', () => {
   });
 });
 
-describe('wait_for duration, background and abort', () => {
+describe('wait_for duration and abort', () => {
   it('honours a duration wait', async () => {
     const started = Date.now();
     const result = await tool.execute({ kind: 'duration', seconds: 0.2, timeout_ms: 2_000, ...FAST });
     expect(parseField(result, 'status')).toBe('satisfied');
     expect(Date.now() - started).toBeGreaterThanOrEqual(150);
-  });
-
-  it('registers background waits without blocking', async () => {
-    const result = await tool.execute({ kind: 'duration', seconds: 5, background: true });
-    expect(parseField(result, 'status')).toBe('parked');
-    const waitId = parseWaitId(result);
-    expect(listActiveWaits().map((record) => record.id)).toContain(waitId);
-    const status = await tool.execute({ wait_id: waitId, timeout_ms: 0, ...FAST });
-    expect(['timeout', 'parked', 'waiting']).toContain(parseField(status, 'status'));
   });
 
   it('settles as aborted when the turn is interrupted', async () => {
@@ -323,13 +314,13 @@ describe('wait_for duration, background and abort', () => {
     expect(listWaitRecords().every((record) => record.status !== 'waiting')).toBe(true);
   });
 
-  it('unregisters nothing until pruned, and exposes an active-wait snapshot', async () => {
-    const started = tool.execute({ kind: 'duration', seconds: 30, background: true });
-    const result = await started;
+  it('exposes an active-wait snapshot while a wait is live', async () => {
+    void tool.execute({ kind: 'duration', seconds: 5, timeout_ms: 5_000, ...FAST });
+    await new Promise((resolve) => setTimeout(resolve, 60));
     const active = listActiveWaits();
     expect(active).toHaveLength(1);
-    expect(active[0]!.label).toContain('等待 30s');
-    expect(parseWaitId(result)).toBe(active[0]!.id);
+    expect(active[0]!.label).toContain('等待 5s');
+    expect(active[0]!.status).toBe('waiting');
   });
 
   it('keeps a timed-out wait resumable until the terminal TTL prunes it', async () => {
@@ -351,21 +342,6 @@ describe('wait_for duration, background and abort', () => {
     const resumed = await tool.execute({ wait_id: waitId, timeout_ms: 0, ...FAST });
     expect(resumed).toContain('输入校验失败');
   });
-
-  it('holds a parked background wait long past the terminal TTL before dropping it', async () => {
-    const result = await tool.execute({ kind: 'duration', seconds: 5, background: true });
-    expect(parseField(result, 'status')).toBe('parked');
-    const waitId = parseWaitId(result);
-
-    // PARKED_TTL_MS 是 2 小时：挂满预算的 background 等待必须熬过默认超时预算，
-    // 否则它会在还能被 wait_id 续等的窗口里被回收。
-    pruneWaitRecords(Date.now() + 60 * 60_000);
-    expect(listWaitRecords().map((record) => record.id)).toContain(waitId);
-    expect(listActiveWaits().map((record) => record.id)).toContain(waitId);
-
-    pruneWaitRecords(Date.now() + 3 * 60 * 60_000);
-    expect(listWaitRecords().map((record) => record.id)).not.toContain(waitId);
-  });
 });
 
 describe('wait_for display text', () => {
@@ -384,9 +360,15 @@ describe('wait_for display text', () => {
     });
     expect(parseField(result, 'reason')).toBe('等 dev server 起来');
 
-    const parked = await tool.execute({ kind: 'duration', seconds: 5, background: true, reason: '等构建' });
-    expect(parseField(parked, 'reason')).toBe('等构建');
-    const waitId = parseWaitId(parked);
+    const timedOut = await tool.execute({
+      kind: 'duration',
+      seconds: 5,
+      reason: '等构建',
+      timeout_ms: 0,
+      ...FAST,
+    });
+    expect(parseField(timedOut, 'reason')).toBe('等构建');
+    const waitId = parseWaitId(timedOut);
     // 续等时带上新的 reason 会覆盖旧的，dock 行随之更新。
     const resumed = await tool.execute({ wait_id: waitId, reason: '等测试跑完', timeout_ms: 0, ...FAST });
     expect(parseField(resumed, 'reason')).toBe('等测试跑完');

@@ -12,6 +12,7 @@ const DEFAULT_TOOL_ICONS = new Map<string, string>(
     list_files: '📂',
     grep_search: '📊',
     run_shell: '⚡️',
+    background_tasks_start: '⚡️',
     web_fetch: '🔗',
     web_search: '🌐',
     Skill: '✨',
@@ -19,7 +20,7 @@ const DEFAULT_TOOL_ICONS = new Map<string, string>(
     Agent: '🤖',
     background_tasks_list: '📋',
     background_tasks_kill: '📋',
-    read_task_output: '📋',
+    background_tasks_read: '📋',
     wait_for: '⏳',
   }),
 );
@@ -57,7 +58,7 @@ export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurn
  *
  * 终端没有第二块可点开的面板，所以这行就是全部信息：超长文案交给 Ink 的
  * `truncate-end` 按当前列宽裁成省略号，工具输出不再往下铺（要读输出请用
- * `read_task_output` / 网页端）。换行必须先压成空格：`truncate-end` 只裁宽度，
+ * `background_tasks_read` / 网页端）。换行必须先压成空格：`truncate-end` 只裁宽度，
  * 多行命令会照样铺成多行。思考不在此列——它照旧整段折行。
  */
 export function createToolCallLogItem({

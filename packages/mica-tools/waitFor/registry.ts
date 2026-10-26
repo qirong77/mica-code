@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { NormalizedWaitCondition, WaitKind } from './types.js';
 
-export type WaitTaskStatus = 'waiting' | 'parked' | 'satisfied' | 'timeout' | 'aborted';
+export type WaitTaskStatus = 'waiting' | 'satisfied' | 'timeout' | 'aborted';
 
 export type WaitRecord = {
   id: string;
@@ -31,22 +31,16 @@ export type WaitRecord = {
 
 const MAX_RECORDS = 64;
 const TERMINAL_TTL_MS = 5 * 60_000;
-/**
- * `background: true` 只登记不轮询，条件没人推进时它永远停在 `parked`。
- * 超过这个时间就当作已被遗忘的等待丢掉（dock 行与基线一起清），
- * 否则没有进程再会去结算它，dock 上会挂一条永不消失的行。
- */
-const PARKED_TTL_MS = 2 * 60 * 60_000;
 
 const records = new Map<string, WaitRecord>();
 
 /**
- * 仍在等待的记录（dock 与任务快照只认这两个状态）。
+ * 仍在等待的记录（dock 与任务快照只认这个状态：等待只在调用存续期间存在）。
  * `timeout` 刻意不算「仍在等待」——那一刻确实没人在等了；模型带着同一个
  * wait_id 续等时它会重新回到 waiting。
  */
 export function isActiveWaitStatus(status: WaitTaskStatus): boolean {
-  return status === 'waiting' || status === 'parked';
+  return status === 'waiting';
 }
 
 /** 可以再次等待的记录：只有已经满足的才算彻底结束（续等会直接返回 satisfied）。 */
@@ -57,11 +51,6 @@ export function isResumableWaitStatus(status: WaitTaskStatus): boolean {
 /** 淘汰过期的终态记录并给总条数封顶，避免长会话里记录无限增长。 */
 export function pruneWaitRecords(now = Date.now()): void {
   for (const record of records.values()) {
-    // deadline 在每次续等时都会刷新，所以这是「最后一次被碰过之后」的时间。
-    if (record.status === 'parked' && now - record.deadline > PARKED_TTL_MS) {
-      records.delete(record.id);
-      continue;
-    }
     if (
       !isActiveWaitStatus(record.status) &&
       record.finishedAt !== undefined &&

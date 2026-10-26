@@ -26,6 +26,7 @@ import {
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
   MICA_AUTO_COMPACT_NOTIFICATIONS,
+  MICA_NOTES_NOTIFICATIONS,
   MICA_BTW_NOTIFICATIONS,
   MICA_METHODS,
   MICA_QUEUE_NOTIFICATIONS,
@@ -148,15 +149,15 @@ export function projectSubagentTasks(tasks: SubagentTaskRecord[]): MicaSubagentT
 
 /** Project the `wait_for` records that are still waiting for the
  * `mica/waitTasks/updated` snapshot. The records live in mica-tools inside this
- * process, so the host is the only place that can see them; a long blocking
- * wait would otherwise look like a frozen tool row in the desktop app. */
+ * process, so the host is the only place that can see them; a long wait would
+ * otherwise look like a frozen tool row in the desktop app. */
 export function projectWaitTasks(waits: WaitRecord[]): MicaWaitTaskItem[] {
   return waits.map((wait) => ({
     id: wait.id,
     kind: wait.kind,
     label: wait.label,
     ...(wait.reason ? { reason: wait.reason } : {}),
-    status: wait.status === 'parked' ? 'parked' : 'waiting',
+    status: 'waiting',
     startedAt: new Date(wait.createdAt).toISOString(),
     polls: wait.polls,
     ...(wait.error ? { detail: wait.error } : wait.detail ? { detail: wait.detail } : {}),
@@ -1573,6 +1574,22 @@ async function handleCodexRequest(
         override,
         effective: resolveAutoCompactSettings(ctx.autoCompactDefaults.current, override),
       });
+      return;
+    }
+    case MICA_METHODS.notesGet: {
+      ctx.writeResponse({ ok: true, content: ctx.agent.sessionNotes ?? '' });
+      return;
+    }
+    case MICA_METHODS.notesSet: {
+      // 笔记不进对话历史，写到内存不会打断在途请求，也不会让本轮换上下文——
+      // 下一个请求自然带上新内容。这里只多一步落盘，好让这个能力在重启后还在。
+      const content = ctx.agent.setSessionNotes(params.content);
+      if (ctx.sessionId) ctx.sessionController.saveCurrent({ allowEmpty: true });
+      ctx.writeNotification(MICA_NOTES_NOTIFICATIONS.updated, {
+        threadId: ctx.sessionId,
+        content,
+      });
+      ctx.writeResponse({ ok: true, content });
       return;
     }
     default:

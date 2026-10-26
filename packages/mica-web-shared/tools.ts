@@ -10,6 +10,7 @@ const TOOL_ICONS: Record<string, string> = {
   list_files: '📂',
   grep_search: '📊',
   run_shell: '⚡️',
+  background_tasks_start: '⚡️',
   web_fetch: '🔗',
   web_search: '🌐',
   Skill: '✨',
@@ -17,7 +18,7 @@ const TOOL_ICONS: Record<string, string> = {
   TodoWrite: '📝',
   background_tasks_list: '📋',
   background_tasks_kill: '📋',
-  read_task_output: '📋',
+  background_tasks_read: '📋',
   wait_for: '⏳',
 };
 
@@ -34,6 +35,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_files: 'List files',
   grep_search: 'Search code',
   run_shell: 'Shell',
+  background_tasks_start: 'Start task',
   web_fetch: 'Fetch web',
   web_search: 'Search web',
   Skill: 'Load skill',
@@ -41,7 +43,7 @@ const TOOL_LABELS: Record<string, string> = {
   TodoWrite: 'Plan',
   background_tasks_list: 'List tasks',
   background_tasks_kill: 'Stop task',
-  read_task_output: 'Task output',
+  background_tasks_read: 'Task output',
   wait_for: 'Wait for',
 };
 

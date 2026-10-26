@@ -160,7 +160,7 @@ or a replaced session history. Mica adds these as **incremental extensions**
   instead of assuming their local queue is complete.
 - `mica/backgroundTasks/updated`, `mica/subagentTasks/updated`
   (`MICA_TASK_NOTIFICATIONS`): snapshot pushes of long-lived host state that
-  outlives a turn (background `run_shell` tasks, running subagents including
+  outlives a turn (`background_tasks_start` tasks, running subagents including
   `run_in_background`). The host emits only when the serialized snapshot changed
   and pushes a replacement whole list.
 - `mica/sessionHistory/replaced` (`MICA_SESSION_NOTIFICATIONS`): the host

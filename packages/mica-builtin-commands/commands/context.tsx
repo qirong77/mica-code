@@ -463,7 +463,11 @@ function recordToolCallWorkset(stats: ConversationStats, name: string, args: unk
   }
   if (name === 'run_shell') {
     stats.shellCommands++;
-    if (input.run_in_background === true) stats.backgroundTasks++;
+    return;
+  }
+  if (name === 'background_tasks_start') {
+    stats.shellCommands++;
+    stats.backgroundTasks++;
   }
 }
 

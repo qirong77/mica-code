@@ -41,6 +41,11 @@ export type PersistedRuntimeSnapshot = {
    * 缺失表示完全跟随默认（老会话与未改过设置的会话都走这条路径）。
    */
   autoCompactOverride?: AutoCompactOverride;
+  /**
+   * 会话笔记（markdown）。属于会话而不进对话历史：compact 改不到它，所以它能一直
+   * 作为长期上下文留在 system prompt 里。缺失表示这条会话还没写过笔记。
+   */
+  notes?: string;
   /** Model context window in tokens; informational for the web console's
    *  context usage display. Optional so older snapshots parse cleanly. */
   contextWindowSize?: number;
@@ -698,6 +703,9 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   if (session.snapshot.subagentUsageHistory !== undefined && !Array.isArray(session.snapshot.subagentUsageHistory)) {
     return null;
   }
+  // 笔记缺失允许（旧会话没写过），存在就必须是字符串——否则 prompt 里会拼出
+  // "[object Object]"，而且每次保存都会原样写回。
+  if (session.snapshot.notes !== undefined && typeof session.snapshot.notes !== 'string') return null;
   const turnState = isPersistedSessionTurnState(session.turnState) ? session.turnState : 'completed';
   let protocol = session.snapshot.protocol;
   if (!isProviderProtocol(protocol)) {

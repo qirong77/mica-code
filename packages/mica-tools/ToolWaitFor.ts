@@ -29,10 +29,16 @@ const DEFAULT_POLL_INTERVAL_MS: Record<WaitKind, number> = {
 };
 
 const DESCRIPTION = [
-  '阻塞等待一个外部事件或条件成立后再继续。用于「脚本还没跑完」「服务还没起来」「文件还没生成」「进程还没退出」「页面内容还没变化」这类需要等待的场合。',
+  '等一个外部条件成立后返回。它只观察、不启动任何东西，也不产生副作用。',
+  '',
+  '用它：等后台任务跑完、等文件出现或内容变化、等服务端口可连、等某个命令输出匹配。',
+  '别用它启动进程——真正执行命令的是 `run_shell`（前台等它跑完）或 `background_tasks_start`（后台，先拿 task_id）。',
+  '别用它代替 `sleep` 轮询：`duration` 只用于确实需要等固定时长、且没有更好观察条件的场合。',
+  '',
+  '等待不会占住整条消息：同一条消息里的其他工具调用会与它并发执行，结果最后一起返回。因此正确用法是把「要等的事」和「等待期间能做的其他调用」放进同一条消息——不要先单独空等一轮再动手。',
   '',
   'kind 决定等什么：',
-  '- task：等一个 run_shell 后台任务结束（task_id）。',
+  '- task：等一个 `background_tasks_start` 启动的后台任务结束（task_id）。dev server、watch 这类不会自己退出的进程不要用 task 等它结束——它不会结束，只会在这里耗到超时；改用 `port` / `http` 等它「起来了」，或直接 `background_tasks_read` 看输出。',
   '- process：等某个 pid 退出。',
   '- file：等文件出现 / 消失 / 内容变化 / 内容匹配正则（until 取 exists|missing|changed|matches）。',
   '- command：反复执行一条命令，等它满足退出码或输出条件（until 取 exit_zero|exit_nonzero|expected_exit_code|stdout_matches|stdout_changed）。例如 until=exit_zero + command="curl -sf http://127.0.0.1:3000/health"。',
@@ -41,7 +47,6 @@ const DESCRIPTION = [
   '- duration：单纯等待 seconds 秒。',
   '',
   `超时不算失败：timeout_ms（默认 ${DEFAULT_TIMEOUT_LABEL}，最大 ${MAX_TIMEOUT_LABEL}）内条件没成立就返回 status=timeout 与一个 wait_id，带上同一个 wait_id 再调用一次即可继续等待——观察基线保留、不重新计时。条件何时成立无法预估时可以放心用默认预算 + 续等，而不是一次把 timeout_ms 开到上限。`,
-  'background=true 时只登记条件并立刻返回 status=parked 与 wait_id，可先去处理别的事，之后用 wait_id 查询/继续等待。',
   '轮询本身失败（连不上、命令起不来）只记进 last error，不代表条件不成立。',
   'reason：一句话说明为什么要等（人读），会显示在客户端的「等待中」列表上。可选，但建议每次都写——尤其 duration 这种「等一段时间」的等待，条件标签本身说不清在等什么。',
 ].join('\n');
@@ -64,7 +69,6 @@ export class ToolWaitFor extends MicaTool {
             description: `本次调用的等待预算，默认 ${DEFAULT_TIMEOUT_LABEL}，最大 ${MAX_TIMEOUT_LABEL}。传 0 表示只做一次立即检查。`,
           },
           poll_interval_ms: { type: 'number', description: '轮询间隔毫秒；默认按 kind 取值，最小 50。' },
-          background: { type: 'boolean', description: 'true 时只登记条件、立刻返回 wait_id，不阻塞本轮。' },
           reason: {
             type: 'string',
             description:
@@ -98,7 +102,7 @@ export class ToolWaitFor extends MicaTool {
           seconds: { type: 'number', description: 'kind=duration：等待多少秒。' },
         },
       },
-      { readOnly: false },
+      { readOnly: false, overlappable: true },
     );
   }
 
@@ -122,11 +126,9 @@ export class ToolWaitFor extends MicaTool {
       condition: parsed.condition,
       pollIntervalMs: parsed.pollIntervalMs,
       timeoutMs: parsed.timeoutMs,
-      status: 'parked',
+      status: 'waiting',
     });
 
-    if (parsed.background) return formatParked(record);
-    record.status = 'waiting';
     return this.runWaitLoop(record, callbacks, parsed.timeoutMs);
   }
 
@@ -218,7 +220,6 @@ export class ToolWaitFor extends MicaTool {
       condition: normalized.condition,
       timeoutMs,
       pollIntervalMs: normalizePollInterval(input.poll_interval_ms, normalized.condition.kind),
-      background: input.background === true,
       reason: normalizeReason(input.reason),
     };
   }
@@ -242,7 +243,6 @@ type ParsedWaitInput =
       condition: NormalizedWaitCondition;
       timeoutMs: number;
       pollIntervalMs: number;
-      background: boolean;
       reason?: string;
     }
   | { ok: true; mode: 'resume'; record: WaitRecord; timeoutMs: number; pollIntervalMs?: number; reason?: string }
@@ -451,13 +451,3 @@ function formatResult(record: WaitRecord, options: { hint?: string; settledByEar
   return lines.join('\n');
 }
 
-function formatParked(record: WaitRecord): string {
-  return [
-    `wait_id: ${record.id}`,
-    `kind: ${record.kind}`,
-    `condition: ${record.label}`,
-    ...(record.reason ? [`reason: ${record.reason}`] : []),
-    'status: parked',
-    `hint: 已登记，未阻塞本轮。用 wait_for({ wait_id: "${record.id}" }) 等待或查询它；到期前没有调用查询就一直保持 parked。`,
-  ].join('\n');
-}

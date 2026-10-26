@@ -7,11 +7,18 @@ import { clampNumber } from './utils/outputLimits.js';
 const DEFAULT_MAX_BYTES = 20_000;
 const HARD_MAX_BYTES = 200_000;
 
-export class ToolReadTaskOutput extends MicaTool {
+const DESCRIPTION = [
+  '读取 background_tasks_start 启动的后台任务的输出与状态，默认返回最新输出。',
+  '',
+  '默认取尾部；需要从中间续读时传 `offset`（配合上次返回的 `next_offset`），或直接给 `tail_bytes`。',
+  '只看状态不读内容时用 `background_tasks_list`；要等任务结束再读时先用 `wait_for(kind="task")`。',
+].join('\n');
+
+export class ToolBackgroundRead extends MicaTool {
   constructor() {
     super(
-      'read_task_output',
-      '读取 run_shell 后台任务输出，默认返回最新输出。',
+      'background_tasks_read',
+      DESCRIPTION,
       {
         type: 'object' as const,
         properties: {

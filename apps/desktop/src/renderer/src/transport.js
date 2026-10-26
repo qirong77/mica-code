@@ -274,6 +274,17 @@ function createWebApi(env) {
           cwd: cwd || null
         }),
       onAutoCompactUpdated: (callback) => subscribe('chat:auto-compact-updated', callback),
+      // 会话笔记（用户与模型共同维护的 markdown）。存在会话快照里，压缩不动它。
+      notes: (id, { sessionId, cwd } = {}) =>
+        invoke('chat:notes', { id, sessionId: sessionId || null, cwd: cwd || null }),
+      setNotes: (id, content, { sessionId, cwd } = {}) =>
+        invoke('chat:set-notes', {
+          id,
+          content,
+          sessionId: sessionId || null,
+          cwd: cwd || null
+        }),
+      onNotesUpdated: (callback) => subscribe('chat:notes-updated', callback),
       compact: (sessionId, mode = 'model') => invoke('chat:compact', { sessionId, mode }),
       checkCwd: (cwd) => invoke('chat:check-cwd', { cwd }),
       updateCwd: (sessionId, cwd) => invoke('chat:update-cwd', { sessionId, cwd }),

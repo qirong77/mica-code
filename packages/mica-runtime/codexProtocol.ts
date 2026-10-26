@@ -163,6 +163,23 @@ export const MICA_CAPABILITY_NOTIFICATIONS = {
   updated: 'mica/capabilities/updated',
 } as const;
 
+/**
+ * 会话笔记被**面板**改写（`mica/notes/set`）。同一会话的其他窗口据此刷新，
+ * 免得一边改完另一边还显示旧内容。
+ *
+ * 模型用 SessionNotes 工具写的那条不发通知：工具跑在 turn 里，客户端本来就会在
+ * 本轮结束（`turn/completed`）后重读一次，多一条通知反而和 turn 增量撞车。
+ */
+export const MICA_NOTES_NOTIFICATIONS = {
+  updated: 'mica/notes/updated',
+} as const;
+
+/** `MICA_NOTES_NOTIFICATIONS.updated` payload. */
+export type MicaNotesSnapshot = {
+  threadId: string | null;
+  content: string;
+};
+
 /** `MICA_CAPABILITY_NOTIFICATIONS.updated` payload. */
 export type MicaCapabilitiesSnapshot = {
   threadId: string | null;
@@ -461,6 +478,16 @@ export const MICA_METHODS = {
    * 设置属于会话，落盘后其他窗口经 `mica/autoCompact/overrideUpdated` 同步。
    */
   autoCompactSet: 'mica/autoCompact/set',
+  /**
+   * 读本会话的笔记（用户与模型共同维护的 markdown）。笔记存在会话快照里，
+   * 不进对话历史，所以压缩不会动它。
+   */
+  notesGet: 'mica/notes/get',
+  /**
+   * 覆盖本会话的笔记。运行中也可以写：它不影响在途请求，下一轮才生效。
+   * 落盘后其他窗口经 `mica/notes/updated` 同步。
+   */
+  notesSet: 'mica/notes/set',
 } as const;
 
 export type MicaBtwAskParams = {
@@ -526,9 +553,9 @@ export type MicaSubagentTaskItem = {
  * One `wait_for` call that is still waiting (see
  * `packages/mica-tools/waitFor/registry.ts`). The record lives in the host
  * process, so this snapshot is the only way the desktop app can show what a
- * turn is blocked on — a long wait otherwise looks like a frozen tool row.
- * `status` is `waiting` when a call is currently blocked on it and `parked`
- * when it was registered with `background: true` and nobody is polling yet.
+ * turn is waiting on — a long wait otherwise looks like a frozen tool row.
+ * A record only exists while a `wait_for` call is live, so the status is
+ * always `waiting`.
  */
 export type MicaWaitTaskItem = {
   id: string;
@@ -541,7 +568,7 @@ export type MicaWaitTaskItem = {
    * and says nothing about why the turn is waiting.
    */
   reason?: string;
-  status: 'waiting' | 'parked';
+  status: 'waiting';
   startedAt: string;
   /** Polls made so far; cheap progress signal for a long wait. */
   polls: number;

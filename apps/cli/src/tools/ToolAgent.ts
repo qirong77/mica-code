@@ -868,10 +868,11 @@ function classifyToolActivity(name: string, argsText: string): ToolActivity {
   if (name === 'apply_patch') return { kind: 'other', description: summarizePatchActivity(compactString(args.patch)) };
   if (name === 'run_shell') {
     const command = clampOneLine(compactString(args.command) || 'command', 72);
-    return {
-      kind: 'other',
-      description: args.run_in_background ? `Starting ${command} in the background…` : `Running ${command}…`,
-    };
+    return { kind: 'other', description: `Running ${command}…` };
+  }
+  if (name === 'background_tasks_start') {
+    const command = clampOneLine(compactString(args.command) || 'command', 72);
+    return { kind: 'other', description: `Starting ${command} in the background…` };
   }
   if (name === 'web_search') {
     return { kind: 'other', description: `Searching the web for ${quotedTarget(args.query, 'query')}…` };
@@ -881,7 +882,7 @@ function classifyToolActivity(name: string, argsText: string): ToolActivity {
     return { kind: 'other', description: `Using the ${compactString(args.skill) || 'selected'} skill…` };
   }
   if (name === 'background_tasks_list') return { kind: 'other', description: 'Checking background tasks…' };
-  if (name === 'read_task_output') return { kind: 'other', description: 'Checking task output…' };
+  if (name === 'background_tasks_read') return { kind: 'other', description: 'Checking task output…' };
   if (name === 'background_tasks_kill') return { kind: 'other', description: 'Stopping background task…' };
 
   try {

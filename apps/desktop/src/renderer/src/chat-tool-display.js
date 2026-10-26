@@ -48,6 +48,7 @@ export function toolSummary(tool, max = 0) {
     case 'grep_search':
       return compactLine([input.pattern, input.path].filter(Boolean).join(' · '), max)
     case 'run_shell':
+    case 'background_tasks_start':
       // shell 命令保留换行：网页上可以整段折行展示，压成一行会看不出多行脚本的结构
       return max ? compactLine(input.command, max) : String(input.command ?? '').trim()
     case 'web_search':
@@ -63,7 +64,7 @@ export function toolSummary(tool, max = 0) {
       )
     case 'background_tasks_list':
       return compactLine(input.status || 'all', max)
-    case 'read_task_output':
+    case 'background_tasks_read':
     case 'background_tasks_kill':
       return compactLine(input.task_id, max)
     case 'wait_for':

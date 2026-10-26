@@ -43,4 +43,5 @@ import { prepareImageForApi } from '@packages/mica-common/index.js';
 - `format.ts`：token 数量格式化。
 - `git.ts`：git 命令执行与错误格式化。
 - `image.ts`：图片格式和尺寸识别，保留原始图片字节供 provider 发送。
+- `sessionNotes.ts`：会话笔记的归一化、追加、长度上限与 prompt 片段，唯一实现在这里，工具与桌面面板都调它。
 - `index.ts`：公共 API 聚合导出。

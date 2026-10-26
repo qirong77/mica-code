@@ -102,7 +102,7 @@ describe('getToolDefinitions', () => {
         'web_search',
         'Skill',
         'background_tasks_list',
-        'read_task_output',
+        'background_tasks_read',
       ]) {
         expect(isToolReadOnly(name), `${name} should be read-only`).toBe(true);
       }
@@ -113,6 +113,7 @@ describe('getToolDefinitions', () => {
         'write_file',
         'apply_patch',
         'run_shell',
+        'background_tasks_start',
         'background_tasks_kill',
         'wait_for',
         'pty_spawn',

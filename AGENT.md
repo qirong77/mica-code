@@ -140,6 +140,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - provider 重试经 `onRetry` 透传；TUI 原地更新单条 notice，app-server 另发 `mica/turn/retrying` 让 desktop 显示重试状态（stderr 同步留日志）。
 - headless 与 TUI 使用相同策略；重试清 responseBuffer，重放已消费的 after_iteration 输入，等待可被 abort 立即打断。
 - `turn:retrying` 不得投影为 Codex `error`，否则 desktop 会提前结束 run。
+- 会话笔记（`snapshot.notes`）存在快照里而不是对话历史里：compact 改不到它，每轮由 `AgentRuntime.buildSystemPrompt()` 追加到 prompt 末尾；rewind 随 checkpoint 一起回滚。
 - turn 级重试与失败写成 notice 存进 `conversationMessages`（`runtime/turnNotices.ts`），不进 provider history；插入位置按创建时已提交的对话条数还原，compact 重写历史时一并清空。
 - `AgentRuntime.abort()` 递增 runId 并中止 controller。`preserveAbortedTurn` 只补未提交的消息：两个 client 使用 `turnCommitted`，不能只比较历史末尾用户文本。
 - TUI / headless 各自维护 `committedResponseBuffer`，迭代边界更新；补写只传 `uncommittedResponseText(responseBuffer, committedResponseBuffer)`。
@@ -193,6 +194,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - compact 保留 `lastUsage` / `usageHistory` 供 Stats 对账；界面 ctx 优先读 `displayUsage`，下一次较新的真实请求后失效。
 - fork 清空两类 usageHistory，只保留描述继承上下文的 `lastUsage`。旧会话用量副本由 `usageIdentity` / `filterOwnedUsage` 统一归属，列表与详情保持一致。
 - 会话快照带 `capabilitySelection`；`startNewSession` 恢复 config 的 `capabilityDefaults`，resume/fork 沿用快照，因此开关不会跨会话串味。
+- 会话快照带 `notes`（markdown，可选字段，缺省当空串）；`startNewSession` 清空、resume/fork 沿用、rewind 随 checkpoint 回滚。字段非字符串按会话损坏拒绝解析，不做类型纠正。
 - 无手动标题时取最后一条真实用户消息，最长 60 字符；跳过 compact 元数据与 `displayContent` 不同于 content 的插件注入消息。
 
 ### 索引、并发与删除
@@ -221,6 +223,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - `mica/*` 扩展通知（queue、tasks、BTW、history、autoCompact、capabilities、turn retrying）直接送 renderer，不进入 turn 重放缓冲（`mica/turn/retrying` 属于 turn 增量，随事件流重放）。
 - `mica/capabilities/get|set` 读写本会话能力：get 返回开关 + 完整目录，set 保存会话并广播 `mica/capabilities/updated`；运行中 set 返回 `ok:false` 而不是错误码。
 - `mica/autoCompact/get|set` 读写本会话压缩设置：get 返回默认值 / 覆盖 / 生效值，set 只存与默认值不同的键并广播 `mica/autoCompact/overrideUpdated`。默认值来自宿主每轮下发的参数，所以要放在**跨请求共享的持有对象**里（`ctx` 每个请求都是新对象）。
+- `mica/notes/get|set` 读写本会话笔记：set 归一化后保存并广播 `mica/notes/updated`；turn 运行中改内容是安全的，落盘跟随本轮 checkpoint，不在 handler 里抢占 lease。
 - 撤回、任务详情/终止、改名、BTW 等辅助请求不启动主 turn，不改 `run.running` / `hostPending`；可在 turn 运行中调用。编辑重跑另有 busy guard。
 - 任务记录只活在 host；详情与终止走 `mica/backgroundTasks/*`、`mica/subagentTasks/*`。运行快照不含已结束任务，详情响应仍须带最终状态与退出码。
 - `turn/start` / `mica/turn/editMessage` 可传 role，由 host 在启动 turn 前应用；edit 时必须在 `loadSnapshot()` 后应用。缺失角色只 warning 并保留原角色，不为切角色重建 host。
@@ -257,16 +260,20 @@ npm run serve:web         # 构建后运行 Web 运行时
 - `mica-tools` 是唯一 registry，产品工具优先经插件 `ctx.tools.register()`；新增工具继承 `MicaTool`，声明 schema、展示、错误格式与 readOnly。
 - `getCatalog()` 暴露工具来源（builtin/runtime/mcp + mcpServer），MCP 工具名统一由 `mcpToolNamePrefix()` 生成，按 server 关闭时用它前缀匹配。
 - readOnly 分类受 `MicaTool.test.ts` 约束：纯查询为 true；写文件、patch、shell、kill、PTY、wait_for 为 false。
+- 执行类工具按「启动 / 等待 / 查看」拆开：`run_shell` 只跑前台命令（严格超时，≤120s）；`background_tasks_start` 负责启动并立即返回 `task_id`；`background_tasks_list` / `_read` / `_kill` 负责查询、读输出、终止；`wait_for` 只观察条件、不启动任何东西。不要再把后台开关做成 `run_shell` 的布尔参数——两种语义互相打架（后台时 `timeout` 被忽略），模型会误用。
+- 工具声明 `overlappable: true`（目前 `wait_for` / `pty_wait`）表示执行期只是等待外部条件：`executeProviderToolCalls` 会立刻启动它并与同一条消息里其余调用重叠，最后统一回收结果，所以「一边等测试、一边改文档」不会被串行屏障挡住。新增加入该声明前先确认工具无写副作用。
 - `truncateDisplayText` 仅在 `process.stdout.columns` 存在时裁剪；app-server 管道无列宽，不按 80 列截断。
 - PTY 由懒启动 Node helper `mica-pty/src/server.mjs` 承载，Bun 首次调用动态加载 `src/manager.js`。
 - 修改 `server.mjs` 后运行 `bun run scripts/generate-pty-server-source.mjs`，同步 `ptyServerSource.ts`。
 - Todo 属当前进程/turn，不写 session；正常完成将 pending / in_progress 全部 completed，abort/error 只将 in_progress 退回 pending。desktop 从实时工具事件重建计划，须同步收口规则。
+- `SessionNotes` 读写会话笔记（`snapshot.notes`），`read` / `append` / `replace` 三个 action，`primaryAgentOnly`；文本归一化与 prompt 片段在 `mica-common/sessionNotes.ts`。工具只改内存，落盘交给本轮 checkpoint，别在工具里调 `saveCurrent`。
 
 ### wait_for 与会话自治
 
 - `wait_for` 支持 task/process/file/command/http/port/duration，条件纯逻辑在 `waitFor/conditions.ts`，记录表是唯一事实来源。
-- 轮询必须监听 signal 并立即返回 aborted；`readOnly: false`，避免并发等待拖住只读批次与重试重放。
-- 超时返回 timeout + wait_id，可带同一 id 续等；超时记录不能丢弃或从 dock 消失。`reason` 仅展示，优先显示于条件标签。
+- 状态只有 waiting / satisfied / timeout / aborted，记录只在调用存续期间存在——没有「登记后没人推进」的 parked 态：要并行就把等待与其余调用放进同一条消息（靠 `overlappable`），不要另造登记入口。
+- 轮询必须监听 signal 并立即返回 aborted；`readOnly: false`（等待没有写副作用，但不能进只读批次的重试重放语义）。
+- 超时返回 timeout + wait_id，可带同一 id 续等（保留观察基线）；超时记录不能丢弃或从 dock 消失。`reason` 仅展示，优先显示于条件标签。dev server 这类永不退出的进程不能用 `kind=task` 等它结束，应改用 `port` / `http`。
 - app-server 每秒投影 `listActiveWaits()` 为 `mica/waitTasks/updated`；改字段同步工具测试、两端图标与 dock/详情展示。
 - `session_*` 工具仅主 agent 可用。目前只剩只读的 `session_peers`：经 `mica-session/listSessionTurnLocks()` 按 `sessions/.turn-locks` 持有进程存活枚举运行中实例，只读锁与 session 文件头部，输出 session 文件路径与读法（先 `conversationMessages`，不整读几十 MB 快照）。压缩只经 `/compact`、`mica compact` 与自动压缩，不再暴露给模型。
 
@@ -395,6 +402,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 粘贴共用 `composer-paste.js`：图片字节转 `[Image](路径)`，文件插绝对路径；系统路径由 `clipboard:file-paths` 按 basename/顺序对齐，失败提示，不插错误文件路径。
 - 角色入口在输入条箭头，非 default 显示角色名，随下一次发送/编辑的 role 参数持久化。
 - 输入条右侧齿轮与时钟都打开 `SessionSettingsDialog`（`chat-modal` 外壳、左侧菜单 + 右侧内容）：会话能力（Tools / Skills / MCP 三页签复选列表，逐项切换）/ 自动压缩（数值项带 −/+/↺，标出「默认 x」）/ 定时任务（`LoopPanel`，与 CLI `/loop` 同一套语义）。齿轮开在会话能力、时钟直接开在定时任务。数据来自 host 的 `mica/capabilities/get`、`mica/autoCompact/get`，提交走对应 set。能力开关运行中只读，压缩与定时任务随时可改；同一会话的其他窗口经 `mica/capabilities/updated` / `mica/autoCompact/overrideUpdated` 同步。
+- 顶栏「会话笔记」图标（`SessionNotesDialog`）打开与会话共享的 markdown 文档：`ModalShell` 外壳 + 独立 Monaco 实例（模型 URI `inmemory://mica-session-notes/<nodeId>`，随弹窗销毁），输入 700ms 防抖保存，不设手动保存按钮。面板只是 `mica/notes/*` 的前端——模型用 `SessionNotes` 工具写同一份内容，因此不看笔记也不能在面板里重新发明一套存储。运行时改笔记（跑完一轮）时，编辑器没有焦点才覆盖正文，避免打断正在输入的用户。
 - 双击用户消息就地编辑，仅空闲且非空时提交；经 `chat:edit-message` 调截断重跑，失败保留编辑文本并 notice。
 - 引用按钮经 `mica-common/chatQuote.ts` 插入围栏文本，展示从草稿反推，删除只删对应块，发送与存储不设特殊协议。
 

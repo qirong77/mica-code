@@ -11,8 +11,9 @@ import {
   listBackgroundTasks,
   waitForBackgroundSpawn,
 } from '../ToolRunShellBackground.js';
+import { ToolBackgroundStart } from '../ToolBackgroundStart.js';
 import { ToolBackgroundTasks } from '../ToolBackgroundTasks.js';
-import { ToolReadTaskOutput } from '../ToolReadTaskOutput.js';
+import { ToolBackgroundRead } from '../ToolBackgroundRead.js';
 import { ToolKillTask } from '../ToolKillTask.js';
 
 function bunEval(script: string): string {
@@ -137,15 +138,12 @@ describe('ToolRunShell', () => {
   });
 
   it('starts background commands with pid/cwd metadata and an output file header', async () => {
-    const tool = new ToolRunShell();
-    const readTaskOutput = new ToolReadTaskOutput();
+    const tool = new ToolBackgroundStart();
+    const readTaskOutput = new ToolBackgroundRead();
     const cwd = process.cwd();
 
     const result = await tool.execute(
-      {
-        command: bunEval("console.log('background ok')"),
-        run_in_background: true,
-      },
+      { command: bunEval("console.log('background ok')") },
       { context: { agent: { taskOwnerId: 'test-agent-owner' } } },
     );
     const outputPath = parseOutputPath(result);
@@ -159,7 +157,7 @@ describe('ToolRunShell', () => {
       expect(listBackgroundTasks({ status: 'all' }).find((task) => task.id === taskId)?.agent_owner_id).toBe(
         'test-agent-owner',
       );
-      expect(result).toContain(`查看输出: read_task_output(task_id="${taskId}")`);
+      expect(result).toContain(`查看输出: background_tasks_read(task_id="${taskId}")`);
       expect(result).toContain(`终止任务: background_tasks_kill(task_id="${taskId}")`);
 
       const content = await waitForFileContains(outputPath, '[mica background task exited]');
@@ -218,14 +216,13 @@ describe('ToolRunShell', () => {
   });
 
   it('lists, reads, and kills background tasks by id', async () => {
-    const runShell = new ToolRunShell();
+    const startTask = new ToolBackgroundStart();
     const listTasks = new ToolBackgroundTasks();
-    const readTaskOutput = new ToolReadTaskOutput();
+    const readTaskOutput = new ToolBackgroundRead();
     const killTask = new ToolKillTask();
 
-    const result = await runShell.execute({
+    const result = await startTask.execute({
       command: bunEval("console.log('ready'); setInterval(() => console.log('tick'), 200)"),
-      run_in_background: true,
     });
     const outputPath = parseOutputPath(result);
     const taskId = parseTaskId(result);

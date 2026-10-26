@@ -31,6 +31,16 @@ export type ToolSafetyOptions = {
 /** 目录里只有「内置」与「MCP」两类：插件在会话期注册的工具同样是产品内置能力。 */
 export type ToolSource = 'builtin' | 'mcp';
 
+export type ToolScheduleOptions = {
+  /**
+   * 执行期只是等待外部条件（后台任务、进程、端口、终端输出…）的工具。调度器会立刻
+   * 启动它，让它与同一条消息里其余工具调用重叠，等其余调用全部完成后再回收结果——
+   * 否则模型「一边等测试、一边改文档」会被整条消息的串行语义挡住。只给 `wait_for` /
+   * `pty_wait` 这类纯等待工具声明。
+   */
+  overlappable?: boolean;
+};
+
 export abstract class MicaTool {
   name: string;
   description: string;
@@ -38,14 +48,21 @@ export abstract class MicaTool {
   readOnly: boolean;
   source: ToolSource;
   mcpServer?: string;
+  overlappable: boolean;
 
-  constructor(name: string, description: string, input_schema: ToolInputSchema, options: ToolSafetyOptions = {}) {
+  constructor(
+    name: string,
+    description: string,
+    input_schema: ToolInputSchema,
+    options: ToolSafetyOptions & ToolScheduleOptions = {},
+  ) {
     this.name = name;
     this.description = description;
     this.input_schema = input_schema;
     this.readOnly = options.readOnly ?? false;
     this.source = options.source ?? 'builtin';
     this.mcpServer = options.mcpServer;
+    this.overlappable = options.overlappable ?? false;
   }
 
   validateInput(input: unknown): ValidationResult {

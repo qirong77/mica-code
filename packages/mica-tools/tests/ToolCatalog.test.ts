@@ -19,24 +19,21 @@ describe('tool catalog', () => {
 
   it('groups the background task family by the shared prefix', () => {
     const byName = new Map(getToolCatalog().map((tool) => [tool.name, tool]));
-    expect(byName.get('background_tasks_list')?.group).toEqual({
-      key: 'background_tasks',
-      label: '后台任务',
-    });
-    expect(byName.get('background_tasks_kill')?.group).toEqual({
-      key: 'background_tasks',
-      label: '后台任务',
-    });
-    // 读输出没有同一个前缀，不并入这一族
-    expect(byName.get('read_task_output')?.group).toBeNull();
+    for (const name of [
+      'background_tasks_start',
+      'background_tasks_list',
+      'background_tasks_read',
+      'background_tasks_kill',
+    ]) {
+      expect(byName.get(name)?.group, name).toEqual({ key: 'background_tasks', label: '后台任务' });
+    }
   });
 
   it('stays flat for prefixes that are not declared as a family', () => {
-    // read_file / read_image / read_task_output 前缀相同但用途不同，不能自动成组
+    // read_file / read_image 前缀相同但用途不同，不能自动成组
     const byName = new Map(getToolCatalog().map((tool) => [tool.name, tool]));
     expect(byName.get('read_file')?.group).toBeNull();
     expect(byName.get('read_image')?.group).toBeNull();
-    expect(byName.get('read_task_output')?.group).toBeNull();
     expect(byName.get('web_search')?.group).toBeNull();
   });
 

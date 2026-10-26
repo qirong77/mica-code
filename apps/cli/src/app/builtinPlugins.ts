@@ -21,6 +21,7 @@ import {
   setupMessageQueue,
   setupMicaCodeAppNotify,
   setupSessionAutonomy,
+  setupSessionNotes,
   TodoPlugin,
 } from '@packages/mica-builtin-commands/index.js';
 
@@ -40,6 +41,7 @@ export function useBuiltinPlugins(
     .use(createBuiltinFilePlugin('mcp', 'MCP', setupMcp))
     .use(createBuiltinFilePlugin('command-memory', 'Command Memory', setupCommandMemory))
     .use(createBuiltinFilePlugin('session-autonomy', 'Session Autonomy', setupSessionAutonomy))
+    .use(createBuiltinFilePlugin('session-notes', 'Session Notes', setupSessionNotes))
     .use(new TodoPlugin())
     .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
   app.use({

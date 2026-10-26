@@ -11,8 +11,9 @@ import { ToolWebSearch } from './ToolWebSearch.js';
 import { ToolSkill } from './ToolSkill.js';
 import { MicaTool } from './MicaTool.js';
 import { ToolRunShell } from './ToolRunShell.js';
+import { ToolBackgroundStart } from './ToolBackgroundStart.js';
 import { ToolBackgroundTasks } from './ToolBackgroundTasks.js';
-import { ToolReadTaskOutput } from './ToolReadTaskOutput.js';
+import { ToolBackgroundRead } from './ToolBackgroundRead.js';
 import { ToolKillTask } from './ToolKillTask.js';
 import { ToolReadImage } from './ToolReadImage.js';
 import { ToolWaitFor } from './ToolWaitFor.js';
@@ -87,8 +88,9 @@ const builtinTools: MicaTool[] = [
   new ToolListFiles(),
   new ToolGrepSearch(),
   new ToolRunShell(),
+  new ToolBackgroundStart(),
   new ToolBackgroundTasks(),
-  new ToolReadTaskOutput(),
+  new ToolBackgroundRead(),
   new ToolKillTask(),
   new ToolWaitFor(),
   new ToolWebFetch(),
@@ -219,12 +221,13 @@ function orphanDescriptorNames(registered: Set<string>): string[] {
 /**
  * 识别工具族：前缀在 `TOOL_FAMILY_LABELS` 里声明过、且当前确实有 ≥2 个成员。
  *
- * 不按「前缀相同就算一族」自动推断：`read_file` / `read_image` / `read_task_output`
- * 前缀相同却分属不同用途，自动成组后按组开关会连带关掉不相干的能力。所以只认显式
+ * 不按「前缀相同就算一族」自动推断：`read_file` / `read_image` 前缀相同却分属
+ * 不同用途，自动成组后按组开关会连带关掉不相干的能力。所以只认显式
  * 声明的族；其余工具（含 `run_shell`、`apply_patch`、`Agent`）一律独立成行。
  *
- * 成员判定是「等于前缀」或「以前缀加下划线开头」，因此 `background_tasks_list` 与
- * `background_tasks_kill` 归为同一族。前缀本身可以含下划线，长的优先匹配。
+ * 成员判定是「等于前缀」或「以前缀加下划线开头」，因此 `background_tasks_start` /
+ * `_list` / `_read` / `_kill` 同属一族（启动、查询、读输出、终止是同一件事的四个动作，
+ * 整族开关才符合直觉）。前缀本身可以含下划线，长的优先匹配。
  */
 function toolFamilies(names: string[]): Map<string, ToolGroupEntry> {
   const families = new Map<string, ToolGroupEntry>();
@@ -328,6 +331,12 @@ export function getToolDisplayText(name: string, input: ToolInput): string {
 export function isToolReadOnly(name: string): boolean {
   const tool = findTool(name);
   return tool?.readOnly === true;
+}
+
+/** 纯等待工具：可以与同一条消息里其余工具调用重叠执行（见 `ToolScheduleOptions`）。 */
+export function isToolOverlappable(name: string): boolean {
+  const tool = findTool(name);
+  return tool?.overlappable === true;
 }
 
 export function isToolPrimaryAgentOnly(name: string): boolean {

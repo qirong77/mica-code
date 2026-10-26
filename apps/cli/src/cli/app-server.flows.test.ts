@@ -55,8 +55,8 @@ function createMockProvider() {
     toolFileContent: 'hello from mock',
     /** Second tool call content (kept separate so the two calls are distinct). */
     toolFileContent2: 'hello from mock (second call)',
-    /** `shell` mode: the command the mock asks `run_shell` to start in the
-     * background, so the tests can drive `mica/backgroundTasks/*`.
+    /** `shell` mode: the command the mock asks `background_tasks_start` to
+     * start, so the tests can drive `mica/backgroundTasks/*`.
      * `/bin/echo` instead of the shell builtin: bash block-buffers builtin output
      * when stdout is a file, so on Linux the first lines only land once `sleep`
      * returns — the external binary writes to the fd immediately. */
@@ -219,14 +219,11 @@ function createMockProvider() {
           if (state.delayBeforeTextMs > 0) setTimeout(finishTool, state.delayBeforeTextMs);
           else finishTool();
         };
-        /** `shell` mode: one background `run_shell` call, answered immediately —
+        /** `shell` mode: one `background_tasks_start` call, answered immediately —
          * the task it starts outlives this response (and the turn), which is
          * exactly the state `mica/backgroundTasks/*` has to reach. */
         const emitShellCallEvents = () => {
-          const argumentsText = JSON.stringify({
-            command: state.shellCommand,
-            run_in_background: true,
-          });
+          const argumentsText = JSON.stringify({ command: state.shellCommand });
           emit({ type: 'response.created', response: { id: 'resp_3', object: 'response' } });
           emit({ type: 'response.in_progress', response: { id: 'resp_3', object: 'response' } });
           emit({
@@ -237,7 +234,7 @@ function createMockProvider() {
               type: 'function_call',
               status: 'in_progress',
               call_id: 'call_shell',
-              name: 'run_shell',
+              name: 'background_tasks_start',
               arguments: '',
             },
           });
@@ -255,7 +252,7 @@ function createMockProvider() {
               type: 'function_call',
               status: 'completed',
               call_id: 'call_shell',
-              name: 'run_shell',
+              name: 'background_tasks_start',
               arguments: argumentsText,
             },
           });
@@ -1926,6 +1923,70 @@ suite('mica app-server real-user flows (mock provider)', () => {
       snapshot?: { autoCompactOverride?: unknown };
     };
     expect(session.snapshot?.autoCompactOverride).toEqual({ quickLimit: 1 });
+  });
+
+  itE2E('session notes round-trip through the protocol, the session file and the next prompt', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('session-notes');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    // 工具必须在这个进程里注册好，否则模型根本看不到有什么可写。
+    await send(host, 99, 'mica/capabilities/get', {});
+    const capabilities = await waitFor(host, (m) => m.id === 99, 'capabilities/get (notes)');
+    expect(
+      (capabilities.result as { tools?: { name: string }[] }).tools?.map((tool) => tool.name),
+    ).toContain('SessionNotes');
+
+    // 草稿会话（还没有 session id）就能读写：面板不必等第一条消息才可用。
+    await send(host, 1, 'mica/notes/get', {});
+    const empty = await waitFor(host, (m) => m.id === 1, 'notes/get (empty)');
+    expect(empty.result).toMatchObject({ content: '' });
+
+    await send(host, 2, 'mica/notes/set', { content: '# 决策\n\n- 用 Bun 跑测试  \n\n' });
+    const saved = await waitFor(host, (m) => m.id === 2, 'notes/set');
+    // 归一化：行尾空白和末尾空行不落盘，否则每次打开都像「被改过」。
+    expect(saved.result).toMatchObject({ content: '# 决策\n\n- 用 Bun 跑测试' });
+    await waitFor(host, (m) => m.method === 'mica/notes/updated', 'notes/updated');
+
+    // 下一轮请求的 system prompt 末尾必须带上它 —— 这是「压缩不掉」的落点。
+    await send(host, 3, 'turn/start', { threadId: '', input: [{ type: 'text', text: '开始干活' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'notes turn started', 30_000);
+    await waitFor(
+      host,
+      turnCompleted((started.params?.turn as { id?: string }).id!),
+      'notes turn completed',
+      30_000,
+    );
+    const instructions = mock!.state.requests[0]?.instructions ?? '';
+    expect(instructions).toContain('<session-notes>');
+    expect(instructions).toContain('- 用 Bun 跑测试');
+    expect(instructions.trimEnd().endsWith('</session-notes>')).toBe(true);
+
+    // 落在会话快照里、不在 messages 里：所以 compact 改不到它。
+    const sessionFile = readdirSync(join(host.home, 'sessions')).filter((f) => f.endsWith('.json'))[0]!;
+    const sessionId = sessionFile.replace(/\.json$/, '');
+    const persisted = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFile), 'utf8')) as {
+      snapshot?: { notes?: string; messages?: unknown[] };
+    };
+    expect(persisted.snapshot?.notes).toBe('# 决策\n\n- 用 Bun 跑测试');
+    expect(JSON.stringify(persisted.snapshot?.messages ?? [])).not.toContain('<session-notes>');
+
+    // 换一个宿主重开同一会话：笔记跟着回来（resume 走的是快照，不是配置文件）。
+    // 同一个 MICA_HOME 起第二个宿主：验证的是「从会话文件恢复」，不是换了个家目录
+    const reopened = spawnHost('session-notes-reopen', [], host.home);
+    hosts.push(reopened);
+    await waitFor(reopened, hostReady, 'reopened host ready or error', 30_000);
+    await send(reopened, 1, 'thread/resume', { threadId: sessionId });
+    const resumed = await waitFor(reopened, (m) => m.id === 1, 'thread/resume (notes)');
+    expect(resumed.error, JSON.stringify(resumed.error)).toBeUndefined();
+    await send(reopened, 2, 'mica/notes/get', {});
+    const restored = await waitFor(reopened, (m) => m.id === 2, 'notes/get (reopened)');
+    expect(restored.result).toMatchObject({ content: '# 决策\n\n- 用 Bun 跑测试' });
   });
 
   itE2E('rapid second send while busy is rejected with an error, host stays usable', async () => {

@@ -822,7 +822,7 @@ function WaitTasksDock({ tasks, now = Date.now(), onOpen }) {
             >
               <span className="chat-task-kind">⏳ {waitTaskKindLabel(task.kind)}</span>
               <span className="chat-task-status chat-task-status-waiting">
-                {task.status === 'parked' ? '已登记' : '等待中'}
+                等待中
               </span>
               <span className="chat-task-runtime">已等 {age}</span>
               <span className="chat-task-type">{task.id}</span>
@@ -1293,7 +1293,7 @@ function WaitTaskModal({ task, now, onClose }) {
       meta={
         <ModalMeta
           items={[
-            task.status === 'parked' ? '已登记' : '等待中',
+            '等待中',
             elapsed != null ? (
               <span className="tabular-nums">已等 {formatLogElapsed(elapsed)}</span>
             ) : null,
@@ -1312,16 +1312,13 @@ function WaitTaskModal({ task, now, onClose }) {
           <div className="chat-modal-prose">{textOf(task.reason)}</div>
         </ModalSection>
       )}
-      <ModalSection title={task.status === 'parked' ? '最近一次观察' : '最近一次检查'}>
+      <ModalSection title="最近一次检查">
         {detail ? (
           <pre className="chat-modal-pre">{textOf(detail)}</pre>
         ) : (
           <div className="chat-modal-note">（还没有观测结果）</div>
         )}
       </ModalSection>
-      {task.status === 'parked' && (
-        <div className="chat-modal-note">这条等待是后台登记的，条件没人推进时不会自己结束。</div>
-      )}
     </TaskDetailModal>
   )
 }

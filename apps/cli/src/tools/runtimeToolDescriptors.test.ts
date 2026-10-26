@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { RUNTIME_TOOL_DESCRIPTORS } from '@packages/mica-tools/runtimeToolDescriptors.js';
 import { TodoWriteTool } from '@packages/mica-builtin-commands/plugins/todo/TodoTool.js';
+import { SessionNotesTool } from '@packages/mica-builtin-commands/plugins/notes/NotesTool.js';
 import { ToolSessionPeers } from '@packages/mica-builtin-commands/plugins/session-autonomy/SessionAutonomyTools.js';
 import { ToolAgent } from './ToolAgent.js';
 
@@ -12,6 +13,7 @@ import { ToolAgent } from './ToolAgent.js';
 const FACTORIES: Record<string, () => { name: string }> = {
   Agent: () => new ToolAgent({} as never),
   TodoWrite: () => new TodoWriteTool(),
+  SessionNotes: () => new SessionNotesTool(),
   session_peers: () => new ToolSessionPeers({ services: {} as never }),
 };
 

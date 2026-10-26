@@ -18,6 +18,7 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconMenu2,
   IconMessage,
+  IconNotebook,
   IconPlus,
   IconRocket,
   IconServer,
@@ -32,6 +33,7 @@ import { ChatView } from './ChatView'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { ServerCard, ServerCardPopover } from './ServerCard'
 import { SessionTree } from './SessionTree'
+import { SessionNotesDialog } from './SessionNotesDialog'
 import TerminalKeyBar from './TerminalKeyBar'
 import { currentServerUrl, isElectronShell, openServerTarget, serverLabel } from './servers'
 import { detachedFilesUrl, readAppUrl, sessionShareUrl, urlWithState } from './app-url'
@@ -774,6 +776,8 @@ export default function App() {
   // 软键盘弹起时让根容器跟着可见区缩，否则底部输入条/终端键栏会被键盘盖住
   useVisualViewportHeight()
   const [sessionsOpen, setSessionsOpen] = useState(false)
+  // 会话笔记弹窗：按当前会话打开，内容存会话快照（不进对话历史）
+  const [notesOpen, setNotesOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => storedLayout().sidebarCollapsed === true
   )
@@ -2521,6 +2525,25 @@ export default function App() {
             )}
             {/* 顶栏右侧：受控浏览器与终端控制的窗口图标（各按窗口/会话一个，没有就不出现）、终端面板开关、文件视图开关。 */}
             <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
+              {/* 会话笔记：本会话的用户/模型共同维护的 markdown，存在会话快照里，
+                  所以压缩不会把它冲掉。窗口类图标按窗口出现，这个是按会话出现。 */}
+              {!shareView && activeNode && (
+                <button
+                  type="button"
+                  title="会话笔记（不会被上下文压缩）"
+                  aria-label="会话笔记"
+                  aria-haspopup="dialog"
+                  aria-expanded={notesOpen}
+                  className={`grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
+                    notesOpen
+                      ? 'bg-white/10 text-white hover:bg-white/15'
+                      : 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                  }`}
+                  onClick={() => setNotesOpen((open) => !open)}
+                >
+                  <IconNotebook size={14} />
+                </button>
+              )}
               {activeTerminals.map((terminal) => {
                 const owned = isTerminalOwnedByNode(terminal, activeNode)
                 const badge = terminalIconBadge(activeTerminals, terminal)
@@ -2617,6 +2640,17 @@ export default function App() {
               </button>
             </div>
           </header>
+          {/* 笔记弹窗挂在 App 层：入口在顶栏，弹窗本身按当前会话读写，
+              与对话区的滚动/挂载状态无关（切到 Files / Stats 也能开着）。 */}
+          {notesOpen && activeNode && (
+            <SessionNotesDialog
+              nodeId={activeNode.id}
+              sessionId={activeNode.sessionId || activeSessionId || null}
+              cwd={activeNode.cwd}
+              running={!!notifications.states?.[activeNode.id]?.running}
+              onClose={() => setNotesOpen(false)}
+            />
+          )}
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <Suspense fallback={null}>
               <StatsView visible={view === 'stats'} />

@@ -21,6 +21,14 @@ import {
 } from './git.js';
 import { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';
 import { splitAutolinkPunctuation } from './autolink.js';
+import {
+  MAX_SESSION_NOTES_LENGTH,
+  SESSION_NOTES_TAG,
+  appendSessionNotes,
+  formatSessionNotesSection,
+  normalizeSessionNotes,
+  sessionNotesSummary,
+} from './sessionNotes.js';
 import { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 import {
   CAPABILITY_SELECTION_VERSION,
@@ -59,6 +67,12 @@ export const micaCommon = {
   comparableText,
   stripMediaPlaceholders,
   splitAutolinkPunctuation,
+  MAX_SESSION_NOTES_LENGTH,
+  SESSION_NOTES_TAG,
+  appendSessionNotes,
+  formatSessionNotesSection,
+  normalizeSessionNotes,
+  sessionNotesSummary,
   BTW_STATE_VERSION,
   btwStatePath,
   deleteBtwState,
@@ -97,6 +111,14 @@ export type { ProcessedImage, SupportedImageMediaType } from './image.js';
 export { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';
 export { splitAutolinkPunctuation } from './autolink.js';
 export type { AutolinkPunctuationSplit } from './autolink.js';
+export {
+  MAX_SESSION_NOTES_LENGTH,
+  SESSION_NOTES_TAG,
+  appendSessionNotes,
+  formatSessionNotesSection,
+  normalizeSessionNotes,
+  sessionNotesSummary,
+} from './sessionNotes.js';
 export { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 export type { StoredBtwThread } from './btwState.js';
 export {

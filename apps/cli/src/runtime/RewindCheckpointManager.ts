@@ -946,6 +946,9 @@ function cloneSnapshot(snapshot: AgentRuntimeSnapshot): AgentRuntimeSnapshot {
     model: snapshot.model,
     effort: snapshot.effort,
     role: snapshot.role,
+    // 笔记必须一起克隆：rewind 的恢复走 loadSnapshot，缺字段会被归一化成空串，
+    // 等于「回退一次就把用户的笔记清空了」。
+    notes: snapshot.notes,
     messages: cloneJson(snapshot.messages),
     usageHistory: cloneJson(snapshot.usageHistory),
     lastUsage: cloneJson(snapshot.lastUsage),

@@ -10,7 +10,8 @@ export class ToolPtyWait extends MicaTool {
     super(
       'pty_wait',
       '等待 PTY 会话满足条件：pattern 匹配输出、进程退出、或 idle_ms 内无新输出（静默）。' +
-        '返回终止原因与当前输出尾部。用于等待程序启动完成或一轮交互结束。',
+        '返回终止原因与当前输出尾部。用于等待程序启动完成或一轮交互结束。' +
+        '等待期间不占住整条消息：同一条消息里的其他工具调用会与它同时执行，结果最后一起返回。',
       {
         type: 'object' as const,
         properties: {
@@ -25,6 +26,7 @@ export class ToolPtyWait extends MicaTool {
         },
         required: ['session_id'],
       },
+      { overlappable: true },
     );
   }
 

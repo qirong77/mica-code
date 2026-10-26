@@ -40,10 +40,14 @@ export type CommandAgent = {
   readonly capabilitySelection?: CapabilitySelection;
   /** 本会话的自动压缩覆盖（只含显式改过的键）；空对象表示完全跟随默认。 */
   readonly autoCompactOverrideSelection?: AutoCompactOverride;
+  /** 本会话的笔记正文（markdown）；未写过为空串。 */
+  readonly sessionNotes?: string;
   reloadConfig(resetClient?: boolean): void;
   setRole(roleName: string): void;
   setCapabilities?(selection: CapabilitySelection): CapabilitySelection;
   setAutoCompactOverride?(override: AutoCompactOverride): AutoCompactOverride;
+  /** 覆盖本会话笔记；返回归一化后的正文。运行中允许调用。 */
+  setSessionNotes?(notes: string): string;
   buildSystemPrompt(): string;
   createSubAgent(options?: { systemPrompt?: string | (() => string); [key: string]: unknown }): {
     /**

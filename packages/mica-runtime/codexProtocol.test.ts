@@ -4,7 +4,9 @@ import {
   CODEX_ERROR_METHOD_NOT_FOUND,
   MICA_AUTO_COMPACT_NOTIFICATIONS,
   MICA_BTW_NOTIFICATIONS,
+  MICA_CAPABILITY_NOTIFICATIONS,
   MICA_METHODS,
+  MICA_NOTES_NOTIFICATIONS,
   encodeCodexError,
   encodeCodexNotification,
   encodeCodexResponse,
@@ -34,13 +36,28 @@ describe('codex protocol framing', () => {
       btwThreads: 'mica/btw/threads',
       btwClose: 'mica/btw/close',
       renameSession: 'mica/session/rename',
+      capabilitiesGet: 'mica/capabilities/get',
+      capabilitiesSet: 'mica/capabilities/set',
+      autoCompactGet: 'mica/autoCompact/get',
+      autoCompactSet: 'mica/autoCompact/set',
+      notesGet: 'mica/notes/get',
+      notesSet: 'mica/notes/set',
     });
   });
 
   // Same reason as MICA_METHODS: the desktop host matches these literal strings,
   // so renaming one side silently drops every automatic-compaction counter.
   it('pins the Mica automatic compaction notification name', () => {
-    expect(MICA_AUTO_COMPACT_NOTIFICATIONS).toEqual({ updated: 'mica/autoCompact/updated' });
+    expect(MICA_AUTO_COMPACT_NOTIFICATIONS).toEqual({
+      updated: 'mica/autoCompact/updated',
+      overrideUpdated: 'mica/autoCompact/overrideUpdated',
+    });
+  });
+
+  // 会话能力开关与笔记面板都靠这几条通知刷新：改名等于面板静默不更新。
+  it('pins the Mica capability and notes notification names', () => {
+    expect(MICA_CAPABILITY_NOTIFICATIONS).toEqual({ updated: 'mica/capabilities/updated' });
+    expect(MICA_NOTES_NOTIFICATIONS).toEqual({ updated: 'mica/notes/updated' });
   });
 
   // Same reason: the desktop host matches this literal string to route a By The Way

@@ -19,11 +19,12 @@
 - `apply_patch`：应用文件补丁。
 - `list_files`：按 glob 模式列出文件。
 - `grep_search`：在文件中搜索正则。
-- `run_shell`：执行 shell 命令，可启动后台任务。
-- `background_tasks_list`：列出后台任务。
-- `read_task_output`：读取后台任务输出。
-- `background_tasks_kill`：终止后台任务。
-- `wait_for`：阻塞等待外部事件/条件成立（后台任务结束、进程退出、文件出现或变化、命令/HTTP/端口就绪、固定时长），超时返回可续等的 `wait_id`；可选 `reason` 说明为什么等（展示在客户端「等待中」列表）。
+- `run_shell`：前台执行 shell 命令并等它结束，严格超时（默认 30s、最长 120s）。
+- `background_tasks_start`：后台启动 shell 命令，立刻返回 `task_id`，不等待结果。
+- `background_tasks_list`：列出后台任务（id / 状态 / pid / 时长 / 输出大小）。
+- `background_tasks_read`：读取后台任务输出与状态。
+- `background_tasks_kill`：终止仍在运行的后台任务。
+- `wait_for`：等外部条件成立（后台任务结束、进程退出、文件出现或变化、命令/HTTP/端口就绪、固定时长），超时返回可续等的 `wait_id`；可选 `reason` 说明为什么等（展示在客户端「等待中」列表）。它只观察、不启动任何东西，且可与同一条消息里其余调用并发执行。
 - `pty_spawn`：在 PTY 中启动交互式终端程序。
 - `pty_send`：向 PTY 会话发送文本或命名按键。
 - `pty_read`：读取 PTY 会话输出。
@@ -33,7 +34,11 @@
 - `web_search`：通过自托管 SearXNG 实例（`searxngUrl` / `SEARXNG_URL`）搜索网络信息。
 - `Skill`：读取并调用本地 skill 指令。
 
-PTY 工具用于驱动交互式 TUI 程序做端到端验证。node-pty 的 native binding 在 Bun 进程内不工作，因此 PTY 会话由懒启动的 Node 子进程承载（`packages/mica-pty/src/server.mjs`），通过 JSONL over stdio 通信；工具实现位于 `packages/mica-tools/pty/`，首次调用时动态加载 `packages/mica-pty/src/manager.js`（不经过 `mica-pty/index.js`，避免 Bun 进程加载 node-pty）。node-pty 缺失或 Node 不可用时工具降级报错，不影响其他功能。
+PTY 工具用于驱动交互式 TUI 程序做端到端验证。
+
+「启动 / 等待 / 查看」是三个独立动作：`run_shell` 只跑前台命令；需要后台时用
+`background_tasks_start` 启动，要结果时用 `wait_for(kind="task")` 等、用
+`background_tasks_read` 读。启动方式与采集方式分开，模型不必在一个参数里切换语义。node-pty 的 native binding 在 Bun 进程内不工作，因此 PTY 会话由懒启动的 Node 子进程承载（`packages/mica-pty/src/server.mjs`），通过 JSONL over stdio 通信；工具实现位于 `packages/mica-tools/pty/`，首次调用时动态加载 `packages/mica-pty/src/manager.js`（不经过 `mica-pty/index.js`，避免 Bun 进程加载 node-pty）。node-pty 缺失或 Node 不可用时工具降级报错，不影响其他功能。
 
 ## 使用入口
 

@@ -6,7 +6,7 @@ import {
   getBackgroundTaskOutputSize,
   listBackgroundTasks,
   readBackgroundTaskOutput,
-  ToolRunShell,
+  ToolBackgroundStart,
   type BackgroundTaskMeta,
 } from '@packages/mica-tools/index.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../../agent/AgentRuntime.js';
@@ -33,7 +33,7 @@ export class MicaUiRuntimeBridge {
   private readonly bridgeDisposers: Array<Disposable | (() => void) | undefined> = [];
   private backgroundTaskSyncTimer: ReturnType<typeof setInterval> | null = null;
   private readonly bashTaskSessions = new Map<string, string>();
-  private readonly bashShell = new ToolRunShell();
+  private readonly backgroundShell = new ToolBackgroundStart();
 
   constructor(
     private agent: AgentRuntime,
@@ -218,8 +218,8 @@ export class MicaUiRuntimeBridge {
       this.upsertBashNotice(session.id, '命令不能为空。', '! bash', 'error');
       return;
     }
-    const result = await this.bashShell.execute(
-      { command, cwd: process.cwd(), run_in_background: true },
+    const result = await this.backgroundShell.execute(
+      { command, cwd: process.cwd() },
       { context: { agent: session.agent } },
     );
     const taskId = result.match(/id: ([a-f0-9]{12})/)?.[1];

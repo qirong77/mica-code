@@ -108,6 +108,9 @@ export { default as setupFileMention } from './plugins/file-mention.js';
 export { default as setupMicaCodeAppNotify } from './plugins/mica-code-app-notify.js';
 export { default as setupSessionAutonomy } from './plugins/session-autonomy/SessionAutonomyPlugin.js';
 export { TodoPlugin } from './plugins/todo/TodoPlugin.js';
+export { default as setupSessionNotes } from './plugins/notes/NotesPlugin.js';
+export { SessionNotesTool, parseNotesInput } from './plugins/notes/NotesTool.js';
+export type { NotesAction } from './plugins/notes/NotesTool.js';
 
 // 启动扩展（不走 PluginManager，由各进程入口直接装配）
 export { default as setupValidateConfig } from './startup/validate-config.js';

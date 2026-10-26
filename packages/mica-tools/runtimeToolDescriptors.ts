@@ -131,4 +131,25 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
       },
     ],
   },
+  {
+    name: "SessionNotes",
+    description: "Read or update this session's notes: a markdown scratchpad shared with the user and shown in the desktop notes panel. The notes live outside the conversation history, so they are never lost to context compaction and are re-attached to the system prompt at the start of every turn. Keep there what must survive a compact: decisions and their reasons, user constraints and preferences, paths/commands that took effort to find, and open questions. Read before a large rewrite, append instead of replacing when you are only adding, and keep it deduplicated and organized under headings rather than a chronological dump. The user edits the same document in the UI, so their edits are authoritative — do not copy the notes back into the chat, the user can already see them.",
+    readOnly: false,
+    parameters: [
+      {
+        name: "action",
+        type: "string",
+        required: true,
+        description:
+          "read returns the current notes; append adds content below what is already there; replace overwrites the whole document.",
+      },
+      {
+        name: "content",
+        type: "string",
+        required: false,
+        description:
+          "Markdown to write. Required for append and replace, ignored for read. At most 20000 characters in total.",
+      },
+    ],
+  },
 ];

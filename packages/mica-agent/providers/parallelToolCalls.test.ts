@@ -119,6 +119,50 @@ describe('parallel provider tool calls', () => {
     ]);
   });
 
+  it('overlaps an overlappable wait with the calls that follow it', async () => {
+    const events: string[] = [];
+    // 两个调用都要等对方起来才放行：串行执行必然死锁，只有重叠才能跑完。
+    const gate = createGate(2);
+    registerTool(new ScriptedTool('probe_wait', false, { events, gate, overlappable: true, output: 'waited' }));
+    registerTool(new ScriptedTool('probe_write', false, { events, gate, output: 'written' }));
+
+    let secondRequest: { messages: Array<{ role: string; tool_call_id?: string; content?: unknown }> } | undefined;
+    openaiMocks.chatCreate
+      .mockResolvedValueOnce(
+        streamOf({
+          model: 'test-model',
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: 'call-wait', function: { name: 'probe_wait', arguments: '{}' } },
+                  { index: 1, id: 'call-write', function: { name: 'probe_write', arguments: '{}' } },
+                ],
+              },
+            },
+          ],
+        }),
+      )
+      .mockImplementationOnce((request: unknown) => {
+        secondRequest = structuredClone(request) as never;
+        return Promise.resolve(streamOf({ model: 'test-model', choices: [{ delta: { content: 'done' } }] }));
+      });
+
+    const query = new ChatCompletionsClient(options('openai_chat_completions')).query('wait while writing');
+    const outcome = await Promise.race([query.then(() => 'completed'), delay(2_000).then(() => 'timeout')]);
+    gate.release();
+    expect(outcome).toBe('completed');
+    await query;
+
+    expect(events.slice(0, 2)).toEqual(['start:probe_wait', 'start:probe_write']);
+    expect(events.slice(2).sort()).toEqual(['finish:probe_wait', 'finish:probe_write']);
+    const toolMessages = (secondRequest?.messages ?? []).filter((message) => message.role === 'tool');
+    expect(toolMessages.map((message) => [message.tool_call_id, message.content])).toEqual([
+      ['call-wait', 'waited'],
+      ['call-write', 'written'],
+    ]);
+  });
+
   it('runs Agent calls concurrently even though the tool is not read-only', async () => {
     const events: string[] = [];
     const gate = createGate(2);
@@ -192,6 +236,7 @@ type ScriptedToolOptions = {
   events: string[];
   output?: string;
   gate?: Gate;
+  overlappable?: boolean;
 };
 
 class ScriptedTool extends MicaTool {
@@ -200,7 +245,7 @@ class ScriptedTool extends MicaTool {
     readOnly: boolean,
     private readonly script: ScriptedToolOptions,
   ) {
-    super(name, 'scripted test tool', { type: 'object', properties: {} }, { readOnly });
+    super(name, 'scripted test tool', { type: 'object', properties: {} }, { readOnly, overlappable: script.overlappable });
   }
 
   async execute(): Promise<string> {
