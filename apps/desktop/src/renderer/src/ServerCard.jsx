@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom'
 import { IconPencil, IconServer } from '@tabler/icons-react'
 import {
+  DEFAULT_SERVER_PORT,
   LOCAL_SERVER_URL,
   MAX_SERVER_NOTE_LENGTH,
   findServerEntry,
@@ -37,7 +38,7 @@ export function ServerCard({ current, onSwitch, onDismiss, width, className = ''
   const [noteTarget, setNoteTarget] = useState('')
   const [noteDraft, setNoteDraft] = useState('')
   // 已经在回环地址上就说明人就在这台机器上，「本机」这个回程入口没有意义（页面可能跑在
-  // 非默认端口上，那时 127.0.0.1:8787 甚至不是当前这台）
+  // 非默认端口上，那时回环默认地址甚至不是当前这台）
   const showLocal = !isLoopbackServer(current)
   const rows = serverListRows(current, recent)
   const currentEntry = findServerEntry(current, recent)
@@ -182,7 +183,7 @@ export function ServerCard({ current, onSwitch, onDismiss, width, className = ''
         <input
           value={value}
           spellCheck={false}
-          placeholder="另一台机器的地址，如 192.168.1.5:8787"
+          placeholder={`另一台机器的地址，如 192.168.1.5:${DEFAULT_SERVER_PORT}`}
           className="h-8 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-xs text-white focus:border-white/30"
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {

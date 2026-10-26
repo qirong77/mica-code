@@ -19,6 +19,8 @@ import {
 // 用户按 `/` 是想浏览或按关键字挑一个，藏掉大半候选就只能靠记名字了。
 export const SKILL_COMPLETION_LIMIT = 200
 export const FILE_COMPLETION_LIMIT = MAX_FILE_MENTION_RESULTS
+// 插入文本里最多列出几个工具名：再长就只是把一屏工具清单塞进输入框。
+export const MAX_LISTED_TOOLS = 6
 // 与 CLI 一致：有查询时挡 100ms 的连续击键，空查询立即给出工作区文件（扫描结果在
 // host 侧按工作区缓存，所以这一下不会重新遍历目录）。
 export const FILE_COMPLETION_DEBOUNCE_MS = 100
@@ -51,7 +53,29 @@ export function completionMentionPath(path) {
 
 export function completionInsertText(item) {
   if (!item) return ''
-  return item.kind === 'skill' ? `/${item.name} ` : mentionText(item.path ?? item.name)
+  // skill 插入的是 SKILL.md 的绝对路径：桌面端不把 `/name` 当命令执行，发出去的
+  // `/name` 对模型只是一段没头没尾的文本，而路径能让它直接读到完整说明。
+  if (item.kind === 'skill') return item.path ? `${mentionPath(item.path)} ` : `/${item.name} `
+  if (item.kind === 'mcp') return mcpCompletionInsertText(item)
+  return mentionText(item.path ?? item.name)
+}
+
+/**
+ * 选中一个 MCP server 时插入的文本。
+ *
+ * 和 skill 不同，MCP 没有可读的文件，能用的是已经注册进会话的工具，所以直接把 server 与
+ * 工具名列出来——模型据此知道该调哪个，用户也不必自己记工具名。工具名未知（没探过、
+ * 或 stdio 尚未连接）时只留 server 名。
+ */
+export function mcpCompletionInsertText(item) {
+  if (!item) return ''
+  const name = String(item.name ?? '')
+  const tools = Array.isArray(item.tools)
+    ? item.tools.filter(Boolean).slice(0, MAX_LISTED_TOOLS)
+    : []
+  if (tools.length === 0) return `使用 MCP server「${name}」 `
+  const suffix = Number(item.tools?.length ?? 0) > tools.length ? ' 等' : ''
+  return `使用 MCP server「${name}」（工具：${tools.join('、')}${suffix}） `
 }
 
 /** host 的 mention 候选 → 浮层选项：`label` 是文件名，`description` 是工作区相对路径。 */
@@ -114,20 +138,81 @@ export function rankCompletions(items, query, limit = SKILL_COMPLETION_LIMIT) {
 /** host 的 skill 候选 → 浮层选项：名称带 `/` 前缀，名称与说明里命中查询的字符都标出来。 */
 export function skillCompletionOptions(items, query, limit = SKILL_COMPLETION_LIMIT) {
   const skills = Array.isArray(items) ? items : []
-  return rankCompletions(skills, query, limit).map((skill) => {
-    const name = String(skill?.name ?? '')
-    const description = String(skill?.description ?? '')
-    return {
-      key: `skill:${name}`,
+  return rankCompletions(skills, query, limit).map((skill) => skillOption(skill, query))
+}
+
+/**
+ * `/` 浮层的完整候选：skill 与 MCP server 混在一起排序。
+ *
+ * 两边都是「往输入框里插一段指向某个能力的文本」，用户按 `/` 时并不想先决定是哪一类，
+ * 所以不分组、按同一套评分（完全匹配 → 前缀 → 包含 → 只在说明里命中）排。
+ */
+export function slashCompletionOptions(
+  { skills, mcpServers } = {},
+  query,
+  limit = SKILL_COMPLETION_LIMIT
+) {
+  const entries = [
+    ...(Array.isArray(skills) ? skills : []).map((skill) => ({
       kind: 'skill',
-      name,
-      label: `/${name}`,
-      description,
-      // label 前面多了一个 `/`，名称里的下标整体右移一位
-      highlights: matchIndexes(name, query).map((index) => index + 1),
-      descriptionHighlights: matchIndexes(description, query)
-    }
-  })
+      item: skill,
+      name: String(skill?.name ?? ''),
+      description: String(skill?.description ?? '')
+    })),
+    ...(Array.isArray(mcpServers) ? mcpServers : []).map((server) => ({
+      kind: 'mcp',
+      item: server,
+      name: String(server?.name ?? ''),
+      description: mcpDescription(server)
+    }))
+  ]
+  const ranked = rankCompletions(entries, query, limit)
+  return ranked.map((entry) =>
+    entry.kind === 'mcp' ? mcpOption(entry.item, query) : skillOption(entry.item, query)
+  )
+}
+
+function skillOption(skill, query) {
+  const name = String(skill?.name ?? '')
+  const description = String(skill?.description ?? '')
+  return {
+    key: `skill:${name}`,
+    kind: 'skill',
+    name,
+    path: String(skill?.path ?? ''),
+    label: `/${name}`,
+    description,
+    // label 前面多了一个 `/`，名称里的下标整体右移一位
+    highlights: matchIndexes(name, query).map((index) => index + 1),
+    descriptionHighlights: matchIndexes(description, query)
+  }
+}
+
+/** MCP 候选的说明列：工具名（未知时给连接方式），同时也是查询匹配的文本。 */
+function mcpDescription(server) {
+  const tools = Array.isArray(server?.tools) ? server.tools.filter(Boolean) : []
+  return tools.length
+    ? `MCP · 工具：${tools.join('、')}`
+    : `MCP · ${server?.type === 'stdio' ? '本地进程' : 'HTTP'}`
+}
+
+/** MCP 候选：label 带 `mcp:` 前缀，说明里是工具名（未知时给连接方式）。 */
+function mcpOption(server, query) {
+  const name = String(server?.name ?? '')
+  const tools = Array.isArray(server?.tools) ? server.tools.filter(Boolean) : []
+  const description = mcpDescription(server)
+  const label = `mcp:${name}`
+  return {
+    key: `mcp:${name}`,
+    kind: 'mcp',
+    name,
+    tools,
+    label,
+    description,
+    // label 前面多了 `mcp:` 四个字符，名称里的下标整体右移
+    highlights: matchIndexes(name, query).map((index) => index + 'mcp:'.length),
+    descriptionHighlights: matchIndexes(description, query)
+  }
 }
 
 /** 把光标前那段 `@query` / `/query` 整体替换成候选的插入文本。 */

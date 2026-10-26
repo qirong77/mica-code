@@ -30,6 +30,7 @@ import {
 import { DEFAULT_AUTO_COMPACT_SETTINGS } from './auto-compact-state.js'
 import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from './browser-control.js'
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
+import { probeMcpServers } from './mcp-probe.js'
 import { clearLogs, readPerformanceSummary } from './log.js'
 
 /**
@@ -123,16 +124,21 @@ function parseMcpServerConfig(content, name) {
   return parsed
 }
 
-function readMcpDetails() {
+/**
+ * MCP 列表。
+ *
+ * 连接本身发生在会话子进程里，宿主不持有连接，所以状态靠自己探一次（`mcp-probe.js`）：
+ * http 类型的 server 能当场问出「能不能用 + 有几个工具」，stdio 的起进程代价太大，只报
+ * 「已配置」并由页面说明连接时机。
+ */
+async function readMcpDetails() {
   const configured = existsSync(configPath()) ? (readJson(configPath()).mcpServers ?? {}) : {}
+  const probes = await probeMcpServers(configured)
   return {
     path: configPath(),
     servers: Object.entries(configured).map(([name, config]) => ({
       ...describeMcpConfig(name, config),
-      // 桌面端不代管 MCP 连接（它跑在会话进程里），这里只反映配置文件的内容
-      status: 'configured',
-      toolCount: 0,
-      tools: []
+      ...(probes.get(name) ?? { status: 'configured', toolCount: 0, tools: [] })
     }))
   }
 }
@@ -555,7 +561,7 @@ function readAutoCompactDetails() {
 
 /* ------------------------------------------------------------------ 动作表 */
 
-function addMcpServer(name, content) {
+async function addMcpServer(name, content) {
   const normalized = normalizeMcpName(name)
   updateMcpServers((servers) => {
     if (normalized in servers) throw new Error(`MCP server 已存在：${normalized}`)
@@ -572,7 +578,7 @@ function addMcpServer(name, content) {
   return readMcpDetails()
 }
 
-function saveMcpServer(name, content) {
+async function saveMcpServer(name, content) {
   const normalized = normalizeMcpName(name)
   updateMcpServers((servers) => {
     if (!(normalized in servers)) throw new Error(`MCP server 不存在：${normalized}`)
@@ -581,7 +587,7 @@ function saveMcpServer(name, content) {
   return readMcpDetails()
 }
 
-function removeMcpServer(name) {
+async function removeMcpServer(name) {
   const normalized = normalizeMcpName(name)
   updateMcpServers((servers) => {
     if (!(normalized in servers)) throw new Error(`MCP server 不存在：${normalized}`)

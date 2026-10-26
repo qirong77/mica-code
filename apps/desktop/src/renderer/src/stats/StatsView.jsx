@@ -23,6 +23,9 @@ const RANGE_OPTIONS = [
 ]
 const PROJECT_BATCH = 7
 const SESSION_BATCH = 11
+// stats:read 的载荷是「每个会话的用量事件」，上千会话时是几十 MB；3 秒一次会把
+// 主进程序列化和 renderer 解析都压满。面板只看总量，半分钟一次足够。
+const STATS_REFRESH_MS = 30_000
 const MONTH_SHORT = [
   'Jan',
   'Feb',
@@ -870,6 +873,9 @@ export function StatsView({ visible }) {
     if (!visible) return undefined
     let alive = true
     const tick = () => {
+      // 一次 stats:read 要把每个会话的用量事件都传过来（上千个会话时是几十 MB），
+      // 隐藏窗口里刷新纯属白烧 CPU/内存，失焦时也没人在看。
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
       window.mica.stats
         .read()
         .then((data) => {
@@ -878,10 +884,14 @@ export function StatsView({ visible }) {
         .catch((error) => console.error('read stats failed', error))
     }
     tick()
-    const timer = window.setInterval(tick, 3000)
+    const timer = window.setInterval(tick, STATS_REFRESH_MS)
+    // 回到窗口时立刻补一次，免得刚打开就看到几十秒前的数字。
+    const onFocus = () => tick()
+    window.addEventListener('focus', onFocus)
     return () => {
       alive = false
       window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
     }
   }, [visible])
 

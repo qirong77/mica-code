@@ -169,9 +169,26 @@ describe('chat CLI arguments', () => {
     const args = buildAppServerArgs({})
     expect(args[0]).toBe('app-server')
     expect(args).toContain('--thinking')
-    for (const flag of ['--session', '--dir', '--model', '--variant', '--role', '--max-turns']) {
+    for (const flag of [
+      '--session',
+      '--dir',
+      '--model',
+      '--variant',
+      '--role',
+      '--max-turns',
+      '--mcp-config'
+    ]) {
       expect(args).not.toContain(flag)
     }
+  })
+
+  // 受控浏览器 / 终端以 MCP 接入：每会话一份配置，与用户自己的 config.json 合并。
+  it('passes the per-session mcp config through to app-server', () => {
+    const args = buildAppServerArgs({
+      sessionId: 's1',
+      mcpConfigPath: '/home/u/.mica/desktop/mcp/x.json'
+    })
+    expect(args.slice(-2)).toEqual(['--mcp-config', '/home/u/.mica/desktop/mcp/x.json'])
   })
 
   it('forwards the composer role so a resident host can switch without respawning', () => {

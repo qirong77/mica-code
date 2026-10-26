@@ -1,5 +1,6 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import tailwindcss from '@tailwindcss/vite'
+import { RUNTIME_PORT_ENV, parseRuntimePort } from '../../packages/mica-web-shared/runtime-port.js'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
@@ -13,7 +14,9 @@ import { resolve } from 'path'
  * 这里没有 preload 段：页面只通过 HTTP + SSE 访问运行时，不需要 IPC 桥
  * （脚本里的 `--ignoreConfigWarning` 就是为它加的）。
  */
-const runtimePort = Number.parseInt(process.env.MICA_DESKTOP_PORT || '', 10) || 8787
+// dev 代理要落到运行时那个端口上：端口常量的唯一来源是 mica-web-shared 的 runtime-port，
+// 这里不再抄一份 8787
+const runtimePort = parseRuntimePort(process.env[RUNTIME_PORT_ENV])
 
 /**
  * 把 `import { IconX, IconY } from '@tabler/icons-react'` 改写成逐个深路径导入。

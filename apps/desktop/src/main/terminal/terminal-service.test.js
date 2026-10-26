@@ -177,8 +177,8 @@ describe('service surface', () => {
     expect(docs.body.endpoints).toHaveLength(TERMINAL_ENDPOINTS.length)
     expect(docs.body.markdown).toContain('http://127.0.0.1:18767')
     expect(docs.body.markdown).toContain('x-mica-owner')
-    // 技能只给占位符，运行时写盘前才换成真实地址（terminal-control.js）
-    expect(docs.body.skillMarkdown).toContain('$MICA_TERMINAL_URL')
+    // 给 agent 的短提示与端点目录同源：MCP 的 doc 列表直接用这一段。
+    expect(docs.body.guide).toContain('idleMs')
   })
 
   it('creates a session with owner from the header and opens the window', async () => {

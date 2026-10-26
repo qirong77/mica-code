@@ -2,14 +2,11 @@ import { describe, expect, it } from 'bun:test'
 import {
   BROWSER_OWNER_ENV,
   BROWSER_URL_ENV,
-  browserSkillDocument,
   detailsFrom,
   emptyBrowserSnapshot,
   normalizeBrowserSummaries,
   parseSseData,
-  sameBrowsers,
-  skillFilePath,
-  skillNeedsWrite
+  sameBrowsers
 } from './browser-control-core.js'
 
 describe('normalizeBrowserSummaries', () => {
@@ -57,48 +54,20 @@ describe('normalizeBrowserSummaries', () => {
   })
 })
 
-describe('skill file', () => {
-  it('writes under $MICA_HOME/skills/mica-browser', () => {
-    expect(skillFilePath('/home/u/.mica')).toBe('/home/u/.mica/skills/mica-browser/SKILL.md')
-    expect(skillFilePath('C:\\Users\\u\\.mica', '\\')).toBe(
-      'C:\\Users\\u\\.mica\\skills\\mica-browser\\SKILL.md'
-    )
-  })
-
-  it('rewrites only when the content actually changed', () => {
-    expect(skillNeedsWrite(null, '# doc')).toBe(true)
-    expect(skillNeedsWrite('# doc', '# doc')).toBe(false)
-    expect(skillNeedsWrite('# doc', '# doc\n')).toBe(true)
-    // 空内容不写：宁可不写，也不要把用户的技能文件清成空的
-    expect(skillNeedsWrite('# doc', '')).toBe(false)
-    expect(skillNeedsWrite('# doc', undefined)).toBe(false)
-  })
-
-  // socket 失效时 `/docs` 必然失败，技能文件不能因此停在旧地址上
-  it('falls back to a local document when the service is unreachable', () => {
-    expect(browserSkillDocument('http://127.0.0.1:8787/remote/control')).toBe(
-      '---\nname: mica-browser\n---\n\nhttp://127.0.0.1:8787/remote/control\n'
-    )
-    expect(browserSkillDocument('  http://127.0.0.1:8787/remote/control/  ')).toBe(
-      '---\nname: mica-browser\n---\n\nhttp://127.0.0.1:8787/remote/control\n'
-    )
-    expect(browserSkillDocument('')).toBe('')
-  })
-})
-
 describe('detailsFrom', () => {
   it('assembles the settings page payload', () => {
     const details = detailsFrom({
       docs: { version: 3, endpoints: [{ id: 'health' }], markdown: 'md' },
       browsers: [{ id: 'brw-1', owner: 'sess-1' }],
       serviceUrl: 'http://127.0.0.1:18767',
-      skillPath: '/home/u/.mica/skills/mica-browser/SKILL.md'
+      mcpUrl: 'http://127.0.0.1:18767/mcp/browser'
     })
     expect(details).toMatchObject({
       available: true,
       serviceUrl: 'http://127.0.0.1:18767',
+      mcpUrl: 'http://127.0.0.1:18767/mcp/browser',
+      toolName: 'control',
       version: 3,
-      skillPath: '/home/u/.mica/skills/mica-browser/SKILL.md',
       error: null,
       envVars: { url: BROWSER_URL_ENV, owner: BROWSER_OWNER_ENV }
     })
@@ -121,8 +90,8 @@ describe('emptyBrowserSnapshot / sameBrowsers / parseSseData', () => {
     expect(emptyBrowserSnapshot()).toEqual({
       available: false,
       serviceUrl: null,
+      mcpUrl: null,
       browsers: [],
-      skillPath: null,
       error: null
     })
     expect(emptyBrowserSnapshot('boom').error).toBe('boom')

@@ -23,8 +23,8 @@ import {
 } from './terminal-core.js'
 import {
   TERMINAL_ENDPOINTS,
+  TERMINAL_GUIDE,
   buildDocsMarkdown,
-  buildSkillMarkdown,
   capabilityCatalog
 } from './terminal-docs.js'
 
@@ -238,6 +238,7 @@ export function createTerminalService({ sessions, windows, address = () => ({ ur
     server,
     handle,
     onSessionEvent,
+    /** 监听 TCP——**只给测试用**（生产环境一律 `listenSocket`），理由同 browser-service */
     listen(port, host = '127.0.0.1') {
       return new Promise((resolve, reject) => {
         const onError = (error) => {
@@ -327,7 +328,7 @@ function buildHandlers({ sessions, windows, address }) {
       serviceUrl: address()?.url || '$MICA_TERMINAL_URL',
       endpoints: TERMINAL_ENDPOINTS,
       markdown: buildDocsMarkdown({ serviceUrl: address()?.url || '$MICA_TERMINAL_URL' }),
-      skillMarkdown: buildSkillMarkdown()
+      guide: TERMINAL_GUIDE
     }),
 
     // ctx.owner 已经合并了 header / body / query：agent 按文档只带 x-mica-owner 也能只看自己的

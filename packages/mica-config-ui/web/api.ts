@@ -288,7 +288,7 @@ function unavailablePerformanceDetails(): ConfigWebPerformanceDetails {
     available: false,
     dir: '',
     files: [],
-    totals: { events: 0, errors: 0, warns: 0, slowCalls: 0, samples: 0, spanMs: 0 },
+    totals: { events: 0, errors: 0, warns: 0, slowCalls: 0, samples: 0, hiddenSamples: 0, spanMs: 0 },
     pending: 0,
     buckets: [],
     timeline: [],

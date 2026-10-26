@@ -391,6 +391,11 @@ function createWebApi(env) {
       list: (cwd) => invoke('skills:list', { cwd })
     },
 
+    mcp: {
+      // 同一个 `/` 浮层里的 MCP server 候选（只读 config.json，不发起连接）
+      listCandidates: () => invoke('mcp:candidates')
+    },
+
     git: {
       status: (cwd) => invoke('git:status', { cwd }),
       summary: (cwd) => invoke('git:summary', { cwd }),

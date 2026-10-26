@@ -4,11 +4,9 @@ import {
   TERMINAL_URL_ENV,
   normalizeTerminalSummaries,
   parseTerminalSseData,
-  resolveTerminalSkillTemplate,
   sameTerminalSessions,
   terminalDetailsFrom,
-  terminalOwnerEnv,
-  terminalSkillFilePath
+  terminalOwnerEnv
 } from './terminal-control-core.js'
 
 describe('normalizeTerminalSummaries', () => {
@@ -50,27 +48,6 @@ describe('normalizeTerminalSummaries', () => {
   })
 })
 
-describe('skill file', () => {
-  it('replaces the env placeholder only when a real address is known', () => {
-    const markdown = `---\nname: mica-terminal\n---\n\n$${TERMINAL_URL_ENV}\n`
-    expect(resolveTerminalSkillTemplate(markdown, { serviceUrl: '' })).toBe(markdown)
-    expect(
-      resolveTerminalSkillTemplate(markdown, {
-        serviceUrl: 'http://127.0.0.1:8787/remote/terminal/'
-      })
-    ).toContain('http://127.0.0.1:8787/remote/terminal\n')
-  })
-
-  it('puts the skill under $MICA_HOME/skills/mica-terminal', () => {
-    expect(terminalSkillFilePath('/home/u/.mica')).toBe(
-      '/home/u/.mica/skills/mica-terminal/SKILL.md'
-    )
-    expect(terminalSkillFilePath('C:\\Users\\u\\.mica', '\\')).toBe(
-      'C:\\Users\\u\\.mica\\skills\\mica-terminal\\SKILL.md'
-    )
-  })
-})
-
 describe('sse and owner', () => {
   it('parses the shared frame shape', () => {
     expect(
@@ -98,18 +75,19 @@ describe('terminalDetailsFrom', () => {
       docs: { version: 1, endpoints: [{ id: 'health' }], markdown: '# docs' },
       sessions: [{ id: 'term-1' }],
       serviceUrl: 'http://127.0.0.1:8787/remote/terminal',
-      skillPath: '/tmp/SKILL.md'
+      mcpUrl: 'http://127.0.0.1:8787/mcp/terminal'
     })
     expect(details).toMatchObject({
       available: true,
       version: 1,
-      skillPath: '/tmp/SKILL.md',
+      mcpUrl: 'http://127.0.0.1:8787/mcp/terminal',
+      toolName: 'control',
       envVars: { url: TERMINAL_URL_ENV, owner: TERMINAL_OWNER_ENV }
     })
     expect(details.sessions).toHaveLength(1)
     expect(details.markdown).toBe('# docs')
     expect(
-      terminalDetailsFrom({ docs: null, sessions: [], serviceUrl: '', skillPath: null }).available
+      terminalDetailsFrom({ docs: null, sessions: [], serviceUrl: '', mcpUrl: '' }).available
     ).toBe(false)
   })
 })

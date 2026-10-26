@@ -7,10 +7,13 @@
  * （见 src/host/servers.js）。
  */
 
-export const DEFAULT_SERVER_PORT = 8787
+import { DEFAULT_RUNTIME_PORT, DEFAULT_RUNTIME_URL } from '@packages/mica-web-shared'
+
+/** 默认端口与「本机」地址都来自运行时那份常量（mica-web-shared 的 runtime-port） */
+export const DEFAULT_SERVER_PORT = DEFAULT_RUNTIME_PORT
 
 /** 默认端口上的回环地址：窗口/浏览器所在的这台机器，也就是「本机」 */
-export const LOCAL_SERVER_URL = `http://127.0.0.1:${DEFAULT_SERVER_PORT}`
+export const LOCAL_SERVER_URL = DEFAULT_RUNTIME_URL
 
 /** 「连接过的服务器」存在页面本地：它只是这台机器上这个页面的回访清单 */
 export const RECENT_SERVERS_KEY = 'mica-servers'

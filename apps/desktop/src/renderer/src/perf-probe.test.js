@@ -115,6 +115,33 @@ describe('startPerfProbe', () => {
     probe.stop()
   })
 
+  it('隐藏窗口不记 lag（定时器被节流，算出来全是几十秒的假冻结）', async () => {
+    const harness = createHarness()
+    const probe = startPerfProbe(harness.win, harness.doc)
+    harness.doc.visibilityState = 'hidden'
+    harness.advance(59_000)
+    harness.tick(1000)
+    expect(sampleOf(probe).lag).toBe(null)
+    expect(sampleOf(probe).vis).toBe(0)
+    probe.stop()
+  })
+
+  it('重新可见时重置基准，不把隐藏期间的时间算进第一帧', async () => {
+    const harness = createHarness()
+    const probe = startPerfProbe(harness.win, harness.doc)
+    harness.doc.visibilityState = 'hidden'
+    harness.advance(600_000)
+    harness.tick(1000)
+    harness.doc.visibilityState = 'visible'
+    harness.emit('visibilitychange', {})
+    harness.advance(1000)
+    harness.tick(1000)
+    const last = sampleOf(probe)
+    expect(last.vis).toBe(1)
+    expect(last.lag).toBe(0)
+    probe.stop()
+  })
+
   it('snapshot 会立刻落盘', async () => {
     const harness = createHarness()
     const probe = startPerfProbe(harness.win, harness.doc)

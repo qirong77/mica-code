@@ -70,7 +70,7 @@ function btwDraftKey(nodeId, threadId) {
 function completionEmptyText(kind, loading, failed) {
   if (kind === 'skill') {
     if (loading) return '正在加载…'
-    return failed ? '加载 skill 失败' : '没有匹配的 skill'
+    return failed ? '加载 skill / MCP 失败' : '没有匹配的 skill 或 MCP'
   }
   if (loading) return '正在搜索文件…'
   return failed ? '文件搜索失败' : '没有找到匹配文件'
@@ -82,7 +82,7 @@ import {
   applyCompletion,
   completionInsertText,
   fileCompletionOptions,
-  skillCompletionOptions
+  slashCompletionOptions
 } from './chat-completions'
 import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { BtwDrawer } from './BtwDrawer'
@@ -3336,10 +3336,27 @@ export function ChatView({
 
     if (completion.kind === 'skill') {
       setCompletionLoading(true)
-      window.mica.skills
-        .list(cwd || null)
-        .then((result) => settle(skillCompletionOptions(result, completion.query)))
-        .catch(fail)
+      // `/` 的候选是两个来源：本地 skills 与 config.json 里的 MCP server。任一失败仍然
+      // 展示另一边，两边都拿不到才算失败。
+      Promise.allSettled([
+        window.mica.skills.list(cwd || null),
+        window.mica.mcp.listCandidates()
+      ]).then(([skills, mcpServers]) => {
+        if (cancelled) return
+        if (skills.status === 'rejected' && mcpServers.status === 'rejected') {
+          fail()
+          return
+        }
+        settle(
+          slashCompletionOptions(
+            {
+              skills: skills.status === 'fulfilled' ? skills.value : [],
+              mcpServers: mcpServers.status === 'fulfilled' ? mcpServers.value : []
+            },
+            completion.query
+          )
+        )
+      })
       return () => {
         cancelled = true
       }
@@ -5785,7 +5802,7 @@ export function ChatView({
           )}
           {completion && !picker && (
             <ComposerCompletionPalette
-              title={completion.kind === 'skill' ? '选择 skill' : '引用文件'}
+              title={completion.kind === 'skill' ? '选择 skill / MCP' : '引用文件'}
               options={completionItems}
               activeIndex={Math.min(completionIndex, Math.max(0, completionItems.length - 1))}
               onActiveIndex={setCompletionIndex}

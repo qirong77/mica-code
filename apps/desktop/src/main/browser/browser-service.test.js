@@ -175,8 +175,8 @@ describe('service surface', () => {
     expect(docs.body.serviceUrl).toBe('http://127.0.0.1:18767')
     expect(docs.body.markdown).toContain('http://127.0.0.1:18767')
     expect(docs.body.markdown).toContain('x-mica-owner')
-    // 技能文档由服务原样给出占位符，运行时写盘前才换成真实地址（browser-control.js）。
-    expect(docs.body.skillMarkdown).toContain('$MICA_BROWSER_URL')
+    // 给 agent 的短提示与端点目录同源：MCP 的 doc 列表直接用这一段。
+    expect(docs.body.guide).toContain('waitFor')
   })
 
   it('rejects unknown endpoints and unsafe methods', async () => {

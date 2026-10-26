@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  BROWSER_GUIDE,
   BROWSER_ENDPOINTS,
   buildDocsMarkdown,
-  buildSkillMarkdown,
   capabilityCatalog
 } from './browser-docs.js'
 
@@ -58,23 +58,13 @@ describe('buildDocsMarkdown', () => {
   })
 })
 
-describe('buildSkillMarkdown', () => {
-  const markdown = buildSkillMarkdown()
-
-  it('is a valid skill document with front matter', () => {
-    expect(markdown.startsWith('---\n')).toBe(true)
-    expect(markdown).toContain('name: mica-browser')
-  })
-
-  // 技能刻意只有一行地址：端点清单会随接口增删漂移，写进技能就是两处分叉。
-  it('carries nothing but the service address', () => {
-    const body = markdown.split('---\n')[2]
-    expect(body.trim()).toBe('$MICA_BROWSER_URL')
-  })
-
-  it('leaves the endpoint list to /browser/docs', () => {
+describe('BROWSER_GUIDE', () => {
+  // MCP 的 doc 列表里会带这段短提示：它得是可执行的建议，而不是又一份端点清单。
+  it('carries actionable hints without a stale endpoint list', () => {
+    expect(BROWSER_GUIDE.length).toBeGreaterThan(0)
+    expect(BROWSER_GUIDE).toContain('waitFor')
     for (const endpoint of BROWSER_ENDPOINTS) {
-      expect(markdown).not.toContain(endpoint.path)
+      expect(BROWSER_GUIDE).not.toContain(endpoint.path)
     }
   })
 })

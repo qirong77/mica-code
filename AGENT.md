@@ -198,6 +198,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 索引、并发与删除
 
 - `$MICA_HOME/session-index.json` 是可重建缓存，不能放进 `sessions/`。save/delete 合并磁盘最新索引，避免跨进程覆盖；读取发现 id 集合不一致时重建并立即持久化。
+- 索引 v2 还记 `rejects`（读不出摘要的旧格式文件的 id + size/mtime）。**必须记**：`version: 1` 之前的裸消息数组与 `{id,title,updatedAt,messages}` 不产生摘要，只算摘要的 id 集合永远对不上磁盘，于是每次 `sessions/` 的 mtime 变化（等于每开一个新会话）都要全量重扫并解析整个会话目录（上千文件、数百 MB，实测 3–4 秒）。size/mtime 用于自愈：文件被改写后重试解析。真出现读不出的文件先看这里，别靠删文件绕过。
 - 垃圾占位须同时满足：默认占位标题、无对话、无 usage；`turnState === 'running'` 永不作为垃圾隐藏或删除。
 - `saveCurrent` 签名冲突时以内存快照降级写盘并递增 revision，不永久跳过；文件已被删时清签名并重新写盘。
 - `sessions/.turn-locks/<id>.lock` 是跨进程写入的唯一事实来源，使用 `wx` 文件锁与 owner pid 存活判定；孤儿锁在 acquire 时回收，delete 同步清锁。pid 复用是已知边界。
@@ -271,7 +272,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 ### MCP、联网与 Skills
 
-- `mica-mcp` 管理 `config.json.mcpServers` 生命周期；工具经 `registerMcp()` 接入，断开、关闭、重连失败同步清理并刷新 registry。
+- `mica-mcp` 管理 `config.json.mcpServers` 生命周期；工具经 `registerMcp()` 接入，断开、关闭、重连失败同步清理并刷新 registry。读取时展开 `url` / `headers` 里的 `${VAR}` 与 `${VAR:-默认值}`（`command` / `args` / `env` 不展开），因此跟着运行时端口走的地址不必写死。
 - headless 显式初始化/关闭 MCP，支持独立 MCP 配置与超时参数。
 - `web_search` 使用 SearXNG：配置 `searxngUrl` → `SEARXNG_URL` → `http://127.0.0.1:8080`；实例须开启 JSON format。结果本地按 count 截断，缓存 5 分钟；`web_fetch` 抓取并转换 HTML。
 - 最新、官方、API/provider 行为、模型能力、价格、法规等可变事实先联网查证；无法查证时明确说明。
@@ -345,7 +346,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 路由、分享与访问
 
 - 默认 `0.0.0.0:8787`，**运行时无认证，所有客户端拥有完整宿主能力**；README 必须保留风险说明。
-- 仅一个端口：`/`、`/mica-web` 为完整应用，`/share` 为分享视图，`/files` 为独立文件窗口页面，`/terminal-control` 为终端窗口页面，`/api/*` 为能力，`/remote/control/*` 为浏览器代理，`/remote/terminal/*` 为终端代理。地址约定只用 `mica-web-shared/app-paths.ts`。
+- 端口常量的唯一出口是 `mica-web-shared/runtime-port.js`（`DEFAULT_RUNTIME_PORT`、`RUNTIME_PORT_ENV`、`parseRuntimePort`、`loopbackRuntimeUrl`，以及 Config Web 的 `DEFAULT_CONFIG_WEB_PORT` / `CONFIG_WEB_PORT_ENV`）。运行时、Electron 外壳、renderer 的「本机」地址、Vite dev 代理、诊断脚本都从那里取，不在各自入口抄字面量；拼给用户的地址一律用运行时上报的实际端口。
+- 仅一个端口：`/`、`/mica-web` 为完整应用，`/share` 为分享视图，`/files` 为独立文件窗口页面，`/terminal-control` 为终端窗口页面，`/mcp/browser` 与 `/mcp/terminal` 为两个 MCP 端点，`/api/*` 为能力，`/remote/control/*` 为浏览器代理，`/remote/terminal/*` 为终端代理。地址约定只用 `mica-web-shared/app-paths.ts`。
+- 不占 TCP 的监听者：受控浏览器与终端服务走 `userData` 下的 Unix socket，`notifyServer.js` 绑临时回环端口。`apps/config-web` 是另一个独立宿主（默认 13987），只在浏览器里打开配置页时启动，与桌面运行时互不相关。
 - `shareView` 仅影响呈现，不是权限边界；不新增访客授权。资源路由先 `toAssetPath()` 去前缀。
 - `--share-port` 只保留兼容开关语义；`--no-share` / `MICA_DESKTOP_SHARE_PORT=0` 只关闭 `/share`。端口占用可随机回退，从 ready JSON 获取实际地址。
 - `access-core.js` 校验 Origin / Host 防跨站与 DNS rebinding；同站忽略端口以支持 Vite 代理，允许代理域名通过 `MICA_DESKTOP_ALLOWED_HOSTS` 配置。
@@ -381,7 +384,8 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 输入、补全与编辑
 
 - CLI / desktop 共用 `mica-file-mentions`，候选最多 20；desktop 不二次排序截断。host 预热 cwd，查询防抖 100ms，空查询立即。
-- `@` 和 desktop `/` skill 补全仅在词首触发；斜杠后再次出现 `/` 按路径处理。选中只插文本，不执行。
+- `@` 和 desktop `/` skill 补全仅在词首触发；斜杠后再次出现 `/` 按路径处理。选中只插文本，不执行：文件插 `@路径`，skill 插该 skill 的 `SKILL.md` 绝对路径（`listSkills` 直接带出，桌面端不把 `/name` 当命令执行）。
+- `/` 浮层的候选是 skill 与 MCP server 混排（`slashCompletionOptions` 同一套评分）；MCP 由 `mcp-candidates-core.js` 只读 `config.json` 列出、不发起连接，工具名仅在设置页探测过同一配置时由 `mcp-probe` 缓存带出。插入文本为 `使用 MCP server「名」（工具：…）`，工具名未知则只留 server 名。
 - skill 候选不截断（host 上限 200），名称与说明都参与匹配与高亮；浮层只让候选列表滚动，标题行固定。
 - desktop composer 不分派斜杠命令，`/loop` 等原样发给模型；需 UI 的能力通过面板操作。
 - 输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻，普通方向键移动光标。
@@ -442,15 +446,15 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 ### 受控浏览器
 
-- 唯一主进程业务例外在 `src/main/browser/`；`browser-docs.js` 是端点唯一目录，路由、文档和技能引用同源。
-- 主进程通过 Unix socket 提供服务，`MICA_BROWSER_SOCKET` 交运行时桥；agent 访问本运行时 `/remote/control`，不另开 TCP 服务。
+- 唯一主进程业务例外在 `src/main/browser/`；`browser-docs.js` 是端点唯一目录，路由、文档与 MCP 操作清单同源。
+- 主进程通过 Unix socket 提供服务，`MICA_BROWSER_SOCKET` 交运行时桥；运行时在已有端口上代理 `/remote/control`（页面与排查用），并挂 MCP 端点 `/mcp/browser`（agent 用），不另开 TCP 服务。
 - `browserOwnerEnv()` 注入 `MICA_BROWSER_OWNER` / `MICA_BROWSER_URL`，owner 唯一决定会话归属；纯 Web 宿主无服务时正常降级。
 - 窗口默认隐藏，关窗只 hide，销毁须专用 close API；同一 `persist:mica-browser` 分区共享持久 Cookie，权限拒绝，window.open 转同窗新标签。
 - 截图用 CDP `Page.captureScreenshot`。依赖显示面的操作（截图、click、type、keys、scroll）统一走 `withShownWindow` + `browser-reveal.js` 的露出控制器：先 `setOpacity(0)` 再 `showInactive`（窗口对 Chromium 是可见的、对用户完全不可见，避免每次操作闪一下），期间 `setIgnoreMouseEvents(true)` 让点击穿透；必要时挂上目标标签页并等首帧；一串操作共用同一次露出，空闲 1.5s 后才收起并恢复透明度（`MICA_BROWSER_REVEAL_OPACITY=0` 退回可见地露出）。逻辑 `visible` 只由 `showBrowser` / `hideBrowser` 改，窗口 show/hide 事件不参与，顶栏图标不会跟着闪。隐藏窗口原生输入会被丢弃、合成器不出帧，因此合成事件路径只作为恢复不了显示面时的兜底，via 报告实际走的那条。
 - `app.whenReady()` 前设置 `disable-backgrounding-occluded-windows` 保持隐藏窗口 rAF/可见性；进程级开关 `MICA_BROWSER_UNTHROTTLE=0` 可关闭。
 - 服务保持 Origin/Host 守卫，无 CORS，非 GET 要求 JSON；Cookie 导出文件 0600，写失败只报告。
 - 顶栏图标显示/隐藏窗口，销毁二次确认；未归属窗口变暗显示。Browser Control 设置页永远可打开，无能力时给说明，仅展示文档入口，不管理窗口。
-- 生成的 `$MICA_HOME/skills/mica-browser/SKILL.md` 仅含服务地址，启动会覆盖；改端点文档只改 `browser-docs.js`。
+- agent 只通过 MCP 使用这个能力：`/mcp/browser` 暴露**一个** tool `control`，不带 `action` 返回操作文档列表，带 `action` + `params` 按端点目录转发到 socket。会话启动时由 `host/control-mcp-config.js` 生成 `$MICA_HOME/desktop/mcp/<owner 哈希>.json` 并经 `--mcp-config` 传入，owner 写进 `x-mica-owner`；同名 server 以外部文件为准，覆盖 `config.json` 里的全局条目。全局条目（无 owner）供 TUI / `mica exec` 用，url 写 `${MICA_DESKTOP_PORT:-8787}`，靠 `mica-mcp` 的变量展开跟住端口。不写 owner 的窗口显示为未归属，终端写操作按页面操作放行。不再生成 skill 文件；旧的 `mica-browser` / `mica-terminal` 技能会在启动时被识别并清理。
 
 ### 终端控制
 
@@ -463,8 +467,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 终端会话存在进程内，最多 12 条**活着的** shell（已退出不占额度）。`sweep()` 每分钟自动回收没人管的会话，两条线都以「窗口没在显示」为前提：已退出的留 10 分钟供读屏后回收；活着的要连续 6 小时无活动（输出、输入、改尺寸）才回收，正在跑东西的 shell 不会被误杀。`windowVisible` 的一律保留。`closed` 事件统一销毁窗口，端点关闭与回收关闭走同一条路径。`close` 用 `destroy` 结束进程，退出后仍可读最后屏幕。纯 Web 宿主没有主进程，`/remote/terminal/*` 明确回 503。
 - SSE 的 `terminal:output` 只发给订阅该会话的页面，`terminal:changed` 只发给该会话的页面与不限会话的列表订阅者，不做全量广播。
 - 写入类操作（`input`、`keys`、`resize`、`close`）校验 `x-mica-owner`：带 owner 且与会话 owner 不一致即 403；不带 owner 视为本人在页面操作，放行。读屏与 `wait` 不拦。这是防串台护栏，不是权限边界。
-- 生成的 `$MICA_HOME/skills/mica-terminal/SKILL.md` 仅含服务地址，启动会覆盖；改端点文档只改 `terminal-docs.js`。
+- 终端同样以 MCP 接入（`/mcp/terminal`，单 tool `control`，与浏览器共用 `host/control-mcp.js`）；owner 由配置里的请求头带入，写操作护栏不变。改端点文档只改 `terminal-docs.js`。
 - 设置页 Terminal Control 与 Browser Control 同构：入口常驻（`layout/Sidebar.tsx`），只有桌面运行时能读数据，拿不到时用 `unavailableTerminalControlDetails` 说清未开启；页面只展示服务状态、会话列表与端点文档，不建会话、不管窗口。端点分组/curl/环境变量说明与浏览器页共用 `web/controlEndpoints.ts`，样式共用 `.control-*`。
+- MCP 页的状态点来自 `host/mcp-probe.js` 的一次真实握手（`initialize` + `tools/list`，缓存 30s）：http server 因此能给出绿点/红点与真实工具数，stdio 起进程代价太大，保持「已配置 · 启动会话时连接」。探测用的 `${VAR}` 优先按运行时上报的实际 origin 补齐端口，避免端口回退时打到另一个实例。
 - 顶栏图标与受控浏览器同一套显示逻辑：一条会话一个图标（多开按序标号），当前会话没有终端就**不出现**，顶栏也不再承担新建入口；会话由 agent 经 `POST /sessions` 创建。点击显示/隐藏窗口，右键确认后关闭。
 - 通用路由、owner、本机 Origin/Host 校验在 `src/main/shared/endpoint-http.js`，浏览器与终端共用，不各写一份。
 
@@ -474,6 +479,8 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 所有功能面都从 `POST /api/invoke` 进入，所以通道耗时只在 `handleInvoke` 里用 `logger('invoke').timed()` 量一次；超过 `SLOW_MS`（默认 300ms，`MICA_LOG_SLOW_MS` 可调）记 warn，并按 `scope:event` 聚合到 `slowReport()`。**新增功能不要自己再包一层计时。**
 - 渲染层分成两个探针：`perf-probe.js` 只管每秒采样（lag / longtask / dom / heap，每 15s 批量推 `perf:report`），`log-probe.js` 只管错误（console.error/warn 与未捕获异常、10s 去重、推 `log:report`，scope=renderer）。两者都把数据交给同一个写入器，**不要另起一套落盘**。
 - 采样一律全量记录，不做「异常才写」的筛选：阈值漏掉的卡顿恰恰是用户能感觉到的那部分。成本靠 tmpdir 与批量写控住。
+- 隐藏窗口不记 `lag`（写 `null`）：Chromium 把定时器节流到 1 次/分钟，按「应到时刻」算出来全是 59s 的假冻结，会把整天数据变成噪声。重新可见时用 `visibilitychange` 重置基准，否则隐藏期间的时间会全算进第一帧。分析侧读 `lag == null` 直接跳过。
+- 面板类轮询要跟着可见性走：`stats:read` 返回的是「每个会话的用量事件」，上千会话时是 20 MB+，3 秒一次会把主进程序列化和 renderer 解析压满。StatsView 因此是 30 秒 + 只在可见且聚焦时刷新 + 回到窗口立即补一次。
 - 配置页的 Performance 面板（`packages/mica-config-ui/web/pages/PerformancePage.tsx`）读 `readPerformanceDetails`，聚合在 host 侧做完（`readPerformanceSummary`），页面只渲染。新增指标时同时改 `ConfigWebPerformanceDetails` 类型与 host 的聚合。
 - `error` 级别的日志字段用 `{ error }` 传异常对象，写入器会展开成 message/code/stack；不要自己 `String(error)`。
 

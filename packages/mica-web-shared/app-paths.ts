@@ -1,7 +1,8 @@
 /**
  * 运行时端口上「按路径区分的服务」的地址约定。
  *
- * 桌面运行时**只监听一个端口**（默认 8787），所有能力靠路径区分，谁也不额外占端口：
+ * 桌面运行时**只监听一个端口**（默认 8787，常量在 `runtime-port.js`），所有能力靠路径区分，
+ * 谁也不额外占端口：
  *
  * - `/` 与 `/mica-web` —— 完整应用（页面产物）；`/mica-web` 是显式名字，两处内容完全相同
  * - `/share` —— 分享视图：`/share?session=<id>` 打开某条会话，`/share` 本身是分享链接列表
@@ -11,6 +12,8 @@
  *   会话列表；由顶栏的文件夹按钮经 `window.open` 打开，外壳把同源的这个页面开成窗口
  * - `/remote/control/*` —— 受控浏览器（主进程的窗口服务挂在 Unix socket 上，由运行时转发，
  *   见 apps/desktop/src/host/browser-control-proxy.js）
+ * - `/mcp/browser`、`/mcp/terminal` —— 两个受控能力给 agent 的 MCP 端点（单 tool，见
+ *   apps/desktop/src/host/control-mcp.js）
  * - `/api/*` —— 运行时能力（invoke / events / env / image）
  *
  * 放在 mica-web-shared 里是因为**两侧都要用同一份判断**：运行时据此路由，渲染器据此决定

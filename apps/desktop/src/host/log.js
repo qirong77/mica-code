@@ -274,6 +274,7 @@ export function readPerformanceSummary(options = {}) {
   let warns = 0
   let slowCalls = 0
   let samples = 0
+  let hiddenSamples = 0
   let first = 0
   let last = 0
 
@@ -288,6 +289,12 @@ export function readPerformanceSummary(options = {}) {
 
     // 渲染层采样点单独抽成时间线
     if (entry.scope === 'perf' && entry.event === 'sample') {
+      // 隐藏窗口的采样没有 lag（定时器被节流，算出来全是假冻结），只留 DOM/堆，
+      // 别让 Number(null) || 0 把它们混进「流畅」的那一档。
+      if (entry.vis !== 1 || typeof entry.lag !== 'number') {
+        hiddenSamples += 1
+        continue
+      }
       samples += 1
       timeline.push({
         at,
@@ -333,6 +340,7 @@ export function readPerformanceSummary(options = {}) {
       warns,
       slowCalls,
       samples,
+      hiddenSamples,
       spanMs: first && last ? last - first : 0
     },
     pending: queue.length,

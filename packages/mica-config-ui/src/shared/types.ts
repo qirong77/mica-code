@@ -65,6 +65,8 @@ export type ConfigWebPerformanceDetails = {
     slowCalls: number;
     /** 采样点数与观测时长。 */
     samples: number;
+    /** 隐藏窗口的采样数：这类采样没有 lag（定时器被节流），不计入 samples。 */
+    hiddenSamples: number;
     spanMs: number;
   };
   /** 当前进程内还没落盘的条数。 */
@@ -363,8 +365,11 @@ export type ConfigWebBrowserControlBrowser = {
 export type ConfigWebBrowserControlDetails = {
   available: boolean;
   serviceUrl: string | null;
+  /** agent 接入用的 MCP 端点（`/mcp/browser`），会话启动时写进 `--mcp-config`。 */
+  mcpUrl: string | null;
+  /** MCP 工具名（固定单工具 `control`）。 */
+  toolName: string;
   version: number;
-  skillPath: string | null;
   error: string | null;
   browsers: ConfigWebBrowserControlBrowser[];
   endpoints: ConfigWebBrowserControlEndpoint[];
@@ -413,8 +418,11 @@ export type ConfigWebTerminalControlSession = {
 export type ConfigWebTerminalControlDetails = {
   available: boolean;
   serviceUrl: string | null;
+  /** agent 接入用的 MCP 端点（`/mcp/terminal`），会话启动时写进 `--mcp-config`。 */
+  mcpUrl: string | null;
+  /** MCP 工具名（固定单工具 `control`）。 */
+  toolName: string;
   version: number;
-  skillPath: string | null;
   error: string | null;
   sessions: ConfigWebTerminalControlSession[];
   /** 与受控浏览器共用同一份端点描述形状（两份服务从各自的端点目录生成文档）。 */

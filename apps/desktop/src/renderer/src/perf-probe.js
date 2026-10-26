@@ -85,8 +85,13 @@ export function startPerfProbe(win, doc) {
 
   const sample = () => {
     const now = win.performance.now()
+    const visible = doc.visibilityState === 'visible'
     // 上一轮定时器本该在 SAMPLE_MS 后触发；多出来的就是主线程被占住的时间。
-    const lag = now - lastAt - SAMPLE_MS
+    //
+    // 隐藏窗口不能这样算：Chromium 会把定时器节流到 1 次/分钟，于是每条都是
+    // ~59s 的「冻结」，掩盖真实数据（整天的窗口就这样全成了噪声）。这时不记 lag，
+    // 返回 null 让分析端直接跳过这一维。
+    const lag = visible ? now - lastAt - SAMPLE_MS : null
     lastAt = now
     // 只在需要时量 DOM，其余采样复用上次结果
     if (domTick >= DOM_STATS_EVERY) {
@@ -95,12 +100,12 @@ export function startPerfProbe(win, doc) {
     }
     domTick += 1
     push({
-      lag: round(lag),
+      lag: lag == null ? null : round(lag),
       long: round(longMax),
       longN: longCount,
       ...domStatsCache,
       ...(heapStats(win) || {}),
-      vis: doc.visibilityState === 'visible' ? 1 : 0
+      vis: visible ? 1 : 0
     })
     // longtask 计数按窗口统计，别累加成全局总量
     longCount = 0
@@ -132,6 +137,11 @@ export function startPerfProbe(win, doc) {
 
   timer = win.setInterval(sample, SAMPLE_MS)
   flushTimer = win.setInterval(flush, FLUSH_MS)
+  // 重新可见时把基准点挪到当下：否则隐藏期间积累的时间会被算进第一帧的 lag。
+  const onVisibility = () => {
+    if (doc.visibilityState === 'visible') lastAt = win.performance.now()
+  }
+  doc.addEventListener?.('visibilitychange', onVisibility)
 
   const api = {
     version: 'perf-2',
@@ -143,6 +153,7 @@ export function startPerfProbe(win, doc) {
       stopped = true
       if (timer) win.clearInterval(timer)
       if (flushTimer) win.clearInterval(flushTimer)
+      doc.removeEventListener?.('visibilitychange', onVisibility)
       stopLongTask?.()
       if (win.__micaPerf === api) delete win.__micaPerf
     }

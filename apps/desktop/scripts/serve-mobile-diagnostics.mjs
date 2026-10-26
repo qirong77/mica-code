@@ -3,12 +3,24 @@ import { networkInterfaces, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { preview } from 'vite'
+import {
+  DEFAULT_RUNTIME_PORT,
+  RUNTIME_PORT_ENV,
+  loopbackRuntimeUrl,
+  parseRuntimePort
+} from '../../../packages/mica-web-shared/runtime-port.js'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = join(root, 'out/renderer')
 const version = 'keyboard-3'
-const port = 18787
-const upstreamPort = Number(process.env.MICA_DESKTOP_PORT || 8787)
+// 诊断代理自己也要一个端口：默认错开运行时一万（8787 → 18787），运行时换了端口它跟着换，
+// 不跟运行时抢；真要换用 MICA_DIAGNOSTICS_PORT。
+const port = parseRuntimePort(process.env.MICA_DIAGNOSTICS_PORT, DEFAULT_RUNTIME_PORT + 10000)
+// 显式给了 MICA_DESKTOP_PORT 就必须是合法端口：悄悄落回 8787 会去探另一台运行时，
+// 那正是这个脚本要排查的错觉。
+const upstreamPort = process.env[RUNTIME_PORT_ENV]
+  ? parseRuntimePort(process.env[RUNTIME_PORT_ENV], 0)
+  : DEFAULT_RUNTIME_PORT
 const maxBodyBytes = 256 * 1024
 const maxLogBytes = 20 * 1024 * 1024
 const logPath = join(tmpdir(), `mica-mobile-viewport-${process.pid}.ndjson`)
@@ -143,11 +155,9 @@ async function diagnostics(req, res, next) {
 }
 
 async function main() {
-  if (!Number.isInteger(upstreamPort) || upstreamPort < 1 || upstreamPort > 65535) {
-    throw new Error('MICA_DESKTOP_PORT must be a valid port')
-  }
+  if (!upstreamPort) throw new Error(`${RUNTIME_PORT_ENV} must be a valid port`)
   await access(join(outDir, 'index.html'))
-  const target = `http://127.0.0.1:${upstreamPort}`
+  const target = loopbackRuntimeUrl(upstreamPort)
   const health = await fetch(`${target}/api/health`, {
     signal: AbortSignal.timeout(5000),
     redirect: 'error'

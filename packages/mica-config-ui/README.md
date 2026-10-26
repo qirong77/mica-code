@@ -41,13 +41,13 @@ render(<ConfigWebApp />)
 `web/App.tsx` 的 section 白名单与 `web/layout/Sidebar.tsx` 的条目按宿主能力区分，浏览器宿主（`apps/config-web`）没有桌面运行时那两份数据：
 
 - **Auto Compact**（`supportsAutoCompact()`）：设置与按会话记账的计数活在运行时的 `userData/auto-compact.json`。**能力不存在时连侧栏入口都不显示**，带 `?section=autoCompact` 的深链退回 Config。
-- **Browser Control**（入口**各处都在**，不受能力门控）：受控浏览器窗口活在 Electron 主进程，运行时是纯 Node，两边靠本机 socket / 运行时端口上的 `/remote/control` 通信（`apps/desktop/src/host/browser-control.js`）。页面只讲两件事：服务状态（地址/版本/可用性/技能文件路径）与接口文档（分组、curl 示例、两个环境变量）；纯逻辑（接口分组、curl 示例）在 `web/browserControl.ts`。
+- **Browser Control**（入口**各处都在**，不受能力门控）：受控浏览器窗口活在 Electron 主进程，运行时是纯 Node，两边靠本机 socket / 运行时端口上的 `/remote/control` 通信（`apps/desktop/src/host/browser-control.js`）。页面只讲两件事：服务状态（地址/版本/可用性/MCP 端点与工具名）与接口文档（分组、curl 示例、两个环境变量）；纯逻辑（接口分组、curl 示例）在 `web/browserControl.ts`。
   - 入口刻意不藏：它是「Mica 里有一套能真正打开的浏览器」这件事的唯一说明处，藏起来会让人以为 Mica 没有这个能力。拿不到服务时 `readBrowserControlDetails()` 交回一份显式不可用的详情（`unavailableBrowserControlDetails`，reason 说清「只有从 Mica Code 应用里打开的配置页才连得上」并给出怎么开），页面照常渲染并提示未开启，`?section=browserControl` 也因此永远有效。
   - **这一页不管窗口**：开、显示、隐藏、关闭分别由 agent 调接口与主区顶栏的地球图标完成，页面列出来只会让人以为得手动建。客户端只有 `readBrowserControlDetails` 一个方法，**不要**再加回 create/close/show/hide（`ConfigWebClient` 上没有它们）。
-  - **页面不显示技能文档正文**：那份 `SKILL.md` 由应用在启动时写到 `$MICA_HOME/skills/mica-browser/`，内容只有一行服务地址（端点清单会随接口演进，抄进技能就是两处分叉）；页面只显示它的路径，正文要看就去读那个文件。文档源头只有一处：`apps/desktop/src/main/browser/browser-docs.js`。
-- **Terminal Control**（与 Browser Control 同一套做法，入口各处都在）：每个会话都是真实 PTY + 登录 shell，服务由 Electron 主进程提供，运行时在已有端口上代理 `/remote/terminal/*`（`apps/desktop/src/host/terminal-control.js`）。页面讲三件事：服务状态（地址/版本/可用性/技能文件路径）、当前会话（标题/cwd/尺寸/运行状态/窗口前后台）、接口文档（分组、curl 示例、两个环境变量）。纯逻辑在 `web/terminalControl.ts`，与浏览器页共用的端点分组/curl 在 `web/controlEndpoints.ts`。
+  - **agent 侧是 MCP**：会话启动时带一份只含 `/mcp/browser` 的 `--mcp-config`，单工具 `control` 不带参数返回操作文档；`config.json` 里的同名条目（无 owner）供 TUI / `mica exec` 使用，url 靠 `${MICA_DESKTOP_PORT:-8787}` 跟住端口。页面显示 MCP 端点与工具名，端点清单与 MCP 文档同源：`apps/desktop/src/main/browser/browser-docs.js`。
+- **Terminal Control**（与 Browser Control 同一套做法，入口各处都在）：每个会话都是真实 PTY + 登录 shell，服务由 Electron 主进程提供，运行时在已有端口上代理 `/remote/terminal/*`（`apps/desktop/src/host/terminal-control.js`）。页面讲三件事：服务状态（地址/版本/可用性/MCP 端点与工具名）、当前会话（标题/cwd/尺寸/运行状态/窗口前后台）、接口文档（分组、curl 示例、两个环境变量）。纯逻辑在 `web/terminalControl.ts`，与浏览器页共用的端点分组/curl 在 `web/controlEndpoints.ts`。
   - 与 Browser Control 一样**页面不管窗口**：会话由 agent 调 `POST /sessions` 创建，窗口的开 / 隐藏 / 关闭由 agent 与主区顶栏的终端图标完成；客户端只有 `readTerminalControlDetails` 一个方法。
-  - 文档源头只有一处：`apps/desktop/src/main/terminal/terminal-docs.js`（路由与文档同源），技能文件写到 `$MICA_HOME/skills/mica-terminal/SKILL.md`。
+  - 文档源头只有一处：`apps/desktop/src/main/terminal/terminal-docs.js`（路由、文档与 MCP 操作清单同源）；接入方式同样是 `/mcp/terminal` 的单工具 `control`。
 
 ## 约定
 

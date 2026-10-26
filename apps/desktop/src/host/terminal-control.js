@@ -1,29 +1,24 @@
 import { ipcMain } from 'electron'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { openSocketRequest, requestJson } from './control-client.js'
 import {
+  TERMINAL_MCP_KIND,
   TERMINAL_OWNER_ENV,
   TERMINAL_SOCKET_ENV,
   TERMINAL_URL_ENV,
   emptyTerminalSnapshot,
   normalizeTerminalSummaries,
   parseTerminalSseData,
-  resolveTerminalSkillTemplate,
   sameTerminalSessions,
-  skillNeedsWrite,
-  terminalDetailsFrom,
-  terminalSkillDocument,
-  terminalSkillFilePath
+  terminalDetailsFrom
 } from './terminal-control-core.js'
+import { controlMcpUrl } from './control-mcp-config.js'
 
 /**
  * 终端控制在运行时的门面：页面（顶栏图标、设置页）与 agent 各自从这一层进出。
  *
  * - **页面**通过 `terminal-control:*` IPC 读列表、显示/隐藏/关闭、新建；
- * - **agent** 不经过这里，它直接打 `MICA_TERMINAL_URL`（运行时端口 + `/remote/terminal`，
- *   由运行时在端口确定后自己写好），再随 `MICA_TERMINAL_OWNER` 传给每个会话进程。
+ * - **agent** 不经过这里：它通过运行时同源端口上的 MCP 端点 `/mcp/terminal` 使用这个能力
+ *   （见 control-mcp.js），配置由 control-mcp-config.js 按会话生成。
  *
  * 终端会话（真实 PTY）与窗口都活在 Electron 主进程里，运行时是纯 Node，两边只能靠本机
  * 通道通信：主进程把服务监听在一个 **Unix socket** 上（不占端口），运行时既把它代理成
@@ -39,7 +34,6 @@ let broadcaster = () => {}
 let state = { ...emptyTerminalSnapshot(), docs: null }
 let streamController = null
 let started = false
-let failedSkillWrite = false
 
 export function setTerminalControlBroadcaster(fn) {
   broadcaster = typeof fn === 'function' ? fn : () => {}
@@ -59,6 +53,15 @@ function hasService() {
   return Boolean(socketPath())
 }
 
+/** 运行时端口上的 MCP 端点：设置页展示它，agent 的 `--mcp-config` 也指向它。 */
+function mcpUrl() {
+  try {
+    return controlMcpUrl(new URL(serviceUrl()).origin, TERMINAL_MCP_KIND)
+  } catch {
+    return ''
+  }
+}
+
 function publish(reason = 'change') {
   const snapshot = getTerminalControlSnapshot()
   broadcaster('terminal:changed', { reason, ...snapshot })
@@ -69,8 +72,8 @@ export function getTerminalControlSnapshot() {
   return {
     available: hasService() && !state.error,
     serviceUrl: serviceUrl() || null,
+    mcpUrl: mcpUrl() || null,
     sessions: state.sessions || [],
-    skillPath: state.skillPath || null,
     error: state.error || null
   }
 }
@@ -112,43 +115,12 @@ async function loadDocs() {
       version: payload.version,
       endpoints: payload.endpoints,
       markdown: payload.markdown,
-      skillMarkdown: resolveTerminalSkillTemplate(payload.skillMarkdown, {
-        serviceUrl: serviceUrl()
-      })
+      guide: payload.guide
     }
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error)
   }
   return state.docs
-}
-
-/**
- * 把技能写进 `$MICA_HOME/skills/mica-terminal/SKILL.md`：agent 靠它知道这台机器上有一套
- * 真实终端、以及怎么把终端挂到当前会话上。内容变了才写，失败只标在文档里。
- */
-async function ensureSkillFile(docs) {
-  // 服务不可达时也要写：地址来自环境变量，与 `/docs` 是否成功无关
-  const markdown = docs?.skillMarkdown || terminalSkillDocument(serviceUrl())
-  if (typeof markdown !== 'string' || !markdown.trim()) return
-  const path = terminalSkillFilePath(resolveMicaHome(), process.platform === 'win32' ? '\\' : '/')
-  try {
-    let existing = null
-    try {
-      existing = await readFile(path, 'utf8')
-    } catch {
-      existing = null
-    }
-    if (!skillNeedsWrite(existing, markdown)) {
-      state.skillPath = path
-      return
-    }
-    await mkdir(join(resolveMicaHome(), 'skills', 'mica-terminal'), { recursive: true })
-    await writeFile(path, markdown, 'utf8')
-    state.skillPath = path
-  } catch (error) {
-    failedSkillWrite = true
-    console.error('[mica-desktop] 写入终端技能文档失败:', error)
-  }
 }
 
 /* ------------------------------------------------------------------ SSE 订阅 */
@@ -218,7 +190,7 @@ async function streamLoop(controller) {
 }
 
 /**
- * 由 server 在启动时调用一次：先取一次列表与文档（顺带写技能），再挂上 SSE。
+ * 由 server 在启动时调用一次：先取一次列表与文档，再挂上 SSE。
  * 没有 socket（纯 `npm run start:web`）时什么都不做。
  */
 export async function startTerminalControl() {
@@ -226,8 +198,7 @@ export async function startTerminalControl() {
   started = true
   if (!hasService()) return getTerminalControlSnapshot()
   await refresh('startup')
-  const docs = await loadDocs()
-  await ensureSkillFile(docs)
+  await loadDocs()
   streamController = new AbortController()
   void streamLoop(streamController)
   return getTerminalControlSnapshot()
@@ -279,8 +250,6 @@ export function registerTerminalControlIpc() {
   )
 
   ipcMain.handle('terminal-control:details', () => readTerminalControlDetails())
-
-  ipcMain.handle('terminal-control:open-skill', () => state.skillPath || null)
 }
 
 /**
@@ -305,20 +274,19 @@ export async function closeTerminalControlWindow({ id } = {}) {
   return getTerminalControlSnapshot()
 }
 
-/** 设置页用：文档 + 当前终端 + 技能文件位置 + 最近一次错误 */
+/** 设置页用：文档 + 当前终端 + MCP 端点 + 最近一次错误 */
 export async function readTerminalControlDetails() {
   if (!hasService()) {
-    return terminalDetailsFrom({ docs: null, sessions: [], serviceUrl: '', skillPath: null })
+    return terminalDetailsFrom({ docs: null, sessions: [], serviceUrl: '', mcpUrl: '' })
   }
   await refresh('details')
   const docs = await loadDocs()
-  await ensureSkillFile(docs)
   return terminalDetailsFrom({
     docs,
     sessions: state.sessions,
     serviceUrl: serviceUrl(),
-    skillPath: state.skillPath,
-    error: state.error || (failedSkillWrite ? '技能文件写入失败（权限或磁盘问题）' : null)
+    mcpUrl: mcpUrl(),
+    error: state.error || null
   })
 }
 

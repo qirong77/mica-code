@@ -1,4 +1,5 @@
 import { runConfigWebAction, type ConfigWebActionName } from '@packages/mica-config-ui/index.js';
+import { CONFIG_WEB_PORT_ENV, DEFAULT_CONFIG_WEB_PORT, parseRuntimePort } from '@packages/mica-web-shared/index.js';
 import { serveGeneratedStaticAsset } from './staticAssets.js';
 import { writeConfigWebState } from './singleton.js';
 import { resolveConfigWebAdvertisedUrl, resolveConfigWebBindHost } from './publicUrl.js';
@@ -7,13 +8,14 @@ import { fileURLToPath } from 'node:url';
 
 const IDLE_EXIT_DELAY_MS = 30_000;
 
-const DEFAULT_PORT = 13987;
-function readPreferredPort(): number | undefined {
-  const raw = process.env.MICA_CONFIG_WEB_PORT?.trim();
+/** 环境变量给的端口；未设置时 `undefined`（用默认值），设了但非法则直接抛错。 */
+export function readPreferredPort(): number | undefined {
+  const raw = process.env[CONFIG_WEB_PORT_ENV]?.trim();
   if (!raw) return undefined;
-  const port = Number(raw);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new Error(`Invalid MICA_CONFIG_WEB_PORT: ${raw}`);
+  const port = parseRuntimePort(raw, 0);
+  // 显式配置写错就直接报错，不落回默认值——否则「填了却没生效」比启动失败更难查
+  if (port === 0) {
+    throw new Error(`Invalid ${CONFIG_WEB_PORT_ENV}: ${raw}`);
   }
   return port;
 }
@@ -75,7 +77,7 @@ export async function startConfigWebServer(options: ConfigWebServerOptions): Pro
 
   const webServer = bun.serve({
     hostname: bindHost,
-    port: preferredPort ?? DEFAULT_PORT,
+    port: preferredPort ?? DEFAULT_CONFIG_WEB_PORT,
     async fetch(request: Request, server: Bun.Server<unknown>) {
       const url = new URL(request.url);
       if (url.pathname.startsWith('/api/')) return handleApiRequest(request, server, url);
@@ -147,7 +149,7 @@ async function startDevConfigWebServer(
     configFile: resolve(root, 'vite.config.ts'),
     server: {
       host: bindHost,
-      port: preferredPort ?? DEFAULT_PORT,
+      port: preferredPort ?? DEFAULT_CONFIG_WEB_PORT,
       strictPort: false,
       proxy: {
         '/api': {
@@ -243,14 +245,14 @@ async function resolveApiCall(
     case '/api/details/mcp':
       return method === 'GET' ? get('readMcpDetails') : METHOD_NOT_ALLOWED;
     case '/api/details/capabilities':
-      if (method === 'GET') return get('readCapabilityDefaults')
+      if (method === 'GET') return get('readCapabilityDefaults');
       if (method === 'PUT')
         return get('writeCapabilityDefaults', {
           disabledSkills: body.disabledSkills,
           disabledTools: body.disabledTools,
           disabledMcpServers: body.disabledMcpServers,
-        })
-      return METHOD_NOT_ALLOWED
+        });
+      return METHOD_NOT_ALLOWED;
     case '/api/details/skills':
       return method === 'GET' ? get('readSkillsDetails') : METHOD_NOT_ALLOWED;
     case '/api/details/roles':
@@ -283,7 +285,12 @@ function resolveFileCall(
     skill: { read: 'readSkillsDetails', create: 'createSkill', write: 'writeSkill', remove: 'deleteSkill' },
     mcp: { read: 'readMcpDetails', create: 'createMcpServer', write: 'writeMcpServer', remove: 'deleteMcpServer' },
   }[kind] as
-    | { read: ConfigWebActionName; create: ConfigWebActionName; write: ConfigWebActionName; remove: ConfigWebActionName }
+    | {
+        read: ConfigWebActionName;
+        create: ConfigWebActionName;
+        write: ConfigWebActionName;
+        remove: ConfigWebActionName;
+      }
     | undefined;
   if (!names) return METHOD_NOT_ALLOWED;
 

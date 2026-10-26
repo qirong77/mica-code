@@ -102,6 +102,8 @@ export function listSkills(cwd) {
         .trim()
       skills.push({
         name,
+        // 输入框选中所插入的就是这条绝对路径，所以扫描时直接带出去，渲染层不自己拼。
+        path: skillFile,
         description:
           description.length > MAX_DESCRIPTION ? description.slice(0, MAX_DESCRIPTION) : description
       })
@@ -111,4 +113,3 @@ export function listSkills(cwd) {
 
   return skills.sort(byName)
 }
-

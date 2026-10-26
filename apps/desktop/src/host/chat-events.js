@@ -121,7 +121,15 @@ export function buildChatEnv(env = process.env) {
 // Per-session resident `mica app-server` process: one host per chat node, kept
 // alive across turns so repeated messages skip process startup, session reload
 // and MCP re-init, and queued inputs get real after_iteration injection.
-export function buildAppServerArgs({ sessionId, cwd, model, variant, role, maxTurns }) {
+export function buildAppServerArgs({
+  sessionId,
+  cwd,
+  model,
+  variant,
+  role,
+  maxTurns,
+  mcpConfigPath
+}) {
   // Keep `--thinking` so reasoning deltas reach the renderer turn log and
   // status line, matching the pre-codex `mica run --format json --thinking`.
   const args = ['app-server', '--thinking']
@@ -131,6 +139,9 @@ export function buildAppServerArgs({ sessionId, cwd, model, variant, role, maxTu
   if (variant) args.push('--variant', variant)
   if (role) args.push('--role', role)
   if (Number.isInteger(maxTurns) && maxTurns > 0) args.push('--max-turns', String(maxTurns))
+  // 受控浏览器 / 终端以 MCP 形式接入：每会话一份配置（带 x-mica-owner），
+  // 与用户自己的 ~/.mica/config.json 合并（不是替换）。
+  if (mcpConfigPath) args.push('--mcp-config', mcpConfigPath)
   return args
 }
 

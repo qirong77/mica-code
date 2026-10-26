@@ -1,19 +1,13 @@
 /**
- * 终端控制在运行时的纯逻辑：环境变量约定、会话摘要归一化、技能文件装配、SSE 解析。
+ * 终端控制在运行时的纯逻辑：环境变量约定、会话摘要归一化、设置页详情装配、SSE 解析。
  *
  * 不 import electron、不发请求 —— 请求与 IPC 在 terminal-control.js，这里只放能直接测的部分。
  */
 
-import {
-  localSkillDocument,
-  resolveSkillTemplate,
-  skillFilePathFor,
-  skillNeedsWrite
-} from './control-skill.js'
 import { TERMINAL_CONTROL_PREFIX } from '@packages/mica-web-shared/index.js'
 
 /**
- * 地址、归属与 socket 三个变量名：一起写进技能文档与设置页，别在两处各写一份。
+ * 地址、归属与 socket 三个变量名：一起写进设置页，别在两处各写一份。
  *
  * 终端宿主活在 Electron 主进程里（真实 PTY + 窗口），它**不占 TCP 端口**，只监听一个
  * Unix socket；运行时在**自己已有的端口**上把 `/remote/terminal/*` 代理过去，所以 agent
@@ -28,24 +22,11 @@ export const TERMINAL_SOCKET_ENV = 'MICA_TERMINAL_SOCKET'
  */
 export { TERMINAL_CONTROL_PREFIX }
 
-/** 技能文件固定落在 `$MICA_HOME/skills/mica-terminal/SKILL.md` */
-export const SKILL_DIR_NAME = 'mica-terminal'
+/** 运行时暴露给 agent 的 MCP 端点（`/mcp/terminal`）。 */
+export const TERMINAL_MCP_KIND = 'terminal'
 
 export function emptyTerminalSnapshot(error = null) {
-  return { available: false, serviceUrl: null, sessions: [], skillPath: null, error }
-}
-
-/**
- * 技能里的 `$MICA_TERMINAL_URL` 是环境变量名，但技能文件同时要写进磁盘给人看，
- * 所以运行时知道真实地址时换成地址本身；拿不到就保留变量名（agent 进程里有它）。
- */
-export function resolveTerminalSkillTemplate(markdown, { serviceUrl = '' } = {}) {
-  return resolveSkillTemplate(markdown, { serviceUrl, envName: TERMINAL_URL_ENV })
-}
-
-/** 服务端文档拿不到时的技能正文：地址直接来自注入给会话进程的那个变量 */
-export function terminalSkillDocument(serviceUrl) {
-  return localSkillDocument('mica-terminal', serviceUrl)
+  return { available: false, serviceUrl: null, mcpUrl: null, sessions: [], error }
 }
 
 /** 归一化服务端返回的终端列表：界面只用这些字段，缺的给默认值 */
@@ -75,18 +56,13 @@ export function normalizeTerminalSummaries(value) {
     .filter((item) => item && item.id)
 }
 
-export { skillNeedsWrite }
-
-export function terminalSkillFilePath(homeDir, separator = '/') {
-  return skillFilePathFor(homeDir, SKILL_DIR_NAME, separator)
-}
-
-export function terminalDetailsFrom({ docs, sessions, serviceUrl, skillPath, error = null }) {
+export function terminalDetailsFrom({ docs, sessions, serviceUrl, mcpUrl = '', error = null }) {
   return {
     available: Boolean(serviceUrl),
     serviceUrl: serviceUrl || null,
+    mcpUrl: mcpUrl || null,
+    toolName: 'control',
     version: Number(docs?.version) || 0,
-    skillPath: skillPath || null,
     error,
     sessions: normalizeTerminalSummaries(sessions),
     endpoints: Array.isArray(docs?.endpoints) ? docs.endpoints : [],

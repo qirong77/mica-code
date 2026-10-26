@@ -6,12 +6,16 @@
  * 所以探活由运行时代劳。
  */
 
-export const DEFAULT_SERVER_PORT = 8787
+import { DEFAULT_RUNTIME_PORT } from '@packages/mica-web-shared'
+
+/** 默认端口：与运行时监听的那个端口同源（见 mica-web-shared 的 runtime-port）。 */
+export const DEFAULT_SERVER_PORT = DEFAULT_RUNTIME_PORT
 export const PROBE_TIMEOUT_MS = 2000
 
 /**
  * 把用户输入的 `[http://]host[:port]` 规范成某个运行时的 origin，非法返回 null。
- * 端口缺省补 8787（应用默认端口）；路径/查询/锚点一律丢掉——一个服务器就是一个 origin。
+ * 端口缺省补运行时默认端口（`DEFAULT_SERVER_PORT`）；路径/查询/锚点一律丢掉——一个服务器
+ * 就是一个 origin。
  */
 export function normalizeServerUrl(input) {
   const raw = String(input ?? '').trim()

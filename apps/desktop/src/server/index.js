@@ -43,17 +43,25 @@ import {
   createTerminalControlProxy,
   isTerminalControlPath
 } from '../host/terminal-control-proxy.js'
+import { CONTROL_MCP_PREFIX, createControlMcpHandler } from '../host/control-mcp.js'
+import { requestJson } from '../host/control-client.js'
+import { CONTROL_ORIGIN_ENV, removeLegacyControlSkills } from '../host/control-mcp-config.js'
+import { resolveMicaHome } from '@packages/mica-config/index.js'
 import {
+  DEFAULT_RUNTIME_PORT,
+  RUNTIME_PORT_ENV,
   SHARE_BASE_PATH,
   isFilesPagePath,
   isSharePath,
   isTerminalPagePath,
+  parseRuntimePort,
   toAssetPath
 } from '@packages/mica-web-shared'
 import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { registerStatsIpc } from '../host/stats.js'
 import { registerSkillsIpc } from '../host/skills.js'
+import { registerMcpCandidatesIpc } from '../host/mcp-candidates.js'
 import { registerPerfIpc } from '../host/perf.js'
 import { logger, flushLogs, registerDiagnosticsIpc } from '../host/log.js'
 import { registerClipboardIpc } from '../host/clipboard.js'
@@ -93,7 +101,6 @@ const runtimeLog = logger('runtime')
 
 const MODULE_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)))
 const PACKAGE_ROOT = resolve(MODULE_DIR, '..', '..')
-const DEFAULT_PORT = 8787
 const MAX_BODY_BYTES = 64 * 1024 * 1024
 const HEARTBEAT_MS = 15000
 
@@ -134,7 +141,7 @@ function parseSharing(value) {
 function parseArgs(argv) {
   const options = {
     host: process.env.MICA_DESKTOP_HOST || '0.0.0.0',
-    port: Number.parseInt(process.env.MICA_DESKTOP_PORT || '', 10) || DEFAULT_PORT,
+    port: parseRuntimePort(process.env[RUNTIME_PORT_ENV]),
     sharing: parseSharing(process.env.MICA_DESKTOP_SHARE_PORT ?? process.env.MICA_DESKTOP_SHARING),
     renderer: process.env.MICA_DESKTOP_RENDERER || join(PACKAGE_ROOT, 'out', 'renderer'),
     // dev 模式下页面由 Vite dev server 提供，服务端只承载 API
@@ -144,7 +151,7 @@ function parseArgs(argv) {
     const arg = argv[index]
     if (arg === '--host' && argv[index + 1]) options.host = argv[(index += 1)]
     else if (arg === '--port' && argv[index + 1])
-      options.port = Number.parseInt(argv[(index += 1)], 10)
+      options.port = parseRuntimePort(argv[(index += 1)])
     // 兼容历史上的 `--share-port 8890`（只认开关，端口号已无意义）与新的 `--no-share`
     else if (arg === '--share-port' && argv[index + 1])
       options.sharing = parseSharing(argv[(index += 1)])
@@ -430,6 +437,12 @@ export async function startDesktopServer(options = {}) {
   stripContainerEnv()
   initializeDesktopProcessPath()
   warmShellEnv()
+  // 这两个能力以前以 skill 形式接入：清掉应用自己写的那两个技能文件，避免 agent
+  // 同时看到「技能」和「MCP 工具」两套入口（用户改过的文件不动，见 control-mcp-config.js）。
+  removeLegacyControlSkills({
+    homeDir: resolveMicaHome(),
+    separator: process.platform === 'win32' ? '\\' : '/'
+  })
 
   const notifyServer = await createNotifyServer()
   setNotifyServer(notifyServer)
@@ -458,6 +471,7 @@ export async function startDesktopServer(options = {}) {
   registerGitIpc()
   registerStatsIpc()
   registerSkillsIpc()
+  registerMcpCandidatesIpc()
   registerPerfIpc()
   registerDiagnosticsIpc(ipcMain)
   registerClipboardIpc()
@@ -477,13 +491,19 @@ export async function startDesktopServer(options = {}) {
   const terminalProxy = createTerminalControlProxy({
     socketPath: process.env[TERMINAL_SOCKET_ENV]
   })
+  // agent 面向的入口是 MCP：两个能力各暴露一个 `/mcp/<kind>` 端点，只挂一个 tool，
+  // 文档按需返回（见 host/control-mcp.js）。纯 Web 宿主没有主进程服务，这里就是空的。
+  const controlMcp = createControlMcpEndpoints({
+    browserSocket: process.env[BROWSER_SOCKET_ENV],
+    terminalSocket: process.env[TERMINAL_SOCKET_ENV]
+  })
 
   const sharing = options.sharing !== false
   const server = createServer(
-    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy })
+    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy, controlMcp })
   )
   const host = options.host || '0.0.0.0'
-  const port = await listenWithFallback(server, host, options.port || DEFAULT_PORT, {
+  const port = await listenWithFallback(server, host, options.port || DEFAULT_RUNTIME_PORT, {
     label: '端口'
   })
 
@@ -491,12 +511,16 @@ export async function startDesktopServer(options = {}) {
   // （可能已回退）之后告知
   setRuntimeAddress({ port, host, sharing })
 
-  // agent 用的浏览器地址：**运行时自己的端口** + /remote/control（端口可能已从默认值回退，
-  // 所以必须等到这里才定）。会话进程靠继承这个变量拿到它，技能文档里也写它。
+  // 会话进程按这个地址拼 MCP 端点（`${origin}/mcp/browser`）；端口可能从默认值回退，
+  // 所以只能等到这里才写。
+  process.env[CONTROL_ORIGIN_ENV] = `http://127.0.0.1:${port}`
+
+  // HTTP 代理地址：**运行时自己的端口** + /remote/control（端口可能已从默认值回退，
+  // 所以必须等到这里才定）。页面与排查用的 curl 仍走这条路径；agent 走上面的 MCP 端点。
   if (process.env[BROWSER_SOCKET_ENV]) {
     process.env[BROWSER_URL_ENV] = `http://127.0.0.1:${port}${BROWSER_CONTROL_PREFIX}`
   }
-  // 挂上浏览器服务：取一次窗口列表 + 文档（顺带把技能文件写给 agent），再订阅它的 SSE。
+  // 挂上浏览器服务：取一次窗口列表 + 文档（设置页要用），再订阅它的 SSE。
   // 纯浏览器宿主（`npm run start:web`）没有 socket，什么都不做。
   void startBrowserControl()
 
@@ -544,6 +568,47 @@ export async function startDesktopServer(options = {}) {
 }
 
 /**
+ * 两个受控能力的 MCP 端点（`/mcp/browser`、`/mcp/terminal`）。
+ *
+ * 主进程没给 socket 就不创建：纯浏览器宿主（`npm run start:web`）里没有窗口与终端服务，
+ * 与其挂一个只会超时的假入口，不如让它 404 —— agent 的 mcp-config 本来也不会指向它。
+ */
+function createControlMcpEndpoints({ browserSocket, terminalSocket }) {
+  const endpoints = {}
+  if (browserSocket) {
+    endpoints.browser = createControlMcpHandler({
+      kind: 'mica-browser',
+      title: '受控浏览器',
+      usage:
+        '驱动 Mica 桌面端内置的浏览器窗口：新开窗口与标签页、导航、读页面内容、点击、输入、按键、滚动、截图、读 cookie 与控制台/网络记录。',
+      socketPath: browserSocket,
+      label: '受控浏览器服务',
+      loadCatalog: () =>
+        requestJson(browserSocket, '/browser/docs', {
+          timeoutMs: 4000,
+          label: '受控浏览器服务'
+        })
+    })
+  }
+  if (terminalSocket) {
+    endpoints.terminal = createControlMcpHandler({
+      kind: 'mica-terminal',
+      title: '终端控制',
+      usage:
+        '操作 Mica 桌面端内置的真实终端（node-pty）：新开会话、写输入、发按键、改尺寸、按条件等待输出、读当前屏幕、显示/隐藏/关闭窗口。',
+      socketPath: terminalSocket,
+      label: '终端控制服务',
+      loadCatalog: () =>
+        requestJson(terminalSocket, '/docs', {
+          timeoutMs: 4000,
+          label: '终端控制服务'
+        })
+    })
+  }
+  return endpoints
+}
+
+/**
  * 一个端口上的请求处理：先按路径分派服务（/api/*、/remote/control/*、/share、页面产物），
  * 再交给静态服务。`/share` 与 `/mica-web` 都是页面产物的别名，页面自己按 location.pathname
  * 判断「是不是分享视图」——判断只有一份，在 @packages/mica-web-shared 的 app-paths 里。
@@ -552,7 +617,8 @@ function createRequestHandler({
   rendererRoot,
   sharing = true,
   browserProxy = null,
-  terminalProxy = null
+  terminalProxy = null,
+  controlMcp = {}
 }) {
   return (req, res) => {
     void (async () => {
@@ -561,6 +627,22 @@ function createRequestHandler({
         // 分享视图（/share 与其子路径）：关掉分享时直接 404，免得以为还能分享。
         if (isSharePath(url.pathname) && !sharing) {
           return sendJson(res, 404, { ok: false, error: '分享视图已关闭' })
+        }
+
+        // 受控能力的 MCP 端点（/mcp/browser、/mcp/terminal）：agent 的唯一入口。
+        // 和 /api 同一套来源校验；MCP 用 POST/GET/DELETE，不能落到下面「只允许 GET」的兜底上。
+        if (url.pathname.startsWith(`${CONTROL_MCP_PREFIX}/`)) {
+          const origin = verifyRequestOrigin(req)
+          if (!origin.ok) return sendJson(res, origin.status, { ok: false, error: origin.error })
+          const kind = url.pathname.slice(CONTROL_MCP_PREFIX.length + 1)
+          const handler = controlMcp[kind]
+          if (!handler) {
+            return sendJson(res, 404, {
+              ok: false,
+              error: `没有这个 MCP 端点：${url.pathname}（只有桌面应用里才有）`
+            })
+          }
+          return await handler(req, res)
         }
 
         // 受控浏览器：窗口服务住在 Electron 主进程里（只有它开得了窗口），只监听 Unix

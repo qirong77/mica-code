@@ -7,6 +7,7 @@ import { resolveBrowserSocketPath, startBrowserHost } from './browser/browser-ho
 import { applyBrowserRenderSwitch } from './browser/browser-core.js'
 import { resolveTerminalSocketPath, startTerminalHost } from './terminal/terminal-host.js'
 import { TERMINAL_PAGE_PATH } from '@mica-app-paths'
+import { RUNTIME_PORT_ENV, loopbackRuntimeUrl, parseRuntimePort } from '@packages/mica-web-shared'
 import { appPageKey, isAppPageTarget } from './app-page-target.js'
 
 /**
@@ -22,7 +23,6 @@ import { appPageKey, isAppPageTarget } from './app-page-target.js'
  */
 
 const RUNTIME_ENTRY = join(__dirname, '../server/index.mjs')
-const DEFAULT_PORT = 8787
 const READY_PREFIX = '[mica-desktop] ready '
 // 与渲染层的顶栏高度（App.jsx 的 h-8）保持一致：macOS 的系统窗口按钮浮在顶栏上，
 // y 要让它在这一条里居中，setSheetOffset 决定原生提示框挂下来时贴在哪。
@@ -65,20 +65,19 @@ let lastFocusedWindow = null
 /* ------------------------------------------------------------------ 运行时 */
 
 function preferredPort() {
-  const value = Number.parseInt(process.env.MICA_DESKTOP_PORT || '', 10)
-  return Number.isInteger(value) && value > 0 ? value : DEFAULT_PORT
+  return parseRuntimePort(process.env[RUNTIME_PORT_ENV])
 }
 
 /** 端口上已经是我们自己的运行时就直接复用（dev 下避免两个运行时抢端口/状态） */
 async function probeRuntime(port) {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+    const response = await fetch(`${loopbackRuntimeUrl(port)}/api/health`, {
       signal: AbortSignal.timeout(1000)
     })
     if (!response.ok) return null
     const body = await response.json()
     if (body?.app !== 'mica-code-app') return null
-    return { url: `http://127.0.0.1:${port}`, port, owned: false }
+    return { url: loopbackRuntimeUrl(port), port, owned: false }
   } catch {
     return null
   }
@@ -119,7 +118,7 @@ function spawnRuntime(port, { pageFromDevServer }) {
       try {
         const info = JSON.parse(line)
         settled = true
-        resolve({ url: `http://127.0.0.1:${info.port}`, port: info.port, owned: true, child })
+        resolve({ url: loopbackRuntimeUrl(info.port), port: info.port, owned: true, child })
       } catch {
         // 就绪行还没收全，等下一个 chunk
       }
@@ -370,7 +369,7 @@ async function navigateToServer(state, target) {
   // 别的服务（或同一台机器上的另一个 mica 实例）占着时它会回退到随机端口，而页面只
   // 知道约定地址。先探活会连到恰好占着 8787 的那个实例上，那不是「本机」。（dev 下
   // 本机页面在 Vite dev server 上，这条分支把它换回本机页面地址。）
-  if (origin && origin === `http://127.0.0.1:${DEFAULT_PORT}` && localPageUrl) {
+  if (origin && origin === loopbackRuntimeUrl() && localPageUrl) {
     const existing = findServerWindow(originOf(localPageUrl))
     if (existing && existing !== state) {
       void enterWindow(existing)

@@ -13,7 +13,7 @@ function details(overrides: Partial<ConfigWebPerformanceDetails> = {}): ConfigWe
     available: true,
     dir: '/tmp/mica-logs',
     files: [{ name: 'perf-20260101.jsonl', bytes: 128, modifiedAt: 1 }],
-    totals: { events: 3, errors: 1, warns: 0, slowCalls: 0, samples: 2, spanMs: 1000 },
+    totals: { events: 3, errors: 1, warns: 0, slowCalls: 0, samples: 2, hiddenSamples: 0, spanMs: 1000 },
     pending: 0,
     buckets: [],
     timeline: [],

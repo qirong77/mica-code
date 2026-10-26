@@ -1,6 +1,6 @@
 /**
  * 终端控制的端点目录与文档。**唯一事实来源**：服务路由由它编译，`/terminal/capabilities`、
- * `/terminal/docs` 与写进 `$MICA_HOME/skills/mica-terminal/SKILL.md` 的技能都从它生成，
+ * `/terminal/docs`、设置页与 MCP server 暴露给 agent 的操作清单都从它生成，
  * 不会出现「文档写了但路由没实现」的漂移。
  */
 
@@ -33,9 +33,9 @@ export const TERMINAL_ENDPOINTS = [
     id: 'docs',
     method: 'GET',
     path: '/docs',
-    summary: '完整文档与技能文件原文',
+    summary: '完整文档与给 agent 的短提示',
     params: [],
-    returns: '{ ok, endpoints, markdown, skillMarkdown }'
+    returns: '{ ok, endpoints, markdown, guide }'
   },
   {
     id: 'listSessions',
@@ -239,6 +239,18 @@ function paramLabel(param) {
   return `${param.name}（${param.in}${param.required ? '，必填' : ''}）`
 }
 
+/**
+ * 给 agent 的短提示：MCP tool 返回的 doc 列表里带这段，比让模型翻整份 markdown 更省上下文。
+ * 详细文档仍然由 `buildDocsMarkdown` 生成（`/docs` 与设置页用）。
+ */
+export const TERMINAL_GUIDE = [
+  '推荐流程：createSession → waitFor({idleMs:800}) 等登录 shell 出提示符 → writeInput → waitFor 等输出稳定 → getSession 读屏幕。',
+  '屏幕文本已经过 ANSI 解析，TUI 的重绘、清屏、光标位置都按终端语义落定，不需要自己剥转义。',
+  'waitFor 默认跳过「刚输入命令的回显」所在行（30 秒内写入的原文），确实要匹配回显时传 skipEcho:false；判断命令成败优先用 expectExitCode 或 idleMs。',
+  '进程退出后屏幕仍可读；用完请自己 closeSession。没有窗口在看的已退出会话 10 分钟后回收，隐藏且 6 小时没有任何活动（输出、输入、改尺寸）的活会话也会被回收。',
+  'idleMs 只代表「这段时间没有新输出」：刚创建的终端可能还在启动 shell，命令要等它就绪才会执行，必要时把 idleMs 调大或多读一次屏幕。'
+].join('\n')
+
 export function buildDocsMarkdown({ serviceUrl = '$MICA_TERMINAL_URL' } = {}) {
   const lines = [
     '# 终端控制（Mica 桌面端内置）',
@@ -255,18 +267,7 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_TERMINAL_URL' } = {}) {
     '',
     '端点路径都相对服务地址：`$MICA_TERMINAL_URL/sessions` 就是 `POST /remote/terminal/sessions`。',
     '',
-    '推荐流程：POST /sessions 开一个 → POST .../wait 传 {"idleMs":800} 等登录 shell',
-    '打印提示符 → POST .../input 输入命令 → POST .../wait 传 {"idleMs":500} 等输出稳定 →',
-    'GET /sessions/:id 读屏幕。',
-    '屏幕文本已经过 ANSI 解析，TUI 的重绘、清屏、光标位置都按终端语义落定，不需要自己剥转义。',
-    '',
-    '`wait` 默认跳过「刚输入命令的回显」所在行（30 秒内写入的原文），所以敲完 `echo done`',
-    '再等 `done` 不会立刻命中命令本身；确实要匹配回显时传 {"skipEcho": false}。',
-    '判断命令成败优先用 {"expectExitCode":0} 或 `idleMs`，比匹配文本更稳。',
-    '进程退出后屏幕仍可读；没有窗口在看的已退出会话 10 分钟后自动回收，隐藏且 6 小时没有任何活动',
-    '（输出、输入、改尺寸）的活会话也会被回收；用完请自己 POST /sessions/:id/close。',
-    '`idleMs` 只代表「这段时间没有新输出」：刚创建的终端可能还在启动 shell，命令要等它就绪',
-    '才会执行，必要时把 idleMs 调大或多读一次屏幕。',
+    ...TERMINAL_GUIDE.split('\n'),
     '',
     '## 端点',
     ''
@@ -293,19 +294,4 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_TERMINAL_URL' } = {}) {
     lines.push('')
   }
   return `${lines.join('\n').trimEnd()}\n`
-}
-
-/**
- * 写进 `$MICA_HOME/skills/mica-terminal/SKILL.md` 的技能。
- *
- * 与 mica-browser 同一个理由：技能里只放地址，接口清单由 agent 自己 GET `${url}/terminal/docs`
- * 取最新版本，避免用户目录里那份文档随服务演进变成过期的抄本。
- */
-export function buildSkillMarkdown() {
-  return `---
-name: mica-terminal
----
-
-$MICA_TERMINAL_URL
-`
 }

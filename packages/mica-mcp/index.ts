@@ -1,5 +1,5 @@
 import { mcpServersAtom } from './client.js';
-import { loadMcpConfig, MCP_CONFIG_PATH, readMcpConfig } from './config.js';
+import { expandMcpEnv, loadMcpConfig, MCP_CONFIG_PATH, readMcpConfig } from './config.js';
 import { initMcp, reconnectMcpServer, shutdownMcp } from './service.js';
 
 export const micaMcp = {
@@ -13,6 +13,8 @@ export const micaMcp = {
   loadConfig: loadMcpConfig,
   /** 从显式文件读取 MCP server 定义；文件损坏时向调用方抛错。 */
   readConfig: readMcpConfig,
+  /** 展开 MCP 配置里的 `${VAR}` / `${VAR:-默认值}`。 */
+  expandEnv: expandMcpEnv,
   servers: mcpServersAtom,
   configPath: MCP_CONFIG_PATH,
 };

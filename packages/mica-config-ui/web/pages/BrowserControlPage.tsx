@@ -22,7 +22,7 @@ import type { ConfigWebBrowserControlDetails, ConfigWebBrowserControlEndpoint } 
  *
  * 这一页**不管窗口**：开、显示、隐藏、关闭分别由 agent 调接口与主区顶栏的图标完成，列在这里
  * 只会让人以为得手动建。它只讲服务状态与接口文档，展示口径全在 `browserControl.ts`。
- * 写给 agent 的技能文档不在这里展开——它由应用生成并同步到技能文件，正文只指向接口文档。
+ * agent 侧接入是 MCP（`/mcp/browser`，单工具 `control`）：端点与会话里是怎么带的见页面正文。
  */
 export function BrowserControlPage() {
   const [details, setDetails] = useState<ConfigWebBrowserControlDetails | null>(null);
@@ -117,13 +117,14 @@ export function BrowserControlPage() {
                 <Fact label="服务地址" value={details.serviceUrl || '—'} mono />
                 <Fact label="版本" value={details.version ? `v${details.version}` : '—'} />
                 <Fact label="窗口" value={String(details.browsers.length)} />
-                <Fact label="技能文件" value={details.skillPath || '—'} mono />
+                <Fact label="MCP 端点" value={details.mcpUrl || '—'} mono />
+                <Fact label="工具名" value={details.toolName || 'control'} mono />
               </dl>
 
-              {details.skillPath ? (
+              {details.mcpUrl ? (
                 <p className="control-note">
-                  技能文件是写给 agent 的 <code>SKILL.md</code>：告诉它这台机器上有一套能真正打开的浏览器、
-                  并指向下面的接口文档。
+                  agent 通过 MCP 使用这个能力：会话启动时带一份只含这个端点的 <code>--mcp-config</code>，工具{' '}
+                  <code>{details.toolName}</code> 不带参数调用会返回 全部操作的文档，带 <code>action</code> 再执行。
                 </p>
               ) : null}
 
@@ -142,7 +143,7 @@ export function BrowserControlPage() {
               <header className="control-head">
                 <div className="control-head-copy">
                   <h2>接口文档</h2>
-                  <p>agent 直接调用这些接口；窗口本身不会改地址，展开后可以复制 curl 示例。</p>
+                  <p>MCP 工具背后的同源端点，排查时可以直接跑；展开后可以复制 curl 示例。</p>
                 </div>
               </header>
               <ControlEndpointList

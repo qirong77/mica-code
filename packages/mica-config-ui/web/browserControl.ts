@@ -1,7 +1,4 @@
-import type {
-  ConfigWebBrowserControlDetails,
-  ConfigWebBrowserControlEndpoint,
-} from '../src/shared/types.js';
+import type { ConfigWebBrowserControlDetails, ConfigWebBrowserControlEndpoint } from '../src/shared/types.js';
 import { controlCurlExample, controlEnvHint } from './controlEndpoints.js';
 
 /**
@@ -33,8 +30,9 @@ export function unavailableBrowserControlDetails(
   return {
     available: false,
     serviceUrl: null,
+    mcpUrl: null,
+    toolName: 'control',
     version: 0,
-    skillPath: null,
     error: reason || BROWSER_CONTROL_DISABLED_REASON,
     browsers: [],
     endpoints: [],

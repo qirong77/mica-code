@@ -9,6 +9,7 @@
 - 关闭连接并清理工具注册：`micaMcp.shutdown()`。
 - 读取 MCP 配置：`micaMcp.loadConfig()`。
 - 从显式路径严格读取 MCP 配置：`micaMcp.readConfig(path)`。
+- 展开配置里的环境变量占位符：`micaMcp.expandEnv(value)`。
 - 暴露 MCP server 状态 store：`micaMcp.servers`。
 
 ## 使用入口
@@ -31,6 +32,26 @@ await micaMcp.init({ signal: abortController.signal });
 // server's complete connect + tools/list phase.
 await micaMcp.init({ parallel: true, initTimeoutMs: 3000 });
 ```
+
+## 环境变量展开
+
+`url` 与 `headers` 的值支持 `${VAR}` 与 `${VAR:-默认值}`，在 `loadConfig` / `readConfig`
+读取时展开。变量未定义（或为空串）且没写默认值时展开为空字符串。
+
+```json
+{
+  "mcpServers": {
+    "mica-browser": {
+      "type": "http",
+      "url": "http://127.0.0.1:${MICA_DESKTOP_PORT:-8787}/mcp/browser"
+    }
+  }
+}
+```
+
+桌面端的 MCP 端点跟着运行时端口走，写死端口会在 `MICA_DESKTOP_PORT` 改动或端口回退后
+静默连到别的实例。`command` / `args` / `env` 不展开：那几个值属于子进程自己的语义，
+提前吃掉 `${...}` 会破坏用户想原样传下去的变量。
 
 ## 设计约束
 

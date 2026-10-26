@@ -129,7 +129,11 @@ export function PerformancePage() {
         <PerfStat label="事件" value={totals?.events ?? 0} />
         <PerfStat label="错误" value={totals?.errors ?? 0} tone={totals?.errors ? 'danger' : undefined} />
         <PerfStat label="慢调用" value={totals?.slowCalls ?? 0} tone={totals?.slowCalls ? 'warn' : undefined} />
-        <PerfStat label="采样点" value={totals?.samples ?? 0} />
+        <PerfStat
+          label="采样点"
+          value={totals?.samples ?? 0}
+          hint={totals?.hiddenSamples ? `另有 ${totals.hiddenSamples} 帧窗口不可见，不记卡顿` : undefined}
+        />
         <PerfStat label="观测时长" value={formatSpan(totals?.spanMs ?? 0)} />
         <PerfStat label="未落盘" value={details?.pending ?? 0} />
       </div>
@@ -275,9 +279,19 @@ function sortBuckets(buckets: ConfigWebPerfBucket[], key: SortKey): ConfigWebPer
   return sorted;
 }
 
-function PerfStat({ label, value, tone }: { label: string; value: number | string; tone?: 'warn' | 'danger' }) {
+function PerfStat({
+  label,
+  value,
+  tone,
+  hint
+}: {
+  label: string;
+  value: number | string;
+  tone?: 'warn' | 'danger';
+  hint?: string;
+}) {
   return (
-    <div className={`perf-stat ${tone ? `perf-stat-${tone}` : ''}`}>
+    <div className={`perf-stat ${tone ? `perf-stat-${tone}` : ''}`} title={hint}>
       <div className="perf-stat-value">{value}</div>
       <div className="perf-stat-label">{label}</div>
     </div>

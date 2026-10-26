@@ -114,9 +114,23 @@ export type SessionTurnLease = {
   release(): void;
 };
 
+/**
+ * 一个 sessions/*.json 里读不出摘要的文件（`version: 1` 之前的两种旧格式：裸
+ * provider 消息数组，以及 `{id,title,updatedAt,messages}`）。它们不产生摘要，
+ * 但仍占着一个文件，必须记进索引：否则 `indexMatchesDisk` 永远判「索引不完整」，
+ * 每次 sessions/ 的 mtime 变化（等于每开一个新会话）都要全量重扫并解析整个目录。
+ *
+ * 存 size/mtime 是为了自愈——文件被改写或压缩过就重新尝试解析一次。
+ */
+type IndexReject = { id: string; size: number; mtimeMs: number };
+
+type SessionIndex = { sessions: SessionSummary[]; rejects: IndexReject[] };
+
 const MICA_HOME = resolveMicaHome();
 export const SESSION_DIR = resolve(MICA_HOME, 'sessions');
 const SESSION_INDEX_FILE = resolve(MICA_HOME, 'session-index.json');
+/** v2 起索引还会记下「读不出摘要的文件」，见 {@link IndexReject}。 */
+const SESSION_INDEX_VERSION = 2;
 const MALFORMED_LEASE_STALE_MS = 60_000;
 // A session persistent without any conversation is a leftover from an
 // allowEmpty turn-start save (see SessionController.saveCurrent) that never
@@ -128,6 +142,8 @@ const UNTITLED_SESSION_TITLE = 'Untitled session';
 export class SessionStore implements SessionStoreLike {
   /** In-memory metadata summaries sorted by updatedAt descending. Lazily built. */
   private cachedIndex: SessionSummary[] | null = null;
+  /** 与 cachedIndex 配套：读不出摘要的文件，见 {@link IndexReject}。 */
+  private cachedRejects: IndexReject[] = [];
   /** Directory mtime when cachedIndex was built, so a session persisted by
    * another process (app-server / desktop runtime / another CLI) invalidates the cache. */
   private cachedIndexDirMtime = 0;
@@ -249,56 +265,74 @@ export class SessionStore implements SessionStoreLike {
    * writers (or missing legacy files) are reconciled. */
   private buildIndexFromDiskOrRebuild(): SessionSummary[] {
     const fromDisk = this.readIndexFromDisk();
-    if (fromDisk && this.indexMatchesDisk(fromDisk)) return fromDisk;
+    if (fromDisk && this.indexMatchesDisk(fromDisk)) {
+      this.cachedRejects = fromDisk.rejects;
+      return fromDisk.sessions;
+    }
     const rebuilt = this.rebuildIndex();
     // Persist the rebuilt index even if we already had a cache: an incomplete
     // on-disk index (e.g. another process added sessions, or an earlier build
     // never persisted) would otherwise force every subsequent reader to rescan
     // and re-parse every session file.
-    this.cachedIndex = rebuilt;
+    this.cachedIndex = rebuilt.sessions;
+    this.cachedRejects = rebuilt.rejects;
     this.persistIndex(rebuilt);
-    return rebuilt;
+    return rebuilt.sessions;
   }
 
-  /** True when the index contains exactly the session ids currently on disk.
-   * A mismatch means another process registered/removed sessions that our
-   * (or the on-disk) index is missing, so a rebuild is the safe source. */
-  private indexMatchesDisk(index: SessionSummary[]): boolean {
+  /** True when the index accounts for exactly the files currently on disk:
+   * every summary and every reject has a file, the rejects are unchanged, and
+   * no file is left unaccounted for. A mismatch means another process
+   * registered/removed sessions, so a rebuild is the safe source. */
+  private indexMatchesDisk(index: SessionIndex): boolean {
     try {
-      const fileIds = new Set(
-        readdirSync(SESSION_DIR)
-          .filter((file) => file.endsWith('.json') && file !== 'index.json' && file !== 'session-index.json')
-          .map((file) => file.slice(0, -'.json'.length)),
-      );
-      if (fileIds.size !== index.length) return false;
-      return index.every((summary) => fileIds.has(summary.id));
+      const fileIds = listSessionIds();
+      if (fileIds.size !== index.sessions.length + index.rejects.length) return false;
+      if (!index.sessions.every((summary) => fileIds.has(summary.id))) return false;
+      for (const reject of index.rejects) {
+        if (!fileIds.has(reject.id)) return false;
+        // 文件变过就重扫一次，让它有机会重新解析成功（例如被压缩/修复过）。
+        const stat = statSync(sessionPath(reject.id));
+        if (stat.size !== reject.size || stat.mtimeMs !== reject.mtimeMs) return false;
+      }
+      return true;
     } catch {
       return false;
     }
   }
 
-  private readIndexFromDisk(): SessionSummary[] | null {
+  private readIndexFromDisk(): SessionIndex | null {
     try {
       if (!existsSync(SESSION_INDEX_FILE)) return null;
       const data = JSON.parse(readFileSync(SESSION_INDEX_FILE, 'utf-8')) as unknown;
       if (!data || typeof data !== 'object') return null;
       const sessions = (data as { sessions?: unknown }).sessions;
       if (!Array.isArray(sessions)) return null;
-      const summaries = sessions.filter(isSessionSummary).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-      return summaries;
+      const rejects = (data as { rejects?: unknown }).rejects;
+      return {
+        sessions: sessions.filter(isSessionSummary).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+        // v1 索引没有 rejects：返回空数组，于是第一次读会重建一次并升到 v2。
+        rejects: Array.isArray(rejects) ? rejects.filter(isIndexReject) : [],
+      };
     } catch {
       return null;
     }
   }
 
-  private rebuildIndex(): SessionSummary[] {
+  private rebuildIndex(): SessionIndex {
     ensureSessionDir();
     const summaries: SessionSummary[] = [];
+    const rejects: IndexReject[] = [];
     for (const file of readdirSync(SESSION_DIR)) {
       if (!file.endsWith('.json') || file === 'index.json' || file === 'session-index.json') continue;
       const path = resolve(SESSION_DIR, file);
       const session = this.read(path);
-      if (!session) continue;
+      if (!session) {
+        // 旧格式（没有 version/snapshot）：记进 rejects，让 id 集合能对上磁盘。
+        const stat = safeStat(path);
+        if (stat) rejects.push({ id: file.slice(0, -'.json'.length), size: stat.size, mtimeMs: stat.mtimeMs });
+        continue;
+      }
       if (isJunkEmptySession(session)) {
         // A session with no user/assistant conversation and no usage is a
         // leftover from an allowEmpty turn-start save. Drop it entirely unless
@@ -318,11 +352,18 @@ export class SessionStore implements SessionStoreLike {
       const summary = toSessionSummary(session);
       if (summary) summaries.push(summary);
     }
-    return summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return {
+      sessions: summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      rejects,
+    };
   }
 
-  private persistIndex(index: SessionSummary[] = this.cachedIndex ?? []): void {
-    const content = JSON.stringify({ version: 1, sessions: index }, null, 2);
+  private persistIndex(index: SessionIndex = { sessions: this.cachedIndex ?? [], rejects: this.cachedRejects }): void {
+    const content = JSON.stringify(
+      { version: SESSION_INDEX_VERSION, sessions: index.sessions, rejects: index.rejects },
+      null,
+      2,
+    );
     const tmpPath = `${SESSION_INDEX_FILE}.${process.pid}.tmp`;
     mkdirSync(MICA_HOME, { recursive: true });
     writeFileSync(tmpPath, `${content}\n`, 'utf-8');
@@ -357,14 +398,24 @@ export class SessionStore implements SessionStoreLike {
     // another process or an incomplete index) is repaired by the read path
     // (buildIndexFromDiskOrRebuild), which rescans and persists a complete
     // index once; the live turn stays responsive.
-    let index = this.readIndexFromDisk();
-    if (!index) {
-      index = this.cachedIndex && this.indexMatchesDisk(this.cachedIndex) ? this.cachedIndex : this.rebuildIndex();
+    const fromDisk = this.readIndexFromDisk();
+    let next: SessionIndex;
+    if (fromDisk) {
+      next = fromDisk;
+    } else if (this.cachedIndex) {
+      const cached = { sessions: this.cachedIndex, rejects: this.cachedRejects };
+      next = this.indexMatchesDisk(cached) ? cached : this.rebuildIndex();
+    } else {
+      next = this.rebuildIndex();
     }
-    mutate(index);
-    this.cachedIndex = index;
+    mutate(next.sessions);
+    // 刚保存的会话不可能是「读不出摘要」的旧文件，顺手清掉同名 reject。
+    const savedIds = new Set(next.sessions.map((entry) => entry.id));
+    next.rejects = next.rejects.filter((reject) => !savedIds.has(reject.id));
+    this.cachedIndex = next.sessions;
+    this.cachedRejects = next.rejects;
     this.cachedIndexDirMtime = dirMtimeMs();
-    this.persistIndex(index);
+    this.persistIndex(next);
   }
 
   private read(path: string): PersistedSession | null {
@@ -559,6 +610,33 @@ function createSessionStore(): SessionStore {
 
 function ensureSessionDir() {
   mkdirSync(SESSION_DIR, { recursive: true });
+}
+
+function isIndexReject(value: unknown): value is IndexReject {
+  if (!value || typeof value !== 'object') return false;
+  const reject = value as Record<string, unknown>;
+  return (
+    typeof reject.id === 'string' &&
+    typeof reject.size === 'number' &&
+    typeof reject.mtimeMs === 'number'
+  );
+}
+
+/** sessions/ 里当前所有会话文件的 id（不含索引自身的两个保留名）。 */
+function listSessionIds(): Set<string> {
+  return new Set(
+    readdirSync(SESSION_DIR)
+      .filter((file) => file.endsWith('.json') && file !== 'index.json' && file !== 'session-index.json')
+      .map((file) => file.slice(0, -'.json'.length)),
+  );
+}
+
+function safeStat(path: string) {
+  try {
+    return statSync(path);
+  } catch {
+    return null;
+  }
 }
 
 function sessionPath(id: string): string {

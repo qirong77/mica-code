@@ -225,7 +225,20 @@ on startup, plus a machine-readable `[mica-desktop] ready {"url":…,"port":…}
 container parses. `GET /api/health` answers whether a port is already serving Mica Code.
 
 It listens on **one** port and distinguishes its services by path (the conventions live in
-`packages/mica-web-shared/app-paths.ts`, shared with the renderer):
+`packages/mica-web-shared/app-paths.ts`, shared with the renderer). That port's number — `8787`
+unless `MICA_DESKTOP_PORT` / `--port` says otherwise — exists in exactly one place,
+`packages/mica-web-shared/runtime-port.js`: the runtime, the Electron shell, the renderer's `本机`
+shortcut, the Vite dev proxy and the mobile-diagnostics script all import it from there instead of
+each carrying a literal. Nothing else in the app opens a TCP port:
+
+- the controlled browser and the terminal service listen on **Unix sockets** in the app's
+  `userData` (`MICA_BROWSER_SOCKET` / `MICA_TERMINAL_SOCKET`), forwarded as `/remote/*` below;
+- `src/host/notifyServer.js` binds an **ephemeral** loopback port (`listen(0)`) for the duration of
+  one turn — nothing ever needs to know its number;
+- `scripts/serve-mobile-diagnostics.mjs` (a manual dev helper, not the app) picks the runtime port
+  plus 10000 — `18787` by default — overridable with `MICA_DIAGNOSTICS_PORT`.
+
+The paths:
 
 - `/` and `/mica-web` — the whole app (session list, files, terminals, settings);
 - `/share` — the surface a share link points at: `/share?session=<id>` opens that one conversation
@@ -236,6 +249,8 @@ It listens on **one** port and distinguishes its services by path (the conventio
   itself answers with the entry points (`/browser/docs`, `/browser/health`), so opening it in a browser
   tells you whether the service is up instead of a bare 404;
 - `/remote/terminal/*` — the agent-facing terminal API, forwarded to the main process (below);
+- `/mcp/browser` and `/mcp/terminal` — the two MCP endpoints the agent actually calls (one tool
+  each, `control`; see "Controlled browser windows" below);
 - `/api/*` — the runtime capabilities.
 
 That replaces the old second listener (share port `8890`, which used to scan upward to 8909): a share
@@ -282,9 +297,10 @@ The container can hand the agent a real browser. It is the one capability that c
 tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridges it for the page.
 
 - `src/main/browser/browser-host.js` is what `src/main/index.js` starts (`startBrowserHost()`): it
-  builds the manager, brings up the API server and hands the URL to the runtime through
-  `MICA_BROWSER_URL` (the runtime then passes that variable on to every `mica` child it spawns).
-  The port is `MICA_BROWSER_PORT` or `18767`, falling back to a random one when taken.
+  builds the manager and brings up the API server on a **Unix socket** (`MICA_BROWSER_SOCKET`, under
+  the app's `userData`), handed to the runtime through that variable — no TCP port of its own. The
+  runtime forwards the socket as `/remote/control/*` on its single port and every `mica` child gets
+  `MICA_BROWSER_URL` = that prefix.
 - `browser-manager.js` holds the windows. Each browser is a `BrowserWindow` whose own webContents
   renders a display-only chrome bar (`browser-chrome.js`: tab strip, read-only URL, owner) with the
   page in a `WebContentsView` below it — tabs, navigation and input are the API's job, there is no
@@ -297,8 +313,8 @@ tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridg
   `/browser/events`). Requests are JSON in/out, `x-mica-owner` (or `owner` in the body/query) says
   which mica session a window belongs to, and the server refuses anything that is not a local
   request (`Origin`/`Host` guard) so a random web page cannot drive it. `browser-docs.js` is the one
-  place the endpoint catalog lives: the routes, `/browser/docs` and the generated skill all read it,
-  and `browser-service.js` refuses to start if a documented endpoint has no handler.
+  place the endpoint catalog lives: the routes, `/browser/docs` and the MCP `control` tool's doc list
+  all read it, and `browser-service.js` refuses to start if a documented endpoint has no handler.
 - Screenshots go through CDP (`Page.captureScreenshot`) rather than `capturePage()` because a hidden
   window has no display surface. Input is the trade-off: native CDP events only reach a _visible_
   window, so `click`/`type`/`keys` fall back to in-page synthetic events while the window is hidden
@@ -316,18 +332,22 @@ tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridg
   default and can be turned off with `MICA_BROWSER_UNTHROTTLE=0` (it is a process-wide switch, not
   per-window).
 - `src/host/browser-control.js` is the runtime side: it reads `MICA_BROWSER_URL`, keeps the window
-  list fresh from `/browser/events`, broadcasts `browser:changed`, exposes the `browser-control:*`
-  IPC channels (used by the top bar and by the settings page) and writes the generated skill to
-  `$MICA_HOME/skills/mica-browser/SKILL.md` so the agent learns how to call it. Without that
-  environment variable — a standalone `npm run start:web` — everything degrades to "no browser
-  service" and the icons simply never appear.
+  list fresh from `/browser/events`, broadcasts `browser:changed` and exposes the `browser-control:*`
+  IPC channels (used by the top bar and by the settings page). The agent never calls the HTTP API
+  directly: `src/host/control-mcp.js` serves a single-tool MCP endpoint at `/mcp/browser` (calling it
+  without `action` returns the operation docs), and `src/host/control-mcp-config.js` writes a
+  per-session `--mcp-config` file carrying `x-mica-owner`. A `mica-browser` / `mica-terminal` entry in
+  `config.json` reaches the same endpoints from the TUI and `mica exec`; its url uses
+  `http://127.0.0.1:${MICA_DESKTOP_PORT:-8787}/mcp/<kind>` so it follows the runtime port (the
+  per-session file wins on name conflict). Without the socket — a standalone
+  `npm run start:web` — everything degrades to "no browser service" and the icons never appear.
 - The page (`App.jsx`) renders one icon per window of the active chat, immediately left of the
   terminal toggle: click toggles the native window, right-click (or a touch long press) destroys it
   after a confirmation, and the count badge distinguishes several windows of the same session.
   Browsers whose owner is unknown are shown dimmed rather than hidden, so a window opened by hand
   with `curl` is still manageable. The settings page has a _Browser Control_ section (its sidebar
   entry is always there; the data only exists inside the desktop runtime) that shows the service
-  status, the path of the skill file we generate for the agent, and the whole endpoint catalog. The
+  status, the MCP endpoint and tool name, and the whole endpoint catalog. The
   skill body itself is not shown — it is a single line (the service address), and copying the
   endpoint list into it would just drift; the agent fetches `/browser/docs` from the address. It
   deliberately does **not** manage windows — opening, showing, hiding and destroying a window is the
@@ -372,12 +392,12 @@ main process' Unix socket) so the agent only needs `MICA_TERMINAL_URL`.
   agent's job (`POST /sessions`), the same split as the browser icons.
 - `src/host/terminal-control.js` mirrors the browser bridge: it subscribes to `/terminal/events`,
   forwards `terminal:changed` only to pages watching that session (plus list subscribers), exposes
-  `terminal-control:*` IPC and writes
-  `$MICA_HOME/skills/mica-terminal/SKILL.md`. A standalone `npm run start:web` has no main process,
-  so `/remote/terminal/*` answers 503 instead of falling back to the SPA.
+  `terminal-control:*` IPC. The agent uses it through the `/mcp/terminal` MCP endpoint (same
+  single-tool bridge as the browser). A standalone `npm run start:web` has no main process, so
+  `/remote/terminal/*` answers 503 instead of falling back to the SPA.
 - The settings page has a _Terminal Control_ section next to _Browser Control_ (the sidebar entry is
   always there; only the desktop runtime can read the data). It shows the service address and
-  version, the generated skill file, every live session (title, cwd, size, running/exited, window in
+  version, the MCP endpoint, every live session (title, cwd, size, running/exited, window in
   the foreground or not) and the full endpoint catalog with copyable `curl` examples. Like the
   browser section it does **not** create or close sessions: that is the agent's job, and buttons
   would suggest you have to build them by hand.
@@ -464,8 +484,8 @@ one when 8787 is taken), because the share surface is a path on the one listener
 When sharing is off (`--no-share`) the dialog reports that sharing is unavailable.
 
 Copying a link also records the session in the share list (`src/host/shared-sessions.js` +
-`shared-sessions-core.js`, persisted to `userData/shared-sessions.json`), so the share port's index page
-(`/?` — the `ShareIndex` component, rendered by `main.jsx` when `/api/env` says `share: true` and no
+`shared-sessions-core.js`, persisted to `userData/shared-sessions.json`), so `/share` itself (the
+`ShareIndex` component, rendered by `main.jsx` when `/api/env` says `share: true` and no
 `?session=` is present) can list what has been handed out: title, working directory, when it was
 shared, a copy button, an open button and a remove button. That page is the only way to navigate there,
 since the share surface has no session list; a session that no longer exists stays in the list marked
@@ -501,7 +521,7 @@ A window can point at another machine's Mica runtime: hovering the sidebar's `Se
 
 Switching opens that address in **a new window** (desktop app) or **a new tab** (browser), so the server you are on keeps its own window instead of being replaced. `renderer/src/servers.js` picks the branch by user agent (`isElectronShell`): inside the container it hands the navigation to the shell (`location.assign`, intercepted by `will-navigate`), anywhere else it calls `window.open(url, '_blank')` and severs `window.opener` afterwards — deliberately not the `noopener` feature string, which makes `window.open` return `null` and would hide a blocked popup — falling back to the current tab when the popup _is_ blocked.
 
-The one thing the page cannot do itself is delegated to the runtime (`src/host/servers.js`, pure logic in `servers-core.js`): probing `GET /api/health` on the target, because a cross-origin `fetch` from the page is unreadable under CORS. Everything else is page-side: a successful probe is recorded by `servers.js` in `localStorage` (key `mica-servers`, newest first, eight entries max, deduplicated by host) and rendered as rows in the same style as the current server, so getting back to a machine is a click instead of retyping its address. Each entry is `{ url, note }` (legacy address-only arrays are still read) and the note is editable in place from the row — a hover-revealed pencil, saved on Enter or blur, cancelled with Esc — because `192.168.1.5` and `192.168.1.6` look alike; there is still no manual add/remove, so the list only ever holds addresses that answered as a Mica Code runtime, and it follows the page's origin, so a window on another machine has its own list. The `本机` entry is the fixed `http://127.0.0.1:8787` shortcut, only offered while the page is hosted by a non-loopback runtime (when it is, you are already home); the current server and that shortcut never appear twice in the list.
+The one thing the page cannot do itself is delegated to the runtime (`src/host/servers.js`, pure logic in `servers-core.js`): probing `GET /api/health` on the target, because a cross-origin `fetch` from the page is unreadable under CORS. Everything else is page-side: a successful probe is recorded by `servers.js` in `localStorage` (key `mica-servers`, newest first, eight entries max, deduplicated by host) and rendered as rows in the same style as the current server, so getting back to a machine is a click instead of retyping its address. Each entry is `{ url, note }` (legacy address-only arrays are still read) and the note is editable in place from the row — a hover-revealed pencil, saved on Enter or blur, cancelled with Esc — because `192.168.1.5` and `192.168.1.6` look alike; there is still no manual add/remove, so the list only ever holds addresses that answered as a Mica Code runtime, and it follows the page's origin, so a window on another machine has its own list. The `本机` entry is the fixed loopback-on-the-default-port shortcut (`LOCAL_SERVER_URL`, built from `DEFAULT_RUNTIME_PORT`), only offered while the page is hosted by a non-loopback runtime (when it is, you are already home); the current server and that shortcut never appear twice in the list.
 
 The container owns the navigation policy and one window per server (`src/main/index.js`). `will-navigate` lets a window's own origin (and the local page) navigate in place, hands the navigation to the window that already shows that server (focused, not reloaded), otherwise opens a new window when `/api/health` of the target reports `app: 'mica-code-app'`, and sends everything else to the system browser. Each window keeps its own state — `did-navigate` re-points that window's unread-badge subscription at the origin it shows and appends `— host:port` to its title, and the dock badge reflects the focused window. The first window is the local one and closing it only hides it; windows opened for other machines close for real. The app always starts on the local runtime (there is no "last server" record to restore). Because the server you switch to may be running an older bundle with no switcher of its own, **⇧⌘M** (shell level, `before-input-event`) always brings the local window to the front (loading it into the current window if it is gone), and the boot-error page offers 返回本机 whenever the current origin is not loopback — that click reloads the local page rather than focusing a window when the error page _is_ the local window, so it stays a recovery action.
 

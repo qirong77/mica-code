@@ -90,7 +90,8 @@ describe('unavailableBrowserControlDetails', () => {
     const details = unavailableBrowserControlDetails();
     expect(details.available).toBe(false);
     expect(details.serviceUrl).toBeNull();
-    expect(details.skillPath).toBeNull();
+    expect(details.mcpUrl).toBeNull();
+    expect(details.toolName).toBe('control');
     expect(details.browsers).toEqual([]);
     expect(details.endpoints).toEqual([]);
     expect(details.error).toContain('桌面应用');

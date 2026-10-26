@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -291,6 +291,46 @@ describe('SessionStore index reconciliation', () => {
 
       // The second writer must not clobber the first writer's entry from the index.
       expect(new SessionStore().listRecent(10).map((session) => session.id)).toEqual(['b', 'a']);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('records unreadable legacy files so a new session does not trigger a full rebuild', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-legacy-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      store.save(makeSession('real', '/tmp/real', '2026-01-01T00:00:00.000Z'));
+
+      // 两种 v1 之前的旧格式：裸消息数组与 {id,title,updatedAt,messages}。
+      writeFileSync(
+        join(SESSION_DIR, 'legacy-array.json'),
+        JSON.stringify([{ role: 'user', content: 'old prompt' }]),
+        'utf-8',
+      );
+      writeFileSync(
+        join(SESSION_DIR, 'legacy-object.json'),
+        JSON.stringify({ id: 'legacy-object', title: 'old', updatedAt: '2025-01-01T00:00:00.000Z', messages: [] }),
+        'utf-8',
+      );
+
+      // 第一次读：重建一次，把两个旧文件记成 rejects 并落盘。
+      expect(store.listRecent(10).map((session) => session.id)).toEqual(['real']);
+      const persisted = JSON.parse(readFileSync(join(micaHome, 'session-index.json'), 'utf-8')) as {
+        rejects?: { id: string }[];
+      };
+      expect(persisted.rejects?.map((reject) => reject.id).sort()).toEqual(['legacy-array', 'legacy-object']);
+
+      // 之后每存一个新会话都会改 sessions/ 的 mtime，但索引已经能对上磁盘，
+      // 所以不能再重新解析目录（旧文件不在索引里就是永久失配，等于每次全量重扫）。
+      const rebuild = vi.spyOn(SessionStore.prototype as unknown as { rebuildIndex: () => unknown }, 'rebuildIndex');
+      const fresh = new SessionStore();
+      fresh.save(makeSession('next', '/tmp/next', '2026-01-03T00:00:00.000Z'));
+      expect(new SessionStore().listRecent(10).map((session) => session.id)).toEqual(['next', 'real']);
+      expect(rebuild).not.toHaveBeenCalled();
     } finally {
       rmSync(micaHome, { recursive: true, force: true });
     }

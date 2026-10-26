@@ -51,6 +51,8 @@ export default function ComposerCompletionPalette({
             role="option"
             aria-selected={index === activeIndex}
             className={index === activeIndex ? 'chat-command-active' : ''}
+            // skill 插入的是路径而不是 `/name`，悬停时先让人看清会插进去什么
+            title={item.kind === 'skill' ? item.path || undefined : undefined}
             onMouseEnter={() => onActiveIndex(index)}
             // 按下就插入，避免 mousedown 先把焦点从 textarea 拿走
             onMouseDown={(event) => event.preventDefault()}

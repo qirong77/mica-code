@@ -5,9 +5,11 @@ import {
   applyCompletion,
   completionInsertText,
   fileCompletionOptions,
+  mcpCompletionInsertText,
   matchIndexes,
   rankCompletions,
-  skillCompletionOptions
+  skillCompletionOptions,
+  slashCompletionOptions
 } from './chat-completions'
 
 describe('composer completions', () => {
@@ -38,9 +40,23 @@ describe('composer completions', () => {
   })
 
   it('builds insert texts for both kinds', () => {
-    expect(completionInsertText({ kind: 'skill', name: 'ask' })).toBe('/ask ')
+    expect(
+      completionInsertText({
+        kind: 'skill',
+        name: 'ask',
+        path: '/home/u/.mica/skills/ask/SKILL.md'
+      })
+    ).toBe('/home/u/.mica/skills/ask/SKILL.md ')
     expect(completionInsertText({ kind: 'file', path: 'src/a.ts' })).toBe('@src/a.ts ')
     expect(completionInsertText({ kind: 'file', path: 'a b/c.ts' })).toBe('@"a b/c.ts" ')
+  })
+
+  it('quotes the skill path when it contains spaces and falls back to the name', () => {
+    expect(
+      completionInsertText({ kind: 'skill', name: 'ask', path: '/home/a b/skills/ask/SKILL.md' })
+    ).toBe('"/home/a b/skills/ask/SKILL.md" ')
+    // 老候选（没有 path）退回 `/name`，不至于插出一段空白
+    expect(completionInsertText({ kind: 'skill', name: 'ask' })).toBe('/ask ')
   })
 
   it('keeps the file insert text identical to the CLI mention', () => {
@@ -116,7 +132,13 @@ describe('composer completions', () => {
 
   it('builds palette options with the slash prefix and highlighted matches', () => {
     const [option] = skillCompletionOptions(
-      [{ name: 'am-alarm-scan', description: '上线后的 AM 告警扫描' }],
+      [
+        {
+          name: 'am-alarm-scan',
+          description: '上线后的 AM 告警扫描',
+          path: '/Users/me/.mica/skills/am-alarm-scan/SKILL.md'
+        }
+      ],
       'alarm'
     )
 
@@ -124,6 +146,7 @@ describe('composer completions', () => {
       key: 'skill:am-alarm-scan',
       kind: 'skill',
       name: 'am-alarm-scan',
+      path: '/Users/me/.mica/skills/am-alarm-scan/SKILL.md',
       label: '/am-alarm-scan',
       description: '上线后的 AM 告警扫描'
     })
@@ -144,6 +167,75 @@ describe('composer completions', () => {
 
   it('accepts a missing skill list', () => {
     expect(skillCompletionOptions(null, 'x')).toEqual([])
+  })
+
+  it('ranks skills and MCP servers in one list', () => {
+    const options = slashCompletionOptions(
+      {
+        skills: [{ name: 'cooper', description: 'Cooper docs', path: '/h/skills/cooper/SKILL.md' }],
+        mcpServers: [
+          { name: 'mica-browser', type: 'http', tools: ['control'] },
+          { name: 'mica-terminal', type: 'http', tools: ['control'] }
+        ]
+      },
+      ''
+    )
+
+    expect(options.map((option) => option.label)).toEqual([
+      '/cooper',
+      'mcp:mica-browser',
+      'mcp:mica-terminal'
+    ])
+  })
+
+  it('narrows the merged list to the query and marks MCP labels after the prefix', () => {
+    const options = slashCompletionOptions(
+      {
+        skills: [{ name: 'cooper', description: 'Cooper docs' }],
+        mcpServers: [{ name: 'mica-browser', type: 'http', tools: ['control'] }]
+      },
+      'browser'
+    )
+
+    expect(options).toHaveLength(1)
+    expect(options[0]).toMatchObject({
+      kind: 'mcp',
+      name: 'mica-browser',
+      label: 'mcp:mica-browser',
+      tools: ['control'],
+      description: 'MCP · 工具：control'
+    })
+    // 名称里从第 5 个字符（`mica-` 之后）开始命中，再右移 `mcp:` 的 4 个字符
+    expect(options[0].highlights).toEqual([9, 10, 11, 12, 13, 14, 15])
+  })
+
+  it('still lists skills when the MCP side is empty or failed', () => {
+    const options = slashCompletionOptions(
+      { skills: [{ name: 'cooper', description: '' }], mcpServers: [] },
+      ''
+    )
+    expect(options.map((option) => option.label)).toEqual(['/cooper'])
+    expect(slashCompletionOptions({}, '')).toEqual([])
+  })
+
+  it('inserts the MCP server with its tool names', () => {
+    expect(mcpCompletionInsertText({ name: 'mica-browser', tools: ['control'] })).toBe(
+      '使用 MCP server「mica-browser」（工具：control） '
+    )
+    expect(completionInsertText({ kind: 'mcp', name: 'mica-browser', tools: ['control'] })).toBe(
+      '使用 MCP server「mica-browser」（工具：control） '
+    )
+    // 工具名未知时只留 server 名，不编一段空括号
+    expect(completionInsertText({ kind: 'mcp', name: 'sequential-thinking', tools: [] })).toBe(
+      '使用 MCP server「sequential-thinking」 '
+    )
+  })
+
+  it('caps the listed tools so one pick cannot flood the composer', () => {
+    const tools = Array.from({ length: 9 }, (_, index) => `tool-${index}`)
+    expect(mcpCompletionInsertText({ name: 'big', tools })).toBe(
+      '使用 MCP server「big」（工具：tool-0、tool-1、tool-2、tool-3、tool-4、tool-5 等） '
+    )
   })
 
   it('matchIndexes finds every occurrence, ignoring case', () => {

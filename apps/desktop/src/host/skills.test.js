@@ -51,7 +51,9 @@ describe('host skill scanning', () => {
     mkdirSync(join(home, 'skills', 'empty'), { recursive: true })
     writeFileSync(join(home, 'skills', 'loose.md'), 'nope', 'utf-8')
 
-    expect(listSkills(null)).toEqual([{ name: 'plain', description: '' }])
+    expect(listSkills(null)).toEqual([
+      { name: 'plain', path: join(home, 'skills', 'plain', 'SKILL.md'), description: '' }
+    ])
   })
 
   it('keeps the project skill when a user skill has the same name', () => {

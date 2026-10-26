@@ -120,13 +120,14 @@ export function TerminalControlPage() {
                 <Fact label="服务地址" value={details.serviceUrl || '—'} mono />
                 <Fact label="版本" value={details.version ? `v${details.version}` : '—'} />
                 <Fact label="会话" value={String(details.sessions.length)} />
-                <Fact label="技能文件" value={details.skillPath || '—'} mono />
+                <Fact label="MCP 端点" value={details.mcpUrl || '—'} mono />
+                <Fact label="工具名" value={details.toolName || 'control'} mono />
               </dl>
 
-              {details.skillPath ? (
+              {details.mcpUrl ? (
                 <p className="control-note">
-                  技能文件是写给 agent 的 <code>SKILL.md</code>：告诉它这台机器上有一个能真正执行的终端、
-                  怎么读屏与输入，并指向下面的接口文档。
+                  agent 通过 MCP 使用这个能力：会话启动时带一份只含这个端点的 <code>--mcp-config</code>，工具{' '}
+                  <code>{details.toolName}</code> 不带参数调用会返回 全部操作的文档，带 <code>action</code> 再执行。
                 </p>
               ) : null}
 

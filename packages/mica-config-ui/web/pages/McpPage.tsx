@@ -6,7 +6,7 @@ import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
 import { mcpStatusLabel, mcpStatusTone, mcpTypeLabel } from '../labels.js';
-import type { ConfigWebMcpDetails } from '../../src/shared/types.js';
+import type { ConfigWebMcpDetails, ConfigWebMcpServer } from '../../src/shared/types.js';
 
 export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
   const [details, setDetails] = useState<ConfigWebMcpDetails | null>(null);
@@ -193,7 +193,10 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
                       {server.target || mcpTypeLabel(server.type)}
                     </span>
                   </span>
-                  <span className={`role-list-item-dot role-list-item-dot-${mcpStatusTone(server.status)}`} />
+                  <span
+                    className={`role-list-item-dot role-list-item-dot-${mcpStatusTone(server.status)}`}
+                    title={mcpStatusLabel(server.status)}
+                  />
                 </button>
               ))}
             </div>
@@ -203,7 +206,7 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
                   <h3>{selectedServer?.name}</h3>
                   {selectedServer ? (
                     <p className="muted-text editor-pane-subtitle">
-                      {mcpTypeLabel(selectedServer.type)} · {selectedServer.toolCount} 个工具
+                      {mcpSubtitle(selectedServer)}
                       {selectedServer.error ? ` · ${selectedServer.error}` : ''}
                     </p>
                   ) : null}
@@ -232,4 +235,17 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 详情副标题。
+ *
+ * http server 在打开页面时就握过手，工具数是真的；stdio 的进程只在会话里起，所以这里不写
+ * 「0 个工具」——那会读成「配了个空的」，改为说明连接时机。
+ */
+function mcpSubtitle(server: ConfigWebMcpServer): string {
+  const type = mcpTypeLabel(server.type);
+  if (server.status === 'connected') return `${type} · ${server.toolCount} 个工具`;
+  if (server.type === 'stdio') return `${type} · 启动会话时连接`;
+  return type;
 }

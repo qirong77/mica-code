@@ -13,11 +13,11 @@ import {
   browserSummary
 } from './browser-core.js'
 import {
+  BROWSER_GUIDE,
   BROWSER_ENDPOINTS,
   BROWSER_SERVICE_APP,
   BROWSER_SERVICE_VERSION,
   buildDocsMarkdown,
-  buildSkillMarkdown,
   capabilityCatalog
 } from './browser-docs.js'
 
@@ -190,6 +190,10 @@ export function createBrowserService({
     server,
     handle,
     broadcast,
+    /**
+     * 监听 TCP——**只给测试用**：生产环境一律 `listenSocket`。留着它是因为接口测试要一个
+     * 真实可连的地址，`fetch` 对 Unix socket 不友好。业务代码不要再调这个方法。
+     */
     listen(port, host = '127.0.0.1') {
       return new Promise((resolve, reject) => {
         const onError = (error) => {
@@ -251,7 +255,7 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
       serviceUrl: address()?.url || '',
       endpoints: BROWSER_ENDPOINTS,
       markdown: buildDocsMarkdown({ serviceUrl: address()?.url || '$MICA_BROWSER_URL' }),
-      skillMarkdown: buildSkillMarkdown()
+      guide: BROWSER_GUIDE
     }),
 
     listBrowsers: () => ({ browsers: manager().listBrowsers() }),

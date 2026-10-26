@@ -1,8 +1,7 @@
 /**
  * 受控浏览器的端点目录与文档。**这是唯一事实来源**：主进程的 HTTP 路由表由它编译
- * （见 browser-core.js 的 compileRoutes），设置页的 Browser Control 一节和写进
- * `$MICA_HOME/skills/mica-browser/SKILL.md` 的技能文档也由它生成 —— 于是不会出现
- * 「文档写了但路由没实现」或反过来的漂移。
+ * （见 browser-core.js 的 compileRoutes），设置页的 Browser Control 一节、MCP server
+ * 暴露给 agent 的操作清单也由它生成 —— 于是不会出现「文档写了但路由没实现」或反过来的漂移。
  */
 
 export const BROWSER_SERVICE_APP = 'mica-code-browser'
@@ -37,9 +36,9 @@ export const BROWSER_ENDPOINTS = [
     id: 'docs',
     method: 'GET',
     path: '/browser/docs',
-    summary: '完整文档与技能文件原文',
+    summary: '完整文档与给 agent 的短提示',
     params: [],
-    returns: '{ ok, endpoints, markdown, skillMarkdown }'
+    returns: '{ ok, endpoints, markdown, guide }'
   },
   {
     id: 'listBrowsers',
@@ -362,6 +361,19 @@ function paramLabel(param) {
   return `${param.name}（${param.in}${param.required ? '，必填' : ''}）`
 }
 
+/**
+ * 给 agent 的短提示：MCP tool 返回的 doc 列表里带这段，比让模型翻整份 markdown 更省上下文。
+ * 详细文档仍然由 `buildDocsMarkdown` 生成（`/browser/docs` 与设置页用）。
+ */
+export const BROWSER_GUIDE = [
+  '先 listBrowsers 看有没有窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。',
+  '等页面别 sleep：用 waitFor（不给条件 = 等加载完成，也可等元素/文本/地址）。',
+  '读页面优先 content / evaluate；不要 hook fetch —— 要核对请求参数看 network 记录里的 body 与 headers。',
+  '截图超时（页面忙、长任务）先重试；仍失败就改用 evaluate 读 DOM / content 校验收敛。',
+  'evaluate 里的复杂逻辑写成 (async () => { … })()，它会等待 Promise。',
+  '用户关窗口只是隐藏（页面状态保留）；hideBrowser 同理，closeBrowser 才真正销毁。'
+].join('\n')
+
 export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
   const lines = [
     '# 受控浏览器（Mica 桌面端内置）',
@@ -375,17 +387,9 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     '',
     '## 使用提示（踩过的坑）',
     '',
-    '- 先 `GET /browser/health` 探活。返回 503 且 error 提到 socket 不存在/未响应，说明 Mica Code',
-    '  应用（主进程）没在提供这个服务，重启应用可恢复；纯 `npm run start:web` 的宿主没有这个能力。',
-    '- 复杂脚本不要塞进 shell 的 `curl -d`：把 `{"expression":"…"}` 写成 JSON 文件，再 `curl -d @文件`。',
-    '  在命令里手写转义是最常见的失败来源（引号、反斜杠、换行各错一次就白跑一轮）。',
-    '  页面逻辑建议放 `(async () => { … })()`，`evaluate` 会等待 Promise。',
-    '- 等页面别 `sleep`：用 `POST /browser/tabs/:id/wait`（不给条件 = 等加载完成，也可等元素/文本/地址）。',
-    '- 要核对请求参数就看 `GET /browser/tabs/:id/network` 的 `body`，不要在页面里 hook `fetch`/`XMLHttpRequest`',
-    '  —— hook 会干扰真实请求，已经出现过把页面请求打坏、必须回滚的情况。',
-    '- 想确认「请求到底打给哪个后端 / 环境头有没有带上」，看同一条记录的 `headers`（如 `nuwa-wings`），',
-    '  不用自己再发一遍请求做对照实验。',
-    '- 截图超时（页面忙、长任务）先重试；仍失败就改用 `evaluate` 读 DOM / `content` 校验收敛。',
+    ...BROWSER_GUIDE.split('\n').map((line) => `- ${line}`),
+    '- 服务探活：`GET /browser/health` 返回 503 说明 Mica Code 应用（主进程）没在提供服务，',
+    '  重启应用可恢复；纯 `npm run start:web` 的宿主没有这个能力。',
     '',
     '## 端点',
     ''
@@ -412,19 +416,4 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     lines.push('')
   }
   return `${lines.join('\n').trimEnd()}\n`
-}
-
-/**
- * 写进 `$MICA_HOME/skills/mica-browser/SKILL.md` 的技能。
- *
- * 刻意只有一行地址：接口清单会随服务演进，抄一份到技能里就会两处分叉（用户目录里那份
- * 还会被下次启动覆盖）。agent 拿到地址后 GET `${url}/browser/docs` 自己取最新文档。
- */
-export function buildSkillMarkdown() {
-  return `---
-name: mica-browser
----
-
-$MICA_BROWSER_URL
-`
 }

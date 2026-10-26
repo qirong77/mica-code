@@ -1,6 +1,7 @@
 import { clipboard, ipcMain } from 'electron'
 import { prewarmFileMentions } from '@packages/mica-file-mentions/index.js'
 import { readBtwState } from '@packages/mica-common/btwState.js'
+import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { spawn } from 'child_process'
 import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
@@ -33,6 +34,11 @@ import { bindLoopSessionId } from './loops'
 import { readAutoCompactTurnParams, recordAutoCompactStatus } from './auto-compact'
 import { browserOwnerEnv } from './browser-control'
 import { terminalOwnerEnv } from './terminal-control'
+import {
+  CONTROL_ORIGIN_ENV,
+  availableControlKinds,
+  writeControlMcpConfig
+} from './control-mcp-config'
 
 /**
  * Mica chat service: one resident `mica app-server` process per chat node
@@ -863,13 +869,26 @@ function spawnChatHost(id, sender, payload) {
     typeof payload.variant === 'string' && payload.variant.trim() ? payload.variant.trim() : ''
   const role = typeof payload.role === 'string' && payload.role.trim() ? payload.role.trim() : ''
 
+  // 这个进程是谁：绑定会话后就是会话 id，草稿态用页签 id。
+  const owner = sessionId || id
+  // 受控浏览器 / 终端以 MCP 接入，owner 写进配置的请求头 —— 端口和可用能力都是
+  // 运行时的状态，所以只能在这一刻生成（`--mcp-config` 与用户配置合并）。
+  const mcpConfigPath = writeControlMcpConfig({
+    homeDir: resolveMicaHome(),
+    origin: process.env[CONTROL_ORIGIN_ENV] || '',
+    owner,
+    kinds: availableControlKinds(),
+    separator: process.platform === 'win32' ? '\\' : '/'
+  })
+
   const args = buildAppServerArgs({
     sessionId,
     cwd,
     model,
     variant,
     role,
-    maxTurns: payload.maxTurns
+    maxTurns: payload.maxTurns,
+    mcpConfigPath
   })
 
   let child
@@ -878,7 +897,7 @@ function spawnChatHost(id, sender, payload) {
       cwd: cwd || process.cwd(),
       // 还没绑定会话的草稿用页签 id 当 owner：agent 那一轮开出来的浏览器窗口照样
       // 能落到当前这个页签的图标上（node id 全程稳定）。
-      env: buildSpawnEnv(process.env, sessionId || id),
+      env: buildSpawnEnv(process.env, owner),
       stdio: ['pipe', 'pipe', 'pipe']
     })
   } catch (error) {

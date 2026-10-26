@@ -1,25 +1,15 @@
 /**
- * 受控浏览器在运行时的纯逻辑：快照归一化、技能文件写入判定、设置页详情装配、SSE 解析。
+ * 受控浏览器在运行时的纯逻辑：快照归一化、设置页详情装配、SSE 解析。
  *
  * 不 import electron、不发请求 —— 请求与 IPC 在 browser-control.js，这里只放能直接测的部分。
  */
 
-import {
-  localSkillDocument,
-  resolveSkillTemplate as resolveTemplate,
-  skillFilePathFor,
-  skillNeedsWrite
-} from './control-skill.js'
-
-export { skillNeedsWrite }
-
 /**
- * 地址、归属与 socket 三个变量名：一起写进技能文档与设置页，别在两处各写一份。
+ * 地址、归属与 socket 三个变量名：一起写进设置页，别在两处各写一份。
  *
  * 浏览器宿主活在 Electron 主进程里，它**不占 TCP 端口**，只监听一个 Unix socket；
  * 运行时在**自己已有的端口**上把 `/remote/control/*` 代理过去（见 browser-control-proxy.js），
- * 所以 agent 只需要一个普通的 HTTP 地址（`MICA_BROWSER_URL`），少开一个端口、也少一处
- * 需要单独做 Host/Origin 校验的入口。
+ * MCP 端点也挂在同一个端口上（`/mcp/browser`）。
  */
 export const BROWSER_URL_ENV = 'MICA_BROWSER_URL'
 export const BROWSER_OWNER_ENV = 'MICA_BROWSER_OWNER'
@@ -27,28 +17,11 @@ export const BROWSER_SOCKET_ENV = 'MICA_BROWSER_SOCKET'
 /** 运行时把主进程的浏览器服务挂在哪个路径下（`MICA_BROWSER_URL` 的路径部分） */
 export const BROWSER_CONTROL_PREFIX = '/remote/control'
 
-/** 技能文件固定落在 `$MICA_HOME/skills/mica-browser/SKILL.md` */
-export const SKILL_DIR_NAME = 'mica-browser'
-export const SKILL_FILE_NAME = 'SKILL.md'
+/** 运行时暴露给 agent 的 MCP 端点（`/mcp/browser`）。 */
+export const BROWSER_MCP_KIND = 'browser'
 
 export function emptyBrowserSnapshot(error = null) {
-  return { available: false, serviceUrl: null, browsers: [], skillPath: null, error }
-}
-
-/**
- * 技能文档里的 `$MICA_BROWSER_URL` 是进程环境变量名（agent 进程里确实有它），但这份文档
- * 同时要写进磁盘给人看，所以运行时知道真实地址时把它换成地址本身。
- *
- * 没拿到地址就原样返回：宁可留一个仍能用的变量名（agent 有那个环境变量），也不要写进
- * 一个可能不对的地址。
- */
-export function resolveSkillTemplate(markdown, { serviceUrl = '' } = {}) {
-  return resolveTemplate(markdown, { serviceUrl, envName: BROWSER_URL_ENV })
-}
-
-/** 服务端文档拿不到时的技能正文：地址直接来自注入给会话进程的那个变量 */
-export function browserSkillDocument(serviceUrl) {
-  return localSkillDocument('mica-browser', serviceUrl)
+  return { available: false, serviceUrl: null, mcpUrl: null, browsers: [], error }
 }
 
 /**
@@ -83,17 +56,14 @@ export function normalizeBrowserSummaries(value) {
     .filter((item) => item && item.id)
 }
 
-export function skillFilePath(homeDir, separator = '/') {
-  return skillFilePathFor(homeDir, SKILL_DIR_NAME, separator)
-}
-
-export function detailsFrom({ docs, browsers, serviceUrl, skillPath, error = null }) {
+export function detailsFrom({ docs, browsers, serviceUrl, mcpUrl = '', error = null }) {
   const available = Boolean(serviceUrl)
   return {
     available,
     serviceUrl: serviceUrl || null,
+    mcpUrl: mcpUrl || null,
+    toolName: 'control',
     version: Number(docs?.version) || 0,
-    skillPath: skillPath || null,
     error,
     browsers: normalizeBrowserSummaries(browsers),
     endpoints: Array.isArray(docs?.endpoints) ? docs.endpoints : [],

@@ -1,30 +1,24 @@
 import { ipcMain } from 'electron'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { openSocketRequest, readAllText } from './control-client.js'
 import {
+  BROWSER_MCP_KIND,
   BROWSER_OWNER_ENV,
   BROWSER_SOCKET_ENV,
   BROWSER_URL_ENV,
-  browserSkillDocument,
   detailsFrom,
   emptyBrowserSnapshot,
   normalizeBrowserSummaries,
   parseSseData,
-  resolveSkillTemplate,
-  sameBrowsers,
-  skillFilePath,
-  skillNeedsWrite
+  sameBrowsers
 } from './browser-control-core.js'
+import { controlMcpUrl } from './control-mcp-config.js'
 
 /**
  * 受控浏览器在运行时的门面：页面（顶栏图标、设置页）与 agent 各自从这一层进出。
  *
  * - **页面**通过 `browser-control:*` IPC 读列表、显示/隐藏/关闭、新建窗口；
- * - **agent** 不经过这里，它直接打 `MICA_BROWSER_URL`（运行时端口 + `/remote/control`，
- *   由运行时在端口确定后自己写好），再随 `MICA_BROWSER_OWNER` 传给每个会话进程，
- *   技能文档见 browser-control-core.js 的说明。
+ * - **agent** 不经过这里：它通过运行时同源端口上的 MCP 端点 `/mcp/browser` 使用这个能力
+ *   （见 control-mcp.js），配置由 control-mcp-config.js 按会话生成。
  *
  * 浏览器窗口活在 Electron 主进程里，运行时是纯 Node，两边只能靠本机通道通信：主进程把
  * 服务监听在一个 **Unix socket** 上（不占端口），运行时既把它代理成自己端口上的
@@ -40,7 +34,6 @@ let broadcaster = () => {}
 let state = { ...emptyBrowserSnapshot(), docs: null }
 let streamController = null
 let started = false
-let failedSkillWrite = false
 
 export function setBrowserControlBroadcaster(fn) {
   broadcaster = typeof fn === 'function' ? fn : () => {}
@@ -60,6 +53,15 @@ function hasService() {
   return Boolean(socketPath())
 }
 
+/** 运行时端口上的 MCP 端点：设置页展示它，agent 的 `--mcp-config` 也指向它。 */
+function mcpUrl() {
+  try {
+    return controlMcpUrl(new URL(serviceUrl()).origin, BROWSER_MCP_KIND)
+  } catch {
+    return ''
+  }
+}
+
 function publish(reason = 'change') {
   const snapshot = getBrowserControlSnapshot()
   broadcaster('browser:changed', { reason, ...snapshot })
@@ -70,8 +72,8 @@ export function getBrowserControlSnapshot() {
   return {
     available: hasService() && !state.error,
     serviceUrl: state.serviceUrl || null,
+    mcpUrl: mcpUrl() || null,
     browsers: state.browsers || [],
-    skillPath: state.skillPath || null,
     error: state.error || null
   }
 }
@@ -125,42 +127,12 @@ async function loadDocs() {
       version: payload.version,
       endpoints: payload.endpoints,
       markdown: payload.markdown,
-      skillMarkdown: resolveSkillTemplate(payload.skillMarkdown, { serviceUrl: serviceUrl() })
+      guide: payload.guide
     }
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error)
   }
   return state.docs
-}
-
-/**
- * 把技能写进 `$MICA_HOME/skills/mica-browser/SKILL.md`：agent 靠它知道这台机器上有一套
- * 能真正打开的浏览器、以及怎么把窗口挂到当前会话上。内容变了才写，失败只在文档里标出来
- * ——不因为写不了文件就让整个能力不可用。
- */
-async function ensureSkillFile(docs) {
-  // 服务不可达时也要写：地址来自环境变量，与 `/docs` 是否成功无关
-  const markdown = docs?.skillMarkdown || browserSkillDocument(serviceUrl())
-  if (typeof markdown !== 'string' || !markdown.trim()) return
-  const path = skillFilePath(resolveMicaHome(), process.platform === 'win32' ? '\\' : '/')
-  try {
-    let existing = null
-    try {
-      existing = await readFile(path, 'utf8')
-    } catch {
-      existing = null
-    }
-    if (!skillNeedsWrite(existing, markdown)) {
-      state.skillPath = path
-      return
-    }
-    await mkdir(join(resolveMicaHome(), 'skills', 'mica-browser'), { recursive: true })
-    await writeFile(path, markdown, 'utf8')
-    state.skillPath = path
-  } catch (error) {
-    failedSkillWrite = true
-    console.error('[mica-desktop] 写入浏览器技能文档失败:', error)
-  }
 }
 
 /* ------------------------------------------------------------------ SSE 订阅 */
@@ -215,7 +187,7 @@ async function streamLoop(controller) {
 }
 
 /**
- * 由 server 在启动时调用一次：先取一次列表与文档（顺带写技能），再挂上 SSE。
+ * 由 server 在启动时调用一次：先取一次列表与文档，再挂上 SSE。
  * 没有服务地址（浏览器宿主、纯 `npm run start:web`）时什么都不做。
  */
 export async function startBrowserControl() {
@@ -224,8 +196,7 @@ export async function startBrowserControl() {
   state.serviceUrl = serviceUrl() || null
   if (!hasService()) return getBrowserControlSnapshot()
   await refresh('startup')
-  const docs = await loadDocs()
-  await ensureSkillFile(docs)
+  await loadDocs()
   streamController = new AbortController()
   void streamLoop(streamController)
   return getBrowserControlSnapshot()
@@ -266,8 +237,6 @@ export function registerBrowserControlIpc() {
   )
 
   ipcMain.handle('browser-control:details', () => readBrowserControlDetails())
-
-  ipcMain.handle('browser-control:open-skill', () => state.skillPath || null)
 }
 
 /**
@@ -309,22 +278,21 @@ export async function hideBrowserControlWindow({ id } = {}) {
   return getBrowserControlSnapshot()
 }
 
-/** 设置页用：文档 + 当前窗口 + 技能文件位置 + 最近一次错误 */
+/** 设置页用：文档 + 当前窗口 + MCP 端点 + 最近一次错误 */
 export async function readBrowserControlDetails() {
   const service = serviceUrl()
   state.serviceUrl = service || null
   if (!hasService()) {
-    return detailsFrom({ docs: null, browsers: [], serviceUrl: '', skillPath: null })
+    return detailsFrom({ docs: null, browsers: [], serviceUrl: '', mcpUrl: '' })
   }
   await refresh('details')
   const docs = await loadDocs()
-  await ensureSkillFile(docs)
   return detailsFrom({
     docs,
     browsers: state.browsers,
     serviceUrl: service,
-    skillPath: state.skillPath,
-    error: state.error || (failedSkillWrite ? '技能文件写入失败（权限或磁盘问题）' : null)
+    mcpUrl: mcpUrl(),
+    error: state.error || null
   })
 }
 

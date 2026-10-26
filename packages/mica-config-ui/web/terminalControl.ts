@@ -24,8 +24,9 @@ export function unavailableTerminalControlDetails(
   return {
     available: false,
     serviceUrl: null,
+    mcpUrl: null,
+    toolName: 'control',
     version: 0,
-    skillPath: null,
     error: reason || TERMINAL_CONTROL_DISABLED_REASON,
     sessions: [],
     endpoints: [],
