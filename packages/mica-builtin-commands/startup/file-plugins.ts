@@ -1,10 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type {
-  FilePluginLoaderOptions,
-  FilePluginLoadResult,
-  PluginSetupReport,
-} from '@packages/mica-plugin/index.js';
+import { readDisabledPluginIds } from '@packages/mica-plugin/index.js';
+import type { FilePluginLoaderOptions, FilePluginLoadResult, PluginSetupReport } from '@packages/mica-plugin/index.js';
 
 type FilePluginsContext = {
   paths?: { config?: string; plugins?: string };
@@ -38,6 +35,8 @@ export default async function setupFilePlugins(ctx: FilePluginsContext): Promise
 
   const loaded = await loadFilePlugins({
     pluginsDir,
+    // 停用发生在加载之前：连插件的 import 都不做，避免它在 setup 之外产生副作用。
+    disabled: readDisabledPluginIds(),
     logger: ctx.logger,
   });
 

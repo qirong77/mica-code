@@ -15,6 +15,8 @@ import type { MicaPlugin } from './Plugin.js';
 export type FilePluginLoaderOptions = {
   homeDir?: string;
   pluginsDir?: string;
+  /** 已停用的插件 id：不导入、不加载（停用意味着连插件的副作用都不该发生）。 */
+  disabled?: Iterable<string>;
   logger?: {
     warn(event: string, data?: unknown): void;
   };
@@ -72,6 +74,7 @@ export type PluginInspectionResult = {
  */
 export async function loadFilePlugins(options: FilePluginLoaderOptions = {}): Promise<FilePluginLoadResult> {
   const pluginsDir = resolvePluginsDir(options);
+  const disabled = new Set(options.disabled ?? []);
   const result: FilePluginLoadResult = { plugins: [], loaded: [], failed: [] };
   let entries: string[];
 
@@ -88,7 +91,7 @@ export async function loadFilePlugins(options: FilePluginLoaderOptions = {}): Pr
   for (const entryName of entries) {
     const target = join(pluginsDir, entryName);
     try {
-      const loaded = await loadPluginEntry(target, entryName);
+      const loaded = await loadPluginEntry(target, entryName, disabled);
       if (!loaded) continue;
       result.plugins.push(loaded.plugin);
       result.loaded.push(loaded.record);
@@ -128,9 +131,11 @@ export function inspectPlugins(options: FilePluginLoaderOptions = {}): PluginIns
 async function loadPluginEntry(
   target: string,
   entryName: string,
+  disabled: ReadonlySet<string>,
 ): Promise<{ plugin: MicaPlugin; record: LoadedFilePlugin } | null> {
   if (isPluginFile(entryName)) {
     const manifest = legacyPluginManifest(entryName, filePluginId(entryName));
+    if (disabled.has(manifest.id)) return null;
     const setup = await importSetup(target);
     return {
       plugin: createFilePlugin(manifest, setup, manifest.id),
@@ -142,12 +147,14 @@ async function loadPluginEntry(
   if (!existsSync(manifestFile)) return null;
 
   const manifest = await readManifest(manifestFile);
+  const pluginId = userPluginId(manifest);
+  if (disabled.has(pluginId)) return null;
   const entryFile = join(target, manifest.main);
   if (!existsSync(entryFile)) {
     throw new Error(`入口文件不存在：${manifest.main}`);
   }
   const setup = await importSetup(entryFile);
-  const plugin = createFilePlugin(manifest, setup, userPluginId(manifest));
+  const plugin = createFilePlugin(manifest, setup, pluginId);
   return { plugin, record: { pluginId: plugin.id, file: entryFile, manifest, format: 'directory' } };
 }
 

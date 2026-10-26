@@ -43,6 +43,7 @@ describe('file-plugins startup plugin', () => {
 
     expect(loadFilePlugins).toHaveBeenCalledWith({
       pluginsDir: '/plugins',
+      disabled: expect.any(Set),
       logger: expect.any(Object),
     });
     expect(register).toHaveBeenCalledOnce();
@@ -91,9 +92,9 @@ describe('config-web-worker startup plugin', () => {
   it('starts Config Web in worker mode', async () => {
     const startServer = vi.fn(async () => undefined);
 
-    await expect(
-      startConfigWebWorker({ argv: ['/usr/bin/mica', '--config-web-worker'], startServer }),
-    ).resolves.toBe(true);
+    await expect(startConfigWebWorker({ argv: ['/usr/bin/mica', '--config-web-worker'], startServer })).resolves.toBe(
+      true,
+    );
     expect(startServer).toHaveBeenCalledWith();
   });
 });

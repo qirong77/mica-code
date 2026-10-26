@@ -88,6 +88,24 @@ describe('loadFilePlugins', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('never imports a disabled plugin', async () => {
+    const dir = mkTempDir();
+    try {
+      writeDirectoryPlugin(
+        dir,
+        'todo-lite',
+        KEBAB_MANIFEST,
+        'throw new Error("disabled plugins must not be imported")',
+      );
+
+      const result = await loadFilePlugins({ pluginsDir: dir, disabled: new Set(['user.todo-lite']) });
+
+      expect(result).toEqual({ plugins: [], loaded: [], failed: [] });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('inspectPlugins', () => {
