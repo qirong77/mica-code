@@ -7,6 +7,7 @@ import {
   isSubagentRunning,
   sameTaskDetail,
   subagentStatusLabel,
+  subagentToolOf,
   taskElapsedMs,
   taskOutputWindowLabel,
   timelineSignature,
@@ -79,8 +80,20 @@ describe('buildSubagentTimeline', () => {
       timeline: [
         { id: 'a', kind: 'thinking', text: '想想' },
         { id: 'b', kind: 'text', text: '   ' },
-        { id: 'c', kind: 'tool', text: '{"x":1}', toolName: 'read_file' },
-        { id: 'd', kind: 'tool_result', text: 'ok', toolName: 'read_file' }
+        {
+          id: 'c',
+          kind: 'tool',
+          text: '{"x":1}',
+          toolName: 'read_file',
+          at: '2026-10-01T00:00:00.000Z'
+        },
+        {
+          id: 'd',
+          kind: 'tool_result',
+          text: 'ok',
+          toolName: 'read_file',
+          at: '2026-10-01T00:00:02.000Z'
+        }
       ]
     })
     expect(steps.map((step) => step.key)).toEqual(['a:0', 'c:2'])
@@ -89,7 +102,9 @@ describe('buildSubagentTimeline', () => {
       kind: 'tool',
       toolName: 'read_file',
       argsText: '{"x":1}',
-      resultText: 'ok'
+      resultText: 'ok',
+      startedAt: Date.parse('2026-10-01T00:00:00.000Z'),
+      finishedAt: Date.parse('2026-10-01T00:00:02.000Z')
     })
   })
 
@@ -121,6 +136,49 @@ describe('buildSubagentTimeline', () => {
     })
     expect(steps.map((step) => step.kind)).toEqual(['tool', 'tool_result'])
     expect(steps[0].resultText).toBe('')
+  })
+})
+
+describe('subagentToolOf', () => {
+  it('maps a pending call to the running tool row and parses its arguments', () => {
+    const tool = subagentToolOf(
+      {
+        key: 'c:0',
+        kind: 'tool',
+        toolName: 'read_file',
+        argsText: '{"file_path":"/tmp/a.txt"}',
+        resultText: '',
+        startedAt: 1000
+      },
+      true
+    )
+    expect(tool).toMatchObject({
+      id: 'c:0',
+      tool: 'read_file',
+      input: { file_path: '/tmp/a.txt' },
+      output: '',
+      status: 'running',
+      startedAt: 1000
+    })
+  })
+
+  it('settles a call once a result exists, even while the task still runs', () => {
+    const tool = subagentToolOf(
+      { key: 'c:0', kind: 'tool', toolName: 'read_file', argsText: '{}', resultText: 'ok' },
+      true
+    )
+    expect(tool.status).toBe('completed')
+    expect(tool.output).toBe('ok')
+  })
+
+  it('keeps an orphan result as the output of its own tool row', () => {
+    const tool = subagentToolOf({
+      key: 'd:0',
+      kind: 'tool_result',
+      toolName: 'run_shell',
+      text: 'done'
+    })
+    expect(tool).toMatchObject({ tool: 'run_shell', input: {}, output: 'done' })
   })
 })
 

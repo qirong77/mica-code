@@ -36,7 +36,7 @@ import {
 } from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { formatTokens as formatSharedTokens, toolIcon } from '@packages/mica-web-shared'
+import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
 import { comparableText } from '@packages/mica-common/promptText.js'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
@@ -46,12 +46,13 @@ import { parsePathHref, remarkPathLinks, splitTextByImages } from './chat-paths'
 import { remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
-import { formatLogElapsed, parseToolArgs, toolDisplayName, toolSummary } from './chat-tool-display'
+import { formatLogElapsed } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
 import { CodeView } from './CodeView'
 import { newlyAnsweredBtwEntries } from './btw-thread'
+import { canCollapseMessage, measureChatCollapse } from './chat-collapse'
 
 function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
@@ -98,6 +99,7 @@ import {
   isSubagentRunning,
   sameTaskDetail,
   subagentStatusLabel,
+  subagentToolOf,
   taskElapsedMs,
   taskOutputWindowLabel,
   timelineSignature,
@@ -363,6 +365,60 @@ function UserMessageText({ text }) {
     ) : (
       <MessageText key={`text:${index}`} text={segment.text.replace(/^\n+|\n+$/g, '')} />
     )
+  )
+}
+
+/**
+ * 长用户消息（自己贴的长文本、模型生成的压缩摘要都以 user 角色落库）默认只展示
+ * 10 行：它们常常占满几十屏，把回答推到很远。折叠判定按 `scrollHeight` 与
+ * computed `lineHeight` 算，换行与窗口宽度都算数；`title` 挂全量文本，悬停即可
+ * 看到被折起的部分。
+ */
+function UserMessageBody({ text }) {
+  const contentRef = useRef(null)
+  const [collapsed, setCollapsed] = useState(false)
+  const [totalLines, setTotalLines] = useState(0)
+  const [expanded, setExpanded] = useState(false)
+
+  useLayoutEffect(() => {
+    const element = contentRef.current
+    if (!element || !canCollapseMessage(text)) return undefined
+    const measure = () => {
+      const style = window.getComputedStyle(element)
+      const lineHeight =
+        Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.28
+      const next = measureChatCollapse({ scrollHeight: element.scrollHeight, lineHeight })
+      setCollapsed((previous) => (previous === next.collapsible ? previous : next.collapsible))
+      setTotalLines((previous) => (previous === next.totalLines ? previous : next.totalLines))
+    }
+    measure()
+    // 宽度变化会改变折行数：同一段文字在窄窗口里可能从 8 行变成 20 行。
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [text])
+
+  const clipped = collapsed && !expanded
+  return (
+    <>
+      <div
+        ref={contentRef}
+        className={`chat-message-collapsible ${clipped ? 'chat-message-collapsible-clipped' : ''}`}
+        title={clipped ? text : undefined}
+      >
+        <UserMessageText text={text} />
+      </div>
+      {collapsed && (
+        <button
+          type="button"
+          className="chat-message-collapse-toggle"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? '收起' : `展开全部（共 ${totalLines} 行）`}
+        </button>
+      )}
+    </>
   )
 }
 
@@ -962,117 +1018,32 @@ function TaskDetailModal({
 
 /** 时间线默认只渲染末尾这么多步，更早的折成一行按钮（长任务动辄上百步）。 */
 const SUBAGENT_STEP_WINDOW = 24
-/** 思考默认只显示开头这么多字符，展开才渲染全文。 */
-const THINKING_PREVIEW_CHARS = 320
 
 /**
- * 一次工具调用：默认只有一行（图标 + 工具名 + 参数摘要 + 行数），
- * 展开才把入参和输出挂进 DOM。
+ * subagent 的活动记录：**与主对话共用一套展示件**。
  *
- * 之前的实现用 `<details>` 直接塞两个 `<pre>`：折叠时 DOM 里也已经有了全部
- * 文本，120 条 × 上千字符直接把弹窗拖死。这里的 body 只在展开时存在。
+ * 思考与工具行直接用回合日志那份（`chat-tool-views.jsx`）：思考整段折行、工具行
+ * 只占一行、完整入参和输出点开到同一个 `ToolDetailDialog`。以前这里另画了一套可以
+ * 就地展开的 `chat-timeline-*` 步骤，同一个工具在主对话和 subagent 详情里长得不一样，
+ * 点开看详情也是两套交互。
+ *
+ * 正文（`text`）按回答渲染，过程行套一层日志排版（`.chat-activity-log`），字号与
+ * 主对话「回答 + 回合日志」的关系保持一致。
  */
-function SubagentToolStep({ step, expanded, active, onToggle }) {
-  const input = useMemo(() => parseToolArgs(step.argsText), [step.argsText])
-  const name = toolDisplayName({ tool: step.toolName, input })
-  const summary = toolSummary({ tool: step.toolName, input })
-  const resultLines = step.resultText ? step.resultText.replace(/\n+$/, '').split('\n').length : 0
-  // 最后一个还没有结果的调用就是正在跑的那一次，标成「运行中」而不是「无输出」。
-  const pending = !resultLines && active
-
-  return (
-    <div className={`chat-timeline-step chat-timeline-tool ${expanded ? 'is-open' : ''}`}>
-      <button
-        type="button"
-        className="chat-timeline-tool-row"
-        aria-expanded={expanded}
-        title={summary || name}
-        onClick={() => onToggle(step.key)}
-      >
-        <span className="chat-timeline-caret" aria-hidden="true">
-          {expanded ? '▾' : '▸'}
-        </span>
-        <span className="chat-timeline-icon" aria-hidden="true">
-          {toolIcon(step.toolName)}
-        </span>
-        <span className="chat-timeline-tool-name">{name}</span>
-        <span className="chat-timeline-tool-summary">{summary}</span>
-        <span className={`chat-timeline-tool-meta ${pending ? 'is-running' : ''}`}>
-          {resultLines ? `${resultLines} 行` : pending ? '运行中' : '无输出'}
-        </span>
-      </button>
-      {expanded ? (
-        <div className="chat-timeline-tool-body">
-          <div className="chat-timeline-block">
-            <div className="chat-timeline-block-head">参数</div>
-            <CodeView
-              className="chat-timeline-code"
-              text={step.argsText}
-              language={input && Object.keys(input).length ? 'json' : 'text'}
-              wrap
-            />
-          </div>
-          {resultLines ? (
-            <div className="chat-timeline-block">
-              <div className="chat-timeline-block-head">输出</div>
-              <CodeView className="chat-timeline-code" text={step.resultText} wrap />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-/** 思考：左侧一条淡色竖线，默认只给开头一段，长文才出现「展开」。 */
-function SubagentThinkingStep({ step, expanded, onToggle }) {
-  const clipped = step.text.length > THINKING_PREVIEW_CHARS
-  const text =
-    expanded || !clipped ? step.text : `${step.text.slice(0, THINKING_PREVIEW_CHARS).trimEnd()}…`
-  return (
-    <div className="chat-timeline-step chat-timeline-thinking">
-      <div className="chat-timeline-thinking-text">{text}</div>
-      {clipped ? (
-        <button type="button" className="chat-timeline-more" onClick={() => onToggle(step.key)}>
-          {expanded ? '收起思考' : '展开思考'}
-        </button>
-      ) : null}
-    </div>
-  )
-}
-
-function SubagentTimelineStepView({ step, expanded, active, onToggle }) {
-  if (step.kind === 'tool') {
-    return <SubagentToolStep step={step} expanded={expanded} active={active} onToggle={onToggle} />
-  }
-  if (step.kind === 'thinking') {
-    return <SubagentThinkingStep step={step} expanded={expanded} onToggle={onToggle} />
-  }
-  if (step.kind === 'tool_result') {
-    // 时间线被截断后可能出现没有对应调用的孤立结果，单独给一块。
-    return (
-      <div className="chat-timeline-step chat-timeline-text">
-        <div className="chat-timeline-block-head">{step.toolName || '工具'} 结果</div>
-        <CodeView className="chat-timeline-code" text={step.text} wrap />
-      </div>
-    )
-  }
-  return (
-    <div className="chat-timeline-step chat-timeline-text">
-      <Markdown text={step.text} />
-    </div>
-  )
-}
-
-// 轮询会不断给出新的 detail 对象；只要这一步的内容没变（引用稳定）就不重渲染，
-// 流式长任务里每秒上百次 markdown 解析就是这么省下来的。
-const SubagentTimelineStep = memo(SubagentTimelineStepView)
-
-function SubagentTimeline({ steps, running, expanded, onToggle }) {
+function SubagentTranscript({ steps, running, onOpenTool }) {
   const [showAll, setShowAll] = useState(false)
   const hidden = showAll ? 0 : Math.max(0, steps.length - SUBAGENT_STEP_WINDOW)
   const visible = hidden > 0 ? steps.slice(hidden) : steps
-  const lastKey = steps.at(-1)?.key
+  // 只有最后一个还没有结果的调用算「正在跑」（与回合日志同规则）：时间线被截断时
+  // 早期那些没有结果的步骤不该一起转圈。
+  let pendingKey = ''
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index]
+    if (step.kind === 'tool' && !step.resultText) {
+      pendingKey = step.key
+      break
+    }
+  }
 
   return (
     <div className="chat-timeline">
@@ -1081,15 +1052,26 @@ function SubagentTimeline({ steps, running, expanded, onToggle }) {
           显示更早的 {hidden} 步
         </button>
       ) : null}
-      {visible.map((step) => (
-        <SubagentTimelineStep
-          key={step.key}
-          step={step}
-          expanded={expanded.has(step.key)}
-          active={running && step.key === lastKey}
-          onToggle={onToggle}
-        />
-      ))}
+      {visible.map((step) => {
+        if (step.kind === 'text') {
+          return (
+            <div className="chat-timeline-text" key={step.key}>
+              <Markdown text={step.text} />
+            </div>
+          )
+        }
+        const tool =
+          step.kind === 'thinking' ? null : subagentToolOf(step, running && step.key === pendingKey)
+        return (
+          <div className="chat-activity-log" key={step.key}>
+            {tool ? (
+              <ToolActivityRow tool={tool} onOpen={() => onOpenTool(tool)} />
+            ) : (
+              <ReasoningRow text={step.text} />
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -1102,7 +1084,7 @@ function subagentStatusClass(status) {
 
 // `runKey` 是持有这个 run 的节点 id（工作区只有一份，所以就是本节点的 id）：
 // 任务记录只活在 host 进程里，所以详情/停止必须打到那个 run 上。
-function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop }) {
+function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, onOpenInEditor }) {
   const load = useCallback(
     () => window.mica.chat.subagentDetail(runKey, initialTask.taskId),
     [runKey, initialTask.taskId]
@@ -1114,7 +1096,8 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop })
     load
   })
   const [stopping, setStopping] = useState(false)
-  const [expanded, setExpanded] = useState(() => new Set())
+  // 点开的工具详情：就用主对话那一个弹窗，参数/输出/「在编辑器中打开」都在里面。
+  const [openTool, setOpenTool] = useState(null)
   const task = detail?.task || initialTask
   // 时间线是 append-only 的，用内容指纹当依赖：轮询给的数组引用每秒都新，
   // 直接依赖它会让所有步骤跟着重建，memo 全部失效。
@@ -1124,14 +1107,6 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop })
   // 只在步骤数变化时贴底：内容长高不算（否则展开一段输出就被拽回底部）。
   const { bodyRef, onBodyScroll } = useStickToBottom(steps.length)
   const usage = task.usage
-  const toggleStep = useCallback((key) => {
-    setExpanded((previous) => {
-      const next = new Set(previous)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }, [])
 
   const stop = async () => {
     if (stopping) return
@@ -1180,30 +1155,41 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop })
     >
       {error && <div className="chat-modal-note is-warn">{error}</div>}
       {task.prompt ? (
-        <details className="chat-timeline-prompt">
-          <summary>任务提示词</summary>
-          <pre className="chat-modal-pre">{textOf(task.prompt)}</pre>
-        </details>
+        // 提示词就是「这个 subagent 收到的用户消息」：用主对话那条用户消息的样子，
+        // 不再折成一块默认收起的 `<pre>`。
+        <div className="chat-message chat-message-user chat-timeline-prompt">
+          <div className="chat-message-marker">▌</div>
+          <div className="chat-message-body">
+            <UserMessageText text={textOf(task.prompt)} />
+          </div>
+        </div>
       ) : null}
       {task.timelineTruncated ? (
         <div className="chat-modal-note">较早的步骤已被丢弃（只保留最近 120 步）。</div>
       ) : null}
       {steps.length ? (
-        <SubagentTimeline
-          steps={steps}
-          running={running}
-          expanded={expanded}
-          onToggle={toggleStep}
-        />
+        <SubagentTranscript steps={steps} running={running} onOpenTool={setOpenTool} />
       ) : (
         <div className="chat-modal-empty">{running ? '正在等待第一个步骤…' : '没有步骤记录。'}</div>
       )}
-      {task.result && (
-        <ModalSection title="结果">
-          <Markdown text={textOf(task.result)} />
-        </ModalSection>
-      )}
+      {task.result ? (
+        // 结果是一家「回答」：与主对话的 assistant 消息同一种块，前面带 ● 标记。
+        <div className="chat-message chat-message-assistant">
+          <div className="chat-message-marker">●</div>
+          <div className="chat-message-body">
+            <Markdown text={textOf(task.result)} />
+          </div>
+        </div>
+      ) : null}
       {task.error && <div className="chat-modal-error">{textOf(task.error)}</div>}
+      {openTool && (
+        <ToolDetailDialog
+          tool={openTool}
+          nested
+          onOpenInEditor={onOpenInEditor}
+          onClose={() => setOpenTool(null)}
+        />
+      )}
     </TaskDetailModal>
   )
 }
@@ -2092,7 +2078,7 @@ function MessageRowView({
         <div className="chat-message-body whitespace-pre-wrap break-words">
           {/* 用户自己贴进来的路径同样可点：会话里读到的路径常常是用户先粘过来的；
               图片引用只保留链接文本，点击弹预览（见 ImageLink） */}
-          <UserMessageText text={message.text} />
+          <UserMessageBody text={message.text} />
         </div>
         <MessageActions text={message.text} role="user" onQuote={onQuote} />
       </div>
@@ -6190,6 +6176,7 @@ export function ChatView({
             task={taskDetail.task}
             onClose={closeTaskDetail}
             onStop={stopSubagent}
+            onOpenInEditor={openToolDocument}
           />
         )}
         {taskDetail?.kind === 'background' && (

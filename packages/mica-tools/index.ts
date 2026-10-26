@@ -40,7 +40,7 @@ export const micaTools = {
   getDisplayText: getToolDisplayText,
   /** 判断工具是否声明为只读。 */
   isReadOnly: isToolReadOnly,
-  /** 判断工具是否为纯等待工具（可与同一条消息里其余调用重叠执行）。 */
+  /** 按工具及输入判断调用是否可与同一条消息里其余调用重叠执行。 */
   isOverlappable: isToolOverlappable,
   /** 判断工具是否只允许顶层 agent 使用。 */
   isPrimaryAgentOnly: isToolPrimaryAgentOnly,

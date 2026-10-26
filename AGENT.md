@@ -263,7 +263,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - `getCatalog()` 暴露工具来源（builtin/runtime/mcp + mcpServer），MCP 工具名统一由 `mcpToolNamePrefix()` 生成，按 server 关闭时用它前缀匹配。
 - readOnly 分类受 `MicaTool.test.ts` 约束：纯查询为 true；写文件、patch、shell、kill、PTY、wait_for 为 false。
 - 执行类工具按「启动 / 等待 / 查看」拆开：`run_shell` 只跑前台命令（严格超时，≤120s）；`background_tasks_start` 负责启动并立即返回 `task_id`；`background_tasks_list` / `_read` / `_kill` 负责查询、读输出、终止；`wait_for` 只观察条件、不启动任何东西。不要再把后台开关做成 `run_shell` 的布尔参数——两种语义互相打架（后台时 `timeout` 被忽略），模型会误用。
-- 工具声明 `overlappable: true`（目前 `wait_for` / `pty_wait`）表示执行期只是等待外部条件：`executeProviderToolCalls` 会立刻启动它并与同一条消息里其余调用重叠，最后统一回收结果，所以「一边等测试、一边改文档」不会被串行屏障挡住。新增加入该声明前先确认工具无写副作用。
+- 工具声明 `overlappable: true`（目前 `wait_for` / `pty_wait`），或按输入重写 `canOverlap(input)`（`agent` 仅 await/join），表示该调用可与同一条消息里其余调用重叠：`executeProviderToolCalls` 会在到达该调用时启动它，最后统一回收结果。等待不进入普通并发批次，也不拆开其前后的并发调用；写/执行屏障只等普通批次。checkpoint 停止时主动取消已启动调用，再回收结果。新增加入该声明前先确认调用无写副作用。
 - `truncateDisplayText` 仅在 `process.stdout.columns` 存在时裁剪；app-server 管道无列宽，不按 80 列截断。
 - PTY 由懒启动 Node helper `mica-pty/src/server.mjs` 承载，Bun 首次调用动态加载 `src/manager.js`。
 - 修改 `server.mjs` 后运行 `bun run scripts/generate-pty-server-source.mjs`，同步 `ptyServerSource.ts`。
@@ -295,6 +295,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 - `SubagentTaskManager` 按 parent 隔离任务与 abort signal；后台完成元数据回注 owner，结果显式 read/await。parent Ctrl+C 同步中止其运行中的 subagent。
 - 前台 Agent 默认阻塞，同消息多个调用可并行；需要主流程继续时用 `run_in_background: true`。每 owner 前后台合计并发上限 4。
+- 后台子任务期间先推进独立工作；需要结果时再 await/join，或将等待与独立工具放在同一消息重叠执行。该重叠按 operation 判断，不改变前台 run 的屏障语义。
 - `context_mode` 为 none/brief/recent/files，默认 brief。Implementer/Tester/Proposal 必填 `owned_paths`，写工具及 shell cwd 校验租约。
 - 内置类型为 general-purpose、Explore、Implementer、Reviewer、Tester、Planner、Proposal；未知类型报错。maxTurns 唯一默认值在 `subagentDefinitions.ts`（100），须传入 provider loop。
 - 非主请求都要记账：Agent 走 `recordSubagentUsage`；commit、BTW、compact 摘要等 helper 走 `recordSubagentTaskUsage` / `recordHelperSubagentUsage`，续问只计新增请求，不污染主 usage。
@@ -401,6 +402,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻，普通方向键移动光标。
 - `TerminalComposer` 容器与 textarea 的 min/max height 共用变量，markdown layer 与自绘光标镜像同一 scrollTop。
 - 主对话区查找按 Cmd/Ctrl+F（`ChatFind.jsx`，交互照 VS Code 的 find widget）：命中只用 CSS Custom Highlight API 上色，不往 React 管的 DOM 里包节点；匹配规则（大小写/全字/正则、上限与 `n/总数`）在 `chat-find.js`，流式变化由 MutationObserver 防抖补扫。
+- 侧栏搜索点开正文命中的会话时，`SessionTree` 把命中的词经 `App.findRequest` 交给对应 `ChatView`，在 `historyLoaded` 后自动开查找条并从第一条命中定位；多个词按 AND 语义在侧栏，进入查找条改写成「任一命中」正则（`chat-find-preset.js`）。只在 `item.snippet` 存在（正文真的命中）时带词，纯标题/路径命中不带，避免开出 0 命中的查找条。
 - 输入法组合期用 `resolveComposerSelection` 取 selectionEnd 并收起选区；blur 清组合态，不在组合期从外部 setInput。
 - 粘贴共用 `composer-paste.js`：图片字节转 `[Image](路径)`，文件插绝对路径；系统路径由 `clipboard:file-paths` 按 basename/顺序对齐，失败提示，不插错误文件路径。
 - 角色入口在输入条箭头，非 default 显示角色名，随下一次发送/编辑的 role 参数持久化。
@@ -415,8 +417,10 @@ npm run serve:web         # 构建后运行 Web 运行时
 - **自动链接与全角标点**：唯一规则在 `mica-common/autolink.ts.splitAutolinkPunctuation`，自动链接在首个全角标点处截断且校验显示文本，显式 Markdown 链接原样保留。
   desktop 的 `remarkAutolinkPunctuation` 放在 `remarkGfm` / `remarkPathLinks` 前；CLI 用 `splitTerminalLink`。新增标点只改共享集合，同步两端测试。
 - 路径识别在 `chat-paths.js` / `PathToken`：单击目录打开、文件定位，Cmd/Ctrl 或中键在应用内打开，图片单击预览；失败 notice，缺 context 时纯文本。
+- 用户消息超过 10 行默认折叠（贴进来的长文本、`[Mica compact checkpoint]` 摘要都以 user 角色落库）：阈值在 `chat-collapse.js`，按 `scrollHeight` 与 computed `line-height` 判定，折叠态挂 `title` 给全量文本，附「展开全部（共 N 行）」按钮；含 `[Image]` 引用的消息不折叠（缩略图会被裁掉）。
 - 回合日志的工具行一律单行省略（终端同规则），点行开详情弹窗看完整入参/输出（输出封顶 5000 行 / 20 万字符）；思考照旧整段折行，不是日志行。`TurnLogItem` memo，计时更新仅影响运行行。
 - 详情弹窗统一走 `chat-modal.jsx` 的 `ModalShell`（portal 到 body，head 固定 + meta 行 + body 唯一滚动层），上下文占用/子代理/后台任务/工具调用/思考共用 `.chat-modal-*`，不再单开弹窗样式。
+- Subagent 详情里的活动记录与主对话共用同一套展示件：思考/工具行用 `chat-tool-views.jsx`，提示词是用户消息块、结果与正文是回答块，工具行点开就是同一个 `ToolDetailDialog`（`nested`，不再就地展开）。两边字号靠 `.chat-activity-log` 对齐；`.chat-modal-overlay` 与 `.chat-view` 共用一组 `--chat-*` 排版变量，否则 portal 到 body 后 `var(--chat-user)` 解析成空。
 - 代码块（聊天 markdown 与详情弹窗的参数/输出）统一由 `CodeView` + `code-highlight.js` 渲染：只做只读着色，认得的语言是 json/shell/diff/js/log，其余原样输出；token 色走 `app.css` 的 `--color-*`，不引入编辑器运行时，路径点击仍由 `PathToken` 提供。`displayText` 在显示前对 json 做缩进重排（数字与转义按原文保留，解析失败原样输出），复制带的是屏幕上那段文本。
 - 要读全文就到编辑器里看：详情弹窗的「在编辑器中打开」经 `FilesView.openDocument` 把内容作为**只读虚拟文档**（`mica-document://` 页签）塞进应用里唯一的 monaco 实例，不另建 editor。页签规则在 `files-document.js`（同 `callID:input/output` 复用同一个 model，同名标题自动加序号），只读状态在 `activateFile` 里按页签切换，打开后关掉弹窗。
 - 模型选择、上下文占用这类轻量浮层统一用 `Popover`，同一尺寸、锚点、关闭逻辑；触发器带对应 `data-popover-trigger`，body 为唯一滚动层。会话级设置（能力 / 压缩 / 定时任务）是弹窗而不是浮层，走 `SessionSettingsDialog`。
@@ -523,6 +527,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - error 红点表示异常未完成，后续 completed 才清；aborted 不算异常。running + 活 lease 显示运行态，running + 无活 lease 才判中断；lease 每次探测，不进文件签名缓存。
 - 会话搜索共用 `mica-web-shared/session-search.ts`：等长全半角/大小写折叠、多词 AND、评分、高亮与片段；renderer 合并草稿并按相关度排序，最多 200 项。
 - 正文由运行时搜 user/assistant 文本，排除 notice、工具和 compact boundary；每会话最多 20k 字符（首 60% + 尾 40%）。默认最近 3 个自然日，全部范围最多最近 600 个候选；截断须告知。
+- 点开搜索结果会带着关键词打开对话内查找条并定位首条命中（见第 12 节）；`SearchSnippet` 没有消息序号，「跳到第 N 条消息」需要先让 host 保留逐消息边界，目前不做。
 - 正文查询防抖 220ms，忽略过期响应；匹配规则不内联组件。快捷键 Cmd/Ctrl+K 不抢终端/输入框自身快捷键。
 - 上下文统计同时支持两种协议，按整条消息 JSON 估算并单列 envelope，所有位置的媒体 payload 都排除。
 - compact / rewind 后旧 input usage 失效时用 staleInput 说明，分母至少为消息体估算，避免占比超过 100%；详情与状态栏共用 ContextUsagePanel。

@@ -40,8 +40,8 @@ export type ProviderToolCallOutcome = {
  * other tool is a serial barrier of its own, so write/exec side effects keep
  * their declared order. Outcomes come back in the original call order.
  *
- * Tools declared `overlappable` (pure waits such as `wait_for` / `pty_wait`)
- * start immediately and overlap the calls that follow them; their outcome is
+ * Calls declared overlappable (such as `wait_for`, `pty_wait`, or `agent await/join`)
+ * start when reached and overlap the calls that follow them; their outcome is
  * collected after every other call settled. Without that, a long poll would
  * block the work the model wanted to do while waiting.
  *
@@ -57,10 +57,31 @@ export async function executeProviderToolCalls(params: {
   onToolResult?: AgentCallbacks['onToolResult'];
   checkpoint?: () => void;
 }): Promise<ProviderToolCallOutcome[]> {
+  // 调度和执行共用解析结果，包括解析失败；不能为了分类重复调用 parseArgs。
+  const calls = params.calls.map((call) => {
+    let parsed: { input: ToolInput } | { error: unknown } | undefined;
+    return {
+      ...call,
+      parseArgs: () => {
+        if (!parsed) {
+          try {
+            parsed = { input: call.parseArgs() };
+          } catch (error) {
+            parsed = { error };
+          }
+        }
+        if ('error' in parsed) throw parsed.error;
+        return parsed.input;
+      },
+    };
+  });
   // 位置即调用顺序：重叠执行的等待和普通批次完成后都回填到自己的下标。
   const outcomes: Array<ProviderToolCallOutcome | undefined> = new Array(params.calls.length);
   const overlapped: Promise<void>[] = [];
-  let index = 0;
+  const started: Promise<void>[] = [];
+  let parallelBatch: Promise<void>[] = [];
+  const cancellation = new AbortController();
+  const signal = params.signal ? AbortSignal.any([params.signal, cancellation.signal]) : cancellation.signal;
 
   const runCall = async (call: ProviderToolCall, position: number): Promise<void> => {
     const outcome = await executeProviderToolCall({
@@ -68,7 +89,7 @@ export async function executeProviderToolCalls(params: {
       argsText: call.argsText,
       id: call.id,
       parseArgs: call.parseArgs,
-      signal: params.signal,
+      signal,
       context: params.context,
       toolFilter: params.toolFilter,
       onToolCall: params.onToolCall,
@@ -77,37 +98,47 @@ export async function executeProviderToolCalls(params: {
     outcomes[position] = { name: call.name, id: call.id, ...outcome };
   };
 
+  const startCall = (call: ProviderToolCall, position: number): Promise<void> => {
+    const execution = runCall(call, position);
+    // 重叠调用可能在屏障回收之前失败，立即登记 rejection handler。
+    void execution.catch(() => {});
+    started.push(execution);
+    return execution;
+  };
+
+  const finishParallelBatch = async (): Promise<void> => {
+    await Promise.all(parallelBatch);
+    parallelBatch = [];
+    params.checkpoint?.();
+  };
+
   try {
-    while (index < params.calls.length) {
-      const current = params.calls[index]!;
-      if (isOverlappableTool(current.name)) {
-        params.checkpoint?.();
-        overlapped.push(runCall(current, index));
-        index += 1;
+    for (const [index, current] of calls.entries()) {
+      params.checkpoint?.();
+      if (isOverlappableTool(current)) {
+        overlapped.push(startCall(current, index));
         continue;
       }
 
-      const batchStart = index;
-      const batch: ProviderToolCall[] = [];
-      if (isParallelSafeTool(params.calls[index]!.name)) {
-        while (index < params.calls.length && isParallelSafeTool(params.calls[index]!.name)) {
-          batch.push(params.calls[index++]!);
-        }
+      if (isParallelSafeTool(current.name)) {
+        // 等待不结束普通并发批次：run A / join T / run B 中 A、B 仍须并发。
+        parallelBatch.push(startCall(current, index));
       } else {
-        batch.push(params.calls[index++]!);
+        await finishParallelBatch();
+        await startCall(current, index);
+        params.checkpoint?.();
       }
-
-      params.checkpoint?.();
-      await Promise.all(batch.map(async (call, offset) => runCall(call, batchStart + offset)));
-      params.checkpoint?.();
     }
+    await finishParallelBatch();
+    await Promise.all(overlapped);
+    params.checkpoint?.();
   } catch (error) {
-    // 批次被中止时别把重叠的等待留成未处理的 rejection。
-    await Promise.allSettled(overlapped);
+    // shouldContinue 等 checkpoint 停止不一定会 abort 外部 signal，须主动取消已启动调用。
+    cancellation.abort(error);
+    await Promise.allSettled(started);
     throw error;
   }
 
-  await Promise.all(overlapped);
   return outcomes.map((outcome, position) => {
     if (!outcome) throw new Error(`工具调用 ${params.calls[position]?.name ?? position} 没有产出结果`);
     return outcome;
@@ -128,9 +159,9 @@ function isParallelSafeTool(name: string): boolean {
   }
 }
 
-function isOverlappableTool(name: string): boolean {
+function isOverlappableTool(call: ProviderToolCall): boolean {
   try {
-    return micaTools.isOverlappable(name);
+    return micaTools.isOverlappable(call.name, call.parseArgs());
   } catch {
     return false;
   }

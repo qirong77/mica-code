@@ -1,3 +1,5 @@
+import { parseToolArgs } from './chat-tool-display'
+
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB']
 
 export function formatBytes(value) {
@@ -46,6 +48,12 @@ export function isBackgroundTaskRunning(task) {
 
 const TIMELINE_KINDS = new Set(['thinking', 'text', 'tool', 'tool_result'])
 
+/** 时间线条目自带的写入时间（毫秒）；缺失时返回 undefined，不编造时间。 */
+function entryTime(entry) {
+  const value = Date.parse(entry?.at)
+  return Number.isFinite(value) ? value : undefined
+}
+
 /**
  * 找最近一条还没挂上结果的工具调用。
  *
@@ -74,17 +82,25 @@ export function buildSubagentTimeline(task) {
     const kind = TIMELINE_KINDS.has(entry?.kind) ? entry.kind : 'thinking'
     const toolName = entry?.toolName || ''
     if (kind === 'tool') {
-      steps.push({ key, kind, toolName, argsText: text, resultText: '' })
+      steps.push({
+        key,
+        kind,
+        toolName,
+        argsText: text,
+        resultText: '',
+        startedAt: entryTime(entry)
+      })
       return
     }
     if (kind === 'tool_result') {
       const target = takePendingToolStep(steps, toolName)
       if (target) {
         target.resultText = text
+        target.finishedAt = entryTime(entry)
         return
       }
       // 找不到对应调用（时间线被截断过）时单独成一步，不能把输出丢掉。
-      steps.push({ key, kind, toolName, text })
+      steps.push({ key, kind, toolName, text, startedAt: entryTime(entry) })
       return
     }
     steps.push({
@@ -95,6 +111,28 @@ export function buildSubagentTimeline(task) {
     })
   })
   return steps
+}
+
+/**
+ * 把时间线里的一步工具调用转成**回合日志那一行**要的形状。
+ *
+ * 主对话的工具行数据来自 app-server 的工具事件（带 `displayText` 与起止时间）；
+ * subagent 的时间线只有原始入参 JSON、结果文本和每条记录的写入时间。这里把状态
+ * 与耗时补齐，两边的工具行才能真正共用同一个 `ToolActivityRow` / `ToolDetailDialog`，
+ * 而不是各画一套（否则同一个工具在主对话和 subagent 详情里长得不一样）。
+ */
+export function subagentToolOf(step, running = false) {
+  // 配不上调用的孤立结果（时间线被截断过）本身就只有输出，没有入参。
+  const output = step?.resultText || (step?.kind === 'tool_result' ? step?.text : '') || ''
+  return {
+    id: step?.key,
+    tool: step?.toolName || '',
+    input: parseToolArgs(step?.argsText),
+    output,
+    status: output || !running ? 'completed' : 'running',
+    startedAt: step?.startedAt,
+    finishedAt: step?.finishedAt
+  }
 }
 
 /**

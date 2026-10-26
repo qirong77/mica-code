@@ -9,6 +9,7 @@
 - 获取可提供给模型的工具定义：`micaTools.getDefinitions()`。
 - 执行指定工具：`micaTools.execute(name, input, callbacks)`。
 - 获取工具调用展示文案：`micaTools.getDisplayText(name, input)`。
+- 调度按 `micaTools.isOverlappable(name, input)` 判断调用能否与同消息其他工具重叠；纯等待工具设置 `overlappable: true`，混合操作工具重写 `MicaTool.canOverlap(input)`（例如 `agent` 仅 await/join）。这与决定安全重试的 `readOnly` 独立。
 - 运行期工具注册支持 `primaryAgentOnly` 元数据，subagent 工具过滤通过 registry 查询，不硬编码产品工具名。
 
 ## 内置工具
@@ -24,7 +25,7 @@
 - `background_tasks_list`：列出后台任务（id / 状态 / pid / 时长 / 输出大小）。
 - `background_tasks_read`：读取后台任务输出与状态。
 - `background_tasks_kill`：终止仍在运行的后台任务。
-- `wait_for`：等外部条件成立（后台任务结束、进程退出、文件出现或变化、命令/HTTP/端口就绪、固定时长），超时返回可续等的 `wait_id`；可选 `reason` 说明为什么等（展示在客户端「等待中」列表）。它只观察、不启动任何东西，且可与同一条消息里其余调用并发执行。`kind=task` 只认 `background_tasks_start` 的 shell 任务，subagent 任务要用 `Agent` 的 `operation=await`；参数类错误（未知 task_id、非法正则、路径越权）立即返回 `failed`，不续等。
+- `wait_for`：等外部条件成立（后台任务结束、进程退出、文件出现或变化、命令/HTTP/端口就绪、固定时长），超时返回可续等的 `wait_id`；可选 `reason` 说明为什么等（展示在客户端「等待中」列表）。除 `kind=command` 会重复执行探测命令外，它只观察、不启动任何东西，且可与同一条消息里其余调用并发执行。`kind=task` 只认 `background_tasks_start` 的 shell 任务，subagent 任务要用 `agent` 的 `operation=await/join`，也可与其他工具重叠执行；参数类错误（未知 task_id、非法正则、路径越权）立即返回 `failed`，不续等。
 - `pty_spawn`：在 PTY 中启动交互式终端程序。
 - `pty_send`：向 PTY 会话发送文本或命名按键。
 - `pty_read`：读取 PTY 会话输出。

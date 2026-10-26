@@ -46,7 +46,10 @@ export function ReasoningRow({ text }) {
 export function ToolActivityRow({ tool, now = Date.now(), onOpen }) {
   if (!tool) return null
   const running = ['pending', 'running'].includes(tool.status)
-  const duration = formatLogElapsed(toolDurationMs(tool, now))
+  // 没有起止时间的调用（如 subagent 时间线里配不上调用的孤立结果）不显示耗时，
+  // 免得每一行都挂一个没有意义的 `0ms`。
+  const elapsed = toolDurationMs(tool, now)
+  const duration = elapsed > 0 ? formatLogElapsed(elapsed) : ''
   const text = singleLine(toolCallText(tool))
 
   return (

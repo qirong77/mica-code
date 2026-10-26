@@ -79,6 +79,7 @@ export class ToolAgent extends MicaTool {
         '可写 subagent 使用 owned_paths 路径租约；Implementer/Tester/Proposal 必填。',
         'Proposal 模式不落盘，只返回 patch 提案；run_many 支持 depends_on 与 max_parallel。',
         '前台 run 会阻塞当前 turn 直到子代理返回；同一条消息里的多个前台调用会并行执行。需要主流程继续推进时用 run_in_background: true，完成后经 operation=read/join 取结果。',
+        'await/join 等待已有子任务，可与同一条消息里的其他工具重叠执行，全部结果一起返回；仍有独立工作时先继续做，或把等待和工作放在同一条消息，别单独等待。shell 后台任务用 wait_for(kind=task)。',
         `可用 subagent_type: ${listSubagents()
           .map((agent) => `${agent.name} (${agent.description})`)
           .join('; ')}。`,
@@ -112,7 +113,7 @@ export class ToolAgent extends MicaTool {
           },
           timeout_ms: {
             type: 'number',
-            description: 'await 最长等待毫秒；超时后返回当前状态，不抛错。',
+            description: 'await/join 最长等待毫秒；超时后返回当前状态，不抛错。',
           },
           context_mode: {
             type: 'string',
@@ -142,6 +143,11 @@ export class ToolAgent extends MicaTool {
         },
       },
     );
+  }
+
+  override canOverlap(input: ToolInput): boolean {
+    const operation = normalizeOperation(input.operation);
+    return operation === 'await' || operation === 'join';
   }
 
   async execute(input: AgentToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
@@ -397,7 +403,7 @@ export class ToolAgent extends MicaTool {
         `context_mode: ${contextMode}`,
         `write_mode: ${writeMode}`,
         ownedPaths.length > 0 ? `owned_paths: ${ownedPaths.join(', ')}` : '',
-        '任务完成后系统会自动通知，请勿轮询；收到通知后使用 Agent operation=read/join 获取结果，operation=await 等待完成，或 operation=kill 停止任务。',
+        '任务完成后系统会自动通知，请勿轮询；先继续独立工作，收到通知后用 agent operation=read/join 获取结果。需要等结果时用 operation=await/join（可与其他工具放在同一条消息并发），停止任务用 operation=kill。',
         '结果仅在当前进程内保留。',
       ]
         .filter(Boolean)

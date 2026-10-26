@@ -8,9 +8,172 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { DEFAULT_SUBAGENT_MAX_TURNS } from '../agents/subagentDefinitions.js';
 import { ToolAgent } from './ToolAgent.js';
+import { micaTools, MicaTool } from '@packages/mica-tools/index.js';
+import { executeProviderToolCalls, throwIfQueryStopped } from '@packages/mica-agent/providers/providerHelpers.js';
 
 describe('ToolAgent', () => {
   afterEach(() => vi.useRealTimers());
+
+  it('only overlaps await/join operations through the registry', () => {
+    const { runtime } = createRuntimeStub();
+    const tool = new ToolAgent(runtime);
+    micaTools.registerRuntime(tool);
+    try {
+      expect(micaTools.isReadOnly('agent')).toBe(false);
+      expect(micaTools.isOverlappable('agent')).toBe(false);
+      for (const operation of ['await', 'join']) {
+        expect(micaTools.isOverlappable('agent', { operation })).toBe(true);
+      }
+      for (const operation of [undefined, 'run', 'run_many', 'read', 'list', 'kill']) {
+        expect(micaTools.isOverlappable('agent', { operation })).toBe(false);
+      }
+    } finally {
+      micaTools.unregisterRuntime(tool);
+    }
+  });
+
+  it.each(['await', 'join'])('overlaps a real %s with the following execution tool', async (operation) => {
+    const deferred = createDeferred<string>();
+    const { runtime } = createRuntimeStub(vi.fn(() => deferred.promise));
+    const manager = new SubagentTaskManager();
+    const agent = new ToolAgent(runtime, manager);
+    const events: string[] = [];
+    const executor = new (class extends MicaTool {
+      constructor() {
+        super('probe_execute', 'Finish child', { type: 'object' });
+      }
+      async execute(): Promise<string> {
+        events.push('executed');
+        deferred.resolve('child completed');
+        return 'executed';
+      }
+      onToolUseDisplayText(): string {
+        return this.name;
+      }
+    })();
+    micaTools.registerRuntime(agent);
+    micaTools.registerRuntime(executor);
+    try {
+      await agent.execute({ description: 'bg', prompt: 'Work', run_in_background: true, context_mode: 'none' });
+      const taskId = manager.list(runtime)[0]!.id;
+      const execution = executeProviderToolCalls({
+        calls: [
+          { name: 'agent', argsText: '{}', parseArgs: () => ({ operation: 'read', task_id: taskId }) },
+          { name: 'agent', argsText: '{}', parseArgs: () => ({ operation, task_id: taskId, timeout_ms: 1000 }) },
+          { name: executor.name, argsText: '{}', parseArgs: () => ({}) },
+        ],
+        context: { agent: runtime },
+        toolFilter: undefined,
+        onToolResult: (name) => {
+          if (name === 'agent') events.push('agent-result');
+        },
+      });
+      const results = await execution;
+      expect(results[0]?.result).toContain('status: running');
+      expect(results[1]?.result).toContain('status: completed');
+      expect(results[1]?.result).toContain('child completed');
+      expect(results.map((result) => result.name)).toEqual(['agent', 'agent', executor.name]);
+      expect(events).toEqual(['agent-result', 'executed', 'agent-result']);
+    } finally {
+      deferred.resolve('cleanup');
+      await flushAsyncWork();
+      micaTools.unregisterRuntime(executor);
+      micaTools.unregisterRuntime(agent);
+    }
+  });
+
+  it.each(['await', 'join'])('propagates cancellation after an overlapped %s settles', async (operation) => {
+    const deferred = createDeferred<string>();
+    const { runtime } = createRuntimeStub(vi.fn(() => deferred.promise));
+    const agent = new ToolAgent(runtime, new SubagentTaskManager());
+    const controller = new AbortController();
+    micaTools.registerRuntime(agent);
+    try {
+      const started = await agent.execute({
+        description: 'bg',
+        prompt: 'Work',
+        run_in_background: true,
+        context_mode: 'none',
+      });
+      const taskId = started.match(/task_id: (\S+)/)?.[1];
+      const execution = executeProviderToolCalls({
+        calls: [{ name: 'agent', argsText: '{}', parseArgs: () => ({ operation, task_id: taskId }) }],
+        context: { agent: runtime },
+        toolFilter: undefined,
+        signal: controller.signal,
+        onToolCall: () => queueMicrotask(() => controller.abort()),
+        checkpoint: () => {
+          if (controller.signal.aborted) throw new Error('query cancelled');
+        },
+      });
+      await expect(execution).rejects.toThrow('query cancelled');
+    } finally {
+      deferred.resolve('cleanup');
+      await flushAsyncWork();
+      micaTools.unregisterRuntime(agent);
+    }
+  });
+
+  it.each(['await', 'join'])(
+    'cancels pending %s when a checkpoint stops without an external abort',
+    async (operation) => {
+      const deferred = createDeferred<string>();
+      const { runtime } = createRuntimeStub(vi.fn(() => deferred.promise));
+      const agent = new ToolAgent(runtime, new SubagentTaskManager());
+      let shouldContinue = true;
+      const stopper = new (class extends MicaTool {
+        constructor() {
+          super('probe_stop', 'Stop continuation', { type: 'object' });
+        }
+        async execute(): Promise<string> {
+          shouldContinue = false;
+          return 'stopped';
+        }
+        onToolUseDisplayText(): string {
+          return this.name;
+        }
+      })();
+      micaTools.registerRuntime(agent);
+      micaTools.registerRuntime(stopper);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const started = await agent.execute({
+          description: 'bg',
+          prompt: 'Work',
+          run_in_background: true,
+          context_mode: 'none',
+        });
+        const taskId = started.match(/task_id: (\S+)/)?.[1];
+        const execution = executeProviderToolCalls({
+          calls: [
+            { name: 'agent', argsText: '{}', parseArgs: () => ({ operation, task_id: taskId }) },
+            { name: stopper.name, argsText: '{}', parseArgs: () => ({}) },
+          ],
+          context: { agent: runtime },
+          toolFilter: undefined,
+          checkpoint: () => throwIfQueryStopped({ shouldContinue: () => shouldContinue }),
+        });
+        const outcome = await Promise.race([
+          execution.then(
+            () => 'completed',
+            (error: Error) => error.name,
+          ),
+          new Promise<string>((resolve) => {
+            timer = setTimeout(() => resolve('timeout'), 1000);
+          }),
+        ]);
+        deferred.resolve('cleanup');
+        await execution.catch(() => {});
+        expect(outcome).toBe('AbortError');
+      } finally {
+        clearTimeout(timer);
+        deferred.resolve('cleanup');
+        await flushAsyncWork();
+        micaTools.unregisterRuntime(stopper);
+        micaTools.unregisterRuntime(agent);
+      }
+    },
+  );
 
   it('runs a synchronous child agent with the selected subagent tool filter and inherited effort', async () => {
     const { runtime, createSubAgent, query } = createRuntimeStub();

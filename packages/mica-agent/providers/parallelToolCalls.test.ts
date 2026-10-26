@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
-import { MicaTool, micaTools } from '@packages/mica-tools/index.js';
+import { MicaTool, micaTools, type ToolInput } from '@packages/mica-tools/index.js';
 import { ChatCompletionsClient } from './ChatCompletionsClient.js';
 import { ResponsesClient } from './ResponsesClient.js';
 import type { ModelClientOptions } from './types.js';
+import { executeProviderToolCalls } from './providerHelpers.js';
 
 const openaiMocks = vi.hoisted(() => ({
   chatCreate: vi.fn(),
@@ -106,12 +107,7 @@ describe('parallel provider tool calls', () => {
 
     await new ChatCompletionsClient(options('openai_chat_completions')).query('write then read');
 
-    expect(events).toEqual([
-      'start:probe_write',
-      'finish:probe_write',
-      'start:probe_read',
-      'finish:probe_read',
-    ]);
+    expect(events).toEqual(['start:probe_write', 'finish:probe_write', 'start:probe_read', 'finish:probe_read']);
     const toolMessages = (secondRequest?.messages ?? []).filter((message) => message.role === 'tool');
     expect(toolMessages.map((message) => [message.tool_call_id, message.content])).toEqual([
       ['call-write', 'written'],
@@ -196,6 +192,150 @@ describe('parallel provider tool calls', () => {
     expect(events).toHaveLength(4);
   });
 
+  it.each([
+    ['openai_chat_completions', 'await'],
+    ['openai_chat_completions', 'join'],
+    ['openai_responses', 'await'],
+    ['openai_responses', 'join'],
+  ] as const)('overlaps agent %s %s after a read batch with a following write', async (protocol, operation) => {
+    const events: string[] = [];
+    const gate = createGate(2);
+    registerTool(new ScriptedTool('probe_read', true, { events, output: 'read' }));
+    registerTool(
+      new ScriptedTool('agent', false, { events, gate, overlapOperations: ['await', 'join'], output: 'joined' }),
+    );
+    registerTool(new ScriptedTool('probe_write', false, { events, gate, output: 'written' }));
+    const calls = [
+      { id: 'call-read', name: 'probe_read', args: '{}' },
+      { id: 'call-agent', name: 'agent', args: JSON.stringify({ operation, task_ids: ['agent-task-test'] }) },
+      { id: 'call-write', name: 'probe_write', args: '{}' },
+    ];
+    if (protocol === 'openai_chat_completions') {
+      openaiMocks.chatCreate
+        .mockResolvedValueOnce(
+          streamOf({
+            choices: [
+              {
+                delta: {
+                  tool_calls: calls.map((call, index) => ({
+                    index,
+                    id: call.id,
+                    function: { name: call.name, arguments: call.args },
+                  })),
+                },
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(streamOf({ choices: [{ delta: { content: 'done' } }] }));
+    } else {
+      openaiMocks.responsesCreate
+        .mockResolvedValueOnce(
+          streamOf(...calls.map((call, index) => functionCallItem(index, call.id, call.name, call.args))),
+        )
+        .mockResolvedValueOnce(streamOf({ type: 'response.output_text.delta', delta: 'done' }));
+    }
+    const client =
+      protocol === 'openai_chat_completions'
+        ? new ChatCompletionsClient(options(protocol))
+        : new ResponsesClient(options(protocol));
+    const query = client.query('wait for subagent while writing');
+    const outcome = await Promise.race([query.then(() => 'completed'), delay(2_000).then(() => 'timeout')]);
+    gate.release();
+    await query;
+    expect(outcome).toBe('completed');
+    expect(events.slice(0, 4)).toEqual(['start:probe_read', 'finish:probe_read', 'start:agent', 'start:probe_write']);
+    if (protocol === 'openai_chat_completions') {
+      const request = openaiMocks.chatCreate.mock.calls[1]![0];
+      expect(
+        request.messages
+          .filter((m: { role: string }) => m.role === 'tool')
+          .map((m: { tool_call_id: string; content: string }) => [m.tool_call_id, m.content]),
+      ).toEqual([
+        ['call-read', 'read'],
+        ['call-agent', 'joined'],
+        ['call-write', 'written'],
+      ]);
+    } else {
+      const request = openaiMocks.responsesCreate.mock.calls[1]![0];
+      expect(
+        request.input
+          .filter((m: { type: string }) => m.type === 'function_call_output')
+          .map((m: { call_id: string; output: string }) => [m.call_id, m.output]),
+      ).toEqual([
+        ['call-read', 'read'],
+        ['call-agent', 'joined'],
+        ['call-write', 'written'],
+      ]);
+    }
+  });
+
+  it.each(['await', 'join'])('keeps foreground agent runs concurrent across %s', async (operation) => {
+    const events: string[] = [];
+    const gate = createGate(2);
+    registerTool(
+      new ScriptedTool('agent', false, {
+        events,
+        gate,
+        gateOperations: ['run'],
+        overlapOperations: ['await', 'join'],
+      }),
+    );
+    registerTool(new ScriptedTool('probe_write', false, { events }));
+    const execution = executeProviderToolCalls({
+      calls: ['run', operation, 'run']
+        .map((op) => ({
+          name: 'agent',
+          argsText: '{}',
+          parseArgs: () => ({ operation: op }),
+        }))
+        .concat([{ name: 'probe_write', argsText: '{}', parseArgs: () => ({ operation: '' }) }]),
+      context: undefined,
+      toolFilter: undefined,
+    });
+    const outcome = await Promise.race([execution.then(() => 'completed'), delay(2_000).then(() => 'timeout')]);
+    gate.release();
+    await execution;
+    expect(outcome).toBe('completed');
+    expect(events.slice(-2)).toEqual(['start:probe_write', 'finish:probe_write']);
+    expect(events.filter((event) => event === 'finish:agent')).toHaveLength(3);
+  });
+
+  it('keeps a foreground agent run as a barrier before a following write', async () => {
+    const events: string[] = [];
+    registerTool(new ScriptedTool('agent', false, { events, overlapOperations: ['await', 'join'] }));
+    registerTool(new ScriptedTool('probe_write', false, { events }));
+    await executeProviderToolCalls({
+      calls: ['agent', 'probe_write'].map((name) => ({ name, argsText: '{}', parseArgs: () => ({}) })),
+      context: undefined,
+      toolFilter: undefined,
+    });
+    expect(events).toEqual(['start:agent', 'finish:agent', 'start:probe_write', 'finish:probe_write']);
+  });
+
+  it('parses inputs once and reports malformed input without preventing later calls', async () => {
+    const events: string[] = [];
+    registerTool(new ScriptedTool('agent', false, { events, overlapOperations: ['await', 'join'] }));
+    registerTool(new ScriptedTool('probe_write', false, { events }));
+    const badArgs = vi.fn(() => {
+      throw new SyntaxError('bad arguments');
+    });
+    const writeArgs = vi.fn(() => ({}));
+    const outcomes = await executeProviderToolCalls({
+      calls: [
+        { name: 'agent', argsText: '{', parseArgs: badArgs },
+        { name: 'probe_write', argsText: '{}', parseArgs: writeArgs },
+      ],
+      context: undefined,
+      toolFilter: undefined,
+    });
+    expect(badArgs).toHaveBeenCalledTimes(1);
+    expect(writeArgs).toHaveBeenCalledTimes(1);
+    expect(outcomes[0]).toMatchObject({ isError: true, result: expect.stringContaining('bad arguments') });
+    expect(outcomes[1]).toMatchObject({ isError: false });
+    expect(events).toEqual(['start:probe_write', 'finish:probe_write']);
+  });
+
   it('runs consecutive read-only Responses calls concurrently and keeps output order', async () => {
     const events: string[] = [];
     const gate = createGate(2);
@@ -204,10 +344,7 @@ describe('parallel provider tool calls', () => {
 
     openaiMocks.responsesCreate
       .mockResolvedValueOnce(
-        streamOf(
-          functionCallItem(0, 'call-a', 'probe_read_a'),
-          functionCallItem(1, 'call-b', 'probe_read_b'),
-        ),
+        streamOf(functionCallItem(0, 'call-a', 'probe_read_a'), functionCallItem(1, 'call-b', 'probe_read_b')),
       )
       .mockResolvedValueOnce(streamOf({ type: 'response.output_text.delta', delta: 'done' }));
 
@@ -237,6 +374,8 @@ type ScriptedToolOptions = {
   output?: string;
   gate?: Gate;
   overlappable?: boolean;
+  overlapOperations?: string[];
+  gateOperations?: string[];
 };
 
 class ScriptedTool extends MicaTool {
@@ -245,14 +384,28 @@ class ScriptedTool extends MicaTool {
     readOnly: boolean,
     private readonly script: ScriptedToolOptions,
   ) {
-    super(name, 'scripted test tool', { type: 'object', properties: {} }, { readOnly, overlappable: script.overlappable });
+    super(
+      name,
+      'scripted test tool',
+      { type: 'object', properties: {} },
+      { readOnly, overlappable: script.overlappable },
+    );
   }
 
-  async execute(): Promise<string> {
+  async execute(input: ToolInput): Promise<string> {
     this.script.events.push(`start:${this.name}`);
-    if (this.script.gate) await this.script.gate.wait();
+    if (
+      this.script.gate &&
+      (!this.script.gateOperations || this.script.gateOperations.includes(String(input.operation)))
+    ) {
+      await this.script.gate.wait();
+    }
     this.script.events.push(`finish:${this.name}`);
     return this.script.output ?? `${this.name} output`;
+  }
+
+  override canOverlap(input: ToolInput): boolean {
+    return this.script.overlapOperations?.includes(String(input.operation)) ?? super.canOverlap(input);
   }
 
   onToolUseDisplayText(): string {
@@ -289,11 +442,11 @@ function registerTool(tool: MicaTool): void {
   micaTools.registerRuntime(tool);
 }
 
-function functionCallItem(outputIndex: number, callId: string, name: string) {
+function functionCallItem(outputIndex: number, callId: string, name: string, args = '{}') {
   return {
     type: 'response.output_item.done',
     output_index: outputIndex,
-    item: { type: 'function_call', id: `fc-${callId}`, call_id: callId, name, arguments: '{}', status: 'completed' },
+    item: { type: 'function_call', id: `fc-${callId}`, call_id: callId, name, arguments: args, status: 'completed' },
   };
 }
 

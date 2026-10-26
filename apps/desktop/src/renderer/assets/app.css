@@ -345,6 +345,15 @@ body.is-resizing.is-resizing-terminal {
   flex-direction: column;
   background: var(--color-canvas);
   color: var(--color-fg-strong);
+}
+
+/* 对话排版变量：主对话区与详情弹窗共用。
+
+   弹窗 portal 到 body，拿不到 `.chat-view` 上的变量；而 subagent 详情里要渲染
+   与主对话一模一样的用户消息块与工具行（见 `SubagentTranscript`），`var(--chat-user)`
+   解析成空会让那条消息既没有底色也没有栅格。两边因此都挂这一组。 */
+.chat-view,
+.chat-modal-overlay {
   --chat-muted: rgb(255 255 255 / 42%);
   --chat-subtle: rgb(255 255 255 / 25%);
   --chat-border: var(--color-line);
@@ -445,6 +454,32 @@ body.is-resizing.is-resizing-terminal {
   min-width: 0;
 }
 
+/* 长消息折到 10 行（用户贴的长文本、模型压缩摘要）：折叠高度与行高同源，
+   JS 按 computed line-height 算同一个阈值（chat-collapse.js）。底部渐变
+   提示还有内容，`title` 挂全量文本。 */
+.chat-message-collapsible-clipped {
+  max-height: calc(10 * var(--chat-message-line-height, 1.28) * 1em);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 88%, transparent);
+  mask-image: linear-gradient(to bottom, #000 88%, transparent);
+}
+
+.chat-message-collapse-toggle {
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--chat-subtle);
+  font-family: inherit;
+  font-size: 11.5px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.chat-message-collapse-toggle:hover {
+  color: var(--color-fg);
+}
+
 .chat-message-assistant {
   /* Tighter than the base row gap so an answer reads as belonging to the prompt
      above it (the 20px before a prompt is what separates one turn from the next). */
@@ -467,7 +502,8 @@ body.is-resizing.is-resizing-terminal {
      eye jumps back to, while the model's answer keeps the reading color. */
   color: var(--color-fg-max);
   font-size: var(--chat-text-size);
-  line-height: 1.28;
+  --chat-message-line-height: 1.28;
+  line-height: var(--chat-message-line-height);
 }
 
 .chat-message-user:first-child {
@@ -1479,6 +1515,12 @@ body.is-resizing.is-resizing-terminal {
   color: var(--color-fg-strong);
   font-family: var(--chat-font);
   font-size: 11.5px;
+}
+
+/* 焦点态由外框 `.chat-find-field:focus-within` 的橙色描边表示；再叠全局
+   `input:focus-visible` 的 1px 白描边就成了框里套框（截图里那层内边框）。 */
+.chat-find-input:focus {
+  outline: none;
 }
 
 .chat-find-input::placeholder {
@@ -3066,22 +3108,23 @@ body.is-resizing.is-resizing-terminal {
   margin-top: 5px;
 }
 
-/*
- * Subagent 时间线（`SubagentTimeline`）。
- *
- * 一条记录 = 一次调用 / 一段思考 / 一段正文，不再把工具入参与结果拆成两条平铺行。
- * 工具行永远只有一行，展开才把入参和输出挂进 DOM——长任务的详情弹窗里，
- * 「折叠但仍然渲染」正是卡顿来源。
- */
+/* subagent 详情里的活动记录：容器只负责「一段记录」的间距与外层盒子，
+   过程行本身复用回合日志那套（`chat-tool-views.jsx` 的 `.chat-turn-log-*`）。 */
 .chat-timeline {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 
-.chat-timeline-step {
+/* 思考与工具行的排版层：与主对话回合日志同一个字号/行高/颜色，但不做成独立
+   滚动区——它在弹窗正文里就是普通内容。 */
+.chat-activity-log {
   min-width: 0;
+  color: var(--color-fg-dim);
+  font-family: var(--chat-font);
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .chat-timeline-earlier {
@@ -3101,173 +3144,16 @@ body.is-resizing.is-resizing-terminal {
   color: var(--color-fg-soft);
 }
 
-.chat-timeline-tool {
-  border-radius: 4px;
-}
-
-.chat-timeline-tool.is-open {
-  background: color-mix(in srgb, var(--color-canvas) 55%, transparent);
-}
-
-.chat-timeline-tool-row {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  padding: 3px 8px 3px 3px;
-  color: var(--color-fg-muted);
-  font: inherit;
-  font-size: 11.5px;
-  text-align: left;
-}
-
-.chat-timeline-tool-row:hover {
-  background: rgb(255 255 255 / 5%);
-  color: var(--color-fg-soft);
-}
-
-.chat-timeline-caret {
-  width: 8px;
-  flex: 0 0 8px;
-  color: var(--color-fg-faint);
-  font-size: 10px;
-  line-height: 1;
-  text-align: center;
-}
-
-.chat-timeline-icon {
-  display: grid;
-  width: 15px;
-  flex: 0 0 15px;
-  place-items: center;
-  font-size: 10px;
-  opacity: 0.85;
-}
-
-/* 工具名与参数摘要之间的分界：名字稳定，摘要是每次调用唯一变化的部分 */
-.chat-timeline-tool-name {
-  flex: 0 0 auto;
-  color: var(--color-fg-soft);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.chat-timeline-tool-summary {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  color: var(--color-fg-faint);
-  font-family: var(--chat-font);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-timeline-tool-meta {
-  flex: 0 0 auto;
-  color: var(--color-fg-ghost);
-  font-size: 10.5px;
-  font-variant-numeric: tabular-nums;
-}
-
-.chat-timeline-tool-meta.is-running {
-  color: var(--color-teal);
-}
-
-.chat-timeline-tool-body {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 7px;
-  margin: 3px 0 7px 26px;
-}
-
-.chat-timeline-block {
-  min-width: 0;
-}
-
-.chat-timeline-block-head {
-  margin-bottom: 3px;
-  color: var(--color-fg-faint);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-/* 展开的入参/输出自己滚：弹窗主体是唯一滚动层，但不能被一段 500 行输出顶高 */
-.chat-timeline-code {
-  max-height: 34vh;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  background: var(--color-canvas);
-  padding: 7px 9px;
-  color: var(--color-fg-soft);
-  font-family: var(--chat-font);
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.chat-timeline-thinking {
-  margin: 5px 0;
-  /* 不用左侧竖条区分区域：靠背景与内缩的圆角块就够，侧边高亮条读起来像选中态。 */
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--color-info) 5%, transparent);
-  padding: 3px 9px 4px;
-  color: var(--color-fg-faint);
-  font-size: 11.5px;
-  font-style: italic;
-  line-height: 1.55;
-}
-
-.chat-timeline-thinking-text {
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
-.chat-timeline-more {
-  margin-top: 1px;
-  border: 0;
-  background: none;
-  padding: 0;
-  color: color-mix(in srgb, var(--color-info) 80%, var(--color-fg-soft));
-  font-family: var(--chat-font);
-  font-size: 10.5px;
-}
-
-.chat-timeline-more:hover {
-  color: var(--color-info);
-}
-
+/* 正文块：按主对话的回答渲染（同一份 markdown 样式），只补一点块间间距 */
 .chat-timeline-text {
   margin: 7px 0;
 }
 
+/* 提示词就是「这个 subagent 收到的用户消息」：直接套主对话的用户消息块，
+   这里只把块前后的间距收进弹窗正文的节奏里。 */
 .chat-timeline-prompt {
-  margin-bottom: 10px;
+  margin-top: 4px;
 }
-
-.chat-timeline-prompt > summary {
-  color: var(--color-fg-faint);
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.chat-timeline-prompt > summary:hover {
-  color: var(--color-fg-soft);
-}
-
-.chat-timeline-prompt .chat-modal-pre {
-  margin-top: 6px;
-  max-height: 26vh;
-  overflow: auto;
-}
-
 .chat-modal-id {
   color: var(--color-fg-ghost);
   font-family: var(--chat-font);

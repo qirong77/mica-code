@@ -607,8 +607,10 @@ export function SessionTree({
         if (item.draft) onSelectDraft?.(item.draft)
         return
       }
-      // 草稿不要在对话里定位：词在输入框里，transcript 里根本没有，打开只会得到空结果
-      if (item.session) onOpenSession?.(item.session, tokens.length ? { find: tokens } : undefined)
+      // 只有「正文里真的命中」才带关键词去定位：草稿的词在输入框里，纯标题命中（snippet 为空）
+      // 的会话正文里没有这串文字，两种情况带过去都只会得到一个 0 命中的查找条。
+      const find = tokens.length && item.snippet ? { find: tokens } : undefined
+      if (item.session) onOpenSession?.(item.session, find)
     },
     [onOpenSession, onSelectDraft, tokens]
   )

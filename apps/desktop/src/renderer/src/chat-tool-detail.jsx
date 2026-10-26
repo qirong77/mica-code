@@ -91,7 +91,7 @@ function SectionActions({ text, language, onOpenInEditor, onClose, documentId, t
   )
 }
 
-export function ToolDetailDialog({ tool, onOpenInEditor, onClose }) {
+export function ToolDetailDialog({ tool, onOpenInEditor, onClose, nested = false }) {
   if (!tool) return null
   const output = toolOutput(tool)
   const outputRaw = output ? output.lines.join('\n') : ''
@@ -111,6 +111,7 @@ export function ToolDetailDialog({ tool, onOpenInEditor, onClose }) {
       icon={toolIcon(tool.tool)}
       subtitle={summary || null}
       className="chat-modal-tool"
+      nested={nested}
       onClose={onClose}
       meta={
         <ModalMeta

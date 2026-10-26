@@ -36,7 +36,7 @@ export type ToolScheduleOptions = {
    * 执行期只是等待外部条件（后台任务、进程、端口、终端输出…）的工具。调度器会立刻
    * 启动它，让它与同一条消息里其余工具调用重叠，等其余调用全部完成后再回收结果——
    * 否则模型「一边等测试、一边改文档」会被整条消息的串行语义挡住。只给 `wait_for` /
-   * `pty_wait` 这类纯等待工具声明。
+   * `pty_wait` 这类纯等待工具声明。混合操作工具可重写 `canOverlap`，按输入判断。
    */
   overlappable?: boolean;
 };
@@ -97,6 +97,11 @@ export abstract class MicaTool {
 
   abstract execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<ToolResult>;
   abstract onToolUseDisplayText(input: ToolInput): string;
+
+  /** 仅按输入判断调度方式；重写时保持同步、无副作用。 */
+  canOverlap(_input: ToolInput): boolean {
+    return this.overlappable;
+  }
 
   async executeTimed(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<ToolResult> {
     try {

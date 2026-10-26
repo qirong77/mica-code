@@ -5,7 +5,7 @@
 ## 包说明
 
 - `mica-agent`：agent 抽象、模型 provider adapter、prompt 构建。
-- `mica-tools`：内置工具、支持文本/图片的工具结果、工具 registry、MCP 工具接入。
+- `mica-tools`：内置工具、支持文本/图片的工具结果、工具 registry、MCP 工具接入；`MicaTool.canOverlap(input)` 与 `micaTools.isOverlappable(name, input)` 为 provider 提供按调用输入判断的重叠调度能力。
 - `mica-mcp`：MCP 配置读取、server 连接管理和工具注册。
 - `mica-ui`：Ink 终端 UI 组件和 UI 状态。
 - `mica-runtime`：运行时协议、事件、状态、输入、消息队列和 OpenCode/DevEco-compatible run JSON schema。

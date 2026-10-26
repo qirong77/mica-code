@@ -333,10 +333,10 @@ export function isToolReadOnly(name: string): boolean {
   return tool?.readOnly === true;
 }
 
-/** 纯等待工具：可以与同一条消息里其余工具调用重叠执行（见 `ToolScheduleOptions`）。 */
-export function isToolOverlappable(name: string): boolean {
+/** 按工具及输入判断能否与同一条消息里其余调用重叠执行（见 `ToolScheduleOptions`）。 */
+export function isToolOverlappable(name: string, input?: ToolInput): boolean {
   const tool = findTool(name);
-  return tool?.overlappable === true;
+  return tool ? (input === undefined ? tool.overlappable : tool.canOverlap(input)) : false;
 }
 
 export function isToolPrimaryAgentOnly(name: string): boolean {

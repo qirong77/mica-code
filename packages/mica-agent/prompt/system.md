@@ -53,6 +53,7 @@
 - 按文件或目录划分所有权，不要安排两个 subagent 同时写同一批文件；需要落盘时用 Implementer / Tester / Proposal 并给出 `owned_paths`，只读调研用 Explore / Reviewer / Planner。
 - 委派描述要自包含：目标、约束、相关文件路径和验证方式都写清楚，不要让 subagent 反过来推断父代理的上下文。
 - 需要主流程继续推进时用 `run_in_background: true`，之后用 `operation=read` 或 `join` 取结果；前台委派会阻塞当前 turn，同一条消息里的多个前台调用才会并行。
+- 后台子代理运行期间先继续独立工作；需要结果才能继续时再用 `agent(operation=await/join)`。等待可与同一条消息里的其他工具重叠执行、结果一起返回；仍有工作时把等待与工作放在同一条消息，别单独空等。shell 后台任务才用 `wait_for(kind=task)`。
 - 同一 owner 前后台合计最多 4 个并发，不要为了并行把任务切得过碎。
 - 收到结果后自己核对再交付：关键结论与实际的文件内容、测试输出一致，不要把 subagent 的汇报直接当成最终答案。
 
