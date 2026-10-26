@@ -10,6 +10,18 @@ type HookRegistration = {
 export class HookRegistry {
   private order = 0;
   private readonly hooks = new Map<string, HookRegistration[]>();
+  private handlerErrorReporter: ((error: unknown, hook: string, pluginId?: string) => void) | null = null;
+
+  /**
+   * 装上「hook 处理函数抛错」的观察者。
+   *
+   * 默认 `failPolicy: 'continue'` 会吞掉异常——这是对的（一个插件的钩子不该打断整个
+   * turn），但完全无声就成了排查黑洞：某个插件的钩子每轮都炸，用户只会觉得「功能没反应」。
+   * 由宿主接到插件日志与健康上报上。
+   */
+  setHandlerErrorReporter(reporter: (error: unknown, hook: string, pluginId?: string) => void): void {
+    this.handlerErrorReporter = reporter;
+  }
 
   on<TEvent = unknown, TResult = unknown>(
     name: string,
@@ -73,7 +85,10 @@ export class HookRegistry {
     return current;
   }
 
-  async guard<TEvent>(name: string, event: TEvent): Promise<{ event: TEvent; handled: boolean; blocked: boolean; reason?: string }> {
+  async guard<TEvent>(
+    name: string,
+    event: TEvent,
+  ): Promise<{ event: TEvent; handled: boolean; blocked: boolean; reason?: string }> {
     let current = event;
     for (const registration of this.hooks.get(name) ?? []) {
       const result = await this.runHandler<TEvent, GuardHookResult<TEvent>>(name, registration, current);
@@ -103,6 +118,7 @@ export class HookRegistry {
         pluginId: registration.options.pluginId,
       })) as TResult | undefined;
     } catch (error) {
+      this.reportHandlerError(error, name, registration.options.pluginId);
       if (registration.options.failPolicy === 'stop') throw error;
       if (registration.options.failPolicy === 'block') {
         return { action: 'block', reason: error instanceof Error ? error.message : String(error) } as TResult;
@@ -123,6 +139,7 @@ export class HookRegistry {
         pluginId: registration.options.pluginId,
       });
     } catch (error) {
+      this.reportHandlerError(error, name, registration.options.pluginId);
       if (registration.options.failPolicy === 'stop') throw error;
       if (registration.options.failPolicy === 'block') {
         return { action: 'block', reason: error instanceof Error ? error.message : String(error) } as TResult;
@@ -130,9 +147,19 @@ export class HookRegistry {
       return undefined;
     }
     if (result && typeof result === 'object' && 'then' in result) {
-      void Promise.resolve(result).catch(() => undefined);
+      void Promise.resolve(result).catch((error: unknown) =>
+        this.reportHandlerError(error, name, registration.options.pluginId),
+      );
       throw new Error(`Hook ${name} must be synchronous`);
     }
     return result as TResult | undefined;
+  }
+
+  private reportHandlerError(error: unknown, hook: string, pluginId?: string): void {
+    try {
+      this.handlerErrorReporter?.(error, hook, pluginId);
+    } catch {
+      // 观察者本身不能影响 hook 的既有语义（继续 / 阻断 / 抛出）。
+    }
   }
 }

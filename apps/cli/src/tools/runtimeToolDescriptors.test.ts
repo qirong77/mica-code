@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { RUNTIME_TOOL_DESCRIPTORS } from '@packages/mica-tools/runtimeToolDescriptors.js';
 import { TodoWriteTool } from '@plugins/todo/TodoTool.js';
-import { SessionNotesTool } from '@packages/mica-builtin-commands/plugins/notes/NotesTool.js';
+import { SessionNotesTool } from '../../../../plugins/session-notes/NotesTool.js';
 import { ToolSessionPeers } from '@packages/mica-builtin-commands/plugins/session-autonomy/SessionAutonomyTools.js';
 import { ToolAgent } from './ToolAgent.js';
 

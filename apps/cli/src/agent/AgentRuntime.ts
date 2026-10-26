@@ -17,13 +17,17 @@ import {
   cloneCapabilitySelection,
   normalizeAutoCompactOverride,
   normalizeCapabilitySelection,
-  formatSessionNotesSection,
-  normalizeSessionNotes,
 } from '@packages/mica-common/index.js';
 import type { AutoCompactOverride, CapabilitySelection } from '@packages/mica-common/index.js';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import { mcpToolNamePrefix } from '@packages/mica-tools/index.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
+import {
+  PluginPromptSections,
+  normalizePluginStateRecord,
+  validatePluginStateValue,
+  type PluginStateRecord,
+} from '@packages/mica-plugin/index.js';
 import {
   agentRuntimeConfigFromSnapshot,
   createAgentClientOptions,
@@ -69,10 +73,12 @@ export type AgentRuntimeSnapshot = {
    */
   autoCompactOverride?: AutoCompactOverride;
   /**
-   * 本会话的笔记（markdown）。用户与模型共同维护，存在快照里而不是对话历史里，
-   * 所以 compact 改不到它；每轮重新拼进 system prompt 末尾。
+   * 插件在本会话里的持久状态：插件 id → 插件自己的 JSON。
+   *
+   * 内核不理解内容，只保证它跨 compact 存活、随 resume / fork 带回、新会话清空。
+   * 会话笔记是最早的用法，但它只是众多消费者之一。
    */
-  notes?: string;
+  pluginState?: PluginStateRecord;
   /** Derived model context window in tokens, used by headless/session tooling. */
   contextWindowSize?: number;
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
@@ -143,7 +149,15 @@ export class AgentRuntime {
   private capabilitiesCustomized = false;
   private defaultCapabilitiesCache: { at: number; value: CapabilitySelection } | null = null;
   private autoCompactOverride: AutoCompactOverride = {};
-  private notes = '';
+  /**
+   * 插件在本会话里的持久状态（键是插件 id）。内核只负责存取与清洗，不理解内容。
+   *
+   * 放在会话快照而不是插件自己写盘：这样它天然跟着 resume / fork / compact 语义走，
+   * 也不会出现「插件重启后状态还在、会话已经换了」的错配。
+   */
+  private pluginState: PluginStateRecord = {};
+  /** 插件向 system prompt 贡献的段落，每轮重新渲染。 */
+  readonly promptSections = new PluginPromptSections();
   private lastStatusKey: string | null = null;
   private activeRunStartedAt: number | null = null;
   private activeStatusModuleStartedAt: number | null = null;
@@ -213,18 +227,32 @@ export class AgentRuntime {
     return this.autoCompactOverrideSelection;
   }
 
-  /** 本会话的笔记正文（markdown，未写为空串）。 */
-  get sessionNotes(): string {
-    return this.notes;
+  /** 读某个插件在本会话里的状态。没写过返回 undefined。 */
+  getPluginState<T = unknown>(pluginId: string): T | undefined {
+    return this.pluginState[pluginId] as T | undefined;
   }
 
   /**
-   * 覆盖本会话的笔记。运行中允许调用：笔记不进对话历史，改它既不会打断在途请求，
-   * 也不会让本轮中途换上下文——下一次请求自然会带上新内容。返回归一化后的正文。
+   * 覆盖某个插件在本会话里的状态。
+   *
+   * 运行中允许调用：插件状态不进对话历史，改它既不会打断在途请求，也不会让本轮
+   * 中途换上下文——下一次请求自然会带上新内容。超出配额直接抛错，让插件自己知道
+   * 写不进去，而不是悄悄被截断。
    */
-  setSessionNotes(input: unknown): string {
-    this.notes = normalizeSessionNotes(input);
-    return this.notes;
+  setPluginState(pluginId: string, value: unknown): void {
+    if (!pluginId.trim()) throw new Error('plugin id must not be empty');
+    const problem = validatePluginStateValue(value);
+    if (problem) throw new Error(`${pluginId}: ${problem}`);
+    if (value === undefined) {
+      delete this.pluginState[pluginId];
+      return;
+    }
+    this.pluginState[pluginId] = value;
+  }
+
+  /** 丢掉某个插件的状态（插件自行清空时用）。 */
+  clearPluginState(pluginId: string): void {
+    delete this.pluginState[pluginId];
   }
 
   /** 当前会话可用的 skills（已应用本会话开关）。 */
@@ -294,11 +322,11 @@ export class AgentRuntime {
       skills: this.availableSkills(),
     });
     const event = this.hooks?.pipelineSync<SystemPromptBuildEvent>('system-prompt:build', { runtime: this, prompt });
-    // 笔记固定追加在最末：它是本会话里唯一「每轮可能变」的段落，放在最后才不会让
-    // 前面稳定的 system / AGENT.md / skills / context 跟着一起失效。
-    const notesSection = formatSessionNotesSection(this.notes);
     const base = event?.prompt ?? prompt;
-    return notesSection ? `${base}\n\n${notesSection}` : base;
+    // 插件段落固定追加在最末：它们才是「每轮可能变」的内容（会话笔记、循环说明），
+    // 放在最后才不会让前面稳定的 system / AGENT.md / skills / context 跟着一起失效。
+    const pluginSections = this.promptSections.render();
+    return pluginSections ? `${base}\n\n${pluginSections}` : base;
   }
 
   setRole(roleName: string): void {
@@ -380,9 +408,9 @@ export class AgentRuntime {
     this.activeAbortController?.abort();
     this.activeAbortController = null;
     this.client?.reset();
-    // /clear 与新建会话都是「这条会话从这里重来」：笔记属于会话，跟着一起清掉，
+    // /clear 与新建会话都是「这条会话从这里重来」：插件状态属于会话，跟着一起清掉，
     // 否则新会话会莫名其妙继承上一轮的结论。
-    this.notes = '';
+    this.pluginState = {};
     this.emitStatus({ type: 'idle' });
   }
 
@@ -397,7 +425,7 @@ export class AgentRuntime {
       capabilitySelection: this.capabilitySelection,
       capabilitiesCustomized: this.capabilitiesCustomized,
       autoCompactOverride: this.autoCompactOverrideSelection,
-      notes: this.notes,
+      pluginState: this.pluginState,
       contextWindowSize: this.currentConfig.provider.contextWindowSize,
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
@@ -473,7 +501,7 @@ export class AgentRuntime {
     this.capabilitiesCustomized = snapshot.capabilitiesCustomized === true;
     this.capabilities = normalizeCapabilitySelection(snapshot.capabilitySelection ?? this.resolveDefaultCapabilities());
     this.autoCompactOverride = normalizeAutoCompactOverride(snapshot.autoCompactOverride);
-    this.notes = normalizeSessionNotes(snapshot.notes);
+    this.pluginState = normalizePluginStateRecord(snapshot.pluginState);
     this.recreateClient();
     this.client?.loadSnapshot({
       model: snapshot.model,

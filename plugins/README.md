@@ -32,6 +32,7 @@ plugins/<id>/
 | `priority`        | 否   | 加载顺序，小的先执行                                                                 |
 | `mica.apiVersion` | 否   | 当前只支持 `1`                                                                       |
 | `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读取                     |
+| `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                           |
 
 ## 设置项
 
@@ -67,6 +68,32 @@ plugins/<id>/
 `type` 支持 `text` / `password` / `textarea` / `select` / `number`。值统一按字符串存进
 `$MICA_HOME/plugin-settings/<id>.json`，未声明的键不会被写入；`select` 必须带 `options`。
 插件每轮读取时会比对文件 mtime，用户改完不需要重启。
+
+字段还能带约束，写错的值既存不进盘、也不会被插件当成有效配置：
+
+| 键          | 作用                                                 |
+| ----------- | ---------------------------------------------------- |
+| `required`  | 必填；留空时页面标红，插件读到空值就知道自己没被配置 |
+| `format`    | `url`（必须是 http/https 绝对地址）或 `number`       |
+| `min`/`max` | 数值范围                                             |
+| `pattern`   | 正则，整串必须匹配                                   |
+
+校验只有一份实现（`validatePluginSettingValues`）：页面保存前用它拒绝，插件运行时读值也用它，
+所以不会出现「页面显示已保存、插件却认为配置不可用」。
+
+## 健康状态与失败可见
+
+`requires` 要写全插件实际触碰的每一面 `ctx.*`：`commands`、`events`、`hooks`、`prompt`、
+`session`、`sessionState`、`settings`、`tools`、`ui`、`git`、`runtime`。宿主缺哪个，插件就整块
+不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
+少声明一项的后果是在 setup 里撞上 `undefined` 并连带算作加载失败，所以不要把可选项当默认存在。
+
+插件自身的故障要能被用户看见，而不是只落在日志里：
+
+- `ctx.health.report({ level: 'warn' | 'error', message, hint })` 写
+  `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「待配置 / 出错」以及原因。
+- 缺配置、外部服务拒绝、上一次请求失败，都属于必须上报的情况。
+- hook 抛错由宿主记录并继续运行；需要某项宿主能力却没声明 `requires`，会在 setup 时抛错。
 
 ## 日志
 

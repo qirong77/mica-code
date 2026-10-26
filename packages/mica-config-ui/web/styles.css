@@ -4076,17 +4076,18 @@
     transform: rotate(90deg);
   }
 
-  /* 插件页：官方 / 用户两张卡片，行上给状态与启停，详情原地展开（不做第二栏）。 */
+  /* 插件页：官方 / 用户两组，行上给状态与启停，详情与设置在原地展开。
+     设置表单用「标签列 + 控件列」两栏，避免说明文字把控件挤散。 */
   .plugin-page {
     display: grid;
-    gap: 14px;
+    gap: 16px;
     min-width: 0;
   }
 
   .plugin-card {
     display: grid;
-    gap: 14px;
-    padding: 18px;
+    gap: 12px;
+    padding: 16px 18px 18px;
     min-width: 0;
   }
 
@@ -4099,17 +4100,19 @@
 
   .plugin-list {
     display: grid;
-    gap: 8px;
+    gap: 6px;
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
-  /* 行是三段栅格：名称列吃掉多余宽度，标签与操作列不参与收缩，窄屏时才换行。 */
+  /* 行只有一层：名称块吃掉多余宽度，标签与操作列不参与收缩，窄屏才换行。 */
   .plugin-row {
     display: grid;
-    gap: 10px;
-    padding: 12px 14px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px 14px;
+    padding: 10px 12px;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: var(--panel-muted);
@@ -4121,32 +4124,31 @@
     background: var(--panel);
   }
 
-  .plugin-row-main {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px 12px;
-    min-width: 0;
-  }
-
   .plugin-row-copy {
-    display: grid;
-    flex: 1 1 220px;
-    gap: 2px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
     min-width: 0;
   }
 
   .plugin-row-name {
-    overflow: hidden;
+    flex: none;
     color: var(--text);
     font-size: var(--text-body);
     font-weight: 500;
-    text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .plugin-row-version {
+    flex: none;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
   }
 
   .plugin-row-sub {
     overflow: hidden;
+    min-width: 0;
     color: var(--text-faint);
     font-family: var(--font-mono);
     font-size: var(--text-aux);
@@ -4154,7 +4156,13 @@
     white-space: nowrap;
   }
 
-  .plugin-row-tags,
+  .plugin-row-tags {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+  }
+
   .plugin-row-actions {
     display: flex;
     flex: none;
@@ -4162,15 +4170,71 @@
     gap: 8px;
   }
 
-  .plugin-row-detail {
+  .plugin-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+    white-space: nowrap;
+  }
+
+  .plugin-state::before {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    content: '';
+  }
+
+  .plugin-state.is-on {
+    color: var(--green);
+  }
+
+  .plugin-state.is-off {
+    color: var(--text-faint);
+  }
+
+  .plugin-state.is-warn {
+    color: var(--yellow);
+  }
+
+  .plugin-state.is-error {
+    color: var(--red);
+  }
+
+  /* 详情区：与行内容左对齐，顶部一条分界线，不再是独立卡片嵌卡片。 */
+  .plugin-detail {
+    grid-column: 1 / -1;
     display: grid;
-    gap: 12px;
-    padding-top: 10px;
-    border-top: 1px solid var(--line-soft);
+    gap: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
     min-width: 0;
   }
 
-  .plugin-detail-text {
+  .plugin-section {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .plugin-section-title {
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .plugin-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .plugin-description {
     margin: 0;
     color: var(--text-soft);
     font-size: var(--text-aux);
@@ -4179,87 +4243,146 @@
 
   .plugin-facts {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 8px 16px;
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 6px 14px;
+    align-items: baseline;
+    min-width: 0;
     margin: 0;
   }
 
-  .plugin-fact {
-    display: grid;
-    grid-template-columns: 48px minmax(0, 1fr);
-    align-items: baseline;
-    gap: 8px;
-    min-width: 0;
+  /* 浏览器默认给 dd 一个 40px 的起始外边距，会把这个两列栅格撑成一列标签、一列悬空的正文。 */
+  .plugin-facts dt,
+  .plugin-facts dd {
+    margin: 0;
   }
 
-  .plugin-fact dt {
+  .plugin-fact-label {
     color: var(--text-faint);
     font-size: var(--text-aux);
   }
 
-  .plugin-fact dd {
+  .plugin-fact-value {
     overflow: hidden;
-    margin: 0;
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: var(--text-aux);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plugin-health {
+    display: grid;
+    gap: 3px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--yellow);
+    border-radius: var(--radius-sm);
+    background: var(--panel-muted);
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+  }
+
+  .plugin-health.is-error {
+    border-left-color: var(--red);
+    color: var(--text);
+  }
+
+  .plugin-health-title {
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .plugin-health-note {
+    color: var(--text-faint);
+  }
+
+  /* 设置表单：左标签右控件，说明挂在控件下方，行与行之间用细线分隔。 */
+  .plugin-settings {
+    display: grid;
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    /* 比内容面亮一档，输入框（panel-muted）才会显得是凹进去的控件而不是一块同色空白。 */
+    background: var(--panel);
+  }
+
+  .plugin-setting-row {
+    display: grid;
+    grid-template-columns: 116px minmax(0, 1fr);
+    gap: 4px 16px;
+    align-items: start;
+    padding: 10px 12px;
+    min-width: 0;
+  }
+
+  .plugin-setting-row + .plugin-setting-row {
+    border-top: 1px solid var(--line);
+  }
+
+  .plugin-setting-label {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding-top: 6px;
+    min-width: 0;
+  }
+
+  .plugin-setting-name {
+    overflow: hidden;
     color: var(--text);
     font-size: var(--text-aux);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .plugin-fact-mono {
-    font-family: var(--font-mono);
+  .plugin-setting-required {
+    flex: none;
+    color: var(--yellow);
+    font-size: var(--text-micro);
   }
 
-  .plugin-files {
+  .plugin-setting-control {
     display: grid;
-    gap: 6px;
+    gap: 4px;
     min-width: 0;
+    max-width: 560px;
   }
 
-  .plugin-detail-label {
-    color: var(--text-faint);
+  .plugin-setting-control input,
+  .plugin-setting-control select,
+  .plugin-setting-control textarea {
+    width: 100%;
     font-size: var(--text-aux);
   }
 
-  /* 插件设置：字段来自清单声明，所以只做一列表单，不假设任何具体插件的语义。 */
-  .plugin-settings {
-    display: grid;
-    gap: 12px;
-    padding: 12px;
-    border: 1px solid var(--line-soft);
-    border-radius: var(--radius-md);
-    background: var(--panel-muted);
-    min-width: 0;
-  }
-
-  .plugin-settings-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .plugin-settings .form-field > .text-input,
-  .plugin-settings .form-field > .text-input-multiline {
-    max-width: 520px;
-  }
-
-  .plugin-settings .config-segmented {
-    max-width: 520px;
-  }
-
-  /* 多行输入与单行输入共用一套边框/底色，只是放开高度并允许纵向拉伸。 */
-  .text-input-multiline {
-    height: auto;
-    min-height: 96px;
-    padding: 9px 11px;
-    line-height: 1.6;
+  .plugin-setting-control textarea {
+    min-height: 84px;
+    padding: 7px 9px;
+    line-height: 1.55;
     resize: vertical;
+  }
+
+  .plugin-setting-hint {
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .plugin-setting-error {
+    color: var(--red);
+    font-size: var(--text-micro);
+    line-height: 1.5;
+  }
+
+  .plugin-save-state {
+    color: var(--text-faint);
+    font-size: var(--text-micro);
   }
 
   .plugin-file-list {
     display: grid;
-    gap: 4px;
+    gap: 3px;
     margin: 0;
     padding: 0;
     list-style: none;
@@ -4291,6 +4414,30 @@
 
   .plugin-error {
     color: var(--red);
+  }
+
+  @media (max-width: 720px) {
+    .plugin-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .plugin-row-actions {
+      grid-column: 1 / -1;
+      justify-content: flex-end;
+    }
+
+    .plugin-setting-row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+    }
+
+    .plugin-setting-label {
+      padding-top: 0;
+    }
+
+    .plugin-facts {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 
   .control-endpoint-body {

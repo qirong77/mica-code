@@ -167,6 +167,7 @@ describe('parsePluginManifest', () => {
         priority: 0,
         apiVersion: 1,
         settings: [],
+        requires: [],
       },
     });
   });

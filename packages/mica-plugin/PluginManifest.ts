@@ -3,6 +3,7 @@ import {
   isValidPluginSettingKey,
   type PluginSettingField,
   type PluginSettingOption,
+  type PluginSettingType,
 } from './PluginSettings.js';
 
 /**
@@ -51,7 +52,38 @@ export type PluginManifest = {
    * `$MICA_HOME/plugin-settings/<id>.json`，插件经 `ctx.settings.get()` 读。
    */
   settings: PluginSettingField[];
+  /**
+   * 插件运行所需的宿主能力。
+   *
+   * 以前插件在 setup 里 `if (!ctx.tools) throw`，宿主少给一项就等于插件启动失败，
+   * `required` 插件甚至会拖垮整个启动。声明成清单数据后，注册阶段就能比对能力并
+   * **跳过**（附原因），故障是配置页上的一条状态，而不是一次崩溃。
+   */
+  requires: PluginRequirement[];
 };
+
+/**
+ * 宿主可以向插件提供的能力面。取值来自 `PluginContext` 的可选字段，新增能力时两处同步。
+ */
+export const PLUGIN_REQUIREMENTS = [
+  'commands',
+  'events',
+  'git',
+  'hooks',
+  'prompt',
+  'runtime',
+  'session',
+  'sessionState',
+  'settings',
+  'tools',
+  'ui',
+] as const;
+
+export type PluginRequirement = (typeof PLUGIN_REQUIREMENTS)[number];
+
+export function isPluginRequirement(value: unknown): value is PluginRequirement {
+  return typeof value === 'string' && (PLUGIN_REQUIREMENTS as readonly string[]).includes(value);
+}
 
 export type PluginManifestParseResult = { ok: true; manifest: PluginManifest } | { ok: false; error: string };
 
@@ -107,6 +139,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const settings = readSettings(input.settings);
   if (!settings.ok) return settings;
 
+  const requires = readRequires(input.requires);
+  if (!requires.ok) return requires;
+
   return {
     ok: true,
     manifest: {
@@ -122,6 +157,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       priority: typeof input.priority === 'number' && Number.isFinite(input.priority) ? input.priority : 0,
       apiVersion,
       settings: settings.value,
+      requires: requires.value,
     },
   };
 }
@@ -157,6 +193,12 @@ function readSettings(input: unknown): { ok: true; value: PluginSettingField[] }
     const options = entry.type === 'select' ? readSettingOptions(entry.options, key) : undefined;
     if (options && !options.ok) return options;
 
+    const format = readFormat(entry.format, key);
+    if (!format.ok) return format;
+    const defaultValue = readString(entry.default) ?? undefined;
+    const defaultProblem = validateDefault(entry.type, defaultValue, options?.value, key);
+    if (defaultProblem) return { ok: false, error: defaultProblem };
+
     fields.push({
       key,
       label,
@@ -164,7 +206,12 @@ function readSettings(input: unknown): { ok: true; value: PluginSettingField[] }
       description: readString(entry.description)?.trim() || undefined,
       placeholder: readString(entry.placeholder)?.trim() || undefined,
       options: options?.value,
-      default: readString(entry.default) ?? undefined,
+      default: defaultValue,
+      required: entry.required === true ? true : undefined,
+      format: format.value,
+      min: readFiniteNumber(entry.min),
+      max: readFiniteNumber(entry.max),
+      pattern: readString(entry.pattern)?.trim() || undefined,
     });
   }
   return { ok: true, value: fields };
@@ -185,6 +232,56 @@ function readSettingOptions(
     options.push({ value, label: readString(entry.label)?.trim() || value });
   }
   return { ok: true, value: options };
+}
+
+/** `format` 只认这两个值：写错的话页面会按「没有约束」渲染，等于悄悄放宽校验。 */
+function readFormat(
+  input: unknown,
+  key: string,
+): { ok: true; value: PluginSettingField['format'] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: undefined };
+  if (input === 'url' || input === 'number') return { ok: true, value: input };
+  return { ok: false, error: `settings.${key}.format 只能是 url 或 number：${String(input)}` };
+}
+
+function readFiniteNumber(input: unknown): number | undefined {
+  return typeof input === 'number' && Number.isFinite(input) ? input : undefined;
+}
+
+/**
+ * 默认值也要能通过同一套校验，否则「清空字段」会把一个非法默认值写进配置，
+ * 而用户什么都没做。
+ */
+function validateDefault(
+  type: PluginSettingType,
+  value: string | undefined,
+  options: PluginSettingOption[] | undefined,
+  key: string,
+): string | null {
+  if (value === undefined || value === '') return null;
+  if (type === 'select' && options && !options.some((option) => option.value === value)) {
+    return `settings.${key}.default 不在 options 里：${value}`;
+  }
+  if (type === 'number' && !Number.isFinite(Number(value))) {
+    return `settings.${key}.default 必须是数字：${value}`;
+  }
+  return null;
+}
+
+function readRequires(input: unknown): { ok: true; value: PluginRequirement[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(input)) return { ok: false, error: 'requires 必须是数组' };
+  const values: PluginRequirement[] = [];
+  for (const entry of input) {
+    if (!isPluginRequirement(entry)) {
+      return {
+        ok: false,
+        error: `requires 里有未知能力：${String(entry)}（可用：${PLUGIN_REQUIREMENTS.join(' / ')}）`,
+      };
+    }
+    if (!values.includes(entry)) values.push(entry);
+  }
+  return { ok: true, value: values };
 }
 
 /**

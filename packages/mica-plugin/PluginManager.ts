@@ -1,25 +1,49 @@
 import type { Disposable } from '@packages/mica-common/index.js';
 import type { MicaPlugin } from './Plugin.js';
 import type { PluginContext } from './PluginContext.js';
+import type { PluginRequirement } from './PluginManifest.js';
+import type { PluginPromptSections } from './PluginPrompt.js';
+import type { PluginSessionStateApi } from './PluginSessionState.js';
+import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
 
 export type PluginSetupReport = {
   loaded: string[];
+  /** setup 抛错的插件。`required` 插件还会继续抛出，中断启动。 */
   failed: { pluginId: string; error: unknown }[];
+  /**
+   * 因为宿主缺少它在清单里声明的能力而没被启动的插件。
+   *
+   * 这类失败**不抛错**：能力缺失是宿主与清单的约定不一致，让整个应用起不来只会把
+   * 一条本可以显示在配置页上的信息变成一次崩溃。
+   */
+  skipped: { pluginId: string; missing: PluginRequirement[] }[];
 };
 
 /**
- * 每个插件在 setup 时拿到的东西，去掉三项「按插件生成」的：
+ * 每个插件在 setup 时拿到的东西，去掉几项「按插件生成」的：
  *
  * - `pluginId` / `onDispose`：生命周期绑定，只由 PluginManager 决定；
  * - `logger`：包装成带插件 id 的文件日志，写进 `os.tmpdir()/mica-logs/`；
- * - `settings`：按插件清单里的 `settings` 声明读取，路径跟着 `paths.config` 走。
+ * - `settings`：按插件清单里的 `settings` 声明读取，路径跟着 `paths.config` 走；
+ * - `health`：插件自报状态，落到 `$MICA_HOME/plugin-health/<id>.json`；
+ * - `prompt`：包一层只写自己段落的入口。
  *
  * host 仍然可以传自己的 `logger`，它会作为落盘之外的转发目标（TUI 静默、headless 写 stderr）。
  */
-export type PluginBaseContext = Omit<PluginContext, 'pluginId' | 'onDispose' | 'logger' | 'settings'> & {
+export type PluginBaseContext = Omit<PluginContext, 'pluginId' | 'onDispose' | 'logger' | 'settings' | 'health'> & {
   logger?: PluginContext['logger'];
+  /**
+   * 按插件 id 生成本会话的状态读写面。宿主不提供时插件拿不到 `sessionState`，
+   * 相关能力必须声明在 `requires` 里，由 manager 跳过而不是让插件在运行期踩空。
+   */
+  sessionStateFor?: (pluginId: string) => PluginSessionStateApi;
+  /**
+   * 内核持有的 prompt 段落表。manager 会为每个插件包一层只写自己段落的入口，
+   * 宿主只需要把 `AgentRuntime.promptSections` 交出来。
+   */
+  promptSections?: PluginPromptSections;
 };
 
 export class PluginManager {
@@ -34,20 +58,51 @@ export class PluginManager {
   }
 
   async setupAll(baseContext: PluginBaseContext): Promise<PluginSetupReport> {
-    const report: PluginSetupReport = { loaded: [], failed: [] };
+    const report: PluginSetupReport = { loaded: [], failed: [], skipped: [] };
+    this.watchHookErrors(baseContext);
 
     for (const plugin of this.sortedPlugins()) {
       const localDisposables: Disposable[] = [];
       const logger = createPluginLogger(plugin.id, baseContext.logger);
+      const configDir = baseContext.paths?.config;
+      // `sessionStateFor` / `promptSections` 由 manager 消费（下面按 pluginId 生成
+      // 本插件专属的入口），不能原样漏进 ctx，否则插件会看到一个能读别人状态的入口。
+      const { sessionStateFor, promptSections: promptRegistry, ...shared } = baseContext;
+      const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
       const ctx: PluginContext = {
-        ...baseContext,
+        ...shared,
         pluginId: plugin.id,
         logger,
-        settings: createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], {
-          configDir: baseContext.paths?.config,
-        }),
+        settings,
+        health: createPluginHealthStore(plugin.id, { configDir }),
         onDispose: (dispose) => localDisposables.push({ dispose }),
       };
+      const sessionState = sessionStateFor?.(plugin.id);
+      if (sessionState) ctx.sessionState = sessionState;
+      if (promptRegistry) {
+        ctx.prompt = { section: (section) => promptRegistry.add(plugin.id, section) };
+      }
+
+      // 清单声明的能力必须都能兑现，否则插件一定会在运行期踩空。放在 setup 之前判断，
+      // 装配出来的 ctx 就是事实，不需要插件自己再猜。
+      const missing = missingRequirements(plugin.manifest?.requires ?? [], ctx);
+      if (missing.length > 0) {
+        report.skipped.push({ pluginId: plugin.id, missing });
+        logger.warn('plugin:skipped', { missing });
+        ctx.health.report({ level: 'warn', message: `宿主未提供能力：${missing.join(', ')}` });
+        continue;
+      }
+
+      // 配置不合法不阻止启动（用户可能正要去页面里填），但必须留痕：否则插件会因为
+      // 读不到可用配置而每轮静默跳过，用户只看到「什么都没发生」。
+      const settingIssues = settings.validate();
+      if (settingIssues.length > 0) {
+        logger.warn('plugin:settings-invalid', { issues: settingIssues });
+        ctx.health.report({
+          level: 'warn',
+          message: `配置不完整：${settingIssues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`,
+        });
+      }
 
       try {
         const disposable = await plugin.setup(ctx);
@@ -64,6 +119,7 @@ export class PluginManager {
         }
         report.failed.push({ pluginId: plugin.id, error });
         logger.error('plugin:setup-failed', { error: errorMessage(error) });
+        ctx.health.report({ level: 'error', message: `启动失败：${errorMessage(error)}` });
         if (plugin.required) throw error;
       }
     }
@@ -84,6 +140,42 @@ export class PluginManager {
   private sortedPlugins(): MicaPlugin[] {
     return [...this.plugins.values()].sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
   }
+
+  /**
+   * 钩子抛错默认被吞掉（`failPolicy: 'continue'`，这是对的：一个插件不该打断 turn），
+   * 但必须留痕——否则「某个插件的钩子每轮都在炸」对用户来说只是「功能没反应」。
+   * 这里把它接到该插件自己的文件日志与健康状态上，与插件主动上报走同一条路径。
+   */
+  private watchHookErrors(baseContext: PluginBaseContext): void {
+    const hooks = baseContext.hooks as { setHandlerErrorReporter?: HookErrorReporterInstaller };
+    if (typeof hooks?.setHandlerErrorReporter !== 'function') return;
+    const loggers = new Map<string, ReturnType<typeof createPluginLogger>>();
+    const configDir = baseContext.paths?.config;
+    hooks.setHandlerErrorReporter((error, hook, pluginId) => {
+      const owner = pluginId ?? '(unscoped)';
+      let logger = loggers.get(owner);
+      if (!logger) {
+        logger = createPluginLogger(owner, baseContext.logger);
+        loggers.set(owner, logger);
+      }
+      const message = errorMessage(error);
+      logger.error('plugin:hook-failed', { hook, error: message });
+      if (pluginId)
+        writePluginHealth(pluginId, { level: 'error', message: `钩子 ${hook} 执行失败：${message}` }, { configDir });
+    });
+  }
+}
+
+type HookErrorReporterInstaller = (reporter: (error: unknown, hook: string, pluginId?: string) => void) => void;
+
+/**
+ * 清单里声明了、但这份 ctx 上真的没有的能力。
+ *
+ * 只认 `undefined`：`ui` / `runtime` 这类能力可能只提供部分方法，那种不完整由插件自己
+ * 判断，manager 不替它猜——猜错会把能用的插件也关掉。
+ */
+function missingRequirements(requires: readonly PluginRequirement[], ctx: PluginContext): PluginRequirement[] {
+  return requires.filter((requirement) => ctx[requirement] === undefined);
 }
 
 function errorMessage(error: unknown): string {

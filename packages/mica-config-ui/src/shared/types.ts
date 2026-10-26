@@ -205,12 +205,23 @@ export type ConfigWebPluginSetting = {
   placeholder?: string;
   options?: { value: string; label: string }[];
   default?: string;
+  /** 必填项：页面在字段下方据此提示「需要填写」。 */
+  required?: boolean;
+  format?: 'url' | 'number';
+  min?: number;
+  max?: number;
+  pattern?: string;
 };
 
 export type ConfigWebPluginSettings = {
   fields: ConfigWebPluginSetting[];
   /** 当前生效值（已按声明过滤、补齐默认值）。 */
   values: Record<string, string>;
+  /**
+   * 当前值的校验问题。非空表示磁盘上的配置不可用——插件可能因此静默跳过工作，
+   * 页面必须把原因显示出来，而不是继续显示「已保存」。
+   */
+  issues: { key: string; label: string; message: string }[];
 };
 
 export type ConfigWebPlugin = {
@@ -231,9 +242,20 @@ export type ConfigWebPlugin = {
   settings: ConfigWebPluginSettings;
   /** 这个插件今天的日志文件（系统 temp 目录），排查时直接打开。 */
   logFile: string;
+  /** 插件自报的最近一次状态（正常 / 待配置 / 出错）；没上报过为 null。 */
+  health: ConfigWebPluginHealth | null;
   /** plugin-status.json 记录的上一次加载结果。 */
-  loadStatus?: 'loaded' | 'registered' | 'failed' | 'unknown';
+  loadStatus?: 'loaded' | 'registered' | 'failed' | 'skipped' | 'unknown';
   error?: string;
+};
+
+/** 插件上报的健康快照，来自 `$MICA_HOME/plugin-health/<id>.json`。 */
+export type ConfigWebPluginHealth = {
+  level: 'ok' | 'warn' | 'error';
+  message: string;
+  /** 可选的处理建议，插件自己写。 */
+  hint?: string;
+  at: string;
 };
 
 export type ConfigWebPluginsDetails = {

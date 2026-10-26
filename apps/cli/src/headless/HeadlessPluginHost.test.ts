@@ -30,6 +30,7 @@ function mockAgent(overrides: Record<string, unknown> = {}): AgentRuntime {
     run: async () => ({ runId: 1, text: 'ok' }),
     abort: () => {},
     preserveAbortedTurn: () => true,
+    promptSections: new micaPlugin.PluginPromptSections(),
     ...overrides,
   } as unknown as AgentRuntime;
 }

@@ -36,10 +36,13 @@ export function pluginStateLabel(state: string | undefined): string {
   return (state && PLUGIN_STATE_LABEL[state]) || '未知';
 }
 
-export function pluginStateTone(state: string | undefined): TagTone {
-  if (state === 'enabled') return 'green';
-  if (state === 'failed') return 'red';
-  return 'default';
+/** `plugin-status.json` 里的机器值不上屏，统一翻成中文。 */
+export function pluginLoadStatusLabel(status: string | undefined): string {
+  if (status === 'loaded') return '已加载';
+  if (status === 'registered') return '已注册';
+  if (status === 'failed') return '加载失败';
+  if (status === 'skipped') return '已跳过';
+  return '尚未加载';
 }
 
 /** 官方插件随产品分发（编译进产物），用户插件装在 `$MICA_HOME/plugins`。 */

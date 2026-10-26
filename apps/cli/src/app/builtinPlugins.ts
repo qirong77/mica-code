@@ -22,7 +22,6 @@ import {
   setupMessageQueue,
   setupMicaCodeAppNotify,
   setupSessionAutonomy,
-  setupSessionNotes,
 } from '@packages/mica-builtin-commands/index.js';
 
 type PluginHost = {
@@ -41,7 +40,6 @@ export function useBuiltinPlugins(
     .use(createBuiltinFilePlugin('mcp', 'MCP', setupMcp))
     .use(createBuiltinFilePlugin('command-memory', 'Command Memory', setupCommandMemory))
     .use(createBuiltinFilePlugin('session-autonomy', 'Session Autonomy', setupSessionAutonomy))
-    .use(createBuiltinFilePlugin('session-notes', 'Session Notes', setupSessionNotes))
     .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
   for (const plugin of enabledOfficialPlugins()) app.use(plugin);
   app.use({

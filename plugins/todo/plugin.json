@@ -8,6 +8,7 @@
   "assets": ["README.md"],
   "required": true,
   "priority": 0,
+  "requires": ["commands", "events", "hooks", "tools", "ui"],
   "mica": {
     "apiVersion": 1
   }

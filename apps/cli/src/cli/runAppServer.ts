@@ -10,6 +10,8 @@ import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import {
   AUTO_COMPACT_DEFAULTS,
+  SESSION_NOTES_PLUGIN_ID,
+  normalizeSessionNotes,
   normalizeAutoCompactOverride,
   prepareImageForApi,
   pruneAutoCompactOverride,
@@ -694,6 +696,14 @@ type HostContext = {
   writeResponse: (result: unknown) => void;
   writeError: (code: number, message: string, data?: unknown) => void;
 };
+
+/**
+ * 桌面笔记面板读的正文。笔记本体由 `plugins/session-notes` 写进插件状态，这里只做
+ * 「键 + 归一化」的投影，保持面板与模型看到同一份内容。
+ */
+function readSessionNotes(agent: AgentRuntime): string {
+  return normalizeSessionNotes(agent.getPluginState(SESSION_NOTES_PLUGIN_ID));
+}
 
 function threadSnapshot(ctx: HostContext, model: string): CodexThread {
   const cwd = process.cwd();
@@ -1577,13 +1587,14 @@ async function handleCodexRequest(
       return;
     }
     case MICA_METHODS.notesGet: {
-      ctx.writeResponse({ ok: true, content: ctx.agent.sessionNotes ?? '' });
+      ctx.writeResponse({ ok: true, content: readSessionNotes(ctx.agent) });
       return;
     }
     case MICA_METHODS.notesSet: {
       // 笔记不进对话历史，写到内存不会打断在途请求，也不会让本轮换上下文——
       // 下一个请求自然带上新内容。这里只多一步落盘，好让这个能力在重启后还在。
-      const content = ctx.agent.setSessionNotes(params.content);
+      const content = normalizeSessionNotes(params.content);
+      ctx.agent.setPluginState(SESSION_NOTES_PLUGIN_ID, content || undefined);
       if (ctx.sessionId) ctx.sessionController.saveCurrent({ allowEmpty: true });
       ctx.writeNotification(MICA_NOTES_NOTIFICATIONS.updated, {
         threadId: ctx.sessionId,

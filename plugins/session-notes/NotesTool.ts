@@ -1,5 +1,9 @@
+import {
+  MAX_SESSION_NOTES_LENGTH,
+  normalizeSessionNotes,
+  sessionNotesSummary,
+} from '@packages/mica-common/index.js';
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
-import { MAX_SESSION_NOTES_LENGTH, normalizeSessionNotes, sessionNotesSummary } from '@packages/mica-common/index.js';
 
 const TOOL_NAME = 'session_notes';
 
@@ -14,7 +18,8 @@ export type ParsedNotesInput =
  * 读 / 追加 / 覆盖本会话的笔记。
  *
  * 笔记不在对话历史里，所以这个工具改动的东西不会被 compact 吃掉——这正是它存在的
- * 理由。工具本身零 IO：写入通过构造注入的回调交给会话（运行时状态 + 快照持久化）。
+ * 理由。工具本身零 IO：读写走构造注入的回调，存储位置由插件决定（现在是会话快照的
+ * `pluginState`），因此这个类对「笔记存在哪」完全无感。
  */
 export class SessionNotesTool extends MicaTool {
   constructor(

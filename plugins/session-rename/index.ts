@@ -39,6 +39,8 @@ type SessionRenameState = {
  */
 export default function setup(ctx: PluginContext): void {
   const states = new Map<string, SessionRenameState>();
+  /** 「配置不完整」只上报一次；用户补好配置后成功改名会把状态覆写成 ok。 */
+  let notConfiguredReported = false;
 
   const readConfig = (): TitleRequestConfig => {
     const values = ctx.settings.get();
@@ -62,6 +64,37 @@ export default function setup(ctx: PluginContext): void {
     logPath: pluginLogPath(ctx.pluginId),
     config: describeConfig(readConfig()),
   });
+
+  /**
+   * 配置是否可用：与配置页保存时用的是同一套校验规则（`ctx.settings.validate()`），
+   * 所以不会出现「页面说已保存、插件说不能用」。
+   *
+   * 不可用时**上报**而不是静默跳过：用户打开插件页就能看到「待配置 / 缺接口地址」，
+   * 否则现象只是「开了插件但标题一直没变」，只能一路翻到 tmpdir 里查日志。
+   */
+  const configProblem = (): string | null => {
+    const issues = ctx.settings.validate();
+    const missing = issues.filter((issue) => issue.key === 'baseUrl' || issue.key === 'model');
+    if (missing.length > 0) {
+      const names = missing.map((issue) => (issue.key === 'baseUrl' ? '接口地址' : '模型')).join('、');
+      return `缺少${names}，自动改名不会运行`;
+    }
+    if (issues.length > 0) {
+      return `配置有问题：${issues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`;
+    }
+    if (!isTitleRequestConfigured(readConfig())) return '缺少接口地址或模型，自动改名不会运行';
+    return null;
+  };
+
+  /** 返回这份配置能不能用；不能用时顺手把原因报到健康状态上。 */
+  const reportConfigHealth = (): boolean => {
+    const problem = configProblem();
+    if (problem) {
+      ctx.health.report({ level: 'warn', message: problem });
+      return false;
+    }
+    return true;
+  };
 
   const renameNow = async (owner: unknown): Promise<string> => {
     const session = ctx.session;
@@ -101,7 +134,14 @@ export default function setup(ctx: PluginContext): void {
       }
 
       const config = readConfig();
-      if (!isTitleRequestConfigured(config)) return;
+      // 配置不完整时每轮都会走到这里：只在第一次上报，避免把健康文件刷成噪声。
+      if (!isTitleRequestConfigured(config)) {
+        if (!notConfiguredReported) {
+          notConfiguredReported = true;
+          reportConfigHealth();
+        }
+        return;
+      }
 
       const state = states.get(info.id) ?? { running: false, lastAttemptAt: 0 };
       if (state.running) return;
@@ -120,6 +160,7 @@ export default function setup(ctx: PluginContext): void {
       })
         .catch((error: unknown) => {
           ctx.logger.warn('session-rename:failed', { sessionId: info.id, error: errorMessage(error) });
+          ctx.health.report({ level: 'error', message: `上次自动改名失败：${errorMessage(error)}` });
           return null;
         })
         .finally(() => {
@@ -146,11 +187,14 @@ export default function setup(ctx: PluginContext): void {
       if (action === 'status' || !action) {
         const config = readConfig();
         const info = ctx.session?.describe();
+        const problem = configProblem();
         ctx.ui?.showMessage(
           [
             `配置：${describeConfig(config)}`,
+            ...(problem ? [`问题：${problem}`] : []),
             `会话：${info ? `${info.id}（titleSource: ${info.titleSource ?? 'derived'}）` : '无'}`,
             `设置文件：${ctx.settings.path ?? '不可用'}`,
+            `健康：${ctx.health.path ?? '不可用'}`,
             '日志：os.tmpdir()/mica-logs/plugin-session-rename-*.jsonl',
           ].join('\n'),
           8000,
@@ -162,6 +206,7 @@ export default function setup(ctx: PluginContext): void {
           const title = await renameNow(undefined);
           ctx.ui?.showMessage(`已重命名：${title}`);
         } catch (error) {
+          ctx.health.report({ level: 'error', message: `手动改名失败：${errorMessage(error)}` });
           ctx.ui?.showMessage(`重命名失败：${errorMessage(error)}`);
         }
         return { ok: true };
@@ -214,6 +259,8 @@ async function rename(input: {
   }
 
   const renamed = session.rename(title, { owner, source: 'auto' });
+  // 成功一次就把「待配置 / 上次失败」的状态收回去，页面上不会一直挂着旧故障。
+  if (renamed) ctx.health.report({ level: 'ok', message: `最近一次改名成功：${title}` });
   ctx.logger.info('session-rename:renamed', {
     sessionId,
     from: currentTitle,

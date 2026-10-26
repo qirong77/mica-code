@@ -9,7 +9,7 @@ import type {
   HookRegistry,
   MicaPlugin,
   PluginManager,
-  PluginContext,
+  PluginBaseContext,
   ServiceContainer,
 } from '@packages/mica-plugin/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
@@ -31,7 +31,6 @@ import {
   setupMessageQueue,
   setupMicaCodeAppNotify,
   setupSessionAutonomy,
-  setupSessionNotes,
 } from '@packages/mica-builtin-commands/index.js';
 import { officialPlugins } from '@packages/mica-official-plugins/index.js';
 import { readDisabledPluginIds } from '@packages/mica-plugin/index.js';
@@ -170,7 +169,6 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     { id: 'session-autonomy', name: 'Session Autonomy', setup: setupSessionAutonomy },
     // 笔记工具与 prompt 注入在 TUI / app-server / exec 三端必须一致：只注册在一处，
     // 会出现「桌面端能记、headless 记不了」的不对称。
-    { id: 'session-notes', name: 'Session Notes', setup: setupSessionNotes },
     { id: 'builtin.mica-code-app-notify', name: `Built-in ${APP_NAME} App Notify`, setup: setupMicaCodeAppNotify },
   ];
   for (const plugin of builtinPlugins) {
@@ -199,7 +197,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
 
   const paths = createHeadlessPluginPaths();
 
-  const baseContext: Omit<PluginContext, 'pluginId' | 'onDispose' | 'settings'> = {
+  const baseContext: PluginBaseContext = {
     paths,
     services,
     hooks,
@@ -216,6 +214,16 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       rename: (title, renameOptions) =>
         sessionController.renameCurrent(title, { source: renameOptions?.source ?? 'auto' }),
     },
+    sessionStateFor: (pluginId) => ({
+      get: () => agent.getPluginState(pluginId),
+      // 没有会话就抛出：静默丢弃写入会让插件以为状态存住了，实际下一轮读回 undefined。
+      set: (value) => {
+        if (!agent.setPluginState) throw new Error(`session state unavailable for ${pluginId}`);
+        agent.setPluginState(pluginId, value);
+      },
+      clear: () => agent.clearPluginState?.(pluginId),
+    }),
+    promptSections: agent.promptSections,
     runtime: {
       submit: options.submit,
       queue: {

@@ -13,7 +13,12 @@ type FilePluginsContext = {
 type FilePluginStatusResult = {
   root: string;
   updatedAt: string;
-  plugins: { id: string; file: string; status: 'failed' | 'loaded' | 'registered'; error?: string }[];
+  plugins: {
+    id: string;
+    file: string;
+    status: 'failed' | 'loaded' | 'registered' | 'skipped';
+    error?: string;
+  }[];
   loadFailed: { file: string; status: 'failed'; error: string }[];
 };
 
@@ -64,6 +69,11 @@ export function writeFilePluginStatus(
   }
 
   const setupFailed = new Map(setupReport.failed.map((item) => [item.pluginId, formatError(item.error)]));
+  // 缺少宿主能力时插件被整块跳过：这既不是「加载成功」也不是「它自己坏了」，
+  // 但用户必须知道它为什么没生效，所以单独记一档并带上缺了哪些能力。
+  const skipped = new Map(
+    setupReport.skipped.map((item) => [item.pluginId, `缺少宿主能力：${item.missing.join(' / ')}`]),
+  );
   const loadedIds = new Set(setupReport.loaded);
   const status: FilePluginStatusResult = {
     root: pluginsRoot,
@@ -71,8 +81,14 @@ export function writeFilePluginStatus(
     plugins: filePlugins.loaded.map((plugin) => ({
       id: plugin.pluginId,
       file: plugin.file,
-      status: setupFailed.has(plugin.pluginId) ? 'failed' : loadedIds.has(plugin.pluginId) ? 'loaded' : 'registered',
-      error: setupFailed.get(plugin.pluginId),
+      status: setupFailed.has(plugin.pluginId)
+        ? 'failed'
+        : skipped.has(plugin.pluginId)
+          ? 'skipped'
+          : loadedIds.has(plugin.pluginId)
+            ? 'loaded'
+            : 'registered',
+      error: setupFailed.get(plugin.pluginId) ?? skipped.get(plugin.pluginId),
     })),
     loadFailed: filePlugins.failed.map((item) => ({
       file: item.file,

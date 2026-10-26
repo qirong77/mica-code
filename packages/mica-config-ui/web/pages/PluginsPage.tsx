@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, SaveStatus, Switch, Tag } from '../components/Ui.js';
+import { Alert, Button, Empty, SaveStatus, Switch } from '../components/Ui.js';
 import {
   readPluginsDetails,
   setPluginEnabled,
@@ -10,7 +10,7 @@ import {
 } from '../api.js';
 import type { ConfigWebPlugin, ConfigWebPluginSetting, ConfigWebPluginsDetails } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
-import { pluginSourceLabel, pluginStateLabel, pluginStateTone } from '../labels.js';
+import { pluginLoadStatusLabel, pluginSourceLabel, pluginStateLabel } from '../labels.js';
 import { useAutoSave } from '../useAutoSave.js';
 
 /**
@@ -82,10 +82,9 @@ export function PluginsPage() {
     >
       <div className="plugin-page">
         <p className="capability-note">
-          插件可以在启动时注册工具、命令、钩子与界面组件。官方插件的源码在仓库{' '}
-          <code>{details?.officialDir ?? 'plugins'}</code>，随产品分发；用户插件放在{' '}
-          <code>{details?.root ?? '$MICA_HOME/plugins'}</code>，每个插件一个目录（<code>plugin.json</code> 清单 +
-          入口）。停用只写 <code>{details?.statePath ?? 'plugins-state.json'}</code>，重开会话才生效。
+          插件在启动时注册工具、命令、钩子与界面组件。官方插件随产品分发、只能启停；用户插件是把一个目录放进{' '}
+          <code>{details?.root ?? '$MICA_HOME/plugins'}</code>。启停写入{' '}
+          <code>{details?.statePath ?? 'plugins-state.json'}</code>，重开会话才生效。
         </p>
         {error ? <Alert message={error} /> : null}
         {loading && !details ? (
@@ -186,33 +185,34 @@ function PluginRow({
 }: PluginRowProps) {
   return (
     <li className={`plugin-row${expanded ? ' is-open' : ''}`}>
-      <div className="plugin-row-main">
-        <span className="plugin-row-copy">
-          <span className="plugin-row-name" title={plugin.name}>
-            {plugin.name}
+      <span className="plugin-row-copy">
+        <span className="plugin-row-name" title={plugin.name}>
+          {plugin.name}
+        </span>
+        <span className="plugin-row-version">v{plugin.version}</span>
+        <span className="plugin-row-sub" title={plugin.location}>
+          {plugin.location}
+        </span>
+      </span>
+      <span className="plugin-row-tags">
+        {plugin.health && plugin.health.level !== 'ok' ? (
+          <span className={`plugin-state is-${plugin.health.level === 'error' ? 'error' : 'warn'}`}>
+            {pluginHealthLabel(plugin.health.level)}
           </span>
-          <span className="plugin-row-sub" title={plugin.location}>
-            v{plugin.version} · {plugin.location}
-          </span>
-        </span>
-        <span className="plugin-row-tags">
-          <Tag tone={plugin.source === 'official' ? 'blue' : 'default'}>{pluginSourceLabel(plugin.source)}</Tag>
-          <Tag tone={pluginStateTone(plugin.state)} dot>
-            {pluginStateLabel(plugin.state)}
-          </Tag>
-        </span>
-        <span className="plugin-row-actions">
-          <Switch
-            checked={plugin.state !== 'disabled'}
-            disabled={!canToggle || busy}
-            label={`${plugin.state === 'disabled' ? '启用' : '停用'}插件 ${plugin.name}`}
-            onChange={onToggleEnabled}
-          />
-          <Button variant="ghost" onClick={onToggleExpanded} title={expanded ? '收起详情' : '展开详情'}>
-            {expanded ? '收起' : '详情'}
-          </Button>
-        </span>
-      </div>
+        ) : null}
+        <span className={`plugin-state ${pluginStateClass(plugin.state)}`}>{pluginStateLabel(plugin.state)}</span>
+      </span>
+      <span className="plugin-row-actions">
+        <Switch
+          checked={plugin.state !== 'disabled'}
+          disabled={!canToggle || busy}
+          label={`${plugin.state === 'disabled' ? '启用' : '停用'}插件 ${plugin.name}`}
+          onChange={onToggleEnabled}
+        />
+        <Button variant="ghost" onClick={onToggleExpanded} title={expanded ? '收起详情' : '展开详情'}>
+          {expanded ? '收起' : '详情'}
+        </Button>
+      </span>
       {expanded ? <PluginDetail plugin={plugin} canSettings={canSettings} onSaved={onSaved} /> : null}
     </li>
   );
@@ -228,27 +228,39 @@ function PluginDetail({
   onSaved(next: ConfigWebPluginsDetails): void;
 }) {
   return (
-    <div className="plugin-row-detail">
-      {plugin.description ? <p className="plugin-detail-text">{plugin.description}</p> : null}
+    <div className="plugin-detail">
+      {plugin.description ? <p className="plugin-description">{plugin.description}</p> : null}
       {plugin.error ? <Alert message={plugin.error} /> : null}
+      {plugin.health && plugin.health.level !== 'ok' ? (
+        <div className={`plugin-health is-${plugin.health.level}`}>
+          <span className="plugin-health-title">
+            {pluginHealthLabel(plugin.health.level)}
+            {plugin.health.at ? ` · ${formatHealthTime(plugin.health.at)}` : ''}
+          </span>
+          <span>{plugin.health.message}</span>
+          {plugin.health.hint ? <span className="plugin-health-note">{plugin.health.hint}</span> : null}
+        </div>
+      ) : null}
       {plugin.settings.fields.length > 0 ? (
         <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
       ) : null}
-      <dl className="plugin-facts">
-        <PluginFact label="标识" value={plugin.id} mono />
-        <PluginFact label="来源" value={pluginSourceLabel(plugin.source)} />
-        <PluginFact label="版本" value={`v${plugin.version}`} />
-        <PluginFact label="入口" value={plugin.entryFile || '—'} mono />
-        <PluginFact label="清单" value={plugin.manifestFile || '—'} mono />
-        <PluginFact
-          label="加载"
-          value={plugin.loadStatus || (plugin.source === 'official' ? '随启动加载' : '尚未加载')}
-        />
-        <PluginFact label="日志" value={plugin.logFile} mono />
-        {plugin.author ? <PluginFact label="作者" value={plugin.author} /> : null}
-      </dl>
-      <div className="plugin-files">
-        <span className="plugin-detail-label">文件</span>
+      <div className="plugin-section">
+        <span className="plugin-section-title">信息</span>
+        <dl className="plugin-facts">
+          <PluginFact label="标识" value={plugin.id} mono />
+          <PluginFact label="来源" value={pluginSourceLabel(plugin.source)} />
+          <PluginFact label="入口" value={plugin.entryFile || '—'} mono />
+          <PluginFact label="清单" value={plugin.manifestFile || '—'} mono />
+          <PluginFact
+            label="加载"
+            value={pluginLoadStatusLabel(plugin.loadStatus ?? (plugin.source === 'official' ? 'loaded' : 'unknown'))}
+          />
+          <PluginFact label="日志" value={plugin.logFile} mono />
+          {plugin.author ? <PluginFact label="作者" value={plugin.author} /> : null}
+        </dl>
+      </div>
+      <div className="plugin-section">
+        <span className="plugin-section-title">文件</span>
         {plugin.files.length === 0 ? (
           <span className="plugin-file-empty">没有可列出的文件</span>
         ) : (
@@ -287,6 +299,7 @@ function PluginSettingsForm({
   onSaved(next: ConfigWebPluginsDetails): void;
 }) {
   const [values, setValues] = useState<Record<string, string>>(plugin.settings.values);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // 换插件、或者外部保存把值改回来时重新对齐：表单不能拿着上一个插件的草稿。
   useEffect(() => {
@@ -295,7 +308,12 @@ function PluginSettingsForm({
 
   const autosave = useAutoSave<Record<string, string>, ConfigWebPluginsDetails>({
     save: (next) => writePluginSettings(plugin.id, next),
-    onSaved: (result) => onSaved(result),
+    onSaved: (result) => {
+      // 保存成功意味着整组值通过了校验：清掉逐字段提示，页面与磁盘从此一致。
+      setFieldErrors({});
+      onSaved(result);
+    },
+    onError: (message) => setFieldErrors(parseSettingIssues(message)),
   });
 
   function update(key: string, value: string) {
@@ -305,103 +323,145 @@ function PluginSettingsForm({
   }
 
   return (
-    <div className="plugin-settings">
-      <div className="plugin-settings-head">
-        <span className="plugin-detail-label">插件设置</span>
+    <div className="plugin-section">
+      <div className="plugin-section-head">
+        <span className="plugin-section-title">设置</span>
         <SaveStatus saving={autosave.saving} saved={autosave.status === 'saved'} />
       </div>
-      {autosave.error ? <Alert message={autosave.error} /> : null}
-      {plugin.settings.fields.map((field) => (
-        <PluginSettingFieldControl
-          key={field.key}
-          field={field}
-          value={values[field.key] ?? ''}
-          disabled={!canSave}
-          onChange={(next) => update(field.key, next)}
-        />
-      ))}
+      {autosave.error && Object.keys(fieldErrors).length === 0 ? <Alert message={autosave.error} /> : null}
+      {plugin.settings.issues.length > 0 ? (
+        <div className="plugin-health">
+          <span className="plugin-health-title">已保存的配置不完整，插件因此不会生效</span>
+          {plugin.settings.issues.map((issue) => (
+            <span key={issue.key}>
+              {issue.label}：{issue.message}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="plugin-settings">
+        {plugin.settings.fields.map((field) => (
+          <PluginSettingRow
+            key={field.key}
+            field={field}
+            value={values[field.key] ?? ''}
+            disabled={!canSave}
+            error={fieldErrors[field.key]}
+            onChange={(next) => update(field.key, next)}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-function PluginSettingFieldControl({
+/**
+ * 一行设置：左边标签、右边控件、说明压在控件下面。
+ *
+ * 用两列栅格而不是「标签在上、控件在下」的堆叠：字段一多，堆叠会让标签、输入框、
+ * 说明各占一行，滚动起来全是断点，也看不出哪段说明属于哪个输入框。
+ */
+function PluginSettingRow({
   field,
   value,
   disabled,
+  error,
   onChange,
 }: {
   field: ConfigWebPluginSetting;
   value: string;
   disabled: boolean;
+  error?: string;
   onChange(next: string): void;
 }) {
+  return (
+    <div className="plugin-setting-row">
+      <label className="plugin-setting-label" htmlFor={`plugin-setting-${field.key}`}>
+        <span className="plugin-setting-name" title={field.label}>
+          {field.label}
+        </span>
+        {field.required ? <span className="plugin-setting-required">必填</span> : null}
+      </label>
+      <div className="plugin-setting-control">
+        <PluginSettingInput field={field} value={value} disabled={disabled} error={error} onChange={onChange} />
+        {error ? <span className="plugin-setting-error">{error}</span> : null}
+        {field.description ? <span className="plugin-setting-hint">{field.description}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function PluginSettingInput({
+  field,
+  value,
+  disabled,
+  error,
+  onChange,
+}: {
+  field: ConfigWebPluginSetting;
+  value: string;
+  disabled: boolean;
+  error?: string;
+  onChange(next: string): void;
+}) {
+  const inputId = `plugin-setting-${field.key}`;
   // 枚举项自绘成按钮组：原生 select 的字号与内边距跟旁边的输入框对不齐。
   if (field.type === 'select') {
     return (
-      <div className="form-field">
-        <span>{field.label}</span>
-        <div className="config-segmented" role="group" aria-label={field.label}>
-          {(field.options ?? []).map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`config-segment${value === option.value ? ' is-active' : ''}`}
-              disabled={disabled}
-              onClick={() => onChange(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-        {field.description ? <span className="config-field-hint">{field.description}</span> : null}
+      <div className="config-segmented" role="group" aria-label={field.label} id={inputId}>
+        {(field.options ?? []).map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={`config-segment${value === option.value ? ' is-active' : ''}`}
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
       </div>
     );
   }
 
   if (field.type === 'textarea') {
     return (
-      <label className="form-field">
-        <span>{field.label}</span>
-        <textarea
-          className="text-input text-input-multiline"
-          value={value}
-          rows={5}
-          spellCheck={false}
-          placeholder={field.placeholder}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        {field.description ? <span className="config-field-hint">{field.description}</span> : null}
-      </label>
-    );
-  }
-
-  return (
-    <label className="form-field">
-      <span>{field.label}</span>
-      <input
-        className="text-input"
-        type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+      <textarea
+        id={inputId}
+        className={`text-input text-input-multiline${error ? ' is-invalid' : ''}`}
         value={value}
+        rows={4}
         spellCheck={false}
-        autoComplete="off"
         placeholder={field.placeholder}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       />
-      {field.description ? <span className="config-field-hint">{field.description}</span> : null}
-    </label>
+    );
+  }
+
+  return (
+    <input
+      id={inputId}
+      className={`text-input${error ? ' is-invalid' : ''}`}
+      type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+      value={value}
+      spellCheck={false}
+      autoComplete="off"
+      placeholder={field.placeholder}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value)}
+    />
   );
 }
 
 function PluginFact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="plugin-fact">
-      <dt>{label}</dt>
-      <dd className={mono ? 'plugin-fact-mono' : undefined} title={value}>
+    <>
+      <dt className="plugin-fact-label">{label}</dt>
+      <dd className="plugin-fact-value" title={value} data-mono={mono ? 'true' : undefined}>
         {value}
       </dd>
-    </div>
+    </>
   );
 }
 
@@ -413,4 +473,38 @@ function formatBytes(bytes: number): string {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 从保存失败的文案里还原逐字段错误。
+ *
+ * 校验错误的格式由 `PluginSettingsValidationError` 固定：首行是摘要，之后每行一条
+ * `key: 原因`。传输层只会把错误压成字符串，页面据此把提示放回对应字段。
+ */
+function parseSettingIssues(message: string): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const line of message.split('\n').slice(1)) {
+    const match = /^([A-Za-z][A-Za-z0-9_]*):\s*(.+)$/.exec(line.trim());
+    if (match) errors[match[1]] = match[2];
+  }
+  return errors;
+}
+
+function pluginHealthLabel(level: 'ok' | 'warn' | 'error'): string {
+  if (level === 'error') return '出错';
+  if (level === 'warn') return '待配置';
+  return '正常';
+}
+
+function pluginStateClass(state: ConfigWebPlugin['state']): string {
+  if (state === 'enabled') return 'is-on';
+  if (state === 'failed') return 'is-error';
+  if (state === 'disabled') return 'is-off';
+  return 'is-warn';
+}
+
+function formatHealthTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString();
 }

@@ -36,8 +36,8 @@ export type SessionAgentAdapter = {
   resetCapabilitiesToDefaults?(): unknown;
   /** 可选：`/clear`、`/new` 之后清掉本会话的压缩覆盖。 */
   setAutoCompactOverride?(override: NonNullable<AgentRuntimeSnapshot['autoCompactOverride']>): unknown;
-  /** 可选：`/clear`、`/new` 之后清空会话笔记。 */
-  setSessionNotes?(notes: string): unknown;
+  /** 可选：`/clear`、`/new` 之后清空插件在会话里的状态（含会话笔记）。 */
+  clearSession?(): void;
   toConversationMessages(): MicaUiConversationMessage[];
 };
 
@@ -109,8 +109,8 @@ export class SessionController {
     this.agent.resetCapabilitiesToDefaults?.();
     // 压缩覆盖同理：新会话不该继承上一条会话调过的阈值。
     this.agent.setAutoCompactOverride?.({});
-    // 笔记同样属于会话：新会话从空白开始，不继承上一轮攒下的结论。
-    this.agent.setSessionNotes?.('');
+    // 插件状态同样属于会话：新会话从空白开始，不继承上一轮攒下的结论（笔记等）。
+    this.agent.clearSession?.();
     this.currentTitleOverride = null;
     this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
@@ -400,7 +400,7 @@ function toPersistedSnapshot(
     // （turn/start 刚应用的 role 会被快照里的旧角色盖回去）。
     ...(snapshot.capabilitiesCustomized ? { capabilitiesCustomized: true } : {}),
     autoCompactOverride: snapshot.autoCompactOverride,
-    notes: snapshot.notes,
+    pluginState: snapshot.pluginState,
     contextWindowSize: micaConfig.getModelRule(snapshot.model).contextSize,
     messages: snapshot.messages,
     conversationMessages,
@@ -423,7 +423,7 @@ function fromPersistedSnapshot(
     capabilitySelection: snapshot.capabilitySelection,
     capabilitiesCustomized: snapshot.capabilitiesCustomized,
     autoCompactOverride: snapshot.autoCompactOverride,
-    notes: snapshot.notes,
+    pluginState: snapshot.pluginState,
     messages: snapshot.messages,
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,

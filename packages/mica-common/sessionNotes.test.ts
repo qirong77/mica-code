@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_SESSION_NOTES_LENGTH,
   appendSessionNotes,
-  formatSessionNotesSection,
   normalizeSessionNotes,
   sessionNotesSummary,
 } from './sessionNotes.js';
@@ -46,21 +45,5 @@ describe('sessionNotesSummary', () => {
   it('counts characters and lines of the normalized text', () => {
     expect(sessionNotesSummary('a\nb')).toEqual({ chars: 3, lines: 2 });
     expect(sessionNotesSummary('  ')).toEqual({ chars: 0, lines: 0 });
-  });
-});
-
-describe('formatSessionNotesSection', () => {
-  it('returns nothing for empty notes so the prompt keeps its shape', () => {
-    expect(formatSessionNotesSection('')).toBe('');
-    expect(formatSessionNotesSection('   \n')).toBe('');
-  });
-
-  it('wraps the notes in a section that explains they are not a new instruction', () => {
-    const section = formatSessionNotesSection('# 决策\n用 Bun');
-    expect(section.startsWith('<session-notes>')).toBe(true);
-    expect(section.endsWith('</session-notes>')).toBe(true);
-    expect(section).toContain('# 决策\n用 Bun');
-    expect(section).toContain('不会被上下文压缩掉');
-    expect(section).toContain('session_notes');
   });
 });

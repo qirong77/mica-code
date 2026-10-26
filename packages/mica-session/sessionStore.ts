@@ -48,10 +48,12 @@ export type PersistedRuntimeSnapshot = {
    */
   autoCompactOverride?: AutoCompactOverride;
   /**
-   * 会话笔记（markdown）。属于会话而不进对话历史：compact 改不到它，所以它能一直
-   * 作为长期上下文留在 system prompt 里。缺失表示这条会话还没写过笔记。
+   * 插件在本会话里的持久状态：插件 id → 插件自己的 JSON。
+   *
+   * 属于会话而不进对话历史：compact 改不到它，所以插件能把长期有效的内容（会话
+   * 笔记、循环任务说明）留在 system prompt 里。缺失表示没有任何插件写过状态。
    */
-  notes?: string;
+  pluginState?: Record<string, unknown>;
   /** Model context window in tokens; informational for the web console's
    *  context usage display. Optional so older snapshots parse cleanly. */
   contextWindowSize?: number;
@@ -709,9 +711,9 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   if (session.snapshot.subagentUsageHistory !== undefined && !Array.isArray(session.snapshot.subagentUsageHistory)) {
     return null;
   }
-  // 笔记缺失允许（旧会话没写过），存在就必须是字符串——否则 prompt 里会拼出
-  // "[object Object]"，而且每次保存都会原样写回。
-  if (session.snapshot.notes !== undefined && typeof session.snapshot.notes !== 'string') return null;
+  // 插件状态缺失允许（没有任何插件写过），存在就必须是普通对象——它是「插件 id →
+  // JSON」的映射，别的形状进不了读写路径，只会让每次保存都原样写回脏数据。
+  if (session.snapshot.pluginState !== undefined && !isPlainRecord(session.snapshot.pluginState)) return null;
   const turnState = isPersistedSessionTurnState(session.turnState) ? session.turnState : 'completed';
   let protocol = session.snapshot.protocol;
   if (!isProviderProtocol(protocol)) {
@@ -747,6 +749,13 @@ function normalizeDisplayUsage(value: unknown): PersistedSnapshotDisplayUsage | 
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+/** 普通对象（不是数组、不是 Date/Map 这类实例）。插件状态只接受这种形状。 */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 function parseLegacySessionForUsage(path: string, messages: unknown[]): PersistedSession | null {

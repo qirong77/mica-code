@@ -39,6 +39,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         // 官方插件的文件已经编译进产物，磁盘上不一定读得到，只列清单声明的部分。
         files: [micaPlugin.PLUGIN_MANIFEST_FILE, manifest.main, ...manifest.assets].map((name) => ({ name })),
         settings: readSettings(manifest.id, manifest.settings, configRoot),
+        health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(manifest.id),
         loadStatus: status?.status,
         error: status?.error,
@@ -61,6 +62,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         manifestFile: plugin.manifestFile,
         files: plugin.files,
         settings: readSettings(plugin.id, plugin.settings, configRoot),
+        health: micaPlugin.readPluginHealth(plugin.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(plugin.id),
         loadStatus: status?.status,
         error: plugin.error ?? status?.error,
@@ -97,6 +99,8 @@ export function setPluginEnabled(id: string, enabled: boolean): ConfigWebPlugins
 export function setPluginSettings(id: string, values: Record<string, unknown>): ConfigWebPluginsDetails {
   const fields = findSettingFields(id);
   if (!fields) throw new Error(`插件没有声明设置项：${id}`);
+  // 校验失败时会抛 PluginSettingsValidationError，带着逐字段的原因；传输层把它转给页面，
+  // 页面据此在对应输入框下面提示，而不是「显示已保存」却存进一组用不了的值。
   micaPlugin.writePluginSettings(id, values, fields, { configDir: getConfigRootPath() });
   return getPluginsDetails();
 }
@@ -109,7 +113,9 @@ function findSettingFields(id: string): PluginSettingField[] | null {
 }
 
 function readSettings(id: string, fields: PluginSettingField[], configRoot: string): ConfigWebPluginSettings {
-  return { fields, values: micaPlugin.readPluginSettings(id, fields, { configDir: configRoot }) };
+  const values = micaPlugin.readPluginSettings(id, fields, { configDir: configRoot });
+  // 磁盘上可能是旧版本写下的、或手改过的值：页面要能把它们标出来，而不是照样显示「已保存」。
+  return { fields, values, issues: micaPlugin.validatePluginSettingValues(fields, values) };
 }
 
 /**
@@ -124,7 +130,10 @@ function withState(plugin: Omit<ConfigWebPlugin, 'state'>, disabled: Set<string>
   return { ...plugin, state };
 }
 
-type PluginStatusEntry = { status: 'loaded' | 'registered' | 'failed' | 'unknown'; error?: string };
+type PluginStatusEntry = {
+  status: 'loaded' | 'registered' | 'failed' | 'skipped' | 'unknown';
+  error?: string;
+};
 
 /**
  * 读 `plugin-status.json`：加载成功的按 id 建索引，加载失败的按插件目录建索引。

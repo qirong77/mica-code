@@ -131,6 +131,7 @@ function createHarness(options: HarnessOptions = {}) {
   });
 
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  const healthReports: Array<{ level: string; message: string }> = [];
   const disposeHandlers: Array<() => void> = [];
   const session: PluginSessionInfo = {
     id: 'session-1',
@@ -159,6 +160,13 @@ function createHarness(options: HarnessOptions = {}) {
         return true;
       },
     },
+    // health 由 PluginManager 无条件注入，不是可选项；假的 ctx 也得给，否则失败分支会抛。
+    health: {
+      path: null,
+      read: () => null,
+      report: (report: { level: string; message: string }) => healthReports.push(report),
+      clear() {},
+    },
     logger,
     onDispose: (handler: () => void) => disposeHandlers.push(handler),
   } as unknown as PluginContext;
@@ -167,6 +175,7 @@ function createHarness(options: HarnessOptions = {}) {
 
   return {
     logger,
+    healthReports,
     renameCalls,
     renamed,
     async emitTurnAfter(outcome: RuntimeTurnAfterHookEvent['outcome']) {

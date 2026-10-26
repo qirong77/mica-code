@@ -16,7 +16,9 @@
       "label": "接口地址",
       "type": "text",
       "placeholder": "https://api.openai.com/v1",
-      "description": "OpenAI 兼容的 base URL。留空则不自动改名。"
+      "description": "OpenAI 兼容的 base URL。留空则不自动改名。",
+      "required": false,
+      "format": "url"
     },
     {
       "key": "apiKey",
@@ -30,8 +32,14 @@
       "type": "select",
       "default": "openai_chat_completions",
       "options": [
-        { "value": "openai_chat_completions", "label": "Chat Completions" },
-        { "value": "openai_responses", "label": "Responses" }
+        {
+          "value": "openai_chat_completions",
+          "label": "Chat Completions"
+        },
+        {
+          "value": "openai_responses",
+          "label": "Responses"
+        }
       ]
     },
     {
@@ -53,14 +61,19 @@
       "label": "送入消息条数",
       "type": "number",
       "default": "12",
-      "description": "从最近一条往前取多少条用户/助手消息，工具调用与结果一律不发送。"
+      "description": "从最近一条往前取多少条用户/助手消息，工具调用与结果一律不发送。",
+      "min": 1,
+      "max": 50
     },
     {
       "key": "minIntervalSeconds",
       "label": "最小间隔（秒）",
       "type": "number",
       "default": "0",
-      "description": "同一条会话两次自动改名的最小间隔，0 表示每轮都试。"
+      "description": "同一条会话两次自动改名的最小间隔，0 表示每轮都试。",
+      "min": 0,
+      "max": 86400
     }
-  ]
+  ],
+  "requires": ["commands", "hooks", "session", "settings", "ui"]
 }

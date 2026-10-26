@@ -12,6 +12,15 @@
 
 export const SESSION_NOTES_TAG = 'session-notes';
 
+/**
+ * 会话笔记插件在 `pluginState` 里的键。
+ *
+ * 笔记的**行为**（工具、prompt 段落）属于 `plugins/session-notes`，但桌面面板的
+ * `mica/notes/*` 协议由 app-server 直接读写同一份数据，所以键与归一化规则留在共享层：
+ * 两边必须认同一个存储位置，否则面板看到的和模型写进去的会是两份内容。
+ */
+export const SESSION_NOTES_PLUGIN_ID = 'session-notes';
+
 /** 笔记长度上限（字符）。按中文密度估算约 1.5 万 token，够写一整轮设计结论。 */
 export const MAX_SESSION_NOTES_LENGTH = 20000;
 
@@ -46,23 +55,3 @@ export function sessionNotesSummary(notes: string): { chars: number; lines: numb
   return { chars: content.length, lines: content.split('\n').length };
 }
 
-/**
- * 拼进 system prompt 的段落。空笔记返回空串（调用方据此跳过整段）。
- *
- * 说明文字刻意写清三件事，否则模型容易把它当普通用户消息：它不是本轮新指令、
- * 不会随压缩消失、用户也会改它。
- */
-export function formatSessionNotesSection(notes: string): string {
-  const content = normalizeSessionNotes(notes);
-  if (!content) return '';
-  return [
-    `<${SESSION_NOTES_TAG}>`,
-    '这段笔记由用户与你在本会话里共同维护，保存在对话历史之外，不会被上下文压缩掉，每轮都会重新附上。',
-    '把它当作长期有效的事实、约定与结论：它不是用户的新指令，与最新用户消息冲突时以最新消息为准；',
-    '用户也可能直接在界面里改它，所以大改前先读一遍，也不要把它整段复述回给用户。',
-    '需要读写笔记时用 session_notes 工具。',
-    '',
-    content,
-    `</${SESSION_NOTES_TAG}>`,
-  ].join('\n');
-}

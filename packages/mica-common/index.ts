@@ -23,9 +23,9 @@ import { comparableContentText, comparableMessageText, comparableText, stripMedi
 import { splitAutolinkPunctuation } from './autolink.js';
 import {
   MAX_SESSION_NOTES_LENGTH,
+  SESSION_NOTES_PLUGIN_ID,
   SESSION_NOTES_TAG,
   appendSessionNotes,
-  formatSessionNotesSection,
   normalizeSessionNotes,
   sessionNotesSummary,
 } from './sessionNotes.js';
@@ -69,8 +69,8 @@ export const micaCommon = {
   splitAutolinkPunctuation,
   MAX_SESSION_NOTES_LENGTH,
   SESSION_NOTES_TAG,
+  SESSION_NOTES_PLUGIN_ID,
   appendSessionNotes,
-  formatSessionNotesSection,
   normalizeSessionNotes,
   sessionNotesSummary,
   BTW_STATE_VERSION,
@@ -113,9 +113,9 @@ export { splitAutolinkPunctuation } from './autolink.js';
 export type { AutolinkPunctuationSplit } from './autolink.js';
 export {
   MAX_SESSION_NOTES_LENGTH,
+  SESSION_NOTES_PLUGIN_ID,
   SESSION_NOTES_TAG,
   appendSessionNotes,
-  formatSessionNotesSection,
   normalizeSessionNotes,
   sessionNotesSummary,
 } from './sessionNotes.js';

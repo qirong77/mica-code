@@ -66,6 +66,7 @@ describe('file-plugins startup plugin', () => {
       {
         loaded: ['user.ready'],
         failed: [{ pluginId: 'user.broken', error: new Error('setup failed') }],
+        skipped: [],
       },
     );
 

@@ -162,6 +162,19 @@ export class Application {
             return true;
           },
         },
+        // 插件状态跟着「当前 agent」走：多 agent 会话下 owner 决定写哪一条，
+        // 不传 owner 就是当前会话。
+        sessionStateFor: (pluginId) => ({
+          get: () => resolvePluginSession(agentSessions, undefined)?.agent.getPluginState(pluginId),
+          // 没有会话就抛出：静默丢弃写入会让插件以为状态存住了，实际下一轮读回 undefined。
+          set: (value) => {
+            const agent = resolvePluginSession(agentSessions, undefined)?.agent;
+            if (!agent) throw new Error(`session state unavailable for ${pluginId}`);
+            agent.setPluginState(pluginId, value);
+          },
+          clear: () => resolvePluginSession(agentSessions, undefined)?.agent.clearPluginState(pluginId),
+        }),
+        promptSections: agent.promptSections,
         runtime: {
           submit: (text, options) => runtime.submit(text, options),
           queue: {

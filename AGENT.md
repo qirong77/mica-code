@@ -259,7 +259,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 没有 `plugin.json` 的目录、散落成文件的 `.js` / `.mjs` 都不是插件，加载器不猜（见 §1 的兼容准则）；用户插件 id 一律加 `user.` 前缀，避免与内置插件撞名后 `Plugin already registered`。
 - 清单解析与路径校验在 `mica-plugin/PluginManifest.ts`：`main` / `assets` 必须是插件目录内的相对路径。配置页用 `inspectPlugins()` 只读扫描，清单写错的插件照样列得出来。
 - 启停状态在 `$MICA_HOME/plugins-state.json`（`{ "disabled": [...] }`），停用的插件在注册阶段就被跳过，改完要重开会话才生效。
-- **插件设置**：需要用户填参数的插件在 `plugin.json` 的 `settings` 里声明字段（`text` / `password` / `textarea` / `select` / `number`），配置页 Plugins 页面按声明渲染并自动保存，值存 `$MICA_HOME/plugin-settings/<id>.json`。插件用 `ctx.settings.get()` 读，store 按文件 mtime 增量刷新，改完不必重启（启停仍然要）。
+- **插件设置**：需要用户填参数的插件在 `plugin.json` 的 `settings` 里声明字段（`text` / `password` / `textarea` / `select` / `number`）与约束（`required` / `format` / `min` / `max` / `pattern`），配置页 Plugins 页面按声明渲染并自动保存，值存 `$MICA_HOME/plugin-settings/<id>.json`。校验只有 `validatePluginSettingValues()` 一处：写盘前拒绝、插件读取时同样过一遍，所以「页面显示已保存、插件却认为配置不可用」不会出现；非法值既不落盘也不静默通过，页面把错误挂回对应输入框，已存盘的不完整配置以 warn 列出。
+- **插件健康**：`ctx.health.report({ level, message, hint })` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页读它显示「正常 / 待配置 / 出错」。插件缺配置、外部服务拒绝、上一次请求失败之类的**用户可见故障必须上报**，不能只写日志——日志是排查用的，健康状态才让人知道这个插件现在到底有没有在工作。
+- **插件崩溃不能静默**：hook 抛错记进插件自己的文件日志并保持宿主继续跑；manifest 的 `requires` 必须声明插件用到的每一个 `ctx.*` 能力面（`commands` / `events` / `hooks` / `prompt` / `session` / `sessionState` / `settings` / `tools` / `ui` / `git` / `runtime`），缺一个就整插件跳过，原因写进 `plugin-status.json` 的 `skipped`，页面显示「已跳过」而不是在 setup 里抛异常连带别的插件一起失败。
 - **插件日志**：`ctx.logger` 由 `PluginManager` 按 pluginId 注入，除转发宿主 logger 外还写 JSONL 到 `os.tmpdir()/mica-logs/plugin-<id>-<day>[-n].jsonl`（2 MB 分片、3 天清理、`MICA_PLUGIN_LOG=0` 关闭）。插件排查问题一律先看它，别往配置目录写日志。
 - 插件要感知会话（例如按对话内容起标题）时用 `ctx.session`：`describe(owner)` 给出 `id` / `title` / `titleSource`，`messages(owner)` 给出 UI 视角对话，`rename(title, { owner, source })` 走 `SessionController.renameCurrent`。`source: 'auto'` 在用户手动命名过（`titleSource === 'manual'`）时被拒绝，自动逻辑不得覆盖人工标题。
 - 新增官方插件：建目录 → 在 `manifests.ts` 与 `index.ts` 两处登记 → 插件自己的测试放在插件目录里（vitest 已覆盖 `plugins/**`）。

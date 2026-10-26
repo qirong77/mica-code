@@ -1,5 +1,6 @@
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
+import sessionNotesSetup from '../../plugins/session-notes/index.js';
 import todoSetup from '../../plugins/todo/index.js';
 import { officialPluginManifests } from './manifests.js';
 
@@ -13,6 +14,7 @@ export { OFFICIAL_PLUGINS_DIR, officialPluginIds, officialPluginManifests } from
  */
 const officialSetups: Record<string, MicaPlugin['setup']> = {
   todo: todoSetup,
+  'session-notes': sessionNotesSetup,
   'session-rename': sessionRenameSetup,
 };
 
