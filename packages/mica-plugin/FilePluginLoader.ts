@@ -1,15 +1,10 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, extname, join } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_DIR_NAME } from '@packages/mica-config/brand.js';
-import {
-  legacyPluginManifest,
-  parsePluginManifest,
-  PLUGIN_MANIFEST_FILE,
-  type PluginManifest,
-} from './PluginManifest.js';
+import { parsePluginManifest, PLUGIN_MANIFEST_FILE, type PluginManifest } from './PluginManifest.js';
 import type { MicaPlugin } from './Plugin.js';
 
 export type FilePluginLoaderOptions = {
@@ -24,10 +19,9 @@ export type FilePluginLoaderOptions = {
 
 export type LoadedFilePlugin = {
   pluginId: string;
-  /** 入口文件。旧格式就是插件文件本身。 */
+  /** 清单 `main` 指向的入口文件。 */
   file: string;
-  manifest?: PluginManifest;
-  format?: PluginPackageFormat;
+  manifest: PluginManifest;
 };
 
 export type FilePluginLoadResult = {
@@ -36,22 +30,19 @@ export type FilePluginLoadResult = {
   failed: { file: string; error: unknown }[];
 };
 
-export type PluginPackageFormat = 'directory' | 'file';
-
 /** 配置页展示用的插件描述：只读文件、不导入代码，坏插件也能列出来。 */
 export type PluginInspection = {
-  /** 运行时使用的插件 id（用户插件带 `user.` / `file.` 前缀，避免与内置插件撞名）。 */
+  /** 运行时使用的插件 id（用户插件带 `user.` 前缀，避免与内置插件撞名）。 */
   id: string;
-  /** 清单里声明的 id。旧格式没有清单，与 name 相同。 */
+  /** 清单里声明的 id；清单坏掉时退回目录名。 */
   declaredId: string;
   name: string;
   version?: string;
   description: string;
-  format: PluginPackageFormat;
-  /** 插件目录（目录格式）或插件文件（旧格式）的绝对路径。 */
+  /** 插件目录的绝对路径。 */
   root: string;
   entryFile: string;
-  manifestFile?: string;
+  manifestFile: string;
   files: { name: string; sizeBytes: number }[];
   /** 清单解析 / 入口缺失等静态问题；加载期错误由 plugin-status.json 提供。 */
   error?: string;
@@ -65,9 +56,8 @@ export type PluginInspectionResult = {
 /**
  * 加载 `$MICA_HOME/plugins` 下的用户插件。
  *
- * 支持两种形态：
- * - 目录插件（推荐）：`<dir>/plugin.json` + 清单声明的入口与资源；
- * - 单文件插件（旧格式）：`<name>.js` / `<name>.mjs`，清单由加载器合成。
+ * 插件只有一种形态：`<dir>/plugin.json` + 清单声明的入口与资源。没有清单的目录、散落的
+ * `.js` / `.mjs` 文件都不是插件，加载器不猜。
  *
  * 任何一个插件失败都不影响其它插件：失败进 `failed`，由调用方写进 plugin-status.json
  * 供配置页展示，而不是让整个启动流程抛错。
@@ -80,7 +70,7 @@ export async function loadFilePlugins(options: FilePluginLoaderOptions = {}): Pr
 
   try {
     entries = (await readdir(pluginsDir, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory() || isPluginFile(entry.name))
+      .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .sort();
   } catch (error) {
@@ -90,8 +80,9 @@ export async function loadFilePlugins(options: FilePluginLoaderOptions = {}): Pr
 
   for (const entryName of entries) {
     const target = join(pluginsDir, entryName);
+    if (!existsSync(join(target, PLUGIN_MANIFEST_FILE))) continue;
     try {
-      const loaded = await loadPluginEntry(target, entryName, disabled);
+      const loaded = await loadPluginEntry(target, disabled);
       if (!loaded) continue;
       result.plugins.push(loaded.plugin);
       result.loaded.push(loaded.record);
@@ -116,46 +107,29 @@ export function inspectPlugins(options: FilePluginLoaderOptions = {}): PluginIns
 
   const plugins: PluginInspection[] = [];
   for (const entry of readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isDirectory()) {
-      const dir = join(root, entry.name);
-      const manifestFile = join(dir, PLUGIN_MANIFEST_FILE);
-      if (!existsSync(manifestFile)) continue;
-      plugins.push(inspectDirectoryPlugin(dir, manifestFile, entry.name));
-      continue;
-    }
-    if (isPluginFile(entry.name)) plugins.push(inspectFilePlugin(join(root, entry.name), entry.name));
+    if (!entry.isDirectory()) continue;
+    const dir = join(root, entry.name);
+    const manifestFile = join(dir, PLUGIN_MANIFEST_FILE);
+    if (!existsSync(manifestFile)) continue;
+    plugins.push(inspectPlugin(dir, manifestFile, entry.name));
   }
   return { root, plugins };
 }
 
 async function loadPluginEntry(
-  target: string,
-  entryName: string,
+  dir: string,
   disabled: ReadonlySet<string>,
 ): Promise<{ plugin: MicaPlugin; record: LoadedFilePlugin } | null> {
-  if (isPluginFile(entryName)) {
-    const manifest = legacyPluginManifest(entryName, filePluginId(entryName));
-    if (disabled.has(manifest.id)) return null;
-    const setup = await importSetup(target);
-    return {
-      plugin: createFilePlugin(manifest, setup, manifest.id),
-      record: { pluginId: manifest.id, file: target, manifest, format: 'file' },
-    };
-  }
-
-  const manifestFile = join(target, PLUGIN_MANIFEST_FILE);
-  if (!existsSync(manifestFile)) return null;
-
-  const manifest = await readManifest(manifestFile);
+  const manifest = await readManifest(join(dir, PLUGIN_MANIFEST_FILE));
   const pluginId = userPluginId(manifest);
   if (disabled.has(pluginId)) return null;
-  const entryFile = join(target, manifest.main);
+  const entryFile = join(dir, manifest.main);
   if (!existsSync(entryFile)) {
     throw new Error(`入口文件不存在：${manifest.main}`);
   }
   const setup = await importSetup(entryFile);
   const plugin = createFilePlugin(manifest, setup, pluginId);
-  return { plugin, record: { pluginId: plugin.id, file: entryFile, manifest, format: 'directory' } };
+  return { plugin, record: { pluginId: plugin.id, file: entryFile, manifest } };
 }
 
 async function readManifest(manifestFile: string): Promise<PluginManifest> {
@@ -193,10 +167,6 @@ function userPluginId(manifest: PluginManifest): string {
   return `user.${manifest.id}`;
 }
 
-function filePluginId(fileName: string): string {
-  return `file.${basename(fileName, extname(fileName))}`;
-}
-
 async function importSetup(entryFile: string): Promise<MicaPlugin['setup']> {
   const mod: unknown = await import(pathToFileURL(entryFile).href);
   return resolvePluginFactory(mod);
@@ -209,13 +179,12 @@ function resolvePluginFactory(mod: unknown): MicaPlugin['setup'] {
   throw new Error('插件入口必须 default 导出 setup 函数');
 }
 
-function inspectDirectoryPlugin(dir: string, manifestFile: string, dirName: string): PluginInspection {
+function inspectPlugin(dir: string, manifestFile: string, dirName: string): PluginInspection {
   const base = {
     id: `user.${dirName}`,
     declaredId: dirName,
     name: dirName,
     description: '',
-    format: 'directory' as const,
     root: dir,
     entryFile: '',
     manifestFile,
@@ -246,26 +215,6 @@ function inspectDirectoryPlugin(dir: string, manifestFile: string, dirName: stri
   };
 }
 
-function inspectFilePlugin(file: string, fileName: string): PluginInspection {
-  let sizeBytes = 0;
-  try {
-    sizeBytes = statSync(file).size;
-  } catch {
-    // 文件在扫描与 stat 之间被删掉：仍然列出来，只是没有大小。
-  }
-  const manifest = legacyPluginManifest(fileName, filePluginId(fileName));
-  return {
-    id: manifest.id,
-    declaredId: manifest.name,
-    name: manifest.name,
-    description: manifest.description,
-    format: 'file',
-    root: file,
-    entryFile: file,
-    files: [{ name: fileName, sizeBytes }],
-  };
-}
-
 function listFiles(dir: string): { name: string; sizeBytes: number }[] {
   try {
     return readdirSync(dir, { withFileTypes: true })
@@ -282,10 +231,6 @@ function listFiles(dir: string): { name: string; sizeBytes: number }[] {
 
 function resolvePluginsDir(options: FilePluginLoaderOptions): string {
   return options.pluginsDir ?? join(options.homeDir ?? homedir(), CONFIG_DIR_NAME, 'plugins');
-}
-
-function isPluginFile(fileName: string): boolean {
-  return fileName.endsWith('.mjs') || fileName.endsWith('.js');
 }
 
 function isMissingDirectory(error: unknown): boolean {

@@ -4,12 +4,7 @@ import { HookRegistry } from './HookRegistry.js';
 import { ServiceContainer } from './ServiceContainer.js';
 import { createServiceToken } from './ServiceToken.js';
 import { inspectPlugins, loadFilePlugins } from './FilePluginLoader.js';
-import {
-  legacyPluginManifest,
-  parsePluginManifest,
-  PLUGIN_API_VERSION,
-  PLUGIN_MANIFEST_FILE,
-} from './PluginManifest.js';
+import { parsePluginManifest, PLUGIN_API_VERSION, PLUGIN_MANIFEST_FILE } from './PluginManifest.js';
 import {
   PLUGIN_STATE_FILE,
   readDisabledPluginIds,
@@ -27,7 +22,6 @@ export const micaPlugin = {
   loadFilePlugins,
   inspectPlugins,
   parsePluginManifest,
-  legacyPluginManifest,
   readPluginState,
   readDisabledPluginIds,
   writePluginState,
@@ -44,7 +38,6 @@ export {
   PLUGIN_MANIFEST_FILE,
   PLUGIN_ENTRY_CANDIDATES,
   isSafePluginRelativePath,
-  legacyPluginManifest,
   parsePluginManifest,
 } from './PluginManifest.js';
 export {
@@ -75,7 +68,6 @@ export type {
   LoadedFilePlugin,
   PluginInspection,
   PluginInspectionResult,
-  PluginPackageFormat,
 } from './FilePluginLoader.js';
 export type { PluginManifest, PluginManifestParseResult } from './PluginManifest.js';
 export type { PluginState, PluginStateOptions } from './PluginState.js';

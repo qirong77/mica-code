@@ -11,8 +11,7 @@
  *   styles.css      ← 资源，由清单的 assets 声明
  * ```
  *
- * 旧格式（`~/.mica/plugins/foo.mjs`）继续可用，加载器会为它合成一份清单，所以配置页不必
- * 为两种形态写两套展示逻辑。
+ * 没有清单的文件不会被当成插件：插件形态只有一种，加载器不去猜。
  */
 
 export const PLUGIN_MANIFEST_FILE = 'plugin.json';
@@ -108,23 +107,6 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       priority: typeof input.priority === 'number' && Number.isFinite(input.priority) ? input.priority : 0,
       apiVersion,
     },
-  };
-}
-
-/** 为旧格式（单个 `.js` / `.mjs` 文件）合成一份清单，展示与加载走同一套结构。 */
-export function legacyPluginManifest(fileName: string, pluginId: string): PluginManifest {
-  const name = fileName.replace(/\.(?:mjs|js)$/i, '');
-  return {
-    id: pluginId,
-    name,
-    version: '0.0.0',
-    description: '单文件插件（旧格式），建议迁移为带 plugin.json 的插件目录。',
-    main: fileName,
-    assets: [],
-    dependencies: [],
-    required: false,
-    priority: 0,
-    apiVersion: PLUGIN_API_VERSION,
   };
 }
 

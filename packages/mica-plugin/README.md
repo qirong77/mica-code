@@ -61,7 +61,7 @@ context.onDispose(() => hook.dispose());
 - `PluginContext.ts`：插件运行上下文。
 - `HookRegistry.ts`、`HookTypes.ts`：hook 类型与注册表。
 - `ServiceContainer.ts`、`ServiceToken.ts`：服务容器与 token。
-- `PluginManifest.ts`：`plugin.json` 的类型、解析与路径越界校验；旧格式单文件插件用它合成清单。
-- `FilePluginLoader.ts`：扫描 `$MICA_HOME/plugins`（目录插件 + 旧格式单文件插件），以及不打代码的 `inspectPlugins`。
+- `PluginManifest.ts`：`plugin.json` 的类型、解析与路径越界校验。
+- `FilePluginLoader.ts`：扫描 `$MICA_HOME/plugins/<id>/`，以及不执行代码的 `inspectPlugins`。没有 `plugin.json` 的目录和散落的 `.js` / `.mjs` 都不算插件。
 - `PluginState.ts`：启停状态文件的读写。
 - `index.ts`：公共 API 聚合导出。

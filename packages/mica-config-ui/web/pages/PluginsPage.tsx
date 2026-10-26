@@ -4,14 +4,14 @@ import { Alert, Button, Empty, Switch, Tag } from '../components/Ui.js';
 import { readPluginsDetails, setPluginEnabled, supportsPluginToggle } from '../api.js';
 import type { ConfigWebPlugin, ConfigWebPluginsDetails } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
-import { pluginFormatLabel, pluginSourceLabel, pluginStateLabel, pluginStateTone } from '../labels.js';
+import { pluginSourceLabel, pluginStateLabel, pluginStateTone } from '../labels.js';
 
 /**
  * 插件页：官方插件与用户插件分两组列出，状态与启停都在行上，详情原地展开。
  *
  * 两种插件含义不同，页面上必须说清楚：
  * - 官方插件随产品分发（源码在仓库 `plugins/`），永远「已安装」，只能启用 / 停用；
- * - 用户插件是 `$MICA_HOME/plugins` 下的目录或单文件，装没装、能不能加载由磁盘决定。
+ * - 用户插件是 `$MICA_HOME/plugins` 下的插件目录，装没装、能不能加载由磁盘决定。
  *
  * 启停只写本地状态文件，插件在启动阶段才注册，因此改完要重开会话才生效——页面提示这一点，
  * 而不是假装立刻生效。
@@ -118,8 +118,8 @@ export function PluginsPage() {
                 <div className="config-head-copy">
                   <h2>用户插件</h2>
                   <p>
-                    目录格式：<code>plugin.json</code> + <code>main</code> 指向的入口（default 导出 setup）；旧格式的
-                    单文件插件（<code>.js</code> / <code>.mjs</code>）仍然可以加载。
+                    一个插件就是一个目录：<code>plugin.json</code> + <code>main</code> 指向的入口（default 导出
+                    setup），样式、文档等资源在清单的 <code>assets</code> 里声明。
                   </p>
                 </div>
                 <span className="plugin-head-count">
@@ -169,7 +169,7 @@ function PluginRow({ plugin, expanded, busy, canToggle, onToggleExpanded, onTogg
             {plugin.name}
           </span>
           <span className="plugin-row-sub" title={plugin.location}>
-            v{plugin.version} · {pluginFormatLabel(plugin.format)} · {plugin.location}
+            v{plugin.version} · {plugin.location}
           </span>
         </span>
         <span className="plugin-row-tags">

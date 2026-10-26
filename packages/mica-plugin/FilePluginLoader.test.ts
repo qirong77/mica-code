@@ -6,38 +6,31 @@ import { inspectPlugins, loadFilePlugins } from './FilePluginLoader.js';
 import { parsePluginManifest } from './PluginManifest.js';
 
 describe('loadFilePlugins', () => {
-  it('loads mjs plugins from the plugins directory in filename order', async () => {
+  it('ignores loose files: a plugin is a package, not a script', async () => {
     const dir = mkTempDir();
     try {
-      writeFileSync(join(dir, '20-second.mjs'), 'export default function setup() {}');
-      writeFileSync(join(dir, '10-first.mjs'), 'export default function setup() {}');
-      writeFileSync(join(dir, 'ignored.txt'), 'nope');
+      writeFileSync(join(dir, 'loose.mjs'), 'export default function setup() {}');
+      writeFileSync(join(dir, 'loose.js'), 'export default function setup() {}');
+      writeFileSync(join(dir, 'notes.txt'), 'nope');
 
-      const result = await loadFilePlugins({ pluginsDir: dir });
-
-      expect(result.failed).toEqual([]);
-      expect(result.plugins.map((plugin) => plugin.id)).toEqual(['file.10-first', 'file.20-second']);
-      expect(result.loaded.map((entry) => entry.format)).toEqual(['file', 'file']);
+      expect(await loadFilePlugins({ pluginsDir: dir })).toEqual({ plugins: [], loaded: [], failed: [] });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('keeps loading when one plugin file is invalid', async () => {
+  it('keeps loading when one plugin package is broken', async () => {
     const dir = mkTempDir();
     const warn = vi.fn();
     try {
-      writeFileSync(join(dir, 'bad.mjs'), 'export const nope = 1');
-      writeFileSync(join(dir, 'good.mjs'), 'export default function setup() {}');
+      writeDirectoryPlugin(dir, 'bad', KEBAB_MANIFEST, 'export const nope = 1');
+      writeDirectoryPlugin(dir, 'todo-lite', KEBAB_MANIFEST, 'export default function setup() {}');
 
       const result = await loadFilePlugins({ pluginsDir: dir, logger: { warn } });
 
-      expect(result.plugins.map((plugin) => plugin.id)).toEqual(['file.good']);
+      expect(result.plugins.map((plugin) => plugin.id)).toEqual(['user.todo-lite']);
       expect(result.failed).toHaveLength(1);
-      expect(warn).toHaveBeenCalledWith(
-        'file-plugin:load-failed',
-        expect.objectContaining({ file: join(dir, 'bad.mjs') }),
-      );
+      expect(warn).toHaveBeenCalledWith('file-plugin:load-failed', expect.objectContaining({ file: join(dir, 'bad') }));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -54,7 +47,7 @@ describe('loadFilePlugins', () => {
       expect(result.plugins.map((plugin) => plugin.id)).toEqual(['user.todo-lite']);
       expect(result.plugins[0]?.name).toBe('Todo Lite');
       expect(result.plugins[0]?.manifest?.main).toBe('index.mjs');
-      expect(result.loaded[0]).toMatchObject({ pluginId: 'user.todo-lite', format: 'directory' });
+      expect(result.loaded[0]).toMatchObject({ pluginId: 'user.todo-lite' });
       expect(result.loaded[0]?.file).toBe(join(dir, 'todo-lite', 'index.mjs'));
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -109,27 +102,24 @@ describe('loadFilePlugins', () => {
 });
 
 describe('inspectPlugins', () => {
-  it('describes directory and legacy plugins without executing them', () => {
+  it('describes plugin packages without executing them', () => {
     const dir = mkTempDir();
     try {
       writeDirectoryPlugin(dir, 'todo-lite', KEBAB_MANIFEST, 'throw new Error("should not run")');
-      writeFileSync(join(dir, 'legacy.mjs'), 'export default function setup() {}');
+      writeFileSync(join(dir, 'loose.mjs'), 'export default function setup() {}');
 
       const result = inspectPlugins({ pluginsDir: dir });
 
       expect(result.root).toBe(dir);
-      // 扫描按目录项名字排序：legacy.mjs 在 todo-lite/ 之前。
-      expect(result.plugins.map((plugin) => plugin.id)).toEqual(['file.legacy', 'user.todo-lite']);
-      const directory = result.plugins[1];
+      expect(result.plugins.map((plugin) => plugin.id)).toEqual(['user.todo-lite']);
+      const directory = result.plugins[0];
       expect(directory).toMatchObject({
         name: 'Todo Lite',
         version: '1.0.0',
-        format: 'directory',
         declaredId: 'todo-lite',
         error: undefined,
       });
       expect(directory?.files.map((file) => file.name)).toEqual(['index.mjs', 'plugin.json']);
-      expect(result.plugins[0]).toMatchObject({ format: 'file', name: 'legacy' });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

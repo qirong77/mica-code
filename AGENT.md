@@ -14,6 +14,7 @@
 - 改动影响本文件中的架构、路径、命令、配置、协议、状态或流程时，同步更新对应章节。
 - 用户可见命令同步检查根 `README.md`、`packages/mica-builtin-commands/README.md`；公共 API 同步检查 `packages/README.md` 和对应包的 README。
 - prompt、skills、工具描述、联网策略和项目指令加载会影响 agent 行为与 prompt cache 前缀，修改时保持稳定前缀。
+- **不为旧形态保留兼容分支**。改了数据形态、目录布局、协议字段或插件格式，就把旧形态的解析、回退与迁移代码一并删掉，只留一条能说清「这个形态不再支持」的报错或提示；不要在加载器、配置读取、UI 里堆 `if (old) … else …`。仓库未发布稳定版本，也没有需要迁移的存档，兼容层只会让两套语义长期并存。
 
 ## 2. 项目与常用命令
 
@@ -253,9 +254,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 ### 插件包
 
-- 一个插件是一个目录：`plugin.json`（`id` / `name` / `version` / `main` / `assets` / `dependencies` / `required` / `priority` / `mica.apiVersion`）+ 入口（`default` 导出 `setup(ctx)`）+ 资源。格式与字段以 `plugins/README.md` 为准。
-- 官方插件在仓库根 `plugins/<id>/`，清单是唯一事实来源，入口在 `packages/mica-official-plugins/index.ts` 登记；用户插件在 `$MICA_HOME/plugins`（目录格式，或旧格式单个 `.js` / `.mjs`），由 `mica-plugin/FilePluginLoader.ts` 在启动时加载。
-- 用户插件 id 一律加 `user.` 前缀（旧格式是 `file.`），避免与内置插件撞名后 `Plugin already registered`。
+- 插件只有一种形态，就是一个目录：`plugin.json`（`id` / `name` / `version` / `main` / `assets` / `dependencies` / `required` / `priority` / `mica.apiVersion`）+ 入口（`default` 导出 `setup(ctx)`）+ 资源。格式与字段以 `plugins/README.md` 为准。
+- 官方插件在仓库根 `plugins/<id>/`，清单是唯一事实来源，入口在 `packages/mica-official-plugins/index.ts` 登记；用户插件在 `$MICA_HOME/plugins/<id>/`，由 `mica-plugin/FilePluginLoader.ts` 在启动时加载。
+- 没有 `plugin.json` 的目录、散落成文件的 `.js` / `.mjs` 都不是插件，加载器不猜（见 §1 的兼容准则）；用户插件 id 一律加 `user.` 前缀，避免与内置插件撞名后 `Plugin already registered`。
 - 清单解析与路径校验在 `mica-plugin/PluginManifest.ts`：`main` / `assets` 必须是插件目录内的相对路径。配置页用 `inspectPlugins()` 只读扫描，清单写错的插件照样列得出来。
 - 启停状态在 `$MICA_HOME/plugins-state.json`（`{ "disabled": [...] }`），停用的插件在注册阶段就被跳过，改完要重开会话才生效。
 - 新增官方插件：建目录 → 在 `manifests.ts` 与 `index.ts` 两处登记 → 插件自己的测试放在插件目录里（vitest 已覆盖 `plugins/**`）。

@@ -8,6 +8,7 @@ import setupFilePlugins, { writeFilePluginStatus } from '@packages/mica-builtin-
 import setupProcessDiagnostics, {
   defaultProcessTitle,
 } from '@packages/mica-builtin-commands/startup/process-diagnostics.js';
+import { parsePluginManifest } from '@packages/mica-plugin/index.js';
 
 const tempDirectories: string[] = [];
 
@@ -19,14 +20,14 @@ afterEach(() => {
 
 describe('file-plugins startup plugin', () => {
   it('loads and registers non-duplicate file plugins', async () => {
-    const duplicate = { id: 'file.duplicate', setup() {} };
-    const available = { id: 'file.available', setup() {} };
+    const duplicate = { id: 'user.duplicate', setup() {} };
+    const available = { id: 'user.available', setup() {} };
     const register = vi.fn();
     const loadFilePlugins = vi.fn(async () => ({
       plugins: [duplicate, available],
       loaded: [
-        { pluginId: duplicate.id, file: '/plugins/duplicate.mjs' },
-        { pluginId: available.id, file: '/plugins/available.mjs' },
+        { pluginId: duplicate.id, file: '/plugins/duplicate/index.js', manifest: manifestFor('duplicate') },
+        { pluginId: available.id, file: '/plugins/available/index.js', manifest: manifestFor('available') },
       ],
       failed: [],
     }));
@@ -57,14 +58,14 @@ describe('file-plugins startup plugin', () => {
       { paths: { config, plugins: '/plugins' } },
       {
         loaded: [
-          { pluginId: 'file.ready', file: '/plugins/ready.mjs' },
-          { pluginId: 'file.broken', file: '/plugins/broken.mjs' },
+          { pluginId: 'user.ready', file: '/plugins/ready/index.js', manifest: manifestFor('ready') },
+          { pluginId: 'user.broken', file: '/plugins/broken/index.js', manifest: manifestFor('broken') },
         ],
-        failed: [{ file: '/plugins/import-error.mjs', error: new Error('import failed') }],
+        failed: [{ file: '/plugins/import-error', error: new Error('import failed') }],
       },
       {
-        loaded: ['file.ready'],
-        failed: [{ pluginId: 'file.broken', error: new Error('setup failed') }],
+        loaded: ['user.ready'],
+        failed: [{ pluginId: 'user.broken', error: new Error('setup failed') }],
       },
     );
 
@@ -72,10 +73,10 @@ describe('file-plugins startup plugin', () => {
     expect(persisted).toMatchObject({
       root: '/plugins',
       plugins: [
-        { id: 'file.ready', status: 'loaded' },
-        { id: 'file.broken', status: 'failed', error: 'setup failed' },
+        { id: 'user.ready', status: 'loaded' },
+        { id: 'user.broken', status: 'failed', error: 'setup failed' },
       ],
-      loadFailed: [{ file: '/plugins/import-error.mjs', status: 'failed', error: 'import failed' }],
+      loadFailed: [{ file: '/plugins/import-error', status: 'failed', error: 'import failed' }],
     });
     expect(status.updatedAt).toEqual(expect.any(String));
   });
@@ -125,4 +126,10 @@ function createTempDirectory(): string {
   const directory = mkdtempSync(join(tmpdir(), 'mica-startup-plugin-'));
   tempDirectories.push(directory);
   return directory;
+}
+
+function manifestFor(id: string) {
+  const result = parsePluginManifest({ id, name: id, version: '1.0.0' });
+  if (!result.ok) throw new Error(result.error);
+  return result.manifest;
 }

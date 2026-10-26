@@ -10,7 +10,7 @@ import type { ConfigWebPlugin, ConfigWebPluginsDetails } from '../shared/types.j
  * 列表有两段来源，含义不同，页面上也是分开的：
  * - 官方插件：随产品分发，清单在仓库 `plugins/<id>/plugin.json`，编译进单二进制，所以永远「已安装」，
  *   只能启用 / 停用；
- * - 用户插件：`$MICA_HOME/plugins` 下的目录或单文件，装没装、能不能加载都由磁盘决定。
+ * - 用户插件：`$MICA_HOME/plugins` 下的插件目录，装没装、能不能加载都由磁盘决定。
  *
  * 这里只做静态扫描（读清单、列文件），不导入插件代码：加载失败、清单写错的插件同样要能列出来，
  * 否则用户没法在页面上看到哪里错了。
@@ -31,7 +31,6 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         description: manifest.description,
         author: manifest.author,
         source: 'official',
-        format: 'directory',
         location: `${OFFICIAL_PLUGINS_DIR}/${manifest.id}`,
         entryFile: manifest.main,
         manifestFile: `${OFFICIAL_PLUGINS_DIR}/${manifest.id}/${micaPlugin.PLUGIN_MANIFEST_FILE}`,
@@ -45,7 +44,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
   });
 
   const user: ConfigWebPlugin[] = inspection.plugins.map((plugin) => {
-    const status = statuses.get(plugin.id) ?? statuses.get(plugin.entryFile);
+    const status = statuses.get(plugin.id) ?? statuses.get(plugin.root);
     return withState(
       {
         id: plugin.id,
@@ -53,7 +52,6 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         version: plugin.version ?? '0.0.0',
         description: plugin.description,
         source: 'user',
-        format: plugin.format,
         location: plugin.root,
         entryFile: plugin.entryFile || undefined,
         manifestFile: plugin.manifestFile,
@@ -99,9 +97,9 @@ function withState(plugin: Omit<ConfigWebPlugin, 'state'>, disabled: Set<string>
 type PluginStatusEntry = { status: 'loaded' | 'registered' | 'failed' | 'unknown'; error?: string };
 
 /**
- * 读 `plugin-status.json`，同时按 id 与入口文件建索引。
+ * 读 `plugin-status.json`：加载成功的按 id 建索引，加载失败的按插件目录建索引。
  *
- * 清单解析失败的插件没有 id，只能靠文件路径对上；两套键并存时页面不用关心是哪一种。
+ * 清单坏掉、入口导入失败的插件没有可用的 id，只能靠目录路径对上；页面按 id → 目录的顺序查。
  */
 function readPluginStatuses(): Map<string, PluginStatusEntry> {
   const path = getPluginStatusPath();

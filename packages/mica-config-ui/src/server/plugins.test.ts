@@ -23,7 +23,7 @@ describe('getPluginsDetails', () => {
     const details = getPluginsDetails();
 
     const todo = details.plugins.find((plugin) => plugin.id === 'todo');
-    expect(todo).toMatchObject({ source: 'official', state: 'enabled', format: 'directory' });
+    expect(todo).toMatchObject({ source: 'official', state: 'enabled' });
     expect(todo?.location).toBe('plugins/todo');
     expect(details.officialDir).toBe('plugins');
     expect(details.statePath).toBe(join(process.env.MICA_HOME!, 'plugins-state.json'));
@@ -44,7 +44,6 @@ describe('getPluginsDetails', () => {
       version: '1.2.0',
       source: 'user',
       state: 'enabled',
-      format: 'directory',
       location: pluginDir,
     });
     expect(hello?.files.map((file) => file.name)).toEqual(['index.js', 'plugin.json']);
@@ -61,16 +60,43 @@ describe('getPluginsDetails', () => {
   });
 
   it('records the last load status written by the CLI', () => {
-    const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'legacy.mjs');
-    mkdirSync(join(process.env.MICA_HOME!, 'plugins'), { recursive: true });
-    writeFileSync(pluginDir, 'export default function setup() {}');
+    const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'hello');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(
+      join(pluginDir, 'plugin.json'),
+      JSON.stringify({ id: 'hello', name: 'Hello', version: '1.2.0', main: 'index.js' }),
+    );
+    writeFileSync(join(pluginDir, 'index.js'), 'export default function setup() {}');
     writeFileSync(
       join(process.env.MICA_HOME!, 'plugin-status.json'),
-      JSON.stringify({ plugins: [{ id: 'file.legacy', file: pluginDir, status: 'failed', error: 'boom' }] }),
+      JSON.stringify({
+        plugins: [{ id: 'user.hello', file: join(pluginDir, 'index.js'), status: 'failed', error: 'boom' }],
+      }),
     );
 
-    const legacy = getPluginsDetails().plugins.find((plugin) => plugin.id === 'file.legacy');
-    expect(legacy).toMatchObject({ state: 'failed', loadStatus: 'failed', error: 'boom' });
+    expect(getPluginsDetails().plugins.find((plugin) => plugin.id === 'user.hello')).toMatchObject({
+      state: 'failed',
+      loadStatus: 'failed',
+      error: 'boom',
+    });
+  });
+
+  it('matches a load failure by plugin directory when the manifest never parsed', () => {
+    const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'unparsable');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(
+      join(pluginDir, 'plugin.json'),
+      '{"id":"unparsable","name":"x","version":"1.0.0","main":"missing.js"}',
+    );
+    writeFileSync(
+      join(process.env.MICA_HOME!, 'plugin-status.json'),
+      JSON.stringify({ loadFailed: [{ file: pluginDir, status: 'failed', error: '入口文件不存在：missing.js' }] }),
+    );
+
+    expect(getPluginsDetails().plugins.find((plugin) => plugin.id === 'user.unparsable')).toMatchObject({
+      state: 'failed',
+      error: '入口文件不存在：missing.js',
+    });
   });
 });
 

@@ -9,7 +9,7 @@ export type MicaPlugin = {
   priority?: number;
   dependencies?: string[];
   required?: boolean;
-  /** 目录插件带的清单；内置插件与旧格式单文件插件为 undefined。 */
+  /** 插件包的清单；内置插件为 undefined（它们没有 plugin.json 文件）。 */
   manifest?: PluginManifest;
   setup(ctx: PluginContext): void | Disposable | Promise<void | Disposable>;
 };

@@ -205,12 +205,10 @@ export type ConfigWebPlugin = {
   source: ConfigWebPluginSource;
   /** 启用 / 停用 / 加载失败。停用的插件在启动阶段就不会注册。 */
   state: ConfigWebPluginState;
-  /** 目录插件还是旧格式的单文件插件。 */
-  format: 'directory' | 'file';
   /** 官方插件是仓库内相对路径（plugins/<id>），用户插件是绝对路径。 */
   location: string;
   entryFile?: string;
-  manifestFile?: string;
+  manifestFile: string;
   files: ConfigWebPluginFile[];
   /** plugin-status.json 记录的上一次加载结果。 */
   loadStatus?: 'loaded' | 'registered' | 'failed' | 'unknown';

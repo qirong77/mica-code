@@ -47,12 +47,6 @@ export function pluginSourceLabel(source: string | undefined): string {
   return source === 'official' ? '官方' : '用户';
 }
 
-export function pluginFormatLabel(format: string | undefined): string {
-  if (format === 'directory') return '插件目录';
-  if (format === 'file') return '单文件';
-  return '未知';
-}
-
 /** MCP server 的连接方式：`stdio` 是本地进程，`http` 是远端地址。 */
 export function mcpTypeLabel(type: string | undefined): string {
   if (type === 'stdio') return '本地进程';

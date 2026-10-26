@@ -18,8 +18,8 @@ type FilePluginStatusResult = {
 };
 
 /**
- * Loads user-owned single-file plugins and registers them with the runtime
- * plugin manager before setupAll() is called.
+ * Loads user-owned plugin packages ($MICA_HOME/plugins/<id>/plugin.json) and
+ * registers them with the runtime plugin manager before setupAll() is called.
  */
 export default async function setupFilePlugins(ctx: FilePluginsContext): Promise<FilePluginLoadResult> {
   const pluginsDir = requirePluginPath(ctx);
