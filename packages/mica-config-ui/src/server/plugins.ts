@@ -1,8 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
+import type { PluginSettingField } from '@packages/mica-plugin/index.js';
 import { OFFICIAL_PLUGINS_DIR, officialPluginManifests } from '@packages/mica-official-plugins/manifests.js';
-import { getPluginsRootPath, getPluginStatePath, getPluginStatusPath } from './paths.js';
-import type { ConfigWebPlugin, ConfigWebPluginsDetails } from '../shared/types.js';
+import { getConfigRootPath, getPluginsRootPath, getPluginStatePath, getPluginStatusPath } from './paths.js';
+import type { ConfigWebPlugin, ConfigWebPluginSettings, ConfigWebPluginsDetails } from '../shared/types.js';
 
 /**
  * 配置页的插件数据层：两个宿主（config-web 的 HTTP 服务、desktop 的 IPC）共用这一份实现。
@@ -12,11 +13,12 @@ import type { ConfigWebPlugin, ConfigWebPluginsDetails } from '../shared/types.j
  *   只能启用 / 停用；
  * - 用户插件：`$MICA_HOME/plugins` 下的插件目录，装没装、能不能加载都由磁盘决定。
  *
- * 这里只做静态扫描（读清单、列文件），不导入插件代码：加载失败、清单写错的插件同样要能列出来，
- * 否则用户没法在页面上看到哪里错了。
+ * 这里只做静态扫描（读清单、列文件、读设置），不导入插件代码：加载失败、清单写错的插件
+ * 同样要能列出来，否则用户没法在页面上看到哪里错了。
  */
 export function getPluginsDetails(): ConfigWebPluginsDetails {
   const root = getPluginsRootPath();
+  const configRoot = getConfigRootPath();
   const disabled = micaPlugin.readDisabledPluginIds();
   const statuses = readPluginStatuses();
   const inspection = micaPlugin.inspectPlugins({ pluginsDir: root });
@@ -36,6 +38,8 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         manifestFile: `${OFFICIAL_PLUGINS_DIR}/${manifest.id}/${micaPlugin.PLUGIN_MANIFEST_FILE}`,
         // 官方插件的文件已经编译进产物，磁盘上不一定读得到，只列清单声明的部分。
         files: [micaPlugin.PLUGIN_MANIFEST_FILE, manifest.main, ...manifest.assets].map((name) => ({ name })),
+        settings: readSettings(manifest.id, manifest.settings, configRoot),
+        logFile: micaPlugin.pluginLogPath(manifest.id),
         loadStatus: status?.status,
         error: status?.error,
       },
@@ -56,6 +60,8 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         entryFile: plugin.entryFile || undefined,
         manifestFile: plugin.manifestFile,
         files: plugin.files,
+        settings: readSettings(plugin.id, plugin.settings, configRoot),
+        logFile: micaPlugin.pluginLogPath(plugin.id),
         loadStatus: status?.status,
         error: plugin.error ?? status?.error,
       },
@@ -80,6 +86,30 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
 export function setPluginEnabled(id: string, enabled: boolean): ConfigWebPluginsDetails {
   micaPlugin.setPluginDisabled(id, !enabled);
   return getPluginsDetails();
+}
+
+/**
+ * 保存插件设置。
+ *
+ * 与启停不同，设置是运行期生效的：插件读的时候按文件 mtime 判断，不需要重开会话。
+ * 未声明的键在这里就被丢掉，插件永远读不到清单之外的东西。
+ */
+export function setPluginSettings(id: string, values: Record<string, unknown>): ConfigWebPluginsDetails {
+  const fields = findSettingFields(id);
+  if (!fields) throw new Error(`插件没有声明设置项：${id}`);
+  micaPlugin.writePluginSettings(id, values, fields, { configDir: getConfigRootPath() });
+  return getPluginsDetails();
+}
+
+function findSettingFields(id: string): PluginSettingField[] | null {
+  const official = officialPluginManifests.find((manifest) => manifest.id === id);
+  if (official) return official.settings;
+  const inspected = micaPlugin.inspectPlugins({ pluginsDir: getPluginsRootPath() }).plugins.find((p) => p.id === id);
+  return inspected ? inspected.settings : null;
+}
+
+function readSettings(id: string, fields: PluginSettingField[], configRoot: string): ConfigWebPluginSettings {
+  return { fields, values: micaPlugin.readPluginSettings(id, fields, { configDir: configRoot }) };
 }
 
 /**

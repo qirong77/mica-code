@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, Switch, Tag } from '../components/Ui.js';
-import { readPluginsDetails, setPluginEnabled, supportsPluginToggle } from '../api.js';
-import type { ConfigWebPlugin, ConfigWebPluginsDetails } from '../../src/shared/types.js';
+import { Alert, Button, Empty, SaveStatus, Switch, Tag } from '../components/Ui.js';
+import {
+  readPluginsDetails,
+  setPluginEnabled,
+  supportsPluginSettings,
+  supportsPluginToggle,
+  writePluginSettings,
+} from '../api.js';
+import type { ConfigWebPlugin, ConfigWebPluginSetting, ConfigWebPluginsDetails } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
 import { pluginSourceLabel, pluginStateLabel, pluginStateTone } from '../labels.js';
+import { useAutoSave } from '../useAutoSave.js';
 
 /**
  * 插件页：官方插件与用户插件分两组列出，状态与启停都在行上，详情原地展开。
@@ -25,6 +32,7 @@ export function PluginsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const RefreshIcon = appIcons.refresh;
   const canToggle = supportsPluginToggle();
+  const canSettings = supportsPluginSettings();
 
   async function load() {
     setLoading(true);
@@ -105,7 +113,9 @@ export function PluginsPage() {
                       expanded={expandedId === plugin.id}
                       busy={pendingId === plugin.id}
                       canToggle={canToggle}
+                      canSettings={canSettings}
                       onToggleExpanded={() => setExpandedId(expandedId === plugin.id ? null : plugin.id)}
+                      onSaved={setDetails}
                       onToggleEnabled={(enabled) => void toggle(plugin, enabled)}
                     />
                   ))}
@@ -137,7 +147,9 @@ export function PluginsPage() {
                       expanded={expandedId === plugin.id}
                       busy={pendingId === plugin.id}
                       canToggle={canToggle}
+                      canSettings={canSettings}
                       onToggleExpanded={() => setExpandedId(expandedId === plugin.id ? null : plugin.id)}
+                      onSaved={setDetails}
                       onToggleEnabled={(enabled) => void toggle(plugin, enabled)}
                     />
                   ))}
@@ -156,11 +168,22 @@ type PluginRowProps = {
   expanded: boolean;
   busy: boolean;
   canToggle: boolean;
+  canSettings: boolean;
   onToggleExpanded(): void;
   onToggleEnabled(enabled: boolean): void;
+  onSaved(next: ConfigWebPluginsDetails): void;
 };
 
-function PluginRow({ plugin, expanded, busy, canToggle, onToggleExpanded, onToggleEnabled }: PluginRowProps) {
+function PluginRow({
+  plugin,
+  expanded,
+  busy,
+  canToggle,
+  canSettings,
+  onToggleExpanded,
+  onToggleEnabled,
+  onSaved,
+}: PluginRowProps) {
   return (
     <li className={`plugin-row${expanded ? ' is-open' : ''}`}>
       <div className="plugin-row-main">
@@ -190,16 +213,27 @@ function PluginRow({ plugin, expanded, busy, canToggle, onToggleExpanded, onTogg
           </Button>
         </span>
       </div>
-      {expanded ? <PluginDetail plugin={plugin} /> : null}
+      {expanded ? <PluginDetail plugin={plugin} canSettings={canSettings} onSaved={onSaved} /> : null}
     </li>
   );
 }
 
-function PluginDetail({ plugin }: { plugin: ConfigWebPlugin }) {
+function PluginDetail({
+  plugin,
+  canSettings,
+  onSaved,
+}: {
+  plugin: ConfigWebPlugin;
+  canSettings: boolean;
+  onSaved(next: ConfigWebPluginsDetails): void;
+}) {
   return (
     <div className="plugin-row-detail">
       {plugin.description ? <p className="plugin-detail-text">{plugin.description}</p> : null}
       {plugin.error ? <Alert message={plugin.error} /> : null}
+      {plugin.settings.fields.length > 0 ? (
+        <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
+      ) : null}
       <dl className="plugin-facts">
         <PluginFact label="标识" value={plugin.id} mono />
         <PluginFact label="来源" value={pluginSourceLabel(plugin.source)} />
@@ -210,6 +244,7 @@ function PluginDetail({ plugin }: { plugin: ConfigWebPlugin }) {
           label="加载"
           value={plugin.loadStatus || (plugin.source === 'official' ? '随启动加载' : '尚未加载')}
         />
+        <PluginFact label="日志" value={plugin.logFile} mono />
         {plugin.author ? <PluginFact label="作者" value={plugin.author} /> : null}
       </dl>
       <div className="plugin-files">
@@ -232,6 +267,130 @@ function PluginDetail({ plugin }: { plugin: ConfigWebPlugin }) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * 插件设置表单。
+ *
+ * 字段完全来自插件清单的 `settings` 声明，页面不认识任何具体插件——加一个插件不需要改这里。
+ * 没有保存按钮：改动停下就写盘（与其他配置页同一套 `useAutoSave`），插件的下一次读取就会
+ * 拿到新值，所以不需要「重开会话」。
+ */
+function PluginSettingsForm({
+  plugin,
+  canSave,
+  onSaved,
+}: {
+  plugin: ConfigWebPlugin;
+  canSave: boolean;
+  onSaved(next: ConfigWebPluginsDetails): void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>(plugin.settings.values);
+
+  // 换插件、或者外部保存把值改回来时重新对齐：表单不能拿着上一个插件的草稿。
+  useEffect(() => {
+    setValues(plugin.settings.values);
+  }, [plugin.id, plugin.settings.values]);
+
+  const autosave = useAutoSave<Record<string, string>, ConfigWebPluginsDetails>({
+    save: (next) => writePluginSettings(plugin.id, next),
+    onSaved: (result) => onSaved(result),
+  });
+
+  function update(key: string, value: string) {
+    const next = { ...values, [key]: value };
+    setValues(next);
+    autosave.schedule(next);
+  }
+
+  return (
+    <div className="plugin-settings">
+      <div className="plugin-settings-head">
+        <span className="plugin-detail-label">插件设置</span>
+        <SaveStatus saving={autosave.saving} saved={autosave.status === 'saved'} />
+      </div>
+      {autosave.error ? <Alert message={autosave.error} /> : null}
+      {plugin.settings.fields.map((field) => (
+        <PluginSettingFieldControl
+          key={field.key}
+          field={field}
+          value={values[field.key] ?? ''}
+          disabled={!canSave}
+          onChange={(next) => update(field.key, next)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PluginSettingFieldControl({
+  field,
+  value,
+  disabled,
+  onChange,
+}: {
+  field: ConfigWebPluginSetting;
+  value: string;
+  disabled: boolean;
+  onChange(next: string): void;
+}) {
+  // 枚举项自绘成按钮组：原生 select 的字号与内边距跟旁边的输入框对不齐。
+  if (field.type === 'select') {
+    return (
+      <div className="form-field">
+        <span>{field.label}</span>
+        <div className="config-segmented" role="group" aria-label={field.label}>
+          {(field.options ?? []).map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`config-segment${value === option.value ? ' is-active' : ''}`}
+              disabled={disabled}
+              onClick={() => onChange(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        {field.description ? <span className="config-field-hint">{field.description}</span> : null}
+      </div>
+    );
+  }
+
+  if (field.type === 'textarea') {
+    return (
+      <label className="form-field">
+        <span>{field.label}</span>
+        <textarea
+          className="text-input text-input-multiline"
+          value={value}
+          rows={5}
+          spellCheck={false}
+          placeholder={field.placeholder}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        {field.description ? <span className="config-field-hint">{field.description}</span> : null}
+      </label>
+    );
+  }
+
+  return (
+    <label className="form-field">
+      <span>{field.label}</span>
+      <input
+        className="text-input"
+        type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+        value={value}
+        spellCheck={false}
+        autoComplete="off"
+        placeholder={field.placeholder}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {field.description ? <span className="config-field-hint">{field.description}</span> : null}
+    </label>
   );
 }
 

@@ -54,6 +54,8 @@ export type ConfigWebClient = {
 
   readPluginsDetails(): Promise<ConfigWebPluginsDetails>;
   setPluginEnabled?(id: string, enabled: boolean): Promise<ConfigWebPluginsDetails>;
+  /** 保存插件设置。与启停不同，写的是设置文件，运行期就能被插件读到。 */
+  writePluginSettings?(id: string, values: Record<string, string>): Promise<ConfigWebPluginsDetails>;
 
   /**
    * 自动压缩（输入框上方那个齿轮曾经管的东西）现在只在这台机器的运行时里：设置与按会话
@@ -188,6 +190,17 @@ export function setPluginEnabled(id: string, enabled: boolean): Promise<ConfigWe
 
 export function supportsPluginToggle(): boolean {
   return typeof client?.setPluginEnabled === 'function';
+}
+
+/** 保存插件设置。页面只在插件声明了 `settings` 时才渲染表单。 */
+export function writePluginSettings(id: string, values: Record<string, string>): Promise<ConfigWebPluginsDetails> {
+  const current = requireClient();
+  if (typeof current.writePluginSettings !== 'function') throw new Error('当前宿主不支持插件设置');
+  return current.writePluginSettings(id, values);
+}
+
+export function supportsPluginSettings(): boolean {
+  return typeof client?.writePluginSettings === 'function';
 }
 
 /** 宿主是否提供自动压缩这一节（桌面运行时提供，浏览器宿主不提供）。 */

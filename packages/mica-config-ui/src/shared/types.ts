@@ -196,6 +196,23 @@ export type ConfigWebPluginSource = 'official' | 'user';
 export type ConfigWebPluginState = 'enabled' | 'disabled' | 'failed';
 export type ConfigWebPluginFile = { name: string; sizeBytes?: number };
 
+/** 插件设置项，形状与 `plugin.json` 里的 `settings` 声明一一对应。 */
+export type ConfigWebPluginSetting = {
+  key: string;
+  label: string;
+  type: 'text' | 'password' | 'textarea' | 'select' | 'number';
+  description?: string;
+  placeholder?: string;
+  options?: { value: string; label: string }[];
+  default?: string;
+};
+
+export type ConfigWebPluginSettings = {
+  fields: ConfigWebPluginSetting[];
+  /** 当前生效值（已按声明过滤、补齐默认值）。 */
+  values: Record<string, string>;
+};
+
 export type ConfigWebPlugin = {
   id: string;
   name: string;
@@ -210,6 +227,10 @@ export type ConfigWebPlugin = {
   entryFile?: string;
   manifestFile: string;
   files: ConfigWebPluginFile[];
+  /** 清单声明了 settings 才有内容；没有声明时 `fields` 为空。 */
+  settings: ConfigWebPluginSettings;
+  /** 这个插件今天的日志文件（系统 temp 目录），排查时直接打开。 */
+  logFile: string;
   /** plugin-status.json 记录的上一次加载结果。 */
   loadStatus?: 'loaded' | 'registered' | 'failed' | 'unknown';
   error?: string;

@@ -6,6 +6,14 @@ import { createServiceToken } from './ServiceToken.js';
 import { inspectPlugins, loadFilePlugins } from './FilePluginLoader.js';
 import { parsePluginManifest, PLUGIN_API_VERSION, PLUGIN_MANIFEST_FILE } from './PluginManifest.js';
 import {
+  PLUGIN_SETTINGS_DIR,
+  createPluginSettingsStore,
+  readPluginSettings,
+  resolvePluginSettingsPath,
+  writePluginSettings,
+} from './PluginSettings.js';
+import { createPluginLogger, pluginLogDir, pluginLogPath } from './PluginLog.js';
+import {
   PLUGIN_STATE_FILE,
   readDisabledPluginIds,
   readPluginState,
@@ -22,12 +30,20 @@ export const micaPlugin = {
   loadFilePlugins,
   inspectPlugins,
   parsePluginManifest,
+  createPluginSettingsStore,
+  readPluginSettings,
+  writePluginSettings,
+  resolvePluginSettingsPath,
+  createPluginLogger,
+  pluginLogDir,
+  pluginLogPath,
   readPluginState,
   readDisabledPluginIds,
   writePluginState,
   setPluginDisabled,
   PLUGIN_MANIFEST_FILE,
   PLUGIN_API_VERSION,
+  PLUGIN_SETTINGS_DIR,
   PLUGIN_STATE_FILE,
 };
 
@@ -41,6 +57,24 @@ export {
   parsePluginManifest,
 } from './PluginManifest.js';
 export {
+  PLUGIN_SETTINGS_DIR,
+  createPluginSettingsStore,
+  isPluginSettingType,
+  isValidPluginSettingKey,
+  readPluginSettings,
+  resolvePluginSettingsPath,
+  writePluginSettings,
+} from './PluginSettings.js';
+export type {
+  PluginSettingField,
+  PluginSettingOption,
+  PluginSettingType,
+  PluginSettingValues,
+  PluginSettingsStore,
+} from './PluginSettings.js';
+export { createPluginLogger, pluginLogDir, pluginLogPath } from './PluginLog.js';
+export type { PluginLogOptions, PluginLogger } from './PluginLog.js';
+export {
   PLUGIN_STATE_FILE,
   normalizePluginState,
   readDisabledPluginIds,
@@ -49,12 +83,14 @@ export {
   setPluginDisabled,
   writePluginState,
 } from './PluginState.js';
-export type { PluginManager } from './PluginManager.js';
-export type { PluginSetupReport } from './PluginManager.js';
+export type { PluginBaseContext, PluginManager, PluginSetupReport } from './PluginManager.js';
 export type { PluginContext } from './PluginContext.js';
 export type {
   PluginFileMentionItem,
   PluginFileMentionProvider,
+  PluginSessionApi,
+  PluginSessionInfo,
+  PluginSessionRenameOptions,
   PluginStatusItem,
   PluginToolRegistrationOptions,
 } from './PluginContext.js';

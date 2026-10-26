@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_DIR_NAME } from '@packages/mica-config/brand.js';
 import { parsePluginManifest, PLUGIN_MANIFEST_FILE, type PluginManifest } from './PluginManifest.js';
+import type { PluginSettingField } from './PluginSettings.js';
 import type { MicaPlugin } from './Plugin.js';
 
 export type FilePluginLoaderOptions = {
@@ -44,6 +45,8 @@ export type PluginInspection = {
   entryFile: string;
   manifestFile: string;
   files: { name: string; sizeBytes: number }[];
+  /** 清单声明的前缀设置项；清单坏掉时为空（页面仍然列得出来，只是没有表单）。 */
+  settings: PluginSettingField[];
   /** 清单解析 / 入口缺失等静态问题；加载期错误由 plugin-status.json 提供。 */
   error?: string;
 };
@@ -189,6 +192,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     entryFile: '',
     manifestFile,
     files: listFiles(dir),
+    settings: [],
   };
 
   let parsed: unknown;
@@ -211,6 +215,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     version: manifest.version,
     description: manifest.description,
     entryFile,
+    settings: manifest.settings,
     error: existsSync(entryFile) ? undefined : `入口文件不存在：${manifest.main}`,
   };
 }

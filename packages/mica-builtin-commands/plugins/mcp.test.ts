@@ -87,6 +87,7 @@ function setupPlugin(withUi = true) {
     services: new micaPlugin.ServiceContainer(),
     events: new micaRuntime.RuntimeEventBus(),
     logger,
+    settings: { path: null, get: () => ({}) },
     onDispose: (dispose) => disposers.push(dispose),
     ...(withUi ? { ui: { submit: vi.fn(), showMessage } } : {}),
   };

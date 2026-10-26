@@ -31,6 +31,53 @@ plugins/<id>/
 | `required`        | 否   | setup 失败是否中断启动；用户插件默认 `false`                                         |
 | `priority`        | 否   | 加载顺序，小的先执行                                                                 |
 | `mica.apiVersion` | 否   | 当前只支持 `1`                                                                       |
+| `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读取                     |
+
+## 设置项
+
+插件需要用户填参数（接口地址、Key、提示词等）时，在 `plugin.json` 的 `settings` 里声明，
+配置页 Plugins 页面会按声明渲染表单、自动保存，插件通过 `ctx.settings.get()` 读当前值：
+
+```json
+{
+  "settings": [
+    {
+      "key": "baseUrl",
+      "label": "接口地址",
+      "type": "text",
+      "default": "",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    { "key": "apiKey", "label": "Key", "type": "password", "default": "" },
+    {
+      "key": "protocol",
+      "label": "协议",
+      "type": "select",
+      "default": "openai_chat_completions",
+      "options": [
+        { "value": "openai_chat_completions", "label": "Chat Completions" },
+        { "value": "openai_responses", "label": "Responses" }
+      ]
+    },
+    { "key": "prompt", "label": "提示词", "type": "textarea", "default": "" }
+  ]
+}
+```
+
+`type` 支持 `text` / `password` / `textarea` / `select` / `number`。值统一按字符串存进
+`$MICA_HOME/plugin-settings/<id>.json`，未声明的键不会被写入；`select` 必须带 `options`。
+插件每轮读取时会比对文件 mtime，用户改完不需要重启。
+
+## 日志
+
+插件拿到的 `ctx.logger` 自带文件输出，写在系统临时目录，不占用户配置目录：
+
+```
+os.tmpdir()/mica-logs/plugin-<id>-<YYYYMMDD>[-n].jsonl
+```
+
+单文件超过 2 MB 自动分片，超过 3 天的文件在下次写入时清理；`MICA_PLUGIN_LOG=0` 关闭。
+排查插件问题时先看这里，配置页插件详情里也会显示当前日志路径。
 
 ## 加一个新插件
 

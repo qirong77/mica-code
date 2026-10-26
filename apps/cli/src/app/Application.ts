@@ -14,7 +14,11 @@ import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
 import { micaSession, type PersistedSession } from '@packages/mica-session/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
-import { normalizeUiState, TerminalAgentSessionManager } from '../agents/terminalAgentSessions.js';
+import {
+  normalizeUiState,
+  TerminalAgentSessionManager,
+  type TerminalAgentSession,
+} from '../agents/terminalAgentSessions.js';
 import {
   formatSubagentTaskDisplay,
   formatSubagentTaskNotification,
@@ -138,6 +142,26 @@ export class Application {
         hooks,
         commands,
         events: runtime.events,
+        session: {
+          describe: (owner) => {
+            const session = resolvePluginSession(agentSessions, owner);
+            if (!session) return null;
+            return {
+              id: session.id,
+              title: session.titleOverride ?? session.sessionController.getCurrentDisplayTitle(),
+              titleSource: session.sessionController.getCurrentTitleSource(),
+            };
+          },
+          messages: (owner) => resolvePluginSession(agentSessions, owner)?.agent.toConversationMessages() ?? [],
+          rename: (title, options) => {
+            const session = resolvePluginSession(agentSessions, options?.owner);
+            if (!session) return false;
+            if (!session.sessionController.renameCurrent(title, { source: options?.source ?? 'auto' })) return false;
+            agentSessions.renameAgent(session.agent, title);
+            uiBridge.syncAgentStatusItems();
+            return true;
+          },
+        },
         runtime: {
           submit: (text, options) => runtime.submit(text, options),
           queue: {
@@ -356,6 +380,21 @@ function createPluginPaths() {
     config,
     plugins: join(config, 'plugins'),
   };
+}
+
+/**
+ * 把 `turn:after` 事件里的 owner 解析成具体会话：不给 owner 就是当前会话。
+ * 插件是按「产生这个 turn 的 agent」操作的，多 agent 场景下不能默认取当前那一条。
+ */
+function resolvePluginSession(
+  sessions: TerminalAgentSessionManager,
+  owner: unknown,
+): TerminalAgentSession | undefined {
+  if (owner) {
+    const matched = sessions.findByAgent(owner as AgentRuntime);
+    if (matched) return matched;
+  }
+  return sessions.current();
 }
 
 const pluginLogger = {

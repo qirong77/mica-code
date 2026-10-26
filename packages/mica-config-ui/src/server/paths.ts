@@ -17,6 +17,11 @@ export function getPluginsRootPath(): string {
   return resolve(getMicaHome(), 'plugins');
 }
 
+/** 插件设置的落盘目录：`$MICA_HOME/plugin-settings/<pluginId>.json`。 */
+export function getConfigRootPath(): string {
+  return getMicaHome();
+}
+
 export function getPluginStatusPath(): string {
   return resolve(getMicaHome(), 'plugin-status.json');
 }

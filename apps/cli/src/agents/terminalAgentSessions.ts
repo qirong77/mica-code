@@ -132,6 +132,20 @@ export class TerminalAgentSessionManager {
     return this.toRecord(session);
   }
 
+  /**
+   * 按 agent 改名（插件给「产生这个 turn 的会话」改名时用，不一定是当前会话）。
+   *
+   * 只改 UI 侧的标题覆盖，落盘由该会话自己的 `SessionController` 负责——两处都写会让
+   * 「谁是标题的真相」变模糊。
+   */
+  renameAgent(agent: AgentRuntime, title: string): TerminalAgentSessionRecord | null {
+    const session = this.findByAgent(agent);
+    if (!session) return null;
+    session.titleOverride = normalizeTitle(title);
+    session.updatedAt = new Date().toISOString();
+    return this.toRecord(session);
+  }
+
   clearIdleSessions(options: { onClear?: (session: TerminalAgentSession) => void } = {}): {
     cleared: TerminalAgentSessionRecord[];
     remaining: TerminalAgentSessionRecord[];

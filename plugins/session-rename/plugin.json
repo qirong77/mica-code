@@ -1,0 +1,66 @@
+{
+  "id": "session-rename",
+  "name": "Auto Session Rename",
+  "version": "1.0.0",
+  "description": "每轮对话结束后，把用户与模型的文本交给另一个模型，自动给会话起一个贴题的标题。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 10,
+  "mica": {
+    "apiVersion": 1
+  },
+  "settings": [
+    {
+      "key": "baseUrl",
+      "label": "接口地址",
+      "type": "text",
+      "placeholder": "https://api.openai.com/v1",
+      "description": "OpenAI 兼容的 base URL。留空则不自动改名。"
+    },
+    {
+      "key": "apiKey",
+      "label": "API Key",
+      "type": "password",
+      "description": "只写在本机的插件设置文件里，不会进入会话记录。"
+    },
+    {
+      "key": "protocol",
+      "label": "协议",
+      "type": "select",
+      "default": "openai_chat_completions",
+      "options": [
+        { "value": "openai_chat_completions", "label": "Chat Completions" },
+        { "value": "openai_responses", "label": "Responses" }
+      ]
+    },
+    {
+      "key": "model",
+      "label": "模型",
+      "type": "text",
+      "placeholder": "gpt-4o-mini",
+      "description": "起标题用的模型，通常选便宜、快的小模型。"
+    },
+    {
+      "key": "prompt",
+      "label": "提示词",
+      "type": "textarea",
+      "default": "你在为一个编程助手会话起标题。\n只输出标题本身：一行、不超过 20 个字、不要引号、不要句号、不要 markdown。\n用中文概括这段对话在做什么，宁可具体（改哪个模块、修什么 bug），也不要空泛（如「代码讨论」「修复问题」）。",
+      "description": "发给模型的系统提示词。留空使用内置默认值。"
+    },
+    {
+      "key": "maxMessages",
+      "label": "送入消息条数",
+      "type": "number",
+      "default": "12",
+      "description": "从最近一条往前取多少条用户/助手消息，工具调用与结果一律不发送。"
+    },
+    {
+      "key": "minIntervalSeconds",
+      "label": "最小间隔（秒）",
+      "type": "number",
+      "default": "0",
+      "description": "同一条会话两次自动改名的最小间隔，0 表示每轮都试。"
+    }
+  ]
+}

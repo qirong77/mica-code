@@ -191,11 +191,21 @@ export class SessionController {
     return true;
   }
 
-  renameCurrent(title: string): void {
-    const now = new Date().toISOString();
+  /**
+   * 改名并立即落盘。
+   *
+   * `source: 'auto'` 是插件（例如自动重命名会话）用的：用户手动改过标题之后，自动来源
+   * 一律被拒——机器生成的标题不能覆盖用户明确写下的东西。返回 false 表示这次没改。
+   */
+  renameCurrent(title: string, options: { source?: 'manual' | 'auto' } = {}): boolean {
+    const source = options.source ?? 'manual';
     const nextTitle = normalizeSessionTitle(title);
+    if (!nextTitle) return false;
+    if (source === 'auto' && this.currentTitleSource === 'manual') return false;
+
+    const now = new Date().toISOString();
     this.currentTitleOverride = nextTitle;
-    this.currentTitleSource = 'manual';
+    this.currentTitleSource = source;
 
     const existing = this.store.load(this.currentSessionId);
     const snapshot = this.agent.getSnapshot();
@@ -205,7 +215,7 @@ export class SessionController {
       revision: (existing?.revision ?? 0) + 1,
       id: this.currentSessionId,
       title: nextTitle,
-      titleSource: 'manual',
+      titleSource: source,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
@@ -214,10 +224,20 @@ export class SessionController {
     };
     this.store.save(session);
     this.currentPersistedSignature = sessionSignature(session);
+    return true;
   }
 
   getCurrentTitle(): string | null {
     return this.currentTitleOverride;
+  }
+
+  getCurrentTitleSource(): 'derived' | 'auto' | 'manual' {
+    return this.currentTitleSource;
+  }
+
+  /** 当前对外展示的标题：覆盖值优先，否则用最近一次保存的标题。 */
+  getCurrentDisplayTitle(): string {
+    return this.currentTitleOverride ?? this.store.load(this.currentSessionId)?.title ?? 'Untitled session';
   }
 
   getCurrentSessionId(): string {

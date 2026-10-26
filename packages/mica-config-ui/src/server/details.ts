@@ -35,7 +35,7 @@ import type {
 import type { PersistedSession } from '@packages/mica-session/index.js';
 import { buildConfigWebContextAnalysis } from './sessionAnalysis.js';
 export { getCapabilityDefaultsDetails, writeCapabilityDefaults } from './capabilityDefaults.js';
-export { getPluginsDetails, setPluginEnabled } from './plugins.js';
+export { getPluginsDetails, setPluginEnabled, setPluginSettings } from './plugins.js';
 
 let mcpInitialized = false;
 

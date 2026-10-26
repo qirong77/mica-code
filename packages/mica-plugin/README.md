@@ -11,6 +11,8 @@
 - 定义 `PluginContext` capability，由应用注入 runtime queue、工具注册和 UI 扩展入口。
 - 定义插件包格式：`plugin.json` 清单（id / name / version / main / assets / dependencies / required / apiVersion）、目录加载器与只读扫描（配置页用）。
 - 维护启停状态（`$MICA_HOME/plugins-state.json`），停用的插件在启动阶段就不注册。
+- 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。
+- 插件日志：`ctx.logger` 自带文件输出，落在系统临时目录并按天分片、按大小轮转。
 
 ## 使用入口
 
@@ -64,4 +66,6 @@ context.onDispose(() => hook.dispose());
 - `PluginManifest.ts`：`plugin.json` 的类型、解析与路径越界校验。
 - `FilePluginLoader.ts`：扫描 `$MICA_HOME/plugins/<id>/`，以及不执行代码的 `inspectPlugins`。没有 `plugin.json` 的目录和散落的 `.js` / `.mjs` 都不算插件。
 - `PluginState.ts`：启停状态文件的读写。
+- `PluginSettings.ts`：设置项的声明类型、规范化读写与按 mtime 刷新的 store，供配置页与插件共用。
+- `PluginLog.ts`：插件文件日志（`os.tmpdir()/mica-logs/plugin-<id>-<day>[-n].jsonl`），带分片与过期清理。
 - `index.ts`：公共 API 聚合导出。

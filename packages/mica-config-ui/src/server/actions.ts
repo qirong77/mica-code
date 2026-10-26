@@ -23,6 +23,7 @@ import {
   writeSkill,
   writeCapabilityDefaults,
   setPluginEnabled as setPluginEnabledInStore,
+  setPluginSettings as setPluginSettingsInStore,
 } from './details.js';
 
 export type ConfigWebActionInput = {
@@ -70,6 +71,8 @@ export const configWebActions = {
 
   readPluginsDetails: (_input: ConfigWebActionInput) => getPluginsDetails(),
   setPluginEnabled: (input: ConfigWebActionInput) => setPluginEnabledInStore(text(input, 'id'), input.enabled === true),
+  writePluginSettings: (input: ConfigWebActionInput) =>
+    setPluginSettingsInStore(text(input, 'id'), record(input, 'values')),
 
   readSessionsDetails: (_input: ConfigWebActionInput) => getSessionsDetails(),
   readSessionDetails: (input: ConfigWebActionInput) => getSessionDetails(text(input, 'id')),
@@ -111,6 +114,14 @@ function optionalText(input: ConfigWebActionInput, field: string): string {
   if (value === undefined) return '';
   if (typeof value !== 'string') throw new Error(`${field} must be string`);
   return value;
+}
+
+/** 插件设置是一张表的键值对；不是对象就当空表，避免把半截数据写进设置文件。 */
+function record(input: ConfigWebActionInput, field: string): Record<string, unknown> {
+  const value = input?.[field];
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error(`${field} must be object`);
+  return value as Record<string, unknown>;
 }
 
 function integer(input: ConfigWebActionInput, field: string, fallback: number): number {

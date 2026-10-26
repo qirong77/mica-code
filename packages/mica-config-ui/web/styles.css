@@ -4221,6 +4221,42 @@
     font-size: var(--text-aux);
   }
 
+  /* 插件设置：字段来自清单声明，所以只做一列表单，不假设任何具体插件的语义。 */
+  .plugin-settings {
+    display: grid;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius-md);
+    background: var(--panel-muted);
+    min-width: 0;
+  }
+
+  .plugin-settings-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .plugin-settings .form-field > .text-input,
+  .plugin-settings .form-field > .text-input-multiline {
+    max-width: 520px;
+  }
+
+  .plugin-settings .config-segmented {
+    max-width: 520px;
+  }
+
+  /* 多行输入与单行输入共用一套边框/底色，只是放开高度并允许纵向拉伸。 */
+  .text-input-multiline {
+    height: auto;
+    min-height: 96px;
+    padding: 9px 11px;
+    line-height: 1.6;
+    resize: vertical;
+  }
+
   .plugin-file-list {
     display: grid;
     gap: 4px;

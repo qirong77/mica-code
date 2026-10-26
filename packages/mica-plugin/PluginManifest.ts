@@ -1,3 +1,10 @@
+import {
+  isPluginSettingType,
+  isValidPluginSettingKey,
+  type PluginSettingField,
+  type PluginSettingOption,
+} from './PluginSettings.js';
+
 /**
  * 插件包的清单（`plugin.json`）。
  *
@@ -39,6 +46,11 @@ export type PluginManifest = {
   /** 加载顺序，小的先执行。 */
   priority: number;
   apiVersion: number;
+  /**
+   * 插件自己的配置项。声明之后配置页会渲染对应表单，值存在
+   * `$MICA_HOME/plugin-settings/<id>.json`，插件经 `ctx.settings.get()` 读。
+   */
+  settings: PluginSettingField[];
 };
 
 export type PluginManifestParseResult = { ok: true; manifest: PluginManifest } | { ok: false; error: string };
@@ -92,6 +104,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const apiVersion = readApiVersion(input.mica);
   if (typeof apiVersion === 'string') return { ok: false, error: apiVersion };
 
+  const settings = readSettings(input.settings);
+  if (!settings.ok) return settings;
+
   return {
     ok: true,
     manifest: {
@@ -106,8 +121,70 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       required: input.required === true,
       priority: typeof input.priority === 'number' && Number.isFinite(input.priority) ? input.priority : 0,
       apiVersion,
+      settings: settings.value,
     },
   };
+}
+
+/**
+ * 设置字段声明。
+ *
+ * 校验从严的理由与清单其余部分一样：页面完全按这份声明渲染表单，key 写错、类型不认识
+ * 都会让用户填了也不生效，所以在解析阶段就报出来。
+ */
+function readSettings(input: unknown): { ok: true; value: PluginSettingField[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(input)) return { ok: false, error: 'settings 必须是数组' };
+
+  const fields: PluginSettingField[] = [];
+  const seen = new Set<string>();
+  for (const entry of input) {
+    if (!isRecord(entry)) return { ok: false, error: 'settings 的每一项必须是对象' };
+    const key = readString(entry.key)?.trim();
+    if (!key) return { ok: false, error: 'settings 项缺少 key' };
+    if (!isValidPluginSettingKey(key)) {
+      return { ok: false, error: `settings.key 只能由字母、数字、"_" 组成，且以字母开头：${key}` };
+    }
+    if (seen.has(key)) return { ok: false, error: `settings.key 重复：${key}` };
+    seen.add(key);
+
+    const label = readString(entry.label)?.trim();
+    if (!label) return { ok: false, error: `settings.${key} 缺少 label` };
+    if (!isPluginSettingType(entry.type)) {
+      return { ok: false, error: `settings.${key} 的 type 不受支持：${String(entry.type)}` };
+    }
+
+    const options = entry.type === 'select' ? readSettingOptions(entry.options, key) : undefined;
+    if (options && !options.ok) return options;
+
+    fields.push({
+      key,
+      label,
+      type: entry.type,
+      description: readString(entry.description)?.trim() || undefined,
+      placeholder: readString(entry.placeholder)?.trim() || undefined,
+      options: options?.value,
+      default: readString(entry.default) ?? undefined,
+    });
+  }
+  return { ok: true, value: fields };
+}
+
+function readSettingOptions(
+  input: unknown,
+  key: string,
+): { ok: true; value: PluginSettingOption[] } | { ok: false; error: string } {
+  if (!Array.isArray(input) || input.length === 0) {
+    return { ok: false, error: `settings.${key} 是 select，必须声明 options` };
+  }
+  const options: PluginSettingOption[] = [];
+  for (const entry of input) {
+    if (!isRecord(entry)) return { ok: false, error: `settings.${key}.options 的每一项必须是对象` };
+    const value = readString(entry.value)?.trim();
+    if (!value) return { ok: false, error: `settings.${key}.options 缺少 value` };
+    options.push({ value, label: readString(entry.label)?.trim() || value });
+  }
+  return { ok: true, value: options };
 }
 
 /**

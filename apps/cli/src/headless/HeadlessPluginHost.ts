@@ -199,12 +199,23 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
 
   const paths = createHeadlessPluginPaths();
 
-  const baseContext: Omit<PluginContext, 'pluginId' | 'onDispose'> = {
+  const baseContext: Omit<PluginContext, 'pluginId' | 'onDispose' | 'settings'> = {
     paths,
     services,
     hooks,
     commands,
     events,
+    // 一个进程一条会话：owner 在这里不参与解析，改名也只会落到当前会话上。
+    session: {
+      describe: () => ({
+        id: sessionController.getCurrentSessionId(),
+        title: sessionController.getCurrentDisplayTitle(),
+        titleSource: sessionController.getCurrentTitleSource(),
+      }),
+      messages: () => agent.toConversationMessages(),
+      rename: (title, renameOptions) =>
+        sessionController.renameCurrent(title, { source: renameOptions?.source ?? 'auto' }),
+    },
     runtime: {
       submit: options.submit,
       queue: {

@@ -51,6 +51,8 @@ export function createHttpConfigWebClient(): ConfigWebClient {
     readPluginsDetails: () => request<ConfigWebPluginsDetails>('/api/details/plugins'),
     setPluginEnabled: (id, enabled) =>
       request<ConfigWebPluginsDetails>('/api/details/plugins', { method: 'PUT', body: { id, enabled } }),
+    writePluginSettings: (id, values) =>
+      request<ConfigWebPluginsDetails>('/api/details/plugin-settings', { method: 'PUT', body: { id, values } }),
 
     readSessionsDetails: () => request<ConfigWebSessionsDetails>('/api/details/sessions'),
     readSessionDetails: (id) => request<ConfigWebSessionDetails>(`/api/details/session?id=${encodeURIComponent(id)}`),
