@@ -1776,70 +1776,15 @@ body.is-resizing.is-resizing-terminal {
  * 看不见，之前的「整段折行 + 折叠输出」正是这样。所以工具行一律 nowrap + 省略号，
  * 内容完整性由弹窗负责。终端（`mica-ui/agentTurnLogItems.tsx`）是同一套规则。
  *
- * 思考不占日志行：它是一段有身份的条目（`思考` / `思考中` + 耗时），正文默认折到
- * 4 行，点标题展开。以前它是一块淡色底的裸文本——没有身份，多个片段各占一块，
- * 读者分不清这是模型在想还是回答的一部分，长起来还会把工具行挤出日志区。
+ * 思考是例外：它不是日志行，而是这一轮在想的什么，照旧整段折行。
  */
 .chat-turn-log-thinking {
   min-width: 0;
-  margin: 1px 0 6px;
-}
-
-.chat-turn-log-thinking-clamp {
-  margin-top: 2px;
-}
-
-.chat-turn-log-thinking-head {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  border-radius: 3px;
-  background: none;
-  padding: 1px 6px 1px 3px;
-  color: var(--color-fg-faint);
-  font: inherit;
-  text-align: left;
-}
-
-.chat-turn-log-thinking-head:hover {
-  background: rgb(255 255 255 / 5%);
-}
-
-.chat-turn-log-thinking-label {
-  color: var(--color-fg-dim);
-  letter-spacing: 0.02em;
-}
-
-.chat-turn-log-thinking-duration {
-  color: var(--color-fg-ghost);
-  font-variant-numeric: tabular-nums;
-}
-
-.chat-turn-log-thinking-caret {
-  flex: 0 0 auto;
-  color: var(--color-fg-ghost);
-  transition: transform 120ms ease;
-}
-
-.chat-turn-log-thinking-caret.is-open {
-  transform: rotate(180deg);
-}
-
-/* 折叠态：高度由 JS 按量出的 line-height 乘行数写死（em 近似差 1px 就会把最后
-   一行裁掉一半），底部渐隐提示「还有」。 */
-.chat-turn-log-thinking-clamp.is-clamped {
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
-  mask-image: linear-gradient(to bottom, #000 70%, transparent);
-}
-
-.chat-turn-log-thinking-body {
-  min-width: 0;
-  /* 与工具行文字同一条左缘（3px 内边距 + 15px 图标位 + 6px 间距）。 */
-  padding: 0 4px 0 24px;
+  margin: 1px 0 7px;
+  /* 不用左侧竖条：淡背景即可，侧边高亮条容易被读成选中态。 */
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-info) 5%, transparent);
+  padding: 4px 9px;
   color: var(--color-fg-muted);
   overflow-wrap: anywhere;
   white-space: pre-wrap;

@@ -47,8 +47,7 @@ import { remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
-import { ThinkingRow, ToolActivityRow } from './chat-tool-views'
-import { mergeThinkingRuns } from './chat-thinking'
+import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
 import { CodeView } from './CodeView'
@@ -1075,7 +1074,7 @@ function SubagentTranscript({ steps, running, onOpenTool }) {
             {tool ? (
               <ToolActivityRow tool={tool} onOpen={() => onOpenTool(tool)} />
             ) : (
-              <ThinkingRow text={step.text} done={!running} />
+              <ReasoningRow text={step.text} />
             )}
           </div>
         )
@@ -1646,16 +1645,8 @@ export function currentTurnActivityMessages(messages, turnId) {
 }
 
 function TurnLogItemView({ message, now, onOpen }) {
-  if (message.kind === 'thinking') {
-    return (
-      <ThinkingRow
-        text={message.text}
-        startedAt={message.startedAt}
-        updatedAt={message.updatedAt}
-        done={message.done}
-        now={now}
-      />
-    )
+  if (message.kind === 'reasoning') {
+    return <ReasoningRow text={message.text} />
   }
   return <ToolActivityRow tool={message.tool} now={now} onOpen={() => onOpen?.(message)} />
 }
@@ -1665,8 +1656,6 @@ function TurnLogItemView({ message, now, onOpen }) {
 const TurnLogItem = memo(TurnLogItemView, (previous, next) => {
   if (previous.message !== next.message) return false
   if (previous.onOpen !== next.onOpen) return false
-  // 已结束的思考不再按 `now` 重算耗时，和已结束的工具行同样处理。
-  if (next.message?.kind === 'thinking' && next.message.done) return true
   const status = next.message?.tool?.status
   const settled = status && !['pending', 'running'].includes(status)
   return settled ? true : previous.now === next.now
@@ -5213,12 +5202,7 @@ export function ChatView({
     () => currentTurnActivityMessages(messages, activityTurnId),
     [activityTurnId, messages]
   )
-  // 相邻的 reasoning 片段在渲染前合并成一段思考：分块显示时它们看起来像几段互不
-  // 相干的引用，也看不出是同一段想法（合并规则见 chat-thinking.js）。
-  const visibleTurnLogMessages = useMemo(
-    () => (running || phase === 'error' ? mergeThinkingRuns(turnActivityMessages) : []),
-    [running, phase, turnActivityMessages]
-  )
+  const visibleTurnLogMessages = running || phase === 'error' ? turnActivityMessages : []
   // 点开详情时按 id 取当下的那条消息：工具还在跑的时候，输出是流式长出来的。
   const activityDetailMessage = activityDetailId
     ? messages.find((message) => message.id === activityDetailId) || null

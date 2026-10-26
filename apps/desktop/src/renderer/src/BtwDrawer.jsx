@@ -19,7 +19,7 @@ import { ComposerImageStrip } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
 import { isModalOpen } from './chat-modal'
-import { ThinkingRow, ToolActivityRow } from './chat-tool-views'
+import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ToolDetailDialog } from './chat-tool-detail'
 import {
   btwContextMenuItems,
@@ -494,7 +494,7 @@ export function BtwDrawer({
                     {/* 思考与工具行：与主对话的回合日志同一套组件与样式（btw 也是个运行实例） */}
                     {entry.thinking || entry.tools?.length ? (
                       <div className="chat-btw-activity">
-                        <ThinkingRow text={entry.thinking} done={entry.status !== 'running'} />
+                        <ReasoningRow text={entry.thinking} />
                         {(entry.tools || []).map((tool) => (
                           <ToolActivityRow
                             key={tool.id}
