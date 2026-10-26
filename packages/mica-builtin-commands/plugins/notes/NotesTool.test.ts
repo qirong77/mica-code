@@ -104,6 +104,6 @@ describe('SessionNotesTool', () => {
   it('is a write tool so it forms a serial barrier between read-only batches', () => {
     const { tool } = createTool();
     expect(tool.readOnly).toBe(false);
-    expect(tool.name).toBe('SessionNotes');
+    expect(tool.name).toBe('session_notes');
   });
 });

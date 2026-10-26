@@ -3,7 +3,7 @@
  *
  * 这些工具由插件在会话启动时注册（todo、session-autonomy、subagent），**只存在于跑 agent 的
  * 进程里**；配置页与桌面设置页只读配置、不加载插件，拿到的目录因此会缺它们，「新会话默认值」
- * 里也就没法关掉 TodoWrite 这类工具。这里把描述抽出来做目录的兜底：`getToolCatalog()` 在工具
+ * 里也就没法关掉 todo_write 这类工具。这里把描述抽出来做目录的兜底：`getToolCatalog()` 在工具
  * 未注册时用描述补一行，注册了就仍以真实工具为准（描述与入参不会被这里覆盖）。
  *
  * 注册方式是运行期，但对用户来说与内置工具没有区别，`getToolCatalog()` 一律按 `builtin` 上报来源。
@@ -22,7 +22,7 @@ export type RuntimeToolDescriptor = {
 
 export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
   {
-    name: "Agent",
+    name: "agent",
     description: "启动和管理 subagent。operation 默认为 run；支持 list/read/kill/await/run_many/join。 subagent 默认注入 brief 任务上下文；可用 context_mode=none|brief|recent|files 控制。 可写 subagent 使用 owned_paths 路径租约；Implementer/Tester/Proposal 必填。 Proposal 模式不落盘，只返回 patch 提案；run_many 支持 depends_on 与 max_parallel。 前台 run 会阻塞当前 turn 直到子代理返回；同一条消息里的多个前台调用会并行执行。需要主流程继续推进时用 run_in_background: true，完成后经 operation=read/join 取结果。 可用 subagent_type: general-purpose (General-purpose subagent for multi-step research, code investigation, and focused implementation help.); Explore (Read-only code exploration subagent for searching, reading, and summarizing relevant project context.); Implementer (Writable implementation subagent for scoped code changes. Requires owned_paths and only writes inside that lease.); Reviewer (Read-only code review subagent for diffs, risks, and missing tests.); Tester (Verification subagent that can run tests/typecheck within owned_paths and report outcomes.); Planner (Planning subagent that returns a task graph and ownership plan without modifying files.); Proposal (Proposal-mode implementation subagent. Requires owned_paths, cannot write files, and must return patch proposals for parent apply.)。 支持 effort: none/low/medium/high/xhigh；省略时继承主 agent 当前 effort。",
     readOnly: false,
     parameters: [
@@ -119,7 +119,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
     parameters: [],
   },
   {
-    name: "TodoWrite",
+    name: "todo_write",
     description: "Create or update the structured todo list for the current coding task. Use it for tasks with several meaningful steps, and skip it for trivial one-step work. Send the complete list on every call, keep at most one item in_progress, and update statuses as work advances. Before yielding a final response, waiting for user input, or stopping for any reason, leave no item in_progress: mark finished items completed and unfinished items pending. Use content for the imperative task label and activeForm for the present-progressive label shown while working.",
     readOnly: false,
     parameters: [
@@ -132,7 +132,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
     ],
   },
   {
-    name: "SessionNotes",
+    name: "session_notes",
     description: "Read or update this session's notes: a markdown scratchpad shared with the user and shown in the desktop notes panel. The notes live outside the conversation history, so they are never lost to context compaction and are re-attached to the system prompt at the start of every turn. Keep there what must survive a compact: decisions and their reasons, user constraints and preferences, paths/commands that took effort to find, and open questions. Read before a large rewrite, append instead of replacing when you are only adding, and keep it deduplicated and organized under headings rather than a chronological dump. The user edits the same document in the UI, so their edits are authoritative — do not copy the notes back into the chat, the user can already see them.",
     readOnly: false,
     parameters: [

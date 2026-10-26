@@ -12,7 +12,7 @@ describe('tool catalog', () => {
 
   it('leaves tools without a shared prefix ungrouped', () => {
     const byName = new Map(getToolCatalog().map((tool) => [tool.name, tool]));
-    for (const name of ['run_shell', 'apply_patch', 'read_file', 'web_search', 'Agent', 'Skill']) {
+    for (const name of ['run_shell', 'apply_patch', 'read_file', 'web_search', 'agent', 'skill']) {
       expect(byName.get(name)?.group, name).toBeNull();
     }
   });
@@ -50,7 +50,7 @@ describe('tool catalog', () => {
   });
 
   it('reports every non-MCP tool as builtin', () => {
-    // 插件在会话期注册的工具（Agent / TodoWrite / session_peers）同样是产品内置能力，
+    // 插件在会话期注册的工具（agent / todo_write / session_peers）同样是产品内置能力，
     // 目录里不再区分「运行期」，否则面板要额外解释一类对用户没有意义的来源。
     expect(new Set(getToolCatalog().map((tool) => tool.source))).toEqual(new Set(['builtin']));
   });

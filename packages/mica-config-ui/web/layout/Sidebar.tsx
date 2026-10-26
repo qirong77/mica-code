@@ -6,28 +6,59 @@ import markUrl from '../../../../apps/desktop/resources/icon.svg?url&no-inline';
 
 export type ConfigWebAppSection = ConfigWebSection;
 
+type SidebarEntry = { key: ConfigWebAppSection; label: string; available?: () => boolean };
+
+type SidebarGroup = { key: string; label?: string; items: SidebarEntry[] };
+
+// 分组按「这条设置改的是谁」排：先说清楚 agent 是什么（能力、提示词、工具来源），
+// 再说会话数据，最后才是只有桌面运行时才有的能力与诊断。原先是 11 个入口平铺，顺序
+// 既不是字母序也不是使用频次，读的人要在整列里找。
+//
 // 带 `available` 的条目由宿主能力决定是否出现：自动压缩的设置与计数只活在桌面运行时里，
 // 浏览器宿主（apps/config-web）拿不到，所以那一边连入口都不显示。
 //
-// Browser Control **刻意不带这个门控**：它是「Mica 里有一套能真正打开的浏览器」这件事的
-// 唯一说明处，藏起来会让人以为 Mica 没有这个能力。服务没开时页面自己说清楚（见
-// pages/BrowserControlPage.tsx 与 browserControl.ts 的 unavailableBrowserControlDetails）。
-//
-// Terminal Control 同理：它是「Mica 里有一个真实的、AI 能操作的终端」的唯一说明处。
-const items = [
-  { key: 'config', label: 'Config' },
-  { key: 'autoCompact', label: 'Auto Compact', available: supportsAutoCompact },
-  { key: 'browserControl', label: 'Browser Control' },
-  { key: 'terminalControl', label: 'Terminal Control' },
-  // Performance 与上两者同一条边界：入口始终在，拿不到数据由页面说明未开启。
-  { key: 'performance', label: 'Performance' },
-  { key: 'sessions', label: 'Sessions' },
-  { key: 'roles', label: 'Roles' },
-  { key: 'mcp', label: 'MCP' },
-  { key: 'skills', label: 'Skills' },
-  { key: 'capabilities', label: 'Capabilities' },
-  { key: 'plugins', label: 'Plugins' },
-] satisfies Array<{ key: ConfigWebAppSection; label: string; available?: () => boolean }>;
+// Browser Control 与 Terminal Control **刻意不带这个门控**：它们是「Mica 里有一套能真正
+// 打开的浏览器 / 终端」这件事的唯一说明处，藏起来会让人以为 Mica 没有这个能力。服务没开
+// 时页面自己说清楚（见 pages/BrowserControlPage.tsx 与 browserControl.ts 的
+// unavailableBrowserControlDetails）。Performance 同理：入口始终在，拿不到数据由页面说明。
+const groups: SidebarGroup[] = [
+  {
+    key: 'general',
+    items: [{ key: 'config', label: 'Config' }],
+  },
+  {
+    key: 'agent',
+    label: 'Agent',
+    items: [
+      { key: 'capabilities', label: 'Capabilities' },
+      { key: 'skills', label: 'Skills' },
+      { key: 'mcp', label: 'MCP' },
+      { key: 'roles', label: 'Roles' },
+      { key: 'plugins', label: 'Plugins' },
+    ],
+  },
+  {
+    key: 'sessions',
+    label: 'Sessions',
+    items: [
+      { key: 'sessions', label: 'Sessions' },
+      { key: 'autoCompact', label: 'Auto Compact', available: supportsAutoCompact },
+    ],
+  },
+  {
+    key: 'desktop',
+    label: 'Desktop',
+    items: [
+      { key: 'browserControl', label: 'Browser Control' },
+      { key: 'terminalControl', label: 'Terminal Control' },
+    ],
+  },
+  {
+    key: 'diagnostics',
+    label: 'Diagnostics',
+    items: [{ key: 'performance', label: 'Performance' }],
+  },
+];
 
 type SidebarProps = {
   section: ConfigWebAppSection;
@@ -35,7 +66,10 @@ type SidebarProps = {
 };
 
 export function Sidebar({ section, onChange }: SidebarProps) {
-  const visibleItems = items.filter((item) => !item.available || item.available());
+  // 宿主拿不到数据的整组直接不渲染，不留一个只有标题的空组。
+  const visibleGroups = groups
+    .map((group) => ({ ...group, items: group.items.filter((item) => !item.available || item.available()) }))
+    .filter((group) => group.items.length > 0);
   return (
     <aside className="sidebar">
       <div className="brand-block">
@@ -43,14 +77,28 @@ export function Sidebar({ section, onChange }: SidebarProps) {
         <div className="brand">Mica</div>
       </div>
       <nav className="nav-menu">
-        {visibleItems.map((item) => (
-          <SidebarItem
-            key={item.key}
-            currentSection={section}
-            section={item.key}
-            label={item.label}
-            onChange={onChange}
-          />
+        {visibleGroups.map((group) => (
+          <div
+            key={group.key}
+            className="nav-group"
+            role="group"
+            aria-labelledby={group.label ? `nav-group-${group.key}` : undefined}
+          >
+            {group.label ? (
+              <div className="nav-group-label" id={`nav-group-${group.key}`}>
+                {group.label}
+              </div>
+            ) : null}
+            {group.items.map((item) => (
+              <SidebarItem
+                key={item.key}
+                currentSection={section}
+                section={item.key}
+                label={item.label}
+                onChange={onChange}
+              />
+            ))}
+          </div>
         ))}
       </nav>
     </aside>

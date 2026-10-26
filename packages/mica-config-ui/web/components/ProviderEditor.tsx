@@ -87,6 +87,7 @@ export function ProviderEditor({
         {hasError ? <span className="config-provider-flag">待修正</span> : null}
         <Button
           icon={<TrashIcon size={14} />}
+          variant="ghost"
           title={removable ? '删除这个服务商' : '至少保留一个服务商'}
           ariaLabel="删除服务商"
           disabled={!removable || disabled}

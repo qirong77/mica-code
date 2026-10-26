@@ -44,18 +44,27 @@ export type NormalizedWaitCondition =
  * 由条件判定函数按需写入，登记表只是持有者——所以「用同一 wait_id 续等」
  * 不会把基线重置。
  */
-export type WaitBaseline = Record<string, unknown>;
+export type WaitBaseline = Record<string, unknown> & {
+  /** `kind=process` 用：只要见过它活着，后续「不存活」才等于「已退出」。 */
+  processSeenAlive?: boolean;
+};
 
 export type WaitProbeResult = {
   satisfied: boolean;
   /** 本次观察的一句话证据，展示在结果与 dock 行上。 */
   detail?: string;
   /**
-   * 本次轮询本身失败（页面连不上、命令起不来、任务 id 不存在……）。
+   * 本次轮询本身失败（页面连不上、命令起不来……）。
    * 只记录到 lastError 继续轮询，绝不因此判定条件成立或不成立——
    * 「等 service 起来」正是连不上才是常态的场景。
    */
   error?: string;
+  /**
+   * 与 `error` 的区别：这个错误**不会**因为多等一会儿而消失（未知 task_id、
+   * 非法正则、路径越权）。再轮询一万次也是同一个结果，所以立刻终止等待、
+   * 把错误交给模型，而不是白耗到超时。
+   */
+  fatal?: boolean;
 };
 
 export const WAIT_KINDS: WaitKind[] = ['task', 'process', 'file', 'command', 'http', 'port', 'duration'];

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button } from '../components/Ui.js';
 import { CapabilityList, CapabilityParameters } from '../components/CapabilityList.js';
@@ -38,29 +38,36 @@ const GROUPS: Group[] = ['tools', 'skills', 'mcpServers'];
 const EMPTY_DRAFT: Draft = { disabledSkills: [], disabledTools: [], disabledMcpServers: [] };
 
 /**
- * 新会话默认能力。只写入 config.json 的 `capabilityDefaults`：已有会话保留自己的
- * snapshot，因此改这里不会动到任何人正在用的对话。会话内的开关在 `/capabilities`
- * （CLI）或输入框旁的能力面板（桌面端）。
+ * 新会话默认能力。只写入 config.json 的 `capabilityDefaults`，所以改这里不会动到已经在
+ * 会话里单独调整过开关的对话。会话内的开关在 `/capabilities`（CLI）或输入框旁的能力面板
+ * （桌面端）。
+ *
+ * 与其他设置页不同，这里没有「保存」按钮：拨一下就直接落盘。写盘串行化，连点时攒成
+ * 「最后一次选择」再发一轮请求，不丢点击也不让两个请求互相覆盖。
  */
-export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
+export function CapabilitiesPage() {
   const [details, setDetails] = useState<ConfigWebCapabilityDefaults | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [group, setGroup] = useState<Group>('tools');
   const [detail, setDetail] = useState<Item | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [status, setStatus] = useState<SaveStatus>(null);
+  // 保存标志的同步副本：连着拨两下时要立刻判重，不能等 setState 触发重渲染。
+  const savingRef = useRef(false);
+  // 本地最新选择（不依赖尚未重渲染的 state）、服务端已确认的选择、待发的下一轮请求。
+  const draftRef = useRef<Draft>(EMPTY_DRAFT);
+  const confirmedRef = useRef<Draft>(EMPTY_DRAFT);
+  const pendingSaveRef = useRef<Draft | null>(null);
+  const savedTimerRef = useRef<number | null>(null);
   const RefreshIcon = appIcons.refresh;
-  const SaveIcon = appIcons.save;
 
   const applyDetails = useCallback((next: ConfigWebCapabilityDefaults) => {
+    const applied = toDraft(next);
     setDetails(next);
-    setDraft({
-      disabledSkills: next.disabledSkills,
-      disabledTools: next.disabledTools,
-      disabledMcpServers: next.disabledMcpServers,
-    });
+    draftRef.current = applied;
+    confirmedRef.current = applied;
+    setDraft(applied);
   }, []);
 
   const load = useCallback(async () => {
@@ -68,6 +75,7 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
     setError(null);
     try {
       applyDetails(await readCapabilityDefaults());
+      setStatus(null);
     } catch (loadError) {
       setError(formatError(loadError));
     } finally {
@@ -79,24 +87,54 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
     void load();
   }, [load]);
 
-  const dirty = useMemo(
-    () =>
-      JSON.stringify(draft) !==
-      JSON.stringify(
-        details
-          ? {
-              disabledSkills: details.disabledSkills,
-              disabledTools: details.disabledTools,
-              disabledMcpServers: details.disabledMcpServers,
-            }
-          : EMPTY_DRAFT,
-      ),
-    [details, draft],
-  );
+  useEffect(() => () => clearSavedTimer(savedTimerRef), []);
 
-  useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
+  const flushSave = useCallback(async () => {
+    if (savingRef.current) return;
+    const next = pendingSaveRef.current;
+    if (!next) return;
+    pendingSaveRef.current = null;
+    savingRef.current = true;
+    clearSavedTimer(savedTimerRef);
+    setStatus('saving');
+    setError(null);
+    try {
+      const saved = await writeCapabilityDefaults(next);
+      const applied = toDraft(saved);
+      confirmedRef.current = applied;
+      setDetails(saved);
+      // 请求期间又拨了几下时本地已有更新的选择，不用这次的响应盖回去。
+      if (!pendingSaveRef.current) {
+        draftRef.current = applied;
+        setDraft(applied);
+        setStatus('saved');
+        savedTimerRef.current = window.setTimeout(() => {
+          savedTimerRef.current = null;
+          setStatus((current) => (current === 'saved' ? null : current));
+        }, 1600);
+      }
+    } catch (saveError) {
+      pendingSaveRef.current = null;
+      const confirmed = confirmedRef.current;
+      draftRef.current = confirmed;
+      setDraft(confirmed);
+      setStatus(null);
+      setError(formatError(saveError));
+    } finally {
+      savingRef.current = false;
+      if (pendingSaveRef.current) void flushSave();
+    }
+  }, []);
+
+  const commit = useCallback(
+    (next: Draft) => {
+      draftRef.current = next;
+      setDraft(next);
+      pendingSaveRef.current = next;
+      void flushSave();
+    },
+    [flushSave],
+  );
 
   const items = useMemo(() => {
     if (!details) return [];
@@ -117,35 +155,17 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
   const enabledCount = items.filter((item) => !disabled.includes(item.name)).length;
 
   function toggle(name: string, enabled: boolean) {
-    setDraft((current) => {
-      const key = disabledKey(group);
-      const next = new Set(current[key]);
-      if (enabled) next.delete(name);
-      else next.add(name);
-      return { ...current, [key]: [...next] };
-    });
+    const key = disabledKey(group);
+    const next = new Set(draftRef.current[key]);
+    if (enabled) next.delete(name);
+    else next.add(name);
+    commit({ ...draftRef.current, [key]: [...next] });
   }
 
   // 整组开关：一次改写组内全部成员，落到同一个禁用名单里（能力校验按工具名逐条判定）。
   function toggleGroup(names: string[], enabled: boolean) {
-    setDraft((current) => {
-      const key = disabledKey(group);
-      return { ...current, [key]: applyGroupEnabled(current[key], names, enabled) };
-    });
-  }
-
-  async function save() {
-    setSaving(true);
-    setError(null);
-    try {
-      applyDetails(await writeCapabilityDefaults(draft));
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1600);
-    } catch (saveError) {
-      setError(formatError(saveError));
-    } finally {
-      setSaving(false);
-    }
+    const key = disabledKey(group);
+    commit({ ...draftRef.current, [key]: applyGroupEnabled(draftRef.current[key], names, enabled) });
   }
 
   return (
@@ -157,21 +177,15 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
           <Button variant="default" icon={<RefreshIcon size={15} />} onClick={() => void load()} loading={loading}>
             刷新
           </Button>
-          <Button
-            icon={<SaveIcon size={15} />}
-            onClick={() => void save()}
-            loading={saving}
-            disabled={loading || !dirty}
-          >
-            保存
-          </Button>
         </div>
       }
     >
       <div className="capability-page">
         <p className="capability-note">
-          这里只决定<strong>新建会话</strong>的默认能力。已有会话保留自己的开关，需要时在会话里用
-          <code>/capabilities</code>（终端）或输入框旁的能力面板（桌面端）调整。
+          这里决定<strong>新会话</strong>
+          的默认能力：没有在会话里单独调过开关的会话跟着这里走，调过的会话保留自己的选择。需要时在会话里用
+          <code>/capabilities</code>
+          （终端）或输入框旁的能力面板（桌面端）改动。
         </p>
         {error ? <Alert message={error} /> : null}
         {loading && !details ? (
@@ -186,10 +200,10 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
                 setGroup(key as Group);
                 setDetail(null);
               }}
-              counts={Object.fromEntries(GROUPS.map((key) => [key, capabilityCount(details, key)]))}
+              counts={Object.fromEntries(GROUPS.map((key) => [key, capabilityCount(details, draft, key)]))}
               items={items}
               countLabel={`${enabledCount} / ${items.length} 默认启用`}
-              status={dirty ? '· 改动未保存' : !dirty && saved ? '· 已保存' : null}
+              status={status === 'saving' ? '· 保存中…' : status === 'saved' ? '· 已保存' : null}
               isEnabled={(name) => !disabled.includes(name)}
               onToggle={(name, checked) => toggle(name, checked)}
               onToggleGroup={group === 'tools' ? toggleGroup : null}
@@ -212,7 +226,7 @@ export function CapabilitiesPage({ onDirtyChange }: { onDirtyChange?(dirty: bool
                 <div className="capability-detail-fact">
                   <span className="capability-detail-label">读写</span>
                   <span className="capability-detail-value">
-                    {detail.readOnly ? '只读 · 不会改动工作区' : '可写 · 会改动文件或执行命令'}
+                    {detail.readOnly ? '只读 · 不会改动工作区' : '非只读 · 不进只读批量并发，也不会随 turn 自动重试'}
                   </span>
                 </div>
               )}
@@ -235,7 +249,7 @@ function disabledKey(group: Group): keyof Draft {
   return 'disabledMcpServers';
 }
 
-function capabilityCount(details: ConfigWebCapabilityDefaults | null, group: Group): string {
+function capabilityCount(details: ConfigWebCapabilityDefaults | null, draft: Draft, group: Group): string {
   if (!details) return '';
   const names =
     group === 'skills'
@@ -243,8 +257,24 @@ function capabilityCount(details: ConfigWebCapabilityDefaults | null, group: Gro
       : group === 'tools'
         ? details.tools.map((item) => item.name)
         : details.mcpServers;
-  const disabled = details[disabledKey(group)];
+  const disabled = draft[disabledKey(group)];
   return `${names.filter((name) => !disabled.includes(name)).length}/${names.length}`;
+}
+
+type SaveStatus = 'saving' | 'saved' | null;
+
+function toDraft(details: ConfigWebCapabilityDefaults): Draft {
+  return {
+    disabledSkills: details.disabledSkills,
+    disabledTools: details.disabledTools,
+    disabledMcpServers: details.disabledMcpServers,
+  };
+}
+
+function clearSavedTimer(ref: { current: number | null }): void {
+  if (ref.current === null) return;
+  window.clearTimeout(ref.current);
+  ref.current = null;
 }
 
 function formatError(error: unknown): string {

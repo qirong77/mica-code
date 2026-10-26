@@ -2,11 +2,11 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as Reac
 import { readSessionContent, readSessionDetails, readSessionsDetails, writeSession } from '../api.js';
 import { ContextPane } from '../components/ContextPane.js';
 import { ConversationPane } from '../components/ConversationPane.js';
-import { confirmDialog } from '../components/DialogHost.js';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, Empty, SaveStatus, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
+import { useAutoSave } from '../useAutoSave.js';
 import type {
   ConfigWebSessionDetails,
   ConfigWebSessionOption,
@@ -15,7 +15,7 @@ import type {
 
 type SessionTab = 'conversation' | 'context' | 'json';
 
-export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
+export function SessionsPage() {
   const [index, setIndex] = useState<ConfigWebSessionsDetails | null>(null);
   const [selectedId, setSelectedId] = useState('');
   const [header, setHeader] = useState<ConfigWebSessionDetails | null>(null);
@@ -30,8 +30,6 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
   const [rawContent, setRawContent] = useState('');
   const [rawSavedContent, setRawSavedContent] = useState('');
   const [rawLoaded, setRawLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
 
   const requestSequence = useRef(0);
   const loadInFlight = useRef(false);
@@ -41,7 +39,63 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
   const RefreshIcon = appIcons.refresh;
-  const SaveIcon = appIcons.save;
+  // 半句 JSON 不写盘：本地先解析一遍，解析不过就只显示提示，等内容合法再落盘。
+  const jsonError = useMemo(() => {
+    if (!dirty) return null;
+    try {
+      JSON.parse(rawContent);
+      return null;
+    } catch (parseError) {
+      return formatError(parseError);
+    }
+  }, [dirty, rawContent]);
+  const sessionId = header?.id ?? '';
+  // 运行中的会话有 turn lease，写盘会和正在跑的 turn 抢，等它结束再写。
+  const running = header?.turnState === 'running';
+
+  const autoSave = useAutoSave<{ id: string; content: string }, ConfigWebSessionDetails>({
+    save: async ({ id, content }) => {
+      await writeSession(id, content);
+      return readSessionDetails(id);
+    },
+    onSaved: (next, saved) => {
+      lastUpdatedAtRef.current = next.updatedAt;
+      setHeader(next);
+      setRawSavedContent(saved.content);
+      setDataVersion((value) => value + 1);
+    },
+  });
+  const { schedule, flush } = autoSave;
+
+  // turn 结束时补一次：运行中敲的内容被 editRawContent 直接跳过，没人再催它写盘。
+  const latestRawRef = useRef({ rawContent, rawSavedContent, rawLoaded, sessionId, jsonError });
+  latestRawRef.current = { rawContent, rawSavedContent, rawLoaded, sessionId, jsonError };
+
+  useEffect(() => {
+    if (running) return;
+    const latest = latestRawRef.current;
+    if (!latest.rawLoaded || !latest.sessionId) return;
+    if (latest.rawContent === latest.rawSavedContent || latest.jsonError) return;
+    schedule({ id: latest.sessionId, content: latest.rawContent });
+  }, [running, schedule]);
+
+  /**
+   * 改动当场登记写盘。
+   *
+   * 不用 effect 兜：改完立刻切会话时，卸载和这次改动落在同一批更新里，被卸载的组件不会
+   * 再跑 effect，那一批改动就没人登记了。半句 JSON 与运行中的会话先不写。
+   */
+  function editRawContent(next: string) {
+    setRawContent(next);
+    if (!rawLoaded || !sessionId || running) return;
+    if (next === rawSavedContent) return;
+    try {
+      JSON.parse(next);
+    } catch {
+      return;
+    }
+    schedule({ id: sessionId, content: next });
+  }
 
   async function loadHeader(id: string, showLoading = false) {
     const sequence = ++requestSequence.current;
@@ -90,15 +144,8 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
 
   async function selectSession(id: string) {
     if (id === selectedIdRef.current) return;
-    if (dirtyRef.current) {
-      const confirmed = await confirmDialog({
-        title: '放弃未保存的修改',
-        message: '当前 Session 有未保存的修改，确定要切换吗？',
-        confirmText: '切换',
-        danger: true,
-      });
-      if (!confirmed) return;
-    }
+    // 先把路上那份改动写完再换，切换不丢正在编辑的内容。
+    await flush();
     selectedIdRef.current = id;
     setSelectedId(id);
     setHeader(null);
@@ -124,51 +171,11 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
     }
   }
 
-  async function save() {
-    if (!header || header.turnState === 'running' || !dirty || saving) return;
-    setError(null);
-    try {
-      JSON.parse(rawContent);
-    } catch (parseError) {
-      setError(`Session 内容不是有效 JSON：${formatError(parseError)}`);
-      return;
-    }
-    setSaving(true);
-    try {
-      await writeSession(header.id, rawContent);
-      const next = await readSessionDetails(header.id);
-      lastUpdatedAtRef.current = next.updatedAt;
-      setHeader(next);
-      setRawSavedContent(rawContent);
-      setRawLoaded(true);
-      setSaved(true);
-      setDataVersion((value) => value + 1);
-      window.setTimeout(() => setSaved(false), 1600);
-    } catch (saveError) {
-      setError(formatError(saveError));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   useEffect(() => {
     void refreshIndex(true);
     const timer = window.setInterval(() => void refreshIndex(false), 1000);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    onDirtyChange?.(dirty);
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warnBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', warnBeforeUnload);
-      onDirtyChange?.(false);
-    };
-  }, [dirty, onDirtyChange]);
 
   const paneKey = `${selectedId}:${version}`;
 
@@ -178,7 +185,7 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
       path={index?.root}
       actions={
         <div className="toolbar">
-          {saved ? <span className="save-status">已保存</span> : null}
+          <SaveStatus saving={autoSave.saving} saved={autoSave.status === 'saved'} />
           <Button
             icon={<RefreshIcon size={15} />}
             title="立即刷新"
@@ -189,6 +196,7 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
       }
     >
       {error ? <Alert message={error} /> : null}
+      {autoSave.error ? <Alert message={autoSave.error} /> : null}
       {loading && !index ? (
         <div className="page-loading">正在加载 Sessions…</div>
       ) : !index ? null : index.sessions.length === 0 ? (
@@ -247,28 +255,15 @@ export function SessionsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean)
                       <p className="muted-text editor-pane-subtitle">{header.id}</p>
                     </div>
                     <div className="toolbar">
-                      {dirty ? <Tag tone="blue">未保存</Tag> : null}
-                      {header.turnState === 'running' ? <span className="muted-text">运行中不可保存</span> : null}
-                      <Button
-                        variant="primary"
-                        icon={<SaveIcon size={15} />}
-                        disabled={!dirty || header.turnState === 'running'}
-                        loading={saving}
-                        onClick={() => void save()}
-                      >
-                        保存
-                      </Button>
+                      {running ? <span className="muted-text">运行中，暂停写盘</span> : null}
+                      {jsonError && !running ? <Tag tone="red">JSON 未写完</Tag> : null}
+                      {dirty && !jsonError && !running ? <Tag tone="blue">待写入</Tag> : null}
                     </div>
                   </div>
                 ) : null}
                 {tab === 'json' ? (
                   <div className="editor-host session-raw-editor">
-                    <JsonEditor
-                      value={rawContent}
-                      language="json"
-                      readOnly={saving || header.turnState === 'running'}
-                      onChange={setRawContent}
-                    />
+                    <JsonEditor value={rawContent} language="json" readOnly={running} onChange={editRawContent} />
                   </div>
                 ) : null}
               </div>

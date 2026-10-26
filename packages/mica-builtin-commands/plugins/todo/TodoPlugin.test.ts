@@ -83,16 +83,16 @@ describe('TodoPlugin', () => {
       component: expect.any(Function),
     });
     expect(harness.commands.resolve('/todo show')?.command.name).toBe('todo');
-    expect(harness.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'TodoWrite' }), {
+    expect(harness.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'todo_write' }), {
       icon: '📝',
       primaryAgentOnly: true,
     });
-    expect(micaTools.getDefinitions().some((tool) => tool.name === 'TodoWrite')).toBe(true);
-    expect(micaTools.getDefinitions().find((tool) => tool.name === 'TodoWrite')?.description).toContain(
+    expect(micaTools.getDefinitions().some((tool) => tool.name === 'todo_write')).toBe(true);
+    expect(micaTools.getDefinitions().find((tool) => tool.name === 'todo_write')?.description).toContain(
       'leave no item in_progress',
     );
 
-    const result = await micaTools.execute('TodoWrite', {
+    const result = await micaTools.execute('todo_write', {
       todos: [
         { content: 'Inspect code', activeForm: 'Inspecting code', status: 'completed' },
         { content: 'Run tests', activeForm: 'Running tests', status: 'in_progress' },
@@ -105,24 +105,24 @@ describe('TodoPlugin', () => {
 
     for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
     expect(harness.remove).toHaveBeenCalledWith('builtin.todo.list');
-    expect(micaTools.getDefinitions().some((tool) => tool.name === 'TodoWrite')).toBe(false);
+    expect(micaTools.getDefinitions().some((tool) => tool.name === 'todo_write')).toBe(false);
   });
 
   it('returns a validation error without replacing the list', async () => {
     createTodoHarness(disposeCallbacks);
 
-    const result = await micaTools.execute('TodoWrite', {
+    const result = await micaTools.execute('todo_write', {
       todos: [{ content: 'Test', activeForm: 'Testing', status: 'unknown' }],
     });
 
-    expect(result).toContain('TodoWrite 输入校验失败');
+    expect(result).toContain('todo_write 输入校验失败');
     expect(result).toContain('status must be pending, in_progress, or completed');
   });
 
   it('clears retained todo state when the session is cleared', async () => {
     const harness = createTodoHarness(disposeCallbacks);
 
-    await micaTools.execute('TodoWrite', {
+    await micaTools.execute('todo_write', {
       todos: [{ content: 'Test', activeForm: 'Testing', status: 'pending' }],
     });
     harness.events.publish({ type: 'session:cleared' });
@@ -165,7 +165,7 @@ describe('TodoPlugin', () => {
     const owner = setCurrentTodoOwner('owner-a');
 
     await micaTools.execute(
-      'TodoWrite',
+      'todo_write',
       {
         todos: [
           { content: 'Update docs', activeForm: 'Updating docs', status: 'completed' },
@@ -309,7 +309,7 @@ function setCurrentTodoOwner(taskOwnerId: string): { taskOwnerId: string } {
 
 async function writeTodoForOwner(owner: { taskOwnerId: string }, content: string, activeForm: string): Promise<void> {
   await micaTools.execute(
-    'TodoWrite',
+    'todo_write',
     { todos: [{ content, activeForm, status: 'in_progress' }] },
     { context: { agent: owner } },
   );

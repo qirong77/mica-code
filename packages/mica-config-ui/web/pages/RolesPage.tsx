@@ -3,27 +3,50 @@ import { createRole, deleteRole, readRolesDetails, writeRole } from '../api.js';
 import { confirmDialog, promptDialog } from '../components/DialogHost.js';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, Empty, SaveStatus, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
+import { useAutoSave } from '../useAutoSave.js';
 import type { ConfigWebRolesDetails } from '../../src/shared/types.js';
 
-export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
+/**
+ * Roles 列表与角色 prompt 编辑。
+ *
+ * 没有保存按钮：停手就写盘。内置 Role 只读，自动保存对它们不生效；切换条目、刷新、新建
+ * 之前先把路上那份改动写完。
+ */
+export function RolesPage() {
   const [details, setDetails] = useState<ConfigWebRolesDetails | null>(null);
   const [selectedName, setSelectedName] = useState('');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selectedRole = useMemo(
     () => details?.roles.find((role) => role.name === selectedName),
     [details, selectedName],
   );
-  const dirty = Boolean(selectedRole && !selectedRole.builtIn && content !== selectedRole.content);
+  const editable = Boolean(selectedRole) && !selectedRole?.builtIn;
+  const autoSave = useAutoSave<{ name: string; content: string }, ConfigWebRolesDetails>({
+    save: (next) => writeRole(next.name, next.content),
+    onSaved: (next) => setDetails(next),
+  });
+  const { schedule, flush } = autoSave;
   const RefreshIcon = appIcons.refresh;
-  const SaveIcon = appIcons.save;
   const AddIcon = appIcons.add;
   const TrashIcon = appIcons.trash;
+
+  /**
+   * 改动当场登记写盘。
+   *
+   * 不用 effect 兜：改完立刻切页面时，卸载和这次改动落在同一批更新里，被卸载的组件不会
+   * 再跑 effect，那一批改动就没人登记了。
+   */
+  function editContent(next: string) {
+    setContent(next);
+    if (!editable || !selectedName) return;
+    if (next === (selectedRole?.content ?? '')) return;
+    schedule({ name: selectedName, content: next });
+  }
 
   function applyDetails(next: ConfigWebRolesDetails, preferredName = selectedName) {
     const selected = next.roles.find((role) => role.name === preferredName) ?? next.roles[0];
@@ -33,9 +56,10 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
   }
 
   async function load() {
-    if (saving || !(await confirmDiscardChanges())) return;
+    await flush();
     setLoading(true);
     setError(null);
+    autoSave.clearError();
     try {
       applyDetails(await readRolesDetails());
     } catch (loadError) {
@@ -45,23 +69,9 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
     }
   }
 
-  async function save() {
-    if (!selectedRole || selectedRole.builtIn || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      applyDetails(await writeRole(selectedRole.name, content), selectedRole.name);
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1600);
-    } catch (saveError) {
-      setError(formatError(saveError));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function addRole() {
-    if (saving || !(await confirmDiscardChanges())) return;
+    if (busy) return;
+    await flush();
     const name = (
       await promptDialog({
         title: '新建 Role',
@@ -72,17 +82,20 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
       })
     )?.trim();
     if (!name) return;
+    setBusy(true);
     setError(null);
     try {
       const next = await createRole(name);
       applyDetails(next, name.replace(/\.md$/i, ''));
     } catch (createError) {
       setError(formatError(createError));
+    } finally {
+      setBusy(false);
     }
   }
 
   async function removeRole() {
-    if (!selectedRole || selectedRole.builtIn || saving) return;
+    if (!selectedRole || selectedRole.builtIn || busy) return;
     const confirmed = await confirmDialog({
       title: `删除 Role「${selectedRole.name}」`,
       message: '此操作不可撤销。',
@@ -90,53 +103,33 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
       danger: true,
     });
     if (!confirmed) return;
-    setSaving(true);
+    // 这个文件马上要没了，路上那份改动不必再写回去。
+    autoSave.cancel();
+    setBusy(true);
     setError(null);
     try {
       applyDetails(await deleteRole(selectedRole.name));
-      setSaved(false);
     } catch (deleteError) {
       setError(formatError(deleteError));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
   async function selectRole(name: string) {
-    if (saving || name === selectedName || !(await confirmDiscardChanges())) return;
+    if (name === selectedName) return;
+    // 先把当前这份写完再换：切换不打断、也不丢正在敲的内容。
+    await flush();
     const role = details?.roles.find((item) => item.name === name);
     setSelectedName(name);
     setContent(role?.content ?? '');
-    setSaved(false);
   }
 
   useEffect(() => {
     void load();
+    // 首次加载只看这一个入口。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    onDirtyChange?.(dirty);
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warnBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', warnBeforeUnload);
-      onDirtyChange?.(false);
-    };
-  }, [dirty, onDirtyChange]);
-
-  function confirmDiscardChanges(): Promise<boolean> {
-    return !dirty
-      ? Promise.resolve(true)
-      : confirmDialog({
-          title: '放弃未保存的修改',
-          message: '当前 Role 有未保存的修改，确定要放弃吗？',
-          confirmText: '放弃修改',
-          danger: true,
-        });
-  }
 
   return (
     <PageFrame
@@ -144,19 +137,20 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
       path={details?.root}
       actions={
         <div className="toolbar">
-          {saved ? <span className="save-status">已保存</span> : null}
-          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={load} loading={loading} />
-          <Button icon={<AddIcon size={15} />} onClick={addRole}>
+          <SaveStatus saving={autoSave.saving} saved={autoSave.status === 'saved'} />
+          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={() => void load()} loading={loading} />
+          <Button icon={<AddIcon size={15} />} disabled={busy} onClick={() => void addRole()}>
             新建
           </Button>
-          {!selectedRole?.builtIn ? (
-            <Button variant="danger" icon={<TrashIcon size={15} />} title="删除" onClick={removeRole} loading={saving}>
+          {editable ? (
+            <Button
+              variant="danger"
+              icon={<TrashIcon size={15} />}
+              title="删除"
+              onClick={() => void removeRole()}
+              loading={busy}
+            >
               删除
-            </Button>
-          ) : null}
-          {!selectedRole?.builtIn ? (
-            <Button variant="primary" icon={<SaveIcon size={15} />} onClick={save} loading={saving}>
-              保存
             </Button>
           ) : null}
         </div>
@@ -164,6 +158,7 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
     >
       <div className="editor-workspace">
         {error ? <Alert message={error} /> : null}
+        {autoSave.error ? <Alert message={autoSave.error} /> : null}
         {loading && !details ? (
           <div className="page-loading">正在加载 Roles…</div>
         ) : !details ? null : details.roles.length === 0 ? (
@@ -176,7 +171,6 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
                   key={role.name}
                   type="button"
                   className={`role-list-item ${selectedName === role.name ? 'role-list-item-active' : ''}`}
-                  disabled={saving}
                   onClick={() => void selectRole(role.name)}
                 >
                   <span className="role-list-item-copy">
@@ -194,12 +188,7 @@ export function RolesPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): v
                 {selectedRole?.builtIn ? <span className="muted-text">内置 Role 只读</span> : null}
               </div>
               <div className="editor-host role-editor-host">
-                <JsonEditor
-                  value={content}
-                  language="markdown"
-                  readOnly={(selectedRole?.builtIn ?? true) || saving}
-                  onChange={setContent}
-                />
+                <JsonEditor value={content} language="markdown" readOnly={!editable} onChange={editContent} />
               </div>
             </div>
           </div>

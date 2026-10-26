@@ -1,7 +1,12 @@
 import crypto from 'node:crypto';
 import type { NormalizedWaitCondition, WaitKind } from './types.js';
 
-export type WaitTaskStatus = 'waiting' | 'satisfied' | 'timeout' | 'aborted';
+/**
+ * `failed` 与 `timeout` 的区别：超时是「条件还没成立，可以续等」，失败是
+ * 「条件根本不可能成立」（未知 task_id、非法正则、路径越权）——续等只会
+ * 重复同一个错误，所以不算可续等状态。
+ */
+export type WaitTaskStatus = 'waiting' | 'satisfied' | 'timeout' | 'aborted' | 'failed';
 
 export type WaitRecord = {
   id: string;
@@ -43,9 +48,9 @@ export function isActiveWaitStatus(status: WaitTaskStatus): boolean {
   return status === 'waiting';
 }
 
-/** 可以再次等待的记录：只有已经满足的才算彻底结束（续等会直接返回 satisfied）。 */
+/** 可以再次等待的记录：已满足与参数错误的都不能续等（会立刻返回同一个结论）。 */
 export function isResumableWaitStatus(status: WaitTaskStatus): boolean {
-  return status !== 'satisfied';
+  return status !== 'satisfied' && status !== 'failed';
 }
 
 /** 淘汰过期的终态记录并给总条数封顶，避免长会话里记录无限增长。 */

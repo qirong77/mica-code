@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button } from '../components/Ui.js';
 import { AutoCompactFields } from '../components/AutoCompactFields.js';
@@ -18,6 +18,9 @@ import { readAutoCompactDetails, resetAutoCompactCounters, writeAutoCompactSetti
 import type { ConfigWebAutoCompactCounter, ConfigWebAutoCompactDetails } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
 
+const SAVE_DEBOUNCE_MS = 400;
+const SAVED_NOTICE_MS = 1600;
+
 /**
  * Auto Compact：一次模型请求跑完就检查 ctx，超过阈值就压缩，不等整个任务结束。
  *
@@ -29,53 +32,121 @@ export function AutoCompactPage() {
   const [details, setDetails] = useState<ConfigWebAutoCompactDetails | null>(null);
   const [draft, setDraft] = useState<AutoCompactDraft | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const RefreshIcon = appIcons.refresh;
-  const SaveIcon = appIcons.save;
   const TrashIcon = appIcons.trash;
+  // 连点 +/− 时 state 还没重渲染，最新的草稿与排队中的写盘都放 ref 里。
+  const draftRef = useRef<AutoCompactDraft | null>(null);
+  const pendingSaveRef = useRef<AutoCompactDraft | null>(null);
+  const savingRef = useRef(false);
+  // 定时器句柄按浏览器（`window.setTimeout`）的返回值存，和 CapabilitiesPage 一致；
+  // 仓库同时引了 node 的类型，用 ReturnType 会拿到 NodeJS.Timeout 而编译不过。
+  const timerRef = useRef<number | null>(null);
+  const savedTimerRef = useRef<number | null>(null);
+
+  const markSaved = useCallback(() => {
+    setSaved(true);
+    if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = window.setTimeout(() => {
+      savedTimerRef.current = null;
+      setSaved(false);
+    }, SAVED_NOTICE_MS);
+  }, []);
+
+  // 同一时刻只留一个请求在飞，期间的改动攒成「最后一次」补发；
+  // 直接丢弃会让界面上已是新值、磁盘上还是旧值。
+  const flushSave = useCallback(async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      for (;;) {
+        const next = pendingSaveRef.current;
+        if (!next) break;
+        pendingSaveRef.current = null;
+        const parsed = autoCompactSettingsFromDraft(next);
+        if (!parsed.ok) {
+          setError(parsed.error);
+          break;
+        }
+        setError(null);
+        try {
+          const payload = await writeAutoCompactSettings(parsed.settings);
+          setDetails(payload);
+          markSaved();
+        } catch (saveError) {
+          // 草稿保持用户输入；下一次合法改动自然带着最新值重试。
+          setError(formatError(saveError));
+          break;
+        }
+      }
+    } finally {
+      savingRef.current = false;
+      // 定时器可能正好落在「循环已经看完 pending、还没放开 savingRef」的缝里：
+      // 那次 flushSave 会因 savingRef 为真直接返回，这一笔改动就没人发了。
+      if (pendingSaveRef.current) void flushSave();
+    }
+  }, [markSaved]);
+
+  const scheduleSave = useCallback(
+    (next: AutoCompactDraft) => {
+      pendingSaveRef.current = next;
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => {
+        timerRef.current = null;
+        void flushSave();
+      }, SAVE_DEBOUNCE_MS);
+    },
+    [flushSave],
+  );
+
+  const applyDraft = useCallback((next: AutoCompactDraft) => {
+    draftRef.current = next;
+    setDraft(next);
+  }, []);
+
+  const editDraft = useCallback(
+    (next: AutoCompactDraft) => {
+      applyDraft(next);
+      scheduleSave(next);
+    },
+    [applyDraft, scheduleSave],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    pendingSaveRef.current = null;
+    setSaved(false);
     try {
       const payload = await readAutoCompactDetails();
       setDetails(payload);
-      setDraft(autoCompactDraftFromSettings(payload.settings));
+      applyDraft(autoCompactDraftFromSettings(payload.settings));
     } catch (loadError) {
       setError(formatError(loadError));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [applyDraft]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  async function save() {
-    if (!draft) return;
-    const parsed = autoCompactSettingsFromDraft(draft);
-    if (!parsed.ok) {
-      setError(parsed.error);
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const payload = await writeAutoCompactSettings(parsed.settings);
-      setDetails(payload);
-      setDraft(autoCompactDraftFromSettings(payload.settings));
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1600);
-    } catch (saveError) {
-      setError(formatError(saveError));
-    } finally {
-      setSaving(false);
-    }
-  }
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current);
+      timerRef.current = null;
+      savedTimerRef.current = null;
+    },
+    [],
+  );
 
   async function reset(sessionId?: string) {
     const target = sessionId ?? '';
@@ -93,7 +164,7 @@ export function AutoCompactPage() {
     try {
       const payload = await resetAutoCompactCounters(sessionId);
       setDetails(payload);
-      setDraft((current) => current ?? autoCompactDraftFromSettings(payload.settings));
+      if (!draftRef.current) applyDraft(autoCompactDraftFromSettings(payload.settings));
     } catch (resetError) {
       setError(formatError(resetError));
     } finally {
@@ -102,12 +173,10 @@ export function AutoCompactPage() {
   }
 
   const setField = <K extends keyof AutoCompactDraft>(key: K, value: AutoCompactDraft[K]) => {
-    setDraft((current) => (current ? { ...current, [key]: value } : current));
-    setError(null);
+    const current = draftRef.current;
+    if (!current) return;
+    editDraft({ ...current, [key]: value });
   };
-
-  const dirty =
-    details && draft ? JSON.stringify(draft) !== JSON.stringify(autoCompactDraftFromSettings(details.settings)) : false;
 
   return (
     <PageFrame
@@ -117,15 +186,6 @@ export function AutoCompactPage() {
         <div className="toolbar">
           {saved ? <span className="save-status">已保存</span> : null}
           <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={() => void load()} loading={loading} />
-          <Button
-            variant="primary"
-            icon={<SaveIcon size={15} />}
-            onClick={() => void save()}
-            loading={saving}
-            disabled={loading || !draft || !dirty}
-          >
-            保存
-          </Button>
         </div>
       }
     >
@@ -160,10 +220,7 @@ export function AutoCompactPage() {
                     150k、模型 100k）。
                   </li>
                 </ul>
-                <Button
-                  onClick={() => setDraft(autoCompactDraftFromSettings(details.defaults))}
-                  disabled={loading || saving}
-                >
+                <Button onClick={() => editDraft(autoCompactDraftFromSettings(details.defaults))} disabled={loading}>
                   恢复默认
                 </Button>
               </div>

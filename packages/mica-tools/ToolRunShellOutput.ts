@@ -1,5 +1,6 @@
 import type { ToolExecuteCallbacks } from './MicaTool.js';
 import { finalizeTextOutput } from './utils/outputLimits.js';
+import { RUN_SHELL_TIMEOUT_MS } from './utils/shell.js';
 
 export const MAX_SHELL_OUTPUT_CHARS = 60_000;
 export const MAX_STREAM_CHARS = 120_000;
@@ -123,6 +124,13 @@ export function buildCommandResult({
     '',
     '[stderr]',
     stderr.text || '(empty)',
+    ...(timedOut
+      ? [
+          '',
+          `[超时] 命令在 ${timeout}ms 后被终止（run_shell 上限 ${RUN_SHELL_TIMEOUT_MS.max}ms）。`,
+          '调大 timeout_ms 只会再等一次并被同样的上限截断；确实需要更久的命令改用 background_tasks_start 启动，再用 wait_for(kind="task") 等它结束。',
+        ]
+      : []),
   ].join('\n');
 
   return finalizeTextOutput(output, { maxChars: MAX_SHELL_OUTPUT_CHARS, label: '命令输出' });

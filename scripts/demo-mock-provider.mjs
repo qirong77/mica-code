@@ -43,7 +43,7 @@ const ROUNDS = [
                 '*** Begin Patch\n*** Update File: packages/mica-runtime/events.ts\n@@ export class EventBus\n-    for (const handler of this.handlers.get(name) ?? []) handler(payload)\n+    for (const handler of this.handlers.get(name) ?? []) {\n+      if (signal?.aborted) return\n+      handler(payload)\n+    }\n*** End Patch',
             },
           },
-          { name: 'run_shell', args: { command: 'bun run test -- packages/mica-runtime/events.test.ts', timeout: 60 } },
+          { name: 'run_shell', args: { command: 'bun run test -- packages/mica-runtime/events.test.ts', timeout_ms: 60 } },
         ],
       },
       {
@@ -141,14 +141,14 @@ $ bun run test -- packages/mica-runtime/events.test.ts
       },
       {
         reason: '跑一遍类型检查和 runtime 的测试，确认没有回退。',
-        calls: [{ name: 'run_shell', args: { command: 'bun run typecheck', timeout: 180 } }],
+        calls: [{ name: 'run_shell', args: { command: 'bun run typecheck', timeout_ms: 180 } }],
       },
       {
         reason: '类型干净了，再跑一遍事件总线的测试。',
         calls: [
           {
             name: 'run_shell',
-            args: { command: 'bun run test -- packages/mica-runtime/events.test.ts', timeout: 120 },
+            args: { command: 'bun run test -- packages/mica-runtime/events.test.ts', timeout_ms: 120 },
           },
         ],
       },

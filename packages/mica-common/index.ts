@@ -134,6 +134,7 @@ export {
   setCapabilityEnabled,
 } from './capabilities.js';
 export type { CapabilityKind, CapabilitySelection } from './capabilities.js';
+export { LEGACY_TOOL_NAMES, normalizeToolName } from './toolNames.js';
 export {
   AUTO_COMPACT_DEFAULTS,
   AUTO_COMPACT_FIELD_RANGES,

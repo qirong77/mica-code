@@ -1,6 +1,9 @@
 import { statSync } from 'fs';
 import path from 'path';
 
+/** `run_shell` 的严格超时（前台命令不该无限等）；超时提示要引用同一个上限。 */
+export const RUN_SHELL_TIMEOUT_MS = { default: 30_000, min: 250, max: 120_000 } as const;
+
 /** 前台与后台 shell 共用同一个 shell 解析，避免两处各写一份平台判断。 */
 export function defaultShell(): string {
   if (process.platform === 'win32') return process.env.ComSpec || 'cmd.exe';

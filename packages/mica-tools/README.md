@@ -24,7 +24,7 @@
 - `background_tasks_list`：列出后台任务（id / 状态 / pid / 时长 / 输出大小）。
 - `background_tasks_read`：读取后台任务输出与状态。
 - `background_tasks_kill`：终止仍在运行的后台任务。
-- `wait_for`：等外部条件成立（后台任务结束、进程退出、文件出现或变化、命令/HTTP/端口就绪、固定时长），超时返回可续等的 `wait_id`；可选 `reason` 说明为什么等（展示在客户端「等待中」列表）。它只观察、不启动任何东西，且可与同一条消息里其余调用并发执行。
+- `wait_for`：等外部条件成立（后台任务结束、进程退出、文件出现或变化、命令/HTTP/端口就绪、固定时长），超时返回可续等的 `wait_id`；可选 `reason` 说明为什么等（展示在客户端「等待中」列表）。它只观察、不启动任何东西，且可与同一条消息里其余调用并发执行。`kind=task` 只认 `background_tasks_start` 的 shell 任务，subagent 任务要用 `Agent` 的 `operation=await`；参数类错误（未知 task_id、非法正则、路径越权）立即返回 `failed`，不续等。
 - `pty_spawn`：在 PTY 中启动交互式终端程序。
 - `pty_send`：向 PTY 会话发送文本或命名按键。
 - `pty_read`：读取 PTY 会话输出。
@@ -32,7 +32,7 @@
 - `pty_kill`：终止 PTY 会话。
 - `web_fetch`：抓取 URL 内容。
 - `web_search`：通过自托管 SearXNG 实例（`searxngUrl` / `SEARXNG_URL`）搜索网络信息。
-- `Skill`：读取并调用本地 skill 指令。
+- `skill`：读取并调用本地 skill 指令。
 
 PTY 工具用于驱动交互式 TUI 程序做端到端验证。
 
@@ -63,21 +63,25 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 - `MicaTool.ts`：工具基类和执行回调类型。
 - `registry.ts`：内置工具、MCP 工具注册和执行分发。
 - `ToolApplyPatch.ts`：应用补丁工具。
-- `ToolBackgroundTasks.ts`：列出与管理后台任务。
+- `ToolBackgroundRead.ts`：读取后台任务输出（`background_tasks_read`）。
+- `ToolBackgroundStart.ts`：后台启动 shell 命令（`background_tasks_start`）。
+- `ToolBackgroundTasks.ts`：列出后台任务（`background_tasks_list`）。
 - `ToolGrepSearch.ts`：文件搜索工具。
 - `ToolKillTask.ts`：终止后台任务。
 - `ToolListFiles.ts`：按 glob 列文件。
 - `ToolReadFile.ts`：读取文件。
 - `ToolReadImage.ts`：读取并返回本地或网络图片。
-- `ToolReadTaskOutput.ts`：读取后台任务输出。
 - `ToolRunShell.ts`：执行 shell 命令。
 - `ToolRunShellBackground.ts`：后台 shell 输出与任务控制支持。
 - `ToolRunShellOutput.ts`：run_shell 统一输出处理。
 - `ToolSkill.ts`：基于 skills 的工具调用。
+- `ToolWaitFor.ts`：等待外部条件成立（task/process/file/command/http/port/duration）。
 - `pty/`：PTY 工具（spawn/send/read/wait/kill）与懒加载 manager 桥接。
 - `ToolWebFetch.ts`：抓取网址内容。
 - `ToolWebSearch.ts`：通过 SearXNG 实例执行网络搜索。
 - `ToolWriteFile.ts`：写入与更新文件。
 - `types.ts`：模型侧工具定义类型。
+- `runtimeToolDescriptors.ts`：只在会话期注册的工具的目录兜底描述。
+- `toolNames.ts`：工具名规范与历史名字映射。
 - `utils/`：展示文案、文件历史、错误格式化和输出限制工具。
 - `index.ts`：公共 API 聚合导出。

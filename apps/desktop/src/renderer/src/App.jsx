@@ -722,6 +722,14 @@ export default function App() {
   const rightActiveTerm = activeRightTermId(rightTerms, rightActiveTermByChat[activeId])
   const [selectedId, setSelectedId] = useState(bootstrap.selectedId)
   const selectedIdRef = useLatest(selectedId)
+  // 侧栏搜索点开结果时要带过去的查找请求：{ nodeId, tokens, nonce }。它按 nodeId 存在这一层，
+  // 由对应的 ChatView 可见且历史到位后自己消费——新会话的实例下一拍才进 cachedChats，
+  // 做成一次性回调会在挂载前就丢掉。
+  const [findRequest, setFindRequest] = useState(null)
+  // 请求消费掉就把 state 清回 null，所以 nonce 不能按上一次的值递增（那会从 1 重新开始，
+  // 和已经消费过的号撞上，查找条再也不开）。这里用一条只增不减的序号。
+  const findRequestSeqRef = useRef(0)
+  const handleFindRequestHandled = useCallback(() => setFindRequest(null), [])
   // 主区视图：chat | files | stats | settings。对话里的路径链接与顶栏的文件夹按钮都落到
   // 这一层（后者另开一个独立窗口，见 openFilesWindow）；终端是主区底部可收起的下拉面板。
   const [view, setView] = useState(() => {
@@ -1809,21 +1817,26 @@ export default function App() {
   )
 
   const openSession = useCallback(
-    (session) => {
-      if (!session?.id) return
+    (session, options) => {
+      if (!session?.id) return null
       setView('chat')
       const existing = nodesRef.current.find(
         (node) => node.type === 'terminal' && node.sessionId === session.id
       )
-      if (existing) {
-        selectNode(existing)
-        return
+      if (existing) selectNode(existing)
+      const nodeId =
+        existing?.id ||
+        createTerminal({
+          resumeSessionId: session.id,
+          text: session.title || session.id,
+          cwd: session.cwd || null
+        })
+      const tokens = Array.isArray(options?.find) ? options.find.filter(Boolean) : []
+      if (nodeId && tokens.length) {
+        findRequestSeqRef.current += 1
+        setFindRequest({ nodeId, tokens, nonce: findRequestSeqRef.current })
       }
-      createTerminal({
-        resumeSessionId: session.id,
-        text: session.title || session.id,
-        cwd: session.cwd || null
-      })
+      return nodeId || null
     },
     [createTerminal, nodesRef, selectNode]
   )
@@ -2442,9 +2455,9 @@ export default function App() {
               terminalSessions={sessionsWithRunningTerminal}
               draftNodes={draftNodes}
               loops={loops}
-              onOpenSession={(sessionId) => {
+              onOpenSession={(session, options) => {
                 closeMobileDrawer()
-                openSession(sessionId)
+                openSession(session, options)
               }}
               onSelectDraft={(node) => {
                 closeMobileDrawer()
@@ -2693,6 +2706,8 @@ export default function App() {
                 visible={view === 'chat' && node.id === activeId}
                 isMobile={isMobile}
                 loops={loops}
+                findRequest={findRequest?.nodeId === node.id ? findRequest : null}
+                onFindRequestHandled={handleFindRequestHandled}
                 onSessionBound={setSessionId}
                 onOpenFile={openChatFile}
                 onOpenDocument={openDocumentInView}

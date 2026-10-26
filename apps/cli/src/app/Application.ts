@@ -236,7 +236,7 @@ export class Application {
         id: 'startup-error-hint',
         text: '启动失败：请根据错误提示修复配置文件，然后重新运行 mica；按 Ctrl+C 退出',
       });
-      micaTools.unregisterRuntime('Agent');
+      micaTools.unregisterRuntime('agent');
       const failedContext = this.context;
       failedContext?.uiBridge.stop();
       const runtimeStop = failedContext?.runtime.stop();
@@ -285,7 +285,7 @@ export class Application {
     await terminateCurrentBackgroundTasks({ signal: 'SIGTERM', forceAfterMs: 1500 });
     await runtimeStop;
     await this.context?.plugins.disposeAll();
-    micaTools.unregisterRuntime('Agent');
+    micaTools.unregisterRuntime('agent');
     this.context?.agentSessions.stop();
     if (this.context) clearActiveContext(this.context);
     this.context = null;

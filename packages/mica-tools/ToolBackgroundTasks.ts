@@ -43,7 +43,8 @@ export class ToolBackgroundTasks extends MicaTool {
         properties: {
           status: {
             type: 'string',
-            description: '过滤任务状态：running、finished、killed、failed、unknown_exited 或 all。默认 all。',
+            description:
+              '过滤任务状态：starting、running、finished、killed、failed、unknown_exited 或 all。默认 all。',
           },
           limit: { type: 'number', description: `最多返回任务数，默认 ${DEFAULT_LIMIT}，最大 ${HARD_LIMIT}。` },
         },

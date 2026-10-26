@@ -58,7 +58,7 @@ describe('ToolAgent', () => {
     expect(options.effort).toBe('medium');
     expect(options.toolFilter?.('read_file')).toBe(true);
     expect(options.toolFilter?.('write_file')).toBe(false);
-    expect(options.toolFilter?.('Agent')).toBe(false);
+    expect(options.toolFilter?.('agent')).toBe(false);
   });
 
   it('lets the parent agent override effort explicitly', async () => {
@@ -177,7 +177,7 @@ describe('ToolAgent', () => {
 
     const options = createSubAgent.mock.calls[0]?.[0] as ModelClientOptions;
     expect(options.toolFilter?.('read_file')).toBe(true);
-    expect(options.toolFilter?.('Agent')).toBe(false);
+    expect(options.toolFilter?.('agent')).toBe(false);
   });
 
   it('fails closed for an unknown subagent type', async () => {
@@ -577,7 +577,7 @@ describe('ToolAgent', () => {
     child.onToolCall?.('read_file', '{"file_path":"a.ts"}', 'tool-1');
     child.onToolResult?.('read_file', 'file contents', 'tool-1');
     // 嵌套 Agent 调用不进活动行，同样不进时间线。
-    child.onToolCall?.('Agent', '{"operation":"read"}', 'tool-2');
+    child.onToolCall?.('agent', '{"operation":"read"}', 'tool-2');
 
     expect(taskManager.get(taskId, runtime)?.timeline).toEqual([
       { id: 'thinking', kind: 'thinking', text: '先看目录，再读文件', at: expect.any(String) },

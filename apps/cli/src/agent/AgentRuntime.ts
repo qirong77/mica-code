@@ -59,6 +59,11 @@ export type AgentRuntimeSnapshot = {
   role: string;
   capabilitySelection?: CapabilitySelection;
   /**
+   * 用户在会话里显式改过能力开关吗？false / 缺失表示这份会话跟随 config 的
+   * `capabilityDefaults`，只有改过的会话才固定用自己的选择。
+   */
+  capabilitiesCustomized?: boolean;
+  /**
    * Per-session 自动压缩覆盖（只含显式改过的键）。与能力开关同理：属于会话，
    * 不写全局配置，默认值仍由调用方（桌面设置页 / AUTO_COMPACT_DEFAULTS）提供。
    */
@@ -105,6 +110,12 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'AgentAbortError');
 }
 
+/**
+ * 默认能力来自 config.json，每次构建请求都会读到：短 TTL 摊掉读盘成本，但不会
+ * 把值长期钉在内存里，配置页改完默认值后面板很快就能看到新值。
+ */
+const DEFAULT_CAPABILITIES_TTL_MS = 1000;
+
 function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[] {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
@@ -127,7 +138,10 @@ export class AgentRuntime {
   private abortedRunCompleteUsageLength: number | null = null;
   private currentConfig: AgentRuntimeConfig;
   private currentRole = DEFAULT_ROLE_NAME;
-  private capabilities: CapabilitySelection = micaConfig.readCapabilityDefaults();
+  private capabilities: CapabilitySelection = normalizeCapabilitySelection(micaConfig.readCapabilityDefaults());
+  /** 用户是否在会话里显式改过能力；false 时这份会话跟随 config 的默认值。 */
+  private capabilitiesCustomized = false;
+  private defaultCapabilitiesCache: { at: number; value: CapabilitySelection } | null = null;
   private autoCompactOverride: AutoCompactOverride = {};
   private notes = '';
   private lastStatusKey: string | null = null;
@@ -153,18 +167,35 @@ export class AgentRuntime {
   }
 
   get capabilitySelection(): CapabilitySelection {
-    return cloneCapabilitySelection(this.capabilities);
+    return cloneCapabilitySelection(this.resolvedCapabilities());
   }
 
   /**
    * 本会话的能力开关。只改当前 agent：工具定义、执行校验与 skills 索引都读这份
    * 状态，其他会话与全局注册表不受影响。运行中拒绝切换，避免一轮里的工具集抖动。
+   *
+   * 默认把这份选择标记为「用户定制」：之后它不再跟随 config 的默认值。传
+   * `customized: false` 只用于把值灌进会话内部状态、不改变跟随关系。
    */
-  setCapabilities(selection: CapabilitySelection): CapabilitySelection {
+  setCapabilities(selection: CapabilitySelection, options: { customized?: boolean } = {}): CapabilitySelection {
     if (this.isRunning) {
       throw new Error('Cannot change capabilities while agent is running');
     }
     this.capabilities = normalizeCapabilitySelection(selection);
+    this.capabilitiesCustomized = options.customized ?? true;
+    return this.capabilitySelection;
+  }
+
+  /**
+   * 新会话（`/new`、`/clear`）回到「跟随 config 默认值」：清掉定制标志，
+   * 所以上一条会话关掉的工具不会漏到这一条。
+   */
+  resetCapabilitiesToDefaults(): CapabilitySelection {
+    if (this.isRunning) {
+      throw new Error('Cannot change capabilities while agent is running');
+    }
+    this.capabilities = cloneCapabilitySelection(this.resolveDefaultCapabilities());
+    this.capabilitiesCustomized = false;
     return this.capabilitySelection;
   }
 
@@ -198,13 +229,14 @@ export class AgentRuntime {
 
   /** 当前会话可用的 skills（已应用本会话开关）。 */
   availableSkills(): Skill[] {
-    const disabled = new Set(this.capabilities.disabledSkills);
+    const disabled = new Set(this.resolvedCapabilities().disabledSkills);
     return micaSkills.getLoaded().filter((skill) => !disabled.has(skill.name));
   }
 
   private isToolEnabledByCapabilities = (name: string): boolean => {
-    if (this.capabilities.disabledTools.includes(name)) return false;
-    for (const server of this.capabilities.disabledMcpServers) {
+    const capabilities = this.resolvedCapabilities();
+    if (capabilities.disabledTools.includes(name)) return false;
+    for (const server of capabilities.disabledMcpServers) {
       if (name.startsWith(mcpToolNamePrefix(server))) return false;
     }
     return true;
@@ -363,6 +395,7 @@ export class AgentRuntime {
       effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
       role: this.role,
       capabilitySelection: this.capabilitySelection,
+      capabilitiesCustomized: this.capabilitiesCustomized,
       autoCompactOverride: this.autoCompactOverrideSelection,
       notes: this.notes,
       contextWindowSize: this.currentConfig.provider.contextWindowSize,
@@ -433,7 +466,12 @@ export class AgentRuntime {
     this.runId++;
     this.currentConfig = agentRuntimeConfigFromSnapshot(snapshot);
     this.currentRole = micaAgent.roles.get(snapshot.role)?.name ?? DEFAULT_ROLE_NAME;
-    this.capabilities = normalizeCapabilitySelection(snapshot.capabilitySelection ?? this.capabilities);
+    // 旧快照没有 `capabilitiesCustomized`：以前的实现把当时的默认值复制进了快照，
+    // 这份副本几乎总是等于默认值，按「未定制」处理（跟随当前 config 默认值）比把
+    // 它当成用户的显式选择更符合意图；用户在面板里再点一下就会重新变成定制，
+    // 没有丢任何真实偏好。
+    this.capabilitiesCustomized = snapshot.capabilitiesCustomized === true;
+    this.capabilities = normalizeCapabilitySelection(snapshot.capabilitySelection ?? this.resolveDefaultCapabilities());
     this.autoCompactOverride = normalizeAutoCompactOverride(snapshot.autoCompactOverride);
     this.notes = normalizeSessionNotes(snapshot.notes);
     this.recreateClient();
@@ -564,6 +602,21 @@ export class AgentRuntime {
     if (!role) throw new Error('Built-in default role is unavailable');
     this.currentRole = role.name;
     return role;
+  }
+
+  /** 当前 config.json 里的新会话默认能力（读盘结果带短 TTL 缓存）。 */
+  private resolveDefaultCapabilities(): CapabilitySelection {
+    const now = Date.now();
+    const cached = this.defaultCapabilitiesCache;
+    if (cached && now - cached.at < DEFAULT_CAPABILITIES_TTL_MS) return cached.value;
+    const value = normalizeCapabilitySelection(micaConfig.readCapabilityDefaults());
+    this.defaultCapabilitiesCache = { at: now, value };
+    return value;
+  }
+
+  /** 会话实际生效的能力：改过的用自己的，没改过的跟着默认值走。 */
+  private resolvedCapabilities(): CapabilitySelection {
+    return this.capabilitiesCustomized ? this.capabilities : this.resolveDefaultCapabilities();
   }
 
   private emitStatus(status: AgentRuntimeStatus): void {

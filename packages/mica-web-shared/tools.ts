@@ -1,3 +1,5 @@
+import { normalizeToolName } from '@packages/mica-common/toolNames.js';
+
 // Tool display vocabulary shared by the desktop renderer and runtime.
 // Pure functions only, matching the desktop ChatView tool-row grammar so both
 // UIs show the same icon/label for the same tool.
@@ -13,9 +15,10 @@ const TOOL_ICONS: Record<string, string> = {
   background_tasks_start: '⚡️',
   web_fetch: '🔗',
   web_search: '🌐',
-  Skill: '✨',
-  Agent: '🤖',
-  TodoWrite: '📝',
+  skill: '✨',
+  agent: '🤖',
+  todo_write: '📝',
+  session_notes: '🗒️',
   background_tasks_list: '📋',
   background_tasks_kill: '📋',
   background_tasks_read: '📋',
@@ -23,8 +26,9 @@ const TOOL_ICONS: Record<string, string> = {
 };
 
 export function toolIcon(toolName: string | null | undefined): string {
-  if (String(toolName || '').startsWith('mcp__')) return '🔌';
-  return TOOL_ICONS[toolName ?? ''] || '⚙';
+  const name = normalizeToolName(toolName);
+  if (name.startsWith('mcp__')) return '🔌';
+  return TOOL_ICONS[name] || '⚙';
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -38,9 +42,10 @@ const TOOL_LABELS: Record<string, string> = {
   background_tasks_start: 'Start task',
   web_fetch: 'Fetch web',
   web_search: 'Search web',
-  Skill: 'Load skill',
-  Agent: 'Subagent',
-  TodoWrite: 'Plan',
+  skill: 'Load skill',
+  agent: 'Subagent',
+  todo_write: 'Plan',
+  session_notes: 'Session notes',
   background_tasks_list: 'List tasks',
   background_tasks_kill: 'Stop task',
   background_tasks_read: 'Task output',
@@ -49,7 +54,7 @@ const TOOL_LABELS: Record<string, string> = {
 
 /** Human label for a tool name; MCP tools render as `[MCP:server] tool` (hash suffix stripped). */
 export function toolLabel(toolName: string | null | undefined): string {
-  const name = String(toolName || '');
+  const name = normalizeToolName(toolName);
   if (name.startsWith('mcp__')) {
     const match = /^mcp__([^_]+)__(.+)$/.exec(name);
     if (match) {

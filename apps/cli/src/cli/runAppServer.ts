@@ -297,7 +297,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       await cleanupTask('stop headless plugins', () => pluginHost!.emitRuntimeStop());
       await cleanupTask('dispose headless plugins', () => pluginHost!.dispose());
     }
-    micaTools.unregisterRuntime('Agent');
+    micaTools.unregisterRuntime('agent');
     disposeModelEffortContext();
   };
 

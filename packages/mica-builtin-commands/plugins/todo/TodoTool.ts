@@ -1,6 +1,6 @@
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 
-const TOOL_NAME = 'TodoWrite';
+const TOOL_NAME = 'todo_write';
 const MAX_TODOS = 20;
 const MAX_TEXT_LENGTH = 240;
 

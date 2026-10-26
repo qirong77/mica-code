@@ -1925,6 +1925,49 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(session.snapshot?.autoCompactOverride).toEqual({ quickLimit: 1 });
   });
 
+  itE2E('capabilities/set pins the session selection over the config defaults', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    type CapabilityGetResult = { selection?: { disabledTools?: string[] } };
+
+    const host = spawnHost('capabilities-pin');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    // 一条会话先跑起来，拿到 session id（草稿会话的 set 只留在内存里）。
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '你好' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (capabilities)');
+    await waitFor(host, turnCompleted((started.params?.turn as { id?: string }).id!), 'turn/completed (capabilities)');
+
+    // 没定制过的会话跟随 config 默认值（这个 home 里没有 capabilityDefaults）。
+    await send(host, 2, 'mica/capabilities/get', {});
+    const initial = await waitFor(host, (m) => m.id === 2, 'capabilities/get (initial)');
+    const initialSelection = (initial.result as CapabilityGetResult).selection;
+    expect(initialSelection?.disabledTools).toEqual([]);
+
+    // 用户在会话里改过之后就固定用这份选择，再 get 拿到的还是它。
+    await send(host, 3, 'mica/capabilities/set', {
+      selection: { version: 1, disabledSkills: [], disabledTools: ['run_shell'], disabledMcpServers: [] },
+    });
+    const saved = await waitFor(host, (m) => m.id === 3, 'capabilities/set');
+    expect(saved.result).toMatchObject({ ok: true, selection: { disabledTools: ['run_shell'] } });
+
+    await send(host, 4, 'mica/capabilities/get', {});
+    const after = await waitFor(host, (m) => m.id === 4, 'capabilities/get (after set)');
+    const afterSelection = (after.result as CapabilityGetResult).selection;
+    expect(afterSelection?.disabledTools).toEqual(['run_shell']);
+
+    // 标志跟着快照落盘，resume 时才知道这条会话要不要跟随默认值。
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    const persisted = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      snapshot?: { capabilitiesCustomized?: unknown; capabilitySelection?: { disabledTools?: string[] } };
+    };
+    expect(persisted.snapshot?.capabilitiesCustomized).toBe(true);
+    expect(persisted.snapshot?.capabilitySelection?.disabledTools).toEqual(['run_shell']);
+  });
+
   itE2E('session notes round-trip through the protocol, the session file and the next prompt', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];
@@ -1940,7 +1983,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const capabilities = await waitFor(host, (m) => m.id === 99, 'capabilities/get (notes)');
     expect(
       (capabilities.result as { tools?: { name: string }[] }).tools?.map((tool) => tool.name),
-    ).toContain('SessionNotes');
+    ).toContain('session_notes');
 
     // 草稿会话（还没有 session id）就能读写：面板不必等第一条消息才可用。
     await send(host, 1, 'mica/notes/get', {});

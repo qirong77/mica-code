@@ -98,7 +98,7 @@ export async function startAsSubmit(
  * - user file plugins ($MICA_HOME/plugins) are not scanned.
  *
  * Everything that shapes the agent's capabilities is shared: session_* tools,
- * message queueing, the command-memory system-prompt guidance, TodoWrite and
+ * message queueing, the command-memory system-prompt guidance, todo_write and
  * the app-notify hooks.
  */
 export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): HeadlessPluginHost {

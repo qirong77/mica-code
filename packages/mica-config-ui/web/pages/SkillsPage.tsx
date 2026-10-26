@@ -3,27 +3,50 @@ import { createSkill, deleteSkill, readSkillsDetails, writeSkill } from '../api.
 import { confirmDialog, promptDialog } from '../components/DialogHost.js';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, Empty, SaveStatus, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
+import { useAutoSave } from '../useAutoSave.js';
 import type { ConfigWebSkillsDetails } from '../../src/shared/types.js';
 
-export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
+/**
+ * Skills 列表与 SKILL.md 编辑。
+ *
+ * 没有保存按钮：停手就写盘。切换条目、刷新、新建之前先把路上那份改动写完，所以不会因为
+ * 点快了而丢掉最后几个字。项目外 Skill 只读，自动保存对它们不生效。
+ */
+export function SkillsPage() {
   const [details, setDetails] = useState<ConfigWebSkillsDetails | null>(null);
   const [selectedName, setSelectedName] = useState('');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selectedSkill = useMemo(
     () => details?.skills.find((skill) => skill.name === selectedName),
     [details, selectedName],
   );
-  const dirty = Boolean(selectedSkill && selectedSkill.editable && content !== selectedSkill.content);
+  const editable = Boolean(selectedSkill?.editable);
+  const autoSave = useAutoSave<{ name: string; content: string }, ConfigWebSkillsDetails>({
+    save: (next) => writeSkill(next.name, next.content),
+    onSaved: (next) => setDetails(next),
+  });
+  const { schedule, flush } = autoSave;
   const RefreshIcon = appIcons.refresh;
-  const SaveIcon = appIcons.save;
   const AddIcon = appIcons.add;
   const TrashIcon = appIcons.trash;
+
+  /**
+   * 改动当场登记写盘。
+   *
+   * 不用 effect 兜：改完立刻切页面时，卸载和这次改动落在同一批更新里，被卸载的组件不会
+   * 再跑 effect，那一批改动就没人登记了。
+   */
+  function editContent(next: string) {
+    setContent(next);
+    if (!editable || !selectedName) return;
+    if (next === (selectedSkill?.content ?? '')) return;
+    schedule({ name: selectedName, content: next });
+  }
 
   function applyDetails(next: ConfigWebSkillsDetails, preferredName = selectedName) {
     const selected = next.skills.find((skill) => skill.name === preferredName) ?? next.skills[0];
@@ -33,9 +56,10 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
   }
 
   async function load() {
-    if (saving || !(await confirmDiscardChanges())) return;
+    await flush();
     setLoading(true);
     setError(null);
+    autoSave.clearError();
     try {
       applyDetails(await readSkillsDetails());
     } catch (loadError) {
@@ -45,23 +69,9 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
     }
   }
 
-  async function save() {
-    if (!selectedSkill || !selectedSkill.editable || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      applyDetails(await writeSkill(selectedSkill.name, content), selectedSkill.name);
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1600);
-    } catch (saveError) {
-      setError(formatError(saveError));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function addSkill() {
-    if (saving || !(await confirmDiscardChanges())) return;
+    if (busy) return;
+    await flush();
     const name = (
       await promptDialog({
         title: '新建 Skill',
@@ -72,16 +82,19 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
       })
     )?.trim();
     if (!name) return;
+    setBusy(true);
     setError(null);
     try {
       applyDetails(await createSkill(name), name);
     } catch (createError) {
       setError(formatError(createError));
+    } finally {
+      setBusy(false);
     }
   }
 
   async function removeSkill() {
-    if (!selectedSkill || !selectedSkill.editable || saving) return;
+    if (!selectedSkill || !selectedSkill.editable || busy) return;
     const confirmed = await confirmDialog({
       title: `删除 Skill「${selectedSkill.name}」`,
       message: `目录 ${selectedSkill.baseDir} 会被整个删除，此操作不可撤销。`,
@@ -89,53 +102,33 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
       danger: true,
     });
     if (!confirmed) return;
-    setSaving(true);
+    // 这个文件马上要没了，路上那份改动不必再写回去。
+    autoSave.cancel();
+    setBusy(true);
     setError(null);
     try {
       applyDetails(await deleteSkill(selectedSkill.name));
-      setSaved(false);
     } catch (deleteError) {
       setError(formatError(deleteError));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
   async function selectSkill(name: string) {
-    if (saving || name === selectedName || !(await confirmDiscardChanges())) return;
+    if (name === selectedName) return;
+    // 先把当前这份写完再换：切换不打断、也不丢正在敲的内容。
+    await flush();
     const skill = details?.skills.find((item) => item.name === name);
     setSelectedName(name);
     setContent(skill?.content ?? '');
-    setSaved(false);
   }
 
   useEffect(() => {
     void load();
+    // 首次加载只看这一个入口。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    onDirtyChange?.(dirty);
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warnBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', warnBeforeUnload);
-      onDirtyChange?.(false);
-    };
-  }, [dirty, onDirtyChange]);
-
-  function confirmDiscardChanges(): Promise<boolean> {
-    return !dirty
-      ? Promise.resolve(true)
-      : confirmDialog({
-          title: '放弃未保存的修改',
-          message: '当前 Skill 有未保存的修改，确定要放弃吗？',
-          confirmText: '放弃修改',
-          danger: true,
-        });
-  }
 
   return (
     <PageFrame
@@ -143,19 +136,20 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
       path={details?.root}
       actions={
         <div className="toolbar">
-          {saved ? <span className="save-status">已保存</span> : null}
-          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={load} loading={loading} />
-          <Button icon={<AddIcon size={15} />} onClick={addSkill}>
+          <SaveStatus saving={autoSave.saving} saved={autoSave.status === 'saved'} />
+          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={() => void load()} loading={loading} />
+          <Button icon={<AddIcon size={15} />} disabled={busy} onClick={() => void addSkill()}>
             新建
           </Button>
           {selectedSkill?.editable ? (
-            <Button variant="danger" icon={<TrashIcon size={15} />} title="删除" onClick={removeSkill} loading={saving}>
+            <Button
+              variant="danger"
+              icon={<TrashIcon size={15} />}
+              title="删除"
+              onClick={() => void removeSkill()}
+              loading={busy}
+            >
               删除
-            </Button>
-          ) : null}
-          {selectedSkill?.editable ? (
-            <Button variant="primary" icon={<SaveIcon size={15} />} onClick={save} loading={saving}>
-              保存
             </Button>
           ) : null}
         </div>
@@ -163,6 +157,7 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
     >
       <div className="editor-workspace">
         {error ? <Alert message={error} /> : null}
+        {autoSave.error ? <Alert message={autoSave.error} /> : null}
         {loading && !details ? (
           <div className="page-loading">正在加载 Skills…</div>
         ) : !details ? null : details.skills.length === 0 ? (
@@ -175,7 +170,6 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
                   key={skill.baseDir}
                   type="button"
                   className={`role-list-item ${selectedName === skill.name ? 'role-list-item-active' : ''}`}
-                  disabled={saving}
                   onClick={() => void selectSkill(skill.name)}
                 >
                   <span className="role-list-item-copy">
@@ -201,12 +195,7 @@ export function SkillsPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): 
                 ) : null}
               </div>
               <div className="editor-host role-editor-host">
-                <JsonEditor
-                  value={content}
-                  language="markdown"
-                  readOnly={!selectedSkill?.editable || saving}
-                  onChange={setContent}
-                />
+                <JsonEditor value={content} language="markdown" readOnly={!editable} onChange={editContent} />
               </div>
             </div>
           </div>

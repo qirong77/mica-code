@@ -19,7 +19,7 @@ export function SubagentTaskRow({
   childrenByParent: Map<string, MicaUiSubagentTaskItem[]>;
   nowMs?: number;
 }): React.ReactNode {
-  const activities = (task.activities ?? []).filter((activity) => activity.toolName !== 'Agent');
+  const activities = (task.activities ?? []).filter((activity) => activity.toolName !== 'agent');
   const childTasks = childrenByParent.get(task.id) ?? [];
   return (
     <Box flexDirection="column" width="100%" minWidth={0} paddingTop={depth === 0 ? 1 : 0}>

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import {
@@ -81,16 +81,20 @@ export async function probeCondition(params: {
     case 'task':
       return probeTask(condition);
     case 'process':
-      return probeProcess(condition);
+      return probeProcess(condition, baseline);
     case 'file':
+      // 只读探测，不做 owned_paths 租约校验：租约约束的是「能写、能执行」，
+      // 而 read_file / grep_search 对读本身不设限，这里加限制只会让
+      // 「等 /tmp 产物出现」在 subagent 里莫名其妙失败。
       return probeFile(condition, baseline);
     case 'command': {
       const access = assertCommandCwd(condition.cwd);
-      if (!access.ok) return { satisfied: false, error: access.message };
+      // cwd 不存在/不是目录：换多少个轮询周期也都是这个结果。
+      if (!access.ok) return { satisfied: false, error: access.message, fatal: true };
       try {
         assertShellPathAccess(condition.cwd ?? process.cwd(), pathContext);
       } catch (error) {
-        return { satisfied: false, error: error instanceof Error ? error.message : String(error) };
+        return { satisfied: false, error: error instanceof Error ? error.message : String(error), fatal: true };
       }
       return probeCommand(condition, baseline, signal);
     }
@@ -107,10 +111,14 @@ function probeTask(condition: Extract<NormalizedWaitCondition, { kind: 'task' }>
   let meta: BackgroundTaskMeta | undefined;
   try {
     meta = loadBackgroundTask(condition.taskId);
-  } catch (error) {
-    return { satisfied: false, error: error instanceof Error ? error.message : String(error) };
+  } catch {
+    // `assertSafeTaskId` 在这里拒掉的是「这个 id 永远不可能是后台任务」，
+    // 与未知 id 同属参数错误，同样必须立刻失败。
+    return { satisfied: false, error: unknownTaskMessage(condition.taskId), fatal: true };
   }
-  if (!meta) return { satisfied: false, error: `未知后台任务: ${condition.taskId}` };
+  // 未知 id 是参数错误而非「还没好」：多轮询一万次也不会注册出来，必须
+  // 立刻失败，否则模型会以为只是在等一个慢任务而白白耗到超时。
+  if (!meta) return { satisfied: false, error: unknownTaskMessage(condition.taskId), fatal: true };
 
   const running = meta.status === 'starting' || meta.status === 'running';
   const detail = `task ${meta.id}: ${meta.status}${
@@ -120,6 +128,22 @@ function probeTask(condition: Extract<NormalizedWaitCondition, { kind: 'task' }>
 
   const tail = readTaskTail(meta);
   return { satisfied: true, detail: tail ? `${detail}\n输出尾部：\n${tail}` : detail };
+}
+
+/**
+ * `wait_for(kind=task)` 只认 `background_tasks_start` 启动的 shell 任务。
+ * 模型很容易把 subagent 的 `agent-task-*` 传进来（「等三个实现子任务完成」
+ * 读起来就是在等 task），所以这里点名它、并给出真正能等它的入口——
+ * 只说「未知 task_id」模型只会换个写法再猜一次。
+ */
+function unknownTaskMessage(taskId: string): string {
+  if (taskId.startsWith('agent-task-')) {
+    return [
+      `${taskId} 是 subagent 任务，wait_for 只能等 background_tasks_start 启动的 shell 任务。`,
+      `等子代理改用 agent({ operation: "await", task_ids: ["${taskId}"] })（只看结果用 "read"，需要合并改动时用 "join"）。`,
+    ].join('');
+  }
+  return `未知 task_id: ${taskId}。它必须是 background_tasks_start 返回的那个 id，不确定时先用 background_tasks_list 查。`;
 }
 
 function readTaskTail(meta: BackgroundTaskMeta): string {
@@ -147,12 +171,30 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
-function probeProcess(condition: Extract<NormalizedWaitCondition, { kind: 'process' }>): WaitProbeResult {
+function probeProcess(
+  condition: Extract<NormalizedWaitCondition, { kind: 'process' }>,
+  baseline: WaitBaseline,
+): WaitProbeResult {
   const alive = isProcessAlive(condition.pid);
-  return {
-    satisfied: !alive,
-    detail: alive ? `pid ${condition.pid}: 仍在运行` : `pid ${condition.pid}: 已退出`,
-  };
+  if (alive) {
+    baseline.processSeenAlive = true;
+    return { satisfied: false, detail: `pid ${condition.pid}: 仍在运行` };
+  }
+  // 从未见它活过：pid 写错和「在我开始等之前就退出了」在这里无法区分，
+  // 但报成 satisfied 会让模型以为进程刚结束并据此继续下一步。宁可让它
+  // 立刻拿到一条说明去核对 pid。
+  if (!baseline.processSeenAlive) {
+    return {
+      satisfied: false,
+      error: [
+        `pid ${condition.pid} 在第一次探测时就不存在，等不到它退出。`,
+        '确认 pid 是否正确（pid 写错时永远等不到）；如果它确实已经结束，直接继续下一步即可。',
+        '等 background_tasks_start 启动的任务请改用 kind="task"。',
+      ].join(''),
+      fatal: true,
+    };
+  }
+  return { satisfied: true, detail: `pid ${condition.pid}: 已退出` };
 }
 
 function fileSignature(filePath: string): string {
@@ -164,12 +206,21 @@ function fileSignature(filePath: string): string {
   }
 }
 
-function readTextCapped(filePath: string): string {
+/**
+ * `matches` 只读尾部窗口：要等的日志通常是边跑边增长的，整读会把大文件直接
+ * 拒掉，让「等日志里出现某一行」这个最正当的用法永远失败。
+ */
+function readTextTail(filePath: string): string {
   const stat = statSync(filePath);
-  if (stat.size > MAX_INSPECT_BYTES) {
-    throw new Error(`文件过大（${stat.size} 字节），wait_for 只检查前 ${MAX_INSPECT_BYTES} 字节`);
+  if (stat.size <= MAX_INSPECT_BYTES) return readFileSync(filePath, 'utf-8');
+  const fd = openSync(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(MAX_INSPECT_BYTES);
+    readSync(fd, buffer, 0, MAX_INSPECT_BYTES, stat.size - MAX_INSPECT_BYTES);
+    return buffer.toString('utf-8');
+  } finally {
+    closeSync(fd);
   }
-  return readFileSync(filePath, 'utf-8');
 }
 
 function probeFile(
@@ -194,17 +245,18 @@ function probeFile(
     };
   }
 
-  if (!condition.pattern) return { satisfied: false, error: 'until=matches 需要提供 pattern' };
+  if (!condition.pattern) return { satisfied: false, error: 'until=matches 需要提供 pattern', fatal: true };
   if (!exists) return { satisfied: false, detail: `${target}: 尚不存在` };
   try {
-    const result = matchRegex(condition.pattern, readTextCapped(target));
-    if (!result.ok) return { satisfied: false, error: result.message };
+    const result = matchRegex(condition.pattern, readTextTail(target));
+    // 非法正则是静态属性，等下去不会变。
+    if (!result.ok) return { satisfied: false, error: result.message, fatal: true };
     return {
       satisfied: result.matched,
       detail: `${target}: ${result.matched ? '匹配' : '未匹配'} /${condition.pattern}/`,
     };
   } catch (error) {
-    return { satisfied: false, error: error instanceof Error ? error.message : String(error) };
+    return { satisfied: false, error: error instanceof Error ? error.message : String(error), fatal: true };
   }
 }
 
@@ -310,14 +362,18 @@ async function runCommandOnce(params: {
       }),
     );
     child.on('close', (code, signal) => {
-      const aborted = link.signal.aborted;
+      // 「单次轮询超时」和「整条等待被中止」都会走到这里，但前者必须报给
+      // 模型（它的命令被杀了），后者交给主循环结算 aborted。
+      const reason = link.signal.reason;
+      const pollTimedOut = (reason as Error | undefined)?.name === 'TimeoutError';
+      const aborted = link.signal.aborted && !pollTimedOut;
       finish({
         code,
         signal,
         stdout: stdout.text,
         stderr: stderr.text,
         aborted,
-        ...(aborted ? { error: (link.signal.reason as Error | undefined)?.message ?? '轮询被中止' } : {}),
+        ...(link.signal.aborted ? { error: (reason as Error | undefined)?.message ?? '轮询被中止' } : {}),
       });
     });
   });
@@ -336,9 +392,11 @@ async function probeCommand(
   if (condition.until === 'stdout_matches' || condition.until === 'stdout_changed') {
     const haystack = `${run.stdout}${run.stderr ? `\n${run.stderr}` : ''}`;
     if (condition.until === 'stdout_matches') {
-      if (!condition.pattern) return { satisfied: false, error: 'until=stdout_matches 需要提供 pattern' };
+      if (!condition.pattern) {
+        return { satisfied: false, error: 'until=stdout_matches 需要提供 pattern', fatal: true };
+      }
       const result = matchRegex(condition.pattern, haystack);
-      if (!result.ok) return { satisfied: false, error: result.message };
+      if (!result.ok) return { satisfied: false, error: result.message, fatal: true };
       return withPollError({
         satisfied: result.matched,
         detail: `exit_code=${exit} ${result.matched ? '匹配' : '未匹配'} /${condition.pattern}/`,
@@ -393,9 +451,11 @@ async function probeHttp(
 
     const body = (await response.text()).slice(0, MAX_INSPECT_BYTES);
     if (condition.until === 'body_matches') {
-      if (!condition.pattern) return { satisfied: false, error: 'until=body_matches 需要提供 pattern' };
+      if (!condition.pattern) {
+        return { satisfied: false, error: 'until=body_matches 需要提供 pattern', fatal: true };
+      }
       const result = matchRegex(condition.pattern, body);
-      if (!result.ok) return { satisfied: false, error: result.message };
+      if (!result.ok) return { satisfied: false, error: result.message, fatal: true };
       return {
         satisfied: result.matched,
         detail: `HTTP ${status} ${result.matched ? '匹配' : '未匹配'} /${condition.pattern}/`,

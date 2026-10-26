@@ -100,7 +100,7 @@ describe('getToolDefinitions', () => {
         'grep_search',
         'web_fetch',
         'web_search',
-        'Skill',
+        'skill',
         'background_tasks_list',
         'background_tasks_read',
       ]) {

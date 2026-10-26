@@ -322,7 +322,9 @@ export function cleanBackgroundTaskOutput(content: string): string {
   const spawnedMarker = '[mica background task spawned]';
   const spawnedAt = content.indexOf(spawnedMarker);
   let output = spawnedAt >= 0 ? content.slice(spawnedAt + spawnedMarker.length) : content;
-  output = output.replace(/^\r?\npid:.*\r?\n\r?\n/u, '');
+  // pid 行后面可能是空行、也可能什么都没有（任务刚启动就被读），所以不能
+  // 要求它后面还有一行。
+  output = output.replace(/^\r?\npid:[^\r\n]*\r?\n?/u, '');
   output = output.replace(/\r?\n?\[mica background task exited\]\r?\n[\s\S]*$/u, '');
   output = output.replace(
     /\r?\n?\[mica background task kill requested\]\r?\nrequested_at:.*\r?\nsignal:.*\r?\n?/gu,

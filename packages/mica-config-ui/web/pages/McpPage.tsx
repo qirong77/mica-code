@@ -3,28 +3,49 @@ import { createMcpServer, deleteMcpServer, readMcpDetails, writeMcpServer } from
 import { confirmDialog, promptDialog } from '../components/DialogHost.js';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, Empty, SaveStatus, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
 import { mcpStatusLabel, mcpStatusTone, mcpTypeLabel } from '../labels.js';
+import { useAutoSave } from '../useAutoSave.js';
 import type { ConfigWebMcpDetails, ConfigWebMcpServer } from '../../src/shared/types.js';
 
-export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): void }) {
+/**
+ * MCP server 列表，直接编辑 config.json 里 `mcpServers` 的单个条目。
+ *
+ * 没有保存按钮：停手就写盘。切换条目、刷新、新建之前先把路上那份改动写完。
+ */
+export function McpPage() {
   const [details, setDetails] = useState<ConfigWebMcpDetails | null>(null);
   const [selectedName, setSelectedName] = useState('');
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selectedServer = useMemo(
     () => details?.servers.find((server) => server.name === selectedName),
     [details, selectedName],
   );
-  const dirty = Boolean(selectedServer && content !== selectedServer.config);
+  const autoSave = useAutoSave<{ name: string; content: string }, ConfigWebMcpDetails>({
+    save: (next) => writeMcpServer(next.name, next.content),
+    onSaved: (next) => setDetails(next),
+  });
+  const { schedule, flush } = autoSave;
   const RefreshIcon = appIcons.refresh;
-  const SaveIcon = appIcons.save;
   const AddIcon = appIcons.add;
   const TrashIcon = appIcons.trash;
+
+  /**
+   * 改动当场登记写盘。
+   *
+   * 不用 effect 兜：改完立刻切页面时，卸载和这次改动落在同一批更新里，被卸载的组件不会
+   * 再跑 effect，那一批改动就没人登记了。
+   */
+  function editContent(next: string) {
+    setContent(next);
+    if (!selectedName || !selectedServer) return;
+    if (next === selectedServer.config) return;
+    schedule({ name: selectedName, content: next });
+  }
 
   function applyDetails(next: ConfigWebMcpDetails, preferredName = selectedName) {
     const selected = next.servers.find((server) => server.name === preferredName) ?? next.servers[0];
@@ -34,9 +55,10 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
   }
 
   async function load() {
-    if (saving || !(await confirmDiscardChanges())) return;
+    await flush();
     setLoading(true);
     setError(null);
+    autoSave.clearError();
     try {
       applyDetails(await readMcpDetails());
     } catch (loadError) {
@@ -46,23 +68,9 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
     }
   }
 
-  async function save() {
-    if (!selectedServer || saving) return;
-    setSaving(true);
-    setError(null);
-    try {
-      applyDetails(await writeMcpServer(selectedServer.name, content), selectedServer.name);
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1600);
-    } catch (saveError) {
-      setError(formatError(saveError));
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function addServer() {
-    if (saving || !(await confirmDiscardChanges())) return;
+    if (busy) return;
+    await flush();
     const name = (
       await promptDialog({
         title: '新建 MCP server',
@@ -73,16 +81,19 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
       })
     )?.trim();
     if (!name) return;
+    setBusy(true);
     setError(null);
     try {
       applyDetails(await createMcpServer(name), name);
     } catch (createError) {
       setError(formatError(createError));
+    } finally {
+      setBusy(false);
     }
   }
 
   async function removeServer() {
-    if (!selectedServer || saving) return;
+    if (!selectedServer || busy) return;
     const confirmed = await confirmDialog({
       title: `删除 MCP server「${selectedServer.name}」`,
       message: '此操作不可撤销。',
@@ -90,53 +101,33 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
       danger: true,
     });
     if (!confirmed) return;
-    setSaving(true);
+    // 这个条目马上要没了，路上那份改动不必再写回去。
+    autoSave.cancel();
+    setBusy(true);
     setError(null);
     try {
       applyDetails(await deleteMcpServer(selectedServer.name));
-      setSaved(false);
     } catch (deleteError) {
       setError(formatError(deleteError));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
   async function selectServer(name: string) {
-    if (saving || name === selectedName || !(await confirmDiscardChanges())) return;
+    if (name === selectedName) return;
+    // 先把当前这份写完再换：切换不打断、也不丢正在敲的内容。
+    await flush();
     const server = details?.servers.find((item) => item.name === name);
     setSelectedName(name);
     setContent(server?.config ?? '');
-    setSaved(false);
   }
 
   useEffect(() => {
     void load();
+    // 首次加载只看这一个入口。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    onDirtyChange?.(dirty);
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warnBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', warnBeforeUnload);
-      onDirtyChange?.(false);
-    };
-  }, [dirty, onDirtyChange]);
-
-  function confirmDiscardChanges(): Promise<boolean> {
-    return !dirty
-      ? Promise.resolve(true)
-      : confirmDialog({
-          title: '放弃未保存的修改',
-          message: '当前 MCP 配置有未保存的修改，确定要放弃吗？',
-          confirmText: '放弃修改',
-          danger: true,
-        });
-  }
 
   return (
     <PageFrame
@@ -144,9 +135,9 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
       path={details?.path}
       actions={
         <div className="toolbar">
-          {saved ? <span className="save-status">已保存</span> : null}
-          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={load} loading={loading} />
-          <Button icon={<AddIcon size={15} />} onClick={addServer}>
+          <SaveStatus saving={autoSave.saving} saved={autoSave.status === 'saved'} />
+          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={() => void load()} loading={loading} />
+          <Button icon={<AddIcon size={15} />} disabled={busy} onClick={() => void addServer()}>
             新建
           </Button>
           {selectedServer ? (
@@ -154,15 +145,10 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
               variant="danger"
               icon={<TrashIcon size={15} />}
               title="删除"
-              onClick={removeServer}
-              loading={saving}
+              onClick={() => void removeServer()}
+              loading={busy}
             >
               删除
-            </Button>
-          ) : null}
-          {selectedServer ? (
-            <Button variant="primary" icon={<SaveIcon size={15} />} onClick={save} loading={saving}>
-              保存
             </Button>
           ) : null}
         </div>
@@ -170,6 +156,7 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
     >
       <div className="editor-workspace">
         {error ? <Alert message={error} /> : null}
+        {autoSave.error ? <Alert message={autoSave.error} /> : null}
         {loading && !details ? (
           <div className="page-loading">正在加载 MCP 配置…</div>
         ) : !details ? null : details.servers.length === 0 ? (
@@ -182,7 +169,6 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
                   key={server.name}
                   type="button"
                   className={`role-list-item ${selectedName === server.name ? 'role-list-item-active' : ''}`}
-                  disabled={saving}
                   onClick={() => void selectServer(server.name)}
                 >
                   <span className="role-list-item-copy">
@@ -218,12 +204,7 @@ export function McpPage({ onDirtyChange }: { onDirtyChange?(dirty: boolean): voi
                 ) : null}
               </div>
               <div className="editor-host role-editor-host">
-                <JsonEditor
-                  value={content}
-                  language="json"
-                  readOnly={saving || !selectedServer}
-                  onChange={setContent}
-                />
+                <JsonEditor value={content} language="json" readOnly={!selectedServer} onChange={editContent} />
               </div>
             </div>
           </div>

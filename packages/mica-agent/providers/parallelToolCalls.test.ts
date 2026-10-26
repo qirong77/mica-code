@@ -166,7 +166,7 @@ describe('parallel provider tool calls', () => {
   it('runs Agent calls concurrently even though the tool is not read-only', async () => {
     const events: string[] = [];
     const gate = createGate(2);
-    registerTool(new ScriptedTool('Agent', false, { events, gate, output: 'task_id: probe' }));
+    registerTool(new ScriptedTool('agent', false, { events, gate, output: 'task_id: probe' }));
 
     openaiMocks.chatCreate
       .mockResolvedValueOnce(
@@ -176,8 +176,8 @@ describe('parallel provider tool calls', () => {
             {
               delta: {
                 tool_calls: [
-                  { index: 0, id: 'call-agent-1', function: { name: 'Agent', arguments: '{}' } },
-                  { index: 1, id: 'call-agent-2', function: { name: 'Agent', arguments: '{}' } },
+                  { index: 0, id: 'call-agent-1', function: { name: 'agent', arguments: '{}' } },
+                  { index: 1, id: 'call-agent-2', function: { name: 'agent', arguments: '{}' } },
                 ],
               },
             },
@@ -192,7 +192,7 @@ describe('parallel provider tool calls', () => {
     expect(outcome).toBe('completed');
     await query;
 
-    expect(events.slice(0, 2)).toEqual(['start:Agent', 'start:Agent']);
+    expect(events.slice(0, 2)).toEqual(['start:agent', 'start:agent']);
     expect(events).toHaveLength(4);
   });
 

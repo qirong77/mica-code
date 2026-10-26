@@ -607,9 +607,10 @@ export function SessionTree({
         if (item.draft) onSelectDraft?.(item.draft)
         return
       }
-      if (item.session) onOpenSession?.(item.session)
+      // 草稿不要在对话里定位：词在输入框里，transcript 里根本没有，打开只会得到空结果
+      if (item.session) onOpenSession?.(item.session, tokens.length ? { find: tokens } : undefined)
     },
-    [onOpenSession, onSelectDraft]
+    [onOpenSession, onSelectDraft, tokens]
   )
 
   // ⌘/Ctrl+K 聚焦搜索框。终端与输入框里 Cmd+K 有自己的含义（清屏 / 删到行尾），不抢。

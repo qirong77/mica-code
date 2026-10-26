@@ -1,7 +1,7 @@
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 import { MAX_SESSION_NOTES_LENGTH, normalizeSessionNotes, sessionNotesSummary } from '@packages/mica-common/index.js';
 
-const TOOL_NAME = 'SessionNotes';
+const TOOL_NAME = 'session_notes';
 
 export type NotesAction = 'read' | 'append' | 'replace';
 

@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { ProviderEditor } from '../components/ProviderEditor.js';
-import { confirmDialog } from '../components/DialogHost.js';
-import { Alert, Button, CollapsiblePanel, Empty, Tag } from '../components/Ui.js';
+import { Alert, Button, CollapsiblePanel, Empty, SaveStatus, Tag } from '../components/Ui.js';
 import { readConfigFile, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
 import {
@@ -23,9 +22,10 @@ import {
   type ConfigDraft,
 } from '../configDraft.js';
 import type { ConfigWebAppSection } from '../layout/Sidebar.js';
+import type { ConfigWebFilePayload } from '../../src/shared/types.js';
+import { useAutoSave } from '../useAutoSave.js';
 
 type ConfigPageProps = {
-  onDirtyChange?(dirty: boolean): void;
   /** 「由其他页面管理」里的跳转；桌面端与浏览器宿主都从 App 传下来。 */
   onNavigate?(section: ConfigWebAppSection): void;
 };
@@ -35,33 +35,58 @@ type ConfigPageProps = {
  *
  * 以前这里是个裸 JSON 编辑器：字段全靠记，写错一个逗号就保存不了。现在按字段编辑——
  * 表单只覆盖有结构的部分（providers / searxngUrl），其余内容（mcpServers、
- * capabilityDefaults、未来新增的键）在「直接编辑 JSON」里原样可见可改，保存时不会丢。
+ * capabilityDefaults、未来新增的键）在「直接编辑 JSON」里原样可见可改，写盘时不会丢。
+ *
+ * 没有保存按钮：改动停下就自动写盘。本地校验不过（必填项没填、JSON 还没写完）时先不写，
+ * 页面上照旧提示哪里要修——自动保存的前提是别把一份会让 CLI 起不来的配置落盘。
  */
-export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
+export function ConfigPage({ onNavigate }: ConfigPageProps) {
   const [draft, setDraft] = useState<ConfigDraft | null>(null);
   const [savedJson, setSavedJson] = useState('');
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [path, setPath] = useState('');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
   const RefreshIcon = appIcons.refresh;
-  const SaveIcon = appIcons.save;
   const AddIcon = appIcons.add;
+  const draftRef = useRef<ConfigDraft | null>(null);
 
   const issues = useMemo(() => (draft ? validateConfigDraft(draft) : []), [draft]);
   const errors = useMemo(() => issueMap(draft ?? {}), [draft]);
-  const dirty = Boolean(draft) && serializeConfigDraft(draft ?? {}) !== savedJson;
+
+  const autoSave = useAutoSave<string, ConfigWebFilePayload>({
+    save: writeConfigFile,
+    onSaved: (payload, sent) => applySavedContent(payload.content, sent),
+  });
+  const { schedule, flush } = autoSave;
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  /**
+   * 改动当场登记写盘。
+   *
+   * 不用 effect 兜：改完立刻切页面时，卸载和这次改动落在同一批更新里，被卸载的组件不会
+   * 再跑 effect，那一批改动就没人登记了。校验没过（必填项缺、模型列表空）先不写——自动
+   * 保存的前提是别把一份会让 CLI 起不来的配置落盘。
+   */
+  function scheduleIfSavable(next: ConfigDraft) {
+    const text = serializeConfigDraft(next);
+    if (text === savedJson) return;
+    if (validateConfigDraft(next).length > 0) return;
+    schedule(text);
+  }
 
   /** 表单改动：draft 与 JSON 文本一起更新，两边永远是同一份内容。 */
   function applyDraft(next: ConfigDraft) {
     setDraft(next);
     setJsonText(serializeConfigDraft(next));
     setJsonError(null);
+    scheduleIfSavable(next);
   }
 
   /** 新增服务商后直接展开它，否则用户只看到多了一行折起来的摘要。 */
@@ -89,6 +114,7 @@ export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
     }
     setJsonError(null);
     setDraft(result.draft);
+    scheduleIfSavable(result.draft);
   }
 
   function applyContent(content: string) {
@@ -99,10 +125,30 @@ export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
     setSavedJson(result.draft ? serializeConfigDraft(result.draft) : content);
   }
 
+  /**
+   * 写盘成功后同步 draft 与「已保存」基线。
+   *
+   * 不动 jsonText：用户在「直接编辑 JSON」里手上那份文本（缩进、空行）不该因为一次自动保存
+   * 被重排、把光标顶走。期间又改过（sent 与当前草稿不一致）时整段跳过，别把新的输入盖回去。
+   */
+  function applySavedContent(content: string, sent: string) {
+    const current = draftRef.current ?? {};
+    if (serializeConfigDraft(current) !== sent) return;
+    const result = parseConfigDraft(content);
+    if (result.draft) {
+      setDraft(result.draft);
+      setSavedJson(serializeConfigDraft(result.draft));
+      return;
+    }
+    setSavedJson(content);
+  }
+
   async function load() {
-    if (!(await confirmDiscardChanges())) return;
+    // 先把路上那几下击键写掉，再按磁盘上的内容重建表单。
+    await flush();
     setLoading(true);
     setError(null);
+    autoSave.clearError();
     try {
       const payload = await readConfigFile();
       setPath(payload.path ?? '');
@@ -114,51 +160,11 @@ export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
     }
   }
 
-  async function save() {
-    if (!draft || saving || jsonError || issues.length > 0) return;
-    setSaving(true);
-    setError(null);
-    try {
-      const payload = await writeConfigFile(serializeConfigDraft(draft));
-      applyContent(payload.content);
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1600);
-    } catch (saveError) {
-      setError(formatError(saveError));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function confirmDiscardChanges(): Promise<boolean> {
-    return !dirty
-      ? Promise.resolve(true)
-      : confirmDialog({
-          title: '放弃未保存的修改',
-          message: '当前配置有未保存的修改，重新加载会丢掉它们。',
-          confirmText: '放弃修改',
-          danger: true,
-        });
-  }
-
   useEffect(() => {
     void load();
-    // 首次加载只看这一个入口；confirmDiscardChanges 依赖的 dirty 在初次加载时必为 false。
+    // 首次加载只看这一个入口；加载完成后 draft 才会出现。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    onDirtyChange?.(dirty);
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!dirty) return;
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', warnBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', warnBeforeUnload);
-      onDirtyChange?.(false);
-    };
-  }, [dirty, onDirtyChange]);
 
   const providers = draft ? providerEntries(draft) : [];
   const extraKeys = draft ? extraConfigKeys(draft) : [];
@@ -169,23 +175,17 @@ export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
       path={path || undefined}
       actions={
         <div className="toolbar">
-          {saved ? <span className="save-status">已保存</span> : null}
-          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={() => void load()} loading={loading} />
-          <Button
-            variant="primary"
-            icon={<SaveIcon size={15} />}
-            onClick={() => void save()}
-            loading={saving}
-            disabled={loading || !draft || !dirty || Boolean(jsonError) || issues.length > 0}
-          >
-            保存
+          <SaveStatus saving={autoSave.saving} saved={autoSave.status === 'saved'} />
+          <Button icon={<RefreshIcon size={15} />} onClick={() => void load()} loading={loading}>
+            重新加载
           </Button>
         </div>
       }
     >
       <div className="detail-body detail-body-stacked">
         {error ? <Alert message={error} /> : null}
-        {jsonError ? <Alert message={`JSON 无法解析，改好之前不能保存：${jsonError}`} /> : null}
+        {autoSave.error ? <Alert message={autoSave.error} /> : null}
+        {jsonError ? <Alert message={`JSON 无法解析，改好之前不会写盘：${jsonError}`} /> : null}
         {issues.length > 0 ? <Alert message={`还有 ${issues.length} 处需要修正：${issues[0].message}`} /> : null}
         {loading && !draft ? (
           <div className="page-loading">正在加载配置…</div>
@@ -201,7 +201,7 @@ export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
                       : '至少需要一个服务商才能发送消息'}
                   </p>
                 </div>
-                <Button icon={<AddIcon size={15} />} disabled={saving} onClick={addProvider}>
+                <Button icon={<AddIcon size={15} />} onClick={addProvider}>
                   添加服务商
                 </Button>
               </header>
@@ -216,7 +216,6 @@ export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
                       raw={raw}
                       index={index}
                       removable={providers.length > 1}
-                      disabled={saving}
                       errorFor={(field) => errors.get(`providers.${index}.${field}`)}
                       hasError={[...errors.keys()].some((key) => key.startsWith(`providers.${index}.`))}
                       expanded={expanded.has(index)}
@@ -257,7 +256,6 @@ export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
                 <input
                   className={errors.has('searxngUrl') ? 'text-input text-input-invalid' : 'text-input'}
                   value={readSearxngUrl(draft)}
-                  disabled={saving}
                   spellCheck={false}
                   placeholder="http://127.0.0.1:8080"
                   aria-invalid={errors.has('searxngUrl')}
@@ -285,19 +283,29 @@ export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
                   <div className="config-managed-copy">
                     <span className="config-managed-name">MCP 服务</span>
                     <span className="config-managed-desc">
-                      {mcpServerCount(draft) > 0 ? `${mcpServerCount(draft)} 个，写在 mcpServers` : '还没有配置'}
+                      {mcpServerCount(draft) > 0 ? `${mcpServerCount(draft)} 个` : '还没有配置'}
+                      <code className="config-managed-key">mcpServers</code>
                     </span>
                   </div>
-                  {onNavigate ? <Button onClick={() => onNavigate('mcp')}>去 MCP 页面</Button> : null}
+                  {onNavigate ? (
+                    <Button variant="ghost" onClick={() => onNavigate('mcp')}>
+                      去 MCP 页面
+                    </Button>
+                  ) : null}
                 </div>
                 <div className="config-managed-row">
                   <div className="config-managed-copy">
                     <span className="config-managed-name">新会话默认能力</span>
                     <span className="config-managed-desc">
-                      {capabilityDefaultsSummary(draft)}，写在 capabilityDefaults
+                      {capabilityDefaultsSummary(draft)}
+                      <code className="config-managed-key">capabilityDefaults</code>
                     </span>
                   </div>
-                  {onNavigate ? <Button onClick={() => onNavigate('capabilities')}>去 Capabilities</Button> : null}
+                  {onNavigate ? (
+                    <Button variant="ghost" onClick={() => onNavigate('capabilities')}>
+                      去 Capabilities
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             </section>
@@ -330,7 +338,7 @@ export function ConfigPage({ onDirtyChange, onNavigate }: ConfigPageProps) {
               meta={jsonError ? <Tag tone="red">解析失败</Tag> : <Tag>可整份替换</Tag>}
             >
               <div className="editor-host config-json-host">
-                <JsonEditor value={jsonText} language="json" readOnly={saving} onChange={applyJsonText} />
+                <JsonEditor value={jsonText} language="json" onChange={applyJsonText} />
               </div>
             </CollapsiblePanel>
           </div>

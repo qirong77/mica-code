@@ -217,7 +217,7 @@ describe('wait_for command conditions', () => {
     expect(parseField(missing, 'status')).toBe('timeout');
   });
 
-  it('surfaces a bad cwd as a poll error instead of satisfying the condition', async () => {
+  it('fails fast on a bad cwd instead of polling until the timeout', async () => {
     const result = await tool.execute({
       kind: 'command',
       command: 'echo hi',
@@ -225,8 +225,97 @@ describe('wait_for command conditions', () => {
       timeout_ms: 100,
       ...FAST,
     });
-    expect(parseField(result, 'status')).toBe('timeout');
+    expect(parseField(result, 'status')).toBe('failed');
+    expect(result).toMatch(/polls: 1\b/);
     expect(result).toContain('cwd is not accessible');
+  });
+});
+
+describe('wait_for unfixable conditions', () => {
+  it('fails fast on a subagent task id and points at Agent instead of polling', async () => {
+    const result = await tool.execute({
+      kind: 'task',
+      task_id: 'agent-task-1793003805784-1rob04',
+      timeout_ms: 60_000,
+      ...FAST,
+    });
+    // 关键回归：不能像以前那样轮询 940 次才发现等错了东西。
+    expect(parseField(result, 'status')).toBe('failed');
+    expect(result).toMatch(/polls: 1\b/);
+    expect(result).toContain('subagent 任务');
+    expect(result).toContain('operation: "await"');
+  });
+
+  it('fails fast on an unknown shell task id', async () => {
+    const result = await tool.execute({
+      kind: 'task',
+      task_id: 'deadbeef1234',
+      timeout_ms: 60_000,
+      ...FAST,
+    });
+    expect(parseField(result, 'status')).toBe('failed');
+    expect(result).toMatch(/polls: 1\b/);
+    expect(result).toContain('background_tasks_list');
+  });
+
+  it('refuses to resume a failed wait', async () => {
+    const first = await tool.execute({
+      kind: 'task',
+      task_id: 'agent-task-1-abc',
+      timeout_ms: 1_000,
+      ...FAST,
+    });
+    const waitId = parseWaitId(first);
+    const resumed = await tool.execute({ wait_id: waitId, timeout_ms: 1_000, ...FAST });
+    expect(parseField(resumed, 'status')).toBe('failed');
+    expect(resumed).toContain('此前的调用里已经结束');
+  });
+
+  it('fails fast on an invalid regex instead of polling a command forever', async () => {
+    const result = await tool.execute({
+      kind: 'command',
+      command: 'echo hi',
+      until: 'stdout_matches',
+      pattern: '(',
+      timeout_ms: 60_000,
+      ...FAST,
+    });
+    expect(parseField(result, 'status')).toBe('failed');
+    expect(result).toMatch(/polls: 1\b/);
+  });
+
+  it('fails fast on an invalid body regex', async () => {
+    const base = await listen(() => new Response('ok'));
+    const result = await tool.execute({
+      kind: 'http',
+      url: base,
+      until: 'body_matches',
+      pattern: '[',
+      timeout_ms: 60_000,
+      ...FAST,
+    });
+    expect(parseField(result, 'status')).toBe('failed');
+    expect(result).toMatch(/polls: 1\b/);
+  });
+
+  it('rejects an http url without a scheme up front', async () => {
+    const result = await tool.execute({
+      kind: 'http',
+      url: 'localhost:3000/health',
+      timeout_ms: 60_000,
+      ...FAST,
+    });
+    expect(result).toContain('url 无效');
+    expect(result).toContain('http://');
+  });
+
+  it('does not report a never-seen pid as a clean exit', async () => {
+    // 用一个大到不可能存在的 pid：旧实现会立刻返回 satisfied，让模型以为
+    // 「进程刚刚结束」并据此继续下一步。
+    const result = await tool.execute({ kind: 'process', pid: 4_194_304, timeout_ms: 60_000, ...FAST });
+    expect(parseField(result, 'status')).toBe('failed');
+    expect(result).toMatch(/polls: 1\b/);
+    expect(result).toContain('第一次探测时就不存在');
   });
 });
 

@@ -166,6 +166,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - cwd 的 `AGENT.md` / `AGENTS.md` 合并注入，路径按 live cwd 解析，不在模块加载时冻结。
 - skills 仅以索引进入 system prompt。角色扫描 `$MICA_HOME/role/*.md`；内置 `default` 不可被同名用户文件覆盖。
 - **能力选择**：`AgentRuntime.setCapabilities()` 保存本会话的 skills / tools / MCP 开关；system prompt 的 skills 索引、工具定义与执行校验读同一份状态（`createClientOptions` 把会话开关与调用方 filter 取交集）。规则在 `mica-common/capabilities.ts`，只存「被关掉的名字」，新增能力默认可用。
+- **默认值 vs 会话定制**：没在会话里改过开关的会话跟随 `config.json` 的 `capabilityDefaults`（读盘带 1 秒缓存，配置页改完很快生效）；`setCapabilities()` 把 `capabilitiesCustomized` 置真之后才固定用自己的选择，`resetCapabilitiesToDefaults()` 让 `/new`、`/clear` 回到跟随默认。
 - 模板品牌占位符通过 `brandTemplate.ts` 的 `applyBrandTemplate` 统一展开；未知占位符保留，不硬编码品牌名。
 
 ### 模型规则
@@ -193,7 +194,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - `subagentUsageHistory` 独立于主 `usageHistory`，保持 rewind 裁剪语义。
 - compact 保留 `lastUsage` / `usageHistory` 供 Stats 对账；界面 ctx 优先读 `displayUsage`，下一次较新的真实请求后失效。
 - fork 清空两类 usageHistory，只保留描述继承上下文的 `lastUsage`。旧会话用量副本由 `usageIdentity` / `filterOwnedUsage` 统一归属，列表与详情保持一致。
-- 会话快照带 `capabilitySelection`；`startNewSession` 恢复 config 的 `capabilityDefaults`，resume/fork 沿用快照，因此开关不会跨会话串味。
+- 会话快照带 `capabilitySelection` 与 `capabilitiesCustomized`（缺失＝未定制，`version: 1` 早期写下的会话都走这条）；未定制的会话跟随 config 的 `capabilityDefaults`，定制过的用快照里的值。`startNewSession` 回到跟随默认，resume/fork 沿用快照，因此开关不会跨会话串味。
 - 会话快照带 `notes`（markdown，可选字段，缺省当空串）；`startNewSession` 清空、resume/fork 沿用、rewind 随 checkpoint 回滚。字段非字符串按会话损坏拒绝解析，不做类型纠正。
 - 无手动标题时取最后一条真实用户消息，最长 60 字符；跳过 compact 元数据与 `displayContent` 不同于 content 的插件注入消息。
 
@@ -248,8 +249,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 命令
 
 - 命令实现放 `mica-builtin-commands/commands/`；装配放 `plugins/command-*.ts`，统一从 `index.ts` 导出。
-- `/capabilities` 是会话设置面板：Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换、不提供全开全关）+ 压缩页签（`+/−` 调阈值，`r` 复位本项、`R` 全部默认）。`/skills`、`/mcp` 显示同一份开关状态，默认值在配置页 Capabilities / Auto Compact 一节。工具分组由 `mica-tools/registry.ts` 的 `TOOL_FAMILY_LABELS` 唯一定义：只认声明过前缀的工具（`pty_*`、`loop_*`、`session_*`、`background_tasks_list` 与 `background_tasks_kill`），且至少两个成员才显示，其余工具平铺；桌面面板按组展示、组头整组开关，落盘仍是逐工具名，TUI 面板保持逐项切换。
-- 设置页与配置页要列出「会话里才会注册」的工具（`Agent`、`TodoWrite`、`session_peers`）时，用 `mica-tools/runtimeToolDescriptors.ts` 的 `RUNTIME_TOOL_DESCRIPTORS`；它们只在同名工具尚未注册时补进 `getCatalog()`，`apps/cli/src/tools/runtimeToolDescriptors.test.ts` 负责与真实工具的定义对账，改工具描述或入参必须同步。目录来源只有 `builtin` 与 `mcp` 两类：插件注册的工具同样按内置上报，面板不区分「运行期」。
+- `/capabilities` 是会话设置面板：Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换、不提供全开全关）+ 压缩页签（`+/−` 调阈值，`r` 复位本项、`R` 全部默认）。`/skills`、`/mcp` 显示同一份开关状态，默认值在配置页 Capabilities / Auto Compact 一节。工具分组由 `mica-tools/registry.ts` 的 `TOOL_FAMILY_LABELS` 唯一定义：只认声明过前缀的工具（`pty_*`、`loop_*`、`session_*`、`background_tasks_*`），且至少两个成员才显示，其余工具平铺；桌面面板按组展示、组头整组开关，落盘仍是逐工具名，TUI 面板保持逐项切换。
+- **工具名一律 snake_case 全小写**（`read_file`、`run_shell`、`todo_write`、`session_notes`、`pty_*`、`background_tasks_*`），与 MCP 工具前缀同一套风格；新增工具不要再起大驼峰。历史遗留名字（`Skill` / `Agent` / `TodoWrite` / `SessionNotes`）登记在 `mica-common/toolNames.ts`，读取处统一过 `normalizeToolName`，旧会话保存的能力开关与旧对话里的工具行因此仍对得上。
+- 设置页与配置页要列出「会话里才会注册」的工具（`agent`、`todo_write`、`session_peers`）时，用 `mica-tools/runtimeToolDescriptors.ts` 的 `RUNTIME_TOOL_DESCRIPTORS`；它们只在同名工具尚未注册时补进 `getCatalog()`，`apps/cli/src/tools/runtimeToolDescriptors.test.ts` 负责与真实工具的定义对账，改工具描述或入参必须同步。目录来源只有 `builtin` 与 `mcp` 两类：插件注册的工具同样按内置上报，面板不区分「运行期」。
 - quick commands 另由 `apps/cli/src/plugins/commands/index.ts` 注册；新增/删除时检查两条路径与 README。
 - 通过 `CommandRuntimeServices` / active proxy 注入依赖；耗时且改状态、文件、配置或 git 的命令走 exclusive task。交互反馈用 `services.showNotice`。
 - turn 运行中是否可执行由注册时的 `allowDuringTurn` 决定，检查 quick commands 与 `plugins/command-*.ts` 两条路径；exclusive task 期间仅 status、task、agents、new。
@@ -266,12 +268,13 @@ npm run serve:web         # 构建后运行 Web 运行时
 - PTY 由懒启动 Node helper `mica-pty/src/server.mjs` 承载，Bun 首次调用动态加载 `src/manager.js`。
 - 修改 `server.mjs` 后运行 `bun run scripts/generate-pty-server-source.mjs`，同步 `ptyServerSource.ts`。
 - Todo 属当前进程/turn，不写 session；正常完成将 pending / in_progress 全部 completed，abort/error 只将 in_progress 退回 pending。desktop 从实时工具事件重建计划，须同步收口规则。
-- `SessionNotes` 读写会话笔记（`snapshot.notes`），`read` / `append` / `replace` 三个 action，`primaryAgentOnly`；文本归一化与 prompt 片段在 `mica-common/sessionNotes.ts`。工具只改内存，落盘交给本轮 checkpoint，别在工具里调 `saveCurrent`。
+- `session_notes` 读写会话笔记（`snapshot.notes`），`read` / `append` / `replace` 三个 action，`primaryAgentOnly`；文本归一化与 prompt 片段在 `mica-common/sessionNotes.ts`。工具只改内存，落盘交给本轮 checkpoint，别在工具里调 `saveCurrent`。
 
 ### wait_for 与会话自治
 
 - `wait_for` 支持 task/process/file/command/http/port/duration，条件纯逻辑在 `waitFor/conditions.ts`，记录表是唯一事实来源。
-- 状态只有 waiting / satisfied / timeout / aborted，记录只在调用存续期间存在——没有「登记后没人推进」的 parked 态：要并行就把等待与其余调用放进同一条消息（靠 `overlappable`），不要另造登记入口。
+- 状态只有 waiting / satisfied / timeout / aborted / failed，记录只在调用存续期间存在——没有「登记后没人推进」的 parked 态：要并行就把等待与其余调用放进同一条消息（靠 `overlappable`），不要另造登记入口。
+- `failed` 是「条件不可能成立」的终止态（未知 task_id、非法正则、路径越权），与 `timeout` 的「还没成立、可续等」严格区分：`probeCondition` 用 `fatal` 标记这些静态错误，主循环立刻返回而不是继续轮询。`kind=task` 只认 `background_tasks_start` 的 shell 任务，`agent-task-*` 直接指向 `Agent(operation=await)`。
 - 轮询必须监听 signal 并立即返回 aborted；`readOnly: false`（等待没有写副作用，但不能进只读批次的重试重放语义）。
 - 超时返回 timeout + wait_id，可带同一 id 续等（保留观察基线）；超时记录不能丢弃或从 dock 消失。`reason` 仅展示，优先显示于条件标签。dev server 这类永不退出的进程不能用 `kind=task` 等它结束，应改用 `port` / `http`。
 - app-server 每秒投影 `listActiveWaits()` 为 `mica/waitTasks/updated`；改字段同步工具测试、两端图标与 dock/详情展示。
@@ -402,7 +405,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 粘贴共用 `composer-paste.js`：图片字节转 `[Image](路径)`，文件插绝对路径；系统路径由 `clipboard:file-paths` 按 basename/顺序对齐，失败提示，不插错误文件路径。
 - 角色入口在输入条箭头，非 default 显示角色名，随下一次发送/编辑的 role 参数持久化。
 - 输入条右侧齿轮与时钟都打开 `SessionSettingsDialog`（`chat-modal` 外壳、左侧菜单 + 右侧内容）：会话能力（Tools / Skills / MCP 三页签复选列表，逐项切换）/ 自动压缩（数值项带 −/+/↺，标出「默认 x」）/ 定时任务（`LoopPanel`，与 CLI `/loop` 同一套语义）。齿轮开在会话能力、时钟直接开在定时任务。数据来自 host 的 `mica/capabilities/get`、`mica/autoCompact/get`，提交走对应 set。能力开关运行中只读，压缩与定时任务随时可改；同一会话的其他窗口经 `mica/capabilities/updated` / `mica/autoCompact/overrideUpdated` 同步。
-- 顶栏「会话笔记」图标（`SessionNotesDialog`）打开与会话共享的 markdown 文档：`ModalShell` 外壳 + 独立 Monaco 实例（模型 URI `inmemory://mica-session-notes/<nodeId>`，随弹窗销毁），输入 700ms 防抖保存，不设手动保存按钮。面板只是 `mica/notes/*` 的前端——模型用 `SessionNotes` 工具写同一份内容，因此不看笔记也不能在面板里重新发明一套存储。运行时改笔记（跑完一轮）时，编辑器没有焦点才覆盖正文，避免打断正在输入的用户。
+- 顶栏「会话笔记」图标（`SessionNotesDialog`）打开与会话共享的 markdown 文档：`ModalShell` 外壳 + 独立 Monaco 实例（模型 URI `inmemory://mica-session-notes/<nodeId>`，随弹窗销毁），输入 700ms 防抖保存，不设手动保存按钮。面板只是 `mica/notes/*` 的前端——模型用 `session_notes` 工具写同一份内容，因此不看笔记也不能在面板里重新发明一套存储。运行时改笔记（跑完一轮）时，编辑器没有焦点才覆盖正文，避免打断正在输入的用户。
 - 双击用户消息就地编辑，仅空闲且非空时提交；经 `chat:edit-message` 调截断重跑，失败保留编辑文本并 notice。
 - 引用按钮经 `mica-common/chatQuote.ts` 插入围栏文本，展示从草稿反推，删除只删对应块，发送与存储不设特殊协议。
 
@@ -543,7 +546,8 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 配置页不提供 effort 开关：是否发送 reasoning 参数由模型规则按模型名判定（`model-effort-context` 从 models.dev 取 `reasoning_options`，`resolveModelRequestPatch` 生成每个模型每个协议各自的 patch，provider 上的 `supportsEffort` 只是兜底）。表单不再编辑该字段，旧配置里已有的值原样保留。
 - 表单转换的唯一实现在 `web/configDraft.ts`（纯函数、有测试）：表单只覆盖已知字段，写入时保留未知顶层键与 provider 里的未知字段，已知键按固定顺序排列，可选字段留空即删键（`models: []` 在 `validate-config` 里是错误）。
 - 新增数据动作先声明 `ConfigWebClient`；宿主无能力则方法可选并提供对应降级。Auto Compact 按能力出现，Browser Control / Terminal Control 始终显示说明。
-- Capabilities 页只改 `config.json` 的 `capabilityDefaults`（新会话默认值），不改已有会话；页签顺序 Tools / Skills / MCP servers，列表为「开关 + 名称 + 描述」三列，描述单行省略、点击开详情弹窗（含只读与入参摘要），不提供全开/全关；工具行按 `group` 成组、组头滑块是整组开关，技能与 MCP 服务器不分组建行。读写实现放在 `mica-config-ui/src/server/capabilityDefaults.ts`，桌面运行时经 `@mica-config-ui/capability-defaults` alias 复用。
+- Capabilities 页改的是 `config.json` 的 `capabilityDefaults`（新会话与未定制会话的默认值），不改已在会话里调过开关的会话；页签顺序 Tools / Skills / MCP servers，列表为「开关 + 名称 + 描述」三列，描述单行省略、点击开详情弹窗（含只读与入参摘要），不提供全开/全关；工具行按 `group` 成组、组头滑块是整组开关，技能与 MCP 服务器不分组建行。读写实现放在 `mica-config-ui/src/server/capabilityDefaults.ts`，桌面运行时经 `@mica-config-ui/capability-defaults` alias 复用。
+- 配置页所有页面（Config / Skills / Roles / MCP / Sessions / Capabilities / Auto Compact）都不设「保存」按钮，也没有「放弃未保存的修改」确认：改动停下就写盘。通用实现在 `web/useAutoSave.ts`——400ms 防抖、写盘串行化并攒成「最后一次」重发、工具栏给「保存中…」「已保存」反馈；切换条目 / 刷新 / 切页面之前先 `flush()`，卸载时补发 pending。失败不回滚输入（只 `Alert`），下一次合法改动重试。校验类页面在本地不通过时**不写盘**：Config 用 `validateConfigDraft` 挡必填缺失与 JSON 半句，Sessions 在 JSON 解析失败或 turn 运行中（lease 冲突）暂停写入。`Sidebar` 按 Agent / Sessions / Desktop / Diagnostics 分组，窄屏收起组标题并压成一行。
 - 样式限定 `.mica-config-ui`，页面级 html/body/#root 高度链由整页宿主定义，不能覆盖 desktop 窄屏根高度。
 - 配置页新建/删除/放弃操作用 `DialogHost` 的 confirmDialog / promptDialog，不依赖原生 prompt/confirm。
 - 改配置页后运行 `bun run build:config-web`，提交生成的 `generatedStaticAssets.ts`；system prompt 与内置角色直接复用 CLI 模板，跳过用户 default.md。
@@ -569,6 +573,8 @@ npm run serve:web         # 构建后运行 Web 运行时
 - **枚举值不直接上屏**。`ready` / `stdio` / `user` / `bundled` 这类机器值在 `mica-config-ui/web/labels.ts` 统一映射成中文后再显示。
 - **长文本单行省略并带 `title`**。名称、描述、路径一律 `min-width: 0` + `text-overflow: ellipsis`，不能让某一列把整行撑破或被裁掉一半。
 - **说明文字只留一处**。页面顶部一段说明足够，不要把同样的灰字分散成三段；需要「改动未保存」「已连接」这类状态时放到操作行或状态列。
+- **页头路径不要整条铺开**。页头位置行由 `PageFrame` 统一收拢成「…/末三级目录/文件名」，文件名用次级前景、目录压暗，完整路径留在 `title`；直接塞一条绝对路径会把页头撑满一行且看不出重点。
+- **行内动作按钮用 `variant="ghost"`**（删除条目、跳到别的页面）。每行都挂一个带边框的方块按钮会让列表读成一排按钮墙；幽灵按钮尺寸与可用态一致，只在 hover 时补边框与底色。
 
 ### 移动端
 

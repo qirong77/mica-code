@@ -205,7 +205,7 @@ describe('structured activity state', () => {
     const first = {
       kind: 'tool',
       tool: {
-        tool: 'TodoWrite',
+        tool: 'todo_write',
         status: 'completed',
         input: {
           todos: [{ content: 'Inspect', activeForm: 'Inspecting', status: 'in_progress' }]
@@ -215,7 +215,7 @@ describe('structured activity state', () => {
     const latest = {
       kind: 'tool',
       tool: {
-        tool: 'TodoWrite',
+        tool: 'todo_write',
         status: 'completed',
         input: {
           todos: [
@@ -228,7 +228,7 @@ describe('structured activity state', () => {
     const rejected = {
       kind: 'tool',
       tool: {
-        tool: 'TodoWrite',
+        tool: 'todo_write',
         status: 'completed',
         input: {
           todos: [
@@ -293,13 +293,13 @@ describe('structured activity state', () => {
         id: 'agent-running',
         kind: 'tool',
         turnId: 'turn-2',
-        tool: { tool: 'Agent', status: 'running' }
+        tool: { tool: 'agent', status: 'running' }
       },
       {
         id: 'agent-done',
         kind: 'tool',
         turnId: 'turn-2',
-        tool: { tool: 'Agent', status: 'completed' }
+        tool: { tool: 'agent', status: 'completed' }
       }
     ]
 
@@ -317,7 +317,7 @@ describe('structured activity state', () => {
         kind: 'tool',
         turnId: 'turn-1',
         tool: {
-          tool: 'TodoWrite',
+          tool: 'todo_write',
           status: 'completed',
           input: {
             todos: [{ content: 'Inspect', activeForm: 'Inspecting', status: 'in_progress' }]
@@ -337,7 +337,7 @@ describe('structured activity state', () => {
         kind: 'tool',
         turnId: 'turn-1',
         tool: {
-          tool: 'TodoWrite',
+          tool: 'todo_write',
           status: 'completed',
           input: {
             todos: [

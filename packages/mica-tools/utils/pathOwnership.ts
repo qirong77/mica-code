@@ -55,7 +55,7 @@ export function assertShellPathAccess(cwd: string | undefined, context: unknown)
   const target = cwd?.trim() ? resolve(processCwd, cwd) : processCwd;
   if (ownership.ownedPaths.some((owned) => pathIsWithin(target, resolve(processCwd, owned)))) return;
   throw new Error(
-    `run_shell cwd is outside subagent owned_paths: ${cwd ?? '.'}. Allowed: ${ownership.ownedPaths
+    `path is outside subagent owned_paths: ${cwd ?? '.'}. Allowed: ${ownership.ownedPaths
       .map((item) => formatOwnedPath(processCwd, item))
       .join(', ')}`,
   );

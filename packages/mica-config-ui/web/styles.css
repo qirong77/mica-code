@@ -195,6 +195,27 @@
     gap: 3px;
   }
 
+  .nav-group {
+    display: grid;
+    gap: 3px;
+  }
+
+  /* 组间靠留白区分，不加分隔线：11 个入口分成 5 组后再画线就和每个入口的
+     选中边框撞在一起，整列看起来全是框。 */
+  .nav-group + .nav-group {
+    margin-top: 8px;
+  }
+
+  .nav-group-label {
+    padding: 0 9px 1px;
+    color: var(--text-faint);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    line-height: 1.6;
+    text-transform: uppercase;
+  }
+
   .nav-item {
     width: 100%;
     min-height: 32px;
@@ -291,12 +312,34 @@
   }
 
   .page-path {
+    display: flex;
+    align-items: baseline;
     margin: 8px 0 0;
+    min-width: 0;
     color: var(--text-faint);
     font-family: var(--font-mono);
     font-size: 11.5px;
     line-height: 1.5;
-    overflow-wrap: anywhere;
+    /* 路径只占一行：目录在中途省略，文件名永远露在最后（见 PageFrame 的 PagePath） */
+    white-space: nowrap;
+  }
+
+  .page-path-dir {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-faint);
+    text-overflow: ellipsis;
+  }
+
+  .page-path-file {
+    flex: none;
+    color: var(--text-soft);
+  }
+
+  .page-path-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .page-hero-actions,
@@ -381,6 +424,27 @@
     background: color-mix(in srgb, var(--red) 10%, transparent);
   }
 
+  /* 幽灵按钮：行内动作（删除服务商、跳到别的页面）用它，避免每行都挂一个带边框的方块，
+     整页看起来像一排按钮墙。尺寸与可用态完全不动，只去掉常态的边框与底色。 */
+  .ui-button-ghost {
+    border-color: transparent;
+    background: transparent;
+    /* 用次级前景而不是 faint：faint 太接近禁用态，看起来像点不了 */
+    color: var(--text-soft);
+  }
+
+  .ui-button-ghost:hover:not(:disabled) {
+    border-color: var(--line);
+    background: var(--panel-hover);
+    color: var(--text);
+  }
+
+  .ui-button-ghost.ui-button-danger:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--red) 45%, transparent);
+    background: color-mix(in srgb, var(--red) 12%, transparent);
+    color: var(--red);
+  }
+
   .ui-button-icon {
     width: 14px;
     height: 14px;
@@ -413,6 +477,10 @@
     color: var(--green);
     font-size: var(--text-aux);
     font-weight: 600;
+  }
+
+  .save-status-pending {
+    color: var(--text-soft);
   }
 
   .ui-alert {
@@ -1382,6 +1450,16 @@
       overflow-x: auto;
       overscroll-behavior-x: contain;
       scrollbar-width: thin;
+    }
+
+    /* 窄屏是一行横向滚动的入口条：分组不再做成块，标题也收起来，
+       否则每个组会变成一列、整条变成两三层高。 */
+    .nav-group {
+      display: contents;
+    }
+
+    .nav-group-label {
+      display: none;
     }
 
     .nav-item {
@@ -3005,11 +3083,14 @@
     flex: none;
   }
 
+  /* 命中区比 30×17 的轨道四周各外扩 7px：轨道本身只有 17px 高，直接点很难点中，
+     表现为「点一下没反应」。外扩量仍落在行内 30px 开关列与 12px 列间距里，不抢相邻控件。
+     轨道尺寸、位置与视觉都不受影响，`inset` 让 input 撑满 containment 块，不能再写死宽高。 */
   .ui-switch input {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+    inset: -7px;
+    width: auto;
+    height: auto;
     margin: 0;
     opacity: 0;
     cursor: pointer;
@@ -3211,6 +3292,17 @@
     min-width: 0;
   }
 
+  /* 卡片里只有一组字段时，说明文字铺满整张卡片宽度会读成长句，收到一行的阅读宽度 */
+  .config-rules {
+    max-width: 520px;
+  }
+
+  /* 单字段卡片（SearXNG 地址）：输入框按内容长度收窄，铺满整卡看着像搜索框 */
+  .config-card > .form-field > .text-input,
+  .config-card > .form-field > .config-input-with-action {
+    max-width: 520px;
+  }
+
   /*
    * 条目列表（规则说明、控制页步骤）：grid 会吃掉 UA 的项目符号，只剩 padding-left
    * 留下的空白缩进，正文比同级标题右移一截。符号改成 ::before 自己画，正文从符号列起排。
@@ -3304,18 +3396,18 @@
   .config-stack {
     display: grid;
     align-content: start;
-    gap: 14px;
+    gap: 16px;
   }
 
   .config-card {
     display: grid;
     gap: 14px;
-    padding: 16px;
+    padding: 18px;
   }
 
   .config-provider-list {
     display: grid;
-    gap: 8px;
+    gap: 10px;
   }
 
   /* 卡片里的空态不需要自己再画一圈边框，也不用 240px 那么高 */
@@ -3325,12 +3417,29 @@
     background: transparent;
   }
 
+  /*
+   * 服务商行：折叠时是卡片里一块「浮起的行」（比卡片底色亮一档），展开后回落到卡片底色，
+   * 好让展开体里的输入框（panel-muted）重新变成最亮的一层。以前两种状态都画在比卡片更暗的
+   * 底色上，看起来像卡片里挖了个坑，再套一层边框就变成框套框。
+   */
   .config-provider {
     display: grid;
     gap: 0;
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-soft);
     border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--bg) 40%, transparent);
+    background: var(--panel-muted);
+    transition:
+      background 120ms ease,
+      border-color 120ms ease;
+  }
+
+  .config-provider.is-open {
+    border-color: var(--line);
+    background: var(--panel);
+  }
+
+  .config-provider:not(.is-open):hover {
+    border-color: var(--line-strong);
   }
 
   .config-provider-head {
@@ -3383,7 +3492,8 @@
   .config-provider-protocol {
     flex: none;
     padding: 1px 6px;
-    border: 1px solid var(--line);
+    /* 行底色比卡片亮一档：沿用 --line 会变成一条暗槽，改用比底色略亮的细边 */
+    border: 1px solid color-mix(in srgb, var(--text-faint) 32%, transparent);
     border-radius: var(--radius-sm);
     color: var(--text-soft);
     font-family: var(--font-mono);
@@ -3396,7 +3506,7 @@
     min-width: 0;
     flex: 1 1 auto;
     overflow: hidden;
-    color: var(--text-faint);
+    color: var(--text-soft);
     font-family: var(--font-mono);
     font-size: var(--text-micro);
     white-space: nowrap;
@@ -3417,8 +3527,8 @@
   .config-provider-body {
     display: grid;
     gap: 10px;
-    padding: 10px 12px 12px;
-    border-top: 1px solid var(--line);
+    padding: 12px;
+    border-top: 1px solid var(--line-soft);
   }
 
   /* 服务商卡片里的输入框比全局矮一档：一个卡片有 6 组字段，38px 会把卡片拉得很长 */
@@ -3576,6 +3686,8 @@
 
   .config-chip-add > .ui-button {
     flex: none;
+    /* 与同一行的输入框等高（服务商卡片里输入框是 34px） */
+    height: 34px;
     white-space: nowrap;
   }
 
@@ -3659,10 +3771,24 @@
   }
 
   .config-managed-desc {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
     min-width: 0;
     color: var(--text-faint);
     font-size: var(--text-aux);
     line-height: 1.5;
+  }
+
+  /* 描述里点出这个字段实际写在 config.json 的哪个键上，避免「写在 xxx」这种散文句 */
+  .config-managed-key {
+    padding: 0 5px;
+    border-radius: var(--radius-sm);
+    background: var(--panel-muted);
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
   }
 
   .config-extra-list {

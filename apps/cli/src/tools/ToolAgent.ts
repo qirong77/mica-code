@@ -72,7 +72,7 @@ export class ToolAgent extends MicaTool {
     private readonly taskManager: SubagentTaskManager = new SubagentTaskManager(),
   ) {
     super(
-      'Agent',
+      'agent',
       [
         '启动和管理 subagent。operation 默认为 run；支持 list/read/kill/await/run_many/join。',
         'subagent 默认注入 brief 任务上下文；可用 context_mode=none|brief|recent|files 控制。',
@@ -769,7 +769,7 @@ function attachSubagentActivityTracking(options: {
   options.child.onToolCall = (name, args, id) => {
     previousOnToolCall?.(name, args, id);
     if (disposed) return;
-    if (name !== 'Agent') {
+    if (name !== 'agent') {
       options.taskManager.appendTimeline(options.taskId, options.owner, {
         id: `tool:${id ?? name}`,
         kind: 'tool',
@@ -779,7 +779,7 @@ function attachSubagentActivityTracking(options: {
     }
     clearWaiting();
     clearResponse();
-    if (name === 'Agent') return;
+    if (name === 'agent') return;
     toolCalls.push({ name, args });
     scheduleActivity();
   };
@@ -878,7 +878,7 @@ function classifyToolActivity(name: string, argsText: string): ToolActivity {
     return { kind: 'other', description: `Searching the web for ${quotedTarget(args.query, 'query')}…` };
   }
   if (name === 'web_fetch') return { kind: 'other', description: `Fetching ${urlTarget(args.url)}…` };
-  if (name === 'Skill') {
+  if (name === 'skill') {
     return { kind: 'other', description: `Using the ${compactString(args.skill) || 'selected'} skill…` };
   }
   if (name === 'background_tasks_list') return { kind: 'other', description: 'Checking background tasks…' };

@@ -30,8 +30,10 @@ export type SessionAgentAdapter = {
   getSnapshot(): AgentRuntimeSnapshot;
   loadSnapshot(snapshot: AgentRuntimeSnapshot): void;
   reloadConfig(resetSession?: boolean): void;
-  /** 可选：`/clear`、`/new` 之后把能力开关恢复成新会话默认值。 */
+  /** 可选：用户显式改能力（`/capabilities`）。标记为会话定制，之后不再跟随默认值。 */
   setCapabilities?(selection: NonNullable<AgentRuntimeSnapshot['capabilitySelection']>): unknown;
+  /** 可选：`/clear`、`/new` 之后回到「跟随 config 默认值」的新会话状态。 */
+  resetCapabilitiesToDefaults?(): unknown;
   /** 可选：`/clear`、`/new` 之后清掉本会话的压缩覆盖。 */
   setAutoCompactOverride?(override: NonNullable<AgentRuntimeSnapshot['autoCompactOverride']>): unknown;
   /** 可选：`/clear`、`/new` 之后清空会话笔记。 */
@@ -102,11 +104,9 @@ export class SessionController {
   startNewSession(): void {
     this.discardCurrentIfEmpty();
     this.currentSessionId = micaSession.createId();
-    // 能力开关属于会话，不属于 agent：新会话回到 config 里的默认值，不能沿用上一条
-    // 会话关掉的工具（否则「新开一个会话」会继承上一轮的临时限制）。
-    if (this.agent.setCapabilities) {
-      this.agent.setCapabilities(micaConfig.readCapabilityDefaults());
-    }
+    // 能力开关属于会话，不属于 agent：新会话重新跟随 config 里的默认值（不继承
+    // 上一条会话关掉的工具，也不继承它的「已定制」状态）。
+    this.agent.resetCapabilitiesToDefaults?.();
     // 压缩覆盖同理：新会话不该继承上一条会话调过的阈值。
     this.agent.setAutoCompactOverride?.({});
     // 笔记同样属于会话：新会话从空白开始，不继承上一轮攒下的结论。
@@ -374,6 +374,11 @@ function toPersistedSnapshot(
     effort: snapshot.effort,
     role: snapshot.role,
     capabilitySelection: snapshot.capabilitySelection,
+    // 只在定制过时写这个键：`parsePersistedSession` 把非 true 归一成 undefined，
+    // 若这里写 `false`，磁盘上是 `false`、读回来是 undefined，`sessionSignature`
+    // 每轮都对不上，于是每个 turn 都会误判「别的进程改过」而整份 resume 一次
+    // （turn/start 刚应用的 role 会被快照里的旧角色盖回去）。
+    ...(snapshot.capabilitiesCustomized ? { capabilitiesCustomized: true } : {}),
     autoCompactOverride: snapshot.autoCompactOverride,
     notes: snapshot.notes,
     contextWindowSize: micaConfig.getModelRule(snapshot.model).contextSize,
@@ -396,6 +401,7 @@ function fromPersistedSnapshot(
     effort: snapshot.effort,
     role,
     capabilitySelection: snapshot.capabilitySelection,
+    capabilitiesCustomized: snapshot.capabilitiesCustomized,
     autoCompactOverride: snapshot.autoCompactOverride,
     notes: snapshot.notes,
     messages: snapshot.messages,

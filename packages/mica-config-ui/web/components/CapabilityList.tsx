@@ -58,7 +58,7 @@ export function CapabilityList({
   items: CapabilityItem[];
   /** 计数行文案，例如 `24/24 启用`；由宿主决定说「默认启用」还是「启用」。 */
   countLabel: string;
-  /** 计数行里的状态说明（改动未保存、已保存之类）。 */
+  /** 计数行里的状态说明（保存中、已保存之类）。 */
   status?: string | null;
   isEnabled(name: string): boolean;
   disabled?: boolean;

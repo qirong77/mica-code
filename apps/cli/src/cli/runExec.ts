@@ -240,7 +240,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       await host.emitRuntimeStop();
       await host.dispose();
     }
-    micaTools.unregisterRuntime('Agent');
+    micaTools.unregisterRuntime('agent');
     disposeModelEffortContext();
   }
 }

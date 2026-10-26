@@ -8,7 +8,7 @@ type ButtonProps = {
   disabled?: boolean;
   pressed?: boolean;
   autoFocus?: boolean;
-  variant?: 'primary' | 'danger' | 'default';
+  variant?: 'primary' | 'danger' | 'default' | 'ghost';
   title?: string;
   ariaLabel?: string;
   onClick(): void;
@@ -26,7 +26,7 @@ export function Button({
   ariaLabel,
   onClick,
 }: ButtonProps) {
-  const variantClass = variant === 'primary' ? 'ui-button-primary' : variant === 'danger' ? 'ui-button-danger' : '';
+  const variantClass = BUTTON_VARIANTS[variant];
   return (
     <button
       className={`ui-button ${variantClass}${children ? '' : ' ui-button-icon-only'}${loading ? ' ui-button-loading' : ''}`}
@@ -51,8 +51,22 @@ export function Button({
   );
 }
 
+const BUTTON_VARIANTS: Record<NonNullable<ButtonProps['variant']>, string> = {
+  primary: 'ui-button-primary',
+  danger: 'ui-button-danger',
+  default: '',
+  ghost: 'ui-button-ghost',
+};
+
 export function Alert({ message }: { message: string }) {
   return <div className="ui-alert">{message}</div>;
+}
+
+/** 自动保存的状态角标：只在写盘中和刚写完这两个瞬间出现，平时不占位。 */
+export function SaveStatus({ saving, saved }: { saving: boolean; saved: boolean }) {
+  if (saving) return <span className="save-status save-status-pending">保存中…</span>;
+  if (saved) return <span className="save-status">已保存</span>;
+  return null;
 }
 
 type SwitchProps = {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { DialogHost, confirmDialog } from './components/DialogHost.js';
+import { DialogHost } from './components/DialogHost.js';
 import { Sidebar, type ConfigWebAppSection } from './layout/Sidebar.js';
 import { CapabilitiesPage } from './pages/CapabilitiesPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
@@ -16,29 +16,16 @@ import { connectHeartbeat, supportsAutoCompact } from './api.js';
 
 export function App() {
   const [section, setSection] = useState<ConfigWebAppSection>(readInitialSection);
-  const [dirtySection, setDirtySection] = useState<ConfigWebAppSection | null>(null);
 
-  async function changeSection(nextSection: ConfigWebAppSection) {
-    if (dirtySection && dirtySection !== nextSection) {
-      const confirmed = await confirmDialog({
-        title: '放弃未保存的修改',
-        message: '当前页面有未保存的修改，确定要离开吗？',
-        confirmText: '离开',
-        danger: true,
-      });
-      if (!confirmed) return;
-    }
+  /**
+   * 各页都是自动保存，切页面不用问「要不要放弃修改」；页面卸载时自己的 hook 会把最后
+   * 一批改动发出去。
+   */
+  function changeSection(nextSection: ConfigWebAppSection) {
     setSection(nextSection);
     const url = new URL(window.location.href);
     url.searchParams.set('section', nextSection);
     window.history.replaceState(null, '', url);
-  }
-
-  function handleDirtyChange(current: ConfigWebAppSection, dirty: boolean) {
-    setDirtySection((prev) => {
-      if (dirty) return current;
-      return prev === current ? null : prev;
-    });
   }
 
   useEffect(() => {
@@ -51,25 +38,16 @@ export function App() {
       <main className="app-shell">
         <Sidebar section={section} onChange={(next) => void changeSection(next)} />
         <div className="content-shell">
-          {section === 'config' ? (
-            <ConfigPage
-              onDirtyChange={(dirty) => handleDirtyChange('config', dirty)}
-              onNavigate={(next) => void changeSection(next)}
-            />
-          ) : null}
+          {section === 'config' ? <ConfigPage onNavigate={(next) => void changeSection(next)} /> : null}
           {section === 'autoCompact' ? <AutoCompactPage /> : null}
           {section === 'browserControl' ? <BrowserControlPage /> : null}
           {section === 'terminalControl' ? <TerminalControlPage /> : null}
           {section === 'performance' ? <PerformancePage /> : null}
-          {section === 'sessions' ? (
-            <SessionsPage onDirtyChange={(dirty) => handleDirtyChange('sessions', dirty)} />
-          ) : null}
-          {section === 'roles' ? <RolesPage onDirtyChange={(dirty) => handleDirtyChange('roles', dirty)} /> : null}
-          {section === 'mcp' ? <McpPage onDirtyChange={(dirty) => handleDirtyChange('mcp', dirty)} /> : null}
-          {section === 'skills' ? <SkillsPage onDirtyChange={(dirty) => handleDirtyChange('skills', dirty)} /> : null}
-          {section === 'capabilities' ? (
-            <CapabilitiesPage onDirtyChange={(dirty) => handleDirtyChange('capabilities', dirty)} />
-          ) : null}
+          {section === 'sessions' ? <SessionsPage /> : null}
+          {section === 'roles' ? <RolesPage /> : null}
+          {section === 'mcp' ? <McpPage /> : null}
+          {section === 'skills' ? <SkillsPage /> : null}
+          {section === 'capabilities' ? <CapabilitiesPage /> : null}
           {section === 'plugins' ? <PluginsPage /> : null}
         </div>
       </main>

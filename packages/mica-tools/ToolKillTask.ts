@@ -10,7 +10,12 @@ const ALLOWED_SIGNALS = new Set<NodeJS.Signals>(['SIGTERM', 'SIGKILL', 'SIGINT']
 
 export class ToolKillTask extends MicaTool {
   constructor() {
-    super('background_tasks_kill', '终止一个仍在运行的后台任务。先默认 SIGTERM，`force_after_ms` 后仍不退出则升级为 SIGKILL。', {
+    super('background_tasks_kill', [
+      '终止一个仍在运行的后台任务。先默认 SIGTERM，`force_after_ms` 后仍不退出则升级为 SIGKILL。',
+      '',
+      `调用会阻塞到进程真正退出，最长约 force_after_ms（默认 ${DEFAULT_FORCE_AFTER_MS}，最大 ${HARD_FORCE_AFTER_MS} 毫秒）。`,
+      '只想看它跑到哪了别用这个——用 `background_tasks_read`。',
+    ].join('\n'), {
       type: 'object' as const,
       properties: {
         task_id: { type: 'string', description: '后台任务 ID。' },

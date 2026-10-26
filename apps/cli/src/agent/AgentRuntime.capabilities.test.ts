@@ -115,9 +115,9 @@ describe('AgentRuntime capability selection', () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();
     const options = agent.createClientOptions({
-      toolFilter: (name) => name !== 'Skill',
+      toolFilter: (name) => name !== 'skill',
     });
-    expect(options.toolFilter?.('Skill')).toBe(false);
+    expect(options.toolFilter?.('skill')).toBe(false);
     expect(options.toolFilter?.('read_file')).toBe(true);
   });
 
@@ -137,5 +137,85 @@ describe('AgentRuntime capability selection', () => {
     } finally {
       getLoaded.mockRestore();
     }
+  });
+
+  it('follows the config defaults until the session customizes them', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    expect(agent.capabilitySelection.disabledTools).toEqual([]);
+
+    // 配置页改了默认值：没定制过的会话应该跟着变（默认值有 1s 短缓存，用假时钟跳过）。
+    defaults = { version: 1, disabledSkills: [], disabledTools: ['run_shell'], disabledMcpServers: [] };
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 5_000);
+      expect(agent.capabilitySelection.disabledTools).toEqual(['run_shell']);
+      expect(agent.createClientOptions().toolFilter?.('run_shell')).toBe(false);
+      expect(agent.getSnapshot()).toMatchObject({ capabilitiesCustomized: false });
+
+      // 用户在会话里点过之后就不再跟随默认值了。
+      agent.setCapabilities({ version: 1, disabledSkills: [], disabledTools: ['read_file'], disabledMcpServers: [] });
+      defaults = { version: 1, disabledSkills: [], disabledTools: ['run_shell', 'todo_write'], disabledMcpServers: [] };
+      vi.setSystemTime(Date.now() + 5_000);
+      expect(agent.capabilitySelection.disabledTools).toEqual(['read_file']);
+      expect(agent.getSnapshot()).toMatchObject({
+        capabilitiesCustomized: true,
+        capabilitySelection: { disabledTools: ['read_file'] },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('treats a snapshot without the customized flag as following the defaults', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    defaults = { version: 1, disabledSkills: [], disabledTools: ['run_shell'], disabledMcpServers: [] };
+    const agent = new AgentRuntime();
+
+    // 旧快照：没有 capabilitiesCustomized，里面那份副本是「创建时的默认值」。
+    agent.loadSnapshot({
+      providerId: 'test-provider',
+      protocol: 'openai_chat_completions',
+      model: 'test-model',
+      effort: 'none',
+      role: 'default',
+      capabilitySelection: { version: 1, disabledSkills: [], disabledTools: ['todo_write'], disabledMcpServers: [] },
+      messages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    });
+    expect(agent.capabilitySelection.disabledTools).toEqual(['run_shell']);
+    expect(agent.getSnapshot().capabilitiesCustomized).toBe(false);
+
+    // 新快照：标志为 true 时用会话自己的选择。
+    agent.loadSnapshot({
+      providerId: 'test-provider',
+      protocol: 'openai_chat_completions',
+      model: 'test-model',
+      effort: 'none',
+      role: 'default',
+      capabilitySelection: { version: 1, disabledSkills: [], disabledTools: ['todo_write'], disabledMcpServers: [] },
+      capabilitiesCustomized: true,
+      messages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    });
+    expect(agent.capabilitySelection.disabledTools).toEqual(['todo_write']);
+    expect(agent.getSnapshot()).toMatchObject({
+      capabilitiesCustomized: true,
+      capabilitySelection: { disabledTools: ['todo_write'] },
+    });
+  });
+
+  it('returns to the defaults for a new session', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    defaults = { version: 1, disabledSkills: [], disabledTools: ['run_shell'], disabledMcpServers: [] };
+    const agent = new AgentRuntime();
+    agent.setCapabilities({ version: 1, disabledSkills: [], disabledTools: ['read_file'], disabledMcpServers: [] });
+    expect(agent.capabilitySelection.disabledTools).toEqual(['read_file']);
+
+    agent.resetCapabilitiesToDefaults();
+    expect(agent.capabilitySelection.disabledTools).toEqual(['run_shell']);
+    expect(agent.getSnapshot().capabilitiesCustomized).toBe(false);
   });
 });

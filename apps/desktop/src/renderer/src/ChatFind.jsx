@@ -126,7 +126,14 @@ function firstMatchIndex(ranges, root) {
   return 0
 }
 
-export function ChatFind({ open, focusSignal = 0, targetRef, onClose }) {
+export function ChatFind({
+  open,
+  focusSignal = 0,
+  preset = null,
+  presetSignal = 0,
+  targetRef,
+  onClose
+}) {
   const [query, setQuery] = useState('')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [wholeWord, setWholeWord] = useState(false)
@@ -138,6 +145,8 @@ export function ChatFind({ open, focusSignal = 0, targetRef, onClose }) {
   const inputRef = useRef(null)
   const rangesRef = useRef([])
   const activeRef = useRef(-1)
+  // 侧栏搜索带进来的查询要从第一条命中开始定位（手输仍然按「从视野往后找」）。
+  const startAtFirstRef = useRef(false)
 
   const matcher = useMemo(
     () => compileFindMatcher(query, { caseSensitive, wholeWord, regex }),
@@ -173,14 +182,16 @@ export function ChatFind({ open, focusSignal = 0, targetRef, onClose }) {
         return
       }
       // 内容在流式输出里长大时保住当前这一条；查询变了才重新从视野里挑
-      const index =
-        keepActive && activeRef.current >= 0
-          ? Math.min(activeRef.current, result.ranges.length - 1)
-          : firstMatchIndex(result.ranges, root)
-      activeRef.current = index
-      setActiveIndex(index)
-      applyFindHighlights(result.ranges, index)
-      if (scroll) scrollRangeIntoView(result.ranges[index], root)
+      let next = firstMatchIndex(result.ranges, root)
+      if (keepActive && activeRef.current >= 0) {
+        next = Math.min(activeRef.current, result.ranges.length - 1)
+      }
+      if (startAtFirstRef.current) next = 0
+      startAtFirstRef.current = false
+      activeRef.current = next
+      setActiveIndex(next)
+      applyFindHighlights(result.ranges, next)
+      if (scroll) scrollRangeIntoView(result.ranges[next], root)
     },
     [matcher, reset, targetRef]
   )
@@ -220,9 +231,21 @@ export function ChatFind({ open, focusSignal = 0, targetRef, onClose }) {
     return () => window.cancelAnimationFrame(handle)
   }, [focusSignal, open])
 
+  // 关掉查找条时不清 query（再按 Cmd+F 能接着改），所以带进来的查询必须连开关一起显式
+  // 重置：否则上一轮的 `a|b` 会以「正则」状态留在下一个会话里，而它本来是字面量。
+  useEffect(() => {
+    if (!preset) return
+    setQuery(preset.query)
+    setRegex(!!preset.regex)
+    setCaseSensitive(false)
+    setWholeWord(false)
+    startAtFirstRef.current = true
+  }, [preset, presetSignal])
+
   useEffect(() => {
     if (open) return
     reset()
+    startAtFirstRef.current = false
   }, [open, reset])
 
   useEffect(() => () => clearFindHighlights(), [])

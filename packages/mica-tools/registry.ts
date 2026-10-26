@@ -202,7 +202,7 @@ export function getToolCatalog(): ToolCatalogEntry[] {
     group: families.get(tool.name) ?? null,
   }));
   // 运行期工具只存在于跑 agent 的进程里：配置页 / 桌面设置页不加载插件，目录会缺
-  // TodoWrite 这类工具，「新会话默认值」里就关不掉它们。未注册时用描述补一行。
+  // todo_write 这类工具，「新会话默认值」里就关不掉它们。未注册时用描述补一行。
   for (const descriptor of RUNTIME_TOOL_DESCRIPTORS) {
     if (registered.has(descriptor.name)) continue;
     entries.push({

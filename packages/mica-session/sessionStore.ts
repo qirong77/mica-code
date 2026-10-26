@@ -31,11 +31,17 @@ export type PersistedRuntimeSnapshot = {
   effort: EffortOption;
   role: string;
   /**
-   * Per-session capability selection (skills / tools / MCP servers). Missing on
-   * older sessions means "everything enabled"; new sessions copy the config
-   * defaults here, so one session never changes another's capabilities.
+   * Per-session capability selection (skills / tools / MCP servers). Only used
+   * when {@link capabilitiesCustomized} is true; otherwise the config defaults
+   * (`config.json` `capabilityDefaults`) apply at runtime.
    */
   capabilitySelection?: CapabilitySelection;
+  /**
+   * True when the user changed capabilities inside this session, so it keeps its
+   * own selection. Missing (including every session written before this flag
+   * existed) means "follow the config defaults".
+   */
+  capabilitiesCustomized?: boolean;
   /**
    * Per-session 自动压缩覆盖：只记录用户显式改过的键，其余继续跟随全局默认值。
    * 缺失表示完全跟随默认（老会话与未改过设置的会话都走这条路径）。
@@ -723,6 +729,8 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
       ...session.snapshot,
       protocol,
       role,
+      // 宽松解析：只认 true，其他值当作「未定制」，不因此拒绝整条会话。
+      capabilitiesCustomized: session.snapshot.capabilitiesCustomized === true ? true : undefined,
       displayUsage: normalizeDisplayUsage(session.snapshot.displayUsage),
     },
   } as PersistedSession;

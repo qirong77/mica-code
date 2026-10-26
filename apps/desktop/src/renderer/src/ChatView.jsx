@@ -41,6 +41,7 @@ import { comparableText } from '@packages/mica-common/promptText.js'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
+import { findPresetForSearch } from './chat-find-preset'
 import { parsePathHref, remarkPathLinks, splitTextByImages } from './chat-paths'
 import { remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
@@ -700,7 +701,7 @@ function textOf(value) {
 }
 
 function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs, onOpen }) {
-  const activities = (task.activities || []).filter((activity) => activity.toolName !== 'Agent')
+  const activities = (task.activities || []).filter((activity) => activity.toolName !== 'agent')
   const childTasks = childrenByParent.get(task.taskId) || []
   const age = formatLogElapsed(Math.max(0, nowMs - (Date.parse(task.startedAt) || nowMs)))
   const indent = Math.min(depth * 14, 42)
@@ -1495,7 +1496,7 @@ function UserMessageEditor({ text, busy, canSubmit, onChange, onCancel, onSubmit
 function lastTodoState(messages) {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
-    if (message.kind !== 'tool' || message.tool?.tool !== 'TodoWrite') continue
+    if (message.kind !== 'tool' || message.tool?.tool !== 'todo_write') continue
     if (message.tool.status !== 'completed') continue
     const todos = message.tool.input?.todos
     if (!Array.isArray(todos) || todos.length > 20) continue
@@ -2480,6 +2481,8 @@ export function ChatView({
   visible,
   isMobile = false,
   loops = [],
+  findRequest = null,
+  onFindRequestHandled,
   onSessionBound,
   onOpenFile,
   onOpenDocument,
@@ -2708,10 +2711,28 @@ export function ChatView({
   // 变化一次就重新聚焦并全选查询，和 VS Code 的 find widget 一样。
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusSignal, setFindFocusSignal] = useState(0)
+  // 侧栏搜索带过来的查询（含 nonce）：打开查找条时一起下发，nonce 变了才重新套用。
+  const [findPreset, setFindPreset] = useState(null)
+  const consumedFindNonceRef = useRef(0)
   const closeFind = useCallback(() => {
     setFindOpen(false)
     textareaRef.current?.focus({ preventScroll: true })
   }, [])
+
+  // 侧栏点开一条搜索结果：等这一轮的历史到位再开查找条，否则扫不到任何东西。请求由 App 按
+  // nodeId 存着（新会话的实例下一拍才挂上来），所以按 nonce 记一次消费，别每次渲染都重开。
+  useEffect(() => {
+    if (!findRequest || !visible || !historyLoaded) return
+    if (consumedFindNonceRef.current === findRequest.nonce) return
+    consumedFindNonceRef.current = findRequest.nonce
+    // 消费即清：请求留在 App 里的话，切走再切回来这个实例重新挂载会再弹一次查找条。
+    onFindRequestHandled?.()
+    const preset = findPresetForSearch(findRequest.tokens)
+    if (!preset) return
+    setFindPreset({ ...preset, nonce: findRequest.nonce })
+    setFindOpen(true)
+    setFindFocusSignal((value) => value + 1)
+  }, [findRequest, historyLoaded, onFindRequestHandled, visible])
 
   // 切走时收起查找条：命中高亮是整页共用的（`CSS.highlights`），留着会在别的页签里
   // 覆盖或残留下不属于当前对话的高亮。
@@ -4274,9 +4295,11 @@ export function ChatView({
 
   useEffect(() => {
     if (!visible || !nodeId || !historyLoaded) return
+    // 查找条开着就别抢焦点：它自己要聚焦输入框，这里 40ms 后回填会让光标落在会话里
+    if (findOpen) return
     const timer = window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 40)
     return () => clearTimeout(timer)
-  }, [historyLoaded, nodeId, visible])
+  }, [findOpen, historyLoaded, nodeId, visible])
 
   // 挂载时加载与 CLI 共享的输入历史（~/.mica/storage.json）；失败静默，
   // 历史为空时上下键导航保持原样（无操作）。
@@ -5750,6 +5773,8 @@ export function ChatView({
         <ChatFind
           open={findOpen}
           focusSignal={findFocusSignal}
+          preset={findPreset}
+          presetSignal={findPreset?.nonce ?? 0}
           targetRef={transcriptRef}
           onClose={closeFind}
         />

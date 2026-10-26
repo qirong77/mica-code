@@ -1,6 +1,10 @@
 import { MicaTool } from './MicaTool.js';
 import type { ToolExecuteCallbacks } from './MicaTool.js';
-import { loadBackgroundTask, readBackgroundTaskOutput } from './ToolRunShellBackground.js';
+import {
+  cleanBackgroundTaskOutput,
+  loadBackgroundTask,
+  readBackgroundTaskOutput,
+} from './ToolRunShellBackground.js';
 import { truncateDisplayText } from './utils/display.js';
 import { clampNumber } from './utils/outputLimits.js';
 
@@ -53,6 +57,7 @@ export class ToolBackgroundRead extends MicaTool {
       tailBytes: input.tail_bytes === undefined && input.offset !== undefined ? undefined : tailBytes,
     });
 
+    const finished = meta.status !== 'starting' && meta.status !== 'running';
     const header = [
       `Task ${meta.id}`,
       `status: ${meta.status}`,
@@ -60,12 +65,17 @@ export class ToolBackgroundRead extends MicaTool {
       `command: ${meta.command}`,
       `output: ${meta.output_path}`,
       `bytes: ${range.start}-${range.end} of ${range.size}`,
+      finished ? `exit_code: ${meta.exit_code ?? 'null'}` : undefined,
+      finished ? `signal: ${meta.signal ?? 'null'}` : undefined,
       range.end < range.size ? `next_offset: ${range.end}` : undefined,
     ]
       .filter(Boolean)
       .join('\n');
 
-    return `${header}\n\n--- output ---\n${range.content || '(no output)'}`;
+    // 与 TUI / 桌面 / `wait_for(kind=task)` 保持同一份投影：任务簿记行
+    // （spawned / kill requested / exited）不属于命令输出，不该喂给模型。
+    const output = cleanBackgroundTaskOutput(range.content);
+    return `${header}\n\n--- output ---\n${output || '(no output)'}`;
   }
 
   onToolUseDisplayText(input: Record<string, unknown>): string {

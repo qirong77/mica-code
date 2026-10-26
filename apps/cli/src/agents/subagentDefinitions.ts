@@ -49,10 +49,10 @@ const READ_ONLY_TOOLS = [
   'background_tasks_read',
   'web_fetch',
   'web_search',
-  'Skill',
+  'skill',
 ];
 
-const INHERITED_SKILL_TOOL = 'Skill';
+const INHERITED_SKILL_TOOL = 'skill';
 const MCP_TOOL_PREFIX = 'mcp__';
 
 /**
@@ -70,7 +70,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     name: 'general-purpose',
     description:
       'General-purpose subagent for multi-step research, code investigation, and focused implementation help.',
-    disallowedTools: ['Agent'],
+    disallowedTools: ['agent'],
     maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'brief',
@@ -87,7 +87,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     description:
       'Read-only code exploration subagent for searching, reading, and summarizing relevant project context.',
     allowedTools: READ_ONLY_TOOLS,
-    disallowedTools: ['Agent'],
+    disallowedTools: ['agent'],
     maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'brief',
@@ -104,7 +104,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     name: 'Implementer',
     description:
       'Writable implementation subagent for scoped code changes. Requires owned_paths and only writes inside that lease.',
-    disallowedTools: ['Agent'],
+    disallowedTools: ['agent'],
     maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'files',
@@ -122,7 +122,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     name: 'Reviewer',
     description: 'Read-only code review subagent for diffs, risks, and missing tests.',
     allowedTools: READ_ONLY_TOOLS,
-    disallowedTools: ['Agent'],
+    disallowedTools: ['agent'],
     maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'files',
@@ -146,7 +146,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
       'background_tasks_kill',
       'wait_for',
     ],
-    disallowedTools: ['Agent', 'write_file', 'apply_patch'],
+    disallowedTools: ['agent', 'write_file', 'apply_patch'],
     maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'brief',
@@ -163,7 +163,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
     name: 'Planner',
     description: 'Planning subagent that returns a task graph and ownership plan without modifying files.',
     allowedTools: READ_ONLY_TOOLS,
-    disallowedTools: ['Agent'],
+    disallowedTools: ['agent'],
     maxTurns: DEFAULT_SUBAGENT_MAX_TURNS,
     effort: true,
     contextModeDefault: 'recent',
@@ -181,7 +181,7 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
       'Proposal-mode implementation subagent. Requires owned_paths, cannot write files, and must return patch proposals for parent apply.',
     allowedTools: READ_ONLY_TOOLS,
     disallowedTools: [
-      'Agent',
+      'agent',
       'write_file',
       'apply_patch',
       'run_shell',

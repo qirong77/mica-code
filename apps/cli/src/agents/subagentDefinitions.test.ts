@@ -26,7 +26,7 @@ describe('subagent definitions', () => {
 
     for (const subagentType of subagentTypes) {
       const filter = buildSubagentToolFilter(getSubagent(subagentType));
-      expect(filter('Skill'), `${subagentType} should inherit Skill`).toBe(true);
+      expect(filter('skill'), `${subagentType} should inherit Skill`).toBe(true);
       expect(filter('mcp__Cooper__readContent_07b6b9a6'), `${subagentType} should inherit MCP tools`).toBe(true);
     }
   });
@@ -35,7 +35,7 @@ describe('subagent definitions', () => {
     const filter = buildSubagentToolFilter(getSubagent('Explore'));
 
     expect(filter('write_file')).toBe(false);
-    expect(filter('Agent')).toBe(false);
+    expect(filter('agent')).toBe(false);
   });
 
   it('keeps primary-agent-only tools out of every subagent', () => {

@@ -1,3 +1,5 @@
+import { normalizeToolName } from './toolNames.js';
+
 /**
  * 会话级能力选择（skills / tools / MCP servers）。
  *
@@ -32,6 +34,11 @@ function normalizeNameList(value: unknown): string[] {
   return names;
 }
 
+/** 工具名走一遍历史别名映射：改名前的会话关掉的工具，升级后仍保持关闭。 */
+function normalizeToolNameList(value: unknown): string[] {
+  return normalizeNameList((Array.isArray(value) ? value : []).map(normalizeToolName));
+}
+
 /** 解析任意持久化值；缺失或损坏时退回「全部启用」。 */
 export function normalizeCapabilitySelection(value: unknown): CapabilitySelection {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return emptyCapabilitySelection();
@@ -39,7 +46,7 @@ export function normalizeCapabilitySelection(value: unknown): CapabilitySelectio
   return {
     version: CAPABILITY_SELECTION_VERSION,
     disabledSkills: normalizeNameList(record.disabledSkills),
-    disabledTools: normalizeNameList(record.disabledTools),
+    disabledTools: normalizeToolNameList(record.disabledTools),
     disabledMcpServers: normalizeNameList(record.disabledMcpServers),
   };
 }

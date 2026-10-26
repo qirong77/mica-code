@@ -72,6 +72,18 @@ describe('cleanBackgroundTaskOutput', () => {
 
     expect(cleanBackgroundTaskOutput(content)).toBe('colored output');
   });
+
+  it('drops the pid line when the task has produced no output yet', () => {
+    const content = [
+      '[mica background task]',
+      'id: abcdef123456',
+      '',
+      '[mica background task spawned]',
+      'pid: 42',
+    ].join('\n');
+
+    expect(cleanBackgroundTaskOutput(content)).toBe('');
+  });
 });
 
 describe('ToolRunShell', () => {
@@ -119,7 +131,7 @@ describe('ToolRunShell', () => {
 
     const result = await tool.execute({
       command: bunEval("console.log('ok')"),
-      timeout: -10,
+      timeout_ms: -10,
     });
 
     expect(result).toContain('timeout_ms: 250');

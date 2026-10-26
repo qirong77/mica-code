@@ -32,7 +32,7 @@ function substituteArgs(content: string, args: string | undefined, skill: Skill)
 export class ToolSkill extends MicaTool {
   constructor() {
     super(
-      'Skill',
+      'skill',
       'Invoke a skill by name',
       {
         type: 'object',

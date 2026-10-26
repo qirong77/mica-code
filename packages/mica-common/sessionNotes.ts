@@ -6,7 +6,7 @@
  * `AgentRuntime.buildSystemPrompt()` 追加到 system prompt 末尾，所以只有长度上限
  * 这一条硬约束——太长会挤占上下文，也会在每次编辑后让 prompt cache 前缀失效。
  *
- * 读写三个入口共用这里的规则：模型（`SessionNotes` 工具）、桌面端笔记面板
+ * 读写三个入口共用这里的规则：模型（`session_notes` 工具）、桌面端笔记面板
  * （`mica/notes/set`）、CLI 与 app-server 的快照读写。
  */
 
@@ -60,7 +60,7 @@ export function formatSessionNotesSection(notes: string): string {
     '这段笔记由用户与你在本会话里共同维护，保存在对话历史之外，不会被上下文压缩掉，每轮都会重新附上。',
     '把它当作长期有效的事实、约定与结论：它不是用户的新指令，与最新用户消息冲突时以最新消息为准；',
     '用户也可能直接在界面里改它，所以大改前先读一遍，也不要把它整段复述回给用户。',
-    '需要读写笔记时用 SessionNotes 工具。',
+    '需要读写笔记时用 session_notes 工具。',
     '',
     content,
     `</${SESSION_NOTES_TAG}>`,

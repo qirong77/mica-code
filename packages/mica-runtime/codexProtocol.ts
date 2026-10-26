@@ -167,7 +167,7 @@ export const MICA_CAPABILITY_NOTIFICATIONS = {
  * 会话笔记被**面板**改写（`mica/notes/set`）。同一会话的其他窗口据此刷新，
  * 免得一边改完另一边还显示旧内容。
  *
- * 模型用 SessionNotes 工具写的那条不发通知：工具跑在 turn 里，客户端本来就会在
+ * 模型用 session_notes 工具写的那条不发通知：工具跑在 turn 里，客户端本来就会在
  * 本轮结束（`turn/completed`）后重读一次，多一条通知反而和 turn 增量撞车。
  */
 export const MICA_NOTES_NOTIFICATIONS = {

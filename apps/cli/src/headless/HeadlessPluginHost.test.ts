@@ -82,10 +82,10 @@ function toolNames(): string[] {
 }
 
 describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
-  it('registers the session-autonomy tools and TodoWrite', async () => {
+  it('registers the session-autonomy tools and todo_write', async () => {
     const { host } = await mount();
     const names = toolNames();
-    for (const expected of ['session_peers', 'TodoWrite']) {
+    for (const expected of ['session_peers', 'todo_write']) {
       expect(names).toContain(expected);
     }
     // session_info / session_compact were removed: the model must not see them again.

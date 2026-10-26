@@ -7,13 +7,14 @@
 // 完整输出都在点开的详情弹窗里（`chat-tool-detail.jsx`）。
 
 import { toolLabel } from '@packages/mica-web-shared'
+import { normalizeToolName } from '@packages/mica-common/toolNames.js'
 
 /** 详情弹窗最多渲染多少行 / 多少字符，避免一条 256KB 的命令输出拖垮 DOM。 */
 export const TOOL_OUTPUT_MAX_LINES = 5000
 export const TOOL_OUTPUT_MAX_CHARS = 200_000
 
 export function toolDisplayName(tool) {
-  if (tool?.tool === 'Agent') {
+  if (normalizeToolName(tool?.tool) === 'agent') {
     const operation = tool.input?.operation || 'run'
     if (operation === 'run_many') return 'Subagents'
     if (operation !== 'run') return `Subagent · ${operation}`
@@ -32,7 +33,7 @@ function compactLine(value, max) {
 /** 从工具入参里挑出最能说明这次调用的那一段（不截断，除非传了 max）。 */
 export function toolSummary(tool, max = 0) {
   const input = tool?.input || {}
-  switch (tool?.tool) {
+  switch (normalizeToolName(tool?.tool)) {
     case 'read_file':
     case 'read_image':
       return compactLine(input.file_path || input.source || input.path, max)
@@ -55,9 +56,9 @@ export function toolSummary(tool, max = 0) {
       return compactLine(input.query, max)
     case 'web_fetch':
       return compactLine(input.url, max)
-    case 'Skill':
+    case 'skill':
       return compactLine(input.skill, max)
-    case 'Agent':
+    case 'agent':
       return compactLine(
         [input.subagent_type, input.description || input.operation].filter(Boolean).join(' · '),
         max

@@ -61,6 +61,6 @@ describe('formatSessionNotesSection', () => {
     expect(section.endsWith('</session-notes>')).toBe(true);
     expect(section).toContain('# 决策\n用 Bun');
     expect(section).toContain('不会被上下文压缩掉');
-    expect(section).toContain('SessionNotes');
+    expect(section).toContain('session_notes');
   });
 });

@@ -11,9 +11,9 @@ import { ToolAgent } from './ToolAgent.js';
  * 兜底描述与工具类本身必须一致，否则两个面板会对同一个工具显示不同的说明与入参。
  */
 const FACTORIES: Record<string, () => { name: string }> = {
-  Agent: () => new ToolAgent({} as never),
-  TodoWrite: () => new TodoWriteTool(),
-  SessionNotes: () => new SessionNotesTool(),
+  agent: () => new ToolAgent({} as never),
+  todo_write: () => new TodoWriteTool(),
+  session_notes: () => new SessionNotesTool(),
   session_peers: () => new ToolSessionPeers({ services: {} as never }),
 };
 

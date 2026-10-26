@@ -936,4 +936,39 @@ describe('SessionController', () => {
     expect(controller.resume(session.id).ok).toBe(true);
     expect(agent.loadSnapshot).toHaveBeenCalledWith(expect.objectContaining({ role: 'default' }));
   });
+
+  /**
+   * 自己刚写下的会话文件不能被当成「别的进程改过」：签名用整份 JSON 算，所以
+   * `toPersistedSnapshot` 写下去的字段必须在 `parsePersistedSession` 里原样读回来。
+   * 之前 `capabilitiesCustomized: false` 写出、读回成 `undefined`，于是每个 turn
+   * 都触发一次 resume，把刚应用的 role 盖回快照里的旧角色。
+   */
+  it('does not read its own save back as an external change', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    const store = micaSession.createStore();
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(
+        (): AgentRuntimeSnapshot => ({
+          providerId: 'openai',
+          protocol: 'openai_chat_completions',
+          model: 'test-model',
+          effort: 'none',
+          role: 'default',
+          capabilitySelection: { version: 1, disabledSkills: [], disabledTools: [], disabledMcpServers: [] },
+          capabilitiesCustomized: false,
+          messages: [{ role: 'user', content: 'my prompt' }],
+          usageHistory: [],
+          lastUsage: undefined,
+        }),
+      ),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => [{ role: 'user' as const, content: 'my prompt' }]),
+    };
+    const controller = new SessionController({ agent, store });
+
+    expect(controller.saveCurrent()).toBe(true);
+    expect(controller.refreshFromStore()).toBeNull();
+  });
 });
