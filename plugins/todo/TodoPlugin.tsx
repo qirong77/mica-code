@@ -9,13 +9,13 @@ import { formatTodoSummary, TodoWriteTool, type TodoItem, type TodoStatus } from
 export { parseTodoInput } from './TodoTool.js';
 export type { TodoItem, TodoStatus } from './TodoTool.js';
 
-const PLUGIN_ID = 'builtin.todo';
-const STATUS_ITEM_ID = 'builtin.todo.list';
+const PLUGIN_ID = 'todo';
+const STATUS_ITEM_ID = 'todo.list';
 const TODO_KIND = '📝(todo)';
 const TODO_KIND_WIDTH = 12;
 const TODO_STATUS_WIDTH = 8;
 const TODO_ITEM_INDENT = '     ⎿  ';
-const FALLBACK_OWNER_ID = 'builtin.todo.default-owner';
+const FALLBACK_OWNER_ID = 'todo.default-owner';
 
 type TodoViewState = {
   items: TodoItem[];

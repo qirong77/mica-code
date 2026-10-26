@@ -1,8 +1,15 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_DIR_NAME } from '@packages/mica-config/brand.js';
+import {
+  legacyPluginManifest,
+  parsePluginManifest,
+  PLUGIN_MANIFEST_FILE,
+  type PluginManifest,
+} from './PluginManifest.js';
 import type { MicaPlugin } from './Plugin.js';
 
 export type FilePluginLoaderOptions = {
@@ -13,55 +20,261 @@ export type FilePluginLoaderOptions = {
   };
 };
 
+export type LoadedFilePlugin = {
+  pluginId: string;
+  /** 入口文件。旧格式就是插件文件本身。 */
+  file: string;
+  manifest?: PluginManifest;
+  format?: PluginPackageFormat;
+};
+
 export type FilePluginLoadResult = {
   plugins: MicaPlugin[];
-  loaded: { pluginId: string; file: string }[];
+  loaded: LoadedFilePlugin[];
   failed: { file: string; error: unknown }[];
 };
 
+export type PluginPackageFormat = 'directory' | 'file';
+
+/** 配置页展示用的插件描述：只读文件、不导入代码，坏插件也能列出来。 */
+export type PluginInspection = {
+  /** 运行时使用的插件 id（用户插件带 `user.` / `file.` 前缀，避免与内置插件撞名）。 */
+  id: string;
+  /** 清单里声明的 id。旧格式没有清单，与 name 相同。 */
+  declaredId: string;
+  name: string;
+  version?: string;
+  description: string;
+  format: PluginPackageFormat;
+  /** 插件目录（目录格式）或插件文件（旧格式）的绝对路径。 */
+  root: string;
+  entryFile: string;
+  manifestFile?: string;
+  files: { name: string; sizeBytes: number }[];
+  /** 清单解析 / 入口缺失等静态问题；加载期错误由 plugin-status.json 提供。 */
+  error?: string;
+};
+
+export type PluginInspectionResult = {
+  root: string;
+  plugins: PluginInspection[];
+};
+
+/**
+ * 加载 `$MICA_HOME/plugins` 下的用户插件。
+ *
+ * 支持两种形态：
+ * - 目录插件（推荐）：`<dir>/plugin.json` + 清单声明的入口与资源；
+ * - 单文件插件（旧格式）：`<name>.js` / `<name>.mjs`，清单由加载器合成。
+ *
+ * 任何一个插件失败都不影响其它插件：失败进 `failed`，由调用方写进 plugin-status.json
+ * 供配置页展示，而不是让整个启动流程抛错。
+ */
 export async function loadFilePlugins(options: FilePluginLoaderOptions = {}): Promise<FilePluginLoadResult> {
-  const pluginsDir = options.pluginsDir ?? join(options.homeDir ?? homedir(), CONFIG_DIR_NAME, 'plugins');
+  const pluginsDir = resolvePluginsDir(options);
   const result: FilePluginLoadResult = { plugins: [], loaded: [], failed: [] };
   let entries: string[];
 
   try {
-    entries = await readdir(pluginsDir);
+    entries = (await readdir(pluginsDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() || isPluginFile(entry.name))
+      .map((entry) => entry.name)
+      .sort();
   } catch (error) {
     if (isMissingDirectory(error)) return result;
     throw error;
   }
 
-  for (const fileName of entries.filter(isPluginFile).sort()) {
-    const file = join(pluginsDir, fileName);
+  for (const entryName of entries) {
+    const target = join(pluginsDir, entryName);
     try {
-      const plugin = await loadFilePlugin(file);
-      result.plugins.push(plugin);
-      result.loaded.push({ pluginId: plugin.id, file });
+      const loaded = await loadPluginEntry(target, entryName);
+      if (!loaded) continue;
+      result.plugins.push(loaded.plugin);
+      result.loaded.push(loaded.record);
     } catch (error) {
-      result.failed.push({ file, error });
-      options.logger?.warn('file-plugin:load-failed', { file, error: formatError(error) });
+      result.failed.push({ file: target, error });
+      options.logger?.warn('file-plugin:load-failed', { file: target, error: formatError(error) });
     }
   }
 
   return result;
 }
 
-async function loadFilePlugin(file: string): Promise<MicaPlugin> {
-  const mod = await import(pathToFileURL(file).href);
-  const setup = resolvePluginFactory(mod);
-  const id = basename(file, extname(file));
+/**
+ * 扫描插件目录，产出配置页要的描述。
+ *
+ * 与 `loadFilePlugins` 共用同一套 id / 清单规则，但不执行插件的代码，所以加载失败、清单写错
+ * 的插件照样能出现在列表里，用户在页面上能看到到底哪里错了。
+ */
+export function inspectPlugins(options: FilePluginLoaderOptions = {}): PluginInspectionResult {
+  const root = resolvePluginsDir(options);
+  if (!existsSync(root)) return { root, plugins: [] };
+
+  const plugins: PluginInspection[] = [];
+  for (const entry of readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isDirectory()) {
+      const dir = join(root, entry.name);
+      const manifestFile = join(dir, PLUGIN_MANIFEST_FILE);
+      if (!existsSync(manifestFile)) continue;
+      plugins.push(inspectDirectoryPlugin(dir, manifestFile, entry.name));
+      continue;
+    }
+    if (isPluginFile(entry.name)) plugins.push(inspectFilePlugin(join(root, entry.name), entry.name));
+  }
+  return { root, plugins };
+}
+
+async function loadPluginEntry(
+  target: string,
+  entryName: string,
+): Promise<{ plugin: MicaPlugin; record: LoadedFilePlugin } | null> {
+  if (isPluginFile(entryName)) {
+    const manifest = legacyPluginManifest(entryName, filePluginId(entryName));
+    const setup = await importSetup(target);
+    return {
+      plugin: createFilePlugin(manifest, setup, manifest.id),
+      record: { pluginId: manifest.id, file: target, manifest, format: 'file' },
+    };
+  }
+
+  const manifestFile = join(target, PLUGIN_MANIFEST_FILE);
+  if (!existsSync(manifestFile)) return null;
+
+  const manifest = await readManifest(manifestFile);
+  const entryFile = join(target, manifest.main);
+  if (!existsSync(entryFile)) {
+    throw new Error(`入口文件不存在：${manifest.main}`);
+  }
+  const setup = await importSetup(entryFile);
+  const plugin = createFilePlugin(manifest, setup, userPluginId(manifest));
+  return { plugin, record: { pluginId: plugin.id, file: entryFile, manifest, format: 'directory' } };
+}
+
+async function readManifest(manifestFile: string): Promise<PluginManifest> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(manifestFile, 'utf-8'));
+  } catch (error) {
+    throw new Error(`plugin.json 无法解析：${formatError(error)}`);
+  }
+  const result = parsePluginManifest(parsed);
+  if (!result.ok) throw new Error(result.error);
+  return result.manifest;
+}
+
+function createFilePlugin(manifest: PluginManifest, setup: MicaPlugin['setup'], pluginId: string): MicaPlugin {
   return {
-    id: `file.${id}`,
-    name: id,
+    id: pluginId,
+    name: manifest.name,
+    version: manifest.version,
+    priority: manifest.priority,
+    dependencies: manifest.dependencies.length > 0 ? manifest.dependencies : undefined,
+    required: manifest.required,
+    manifest,
     setup,
   };
+}
+
+/**
+ * 用户插件的运行期 id 一律加前缀。
+ *
+ * 插件的 id 由插件的作者决定，不加前缀就存在「用户插件叫 mcp、和内名插件撞名后启动即抛
+ * Plugin already registered」的风险；前缀把命名空间分开，停用名单也因此不会歧义。
+ */
+function userPluginId(manifest: PluginManifest): string {
+  return `user.${manifest.id}`;
+}
+
+function filePluginId(fileName: string): string {
+  return `file.${basename(fileName, extname(fileName))}`;
+}
+
+async function importSetup(entryFile: string): Promise<MicaPlugin['setup']> {
+  const mod: unknown = await import(pathToFileURL(entryFile).href);
+  return resolvePluginFactory(mod);
 }
 
 function resolvePluginFactory(mod: unknown): MicaPlugin['setup'] {
   if (typeof mod === 'object' && mod !== null && 'default' in mod && typeof mod.default === 'function') {
     return mod.default as MicaPlugin['setup'];
   }
-  throw new Error('Plugin file must default export a setup function');
+  throw new Error('插件入口必须 default 导出 setup 函数');
+}
+
+function inspectDirectoryPlugin(dir: string, manifestFile: string, dirName: string): PluginInspection {
+  const base = {
+    id: `user.${dirName}`,
+    declaredId: dirName,
+    name: dirName,
+    description: '',
+    format: 'directory' as const,
+    root: dir,
+    entryFile: '',
+    manifestFile,
+    files: listFiles(dir),
+  };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(manifestFile, 'utf-8'));
+  } catch (error) {
+    return { ...base, error: `plugin.json 无法解析：${formatError(error)}` };
+  }
+
+  const result = parsePluginManifest(parsed);
+  if (!result.ok) return { ...base, error: result.error };
+
+  const manifest = result.manifest;
+  const entryFile = join(dir, manifest.main);
+  return {
+    ...base,
+    id: `user.${manifest.id}`,
+    declaredId: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    description: manifest.description,
+    entryFile,
+    error: existsSync(entryFile) ? undefined : `入口文件不存在：${manifest.main}`,
+  };
+}
+
+function inspectFilePlugin(file: string, fileName: string): PluginInspection {
+  let sizeBytes = 0;
+  try {
+    sizeBytes = statSync(file).size;
+  } catch {
+    // 文件在扫描与 stat 之间被删掉：仍然列出来，只是没有大小。
+  }
+  const manifest = legacyPluginManifest(fileName, filePluginId(fileName));
+  return {
+    id: manifest.id,
+    declaredId: manifest.name,
+    name: manifest.name,
+    description: manifest.description,
+    format: 'file',
+    root: file,
+    entryFile: file,
+    files: [{ name: fileName, sizeBytes }],
+  };
+}
+
+function listFiles(dir: string): { name: string; sizeBytes: number }[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((entry) => ({
+        name: entry.name,
+        sizeBytes: statSync(join(dir, entry.name)).size,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function resolvePluginsDir(options: FilePluginLoaderOptions): string {
+  return options.pluginsDir ?? join(options.homeDir ?? homedir(), CONFIG_DIR_NAME, 'plugins');
 }
 
 function isPluginFile(fileName: string): boolean {

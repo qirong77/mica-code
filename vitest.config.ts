@@ -34,6 +34,7 @@ export default defineConfig({
     alias: {
       '@packages': fileURLToPath(new URL('./packages', import.meta.url)),
       '@apps': fileURLToPath(new URL('./apps', import.meta.url)),
+      '@plugins': fileURLToPath(new URL('./plugins', import.meta.url)),
     },
   },
   test: {
@@ -42,6 +43,8 @@ export default defineConfig({
     setupFiles: ['./test/setup.ts'],
     include: [
       'packages/mica-builtin-commands/**/*.test.ts',
+      'packages/mica-official-plugins/**/*.test.ts',
+      'plugins/**/*.test.{ts,tsx}',
       'apps/**/*.test.{ts,tsx}',
       'packages/mica-*/**/*.test.ts',
       'packages/@anthropic/ink/**/*.test.ts',

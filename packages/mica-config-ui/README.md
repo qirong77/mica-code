@@ -12,7 +12,8 @@ index.ts                 Node 侧入口：数据动作、路径工具、共享�
 src/shared/types.ts      页面与数据层共用的类型
 src/server/
   actions.ts             「动作名 → 数据操作」表（HTTP 与 IPC 两个传输层的唯一语义来源）
-  details.ts             动作实现（MCP / skills / roles / plugins / sessions）
+  details.ts             动作实现（MCP / skills / roles / sessions）
+  plugins.ts             插件页数据（官方 + 用户插件、启停状态），两个宿主共用
   configFiles.ts         config.json 读写与校验
   paths.ts               $MICA_HOME 下的各路径
   conversation.ts        history → 可读对话项
@@ -55,5 +56,6 @@ render(<ConfigWebApp />)
   - **页面级的根高度链归宿主**：`html/body/#root { height: 100% }` 这类规则**不要**写在这份共享样式里。宿主的样式表（`apps/desktop/.../app.css`）装在 `@layer base`，而这份是后加载的无层级样式，同优先级下必然把它顶掉——桌面端移动端的根容器高度（`--vvh`，软键盘避让全靠它）会因此静默失效，表现是手机上输入条留在键盘下面。整页托管这份页面的浏览器宿主自己写：`apps/config-web/web/src/host.css`。
 - **页面不自己读数据**：所有数据操作都经 `ConfigWebClient`，宿主实现传输层；宿主没注册时页面会明确报错，不静默降级。
 - **桌面宿主的数据实现与 CLI 宿主各自独立**：`apps/desktop/src/host/configWebData.js` 直接读写本机 `$MICA_HOME`（纯文件，不依赖 CLI 的运行时包），CLI 宿主用本包的 `details.ts`（依赖 `mica-mcp`/`mica-session`/`mica-skills`/`mica-config`/`mica-agent`）。两边的返回结构由 `src/shared/types.ts` 约束，改动数据结构要同步两处。
+- **插件页是例外，两边共用 `src/server/plugins.ts`**：它要同时认识官方插件（清单在仓库 `plugins/`，编译进产物）与用户插件（`$MICA_HOME/plugins` 下的目录），自己抄一份扫描逻辑必然对不上。桌面宿主经 `@mica-config-ui/plugins` alias 引用它。
 - **`sessionView.ts` 是纯逻辑出口**：桌面运行时只引它（`history → 对话项 / 上下文分解`，不碰文件系统、不引 `mica-agent` 的值）。因此 `conversation.ts` 里的类型导入必须写成 `import type … from '@packages/mica-agent/core/Conversation.js'` 这种**关键字形式 + 具体文件**：写成 `import { type X } from '@packages/mica-agent/index.js'` 时，Vite 在桌面端构建里不会剥掉它，会把整个 agent 包（含 `prompt/system.md`）拉进运行时 bundle 并直接构建失败。
 - 改配置页交互（新建/删除/放弃修改）后必须跑 `bun run build:config-web` 重新生成 `apps/config-web/src/server/generatedStaticAssets.ts`，内嵌产物随源码一起提交。

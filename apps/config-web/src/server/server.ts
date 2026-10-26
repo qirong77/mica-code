@@ -258,7 +258,9 @@ async function resolveApiCall(
     case '/api/details/roles':
       return method === 'GET' ? get('readRolesDetails') : METHOD_NOT_ALLOWED;
     case '/api/details/plugins':
-      return method === 'GET' ? get('readPluginsDetails') : METHOD_NOT_ALLOWED;
+      if (method === 'GET') return get('readPluginsDetails');
+      if (method === 'PUT') return get('setPluginEnabled', { id: body.id, enabled: body.enabled });
+      return METHOD_NOT_ALLOWED;
     case '/api/details/sessions':
       return method === 'GET' ? get('readSessionsDetails') : METHOD_NOT_ALLOWED;
 

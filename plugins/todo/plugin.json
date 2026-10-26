@@ -1,0 +1,14 @@
+{
+  "id": "todo",
+  "name": "Todo",
+  "version": "1.0.0",
+  "description": "Turn-scoped todo list: the todo_write tool, the /todo command and a live status panel.",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "required": true,
+  "priority": 0,
+  "mica": {
+    "apiVersion": 1
+  }
+}

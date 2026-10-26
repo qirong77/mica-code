@@ -12,11 +12,10 @@ const MCP_STATUS_LABEL: Record<string, string> = {
   failed: '连接失败',
 };
 
-const PLUGIN_STATUS_LABEL: Record<string, string> = {
-  loaded: '已加载',
-  registered: '已注册',
+const PLUGIN_STATE_LABEL: Record<string, string> = {
+  enabled: '已启用',
+  disabled: '已停用',
   failed: '加载失败',
-  unknown: '未知',
 };
 
 type TagTone = 'default' | 'green' | 'red' | 'blue';
@@ -32,14 +31,26 @@ export function mcpStatusTone(status: string | undefined): TagTone {
   return 'default';
 }
 
-export function pluginStatusLabel(status: string | undefined): string {
-  return (status && PLUGIN_STATUS_LABEL[status]) || '未知';
+/** 插件状态只有三种：启用、停用、加载失败。加载失败的细节看 `error`。 */
+export function pluginStateLabel(state: string | undefined): string {
+  return (state && PLUGIN_STATE_LABEL[state]) || '未知';
 }
 
-export function pluginStatusTone(status: string | undefined): TagTone {
-  if (status === 'loaded' || status === 'registered') return 'green';
-  if (status === 'failed') return 'red';
+export function pluginStateTone(state: string | undefined): TagTone {
+  if (state === 'enabled') return 'green';
+  if (state === 'failed') return 'red';
   return 'default';
+}
+
+/** 官方插件随产品分发（编译进产物），用户插件装在 `$MICA_HOME/plugins`。 */
+export function pluginSourceLabel(source: string | undefined): string {
+  return source === 'official' ? '官方' : '用户';
+}
+
+export function pluginFormatLabel(format: string | undefined): string {
+  if (format === 'directory') return '插件目录';
+  if (format === 'file') return '单文件';
+  return '未知';
 }
 
 /** MCP server 的连接方式：`stdio` 是本地进程，`http` 是远端地址。 */

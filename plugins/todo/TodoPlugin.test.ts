@@ -79,7 +79,7 @@ describe('TodoPlugin', () => {
     const harness = createTodoHarness(disposeCallbacks);
 
     expect(harness.upsert).toHaveBeenCalledWith({
-      id: 'builtin.todo.list',
+      id: 'todo.list',
       component: expect.any(Function),
     });
     expect(harness.commands.resolve('/todo show')?.command.name).toBe('todo');
@@ -104,7 +104,7 @@ describe('TodoPlugin', () => {
     expect(harness.showMessage).toHaveBeenCalledWith('Todo list hidden. Use /todo show to restore it.');
 
     for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
-    expect(harness.remove).toHaveBeenCalledWith('builtin.todo.list');
+    expect(harness.remove).toHaveBeenCalledWith('todo.list');
     expect(micaTools.getDefinitions().some((tool) => tool.name === 'todo_write')).toBe(false);
   });
 
@@ -274,7 +274,7 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>) 
     return { dispose: () => micaTools.unregisterRuntime(tool) };
   });
   const ctx = {
-    pluginId: 'builtin.todo',
+    pluginId: 'todo',
     commands,
     hooks,
     events,

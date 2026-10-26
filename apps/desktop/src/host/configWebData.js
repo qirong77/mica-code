@@ -18,6 +18,9 @@ import {
   getCapabilityDefaultsDetails,
   writeCapabilityDefaults
 } from '@mica-config-ui/capability-defaults'
+// 插件列表要同时认识官方插件（清单编译进产物）和用户插件（磁盘上的目录），因此和
+// config-web 共用同一份实现，不再在这里抄一遍扫描逻辑。
+import { getPluginsDetails, setPluginEnabled as setPluginEnabledInStore } from '@mica-config-ui/plugins'
 // 内置 default role 与 CLI 同源：提示词模板就是 packages/mica-agent/prompt/system.md，
 // 展开品牌占位符后原样展示（只读），桌面宿主不自己留一份副本。
 import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?raw'
@@ -58,8 +61,6 @@ const configPath = () => join(micaHome(), 'config.json')
 const sessionsDir = () => join(micaHome(), 'sessions')
 const rolesDir = () => join(micaHome(), 'role')
 const skillsRoot = () => join(micaHome(), 'skills')
-const pluginsRoot = () => join(micaHome(), 'plugins')
-const pluginStatusPath = () => join(micaHome(), 'plugin-status.json')
 
 function writeTextAtomic(file, content) {
   const temporary = join(dirname(file), `.${basename(file)}.${process.pid}.tmp`)
@@ -324,58 +325,6 @@ function deleteSkill(name) {
   return readSkillsDetails()
 }
 
-/* ------------------------------------------------------------------ 插件 */
-
-function readPluginStatusByFile() {
-  const path = pluginStatusPath()
-  if (!existsSync(path)) return new Map()
-  try {
-    const parsed = readJson(path)
-    const entries = [...(parsed.plugins ?? []), ...(parsed.loadFailed ?? [])]
-    return new Map(
-      entries
-        .filter((item) => typeof item?.file === 'string')
-        .map((item) => [
-          item.file,
-          { status: normalizePluginStatus(item.status), error: item.error }
-        ])
-    )
-  } catch {
-    return new Map()
-  }
-}
-
-function normalizePluginStatus(value) {
-  return value === 'loaded' || value === 'registered' || value === 'failed' ? value : 'unknown'
-}
-
-function readPluginsDetails() {
-  const root = pluginsRoot()
-  const statusByFile = readPluginStatusByFile()
-  const plugins = existsSync(root)
-    ? readdirSync(root)
-        .filter((name) => name.endsWith('.js') || name.endsWith('.mjs'))
-        .sort()
-        .map((fileName) => {
-          const file = join(root, fileName)
-          const stat = statSync(file)
-          const name = basename(fileName, extname(fileName))
-          return {
-            name,
-            id: `file.${name}`,
-            file,
-            content: readFileSync(file, 'utf-8'),
-            extension: extname(fileName),
-            sizeBytes: stat.size,
-            updatedAt: stat.mtime.toISOString(),
-            status: statusByFile.get(file)?.status ?? 'unknown',
-            error: statusByFile.get(file)?.error
-          }
-        })
-    : []
-  return { root, plugins }
-}
-
 /* ------------------------------------------------------------------ 会话 */
 
 function sessionPath(id) {
@@ -627,7 +576,8 @@ export const configWebActions = {
       disabledMcpServers: input?.disabledMcpServers
     }),
 
-  readPluginsDetails: () => readPluginsDetails(),
+  readPluginsDetails: () => getPluginsDetails(),
+  setPluginEnabled: (input) => setPluginEnabledInStore(text(input, 'id'), input?.enabled === true),
 
   readSessionsDetails: () => readSessionsDetails(),
   readSessionDetails: (input) => readSessionDetails(text(input, 'id')),

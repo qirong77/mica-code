@@ -28,8 +28,7 @@ export function createHttpConfigWebClient(): ConfigWebClient {
       request<ConfigWebMcpDetails>('/api/files/mcp', { method: 'POST', body: { name, content } }),
     writeMcpServer: (name, content) =>
       request<ConfigWebMcpDetails>('/api/files/mcp', { method: 'PUT', body: { name, content } }),
-    deleteMcpServer: (name) =>
-      request<ConfigWebMcpDetails>('/api/files/mcp', { method: 'DELETE', body: { name } }),
+    deleteMcpServer: (name) => request<ConfigWebMcpDetails>('/api/files/mcp', { method: 'DELETE', body: { name } }),
 
     readCapabilityDefaults: () => request<ConfigWebCapabilityDefaults>('/api/details/capabilities'),
     writeCapabilityDefaults: (input) =>
@@ -40,18 +39,18 @@ export function createHttpConfigWebClient(): ConfigWebClient {
       request<ConfigWebSkillsDetails>('/api/files/skill', { method: 'POST', body: { name, content } }),
     writeSkill: (name, content) =>
       request<ConfigWebSkillsDetails>('/api/files/skill', { method: 'PUT', body: { name, content } }),
-    deleteSkill: (name) =>
-      request<ConfigWebSkillsDetails>('/api/files/skill', { method: 'DELETE', body: { name } }),
+    deleteSkill: (name) => request<ConfigWebSkillsDetails>('/api/files/skill', { method: 'DELETE', body: { name } }),
 
     readRolesDetails: () => request<ConfigWebRolesDetails>('/api/details/roles'),
     createRole: (name, content = '') =>
       request<ConfigWebRolesDetails>('/api/files/role', { method: 'POST', body: { name, content } }),
     writeRole: (name, content) =>
       request<ConfigWebRolesDetails>('/api/files/role', { method: 'PUT', body: { name, content } }),
-    deleteRole: (name) =>
-      request<ConfigWebRolesDetails>('/api/files/role', { method: 'DELETE', body: { name } }),
+    deleteRole: (name) => request<ConfigWebRolesDetails>('/api/files/role', { method: 'DELETE', body: { name } }),
 
     readPluginsDetails: () => request<ConfigWebPluginsDetails>('/api/details/plugins'),
+    setPluginEnabled: (id, enabled) =>
+      request<ConfigWebPluginsDetails>('/api/details/plugins', { method: 'PUT', body: { id, enabled } }),
 
     readSessionsDetails: () => request<ConfigWebSessionsDetails>('/api/details/sessions'),
     readSessionDetails: (id) => request<ConfigWebSessionDetails>(`/api/details/session?id=${encodeURIComponent(id)}`),
@@ -69,8 +68,7 @@ export function createHttpConfigWebClient(): ConfigWebClient {
       ),
     readSessionContextAnalysis: (id) =>
       request<ConfigWebContextAnalysis>(`/api/details/session?id=${encodeURIComponent(id)}&view=context`),
-    writeSession: (id, content) =>
-      request<unknown>('/api/files/session', { method: 'PUT', body: { id, content } }),
+    writeSession: (id, content) => request<unknown>('/api/files/session', { method: 'PUT', body: { id, content } }),
 
     connectHeartbeat: (onEvent) => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -89,10 +87,7 @@ export function createHttpConfigWebClient(): ConfigWebClient {
   };
 }
 
-async function request<T>(
-  path: string,
-  options: { method?: string; body?: unknown } = {},
-): Promise<T> {
+async function request<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
   const response = await fetch(path, {
     method: options.method ?? 'GET',
     ...(options.body === undefined

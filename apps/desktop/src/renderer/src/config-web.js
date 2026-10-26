@@ -28,6 +28,7 @@ export function createDesktopConfigWebClient() {
     deleteRole: (name) => invoke('deleteRole', { name }),
 
     readPluginsDetails: () => invoke('readPluginsDetails'),
+    setPluginEnabled: (id, enabled) => invoke('setPluginEnabled', { id, enabled }),
 
     readAutoCompactDetails: () => invoke('readAutoCompactDetails'),
     writeAutoCompactSettings: (settings) => invoke('writeAutoCompactSettings', { settings }),

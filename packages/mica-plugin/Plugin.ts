@@ -1,4 +1,5 @@
 import type { Disposable } from '@packages/mica-common/index.js';
+import type { PluginManifest } from './PluginManifest.js';
 import type { PluginContext } from './PluginContext.js';
 
 export type MicaPlugin = {
@@ -8,6 +9,8 @@ export type MicaPlugin = {
   priority?: number;
   dependencies?: string[];
   required?: boolean;
+  /** 目录插件带的清单；内置插件与旧格式单文件插件为 undefined。 */
+  manifest?: PluginManifest;
   setup(ctx: PluginContext): void | Disposable | Promise<void | Disposable>;
 };
 
@@ -18,6 +21,7 @@ export abstract class Plugin implements MicaPlugin {
   readonly priority?: number;
   readonly dependencies?: string[];
   readonly required?: boolean;
+  readonly manifest?: PluginManifest;
 
   protected constructor(options: {
     id: string;
@@ -26,6 +30,7 @@ export abstract class Plugin implements MicaPlugin {
     priority?: number;
     dependencies?: string[];
     required?: boolean;
+    manifest?: PluginManifest;
   }) {
     this.id = options.id;
     this.name = options.name;
@@ -33,6 +38,7 @@ export abstract class Plugin implements MicaPlugin {
     this.priority = options.priority;
     this.dependencies = options.dependencies;
     this.required = options.required;
+    this.manifest = options.manifest;
   }
 
   abstract setup(ctx: PluginContext): void | Disposable | Promise<void | Disposable>;

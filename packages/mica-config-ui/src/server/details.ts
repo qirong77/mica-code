@@ -11,20 +11,19 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, extname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { buildConfigWebConversationItems } from './conversation.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
-import { getPluginsRootPath, getPluginStatusPath, getSkillsRootPath } from './paths.js';
+import { getSkillsRootPath } from './paths.js';
 import type { McpServerConfig } from '@packages/mica-mcp/index.js';
 import type { Skill } from '@packages/mica-skills/index.js';
 import type {
   ConfigWebMcpDetails,
   ConfigWebMcpServer,
-  ConfigWebPluginsDetails,
   ConfigWebRolesDetails,
   ConfigWebContextAnalysis,
   ConfigWebConversationItem,
@@ -36,6 +35,7 @@ import type {
 import type { PersistedSession } from '@packages/mica-session/index.js';
 import { buildConfigWebContextAnalysis } from './sessionAnalysis.js';
 export { getCapabilityDefaultsDetails, writeCapabilityDefaults } from './capabilityDefaults.js';
+export { getPluginsDetails, setPluginEnabled } from './plugins.js';
 
 let mcpInitialized = false;
 
@@ -136,7 +136,6 @@ export function getSkillsDetails(): ConfigWebSkillsDetails {
   };
 }
 
-
 export function writeSkill(name: string, content: string): ConfigWebSkillsDetails {
   const skill = findEditableSkill(name);
   const skillFile = join(skill.baseDir, 'SKILL.md');
@@ -173,38 +172,6 @@ export function deleteSkill(name: string): ConfigWebSkillsDetails {
   rmSync(skill.baseDir, { recursive: true, force: true });
   micaSkills.reload();
   return getSkillsDetails();
-}
-
-export function getPluginsDetails(): ConfigWebPluginsDetails {
-  const root = getPluginsRootPath();
-  const statusByFile = readPluginStatusByFile();
-  const plugins = existsSync(root)
-    ? readdirSync(root)
-        .filter(isPluginFile)
-        .sort()
-        .map((fileName) => {
-          const file = join(root, fileName);
-          const stat = statSync(file);
-          const name = basename(fileName, extname(fileName));
-          const status = statusByFile.get(file);
-          return {
-            name,
-            id: `file.${name}`,
-            file,
-            content: readFileSync(file, 'utf-8'),
-            extension: extname(fileName),
-            sizeBytes: stat.size,
-            updatedAt: stat.mtime.toISOString(),
-            status: status?.status ?? 'unknown',
-            error: status?.error,
-          };
-        })
-    : [];
-
-  return {
-    root,
-    plugins,
-  };
 }
 
 export function getSessionsDetails(): ConfigWebSessionsDetails {
@@ -449,31 +416,6 @@ function normalizeRoleName(name: string): string {
   return trimmed;
 }
 
-function readPluginStatusByFile(): Map<
-  string,
-  { status: 'loaded' | 'registered' | 'failed' | 'unknown'; error?: string }
-> {
-  const path = getPluginStatusPath();
-  if (!existsSync(path)) return new Map();
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as {
-      plugins?: Array<{ file?: string; status?: string; error?: string }>;
-      loadFailed?: Array<{ file?: string; status?: string; error?: string }>;
-    };
-    return new Map(
-      [...(parsed.plugins ?? []), ...(parsed.loadFailed ?? [])]
-        .filter((item): item is { file: string; status?: string; error?: string } => typeof item.file === 'string')
-        .map((item) => [item.file, { status: normalizePluginStatus(item.status), error: item.error }]),
-    );
-  } catch {
-    return new Map();
-  }
-}
-
-function normalizePluginStatus(value: string | undefined): 'loaded' | 'registered' | 'failed' | 'unknown' {
-  return value === 'loaded' || value === 'registered' || value === 'failed' ? value : 'unknown';
-}
-
 function describeMcpConfig(
   name: string,
   config: McpServerConfig,
@@ -601,8 +543,4 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
-}
-
-function isPluginFile(fileName: string): boolean {
-  return fileName.endsWith('.mjs') || fileName.endsWith('.js');
 }

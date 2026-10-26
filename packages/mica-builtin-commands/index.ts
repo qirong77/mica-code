@@ -52,7 +52,13 @@ export { createNewCommand } from './commands/new.js';
 export { createRenameCommand } from './commands/rename.js';
 export { createResumeCommand, formatResumeSessionTitle } from './commands/resume.js';
 export { createRewindCommand, rewindCheckpointCells } from './commands/rewind.js';
-export { createBtwCommand, parseBtwArgs, formatBtwNotice, buildBtwSystemPrompt, messagesToTranscript } from './commands/btw.js';
+export {
+  createBtwCommand,
+  parseBtwArgs,
+  formatBtwNotice,
+  buildBtwSystemPrompt,
+  messagesToTranscript,
+} from './commands/btw.js';
 // btw 的纯逻辑单独成文件：headless 的 btw 面板（app-server）不能拉 Ink 进来，
 // 只能从 './commands/btwThread.js' 直接取，见那里的说明。
 export { createBtwThread } from './commands/btwThread.js';
@@ -107,7 +113,6 @@ export { default as setupMessageQueue } from './plugins/message-queue.js';
 export { default as setupFileMention } from './plugins/file-mention.js';
 export { default as setupMicaCodeAppNotify } from './plugins/mica-code-app-notify.js';
 export { default as setupSessionAutonomy } from './plugins/session-autonomy/SessionAutonomyPlugin.js';
-export { TodoPlugin } from './plugins/todo/TodoPlugin.js';
 export { default as setupSessionNotes } from './plugins/notes/NotesPlugin.js';
 export { SessionNotesTool, parseNotesInput } from './plugins/notes/NotesTool.js';
 export type { NotesAction } from './plugins/notes/NotesTool.js';
@@ -130,4 +135,7 @@ export type { ConfigChange, ConfigIssue, ConfigValidationResult } from './startu
 export { default as setupProcessDiagnostics } from './startup/process-diagnostics.js';
 export { default as setupFilePlugins, writeFilePluginStatus } from './startup/file-plugins.js';
 export { default as setupModelEffortContext } from './startup/model-effort-context/index.js';
-export { __resetModelsCacheForTests, getModelRule as getModelsDevRule } from './startup/model-effort-context/getModelRule.js';
+export {
+  __resetModelsCacheForTests,
+  getModelRule as getModelsDevRule,
+} from './startup/model-effort-context/getModelRule.js';

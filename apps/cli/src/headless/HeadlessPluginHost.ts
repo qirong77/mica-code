@@ -32,8 +32,9 @@ import {
   setupMicaCodeAppNotify,
   setupSessionAutonomy,
   setupSessionNotes,
-  TodoPlugin,
 } from '@packages/mica-builtin-commands/index.js';
+import { officialPlugins } from '@packages/mica-official-plugins/index.js';
+import { readDisabledPluginIds } from '@packages/mica-plugin/index.js';
 import { createHeadlessRuntimeServices } from './headlessRuntimeServices.js';
 import { TurnNoticeLog } from '../runtime/turnNotices.js';
 import type { HeadlessTurnStartResult } from '../runtime/HeadlessTurnExecutor.js';
@@ -180,7 +181,11 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       setup: plugin.setup,
     });
   }
-  plugins.register(new TodoPlugin());
+  const disabledPlugins = readDisabledPluginIds();
+  for (const plugin of officialPlugins) {
+    if (disabledPlugins.has(plugin.id)) continue;
+    plugins.register(plugin);
+  }
 
   // Persisted conversation = provider history + notices threaded back into the
   // position they were created at (see TurnNoticeLog), matching the

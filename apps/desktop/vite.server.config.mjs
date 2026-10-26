@@ -32,6 +32,10 @@ export default defineConfig({
         find: '@mica-config-ui/capability-defaults',
         replacement: resolve('../../packages/mica-config-ui/src/server/capabilityDefaults.ts')
       },
+      {
+        find: '@mica-config-ui/plugins',
+        replacement: resolve('../../packages/mica-config-ui/src/server/plugins.ts')
+      },
       { find: '@packages', replacement: resolve('../../packages') }
     ]
   },

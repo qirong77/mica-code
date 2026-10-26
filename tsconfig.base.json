@@ -3,6 +3,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
     "allowJs": true,
     "strict": true,
     "noUnusedLocals": true,
@@ -17,6 +18,7 @@
     "paths": {
       "@packages/*": ["./packages/*"],
       "@apps/*": ["./apps/*"],
+      "@plugins/*": ["./plugins/*"],
       "@mica-config-ui/web": ["./packages/mica-config-ui/web/index.tsx"],
       "@mica-config-ui/*": ["./packages/mica-config-ui/*"]
     },

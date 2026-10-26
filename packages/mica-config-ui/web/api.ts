@@ -53,6 +53,7 @@ export type ConfigWebClient = {
   }): Promise<ConfigWebCapabilityDefaults>;
 
   readPluginsDetails(): Promise<ConfigWebPluginsDetails>;
+  setPluginEnabled?(id: string, enabled: boolean): Promise<ConfigWebPluginsDetails>;
 
   /**
    * 自动压缩（输入框上方那个齿轮曾经管的东西）现在只在这台机器的运行时里：设置与按会话
@@ -176,6 +177,17 @@ export function deleteSkill(name: string): Promise<ConfigWebSkillsDetails> {
 
 export function readPluginsDetails(): Promise<ConfigWebPluginsDetails> {
   return requireClient().readPluginsDetails();
+}
+
+/** 启用 / 停用插件：只写本地状态文件，下一次启动生效。 */
+export function setPluginEnabled(id: string, enabled: boolean): Promise<ConfigWebPluginsDetails> {
+  const current = requireClient();
+  if (typeof current.setPluginEnabled !== 'function') throw new Error('当前宿主不支持启停插件');
+  return current.setPluginEnabled(id, enabled);
+}
+
+export function supportsPluginToggle(): boolean {
+  return typeof client?.setPluginEnabled === 'function';
 }
 
 /** 宿主是否提供自动压缩这一节（桌面运行时提供，浏览器宿主不提供）。 */

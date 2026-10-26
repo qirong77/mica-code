@@ -192,20 +192,38 @@ export type ConfigWebCapabilityTool = {
   group: { key: string; label: string } | null;
 };
 
+export type ConfigWebPluginSource = 'official' | 'user';
+export type ConfigWebPluginState = 'enabled' | 'disabled' | 'failed';
+export type ConfigWebPluginFile = { name: string; sizeBytes?: number };
+
 export type ConfigWebPlugin = {
-  name: string;
   id: string;
-  file: string;
-  content: string;
-  extension: string;
-  sizeBytes: number;
-  updatedAt: string;
-  status?: 'loaded' | 'registered' | 'failed' | 'unknown';
+  name: string;
+  version: string;
+  description: string;
+  author?: string;
+  source: ConfigWebPluginSource;
+  /** 启用 / 停用 / 加载失败。停用的插件在启动阶段就不会注册。 */
+  state: ConfigWebPluginState;
+  /** 目录插件还是旧格式的单文件插件。 */
+  format: 'directory' | 'file';
+  /** 官方插件是仓库内相对路径（plugins/<id>），用户插件是绝对路径。 */
+  location: string;
+  entryFile?: string;
+  manifestFile?: string;
+  files: ConfigWebPluginFile[];
+  /** plugin-status.json 记录的上一次加载结果。 */
+  loadStatus?: 'loaded' | 'registered' | 'failed' | 'unknown';
   error?: string;
 };
 
 export type ConfigWebPluginsDetails = {
+  /** 用户插件目录（$MICA_HOME/plugins）。 */
   root: string;
+  /** 启停状态文件（$MICA_HOME/plugins-state.json）。 */
+  statePath: string;
+  /** 官方插件在仓库里的目录。 */
+  officialDir: string;
   plugins: ConfigWebPlugin[];
 };
 

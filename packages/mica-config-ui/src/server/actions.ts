@@ -22,6 +22,7 @@ import {
   writeSessionDetails,
   writeSkill,
   writeCapabilityDefaults,
+  setPluginEnabled as setPluginEnabledInStore,
 } from './details.js';
 
 export type ConfigWebActionInput = {
@@ -46,20 +47,16 @@ export const configWebActions = {
   readMcpDetails: (_input: ConfigWebActionInput) => getMcpDetails(),
   createMcpServer: (input: ConfigWebActionInput) =>
     createMcpServer(text(input, 'name'), optionalText(input, 'content')),
-  writeMcpServer: (input: ConfigWebActionInput) =>
-    writeMcpServer(text(input, 'name'), text(input, 'content')),
+  writeMcpServer: (input: ConfigWebActionInput) => writeMcpServer(text(input, 'name'), text(input, 'content')),
   deleteMcpServer: (input: ConfigWebActionInput) => deleteMcpServer(text(input, 'name')),
 
   readSkillsDetails: (_input: ConfigWebActionInput) => getSkillsDetails(),
-  createSkill: (input: ConfigWebActionInput) =>
-    createSkill(text(input, 'name'), optionalText(input, 'content')),
-  writeSkill: (input: ConfigWebActionInput) =>
-    writeSkill(text(input, 'name'), text(input, 'content')),
+  createSkill: (input: ConfigWebActionInput) => createSkill(text(input, 'name'), optionalText(input, 'content')),
+  writeSkill: (input: ConfigWebActionInput) => writeSkill(text(input, 'name'), text(input, 'content')),
   deleteSkill: (input: ConfigWebActionInput) => deleteSkill(text(input, 'name')),
 
   readRolesDetails: (_input: ConfigWebActionInput) => getRolesDetails(),
-  createRole: (input: ConfigWebActionInput) =>
-    createRole(text(input, 'name'), optionalText(input, 'content')),
+  createRole: (input: ConfigWebActionInput) => createRole(text(input, 'name'), optionalText(input, 'content')),
   writeRole: (input: ConfigWebActionInput) => writeRole(text(input, 'name'), text(input, 'content')),
   deleteRole: (input: ConfigWebActionInput) => deleteRole(text(input, 'name')),
 
@@ -72,6 +69,7 @@ export const configWebActions = {
     }),
 
   readPluginsDetails: (_input: ConfigWebActionInput) => getPluginsDetails(),
+  setPluginEnabled: (input: ConfigWebActionInput) => setPluginEnabledInStore(text(input, 'id'), input.enabled === true),
 
   readSessionsDetails: (_input: ConfigWebActionInput) => getSessionsDetails(),
   readSessionDetails: (input: ConfigWebActionInput) => getSessionDetails(text(input, 'id')),
@@ -83,12 +81,9 @@ export const configWebActions = {
       integer(input, 'limit', 80),
       input.tail === true,
     ),
-  readSessionItem: (input: ConfigWebActionInput) =>
-    getSessionItem(text(input, 'id'), integer(input, 'sequence', 1)),
-  readSessionContextAnalysis: (input: ConfigWebActionInput) =>
-    getSessionContextAnalysis(text(input, 'id')),
-  writeSession: (input: ConfigWebActionInput) =>
-    writeSessionDetails(text(input, 'id'), text(input, 'content')),
+  readSessionItem: (input: ConfigWebActionInput) => getSessionItem(text(input, 'id'), integer(input, 'sequence', 1)),
+  readSessionContextAnalysis: (input: ConfigWebActionInput) => getSessionContextAnalysis(text(input, 'id')),
+  writeSession: (input: ConfigWebActionInput) => writeSessionDetails(text(input, 'id'), text(input, 'content')),
 } satisfies Record<string, ConfigWebAction>;
 
 export type ConfigWebActionName = keyof typeof configWebActions;
@@ -100,10 +95,7 @@ export function isConfigWebActionName(value: unknown): value is ConfigWebActionN
 }
 
 /** 传输层只负责搬运：动作名 + 参数进来，数据或错误出去。 */
-export function runConfigWebAction(
-  name: ConfigWebActionName,
-  input: ConfigWebActionInput = {},
-): unknown {
+export function runConfigWebAction(name: ConfigWebActionName, input: ConfigWebActionInput = {}): unknown {
   const action: ConfigWebAction = configWebActions[name];
   return action(input);
 }

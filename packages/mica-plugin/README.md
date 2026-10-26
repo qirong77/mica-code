@@ -9,6 +9,8 @@
 - 提供 hook registry，用于扩展运行时流程。
 - 提供 service container 和 service token，用于插件间共享能力。
 - 定义 `PluginContext` capability，由应用注入 runtime queue、工具注册和 UI 扩展入口。
+- 定义插件包格式：`plugin.json` 清单（id / name / version / main / assets / dependencies / required / apiVersion）、目录加载器与只读扫描（配置页用）。
+- 维护启停状态（`$MICA_HOME/plugins-state.json`），停用的插件在启动阶段就不注册。
 
 ## 使用入口
 
@@ -48,7 +50,8 @@ context.onDispose(() => hook.dispose());
 
 - 本包只提供插件机制，不包含具体产品插件。
 - 插件通过 context、hooks 和 services 与外部交互，避免直接耦合应用层单例。
-- 官方运行期插件位于 `packages/mica-builtin-commands/plugins`，不应反向导入 `src/**`。
+- 官方运行期插件位于 `packages/mica-builtin-commands/plugins` 与仓库根 `plugins/`，都不应反向导入 `src/**`。
+- 插件包格式见仓库根 `plugins/README.md`：一个插件是一个目录，入口 `default` 导出 `setup(ctx)`。
 - 生命周期中注册的资源需要可释放，避免长期运行中的泄漏。
 
 ## 目录说明
@@ -58,4 +61,7 @@ context.onDispose(() => hook.dispose());
 - `PluginContext.ts`：插件运行上下文。
 - `HookRegistry.ts`、`HookTypes.ts`：hook 类型与注册表。
 - `ServiceContainer.ts`、`ServiceToken.ts`：服务容器与 token。
+- `PluginManifest.ts`：`plugin.json` 的类型、解析与路径越界校验；旧格式单文件插件用它合成清单。
+- `FilePluginLoader.ts`：扫描 `$MICA_HOME/plugins`（目录插件 + 旧格式单文件插件），以及不打代码的 `inspectPlugins`。
+- `PluginState.ts`：启停状态文件的读写。
 - `index.ts`：公共 API 聚合导出。

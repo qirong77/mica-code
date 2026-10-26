@@ -62,6 +62,9 @@ npm run serve:web         # 构建后运行 Web 运行时
 | `apps/config-web/` | 配置页浏览器宿主：Bun HTTP 服务与内嵌静态资源 |
 | `apps/website/`    | Astro 官网                                    |
 
+仓库根的 `plugins/` 是官方插件源码（每个目录一个插件包），由 `packages/mica-official-plugins`
+静态登记后编译进产物；用户插件装在 `$MICA_HOME/plugins`，格式相同。
+
 ### 公共包
 
 以下包均位于 `packages/`。
@@ -84,11 +87,13 @@ npm run serve:web         # 构建后运行 Web 运行时
 | `mica-web-shared`             | desktop renderer / 运行时共享的展示、状态、搜索、地址约定                |
 | `mica-file-mentions`          | CLI / desktop 共用的文件补全触发、扫描、排序、插入逻辑                   |
 | `mica-config-ui`              | 配置页唯一实现：页面、服务端数据动作、共享类型                           |
+| `mica-official-plugins`       | 官方插件目录：`manifests.js` 只含清单，`index.js` 才带入口               |
 
 - 公共 API 从包的 `index.ts` 导出，应用层优先使用 `@packages/<name>/index.js`。
 - 根 tsconfig 提供 `@packages/*`、`@apps/*` alias；package 不得反向依赖 `@apps/*`。
 - 底层需要上层能力时，通过类型、回调、service、hook 或 adapter 注入。
-- `mica-builtin-commands/plugins` 经 `PluginContext` 接入，不反向 import 应用 `src/**`。
+- `mica-builtin-commands/plugins` 与仓库根 `plugins/*` 都经 `PluginContext` 接入，不反向 import 应用 `src/**`。
+- 配置页这类「只想列插件」的宿主只 import `mica-official-plugins/manifests.js`，别把插件实现（React / Ink）拖进进程。
 - TypeScript 使用 strict、isolatedModules、verbatimModuleSyntax，类型导入用 `import type`。
 - 默认静态导入；进程模式分派、PTY 首次加载和 renderer 重模块按需加载可使用动态 import。
 - **生产代码禁止静态 import `node-pty` 或 `mica-pty/index.js`**；保持 native binding external，Bun 编译二进制无法解析它。
@@ -246,6 +251,15 @@ npm run serve:web         # 构建后运行 Web 运行时
 
 ## 9. 命令、工具、MCP 与 Skills
 
+### 插件包
+
+- 一个插件是一个目录：`plugin.json`（`id` / `name` / `version` / `main` / `assets` / `dependencies` / `required` / `priority` / `mica.apiVersion`）+ 入口（`default` 导出 `setup(ctx)`）+ 资源。格式与字段以 `plugins/README.md` 为准。
+- 官方插件在仓库根 `plugins/<id>/`，清单是唯一事实来源，入口在 `packages/mica-official-plugins/index.ts` 登记；用户插件在 `$MICA_HOME/plugins`（目录格式，或旧格式单个 `.js` / `.mjs`），由 `mica-plugin/FilePluginLoader.ts` 在启动时加载。
+- 用户插件 id 一律加 `user.` 前缀（旧格式是 `file.`），避免与内置插件撞名后 `Plugin already registered`。
+- 清单解析与路径校验在 `mica-plugin/PluginManifest.ts`：`main` / `assets` 必须是插件目录内的相对路径。配置页用 `inspectPlugins()` 只读扫描，清单写错的插件照样列得出来。
+- 启停状态在 `$MICA_HOME/plugins-state.json`（`{ "disabled": [...] }`），停用的插件在注册阶段就被跳过，改完要重开会话才生效。
+- 新增官方插件：建目录 → 在 `manifests.ts` 与 `index.ts` 两处登记 → 插件自己的测试放在插件目录里（vitest 已覆盖 `plugins/**`）。
+
 ### 命令
 
 - 命令实现放 `mica-builtin-commands/commands/`；装配放 `plugins/command-*.ts`，统一从 `index.ts` 导出。
@@ -267,7 +281,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - `truncateDisplayText` 仅在 `process.stdout.columns` 存在时裁剪；app-server 管道无列宽，不按 80 列截断。
 - PTY 由懒启动 Node helper `mica-pty/src/server.mjs` 承载，Bun 首次调用动态加载 `src/manager.js`。
 - 修改 `server.mjs` 后运行 `bun run scripts/generate-pty-server-source.mjs`，同步 `ptyServerSource.ts`。
-- Todo 属当前进程/turn，不写 session；正常完成将 pending / in_progress 全部 completed，abort/error 只将 in_progress 退回 pending。desktop 从实时工具事件重建计划，须同步收口规则。
+- Todo（`plugins/todo/`）属当前进程/turn，不写 session；正常完成将 pending / in_progress 全部 completed，abort/error 只将 in_progress 退回 pending。desktop 从实时工具事件重建计划，须同步收口规则。
 - `session_notes` 读写会话笔记（`snapshot.notes`），`read` / `append` / `replace` 三个 action，`primaryAgentOnly`；文本归一化与 prompt 片段在 `mica-common/sessionNotes.ts`。工具只改内存，落盘交给本轮 checkpoint，别在工具里调 `saveCurrent`。
 
 ### wait_for 与会话自治
@@ -418,8 +432,7 @@ npm run serve:web         # 构建后运行 Web 运行时
   desktop 的 `remarkAutolinkPunctuation` 放在 `remarkGfm` / `remarkPathLinks` 前；CLI 用 `splitTerminalLink`。新增标点只改共享集合，同步两端测试。
 - 路径识别在 `chat-paths.js` / `PathToken`：单击目录打开、文件定位，Cmd/Ctrl 或中键在应用内打开，图片单击预览；失败 notice，缺 context 时纯文本。
 - 用户消息超过 10 行默认折叠（贴进来的长文本、`[Mica compact checkpoint]` 摘要都以 user 角色落库）：阈值在 `chat-collapse.js`，按 `scrollHeight` 与 computed `line-height` 判定，附「展开全部（共 N 行）」按钮；含 `[Image]` 引用的消息不折叠（缩略图会被裁掉）。折叠态悬停弹真正的浮层看全文（`chat-hover-tooltip.jsx`：延迟 320ms、离开 160ms 收起、portal 到 body、自己可滚动），**不要用原生 `title`**——它延迟约 1 秒、长文本压成一行、滚不动也选不中，正是「想看被折掉的部分」最需要的两件事。
-- 回合日志的工具行一律单行省略（终端同规则），点行开详情弹窗看完整入参/输出（输出封顶 5000 行 / 20 万字符）。`TurnLogItem` memo，计时更新仅影响运行行。
-- 思考是一条有身份的条目，不是裸文本块：相邻 reasoning 片段先经 `chat-thinking.js.mergeThinkingRuns` 合成一段（中间隔工具调用才断开），标题行给「思考 / 思考中 + 耗时」，正文默认折到 4 行、点标题展开，还在想时不折（日志贴底滚动，读者看的是此刻在想什么）。`chat-tool-views.jsx.ThinkingRow` 是唯一实现，主对话、BTW 抽屉、subagent 详情共用。
+- 回合日志的工具行一律单行省略（终端同规则），点行开详情弹窗看完整入参/输出（输出封顶 5000 行 / 20 万字符）；思考照旧整段折行，不是日志行。`TurnLogItem` memo，计时更新仅影响运行行。
 - 详情弹窗统一走 `chat-modal.jsx` 的 `ModalShell`（portal 到 body，head 固定 + meta 行 + body 唯一滚动层），上下文占用/子代理/后台任务/工具调用/思考共用 `.chat-modal-*`，不再单开弹窗样式。
 - Subagent 详情里的活动记录与主对话共用同一套展示件：思考/工具行用 `chat-tool-views.jsx`，提示词是用户消息块、结果与正文是回答块，工具行点开就是同一个 `ToolDetailDialog`（`nested`，不再就地展开）。两边字号靠 `.chat-activity-log` 对齐；`.chat-modal-overlay` 与 `.chat-view` 共用一组 `--chat-*` 排版变量，否则 portal 到 body 后 `var(--chat-user)` 解析成空。
 - 代码块（聊天 markdown 与详情弹窗的参数/输出）统一由 `CodeView` + `code-highlight.js` 渲染：只做只读着色，认得的语言是 json/shell/diff/js/log，其余原样输出；token 色走 `app.css` 的 `--color-*`，不引入编辑器运行时，路径点击仍由 `PathToken` 提供。`displayText` 在显示前对 json 做缩进重排（数字与转义按原文保留，解析失败原样输出），复制带的是屏幕上那段文本。
@@ -553,7 +566,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - 表单转换的唯一实现在 `web/configDraft.ts`（纯函数、有测试）：表单只覆盖已知字段，写入时保留未知顶层键与 provider 里的未知字段，已知键按固定顺序排列，可选字段留空即删键（`models: []` 在 `validate-config` 里是错误）。
 - 新增数据动作先声明 `ConfigWebClient`；宿主无能力则方法可选并提供对应降级。Auto Compact 按能力出现，Browser Control / Terminal Control 始终显示说明。
 - Capabilities 页改的是 `config.json` 的 `capabilityDefaults`（新会话与未定制会话的默认值），不改已在会话里调过开关的会话；页签顺序 Tools / Skills / MCP servers，列表为「开关 + 名称 + 描述」三列，描述单行省略、点击开详情弹窗（含只读与入参摘要），不提供全开/全关；工具行按 `group` 成组、组头滑块是整组开关，技能与 MCP 服务器不分组建行。读写实现放在 `mica-config-ui/src/server/capabilityDefaults.ts`，桌面运行时经 `@mica-config-ui/capability-defaults` alias 复用。
-- 配置页所有页面（Config / Skills / Roles / MCP / Sessions / Capabilities / Auto Compact）都不设「保存」按钮，也没有「放弃未保存的修改」确认：改动停下就写盘。通用实现在 `web/useAutoSave.ts`——400ms 防抖、写盘串行化并攒成「最后一次」重发、工具栏给「保存中…」「已保存」反馈；切换条目 / 刷新 / 切页面之前先 `flush()`，卸载时补发 pending。失败不回滚输入（只 `Alert`），下一次合法改动重试。校验类页面在本地不通过时**不写盘**：Config 用 `validateConfigDraft` 挡必填缺失与 JSON 半句，Sessions 在 JSON 解析失败或 turn 运行中（lease 冲突）暂停写入。`Sidebar` 按 Agent / Sessions / Desktop / Diagnostics 分组，窄屏收起组标题并压成一行。
+- 配置页所有页面（Config / Skills / Roles / MCP / Sessions / Capabilities / Auto Compact / Plugins）都不设「保存」按钮，也没有「放弃未保存的修改」确认：改动停下就写盘。通用实现在 `web/useAutoSave.ts`——400ms 防抖、写盘串行化并攒成「最后一次」重发、工具栏给「保存中…」「已保存」反馈；切换条目 / 刷新 / 切页面之前先 `flush()`，卸载时补发 pending。失败不回滚输入（只 `Alert`），下一次合法改动重试。校验类页面在本地不通过时**不写盘**：Config 用 `validateConfigDraft` 挡必填缺失与 JSON 半句，Sessions 在 JSON 解析失败或 turn 运行中（lease 冲突）暂停写入。`Sidebar` 按 Agent / Sessions / Desktop / Diagnostics 分组，窄屏收起组标题并压成一行。
 - 样式限定 `.mica-config-ui`，页面级 html/body/#root 高度链由整页宿主定义，不能覆盖 desktop 窄屏根高度。
 - 配置页新建/删除/放弃操作用 `DialogHost` 的 confirmDialog / promptDialog，不依赖原生 prompt/confirm。
 - 改配置页后运行 `bun run build:config-web`，提交生成的 `generatedStaticAssets.ts`；system prompt 与内置角色直接复用 CLI 模板，跳过用户 default.md。

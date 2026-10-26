@@ -4,6 +4,8 @@
     "apps/cli/src",
     "packages/mica-common",
     "packages/mica-plugin",
+    "packages/mica-official-plugins",
+    "plugins",
     "packages/mica-runtime",
     "packages/mica-commands",
     "packages/mica-builtin-commands",
@@ -22,8 +24,5 @@
     "packages/mica-file-mentions",
     "packages/@anthropic/ink/src"
   ],
-  "exclude": [
-    "**/dist",
-    "**/node_modules"
-  ]
+  "exclude": ["**/dist", "**/node_modules"]
 }
