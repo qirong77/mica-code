@@ -78,6 +78,7 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 - `ToolRunShellOutput.ts`：run_shell 统一输出处理。
 - `ToolSkill.ts`：基于 skills 的工具调用。
 - `ToolWaitFor.ts`：等待外部条件成立（task/process/file/command/http/port/duration）。
+- `waitFor/`：`wait_for` 的条件与等待记录实现（`conditions.ts` 探测各 kind，`registry.ts` 记录活动等待与历史，`types.ts` 是归一化条件类型）。
 - `pty/`：PTY 工具（spawn/send/read/wait/kill）与懒加载 manager 桥接。
 - `ToolWebFetch.ts`：抓取网址内容。
 - `ToolWriteFile.ts`：写入与更新文件。
@@ -85,4 +86,5 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 - `runtimeToolDescriptors.ts`：只在会话期注册的工具的目录兜底描述。
 - `toolNames.ts`：工具名规范与历史名字映射。
 - `utils/`：展示文案、文件历史、错误格式化和输出限制工具。
+- `tests/`：`MicaTool` 基类、工具目录与各工具的单测。
 - `index.ts`：公共 API 聚合导出。

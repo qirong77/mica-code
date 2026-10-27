@@ -9,13 +9,14 @@
 - 提供 hook registry，用于扩展运行时流程。
 - 提供 service container 和 service token，用于插件间共享能力。
 - 定义 `PluginContext` capability，由应用注入 runtime queue、工具注册和 UI 扩展入口。
-- 定义插件包格式：`plugin.json` 清单（id / name / version / main / assets / dependencies / required / apiVersion）、目录加载器与只读扫描（配置页用）。
+- 定义插件包格式：`plugin.json` 清单（id / name / version / main / assets / dependencies / required / priority / settings / requires / `mica.apiVersion`）、目录加载器与只读扫描（配置页用）。
 - 维护启停状态（`$MICA_HOME/plugins-state.json`），停用的插件在启动阶段就不注册。
 - 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。
 - 插件日志：`ctx.logger` 自带文件输出，落在系统临时目录并按天分片、按大小轮转。
 - 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 出错」。
 - 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
+- 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。
 - 模型请求重写：`ctx.agent.onIterationRewrite()` 在两次模型请求之间改写要发送的历史（自动压缩用它）。
 
 ## 使用入口
@@ -84,11 +85,16 @@ context.onDispose(() => registration.dispose());
 - `Plugin.ts`：插件基类和生命周期约定。
 - `PluginManager.ts`：插件注册、激活和销毁管理。
 - `PluginContext.ts`：插件运行上下文。
+- `PluginAgent.ts`：模型请求之间的扩展句柄（`onIterationRewrite` 的注册表与句柄类型）。
 - `HookRegistry.ts`、`HookTypes.ts`：hook 类型与注册表。
 - `ServiceContainer.ts`、`ServiceToken.ts`：服务容器与 token。
 - `PluginManifest.ts`：`plugin.json` 的类型、解析与路径越界校验。
 - `FilePluginLoader.ts`：扫描 `$MICA_HOME/plugins/<id>/`，以及不执行代码的 `inspectPlugins`。没有 `plugin.json` 的目录和散落的 `.js` / `.mjs` 都不算插件。
 - `PluginState.ts`：启停状态文件的读写。
+- `PluginHealth.ts`：插件健康状态（`$MICA_HOME/plugin-health/<id>.json`）的读写。
 - `PluginSettings.ts`：设置项的声明类型、规范化读写与按 mtime 刷新的 store，供配置页与插件共用。
+- `PluginPrompt.ts`：插件贡献的 system prompt 片段收集。
+- `PluginSessionState.ts`：插件存进会话快照的状态的大小上限与校验。
 - `PluginLog.ts`：插件文件日志（`os.tmpdir()/mica-logs/plugin-<id>-<day>[-n].jsonl`），带分片与过期清理。
+- `sessionAnnotations.ts`：`$MICA_HOME/plugin-data/<pluginId>/session-annotations.json` 的归一化读写。
 - `index.ts`：公共 API 聚合导出。

@@ -9,7 +9,7 @@
 
 ## 设计动机
 
-原始 python 驱动（`temp/mica_pty.py`）发现过一个关键问题：同步读取 pty master 时，如果 app 的输出没有及时排空，stdin 字节会被批量积压，导致 ink 的 tokenizer 把 `\r`（Enter）与前序字符合并成一个 chunk，Enter 被当成文本（换行）插入。
+早期的 Python 驱动（已不在仓库内）发现过一个关键问题：同步读取 pty master 时，如果 app 的输出没有及时排空，stdin 字节会被批量积压，导致 ink 的 tokenizer 把 `\r`（Enter）与前序字符合并成一个 chunk，Enter 被当成文本（换行）插入。
 
 node-pty 天然避免了这个问题：它在独立线程读取 master fd，`onData` 以异步事件回调 JS 主线程，子进程永远不会因为 pty 缓冲满而阻塞，stdin 写入也不会被合并。因此本包不依赖"持续排空 pty"这类驱动侧 hack。
 
@@ -70,7 +70,7 @@ pty_* 工具 (packages/mica-tools/pty/)
   4. mica-pty 模块目录向上（开发模式，不依赖 cwd）；
   5. 当前工作目录向上（含 `.bun` 缓存布局）；
   6. 全局 npm / homebrew / nvm 目录。
-  全部失败时报错会列出已尝试位置和修复方式。
+     全部失败时报错会列出已尝试位置和修复方式。
 - `src/server.mjs` 是唯一真相源，`src/ptyServerSource.ts` 通过 `bun run scripts/generate-pty-server-source.mjs` 生成其 JSON 转义内嵌（`bun build --compile` 不支持 `?raw`），`tests/serverSource.test.ts` 校验同步。
 - node-pty 缺失或 `node` 不可用（可用 `MICA_PTY_NODE` 覆盖）时工具降级报错，不影响 mica 其他功能。
 
@@ -129,6 +129,9 @@ await manager.kill(sessionId);
 
 - `stripAnsi` / `ANSI_STRIP_RE` — ANSI/控制序列剥离（保留 `\t \r \n`）。
 - `KEYS` / `ctrl()` / `key()` — 按键序列。
+- `toWellFormedText()` — 把不成对的代理项替换为 U+FFFD，输出可安全编码的文本。
+- `ensureSpawnHelperExecutable()` — `spawn-helper` 的幂等 chmod 兜底（`PtyDriver.spawn()` 里已自动调用）。
+- `ptyServerSource` — `src/server.mjs` 生成的内嵌源码，只在打包/校验场景直接读取。
 
 ## mica 冒烟测试
 
@@ -149,7 +152,7 @@ MICA_PTY_FLOW_SMOKE=1 MICA_PTY_SOURCE_HOME="$HOME/.mica" \
 
 vitest 会重定向 `HOME`，必须显式传 `MICA_PTY_SOURCE_HOME`；测试只把 `config.json` 复制到隔离 `MICA_HOME`，不触碰用户数据。可加 `-t "seeded HOME"` 等过滤只跑部分场景。
 
-按需修改文件顶部的 `MICA_BIN`/`HOME`/`CWD`，并预置隔离 `MICA_HOME`（config.json + storage.json，模板见 `temp/mica_pty.py`）。
+按需修改文件顶部的 `MICA_BIN`/`HOME`/`CWD`，并预置隔离 `MICA_HOME`；`tests/user-flows.smoke.test.ts` 里的 `freshHome()` / `seededHome()` 就是现成的构造方式（前者给全新空 home，后者只把用户真实 `config.json` 复制进隔离目录）。
 
 ## 目录结构
 
@@ -169,6 +172,7 @@ packages/mica-pty/
     driver.test.ts    单元/集成测试（vitest，Node 环境）
     manager.test.ts   PtyManager 集成测试（真实 PTY 进程）
     serverSource.test.ts  校验 server.mjs 与 ptyServerSource.ts 同步
+    loop-memory-measure.test.ts  RSS 与历史数组增长的测量脚本（`MICA_PTY_MEASURE=1` 才跑）
     mica.smoke.test.ts  真实 mica 端到端冒烟（默认跳过）
     user-flows.smoke.test.ts  真实用户流冒烟（命令/对话/多 agent/压测，默认跳过）
 ```

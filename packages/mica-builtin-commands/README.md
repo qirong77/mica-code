@@ -1,6 +1,6 @@
 # mica-builtin-commands
 
-`mica-builtin-commands` 是 Mica Code 的内置命令与官方插件包。它定义全部产品命令实现（`commands/`）、运行期插件装配（`plugins/`，含 `command-*.ts`、会话笔记、MCP、message queue、文件 mention、session-autonomy、loop）、启动扩展（`startup/`，validate-config、process-diagnostics、file-plugins、model-effort-context）以及 command host 契约与运行时服务类型。运行期插件与启动扩展统一从本包 `index.ts` 导出。
+`mica-builtin-commands` 是 Mica Code 的内置命令与官方插件包。它定义全部产品命令实现（`commands/`）、运行期插件装配（`plugins/`，含 `command-*.ts`、MCP、message queue、文件 mention、`command-memory.ts` 的会话记忆指引、`mica-code-app-notify.ts`、session-autonomy、loop）、启动扩展（`startup/`，validate-config、process-diagnostics、file-plugins、model-effort-context）以及 command host 契约与运行时服务类型。运行期插件与启动扩展统一从本包 `index.ts` 导出。
 
 ## 主要能力
 
@@ -49,11 +49,12 @@ packages/mica-builtin-commands/
   tests/                   包内全部测试
 ```
 
-- `commands/`：全部命令工厂，`cd`、`clear`、`compact`、`commit`、`config`、`context`、`effort`、`exit`、`fork`、`loop`（含 loop 工具）、`mcp`、`model`、`new`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task`。
+- `commands/`：全部命令工厂，`btw`（含 btwThread 线程辅助）、`capabilities`、`cd`、`clear`、`compact`、`commit`、`config`、`context`、`effort`、`exit`、`fork`、`loop`（含 loop 工具）、`mcp`、`model`、`new`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task`。
 - `shared/`：
   - `commandInput.ts`：列表选择键盘导航。
   - `selectCommand.tsx`：通用选择面板。
   - `configSwitch.ts`：provider/model/effort 切换辅助。
+  - `ScrollableCommandDialog.tsx`：命令面板共用的滚动容器与滚动控制器。
 - `git/`：
   - `agentChangeTracker.ts`：当前 agent 增量文件追踪。
   - `commitRunner.ts`：commit 命令与 headless `mica commit` 共享的确定性 git 分析/提交逻辑（变更摘要、commit message 生成、add/commit/push），公共入口由 `index.ts` 聚合导出。

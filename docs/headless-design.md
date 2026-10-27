@@ -3,21 +3,21 @@
 Mica runs a UI-agnostic headless execution core that speaks the OpenAI Codex
 protocol family, so any client that already drives `codex exec` or
 `codex app-server` can drive Mica without a Mica-specific adapter. This doc
-covers the *internal design* of that headless layer; integration and
+covers the _internal design_ of that headless layer; integration and
 registration steps live in [multica-runtime.md](./multica-runtime.md).
 
 ## Design goal
 
-Three surfaces share one turn-execution core, and they must behave **the same
+Two surfaces share one turn-execution core, and they must behave **the same
 way** (single-slot queue, iteration-boundary injection, turn-level retry,
 abort, plugin hooks, session persistence):
 
-| Surface                    | Entry point                          | Transport                        |
-| -------------------------- | ------------------------------------ | -------------------------------- |
-| One-shot                   | `mica exec [--json] "<prompt>"`      | stdout text or Codex ThreadEvent |
-| Resident per-session host  | `mica app-server`                    | Codex v2 JSON-RPC over stdio    |
+| Surface                   | Entry point                     | Transport                        |
+| ------------------------- | ------------------------------- | -------------------------------- |
+| One-shot                  | `mica exec [--json] "<prompt>"` | stdout text or Codex ThreadEvent |
+| Resident per-session host | `mica app-server`               | Codex v2 JSON-RPC over stdio     |
 
-All three build the same `HeadlessTurnExecutor` and attach the same
+Both build the same `HeadlessTurnExecutor` and attach the same
 `HeadlessPluginHost`; the only differences are the output protocol and how
 stdin/input arrives.
 
@@ -60,7 +60,7 @@ Key behaviors that mirror the interactive `LocalRuntimeController`:
 as the interactive app, minus the inherently terminal-bound ones (file-mention,
 the `/model` / `/compact` command suite, user file plugins). The agent-shaping
 plugins — `session_*` autonomy, message queueing, command-memory guide,
-TodoWrite, app-notify — behave identically.
+the `todo` plugin (`todo_write`), app-notify — behave identically.
 
 Differences are deliberate and documented:
 
@@ -105,7 +105,7 @@ reload, and MCP re-init.
   `thread/start`, `thread/resume`, `turn/start`, `turn/steer`, `turn/interrupt`.
   Unknown methods return `-32601 method-not-found` so clients can negotiate.
 - **Notifications** (`CODEX_NOTIFICATIONS`): `thread/started`,
-  `turn/started`, `turn/completed`, `item/started`, `item/completed`,
+  `thread/status/changed`, `turn/started`, `turn/completed`, `item/started`, `item/completed`,
   `item/agentMessage/delta`, `item/reasoning/textDelta`,
   `item/commandExecution/outputDelta`, `thread/tokenUsage/updated`, `error`,
   `warning`.
@@ -158,11 +158,12 @@ or a replaced session history. Mica adds these as **incremental extensions**
   clears it. The host-side slot is single-slot and separate from any local
   after_turn queue the client keeps, so clients must merge both into one view
   instead of assuming their local queue is complete.
-- `mica/backgroundTasks/updated`, `mica/subagentTasks/updated`
-  (`MICA_TASK_NOTIFICATIONS`): snapshot pushes of long-lived host state that
-  outlives a turn (`background_tasks_start` tasks, running subagents including
-  `run_in_background`). The host emits only when the serialized snapshot changed
-  and pushes a replacement whole list.
+- `mica/backgroundTasks/updated`, `mica/subagentTasks/updated`,
+  `mica/waitTasks/updated` (`MICA_TASK_NOTIFICATIONS`): snapshot pushes of
+  long-lived host state that outlives a turn (`background_tasks_start` tasks,
+  running subagents including `run_in_background`, in-flight `wait_for` waits).
+  The host emits only when the serialized snapshot changed and pushes a
+  replacement whole list.
 - `mica/sessionHistory/replaced` (`MICA_SESSION_NOTIFICATIONS`): the host
   replaced the persisted history (edit-and-rerun, compaction); the client
   reloads the session instead of showing a stale transcript.
@@ -171,6 +172,12 @@ or a replaced session history. Mica adds these as **incremental extensions**
   (`attempt`, `maxAttempts`, `delayMs`, `error`). It is a turn-level delta, not
   a Codex `error` (which would end the run on the client), so the desktop app
   can render "retrying n/5" instead of looking frozen for ten seconds.
+- `mica/btw/updated` (`MICA_BTW_NOTIFICATIONS`): streaming state of a By The Way
+  thread. `mica/btw/ask` acks immediately and answers out of band, so an answer
+  never blocks interrupt / steer / recall.
+- `mica/capabilities/updated` (`MICA_CAPABILITY_NOTIFICATIONS`) and
+  `mica/notes/updated`: another window changed this session's capability
+  selection or its notes.
 
 ## Mica extension requests
 
@@ -199,6 +206,22 @@ methods with `-32601`):
   records live only in the host's `SubagentTaskManager`, and the transcript is
   deliberately kept out of the per-second snapshot, so it is fetched on demand
   while a detail modal is open.
+- `mica/queue/hold`: freeze the queued input so its iteration boundary cannot
+  inject it while the client moves it back into the composer (`held: false`
+  releases). Without it, "re-edit" on a queued message races the boundary.
+- `mica/btw/{ask,compact,interrupt,recall,threads,close}`: the By The Way drawer.
+  Threads are host-side subagents, so asking, stopping one answer, taking a
+  queued question back, listing tabs after a reload and closing a tab all go
+  through the host.
+- `mica/session/rename`: rename the session on the host. A turn running (or the
+  host merely idle but alive) holds the in-memory snapshot, so a client-side
+  read-modify-write would be overwritten by the host's next save.
+- `mica/capabilities/get` / `mica/capabilities/set`: read the session's
+  tool/skill/MCP selection with the full catalog, or replace it (`set` is
+  refused while a turn runs).
+- `mica/notes/get` / `mica/notes/set`: read or overwrite the session notes.
+  Notes live in the snapshot, not the provider history, so compaction never
+  touches them; `set` works mid-turn and applies from the next request.
 
 ## Model, effort, and context resolution
 

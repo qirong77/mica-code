@@ -10,7 +10,7 @@
     "icons:generate": "python3 scripts/generate-icons.py",
     "icons:sync": "bun scripts/sync-vscode-icons.mjs",
     "lint": "eslint --cache .",
-    "test": "bun test src/host src/renderer/src src/main",
+    "test": "node ../../scripts/prune-test-temp.mjs && bun test src/host src/renderer/src src/main",
     "start": "electron-vite preview --ignoreConfigWarning",
     "dev": "npm run build:server && electron-vite dev --ignoreConfigWarning",
     "build": "node scripts/run-parallel.mjs \"npm run build:cli\" \"electron-vite build --ignoreConfigWarning\" \"vite build --config vite.server.config.mjs\"",

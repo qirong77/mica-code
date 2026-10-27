@@ -300,6 +300,7 @@ type MockProvider = ReturnType<typeof createMockProvider>;
 type MockContext = {
   mock: MockProvider;
   baseUrl: string;
+  homes: string[];
 };
 
 const mockContext = new AsyncLocalStorage<MockContext>();
@@ -342,6 +343,7 @@ function makeHome(tag: string): string {
     ),
   );
   mkdirSync(join(home, 'sessions'), { recursive: true });
+  currentMock().homes.push(home);
   return home;
 }
 
@@ -354,6 +356,7 @@ function makeCredentialFreeHome(tag: string): string {
   rmSync(home, { recursive: true, force: true });
   mkdirSync(home, { recursive: true });
   mkdirSync(join(home, 'sessions'), { recursive: true });
+  currentMock().homes.push(home);
   return home;
 }
 
@@ -436,7 +439,7 @@ async function startMockContext(): Promise<MockContext> {
   const provider = createMockProvider();
   await new Promise<void>((resolve) => provider.server.listen(0, '127.0.0.1', resolve));
   const { port } = provider.server.address() as AddressInfo;
-  return { mock: provider, baseUrl: `http://127.0.0.1:${port}/v1` };
+  return { mock: provider, baseUrl: `http://127.0.0.1:${port}/v1`, homes: [] };
 }
 
 async function stopMockContext(context: MockContext): Promise<void> {
@@ -444,6 +447,7 @@ async function stopMockContext(context: MockContext): Promise<void> {
   // `hang` mode leaves a request stream open; `close()` alone would wait for it.
   context.mock.server.closeAllConnections();
   await closed;
+  for (const home of context.homes) rmSync(home, { recursive: true, force: true });
 }
 
 /** `createStore()` takes no path: it reads the module-level `MICA_HOME`. Rebinding

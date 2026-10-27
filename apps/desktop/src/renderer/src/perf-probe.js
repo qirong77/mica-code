@@ -91,7 +91,9 @@ export function startPerfProbe(win, doc) {
     // 隐藏窗口不能这样算：Chromium 会把定时器节流到 1 次/分钟，于是每条都是
     // ~59s 的「冻结」，掩盖真实数据（整天的窗口就这样全成了噪声）。这时不记 lag，
     // 返回 null 让分析端直接跳过这一维。
-    const lag = visible ? now - lastAt - SAMPLE_MS : null
+    // 定时器有时会比 SAMPLE_MS 早零点几毫秒触发，直减会得到负值（实测占 47%），
+    // 均值被拉负、分位数失真。提前触发就是「没有延迟」，下限取 0。
+    const lag = visible ? Math.max(0, now - lastAt - SAMPLE_MS) : null
     lastAt = now
     // 只在需要时量 DOM，其余采样复用上次结果
     if (domTick >= DOM_STATS_EVERY) {

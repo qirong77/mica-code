@@ -18,6 +18,7 @@ const registry = new micaCommands.CommandRegistry();
 registry.register({
   name: 'hello',
   description: '输出问候',
+  pluginId: 'example',
   handler: async () => ({ ok: true, handled: true }),
 });
 ```

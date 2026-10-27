@@ -65,6 +65,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    globalSetup: ['./test/globalSetup.ts'],
     setupFiles: ['./test/setup.ts'],
     exclude: ['**/node_modules/**', '**/dist/**', 'temp/**'],
     // Vitest 默认 5s 是给纯内存单测留的预算，这套测试不是：unit 里有真实 git 仓库和

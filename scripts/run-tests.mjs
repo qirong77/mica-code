@@ -7,10 +7,16 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const vitest = join(root, 'node_modules', 'vitest', 'vitest.mjs');
 const extra = process.argv.slice(2);
 
+function pruneTestTemp() {
+  spawnSync(process.execPath, [join(root, 'scripts', 'prune-test-temp.mjs')], { stdio: 'inherit' });
+}
+
 function runVitest(args) {
   const result = spawnSync(process.execPath, [vitest, 'run', ...args], { stdio: 'inherit', cwd: root });
   return result.status ?? 1;
 }
+
+pruneTestTemp();
 
 // 显式给了文件或过滤参数时直接单次运行，vitest 会按 project 的 include 归位。
 if (extra.length > 0) process.exit(runVitest(extra));

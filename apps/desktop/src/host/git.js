@@ -4,13 +4,20 @@ import { ipcMain } from 'electron'
 import { compareChangePaths, parseNumstat, parseStatusCode, statusFromCode } from './git-core'
 import {
   countLines,
-  currentBranchName,
   getBranchSummary,
   getFile,
   getRefs,
   resolveRef as resolveCompareRef
 } from './git-compare'
-import { discardFile, getRepository, git, gitErrorMessage, stageFile, unstageFile } from './git-ops'
+import {
+  discardFile,
+  getRepository,
+  getWorkspaceStatus,
+  git,
+  gitErrorMessage,
+  stageFile,
+  unstageFile
+} from './git-ops'
 
 async function getSummary(cwd) {
   const { root, base } = await getRepository(cwd)
@@ -60,24 +67,7 @@ async function getSummary(cwd) {
   }
 }
 
-async function getStatus(cwd) {
-  const { root } = await getRepository(cwd)
-  const branch = await currentBranchName(root)
-  if (!branch) {
-    const hash = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim()
-    return {
-      root,
-      branch: hash ? `detached@${hash}` : 'detached',
-      projectName: path.basename(root)
-    }
-  }
-  return {
-    root,
-    branch,
-    projectName: path.basename(root)
-  }
-}
-
+const getStatus = getWorkspaceStatus
 async function resolveRef(cwd, ref, kinds = ['branch', 'tag']) {
   const refs = await getRefs(cwd)
   const values = [...refs.branches, ...refs.tags]

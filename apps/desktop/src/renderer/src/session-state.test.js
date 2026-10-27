@@ -4,7 +4,8 @@ import {
   draftMarkers,
   liveSessionRowState,
   mergeRowStates,
-  runningTerminalSessions
+  runningTerminalSessions,
+  sameSessionSnapshot
 } from './session-state'
 
 describe('draftMarkers', () => {
@@ -195,5 +196,50 @@ describe('collectGroupStates', () => {
     })
     expect(seen).toEqual(['session:s1', 'draft:d1'])
     expect(states.get('g1')).toBe('unread')
+  })
+})
+
+describe('sameSessionSnapshot', () => {
+  const row = (overrides = {}) => ({
+    id: 's1',
+    title: '标题',
+    cwd: '/repo',
+    updatedAtMs: 1000,
+    turnState: 'completed',
+    ...overrides
+  })
+
+  it('字段全等时认为没变（轮询结果可以直接丢掉）', () => {
+    expect(sameSessionSnapshot([row()], [row()])).toBe(true)
+  })
+
+  it('空列表与缺失参数都算没变', () => {
+    expect(sameSessionSnapshot([], [])).toBe(true)
+    expect(sameSessionSnapshot(null, undefined)).toBe(true)
+  })
+
+  it('任一字段变化都算变了', () => {
+    const cases = [
+      { title: '新标题' },
+      { cwd: '/other' },
+      { updatedAtMs: 2000 },
+      { turnState: 'running' }
+    ]
+    for (const change of cases) {
+      expect(sameSessionSnapshot([row()], [row(change)])).toBe(false)
+    }
+  })
+
+  it('顺序或数量变化也算变了', () => {
+    expect(sameSessionSnapshot([row()], [row(), row({ id: 's2' })])).toBe(false)
+    expect(sameSessionSnapshot([row(), row({ id: 's2' })], [row({ id: 's2' }), row()])).toBe(
+      false
+    )
+  })
+
+  it('新增会话时能立刻被发现', () => {
+    const before = [row()]
+    const next = [row(), row({ id: 's2', updatedAtMs: 2000 })]
+    expect(sameSessionSnapshot(before, next)).toBe(false)
   })
 })

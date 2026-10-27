@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -14,6 +14,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  rmSync(home, { recursive: true, force: true })
   if (originalHome === undefined) delete process.env.MICA_HOME
   else process.env.MICA_HOME = originalHome
 })

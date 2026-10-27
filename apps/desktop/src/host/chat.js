@@ -8,6 +8,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFile
 import { homedir } from 'os'
 import { basename, join } from 'path'
 import { resolveMicaExecutable } from './mica-cli'
+import { logger } from './log'
+import { readTopLevelCwd } from './session-file-head'
 import { isDirectory, resolveUsableCwd } from './cwd-utils'
 import {
   appendBufferedEvent,
@@ -367,6 +369,13 @@ function readSessionMeta(sessionId) {
   } catch {
     return null
   }
+}
+
+/** 只取 cwd 时先读文件头，读不到才退回整份解析。 */
+function readSessionCwd(sessionId) {
+  const file = sessionFile(sessionId)
+  if (!file || !existsSync(file)) return null
+  return readTopLevelCwd(file) ?? readSessionMeta(sessionId)?.cwd ?? null
 }
 
 function forkSession(sessionId) {
@@ -1493,10 +1502,11 @@ function runCompactSession(sessionId, mode = 'model') {
   // compact 进程必须落在会话自己的工作目录，否则 saveCurrent 会把
   // process.cwd()（Electron 主进程的 cwd，Finder 启动时通常是 /）写进会话文件，
   // 覆盖真实 cwd，导致后续恢复会话时工作目录错乱。
-  const sessionMeta = readSessionMeta(sessionId)
+  // 这里只要 cwd，别为了它整份解析会话（最大的一份 52MB）。
+  const sessionCwd = readSessionCwd(sessionId)
   // 会话记录的 cwd 可能因目录被移动/删除而失效，此时 spawn 会 ENOENT。
   // 先归一化为可用目录，避免压缩直接失败；回退信息随结果返回供 UI 提示。
-  const resolved = resolveUsableCwd(sessionMeta?.cwd || process.cwd())
+  const resolved = resolveUsableCwd(sessionCwd || process.cwd())
   const compactCwd = resolved.cwd
   return new Promise((resolvePromise) => {
     let stdout = ''
@@ -1980,9 +1990,26 @@ export function registerChatIpc() {
     )
   })
 
-  ipcMain.handle('chat:compact', (_event, { sessionId, mode } = {}) => {
+  ipcMain.handle('chat:compact', async (_event, { sessionId, mode } = {}) => {
     if (!sessionId || typeof sessionId !== 'string') return { ok: false, error: 'sessionId 缺失' }
-    return runCompactSession(sessionId, mode === 'local' ? 'local' : 'model')
+    const resolvedMode = mode === 'local' ? 'local' : 'model'
+    const started = Date.now()
+    const result = await runCompactSession(sessionId, resolvedMode)
+    // 压缩是最长的一次阻塞（实测 6–38 秒），但只按通道计时看不出是本地清理还是
+    // 模型摘要。把请求的模式和子进程回报的实际策略一起记下来，才能判断下一次该
+    // 优化哪条路径。
+    logger('chat').info('compact.finished', {
+      requestedMode: resolvedMode,
+      ms: Date.now() - started,
+      ok: result?.ok !== false,
+      strategy: result?.strategy ?? null,
+      beforeCount: result?.beforeCount ?? null,
+      afterCount: result?.afterCount ?? null,
+      beforeTokenEstimate: result?.beforeTokenEstimate ?? null,
+      afterTokenEstimate: result?.afterTokenEstimate ?? null,
+      savedRatio: result?.savedRatio ?? null
+    })
+    return result
   })
 
   ipcMain.handle('chat:check-cwd', (_event, { cwd } = {}) => {

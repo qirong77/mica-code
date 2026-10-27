@@ -1,7 +1,7 @@
 import { describe, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PtyDriver } from '@packages/mica-pty/index.js';
@@ -21,8 +21,32 @@ const suite = enabled ? describe : describe.skip;
 
 type ScriptStep = { kind: 'tool'; name: string; args: Record<string, unknown> } | { kind: 'text'; text: string };
 
+/**
+ * The CLI issues extra requests on its own (session auto-titling, retries), so
+ * script order cannot be trusted to line up with the prompt under test.
+ * Answer by inspecting the request instead.
+ */
+function lastUserText(input: unknown[]): string {
+  for (let i = input.length - 1; i >= 0; i--) {
+    const item = input[i] as { role?: string; content?: unknown } | undefined;
+    if (item?.role !== 'user') continue;
+    if (typeof item.content === 'string') return item.content;
+    if (Array.isArray(item.content)) {
+      return item.content
+        .map((part) => (typeof (part as { text?: unknown })?.text === 'string' ? (part as { text: string }).text : ''))
+        .join('');
+    }
+    return '';
+  }
+  return '';
+}
+
 function createMockProvider(script: ScriptStep[]) {
-  const state = { script, scriptIndex: 0, requests: [] as Array<{ model: string; input: unknown[]; tools: unknown[] }> };
+  const state = {
+    script,
+    scriptIndex: 0,
+    requests: [] as Array<{ model: string; input: unknown[]; tools: unknown[] }>,
+  };
   const server: Server = createServer((req, res) => {
     if (req.method === 'POST' && req.url?.startsWith('/v1/responses')) {
       let body = '';
@@ -34,7 +58,13 @@ function createMockProvider(script: ScriptStep[]) {
         } catch {
           // keep defaults
         }
-        const step = state.script[state.scriptIndex];
+        const prompt = lastUserText(parsed.input ?? []);
+        const canned = prompt.includes('那缓存怎么办')
+          ? '继续回答：这里要注意缓存失效。'
+          : prompt.includes('这个方案可行吗')
+            ? '可行，但需注意边界。'
+            : null;
+        const step: ScriptStep | undefined = canned ? { kind: 'text', text: canned } : state.script[state.scriptIndex];
         state.scriptIndex++;
         state.requests.push({ model: parsed.model ?? '', input: parsed.input ?? [], tools: parsed.tools ?? [] });
 
@@ -64,10 +94,30 @@ function createMockProvider(script: ScriptStep[]) {
           const text = step && step.kind === 'text' ? step.text : '（无更多脚本步骤）';
           emit({ type: 'response.created', response: { id: 'resp_1', object: 'response' } });
           emit({ type: 'response.in_progress', response: { id: 'resp_1', object: 'response' } });
-          emit({ type: 'response.output_item.added', output_index: 0, item: { id: 'msg_1', type: 'message', status: 'in_progress', role: 'assistant', content: [] } });
-          emit({ type: 'response.output_text.delta', item_id: 'msg_1', output_index: 0, content_index: 0, delta: text });
+          emit({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: { id: 'msg_1', type: 'message', status: 'in_progress', role: 'assistant', content: [] },
+          });
+          emit({
+            type: 'response.output_text.delta',
+            item_id: 'msg_1',
+            output_index: 0,
+            content_index: 0,
+            delta: text,
+          });
           emit({ type: 'response.output_text.done', item_id: 'msg_1', output_index: 0, content_index: 0, text });
-          emit({ type: 'response.output_item.done', output_index: 0, item: { id: 'msg_1', type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text }] } });
+          emit({
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: {
+              id: 'msg_1',
+              type: 'message',
+              status: 'completed',
+              role: 'assistant',
+              content: [{ type: 'output_text', text }],
+            },
+          });
           emitCompleted();
           res.end();
           return;
@@ -79,7 +129,14 @@ function createMockProvider(script: ScriptStep[]) {
         emit({
           type: 'response.output_item.added',
           output_index: 0,
-          item: { id: 'fc_1', type: 'function_call', status: 'in_progress', call_id: callId, name: step.name, arguments: '' },
+          item: {
+            id: 'fc_1',
+            type: 'function_call',
+            status: 'in_progress',
+            call_id: callId,
+            name: step.name,
+            arguments: '',
+          },
         });
         emit({
           type: 'response.function_call_arguments.delta',
@@ -93,11 +150,23 @@ function createMockProvider(script: ScriptStep[]) {
           item_id: 'fc_1',
           delta: argumentsText.slice(Math.floor(argumentsText.length / 2)),
         });
-        emit({ type: 'response.function_call_arguments.done', output_index: 0, item_id: 'fc_1', arguments: argumentsText });
+        emit({
+          type: 'response.function_call_arguments.done',
+          output_index: 0,
+          item_id: 'fc_1',
+          arguments: argumentsText,
+        });
         emit({
           type: 'response.output_item.done',
           output_index: 0,
-          item: { id: 'fc_1', type: 'function_call', status: 'completed', call_id: callId, name: step.name, arguments: argumentsText },
+          item: {
+            id: 'fc_1',
+            type: 'function_call',
+            status: 'completed',
+            call_id: callId,
+            name: step.name,
+            arguments: argumentsText,
+          },
         });
         emitCompleted();
         res.end();
@@ -154,7 +223,9 @@ suite('/btw PTY end-to-end (mock provider)', () => {
 
     const fail = (stage: string, extra = '') => {
       driver.close('SIGKILL', 1_000).catch(() => undefined);
-      throw new Error(`${stage}\n--- TUI 输出尾部 ---\n${driver.latestScreen(30_000)}${extra ? `\n--- ${extra} ---` : ''}`);
+      throw new Error(
+        `${stage}\n--- TUI 输出尾部 ---\n${driver.latestScreen(30_000)}${extra ? `\n--- ${extra} ---` : ''}`,
+      );
     };
 
     try {
@@ -168,7 +239,12 @@ suite('/btw PTY end-to-end (mock provider)', () => {
       if (t1 !== 'completed') fail(`turn1 未完成: ${String(t1)}`);
 
       // /btw：一条 By The Way 问题，主流程不等待
-      await driver.typeText('/btw 这个方案可行吗', 15);
+      // The slash dropdown re-renders on every keystroke; typing the space in the
+      // same burst occasionally loses it and turns the line into `/btw这个方案...`,
+      // which the CLI then rejects as an unknown command. Let the popup settle.
+      await driver.typeText('/btw', 15);
+      await driver.waitIdle(300, 10_000);
+      await driver.typeText(' 这个方案可行吗', 15);
       driver.enter();
 
       // 等待 By The Way notice 出现
@@ -180,7 +256,9 @@ suite('/btw PTY end-to-end (mock provider)', () => {
       if (!gotContinue) fail('未看到 /btw -continue 提示');
 
       // /btw -continue：复用同一个子代理，主流程不受影响
-      await driver.typeText('/btw -continue 那缓存怎么办', 15);
+      await driver.typeText('/btw -continue', 15);
+      await driver.waitIdle(300, 10_000);
+      await driver.typeText(' 那缓存怎么办', 15);
       driver.enter();
       const gotFollowUp = await driver.waitFor(/这里要注意缓存失效/, { timeoutMs: 90_000 });
       if (!gotFollowUp) fail('未看到 btw 跟进回答');
@@ -192,6 +270,8 @@ suite('/btw PTY end-to-end (mock provider)', () => {
     } finally {
       await driver.close('SIGKILL', 1_000).catch(() => undefined);
       await new Promise<void>((resolve) => mock.server.close(() => resolve()));
+      rmSync(home, { recursive: true, force: true });
+      rmSync(wd, { recursive: true, force: true });
     }
   }, 600_000);
 });

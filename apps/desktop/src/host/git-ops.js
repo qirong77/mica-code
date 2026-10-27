@@ -84,6 +84,32 @@ export async function getRepository(cwd) {
   return { root, base }
 }
 
+/**
+ * 侧栏与页脚只要仓库根和分支名。会话视图每 10 秒轮询一次，所以合并成一次
+ * `rev-parse`（原来的 show-toplevel + verify HEAD + symbolic-ref 是三个进程）。
+ */
+export async function getWorkspaceStatus(cwd) {
+  let root
+  let branch
+  try {
+    const [rootLine, branchLine = ''] = (
+      await git(cwd, ['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD'])
+    ).split('\n')
+    root = rootLine.trim()
+    branch = branchLine.trim()
+  } catch (error) {
+    // 还没有第一个提交时 `--abbrev-ref HEAD` 以 128 退出；仓库根照样取得到，
+    // 分支名改从 HEAD 引用读（symbolic-ref 不依赖提交存在）。
+    root = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
+    branch = (await git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim()
+    if (!branch) throw error
+  }
+  const projectName = path.basename(root)
+  if (branch && branch !== 'HEAD') return { root, branch, projectName }
+  const hash = (await git(root, ['rev-parse', '--short', 'HEAD']).catch(() => '')).trim()
+  return { root, branch: hash ? `detached@${hash}` : 'detached', projectName }
+}
+
 /** 把仓库内的相对路径解析成绝对路径，越界（`../`）就报错。 */
 export function safeFilePath(root, relativePath) {
   const absolutePath = path.resolve(root, relativePath)

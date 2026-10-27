@@ -119,3 +119,29 @@ export function collectGroupStates({
   for (const group of childGroups(projects, null)) walk(group)
   return states
 }
+
+/**
+ * 会话列表每 10 秒轮询一次，但绝大多数时候内容一模一样：IPC 每次都给出新数组，
+ * 直接 setState 会让上千行的侧栏整棵重渲染。逐项比字段（不建中间字符串），
+ * 任何一项不同就早退，全部一致才算没变。
+ */
+export function sameSessionSnapshot(previous, next) {
+  const before = Array.isArray(previous) ? previous : []
+  const after = Array.isArray(next) ? next : []
+  if (before.length !== after.length) return false
+  for (let index = 0; index < after.length; index += 1) {
+    const a = before[index]
+    const b = after[index]
+    if (!a || !b) return false
+    if (
+      a.id !== b.id ||
+      a.title !== b.title ||
+      a.cwd !== b.cwd ||
+      a.updatedAtMs !== b.updatedAtMs ||
+      a.turnState !== b.turnState
+    ) {
+      return false
+    }
+  }
+  return true
+}

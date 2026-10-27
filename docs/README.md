@@ -24,7 +24,7 @@
 | 文档                                                              | 内容                                                |
 | ----------------------------------------------------------------- | --------------------------------------------------- |
 | [Headless 执行层设计](./headless-design.md)                       | 无界面执行层、队列、重试、中止与 Codex 事件投影。   |
-| [Codex 系驱动集成](./multica-runtime.md)                          | 参数兼容、模型解析、会话复用与错误处理。            |
+| [Codex 系驱动接入（Multica）](./multica-runtime.md)               | 参数兼容、模型解析、会话复用与错误处理。            |
 | [共享包索引](../packages/README.md)                               | 包的职责、公共入口及依赖边界。                      |
 | [交互式架构图](https://qirong77.github.io/mica-code/architecture) | CLI 与 Desktop 运行时地图，支持节点搜索与依赖追踪。 |
 

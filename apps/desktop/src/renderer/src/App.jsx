@@ -70,7 +70,7 @@ import {
   resolveDefaultCwd,
   uid
 } from './workspace'
-import { draftMarkers, runningTerminalSessions } from './session-state'
+import { draftMarkers, runningTerminalSessions, sameSessionSnapshot } from './session-state'
 import { browserIconBadge, browserIconTitle, isOwnedByNode, nodeBrowsers } from './browser-control'
 import {
   isTerminalOwnedByNode,
@@ -85,6 +85,13 @@ import {
   uiStateKeys,
   useUiStateValue
 } from './ui-state'
+
+/**
+ * 会话列表的轮询间隔。一次返回的全部会话（上千条）要序列化过来，所以只在可见且
+ * 聚焦时轮询；内容没变时 `applySessions` 会直接跳过，不会引起重渲染。回到窗口时
+ * 另有 focus / visibilitychange 立即补一次。
+ */
+const SESSION_POLL_MS = 10000
 
 /** notify 事件里的 terminalId 是 `<节点id>:<pane>`，转回树节点 id */
 function nodeIdFor(ptyId) {
@@ -928,6 +935,9 @@ export default function App() {
   }, [])
 
   const applySessions = useCallback((list) => {
+    // 轮询拿到的数组永远是新引用，内容却基本不变。先和上一份逐项比，一致就
+    // 整个跳过 —— 否则上千行的侧栏每 10 秒白重渲染一次。
+    if (sameSessionSnapshot(sessionsRef.current, list)) return
     const meta = {}
     for (const row of list || []) {
       if (!row?.id) continue
@@ -1284,8 +1294,19 @@ export default function App() {
     refreshLoops()
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible' && document.hasFocus()) refreshSessions()
-    }, 3000)
-    return () => clearInterval(timer)
+    }, SESSION_POLL_MS)
+    // 定时器在后台页签会被节流，回到前台可能要等到下一个周期；重新可见时立刻补一次，
+    // 这样间隔放宽之后也不会有「回来先看到旧状态」的观感损失。
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refreshSessions()
+    }
+    window.addEventListener('focus', onVisibility)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', onVisibility)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [refreshPins, refreshProjects, refreshLoops, refreshSessions, refreshSort])
 
   const refreshGit = useCallback(
@@ -1323,7 +1344,11 @@ export default function App() {
           : { terminalId: id, cwd, repository: null, branch: null, status: null, loading: true }
       )
       try {
-        const summaryPromise = window.mica.git.summary(cwd)
+        // 会话视图只用仓库根与分支（`refreshGit` 下面的 status），而 `git:summary`
+        // 还要跑一遍 status -z + diff --numstat 全树扫描；10 秒一次的轮询没必要为
+        // 看不见的 Git 面板付这份钱，切到文件视图那一下会补上。
+        const summaryPromise =
+          viewRef.current === 'files' ? window.mica.git.summary(cwd) : Promise.resolve(null)
         // 分支对比要多跑 merge-base + diff + ls-files（在 2700 文件的仓库上约 0.2s CPU），
         // 只有停在文件视图里才值得 —— 切到文件视图那一下的刷新会把它补上。
         const loadBranch = (target, resolvedRoot = null) => {
@@ -1371,10 +1396,16 @@ export default function App() {
           status = fallback[2]
         }
         if (request === gitRequest.current && id === activeRef.current) {
+          // 会话视图不查 summary，就沿用同一个仓库上一次的结果，免得切回文件视图时
+          // 文件树的 Git 装饰先被清空再补回来（闪一下）。
+          const previous = gitRef.current
+          const repository =
+            summary?.repository ||
+            (previous.terminalId === id && previous.cwd === cwd ? previous.repository : null)
           setGit({
             terminalId: id,
             cwd,
-            repository: summary?.repository || null,
+            repository,
             branch: branch?.repository || null,
             compareError: branch?.error || null,
             status: status?.status || null,

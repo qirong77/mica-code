@@ -9,9 +9,10 @@ import { PtyDriver } from '../index.js';
  *   MICA_PTY_SMOKE=1 npx vitest run packages/mica-pty/tests/mica.smoke.test.ts
  *
  * Point MICA_BIN/HOME/CWD below at your binary and an isolated MICA_HOME that
- * has config.json + storage.json seeded (see temp/mica_pty.py for a template).
+ * has config.json + storage.json seeded (see freshHome()/seededHome() in
+ * user-flows.smoke.test.ts for a template).
  */
-const MICA_BIN = '/Users/qironglin/Desktop/mica-code/dist/mica';
+const MICA_BIN = process.env.MICA_BIN ?? `${process.cwd()}/dist/mica`;
 const HOME = '/private/tmp/mica-pty-smoke-home';
 const CWD = '/private/tmp/mica-pty-smoke-wd';
 

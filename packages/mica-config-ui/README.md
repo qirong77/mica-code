@@ -18,6 +18,8 @@ src/server/
   paths.ts               $MICA_HOME 下的各路径
   conversation.ts        history → 可读对话项
   sessionAnalysis.ts     history → 上下文占用分解
+  sessionHead.ts         会话文件头只读解析（Sessions 左栏用，只读前 8KB）
+  capabilityDefaults.ts  能力默认值（config.capabilityDefaults）的读取与写入
   sessionView.ts         上面两者的「纯逻辑」出口（桌面运行时可复用，见下）
 web/                     页面组件（React）
   index.tsx              宿主入口：ConfigWebApp / setConfigWebClient / setConfigWebEditor

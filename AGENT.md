@@ -83,6 +83,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 | `mica-file-mentions`          | CLI / desktop 共用的文件补全触发、扫描、排序、插入                      |
 | `mica-config-ui`              | 配置页唯一实现：页面、数据动作、共享类型                                |
 | `mica-official-plugins`       | 官方插件目录：`manifests.js` 只含清单，`index.js` 才带入口              |
+| `@anthropic/ink`              | 仓库内 vendored 的 Ink 分支：终端渲染原语，`mica-ui` 的唯一 Ink 来源    |
 
 ### 边界规则
 
@@ -341,7 +342,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 文件树尺寸沿用 VS Code：活动栏 48px、树行 22px、缩进 8px。
 - Git 分暂存/工作区两段，写操作仅 stage/unstage/discard，discard 点名文件并确认；所有 Git 命令带 `GIT_OPTIONAL_LOCKS=0`。
 - Git 比较按仓库/基线/模式与 fingerprint 保存审阅状态；DiffEditor 统一只读，换文件先 `setModel(null)`。
-- Git 轮询只在可见且聚焦时进行（Files 3s / 其他 10s），不重叠。
+- Git 轮询只在可见且聚焦时进行（Files 3s / 其他 10s），不重叠；会话视图只取仓库根与分支（`git:status` 一次 `rev-parse`），`git:summary` 的全树 status + numstat 与分支对比只在文件视图跑。
 - Pinned / Projects / Recent 互斥，归属经 `stats:move-session`；拖放判定在 `session-dnd.js`。
 - 会话行共用操作列/图标列/名称栅格；状态优先级沿用 `session-state.js`，error 红点由后续 completed 清除。
 - 会话搜索共用 `mica-web-shared/session-search.ts`；正文搜索每会话最多 20k 字符，默认最近 3 日、最多 600 个候选，截断须告知。
@@ -364,9 +365,12 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - `host/log.js` 是运行时唯一日志写入器：JSONL 落 `os.tmpdir()/mica-logs/`，2s 批量 flush，留 1000 条环形缓冲。
 - 通道耗时只在 `handleInvoke` 用 `logger('invoke').timed()` 量一次；超过 `SLOW_MS`（默认 300ms）记 warn。新增功能不要自己再包一层计时。
+- `chat:compact` 额外记一条 `compact.finished`（请求模式、子进程回报的 strategy、前后 token 估算）——只按通道计时分不出本地清理与模型摘要。
+- 只读会话顶层字段（cwd、标题等）用 `host/session-file-head.js` 读文件头，不要为单个字段整份 `JSON.parse`：最大的一份会话 52MB。
 - 渲染层 `perf-probe.js` 只采样、`log-probe.js` 只记错误，两者交给同一写入器。
 - 采样全量记录，不做「异常才写」；隐藏窗口的 `lag` 记 null。
-- 面板轮询跟可见性走（Stats 30s + 可见且聚焦）；配置页 Performance 的聚合在 host 侧做完。
+- 面板轮询跟可见性走（Stats 30s + 可见且聚焦；会话列表 10s，回到窗口立即补一次）；配置页 Performance 的聚合在 host 侧做完。
+- 会话列表整份返回，但内容没变时按字段指纹（`session-state.js` 的 `sameSessionSnapshot`）跳过 setState，空闲轮询不触发重渲染。
 
 ## 10. UI 规范
 
@@ -437,12 +441,13 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 ### 验证
 
-- 局部改动跑相关测试 + `bun run typecheck` + `git diff --check`；全量测试约 1 分钟起步（unit ~25s + process ~40s，两个 project 串行），仅发布、跨慢套件或 CI 要求时跑。
+- 局部改动跑相关测试 + `bun run typecheck` + `git diff --check`；全量测试约 90s（unit ~25-30s + process ~55-60s），仅发布、跨慢套件或 CI 要求时跑。
+- `bun run test` 走 `scripts/run-tests.mjs`：先 `scripts/prune-test-temp.mjs` 清掉 `os.tmpdir()` 下过期的 `mica*` 测试目录（保留 `mica-tasks` / `mica-logs`，`MICA_TEST_TEMP_MAX_AGE_HOURS` 默认 6h），再串行跑两个 project，unit 失败即跳过 process。`test/globalSetup.ts` 用 `MICA_TEST_ROOT` 作整轮唯一的临时根并在结束时删除；worker 是被直接杀掉的，`setupFiles` 里的 exit 钩子不会触发，清理只能放在 globalSetup。
 - 测试分两个 project（`vitest.config.ts`）：`unit` 是进程内单测、按文件并行；`process` 是真实子进程 / PTY / TUI 的 E2E，文件串行、文件内用例并发。慢的根源是每个用例 spawn 一次真实 `mica`（冷启动 1–1.5s），所以新增 E2E 用例要用 `it.concurrent` 语义（每用例自带 mock provider 与 `MICA_HOME`），不要把 `process` 项目丢回并行池：它和 unit 的 worker 抢 CPU 时会打挂 `btw.pty`、turn lease 这类时序敏感用例。
 - `testTimeout` 显式给定而不是沿用 Vitest 默认 5s：unit 里有真实 git 仓库与文件 I/O，process 的 PTY 用例内部就按 20s 等待。机器一忙（多个 worker + 开发者自己的进程）5s 会打挂与代码无关的用例。并发上限同理：`unit` 的 `maxWorkers` 固定 4、`process` 的 `maxConcurrency` 固定 3，再往上不更快，只是把时间换成偶发超时。
 - 根测试用 Vitest / Node；`PtyDriver` 仅 Node/vitest 可用，Bun 用 manager + Node helper。
 - `app-server.flows.test.ts` 用本地 mock provider，无需真实 key；resume 用隔离 `MICA_HOME`。
-- PTY 真实 provider 冒烟须显式 `MICA_PTY_SMOKE=1` 并传 `MICA_PTY_SOURCE_HOME`。
+- PTY 真实 provider 冒烟须显式开关并指向真实配置：单轮用 `MICA_PTY_SMOKE=1`，用户流程用 `MICA_PTY_FLOW_SMOKE=1`，两者都读 `MICA_PTY_SOURCE_HOME`（默认 `~/.mica`）。
 - desktop 改动至少 `npx eslint src/` + `npm test`；新增运行时依赖另构建 server 验证自包含。
 - 浏览器与终端控制必须真窗口验证，单测不能替代。
 - 起测试实例要同时给 `MICA_HOME` / `MICA_DESKTOP_USER_DATA` / `MICA_DESKTOP_PORT` 与独立 `--user-data-dir`。

@@ -42,6 +42,7 @@ function createMockProvider() {
 type MockContext = {
   server: Server;
   baseUrl: string;
+  homes: string[];
 };
 
 const mockContext = new AsyncLocalStorage<MockContext>();
@@ -77,6 +78,7 @@ function makeHome(tag: string): string {
     ),
   );
   mkdirSync(join(home, 'sessions'), { recursive: true });
+  currentMock().homes.push(home);
   return home;
 }
 
@@ -144,11 +146,12 @@ async function startMockContext(): Promise<MockContext> {
   const server = createMockProvider().server;
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
-  return { server, baseUrl: `http://127.0.0.1:${port}/v1` };
+  return { server, baseUrl: `http://127.0.0.1:${port}/v1`, homes: [] };
 }
 
 async function stopMockContext(context: MockContext): Promise<void> {
   await new Promise<void>((resolve) => context.server.close(() => resolve()));
+  for (const home of context.homes) rmSync(home, { recursive: true, force: true });
 }
 
 /** Write a session JSON file into `<home>/sessions/<id>.json`. */

@@ -5,7 +5,15 @@ import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
-import { discardFile, git, gitErrorMessage, safeFilePath, stageFile, unstageFile } from './git-ops'
+import {
+  discardFile,
+  getWorkspaceStatus,
+  git,
+  gitErrorMessage,
+  safeFilePath,
+  stageFile,
+  unstageFile
+} from './git-ops'
 
 const execFileAsync = promisify(execFile)
 
@@ -190,5 +198,51 @@ describe('索引锁', () => {
     expect(gitErrorMessage({ stderr: 'fatal: not a git repository\n' })).toBe(
       'fatal: not a git repository'
     )
+  })
+})
+
+describe('getWorkspaceStatus', () => {
+  let dir
+  beforeEach(async () => {
+    dir = await setup()
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+
+  it('普通仓库给出根目录、分支名与项目名', async () => {
+    const statusInfo = await getWorkspaceStatus(dir)
+    expect(statusInfo.branch).toBe(
+      (await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+    )
+    expect(statusInfo.projectName).toBe(path.basename(dir))
+    expect(statusInfo.root).toBe((await git(dir, ['rev-parse', '--show-toplevel'])).trim())
+  })
+
+  it('还没有第一个提交时仍能报出分支名', async () => {
+    const fresh = await mkdtemp(path.join(tmpdir(), 'mica-git-unborn-'))
+    try {
+      await execFileAsync('git', ['init', '-q', '-b', 'trunk'], { cwd: fresh })
+      const statusInfo = await getWorkspaceStatus(fresh)
+      expect(statusInfo.branch).toBe('trunk')
+      // macOS 的 tmpdir 是 /var/... 的符号链接，git 报的是 /private/var/...
+      expect(statusInfo.root).toBe((await git(fresh, ['rev-parse', '--show-toplevel'])).trim())
+    } finally {
+      await rm(fresh, { recursive: true, force: true })
+    }
+  })
+
+  it('游离 HEAD 报 detached 加短提交号', async () => {
+    await git(dir, ['checkout', '-q', '--detach', 'HEAD'])
+    const statusInfo = await getWorkspaceStatus(dir)
+    expect(statusInfo.branch).toMatch(/^detached@[0-9a-f]{7,}$/)
+  })
+
+  it('不在仓库里时抛出 git 的原始错误', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'mica-git-none-'))
+    try {
+      const error = await getWorkspaceStatus(outside).catch((failure) => failure)
+      expect(String(error)).toContain('not a git repository')
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
   })
 })

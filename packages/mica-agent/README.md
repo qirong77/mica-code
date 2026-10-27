@@ -4,8 +4,8 @@
 
 ## 主要能力
 
-- 提供 `BaseAgent`、`IAgent`、conversation message 等公共 agent 类型。
-- 提供 OpenAI Chat Completions、OpenAI Responses 和 Anthropic Messages 三类协议 client。
+- 提供 `IAgent`、conversation message 等公共 agent 类型。
+- 提供 OpenAI Chat Completions 与 OpenAI Responses 两类协议 client。
 - 提供子 agent 创建入口：`createSubAgent`。
 - 提供 usage 汇总与 subagent usage 记录类型：`summarizeUsageHistory`、`SubagentUsageRecord`。
 - 提供 subagent 用量记账原语：`buildSubagentUsageRecord`、`recordSubagentTaskUsage`（helper 子代理的请求记进 owner 的 `subagentUsageHistory`，支持 `fromIndex` 只记新增部分）。
@@ -48,6 +48,5 @@ const agent = micaAgent.createModelClient({
 - `core/`：agent 抽象类型、基类和对话消息类型。
 - `providers/`：具体模型 provider adapter。
 - `prompt/`：系统 prompt 构建、role 文件加载、系统提示词模板和测试。
-- `ui/`：UI 提示相关展示与样式相关。
 - `index.ts`：公共 API 聚合导出。
 - `assets.d.ts`：静态资源类型声明。

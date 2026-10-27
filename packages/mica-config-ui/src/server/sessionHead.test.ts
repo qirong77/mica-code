@@ -1,12 +1,18 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { readSessionHead, summarizeSessionFile } from './sessionHead.js';
 
+const root = mkdtempSync(join(tmpdir(), 'mica-session-head-'));
+let fileCount = 0;
+
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
 function withSessionFile(content: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'mica-session-head-'));
-  const path = join(dir, '20260101T000000Z-abcdef.json');
+  const path = join(root, `20260101T000000Z-${(fileCount++).toString().padStart(6, '0')}.json`);
   writeFileSync(path, content);
   return path;
 }
