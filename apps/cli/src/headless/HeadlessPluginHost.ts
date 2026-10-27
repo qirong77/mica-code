@@ -24,6 +24,7 @@ import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { configureIterationRewrite, registerIterationRewrite } from '../agent/iterationRewrite.js';
+import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import type { SessionController } from '../session/SessionController.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
@@ -52,6 +53,14 @@ export type HeadlessPluginHostOptions = {
    * 压缩历史只会改变这一次的开销与结果，基准测试不能被它悄悄影响。
    */
   oneShot?: boolean;
+  /**
+   * 运行在 desktop 宿主里（Electron 壳 / Web 运行时的 app-server 子进程）。
+   *
+   * 决定插件能不能拿到 `desktop` 能力面：只有桌面端能看到插件声明的菜单页面、
+   * 打开系统设置页，所以依赖它的插件在 CLI / TUI / exec 里整插件跳过，而不是
+   * 装载成功却什么都做不了。
+   */
+  desktopHost?: boolean;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -149,6 +158,8 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     isBusy: options.isBusy,
     submit: options.submit,
   });
+  // headless 下 `agent` 就是当前会话的 agent：没有多会话菜单，所以它就是默认 owner。
+  const pluginSubagents = createPluginSubagentHost({ defaultAgent: agent, taskManager: subagentTasks });
 
   const hostRegistration = services.register(commandHostToken, {
     agent,
@@ -216,6 +227,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
 
   const baseContext: PluginBaseContext = {
     paths,
+    ...(options.desktopHost ? { desktop: { host: 'desktop' as const } } : {}),
     services,
     hooks,
     commands,
@@ -244,6 +256,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     agentRegistry: {
       onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
     },
+    subagentsFor: (pluginId) => pluginSubagents.forPlugin(pluginId),
     runtime: {
       submit: options.submit,
       queue: {
@@ -313,6 +326,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     },
     async dispose() {
       await plugins.disposeAll();
+      pluginSubagents.disposeAll();
     },
   };
   return host;

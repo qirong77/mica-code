@@ -18,6 +18,14 @@
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
 - 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。
 - 模型请求重写：`ctx.agent.onIterationRewrite()` 在两次模型请求之间改写要发送的历史（自动压缩用它）。
+- 委派子代理：`ctx.subagents` 注册子代理类型、前台/后台跑一个、管后台任务。机制（建子代理、用量记账、路径租约、完成回注）由宿主提供，插件只决定有哪些类型与工具形状。
+- 内置 skill：`ctx.skills.register()` 把随包分发的 skill 注册进运行期 skill 表。注册进来的 skill 与
+  磁盘扫描出来的完全同权（system prompt 索引、`skill` 工具、会话能力开关）；磁盘上的同名 skill 优先，
+  被遮蔽的条目从返回值的 `skipped` 读出来，插件应当把它报成一条健康状态。
+- 运行条件：清单里的 `desktop.checks` 声明插件依赖的权限与外部工具，取值只能来自
+  `DESKTOP_CHECKS` 目录（`PluginDesktop.ts` 是宿主与插件共用的单一事实来源）。状态由桌面端探测
+  并渲染在配置页的插件详情里——插件跑在 app-server 子进程里，既探测不到也渲染不了。
+  依赖桌面能力面的插件用 `requires: ["desktop"]` 声明，其它宿主在注册阶段整插件跳过。
 
 ## 使用入口
 
@@ -94,6 +102,9 @@ context.onDispose(() => registration.dispose());
 - `PluginHealth.ts`：插件健康状态（`$MICA_HOME/plugin-health/<id>.json`）的读写。
 - `PluginSettings.ts`：设置项的声明类型、规范化读写与按 mtime 刷新的 store，供配置页与插件共用。
 - `PluginPrompt.ts`：插件贡献的 system prompt 片段收集。
+- `PluginDesktop.ts`：桌面宿主的能力面——检查项目录（`DESKTOP_CHECKS`）、运行条件声明与
+  skill 注册的类型。新增一项检查 = 在这里登记 + 桌面端（`apps/desktop/src/main/system/`）实现探测器。
+- `PluginSubagents.ts`：委派子代理的能力面类型（类型声明、spawn 入参、任务快照、`PluginSubagentRegistry`），宿主实现机制、插件提供策略。
 - `PluginSessionState.ts`：插件存进会话快照的状态的大小上限与校验。
 - `PluginLog.ts`：插件文件日志（`os.tmpdir()/mica-logs/plugin-<id>-<day>[-n].jsonl`），带分片与过期清理。
 - `sessionAnnotations.ts`：`$MICA_HOME/plugin-data/<pluginId>/session-annotations.json` 的归一化读写。

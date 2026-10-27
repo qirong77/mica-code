@@ -12,7 +12,8 @@ describe('stripControlSockets', () => {
       MICA_TERMINAL_URL: 'http://127.0.0.1:8787/remote/terminal',
       MICA_TERMINAL_SOCKET: '/tmp/mica-terminal.sock',
       MICA_BROWSER_URL: 'http://127.0.0.1:8787/remote/control',
-      MICA_BROWSER_SOCKET: '/tmp/mica-browser.sock'
+      MICA_BROWSER_SOCKET: '/tmp/mica-browser.sock',
+      MICA_SYSTEM_SOCKET: '/tmp/mica-system.sock'
     })
 
     expect(env).toEqual({
@@ -20,6 +21,10 @@ describe('stripControlSockets', () => {
       MICA_TERMINAL_URL: 'http://127.0.0.1:8787/remote/terminal',
       MICA_BROWSER_URL: 'http://127.0.0.1:8787/remote/control'
     })
+  })
+
+  test('drops the system check socket too', () => {
+    expect(stripControlSockets({ MICA_SYSTEM_SOCKET: '/tmp/mica-system.sock' })).toEqual({})
   })
 
   test('does not mutate the caller environment', () => {

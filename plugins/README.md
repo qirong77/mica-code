@@ -11,7 +11,7 @@
 
 ```
 plugins/<id>/
-  plugin.json     清单：id / name / version / description / main / assets / required
+  plugin.json     清单：id / name / version / description / main / assets / required / desktop
   index.ts        入口，default 导出 setup(ctx)
   ...             实现文件、README、样式等资源
 ```
@@ -33,6 +33,7 @@ plugins/<id>/
 | `mica.apiVersion` | 否   | 当前只支持 `1`                                                                       |
 | `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读取                     |
 | `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                           |
+| `desktop`         | 否   | 声明依赖的桌面端运行条件，见「运行条件」一节；用它的插件要同时声明 `requires: ["desktop"]` |
 
 ## 设置项
 
@@ -88,11 +89,58 @@ plugins/<id>/
 
 ## 健康状态与失败可见
 
-`requires` 要写全插件实际触碰的每一面 `ctx.*`：`commands`、`events`、`hooks`、`prompt`、
-`session`、`sessionState`、`settings`、`tools`、`ui`、`git`、`runtime`、`agent`。宿主缺哪个，
+`requires` 要写全插件实际触碰的每一面 `ctx.*`：`commands`、`desktop`、`events`、`hooks`、`prompt`、
+`session`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`。宿主缺哪个，
 插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
+`subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。
+机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定有哪些类型、`agent` 工具长什么样。
+`skills` 是内置 skill 的注册面（`ctx.skills.register`），`desktop` 只有桌面端运行时才提供（见下节）。
 少声明一项的后果是在 setup 里撞上 `undefined` 并连带算作加载失败，所以不要把可选项当默认存在。
+
+## 内置 skill
+
+插件可以把 skill 随包分发：正文用 `import SKILL_MD from './skill/SKILL.md' with { type: 'text' }`
+内嵌，元数据从 frontmatter 解析（`micaSkills.parseMarkdown`，单一来源），再注册：
+
+```ts
+const skill = micaSkills.parseMarkdown(SKILL_MD);
+ctx.skills.register({ ...skill, name: skill.name!, description: skill.description!, baseDir: runtimeDir });
+```
+
+注册进来的 skill 与磁盘扫描出来的完全同权：进 system prompt 索引、`skill` 工具能加载、会话能力
+页签能关掉它。差别只有两点：
+
+- **磁盘优先**：用户在自己的 skills 目录里放了同名 skill 就覆盖内置的；被遮蔽的条目从
+  `register()` 返回的 `skipped` 读出来，插件应当把它报成一条健康状态。
+- **没有磁盘路径**：只落盘 `SKILL.md` 是不够的——`baseDir` 必须是宿主真能读到的目录，正文里引用的
+  脚本都相对它解析。所以插件要把随包资源先写到 `$MICA_HOME/<自己的目录>`，再用落盘路径注册。
+  单二进制里没有插件目录可读，内嵌 + 落盘是唯一可行路径（参考 `plugins/computer-use`）。
+
+配置页的 Skills 页面只管磁盘上的 skill（新建 / 删除 / 编辑文件），内置 skill 出现在会话能力页签里。
+
+## 运行条件
+
+插件依赖桌面端的权限或外部工具时，在清单里声明（**只声明 id**，不是渲染代码、也不是探测代码）：
+
+```json
+"desktop": {
+  "checks": ["accessibility", "screen-recording"]
+}
+```
+
+取值来自 `DESKTOP_CHECKS` 目录（`mica-plugin/PluginDesktop.ts`）：`accessibility` /
+`screen-recording` / `command-line-tools`。
+
+声明之后，配置页 **Settings → Plugins → 该插件** 会多出一块「运行条件」：每行显示已开启 /
+未开启 / 未知，以及「打开设置」按钮跳到对应的系统设置面板（探测与跳转都只有桌面应用做得了，
+见 AGENT.md 第 9 节）。插件不描述状态、不拼系统设置 URL、也不渲染界面——它跑在
+`mica app-server` 子进程里，本来就没有渲染面，权限状态也不属于它。
+
+新增一种运行条件 = 在 `mica-plugin/PluginDesktop.ts` 登记 + 桌面端实现探测器，插件侧只改清单。
+
+依赖这个能力的插件用 `requires: ["desktop"]` 声明：只有桌面端 spawn 的 app-server 才提供它，
+CLI / TUI / `mica exec` 里整插件跳过（而不是装上了却永远显示不了状态）。
 
 插件自身的故障要能被用户看见，而不是只落在日志里：
 

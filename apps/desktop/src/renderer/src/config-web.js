@@ -30,6 +30,9 @@ export function createDesktopConfigWebClient() {
     readPluginsDetails: () => invoke('readPluginsDetails'),
     setPluginEnabled: (id, enabled) => invoke('setPluginEnabled', { id, enabled }),
     writePluginSettings: (id, values) => invoke('writePluginSettings', { id, values }),
+    // 插件详情页的运行条件（辅助功能 / 屏幕录制等）：探测在 Electron 主进程
+    readDesktopChecks: () => invoke('readDesktopChecks'),
+    openDesktopSettings: (pane) => invoke('openDesktopSettings', { pane }),
 
     readBrowserControlDetails: () => invoke('readBrowserControlDetails'),
     readTerminalControlDetails: () => invoke('readTerminalControlDetails'),

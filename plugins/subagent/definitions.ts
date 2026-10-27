@@ -1,44 +1,11 @@
-import { micaAgent } from '@packages/mica-agent/index.js';
-import { APP_NAME } from '@packages/mica-config/brand.js';
-import { micaTools } from '@packages/mica-tools/index.js';
+import type { PluginSubagentType } from '@packages/mica-plugin/index.js';
 
-export type SubagentContextMode = 'none' | 'brief' | 'recent' | 'files';
-export type SubagentWriteMode = 'none' | 'owned_paths' | 'proposal' | 'unrestricted';
-
-export type SubagentDefinition = {
-  name: string;
-  description: string;
-  systemPrompt: string;
-  allowedTools?: string[];
-  disallowedTools?: string[];
-  model?: string;
-  maxTurns?: number;
-  /** Whether the parent agent may select reasoning effort. Defaults to true. */
-  effort?: boolean;
-  /** Default delegated context mode when parent omits context_mode. */
-  contextModeDefault?: SubagentContextMode;
-  /**
-   * Write policy for mutable tools.
-   * - none: writes disallowed by tool filter
-   * - owned_paths: writes allowed only within owned_paths
-   * - proposal: do not write; return patch proposals for parent apply
-   * - unrestricted: existing general-purpose behavior
-   */
-  writeMode?: SubagentWriteMode;
-  /** When true, parent must provide owned_paths for writable/proposal subagents. */
-  requireOwnedPaths?: boolean;
-};
-
-const SUBAGENT_INSTRUCTIONS = [
-  '<subagent-instructions>',
-  `You are running as a subagent for the primary ${APP_NAME} agent.`,
-  'Complete only the delegated task and return a concise, evidence-backed summary for the parent agent.',
-  'Do not ask the user for follow-up unless the delegated task is impossible without it.',
-  'If you read files or run commands, mention the key paths, commands, and outcomes that matter.',
-  'Prefer a final answer that includes: summary, findings, files_touched, risks, and next_actions_for_parent.',
-  'JSON object output is preferred when practical.',
-  '</subagent-instructions>',
-].join('\n');
+/**
+ * 内置子代理类型。
+ *
+ * 类型是策略而不是机制：宿主只管「怎么建、怎么跑、怎么写盘」，具体有哪几种、每种能给
+ * 哪些工具、默认塞多少上下文，全在这里声明，内核里没有一处写死 `Explore` 之类的名字。
+ */
 
 const READ_ONLY_TOOLS = [
   'read_file',
@@ -52,9 +19,6 @@ const READ_ONLY_TOOLS = [
   'skill',
 ];
 
-const INHERITED_SKILL_TOOL = 'skill';
-const MCP_TOOL_PREFIX = 'mcp__';
-
 /**
  * 子代理默认的迭代上限。
  *
@@ -65,7 +29,7 @@ const MCP_TOOL_PREFIX = 'mcp__';
  */
 export const DEFAULT_SUBAGENT_MAX_TURNS = 100;
 
-export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
+export const BUILTIN_SUBAGENTS: PluginSubagentType[] = [
   {
     name: 'general-purpose',
     description:
@@ -203,51 +167,18 @@ export const BUILTIN_SUBAGENTS: SubagentDefinition[] = [
   },
 ];
 
-const subagentByName = new Map(BUILTIN_SUBAGENTS.map((agent) => [normalizeSubagentName(agent.name), agent]));
-
-export function listSubagents(): SubagentDefinition[] {
-  return [...BUILTIN_SUBAGENTS];
-}
-
-export function getSubagent(name: string | undefined): SubagentDefinition {
+/**
+ * 按名字找类型。
+ *
+ * 大小写不敏感：模型经常把 `Explore` 写成 `explore`，为此拒绝一整次委派没有意义。
+ * 找不到就抛错并列出可用类型——这比静默回退到 general-purpose 好，后者会让
+ * 「只读调研」悄悄变成一次可写委派。
+ */
+export function getBuiltinSubagent(types: readonly PluginSubagentType[], name: string | undefined): PluginSubagentType {
   const normalized = normalizeSubagentName(name || 'general-purpose');
-  const definition = subagentByName.get(normalized);
+  const definition = types.find((type) => normalizeSubagentName(type.name) === normalized);
   if (definition) return definition;
-  throw new Error(
-    `Unknown subagent_type: ${name}. Available types: ${BUILTIN_SUBAGENTS.map((agent) => agent.name).join(', ')}`,
-  );
-}
-
-export function buildSubagentSystemPrompt(definition: SubagentDefinition): string {
-  const writePolicy = [
-    '<write-policy>',
-    `write_mode: ${definition.writeMode ?? 'unrestricted'}`,
-    definition.requireOwnedPaths
-      ? 'owned_paths are required and must be respected for any mutable action.'
-      : 'owned_paths may be provided to further restrict mutable actions.',
-    definition.writeMode === 'proposal'
-      ? 'Do not write files. Return patch proposals only.'
-      : definition.writeMode === 'none'
-        ? 'Do not write files or run mutating shell commands.'
-        : 'Prefer minimal, reversible changes.',
-    '</write-policy>',
-  ].join('\n');
-  return [micaAgent.buildSystemPrompt(), '', SUBAGENT_INSTRUCTIONS, '', writePolicy, '', definition.systemPrompt].join(
-    '\n',
-  );
-}
-
-export function buildSubagentToolFilter(definition: SubagentDefinition): (toolName: string) => boolean {
-  const allowed = new Set(definition.allowedTools ?? ['*']);
-  const disallowed = new Set(definition.disallowedTools ?? []);
-  return (toolName: string) => {
-    if (micaTools.isPrimaryAgentOnly(toolName)) return false;
-    if (disallowed.has(toolName)) return false;
-    // Skills and MCP servers are process-level capabilities shared with the parent agent.
-    // Every subagent inherits them without weakening its restrictions on other tools.
-    if (toolName === INHERITED_SKILL_TOOL || toolName.startsWith(MCP_TOOL_PREFIX)) return true;
-    return allowed.has('*') || allowed.has(toolName);
-  };
+  throw new Error(`Unknown subagent_type: ${name}. Available types: ${types.map((type) => type.name).join(', ')}`);
 }
 
 function normalizeSubagentName(name: string): string {

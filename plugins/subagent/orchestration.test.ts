@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRunManySpecs, planSubagentRuns } from './subagentOrchestration.js';
+import { parseRunManySpecs, planSubagentRuns } from './orchestration.js';
 
 describe('subagentOrchestration', () => {
   it('plans dependency order and rejects same-wave owned_paths conflicts', () => {
@@ -53,5 +53,20 @@ describe('subagentOrchestration', () => {
         ]),
       ),
     ).toThrow('cycle');
+  });
+
+  it('rejects duplicate ids and unknown dependencies before running anything', () => {
+    expect(() =>
+      planSubagentRuns(
+        parseRunManySpecs([
+          { id: 'a', description: 'a', prompt: 'a' },
+          { id: 'a', description: 'b', prompt: 'b' },
+        ]),
+      ),
+    ).toThrow('unique');
+
+    expect(() =>
+      planSubagentRuns(parseRunManySpecs([{ id: 'a', description: 'a', prompt: 'a', depends_on: ['b'] }])),
+    ).toThrow('Unknown depends_on task id: b');
   });
 });

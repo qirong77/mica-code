@@ -5,6 +5,7 @@ import {
   type PluginSettingOption,
   type PluginSettingType,
 } from './PluginSettings.js';
+import { isDesktopCheckId, type DesktopCheckId } from './PluginDesktop.js';
 
 /**
  * 插件包的清单（`plugin.json`）。
@@ -60,6 +61,11 @@ export type PluginManifest = {
    * **跳过**（附原因），故障是配置页上的一条状态，而不是一次崩溃。
    */
   requires: PluginRequirement[];
+  /**
+   * 插件依赖的桌面端运行条件。声明式数据：宿主负责探测状态，并在插件自己的设置页里
+   * 展示「开了没有 / 去哪里开」——插件代码只跑在 app-server 子进程里，探测不到这些。
+   */
+  desktopChecks: DesktopCheckId[];
 };
 
 /**
@@ -68,6 +74,7 @@ export type PluginManifest = {
 export const PLUGIN_REQUIREMENTS = [
   'agent',
   'commands',
+  'desktop',
   'events',
   'git',
   'hooks',
@@ -76,6 +83,8 @@ export const PLUGIN_REQUIREMENTS = [
   'session',
   'sessionState',
   'settings',
+  'skills',
+  'subagents',
   'tools',
   'ui',
 ] as const;
@@ -143,6 +152,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const requires = readRequires(input.requires);
   if (!requires.ok) return requires;
 
+  const desktopChecks = readDesktopChecks(input.desktop);
+  if (!desktopChecks.ok) return desktopChecks;
+
   return {
     ok: true,
     manifest: {
@@ -159,8 +171,34 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       apiVersion,
       settings: settings.value,
       requires: requires.value,
+      desktopChecks: desktopChecks.value,
     },
   };
+}
+
+/**
+ * `desktop.checks` 的结构。
+ *
+ * 校验从严的理由与设置项一致：设置页完全按这份声明显示，检查项 id 写错就等于永远
+ * 显示不出一行状态——用户在配置页看到一条可读的错误，比看到一个缺项的面板强。
+ */
+function readDesktopChecks(
+  input: unknown,
+): { ok: true; value: DesktopCheckId[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: [] };
+  if (!isRecord(input)) return { ok: false, error: 'desktop 必须是对象' };
+  const rawChecks = input.checks;
+  if (rawChecks === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(rawChecks)) return { ok: false, error: 'desktop.checks 必须是数组' };
+
+  const value: DesktopCheckId[] = [];
+  for (const check of rawChecks) {
+    if (!isDesktopCheckId(check)) {
+      return { ok: false, error: `desktop.checks 里有未知检查项：${String(check)}` };
+    }
+    if (!value.includes(check)) value.push(check);
+  }
+  return { ok: true, value };
 }
 
 /**

@@ -1,9 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import type { PluginSettingField } from '@packages/mica-plugin/index.js';
+import { DESKTOP_CHECKS } from '@packages/mica-plugin/index.js';
 import { OFFICIAL_PLUGINS_DIR, officialPluginManifests } from '@packages/mica-official-plugins/manifests.js';
 import { getConfigRootPath, getPluginsRootPath, getPluginStatePath, getPluginStatusPath } from './paths.js';
-import type { ConfigWebPlugin, ConfigWebPluginSettings, ConfigWebPluginsDetails } from '../shared/types.js';
+import type {
+  ConfigWebPlugin,
+  ConfigWebPluginCheck,
+  ConfigWebPluginSettings,
+  ConfigWebPluginsDetails,
+} from '../shared/types.js';
 
 /**
  * 配置页的插件数据层：两个宿主（config-web 的 HTTP 服务、desktop 的 IPC）共用这一份实现。
@@ -39,6 +45,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         // 官方插件的文件已经编译进产物，磁盘上不一定读得到，只列清单声明的部分。
         files: [micaPlugin.PLUGIN_MANIFEST_FILE, manifest.main, ...manifest.assets].map((name) => ({ name })),
         settings: readSettings(manifest.id, manifest.settings, configRoot),
+        desktopChecks: resolveDesktopChecks(manifest.desktopChecks),
         health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(manifest.id),
         loadStatus: status?.status,
@@ -62,6 +69,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         manifestFile: plugin.manifestFile,
         files: plugin.files,
         settings: readSettings(plugin.id, plugin.settings, configRoot),
+        desktopChecks: resolveDesktopChecks(plugin.desktopChecks),
         health: micaPlugin.readPluginHealth(plugin.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(plugin.id),
         loadStatus: status?.status,
@@ -116,6 +124,27 @@ function readSettings(id: string, fields: PluginSettingField[], configRoot: stri
   const values = micaPlugin.readPluginSettings(id, fields, { configDir: configRoot });
   // 磁盘上可能是旧版本写下的、或手改过的值：页面要能把它们标出来，而不是照样显示「已保存」。
   return { fields, values, issues: micaPlugin.validatePluginSettingValues(fields, values) };
+}
+
+/**
+ * 清单只声明检查项 id，文案与系统设置入口都来自宿主的检查目录（`DESKTOP_CHECKS`）。
+ *
+ * 页面因此不需要认识任何检查项，也不需要把插件包导进浏览器：它能显示的每一样东西
+ * 都由这份数据决定。
+ */
+function resolveDesktopChecks(ids: readonly string[]): ConfigWebPluginCheck[] {
+  return ids.flatMap((id) => {
+    const definition = DESKTOP_CHECKS.find((check) => check.id === id);
+    if (!definition) return [];
+    return [
+      {
+        id: definition.id,
+        label: definition.label,
+        description: definition.description,
+        pane: definition.pane,
+      },
+    ];
+  });
 }
 
 /**

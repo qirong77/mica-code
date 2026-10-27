@@ -210,6 +210,19 @@ export const clipboard = {
   }
 }
 
+/**
+ * 纯 Web 运行时没有 macOS 的 TCC 上下文：权限探测一律「未知」，让页面提示用户改用
+ * 桌面应用，而不是谎报「已开启」。
+ */
+export const systemPreferences = {
+  isTrustedAccessibilityClient() {
+    return false
+  },
+  getMediaAccessStatus() {
+    return 'unknown'
+  }
+}
+
 export const dialog = {
   showErrorBox(title, message) {
     console.error(`[mica-desktop] ${title}: ${message}`)

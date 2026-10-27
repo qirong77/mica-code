@@ -4,14 +4,17 @@ import { RUNTIME_TOOL_DESCRIPTORS } from '@packages/mica-tools/runtimeToolDescri
 import { TodoWriteTool } from '@plugins/todo/TodoTool.js';
 import { SessionNotesTool } from '../../../../plugins/session-notes/NotesTool.js';
 import { ToolSessionPeers } from '@packages/mica-builtin-commands/plugins/session-autonomy/SessionAutonomyTools.js';
-import { ToolAgent } from './ToolAgent.js';
+import { AgentTool } from '@plugins/subagent/AgentTool.js';
+import { BUILTIN_SUBAGENTS } from '@plugins/subagent/definitions.js';
 
 /**
  * 运行期工具在配置页 / 桌面设置页的目录里靠 `RUNTIME_TOOL_DESCRIPTORS` 兜底（那些进程不加载插件）。
  * 兜底描述与工具类本身必须一致，否则两个面板会对同一个工具显示不同的说明与入参。
  */
 const FACTORIES: Record<string, () => { name: string }> = {
-  agent: () => new ToolAgent({} as never),
+  // `agent` 由官方插件 subagent 注册；这里只需要一个能列出内置类型的桩，
+  // 描述里的类型清单就是唯一随注册内容变化的部分。
+  agent: () => new AgentTool({ listTypes: () => BUILTIN_SUBAGENTS } as never),
   todo_write: () => new TodoWriteTool(),
   session_notes: () => new SessionNotesTool(),
   session_peers: () => new ToolSessionPeers({ services: {} as never }),

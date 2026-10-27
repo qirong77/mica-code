@@ -98,6 +98,34 @@ describe('getPluginsDetails', () => {
       error: '入口文件不存在：missing.js',
     });
   });
+
+  it('resolves declared desktop checks into the catalog rows the page renders', () => {
+    const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'needs-permissions');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(
+      join(pluginDir, 'plugin.json'),
+      JSON.stringify({
+        id: 'needs-permissions',
+        name: 'Needs Permissions',
+        version: '1.0.0',
+        main: 'index.js',
+        desktop: { checks: ['screen-recording', 'command-line-tools'] },
+      }),
+    );
+    writeFileSync(join(pluginDir, 'index.js'), 'export default function setup() {}');
+
+    const plugin = getPluginsDetails().plugins.find((entry) => entry.id === 'user.needs-permissions');
+    // 顺序来自清单，文案与面板地址来自宿主的检查目录——页面自己不认识任何检查项。
+    expect(plugin?.desktopChecks.map((check) => check.id)).toEqual(['screen-recording', 'command-line-tools']);
+    expect(plugin?.desktopChecks[0]?.label).toBe('屏幕录制');
+    expect(plugin?.desktopChecks[0]?.pane).toContain('Privacy_ScreenCapture');
+    // 没有可打开的面板时不编一个出来
+    expect(plugin?.desktopChecks[1]?.pane).toBeUndefined();
+  });
+
+  it('reports no desktop checks for a plugin that declares none', () => {
+    expect(getPluginsDetails().plugins.find((plugin) => plugin.id === 'todo')?.desktopChecks).toEqual([]);
+  });
 });
 
 describe('setPluginEnabled', () => {

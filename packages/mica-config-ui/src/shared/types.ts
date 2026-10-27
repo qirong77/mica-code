@@ -243,6 +243,11 @@ export type ConfigWebPlugin = {
   files: ConfigWebPluginFile[];
   /** 清单声明了 settings 才有内容；没有声明时 `fields` 为空。 */
   settings: ConfigWebPluginSettings;
+  /**
+   * 插件依赖的桌面端运行条件（清单 `desktop.checks`）。文案与系统设置入口都来自宿主的
+   * 检查目录，插件只声明 id——它跑在 app-server 子进程里，探测不到这些状态。
+   */
+  desktopChecks: ConfigWebPluginCheck[];
   /** 这个插件今天的日志文件（系统 temp 目录），排查时直接打开。 */
   logFile: string;
   /** 插件自报的最近一次状态（正常 / 待配置 / 出错）；没上报过为 null。 */
@@ -250,6 +255,29 @@ export type ConfigWebPlugin = {
   /** plugin-status.json 记录的上一次加载结果。 */
   loadStatus?: 'loaded' | 'registered' | 'failed' | 'skipped' | 'unknown';
   error?: string;
+};
+
+/** 一项运行条件的静态描述；此刻是否满足由 `readDesktopChecks()` 另取。 */
+export type ConfigWebPluginCheck = {
+  id: string;
+  label: string;
+  description: string;
+  /** 系统设置面板地址；没有可打开的面板时为空（例如要用户自己装命令行工具）。 */
+  pane?: string;
+};
+
+export type ConfigWebDesktopCheckStatus = {
+  id: string;
+  status: 'granted' | 'denied' | 'unknown';
+  /** 探测到的具体信息，例如 clang 版本；没有可说的为空。 */
+  detail: string;
+};
+
+export type ConfigWebDesktopChecks = {
+  /** 当前宿主能不能真的探测：浏览器宿主不能（TCC 权限属于桌面应用进程）。 */
+  supported: boolean;
+  platform: string;
+  checks: ConfigWebDesktopCheckStatus[];
 };
 
 /** 插件上报的健康快照，来自 `$MICA_HOME/plugin-health/<id>.json`。 */

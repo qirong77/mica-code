@@ -1,17 +1,27 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, SaveStatus, SettingRow, SettingsGroup, SplitView, Switch } from '../components/Ui.js';
+import { Alert, Button, SaveStatus, SettingRow, SettingsGroup, SplitView, Switch, Tag } from '../components/Ui.js';
 import {
+  openDesktopSettings,
+  readDesktopChecks,
   readPluginsDetails,
   setPluginEnabled,
   supportsPluginSettings,
   supportsPluginToggle,
   writePluginSettings,
 } from '../api.js';
-import type { ConfigWebPlugin, ConfigWebPluginSetting, ConfigWebPluginsDetails } from '../../src/shared/types.js';
+import type {
+  ConfigWebDesktopCheckStatus,
+  ConfigWebPlugin,
+  ConfigWebPluginSetting,
+  ConfigWebPluginsDetails,
+} from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
-import { pluginLoadStatusLabel, pluginSourceLabel, pluginStateLabel } from '../labels.js';
+import { desktopCheckStatusLabel, pluginLoadStatusLabel, pluginSourceLabel, pluginStateLabel } from '../labels.js';
 import { useAutoSave } from '../useAutoSave.js';
+
+/** 运行条件状态 → 标签色调。未知用中性色：没探测到不等于没问题。 */
+const DESKTOP_CHECK_TONE = { granted: 'green', denied: 'red', unknown: 'default' } as const;
 
 /**
  * 插件页：左边列出插件，右边看选中的那一个。
@@ -279,6 +289,8 @@ function PluginBody({
         </div>
       ) : null}
 
+      {plugin.desktopChecks.length > 0 ? <PluginChecksGroup plugin={plugin} /> : null}
+
       {plugin.settings.fields.length > 0 ? (
         <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
       ) : null}
@@ -339,6 +351,121 @@ function PluginBody({
         </SettingRow>
       </SettingsGroup>
     </>
+  );
+}
+
+/**
+ * 插件的运行条件（清单 `desktop.checks`）：权限开没开、依赖装没装，以及「去哪里开」。
+ *
+ * 这一节完全由清单声明驱动，页面不认识任何具体插件。状态只有桌面宿主答得上来（TCC 权限
+ * 属于有 app 身份的那个进程），浏览器宿主会交回 `supported: false`——那就说明白「需要在
+ * 桌面应用里查看」，而不是假装一切正常。
+ *
+ * 权限是在系统设置里改的，改完这里不知道：重新获得焦点、切回本页或点刷新时再问一次。
+ */
+function PluginChecksGroup({ plugin }: { plugin: ConfigWebPlugin }) {
+  const [statuses, setStatuses] = useState<Record<string, ConfigWebDesktopCheckStatus>>({});
+  const [supported, setSupported] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const RefreshIcon = appIcons.refresh;
+
+  const refresh = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setLoading(true);
+    try {
+      const result = await readDesktopChecks();
+      const next: Record<string, ConfigWebDesktopCheckStatus> = {};
+      for (const check of result.checks) next[check.id] = check;
+      setStatuses(next);
+      setSupported(result.supported);
+      setError(null);
+    } catch (readError) {
+      setError(formatError(readError));
+    } finally {
+      inFlight.current = false;
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh, plugin.id]);
+
+  // 用户去系统设置里开权限、再切回来：窗口聚焦与标签页重新可见都是回来的信号。
+  useEffect(() => {
+    const onFocus = () => void refresh();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refresh]);
+
+  async function openSettings(pane: string) {
+    setOpening(pane);
+    try {
+      const result = await openDesktopSettings(pane);
+      // 打不开要说出来：点完毫无反应比报错更让人困惑
+      setError(result.ok ? null : result.error || '打不开系统设置');
+    } finally {
+      setOpening(null);
+    }
+  }
+
+  return (
+    <SettingsGroup
+      title="运行条件"
+      description="这些条件由运行 Mica 的应用持有，缺一项时插件会静默失效"
+      actions={
+        <Button
+          icon={<RefreshIcon size={15} />}
+          title="重新检查"
+          ariaLabel="重新检查运行条件"
+          loading={loading}
+          onClick={() => void refresh()}
+        />
+      }
+    >
+      {error ? <Alert message={error} /> : null}
+      {!supported ? (
+        <div className="plugin-health">
+          <span className="plugin-health-note">需要在桌面应用的设置页里查看这些条件。</span>
+        </div>
+      ) : null}
+      {plugin.desktopChecks.map((check) => {
+        const status = statuses[check.id]?.status ?? 'unknown';
+        const detail = statuses[check.id]?.detail ?? '';
+        const canOpen = Boolean(check.pane) && status !== 'granted';
+        return (
+          <SettingRow key={check.id} label={check.label} hint={check.description}>
+            <div className="plugin-check">
+              <Tag tone={DESKTOP_CHECK_TONE[status]} dot>
+                {desktopCheckStatusLabel(status)}
+              </Tag>
+              {detail ? <span className="plugin-check-detail">{detail}</span> : null}
+              {canOpen && supported ? (
+                <Button
+                  variant="ghost"
+                  title={`打开${check.label}的系统设置`}
+                  loading={opening === check.pane}
+                  onClick={() => void openSettings(check.pane as string)}
+                >
+                  打开设置
+                </Button>
+              ) : null}
+            </div>
+          </SettingRow>
+        );
+      })}
+    </SettingsGroup>
   );
 }
 

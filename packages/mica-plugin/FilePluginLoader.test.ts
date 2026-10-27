@@ -168,6 +168,7 @@ describe('parsePluginManifest', () => {
         apiVersion: 1,
         settings: [],
         requires: [],
+        desktopChecks: [],
       },
     });
   });

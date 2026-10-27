@@ -70,6 +70,7 @@ function manifest(requires: string[]) {
     apiVersion: 1,
     settings: [],
     requires: requires as never,
+    desktopChecks: [],
   };
 }
 

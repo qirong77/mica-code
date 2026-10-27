@@ -5,7 +5,7 @@ import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import { createStdoutCodexExecWriter, type CodexExecEventWriter } from '@packages/mica-runtime/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
-import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
+import { terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentAbortError, AgentRuntime } from '../agent/AgentRuntime.js';
 import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
@@ -16,7 +16,6 @@ import {
   REMOTE_TURN_MESSAGE,
 } from '../runtime/HeadlessTurnExecutor.js';
 import { SessionController } from '../session/SessionController.js';
-import { ToolAgent } from '../tools/ToolAgent.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
 import { resolveRuntimeConfigOverride } from './modelCatalog.js';
 
@@ -103,7 +102,6 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       },
     });
     subagentTasks = new SubagentTaskManager();
-    micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
 
     if (options.sessionId) {
       const resumed = sessionController.resume(options.sessionId);
@@ -241,7 +239,6 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       await host.emitRuntimeStop();
       await host.dispose();
     }
-    micaTools.unregisterRuntime('agent');
     disposeModelEffortContext();
   }
 }

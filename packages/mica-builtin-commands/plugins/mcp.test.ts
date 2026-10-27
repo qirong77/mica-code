@@ -89,6 +89,7 @@ function setupPlugin(withUi = true) {
     logger,
     settings: { path: null, get: () => ({}), validate: () => [] },
     health: { path: null, read: () => null, report: () => {}, clear: () => {} },
+    skills: { register: () => ({ dispose() {}, skipped: [] }) },
     onDispose: (dispose) => disposers.push(dispose),
     ...(withUi ? { ui: { submit: vi.fn(), showMessage } } : {}),
   };

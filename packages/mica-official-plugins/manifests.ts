@@ -1,8 +1,10 @@
 import { parsePluginManifest, type PluginManifest } from '@packages/mica-plugin/PluginManifest.js';
 import autoCompactManifest from '../../plugins/auto-compact/plugin.json';
+import computerUseManifest from '../../plugins/computer-use/plugin.json';
 import sessionRenameManifest from '../../plugins/session-rename/plugin.json';
 import sessionNotesManifest from '../../plugins/session-notes/plugin.json';
 import sessionTagsManifest from '../../plugins/session-tags/plugin.json';
+import subagentManifest from '../../plugins/subagent/plugin.json';
 import todoManifest from '../../plugins/todo/plugin.json';
 import webSearchManifest from '../../plugins/web-search/plugin.json';
 
@@ -22,6 +24,8 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(sessionNotesManifest),
   readManifest(sessionRenameManifest),
   readManifest(sessionTagsManifest),
+  readManifest(subagentManifest),
+  readManifest(computerUseManifest),
 ];
 
 export const officialPluginIds = new Set(officialPluginManifests.map((manifest) => manifest.id));

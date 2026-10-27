@@ -4,6 +4,7 @@ import type {
   ConfigWebContextAnalysis,
   ConfigWebConversationItem,
   ConfigWebConversationPage,
+  ConfigWebDesktopChecks,
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
   ConfigWebPerformanceDetails,
@@ -54,6 +55,15 @@ export type ConfigWebClient = {
   setPluginEnabled?(id: string, enabled: boolean): Promise<ConfigWebPluginsDetails>;
   /** 保存插件设置。与启停不同，写的是设置文件，运行期就能被插件读到。 */
   writePluginSettings?(id: string, values: Record<string, string>): Promise<ConfigWebPluginsDetails>;
+  /**
+   * 插件声明的运行条件（辅助功能、屏幕录制等）此刻是否满足。
+   *
+   * 只有桌面宿主能答：TCC 权限属于有 app 身份的那个进程，浏览器宿主（apps/config-web）
+   * 拿不到真实状态，也就不提供这两个方法。
+   */
+  readDesktopChecks?(): Promise<ConfigWebDesktopChecks>;
+  /** 打开某一项对应的系统设置面板。 */
+  openDesktopSettings?(pane: string): Promise<{ ok: boolean; error?: string }>;
 
   /**
    * 自动压缩（输入框上方那个齿轮曾经管的东西）现在只在这台机器的运行时里：设置与按会话
@@ -196,6 +206,39 @@ export function writePluginSettings(id: string, values: Record<string, string>):
 
 export function supportsPluginSettings(): boolean {
   return typeof client?.writePluginSettings === 'function';
+}
+
+/**
+ * 这个宿主能不能探测插件的运行条件（辅助功能、屏幕录制、命令行工具）。
+ *
+ * 插件详情页据此决定是显示实时状态还是「需要桌面应用」——不隐藏这一节，否则用户在
+ * 浏览器里看到的是一个「什么都没说」的插件页。
+ */
+export function supportsDesktopChecks(): boolean {
+  return typeof client?.readDesktopChecks === 'function';
+}
+
+type DesktopChecksClient = ConfigWebClient & Required<Pick<ConfigWebClient, 'readDesktopChecks'>>;
+
+/** 宿主没有探测能力时交回一份显式的「未知」，页面照常渲染。 */
+export async function readDesktopChecks(): Promise<ConfigWebDesktopChecks> {
+  if (!supportsDesktopChecks()) return Promise.resolve(unavailableDesktopChecks());
+  const result = await (requireClient() as DesktopChecksClient).readDesktopChecks();
+  // 「宿主提供了这个方法」本身就是支持：探测结果里不带这个标记，这里补上。
+  return { ...result, supported: true };
+}
+
+function unavailableDesktopChecks(): ConfigWebDesktopChecks {
+  return { supported: false, platform: '', checks: [] };
+}
+
+/** 打开系统设置面板。宿主做不到时把原因交回给页面，由它显示在那一行下面。 */
+export async function openDesktopSettings(pane: string): Promise<{ ok: boolean; error?: string }> {
+  const current = client;
+  if (typeof current?.openDesktopSettings !== 'function') {
+    return { ok: false, error: '当前宿主不支持打开系统设置' };
+  }
+  return current.openDesktopSettings(pane);
 }
 
 /**

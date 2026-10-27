@@ -1,0 +1,28 @@
+{
+  "id": "subagent",
+  "name": "Subagent",
+  "version": "1.0.0",
+  "description": "Subagent delegation: the built-in subagent types, the agent tool and the delegation prompt section.",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "required": false,
+  "priority": 0,
+  "requires": ["prompt", "settings", "subagents", "tools"],
+  "settings": [
+    {
+      "key": "delegationMode",
+      "label": "委派倾向",
+      "type": "select",
+      "description": "proactive：能拆就拆、优先并行；on-request：只有用户或项目约定要求时才开子代理。",
+      "default": "proactive",
+      "options": [
+        { "value": "proactive", "label": "主动委派" },
+        { "value": "on-request", "label": "仅按要求委派" }
+      ]
+    }
+  ],
+  "mica": {
+    "apiVersion": 1
+  }
+}

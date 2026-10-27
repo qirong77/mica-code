@@ -174,7 +174,7 @@ export function formatBtwNotice(question: string, answer: string, isFallback = f
  * btw 是主流程旁边的旁问线程，它在应用上下文里拿到的 `toolContext` 与主流程相同、
  * 没有 `taskId`，所以「session 工具只能由主 agent 调用」那道运行期护栏对它不生效。
  * 唯一可靠的做法是在**工具集**这一层就把它们排除掉——与 `Agent` 工具的子代理同一条
- * 边界（见 `apps/cli/src/agents/subagentDefinitions.ts` 的 `buildSubagentToolFilter`）。
+ * 边界（见 `apps/cli/src/agents/PluginSubagentHost.ts` 的 `buildSubagentToolFilter`）。
  * 其余工具（含 `Skill` 与 MCP）照旧可用：btw 的回答本来就要靠读文件 / 搜索 / 联网。
  */
 export function btwToolFilter(toolName: string): boolean {

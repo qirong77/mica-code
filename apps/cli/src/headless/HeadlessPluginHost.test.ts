@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import mitt from 'mitt';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
+import { micaSkills } from '@packages/mica-skills/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
@@ -52,7 +55,11 @@ function mockSessionController(saveSpy: ReturnType<typeof vi.fn>): SessionContro
   } as unknown as SessionController;
 }
 
-async function mount(saveSpy = vi.fn(() => true), agentOverrides: Record<string, unknown> = {}) {
+async function mount(
+  saveSpy = vi.fn(() => true),
+  agentOverrides: Record<string, unknown> = {},
+  hostOptions: { desktopHost?: boolean } = {},
+) {
   const hooks = new micaPlugin.HookRegistry();
   const agent = mockAgent(agentOverrides);
   const sessionController = mockSessionController(saveSpy);
@@ -68,6 +75,7 @@ async function mount(saveSpy = vi.fn(() => true), agentOverrides: Record<string,
     agent,
     sessionController,
     subagentTasks: subagentTasks as never,
+    ...hostOptions,
     isBusy: () => executor.isBusy,
     submit: (text, options) => startAsSubmit((input) => executor.start(input), text, options),
   });
@@ -86,6 +94,27 @@ function toolNames(): string[] {
 }
 
 describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
+  it.skipIf(process.platform !== 'darwin')(
+    'only the desktop host gets the computer-use skill (requires: ["desktop"])',
+    async () => {
+      const headless = await mount();
+      expect(micaSkills.getLoaded().some((skill) => skill.name === 'computer-use')).toBe(false);
+      await headless.host.dispose();
+
+      const desktop = await mount(vi.fn(() => true), {}, { desktopHost: true });
+      const skill = micaSkills.getLoaded().find((entry) => entry.name === 'computer-use');
+      expect(skill).toBeDefined();
+      // 落盘路径必须是真目录，正文里的占位符要换成它
+      expect(skill?.baseDir).toBe(join(process.env.MICA_HOME!, 'computer-use'));
+      expect(skill?.content).toContain(skill!.baseDir);
+      expect(existsSync(join(skill!.baseDir, 'scripts', 'desktop.mjs'))).toBe(true);
+      await desktop.host.dispose();
+
+      // 卸载后注册随之消失，否则下一个宿主会看到别人的能力
+      expect(micaSkills.getLoaded().some((entry) => entry.name === 'computer-use')).toBe(false);
+    },
+  );
+
   it('registers the session-autonomy tools and todo_write', async () => {
     const { host } = await mount();
     const names = toolNames();

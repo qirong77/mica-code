@@ -67,6 +67,51 @@ export function pathIsWithin(target: string, root: string): boolean {
   return target.startsWith(prefix);
 }
 
+/**
+ * 把 `owned_paths` 归一化成绝对路径并去重。
+ *
+ * 租约表与写工具校验必须比较同一套绝对路径：直接比较用户给的相对路径，
+ * `src/a` 与 `/repo/src/a` 会被当成两段互不重叠的租约。
+ */
+export function normalizeOwnedPaths(paths: string[], cwd = process.cwd()): string[] {
+  const unique = new Set<string>();
+  for (const raw of paths) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    unique.add(resolve(cwd, trimmed));
+  }
+  return [...unique];
+}
+
+/**
+ * 解析父代理给的 `owned_paths`。值非法是调用方错误，必须报错而不是悄悄当成「没有限制」。
+ */
+export function parseOwnedPaths(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    throw new Error('owned_paths must be an array of strings.');
+  }
+  const paths = value.map((item) => {
+    if (typeof item !== 'string' || !item.trim()) {
+      throw new Error('owned_paths entries must be non-empty strings.');
+    }
+    return item.trim();
+  });
+  return normalizeOwnedPaths(paths);
+}
+
+/** 两段租约只要有包含关系就算冲突：并发写同一棵子树同样会互相覆盖。 */
+export function findPathConflict(leftPaths: string[], rightPaths: string[]): { left: string; right: string } | null {
+  for (const left of leftPaths) {
+    for (const right of rightPaths) {
+      if (pathIsWithin(left, right) || pathIsWithin(right, left)) {
+        return { left, right };
+      }
+    }
+  }
+  return null;
+}
+
 function formatOwnedPath(cwd: string, path: string): string {
   const absolute = resolve(cwd, path);
   if (isAbsolute(path)) return absolute;

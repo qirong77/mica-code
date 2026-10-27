@@ -105,4 +105,35 @@ describe('loadSkills', () => {
       rmSync(skillDir, { recursive: true, force: true });
     }
   });
+
+  it('merges runtime-registered skills and lets disk skills win name clashes', async () => {
+    process.env.MICA_HOME = tempHome;
+    const skillDir = join(tempHome, 'skills', 'clash-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      ['---', 'name: clash-skill', 'description: From disk', '---', '', '# Disk'].join('\n'),
+      'utf-8',
+    );
+
+    vi.resetModules();
+    const { getLoadedSkills, registerRuntimeSkills } =
+      (await import('./loadSkills.js')) as typeof import('./loadSkills.js');
+
+    const registration = registerRuntimeSkills('test.plugin', [
+      { name: 'builtin-skill', description: 'From plugin', content: '# Plugin', baseDir: '/tmp/builtin-skill' },
+      { name: 'clash-skill', description: 'Shadowed', content: '# Shadowed', baseDir: '/tmp/clash' },
+    ]);
+
+    expect(registration.skipped).toEqual([
+      { name: 'clash-skill', reason: '同名 skill 已存在（磁盘上的 skill 优先）' },
+    ]);
+    const skills = getLoadedSkills();
+    expect(skills.find((skill) => skill.name === 'builtin-skill')?.description).toBe('From plugin');
+    expect(skills.find((skill) => skill.name === 'clash-skill')?.description).toBe('From disk');
+
+    registration.dispose();
+    expect(getLoadedSkills().some((skill) => skill.name === 'builtin-skill')).toBe(false);
+    rmSync(skillDir, { recursive: true, force: true });
+  });
 });

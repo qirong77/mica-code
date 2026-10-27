@@ -28,7 +28,7 @@ import {
 import { applySessionConfig, SessionController } from '../session/SessionController.js';
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
-import { ToolAgent } from '../tools/ToolAgent.js';
+import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
 import type { ApplicationContext } from './ApplicationContext.js';
 import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
@@ -43,6 +43,7 @@ export class Application {
   private context: ApplicationContext | null = null;
   private stopPromise: Promise<void> | null = null;
   private subagentTasks: SubagentTaskManager | null = null;
+  private pluginSubagents: ReturnType<typeof createPluginSubagentHost> | null = null;
 
   constructor(private readonly options: { sessionId?: string } = {}) {}
 
@@ -111,7 +112,9 @@ export class Application {
       const uiBridge = new MicaUiRuntimeBridge(agent, runtime, agentSessions, subagentTasks);
       this.subagentTasks = subagentTasks;
       agentSessions.registerCurrent(agent, sessionController);
-      micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
+      // 子代理是插件能力面：`agent` 工具由插件注册，内核只提供创建/运行/记账/租约机制。
+      const pluginSubagents = createPluginSubagentHost({ defaultAgent: agent, taskManager: subagentTasks });
+      this.pluginSubagents = pluginSubagents;
       // 插件重写模型请求的那条链需要知道「这次请求属于哪条会话」，而 agent 本身不持有
       // 会话身份（一条会话可以被 fork、可以有多个 agent），所以由这一层回答。
       configureIterationRewrite({
@@ -186,6 +189,7 @@ export class Application {
         agentRegistry: {
           onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
         },
+        subagentsFor: (pluginId) => pluginSubagents.forPlugin(pluginId),
         runtime: {
           submit: (text, options) => runtime.submit(text, options),
           queue: {
@@ -284,7 +288,8 @@ export class Application {
         id: 'startup-error-hint',
         text: '启动失败：请根据错误提示修复配置文件，然后重新运行 mica；按 Ctrl+C 退出',
       });
-      micaTools.unregisterRuntime('agent');
+      this.pluginSubagents?.disposeAll();
+      this.pluginSubagents = null;
       const failedContext = this.context;
       failedContext?.uiBridge.stop();
       const runtimeStop = failedContext?.runtime.stop();
@@ -329,11 +334,12 @@ export class Application {
     const runtimeStop = this.context?.runtime.stop();
     const subagentTasks = this.subagentTasks;
     this.subagentTasks = null;
+    this.pluginSubagents?.disposeAll();
+    this.pluginSubagents = null;
     await subagentTasks?.stop();
     await terminateCurrentBackgroundTasks({ signal: 'SIGTERM', forceAfterMs: 1500 });
     await runtimeStop;
     await this.context?.plugins.disposeAll();
-    micaTools.unregisterRuntime('agent');
     this.context?.agentSessions.stop();
     if (this.context) clearActiveContext(this.context);
     this.context = null;

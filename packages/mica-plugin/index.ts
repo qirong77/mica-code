@@ -155,6 +155,34 @@ export type {
 } from './PluginContext.js';
 export type { PluginPromptSection } from './PluginPrompt.js';
 export { PluginPromptSections } from './PluginPrompt.js';
+export {
+  DESKTOP_CHECKS,
+  DESKTOP_CHECK_IDS,
+  isDesktopCheckId,
+} from './PluginDesktop.js';
+export type {
+  DesktopCheckDefinition,
+  DesktopCheckId,
+  PluginDesktopApi,
+  PluginDesktopRequirements,
+  PluginSkillDefinition,
+  PluginSkillRegistration,
+  PluginSkillsApi,
+} from './PluginDesktop.js';
+export type {
+  PluginSubagentApi,
+  PluginSubagentAwaitOptions,
+  PluginSubagentCaller,
+  PluginSubagentContextMode,
+  PluginSubagentRegistry,
+  PluginSubagentRunResult,
+  PluginSubagentSpawnRequest,
+  PluginSubagentTaskHandle,
+  PluginSubagentTaskSnapshot,
+  PluginSubagentTaskStatus,
+  PluginSubagentType,
+  PluginSubagentWriteMode,
+} from './PluginSubagents.js';
 export type {
   PluginAgentHandle,
   PluginAgentRegistry,

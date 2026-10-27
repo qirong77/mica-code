@@ -1,0 +1,16 @@
+{
+  "id": "computer-use",
+  "name": "Computer Use",
+  "version": "1.0.0",
+  "description": "让模型直接操作 macOS 桌面：AX 元素树按名字点控件、CGEvent 发键鼠、截图读屏。权限状态显示在本页的「运行条件」里，可一键跳到系统设置。",
+  "author": "Mica",
+  "main": "index.ts",
+  "assets": ["README.md", "skill/SKILL.md", "runtime/scripts/desktop.mjs", "runtime/src/helper.m", "runtimeSources.ts"],
+  "priority": 210,
+  "required": false,
+  "mica": { "apiVersion": 1 },
+  "requires": ["skills", "desktop"],
+  "desktop": {
+    "checks": ["accessibility", "screen-recording", "command-line-tools"]
+  }
+}

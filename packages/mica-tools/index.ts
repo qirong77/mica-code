@@ -87,10 +87,15 @@ export {
 } from './ToolRunShellBackground.js';
 export type { BackgroundTaskMeta, BackgroundTaskStatus } from './ToolRunShellBackground.js';
 export {
-  listActiveWaits,
-  listWaitRecords,
-  clearWaitRecords,
-  isActiveWaitStatus,
-} from './waitFor/registry.js';
+  assertShellPathAccess,
+  assertWritablePath,
+  findPathConflict,
+  getPathOwnershipContext,
+  normalizeOwnedPaths,
+  parseOwnedPaths,
+  pathIsWithin,
+} from './utils/pathOwnership.js';
+export type { PathOwnershipContext } from './utils/pathOwnership.js';
+export { listActiveWaits, listWaitRecords, clearWaitRecords, isActiveWaitStatus } from './waitFor/registry.js';
 export type { WaitRecord, WaitTaskStatus } from './waitFor/registry.js';
 export type { NormalizedWaitCondition, WaitKind } from './waitFor/types.js';

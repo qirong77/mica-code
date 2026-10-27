@@ -8,8 +8,10 @@ import type { ServiceContainer } from './ServiceContainer.js';
 import type { PluginIterationRewriter } from './PluginAgent.js';
 import type { PluginPromptSection } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
+import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginHealthStore } from './PluginHealth.js';
 import type { PluginSettingIssue, PluginSettingValues } from './PluginSettings.js';
+import type { PluginDesktopApi, PluginSkillsApi } from './PluginDesktop.js';
 import type React from 'react';
 
 export type PluginStatusItem = {
@@ -98,6 +100,23 @@ export type PluginContext = {
     section(section: PluginPromptSection): Disposable;
   };
   /**
+   * 注册 skill：插件自带的内置能力（正文随包分发，不在用户的 skills 目录里）。
+   *
+   * 注册进来的 skill 与磁盘扫描出来的完全同权：进 system prompt 索引、`skill` 工具
+   * 能加载、`/skills` 面板与配置页能看到、会话能力开关能关掉它。磁盘上的同名 skill
+   * 优先，被遮蔽的条目从 `skipped` 读出来，插件应当把它报成一条用户可见的状态。
+   */
+  skills: PluginSkillsApi;
+  /**
+   * desktop 宿主身份。只有桌面端的运行时（Electron 壳 / Web 运行时）往 app-server
+   * 传了标记时才有值；CLI、TUI、`mica exec` 里为 undefined。
+   *
+   * 运行条件（清单 `desktop.checks`）由桌面端探测并渲染，这里只让插件判断「我是不是
+   * 跑在能兑现这些条件的宿主里」——依赖它的插件用 `requires: ['desktop']` 声明，
+   * 其它宿主会整插件跳过，而不是让插件在运行期踩空。
+   */
+  desktop?: PluginDesktopApi;
+  /**
    * 与模型请求交互的入口：在迭代边界重写「接下来要发送的历史」。
    *
    * 只在常驻会话的宿主里提供（TUI / app-server）。`mica exec` 这样的
@@ -106,6 +125,13 @@ export type PluginContext = {
   agent?: {
     onIterationRewrite(handler: PluginIterationRewriter): Disposable;
   };
+  /**
+   * 委派子代理：注册子代理类型、前台/后台跑一个、管后台任务。
+   *
+   * 机制在宿主（建子代理、用量记账、路径租约、完成后回注通知），策略在插件
+   * （有哪些类型、工具怎么描述、什么时候委派）。内核里不出现任何具体委派策略。
+   */
+  subagents?: PluginSubagentApi;
   /**
    * 清单里声明的设置项的当前值（`$MICA_HOME/plugin-settings/<id>.json`）。
    * 配置页改完立刻生效：读的时候按文件 mtime 判断，不需要重开会话。

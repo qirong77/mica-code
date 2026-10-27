@@ -79,6 +79,10 @@ function buildSpawnEnv(env = process.env, owner = null) {
   const reachable = stripControlSockets(mergeShellEnv(env))
   return {
     ...reachable,
+    // 这个进程是桌面端拉起来的 app-server：插件据此提供只有桌面宿主能兑现的能力
+    // （运行条件探测、系统设置跳转）。CLI / TUI / exec 不会带这个标记。
+    // 注意别用 MICA_DESKTOP_HOST：那是运行时的绑定地址，同名会让两边互相踩。
+    MICA_PLUGIN_DESKTOP_HOST: '1',
     MICA_MCP_INIT_TIMEOUT_MS: String(CHAT_MCP_INIT_TIMEOUT_MS),
     // 受控浏览器按 owner 归属：agent 用它开出来的窗口会挂到对应会话的图标上。
     // 地址（MICA_BROWSER_URL）由运行时的环境继承，这里只补「这一轮是谁」。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatStructuredSubagentResult, parseStructuredSubagentResult } from './subagentResult.js';
+import { formatStructuredSubagentResult, parseStructuredSubagentResult } from './result.js';
 
 describe('subagentResult', () => {
   it('parses json object results', () => {
@@ -28,5 +28,16 @@ describe('subagentResult', () => {
     expect(text).toContain('Subagent: Explore');
     expect(text).toContain('## Summary');
     expect(text).toContain('packages/mica-config/config.ts');
+  });
+
+  it('keeps the caller-supplied status when the payload does not declare one', () => {
+    const text = formatStructuredSubagentResult({
+      type: 'Tester',
+      description: 'run the unit tests',
+      result: 'one test failed',
+      status: 'partial',
+    });
+
+    expect(text).toContain('Status: partial');
   });
 });

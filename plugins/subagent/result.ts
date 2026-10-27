@@ -11,6 +11,14 @@ export type StructuredSubagentResult = {
 const MAX_LIST_ITEMS = 12;
 const MAX_ITEM_CHARS = 400;
 const MAX_SUMMARY_CHARS = 2_000;
+/**
+ * 原始结果的展示上限。
+ *
+ * 结构化那几段已经把要点摘出来了，这里再贴一份全文只会把所有内容在父代理上下文里
+ * 说两遍；几百 KB 的实现日志一次就能把一轮上下文吃掉。超出的部分只留标记——
+ * 真需要全文时应当让子代理把结论写进 summary，而不是指望父代理读完整流水。
+ */
+const MAX_RAW_CHARS = 6_000;
 
 export function formatStructuredSubagentResult(options: {
   type: string;
@@ -40,7 +48,7 @@ export function formatStructuredSubagentResult(options: {
     formatList(structured.next_actions_for_parent),
     '',
     '## Raw result',
-    structured.raw || '(empty result)',
+    clampText(structured.raw, MAX_RAW_CHARS) || '(empty result)',
   ].join('\n');
 }
 

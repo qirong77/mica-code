@@ -73,7 +73,6 @@ import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProje
 import { BtwThreads, readStoredBtwThreads, writeStoredBtwThreads } from '../runtime/btwThread.js';
 import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory.js';
 import { SessionController } from '../session/SessionController.js';
-import { ToolAgent } from '../tools/ToolAgent.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
 import { resolveRuntimeConfigOverride } from './modelCatalog.js';
 
@@ -287,7 +286,6 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       await cleanupTask('stop headless plugins', () => pluginHost!.emitRuntimeStop());
       await cleanupTask('dispose headless plugins', () => pluginHost!.dispose());
     }
-    micaTools.unregisterRuntime('agent');
     disposeModelEffortContext();
   };
 
@@ -333,7 +331,6 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       },
     });
     subagentTasks = new SubagentTaskManager();
-    micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
 
     // By The Way（CLI 的 `/btw`）在桌面端的等价物：输入条上的一个抽屉，每个 tab 一条线程。
     // 线程状态（可复用的子代理 + 问答）只能活在 host 里，回答经通知推回。
@@ -481,6 +478,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       agent,
       sessionController,
       subagentTasks,
+      // 桌面端的运行时 spawn 这个进程时会带上标记（见 apps/desktop/src/host/chat.js）。
+      // 插件据此决定自己要不要提供只有桌面页面能兑现的能力。
+      desktopHost: process.env.MICA_PLUGIN_DESKTOP_HOST === '1',
       isBusy: () => executor!.isBusy,
       submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
     });

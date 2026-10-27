@@ -27,7 +27,7 @@ type CallerAgent = Pick<CommandAgent, 'taskOwnerId' | 'getSnapshot' | 'config' |
 function callerAgent(callbacks?: ToolExecuteCallbacks): CallerAgent | undefined {
   const context = callbacks?.context;
   if (!context || typeof context !== 'object') return undefined;
-  // Subagent tool contexts carry a taskId (see ToolAgent); session tools must
+  // Subagent tool contexts carry a taskId (see PluginSubagentHost); session tools must
   // never be driven from a subagent, even if the subagent shares the parent's
   // tool registry. The primaryAgentOnly filter already hides them, this is a
   // defense-in-depth guard.

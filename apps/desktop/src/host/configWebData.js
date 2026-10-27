@@ -32,6 +32,7 @@ import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?r
 import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js'
 import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from './browser-control.js'
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
+import { openSystemSettings, readSystemChecks } from './system-checks.js'
 import { probeMcpServers } from './mcp-probe.js'
 import { clearLogs, readPerformanceSummary } from './log.js'
 
@@ -526,6 +527,11 @@ export const configWebActions = {
   setPluginEnabled: (input) => setPluginEnabledInStore(text(input, 'id'), input?.enabled === true),
   writePluginSettings: (input) =>
     setPluginSettingsInStore(text(input, 'id'), isRecord(input?.values) ? input.values : {}),
+
+  // 插件声明了运行条件（清单 desktop.checks）时，插件详情页据此显示「开了没有 / 去哪开」。
+  // 探测在 Electron 主进程（TCC 权限属于有 app 身份的那个进程），见 system-checks.js。
+  readDesktopChecks: () => readSystemChecks(),
+  openDesktopSettings: (input) => openSystemSettings(text(input, 'pane')),
 
   readSessionsDetails: () => readSessionsDetails(),
   readSessionDetails: (input) => readSessionDetails(text(input, 'id')),

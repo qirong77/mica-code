@@ -6,8 +6,8 @@ import {
 } from '@packages/mica-agent/index.js';
 import { micaCommon } from '@packages/mica-common/index.js';
 import type { EffortOption } from '@packages/mica-config/index.js';
+import type { PluginSubagentContextMode, PluginSubagentWriteMode } from '@packages/mica-plugin/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
-import type { SubagentContextMode, SubagentWriteMode } from './subagentDefinitions.js';
 
 const DEFAULT_MAX_CONCURRENT_TASKS = 4;
 const DEFAULT_MAX_RETAINED_TASKS = 100;
@@ -60,12 +60,14 @@ export type SubagentTaskRecord = {
   model: string;
   effort: EffortOption;
   max_turns?: number;
-  context_mode?: SubagentContextMode;
+  context_mode?: PluginSubagentContextMode;
   context_files?: string[];
-  write_mode?: SubagentWriteMode;
+  write_mode?: PluginSubagentWriteMode;
   owned_paths?: string[];
   status: SubagentTaskStatus;
   parent_task_id?: string;
+  /** 发起这次委派的插件 id（插件能力面），用于按插件收窄任务视图。 */
+  pluginId?: string;
   activities?: SubagentTaskActivity[];
   timeline?: SubagentTaskTimelineEntry[];
   /** True once older timeline entries were dropped to bound the record. */
@@ -93,11 +95,12 @@ export type StartSubagentTaskOptions = {
   effort: EffortOption;
   maxTurns?: number;
   prompt?: string;
-  contextMode?: SubagentContextMode;
+  contextMode?: PluginSubagentContextMode;
   contextFiles?: string[];
-  writeMode?: SubagentWriteMode;
+  writeMode?: PluginSubagentWriteMode;
   ownedPaths?: string[];
   parentTaskId?: string;
+  pluginId?: string;
   run: (signal: AbortSignal) => Promise<{ result: string; usage?: AgentUsageSummary }>;
   getUsage?: () => AgentUsageSummary;
 };
@@ -212,6 +215,7 @@ export class SubagentTaskManager {
       ...(options.ownedPaths && options.ownedPaths.length > 0 ? { owned_paths: [...options.ownedPaths] } : {}),
       status: 'running',
       ...(options.parentTaskId ? { parent_task_id: options.parentTaskId } : {}),
+      ...(options.pluginId ? { pluginId: options.pluginId } : {}),
       activities: [],
       started_at: new Date().toISOString(),
     };

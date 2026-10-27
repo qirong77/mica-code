@@ -1,8 +1,10 @@
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import autoCompactSetup from '../../plugins/auto-compact/index.js';
+import computerUseSetup from '../../plugins/computer-use/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
 import sessionNotesSetup from '../../plugins/session-notes/index.js';
 import sessionTagsSetup from '../../plugins/session-tags/index.js';
+import subagentSetup from '../../plugins/subagent/index.js';
 import todoSetup from '../../plugins/todo/index.js';
 import webSearchSetup from '../../plugins/web-search/index.js';
 import { officialPluginManifests } from './manifests.js';
@@ -22,6 +24,8 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   'session-notes': sessionNotesSetup,
   'session-rename': sessionRenameSetup,
   'session-tags': sessionTagsSetup,
+  subagent: subagentSetup,
+  'computer-use': computerUseSetup,
 };
 
 export const officialPlugins: MicaPlugin[] = officialPluginManifests.map((manifest) => {

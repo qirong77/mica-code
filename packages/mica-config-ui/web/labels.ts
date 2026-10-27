@@ -45,6 +45,13 @@ export function pluginLoadStatusLabel(status: string | undefined): string {
   return '尚未加载';
 }
 
+/** 插件运行条件的状态；「未知」是探测不到（例如浏览器宿主），不是「没开」。 */
+export function desktopCheckStatusLabel(status: string | undefined): string {
+  if (status === 'granted') return '已开启';
+  if (status === 'denied') return '未开启';
+  return '未知';
+}
+
 /** 官方插件随产品分发（编译进产物），用户插件装在 `$MICA_HOME/plugins`。 */
 export function pluginSourceLabel(source: string | undefined): string {
   return source === 'official' ? '官方' : '用户';

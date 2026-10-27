@@ -6,6 +6,7 @@ import icon from '../../resources/icon.png?asset'
 import { resolveBrowserSocketPath, startBrowserHost } from './browser/browser-host.js'
 import { applyBrowserRenderSwitch } from './browser/browser-core.js'
 import { resolveTerminalSocketPath, startTerminalHost } from './terminal/terminal-host.js'
+import { resolveSystemSocketPath, startSystemHost } from './system/system-host.js'
 import { TERMINAL_PAGE_PATH } from '@mica-app-paths'
 import { RUNTIME_PORT_ENV, loopbackRuntimeUrl, parseRuntimePort } from '@packages/mica-web-shared'
 import { appPageKey, isAppPageTarget } from './app-page-target.js'
@@ -49,6 +50,12 @@ let browserHost = null
  * 交给运行时，运行时代理成自己端口上的 `/remote/terminal/*`。
  */
 let terminalHost = null
+/**
+ * 系统检查宿主（辅助功能 / 屏幕录制 / 命令行工具）。同样只在主进程：
+ * TCC 权限属于有 app 身份的那个进程，运行时（`ELECTRON_RUN_AS_NODE`）拿到的是空壳。
+ * socket 路径经 `MICA_SYSTEM_SOCKET` 交给运行时，页面经运行时的 IPC 读它。
+ */
+let systemHost = null
 /** 「本机」页面地址（dev 下是 Vite dev server），⇧⌘M 与默认端口上的回环目标都回到它 */
 let localPageUrl = ''
 /**
@@ -98,7 +105,8 @@ function spawnRuntime(port, { pageFromDevServer }) {
       // 受控浏览器的 socket：运行时据此在**自己已有的端口**上代理出 /remote/control，
       // 再把它注入给每个 agent 进程（MICA_BROWSER_URL），所以这里不再传端口或地址。
       MICA_BROWSER_SOCKET: browserHost?.socketPath || '',
-      MICA_TERMINAL_SOCKET: terminalHost?.socketPath || ''
+      MICA_TERMINAL_SOCKET: terminalHost?.socketPath || '',
+      MICA_SYSTEM_SOCKET: systemHost?.socketPath || ''
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })
@@ -701,6 +709,16 @@ app.whenReady().then(async () => {
     console.error('[mica-code-app] 终端控制服务启动失败', error)
   }
 
+  // 系统检查（权限 / 命令行工具）同样先起：页面与插件页面读它，起不来只是全报「未知」
+  try {
+    systemHost = await startSystemHost({
+      socketPath: resolveSystemSocketPath(app.getPath('userData'))
+    })
+    console.log(`[mica-system] 系统检查服务: unix:${systemHost.socketPath}`)
+  } catch (error) {
+    console.error('[mica-code-app] 系统检查服务启动失败', error)
+  }
+
   try {
     runtime = await resolveRuntime({ pageFromDevServer: Boolean(devPageUrl) })
   } catch (error) {
@@ -715,6 +733,10 @@ app.whenReady().then(async () => {
   if (runtime.owned === false && terminalHost) {
     // 同理：复用的运行时没有这次的 MICA_TERMINAL_SOCKET
     console.warn('[mica-code-app] 复用了已在运行的运行时，终端控制可能不可用（重启运行时即可）')
+  }
+  if (runtime.owned === false && systemHost) {
+    // 同理：复用的运行时不知道这次的 MICA_SYSTEM_SOCKET，系统检查会报「需要桌面应用」
+    console.warn('[mica-code-app] 复用了已在运行的运行时，系统检查可能不可用（重启运行时即可）')
   }
 
   localPageUrl = devPageUrl || runtime.url
@@ -747,7 +769,7 @@ app.on('before-quit', () => {
   for (const state of windows) stopUnreadWatcher(state)
 })
 
-// 服务（浏览器、终端）只在确定退出时拆。放在 `before-quit` 里的话，一旦这次退出被取消
+// 服务（浏览器、终端、系统检查）只在确定退出时拆。放在 `before-quit` 里的话，一旦这次退出被取消
 // （系统打断、别处 preventDefault），socket 已经被 unlink，进程却还活着——运行时之后
 // 每条 `/remote/*` 都只能 503，只有重启应用能恢复。
 app.on('will-quit', () => {
@@ -756,6 +778,8 @@ app.on('will-quit', () => {
   browserHost = null
   if (terminalHost) void terminalHost.close().catch(() => {})
   terminalHost = null
+  if (systemHost) void systemHost.close().catch(() => {})
+  systemHost = null
   // 只结束自己拉起的运行时；复用的那个（dev 下已在跑）留给它的属主
   if (runtime?.owned && runtime.child) {
     try {

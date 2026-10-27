@@ -1,13 +1,13 @@
 import type { EffortOption } from '@packages/mica-config/index.js';
-import type { SubagentContextMode } from './subagentDefinitions.js';
-import { findPathConflict, normalizeOwnedPaths } from './subagentPathLease.js';
+import type { PluginSubagentContextMode } from '@packages/mica-plugin/index.js';
+import { findPathConflict, normalizeOwnedPaths } from '@packages/mica-tools/index.js';
 
 export type SubagentRunSpec = {
   description: string;
   prompt: string;
   subagent_type?: string;
   effort?: EffortOption;
-  context_mode?: SubagentContextMode;
+  context_mode?: PluginSubagentContextMode;
   context_files?: string[];
   owned_paths?: string[];
   run_in_background?: boolean;
@@ -126,7 +126,9 @@ function parseRunSpec(value: unknown, index: number): SubagentRunSpec {
     prompt,
     ...(typeof record.subagent_type === 'string' ? { subagent_type: record.subagent_type } : {}),
     ...(typeof record.effort === 'string' ? { effort: record.effort as EffortOption } : {}),
-    ...(typeof record.context_mode === 'string' ? { context_mode: record.context_mode as SubagentContextMode } : {}),
+    ...(typeof record.context_mode === 'string'
+      ? { context_mode: record.context_mode as PluginSubagentContextMode }
+      : {}),
     ...(Array.isArray(record.context_files)
       ? {
           context_files: record.context_files.map((item, itemIndex) =>

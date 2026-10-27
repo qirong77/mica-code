@@ -3325,6 +3325,25 @@
     color: var(--text-faint);
   }
 
+  /* 运行条件一行：状态标签、探测到的细节、以及「去开」的入口，都跟在同一个控件格里。 */
+  .plugin-check {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .plugin-check-detail {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-aux);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .plugin-setting-required {
     margin-left: 5px;
     padding: 0 4px;

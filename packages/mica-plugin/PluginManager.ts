@@ -5,9 +5,11 @@ import type { PluginAgentRegistry } from './PluginAgent.js';
 import type { PluginRequirement } from './PluginManifest.js';
 import type { PluginPromptSections } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
+import type { PluginSubagentApi } from './PluginSubagents.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
+import { micaSkills } from '@packages/mica-skills/index.js';
 
 export type PluginSetupReport = {
   loaded: string[];
@@ -30,10 +32,14 @@ export type PluginSetupReport = {
  * - `settings`：按插件清单里的 `settings` 声明读取，路径跟着 `paths.config` 走；
  * - `health`：插件自报状态，落到 `$MICA_HOME/plugin-health/<id>.json`；
  * - `prompt`：包一层只写自己段落的入口。
+ * - `skills`：进程级 skill 注册表，按 pluginId 归属，卸载时一起摘掉。
  *
  * host 仍然可以传自己的 `logger`，它会作为落盘之外的转发目标（TUI 静默、headless 写 stderr）。
  */
-export type PluginBaseContext = Omit<PluginContext, 'pluginId' | 'onDispose' | 'logger' | 'settings' | 'health'> & {
+export type PluginBaseContext = Omit<
+  PluginContext,
+  'pluginId' | 'onDispose' | 'logger' | 'settings' | 'health' | 'skills'
+> & {
   logger?: PluginContext['logger'];
   /**
    * 按插件 id 生成本会话的状态读写面。宿主不提供时插件拿不到 `sessionState`，
@@ -49,6 +55,11 @@ export type PluginBaseContext = Omit<PluginContext, 'pluginId' | 'onDispose' | '
    * 内核持有的模型请求改写表。manager 按插件 id 绑定后交给插件，插件注册不到别人名下。
    */
   agentRegistry?: PluginAgentRegistry;
+  /**
+   * 委派子代理的入口。manager 按插件 id 绑定后交给插件——注册的子代理类型挂在插件
+   * 名下，卸载时随之摘除。
+   */
+  subagentsFor?: (pluginId: string) => PluginSubagentApi;
 };
 
 export class PluginManager {
@@ -72,14 +83,33 @@ export class PluginManager {
       const configDir = baseContext.paths?.config;
       // `sessionStateFor` / `promptSections` 由 manager 消费（下面按 pluginId 生成
       // 本插件专属的入口），不能原样漏进 ctx，否则插件会看到一个能读别人状态的入口。
-      const { sessionStateFor, promptSections: promptRegistry, agentRegistry, ...shared } = baseContext;
+      const { sessionStateFor, promptSections: promptRegistry, agentRegistry, subagentsFor, ...shared } = baseContext;
       const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
+      const health = createPluginHealthStore(plugin.id, { configDir });
       const ctx: PluginContext = {
         ...shared,
         pluginId: plugin.id,
         logger,
         settings,
-        health: createPluginHealthStore(plugin.id, { configDir }),
+        health,
+        // skill 是进程级注册表（磁盘扫描 + 插件注册合流），所以不需要宿主接线：
+        // 注册归属这个插件，卸载时按 pluginId 一起摘掉。
+        skills: {
+          register: (skill) => {
+            const registration = micaSkills.registerRuntime(plugin.id, [skill]);
+            if (registration.skipped.length > 0) {
+              logger.warn('plugin:skill-shadowed', { skipped: registration.skipped });
+              health.report({
+                level: 'warn',
+                message: `skill 未注册：${registration.skipped
+                  .map((item) => `${item.name}（${item.reason}）`)
+                  .join('；')}`,
+              });
+            }
+            localDisposables.push({ dispose: () => registration.dispose() });
+            return { dispose: registration.dispose, skipped: registration.skipped };
+          },
+        },
         onDispose: (dispose) => localDisposables.push({ dispose }),
       };
       const sessionState = sessionStateFor?.(plugin.id);
@@ -90,6 +120,7 @@ export class PluginManager {
       if (agentRegistry) {
         ctx.agent = { onIterationRewrite: (handler) => agentRegistry.onIterationRewrite(plugin.id, handler) };
       }
+      if (subagentsFor) ctx.subagents = subagentsFor(plugin.id);
 
       // 清单声明的能力必须都能兑现，否则插件一定会在运行期踩空。放在 setup 之前判断，
       // 装配出来的 ctx 就是事实，不需要插件自己再猜。
