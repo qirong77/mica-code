@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, SaveStatus, Switch } from '../components/Ui.js';
+import { Alert, Button, SaveStatus, SettingRow, SettingsGroup, SplitView, Switch } from '../components/Ui.js';
 import {
   readPluginsDetails,
   setPluginEnabled,
@@ -14,23 +14,25 @@ import { pluginLoadStatusLabel, pluginSourceLabel, pluginStateLabel } from '../l
 import { useAutoSave } from '../useAutoSave.js';
 
 /**
- * 插件页：官方插件与用户插件分两组列出，状态与启停都在行上，详情原地展开。
+ * 插件页：左边列出插件，右边看选中的那一个。
  *
  * 两种插件含义不同，页面上必须说清楚：
  * - 官方插件随产品分发（源码在仓库 `plugins/`），永远「已安装」，只能启用 / 停用；
  * - 用户插件是 `$MICA_HOME/plugins` 下的插件目录，装没装、能不能加载由磁盘决定。
  *
  * 启停只写本地状态文件，插件在启动阶段才注册，因此改完要重开会话才生效——页面提示这一点，
- * 而不是假装立刻生效。
+ * 而不是假装立刻生效。设置则不同：写盘后插件的下一次读取就拿到新值，不需要重开会话。
  */
 export function PluginsPage() {
   const [details, setDetails] = useState<ConfigWebPluginsDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [filter, setFilter] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const RefreshIcon = appIcons.refresh;
+  const SearchIcon = appIcons.search;
   const canToggle = supportsPluginToggle();
   const canSettings = supportsPluginSettings();
 
@@ -68,6 +70,11 @@ export function PluginsPage() {
   const official = plugins.filter((plugin) => plugin.source === 'official');
   const user = plugins.filter((plugin) => plugin.source === 'user');
   const enabledCount = plugins.filter((plugin) => plugin.state === 'enabled').length;
+  const visibleOfficial = useMemo(() => filterPlugins(official, filter), [official, filter]);
+  const visibleUser = useMemo(() => filterPlugins(user, filter), [user, filter]);
+
+  // 没选过就落在第一个插件上：右栏永远有内容，不会出现「先点一个才知道有什么」。
+  const selected = plugins.find((plugin) => plugin.id === selectedId) ?? plugins[0];
 
   return (
     <PageFrame
@@ -80,145 +87,175 @@ export function PluginsPage() {
         </div>
       }
     >
-      <div className="plugin-page">
-        <p className="capability-note">
-          插件在启动时注册工具、命令、钩子与界面组件。官方插件随产品分发、只能启停；用户插件是把一个目录放进{' '}
-          <code>{details?.root ?? '$MICA_HOME/plugins'}</code>。启停写入{' '}
-          <code>{details?.statePath ?? 'plugins-state.json'}</code>，重开会话才生效。
-        </p>
-        {error ? <Alert message={error} /> : null}
-        {loading && !details ? (
-          <div className="page-loading">正在加载 Plugins…</div>
-        ) : (
-          <>
-            <section className="simple-card plugin-card">
-              <header className="config-card-head">
-                <div className="config-head-copy">
-                  <h2>官方插件</h2>
-                  <p>内置在产物里，不能卸载；停用后它的工具、命令与钩子都不会注册。</p>
-                </div>
-                <span className="plugin-head-count">
-                  {official.filter((plugin) => plugin.state === 'enabled').length}/{official.length} 启用
-                </span>
-              </header>
-              {official.length === 0 ? (
-                <Empty description="没有官方插件" />
-              ) : (
-                <ul className="plugin-list">
-                  {official.map((plugin) => (
-                    <PluginRow
-                      key={plugin.id}
-                      plugin={plugin}
-                      expanded={expandedId === plugin.id}
-                      busy={pendingId === plugin.id}
-                      canToggle={canToggle}
-                      canSettings={canSettings}
-                      onToggleExpanded={() => setExpandedId(expandedId === plugin.id ? null : plugin.id)}
-                      onSaved={setDetails}
-                      onToggleEnabled={(enabled) => void toggle(plugin, enabled)}
+      {error ? <Alert message={error} /> : null}
+      {loading && !details ? (
+        <div className="page-loading">正在加载 Plugins…</div>
+      ) : (
+        <div className="plugin-page">
+          <SplitView
+            rail={
+              <>
+                <div className="split-rail-head">
+                  <div className="split-rail-filter">
+                    <SearchIcon size={14} aria-hidden="true" />
+                    <input
+                      value={filter}
+                      type="search"
+                      aria-label="搜索插件"
+                      placeholder={`搜索 ${plugins.length} 个插件`}
+                      onChange={(event) => setFilter(event.target.value)}
                     />
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            <section className="simple-card plugin-card">
-              <header className="config-card-head">
-                <div className="config-head-copy">
-                  <h2>用户插件</h2>
-                  <p>
-                    一个插件就是一个目录：<code>plugin.json</code> + <code>main</code> 指向的入口（default 导出
-                    setup），样式、文档等资源在清单的 <code>assets</code> 里声明。
-                  </p>
+                  </div>
                 </div>
-                <span className="plugin-head-count">
-                  {enabledCount} / {plugins.length} 启用
-                </span>
-              </header>
-              {user.length === 0 ? (
-                <Empty description="还没有安装用户插件：把插件目录放进上面那个路径即可" />
-              ) : (
-                <ul className="plugin-list">
-                  {user.map((plugin) => (
-                    <PluginRow
-                      key={plugin.id}
-                      plugin={plugin}
-                      expanded={expandedId === plugin.id}
-                      busy={pendingId === plugin.id}
-                      canToggle={canToggle}
-                      canSettings={canSettings}
-                      onToggleExpanded={() => setExpandedId(expandedId === plugin.id ? null : plugin.id)}
-                      onSaved={setDetails}
-                      onToggleEnabled={(enabled) => void toggle(plugin, enabled)}
-                    />
-                  ))}
-                </ul>
-              )}
-            </section>
-          </>
-        )}
-      </div>
+                <div className="split-rail-list" role="listbox" aria-label="插件列表">
+                  <PluginRailGroup
+                    title={`官方 · ${enabledCount}/${plugins.length} 启用`}
+                    plugins={visibleOfficial}
+                    selectedId={selected?.id}
+                    onSelect={setSelectedId}
+                    emptyText={official.length === 0 ? '没有官方插件' : '没有匹配的官方插件'}
+                  />
+                  <PluginRailGroup
+                    title="用户"
+                    plugins={visibleUser}
+                    selectedId={selected?.id}
+                    onSelect={setSelectedId}
+                    emptyText={user.length === 0 ? '还没有安装用户插件' : '没有匹配的用户插件'}
+                    hint={user.length === 0 ? '把插件目录放进上面那个路径后重新加载' : undefined}
+                  />
+                </div>
+              </>
+            }
+          >
+            {selected ? (
+              <div className="plugin-detail">
+                <PluginDetailHeader
+                  plugin={selected}
+                  busy={pendingId === selected.id}
+                  canToggle={canToggle}
+                  onToggleEnabled={(enabled) => void toggle(selected, enabled)}
+                />
+                <div className="plugin-detail-scroll">
+                  <PluginBody plugin={selected} canSettings={canSettings} onSaved={setDetails} />
+                </div>
+              </div>
+            ) : (
+              <div className="page-loading">没有可显示的插件</div>
+            )}
+          </SplitView>
+        </div>
+      )}
     </PageFrame>
   );
 }
 
-type PluginRowProps = {
-  plugin: ConfigWebPlugin;
-  expanded: boolean;
-  busy: boolean;
-  canToggle: boolean;
-  canSettings: boolean;
-  onToggleExpanded(): void;
-  onToggleEnabled(enabled: boolean): void;
-  onSaved(next: ConfigWebPluginsDetails): void;
-};
-
-function PluginRow({
-  plugin,
-  expanded,
-  busy,
-  canToggle,
-  canSettings,
-  onToggleExpanded,
-  onToggleEnabled,
-  onSaved,
-}: PluginRowProps) {
+function PluginRailGroup({
+  title,
+  plugins,
+  selectedId,
+  onSelect,
+  emptyText,
+  hint,
+}: {
+  title: string;
+  plugins: ConfigWebPlugin[];
+  selectedId?: string;
+  onSelect(id: string): void;
+  emptyText: string;
+  hint?: string;
+}) {
   return (
-    <li className={`plugin-row${expanded ? ' is-open' : ''}`}>
-      <span className="plugin-row-copy">
-        <span className="plugin-row-name" title={plugin.name}>
-          {plugin.name}
-        </span>
-        <span className="plugin-row-version">v{plugin.version}</span>
-        <span className="plugin-row-sub" title={plugin.location}>
-          {plugin.location}
-        </span>
-      </span>
-      <span className="plugin-row-tags">
-        {plugin.health && plugin.health.level !== 'ok' ? (
-          <span className={`plugin-state is-${plugin.health.level === 'error' ? 'error' : 'warn'}`}>
-            {pluginHealthLabel(plugin.health.level)}
-          </span>
-        ) : null}
-        <span className={`plugin-state ${pluginStateClass(plugin.state)}`}>{pluginStateLabel(plugin.state)}</span>
-      </span>
-      <span className="plugin-row-actions">
-        <Switch
-          checked={plugin.state !== 'disabled'}
-          disabled={!canToggle || busy}
-          label={`${plugin.state === 'disabled' ? '启用' : '停用'}插件 ${plugin.name}`}
-          onChange={onToggleEnabled}
-        />
-        <Button variant="ghost" onClick={onToggleExpanded} title={expanded ? '收起详情' : '展开详情'}>
-          {expanded ? '收起' : '详情'}
-        </Button>
-      </span>
-      {expanded ? <PluginDetail plugin={plugin} canSettings={canSettings} onSaved={onSaved} /> : null}
-    </li>
+    <div className="split-rail-section">
+      <p className="split-rail-group">{title}</p>
+      {plugins.length === 0 ? (
+        <div className="split-rail-empty">
+          {emptyText}
+          {hint ? <span className="split-rail-empty-hint">{hint}</span> : null}
+        </div>
+      ) : (
+        plugins.map((plugin) => (
+          <button
+            key={plugin.id}
+            type="button"
+            role="option"
+            aria-selected={plugin.id === selectedId}
+            className={`split-item${plugin.id === selectedId ? ' is-active' : ''}`}
+            title={`${plugin.name} · ${plugin.location}`}
+            onClick={() => onSelect(plugin.id)}
+          >
+            <span className="split-item-copy">
+              <span className="split-item-title">{plugin.name}</span>
+              {/* 分组标题已经写明来源，行上再重复一遍没有信息量；这里放版本与例外状态。 */}
+              <span className="split-item-meta">{railMeta(plugin)}</span>
+            </span>
+            <span className="split-item-trailing">
+              <PluginStatusDot plugin={plugin} />
+            </span>
+          </button>
+        ))
+      )}
+    </div>
   );
 }
 
-function PluginDetail({
+/** 列表行的状态点：异常优先于启停，因为「启用了但坏了」才是最需要看见的。 */
+function PluginStatusDot({ plugin }: { plugin: ConfigWebPlugin }) {
+  const tone =
+    plugin.state === 'failed' || plugin.health?.level === 'error'
+      ? 'red'
+      : plugin.health?.level === 'warn'
+        ? 'blue'
+        : plugin.state === 'enabled'
+          ? 'green'
+          : 'default';
+  const label = pluginHealthLabel(plugin);
+  return <span className={`session-state-dot is-${tone}`} title={label} />;
+}
+
+function PluginDetailHeader({
+  plugin,
+  busy,
+  canToggle,
+  onToggleEnabled,
+}: {
+  plugin: ConfigWebPlugin;
+  busy: boolean;
+  canToggle: boolean;
+  onToggleEnabled(enabled: boolean): void;
+}) {
+  const enabled = plugin.state !== 'disabled';
+  return (
+    <header className="plugin-detail-head">
+      <div className="plugin-detail-title">
+        <div className="plugin-detail-title-copy">
+          <h2 title={plugin.name}>{plugin.name}</h2>
+          <span className="plugin-detail-meta">
+            v{plugin.version} · {pluginSourceLabel(plugin.source)} ·{' '}
+            <span className="plugin-detail-location" title={plugin.location}>
+              {plugin.location}
+            </span>
+          </span>
+        </div>
+        <div className="plugin-detail-actions">
+          {plugin.state === 'failed' ? (
+            <span className="plugin-state is-error">{pluginStateLabel(plugin.state)}</span>
+          ) : null}
+          <label className="plugin-toggle" title="停用后它的工具、命令与钩子都不会注册；重开会话生效">
+            <Switch
+              checked={enabled}
+              disabled={!canToggle || busy}
+              label={`${enabled ? '停用' : '启用'}插件 ${plugin.name}`}
+              onChange={onToggleEnabled}
+            />
+            <span>{enabled ? '已启用' : '已停用'}</span>
+          </label>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function PluginBody({
   plugin,
   canSettings,
   onSaved,
@@ -228,57 +265,80 @@ function PluginDetail({
   onSaved(next: ConfigWebPluginsDetails): void;
 }) {
   return (
-    <div className="plugin-detail">
-      {plugin.description ? <p className="plugin-description">{plugin.description}</p> : null}
+    <>
+      {plugin.description ? <p className="plugin-detail-description">{plugin.description}</p> : null}
       {plugin.error ? <Alert message={plugin.error} /> : null}
       {plugin.health && plugin.health.level !== 'ok' ? (
         <div className={`plugin-health is-${plugin.health.level}`}>
           <span className="plugin-health-title">
-            {pluginHealthLabel(plugin.health.level)}
+            {pluginHealthLabel(plugin)}
             {plugin.health.at ? ` · ${formatHealthTime(plugin.health.at)}` : ''}
           </span>
           <span>{plugin.health.message}</span>
           {plugin.health.hint ? <span className="plugin-health-note">{plugin.health.hint}</span> : null}
         </div>
       ) : null}
+
       {plugin.settings.fields.length > 0 ? (
         <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
       ) : null}
-      <div className="plugin-section">
-        <span className="plugin-section-title">信息</span>
-        <dl className="plugin-facts">
-          <PluginFact label="标识" value={plugin.id} mono />
-          <PluginFact label="来源" value={pluginSourceLabel(plugin.source)} />
-          <PluginFact label="入口" value={plugin.entryFile || '—'} mono />
-          <PluginFact label="清单" value={plugin.manifestFile || '—'} mono />
-          <PluginFact
-            label="加载"
-            value={pluginLoadStatusLabel(plugin.loadStatus ?? (plugin.source === 'official' ? 'loaded' : 'unknown'))}
-          />
-          <PluginFact label="日志" value={plugin.logFile} mono />
-          {plugin.author ? <PluginFact label="作者" value={plugin.author} /> : null}
-        </dl>
-      </div>
-      <div className="plugin-section">
-        <span className="plugin-section-title">文件</span>
-        {plugin.files.length === 0 ? (
-          <span className="plugin-file-empty">没有可列出的文件</span>
-        ) : (
-          <ul className="plugin-file-list">
-            {plugin.files.map((file) => (
-              <li key={file.name}>
-                <span className="plugin-file-name" title={file.name}>
-                  {file.name}
-                </span>
-                <span className="plugin-file-size">
-                  {typeof file.sizeBytes === 'number' ? formatBytes(file.sizeBytes) : '内置'}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
+
+      <SettingsGroup title="信息" description="入口、清单与日志都在磁盘上，排查时按这些路径找">
+        <SettingRow label="标识">
+          <span className="setting-row-value is-mono">{plugin.id}</span>
+        </SettingRow>
+        <SettingRow label="加载">
+          <span className="setting-row-value">
+            {pluginLoadStatusLabel(plugin.loadStatus ?? (plugin.source === 'official' ? 'loaded' : 'unknown'))}
+          </span>
+        </SettingRow>
+        <SettingRow label="入口">
+          <span className="setting-row-value is-mono" title={plugin.entryFile || '—'}>
+            {plugin.entryFile || '—'}
+          </span>
+        </SettingRow>
+        <SettingRow label="清单">
+          <span className="setting-row-value is-mono" title={plugin.manifestFile || '—'}>
+            {plugin.manifestFile || '—'}
+          </span>
+        </SettingRow>
+        <SettingRow label="日志" hint="每个插件一份 JSONL，默认落在系统临时目录">
+          <span className="setting-row-value is-mono" title={plugin.logFile}>
+            {plugin.logFile}
+          </span>
+        </SettingRow>
+        {plugin.author ? (
+          <SettingRow label="作者">
+            <span className="setting-row-value">{plugin.author}</span>
+          </SettingRow>
+        ) : null}
+        <SettingRow
+          label={
+            <>
+              文件<span className="config-field-count">{plugin.files.length}</span>
+            </>
+          }
+        >
+          {plugin.files.length === 0 ? (
+            <span className="setting-row-value">没有可列出的文件</span>
+          ) : (
+            <ul className="plugin-file-list">
+              {plugin.files.map((file) => (
+                <li key={file.name}>
+                  <span className="plugin-file-name" title={file.name}>
+                    {file.name}
+                  </span>
+                  {/* 官方插件编译进产物、磁盘上没有文件，写「内置」一遍遍重复没有信息量 */}
+                  {typeof file.sizeBytes === 'number' ? (
+                    <span className="plugin-file-size">{formatBytes(file.sizeBytes)}</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </SettingRow>
+      </SettingsGroup>
+    </>
   );
 }
 
@@ -323,14 +383,14 @@ function PluginSettingsForm({
   }
 
   return (
-    <div className="plugin-section">
-      <div className="plugin-section-head">
-        <span className="plugin-section-title">设置</span>
-        <SaveStatus saving={autosave.saving} saved={autosave.status === 'saved'} />
-      </div>
+    <SettingsGroup
+      title="设置"
+      description="改动停下就写盘，插件的下一次读取即生效"
+      actions={<SaveStatus saving={autosave.saving} saved={autosave.status === 'saved'} />}
+    >
       {autosave.error && Object.keys(fieldErrors).length === 0 ? <Alert message={autosave.error} /> : null}
       {plugin.settings.issues.length > 0 ? (
-        <div className="plugin-health">
+        <div className="plugin-health is-warn">
           <span className="plugin-health-title">已保存的配置不完整，插件因此不会生效</span>
           {plugin.settings.issues.map((issue) => (
             <span key={issue.key}>
@@ -339,55 +399,30 @@ function PluginSettingsForm({
           ))}
         </div>
       ) : null}
-      <div className="plugin-settings">
-        {plugin.settings.fields.map((field) => (
-          <PluginSettingRow
-            key={field.key}
+      {plugin.settings.fields.map((field) => (
+        <SettingRow
+          key={field.key}
+          htmlFor={`plugin-setting-${field.key}`}
+          label={
+            <>
+              {field.label}
+              {field.required ? <span className="plugin-setting-required">必填</span> : null}
+            </>
+          }
+          hint={field.description}
+          error={fieldErrors[field.key]}
+          wide={field.type === 'textarea'}
+        >
+          <PluginSettingInput
             field={field}
             value={values[field.key] ?? ''}
             disabled={!canSave}
-            error={fieldErrors[field.key]}
+            invalid={Boolean(fieldErrors[field.key])}
             onChange={(next) => update(field.key, next)}
           />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * 一行设置：左边标签、右边控件、说明压在控件下面。
- *
- * 用两列栅格而不是「标签在上、控件在下」的堆叠：字段一多，堆叠会让标签、输入框、
- * 说明各占一行，滚动起来全是断点，也看不出哪段说明属于哪个输入框。
- */
-function PluginSettingRow({
-  field,
-  value,
-  disabled,
-  error,
-  onChange,
-}: {
-  field: ConfigWebPluginSetting;
-  value: string;
-  disabled: boolean;
-  error?: string;
-  onChange(next: string): void;
-}) {
-  return (
-    <div className="plugin-setting-row">
-      <label className="plugin-setting-label" htmlFor={`plugin-setting-${field.key}`}>
-        <span className="plugin-setting-name" title={field.label}>
-          {field.label}
-        </span>
-        {field.required ? <span className="plugin-setting-required">必填</span> : null}
-      </label>
-      <div className="plugin-setting-control">
-        <PluginSettingInput field={field} value={value} disabled={disabled} error={error} onChange={onChange} />
-        {error ? <span className="plugin-setting-error">{error}</span> : null}
-        {field.description ? <span className="plugin-setting-hint">{field.description}</span> : null}
-      </div>
-    </div>
+        </SettingRow>
+      ))}
+    </SettingsGroup>
   );
 }
 
@@ -395,13 +430,13 @@ function PluginSettingInput({
   field,
   value,
   disabled,
-  error,
+  invalid,
   onChange,
 }: {
   field: ConfigWebPluginSetting;
   value: string;
   disabled: boolean;
-  error?: string;
+  invalid: boolean;
   onChange(next: string): void;
 }) {
   const inputId = `plugin-setting-${field.key}`;
@@ -428,7 +463,7 @@ function PluginSettingInput({
     return (
       <textarea
         id={inputId}
-        className={`text-input text-input-multiline${error ? ' is-invalid' : ''}`}
+        className={`text-input text-input-multiline${invalid ? ' is-invalid' : ''}`}
         value={value}
         rows={4}
         spellCheck={false}
@@ -442,7 +477,7 @@ function PluginSettingInput({
   return (
     <input
       id={inputId}
-      className={`text-input${error ? ' is-invalid' : ''}`}
+      className={`text-input${invalid ? ' is-invalid' : ''}`}
       type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
       value={value}
       spellCheck={false}
@@ -454,15 +489,26 @@ function PluginSettingInput({
   );
 }
 
-function PluginFact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <>
-      <dt className="plugin-fact-label">{label}</dt>
-      <dd className="plugin-fact-value" title={value} data-mono={mono ? 'true' : undefined}>
-        {value}
-      </dd>
-    </>
+function filterPlugins(plugins: ConfigWebPlugin[], filter: string): ConfigWebPlugin[] {
+  const query = filter.trim().toLocaleLowerCase();
+  if (!query) return plugins;
+  return plugins.filter((plugin) =>
+    `${plugin.name} ${plugin.id} ${plugin.description ?? ''}`.toLocaleLowerCase().includes(query),
   );
+}
+
+function railMeta(plugin: ConfigWebPlugin): string {
+  const parts = [`v${plugin.version}`];
+  if (plugin.state !== 'enabled') parts.push(pluginStateLabel(plugin.state));
+  if (plugin.settings.fields.length > 0) parts.push('可设置');
+  return parts.join(' · ');
+}
+
+function pluginHealthLabel(plugin: ConfigWebPlugin): string {
+  if (plugin.state === 'failed') return '加载失败';
+  if (plugin.health?.level === 'error') return '出错';
+  if (plugin.health?.level === 'warn') return '待配置';
+  return plugin.state === 'enabled' ? '正常' : '已停用';
 }
 
 function formatBytes(bytes: number): string {
@@ -488,19 +534,6 @@ function parseSettingIssues(message: string): Record<string, string> {
     if (match) errors[match[1]] = match[2];
   }
   return errors;
-}
-
-function pluginHealthLabel(level: 'ok' | 'warn' | 'error'): string {
-  if (level === 'error') return '出错';
-  if (level === 'warn') return '待配置';
-  return '正常';
-}
-
-function pluginStateClass(state: ConfigWebPlugin['state']): string {
-  if (state === 'enabled') return 'is-on';
-  if (state === 'failed') return 'is-error';
-  if (state === 'disabled') return 'is-off';
-  return 'is-warn';
 }
 
 function formatHealthTime(iso: string): string {

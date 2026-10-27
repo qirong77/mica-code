@@ -25,6 +25,7 @@ import {
   setPluginEnabled as setPluginEnabledInStore,
   setPluginSettings as setPluginSettingsInStore
 } from '@mica-config-ui/plugins'
+import { readSessionHead, summarizeSessionFile } from '@mica-config-ui/session-head'
 // 内置 default role 与 CLI 同源：提示词模板就是 packages/mica-agent/prompt/system.md，
 // 展开品牌占位符后原样展示（只读），桌面宿主不自己留一份副本。
 import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?raw'
@@ -343,9 +344,8 @@ function loadSession(id) {
 }
 
 function readSessionTitle(path) {
-  const head = readFileSync(path, 'utf-8').slice(0, 4096)
-  const match = head.match(/"title"\s*:\s*("(?:\\.|[^"\\])*")/)
-  return match ? cleanSessionTitle(JSON.parse(match[1])) : undefined
+  const title = readSessionHead(path).title
+  return title === undefined ? undefined : cleanSessionTitle(title)
 }
 
 /**
@@ -369,9 +369,8 @@ function listRecentSessions() {
       const path = join(directory, entry.name)
       const id = basename(entry.name, '.json')
       try {
-        return [
-          { id, title: readSessionTitle(path) ?? id, updatedAt: statSync(path).mtime.toISOString() }
-        ]
+        const summary = summarizeSessionFile(path, id)
+        return [{ ...summary, title: cleanSessionTitle(summary.title) }]
       } catch {
         return []
       }

@@ -1,22 +1,11 @@
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { buildConfigWebConversationItems } from './conversation.js';
+import { summarizeSessionFile } from './sessionHead.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { getSkillsRootPath } from './paths.js';
 import type { McpServerConfig } from '@packages/mica-mcp/index.js';
@@ -274,24 +263,12 @@ function listRecentSessions(): ConfigWebSessionsDetails['sessions'] {
       const id = basename(entry.name, '.json');
       const path = join(micaSession.dir, entry.name);
       try {
-        return [{ id, title: readSessionTitle(path) ?? id, updatedAt: statSync(path).mtime.toISOString() }];
+        return [summarizeSessionFile(path, id)];
       } catch {
         return [];
       }
     })
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-}
-
-function readSessionTitle(path: string): string | undefined {
-  const handle = openSync(path, 'r');
-  try {
-    const buffer = Buffer.allocUnsafe(4096);
-    const length = readSync(handle, buffer, 0, buffer.length, 0);
-    const match = buffer.toString('utf-8', 0, length).match(/"title"\s*:\s*("(?:\\.|[^"\\])*")/);
-    return match ? (JSON.parse(match[1]) as string) : undefined;
-  } finally {
-    closeSync(handle);
-  }
 }
 
 function loadSessionCached(id: string): CachedEntry<PersistedSession> {

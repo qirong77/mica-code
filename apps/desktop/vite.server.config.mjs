@@ -36,6 +36,12 @@ export default defineConfig({
         find: '@mica-config-ui/plugins',
         replacement: resolve('../../packages/mica-config-ui/src/server/plugins.ts')
       },
+      // 会话列表行（标题 / cwd / 模型 / 状态）在两边是同一套解析：都只读文件头一个窗口，
+      // 不整份解析几 MB 的快照。
+      {
+        find: '@mica-config-ui/session-head',
+        replacement: resolve('../../packages/mica-config-ui/src/server/sessionHead.ts')
+      },
       { find: '@packages', replacement: resolve('../../packages') }
     ]
   },

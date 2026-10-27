@@ -372,6 +372,11 @@ export type ConfigWebSessionOption = {
   id: string;
   title: string;
   updatedAt: string;
+  /** 列表里用来区分同名会话：工作目录末两级、模型、状态各占一行信息。 */
+  cwd?: string;
+  model?: string;
+  turnState?: string;
+  sizeBytes?: number;
 };
 
 export type ConfigWebSessionsDetails = {

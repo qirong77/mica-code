@@ -1,10 +1,10 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { readSessionContent, readSessionDetails, readSessionsDetails, writeSession } from '../api.js';
 import { ContextPane } from '../components/ContextPane.js';
 import { ConversationPane } from '../components/ConversationPane.js';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, SaveStatus, Tag } from '../components/Ui.js';
+import { Alert, Button, Empty, SaveStatus, SplitView, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
 import { useAutoSave } from '../useAutoSave.js';
 import type {
@@ -15,6 +15,19 @@ import type {
 
 type SessionTab = 'conversation' | 'context' | 'json';
 
+const SESSION_TABS: { id: SessionTab; label: string }[] = [
+  { id: 'conversation', label: '对话记录' },
+  { id: 'context', label: 'Context 分析' },
+  { id: 'json', label: '原始文件' },
+];
+
+/**
+ * Sessions：左边一列会话、右边看选中的那一条。
+ *
+ * 以前是「顶部一个会话选择器下拉 + 下面一张摘要卡 + 一张视图卡」：选择器占掉一整行高度，
+ * 而真正要看的对话挤在第三块里滚动。列表放进左栏后，切换会话是一行一次点击，
+ * 竖排空间全给正文；摘要在详情头部收成一行，不再单独占一张卡。
+ */
 export function SessionsPage() {
   const [index, setIndex] = useState<ConfigWebSessionsDetails | null>(null);
   const [selectedId, setSelectedId] = useState('');
@@ -25,6 +38,7 @@ export function SessionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const [dataVersion, setDataVersion] = useState(0);
+  const [filter, setFilter] = useState('');
 
   // Raw JSON editor state is lifted here so tab switches do not lose edits.
   const [rawContent, setRawContent] = useState('');
@@ -39,6 +53,7 @@ export function SessionsPage() {
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
   const RefreshIcon = appIcons.refresh;
+  const SearchIcon = appIcons.search;
   // 半句 JSON 不写盘：本地先解析一遍，解析不过就只显示提示，等内容合法再落盘。
   const jsonError = useMemo(() => {
     if (!dirty) return null;
@@ -178,6 +193,8 @@ export function SessionsPage() {
   }, []);
 
   const paneKey = `${selectedId}:${version}`;
+  const sessions = index?.sessions ?? [];
+  const visibleSessions = useMemo(() => filterSessions(sessions, filter), [sessions, filter]);
 
   return (
     <PageFrame
@@ -199,298 +216,189 @@ export function SessionsPage() {
       {autoSave.error ? <Alert message={autoSave.error} /> : null}
       {loading && !index ? (
         <div className="page-loading">正在加载 Sessions…</div>
-      ) : !index ? null : index.sessions.length === 0 ? (
-        <Empty description="暂无 Session" />
+      ) : !index ? null : sessions.length === 0 ? (
+        <Empty description="还没有任何会话：跑一次对话就会出现在这里" />
       ) : (
-        <div className="session-layout">
-          <div className="session-toolbar simple-card">
-            <SessionPicker sessions={index.sessions} value={selectedId} onChange={selectSession} />
-          </div>
-
-          {sessionLoading && !header ? <div className="session-loading">正在加载 Session…</div> : null}
-          {header ? <SessionHeader session={header} /> : null}
-          {header ? (
-            <section className="simple-card session-tab-card">
-              <div className="session-tabs" role="tablist" aria-label="Session 视图">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === 'conversation'}
-                  className={`session-tab${tab === 'conversation' ? ' session-tab-active' : ''}`}
-                  onClick={() => setTab('conversation')}
-                >
-                  对话记录
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === 'context'}
-                  className={`session-tab${tab === 'context' ? ' session-tab-active' : ''}`}
-                  onClick={() => setTab('context')}
-                >
-                  Context 分析
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === 'json'}
-                  className={`session-tab${tab === 'json' ? ' session-tab-active' : ''}`}
-                  onClick={() => void openRawTab()}
-                >
-                  原始文件
-                  {dirty ? <span className="session-tab-dirty">●</span> : null}
-                </button>
-              </div>
-              <div className="session-tab-body">
-                {tab === 'conversation' ? (
-                  <ConversationPane key={paneKey} sessionId={header.id} refreshToken={dataVersion} />
-                ) : null}
-                {tab === 'context' ? (
-                  <ContextPane key={paneKey} sessionId={header.id} refreshToken={dataVersion} />
-                ) : null}
-                {tab === 'json' ? (
-                  <div className="editor-pane-header session-raw-header">
-                    <div>
-                      <h3>原始 JSON</h3>
-                      <p className="muted-text editor-pane-subtitle">{header.id}</p>
-                    </div>
-                    <div className="toolbar">
-                      {running ? <span className="muted-text">运行中，暂停写盘</span> : null}
-                      {jsonError && !running ? <Tag tone="red">JSON 未写完</Tag> : null}
-                      {dirty && !jsonError && !running ? <Tag tone="blue">待写入</Tag> : null}
-                    </div>
+        <div className="session-page">
+          <SplitView
+            rail={
+              <>
+                <div className="split-rail-head">
+                  <div className="split-rail-filter">
+                    <SearchIcon size={14} aria-hidden="true" />
+                    <input
+                      value={filter}
+                      type="search"
+                      aria-label="搜索会话"
+                      placeholder="搜索标题、目录或模型"
+                      onChange={(event) => setFilter(event.target.value)}
+                    />
                   </div>
-                ) : null}
-                {tab === 'json' ? (
-                  <div className="editor-host session-raw-editor">
-                    <JsonEditor value={rawContent} language="json" readOnly={running} onChange={editRawContent} />
-                  </div>
-                ) : null}
+                </div>
+                <div className="split-rail-list" role="listbox" aria-label="会话列表">
+                  {visibleSessions.length === 0 ? (
+                    <p className="split-rail-empty">没有匹配的会话</p>
+                  ) : (
+                    visibleSessions.map((item) => (
+                      <SessionRow
+                        key={item.id}
+                        session={item}
+                        active={item.id === selectedId}
+                        onSelect={() => void selectSession(item.id)}
+                      />
+                    ))
+                  )}
+                </div>
+              </>
+            }
+          >
+            {sessionLoading && !header ? (
+              <div className="page-loading">正在加载 Session…</div>
+            ) : header ? (
+              <div className="session-detail">
+                <SessionHead session={header} />
+                <div className="session-tabs" role="tablist" aria-label="Session 视图">
+                  {SESSION_TABS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={tab === item.id}
+                      className={`session-tab${tab === item.id ? ' session-tab-active' : ''}`}
+                      onClick={() => (item.id === 'json' ? void openRawTab() : setTab(item.id))}
+                    >
+                      {item.label}
+                      {item.id === 'json' && dirty ? <span className="session-tab-dirty">●</span> : null}
+                    </button>
+                  ))}
+                  <span className="session-tabs-tail">
+                    {tab === 'json' ? (
+                      <>
+                        {running ? <span className="muted-text">运行中，暂停写盘</span> : null}
+                        {jsonError && !running ? <Tag tone="red">JSON 未写完</Tag> : null}
+                        {dirty && !jsonError && !running ? <Tag tone="blue">待写入</Tag> : null}
+                      </>
+                    ) : null}
+                  </span>
+                </div>
+                <div className="session-tab-body">
+                  {tab === 'conversation' ? (
+                    <ConversationPane key={paneKey} sessionId={header.id} refreshToken={dataVersion} />
+                  ) : null}
+                  {tab === 'context' ? (
+                    <ContextPane key={paneKey} sessionId={header.id} refreshToken={dataVersion} />
+                  ) : null}
+                  {tab === 'json' ? (
+                    <div className="editor-host session-raw-editor">
+                      <JsonEditor value={rawContent} language="json" readOnly={running} onChange={editRawContent} />
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            </section>
-          ) : null}
+            ) : (
+              <div className="page-loading">正在加载 Session…</div>
+            )}
+          </SplitView>
         </div>
       )}
     </PageFrame>
   );
 }
 
-function SessionPicker({
-  sessions,
-  value,
-  onChange,
+function SessionRow({
+  session,
+  active,
+  onSelect,
 }: {
-  sessions: ConfigWebSessionOption[];
-  value: string;
-  onChange(value: string): void;
+  session: ConfigWebSessionOption;
+  active: boolean;
+  onSelect(): void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const rootRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const activeOptionRef = useRef<HTMLButtonElement>(null);
-  const listboxId = useId();
-  const selected = sessions.find((item) => item.id === value) ?? sessions[0];
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const filteredSessions = useMemo(() => {
-    if (!normalizedQuery) return sessions;
-    return sessions.filter((item) =>
-      `${item.title} ${item.id} ${formatDate(item.updatedAt)}`.toLocaleLowerCase().includes(normalizedQuery),
-    );
-  }, [normalizedQuery, sessions]);
-  const selectedIsVisible = filteredSessions.some((item) => item.id === value);
-  const CheckIcon = appIcons.check;
-  const ChevronDownIcon = appIcons.chevronDown;
-  const SearchIcon = appIcons.search;
-
-  useEffect(() => {
-    if (!open) return;
-
-    const focusFrame = requestAnimationFrame(() => {
-      searchRef.current?.focus();
-      activeOptionRef.current?.scrollIntoView({ block: 'nearest' });
-    });
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeWhenFocusLeaves = (event: FocusEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      setOpen(false);
-      rootRef.current?.querySelector<HTMLButtonElement>('.session-picker-trigger')?.focus();
-    };
-
-    document.addEventListener('pointerdown', closeOnOutsideClick);
-    document.addEventListener('focusin', closeWhenFocusLeaves);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      cancelAnimationFrame(focusFrame);
-      document.removeEventListener('pointerdown', closeOnOutsideClick);
-      document.removeEventListener('focusin', closeWhenFocusLeaves);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [open]);
-
-  function togglePicker() {
-    setOpen((current) => {
-      if (!current) setQuery('');
-      return !current;
-    });
-  }
-
-  function chooseSession(id: string) {
-    setOpen(false);
-    if (id !== value) onChange(id);
-    requestAnimationFrame(() => rootRef.current?.querySelector<HTMLButtonElement>('.session-picker-trigger')?.focus());
-  }
-
-  function focusFirstOption(event: ReactKeyboardEvent<HTMLInputElement>) {
-    if (event.key !== 'ArrowDown') return;
-    event.preventDefault();
-    rootRef.current?.querySelector<HTMLButtonElement>('.session-picker-option')?.focus();
-  }
-
-  function moveOptionFocus(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-    const options = Array.from(rootRef.current?.querySelectorAll<HTMLButtonElement>('.session-picker-option') ?? []);
-    if (options.length === 0) return;
-
-    event.preventDefault();
-    const currentIndex = options.indexOf(event.currentTarget);
-    const nextIndex =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? options.length - 1
-          : Math.max(0, Math.min(options.length - 1, currentIndex + (event.key === 'ArrowDown' ? 1 : -1)));
-    options[nextIndex]?.focus();
-  }
-
+  const state = presentStatus(session.turnState ?? '');
   return (
-    <div className="session-selector">
-      <span className="session-selector-label">Session</span>
-      <div className="session-picker" ref={rootRef}>
-        <button
-          className="session-picker-trigger"
-          type="button"
-          title={selected ? `${selected.title} · ${formatDate(selected.updatedAt)}` : undefined}
-          aria-haspopup="listbox"
-          aria-expanded={open}
-          aria-controls={open ? listboxId : undefined}
-          onClick={togglePicker}
-        >
-          <span className="session-picker-value">
-            <strong>{selected?.title ?? '选择 Session'}</strong>
-            {selected ? <span>{formatDate(selected.updatedAt)}</span> : null}
-          </span>
-          <ChevronDownIcon className="session-picker-chevron" size={16} aria-hidden="true" />
-        </button>
-
-        {open ? (
-          <div className="session-picker-popover">
-            <div className="session-picker-search">
-              <SearchIcon size={15} aria-hidden="true" />
-              <input
-                ref={searchRef}
-                value={query}
-                type="search"
-                aria-label="搜索 Session"
-                placeholder="搜索标题、ID 或时间"
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={focusFirstOption}
-              />
-              <span>{filteredSessions.length}</span>
-            </div>
-            <div className="session-picker-options" id={listboxId} role="listbox" aria-label="Session 列表">
-              {filteredSessions.length > 0 ? (
-                filteredSessions.map((item, index) => {
-                  const active = item.id === value;
-                  return (
-                    <button
-                      className={`session-picker-option ${active ? 'session-picker-option-active' : ''}`}
-                      key={item.id}
-                      type="button"
-                      ref={active ? activeOptionRef : undefined}
-                      role="option"
-                      aria-selected={active}
-                      tabIndex={active || (!selectedIsVisible && index === 0) ? 0 : -1}
-                      title={`${item.title}\n${item.id}`}
-                      onClick={() => chooseSession(item.id)}
-                      onKeyDown={moveOptionFocus}
-                    >
-                      <span className="session-picker-option-copy">
-                        <strong>{item.title}</strong>
-                        <span>{formatDate(item.updatedAt)}</span>
-                      </span>
-                      <span className="session-picker-check">
-                        {active ? <CheckIcon size={16} aria-hidden="true" /> : null}
-                      </span>
-                    </button>
-                  );
-                })
-              ) : (
-                <div className="session-picker-empty">没有匹配的 Session</div>
-              )}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
+    <button
+      type="button"
+      role="option"
+      aria-selected={active}
+      className={`split-item${active ? ' is-active' : ''}`}
+      title={`${session.title}\n${session.cwd ?? ''}\n${session.id}`}
+      onClick={onSelect}
+    >
+      <span className="split-item-copy">
+        <span className="split-item-title">{session.title}</span>
+        <span className="split-item-meta">{sessionMeta(session)}</span>
+      </span>
+      {state ? (
+        <span className="split-item-trailing">
+          <span className={`session-state-dot is-${state.tone}`} title={state.label} />
+        </span>
+      ) : null}
+    </button>
   );
 }
 
-function SessionHeader({ session }: { session: ConfigWebSessionDetails }) {
+/** 详情头部：标题 + 身份行 + 一行事实。摘要不再是单独一张卡，避免它比正文还抢眼。 */
+function SessionHead({ session }: { session: ConfigWebSessionDetails }) {
   const status = presentStatus(session.turnState);
   return (
-    <div className="session-summary simple-card">
-      <div className="session-summary-head">
-        <div className="session-summary-title">
-          <h3 title={session.title}>{session.title}</h3>
-          <span className="session-summary-id" title={session.id}>
-            {session.id}
-          </span>
-        </div>
-        <div className="toolbar">
-          <Tag tone={status.tone} dot>
-            {status.label}
-          </Tag>
-        </div>
+    <header className="session-detail-head">
+      <div className="session-detail-title">
+        <h2 title={session.title}>{session.title}</h2>
+        <Tag tone={status.tone} dot>
+          {status.label}
+        </Tag>
       </div>
-      <dl className="session-meta">
-        <MetaFact label="Working Directory" value={session.cwd} wide mono />
-        <MetaFact label="Model" value={`${session.providerId} · ${session.model}`} />
-        <MetaFact label="Role" value={session.role} />
-        <MetaFact label="Updated" value={formatDate(session.updatedAt)} />
+      <p className="session-detail-path" title={session.cwd}>
+        {shortenDir(session.cwd)}
+      </p>
+      <dl className="session-detail-facts">
+        <MetaFact label="模型" value={`${session.providerId} · ${session.model}`} />
+        <MetaFact label="角色" value={session.role} />
+        <MetaFact label="更新" value={formatDate(session.updatedAt)} />
         <MetaFact
-          label="File"
+          label="文件"
           value={`${formatBytes(session.fileSizeBytes)} · ${session.messageCount} 条消息 · ${session.usageCount} 条用量`}
         />
       </dl>
+    </header>
+  );
+}
+
+function MetaFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="session-detail-fact">
+      <dt>{label}</dt>
+      <dd title={value}>{value}</dd>
     </div>
   );
 }
 
-function MetaFact({
-  label,
-  value,
-  wide = false,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  wide?: boolean;
-  mono?: boolean;
-}) {
-  return (
-    <div className={`session-meta-fact${wide ? ' session-meta-wide' : ''}`}>
-      <dt>{label}</dt>
-      <dd className={mono ? 'session-meta-mono' : undefined} title={value}>
-        {value}
-      </dd>
-    </div>
+/** 列表行的第二行：目录末两级 · 模型。两者都没有时退回更新时间。 */
+function sessionMeta(session: ConfigWebSessionOption): string {
+  const parts = [tailDir(session.cwd), session.model].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(' · ') : formatDate(session.updatedAt);
+}
+
+function filterSessions(sessions: ConfigWebSessionOption[], filter: string): ConfigWebSessionOption[] {
+  const query = filter.trim().toLocaleLowerCase();
+  if (!query) return sessions;
+  return sessions.filter((session) =>
+    `${session.title} ${session.id} ${session.cwd ?? ''} ${session.model ?? ''}`.toLocaleLowerCase().includes(query),
   );
+}
+
+/** 目录末两级：面板里只需要认出「哪个项目」。 */
+function tailDir(cwd?: string): string | undefined {
+  if (!cwd) return undefined;
+  const parts = cwd.split(/[/\\]/).filter(Boolean);
+  if (parts.length === 0) return cwd;
+  return parts.slice(-2).join('/');
+}
+
+function shortenDir(cwd: string): string {
+  const parts = cwd.split(/[/\\]/).filter(Boolean);
+  if (parts.length <= 4) return cwd;
+  return `…/${parts.slice(-4).join('/')}`;
 }
 
 function formatDate(value: string): string {
@@ -518,6 +426,6 @@ function presentStatus(turnState: string): { tone: 'default' | 'green' | 'red' |
     case 'error':
       return { tone: 'red', label: '错误' };
     default:
-      return { tone: 'default', label: turnState };
+      return { tone: 'default', label: turnState || '未知' };
   }
 }

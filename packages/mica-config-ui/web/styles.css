@@ -49,6 +49,10 @@
   --radius-md: calc(var(--radius-scalar) * 0.625rem); /* 3px */
   --radius-lg: calc(var(--radius-scalar) * 0.75rem); /* 3.6px */
   --radius-xl: calc(var(--radius-scalar) * 1rem); /* 4.8px */
+
+  /* 单行控件（输入框 / 分段按钮 / 行内小按钮）共用这一个高度。
+     一处改动就同步整页：同桌摆放的控件高度不一致，读起来就是没对齐。 */
+  --control-h: 30px;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -276,7 +280,7 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    padding: 22px 28px 28px;
+    padding: 20px 28px 24px;
     background: var(--bg);
   }
 
@@ -289,37 +293,45 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    gap: 18px;
+    gap: 0;
   }
 
-  .page-hero {
+  /* 页头是一条固定的窄栏：标题与位置行贴在一起，下面一条发丝线把内容区和它分开。
+     以前标题、路径、操作各占一行，页头能吃掉 70px，内容区还没开始就只有半屏。 */
+  .page-head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 16px;
+    padding: 0 2px 12px;
+    border-bottom: 1px solid var(--line-soft);
   }
 
-  .page-hero-copy {
+  .page-head-copy {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
     min-width: 0;
   }
 
-  .page-title-row h1 {
+  .page-head-copy h1 {
+    flex: none;
     margin: 0;
-    font-size: var(--text-heading);
+    font-size: var(--text-title);
     font-weight: 650;
-    line-height: 1.25;
+    line-height: 1.3;
     letter-spacing: -0.01em;
   }
 
   .page-path {
     display: flex;
     align-items: baseline;
-    margin: 8px 0 0;
+    margin: 0;
     min-width: 0;
     color: var(--text-faint);
     font-family: var(--font-mono);
-    font-size: 11.5px;
-    line-height: 1.5;
+    font-size: 11px;
+    line-height: 1.4;
     /* 路径只占一行：目录在中途省略，文件名永远露在最后（见 PageFrame 的 PagePath） */
     white-space: nowrap;
   }
@@ -342,7 +354,7 @@
     text-overflow: ellipsis;
   }
 
-  .page-hero-actions,
+  .page-head-actions,
   .toolbar,
   .table-panel-tags,
   .table-tags {
@@ -358,11 +370,16 @@
     overflow: auto;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
+    padding-top: 16px;
+    /* 页面宽度由宿主决定：桌面端把设置页挤在中间一列里，视口可能很宽而内容只有 ~700px。
+       双栏与标签列因此按容器宽度折叠，而不是按视口。 */
+    container-type: inline-size;
+    container-name: page;
   }
 
   .ui-button {
     min-width: 32px;
-    height: 30px;
+    height: var(--control-h);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -649,6 +666,340 @@
     gap: 4px;
   }
 
+  /* ---- 设置分组：一块面 + 若干「标签 / 控件」行 -------------------------- */
+  /* 组是一块面，行只有分隔线。以前的写法把每个字段都包成卡片，页面读起来像一堆
+     等高的方块：分不出哪些字段属于同一件事，也看不出谁是重点。 */
+  .settings-group {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+  }
+
+  .settings-group-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 13px 16px 12px;
+  }
+
+  .settings-group-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .settings-group-copy h2 {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--text-body);
+    font-weight: 600;
+    letter-spacing: 0.005em;
+    line-height: 1.4;
+  }
+
+  .settings-group-copy p {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+  }
+
+  .settings-group-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .settings-group-body {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  /* 分组里直接放的提示条（配置不完整、保存失败）：与行内容左右对齐，别贴着边框。 */
+  .settings-group > .plugin-health,
+  .settings-group > .ui-alert {
+    margin: 0 16px 12px;
+  }
+
+  .setting-row {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    align-items: start;
+    gap: 8px 18px;
+    padding: 10px 16px;
+  }
+
+  .setting-row + .setting-row {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .setting-row.is-wide {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .setting-row-label {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    /* 与控件第一行文字对齐：标签块自带 3px 上边距，输入框才不会显得比标签高半行 */
+    padding-top: 6px;
+  }
+
+  .setting-row.is-wide .setting-row-label {
+    padding-top: 0;
+    gap: 3px;
+  }
+
+  .setting-row-name {
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+    font-weight: 500;
+    line-height: 1.45;
+  }
+
+  .setting-row-hint {
+    color: var(--text-faint);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+
+  .setting-row-control {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  /* 行内的单行输入不收满整行：分组有一千像素宽时，一个地址框铺到底会读成搜索栏。
+     多行文本要占满，数字框按内容长度收窄。 */
+  .setting-row-control .text-input:not(.text-input-multiline) {
+    max-width: 420px;
+  }
+
+  .setting-row-control .text-input[type='number'] {
+    max-width: 140px;
+  }
+
+  .setting-row-error {
+    color: var(--red);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+
+  /* ---- 左列表 / 右详情 --------------------------------------------------- */
+  .split-view {
+    display: grid;
+    grid-template-columns: 264px minmax(0, 1fr);
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+  }
+
+  /* 列表栏压暗一档（复用画布色），详情面才显得是「被选中的那一块」，不用再加一层边框。 */
+  .split-rail {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--line);
+    background: var(--bg);
+  }
+
+  .split-rail-head {
+    display: grid;
+    gap: 8px;
+    padding: 10px 10px 9px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .split-rail-filter {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .split-rail-filter > svg {
+    position: absolute;
+    left: 8px;
+    color: var(--text-faint);
+    pointer-events: none;
+  }
+
+  .split-rail-filter input {
+    width: 100%;
+    height: 28px;
+    padding: 0 8px 0 27px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--panel);
+    color: var(--text);
+    font-size: var(--text-aux);
+  }
+
+  .split-rail-filter input::placeholder {
+    color: var(--text-faint);
+  }
+
+  .split-rail-filter input:focus-visible {
+    border-color: var(--line-strong);
+    outline: none;
+  }
+
+  .split-rail-group {
+    padding: 10px 10px 3px;
+    color: var(--text-faint);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .split-rail-list {
+    display: grid;
+    gap: 1px;
+    align-content: start;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 6px;
+  }
+
+  .split-rail-empty {
+    padding: 16px 10px;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+  }
+
+  .split-item {
+    display: grid;
+    /* 按钮默认按内容宽度收缩（表单控件的 width: auto 等价于 fit-content），
+       不写满一行的话，选中态的底色框只包住文字，看起来像没对齐的标签。 */
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 2px 8px;
+    padding: 7px 9px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-soft);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background 90ms ease,
+      border-color 90ms ease,
+      color 90ms ease;
+  }
+
+  .split-item:hover {
+    background: var(--panel);
+    color: var(--text);
+  }
+
+  /* 选中态靠底色 + 描边，不用左侧竖条：那条读起来像编辑器 gutter。 */
+  .split-item.is-active {
+    border-color: var(--line);
+    background: var(--panel-muted);
+    color: var(--text);
+  }
+
+  .split-item-copy {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .split-item-title {
+    overflow: hidden;
+    color: inherit;
+    font-size: var(--text-aux);
+    font-weight: 500;
+    line-height: 1.45;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .split-item.is-active .split-item-title {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .split-item-meta {
+    overflow: hidden;
+    color: var(--text-faint);
+    font-size: 11px;
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .split-item-trailing {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-faint);
+  }
+
+  .split-main {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .split-main-scroll {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* 内容区变窄（窗口窄，或桌面端把它挤在中间一列）：左右两栏上下叠，列表压成一段可滚区域。 */
+  @container page (max-width: 860px) {
+    .split-view {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+      height: auto;
+      min-height: 100%;
+    }
+
+    .split-rail {
+      max-height: 240px;
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .split-main {
+      min-height: 420px;
+    }
+
+    /* 标签列在窄容器里会把控件压成一条缝，改成上下排。 */
+    .setting-row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+    }
+
+    .setting-row-label {
+      padding-top: 0;
+    }
+
+    /* 上下排时「值 + 跳转」靠左接在标签下面：仍然右对齐会甩到一行之外的末端。 */
+    .setting-row-inline {
+      justify-content: flex-start;
+      min-height: 0;
+    }
+  }
+
   .table-panel-title strong,
   .tool-item strong,
   .simple-row strong {
@@ -775,304 +1126,106 @@
     text-align: center;
   }
 
-  .session-layout {
+  /* Sessions：整页就是一块双栏（左列表 / 右详情），高度吃满，正文自己滚。 */
+  .session-page {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .session-detail {
     display: grid;
-    gap: 16px;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    min-height: 0;
   }
 
-  /* 会话切换条：只承载选择器，压到最薄，别和下面的摘要卡抢注意力 */
-  .session-toolbar {
-    display: block;
-    padding: 8px 10px;
-  }
-
-  .session-selector {
+  /* 详情头部：标题 + 状态、目录、一行事实。压成 3 行，把篇幅留给对话。 */
+  .session-detail-head {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    min-width: 0;
-    align-items: center;
-    gap: 10px;
+    gap: 4px;
+    padding: 12px 16px 11px;
+    border-bottom: 1px solid var(--line-soft);
   }
 
-  .session-selector-label {
-    padding-left: 2px;
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .session-picker {
-    position: relative;
-    min-width: 0;
-  }
-
-  .session-picker-trigger {
-    width: 100%;
-    height: 34px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 10px;
-    padding: 0 9px;
-    border: 1px solid var(--line-soft);
-    border-radius: 4px;
-    outline: none;
-    background: var(--panel-muted);
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .session-picker-trigger:hover {
-    border-color: var(--line);
-    background: var(--panel-hover);
-  }
-
-  .session-picker-trigger:focus-visible,
-  .session-picker-search:focus-within {
-    border-color: var(--line-strong);
-    box-shadow: 0 0 0 2px rgb(255 255 255 / 7%);
-  }
-
-  .session-picker-value {
-    min-width: 0;
+  .session-detail-title {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-
-  .session-picker-value strong,
-  .session-picker-value > span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .session-picker-value strong {
-    min-width: 0;
-    color: var(--text);
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .session-picker-value > span {
-    flex: 0 0 auto;
-    margin-left: auto;
-    padding-left: 10px;
-    color: var(--text-faint);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .session-picker-chevron {
-    flex: 0 0 auto;
-    color: var(--text-faint);
-    transition: transform 160ms ease;
-  }
-
-  .session-picker-trigger[aria-expanded='true'] .session-picker-chevron {
-    transform: rotate(180deg);
-  }
-
-  .session-picker-popover {
-    position: absolute;
-    z-index: 30;
-    top: calc(100% + 6px);
-    right: 0;
-    left: 0;
-    min-width: 320px;
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    background: var(--panel);
-    box-shadow: 0 12px 32px rgb(0 0 0 / 50%);
-  }
-
-  .session-picker-search {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 8px;
-    margin: 8px;
-    padding: 0 10px;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    color: var(--text-faint);
-  }
-
-  .session-picker-search input {
-    width: 100%;
-    height: 34px;
-    min-width: 0;
-    padding: 0;
-    border: 0;
-    outline: 0;
-    background: transparent;
-    color: var(--text);
-    font-size: 13px;
-  }
-
-  .session-picker-search > span {
-    min-width: 22px;
-    padding: 2px 6px;
-    border-radius: 999px;
-    background: var(--panel-muted);
-    color: var(--text-faint);
-    font-size: 11px;
-    text-align: center;
-  }
-
-  .session-picker-options {
-    max-height: min(360px, calc(100dvh - 260px));
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 0 8px 8px;
-    scrollbar-gutter: stable;
-  }
-
-  .session-picker-option {
-    width: 100%;
-    min-height: 52px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 20px;
     align-items: center;
     gap: 10px;
-    padding: 7px 10px;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .session-picker-option:hover,
-  .session-picker-option:focus-visible,
-  .session-picker-option-active {
-    border-color: var(--line);
-    outline: none;
-    background: var(--panel-muted);
-  }
-
-  .session-picker-option-active {
-    border-color: color-mix(in srgb, var(--blue) 40%, transparent);
-    background: color-mix(in srgb, var(--blue) 10%, transparent);
-  }
-
-  .session-picker-option-copy {
-    min-width: 0;
-    display: grid;
-    gap: 3px;
-  }
-
-  .session-picker-option-copy strong {
-    overflow: hidden;
-    font-size: 13px;
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .session-picker-option-copy > span {
-    color: var(--text-faint);
-    font-size: 11px;
-  }
-
-  .session-picker-check {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--blue);
-  }
-
-  .session-picker-empty {
-    padding: 28px 12px;
-    color: var(--text-faint);
-    font-size: 13px;
-    text-align: center;
-  }
-
-  .session-summary {
-    display: grid;
-    gap: 16px;
-    padding: 14px 16px;
-  }
-
-  .session-summary-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .session-summary-title {
-    display: grid;
-    gap: 5px;
     min-width: 0;
   }
 
-  .session-summary-title h3 {
+  .session-detail-title h2 {
+    min-width: 0;
     overflow: hidden;
     margin: 0;
     color: var(--text);
-    font-size: var(--text-title);
-    font-weight: 650;
-    line-height: 1.35;
+    font-size: var(--text-subhead);
+    font-weight: 600;
+    line-height: 1.4;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .session-summary-id {
+  .session-detail-path {
+    margin: 0;
     overflow: hidden;
     color: var(--text-faint);
     font-family: var(--font-mono);
-    font-size: var(--text-micro);
+    font-size: 11px;
+    line-height: 1.5;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  /* 摘要用的定义网格：标签在值上方，行间只留发丝分隔线，长路径自己换行 */
-  .session-meta {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0;
-    margin: 0;
+  /* 事实行：标签压在值上方，四项排一行；长模型名自己省略，不撑破头部。 */
+  .session-detail-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 24px;
+    margin: 4px 0 0;
   }
 
-  .session-meta-fact {
+  .session-detail-fact {
     display: grid;
-    align-content: start;
-    gap: 3px;
+    gap: 1px;
     min-width: 0;
-    padding: 11px 16px 11px 0;
-    border-top: 1px solid var(--line-soft);
+    max-width: 320px;
   }
 
-  .session-meta-wide {
-    grid-column: 1 / -1;
-  }
-
-  .session-meta dt {
+  .session-detail-fact dt {
     color: var(--text-faint);
-    font-size: var(--text-micro);
-    font-weight: 600;
-    letter-spacing: 0.06em;
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
   }
 
-  .session-meta dd {
+  .session-detail-fact dd {
     margin: 0;
-    color: var(--text);
+    overflow: hidden;
+    color: var(--text-soft);
     font-size: var(--text-aux);
-    line-height: 1.55;
-    overflow-wrap: anywhere;
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .session-meta-mono {
-    font-family: var(--font-mono);
-    font-size: 12px;
+  /* 列表行的状态点：一行只留一个颜色信号，文字说明留给详情头部。 */
+  .session-state-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--text-faint);
+  }
+
+  .session-state-dot.is-green {
+    background: var(--green);
+  }
+
+  .session-state-dot.is-blue {
+    background: var(--blue);
+  }
+
+  .session-state-dot.is-red {
+    background: var(--red);
   }
 
   .role-layout {
@@ -1945,15 +2098,12 @@
       padding: 16px;
     }
 
-    .page-hero,
+    .page-head,
     .collapsible-summary,
     .simple-row {
       grid-template-columns: 1fr;
       flex-direction: column;
-    }
-
-    .page-title-row h1 {
-      font-size: var(--text-heading);
+      align-items: flex-start;
     }
 
     .editor-host-large {
@@ -1976,23 +2126,6 @@
 
     .role-editor-host {
       min-height: 360px;
-    }
-
-    .session-selector {
-      grid-template-columns: 1fr;
-      gap: 5px;
-    }
-
-    .session-picker-popover {
-      min-width: 0;
-    }
-
-    .session-summary {
-      padding: 12px 14px;
-    }
-
-    .session-meta {
-      grid-template-columns: minmax(0, 1fr);
     }
 
     .control-fact {
@@ -2244,31 +2377,12 @@
     display: none;
   }
 
-  .session-raw-card {
-    overflow: hidden;
-  }
-
-  .session-raw-header {
-    min-height: 58px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--line);
-  }
-
+  /* 原始文件编辑器吃满详情区剩下的高度：上下都不留白，滚动交给编辑器自己。 */
   .session-raw-editor {
-    height: 480px;
+    height: 100%;
+    min-height: 320px;
     border: 0;
     border-radius: 0;
-  }
-
-  @media (max-width: 720px) {
-    .session-raw-header {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
-    .session-raw-editor {
-      height: 420px;
-    }
   }
 
   .form-grid {
@@ -2290,15 +2404,18 @@
 
   .text-input {
     width: 100%;
-    height: 38px;
+    /* 输入框是「凹进去」的控件：底色比所在分组暗一档，描边只做边界。
+       之前用 panel-muted（比卡片亮），整行读起来像一块浮起来的亮斑。 */
+    height: var(--control-h);
     box-sizing: border-box;
-    background: var(--panel-muted);
+    background: var(--bg);
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
     color: var(--text);
-    padding: 0 11px;
-    font-size: 13px;
+    padding: 0 9px;
+    font-size: var(--text-body);
     font-family: inherit;
+    line-height: normal;
     outline: none;
     transition:
       border-color 100ms ease,
@@ -2306,14 +2423,37 @@
       box-shadow 100ms ease;
   }
 
+  .text-input:hover:not(:disabled) {
+    border-color: var(--line-strong);
+  }
+
+  .text-input:disabled {
+    color: var(--text-faint);
+    cursor: default;
+  }
+
   .text-input::placeholder {
     color: var(--text-faint);
   }
 
   .text-input:focus {
-    border-color: var(--line-strong);
-    background: var(--panel);
-    box-shadow: 0 0 0 2px rgb(255 255 255 / 7%);
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+
+  /* 多行文本：高度交给内容，行距放宽，横向不拉伸。
+     没有这条规则时 textarea 会继承 .text-input 的 height: 38px 与 padding: 0 9px，
+     四行内容挤在一条 38px 的缝里溢出，右下角还露着浏览器默认的拖拽三角。 */
+  .text-input-multiline {
+    height: auto;
+    min-height: 84px;
+    max-height: 260px;
+    padding: 7px 9px;
+    line-height: 1.6;
+    /* 高度跟着内容长：深色主题下浏览器原生的拖拽三角是一块白，看着像渲染错误；
+       换成 field-sizing 之后不需要手柄（不支持的浏览器退回 rows 给出的高度）。 */
+    field-sizing: content;
+    resize: none;
   }
 
   .machine-list {
@@ -2418,17 +2558,24 @@
 
   /* Sessions page tabs */
 
-  .session-tab-card {
-    overflow: hidden;
-  }
-
   .session-tabs {
     display: flex;
+    align-items: center;
     gap: 20px;
     overflow-x: auto;
     overscroll-behavior-x: contain;
     padding: 0 16px;
     border-bottom: 1px solid var(--line);
+  }
+
+  /* 标签行右端的状态（暂停写盘 / JSON 未写完）：跟标签同一条线，不另占一行。 */
+  .session-tabs-tail {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
   }
 
   .session-tab {
@@ -2477,7 +2624,10 @@
   }
 
   .session-tab-body {
-    padding: 14px;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 14px 16px 16px;
   }
 
   /* 标签页本身已是一张卡，里面的分区不要再套一层边框（双层描边看起来像没对齐的嵌套卡片）。 */
@@ -3286,21 +3436,9 @@
   }
 
   /* 规则说明分条：整段长文本读起来像免责声明，拆成三条才扫得动 */
-  .auto-compact-rules,
-  .config-rules {
+  .auto-compact-rules {
     flex: 1 1 260px;
     min-width: 0;
-  }
-
-  /* 卡片里只有一组字段时，说明文字铺满整张卡片宽度会读成长句，收到一行的阅读宽度 */
-  .config-rules {
-    max-width: 520px;
-  }
-
-  /* 单字段卡片（SearXNG 地址）：输入框按内容长度收窄，铺满整卡看着像搜索框 */
-  .config-card > .form-field > .text-input,
-  .config-card > .form-field > .config-input-with-action {
-    max-width: 520px;
   }
 
   /*
@@ -3308,7 +3446,6 @@
    * 留下的空白缩进，正文比同级标题右移一截。符号改成 ::before 自己画，正文从符号列起排。
    */
   .auto-compact-rules,
-  .config-rules,
   .control-steps {
     display: grid;
     gap: 4px;
@@ -3321,7 +3458,6 @@
   }
 
   .auto-compact-rules > li,
-  .config-rules > li,
   .control-steps > li {
     display: grid;
     grid-template-columns: 10px minmax(0, 1fr);
@@ -3330,7 +3466,6 @@
   }
 
   .auto-compact-rules > li::before,
-  .config-rules > li::before,
   .control-steps > li::before {
     content: '•';
     color: var(--text-faint);
@@ -3393,72 +3528,102 @@
   }
 
   /* Config：按字段编辑 config.json（providers / searxngUrl），整份 JSON 收在折叠面板里 */
-  .config-stack {
+  .config-page {
     display: grid;
     align-content: start;
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .config-page-body {
+    display: grid;
+    align-content: start;
+    /* 组与组之间留 16px：同一页里不再出现「卡片 / 卡片 / 卡片」的等距方块 */
     gap: 16px;
+    padding-bottom: 8px;
   }
 
-  .config-card {
-    display: grid;
-    gap: 14px;
-    padding: 18px;
+  .settings-empty {
+    margin: 0;
+    padding: 16px;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.5;
   }
 
-  .config-provider-list {
-    display: grid;
-    gap: 10px;
+  /* 只读事实行（其他页面管理、其他字段）：值与跳转按钮同排，值可以省略 */
+  .setting-row-inline {
+    display: flex;
+    align-items: center;
+    /* 值与跳转都靠右：中间那段空白只会让它们看起来不属于同一行。 */
+    justify-content: flex-end;
+    gap: 12px;
+    min-width: 0;
+    min-height: 30px;
   }
 
-  /* 卡片里的空态不需要自己再画一圈边框，也不用 240px 那么高 */
-  .config-card > .ui-empty-wrap {
-    min-height: 120px;
-    border: 0;
-    background: transparent;
+  .setting-row-value {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: var(--text-body);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .setting-row-value.is-mono {
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: var(--text-aux);
+  }
+
+  /* 只读事实行背后的配置键：小一号的等宽标签，说明这一行写在 config.json 的哪个键上。 */
+  .setting-row-key {
+    flex: none;
+    padding: 0 5px;
+    border-radius: var(--radius-sm);
+    background: var(--panel-muted);
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    line-height: 17px;
   }
 
   /*
-   * 服务商行：折叠时是卡片里一块「浮起的行」（比卡片底色亮一档），展开后回落到卡片底色，
-   * 好让展开体里的输入框（panel-muted）重新变成最亮的一层。以前两种状态都画在比卡片更暗的
-   * 底色上，看起来像卡片里挖了个坑，再套一层边框就变成框套框。
+   * 服务商行：分组里的一个条目，不是卡片里的卡片。
+   *
+   * 折叠态就是分组里的一行（名称 / 协议 / 地址摘要）；展开后在同一个分组里接上字段行。
+   * 以前它在卡片里再套一层带边框的方块，展开后又是一层边框，读起来像框套框。
    */
-  .config-provider {
+  .provider-row {
     display: grid;
-    gap: 0;
-    border: 1px solid var(--line-soft);
-    border-radius: var(--radius-md);
-    background: var(--panel-muted);
-    transition:
-      background 120ms ease,
-      border-color 120ms ease;
   }
 
-  .config-provider.is-open {
-    border-color: var(--line);
-    background: var(--panel);
+  .provider-row + .provider-row {
+    border-top: 1px solid var(--line-soft);
   }
 
-  .config-provider:not(.is-open):hover {
-    border-color: var(--line-strong);
+  .provider-row.is-open {
+    background: color-mix(in srgb, var(--panel-muted) 45%, transparent);
   }
 
-  .config-provider-head {
+  .provider-row-head {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
     padding: 0 8px 0 0;
   }
 
   /* 整条标题栏都是折叠热区；删除按钮留在外面，避免误触收起 */
-  .config-provider-toggle {
+  .provider-row-toggle {
     display: flex;
     flex: 1 1 auto;
     align-items: center;
     gap: 8px;
     min-width: 0;
-    height: 42px;
-    padding: 0 4px 0 10px;
+    height: 38px;
+    padding: 0 4px 0 14px;
     border: 0;
     background: transparent;
     color: inherit;
@@ -3467,17 +3632,23 @@
     cursor: pointer;
   }
 
-  .config-provider-chevron {
+  .provider-row-chevron {
     flex: none;
     color: var(--text-faint);
-    transition: transform 120ms ease;
+    transition:
+      transform 120ms ease,
+      color 100ms ease;
   }
 
-  .config-provider.is-open .config-provider-chevron {
+  .provider-row-toggle:hover .provider-row-chevron {
+    color: var(--text-soft);
+  }
+
+  .provider-row.is-open .provider-row-chevron {
     transform: rotate(90deg);
   }
 
-  .config-provider-title {
+  .provider-row-name {
     flex: none;
     min-width: 0;
     max-width: 40%;
@@ -3489,68 +3660,51 @@
     text-overflow: ellipsis;
   }
 
-  .config-provider-protocol {
+  .provider-row-protocol {
     flex: none;
-    padding: 1px 6px;
-    /* 行底色比卡片亮一档：沿用 --line 会变成一条暗槽，改用比底色略亮的细边 */
+    padding: 0 5px;
     border: 1px solid color-mix(in srgb, var(--text-faint) 32%, transparent);
     border-radius: var(--radius-sm);
     color: var(--text-soft);
     font-family: var(--font-mono);
     font-size: var(--text-micro);
-    line-height: 16px;
+    line-height: 15px;
   }
 
   /* 折叠时的摘要：地址可能很长，只能在这里省略 */
-  .config-provider-meta {
+  .provider-row-meta {
     min-width: 0;
     flex: 1 1 auto;
     overflow: hidden;
-    color: var(--text-soft);
+    color: var(--text-faint);
     font-family: var(--font-mono);
     font-size: var(--text-micro);
     white-space: nowrap;
     text-overflow: ellipsis;
   }
 
-  .config-provider-flag {
+  .provider-row-flag {
     flex: none;
-    padding: 1px 6px;
+    padding: 0 6px;
     border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
     border-radius: var(--radius-sm);
     color: var(--red);
     font-size: var(--text-micro);
-    line-height: 16px;
+    line-height: 15px;
   }
 
-  /* 展开体：顶部一条分隔线，字段之间 10px，比卡片之间的 12px 更紧 */
-  .config-provider-body {
-    display: grid;
-    gap: 10px;
-    padding: 12px;
+  /* 展开体：字段行与上面的标题行左边对齐（多让出 14px 给标题的箭头位） */
+  .provider-row-body {
+    padding-left: 14px;
     border-top: 1px solid var(--line-soft);
-  }
-
-  /* 服务商卡片里的输入框比全局矮一档：一个卡片有 6 组字段，38px 会把卡片拉得很长 */
-  .config-provider .text-input {
-    height: 34px;
-  }
-
-  .config-provider .form-field {
-    gap: 6px;
-  }
-
-  .config-provider-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 10px;
-    align-items: start;
   }
 
   /* 输入框右侧叠一个图标按钮（API Key 的明文开关）：外框高度由 text-input 决定 */
   .config-input-with-action {
     position: relative;
     display: block;
+    /* 跟着行内输入框一起收窄，否则明文按钮会跑到分组最右边、离输入框半个屏幕。 */
+    max-width: 420px;
   }
 
   .config-input-with-action > .text-input {
@@ -3563,8 +3717,8 @@
     right: 4px;
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     padding: 0;
     border: 0;
     border-radius: var(--radius-sm);
@@ -3588,16 +3742,16 @@
     box-sizing: border-box;
     gap: 2px;
     justify-self: start;
-    /* 与卡片里的 text-input 等高，同一行里才不会有落差 */
-    height: 34px;
+    /* 与设置行里的 text-input 等高，同一行里才不会有落差 */
+    height: var(--control-h);
     padding: 2px;
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
-    background: var(--panel-muted);
+    background: var(--bg);
   }
 
   .config-segment {
-    height: 28px;
+    height: calc(var(--control-h) - 6px);
     padding: 0 12px;
     border: 0;
     border-radius: var(--radius-sm);
@@ -3617,7 +3771,7 @@
   }
 
   .config-segment.is-active {
-    background: var(--panel);
+    background: var(--panel-muted);
     color: var(--text);
   }
 
@@ -3679,25 +3833,24 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-top: 2px;
-    /* 不加限制时输入框会横到卡片另一头，看起来像主输入框 */
+    /* 不加限制时输入框会横到分组另一头，看起来像主输入框 */
     max-width: 420px;
   }
 
   .config-chip-add > .ui-button {
     flex: none;
-    /* 与同一行的输入框等高（服务商卡片里输入框是 34px） */
-    height: 34px;
+    /* 与同一行的输入框等高 */
+    height: var(--control-h);
     white-space: nowrap;
   }
 
-  /* input 的 intrinsic 宽度会把这一行撑出卡片，靠 min-width: 0 才真的能收缩 */
+  /* input 的 intrinsic 宽度会把这一行撑出分组，靠 min-width: 0 才真的能收缩 */
   .config-chip-add > .text-input {
     min-width: 0;
     flex: 1 1 auto;
   }
 
-  /* 字段名后面的数量：小一号，跟在标题行里不额外占高度 */
+  /* 字段名后面的数量：小一号，跟在标签行里不额外占高度 */
   .config-field-count {
     margin-left: 6px;
     padding: 0 5px;
@@ -3724,11 +3877,11 @@
 
   /* 窄屏：标题行只留名称和协议，地址摘要没地方放，挤一起会两边都被裁掉 */
   @media (max-width: 720px) {
-    .config-provider-meta {
+    .provider-row-meta {
       display: none;
     }
 
-    .config-provider-title {
+    .provider-row-name {
       max-width: none;
     }
   }
@@ -3737,90 +3890,6 @@
   .text-input-invalid:focus {
     border-color: color-mix(in srgb, var(--red) 55%, var(--line));
     background: color-mix(in srgb, var(--red) 8%, var(--panel-muted));
-  }
-
-  .config-managed-list {
-    display: grid;
-  }
-
-  .config-managed-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px 12px;
-    padding: 10px 0;
-    border-top: 1px solid var(--line-soft);
-  }
-
-  .config-managed-row:first-child {
-    padding-top: 0;
-    border-top: 0;
-  }
-
-  .config-managed-copy {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .config-managed-name {
-    color: var(--text);
-    font-size: var(--text-body);
-    font-weight: 500;
-  }
-
-  .config-managed-desc {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 6px;
-    min-width: 0;
-    color: var(--text-faint);
-    font-size: var(--text-aux);
-    line-height: 1.5;
-  }
-
-  /* 描述里点出这个字段实际写在 config.json 的哪个键上，避免「写在 xxx」这种散文句 */
-  .config-managed-key {
-    padding: 0 5px;
-    border-radius: var(--radius-sm);
-    background: var(--panel-muted);
-    color: var(--text-soft);
-    font-family: var(--font-mono);
-    font-size: var(--text-micro);
-  }
-
-  .config-extra-list {
-    display: grid;
-    gap: 6px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .config-extra-row {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    min-width: 0;
-  }
-
-  .config-extra-key {
-    flex: none;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-  }
-
-  .config-extra-value {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-    white-space: nowrap;
-    text-overflow: ellipsis;
   }
 
   .config-json-host {
@@ -4076,118 +4145,144 @@
     transform: rotate(90deg);
   }
 
-  /* 插件页：官方 / 用户两组，行上给状态与启停，详情与设置在原地展开。
-     设置表单用「标签列 + 控件列」两栏，避免说明文字把控件挤散。 */
+  /* 插件页：左列表 / 右详情。详情里依次是描述、健康状态、设置分组、信息分组。
+     设置表单用共享的「标签列 + 控件列」行，不再自己画一套。 */
   .plugin-page {
+    height: 100%;
+    min-height: 0;
+  }
+
+  /* 列表栏里的分组：两个来源（官方 / 用户）各一段，标题即小节名。 */
+  .split-rail-section {
     display: grid;
+    gap: 1px;
+    align-content: start;
+  }
+
+  .split-rail-section + .split-rail-section {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .split-rail-empty-hint {
+    display: block;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+    color: var(--text-faint);
+    font-size: 11px;
+  }
+
+  .plugin-detail {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .plugin-detail-head {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .plugin-detail-title {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
     gap: 16px;
     min-width: 0;
   }
 
-  .plugin-card {
+  .plugin-detail-title-copy {
     display: grid;
-    gap: 12px;
-    padding: 16px 18px 18px;
+    gap: 2px;
     min-width: 0;
   }
 
-  .plugin-head-count {
-    flex: none;
-    color: var(--text-faint);
-    font-size: var(--text-aux);
-    white-space: nowrap;
-  }
-
-  .plugin-list {
-    display: grid;
-    gap: 6px;
+  .plugin-detail-title h2 {
     margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  /* 行只有一层：名称块吃掉多余宽度，标签与操作列不参与收缩，窄屏才换行。 */
-  .plugin-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: center;
-    gap: 10px 14px;
-    padding: 10px 12px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: var(--panel-muted);
-    min-width: 0;
-  }
-
-  .plugin-row.is-open {
-    border-color: var(--line-strong, var(--line));
-    background: var(--panel);
-  }
-
-  .plugin-row-copy {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .plugin-row-name {
-    flex: none;
     color: var(--text);
-    font-size: var(--text-body);
-    font-weight: 500;
-    white-space: nowrap;
+    font-size: var(--text-subhead);
+    font-weight: 650;
+    line-height: 1.4;
   }
 
-  .plugin-row-version {
-    flex: none;
-    color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: var(--text-micro);
-  }
-
-  .plugin-row-sub {
+  .plugin-detail-meta {
     overflow: hidden;
-    min-width: 0;
     color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: var(--text-aux);
+    font-size: 11.5px;
+    line-height: 1.5;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .plugin-row-tags {
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: 6px;
+  .plugin-detail-location {
+    font-family: var(--font-mono);
   }
 
-  .plugin-row-actions {
+  .plugin-detail-actions {
     display: flex;
-    flex: none;
+    flex: 0 0 auto;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
+  }
+
+  /* 启停开关 + 文案同一行：开关自己占位，标签只解释当前状态。 */
+  .plugin-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+    cursor: pointer;
+  }
+
+  .plugin-detail-scroll {
+    /* flex 而不是 grid：grid 的自动行在定高容器里会被拉伸/压缩，分组会被裁成等高方块。 */
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 14px 16px 18px;
+  }
+
+  /* 分组在被 flex 容器压缩时保持内容高度，滚动交给外层。 */
+  .plugin-detail-scroll > * {
+    flex: none;
+  }
+
+  .plugin-detail-description {
+    margin: 0;
+    max-width: 72ch;
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+    line-height: 1.6;
   }
 
   .plugin-state {
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    padding: 0 7px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
     color: var(--text-soft);
-    font-size: var(--text-aux);
+    font-size: var(--text-micro);
+    line-height: 18px;
     white-space: nowrap;
   }
 
   .plugin-state::before {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
     content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 999px;
+    background: currentColor;
   }
 
   .plugin-state.is-on {
+    border-color: color-mix(in srgb, var(--green) 40%, transparent);
     color: var(--green);
   }
 
@@ -4196,188 +4291,50 @@
   }
 
   .plugin-state.is-warn {
-    color: var(--yellow);
+    border-color: color-mix(in srgb, var(--amber) 40%, transparent);
+    color: var(--amber);
   }
 
   .plugin-state.is-error {
+    border-color: color-mix(in srgb, var(--red) 45%, transparent);
     color: var(--red);
   }
 
-  /* 详情区：与行内容左对齐，顶部一条分界线，不再是独立卡片嵌卡片。 */
-  .plugin-detail {
-    grid-column: 1 / -1;
-    display: grid;
-    gap: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--line);
-    min-width: 0;
-  }
-
-  .plugin-section {
-    display: grid;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .plugin-section-title {
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-
-  .plugin-section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
-  }
-
-  .plugin-description {
-    margin: 0;
-    color: var(--text-soft);
-    font-size: var(--text-aux);
-    line-height: 1.6;
-  }
-
-  .plugin-facts {
-    display: grid;
-    grid-template-columns: 76px minmax(0, 1fr);
-    gap: 6px 14px;
-    align-items: baseline;
-    min-width: 0;
-    margin: 0;
-  }
-
-  /* 浏览器默认给 dd 一个 40px 的起始外边距，会把这个两列栅格撑成一列标签、一列悬空的正文。 */
-  .plugin-facts dt,
-  .plugin-facts dd {
-    margin: 0;
-  }
-
-  .plugin-fact-label {
-    color: var(--text-faint);
-    font-size: var(--text-aux);
-  }
-
-  .plugin-fact-value {
-    overflow: hidden;
-    color: var(--text-soft);
-    font-family: var(--font-mono);
-    font-size: var(--text-aux);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
+  /* 健康状态：一条横条，不套卡片边框（外层分组已经是一块面）。 */
   .plugin-health {
     display: grid;
     gap: 3px;
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    border-left: 2px solid var(--yellow);
-    border-radius: var(--radius-sm);
-    background: var(--panel-muted);
+    padding: 9px 11px;
+    border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--amber) 8%, transparent);
     color: var(--text-soft);
     font-size: var(--text-aux);
+    line-height: 1.5;
   }
 
   .plugin-health.is-error {
-    border-left-color: var(--red);
-    color: var(--text);
+    border-color: color-mix(in srgb, var(--red) 35%, transparent);
+    background: color-mix(in srgb, var(--red) 8%, transparent);
   }
 
   .plugin-health-title {
     color: var(--text);
-    font-weight: 500;
+    font-weight: 600;
   }
 
   .plugin-health-note {
     color: var(--text-faint);
   }
 
-  /* 设置表单：左标签右控件，说明挂在控件下方，行与行之间用细线分隔。 */
-  .plugin-settings {
-    display: grid;
-    min-width: 0;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    /* 比内容面亮一档，输入框（panel-muted）才会显得是凹进去的控件而不是一块同色空白。 */
-    background: var(--panel);
-  }
-
-  .plugin-setting-row {
-    display: grid;
-    grid-template-columns: 116px minmax(0, 1fr);
-    gap: 4px 16px;
-    align-items: start;
-    padding: 10px 12px;
-    min-width: 0;
-  }
-
-  .plugin-setting-row + .plugin-setting-row {
-    border-top: 1px solid var(--line);
-  }
-
-  .plugin-setting-label {
-    display: flex;
-    align-items: baseline;
-    gap: 6px;
-    padding-top: 6px;
-    min-width: 0;
-  }
-
-  .plugin-setting-name {
-    overflow: hidden;
-    color: var(--text);
-    font-size: var(--text-aux);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .plugin-setting-required {
-    flex: none;
-    color: var(--yellow);
-    font-size: var(--text-micro);
-  }
-
-  .plugin-setting-control {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-    max-width: 560px;
-  }
-
-  .plugin-setting-control input,
-  .plugin-setting-control select,
-  .plugin-setting-control textarea {
-    width: 100%;
-    font-size: var(--text-aux);
-  }
-
-  .plugin-setting-control textarea {
-    min-height: 84px;
-    padding: 7px 9px;
-    line-height: 1.55;
-    resize: vertical;
-  }
-
-  .plugin-setting-hint {
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    line-height: 1.5;
-    overflow-wrap: anywhere;
-  }
-
-  .plugin-setting-error {
-    color: var(--red);
-    font-size: var(--text-micro);
-    line-height: 1.5;
-  }
-
-  .plugin-save-state {
-    color: var(--text-faint);
-    font-size: var(--text-micro);
+    margin-left: 5px;
+    padding: 0 4px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    color: var(--accent);
+    font-size: 10px;
+    line-height: 15px;
   }
 
   .plugin-file-list {
@@ -4405,8 +4362,7 @@
     white-space: nowrap;
   }
 
-  .plugin-file-size,
-  .plugin-file-empty {
+  .plugin-file-size {
     flex: none;
     color: var(--text-faint);
     font-size: var(--text-aux);
@@ -4414,30 +4370,6 @@
 
   .plugin-error {
     color: var(--red);
-  }
-
-  @media (max-width: 720px) {
-    .plugin-row {
-      grid-template-columns: minmax(0, 1fr) auto;
-    }
-
-    .plugin-row-actions {
-      grid-column: 1 / -1;
-      justify-content: flex-end;
-    }
-
-    .plugin-setting-row {
-      grid-template-columns: minmax(0, 1fr);
-      gap: 6px;
-    }
-
-    .plugin-setting-label {
-      padding-top: 0;
-    }
-
-    .plugin-facts {
-      grid-template-columns: minmax(0, 1fr);
-    }
   }
 
   .control-endpoint-body {

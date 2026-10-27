@@ -265,6 +265,7 @@ npm run serve:web         # 构建后运行 Web 运行时
 - **插件日志**：`ctx.logger` 由 `PluginManager` 按 pluginId 注入，除转发宿主 logger 外还写 JSONL 到 `os.tmpdir()/mica-logs/plugin-<id>-<day>[-n].jsonl`（2 MB 分片、3 天清理、`MICA_PLUGIN_LOG=0` 关闭）。插件排查问题一律先看它，别往配置目录写日志。
 - 插件要感知会话（例如按对话内容起标题）时用 `ctx.session`：`describe(owner)` 给出 `id` / `title` / `titleSource`，`messages(owner)` 给出 UI 视角对话，`rename(title, { owner, source })` 走 `SessionController.renameCurrent`。`source: 'auto'` 在用户手动命名过（`titleSource === 'manual'`）时被拒绝，自动逻辑不得覆盖人工标题。
 - 新增官方插件：建目录 → 在 `manifests.ts` 与 `index.ts` 两处登记 → 插件自己的测试放在插件目录里（vitest 已覆盖 `plugins/**`）。
+- **插件系统仍在持续演进**：新增插件、或给已有插件加功能时，如果现有的 `ctx.*` 能力面（缺少渲染扩展点、缺少跨会话数据通道等）撑不住需求，应同时考虑重构对应的宿主模块，而不是为了"实现这个插件"在宿主里写死它的业务概念、或在插件里绕过能力边界强行 hack。判断标准很简单：宿主里不该出现具体插件的名词（如"标签""笔记"），插件也不该通过改别人的数据（改名、改标题）来伪造一个界面。能力缺口应当在通用能力面（`PluginContext` 的某一面）上一次补齐，让下一个插件同样受益。
 
 ### 命令
 
@@ -565,9 +566,15 @@ npm run serve:web         # 构建后运行 Web 运行时
 ### 配置页与主题
 
 - `mica-config-ui` 为唯一配置页实现：config-web 用 HTTP 托管，desktop SettingsView 直接嵌入组件，数据经运行时，不改回 iframe/子进程。
-- 新页面只用既有积木：`PageFrame`、`Button`、`Tag`、`Switch`、`CollapsiblePanel`、`ControlEndpointList`，文案走 `labels.ts`；不在页面里另写按钮、开关、页签或枚举中文。
+- 新页面只用既有积木：`PageFrame`、`Button`、`Tag`、`Switch`、`CollapsiblePanel`、`SettingsGroup`、`SettingRow`、`SplitView`、`ControlEndpointList`，文案走 `labels.ts`；不在页面里另写按钮、开关、页签、设置行或枚举中文。
+- 三块页面骨架（`mica-config-ui/web/components/Ui.tsx` + `styles.css`，新页面照抄，不要各写一套）：
+  - `PageFrame` 的页头压成一条窄栏：标题与位置行同一行、下面一条发丝线分隔，内容区从 `padding-top: 16px` 起算。操作按钮只放同步状态与刷新。
+  - `SettingsGroup` + `SettingRow` 是设置类页面的唯一形态：一组一块面（标题 / 一句说明 / 右侧动作），组内每行「左标签（含一句 hint）右控件」，行间只有分隔线。字段很宽（JSON、多行文本）时传 `wide` 改成上下排。以前每个字段一张卡片，字段一多整页变成等高方块。
+  - `SplitView` 是「先选一条、再看它」类页面（Sessions / Plugins）的唯一形态：左栏列表（搜索 + 分组 + `split-item` 行）、右栏详情，两栏之间一条分隔线。不要再做「顶部选择器 + 下面内容」的竖排堆叠。
+- 折叠按容器宽度而不是视口：`.page-panel` 是 `container-type: inline-size`，双栏与标签列在 `@container page (max-width: 860px)` 下改成上下叠。桌面端把配置页挤在中间一列时视口仍然很宽，只有容器查询才对。
 - Config 页按字段编辑 `config.json`（providers / searxngUrl），整份 JSON 收在「直接编辑 JSON」折叠面板里；`mcpServers`、`capabilityDefaults` 只读展示并跳到各自页面，不在这里重复实现。
-- 服务商卡片默认折成一行摘要（名称 / 协议 / 地址 / 模型数），展开才渲染字段；有校验错误时强制展开并标「待修正」。
+- 服务商在分组里是一行：折叠时显示名称 / 协议 / 地址摘要 / 模型数，展开后在同一个分组里接上字段行；有校验错误时强制展开并标「待修正」。
+- Sessions 左栏的行要用到工作目录、模型、状态与会话大小：唯一实现在 `mica-config-ui/src/server/sessionHead.ts`，只读会话文件头一个 8KB 窗口（整份快照动辄几 MB、上千个文件）。桌面运行时经 `@mica-config-ui/session-head` alias 复用同一份解析，不在 `host/configWebData.js` 里再抄一遍。
 - 配置页不提供 effort 开关：是否发送 reasoning 参数由模型规则按模型名判定（`model-effort-context` 从 models.dev 取 `reasoning_options`，`resolveModelRequestPatch` 生成每个模型每个协议各自的 patch，provider 上的 `supportsEffort` 只是兜底）。表单不再编辑该字段，旧配置里已有的值原样保留。
 - 表单转换的唯一实现在 `web/configDraft.ts`（纯函数、有测试）：表单只覆盖已知字段，写入时保留未知顶层键与 provider 里的未知字段，已知键按固定顺序排列，可选字段留空即删键（`models: []` 在 `validate-config` 里是错误）。
 - 新增数据动作先声明 `ConfigWebClient`；宿主无能力则方法可选并提供对应降级。Auto Compact 按能力出现，Browser Control / Terminal Control 始终显示说明。
@@ -600,6 +607,8 @@ npm run serve:web         # 构建后运行 Web 运行时
 - **说明文字只留一处**。页面顶部一段说明足够，不要把同样的灰字分散成三段；需要「改动未保存」「已连接」这类状态时放到操作行或状态列。
 - **页头路径不要整条铺开**。页头位置行由 `PageFrame` 统一收拢成「…/末三级目录/文件名」，文件名用次级前景、目录压暗，完整路径留在 `title`；直接塞一条绝对路径会把页头撑满一行且看不出重点。
 - **行内动作按钮用 `variant="ghost"`**（删除条目、跳到别的页面）。每行都挂一个带边框的方块按钮会让列表读成一排按钮墙；幽灵按钮尺寸与可用态一致，只在 hover 时补边框与底色。
+- **列表行按钮要写满整行**。`<button>` 的 `width: auto` 等价于 fit-content，即使 `display: grid` 也不会拉伸：不写 `width: 100%` 时只有选中态那一条画出底色，看起来像一行比别的行短。
+- **不要把字段逐个包成卡片**。一页里出现三张以上等高卡片就读不出层级；设置项用 `SettingsGroup` + `SettingRow`（一块面 + 行分隔线），列表/详情用 `SplitView`。分组之间留 16px，组内行间距只靠分隔线。
 
 ### 移动端
 

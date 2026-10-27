@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { ProviderEditor } from '../components/ProviderEditor.js';
-import { Alert, Button, CollapsiblePanel, Empty, SaveStatus, Tag } from '../components/Ui.js';
+import { Alert, Button, CollapsiblePanel, SaveStatus, SettingRow, SettingsGroup, Tag } from '../components/Ui.js';
 import { readConfigFile, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
 import {
@@ -182,7 +182,7 @@ export function ConfigPage({ onNavigate }: ConfigPageProps) {
         </div>
       }
     >
-      <div className="detail-body detail-body-stacked">
+      <div className="config-page">
         {error ? <Alert message={error} /> : null}
         {autoSave.error ? <Alert message={autoSave.error} /> : null}
         {jsonError ? <Alert message={`JSON 无法解析，改好之前不会写盘：${jsonError}`} /> : null}
@@ -190,145 +190,107 @@ export function ConfigPage({ onNavigate }: ConfigPageProps) {
         {loading && !draft ? (
           <div className="page-loading">正在加载配置…</div>
         ) : !draft ? null : (
-          <div className="config-stack">
-            <section className="simple-card config-card">
-              <header className="config-card-head">
-                <div className="config-head-copy">
-                  <h2>服务商</h2>
-                  <p>
-                    {providers.length > 0
-                      ? `${providers.length} 个服务商，决定可选的模型与鉴权`
-                      : '至少需要一个服务商才能发送消息'}
-                  </p>
-                </div>
+          <div className="config-page-body">
+            <SettingsGroup
+              title="服务商"
+              description={
+                providers.length > 0
+                  ? `${providers.length} 个服务商决定可选的模型与鉴权`
+                  : '至少需要一个服务商才能发送消息'
+              }
+              actions={
                 <Button icon={<AddIcon size={15} />} onClick={addProvider}>
                   添加服务商
                 </Button>
-              </header>
-
+              }
+            >
               {providers.length === 0 ? (
-                <Empty description="还没有服务商，按「添加服务商」开始" />
+                <p className="settings-empty">还没有服务商，按右上角「添加服务商」开始。</p>
               ) : (
-                <div className="config-provider-list">
-                  {providers.map((raw, index) => (
-                    <ProviderEditor
-                      key={index}
-                      raw={raw}
-                      index={index}
-                      removable={providers.length > 1}
-                      errorFor={(field) => errors.get(`providers.${index}.${field}`)}
-                      hasError={[...errors.keys()].some((key) => key.startsWith(`providers.${index}.`))}
-                      expanded={expanded.has(index)}
-                      revealed={revealed.has(index)}
-                      onToggleExpanded={() =>
-                        setExpanded((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(index)) next.delete(index);
-                          else next.add(index);
-                          return next;
-                        })
-                      }
-                      onToggleReveal={() =>
-                        setRevealed((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(index)) next.delete(index);
-                          else next.add(index);
-                          return next;
-                        })
-                      }
-                      onChange={(next) => applyDraft(writeProviderDraft(draft, index, next))}
-                      onRemove={() => removeProvider(index)}
-                    />
-                  ))}
-                </div>
+                providers.map((raw, index) => (
+                  <ProviderEditor
+                    key={index}
+                    raw={raw}
+                    index={index}
+                    removable={providers.length > 1}
+                    errorFor={(field) => errors.get(`providers.${index}.${field}`)}
+                    hasError={[...errors.keys()].some((key) => key.startsWith(`providers.${index}.`))}
+                    expanded={expanded.has(index)}
+                    revealed={revealed.has(index)}
+                    onToggleExpanded={() =>
+                      setExpanded((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(index)) next.delete(index);
+                        else next.add(index);
+                        return next;
+                      })
+                    }
+                    onToggleReveal={() =>
+                      setRevealed((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(index)) next.delete(index);
+                        else next.add(index);
+                        return next;
+                      })
+                    }
+                    onChange={(next) => applyDraft(writeProviderDraft(draft, index, next))}
+                    onRemove={() => removeProvider(index)}
+                  />
+                ))
               )}
-            </section>
+            </SettingsGroup>
 
-            <section className="simple-card config-card">
-              <header className="config-card-head">
-                <div className="config-head-copy">
-                  <h2>联网搜索</h2>
-                  <p>联网检索走的 SearXNG 实例（web_search 工具）</p>
-                </div>
-              </header>
-              <label className="form-field">
-                <span>SearXNG 地址</span>
+            <SettingsGroup title="联网搜索" description="web_search 走的 SearXNG 实例，需要开启 JSON 输出格式">
+              <SettingRow label="SearXNG 地址" hint="留空按环境变量或默认地址" error={errors.get('searxngUrl')}>
                 <input
                   className={errors.has('searxngUrl') ? 'text-input text-input-invalid' : 'text-input'}
                   value={readSearxngUrl(draft)}
                   spellCheck={false}
                   placeholder="http://127.0.0.1:8080"
+                  aria-label="SearXNG 地址"
                   aria-invalid={errors.has('searxngUrl')}
                   onChange={(event) => applyDraft(writeSearxngUrl(draft, event.target.value))}
                 />
-                {errors.has('searxngUrl') ? (
-                  <span className="config-field-error">{errors.get('searxngUrl')}</span>
-                ) : null}
-              </label>
-              <ul className="config-rules">
-                <li>留空时按环境变量 SEARXNG_URL、最后回退到 http://127.0.0.1:8080。</li>
-                <li>实例需要开启 JSON 输出格式，否则 web_search 拿不到结果。</li>
-              </ul>
-            </section>
+              </SettingRow>
+            </SettingsGroup>
 
-            <section className="simple-card config-card">
-              <header className="config-card-head">
-                <div className="config-head-copy">
-                  <h2>其他页面管理</h2>
-                  <p>这些字段同样写在 config.json，但各有专门的编辑页</p>
-                </div>
-              </header>
-              <div className="config-managed-list">
-                <div className="config-managed-row">
-                  <div className="config-managed-copy">
-                    <span className="config-managed-name">MCP 服务</span>
-                    <span className="config-managed-desc">
-                      {mcpServerCount(draft) > 0 ? `${mcpServerCount(draft)} 个` : '还没有配置'}
-                      <code className="config-managed-key">mcpServers</code>
-                    </span>
-                  </div>
+            <SettingsGroup title="其他页面管理" description="同样写在 config.json，各有专门的编辑页">
+              <SettingRow label="MCP 服务">
+                <div className="setting-row-inline">
+                  <span className="setting-row-value">
+                    {mcpServerCount(draft) > 0 ? `${mcpServerCount(draft)} 个已配置` : '还没有配置'}
+                  </span>
+                  <code className="setting-row-key">mcpServers</code>
                   {onNavigate ? (
                     <Button variant="ghost" onClick={() => onNavigate('mcp')}>
                       去 MCP 页面
                     </Button>
                   ) : null}
                 </div>
-                <div className="config-managed-row">
-                  <div className="config-managed-copy">
-                    <span className="config-managed-name">新会话默认能力</span>
-                    <span className="config-managed-desc">
-                      {capabilityDefaultsSummary(draft)}
-                      <code className="config-managed-key">capabilityDefaults</code>
-                    </span>
-                  </div>
+              </SettingRow>
+              <SettingRow label="新会话默认能力">
+                <div className="setting-row-inline">
+                  <span className="setting-row-value">{capabilityDefaultsSummary(draft)}</span>
+                  <code className="setting-row-key">capabilityDefaults</code>
                   {onNavigate ? (
                     <Button variant="ghost" onClick={() => onNavigate('capabilities')}>
                       去 Capabilities
                     </Button>
                   ) : null}
                 </div>
-              </div>
-            </section>
+              </SettingRow>
+            </SettingsGroup>
 
             {extraKeys.length > 0 ? (
-              <section className="simple-card config-card">
-                <header className="config-card-head">
-                  <div className="config-head-copy">
-                    <h2>其他字段</h2>
-                    <p>表单没有覆盖的键，保存时原样保留，可在「直接编辑 JSON」里修改</p>
-                  </div>
-                </header>
-                <ul className="config-extra-list">
-                  {extraKeys.map((key) => (
-                    <li className="config-extra-row" key={key}>
-                      <span className="config-extra-key">{key}</span>
-                      <span className="config-extra-value" title={previewValue(draft[key])}>
-                        {previewValue(draft[key])}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+              <SettingsGroup title="其他字段" description="表单没有覆盖的键，保存时原样保留">
+                {extraKeys.map((key) => (
+                  <SettingRow key={key} label={<code>{key}</code>}>
+                    <span className="setting-row-value is-mono" title={previewValue(draft[key])}>
+                      {previewValue(draft[key])}
+                    </span>
+                  </SettingRow>
+                ))}
+              </SettingsGroup>
             ) : null}
 
             <CollapsiblePanel

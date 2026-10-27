@@ -19,14 +19,12 @@ export function PageFrame({ title, path, actions, children, immersive = false }:
 
   return (
     <section className="page-frame">
-      <header className="page-hero">
-        <div className="page-hero-copy">
-          <div className="page-title-row">
-            <h1>{title}</h1>
-          </div>
+      <header className="page-head">
+        <div className="page-head-copy">
+          <h1>{title}</h1>
           {path ? <PagePath value={path} /> : null}
         </div>
-        {actions ? <div className="page-hero-actions">{actions}</div> : null}
+        {actions ? <div className="page-head-actions">{actions}</div> : null}
       </header>
 
       <div className="page-panel">{children}</div>

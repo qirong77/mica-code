@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { appIcons } from '../icons.js';
 import { providerProtocolLabel } from '../labels.js';
 import { PROVIDER_PROTOCOL_VALUES, readProviderDraft, type ProviderDraft } from '../configDraft.js';
-import { Button } from './Ui.js';
+import { Button, SettingRow } from './Ui.js';
 
 type ProviderEditorProps = {
   raw: unknown;
@@ -12,7 +12,7 @@ type ProviderEditorProps = {
   revealed: boolean;
   removable: boolean;
   expanded: boolean;
-  /** 校验出错时强制展开，避免错误藏在折叠卡片里。 */
+  /** 校验出错时强制展开，避免错误藏在折叠行里。 */
   hasError: boolean;
   disabled?: boolean;
   onToggleReveal(): void;
@@ -22,10 +22,10 @@ type ProviderEditorProps = {
 };
 
 /**
- * 一个服务商的字段编辑块。
+ * 一个服务商：折叠时是一行摘要，展开后是同一块面里的字段行。
  *
- * 所有值都来自外部 draft（受控），组件自身只留「正在输入的模型名」与两个折叠开关，
- * 所以父级重新加载或撤销时不会残留旧值。默认折叠成一行摘要——多数时候只是看看配置，
+ * 所有值都来自外部 draft（受控），组件自身只留「正在输入的模型名」与折叠开关，
+ * 所以父级重新加载或撤销时不会残留旧值。默认折叠——多数时候只是看看配置，
  * 不需要每次把七八个输入框都铺开。
  */
 export function ProviderEditor({
@@ -66,25 +66,25 @@ export function ProviderEditor({
   }
 
   return (
-    <article className={`config-provider${open ? ' is-open' : ''}`}>
-      <header className="config-provider-head">
+    <article className={`provider-row${open ? ' is-open' : ''}`}>
+      <header className="provider-row-head">
         <button
           type="button"
-          className="config-provider-toggle"
+          className="provider-row-toggle"
           aria-expanded={open}
           title={open ? '收起' : '展开编辑'}
           onClick={onToggleExpanded}
         >
-          <ChevronIcon size={13} className="config-provider-chevron" />
-          <span className="config-provider-title" title={fields.name || fields.id}>
+          <ChevronIcon size={13} className="provider-row-chevron" aria-hidden="true" />
+          <span className="provider-row-name" title={fields.name || fields.id}>
             {fields.name.trim() || fields.id.trim() || '新的服务商'}
           </span>
-          <span className="config-provider-protocol">{providerProtocolLabel(fields.protocol)}</span>
-          <span className="config-provider-meta" title={fields.apiBase}>
+          <span className="provider-row-protocol">{providerProtocolLabel(fields.protocol)}</span>
+          <span className="provider-row-meta" title={fields.apiBase}>
             {summaryText(fields)}
           </span>
         </button>
-        {hasError ? <span className="config-provider-flag">待修正</span> : null}
+        {hasError ? <span className="provider-row-flag">待修正</span> : null}
         <Button
           icon={<TrashIcon size={14} />}
           variant="ghost"
@@ -96,123 +96,110 @@ export function ProviderEditor({
       </header>
 
       {open ? (
-        <div className="config-provider-body">
-          <div className="config-provider-grid">
-            <label className="form-field">
-              <span>标识</span>
+        <div className="provider-row-body">
+          <SettingRow label="标识" hint="会话里按这个名字引用" error={errorFor('id')}>
+            <input
+              className={invalidClass(errorFor('id'))}
+              value={fields.id}
+              disabled={disabled}
+              spellCheck={false}
+              placeholder="例如 deepseek"
+              aria-label={`服务商 ${index + 1} 标识`}
+              aria-invalid={Boolean(errorFor('id'))}
+              onChange={(event) => patch({ id: event.target.value })}
+            />
+          </SettingRow>
+
+          <SettingRow label="显示名称" error={errorFor('name')}>
+            <input
+              className="text-input"
+              value={fields.name}
+              disabled={disabled}
+              placeholder="可选"
+              aria-label={`服务商 ${index + 1} 显示名称`}
+              onChange={(event) => patch({ name: event.target.value })}
+            />
+          </SettingRow>
+
+          <SettingRow label="API Base" error={errorFor('api_base')}>
+            <input
+              className={invalidClass(errorFor('api_base'))}
+              value={fields.apiBase}
+              disabled={disabled}
+              spellCheck={false}
+              placeholder="https://api.example.com"
+              aria-label={`服务商 ${index + 1} API Base`}
+              aria-invalid={Boolean(errorFor('api_base'))}
+              onChange={(event) => patch({ apiBase: event.target.value })}
+            />
+          </SettingRow>
+
+          <SettingRow label="API Key" hint="留空表示不需要鉴权" error={errorFor('api_key')}>
+            <span className="config-input-with-action">
               <input
-                className={invalidClass(errorFor('id'))}
-                value={fields.id}
+                className={invalidClass(errorFor('api_key'))}
+                type={revealed ? 'text' : 'password'}
+                value={fields.apiKey}
                 disabled={disabled}
                 spellCheck={false}
-                placeholder="会话里引用这个名字，例如 deepseek"
-                aria-label={`服务商 ${index + 1} 标识`}
-                aria-invalid={Boolean(errorFor('id'))}
-                onChange={(event) => patch({ id: event.target.value })}
+                autoComplete="off"
+                placeholder="sk-…"
+                aria-label={`服务商 ${index + 1} API Key`}
+                aria-invalid={Boolean(errorFor('api_key'))}
+                onChange={(event) => patch({ apiKey: event.target.value })}
               />
-              <FieldError message={errorFor('id')} />
-            </label>
-            <label className="form-field">
-              <span>显示名称</span>
-              <input
-                className="text-input"
-                value={fields.name}
-                disabled={disabled}
-                placeholder="可选"
-                aria-label={`服务商 ${index + 1} 显示名称`}
-                onChange={(event) => patch({ name: event.target.value })}
-              />
-              <FieldError message={errorFor('name')} />
-            </label>
-          </div>
-
-          <div className="config-provider-grid">
-            <label className="form-field">
-              <span>API Base</span>
-              <input
-                className={invalidClass(errorFor('api_base'))}
-                value={fields.apiBase}
-                disabled={disabled}
-                spellCheck={false}
-                placeholder="https://api.example.com"
-                aria-label={`服务商 ${index + 1} API Base`}
-                aria-invalid={Boolean(errorFor('api_base'))}
-                onChange={(event) => patch({ apiBase: event.target.value })}
-              />
-              <FieldError message={errorFor('api_base')} />
-            </label>
-
-            <label className="form-field">
-              <span>API Key</span>
-              <span className="config-input-with-action">
-                <input
-                  className={invalidClass(errorFor('api_key'))}
-                  type={revealed ? 'text' : 'password'}
-                  value={fields.apiKey}
-                  disabled={disabled}
-                  spellCheck={false}
-                  autoComplete="off"
-                  placeholder="留空表示不需要鉴权"
-                  aria-label={`服务商 ${index + 1} API Key`}
-                  aria-invalid={Boolean(errorFor('api_key'))}
-                  onChange={(event) => patch({ apiKey: event.target.value })}
-                />
-                <button
-                  type="button"
-                  className="config-input-action"
-                  title={revealed ? '隐藏明文' : '显示明文'}
-                  aria-label={revealed ? '隐藏明文' : '显示明文'}
-                  onClick={onToggleReveal}
-                >
-                  {revealed ? <HideIcon size={14} /> : <ShowIcon size={14} />}
-                </button>
-              </span>
-              <FieldError message={errorFor('api_key')} />
-            </label>
-          </div>
-
-          <div className="config-provider-grid">
-            <div className="form-field">
-              <span>协议</span>
-              <div className="config-segmented" role="radiogroup" aria-label={`服务商 ${index + 1} 协议`}>
-                {PROVIDER_PROTOCOL_VALUES.map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    role="radio"
-                    aria-checked={fields.protocol === value}
-                    className={`config-segment${fields.protocol === value ? ' is-active' : ''}`}
-                    disabled={disabled}
-                    onClick={() => patch({ protocol: value })}
-                  >
-                    {providerProtocolLabel(value)}
-                  </button>
-                ))}
-              </div>
-              <FieldError message={errorFor('protocol')} />
-            </div>
-
-            <label className="form-field">
-              <span>模型列表地址</span>
-              <input
-                className={invalidClass(errorFor('get_model_url'))}
-                value={fields.getModelUrl}
-                disabled={disabled}
-                spellCheck={false}
-                placeholder="可选，例如 https://api.example.com/models"
-                aria-label={`服务商 ${index + 1} 模型列表地址`}
-                aria-invalid={Boolean(errorFor('get_model_url'))}
-                onChange={(event) => patch({ getModelUrl: event.target.value })}
-              />
-              <FieldError message={errorFor('get_model_url')} />
-            </label>
-          </div>
-
-          <div className="form-field">
-            <span>
-              模型
-              {fields.models.length > 0 ? <span className="config-field-count">{fields.models.length}</span> : null}
+              <button
+                type="button"
+                className="config-input-action"
+                title={revealed ? '隐藏明文' : '显示明文'}
+                aria-label={revealed ? '隐藏明文' : '显示明文'}
+                onClick={onToggleReveal}
+              >
+                {revealed ? <HideIcon size={14} /> : <ShowIcon size={14} />}
+              </button>
             </span>
+          </SettingRow>
+
+          <SettingRow label="协议" error={errorFor('protocol')}>
+            <div className="config-segmented" role="radiogroup" aria-label={`服务商 ${index + 1} 协议`}>
+              {PROVIDER_PROTOCOL_VALUES.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={fields.protocol === value}
+                  className={`config-segment${fields.protocol === value ? ' is-active' : ''}`}
+                  disabled={disabled}
+                  onClick={() => patch({ protocol: value })}
+                >
+                  {providerProtocolLabel(value)}
+                </button>
+              ))}
+            </div>
+          </SettingRow>
+
+          <SettingRow label="模型列表地址" hint="可选，留空则使用下面列出的模型" error={errorFor('get_model_url')}>
+            <input
+              className={invalidClass(errorFor('get_model_url'))}
+              value={fields.getModelUrl}
+              disabled={disabled}
+              spellCheck={false}
+              placeholder="https://api.example.com/models"
+              aria-label={`服务商 ${index + 1} 模型列表地址`}
+              aria-invalid={Boolean(errorFor('get_model_url'))}
+              onChange={(event) => patch({ getModelUrl: event.target.value })}
+            />
+          </SettingRow>
+
+          <SettingRow
+            label={
+              <>
+                模型
+                {fields.models.length > 0 ? <span className="config-field-count">{fields.models.length}</span> : null}
+              </>
+            }
+            error={errorFor('models')}
+          >
             {fields.models.length === 0 ? (
               <p className="config-field-hint">
                 {fields.getModelUrl.trim()
@@ -260,8 +247,7 @@ export function ProviderEditor({
                 添加
               </Button>
             </form>
-            <FieldError message={errorFor('models')} />
-          </div>
+          </SettingRow>
         </div>
       ) : null}
     </article>
@@ -273,10 +259,6 @@ function summaryText(fields: ProviderDraft): string {
   const base = fields.apiBase.trim().replace(/^https?:\/\//, '');
   const models = fields.models.length > 0 ? `${fields.models.length} 个模型` : '未列模型';
   return base ? `${base} · ${models}` : models;
-}
-
-function FieldError({ message }: { message?: string }) {
-  return message ? <span className="config-field-error">{message}</span> : null;
 }
 
 function invalidClass(message?: string): string {
