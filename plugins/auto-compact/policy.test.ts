@@ -70,23 +70,23 @@ describe('decideAutoCompactStep', () => {
   });
 
   it('runs the local pass once the quick threshold is crossed', () => {
-    expect(decideAutoCompactStep({ settings: settings(), counters: counters(), ctxTokens: 210_000 })).toBe('quick');
+    expect(decideAutoCompactStep({ settings: settings(), counters: counters(), ctxTokens: 310_000 })).toBe('quick');
   });
 
   it('escalates to the model pass when the quick allowance is used up', () => {
-    const used = counters({ quickRuns: 3 });
+    const used = counters({ quickRuns: 999 });
     expect(decideAutoCompactStep({ settings: settings(), counters: used, ctxTokens: 210_000 })).toBe('model');
   });
 
   it('starts from the local pass when only the model pass is due', () => {
-    // 120k 在快速阈值（200k）之下：模型压缩到期本身就足以触发一次快速压缩，
+    // 200k 在快速阈值（300k）之下：模型压缩到期本身就足以触发一次快速压缩，
     // 否则会直接花一次模型请求去压一段本来能本地清掉的历史。
     const due = counters({ quickRuns: 0, modelRuns: 0 });
-    expect(decideAutoCompactStep({ settings: settings(), counters: due, ctxTokens: 130_000 })).toBe('quick');
+    expect(decideAutoCompactStep({ settings: settings(), counters: due, ctxTokens: 210_000 })).toBe('quick');
   });
 
   it('stops entirely once both allowances are used up', () => {
-    const used = counters({ quickRuns: 3, modelRuns: 3 });
+    const used = counters({ quickRuns: 999, modelRuns: 999 });
     expect(decideAutoCompactStep({ settings: settings(), counters: used, ctxTokens: 900_000 })).toBeNull();
   });
 
@@ -129,13 +129,13 @@ describe('decideAutoCompactStep', () => {
 
 describe('shouldEscalateToModel', () => {
   it('escalates only when the context is still above the model threshold', () => {
-    expect(shouldEscalateToModel({ settings: settings(), counters: counters(), ctxTokens: 150_000 })).toBe(true);
+    expect(shouldEscalateToModel({ settings: settings(), counters: counters(), ctxTokens: 210_000 })).toBe(true);
     expect(shouldEscalateToModel({ settings: settings(), counters: counters(), ctxTokens: 90_000 })).toBe(false);
   });
 
   it('stops at the model allowance', () => {
     expect(
-      shouldEscalateToModel({ settings: settings(), counters: counters({ modelRuns: 3 }), ctxTokens: 900_000 }),
+      shouldEscalateToModel({ settings: settings(), counters: counters({ modelRuns: 999 }), ctxTokens: 900_000 }),
     ).toBe(false);
   });
 });

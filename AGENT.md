@@ -251,7 +251,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - 本地清理替换工具结果、可识别媒体与工具参数正文；tool-call arguments 必须仍是合法 JSON，只裁正文/长命令，保留路径、pattern、name、offset。
 - 裁剪规则集中在 `mica-context/CompactionService.ts`（正文/命令阈值 200/400），幂等标记 `[omitted `。
-- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 200k / 120k、各最多 3 次、间隔 20 分钟。设置在插件 `settings`，计数在会话 `pluginState['auto-compact']`。
+- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次、间隔 30 分钟。设置在插件 `settings`，计数在会话 `pluginState['auto-compact']`。
 - 自动压缩只在常驻会话生效：`mica exec` 是一次性运行（`agent.mode === 'one-shot'`），改变成本或输出的策略一律跳过。
 - 压缩只改发给模型的历史，不改 `conversationMessages`；自动压缩失败只记 note，不中断 turn。
 - 所有压缩保留 usage 记账；需要模型的 compact / review / commit 走 subagent 或 exclusive task，不污染运行中的主 turn。

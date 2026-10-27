@@ -28,11 +28,11 @@ export type AutoCompactStep = 'quick' | 'model';
 
 export const DEFAULT_SETTINGS: AutoCompactSettings = {
   enabled: true,
-  quickThresholdK: 200,
-  quickLimit: 3,
-  modelThresholdK: 120,
-  modelLimit: 3,
-  minIntervalMs: 20 * 60 * 1000,
+  quickThresholdK: 300,
+  quickLimit: 999,
+  modelThresholdK: 200,
+  modelLimit: 999,
+  minIntervalMs: 30 * 60 * 1000,
 };
 
 export const EMPTY_COUNTERS: AutoCompactCounters = {
