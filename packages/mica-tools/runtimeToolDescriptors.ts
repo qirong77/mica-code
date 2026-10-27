@@ -114,27 +114,20 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
   },
   {
     name: "session_peers",
-    description: "列出当前正在运行的 Mica 实例（其他窗口/终端里的 TUI、mica exec、desktop 的 app-server 进程），返回各自 session 缓存文件路径与读取方法。 当怀疑工作区被另一个 Mica 会话改动、文件内容与预期不符、或想确认是否有别的会话在同一个项目/仓库工作时使用。 只读，不修改任何东西。注意：只列出正在执行 turn 的实例，空闲实例不会改动文件，因此不在列表中。 默认只列正在运行的实例；传 hours 后额外列出最近 N 小时内结束的会话（已释放 turn 锁，仍可能刚改过工作区），0 表示不列。",
+    description: "列出当前正在运行的 Mica 实例（其他窗口/终端里的 TUI、mica exec、desktop 的 app-server 进程），返回各自 session 缓存文件路径与读取方法。 当怀疑工作区被另一个 Mica 会话改动、文件内容与预期不符、或想确认是否有别的会话在同一个项目/仓库工作时使用。 只读，不修改任何东西。注意：只列出正在执行 turn 的实例，空闲实例不会改动文件，因此不在列表中。",
     readOnly: true,
-    parameters: [
-      {
-        name: "hours",
-        type: "number",
-        required: false,
-        description: "额外列出最近 N 小时内结束（不再持有 turn 锁）的会话；默认 0 表示不列。",
-      },
-    ],
+    parameters: [],
   },
   {
     name: "todo_write",
-    description: "Create or update the plan for the current turn. The user sees it as your working plan. Use it when the task needs 3+ meaningful milestones; skip it for trivial or single-step work. Keep 7 items or fewer. Describe outcomes, not keystrokes: no \"open file X\" or \"run command Y\" items. Send the complete list on every call; it replaces the previous one. Only call it when the list actually changes. Mark an item in_progress when you start it, and completed only when it is really done.",
+    description: "Create or update the structured todo list for the current coding task. Use it for tasks with several meaningful steps, and skip it for trivial one-step work. Send the complete list on every call, keep at most one item in_progress, and update statuses as work advances. Before yielding a final response, waiting for user input, or stopping for any reason, leave no item in_progress: mark finished items completed and unfinished items pending. Use content for the imperative task label and activeForm for the present-progressive label shown while working.",
     readOnly: false,
     parameters: [
       {
         name: "todos",
         type: "array",
         required: true,
-        description: "The complete replacement list, in execution order.",
+        description: "The complete replacement todo list in execution order.",
       },
     ],
   },
