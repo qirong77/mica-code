@@ -1,0 +1,164 @@
+import { describe, expect, it } from 'vitest';
+import {
+  TAG_COLORS,
+  addSessionTag,
+  clearSessionTags,
+  describeTagStore,
+  emptyTagStore,
+  firstFreeColor,
+  formatTagList,
+  normalizeTagStore,
+  removeSessionTag,
+  renameTagLabel,
+  resolveTagColor,
+  setSessionTags,
+  tagCounts,
+  tagsOf,
+} from './tags.js';
+import { parseTagsInput } from './TagsTool.js';
+import { formatSessionTagsSection } from './tagsSection.js';
+
+describe('normalizeTagStore', () => {
+  it('缺字段与垃圾输入都收敛成一份可用的空表', () => {
+    for (const raw of [undefined, null, 42, 'nope', [], {}]) {
+      const store = normalizeTagStore(raw);
+      expect(Object.keys(store.labels).sort()).toEqual([...TAG_COLORS].sort());
+      expect(store.assignments).toEqual({});
+    }
+  });
+
+  it('丢掉未知色槽、重复项，并按色序重排', () => {
+    const store = normalizeTagStore({
+      version: 1,
+      labels: { red: '  紧急  ', nope: 'x' },
+      assignments: {
+        s1: ['gray', 'red', 'red', 'chartreuse'],
+        s2: [],
+        '  ': ['red'],
+        s3: 'red',
+      },
+    });
+    expect(store.labels.red).toBe('紧急');
+    expect(store.labels.green).toBe('Green');
+    expect(store.assignments).toEqual({ s1: ['red', 'gray'] });
+  });
+
+  it('空名字不覆盖默认名，过长名字被截断', () => {
+    expect(normalizeTagStore({ labels: { red: '   ' } }).labels.red).toBe('Red');
+    const long = normalizeTagStore({ labels: { blue: 'x'.repeat(60) } }).labels.blue;
+    expect(long.length).toBe(24);
+  });
+});
+
+describe('色槽解析', () => {
+  it('接受色槽 id、默认名与改过的名字', () => {
+    const store = renameTagLabel(emptyTagStore(), 'red', '阻塞');
+    expect(resolveTagColor(store, 'red')).toBe('red');
+    expect(resolveTagColor(store, '  RED ')).toBe('red');
+    expect(resolveTagColor(store, '阻塞')).toBe('red');
+    // 改名之后默认名仍要命中，否则顺手记下的旧命令就废了。
+    expect(resolveTagColor(store, 'Red')).toBe('red');
+    expect(resolveTagColor(store, 'unknown')).toBeNull();
+  });
+});
+
+describe('会话归属', () => {
+  it('打标去重、按色序排；去标到空就删键', () => {
+    let store = emptyTagStore();
+    store = addSessionTag(store, 's1', 'blue');
+    store = addSessionTag(store, 's1', 'red');
+    store = addSessionTag(store, 's1', 'blue');
+    expect(tagsOf(store, 's1')).toEqual(['red', 'blue']);
+
+    store = removeSessionTag(store, 's1', 'red');
+    expect(tagsOf(store, 's1')).toEqual(['blue']);
+    store = removeSessionTag(store, 's1', 'blue');
+    expect(store.assignments).toEqual({});
+  });
+
+  it('重复打标 / 去掉不存在的标签返回同一个对象（调用方据此判断有没有变）', () => {
+    const store = addSessionTag(emptyTagStore(), 's1', 'red');
+    expect(addSessionTag(store, 's1', 'red')).toBe(store);
+    expect(removeSessionTag(store, 's1', 'green')).toBe(store);
+    expect(clearSessionTags(store, 'nope')).toBe(store);
+  });
+
+  it('不修改传入的 store', () => {
+    const store = emptyTagStore();
+    const next = setSessionTags(store, 's1', ['red']);
+    expect(store.assignments).toEqual({});
+    expect(next.assignments).toEqual({ s1: ['red'] });
+  });
+
+  it('清空后不再有该会话的键', () => {
+    const store = addSessionTag(emptyTagStore(), 's1', 'red');
+    expect(clearSessionTags(store, 's1').assignments).toEqual({});
+  });
+});
+
+describe('用量与展示', () => {
+  it('统计每个色槽挂了多少会话，并给出第一个空闲色槽', () => {
+    let store = emptyTagStore();
+    store = addSessionTag(store, 's1', 'red');
+    store = addSessionTag(store, 's2', 'red');
+    store = addSessionTag(store, 's2', 'blue');
+    const counts = tagCounts(store);
+    expect(counts.red).toBe(2);
+    expect(counts.blue).toBe(1);
+    expect(counts.gray).toBe(0);
+    expect(firstFreeColor(store)).toBe('orange');
+  });
+
+  it('7 个色槽都用上时没有空闲色槽', () => {
+    let store = emptyTagStore();
+    TAG_COLORS.forEach((color, index) => {
+      store = addSessionTag(store, `s${index}`, color);
+    });
+    expect(firstFreeColor(store)).toBeNull();
+  });
+
+  it('改过名字的色槽在文本里带上 id，没改过只显示名字', () => {
+    const store = renameTagLabel(emptyTagStore(), 'red', '阻塞');
+    const withTags = addSessionTag(store, 's1', 'red');
+    expect(formatTagList(withTags, ['red'])).toBe('阻塞 (red)');
+    expect(formatTagList(emptyTagStore(), [])).toBe('（无标签）');
+  });
+
+  it('describeTagStore 列出全部色槽与当前会话', () => {
+    const store = addSessionTag(emptyTagStore(), 's1', 'red');
+    const lines = describeTagStore(store, 's1');
+    expect(lines[0]).toContain('7 个固定色槽');
+    expect(lines).toHaveLength(TAG_COLORS.length + 2);
+    expect(lines.at(-1)).toContain('Red');
+    expect(describeTagStore(store, 's2').at(-1)).toContain('无标签');
+  });
+});
+
+describe('parseTagsInput', () => {
+  it('只认色槽 id，不认改过的名字', () => {
+    expect(parseTagsInput({ action: 'read' })).toEqual({ ok: true, action: 'read' });
+    expect(parseTagsInput({ action: 'add', color: 'red' })).toEqual({
+      ok: true,
+      action: 'add',
+      color: 'red',
+    });
+    expect(parseTagsInput({ action: 'add', color: '阻塞' }).ok).toBe(false);
+    expect(parseTagsInput({ action: 'add' }).ok).toBe(false);
+    expect(parseTagsInput({ action: 'rename', color: 'red' }).ok).toBe(false);
+    expect(parseTagsInput({ action: 'read', extra: 1 }).ok).toBe(false);
+  });
+});
+
+describe('formatSessionTagsSection', () => {
+  it('没有标签时整段为空', () => {
+    expect(formatSessionTagsSection(emptyTagStore(), [])).toBe('');
+  });
+
+  it('有标签时带上色槽名并声明它不是指令', () => {
+    const store = renameTagLabel(emptyTagStore(), 'red', '阻塞');
+    const text = formatSessionTagsSection(store, ['red', 'blue']);
+    expect(text).toContain('阻塞 [red]');
+    expect(text).toContain('Blue [blue]');
+    expect(text).toContain('不是任务指令');
+  });
+});

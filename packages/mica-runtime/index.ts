@@ -23,6 +23,7 @@ export type {
   RuntimeOwner,
   RuntimePluginQueue,
   RuntimeTurnAfterHookEvent,
+  RuntimeTurnBeforeHookEvent,
   TurnOutcome,
 } from './PluginRuntime.js';
 export type {

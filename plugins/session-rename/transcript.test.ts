@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTranscript, formatTranscript, messageText } from './transcript.js';
+import { buildTranscript, formatTitleInput, formatTranscript, messageText } from './transcript.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 
 const user = (text: string, extra: Partial<{ displayContent: string }> = {}): MicaUiConversationMessage => ({
@@ -83,6 +83,33 @@ describe('buildTranscript', () => {
     const entries = buildTranscript([user('x'.repeat(50))], { maxMessages: 5, maxCharsPerMessage: 10 });
     expect(entries[0]?.text).toBe('xxxxxxxxxx…');
   });
+
+  it('appends the in-flight user input, which is not in the history yet', () => {
+    const entries = buildTranscript([user('第一轮'), assistant('好')], {
+      maxMessages: 10,
+      latestUserText: '第二轮：顺便修下登录',
+    });
+
+    expect(entries.at(-1)).toEqual({ role: 'user', text: '第二轮：顺便修下登录' });
+  });
+
+  it('does not append the in-flight input twice when it is already the last user entry', () => {
+    const entries = buildTranscript([user('第一轮'), assistant('好'), user('第二轮')], {
+      maxMessages: 10,
+      latestUserText: '第二轮',
+    });
+
+    expect(entries.filter((entry) => entry.text === '第二轮')).toHaveLength(1);
+  });
+
+  it('keeps the in-flight input inside the message budget', () => {
+    const entries = buildTranscript([user('旧一'), assistant('旧答'), user('旧二'), assistant('旧答二')], {
+      maxMessages: 2,
+      latestUserText: '这一轮',
+    });
+
+    expect(entries.map((entry) => entry.text)).toEqual(['旧答二', '这一轮']);
+  });
 });
 
 describe('formatTranscript', () => {
@@ -93,6 +120,30 @@ describe('formatTranscript', () => {
         { role: 'assistant', text: '答案' },
       ]),
     ).toBe('用户：问题\n\n助手：答案');
+  });
+});
+
+describe('formatTitleInput', () => {
+  it('separates the context from the request the title should describe', () => {
+    expect(
+      formatTitleInput([
+        { role: 'user', text: '重构压缩策略' },
+        { role: 'assistant', text: '改完阈值了' },
+        { role: 'user', text: '顺便修下登录超时' },
+      ]),
+    ).toBe(
+      [
+        '对话记录（从旧到新，仅用于理解上下文）：',
+        '用户：重构压缩策略\n\n助手：改完阈值了',
+        '',
+        '用户最新请求（标题概括这一段）：',
+        '用户：顺便修下登录超时',
+      ].join('\n'),
+    );
+  });
+
+  it('falls back to a plain transcript when there is no user message', () => {
+    expect(formatTitleInput([{ role: 'assistant', text: '只剩我' }])).toBe('对话记录（从旧到新）：\n助手：只剩我');
   });
 });
 

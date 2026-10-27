@@ -1,6 +1,7 @@
 import { parsePluginManifest, type PluginManifest } from '@packages/mica-plugin/PluginManifest.js';
 import sessionRenameManifest from '../../plugins/session-rename/plugin.json';
 import sessionNotesManifest from '../../plugins/session-notes/plugin.json';
+import sessionTagsManifest from '../../plugins/session-tags/plugin.json';
 import todoManifest from '../../plugins/todo/plugin.json';
 
 /**
@@ -16,6 +17,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(todoManifest),
   readManifest(sessionNotesManifest),
   readManifest(sessionRenameManifest),
+  readManifest(sessionTagsManifest),
 ];
 
 export const officialPluginIds = new Set(officialPluginManifests.map((manifest) => manifest.id));

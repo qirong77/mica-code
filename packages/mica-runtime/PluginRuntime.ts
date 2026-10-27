@@ -16,6 +16,15 @@ export type RuntimeInputReceivedHookEvent = {
   owner: RuntimeOwner;
 };
 
+/** `turn:before`：用户输入已落进会话，模型请求还没发出。 */
+export type RuntimeTurnBeforeHookEvent = {
+  /** 触发这一轮的宿主（交互式 runtime 或 headless host）。 */
+  runtime: unknown;
+  input: RuntimeInput;
+  /** 已解析的多模态内容；未解析时为 undefined。 */
+  content?: unknown;
+};
+
 export type RuntimeTurnAfterHookEvent = {
   input: RuntimeInput;
   elapsedMs: number;

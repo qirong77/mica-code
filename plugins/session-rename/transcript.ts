@@ -20,6 +20,13 @@ export type TranscriptOptions = {
   maxMessages: number;
   /** 单条最多保留多少字符，超出截断。 */
   maxCharsPerMessage?: number;
+  /**
+   * 本轮正在执行的用户输入。
+   *
+   * `turn:before` 时它还不在 agent history 里（TUI 只进了 `uiState`，headless 只是
+   * `pendingUserMessage`），所以只能由 hook 事件补进来——而它正是标题要概括的东西。
+   */
+  latestUserText?: string;
 };
 
 const DEFAULT_MAX_CHARS_PER_MESSAGE = 600;
@@ -43,12 +50,52 @@ export function buildTranscript(
     entries.push({ role, text: truncate(text, maxChars) });
   }
 
+  appendLatestUserText(entries, options.latestUserText, maxChars);
   return options.maxMessages > 0 ? entries.slice(-options.maxMessages) : entries;
 }
 
 /** 成对出现的对话文本，直接作为标题模型的输入。 */
 export function formatTranscript(entries: readonly TranscriptEntry[]): string {
   return entries.map((entry) => `${entry.role === 'user' ? '用户' : '助手'}：${entry.text}`).join('\n\n');
+}
+
+/**
+ * 标题模型的输入：先给上下文，再单独点出「最新请求」。
+ *
+ * 两段分开写，是因为标题要概括的是**这一轮**在做什么；混成一段时模型很容易被前面几轮
+ * 的内容带跑（尤其是旧任务比新请求长得多的时候）。
+ */
+export function formatTitleInput(entries: readonly TranscriptEntry[]): string {
+  let latestIndex = -1;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (entries[index]?.role === 'user') {
+      latestIndex = index;
+      break;
+    }
+  }
+  if (latestIndex < 0) return ['对话记录（从旧到新）：', formatTranscript(entries)].join('\n');
+
+  const latest = entries[latestIndex]!;
+  const earlier = entries.filter((_, index) => index !== latestIndex);
+  return [
+    ...(earlier.length > 0 ? ['对话记录（从旧到新，仅用于理解上下文）：', formatTranscript(earlier), ''] : []),
+    '用户最新请求（标题概括这一段）：',
+    `用户：${latest.text}`,
+  ].join('\n');
+}
+
+/** 与 `buildTranscript` 的截断规则一致，重复的输入不会被算成两条对话。 */
+function appendLatestUserText(entries: TranscriptEntry[], latestUserText: string | undefined, maxChars: number): void {
+  const text = latestUserText ? messageText(latestUserText) : '';
+  if (!text) return;
+  const latest = truncate(text, maxChars);
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (!entry || entry.role !== 'user') continue;
+    if (entry.text === latest) return;
+    break;
+  }
+  entries.push({ role: 'user', text: latest });
 }
 
 export function messageText(content: string | MicaUiContentBlockParam[]): string {

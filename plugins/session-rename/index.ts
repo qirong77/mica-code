@@ -1,7 +1,7 @@
 import { pluginLogPath, type PluginContext } from '@packages/mica-plugin/index.js';
-import type { RuntimeTurnAfterHookEvent } from '@packages/mica-runtime/index.js';
+import type { RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
-import { buildTranscript, formatTranscript } from './transcript.js';
+import { buildTranscript, formatTitleInput, messageText } from './transcript.js';
 import {
   isTitleRequestConfigured,
   requestSessionTitle,
@@ -11,9 +11,13 @@ import {
 
 /** 与 `plugin.json` 里的 `prompt.default` 保持一致（有测试对账）。 */
 export const DEFAULT_PROMPT = [
-  '你在为一个编程助手会话起标题。',
-  '只输出标题本身：一行、不超过 20 个字、不要引号、不要句号、不要 markdown。',
-  '用中文概括这段对话在做什么，宁可具体（改哪个模块、修什么 bug），也不要空泛（如「代码讨论」「修复问题」）。',
+  '你在为编程助手会话起标题，标题要概括用户最近一次提出的任务。',
+  '输入分两段：对话记录用来理解上下文（改哪个模块、进行到哪一步），用户最新请求是标题的对象。',
+  '先读对话记录，再按最新请求定标题；两者不一致时以最新请求为准，不要沿用上一轮的主题。',
+  '最新请求太含糊（如「继续」「再改一下」）时，用上下文补全它真正指的事。',
+  '只输出标题本身：一行、不超过 20 个字，不要引号、句号或 markdown。',
+  '要具体：写清动作和对象（改哪个模块、修什么 bug），不要泛泛的类别（如「代码讨论」「修复问题」）。',
+  '不要照抄用户原话里的寒暄、举例或粘贴的报错，只取其中的动作与目标。',
 ].join('\n');
 
 const DEFAULT_MAX_MESSAGES = 12;
@@ -23,15 +27,19 @@ const MAX_MESSAGES_LIMIT = 50;
 type SessionRenameState = {
   running: boolean;
   lastAttemptAt: number;
+  /** 上次成功起标题用的「最新请求」：同一条请求不重复请求模型。 */
+  lastRequestText: string;
 };
 
 /**
  * 自动重命名会话。
  *
- * 每轮**成功**结束后（`turn:after` + `completed`）把用户与助手的文本交给另一台模型，
+ * 每轮**开始运行前**（`turn:before`）把最近的对话文本与本轮用户请求交给另一台模型，
  * 让它给出一个贴题的标题。几个刻意的取舍：
  *
- * - 不阻塞 turn：重命名是一次外部请求，`turn:after` 里只是发起，失败只记日志；
+ * - 不阻塞 turn：重命名是一次外部请求，`turn:before` 里只是发起，失败只记日志；
+ * - 放在开始之前，是因为标题要在用户盯着这一轮跑的时候就有意义；放在结束之后，
+ *   标题永远滞后一轮，用户看到的始终是上一件事的标题；
  * - 不覆盖用户的标题：`SessionController.renameCurrent(title, { source: 'auto' })` 在
  *   `titleSource === 'manual'` 时直接返回 false；
  * - 工具调用与结果不进 prompt（见 `transcript.ts`）：它们不是对话内容；
@@ -107,26 +115,27 @@ export default function setup(ctx: PluginContext): void {
     if (!info) throw new Error('当前没有会话');
     const title = await rename({
       ctx,
-      owner,
       sessionId: info.id,
       currentTitle: info.title,
       config,
       maxMessages: maxMessages(),
+      // 手动触发时这一轮已经跑完，最后一条用户消息就在历史里。
+      latestUserText: '',
     });
     if (title === null) throw new Error('这次没有生成新标题（内容不足，或用户已手动命名）');
     return title;
   };
 
-  const hookSubscription = ctx.hooks.on<RuntimeTurnAfterHookEvent>(
-    'turn:after',
+  const hookSubscription = ctx.hooks.on<RuntimeTurnBeforeHookEvent>(
+    'turn:before',
     (event) => {
-      // 只有正常结束的一轮才有「完整的问答」。中止或失败时助手的文本往往只是一半，
-      // 拿它去起标题会把错误的印象固化进标题。
-      if (event.outcome !== 'completed') return;
+      // 系统注入（compact 边界、插件通知）不是用户提的要求，拿它当标题依据只会得到
+      // 一句内部文本。
+      if (event.input.source === 'system') return;
       const session = ctx.session;
       if (!session) return;
 
-      const info = session.describe(event.owner);
+      const info = session.describe();
       if (!info) return;
       if (info.titleSource === 'manual') {
         ctx.logger.info('session-rename:skip', { reason: 'manual-title', sessionId: info.id });
@@ -143,30 +152,38 @@ export default function setup(ctx: PluginContext): void {
         return;
       }
 
-      const state = states.get(info.id) ?? { running: false, lastAttemptAt: 0 };
+      const latestUserText = messageText(event.input.text ?? '');
+      const state = states.get(info.id) ?? { running: false, lastAttemptAt: 0, lastRequestText: '' };
       if (state.running) return;
+      // 同一条用户请求只起一次标题：`mica exec` 在一轮结束后会再补发一次 `turn:before`，
+      // 重复请求既改不动标题，也白花一次调用。
+      if (latestUserText && state.lastRequestText === latestUserText) return;
       const interval = minIntervalMs();
       if (interval > 0 && Date.now() - state.lastAttemptAt < interval) return;
 
-      states.set(info.id, { running: true, lastAttemptAt: Date.now() });
+      states.set(info.id, { ...state, running: true, lastAttemptAt: Date.now() });
       // 不 await：这里只是发起，重命名失败绝不能拖住或打断 turn。
-      void rename({
-        ctx,
-        owner: event.owner,
-        sessionId: info.id,
-        currentTitle: info.title,
-        config,
-        maxMessages: maxMessages(),
-      })
-        .catch((error: unknown) => {
+      void (async () => {
+        try {
+          const title = await rename({
+            ctx,
+            sessionId: info.id,
+            currentTitle: info.title,
+            config,
+            maxMessages: maxMessages(),
+            latestUserText,
+          });
+          if (title === null) return;
+          const current = states.get(info.id);
+          if (current) states.set(info.id, { ...current, lastRequestText: latestUserText });
+        } catch (error) {
           ctx.logger.warn('session-rename:failed', { sessionId: info.id, error: errorMessage(error) });
           ctx.health.report({ level: 'error', message: `上次自动改名失败：${errorMessage(error)}` });
-          return null;
-        })
-        .finally(() => {
+        } finally {
           const current = states.get(info.id);
           if (current) states.set(info.id, { ...current, running: false });
-        });
+        }
+      })();
     },
     { pluginId: ctx.pluginId },
   );
@@ -220,20 +237,18 @@ export default function setup(ctx: PluginContext): void {
 
 async function rename(input: {
   ctx: PluginContext;
-  owner: unknown;
   sessionId: string;
   currentTitle: string;
   config: TitleRequestConfig;
   maxMessages: number;
+  latestUserText: string;
 }): Promise<string | null> {
-  const { ctx, owner, sessionId, currentTitle, config, maxMessages } = input;
+  const { ctx, sessionId, currentTitle, config, maxMessages, latestUserText } = input;
   const session = ctx.session;
   if (!session) return null;
 
-  const entries = buildTranscript(session.messages(owner), { maxMessages });
-  const hasUser = entries.some((entry) => entry.role === 'user');
-  const hasAssistant = entries.some((entry) => entry.role === 'assistant');
-  if (!hasUser || !hasAssistant) {
+  const entries = buildTranscript(session.messages(), { maxMessages, latestUserText });
+  if (!entries.some((entry) => entry.role === 'user')) {
     ctx.logger.info('session-rename:skip', { reason: 'not-enough-conversation', sessionId, entries: entries.length });
     return null;
   }
@@ -243,11 +258,12 @@ async function rename(input: {
     sessionId,
     entries: entries.length,
     chars: entries.reduce((total, entry) => total + entry.text.length, 0),
+    latestChars: latestUserText.length,
     model: config.model,
     protocol: config.protocol,
   });
 
-  const { title: rawTitle, usage } = await requestSessionTitle(config, formatTranscript(entries));
+  const { title: rawTitle, usage } = await requestSessionTitle(config, formatTitleInput(entries));
   const title = sanitizeTitle(rawTitle);
   if (!title) {
     ctx.logger.warn('session-rename:empty-title', { sessionId, elapsedMs: Date.now() - startedAt });
@@ -258,7 +274,7 @@ async function rename(input: {
     return title;
   }
 
-  const renamed = session.rename(title, { owner, source: 'auto' });
+  const renamed = session.rename(title, { source: 'auto' });
   // 成功一次就把「待配置 / 上次失败」的状态收回去，页面上不会一直挂着旧故障。
   if (renamed) ctx.health.report({ level: 'ok', message: `最近一次改名成功：${title}` });
   ctx.logger.info('session-rename:renamed', {

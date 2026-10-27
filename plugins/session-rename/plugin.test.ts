@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import type { PluginContext, PluginSessionInfo, PluginSettingValues } from '@packages/mica-plugin/index.js';
-import type { RuntimeTurnAfterHookEvent } from '@packages/mica-runtime/index.js';
+import type { RuntimeInputSource, RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 
 const query = vi.fn(async () => '标题：修复登录超时\n说明：给 fetch 加了 timeout');
@@ -38,15 +38,52 @@ const configuredSettings: PluginSettingValues = {
 };
 
 describe('session-rename plugin', () => {
-  it('renames the session with an auto-sourced title after a completed turn', async () => {
+  it('renames the session with an auto-sourced title before the turn runs', async () => {
     const harness = createHarness();
 
-    await harness.emitTurnAfter('completed');
+    await harness.emitTurnBefore();
     const renamed = await harness.renamed;
 
     expect(renamed).toEqual({ title: '修复登录超时', source: 'auto' });
     expect(query).toHaveBeenCalledOnce();
     expect(String((query.mock.calls[0] as unknown[])[0])).toContain('用户：登录老是超时');
+  });
+
+  it('starts the title request without holding the turn open', async () => {
+    const harness = createHarness();
+    let releaseQuery: (title: string) => void = () => {};
+    query.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseQuery = resolve;
+        }),
+    );
+
+    // handler 必须同步返回：turn:before 是 await 的，等一次外部请求就是每轮都卡 1-2 秒。
+    await expect(harness.emitTurnBefore()).resolves.toBeUndefined();
+    expect(harness.renameCalls).toEqual([]);
+
+    releaseQuery('修复登录超时');
+    await vi.waitFor(() => expect(harness.renameCalls).toHaveLength(1));
+  });
+
+  it('puts the newest request after the context so the title follows the current task', async () => {
+    const harness = createHarness({
+      messages: [
+        { role: 'user', content: '重构压缩策略' },
+        { role: 'assistant', content: '把阈值挪进 CompactionService 了' },
+      ],
+    });
+
+    await harness.emitTurnBefore({ text: '顺便把登录超时也修了' });
+    await harness.renamed;
+
+    const prompt = String((query.mock.calls.at(-1) as unknown[])[0]);
+    expect(prompt).toContain('对话记录（从旧到新，仅用于理解上下文）：');
+    expect(prompt).toContain('用户：重构压缩策略');
+    expect(prompt).toContain('用户最新请求（标题概括这一段）：\n用户：顺便把登录超时也修了');
+    // 本轮输入只出现一次：TUI 里它已经进了 uiState，headless 里还没进 agent history。
+    expect(prompt.match(/顺便把登录超时也修了/g)).toHaveLength(1);
   });
 
   it('never sends tool noise: the transcript is text messages only', async () => {
@@ -57,7 +94,7 @@ describe('session-rename plugin', () => {
       ],
     });
 
-    await harness.emitTurnAfter('completed');
+    await harness.emitTurnBefore({ text: '那修一下' });
     await harness.renamed;
 
     const prompt = String((query.mock.calls.at(-1) as unknown[])[0]);
@@ -68,17 +105,16 @@ describe('session-rename plugin', () => {
   it('respects a title the user renamed by hand', async () => {
     const harness = createHarness({ titleSource: 'manual' });
 
-    await harness.emitTurnAfter('completed');
+    await harness.emitTurnBefore();
 
     expect(harness.renameCalls).toEqual([]);
     expect(query).not.toHaveBeenCalled();
   });
 
-  it('skips failed and aborted turns', async () => {
+  it('ignores system inputs, which carry no user request', async () => {
     const harness = createHarness();
 
-    await harness.emitTurnAfter('aborted');
-    await harness.emitTurnAfter('error');
+    await harness.emitTurnBefore({ text: '[Mica compact boundary]\n{}', source: 'system' });
 
     expect(query).not.toHaveBeenCalled();
   });
@@ -86,7 +122,7 @@ describe('session-rename plugin', () => {
   it('stays silent when the endpoint is not configured yet', async () => {
     const harness = createHarness({ settings: { ...configuredSettings, baseUrl: '', model: '' } });
 
-    await harness.emitTurnAfter('completed');
+    await harness.emitTurnBefore();
 
     expect(query).not.toHaveBeenCalled();
     expect(harness.renameCalls).toEqual([]);
@@ -96,7 +132,7 @@ describe('session-rename plugin', () => {
     const harness = createHarness();
     query.mockRejectedValueOnce(new Error('401 invalid key'));
 
-    await expect(harness.emitTurnAfter('completed')).resolves.toBeUndefined();
+    await expect(harness.emitTurnBefore()).resolves.toBeUndefined();
     await vi.waitFor(() => expect(harness.logger.warn).toHaveBeenCalled());
 
     expect(harness.renameCalls).toEqual([]);
@@ -106,12 +142,25 @@ describe('session-rename plugin', () => {
     const harness = createHarness({ title: '修复登录超时' });
     query.mockResolvedValueOnce('修复登录超时');
 
-    await harness.emitTurnAfter('completed');
+    await harness.emitTurnBefore();
     await vi.waitFor(() =>
       expect(harness.logger.info).toHaveBeenCalledWith('session-rename:unchanged', expect.anything()),
     );
 
     expect(harness.renameCalls).toEqual([]);
+  });
+
+  it('asks once per user request, not again for the trailing turn:before of one-shot hosts', async () => {
+    const harness = createHarness();
+
+    await harness.emitTurnBefore();
+    await vi.waitFor(() => expect(harness.renameCalls).toHaveLength(1));
+    await harness.flush();
+
+    await harness.emitTurnBefore();
+    await harness.flush();
+
+    expect(query).toHaveBeenCalledOnce();
   });
 });
 
@@ -178,14 +227,24 @@ function createHarness(options: HarnessOptions = {}) {
     healthReports,
     renameCalls,
     renamed,
-    async emitTurnAfter(outcome: RuntimeTurnAfterHookEvent['outcome']) {
-      await hooks.emit<RuntimeTurnAfterHookEvent>('turn:after', {
-        input: { id: 'input-1', text: '登录老是超时', source: 'ui', createdAt: 0 },
-        elapsedMs: 10,
-        hasError: outcome === 'error',
-        outcome,
-        owner: {},
+    /**
+     * 派发一次 `turn:before`。
+     *
+     * handler 是同步返回的（改名只是发起），所以这里 resolve 时请求多半还没回来；
+     * 要等结果用 `renamed` 或 `vi.waitFor`。
+     */
+    async emitTurnBefore(options: { text?: string; source?: RuntimeInputSource } = {}) {
+      await hooks.emit<RuntimeTurnBeforeHookEvent>('turn:before', {
+        runtime: {},
+        input: {
+          id: 'input-1',
+          text: options.text ?? '登录老是超时',
+          source: options.source ?? 'ui',
+          createdAt: 0,
+        },
       });
     },
+    /** 把已排队的 microtask（rename 链）全部跑完。 */
+    flush: () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
   };
 }
