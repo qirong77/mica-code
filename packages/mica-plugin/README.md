@@ -13,6 +13,10 @@
 - 维护启停状态（`$MICA_HOME/plugins-state.json`），停用的插件在启动阶段就不注册。
 - 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。
 - 插件日志：`ctx.logger` 自带文件输出，落在系统临时目录并按天分片、按大小轮转。
+- 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 出错」。
+- 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。
+- 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
+- 模型请求重写：`ctx.agent.onIterationRewrite()` 在两次模型请求之间改写要发送的历史（自动压缩用它）。
 
 ## 使用入口
 
@@ -47,6 +51,25 @@ context.onDispose(() => hook.dispose());
 ```
 
 这个 hook 只修改 system prompt，不会写入 user message 或 session provider history。显式传入自定义 system prompt 的 subagent 不经过该扩展点。
+
+### 模型请求之间的扩展
+
+某些能力不属于「某个工具」，而是「这次请求要发什么历史」。自动压缩是第一个这样的需求，
+但入口刻意做成通用的：任何想裁剪历史、按会话注入上下文、按成本降级的插件都走同一套。
+
+```ts
+const registration = context.agent!.onIterationRewrite(async (messages, agent) => {
+  if (agent.mode === 'one-shot') return null; // exec 没有下一轮，省不出东西
+  const usage = agent.lastUsage();
+  if (!usage || usage.inputTokens < 200_000) return null;
+  const { messages: next } = await agent.compact(messages, { mode: 'quick' });
+  return next;
+});
+context.onDispose(() => registration.dispose());
+```
+
+插件拿到的是**句柄**而不是 agent 本体：只能读最近一次用量、读写自己的会话状态、请求压缩，
+改不到 provider 配置、别的插件状态与会话读写面。声明 `requires: ["agent"]` 才会拿到它。
 
 ## 设计约束
 

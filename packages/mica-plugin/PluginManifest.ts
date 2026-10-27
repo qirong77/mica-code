@@ -66,6 +66,7 @@ export type PluginManifest = {
  * 宿主可以向插件提供的能力面。取值来自 `PluginContext` 的可选字段，新增能力时两处同步。
  */
 export const PLUGIN_REQUIREMENTS = [
+  'agent',
   'commands',
   'events',
   'git',
@@ -211,6 +212,8 @@ function readSettings(input: unknown): { ok: true; value: PluginSettingField[] }
       format: format.value,
       min: readFiniteNumber(entry.min),
       max: readFiniteNumber(entry.max),
+      step: readFiniteNumber(entry.step),
+      unit: readString(entry.unit)?.trim() || undefined,
       pattern: readString(entry.pattern)?.trim() || undefined,
     });
   }
@@ -264,6 +267,9 @@ function validateDefault(
   }
   if (type === 'number' && !Number.isFinite(Number(value))) {
     return `settings.${key}.default 必须是数字：${value}`;
+  }
+  if (type === 'switch' && value !== 'true' && value !== 'false') {
+    return `settings.${key}.default 只能是 true / false：${value}`;
   }
   return null;
 }

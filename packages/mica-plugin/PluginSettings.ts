@@ -10,7 +10,7 @@ import { join } from 'node:path';
  */
 export const PLUGIN_SETTINGS_DIR = 'plugin-settings';
 
-export type PluginSettingType = 'text' | 'password' | 'textarea' | 'select' | 'number';
+export type PluginSettingType = 'text' | 'password' | 'textarea' | 'select' | 'number' | 'switch';
 
 export type PluginSettingOption = {
   value: string;
@@ -39,6 +39,10 @@ export type PluginSettingField = {
   /** `format: 'number'`（或 `type: 'number'`）的取值下限 / 上限。 */
   min?: number;
   max?: number;
+  /** 数字项的步进（页面的 −/+ 按钮按它走）；缺省 1。 */
+  step?: number;
+  /** 数字项的单位，显示在控件右侧（`k tokens` / `分钟` / `次`）。 */
+  unit?: string;
   /** 额外的正则约束，作用于字符串值。 */
   pattern?: string;
 };
@@ -75,7 +79,14 @@ const SETTING_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 /** 声明字段的类型是否受支持。 */
 export function isPluginSettingType(value: unknown): value is PluginSettingType {
-  return value === 'text' || value === 'password' || value === 'textarea' || value === 'select' || value === 'number';
+  return (
+    value === 'text' ||
+    value === 'password' ||
+    value === 'textarea' ||
+    value === 'select' ||
+    value === 'number' ||
+    value === 'switch'
+  );
 }
 
 /** 字段 key 只允许标识符形式：它会变成 JSON 的键，也会被插件按名字读取。 */
@@ -101,6 +112,15 @@ export function validatePluginSettingValues(
   for (const field of fields) {
     const raw = values[field.key];
     const value = typeof raw === 'string' ? raw.trim() : '';
+
+    if (field.type === 'switch') {
+      // 开关只有两种合法取值：页面写 'true' / 'false'，其它一律算配置坏了，
+      // 否则插件读到 'yes' 之类的值时无法判断用户到底想要哪一种。
+      if (value && value !== 'true' && value !== 'false') {
+        issues.push({ key: field.key, label: field.label, message: '只能是 true / false' });
+      }
+      continue;
+    }
 
     if (!value) {
       // 空值只在 required 时算错：可选字段留空是「用默认行为」，不是配置残缺。

@@ -1,8 +1,10 @@
 import { parsePluginManifest, type PluginManifest } from '@packages/mica-plugin/PluginManifest.js';
+import autoCompactManifest from '../../plugins/auto-compact/plugin.json';
 import sessionRenameManifest from '../../plugins/session-rename/plugin.json';
 import sessionNotesManifest from '../../plugins/session-notes/plugin.json';
 import sessionTagsManifest from '../../plugins/session-tags/plugin.json';
 import todoManifest from '../../plugins/todo/plugin.json';
+import webSearchManifest from '../../plugins/web-search/plugin.json';
 
 /**
  * 官方插件的清单目录。
@@ -14,6 +16,8 @@ import todoManifest from '../../plugins/todo/plugin.json';
 export const OFFICIAL_PLUGINS_DIR = 'plugins';
 
 export const officialPluginManifests: PluginManifest[] = [
+  readManifest(autoCompactManifest),
+  readManifest(webSearchManifest),
   readManifest(todoManifest),
   readManifest(sessionNotesManifest),
   readManifest(sessionRenameManifest),

@@ -25,17 +25,11 @@ import {
   setPluginEnabled as setPluginEnabledInStore,
   setPluginSettings as setPluginSettingsInStore
 } from '@mica-config-ui/plugins'
-import { readSessionHead, summarizeSessionFile } from '@mica-config-ui/session-head'
+import { summarizeSessionFile } from '@mica-config-ui/session-head'
 // 内置 default role 与 CLI 同源：提示词模板就是 packages/mica-agent/prompt/system.md，
 // 展开品牌占位符后原样展示（只读），桌面宿主不自己留一份副本。
 import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?raw'
 import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js'
-import {
-  getAutoCompactSnapshot,
-  resetAutoCompactCounters as resetAutoCompactCountersInStore,
-  saveAutoCompactSettings
-} from './auto-compact.js'
-import { DEFAULT_AUTO_COMPACT_SETTINGS } from './auto-compact-state.js'
 import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from './browser-control.js'
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
 import { probeMcpServers } from './mcp-probe.js'
@@ -48,10 +42,7 @@ import { clearLogs, readPerformanceSummary } from './log.js'
  * CLI 的那些运行时包 —— 页面组件来自 packages/mica-config-ui，但它引用的数据操作在这里
  * 用最朴素的文件读写实现，和 CLI 侧（apps/config-web 的 server.ts）各自对着一份数据。
  *
- * 唯一的例外是自动压缩：它的设置与计数不在 `$MICA_HOME` 里，而是运行时自己的
- * `userData/auto-compact.json`（host/auto-compact.js 是唯一持有者，这里有它转发）。
- *
- * 受控浏览器同理：窗口活在 Electron 主进程（host/browser-control.js），运行时是纯 Node，
+ * 受控浏览器的窗口活在 Electron 主进程（host/browser-control.js），运行时是纯 Node，
  * 两边只能靠本机 HTTP 服务通信 —— 这里转发「读详情」，窗口的开 / 显示 / 隐藏 / 关闭
  * 全归 agent 经那套接口（与主区顶栏图标）做，配置页不提供入口。
  *
@@ -343,11 +334,6 @@ function loadSession(id) {
   return { session: readJson(path), path }
 }
 
-function readSessionTitle(path) {
-  const title = readSessionHead(path).title
-  return title === undefined ? undefined : cleanSessionTitle(title)
-}
-
 /**
  * 老会话的标题可能从带图片的输入原样截出来（`[Image](/Users/…/a.png) 帮我看下`）。
  * 本地路径对列表毫无意义，读取时剥掉占位符即可，不必改写用户文件。
@@ -466,49 +452,6 @@ function readSessionContextAnalysis(id) {
   )
 }
 
-/* -------------------------------------------------------------- 自动压缩 */
-
-/**
- * 计数按 sessionId 记（真正的数据与规则在 host/auto-compact.js，这里只是给页面看的投影）。
- * 标题从会话文件里现读：计数可以留着已经删掉的会话，那就只显示 id 片段而不是当成错误。
- */
-function sessionTitleOf(sessionId) {
-  const safeId = String(sessionId ?? '').replace(/[^A-Za-z0-9._-]/g, '')
-  if (!safeId) return undefined
-  const path = sessionPath(safeId)
-  if (!existsSync(path)) return undefined
-  try {
-    return readSessionTitle(path)
-  } catch {
-    return undefined
-  }
-}
-
-/** 最近压过的排前面；没压成功过（没有时间戳）的排最后，顺序稳定。 */
-function autoCompactCounters(counters) {
-  return Object.entries(counters)
-    .map(([sessionId, countersOfSession]) => ({
-      sessionId,
-      title: sessionTitleOf(sessionId),
-      ...countersOfSession
-    }))
-    .sort((left, right) => {
-      const leftAt = Date.parse(left.lastRunAt || '')
-      const rightAt = Date.parse(right.lastRunAt || '')
-      return (Number.isFinite(rightAt) ? rightAt : -1) - (Number.isFinite(leftAt) ? leftAt : -1)
-    })
-}
-
-function readAutoCompactDetails() {
-  const snapshot = getAutoCompactSnapshot()
-  return {
-    path: snapshot.path,
-    settings: snapshot.settings,
-    defaults: { ...DEFAULT_AUTO_COMPACT_SETTINGS },
-    counters: autoCompactCounters(snapshot.counters)
-  }
-}
-
 /* ------------------------------------------------------------ 受控浏览器 */
 
 /* ------------------------------------------------------------------ 动作表 */
@@ -587,16 +530,6 @@ export const configWebActions = {
   readSessionsDetails: () => readSessionsDetails(),
   readSessionDetails: (input) => readSessionDetails(text(input, 'id')),
   readSessionContent: (input) => readSessionContent(text(input, 'id')),
-
-  readAutoCompactDetails: () => readAutoCompactDetails(),
-  writeAutoCompactSettings: (input) => {
-    saveAutoCompactSettings(input?.settings)
-    return readAutoCompactDetails()
-  },
-  resetAutoCompactCounters: (input) => {
-    resetAutoCompactCountersInStore(input?.sessionId)
-    return readAutoCompactDetails()
-  },
 
   readBrowserControlDetails: () => readBrowserControlDetailsFromHost(),
   readTerminalControlDetails: () => readTerminalControlDetailsFromHost(),

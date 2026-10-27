@@ -4,7 +4,7 @@
  * 配置页不再是「一个 JSON 编辑器」，而是按字段编辑；这份文件负责把 JSON 与表单之间来回
  * 转换，并且只用纯函数实现，好在没有 DOM 的环境里测：
  *
- * - **不丢字段**：表单只认识 providers / searxngUrl 这些已知字段，其余键（mcpServers、
+ * - **不丢字段**：表单只认识 providers 这类已知字段，其余键（mcpServers、
  *   capabilityDefaults，以及任何我们还不认识的字段）原样留在 draft 上写回去。provider 项里
  *   的未知字段同样保留，只覆盖表单管得着的那几个。
  * - **键顺序稳定**：写入前按固定顺序排列已知键，未知键保持原顺序跟在后面，避免每次保存都
@@ -18,7 +18,7 @@ export type ProviderProtocolValue = (typeof PROVIDER_PROTOCOL_VALUES)[number];
 export const DEFAULT_PROVIDER_PROTOCOL: ProviderProtocolValue = 'openai_chat_completions';
 
 /** 表单已知的顶层字段，其余一律当「高级字段」原样保留。 */
-export const KNOWN_CONFIG_KEYS = ['providers', 'searxngUrl', 'mcpServers', 'capabilityDefaults'] as const;
+export const KNOWN_CONFIG_KEYS = ['providers', 'mcpServers', 'capabilityDefaults'] as const;
 const CONFIG_KEY_ORDER: readonly string[] = KNOWN_CONFIG_KEYS;
 const PROVIDER_KEY_ORDER = [
   'id',
@@ -107,18 +107,6 @@ export function removeProviderDraft(draft: ConfigDraft, index: number): ConfigDr
   return { ...draft, providers: providerEntries(draft).filter((_, current) => current !== index) };
 }
 
-export function readSearxngUrl(draft: ConfigDraft): string {
-  return text(draft.searxngUrl);
-}
-
-export function writeSearxngUrl(draft: ConfigDraft, value: string): ConfigDraft {
-  const next = { ...draft };
-  const trimmed = value.trim();
-  if (trimmed) next.searxngUrl = trimmed;
-  else delete next.searxngUrl;
-  return next;
-}
-
 /** 表单不管、但文件里存在的顶层键（在「高级字段」里列出来，免得悄悄看不见）。 */
 export function extraConfigKeys(draft: ConfigDraft): string[] {
   return Object.keys(draft).filter((key) => !CONFIG_KEY_ORDER.includes(key));
@@ -185,10 +173,6 @@ export function validateConfigDraft(draft: ConfigDraft): ConfigDraftIssue[] {
         issues.push({ key: `${base}.api_key`, message: '必须是字符串' });
       }
     });
-  }
-
-  if (draft.searxngUrl !== undefined && typeof draft.searxngUrl !== 'string') {
-    issues.push({ key: 'searxngUrl', message: '必须是字符串' });
   }
 
   return issues;

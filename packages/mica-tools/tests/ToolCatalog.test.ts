@@ -12,7 +12,7 @@ describe('tool catalog', () => {
 
   it('leaves tools without a shared prefix ungrouped', () => {
     const byName = new Map(getToolCatalog().map((tool) => [tool.name, tool]));
-    for (const name of ['run_shell', 'apply_patch', 'read_file', 'web_search', 'agent', 'skill']) {
+    for (const name of ['run_shell', 'apply_patch', 'read_file', 'web_fetch', 'agent', 'skill']) {
       expect(byName.get(name)?.group, name).toBeNull();
     }
   });
@@ -34,7 +34,7 @@ describe('tool catalog', () => {
     const byName = new Map(getToolCatalog().map((tool) => [tool.name, tool]));
     expect(byName.get('read_file')?.group).toBeNull();
     expect(byName.get('read_image')?.group).toBeNull();
-    expect(byName.get('web_search')?.group).toBeNull();
+    expect(byName.get('web_fetch')?.group).toBeNull();
   });
 
   it('summarises input parameters for the detail panel', () => {

@@ -232,7 +232,8 @@ mica models --json</code></pre>
             <code>SEARXNG_URL</code>
           </td>
           <td>
-            内置网络搜索服务地址；优先级低于配置文件的 <code>searxngUrl</code>。
+            网络搜索插件读取的 SearXNG 地址；插件设置里填了就以它为准，留空时用这个环境变量，再退回{' '}
+            <code>http://127.0.0.1:8080</code>。
           </td>
         </tr>
       </tbody>
@@ -245,11 +246,12 @@ mica models --json</code></pre>
 
   <h2>配置网络搜索</h2>
   <p>
-    内置 <code>web_search</code> 使用 SearXNG 实例，实例需启用 JSON 格式响应。在 <code>config.json</code> 顶层设置{' '}
-    <code>searxngUrl</code>，或在没有该配置时设置 <code>SEARXNG_URL</code>；两者均未提供时使用{' '}
-    <code>http://127.0.0.1:8080</code>。这项配置与模型 API 分开管理。
+    <code>web_search</code> 由官方插件 <code>web-search</code> 提供，使用 SearXNG 实例，实例需启用 JSON
+    格式响应。地址在配置页的 <code>Plugins</code> → <code>Web Search</code> 中填写：插件设置里的地址优先，
+    留空时读取环境变量 <code>SEARXNG_URL</code>，两者都未提供则使用 <code>http://127.0.0.1:8080</code>。
+    这项配置保存在 <code>$MICA_HOME/plugin-settings/web-search.json</code>，与模型 API 分开管理，不写在{' '}
+    <code>config.json</code>。
   </p>
-
   <h2>排查连接问题</h2>
   <ul>
     <li>

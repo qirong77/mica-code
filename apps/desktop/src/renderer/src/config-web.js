@@ -31,10 +31,6 @@ export function createDesktopConfigWebClient() {
     setPluginEnabled: (id, enabled) => invoke('setPluginEnabled', { id, enabled }),
     writePluginSettings: (id, values) => invoke('writePluginSettings', { id, values }),
 
-    readAutoCompactDetails: () => invoke('readAutoCompactDetails'),
-    writeAutoCompactSettings: (settings) => invoke('writeAutoCompactSettings', { settings }),
-    resetAutoCompactCounters: (sessionId) => invoke('resetAutoCompactCounters', { sessionId }),
-
     readBrowserControlDetails: () => invoke('readBrowserControlDetails'),
     readTerminalControlDetails: () => invoke('readTerminalControlDetails'),
 

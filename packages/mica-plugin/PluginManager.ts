@@ -1,6 +1,7 @@
 import type { Disposable } from '@packages/mica-common/index.js';
 import type { MicaPlugin } from './Plugin.js';
 import type { PluginContext } from './PluginContext.js';
+import type { PluginAgentRegistry } from './PluginAgent.js';
 import type { PluginRequirement } from './PluginManifest.js';
 import type { PluginPromptSections } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
@@ -44,6 +45,10 @@ export type PluginBaseContext = Omit<PluginContext, 'pluginId' | 'onDispose' | '
    * 宿主只需要把 `AgentRuntime.promptSections` 交出来。
    */
   promptSections?: PluginPromptSections;
+  /**
+   * 内核持有的模型请求改写表。manager 按插件 id 绑定后交给插件，插件注册不到别人名下。
+   */
+  agentRegistry?: PluginAgentRegistry;
 };
 
 export class PluginManager {
@@ -67,7 +72,7 @@ export class PluginManager {
       const configDir = baseContext.paths?.config;
       // `sessionStateFor` / `promptSections` 由 manager 消费（下面按 pluginId 生成
       // 本插件专属的入口），不能原样漏进 ctx，否则插件会看到一个能读别人状态的入口。
-      const { sessionStateFor, promptSections: promptRegistry, ...shared } = baseContext;
+      const { sessionStateFor, promptSections: promptRegistry, agentRegistry, ...shared } = baseContext;
       const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
       const ctx: PluginContext = {
         ...shared,
@@ -81,6 +86,9 @@ export class PluginManager {
       if (sessionState) ctx.sessionState = sessionState;
       if (promptRegistry) {
         ctx.prompt = { section: (section) => promptRegistry.add(plugin.id, section) };
+      }
+      if (agentRegistry) {
+        ctx.agent = { onIterationRewrite: (handler) => agentRegistry.onIterationRewrite(plugin.id, handler) };
       }
 
       // 清单声明的能力必须都能兑现，否则插件一定会在运行期踩空。放在 setup 之前判断，

@@ -9,15 +9,10 @@ import { VERSION_LABEL } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import {
-  AUTO_COMPACT_DEFAULTS,
   SESSION_NOTES_PLUGIN_ID,
   normalizeSessionNotes,
-  normalizeAutoCompactOverride,
   prepareImageForApi,
-  pruneAutoCompactOverride,
-  resolveAutoCompactSettings,
 } from '@packages/mica-common/index.js';
-import type { AutoCompactSettings } from '@packages/mica-common/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import type { AgentContentBlockParam, AgentQueryContent } from '@packages/mica-agent/index.js';
 import {
@@ -27,7 +22,6 @@ import {
   CODEX_ERROR_METHOD_NOT_FOUND,
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
-  MICA_AUTO_COMPACT_NOTIFICATIONS,
   MICA_NOTES_NOTIFICATIONS,
   MICA_BTW_NOTIFICATIONS,
   MICA_METHODS,
@@ -76,7 +70,6 @@ import {
   type HeadlessTurnStartResult,
 } from '../runtime/HeadlessTurnExecutor.js';
 import { attachCodexProjector, type CodexProjector } from '../runtime/CodexProjector.js';
-import { AutoCompactController } from '../runtime/autoCompact.js';
 import { BtwThreads, readStoredBtwThreads, writeStoredBtwThreads } from '../runtime/btwThread.js';
 import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory.js';
 import { SessionController } from '../session/SessionController.js';
@@ -261,11 +254,6 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let subagentTasks: SubagentTaskManager | null = null;
   let projector: CodexProjector | null = null;
   let executor: HeadlessTurnExecutor | null = null;
-  let autoCompact: AutoCompactController | null = null;
-  // 跨请求共享：本进程最近一次从宿主收到的压缩设置（默认值的真相）。
-  const autoCompactDefaultSettings: { current: AutoCompactSettings } = {
-    current: { ...AUTO_COMPACT_DEFAULTS },
-  };
   let btwController: BtwThreads | null = null;
   let pluginHost: ReturnType<typeof createHeadlessPluginHost> | null = null;
   let mcpStarted = false;
@@ -335,18 +323,6 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
 
     const hooks = new micaPlugin.HookRegistry();
     agent = new AgentRuntime(runtimeOverride, hooks);
-    // 自动压缩：设置与计数由桌面宿主在 turn/start 时下发（常驻 host 只 spawn 一次，
-    // 页面上改的阈值/次数只能随 turn 带过来），计数经通知回传宿主持久化。
-    autoCompact = new AutoCompactController({
-      agent,
-      onStatus: (counters) => {
-        try {
-          writeNotification(MICA_AUTO_COMPACT_NOTIFICATIONS.updated, { threadId: sessionId, ...counters });
-        } catch {
-          // stdout 在退出流程里可能已经关闭；计数回传失败不该影响 turn。
-        }
-      },
-    });
     sessionController = new SessionController({
       agent,
       config: { apply() {} },
@@ -491,9 +467,6 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       agent,
       sessionController,
       maxTurns: options.maxTurns,
-      autoCompact: {
-        rewriteIterationMessages: (messages) => autoCompact!.rewriteIterationMessages(messages),
-      },
       onEvent: (event) => {
         if (event.type === 'turn:finish') projector?.completeAgentMessage();
         handleTurnEvent(writeNotification, event, sessionId, {
@@ -639,8 +612,6 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         refreshTaskSnapshots: () => pushTaskSnapshots(),
         runtimeOverride,
         executor: executor!,
-        autoCompact: autoCompact!,
-        autoCompactDefaults: autoCompactDefaultSettings,
         btw: btwController,
         mcpReady: mcpInitPromise ?? Promise.resolve(),
         sessionId,
@@ -673,17 +644,6 @@ type HostContext = {
   refreshTaskSnapshots: () => void;
   runtimeOverride: AgentRuntimeConfigOverride;
   executor: HeadlessTurnExecutor;
-  /** Automatic context compaction state machine (settings + run counters). */
-  autoCompact: AutoCompactController;
-  /**
-   * 宿主上次下发的压缩设置（桌面设置页里的全局默认值）。`mica/autoCompact/get`
-   * 用它展示「默认是多少」，会话覆盖则叠在它上面——默认值只有宿主一份，常驻 host
-   * 自己不去读配置文件。
-   *
-   * 每个请求都会新建一份 ctx，所以这里放的是**共享的**持有对象：写到它里面，
-   * 下一次请求才读得到（写成 ctx 的普通字段每次都会回落到初始值）。
-   */
-  autoCompactDefaults: { current: AutoCompactSettings };
   /** By The Way（btw）线程：面板连续追问即 CLI 的 `/btw -continue`。 */
   btw: BtwThreads | null;
   /** Resolves once the background MCP init finished (never rejects). */
@@ -844,28 +804,6 @@ function applyRoleOverride(ctx: HostContext, params: Record<string, unknown>): v
  * numbers between turns, so per-turn delivery is the only path that reaches it.
  * Unknown/missing field types degrade to the defaults inside the controller.
  */
-function applyAutoCompactParams(ctx: HostContext, params: Record<string, unknown>): void {
-  if (params.autoCompact === undefined) {
-    // 宿主没带设置（exec / codex-family driver）：保留「不压缩」的既有行为，
-    // 只把本会话的覆盖应用上去也没有意义，因为下游会拒绝压缩。
-    return;
-  }
-  const raw = (params.autoCompact && typeof params.autoCompact === 'object' ? params.autoCompact : {}) as Record<
-    string,
-    unknown
-  >;
-  // 宿主的这份是默认值；本会话改过的键盖在上面。计数（quickRuns/modelRuns/lastRunAt）
-  // 仍以宿主账本为准，所以只替换设置部分。
-  const base = resolveAutoCompactSettings(AUTO_COMPACT_DEFAULTS, raw);
-  ctx.autoCompactDefaults.current = base;
-  ctx.autoCompact.setParams({
-    ...resolveAutoCompactSettings(base, ctx.agent.autoCompactOverrideSelection),
-    quickRuns: raw.quickRuns,
-    modelRuns: raw.modelRuns,
-    lastRunAt: raw.lastRunAt ?? null,
-  });
-}
-
 function warnIfCodexPolicyCannotBeEnforced(ctx: HostContext, params: Record<string, unknown>): void {
   const approval = params.approvalPolicy;
   const sandbox = params.sandboxPolicy ?? params.sandbox;
@@ -1017,7 +955,6 @@ async function handleCodexRequest(
       }
       warnIfCodexPolicyCannotBeEnforced(ctx, params);
       applyRoleOverride(ctx, params);
-      applyAutoCompactParams(ctx, params);
       const model = paramString(params, 'model');
       const effort = paramString(params, 'effort');
       if (model || effort) {
@@ -1192,7 +1129,6 @@ async function handleCodexRequest(
       // 必须在 loadSnapshot 之后：loadSnapshot 会按快照里的 role 重置 currentRole，
       // 先应用角色会被上面这份「截断前快照」覆盖回旧角色。
       applyRoleOverride(ctx, params);
-      applyAutoCompactParams(ctx, params);
       await ctx.mcpReady;
       // 落盘要在通知之前：turn 启动后的首次保存跑在 executor.start 之后的异步
       // 路径上（runTurn 里先 await parseImageRefs），此刻客户端若直接读文件会拿到
@@ -1548,42 +1484,6 @@ async function handleCodexRequest(
         disabledMcpServers: selection.disabledMcpServers,
       });
       ctx.writeResponse({ ok: true, selection });
-      return;
-    }
-    case MICA_METHODS.autoCompactGet: {
-      // 三层一起回：默认值（宿主上次下发的）、本会话覆盖、以及合并后的生效值。
-      // 面板不做第二套合并逻辑，也就不会出现「面板显示的和实际跑的不一样」。
-      const override = ctx.agent.autoCompactOverrideSelection;
-      ctx.writeResponse({
-        ok: true,
-        defaults: ctx.autoCompactDefaults.current,
-        override,
-        effective: resolveAutoCompactSettings(ctx.autoCompactDefaults.current, override),
-      });
-      return;
-    }
-    case MICA_METHODS.autoCompactSet: {
-      const raw = params.override;
-      if (raw === undefined) {
-        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'override must be an object');
-        return;
-      }
-      // 空对象 = 恢复默认。只存**与默认值不同**的键：默认值以后调整仍能落到这条会话上，
-      // 快照里也不会留下一堆「用户其实没改过」的值。
-      const override = ctx.agent.setAutoCompactOverride(
-        pruneAutoCompactOverride(normalizeAutoCompactOverride(raw), ctx.autoCompactDefaults.current),
-      );
-      if (ctx.sessionId) ctx.sessionController.saveCurrent({ allowEmpty: true });
-      ctx.writeNotification(MICA_AUTO_COMPACT_NOTIFICATIONS.overrideUpdated, {
-        threadId: ctx.sessionId,
-        override,
-        effective: resolveAutoCompactSettings(ctx.autoCompactDefaults.current, override),
-      });
-      ctx.writeResponse({
-        ok: true,
-        override,
-        effective: resolveAutoCompactSettings(ctx.autoCompactDefaults.current, override),
-      });
       return;
     }
     case MICA_METHODS.notesGet: {

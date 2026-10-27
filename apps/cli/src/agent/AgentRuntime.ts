@@ -12,16 +12,12 @@ import {
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { EffortOption, ProviderProtocol } from '@packages/mica-config/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
-import {
-  micaCommon,
-  cloneCapabilitySelection,
-  normalizeAutoCompactOverride,
-  normalizeCapabilitySelection,
-} from '@packages/mica-common/index.js';
-import type { AutoCompactOverride, CapabilitySelection } from '@packages/mica-common/index.js';
+import { micaCommon, cloneCapabilitySelection, normalizeCapabilitySelection } from '@packages/mica-common/index.js';
+import type { CapabilitySelection } from '@packages/mica-common/index.js';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import { mcpToolNamePrefix } from '@packages/mica-tools/index.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
+import { applyIterationRewrites } from './iterationRewrite.js';
 import {
   PluginPromptSections,
   normalizePluginStateRecord,
@@ -68,11 +64,6 @@ export type AgentRuntimeSnapshot = {
    */
   capabilitiesCustomized?: boolean;
   /**
-   * Per-session 自动压缩覆盖（只含显式改过的键）。与能力开关同理：属于会话，
-   * 不写全局配置，默认值仍由调用方（桌面设置页 / AUTO_COMPACT_DEFAULTS）提供。
-   */
-  autoCompactOverride?: AutoCompactOverride;
-  /**
    * 插件在本会话里的持久状态：插件 id → 插件自己的 JSON。
    *
    * 内核不理解内容，只保证它跨 compact 存活、随 resume / fork 带回、新会话清空。
@@ -95,10 +86,6 @@ type SystemPromptBuildEvent = {
 
 type AgentRunOptions = {
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
-  /** 上下文压缩钩子：在完整请求结束（工具迭代边界）时重写接下来要发送的历史。 */
-  rewriteIterationMessages?: (
-    messages: unknown[],
-  ) => unknown[] | null | undefined | Promise<unknown[] | null | undefined>;
   /** provider 层重试（零输出安全重发）每次触发前回调，供调用方展示重试状态。 */
   onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
   maxTurns?: number;
@@ -148,7 +135,6 @@ export class AgentRuntime {
   /** 用户是否在会话里显式改过能力；false 时这份会话跟随 config 的默认值。 */
   private capabilitiesCustomized = false;
   private defaultCapabilitiesCache: { at: number; value: CapabilitySelection } | null = null;
-  private autoCompactOverride: AutoCompactOverride = {};
   /**
    * 插件在本会话里的持久状态（键是插件 id）。内核只负责存取与清洗，不理解内容。
    *
@@ -211,20 +197,6 @@ export class AgentRuntime {
     this.capabilities = cloneCapabilitySelection(this.resolveDefaultCapabilities());
     this.capabilitiesCustomized = false;
     return this.capabilitySelection;
-  }
-
-  /** 本会话的自动压缩覆盖；空对象表示完全跟随默认值。 */
-  get autoCompactOverrideSelection(): AutoCompactOverride {
-    return { ...this.autoCompactOverride };
-  }
-
-  /**
-   * 改本会话的压缩覆盖。只在下一个迭代边界生效（压缩在请求间隙判断），
-   * 所以运行中调用是安全的：不会打断正在跑的请求，也不会让本轮中途换阈值。
-   */
-  setAutoCompactOverride(input: unknown): AutoCompactOverride {
-    this.autoCompactOverride = normalizeAutoCompactOverride(input);
-    return this.autoCompactOverrideSelection;
   }
 
   /** 读某个插件在本会话里的状态。没写过返回 undefined。 */
@@ -424,7 +396,6 @@ export class AgentRuntime {
       role: this.role,
       capabilitySelection: this.capabilitySelection,
       capabilitiesCustomized: this.capabilitiesCustomized,
-      autoCompactOverride: this.autoCompactOverrideSelection,
       pluginState: this.pluginState,
       contextWindowSize: this.currentConfig.provider.contextWindowSize,
       messages: snapshot?.messages ?? [],
@@ -500,7 +471,6 @@ export class AgentRuntime {
     // 没有丢任何真实偏好。
     this.capabilitiesCustomized = snapshot.capabilitiesCustomized === true;
     this.capabilities = normalizeCapabilitySelection(snapshot.capabilitySelection ?? this.resolveDefaultCapabilities());
-    this.autoCompactOverride = normalizeAutoCompactOverride(snapshot.autoCompactOverride);
     this.pluginState = normalizePluginStateRecord(snapshot.pluginState);
     this.recreateClient();
     this.client?.loadSnapshot({
@@ -553,7 +523,7 @@ export class AgentRuntime {
         },
         rewriteIterationMessages: async (messages) => {
           if (!this.isCurrent(runId)) return null;
-          return options.rewriteIterationMessages?.(messages) ?? null;
+          return applyIterationRewrites(messages, this);
         },
         onIterationComplete: async () => {
           if (!this.isCurrent(runId)) return null;

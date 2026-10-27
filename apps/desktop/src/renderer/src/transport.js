@@ -263,17 +263,6 @@ function createWebApi(env) {
           cwd: cwd || null
         }),
       onCapabilitiesUpdated: (callback) => subscribe('chat:capabilities-updated', callback),
-      // 本会话的自动压缩设置（默认值 + 会话覆盖 + 生效值）。
-      autoCompact: (id, { sessionId, cwd } = {}) =>
-        invoke('chat:auto-compact', { id, sessionId: sessionId || null, cwd: cwd || null }),
-      setAutoCompact: (id, override, { sessionId, cwd } = {}) =>
-        invoke('chat:set-auto-compact', {
-          id,
-          override,
-          sessionId: sessionId || null,
-          cwd: cwd || null
-        }),
-      onAutoCompactUpdated: (callback) => subscribe('chat:auto-compact-updated', callback),
       // 会话笔记（用户与模型共同维护的 markdown）。存在会话快照里，压缩不动它。
       notes: (id, { sessionId, cwd } = {}) =>
         invoke('chat:notes', { id, sessionId: sessionId || null, cwd: cwd || null }),

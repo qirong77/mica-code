@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   CODEX_METHODS,
   CODEX_ERROR_METHOD_NOT_FOUND,
-  MICA_AUTO_COMPACT_NOTIFICATIONS,
   MICA_BTW_NOTIFICATIONS,
   MICA_CAPABILITY_NOTIFICATIONS,
   MICA_METHODS,
@@ -38,19 +37,8 @@ describe('codex protocol framing', () => {
       renameSession: 'mica/session/rename',
       capabilitiesGet: 'mica/capabilities/get',
       capabilitiesSet: 'mica/capabilities/set',
-      autoCompactGet: 'mica/autoCompact/get',
-      autoCompactSet: 'mica/autoCompact/set',
       notesGet: 'mica/notes/get',
       notesSet: 'mica/notes/set',
-    });
-  });
-
-  // Same reason as MICA_METHODS: the desktop host matches these literal strings,
-  // so renaming one side silently drops every automatic-compaction counter.
-  it('pins the Mica automatic compaction notification name', () => {
-    expect(MICA_AUTO_COMPACT_NOTIFICATIONS).toEqual({
-      updated: 'mica/autoCompact/updated',
-      overrideUpdated: 'mica/autoCompact/overrideUpdated',
     });
   });
 

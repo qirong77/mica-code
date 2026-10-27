@@ -1,7 +1,5 @@
 import type {
-  ConfigWebAutoCompactDetails,
   ConfigWebCapabilityDefaults,
-  ConfigWebAutoCompactSettings,
   ConfigWebBrowserControlDetails,
   ConfigWebContextAnalysis,
   ConfigWebConversationItem,
@@ -62,9 +60,6 @@ export type ConfigWebClient = {
    * 记账的计数都在运行时的 userData 目录下。浏览器宿主（apps/config-web）没有这份数据，
    * 所以这三个方法是可选的，缺了就不显示这一节。
    */
-  readAutoCompactDetails?(): Promise<ConfigWebAutoCompactDetails>;
-  writeAutoCompactSettings?(settings: ConfigWebAutoCompactSettings): Promise<ConfigWebAutoCompactDetails>;
-  resetAutoCompactCounters?(sessionId?: string): Promise<ConfigWebAutoCompactDetails>;
 
   /**
    * 受控浏览器（Mica 里那套能真正打开的浏览器）只在桌面运行时里：窗口活在 Electron 主进程，
@@ -201,32 +196,6 @@ export function writePluginSettings(id: string, values: Record<string, string>):
 
 export function supportsPluginSettings(): boolean {
   return typeof client?.writePluginSettings === 'function';
-}
-
-/** 宿主是否提供自动压缩这一节（桌面运行时提供，浏览器宿主不提供）。 */
-export function supportsAutoCompact(): boolean {
-  return typeof client?.readAutoCompactDetails === 'function';
-}
-
-type AutoCompactClient = ConfigWebClient &
-  Required<Pick<ConfigWebClient, 'readAutoCompactDetails' | 'writeAutoCompactSettings' | 'resetAutoCompactCounters'>>;
-
-export function readAutoCompactDetails(): Promise<ConfigWebAutoCompactDetails> {
-  return requireAutoCompact().readAutoCompactDetails();
-}
-
-export function writeAutoCompactSettings(settings: ConfigWebAutoCompactSettings): Promise<ConfigWebAutoCompactDetails> {
-  return requireAutoCompact().writeAutoCompactSettings(settings);
-}
-
-export function resetAutoCompactCounters(sessionId?: string): Promise<ConfigWebAutoCompactDetails> {
-  return requireAutoCompact().resetAutoCompactCounters(sessionId);
-}
-
-function requireAutoCompact(): AutoCompactClient {
-  const current = requireClient();
-  if (!supportsAutoCompact()) throw new Error('当前宿主不支持自动压缩设置');
-  return current as AutoCompactClient;
 }
 
 /**

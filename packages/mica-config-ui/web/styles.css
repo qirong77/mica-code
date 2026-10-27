@@ -105,10 +105,6 @@
     font-family: var(--font-mono);
   }
 
-  .font-display {
-    font-family: var(--font-sans);
-  }
-
   ::selection {
     background: rgb(255 255 255 / 20%);
     color: inherit;
@@ -356,8 +352,7 @@
 
   .page-head-actions,
   .toolbar,
-  .table-panel-tags,
-  .table-tags {
+  .table-panel-tags {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
@@ -512,7 +507,6 @@
     white-space: pre-line;
   }
 
-  .editor-only,
   .editor-workspace {
     width: 100%;
     height: 100%;
@@ -522,7 +516,6 @@
     gap: 12px;
   }
 
-  .editor-only > .ui-alert,
   .editor-workspace > .ui-alert {
     flex: 0 0 auto;
     margin-bottom: 0;
@@ -534,8 +527,7 @@
     min-height: 0;
   }
 
-  .page-loading,
-  .editor-loading {
+  .page-loading {
     display: grid;
     place-items: center;
     color: var(--text-faint);
@@ -547,19 +539,8 @@
     flex: 1 1 0;
   }
 
-  .editor-loading {
-    flex: 0 0 auto;
-    min-height: 30px;
-    border: 1px solid var(--line-soft);
-    border-radius: var(--radius-md);
-    background: var(--panel);
-  }
-
   .detail-body-stacked,
-  .stacked-panels,
-  .plugin-grid,
-  .tool-list,
-  .simple-list {
+  .tool-list {
     display: grid;
     gap: 12px;
   }
@@ -587,12 +568,6 @@
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
     background: var(--panel);
-  }
-
-  .editor-host-large {
-    flex: 1 1 0;
-    height: auto;
-    min-height: 0;
   }
 
   .detail-body {
@@ -958,12 +933,6 @@
     overflow: hidden;
   }
 
-  .split-main-scroll {
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-
   /* 内容区变窄（窗口窄，或桌面端把它挤在中间一列）：左右两栏上下叠，列表压成一段可滚区域。 */
   @container page (max-width: 860px) {
     .split-view {
@@ -1001,8 +970,7 @@
   }
 
   .table-panel-title strong,
-  .tool-item strong,
-  .simple-row strong {
+  .tool-item strong {
     color: var(--text);
     font-size: var(--text-subhead);
     font-weight: 600;
@@ -1015,7 +983,6 @@
     line-height: 1.5;
   }
 
-  .metric-chip,
   .ui-tag {
     display: inline-flex;
     align-items: center;
@@ -1058,19 +1025,6 @@
     background: color-mix(in srgb, var(--blue) 9%, transparent);
   }
 
-  .simple-row {
-    display: grid;
-    grid-template-columns: 110px minmax(0, 1fr);
-    gap: 12px;
-    align-items: start;
-  }
-
-  .simple-row span {
-    color: var(--text-faint);
-    font-size: var(--text-aux);
-  }
-
-  .simple-row strong,
   .tool-item p,
   .skill-preview,
   .code-preview {
@@ -1370,48 +1324,9 @@
     line-height: 1.6;
   }
 
-  .conversation-layout,
   .conversation-timeline {
     display: grid;
     gap: 8px;
-  }
-
-  .conversation-overview {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0;
-    padding: 14px 0;
-    border-top: 1px solid var(--line);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .conversation-overview > div {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-    padding: 0 16px;
-    border-right: 1px solid var(--line);
-  }
-
-  .conversation-overview > div:last-child {
-    border-right: 0;
-  }
-
-  .conversation-overview span {
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .conversation-overview strong {
-    overflow: hidden;
-    color: var(--text);
-    font-size: var(--text-subhead);
-    font-weight: 650;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .conversation-timeline {
@@ -1632,413 +1547,6 @@
     font-size: 13px;
   }
 
-  .chat-workspace {
-    display: grid;
-    grid-template-columns: 300px minmax(0, 1fr);
-    gap: 12px;
-    min-height: min(760px, calc(100dvh - 160px));
-    height: min(760px, calc(100dvh - 160px));
-  }
-
-  .chat-sidebar,
-  .chat-main {
-    min-width: 0;
-    min-height: 0;
-    display: grid;
-    overflow: hidden;
-  }
-
-  .chat-sidebar {
-    grid-template-rows: auto auto minmax(0, 1fr);
-    gap: 10px;
-    padding: 12px;
-  }
-
-  .chat-sidebar-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-  }
-
-  .chat-search {
-    display: grid;
-    grid-template-columns: 14px minmax(0, 1fr);
-    align-items: center;
-    gap: 8px;
-    height: 36px;
-    padding: 0 10px;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    background: var(--panel-muted);
-    color: var(--text-faint);
-  }
-
-  .chat-search input {
-    width: 100%;
-    border: 0;
-    outline: none;
-    background: transparent;
-    color: var(--text);
-    font-size: 13px;
-  }
-
-  .chat-tree {
-    min-height: 0;
-    overflow: auto;
-    display: grid;
-    align-content: start;
-    gap: 10px;
-    padding-right: 2px;
-  }
-
-  .chat-folder {
-    display: grid;
-    gap: 4px;
-  }
-
-  .chat-folder > .chat-conv-row {
-    margin-left: 8px;
-  }
-
-  .chat-folder-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .chat-folder-row-static {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .chat-folder-toggle {
-    min-width: 0;
-    display: grid;
-    grid-template-columns: 14px 14px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .chat-folder-toggle.static {
-    grid-template-columns: minmax(0, 1fr) auto;
-    cursor: default;
-    color: var(--text-faint);
-  }
-
-  .chat-folder-toggle span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .chat-folder-toggle em {
-    color: var(--text-faint);
-    font-style: normal;
-    font-weight: 600;
-    font-size: 11px;
-  }
-
-  .chat-folder-toggle:hover {
-    background: var(--panel-muted);
-  }
-
-  .chat-folder-toggle.static:hover {
-    background: transparent;
-  }
-
-  .chat-row-actions {
-    display: none;
-    align-items: center;
-    gap: 2px;
-  }
-
-  .chat-folder-row:hover .chat-row-actions,
-  .chat-conv-row:hover .chat-conv-more,
-  .chat-conv-row.active .chat-conv-more {
-    display: inline-flex;
-  }
-
-  .chat-row-actions button,
-  .chat-conv-more {
-    width: 24px;
-    height: 24px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    border-radius: 3px;
-    background: transparent;
-    color: var(--text-faint);
-    cursor: pointer;
-  }
-
-  .chat-row-actions button:hover,
-  .chat-conv-more:hover {
-    background: var(--panel-muted);
-    color: var(--text);
-  }
-
-  .chat-conv-row {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 2px;
-    border-radius: 4px;
-  }
-
-  .chat-conv-row.active {
-    background: rgb(255 255 255 / 6%);
-  }
-
-  .chat-conv-main {
-    min-width: 0;
-    display: grid;
-    grid-template-columns: 14px minmax(0, 1fr);
-    align-items: center;
-    gap: 8px;
-    padding: 8px;
-    border: 0;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .chat-conv-main:hover {
-    background: var(--panel-muted);
-  }
-
-  .chat-conv-row.active .chat-conv-main:hover {
-    background: transparent;
-  }
-
-  .chat-conv-icon {
-    color: var(--text-faint);
-    display: inline-flex;
-  }
-
-  .chat-conv-copy {
-    min-width: 0;
-    display: grid;
-    gap: 2px;
-  }
-
-  .chat-conv-copy strong,
-  .chat-conv-copy span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .chat-conv-copy strong {
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .chat-conv-copy span {
-    color: var(--text-faint);
-    font-size: 11px;
-  }
-
-  .chat-conv-more {
-    display: none;
-    margin-right: 4px;
-  }
-
-  .chat-menu {
-    position: relative;
-  }
-
-  .chat-menu-panel {
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    z-index: 20;
-    min-width: 150px;
-    display: grid;
-    padding: 6px;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    background: var(--panel);
-    box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
-  }
-
-  .chat-menu-panel button {
-    width: 100%;
-    padding: 8px 10px;
-    border: 0;
-    border-radius: 3px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font-size: 12px;
-  }
-
-  .chat-menu-panel button:hover {
-    background: var(--panel-muted);
-  }
-
-  .chat-menu-panel button.danger {
-    color: var(--red);
-  }
-
-  .chat-empty-hint {
-    padding: 18px 8px;
-    color: var(--text-faint);
-    font-size: 12px;
-    text-align: center;
-  }
-
-  .chat-main {
-    grid-template-rows: auto minmax(0, 1fr) auto;
-  }
-
-  .chat-empty-main {
-    min-height: 0;
-    display: grid;
-    place-content: center;
-    gap: 12px;
-    padding: 24px;
-  }
-
-  .chat-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px 16px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .chat-header-copy {
-    min-width: 0;
-    display: grid;
-    gap: 8px;
-  }
-
-  .chat-header-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    color: var(--text-soft);
-  }
-
-  .chat-header-title h2 {
-    margin: 0;
-    overflow: hidden;
-    color: var(--text);
-    font-size: 16px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .chat-header-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-faint);
-    font-size: 12px;
-  }
-
-  .chat-header-actions {
-    flex: 0 0 auto;
-  }
-
-  .chat-header-actions .chat-conv-more {
-    display: inline-flex;
-    width: 32px;
-    height: 32px;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    background: var(--panel-muted);
-  }
-
-  .chat-messages {
-    min-height: 0;
-    overflow: auto;
-    display: grid;
-    align-content: start;
-    gap: 12px;
-    padding: 20px 16px 28px;
-    background: var(--bg);
-  }
-
-  .chat-bubble {
-    max-width: min(720px, 100%);
-    display: grid;
-    gap: 6px;
-  }
-
-  .chat-bubble-user {
-    justify-self: end;
-  }
-
-  .chat-bubble-assistant,
-  .chat-bubble-tool,
-  .chat-bubble-system {
-    justify-self: start;
-  }
-
-  .chat-bubble-meta {
-    color: var(--text-faint);
-    font-size: 11px;
-    font-weight: 600;
-  }
-
-  .chat-bubble-user .chat-bubble-meta {
-    text-align: right;
-  }
-
-  .chat-bubble-content {
-    margin: 0;
-    padding: 12px 14px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--panel-muted);
-    color: var(--text);
-    font-family: inherit;
-    font-size: 13px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .chat-bubble-user .chat-bubble-content {
-    border-color: color-mix(in srgb, var(--blue) 40%, transparent);
-    background: color-mix(in srgb, var(--blue) 10%, transparent);
-  }
-
-  .chat-bubble-assistant .chat-bubble-content {
-    border-color: color-mix(in srgb, var(--green) 40%, transparent);
-    background: color-mix(in srgb, var(--green) 10%, transparent);
-  }
-
-  .chat-bubble-tool .chat-bubble-content {
-    border-color: var(--line);
-    background: var(--panel-muted);
-    font-family: var(--font-mono);
-    font-size: 12px;
-  }
-
-  .chat-bubble-pending .chat-bubble-content {
-    color: var(--text-faint);
-    font-style: italic;
-  }
-
   .chat-composer {
     display: grid;
     gap: 8px;
@@ -2076,22 +1584,6 @@
     font-size: 12px;
   }
 
-  @media (max-width: 960px) {
-    .chat-workspace {
-      grid-template-columns: 1fr;
-      height: auto;
-      min-height: 0;
-    }
-
-    .chat-sidebar {
-      max-height: 320px;
-    }
-
-    .chat-main {
-      min-height: 520px;
-    }
-  }
-
   @media (max-width: 720px) {
     .content-shell,
     .sidebar {
@@ -2099,19 +1591,10 @@
     }
 
     .page-head,
-    .collapsible-summary,
-    .simple-row {
+    .collapsible-summary {
       grid-template-columns: 1fr;
       flex-direction: column;
       align-items: flex-start;
-    }
-
-    .editor-host-large {
-      min-height: 0;
-    }
-
-    .conversation-overview {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .role-layout {
@@ -2141,21 +1624,6 @@
       gap: 4px 10px;
     }
 
-    .conversation-overview > div {
-      padding: 8px 16px;
-    }
-
-    .conversation-overview > div:nth-child(2) {
-      border-right: 0;
-    }
-
-    .chat-workspace {
-      grid-template-columns: 1fr;
-    }
-
-    .chat-sidebar {
-      max-height: 280px;
-    }
   }
 
   /* Chat transcript (ChatGPT-like) */
@@ -2176,230 +1644,12 @@
     min-width: 0;
   }
 
-  .chat-turn-user {
-    align-items: flex-end;
-  }
-
-  .chat-turn-assistant {
-    align-items: stretch;
-  }
-
-  .chat-user-bubble {
-    max-width: min(680px, 92%);
-    padding: 10px 14px;
-    border-radius: 4px;
-    background: var(--panel-muted);
-    color: var(--text);
-    font-size: 14px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .chat-assistant-text {
-    margin: 0;
-    color: var(--text);
-    font-size: 15px;
-    line-height: 1.75;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .chat-assistant-muted,
-  .chat-pending-line {
-    color: var(--text-faint);
-    font-size: 14px;
-  }
-
-  .chat-pending-line {
-    font-style: italic;
-  }
-
-  .chat-thinking,
-  .chat-tool-step,
-  .chat-system-block {
-    border: 0;
-    background: transparent;
-  }
-
-  .chat-thinking {
-    color: var(--text-faint);
-    font-size: 12px;
-  }
-
-  .chat-thinking summary,
-  .chat-tool-step summary,
-  .chat-system-block summary {
-    cursor: pointer;
-    list-style: none;
-    user-select: none;
-  }
-
-  .chat-thinking summary::-webkit-details-marker,
-  .chat-tool-step summary::-webkit-details-marker,
-  .chat-system-block summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .chat-thinking summary {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-faint);
-    font-weight: 500;
-  }
-
-  .chat-thinking summary::before {
-    content: '▸';
-    font-size: 11px;
-  }
-
-  .chat-thinking[open] summary::before {
-    content: '▾';
-  }
-
-  .chat-thinking pre {
-    margin: 8px 0 0;
-    padding: 10px 12px;
-    border-radius: 5px;
-    background: var(--panel-muted);
-    color: var(--text-soft);
-    font-family: inherit;
-    font-size: 12px;
-    line-height: 1.55;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .chat-tool-list {
-    display: grid;
-    gap: 6px;
-  }
-
-  .chat-tool-step {
-    color: var(--text-soft);
-    font-size: 13px;
-  }
-
-  .chat-tool-step > summary,
-  .chat-tool-step.chat-tool-done:not(details),
-  .chat-tool-step.chat-tool-error:not(details),
-  .chat-tool-step.chat-tool-pending:not(details) {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    max-width: 100%;
-    padding: 2px 0;
-  }
-
-  .chat-tool-step:not(details) {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .chat-tool-mark {
-    flex: 0 0 auto;
-    width: 14px;
-    color: var(--green);
-    font-size: 12px;
-    text-align: center;
-  }
-
-  .chat-tool-error .chat-tool-mark {
-    color: var(--red);
-  }
-
-  .chat-tool-pending .chat-tool-mark {
-    color: var(--blue);
-  }
-
-  .chat-tool-summary {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .chat-tool-body {
-    display: grid;
-    gap: 8px;
-    margin-top: 6px;
-    margin-left: 22px;
-  }
-
-  .chat-tool-body section header {
-    margin-bottom: 4px;
-    color: var(--text-faint);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-  }
-
-  .chat-tool-body pre,
-  .chat-unknown-content,
-  .chat-system-block pre {
-    margin: 0;
-    padding: 10px 12px;
-    border-radius: 5px;
-    background: var(--panel-muted);
-    color: var(--text-soft);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-
-  .chat-assistant-meta {
-    color: var(--text-faint);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-
-  .chat-system-block {
-    color: var(--text-faint);
-    font-size: 12px;
-  }
-
-  .chat-system-block summary {
-    color: var(--text-faint);
-  }
-
-  /* soften old bubble styles if leftover classes appear */
-  .chat-messages .conversation-layout,
-  .chat-messages .conversation-overview,
-  .chat-messages .conversation-timeline::before,
-  .chat-messages .conversation-sequence {
-    display: none;
-  }
-
   /* 原始文件编辑器吃满详情区剩下的高度：上下都不留白，滚动交给编辑器自己。 */
   .session-raw-editor {
     height: 100%;
     min-height: 320px;
     border: 0;
     border-radius: 0;
-  }
-
-  .form-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-  }
-
-  .form-field {
-    display: grid;
-    gap: 7px;
-  }
-
-  .form-field > span {
-    color: var(--text-soft);
-    font-size: var(--text-aux);
-    font-weight: 500;
   }
 
   .text-input {
@@ -2456,72 +1706,6 @@
     resize: none;
   }
 
-  .machine-list {
-    display: grid;
-  }
-
-  .machine-row {
-    display: grid;
-    grid-template-columns: 8px minmax(140px, 1fr) minmax(0, auto);
-    align-items: center;
-    gap: 12px;
-    min-height: 58px;
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--line-soft);
-    transition: background 100ms ease;
-  }
-
-  .machine-row:last-child {
-    border-bottom: 0;
-  }
-
-  .machine-row:hover {
-    background: rgb(255 255 255 / 2%);
-  }
-
-  .machine-copy {
-    display: grid;
-    min-width: 0;
-    gap: 2px;
-  }
-
-  .machine-name {
-    display: block;
-    color: var(--text);
-    font-size: var(--text-body);
-    font-weight: 600;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .machine-copy > code {
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-  }
-
-  .machine-meta {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  .machine-session {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .machine-session code {
-    color: var(--text-soft);
-  }
-
   /* Online/offline status lamp (code-by-wire parity) */
   .status-lamp {
     width: 7px;
@@ -2538,22 +1722,6 @@
 
   .status-lamp-offline {
     background: var(--text-faint);
-  }
-
-  @media (max-width: 720px) {
-    .form-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .machine-row {
-      grid-template-columns: 8px minmax(0, 1fr);
-    }
-
-    .machine-meta {
-      grid-column: 2;
-      justify-content: flex-start;
-      flex-wrap: wrap;
-    }
   }
 
   /* Sessions page tabs */
@@ -3163,38 +2331,12 @@
     }
   }
 
-  /* Auto Compact：规则表单 + 按会话记的压缩计数（每跑完一次模型请求检查一次 ctx） */
-  .auto-compact-stack {
-    display: grid;
-    align-content: start;
-    gap: 14px;
-  }
-
-  .auto-compact-card {
-    display: grid;
-    gap: 14px;
-    padding: 16px;
-  }
-
-  .auto-compact-card-head,
-  .config-card-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .auto-compact-head-copy,
-  .config-head-copy,
   .control-head-copy {
     display: grid;
     gap: 3px;
     min-width: 0;
   }
 
-  .auto-compact-head-copy h2,
-  .config-head-copy h2,
   .control-head-copy h2 {
     margin: 0;
     color: var(--text);
@@ -3202,29 +2344,11 @@
     font-weight: 600;
   }
 
-  .auto-compact-head-copy p,
-  .config-head-copy p,
   .control-head-copy p {
     margin: 0;
     color: var(--text-soft);
     font-size: var(--text-aux);
     line-height: 1.55;
-  }
-
-  /* 开关：原生 checkbox 藏起来，滑块自己画，避免橙色系统控件混进 Darcula 配色 */
-  .auto-compact-switch {
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    gap: 8px;
-    color: var(--text);
-    font-size: var(--text-aux);
-    font-weight: 500;
-    cursor: pointer;
-  }
-
-  .auto-compact-switch-label {
-    color: var(--text-soft);
   }
 
   .ui-switch {
@@ -3298,154 +2422,6 @@
     outline-offset: 2px;
   }
 
-  .auto-compact-fields {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    gap: 12px;
-  }
-
-  /* 字段编辑器（设置页与会话弹窗共用）：标签在左、控件在右的行列表。
-     之前是等宽网格，五个数字框摊满整行、眼睛要在列间横跳。 */
-  .auto-compact-editor {
-    display: grid;
-    gap: 0;
-  }
-
-  .auto-compact-enable {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 40px;
-    padding: 0 0 4px;
-  }
-
-  .auto-compact-enable-label {
-    color: var(--text);
-    font-size: var(--text-aux);
-    cursor: pointer;
-  }
-
-  .auto-compact-enable-hint {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text-faint);
-    font-size: var(--text-aux);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .auto-compact-rows {
-    display: grid;
-    gap: 0;
-  }
-
-  .auto-compact-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 38px;
-    border-top: 1px solid var(--line-soft);
-  }
-
-  .auto-compact-label {
-    display: flex;
-    min-width: 0;
-    align-items: baseline;
-    gap: 8px;
-    color: var(--text-soft);
-    font-size: var(--text-aux);
-  }
-
-  .auto-compact-default {
-    flex: none;
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .auto-compact-steppers {
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    gap: 2px;
-  }
-
-  .auto-compact-step,
-  .auto-compact-reset {
-    display: grid;
-    width: 22px;
-    height: 22px;
-    flex: none;
-    place-items: center;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-soft);
-    font: inherit;
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .auto-compact-step:hover:not(:disabled),
-  .auto-compact-reset:hover:not(:disabled) {
-    border-color: var(--line-strong);
-    color: var(--text);
-  }
-
-  /* 禁用只掉颜色，尺寸与边框不动，行高不会跟着跳 */
-  .auto-compact-step:disabled,
-  .auto-compact-reset:disabled {
-    border-color: var(--line-soft);
-    color: var(--text-faint);
-    cursor: default;
-  }
-
-  .auto-compact-input {
-    width: 62px;
-    height: 22px;
-    padding: 0 6px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: var(--panel-muted);
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: var(--text-aux);
-    text-align: right;
-  }
-
-  .auto-compact-input:focus {
-    border-color: var(--line-strong);
-    outline: none;
-  }
-
-  .auto-compact-unit {
-    /* 定宽而不是 min-width：k / 次 / 分钟 三种单位撑出的宽度不同，会让每行的 ± 位置错开 */
-    width: 30px;
-    flex: none;
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-  }
-
-  .auto-compact-footer {
-    display: flex;
-    /* 桌面端的设置页挤在中间一列里（见 AGENT.md），窄到放不下时整块折行而不是把按钮压成竖排 */
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 10px 12px;
-  }
-
-  /* 规则说明分条：整段长文本读起来像免责声明，拆成三条才扫得动 */
-  .auto-compact-rules {
-    flex: 1 1 260px;
-    min-width: 0;
-  }
-
-  /*
-   * 条目列表（规则说明、控制页步骤）：grid 会吃掉 UA 的项目符号，只剩 padding-left
-   * 留下的空白缩进，正文比同级标题右移一截。符号改成 ::before 自己画，正文从符号列起排。
-   */
-  .auto-compact-rules,
   .control-steps {
     display: grid;
     gap: 4px;
@@ -3457,7 +2433,6 @@
     line-height: 1.6;
   }
 
-  .auto-compact-rules > li,
   .control-steps > li {
     display: grid;
     grid-template-columns: 10px minmax(0, 1fr);
@@ -3465,69 +2440,12 @@
     gap: 2px;
   }
 
-  .auto-compact-rules > li::before,
   .control-steps > li::before {
     content: '•';
     color: var(--text-faint);
   }
 
-  .auto-compact-note {
-    flex: 1 1 220px;
-    min-width: 0;
-    margin: 0;
-    color: var(--text-faint);
-    font-size: var(--text-aux);
-    line-height: 1.6;
-  }
-
-  .auto-compact-footer > .ui-button {
-    flex: none;
-    align-self: flex-end;
-    margin-left: auto;
-    white-space: nowrap;
-  }
-
-  .auto-compact-counter-list {
-    display: grid;
-  }
-
-  .auto-compact-counter-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 12px;
-    min-height: 46px;
-    padding: 8px 0;
-    border-top: 1px solid var(--line-soft);
-  }
-
-  .auto-compact-counter-row:first-child {
-    border-top: 0;
-  }
-
-  .auto-compact-counter-copy {
-    display: grid;
-    gap: 3px;
-    min-width: 0;
-  }
-
-  .auto-compact-counter-copy strong {
-    overflow: hidden;
-    color: var(--text);
-    font-size: var(--text-body);
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .auto-compact-counter-meta {
-    min-width: 0;
-    color: var(--text-soft);
-    font-size: var(--text-aux);
-    line-height: 1.5;
-  }
-
-  /* Config：按字段编辑 config.json（providers / searxngUrl），整份 JSON 收在折叠面板里 */
+  /* Config：按字段编辑 config.json（providers），整份 JSON 收在折叠面板里 */
   .config-page {
     display: grid;
     align-content: start;
@@ -3750,6 +2668,93 @@
     background: var(--bg);
   }
 
+  /* 数字项：− / 输入 / + 落在同一条边框里，单位跟在后面。
+     三段的字号与内边距各自一套，只有共用高度 + 一条外框才对得齐。 */
+  .config-stepper {
+    display: inline-flex;
+    box-sizing: border-box;
+    align-items: center;
+    justify-self: start;
+    gap: 0;
+    height: var(--control-h);
+    padding: 0 2px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--bg);
+  }
+
+  .config-stepper:focus-within {
+    border-color: var(--accent-line);
+  }
+
+  .config-stepper.is-invalid {
+    border-color: var(--danger);
+  }
+
+  .config-stepper-btn {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: calc(var(--control-h) - 8px);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-soft);
+    font-family: inherit;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .config-stepper-btn:hover:not(:disabled) {
+    background: var(--panel-muted);
+    color: var(--text);
+  }
+
+  .config-stepper-btn:disabled {
+    color: var(--text-muted);
+    cursor: default;
+  }
+
+  .config-stepper .config-stepper-input,
+  .config-stepper .text-input {
+    width: 64px;
+    height: calc(var(--control-h) - 8px);
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .config-stepper .text-input:focus {
+    outline: none;
+    box-shadow: none;
+  }
+
+  .config-stepper-unit {
+    /* 单位定宽：`k tokens` / `分钟` / `次` 长短不一时，右边这组不会左右跳。 */
+    min-width: 56px;
+    padding-right: 6px;
+    padding-left: 2px;
+    color: var(--text-muted);
+    font-size: var(--text-aux);
+    white-space: nowrap;
+  }
+
+  /* 原生 spinner 与自己的 −/+ 重复，还占掉 16px 宽度。 */
+  .config-stepper-input::-webkit-outer-spin-button,
+  .config-stepper-input::-webkit-inner-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
+  }
+
+  .config-stepper-input {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
   .config-segment {
     height: calc(var(--control-h) - 6px);
     padding: 0 12px;
@@ -3866,13 +2871,6 @@
     color: var(--text-faint);
     font-size: var(--text-aux);
     line-height: 1.5;
-  }
-
-  .config-field-error {
-    color: var(--red);
-    font-size: var(--text-label);
-    font-weight: 400;
-    line-height: 1.4;
   }
 
   /* 窄屏：标题行只留名称和协议，地址摘要没地方放，挤一起会两边都被裁掉 */
@@ -4366,10 +3364,6 @@
     flex: none;
     color: var(--text-faint);
     font-size: var(--text-aux);
-  }
-
-  .plugin-error {
-    color: var(--red);
   }
 
   .control-endpoint-body {

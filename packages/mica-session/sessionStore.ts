@@ -15,7 +15,6 @@ import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { deleteBtwState } from '@packages/mica-common/btwState.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
 import type { CapabilitySelection } from '@packages/mica-common/capabilities.js';
-import type { AutoCompactOverride } from '@packages/mica-common/autoCompact.js';
 import type { AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
 import {
   isEffortOption,
@@ -42,11 +41,6 @@ export type PersistedRuntimeSnapshot = {
    * existed) means "follow the config defaults".
    */
   capabilitiesCustomized?: boolean;
-  /**
-   * Per-session 自动压缩覆盖：只记录用户显式改过的键，其余继续跟随全局默认值。
-   * 缺失表示完全跟随默认（老会话与未改过设置的会话都走这条路径）。
-   */
-  autoCompactOverride?: AutoCompactOverride;
   /**
    * 插件在本会话里的持久状态：插件 id → 插件自己的 JSON。
    *

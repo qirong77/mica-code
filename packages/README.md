@@ -17,7 +17,7 @@
 - `mica-skills`：用户 skills 的扫描、解析和缓存。
 - `mica-plugin`：插件生命周期、hooks、service container、host capability context，以及插件包格式（`plugin.json` 清单、目录加载器、启停状态）。
 - `mica-official-plugins`：官方插件目录。清单来自仓库根 `plugins/<id>/plugin.json`，入口静态登记；只想列清单的宿主用 `manifests.js`，避免把插件实现拖进进程。
-- `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别、`loopArgs.ts` 的 `/loop` 参数解析、`chatQuote.ts` 的「引用对话」文本约定、`promptText.ts` 的消息定位归一化（CLI 与桌面端共用的 `comparableText`）、`capabilities.ts` 的会话能力开关、`autoCompact.ts` 的压缩设置默认值与会话覆盖合并。
+- `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别、`loopArgs.ts` 的 `/loop` 参数解析、`chatQuote.ts` 的「引用对话」文本约定、`promptText.ts` 的消息定位归一化（CLI 与桌面端共用的 `comparableText`）、`capabilities.ts` 的会话能力开关。
 - `mica-pty`：PTY 能力包。`PtyDriver` 是基于 node-pty 的测试驱动（Node/vitest 环境）；同时提供内置 `pty_*` 工具的运行时支持（`PtyManager` + Node helper 桥接），Bun 主进程通过 JSONL IPC 使用，node-pty 只在 Node 子进程中加载。
 - `mica-web-shared`：`apps/desktop` renderer 与其运行时共用的纯函数（端口常量与「本机」地址、单端口上的路径约定、时间/状态/token 格式化、界面状态的补丁语义、侧栏会话搜索的匹配/高亮/片段），无 React、无运行时依赖。
 - `mica-file-mentions`：`@` 文件补全的唯一实现（触发判定、工作区扫描 + 缓存、评分排序、插入文本）。CLI 输入框/插件与 `apps/desktop` 的聊天输入框共用它，纯逻辑在 `rank.ts`，Node 侧扫描在 `search.ts`。

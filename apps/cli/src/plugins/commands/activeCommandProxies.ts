@@ -29,9 +29,6 @@ export function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
     get capabilitySelection() {
       return current().capabilitySelection;
     },
-    get autoCompactOverrideSelection() {
-      return current().autoCompactOverrideSelection;
-    },
     reloadConfig(resetClient?: boolean) {
       current().reloadConfig(resetClient);
     },
@@ -40,9 +37,6 @@ export function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
     },
     setCapabilities(selection: Parameters<NonNullable<CommandAgent['setCapabilities']>>[0]) {
       return current().setCapabilities(selection);
-    },
-    setAutoCompactOverride(override: Parameters<NonNullable<CommandAgent['setAutoCompactOverride']>>[0]) {
-      return current().setAutoCompactOverride(override);
     },
     buildSystemPrompt() {
       return current().buildSystemPrompt();

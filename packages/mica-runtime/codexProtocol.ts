@@ -200,23 +200,6 @@ export type MicaTurnRetrying = {
   error: string;
 };
 
-/**
- * Mica extension notification: the host ran an automatic context compaction
- * (see `apps/cli/src/runtime/autoCompact.ts`) and reports the session's run
- * counters afterwards. The counters are what the desktop app's 自动压缩 panel
- * shows and what it sends back on the next `turn/start` (`autoCompact`), so
- * every applied run — and every skipped one, via `lastNote` — must be pushed,
- * not only the successful compactions. Emitted at an iteration boundary, i.e.
- * while the turn is still running.
- */
-export const MICA_AUTO_COMPACT_NOTIFICATIONS = {
-  updated: 'mica/autoCompact/updated',
-  /**
-   * 本会话的压缩覆盖被改了（面板/CLI 改阈值、或恢复默认）。计数通知只回推
-   * 「压了几次」，设置变更必须单独一条，别的窗口才不会继续显示旧阈值。
-   */
-  overrideUpdated: 'mica/autoCompact/overrideUpdated',
-} as const;
 
 /**
  * Mica extension notification: By The Way（btw）线程的快照。
@@ -354,48 +337,6 @@ export type MicaBtwThreadUpdated = MicaBtwThread & {
 };
 
 /**
- * Settings + per-session run counters for automatic compaction. Sent by the
- * client on `turn/start` / `mica/turn/editMessage` (the resident host is
- * spawned once, so the user's panel changes can only reach it per turn) and
- * echoed back — counters only — in `MICA_AUTO_COMPACT_NOTIFICATIONS.updated`.
- *
- * Semantics: 快速压缩 is the cheap local pass (no model request) and always
- * goes first — 模型压缩 is only reached after it, or directly once the quick
- * allowance is used up. So 快速压缩 runs when ctx ≥ `quickThresholdK` (or when
- * 模型压缩 is due) and it already ran fewer than `quickLimit` times; 模型压缩
- * runs when the context is *still* ≥ `modelThresholdK` (which is why the
- * default 120 is BELOW the quick threshold 200) and it already ran fewer than
- * `modelLimit` times.
- *
- * `minIntervalMs` throttles the two passes: a compaction needs to be at least
- * that far from the previous one (`lastRunAt`, carried along with the counters)
- * unless the context already reached the model threshold — that pass's quick →
- * model chain is one trigger, not two.
- */
-export type MicaAutoCompactParams = {
-  enabled?: boolean;
-  quickThresholdK?: number;
-  quickLimit?: number;
-  quickRuns?: number;
-  modelThresholdK?: number;
-  modelLimit?: number;
-  modelRuns?: number;
-  minIntervalMs?: number;
-  lastRunAt?: string | null;
-};
-
-/** `MICA_AUTO_COMPACT_NOTIFICATIONS.updated` payload. */
-export type MicaAutoCompactStatus = {
-  threadId?: string;
-  quickRuns: number;
-  modelRuns: number;
-  lastRunAt: string | null;
-  lastKind: 'quick' | 'model' | null;
-  lastSavedTokens: number;
-  lastNote: string | null;
-};
-
-/**
  * Mica extension requests (client -> host). The Codex protocol has no request
  * for these, so the desktop app needs Mica-specific ones:
  *
@@ -468,16 +409,6 @@ export const MICA_METHODS = {
    * tells every client that has this session open.
    */
   capabilitiesSet: 'mica/capabilities/set',
-  /**
-   * 读本会话的自动压缩设置：默认值（宿主上次下发的）、会话覆盖、以及合并后的
-   * 生效值。面板只负责展示和改写覆盖，不做第二套合并逻辑。
-   */
-  autoCompactGet: 'mica/autoCompact/get',
-  /**
-   * 替换本会话的压缩覆盖（只含要覆盖的键）。空对象 = 恢复默认。
-   * 设置属于会话，落盘后其他窗口经 `mica/autoCompact/overrideUpdated` 同步。
-   */
-  autoCompactSet: 'mica/autoCompact/set',
   /**
    * 读本会话的笔记（用户与模型共同维护的 markdown）。笔记存在会话快照里，
    * 不进对话历史，所以压缩不会动它。

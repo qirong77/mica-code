@@ -220,23 +220,6 @@ describe('chat CLI arguments', () => {
     expect(params).not.toHaveProperty('clientMessageId')
   })
 
-  it('forwards the auto-compact setting with the session counters, and omits both when absent', () => {
-    const autoCompact = {
-      enabled: true,
-      quickThresholdK: 200,
-      quickLimit: 3,
-      quickRuns: 2,
-      modelThresholdK: 120,
-      modelLimit: 3,
-      modelRuns: 1,
-      minIntervalMs: 20 * 60 * 1000,
-      lastRunAt: '2026-09-01T00:00:00.000Z'
-    }
-    const params = buildTurnStartParams({ threadId: 's1', prompt: 'hi', autoCompact })
-    expect(params.autoCompact).toEqual(autoCompact)
-    expect(buildTurnStartParams({ threadId: 's1', prompt: 'hi' })).not.toHaveProperty('autoCompact')
-  })
-
   it('maps codex turn/started to a step_start app event', () => {
     const event = codexNotificationToEvent({
       method: 'turn/started',

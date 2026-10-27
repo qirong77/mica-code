@@ -3,7 +3,6 @@ import { DialogHost } from './components/DialogHost.js';
 import { Sidebar, type ConfigWebAppSection } from './layout/Sidebar.js';
 import { CapabilitiesPage } from './pages/CapabilitiesPage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
-import { AutoCompactPage } from './pages/AutoCompactPage.js';
 import { BrowserControlPage } from './pages/BrowserControlPage.js';
 import { McpPage } from './pages/McpPage.js';
 import { PluginsPage } from './pages/PluginsPage.js';
@@ -12,7 +11,7 @@ import { SessionsPage } from './pages/SessionsPage.js';
 import { SkillsPage } from './pages/SkillsPage.js';
 import { TerminalControlPage } from './pages/TerminalControlPage.js';
 import { PerformancePage } from './pages/PerformancePage.js';
-import { connectHeartbeat, supportsAutoCompact } from './api.js';
+import { connectHeartbeat } from './api.js';
 
 export function App() {
   const [section, setSection] = useState<ConfigWebAppSection>(readInitialSection);
@@ -39,7 +38,6 @@ export function App() {
         <Sidebar section={section} onChange={(next) => void changeSection(next)} />
         <div className="content-shell">
           {section === 'config' ? <ConfigPage onNavigate={(next) => void changeSection(next)} /> : null}
-          {section === 'autoCompact' ? <AutoCompactPage /> : null}
           {section === 'browserControl' ? <BrowserControlPage /> : null}
           {section === 'terminalControl' ? <TerminalControlPage /> : null}
           {section === 'performance' ? <PerformancePage /> : null}
@@ -62,14 +60,13 @@ function readInitialSection(): ConfigWebAppSection {
 }
 
 /**
- * 深链里的 section 必须在当前宿主里真的存在，否则退回 Config（浏览器宿主没有 Auto Compact
- * 的数据；Browser Control 的入口各处都在，拿不到服务时页面自己说明未开启）。
+ * 深链里的 section 必须真的存在，否则退回 Config（Browser Control 的入口各处都在，
+ * 拿不到服务时页面自己说明未开启）。
  */
 function isSectionAvailable(candidate: string | null): boolean {
   if (!candidate) return false;
   const known: ConfigWebAppSection[] = [
     'config',
-    'autoCompact',
     'browserControl',
     'terminalControl',
     'performance',
@@ -81,6 +78,5 @@ function isSectionAvailable(candidate: string | null): boolean {
     'plugins',
   ];
   if (!known.includes(candidate as ConfigWebAppSection)) return false;
-  if (candidate === 'autoCompact') return supportsAutoCompact();
   return true;
 }

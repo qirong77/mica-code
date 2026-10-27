@@ -1,33 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { IconAdjustments, IconClock, IconGauge } from '@tabler/icons-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { IconAdjustments, IconClock } from '@tabler/icons-react'
 // 设置页的同一批控件：会话级开关与默认值表单必须是同一套 UI，不在两端各写一份
 import {
-  AutoCompactFields,
   CapabilityList,
   CapabilityParameters,
   ConfigSwitch as Switch,
-  applyGroupEnabled,
-  autoCompactDraftFromSettings,
-  autoCompactNumbersFromSettings
+  applyGroupEnabled
 } from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
 import { LoopPanel } from './LoopPanel'
 
 /**
- * 输入框旁的「会话设置」弹窗：会话能力 / 自动压缩 / 定时任务三块。
+ * 输入框旁的「会话设置」弹窗：会话能力 / 定时任务两块。
  *
- * 三个菜单都属于**当前会话**，不是应用级设置——同一应用里另一条会话照旧按默认值走。
- * 默认值分别在设置页的 Capabilities、Auto Compact 与 CLI `/loop` 里，只影响以后新建
- * 的会话（定时任务本身也只挂在当前会话上）。
+ * 两块都属于**当前会话**，不是应用级设置——同一应用里另一条会话照旧按默认值走。
+ * 能力默认值在设置页的 Capabilities、定时任务在 CLI `/loop` 里（定时任务本身也只挂在
+ * 当前会话上）。自动压缩不在这里：它是插件（见 `plugins/auto-compact`），设置与计数
+ * 都归插件自己管，入口统一在配置页的 Plugins 一节。
  *
- * 数据来自常驻 chat host（`mica/capabilities/get`、`mica/autoCompact/get`）；提交走
- * 对应的 set 方法，成功后 host 发 `mica/capabilities/updated` /
- * `mica/autoCompact/overrideUpdated`，同一会话的其他窗口据此同步。
+ * 数据来自常驻 chat host 的 `mica/capabilities/get`；提交走对应的 set 方法，成功后
+ * host 发 `mica/capabilities/updated`，同一会话的其他窗口据此同步。
  */
 
 const SECTIONS = [
   { id: 'capabilities', label: '会话能力', icon: IconAdjustments },
-  { id: 'autoCompact', label: '自动压缩', icon: IconGauge },
   { id: 'loop', label: '定时任务', icon: IconClock }
 ]
 
@@ -71,7 +67,6 @@ export function SessionSettingsDialog({
   const [section, setSection] = useState(initialSection)
   const [catalog, setCatalog] = useState(null)
   const [selection, setSelection] = useState(null)
-  const [compact, setCompact] = useState(null)
   const [tab, setTab] = useState('tools')
   const [error, setError] = useState('')
   // 保存中标志的同步副本：apply 里要立刻判重，不能等 setSaving 触发下一次渲染。
@@ -86,10 +81,7 @@ export function SessionSettingsDialog({
   const load = useCallback(async () => {
     setError('')
     try {
-      const [capabilityResult, compactResult] = await Promise.all([
-        window.mica.chat.capabilities(nodeId, { sessionId, cwd }),
-        window.mica.chat.autoCompact(nodeId, { sessionId, cwd })
-      ])
+      const capabilityResult = await window.mica.chat.capabilities(nodeId, { sessionId, cwd })
       if (!capabilityResult?.ok) {
         setError(capabilityResult?.error || '读取能力列表失败')
         return
@@ -102,8 +94,6 @@ export function SessionSettingsDialog({
       setSelection(capabilityResult.selection || EMPTY_SELECTION)
       selectionRef.current = capabilityResult.selection || EMPTY_SELECTION
       confirmedRef.current = selectionRef.current
-      if (compactResult?.ok) setCompact(normalizeCompact(compactResult))
-      else if (compactResult?.error) setError(compactResult.error)
     } catch (loadError) {
       setError(formatError(loadError))
     }
@@ -163,28 +153,6 @@ export function SessionSettingsDialog({
     [running, flushSave]
   )
 
-  // 压缩设置在请求间隙生效，运行中改也不会让本轮换阈值，所以不受 running 限制。
-  const applyCompact = useCallback(
-    async (override) => {
-      const previous = compact
-      setCompact((current) => current && { ...current, override })
-      setError('')
-      try {
-        const result = await window.mica.chat.setAutoCompact(nodeId, override, { sessionId, cwd })
-        if (!result?.ok) {
-          setCompact(previous)
-          setError(result?.error || '保存失败')
-          return
-        }
-        setCompact((current) => normalizeCompact({ ...current, ...result }))
-      } catch (saveError) {
-        setCompact(previous)
-        setError(formatError(saveError))
-      }
-    },
-    [nodeId, sessionId, cwd, compact]
-  )
-
   const activeTab = CAPABILITY_TABS.find((entry) => entry.key === tab) || CAPABILITY_TABS[0]
   const items = listItems(catalog, tab)
   const disabled = selection?.[activeTab.disabledKey] || []
@@ -211,34 +179,6 @@ export function SessionSettingsDialog({
       ...base,
       [disabledKey]: applyGroupEnabled(base[disabledKey], names, enabled)
     })
-  }
-
-  // 生效值 → 编辑器草稿（分钟、字符串），默认值 → 「默认 x」提示用的数字表。
-  // 两者都来自 mica-common 的合并规则，这里只做搬运。
-  const compactDraft = useMemo(
-    () => (compact ? autoCompactDraftFromSettings(compact.effective) : null),
-    [compact]
-  )
-  const compactDefaults = useMemo(
-    () => autoCompactNumbersFromSettings(compact?.defaults),
-    [compact]
-  )
-
-  // 编辑器按分钟编辑，存储用毫秒：换算只在这一处。
-  function patchCompact(key, raw) {
-    if (!compact) return
-    const value = Number(raw)
-    if (!Number.isFinite(value)) return
-    const storeKey = key === 'minIntervalMinutes' ? 'minIntervalMs' : key
-    const storeValue = key === 'minIntervalMinutes' ? value * 60_000 : value
-    void applyCompact({ ...compact.override, [storeKey]: storeValue })
-  }
-
-  function resetCompactKey(key) {
-    if (!compact) return
-    const next = { ...compact.override }
-    delete next[key === 'minIntervalMinutes' ? 'minIntervalMs' : key]
-    void applyCompact(next)
   }
 
   const totalCount = countAll(catalog)
@@ -270,13 +210,7 @@ export function SessionSettingsDialog({
               <Icon size={14} aria-hidden="true" />
               <span className="session-settings-nav-label">{entry.label}</span>
               <span className="session-settings-nav-meta">
-                {sectionMeta(entry.id, {
-                  catalog,
-                  compact,
-                  loopProps,
-                  totalCount,
-                  disabledCount
-                })}
+                {sectionMeta(entry.id, { catalog, loopProps, totalCount, disabledCount })}
               </span>
             </button>
           )
@@ -284,8 +218,8 @@ export function SessionSettingsDialog({
       </nav>
 
       <div className="session-settings-panel">
-        {/* 能力列表与自动压缩编辑器都来自设置页同一份组件（见 packages/mica-config-ui），
-            这里只负责数据与落点。外壳加 `mica-config-ui is-embed` 拿到同一套配色与控件。 */}
+        {/* 能力列表来自设置页同一份组件（见 packages/mica-config-ui），这里只负责数据与
+            落点。外壳加 `mica-config-ui is-embed` 拿到同一套配色与控件。 */}
         <div className="mica-config-ui is-embed">
           {section === 'capabilities' ? (
             catalog ? (
@@ -322,29 +256,10 @@ export function SessionSettingsDialog({
             )
           ) : null}
 
-          {section === 'autoCompact' ? (
-            compact ? (
-              <>
-                <AutoCompactFields
-                  draft={compactDraft}
-                  defaults={compactDefaults}
-                  onChange={patchCompact}
-                  onToggle={(enabled) => applyCompact({ ...compact.override, enabled })}
-                  onResetKey={resetCompactKey}
-                />
-                <p className="capability-note">
-                  新会话的默认压缩设置在设置页 Auto Compact 里配置。
-                </p>
-              </>
-            ) : (
-              <p className="capability-note">正在加载…</p>
-            )
-          ) : null}
+          {section === 'loop' ? <LoopPanel {...loopProps} /> : null}
+
+          {error ? <p className="session-settings-error">{error}</p> : null}
         </div>
-
-        {section === 'loop' ? <LoopPanel {...loopProps} /> : null}
-
-        {error ? <p className="session-settings-error">{error}</p> : null}
       </div>
 
       {detail ? (
@@ -423,24 +338,11 @@ function CapabilityDetail({ detail, item, enabled, running, onToggle, onClose })
   )
 }
 
-function sectionMeta(id, { catalog, compact, loopProps, totalCount, disabledCount }) {
+function sectionMeta(id, { catalog, loopProps, totalCount, disabledCount }) {
   if (id === 'capabilities') return catalog ? `${totalCount - disabledCount}/${totalCount}` : ''
-  if (id === 'autoCompact') {
-    if (!compact) return ''
-    const count = Object.keys(compact.override || {}).length
-    return count === 0 ? '默认' : `${count} 项已改`
-  }
   const loop = loopProps?.loop
   if (!loop) return '未设置'
   return loop.status === 'active' ? '运行中' : '已暂停'
-}
-
-function normalizeCompact(result) {
-  return {
-    defaults: result.defaults && typeof result.defaults === 'object' ? result.defaults : {},
-    override: result.override && typeof result.override === 'object' ? result.override : {},
-    effective: result.effective && typeof result.effective === 'object' ? result.effective : {}
-  }
 }
 
 function listItems(catalog, kind) {

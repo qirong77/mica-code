@@ -32,8 +32,9 @@
 - `pty_wait`：等待 PTY 输出匹配、进程退出或静默。
 - `pty_kill`：终止 PTY 会话。
 - `web_fetch`：抓取 URL 内容。
-- `web_search`：通过自托管 SearXNG 实例（`searxngUrl` / `SEARXNG_URL`）搜索网络信息。
 - `skill`：读取并调用本地 skill 指令。
+
+`web_search` 由 `plugins/web-search` 官方插件注册，工具名与内置工具同形。
 
 PTY 工具用于驱动交互式 TUI 程序做端到端验证。
 
@@ -79,7 +80,6 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 - `ToolWaitFor.ts`：等待外部条件成立（task/process/file/command/http/port/duration）。
 - `pty/`：PTY 工具（spawn/send/read/wait/kill）与懒加载 manager 桥接。
 - `ToolWebFetch.ts`：抓取网址内容。
-- `ToolWebSearch.ts`：通过 SearXNG 实例执行网络搜索。
 - `ToolWriteFile.ts`：写入与更新文件。
 - `types.ts`：模型侧工具定义类型。
 - `runtimeToolDescriptors.ts`：只在会话期注册的工具的目录兜底描述。

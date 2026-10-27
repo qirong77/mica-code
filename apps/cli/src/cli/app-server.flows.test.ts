@@ -1782,7 +1782,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     );
   });
 
-  itE2E("auto compaction shrinks the running turn's next request and reports its counters", async () => {
+  itE2E("auto compact plugin shrinks the running turn's next request", async () => {
     mock!.state.mode = 'tool';
     mock!.state.requests = [];
     mock!.state.responsesFinished = 0;
@@ -1793,7 +1793,23 @@ suite('mica app-server real-user flows (mock provider)', () => {
     // 请求立刻变小 —— 这正是「不等所有任务跑完」才有的收益。
     mock!.state.toolFileContent = 'y'.repeat(20_000);
 
-    const host = spawnHost('auto-compact');
+    // 阈值归插件自己的设置管（配置页 Plugins 一节写的也是这个文件），所以在起进程
+    // 之前就写好：插件的 setup 读一次设置。
+    const home = makeHome('auto-compact-plugin');
+    mkdirSync(join(home, 'plugin-settings'), { recursive: true });
+    writeFileSync(
+      join(home, 'plugin-settings', 'auto-compact.json'),
+      JSON.stringify({
+        enabled: 'true',
+        quickThresholdK: '200',
+        quickLimit: '1',
+        modelThresholdK: '120',
+        modelLimit: '0',
+        minIntervalMinutes: '0',
+      }),
+    );
+
+    const host = spawnHost('auto-compact-plugin', [], home);
     hosts.push(host);
     mock!.state.toolFilePath = join(host.cwd, 'auto-compact-notes.txt');
     await waitFor(host, hostReady, 'host ready or error', 30_000);
@@ -1802,30 +1818,10 @@ suite('mica app-server real-user flows (mock provider)', () => {
       threadId: '',
       input: [{ type: 'text', text: '写一个很大的文件' }],
       model: 'mock/mock-chat',
-      autoCompact: {
-        enabled: true,
-        quickThresholdK: 200,
-        quickLimit: 1,
-        modelThresholdK: 120,
-        modelLimit: 0,
-        quickRuns: 0,
-        modelRuns: 0,
-      },
     });
     const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (auto compact)');
     const turnId = (started.params?.turn as { id?: string }).id!;
-
-    // 计数通知必须先于 turn/completed：压缩发生在「一次请求结束、下一次请求发出
-    // 之前」的迭代边界上，而不是等整个任务结束。
-    const update = await waitFor(host, (m) => m.method === 'mica/autoCompact/updated', 'auto compact update');
-    expect(update.params).toMatchObject({
-      quickRuns: 1,
-      modelRuns: 0,
-      lastKind: 'quick',
-      threadId: expect.any(String),
-    });
-    const completed = await waitFor(host, turnCompleted(turnId), 'turn/completed (auto compact)', 30_000);
-    expect(host.lines.indexOf(update)).toBeLessThan(host.lines.indexOf(completed));
+    await waitFor(host, turnCompleted(turnId), 'turn/completed (auto compact)', 30_000);
 
     // 第二次请求带的就是压缩后的历史：2 万字符正文只剩摘要，工具结果换成占位符。
     const secondInput = mock!.state.requests[1]!.input as Array<{
@@ -1851,79 +1847,6 @@ suite('mica app-server real-user flows (mock provider)', () => {
     );
   });
 
-  itE2E('session-level auto compact override wins over the host settings', async () => {
-    mock!.state.mode = 'tool';
-    mock!.state.requests = [];
-    mock!.state.responsesFinished = 0;
-    mock!.state.delayBeforeTextMs = 0;
-    mock!.state.inputTokens = 250_000;
-    mock!.state.toolFileContent = 'z'.repeat(20_000);
-
-    const host = spawnHost('auto-compact-override');
-    hosts.push(host);
-    mock!.state.toolFilePath = join(host.cwd, 'auto-compact-override-notes.txt');
-    await waitFor(host, hostReady, 'host ready or error', 30_000);
-
-    // 开工前：默认值是内置默认，本会话还没有覆盖。
-    await send(host, 1, 'mica/autoCompact/get', {});
-    const initial = await waitFor(host, (m) => m.id === 1, 'autoCompact/get (initial)');
-    expect(initial.result).toMatchObject({
-      override: {},
-      defaults: { quickThresholdK: 200, quickLimit: 3 },
-    });
-
-    // 只改一项：覆盖里就只该有这一项（其余继续跟随默认值）。
-    await send(host, 2, 'mica/autoCompact/set', { override: { quickLimit: 1 } });
-    const setReply = await waitFor(host, (m) => m.id === 2, 'autoCompact/set');
-    expect(setReply.result).toMatchObject({ override: { quickLimit: 1 } });
-    const setNotification = await waitFor(
-      host,
-      (m) => m.method === 'mica/autoCompact/overrideUpdated',
-      'auto compact override notification',
-    );
-    expect(setNotification.params).toMatchObject({ override: { quickLimit: 1 } });
-
-    // 宿主下发的是「不许快速压缩」（quickLimit: 0）：会话覆盖必须赢。
-    await send(host, 3, 'turn/start', {
-      threadId: '',
-      input: [{ type: 'text', text: '写一个很大的文件' }],
-      model: 'mock/mock-chat',
-      autoCompact: {
-        enabled: true,
-        quickThresholdK: 200,
-        quickLimit: 0,
-        modelThresholdK: 120,
-        modelLimit: 0,
-        quickRuns: 0,
-        modelRuns: 0,
-      },
-    });
-    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (override)');
-    const turnId = (started.params?.turn as { id?: string }).id!;
-    const update = await waitFor(
-      host,
-      (m) => m.method === 'mica/autoCompact/updated',
-      'auto compact update (override)',
-    );
-    expect(update.params).toMatchObject({ quickRuns: 1, modelRuns: 0, lastKind: 'quick' });
-    await waitFor(host, turnCompleted(turnId), 'turn/completed (override)', 30_000);
-
-    // 宿主这一轮下发的设置成为新的默认值，覆盖仍然单独列出、生效值跟着覆盖走。
-    await send(host, 4, 'mica/autoCompact/get', {});
-    const after = await waitFor(host, (m) => m.id === 4, 'autoCompact/get (after turn)');
-    expect(after.result).toMatchObject({
-      defaults: { quickThresholdK: 200, quickLimit: 0 },
-      override: { quickLimit: 1 },
-      effective: { quickLimit: 1, quickThresholdK: 200 },
-    });
-
-    // 覆盖随会话落盘：换一个客户端（或桌面端）打开同一会话时还是这套设置。
-    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
-    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
-      snapshot?: { autoCompactOverride?: unknown };
-    };
-    expect(session.snapshot?.autoCompactOverride).toEqual({ quickLimit: 1 });
-  });
 
   itE2E('capabilities/set pins the session selection over the config defaults', async () => {
     mock!.state.mode = 'ok';

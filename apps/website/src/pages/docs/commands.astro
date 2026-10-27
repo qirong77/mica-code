@@ -33,7 +33,7 @@ const groups = [
       ['/task', '查看代理、保留的子代理任务与运行中的后台 shell；/task clear 清理空闲任务。', true],
       ['/btw', '发起不进入主对话上下文的旁问；/btw -continue 继续上一问。', true],
       ['/loop', '启动定时任务；/loop status 查看状态，/loop stop 停止。', false],
-      ['/capabilities', '本会话设置：选择可用的 Skills、工具、MCP 服务，并可调整本会话的自动压缩阈值（只影响当前会话）。', false],
+      ['/capabilities', '本会话设置：选择可用的工具、Skills 与 MCP 服务；只影响当前会话，不改变配置页的默认值。', false],
       ['/mcp', '查看 MCP 服务器与工具；/mcp reconnect <server> 重连。', false],
       ['/skills', '查看当前发现的 Skills。', false],
       ['/commit', '生成提交说明并执行 Git 提交、尝试推送；/commit agent 仅提交当前代理追踪的改动。', true],

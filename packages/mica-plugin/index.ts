@@ -121,6 +121,14 @@ export type {
 } from './PluginContext.js';
 export type { PluginPromptSection } from './PluginPrompt.js';
 export { PluginPromptSections } from './PluginPrompt.js';
+export type {
+  PluginAgentHandle,
+  PluginAgentRegistry,
+  PluginAgentUsage,
+  PluginCompactMode,
+  PluginCompactResult,
+  PluginIterationRewriter,
+} from './PluginAgent.js';
 export {
   PLUGIN_HEALTH_DIR,
   readPluginHealth,

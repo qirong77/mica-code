@@ -6,7 +6,6 @@ export type ConfigWebSection =
   | 'skills'
   | 'capabilities'
   | 'plugins'
-  | 'autoCompact'
   | 'browserControl'
   | 'terminalControl'
   | 'performance';
@@ -200,7 +199,7 @@ export type ConfigWebPluginFile = { name: string; sizeBytes?: number };
 export type ConfigWebPluginSetting = {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'textarea' | 'select' | 'number';
+  type: 'text' | 'password' | 'textarea' | 'select' | 'number' | 'switch';
   description?: string;
   placeholder?: string;
   options?: { value: string; label: string }[];
@@ -210,6 +209,10 @@ export type ConfigWebPluginSetting = {
   format?: 'url' | 'number';
   min?: number;
   max?: number;
+  /** 数字项的步进（页面的 −/+ 按钮按它走），缺省 1。 */
+  step?: number;
+  /** 数字项的单位（`k tokens` / `分钟` / `次`）。 */
+  unit?: string;
   pattern?: string;
 };
 
@@ -266,38 +269,6 @@ export type ConfigWebPluginsDetails = {
   /** 官方插件在仓库里的目录。 */
   officialDir: string;
   plugins: ConfigWebPlugin[];
-};
-
-export type ConfigWebAutoCompactSettings = {
-  enabled: boolean;
-  quickThresholdK: number;
-  quickLimit: number;
-  modelThresholdK: number;
-  modelLimit: number;
-  /** 两次压缩之间的最小间隔（毫秒）；页面上按分钟编辑，0 表示不限制。 */
-  minIntervalMs: number;
-};
-
-/** 一个会话的自动压缩账本（计数只是展示用的，丢了不影响压缩本身）。 */
-export type ConfigWebAutoCompactCounter = {
-  sessionId: string;
-  /** 会话文件还在时是它的标题；会话被删了就只剩 id。 */
-  title?: string;
-  quickRuns: number;
-  modelRuns: number;
-  lastRunAt: string | null;
-  lastKind: 'quick' | 'model' | null;
-  lastSavedTokens: number;
-  lastNote: string | null;
-};
-
-export type ConfigWebAutoCompactDetails = {
-  /** 落盘位置（运行时目录下的 auto-compact.json），页面上直接展示。 */
-  path: string;
-  settings: ConfigWebAutoCompactSettings;
-  /** 运行时的默认值，页面用它实现「恢复默认」。 */
-  defaults: ConfigWebAutoCompactSettings;
-  counters: ConfigWebAutoCompactCounter[];
 };
 
 export type ConfigWebSession = {

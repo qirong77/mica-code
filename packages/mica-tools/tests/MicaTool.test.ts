@@ -99,7 +99,6 @@ describe('getToolDefinitions', () => {
         'list_files',
         'grep_search',
         'web_fetch',
-        'web_search',
         'skill',
         'background_tasks_list',
         'background_tasks_read',

@@ -7,12 +7,10 @@ import {
   parseConfigDraft,
   providerEntries,
   readProviderDraft,
-  readSearxngUrl,
   removeProviderDraft,
   serializeConfigDraft,
   validateConfigDraft,
   writeProviderDraft,
-  writeSearxngUrl,
 } from './configDraft.js';
 
 const SOURCE = {
@@ -27,7 +25,6 @@ const SOURCE = {
       models: ['deepseek-chat'],
     },
   ],
-  searxngUrl: 'http://127.0.0.1:8080',
   mcpServers: {
     'sequential-thinking': { command: 'npx', args: ['-y', '@modelcontextprotocol/server-sequential-thinking'] },
   },
@@ -129,23 +126,11 @@ describe('config draft providers', () => {
   });
 });
 
-describe('config draft search url', () => {
-  it('deletes the key when cleared', () => {
-    const draft = writeSearxngUrl(draftOf(SOURCE), '   ');
-    expect('searxngUrl' in draft).toBe(false);
-    expect(readSearxngUrl(draft)).toBe('');
-  });
-
-  it('trims the value', () => {
-    expect(writeSearxngUrl({}, ' http://localhost:8080 ')).toEqual({ searxngUrl: 'http://localhost:8080' });
-  });
-});
-
 describe('config draft serialization', () => {
   it('puts known keys first and keeps extra keys after them', () => {
-    const text = serializeConfigDraft({ zebra: 1, searxngUrl: 'http://x', providers: [] });
-    expect(text.indexOf('"providers"')).toBeLessThan(text.indexOf('"searxngUrl"'));
-    expect(text.indexOf('"searxngUrl"')).toBeLessThan(text.indexOf('"zebra"'));
+    const text = serializeConfigDraft({ zebra: 1, mcpServers: {}, providers: [] });
+    expect(text.indexOf('"providers"')).toBeLessThan(text.indexOf('"mcpServers"'));
+    expect(text.indexOf('"mcpServers"')).toBeLessThan(text.indexOf('"zebra"'));
     expect(text.endsWith('\n')).toBe(true);
   });
 

@@ -24,8 +24,6 @@ export interface ProviderDefinition {
 
 export interface PersistedMicaConfig {
   providers: ProviderDefinition[];
-  /** Base URL of the self-hosted SearXNG instance used by the `web_search` tool. */
-  searxngUrl?: string;
   /**
    * Default capability selection copied into new sessions. Existing sessions keep
    * their own snapshot, so changing this never rewrites an open conversation.

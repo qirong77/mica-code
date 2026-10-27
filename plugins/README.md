@@ -65,9 +65,12 @@ plugins/<id>/
 }
 ```
 
-`type` 支持 `text` / `password` / `textarea` / `select` / `number`。值统一按字符串存进
-`$MICA_HOME/plugin-settings/<id>.json`，未声明的键不会被写入；`select` 必须带 `options`。
-插件每轮读取时会比对文件 mtime，用户改完不需要重启。
+`type` 支持 `text` / `password` / `textarea` / `select` / `number` / `switch`。值统一按字符串存进
+`$MICA_HOME/plugin-settings/<id>.json`，未声明的键不会被写入；`select` 必须带 `options`，
+`switch` 存 `"true"` / `"false"`。插件每轮读取时会比对文件 mtime，用户改完不需要重启。
+
+`number` 还可以声明 `step` 与 `unit`：页面把它画成「− 输入 +」加单位，而不是铺满整行的
+原生数字框。少一次「用户不知道该填多少」的来回。
 
 字段还能带约束，写错的值既存不进盘、也不会被插件当成有效配置：
 
@@ -76,6 +79,8 @@ plugins/<id>/
 | `required`  | 必填；留空时页面标红，插件读到空值就知道自己没被配置 |
 | `format`    | `url`（必须是 http/https 绝对地址）或 `number`       |
 | `min`/`max` | 数值范围                                             |
+| `step`      | 数值项的步进（页面的 −/+ 按它走），缺省 1            |
+| `unit`      | 数值项的单位，显示在控件右侧（`k tokens` / `分钟`）  |
 | `pattern`   | 正则，整串必须匹配                                   |
 
 校验只有一份实现（`validatePluginSettingValues`）：页面保存前用它拒绝，插件运行时读值也用它，
@@ -84,8 +89,9 @@ plugins/<id>/
 ## 健康状态与失败可见
 
 `requires` 要写全插件实际触碰的每一面 `ctx.*`：`commands`、`events`、`hooks`、`prompt`、
-`session`、`sessionState`、`settings`、`tools`、`ui`、`git`、`runtime`。宿主缺哪个，插件就整块
-不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
+`session`、`sessionState`、`settings`、`tools`、`ui`、`git`、`runtime`、`agent`。宿主缺哪个，
+插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
+`agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
 少声明一项的后果是在 setup 里撞上 `undefined` 并连带算作加载失败，所以不要把可选项当默认存在。
 
 插件自身的故障要能被用户看见，而不是只落在日志里：

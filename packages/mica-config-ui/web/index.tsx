@@ -16,10 +16,9 @@ export type { ConfigWebSection } from '../src/shared/types.js';
 
 /**
  * 会话级设置（桌面端会话设置弹窗）复用同一批控件：
- * 自动压缩的字段编辑器、能力列表、开关。宿主把它们包在 `.mica-config-ui is-embed` 里，
+ * 能力列表与开关。宿主把它们包在 `.mica-config-ui is-embed` 里，
  * 就能拿到与设置页完全一致的形态，不用另写一套。
  */
-export { AutoCompactFields } from './components/AutoCompactFields.js';
 export { CapabilityList, CapabilityParameters } from './components/CapabilityList.js';
 export type {
   CapabilityGroupDef,
@@ -29,10 +28,3 @@ export type {
 export { applyGroupEnabled, buildCapabilitySections } from './capabilityGroups.js';
 export type { CapabilityGroupRef, CapabilitySection } from './capabilityGroups.js';
 export { Switch as ConfigSwitch } from './components/Ui.js';
-export {
-  AUTO_COMPACT_FIELDS,
-  autoCompactDraftFromSettings,
-  autoCompactNumbersFromSettings,
-  autoCompactSettingsFromDraft,
-  type AutoCompactDraft,
-} from './autoCompact.js';

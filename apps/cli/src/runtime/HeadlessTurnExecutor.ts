@@ -41,12 +41,6 @@ export type HeadlessTurnExecutorOptions = {
   agent: AgentRuntime;
   sessionController: SessionController;
   onEvent: (event: HeadlessTurnEvent) => void;
-  /**
-   * Optional automatic context compaction. Driven by the provider's iteration
-   * boundary: after every completed model request the hook may return a smaller
-   * history, which the running turn continues with (see autoCompact.ts).
-   */
-  autoCompact?: HeadlessAutoCompactHook;
   /** Fired once the drain loop empties (all queued turns finished). */
   onIdle?: () => void;
   maxTurns?: number;
@@ -84,11 +78,6 @@ export type HeadlessTurnExecutorOptions = {
 export type HeadlessNoticeSource = {
   /** Rebinds to the live session (a resume rebuilds it from the session file). */
   ensure(): TurnNoticeLog;
-};
-
-export type HeadlessAutoCompactHook = {
-  /** Rewrites the session messages at an iteration boundary; null keeps them. */
-  rewriteIterationMessages(messages: unknown[]): Promise<unknown[] | null>;
 };
 
 /**
@@ -392,9 +381,6 @@ export class HeadlessTurnExecutor {
             runResult = await agent.run(runContent, {
               reservedRunId: attempt === 0 ? reservedRunId : undefined,
               maxTurns: this.options.maxTurns,
-              rewriteIterationMessages: this.options.autoCompact
-                ? (messages: unknown[]) => this.options.autoCompact!.rewriteIterationMessages(messages)
-                : undefined,
               onIterationComplete: () => {
                 this.saveCurrent({ allowEmpty: true, turnState: 'running' });
                 // The iteration that just completed pushed its text (and tool

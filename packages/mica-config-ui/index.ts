@@ -26,9 +26,6 @@ export {
   getSkillsRootPath,
 } from './src/server/paths.js';
 export type {
-  ConfigWebAutoCompactCounter,
-  ConfigWebAutoCompactDetails,
-  ConfigWebAutoCompactSettings,
   ConfigWebBrowserControlBrowser,
   ConfigWebBrowserControlDetails,
   ConfigWebBrowserControlEndpoint,

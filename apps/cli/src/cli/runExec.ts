@@ -157,6 +157,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       agent,
       sessionController,
       subagentTasks,
+      oneShot: true,
       isBusy: () => executor!.isBusy,
       submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
     });

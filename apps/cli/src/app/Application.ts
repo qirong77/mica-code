@@ -14,6 +14,7 @@ import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
 import { micaSession, type PersistedSession } from '@packages/mica-session/index.js';
 import { micaTools, terminateCurrentBackgroundTasks } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
+import { configureIterationRewrite, registerIterationRewrite } from '../agent/iterationRewrite.js';
 import {
   normalizeUiState,
   TerminalAgentSessionManager,
@@ -111,6 +112,13 @@ export class Application {
       this.subagentTasks = subagentTasks;
       agentSessions.registerCurrent(agent, sessionController);
       micaTools.registerRuntime(new ToolAgent(agent, subagentTasks));
+      // 插件重写模型请求的那条链需要知道「这次请求属于哪条会话」，而 agent 本身不持有
+      // 会话身份（一条会话可以被 fork、可以有多个 agent），所以由这一层回答。
+      configureIterationRewrite({
+        mode: 'session',
+        resolveSessionId: (target) => agentSessions.findByAgent(target)?.sessionController.getCurrentSessionId() ?? null,
+        onError: reportPluginIterationError,
+      });
 
       this.context = {
         agent,
@@ -175,6 +183,9 @@ export class Application {
           clear: () => resolvePluginSession(agentSessions, undefined)?.agent.clearPluginState(pluginId),
         }),
         promptSections: agent.promptSections,
+        agentRegistry: {
+          onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
+        },
         runtime: {
           submit: (text, options) => runtime.submit(text, options),
           queue: {
@@ -415,3 +426,13 @@ const pluginLogger = {
   warn() {},
   error() {},
 };
+
+/**
+ * 模型请求重写失败：插件自己的策略算错了，不该让正在跑的 turn 挂掉，但也不能无声。
+ * 与 hook 失败走同一条去向——插件日志 + 健康状态，用户能在配置页看到。
+ */
+function reportPluginIterationError(error: unknown, pluginId: string): void {
+  const message = error instanceof Error ? error.message : String(error);
+  micaPlugin.createPluginLogger(pluginId, pluginLogger).error('plugin:iteration-rewrite-failed', { error: message });
+  micaPlugin.writePluginHealth(pluginId, { level: 'error', message: `模型请求重写失败：${message}` });
+}

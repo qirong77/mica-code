@@ -13,12 +13,10 @@ import {
   mcpServerCount,
   parseConfigDraft,
   providerEntries,
-  readSearxngUrl,
   removeProviderDraft,
   serializeConfigDraft,
   validateConfigDraft,
   writeProviderDraft,
-  writeSearxngUrl,
   type ConfigDraft,
 } from '../configDraft.js';
 import type { ConfigWebAppSection } from '../layout/Sidebar.js';
@@ -34,7 +32,7 @@ type ConfigPageProps = {
  * config.json 的配置页。
  *
  * 以前这里是个裸 JSON 编辑器：字段全靠记，写错一个逗号就保存不了。现在按字段编辑——
- * 表单只覆盖有结构的部分（providers / searxngUrl），其余内容（mcpServers、
+ * 表单只覆盖有结构的部分（providers），其余内容（mcpServers、
  * capabilityDefaults、未来新增的键）在「直接编辑 JSON」里原样可见可改，写盘时不会丢。
  *
  * 没有保存按钮：改动停下就自动写盘。本地校验不过（必填项没填、JSON 还没写完）时先不写，
@@ -238,20 +236,6 @@ export function ConfigPage({ onNavigate }: ConfigPageProps) {
                   />
                 ))
               )}
-            </SettingsGroup>
-
-            <SettingsGroup title="联网搜索" description="web_search 走的 SearXNG 实例，需要开启 JSON 输出格式">
-              <SettingRow label="SearXNG 地址" hint="留空按环境变量或默认地址" error={errors.get('searxngUrl')}>
-                <input
-                  className={errors.has('searxngUrl') ? 'text-input text-input-invalid' : 'text-input'}
-                  value={readSearxngUrl(draft)}
-                  spellCheck={false}
-                  placeholder="http://127.0.0.1:8080"
-                  aria-label="SearXNG 地址"
-                  aria-invalid={errors.has('searxngUrl')}
-                  onChange={(event) => applyDraft(writeSearxngUrl(draft, event.target.value))}
-                />
-              </SettingRow>
             </SettingsGroup>
 
             <SettingsGroup title="其他页面管理" description="同样写在 config.json，各有专门的编辑页">

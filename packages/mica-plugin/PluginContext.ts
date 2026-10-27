@@ -5,6 +5,7 @@ import type { MicaTool } from '@packages/mica-tools/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from './HookRegistry.js';
 import type { ServiceContainer } from './ServiceContainer.js';
+import type { PluginIterationRewriter } from './PluginAgent.js';
 import type { PluginPromptSection } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
 import type { PluginHealthStore } from './PluginHealth.js';
@@ -95,6 +96,15 @@ export type PluginContext = {
    */
   prompt?: {
     section(section: PluginPromptSection): Disposable;
+  };
+  /**
+   * 与模型请求交互的入口：在迭代边界重写「接下来要发送的历史」。
+   *
+   * 只在常驻会话的宿主里提供（TUI / app-server）。`mica exec` 这样的
+   * 一次性运行不提供——那边任何改变成本或输出的策略都会污染基准测试。
+   */
+  agent?: {
+    onIterationRewrite(handler: PluginIterationRewriter): Disposable;
   };
   /**
    * 清单里声明的设置项的当前值（`$MICA_HOME/plugin-settings/<id>.json`）。

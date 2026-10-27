@@ -440,6 +440,55 @@ function PluginSettingInput({
   onChange(next: string): void;
 }) {
   const inputId = `plugin-setting-${field.key}`;
+  if (field.type === 'switch') {
+    return (
+      <Switch
+        id={inputId}
+        label={field.label}
+        checked={value === 'true'}
+        disabled={disabled}
+        onChange={(checked) => onChange(checked ? 'true' : 'false')}
+      />
+    );
+  }
+
+  if (field.type === 'number') {
+    const numeric = Number(value);
+    const step = field.step ?? 1;
+    const canStep = Number.isFinite(numeric);
+    // 步进按钮落在同一条边框里，与输入框共用高度：原生 number 的上下箭头既占位
+    // 又和 −/+ 重复，所以这里关掉它们（appearance: none 在样式里）。
+    const nudge = (direction: 1 | -1) => {
+      const base = canStep ? numeric : (field.min ?? 0);
+      const next = base + step * direction;
+      const clamped = Math.min(field.max === undefined ? next : field.max, field.min === undefined ? next : field.min);
+      onChange(String(Number(clamped.toFixed(4))));
+    };
+    return (
+      <span className={`config-stepper${invalid ? ' is-invalid' : ''}`}>
+        <button type="button" className="config-stepper-btn" disabled={disabled} onClick={() => nudge(-1)}>
+          −
+        </button>
+        <input
+          id={inputId}
+          className="text-input config-stepper-input"
+          type="number"
+          inputMode="numeric"
+          value={value}
+          min={field.min}
+          max={field.max}
+          step={step}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <button type="button" className="config-stepper-btn" disabled={disabled} onClick={() => nudge(1)}>
+          +
+        </button>
+        {field.unit ? <span className="config-stepper-unit">{field.unit}</span> : null}
+      </span>
+    );
+  }
+
   // 枚举项自绘成按钮组：原生 select 的字号与内边距跟旁边的输入框对不齐。
   if (field.type === 'select') {
     return (
@@ -478,7 +527,7 @@ function PluginSettingInput({
     <input
       id={inputId}
       className={`text-input${invalid ? ' is-invalid' : ''}`}
-      type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+      type={field.type === 'password' ? 'password' : 'text'}
       value={value}
       spellCheck={false}
       autoComplete="off"

@@ -34,8 +34,6 @@ export type SessionAgentAdapter = {
   setCapabilities?(selection: NonNullable<AgentRuntimeSnapshot['capabilitySelection']>): unknown;
   /** 可选：`/clear`、`/new` 之后回到「跟随 config 默认值」的新会话状态。 */
   resetCapabilitiesToDefaults?(): unknown;
-  /** 可选：`/clear`、`/new` 之后清掉本会话的压缩覆盖。 */
-  setAutoCompactOverride?(override: NonNullable<AgentRuntimeSnapshot['autoCompactOverride']>): unknown;
   /** 可选：`/clear`、`/new` 之后清空插件在会话里的状态（含会话笔记）。 */
   clearSession?(): void;
   toConversationMessages(): MicaUiConversationMessage[];
@@ -107,8 +105,6 @@ export class SessionController {
     // 能力开关属于会话，不属于 agent：新会话重新跟随 config 里的默认值（不继承
     // 上一条会话关掉的工具，也不继承它的「已定制」状态）。
     this.agent.resetCapabilitiesToDefaults?.();
-    // 压缩覆盖同理：新会话不该继承上一条会话调过的阈值。
-    this.agent.setAutoCompactOverride?.({});
     // 插件状态同样属于会话：新会话从空白开始，不继承上一轮攒下的结论（笔记等）。
     this.agent.clearSession?.();
     this.currentTitleOverride = null;
@@ -399,7 +395,6 @@ function toPersistedSnapshot(
     // 每轮都对不上，于是每个 turn 都会误判「别的进程改过」而整份 resume 一次
     // （turn/start 刚应用的 role 会被快照里的旧角色盖回去）。
     ...(snapshot.capabilitiesCustomized ? { capabilitiesCustomized: true } : {}),
-    autoCompactOverride: snapshot.autoCompactOverride,
     pluginState: snapshot.pluginState,
     contextWindowSize: micaConfig.getModelRule(snapshot.model).contextSize,
     messages: snapshot.messages,
@@ -422,7 +417,6 @@ function fromPersistedSnapshot(
     role,
     capabilitySelection: snapshot.capabilitySelection,
     capabilitiesCustomized: snapshot.capabilitiesCustomized,
-    autoCompactOverride: snapshot.autoCompactOverride,
     pluginState: snapshot.pluginState,
     messages: snapshot.messages,
     usageHistory: snapshot.usageHistory,

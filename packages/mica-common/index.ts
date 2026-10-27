@@ -122,6 +122,29 @@ export {
 export { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 export type { StoredBtwThread } from './btwState.js';
 export {
+  MAX_TODOS,
+  MAX_TODO_TEXT_LENGTH,
+  RECOMMENDED_TODO_ITEMS,
+  TODO_TOOL_NAME,
+  appendTodoNotes,
+  demoteExtraInProgress,
+  formatTodoSummary,
+  parseTodoInput,
+  projectTodoSnapshot,
+  resolveTodoDisplayItems,
+  shouldShowTodoList,
+  summarizeTodoProgress,
+  todoItemLabel,
+} from './todoState.js';
+export type {
+  TodoItem,
+  TodoParseResult,
+  TodoProgress,
+  TodoSnapshot,
+  TodoStatus,
+  TodoWriteEntry,
+} from './todoState.js';
+export {
   CAPABILITY_SELECTION_VERSION,
   capabilityCounts,
   capabilitySelectionEquals,
@@ -135,23 +158,3 @@ export {
 } from './capabilities.js';
 export type { CapabilityKind, CapabilitySelection } from './capabilities.js';
 export { LEGACY_TOOL_NAMES, normalizeToolName } from './toolNames.js';
-export {
-  AUTO_COMPACT_DEFAULTS,
-  AUTO_COMPACT_FIELD_RANGES,
-  AUTO_COMPACT_MAX_INTERVAL_MS,
-  AUTO_COMPACT_MAX_LIMIT,
-  AUTO_COMPACT_MAX_THRESHOLD_K,
-  AUTO_COMPACT_MIN_MODEL_THRESHOLD_K,
-  AUTO_COMPACT_MIN_QUICK_THRESHOLD_K,
-  AUTO_COMPACT_NUMERIC_KEYS,
-  isEmptyAutoCompactOverride,
-  normalizeAutoCompactOverride,
-  pruneAutoCompactOverride,
-  resolveAutoCompactSettings,
-} from './autoCompact.js';
-export type {
-  AutoCompactFieldRange,
-  AutoCompactNumericKey,
-  AutoCompactOverride,
-  AutoCompactSettings,
-} from './autoCompact.js';

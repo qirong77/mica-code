@@ -1,5 +1,4 @@
 import type { ConfigWebSection } from '../../src/shared/types.js';
-import { supportsAutoCompact } from '../api.js';
 import { appIcons } from '../icons.js';
 // 品牌标志全仓库只有一份（apps/desktop/resources/icon.svg），这里直接引用，不要另存副本。
 import markUrl from '../../../../apps/desktop/resources/icon.svg?url&no-inline';
@@ -14,8 +13,7 @@ type SidebarGroup = { key: string; label?: string; items: SidebarEntry[] };
 // 再说会话数据，最后才是只有桌面运行时才有的能力与诊断。原先是 11 个入口平铺，顺序
 // 既不是字母序也不是使用频次，读的人要在整列里找。
 //
-// 带 `available` 的条目由宿主能力决定是否出现：自动压缩的设置与计数只活在桌面运行时里，
-// 浏览器宿主（apps/config-web）拿不到，所以那一边连入口都不显示。
+// 带 `available` 的条目由宿主能力决定是否出现（当前没有这样的条目，留作扩展点）。
 //
 // Browser Control 与 Terminal Control **刻意不带这个门控**：它们是「Mica 里有一套能真正
 // 打开的浏览器 / 终端」这件事的唯一说明处，藏起来会让人以为 Mica 没有这个能力。服务没开
@@ -42,7 +40,6 @@ const groups: SidebarGroup[] = [
     label: 'Sessions',
     items: [
       { key: 'sessions', label: 'Sessions' },
-      { key: 'autoCompact', label: 'Auto Compact', available: supportsAutoCompact },
     ],
   },
   {

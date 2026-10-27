@@ -1,0 +1,74 @@
+{
+  "id": "auto-compact",
+  "name": "Auto Compact",
+  "version": "1.0.0",
+  "description": "一次模型请求跑完就检查上下文占用，超过阈值先做本地清理、仍超阈值再做模型摘要，不等整个任务结束。",
+  "main": "index.js",
+  "priority": 100,
+  "required": false,
+  "requires": ["agent", "settings"],
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "启用自动压缩",
+      "type": "switch",
+      "default": "true",
+      "description": "关掉之后只在手动 /compact 时压缩。"
+    },
+    {
+      "key": "quickThresholdK",
+      "label": "快速压缩阈值",
+      "type": "number",
+      "default": "200",
+      "min": 150,
+      "max": 10000,
+      "step": 10,
+      "unit": "k tokens",
+      "description": "上下文超过这个量就先做本地清理（把工具结果与参数正文换成占位符），不调用模型。"
+    },
+    {
+      "key": "quickLimit",
+      "label": "快速压缩次数",
+      "type": "number",
+      "default": "3",
+      "min": 0,
+      "max": 999,
+      "step": 1,
+      "unit": "次",
+      "description": "一条会话最多做几次快速压缩，0 表示不做这一类。"
+    },
+    {
+      "key": "modelThresholdK",
+      "label": "模型压缩阈值",
+      "type": "number",
+      "default": "120",
+      "min": 100,
+      "max": 10000,
+      "step": 10,
+      "unit": "k tokens",
+      "description": "本地清理之后仍超过这个量，才花一次模型请求做摘要。"
+    },
+    {
+      "key": "modelLimit",
+      "label": "模型压缩次数",
+      "type": "number",
+      "default": "3",
+      "min": 0,
+      "max": 999,
+      "step": 1,
+      "unit": "次",
+      "description": "一条会话最多做几次模型压缩，0 表示不做这一类。"
+    },
+    {
+      "key": "minIntervalMinutes",
+      "label": "两次压缩的最小间隔",
+      "type": "number",
+      "default": "20",
+      "min": 0,
+      "max": 1440,
+      "step": 5,
+      "unit": "分钟",
+      "description": "免得同一段上下文被反复触发；0 表示不限制。"
+    }
+  ]
+}

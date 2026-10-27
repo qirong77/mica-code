@@ -1,8 +1,10 @@
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
+import autoCompactSetup from '../../plugins/auto-compact/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
 import sessionNotesSetup from '../../plugins/session-notes/index.js';
 import sessionTagsSetup from '../../plugins/session-tags/index.js';
 import todoSetup from '../../plugins/todo/index.js';
+import webSearchSetup from '../../plugins/web-search/index.js';
 import { officialPluginManifests } from './manifests.js';
 
 export { OFFICIAL_PLUGINS_DIR, officialPluginIds, officialPluginManifests } from './manifests.js';
@@ -14,6 +16,8 @@ export { OFFICIAL_PLUGINS_DIR, officialPluginIds, officialPluginManifests } from
  * 进来。只想列清单的地方用 `./manifests.js`。
  */
 const officialSetups: Record<string, MicaPlugin['setup']> = {
+  'auto-compact': autoCompactSetup,
+  'web-search': webSearchSetup,
   todo: todoSetup,
   'session-notes': sessionNotesSetup,
   'session-rename': sessionRenameSetup,

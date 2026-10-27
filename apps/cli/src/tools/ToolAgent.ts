@@ -880,9 +880,6 @@ function classifyToolActivity(name: string, argsText: string): ToolActivity {
     const command = clampOneLine(compactString(args.command) || 'command', 72);
     return { kind: 'other', description: `Starting ${command} in the background…` };
   }
-  if (name === 'web_search') {
-    return { kind: 'other', description: `Searching the web for ${quotedTarget(args.query, 'query')}…` };
-  }
   if (name === 'web_fetch') return { kind: 'other', description: `Fetching ${urlTarget(args.url)}…` };
   if (name === 'skill') {
     return { kind: 'other', description: `Using the ${compactString(args.skill) || 'selected'} skill…` };

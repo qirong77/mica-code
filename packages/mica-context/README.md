@@ -24,7 +24,7 @@ const service = new micaContext.CompactionService(options);
 
 - 本包只处理上下文相关算法和服务，不直接依赖终端 UI。
 - 不修改 provider adapter；压缩结果应通过 runtime/session 层接入对话。
-- 自动压缩策略应由运行时 hook 或应用层触发。
+- 什么时候压缩由调用方决定：运行时在手动入口触发，自动压缩由 `auto-compact` 插件经 `ctx.agent.onIterationRewrite` 触发。
 
 ## 目录说明
 

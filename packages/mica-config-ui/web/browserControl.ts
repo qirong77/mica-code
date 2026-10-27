@@ -7,7 +7,7 @@ import { controlCurlExample, controlEnvHint } from './controlEndpoints.js';
  * 受控浏览器活在桌面运行时里（窗口在 Electron 主进程、运行时经本机 HTTP 服务读写，见
  * `apps/desktop/src/host/browser-control.js`），页面只是把详情读出来展示（**不管窗口**：
  * 开、显示、隐藏、关闭都由 agent 调接口或顶栏图标完成）。这里不碰数据源，只把详情翻译成
- * 界面文案 —— 与 `autoCompact.ts` 同一条边界：能测的判断都抽出来，组件里只接线。
+ * 界面文案：能测的判断都抽出来，组件里只接线。
  */
 
 /** 没有服务地址时，示例里用环境变量占位，agent 拿到手就是可移植的一份。 */

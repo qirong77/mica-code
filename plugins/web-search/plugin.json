@@ -1,0 +1,31 @@
+{
+  "id": "web-search",
+  "name": "Web Search",
+  "version": "1.0.0",
+  "description": "给模型一个 web_search 工具：查询最新信息、官方文档、API 行为、价格与版本，再用 web_fetch 打开具体页面。",
+  "main": "index.js",
+  "priority": 200,
+  "required": false,
+  "requires": ["tools", "settings", "prompt"],
+  "settings": [
+    {
+      "key": "searxngUrl",
+      "label": "SearXNG 地址",
+      "type": "text",
+      "format": "url",
+      "placeholder": "http://127.0.0.1:8080",
+      "description": "自托管 SearXNG 实例，须在 settings.yml 的 search.formats 里开启 json。留空则用 SEARXNG_URL 环境变量，其次 http://127.0.0.1:8080。"
+    },
+    {
+      "key": "defaultCount",
+      "label": "默认返回条数",
+      "type": "number",
+      "default": "5",
+      "min": 1,
+      "max": 20,
+      "step": 1,
+      "unit": "条",
+      "description": "模型没有指定 count 时用的条数。"
+    }
+  ]
+}

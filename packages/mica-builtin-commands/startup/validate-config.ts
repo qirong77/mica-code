@@ -196,9 +196,6 @@ export function validateConfig(input: unknown): ConfigValidationResult {
     }
   });
 
-  if (config.searxngUrl !== undefined && typeof config.searxngUrl !== 'string') {
-    add('error', 'searxng_url_invalid', 'searxngUrl', '"searxngUrl" 必须是字符串。');
-  }
   validateMcpServers(config.mcpServers, add);
 
   return validationResult(config, changed, changes, issues);

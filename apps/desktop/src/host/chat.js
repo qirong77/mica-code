@@ -31,7 +31,6 @@ import { isValidSessionId } from './session-delete'
 import { renameSessionFile } from './session-rename'
 import { createTurnLeaseProbe } from './session-lease'
 import { bindLoopSessionId } from './loops'
-import { readAutoCompactTurnParams, recordAutoCompactStatus } from './auto-compact'
 import { browserOwnerEnv } from './browser-control'
 import { terminalOwnerEnv } from './terminal-control'
 import {
@@ -729,7 +728,6 @@ function sendTurnStart(run, payload) {
     model: payload.model,
     variant: payload.variant,
     role: payload.role,
-    autoCompact: readAutoCompactTurnParams(runSessionId(run)),
     clientMessageId: payload.clientMessageId
   })
   return sendCodexRequest(run, 'turn/start', params)
@@ -805,9 +803,6 @@ function editRunMessage(sender, id, payload = {}) {
   // Same role extension as turn/start: editing a message re-runs a turn, so a
   // role picked in the composer must apply (and persist) here too.
   if (payload.role) params.role = payload.role
-  // Same auto-compact extension as turn/start: the re-run turn must carry the
-  // current setting, otherwise an edit would silently run without it.
-  params.autoCompact = readAutoCompactTurnParams(runSessionId(run))
   // Like sendTurnStart: the replay buffer and `prompt` describe the turn being
   // started, otherwise a renderer reload trims the transcript at the previous
   // turn's boundary and replays the wrong run.
@@ -1213,19 +1208,6 @@ function handleHostNotification(id, run, notification) {
       })
     }
     return
-  } else if (method === 'mica/autoCompact/overrideUpdated') {
-    // 会话级压缩覆盖变了：同一会话的其他窗口刷新面板。与能力开关同理，
-    // 这条通知不进 turn 事件缓冲。
-    if (run.sender && !run.sender.isDestroyed()) {
-      run.sender.send('chat:auto-compact-updated', {
-        id,
-        sessionId: runSessionId(run),
-        override: params.override && typeof params.override === 'object' ? params.override : {},
-        effective:
-          params.effective && typeof params.effective === 'object' ? params.effective : null
-      })
-    }
-    return
   } else if (method === 'mica/capabilities/updated') {
     // 会话级能力开关变了：同一会话的其他窗口/标签页用这条快照刷新面板。
     // 它与 turn 生命周期无关，不进事件缓冲，也不改 running / hostPending。
@@ -1261,15 +1243,6 @@ function handleHostNotification(id, run, notification) {
         event: { ...replacedEvent, history }
       })
     }
-    return
-  } else if (method === 'mica/autoCompact/updated') {
-    // The host ran an auto-compact and reports the session's tally. It is host
-    // state, not a turn delta: the settings page reads it back from
-    // host/auto-compact.js, so it must not enter the turn event buffer (there
-    // would be nothing to render from it) and must not touch running /
-    // hostPending — a compaction happens between two requests and does not
-    // change the lifecycle of the turn.
-    recordAutoCompactStatus(run.sessionId || params.threadId || null, params)
     return
   } else if (method === 'error') {
     run.running = false
@@ -1983,24 +1956,6 @@ export function registerChatIpc() {
     if (!ensured.run) return { ok: false, error: ensured.error }
     return unwrapHostResult(
       await hostTaskRequest(ensured.run, 'mica/capabilities/set', { selection })
-    )
-  })
-
-  // 本会话的自动压缩设置：默认值（设置页那份）+ 会话覆盖 + 生效值一起回，
-  // 面板只负责展示与改写覆盖，合并逻辑留在 host（app-server）里。
-  ipcMain.handle('chat:auto-compact', async (event, { id, sessionId, cwd } = {}) => {
-    if (!id) return { ok: false, error: 'chat id 缺失' }
-    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return unwrapHostResult(await hostTaskRequest(ensured.run, 'mica/autoCompact/get', {}))
-  })
-
-  ipcMain.handle('chat:set-auto-compact', async (event, { id, sessionId, cwd, override } = {}) => {
-    if (!id) return { ok: false, error: 'chat id 缺失' }
-    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return unwrapHostResult(
-      await hostTaskRequest(ensured.run, 'mica/autoCompact/set', { override })
     )
   })
 

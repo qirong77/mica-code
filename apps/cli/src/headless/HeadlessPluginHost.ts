@@ -23,6 +23,7 @@ import type {
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
+import { configureIterationRewrite, registerIterationRewrite } from '../agent/iterationRewrite.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import type { SessionController } from '../session/SessionController.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
@@ -44,6 +45,13 @@ export type HeadlessPluginHostOptions = {
   sessionController: SessionController;
   subagentTasks: SubagentTaskManager;
   isBusy: () => boolean;
+  /**
+   * 这次运行是一次性任务（`mica exec`）还是常驻会话（app-server）。
+   *
+   * 会改变成本或输出的插件（自动压缩）只在常驻会话里生效：一次性运行没有第二轮，
+   * 压缩历史只会改变这一次的开销与结果，基准测试不能被它悄悄影响。
+   */
+  oneShot?: boolean;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -103,6 +111,15 @@ export async function startAsSubmit(
  */
 export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): HeadlessPluginHost {
   const { hooks, agent, sessionController, subagentTasks } = options;
+  configureIterationRewrite({
+    mode: options.oneShot ? 'one-shot' : 'session',
+    resolveSessionId: () => sessionController.getCurrentSessionId(),
+    onError: (error, pluginId) => {
+      const message = error instanceof Error ? error.message : String(error);
+      micaPlugin.createPluginLogger(pluginId).error('plugin:iteration-rewrite-failed', { error: message });
+      micaPlugin.writePluginHealth(pluginId, { level: 'error', message: `模型请求重写失败：${message}` });
+    },
+  });
   const services = new micaPlugin.ServiceContainer();
   const commands = new micaCommands.CommandRegistry();
   const events = new micaRuntime.RuntimeEventBus();
@@ -224,6 +241,9 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       clear: () => agent.clearPluginState?.(pluginId),
     }),
     promptSections: agent.promptSections,
+    agentRegistry: {
+      onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
+    },
     runtime: {
       submit: options.submit,
       queue: {
