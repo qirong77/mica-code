@@ -26,6 +26,8 @@ bun install
 bun run dev
 bun run typecheck
 bun run test -- <测试文件>   # Vitest；根项目不要用 bun test
+bun run test:unit          # 只跑 unit project（进程内单测，并行）
+bun run test:process       # 只跑 process project（真实子进程 E2E，文件串行）
 bun run build              # typecheck → 单二进制编译 → 安装本地入口
 bun run build:config-web   # 配置页产物 + generatedStaticAssets.ts
 bun run format             # 全仓格式化；局部任务只格式化改动文件
@@ -435,7 +437,9 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 ### 验证
 
-- 局部改动跑相关测试 + `bun run typecheck` + `git diff --check`；全量测试约 7–8 分钟，仅发布、跨慢套件或 CI 要求时跑。
+- 局部改动跑相关测试 + `bun run typecheck` + `git diff --check`；全量测试约 1 分钟起步（unit ~25s + process ~40s，两个 project 串行），仅发布、跨慢套件或 CI 要求时跑。
+- 测试分两个 project（`vitest.config.ts`）：`unit` 是进程内单测、按文件并行；`process` 是真实子进程 / PTY / TUI 的 E2E，文件串行、文件内用例并发。慢的根源是每个用例 spawn 一次真实 `mica`（冷启动 1–1.5s），所以新增 E2E 用例要用 `it.concurrent` 语义（每用例自带 mock provider 与 `MICA_HOME`），不要把 `process` 项目丢回并行池：它和 unit 的 worker 抢 CPU 时会打挂 `btw.pty`、turn lease 这类时序敏感用例。
+- `testTimeout` 显式给定而不是沿用 Vitest 默认 5s：unit 里有真实 git 仓库与文件 I/O，process 的 PTY 用例内部就按 20s 等待。机器一忙（多个 worker + 开发者自己的进程）5s 会打挂与代码无关的用例。`unit` 的 `maxWorkers` 固定 4：再多不更快，只是把时间换成偶发超时。
 - 根测试用 Vitest / Node；`PtyDriver` 仅 Node/vitest 可用，Bun 用 manager + Node helper。
 - `app-server.flows.test.ts` 用本地 mock provider，无需真实 key；resume 用隔离 `MICA_HOME`。
 - PTY 真实 provider 冒烟须显式 `MICA_PTY_SMOKE=1` 并传 `MICA_PTY_SOURCE_HOME`。

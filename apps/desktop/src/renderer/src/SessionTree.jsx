@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  IconCheck,
   IconChevronRight,
   IconClock,
   IconDots,
@@ -28,6 +29,14 @@ import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { draftMenuItems, sessionMenuItems } from './session-menu'
+import {
+  annotationBadges,
+  annotationMenuItems,
+  hiddenBadgeCount,
+  parseAnnotationAction,
+  toggleTarget,
+  visibleBadges
+} from './session-annotations'
 import { childGroups, groupSubtreeIds, sessionSectionOf, sessionsByGroup } from './session-projects'
 import { longPressHandlers } from './hooks'
 import {
@@ -150,6 +159,28 @@ function RenameInput({ value, onCommit, onCancel }) {
 
 // 行尾固定右对齐：可选的工作目录标签 + 相对时间。工作目录放在行尾（而不是标题前）
 // 是为了让 Recent 的标题都在同一列——标签宽度随目录名变化会把标题推得参差不齐。
+// 插件给的会话标记（标签点）跟在标题后面而不是行首：行首 w-4 的状态位是「运行中/未读」
+// 一类的即时状态，标记是长期分类，混在一起会看不出哪个是哪个。
+function RowAnnotationDots({ badges }) {
+  if (!badges.length) return null
+  const hidden = hiddenBadgeCount(badges)
+  const title = badges.map((badge) => badge.label).join(' / ')
+  return (
+    <span className="flex shrink-0 items-center gap-1" title={title}>
+      {visibleBadges(badges).map((badge) => (
+        <span
+          key={badge.key}
+          className="size-1.5 rounded-full ring-1 ring-black/20"
+          style={{ backgroundColor: badge.color }}
+        />
+      ))}
+      {hidden > 0 && (
+        <span className="text-[10px] leading-none text-white/40">+{hidden}</span>
+      )}
+    </span>
+  )
+}
+
 function RowTail({ label, labelTitle, relativeTime }) {
   return (
     <span className="relative flex min-w-4 shrink-0 items-center justify-end gap-2">
@@ -273,13 +304,16 @@ function ContextMenu({ menu, onClose, onAction }) {
       {items.map((item, index) => {
         if (item === 'separator')
           return <div key={`sep-${index}`} className="mx-1 my-1 h-px bg-white/10" />
-        const [action, label, danger] = item
+        // 元组是常用的简写；插件给的标记项要带色点和对勾，所以也接受对象。
+        const [action, label, danger, dot, checked] = Array.isArray(item)
+          ? item
+          : [item.action, item.label, item.danger, item.dot, item.checked]
         return (
           <button
             key={action}
             type="button"
             aria-label={label}
-            className={`flex h-7 w-full items-center px-2 text-left text-[13px] transition-colors hover:bg-white/[.08] ${
+            className={`flex h-7 w-full items-center gap-2 px-2 text-left text-[13px] transition-colors hover:bg-white/[.08] ${
               danger ? 'text-danger' : 'text-white/90'
             }`}
             onClick={() => {
@@ -287,7 +321,16 @@ function ContextMenu({ menu, onClose, onAction }) {
               onAction(action, menu)
             }}
           >
-            {label}
+            {dot ? (
+              <span
+                className="size-2.5 shrink-0 rounded-full ring-1 ring-white/25"
+                style={{ backgroundColor: dot }}
+              />
+            ) : null}
+            <span className="min-w-0 flex-1 truncate">{label}</span>
+            {checked ? (
+              <IconCheck size={12} stroke={2.5} className="shrink-0 text-white/70" />
+            ) : null}
           </button>
         )
       })}
@@ -310,6 +353,7 @@ export function SessionTree({
   terminalSessions,
   draftNodes,
   loops,
+  annotations,
   onOpenSession,
   onSelectDraft,
   onTogglePin,
@@ -325,7 +369,8 @@ export function SessionTree({
   onRenameGroup,
   onMoveGroup,
   onDeleteGroup,
-  onCreateSessionInGroup
+  onCreateSessionInGroup,
+  onToggleAnnotation
 }) {
   const [menu, setMenu] = useState(null)
   const [detailSessionId, setDetailSessionId] = useState(null)
@@ -652,7 +697,11 @@ export function SessionTree({
   }
 
   const runAction = (action, menuPayload) => {
-    if (action === 'pin' || action === 'unpin') onTogglePin(menuPayload.session.id)
+    const annotation = parseAnnotationAction(action)
+    if (annotation) {
+      const target = toggleTarget(annotations, menuPayload.session.id, annotation)
+      onToggleAnnotation?.(menuPayload.session.id, target)
+    } else if (action === 'pin' || action === 'unpin') onTogglePin(menuPayload.session.id)
     else if (action === 'unassign') onMoveSession(menuPayload.session.id, { section: 'recent' })
     else if (action === 'detail') setDetailSessionId(menuPayload.session.id)
     else if (action === 'share') onShareSession?.(menuPayload.session.id)
@@ -667,11 +716,20 @@ export function SessionTree({
     else if (action === 'delete-group') onDeleteGroup(menuPayload.group.id)
   }
 
-  const menuItemsFor = (session) =>
-    sessionMenuItems({
+  /** 插件标记项插在删除项之前：删除永远排最后，误点就找不回来了。 */
+  const menuItemsFor = (session) => {
+    const items = sessionMenuItems({
       pinned: !!pins[session.id],
       inProject: sectionOf(session.id).section === 'project'
     })
+    const annotationsItems = annotationMenuItems(annotations, session.id)
+    if (!annotationsItems.length) return items
+    const dangerIndex = items.findIndex((item) => Array.isArray(item) && item[2])
+    if (dangerIndex < 0) return [...items, 'separator', ...annotationsItems]
+    const head = items.slice(0, dangerIndex)
+    while (head[head.length - 1] === 'separator') head.pop()
+    return [...head, 'separator', ...annotationsItems, 'separator', ...items.slice(dangerIndex)]
+  }
 
   const groupMenuItems = () => [
     ['new-session', '在此新建会话'],
@@ -861,6 +919,7 @@ export function SessionTree({
                 </span>
               )}
               <span className="min-w-0 truncate">{session.title || session.id}</span>
+              <RowAnnotationDots badges={annotationBadges(annotations, session.id)} />
             </span>
           )}
           <RowTail

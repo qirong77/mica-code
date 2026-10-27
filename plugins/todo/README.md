@@ -1,25 +1,56 @@
 # Todo
 
-回合内的待办清单：`todo_write` 工具、`/todo` 命令和一段常驻状态面板。
+回合内的运行计划：`todo_write` 工具、`/todo` 命令和一段常驻状态面板。
 
 ## 它做什么
 
-- `todo_write` 让模型把计划写成条目（`pending` / `in_progress` / `completed`）。工具只改内存，
-  不写会话文件。
-- 回合正常完成时，遗留的 `pending` / `in_progress` 一起标记为完成；中止或失败只把
-  `in_progress` 退回 `pending`，因为「停了」不等于「做完了」。
+- `todo_write` 让模型把本轮计划写成条目（`pending` / `in_progress` / `completed`）。
+  工具只改内存，不写会话文件——「本轮计划」的边界就是这一轮。
+- **宿不改写模型给的状态。** 回合正常结束只是说明模型收尾了，不代表剩下的事做完了：
+  未完成项仍然是未完成。唯一被修正的是展示投影——回合结束后 `in_progress` 显示为
+  `pending`（已经没有东西还在进行），而 `pending` 不会被升成完成。
+- 清单全部完成时**仍然显示**，收成一行 `completed N/N all done`。直接隐藏会让用户
+  分不清「没建过计划」和「计划全部做完了」。
 - `/todo [show|hide|clear]` 控制面板显隐与清空。
-- 面板按 agent 归属隔离，多 agent 各自一份清单。
+
+## 工具契约
+
+约束放在 schema 与工具描述里，执行期只做归一化：拒绝一整个调用会让模型白跑一轮并
+多烧一次上下文，换来的只是格式干净。
+
+| 情况 | 处理 |
+| --- | --- |
+| `todos` 不是数组 / 入参不是对象 | 报错（结构上根本不是一份清单） |
+| 未知字段 | 忽略 |
+| `content` 为空 | 丢弃该条目并说明 |
+| `status` 非法 | 按 `pending` 处理并说明 |
+| 多个 `in_progress` | 只保留第一个，其余降级为 `pending` 并说明 |
+| 超过 20 项 / 单条超过 240 字符 | 截断并说明 |
+
+`activeForm`（进行时文案）与 `id` 都是可选的：中文没有进行时变形，必填只会逼模型把
+同一句话写两遍；`id` 缺省时由内容派生。
+
+## 两端共用一份规则
+
+`packages/mica-common/todoState.ts` 是解析归一化、清单投影、显示规则与回显格式的
+唯一实现，TUI 面板与 desktop 的计划 dock 都读它。desktop 的计划从对话里的
+`todo_write` 工具行投影（`todoSnapshotFromMessages`），所以重开先前没关掉的会话时
+它还在，而关掉再打开就没有了——这与「本轮计划」的定位一致。
+
+需要长期留存的待办请用会话笔记（`session_notes`）：它在对话历史之外，压缩动不到、
+resume 带得回来。
 
 ## 文件
 
-| 文件                 | 作用                                   |
-| -------------------- | -------------------------------------- |
-| `plugin.json`        | 插件清单（id / 版本 / 入口 / 资源）    |
-| `index.ts`           | 入口，`default` 导出 setup             |
-| `TodoPlugin.tsx`     | 面板、命令、事件与钩子接线             |
-| `TodoTool.ts`        | `todo_write` 工具与输入解析（纯逻辑）  |
-| `TodoPlugin.test.ts` | 工具解析、面板显隐、回合收口规则的测试 |
+| 文件                 | 作用                                     |
+| -------------------- | ---------------------------------------- |
+| `plugin.json`        | 插件清单（id / 版本 / 入口 / 资源）      |
+| `index.ts`           | 入口，`default` 导出 setup               |
+| `TodoPlugin.tsx`     | 面板、命令、事件与钩子接线               |
+| `TodoTool.ts`        | `todo_write` 工具定义                    |
+| `TodoPlugin.test.ts` | 归一化规则、投影、面板显隐与收口的测试   |
+
+纯逻辑在 `packages/mica-common/todoState.ts`（含自己的测试）。
 
 ## 停用它
 

@@ -137,4 +137,86 @@ describe('session_peers tool', () => {
     }).execute({}, withAgent(deps));
     expect(output).toContain('只能在交互式主会话中使用');
   });
+
+  it('stays on running instances only unless hours is passed', async () => {
+    const deps = makeDeps();
+    let asked = false;
+    const output = await new ToolSessionPeers({
+      ...deps,
+      listTurnLocks: () => [lock({ sessionId: 'sess-1', pid: 111 })],
+      listRecentSessions: () => {
+        asked = true;
+        return [];
+      },
+      describeProcess: () => undefined,
+    }).execute({}, withAgent(deps));
+
+    expect(asked).toBe(false);
+    expect(output).not.toContain('小时内结束的会话');
+  });
+
+  it('lists sessions that ended inside the hours window, skipping running and the caller', async () => {
+    const deps = makeDeps();
+    const sinceSeen: number[] = [];
+    const endedAt = new Date(Date.now() - 30 * 60_000).toISOString();
+    const output = await new ToolSessionPeers({
+      ...deps,
+      listTurnLocks: () => [lock({ sessionId: 'sess-1', pid: 111 }), lock({ sessionId: 'sess-busy', pid: 222 })],
+      listRecentSessions: (since) => {
+        sinceSeen.push(since);
+        return [
+          {
+            sessionId: 'sess-1',
+            sessionPath: '/sessions/sess-1.json',
+            title: '本会话',
+            updatedAt: endedAt,
+            modifiedAt: endedAt,
+          },
+          {
+            sessionId: 'sess-busy',
+            sessionPath: '/sessions/sess-busy.json',
+            title: '还在跑',
+            turnState: 'running',
+            updatedAt: endedAt,
+            modifiedAt: endedAt,
+          },
+          {
+            sessionId: 'sess-done',
+            sessionPath: '/sessions/sess-done.json',
+            title: '刚结束的会话',
+            cwd: '/repo/finished',
+            turnState: 'completed',
+            model: 'mock-chat',
+            updatedAt: endedAt,
+            modifiedAt: endedAt,
+          },
+        ];
+      },
+      describeProcess: () => undefined,
+    }).execute({ hours: 3 }, withAgent(deps));
+
+    expect(sinceSeen).toHaveLength(1);
+    expect(Date.now() - sinceSeen[0]!).toBeGreaterThanOrEqual(3 * 3_600_000 - 5_000);
+    expect(output).toContain('最近 3 小时内结束的会话：1 个');
+    expect(output).toContain('/sessions/sess-done.json');
+    expect(output).toContain('刚结束的会话');
+    expect(output).toContain('turnState completed');
+    expect(output).toContain('30 分钟前');
+    // The caller and live instances keep their own block; the ended list holds one entry.
+    const endedSection = output.slice(output.indexOf('最近 3 小时内结束的会话'));
+    expect(endedSection).not.toContain('/sessions/sess-1.json');
+    expect(endedSection).not.toContain('/sessions/sess-busy.json');
+  });
+
+  it('says so when nothing finished inside the window', async () => {
+    const deps = makeDeps();
+    const output = await new ToolSessionPeers({
+      ...deps,
+      listTurnLocks: () => [lock({ sessionId: 'sess-1', pid: 111 })],
+      listRecentSessions: () => [],
+      describeProcess: () => undefined,
+    }).execute({ hours: 6 }, withAgent(deps));
+
+    expect(output).toContain('最近 6 小时内没有已结束的其他会话');
+  });
 });

@@ -38,6 +38,13 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
 import { comparableText } from '@packages/mica-common/promptText.js'
+import {
+  projectTodoSnapshot,
+  resolveTodoDisplayItems,
+  shouldShowTodoList,
+  summarizeTodoProgress,
+  todoItemLabel
+} from '@packages/mica-common/todoState.js'
 import { ContextUsageSection } from './stats/ContextUsagePanel'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
@@ -1486,126 +1493,68 @@ function UserMessageEditor({ text, busy, canSubmit, onChange, onCancel, onSubmit
   )
 }
 
-function lastTodoState(messages) {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]
+/**
+ * 对话里的 `todo_write` 工具行 → 当前清单。
+ *
+ * 与 TUI 插件共用 `mica-common/todoState`：解析归一化、投影、暂停规则都只有一份。
+ * 只有「完成态」的工具行算数——运行中的那条入参还在流式拼接。
+ */
+export function todoSnapshotFromMessages(messages) {
+  const entries = []
+  for (const message of messages) {
     if (message.kind !== 'tool' || message.tool?.tool !== 'todo_write') continue
     if (message.tool.status !== 'completed') continue
-    const todos = message.tool.input?.todos
-    if (!Array.isArray(todos) || todos.length > 20) continue
-    const normalized = []
-    let inProgress = 0
-    let valid = true
-    for (const item of todos) {
-      const keys = item && typeof item === 'object' ? Object.keys(item) : []
-      const content = typeof item?.content === 'string' ? item.content.trim() : ''
-      const activeForm = typeof item?.activeForm === 'string' ? item.activeForm.trim() : ''
-      if (
-        keys.some((key) => !['content', 'activeForm', 'status'].includes(key)) ||
-        !content ||
-        !activeForm ||
-        content.length > 240 ||
-        activeForm.length > 240 ||
-        !['pending', 'in_progress', 'completed'].includes(item?.status)
-      ) {
-        valid = false
-        break
-      }
-      if (item.status === 'in_progress') inProgress += 1
-      normalized.push({ content, activeForm, status: item.status })
-    }
-    if (valid && inProgress <= 1) {
-      return { items: normalized, turnId: message.turnId || null, index }
-    }
+    entries.push({ input: message.tool.input, turnId: message.turnId || null })
   }
-  return null
-}
-
-function latestTodoState(messages) {
-  return lastTodoState(messages) ?? { items: [], turnId: null }
+  return projectTodoSnapshot(entries)
 }
 
 export function latestTodoItems(messages) {
-  return latestTodoState(messages).items
-}
-
-// 与 Todo 插件的 turn:after 规则同款：正常结束的 turn 把未完成项（in_progress 与
-// pending）全部标为 completed，列表随之隐藏，否则残留的 pending 项会让计划面板在
-// 运行结束后一直显示 "N remaining"。桌面端没有插件状态、计划是从工具事件重建的，
-// 所以在 turn 正常结束时就地收口；abort/error 交给 todoItemsForTurn 的暂停展示。
-export function completeRemainingTodoItems(messages) {
-  const state = lastTodoState(messages)
-  if (!state || state.items.every((item) => item.status === 'completed')) return messages
-  return messages.map((message, index) => {
-    if (index !== state.index) return message
-    const todos = message.tool.input.todos
-    return {
-      ...message,
-      tool: {
-        ...message.tool,
-        input: {
-          ...message.tool.input,
-          todos: todos.map((item) =>
-            item.status === 'completed' ? item : { ...item, status: 'completed' }
-          )
-        }
-      }
-    }
-  })
+  return todoSnapshotFromMessages(messages).items
 }
 
 export function todoItemsForTurn(messages, turnId, running) {
-  const state = latestTodoState(messages)
-  const paused = !running || !state.turnId || state.turnId !== turnId
-  return paused
-    ? state.items.map((item) =>
-        item.status === 'in_progress' ? { ...item, status: 'pending' } : item
-      )
-    : state.items
+  return resolveTodoDisplayItems(todoSnapshotFromMessages(messages), { running, turnId })
 }
 
 function TodoDock({ items, hidden }) {
-  const completed = items.filter((item) => item.status === 'completed').length
-  const allCompleted = items.length > 0 && completed === items.length
-  const active = items.some((item) => item.status === 'in_progress')
-  const remaining = items.length - completed
+  if (!shouldShowTodoList(items, { hidden })) return null
 
-  if (!items.length || allCompleted || hidden) return null
+  const progress = summarizeTodoProgress(items)
+  const status = progress.active ? 'running' : progress.remaining === 0 ? 'completed' : 'pending'
 
   return (
     <section className="chat-task-dock chat-todo-dock" aria-label="当前运行计划">
       <div className="chat-task-summary-row">
         <span className="chat-task-kind">📝(todo)</span>
-        <span className={`chat-task-status ${active ? 'chat-task-status-running' : ''}`}>
-          {active ? 'running' : 'pending'}
-        </span>
+        <span className={`chat-task-status chat-task-status-${status}`}>{status}</span>
         <span className="chat-task-runtime">
-          {completed}/{items.length}
+          {progress.completed}/{progress.total}
         </span>
-        <span className="chat-task-description">{remaining} remaining</span>
+        <span className="chat-task-description">
+          {progress.remaining === 0 ? 'all done' : `${progress.remaining} remaining`}
+        </span>
       </div>
-      <div className="chat-task-children">
-        {items.map((item, index) => (
-          <div
-            key={`${index}:${item.content}`}
-            className={`chat-task-child chat-todo-${item.status}`}
-          >
-            <span className="chat-task-child-prefix"> ⎿ </span>
-            <span className="chat-task-child-marker" aria-hidden="true">
-              {item.status === 'completed' ? (
-                '✓'
-              ) : item.status === 'in_progress' ? (
-                <IconLoader2 size={10} className="animate-spin" />
-              ) : (
-                '○'
-              )}
-            </span>
-            <span className="chat-task-description">
-              {item.status === 'in_progress' ? item.activeForm : item.content}
-            </span>
-          </div>
-        ))}
-      </div>
+      {/* 全部完成时收成一行：计划留在屏幕上作为「这轮做了什么」的记录。 */}
+      {progress.remaining > 0 && (
+        <div className="chat-task-children">
+          {items.map((item) => (
+            <div key={item.id} className={`chat-task-child chat-todo-${item.status}`}>
+              <span className="chat-task-child-prefix"> ⎿ </span>
+              <span className="chat-task-child-marker" aria-hidden="true">
+                {item.status === 'completed' ? (
+                  '✓'
+                ) : item.status === 'in_progress' ? (
+                  <IconLoader2 size={10} className="animate-spin" />
+                ) : (
+                  '○'
+                )}
+              </span>
+              <span className="chat-task-description">{todoItemLabel(item)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   )
 }
@@ -3710,10 +3659,8 @@ export function ChatView({
         case 'step_finish': {
           finishStream(timestamp)
           finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
-          // 对齐 Todo 插件的 turn:after：正常结束的 turn 之后不再展示残留计划项。
-          if (event.part?.reason === 'completed') {
-            updateMessages(completeRemainingTodoItems)
-          }
+          // 计划不在这里收口：turn 正常结束不代表残留项做完了。清单保持模型写下的
+          // 状态，`todoItemsForTurn` 只把不再活跃的 in_progress 投影成 pending。
           // failed turn 的真实原因在 turn/completed 通知的 error 字段里透传，
           // 否则模型 400 / provider 配置错误等失败只会把 phase 置为 error，
           // 用户看到“运行了又马上停止”却没有任何提示。

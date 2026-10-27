@@ -8,7 +8,8 @@ const PLUGIN_ID = 'builtin.session-autonomy';
 const SESSION_AUTONOMY_GUIDANCE = `# 会话自治（Session Autonomy）
 
 你可以通过以下工具观察当前会话：
-- session_peers：查看正在运行的其他 Mica 实例及其 session 文件路径；怀疑工作区被别的会话改动时用它排查。`;
+- session_peers：查看正在运行的其他 Mica 实例及其 session 文件路径；怀疑工作区被别的会话改动时用它排查。
+  传入 hours（如 6）还会列出最近 N 小时内结束的会话——它们已释放 turn 锁，但可能刚改过工作区。`;
 
 type SystemPromptBuildEvent = {
   runtime: unknown;

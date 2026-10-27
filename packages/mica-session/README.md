@@ -12,6 +12,7 @@
 - 加载指定会话：`store.load(id)`。
 - 保存会话快照：`store.save(session)`。
 - 列出正在运行的会话：`listSessionTurnLocks()`（读 `sessions/.turn-locks`，按持有进程是否存活判定）。
+- 列出最近结束的会话：`listRecentSessionFiles({ since, limit })`（按 session 文件写入时间与头部 `updatedAt` 判定窗口，不持锁即代表那一轮已结束）。
 
 ## 使用入口
 
@@ -26,6 +27,7 @@ const sessions = store.list(10);
 
 - 本包只负责会话文件存储，不直接调用 provider 或渲染 UI。
 - `listSessionTurnLocks()` 只读 `sessions/.turn-locks/<id>.lock` 的 `pid` 与 session 文件头部 4 KiB（`title`/`cwd`/`turnState`/`model`），不解析完整快照：会话文件可达几十 MB。
+- `listRecentSessionFiles()` 同样只读文件头部：先用文件 mtime 粗筛窗口，再以头部 `updatedAt` 为准（缺失时退回 mtime），按最新在前排序并截断 `limit`；`session-index.json` 与非常规文件名不算会话。
 - turn 锁是「某个进程正在跑这一轮」的唯一跨进程事实来源；空闲实例不持锁，因此不在列表里。
 - 会话 ID 和路径需要做安全处理，避免越权读取任意文件。
 - 保存内容应是可序列化快照，便于后续 resume、fork 或 session graph 扩展。

@@ -25,6 +25,24 @@ import { PluginPromptSections } from './PluginPrompt.js';
 import { PluginSettingsValidationError, validatePluginSettingValues } from './PluginSettings.js';
 import { MAX_PLUGIN_STATE_BYTES, normalizePluginStateRecord, validatePluginStateValue } from './PluginSessionState.js';
 import {
+  PLUGIN_DATA_DIR,
+  SESSION_ANNOTATIONS_FILE,
+  SESSION_ANNOTATIONS_VERSION,
+  annotationCounts,
+  annotationsOf,
+  emptySessionAnnotations,
+  normalizeSessionAnnotations,
+  pluginDataDir,
+  readAllSessionAnnotations,
+  readSessionAnnotations,
+  resolveAnnotationOptions,
+  sessionAnnotationsExists,
+  sessionAnnotationsPath,
+  setSessionAnnotations,
+  toggleSessionAnnotation,
+  writeSessionAnnotations,
+} from './sessionAnnotations.js';
+import {
   PLUGIN_STATE_FILE,
   readDisabledPluginIds,
   readPluginState,
@@ -34,6 +52,22 @@ import {
 
 export const micaPlugin = {
   Plugin,
+  PLUGIN_DATA_DIR,
+  SESSION_ANNOTATIONS_FILE,
+  SESSION_ANNOTATIONS_VERSION,
+  annotationCounts,
+  annotationsOf,
+  emptySessionAnnotations,
+  normalizeSessionAnnotations,
+  pluginDataDir,
+  readAllSessionAnnotations,
+  readSessionAnnotations,
+  resolveAnnotationOptions,
+  sessionAnnotationsExists,
+  sessionAnnotationsPath,
+  setSessionAnnotations,
+  toggleSessionAnnotation,
+  writeSessionAnnotations,
   PluginManager,
   HookRegistry,
   ServiceContainer,
@@ -156,3 +190,26 @@ export type {
 } from './FilePluginLoader.js';
 export type { PluginManifest, PluginManifestParseResult } from './PluginManifest.js';
 export type { PluginState, PluginStateOptions } from './PluginState.js';
+export {
+  PLUGIN_DATA_DIR,
+  SESSION_ANNOTATIONS_FILE,
+  SESSION_ANNOTATIONS_VERSION,
+  annotationCounts,
+  annotationsOf,
+  emptySessionAnnotations,
+  normalizeSessionAnnotations,
+  pluginDataDir,
+  readAllSessionAnnotations,
+  readSessionAnnotations,
+  resolveAnnotationOptions,
+  sessionAnnotationsExists,
+  sessionAnnotationsPath,
+  setSessionAnnotations,
+  toggleSessionAnnotation,
+  writeSessionAnnotations,
+} from './sessionAnnotations.js';
+export type {
+  SessionAnnotationOption,
+  SessionAnnotations,
+  SessionAnnotationsProvider,
+} from './sessionAnnotations.js';

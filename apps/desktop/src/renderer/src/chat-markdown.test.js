@@ -5,7 +5,6 @@ import {
   Markdown,
   canReuseVisualTranscript,
   chatUrlTransform,
-  completeRemainingTodoItems,
   currentTurnActivityMessages,
   fileTarget,
   hasPersistedTurn,
@@ -14,6 +13,7 @@ import {
   latestTodoItems,
   mergeReplayEvents,
   resolveChatPath,
+  todoSnapshotFromMessages,
   todoItemsForTurn
 } from './ChatView'
 
@@ -201,7 +201,7 @@ describe('visual transcript cache', () => {
 })
 
 describe('structured activity state', () => {
-  it('uses the latest TodoWrite replacement list and ignores malformed rows', () => {
+  it('uses the latest todo_write replacement list', () => {
     const first = {
       kind: 'tool',
       tool: {
@@ -220,28 +220,46 @@ describe('structured activity state', () => {
         input: {
           todos: [
             { content: 'Inspect', activeForm: 'Inspecting', status: 'completed' },
-            { content: 'Test', activeForm: 'Testing', status: 'in_progress' }
+            { content: 'Test', status: 'in_progress' }
           ]
         }
       }
     }
-    const rejected = {
+
+    expect(latestTodoItems([first, latest])).toEqual([
+      { id: 'Inspect', content: 'Inspect', activeForm: 'Inspecting', status: 'completed' },
+      { id: 'Test', content: 'Test', activeForm: undefined, status: 'in_progress' }
+    ])
+  })
+
+  it('skips a streaming todo row and normalizes extra in-progress entries', () => {
+    const streaming = {
+      kind: 'tool',
+      tool: {
+        tool: 'todo_write',
+        status: 'running',
+        input: {
+          todos: [{ content: 'Half', status: 'pending' }]
+        }
+      }
+    }
+    const twoActive = {
       kind: 'tool',
       tool: {
         tool: 'todo_write',
         status: 'completed',
         input: {
           todos: [
-            { content: 'One', activeForm: 'Doing one', status: 'in_progress' },
-            { content: 'Two', activeForm: 'Doing two', status: 'in_progress' }
+            { content: 'One', status: 'in_progress' },
+            { content: 'Two', status: 'in_progress' }
           ]
         }
       }
     }
 
-    expect(latestTodoItems([first, latest, rejected])).toEqual([
-      { content: 'Inspect', activeForm: 'Inspecting', status: 'completed' },
-      { content: 'Test', activeForm: 'Testing', status: 'in_progress' }
+    expect(latestTodoItems([streaming, twoActive]).map((item) => item.status)).toEqual([
+      'in_progress',
+      'pending'
     ])
   })
 
@@ -320,7 +338,7 @@ describe('structured activity state', () => {
           tool: 'todo_write',
           status: 'completed',
           input: {
-            todos: [{ content: 'Inspect', activeForm: 'Inspecting', status: 'in_progress' }]
+            todos: [{ content: 'Inspect', status: 'in_progress' }]
           }
         }
       }
@@ -331,7 +349,7 @@ describe('structured activity state', () => {
     expect(todoItemsForTurn(messages, 'turn-2', true)[0].status).toBe('pending')
   })
 
-  it('completes the leftover plan once the turn finished', () => {
+  it('never turns leftover items into completed ones when the turn ends', () => {
     const messages = [
       {
         kind: 'tool',
@@ -350,14 +368,12 @@ describe('structured activity state', () => {
       }
     ]
 
-    expect(latestTodoItems(completeRemainingTodoItems(messages))).toEqual([
-      { content: 'Inspect', activeForm: 'Inspecting', status: 'completed' },
-      { content: 'Test', activeForm: 'Testing', status: 'completed' },
-      { content: 'Ship', activeForm: 'Shipping', status: 'completed' }
+    // 回归点：turn 结束只暂停展示，剩下两项必须仍然报告为未完成。
+    expect(todoItemsForTurn(messages, 'turn-1', false).map((item) => item.status)).toEqual([
+      'completed',
+      'pending',
+      'pending'
     ])
-    // 已收口 / 没有计划时保持原引用，避免运行结束时的无谓重渲染。
-    expect(completeRemainingTodoItems([])).toEqual([])
-    const closed = completeRemainingTodoItems(messages)
-    expect(completeRemainingTodoItems(closed)).toBe(closed)
+    expect(todoSnapshotFromMessages([])).toEqual({ items: [], turnId: null })
   })
 })

@@ -39,6 +39,31 @@ export type ListSessionTurnLocksOptions = {
 
 const HEAD_BYTES = 4096;
 const LOCK_FILE = /^([A-Za-z0-9_.-]+)\.lock$/;
+const SESSION_FILE = /^([A-Za-z0-9_.-]+)\.json$/;
+
+/** A session file written recently whose turn lease may already be gone. */
+export type RecentSessionFile = {
+  sessionId: string;
+  sessionPath: string;
+  /** Session metadata read from the file head; the snapshot is never parsed. */
+  title?: string;
+  cwd?: string;
+  updatedAt?: string;
+  turnState?: string;
+  model?: string;
+  /** Last write time of the file itself (ISO); the ordering fallback. */
+  modifiedAt: string;
+};
+
+export type ListRecentSessionsOptions = {
+  sessionDir?: string;
+  /** Only sessions whose last write is at or after this instant. */
+  since: number | Date;
+  /** Newest first, at most `limit` entries (default 20). */
+  limit?: number;
+  /** Reads only the head of a session file; defaults to the first 4 KiB. */
+  readHead?: (path: string) => string;
+};
 
 /** Same rule as the orphan-lease reclaimer: only ESRCH means "process gone". */
 export function isProcessAlive(pid: number): boolean {
@@ -94,6 +119,67 @@ export function listSessionTurnLocks(options: ListSessionTurnLocksOptions = {}):
     });
   }
   return locks.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
+/**
+ * Sessions whose files were touched since `since` — the complement of the
+ * turn locks: nobody holds them right now, but the workspace may still have
+ * been changed by that run. Cheap by design: the file mtime decides whether
+ * the head is read at all, and the snapshot is never parsed.
+ */
+export function listRecentSessionFiles(options: ListRecentSessionsOptions): RecentSessionFile[] {
+  const sessionDir = options.sessionDir ?? SESSION_DIR;
+  const sinceMs = typeof options.since === 'number' ? options.since : options.since.getTime();
+  const limit = Math.max(1, options.limit ?? 20);
+  const readHead = options.readHead ?? readFileHead;
+
+  let entries: string[];
+  try {
+    entries = readdirSync(sessionDir);
+  } catch {
+    return [];
+  }
+
+  const sessions: RecentSessionFile[] = [];
+  for (const entry of entries) {
+    const match = SESSION_FILE.exec(entry);
+    if (!match) continue;
+    // The metadata index lives beside the sessions in some layouts; it is not a
+    // session even though the name matches.
+    if (entry === 'session-index.json') continue;
+    const sessionId = match[1]!;
+    const sessionPath = resolve(sessionDir, entry);
+    let modifiedMs: number;
+    try {
+      modifiedMs = statSync(sessionPath).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (!Number.isFinite(modifiedMs) || modifiedMs < sinceMs) continue;
+
+    const head = safeReadHead(readHead, sessionPath);
+    const updatedAt = readHeadField(head, 'updatedAt');
+    const updatedMs = updatedAt ? Date.parse(updatedAt) : Number.NaN;
+    // The head is the authority when it parses: a file touched by something
+    // else is not proof that the session itself was active inside the window.
+    if (Number.isFinite(updatedMs) && updatedMs < sinceMs) continue;
+    sessions.push({
+      sessionId,
+      sessionPath,
+      title: readHeadField(head, 'title'),
+      cwd: readHeadField(head, 'cwd'),
+      updatedAt,
+      turnState: readHeadField(head, 'turnState'),
+      model: readHeadField(head, 'model'),
+      modifiedAt: new Date(modifiedMs).toISOString(),
+    });
+  }
+
+  const timestampOf = (session: RecentSessionFile): number => {
+    const parsed = Date.parse(session.updatedAt ?? '');
+    return Number.isFinite(parsed) ? parsed : Date.parse(session.modifiedAt);
+  };
+  return sessions.sort((a, b) => timestampOf(b) - timestampOf(a)).slice(0, limit);
 }
 
 function readLockOwner(lockPath: string): { pid: number; createdAt?: string } | null {

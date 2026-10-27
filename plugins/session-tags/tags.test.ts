@@ -7,6 +7,7 @@ import {
   emptyTagStore,
   firstFreeColor,
   formatTagList,
+  labelOf,
   normalizeTagStore,
   removeSessionTag,
   renameTagLabel,
@@ -15,14 +16,12 @@ import {
   tagCounts,
   tagsOf,
 } from './tags.js';
-import { parseTagsInput } from './TagsTool.js';
-import { formatSessionTagsSection } from './tagsSection.js';
 
 describe('normalizeTagStore', () => {
   it('缺字段与垃圾输入都收敛成一份可用的空表', () => {
     for (const raw of [undefined, null, 42, 'nope', [], {}]) {
       const store = normalizeTagStore(raw);
-      expect(Object.keys(store.labels).sort()).toEqual([...TAG_COLORS].sort());
+      expect(store.options.map((option) => option.id).sort()).toEqual([...TAG_COLORS].sort());
       expect(store.assignments).toEqual({});
     }
   });
@@ -30,7 +29,10 @@ describe('normalizeTagStore', () => {
   it('丢掉未知色槽、重复项，并按色序重排', () => {
     const store = normalizeTagStore({
       version: 1,
-      labels: { red: '  紧急  ', nope: 'x' },
+      options: [
+        { id: 'red', label: '  紧急  ', color: '#FF3B30' },
+        { id: 'nope', label: 'x', color: '#123456' },
+      ],
       assignments: {
         s1: ['gray', 'red', 'red', 'chartreuse'],
         s2: [],
@@ -38,14 +40,19 @@ describe('normalizeTagStore', () => {
         s3: 'red',
       },
     });
-    expect(store.labels.red).toBe('紧急');
-    expect(store.labels.green).toBe('Green');
+    expect(labelOf(store, 'red')).toBe('紧急');
+    expect(labelOf(store, 'green')).toBe('Green');
+    // 7 个色槽是产品契约：文件里没写到的颜色也要补回来，否则那个颜色再也打不上。
+    expect(store.options).toHaveLength(TAG_COLORS.length);
     expect(store.assignments).toEqual({ s1: ['red', 'gray'] });
   });
 
   it('空名字不覆盖默认名，过长名字被截断', () => {
-    expect(normalizeTagStore({ labels: { red: '   ' } }).labels.red).toBe('Red');
-    const long = normalizeTagStore({ labels: { blue: 'x'.repeat(60) } }).labels.blue;
+    expect(labelOf(normalizeTagStore({ options: [{ id: 'red', label: '   ' }] }), 'red')).toBe('Red');
+    const long = labelOf(
+      normalizeTagStore({ options: [{ id: 'blue', label: 'x'.repeat(60) }] }),
+      'blue',
+    );
     expect(long.length).toBe(24);
   });
 });
@@ -134,31 +141,3 @@ describe('用量与展示', () => {
   });
 });
 
-describe('parseTagsInput', () => {
-  it('只认色槽 id，不认改过的名字', () => {
-    expect(parseTagsInput({ action: 'read' })).toEqual({ ok: true, action: 'read' });
-    expect(parseTagsInput({ action: 'add', color: 'red' })).toEqual({
-      ok: true,
-      action: 'add',
-      color: 'red',
-    });
-    expect(parseTagsInput({ action: 'add', color: '阻塞' }).ok).toBe(false);
-    expect(parseTagsInput({ action: 'add' }).ok).toBe(false);
-    expect(parseTagsInput({ action: 'rename', color: 'red' }).ok).toBe(false);
-    expect(parseTagsInput({ action: 'read', extra: 1 }).ok).toBe(false);
-  });
-});
-
-describe('formatSessionTagsSection', () => {
-  it('没有标签时整段为空', () => {
-    expect(formatSessionTagsSection(emptyTagStore(), [])).toBe('');
-  });
-
-  it('有标签时带上色槽名并声明它不是指令', () => {
-    const store = renameTagLabel(emptyTagStore(), 'red', '阻塞');
-    const text = formatSessionTagsSection(store, ['red', 'blue']);
-    expect(text).toContain('阻塞 [red]');
-    expect(text).toContain('Blue [blue]');
-    expect(text).toContain('不是任务指令');
-  });
-});

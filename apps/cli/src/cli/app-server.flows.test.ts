@@ -1,4 +1,5 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -360,19 +361,39 @@ function createMockProvider() {
   return { server, state };
 }
 
-let mock: ReturnType<typeof createMockProvider> | null = null;
-let baseUrl = '';
+type MockProvider = ReturnType<typeof createMockProvider>;
 
-beforeAll(async () => {
-  mock = createMockProvider();
-  await new Promise<void>((resolve) => mock!.server.listen(0, '127.0.0.1', resolve));
-  const { port } = mock!.server.address() as AddressInfo;
-  baseUrl = `http://127.0.0.1:${port}/v1`;
-});
+/** Everything one test owns: its own mock provider (its own port, its own
+ * programmable state), its own hosts, and the `MICA_HOME` dirs to clean up.
+ * Tests run concurrently (`it.concurrent`), so none of this may be shared. */
+type MockContext = {
+  mock: MockProvider;
+  baseUrl: string;
+  hosts: Host[];
+};
 
-afterAll(async () => {
-  await new Promise<void>((resolve, reject) => mock!.server.close((error) => (error ? reject(error) : resolve())));
-});
+const mockContext = new AsyncLocalStorage<MockContext>();
+
+function currentMock(): MockContext {
+  const context = mockContext.getStore();
+  if (!context) throw new Error('flow test ran outside its mock context');
+  return context;
+}
+
+/** Per-test programmable provider state. Kept nameable as `mock.state` so the
+ * 200+ call sites stay unchanged while each concurrent test gets its own. */
+const mock = {
+  get state() {
+    return currentMock().mock.state;
+  },
+};
+
+/** Hosts spawned by the running test; `itE2E` kills them afterwards. */
+const hosts = {
+  push(host: Host): void {
+    currentMock().hosts.push(host);
+  },
+};
 
 type HostMessage = {
   method?: string;
@@ -408,7 +429,7 @@ function makeHome(tag: string): string {
             id: 'mock',
             name: 'Mock',
             protocol: 'openai_responses',
-            api_base: baseUrl,
+            api_base: currentMock().baseUrl,
             api_key: 'test-key',
             models: ['mock-chat'],
           },
@@ -436,7 +457,7 @@ function makeHomeWithSlowMcp(tag: string): string {
             id: 'mock',
             name: 'Mock',
             protocol: 'openai_responses',
-            api_base: baseUrl,
+            api_base: currentMock().baseUrl,
             api_key: 'test-key',
             models: ['mock-chat'],
           },
@@ -633,38 +654,50 @@ function contentTextOf(content: unknown): string {
 }
 
 /** E2E tests spawn a real child process and wait on protocol notifications; the
- * 5s vitest default is too short (host boot alone takes ~1.5s). */
+ * 5s vitest default is too short (host boot alone takes ~1.5s).
+ *
+ * Each test is fully self-contained (own mock provider + own `MICA_HOME`), so
+ * they run concurrently: the wall clock of this file is then a few host boots
+ * instead of 39 of them in a row. `maxConcurrency` in vitest.config.ts caps how
+ * many real `mica` children run at once. */
 function itE2E(name: string, fn: () => Promise<void>): void {
-  it(name, fn, 60_000);
+  it.concurrent(
+    name,
+    async () => {
+      const context = await startMockContext();
+      try {
+        await mockContext.run(context, fn);
+      } finally {
+        await stopMockContext(context);
+      }
+    },
+    60_000,
+  );
+}
+
+async function startMockContext(): Promise<MockContext> {
+  const provider = createMockProvider();
+  await new Promise<void>((resolve) => provider.server.listen(0, '127.0.0.1', resolve));
+  const { port } = provider.server.address() as AddressInfo;
+  return { mock: provider, baseUrl: `http://127.0.0.1:${port}/v1`, hosts: [] };
+}
+
+/** Kill the test's hosts, drop their `MICA_HOME` dirs, close the mock server.
+ * Hosts get a hard deadline so one wedged child cannot hold the file open. */
+async function stopMockContext(context: MockContext): Promise<void> {
+  for (const host of context.hosts) killHost(host);
+  await Promise.all(
+    context.hosts.map(async (host) => {
+      await Promise.race([host.closePromise, sleep(5_000)]);
+      rmSync(host.home, { recursive: true, force: true });
+    }),
+  );
+  await new Promise<void>((resolve) => context.mock.server.close(() => resolve()));
 }
 
 const hostReady = (m: HostMessage) => m.method === 'mica/backgroundTasks/updated' || m.method === 'error';
 
 suite('mica app-server real-user flows (mock provider)', () => {
-  const hosts: Host[] = [];
-  afterEach(async () => {
-    const activeHosts = hosts.splice(0);
-    for (const host of activeHosts) killHost(host);
-    await Promise.all(
-      activeHosts.map(async (host) => {
-        await Promise.race([host.closePromise, sleep(5_000)]);
-        rmSync(host.home, { recursive: true, force: true });
-      }),
-    );
-    mock!.state.mode = 'ok';
-    mock!.state.errorMessage = '';
-    mock!.state.requests = [];
-    mock!.state.responsesFinished = 0;
-    mock!.state.delayBeforeTextMs = 0;
-    mock!.state.toolFilePath = '';
-    mock!.state.shellCommand = '/bin/echo tick-1; /bin/echo tick-2; sleep 60';
-    mock!.state.longText = '';
-    mock!.state.includeReasoning = false;
-    mock!.state.inputTokens = 10;
-    mock!.state.toolFileContent = 'hello from mock';
-    mock!.state.toolFileContent2 = 'hello from mock (second call)';
-  });
-
   itE2E('new session + switched model (full provider/model id) + effort completes the turn', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];
@@ -871,7 +904,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
 
     const hostA = spawnHost('btw-persist-a');
     // 不 push 进 hosts：hostB 会用同一个 home（resume 同一个会话），
-    // afterEach 会并行 rm 两个同路径的目录而抛 ENOTEMPTY。hostA 由我们自己关掉。
+    // 收尾清理会并行 rm 两个同路径的目录而抛 ENOTEMPTY。hostA 由我们自己关掉。
     await waitFor(hostA, hostReady, 'host A ready or error', 30_000);
     await send(hostA, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '起个会话' }] });
     const started = await waitFor(hostA, (m) => m.method === 'turn/started', 'turn/started');
@@ -1846,7 +1879,6 @@ suite('mica app-server real-user flows (mock provider)', () => {
       '[Old tool result content cleared during compact]',
     );
   });
-
 
   itE2E('capabilities/set pins the session selection over the config defaults', async () => {
     mock!.state.mode = 'ok';

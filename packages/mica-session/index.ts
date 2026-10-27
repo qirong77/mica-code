@@ -11,7 +11,7 @@ export const micaSession = {
   SessionStore: micaSessionStore.SessionStore,
 };
 
-export { isProcessAlive, listSessionTurnLocks, readFileHead } from './liveSessions.js';
+export { isProcessAlive, listRecentSessionFiles, listSessionTurnLocks, readFileHead } from './liveSessions.js';
 
 export type {
   PersistedRuntimeSnapshot,
@@ -23,4 +23,9 @@ export type {
   SessionTurnLease,
 } from './sessionStore.js';
 
-export type { ListSessionTurnLocksOptions, SessionTurnLock } from './liveSessions.js';
+export type {
+  ListRecentSessionsOptions,
+  ListSessionTurnLocksOptions,
+  RecentSessionFile,
+  SessionTurnLock,
+} from './liveSessions.js';

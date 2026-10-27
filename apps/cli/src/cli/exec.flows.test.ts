@@ -1,4 +1,5 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -274,7 +275,11 @@ function createMockProvider() {
           return;
         }
         if (state.delayBeforeTextMs > 0) {
-          setTimeout(finishText, state.delayBeforeTextMs);
+          // The test may release the child (SIGINT) and tear its provider down
+          // before the delay elapses; writing into a dead socket would throw.
+          setTimeout(() => {
+            if (!res.destroyed && !res.writableEnded) finishText();
+          }, state.delayBeforeTextMs);
         } else {
           finishText();
         }
@@ -287,19 +292,31 @@ function createMockProvider() {
   return { server, state };
 }
 
-let mock: ReturnType<typeof createMockProvider> | null = null;
-let baseUrl = '';
+type MockProvider = ReturnType<typeof createMockProvider>;
 
-beforeAll(async () => {
-  mock = createMockProvider();
-  await new Promise<void>((resolve) => mock!.server.listen(0, '127.0.0.1', resolve));
-  const { port } = mock!.server.address() as AddressInfo;
-  baseUrl = `http://127.0.0.1:${port}/v1`;
-});
+/** Everything one test owns: its own mock provider (own port, own programmable
+ * state) and its own `baseUrl`. Tests run concurrently (`it.concurrent`), so
+ * none of this may be shared between them. */
+type MockContext = {
+  mock: MockProvider;
+  baseUrl: string;
+};
 
-afterAll(async () => {
-  await new Promise<void>((resolve, reject) => mock!.server.close((error) => (error ? reject(error) : resolve())));
-});
+const mockContext = new AsyncLocalStorage<MockContext>();
+
+function currentMock(): MockContext {
+  const context = mockContext.getStore();
+  if (!context) throw new Error('flow test ran outside its mock context');
+  return context;
+}
+
+/** Per-test programmable provider state. Kept nameable as `mock.state` so the
+ * call sites stay unchanged while each concurrent test gets its own. */
+const mock = {
+  get state() {
+    return currentMock().mock.state;
+  },
+};
 
 function makeHome(tag: string): string {
   const home = join(tmpdir(), `mica-exec-flow-${process.pid}-${tag}`);
@@ -314,7 +331,7 @@ function makeHome(tag: string): string {
             id: 'mock',
             name: 'Mock',
             protocol: 'openai_responses',
-            api_base: baseUrl,
+            api_base: currentMock().baseUrl,
             api_key: 'test-key',
             models: ['mock-chat'],
           },
@@ -394,43 +411,73 @@ function parseJsonl(stdout: string): Record<string, unknown>[] {
     .filter((line): line is Record<string, unknown> => line !== null);
 }
 
-/** E2E tests spawn a real child process; the 5s vitest default is too short. */
+/** E2E tests spawn a real child process; the 5s vitest default is too short.
+ *
+ * Each test is fully self-contained (own mock provider + own `MICA_HOME`), so
+ * they run concurrently: the wall clock of this file is then a few process
+ * boots instead of one per test. `maxConcurrency` in vitest.config.ts caps how
+ * many real `mica` children run at once. */
 function itE2E(name: string, fn: () => Promise<void>): void {
-  it(name, fn, 60_000);
+  it.concurrent(
+    name,
+    async () => {
+      const context = await startMockContext();
+      try {
+        await mockContext.run(context, fn);
+      } finally {
+        await stopMockContext(context);
+      }
+    },
+    60_000,
+  );
 }
 
+async function startMockContext(): Promise<MockContext> {
+  const provider = createMockProvider();
+  await new Promise<void>((resolve) => provider.server.listen(0, '127.0.0.1', resolve));
+  const { port } = provider.server.address() as AddressInfo;
+  return { mock: provider, baseUrl: `http://127.0.0.1:${port}/v1` };
+}
+
+async function stopMockContext(context: MockContext): Promise<void> {
+  const closed = new Promise<void>((resolve) => context.mock.server.close(() => resolve()));
+  // `hang` mode leaves a request stream open; `close()` alone would wait for it.
+  context.mock.server.closeAllConnections();
+  await closed;
+}
+
+/** `createStore()` takes no path: it reads the module-level `MICA_HOME`. Rebinding
+ *  it therefore means mutating `process.env` and re-running the module graph, and
+ *  both are process-wide. The lock keeps that window from overlapping with
+ *  another test that needs the same rebind (a concurrently spawning test would
+ *  otherwise inherit a `MICA_HOME` it does not own). */
+let sessionStoreRebind: Promise<unknown> = Promise.resolve();
+
 /** Session ids the real SessionStore lists for a MICA_HOME — the same source
- *  `/resume` reads. The module graph is re-bound to that home on each call. */
+ *  `/resume` reads. */
 async function listSessionIds(micaHome: string): Promise<string[]> {
-  const previous = process.env.MICA_HOME;
-  process.env.MICA_HOME = micaHome;
-  vi.resetModules();
-  try {
-    const { micaSession } = await import('@packages/mica-session/index.js');
-    return micaSession
-      .createStore()
-      .listRecent(10)
-      .map((session) => session.id);
-  } finally {
-    if (previous === undefined) delete process.env.MICA_HOME;
-    else process.env.MICA_HOME = previous;
+  const run = async (): Promise<string[]> => {
+    const previous = process.env.MICA_HOME;
+    process.env.MICA_HOME = micaHome;
     vi.resetModules();
-  }
+    try {
+      const { micaSession } = await import('@packages/mica-session/index.js');
+      return micaSession
+        .createStore()
+        .listRecent(10)
+        .map((session) => session.id);
+    } finally {
+      if (previous === undefined) delete process.env.MICA_HOME;
+      else process.env.MICA_HOME = previous;
+      vi.resetModules();
+    }
+  };
+  const result = sessionStoreRebind.then(run, run);
+  sessionStoreRebind = result.catch(() => undefined);
+  return result;
 }
 
 suite('mica exec real-user flows (mock provider)', () => {
-  afterEach(() => {
-    // Reset mock state between tests.
-    mock!.state.mode = 'ok';
-    mock!.state.errorMessage = '';
-    mock!.state.requests = [];
-    mock!.state.responsesFinished = 0;
-    mock!.state.includeReasoning = false;
-    mock!.state.toolFilePath = '';
-    mock!.state.toolFileContent = 'hello from exec tool mock';
-    mock!.state.delayBeforeTextMs = 0;
-  });
-
   itE2E('--model override changes the model sent to provider', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];
@@ -471,7 +518,7 @@ suite('mica exec real-user flows (mock provider)', () => {
       {
         MICA_HOME: home,
         OPENAI_API_KEY: 'sk-from-environment',
-        OPENAI_BASE_URL: baseUrl,
+        OPENAI_BASE_URL: currentMock().baseUrl,
       },
     );
 

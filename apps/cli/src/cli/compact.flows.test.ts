@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -36,19 +37,20 @@ function createMockProvider() {
   return { server };
 }
 
-let mock: ReturnType<typeof createMockProvider> | null = null;
-let baseUrl = '';
+/** One test's own mock provider (own port) — tests run concurrently
+ * (`it.concurrent`), so the config each one writes must not share a `baseUrl`. */
+type MockContext = {
+  server: Server;
+  baseUrl: string;
+};
 
-beforeAll(async () => {
-  mock = createMockProvider();
-  await new Promise<void>((resolve) => mock!.server.listen(0, '127.0.0.1', resolve));
-  const { port } = mock!.server.address() as AddressInfo;
-  baseUrl = `http://127.0.0.1:${port}/v1`;
-});
+const mockContext = new AsyncLocalStorage<MockContext>();
 
-afterAll(async () => {
-  await new Promise<void>((resolve, reject) => mock!.server.close((error) => (error ? reject(error) : resolve())));
-});
+function currentMock(): MockContext {
+  const context = mockContext.getStore();
+  if (!context) throw new Error('compact flow test ran outside its mock context');
+  return context;
+}
 
 /** Create a temp MICA_HOME with a config.json pointing at the mock provider. */
 function makeHome(tag: string): string {
@@ -64,7 +66,7 @@ function makeHome(tag: string): string {
             id: 'mock',
             name: 'Mock',
             protocol: 'openai_responses',
-            api_base: baseUrl,
+            api_base: currentMock().baseUrl,
             api_key: 'test-key',
             models: ['mock-chat'],
           },
@@ -116,9 +118,37 @@ function runCli(
   });
 }
 
-/** E2E tests spawn a real child process; the 5s vitest default is too short. */
+/** E2E tests spawn a real child process (boot alone is ~1.5s), so the 5s vitest
+ * default is too short.
+ *
+ * Each test is fully self-contained (own `MICA_HOME`, own mock provider), so
+ * they run concurrently and the file's wall clock is a few boot waves instead of
+ * one per test. `maxConcurrency` in vitest.config.ts caps how many real `mica`
+ * children run at once. */
 function itE2E(name: string, fn: () => Promise<void>): void {
-  it(name, fn, 60_000);
+  it.concurrent(
+    name,
+    async () => {
+      const context = await startMockContext();
+      try {
+        await mockContext.run(context, fn);
+      } finally {
+        await stopMockContext(context);
+      }
+    },
+    60_000,
+  );
+}
+
+async function startMockContext(): Promise<MockContext> {
+  const server = createMockProvider().server;
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return { server, baseUrl: `http://127.0.0.1:${port}/v1` };
+}
+
+async function stopMockContext(context: MockContext): Promise<void> {
+  await new Promise<void>((resolve) => context.server.close(() => resolve()));
 }
 
 /** Write a session JSON file into `<home>/sessions/<id>.json`. */
@@ -424,7 +454,9 @@ suite('mica compact --tool-results-only flows', () => {
     expect(parsedSecond.code).toBe('not_needed');
 
     const afterSecond = readSession(home, sessionId);
-    const messagesSecond = (afterSecond.snapshot as Record<string, unknown[]>).messages as Array<Record<string, unknown>>;
+    const messagesSecond = (afterSecond.snapshot as Record<string, unknown[]>).messages as Array<
+      Record<string, unknown>
+    >;
     expect(messagesSecond.length).toBe(4);
     expect(messagesSecond[0]!.content).toBe('读取文件并总结');
     expect(messagesSecond[3]!.content).toBe('这是模型回复，必须保留');

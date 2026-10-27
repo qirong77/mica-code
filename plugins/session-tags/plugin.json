@@ -10,5 +10,5 @@
   "mica": {
     "apiVersion": 1
   },
-  "requires": ["commands", "prompt", "session", "tools", "ui"]
+  "requires": ["commands", "session", "ui"]
 }

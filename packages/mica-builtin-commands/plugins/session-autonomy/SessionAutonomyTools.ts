@@ -1,15 +1,26 @@
 import { spawnSync } from 'node:child_process';
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 import type { CommandAgent, CommandRuntimeServices } from '@packages/mica-builtin-commands/index.js';
-import { listSessionTurnLocks, type SessionTurnLock } from '@packages/mica-session/index.js';
+import {
+  listRecentSessionFiles,
+  listSessionTurnLocks,
+  type RecentSessionFile,
+  type SessionTurnLock,
+} from '@packages/mica-session/index.js';
 
 export type SessionToolDeps = {
   services: CommandRuntimeServices;
   /** 运行中会话枚举；测试注入用，默认读 `$MICA_HOME/sessions/.turn-locks`。 */
   listTurnLocks?: () => SessionTurnLock[];
+  /** 最近结束的会话枚举；测试注入用，默认读 `$MICA_HOME/sessions/*.json` 的文件头。 */
+  listRecentSessions?: (sinceMs: number) => RecentSessionFile[];
   /** 进程描述；测试注入用，默认 `ps -o command=`。 */
   describeProcess?: (pid: number) => string | undefined;
 };
+
+/** `hours` 的上限：超过一个月的窗口对排查「谁动过工作区」没有意义。 */
+const MAX_HOURS = 24 * 30;
+const HOUR_MS = 60 * 60 * 1000;
 
 type CallerAgent = Pick<CommandAgent, 'taskOwnerId' | 'getSnapshot' | 'config' | 'role'>;
 
@@ -62,6 +73,24 @@ function formatElapsed(startedAt: string): string {
   return `已运行 ${Math.floor(hours / 24)} 天`;
 }
 
+function formatAgo(timestamp: string | undefined): string {
+  const parsed = Date.parse(timestamp ?? '');
+  if (!Number.isFinite(parsed)) return '时间未知';
+  const elapsed = Date.now() - parsed;
+  if (elapsed < 60_000) return '刚刚';
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时 ${minutes % 60} 分前`;
+  return `${Math.floor(hours / 24)} 天前`;
+}
+
+function readHours(input: ToolInput): number {
+  const raw = input.hours;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return 0;
+  return Math.min(MAX_HOURS, Math.max(0, Math.floor(raw)));
+}
+
 function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
@@ -74,18 +103,29 @@ export class ToolSessionPeers extends MicaTool {
         '列出当前正在运行的 Mica 实例（其他窗口/终端里的 TUI、mica exec、desktop 的 app-server 进程），返回各自 session 缓存文件路径与读取方法。',
         '当怀疑工作区被另一个 Mica 会话改动、文件内容与预期不符、或想确认是否有别的会话在同一个项目/仓库工作时使用。',
         '只读，不修改任何东西。注意：只列出正在执行 turn 的实例，空闲实例不会改动文件，因此不在列表中。',
+        '默认只列正在运行的实例；传 hours 后额外列出最近 N 小时内结束的会话（已释放 turn 锁，仍可能刚改过工作区），0 表示不列。',
       ].join(' '),
-      { type: 'object', properties: {}, additionalProperties: false },
+      {
+        type: 'object',
+        properties: {
+          hours: {
+            type: 'number',
+            description: '额外列出最近 N 小时内结束（不再持有 turn 锁）的会话；默认 0 表示不列。',
+          },
+        },
+        additionalProperties: false,
+      },
       { readOnly: true },
     );
   }
 
-  async execute(_input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const agent = callerAgent(callbacks);
     if (!isActiveAgent(this.deps.services, agent)) return notAvailable('未找到当前 agent');
     const currentSessionId = this.deps.services.getCurrentAgentSessionId?.() ?? '';
     const locks = (this.deps.listTurnLocks ?? listSessionTurnLocks)();
     const describe = this.deps.describeProcess ?? describeProcessCommand;
+    const hours = readHours(input);
     const running = locks.filter((lock) => lock.alive);
     const stale = locks.filter((lock) => !lock.alive);
     // Same working directory is the interesting case: that is the instance most
@@ -128,6 +168,34 @@ export class ToolSessionPeers extends MicaTool {
           .map((lock) => `${lock.sessionId}(pid ${lock.pid})`)
           .join(', ')}`,
       );
+    }
+
+    if (hours > 0) {
+      // Running sessions already have their own block and a leftover lease is
+      // reported above: what is new here is "ended recently, still warm".
+      const busy = new Set(running.map((lock) => lock.sessionId));
+      if (currentSessionId) busy.add(currentSessionId);
+      const listRecent =
+        this.deps.listRecentSessions ?? ((sinceMs: number) => listRecentSessionFiles({ since: sinceMs }));
+      const ended = listRecent(Date.now() - hours * HOUR_MS).filter((session) => !busy.has(session.sessionId));
+      lines.push(
+        '',
+        ended.length === 0
+          ? `最近 ${hours} 小时内没有已结束的其他会话。`
+          : `最近 ${hours} 小时内结束的会话：${ended.length} 个（已释放 turn 锁，仍可能刚改过工作区）`,
+      );
+      ended.forEach((session, index) => {
+        lines.push('', `${index + 1}. ${session.sessionId}`);
+        lines.push(`   标题: ${session.title ?? '(未读到)'}`);
+        lines.push(`   cwd: ${session.cwd ?? '(未读到)'}`);
+        const meta = [
+          session.turnState ? `turnState ${session.turnState}` : '',
+          session.model ? `model ${session.model}` : '',
+          `最后写入${formatAgo(session.updatedAt ?? session.modifiedAt)}`,
+        ].filter(Boolean);
+        lines.push(`   ${meta.join(' · ')}`);
+        lines.push(`   session 文件: ${session.sessionPath}`);
+      });
     }
 
     lines.push('', SESSION_READ_GUIDANCE);

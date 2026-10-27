@@ -1,6 +1,21 @@
+import {
+  annotationsOf,
+  emptySessionAnnotations,
+  normalizeSessionAnnotations,
+  resolveAnnotationOptions,
+  setSessionAnnotations,
+  toggleSessionAnnotation,
+  type SessionAnnotationOption,
+  type SessionAnnotations,
+} from '@packages/mica-plugin/sessionAnnotations.js';
+
 /**
- * 会话标签的纯数据层：7 个固定色槽（照 macOS Finder 的彩色圆点），每个色槽有一个可改的
+ * 会话标签的数据层：7 个固定色槽（照 macOS Finder 的彩色圆点），每个色槽有一个可改的
  * 名字，会话与色槽是多对多。
+ *
+ * 落盘用的是插件系统的通用「会话行标记」格式（`session-annotations.json`）：色槽就是
+ * `options`，打标就是 `assignments`。所以宿主不需要认识「标签」，它只按 options 的颜色
+ * 画点、按 options 的名字做菜单项——换成别的插件写同样的文件，界面照样能用。
  *
  * 这里只有纯函数：不碰文件、不碰 `ctx`。落盘在 `storeFile.ts`，接入在 `index.ts`。
  *
@@ -43,19 +58,7 @@ export const DEFAULT_TAG_LABELS: Record<TagColor, string> = {
 
 export const MAX_TAG_LABEL_LENGTH = 24;
 
-export const TAGS_STORE_VERSION = 1;
-
-export type TagStore = {
-  version: number;
-  /** 色槽 id -> 用户给它起的名字。7 个键永远齐全。 */
-  labels: Record<TagColor, string>;
-  /** 会话 id -> 它挂着的色槽（按色序去重）。没有标签的会话不占键。 */
-  assignments: Record<string, TagColor[]>;
-};
-
-export function emptyTagStore(): TagStore {
-  return { version: TAGS_STORE_VERSION, labels: { ...DEFAULT_TAG_LABELS }, assignments: {} };
-}
+export type TagStore = SessionAnnotations;
 
 export function isTagColor(value: unknown): value is TagColor {
   return typeof value === 'string' && (TAG_COLORS as readonly string[]).includes(value);
@@ -65,38 +68,53 @@ export function tagColorIndex(color: TagColor): number {
   return TAG_COLORS.indexOf(color);
 }
 
+export function emptyTagStore(): TagStore {
+  return {
+    ...emptySessionAnnotations('Session Tags'),
+    options: TAG_COLORS.map((color) => ({
+      id: color,
+      label: DEFAULT_TAG_LABELS[color],
+      color: TAG_COLOR_HEX[color],
+    })),
+  };
+}
+
 /**
  * 把任意读到的 JSON 收敛成一份能用的 store。
  *
- * 磁盘上的文件可能被手改过、也可能是旧版本写的：未知色槽、重复项、非字符串名字一律丢掉，
- * 缺的色槽补默认名。解析失败**不抛错**——标签坏掉不该让会话起不来。
+ * 7 个色槽是产品契约的一部分：文件里缺了某个色槽（旧版本写过、被手改删掉）也要补回来，
+ * 否则那个颜色就再也打不上了。顺序永远按 `TAG_COLORS`。
  */
 export function normalizeTagStore(raw: unknown): TagStore {
-  const store = emptyTagStore();
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return store;
+  const data = normalizeSessionAnnotations(raw, 'Session Tags');
+  const byId = new Map(data.options.map((option) => [option.id, option]));
+  const options: SessionAnnotationOption[] = TAG_COLORS.map((color) => {
+    const found = byId.get(color);
+    return {
+      id: color,
+      label: found?.label || DEFAULT_TAG_LABELS[color],
+      color: found?.color || TAG_COLOR_HEX[color],
+    };
+  });
+  return { ...data, options, assignments: sortAssignments(data.assignments) };
+}
 
-  const record = raw as Record<string, unknown>;
-  const labels = record.labels;
-  if (labels && typeof labels === 'object' && !Array.isArray(labels)) {
-    for (const color of TAG_COLORS) {
-      const value = (labels as Record<string, unknown>)[color];
-      if (typeof value !== 'string') continue;
-      const name = cleanTagLabel(value);
-      if (name) store.labels[color] = name;
-    }
+/**
+ * 归属里的颜色按色序排。
+ *
+ * 文件是公开格式（用户会手改、旧版本按点击顺序写过），而侧栏那排圆点的位置必须稳定：
+ * 同一组标签在任何会话上都按红→灰排，用户才靠「第几个点」认得出是哪个分类。
+ * 不认识的 id 在这里丢掉——它们画不出任何东西，留着只会让 `/tags` 的输出对不上。
+ */
+function sortAssignments(assignments: Record<string, string[]>): Record<string, string[]> {
+  const order = new Map(TAG_COLORS.map((color, index) => [color as string, index]));
+  const sorted: Record<string, string[]> = {};
+  for (const [sessionId, colors] of Object.entries(assignments)) {
+    const known = colors.filter((color) => order.has(color));
+    if (known.length === 0) continue;
+    sorted[sessionId] = known.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
   }
-
-  const assignments = record.assignments;
-  if (assignments && typeof assignments === 'object' && !Array.isArray(assignments)) {
-    for (const [sessionId, colors] of Object.entries(assignments as Record<string, unknown>)) {
-      const id = sessionId.trim();
-      if (!id || !Array.isArray(colors)) continue;
-      const normalized = normalizeColorList(colors);
-      if (normalized.length > 0) store.assignments[id] = normalized;
-    }
-  }
-
-  return store;
+  return sorted;
 }
 
 /** 色槽名字：去掉控制字符与多余空白，过长截断；空串表示这次改名无效。 */
@@ -108,16 +126,21 @@ export function cleanTagLabel(value: string): string {
   return name.slice(0, MAX_TAG_LABEL_LENGTH);
 }
 
-/** 去重并按色序排列；未知色槽丢弃。 */
-export function normalizeColorList(values: readonly unknown[]): TagColor[] {
-  const seen = new Set<TagColor>();
-  for (const value of values) if (isTagColor(value)) seen.add(value);
-  return [...seen].sort((a, b) => tagColorIndex(a) - tagColorIndex(b));
+export function labelOf(store: TagStore, color: TagColor): string {
+  return store.options.find((option) => option.id === color)?.label ?? DEFAULT_TAG_LABELS[color];
+}
+
+export function colorOf(store: TagStore, color: TagColor): string {
+  return store.options.find((option) => option.id === color)?.color ?? TAG_COLOR_HEX[color];
 }
 
 export function tagsOf(store: TagStore, sessionId: string | null | undefined): TagColor[] {
-  if (!sessionId) return [];
-  return store.assignments[sessionId] ?? [];
+  return annotationsOf(store, sessionId).filter(isTagColor);
+}
+
+/** 会话行要画的那排圆点（宿主用同一份解析，确保两边顺序一致）。 */
+export function tagBadgesOf(store: TagStore, sessionId: string | null | undefined): SessionAnnotationOption[] {
+  return resolveAnnotationOptions(store, sessionId);
 }
 
 /**
@@ -132,26 +155,18 @@ export function resolveTagColor(store: TagStore, token: string): TagColor | null
   if (isTagColor(value)) return value;
   for (const color of TAG_COLORS) {
     if (DEFAULT_TAG_LABELS[color].toLowerCase() === value) return color;
-    if (store.labels[color].toLowerCase() === value) return color;
+    if (labelOf(store, color).toLowerCase() === value) return color;
   }
   return null;
 }
 
-/** 设置某个会话的标签集合（整组替换）。空集合等于清空，并从文件里删掉这个键。 */
 export function setSessionTags(store: TagStore, sessionId: string, colors: readonly unknown[]): TagStore {
-  const id = sessionId.trim();
-  if (!id) return store;
-  const next = normalizeColorList(colors);
-  const assignments = { ...store.assignments };
-  if (next.length > 0) assignments[id] = next;
-  else delete assignments[id];
-  return { ...store, assignments };
+  return setSessionAnnotations(store, sessionId, colors.filter(isTagColor));
 }
 
 export function addSessionTag(store: TagStore, sessionId: string, color: TagColor): TagStore {
-  const current = tagsOf(store, sessionId);
-  if (current.includes(color)) return store;
-  return setSessionTags(store, sessionId, [...current, color]);
+  if (tagsOf(store, sessionId).includes(color)) return store;
+  return setSessionTags(store, sessionId, [...tagsOf(store, sessionId), color]);
 }
 
 export function removeSessionTag(store: TagStore, sessionId: string, color: TagColor): TagStore {
@@ -170,18 +185,27 @@ export function clearSessionTags(store: TagStore, sessionId: string): TagStore {
   return setSessionTags(store, sessionId, []);
 }
 
+/** 点一下某个色槽（右键菜单的 toggle 语义，与宿主界面上的行为一致）。 */
+export function toggleSessionTag(store: TagStore, sessionId: string, color: TagColor): TagStore {
+  if (!isTagColor(color)) return store;
+  return toggleSessionAnnotation(store, sessionId, color);
+}
+
 /** 改色槽名字。空名字或与原名相同都返回原 store（调用方据此判断有没有变）。 */
 export function renameTagLabel(store: TagStore, color: TagColor, name: string): TagStore {
   const next = cleanTagLabel(name);
-  if (!next || next === store.labels[color]) return store;
-  return { ...store, labels: { ...store.labels, [color]: next } };
+  if (!next || next === labelOf(store, color)) return store;
+  return {
+    ...store,
+    options: store.options.map((option) => (option.id === color ? { ...option, label: next } : option)),
+  };
 }
 
 /** 每个色槽挂着多少个会话，用于 `/tags list` 与管理面板的「0 个会话」提示。 */
 export function tagCounts(store: TagStore): Record<TagColor, number> {
   const counts = Object.fromEntries(TAG_COLORS.map((color) => [color, 0])) as Record<TagColor, number>;
   for (const colors of Object.values(store.assignments)) {
-    for (const color of colors) counts[color] += 1;
+    for (const color of colors) if (isTagColor(color)) counts[color] += 1;
   }
   return counts;
 }
@@ -194,7 +218,7 @@ export function firstFreeColor(store: TagStore): TagColor | null {
 
 /** 某个色槽的展示名：改过名字就带上是哪个色槽，没改过就只显示名字。 */
 export function tagLabelText(store: TagStore, color: TagColor): string {
-  const label = store.labels[color];
+  const label = labelOf(store, color);
   return label === DEFAULT_TAG_LABELS[color] ? label : `${label} (${color})`;
 }
 

@@ -1,4 +1,5 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -87,29 +88,39 @@ function createMockProvider() {
   return { server, state };
 }
 
-let mock: ReturnType<typeof createMockProvider> | null = null;
-let baseUrl = '';
-const tempPaths = new Set<string>();
+type MockProvider = ReturnType<typeof createMockProvider>;
 
-beforeAll(async () => {
-  mock = createMockProvider();
-  await new Promise<void>((resolve) => mock!.server.listen(0, '127.0.0.1', resolve));
-  baseUrl = `http://127.0.0.1:${(mock!.server.address() as AddressInfo).port}/v1`;
-});
+/** Everything one test owns: its own mock provider (own port, own programmable
+ * state) and the temp homes/repos/remotes it created. Tests run concurrently
+ * (`it.concurrent`), so none of this may be shared. */
+type MockContext = {
+  mock: MockProvider;
+  baseUrl: string;
+  tempPaths: string[];
+};
 
-afterAll(async () => {
-  await new Promise<void>((resolve, reject) => mock!.server.close((error) => (error ? reject(error) : resolve())));
-});
+const mockContext = new AsyncLocalStorage<MockContext>();
 
-afterEach(() => {
-  for (const path of tempPaths) rmSync(path, { recursive: true, force: true });
-  tempPaths.clear();
-  if (mock) {
-    mock.state.mode = 'ok';
-    mock.state.requests = [];
-    mock.state.onRequest = undefined;
-  }
-});
+function currentMock(): MockContext {
+  const context = mockContext.getStore();
+  if (!context) throw new Error('commit flow test ran outside its mock context');
+  return context;
+}
+
+/** Per-test programmable provider state. Kept nameable as `mock.state` so the
+ * call sites stay unchanged while each concurrent test gets its own. */
+const mock = {
+  get state() {
+    return currentMock().mock.state;
+  },
+};
+
+/** Temp dirs owned by the running test; `itE2E` removes them afterwards. */
+const tempPaths = {
+  add(path: string): void {
+    currentMock().tempPaths.push(path);
+  },
+};
 
 function makeHome(tag: string): string {
   const home = join(tmpdir(), `mica-commit-flow-${process.pid}-${tag}`);
@@ -124,7 +135,7 @@ function makeHome(tag: string): string {
           id: 'mock',
           name: 'Mock',
           protocol: 'openai_responses',
-          api_base: baseUrl,
+          api_base: currentMock().baseUrl,
           api_key: 'test-key',
           models: ['mock-chat'],
         },
@@ -247,8 +258,39 @@ function payload(stdout: string): Record<string, unknown> {
   return JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as Record<string, unknown>;
 }
 
+/** E2E tests spawn a real child process (boot alone is ~1.5s), so the 5s vitest
+ * default is too short.
+ *
+ * Each test is fully self-contained (own mock provider, own `MICA_HOME`, own git
+ * repos), so they run concurrently and the file's wall clock is a few boot waves
+ * instead of one per test. `maxConcurrency` in vitest.config.ts caps how many
+ * real `mica` children run at once. */
 function itE2E(name: string, fn: () => Promise<void>): void {
-  it(name, fn, 60_000);
+  it.concurrent(
+    name,
+    async () => {
+      const context = await startMockContext();
+      try {
+        await mockContext.run(context, fn);
+      } finally {
+        await stopMockContext(context);
+      }
+    },
+    60_000,
+  );
+}
+
+async function startMockContext(): Promise<MockContext> {
+  const provider = createMockProvider();
+  await new Promise<void>((resolve) => provider.server.listen(0, '127.0.0.1', resolve));
+  const { port } = provider.server.address() as AddressInfo;
+  return { mock: provider, baseUrl: `http://127.0.0.1:${port}/v1`, tempPaths: [] };
+}
+
+/** Drop the test's temp homes/repos/remotes, then close its mock server. */
+async function stopMockContext(context: MockContext): Promise<void> {
+  for (const path of context.tempPaths) rmSync(path, { recursive: true, force: true });
+  await new Promise<void>((resolve) => context.mock.server.close(() => resolve()));
 }
 
 suite('mica commit real-user flows (mock provider)', () => {

@@ -27,6 +27,7 @@ import { createTurnLeaseProbe, isInterruptedSession } from './session-lease'
 import { createStatsScanner } from './stats-scanner'
 import { deleteSessionFiles, isValidSessionId, stripSessionFromSort } from './session-delete'
 import { dropLoopsForSession } from './loops'
+import { listSessionAnnotations, setSessionAnnotation } from './session-annotations'
 
 /**
  * mica 的对话 session 快照统计：直接扫描 ~/.mica/sessions/*.json（真实 AI 会话），
@@ -374,6 +375,9 @@ export function registerStatsIpc() {
     }
   })
   ipcMain.handle('stats:list-sessions', () => ({ sessions: scanMeta() }))
+  // 会话行上的插件标记（标签色点等）：宿主只提供通用读写面，具体有哪些、叫什么由插件决定。
+  ipcMain.handle('stats:list-annotations', () => listSessionAnnotations())
+  ipcMain.handle('stats:set-annotation', (_event, payload = {}) => setSessionAnnotation(payload))
   ipcMain.handle('stats:session-title', (_event, { sessionId } = {}) => sessionTitle(sessionId))
   ipcMain.handle('stats:delete-session', (_event, { sessionId } = {}) => deleteSession(sessionId))
   ipcMain.handle('stats:list-pins', () => readPins())

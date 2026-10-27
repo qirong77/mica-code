@@ -421,6 +421,10 @@ function createWebApi(env) {
       read: () => invoke('stats:read'),
       sessionDetail: (sessionId) => invoke('stats:session-detail', { sessionId }),
       listSessions: () => invoke('stats:list-sessions'),
+      // 会话行上的插件标记（标签色点等）：宿主不认识具体插件，只转交这份通用结构。
+      listAnnotations: () => invoke('stats:list-annotations'),
+      setAnnotation: ({ pluginId, sessionId, optionId, on }) =>
+        invoke('stats:set-annotation', { pluginId, sessionId, optionId, on }),
       // 会话内容搜索：只在渲染层已经拿到的元数据之外的部分（对话正文）走这一趟，
       // 时间范围把要读的会话限制在最近若干天（见 host/stats.js 的 searchSessions）。
       searchSessions: (query, sinceMs = 0) => invoke('stats:search-sessions', { query, sinceMs }),

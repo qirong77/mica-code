@@ -74,9 +74,11 @@ describe('PtyManager', () => {
   it('wait idle resolves after output settles', async () => {
     const manager = makeManager();
     const { sessionId } = await manager.spawn([SHELL, '-c', 'echo settled; sleep 0.3']);
-    const wait = await manager.wait(sessionId, { idleMs: 200, timeoutMs: LONG_TIMEOUT });
-    expect(wait.reason).toBe('idle');
-    expect(wait.output).toContain('settled');
+    // 子进程启动本身就可能是 200ms 以上的静默，直接按 idle 等会在吐出第一行之前就成立。
+    const first = await manager.wait(sessionId, { pattern: 'settled', timeoutMs: LONG_TIMEOUT });
+    expect(first.output).toContain('settled');
+    const idle = await manager.wait(sessionId, { idleMs: 200, timeoutMs: LONG_TIMEOUT });
+    expect(idle.reason).toBe('idle');
     await manager.kill(sessionId);
   });
 

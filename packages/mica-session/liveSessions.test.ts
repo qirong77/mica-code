@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { listSessionTurnLocks } from './liveSessions.js';
+import { listRecentSessionFiles, listSessionTurnLocks } from './liveSessions.js';
 
 const createdDirs: string[] = [];
 
@@ -25,14 +25,14 @@ function writeSession(sessionDir: string, id: string, body: string): string {
   return sessionPath;
 }
 
-function sessionBody(id: string, title: string, extra = ''): string {
+function sessionBody(id: string, title: string, extra = '', updatedAt = '2026-10-02T03:04:05.000Z'): string {
   return `{
   "version": 1,
   "id": "${id}",
   "title": ${JSON.stringify(title)},
   "titleSource": "derived",
   "createdAt": "2026-10-01T00:00:00.000Z",
-  "updatedAt": "2026-10-02T03:04:05.000Z",
+  "updatedAt": "${updatedAt}",
   "cwd": "/tmp/project",
   "turnState": "running",
   "snapshot": {
@@ -122,5 +122,73 @@ describe('listSessionTurnLocks', () => {
     const locks = listSessionTurnLocks({ sessionDir, isAlive: () => true });
 
     expect(locks.map((lock) => lock.sessionId)).toEqual(['earlier', 'later']);
+  });
+});
+
+describe('listRecentSessionFiles', () => {
+  const now = Date.parse('2026-10-02T06:00:00.000Z');
+
+  function touch(path: string, iso: string): void {
+    const seconds = Date.parse(iso) / 1000;
+    utimesSync(path, seconds, seconds);
+  }
+
+  it('lists sessions written inside the window with metadata read from the head', () => {
+    const sessionDir = makeSessionDir();
+    const recent = writeSession(sessionDir, 'sess-recent', sessionBody('sess-recent', '刚结束的会话'));
+    const old = writeSession(sessionDir, 'sess-old', sessionBody('sess-old', '很久以前的会话'));
+    touch(recent, '2026-10-02T05:00:00.000Z');
+    touch(old, '2026-09-01T05:00:00.000Z');
+
+    const files = listRecentSessionFiles({ sessionDir, since: now - 24 * 3_600_000 });
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      sessionId: 'sess-recent',
+      sessionPath: recent,
+      title: '刚结束的会话',
+      cwd: '/tmp/project',
+      turnState: 'running',
+      model: 'mock-chat',
+    });
+  });
+
+  it('trusts a stale header over a freshly touched file and ignores non-session entries', () => {
+    const sessionDir = makeSessionDir();
+    const stale = writeSession(sessionDir, 'sess-stale', sessionBody('sess-stale', '头部过期'));
+    touch(stale, '2026-10-02T05:59:00.000Z');
+    writeFileSync(resolve(sessionDir, 'session-index.json'), '{ "sessions": [] }');
+    writeFileSync(resolve(sessionDir, 'notes.txt'), 'not a session');
+
+    const files = listRecentSessionFiles({ sessionDir, since: now - 3_600_000 });
+
+    // The header says 2026-10-02T03:04:05Z, well outside the one-hour window.
+    expect(files).toEqual([]);
+  });
+
+  it('orders newest first and honours the limit', () => {
+    const sessionDir = makeSessionDir();
+    const older = writeSession(
+      sessionDir,
+      'sess-older',
+      sessionBody('sess-older', '旧一点', '', '2026-10-02T05:10:00.000Z'),
+    );
+    const newer = writeSession(
+      sessionDir,
+      'sess-newer',
+      sessionBody('sess-newer', '新一点', '', '2026-10-02T05:30:00.000Z'),
+    );
+    touch(older, '2026-10-02T05:00:00.000Z');
+    touch(newer, '2026-10-02T05:30:00.000Z');
+
+    const files = listRecentSessionFiles({ sessionDir, since: now - 3_600_000, limit: 1 });
+
+    expect(files.map((file) => file.sessionId)).toEqual(['sess-newer']);
+  });
+
+  it('returns nothing when the session dir is missing', () => {
+    expect(
+      listRecentSessionFiles({ sessionDir: join(tmpdir(), 'mica-live-sessions-missing'), since: now }),
+    ).toEqual([]);
   });
 });

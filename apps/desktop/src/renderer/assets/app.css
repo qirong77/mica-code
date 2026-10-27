@@ -2375,6 +2375,10 @@ body.is-resizing.is-resizing-terminal {
   color: var(--color-teal);
 }
 
+.chat-task-status-completed {
+  color: var(--color-success);
+}
+
 .chat-task-status-waiting {
   color: var(--color-warn);
 }

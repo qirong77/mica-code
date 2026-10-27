@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../../agent/AgentRuntime.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import type { RuntimeInput, SubmitOptions } from '@packages/mica-runtime/index.js';
@@ -9,27 +9,37 @@ import type { RuntimeInput, SubmitOptions } from '@packages/mica-runtime/index.j
 const previousMicaHome = process.env.MICA_HOME;
 let micaHome: string;
 
-beforeEach(() => {
+// `mica-session` pins `MICA_HOME` at module load, so the modules below used to be
+// re-imported per test (`vi.resetModules()`), which re-loaded the whole graph —
+// Ink/React included — and pushed each test towards vitest's 5s default. Session
+// ids are unique per test, so one home for the file is enough isolation: set it
+// once, import once.
+let LocalRuntimeController: typeof import('./LocalRuntimeController.js').LocalRuntimeController;
+let SessionController: typeof import('../../session/SessionController.js').SessionController;
+let micaCommands: typeof import('@packages/mica-commands/index.js').micaCommands;
+let micaPlugin: typeof import('@packages/mica-plugin/index.js').micaPlugin;
+let setupMessageQueue: typeof import('@packages/mica-builtin-commands/plugins/message-queue.js').default;
+let setActiveContext: typeof import('../activeContext.js').setActiveContext;
+
+beforeAll(async () => {
   micaHome = mkdtempSync(join(tmpdir(), 'mica-runtime-queue-'));
   process.env.MICA_HOME = micaHome;
-  vi.resetModules();
+  ({ LocalRuntimeController } = await import('./LocalRuntimeController.js'));
+  ({ SessionController } = await import('../../session/SessionController.js'));
+  ({ micaCommands } = await import('@packages/mica-commands/index.js'));
+  ({ micaPlugin } = await import('@packages/mica-plugin/index.js'));
+  ({ default: setupMessageQueue } = await import('@packages/mica-builtin-commands/plugins/message-queue.js'));
+  ({ setActiveContext } = await import('../activeContext.js'));
 });
 
-afterEach(() => {
+afterAll(() => {
   rmSync(micaHome, { recursive: true, force: true });
   if (previousMicaHome === undefined) delete process.env.MICA_HOME;
   else process.env.MICA_HOME = previousMicaHome;
-  vi.resetModules();
 });
 
 describe('LocalRuntimeController queue drain', () => {
   it('starts the after-turn queued input as a new turn without a false lease warning', async () => {
-    const { LocalRuntimeController } = await import('./LocalRuntimeController.js');
-    const { SessionController } = await import('../../session/SessionController.js');
-    const { micaCommands } = await import('@packages/mica-commands/index.js');
-    const { micaPlugin } = await import('@packages/mica-plugin/index.js');
-    const { default: setupMessageQueue } = await import('@packages/mica-builtin-commands/plugins/message-queue.js');
-
     const snapshot: AgentRuntimeSnapshot = {
       providerId: 'openai',
       protocol: 'openai_chat_completions',
@@ -202,12 +212,6 @@ describe('LocalRuntimeController queue drain', () => {
   });
 
   it('shows provider-level retries as an in-place conversation notice', async () => {
-    const { LocalRuntimeController } = await import('./LocalRuntimeController.js');
-    const { SessionController } = await import('../../session/SessionController.js');
-    const { micaCommands } = await import('@packages/mica-commands/index.js');
-    const { micaPlugin } = await import('@packages/mica-plugin/index.js');
-    const { setActiveContext } = await import('../activeContext.js');
-
     const snapshot: AgentRuntimeSnapshot = {
       providerId: 'openai',
       protocol: 'openai_chat_completions',
@@ -279,7 +283,9 @@ describe('LocalRuntimeController queue drain', () => {
 
       await runtime.submit('hello');
 
-      const notices = fakeSession.uiState.conversationMessages.filter((m) => (m as { role?: string }).role === 'notice');
+      const notices = fakeSession.uiState.conversationMessages.filter(
+        (m) => (m as { role?: string }).role === 'notice',
+      );
       expect(notices).toHaveLength(1);
       const content = String((notices[0] as { content?: unknown })?.content);
       expect(content).toContain('请求暂时失败');

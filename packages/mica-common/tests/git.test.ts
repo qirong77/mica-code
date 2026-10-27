@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -33,12 +33,6 @@ describe('gitText', () => {
   it('does not write the index back while reading', () => {
     const index = join(dir, '.git', 'index');
 
-    // 对照：不带 GIT_OPTIONAL_LOCKS=0 的 status 会写回刷新后的索引。
-    writeFileSync(join(dir, 'a.txt'), 'two\n');
-    const before = snapshot(index);
-    execFileSync('git', ['status', '--porcelain'], { cwd: dir });
-    expect(snapshot(index)).not.toBe(before);
-
     // 走 gitText 的读命令原封不动。
     writeFileSync(join(dir, 'a.txt'), 'three\n');
     const stale = snapshot(index);
@@ -48,5 +42,35 @@ describe('gitText', () => {
     // 写操作照旧落盘（可选锁被关掉不影响必需的锁）。
     gitText(['add', '--', 'a.txt'], { cwd: dir });
     expect(snapshot(index)).not.toBe(stale);
+  });
+
+  // 这个变量只有真的进了子进程才有用。以前这里靠「不带 GIT_OPTIONAL_LOCKS=0 的 status
+  // 会写回刷新后的索引」做对照，但 git 2.50（Apple Git-155）起读命令不再写索引了，
+  // 对照在本地恒失败；直接看子进程拿到什么，才和 git 版本无关。
+  it('passes GIT_OPTIONAL_LOCKS=0 to the git child process', () => {
+    const bin = mkdtempSync(join(tmpdir(), 'mica-common-git-bin-'));
+    const out = join(bin, 'locks.txt');
+    const fakeGit = join(bin, 'git');
+    writeFileSync(fakeGit, '#!/bin/sh\nprintf %s "${GIT_OPTIONAL_LOCKS-unset}" > "$MICA_GIT_LOCKS_OUT"\n');
+    chmodSync(fakeGit, 0o755);
+    const previousPath = process.env.PATH;
+    const previousOut = process.env.MICA_GIT_LOCKS_OUT;
+    process.env.PATH = `${bin}:${previousPath ?? ''}`;
+    process.env.MICA_GIT_LOCKS_OUT = out;
+    try {
+      gitText(['status', '--porcelain']);
+      expect(readFileSync(out, 'utf-8')).toBe('0');
+
+      // 对照：同一个假 git，不经 gitText 调用时拿不到这个变量。
+      const ambient = { ...process.env };
+      delete ambient.GIT_OPTIONAL_LOCKS;
+      execFileSync('git', ['status', '--porcelain'], { env: ambient });
+      expect(readFileSync(out, 'utf-8')).toBe('unset');
+    } finally {
+      process.env.PATH = previousPath;
+      if (previousOut === undefined) delete process.env.MICA_GIT_LOCKS_OUT;
+      else process.env.MICA_GIT_LOCKS_OUT = previousOut;
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 });
