@@ -20,7 +20,11 @@ export type TitleRequestResult = {
   usage?: { promptTokens?: number; completionTokens?: number };
 };
 
-const DEFAULT_TIMEOUT_MS = 20_000;
+/**
+ * 起标题的模型常是 reasoning 模型：实测同一份 prompt 耗时 5~14s，且 reasoning token
+ * 占输出的绝大部分。20s 的上限会让「模型慢一点」直接表现成「插件坏了」。
+ */
+const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TITLE_CHARS = 60;
 /** 模型返回的「标题：xxx」「Title: xxx」这类前缀，剥掉。 */
 const TITLE_PREFIX_PATTERN = /^\s*(?:标题|会话标题|title|session title)\s*[:：]\s*/i;
@@ -56,9 +60,24 @@ export async function requestSessionTitle(
     systemPrompt: config.prompt,
   });
 
-  const raw = await withTimeout(client.query(transcript), options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options.signal);
-  const usage = client.lastUsage as { promptTokens?: number; completionTokens?: number } | undefined;
-  return { title: sanitizeTitle(raw), usage };
+  // 超时必须真的 cancel 请求：只 reject 的话，这个请求会继续跑到模型把 reasoning 吐完，
+  // 白烧 token 还拖慢下一轮。
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  else options.signal?.addEventListener('abort', forwardAbort, { once: true });
+
+  try {
+    const raw = await withTimeout(
+      client.query(transcript, { signal: controller.signal }),
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      controller,
+    );
+    const usage = client.lastUsage as { promptTokens?: number; completionTokens?: number } | undefined;
+    return { title: sanitizeTitle(raw), usage };
+  } finally {
+    options.signal?.removeEventListener('abort', forwardAbort);
+  }
 }
 
 /**
@@ -86,24 +105,19 @@ export function sanitizeTitle(raw: unknown): string {
   return stripped.length > MAX_TITLE_CHARS ? stripped.slice(0, MAX_TITLE_CHARS - 1).trimEnd() + '…' : stripped;
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
-  if (signal?.aborted) throw new Error('aborted');
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, controller: AbortController): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`起标题超时（${timeoutMs}ms）`)), timeoutMs);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new Error('aborted'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`起标题超时（${timeoutMs}ms）`));
+    }, timeoutMs);
     promise.then(
       (value) => {
         clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
         resolve(value);
       },
       (error) => {
         clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
         reject(error);
       },
     );

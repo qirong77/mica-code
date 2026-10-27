@@ -177,8 +177,9 @@ export default function setup(ctx: PluginContext): void {
           const current = states.get(info.id);
           if (current) states.set(info.id, { ...current, lastRequestText: latestUserText });
         } catch (error) {
-          ctx.logger.warn('session-rename:failed', { sessionId: info.id, error: errorMessage(error) });
-          ctx.health.report({ level: 'error', message: `上次自动改名失败：${errorMessage(error)}` });
+          const message = errorMessage(error);
+          ctx.logger.warn('session-rename:failed', { sessionId: info.id, reason: failureReason(message), error: message });
+          ctx.health.report({ level: 'error', message: `上次自动改名失败：${message}` });
         } finally {
           const current = states.get(info.id);
           if (current) states.set(info.id, { ...current, running: false });
@@ -310,4 +311,11 @@ function describeConfig(config: TitleRequestConfig): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** 失败分类：排查时先看 reason，不用逐句读错误文本。 */
+function failureReason(message: string): 'timeout' | 'aborted' | 'request-failed' {
+  if (message.includes('超时')) return 'timeout';
+  if (message === 'aborted' || /abort/i.test(message)) return 'aborted';
+  return 'request-failed';
 }

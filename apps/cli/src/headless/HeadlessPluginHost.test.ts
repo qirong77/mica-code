@@ -38,6 +38,9 @@ function mockAgent(overrides: Record<string, unknown> = {}): AgentRuntime {
 function mockSessionController(saveSpy: ReturnType<typeof vi.fn>): SessionController {
   return {
     getCurrentSessionId: () => 'sess-headless',
+    // 官方插件会在 turn:before 里读展示标题（session-rename），桩缺了它整条 hook 会抛错。
+    getCurrentDisplayTitle: () => 'headless test session',
+    getCurrentTitleSource: () => 'derived',
     saveCurrent: saveSpy,
     refreshFromStore: () => null,
     startNewSession: () => {},

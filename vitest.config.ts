@@ -93,9 +93,9 @@ export default defineConfig({
           include: PROCESS_TESTS,
           exclude: ['**/node_modules/**', '**/dist/**', 'temp/**'],
           fileParallelism: false,
-          // 4 个并发的真实 TUI 在开发机上会把 /btw 的 mock 请求饿到 90s 预算之外；
-          // 2 个仍能把 flows 文件压到几十秒，且不再偶发。
-          maxConcurrency: 2,
+          // 4 个并发的真实 TUI 会把 /btw 的 mock 请求饿到 90s 预算之外（实测约 1/3 概率），
+          // 3 个是这台机器上的稳定上限：再快的那 20s 会换成偶发失败。
+          maxConcurrency: 3,
           // PTY 用例内部的 wait 预算就是 LONG_TIMEOUT = 20s，外层不能比它更小。
           testTimeout: 30_000,
           hookTimeout: 30_000,
