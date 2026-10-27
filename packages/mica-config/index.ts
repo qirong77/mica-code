@@ -1,6 +1,5 @@
 import {
   CONFIG_PATH,
-  EFFORT_OPTIONS,
   PROVIDER_PROTOCOLS,
   readConfig,
   getConfig,
@@ -13,9 +12,7 @@ import {
   normalizeModelEffort,
   registerModelRuleResolver,
   registerModelRules,
-  resolveModelRequestPatch,
-  resolveChatCompletionsEffortParams,
-  resolveResponsesReasoningParams,
+  resolveEffortParams,
   readCapabilityDefaults,
   updateCapabilityDefaults,
 } from './config.js';
@@ -34,7 +31,6 @@ import {
 
 export const micaConfig = {
   path: CONFIG_PATH,
-  effortOptions: EFFORT_OPTIONS,
   providerProtocols: PROVIDER_PROTOCOLS,
   /** 从磁盘读取配置文件；缺失时会先写入默认配置。 */
   read: readConfig,
@@ -58,12 +54,8 @@ export const micaConfig = {
   registerModelRules,
   /** 注册异步模型规则解析器。 */
   registerModelRuleResolver,
-  /** 解析模型在指定协议下的请求参数。 */
-  resolveModelRequestPatch,
-  /** 把统一 effort 转换为 Chat Completions 请求参数。 */
-  resolveChatCompletionsEffortParams,
-  /** 把统一 effort 转换为 Responses 请求参数。 */
-  resolveResponsesReasoningParams,
+  /** 把 effort 解析成指定协议、指定模型真正要发送的请求参数。 */
+  resolveEffortParams,
   /** 新会话默认能力（config.json 的 capabilityDefaults）。 */
   readCapabilityDefaults,
   /** 保存新会话默认能力；不改动已有会话。 */
@@ -98,16 +90,15 @@ export {
   providerSupportsModel,
   registerModelRuleResolver,
   registerModelRules,
-  resolveModelRequestPatch,
-  resolveChatCompletionsEffortParams,
-  resolveResponsesReasoningParams,
+  resolveEffortParams,
 } from './config.js';
+export type { EffortParamsRequest } from './config.js';
 export { readCapabilityDefaults, updateCapabilityDefaults } from './config.js';
 export { readRuntimeEnvConfig, runtimeEnv } from './runtimeEnv.js';
 export type { RuntimeEnvConfig, RuntimeEnvSource } from './runtimeEnv.js';
 export type {
   EffortOption,
-  EffortMap,
+  KnownEffortLevel,
   ModelRule,
   ModelEffortRule,
   ModelRequestPatch,
@@ -117,7 +108,7 @@ export type {
   PersistedMicaConfig,
   ProviderDefinition,
 } from './config.js';
-export { isEffortOption, isProviderProtocol } from './types.js';
+export { isEffortLevelName, isProviderProtocol } from './types.js';
 export {
   MICA_STORAGE_PATH,
   appendInputHistory,

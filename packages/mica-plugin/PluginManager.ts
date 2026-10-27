@@ -118,7 +118,10 @@ export class PluginManager {
         ctx.prompt = { section: (section) => promptRegistry.add(plugin.id, section) };
       }
       if (agentRegistry) {
-        ctx.agent = { onIterationRewrite: (handler) => agentRegistry.onIterationRewrite(plugin.id, handler) };
+        ctx.agent = {
+          mode: agentRegistry.mode,
+          onIterationRewrite: (handler) => agentRegistry.onIterationRewrite(plugin.id, handler),
+        };
       }
       if (subagentsFor) ctx.subagents = subagentsFor(plugin.id);
 

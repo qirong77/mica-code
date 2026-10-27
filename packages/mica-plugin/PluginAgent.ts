@@ -64,5 +64,7 @@ export type PluginIterationRewriter = (
  * 与 `promptSections` 同一套处理方式，插件无法注册到别人的名下。
  */
 export type PluginAgentRegistry = {
+  /** 宿主形态，原样交给 `ctx.agent.mode`。 */
+  mode: 'session' | 'one-shot';
   onIterationRewrite(pluginId: string, handler: PluginIterationRewriter): Disposable;
 };

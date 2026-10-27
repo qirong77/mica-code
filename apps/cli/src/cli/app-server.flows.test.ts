@@ -432,6 +432,7 @@ function makeHome(tag: string): string {
             api_base: currentMock().baseUrl,
             api_key: 'test-key',
             models: ['mock-chat'],
+            effortLevels: ['low', 'medium', 'high'],
           },
         ],
       },
@@ -460,6 +461,7 @@ function makeHomeWithSlowMcp(tag: string): string {
             api_base: currentMock().baseUrl,
             api_key: 'test-key',
             models: ['mock-chat'],
+            effortLevels: ['low', 'medium', 'high'],
           },
         ],
         mcpServers: {

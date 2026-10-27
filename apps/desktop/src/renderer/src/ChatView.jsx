@@ -163,13 +163,20 @@ function levelFor(value, thresholds) {
   return level
 }
 
-const EFFORT_OPTIONS = [
-  { value: 'none', detail: '不发送推理参数' },
-  { value: 'low', detail: '轻量推理' },
-  { value: 'medium', detail: '默认推理' },
-  { value: 'high', detail: '深度推理' },
-  { value: 'xhigh', detail: '最强推理' }
-]
+/**
+ * 已知档位名的说明文案。可选档位不来自这里，而来自模型自己声明的集合（`mica models --json`
+ * 的 `efforts`）：`max`、`minimal` 这类名字是模型真实使用的档位，不做换算。
+ */
+const EFFORT_LABELS = {
+  none: '不请求推理',
+  minimal: '最少推理',
+  low: '轻量推理',
+  medium: '默认推理',
+  high: '深度推理',
+  xhigh: '超强推理',
+  max: '最强推理',
+  on: '开启推理'
+}
 
 function copyText(text) {
   if (!text) return Promise.resolve()
@@ -4361,6 +4368,20 @@ export function ChatView({
               map[item.id] = { protocol: item.protocol, efforts: item.efforts || [] }
             modelProtocolsRef.current = { map, currentProtocol: result.currentProtocol }
           }
+          if (kind === 'variant' && result?.ok) {
+            // 条目存在但 efforts 为空 = 模型本身没有推理强度可选。这时不能再回落到
+            // 全部五档：界面看起来切了档，实际一条参数都发不出去。
+            const activeModel = overridesRef.current.get(nodeId)?.model || meta?.model || ''
+            const entry = (result.models || []).find((item) => {
+              if (!activeModel) return false
+              return item.id === activeModel || item.id.endsWith(`/${activeModel}`)
+            })
+            if (entry && Array.isArray(entry.efforts) && entry.efforts.length === 0) {
+              setPicker(null)
+              appendNotice('当前模型不提供推理强度选项')
+              return
+            }
+          }
           setPicker((current) => {
             if (current?.kind !== kind) return current
             if (!result?.ok)
@@ -4371,15 +4392,16 @@ export function ChatView({
                 if (!activeModel) return false
                 return item.id === activeModel || item.id.endsWith(`/${activeModel}`)
               })
-              const efforts = entry?.efforts?.length
-                ? entry.efforts
-                : EFFORT_OPTIONS.map((option) => option.value)
-              const effortSet = new Set(efforts)
-              const options = EFFORT_OPTIONS.filter((option) => effortSet.has(option.value))
+              // 选项就是模型自己声明的档位，原样展示（`max` 不显示成 `xhigh`）；
+              // 已知名字补一句说明，未知名字只显示原名。
+              const options = (entry?.efforts || []).map((level) => ({
+                value: level,
+                detail: EFFORT_LABELS[level] || ''
+              }))
               return {
                 ...current,
                 loading: false,
-                options: options.length ? options : EFFORT_OPTIONS
+                options
               }
             }
             const options =

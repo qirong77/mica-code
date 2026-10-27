@@ -17,7 +17,7 @@
 - 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
 - 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。
-- 模型请求重写：`ctx.agent.onIterationRewrite()` 在两次模型请求之间改写要发送的历史（自动压缩用它）。
+- 模型请求重写：`ctx.agent.onIterationRewrite()` 在两次模型请求之间改写要发送的历史（自动压缩用它）；`ctx.agent.mode` 回答宿主形态（`session` / `one-shot`），一次性运行里不该跑会额外花钱的后台策略。
 - 委派子代理：`ctx.subagents` 注册子代理类型、前台/后台跑一个、管后台任务。机制（建子代理、用量记账、路径租约、完成回注）由宿主提供，插件只决定有哪些类型与工具形状。
 - 内置 skill：`ctx.skills.register()` 把随包分发的 skill 注册进运行期 skill 表。注册进来的 skill 与
   磁盘扫描出来的完全同权（system prompt 索引、`skill` 工具、会话能力开关）；磁盘上的同名 skill 优先，

@@ -77,7 +77,7 @@ export const CLI_USAGE = [
   '  --session <id>                    Resume a Mica session',
   '  --dir, --cd <path>                Set the task working directory',
   '  --model <provider/model>          Override provider and model',
-  '  --variant <effort>                none|low|medium|high|xhigh',
+  '  --variant <effort>                Model-declared level (see `models --json` efforts)',
   '  --role <name>                     Override the agent role',
   '  --max-turns <count>               Limit model round trips',
   '  --thinking                        Include reasoning events in JSON output',
@@ -105,7 +105,7 @@ export const CLI_USAGE = [
   '',
   'Commit options:',
   '  --dir <path>                      Set the working directory',
-  '  --session <id>                    Record the commit message request in this session\'s usage',
+  "  --session <id>                    Record the commit message request in this session's usage",
 ].join('\n');
 
 export function parseCliArgs(argv: string[]): CliInvocation {
@@ -368,7 +368,8 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       const key = separator === -1 ? override : override.slice(0, separator);
       const value = separator === -1 ? '' : override.slice(separator + 1);
       if (key === 'model_reasoning_effort' && value) {
-        variant = mapCodexEffort(value);
+        // 原样透传：`minimal` / `max` 是模型自己的档位名，折算成别的值会改变用户的选择。
+        variant = value;
       } else if (key === 'model_reasoning_summary' && value) {
         thinking = value !== 'none';
       }
@@ -456,17 +457,6 @@ function takeValue(
   const value = argv[index];
   if (!value) return { ok: false, error: cliError(`Missing value for ${name}.`) };
   return { ok: true, value };
-}
-
-/**
- * Codex's `model_reasoning_effort` enum is wider than Mica's: `minimal` and
- * `max` have no Mica counterpart, so collapse them onto the nearest Mica
- * effort. Every other Codex value already matches a Mica effort name.
- */
-const CODEX_EFFORT_ALIASES: Record<string, string> = { minimal: 'low', max: 'xhigh' };
-
-function mapCodexEffort(value: string): string {
-  return CODEX_EFFORT_ALIASES[value] ?? value;
 }
 
 function cliError(message: string): { mode: 'error'; message: string } {

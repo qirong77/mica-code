@@ -70,7 +70,9 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     if (!prompt) throw new Error('Headless exec requires a non-empty prompt');
     if (options.cwd) process.chdir(resolve(options.cwd));
 
-    const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant);
+    const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant, {
+      strictEffort: true,
+    });
     let initialModel = runtimeOverride.model ?? micaConfig.get().model;
     if (!initialModel) {
       const config = micaConfig.get();

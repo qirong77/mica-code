@@ -238,6 +238,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
         id: sessionController.getCurrentSessionId(),
         title: sessionController.getCurrentDisplayTitle(),
         titleSource: sessionController.getCurrentTitleSource(),
+        cwd: process.cwd(),
       }),
       messages: () => agent.toConversationMessages(),
       rename: (title, renameOptions) =>
@@ -254,6 +255,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     }),
     promptSections: agent.promptSections,
     agentRegistry: {
+      mode: options.oneShot ? 'one-shot' : 'session',
       onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
     },
     subagentsFor: (pluginId) => pluginSubagents.forPlugin(pluginId),

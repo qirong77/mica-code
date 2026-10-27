@@ -12,12 +12,7 @@ import type {
   ResponseUsage,
 } from 'openai/resources/responses/responses.js';
 import { micaTools } from '@packages/mica-tools/index.js';
-import {
-  resolveResponsesReasoningParams,
-  resolveModelRequestPatch,
-  type EffortOption,
-  type ProviderDefinition,
-} from '@packages/mica-config/index.js';
+import { resolveEffortParams, type EffortOption, type ProviderDefinition } from '@packages/mica-config/index.js';
 import {
   BaseAgent,
   throwIfAgentMaxTurnsReached,
@@ -419,11 +414,14 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
   }
 
   private get reasoningParams(): Record<string, unknown> {
-    if (!this.provider || !this.effort) return {};
-    const patch =
-      resolveModelRequestPatch(this.model, this.effort, 'openai_responses') ??
-      resolveResponsesReasoningParams(this.provider, this.effort);
-    return withResponsesReasoningSummary(patch);
+    return withResponsesReasoningSummary(
+      resolveEffortParams({
+        provider: this.provider,
+        model: this.model,
+        effort: this.effort,
+        protocol: 'openai_responses',
+      }),
+    );
   }
 
   private recordUsage(

@@ -39,6 +39,13 @@ export type PluginSessionInfo = {
   title: string;
   /** `manual` 表示用户手动改过标题，插件的自动改名不应覆盖它。 */
   titleSource?: 'derived' | 'auto' | 'manual';
+  /**
+   * 会话的工作目录（绝对路径）。
+   *
+   * 会话切目录（`/cd`、resume 到会话自己的目录）会改变它，所以插件应当每次读，
+   * 不要缓存成进程启动时的 cwd。按工作区归档的插件（记忆、统计）靠它区分项目。
+   */
+  cwd?: string;
 };
 
 export type PluginSessionRenameOptions = {
@@ -123,6 +130,8 @@ export type PluginContext = {
    * 一次性运行不提供——那边任何改变成本或输出的策略都会污染基准测试。
    */
   agent?: {
+    /** 宿主形态，与 `PluginIterationRewriter.mode` 同义：`one-shot` 没有下一轮。 */
+    readonly mode: 'session' | 'one-shot';
     onIterationRewrite(handler: PluginIterationRewriter): Disposable;
   };
   /**

@@ -35,12 +35,34 @@ export function showEffortSelector(
   services: CommandRuntimeServices,
   options: { onAfterSelect?: (effort: string) => void | Promise<void> } = {},
 ): void {
-  const effortOptions =
-    agent.config.provider.supportsEffort === false ? ['none'] : micaConfig.getModelEffortOptions(agent.config.model);
+  if (agent.config.provider.supportsEffort === false) {
+    services.showNotice(
+      `${agent.config.provider.name ?? agent.config.provider.id} does not use reasoning effort; nothing to select`,
+      undefined,
+      { command: '/effort', status: 'info' },
+    );
+    return;
+  }
+  const effortOptions = micaConfig.getModelEffortOptions(
+    agent.config.model,
+    agent.config.provider.protocol,
+    agent.config.provider,
+  );
+  if (effortOptions.length === 0) {
+    // 该协议下没有可用档位（非推理模型、只有 budget，或 models.dev 没收录）：不弹空列表，直接说明。
+    // 未收录的模型可以自己在 provider 上声明档位，所以提示里点出这个入口。
+    services.showNotice(
+      `${agent.config.model} declares no reasoning effort levels for ${agent.config.provider.protocol}; ` +
+        'add providers[].effortLevels in config.json if this endpoint accepts them',
+      undefined,
+      { command: '/effort', status: 'info' },
+    );
+    return;
+  }
   showSelectCommand({
     id: 'select-effort',
     title: 'select effort',
-    current: agent.config.provider.supportsEffort === false ? 'none' : agent.config.effort,
+    current: agent.config.effort,
     options: effortOptions.map((effort) => ({
       name: effort,
       label: effort,

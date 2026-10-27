@@ -1,0 +1,128 @@
+{
+  "id": "memory",
+  "name": "Memory",
+  "version": "1.0.0",
+  "description": "跨会话记忆：用户档案、环境经验与项目约定三块，注入系统提示并通过 memory 工具维护；可选用宿主子代理或独立接口在每轮结束后自动整理。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "required": false,
+  "priority": 150,
+  "requires": ["commands", "hooks", "prompt", "session", "settings", "tools"],
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "启用记忆",
+      "type": "switch",
+      "default": "true",
+      "description": "关闭后不注册工具、不注入提示词，已有记忆文件保留在磁盘上。"
+    },
+    {
+      "key": "autoCapture",
+      "label": "自动整理",
+      "type": "switch",
+      "default": "false",
+      "description": "每轮成功结束后把对话收敛成记忆操作。会调用模型，默认关闭。"
+    },
+    {
+      "key": "curatorMode",
+      "label": "整理方式",
+      "type": "select",
+      "default": "subagent",
+      "options": [
+        { "value": "subagent", "label": "宿主子代理（当前模型）" },
+        { "value": "direct", "label": "独立接口（下面四项）" }
+      ],
+      "description": "子代理复用当前主对话的模型配置；独立接口可以换成更便宜的模型或另一家服务。"
+    },
+    {
+      "key": "curatorBaseUrl",
+      "label": "整理接口地址",
+      "type": "text",
+      "format": "url",
+      "placeholder": "https://api.openai.com/v1",
+      "description": "独立接口模式必填。写到 /v1 即可，插件按协议补 /chat/completions 或 /responses。"
+    },
+    {
+      "key": "curatorApiKey",
+      "label": "整理接口 Key",
+      "type": "password",
+      "description": "只用于后台整理，不参与主对话请求。可以填 ${MY_CURATOR_KEY} 从环境变量读，避免把长期凭据写进设置文件。"
+    },
+    {
+      "key": "curatorProtocol",
+      "label": "整理接口协议",
+      "type": "select",
+      "default": "openai_chat_completions",
+      "options": [
+        { "value": "openai_chat_completions", "label": "Chat Completions" },
+        { "value": "openai_responses", "label": "Responses" }
+      ]
+    },
+    {
+      "key": "curatorModel",
+      "label": "整理模型",
+      "type": "text",
+      "placeholder": "gpt-4.1-mini",
+      "description": "独立接口模式必填。整理是一次性提取任务，用小模型通常就够。"
+    },
+    {
+      "key": "minIntervalMinutes",
+      "label": "整理间隔",
+      "type": "number",
+      "default": "10",
+      "min": 0,
+      "max": 1440,
+      "step": 5,
+      "unit": "分钟",
+      "description": "两次自动整理之间至少间隔多久；0 表示不节流。"
+    },
+    {
+      "key": "maxMessages",
+      "label": "整理输入条数",
+      "type": "number",
+      "default": "30",
+      "min": 2,
+      "max": 100,
+      "step": 5,
+      "unit": "条",
+      "description": "每次整理最多回看最近多少条用户 / 助手消息。"
+    },
+    {
+      "key": "userCharLimit",
+      "label": "用户档案预算",
+      "type": "number",
+      "default": "1375",
+      "min": 200,
+      "max": 20000,
+      "step": 25,
+      "unit": "字符",
+      "description": "user 记忆的字符上限，约 500 tokens。"
+    },
+    {
+      "key": "memoryCharLimit",
+      "label": "记忆预算",
+      "type": "number",
+      "default": "2200",
+      "min": 200,
+      "max": 20000,
+      "step": 25,
+      "unit": "字符",
+      "description": "memory 记忆的字符上限，约 800 tokens。"
+    },
+    {
+      "key": "projectCharLimit",
+      "label": "项目记忆预算",
+      "type": "number",
+      "default": "2200",
+      "min": 200,
+      "max": 20000,
+      "step": 25,
+      "unit": "字符",
+      "description": "当前工作区记忆的字符上限。"
+    }
+  ],
+  "mica": {
+    "apiVersion": 1
+  }
+}

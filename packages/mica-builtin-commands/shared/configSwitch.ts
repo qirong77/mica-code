@@ -1,5 +1,6 @@
 import { formatTokenCount } from '@packages/mica-common/format.js';
 import {
+  isEffortLevelName,
   micaConfig,
   type EffortOption,
   type IMicaConfig,
@@ -89,8 +90,9 @@ function normalizeConfigSwitchSelection(config: IMicaConfig): {
   if (!provider) return { config, adjustments: [] };
 
   const model = config.model || provider.models?.[0] || '';
-  const selectedEffort = isEffortOption(config.effort) ? config.effort : 'medium';
-  const effort = provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, selectedEffort);
+  const selectedEffort = isEffortLevelName(config.effort) ? config.effort : 'medium';
+  const effort =
+    provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, selectedEffort, provider);
   const contextWindowSize = micaConfig.getModelRule(model).contextSize;
   const adjustments: ConfigSwitchAdjustment[] = [];
 
@@ -131,7 +133,7 @@ function configForAgent(config: IMicaConfig, agent: CommandAgent): IMicaConfig {
   const effort =
     provider.supportsEffort === false
       ? 'none'
-      : isEffortOption(agent.config.effort)
+      : isEffortLevelName(agent.config.effort)
         ? agent.config.effort
         : config.effort;
 
@@ -166,8 +168,4 @@ function formatConfigSwitchAdjustments(adjustments: ConfigSwitchAdjustment[]): s
     return `context ${formatTokenCount(adjustment.from, { roundedThousands: true })} -> ${formatTokenCount(adjustment.to, { roundedThousands: true })}`;
   });
   return `Adjusted defaults: ${parts.join(', ')}`;
-}
-
-function isEffortOption(value: string): value is EffortOption {
-  return micaConfig.effortOptions.includes(value as EffortOption);
 }

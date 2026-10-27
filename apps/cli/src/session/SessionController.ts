@@ -534,7 +534,8 @@ export function applySessionConfig(snapshot: PersistedRuntimeSnapshot): Persiste
         : provider.id === config.provider && providerSupportsModel(provider, config.model)
           ? config.model
           : (provider.models?.[0] ?? snapshot.model);
-    const effort = provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort);
+    const effort =
+      provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort, provider);
     resolvedSnapshot = {
       ...snapshot,
       providerId: provider.id,

@@ -8,7 +8,7 @@ import {
 } from '@packages/mica-agent/index.js';
 import type { Disposable } from '@packages/mica-common/index.js';
 import { APP_NAME } from '@packages/mica-config/brand.js';
-import { isEffortOption, type EffortOption } from '@packages/mica-config/index.js';
+import { isEffortLevelName, micaConfig, type EffortOption } from '@packages/mica-config/index.js';
 import { findPathConflict, micaTools, normalizeOwnedPaths, parseOwnedPaths } from '@packages/mica-tools/index.js';
 import type {
   PluginSubagentApi,
@@ -134,7 +134,12 @@ export function createPluginSubagentHost(
       const owner = resolveOwner(request.caller);
       const createClientOptions = owner.createClientOptions.bind(owner);
       const inheritedClientOptions = createClientOptions();
-      const effort = resolveSubagentEffort(request.effort, definition.effort, inheritedClientOptions);
+      const effort = resolveSubagentEffort(
+        request.effort,
+        definition.effort,
+        definition.model ?? inheritedClientOptions.model,
+        inheritedClientOptions,
+      );
       const contextMode = resolveContextMode(request.contextMode, definition);
       const contextFiles = request.contextFiles ?? [];
       const ownedPaths = resolveOwnedPaths(request.ownedPaths ?? [], definition);
@@ -572,9 +577,10 @@ function resolveContextMode(
 function resolveSubagentEffort(
   requested: string | undefined,
   effortEnabled: boolean | undefined,
+  model: string,
   parentOptions: ModelClientOptions,
 ): EffortOption {
-  if (requested !== undefined && !isEffortOption(requested)) {
+  if (requested !== undefined && !isEffortLevelName(requested)) {
     throw new Error(`Invalid subagent effort: ${String(requested)}.`);
   }
   if (effortEnabled === false) {
@@ -584,7 +590,9 @@ function resolveSubagentEffort(
     return 'none';
   }
   if (parentOptions.provider.supportsEffort === false) return 'none';
-  return requested ?? parentOptions.effort ?? 'none';
+  // 档位是模型自己的集合：子代理可能换了模型，父代理的档位名不一定在它这儿存在，
+  // 传下去之前先按子代理的模型收敛，避免把 `high` 之类的名字发给只认 `max` 的服务。
+  return micaConfig.normalizeModelEffort(model, requested ?? parentOptions.effort ?? 'none', parentOptions.provider);
 }
 
 function resolveOwnedPaths(value: string[], definition: PluginSubagentType): string[] {

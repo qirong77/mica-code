@@ -335,6 +335,8 @@ function makeHome(tag: string): string {
             api_base: currentMock().baseUrl,
             api_key: 'test-key',
             models: ['mock-chat'],
+            // mock 模型不在 models.dev 里，档位由服务端所有者声明。
+            effortLevels: ['none', 'low', 'medium', 'high'],
           },
         ],
       },
@@ -510,7 +512,8 @@ suite('mica exec real-user flows (mock provider)', () => {
         '--dangerously-bypass-approvals-and-sandbox',
         '--skip-git-repo-check',
         '--model',
-        'openai/mock-chat',
+        // 档位来自模型自己的元数据，所以这里用一个 models.dev 收录、确实声明了 high 的模型名。
+        'openai/gpt-5.4',
         '--json',
         '--enable',
         'unified_exec',
@@ -528,7 +531,7 @@ suite('mica exec real-user flows (mock provider)', () => {
 
     expect(result.code).toBe(0);
     expect(mock!.state.requests.length).toBeGreaterThan(0);
-    expect(mock!.state.requests[0].model).toBe('mock-chat');
+    expect(mock!.state.requests[0].model).toBe('gpt-5.4');
     expect(mock!.state.requests[0].reasoning?.effort).toBe('high');
     expect(parseJsonl(result.stdout).some((e) => e.type === 'turn.completed')).toBe(true);
 

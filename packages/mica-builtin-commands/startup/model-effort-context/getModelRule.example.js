@@ -2,16 +2,19 @@ import { getModelRule } from './getModelRule.js';
 
 // Expected values cross-checked with vendor documentation and the matching
 // first-party entries in https://models.dev/api.json.
+//
+// 档位名就是厂商自己的写法，不做归一化：Anthropic 的最高档是 `max`（不是 `xhigh`），
+// 只有开关的模型是 `none`/`on`，只声明 budget_tokens 的模型没有 effort 档位。
 const models = {
   'gpt-5.4': { contextSize: 1050000, efforts: ['none', 'low', 'medium', 'high', 'xhigh'] },
-  'claude-opus-4-6': { contextSize: 1000000, efforts: ['low', 'medium', 'high', 'xhigh'] },
-  'claude-sonnet-4-6': { contextSize: 1000000, efforts: ['low', 'medium', 'high', 'xhigh'] },
+  'claude-opus-4-6': { contextSize: 1000000, efforts: ['low', 'medium', 'high', 'max'] },
+  'claude-sonnet-4-6': { contextSize: 1000000, efforts: ['low', 'medium', 'high', 'max'] },
   'gemini-3.1-pro-preview': { contextSize: 1048576, efforts: ['low', 'medium', 'high'] },
-  'gemini-2.5-pro': { contextSize: 1048576, efforts: ['high'] },
+  'gemini-2.5-pro': { contextSize: 1048576, efforts: [] },
   'grok-4.5': { contextSize: 500000, efforts: ['low', 'medium', 'high'] },
-  'deepseek-reasoner': { contextSize: 1000000, efforts: ['high'] },
+  'deepseek-reasoner': { contextSize: 1000000, efforts: [] },
   'deepseek-chat': { contextSize: 1000000, efforts: [] },
-  'kimi-k2.6': { contextSize: 262144, efforts: ['none', 'high'] },
+  'kimi-k2.6': { contextSize: 262144, efforts: ['none', 'on'] },
 };
 
 let consistent = true;

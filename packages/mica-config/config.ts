@@ -8,7 +8,7 @@ import {
 import {
   CONFIG_PATH,
   firstProviderModel,
-  isEffortOption,
+  isEffortLevelName,
   isNonEmptyString,
   providerSupportsModel,
   type EffortOption,
@@ -18,20 +18,20 @@ import {
 } from './types.js';
 import { readPersistedConfig, writePersistedConfig } from './persistence.js';
 import { loadMissingProviderModelsFromStore, loadProviderModelsFromStore } from './providerModels.js';
-import { getModelRule } from './getModelRule.js';
+import { getModelRule, normalizeModelEffort } from './getModelRule.js';
 import { isEnvOnlyProvider, synthesizeEnvProviders } from './envProvider.js';
 import { normalizeCapabilitySelection, type CapabilitySelection } from '@packages/mica-common/capabilities.js';
 
 export {
   CONFIG_PATH,
   DEFAULT_MODEL_CONTEXT_SIZE,
-  EFFORT_OPTIONS,
+  KNOWN_EFFORT_LEVELS,
   PROVIDER_PROTOCOLS,
   providerSupportsModel,
 } from './types.js';
 export type {
-  EffortMap,
   EffortOption,
+  KnownEffortLevel,
   IMicaConfig,
   ModelEffortRule,
   ModelRequestPatch,
@@ -46,11 +46,12 @@ export {
   getModelEffortOptions,
   getModelRule,
   normalizeModelEffort,
+  orderEffortLevels,
   registerModelRuleResolver,
   registerModelRules,
-  resolveModelRequestPatch,
 } from './getModelRule.js';
-export { resolveChatCompletionsEffortParams, resolveResponsesReasoningParams } from './effort.js';
+export { resolveEffortParams } from './effort.js';
+export type { EffortParamsRequest } from './effort.js';
 
 const configAtom = atom<IMicaConfig>(readConfig());
 
@@ -162,7 +163,12 @@ function mergeRuntimeConfig(config: PersistedMicaConfig, lastUsed: LastUsedConfi
   const providerId = resolveLastUsedProvider(providers, lastUsed.provider);
   const provider = providers.find((item) => item.id === providerId);
   const model = resolveLastUsedModel(provider, lastUsed.model, lastUsed.providerPreferences?.[providerId]?.model);
-  const effort = resolveLastUsedEffort(provider, lastUsed.effort, lastUsed.providerPreferences?.[providerId]?.effort);
+  const effort = resolveLastUsedEffort(
+    provider,
+    model,
+    lastUsed.effort,
+    lastUsed.providerPreferences?.[providerId]?.effort,
+  );
   return {
     ...config,
     providers,
@@ -191,12 +197,19 @@ function resolveLastUsedModel(
 
 function resolveLastUsedEffort(
   provider: ProviderDefinition | undefined,
+  model: string,
   effort: unknown,
   preferenceEffort?: unknown,
 ): EffortOption {
-  const selectedPreference = isEffortOption(preferenceEffort) ? preferenceEffort : undefined;
-  const selected = selectedPreference ?? (isEffortOption(effort) ? effort : 'medium');
-  return provider?.supportsEffort === false ? 'none' : selected;
+  if (provider?.supportsEffort === false) return 'none';
+  const selected = isEffortLevelName(preferenceEffort)
+    ? preferenceEffort
+    : isEffortLevelName(effort)
+      ? effort
+      : 'medium';
+  // 存下来的值可能来自别的模型（换过模型、档位被厂商改名）：统一按当前模型收敛，
+  // 配置里不会留下当前模型发不出去的档位名。
+  return normalizeModelEffort(model, selected);
 }
 
 /** 新会话默认能力：config.json 的 `capabilityDefaults`，缺失即全部启用。 */

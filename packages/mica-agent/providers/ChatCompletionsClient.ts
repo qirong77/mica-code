@@ -1,12 +1,7 @@
 import { OpenAI } from 'openai';
 import { randomUUID } from 'node:crypto';
 import { micaTools } from '@packages/mica-tools/index.js';
-import {
-  resolveChatCompletionsEffortParams,
-  resolveModelRequestPatch,
-  type EffortOption,
-  type ProviderDefinition,
-} from '@packages/mica-config/index.js';
+import { resolveEffortParams, type EffortOption, type ProviderDefinition } from '@packages/mica-config/index.js';
 import {
   BaseAgent,
   throwIfAgentMaxTurnsReached,
@@ -373,11 +368,12 @@ export class ChatCompletionsClient extends BaseAgent<
   }
 
   private get reasoningParams(): Record<string, unknown> {
-    const effort = this.effort ?? 'none';
-    return (
-      resolveModelRequestPatch(this.model, effort, 'openai_chat_completions') ??
-      resolveChatCompletionsEffortParams(this.provider, effort)
-    );
+    return resolveEffortParams({
+      provider: this.provider,
+      model: this.model,
+      effort: this.effort,
+      protocol: 'openai_chat_completions',
+    });
   }
 
   private recordUsage(

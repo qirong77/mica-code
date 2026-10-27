@@ -9,15 +9,21 @@ const previousMicaHome = process.env.MICA_HOME;
 const tempHome = mkdtempSync(join(tmpdir(), 'mica-config-switch-'));
 let micaUi: typeof import('@packages/mica-ui/index.js').micaUi;
 let micaConfig: typeof import('@packages/mica-config/index.js').micaConfig;
+let disposeModelEffortContext: () => void;
 
 beforeAll(async () => {
   process.env.HOME = tempHome;
   process.env.MICA_HOME = tempHome;
   ({ micaUi } = await import('@packages/mica-ui/index.js'));
   ({ micaConfig } = await import('@packages/mica-config/index.js'));
+  // 档位来自模型元数据，测试也要按真实形态注册解析器。
+  const { default: setupModelEffortContext } =
+    await import('@packages/mica-builtin-commands/startup/model-effort-context/index.js');
+  disposeModelEffortContext = setupModelEffortContext();
 });
 
 afterAll(() => {
+  disposeModelEffortContext?.();
   if (previousHome === undefined) {
     delete process.env.HOME;
   } else {
@@ -91,7 +97,7 @@ describe('config switch commands', () => {
 
       panel?.onInput?.('', { upArrow: true });
       panel?.onInput?.('', { return: true });
-      await waitForSelectCommand();
+      await waitForPanel('select-effort');
 
       expect(micaUi.panels.pluginUIs.get()[0]?.id).toBe('select-effort');
       expect(micaConfig.get().model).toBe('gpt-5.5');
@@ -165,7 +171,7 @@ describe('config switch commands', () => {
 
       panel?.onInput?.('', { downArrow: true });
       panel?.onInput?.('', { return: true });
-      await waitForSelectCommand();
+      await waitFor(() => micaConfig.get().effort === selectedEffort, 'effort switch');
 
       expect(micaConfig.get().effort).toBe(selectedEffort);
       expect(services.showNotice).toHaveBeenCalledTimes(1);
@@ -230,6 +236,7 @@ describe('config switch commands', () => {
       protocol: 'openai_chat_completions' as const,
       models: ['deepseek-v4-pro'],
     };
+    const deepseekContext = micaConfig.getModelRule('deepseek-v4-pro').contextSize;
     micaConfig.update(() => ({
       provider: openai.id,
       model: 'gpt-5.4',
@@ -253,28 +260,30 @@ describe('config switch commands', () => {
 
       expect(panel?.onTextChange?.('DeepSeek')).toBe(true);
       panel?.onInput?.('', { return: true });
-      await waitForSelectCommand();
+      await waitForPanel('select-effort');
 
       const activePanel = micaUi.panels.pluginUIs.get()[0];
       expect(activePanel?.id).toBe('select-effort');
+      // deepseek-v4-pro 只声明 none/high/max，旧的 low 被收敛到它自己的默认档位 high。
       expect(micaConfig.get()).toMatchObject({
         provider: 'deepseek',
         model: 'deepseek-v4-pro',
-        effort: 'low',
-        contextWindowSize: 1000000,
+        effort: 'high',
+        contextWindowSize: deepseekContext,
       });
 
       activePanel?.onInput?.('', { return: true });
-      await waitForSelectCommand();
+      await waitFor(() => vi.mocked(services.showNotice).mock.calls.length > 0, 'effort notice');
 
       expect(micaConfig.get()).toMatchObject({
         provider: 'deepseek',
         model: 'deepseek-v4-pro',
-        effort: 'low',
-        contextWindowSize: 1000000,
+        effort: 'high',
+        contextWindowSize: deepseekContext,
       });
+      // 换模型会同时带出上下文窗口调整（gpt-5.4 与 deepseek-v4-pro 的真实上下文不同）。
       expect(services.showNotice).toHaveBeenLastCalledWith(
-        'Model: DeepSeek / deepseek-v4-pro; Prompt cache may be invalidated. Consider /compact',
+        expect.stringContaining('Model: DeepSeek / deepseek-v4-pro;'),
         undefined,
         {
           command: '/model',
@@ -306,11 +315,13 @@ describe('config switch commands', () => {
       protocol: 'openai_chat_completions' as const,
       models: ['gpt-5.5', 'gpt-5.4'],
     };
+    // 用模型元数据里的真实上下文；写死 1M 会和真实规则不一致，触发一次「已调整默认值」提示。
+    const deepseekContext = micaConfig.getModelRule('deepseek-v4-pro').contextSize;
     micaConfig.update(() => ({
       provider: deepseek.id,
       model: 'deepseek-v4-pro',
       effort: 'low',
-      contextWindowSize: 1000000,
+      contextWindowSize: deepseekContext,
       providers: [deepseek, openai],
     }));
     const services = makeServices();
@@ -331,7 +342,7 @@ describe('config switch commands', () => {
 
       panel?.onInput?.('', { downArrow: true });
       panel?.onInput?.('', { return: true });
-      await waitForSelectCommand();
+      await waitFor(() => micaConfig.get().model === 'gpt-5.5', 'model switch');
 
       expect(micaConfig.get().provider).toBe('openai');
       expect(micaConfig.get().model).toBe('gpt-5.5');
@@ -412,8 +423,34 @@ function makeAgent(
   };
 }
 
-function waitForSelectCommand(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+function currentPanelId(): string | undefined {
+  return micaUi.panels.pluginUIs.get()[0]?.id;
+}
+
+/**
+ * 档位与模型元数据都是真实规则的形态，切换会真的落盘；固定等一个 tick 只是碰运气，
+ * 这里按预期结果轮询，超时才算失败。
+ */
+function waitFor(condition: () => boolean, description: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + 3000;
+    const tick = () => {
+      if (condition()) {
+        resolve();
+        return;
+      }
+      if (Date.now() > deadline) {
+        reject(new Error(`Timed out waiting for ${description}`));
+        return;
+      }
+      setTimeout(tick, 5);
+    };
+    tick();
+  });
+}
+
+function waitForPanel(id: string): Promise<void> {
+  return waitFor(() => currentPanelId() === id, `${id} panel`);
 }
 
 function makeSession(): CommandSessionController {

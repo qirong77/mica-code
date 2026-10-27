@@ -34,6 +34,10 @@ function mockAgent(overrides: Record<string, unknown> = {}): AgentRuntime {
     abort: () => {},
     preserveAbortedTurn: () => true,
     promptSections: new micaPlugin.PluginPromptSections(),
+    // 官方插件在渲染提示词段落时读自己的会话状态（session-notes 就这么做）。
+    getPluginState: () => undefined,
+    setPluginState: () => {},
+    clearPluginState: () => {},
     ...overrides,
   } as unknown as AgentRuntime;
 }
@@ -101,7 +105,11 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
       expect(micaSkills.getLoaded().some((skill) => skill.name === 'computer-use')).toBe(false);
       await headless.host.dispose();
 
-      const desktop = await mount(vi.fn(() => true), {}, { desktopHost: true });
+      const desktop = await mount(
+        vi.fn(() => true),
+        {},
+        { desktopHost: true },
+      );
       const skill = micaSkills.getLoaded().find((entry) => entry.name === 'computer-use');
       expect(skill).toBeDefined();
       // 落盘路径必须是真目录，正文里的占位符要换成它
@@ -124,6 +132,15 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
     // session_info / session_compact were removed: the model must not see them again.
     expect(names).not.toContain('session_info');
     await host.dispose();
+  });
+
+  it('loads the memory plugin: `memory` tool plus a session-scoped prompt section', async () => {
+    const { agent, host } = await mount();
+    expect(toolNames()).toContain('memory');
+    // 段落按会话读盘并冻结；headless 宿主与 TUI 共用同一份能力面。
+    expect(agent.promptSections.render()).toContain('## 持久记忆');
+    await host.dispose();
+    expect(agent.promptSections.render()).not.toContain('## 持久记忆');
   });
 
   it('injects the session-autonomy guidance into the system prompt (system-prompt:build hook)', async () => {
@@ -170,7 +187,6 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
     expect(host.getConversationMessages()?.some((message) => message.role === 'notice')).toBe(true);
     await host.dispose();
   });
-
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {

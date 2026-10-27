@@ -119,7 +119,8 @@ export class Application {
       // 会话身份（一条会话可以被 fork、可以有多个 agent），所以由这一层回答。
       configureIterationRewrite({
         mode: 'session',
-        resolveSessionId: (target) => agentSessions.findByAgent(target)?.sessionController.getCurrentSessionId() ?? null,
+        resolveSessionId: (target) =>
+          agentSessions.findByAgent(target)?.sessionController.getCurrentSessionId() ?? null,
         onError: reportPluginIterationError,
       });
 
@@ -161,6 +162,7 @@ export class Application {
               id: session.id,
               title: session.titleOverride ?? session.sessionController.getCurrentDisplayTitle(),
               titleSource: session.sessionController.getCurrentTitleSource(),
+              cwd: process.cwd(),
             };
           },
           messages: (owner) => resolvePluginSession(agentSessions, owner)?.agent.toConversationMessages() ?? [],
@@ -187,6 +189,7 @@ export class Application {
         }),
         promptSections: agent.promptSections,
         agentRegistry: {
+          mode: 'session',
           onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
         },
         subagentsFor: (pluginId) => pluginSubagents.forPlugin(pluginId),
@@ -416,10 +419,7 @@ function createPluginPaths() {
  * 把 `turn:after` 事件里的 owner 解析成具体会话：不给 owner 就是当前会话。
  * 插件是按「产生这个 turn 的 agent」操作的，多 agent 场景下不能默认取当前那一条。
  */
-function resolvePluginSession(
-  sessions: TerminalAgentSessionManager,
-  owner: unknown,
-): TerminalAgentSession | undefined {
+function resolvePluginSession(sessions: TerminalAgentSessionManager, owner: unknown): TerminalAgentSession | undefined {
   if (owner) {
     const matched = sessions.findByAgent(owner as AgentRuntime);
     if (matched) return matched;

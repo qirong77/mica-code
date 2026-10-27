@@ -1,4 +1,10 @@
-import { isEffortOption, micaConfig, type EffortOption, type IMicaConfig } from '@packages/mica-config/index.js';
+import {
+  isEffortLevelName,
+  micaConfig,
+  type EffortOption,
+  type IMicaConfig,
+  type ProviderDefinition,
+} from '@packages/mica-config/index.js';
 import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 
 export async function listRuntimeModelIds(): Promise<string[]> {
@@ -37,21 +43,25 @@ export function resolveRuntimeConfigOverride(
   config: IMicaConfig,
   modelID?: string,
   variant?: string,
+  options: { strictEffort?: boolean } = {},
 ): AgentRuntimeConfigOverride {
-  const effort = resolveEffort(variant);
-  if (!modelID) return effort ? { effort } : {};
-
   const matchedProvider = [...config.providers]
-    .sort((a, b) => b.id.length - a.id.length)
-    .find((provider) => modelID.startsWith(`${provider.id}/`));
+    .sort((left, right) => right.id.length - left.id.length)
+    .find((provider) => modelID?.startsWith(`${provider.id}/`));
+  const model = !modelID ? config.model : matchedProvider ? modelID.slice(matchedProvider.id.length + 1) : modelID;
+  if (modelID && matchedProvider && !model) {
+    throw new Error(`Missing model name after provider prefix: ${modelID}`);
+  }
+  const provider = matchedProvider ?? config.providers.find((item) => item.id === config.provider);
+  const effort = resolveEffort(variant, model, provider, options.strictEffort === true);
+
+  if (!modelID) return effort ? { effort } : {};
   if (!matchedProvider) {
     return {
       model: modelID,
       ...(effort ? { effort } : {}),
     };
   }
-  const model = modelID.slice(matchedProvider.id.length + 1);
-  if (!model) throw new Error(`Missing model name after provider prefix: ${modelID}`);
   return {
     providerId: matchedProvider.id,
     model,
@@ -59,10 +69,27 @@ export function resolveRuntimeConfigOverride(
   };
 }
 
-function resolveEffort(variant?: string): EffortOption | undefined {
+function resolveEffort(
+  variant: string | undefined,
+  model: string | undefined,
+  provider: ProviderDefinition | undefined,
+  strict: boolean,
+): EffortOption | undefined {
   if (!variant) return undefined;
-  if (!isEffortOption(variant)) {
-    throw new Error(`Unsupported --variant value: ${variant}. Use none, low, medium, high, or xhigh.`);
+  // 档位名由模型自己声明（`max`、`minimal` …），不换算也不落别名；这里只挡不是档位名的输入。
+  // 命令行显式指定时再按该模型的真实档位校验，避免把写错的档位静默换成别的值。
+  if (!isEffortLevelName(variant)) {
+    throw new Error(`Unsupported --variant value: ${variant}. Use one of the levels that model declares.`);
+  }
+  if (!strict || !model) return variant;
+  const levels = micaConfig.getModelEffortOptions(model, provider?.protocol, provider);
+  if (levels.length === 0) {
+    throw new Error(
+      `Model ${model} exposes no reasoning effort levels; add providers[].effortLevels if the endpoint accepts them.`,
+    );
+  }
+  if (!levels.includes(variant)) {
+    throw new Error(`Unsupported --variant ${variant} for ${model}; available levels: ${levels.join(', ')}.`);
   }
   return variant;
 }

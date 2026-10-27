@@ -115,7 +115,7 @@ mica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修
             <code>--variant &lt;effort&gt;</code>
           </td>
           <td>
-            选择 <code>none / low / medium / high / xhigh</code> 中模型支持的值。
+            选择模型自己声明的档位（取值见 <code>mica models --json</code> 的 <code>efforts</code>）。档位名不做换算，模型不声明档位时不发推理参数。
           </td>
         </tr>
         <tr>

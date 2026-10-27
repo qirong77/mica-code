@@ -42,7 +42,9 @@ export function readAgentRuntimeConfig(override: AgentRuntimeConfigOverride = {}
     provider: normalizedProvider,
     model,
     effort:
-      normalizedProvider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, requestedEffort),
+      normalizedProvider.supportsEffort === false
+        ? 'none'
+        : micaConfig.normalizeModelEffort(model, requestedEffort, normalizedProvider),
   };
 }
 
@@ -60,7 +62,10 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
       return {
         provider: normalizeProviderForModel(fallback, model),
         model,
-        effort: fallback.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
+        effort:
+          fallback.supportsEffort === false
+            ? 'none'
+            : micaConfig.normalizeModelEffort(model, snapshot.effort, fallback),
       };
     }
     throw new Error(`Provider not found: ${snapshot.providerId || '(empty)'}`);
@@ -80,7 +85,10 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
       return {
         provider: normalizeProviderForModel(fallback, model),
         model,
-        effort: fallback.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
+        effort:
+          fallback.supportsEffort === false
+            ? 'none'
+            : micaConfig.normalizeModelEffort(model, snapshot.effort, fallback),
       };
     }
     throw new Error(`Session protocol mismatch: ${snapshot.protocol} -> ${provider.protocol}`);
@@ -91,7 +99,9 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
     provider: normalizedProvider,
     model,
     effort:
-      normalizedProvider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, snapshot.effort),
+      normalizedProvider.supportsEffort === false
+        ? 'none'
+        : micaConfig.normalizeModelEffort(model, snapshot.effort, normalizedProvider),
   };
 }
 

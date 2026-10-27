@@ -1,6 +1,6 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from '../services.js';
-import { micaConfig, type EffortOption } from '@packages/mica-config/index.js';
+import { isEffortLevelName, micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from '../shared/selectCommand.js';
 import type { CommandRuntimeServices, CommandSessionController } from '../services.js';
 import { applyConfigSwitchUpdate, reportConfigSwitchError, syncConfigFromAgent } from '../shared/configSwitch.js';
@@ -102,12 +102,14 @@ async function applyModelSelection(
         const storedEffort = providerChanged
           ? micaConfig.storage.providerPreference.read(selection.providerId).effort
           : undefined;
-        const preferredEffort = isEffortOption(storedEffort) ? storedEffort : undefined;
+        // 换到别的模型后档位集合会变（`xhigh` 和 `max` 是两个模型各自的真实档位名），
+        // 存下来的旧档位只能按新模型收敛，否则会带着一个发不出去的值。
+        const preferredEffort = isEffortLevelName(storedEffort) ? storedEffort : undefined;
         return {
           ...config,
           provider: selection.providerId,
           model: selection.model,
-          effort: preferredEffort ?? config.effort,
+          effort: micaConfig.normalizeModelEffort(selection.model, preferredEffort ?? config.effort, provider),
         };
       },
       successMessage: (config) => {
@@ -133,8 +135,4 @@ function decodeModelSelection(value: string): ModelSelection {
     throw new Error('Invalid model selection');
   }
   return { providerId: parsed[0], model: parsed[1] };
-}
-
-function isEffortOption(value: string | undefined): value is EffortOption {
-  return micaConfig.effortOptions.includes(value as EffortOption);
 }

@@ -40,7 +40,9 @@ function parseSessionMeta(raw) {
   if (!snapshot || typeof snapshot !== 'object') return null
   if (!Array.isArray(snapshot.messages) || !Array.isArray(snapshot.conversationMessages))
     return null
-  if (!['none', 'low', 'medium', 'high', 'xhigh'].includes(snapshot.effort)) return null
+  // 档位名随模型而变，白名单会把 `max` / `minimal` 这类真实档位整条会话丢掉。
+  if (typeof snapshot.effort !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(snapshot.effort))
+    return null
   const updatedAtMs = Date.parse(raw.updatedAt)
   if (!Number.isFinite(updatedAtMs)) return null
   const createdAtMs = Date.parse(raw.createdAt)

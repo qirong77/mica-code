@@ -1,7 +1,14 @@
 import { resolve } from 'path'
 
 const DEFAULT_PROTOCOL = 'openai_chat_completions'
-const EFFORT_OPTIONS = new Set(['none', 'low', 'medium', 'high', 'xhigh'])
+
+/**
+ * 档位名随模型而变（`max`、`minimal`、`on` …），这里只做语法检查，不做白名单：
+ * 具体某档是否被当前模型支持由 agent 侧 normalizeModelEffort 收敛。
+ */
+function isEffortLevelName(value) {
+  return typeof value === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(value)
+}
 
 function nonEmptyString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : ''
@@ -38,7 +45,7 @@ export function resolveDefaultChatMeta(config, storage, cwd) {
   const effort =
     provider?.supportsEffort === false
       ? 'none'
-      : EFFORT_OPTIONS.has(requestedEffort)
+      : isEffortLevelName(requestedEffort)
         ? requestedEffort
         : 'medium'
 

@@ -77,6 +77,27 @@ describe('startup config validation', () => {
     expect(() => assertValidConfig(result, '/tmp/config.json')).toThrow('配置文件有问题：/tmp/config.json');
   });
 
+  it('rejects provider effort levels that are not level names', () => {
+    const result = validateConfig({
+      providers: [
+        {
+          id: 'local',
+          api_base: 'https://example.com',
+          protocol: DEFAULT_PROVIDER_PROTOCOL,
+          api_key: 'x',
+          effortLevels: ['low', 'HIGH!'],
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'provider_effort_levels_invalid', path: 'providers[0].effortLevels' }),
+      ]),
+    );
+  });
+
   it('validates MCP server shapes while keeping a missing provider API key non-blocking', () => {
     const result = validateConfig({
       providers: [{ id: 'local', api_base: 'https://example.com' }],
@@ -97,58 +118,137 @@ describe('startup config validation', () => {
 });
 
 describe('model configuration', () => {
-  it('resolves fixed effort request parameters', () => {
-    const deepseek = baseConfig().providers[0]!;
-
-    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'xhigh')).toEqual({
-      reasoning_effort: 'xhigh',
-    });
-    expect(configApi.resolveChatCompletionsEffortParams(deepseek, 'none')).toEqual({});
-  });
-
-  it('uses the fixed rule for every model', () => {
-    const krill = baseConfig().providers[1]!;
-    const openai = {
-      ...krill,
-      id: 'openai',
-      api_base: 'https://api.openai.com/v1',
-    };
-
+  it('keeps a rule without effort levels for models without metadata', () => {
+    // 没有元数据就不知道它接受哪些档位名，不替它猜一份「标准五档」。
     expect(configApi.getModelRule('test-model').contextSize).toBe(1000000);
-
-    expect(configApi.resolveChatCompletionsEffortParams(openai, 'xhigh')).toEqual({
-      reasoning_effort: 'xhigh',
-    });
-    expect(configApi.resolveResponsesReasoningParams(openai, 'xhigh')).toEqual({
-      reasoning: { effort: 'xhigh' },
-    });
+    expect(configApi.getModelEffortOptions('test-model')).toEqual([]);
+    // 也不知道它不支持这个值，所以原样保留，不把用户存的档位改成 none
+    expect(configApi.normalizeModelEffort('test-model', 'xhigh')).toBe('xhigh');
   });
 
-  it('uses OpenAI request params with mapped model effort values', () => {
-    const zai = {
-      ...baseConfig().providers[1]!,
-      id: 'zai',
-      api_base: 'https://api.z.ai/api/paas/v4',
-    };
-    const kimi = {
-      ...baseConfig().providers[1]!,
-      id: 'openrouter',
-      api_base: 'https://openrouter.ai/api/v1',
-    };
-    const disabledProvider = {
-      ...baseConfig().providers[1]!,
-      id: 'moonshot',
-      api_base: 'https://api.moonshot.cn/v1',
-      supportsEffort: false,
-    };
+  it('sends nothing for unknown models instead of guessing a parameter', () => {
+    const deepseek = baseConfig().providers[0]!;
+    const responses = { ...deepseek, protocol: 'openai_responses' as const };
 
-    expect(configApi.resolveChatCompletionsEffortParams(zai, 'xhigh')).toEqual({
-      reasoning_effort: 'xhigh',
+    expect(
+      configApi.resolveEffortParams({
+        provider: deepseek,
+        model: 'test-model',
+        effort: 'xhigh',
+        protocol: 'openai_chat_completions',
+      }),
+    ).toEqual({});
+    expect(
+      configApi.resolveEffortParams({
+        provider: responses,
+        model: 'test-model',
+        effort: 'high',
+        protocol: 'openai_responses',
+      }),
+    ).toEqual({});
+  });
+
+  it('uses the levels a provider declares for models models.dev does not know', () => {
+    const declared = {
+      ...baseConfig().providers[0]!,
+      id: 'self-hosted',
+      effortLevels: ['low', 'medium', 'high'] as const,
+    };
+    const provider = { ...declared, effortLevels: [...declared.effortLevels] };
+    const responses = { ...provider, protocol: 'openai_responses' as const };
+
+    expect(configApi.getModelEffortOptions('private-model', 'openai_chat_completions', provider)).toEqual([
+      'low',
+      'medium',
+      'high',
+    ]);
+    // 声明里的取值原样发出，两种协议各自用自己那份字段。
+    expect(
+      configApi.resolveEffortParams({
+        provider,
+        model: 'private-model',
+        effort: 'high',
+        protocol: 'openai_chat_completions',
+      }),
+    ).toEqual({ reasoning_effort: 'high' });
+    expect(
+      configApi.resolveEffortParams({
+        provider: responses,
+        model: 'private-model',
+        effort: 'high',
+        protocol: 'openai_responses',
+      }),
+    ).toEqual({ reasoning: { effort: 'high' } });
+    // 未声明的档位依旧不发；也没被悄悄换成声明里的别的值。
+    expect(
+      configApi.resolveEffortParams({
+        provider,
+        model: 'private-model',
+        effort: 'xhigh',
+        protocol: 'openai_chat_completions',
+      }),
+    ).toEqual({});
+    // 收敛到声明里的中间档，而不是声明里的最高档。
+    expect(configApi.normalizeModelEffort('private-model', 'xhigh', provider)).toBe('medium');
+  });
+
+  it('never sends effort parameters when the provider declares none', () => {
+    const disabled = { ...baseConfig().providers[1]!, id: 'moonshot', supportsEffort: false };
+    const unregister = configApi.registerModelRules({
+      'declared-model': {
+        contextSize: 200000,
+        defaultEffort: 'high',
+        efforts: {
+          high: { openai_chat_completions: { reasoning_effort: 'high' } },
+        },
+      },
     });
-    expect(configApi.resolveChatCompletionsEffortParams(kimi, 'high')).toEqual({
-      reasoning_effort: 'high',
+    try {
+      expect(
+        configApi.resolveEffortParams({
+          provider: disabled,
+          model: 'declared-model',
+          effort: 'high',
+          protocol: 'openai_chat_completions',
+        }),
+      ).toEqual({});
+    } finally {
+      unregister();
+    }
+  });
+
+  it('does not guess a parameter for a declared model without that level', () => {
+    const unregister = configApi.registerModelRules({
+      'toggle-only-model': {
+        contextSize: 200000,
+        defaultEffort: 'high',
+        efforts: {
+          none: { openai_chat_completions: { thinking: { type: 'disabled' } } },
+          high: { openai_chat_completions: { thinking: { type: 'enabled' } } },
+        },
+      },
     });
-    expect(configApi.resolveChatCompletionsEffortParams(disabledProvider, 'high')).toEqual({});
+    const provider = baseConfig().providers[0]!;
+    try {
+      expect(
+        configApi.resolveEffortParams({
+          provider,
+          model: 'toggle-only-model',
+          effort: 'high',
+          protocol: 'openai_responses',
+        }),
+      ).toEqual({});
+      expect(
+        configApi.resolveEffortParams({
+          provider,
+          model: 'toggle-only-model',
+          effort: 'xhigh',
+          protocol: 'openai_chat_completions',
+        }),
+      ).toEqual({});
+    } finally {
+      unregister();
+    }
   });
 });
 

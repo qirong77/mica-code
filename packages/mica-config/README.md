@@ -17,7 +17,8 @@
 - 读取本地状态：`micaConfig.storage.read()`。
 - 读取共享输入框历史：`micaConfig.inputHistory.read()`。
 - 追加共享输入框历史：`micaConfig.inputHistory.append(text)`。
-- 模型规则注册与解析：`micaConfig.ensureModelRule`、`registerModelRules`、`registerModelRuleResolver`、`resolveModelRequestPatch`。
+- 模型规则注册与解析：`micaConfig.ensureModelRule`、`registerModelRules`、`registerModelRuleResolver`。
+- effort 档位与 wire 参数的唯一入口：`getModelEffortOptions` / `normalizeModelEffort` / `resolveEffortParams`。
 - 读写新会话默认能力：`readCapabilityDefaults` / `updateCapabilityDefaults`，对应 `config.json` 的 `capabilityDefaults`，配置页 Capabilities 页签用它。
 
 ## 使用入口
@@ -46,15 +47,22 @@ micaConfig.update((current) => ({
 
 ## 模型规则
 
-模型规则默认由 models.dev 元数据生成（磁盘缓存 24h → 内置种子 → 在线刷新），查不到时回退 1M contextSize 与五档 effort。effort 固定支持 `none/low/medium/high/xhigh` 五档并直接映射到 OpenAI 请求参数。
+模型规则默认由 models.dev 元数据生成（磁盘缓存 24h → 内置种子 → 在线刷新），查不到时回退 1M contextSize，并且**不带任何 effort 档位**。
 
-- Provider 可通过设置 `supportsEffort: false` 禁用 effort 选择。
+- 档位名就是模型声明的那一组真实取值，不做归一化也不落别名：Anthropic 系的最高档是 `max`，OpenAI 系的 `minimal` 就是 `minimal`，`gpt-6.1` 同时声明 `xhigh` 与 `max` 时两者都能选。可选档位由 `getModelEffortOptions(model, protocol?, provider?)` 从规则里读，UI 不再有硬编码的五档。
+- 规则里的每个档位同时带 `openai_chat_completions` 与 `openai_responses` 两份补丁——models.dev 只说明「模型支持哪些档位」，不说明用户会用哪种协议，所以补丁不能按猜出来的协议只存一份。传了 `protocol` 时，该协议下没有等价参数的档位会被过滤掉（例如只有 toggle 的模型在 responses 下没有可控档位）。
+- 只有开关的模型（models.dev `toggle`）档位是 `none` / `on`；同时声明了 toggle 与 effort 取值的模型多一个 `none`，用来发 `thinking: disabled`。
+- 只声明 `budget_tokens`、或根本没声明 reasoning 的模型没有档位：选什么都不发参数，`/effort` 与 desktop 选择器都会直说「该模型不提供推理强度选项」。
+- 模型未知时默认没有档位，不发任何推理参数；猜出来的档位会被不支持该参数的端点直接 400。自建网关的模型名 models.dev 不认识，可以在 provider 上用 `effortLevels` 声明服务端真实接受的档位名（如 `["low","medium","high"]`），这些名字原样发出；有 models.dev 元数据时以模型自己的档位为准，`effortLevels` 不参与。
+- `--variant` 是显式选择：档位名不合法、模型没声明该档位、或模型完全没有档位（也没声明 `effortLevels`）都会直接报错并列出可用档位，不会被静默改成别的值。
+- Provider 可通过设置 `supportsEffort: false` 禁用 effort：它在 `resolveEffortParams` 里最先判断，模型补丁不能绕过它。
+- 请求侧只有一个入口 `resolveEffortParams({ provider, model, effort, protocol })`，两个 provider client 都调它，不再各自拼参数。
 
 ## 目录说明
 
 - `config.ts`：静态配置读写、运行时配置合成、provider 模型拉取和类型定义。
 - `micaStorage.ts`：最后使用配置、共享输入框历史、用户偏好和使用记录等本地状态读写。
-- `effort.ts`：Effort 选项、映射与请求参数转换。
+- `effort.ts`：effort 档位名到 wire 参数的唯一转换入口。
 - `getModelRule.ts`：注册与解析模型规则（effort 档位、contextSize、请求参数补丁）。
 - `persistence.ts`：配置文件 IO。
 - `providerModels.ts`：模型列表加载与运行时缓存管理。

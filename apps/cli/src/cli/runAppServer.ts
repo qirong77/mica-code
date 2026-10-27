@@ -301,7 +301,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     process.exit(code);
   };
 
-  const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant);
+  const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant, {
+    strictEffort: true,
+  });
 
   try {
     let initialModel = runtimeOverride.model ?? micaConfig.get().model;

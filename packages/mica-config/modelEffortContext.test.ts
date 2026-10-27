@@ -7,7 +7,8 @@ import {
   __resetModelsCacheForTests,
   getModelRule as getModelsDevRule,
 } from '@packages/mica-builtin-commands/startup/model-effort-context/getModelRule.js';
-import { ensureModelRule, getModelEffortOptions, getModelRule, resolveModelRequestPatch } from './getModelRule.js';
+import { resolveEffortParams } from './effort.js';
+import { ensureModelRule, getModelEffortOptions, getModelRule } from './getModelRule.js';
 
 let dispose: (() => void) | undefined;
 let tempMicaHome: string;
@@ -51,6 +52,22 @@ describe('model-effort-context', () => {
     expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
   });
 
+  it('answers synchronous reads from the bundled snapshot before any async resolve', () => {
+    dispose = setupModelEffortContext();
+
+    // 没有 await 过 ensureModelRule：请求参数与 /effort 候选也必须拿到模型真实档位，
+    // 否则启动后第一轮会按「未知模型」处理，一条推理参数都不发。
+    expect(getModelEffortOptions('claude-sonnet-4-6', 'openai_chat_completions')).toContain('max');
+    expect(
+      resolveEffortParams({
+        provider: { id: 'gateway', api_base: 'http://127.0.0.1:1', protocol: 'openai_chat_completions' },
+        model: 'claude-sonnet-4-6',
+        effort: 'max',
+        protocol: 'openai_chat_completions',
+      }),
+    ).toEqual({ reasoning_effort: 'max' });
+  });
+
   it('loads context sizes and dynamic effort options on demand', async () => {
     await mockModelsDev();
     dispose = setupModelEffortContext();
@@ -62,25 +79,51 @@ describe('model-effort-context', () => {
     expect(getModelRule('grok-4.5').contextSize).toBe(500000);
     expect(getModelRule('deepseek-v4-pro').supportsVision).toBe(false);
     expect(getModelRule('gpt-5.5').supportsVision).toBe(true);
-    expect(getModelEffortOptions('deepseek-v4-pro')).toEqual(['none', 'high', 'xhigh']);
+    // 档位就是模型自己声明的名字：`max` 不会被折算成 `xhigh`，toggle 额外补一个 `none`。
+    expect(getModelEffortOptions('deepseek-v4-pro')).toEqual(['none', 'high', 'max']);
     expect(getModelEffortOptions('grok-4.5')).toEqual(['low', 'medium', 'high']);
+    // 只有开关的模型是两个状态，不是一份编造出来的档位表。
+    expect(getModelEffortOptions('kimi-k2.6')).toEqual(['none', 'on']);
   });
 
-  it('resolves protocol-specific request patches without provider matching', async () => {
+  it('resolves wire params for both protocols from the model metadata alone', async () => {
     await mockModelsDev();
     dispose = setupModelEffortContext();
     await Promise.all(['kimi-k2.6', 'deepseek-v4-pro', 'gpt-5.5'].map((model) => ensureModelRule(model)));
 
-    expect(resolveModelRequestPatch('kimi-k2.6', 'none', 'openai_chat_completions')).toEqual({
-      thinking: { type: 'disabled' },
-    });
-    expect(resolveModelRequestPatch('deepseek-v4-pro', 'xhigh', 'openai_chat_completions')).toEqual({
+    const params = (model: string, effort: string, protocol: 'openai_chat_completions' | 'openai_responses') =>
+      resolveEffortParams({
+        provider: { id: 'gateway', api_base: 'http://127.0.0.1:1', protocol },
+        model,
+        effort,
+        protocol,
+      });
+
+    // 只有 toggle 的模型：chat 用开关，responses 没有等价参数，交给服务端默认值。
+    expect(params('kimi-k2.6', 'none', 'openai_chat_completions')).toEqual({ thinking: { type: 'disabled' } });
+    expect(params('kimi-k2.6', 'none', 'openai_responses')).toEqual({});
+    expect(params('kimi-k2.6', 'on', 'openai_chat_completions')).toEqual({ thinking: { type: 'enabled' } });
+
+    // 声明了 max 的模型：发出去的就是 max，不做别名换算。
+    expect(params('deepseek-v4-pro', 'max', 'openai_chat_completions')).toEqual({
       thinking: { type: 'enabled' },
       reasoning_effort: 'max',
     });
-    expect(resolveModelRequestPatch('gpt-5.5', 'medium', 'openai_responses')).toEqual({
-      reasoning: { effort: 'medium' },
-    });
+    expect(params('deepseek-v4-pro', 'max', 'openai_responses')).toEqual({ reasoning: { effort: 'max' } });
+    // `none` 是 toggle 补出来的档位（模型没声明这个 effort 取值）：只发开关，不发 effort 字段，
+    // Responses 协议没有等价参数就什么都不发。
+    expect(params('deepseek-v4-pro', 'none', 'openai_chat_completions')).toEqual({ thinking: { type: 'disabled' } });
+    expect(params('deepseek-v4-pro', 'none', 'openai_responses')).toEqual({});
+    expect(getModelEffortOptions('deepseek-v4-pro', 'openai_responses')).toEqual(['high', 'max']);
+
+    // 两种协议各拿自己的补丁，与 models.dev 里 provider 的协议无关。
+    expect(params('gpt-5.5', 'medium', 'openai_responses')).toEqual({ reasoning: { effort: 'medium' } });
+    expect(params('gpt-5.5', 'medium', 'openai_chat_completions')).toEqual({ reasoning_effort: 'medium' });
+    expect(params('gpt-5.5', 'none', 'openai_chat_completions')).toEqual({ reasoning_effort: 'none' });
+
+    // 模型没声明的档位不发参数，而不是把别的模型的档位名硬塞过去。
+    expect(params('deepseek-v4-pro', 'low', 'openai_chat_completions')).toEqual({});
+    expect(params('deepseek-v4-pro', 'xhigh', 'openai_chat_completions')).toEqual({});
   });
   it('uses a models.dev disk cache younger than 24 hours without requesting the API', async () => {
     await writeModelsCache(Date.now() - 60 * 60 * 1000, {
@@ -173,7 +216,9 @@ describe('model-effort-context', () => {
 
     const rule = await ensureModelRule('brand-new-model-2099');
     expect(rule.contextSize).toBe(1000000);
-    expect(rule.defaultEffort).toBe('medium');
+    // 元数据缺失时不发任何推理参数，默认档位只能是「不请求推理」。
+    expect(rule.defaultEffort).toBe('none');
+    expect(rule.efforts).toEqual({});
     expect(rule.supportsVision).toBe(true);
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('brand-new-model-2099'));
     errorSpy.mockRestore();
@@ -204,11 +249,10 @@ async function mockModelsDev() {
     },
     deepseek: {
       models: {
-        'deepseek-v4-pro': model(
-          1000000,
-          [{ type: 'toggle' }, { type: 'effort', values: ['high', 'max'] }],
-          { input: ['text'], output: ['text'] },
-        ),
+        'deepseek-v4-pro': model(1000000, [{ type: 'toggle' }, { type: 'effort', values: ['high', 'max'] }], {
+          input: ['text'],
+          output: ['text'],
+        }),
       },
     },
     openai: {

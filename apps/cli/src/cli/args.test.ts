@@ -186,9 +186,10 @@ describe('parseCliArgs', () => {
       mode: 'app-server',
       cwd: '/work',
     });
-    expect(
-      parseCliArgs(['app-server', '--listen=stdio://', '--model', 'openai/gpt-5']),
-    ).toMatchObject({ mode: 'app-server', model: 'openai/gpt-5' });
+    expect(parseCliArgs(['app-server', '--listen=stdio://', '--model', 'openai/gpt-5'])).toMatchObject({
+      mode: 'app-server',
+      model: 'openai/gpt-5',
+    });
     expect(parseCliArgs(['app-server', '--stdio'])).toMatchObject({ mode: 'app-server' });
     expect(parseCliArgs(['app-server', '--listen', 'stdio://', '--nope'])).toMatchObject({
       mode: 'error',
@@ -232,12 +233,13 @@ describe('parseCliArgs', () => {
     });
   });
 
-  it('maps codex-only effort values and config overrides onto Mica options', () => {
+  it('passes codex effort values through without renaming them', () => {
+    // `minimal` / `max` 是模型自己的档位名：折算成 low / xhigh 会改变用户选的那一档。
     expect(parseCliArgs(['exec', '-c', 'model_reasoning_effort=minimal', 'hi'])).toMatchObject({
-      variant: 'low',
+      variant: 'minimal',
     });
     expect(parseCliArgs(['exec', '-cmodel_reasoning_effort=max', 'hi'])).toMatchObject({
-      variant: 'xhigh',
+      variant: 'max',
     });
     expect(parseCliArgs(['exec', '-c', 'model_reasoning_summary=auto', 'hi'])).toMatchObject({
       thinking: true,
@@ -245,9 +247,10 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['exec', '-c', 'model_reasoning_summary=none', 'hi'])).toMatchObject({
       thinking: false,
     });
-    expect(
-      parseCliArgs(['exec', '-c', 'sandbox_workspace_write.network_access=true', 'hi']),
-    ).toMatchObject({ mode: 'exec', variant: undefined });
+    expect(parseCliArgs(['exec', '-c', 'sandbox_workspace_write.network_access=true', 'hi'])).toMatchObject({
+      mode: 'exec',
+      variant: undefined,
+    });
     expect(parseCliArgs(['exec', '-c'])).toMatchObject({ mode: 'error' });
   });
 

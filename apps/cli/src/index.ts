@@ -45,7 +45,8 @@ if (invocation.mode === 'models') {
   const { listRuntimeModelIds } = await import('./cli/modelCatalog.js');
   const models = await listRuntimeModelIds();
   if (invocation.json) {
-    const { ensureModelRule, getModelEffortOptions } = await import('@packages/mica-config/index.js');
+    const { ensureModelRule, getModelEffortOptions, micaConfig, isProviderProtocol } =
+      await import('@packages/mica-config/index.js');
     const { default: setupModelEffortContext } =
       await import('@packages/mica-builtin-commands/startup/model-effort-context/index.js');
     const disposeModelEffortContext = setupModelEffortContext();
@@ -53,9 +54,16 @@ if (invocation.mode === 'models') {
       const entries = await Promise.all(
         models.map(async (id) => {
           let efforts: string[] = [];
+          const model = id.split('/').at(-1) ?? id;
+          // 档位集合按「模型 + 用户配置的协议」决定：同一个模型挂在两种协议下，能用的档位不同。
+          const provider = micaConfig
+            .get()
+            .providers.filter((item) => id.startsWith(`${item.id}/`))
+            .sort((left, right) => right.id.length - left.id.length)[0];
+          const protocol = isProviderProtocol(provider?.protocol) ? provider.protocol : undefined;
           try {
-            await ensureModelRule(id.split('/').at(-1) ?? id);
-            efforts = getModelEffortOptions(id.split('/').at(-1) ?? id);
+            await ensureModelRule(model);
+            efforts = getModelEffortOptions(model, protocol, provider);
           } catch {
             // Best-effort: models.dev lookup may be unavailable offline.
           }

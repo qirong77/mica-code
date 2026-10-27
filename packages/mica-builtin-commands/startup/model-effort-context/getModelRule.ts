@@ -3,16 +3,13 @@ import { dirname, resolve } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
-import type { ModelRule, ProviderProtocol } from '@packages/mica-config/types.js';
+import { orderEffortLevels } from '@packages/mica-config/getModelRule.js';
+import type { ModelRule } from '@packages/mica-config/types.js';
 import { modelsDevSeedBase64 } from './seed/models-dev.seed.js';
 
 const MODELS_URL = 'https://models.dev/api.json';
 const CACHE_VERSION = 1;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh'] as const;
-
-type Effort = (typeof EFFORTS)[number];
-
 type ModelMetadata = {
   id?: string;
   limit?: { context?: number };
@@ -79,27 +76,40 @@ export async function getModelRule(modelName = '', signal?: AbortSignal): Promis
   }
 
   const match = selectMatch(matches, requestedName);
+  return buildRule(match, requestedName);
+}
+
+/**
+ * 同步版：只用已经解码好的快照（内存缓存或随包种子）回答。
+ *
+ * 启动后到第一次异步解析完成之间、以及任何同步读（`/effort`、desktop 选择器、
+ * 请求参数拼装）都要能拿到模型真实档位，不能因为还没 `await` 过就退化成「未知模型」。
+ */
+export function getSeedModelRule(modelName = '') {
+  const requestedName = modelName.trim();
+  if (!requestedName) return undefined;
+  const providers = memoryCache?.payload ?? seedEntry.payload;
+  const matches = findMatches(providers, requestedName);
+  if (matches.length === 0) return undefined;
+  try {
+    return buildRule(selectMatch(matches, requestedName), requestedName);
+  } catch {
+    return undefined;
+  }
+}
+
+function buildRule(match: ModelMatch, requestedName: string): ResolvedRule {
   const contextSize = match.model?.limit?.context;
   if (typeof contextSize !== 'number' || !Number.isFinite(contextSize) || contextSize <= 0) {
     throw new Error(`Model has no valid context limit on models.dev: ${requestedName}`);
   }
 
-  const options = Array.isArray(match.model.reasoning_options) ? match.model.reasoning_options : [];
-  const effortOption = options.find((option) => option?.type === 'effort');
-  const hasToggle = options.some((option) => option?.type === 'toggle');
-  const efforts = normalizeEfforts(effortOption?.values, hasToggle, match.model.reasoning);
-  const protocol: ProviderProtocol = match.providerId === 'openai' ? 'openai_responses' : 'openai_chat_completions';
-
+  const effort = resolveEffortMetadata(match.model);
   return {
     contextSize,
-    defaultEffort: chooseDefaultEffort(efforts, protocol),
+    defaultEffort: chooseDefaultEffort(effort.levels),
     supportsVision: modelSupportsVision(match.model),
-    efforts: Object.fromEntries(
-      efforts.map((effort) => [
-        effort,
-        { [protocol]: requestPatch(protocol, effort, hasToggle, Boolean(effortOption)) },
-      ]),
-    ) as ModelRule['efforts'],
+    efforts: buildEfforts(effort),
   };
 }
 
@@ -207,7 +217,8 @@ function parseSeedEntry(encoded: string): CacheEntry {
 function isModelsPayload(value: unknown): value is ModelsPayload {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   return Object.values(value as ModelsPayload).some(
-    (provider) => Boolean(provider) && typeof provider === 'object' && provider.models && typeof provider.models === 'object',
+    (provider) =>
+      Boolean(provider) && typeof provider === 'object' && provider.models && typeof provider.models === 'object',
   );
 }
 
@@ -297,10 +308,12 @@ function inferOwner(modelName: string): string | undefined {
   return undefined;
 }
 
-function normalizeOptionSignature(options: ModelMetadata['reasoning_options']): Array<{ type?: string; values?: string[] }> {
+function normalizeOptionSignature(
+  options: ModelMetadata['reasoning_options'],
+): Array<{ type?: string; values?: string[] }> {
   return (Array.isArray(options) ? options : []).map((option) => ({
     type: option?.type,
-    values: Array.isArray(option?.values) ? option.values.map(normalizeEffortName).sort() : undefined,
+    values: Array.isArray(option?.values) ? option.values.map(String).sort() : undefined,
   }));
 }
 
@@ -316,33 +329,82 @@ function signatureCount(match: ModelMatch, counts: Map<string, number>): number 
   );
 }
 
-function normalizeEfforts(values: unknown, hasToggle: boolean, supportsReasoning: boolean | undefined): Effort[] {
-  const result = (Array.isArray(values) ? values : [])
-    .map(normalizeEffortName)
-    .filter((value): value is Effort => EFFORTS.includes(value as Effort));
-  if (hasToggle && !result.includes('none')) result.unshift('none');
-  if (hasToggle && result.length === 1) result.push('high');
-  if (result.length === 0 && supportsReasoning) result.push('high');
-  return [...new Set(result)].sort((left, right) => EFFORTS.indexOf(left) - EFFORTS.indexOf(right));
-}
+type EffortMetadata = {
+  /** 模型真实可选的档位名，原样保留 models.dev 的写法。 */
+  levels: string[];
+  /** models.dev 明确声明为 effort 取值的档位；`none` 可能只是为了开关补上的。 */
+  declaredLevels: string[];
+  hasEffort: boolean;
+  hasToggle: boolean;
+};
 
-function normalizeEffortName(value: unknown): string {
-  return value === 'max' ? 'xhigh' : String(value);
-}
+/**
+ * models.dev 的 reasoning 元数据 → 这个模型真实的档位集合。
+ *
+ * 档位名一律照抄，不做归一化：`max` 就是 `max`，`minimal` 就是 `minimal`。把它们折算
+ * 成统一的「五档」等于替模型编造别名，发出去的值未必被服务接受，用户选的也不是那一档。
+ *
+ * - 声明了 effort 取值：那些就是档位；
+ * - 同时声明了 toggle：再补一个 `none`（关掉推理），因为开关本来就能关；
+ * - 只有 toggle：这是布尔开关，档位是 `none`（关）与 `on`（开）；
+ * - 只有 `reasoning: true` 没给任何控制参数，或不支持推理：没有档位，不发推理参数。
+ */
+function resolveEffortMetadata(model: ModelMetadata): EffortMetadata {
+  const options = Array.isArray(model.reasoning_options) ? model.reasoning_options : [];
+  const effortOption = options.find((option) => option?.type === 'effort');
+  const declared = (Array.isArray(effortOption?.values) ? effortOption.values : [])
+    .map((value) => String(value).trim())
+    .filter((value) => value.length > 0);
+  const hasToggle = options.some((option) => option?.type === 'toggle');
+  const hasEffort = Boolean(effortOption) && declared.length > 0;
 
-function chooseDefaultEffort(efforts: Effort[], protocol: ProviderProtocol): Effort {
-  if (protocol === 'openai_responses' && efforts.includes('medium')) return 'medium';
-  if (efforts.includes('high')) return 'high';
-  if (efforts.includes('medium')) return 'medium';
-  return efforts.at(-1) ?? 'none';
-}
-
-function requestPatch(protocol: ProviderProtocol, effort: Effort, hasToggle: boolean, hasEffort: boolean): Record<string, unknown> {
-  if (protocol === 'openai_responses') return { reasoning: { effort } };
-  if (hasToggle) {
-    const patch: Record<string, unknown> = { thinking: { type: effort === 'none' ? 'disabled' : 'enabled' } };
-    if (effort !== 'none' && hasEffort) patch.reasoning_effort = effort === 'xhigh' ? 'max' : effort;
-    return patch;
+  if (!hasEffort && !hasToggle) {
+    return { levels: [], declaredLevels: [], hasEffort: false, hasToggle: false };
   }
-  return { reasoning_effort: effort === 'xhigh' ? 'max' : effort };
+
+  if (!hasEffort) return { levels: ['none', 'on'], declaredLevels: [], hasEffort: false, hasToggle: true };
+  const levels = new Set(declared);
+  if (hasToggle) levels.add('none');
+  return { levels: orderEffortLevels(levels), declaredLevels: declared, hasEffort: true, hasToggle };
+}
+
+/**
+ * 每个档位同时为两种协议生成补丁，且只取决于模型自己怎么说。
+ *
+ * 不能按 models.dev 的 providerId 猜协议、把补丁只挂在那一个协议上：用户完全可能把
+ * 同一个模型挂在另一种协议下（例如把 DeepSeek 挂在 `openai_responses`），那样最高档
+ * 就会以错误的字段名发出去，该关掉的 thinking 也关不掉。
+ */
+function buildEfforts(meta: EffortMetadata): ModelRule['efforts'] {
+  const efforts: ModelRule['efforts'] = {};
+  const declared = new Set(meta.declaredLevels);
+  for (const level of meta.levels) {
+    const rule: NonNullable<ModelRule['efforts'][string]> = {};
+    if (declared.has(level)) {
+      rule.openai_responses = { reasoning: { effort: level } };
+      rule.openai_chat_completions = {
+        ...(meta.hasToggle ? { thinking: { type: level === 'none' ? 'disabled' : 'enabled' } } : {}),
+        reasoning_effort: level,
+      };
+    } else if (meta.hasToggle) {
+      // 开关补出来的 `none` / `on` 不是模型声明的 effort 取值：只发开关，不发 effort 字段。
+      // 布尔开关在 Responses 协议下没有等价参数，该协议就没有这一档（列出来也发不出去）。
+      rule.openai_chat_completions = { thinking: { type: level === 'none' ? 'disabled' : 'enabled' } };
+    }
+    efforts[level] = rule;
+  }
+  return efforts;
+}
+
+/**
+ * 默认档位：开关模型默认开着（服务端本来就在推理），其余优先中等、其次高档。
+ *
+ * 两档都没有时取声明里最省的一档，而不是最强的一档——换到只声明 `xhigh` / `max` 的模型
+ * 时，代价最大的那个档不该成为默认值。
+ */
+function chooseDefaultEffort(levels: string[]): ModelRule['defaultEffort'] {
+  if (levels.includes('on')) return 'on';
+  if (levels.includes('medium')) return 'medium';
+  if (levels.includes('high')) return 'high';
+  return levels[0] ?? 'none';
 }

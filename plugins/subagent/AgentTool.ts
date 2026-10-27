@@ -76,8 +76,8 @@ export class AgentTool extends MicaTool {
           },
           effort: {
             type: 'string',
-            enum: ['none', 'low', 'medium', 'high', 'xhigh'],
-            description: 'subagent reasoning effort；省略时继承主 agent 当前 effort。',
+            description:
+              'subagent reasoning effort，取子代理模型自己声明的档位名（见 /effort 列表，如 low/medium/high/max）；省略时继承主 agent 当前 effort。',
           },
           task_id: { type: 'string', description: 'read/kill/await/join 操作的后台 subagent task ID。' },
           task_ids: {
@@ -376,7 +376,7 @@ function buildDescription(types: PluginSubagentType[]): string {
     '前台 run 会阻塞当前 turn 直到子代理返回；同一条消息里的多个前台调用会并行执行。需要主流程继续推进时用 run_in_background: true，完成后经 operation=read/join 取结果。',
     'await/join 等待已有子任务，可与同一条消息里的其他工具重叠执行，全部结果一起返回；仍有独立工作时先继续做，或把等待和工作放在同一条消息，别单独等待。shell 后台任务用 wait_for(kind=task)。',
     `可用 subagent_type: ${types.map((type) => `${type.name} (${type.description})`).join('; ')}。`,
-    '支持 effort: none/low/medium/high/xhigh；省略时继承主 agent 当前 effort。',
+    'effort 取子代理模型自己声明的档位名（模型不同档位集合也不同），省略时继承主 agent 当前 effort。',
   ].join(' ');
 }
 

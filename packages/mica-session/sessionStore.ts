@@ -17,7 +17,7 @@ import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
 import type { CapabilitySelection } from '@packages/mica-common/capabilities.js';
 import type { AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
 import {
-  isEffortOption,
+  isEffortLevelName,
   isProviderProtocol,
   type EffortOption,
   type ProviderProtocol,
@@ -716,7 +716,9 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
       .find(isProviderProtocol);
     protocol = provider ?? 'openai_chat_completions';
   }
-  if (!isEffortOption(session.snapshot.effort)) return null;
+  // 档位名随模型而变（`max`、`minimal`、`on` …），只做语法校验；是否被当前模型支持由
+  // `normalizeModelEffort` 在恢复会话时收敛。
+  if (!isEffortLevelName(session.snapshot.effort)) return null;
   const role = isNonEmptyString(session.snapshot.role) ? session.snapshot.role : 'default';
   return {
     ...session,

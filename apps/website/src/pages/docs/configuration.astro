@@ -163,9 +163,11 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
 
   <h2>选择模型与推理强度</h2>
   <p>
-    终端使用 <code>/model</code> 选择模型，用 <code>/effort</code> 选择推理强度。可用值为 <code>none</code>、
-    <code>low</code>、<code>medium</code>、<code>high</code>、<code>xhigh</code>，实际选项取决于模型规则与 provider
-    能力。桌面端在输入区的模型面板中完成同样的操作。
+    终端使用 <code>/model</code> 选择模型，用 <code>/effort</code> 选择推理强度。可用档位就是该模型自己声明的取值：
+    有的模型是 <code>minimal</code>/<code>low</code>/<code>medium</code>/<code>high</code>，有的最高档叫 <code>max</code>，
+    有的只有开关（<code>none</code>/<code>on</code>）。Mica 不做档位换算，也不会给不支持推理参数的模型凑出五档。
+    自建网关或私有部署的模型名如果不在 models.dev 里，可在该 provider 上写{' '}
+    <code>effortLevels</code> 声明服务端真实接受的档位。桌面端在输入区的模型面板中完成同样的操作。
   </p>
   <pre><code>mica models
 mica models --json</code></pre>

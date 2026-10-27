@@ -38,7 +38,42 @@ describe('resolveRuntimeConfigOverride', () => {
     expect(resolveRuntimeConfigOverride(config, 'gpt-custom')).toEqual({ model: 'gpt-custom' });
   });
 
-  it('rejects unsupported effort variants', () => {
-    expect(() => resolveRuntimeConfigOverride(config, undefined, 'max')).toThrow('Unsupported --variant');
+  it('accepts the level names a model declares instead of rewriting them', async () => {
+    const { default: setupModelEffortContext } =
+      await import('@packages/mica-builtin-commands/startup/model-effort-context/index.js');
+    const dispose = setupModelEffortContext();
+    try {
+      // gpt-5.6-luna 自己声明了 `max`，所以 `max` 原样传下去，不会被改写成别档。
+      const lunaConfig = { ...config, model: 'gpt-5.6-luna' };
+      expect(resolveRuntimeConfigOverride(lunaConfig, undefined, 'max', { strictEffort: true })).toEqual({
+        effort: 'max',
+      });
+      expect(resolveRuntimeConfigOverride(config, 'openrouter/gpt-5.6-luna', 'max', { strictEffort: true })).toEqual({
+        providerId: 'openrouter',
+        model: 'gpt-5.6-luna',
+        effort: 'max',
+      });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('rejects a variant the target model does not declare', async () => {
+    const { default: setupModelEffortContext } =
+      await import('@packages/mica-builtin-commands/startup/model-effort-context/index.js');
+    const dispose = setupModelEffortContext();
+    try {
+      expect(() =>
+        resolveRuntimeConfigOverride(config, 'openrouter/gpt-5.6-luna', 'ultra', { strictEffort: true }),
+      ).toThrow('available levels');
+      expect(() =>
+        resolveRuntimeConfigOverride(config, 'openrouter/gpt-5.6-luna', 'max!', { strictEffort: true }),
+      ).toThrow('Unsupported --variant value');
+      expect(() =>
+        resolveRuntimeConfigOverride(config, 'openrouter/gpt-5.6-luna', 'minimal', { strictEffort: true }),
+      ).toThrow('available levels');
+    } finally {
+      dispose();
+    }
   });
 });

@@ -121,7 +121,6 @@ export {
   assertValidConfig,
   ConfigValidationError,
   DEFAULT_PROVIDER_PROTOCOL,
-  EFFORT_OPTIONS,
   formatConfigValidationIssues,
   PROVIDER_PROTOCOLS,
   validateConfig,

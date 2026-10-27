@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isEffortLevelName } from '@packages/mica-config/types.js';
 
 export const DEFAULT_PROVIDER_PROTOCOL = 'openai_chat_completions';
 export const PROVIDER_PROTOCOLS = [DEFAULT_PROVIDER_PROTOCOL, 'openai_responses'];
-export const EFFORT_OPTIONS = ['none', 'low', 'medium', 'high', 'xhigh'];
 
 export type ConfigIssue = {
   severity: 'error' | 'warning';
@@ -178,6 +178,19 @@ export function validateConfig(input: unknown): ConfigValidationResult {
         `provider "${providerName}" 的 supportsEffort 必须是 boolean。`,
       );
     }
+    if (
+      provider.effortLevels !== undefined &&
+      (!Array.isArray(provider.effortLevels) ||
+        provider.effortLevels.length === 0 ||
+        provider.effortLevels.some((level) => !isEffortLevelName(level)))
+    ) {
+      add(
+        'error',
+        'provider_effort_levels_invalid',
+        `${providerPath}.effortLevels`,
+        `provider "${providerName}" 的 effortLevels 必须是档位名数组（如 ["low","medium","high"]）。`,
+      );
+    }
     if (provider.api_key !== undefined && typeof provider.api_key !== 'string') {
       add(
         'error',
@@ -238,7 +251,10 @@ function applyConfigDefaults(input: unknown): { config: unknown; changed: boolea
   };
 }
 
-function validateMcpServers(mcpServers: unknown, add: (severity: ConfigIssue['severity'], code: string, path: string, message: string, suggestion?: string) => void): void {
+function validateMcpServers(
+  mcpServers: unknown,
+  add: (severity: ConfigIssue['severity'], code: string, path: string, message: string, suggestion?: string) => void,
+): void {
   if (mcpServers === undefined) return;
   if (!isRecord(mcpServers)) {
     add('error', 'mcp_servers_invalid', 'mcpServers', '"mcpServers" 必须是 object。');
@@ -313,7 +329,12 @@ function parseConfigText(content: string, configPath: string): ConfigValidationR
   }
 }
 
-function validationResult(config: unknown, changed: boolean, changes: ConfigChange[], issues: ConfigIssue[]): ConfigValidationResult {
+function validationResult(
+  config: unknown,
+  changed: boolean,
+  changes: ConfigChange[],
+  issues: ConfigIssue[],
+): ConfigValidationResult {
   return {
     ok: !issues.some((issue) => issue.severity === 'error'),
     config,
