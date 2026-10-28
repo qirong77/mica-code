@@ -1,6 +1,7 @@
 {
   "id": "web-search",
   "name": "Web Search",
+  "icon": "globe",
   "version": "1.0.0",
   "description": "给模型一个 web_search 工具：查询最新信息、官方文档、API 行为、价格与版本，再用 web_fetch 打开具体页面。",
   "main": "index.js",

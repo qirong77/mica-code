@@ -19,6 +19,7 @@
 - 追加共享输入框历史：`micaConfig.inputHistory.append(text)`。
 - 模型规则注册与解析：`micaConfig.ensureModelRule`、`registerModelRules`、`registerModelRuleResolver`。
 - effort 档位与 wire 参数的唯一入口：`getModelEffortOptions` / `normalizeModelEffort` / `resolveEffortParams`。
+- 档位与上下文跟着「谁在服务这个模型」走：`getModelRule` / `ensureModelRule` 接受 provider 作用域（`{ id, api_base }`），缓存键带上 provider。同一模型名在网关与厂商原生条目下的档位可以不同（OpenRouter 的 `moonshotai/kimi-k3` 多一个 `none`），只按模型名查会用错那一份；服务商在 models.dev 收录了该模型就以它为准（先认 `id`，再认 `api_base` 主机名），否则按模型厂商的条目。`micaConfig.providerForModel(model)` 解出归属。
 - 读写新会话默认能力：`readCapabilityDefaults` / `updateCapabilityDefaults`，对应 `config.json` 的 `capabilityDefaults`，配置页 Capabilities 页签用它。
 
 ## 使用入口
@@ -54,7 +55,8 @@ micaConfig.update((current) => ({
 - 只有开关的模型（models.dev `toggle`）档位是 `none` / `on`；同时声明了 toggle 与 effort 取值的模型多一个 `none`，用来发 `thinking: disabled`。
 - 只声明 `budget_tokens`、或根本没声明 reasoning 的模型没有档位：选什么都不发参数，`/effort` 与 desktop 选择器都会直说「该模型不提供推理强度选项」。
 - 模型未知时默认没有档位，不发任何推理参数；猜出来的档位会被不支持该参数的端点直接 400。自建网关的模型名 models.dev 不认识，可以在 provider 上用 `effortLevels` 声明服务端真实接受的档位名（如 `["low","medium","high"]`），这些名字原样发出；有 models.dev 元数据时以模型自己的档位为准，`effortLevels` 不参与。
-- `--variant` 是显式选择：档位名不合法、模型没声明该档位、或模型完全没有档位（也没声明 `effortLevels`）都会直接报错并列出可用档位，不会被静默改成别的值。
+- 档位怎么收敛由调用方声明，不是一处全局策略：`mica exec --variant` 这类命令行显式参数走 `strict`（档位名不合法、模型没声明该档位、或模型完全没有档位也都直接报错并列出可用档位，不会被静默改成别的值）；桌面端/Codex 驱动带上来的 model+effort 走 `clamp`（收敛到目标模型自己的档位，或丢掉模型没声明的档位，并由 host 用 warning 通知说明实际发了什么）。客户端选择不是用户当场敲的参数，让它把 host 拦下来就等于一条永远发不出去的消息。
+- 两种策略都要求先 `ensureModelRule(model)` 再解析档位：档位集合来自 models.dev，磁盘缓存是异步读的，先算会把「缓存里有、随包种子里没有」的模型误判成没有档位。
 - Provider 可通过设置 `supportsEffort: false` 禁用 effort：它在 `resolveEffortParams` 里最先判断，模型补丁不能绕过它。
 - 请求侧只有一个入口 `resolveEffortParams({ provider, model, effort, protocol })`，两个 provider client 都调它，不再各自拼参数。
 

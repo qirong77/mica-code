@@ -134,6 +134,7 @@ export function RolesPage() {
   return (
     <PageFrame
       title="Roles"
+      description="会话可切换的角色提示词：只替换 system prompt 的正文，其余段落仍由 Mica 组装"
       path={details?.root}
       actions={
         <div className="toolbar">

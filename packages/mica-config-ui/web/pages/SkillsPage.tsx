@@ -133,6 +133,7 @@ export function SkillsPage() {
   return (
     <PageFrame
       title="Skills"
+      description="磁盘上的 skill 目录：这里是唯一能创建与编辑 SKILL.md 的地方，改完下一轮对话即可用"
       path={details?.root}
       actions={
         <div className="toolbar">

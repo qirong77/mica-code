@@ -4,6 +4,8 @@
 
 ## 主要能力
 
+- 只读运行观察：`AgentObservationEvent` 定义 `agent:observe`，由 `HookRegistry.notify()` 按注册顺序调用，观察者抛错或返回挂起的 Promise 均不阻塞任务。异步完成顺序由观察插件负责，磁盘队列在插件 dispose 时 flush。覆盖 `AgentRuntime.run` 的起止、实际请求边界与工具定义、最终 prompt、工具调用/结果、用量、重试及历史改写；直接创建的 helper 模型客户端内部轨迹暂未覆盖。
+
 - 定义 class-based plugin 的基础结构。
 - 管理插件加载、启动和销毁生命周期。
 - 提供 hook registry，用于扩展运行时流程。

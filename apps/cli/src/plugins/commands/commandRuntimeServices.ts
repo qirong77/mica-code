@@ -346,7 +346,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       syncModelDisplay(session?.agent ?? target);
     },
     async ensureModelRule(model) {
-      await micaConfig.ensureModelRule(model);
+      await micaConfig.ensureModelRule(model, undefined, micaConfig.providerForModel(model));
     },
     startConfigWeb,
     isAgentRunning() {
@@ -742,7 +742,9 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       const compactedConversationMessages = toCompactedConversationDisplay(concreteAgent.toConversationMessages());
       if (appliedMessages.length === 0 || compactedConversationMessages.length === 0) {
         concreteAgent.restoreClientSnapshot(clientSnapshot);
-        throw new Error('History replacement removed all usable conversation content; the original session was restored');
+        throw new Error(
+          'History replacement removed all usable conversation content; the original session was restored',
+        );
       }
 
       const previousUiState = ownerSession?.uiState ?? captureSessionUi();

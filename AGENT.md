@@ -102,7 +102,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 ### 启动
 
 1. `apps/cli/src/app/configWebWorker.ts` 优先分派 Config Web worker。
-2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 version、models、exec、commit、compact 与交互模式；`startup/validate-config.js` 补齐默认值。
+2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 version、models、exec、compact、插件命令（`mica commit`）与交互模式；`startup/validate-config.js` 补齐默认值。
 3. `Application.start()`：Ink → 配置校验 → 必要时选初始模型 → runtime、session、registry、hooks、services、agent/session manager、UI bridge、subagent manager。
 4. 设 active context → 注册内置插件 → 用户插件 `setupAll` 并写 `plugin-status.json` → 启动 UI bridge 与 runtime。
 5. 失败时显示修复提示、清理资源、设置 `process.exitCode = 1`。
@@ -150,6 +150,11 @@ npm run start:web          # 运行已构建的 Web 运行时
 - skills 只以索引进入 system prompt。
 - `AgentRuntime.setCapabilities()` 保存会话开关；prompt、工具定义与执行校验读同一份状态。未定制的会话跟随 `config.capabilityDefaults`，`resetCapabilitiesToDefaults()` 回到跟随默认。
 - effort 的档位名就是模型在 models.dev 声明的真实取值：`minimal`/`max`/`xhigh` 各是各的，不归一化、不落别名；只有开关的模型是 `none`/`on`，只声明 budget 或没有 reasoning 的模型没有档位。没有任何档位的模型不发推理参数，也不在 `/effort`、desktop 选择器里凑五档；models.dev 没收录的模型由 provider 的 `effortLevels` 声明档位。切换模型时 clamp 到该模型自己的档位并同步 context window。metadata 优先级：磁盘缓存（24h）→ 内置 models.dev 种子 → 在线刷新。
+- 档位/上下文跟着「谁在服务这次请求」查：`getModelRule` / `ensureModelRule` 接受 provider 作用域（`{ id, api_base }`），缓存键带上 provider。同一个模型在网关（OpenRouter 的 `moonshotai/kimi-k3` 有 `none`）与厂商原生条目（没有 `none`）下的档位可以不同，只按模型名匹配会用错那一份。服务商在 models.dev 里收录了这个模型就以它为准（先认 `id`、再认 `api_base` 的主机名），否则仍按模型厂商的条目。
+- 发给模型的是 `getModelRule(model, provider)` 的那份规则，界面显示的也必须是同一份：状态行按「模型声明的档位 + 模型默认档位」收敛（`resolveDisplayedEffort`），没有档位显示 `—`，不属于该模型的档位显示它自己的默认值——界面不能显示一个不会发出去的值。
+- 档位解析分两条策略（`resolveRuntimeConfigOverride` 的 `effortPolicy`）：`mica exec --variant` 这类命令行显式参数走 `strict`，档位不合法就报错；客户端带上来的 model+effort（desktop 选择器、Codex 驱动的 thread/\* 字段）走 `clamp`，收敛到目标模型的档位或丢掉它没声明的档位，由 host 用 warning 说明实际发了什么。app-server 因此绝不能因为一个客户端档位起不来。
+- 解析档位之前必须先 `ensureModelRule(model)`：档位集合来自 models.dev，磁盘缓存异步读，先算会把「只在缓存里、随包种子里没有」的模型判成没有档位。
+- 档位的**字段名**跟着「谁在服务这次请求」走（`isGatewayEntry`）：厂商直连的条目（`deepseek-flash`）用 `thinking` / `reasoning_effort`，聚合网关的条目（`z-ai/glm-4.6` 这类带前缀的键）只能用 `reasoning.effort`——网关会静默忽略 `thinking`，推理照跑。两边一起发更糟，网关会先命中 `thinking` / `reasoning_effort` 而把 `none` 顶掉。
 - 只有 `get_model_url` 动态 provider 查询模型列表，结果不写回 config.json。
 
 ## 5. 配置、会话与存储
@@ -193,28 +198,33 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 重构方向是通用能力面：扩展 `PluginContext` 的某一面（`agent` / `commands` / `desktop` / `events` / `hooks` / `session` / `sessionState` / `settings` / `skills` / `tools` / `ui`）或复用已有能力；宿主里不出现具体插件名词，「加个 if 兼容某插件」不算设计。
 - 重构与实现同一次变更交付：插件系统改动、受影响的官方插件、`plugins/README.md` 与本文章节一并更新；按第 1 节不留旧形态兼容分支，不为过渡保留双路径。
 - 插件格式或能力面变更后跑 `plugins/**` 相关测试与 `bun run typecheck`；触及工具定义或 prompt 前缀时按第 1 节确认前缀稳定。
-- 插件只有一种形态：目录 + `plugin.json`（`id` / `name` / `version` / `main` / `assets` / `dependencies` / `required` / `priority` / `mica.apiVersion` / `settings` / `requires`）+ 入口（`default` 导出 `setup(ctx)`）。格式与字段以 `plugins/README.md` 为准。
+- 插件只有一种形态：目录 + `plugin.json`（`id` / `name` / `version` / `icon` / `main` / `assets` / `dependencies` / `required` / `priority` / `mica.apiVersion` / `settings` / `requires`）+ 入口（`default` 导出 `setup(ctx)`）。`icon` 只是配置页插件目录用的图标名，不认的值回落默认图标。格式与字段以 `plugins/README.md` 为准。
 - 官方插件在仓库根 `plugins/<id>/`：清单登记在 `mica-official-plugins/manifests.ts`，入口登记在 `index.ts`。用户插件在 `$MICA_HOME/plugins/<id>/`，由 `FilePluginLoader` 启动时加载，id 一律加 `user.` 前缀。
 - 没有 `plugin.json` 的目录、散落成文件的 `.js` / `.mjs` 都不是插件，加载器不猜。
 - 启停状态在 `$MICA_HOME/plugins-state.json`（`{ "disabled": [...] }`）；停用的插件在注册阶段跳过，改完重开会话生效。
-- `requires` 必须写全插件触碰的每一面：`agent` / `commands` / `desktop` / `events` / `git` / `hooks` / `prompt` / `runtime` / `session` / `sessionState` / `settings` / `skills` / `subagents` / `tools` / `ui`。缺一项整插件跳过，原因写进 `plugin-status.json` 的 `skipped`。
+- `requires` 必须写全插件触碰的每一面：`agent` / `commands` / `desktop` / `events` / `git` / `hooks` / `models` / `prompt` / `runtime` / `session` / `sessionState` / `settings` / `skills` / `subagents` / `tools` / `ui`。缺一项整插件跳过，原因写进 `plugin-status.json` 的 `skipped`。
 - 内置 skill 用 `ctx.skills.register()`：正文随包用 `import … with { type: 'text' }` 内嵌，元数据由 `micaSkills.parseMarkdown(SKILL.md)` 解析（frontmatter 是唯一来源），注册后与磁盘 skill 同权（prompt 索引 / `skill` 工具 / 会话能力开关）。磁盘上的同名 skill 优先，被遮蔽的条目从返回值 `skipped` 读出来并 `ctx.health.report()`。`baseDir` 必须是真能读到的目录——单二进制没有插件目录，所以随包资源要先落盘到 `$MICA_HOME/<插件目录>` 再注册（`plugins/computer-use` 是完整示例，源码内嵌由 `scripts/generate-computer-use-sources.mjs` 生成，改 `runtime/**` 必须重跑）。
 - 运行条件由清单 `desktop.checks` 声明，取值只能来自 `mica-plugin/PluginDesktop.ts` 的 `DESKTOP_CHECKS`；配置页 Settings → Plugins 的插件详情里渲染成「运行条件」一节（状态 + 打开系统设置），插件跑在 app-server 子进程里、探测不到也渲染不了。新增一种检查项 = 在 `DESKTOP_CHECKS` 登记 + 桌面端实现探测器（`src/main/system/`）。声明了它就写 `requires: ["desktop"]`。
 - `desktop` 能力只有桌面端 spawn 的 app-server 提供：`buildSpawnEnv` 注入 `MICA_PLUGIN_DESKTOP_HOST=1`（别用 `MICA_DESKTOP_HOST`，那是运行时的绑定地址），`runAppServer` 据此传 `desktopHost` 给 `HeadlessPluginHost`。CLI / TUI / `mica exec` 里没有它，依赖插件整块跳过。
 - 设置项在清单 `settings` 里声明，类型 `text` / `password` / `textarea` / `select` / `number` / `switch`；数字项可带 `step` 与 `unit`，开关值只能是 `"true"` / `"false"`。值存 `$MICA_HOME/plugin-settings/<id>.json`，读取按 mtime 判断是否变化。
 - 校验只有 `validatePluginSettingValues()` 一处：写盘前拒绝，插件读值时同样过一遍；非法值既不落盘也不静默通过。
+- 需要按会话调整的项标 `perSession`：默认值仍是 `settings`（配置页写），会话里只存**改过**的键（`pluginSessionSettings[pluginId]`），没改过的继续跟随默认值。插件读 `ctx.sessionSettings.get()`（合并后的生效值），界面由 `mica/pluginSettings/get|set` 驱动，桌面端从会话设置→插件进入。只存改过的键是硬约束：整份存会把当时的默认值固化进老会话。
 - 用户可见故障（缺配置、外部服务拒绝、请求失败）必须 `ctx.health.report({ level, message, hint })`，不能只写日志。
 - `ctx.logger` 按 pluginId 注入，同时写 `os.tmpdir()/mica-logs/plugin-<id>-<day>[-n].jsonl`（2 MB 分片、3 天清理、`MICA_PLUGIN_LOG=0` 关闭）。排查插件问题先看它。
 - 插件感知会话用 `ctx.session`：`describe(owner)`（含 `cwd`，按工作区归档的插件读它而不是缓存进程 cwd）、`messages(owner)`、`rename(title, { owner, source })`；`source: 'auto'` 在人工命名过时被拒绝。
 - 宿主形态由 `ctx.agent.mode` 回答（`session` / `one-shot`，后者是 `mica exec`），与迭代重写句柄上的同名属性一致；会改变成本或输出的策略只在 `session` 生效。
 - 影响模型请求的插件用 `ctx.agent.onIterationRewrite(handler)`：在迭代边界改写接下来要发送的历史。句柄只暴露 `sessionId`、`mode`、`lastUsage()`、`getState()` / `setState()`、`compact()`。
 - 委派子代理用 `ctx.subagents`：`registerType()` 注册类型（工具白/黑名单、写策略、`maxTurns`）、`run` / `background` 跑一个、`tasks.list|get|kill|wait` 管后台任务、`caller(context)` 解出本次调用所属的委派来源。机制（建子代理、用量记账、路径租约、完成回注）在宿主，策略（有哪些类型、工具形状、什么时候委派）在插件；子代理类型挂在注册它的插件名下，插件停用即消失。
-- 官方插件：`todo`（进程内待办）、`session-notes`（会话笔记）、`session-tags`（会话颜色标签）、`session-rename`（每轮前自动起标题）、`auto-compact`（自动压缩）、`memory`（跨会话记忆：`user` / `memory` / `project` 三块 markdown 文件，`ctx.prompt` 注入会话内冻结的快照、`memory` 工具维护预算内的条目、turn:after 可选整理；整理可走宿主子代理，也可配独立的接口地址 / Key / 协议 / 模型，缺 `subagents` 时降级为独立接口）、`web-search`（`web_search` 工具）、`subagent`（7 种子代理类型、`agent` 工具、委派 prompt 段落与委派倾向设置）、`computer-use`（macOS 桌面自动化 skill：AX 元素树 + CGEvent 键鼠 + 截图，随包 runtime 落盘到 `$MICA_HOME/computer-use`，首次用到时 clang 编译 helper；权限状态显示在配置页插件详情的「运行条件」里）。
+- 插件自己问一次模型（起标题、写提交说明、整理记忆）用 `ctx.models.request`：插件只声明接口地址 / 协议 / 模型与 system+user，请求、协议分支、超时中断与用量记账都在宿主（`apps/cli/src/plugins/pluginModels.ts`），记录以 `origin: 'plugin'` 落进会话的 `subagentUsageHistory`。插件里不自建模型 HTTP 客户端。
+- 官方插件：`todo`（进程内待办）、`session-notes`（会话笔记）、`session-tags`（会话颜色标签）、`session-rename`（每轮前自动起标题）、`auto-compact`（自动压缩）、`memory`（跨会话记忆：`user` / `memory` / `project` 三块 markdown 文件，`ctx.prompt` 注入会话内冻结的快照、`memory` 工具维护预算内的条目、turn:after 可选整理；整理可走宿主子代理，也可配独立的接口地址 / Key / 协议 / 模型，缺 `subagents` 时降级为独立接口）、`web-search`（`web_search` 工具）、`subagent`（7 种子代理类型、`agent` 工具、委派 prompt 段落与委派倾向设置）、`commit`（`/commit` 命令：确定性 git 分析 + 一次模型请求写提交说明 + add / commit / push；模型可跟随主配置，也可单独配接口地址 / Key / 协议 / 模型）、`computer-use`（macOS 桌面自动化 skill：AX 元素树 + CGEvent 键鼠 + 截图，随包 runtime 落盘到 `$MICA_HOME/computer-use`，首次用到时 clang 编译 helper；权限状态显示在配置页插件详情的「运行条件」里）。
 - 新增插件：建目录 → 两处登记 → 测试放插件目录内（vitest 覆盖 `plugins/**`）。
+- 运行观察走通用 `agent:observe` hook（`AgentObservationEvent`，owner/runId 关联）：运行开始/终态、请求边界、最终 prompt、工具调用/结果、用量、重试与历史改写。观察失败不得中断任务；范围是 `AgentRuntime.run`，helper 客户端内部轨迹尚未覆盖。官方 `harness-review` 插件异步写 `$MICA_HOME/plugin-data/harness-review`，通过 `/harness-review list|report|assess` 和 `harness_review` 查看、导出、记录人工评估；按 cwd 复盘，不自动修改 harness。
 
 ### 命令
 
 - 命令实现放 `mica-builtin-commands/commands/`；装配放 `plugins/command-*.ts`，统一经 `index.ts` 导出。
+- `/commit` 由官方插件 `plugins/commit/` 提供（TUI 里执行，可通过 `--dir` 之外的入口无参调用）。`mica commit`（CLI）与桌面右键 commit 都经 `apps/cli/src/cli/runPluginCommand.ts` 以一次性插件命令执行：只装配 `commands` / `events` / `settings` 这一层插件宿主，不建会话、不启 agent、不记账。
+- 命令可以用 `CommandResult` 的 `message`（给用户看的一句话）与 `data`（结构化结果，`mica commit` 直接打印成 JSON）回报执行输出。
 - `/capabilities` 管理本会话 Tools / Skills / MCP 三页签开关（运行中拒绝提交，逐项切换）。工具分组由 `mica-tools/registry.ts` 的 `TOOL_FAMILY_LABELS` 唯一定义：只认声明过前缀的工具，至少两个成员才成组。
 - 工具名一律 snake_case 全小写；历史遗留名登记在 `mica-common/toolNames.ts`，读取处统一过 `normalizeToolName`。
 - 只在会话里注册的工具（`agent`、`todo_write`、`session_peers`）在配置页/设置页由 `RUNTIME_TOOL_DESCRIPTORS` 兜底列出，改描述要同步 `runtimeToolDescriptors.test.ts`。
@@ -229,7 +239,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 执行类工具按「启动 / 等待 / 查看」拆开：`run_shell` 只跑前台命令（≤120s）；`background_tasks_start` 启动并立即返回 id；`wait_for` 只观察条件。
 - `overlappable: true`（`wait_for` / `pty_wait`）或 `canOverlap(input)`（`agent` 仅 await/join）表示可与同消息其余调用重叠；加入前确认无写副作用。
 - PTY 由懒启动的 Node helper（`mica-pty/src/server.mjs`）承载；改 `server.mjs` 后跑 `bun run scripts/generate-pty-server-source.mjs` 同步 `ptyServerSource.ts`。
-- Todo（`plugins/todo/`）是「本轮计划」，不写 session。宿主只渲染、不改写模型给的状态：turn 结束既不把 `pending` 升成 `completed`，也不把 `in_progress` 退回写进数据，只在展示投影里把不再活跃的 `in_progress` 显示为 `pending`（`resolveTodoDisplayItems`）。清单全部完成时保留一行汇总而不是消失。解析归一化、投影、显示规则唯一实现在 `mica-common/todoState.ts`，TUI 面板与 desktop 计划 dock 共用；desktop 从对话里的 `todo_write` 工具行投影。执行期只做归一化（未知字段忽略、多个 `in_progress` 降级、超长截断），不拒绝整次调用。
+- Todo（`plugins/todo/`）是「本轮计划」，不写 session。宿主只渲染、不改写模型给的状态：turn 结束既不把 `pending` 升成 `completed`，也不把 `in_progress` 退回写进数据。**显示边界也是轮次**：`resolveTodoPanel` 只在清单所属那一轮还在跑（或用户 `/todo show` 手动打开）时返回 `visible: true`，turn 结束即收起，新一轮开始时上一轮清单直接作废——desktop 从历史里的 `todo_write` 工具行投影，必须校验 `turnId` 才能避免旧计划一直挂在页面上。解析归一化、投影、显示规则唯一实现在 `mica-common/todoState.ts`，TUI 面板与 desktop dock 共用。执行期只做归一化（未知字段忽略、多个 `in_progress` 降级、超长截断），不拒绝整次调用。
 - `session_notes` 工具只改内存（`snapshot.notes`），落盘交给本轮 checkpoint。
 
 ### MCP 与 Skills
@@ -250,9 +260,10 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 内置类型：general-purpose、Explore、Implementer、Reviewer、Tester、Planner、Proposal；`maxTurns` 唯一默认值在 `plugins/subagent/definitions.ts`（100）。
 - `SubagentTaskManager` 按 owner 隔离任务与 abort signal，任务记录带 `pluginId` 供 `ctx.subagents.tasks.*` 收窄；后台完成元数据回注 owner，结果显式 read/await。parent Ctrl+C 同步中止其运行中的子代理。
 - 前台委派默认阻塞，同消息多个调用可并行；需要主流程继续时用 `run_in_background: true`；每 owner 合计并发上限 4。
+- turn 结束即收尾它起的后台子代理（`killRunningForOwner(owner, 'Parent turn finished.')`）：这一轮已经交付，结果只能经 `agent operation=read` 取回，而下一轮的模型不会去读上个 turn 的 `task_id`。留着它们只会在状态栏挂一条永远 running 的条目并继续烧 token。收尾在 `turn:after` 之前（TUI 在 `LocalRuntimeController.runTurn` 的 finally，headless 在 `HeadlessTurnExecutor.emitTurnAfter`），且不发完成通知。
 - `context_mode` 为 none/brief/recent/files，默认 brief；Implementer / Tester / Proposal 必填 `owned_paths`，写工具与 shell cwd 校验租约（判定唯一实现在 `mica-tools/utils/pathOwnership.ts`）。
 - 委派倾向由插件设置 `delegationMode` 决定（`proactive` 默认 / `on-request`），prompt 段落每轮按设置重新渲染。
-- 非主请求都要记账：Agent 走 `recordSubagentUsage`；commit、BTW、摘要等走 `recordSubagentTaskUsage` / `recordHelperSubagentUsage`。
+- 非主请求都要记账：Agent 走 `recordSubagentUsage`；BTW、摘要等走 `recordSubagentTaskUsage` / `recordHelperSubagentUsage`；插件自己的模型请求走 `ctx.models.request`，宿主以 `origin: 'plugin'` 记进同一份 `subagentUsageHistory`（Stats 的 By plugin 卡片与会话详情可见）。插件里不出现自己拼的模型 HTTP 客户端——那笔开销没人记。
 
 ### 压缩
 
@@ -267,7 +278,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次、间隔 30 分钟。设置在插件 `settings`（每项都标 `perSession`，可在会话设置里按会话覆盖），计数在会话 `pluginState['auto-compact']`。
 - 自动压缩只在常驻会话生效：`mica exec` 是一次性运行（`agent.mode === 'one-shot'`），改变成本或输出的策略一律跳过。
 - 压缩只改发给模型的历史，不改 `conversationMessages`；自动压缩失败只记 note，不中断 turn。
-- 所有压缩保留 usage 记账；需要模型的 compact / review / commit 走 subagent 或 exclusive task，不污染运行中的主 turn。
+- 所有压缩保留 usage 记账；需要模型的 compact / review 走 subagent 或 exclusive task，不污染运行中的主 turn。
 - 会话笔记存在快照里，compact 改不到它，每轮由 `buildSystemPrompt()` 追加；rewind 随 checkpoint 回滚。
 
 ### 定时循环
@@ -320,7 +331,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 ### 对话与输入
 
-- chat run 按 nodeId 存于 `host/chat.js`；请求级发送错误走 `chat:queue-error`，回滚乐观消息并恢复草稿。
+- chat run 按 nodeId 存于 `host/chat.js`；请求级发送错误走 `chat:queue-error`，回滚乐观消息并恢复草稿。host 进程在应答 `turn/start` 之前就退出时走同一条路径（`chat-host-requests.js` 结算未应答请求）：那一轮从未跑过，气泡必须撤回，否则消息看起来已发送、会话里却不存在，双击编辑只会得到「找不到要编辑的消息」。
 - 队列唯一投影 `chat-queue.js.mergeQueuedItems`：host after_iteration 在前，本地 after_turn 在后。
 - `mica/queue/hold` 冻结待撤回条目，结果由 `chat-recall.js.resolveQueueRecall` 判定为回输入框 / 已发送 / 保留。
 - `run.events` / `run.prompt` 每轮重置；恢复先用 `historyBeforeRunReplay` 裁掉本轮已保存回答再重放。
@@ -361,6 +372,12 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 会话搜索共用 `mica-web-shared/session-search.ts`；正文搜索每会话最多 20k 字符，默认最近 3 日、最多 600 个候选，截断须告知。
 - 上下文统计按整条消息 JSON 估算并排除媒体 payload；compact / rewind 后用 staleInput 说明。
 
+### 侧栏入口与整页设置
+
+- 会话侧栏顶部保持一行入口的固定顺序：New Session / Stats / Settings / Server / Plugins。Plugins 虽然在最末，但它只是一个页面入口——点它进插件整页（目录 → 点一张卡进详情），不做下拉面板、不在侧栏里列插件。
+- 设置与插件页都以覆盖整窗的一层打开（`configPage` 状态 + `fixed inset-0` + 顶部拖拽条），不在对话区右侧再开一栏：配置页自带侧栏导航，套两层侧栏只会把内容挤窄。返回走配置页侧栏顶部的「返回对话」，主区顶栏的返回只管 Files / Stats。
+- `SettingsView` 每次打开重新挂载，`key` 含 section 与插件 id：入口决定落在哪一页，残留的上一页导航会让人以为点错了地方。
+
 ### 受控浏览器与终端控制
 
 - 主进程业务例外：`src/main/browser/`、`src/main/terminal/`、`src/main/system/`；端点目录各自唯一（`browser-docs.js` / `terminal-docs.js` / `system-docs.js`），路由、文档与 MCP 操作清单同源。系统检查只服务宿主自己（`MICA_SYSTEM_SOCKET` 由运行时经 `host/system-checks.js` 直连，不做 `/remote/*` 代理、不暴露 MCP），探测用 `systemPreferences`、跳转用 `shell.openExternal`（renderer 的 `window.open` 只放行 http(s)）；配置页插件详情的「运行条件」经 `readDesktopChecks` / `openDesktopSettings` 两个桌面专有动作读它。
@@ -397,6 +414,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 ### 配置页
 
 - `mica-config-ui` 是唯一实现：config-web 用 HTTP 托管，desktop SettingsView 直接嵌组件，不起 iframe 或子进程。
+- 两个宿主都整页打开：桌面端点左下角设置按钮、左上角插件菜单，都以覆盖整窗的一层渲染 `<App>`（`section` 定位到 Config 或 Plugins、`pluginId` 定位到插件详情，`onClose` 渲染左上角返回）。页面内导航由侧栏切换，不做弹窗内嵌。
 - 新页面只用既有积木：`PageFrame`、`Button`、`Tag`、`Switch`、`CollapsiblePanel`、`SettingsGroup`、`SettingRow`、`SplitView`、`ControlEndpointList`；文案走 `labels.ts`。
 - 三块骨架：`PageFrame`（窄页头 + 内容区）、`SettingsGroup` + `SettingRow`（一页一块面，行间分隔线）、`SplitView`（左列表 + 右详情）。
 - 折叠按容器宽度（`@container page (max-width: 860px)`），不按视口。
@@ -406,7 +424,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 配置页不提供 effort 开关：由模型规则按模型名决定。
 - 表单转换唯一实现 `web/configDraft.ts`；写入保留未知键，已知键固定顺序，可选字段留空即删键。
 - Capabilities 页改 `config.capabilityDefaults`，读写实现在 `src/server/capabilityDefaults.ts`。
-- 插件设置在 Plugins 页按清单渲染：开关用共享 `Switch`，数字用 `config-stepper`（−/输入/+ 共用一条边框，单位定宽）。
+- 插件页是「目录 + 整页详情」：目录按官方 / 用户分组渲染卡片网格（停用的卡片压暗、状态标在卡片脚注），每张卡显示清单 `icon`（`web/pluginIcons.tsx` 的映射表，未登记回落 `puzzle`）；点开进入单插件详情页，返回走详情页自己的返回行。清单 icon 不参与内核逻辑，只在配置页呈现。
+- 插件设置在详情页按清单渲染：开关用共享 `Switch`，数字用 `config-stepper`（−/输入/+ 共用一条边框，单位定宽）。
 - 所有页面不设保存按钮：`useAutoSave`（400ms 防抖、串行写盘、卸载补发）；校验不过不写盘。
 - 新建/删除/放弃用 `DialogHost` 的 confirmDialog / promptDialog。
 - 改配置页后跑 `bun run build:config-web` 并提交 `generatedStaticAssets.ts`。
@@ -460,6 +479,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - `testTimeout` 显式给定而不是沿用 Vitest 默认 5s：unit 里有真实 git 仓库与文件 I/O，process 的 PTY 用例内部就按 20s 等待。机器一忙（多个 worker + 开发者自己的进程）5s 会打挂与代码无关的用例。并发上限同理：`unit` 的 `maxWorkers` 固定 4、`process` 的 `maxConcurrency` 固定 3，再往上不更快，只是把时间换成偶发超时。
 - 根测试用 Vitest / Node；`PtyDriver` 仅 Node/vitest 可用，Bun 用 manager + Node helper。
 - `app-server.flows.test.ts` 用本地 mock provider，无需真实 key；resume 用隔离 `MICA_HOME`。
+- 允许使用用户真实 Mica 配置中的 API 做少量、与当前改动直接相关的冒烟测试、复现和验证，无需逐次征求同意；仍使用隔离的 `MICA_HOME`，不改写原配置、不输出凭据，临时凭据副本用完清理。控制实际 API 请求总量，计入工具迭代、重试及 helper/subagent 请求；大量请求（批量评测、压力测试、长循环或大规模并发）必须先说明目的、预计请求量与成本范围，并取得用户同意，不能拆成多批少量请求绕过。
 - PTY 真实 provider 冒烟须显式开关并指向真实配置：单轮用 `MICA_PTY_SMOKE=1`，用户流程用 `MICA_PTY_FLOW_SMOKE=1`，两者都读 `MICA_PTY_SOURCE_HOME`（默认 `~/.mica`）。
 - desktop 改动至少 `npx eslint src/` + `npm test`；新增运行时依赖另构建 server 验证自包含。
 - 浏览器与终端控制必须真窗口验证，单测不能替代。

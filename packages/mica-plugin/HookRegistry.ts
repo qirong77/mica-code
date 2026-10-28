@@ -59,6 +59,22 @@ export class HookRegistry {
     }
   }
 
+  /** Diagnostic notifications invoke in order without waiting for handler completion.
+   * Observers enqueue their own IO and flush it during their plugin's dispose lifecycle.
+   */
+  notify<TEvent>(name: string, event: TEvent): void {
+    for (const registration of [...(this.hooks.get(name) ?? [])]) {
+      try {
+        const result = registration.handler(event, { hook: name, pluginId: registration.options.pluginId });
+        void Promise.resolve(result).catch((error: unknown) =>
+          this.reportHandlerError(error, name, registration.options.pluginId),
+        );
+      } catch (error) {
+        this.reportHandlerError(error, name, registration.options.pluginId);
+      }
+    }
+  }
+
   async pipeline<TEvent>(name: string, event: TEvent): Promise<TEvent> {
     let current = event;
     for (const registration of this.hooks.get(name) ?? []) {

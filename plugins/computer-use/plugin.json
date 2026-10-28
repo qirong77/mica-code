@@ -1,6 +1,7 @@
 {
   "id": "computer-use",
   "name": "Computer Use",
+  "icon": "mouse-pointer-click",
   "version": "1.0.0",
   "description": "让模型直接操作 macOS 桌面：AX 元素树按名字点控件、CGEvent 发键鼠、截图读屏。权限状态显示在本页的「运行条件」里，可一键跳到系统设置。",
   "author": "Mica",

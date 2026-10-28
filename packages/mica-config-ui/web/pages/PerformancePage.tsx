@@ -98,6 +98,7 @@ export function PerformancePage() {
   return (
     <PageFrame
       title="Performance"
+      description="桌面运行时写在本机临时目录的耗时与渲染采样，用于确认卡顿出在哪一段"
       path={details?.dir}
       actions={
         <div className="toolbar">
@@ -283,7 +284,7 @@ function PerfStat({
   label,
   value,
   tone,
-  hint
+  hint,
 }: {
   label: string;
   value: number | string;

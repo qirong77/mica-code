@@ -397,7 +397,7 @@ function toPersistedSnapshot(
     ...(snapshot.capabilitiesCustomized ? { capabilitiesCustomized: true } : {}),
     pluginState: snapshot.pluginState,
     pluginSessionSettings: snapshot.pluginSessionSettings,
-    contextWindowSize: micaConfig.getModelRule(snapshot.model).contextSize,
+    contextWindowSize: micaConfig.getModelRule(snapshot.model, { id: snapshot.providerId }).contextSize,
     messages: snapshot.messages,
     conversationMessages,
     usageHistory: snapshot.usageHistory,
@@ -550,7 +550,7 @@ export function applySessionConfig(snapshot: PersistedRuntimeSnapshot): Persiste
       provider: provider.id,
       model,
       effort,
-      contextWindowSize: micaConfig.getModelRule(model).contextSize,
+      contextWindowSize: micaConfig.getModelRule(model, provider).contextSize,
     };
   });
   return resolvedSnapshot;

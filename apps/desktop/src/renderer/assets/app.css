@@ -4979,3 +4979,17 @@ body.is-resizing-btw {
     display: none;
   }
 }
+
+/*
+ * 整页打开的设置 / 插件页（App.jsx 的 configPage 层）。
+ *
+ * 配置页自带一列导航与自己的滚动，外壳只负责给出确定的高度与底色：
+ * `.mica-config-ui` 是 `height: 100%`，把它放在高度不定的 flex 子项里会塌成 0。
+ */
+.mica-config-shell {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  background: var(--color-canvas);
+}

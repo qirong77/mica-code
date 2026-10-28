@@ -6,6 +6,7 @@ import { AgentAbortError } from '../agent/AgentRuntime.js';
 import { HeadlessTurnExecutor, type HeadlessTurnEvent } from './HeadlessTurnExecutor.js';
 import { TurnNoticeLog } from './turnNotices.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
+import { micaPlugin } from '@packages/mica-plugin/index.js';
 
 class MockAgent {
   readonly events = mitt();
@@ -89,11 +90,12 @@ class MockAgent {
 
 let harnessSeq = 0;
 
-function createHarness() {
+function createHarness(options: { withPluginLayer?: boolean } = {}) {
   const agent = new MockAgent();
   const events: HeadlessTurnEvent[] = [];
   const savedStates: string[] = [];
   const savedConversations: Array<Array<{ role: string }> | undefined> = [];
+  const subagentSettleCalls: Array<{ reason: string; owner: unknown }> = [];
   // 每个 harness 一个独立 session id：executor 现在按轮取 turn lease，共用同一个 id
   // 会让上一个测试里还没跑完的后台 turn 把下一个测试挡成 busy-remote。
   const sessionId = `session-${++harnessSeq}`;
@@ -116,6 +118,17 @@ function createHarness() {
     onEvent: (event) => events.push(event),
     maxTurnRetries: 2,
     retryDelayMs: 5,
+    subagentTasks: {
+      killRunningForOwner: (owner: unknown, reason: string) => {
+        subagentSettleCalls.push({ owner, reason });
+        return 0;
+      },
+    } as never,
+    // 收尾发生在 turn:after 之前，所以必须有插件层才会跑（没有插件层连 agent
+    // 工具都不存在，也就不会有子代理）。
+    ...(options.withPluginLayer
+      ? { hooks: new micaPlugin.HookRegistry(), host: { getCurrentSessionId: () => sessionId } }
+      : {}),
     notices: { ensure: () => noticeLog },
     // Mirrors HeadlessPluginHost: the persisted conversation is the provider
     // history with the notices threaded back in.
@@ -136,6 +149,7 @@ function createHarness() {
     noticeLog,
     savedStates,
     savedConversations,
+    subagentSettleCalls,
     getIdleCount: () => idleCount,
   };
 }
@@ -157,6 +171,18 @@ describe('HeadlessTurnExecutor', () => {
     expect(result).toBe('started');
     expect(agent.runCalls).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'turn:start' });
+  });
+
+  it('stops the background subagents a finished turn left running', async () => {
+    const harness = createHarness({ withPluginLayer: true });
+    await harness.executor.start(input('hello'));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // 一个 turn 结束后它起的后台子代理没有消费者了：结果只能经 `agent
+    // operation=read` 取回，而这一轮已经交付，状态栏不该继续挂着 running。
+    expect(harness.subagentSettleCalls).toHaveLength(1);
+    expect(harness.subagentSettleCalls[0]).toMatchObject({ reason: 'Parent turn finished.' });
+    expect(harness.subagentSettleCalls[0]?.owner).toBe(harness.agent);
   });
 
   it('queues an input while busy and drains it after the turn', async () => {

@@ -74,7 +74,7 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
     syncModelDisplay() {},
     async ensureModelRule(model) {
       const { micaConfig } = await import('@packages/mica-config/index.js');
-      await micaConfig.ensureModelRule(model);
+      await micaConfig.ensureModelRule(model, undefined, micaConfig.providerForModel(model));
     },
     async startConfigWeb() {
       throw new Error('/config is not available in headless mode');
@@ -184,7 +184,9 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
       const compacted = toCompactedConversationDisplay(concreteAgent.toConversationMessages());
       if (appliedMessages.length === 0 || compacted.length === 0) {
         concreteAgent.restoreClientSnapshot(clientSnapshot);
-        throw new Error('History replacement removed all usable conversation content; the original session was restored');
+        throw new Error(
+          'History replacement removed all usable conversation content; the original session was restored',
+        );
       }
       // Rewriting the history drops the notices with it (same as the CLI).
       noticeLog().clear();

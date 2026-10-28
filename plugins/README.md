@@ -11,29 +11,30 @@
 
 ```
 plugins/<id>/
-  plugin.json     清单：id / name / version / description / main / assets / required / desktop
+  plugin.json     清单：id / name / icon / version / description / main / assets / required / desktop
   index.ts        入口，default 导出 setup(ctx)
   ...             实现文件、README、样式等资源
 ```
 
 `plugin.json`：
 
-| 字段              | 必填 | 说明                                                                                 |
-| ----------------- | ---- | ------------------------------------------------------------------------------------ |
-| `id`              | 是   | 小写字母、数字、`.`、`_`、`-`；用户插件会在运行期加 `user.` 前缀，避免和内置插件撞名 |
-| `name`            | 是   | 展示名                                                                               |
-| `version`         | 是   | `1.0.0` 形式                                                                         |
-| `description`     | 否   | 配置页与详情里显示的一句话说明                                                       |
-| `author`          | 否   | 作者                                                                                 |
-| `main`            | 否   | 入口文件，默认 `index.js`；必须在插件目录内                                          |
-| `assets`          | 否   | 随插件分发的资源（样式、文档、图标），同样不许跳出版块目录                           |
-| `dependencies`    | 否   | 需要先 setup 的插件 id                                                               |
-| `required`        | 否   | setup 失败是否中断启动；用户插件默认 `false`                                         |
-| `priority`        | 否   | 加载顺序，小的先执行                                                                 |
-| `mica.apiVersion` | 否   | 当前只支持 `1`                                                                       |
-| `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读取                     |
-| `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                           |
-| `desktop`         | 否   | 声明依赖的桌面端运行条件，见「运行条件」一节；用它的插件要同时声明 `requires: ["desktop"]` |
+| 字段              | 必填 | 说明                                                                                               |
+| ----------------- | ---- | -------------------------------------------------------------------------------------------------- |
+| `id`              | 是   | 小写字母、数字、`.`、`_`、`-`；用户插件会在运行期加 `user.` 前缀，避免和内置插件撞名               |
+| `name`            | 是   | 展示名                                                                                             |
+| `version`         | 是   | `1.0.0` 形式                                                                                       |
+| `description`     | 否   | 配置页与详情里显示的一句话说明                                                                     |
+| `icon`            | 否   | 插件图标名（kebab-case），取值见 `packages/mica-config-ui/web/pluginIcons.tsx`；缺省用默认方块图标 |
+| `author`          | 否   | 作者                                                                                               |
+| `main`            | 否   | 入口文件，默认 `index.js`；必须在插件目录内                                                        |
+| `assets`          | 否   | 随插件分发的资源（样式、文档、图标），同样不许跳出版块目录                                         |
+| `dependencies`    | 否   | 需要先 setup 的插件 id                                                                             |
+| `required`        | 否   | setup 失败是否中断启动；用户插件默认 `false`                                                       |
+| `priority`        | 否   | 加载顺序，小的先执行                                                                               |
+| `mica.apiVersion` | 否   | 当前只支持 `1`                                                                                     |
+| `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读取                                   |
+| `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                                         |
+| `desktop`         | 否   | 声明依赖的桌面端运行条件，见「运行条件」一节；用它的插件要同时声明 `requires: ["desktop"]`         |
 
 ## 设置项
 
@@ -96,13 +97,36 @@ plugins/<id>/
 ## 健康状态与失败可见
 
 `requires` 要写全插件实际触碰的每一面 `ctx.*`：`commands`、`desktop`、`events`、`hooks`、`prompt`、
-`session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`。宿主缺哪个，
+`session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`、`models`。宿主缺哪个，
 插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。
 机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定有哪些类型、`agent` 工具长什么样。
+`models` 是插件自己的模型请求入口（`ctx.models.request`），见下节——**插件不要自己 `fetch` 模型接口**。
 `skills` 是内置 skill 的注册面（`ctx.skills.register`），`desktop` 只有桌面端运行时才提供（见下节）。
 少声明一项的后果是在 setup 里撞上 `undefined` 并连带算作加载失败，所以不要把可选项当默认存在。
+
+## 插件自己的模型请求
+
+后台请求（自动起标题、写 commit message、整理记忆…）一律走 `ctx.models.request`：
+
+```ts
+const { text, usage } = await ctx.models.request({
+  purpose: '自动起标题',       // Stats 里显示的用途
+  system: prompt,
+  user: transcript,
+  baseUrl: settings.baseUrl,   // 插件自己的接口地址
+  apiKey: settings.apiKey,
+  protocol: settings.protocol, // openai_chat_completions | openai_responses
+  model: settings.model,
+  timeoutMs: 60_000,           // 可选，宿主会真的中断请求而不是只 reject
+});
+```
+
+请求由宿主发出，所以三件事只有一份实现：协议分支（Chat Completions / Responses）、超时与中断、
+**用量记账**——这笔开销会以 `origin: 'plugin'` 记进当前会话的 `subagentUsageHistory`，在
+Stats 的「By plugin」卡片与会话详情里能看到。插件自己 `fetch` 的请求没有会话写面可以记，
+用户在 Stats 里就永远看不到它花了多少。
 
 ## 内置 skill
 
@@ -156,6 +180,8 @@ CLI / TUI / `mica exec` 里整插件跳过（而不是装上了却永远显示�
 - hook 抛错由宿主记录并继续运行；需要某项宿主能力却没声明 `requires`，会在 setup 时抛错。
 
 ## 日志
+
+需要观察运行的插件可以订阅只读 `agent:observe` hook（类型 `AgentObservationEvent`）：宿主提供 owner/runId、运行开始与终态、实际请求边界与工具定义、最终 prompt、工具调用与结果、用量、重试和历史改写。通过 `HookRegistry.notify()` 派发：按顺序调用但不等待异步 handler；失败或挂起不阻塞任务，观察插件自己维护 IO 队列并在 dispose 时 flush。观察者不得修改事件中的运行输入。它覆盖 `AgentRuntime.run`，直接创建的 helper 模型客户端目前不在完整观察范围内。官方 [Harness Review](harness-review/README.md) 用这个接口异步记录并生成复盘报告。
 
 插件拿到的 `ctx.logger` 自带文件输出，写在系统临时目录，不占用户配置目录：
 

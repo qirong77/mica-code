@@ -1,6 +1,7 @@
 {
   "id": "session-tags",
   "name": "Session Tags",
+  "icon": "tags",
   "version": "1.0.0",
   "description": "照 macOS Finder 的彩色圆点给会话打标签：7 个固定色槽、可改名，跨 Pinned / Projects / Recent 检索，不改变会话归属。",
   "author": "Mica Code",

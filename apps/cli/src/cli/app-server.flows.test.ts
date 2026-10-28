@@ -444,6 +444,35 @@ function makeHome(tag: string): string {
   return home;
 }
 
+/**
+ * Provider that declares no effort levels at all (and whose model name models.dev
+ * does not know). This is the endpoint shape that used to take the whole host
+ * down when the desktop replayed its last-chosen `--variant`.
+ */
+function makeHomeWithoutEffortLevels(tag: string): string {
+  const home = makeHome(tag);
+  writeFileSync(
+    join(home, 'config.json'),
+    JSON.stringify(
+      {
+        providers: [
+          {
+            id: 'mock',
+            name: 'Mock',
+            protocol: 'openai_responses',
+            api_base: currentMock().baseUrl,
+            api_key: 'test-key',
+            models: ['mock-chat'],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+  return home;
+}
+
 /** makeHome variant with a slow stdio MCP server (3s initialize delay), used to
  * verify the host becomes ready before MCP init finishes and the first turn
  * waits for it. */
@@ -688,12 +717,11 @@ async function startMockContext(): Promise<MockContext> {
  * Hosts get a hard deadline so one wedged child cannot hold the file open. */
 async function stopMockContext(context: MockContext): Promise<void> {
   for (const host of context.hosts) killHost(host);
-  await Promise.all(
-    context.hosts.map(async (host) => {
-      await Promise.race([host.closePromise, sleep(5_000)]);
-      rmSync(host.home, { recursive: true, force: true });
-    }),
-  );
+  await Promise.all(context.hosts.map((host) => Promise.race([host.closePromise, sleep(5_000)])));
+  // Resumed hosts can share one home; remove it once, after every writer exits.
+  for (const home of new Set(context.hosts.map((host) => host.home))) {
+    rmSync(home, { recursive: true, force: true });
+  }
   await new Promise<void>((resolve) => context.mock.server.close(() => resolve()));
 }
 
@@ -2131,6 +2159,12 @@ suite('mica app-server real-user flows (mock provider)', () => {
     });
     await waitFor(host, (m) => m.method === 'mica/queue/queued', 'mica/queue/queued (abort)');
 
+    // turn/started precedes provider IO. Interrupting before the first request
+    // arrives makes the drained turn request #1, invalidating the #2 assertion.
+    const requestDeadline = Date.now() + 10_000;
+    while (mock!.state.requests.length === 0 && Date.now() < requestDeadline) await sleep(10);
+    expect(mock!.state.requests.length).toBeGreaterThanOrEqual(1);
+
     // User hits stop: interrupt the active turn, then the queued input must
     // still drain on the same host.
     await send(host, 3, 'turn/interrupt', { threadId: '', turnId: turn1 });
@@ -2666,5 +2700,94 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
     const turnId = (started.params?.turn as { id: string }).id;
     await waitFor(host, turnCompleted(turnId), 'turn/completed');
+  });
+
+  itE2E('a client variant the model does not declare degrades the turn instead of killing the host', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    // 端点不接受任何推理档位：provider 没有 effortLevels，模型名 models.dev 也不认识。
+    // 桌面端会把上次选的档位一起带上来（`--variant high`），host 必须照常起服务：
+    // 之前的实现直接 exit(1)，用户看到一条永远发不出去、也编辑不了的消息。
+    const home = makeHomeWithoutEffortLevels('no-effort-levels');
+    const host = spawnHost('no-effort-levels', ['--variant', 'high'], home);
+    hosts.push(host);
+    const ready = await waitFor(host, hostReady, 'host ready or error', 30_000);
+    expect(ready.method).not.toBe('error');
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '你好' }],
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    const completed = await waitFor(host, turnCompleted(turnId), 'turn/completed');
+    expect((completed.params?.turn as { status?: string }).status).toBe('completed');
+
+    // 档位没有声明 → 请求里不带任何推理参数，也不发一个端点未必接受的猜测值。
+    expect(mock!.state.requests.length).toBeGreaterThan(0);
+    expect(mock!.state.requests[0].reasoning).toBeUndefined();
+
+    // 降级要可见：warning 通知而不是 error（host 还在服务）。
+    const warning = host.lines.find((m) => m.method === 'warning');
+    expect((warning?.params?.warning as { message?: string })?.message).toContain('high');
+  });
+
+  itE2E('switching model + effort across turns of one resident host sends each level to its own model', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('switch-model-effort');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    const runTurn = async (id: number, text: string, overrides: Record<string, unknown>) => {
+      await send(host, id, 'turn/start', { threadId: '', input: [{ type: 'text', text }], ...overrides });
+      // 用「自己这条请求的应答」定位本轮的 turn id：常驻 host 里 turn/started 会重复
+      // 出现，按方法名找会拿到上一轮的。
+      const response = await waitFor(
+        host,
+        (m) => m.id === id && (m.result !== undefined || m.error !== undefined),
+        `turn/start #${id} response`,
+      );
+      expect(response.error).toBeUndefined();
+      const turnId = (response.result as { turn?: { id?: string } }).turn?.id!;
+      expect(turnId).toBeTruthy();
+      const completed = await waitFor(host, turnCompleted(turnId), 'turn/completed');
+      expect((completed.params?.turn as { status?: string }).status).toBe('completed');
+    };
+
+    await runTurn(1, '第一轮：low', { model: 'mock/mock-chat', effort: 'low' });
+    await runTurn(2, '第二轮：换模型 high', { model: 'mock/mock-chat-alt', effort: 'high' });
+    // 第三轮：模型不认识的档位（`xhigh` 不在 mock provider 声明的三档里）按目标模型收敛。
+    await runTurn(3, '第三轮：无效档位', { model: 'mock/mock-chat-alt', effort: 'xhigh' });
+    await runTurn(4, '第四轮：换回第一个模型', { model: 'mock/mock-chat', effort: 'low' });
+
+    const [first, second, third, fourth] = mock!.state.requests;
+    expect(first.model).toBe('mock-chat');
+    expect(first.reasoning?.effort).toBe('low');
+    expect(second.model).toBe('mock-chat-alt');
+    expect(second.reasoning?.effort).toBe('high');
+    expect(third.model).toBe('mock-chat-alt');
+    expect(third.reasoning?.effort).toBe('medium');
+    expect(fourth.model).toBe('mock-chat');
+    expect(fourth.reasoning?.effort).toBe('low');
+
+    // 收敛要告诉用户，否则界面说 xhigh、请求里发的是 medium。
+    const adjustment = host.lines.find(
+      (m) =>
+        m.method === 'warning' && String((m.params?.warning as { message?: string })?.message || '').includes('xhigh'),
+    );
+    expect(adjustment).toBeTruthy();
+
+    // 会话快照记录的是最后一轮生效的模型，resume 或桌面刷新都读它。
+    const sessionFile = readdirSync(join(host.home, 'sessions')).find((file) => file.endsWith('.json'));
+    expect(sessionFile).toBeTruthy();
+    const saved = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFile!), 'utf8'));
+    expect(saved.snapshot.model).toBe('mock-chat');
   });
 });

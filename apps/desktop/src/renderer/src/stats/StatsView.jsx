@@ -635,6 +635,108 @@ function BySubagentCard({ scoped }) {
   )
 }
 
+/**
+ * 插件自己的模型请求（自动起标题、写 commit message、整理记忆…）。
+ *
+ * 这些请求不进主上下文，但花的是同一条会话的钱，所以和 subagent 一样计入总量；
+ * 单独成卡是因为它们不是委派——用户要知道「钱花在哪个插件的后台任务上」。
+ */
+function ByPluginCard({ scoped }) {
+  const rows = useMemo(() => {
+    const map = new Map()
+    for (const s of scoped) {
+      for (const usage of s.usageEvents || []) {
+        if (!usage.isPlugin) continue
+        const pluginId = usage.pluginId || 'unknown'
+        const row = map.get(pluginId) || {
+          pluginId,
+          sessions: new Set(),
+          requests: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          purposes: new Set()
+        }
+        row.sessions.add(s.id)
+        row.requests++
+        row.inputTokens += usage.inputTokens
+        row.outputTokens += usage.outputTokens
+        row.totalTokens += usage.totalTokens
+        if (usage.pluginPurpose) row.purposes.add(usage.pluginPurpose)
+        map.set(pluginId, row)
+      }
+    }
+    return [...map.values()]
+      .map((row) => ({
+        ...row,
+        sessions: row.sessions.size,
+        purposes: [...row.purposes]
+      }))
+      .sort((a, b) => b.totalTokens - a.totalTokens || a.pluginId.localeCompare(b.pluginId))
+  }, [scoped])
+
+  if (rows.length === 0) return null
+
+  return (
+    <section className={`${CARD_CLASS} p-4`}>
+      <header className="mb-2 flex items-center justify-between">
+        <h2 className={OVERLINE_CLASS}>By plugin</h2>
+        <span className="text-[11px] text-fg-faint">{rows.length} plugins</span>
+      </header>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] table-fixed text-[13px]">
+          <colgroup>
+            <col className="w-[46%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+            <col className="w-[18%]" />
+          </colgroup>
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-left font-normal">
+                Plugin
+              </th>
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
+                Requests
+              </th>
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
+                Input
+              </th>
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
+                Output
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.pluginId} className="border-t border-line">
+                <td className="py-1 pr-3">
+                  <span className="block truncate text-xs text-fg-strong" title={row.pluginId}>
+                    {row.pluginId}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[11px] text-fg-faint">
+                    {row.sessions} sessions
+                    {row.purposes.length > 0 ? ` · ${row.purposes.join(' / ')}` : ''}
+                  </span>
+                </td>
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                  {row.requests.toLocaleString()}
+                </td>
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                  {tokensShort(row.inputTokens)}
+                </td>
+                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                  {tokensShort(row.outputTokens)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 /** 按项目（cwd basename）聚合，分批展示 */
 function ByProjectCard({ scoped, visibleRows, onShowMore }) {
   const rows = useMemo(() => {
@@ -810,6 +912,9 @@ function BySessionCard({ scoped, onDetail }) {
                     {basename(s.cwd)} · {s.id ? s.id.slice(0, 8) : ''}
                     {Number(s.subagentTasks) > 0 && (
                       <span className="text-warn-soft"> · {s.subagentTasks} sub</span>
+                    )}
+                    {Number(s.pluginRequests) > 0 && (
+                      <span className="text-fg-faint"> · {s.pluginRequests} plugin</span>
                     )}
                   </span>
                 </td>
@@ -1002,6 +1107,7 @@ export function StatsView({ visible }) {
               <DailyCard sessions={sessions} range={range} />
               <ByModelCard scoped={activeScoped} />
               <BySubagentCard scoped={activeScoped} />
+              <ByPluginCard scoped={activeScoped} />
               <ByProjectCard
                 scoped={activeScoped}
                 visibleRows={visibleRows}

@@ -8,7 +8,7 @@ import {
   getModelRule as getModelsDevRule,
 } from '@packages/mica-builtin-commands/startup/model-effort-context/getModelRule.js';
 import { resolveEffortParams } from './effort.js';
-import { ensureModelRule, getModelEffortOptions, getModelRule } from './getModelRule.js';
+import { ensureModelRule, getModelEffortOptions, getModelRule, orderEffortLevels } from './getModelRule.js';
 
 let dispose: (() => void) | undefined;
 let tempMicaHome: string;
@@ -31,7 +31,23 @@ afterEach(async () => {
 });
 
 describe('model-effort-context', () => {
+  it('orders vendor-specific level names between the ones they sit between', () => {
+    // DeepSeek 的响应里档位枚举是 none → minimal → low → medium → high → xhigh → ultra → max，
+    // 选择器按这个顺序排；`ultra` 是厂商自定义名，不能被当成未知值排到最后。
+    expect(orderEffortLevels(['max', 'ultra', 'low', 'xhigh', 'none'])).toEqual([
+      'none',
+      'low',
+      'xhigh',
+      'ultra',
+      'max',
+    ]);
+  });
+
   it('forwards headless cancellation to the models.dev request', async () => {
+    // 显式放一份过期缓存：随包种子是新鲜的，直接读种子就不会发请求，这条用例会空转。
+    await writeModelsCache(Date.now() - 25 * 60 * 60 * 1000, {
+      cached: { models: { 'other-model': model(1000, []) } },
+    });
     const fetchMock = vi.fn(
       async (_url: string, options?: { signal?: AbortSignal }) =>
         await new Promise<Response>((_resolve, reject) => {
@@ -71,25 +87,85 @@ describe('model-effort-context', () => {
   it('loads context sizes and dynamic effort options on demand', async () => {
     await mockModelsDev();
     dispose = setupModelEffortContext();
-    await Promise.all(['kimi-k2.6', 'deepseek-v4-pro', 'gpt-5.5', 'grok-4.5'].map((model) => ensureModelRule(model)));
+    await Promise.all(
+      ['mock-toggle-model', 'mock-effort-model', 'mock-gpt', 'mock-grok'].map((model) => ensureModelRule(model)),
+    );
 
-    expect(getModelRule('kimi-k2.6').contextSize).toBe(262144);
-    expect(getModelRule('deepseek-v4-pro').contextSize).toBe(1000000);
-    expect(getModelRule('gpt-5.5').contextSize).toBe(1050000);
-    expect(getModelRule('grok-4.5').contextSize).toBe(500000);
-    expect(getModelRule('deepseek-v4-pro').supportsVision).toBe(false);
-    expect(getModelRule('gpt-5.5').supportsVision).toBe(true);
+    expect(getModelRule('mock-toggle-model').contextSize).toBe(262144);
+    expect(getModelRule('mock-effort-model').contextSize).toBe(1000000);
+    expect(getModelRule('mock-gpt').contextSize).toBe(1050000);
+    expect(getModelRule('mock-grok').contextSize).toBe(500000);
+    expect(getModelRule('mock-effort-model').supportsVision).toBe(false);
+    expect(getModelRule('mock-gpt').supportsVision).toBe(true);
     // 档位就是模型自己声明的名字：`max` 不会被折算成 `xhigh`，toggle 额外补一个 `none`。
-    expect(getModelEffortOptions('deepseek-v4-pro')).toEqual(['none', 'high', 'max']);
-    expect(getModelEffortOptions('grok-4.5')).toEqual(['low', 'medium', 'high']);
+    expect(getModelEffortOptions('mock-effort-model')).toEqual(['none', 'high', 'max']);
+    expect(getModelEffortOptions('mock-grok')).toEqual(['low', 'medium', 'high']);
     // 只有开关的模型是两个状态，不是一份编造出来的档位表。
-    expect(getModelEffortOptions('kimi-k2.6')).toEqual(['none', 'on']);
+    expect(getModelEffortOptions('mock-toggle-model')).toEqual(['none', 'on']);
+  });
+
+  it('takes effort levels from the provider that actually serves the model', async () => {
+    await mockModelsDev();
+    dispose = setupModelEffortContext();
+    const gateway = {
+      id: 'OpenRouter',
+      api_base: 'https://openrouter.ai/api/v1',
+      protocol: 'openai_chat_completions' as const,
+    };
+    const vendor = {
+      id: 'moonshotai',
+      api_base: 'https://api.moonshot.ai/v1',
+      protocol: 'openai_chat_completions' as const,
+    };
+    await ensureModelRule('mock-kimi-k3', undefined, gateway);
+    await ensureModelRule('mock-kimi-k3', undefined, vendor);
+
+    // 网关多一个 `none`：选不到它等于少一个 OpenRouter 真实支持的档位。
+    expect(getModelEffortOptions('mock-kimi-k3', 'openai_chat_completions', gateway)).toEqual([
+      'none',
+      'low',
+      'high',
+      'max',
+    ]);
+    expect(getModelEffortOptions('mock-kimi-k3', 'openai_chat_completions', vendor)).toEqual(['low', 'high', 'max']);
+    // 发送参数必须跟着同一份元数据走。
+    expect(
+      resolveEffortParams({
+        provider: gateway,
+        model: 'mock-kimi-k3',
+        effort: 'none',
+        protocol: 'openai_chat_completions',
+      }),
+    ).toEqual({ reasoning: { effort: 'none' } });
+    // 带厂商前缀的键说明是网关收录的：推理开关要用 `reasoning`，实测 OpenRouter 上
+    // `thinking` / `reasoning_effort` 会被忽略（glm-4.6 选 none 仍然产出推理），
+    // 而厂商直连的条目只认 `thinking`。
+    expect(
+      resolveEffortParams({
+        provider: {
+          id: 'moonshotai',
+          api_base: 'https://api.moonshot.ai/v1',
+          protocol: 'openai_chat_completions',
+        },
+        model: 'mock-kimi-k3',
+        effort: 'low',
+        protocol: 'openai_chat_completions',
+      }),
+    ).toEqual({ reasoning_effort: 'low' });
+    expect(
+      resolveEffortParams({
+        provider: gateway,
+        model: 'mock-kimi-k3',
+        effort: 'low',
+        protocol: 'openai_chat_completions',
+      }),
+    ).toEqual({ reasoning: { effort: 'low' } });
   });
 
   it('resolves wire params for both protocols from the model metadata alone', async () => {
     await mockModelsDev();
     dispose = setupModelEffortContext();
-    await Promise.all(['kimi-k2.6', 'deepseek-v4-pro', 'gpt-5.5'].map((model) => ensureModelRule(model)));
+    await Promise.all(['mock-toggle-model', 'mock-effort-model', 'mock-gpt'].map((model) => ensureModelRule(model)));
 
     const params = (model: string, effort: string, protocol: 'openai_chat_completions' | 'openai_responses') =>
       resolveEffortParams({
@@ -99,31 +175,49 @@ describe('model-effort-context', () => {
         protocol,
       });
 
-    // 只有 toggle 的模型：chat 用开关，responses 没有等价参数，交给服务端默认值。
-    expect(params('kimi-k2.6', 'none', 'openai_chat_completions')).toEqual({ thinking: { type: 'disabled' } });
-    expect(params('kimi-k2.6', 'none', 'openai_responses')).toEqual({});
-    expect(params('kimi-k2.6', 'on', 'openai_chat_completions')).toEqual({ thinking: { type: 'enabled' } });
+    // 只声明 toggle 的模型：chat 用开关；Responses 协议没有证据表明它认 `effort`，什么都不发。
+    expect(params('mock-toggle-model', 'none', 'openai_chat_completions')).toEqual({ thinking: { type: 'disabled' } });
+    expect(params('mock-toggle-model', 'none', 'openai_responses')).toEqual({});
+    expect(params('mock-toggle-model', 'on', 'openai_chat_completions')).toEqual({ thinking: { type: 'enabled' } });
+    // 同一份开关元数据被网关收录时换成厂商无关的写法，否则「关掉」在网关上不生效。
+    const gatewayLike = {
+      id: 'openrouter',
+      api_base: 'https://openrouter.ai/api/v1',
+      protocol: 'openai_chat_completions' as const,
+    };
+    // 生产路径是先用 provider 解析一次规则再发请求，这里照做，避免落到不带 provider 的兜底规则上。
+    await ensureModelRule('mock-toggle-model', undefined, gatewayLike);
+    const gatewayToggle = (effort: string) =>
+      resolveEffortParams({
+        provider: gatewayLike,
+        model: 'mock-toggle-model',
+        effort,
+        protocol: 'openai_chat_completions',
+      });
+    expect(gatewayToggle('none')).toEqual({ reasoning: { effort: 'none' } });
+    expect(gatewayToggle('on')).toEqual({ reasoning: { enabled: true } });
 
     // 声明了 max 的模型：发出去的就是 max，不做别名换算。
-    expect(params('deepseek-v4-pro', 'max', 'openai_chat_completions')).toEqual({
+    expect(params('mock-effort-model', 'max', 'openai_chat_completions')).toEqual({
       thinking: { type: 'enabled' },
       reasoning_effort: 'max',
     });
-    expect(params('deepseek-v4-pro', 'max', 'openai_responses')).toEqual({ reasoning: { effort: 'max' } });
+    expect(params('mock-effort-model', 'max', 'openai_responses')).toEqual({ reasoning: { effort: 'max' } });
     // `none` 是 toggle 补出来的档位（模型没声明这个 effort 取值）：只发开关，不发 effort 字段，
-    // Responses 协议没有等价参数就什么都不发。
-    expect(params('deepseek-v4-pro', 'none', 'openai_chat_completions')).toEqual({ thinking: { type: 'disabled' } });
-    expect(params('deepseek-v4-pro', 'none', 'openai_responses')).toEqual({});
-    expect(getModelEffortOptions('deepseek-v4-pro', 'openai_responses')).toEqual(['high', 'max']);
+    // 但模型既然声明过数字档位，说明这个接口的档位是套真枚举，「关掉」在里面就是 `none`
+    // （DeepSeek 的 responses 端点实测接受 `reasoning.effort = "none"`，回包确实没有 reasoning）。
+    expect(params('mock-effort-model', 'none', 'openai_chat_completions')).toEqual({ thinking: { type: 'disabled' } });
+    expect(params('mock-effort-model', 'none', 'openai_responses')).toEqual({ reasoning: { effort: 'none' } });
+    expect(getModelEffortOptions('mock-effort-model', 'openai_responses')).toEqual(['none', 'high', 'max']);
 
     // 两种协议各拿自己的补丁，与 models.dev 里 provider 的协议无关。
-    expect(params('gpt-5.5', 'medium', 'openai_responses')).toEqual({ reasoning: { effort: 'medium' } });
-    expect(params('gpt-5.5', 'medium', 'openai_chat_completions')).toEqual({ reasoning_effort: 'medium' });
-    expect(params('gpt-5.5', 'none', 'openai_chat_completions')).toEqual({ reasoning_effort: 'none' });
+    expect(params('mock-gpt', 'medium', 'openai_responses')).toEqual({ reasoning: { effort: 'medium' } });
+    expect(params('mock-gpt', 'medium', 'openai_chat_completions')).toEqual({ reasoning_effort: 'medium' });
+    expect(params('mock-gpt', 'none', 'openai_chat_completions')).toEqual({ reasoning_effort: 'none' });
 
     // 模型没声明的档位不发参数，而不是把别的模型的档位名硬塞过去。
-    expect(params('deepseek-v4-pro', 'low', 'openai_chat_completions')).toEqual({});
-    expect(params('deepseek-v4-pro', 'xhigh', 'openai_chat_completions')).toEqual({});
+    expect(params('mock-effort-model', 'low', 'openai_chat_completions')).toEqual({});
+    expect(params('mock-effort-model', 'xhigh', 'openai_chat_completions')).toEqual({});
   });
   it('uses a models.dev disk cache younger than 24 hours without requesting the API', async () => {
     await writeModelsCache(Date.now() - 60 * 60 * 1000, {
@@ -151,12 +245,19 @@ describe('model-effort-context', () => {
 
     await expect(getModelsDevRule('stale-model')).resolves.toMatchObject({ contextSize: 111000 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    // 先把旧载荷的那份规则钉进进程缓存（启动早期就是这条路径：选择器、`models --json`）。
+    dispose = setupModelEffortContext();
+    await ensureModelRule('stale-model');
+    expect(getModelRule('stale-model').contextSize).toBe(111000);
 
     resolveFetch(new Response(JSON.stringify({ refreshed: { models: { 'stale-model': model(222000, []) } } })));
     await vi.waitFor(async () => {
       const cache = JSON.parse(await readFile(modelsCachePath(), 'utf8')) as ModelsCache;
       expect(cache.payload.refreshed?.models['stale-model']?.limit.context).toBe(222000);
     });
+    // 刷新落盘之后，按旧载荷解析出来的记忆化规则必须作废：否则整个进程寿命里都
+    // 沿用种子里的旧数据（新模型一直「没有档位」，老模型少一档 `none`）。
+    await vi.waitFor(() => expect(getModelRule('stale-model').contextSize).toBe(222000));
   });
 
   it('keeps a stale cache when the background refresh fails', async () => {
@@ -175,6 +276,10 @@ describe('model-effort-context', () => {
   });
 
   it('waits for a cold request and atomically caches a successful response', async () => {
+    // 同上：种子新鲜时不会触发刷，先让缓存过期才是真的「冷请求」。
+    await writeModelsCache(Date.now() - 25 * 60 * 60 * 1000, {
+      cached: { models: { 'other-model': model(1000, []) } },
+    });
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response(JSON.stringify({ fetched: { models: { 'cold-model': model(456000, []) } } })));
@@ -244,12 +349,21 @@ async function mockModelsDev() {
   const payload = {
     moonshotai: {
       models: {
-        'kimi-k2.6': model(262144, [{ type: 'toggle' }]),
+        'mock-toggle-model': model(262144, [{ type: 'toggle' }]),
+        // 同一个模型的档位在不同服务商下可以不同：厂商自己不给 `none`，网关多给一个。
+        'mock-kimi-k3': model(1000000, [{ type: 'effort', values: ['low', 'high', 'max'] }]),
+      },
+    },
+    openrouter: {
+      api: 'https://openrouter.ai/api/v1',
+      models: {
+        'moonshotai/mock-kimi-k3': model(1000000, [{ type: 'effort', values: ['none', 'low', 'high', 'max'] }]),
+        'z-ai/mock-toggle-model': model(262144, [{ type: 'toggle' }]),
       },
     },
     deepseek: {
       models: {
-        'deepseek-v4-pro': model(1000000, [{ type: 'toggle' }, { type: 'effort', values: ['high', 'max'] }], {
+        'mock-effort-model': model(1000000, [{ type: 'toggle' }, { type: 'effort', values: ['high', 'max'] }], {
           input: ['text'],
           output: ['text'],
         }),
@@ -257,16 +371,17 @@ async function mockModelsDev() {
     },
     openai: {
       models: {
-        'gpt-5.5': model(1050000, [{ type: 'effort', values: ['none', 'low', 'medium', 'high', 'max'] }]),
+        'mock-gpt': model(1050000, [{ type: 'effort', values: ['none', 'low', 'medium', 'high', 'max'] }]),
       },
     },
     xai: {
       models: {
-        'grok-4.5': model(500000, [{ type: 'effort', values: ['low', 'medium', 'high'] }]),
+        'mock-grok': model(500000, [{ type: 'effort', values: ['low', 'medium', 'high'] }]),
       },
     },
   };
-  // A disk cache pins the tests to the mock payload regardless of the bundled seed.
+  // 夹具用 models.dev 里不存在的模型名：同步读只认内存缓存/随包种子，用真名字的话
+  // 刷新种子之后这里解析到的就是线上数据，夹具形同虚设。
   await writeModelsCache(Date.now(), payload);
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload))));
 }

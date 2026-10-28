@@ -1,6 +1,7 @@
 {
   "id": "subagent",
   "name": "Subagent",
+  "icon": "bot",
   "version": "1.0.0",
   "description": "Subagent delegation: the built-in subagent types, the agent tool and the delegation prompt section.",
   "author": "Mica Code",

@@ -2,14 +2,14 @@ import type { Disposable } from '@packages/mica-common/index.js';
 import type { MicaPlugin } from './Plugin.js';
 import type { PluginContext } from './PluginContext.js';
 import type { PluginAgentRegistry } from './PluginAgent.js';
+import type { PluginModelsHandler } from './PluginModels.js';
 import type { PluginRequirement } from './PluginManifest.js';
 import type { PluginPromptSections } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
-import type { PluginSessionSettingsHostApi } from './PluginSessionSettings.js';
+import { createPluginSessionSettingsApi, type PluginSessionSettingsHostApi } from './PluginSessionSettings.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
-import { createPluginSessionSettingsApi } from './PluginSessionSettings.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 
@@ -40,7 +40,7 @@ export type PluginSetupReport = {
  */
 export type PluginBaseContext = Omit<
   PluginContext,
-  'pluginId' | 'onDispose' | 'logger' | 'settings' | 'health' | 'skills'
+  'pluginId' | 'onDispose' | 'logger' | 'settings' | 'sessionSettings' | 'health' | 'skills' | 'models'
 > & {
   logger?: PluginContext['logger'];
   /**
@@ -50,7 +50,7 @@ export type PluginBaseContext = Omit<
   sessionStateFor?: (pluginId: string) => PluginSessionStateApi;
   /**
    * 按插件 id 生成本会话的设置覆盖读写面。宿主不提供时插件拿不到 `sessionSettings`，
-   * 声明了 `requires: ['sessionSettings']` 的插件会被跳过，而不是读不到配置还假装在跑。
+   * 需要它的插件必须在 `requires` 里声明，注册阶段就会被跳过。
    */
   sessionSettingsFor?: (pluginId: string) => PluginSessionSettingsHostApi;
   /**
@@ -67,6 +67,11 @@ export type PluginBaseContext = Omit<
    * 名下，卸载时随之摘除。
    */
   subagentsFor?: (pluginId: string) => PluginSubagentApi;
+  /**
+   * 插件自己的模型请求入口。manager 按插件 id 绑定后交给插件，所以记账与日志都挂着
+   * 插件身份；没有会话可记的宿主（`mica commit`）照样提供，只是不入账。
+   */
+  pluginModels?: PluginModelsHandler;
 };
 
 export class PluginManager {
@@ -88,9 +93,14 @@ export class PluginManager {
     return [...this.plugins.values()];
   }
 
-  
-
-  async setupAll(baseContext: PluginBaseContext): Promise<PluginSetupReport> {
+  /**
+   * 装配全部已登记的插件。
+   *
+   * `quietSkips` 给「只跑一条命令」的一次性宿主用（`mica commit`）：那种进程本来就只
+   * 提供命令相关的几面能力，别的插件因为缺能力被跳过是设计如此，不该把用户的插件健康
+   * 状态写成「宿主未提供能力」。
+   */
+  async setupAll(baseContext: PluginBaseContext, options: { quietSkips?: boolean } = {}): Promise<PluginSetupReport> {
     const report: PluginSetupReport = { loaded: [], failed: [], skipped: [] };
     this.watchHookErrors(baseContext);
 
@@ -98,24 +108,37 @@ export class PluginManager {
       const localDisposables: Disposable[] = [];
       const logger = createPluginLogger(plugin.id, baseContext.logger);
       const configDir = baseContext.paths?.config;
-      // `sessionStateFor` / `sessionSettingsFor` / `promptSections` 由 manager 消费
-      // （下面按 pluginId 生成本插件专属的入口），不能原样漏进 ctx，否则插件会看到一个
-      // 能读别人状态的入口。
+      // `sessionStateFor` / `promptSections` 由 manager 消费（下面按 pluginId 生成
+      // 本插件专属的入口），不能原样漏进 ctx，否则插件会看到一个能读别人状态的入口。
       const {
         sessionStateFor,
         sessionSettingsFor,
         promptSections: promptRegistry,
         agentRegistry,
         subagentsFor,
+        pluginModels: modelsHandler,
         ...shared
       } = baseContext;
       const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
       const health = createPluginHealthStore(plugin.id, { configDir });
+      // 宿主的会话级读写面按 pluginId 绑定；没有它就退化成「只有全局设置」，
+      // 插件通过 `requires: ['sessionSettings']` 声明这一点，缺能力时注册阶段跳过。
+      const sessionSettingsHost = sessionSettingsFor?.(plugin.id);
       const ctx: PluginContext = {
         ...shared,
         pluginId: plugin.id,
         logger,
         settings,
+        ...(sessionSettingsHost
+          ? {
+              sessionSettings: createPluginSessionSettingsApi({
+                fields: plugin.manifest?.settings ?? [],
+                readGlobal: () => settings.get(),
+                readOverrides: () => sessionSettingsHost.read(),
+                writeOverrides: (value) => sessionSettingsHost.write(value),
+              }),
+            }
+          : {}),
         health,
         // skill 是进程级注册表（磁盘扫描 + 插件注册合流），所以不需要宿主接线：
         // 注册归属这个插件，卸载时按 pluginId 一起摘掉。
@@ -137,15 +160,6 @@ export class PluginManager {
         },
         onDispose: (dispose) => localDisposables.push({ dispose }),
       };
-      const sessionSettingsHost = sessionSettingsFor?.(plugin.id);
-      if (sessionSettingsHost) {
-        ctx.sessionSettings = createPluginSessionSettingsApi({
-          fields: plugin.manifest?.settings ?? [],
-          readGlobal: () => settings.get(),
-          readOverrides: () => sessionSettingsHost.read(),
-          writeOverrides: (value) => sessionSettingsHost.write(value),
-        });
-      }
       const sessionState = sessionStateFor?.(plugin.id);
       if (sessionState) ctx.sessionState = sessionState;
       if (promptRegistry) {
@@ -158,14 +172,19 @@ export class PluginManager {
         };
       }
       if (subagentsFor) ctx.subagents = subagentsFor(plugin.id);
+      if (modelsHandler) {
+        ctx.models = { request: (request) => modelsHandler(plugin.id, request) };
+      }
 
       // 清单声明的能力必须都能兑现，否则插件一定会在运行期踩空。放在 setup 之前判断，
       // 装配出来的 ctx 就是事实，不需要插件自己再猜。
       const missing = missingRequirements(plugin.manifest?.requires ?? [], ctx);
       if (missing.length > 0) {
         report.skipped.push({ pluginId: plugin.id, missing });
-        logger.warn('plugin:skipped', { missing });
-        ctx.health.report({ level: 'warn', message: `宿主未提供能力：${missing.join(', ')}` });
+        if (!options.quietSkips) {
+          logger.warn('plugin:skipped', { missing });
+          ctx.health.report({ level: 'warn', message: `宿主未提供能力：${missing.join(', ')}` });
+        }
         continue;
       }
 

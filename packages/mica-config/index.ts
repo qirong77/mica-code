@@ -1,6 +1,7 @@
 import {
   CONFIG_PATH,
   PROVIDER_PROTOCOLS,
+  providerForModel,
   readConfig,
   getConfig,
   updateConfig,
@@ -50,6 +51,8 @@ export const micaConfig = {
   getModelEffortOptions,
   /** 将不受模型支持的 effort 校正为模型默认值。 */
   normalizeModelEffort,
+  /** 这个模型实际由哪个 provider 服务（模型元数据要按它查）。 */
+  providerForModel: (model: string | undefined) => providerForModel(getConfig(), model),
   /** 注册数据驱动的模型规则。 */
   registerModelRules,
   /** 注册异步模型规则解析器。 */
@@ -88,6 +91,7 @@ export {
   getModelRule,
   normalizeModelEffort,
   providerSupportsModel,
+  providerForModel,
   registerModelRuleResolver,
   registerModelRules,
   resolveEffortParams,

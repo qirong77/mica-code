@@ -111,7 +111,7 @@ export function createAgentClientOptions(config: AgentRuntimeConfig): ModelClien
     baseURL: config.provider.api_base,
     model: config.model,
     effort: config.effort,
-    supportsVision: micaConfig.getModelRule(config.model).supportsVision ?? true,
+    supportsVision: micaConfig.getModelRule(config.model, config.provider).supportsVision ?? true,
     provider: config.provider,
   };
 }
@@ -119,6 +119,6 @@ export function createAgentClientOptions(config: AgentRuntimeConfig): ModelClien
 function normalizeProviderForModel(provider: ProviderDefinition, model: string): RuntimeProviderDefinition {
   return {
     ...provider,
-    contextWindowSize: micaConfig.getModelRule(model).contextSize,
+    contextWindowSize: micaConfig.getModelRule(model, provider).contextSize,
   };
 }

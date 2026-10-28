@@ -139,22 +139,19 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['compact', '--nope', 'x'])).toMatchObject({ mode: 'error' });
   });
 
-  it('parses headless commit invocations with an owning session', () => {
+  it('parses headless commit invocations', () => {
     expect(parseCliArgs(['commit', '--dir', '/work'])).toEqual({
       mode: 'commit',
       cwd: '/work',
-      sessionId: undefined,
-      format: 'json',
     });
-    expect(parseCliArgs(['commit', '--dir=/work', '--session=abc'])).toMatchObject({
+    expect(parseCliArgs(['commit', '--dir=/work', '--format=json'])).toEqual({ mode: 'commit', cwd: '/work' });
+    expect(parseCliArgs(['commit', '--dir=/work'])).toMatchObject({
       mode: 'commit',
       cwd: '/work',
-      sessionId: 'abc',
     });
-    expect(parseCliArgs(['commit', '--session', 'abc-1'])).toMatchObject({
-      mode: 'commit',
-      sessionId: 'abc-1',
-    });
+    expect(parseCliArgs(['commit'])).toEqual({ mode: 'commit', cwd: undefined });
+    expect(parseCliArgs(['commit', '--format=yaml'])).toMatchObject({ mode: 'error' });
+    expect(parseCliArgs(['commit', '--session=abc'])).toMatchObject({ mode: 'error' });
     expect(parseCliArgs(['commit', '--nope'])).toMatchObject({ mode: 'error' });
   });
 

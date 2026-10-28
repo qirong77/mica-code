@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { PluginModelRequest } from '@packages/mica-plugin/index.js';
 import manifest from './plugin.json';
 import { DEFAULT_PROMPT } from './index.js';
-import { buildTitleProvider, isTitleRequestConfigured, sanitizeTitle } from './titleRequest.js';
+import { isTitleRequestConfigured, requestSessionTitle, sanitizeTitle } from './titleRequest.js';
 
 describe('sanitizeTitle', () => {
   it('takes the first line and strips decoration', () => {
@@ -35,22 +36,38 @@ describe('isTitleRequestConfigured', () => {
   });
 });
 
-describe('buildTitleProvider', () => {
-  it('declares an independent provider with effort disabled', () => {
-    const provider = buildTitleProvider({
+describe('requestSessionTitle', () => {
+  it('asks the host for one request with the configured endpoint and prompt', async () => {
+    const requests: PluginModelRequest[] = [];
+    const models = {
+      request: async (request: PluginModelRequest) => {
+        requests.push(request);
+        return { text: '**修复登录超时**', usage: null };
+      },
+    };
+
+    const result = await requestSessionTitle(
+      models,
+      {
+        baseUrl: 'https://example.test/v1',
+        apiKey: 'secret',
+        protocol: 'openai_responses',
+        model: 'mini',
+        prompt: '只输出标题',
+      },
+      'user: 修一下登录超时',
+    );
+
+    expect(requests[0]).toMatchObject({
+      purpose: '自动起标题',
+      system: '只输出标题',
+      user: 'user: 修一下登录超时',
       baseUrl: 'https://example.test/v1',
       apiKey: 'secret',
       protocol: 'openai_responses',
       model: 'mini',
-      prompt: '',
     });
-
-    expect(provider).toMatchObject({
-      api_base: 'https://example.test/v1',
-      protocol: 'openai_responses',
-      models: ['mini'],
-      supportsEffort: false,
-    });
+    expect(result).toEqual({ title: '修复登录超时', usage: null });
   });
 });
 

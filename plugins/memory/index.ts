@@ -271,7 +271,17 @@ async function runCuratorPrompt(ctx: PluginContext, settings: MemorySettings, us
           '整理接口未配置完整：需要接口地址、API Key 与模型名（插件设置 → Memory）；Key 填 ${ENV_VAR} 时该环境变量需要在启动 Mica 的进程里可见',
       };
     }
-    return settle(await requestCuratorCompletion(config, { system: CURATOR_SYSTEM_PROMPT, user }));
+    const models = ctx.models;
+    if (!models) {
+      return {
+        ok: false,
+        retryable: false,
+        error: '当前宿主不提供模型请求能力；请把整理模式改成「宿主子代理」',
+      };
+    }
+    return settle(
+      await requestCuratorCompletion(models, config, { system: CURATOR_SYSTEM_PROMPT, user }),
+    );
   }
 
   if (!ctx.subagents) {

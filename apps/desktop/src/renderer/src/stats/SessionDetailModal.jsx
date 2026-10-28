@@ -258,11 +258,15 @@ export function SessionDetailModal({ sessionId, onClose }) {
   }, [onClose])
 
   const usageHistory = useMemo(() => detail?.usageHistory || [], [detail])
-  const subagents = useMemo(() => detail?.subagentUsageHistory || [], [detail])
-  const subRequests = useMemo(
-    () => subagents.flatMap((record) => record.requests || []),
-    [subagents]
+  const records = useMemo(() => detail?.subagentUsageHistory || [], [detail])
+  // 同一份数组里既有委派子代理，也有插件自己的模型请求（`origin: 'plugin'`）：
+  // 两者都计入本会话开销，但「谁发起的」不同，界面上分开列。
+  const subagents = useMemo(() => records.filter((record) => record.origin !== 'plugin'), [records])
+  const pluginRequests = useMemo(
+    () => records.filter((record) => record.origin === 'plugin'),
+    [records]
   )
+  const subRequests = useMemo(() => records.flatMap((record) => record.requests || []), [records])
   const allUsage = useMemo(() => {
     const rows = [
       ...usageHistory.map((u) => ({ ...u, source: 'main' })),
@@ -347,7 +351,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
                 secondary={`${formatTokens(totals.main.input)} in · ${formatTokens(totals.main.output)} out`}
               />
               <StatCard
-                label="sub-agents"
+                label="子任务 / 插件"
                 primary={`${subRequests.length} req`}
                 secondary={`${formatTokens(totals.sub.input)} in · ${formatTokens(totals.sub.output)} out`}
               />
@@ -380,6 +384,24 @@ export function SessionDetailModal({ sessionId, onClose }) {
                 {subagents.map((record) => (
                   <SubagentCard
                     key={record.taskId || record.initiatedByCallId || record.description}
+                    record={record}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {pluginRequests.length > 0 && (
+            <section>
+              <h3 className={OVERLINE_CLASS}>插件请求</h3>
+              <p className="mt-1 text-[10px] text-fg-ghost">
+                插件自己的模型请求（自动起标题、写 commit message、整理记忆…）：不进主上下文，
+                但同样计入本会话的请求与 token。
+              </p>
+              <div className="mt-2 flex flex-col gap-2">
+                {pluginRequests.map((record) => (
+                  <SubagentCard
+                    key={`${record.pluginId || 'plugin'}-${record.taskId || record.description}`}
                     record={record}
                   />
                 ))}

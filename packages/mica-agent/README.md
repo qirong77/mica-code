@@ -6,9 +6,10 @@
 
 - 提供 `IAgent`、conversation message 等公共 agent 类型。
 - 提供 OpenAI Chat Completions 与 OpenAI Responses 两类协议 client。
+- `AgentQueryOptions.onRequestStart` 在实际发起每轮请求前提供消息数量与本轮工具定义；包括首个失败请求，transport 重试另走 `onRetry`，观察回调抛错不影响请求。
 - 提供子 agent 创建入口：`createSubAgent`。
 - 提供 usage 汇总与 subagent usage 记录类型：`summarizeUsageHistory`、`SubagentUsageRecord`。
-- 提供 subagent 用量记账原语：`buildSubagentUsageRecord`、`recordSubagentTaskUsage`（helper 子代理的请求记进 owner 的 `subagentUsageHistory`，支持 `fromIndex` 只记新增部分）。
+- 提供 subagent 用量记账原语：`buildSubagentUsageRecord`、`recordSubagentTaskUsage`（helper 子代理的请求记进 owner 的 `subagentUsageHistory`，支持 `fromIndex` 只记新增部分；`origin: 'plugin'` + `pluginId` 标记插件自己的模型请求，同样计入会话开销）。
 - 提供按 `provider.protocol` 分流的模型 client 创建入口：`createModelClient`。
 - 构建运行时系统提示词：`buildSystemPrompt`。
 - 单独取 skills 索引正文：`formatSkillsIndex`（By The Way 的隔离子代理替换了系统提示词，索引必须与主流程同源）。

@@ -8,11 +8,22 @@ import {
 } from './types.js';
 
 type RegisteredModelRule = Omit<ModelRule, 'name' | 'modelKeysIncludes'>;
-type ModelRuleResolver = (modelName: string, signal?: AbortSignal) => Promise<RegisteredModelRule>;
-type ModelRuleSyncResolver = (modelName: string) => RegisteredModelRule | undefined;
+/**
+ * 解析档位/上下文时带上「这次请求走哪个服务商」：同一个模型名在不同网关下的档位可以不一样。
+ * 只给模型名也能工作（退回模型厂商的条目），但网关特有的档位就查不到。
+ */
+type ModelRuleScope = { id?: string; api_base?: string };
+type ModelRuleResolver = (
+  modelName: string,
+  signal?: AbortSignal,
+  scope?: ModelRuleScope,
+) => Promise<RegisteredModelRule>;
+type ModelRuleSyncResolver = (modelName: string, scope?: ModelRuleScope) => RegisteredModelRule | undefined;
 
 const registeredRules = new Map<string, RegisteredModelRule>();
 const pendingRules = new Map<string, Promise<ModelRule>>();
+/** 由 resolver（也就是 models.dev 元数据）填进来的键；刷新后只清这些。 */
+const resolvedRuleKeys = new Set<string>();
 let modelRuleResolver: ModelRuleResolver | undefined;
 let modelRuleSyncResolver: ModelRuleSyncResolver | undefined;
 
@@ -22,6 +33,19 @@ export function registerModelRules(rules: Record<string, RegisteredModelRule>): 
   return () => {
     for (const model of registered) registeredRules.delete(model);
   };
+}
+
+/**
+ * 丢掉已经按旧元数据解析出来的规则。
+ *
+ * 规则一旦解析就整条缓存在进程里，而 models.dev 的在线刷新是后台完成的：启动时先按
+ * 随包种子回答的模型（新模型甚至完全没有档位）会在整个进程寿命里沿用旧数据。刷新成功
+ * 后清掉这批键，下一次同步读就会用新载荷重算；`registerModelRules` 注册的静态规则不动。
+ */
+export function clearResolvedModelRules(): void {
+  for (const key of resolvedRuleKeys) registeredRules.delete(key);
+  resolvedRuleKeys.clear();
+  pendingRules.clear();
 }
 
 /**
@@ -40,25 +64,42 @@ export function registerModelRuleResolver(
   };
 }
 
-export async function ensureModelRule(modelName: string, signal?: AbortSignal): Promise<ModelRule> {
-  if (registeredRules.has(modelName)) return getModelRule(modelName);
-  if (!modelRuleResolver) return getModelRule(modelName);
+export async function ensureModelRule(
+  modelName: string,
+  signal?: AbortSignal,
+  scope?: ModelRuleScope,
+): Promise<ModelRule> {
+  const key = ruleKey(modelName, scope);
+  if (registeredRules.has(key)) return getModelRule(modelName, scope);
+  if (!modelRuleResolver) return getModelRule(modelName, scope);
 
-  const existing = pendingRules.get(modelName);
+  const existing = pendingRules.get(key);
   if (existing) return existing;
 
-  const pending = modelRuleResolver(modelName, signal)
+  const pending = modelRuleResolver(modelName, signal, scope)
     .then((rule) => {
-      registeredRules.set(modelName, rule);
-      return getModelRule(modelName);
+      registeredRules.set(key, rule);
+      resolvedRuleKeys.add(key);
+      return getModelRule(modelName, scope);
     })
     .catch((error: unknown) => {
       if (signal?.aborted) throw error;
-      return getModelRule(modelName);
+      return getModelRule(modelName, scope);
     })
-    .finally(() => pendingRules.delete(modelName));
-  pendingRules.set(modelName, pending);
+    .finally(() => pendingRules.delete(key));
+  pendingRules.set(key, pending);
   return pending;
+}
+
+/**
+ * 缓存键：带服务商时把该服务商算进去。
+ *
+ * 同一个模型名可能同时挂在网关和原生服务上（OpenRouter 的 `kimi-k3` 与 Moonshot 的
+ * `kimi-k3` 档位不同），只按模型名缓存会让后注册的那份覆盖前一份，或者谁先解析谁说了算。
+ */
+function ruleKey(modelName: string, scope?: ModelRuleScope): string {
+  const providerId = scope?.id?.trim();
+  return providerId ? `${providerId.toLowerCase()}::${modelName}` : modelName;
 }
 
 /**
@@ -68,11 +109,21 @@ export async function ensureModelRule(modelName: string, signal?: AbortSignal): 
  * 所以 `efforts` 留空——`resolveEffortParams` 因此什么也不发。猜一份「标准五档」的
  * 后果是把 `xhigh` 之类的名字发给只认 `max` 的服务，换来一个 400。
  */
-export function getModelRule(modelName: string): ModelRule {
-  const registered = registeredRules.get(modelName);
+export function getModelRule(modelName: string, scope?: ModelRuleScope): ModelRule {
+  const registered = registeredRules.get(ruleKey(modelName, scope));
   if (registered) return { name: modelName, modelKeysIncludes: [modelName], ...registered };
-  const fromSnapshot = modelRuleSyncResolver?.(modelName);
+  const fromSnapshot = modelRuleSyncResolver?.(modelName, scope);
   if (fromSnapshot) return { name: modelName, modelKeysIncludes: [modelName], ...fromSnapshot };
+  // 带服务商查不到时退回不带服务商的那份（进程启动早期只按模型名注册过），
+  // 保证同步读至少能拿到模型厂商的元数据而不是空规则。
+  if (scope) {
+    const fallback = registeredRules.get(modelName);
+    if (fallback) return { name: modelName, modelKeysIncludes: [modelName], ...fallback };
+    const fromFallbackSnapshot = modelRuleSyncResolver?.(modelName);
+    if (fromFallbackSnapshot) {
+      return { name: modelName, modelKeysIncludes: [modelName], ...fromFallbackSnapshot };
+    }
+  }
   return {
     name: modelName,
     modelKeysIncludes: [modelName],
@@ -97,7 +148,7 @@ export function getModelEffortOptions(
   protocol?: ProviderProtocol,
   provider?: ProviderDefinition,
 ): EffortOption[] {
-  const efforts = getModelRule(modelName).efforts;
+  const efforts = getModelRule(modelName, provider).efforts;
   if (Object.keys(efforts).length === 0) {
     return orderEffortLevels(provider?.effortLevels ?? []);
   }
@@ -119,7 +170,7 @@ export function normalizeModelEffort(
   effort: EffortOption,
   provider?: ProviderDefinition,
 ): EffortOption {
-  const rule = getModelRule(modelName);
+  const rule = getModelRule(modelName, provider);
   const levels = Object.keys(rule.efforts);
   if (levels.length === 0) {
     const declared = provider?.effortLevels ?? [];

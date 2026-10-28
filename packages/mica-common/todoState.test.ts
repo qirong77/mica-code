@@ -4,8 +4,7 @@ import {
   formatTodoSummary,
   parseTodoInput,
   projectTodoSnapshot,
-  resolveTodoDisplayItems,
-  shouldShowTodoList,
+  resolveTodoPanel,
   summarizeTodoProgress,
   type TodoItem,
 } from './todoState.js';
@@ -106,31 +105,63 @@ describe('summarizeTodoProgress', () => {
   });
 });
 
-describe('resolveTodoDisplayItems', () => {
+describe('resolveTodoPanel', () => {
   const items: TodoItem[] = [
     { id: 'a', content: 'A', status: 'completed' },
     { id: 'b', content: 'B', activeForm: 'Doing B', status: 'in_progress' },
     { id: 'c', content: 'C', status: 'pending' },
   ];
 
-  it('keeps in-progress while the turn is live', () => {
-    expect(resolveTodoDisplayItems({ items, turnId: 'turn-1' }, { running: true, turnId: 'turn-1' })).toEqual(items);
+  it('shows the list untouched while its turn is running', () => {
+    expect(resolveTodoPanel({ items, turnId: 'turn-1' }, { running: true, open: true, turnId: 'turn-1' })).toEqual({
+      items,
+      visible: true,
+    });
   });
 
-  it('pauses in-progress without touching completed items once the turn ends', () => {
-    const display = resolveTodoDisplayItems({ items, turnId: 'turn-1' }, { running: false, turnId: 'turn-1' });
-    expect(display.map((item) => item.status)).toEqual(['completed', 'pending', 'pending']);
-    expect(display[0]).toEqual({ id: 'a', content: 'A', status: 'completed' });
+  it('hides the list once its turn ends and nobody reopens it', () => {
+    // 回归点：turn 结束后不能再把上一轮的计划留在屏幕上。
+    expect(resolveTodoPanel({ items, turnId: 'turn-1' }, { running: false, open: false, turnId: 'turn-1' })).toEqual({
+      items: [],
+      visible: false,
+    });
   });
 
-  it('treats a stale turn snapshot as paused', () => {
-    const display = resolveTodoDisplayItems({ items, turnId: 'turn-1' }, { running: true, turnId: 'turn-2' });
-    expect(display[1].status).toBe('pending');
+  it('hides a stale snapshot from an earlier turn even while the next one runs', () => {
+    // 回归点：新的一轮开始时，历史里上一轮的 todo_write 不得重新冒出来。
+    expect(resolveTodoPanel({ items, turnId: 'turn-1' }, { running: true, open: true, turnId: 'turn-2' })).toEqual({
+      items: [],
+      visible: false,
+    });
   });
 
-  it('only needs the running flag when the caller has a single list', () => {
-    expect(resolveTodoDisplayItems({ items, turnId: null }, { running: true })[1].status).toBe('in_progress');
-    expect(resolveTodoDisplayItems({ items, turnId: null }, { running: false })[1].status).toBe('pending');
+  it('only needs the running flag when the caller owns a single list', () => {
+    expect(resolveTodoPanel({ items, turnId: null }, { running: true, open: true }).visible).toBe(true);
+    expect(resolveTodoPanel({ items, turnId: null }, { running: false, open: false }).visible).toBe(false);
+  });
+
+  it('hides empty lists and respects the hidden flag', () => {
+    expect(
+      resolveTodoPanel({ items: [], turnId: 'turn-1' }, { running: true, open: true, turnId: 'turn-1' }).visible,
+    ).toBe(false);
+    expect(
+      resolveTodoPanel({ items, turnId: 'turn-1' }, { running: true, open: true, turnId: 'turn-1', hidden: true })
+        .visible,
+    ).toBe(false);
+  });
+
+  it('keeps a fully completed list visible while the turn still runs', () => {
+    const done: TodoItem[] = [{ id: 'a', content: 'A', status: 'completed' }];
+    expect(
+      resolveTodoPanel({ items: done, turnId: 'turn-1' }, { running: true, open: true, turnId: 'turn-1' }).visible,
+    ).toBe(true);
+  });
+
+  it('pauses in-progress items when the panel is opened outside a turn', () => {
+    // `/todo show` 打开的是刚结束那一轮：条目可以看，但不能假装还在跑。
+    const panel = resolveTodoPanel({ items, turnId: 'turn-1' }, { running: false, open: true, turnId: 'turn-1' });
+    expect(panel.visible).toBe(true);
+    expect(panel.items.map((item) => item.status)).toEqual(['completed', 'pending', 'pending']);
   });
 });
 
@@ -151,19 +182,6 @@ describe('projectTodoSnapshot', () => {
   });
 });
 
-describe('shouldShowTodoList', () => {
-  const items: TodoItem[] = [{ id: 'a', content: 'A', status: 'completed' }];
-
-  it('hides empty lists and respects the hidden flag', () => {
-    expect(shouldShowTodoList([])).toBe(false);
-    expect(shouldShowTodoList(items, { hidden: true })).toBe(false);
-  });
-
-  it('keeps a fully completed list visible as a one-line summary', () => {
-    expect(shouldShowTodoList(items)).toBe(true);
-  });
-});
-
 describe('formatTodoSummary', () => {
   it('lists only the remaining items', () => {
     const summary = formatTodoSummary([
@@ -172,9 +190,7 @@ describe('formatTodoSummary', () => {
       { id: 'c', content: 'Update docs', status: 'pending' },
     ]);
 
-    expect(summary).toBe(
-      ['TODO 清单已更新：1/3 完成，剩 2 项。', '- [>] Run tests', '- [ ] Update docs'].join('\n'),
-    );
+    expect(summary).toBe(['TODO 清单已更新：1/3 完成，剩 2 项。', '- [>] Run tests', '- [ ] Update docs'].join('\n'));
   });
 
   it('reports completion without listing items', () => {

@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
-import { orderEffortLevels } from '@packages/mica-config/getModelRule.js';
+import { clearResolvedModelRules, orderEffortLevels } from '@packages/mica-config/getModelRule.js';
 import type { ModelRule } from '@packages/mica-config/types.js';
 import { modelsDevSeedBase64 } from './seed/models-dev.seed.js';
 
@@ -19,6 +19,7 @@ type ModelMetadata = {
 };
 
 type ProviderEntry = {
+  api?: string;
   models?: Record<string, ModelMetadata>;
 };
 
@@ -30,7 +31,30 @@ type CacheEntry = {
   payload: ModelsPayload;
 };
 
-type ModelMatch = { providerId: string; model: ModelMetadata };
+type ModelMatch = { providerId: string; modelId: string; model: ModelMetadata };
+
+/**
+ * 这条元数据是不是聚合网关收录的：网关给外部模型加厂商前缀（`z-ai/glm-4.6`），
+ * 厂商自己的条目就是裸模型名（`deepseek-flash`）。带前缀说明请求走的是第三方转发，
+ * 推理开关要用厂商无关的 `reasoning`，而不是某个厂商私有的 `thinking`。
+ */
+function isGatewayEntry(match: ModelMatch): boolean {
+  return match.modelId.includes('/');
+}
+
+/** 完全同名 vs 只按 basename 同名：调用方只有在两者都空时才算「没找到」。 */
+type MatchSet = { exact: ModelMatch[]; loose: ModelMatch[] };
+
+/**
+ * 请求实际会走哪个服务商：用来在 models.dev 里优先挑「这个网关自己」的条目。
+ *
+ * 同一个模型在不同网关下的档位可以不一样（OpenRouter 的 kimi-k3 多一个 `none`，
+ * 原生 Moonshot 没有），所以档位集合必须跟着「谁在服务这次请求」走，而不是只看模型厂商。
+ */
+export type ModelProviderHint = {
+  id?: string;
+  apiBase?: string;
+};
 
 type ResolvedRule = Omit<ModelRule, 'name' | 'modelKeysIncludes'>;
 
@@ -50,18 +74,22 @@ const seedEntry = parseSeedEntry(modelsDevSeedBase64);
  * therefore the model author's provider; if that cannot be inferred, the most
  * common definition among exact-name matches is used.
  */
-export async function getModelRule(modelName = '', signal?: AbortSignal): Promise<ResolvedRule> {
+export async function getModelRule(
+  modelName = '',
+  signal?: AbortSignal,
+  provider?: ModelProviderHint,
+): Promise<ResolvedRule> {
   const requestedName = modelName.trim();
   if (!requestedName) throw new TypeError('modelName must be a non-empty string');
 
   let providers = await loadModels(signal);
   let matches = findMatches(providers, requestedName);
-  if (matches.length === 0 && providers !== seedEntry.payload) {
+  if (isEmptyMatch(matches) && providers !== seedEntry.payload) {
     // A disk cache may be stale or miss models that the bundled seed knows
     // about; always fall back to the seed before waiting on the network.
     matches = findMatches(seedEntry.payload, requestedName);
   }
-  if (matches.length === 0 && refreshPromise) {
+  if (isEmptyMatch(matches) && refreshPromise) {
     try {
       providers = await refreshPromise;
     } catch (error) {
@@ -70,12 +98,12 @@ export async function getModelRule(modelName = '', signal?: AbortSignal): Promis
     }
     matches = findMatches(providers, requestedName);
   }
-  if (matches.length === 0) {
+  if (isEmptyMatch(matches)) {
     warnSyncFallback(requestedName);
     throw new Error(`Model not found on models.dev: ${requestedName}`);
   }
 
-  const match = selectMatch(matches, requestedName);
+  const match = selectMatch(matches, requestedName, providers, provider);
   return buildRule(match, requestedName);
 }
 
@@ -85,14 +113,14 @@ export async function getModelRule(modelName = '', signal?: AbortSignal): Promis
  * 启动后到第一次异步解析完成之间、以及任何同步读（`/effort`、desktop 选择器、
  * 请求参数拼装）都要能拿到模型真实档位，不能因为还没 `await` 过就退化成「未知模型」。
  */
-export function getSeedModelRule(modelName = '') {
+export function getSeedModelRule(modelName = '', provider?: ModelProviderHint) {
   const requestedName = modelName.trim();
   if (!requestedName) return undefined;
   const providers = memoryCache?.payload ?? seedEntry.payload;
   const matches = findMatches(providers, requestedName);
-  if (matches.length === 0) return undefined;
+  if (isEmptyMatch(matches)) return undefined;
   try {
-    return buildRule(selectMatch(matches, requestedName), requestedName);
+    return buildRule(selectMatch(matches, requestedName, providers, provider), requestedName);
   } catch {
     return undefined;
   }
@@ -104,7 +132,7 @@ function buildRule(match: ModelMatch, requestedName: string): ResolvedRule {
     throw new Error(`Model has no valid context limit on models.dev: ${requestedName}`);
   }
 
-  const effort = resolveEffortMetadata(match.model);
+  const effort = resolveEffortMetadata(match.model, isGatewayEntry(match));
   return {
     contextSize,
     defaultEffort: chooseDefaultEffort(effort.levels),
@@ -148,6 +176,9 @@ function refreshModels(signal?: AbortSignal): Promise<ModelsPayload> {
 
     const entry: CacheEntry = { version: CACHE_VERSION, fetchedAt: Date.now(), payload };
     memoryCache = entry;
+    // 刷新前按旧载荷（往往是随包种子）解析出来的规则要作废，否则整个进程寿命内都
+    // 沿用旧档位：种子不认识的模型一直显示「没有档位」，种子认识的模型少一档 `none`。
+    clearResolvedModelRules();
     await writeCacheAtomically(entry).catch(() => undefined);
     return payload;
   });
@@ -261,7 +292,7 @@ function warnSyncFallback(modelName: string, error?: unknown): void {
   );
 }
 
-function findMatches(providers: ModelsPayload, requestedName: string): ModelMatch[] {
+function findMatches(providers: ModelsPayload, requestedName: string): MatchSet {
   const basename = requestedName.split('/').at(-1)?.toLowerCase() ?? '';
   const exact: ModelMatch[] = [];
   const basenameMatches: ModelMatch[] = [];
@@ -269,22 +300,40 @@ function findMatches(providers: ModelsPayload, requestedName: string): ModelMatc
   for (const [providerId, provider] of Object.entries(providers ?? {})) {
     for (const [key, model] of Object.entries(provider?.models ?? {})) {
       const ids = [key, model?.id].filter((value): value is string => typeof value === 'string');
-      const candidate = { providerId, model };
+      const candidate = { providerId, modelId: key, model };
       if (ids.some((id) => id.toLowerCase() === requestedName.toLowerCase())) exact.push(candidate);
       if (ids.some((id) => id.split('/').at(-1)?.toLowerCase() === basename)) basenameMatches.push(candidate);
     }
   }
 
-  return exact.length > 0 ? exact : basenameMatches;
+  return { exact, loose: basenameMatches };
 }
 
-function selectMatch(matches: ModelMatch[], modelName: string): ModelMatch {
+function isEmptyMatch(matches: MatchSet): boolean {
+  return matches.exact.length === 0 && matches.loose.length === 0;
+}
+
+function selectMatch(
+  matches: MatchSet,
+  modelName: string,
+  providers: ModelsPayload,
+  provider?: ModelProviderHint,
+): ModelMatch {
+  // 请求方点名了服务商，而该服务商在 models.dev 里正好收录了这个模型：以它为准。
+  // 网关会改写/扩展可用的档位名，用模型厂商的条目会少报档位（选不到 `none` 这类）。
+  // 网关下的键常常带厂商前缀（`moonshotai/kimi-k3`），所以这里连 basename 命中一起看。
+  const preferred = preferredProviderId(providers, provider);
+  const all = [...matches.exact, ...matches.loose];
+  const own = preferred ? all.find((match) => match.providerId === preferred) : undefined;
+  if (own) return own;
+
+  const exact = matches.exact.length > 0 ? matches.exact : matches.loose;
   const owner = inferOwner(modelName);
-  const original = owner && matches.find((match) => match.providerId === owner);
+  const original = owner && exact.find((match) => match.providerId === owner);
   if (original) return original;
 
   const signatureCounts = new Map<string, number>();
-  for (const match of matches) {
+  for (const match of exact) {
     const signature = JSON.stringify({
       context: match.model?.limit?.context,
       reasoning: match.model?.reasoning,
@@ -292,9 +341,34 @@ function selectMatch(matches: ModelMatch[], modelName: string): ModelMatch {
     });
     signatureCounts.set(signature, (signatureCounts.get(signature) ?? 0) + 1);
   }
-  return matches.reduce((best, match) =>
+  return exact.reduce((best, match) =>
     signatureCount(match, signatureCounts) > signatureCount(best, signatureCounts) ? match : best,
   );
+}
+
+/**
+ * 把配置里的 provider 对到 models.dev 的 provider 条目上：先认 id（大小写不敏感），
+ * 再认 `api_base` 的主机名。对不上就返回空——这时退回模型厂商的条目，不猜。
+ */
+function preferredProviderId(providers: ModelsPayload, provider?: ModelProviderHint): string | undefined {
+  if (!provider) return undefined;
+  const wantedId = provider.id?.trim().toLowerCase();
+  if (wantedId) {
+    const byId = Object.keys(providers ?? {}).find((key) => key.toLowerCase() === wantedId);
+    if (byId) return byId;
+  }
+  const wantedHost = hostOf(provider.apiBase);
+  if (!wantedHost) return undefined;
+  return Object.keys(providers ?? {}).find((key) => hostOf(providers[key]?.api) === wantedHost);
+}
+
+function hostOf(url?: string): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return undefined;
+  }
 }
 
 function inferOwner(modelName: string): string | undefined {
@@ -336,6 +410,8 @@ type EffortMetadata = {
   declaredLevels: string[];
   hasEffort: boolean;
   hasToggle: boolean;
+  /** 元数据来自聚合网关（模型键带厂商前缀），开关参数用厂商无关的 `reasoning`。 */
+  gatewayStyle: boolean;
 };
 
 /**
@@ -349,7 +425,7 @@ type EffortMetadata = {
  * - 只有 toggle：这是布尔开关，档位是 `none`（关）与 `on`（开）；
  * - 只有 `reasoning: true` 没给任何控制参数，或不支持推理：没有档位，不发推理参数。
  */
-function resolveEffortMetadata(model: ModelMetadata): EffortMetadata {
+function resolveEffortMetadata(model: ModelMetadata, gatewayStyle: boolean): EffortMetadata {
   const options = Array.isArray(model.reasoning_options) ? model.reasoning_options : [];
   const effortOption = options.find((option) => option?.type === 'effort');
   const declared = (Array.isArray(effortOption?.values) ? effortOption.values : [])
@@ -359,13 +435,15 @@ function resolveEffortMetadata(model: ModelMetadata): EffortMetadata {
   const hasEffort = Boolean(effortOption) && declared.length > 0;
 
   if (!hasEffort && !hasToggle) {
-    return { levels: [], declaredLevels: [], hasEffort: false, hasToggle: false };
+    return { levels: [], declaredLevels: [], hasEffort: false, hasToggle: false, gatewayStyle };
   }
 
-  if (!hasEffort) return { levels: ['none', 'on'], declaredLevels: [], hasEffort: false, hasToggle: true };
+  if (!hasEffort) {
+    return { levels: ['none', 'on'], declaredLevels: [], hasEffort: false, hasToggle: true, gatewayStyle };
+  }
   const levels = new Set(declared);
   if (hasToggle) levels.add('none');
-  return { levels: orderEffortLevels(levels), declaredLevels: declared, hasEffort: true, hasToggle };
+  return { levels: orderEffortLevels(levels), declaredLevels: declared, hasEffort: true, hasToggle, gatewayStyle };
 }
 
 /**
@@ -382,14 +460,32 @@ function buildEfforts(meta: EffortMetadata): ModelRule['efforts'] {
     const rule: NonNullable<ModelRule['efforts'][string]> = {};
     if (declared.has(level)) {
       rule.openai_responses = { reasoning: { effort: level } };
-      rule.openai_chat_completions = {
-        ...(meta.hasToggle ? { thinking: { type: level === 'none' ? 'disabled' : 'enabled' } } : {}),
-        reasoning_effort: level,
-      };
+      // 网关只认 `reasoning.effort`；再多带 `thinking` / `reasoning_effort` 会抢先生效，
+      // 实测把 `none` 顶掉、推理照样跑。
+      rule.openai_chat_completions = meta.gatewayStyle
+        ? { reasoning: { effort: level } }
+        : {
+            ...(meta.hasToggle ? { thinking: { type: level === 'none' ? 'disabled' : 'enabled' } } : {}),
+            reasoning_effort: level,
+          };
     } else if (meta.hasToggle) {
-      // 开关补出来的 `none` / `on` 不是模型声明的 effort 取值：只发开关，不发 effort 字段。
-      // 布尔开关在 Responses 协议下没有等价参数，该协议就没有这一档（列出来也发不出去）。
-      rule.openai_chat_completions = { thinking: { type: level === 'none' ? 'disabled' : 'enabled' } };
+      // 开关补出来的 `none` / `on` 不是模型声明的 effort 取值，所以不发数字档位。
+      //
+      // 开关的字段名跟着「谁在服务这次请求」走，实测两套互不通用：
+      // - 厂商直连（`deepseek-flash`）：只认 `thinking: disabled`；
+      // - 聚合网关（`z-ai/glm-4.6` 这类带前缀的键）：只认 `reasoning.effort`，
+      //   收到 `thinking` 会静默忽略，推理照跑，`reasoning_effort` 也只有部分模型认。
+      // 两边一起发更糟：网关会被 `thinking` / `reasoning_effort` 抢先生效，反而关不掉。
+      rule.openai_chat_completions = meta.gatewayStyle
+        ? // `on` 不是 effort 取值，网关这边用开关式写法。
+          { reasoning: level === 'none' ? { effort: 'none' } : { enabled: true } }
+        : { thinking: { type: level === 'none' ? 'disabled' : 'enabled' } };
+      // 已经声明过 effort 取值的模型，说明这个接口的数字档位是一套真的枚举，「关掉推理」
+      // 在里面就是 `none`（DeepSeek 的 responses 端点实测接受，且回包确实没有 reasoning）。
+      // 只声明开关的模型没有这份证据，Responses 协议下就没有这一档。
+      if (meta.hasEffort && level === 'none') {
+        rule.openai_responses = { reasoning: { effort: 'none' } };
+      }
     }
     efforts[level] = rule;
   }

@@ -120,6 +120,50 @@ describe('TodoPlugin', () => {
     await harness.commands.execute('/todo show');
     expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list is empty.');
   });
+
+  it('drops the previous plan when a new turn starts', async () => {
+    const harness = createTodoHarness(disposeCallbacks);
+
+    await micaTools.execute('todo_write', { todos: [{ content: 'Old plan', status: 'pending' }] });
+    await harness.hooks.emit('turn:after', {
+      input: micaRuntime.createRuntimeInput('done', 'ui'),
+      elapsedMs: 10,
+      hasError: false,
+      outcome: 'completed',
+    });
+
+    // 回归点：新一轮开始而模型没写计划时，屏幕上不能还挂着上一轮的计划。
+    await harness.hooks.emit('turn:before', {
+      runtime: {},
+      input: micaRuntime.createRuntimeInput('unrelated question', 'ui'),
+    });
+
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list is empty.');
+  });
+
+  it('keeps the plan readable through /todo show after the turn ended', async () => {
+    const harness = createTodoHarness(disposeCallbacks);
+
+    await micaTools.execute('todo_write', {
+      todos: [
+        { content: 'Done', status: 'completed' },
+        { content: 'Left over', status: 'in_progress' },
+      ],
+    });
+    await harness.hooks.emit('turn:after', {
+      input: micaRuntime.createRuntimeInput('done', 'ui'),
+      elapsedMs: 10,
+      hasError: false,
+      outcome: 'completed',
+    });
+
+    // 面板收起后仍能手动查看，且不会把 in_progress 报成已完成。
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith(
+      ['TODO 清单已更新：1/2 完成，剩 1 项。', '- [ ] Left over'].join('\n'),
+    );
+  });
 });
 
 function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>) {

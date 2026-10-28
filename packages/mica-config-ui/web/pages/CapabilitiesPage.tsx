@@ -171,6 +171,7 @@ export function CapabilitiesPage() {
   return (
     <PageFrame
       title="Capabilities"
+      description="新会话默认开放的工具、skills 与 MCP server；单个会话可以在对话里单独调整"
       path="config.json · capabilityDefaults"
       actions={
         <div className="toolbar">

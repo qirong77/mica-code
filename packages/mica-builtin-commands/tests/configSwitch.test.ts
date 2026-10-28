@@ -240,7 +240,7 @@ describe('config switch commands', () => {
     micaConfig.update(() => ({
       provider: openai.id,
       model: 'gpt-5.4',
-      effort: 'low',
+      effort: 'xhigh',
       contextWindowSize: 256000,
       providers: [openai, deepseek],
     }));
@@ -248,7 +248,7 @@ describe('config switch commands', () => {
     const agent = makeAgent([], {
       provider: { ...openai, contextWindowSize: 256000 },
       model: 'gpt-5.4',
-      effort: 'low',
+      effort: 'xhigh',
     });
     const session = makeSession();
 
@@ -264,7 +264,7 @@ describe('config switch commands', () => {
 
       const activePanel = micaUi.panels.pluginUIs.get()[0];
       expect(activePanel?.id).toBe('select-effort');
-      // deepseek-v4-pro 只声明 none/high/max，旧的 low 被收敛到它自己的默认档位 high。
+      // deepseek-v4-pro 没声明 xhigh，旧的档位被收敛到它自己的默认档位 high。
       expect(micaConfig.get()).toMatchObject({
         provider: 'deepseek',
         model: 'deepseek-v4-pro',

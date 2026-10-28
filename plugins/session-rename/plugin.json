@@ -1,6 +1,7 @@
 {
   "id": "session-rename",
   "name": "Auto Session Rename",
+  "icon": "text-cursor-input",
   "version": "1.0.0",
   "description": "每轮开始前，把最近的对话上下文与本轮用户请求交给另一个模型，自动给会话起一个贴题的标题。",
   "author": "Mica Code",
@@ -75,5 +76,5 @@
       "max": 86400
     }
   ],
-  "requires": ["commands", "hooks", "session", "settings", "ui"]
+  "requires": ["commands", "hooks", "models", "session", "settings", "ui"]
 }

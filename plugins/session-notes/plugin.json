@@ -1,6 +1,7 @@
 {
   "id": "session-notes",
   "name": "Session Notes",
+  "icon": "notebook-pen",
   "version": "1.0.0",
   "description": "A markdown scratchpad shared by the user and the model, persisted per session so it survives compaction.",
   "author": "Mica Code",

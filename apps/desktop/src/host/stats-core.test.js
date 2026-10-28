@@ -151,6 +151,45 @@ describe('Stats usage aggregation', () => {
     ])
   })
 
+  test('separates plugin model requests from delegated subagents', () => {
+    const session = parseStatsSession({
+      id: 'with-plugin-request',
+      createdAt: '2026-08-01T01:00:00.000Z',
+      updatedAt: '2026-08-01T02:00:00.000Z',
+      snapshot: {
+        model: 'main-model',
+        messages: [],
+        usageHistory: [{ usageId: 'main-1', inputTokens: 500, outputTokens: 50 }],
+        subagentUsageHistory: [
+          {
+            taskId: 'plugin:session-rename:自动起标题',
+            origin: 'plugin',
+            pluginId: 'session-rename',
+            subagentType: 'plugin:session-rename',
+            description: '自动起标题',
+            status: 'completed',
+            startedAt: '2026-08-01T01:10:00.000Z',
+            finishedAt: '2026-08-01T01:10:03.000Z',
+            requests: [{ usageId: 'plugin-1', inputTokens: 80, outputTokens: 8 }]
+          }
+        ]
+      }
+    })
+
+    // 插件请求照样算进本会话的开销，但不该被当成一次委派子代理任务。
+    expect(session.requests).toBe(2)
+    expect(session.inputTokens).toBe(580)
+    expect(session.subagentTasks).toBe(0)
+    expect(session.pluginRequests).toBe(1)
+    expect(session.usageEvents[1]).toMatchObject({
+      usageId: 'plugin-1',
+      isSubagent: false,
+      isPlugin: true,
+      pluginId: 'session-rename',
+      pluginPurpose: '自动起标题'
+    })
+  })
+
   test('gives raw records and projected events the same identity', () => {
     const raw = { usageId: 'u1', inputTokens: 10 }
     expect(usageIdentity(raw)).toBe('id:u1')

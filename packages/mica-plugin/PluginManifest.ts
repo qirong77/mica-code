@@ -89,6 +89,7 @@ export const PLUGIN_REQUIREMENTS = [
   'runtime',
   'session',
   'sessionSettings',
+  'models',
   'sessionState',
   'settings',
   'skills',

@@ -91,6 +91,7 @@ export function TerminalControlPage() {
   return (
     <PageFrame
       title="Terminal Control"
+      description="Mica 内置终端：一个会话一个后台 shell，agent 读写它看到的那一屏"
       path={details?.serviceUrl ?? undefined}
       actions={
         <div className="toolbar">

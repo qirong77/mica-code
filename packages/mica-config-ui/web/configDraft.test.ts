@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   addProviderDraft,
-  capabilityDefaultsSummary,
-  extraConfigKeys,
-  mcpServerCount,
   parseConfigDraft,
   providerEntries,
   readProviderDraft,
@@ -132,14 +129,6 @@ describe('config draft serialization', () => {
     expect(text.indexOf('"providers"')).toBeLessThan(text.indexOf('"mcpServers"'));
     expect(text.indexOf('"mcpServers"')).toBeLessThan(text.indexOf('"zebra"'));
     expect(text.endsWith('\n')).toBe(true);
-  });
-
-  it('lists extra keys and summaries', () => {
-    const draft = draftOf({ ...SOURCE, modelRules: [], capabilityDefaults: { disabledTools: ['a', 'b'] } });
-    expect(extraConfigKeys(draft)).toEqual(['modelRules']);
-    expect(mcpServerCount(draft)).toBe(1);
-    expect(capabilityDefaultsSummary(draft)).toBe('默认关闭 2 项');
-    expect(capabilityDefaultsSummary(draftOf(SOURCE))).toBe('全部启用');
   });
 });
 

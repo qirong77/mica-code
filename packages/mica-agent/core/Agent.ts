@@ -28,6 +28,8 @@ export type AgentCallbacks = {
 export type AgentQueryOptions = {
   signal?: AbortSignal;
   shouldContinue?: () => boolean;
+  /** Once before each model request, excluding transport retries. Observer errors are ignored. */
+  onRequestStart?: (info: { messageCount: number; tools?: unknown }) => void;
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
   /**
    * Rewrites the in-flight session messages at an iteration boundary — the point

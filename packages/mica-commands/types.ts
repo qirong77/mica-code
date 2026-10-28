@@ -24,8 +24,19 @@ export type CommandContext = {
 };
 
 export type CommandResult =
-  | { ok: true; handled?: boolean }
-  | { ok: false; error: unknown; message?: string };
+  | {
+      ok: true;
+      handled?: boolean;
+      /** 一句话结果，界面可以直接显示（成功时也一样）。 */
+      message?: string;
+      /**
+       * 结构化结果，给宿主或脚本用（`mica commit --format json`）。
+       *
+       * 命令是插件实现的产品能力，宿主不该为了拿一个哈希去解析人类可读的文案。
+       */
+      data?: unknown;
+    }
+  | { ok: false; error: unknown; message?: string; data?: unknown };
 
 export type ParsedCommand = {
   command: MicaCommand;

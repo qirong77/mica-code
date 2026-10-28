@@ -1,0 +1,60 @@
+{
+  "id": "commit",
+  "name": "Git Commit",
+  "icon": "git-commit",
+  "version": "1.0.0",
+  "description": "分析当前工作区的改动，让模型写一条 commit message，然后 add / commit / push。模型可以跟随主配置，也可以单独指定接口、协议与模型。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 120,
+  "requires": ["commands", "events", "models", "settings"],
+  "settings": [
+    {
+      "key": "baseUrl",
+      "label": "接口地址",
+      "type": "text",
+      "format": "url",
+      "placeholder": "https://api.openai.com/v1",
+      "description": "留空跟随主配置（当前 provider 的地址、Key 与协议）。写到 /v1 即可，插件按协议补 /chat/completions 或 /responses。"
+    },
+    {
+      "key": "apiKey",
+      "label": "API Key",
+      "type": "password",
+      "description": "只写在本机的插件设置文件里。留空跟随主配置，可填 ${MY_KEY} 从环境变量读。"
+    },
+    {
+      "key": "protocol",
+      "label": "协议",
+      "type": "select",
+      "default": "openai_chat_completions",
+      "options": [
+        { "value": "openai_chat_completions", "label": "Chat Completions" },
+        { "value": "openai_responses", "label": "Responses" }
+      ],
+      "description": "只在填了接口地址时生效；跟随主配置时用主配置 provider 的协议。"
+    },
+    {
+      "key": "model",
+      "label": "模型",
+      "type": "text",
+      "placeholder": "gpt-4.1-mini",
+      "description": "留空跟随主配置的模型。写一个模型名就换用它（接口地址留空时仍在主配置的接口上调）。"
+    },
+    {
+      "key": "prompt",
+      "label": "提示词",
+      "type": "textarea",
+      "default": "You write concise git commit messages.\nReturn only the commit message, with no markdown fences and no explanation.\nChoose exactly one format category from: feat, fix, refactor, chore, docs, test, perf, style, build, ci.\nUse this subject format: type: 中文摘要 emoji\nPut only the plain type before the colon; put the emoji at the end.\nExamples:\nfeat: 开发了提交插件 ✨\nfix: 修复模型配置读取失败 🐛\nrefactor: 简化 agent 运行时配置 ♻️\nchore: 更新项目配置 🔧\nKeep the subject under 72 characters.\nAdd a short Chinese body only if it materially clarifies multiple changes.\nDo not include step-by-step reasoning.",
+      "description": "发给模型的系统提示词。留空使用内置默认值。"
+    },
+    {
+      "key": "push",
+      "label": "提交后推送",
+      "type": "switch",
+      "default": "true",
+      "description": "提交成功后推送到上游分支；没有上游时按同名远程分支推，都没有就只提交不推送。"
+    }
+  ]
+}

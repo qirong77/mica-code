@@ -45,7 +45,8 @@ export async function applyConfigSwitchUpdate({
 }): Promise<IMicaConfig> {
   let adjustments: ConfigSwitchAdjustment[] = [];
   const candidate = update(configForAgent(micaConfig.get(), agent));
-  await micaConfig.ensureModelRule(candidate.model);
+  const candidateProvider = candidate.providers.find((item) => item.id === candidate.provider);
+  await micaConfig.ensureModelRule(candidate.model, undefined, candidateProvider);
   assertProtocolCompatible(agent, candidate);
   const next = micaConfig.update((config) => {
     const normalized = normalizeConfigSwitchSelection(update(configForAgent(config, agent)));
@@ -93,7 +94,7 @@ function normalizeConfigSwitchSelection(config: IMicaConfig): {
   const selectedEffort = isEffortLevelName(config.effort) ? config.effort : 'medium';
   const effort =
     provider.supportsEffort === false ? 'none' : micaConfig.normalizeModelEffort(model, selectedEffort, provider);
-  const contextWindowSize = micaConfig.getModelRule(model).contextSize;
+  const contextWindowSize = micaConfig.getModelRule(model, provider).contextSize;
   const adjustments: ConfigSwitchAdjustment[] = [];
 
   if (config.effort !== effort) {
@@ -142,7 +143,7 @@ function configForAgent(config: IMicaConfig, agent: CommandAgent): IMicaConfig {
     provider: provider.id,
     model,
     effort,
-    contextWindowSize: micaConfig.getModelRule(model).contextSize,
+    contextWindowSize: micaConfig.getModelRule(model, provider).contextSize,
   };
 }
 
@@ -150,11 +151,7 @@ function findCurrentProvider(config: IMicaConfig): ProviderDefinition | undefine
   return config.providers.find((item) => item.id === config.provider);
 }
 
-function formatConfigSwitchSuccess(
-  message: string,
-  adjustments: ConfigSwitchAdjustment[],
-  hint?: string,
-): string {
+function formatConfigSwitchSuccess(message: string, adjustments: ConfigSwitchAdjustment[], hint?: string): string {
   return [message, adjustments.length > 0 ? formatConfigSwitchAdjustments(adjustments) : undefined, hint]
     .filter((part): part is string => Boolean(part))
     .join('; ');

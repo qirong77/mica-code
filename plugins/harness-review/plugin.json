@@ -1,0 +1,37 @@
+{
+  "id": "harness-review",
+  "name": "Harness Review",
+  "icon": "heart-pulse",
+  "version": "0.1.0",
+  "description": "自动记录 agent 运行轨迹，聚合工具失败与重复调用，生成有证据的复盘报告并记录人工评估。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 30,
+  "mica": { "apiVersion": 1 },
+  "requires": ["hooks", "session", "commands", "tools", "settings", "ui"],
+  "settings": [
+    { "key": "enabled", "label": "自动记录运行", "type": "switch", "default": "true" },
+    { "key": "captureContent", "label": "记录任务与工具内容（脱敏、截断）", "type": "switch", "default": "true" },
+    {
+      "key": "maxEventChars",
+      "label": "单条内容上限",
+      "type": "number",
+      "default": "4000",
+      "min": 200,
+      "max": 20000,
+      "step": 200,
+      "unit": "字符"
+    },
+    {
+      "key": "maxEventsPerRun",
+      "label": "单次运行事件上限",
+      "type": "number",
+      "default": "2000",
+      "min": 20,
+      "max": 10000,
+      "step": 100,
+      "unit": "条"
+    }
+  ]
+}

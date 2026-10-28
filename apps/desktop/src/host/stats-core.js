@@ -457,6 +457,8 @@ export function projectSubagentRecords(records) {
     taskId: record.taskId || null,
     parentTaskId: record.parentTaskId || null,
     initiatedByCallId: record.initiatedByCallId || null,
+    origin: record.origin === 'plugin' ? 'plugin' : 'subagent',
+    pluginId: record.pluginId || null,
     subagentType: record.subagentType || null,
     description: record.description || null,
     status: record.status || null,
@@ -648,8 +650,16 @@ export function parseStatsSession(raw) {
   // Subagent requests are persisted per task under snapshot.subagentUsageHistory;
   // flatten them into the same usage-event stream, tagged with task lineage so
   // the UI can filter or group by subagent later.
+  //
+  // 同一份数组里还躺着插件自己的模型请求（`origin: 'plugin'`，例如自动起标题、写
+  // commit message）：它们同样是本会话的开销，但来源不是子代理，界面要分开呈现。
   const subagentEvents = []
+  let subagentTaskCount = 0
+  let pluginRequestCount = 0
   for (const record of subagentRecords) {
+    const isPlugin = record.origin === 'plugin' || Boolean(record.pluginId)
+    if (isPlugin) pluginRequestCount += Array.isArray(record.requests) ? record.requests.length : 0
+    else subagentTaskCount += 1
     const recordModel = record.model || snap.model
     // Subagent requests rarely carry occurredAt on legacy records; the task's
     // startedAt is closer to the true request time than the session createdAt.
@@ -660,7 +670,14 @@ export function parseStatsSession(raw) {
     for (const usage of requests) {
       subagentEvents.push({
         ...normalizeUsageEvent(usage, recordStartMs, recordModel),
-        isSubagent: true,
+        isSubagent: !isPlugin,
+        ...(isPlugin
+          ? {
+              isPlugin: true,
+              pluginId: record.pluginId || null,
+              pluginPurpose: record.description || null
+            }
+          : {}),
         subagentTaskId: record.taskId || null,
         subagentParentTaskId: record.parentTaskId || null,
         subagentType: record.subagentType || null,
@@ -675,7 +692,7 @@ export function parseStatsSession(raw) {
   }
   const usageEvents = [...mainEvents, ...subagentEvents]
   const summary = summarizeEvents(session, usageEvents)
-  return { ...summary, subagentTasks: subagentRecords.length }
+  return { ...summary, subagentTasks: subagentTaskCount, pluginRequests: pluginRequestCount }
 }
 
 /**

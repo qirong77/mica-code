@@ -4,7 +4,8 @@
 
 ## 主要能力
 
-- 提供全部产品内置命令实现：`/btw`、`/cd`、`/clear`、`/compact`、`/config`、`/exit`、`/fork`、`/model`、`/effort`、`/role`、`/capabilities`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/commit`、`/new`、`/rename`、`/resume`、`/rewind`、`/loop`。
+- 提供全部产品内置命令实现：`/btw`、`/cd`、`/clear`、`/compact`、`/config`、`/exit`、`/fork`、`/model`、`/effort`、`/role`、`/capabilities`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/new`、`/rename`、`/resume`、`/rewind`、`/loop`。`/commit` 由官方插件 `plugins/commit` 提供，不在本包。
+- `/harness-review list|report|assess <id> <状态> <依据>` 由官方插件 `plugins/harness-review` 提供：查看当前工作区运行复盘、导出报告、记录人工评估；运行中可用。
 - 通过 `CommandHostService` 支持 `plugins/command-*.ts` 装配层注册全部命令（TUI 与 headless 共用）。
 - 提供命令所需的服务类型与注入入口。
 - 支持带 UI 面板的命令，例如 `model`、`resume`、`mcp`、`skills`、`task`。
@@ -39,26 +40,22 @@ const commands = [
 
 ```text
 packages/mica-builtin-commands/
-  index.ts                 公共 API：命令工厂、AgentChangeTracker、commit 分析辅助、services 类型
+  index.ts                 公共 API：命令工厂、services 类型
   commandHost.ts           单文件命令插件使用的宿主服务契约
   services.ts              命令依赖的服务接口定义
   README.md
   commands/                各内置斜杠命令实现
   shared/                  命令间共享辅助逻辑
-  git/                     Git 变更追踪与提交辅助
   tests/                   包内全部测试
 ```
 
-- `commands/`：全部命令工厂，`btw`（含 btwThread 线程辅助）、`capabilities`、`cd`、`clear`、`compact`、`commit`、`config`、`context`、`effort`、`exit`、`fork`、`loop`（含 loop 工具）、`mcp`、`model`、`new`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task`。
+- `commands/`：全部命令工厂，`btw`（含 btwThread 线程辅助）、`capabilities`、`cd`、`clear`、`compact`、`config`、`context`、`effort`、`exit`、`fork`、`loop`（含 loop 工具）、`mcp`、`model`、`new`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task`。
 - `shared/`：
   - `commandInput.ts`：列表选择键盘导航。
   - `selectCommand.tsx`：通用选择面板。
   - `configSwitch.ts`：provider/model/effort 切换辅助。
   - `ScrollableCommandDialog.tsx`：命令面板共用的滚动容器与滚动控制器。
-- `git/`：
-  - `agentChangeTracker.ts`：当前 agent 增量文件追踪。
-  - `commitRunner.ts`：commit 命令与 headless `mica commit` 共享的确定性 git 分析/提交逻辑（变更摘要、commit message 生成、add/commit/push），公共入口由 `index.ts` 聚合导出。
 - `services.ts`：`CommandRuntimeServices` 与相关类型，避免命令直接依赖应用层。
-- `subagentUsage.ts`：helper 子代理（commit message / btw / compact 摘要）的用量记账入口（`recordHelperSubagentUsage`），写进当前会话的 `subagentUsageHistory`。
+- `subagentUsage.ts`：helper 子代理（btw / compact 摘要）的用量记账入口（`recordHelperSubagentUsage`），写进当前会话的 `subagentUsageHistory`。
 - `commandHost.ts`：向单文件命令插件暴露 active agent、session controller、runtime services 和统一注册函数。
 - `index.ts`：稳定公共导出入口；应用层只应从这里引用。

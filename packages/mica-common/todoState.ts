@@ -55,6 +55,12 @@ export type TodoProgress = {
   active: TodoItem | null;
 };
 
+/** 面板/dock 的投影结果：`visible` 为 false 时不要渲染任何东西。 */
+export type TodoPanel = {
+  items: TodoItem[];
+  visible: boolean;
+};
+
 export type TodoParseResult =
   | {
       ok: true;
@@ -157,23 +163,42 @@ export function projectTodoSnapshot(entries: readonly TodoWriteEntry[]): TodoSna
 }
 
 /**
- * 展示用的清单：不在活跃 turn 里时，`in_progress` 一律显示为 `pending`。
+ * 面板/dock 要显示什么。
  *
- * 这是纯展示投影，不改模型给的数据：「这一轮已经结束」意味着没有东西还在进行，
- * 但也不代表那些事做完了——所以降到 pending，而不是 completed。
+ * 计划属于**一轮**，所以显示的边界也是轮次：
  *
- * `turnId` 不传时只看 `running`（TUI 只有一个活跃清单）；传了则要求 turn 匹配
- * （desktop 从历史投影，可能拿到上一轮的清单）。
+ * - 只在该清单所属的那一轮还在跑时出现。turn 一结束就收起——「本轮正在做什么」这个
+ *   问题已经没有答案，把上一轮的清单留在屏幕上会让人以为它仍是当前进度（这是残留的
+ *   主要来源）。
+ * - 历史里的清单不算数：`todo_write` 会留在对话历史里，从历史投影时若拿的是上一轮的
+ *   记录（`turnId` 不匹配），一律当作没有清单，而不是停下来展示过时的进度。
+ * - 全部完成时也照常显示（运行中的最后一步），因为它仍是本轮的进度；收起由轮次结束
+ *   负责，而不是由「做完了」负责。
+ *
+ * `open` 与 `running` 是两件事：`open` 回答「用户此刻要不要看这个面板」
+ * （`/todo show` 或本轮进行中），`running` 回答「这些条目还在被执行吗」。
+ * 分开之后，空闲时手动打开面板不会把 `in_progress` 显示成还在跑的假 spinner。
  */
-export function resolveTodoDisplayItems(
+export function resolveTodoPanel(
   snapshot: TodoSnapshot,
-  options: { running: boolean; turnId?: string | null },
-): TodoItem[] {
-  const live =
-    options.running &&
-    (options.turnId === undefined || (snapshot.turnId !== null && snapshot.turnId === options.turnId));
-  if (live) return snapshot.items;
-  return snapshot.items.map((item) => (item.status === 'in_progress' ? { ...item, status: 'pending' } : item));
+  options: { running: boolean; open: boolean; turnId?: string | null; hidden?: boolean },
+): TodoPanel {
+  if (options.hidden || !options.open || snapshot.items.length === 0) {
+    return { items: [], visible: false };
+  }
+  // 条目还在跑时必须确认它们属于当前这一轮；空闲查看时不追究，用户就是要看最近那份。
+  //
+  // `turnId` 不传表示调用方只有一个活跃清单（TUI）；传了就必须匹配，否则是上一轮的残留。
+  if (options.running) {
+    const belongsToTurn = options.turnId == null || (snapshot.turnId !== null && snapshot.turnId === options.turnId);
+    if (!belongsToTurn) return { items: [], visible: false };
+    return { items: snapshot.items, visible: true };
+  }
+  // 没有东西在跑：只做展示投影，数据不动。
+  return {
+    items: snapshot.items.map((item) => (item.status === 'in_progress' ? { ...item, status: 'pending' } : item)),
+    visible: true,
+  };
 }
 
 /** 计数。`active` 用于「当前在做什么」的一行摘要。 */
@@ -192,20 +217,9 @@ export function summarizeTodoProgress(items: readonly TodoItem[]): TodoProgress 
   };
 }
 
-/**
- * 面板/dock 是否该出现。
- *
- * 全部完成时**仍然显示**（折叠成一行），因为「这轮做完了什么」本身是信息；
- * 直接隐藏会让用户分不清「没建过计划」和「计划全部完成」。
- */
-export function shouldShowTodoList(items: readonly TodoItem[], options: { hidden?: boolean } = {}): boolean {
-  if (options.hidden) return false;
-  return items.length > 0;
-}
-
 /** 单条展示文案：进行中用 activeForm，其余用 content。 */
 export function todoItemLabel(item: TodoItem): string {
-  return item.status === 'in_progress' ? item.activeForm ?? item.content : item.content;
+  return item.status === 'in_progress' ? (item.activeForm ?? item.content) : item.content;
 }
 
 /**
@@ -221,9 +235,7 @@ export function formatTodoSummary(items: readonly TodoItem[]): string {
     return `TODO 清单已更新：${progress.total}/${progress.total} 完成。全部结束。`;
   }
 
-  const lines = [
-    `TODO 清单已更新：${progress.completed}/${progress.total} 完成，剩 ${progress.remaining} 项。`,
-  ];
+  const lines = [`TODO 清单已更新：${progress.completed}/${progress.total} 完成，剩 ${progress.remaining} 项。`];
   for (const item of items) {
     if (item.status === 'completed') continue;
     lines.push(`- [${item.status === 'in_progress' ? '>' : ' '}] ${item.content}`);

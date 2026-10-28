@@ -155,11 +155,7 @@ export type {
 } from './PluginContext.js';
 export type { PluginPromptSection } from './PluginPrompt.js';
 export { PluginPromptSections } from './PluginPrompt.js';
-export {
-  DESKTOP_CHECKS,
-  DESKTOP_CHECK_IDS,
-  isDesktopCheckId,
-} from './PluginDesktop.js';
+export { DESKTOP_CHECKS, DESKTOP_CHECK_IDS, isDesktopCheckId } from './PluginDesktop.js';
 export type {
   DesktopCheckDefinition,
   DesktopCheckId,
@@ -191,6 +187,14 @@ export type {
   PluginCompactResult,
   PluginIterationRewriter,
 } from './PluginAgent.js';
+export type {
+  PluginModelProtocol,
+  PluginModelRequest,
+  PluginModelResult,
+  PluginModelUsage,
+  PluginModelsApi,
+  PluginModelsHandler,
+} from './PluginModels.js';
 export {
   PLUGIN_HEALTH_DIR,
   readPluginHealth,
@@ -221,6 +225,7 @@ export type {
   PluginSessionSettingsView,
 } from './PluginSessionSettings.js';
 export type { HookRegistry } from './HookRegistry.js';
+export type { AgentObservationEvent } from './AgentObservation.js';
 export type { GuardHookResult, HookExecutionContext, HookHandler, HookKind, HookOptions } from './HookTypes.js';
 export type { ServiceContainer } from './ServiceContainer.js';
 export type { ServiceToken } from './ServiceToken.js';
@@ -251,8 +256,4 @@ export {
   toggleSessionAnnotation,
   writeSessionAnnotations,
 } from './sessionAnnotations.js';
-export type {
-  SessionAnnotationOption,
-  SessionAnnotations,
-  SessionAnnotationsProvider,
-} from './sessionAnnotations.js';
+export type { SessionAnnotationOption, SessionAnnotations, SessionAnnotationsProvider } from './sessionAnnotations.js';

@@ -39,6 +39,48 @@ afterAll(() => {
 });
 
 describe('LocalRuntimeController queue drain', () => {
+  it('stops the background subagents a finished turn left running', async () => {
+    const snapshot: AgentRuntimeSnapshot = {
+      providerId: 'openai',
+      protocol: 'openai_chat_completions',
+      model: 'test-model',
+      effort: 'none',
+      role: 'default',
+      messages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    };
+    let runId = 0;
+    const agent = {
+      events: { on: vi.fn(), off: vi.fn() },
+      reserveRunId: () => ++runId,
+      isCurrent: () => true,
+      captureClientSnapshot: () => undefined,
+      run: vi.fn(() => Promise.resolve({ runId, text: 'done' })),
+      toConversationMessages: () => [],
+      getSnapshot: () => snapshot,
+      setSessionId: vi.fn(),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      preserveAbortedTurn: vi.fn(),
+    } as unknown as AgentRuntime;
+    const killRunningForOwner = vi.fn(() => 0);
+    const runtime = new LocalRuntimeController(
+      agent,
+      new SessionController(agent),
+      new micaCommands.CommandRegistry(),
+      new micaPlugin.HookRegistry(),
+      new micaPlugin.ServiceContainer(),
+      { killRunningForOwner } as never,
+    );
+
+    await runtime.submit('hello');
+
+    // 这一轮已交付：它起的后台子代理不会再有消费者，留着只会在状态栏挂一条
+    // 永远 running 的条目并继续烧 token。
+    expect(killRunningForOwner).toHaveBeenCalledWith(agent, 'Parent turn finished.');
+  });
+
   it('starts the after-turn queued input as a new turn without a false lease warning', async () => {
     const snapshot: AgentRuntimeSnapshot = {
       providerId: 'openai',

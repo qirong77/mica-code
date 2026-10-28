@@ -45,7 +45,7 @@ if (invocation.mode === 'models') {
   const { listRuntimeModelIds } = await import('./cli/modelCatalog.js');
   const models = await listRuntimeModelIds();
   if (invocation.json) {
-    const { ensureModelRule, getModelEffortOptions, micaConfig, isProviderProtocol } =
+    const { ensureModelRule, getModelRule, getModelEffortOptions, micaConfig, isProviderProtocol } =
       await import('@packages/mica-config/index.js');
     const { default: setupModelEffortContext } =
       await import('@packages/mica-builtin-commands/startup/model-effort-context/index.js');
@@ -54,6 +54,7 @@ if (invocation.mode === 'models') {
       const entries = await Promise.all(
         models.map(async (id) => {
           let efforts: string[] = [];
+          let defaultEffort: string | null = null;
           const model = id.split('/').at(-1) ?? id;
           // 档位集合按「模型 + 用户配置的协议」决定：同一个模型挂在两种协议下，能用的档位不同。
           const provider = micaConfig
@@ -62,12 +63,15 @@ if (invocation.mode === 'models') {
             .sort((left, right) => right.id.length - left.id.length)[0];
           const protocol = isProviderProtocol(provider?.protocol) ? provider.protocol : undefined;
           try {
-            await ensureModelRule(model);
+            // 档位跟着「谁在服务这个模型」走：带上 provider 才能拿到网关自己声明的档位。
+            await ensureModelRule(model, undefined, provider);
             efforts = getModelEffortOptions(model, protocol, provider);
+            // 模型自己的默认档位：界面按它收敛显示，跟 host 每轮 normalizeModelEffort 的结果一致。
+            if (efforts.length > 0) defaultEffort = getModelRule(model, provider).defaultEffort ?? null;
           } catch {
             // Best-effort: models.dev lookup may be unavailable offline.
           }
-          return { id, efforts };
+          return { id, efforts, defaultEffort };
         }),
       );
       process.stdout.write(`${JSON.stringify(entries)}\n`);
@@ -154,19 +158,11 @@ if (invocation.mode === 'compact') {
 }
 
 if (invocation.mode === 'commit') {
-  const { runCommit } = await import('./cli/runCommit.js');
-  const abortController = new AbortController();
-  const requestAbort = () => abortController.abort();
-  process.once('SIGINT', requestAbort);
-  process.once('SIGTERM', requestAbort);
-  process.once('SIGHUP', requestAbort);
+  // 提交流程属于 commit 插件：这里只装配插件并执行同名命令，内核不知道 git 细节。
+  const { runPluginCommand } = await import('./cli/runPluginCommand.js');
   let exitCode = 0;
   try {
-    const result = await runCommit({
-      cwd: invocation.cwd,
-      sessionId: invocation.sessionId,
-      signal: abortController.signal,
-    });
+    const result = await runPluginCommand({ name: 'commit', cwd: invocation.cwd });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (!result.ok) exitCode = 1;
     if (!result.ok && result.error) console.error(result.error);

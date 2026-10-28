@@ -72,7 +72,7 @@ const steerRequest = `{"id":4,"method":"turn/steer","params":{"expectedTurnId":"
           <td>
             <code>mica commit</code>
           </td>
-          <td>生成提交说明并执行 Git 提交、尝试推送。</td>
+          <td>执行 <code>commit</code> 插件命令：生成提交说明并执行 Git 提交、尝试推送。</td>
           <td>单行 JSON 结果。</td>
         </tr>
       </tbody>
@@ -306,8 +306,10 @@ mica compact --session SESSION_ID --force</code></pre>
   <h2>生成并执行 Git 提交</h2>
   <pre><code>mica commit --dir ./your-project</code></pre>
   <p>
-    命令收集 Git 变化，调用模型生成提交说明，然后执行 <code>git add -A</code>
-    、提交并尝试推送。它会包含工作区中的全部可暂存变化，运行前应完成审阅。
+    <code>mica commit</code> 以一次性插件命令执行官方插件 <code>commit</code> 的 <code>/commit</code>：收集
+    Git 变化，调用模型生成提交说明，然后执行 <code>git add -A</code>、提交并尝试推送。它会包含工作区中的全部
+    可暂存变化，运行前应完成审阅。写提交说明的模型默认跟随主配置，也可以在
+    <code>$MICA_HOME/plugin-settings/commit.json</code>（或配置页 Plugins → Git Commit）单独指定接口、模型与是否推送。
   </p>
   <p>
     成功结果包含 <code>ok</code>、<code>commitHash</code>、<code>subject</code>、<code>commitMessage</code> 与{' '}

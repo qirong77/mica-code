@@ -84,7 +84,7 @@ export default defineConfig({
         '@packages': resolve('../../packages'),
         // 配置页组件来自 packages/mica-config-ui：显式指向 .tsx 入口，页面代码是 .jsx，
         // 写 `.../index.js` 不会回退到 TypeScript 源码
-        '@mica-config-ui/web': resolve('../../packages/mica-config-ui/web/index.tsx')
+        '@mica-config-ui/web': resolve('../../packages/mica-config-ui/web/index.tsx'),
       }
     },
     server: {

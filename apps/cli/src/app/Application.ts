@@ -29,6 +29,7 @@ import { applySessionConfig, SessionController } from '../session/SessionControl
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
+import { createPluginModels, recordPluginModelUsage } from '../plugins/pluginModels.js';
 import type { ApplicationContext } from './ApplicationContext.js';
 import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
@@ -81,7 +82,7 @@ export class Application {
       if (startupSession) {
         const snapshot = applySessionConfig(startupSession.snapshot);
         startupSession = { ...startupSession, snapshot };
-        void micaConfig.ensureModelRule(snapshot.model).catch(() => undefined);
+        void micaConfig.ensureModelRule(snapshot.model, undefined, { id: snapshot.providerId }).catch(() => undefined);
       } else {
         try {
           await ensureInitialModelSelection();
@@ -93,7 +94,10 @@ export class Application {
           });
         }
         const currentModel = micaConfig.get().model;
-        if (currentModel) void micaConfig.ensureModelRule(currentModel).catch(() => undefined);
+        if (currentModel)
+          void micaConfig
+            .ensureModelRule(currentModel, undefined, micaConfig.providerForModel(currentModel))
+            .catch(() => undefined);
       }
       const hooks = new micaPlugin.HookRegistry();
       const agent = new AgentRuntime({}, hooks);
@@ -187,7 +191,8 @@ export class Application {
           },
           clear: () => resolvePluginSession(agentSessions, undefined)?.agent.clearPluginState(pluginId),
         }),
-        // 会话级的插件设置覆盖：写不到会话上就抛错，别让界面显示「已保存」而实际没存。
+        // 会话级设置覆盖与插件状态一样跟着「当前 agent」走；没有会话时抛出，
+        // 免得用户以为改动生效了、实际没落进任何快照。
         sessionSettingsFor: (pluginId) => ({
           read: () => resolvePluginSession(agentSessions, undefined)?.agent.getPluginSessionSettings(pluginId),
           write: (value) => {
@@ -202,6 +207,17 @@ export class Application {
           onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
         },
         subagentsFor: (pluginId) => pluginSubagents.forPlugin(pluginId),
+        // 插件自己的模型请求（起标题、写 commit message、整理记忆）由宿主代发：
+        // 记账只有宿主做得到，请求实现也只该有一份。
+        pluginModels: createPluginModels({
+          record: (entry) => {
+            const session = resolvePluginSession(agentSessions, undefined);
+            recordPluginModelUsage(entry, {
+              agent: session?.agent,
+              save: () => session?.sessionController.saveCurrent({ allowEmpty: true }),
+            });
+          },
+        }),
         runtime: {
           submit: (text, options) => runtime.submit(text, options),
           queue: {
@@ -368,7 +384,7 @@ function seedStartupModelDisplay(session: PersistedSession | null): void {
     !model ? '-' : provider?.supportsEffort === false ? 'none' : (session?.snapshot.effort ?? config.effort ?? '-'),
   );
   micaUi.panels.modelDisplay.contextWindowSize.set(
-    session && model ? micaConfig.getModelRule(model).contextSize : config.contextWindowSize,
+    session && model ? micaConfig.getModelRule(model, provider).contextSize : config.contextWindowSize,
   );
   micaUi.terminalInput.role.set(session?.snapshot.role ?? 'default');
 }

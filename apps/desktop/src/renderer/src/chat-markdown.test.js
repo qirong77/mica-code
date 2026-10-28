@@ -14,7 +14,7 @@ import {
   mergeReplayEvents,
   resolveChatPath,
   todoSnapshotFromMessages,
-  todoItemsForTurn
+  todoPanelForTurn
 } from './ChatView'
 
 describe('chat Markdown', () => {
@@ -329,7 +329,7 @@ describe('structured activity state', () => {
     ])
   })
 
-  it('pauses an in-progress todo outside its owning active turn', () => {
+  it('shows the plan only while its own turn runs', () => {
     const messages = [
       {
         kind: 'tool',
@@ -344,12 +344,17 @@ describe('structured activity state', () => {
       }
     ]
 
-    expect(todoItemsForTurn(messages, 'turn-1', true)[0].status).toBe('in_progress')
-    expect(todoItemsForTurn(messages, 'turn-1', false)[0].status).toBe('pending')
-    expect(todoItemsForTurn(messages, 'turn-2', true)[0].status).toBe('pending')
+    expect(todoPanelForTurn(messages, 'turn-1', true)).toEqual({
+      items: [{ id: 'Inspect', content: 'Inspect', activeForm: undefined, status: 'in_progress' }],
+      visible: true
+    })
+    // 回归点：轮次结束后不能继续把上一轮的计划挂在页面上。
+    expect(todoPanelForTurn(messages, 'turn-1', false)).toEqual({ items: [], visible: false })
+    // 回归点：新的一轮开始时，历史里上一轮的清单不得重新出现。
+    expect(todoPanelForTurn(messages, 'turn-2', true)).toEqual({ items: [], visible: false })
   })
 
-  it('never turns leftover items into completed ones when the turn ends', () => {
+  it('keeps leftover items unfinished in the data while the turn runs', () => {
     const messages = [
       {
         kind: 'tool',
@@ -368,12 +373,30 @@ describe('structured activity state', () => {
       }
     ]
 
-    // 回归点：turn 结束只暂停展示，剩下两项必须仍然报告为未完成。
-    expect(todoItemsForTurn(messages, 'turn-1', false).map((item) => item.status)).toEqual([
+    // 回归点：turn 结束不伪造完成，数据仍然只有一项完成。
+    expect(latestTodoItems(messages).map((item) => item.status)).toEqual([
       'completed',
-      'pending',
+      'in_progress',
       'pending'
     ])
     expect(todoSnapshotFromMessages([])).toEqual({ items: [], turnId: null })
+  })
+
+  it('drops the dock when the todo list belongs to an older turn', () => {
+    const messages = [
+      {
+        kind: 'tool',
+        turnId: 'turn-1',
+        tool: {
+          tool: 'todo_write',
+          status: 'completed',
+          input: { todos: [{ content: 'Old plan', status: 'pending' }] }
+        }
+      }
+    ]
+
+    // 空闲时没有活跃轮次：不能因为历史里还有一条 todo_write 就一直显示。
+    expect(todoPanelForTurn(messages, null, false)).toEqual({ items: [], visible: false })
+    expect(todoPanelForTurn(messages, 'turn-1', true, true)).toEqual({ items: [], visible: false })
   })
 })

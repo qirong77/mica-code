@@ -165,5 +165,5 @@ function describeLocateFailure(messages: unknown[], prompt: string): string {
   if (findUserMessageCutIndex(messages, prompt) >= 0) {
     return '这条消息在会话里的位置已变化（可能被压缩或由另一个窗口改写），请重新打开会话后重试';
   }
-  return '找不到要编辑的消息，历史可能已经变化';
+  return '找不到这条消息：它可能没有真正发出，或者历史已被压缩';
 }

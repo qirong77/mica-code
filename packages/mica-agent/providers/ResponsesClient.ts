@@ -215,6 +215,13 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
         this.model,
       );
 
+      const requestTools = this.tools ? this.responseTools : undefined;
+      try {
+        options?.onRequestStart?.({ messageCount: wireMessages.length, tools: requestTools });
+      } catch {
+        // Observation must not interrupt the model request.
+      }
+
       // krill 等上游在过载时返回 HTTP 200 + {"error":...,"type":"error"} JSON，
       // openai-node SDK 不会在 create() 抛错，而是把错误体反序列化成 APIError
       // 在流迭代首帧抛出（type=service_unavailable_error / code=server_is_overloaded）。
@@ -239,9 +246,9 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
               model: this.model,
               instructions: systemPrompt,
               input: wireMessages,
-              ...(this.tools
+              ...(requestTools
                 ? {
-                    tools: this.responseTools,
+                    tools: requestTools,
                     tool_choice: 'auto' as const,
                   }
                 : {}),

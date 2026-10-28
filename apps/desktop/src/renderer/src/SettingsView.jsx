@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { ConfigWebApp, setConfigWebClient, setConfigWebEditor } from '@mica-config-ui/web'
 import { createDesktopConfigWebClient } from './config-web'
 import { LocalJsonEditor } from './config-web-editor'
@@ -9,24 +8,28 @@ setConfigWebClient(createDesktopConfigWebClient())
 setConfigWebEditor(LocalJsonEditor)
 
 /**
- * Settings 视图：直接渲染配置页组件。
+ * 设置 / 插件页：整页打开的配置页。
  *
- * 数据来自页面所连的那台运行时，所以「切到另一台服务器」之后这个视图改的就是那台的
- * 配置——不再依赖本机拉起 config-web 子进程，也没有跨源 iframe。
+ * 桌面上它盖住整个窗口（包括左侧会话列表），而不是塞进对话区右侧：配置页自带一列导航，
+ * 再套一层会话列表只会把内容挤窄；顶部「返回对话」把用户送回对话，设置因此是一层页面，
+ * 而不是一个可以一直开着的面板。
+ *
+ * 数据来自页面所连的那台运行时，所以「切到另一台服务器」之后这里改的就是那台的配置——
+ * 不依赖本机拉起 config-web 子进程，也没有跨源 iframe。
+ *
+ * 每次打开都重新挂载（`key` 含 section / 插件 id）：入口决定了落在哪一页，残留的上一页
+ * 导航状态会让人以为点错了地方（例如从插件菜单进却停在上次的 Performance）。
  */
-export function SettingsView({ visible }) {
-  // 首次打开才挂载，之后保持挂载以保留页内状态（与其它视图的常驻方式一致）
-  const [mounted, setMounted] = useState(visible)
-  useEffect(() => {
-    if (visible) setMounted(true)
-  }, [visible])
-
+export function SettingsView({ section = 'config', pluginId = null, onClose }) {
   return (
-    <section
-      className={`min-h-0 flex-1 flex-col overflow-hidden ${visible ? 'flex' : 'hidden'}`}
-      aria-hidden={!visible}
-    >
-      {mounted ? <ConfigWebApp /> : null}
+    <section className="mica-config-shell" aria-label="Mica 设置">
+      <ConfigWebApp
+        key={`${section}:${pluginId ?? ''}`}
+        initialSection={section}
+        initialPluginId={pluginId}
+        onClose={onClose}
+        closeLabel="返回对话"
+      />
     </section>
   )
 }

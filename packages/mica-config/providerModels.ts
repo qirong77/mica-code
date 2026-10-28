@@ -32,7 +32,8 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
   const currentConfig = store.getConfig();
   if (currentConfig.provider === providerId) {
     const model = currentConfig.model || models[0]!;
-    void ensureModelRule(model).catch(() => undefined);
+    const activeProvider = currentConfig.providers.find((item) => item.id === providerId);
+    void ensureModelRule(model, undefined, activeProvider).catch(() => undefined);
   }
 
   store.updateRuntimeConfig((config) => {
@@ -50,12 +51,12 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
       ...config,
       providers,
       model,
-      contextWindowSize: current ? getModelRule(model).contextSize : config.contextWindowSize,
+      contextWindowSize: current ? getModelRule(model, current).contextSize : config.contextWindowSize,
       effort:
         current?.supportsEffort === false
           ? 'none'
           : current
-            ? normalizeModelEffort(model, config.effort)
+            ? normalizeModelEffort(model, config.effort, current)
             : config.effort,
     };
   });

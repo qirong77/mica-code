@@ -7,9 +7,7 @@ function base(extra: Record<string, unknown> = {}) {
 
 describe('parsePluginManifest desktop checks', () => {
   it('reads the declared run requirements in declaration order', () => {
-    const result = parsePluginManifest(
-      base({ desktop: { checks: ['screen-recording', 'accessibility'] } }),
-    );
+    const result = parsePluginManifest(base({ desktop: { checks: ['screen-recording', 'accessibility'] } }));
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -49,5 +47,25 @@ describe('parsePluginManifest requirements', () => {
   it('rejects capability names the host can never provide', () => {
     const result = parsePluginManifest(base({ requires: ['teleport'] }));
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('parsePluginManifest icon', () => {
+  it('keeps the declared icon name', () => {
+    const result = parsePluginManifest(base({ icon: 'list-checks' }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.icon).toBe('list-checks');
+  });
+
+  it('leaves the icon empty so the interface can fall back to its default', () => {
+    const result = parsePluginManifest(base());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.icon).toBe('');
+  });
+
+  it('rejects names the interface could never resolve', () => {
+    for (const icon of ['ListChecks', 'list_checks', 'list--checks', 'list checks', '图标']) {
+      expect(parsePluginManifest(base({ icon })).ok).toBe(false);
+    }
   });
 });

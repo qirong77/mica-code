@@ -261,7 +261,12 @@ export function SessionSettingsDialog({
           {section === 'loop' ? <LoopPanel {...loopProps} /> : null}
 
           {section === 'plugins' ? (
-            <PluginSettingsPanel nodeId={nodeId} sessionId={sessionId} cwd={cwd} running={running} />
+            <PluginSettingsPanel
+              nodeId={nodeId}
+              sessionId={sessionId}
+              cwd={cwd}
+              running={running}
+            />
           ) : null}
 
           {error ? <p className="session-settings-error">{error}</p> : null}

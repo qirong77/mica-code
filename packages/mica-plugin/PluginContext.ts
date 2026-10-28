@@ -10,6 +10,7 @@ import type { PluginPromptSection } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
 import type { PluginSessionSettingsApi } from './PluginSessionSettings.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
+import type { PluginModelsApi } from './PluginModels.js';
 import type { PluginHealthStore } from './PluginHealth.js';
 import type { PluginSettingIssue, PluginSettingValues } from './PluginSettings.js';
 import type { PluginDesktopApi, PluginSkillsApi } from './PluginDesktop.js';
@@ -152,6 +153,8 @@ export type PluginContext = {
    * （有哪些类型、工具怎么描述、什么时候委派）。内核里不出现任何具体委派策略。
    */
   subagents?: PluginSubagentApi;
+  /** Host-scoped helper model requests; usage is attributed to the calling plugin. */
+  models?: PluginModelsApi;
   /**
    * 清单里声明的设置项的当前值（`$MICA_HOME/plugin-settings/<id>.json`）。
    * 配置页改完立刻生效：读的时候按文件 mtime 判断，不需要重开会话。

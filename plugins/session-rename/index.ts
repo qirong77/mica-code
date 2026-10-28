@@ -247,6 +247,8 @@ async function rename(input: {
   const { ctx, sessionId, currentTitle, config, maxMessages, latestUserText } = input;
   const session = ctx.session;
   if (!session) return null;
+  const models = ctx.models;
+  if (!models) throw new Error('插件运行环境没有提供模型请求接口');
 
   const entries = buildTranscript(session.messages(), { maxMessages, latestUserText });
   if (!entries.some((entry) => entry.role === 'user')) {
@@ -264,7 +266,11 @@ async function rename(input: {
     protocol: config.protocol,
   });
 
-  const { title: rawTitle, usage } = await requestSessionTitle(config, formatTitleInput(entries));
+  const { title: rawTitle, usage } = await requestSessionTitle(
+    models,
+    config,
+    formatTitleInput(entries),
+  );
   const title = sanitizeTitle(rawTitle);
   if (!title) {
     ctx.logger.warn('session-rename:empty-title', { sessionId, elapsedMs: Date.now() - startedAt });

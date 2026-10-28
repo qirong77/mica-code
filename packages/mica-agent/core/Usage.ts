@@ -21,6 +21,15 @@ export type SubagentUsageRecord = {
   taskId: string;
   /** The parent task id when this subagent was spawned by another subagent. */
   parentTaskId?: string;
+  /**
+   * 谁发起了这批请求：委派子代理（缺省）还是某个插件自己的模型请求。
+   *
+   * 两者都是「本会话产生、但不进主上下文」的开销，所以共用同一份记账；界面上
+   * 需要分开呈现（`By subagent` / `By plugin`），就靠这个字段区分。
+   */
+  origin?: 'subagent' | 'plugin';
+  /** `origin === 'plugin'` 时发起这批请求的插件 id。 */
+  pluginId?: string;
   /** The provider tool-call id of the parent agent's Agent invocation. */
   initiatedByCallId?: string;
   subagentType: string;
@@ -69,6 +78,8 @@ export type SubagentUsageTaskMeta = {
   taskId: string;
   parentTaskId?: string;
   initiatedByCallId?: string;
+  origin?: 'subagent' | 'plugin';
+  pluginId?: string;
   subagentType: string;
   description: string;
   model?: string;
@@ -87,6 +98,8 @@ export function buildSubagentUsageRecord(
     taskId: options.taskId,
     ...(options.parentTaskId ? { parentTaskId: options.parentTaskId } : {}),
     ...(options.initiatedByCallId ? { initiatedByCallId: options.initiatedByCallId } : {}),
+    ...(options.origin ? { origin: options.origin } : {}),
+    ...(options.pluginId ? { pluginId: options.pluginId } : {}),
     subagentType: options.subagentType,
     description: options.description,
     ...(options.model ? { model: options.model } : {}),

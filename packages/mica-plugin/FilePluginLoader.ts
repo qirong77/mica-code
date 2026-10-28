@@ -41,6 +41,8 @@ export type PluginInspection = {
   name: string;
   version?: string;
   description: string;
+  /** 清单声明的图标名；清单坏掉或没声明时为空字符串，界面用默认图标兜底。 */
+  icon: string;
   /** 插件目录的绝对路径。 */
   root: string;
   entryFile: string;
@@ -191,6 +193,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     declaredId: dirName,
     name: dirName,
     description: '',
+    icon: '',
     root: dir,
     entryFile: '',
     manifestFile,
@@ -218,6 +221,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     name: manifest.name,
     version: manifest.version,
     description: manifest.description,
+    icon: manifest.icon,
     entryFile,
     settings: manifest.settings,
     desktopChecks: manifest.desktopChecks,

@@ -834,6 +834,12 @@ export class LocalRuntimeController implements RuntimeController {
       }
       const elapsedMs = Date.now() - startedAt;
       if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
+      // 这一轮已经收尾：它起的后台子代理不会再有消费者。结果只能经 `agent
+      // operation=read` 取回，而下一轮的模型不会去读上一个 turn 的 task_id——
+      // 留着它们只会在状态栏挂一条永远 running 的条目，并继续烧 token。
+      // `killRunningForOwner` 只处理仍在跑的任务，且不发完成通知，所以重试、
+      // 中止与排队轮次都不会因此多出一条系统消息。
+      this.subagentTasks?.killRunningForOwner(agent, 'Parent turn finished.');
       // Release the turn lease before turn:after hooks run. The message-queue
       // plugin dequeues after-turn inputs there and starts the next turn, which
       // needs a free lease; releasing after the hook made that submit fail with

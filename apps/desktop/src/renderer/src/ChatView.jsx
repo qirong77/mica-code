@@ -40,8 +40,7 @@ import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
 import { comparableText } from '@packages/mica-common/promptText.js'
 import {
   projectTodoSnapshot,
-  resolveTodoDisplayItems,
-  shouldShowTodoList,
+  resolveTodoPanel,
   summarizeTodoProgress,
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
@@ -899,9 +898,7 @@ function WaitTasksDock({ tasks, now = Date.now(), onOpen }) {
               onClick={() => onOpen?.(task)}
             >
               <span className="chat-task-kind">⏳ {waitTaskKindLabel(task.kind)}</span>
-              <span className="chat-task-status chat-task-status-waiting">
-                等待中
-              </span>
+              <span className="chat-task-status chat-task-status-waiting">等待中</span>
               <span className="chat-task-runtime">已等 {age}</span>
               <span className="chat-task-type">{task.id}</span>
               <span className="chat-task-description">
@@ -1520,12 +1517,27 @@ export function latestTodoItems(messages) {
   return todoSnapshotFromMessages(messages).items
 }
 
-export function todoItemsForTurn(messages, turnId, running) {
-  return resolveTodoDisplayItems(todoSnapshotFromMessages(messages), { running, turnId })
+/**
+ * 本轮要显示的清单。
+ *
+ * `turnId` 必须传当前活跃的轮次：`messages` 是整段会话历史，最后一
+ * 条 `todo_write` 很可能属于上一轮，直接渲染会让早先的计划一直挂在页面上。
+ * 轮次结束（`running` false）时也会收起，规则与 TUI 面板同一份。
+ */
+export function todoPanelForTurn(messages, turnId, running, hidden = false) {
+  // desktop 没有「手动打开」的入口：面板就是实时指示器，轮次结束即收起。
+  return resolveTodoPanel(todoSnapshotFromMessages(messages), {
+    running,
+    open: running,
+    turnId,
+    hidden
+  })
 }
 
-function TodoDock({ items, hidden }) {
-  if (!shouldShowTodoList(items, { hidden })) return null
+function TodoDock({ panel }) {
+  if (!panel.visible) return null
+
+  const items = panel.items
 
   const progress = summarizeTodoProgress(items)
   const status = progress.active ? 'running' : progress.remaining === 0 ? 'completed' : 'pending'
@@ -2648,6 +2660,9 @@ export function ChatView({
   const [composerMinHeight, setComposerMinHeight] = useState(null)
   const messagesRef = useRef([])
   const modelProtocolsRef = useRef(null) // { map: { [modelId]: { protocol, efforts } }, currentProtocol }
+  // 模型档位表：状态行要按它判断当前模型有没有推理强度。等选择面板打开才拉不够——首屏会
+  // 显示上一次会话留下的档位，看起来像这一轮会带着它发出去。
+  const [modelEfforts, setModelEfforts] = useState(null)
   const protocolBlockRef = useRef('')
   const compactBusyRef = useRef(false)
   const listRef = useRef(null)
@@ -3667,7 +3682,7 @@ export function ChatView({
           finishStream(timestamp)
           finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
           // 计划不在这里收口：turn 正常结束不代表残留项做完了。清单保持模型写下的
-          // 状态，`todoItemsForTurn` 只把不再活跃的 in_progress 投影成 pending。
+          // 状态，`todoPanelForTurn` 只显示属于本轮的那份清单。
           // failed turn 的真实原因在 turn/completed 通知的 error 字段里透传，
           // 否则模型 400 / provider 配置错误等失败只会把 phase 置为 error，
           // 用户看到“运行了又马上停止”却没有任何提示。
@@ -3853,7 +3868,9 @@ export function ChatView({
         draftsRef.current.set(nodeIdRef.current, payload.text)
         setInput(payload.text)
       }
-      appendNotice(payload.error || '消息发送失败', 'error')
+      // silent：host 已经用同一条 turn.error 通知报过错的场合（host 启动即退出），
+      // 这里只撤回气泡，不再叠一条一样的 /error。
+      if (!payload.silent) appendNotice(payload.error || '消息发送失败', 'error')
     })
     const offRunStarted = window.mica.chat.onRunStarted((payload) => {
       if (payload.id !== currentRunKey()) return
@@ -4344,6 +4361,33 @@ export function ChatView({
     [appendNotice, meta?.protocol]
   )
 
+  /** 记住一次 `chat.models()` 结果：协议切换判定、档位展示、换模型收敛 override 共用。 */
+  const rememberModelCatalog = useCallback((result) => {
+    const map = {}
+    for (const item of result.models || [])
+      map[item.id] = {
+        protocol: item.protocol,
+        efforts: item.efforts || [],
+        defaultEffort: item.defaultEffort || null
+      }
+    modelProtocolsRef.current = { map, currentProtocol: result.currentProtocol }
+    setModelEfforts(map)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    window.mica.chat
+      .models()
+      .then((result) => {
+        if (cancelled || !result?.ok) return
+        rememberModelCatalog(result)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [rememberModelCatalog])
+
   const openPicker = useCallback(
     (kind) => {
       if (running) {
@@ -4362,12 +4406,7 @@ export function ChatView({
           : window.mica.chat.roles()
       request
         .then((result) => {
-          if (needsModels && result?.ok) {
-            const map = {}
-            for (const item of result.models || [])
-              map[item.id] = { protocol: item.protocol, efforts: item.efforts || [] }
-            modelProtocolsRef.current = { map, currentProtocol: result.currentProtocol }
-          }
+          if (needsModels && result?.ok) rememberModelCatalog(result)
           if (kind === 'variant' && result?.ok) {
             // 条目存在但 efforts 为空 = 模型本身没有推理强度可选。这时不能再回落到
             // 全部五档：界面看起来切了档，实际一条参数都发不出去。
@@ -4430,7 +4469,21 @@ export function ChatView({
           )
         })
     },
-    [appendNotice, meta, nodeId, running]
+    [appendNotice, meta, nodeId, rememberModelCatalog, running]
+  )
+
+  /** 换模型时收起不再适用的档位 override，返回被丢掉的档位（用于提示）。 */
+  const dropUnsupportedVariant = useCallback(
+    (modelId) => {
+      const current = overridesRef.current.get(nodeId)?.variant
+      if (!current) return undefined
+      const efforts = modelProtocolsRef.current?.map?.[modelId]?.efforts
+      // 拿不到新模型的档位就不猜：缓存里没有它时留给 host 侧收敛（ctx.warn 会提示）。
+      if (!Array.isArray(efforts) || efforts.includes(current)) return undefined
+      applyOverride('variant', '')
+      return { level: current, hasLevels: efforts.length > 0 }
+    },
+    [applyOverride, nodeId]
   )
 
   const selectPickerOption = useCallback(
@@ -4440,6 +4493,9 @@ export function ChatView({
       const value = option.value
       if (kind === 'model' && !canSwitchModelProtocol(value, messages.length)) return
       applyOverride(kind, value)
+      // 换模型就把上一档的 override 收回来：档位名是模型自己声明的（`xhigh` 和 `max`
+      // 不是一回事），把 A 模型的档位套到 B 模型上，界面说"已切换"、请求里却什么都没发。
+      const droppedVariant = kind === 'model' ? dropUnsupportedVariant(value) : undefined
       setPicker(null)
       const title =
         kind === 'model'
@@ -4452,9 +4508,23 @@ export function ChatView({
       appendNotice(
         `${title}（下次对话开始生效）。提示词缓存可能失效，如上下文较大可在 Chat 区域右键选择 Compact`
       )
+      if (droppedVariant) {
+        appendNotice(
+          droppedVariant.hasLevels
+            ? `新模型没有「${droppedVariant.level}」档，推理强度已改回它自己的默认值`
+            : '新模型不提供推理强度选项，这一轮不会发送推理参数'
+        )
+      }
       requestAnimationFrame(() => textareaRef.current?.focus())
     },
-    [appendNotice, applyOverride, canSwitchModelProtocol, messages.length, picker]
+    [
+      appendNotice,
+      applyOverride,
+      canSwitchModelProtocol,
+      dropUnsupportedVariant,
+      messages.length,
+      picker
+    ]
   )
 
   const closePicker = useCallback(() => setPicker(null), [])
@@ -5222,12 +5292,22 @@ export function ChatView({
       ? messages.find((message) => message.id === streamRef.current.id)?.text || ''
       : ''
   const activeStreamTokenEstimate = activeStreamText ? estimateTokens(activeStreamText) : 0
-  const todoItems = useMemo(() => {
-    return todoItemsForTurn(messages, activityTurnId, running)
-  }, [activityTurnId, messages, running])
+  const todoPanel = useMemo(() => {
+    return todoPanelForTurn(messages, activityTurnId, running, todoHidden)
+  }, [activityTurnId, messages, running, todoHidden])
   const activeOverrides = overridesRef.current.get(nodeId) || {}
   const activeModel = activeOverrides.model || meta?.model || ''
   const activeEffort = activeOverrides.variant || meta?.effort || 'none'
+  const activeEffortKey = activeOverrides.model || `${meta?.providerId || ''}/${meta?.model || ''}`
+  const activeEffortLevels = modelEfforts?.[activeEffortKey]?.efforts
+  // 状态行显示「这一轮真正会发出去的档位」，而不是上一次会话留下的值：
+  // 模型没有任何档位时发不出推理参数（显示 `—`）；当前档位不属于这个模型时，host 每轮会把它
+  // 收敛到模型自己的默认档位（`normalizeModelEffort`），这里提前显示同一个结果。
+  const activeEffortLabel = resolveDisplayedEffort(
+    activeEffort,
+    activeEffortLevels,
+    modelEfforts?.[activeEffortKey]?.defaultEffort
+  )
   const activeRole = activeOverrides.role || meta?.role || 'default'
   const contextUsage = usageValues(meta?.lastUsage)
   const contextTokens = contextUsage?.total ?? 0
@@ -5558,7 +5638,7 @@ export function ChatView({
               data-popover-trigger="picker"
               onClick={() => openPicker('variant')}
             >
-              {activeEffort}
+              {activeEffortLabel}
             </span>
           </span>
         )}
@@ -5794,7 +5874,7 @@ export function ChatView({
               emptyText={completionEmptyText(completion.kind, completionLoading, completionFailed)}
             />
           )}
-          <TodoDock items={todoItems} hidden={todoHidden} />
+          <TodoDock panel={todoPanel} />
           <SubagentStatusDock
             tasks={subagentTasks}
             now={taskNow}
@@ -6237,4 +6317,18 @@ export function ChatView({
       </div>
     </ChatPathContext.Provider>
   )
+}
+
+/**
+ * 状态行显示哪个档位：只显示「这一轮真正会发出去」的那一档。
+ *
+ * - 拿不到模型档位（模型列表还没加载/模型不在列表里）：照原样显示，不猜；
+ * - 模型声明了没有任何档位：发不出推理参数，显示 `—`；
+ * - 当前档位不属于这个模型：host 每轮会收敛到模型自己的默认档位，这里提前显示同一结果。
+ */
+export function resolveDisplayedEffort(effort, levels, defaultEffort) {
+  if (!Array.isArray(levels)) return effort
+  if (levels.length === 0) return '—'
+  if (levels.includes(effort)) return effort
+  return defaultEffort && levels.includes(defaultEffort) ? defaultEffort : '—'
 }

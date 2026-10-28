@@ -38,9 +38,7 @@ const groups: SidebarGroup[] = [
   {
     key: 'sessions',
     label: 'Sessions',
-    items: [
-      { key: 'sessions', label: 'Sessions' },
-    ],
+    items: [{ key: 'sessions', label: 'Sessions' }],
   },
   {
     key: 'desktop',
@@ -60,18 +58,35 @@ const groups: SidebarGroup[] = [
 type SidebarProps = {
   section: ConfigWebAppSection;
   onChange(section: ConfigWebAppSection): void;
+  /**
+   * 回到应用（桌面端把配置页当整页打开时由宿主提供）。
+   *
+   * 有这个按钮，设置页才是「从对话里进来的一页」，而不是一个关不掉的面板；浏览器宿主
+   * 没有上层界面可回，不传即可。
+   */
+  onClose?(): void;
+  /** 「回到应用」的文案，默认「返回应用」。 */
+  closeLabel?: string;
 };
 
-export function Sidebar({ section, onChange }: SidebarProps) {
+export function Sidebar({ section, onChange, onClose, closeLabel = '返回应用' }: SidebarProps) {
+  const BackIcon = appIcons.chevronLeft;
   // 宿主拿不到数据的整组直接不渲染，不留一个只有标题的空组。
   const visibleGroups = groups
     .map((group) => ({ ...group, items: group.items.filter((item) => !item.available || item.available()) }))
     .filter((group) => group.items.length > 0);
   return (
     <aside className="sidebar">
+      {onClose ? (
+        <button type="button" className="sidebar-back" title={closeLabel} onClick={onClose}>
+          <BackIcon size={14} aria-hidden="true" />
+          <span>{closeLabel}</span>
+        </button>
+      ) : null}
       <div className="brand-block">
         <MicaMark />
         <div className="brand">Mica</div>
+        <span className="brand-tag">设置</span>
       </div>
       <nav className="nav-menu">
         {visibleGroups.map((group) => (
@@ -98,6 +113,11 @@ export function Sidebar({ section, onChange }: SidebarProps) {
           </div>
         ))}
       </nav>
+      {/* 底部固定提示：这一页没有保存按钮，先把这件事说在前面（各页都是改动停下就写盘）。 */}
+      <div className="sidebar-foot">
+        <span className="sidebar-foot-dot" aria-hidden="true" />
+        <span>改动会自动保存</span>
+      </div>
     </aside>
   );
 }

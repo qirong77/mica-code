@@ -1,11 +1,12 @@
-import { micaAgent } from '@packages/mica-agent/index.js';
-import type { ProviderDefinition, ProviderProtocol } from '@packages/mica-config/index.js';
+import type { ProviderProtocol } from '@packages/mica-config/index.js';
+import type { PluginModelsApi, PluginModelUsage } from '@packages/mica-plugin/index.js';
 
 /**
  * 起标题的那次模型请求。
  *
- * 走 `micaAgent.createSubAgent`，不经过当前会话：插件有自己的地址、key、协议和模型，
- * 与用户在用的 provider 完全无关，也不该把标题请求算进会话上下文。
+ * 请求本身交给宿主的 `ctx.models`：插件只声明「用哪个地址/协议/模型、system 与 user
+ * 是什么」，发出去与记账都由宿主负责。这样这笔开销会出现在会话的 Stats 里（插件自己
+ * fetch 就没人记），协议分支与超时也只有一份实现。
  */
 export type TitleRequestConfig = {
   baseUrl: string;
@@ -17,7 +18,7 @@ export type TitleRequestConfig = {
 
 export type TitleRequestResult = {
   title: string;
-  usage?: { promptTokens?: number; completionTokens?: number };
+  usage?: PluginModelUsage | null;
 };
 
 /**
@@ -33,51 +34,24 @@ export function isTitleRequestConfigured(config: TitleRequestConfig): boolean {
   return Boolean(config.baseUrl.trim() && config.model.trim());
 }
 
-export function buildTitleProvider(config: TitleRequestConfig): ProviderDefinition {
-  return {
-    id: 'session-rename',
-    name: 'Session Rename',
-    api_base: config.baseUrl,
-    api_key: config.apiKey,
-    protocol: config.protocol,
-    models: [config.model],
-    // 起标题用不到推理参数，也不该因为模型名猜错而多发一段 reasoning 配置。
-    supportsEffort: false,
-  };
-}
-
 export async function requestSessionTitle(
+  models: PluginModelsApi,
   config: TitleRequestConfig,
   transcript: string,
   options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<TitleRequestResult> {
-  const client = micaAgent.createSubAgent({
+  const result = await models.request({
+    purpose: '自动起标题',
+    system: config.prompt,
+    user: transcript,
     model: config.model,
+    baseUrl: config.baseUrl,
     apiKey: config.apiKey,
-    baseURL: config.baseUrl,
-    provider: buildTitleProvider(config),
-    effort: 'none',
-    systemPrompt: config.prompt,
+    protocol: config.protocol,
+    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    signal: options.signal,
   });
-
-  // 超时必须真的 cancel 请求：只 reject 的话，这个请求会继续跑到模型把 reasoning 吐完，
-  // 白烧 token 还拖慢下一轮。
-  const controller = new AbortController();
-  const forwardAbort = () => controller.abort();
-  if (options.signal?.aborted) controller.abort();
-  else options.signal?.addEventListener('abort', forwardAbort, { once: true });
-
-  try {
-    const raw = await withTimeout(
-      client.query(transcript, { signal: controller.signal }),
-      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      controller,
-    );
-    const usage = client.lastUsage as { promptTokens?: number; completionTokens?: number } | undefined;
-    return { title: sanitizeTitle(raw), usage };
-  } finally {
-    options.signal?.removeEventListener('abort', forwardAbort);
-  }
+  return { title: sanitizeTitle(result.text), usage: result.usage };
 }
 
 /**
@@ -103,23 +77,4 @@ export function sanitizeTitle(raw: unknown): string {
     .trim();
   if (!stripped) return '';
   return stripped.length > MAX_TITLE_CHARS ? stripped.slice(0, MAX_TITLE_CHARS - 1).trimEnd() + '…' : stripped;
-}
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, controller: AbortController): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error(`起标题超时（${timeoutMs}ms）`));
-    }, timeoutMs);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
 }

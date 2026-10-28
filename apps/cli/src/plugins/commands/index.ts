@@ -2,7 +2,6 @@ import { micaBuiltinCommands } from '@packages/mica-builtin-commands/index.js';
 import { commandHostToken, type BuiltInCommandItem } from '@packages/mica-builtin-commands/commandHost.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaPlugin, type PluginContext } from '@packages/mica-plugin/index.js';
-import { micaTools } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../../agent/AgentRuntime.js';
 import { BUILD_TIME } from '../../buildMeta.js';
 import type { SessionController } from '../../session/SessionController.js';
@@ -10,12 +9,11 @@ import { createActiveAgentProxy, createActiveSessionControllerProxy } from './ac
 import { createCommandRuntimeServices } from './commandRuntimeServices.js';
 import { registerCommand } from './registerCommand.js';
 
-const ALLOW_DURING_TURN_COMMANDS = new Set(['status', 'context', 'config', 'task', 'commit']);
+const ALLOW_DURING_TURN_COMMANDS = new Set(['status', 'context', 'config', 'task']);
 
 function createBuiltInCommands(
   agent: AgentRuntime,
   sessionController: SessionController,
-  tracker: InstanceType<typeof micaBuiltinCommands.AgentChangeTracker>,
 ): {
   commands: BuiltInCommandItem[];
   services: ReturnType<typeof createCommandRuntimeServices>;
@@ -40,7 +38,6 @@ function createBuiltInCommands(
       micaBuiltinCommands.createConfigCommand(activeAgent, services),
       micaBuiltinCommands.createMcpCommand(services, activeAgent),
       micaBuiltinCommands.createSkillsCommand(activeAgent),
-      micaBuiltinCommands.createCommitCommand(activeAgent, services, tracker),
       micaBuiltinCommands.createTaskCommand(services),
     ],
   };
@@ -60,13 +57,9 @@ export class BuiltInCommandsPlugin extends micaPlugin.Plugin {
   }
 
   setup(ctx: PluginContext): void {
-    const tracker = new micaBuiltinCommands.AgentChangeTracker();
-    const observer = micaTools.observeExecution(tracker.createObserver());
-    ctx.onDispose(() => observer.dispose());
     const { commands, services, activeAgent, activeSessionController } = createBuiltInCommands(
       this.agent,
       this.sessionController,
-      tracker,
     );
     const hostRegistration = ctx.services.register(commandHostToken, {
       agent: activeAgent,

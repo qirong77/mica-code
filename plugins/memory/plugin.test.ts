@@ -53,6 +53,7 @@ function createHarness(options: HarnessOptions = {}) {
   const subagentTypes: PluginSubagentType[] = [];
   const disposers: (() => void)[] = [];
   const runs: { type?: string; prompt: string }[] = [];
+  const models: { purpose: string; system: string; user: string }[] = [];
 
   const settings: PluginSettingValues = {
     enabled: 'true',
@@ -110,6 +111,12 @@ function createHarness(options: HarnessOptions = {}) {
     },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     ui: { showMessage: (text: string) => shown.push(text) },
+    models: {
+      request: async (request: { purpose: string; system: string; user: string }) => {
+        models.push(request);
+        return { text: nextCuratorOutput(), usage: null };
+      },
+    },
     onDispose: (dispose: () => void) => disposers.push(dispose),
     subagents:
       options.withSubagents === false
@@ -147,6 +154,7 @@ function createHarness(options: HarnessOptions = {}) {
     shown,
     subagentTypes,
     runs,
+    models,
     disposers,
     async emitTurnAfter(event: Record<string, unknown> = { outcome: 'completed', owner: {} }) {
       await hooks.emit('turn:after', event);
@@ -403,25 +411,6 @@ describe('memory auto capture', () => {
   });
 
   it('uses the configured provider instead of a subagent in direct mode', async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: JSON.stringify({
-                    operations: [{ target: 'user', action: 'add', content: '独立接口写入的一条' }],
-                  }),
-                },
-              },
-            ],
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
     const harness = createHarness({
       settings: {
         autoCapture: 'true',
@@ -434,15 +423,22 @@ describe('memory auto capture', () => {
         { role: 'user', content: '记住这条' },
         { role: 'assistant', content: '好' },
       ],
+      curatorOutput: JSON.stringify({
+        operations: [{ target: 'user', action: 'add', content: '独立接口写入的一条' }],
+      }),
     });
 
     await harness.emitTurnAfter();
 
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(harness.models).toHaveLength(1));
     expect(harness.runs).toHaveLength(0);
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe('https://api.example.test/v1/chat/completions');
-    expect(JSON.parse(String(init.body)).model).toBe('cheap-model');
+    expect(harness.models[0]).toMatchObject({
+      purpose: '整理记忆',
+      model: 'cheap-model',
+      baseUrl: 'https://api.example.test/v1',
+      apiKey: 'sk-test',
+      protocol: 'openai_chat_completions',
+    });
     await vi.waitFor(() =>
       expect(readFileSync(join(harness.home, 'memory', 'USER.md'), 'utf-8')).toBe('独立接口写入的一条\n'),
     );

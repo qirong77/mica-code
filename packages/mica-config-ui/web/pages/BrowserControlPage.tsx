@@ -88,6 +88,7 @@ export function BrowserControlPage() {
   return (
     <PageFrame
       title="Browser Control"
+      description="Mica 内置的受控浏览器：agent 通过 MCP 工具驱动它，窗口默认不显示"
       path={details?.serviceUrl ?? undefined}
       actions={
         <div className="toolbar">

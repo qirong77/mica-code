@@ -1,6 +1,7 @@
 {
   "id": "memory",
   "name": "Memory",
+  "icon": "brain",
   "version": "1.0.0",
   "description": "跨会话记忆：用户档案、环境经验与项目约定三块，注入系统提示并通过 memory 工具维护；可选用宿主子代理或独立接口在每轮结束后自动整理。",
   "author": "Mica Code",

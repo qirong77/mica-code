@@ -1,6 +1,42 @@
 import { describe, expect, it } from 'vitest';
 import { HookRegistry } from './HookRegistry.js';
 
+describe('HookRegistry.notify', () => {
+  it('reports failures and continues despite stop/block policies or hanging handlers', async () => {
+    const hooks = new HookRegistry();
+    const seen: string[] = [];
+    const errors: string[] = [];
+    hooks.setHandlerErrorReporter((error) => {
+      errors.push((error as Error).message);
+    });
+    hooks.on(
+      'observe',
+      () => {
+        throw new Error('sync');
+      },
+      { failPolicy: 'stop', priority: -2 },
+    );
+    hooks.on(
+      'observe',
+      async () => {
+        throw new Error('async');
+      },
+      { failPolicy: 'block', priority: -1 },
+    );
+    hooks.on('observe', () => {
+      seen.push('hang');
+      return new Promise(() => {});
+    });
+    hooks.on('observe', () => {
+      seen.push('last');
+    });
+    expect(hooks.notify('observe', {})).toBeUndefined();
+    expect(seen).toEqual(['hang', 'last']);
+    await Promise.resolve();
+    expect(errors).toEqual(['sync', 'async']);
+  });
+});
+
 describe('HookRegistry.pipelineSync', () => {
   it('pipes synchronous hook results in priority order', () => {
     const hooks = new HookRegistry();

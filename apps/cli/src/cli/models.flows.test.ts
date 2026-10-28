@@ -67,13 +67,19 @@ suite('mica models flows', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
 
-      const entries = JSON.parse(result.stdout.trim()) as Array<{ id: string; efforts: string[] }>;
+      const entries = JSON.parse(result.stdout.trim()) as Array<{
+        id: string;
+        efforts: string[];
+        defaultEffort: string | null;
+      }>;
       expect(entries.map((entry) => entry.id)).toEqual([
         'deepseek/deepseek-chat',
         'deepseek/deepseek-reasoner',
         'openrouter/openai/gpt-5',
       ]);
       expect(entries.every((entry) => Array.isArray(entry.efforts))).toBe(true);
+      // 没有档位的模型不给默认档位，否则界面会把一个不会发送的值当成默认值显示。
+      expect(entries.every((entry) => entry.efforts.length > 0 || entry.defaultEffort === null)).toBe(true);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -100,7 +106,9 @@ suite('mica models flows', () => {
       const result = runCli(['models', '--json'], home);
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
-      expect(JSON.parse(result.stdout.trim())).toEqual([{ id: 'static/static-model', efforts: expect.any(Array) }]);
+      expect(JSON.parse(result.stdout.trim())).toEqual([
+        { id: 'static/static-model', efforts: expect.any(Array), defaultEffort: null },
+      ]);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

@@ -2,13 +2,15 @@ import type { ReactNode } from 'react';
 
 type PageFrameProps = {
   title: string;
+  /** 一页一句话的说明：放在标题下面，回答「这一页管什么」。 */
+  description?: string;
   path?: string;
   actions?: ReactNode;
   children: ReactNode;
   immersive?: boolean;
 };
 
-export function PageFrame({ title, path, actions, children, immersive = false }: PageFrameProps) {
+export function PageFrame({ title, description, path, actions, children, immersive = false }: PageFrameProps) {
   if (immersive) {
     return (
       <main className="page-frame page-frame-immersive">
@@ -21,8 +23,12 @@ export function PageFrame({ title, path, actions, children, immersive = false }:
     <section className="page-frame">
       <header className="page-head">
         <div className="page-head-copy">
-          <h1>{title}</h1>
-          {path ? <PagePath value={path} /> : null}
+          {/* 标题与位置行同排：位置是标题的注脚，不是独立一行。 */}
+          <div className="page-head-title">
+            <h1>{title}</h1>
+            {path ? <PagePath value={path} /> : null}
+          </div>
+          {description ? <p className="page-description">{description}</p> : null}
         </div>
         {actions ? <div className="page-head-actions">{actions}</div> : null}
       </header>

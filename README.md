@@ -85,8 +85,11 @@ mica
 | 查看任务与发起旁问 | `/task` · `/btw`                         |
 | 重复执行与提交变更 | `/loop` · `/commit`                      |
 | 配置模型与扩展     | `/config` · `/capabilities` · `/mcp` · `/skills` |
+| 复盘 agent 运行    | `/harness-review list` · `/harness-review report` |
 
 完整语法、运行期间的可用性与快捷键见 [命令与快捷键](https://qirong77.github.io/mica-code/docs/commands/)。
+
+官方插件 [Harness Review](plugins/harness-review/README.md) 自动记录运行轨迹、聚合工具失败与重复调用，并导出带证据的复盘报告。桌面端可以让 agent 调用 `harness_review` 查看报告；人工评估结论单独记录，插件不自动修改指令、工具或记忆。
 
 ### 桌面：把工作放在同一处
 

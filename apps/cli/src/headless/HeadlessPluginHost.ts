@@ -1,6 +1,4 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { APP_NAME, resolveMicaHome } from '@packages/mica-config/brand.js';
+import { APP_NAME } from '@packages/mica-config/brand.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
@@ -25,9 +23,11 @@ import { micaTools } from '@packages/mica-tools/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { configureIterationRewrite, registerIterationRewrite } from '../agent/iterationRewrite.js';
 import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
+import { createPluginModels, recordPluginModelUsage } from '../plugins/pluginModels.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import type { SessionController } from '../session/SessionController.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
+import { createPluginPaths } from '../plugins/pluginPaths.js';
 import {
   setupCommandMemory,
   setupMessageQueue,
@@ -223,7 +223,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     return messages.length > 0 ? messages : undefined;
   };
 
-  const paths = createHeadlessPluginPaths();
+  const paths = createPluginPaths();
 
   const baseContext: PluginBaseContext = {
     paths,
@@ -253,13 +253,10 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       },
       clear: () => agent.clearPluginState?.(pluginId),
     }),
-    // 会话级的插件设置覆盖：写不到会话上就抛错，别让界面显示「已保存」而实际没存。
     sessionSettingsFor: (pluginId) => ({
       read: () => agent.getPluginSessionSettings?.(pluginId),
       write: (value) => {
-        if (!agent.setPluginSessionSettings) {
-          throw new Error(`session settings unavailable for ${pluginId}`);
-        }
+        if (!agent.setPluginSessionSettings) throw new Error(`session settings unavailable for ${pluginId}`);
         agent.setPluginSessionSettings(pluginId, value);
       },
     }),
@@ -269,6 +266,14 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
     },
     subagentsFor: (pluginId) => pluginSubagents.forPlugin(pluginId),
+    // 插件自己的模型请求同样要记账：app-server 就是常驻会话，漏了这一笔 Stats 会少算。
+    pluginModels: createPluginModels({
+      record: (entry) =>
+        recordPluginModelUsage(entry, {
+          agent,
+          save: () => sessionController.saveCurrent({ allowEmpty: true }),
+        }),
+    }),
     runtime: {
       submit: options.submit,
       queue: {
@@ -342,14 +347,4 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     },
   };
   return host;
-}
-
-function createHeadlessPluginPaths() {
-  const home = homedir();
-  const config = resolveMicaHome();
-  return {
-    home,
-    config,
-    plugins: join(config, 'plugins'),
-  };
 }

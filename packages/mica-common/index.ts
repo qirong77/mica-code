@@ -131,13 +131,13 @@ export {
   formatTodoSummary,
   parseTodoInput,
   projectTodoSnapshot,
-  resolveTodoDisplayItems,
-  shouldShowTodoList,
+  resolveTodoPanel,
   summarizeTodoProgress,
   todoItemLabel,
 } from './todoState.js';
 export type {
   TodoItem,
+  TodoPanel,
   TodoParseResult,
   TodoProgress,
   TodoSnapshot,

@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -36,6 +36,8 @@ function createMockProvider() {
         return;
       }
       const text = 'fix: 更新提交流程 🐛';
+      // 提交说明由宿主的 `ctx.models` 代发，走的就是仓库里的 provider adapter，
+      // 所以 mock 必须按 Responses 的流式事件回。
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       const emit = (event: Record<string, unknown>) => res.write(`data: ${JSON.stringify(event)}\n\n`);
       emit({ type: 'response.created', response: { id: 'commit-resp', object: 'response' } });
@@ -66,15 +68,6 @@ function createMockProvider() {
       });
       emit({
         type: 'response.completed',
-        response: {
-          id: 'commit-resp',
-          object: 'response',
-          status: 'completed',
-          usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
-        },
-      });
-      emit({
-        type: 'response.done',
         response: {
           id: 'commit-resp',
           object: 'response',
@@ -143,41 +136,6 @@ function makeHome(tag: string): string {
     }),
   );
   return home;
-}
-
-/** Writes a minimal version-1 session file so `commit --session` has something to attribute to. */
-function writeSession(home: string, id: string, cwd: string): void {
-  const directory = join(home, 'sessions');
-  mkdirSync(directory, { recursive: true });
-  const now = new Date().toISOString();
-  writeFileSync(
-    join(directory, `${id}.json`),
-    `${JSON.stringify(
-      {
-        version: 1,
-        revision: 3,
-        id,
-        title: 'commit usage flow',
-        titleSource: 'manual',
-        createdAt: now,
-        updatedAt: now,
-        cwd,
-        turnState: 'completed',
-        snapshot: {
-          providerId: 'mock',
-          protocol: 'openai_responses',
-          model: 'mock-chat',
-          effort: 'none',
-          role: 'default',
-          messages: [{ role: 'user', content: 'hi' }],
-          conversationMessages: [{ role: 'user', content: 'hi' }],
-          usageHistory: [],
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
 }
 
 function makeRepo(tag: string): string {
@@ -310,31 +268,6 @@ suite('mica commit real-user flows (mock provider)', () => {
     expect(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: repo, encoding: 'utf8' }).trim()).toBe(
       'fix: 更新提交流程 🐛',
     );
-  });
-
-  itE2E('records the commit message request in the owning session', async () => {
-    mock!.state.mode = 'ok';
-    mock!.state.requests = [];
-    const home = makeHome('session-usage');
-    const repo = makeRepo('session-usage');
-    const sessionId = 'commit-usage-session';
-    writeSession(home, sessionId, repo);
-    writeFileSync(join(repo, 'README.md'), 'updated and accounted for\n');
-
-    const result = await runCli(['commit', '--dir', repo, '--session', sessionId], { MICA_HOME: home });
-    expect(result.code).toBe(0);
-    expect(mock!.state.requests).toHaveLength(1);
-
-    const session = JSON.parse(readFileSync(join(home, 'sessions', `${sessionId}.json`), 'utf8'));
-    const records = session.snapshot.subagentUsageHistory;
-    expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ subagentType: 'commit', status: 'completed', model: 'mock-chat' });
-    // One request with the mock provider's usage, and no pollution of the main history.
-    expect(records[0].requests).toHaveLength(1);
-    expect(records[0].requests[0]).toMatchObject({ inputTokens: 10, outputTokens: 5, totalTokens: 15 });
-    expect(records[0].summary).toMatchObject({ records: 1, inputTokens: 10, outputTokens: 5 });
-    expect(session.snapshot.usageHistory).toEqual([]);
-    expect(session.revision).toBe(4);
   });
 
   itE2E('returns nothing_to_commit without contacting the provider', async () => {

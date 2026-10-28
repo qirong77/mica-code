@@ -22,7 +22,9 @@ export type EffortParamsRequest = {
 export function resolveEffortParams({ provider, model, effort, protocol }: EffortParamsRequest): ResolvedEffortParams {
   if (provider.supportsEffort === false) return {};
   const level = effort ?? 'none';
-  const rule = getModelRule(model);
+  // 档位补丁必须按「实际服务这次请求的 provider」查：同一个模型挂在网关上时档位集合
+  // 可能与厂商自己的条目不同（OpenRouter 的 kimi-k3 多一个 `none`）。
+  const rule = getModelRule(model, provider);
   const fromModel = rule.efforts[level]?.[protocol];
   if (fromModel) return fromModel;
   if (Object.keys(rule.efforts).length > 0) return {};

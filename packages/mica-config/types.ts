@@ -7,7 +7,7 @@ import { resolveMicaHomePath } from './brand.js';
  * `max`、`on` …），把它们折算成统一的五档等于替模型编造别名——`max` 被发成
  * `xhigh` 会被拒绝，`minimal` 被折成 `low` 则根本不是用户选的那一档。
  */
-export const KNOWN_EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'on'] as const;
+export const KNOWN_EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra', 'max', 'on'] as const;
 export const PROVIDER_PROTOCOLS = ['openai_chat_completions', 'openai_responses'] as const;
 export const DEFAULT_MODEL_CONTEXT_SIZE = 256;
 export const CONFIG_PATH = resolveMicaHomePath('config.json');
@@ -110,6 +110,26 @@ export function isProviderProtocol(value: unknown): value is ProviderProtocol {
 export function providerSupportsModel(provider: ProviderDefinition, model: string): boolean {
   if (!Array.isArray(provider.models) || provider.models.length === 0) return true;
   return provider.models.includes(model);
+}
+
+/**
+ * 这个模型实际由哪个 provider 服务：带 `provider/model` 前缀时按最长前缀匹配，
+ * 否则算在当前 provider 上（常驻会话里的裸模型名就是这种）。
+ *
+ * 档位、上下文窗口这类元数据都跟着「谁在服务」走：同一个模型名挂在网关上时
+ * 可选档位可能与厂商自己的条目不同，所以要先把归属解出来再查。
+ */
+export function providerForModel(
+  config: Pick<IMicaConfig, 'providers' | 'provider'>,
+  model: string | undefined,
+): ProviderDefinition | undefined {
+  if (model) {
+    const matched = [...config.providers]
+      .sort((left, right) => right.id.length - left.id.length)
+      .find((provider) => model.startsWith(`${provider.id}/`));
+    if (matched) return matched;
+  }
+  return config.providers.find((provider) => provider.id === config.provider);
 }
 
 export function firstProviderModel(provider: ProviderDefinition | Record<string, unknown>): string | undefined {

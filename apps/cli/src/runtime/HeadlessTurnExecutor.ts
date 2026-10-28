@@ -8,6 +8,7 @@ import { micaTools } from '@packages/mica-tools/index.js';
 import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
 import type { SessionController } from '../session/SessionController.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
+import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { uncommittedResponseText } from './conversationHistory.js';
 import { TurnNoticeLog, createRetryNotice, createTurnErrorNotice } from './turnNotices.js';
 
@@ -67,6 +68,13 @@ export type HeadlessTurnExecutorOptions = {
   /** Turn-level retry policy override (defaults match the interactive CLI). */
   maxTurnRetries?: number;
   retryDelayMs?: number;
+  /**
+   * 这一轮结束时收尾它起的后台子代理。
+   *
+   * 不注入就不会收尾（`mica exec --no-save` 这类没有插件层的运行连 `agent` 工具
+   * 都不存在，也就不会有子代理）。
+   */
+  subagentTasks?: Pick<SubagentTaskManager, 'killRunningForOwner'>;
   /**
    * Session notices (retry hints, failure reasons) shown in the conversation
    * but kept out of the provider history. Attached with the plugin layer: the
@@ -494,6 +502,9 @@ export class HeadlessTurnExecutor {
     // session look busy to its own process (the interactive runtime releases it
     // in the same place for the same reason).
     this.releaseTurnLease();
+    // 放在 turn:after 之前：那个 hook 会启动排队的下一轮，下一轮开始时就该看不到
+    // 这一轮的孤儿任务了。
+    this.settleSubagents();
     await this.options.hooks?.emit('turn:after', {
       input,
       elapsedMs,
@@ -501,6 +512,18 @@ export class HeadlessTurnExecutor {
       outcome,
       owner: this.options.agent,
     });
+  }
+
+  /**
+   * 这一轮已经收尾，它起的后台子代理不会再有消费者：结果只能经 `agent
+   * operation=read` 取回，而下一轮的模型不会去读上一个 turn 的 task_id。留着它们
+   * 只会在状态栏挂一条永远 running 的条目，并继续烧 token。
+   *
+   * 幂等（只处理仍在跑的任务），且不发完成通知，所以重试、中止与排队轮次都不会
+   * 因此多出一条系统消息。
+   */
+  private settleSubagents(): void {
+    this.options.subagentTasks?.killRunningForOwner(this.options.agent, 'Parent turn finished.');
   }
 
   /**

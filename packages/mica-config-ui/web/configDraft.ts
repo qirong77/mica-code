@@ -107,25 +107,6 @@ export function removeProviderDraft(draft: ConfigDraft, index: number): ConfigDr
   return { ...draft, providers: providerEntries(draft).filter((_, current) => current !== index) };
 }
 
-/** 表单不管、但文件里存在的顶层键（在「高级字段」里列出来，免得悄悄看不见）。 */
-export function extraConfigKeys(draft: ConfigDraft): string[] {
-  return Object.keys(draft).filter((key) => !CONFIG_KEY_ORDER.includes(key));
-}
-
-export function mcpServerCount(draft: ConfigDraft): number {
-  return isRecord(draft.mcpServers) ? Object.keys(draft.mcpServers).length : 0;
-}
-
-export function capabilityDefaultsSummary(draft: ConfigDraft): string {
-  const defaults = draft.capabilityDefaults;
-  if (!isRecord(defaults)) return '全部启用';
-  const disabled = ['disabledSkills', 'disabledTools', 'disabledMcpServers'].reduce(
-    (sum, key) => sum + (Array.isArray(defaults[key]) ? defaults[key].length : 0),
-    0,
-  );
-  return disabled === 0 ? '全部启用' : `默认关闭 ${disabled} 项`;
-}
-
 /**
  * 写盘前的本地校验，`key` 与 `ConfigDraftIssue` 一致。
  *

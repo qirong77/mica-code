@@ -27,6 +27,7 @@ export {
   DEFAULT_MODEL_CONTEXT_SIZE,
   KNOWN_EFFORT_LEVELS,
   PROVIDER_PROTOCOLS,
+  providerForModel,
   providerSupportsModel,
 } from './types.js';
 export type {
@@ -175,7 +176,7 @@ function mergeRuntimeConfig(config: PersistedMicaConfig, lastUsed: LastUsedConfi
     provider: providerId,
     model,
     effort,
-    contextWindowSize: getModelRule(model).contextSize,
+    contextWindowSize: getModelRule(model, provider).contextSize,
   };
 }
 

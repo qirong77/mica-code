@@ -187,6 +187,12 @@ export class ChatCompletionsClient extends BaseAgent<
       let emittedContentSeparator = false;
       const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
       const wireMessages = stripImagesForVision(messages, this.supportsVision, this.model);
+      const requestTools = this.tools ? this.openaiTools : undefined;
+      try {
+        options?.onRequestStart?.({ messageCount: wireMessages.length, tools: requestTools });
+      } catch {
+        // Observation must not interrupt the model request.
+      }
 
       // 与 ResponsesClient 同理：上游（如 krill）过载时返回 HTTP 200 + error JSON，
       // openai-node SDK 把它反序列化成 APIError 在流迭代首帧抛出。重试必须包住
@@ -202,9 +208,9 @@ export class ChatCompletionsClient extends BaseAgent<
             {
               model: this.model,
               messages: wireMessages,
-              ...(this.tools
+              ...(requestTools
                 ? {
-                    tools: this.openaiTools,
+                    tools: requestTools,
                     tool_choice: 'auto' as const,
                   }
                 : {}),

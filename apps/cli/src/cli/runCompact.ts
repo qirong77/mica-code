@@ -117,13 +117,17 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       options: options.toolResultsOnly
         ? {
             toolResultsOnly: true,
-            contextWindowSize: snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
+            contextWindowSize:
+              snapshot.contextWindowSize ??
+              micaConfig.getModelRule(agent.config.model, agent.config.provider).contextSize,
           }
         : {
             force: options.pruneOnly === true || options.force === true,
             pruneOnly: options.pruneOnly === true,
             lightweightPrune: options.pruneOnly === true,
-            contextWindowSize: snapshot.contextWindowSize ?? micaConfig.getModelRule(agent.config.model).contextSize,
+            contextWindowSize:
+              snapshot.contextWindowSize ??
+              micaConfig.getModelRule(agent.config.model, agent.config.provider).contextSize,
           },
       summarize: async (transcript, prompt) => {
         const owner = agent;
@@ -258,7 +262,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
 
 async function ensureCompactModelRule(model: string, signal?: AbortSignal): Promise<void> {
   try {
-    await micaConfig.ensureModelRule(model, signal);
+    await micaConfig.ensureModelRule(model, signal, micaConfig.providerForModel(model));
   } catch (error) {
     if (signal?.aborted) throw error;
     console.error(

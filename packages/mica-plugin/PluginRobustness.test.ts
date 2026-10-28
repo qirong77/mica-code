@@ -116,6 +116,19 @@ describe('PluginManager robustness', () => {
     expect(readPluginHealth('needs-config', { configDir })?.level).toBe('warn');
   });
 
+  it('leaves plugin health untouched when the host asked for quiet skips', async () => {
+    const manager = new PluginManager();
+    const setup = vi.fn();
+    manager.register(plugin('needs-prompt', setup, manifest(['prompt'])));
+
+    const report = await manager.setupAll(baseContext(configDir), { quietSkips: true });
+
+    expect(setup).not.toHaveBeenCalled();
+    expect(report.skipped).toEqual([{ pluginId: 'needs-prompt', missing: ['prompt'] }]);
+    // 一次性命令宿主只提供命令相关的几面能力：跳过是设计如此，不能写进用户的插件健康状态。
+    expect(readPluginHealth('needs-prompt', { configDir })).toBeNull();
+  });
+
   it('surfaces hook handler errors through the plugin health channel', async () => {
     const hooks = new HookRegistry();
     const manager = new PluginManager();

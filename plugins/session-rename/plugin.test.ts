@@ -4,16 +4,7 @@ import type { PluginContext, PluginSessionInfo, PluginSettingValues } from '@pac
 import type { RuntimeInputSource, RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 
-const query = vi.fn(async () => '标题：修复登录超时\n说明：给 fetch 加了 timeout');
-
-vi.mock('@packages/mica-agent/index.js', () => ({
-  micaAgent: {
-    createSubAgent: () => ({
-      query,
-      lastUsage: { promptTokens: 10, completionTokens: 4 },
-    }),
-  },
-}));
+const query = vi.fn(async (_transcript: string) => '标题：修复登录超时\n说明：给 fetch 加了 timeout');
 
 const { default: setup } = await import('./index.js');
 
@@ -217,6 +208,9 @@ function createHarness(options: HarnessOptions = {}) {
       clear() {},
     },
     logger,
+    models: {
+      request: async (request: { user: string }) => ({ text: await query(request.user), usage: null }),
+    },
     onDispose: (handler: () => void) => disposeHandlers.push(handler),
   } as unknown as PluginContext;
 

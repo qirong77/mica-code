@@ -8,11 +8,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { VERSION_LABEL, resolveMicaHome } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
-import {
-  SESSION_NOTES_PLUGIN_ID,
-  normalizeSessionNotes,
-  prepareImageForApi,
-} from '@packages/mica-common/index.js';
+import { SESSION_NOTES_PLUGIN_ID, normalizeSessionNotes, prepareImageForApi } from '@packages/mica-common/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import type { AgentContentBlockParam, AgentQueryContent } from '@packages/mica-agent/index.js';
 import {
@@ -74,7 +70,7 @@ import { BtwThreads, readStoredBtwThreads, writeStoredBtwThreads } from '../runt
 import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory.js';
 import { SessionController } from '../session/SessionController.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
-import { resolveRuntimeConfigOverride } from './modelCatalog.js';
+import { resolveRuntimeConfigOverride, type EffortAdjustment, type ResolvedRuntimeOverride } from './modelCatalog.js';
 import { applyPluginSessionSettings, listPluginSessionSettings } from './pluginSessionSettings.js';
 
 export type AppServerOptions = {
@@ -302,9 +298,19 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     process.exit(code);
   };
 
+  // 档位要读模型的真实档位，而 models.dev 的磁盘缓存是异步读的：先把元数据等就位，
+  // 再解析 effort。否则「只存在于缓存、不在随包种子里」的模型（刚接入的网关模型就是
+  // 这种）会被判成没有档位，整个 host 起不来，用户看到一条永远发不出去的消息。
+  const startupModel = resolveRuntimeConfigOverride(micaConfig.get(), options.model).model ?? micaConfig.get().model;
+  await ensureChatHostModelRule(startupModel ?? '', providerHintForModel(startupModel));
   const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant, {
-    strictEffort: true,
+    effortPolicy: 'clamp',
   });
+  if (runtimeOverride.effortAdjustment) {
+    // --variant 来自桌面端 spawn 时带的 override，不是用户手打的命令行参数：
+    // 收敛档位并提示，而不是拒绝启动（strict 只留给 mica exec）。
+    writeWarning('', describeEffortAdjustment(startupModel ?? '', runtimeOverride.effortAdjustment));
+  }
 
   try {
     let initialModel = runtimeOverride.model ?? micaConfig.get().model;
@@ -320,7 +326,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         }
       }
     }
-    await ensureChatHostModelRule(initialModel);
+    await ensureChatHostModelRule(initialModel, providerHintForModel(initialModel));
 
     const hooks = new micaPlugin.HookRegistry();
     agent = new AgentRuntime(runtimeOverride, hooks);
@@ -385,7 +391,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         options.sessionId = undefined;
       }
       if (resumed.ok) {
-        await ensureChatHostModelRule(runtimeOverride.model ?? agent.config.model);
+        await ensureChatHostModelRule(
+          runtimeOverride.model ?? agent.config.model,
+          providerHintForModel(runtimeOverride.model) ?? agent.config.provider,
+        );
         // A --model/--variant override must take priority over the session
         // snapshot's provider/model/effort. Without this, resume discards the
         // CLI override (the agent reloaded config from the snapshot inside
@@ -466,6 +475,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     executor = new HeadlessTurnExecutor({
       agent,
       sessionController,
+      subagentTasks,
       maxTurns: options.maxTurns,
       onEvent: (event) => {
         if (event.type === 'turn:finish') projector?.completeAgentMessage();
@@ -630,6 +640,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         writeNotification,
         writeResponse: (result) => process.stdout.write(encodeCodexResponse(id, result)),
         writeError: (code, errorMessage, data) => process.stdout.write(encodeCodexError(id, code, errorMessage, data)),
+        warn: (warningMessage) => writeWarning(sessionId, warningMessage),
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -664,6 +675,8 @@ type HostContext = {
   writeNotification: (method: string, params: unknown) => void;
   writeResponse: (result: unknown) => void;
   writeError: (code: number, message: string, data?: unknown) => void;
+  /** 非致命降级提示（host 继续服务），渲染层显示成一条 warn notice。 */
+  warn: (message: string) => void;
 };
 
 /**
@@ -873,7 +886,7 @@ async function handleCodexRequest(
       const effort = paramString(params, 'effort');
       if (model || effort) {
         try {
-          const override = resolveRuntimeConfigOverride(micaConfig.get(), model, effort);
+          const override = await resolveClientOverride(ctx, model, effort);
           ctx.agent.configureForRun(
             {
               providerId: override.providerId,
@@ -882,7 +895,7 @@ async function handleCodexRequest(
             },
             true,
           );
-          await ensureChatHostModelRule(override.model ?? ctx.agent.config.model);
+          warnIfEffortAdjusted(ctx, override);
         } catch (error) {
           ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
           return;
@@ -921,14 +934,15 @@ async function handleCodexRequest(
       let resumeOverride = ctx.runtimeOverride;
       if (paramsModel || paramsEffort) {
         try {
-          resumeOverride = resolveRuntimeConfigOverride(micaConfig.get(), paramsModel, paramsEffort);
+          resumeOverride = await resolveClientOverride(ctx, paramsModel, paramsEffort);
+          warnIfEffortAdjusted(ctx, resumeOverride);
         } catch (error) {
           ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
           return;
         }
       }
       const overrideModel = resumeOverride.model ?? ctx.agent.config.model;
-      await ensureChatHostModelRule(overrideModel);
+      await ensureChatHostModelRule(overrideModel, providerHintForModel(overrideModel) ?? ctx.agent.config.provider);
       ctx.agent.configureForRun(
         hasRuntimeOverride(resumeOverride)
           ? resumeOverride
@@ -972,7 +986,7 @@ async function handleCodexRequest(
           // a bare model name. Resolve provider + model like the CLI does,
           // otherwise the current provider receives an unknown model name and
           // the turn fails immediately with a 400.
-          const override = resolveRuntimeConfigOverride(micaConfig.get(), model, effort);
+          const override = await resolveClientOverride(ctx, model, effort);
           ctx.agent.configureForRun(
             {
               providerId: override.providerId,
@@ -981,6 +995,7 @@ async function handleCodexRequest(
             },
             true,
           );
+          warnIfEffortAdjusted(ctx, override);
         } catch (error) {
           ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
           return;
@@ -1115,7 +1130,7 @@ async function handleCodexRequest(
       const effort = paramString(params, 'effort');
       if (model || effort) {
         try {
-          const override = resolveRuntimeConfigOverride(micaConfig.get(), model, effort);
+          const override = await resolveClientOverride(ctx, model, effort);
           ctx.agent.configureForRun(
             {
               providerId: override.providerId,
@@ -1124,6 +1139,7 @@ async function handleCodexRequest(
             },
             true,
           );
+          warnIfEffortAdjusted(ctx, override);
         } catch (error) {
           ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
           return;
@@ -1662,11 +1678,16 @@ function inputToQueueItem(input: {
  * flow tests' 30s host-ready wait fails). A host only needs the rule once per
  * model; a later snapshot model that differs re-enters through a fresh key. */
 const ensuredHostModelRules = new Set<string>();
-async function ensureChatHostModelRule(model: string): Promise<void> {
-  if (!model || ensuredHostModelRules.has(model)) return;
-  ensuredHostModelRules.add(model);
+
+const providerHintForModel = (model: string | undefined) => micaConfig.providerForModel(model);
+async function ensureChatHostModelRule(model: string, provider?: { id?: string; api_base?: string }): Promise<void> {
+  if (!model) return;
+  // 同一个模型名在网关与原生服务下的档位可以不同，缓存键必须带上服务商。
+  const key = provider?.id ? `${provider.id.toLowerCase()}::${model}` : model;
+  if (ensuredHostModelRules.has(key)) return;
+  ensuredHostModelRules.add(key);
   try {
-    await micaConfig.ensureModelRule(model);
+    await micaConfig.ensureModelRule(model, undefined, provider);
   } catch (error) {
     console.error(
       `Model metadata unavailable for ${model}; using generic defaults: ${error instanceof Error ? error.message : String(error)}`,
@@ -1692,4 +1713,48 @@ async function cleanupTask(label: string, action: () => unknown | Promise<unknow
 
 function hasRuntimeOverride(override: AgentRuntimeConfigOverride): boolean {
   return override.providerId !== undefined || override.model !== undefined || override.effort !== undefined;
+}
+
+/**
+ * 解析客户端带上来的 model/effort（desktop 的模型与推理强度选择器、Codex 驱动的
+ * thread/* 字段）。
+ *
+ * 与 `mica exec --variant` 的关键区别：这些值不是用户当场敲的参数，可能是上一次会话
+ * 留下的、或者属于另一个模型。所以这里走 clamp —— 档位对不上就收敛并提示，绝不抛错。
+ * 抛错会让 host 直接退出，用户看到的是一条永远发不出去的消息。
+ *
+ * 元数据必须先 await 再算档位：档位集合来自 models.dev（可能只存在于磁盘缓存，随包
+ * 种子没有），缓存是异步读的，先算等于把这类模型判成「没有档位」。
+ */
+async function resolveClientOverride(
+  ctx: HostContext,
+  model: string | undefined,
+  effort: string | undefined,
+): Promise<ResolvedRuntimeOverride> {
+  const fallbackProviderId = ctx.agent.config.provider.id;
+  const probe = resolveRuntimeConfigOverride(micaConfig.get(), model, undefined, { fallbackProviderId });
+  const targetModel = probe.model ?? ctx.agent.config.model;
+  await ensureChatHostModelRule(targetModel, providerHintForModel(targetModel));
+  // 只给了 effort 时用「会话当前模型」解析，而不是全局默认模型：两者可以不同（切换过
+  // 模型、或恢复的会话用的是别的 provider），拿默认模型的档位去收敛会算出另一个值。
+  return resolveRuntimeConfigOverride(micaConfig.get(), model ?? targetModel, effort, {
+    effortPolicy: 'clamp',
+    fallbackProviderId,
+  });
+}
+
+/** clamp 生效时把「你要的档位」和「实际发出去的档位」告诉用户，避免界面说一套、请求发一套。 */
+function warnIfEffortAdjusted(ctx: HostContext, override: ResolvedRuntimeOverride): void {
+  if (!override.effortAdjustment) return;
+  ctx.warn(describeEffortAdjustment(override.model ?? ctx.agent.config.model, override.effortAdjustment));
+}
+
+function describeEffortAdjustment(model: string, adjustment: EffortAdjustment): string {
+  if (adjustment.reason === 'unknown-level') {
+    return `忽略未知的推理强度「${adjustment.requested}」：可用档位由模型自己声明。`;
+  }
+  if (adjustment.reason === 'undeclared') {
+    return `${model} 没有声明推理强度档位，「${adjustment.requested}」这次不会生效（请求不带推理参数）。`;
+  }
+  return `${model} 没有「${adjustment.requested}」档，已改用「${adjustment.applied ?? '默认'}」。`;
 }

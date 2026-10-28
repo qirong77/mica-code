@@ -16,7 +16,7 @@
 - `mica-builtin-commands`：Mica Code 内置产品命令。
 - `mica-context`：上下文管理能力，当前主要是 compact。
 - `mica-skills`：用户 skills 的扫描、解析和缓存。
-- `mica-plugin`：插件生命周期、hooks、service container、host capability context（含委派子代理的 `ctx.subagents` 能力面），以及插件包格式（`plugin.json` 清单、目录加载器、启停状态）。
+- `mica-plugin`：插件生命周期、hooks、service container、host capability context（含委派子代理的 `ctx.subagents` 能力面），以及插件包格式（`plugin.json` 清单、目录加载器、启停状态）。`AgentObservationEvent` 定义 `agent:observe` 的只读运行观察协议，覆盖运行、请求、工具、用量和终态。
 - `mica-official-plugins`：官方插件目录。清单来自仓库根 `plugins/<id>/plugin.json`，入口静态登记；只想列清单的宿主用 `manifests.js`，避免把插件实现拖进进程。
 - `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别、`loopArgs.ts` 的 `/loop` 参数解析、`chatQuote.ts` 的「引用对话」文本约定、`promptText.ts` 的消息定位归一化（CLI 与桌面端共用的 `comparableText`）、`capabilities.ts` 的会话能力开关、`todoState.ts` 的待办解析归一化与展示投影（TUI 面板与 desktop 计划 dock 共用）。
 - `mica-pty`：PTY 能力包。`PtyDriver` 是基于 node-pty 的测试驱动（Node/vitest 环境）；同时提供内置 `pty_*` 工具的运行时支持（`PtyManager` + Node helper 桥接），Bun 主进程通过 JSONL IPC 使用，node-pty 只在 Node 子进程中加载。

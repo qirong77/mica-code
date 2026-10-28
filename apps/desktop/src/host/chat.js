@@ -26,6 +26,7 @@ import { resolveDefaultChatMeta } from './chat-meta'
 import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
 import { createChatQueue, mergeQueuedItems, resolveBusyDispatch } from './chat-queue'
+import { settlePendingHostRequests } from './chat-host-requests'
 import { unwrapHostResult } from './chat-capabilities'
 import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
@@ -456,11 +457,6 @@ function startCommitRun(sender, commitId, payload) {
   if (!cwd) return { ok: false, error: '缺少工作目录' }
   if (commitRuns.has(commitId)) return { ok: false, error: 'commit 任务已存在' }
 
-  // The commit message costs one model request; hand the owning chat session to the
-  // CLI so that spend is recorded in the session's usage stats instead of vanishing
-  // with the one-shot process.
-  const sessionId = isValidSessionId(payload.sessionId) ? payload.sessionId : null
-
   const mica = resolveMicaExecutable()
   if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
 
@@ -468,12 +464,16 @@ function startCommitRun(sender, commitId, payload) {
   try {
     child = spawn(
       mica,
-      // One-shot commit: mica collects the git changes, asks the model exactly
-      // once for the message, then runs add/commit/push. No multi-turn loop.
-      ['commit', '--format', 'json', '--dir', cwd, ...(sessionId ? ['--session', sessionId] : [])],
+      // One-shot commit: the commit plugin collects the git changes, asks its
+      // own configured model once for the message, then runs add/commit/push.
+      // No multi-turn loop, no agent.
+      ['commit', '--format', 'json', '--dir', cwd],
       {
         cwd,
-        env: buildSpawnEnv(process.env, sessionId),
+        env: buildSpawnEnv(
+          process.env,
+          isValidSessionId(payload.sessionId) ? payload.sessionId : null
+        ),
         stdio: ['ignore', 'pipe', 'pipe']
       }
     )
@@ -968,6 +968,7 @@ function spawnChatHost(id, sender, payload) {
   child.on('error', (error) => {
     const message = error instanceof Error ? error.message : String(error)
     if (!run.exitSent) {
+      rejectUnansweredTurns(id, run, message)
       postNotify(`${id}:mica`, 'turn.error', {
         ...(run.sessionId || run.requestedSessionId
           ? { sessionId: run.sessionId || run.requestedSessionId }
@@ -987,23 +988,53 @@ function spawnChatHost(id, sender, payload) {
         run.sessionId || run.requestedSessionId
           ? { sessionId: run.sessionId || run.requestedSessionId }
           : {}
-      if (run.aborting || signal === 'SIGTERM' || signal === 'SIGINT') {
+      const aborted = run.aborting || signal === 'SIGTERM' || signal === 'SIGINT'
+      // stderr 常常在 close 之后才到，退而求其次用退出码，别让错误只剩一句「已退出」。
+      const failure = run.stderr.trim() || `mica 进程已退出（code ${exitCode ?? 'null'}）`
+      // host 在应答 turn/start 之前就退出（启动参数被拒绝、进程崩了）：这一轮从未跑过，
+      // 撤回乐观气泡，别让用户以为消息已发送、历史里却查不到。
+      let rejected = false
+      if (!aborted) {
+        // 紧随其后的 turn.error 通知会渲染成同一条错误，这里只做撤回，不重复提示。
+        rejected = rejectUnansweredTurns(id, run, failure, { silent: true })
+      }
+      if (aborted) {
         postNotify(`${id}:mica`, 'turn.aborted', extra)
       } else {
-        postNotify(`${id}:mica`, 'turn.error', {
-          ...extra,
-          ...(run.stderr.trim() ? { summary: run.stderr.trim().slice(0, 200) } : {})
-        })
+        postNotify(`${id}:mica`, 'turn.error', { ...extra, summary: failure.slice(0, 200) })
       }
       sendChatExit(id, run, {
         exitCode,
         signal,
-        ...(exitCode && run.stderr.trim() ? { error: run.stderr.trim() } : {})
+        // 已经用 chat:queue-error 报过同一条错误了，别再在会话里留一份一样的 /error。
+        ...(exitCode && !rejected ? { error: failure } : {})
       })
     }
   })
 
   return { ok: true }
+}
+
+/**
+ * host 走了但没应答的请求：带 resolve 的当场回失败，turn/start 转成 `chat:queue-error`
+ * 让渲染层撤回乐观气泡并恢复草稿（与 Host 明确拒绝 turn/start 时同一条路径）。
+ */
+function rejectUnansweredTurns(id, run, message, { silent = false } = {}) {
+  const { rejectedTurns } = settlePendingHostRequests(run, message)
+  if (rejectedTurns.length === 0) return false
+  run.running = false
+  run.currentTurnId = null
+  for (const rejected of rejectedTurns) {
+    if (run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:queue-error', {
+        id,
+        ...rejected,
+        error: message,
+        ...(silent ? { silent } : {})
+      })
+    }
+  }
+  return true
 }
 
 function handleHostOutput(id, run, chunk) {
@@ -1450,13 +1481,15 @@ async function listModels() {
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith('#'))
-      .map((id) => ({ id, efforts: [] }))
+      .map((id) => ({ id, efforts: [], defaultEffort: null }))
   const buildResult = (entries) => ({
     ok: true,
     models: entries.map((entry) => ({
       id: entry.id,
       protocol: protocolForModelId(entry.id),
-      efforts: Array.isArray(entry.efforts) ? entry.efforts : []
+      efforts: Array.isArray(entry.efforts) ? entry.efforts : [],
+      // 模型自己声明的默认档位：渲染层按它收敛展示，与 host 每轮实际发送的档位一致。
+      defaultEffort: typeof entry.defaultEffort === 'string' ? entry.defaultEffort : null
     })),
     currentProtocol: protocolForProviderId(provider)
   })

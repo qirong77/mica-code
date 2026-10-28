@@ -1,4 +1,5 @@
 import mitt from 'mitt';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   DEFAULT_ROLE_NAME,
   micaAgent,
@@ -16,7 +17,7 @@ import { micaCommon, cloneCapabilitySelection, normalizeCapabilitySelection } fr
 import type { CapabilitySelection } from '@packages/mica-common/index.js';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import { mcpToolNamePrefix } from '@packages/mica-tools/index.js';
-import type { HookRegistry } from '@packages/mica-plugin/index.js';
+import type { AgentObservationEvent, HookRegistry } from '@packages/mica-plugin/index.js';
 import { applyIterationRewrites } from './iterationRewrite.js';
 import {
   PluginPromptSections,
@@ -97,6 +98,14 @@ type AgentRunOptions = {
   reservedRunId?: number;
 };
 
+type ObservationPayload = AgentObservationEvent extends infer Event
+  ? Event extends AgentObservationEvent
+    ? Omit<Event, 'owner' | 'runId' | 'timestamp'>
+    : never
+  : never;
+
+type ObservedRun = { runId: number; closed: boolean };
+
 export class AgentAbortError extends Error {
   constructor(readonly runId = -1) {
     super('Agent run aborted');
@@ -129,6 +138,9 @@ export class AgentRuntime {
   readonly taskOwnerId = micaCommon.createId('agent-runtime');
   private client: IAgent<ModelClientOptions> | null = null;
   private runId = 0;
+  // Async scope prevents UI prompt previews and callbacks left by an older run
+  // from being attributed to whichever run happens to be active now.
+  private readonly observationScope = new AsyncLocalStorage<ObservedRun>();
   private activeAbortController: AbortController | null = null;
   private activeRunUsageStartIndex: number | null = null;
   private activeRunCompleteUsageLength: number | null = null;
@@ -515,47 +527,81 @@ export class AgentRuntime {
   async run(question: AgentQueryContent, options: AgentRunOptions = {}): Promise<{ runId: number; text: string }> {
     const runId = options.reservedRunId ?? ++this.runId;
     const startedAt = Date.now();
-
-    if (!this.isCurrent(runId)) throw new AgentAbortError(runId);
-
-    if (!this.client || !this.isConfigured) {
-      const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
-      this.emitStatus({ type: 'error', message });
-      throw new Error(message);
-    }
-    if (!this.currentConfig.model) {
-      const message = `未配置模型，运行 /model 命令选择模型后再尝试`;
-      this.emitStatus({ type: 'error', message });
-      throw new Error(message);
-    }
-
-    const abortController = new AbortController();
-    this.activeAbortController = abortController;
-    this.activeRunStartedAt = startedAt;
-    this.activeRunUsageStartIndex = this.client.usageHistory.length;
-    this.activeRunCompleteUsageLength = this.client.usageHistory.length;
-    this.abortedRunUsageStartIndex = null;
-    this.abortedRunCompleteUsageLength = null;
-    this.emitStatus({ type: 'connecting', startedAt });
+    const observed: ObservedRun = { runId, closed: false };
+    let outcome: 'completed' | 'aborted' | 'error' = 'completed';
+    let observationError: string | undefined;
+    let abortController: AbortController | undefined;
+    this.observe(observed, {
+      type: 'run:start',
+      input: cloneJson(question),
+      config: Object.freeze({
+        providerId: this.currentConfig.provider.id,
+        protocol: this.currentConfig.provider.protocol,
+        model: this.currentConfig.model,
+        effort: this.currentConfig.provider.supportsEffort !== false ? this.currentConfig.effort : 'none',
+        role: this.currentRole,
+      }),
+    });
     try {
-      const text = await this.client.query(question, {
-        signal: abortController.signal,
-        shouldContinue: () => this.isCurrent(runId),
-        maxTurns: options.maxTurns,
-        onRetry: (info) => {
-          if (!this.isCurrent(runId)) return;
-          options.onRetry?.(info);
-        },
-        rewriteIterationMessages: async (messages) => {
-          if (!this.isCurrent(runId)) return null;
-          return applyIterationRewrites(messages, this);
-        },
-        onIterationComplete: async () => {
-          if (!this.isCurrent(runId)) return null;
-          this.activeRunCompleteUsageLength = this.client?.usageHistory.length ?? this.activeRunCompleteUsageLength;
-          return options.onIterationComplete?.() ?? null;
-        },
-      });
+      if (!this.isCurrent(runId)) throw new AgentAbortError(runId);
+      if (!this.client || !this.isConfigured) {
+        const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
+        throw new Error(message);
+      }
+      if (!this.currentConfig.model) {
+        const message = '未配置模型，运行 /model 命令选择模型后再尝试';
+        throw new Error(message);
+      }
+      abortController = new AbortController();
+      this.activeAbortController = abortController;
+      this.activeRunStartedAt = startedAt;
+      this.activeRunUsageStartIndex = this.client.usageHistory.length;
+      this.activeRunCompleteUsageLength = this.client.usageHistory.length;
+      this.abortedRunUsageStartIndex = null;
+      this.abortedRunCompleteUsageLength = null;
+      this.emitStatus({ type: 'connecting', startedAt });
+      const client = this.client;
+      const signal = abortController.signal;
+      const text = await this.observationScope.run(observed, () =>
+        client.query(question, {
+          signal,
+          shouldContinue: () => this.isCurrent(runId),
+          maxTurns: options.maxTurns,
+          onRequestStart: (info) => {
+            if (!this.isCurrent(runId)) return;
+            this.observeActive({
+              type: 'request:start',
+              messageCount: info.messageCount,
+              ...(info.tools === undefined ? {} : { tools: cloneJson(info.tools) }),
+            });
+          },
+          onRetry: (info) => {
+            if (!this.isCurrent(runId)) return;
+            this.observeActive({
+              type: 'retry',
+              attempt: info.attempt,
+              delayMs: info.delayMs,
+              error: info.error instanceof Error ? info.error.message : String(info.error),
+            });
+            options.onRetry?.(info);
+          },
+          rewriteIterationMessages: async (messages) => {
+            if (!this.isCurrent(runId)) return null;
+            const beforeCount = messages.length;
+            const rewritten = await applyIterationRewrites(messages, this);
+            if (rewritten && this.isCurrent(runId)) {
+              this.observeActive({ type: 'history:rewritten', beforeCount, afterCount: rewritten.length });
+            }
+            return rewritten;
+          },
+          onIterationComplete: async () => {
+            if (!this.isCurrent(runId)) return null;
+            this.activeRunCompleteUsageLength = this.client?.usageHistory.length ?? this.activeRunCompleteUsageLength;
+            return options.onIterationComplete?.() ?? null;
+          },
+        }),
+      );
+      if (!this.isCurrent(runId) || signal.aborted) outcome = 'aborted';
       if (this.isCurrent(runId)) {
         this.emitStatus({
           type: 'completed',
@@ -566,22 +612,34 @@ export class AgentRuntime {
       return { runId, text };
     } catch (error) {
       if (!this.isCurrent(runId) || isAbortError(error)) {
-        this.abortedRunUsageStartIndex = this.activeRunUsageStartIndex;
-        this.abortedRunCompleteUsageLength = this.activeRunCompleteUsageLength;
+        outcome = 'aborted';
+        if (abortController) {
+          this.abortedRunUsageStartIndex = this.activeRunUsageStartIndex;
+          this.abortedRunCompleteUsageLength = this.activeRunCompleteUsageLength;
+        }
         throw new AgentAbortError(runId);
       }
       const message = error instanceof Error ? error.message : String(error);
+      outcome = 'error';
+      observationError = message;
       if (this.isCurrent(runId)) this.emitStatus({ type: 'error', message });
       throw error;
     } finally {
-      if (this.activeAbortController === abortController) {
+      if (abortController && this.activeAbortController === abortController) {
         this.activeAbortController = null;
       }
-      if (this.activeAbortController === null) {
+      if (abortController && this.activeAbortController === null) {
         this.activeRunStartedAt = null;
         this.activeRunUsageStartIndex = null;
         this.activeRunCompleteUsageLength = null;
       }
+      observed.closed = true;
+      this.observe(observed, {
+        type: 'run:finish',
+        outcome,
+        elapsedMs: Date.now() - startedAt,
+        ...(observationError === undefined ? {} : { error: observationError }),
+      });
     }
   }
 
@@ -604,20 +662,59 @@ export class AgentRuntime {
       this.events.emit('thinking', thinking);
     };
     this.client.onToolCall = (name, args, id) => {
+      this.observeActive({ type: 'tool:call', name, args, id });
       this.emitStatus({ type: 'calling_tool', startedAt: this.activeRunStartedAt ?? undefined, toolNames: [name] });
       this.events.emit('toolCall', { name, args, id });
     };
     this.client.onToolResult = (name, result, id) => {
+      this.observeActive({ type: 'tool:result', name, result, id });
       this.events.emit('toolResult', { name, result, id });
       this.emitStatus({ type: 'connecting', startedAt: this.activeRunStartedAt ?? undefined });
     };
     this.client.onUsage = (usage) => {
+      this.observeActive({
+        type: 'usage',
+        usage: Object.freeze({
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cachedInputTokens: usage.cachedInputTokens,
+          totalTokens: usage.totalTokens,
+          model: usage.model,
+        }),
+      });
       this.events.emit('usage', usage);
     };
   }
 
   private clientOptions(): ModelClientOptions {
-    return this.createClientOptions();
+    return this.createClientOptions({
+      systemPrompt: () => {
+        const prompt = this.buildSystemPrompt();
+        // Only the main client's resolver observes the returned prompt. Shared
+        // createClientOptions() callbacks used by subrequests do not report it.
+        this.observeActive({ type: 'prompt:resolved', prompt });
+        return prompt;
+      },
+    });
+  }
+
+  private observeActive(payload: ObservationPayload): void {
+    const observed = this.observationScope.getStore();
+    if (!observed || observed.closed || !this.isCurrent(observed.runId)) return;
+    this.observe(observed, payload);
+  }
+
+  private observe(observed: ObservedRun, payload: ObservationPayload): void {
+    if (!this.hooks) return;
+    const event: AgentObservationEvent = Object.freeze({
+      ...payload,
+      owner: this,
+      runId: observed.runId,
+      timestamp: new Date().toISOString(),
+    });
+    // Diagnostic callbacks never delay completion/abort, including a handler that
+    // returns a promise which never settles. Plugins own their IO flush lifecycle.
+    this.observationScope.exit(() => this.hooks!.notify('agent:observe', event));
   }
 
   private resolveCurrentRole() {

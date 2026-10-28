@@ -10,6 +10,7 @@ import {
 } from 'react'
 import {
   IconArrowUp,
+  IconBlocks,
   IconChartBar,
   IconFile,
   IconFolder,
@@ -737,17 +738,37 @@ export default function App() {
   // 和已经消费过的号撞上，查找条再也不开）。这里用一条只增不减的序号。
   const findRequestSeqRef = useRef(0)
   const handleFindRequestHandled = useCallback(() => setFindRequest(null), [])
-  // 主区视图：chat | files | stats | settings。对话里的路径链接与顶栏的文件夹按钮都落到
-  // 这一层（后者另开一个独立窗口，见 openFilesWindow）；终端是主区底部可收起的下拉面板。
+  // 主区视图：chat | files | stats。对话里的路径链接与顶栏的文件夹按钮都落到这一层
+  // （后者另开一个独立窗口，见 openFilesWindow）；终端是主区底部可收起的下拉面板。
+  // 设置与插件不在这套视图里：它们是盖住整个窗口的一层（见下面的 configPage）。
   const [view, setView] = useState(() => {
     // 分享页只从对话开始（布局是跨页面共享的，别把分享者那边的视图带过来）
     if (shareView) return 'chat'
-    return storedLayout().view === 'stats' ||
-      storedLayout().view === 'settings' ||
-      storedLayout().view === 'files'
+    return storedLayout().view === 'stats' || storedLayout().view === 'files'
       ? storedLayout().view
       : 'chat'
   })
+  /**
+   * 整页打开的配置页：`{ section, pluginId }`，`null` 表示不在这一层。
+   *
+   * 设置与插件都落在这里：配置页自带一列导航，塞进对话区右侧只会把内容挤窄，而且没法
+   * 与「我在对话里」这件事分开——盖住整个窗口配一个「返回对话」，它才是一层页面。
+   */
+  const [configPage, setConfigPage] = useState(null)
+  const openConfigPage = useCallback((section = 'config', pluginId = null) => {
+    setConfigPage({ section, pluginId })
+  }, [])
+  // 关掉时一并清掉地址栏的 `section` / `plugin`：配置页会把当前页写进查询串（浏览器宿主
+  // 靠它深链），留着的话「返回对话」后刷新又会掉回设置页。
+  const closeConfigPage = useCallback(() => {
+    setConfigPage(null)
+    const url = new URL(window.location.href)
+    if (url.searchParams.has('section') || url.searchParams.has('plugin')) {
+      url.searchParams.delete('section')
+      url.searchParams.delete('plugin')
+      window.history.replaceState(null, '', url)
+    }
+  }, [])
   // 文件视图按需挂载：打开过一次后保持挂载（切回对话再切回来不丢已打开/未保存的文件），
   // 但没被打开过时它的 chunk（文件树、图标清单）不进启动路径。
   const [filesMounted, setFilesMounted] = useState(view === 'files')
@@ -1211,8 +1232,7 @@ export default function App() {
     if (
       remoteLayout.view === 'chat' ||
       remoteLayout.view === 'files' ||
-      remoteLayout.view === 'stats' ||
-      remoteLayout.view === 'settings'
+      remoteLayout.view === 'stats'
     )
       setView(remoteLayout.view)
   }, [remoteLayout])
@@ -2445,16 +2465,11 @@ export default function App() {
               </button>
               <button
                 type="button"
-                aria-pressed={view === 'settings'}
-                title="打开 Mica 配置页面"
-                className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
-                  view === 'settings'
-                    ? 'bg-white/[.10] text-white'
-                    : 'text-white/60 hover:bg-white/[.05] hover:text-white'
-                }`}
+                title="打开 Mica 设置"
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
                 onClick={() => {
                   closeMobileDrawer()
-                  setView('settings')
+                  openConfigPage('config')
                 }}
               >
                 <IconSettings size={14} className="shrink-0 opacity-75" />
@@ -2482,6 +2497,21 @@ export default function App() {
                   </span>
                 </button>
               </div>
+              {/* 插件入口排在最后：插件是「装进来的能力」，属于调整类入口，和 Server /
+                  Settings 一起收在同一列末尾。点它进插件整页（目录 → 点一张卡进详情），
+                  不做下拉面板。 */}
+              <button
+                type="button"
+                title="插件（查看已装载的插件与它们的设置）"
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
+                onClick={() => {
+                  closeMobileDrawer()
+                  openConfigPage('plugins')
+                }}
+              >
+                <IconBlocks size={14} className="shrink-0 opacity-75" />
+                <span>Plugins</span>
+              </button>
             </nav>
             {serverMenuOpen && isMobile && (
               <div className="no-drag shrink-0 px-2 pb-2">
@@ -2570,7 +2600,7 @@ export default function App() {
             {/* 返回对话是主区顶栏最左的入口（与 CLI 的 prompt 前导一致）：非对话视图
                 下始终出现在最前，不要挪回右侧（分享页也留着它：那页只是没有左侧会话
                 列表，文件/终端都还在，需要回到对话）。
-                视图名（Files / Stats / Settings）不再重复展示——各自页面自带标识，
+                视图名（Files / Stats）不再重复展示——各自页面自带标识，
                 这一栏只留返回入口。 */}
             {view !== 'chat' && (
               <button
@@ -2721,9 +2751,6 @@ export default function App() {
             <Suspense fallback={null}>
               <StatsView visible={view === 'stats'} />
             </Suspense>
-            <Suspense fallback={null}>
-              <SettingsView visible={view === 'settings'} />
-            </Suspense>
             {filesMounted && (
               <Suspense fallback={null}>
                 <FilesView
@@ -2767,7 +2794,7 @@ export default function App() {
                 onNewSession={createChatSession}
                 onResumeSession={openSession}
                 onOpenTerminal={openChatTerminal}
-                onOpenSettings={() => setView('settings')}
+                onOpenSettings={() => openConfigPage('config')}
                 onSessionRenamed={refreshSessions}
                 onShareSession={shareSession}
               />
@@ -2988,6 +3015,35 @@ export default function App() {
           onSwitch={switchServer}
           onDismiss={() => setServerMenuOpen(false)}
         />
+      )}
+      {/* 设置 / 插件：盖住整个窗口的一层。留一条顶部拖动条，否则整页打开后窗口没法拖
+          （macOS 的交通灯是系统画在页面之上的，不受这层影响）。 */}
+      {configPage && (
+        <div className="fixed inset-0 z-[9500] flex flex-col bg-canvas">
+          {/* 桌面端留一条拖动条：整页盖住窗口后没有别处可以拖（macOS 的交通灯由系统画在
+              页面之上，不受这层影响）。手机上没有窗口可拖，省掉这条空档。 */}
+          {!isMobile && (
+            <div
+              className="drag-region h-8 shrink-0 border-b border-line bg-panel"
+              aria-hidden="true"
+            />
+          )}
+          <div className="no-drag flex min-h-0 flex-1 flex-col">
+            <Suspense
+              fallback={
+                <div className="grid flex-1 place-items-center text-xs text-white/40">
+                  正在加载…
+                </div>
+              }
+            >
+              <SettingsView
+                section={configPage.section}
+                pluginId={configPage.pluginId}
+                onClose={closeConfigPage}
+              />
+            </Suspense>
+          </div>
+        </div>
       )}
       {toast && (
         <div

@@ -2,15 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { ProviderEditor } from '../components/ProviderEditor.js';
-import { Alert, Button, CollapsiblePanel, SaveStatus, SettingRow, SettingsGroup, Tag } from '../components/Ui.js';
+import { Alert, Button, CollapsiblePanel, SaveStatus, SettingsGroup, Tag } from '../components/Ui.js';
 import { readConfigFile, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
 import {
   addProviderDraft,
-  capabilityDefaultsSummary,
-  extraConfigKeys,
   issueMap,
-  mcpServerCount,
   parseConfigDraft,
   providerEntries,
   removeProviderDraft,
@@ -19,14 +16,8 @@ import {
   writeProviderDraft,
   type ConfigDraft,
 } from '../configDraft.js';
-import type { ConfigWebAppSection } from '../layout/Sidebar.js';
 import type { ConfigWebFilePayload } from '../../src/shared/types.js';
 import { useAutoSave } from '../useAutoSave.js';
-
-type ConfigPageProps = {
-  /** 「由其他页面管理」里的跳转；桌面端与浏览器宿主都从 App 传下来。 */
-  onNavigate?(section: ConfigWebAppSection): void;
-};
 
 /**
  * config.json 的配置页。
@@ -38,7 +29,7 @@ type ConfigPageProps = {
  * 没有保存按钮：改动停下就自动写盘。本地校验不过（必填项没填、JSON 还没写完）时先不写，
  * 页面上照旧提示哪里要修——自动保存的前提是别把一份会让 CLI 起不来的配置落盘。
  */
-export function ConfigPage({ onNavigate }: ConfigPageProps) {
+export function ConfigPage() {
   const [draft, setDraft] = useState<ConfigDraft | null>(null);
   const [savedJson, setSavedJson] = useState('');
   const [jsonText, setJsonText] = useState('');
@@ -165,11 +156,11 @@ export function ConfigPage({ onNavigate }: ConfigPageProps) {
   }, []);
 
   const providers = draft ? providerEntries(draft) : [];
-  const extraKeys = draft ? extraConfigKeys(draft) : [];
 
   return (
     <PageFrame
       title="配置"
+      description="服务商与模型列表；这一页只改 config.json 里按字段可编辑的部分"
       path={path || undefined}
       actions={
         <div className="toolbar">
@@ -238,45 +229,6 @@ export function ConfigPage({ onNavigate }: ConfigPageProps) {
               )}
             </SettingsGroup>
 
-            <SettingsGroup title="其他页面管理" description="同样写在 config.json，各有专门的编辑页">
-              <SettingRow label="MCP 服务">
-                <div className="setting-row-inline">
-                  <span className="setting-row-value">
-                    {mcpServerCount(draft) > 0 ? `${mcpServerCount(draft)} 个已配置` : '还没有配置'}
-                  </span>
-                  <code className="setting-row-key">mcpServers</code>
-                  {onNavigate ? (
-                    <Button variant="ghost" onClick={() => onNavigate('mcp')}>
-                      去 MCP 页面
-                    </Button>
-                  ) : null}
-                </div>
-              </SettingRow>
-              <SettingRow label="新会话默认能力">
-                <div className="setting-row-inline">
-                  <span className="setting-row-value">{capabilityDefaultsSummary(draft)}</span>
-                  <code className="setting-row-key">capabilityDefaults</code>
-                  {onNavigate ? (
-                    <Button variant="ghost" onClick={() => onNavigate('capabilities')}>
-                      去 Capabilities
-                    </Button>
-                  ) : null}
-                </div>
-              </SettingRow>
-            </SettingsGroup>
-
-            {extraKeys.length > 0 ? (
-              <SettingsGroup title="其他字段" description="表单没有覆盖的键，保存时原样保留">
-                {extraKeys.map((key) => (
-                  <SettingRow key={key} label={<code>{key}</code>}>
-                    <span className="setting-row-value is-mono" title={previewValue(draft[key])}>
-                      {previewValue(draft[key])}
-                    </span>
-                  </SettingRow>
-                ))}
-              </SettingsGroup>
-            ) : null}
-
             <CollapsiblePanel
               title="直接编辑 JSON"
               subtitle="整份 config.json，解析通过后表单会同步"
@@ -302,12 +254,6 @@ function shiftIndexSet(source: ReadonlySet<number>, removed: number): ReadonlySe
     else if (index > removed) next.add(index - 1);
   }
   return next;
-}
-
-function previewValue(value: unknown): string {
-  const text = typeof value === 'string' ? value : JSON.stringify(value);
-  if (!text) return '（空）';
-  return text.length > 120 ? `${text.slice(0, 120)}…` : text;
 }
 
 function formatError(error: unknown): string {

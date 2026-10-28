@@ -199,6 +199,7 @@ export function SessionsPage() {
   return (
     <PageFrame
       title="Sessions"
+      description="本机保存的会话快照：可以查看摘要、改标题、导出与删除"
       path={index?.root}
       actions={
         <div className="toolbar">

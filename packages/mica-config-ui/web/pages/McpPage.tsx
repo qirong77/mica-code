@@ -132,6 +132,7 @@ export function McpPage() {
   return (
     <PageFrame
       title="MCP"
+      description="config.json 的 mcpServers：每个 server 一条，连不上时页面会说清是哪一步失败"
       path={details?.path}
       actions={
         <div className="toolbar">

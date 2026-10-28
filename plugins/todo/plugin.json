@@ -1,6 +1,7 @@
 {
   "id": "todo",
   "name": "Todo",
+  "icon": "list-checks",
   "version": "1.0.0",
   "description": "Turn-scoped todo list: the todo_write tool, the /todo command and a live status panel.",
   "author": "Mica Code",

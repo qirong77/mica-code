@@ -1,6 +1,8 @@
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import autoCompactSetup from '../../plugins/auto-compact/index.js';
+import commitSetup from '../../plugins/commit/index.js';
 import computerUseSetup from '../../plugins/computer-use/index.js';
+import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
 import sessionNotesSetup from '../../plugins/session-notes/index.js';
@@ -20,6 +22,8 @@ export { OFFICIAL_PLUGINS_DIR, officialPluginIds, officialPluginManifests } from
  */
 const officialSetups: Record<string, MicaPlugin['setup']> = {
   'auto-compact': autoCompactSetup,
+  commit: commitSetup,
+  'harness-review': harnessReviewSetup,
   memory: memorySetup,
   'web-search': webSearchSetup,
   todo: todoSetup,

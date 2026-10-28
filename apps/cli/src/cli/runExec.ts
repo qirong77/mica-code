@@ -10,11 +10,7 @@ import { AgentAbortError, AgentRuntime } from '../agent/AgentRuntime.js';
 import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { attachCodexExecProjector, type CodexExecProjector } from '../runtime/CodexExecProjector.js';
-import {
-  HeadlessTurnExecutor,
-  MAX_TURN_RETRIES,
-  REMOTE_TURN_MESSAGE,
-} from '../runtime/HeadlessTurnExecutor.js';
+import { HeadlessTurnExecutor, MAX_TURN_RETRIES, REMOTE_TURN_MESSAGE } from '../runtime/HeadlessTurnExecutor.js';
 import { SessionController } from '../session/SessionController.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
 import { resolveRuntimeConfigOverride } from './modelCatalog.js';
@@ -70,8 +66,14 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     if (!prompt) throw new Error('Headless exec requires a non-empty prompt');
     if (options.cwd) process.chdir(resolve(options.cwd));
 
+    // --variant 是命令行里显式写的参数，打错要报错（strict）；但校验前必须先加载模型
+    // 元数据 —— 档位来自 models.dev，磁盘缓存是异步读的，先校验会把「缓存里有、随包
+    // 种子里没有」的模型误判成没有档位。
+    const requestedModel =
+      resolveRuntimeConfigOverride(micaConfig.get(), options.model).model ?? micaConfig.get().model;
+    await ensureHeadlessModelRule(requestedModel ?? '', options.signal);
     const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant, {
-      strictEffort: true,
+      effortPolicy: 'strict',
     });
     let initialModel = runtimeOverride.model ?? micaConfig.get().model;
     if (!initialModel) {
@@ -136,6 +138,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     executor = new HeadlessTurnExecutor({
       agent,
       sessionController,
+      subagentTasks,
       maxTurns: options.maxTurns,
       save: options.noSave !== true,
       onEvent: (event) => {
@@ -289,7 +292,10 @@ function exitCodeForStatus(status: 'completed' | 'aborted' | 'error'): number {
 
 async function cleanup(label: string, task: () => Promise<unknown> | void, timeoutMs = 3000): Promise<void> {
   try {
-    await Promise.race([Promise.resolve(task()), new Promise((resolveTimeout) => setTimeout(resolveTimeout, timeoutMs))]);
+    await Promise.race([
+      Promise.resolve(task()),
+      new Promise((resolveTimeout) => setTimeout(resolveTimeout, timeoutMs)),
+    ]);
   } catch (error) {
     console.error(`[headless exec] ${label} failed: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -301,7 +307,7 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 async function ensureHeadlessModelRule(model: string, signal?: AbortSignal): Promise<void> {
   try {
-    await micaConfig.ensureModelRule(model, signal);
+    await micaConfig.ensureModelRule(model, signal, micaConfig.providerForModel(model));
   } catch (error) {
     // Headless mode must not pollute protocol stdout: log to stderr and fall
     // back to the generic model rule.
