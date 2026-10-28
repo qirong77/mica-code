@@ -23,6 +23,7 @@ import {
   writeSkill,
   writeCapabilityDefaults,
   setPluginEnabled as setPluginEnabledInStore,
+  testPluginLlm as testPluginLlmInStore,
   setPluginSettings as setPluginSettingsInStore,
 } from './details.js';
 
@@ -71,6 +72,8 @@ export const configWebActions = {
 
   readPluginsDetails: (_input: ConfigWebActionInput) => getPluginsDetails(),
   setPluginEnabled: (input: ConfigWebActionInput) => setPluginEnabledInStore(text(input, 'id'), input.enabled === true),
+  testPluginLlm: (input: ConfigWebActionInput) =>
+    testPluginLlmInStore(text(input, 'id'), isRecord(input?.values) ? (input.values as Record<string, unknown>) : undefined),
   writePluginSettings: (input: ConfigWebActionInput) =>
     setPluginSettingsInStore(text(input, 'id'), record(input, 'values')),
 
@@ -114,6 +117,11 @@ function optionalText(input: ConfigWebActionInput, field: string): string {
   if (value === undefined) return '';
   if (typeof value !== 'string') throw new Error(`${field} must be string`);
   return value;
+}
+
+/** 对象（且不是数组）：页面传来的表单键值、插件状态都是这种形状。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** 插件设置是一张表的键值对；不是对象就当空表，避免把半截数据写进设置文件。 */

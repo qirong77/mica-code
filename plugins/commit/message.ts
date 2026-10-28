@@ -1,11 +1,10 @@
-import type { ProviderProtocol } from '@packages/mica-config/index.js';
-import type { PluginModelsApi } from '@packages/mica-plugin/index.js';
+import type { PluginLlmApi } from '@packages/mica-plugin/index.js';
 
 /**
  * commit message 的模型请求。
  *
  * 只发一次「system + user → 文本」，没有工具、没有多轮、没有流式：这里要的是一条确定
- * 的消息，任何额外能力都只会让失败面变大。请求交给宿主的 `ctx.models`：协议分支、
+ * 的消息，任何额外能力都只会让失败面变大。请求交给 `ctx.llm`：接口配置、协议分支、
  * envelope 拼接与用量记账都只有一份实现，这笔开销也会出现在会话的 Stats 里。
  */
 
@@ -26,11 +25,9 @@ export const DEFAULT_PROMPT = [
 ].join('\n');
 
 export type MessageRequestConfig = {
-  baseUrl: string;
-  apiKey: string;
-  protocol: ProviderProtocol;
-  model: string;
   prompt: string;
+  /** 覆盖模型（设置里单独写了模型名时）；不填用 `ctx.llm` 生效的模型。 */
+  model?: string;
   timeoutMs?: number;
 };
 
@@ -47,19 +44,16 @@ export class CommitMessageError extends Error {
 }
 
 export async function requestCommitMessage(
-  models: PluginModelsApi,
+  llm: PluginLlmApi,
   config: MessageRequestConfig,
   summary: string,
 ): Promise<string> {
   try {
-    const result = await models.request({
+    const result = await llm.request({
       purpose: '写提交说明',
       system: config.prompt,
       user: buildUserMessage(summary),
       model: config.model,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      protocol: config.protocol,
       timeoutMs: config.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     });
     return sanitizeCommitMessage(result.text);

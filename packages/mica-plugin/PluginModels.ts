@@ -38,6 +38,12 @@ export type PluginModelRequest = {
   baseUrl: string;
   apiKey?: string;
   protocol?: PluginModelProtocol;
+  /**
+   * 用主配置的接口地址 / Key / 协议发这次请求（`baseUrl` / `apiKey` / `protocol` 被忽略）。
+   *
+   * `ctx.llm` 在「跟随主配置」时走这条：插件不掌握 provider 配置，由宿主解析。
+   */
+  useMainProvider?: boolean;
   /** 默认 60s；部分推理模型吐 reasoning 要 5~14s，别设太小。 */
   timeoutMs?: number;
   signal?: AbortSignal;

@@ -23,7 +23,8 @@ import {
 import {
   getPluginsDetails,
   setPluginEnabled as setPluginEnabledInStore,
-  setPluginSettings as setPluginSettingsInStore
+  setPluginSettings as setPluginSettingsInStore,
+  testPluginLlm as testPluginLlmInStore
 } from '@mica-config-ui/plugins'
 import { summarizeSessionFile } from '@mica-config-ui/session-head'
 // 内置 default role 与 CLI 同源：提示词模板就是 packages/mica-agent/prompt/system.md，
@@ -527,6 +528,9 @@ export const configWebActions = {
   setPluginEnabled: (input) => setPluginEnabledInStore(text(input, 'id'), input?.enabled === true),
   writePluginSettings: (input) =>
     setPluginSettingsInStore(text(input, 'id'), isRecord(input?.values) ? input.values : {}),
+  // 试连插件声明的模型接口：与插件运行时同一条请求实现，测通了就代表它能工作。
+  testPluginLlm: (input) =>
+    testPluginLlmInStore(text(input, 'id'), isRecord(input?.values) ? input.values : undefined),
 
   // 插件声明了运行条件（清单 desktop.checks）时，插件详情页据此显示「开了没有 / 去哪开」。
   // 探测在 Electron 主进程（TCC 权限属于有 app 身份的那个进程），见 system-checks.js。

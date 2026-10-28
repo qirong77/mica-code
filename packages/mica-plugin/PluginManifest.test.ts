@@ -69,3 +69,47 @@ describe('parsePluginManifest icon', () => {
     }
   });
 });
+
+describe('parsePluginManifest llm', () => {
+  it('expands the llm declaration into ordinary settings fields', () => {
+    const result = parsePluginManifest(base({ llm: { label: '起标题模型', modelPlaceholder: 'gpt-4o-mini' } }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.llm).toMatchObject({ label: '起标题模型', followMain: false });
+    // 字段进同一个 settings 列表：存储、校验、按会话覆盖因此只有一条路径。
+    expect(result.manifest.settings.map((field) => field.key)).toEqual([
+      'baseUrl',
+      'apiKey',
+      'protocol',
+      'model',
+    ]);
+    expect(result.manifest.settings.find((field) => field.key === 'model')?.placeholder).toBe('gpt-4o-mini');
+  });
+
+  it('refuses a second declaration of the same keys', () => {
+    const result = parsePluginManifest(
+      base({
+        llm: { followMain: true },
+        settings: [{ key: 'baseUrl', label: '地址', type: 'text' }],
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('baseUrl');
+  });
+
+  it('rejects wrong types instead of rendering an unusable form', () => {
+    const wrongBool = parsePluginManifest(base({ llm: { followMain: 'yes' } }));
+    expect(wrongBool.ok).toBe(false);
+
+    const wrongString = parsePluginManifest(base({ llm: { label: 42 } }));
+    expect(wrongString.ok).toBe(false);
+  });
+
+  it('is null when the plugin does not call a model', () => {
+    const result = parsePluginManifest(base());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.llm).toBeNull();
+  });
+});

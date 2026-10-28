@@ -34,6 +34,18 @@ export type PluginSettingField = {
    * 用户看不出配置其实是残缺的。
    */
   required?: boolean;
+  /**
+   * 条件必填：只有 `values[key] === equals` 时才算必填。
+   *
+   * `llm` 生成的面板需要它：关掉「跟随主配置」之后接口地址与模型才必须填，
+   * 跟着主配置时留空完全是正常状态。
+   */
+  requiredWhen?: { key: string; equals: string };
+  /**
+   * 字段属于哪一块面板。目前只有 `llm`：由清单的 `llm` 声明生成，页面把这几项收进
+   * 同一个带「测试」按钮的面板，而不是排进普通设置列表。
+   */
+  group?: 'llm';
   /** 值的形态约束。`url` 要求 http/https，`number` 要求可解析的有限数字。 */
   format?: 'url' | 'number';
   /** `format: 'number'`（或 `type: 'number'`）的取值下限 / 上限。 */
@@ -134,7 +146,7 @@ export function validatePluginSettingValues(
 
     if (!value) {
       // 空值只在 required 时算错：可选字段留空是「用默认行为」，不是配置残缺。
-      if (field.required) issues.push({ key: field.key, label: field.label, message: '不能为空' });
+      if (isFieldRequired(field, values)) issues.push({ key: field.key, label: field.label, message: '不能为空' });
       continue;
     }
 
@@ -181,6 +193,15 @@ export function validatePluginSettingValues(
   return issues;
 }
 
+/** `required` + `requiredWhen` 的唯一判定，写入校验与页面提示都读它。 */
+export function isFieldRequired(field: PluginSettingField, values: Record<string, unknown>): boolean {
+  if (!field.required) return false;
+  const condition = field.requiredWhen;
+  if (!condition) return true;
+  const raw = values[condition.key];
+  return (typeof raw === 'string' ? raw : '') === condition.equals;
+}
+
 function urlProblem(value: string): string | null {
   let parsed: URL;
   try {
@@ -204,6 +225,19 @@ export function readPluginSettings(
   options: { configDir?: string } = {},
 ): PluginSettingValues {
   const stored = readStoredValues(pluginId, options.configDir);
+  return normalizePluginSettingValues(fields, stored);
+}
+
+/**
+ * 把一组原始值收敛成「只含声明键 + 补默认值」的形态。
+ *
+ * 保存之前与在读盘之外的地方都要用：配置页可以在落盘前先拿它做一次校验 / 试连，
+ * 这样「页面上刚填的值」和「写完之后插件读到的值」是同一套规则。
+ */
+export function normalizePluginSettingValues(
+  fields: readonly PluginSettingField[],
+  stored: Record<string, unknown>,
+): PluginSettingValues {
   const values: PluginSettingValues = {};
   for (const field of fields) {
     const value = stored[field.key];
@@ -226,11 +260,7 @@ export function writePluginSettings(
 ): PluginSettingValues {
   const configDir = options.configDir;
   if (!configDir) throw new Error('写入插件设置需要 configDir');
-  const normalized: PluginSettingValues = {};
-  for (const field of fields) {
-    const value = values[field.key];
-    normalized[field.key] = typeof value === 'string' ? value : (field.default ?? '');
-  }
+  const normalized = normalizePluginSettingValues(fields, values);
   const issues = validatePluginSettingValues(fields, normalized);
   if (issues.length > 0) throw new PluginSettingsValidationError(pluginId, issues);
   const file = resolvePluginSettingsPath(pluginId, configDir);

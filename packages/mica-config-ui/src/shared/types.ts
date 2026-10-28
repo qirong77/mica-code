@@ -208,6 +208,11 @@ export type ConfigWebPluginSetting = {
   required?: boolean;
   /** 这条会话可以单独覆盖（默认值仍由插件设置提供）。 */
   perSession?: boolean;
+  /**
+   * 属于哪一块面板。`llm` 表示由清单的 `llm` 声明生成，页面把它们收进同一个
+   * 「模型接口」面板（带「测试连接」），而不是排进普通设置列表。
+   */
+  group?: 'llm';
   format?: 'url' | 'number';
   min?: number;
   max?: number;
@@ -227,6 +232,32 @@ export type ConfigWebPluginSettings = {
    * 页面必须把原因显示出来，而不是继续显示「已保存」。
    */
   issues: { key: string; label: string; message: string }[];
+};
+
+/**
+ * 插件声明的模型接口（清单 `llm`）。
+ *
+ * 四项配置字段本身仍在 `settings.fields` 里（`group: 'llm'`），这里只放面板需要的
+ * 展示与状态：标题、说明、是否允许跟随主配置，以及「现在到底能不能用」。
+ */
+export type ConfigWebPluginLlm = {
+  label: string;
+  description: string;
+  followMain: boolean;
+  /** 生效配置的人读摘要（不含 Key）。 */
+  summary: string;
+  configured: boolean;
+  /** 不跟随主配置时这几项必填，页面据此加标记。 */
+  required: boolean;
+};
+
+/** 「测试连接」的结果：成功给出耗时，失败给出可直接照做的原因。 */
+export type ConfigWebPluginLlmTest = {
+  ok: boolean;
+  message: string;
+  latencyMs: number;
+  model: string;
+  reply?: string;
 };
 
 export type ConfigWebPlugin = {
@@ -250,6 +281,13 @@ export type ConfigWebPlugin = {
   files: ConfigWebPluginFile[];
   /** 清单声明了 settings 才有内容；没有声明时 `fields` 为空。 */
   settings: ConfigWebPluginSettings;
+  /**
+   * 清单里的 `llm` 声明：插件要自己调模型。
+   *
+   * 面板把 `settings.fields` 里 `group: 'llm'` 的那几项收在一起，配一个「测试连接」，
+   * 页面因此只需要认识这一份数据，不用为每个插件各写一套模型表单。
+   */
+  llm: ConfigWebPluginLlm | null;
   /**
    * 插件依赖的桌面端运行条件（清单 `desktop.checks`）。文案与系统设置入口都来自宿主的
    * 检查目录，插件只声明 id——它跑在 app-server 子进程里，探测不到这些状态。

@@ -7,6 +7,7 @@ import { CONFIG_DIR_NAME } from '@packages/mica-config/brand.js';
 import { parsePluginManifest, PLUGIN_MANIFEST_FILE, type PluginManifest } from './PluginManifest.js';
 import type { DesktopCheckId } from './PluginDesktop.js';
 import type { PluginSettingField } from './PluginSettings.js';
+import type { PluginLlmSpec } from './PluginLlm.js';
 import type { MicaPlugin } from './Plugin.js';
 
 export type FilePluginLoaderOptions = {
@@ -50,6 +51,8 @@ export type PluginInspection = {
   files: { name: string; sizeBytes: number }[];
   /** 清单声明的前缀设置项；清单坏掉时为空（页面仍然列得出来，只是没有表单）。 */
   settings: PluginSettingField[];
+  /** 清单里的 `llm` 声明；没声明（或清单坏掉）时为 null。 */
+  llm: PluginLlmSpec | null;
   /** 清单声明的桌面端运行条件；清单坏掉时为空。 */
   desktopChecks: DesktopCheckId[];
   /** 清单解析 / 入口缺失等静态问题；加载期错误由 plugin-status.json 提供。 */
@@ -199,6 +202,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     manifestFile,
     files: listFiles(dir),
     settings: [],
+    llm: null,
     desktopChecks: [],
   };
 
@@ -224,6 +228,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     icon: manifest.icon,
     entryFile,
     settings: manifest.settings,
+    llm: manifest.llm,
     desktopChecks: manifest.desktopChecks,
     error: existsSync(entryFile) ? undefined : `入口文件不存在：${manifest.main}`,
   };

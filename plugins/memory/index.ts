@@ -12,7 +12,7 @@ import {
 import { MemoryTool } from './MemoryTool.js';
 import { requestCuratorCompletion } from './providers.js';
 import { MemorySnapshotCache, formatMemorySection } from './section.js';
-import { curatorProviderConfig, describeCurator, settingsFromValues, type MemorySettings } from './settings.js';
+import { curatorReady, describeCurator, settingsFromValues, type MemorySettings } from './settings.js';
 import { MEMORY_DIR_NAME, MemoryRepository } from './store.js';
 import { registerMemoryCommand, type MemoryReviewOutcome } from './commands.js';
 
@@ -262,26 +262,16 @@ async function runCuratorPrompt(ctx: PluginContext, settings: MemorySettings, us
   };
 
   if (settings.curatorMode === 'direct') {
-    const config = curatorProviderConfig(settings);
-    if (!config) {
+    const llm = ctx.llm;
+    if (!llm || !curatorReady(llm)) {
       return {
         ok: false,
         retryable: false,
         error:
-          '整理接口未配置完整：需要接口地址、API Key 与模型名（插件设置 → Memory）；Key 填 ${ENV_VAR} 时该环境变量需要在启动 Mica 的进程里可见',
+          '整理接口未配置完整：需要接口地址与模型名（插件设置 → Memory）；Key 填 ${ENV_VAR} 时该环境变量需要在启动 Mica 的进程里可见',
       };
     }
-    const models = ctx.models;
-    if (!models) {
-      return {
-        ok: false,
-        retryable: false,
-        error: '当前宿主不提供模型请求能力；请把整理模式改成「宿主子代理」',
-      };
-    }
-    return settle(
-      await requestCuratorCompletion(models, config, { system: CURATOR_SYSTEM_PROMPT, user }),
-    );
+    return settle(await requestCuratorCompletion(llm, { system: CURATOR_SYSTEM_PROMPT, user }));
   }
 
   if (!ctx.subagents) {
@@ -350,7 +340,7 @@ function withinInterval(lastRunAt: string | null, minutes: number): boolean {
 function describeRuntime(ctx: PluginContext, repository: MemoryRepository): string {
   const settings = readSettings(ctx);
   const state = repository.readState();
-  const lines = [describeCurator(settings)];
+  const lines = [describeCurator(settings, ctx.llm)];
   if (state.lastRunAt) {
     const failed = state.lastError ? ` · 上次失败：${state.lastError}` : '';
     // 节流是全局的（多个会话共用一份 state.json），所以这里标明，避免用户以为
@@ -378,7 +368,7 @@ function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository): 
   const total = snapshots.reduce((sum, snapshot) => sum + snapshot.entries.length, 0);
   const usage = snapshots.map((snapshot) => `${snapshot.target} ${snapshot.chars}/${snapshot.limit}`).join(' · ');
 
-  if (settings.autoCapture && settings.curatorMode === 'direct' && !curatorProviderConfig(settings)) {
+  if (settings.autoCapture && settings.curatorMode === 'direct' && !curatorReady(ctx.llm)) {
     ctx.health.report({
       level: 'warn',
       message: '自动整理已开启，但独立接口还没配置完整',
@@ -390,7 +380,7 @@ function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository): 
   ctx.health.report({
     level: 'ok',
     message: `记忆已就绪：${total} 条（${usage}）`,
-    hint: describeCurator(settings),
+    hint: describeCurator(settings, ctx.llm),
   });
 }
 

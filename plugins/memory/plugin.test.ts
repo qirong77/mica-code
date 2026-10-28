@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
+import { createPluginLlmApi } from '@packages/mica-plugin/index.js';
 import { HookRegistry } from '@packages/mica-plugin/HookRegistry.js';
 import type {
   PluginContext,
@@ -111,12 +112,15 @@ function createHarness(options: HarnessOptions = {}) {
     },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     ui: { showMessage: (text: string) => shown.push(text) },
-    models: {
-      request: async (request: { purpose: string; system: string; user: string }) => {
+    // 真组件 + 假底层：插件走的就是 `ctx.llm` 这条路。
+    llm: createPluginLlmApi({
+      spec: {},
+      readValues: () => settings,
+      models: async (request) => {
         models.push(request);
         return { text: nextCuratorOutput(), usage: null };
       },
-    },
+    }),
     onDispose: (dispose: () => void) => disposers.push(dispose),
     subagents:
       options.withSubagents === false
@@ -415,9 +419,9 @@ describe('memory auto capture', () => {
       settings: {
         autoCapture: 'true',
         curatorMode: 'direct',
-        curatorBaseUrl: 'https://api.example.test/v1',
-        curatorApiKey: 'sk-test',
-        curatorModel: 'cheap-model',
+        baseUrl: 'https://api.example.test/v1',
+        apiKey: 'sk-test',
+        model: 'cheap-model',
       },
       messages: [
         { role: 'user', content: '记住这条' },

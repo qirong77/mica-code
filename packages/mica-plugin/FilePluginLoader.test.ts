@@ -168,6 +168,7 @@ describe('parsePluginManifest', () => {
         priority: 0,
         apiVersion: 1,
         settings: [],
+        llm: null,
         requires: [],
         desktopChecks: [],
       },

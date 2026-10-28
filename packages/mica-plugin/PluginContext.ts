@@ -11,6 +11,7 @@ import type { PluginSessionStateApi } from './PluginSessionState.js';
 import type { PluginSessionSettingsApi } from './PluginSessionSettings.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginModelsApi } from './PluginModels.js';
+import type { PluginLlmApi } from './PluginLlm.js';
 import type { PluginHealthStore } from './PluginHealth.js';
 import type { PluginSettingIssue, PluginSettingValues } from './PluginSettings.js';
 import type { PluginDesktopApi, PluginSkillsApi } from './PluginDesktop.js';
@@ -155,6 +156,13 @@ export type PluginContext = {
   subagents?: PluginSubagentApi;
   /** Host-scoped helper model requests; usage is attributed to the calling plugin. */
   models?: PluginModelsApi;
+  /**
+   * 插件自己调模型时的配置 + 请求（清单 `llm` 声明的那一份）。
+   *
+   * 比 `ctx.models` 高一层：它把「用哪个地址/Key/协议/模型」也收进来，插件不必自己拼
+   * 四个字段、也不必各写一遍「没配置就别发」。记账仍走 `ctx.models`。
+   */
+  llm?: PluginLlmApi;
   /**
    * 清单里声明的设置项的当前值（`$MICA_HOME/plugin-settings/<id>.json`）。
    * 配置页改完立刻生效：读的时候按文件 mtime 判断，不需要重开会话。

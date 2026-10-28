@@ -1,6 +1,6 @@
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { runCommitFlow } from './flow.js';
-import { readCommitSettings, resolveMessageTarget } from './settings.js';
+import { commitLlmProblem, readCommitSettings } from './settings.js';
 
 /**
  * `commit` 命令：把当前工作区的改动变成一次提交。
@@ -30,33 +30,24 @@ export default function setup(ctx: PluginContext): void {
       }
 
       const settings = readCommitSettings(ctx.settings.get());
-      const target = resolveMessageTarget(settings);
-      if (target.problem) {
-        ctx.health.report({ level: 'warn', message: target.problem, hint: '到配置页 Plugins → Git Commit 里补齐' });
-        notify(ctx, 'warn', `commit: ${target.problem}`);
-        return { ok: false, error: new Error(target.problem) };
-      }
-      // 模型请求由宿主代发：`mica commit` 也有这一面，只发请求、没有会话可记账。
-      const models = ctx.models;
-      if (!models) {
-        const error = new Error('插件运行环境没有提供模型请求接口');
-        notify(ctx, 'error', `commit: ${error.message}`);
-        return { ok: false, error };
+      const llm = ctx.llm;
+      const problem = commitLlmProblem(llm);
+      if (problem || !llm) {
+        ctx.health.report({ level: 'warn', message: problem ?? '', hint: '到配置页 Plugins → Git Commit 里补齐' });
+        notify(ctx, 'warn', `commit: ${problem}`);
+        return { ok: false, error: new Error(problem ?? '') };
       }
 
       const cwd = process.cwd();
       ctx.logger.info('commit:run', {
         cwd,
-        baseUrl: target.config.baseUrl,
-        model: target.config.model,
-        protocol: target.config.protocol,
-        standalone: target.standalone,
+        llm: llm.describe(),
         push: settings.push,
       });
       const result = await runCommitFlow({
         cwd,
-        message: target.config,
-        models,
+        message: { prompt: settings.prompt },
+        llm,
         push: settings.push,
         onProgress: (text) => notify(ctx, 'info', text),
       });

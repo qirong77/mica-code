@@ -33,6 +33,7 @@ plugins/<id>/
 | `priority`        | 否   | 加载顺序，小的先执行                                                                               |
 | `mica.apiVersion` | 否   | 当前只支持 `1`                                                                                     |
 | `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读取                                   |
+| `llm`             | 否   | 需要自己调模型时声明一次，见「模型接口」一节；插件用 `ctx.llm` 读取与请求                          |
 | `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                                         |
 | `desktop`         | 否   | 声明依赖的桌面端运行条件，见「运行条件」一节；用它的插件要同时声明 `requires: ["desktop"]`         |
 
@@ -70,6 +71,41 @@ plugins/<id>/
 `type` 支持 `text` / `password` / `textarea` / `select` / `number` / `switch`。值统一按字符串存进
 `$MICA_HOME/plugin-settings/<id>.json`，未声明的键不会被写入；`select` 必须带 `options`，
 `switch` 存 `"true"` / `"false"`。插件每轮读取时会比对文件 mtime，用户改完不需要重启。
+
+### 模型接口（`llm`）
+
+插件要自己问一次模型（起标题、写提交说明、整理记忆）时，不要在 `settings` 里手写那四项：
+
+```json
+"llm": {
+  "label": "起标题模型",
+  "description": "每轮开始前把最近对话交给它生成标题。",
+  "followMain": true,
+  "modelPlaceholder": "gpt-4o-mini",
+  "required": true
+}
+```
+
+声明会展开成 `useMainProvider`（`followMain` 为真时）/ `baseUrl` / `apiKey` / `protocol` /
+`model` 这几个普通设置项（`group: "llm"`），所以存储、校验、按会话覆盖仍然只有一条路径，
+页面把它们收进同一个「模型接口」面板：
+
+- `followMain`：多一个「跟随主配置」开关，默认开。打开时地址 / Key / 协议 / 模型都取自
+  当前会话的 provider（模型名带 `provider/model` 前缀时按前缀路由），关掉才用自己填的四项；
+- `required`：只在关掉「跟随主配置」后要求填写，跟着主配置时留空是正常状态；
+- 面板右侧有「测试连接」：发一次真实的最小请求并给出耗时或可照做的原因，用的是插件
+  运行时同一条请求实现，测通了就代表能工作。
+
+代码里只读生效值、只给提示词：
+
+```ts
+const llm = ctx.llm;                       // 清单声明了 llm 才有
+if (!llm?.configured()) return;            // 没配置就别发请求
+const { text } = await llm.request({ purpose: '自动起标题', system, user });
+```
+
+请求由宿主代发并记账（`origin: 'plugin'`，记进会话的 `subagentUsageHistory`），插件里不要
+自己拼地址 / Key，也不要自己发 HTTP。`requires` 里同时写上 `llm`。
 
 `number` 还可以声明 `step` 与 `unit`：页面把它画成「− 输入 +」加单位，而不是铺满整行的
 原生数字框。少一次「用户不知道该填多少」的来回。

@@ -69,6 +69,7 @@ function manifest(requires: string[]) {
     required: false,
     priority: 0,
     apiVersion: 1,
+    llm: null,
     settings: [],
     requires: requires as never,
     desktopChecks: [],

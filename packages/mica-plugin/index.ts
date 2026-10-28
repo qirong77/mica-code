@@ -8,11 +8,19 @@ import { parsePluginManifest, PLUGIN_API_VERSION, PLUGIN_MANIFEST_FILE } from '.
 import {
   PLUGIN_SETTINGS_DIR,
   createPluginSettingsStore,
+  normalizePluginSettingValues,
   readPluginSettings,
   resolvePluginSettingsPath,
   writePluginSettings,
 } from './PluginSettings.js';
 import { createPluginLogger, pluginLogDir, pluginLogPath } from './PluginLog.js';
+import {
+  describePluginLlm,
+  isPluginLlmConfigured,
+  pluginLlmSettingFields,
+  resolvePluginLlmConfig,
+  resolveUseMainProvider,
+} from './PluginLlm.js';
 import {
   PLUGIN_HEALTH_DIR,
   clearPluginHealth,
@@ -76,10 +84,16 @@ export const micaPlugin = {
   inspectPlugins,
   parsePluginManifest,
   createPluginSettingsStore,
+  normalizePluginSettingValues,
   readPluginSettings,
   writePluginSettings,
   resolvePluginSettingsPath,
   validatePluginSettingValues,
+  resolvePluginLlmConfig,
+  resolveUseMainProvider,
+  isPluginLlmConfigured,
+  describePluginLlm,
+  pluginLlmSettingFields,
   PluginSettingsValidationError,
   createPluginLogger,
   PLUGIN_HEALTH_DIR,
@@ -118,6 +132,7 @@ export {
   createPluginSettingsStore,
   isPluginSettingType,
   isValidPluginSettingKey,
+  normalizePluginSettingValues,
   readPluginSettings,
   resolvePluginSettingsPath,
   writePluginSettings,
@@ -195,6 +210,26 @@ export type {
   PluginModelsApi,
   PluginModelsHandler,
 } from './PluginModels.js';
+export {
+  PLUGIN_LLM_PROTOCOLS,
+  PLUGIN_LLM_SETTING_KEYS,
+  DEFAULT_PLUGIN_LLM_PROTOCOL,
+  createPluginLlmApi,
+  describePluginLlm,
+  expandEnvPlaceholders,
+  isPluginLlmConfigured,
+  isPluginLlmSettingKey,
+  pluginLlmSettingFields,
+  resolvePluginLlmConfig,
+  resolveUseMainProvider,
+} from './PluginLlm.js';
+export type {
+  CreatePluginLlmApiOptions,
+  PluginLlmApi,
+  PluginLlmConfig,
+  PluginLlmRequest,
+  PluginLlmSpec,
+} from './PluginLlm.js';
 export {
   PLUGIN_HEALTH_DIR,
   readPluginHealth,

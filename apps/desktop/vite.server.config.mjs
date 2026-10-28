@@ -12,6 +12,19 @@ import { defineConfig } from 'vite'
 const external = [...builtinModules, ...builtinModules.map((name) => `node:${name}`), 'node-pty']
 
 export default defineConfig({
+  plugins: [
+    {
+      name: 'text-import',
+      // `packages/mica-agent` 用 `import X from './system.md' with { type: 'text' }` 内嵌
+      // 提示词（单二进制靠 bun 的这个能力）。配置页的「测试连接」要在运行时里发一次
+      // 真实请求，于是这个包也进了服务端产物——rolldown 默认把 .md 当 JS 解析会直接报错，
+      // 这里按文本处理，语义与 bun 的 `type: 'text'` 一致。
+      transform(code, id) {
+        if (!id.endsWith('.md')) return null
+        return { code: `export default ${JSON.stringify(code)}`, map: null }
+      }
+    }
+  ],
   // SSR 构建默认把 package.json 的 dependencies 全部外部化，产物因此仍会 `import` 裸包名，
   // 而打包版 app.asar 里并没有它们（`nanostores` 就是被它引用、又不在依赖树里的一个，
   // 打包版启动即 `Cannot find package 'nanostores'`；dev 模式从仓库根 node_modules 解析，

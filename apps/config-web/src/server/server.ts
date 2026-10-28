@@ -264,6 +264,10 @@ async function resolveApiCall(
     case '/api/details/plugin-settings':
       if (method === 'PUT') return get('writePluginSettings', { id: body.id, values: body.values });
       return METHOD_NOT_ALLOWED;
+    case '/api/details/plugin-llm-test':
+      // 试连是一次真实的模型请求，所以用 POST：它不是幂等的读，也不该被缓存。
+      if (method !== 'POST') return METHOD_NOT_ALLOWED;
+      return get('testPluginLlm', { id: body.id, values: body.values });
     case '/api/details/sessions':
       return method === 'GET' ? get('readSessionsDetails') : METHOD_NOT_ALLOWED;
 

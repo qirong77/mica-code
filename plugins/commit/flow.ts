@@ -1,5 +1,5 @@
 import { formatExecError } from '@packages/mica-common/index.js';
-import type { PluginModelsApi } from '@packages/mica-plugin/index.js';
+import type { PluginLlmApi } from '@packages/mica-plugin/index.js';
 import { commitWithMessage, git, hasUnmergedFiles, pushCurrentBranch, safeGit } from './git.js';
 import { requestCommitMessage, type MessageRequestConfig } from './message.js';
 import { buildChangeSummary } from './summary.js';
@@ -29,8 +29,8 @@ export type CommitFlowResult = {
 export type CommitFlowOptions = {
   cwd: string;
   message: MessageRequestConfig;
-  /** 宿主的模型请求入口（`ctx.models`）：请求与用量记账都走它。 */
-  models: PluginModelsApi;
+  /** 模型接口（`ctx.llm`）：接口配置、请求与用量记账都走它。 */
+  llm: PluginLlmApi;
   /** 提交成功后是否推送。 */
   push: boolean;
   onProgress?: (text: string) => void;
@@ -52,7 +52,7 @@ export async function runCommitFlow(options: CommitFlowOptions): Promise<CommitF
 
     const summary = await buildChangeSummary(cwd, status);
     report('commit: 正在生成提交信息...');
-    const commitMessage = await requestCommitMessage(options.models, options.message, summary);
+    const commitMessage = await requestCommitMessage(options.llm, options.message, summary);
     report(`commit: ${firstLine(commitMessage)}`);
 
     git(['add', '-A'], cwd);

@@ -1,13 +1,7 @@
 import { pluginLogPath, type PluginContext } from '@packages/mica-plugin/index.js';
 import type { RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
-import type { ProviderProtocol } from '@packages/mica-config/index.js';
 import { buildTranscript, formatTitleInput, messageText } from './transcript.js';
-import {
-  isTitleRequestConfigured,
-  requestSessionTitle,
-  sanitizeTitle,
-  type TitleRequestConfig,
-} from './titleRequest.js';
+import { requestSessionTitle, sanitizeTitle, type TitleRequestConfig } from './titleRequest.js';
 
 /** 与 `plugin.json` 里的 `prompt.default` 保持一致（有测试对账）。 */
 export const DEFAULT_PROMPT = [
@@ -50,16 +44,12 @@ export default function setup(ctx: PluginContext): void {
   /** 「配置不完整」只上报一次；用户补好配置后成功改名会把状态覆写成 ok。 */
   let notConfiguredReported = false;
 
-  const readConfig = (): TitleRequestConfig => {
-    const values = ctx.settings.get();
-    return {
-      baseUrl: (values.baseUrl ?? '').trim(),
-      apiKey: values.apiKey ?? '',
-      protocol: parseProtocol(values.protocol),
-      model: (values.model ?? '').trim(),
-      prompt: (values.prompt ?? '').trim() || DEFAULT_PROMPT,
-    };
-  };
+  // 模型接口由 `ctx.llm` 负责（清单 `llm` 声明）：这里只剩提示词。
+  const readConfig = (): TitleRequestConfig => ({
+    prompt: (ctx.settings.get().prompt ?? '').trim() || DEFAULT_PROMPT,
+  });
+  /** 没配好就别发请求：`ctx.llm.request` 会抛错，但这里要提前给出可读的原因。 */
+  const llmReady = () => ctx.llm?.configured() === true;
 
   const maxMessages = () => parseCount(ctx.settings.get().maxMessages, DEFAULT_MAX_MESSAGES, MAX_MESSAGES_LIMIT);
   const minIntervalMs = () => {
@@ -70,7 +60,7 @@ export default function setup(ctx: PluginContext): void {
   ctx.logger.info('session-rename:setup', {
     settingsPath: ctx.settings.path,
     logPath: pluginLogPath(ctx.pluginId),
-    config: describeConfig(readConfig()),
+    config: describeConfig(ctx, readConfig()),
   });
 
   /**
@@ -82,15 +72,10 @@ export default function setup(ctx: PluginContext): void {
    */
   const configProblem = (): string | null => {
     const issues = ctx.settings.validate();
-    const missing = issues.filter((issue) => issue.key === 'baseUrl' || issue.key === 'model');
-    if (missing.length > 0) {
-      const names = missing.map((issue) => (issue.key === 'baseUrl' ? '接口地址' : '模型')).join('、');
-      return `缺少${names}，自动改名不会运行`;
-    }
     if (issues.length > 0) {
       return `配置有问题：${issues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`;
     }
-    if (!isTitleRequestConfigured(readConfig())) return '缺少接口地址或模型，自动改名不会运行';
+    if (!llmReady()) return '模型接口未配置（接口地址与模型），自动改名不会运行';
     return null;
   };
 
@@ -108,9 +93,7 @@ export default function setup(ctx: PluginContext): void {
     const session = ctx.session;
     if (!session) throw new Error('插件运行环境没有提供会话接口');
     const config = readConfig();
-    if (!isTitleRequestConfigured(config)) {
-      throw new Error('未配置接口地址或模型：请在设置页填写后再试');
-    }
+    if (!llmReady()) throw new Error('模型接口未配置：请到插件设置里填写接口地址与模型');
     const info = session.describe(owner);
     if (!info) throw new Error('当前没有会话');
     const title = await rename({
@@ -144,7 +127,7 @@ export default function setup(ctx: PluginContext): void {
 
       const config = readConfig();
       // 配置不完整时每轮都会走到这里：只在第一次上报，避免把健康文件刷成噪声。
-      if (!isTitleRequestConfigured(config)) {
+      if (!llmReady()) {
         if (!notConfiguredReported) {
           notConfiguredReported = true;
           reportConfigHealth();
@@ -178,7 +161,11 @@ export default function setup(ctx: PluginContext): void {
           if (current) states.set(info.id, { ...current, lastRequestText: latestUserText });
         } catch (error) {
           const message = errorMessage(error);
-          ctx.logger.warn('session-rename:failed', { sessionId: info.id, reason: failureReason(message), error: message });
+          ctx.logger.warn('session-rename:failed', {
+            sessionId: info.id,
+            reason: failureReason(message),
+            error: message,
+          });
           ctx.health.report({ level: 'error', message: `上次自动改名失败：${message}` });
         } finally {
           const current = states.get(info.id);
@@ -208,7 +195,7 @@ export default function setup(ctx: PluginContext): void {
         const problem = configProblem();
         ctx.ui?.showMessage(
           [
-            `配置：${describeConfig(config)}`,
+            `配置：${describeConfig(ctx, config)}`,
             ...(problem ? [`问题：${problem}`] : []),
             `会话：${info ? `${info.id}（titleSource: ${info.titleSource ?? 'derived'}）` : '无'}`,
             `设置文件：${ctx.settings.path ?? '不可用'}`,
@@ -247,8 +234,8 @@ async function rename(input: {
   const { ctx, sessionId, currentTitle, config, maxMessages, latestUserText } = input;
   const session = ctx.session;
   if (!session) return null;
-  const models = ctx.models;
-  if (!models) throw new Error('插件运行环境没有提供模型请求接口');
+  const llm = ctx.llm;
+  if (!llm) throw new Error('插件运行环境没有提供模型接口（requires 里缺 llm）');
 
   const entries = buildTranscript(session.messages(), { maxMessages, latestUserText });
   if (!entries.some((entry) => entry.role === 'user')) {
@@ -262,15 +249,10 @@ async function rename(input: {
     entries: entries.length,
     chars: entries.reduce((total, entry) => total + entry.text.length, 0),
     latestChars: latestUserText.length,
-    model: config.model,
-    protocol: config.protocol,
+    llm: llm.describe(),
   });
 
-  const { title: rawTitle, usage } = await requestSessionTitle(
-    models,
-    config,
-    formatTitleInput(entries),
-  );
+  const { title: rawTitle, usage } = await requestSessionTitle(llm, config, formatTitleInput(entries));
   const title = sanitizeTitle(rawTitle);
   if (!title) {
     ctx.logger.warn('session-rename:empty-title', { sessionId, elapsedMs: Date.now() - startedAt });
@@ -295,10 +277,6 @@ async function rename(input: {
   return renamed ? title : null;
 }
 
-function parseProtocol(value: string | undefined): ProviderProtocol {
-  return value === 'openai_responses' ? 'openai_responses' : 'openai_chat_completions';
-}
-
 function parseCount(value: string | undefined, fallback: number, max: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
@@ -306,13 +284,8 @@ function parseCount(value: string | undefined, fallback: number, max: number): n
 }
 
 /** 日志里永远不带 apiKey。 */
-function describeConfig(config: TitleRequestConfig): string {
-  return [
-    `baseUrl=${config.baseUrl || '(空)'}`,
-    `model=${config.model || '(空)'}`,
-    `protocol=${config.protocol}`,
-    `prompt=${config.prompt.length} 字`,
-  ].join(' ');
+function describeConfig(ctx: PluginContext, config: TitleRequestConfig): string {
+  return [`llm=${ctx.llm?.describe() ?? '(不可用)'}`, `prompt=${config.prompt.length} 字`].join(' ');
 }
 
 function errorMessage(error: unknown): string {

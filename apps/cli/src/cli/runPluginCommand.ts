@@ -4,6 +4,7 @@ import { formatExecError } from '@packages/mica-common/index.js';
 import { officialPlugins } from '@packages/mica-official-plugins/index.js';
 import { micaPlugin, readDisabledPluginIds, type PluginSetupReport } from '@packages/mica-plugin/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
+import { readActiveProviderConfig } from '@packages/mica-config/index.js';
 import { createPluginModels } from '../plugins/pluginModels.js';
 import { createPluginPaths } from '../plugins/pluginPaths.js';
 
@@ -54,7 +55,8 @@ export async function runPluginCommand(options: PluginCommandRunOptions): Promis
       events,
       // 命令里也可能要模型（`/commit` 的提交说明）：请求由宿主代发，
       // 这个进程没有会话，所以只发请求、不入账。
-      pluginModels: createPluginModels(),
+      // `mica commit` 也有「跟随主配置」这条路：没有会话，就用配置里的当前 provider。
+      pluginModels: createPluginModels({ resolveMainProvider: (model) => readActiveProviderConfig(model ? { model } : {}) }),
     },
     // 这里只有命令相关的几面能力，别的插件因为缺能力被跳过是正常现象，
     // 不能把「跳过」写进用户的插件健康状态。

@@ -1,5 +1,5 @@
 import { DEFAULT_MEMORY_BUDGETS, type MemoryBudgets } from './store.js';
-import { CURATOR_PROTOCOLS, type CuratorProtocol, type CuratorProviderConfig } from './providers.js';
+import type { PluginLlmApi } from '@packages/mica-plugin/index.js';
 
 /**
  * 插件设置 → 运行参数。
@@ -18,10 +18,6 @@ export type MemorySettings = {
   minIntervalMinutes: number;
   maxMessages: number;
   curatorMode: CuratorMode;
-  curatorBaseUrl: string;
-  curatorApiKey: string;
-  curatorProtocol: CuratorProtocol;
-  curatorModel: string;
 };
 
 export const DEFAULT_SETTINGS: MemorySettings = {
@@ -31,10 +27,6 @@ export const DEFAULT_SETTINGS: MemorySettings = {
   minIntervalMinutes: 10,
   maxMessages: 30,
   curatorMode: 'subagent',
-  curatorBaseUrl: '',
-  curatorApiKey: '',
-  curatorProtocol: 'openai_chat_completions',
-  curatorModel: '',
 };
 
 export function settingsFromValues(values: Record<string, string | undefined>): MemorySettings {
@@ -49,34 +41,22 @@ export function settingsFromValues(values: Record<string, string | undefined>): 
     minIntervalMinutes: readNumber(values.minIntervalMinutes, DEFAULT_SETTINGS.minIntervalMinutes, 0, 1440),
     maxMessages: readNumber(values.maxMessages, DEFAULT_SETTINGS.maxMessages, 2, 100),
     curatorMode: values.curatorMode === 'direct' ? 'direct' : 'subagent',
-    curatorBaseUrl: (values.curatorBaseUrl ?? '').trim(),
-    // Key 支持 `${ENV_VAR}`：设置文件是明文 JSON，长期凭据更适合放在环境变量里。
-    // 只对 Key 展开——地址带 `format: url` 校验，占位符会被配置页判成非法值。
-    curatorApiKey: expandEnv((values.curatorApiKey ?? '').trim()),
-    curatorProtocol: CURATOR_PROTOCOLS.includes(values.curatorProtocol as CuratorProtocol)
-      ? (values.curatorProtocol as CuratorProtocol)
-      : DEFAULT_SETTINGS.curatorProtocol,
-    curatorModel: (values.curatorModel ?? '').trim(),
   };
 }
 
-/** 独立 provider 模式下的请求配置；缺任何一项都返回 null（由调用方上报待配置）。 */
-export function curatorProviderConfig(settings: MemorySettings): CuratorProviderConfig | null {
-  if (!settings.curatorBaseUrl || !settings.curatorApiKey || !settings.curatorModel) return null;
-  return {
-    baseUrl: settings.curatorBaseUrl,
-    apiKey: settings.curatorApiKey,
-    protocol: settings.curatorProtocol,
-    model: settings.curatorModel,
-  };
+/**
+ * 独立接口是否可用。`ctx.llm` 已经在读生效值时展开过 `${ENV_VAR}`，
+ * 缺地址或模型就是「没配好」，由调用方上报待配置。
+ */
+export function curatorReady(llm: PluginLlmApi | undefined): boolean {
+  return llm?.configured() === true;
 }
 
-export function describeCurator(settings: MemorySettings): string {
+export function describeCurator(settings: MemorySettings, llm: PluginLlmApi | undefined): string {
   if (!settings.autoCapture) return '自动整理：关闭（/memory review 可手动整理一次）';
   const interval = settings.minIntervalMinutes > 0 ? `每 ${settings.minIntervalMinutes} 分钟最多一次` : '不节流';
   if (settings.curatorMode === 'direct') {
-    const model = settings.curatorModel || '未指定模型';
-    return `自动整理：开启 · ${interval} · 独立接口（${settings.curatorProtocol} / ${model}）`;
+    return `自动整理：开启 · ${interval} · 独立接口（${llm?.describe() ?? '未配置'}）`;
   }
   return `自动整理：开启 · ${interval} · 宿主子代理（用当前模型）`;
 }
@@ -85,11 +65,6 @@ function readSwitch(value: string | undefined, fallback: boolean): boolean {
   if (value === 'true') return true;
   if (value === 'false') return false;
   return fallback;
-}
-
-/** `${VAR}` → 环境变量；变量缺失时变成空串，由 `curatorProviderConfig` 判为未配置。 */
-export function expandEnv(value: string): string {
-  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => process.env[name] ?? '');
 }
 
 function readNumber(value: string | undefined, fallback: number, min: number, max: number): number {

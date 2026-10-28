@@ -1,4 +1,5 @@
 import { APP_NAME } from '@packages/mica-config/brand.js';
+import { readActiveProviderConfig } from '@packages/mica-config/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
@@ -273,6 +274,12 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
           agent,
           save: () => sessionController.saveCurrent({ allowEmpty: true }),
         }),
+      // 「跟随主配置」= 这条会话正在用的 provider；会话没起来时退回全局默认。
+      resolveMainProvider: (model) => {
+        if (model) return readActiveProviderConfig({ model });
+        const snapshot = agent?.getSnapshot?.();
+        return readActiveProviderConfig(snapshot ? { providerId: snapshot.providerId, model: snapshot.model } : {});
+      },
     }),
     runtime: {
       submit: options.submit,

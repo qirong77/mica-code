@@ -13,44 +13,6 @@
   },
   "settings": [
     {
-      "key": "baseUrl",
-      "label": "接口地址",
-      "type": "text",
-      "placeholder": "https://api.openai.com/v1",
-      "description": "OpenAI 兼容的 base URL。留空则不自动改名。",
-      "required": false,
-      "format": "url"
-    },
-    {
-      "key": "apiKey",
-      "label": "API Key",
-      "type": "password",
-      "description": "只写在本机的插件设置文件里，不会进入会话记录。"
-    },
-    {
-      "key": "protocol",
-      "label": "协议",
-      "type": "select",
-      "default": "openai_chat_completions",
-      "options": [
-        {
-          "value": "openai_chat_completions",
-          "label": "Chat Completions"
-        },
-        {
-          "value": "openai_responses",
-          "label": "Responses"
-        }
-      ]
-    },
-    {
-      "key": "model",
-      "label": "模型",
-      "type": "text",
-      "placeholder": "gpt-4o-mini",
-      "description": "起标题用的模型，通常选便宜、快的小模型。"
-    },
-    {
       "key": "prompt",
       "label": "提示词",
       "type": "textarea",
@@ -76,5 +38,10 @@
       "max": 86400
     }
   ],
-  "requires": ["commands", "hooks", "models", "session", "settings", "ui"]
+  "requires": ["commands", "hooks", "session", "settings", "ui", "llm"],
+  "llm": {
+    "label": "起标题模型",
+    "description": "每轮开始前把最近对话交给它，生成一个贴题的会话标题。建议用便宜、快的小模型。",
+    "modelPlaceholder": "gpt-4o-mini"
+  }
 }

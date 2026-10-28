@@ -3660,6 +3660,43 @@
     line-height: 15px;
   }
 
+  /* 模型接口面板：测试结果与提示都贴在设置行下面，成功/失败只换颜色不换位置。 */
+  .plugin-llm-hint {
+    margin: 0;
+    padding: 9px 12px;
+    border-top: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
+  .plugin-llm-result {
+    display: flex;
+    gap: 7px;
+    align-items: baseline;
+    margin: 0;
+    padding: 9px 12px;
+    border-top: 1px solid var(--border-subtle);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .plugin-llm-result-dot {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    transform: translateY(-1px);
+  }
+
+  .plugin-llm-result.is-ok {
+    color: var(--green);
+  }
+
+  .plugin-llm-result.is-error {
+    color: var(--red);
+  }
+
   /* 会话设置里的插件一节：一行控件 + 退回继承的次要动作，与配置页同行高。 */
   .session-plugin-settings {
     display: flex;

@@ -50,7 +50,7 @@ memory(target: "user" | "memory" | "project", operations?: Operation[])
 | `subagent`    | 宿主的 `memory-curator` 子代理（只读、单轮、无工具）       | 不想再填一套配置，复用当前模型           |
 | `direct`      | 插件自己的 provider 客户端（Chat Completions / Responses） | 想换更便宜的模型、另一家服务或另一个 Key |
 
-`direct` 需要填接口地址、Key、协议与模型名；缺任何一项都会在插件健康状态里显示「待配置」，而不是静默不整理。基地址写到 `/v1` 即可，插件按协议补 `/chat/completions` 或 `/responses`。Key 可以写成 `${MY_CURATOR_KEY}` 从环境变量读——插件设置是明文 JSON，长期凭据更适合留在环境里。请求不带 `temperature`：推理模型（o 系列 / gpt-5）不接受它，只会得到一个 400。
+`direct` 需要在「整理模型」面板里填接口地址与模型（清单的 `llm` 声明，见 `plugins/README.md`）；缺任何一项都会在插件健康状态里显示「待配置」，而不是静默不整理。基地址写到 `/v1` 即可，插件按协议补 `/chat/completions` 或 `/responses`。Key 可以写成 `${MY_CURATOR_KEY}` 从环境变量读——插件设置是明文 JSON，长期凭据更适合留在环境里。填完可以点「测试连接」验证。请求不带 `temperature`：推理模型（o 系列 / gpt-5）不接受它，只会得到一个 400。
 
 整理有节流（`minIntervalMinutes`，默认 10 分钟，**全局**：多个会话共用 `state.json`，避免开一堆页签时每个都在花钱）和输入上限（`maxMessages`，默认 30 条），同一时间只会有一个整理在跑。整理失败只上报健康状态、写插件日志，不影响已经结束的 turn。
 

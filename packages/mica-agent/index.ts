@@ -68,6 +68,10 @@ export type {
 export { DEFAULT_ROLE_NAME, formatSkillsIndex } from './prompt/index.js';
 export type { AgentRole, BuildSystemPromptOptions } from './prompt/index.js';
 export { createModelClient, createSubAgent, registerModelClient } from './providers/createModelClient.js';
+export { runModelTextRequest, clampModelTimeout } from './modelText.js';
+export type { ModelTextClient, ModelTextRequest, ModelTextResult } from './modelText.js';
+export { probeModelConnection } from './probeModel.js';
+export type { ModelProbeConfig, ModelProbeResult } from './probeModel.js';
 export type { ModelClientFactory } from './providers/createModelClient.js';
 export { ChatCompletionsClient } from './providers/ChatCompletionsClient.js';
 export { ResponsesClient } from './providers/ResponsesClient.js';

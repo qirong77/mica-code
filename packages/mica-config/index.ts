@@ -51,6 +51,8 @@ export const micaConfig = {
   getModelEffortOptions,
   /** 将不受模型支持的 effort 校正为模型默认值。 */
   normalizeModelEffort,
+  /** 当前主配置的接口地址 / Key / 协议 / 模型（插件「跟随主配置」与配置页试连用它）。 */
+  readActiveProviderConfig,
   /** 这个模型实际由哪个 provider 服务（模型元数据要按它查）。 */
   providerForModel: (model: string | undefined) => providerForModel(getConfig(), model),
   /** 注册数据驱动的模型规则。 */
@@ -98,6 +100,9 @@ export {
 } from './config.js';
 export type { EffortParamsRequest } from './config.js';
 export { readCapabilityDefaults, updateCapabilityDefaults } from './config.js';
+import { readActiveProviderConfig } from './activeProvider.js';
+export { readActiveProviderConfig } from './activeProvider.js';
+export type { ActiveProviderConfig } from './activeProvider.js';
 export { readRuntimeEnvConfig, runtimeEnv } from './runtimeEnv.js';
 export type { RuntimeEnvConfig, RuntimeEnvSource } from './runtimeEnv.js';
 export type {

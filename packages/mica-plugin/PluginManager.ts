@@ -7,6 +7,7 @@ import type { PluginRequirement } from './PluginManifest.js';
 import type { PluginPromptSections } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
 import { createPluginSessionSettingsApi, type PluginSessionSettingsHostApi } from './PluginSessionSettings.js';
+import { createPluginLlmApi } from './PluginLlm.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
@@ -174,6 +175,15 @@ export class PluginManager {
       if (subagentsFor) ctx.subagents = subagentsFor(plugin.id);
       if (modelsHandler) {
         ctx.models = { request: (request) => modelsHandler(plugin.id, request) };
+      }
+      if (plugin.manifest?.llm && modelsHandler) {
+        // 生效值 = 全局设置 + 本会话覆盖；每次调用重新合并，配置页改完立刻生效。
+        const llmSpec = plugin.manifest.llm;
+        ctx.llm = createPluginLlmApi({
+          spec: llmSpec,
+          readValues: () => ({ ...settings.get(), ...(sessionSettingsHost?.read() ?? {}) }),
+          models: (request) => modelsHandler(plugin.id, request),
+        });
       }
 
       // 清单声明的能力必须都能兑现，否则插件一定会在运行期踩空。放在 setup 之前判断，

@@ -5,6 +5,7 @@ import {
   type PluginSettingOption,
   type PluginSettingType,
 } from './PluginSettings.js';
+import { pluginLlmSettingFields, type PluginLlmSpec } from './PluginLlm.js';
 import { isDesktopCheckId, type DesktopCheckId } from './PluginDesktop.js';
 
 /**
@@ -61,6 +62,13 @@ export type PluginManifest = {
    */
   settings: PluginSettingField[];
   /**
+   * 插件要自己调模型时的声明（起标题、写提交说明、整理记忆）。
+   *
+   * 四个配置字段已经展开进 `settings`（`group: 'llm'`），这里只留声明本身：页面用它
+   * 生成面板标题、说明、是否允许「跟随主配置」，插件用 `ctx.llm` 拿到解析好的配置。
+   */
+  llm: PluginLlmSpec | null;
+  /**
    * 插件运行所需的宿主能力。
    *
    * 以前插件在 setup 里 `if (!ctx.tools) throw`，宿主少给一项就等于插件启动失败，
@@ -85,6 +93,7 @@ export const PLUGIN_REQUIREMENTS = [
   'events',
   'git',
   'hooks',
+  'llm',
   'prompt',
   'runtime',
   'session',
@@ -165,6 +174,17 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const settings = readSettings(input.settings);
   if (!settings.ok) return settings;
 
+  const llm = readLlm(input.llm);
+  if (!llm.ok) return llm;
+  // `llm` 声明展开成普通设置字段：存储、校验、按会话覆盖都只有一条路径，
+  // 页面则按 `group: 'llm'` 把它们收进同一个面板（带「测试」按钮）。
+  const llmFields = llm.value ? pluginLlmSettingFields(llm.value) : [];
+  for (const field of llmFields) {
+    if (settings.value.some((declared) => declared.key === field.key)) {
+      return { ok: false, error: `settings 不能重复声明 llm 的字段：${field.key}` };
+    }
+  }
+
   const requires = readRequires(input.requires);
   if (!requires.ok) return requires;
 
@@ -186,9 +206,52 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       required: input.required === true,
       priority: typeof input.priority === 'number' && Number.isFinite(input.priority) ? input.priority : 0,
       apiVersion,
-      settings: settings.value,
+      settings: [...settings.value, ...llmFields],
+      llm: llm.value ?? null,
       requires: requires.value,
       desktopChecks: desktopChecks.value,
+    },
+  };
+}
+
+/**
+ * `llm` 声明：插件要一个模型接口，字段由 `pluginLlmSettingFields` 统一生成。
+ *
+ * 校验从严与 settings 一致——面板完全按这份声明显示，写错的字段（例如 `followMain`
+ * 给了字符串）会让页面渲染出一个不可用的表单，不如在加载阶段就报错。
+ */
+function readLlm(input: unknown): { ok: true; value: PluginLlmSpec | null } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: null };
+  if (!isRecord(input)) return { ok: false, error: 'llm 必须是对象' };
+
+  for (const key of ['label', 'description', 'modelPlaceholder', 'baseUrlPlaceholder'] as const) {
+    const value = input[key];
+    if (value !== undefined && typeof value !== 'string') {
+      return { ok: false, error: `llm.${key} 必须是字符串` };
+    }
+  }
+  for (const key of ['followMain', 'required'] as const) {
+    const value = input[key];
+    if (value !== undefined && typeof value !== 'boolean') {
+      return { ok: false, error: `llm.${key} 必须是布尔值` };
+    }
+  }
+
+  return {
+    ok: true,
+    value: {
+      label: typeof input.label === 'string' && input.label.trim() ? input.label.trim() : undefined,
+      description: typeof input.description === 'string' && input.description.trim() ? input.description.trim() : undefined,
+      followMain: input.followMain === true,
+      modelPlaceholder:
+        typeof input.modelPlaceholder === 'string' && input.modelPlaceholder.trim()
+          ? input.modelPlaceholder.trim()
+          : undefined,
+      baseUrlPlaceholder:
+        typeof input.baseUrlPlaceholder === 'string' && input.baseUrlPlaceholder.trim()
+          ? input.baseUrlPlaceholder.trim()
+          : undefined,
+      required: input.required === true,
     },
   };
 }

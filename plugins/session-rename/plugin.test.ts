@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { micaPlugin } from '@packages/mica-plugin/index.js';
+import { createPluginLlmApi, micaPlugin } from '@packages/mica-plugin/index.js';
 import type { PluginContext, PluginSessionInfo, PluginSettingValues } from '@packages/mica-plugin/index.js';
 import type { RuntimeInputSource, RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
@@ -208,9 +208,12 @@ function createHarness(options: HarnessOptions = {}) {
       clear() {},
     },
     logger,
-    models: {
-      request: async (request: { user: string }) => ({ text: await query(request.user), usage: null }),
-    },
+    // 真组件 + 假底层：插件走的就是 `ctx.llm` 这条路。
+    llm: createPluginLlmApi({
+      spec: {},
+      readValues: () => options.settings ?? configuredSettings,
+      models: async (request) => ({ text: await query(request.user), usage: null }),
+    }),
     onDispose: (handler: () => void) => disposeHandlers.push(handler),
   } as unknown as PluginContext;
 

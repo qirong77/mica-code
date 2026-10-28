@@ -9,7 +9,7 @@
   "assets": ["README.md"],
   "required": false,
   "priority": 150,
-  "requires": ["commands", "hooks", "prompt", "session", "settings", "tools"],
+  "requires": ["commands", "hooks", "prompt", "session", "settings", "tools", "llm"],
   "settings": [
     {
       "key": "enabled",
@@ -31,8 +31,14 @@
       "type": "select",
       "default": "subagent",
       "options": [
-        { "value": "subagent", "label": "宿主子代理（当前模型）" },
-        { "value": "direct", "label": "独立接口（下面四项）" }
+        {
+          "value": "subagent",
+          "label": "宿主子代理（当前模型）"
+        },
+        {
+          "value": "direct",
+          "label": "独立接口（下面四项）"
+        }
       ],
       "description": "子代理复用当前主对话的模型配置；独立接口可以换成更便宜的模型或另一家服务。"
     },
@@ -56,8 +62,14 @@
       "type": "select",
       "default": "openai_chat_completions",
       "options": [
-        { "value": "openai_chat_completions", "label": "Chat Completions" },
-        { "value": "openai_responses", "label": "Responses" }
+        {
+          "value": "openai_chat_completions",
+          "label": "Chat Completions"
+        },
+        {
+          "value": "openai_responses",
+          "label": "Responses"
+        }
       ]
     },
     {
@@ -125,5 +137,10 @@
   ],
   "mica": {
     "apiVersion": 1
+  },
+  "llm": {
+    "label": "整理模型",
+    "description": "「整理方式 = 独立接口」时用它把对话收敛成记忆操作；子代理方式复用主对话的模型。",
+    "modelPlaceholder": "gpt-4.1-mini"
   }
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_SETTINGS, curatorProviderConfig, expandEnv, settingsFromValues } from './settings.js';
+import { createPluginLlmApi, expandEnvPlaceholders } from '@packages/mica-plugin/index.js';
+import { DEFAULT_SETTINGS, curatorReady, settingsFromValues } from './settings.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -11,7 +12,6 @@ describe('settingsFromValues', () => {
       enabled: DEFAULT_SETTINGS.enabled,
       autoCapture: false,
       curatorMode: 'subagent',
-      curatorProtocol: 'openai_chat_completions',
       minIntervalMinutes: 10,
       maxMessages: 30,
     });
@@ -26,31 +26,47 @@ describe('settingsFromValues', () => {
 
   it('expands ${VAR} in the curator key so the secret can live in the environment', () => {
     vi.stubEnv('MY_CURATOR_KEY', 'sk-from-env');
-    const settings = settingsFromValues({
-      curatorMode: 'direct',
-      curatorBaseUrl: 'https://api.example.test/v1',
-      curatorApiKey: '${MY_CURATOR_KEY}',
-      curatorModel: 'cheap-model',
+    const llm = createPluginLlmApi({
+      spec: {},
+      readValues: () => ({
+        baseUrl: 'https://api.example.test/v1',
+        apiKey: '${MY_CURATOR_KEY}',
+        model: 'cheap-model',
+      }),
+      models: async () => ({ text: '', usage: null }),
     });
 
-    expect(settings.curatorApiKey).toBe('sk-from-env');
-    expect(curatorProviderConfig(settings)).toMatchObject({ apiKey: 'sk-from-env' });
+    expect(llm.config().apiKey).toBe('sk-from-env');
+    expect(curatorReady(llm)).toBe(true);
   });
 
   it('treats a missing environment variable as an unconfigured provider', () => {
-    const settings = settingsFromValues({
-      curatorMode: 'direct',
-      curatorBaseUrl: 'https://api.example.test/v1',
-      curatorApiKey: '${NOT_DEFINED_ANYWHERE}',
-      curatorModel: 'cheap-model',
+    const llm = createPluginLlmApi({
+      spec: {},
+      readValues: () => ({
+        baseUrl: 'https://api.example.test/v1',
+        apiKey: '${NOT_DEFINED_ANYWHERE}',
+        model: 'cheap-model',
+      }),
+      models: async () => ({ text: '', usage: null }),
     });
 
-    expect(settings.curatorApiKey).toBe('');
-    expect(curatorProviderConfig(settings)).toBeNull();
+    // 地址与模型都在，Key 展开成空串：可用（本地网关常常不校验 Key）。
+    expect(llm.config().apiKey).toBe('');
+    expect(curatorReady(llm)).toBe(true);
   });
 
   it('leaves a literal key untouched and reports incomplete config', () => {
-    expect(expandEnv('sk-literal')).toBe('sk-literal');
-    expect(curatorProviderConfig(settingsFromValues({ curatorBaseUrl: 'https://x.test/v1' }))).toBeNull();
+    expect(expandEnvPlaceholders('sk-literal')).toBe('sk-literal');
+    expect(curatorReady(undefined)).toBe(false);
+    expect(
+      curatorReady(
+        createPluginLlmApi({
+          spec: {},
+          readValues: () => ({ baseUrl: 'https://x.test/v1' }),
+          models: async () => ({ text: '', usage: null }),
+        }),
+      ),
+    ).toBe(false);
   });
 });

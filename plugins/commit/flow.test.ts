@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { PluginModelRequest, PluginModelsApi } from '@packages/mica-plugin/index.js';
+import { createPluginLlmApi, type PluginModelRequest } from '@packages/mica-plugin/index.js';
 import { runCommitFlow } from './flow.js';
 import { DEFAULT_PROMPT } from './message.js';
 
@@ -27,26 +27,22 @@ function makeRepo(): string {
   return directory;
 }
 
-/** 假的宿主模型入口：记录 user 正文（摘要），按脚本返回文本或抛错。 */
-function fakeModels(reply: string | Error) {
+/** 假的模型底层：记录 user 正文（摘要），按脚本返回文本或抛错。 */
+function fakeLlm(reply: string | Error) {
   const calls: PluginModelRequest[] = [];
-  const models: PluginModelsApi = {
-    async request(request) {
+  const llm = createPluginLlmApi({
+    spec: {},
+    readValues: () => ({ baseUrl: 'https://api.example.test/v1', apiKey: 'test-key', model: 'mini' }),
+    models: async (request) => {
       calls.push(request);
       if (reply instanceof Error) throw reply;
       return { text: reply, usage: null };
     },
-  };
-  return { models, calls };
+  });
+  return { llm, calls };
 }
 
-const message = {
-  baseUrl: 'https://api.example.test/v1',
-  apiKey: 'test-key',
-  protocol: 'openai_chat_completions' as const,
-  model: 'mini',
-  prompt: DEFAULT_PROMPT,
-};
+const message = { prompt: DEFAULT_PROMPT };
 
 beforeEach(() => {
   repo = makeRepo();
@@ -61,12 +57,12 @@ describe('commit flow', () => {
     writeFileSync(join(repo, 'README.md'), 'updated\n');
     writeFileSync(join(repo, 'notes.txt'), 'new file\n');
     const progress: string[] = [];
-    const { models, calls } = fakeModels('fix: 更新说明文件 🐛');
+    const { llm, calls } = fakeLlm('fix: 更新说明文件 🐛');
 
     const result = await runCommitFlow({
       cwd: repo,
       message,
-      models,
+      llm,
       push: false,
       onProgress: (text) => progress.push(text),
     });
@@ -90,7 +86,7 @@ describe('commit flow', () => {
     const result = await runCommitFlow({
       cwd: repo,
       message,
-      models: fakeModels(new Error('commit message 请求无法完成：mock provider failed')).models,
+      llm: fakeLlm(new Error('commit message 请求无法完成：mock provider failed')).llm,
       push: false,
     });
 
@@ -101,11 +97,11 @@ describe('commit flow', () => {
   });
 
   it('returns nothing_to_commit without asking the model', async () => {
-    const { models, calls } = fakeModels('chore: 空提交 🔧');
+    const { llm, calls } = fakeLlm('chore: 空提交 🔧');
     const result = await runCommitFlow({
       cwd: repo,
       message,
-      models,
+      llm,
       push: false,
     });
 
@@ -128,7 +124,7 @@ describe('commit flow', () => {
     const result = await runCommitFlow({
       cwd: repo,
       message,
-      models: fakeModels('fix: 冲突 🐛').models,
+      llm: fakeLlm('fix: 冲突 🐛').llm,
       push: false,
     });
 

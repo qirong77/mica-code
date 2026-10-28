@@ -8,6 +8,7 @@ import { ThemeProvider } from '../../../../packages/@anthropic/ink/src/theme/The
 import { wrappedRender } from '@anthropic/ink';
 import { micaUi } from '@packages/mica-ui/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
+import { readActiveProviderConfig } from '@packages/mica-config/index.js';
 import { micaCommands, type CommandRegistry } from '@packages/mica-commands/index.js';
 import { formatExecError, gitText } from '@packages/mica-common/index.js';
 import { micaPlugin, type MicaPlugin } from '@packages/mica-plugin/index.js';
@@ -216,6 +217,16 @@ export class Application {
               agent: session?.agent,
               save: () => session?.sessionController.saveCurrent({ allowEmpty: true }),
             });
+          },
+          // 「跟随主配置」跟的是这条会话正在用的 provider：会话切到别的服务商之后，
+          // 插件请求跟着走，而不是打回配置页里的全局默认。
+          resolveMainProvider: (model) => {
+            // 插件点名了模型：让 provider 跟着模型前缀走；否则跟会话正在用的那一个。
+            if (model) return readActiveProviderConfig({ model });
+            const snapshot = resolvePluginSession(agentSessions, undefined)?.agent.getSnapshot();
+            return readActiveProviderConfig(
+              snapshot ? { providerId: snapshot.providerId, model: snapshot.model } : {},
+            );
           },
         }),
         runtime: {

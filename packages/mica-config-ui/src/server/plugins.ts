@@ -1,12 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { micaConfig } from '@packages/mica-config/index.js';
+import { probeModelConnection } from '@packages/mica-agent/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
-import type { PluginSettingField } from '@packages/mica-plugin/index.js';
+import type { PluginLlmSpec, PluginModelRequest, PluginSettingField } from '@packages/mica-plugin/index.js';
 import { DESKTOP_CHECKS } from '@packages/mica-plugin/index.js';
 import { OFFICIAL_PLUGINS_DIR, officialPluginManifests } from '@packages/mica-official-plugins/manifests.js';
 import { getConfigRootPath, getPluginsRootPath, getPluginStatePath, getPluginStatusPath } from './paths.js';
 import type {
   ConfigWebPlugin,
   ConfigWebPluginCheck,
+  ConfigWebPluginLlm,
+  ConfigWebPluginLlmTest,
   ConfigWebPluginSettings,
   ConfigWebPluginsDetails,
 } from '../shared/types.js';
@@ -46,6 +50,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         // 官方插件的文件已经编译进产物，磁盘上不一定读得到，只列清单声明的部分。
         files: [micaPlugin.PLUGIN_MANIFEST_FILE, manifest.main, ...manifest.assets].map((name) => ({ name })),
         settings: readSettings(manifest.id, manifest.settings, configRoot),
+        llm: readLlm(manifest.id, manifest.llm, manifest.settings, configRoot),
         desktopChecks: resolveDesktopChecks(manifest.desktopChecks),
         health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(manifest.id),
@@ -71,6 +76,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         manifestFile: plugin.manifestFile,
         files: plugin.files,
         settings: readSettings(plugin.id, plugin.settings, configRoot),
+        llm: readLlm(plugin.id, plugin.llm, plugin.settings, configRoot),
         desktopChecks: resolveDesktopChecks(plugin.desktopChecks),
         health: micaPlugin.readPluginHealth(plugin.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(plugin.id),
@@ -122,10 +128,99 @@ function findSettingFields(id: string): PluginSettingField[] | null {
   return inspected ? inspected.settings : null;
 }
 
+function findManifest(id: string): { llm: PluginLlmSpec | null; settings: PluginSettingField[] } | null {
+  const official = officialPluginManifests.find((manifest) => manifest.id === id);
+  if (official) return { llm: official.llm, settings: official.settings };
+  const inspected = micaPlugin.inspectPlugins({ pluginsDir: getPluginsRootPath() }).plugins.find((p) => p.id === id);
+  return inspected ? { llm: inspected.llm, settings: inspected.settings } : null;
+}
+
+/**
+ * 「测试连接」。
+ *
+ * 用的是插件真正会走的那一次请求（`probeModelConnection` → `runModelTextRequest`，
+ * 与 `ctx.llm.request` 同一条实现），所以测通了就代表插件能工作，不会出现「测试用一条
+ * 路、实际用另一条路」。测试本身不记账：它不属于任何会话。
+ *
+ * `values` 可选：页面在用户改完还没落盘时也能先测一次。不传就读磁盘上的生效值。
+ */
+export async function testPluginLlm(id: string, values?: Record<string, unknown>): Promise<ConfigWebPluginLlmTest> {
+  const manifest = findManifest(id);
+  if (!manifest?.llm) throw new Error(`插件没有声明模型接口：${id}`);
+  // 与保存走同一套校验：非法值先在这里拦下，不必发一次注定失败的请求。
+  const merged =
+    values === undefined
+      ? micaPlugin.readPluginSettings(id, manifest.settings, { configDir: getConfigRootPath() })
+      : micaPlugin.normalizePluginSettingValues(manifest.settings, values);
+  const issues = micaPlugin.validatePluginSettingValues(manifest.settings, merged);
+  if (issues.length > 0) {
+    return {
+      ok: false,
+      message: issues.map((issue) => `${issue.label} ${issue.message}`).join('；'),
+      latencyMs: 0,
+      model: '',
+    };
+  }
+
+  const config = micaPlugin.resolvePluginLlmConfig(manifest.llm, merged);
+  let target: { baseUrl: string; apiKey: string; protocol: PluginModelRequest['protocol']; model: string };
+  if (config.useMainProvider) {
+    const main = micaConfig.readActiveProviderConfig();
+    target = {
+      baseUrl: main.baseUrl,
+      apiKey: main.apiKey,
+      protocol: main.protocol,
+      model: config.model || main.model,
+    };
+  } else {
+    target = { baseUrl: config.baseUrl, apiKey: config.apiKey, protocol: config.protocol, model: config.model };
+  }
+  return probeModelConnection(target);
+}
+
 function readSettings(id: string, fields: PluginSettingField[], configRoot: string): ConfigWebPluginSettings {
   const values = micaPlugin.readPluginSettings(id, fields, { configDir: configRoot });
   // 磁盘上可能是旧版本写下的、或手改过的值：页面要能把它们标出来，而不是照样显示「已保存」。
   return { fields, values, issues: micaPlugin.validatePluginSettingValues(fields, values) };
+}
+
+/**
+ * 模型接口面板的数据：声明 + 生效值摘要 + 现在能不能用。
+ *
+ * 「能不能用」对「跟随主配置」还要看主配置里有没有可用 provider——那种情况页面若只
+ * 显示「已配置」，用户会在插件静默失败时才回头排查。
+ */
+function readLlm(
+  id: string,
+  spec: PluginLlmSpec | null,
+  fields: PluginSettingField[],
+  configRoot: string,
+): ConfigWebPluginLlm | null {
+  if (!spec) return null;
+  const values = micaPlugin.readPluginSettings(id, fields, { configDir: configRoot });
+  const config = micaPlugin.resolvePluginLlmConfig(spec, values);
+  let configured = micaPlugin.isPluginLlmConfigured(config);
+  let summary = micaPlugin.describePluginLlm(config);
+  if (configured && config.useMainProvider) {
+    try {
+      const main = micaConfig.readActiveProviderConfig();
+      const model = config.model || main.model;
+      configured = Boolean(main.baseUrl && model);
+      if (configured)
+        summary = `跟随主配置 · ${main.protocol === 'openai_responses' ? 'Responses' : 'Chat Completions'} · ${model}`;
+    } catch (error) {
+      configured = false;
+      summary = error instanceof Error ? error.message : '主配置不可用';
+    }
+  }
+  return {
+    label: spec.label ?? '模型接口',
+    description: spec.description ?? '这个插件会用它自己问一次模型。',
+    followMain: spec.followMain === true,
+    summary,
+    configured,
+    required: spec.required === true,
+  };
 }
 
 /**

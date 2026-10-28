@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  createPluginLlmApi,
   micaPlugin,
   type PluginContext,
   type PluginModelRequest,
@@ -69,12 +70,16 @@ function createHarness(options: { settings?: PluginSettingValues; text?: string 
   const healthReports: Array<{ level: string; message: string }> = [];
   const commands: MicaCommand[] = [];
   const requests: PluginModelRequest[] = [];
-  const models = {
-    request: vi.fn(async (request: PluginModelRequest) => {
+  const settingsValues = options.settings ?? standaloneSettings;
+  // 真组件 + 假底层：插件走的就是 `ctx.llm` 这条路。
+  const llm = createPluginLlmApi({
+    spec: { followMain: true },
+    readValues: () => ({ useMainProvider: 'false', ...settingsValues }),
+    models: vi.fn(async (request: PluginModelRequest) => {
       requests.push(request);
       return { text: options.text ?? 'feat: 插件提交 ✨', usage: null };
     }),
-  };
+  });
 
   const ctx = {
     pluginId: 'commit',
@@ -104,7 +109,7 @@ function createHarness(options: { settings?: PluginSettingValues; text?: string 
       clear() {},
     },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    models,
+    llm,
     onDispose: vi.fn(),
   } as unknown as PluginContext;
 
@@ -116,7 +121,7 @@ function createHarness(options: { settings?: PluginSettingValues; text?: string 
     notifications,
     healthReports,
     requests,
-    models,
+    llm,
     run: (args = '') => command.handler({}, args) as CommandResult | Promise<CommandResult>,
   };
 }
@@ -163,7 +168,7 @@ describe('commit plugin command', () => {
     const result = await harness.run();
 
     expect(result.ok).toBe(false);
-    expect(harness.models.request).not.toHaveBeenCalled();
+    expect(harness.requests).toHaveLength(0);
     expect(git(['log', '-1', '--pretty=%s']).trim()).toBe('chore: initialize test repo');
     expect(harness.healthReports.at(-1)).toMatchObject({ level: 'warn' });
   });

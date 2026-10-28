@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { PluginSettingInput } from '../components/PluginSettingInput.js';
 import { Alert, Button, Empty, SaveStatus, SettingRow, SettingsGroup, Switch, Tag } from '../components/Ui.js';
+import { LlmSettingsSection } from '../components/LlmSettingsSection.js';
 import { PluginIcon } from '../pluginIcons.js';
 import {
   openDesktopSettings,
@@ -604,47 +605,63 @@ function PluginSettingsForm({
   }
 
   return (
-    <SettingsGroup
-      title="设置"
-      description="改动停下就写盘，插件的下一次读取即生效"
-      actions={<SaveStatus saving={autosave.saving} saved={autosave.status === 'saved'} />}
-    >
-      {autosave.error && Object.keys(fieldErrors).length === 0 ? <Alert message={autosave.error} /> : null}
-      {plugin.settings.issues.length > 0 ? (
-        <div className="plugin-health is-warn">
-          <span className="plugin-health-title">已保存的配置不完整，插件因此不会生效</span>
-          {plugin.settings.issues.map((issue) => (
-            <span key={issue.key}>
-              {issue.label}：{issue.message}
-            </span>
+    <>
+      <SettingsGroup
+        title="设置"
+        description="改动停下就写盘，插件的下一次读取即生效"
+        actions={<SaveStatus saving={autosave.saving} saved={autosave.status === 'saved'} />}
+      >
+        {autosave.error && Object.keys(fieldErrors).length === 0 ? <Alert message={autosave.error} /> : null}
+        {plugin.settings.issues.length > 0 ? (
+          <div className="plugin-health is-warn">
+            <span className="plugin-health-title">已保存的配置不完整，插件因此不会生效</span>
+            {plugin.settings.issues.map((issue) => (
+              <span key={issue.key}>
+                {issue.label}：{issue.message}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {/* 模型接口的那几项由下面的 LlmSettingsSection 统一渲染（带测试按钮）。 */}
+        {plugin.settings.fields
+          .filter((field) => field.group !== 'llm')
+          .map((field) => (
+            <SettingRow
+              key={field.key}
+              htmlFor={`plugin-setting-${field.key}`}
+              label={
+                <>
+                  {field.label}
+                  {field.required ? <span className="plugin-setting-required">必填</span> : null}
+                  {field.perSession ? <span className="plugin-setting-session">可按会话覆盖</span> : null}
+                </>
+              }
+              hint={field.description}
+              error={fieldErrors[field.key]}
+              wide={field.type === 'textarea'}
+            >
+              <PluginSettingInput
+                field={field}
+                value={values[field.key] ?? ''}
+                disabled={!canSave}
+                invalid={Boolean(fieldErrors[field.key])}
+                onChange={(next) => update(field.key, next)}
+              />
+            </SettingRow>
           ))}
-        </div>
-      ) : null}
-      {plugin.settings.fields.map((field) => (
-        <SettingRow
-          key={field.key}
-          htmlFor={`plugin-setting-${field.key}`}
-          label={
-            <>
-              {field.label}
-              {field.required ? <span className="plugin-setting-required">必填</span> : null}
-              {field.perSession ? <span className="plugin-setting-session">可按会话覆盖</span> : null}
-            </>
-          }
-          hint={field.description}
-          error={fieldErrors[field.key]}
-          wide={field.type === 'textarea'}
-        >
-          <PluginSettingInput
-            field={field}
-            value={values[field.key] ?? ''}
-            disabled={!canSave}
-            invalid={Boolean(fieldErrors[field.key])}
-            onChange={(next) => update(field.key, next)}
-          />
-        </SettingRow>
-      ))}
-    </SettingsGroup>
+      </SettingsGroup>
+      <LlmSettingsSection
+        plugin={plugin}
+        values={values}
+        errors={Object.entries(fieldErrors).map(([key, message]) => ({
+          key,
+          label: plugin.settings.fields.find((field) => field.key === key)?.label ?? key,
+          message,
+        }))}
+        onChange={update}
+        disabled={!canSave}
+      />
+    </>
   );
 }
 

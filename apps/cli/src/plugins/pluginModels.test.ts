@@ -178,3 +178,62 @@ describe('recordPluginModelUsage', () => {
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+describe('createPluginModels follow-main', () => {
+  it('resolves the endpoint from the host instead of the plugin', async () => {
+    const built: { baseURL?: string; apiKey?: string; model?: string } = {};
+    const models = createPluginModels({
+      resolveMainProvider: () => ({
+        baseUrl: 'https://main.test/v1',
+        apiKey: 'main-key',
+        protocol: 'openai_responses',
+        model: 'main-model',
+      }),
+      createClient: ((options: { baseURL?: string; apiKey?: string; model?: string }) => {
+        built.baseURL = options.baseURL;
+        built.apiKey = options.apiKey;
+        built.model = options.model;
+        return { query: async () => 'ok', usageHistory: [] };
+      }) as never,
+    });
+
+    await models('commit', { ...baseRequest, useMainProvider: true, baseUrl: '', model: '' });
+
+    // 插件给的是空地址，实际打到宿主解析出的主配置接口上。
+    expect(built).toEqual({
+      baseURL: 'https://main.test/v1',
+      apiKey: 'main-key',
+      model: 'main-model',
+    });
+  });
+
+  it('uses the model the plugin names while following the main endpoint', async () => {
+    const seen: { model?: string } = {};
+    const models = createPluginModels({
+      resolveMainProvider: (model) => {
+        seen.model = model;
+        return { baseUrl: 'https://main.test/v1', apiKey: 'k', protocol: 'openai_chat_completions', model: 'picked' };
+      },
+      record: () => {},
+      createClient: ((options: { model: string }) => ({
+        query: async () => {
+          seen.model = options.model;
+          return 'ok';
+        },
+        usageHistory: [],
+      })) as never,
+    });
+
+    await models('commit', { ...baseRequest, useMainProvider: true, baseUrl: '', model: 'cheap/cheap-model' });
+
+    // 解析器拿到插件点名的模型（决定 provider），实际请求也用它。
+    expect(seen.model).toBe('cheap/cheap-model');
+  });
+
+  it('fails loudly when the host cannot resolve the main provider', async () => {
+    const models = createPluginModels();
+    await expect(models('commit', { ...baseRequest, useMainProvider: true, baseUrl: '', model: '' })).rejects.toThrow(
+      /没有提供主配置/,
+    );
+  });
+});

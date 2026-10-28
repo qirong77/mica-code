@@ -8,6 +8,7 @@ import type {
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
   ConfigWebPerformanceDetails,
+  ConfigWebPluginLlmTest,
   ConfigWebPluginsDetails,
   ConfigWebRolesDetails,
   ConfigWebSessionDetails,
@@ -55,6 +56,7 @@ export type ConfigWebClient = {
   setPluginEnabled?(id: string, enabled: boolean): Promise<ConfigWebPluginsDetails>;
   /** 保存插件设置。与启停不同，写的是设置文件，运行期就能被插件读到。 */
   writePluginSettings?(id: string, values: Record<string, string>): Promise<ConfigWebPluginsDetails>;
+  testPluginLlm?(id: string, values?: Record<string, string>): Promise<ConfigWebPluginLlmTest>;
   /**
    * 插件声明的运行条件（辅助功能、屏幕录制等）此刻是否满足。
    *
@@ -202,6 +204,25 @@ export function writePluginSettings(id: string, values: Record<string, string>):
   const current = requireClient();
   if (typeof current.writePluginSettings !== 'function') throw new Error('当前宿主不支持插件设置');
   return current.writePluginSettings(id, values);
+}
+
+/**
+ * 试连插件声明的模型接口。
+ *
+ * 不传 `values` 时测磁盘上已保存的配置；传了就测页面当前填的这一份——用户改完
+ * 不用先保存再测。
+ */
+export function testPluginLlm(
+  id: string,
+  values?: Record<string, string>,
+): Promise<ConfigWebPluginLlmTest> {
+  const current = requireClient();
+  if (typeof current.testPluginLlm !== 'function') throw new Error('当前宿主不支持测试模型接口');
+  return current.testPluginLlm(id, values);
+}
+
+export function supportsPluginLlmTest(): boolean {
+  return typeof client?.testPluginLlm === 'function';
 }
 
 export function supportsPluginSettings(): boolean {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { PluginModelRequest } from '@packages/mica-plugin/index.js';
+import { createPluginLlmApi, type PluginModelRequest } from '@packages/mica-plugin/index.js';
 import manifest from './plugin.json';
 import { DEFAULT_PROMPT } from './index.js';
-import { isTitleRequestConfigured, requestSessionTitle, sanitizeTitle } from './titleRequest.js';
+import { requestSessionTitle, sanitizeTitle } from './titleRequest.js';
 
 describe('sanitizeTitle', () => {
   it('takes the first line and strips decoration', () => {
@@ -26,37 +26,36 @@ describe('sanitizeTitle', () => {
   });
 });
 
-describe('isTitleRequestConfigured', () => {
-  const base = { baseUrl: 'https://api.openai.com/v1', apiKey: 'k', protocol: 'openai_chat_completions' as const };
+describe('llm readiness', () => {
+  const build = (values: Record<string, string>) =>
+    createPluginLlmApi({ spec: {}, readValues: () => values, models: async () => ({ text: '', usage: null }) });
 
   it('needs both base url and model', () => {
-    expect(isTitleRequestConfigured({ ...base, model: 'gpt-4o-mini', prompt: '' })).toBe(true);
-    expect(isTitleRequestConfigured({ ...base, model: '  ', prompt: '' })).toBe(false);
-    expect(isTitleRequestConfigured({ ...base, baseUrl: ' ', model: 'm', prompt: '' })).toBe(false);
+    const base = { baseUrl: 'https://api.openai.com/v1', apiKey: 'k' };
+    expect(build({ ...base, model: 'gpt-4o-mini' }).configured()).toBe(true);
+    expect(build({ ...base, model: '  ' }).configured()).toBe(false);
+    expect(build({ ...base, baseUrl: ' ', model: 'm' }).configured()).toBe(false);
   });
 });
 
 describe('requestSessionTitle', () => {
   it('asks the host for one request with the configured endpoint and prompt', async () => {
     const requests: PluginModelRequest[] = [];
-    const models = {
-      request: async (request: PluginModelRequest) => {
-        requests.push(request);
-        return { text: '**修复登录超时**', usage: null };
-      },
-    };
-
-    const result = await requestSessionTitle(
-      models,
-      {
+    const llm = createPluginLlmApi({
+      spec: {},
+      readValues: () => ({
         baseUrl: 'https://example.test/v1',
         apiKey: 'secret',
         protocol: 'openai_responses',
         model: 'mini',
-        prompt: '只输出标题',
+      }),
+      models: async (request) => {
+        requests.push(request);
+        return { text: '**修复登录超时**', usage: null };
       },
-      'user: 修一下登录超时',
-    );
+    });
+
+    const result = await requestSessionTitle(llm, { prompt: '只输出标题' }, 'user: 修一下登录超时');
 
     expect(requests[0]).toMatchObject({
       purpose: '自动起标题',
@@ -79,8 +78,8 @@ describe('plugin manifest', () => {
 
   it('declares the fields the plugin actually reads', () => {
     const keys = manifest.settings.map((entry) => entry.key);
-    expect(keys).toEqual(
-      expect.arrayContaining(['baseUrl', 'apiKey', 'protocol', 'model', 'prompt', 'maxMessages', 'minIntervalSeconds']),
-    );
+    expect(keys).toEqual(expect.arrayContaining(['prompt', 'maxMessages', 'minIntervalSeconds']));
+    // 模型接口由清单的 `llm` 声明生成，不再手写四个字段。
+    expect(manifest.llm).toMatchObject({ modelPlaceholder: 'gpt-4o-mini' });
   });
 });

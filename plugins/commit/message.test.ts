@@ -1,34 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import type { PluginModelRequest, PluginModelsApi } from '@packages/mica-plugin/index.js';
+import { createPluginLlmApi, type PluginModelRequest } from '@packages/mica-plugin/index.js';
 import { DEFAULT_PROMPT, requestCommitMessage, sanitizeCommitMessage } from './message.js';
 
-const config = {
-  baseUrl: 'https://api.example.test/v1',
-  apiKey: 'test-key',
-  protocol: 'openai_chat_completions' as const,
-  model: 'mini',
-  prompt: DEFAULT_PROMPT,
-};
+const config = { prompt: DEFAULT_PROMPT };
 
-function fakeModels(reply: string | Error): { models: PluginModelsApi; calls: PluginModelRequest[] } {
+/** 用真的 `ctx.llm` 组件，只把最底层的请求换成假的：这样测的是插件真正走的那条路。 */
+function fakeLlm(reply: string | Error, values: Record<string, string> = {}) {
   const calls: PluginModelRequest[] = [];
-  return {
-    calls,
-    models: {
-      async request(request) {
-        calls.push(request);
-        if (reply instanceof Error) throw reply;
-        return { text: reply, usage: null };
-      },
+  const llm = createPluginLlmApi({
+    spec: { followMain: true },
+    readValues: () => ({
+      useMainProvider: 'false',
+      baseUrl: 'https://api.example.test/v1',
+      apiKey: 'test-key',
+      model: 'mini',
+      ...values,
+    }),
+    models: async (request) => {
+      calls.push(request);
+      if (reply instanceof Error) throw reply;
+      return { text: reply, usage: null };
     },
-  };
+  });
+  return { llm, calls };
 }
 
 describe('commit message request', () => {
   it('asks the host for one non-streaming completion and sanitizes the text', async () => {
-    const { models, calls } = fakeModels('```\nfix: 修复导入路径 🐛\n```');
+    const { llm, calls } = fakeLlm('```\nfix: 修复导入路径 🐛\n```');
 
-    const message = await requestCommitMessage(models, config, 'Changed files:\n M README.md');
+    const message = await requestCommitMessage(llm, config, 'Changed files:\n M README.md');
 
     expect(message).toBe('fix: 修复导入路径 🐛');
     expect(calls).toHaveLength(1);
@@ -44,9 +45,9 @@ describe('commit message request', () => {
   });
 
   it('wraps host failures with the plugin error type', async () => {
-    const { models } = fakeModels(new Error('HTTP 401 · invalid api key'));
+    const { llm } = fakeLlm(new Error('HTTP 401 · invalid api key'));
 
-    await expect(requestCommitMessage(models, config, 'diff')).rejects.toThrow(/commit message 请求无法完成：HTTP 401/);
+    await expect(requestCommitMessage(llm, config, 'diff')).rejects.toThrow(/commit message 请求无法完成：HTTP 401/);
   });
 
   it('falls back to a generic subject when the model returns nothing usable', () => {
