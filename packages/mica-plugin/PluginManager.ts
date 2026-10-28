@@ -8,6 +8,7 @@ import type { PluginPromptSections } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
 import { createPluginSessionSettingsApi, type PluginSessionSettingsHostApi } from './PluginSessionSettings.js';
 import { createPluginLlmApi } from './PluginLlm.js';
+import { createPluginBackgroundScheduler } from './PluginBackground.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
@@ -161,6 +162,18 @@ export class PluginManager {
         },
         onDispose: (dispose) => localDisposables.push({ dispose }),
       };
+      // 常驻任务由 manager 自己调度，不依赖宿主接线：它是纯定时逻辑，任何宿主都能给。
+      // 插件没手动 dispose 的循环随 localDisposables 一起回收，所以停用插件 = 循环停止。
+      const background = createPluginBackgroundScheduler({
+        pluginId: plugin.id,
+        onError: (taskId, error) => {
+          const message = errorMessage(error);
+          logger.warn('plugin:background-failed', { taskId, error: message });
+          health.report({ level: 'warn', message: `常驻任务 ${taskId} 失败：${message}` });
+        },
+      });
+      ctx.background = background;
+      localDisposables.push({ dispose: () => background.disposeAll() });
       const sessionState = sessionStateFor?.(plugin.id);
       if (sessionState) ctx.sessionState = sessionState;
       if (promptRegistry) {

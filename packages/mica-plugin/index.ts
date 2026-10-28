@@ -168,6 +168,12 @@ export type {
   PluginToolRegistrationOptions,
 } from './PluginContext.js';
 export type { PluginPromptSection } from './PluginPrompt.js';
+export type {
+  PluginBackgroundApi,
+  PluginBackgroundState,
+  PluginBackgroundTask,
+} from './PluginBackground.js';
+export { createPluginBackgroundScheduler } from './PluginBackground.js';
 export { PluginPromptSections } from './PluginPrompt.js';
 export { DESKTOP_CHECKS, DESKTOP_CHECK_IDS, isDesktopCheckId } from './PluginDesktop.js';
 export type {

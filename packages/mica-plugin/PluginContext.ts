@@ -6,6 +6,7 @@ import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from './HookRegistry.js';
 import type { ServiceContainer } from './ServiceContainer.js';
 import type { PluginIterationRewriter } from './PluginAgent.js';
+import type { PluginBackgroundApi } from './PluginBackground.js';
 import type { PluginPromptSection } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
 import type { PluginSessionSettingsApi } from './PluginSessionSettings.js';
@@ -221,6 +222,13 @@ export type PluginContext = {
   tools?: {
     register(tool: MicaTool, options?: PluginToolRegistrationOptions): Disposable;
   };
+  /**
+   * 常驻工作（周期轮询、心跳、增量同步）。
+   *
+   * 由 manager 提供给每个插件，宿主无需接线。注册的循环活在插件生命周期里：插件停用
+   * 或宿主退出时一起停，不会留下一个「插件关了却还在跑」的后台进程。
+   */
+  background?: PluginBackgroundApi;
   ui?: {
     submit(text: string, options?: { displayText?: string }): void;
     showMessage(text: string, ttl?: number): void;

@@ -1,0 +1,56 @@
+{
+  "id": "mobile-relay",
+  "name": "Mobile Relay",
+  "icon": "message-square",
+  "version": "1.1.0",
+  "description": "手机经中转机打开这台机器上的 Mica（真实界面）：中转机托管页面并开窄 API，本机只做短轮询，不转发端口、不建常驻隧道。上行应用层加密，可限制开启时段并随机化间隔。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 40,
+  "mica": { "apiVersion": 1 },
+  "requires": ["settings", "tools", "background"],
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "启用桥",
+      "type": "switch",
+      "default": "true"
+    },
+    {
+      "key": "relayUrl",
+      "label": "中转地址",
+      "type": "text",
+      "default": "",
+      "placeholder": "https://1.2.3.4:9200"
+    },
+    {
+      "key": "token",
+      "label": "访问口令",
+      "type": "password",
+      "default": ""
+    },
+    {
+      "key": "activeHours",
+      "label": "开启时段",
+      "type": "text",
+      "default": "08:30-12:00,13:30-18:30",
+      "placeholder": "08:30-12:00,13:30-18:30；留空表示全天"
+    },
+    {
+      "key": "activeDays",
+      "label": "开启星期",
+      "type": "text",
+      "default": "1-5",
+      "placeholder": "1-5 表示周一到周五；0 是周日；留空表示每天"
+    },
+    {
+      "key": "jitter",
+      "label": "间隔抖动",
+      "type": "number",
+      "default": "35",
+      "step": "5",
+      "unit": "%"
+    }
+  ]
+}

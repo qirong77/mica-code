@@ -1,0 +1,27 @@
+[Unit]
+Description=Mica mobile relay (phone access gateway)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mobile-relay
+StateDirectory=mobile-relay
+EnvironmentFile=-/opt/mobile-relay/relay.env
+ExecStart=/usr/bin/env node /opt/mobile-relay/relay.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

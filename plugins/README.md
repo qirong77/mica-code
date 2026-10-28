@@ -132,8 +132,8 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 
 ## 健康状态与失败可见
 
-`requires` 要写全插件实际触碰的每一面 `ctx.*`：`commands`、`desktop`、`events`、`hooks`、`prompt`、
-`session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`、`models`。宿主缺哪个，
+`requires` 要写全插件实际触碰的每一面 `ctx.*`：`background`、`commands`、`desktop`、`events`、`hooks`、`prompt`、
+`session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`、`models`、`llm`。宿主缺哪个，
 插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。
@@ -143,6 +143,12 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 的用量同样以 `origin: 'plugin'` 记账。system prompt 是整体替换，插件要自己带上需要的上下文。
 `models` 是插件自己的模型请求入口（`ctx.models.request`），见下节——**插件不要自己 `fetch` 模型接口**。
 `skills` 是内置 skill 的注册面（`ctx.skills.register`），`desktop` 只有桌面端运行时才提供（见下节）。
+`background` 是常驻工作的注册面（`ctx.background.register`）：周期轮询、心跳、增量同步这类
+「一直在跑」的东西交给宿主调度，插件停用或宿主退出时一起停。不要用 `setInterval` 自己起循环，
+也不要把它做成 launchd / systemd 单独安装的服务——那样插件关了它还在跑，用户根本不知道还有东西在外联。
+间隔用 `every: number | (() => number)` 声明，函数形式每轮结束后重新取值，便于按状态退避；
+单轮抛错只记该插件的健康状态与日志，不会停掉后续调度。需要跟着插件一起结束的子进程，
+在 `ctx.onDispose()` 里自己杀掉（`startedAt`/`pid` 之类的状态写 `$MICA_HOME/plugin-data/<id>/`）。
 少声明一项的后果是在 setup 里撞上 `undefined` 并连带算作加载失败，所以不要把可选项当默认存在。
 
 命令结果给用户看走 `ctx.ui.notice(content, { command, status, surface })`：`surface: 'command_panel'`

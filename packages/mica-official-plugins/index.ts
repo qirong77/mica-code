@@ -6,6 +6,7 @@ import computerUseSetup from '../../plugins/computer-use/index.js';
 import connectionsSetup from '../../plugins/connections/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
+import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
 import sessionNotesSetup from '../../plugins/session-notes/index.js';
 import sessionTagsSetup from '../../plugins/session-tags/index.js';
@@ -36,6 +37,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   subagent: subagentSetup,
   'computer-use': computerUseSetup,
   connections: connectionsSetup,
+  'mobile-relay': mobileRelaySetup,
 };
 
 export const officialPlugins: MicaPlugin[] = officialPluginManifests.map((manifest) => {

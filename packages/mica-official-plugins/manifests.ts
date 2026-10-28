@@ -6,6 +6,7 @@ import computerUseManifest from '../../plugins/computer-use/plugin.json';
 import connectionsManifest from '../../plugins/connections/plugin.json';
 import harnessReviewManifest from '../../plugins/harness-review/plugin.json';
 import memoryManifest from '../../plugins/memory/plugin.json';
+import mobileRelayManifest from '../../plugins/mobile-relay/plugin.json';
 import sessionRenameManifest from '../../plugins/session-rename/plugin.json';
 import sessionNotesManifest from '../../plugins/session-notes/plugin.json';
 import sessionTagsManifest from '../../plugins/session-tags/plugin.json';
@@ -36,6 +37,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(subagentManifest),
   readManifest(computerUseManifest),
   readManifest(connectionsManifest),
+  readManifest(mobileRelayManifest),
 ];
 
 export const officialPluginIds = new Set(officialPluginManifests.map((manifest) => manifest.id));

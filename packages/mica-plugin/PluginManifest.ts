@@ -97,6 +97,7 @@ export type PluginManifest = {
  */
 export const PLUGIN_REQUIREMENTS = [
   'agent',
+  'background',
   'commands',
   'desktop',
   'events',
