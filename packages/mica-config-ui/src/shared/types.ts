@@ -193,8 +193,6 @@ export type ConfigWebCapabilityTool = {
 
 export type ConfigWebPluginSource = 'official' | 'user';
 export type ConfigWebPluginState = 'enabled' | 'disabled' | 'failed';
-export type ConfigWebPluginFile = { name: string; sizeBytes?: number };
-
 /** 插件设置项，形状与 `plugin.json` 里的 `settings` 声明一一对应。 */
 export type ConfigWebPluginSetting = {
   key: string;
@@ -278,7 +276,6 @@ export type ConfigWebPlugin = {
   location: string;
   entryFile?: string;
   manifestFile: string;
-  files: ConfigWebPluginFile[];
   /** 清单声明了 settings 才有内容；没有声明时 `fields` 为空。 */
   settings: ConfigWebPluginSettings;
   /**
@@ -381,6 +378,67 @@ export type ConfigWebContextEntry = {
   images?: number;
 };
 
+/**
+ * 上下文占用的类别。同一份 provider 历史可能是两种形态：
+ * - Chat Completions：`{ role, content, tool_calls }` / `{ role: 'tool', tool_call_id }`
+ * - Responses：扁平的 `{ type: 'message' | 'function_call' | 'function_call_output' | 'reasoning' }`
+ *
+ * `envelope` 是每条消息的 role / type / call_id / name 等结构字段——线上请求同样会带上，
+ * 混进正文会让「持久化消息体」明显偏小、差额全被算成 system prompt。
+ */
+export type ConfigWebContextKind =
+  | 'user'
+  | 'assistant'
+  | 'reasoning'
+  | 'tool_call'
+  | 'tool_result'
+  | 'envelope'
+  | 'other';
+
+export type ConfigWebContextCategory = {
+  kind: ConfigWebContextKind;
+  count: number;
+  chars: number;
+  tokens: number;
+};
+
+export type ConfigWebContextToolCall = {
+  id?: string;
+  name?: string;
+  arguments?: string;
+};
+
+/** 逐条明细：一条持久化消息贡献的体积。`parts` 是它按类别拆开的字符数。 */
+export type ConfigWebContextItem = {
+  /** 1-based，按持久化顺序；排序后仍能指回原位置。 */
+  sequence: number;
+  kind: ConfigWebContextKind;
+  chars: number;
+  tokens: number;
+  parts: Partial<Record<ConfigWebContextKind, number>>;
+  content?: string;
+  role?: string;
+  name?: string;
+  toolCallId?: string;
+  toolCalls?: ConfigWebContextToolCall[];
+  cleared?: boolean;
+  truncated?: boolean;
+  hasImage?: boolean;
+  imageCount?: number;
+  mediaCount?: number;
+  encryptedChars?: number;
+};
+
+/** 最近一次请求的 input 已被 compact / 裁剪作废时，作废原因与两个数字。 */
+export type ConfigWebContextStaleInput = {
+  inputTokens: number;
+  reason: 'compacted' | 'truncated';
+  compactedAt?: string;
+  compactedTokens?: number;
+  recordedMessages?: number;
+  currentMessages?: number;
+};
+
 export type ConfigWebContextTurn = {
   /** 1-based turn number; 0 for a session without any user message. */
   index: number;
@@ -410,6 +468,18 @@ export type ConfigWebContextAnalysis = {
     totalTokens: number;
   };
   turns: ConfigWebContextTurn[];
+  /** 持久化消息体（含结构字段）的估算：chars/4，与 CLI 的 ctx 同口径。 */
+  messageChars: number;
+  messageTokens: number;
+  clearedResults: number;
+  categories: ConfigWebContextCategory[];
+  items: ConfigWebContextItem[];
+  /** 最近一次真实请求的 input；快照在请求之后被改写时留 0（见 `staleInput`）。 */
+  lastInputTokens: number;
+  staleInput: ConfigWebContextStaleInput | null;
+  /** 本会话出现过的最小请求 input：固定开销（system prompt + 工具 schema）的上界。 */
+  fixedOverheadTokens: number;
+  overheadTokens: number;
 };
 
 export type ConfigWebSessionOption = {

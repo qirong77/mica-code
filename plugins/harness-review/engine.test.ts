@@ -868,3 +868,190 @@ test('scope filtering precedes the 300-run limit and out-of-scope traces are nev
   );
   assert.equal(report.warnings.filter((warning) => warning.includes('missing or unreadable trace')).length, 300);
 }, 20_000);
+
+test('prune removes only old finished runs in scope and keeps active or unreadable ones', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const cwd = resolve('workspace-a');
+  const other = resolve('workspace-b');
+
+  const active = runner(recorder, { runId: 1, cwd, owner: {} });
+  active.start('still running');
+
+  const finished = runner(recorder, { runId: 2, cwd, owner: {} });
+  finished.start('finished long ago');
+  finished.finish();
+
+  const foreign = runner(recorder, { runId: 3, cwd: other, owner: {} });
+  foreign.start('another workspace');
+  foreign.finish();
+
+  // Age the finished runs so they fall outside the retention window. The active
+  // run keeps its recent timestamp and must survive regardless.
+  await recorder.flush();
+  const old = new Date(Date.now() - 40 * 86_400_000).toISOString();
+  const runsDir = join(root, 'runs');
+  for (const id of await readdir(runsDir)) {
+    const file = join(runsDir, id, 'summary.json');
+    const summary = JSON.parse(await readFile(file, 'utf8'));
+    if (summary.outcome === 'running') continue;
+    await writeFile(file, JSON.stringify({ ...summary, startedAt: old, finishedAt: old }));
+  }
+
+  const scoped = await recorder.prune({ olderThanDays: 30, cwd });
+  assert.equal(scoped.deletedRuns, 1);
+  assert.equal(scoped.skippedActive, 1);
+  assert.ok(scoped.freedBytes > 0);
+
+  const after = await recorder.review();
+  const remaining = after.runs.map((run) => run.cwd);
+  assert.ok(remaining.includes(cwd), 'the still-running run in scope is kept');
+  assert.ok(remaining.includes(other), 'another workspace is never touched');
+  assert.equal(after.runs.filter((run) => run.cwd === cwd).length, 1);
+}, 20_000);
+
+test('suggestions change with the failure cause instead of repeating one paragraph', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder, { runId: 1 });
+  run.start();
+  run.call('{"patch":"a"}', 'apply_patch', 'c-1');
+  run.result('工具 apply_patch 执行失败：\nError: 第 3 行的 hunk 没有任何增删内容', 'apply_patch', 'c-1');
+  run.call('{"command":"bun run build"}', 'run_shell', 'c-2');
+  run.result('[command]\nexit_code: 1\n[/command]', 'run_shell', 'c-2');
+  run.finish();
+  const report = await recorder.review();
+  const help = (title: string) => report.findings.find((finding) => finding.title === title)!;
+  const hunk = help('Tool error in apply_patch: empty-hunk');
+  const shell = help('Tool error in run_shell: exit-1');
+  assert.notEqual(hunk.suggestion, shell.suggestion);
+  assert.match(hunk.suggestion, /hunk/);
+  assert.match(shell.suggestion, /退出码/);
+  assert.match(shell.suggestion, /1/);
+  assert.ok(hunk.evaluation.length > 0 && shell.evaluation.length > 0);
+});
+
+test('rebuild re-derives findings from stored traces and leaves counters intact', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const cwd = resolve('workspace-a');
+  const run = runner(recorder, { runId: 1, cwd });
+  run.start('rebuild fixture');
+  run.call('{"patch":"a"}', 'apply_patch', 'c-1');
+  run.result('工具 apply_patch 执行失败：\nError: 第 3 行的 hunk 没有任何增删内容', 'apply_patch', 'c-1');
+  run.emit({ type: 'usage', usage: { inputTokens: 11, outputTokens: 4, cachedInputTokens: 2 } });
+  run.finish();
+  await recorder.flush();
+
+  const runsDir = join(root, 'runs');
+  const [id] = await readdir(runsDir);
+  const file = join(runsDir, id, 'summary.json');
+  const before = JSON.parse(await readFile(file, 'utf8'));
+  assert.equal(before.findings.length, 1);
+
+  // Simulate findings recorded by an older classification rule: the fragmented
+  // per-argument key plus the generic advice that users could not act on.
+  const legacy = {
+    ...before.findings[0],
+    id: 'a'.repeat(64),
+    title: 'Tool error in apply_patch: tool-error',
+    suggestion: 'Review the failing call and its arguments.',
+    occurrences: 4,
+  };
+  await writeFile(file, JSON.stringify({ ...before, findings: [legacy, { ...legacy, id: 'b'.repeat(64) }] }));
+
+  const result = await recorder.rebuild({ cwd });
+  assert.equal(result.rebuilt, 1);
+  assert.equal(result.findings, 1);
+
+  const after = JSON.parse(await readFile(file, 'utf8'));
+  assert.deepEqual(
+    after.findings.map((finding: { title: string }) => finding.title),
+    ['Tool error in apply_patch: empty-hunk'],
+  );
+  assert.match(after.findings[0].suggestion, /hunk/);
+  assert.equal(after.findings[0].evidence[0].available, true);
+  // Traces are weaker than the live counters (they may have dropped events), so
+  // rebuild must not touch anything except findings.
+  for (const key of ['requestCount', 'toolCalls', 'toolErrors', 'inputTokens', 'outputTokens', 'outcome', 'startedAt'])
+    assert.deepEqual(after[key], before[key], key);
+}, 20_000);
+
+test('rebuild skips live runs and reports unreadable traces instead of inventing evidence', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const cwd = resolve('workspace-a');
+  const live = runner(recorder, { runId: 1, cwd });
+  live.start('still running');
+  await recorder.flush();
+
+  const runsDir = join(root, 'runs');
+  const liveId = (await readdir(runsDir))[0];
+  // A run whose trace no longer parses must be reported, not silently rebuilt
+  // into an empty finding list that looks like "no problems found".
+  const brokenDir = join(runsDir, 'broken-run');
+  await mkdir(brokenDir, { recursive: true });
+  await writeFile(
+    join(brokenDir, 'summary.json'),
+    JSON.stringify({
+      ...JSON.parse(await readFile(join(runsDir, liveId, 'summary.json'), 'utf8')),
+      id: 'broken-run',
+      outcome: 'completed',
+      traceFile: join(brokenDir, 'events.jsonl'),
+    }),
+  );
+  await writeFile(join(brokenDir, 'events.jsonl'), '{"seq":1,"type":"tool:call"}\nnot-json\n');
+
+  const result = await recorder.rebuild({ cwd });
+  assert.equal(result.skippedRunning, 1);
+  assert.equal(result.skippedUnreadable, 1);
+  assert.equal(result.rebuilt, 0);
+}, 20_000);
+test('one recurring tool error stays one finding no matter how many argument variants hit it', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder, { runId: 1 });
+  run.start();
+  // Same tool, different patches, same underlying cause. Keying the finding by
+  // the argument fingerprint produced one look-alike review item per call, which
+  // is what real runs showed (10 empty hunks -> 10 identical suggestions).
+  for (let index = 0; index < 4; index++) {
+    run.call(`{"patch":"*** Update File: f${index}.ts\\n*** End Patch"}`, 'apply_patch', `call-${index}`);
+    run.result(
+      JSON.stringify({
+        isError: true,
+        message: `工具 apply_patch 执行失败：\nError: 第 ${index + 3} 行的 hunk 没有任何增删内容`,
+      }),
+      'apply_patch',
+      `call-${index}`,
+    );
+  }
+  run.finish();
+  const report = await recorder.review();
+  const failures = report.findings.filter((finding) => finding.kind === 'tool-error');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].title, 'Tool error in apply_patch: empty-hunk');
+  assert.equal(failures[0].occurrences, 4);
+  assert.equal(failures[0].evidence.length, 4);
+});
+
+test('tool-specific error causes are classified instead of falling into tool-error', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder, { runId: 1 });
+  run.start();
+  const cases: Array<[string, string]> = [
+    ['工具 apply_patch 执行失败：\nError: patch 必须以 *** Begin Patch 开始', 'invalid-patch-header'],
+    ['{"isError":true,"message":"hunk failed: context not found"}', 'patch-context-mismatch'],
+  ];
+  for (const [index, [result, cause]] of cases.entries()) {
+    run.call(`{"patch":"p${index}"}`, 'apply_patch', `p-${index}`);
+    run.result(result, 'apply_patch', `p-${index}`);
+    const report = await recorder.review();
+    assert.ok(
+      report.findings.some((finding) => finding.title === `Tool error in apply_patch: ${cause}`),
+      `expected ${cause} in ${report.findings.map((finding) => finding.title).join(', ')}`,
+    );
+  }
+  // A plain "ENOENT: no such file" must still be a missing-file problem, not one
+  // of the patch categories above.
+  run.call('{"path":"gone.txt"}', 'read_file', 'r-1');
+  run.result('{"isError":true,"message":"ENOENT: no such file or directory"}', 'read_file', 'r-1');
+  const final = await recorder.review();
+  assert.ok(final.findings.some((finding) => finding.title === 'Tool error in read_file: not-found'));
+  run.finish();
+});

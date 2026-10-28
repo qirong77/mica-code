@@ -28,6 +28,7 @@
   --green: #a8c023; /* terminal.ansiGreen */
   --red: #ff6b68; /* terminal.ansiRed */
   --amber: #d6bf55; /* terminal.ansiYellow */
+  --violet: #b48ee0; /* derived: thinking / reasoning 的紫（Darcula 的语法高亮紫） */
 
   /* Type scale — one principled ladder (code-by-wire parity). px shown at the 16px root. */
   --text-micro: 0.6875rem; /* 11px — micro overlines, tabular meta */
@@ -1734,6 +1735,24 @@
     border-radius: 0;
   }
 
+  .session-raw {
+    display: grid;
+    gap: 8px;
+  }
+
+  .session-raw-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  /* 详情里的错误不挤掉页签：贴在标签条下面一行，内容仍可读。 */
+  .session-detail-alert {
+    margin: 0 16px;
+  }
+
   .text-input {
     width: 100%;
     /* 输入框是「凹进去」的控件：底色比所在分组暗一档，描边只做边界。
@@ -1950,65 +1969,77 @@
 
   .context-overview {
     display: grid;
-    gap: 12px;
+    gap: 10px;
     padding: 14px;
   }
 
-  .context-overview-row {
+  .context-categories,
+  .context-items,
+  .context-estimate {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0;
+    gap: 10px;
+    padding: 14px;
   }
 
-  .context-total-card {
-    display: grid;
-    gap: 2px;
-    padding: 10px 12px;
-    border: 0;
-    border-right: 1px solid var(--line-soft);
-    border-radius: 0;
-    background: transparent;
+  /* 一节一个面：标题行说明这一节回答什么，下面只有一个主体（表 / 列表 / 折叠说明）。 */
+  .context-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
     min-width: 0;
   }
 
-  .context-total-card:last-child {
-    border-right: 0;
-  }
-
-  .context-total-card span {
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .context-total-card strong {
-    overflow: hidden;
+  .context-section-head h3 {
+    margin: 0;
     color: var(--text);
     font-size: var(--text-subhead);
     font-weight: 650;
+  }
+
+  .context-section-head .muted-text {
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .context-total-card-main {
-    /* 总计只是同一行里的一个数：靠更亮的数字和标签区分，不加底色块免得看起来像残留的嵌套卡片。 */
-    background: transparent;
+  /* 类别颜色：堆叠条、图例、类别表、逐条徽章共用一份，同一类在两处永远同一个颜色。 */
+  .context-kind-user {
+    --kind: var(--blue);
   }
 
-  .context-total-card-main strong {
-    color: var(--text);
-    font-size: var(--text-title);
+  .context-kind-assistant {
+    --kind: var(--text-soft);
+  }
+
+  .context-kind-reasoning {
+    --kind: var(--violet);
+  }
+
+  .context-kind-tool_call {
+    --kind: var(--amber);
+  }
+
+  .context-kind-tool_result {
+    --kind: var(--green);
+  }
+
+  .context-kind-envelope {
+    --kind: var(--text-faint);
+  }
+
+  .context-kind-other,
+  .context-kind-overhead {
+    --kind: var(--text-faint);
   }
 
   .context-stacked-bar {
     display: flex;
     width: 100%;
-    height: 10px;
+    height: 12px;
     overflow: hidden;
     border-radius: 3px;
-    background: var(--panel-muted);
+    background: var(--bg);
     border: 1px solid var(--line);
   }
 
@@ -2018,6 +2049,18 @@
     min-width: 2px;
   }
 
+  .context-seg.context-kind-user,
+  .context-seg.context-kind-assistant,
+  .context-seg.context-kind-reasoning,
+  .context-seg.context-kind-tool_call,
+  .context-seg.context-kind-tool_result,
+  .context-seg.context-kind-envelope,
+  .context-seg.context-kind-other,
+  .context-seg.context-kind-overhead {
+    background: var(--kind);
+  }
+
+  /* 按轮次的小条仍用「对话 / 工具 / 思考」三分组。 */
   .context-seg-conversation {
     background: var(--blue);
   }
@@ -2034,27 +2077,394 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 14px;
+    gap: 6px 14px;
     color: var(--text-soft);
     font-size: 12px;
+  }
+
+  .context-legend > span {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .context-legend em {
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-style: normal;
+    font-size: 11.5px;
+  }
+
+  .context-legend small {
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 11px;
   }
 
   .context-dot {
     display: inline-block;
     width: 8px;
     height: 8px;
-    margin-right: 5px;
+    margin-right: 2px;
     border-radius: 2px;
-    vertical-align: -1px;
+    background: var(--kind, var(--text-faint));
+    align-self: center;
   }
 
-  .context-usage-note {
-    color: var(--text-soft);
-  }
-
-  .context-estimate-note {
-    margin-left: auto;
+  .context-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
     color: var(--text-faint);
+    font-size: 11.5px;
+  }
+
+  .context-facts strong {
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-weight: 600;
+  }
+
+  .context-note {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: 11.5px;
+    line-height: 1.6;
+  }
+
+  .context-note-warn {
+    color: var(--amber);
+  }
+
+  .context-badge {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--kind, var(--text-faint)) 16%, transparent);
+    color: var(--kind, var(--text-faint));
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.6;
+    text-overflow: ellipsis;
+    vertical-align: 1px;
+    white-space: nowrap;
+  }
+
+  .context-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-label);
+  }
+
+  .context-table th {
+    padding: 0 0 6px;
+    color: var(--text-faint);
+    font-weight: 500;
+    text-align: left;
+  }
+
+  .context-table th.is-num,
+  .context-table td.is-num {
+    text-align: right;
+  }
+
+  .context-table td {
+    padding: 7px 0;
+    border-top: 1px solid var(--line-soft);
+    color: var(--text);
+    vertical-align: middle;
+  }
+
+  .context-table td.is-num {
+    padding-right: 12px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .context-table td.is-num.muted-text {
+    color: var(--text-faint);
+  }
+
+  .context-table th:first-child {
+    width: 46%;
+  }
+
+  .context-table th:nth-child(3) {
+    width: 18%;
+  }
+
+  .context-share {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .context-share-track {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--bg);
+  }
+
+  .context-share-track i {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
+    background: var(--kind, var(--text-faint));
+  }
+
+  .context-share em {
+    flex: 0 0 auto;
+    width: 46px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-style: normal;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .context-estimate > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+    color: var(--text-soft);
+    font-size: var(--text-label);
+    cursor: pointer;
+  }
+
+  .context-estimate > summary .muted-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .context-estimate-body {
+    display: grid;
+    gap: 8px;
+    padding-top: 2px;
+  }
+
+  .context-estimate-body p {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: 11.5px;
+    line-height: 1.65;
+  }
+
+  .context-items .context-section-head {
+    margin-bottom: 2px;
+  }
+
+  .context-item-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .context-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--panel-muted);
+    color: var(--text-soft);
+    font-size: 11px;
+    line-height: 1.6;
+    cursor: pointer;
+    transition:
+      color 100ms ease,
+      border-color 100ms ease,
+      background 100ms ease;
+  }
+
+  .context-filter:hover {
+    border-color: var(--line-strong);
+    color: var(--text);
+  }
+
+  .context-filter.is-active {
+    border-color: var(--line-strong);
+    background: var(--panel-hover);
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .context-filter > span {
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .context-filter-sort {
+    margin-left: auto;
+  }
+
+  .context-item-list {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+  }
+
+  .context-item + .context-item {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .context-item-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .context-item-row:hover {
+    background: var(--panel-muted);
+  }
+
+  .context-item-seq {
+    flex: 0 0 auto;
+    width: 42px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .context-item-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .context-item-subtitle {
+    flex: 0 1 32%;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .context-item-tokens {
+    flex: 0 0 auto;
+    width: 54px;
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .context-item-share {
+    flex: 0 0 auto;
+    width: 44px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .context-item-chevron {
+    flex: 0 0 auto;
+    width: 12px;
+    color: var(--text-faint);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .context-item-detail {
+    display: grid;
+    gap: 6px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--line-soft);
+    background: var(--panel-muted);
+  }
+
+  .context-item-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+  }
+
+  .context-item-content {
+    max-height: 280px;
+    overflow: auto;
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .context-item-empty {
+    color: var(--text-faint);
+    font-size: 11.5px;
+  }
+
+  .context-item-calls {
+    display: grid;
+    gap: 6px;
+  }
+
+  .context-item-call {
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--bg);
+  }
+
+  .context-item-call-name {
+    color: var(--amber);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .context-item-call pre {
+    max-height: 160px;
+    overflow: auto;
+    margin: 4px 0 0;
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .context-load-more {
+    width: 100%;
   }
 
   .context-turns {
@@ -2062,18 +2472,25 @@
     overflow: hidden;
   }
 
-  .context-turns-header {
+  .context-turns > summary {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 10px;
     padding: 12px 14px;
-    border-bottom: 1px solid var(--line);
+    color: var(--text-soft);
+    font-size: var(--text-label);
+    cursor: pointer;
   }
 
-  .context-turns-header h3 {
-    margin: 0;
-    font-size: 14px;
+  .context-turns > summary .muted-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .context-turns[open] > summary {
+    border-bottom: 1px solid var(--line);
   }
 
   .context-turn-list {
@@ -2390,16 +2807,14 @@
   }
 
   @media (max-width: 720px) {
-    .context-overview-row {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    /* 窄屏只留一列：类别表靠右的数字列会被挤没。 */
+    .context-table th.is-num,
+    .context-table td.is-num {
+      display: none;
     }
 
-    .context-total-card:nth-child(2n) {
-      border-right: 0;
-    }
-
-    .context-total-card:nth-child(n + 3) {
-      border-top: 1px solid var(--line-soft);
+    .context-item-subtitle {
+      display: none;
     }
 
     .modal-backdrop {
@@ -3555,7 +3970,7 @@
     gap: 10px;
   }
 
-  /* 两列：左边是「要动的东西」（运行条件、设置），右边是「查的东西」（信息、文件）。
+  /* 两列：左边是「要动的东西」（运行条件、设置），右边是「查的东西」（信息）。
      窄容器下退化为单列，右侧信息排到最后。 */
   .plugin-columns {
     display: grid;
@@ -3591,6 +4006,14 @@
     color: var(--text-soft);
     font-size: var(--text-aux);
     line-height: 1.65;
+  }
+
+  /* 没有可配置项时的一行说明：与左列的分组标题左对齐，不占一整块面。 */
+  .plugin-note {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.6;
   }
 
   /* 健康状态：一条横条，不套卡片边框（外层分组已经是一块面）。 */
@@ -3745,35 +4168,48 @@
     cursor: default;
   }
 
-  .plugin-file-list {
+  /*
+   * 插件详情右侧的信息表：标签窄、值单行省略。
+   *
+   * 这里不放文件清单——那是给插件作者看的，用户只需要知道它装没装上、在磁盘哪。
+   * 标签列固定 64px，是因为这一列只有 340px 宽；用 SettingRow 的 150px 会把路径压成省略号。
+   */
+  .plugin-meta {
     display: grid;
-    gap: 3px;
     margin: 0;
-    padding: 0;
-    list-style: none;
   }
 
-  .plugin-file-list li {
-    display: flex;
+  .plugin-meta-row {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
     align-items: baseline;
-    justify-content: space-between;
     gap: 12px;
-    min-width: 0;
+    padding: 9px 16px;
+  }
+
+  .plugin-meta-row + .plugin-meta-row {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .plugin-meta-row dt {
     color: var(--text-soft);
     font-size: var(--text-aux);
+    font-weight: 500;
   }
 
-  .plugin-file-name {
+  .plugin-meta-row dd {
+    min-width: 0;
+    margin: 0;
     overflow: hidden;
-    font-family: var(--font-mono);
+    color: var(--text);
+    font-size: var(--text-aux);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .plugin-file-size {
-    flex: none;
-    color: var(--text-faint);
-    font-size: var(--text-aux);
+  .plugin-meta-row dd.is-mono {
+    color: var(--text-soft);
+    font-family: var(--font-mono);
   }
 
   .control-endpoint-body {

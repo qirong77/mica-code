@@ -240,8 +240,12 @@ export function getSessionContextAnalysis(id: string): ConfigWebContextAnalysis 
       systemPrompt: role?.prompt ?? '',
       messages: session.snapshot.messages,
     },
-    session.snapshot.usageHistory,
-    session.snapshot.contextWindowSize,
+    {
+      usageHistory: session.snapshot.usageHistory,
+      contextWindowSize: session.snapshot.contextWindowSize,
+      lastUsage: session.snapshot.lastUsage,
+      displayUsage: session.snapshot.displayUsage,
+    },
   );
 }
 

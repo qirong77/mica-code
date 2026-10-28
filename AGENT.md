@@ -346,9 +346,10 @@ npm run start:web          # 运行已构建的 Web 运行时
 - desktop composer 不分派斜杠命令；输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻。
 - 粘贴共用 `composer-paste.js`：图片转 `[Image](路径)`，文件插绝对路径。
 - 角色入口在输入条箭头，随下一次发送/编辑的 role 参数持久化。
-- 输入条齿轮与时钟打开 `SessionSettingsDialog`：会话能力（Tools / Skills / MCP 三页签）/ 定时任务。自动压缩不在这里，它在配置页 Plugins。
+- 输入条齿轮与时钟打开 `SessionSettingsDialog`：会话能力（Tools / Skills / MCP 三页签）/ 定时任务 / 插件。声明了 `perSession` 的插件是左侧导航「插件」下面的子项，内容区只画选中的那一个；自动压缩的阈值这类按会话可调的项就在这里，默认值仍在配置页 Plugins。
 - 顶栏「会话笔记」图标打开 `SessionNotesDialog`（Monaco，700ms 防抖，无保存按钮）。
 - 双击用户消息就地编辑，仅空闲且非空时提交，经 `chat:edit-message` 截断重跑；失败保留编辑文本。
+- **会话详情只有一个组件**：`mica-config-ui` 的 `SessionDetailView`（头部 + 对话记录 / Context 分析 / 原始文件，原始文件自动保存）。配置页 Sessions 页、Stats 的会话详情弹窗（额外带「用量」页签）与状态栏上下文弹窗都渲染它，桌面端只包一层 `.mica-config-ui.is-embed` 的外壳与 `chat-modal-session-detail` 尺寸；不要再写第二套会话详情或上下文分组，上下文分类 / 信封 / 差额的唯一计算在 `mica-config-ui/src/server/contextBreakdown.ts`。
 
 ### 展示
 
@@ -429,6 +430,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 表单转换唯一实现 `web/configDraft.ts`；写入保留未知键，已知键固定顺序，可选字段留空即删键。
 - Capabilities 页改 `config.capabilityDefaults`，读写实现在 `src/server/capabilityDefaults.ts`。
 - 插件页是「目录 + 整页详情」：目录按官方 / 用户分组渲染卡片网格（停用的卡片压暗、状态标在卡片脚注），每张卡显示清单 `icon`（`web/pluginIcons.tsx` 的映射表，未登记回落 `puzzle`）；点开进入单插件详情页，返回走详情页自己的返回行。清单 icon 不参与内核逻辑，只在配置页呈现。
+- 详情页右侧信息表只有标识 / 加载 / 目录 / 日志四行、单行省略；插件里的文件清单不进界面（`PluginInspection` 不读目录），用户要的是「装没装上」而不是文件浏览器。
 - 插件设置在详情页按清单渲染：开关用共享 `Switch`，数字用 `config-stepper`（−/输入/+ 共用一条边框，单位定宽）。
 - 所有页面不设保存按钮：`useAutoSave`（400ms 防抖、串行写盘、卸载补发）；校验不过不写盘。
 - 新建/删除/放弃用 `DialogHost` 的 confirmDialog / promptDialog。

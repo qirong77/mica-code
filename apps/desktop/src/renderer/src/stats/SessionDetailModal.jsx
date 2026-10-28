@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { SessionDetailView } from '@mica-config-ui/web'
 import { ModalMeta, ModalShell } from '../chat-modal'
-import { ContextUsageSection } from './ContextUsagePanel'
-import { formatTokens } from './context-usage'
 
 const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
 
@@ -11,6 +10,13 @@ function fmtTime(iso) {
   if (Number.isNaN(d.getTime())) return '—'
   const p = (x) => String(x).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+function fmtTokens(value) {
+  const n = Number(value) || 0
+  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(1)}k`
+  return String(Math.round(n))
 }
 
 function rate(u) {
@@ -50,7 +56,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-fg-muted">
         <span className="text-fg-faint">{title}</span>
         <span className="tabular-nums">
-          {rows.length} req · {formatTokens(total.input)} in · {formatTokens(total.output)} out
+          {rows.length} req · {fmtTokens(total.input)} in · {fmtTokens(total.output)} out
         </span>
         <span className="tabular-nums text-fg-dim">
           缓存率 {total.input > 0 ? `${((total.cached / total.input) * 100).toFixed(1)}%` : '—'}
@@ -198,7 +204,7 @@ function SubagentCard({ record }) {
           </span>
         )}
         <span className="ml-auto font-mono text-[10px] text-fg-faint tabular-nums">
-          {requests.length} req · {formatTokens(summary.totalTokens || 0)} tokens
+          {requests.length} req · {fmtTokens(summary.totalTokens || 0)} tokens
         </span>
       </div>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[10px] text-fg-faint">
@@ -228,6 +234,10 @@ function SubagentCard({ record }) {
   )
 }
 
+/**
+ * 会话详情：与上下文弹窗、配置页的 Sessions 页共用 `SessionDetailView`（对话记录 /
+ * Context 分析 / 原始文件），这里只多一个统计页专属的「用量」页签。
+ */
 export function SessionDetailModal({ sessionId, onClose }) {
   const [detail, setDetail] = useState(null)
   const [error, setError] = useState(null)
@@ -248,14 +258,6 @@ export function SessionDetailModal({ sessionId, onClose }) {
       alive = false
     }
   }, [sessionId])
-
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   const usageHistory = useMemo(() => detail?.usageHistory || [], [detail])
   const records = useMemo(() => detail?.subagentUsageHistory || [], [detail])
@@ -301,81 +303,43 @@ export function SessionDetailModal({ sessionId, onClose }) {
     }
   }, [usageHistory, subRequests])
 
-  return (
-    <ModalShell
-      title={detail?.title || '会话详情'}
-      subtitle={detail?.id ? detail.id.slice(0, 12) : null}
-      onClose={onClose}
-      className="chat-modal-task"
-      meta={
-        <ModalMeta
-          items={[
-            detail?.model,
-            detail?.effort ? `effort ${detail.effort}` : null,
-            detail?.role ? `role ${detail.role}` : null,
-            detail?.turnState || null,
-            `${fmtTime(detail?.createdAt)} → ${fmtTime(detail?.updatedAt)}`,
-            detail?.cwd
-          ]}
-        />
-      }
-    >
-      {error ? (
-        <div className="rounded-[4px] border border-danger/30 bg-danger/8 px-3 py-2 text-xs text-danger-soft">
-          {error}
-        </div>
-      ) : !detail ? (
-        <div className="py-10 text-center text-xs text-fg-faint">加载中…</div>
-      ) : (
-        <div className="flex flex-col gap-5">
-          <section>
-            <h3 className={OVERLINE_CLASS}>上下文占用</h3>
-            <p className="mt-1 text-[10px] text-fg-ghost">
-              按持久化消息体的类别估算（chars/4，与 CLI 的 ctx 同口径）；点开单条可看内容与体积。
-            </p>
-            <div className="mt-2">
-              <ContextUsageSection
-                context={detail.context}
-                messages={detail.messages}
-                contextWindowSize={detail.contextWindowSize}
-              />
-            </div>
-          </section>
-
-          <section>
-            <h3 className={OVERLINE_CLASS}>请求用量</h3>
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <StatCard
-                label="主 agent"
-                primary={`${usageHistory.length} req`}
-                secondary={`${formatTokens(totals.main.input)} in · ${formatTokens(totals.main.output)} out`}
-              />
-              <StatCard
-                label="子任务 / 插件"
-                primary={`${subRequests.length} req`}
-                secondary={`${formatTokens(totals.sub.input)} in · ${formatTokens(totals.sub.output)} out`}
-              />
-              <StatCard
-                label="合计"
-                primary={formatTokens(totals.all.total)}
-                secondary={`${totals.all.input.toLocaleString()} in · ${totals.all.output.toLocaleString()} out`}
-              />
-              <StatCard
-                label="缓存率"
-                primary={
-                  totals.all.input > 0
-                    ? `${((totals.all.cached / totals.all.input) * 100).toFixed(1)}%`
-                    : '—'
-                }
-                secondary={`${totals.all.cached.toLocaleString()} cached`}
-              />
-            </div>
-            <UsageTable rows={allUsage} title="逐条请求（主 + sub 合并，按时间排序）" />
-            <p className="mt-1 text-[10px] leading-relaxed text-fg-ghost">
-              输入逐条上涨多为上一轮的输出被回放：思考型模型（reasoning）的思考内容同样计入下一次
-              input，所以「输出」和「输入增长」会一起变大。
-            </p>
-          </section>
+  const usageTab = useMemo(
+    () => ({
+      id: 'usage',
+      label: '用量',
+      content: (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <StatCard
+              label="主 agent"
+              primary={`${usageHistory.length} req`}
+              secondary={`${fmtTokens(totals.main.input)} in · ${fmtTokens(totals.main.output)} out`}
+            />
+            <StatCard
+              label="子任务 / 插件"
+              primary={`${subRequests.length} req`}
+              secondary={`${fmtTokens(totals.sub.input)} in · ${fmtTokens(totals.sub.output)} out`}
+            />
+            <StatCard
+              label="合计"
+              primary={fmtTokens(totals.all.total)}
+              secondary={`${totals.all.input.toLocaleString()} in · ${totals.all.output.toLocaleString()} out`}
+            />
+            <StatCard
+              label="缓存率"
+              primary={
+                totals.all.input > 0
+                  ? `${((totals.all.cached / totals.all.input) * 100).toFixed(1)}%`
+                  : '—'
+              }
+              secondary={`${totals.all.cached.toLocaleString()} cached`}
+            />
+          </div>
+          <UsageTable rows={allUsage} title="逐条请求（主 + sub 合并，按时间排序）" />
+          <p className="text-[10px] leading-relaxed text-fg-ghost">
+            输入逐条上涨多为上一轮的输出被回放：思考型模型（reasoning）的思考内容同样计入下一次
+            input，所以「输出」和「输入增长」会一起变大。
+          </p>
 
           {subagents.length > 0 && (
             <section>
@@ -408,6 +372,38 @@ export function SessionDetailModal({ sessionId, onClose }) {
               </div>
             </section>
           )}
+        </div>
+      )
+    }),
+    [allUsage, pluginRequests, subagents, subRequests.length, totals, usageHistory.length]
+  )
+
+  return (
+    <ModalShell
+      title={detail?.title || '会话详情'}
+      subtitle={detail?.id ? detail.id.slice(0, 12) : null}
+      onClose={onClose}
+      className="chat-modal-session-detail"
+      meta={
+        <ModalMeta
+          items={[
+            detail?.model,
+            detail?.effort ? `effort ${detail.effort}` : null,
+            detail?.role ? `role ${detail.role}` : null,
+            detail?.turnState || null,
+            `${fmtTime(detail?.createdAt)} → ${fmtTime(detail?.updatedAt)}`,
+            detail?.cwd
+          ]}
+        />
+      }
+    >
+      {error ? (
+        <div className="rounded-[4px] border border-danger/30 bg-danger/8 px-3 py-2 text-xs text-danger-soft">
+          {error}
+        </div>
+      ) : (
+        <div className="mica-config-ui is-embed session-detail-embed">
+          <SessionDetailView sessionId={sessionId} extraTabs={[usageTab]} />
         </div>
       )}
     </ModalShell>

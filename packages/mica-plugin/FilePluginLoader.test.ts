@@ -119,7 +119,7 @@ describe('inspectPlugins', () => {
         declaredId: 'todo-lite',
         error: undefined,
       });
-      expect(directory?.files.map((file) => file.name)).toEqual(['index.mjs', 'plugin.json']);
+      expect(directory?.manifestFile).toBe(join(dir, 'todo-lite', 'plugin.json'));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

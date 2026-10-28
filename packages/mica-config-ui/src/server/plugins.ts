@@ -47,8 +47,6 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         location: `${OFFICIAL_PLUGINS_DIR}/${manifest.id}`,
         entryFile: manifest.main,
         manifestFile: `${OFFICIAL_PLUGINS_DIR}/${manifest.id}/${micaPlugin.PLUGIN_MANIFEST_FILE}`,
-        // 官方插件的文件已经编译进产物，磁盘上不一定读得到，只列清单声明的部分。
-        files: [micaPlugin.PLUGIN_MANIFEST_FILE, manifest.main, ...manifest.assets].map((name) => ({ name })),
         settings: readSettings(manifest.id, manifest.settings, configRoot),
         llm: readLlm(manifest.id, manifest.llm, manifest.settings, configRoot),
         desktopChecks: resolveDesktopChecks(manifest.desktopChecks),
@@ -74,7 +72,6 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         location: plugin.root,
         entryFile: plugin.entryFile || undefined,
         manifestFile: plugin.manifestFile,
-        files: plugin.files,
         settings: readSettings(plugin.id, plugin.settings, configRoot),
         llm: readLlm(plugin.id, plugin.llm, plugin.settings, configRoot),
         desktopChecks: resolveDesktopChecks(plugin.desktopChecks),

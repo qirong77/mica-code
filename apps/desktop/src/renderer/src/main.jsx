@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { setConfigWebClient } from '@mica-config-ui/web'
 import App from './App'
 import { ErrorBoundary } from './ErrorBoundary'
 import ShareIndex from './ShareIndex'
@@ -7,6 +8,11 @@ import { ensureMicaApi } from './transport'
 import { ensureUiState } from './ui-state'
 import { LOCAL_SERVER_URL, currentServerUrl, isLoopbackServer } from './servers'
 import { readAppUrl } from './app-url'
+import { createDesktopConfigWebClient } from './config-web'
+
+// 配置页的数据源在这里接一次：会话详情（对话记录 / Context 分析 / 原始文件）也会在
+// 对话区与统计页里打开，那些入口不经过设置页，不能等到 SettingsView 被懒加载才注册。
+setConfigWebClient(createDesktopConfigWebClient())
 
 if (new URLSearchParams(window.location.search).get('viewport-debug') === '1') {
   void import('./viewport-diagnostics')

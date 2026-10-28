@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { appendFile, chmod, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, chmod, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
 import type { AgentObservationEvent } from '@packages/mica-plugin/index.js';
 
@@ -20,6 +20,10 @@ export type ReviewFinding = {
   note?: string;
   updatedAt?: string;
   occurrences: number;
+  /** Workspace this aggregation belongs to. Findings are keyed per workspace, so
+   *  a global review shows the same cause once per project — without this the
+   *  rows are indistinguishable. */
+  cwd?: string;
   evidence: Evidence[];
 };
 export type RunSummary = {
@@ -84,6 +88,42 @@ const POLLING =
   /(?:^|[._:/-])(?:wait_for|background_tasks_read|background_tasks_list|pty_read|read_terminal|terminal_read|wait|sleep|poll)(?:$|[._:/-])/i;
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
 
+/**
+ * Stored payloads keep the original text under `content` (or drop it entirely in
+ * metadata-only mode). Rebuilding has to read the text back out to classify it.
+ */
+function storedText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>;
+    if (typeof item.content === 'string') return item.content;
+    if (typeof item.message === 'string') return item.message;
+  }
+  return value === undefined ? '' : JSON.stringify(value);
+}
+
+/** Bytes on disk for one run directory, so prune can report what it reclaimed. */
+async function directorySize(directory: string): Promise<number> {
+  let total = 0;
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const target = join(directory, entry.name);
+    if (entry.isDirectory()) total += await directorySize(target);
+    else
+      try {
+        total += (await stat(target)).size;
+      } catch {
+        /* vanished between readdir and stat */
+      }
+  }
+  return total;
+}
+
 function canonicalCwd(cwd: string): string {
   try {
     return realpathSync.native(cwd);
@@ -96,12 +136,14 @@ function redactYamlBlocks(text: string): string {
   const lineNumber = /^[ \t]*(?:L?\d+[ \t]*[|│:]|L?\d+\t)[ \t]?/;
   for (let index = 0; index < lines.length; index++) {
     const numbered = lines[index].match(lineNumber)?.[0];
-    const header = lines[index].slice(numbered?.length ?? 0).match(
-      /^([ \t]*)["']?(?:api[_-]?key|access[_-]?key|(?:access[_-]?|refresh[_-]?)?token|password|passwd|authorization|cookie|secret|credential|private[_-]?key)["']?[ \t]*:[ \t]*[|>](?:[1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#.*)?\r?$/i,
-    );
+    const header = lines[index]
+      .slice(numbered?.length ?? 0)
+      .match(
+        /^([ \t]*)["']?(?:api[_-]?key|access[_-]?key|(?:access[_-]?|refresh[_-]?)?token|password|passwd|authorization|cookie|secret|credential|private[_-]?key)["']?[ \t]*:[ \t]*[|>](?:[1-9][+-]?|[+-][1-9]?)?[ \t]*(?:#.*)?\r?$/i,
+      );
     if (!header) continue;
     for (let next = index + 1; next < lines.length; next++) {
-      const prefix = numbered ? lines[next].match(lineNumber)?.[0] ?? '' : '';
+      const prefix = numbered ? (lines[next].match(lineNumber)?.[0] ?? '') : '';
       const body = lines[next].slice(prefix.length);
       const indent = body.match(/^[ \t]*/)![0];
       if (body.trim() && indent.length <= header[1].length) break;
@@ -244,7 +286,97 @@ function errorCategory(raw: string, name: string): string | null {
     return classifyError(raw);
   return null;
 }
+/**
+ * Per-cause guidance for a failing tool call. A review item whose suggestion is
+ * the same sentence for every cause tells the user nothing they could not see in
+ * the title, which is exactly what real runs produced: 13 `apply_patch` failures
+ * collapsed into one paragraph of generic advice. Keys come from classifyError
+ * and errorCategory.
+ */
+function errorGuidance(name: string, category: string): { suggestion: string; evaluation: string } {
+  const patch = /(?:^|[.:/])apply_patch$/.test(name);
+  if (category === 'empty-hunk')
+    return {
+      suggestion:
+        'patch 里的 hunk 没有任何增删行——通常是把上下文行当成了修改内容。整段重写，或补上真实的 +/- 行后再提交。',
+      evaluation: '重放同一处编辑，确认发出的 patch 至少含一行增删，且目标文件最终内容与预期一致。',
+    };
+  if (category === 'invalid-patch-header')
+    return {
+      suggestion:
+        'patch 缺少 *** Begin Patch 包裹，或被截断、加了额外前缀。检查生成 patch 的拼接方式（heredoc、多段模板）后重新发送。',
+      evaluation: '用同一段构造流程再生成一次 patch，对比发出内容的首尾是否完整。',
+    };
+  if (category === 'patch-context-mismatch')
+    return {
+      suggestion:
+        'patch 的上下文与文件当前内容不一致：改动前没重读文件，或文件已被其他会话改写。改前重新 read_file 定位目标行。',
+      evaluation: '重放同一处修改，确认读取发生在最后一次写入之后，patch 一次即成功。',
+    };
+  if (category === 'not-found')
+    return {
+      suggestion: '目标路径不存在。确认路径按当前 cwd 解析，大小写与扩展名和仓库实际一致。',
+      evaluation: '用同一路径先 list_files 或 rg 确认存在，再重放原调用。',
+    };
+  if (category === 'permission')
+    return {
+      suggestion: '权限被拒。确认是否在写受保护目录，或该操作本应交由用户执行。',
+      evaluation: '在同一用户、同一目录下重放等价的最小权限命令。',
+    };
+  if (category === 'timeout')
+    return {
+      suggestion:
+        '调用超时。耗时命令改用 background_tasks_start 启动，再用 wait_for / background_tasks_read 取结果，不要靠调大前台超时。',
+      evaluation: '把同一命令改为后台启动，确认它能正常结束且输出可取回。',
+    };
+  if (category === 'invalid-input')
+    return {
+      suggestion: '参数不合法。按工具 schema 校正字段名、类型与取值范围，避免用同类错误参数连续重试。',
+      evaluation: '用校正后的参数重放，确认工具正常执行。',
+    };
+  if (category === 'rate-limit')
+    return {
+      suggestion: '被上游限流。降低并发或请求频率，必要时退避后重试。',
+      evaluation: '在相同负载下重放，确认不再触发限流。',
+    };
+  if (category === 'signal')
+    return {
+      suggestion:
+        '命令被信号终止（可能是用户中断或系统回收）。确认是否该由后台任务承载，并在重试前检查是否有残留进程。',
+      evaluation: '重放同一命令，确认它不再被外部信号打断。',
+    };
+  if (/^exit-\d+$/.test(category))
+    return {
+      suggestion: `命令以非零退出码结束（${category.slice(5)}）。先读该命令的实际输出定位失败点，而不是原样重试；检查类命令要看是不是把"有差异"当成了失败。`,
+      evaluation: '重放同一命令并查看完整 stdout/stderr，确认退出码变为 0 或失败原因已被解释。',
+    };
+  return {
+    suggestion: patch
+      ? '按失败原文定位具体规则：先读一次目标文件，再用最小 patch 验证。'
+      : '读失败原文定位原因；确认是参数、环境还是外部状态问题后再重试，避免同类调用连续失败。',
+    evaluation: '在与失败时相当的环境里重放同一调用，确认成功且任务验收标准仍然满足。',
+  };
+}
+
 function classifyError(text: string): string {
+  // Tool-specific causes first: the generic rules below would swallow these
+  // ("context not found" looks like a missing file) and every occurrence would
+  // collapse into one uninformative `tool-error`.
+  if (/hunk 没有任何增删内容|hunk (?:has|contains) no (?:changes|additions|removals)/i.test(text)) {
+    return 'empty-hunk';
+  }
+  if (/\*\*\* Begin Patch|必须以.*Begin Patch|must (?:start|begin) with \*\*\* Begin Patch/i.test(text)) {
+    return 'invalid-patch-header';
+  }
+  if (
+    // Real runs also produced `Update File 失败：<path> 中找不到 hunk 对应内容`,
+    // which means the same thing as the English forms.
+    /context not found|old_string[^\n]*not found|invalid context|hunk failed|patch (?:does not apply|failed)|找不到 ?hunk|找不到要替换的内容/i.test(
+      text,
+    )
+  ) {
+    return 'patch-context-mismatch';
+  }
   if (/ENOENT|not found|no such file/i.test(text)) return 'not-found';
   if (/EACCES|EPERM|permission denied|unauthorized|forbidden/i.test(text)) return 'permission';
   if (/timeout|timed out|ETIMEDOUT/i.test(text)) return 'timeout';
@@ -320,6 +452,72 @@ export class HarnessRecorder {
       await this.atomic(join(directory, 'summary.json'), JSON.stringify(state.summary, null, 2));
     });
   }
+  /**
+   * Findings are derived data, so the live writer and `rebuild` must share one
+   * implementation: anything derivable from a stored trace has to be derivable
+   * again later, otherwise a classification fix can never reach existing runs.
+   */
+  private noteToolCall(state: RunState, seq: number, name: string, args: string, correlation?: string): string {
+    const argsHash = digest(canonicalArgs(args));
+    const pendingKey = correlation ?? `name:${name}`;
+    if (state.pending.size >= 200) state.pending.delete(state.pending.keys().next().value!);
+    state.pending.set(pendingKey, { name, argsHash });
+    const key = `${name}\n${argsHash}`;
+    let call = state.calls.get(key);
+    if (!call && state.calls.size < MAX_KEYS) {
+      call = { count: 0, first: seq, name };
+      state.calls.set(key, call);
+    }
+    if (call) {
+      call.count++;
+      if (call.count >= 3 && !POLLING.test(name))
+        this.addFinding(
+          state,
+          'repeated-call',
+          key,
+          seq,
+          `Repeated call to ${name}`,
+          name,
+          '同一工具用完全相同的参数被连续调用多次。确认是有意为之（轮询、分页、外部状态在变），否则补一次进度判断或改用能一次拿到结果的方式。',
+          '重放同类任务，对比调用次数与实际推进量。轮询、分页与外部状态变化可以正当地重复调用。',
+          `Identical redacted arguments; call ${call.count}. Repetition alone does not establish lack of progress.`,
+        );
+    }
+    return argsHash;
+  }
+
+  private noteToolResult(
+    state: RunState,
+    seq: number,
+    name: string,
+    result: string,
+    correlation?: string,
+  ): string | null {
+    const pendingKey = correlation ?? `name:${name}`;
+    const call = state.pending.get(pendingKey);
+    state.pending.delete(pendingKey);
+    const category = errorCategory(result, name);
+    if (!category) return null;
+    state.summary.toolErrors++;
+    const guidance = errorGuidance(name, category);
+    this.addFinding(
+      state,
+      'tool-error',
+      // Keyed by tool + cause, not by arguments: the suggestion is identical for
+      // every call, so per-argument keys turned one recurring failure (10 empty
+      // hunks in a single run) into 10 look-alike review items. The argument
+      // fingerprint stays in the evidence detail for tracing.
+      `${name}\n${category}`,
+      seq,
+      `Tool error in ${name}: ${category}`,
+      name,
+      guidance.suggestion,
+      guidance.evaluation,
+      `Error category: ${category}; arguments ${call?.argsHash?.slice(0, 12) ?? 'unknown'}. A tool error does not establish task failure.`,
+    );
+    return category;
+  }
+
   private addFinding(
     state: RunState,
     kind: ReviewFinding['kind'],
@@ -335,7 +533,18 @@ export class HarnessRecorder {
     let finding = state.candidates.get(id);
     if (!finding) {
       if (state.candidates.size >= MAX_FINDINGS) return;
-      finding = { id, kind, title, module, suggestion, evaluation, status: 'open', occurrences: 0, evidence: [] };
+      finding = {
+        id,
+        kind,
+        title,
+        module,
+        suggestion,
+        evaluation,
+        status: 'open',
+        occurrences: 0,
+        ...(state.summary.cwd ? { cwd: state.summary.cwd } : {}),
+        evidence: [],
+      };
       state.candidates.set(id, finding);
       state.summary.findings.push(finding);
     }
@@ -455,30 +664,7 @@ export class HarnessRecorder {
       case 'tool:call': {
         state.summary.toolCalls++;
         const name = boundedText(event.name, 200);
-        const argsHash = digest(canonicalArgs(event.args));
-        const key = `${name}\n${argsHash}`;
-        if (state.pending.size >= 200) state.pending.delete(state.pending.keys().next().value!);
-        state.pending.set(event.id ?? `name:${name}`, { name, argsHash });
-        let call = state.calls.get(key);
-        if (!call && state.calls.size < MAX_KEYS) {
-          call = { count: 0, first: seq, name };
-          state.calls.set(key, call);
-        }
-        if (call) {
-          call.count++;
-          if (call.count >= 3 && !POLLING.test(name))
-            this.addFinding(
-              state,
-              'repeated-call',
-              key,
-              seq,
-              `Repeated call to ${name}`,
-              name,
-              'Inspect whether identical arguments are intentional; consider a progress check, caching, or clearer next-step guidance if the calls are redundant.',
-              'Replay a comparable task and compare useful progress and call count. Polling, pagination, and changing external state can justify repeated calls.',
-              `Identical redacted arguments; call ${call.count}. Repetition alone does not establish lack of progress.`,
-            );
-        }
+        const argsHash = this.noteToolCall(state, seq, name, event.args, event.id ? digest(event.id) : undefined);
         stored.name = name;
         stored.args = payload(event.args, state.options);
         stored.argsHash = argsHash;
@@ -488,24 +674,7 @@ export class HarnessRecorder {
       }
       case 'tool:result': {
         const name = boundedText(event.name, 200);
-        const pendingKey = event.id ?? `name:${name}`;
-        const call = state.pending.get(pendingKey);
-        state.pending.delete(pendingKey);
-        const category = errorCategory(event.result, name);
-        if (category) {
-          state.summary.toolErrors++;
-          this.addFinding(
-            state,
-            'tool-error',
-            `${name}\n${call?.argsHash ?? 'unknown-arguments'}\n${category}`,
-            seq,
-            `Tool error in ${name}: ${category}`,
-            name,
-            'Review the failing call and its arguments; consider input validation, environment guidance, or bounded recovery when the cause is confirmed.',
-            'Replay the same redacted argument pattern in a comparable environment and verify the tool succeeds and the task still meets its acceptance criteria.',
-            `Error category: ${category}. A tool error does not establish task failure.`,
-          );
-        }
+        const category = this.noteToolResult(state, seq, name, event.result, event.id ? digest(event.id) : undefined);
         stored.name = name;
         stored.result = payload(
           event.result,
@@ -771,6 +940,208 @@ export class HarnessRecorder {
     if (failure) throw failure;
     return path;
   }
+
+  /**
+   * Delete run directories older than `olderThanDays`. Manual only: retaining
+   * history is the point of the plugin, and the data lives under `$MICA_HOME`
+   * (not a temp dir), so nothing here deletes on a schedule. Runs without a
+   * finish event are always kept — they may belong to a live session.
+   */
+  async prune(options: { olderThanDays: number; cwd?: string }): Promise<{
+    deletedRuns: number;
+    keptRuns: number;
+    freedBytes: number;
+    skippedActive: number;
+  }> {
+    await this.flush();
+    const days = Math.max(1, Math.floor(options.olderThanDays));
+    const cutoff = Date.now() - days * 86_400_000;
+    const scope = options.cwd ? canonicalCwd(options.cwd) : undefined;
+    let deletedRuns = 0;
+    let keptRuns = 0;
+    let freedBytes = 0;
+    let skippedActive = 0;
+    let entries: { name: string }[] = [];
+    try {
+      entries = (await readdir(join(this.root, 'runs'), { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => ({ name: entry.name }));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+        return { deletedRuns, keptRuns, freedBytes, skippedActive };
+      throw error;
+    }
+    for (const entry of entries) {
+      const directory = join(this.root, 'runs', entry.name);
+      let summary: RunSummary | null = null;
+      try {
+        summary = JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8')) as RunSummary;
+      } catch {
+        // Unreadable runs carry no evidence: keep them so the review keeps
+        // reporting them as corrupt instead of silently disappearing.
+        keptRuns++;
+        continue;
+      }
+      if (scope && summary.cwd && canonicalCwd(summary.cwd) !== scope) {
+        keptRuns++;
+        continue;
+      }
+      if (summary.outcome === 'running') {
+        keptRuns++;
+        skippedActive++;
+        continue;
+      }
+      const endedAt = Date.parse(summary.finishedAt ?? summary.startedAt);
+      if (!Number.isFinite(endedAt) || endedAt >= cutoff) {
+        keptRuns++;
+        continue;
+      }
+      const size = await directorySize(directory);
+      try {
+        await rm(directory, { recursive: true, force: true });
+        deletedRuns++;
+        freedBytes += size;
+      } catch (error) {
+        this.onError(error);
+        keptRuns++;
+      }
+    }
+    return { deletedRuns, keptRuns, freedBytes, skippedActive };
+  }
+
+  /**
+   * Re-derive findings for stored runs from their traces. Findings are derived
+   * data and traces are the source of truth, so a classification fix (or a
+   * changed aggregation key) can be applied to runs recorded before it — without
+   * this, every historical run keeps the old fragmented findings forever.
+   *
+   * Counters, timings and outcome are left untouched: traces may have dropped
+   * events at the capture limit, so recomputing them would undercount. Only
+   * `findings` is replaced.
+   */
+  async rebuild(options: { cwd?: string } = {}): Promise<{
+    rebuilt: number;
+    findings: number;
+    skippedRunning: number;
+    skippedUnreadable: number;
+  }> {
+    await this.flush();
+    const scope = options.cwd ? canonicalCwd(options.cwd) : undefined;
+    let rebuilt = 0;
+    let findings = 0;
+    let skippedRunning = 0;
+    let skippedUnreadable = 0;
+    let entries: string[] = [];
+    try {
+      entries = (await readdir(join(this.root, 'runs'), { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+        return { rebuilt, findings, skippedRunning, skippedUnreadable };
+      throw error;
+    }
+    for (const id of entries) {
+      const directory = join(this.root, 'runs', id);
+      let summary: RunSummary;
+      try {
+        summary = JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8')) as RunSummary;
+        if (!validSummary(summary, id)) throw new Error('invalid summary schema');
+      } catch {
+        skippedUnreadable++;
+        continue;
+      }
+      if (scope && summary.cwd && canonicalCwd(summary.cwd) !== scope) continue;
+      // A live run keeps deriving findings in memory and would overwrite this on
+      // its next checkpoint; leave it alone.
+      if (summary.outcome === 'running') {
+        skippedRunning++;
+        continue;
+      }
+      let lines: string[];
+      try {
+        lines = (await readFile(summary.traceFile, 'utf8')).split('\n').filter(Boolean);
+      } catch {
+        skippedUnreadable++;
+        continue;
+      }
+      const state: RunState = {
+        summary: { ...summary, findings: [] },
+        options: { captureContent: false, maxEventChars: 4000, maxEventsPerRun: 2000 },
+        seq: 0,
+        written: lines.length,
+        calls: new Map(),
+        pending: new Map(),
+        candidates: new Map(),
+      };
+      let expected = 0;
+      let usable = true;
+      for (const line of lines) {
+        let event: StoredEvent;
+        try {
+          event = JSON.parse(line) as StoredEvent;
+        } catch {
+          usable = false;
+          break;
+        }
+        // seq must stay consecutive: evidence points at it by number.
+        if (event.seq !== ++expected) {
+          usable = false;
+          break;
+        }
+        this.replay(state, event);
+      }
+      if (!usable) {
+        skippedUnreadable++;
+        continue;
+      }
+      // Every replayed event exists on disk, so re-derived evidence is traceable.
+      for (const finding of state.candidates.values())
+        for (const evidence of finding.evidence) evidence.available = true;
+      const replaced = [...state.candidates.values()];
+      try {
+        // Another mica process (desktop app-server, CLI) may be writing this run
+        // right now. Re-read before replacing so a run that went back to
+        // `running` keeps its live findings instead of ours.
+        const latest = JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8')) as RunSummary;
+        if (latest.outcome === 'running' || latest.finishedAt !== summary.finishedAt) {
+          skippedRunning++;
+          continue;
+        }
+        await this.atomic(join(directory, 'summary.json'), JSON.stringify({ ...summary, findings: replaced }, null, 2));
+        rebuilt++;
+        findings += replaced.length;
+      } catch (error) {
+        this.onError(error);
+        skippedUnreadable++;
+      }
+    }
+    return { rebuilt, findings, skippedRunning, skippedUnreadable };
+  }
+
+  /** Replay one stored event through the same derivation the live writer uses. */
+  private replay(state: RunState, event: StoredEvent): void {
+    const seq = event.seq;
+    // The persisted idHash is what correlates a call with its result on replay.
+    const correlation = typeof event.idHash === 'string' ? event.idHash : undefined;
+    const name = boundedText(String(event.name ?? ''), 200);
+    if (event.type === 'tool:call') this.noteToolCall(state, seq, name, storedText(event.args), correlation);
+    else if (event.type === 'tool:result') this.noteToolResult(state, seq, name, storedText(event.result), correlation);
+    else if (event.type === 'run:finish' && event.outcome === 'error') {
+      const category = classifyError(storedText(event.error));
+      this.addFinding(
+        state,
+        'run-error',
+        `${state.summary.config.providerId}\n${state.summary.config.model}\n${category}`,
+        seq,
+        `Run ended with an error: ${category}`,
+        'runtime',
+        'Inspect the final error and preceding trace before identifying a runtime or guidance change.',
+        'Replay the original acceptance criteria and confirm both task completion and an independent user or test check.',
+        `Runtime reported error: ${category}.`,
+      );
+    }
+  }
 }
 
 function validSummary(value: RunSummary, directoryId: string): boolean {
@@ -953,6 +1324,7 @@ function markdownReport(report: ReviewReport, directory: string): string {
       '',
       `Status: **${finding.status}** · Occurrences: ${finding.occurrences} · Module: ${markdownText(finding.module)}`,
       '',
+      ...(finding.cwd ? [`Workspace: ${markdownText(finding.cwd)}`, ''] : []),
       `Suggestion: ${markdownText(finding.suggestion)}`,
       '',
       `Evaluation: ${markdownText(finding.evaluation)}`,

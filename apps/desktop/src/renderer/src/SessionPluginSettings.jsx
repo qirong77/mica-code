@@ -8,10 +8,19 @@ import { PluginSettingInput, SettingRow, SettingsGroup } from '@mica-config-ui/w
  * 内核不认识任何具体插件。默认值仍归插件设置（配置页）管，这里改动只作用于当前
  * 会话，并随会话快照落盘。
  *
+ * **哪个插件**由左侧导航决定（见 SessionSettingsDialog），这里只画选中的那一个：
+ * 内容区不再出现页签，插件列表与「会话能力 / 定时任务」在同一个导航里，用户不需要
+ * 在两处找入口。
+ *
  * 每个字段默认「跟随默认值」，改过之后出现「跟随默认」按钮把它退回继承状态：
  * 只存改过的键，所以之后调默认值时，没动过的字段会跟着变。
  */
-export function PluginSettingsPanel({ nodeId, sessionId, cwd, running }) {
+
+/**
+ * 读一份「哪些插件有会话级设置」。`enabled` 为假时不发请求：用户没点开插件一节之前，
+ * 这条 host 调用没有意义。
+ */
+export function usePluginSessionSettings({ nodeId, sessionId, cwd, enabled }) {
   const [plugins, setPlugins] = useState(null)
   const [error, setError] = useState('')
   const [savingKey, setSavingKey] = useState('')
@@ -31,12 +40,12 @@ export function PluginSettingsPanel({ nodeId, sessionId, cwd, running }) {
   }, [nodeId, sessionId, cwd])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    if (enabled) void load()
+  }, [enabled, load])
 
   // `null` 是「退回跟随默认值」，空字符串是用户真的把这一项清空了：两者不能混，
   // 否则把数字清空会被当成没改过。
-  const apply = useCallback(
+  const save = useCallback(
     async (pluginId, key, value) => {
       setSavingKey(`${pluginId}:${key}`)
       setError('')
@@ -65,72 +74,63 @@ export function PluginSettingsPanel({ nodeId, sessionId, cwd, running }) {
     [nodeId, sessionId, cwd, load]
   )
 
-  if (plugins === null) {
-    return <p className="capability-note">{error || '正在加载…'}</p>
-  }
+  return { plugins, error, savingKey, save }
+}
 
-  if (plugins.length === 0) {
-    return (
-      <p className="capability-note">
-        没有可按会话调整的插件设置。插件在清单里给设置项标上 <code>perSession</code>
-        之后会出现在这里。
-      </p>
-    )
+export function PluginSettingsPanel({ plugin, running, savingKey, error, onSave }) {
+  if (!plugin) {
+    return <p className="capability-note">{error || '正在加载…'}</p>
   }
 
   return (
     <div className="session-plugin-settings">
-      {plugins.map((plugin) => (
-        <SettingsGroup key={plugin.id} title={plugin.name} description={plugin.description || ''}>
-          {plugin.fields.map((field) => {
-            const overridden = Object.prototype.hasOwnProperty.call(
-              plugin.overrides ?? {},
-              field.key
-            )
-            const value =
-              typeof plugin.values?.[field.key] === 'string' ? plugin.values[field.key] : ''
-            const saving = savingKey === `${plugin.id}:${field.key}`
-            return (
-              <SettingRow
-                key={field.key}
-                label={
-                  <>
-                    {field.label}
-                    {overridden ? <span className="session-plugin-tag">仅本会话</span> : null}
-                  </>
-                }
-                htmlFor={`session-plugin-setting-${plugin.id}-${field.key}`}
-                wide={field.type === 'textarea'}
-                // 说明讲「这一项是什么」，覆盖状态由标签与「跟随默认」按钮表达：
-                // 每行都写一遍「跟随默认值」只会把有用的说明挤掉。
-                hint={field.description}
-              >
-                <div className="session-plugin-control">
-                  <PluginSettingInput
-                    field={field}
-                    value={value}
-                    disabled={running || saving}
-                    invalid={false}
-                    onChange={(next) => void apply(plugin.id, field.key, next)}
-                  />
-                  {overridden ? (
-                    <button
-                      type="button"
-                      className="session-plugin-reset"
-                      disabled={running || saving}
-                      onClick={() => void apply(plugin.id, field.key, null)}
-                    >
-                      跟随默认
-                    </button>
-                  ) : null}
-                </div>
-              </SettingRow>
-            )
-          })}
-        </SettingsGroup>
-      ))}
+      <SettingsGroup title={plugin.name} description={plugin.description || ''}>
+        {plugin.fields.map((field) => renderField({ plugin, field, running, savingKey, onSave }))}
+      </SettingsGroup>
       {error ? <p className="session-settings-error">{error}</p> : null}
     </div>
+  )
+}
+
+function renderField({ plugin, field, running, savingKey, onSave }) {
+  const overridden = Object.prototype.hasOwnProperty.call(plugin.overrides ?? {}, field.key)
+  const value = typeof plugin.values?.[field.key] === 'string' ? plugin.values[field.key] : ''
+  const saving = savingKey === `${plugin.id}:${field.key}`
+  return (
+    <SettingRow
+      key={field.key}
+      label={
+        <>
+          {field.label}
+          {overridden ? <span className="session-plugin-tag">仅本会话</span> : null}
+        </>
+      }
+      htmlFor={`session-plugin-setting-${plugin.id}-${field.key}`}
+      wide={field.type === 'textarea'}
+      // 说明讲「这一项是什么」，覆盖状态由标签与「跟随默认」按钮表达：
+      // 每行都写一遍「跟随默认值」只会把有用的说明挤掉。
+      hint={field.description}
+    >
+      <div className="session-plugin-control">
+        <PluginSettingInput
+          field={field}
+          value={value}
+          disabled={running || saving}
+          invalid={false}
+          onChange={(next) => void onSave(plugin.id, field.key, next)}
+        />
+        {overridden ? (
+          <button
+            type="button"
+            className="session-plugin-reset"
+            disabled={running || saving}
+            onClick={() => void onSave(plugin.id, field.key, null)}
+          >
+            跟随默认
+          </button>
+        ) : null}
+      </div>
+    </SettingRow>
   )
 }
 

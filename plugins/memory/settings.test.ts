@@ -10,9 +10,9 @@ describe('settingsFromValues', () => {
   it('falls back to defaults for missing or unparsable values', () => {
     expect(settingsFromValues({})).toMatchObject({
       enabled: DEFAULT_SETTINGS.enabled,
-      autoCapture: false,
+      autoCapture: DEFAULT_SETTINGS.autoCapture,
       curatorMode: 'subagent',
-      minIntervalMinutes: 10,
+      minIntervalMinutes: DEFAULT_SETTINGS.minIntervalMinutes,
       maxMessages: 30,
     });
     expect(settingsFromValues({ memoryCharLimit: 'abc', minIntervalMinutes: '-5' }).budgets.memory).toBe(2200);

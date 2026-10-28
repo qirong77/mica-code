@@ -1,139 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { readSessionContent, readSessionDetails, readSessionsDetails, writeSession } from '../api.js';
-import { ContextPane } from '../components/ContextPane.js';
-import { ConversationPane } from '../components/ConversationPane.js';
-import { JsonEditor } from '../components/JsonEditor.js';
+import { readSessionsDetails } from '../api.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, SaveStatus, SplitView, Tag } from '../components/Ui.js';
+import { SessionDetailView } from '../components/SessionDetailView.js';
+import { Alert, Button, Empty, SplitView } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
-import { useAutoSave } from '../useAutoSave.js';
-import type {
-  ConfigWebSessionDetails,
-  ConfigWebSessionOption,
-  ConfigWebSessionsDetails,
-} from '../../src/shared/types.js';
+import type { ConfigWebSessionOption, ConfigWebSessionsDetails } from '../../src/shared/types.js';
 
-type SessionTab = 'conversation' | 'context' | 'json';
-
-const SESSION_TABS: { id: SessionTab; label: string }[] = [
-  { id: 'conversation', label: '对话记录' },
-  { id: 'context', label: 'Context 分析' },
-  { id: 'json', label: '原始文件' },
-];
+type SessionIndex = ConfigWebSessionsDetails;
 
 /**
  * Sessions：左边一列会话、右边看选中的那一条。
  *
- * 以前是「顶部一个会话选择器下拉 + 下面一张摘要卡 + 一张视图卡」：选择器占掉一整行高度，
- * 而真正要看的对话挤在第三块里滚动。列表放进左栏后，切换会话是一行一次点击，
- * 竖排空间全给正文；摘要在详情头部收成一行，不再单独占一张卡。
+ * 右栏由 `SessionDetailView` 负责（对话记录 / Context 分析 / 原始文件），与桌面端的会话详情、
+ * 上下文弹窗是同一个组件——这里只管列表、选中与刷新，不再自己拼详情页。
  */
 export function SessionsPage() {
-  const [index, setIndex] = useState<ConfigWebSessionsDetails | null>(null);
+  const [index, setIndex] = useState<SessionIndex | null>(null);
   const [selectedId, setSelectedId] = useState('');
-  const [header, setHeader] = useState<ConfigWebSessionDetails | null>(null);
-  const [tab, setTab] = useState<SessionTab>('conversation');
   const [loading, setLoading] = useState(true);
-  const [sessionLoading, setSessionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [version, setVersion] = useState(0);
-  const [dataVersion, setDataVersion] = useState(0);
   const [filter, setFilter] = useState('');
 
-  // Raw JSON editor state is lifted here so tab switches do not lose edits.
-  const [rawContent, setRawContent] = useState('');
-  const [rawSavedContent, setRawSavedContent] = useState('');
-  const [rawLoaded, setRawLoaded] = useState(false);
-
-  const requestSequence = useRef(0);
   const loadInFlight = useRef(false);
   const selectedIdRef = useRef('');
-  const lastUpdatedAtRef = useRef<string | null>(null);
-  const dirty = rawContent !== rawSavedContent;
-  const dirtyRef = useRef(false);
-  dirtyRef.current = dirty;
+
   const RefreshIcon = appIcons.refresh;
   const SearchIcon = appIcons.search;
-  // 半句 JSON 不写盘：本地先解析一遍，解析不过就只显示提示，等内容合法再落盘。
-  const jsonError = useMemo(() => {
-    if (!dirty) return null;
-    try {
-      JSON.parse(rawContent);
-      return null;
-    } catch (parseError) {
-      return formatError(parseError);
-    }
-  }, [dirty, rawContent]);
-  const sessionId = header?.id ?? '';
-  // 运行中的会话有 turn lease，写盘会和正在跑的 turn 抢，等它结束再写。
-  const running = header?.turnState === 'running';
-
-  const autoSave = useAutoSave<{ id: string; content: string }, ConfigWebSessionDetails>({
-    save: async ({ id, content }) => {
-      await writeSession(id, content);
-      return readSessionDetails(id);
-    },
-    onSaved: (next, saved) => {
-      lastUpdatedAtRef.current = next.updatedAt;
-      setHeader(next);
-      setRawSavedContent(saved.content);
-      setDataVersion((value) => value + 1);
-    },
-  });
-  const { schedule, flush } = autoSave;
-
-  // turn 结束时补一次：运行中敲的内容被 editRawContent 直接跳过，没人再催它写盘。
-  const latestRawRef = useRef({ rawContent, rawSavedContent, rawLoaded, sessionId, jsonError });
-  latestRawRef.current = { rawContent, rawSavedContent, rawLoaded, sessionId, jsonError };
-
-  useEffect(() => {
-    if (running) return;
-    const latest = latestRawRef.current;
-    if (!latest.rawLoaded || !latest.sessionId) return;
-    if (latest.rawContent === latest.rawSavedContent || latest.jsonError) return;
-    schedule({ id: latest.sessionId, content: latest.rawContent });
-  }, [running, schedule]);
-
-  /**
-   * 改动当场登记写盘。
-   *
-   * 不用 effect 兜：改完立刻切会话时，卸载和这次改动落在同一批更新里，被卸载的组件不会
-   * 再跑 effect，那一批改动就没人登记了。半句 JSON 与运行中的会话先不写。
-   */
-  function editRawContent(next: string) {
-    setRawContent(next);
-    if (!rawLoaded || !sessionId || running) return;
-    if (next === rawSavedContent) return;
-    try {
-      JSON.parse(next);
-    } catch {
-      return;
-    }
-    schedule({ id: sessionId, content: next });
-  }
-
-  async function loadHeader(id: string, showLoading = false) {
-    const sequence = ++requestSequence.current;
-    if (!id) {
-      setHeader(null);
-      return;
-    }
-    if (showLoading) setSessionLoading(true);
-    try {
-      const next = await readSessionDetails(id);
-      if (requestSequence.current !== sequence) return;
-      if (lastUpdatedAtRef.current !== null && lastUpdatedAtRef.current !== next.updatedAt) {
-        setDataVersion((value) => value + 1);
-      }
-      lastUpdatedAtRef.current = next.updatedAt;
-      setHeader(next);
-      setError(null);
-    } catch (loadError) {
-      if (requestSequence.current === sequence) setError(formatError(loadError));
-    } finally {
-      if (showLoading && requestSequence.current === sequence) setSessionLoading(false);
-    }
-  }
 
   async function refreshIndex(showLoading: boolean) {
     if (loadInFlight.current) return;
@@ -143,12 +35,11 @@ export function SessionsPage() {
       const next = await readSessionsDetails();
       const preferredId = selectedIdRef.current;
       const preferredExists = next.sessions.some((item) => item.id === preferredId);
-      const nextId = preferredExists || (dirtyRef.current && preferredId) ? preferredId : (next.sessions[0]?.id ?? '');
+      const nextId = preferredExists ? preferredId : (next.sessions[0]?.id ?? '');
       setIndex(next);
       selectedIdRef.current = nextId;
       setSelectedId(nextId);
-      await loadHeader(nextId, showLoading);
-      if (!nextId) setError(null);
+      setError(null);
     } catch (loadError) {
       setError(formatError(loadError));
     } finally {
@@ -157,42 +48,18 @@ export function SessionsPage() {
     }
   }
 
-  async function selectSession(id: string) {
-    if (id === selectedIdRef.current) return;
-    // 先把路上那份改动写完再换，切换不丢正在编辑的内容。
-    await flush();
-    selectedIdRef.current = id;
-    setSelectedId(id);
-    setHeader(null);
-    lastUpdatedAtRef.current = null;
-    setRawContent('');
-    setRawSavedContent('');
-    setRawLoaded(false);
-    setError(null);
-    setVersion((value) => value + 1);
-    void loadHeader(id, true);
-  }
-
-  async function openRawTab() {
-    setTab('json');
-    if (rawLoaded || !header) return;
-    try {
-      const next = await readSessionContent(header.id);
-      setRawContent(next.content);
-      setRawSavedContent(next.content);
-      setRawLoaded(true);
-    } catch (loadError) {
-      setError(formatError(loadError));
-    }
-  }
-
   useEffect(() => {
     void refreshIndex(true);
-    const timer = window.setInterval(() => void refreshIndex(false), 1000);
+    const timer = window.setInterval(() => void refreshIndex(false), 3000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const paneKey = `${selectedId}:${version}`;
+  function selectSession(id: string) {
+    if (id === selectedIdRef.current) return;
+    selectedIdRef.current = id;
+    setSelectedId(id);
+  }
+
   const sessions = index?.sessions ?? [];
   const visibleSessions = useMemo(() => filterSessions(sessions, filter), [sessions, filter]);
 
@@ -203,7 +70,6 @@ export function SessionsPage() {
       path={index?.root}
       actions={
         <div className="toolbar">
-          <SaveStatus saving={autoSave.saving} saved={autoSave.status === 'saved'} />
           <Button
             icon={<RefreshIcon size={15} />}
             title="立即刷新"
@@ -214,7 +80,6 @@ export function SessionsPage() {
       }
     >
       {error ? <Alert message={error} /> : null}
-      {autoSave.error ? <Alert message={autoSave.error} /> : null}
       {loading && !index ? (
         <div className="page-loading">正在加载 Sessions…</div>
       ) : !index ? null : sessions.length === 0 ? (
@@ -245,7 +110,7 @@ export function SessionsPage() {
                         key={item.id}
                         session={item}
                         active={item.id === selectedId}
-                        onSelect={() => void selectSession(item.id)}
+                        onSelect={() => selectSession(item.id)}
                       />
                     ))
                   )}
@@ -253,49 +118,9 @@ export function SessionsPage() {
               </>
             }
           >
-            {sessionLoading && !header ? (
-              <div className="page-loading">正在加载 Session…</div>
-            ) : header ? (
-              <div className="session-detail">
-                <SessionHead session={header} />
-                <div className="session-tabs" role="tablist" aria-label="Session 视图">
-                  {SESSION_TABS.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={tab === item.id}
-                      className={`session-tab${tab === item.id ? ' session-tab-active' : ''}`}
-                      onClick={() => (item.id === 'json' ? void openRawTab() : setTab(item.id))}
-                    >
-                      {item.label}
-                      {item.id === 'json' && dirty ? <span className="session-tab-dirty">●</span> : null}
-                    </button>
-                  ))}
-                  <span className="session-tabs-tail">
-                    {tab === 'json' ? (
-                      <>
-                        {running ? <span className="muted-text">运行中，暂停写盘</span> : null}
-                        {jsonError && !running ? <Tag tone="red">JSON 未写完</Tag> : null}
-                        {dirty && !jsonError && !running ? <Tag tone="blue">待写入</Tag> : null}
-                      </>
-                    ) : null}
-                  </span>
-                </div>
-                <div className="session-tab-body">
-                  {tab === 'conversation' ? (
-                    <ConversationPane key={paneKey} sessionId={header.id} refreshToken={dataVersion} />
-                  ) : null}
-                  {tab === 'context' ? (
-                    <ContextPane key={paneKey} sessionId={header.id} refreshToken={dataVersion} />
-                  ) : null}
-                  {tab === 'json' ? (
-                    <div className="editor-host session-raw-editor">
-                      <JsonEditor value={rawContent} language="json" readOnly={running} onChange={editRawContent} />
-                    </div>
-                  ) : null}
-                </div>
-              </div>
+            {selectedId ? (
+              // 换会话就重新挂载：上一个会话的页签、滚动与未保存草稿不该带过来。
+              <SessionDetailView key={selectedId} sessionId={selectedId} />
             ) : (
               <div className="page-loading">正在加载 Session…</div>
             )}
@@ -338,42 +163,6 @@ function SessionRow({
   );
 }
 
-/** 详情头部：标题 + 身份行 + 一行事实。摘要不再是单独一张卡，避免它比正文还抢眼。 */
-function SessionHead({ session }: { session: ConfigWebSessionDetails }) {
-  const status = presentStatus(session.turnState);
-  return (
-    <header className="session-detail-head">
-      <div className="session-detail-title">
-        <h2 title={session.title}>{session.title}</h2>
-        <Tag tone={status.tone} dot>
-          {status.label}
-        </Tag>
-      </div>
-      <p className="session-detail-path" title={session.cwd}>
-        {shortenDir(session.cwd)}
-      </p>
-      <dl className="session-detail-facts">
-        <MetaFact label="模型" value={`${session.providerId} · ${session.model}`} />
-        <MetaFact label="角色" value={session.role} />
-        <MetaFact label="更新" value={formatDate(session.updatedAt)} />
-        <MetaFact
-          label="文件"
-          value={`${formatBytes(session.fileSizeBytes)} · ${session.messageCount} 条消息 · ${session.usageCount} 条用量`}
-        />
-      </dl>
-    </header>
-  );
-}
-
-function MetaFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="session-detail-fact">
-      <dt>{label}</dt>
-      <dd title={value}>{value}</dd>
-    </div>
-  );
-}
-
 /** 列表行的第二行：目录末两级 · 模型。两者都没有时退回更新时间。 */
 function sessionMeta(session: ConfigWebSessionOption): string {
   const parts = [tailDir(session.cwd), session.model].filter((part): part is string => Boolean(part));
@@ -396,20 +185,8 @@ function tailDir(cwd?: string): string | undefined {
   return parts.slice(-2).join('/');
 }
 
-function shortenDir(cwd: string): string {
-  const parts = cwd.split(/[/\\]/).filter(Boolean);
-  if (parts.length <= 4) return cwd;
-  return `…/${parts.slice(-4).join('/')}`;
-}
-
 function formatDate(value: string): string {
   return new Date(value).toLocaleString();
-}
-
-function formatBytes(value: number): string {
-  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${value} B`;
 }
 
 function formatError(error: unknown): string {

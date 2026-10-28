@@ -17,6 +17,7 @@ src/server/
   configFiles.ts         config.json 读写与校验
   paths.ts               $MICA_HOME 下的各路径
   conversation.ts        history → 可读对话项
+  contextBreakdown.ts    history → 上下文逐条明细与类别汇总（chars/4 口径，含消息结构信封）
   sessionAnalysis.ts     history → 上下文占用分解
   sessionHead.ts         会话文件头只读解析（Sessions 左栏用，只读前 8KB）
   capabilityDefaults.ts  能力默认值（config.capabilityDefaults）的读取与写入
@@ -25,6 +26,7 @@ web/                     页面组件（React）
   index.tsx              宿主入口：ConfigWebApp / setConfigWebClient / setConfigWebEditor
   api.ts                 数据源接口 ConfigWebClient + 模块级注册与转发
   editor.ts              编辑器接口与注册（默认给一个朴素文本域兜底）
+  contextView.ts         上下文分解 → 堆叠条 / 类别表 / 差额提示（纯换算，可单测）
   App.tsx styles.css 等  页面本体
 ```
 
@@ -63,4 +65,5 @@ render(<ConfigWebApp />)
 - **插件页是例外，两边共用 `src/server/plugins.ts`**：它要同时认识官方插件（清单在仓库 `plugins/`，编译进产物）与用户插件（`$MICA_HOME/plugins` 下的目录），自己抄一份扫描逻辑必然对不上。桌面宿主经 `@mica-config-ui/plugins` alias 引用它。
 - **插件设置在插件页内编辑**：字段来自清单的 `settings` 声明，值读写 `$MICA_HOME/plugin-settings/<id>.json`（`mica-plugin/PluginSettings.ts`），写盘走 `writePluginSettings` 动作、沿用 `useAutoSave` 的自动保存约定。插件详情同时给出今天的分片日志路径，方便排查。
 - **`sessionView.ts` 是纯逻辑出口**：桌面运行时只引它（`history → 对话项 / 上下文分解`，不碰文件系统、不引 `mica-agent` 的值）。因此 `conversation.ts` 里的类型导入必须写成 `import type … from '@packages/mica-agent/core/Conversation.js'` 这种**关键字形式 + 具体文件**：写成 `import { type X } from '@packages/mica-agent/index.js'` 时，Vite 在桌面端构建里不会剥掉它，会把整个 agent 包（含 `prompt/system.md`）拉进运行时 bundle 并直接构建失败。
+- **会话详情只有一份实现**：`web/components/SessionDetailView.tsx`（头部 + 对话记录 / Context 分析 / 原始文件三个页签，原始文件自动保存）。配置页 Sessions 页直接渲染它，桌面端的会话详情弹窗与状态栏上下文弹窗也渲染它——宿主只负责外壳（弹窗、宽度）与额外的「用量」页签，不要另写一套会话详情或上下文分组。
 - 改配置页交互（新建/删除/放弃修改）后必须跑 `bun run build:config-web` 重新生成 `apps/config-web/src/server/generatedStaticAssets.ts`，内嵌产物随源码一起提交。

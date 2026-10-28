@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { PluginSettingInput } from '../components/PluginSettingInput.js';
-import { Alert, Button, Empty, SaveStatus, SettingRow, SettingsGroup, Switch, Tag } from '../components/Ui.js';
+import { Alert, Button, SaveStatus, SettingRow, SettingsGroup, Switch, Tag } from '../components/Ui.js';
 import { LlmSettingsSection } from '../components/LlmSettingsSection.js';
 import { PluginIcon } from '../pluginIcons.js';
 import {
@@ -382,7 +382,9 @@ function PluginDetail({
               <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
             ) : null}
             {plugin.desktopChecks.length === 0 && plugin.settings.fields.length === 0 ? (
-              <Empty description="这个插件没有可配置项，加载状态与文件信息在右侧。" />
+              // 没有可配置项时留一句说明，而不是一个 240px 高的空盒子：它旁边就是信息表，
+              // 空盒子会读成「内容没加载出来」。
+              <p className="plugin-note">这个插件没有可配置项，装上就在工作。</p>
             ) : null}
           </div>
           <aside className="plugin-column">
@@ -394,57 +396,34 @@ function PluginDetail({
   );
 }
 
+/**
+ * 右侧的信息栏：只回答「它是谁、装没装上、在磁盘哪」，不列插件里的文件。
+ *
+ * 每行都单行省略（完整值在 `title` 里）：这里是排查用的索引，不是文件浏览器，
+ * 一列换行的路径会把这张表读成两栏错位。
+ */
 function PluginInfoGroup({ plugin }: { plugin: ConfigWebPlugin }) {
+  const rows: { label: string; value: string; mono?: boolean; title?: string }[] = [
+    { label: '标识', value: plugin.id, mono: true },
+    {
+      label: '加载',
+      value: pluginLoadStatusLabel(plugin.loadStatus ?? (plugin.source === 'official' ? 'loaded' : 'unknown')),
+    },
+    { label: '目录', value: plugin.location, mono: true },
+    { label: '日志', value: plugin.logFile, mono: true },
+  ];
   return (
-    <SettingsGroup title="信息" description="入口、清单与日志都在磁盘上，排查时按这些路径找">
-      <SettingRow label="标识">
-        <span className="setting-row-value is-mono">{plugin.id}</span>
-      </SettingRow>
-      <SettingRow label="加载">
-        <span className="setting-row-value">
-          {pluginLoadStatusLabel(plugin.loadStatus ?? (plugin.source === 'official' ? 'loaded' : 'unknown'))}
-        </span>
-      </SettingRow>
-      <SettingRow label="入口">
-        <span className="setting-row-value is-mono" title={plugin.entryFile || '—'}>
-          {plugin.entryFile || '—'}
-        </span>
-      </SettingRow>
-      <SettingRow label="清单">
-        <span className="setting-row-value is-mono" title={plugin.manifestFile || '—'}>
-          {plugin.manifestFile || '—'}
-        </span>
-      </SettingRow>
-      <SettingRow label="日志" hint="每个插件一份 JSONL，默认落在系统临时目录">
-        <span className="setting-row-value is-mono" title={plugin.logFile}>
-          {plugin.logFile}
-        </span>
-      </SettingRow>
-      <SettingRow
-        label={
-          <>
-            文件<span className="config-field-count">{plugin.files.length}</span>
-          </>
-        }
-      >
-        {plugin.files.length === 0 ? (
-          <span className="setting-row-value">没有可列出的文件</span>
-        ) : (
-          <ul className="plugin-file-list">
-            {plugin.files.map((file) => (
-              <li key={file.name}>
-                <span className="plugin-file-name" title={file.name}>
-                  {file.name}
-                </span>
-                {/* 官方插件编译进产物、磁盘上没有文件，写「内置」一遍遍重复没有信息量 */}
-                {typeof file.sizeBytes === 'number' ? (
-                  <span className="plugin-file-size">{formatBytes(file.sizeBytes)}</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </SettingRow>
+    <SettingsGroup title="信息">
+      <dl className="plugin-meta">
+        {rows.map((row) => (
+          <div className="plugin-meta-row" key={row.label}>
+            <dt>{row.label}</dt>
+            <dd className={row.mono ? 'is-mono' : undefined} title={row.title ?? row.value}>
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
     </SettingsGroup>
   );
 }
@@ -686,12 +665,6 @@ function pluginHealthLabel(plugin: ConfigWebPlugin): string {
   if (plugin.health?.level === 'error') return '出错';
   if (plugin.health?.level === 'warn') return '待配置';
   return plugin.state === 'enabled' ? '正常' : '已停用';
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function formatError(error: unknown): string {

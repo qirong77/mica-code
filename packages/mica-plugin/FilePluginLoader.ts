@@ -1,5 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -48,7 +48,6 @@ export type PluginInspection = {
   root: string;
   entryFile: string;
   manifestFile: string;
-  files: { name: string; sizeBytes: number }[];
   /** 清单声明的前缀设置项；清单坏掉时为空（页面仍然列得出来，只是没有表单）。 */
   settings: PluginSettingField[];
   /** 清单里的 `llm` 声明；没声明（或清单坏掉）时为 null。 */
@@ -200,7 +199,6 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     root: dir,
     entryFile: '',
     manifestFile,
-    files: listFiles(dir),
     settings: [],
     llm: null,
     desktopChecks: [],
@@ -232,20 +230,6 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     desktopChecks: manifest.desktopChecks,
     error: existsSync(entryFile) ? undefined : `入口文件不存在：${manifest.main}`,
   };
-}
-
-function listFiles(dir: string): { name: string; sizeBytes: number }[] {
-  try {
-    return readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isFile())
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((entry) => ({
-        name: entry.name,
-        sizeBytes: statSync(join(dir, entry.name)).size,
-      }));
-  } catch {
-    return [];
-  }
 }
 
 function resolvePluginsDir(options: FilePluginLoaderOptions): string {

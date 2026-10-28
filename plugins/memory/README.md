@@ -41,7 +41,11 @@ memory(target: "user" | "memory" | "project", operations?: Operation[])
 
 ## 自动整理
 
-默认关闭。开启后（`autoCapture`），每轮**成功结束**时跑一次整理：输入是最近若干条用户 / 助手消息 + 当前三块记忆，输出是一批操作。aborted / error 的轮次不整理。
+默认开启（`autoCapture`）：每轮**成功结束**时跑一次整理，输入是最近若干条用户 / 助手消息 + 当前三块记忆，输出是一批操作。aborted / error 的轮次不整理。
+
+为什么默认开着：只靠模型自觉调用 `memory` 工具时，真机上几乎不会增长——实测 12 个会话里只有 1 次调用，装了一整天也只有 1 条记忆。成本由节流兜住（默认 30 分钟全局最多一次），需要彻底省钱时在设置里关掉。
+
+两条写入路径是互补的，不是重复的：**短对话**（一两轮）达不到整理门槛，靠提示词里的触发点在对话当场写入，这是「用户说了句偏好」也能立刻记住的原因；**长对话**靠整理兜住模型漏掉的部分。
 
 两种整理方式：
 
@@ -52,7 +56,7 @@ memory(target: "user" | "memory" | "project", operations?: Operation[])
 
 `direct` 需要在「整理模型」面板里填接口地址与模型（清单的 `llm` 声明，见 `plugins/README.md`）；缺任何一项都会在插件健康状态里显示「待配置」，而不是静默不整理。基地址写到 `/v1` 即可，插件按协议补 `/chat/completions` 或 `/responses`。Key 可以写成 `${MY_CURATOR_KEY}` 从环境变量读——插件设置是明文 JSON，长期凭据更适合留在环境里。填完可以点「测试连接」验证。请求不带 `temperature`：推理模型（o 系列 / gpt-5）不接受它，只会得到一个 400。
 
-整理有节流（`minIntervalMinutes`，默认 10 分钟，**全局**：多个会话共用 `state.json`，避免开一堆页签时每个都在花钱）和输入上限（`maxMessages`，默认 30 条），同一时间只会有一个整理在跑。整理失败只上报健康状态、写插件日志，不影响已经结束的 turn。
+整理有三层节流：少于 8 条用户 / 助手消息（约 4 轮）直接跳过——「回复一句 ok」这种轮次没有可沉淀的内容，不该为它发一次模型请求；`minIntervalMinutes`（默认 30 分钟，**全局**：多个会话共用 `state.json`，避免开一堆页签时每个都在花钱）；输入上限 `maxMessages`（默认 30 条）。同一时间只会有一个整理在跑。整理失败只上报健康状态、写插件日志，不影响已经结束的 turn。
 
 整理结果按严格 schema 解析（`target` / `action` / `old_text` / `content`）。真机上模型偶尔会退回自己熟悉的另一套字段（`op` / `path` / `value`）：常见别名会被接受；一条都认不出来时**再问一次**（附上「上一条输出不可用」和 schema），而不是把整轮当成「这次没有可保存的内容」——后者会让用户以为整理器工作了，实际什么都没写。
 
@@ -68,9 +72,13 @@ memory(target: "user" | "memory" | "project", operations?: Operation[])
 
 ## 设置
 
-在配置页 **Settings → Plugins → Memory** 里改，改完立刻生效（预算按次读取）：
+在配置页 **Settings → Plugins → Memory** 里改，改完立刻生效（预算与整理开关按次读取）。
 
-`enabled` · `autoCapture` · `curatorMode` · `curatorBaseUrl` / `curatorApiKey` / `curatorProtocol` / `curatorModel` · `minIntervalMinutes` · `maxMessages` · `userCharLimit` / `memoryCharLimit` / `projectCharLimit`
+注意：设置文件里一旦写入了某项，它就**覆盖**清单里的默认值。升级到「自动整理默认开启」的版本后，老配置文件里残留的 `autoCapture: "false"` 仍然生效——想跟着新默认走，把它改成 `"true"` 或删掉这一项。
+
+`enabled` · `autoCapture` · `curatorMode` · `minIntervalMinutes` · `maxMessages` · `userCharLimit` / `memoryCharLimit` / `projectCharLimit`
+
+独立接口的地址 / Key / 协议 / 模型不在 `settings` 里重复声明，而是清单的 `llm` 段（配置页显示为「模型接口」面板，带「测试连接」），由宿主经 `ctx.llm` 提供给插件。
 
 ## 边界
 

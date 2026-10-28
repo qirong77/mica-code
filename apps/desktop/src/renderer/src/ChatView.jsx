@@ -44,7 +44,7 @@ import {
   summarizeTodoProgress,
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
-import { ContextUsageSection } from './stats/ContextUsagePanel'
+import { SessionDetailView } from '@mica-config-ui/web'
 import { ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { findPresetForSearch } from './chat-find-preset'
@@ -540,43 +540,20 @@ function ImagePreviewModal({ source, alt, onClose, onReveal, onOpenFile }) {
   )
 }
 
-function ContextDetailPopover({ sessionId, contextWindowSize, onClose }) {
-  const [detail, setDetail] = useState(null)
-  const [error, setError] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    if (!sessionId) {
-      setError('No active session')
-      return
-    }
-    window.mica.stats
-      .sessionDetail(sessionId)
-      .then((data) => {
-        if (cancelled) return
-        setDetail(data)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setError(String(err?.message || err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [sessionId])
-
+/**
+ * 上下文弹窗：与统计页的会话详情、配置页的 Sessions 页是同一个组件，只是落在
+ * 「Context 分析」页签上。以前这里单独实现了一套占用分解，同一个会话在两处会给出
+ * 两个口径的数字。
+ */
+function ContextDetailPopover({ sessionId, onClose }) {
   return (
-    <ModalShell title="上下文占用" onClose={onClose}>
-      {error ? (
-        <div className="chat-modal-empty">{error}</div>
-      ) : !detail ? (
-        <div className="chat-modal-empty">加载中…</div>
+    <ModalShell title="上下文占用" onClose={onClose} className="chat-modal-session-detail">
+      {sessionId ? (
+        <div className="mica-config-ui is-embed session-detail-embed">
+          <SessionDetailView sessionId={sessionId} defaultTab="context" showHead={false} />
+        </div>
       ) : (
-        <ContextUsageSection
-          context={detail.context}
-          messages={detail.messages}
-          contextWindowSize={contextWindowSize || detail.contextWindowSize}
-        />
+        <div className="chat-modal-empty">No active session</div>
       )}
     </ModalShell>
   )
@@ -6222,7 +6199,6 @@ export function ChatView({
         {contextDetail && (
           <ContextDetailPopover
             sessionId={sessionIdRef.current}
-            contextWindowSize={windowSize}
             onClose={() => setContextDetail(false)}
           />
         )}

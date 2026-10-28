@@ -22,8 +22,8 @@
       "key": "autoCapture",
       "label": "自动整理",
       "type": "switch",
-      "default": "false",
-      "description": "每轮成功结束后把对话收敛成记忆操作。会调用模型，默认关闭。"
+      "default": "true",
+      "description": "每轮成功结束后把对话收敛成记忆操作。会调用模型，按下面的「整理间隔」节流；关掉后只有你或模型主动调用 memory 工具时才会写入。"
     },
     {
       "key": "curatorMode",
@@ -37,58 +37,21 @@
         },
         {
           "value": "direct",
-          "label": "独立接口（下面四项）"
+          "label": "独立接口（用下面的模型接口）"
         }
       ],
-      "description": "子代理复用当前主对话的模型配置；独立接口可以换成更便宜的模型或另一家服务。"
-    },
-    {
-      "key": "curatorBaseUrl",
-      "label": "整理接口地址",
-      "type": "text",
-      "format": "url",
-      "placeholder": "https://api.openai.com/v1",
-      "description": "独立接口模式必填。写到 /v1 即可，插件按协议补 /chat/completions 或 /responses。"
-    },
-    {
-      "key": "curatorApiKey",
-      "label": "整理接口 Key",
-      "type": "password",
-      "description": "只用于后台整理，不参与主对话请求。可以填 ${MY_CURATOR_KEY} 从环境变量读，避免把长期凭据写进设置文件。"
-    },
-    {
-      "key": "curatorProtocol",
-      "label": "整理接口协议",
-      "type": "select",
-      "default": "openai_chat_completions",
-      "options": [
-        {
-          "value": "openai_chat_completions",
-          "label": "Chat Completions"
-        },
-        {
-          "value": "openai_responses",
-          "label": "Responses"
-        }
-      ]
-    },
-    {
-      "key": "curatorModel",
-      "label": "整理模型",
-      "type": "text",
-      "placeholder": "gpt-4.1-mini",
-      "description": "独立接口模式必填。整理是一次性提取任务，用小模型通常就够。"
+      "description": "子代理复用当前主对话的模型配置；独立接口用下方「模型接口」里单独配置的地址 / Key / 协议 / 模型。"
     },
     {
       "key": "minIntervalMinutes",
       "label": "整理间隔",
       "type": "number",
-      "default": "10",
+      "default": "30",
       "min": 0,
       "max": 1440,
       "step": 5,
       "unit": "分钟",
-      "description": "两次自动整理之间至少间隔多久；0 表示不节流。"
+      "description": "两次自动整理之间至少间隔多久（全局，多个会话共用）；0 表示不节流。"
     },
     {
       "key": "maxMessages",

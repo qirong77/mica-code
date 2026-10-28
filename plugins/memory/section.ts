@@ -17,6 +17,22 @@ import { MEMORY_TARGETS, type MemoryStoreSnapshot, type MemoryTarget } from './s
 
 export const MAX_CACHED_SNAPSHOTS = 32;
 
+/**
+ * 「什么时候该写」比「在哪写」更容易被忽略：只写一句「需要长期保留的事实用 memory
+ * 工具写入」时，模型会一直忙于当前任务、整轮下来一次都不写（真机上 12 个会话里只有
+ * 1 次）。所以这里给的是可判定的触发点，而不是抽象原则——遇到就当场写，而不是等到
+ * 用户明确要求。
+ */
+const WRITE_GUIDANCE = [
+  '用 `memory` 工具保存值得跨会话保留的事实。**遇到下面任一条就当场写，不要等用户要求，也不要攒到对话结束**：',
+  '',
+  '- 用户纠正了你，或表达了偏好、习惯、长期要求（例如「以后不要这样」「回答短一点」）→ `user`；',
+  '- 你花了一番功夫才确认的环境事实、工具坑、非显然的命令或配置 → `memory`；',
+  '- 这轮定下了目录约定、构建/测试方式、架构决策及其理由 → `project`。',
+  '',
+  '不要保存：一次性的调试细节与临时路径、从代码或配置一眼可见的事、密钥与凭据（只记「放在哪」）。写满时先 `patch` / `remove` 腾出空间再 `add`。',
+].join('\n');
+
 export type MemorySnapshotLoader = {
   /** 三块一起读（会话第一次渲染）。 */
   loadAll(): MemoryStoreSnapshot[];
@@ -105,9 +121,7 @@ export function formatMemorySection(snapshots: MemoryStoreSnapshot[], options: M
     lines.push('当前还没有保存任何记忆。', '');
   }
 
-  lines.push(
-    '需要长期保留的事实用 `memory` 工具写入：`user` 记用户是谁、偏好如何；`memory` 记环境事实、工具坑与经验；`project` 记当前工作区的约定与决策。只存长期有用、无法从代码库直接读到的事实，不要存密钥和一次性路径。写满时先 `patch` / `remove` 腾出空间再 `add`。',
-  );
+  lines.push(WRITE_GUIDANCE);
   return lines.join('\n');
 }
 

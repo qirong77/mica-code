@@ -1,8 +1,10 @@
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import { buildConfigWebConversationItems, type ConfigWebConversationSource } from './conversation.js';
+import { summarizeContextItems } from './contextBreakdown.js';
 import type {
   ConfigWebContextAnalysis,
   ConfigWebContextEntry,
+  ConfigWebContextStaleInput,
   ConfigWebContextTurn,
   ConfigWebConversationItem,
 } from '../shared/types.js';
@@ -35,9 +37,9 @@ export function estimateTextTokens(text: string): number {
 
 export function buildConfigWebContextAnalysis(
   source: ConfigWebConversationSource,
-  usageHistory: AgentUsageRecord[] = [],
-  contextWindowSize?: number,
+  options: ConfigWebContextAnalysisOptions = {},
 ): ConfigWebContextAnalysis {
+  const usageHistory = options.usageHistory ?? [];
   const items = buildConfigWebConversationItems(source);
   const groups: ConfigWebConversationItem[][] = [[]];
   for (const item of items) {
@@ -82,15 +84,103 @@ export function buildConfigWebContextAnalysis(
     { conversationTokens: 0, toolTokens: 0, thinkingTokens: 0, totalTokens: 0 },
   );
 
+  // 持久化消息体的分类拆解：与按轮次的分解并行，前者回答「谁占了 context」，
+  // 后者回答「从哪一轮开始变大的」。
+  const breakdown = summarizeContextItems(source.messages);
+  const staleInput = resolveStaleRequestInput({
+    lastUsage: options.lastUsage,
+    displayUsage: options.displayUsage,
+    messageCount: source.messages.length,
+  });
+  const lastInputTokens = staleInput ? 0 : Number(options.lastUsage?.inputTokens) || 0;
+
   return {
     providerId: source.providerId,
     model: source.model,
-    contextWindowSize,
+    contextWindowSize: options.contextWindowSize,
     imageCount,
     turnCount: turns.length,
     totals,
     turns,
+    messageChars: breakdown.messageChars,
+    messageTokens: breakdown.messageTokens,
+    clearedResults: breakdown.clearedResults,
+    categories: breakdown.categories,
+    items: breakdown.items,
+    lastInputTokens,
+    staleInput,
+    // 本会话出现过的最小请求 input：固定开销（system prompt + 工具 schema）的上界。
+    // 差额超过它就不可能全是固定开销，界面据此改用「其它差额」的说法。
+    fixedOverheadTokens: minRequestInputTokens(usageHistory),
+    overheadTokens: lastInputTokens > breakdown.messageTokens ? lastInputTokens - breakdown.messageTokens : 0,
   };
+}
+
+export type ConfigWebContextAnalysisOptions = {
+  usageHistory?: AgentUsageRecord[];
+  contextWindowSize?: number;
+  /** 最近一次请求（快照的 `lastUsage`）：占比分母与差额的被减数。 */
+  lastUsage?: { inputTokens?: number; messageCount?: number; occurredAt?: string };
+  /** compact 之后的展示用量：用来判定那次请求的 input 还能不能代表当前快照。 */
+  displayUsage?: { totalTokens?: number; compactedAt?: string };
+};
+
+/**
+ * 最近一次请求的 input 还能代表当前快照吗？不能则返回作废原因：
+ * - `compacted`：快照在那次请求之后被 compact 改写过（`displayUsage.compactedAt` 更晚）；
+ * - `truncated`：那次请求看到的消息比快照现在多（prune / rewind 裁掉了轮次）。
+ *
+ * 两种情况里 `lastUsage.inputTokens` 描述的都是**另一份**上下文：拿它当分母/被减数会把
+ * 「已经被清理掉的内容」显示成「系统提示词 / 工具 schema」。
+ */
+export function resolveStaleRequestInput({
+  lastUsage,
+  displayUsage,
+  messageCount,
+}: {
+  lastUsage?: { inputTokens?: number; messageCount?: number; occurredAt?: string };
+  displayUsage?: { totalTokens?: number; compactedAt?: string };
+  messageCount?: number;
+}): ConfigWebContextStaleInput | null {
+  const inputTokens = Number(lastUsage?.inputTokens) || 0;
+  if (inputTokens <= 0) return null;
+  const compactedAtMs = Date.parse(displayUsage?.compactedAt ?? '');
+  const usedAtMs = Date.parse(lastUsage?.occurredAt ?? '');
+  if (Number.isFinite(compactedAtMs) && (!Number.isFinite(usedAtMs) || compactedAtMs > usedAtMs)) {
+    return {
+      inputTokens,
+      reason: 'compacted',
+      compactedAt: displayUsage?.compactedAt,
+      compactedTokens: Number(displayUsage?.totalTokens) || 0,
+    };
+  }
+  const recordedMessages = Number(lastUsage?.messageCount);
+  const currentMessages = Number(messageCount);
+  if (
+    Number.isFinite(recordedMessages) &&
+    recordedMessages > 0 &&
+    Number.isFinite(currentMessages) &&
+    currentMessages < recordedMessages
+  ) {
+    return {
+      inputTokens,
+      reason: 'truncated',
+      recordedMessages,
+      currentMessages,
+    };
+  }
+  return null;
+}
+
+/** 本会话出现过的最小请求 input：固定开销的上界。 */
+export function minRequestInputTokens(usageHistory: AgentUsageRecord[] = []): number {
+  let min = 0;
+  for (const record of usageHistory) {
+    const input = Number(record?.inputTokens);
+    if (!Number.isFinite(input) || input <= 0) continue;
+    if (min === 0 || input < min) min = input;
+  }
+  return min;
 }
 
 function createEmptyTurn(): ConfigWebContextTurn {

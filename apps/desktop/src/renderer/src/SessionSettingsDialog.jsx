@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { IconAdjustments, IconClock, IconPuzzle } from '@tabler/icons-react'
 // 设置页的同一批控件：会话级开关与默认值表单必须是同一套 UI，不在两端各写一份
 import {
@@ -9,7 +9,8 @@ import {
 } from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
 import { LoopPanel } from './LoopPanel'
-import { PluginSettingsPanel } from './SessionPluginSettings'
+import { PluginSettingsPanel, usePluginSessionSettings } from './SessionPluginSettings'
+import { countPluginOverrides, pickActivePlugin } from './sessionPluginNav'
 
 /**
  * 输入框旁的「会话设置」弹窗：会话能力 / 定时任务 / 插件三块。
@@ -18,6 +19,7 @@ import { PluginSettingsPanel } from './SessionPluginSettings'
  * 能力默认值在设置页的 Capabilities、定时任务在 CLI `/loop` 里（定时任务本身也只挂在
  * 当前会话上）。插件一节按清单渲染：只有插件把设置项标成 `perSession`，它才会出现，
  * 因此自动压缩的阈值这类「每条会话可以不一样」的配置由插件自己声明，内核不认识它。
+ * 那几个插件是**左侧导航的子项**（挂在「插件」下面），内容区只画选中的那一个。
  *
  * 数据来自常驻 chat host 的 `mica/capabilities/get`；提交走对应的 set 方法，成功后
  * host 发 `mica/capabilities/updated`，同一会话的其他窗口据此同步。
@@ -79,6 +81,17 @@ export function SessionSettingsDialog({
   const pendingSaveRef = useRef(null)
   // 点了哪一行就开哪一行的详情；null 表示没有详情弹窗。
   const [detail, setDetail] = useState(null)
+  // 插件一节选中的插件；列表加载后按 id 认，插件被停用时回落到第一个。
+  const [pluginId, setPluginId] = useState('')
+
+  const pluginSettings = usePluginSessionSettings({
+    nodeId,
+    sessionId,
+    cwd,
+    // 只有进到插件一节才读：这条 host 调用在别的分类里没有意义。
+    enabled: section === 'plugins'
+  })
+  const activePlugin = pickActivePlugin(pluginSettings.plugins, pluginId)
 
   const load = useCallback(async () => {
     setError('')
@@ -185,6 +198,8 @@ export function SessionSettingsDialog({
 
   const totalCount = countAll(catalog)
   const disabledCount = disabledTotal(selection)
+  // 插件子项列表是否真的渲染：父项据此降到「所在的一节」，把选中底色让给子项。
+  const hasPluginSubnav = section === 'plugins' && (pluginSettings.plugins?.length ?? 0) > 0
 
   return (
     <ModalShell
@@ -199,22 +214,64 @@ export function SessionSettingsDialog({
         {SECTIONS.map((entry) => {
           const Icon = entry.icon
           return (
-            <button
-              key={entry.id}
-              type="button"
-              className={`session-settings-nav-item${section === entry.id ? ' is-active' : ''}`}
-              aria-current={section === entry.id ? 'true' : undefined}
-              onClick={() => {
-                setSection(entry.id)
-                setDetail(null)
-              }}
-            >
-              <Icon size={14} aria-hidden="true" />
-              <span className="session-settings-nav-label">{entry.label}</span>
-              <span className="session-settings-nav-meta">
-                {sectionMeta(entry.id, { catalog, loopProps, totalCount, disabledCount })}
-              </span>
-            </button>
+            <Fragment key={entry.id}>
+              <button
+                type="button"
+                className={`session-settings-nav-item${section === entry.id ? ' is-active' : ''}${
+                  entry.id === 'plugins' && hasPluginSubnav ? ' is-group' : ''
+                }`}
+                aria-current={section === entry.id ? 'true' : undefined}
+                onClick={() => {
+                  setSection(entry.id)
+                  setDetail(null)
+                }}
+              >
+                <Icon size={14} aria-hidden="true" />
+                <span className="session-settings-nav-label">{entry.label}</span>
+                <span className="session-settings-nav-meta">
+                  {sectionMeta(entry.id, {
+                    catalog,
+                    loopProps,
+                    totalCount,
+                    disabledCount,
+                    pluginCount: pluginSettings.plugins?.length ?? null
+                  })}
+                </span>
+              </button>
+              {/* 插件挂在「插件」这一项的下面：左侧这一列就是全部入口，不在内容区再开一排页签。
+                  列表没加载完（或没有可按会话调整的插件）时不渲染子项。 */}
+              {entry.id === 'plugins' && hasPluginSubnav ? (
+                <div className="session-settings-subnav" role="group" aria-label="插件">
+                  {pluginSettings.plugins.map((plugin) => {
+                    const isActive = activePlugin?.id === plugin.id
+                    const overridden = countPluginOverrides(plugin)
+                    return (
+                      <button
+                        key={plugin.id}
+                        type="button"
+                        className={`session-settings-nav-item session-settings-nav-subitem${
+                          isActive ? ' is-active' : ''
+                        }`}
+                        aria-current={isActive ? 'true' : undefined}
+                        title={
+                          overridden > 0 ? `${plugin.name}：${overridden} 项仅本会话` : plugin.name
+                        }
+                        onClick={() => {
+                          setPluginId(plugin.id)
+                          setDetail(null)
+                        }}
+                      >
+                        <span className="session-settings-nav-dot" aria-hidden="true" />
+                        <span className="session-settings-nav-label">{plugin.name}</span>
+                        <span className="session-settings-nav-meta">
+                          {overridden > 0 ? overridden : ''}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </Fragment>
           )
         })}
       </nav>
@@ -262,10 +319,11 @@ export function SessionSettingsDialog({
 
           {section === 'plugins' ? (
             <PluginSettingsPanel
-              nodeId={nodeId}
-              sessionId={sessionId}
-              cwd={cwd}
+              plugin={activePlugin}
               running={running}
+              savingKey={pluginSettings.savingKey}
+              error={pluginSettings.error}
+              onSave={pluginSettings.save}
             />
           ) : null}
 
@@ -349,10 +407,10 @@ function CapabilityDetail({ detail, item, enabled, running, onToggle, onClose })
   )
 }
 
-function sectionMeta(id, { catalog, loopProps, totalCount, disabledCount }) {
+function sectionMeta(id, { catalog, loopProps, totalCount, disabledCount, pluginCount }) {
   if (id === 'capabilities') return catalog ? `${totalCount - disabledCount}/${totalCount}` : ''
-  // 插件一节按需加载，导航项先不显示计数（显示 0 会让人以为没有可配置的插件）。
-  if (id === 'plugins') return ''
+  // 插件一节按需加载：没读到之前留空，读到之后是插件数（0 也照实显示）。
+  if (id === 'plugins') return pluginCount === null ? '' : `${pluginCount}`
   const loop = loopProps?.loop
   if (!loop) return '未设置'
   return loop.status === 'active' ? '运行中' : '已暂停'

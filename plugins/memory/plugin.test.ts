@@ -28,6 +28,22 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+/**
+ * 整理门槛是 8 条消息（约 4 轮）：真实会话都有这个体量，一两句寒暄不值得花钱整理。
+ * 用例只需要一两轮核心内容时，用固定背景轮次把输入补到门槛以上。
+ */
+function thread(...core: [string, string][]): { role: string; content: string }[] {
+  const padding: [string, string][] = [
+    ['先看下这个仓库', '好的，我先看目录结构。'],
+    ['继续', '已经看完了，结构不复杂。'],
+    ['接下来做什么？', '等你给下一步指令。'],
+  ];
+  return [...padding, ...core].flatMap(([user, assistant]) => [
+    { role: 'user', content: user },
+    { role: 'assistant', content: assistant },
+  ]);
+}
+
 type HarnessOptions = {
   settings?: PluginSettingValues;
   issues?: PluginSettingIssue[];
@@ -258,10 +274,7 @@ describe('memory auto capture', () => {
   it('runs the curator after a completed turn and applies the operations', async () => {
     const harness = createHarness({
       settings: { autoCapture: 'true' },
-      messages: [
-        { role: 'user', content: '以后测试都用 bun run test' },
-        { role: 'assistant', content: '记住了。' },
-      ],
+      messages: thread(['以后测试都用 bun run test', '记住了。']),
       curatorOutput: JSON.stringify({
         operations: [
           { target: 'user', action: 'add', content: '用户要求测试用 bun run test' },
@@ -322,10 +335,7 @@ describe('memory auto capture', () => {
   it('respects the configured interval between runs', async () => {
     const harness = createHarness({
       settings: { autoCapture: 'true', minIntervalMinutes: '60' },
-      messages: [
-        { role: 'user', content: '偏好中文' },
-        { role: 'assistant', content: '好的' },
-      ],
+      messages: thread(['偏好中文', '好的']),
       curatorOutput: JSON.stringify({ operations: [{ target: 'user', action: 'add', content: '偏好中文' }] }),
     });
 
@@ -340,10 +350,7 @@ describe('memory auto capture', () => {
   it('reports a curator failure without breaking the turn', async () => {
     const harness = createHarness({
       settings: { autoCapture: 'true' },
-      messages: [
-        { role: 'user', content: '记住这个' },
-        { role: 'assistant', content: '好' },
-      ],
+      messages: thread(['记住这个', '好']),
       curatorOutput: '这不是 JSON',
     });
 
@@ -357,10 +364,7 @@ describe('memory auto capture', () => {
   it('retries once when the curator falls back to another schema', async () => {
     const harness = createHarness({
       settings: { autoCapture: 'true' },
-      messages: [
-        { role: 'user', content: '偏好中文' },
-        { role: 'assistant', content: '好' },
-      ],
+      messages: thread(['偏好中文', '好']),
       curatorOutputs: [
         // 真实模型（codex 系网关）会这样回。
         '{"operations":[{"op":"add","path":"/repo/demo","value":"偏好中文"}]}',
@@ -387,10 +391,7 @@ describe('memory auto capture', () => {
   it('asks for the direct provider when a manual review has no subagent runner', async () => {
     const harness = createHarness({
       withSubagents: false,
-      messages: [
-        { role: 'user', content: '记住这条' },
-        { role: 'assistant', content: '好' },
-      ],
+      messages: thread(['记住这条', '好']),
     });
 
     await harness.commands.execute('/memory review');
@@ -401,10 +402,7 @@ describe('memory auto capture', () => {
   it('accepts a partial curator response when it still carries JSON', async () => {
     const harness = createHarness({
       settings: { autoCapture: 'true' },
-      messages: [
-        { role: 'user', content: '偏好中文' },
-        { role: 'assistant', content: '好' },
-      ],
+      messages: thread(['偏好中文', '好']),
       curatorStatus: 'partial',
       curatorOutput: JSON.stringify({ operations: [{ target: 'user', action: 'add', content: '偏好中文' }] }),
     });
@@ -423,10 +421,7 @@ describe('memory auto capture', () => {
         apiKey: 'sk-test',
         model: 'cheap-model',
       },
-      messages: [
-        { role: 'user', content: '记住这条' },
-        { role: 'assistant', content: '好' },
-      ],
+      messages: thread(['记住这条', '好']),
       curatorOutput: JSON.stringify({
         operations: [{ target: 'user', action: 'add', content: '独立接口写入的一条' }],
       }),
@@ -462,10 +457,7 @@ describe('memory command', () => {
 
   it('runs a manual review even when auto capture is off', async () => {
     const harness = createHarness({
-      messages: [
-        { role: 'user', content: '用 pnpm' },
-        { role: 'assistant', content: '好' },
-      ],
+      messages: thread(['用 pnpm', '好']),
       curatorOutput: JSON.stringify({ operations: [{ target: 'project', action: 'add', content: '用 pnpm' }] }),
     });
 

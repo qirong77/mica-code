@@ -46,7 +46,7 @@ describe('getPluginsDetails', () => {
       state: 'enabled',
       location: pluginDir,
     });
-    expect(hello?.files.map((file) => file.name)).toEqual(['index.js', 'plugin.json']);
+    expect(hello?.manifestFile).toBe(join(pluginDir, 'plugin.json'));
   });
 
   it('marks broken plugins as failed with the manifest error', () => {

@@ -5,8 +5,11 @@ import type { PluginLlmApi } from '@packages/mica-plugin/index.js';
  * 插件设置 → 运行参数。
  *
  * 设置文件里的值全是字符串（配置页就是一个表单），所以解析、兜底、范围收敛都在
- * 这一处，运行期不再回头读原始值。`autoCapture` 默认关闭：后台整理会花模型的钱，
- * 不该是「装了插件就自动开始」的行为。
+ * 这一处，运行期不再回头读原始值。
+ *
+ * `autoCapture` 默认开启，与 `auto-compact` 同一取向：记忆全靠模型自觉调用工具写入
+ * 的话，真机上几乎不会增长（实测 12 个会话只有 1 次），插件就等于没装。成本靠节流
+ * 兜住——默认 30 分钟最多一次（全局），比 `auto-compact` 的阈值触发更保守。
  */
 
 export type CuratorMode = 'subagent' | 'direct';
@@ -23,8 +26,8 @@ export type MemorySettings = {
 export const DEFAULT_SETTINGS: MemorySettings = {
   enabled: true,
   budgets: DEFAULT_MEMORY_BUDGETS,
-  autoCapture: false,
-  minIntervalMinutes: 10,
+  autoCapture: true,
+  minIntervalMinutes: 30,
   maxMessages: 30,
   curatorMode: 'subagent',
 };

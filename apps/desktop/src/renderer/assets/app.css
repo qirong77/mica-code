@@ -4814,6 +4814,49 @@ body.is-resizing-btw {
   white-space: nowrap;
 }
 
+/* 插件子项：与父项共用同一套栅格，图标列换成一个圆点，文字左缘因此和父项标签对齐。
+   缩进靠这一列而不是 padding-left，父项与子项读起来是一棵树。 */
+.session-settings-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 1px 0 3px;
+}
+
+.session-settings-nav-subitem {
+  height: 26px;
+}
+
+/* 有子项时父项只剩「你在这一节」：底色交给选中的子项，否则两行都亮着，
+   看不出当前看的是哪个插件。 */
+.session-settings-nav-item.is-group.is-active {
+  background: transparent;
+  color: var(--color-fg);
+}
+
+.session-settings-nav-item.is-group.is-active:hover {
+  background: rgb(255 255 255 / 5%);
+}
+
+.session-settings-nav-dot {
+  width: 4px;
+  height: 4px;
+  margin: 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.45;
+}
+
+.session-settings-nav-subitem.is-active {
+  background: rgb(255 255 255 / 9%);
+  color: var(--color-fg-max);
+}
+
+.session-settings-nav-subitem.is-active .session-settings-nav-dot {
+  background: var(--color-accent);
+  opacity: 1;
+}
+
 .session-settings-panel {
   min-width: 0;
   min-height: 0;
@@ -4978,6 +5021,11 @@ body.is-resizing-btw {
   .session-settings-nav-meta {
     display: none;
   }
+
+  /* 横排时子项加入同一行：再开一行只在面板里留一条空白。 */
+  .session-settings-subnav {
+    display: contents;
+  }
 }
 
 /*
@@ -4992,4 +5040,35 @@ body.is-resizing-btw {
   min-height: 0;
   width: 100%;
   background: var(--color-canvas);
+}
+
+/*
+ * 会话详情 / 上下文弹窗：内容是 packages/mica-config-ui 的 SessionDetailView（含页签、
+ * 对话记录、Context 分析、原始文件）。它自带 `grid-template-rows: auto auto minmax(0, 1fr)`，
+ * 必须拿到确定高度才会让正文页签自己滚动，所以这里把弹窗 body 变成不滚动的 flex 层。
+ */
+.chat-modal-session-detail {
+  --modal-w: min(1180px, 96vw);
+  height: min(86vh, 940px);
+}
+
+.chat-modal-session-detail .chat-modal-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.chat-modal-session-detail .session-detail-embed {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-modal-session-detail .session-detail-embed > .session-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
 }

@@ -35,7 +35,14 @@ import { registerMemoryCommand, type MemoryReviewOutcome } from './commands.js';
 const PLUGIN_ID = 'memory';
 const CURATOR_SUBAGENT_TYPE = 'memory-curator';
 const PROMPT_SECTION_ORDER = 900;
-const MIN_CONVERSATION_MESSAGES = 2;
+/**
+ * 整理的最小输入：少于这么多条用户 / 助手消息就直接跳过。
+ *
+ * 2 条（一问一答）也会触发一次模型请求，而「回复一句 ok」这种轮次没有任何值得沉淀的
+ * 内容——纯浪费。真实使用里一次有信息量的会话至少有四五个来回，取 8 条（约 4 轮）
+ * 作为门槛，短对话不花钱，长对话照常整理。
+ */
+const MIN_CONVERSATION_MESSAGES = 8;
 
 const plugin: MicaPlugin = {
   id: PLUGIN_ID,

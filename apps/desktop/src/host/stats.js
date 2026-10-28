@@ -16,11 +16,8 @@ import {
   filterOwnedSubagentRecords,
   filterOwnedUsage,
   ownedUsageIdentities,
-  projectMessages,
   projectSubagentRecords,
-  projectUsage,
-  resolveStaleRequestInput,
-  summarizeContext
+  projectUsage
 } from './stats-core'
 import { extractSnippet, tokenizeSearchQuery } from '@packages/mica-web-shared/session-search.js'
 import { createTurnLeaseProbe, isInterruptedSession } from './session-lease'
@@ -184,22 +181,6 @@ function normalizeDisplayUsage(value) {
   return { totalTokens, compactedAt: value.compactedAt }
 }
 
-/**
- * 本会话出现过的最小请求 input：固定开销（system prompt + AGENT.md + skills 索引 +
- * 全部工具 schema）的上界——它同时还含那次请求已有的历史，所以只会偏高。
- * 差额一旦超过它，就不可能全是固定开销，弹窗要改用「其它差额」的说法。
- */
-function minRequestInputTokens(snap) {
-  const history = Array.isArray(snap?.usageHistory) ? snap.usageHistory : []
-  let min = 0
-  for (const event of history) {
-    const input = Number(event?.inputTokens)
-    if (!Number.isFinite(input) || input <= 0) continue
-    if (min === 0 || input < min) min = input
-  }
-  return min
-}
-
 /** turn lease 目录：正在跑的 turn 在这里留下持有者 pid（见 session-lease.js）。 */
 function turnLocksDir() {
   return join(sessionsDir(), '.turn-locks')
@@ -326,7 +307,6 @@ export function registerStatsIpc() {
     if (!file || !existsSync(file)) throw new Error('Session not found')
     const raw = JSON.parse(readFileSync(file, 'utf8'))
     const snap = raw.snapshot || {}
-    const messages = Array.isArray(snap.messages) ? snap.messages : []
     const usageHistory = Array.isArray(snap.usageHistory) ? snap.usageHistory : []
     const subagentRecords = Array.isArray(snap.subagentUsageHistory)
       ? snap.subagentUsageHistory.filter((record) => record && typeof record === 'object')
@@ -336,14 +316,6 @@ export function registerStatsIpc() {
     const owned = ownedUsageIdentities(scan(), sessionId)
     const lastUsage = snap.lastUsage ? projectUsage(snap.lastUsage) : null
     const displayUsage = normalizeDisplayUsage(snap.displayUsage)
-    // compact / prune 改写过这份历史：lastUsage.inputTokens 描述的是改写**之前**的
-    // 上下文，拿它当分母/被减数会把「被清掉的内容」显示成 system prompt / 工具 schema。
-    const staleInput = resolveStaleRequestInput({
-      // 原始记录（不是投影后的）：判定要用 messageCount，投影会把它丢掉。
-      lastUsage: snap.lastUsage,
-      displayUsage,
-      messageCount: messages.length
-    })
     return {
       id: raw.id || null,
       title: raw.title || null,
@@ -356,14 +328,6 @@ export function registerStatsIpc() {
       effort: snap.effort || null,
       role: snap.role || null,
       contextWindowSize: snap.contextWindowSize || null,
-      messages: projectMessages(messages),
-      // 弹窗的「谁占了 context」分解，按原始消息体积估算（与 CLI 的 chars/4 同口径）。
-      context: summarizeContext(messages, {
-        lastInputTokens: staleInput ? 0 : lastUsage?.inputTokens || 0,
-        staleInput,
-        fixedOverheadTokens: minRequestInputTokens(snap),
-        contextWindowSize: snap.contextWindowSize || null
-      }),
       displayUsage,
       // 与列表同一个归属口径：fork 之前写入的会话文件里带着来源会话的用量副本，那些
       // 记录归来源会话，详情视图不能把它们展示成自己的（否则列表 0 请求、详情 106 条）。

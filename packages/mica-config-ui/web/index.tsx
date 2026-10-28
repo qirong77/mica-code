@@ -36,3 +36,10 @@ export { PluginSettingInput } from './components/PluginSettingInput.js';
  */
 export { PluginIcon, PLUGIN_ICONS, resolvePluginIcon } from './pluginIcons.js';
 export type { PluginIconName } from './pluginIcons.js';
+
+/**
+ * 会话详情：桌面端的会话详情弹窗 / 上下文弹窗与配置页的 Sessions 页共用这一份，
+ * 三个页签（对话记录 / Context 分析 / 原始文件）在各入口长得一样。
+ */
+export { SessionDetailView } from './components/SessionDetailView.js';
+export type { SessionDetailExtraTab, SessionDetailTab } from './components/SessionDetailView.js';

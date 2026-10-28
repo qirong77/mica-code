@@ -447,11 +447,12 @@ function readSessionItem(id, sequence) {
 
 function readSessionContextAnalysis(id) {
   const { session } = loadSession(id)
-  return buildConfigWebContextAnalysis(
-    conversationSource(session),
-    session.snapshot.usageHistory,
-    session.snapshot.contextWindowSize
-  )
+  return buildConfigWebContextAnalysis(conversationSource(session), {
+    usageHistory: session.snapshot.usageHistory,
+    contextWindowSize: session.snapshot.contextWindowSize,
+    lastUsage: session.snapshot.lastUsage,
+    displayUsage: session.snapshot.displayUsage
+  })
 }
 
 /* ------------------------------------------------------------ 受控浏览器 */

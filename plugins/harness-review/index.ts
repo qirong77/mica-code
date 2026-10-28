@@ -54,6 +54,28 @@ export default function setup(ctx: PluginContext): void {
       };
     }
     if (action === 'report') return { path: await recorder.exportReport(cwd) };
+    if (action === 'prune') {
+      // Manual only: nothing deletes runs on a schedule, and an active run is
+      // never removed. Scoped to the current workspace so one project's cleanup
+      // cannot drop another project's evidence.
+      const days = count(input.days === undefined ? undefined : String(input.days), 30, 1, 3650);
+      const result = await recorder.prune({ olderThanDays: days, cwd });
+      return {
+        ...result,
+        freedMb: Math.round((result.freedBytes / 1_048_576) * 10) / 10,
+        olderThanDays: days,
+        displayLimit: `已删除 ${result.deletedRuns} 次运行记录；仍在运行的记录不会删除。人工评估结论保留。`,
+      };
+    }
+    if (action === 'rebuild') {
+      // Findings are derived from traces, so a classification fix can be applied
+      // to runs recorded before it. Counters and outcomes stay untouched.
+      const result = await recorder.rebuild({ cwd });
+      return {
+        ...result,
+        displayLimit: '已按当前规则从轨迹重算历史运行的问题条目；运行指标与人工评估结论不变。',
+      };
+    }
     if (action === 'assess') {
       if (typeof input.id !== 'string' || !input.id.trim()) throw new Error('assess 需要 review 条目的 id');
       if (!STATUSES.includes(input.status as ReviewStatus)) throw new Error(`status 必须是 ${STATUSES.join(' / ')}`);
@@ -65,7 +87,7 @@ export default function setup(ctx: PluginContext): void {
       await recorder.decide(input.id, input.status as ReviewStatus, input.note);
       return { id: input.id, status: input.status, recorded: true };
     }
-    throw new Error('action 必须是 list / report / assess');
+    throw new Error('action 必须是 list / report / prune / rebuild / assess');
   };
 
   const tool = ctx.tools!.register(new HarnessReviewTool(execute));
@@ -76,6 +98,8 @@ export default function setup(ctx: PluginContext): void {
     completionItems: [
       { arg: 'list', description: '查看当前工作区的运行与问题条目' },
       { arg: 'report', description: '导出 Markdown 复盘报告' },
+      { arg: 'prune', description: 'prune [天数]：删除早于若干天的运行记录（默认 30）' },
+      { arg: 'rebuild', description: 'rebuild：按当前规则从轨迹重算历史问题条目' },
       { arg: 'assess', description: 'assess <id> <状态> <判断依据>：记录人工评估' },
     ],
     pluginId: ctx.pluginId,
@@ -84,7 +108,10 @@ export default function setup(ctx: PluginContext): void {
     async handler(_commandCtx, args) {
       try {
         const [action = 'list', id, status, ...note] = args.trim().split(/\s+/).filter(Boolean);
-        const data = await execute({ action, id, status, note: note.join(' ') });
+        // `prune 7` passes the retention window as the first positional argument.
+        const data = await execute(
+          action === 'prune' ? { action, days: Number(id) } : { action, id, status, note: note.join(' ') },
+        );
         const message = JSON.stringify(data, null, 2);
         ctx.ui?.showMessage(message, 12000);
         return { ok: true, message, data };
@@ -107,10 +134,15 @@ export class HarnessReviewTool extends MicaTool {
       {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['list', 'report', 'assess'], description: '默认 list' },
+          action: {
+            type: 'string',
+            enum: ['list', 'report', 'prune', 'rebuild', 'assess'],
+            description: '默认 list',
+          },
           id: { type: 'string', description: 'assess：问题条目 id' },
           status: { type: 'string', enum: [...STATUSES] },
           note: { type: 'string', description: 'assess：用户判断依据，或实际评估方法与结果' },
+          days: { type: 'number', description: 'prune：保留最近多少天的运行记录，默认 30' },
         },
       },
     );

@@ -1,10 +1,8 @@
-import { ConfigWebApp, setConfigWebClient, setConfigWebEditor } from '@mica-config-ui/web'
-import { createDesktopConfigWebClient } from './config-web'
+import { ConfigWebApp, setConfigWebEditor } from '@mica-config-ui/web'
 import { LocalJsonEditor } from './config-web-editor'
 
-// 宿主接线只做一次：数据源走运行时 IPC、编辑器用应用自带的 monaco；页面组件本身来自
-// packages/mica-config-ui（浏览器端 apps/config-web 用同一份源码，见那里的 main.tsx）。
-setConfigWebClient(createDesktopConfigWebClient())
+// 数据源在渲染层入口（main.jsx）已经接过一次——会话详情也会在设置页之外打开。
+// 这里只补编辑器：应用自带的 monaco 是懒加载进来的，跟着设置页一起注册。
 setConfigWebEditor(LocalJsonEditor)
 
 /**

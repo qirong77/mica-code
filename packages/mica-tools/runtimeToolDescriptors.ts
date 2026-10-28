@@ -31,6 +31,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
       { name: 'id', type: 'string', required: false, description: 'assess：问题条目 id' },
       { name: 'status', type: 'string', required: false, description: '' },
       { name: 'note', type: 'string', required: false, description: 'assess：用户判断依据，或实际评估方法与结果' },
+      { name: 'days', type: 'number', required: false, description: 'prune：保留最近多少天的运行记录，默认 30' },
     ],
   },
   {
