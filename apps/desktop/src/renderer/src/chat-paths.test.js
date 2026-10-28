@@ -55,6 +55,15 @@ describe('findPathCandidates', () => {
     expect(findPathCandidates('and/or 都行')).toEqual([])
   })
 
+  it('recognizes a path right after a colon, half or full width', () => {
+    expect(findPathCandidates('目录：/Users/a/b').map((item) => item.path)).toEqual([
+      '/Users/a/b'
+    ])
+    expect(findPathCandidates('config:/Users/a/b.json').map((item) => item.path)).toEqual([
+      '/Users/a/b.json'
+    ])
+  })
+
   it('reads the :line:column suffix', () => {
     const [candidate] = findPathCandidates('at src/app.ts:12:5')
     expect(candidate).toMatchObject({ path: 'src/app.ts', line: 12, column: 5 })

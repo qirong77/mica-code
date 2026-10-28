@@ -370,6 +370,8 @@ function createWebApi(env) {
     files: {
       list: (path) => invoke('files:list', { path }),
       read: (path) => invoke('files:read', { path }),
+      // 路径点击要先知道目标是文件还是目录（页面侧没有文件系统）
+      stat: (path) => invoke('files:stat', { path }),
       write: (path, content, expectedVersion) =>
         invoke('files:write', { path, content, expectedVersion }),
       // `@` 补全候选：与 CLI 的 file-mention 插件共用 mica-file-mentions

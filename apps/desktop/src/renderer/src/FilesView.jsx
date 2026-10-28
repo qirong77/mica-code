@@ -10,6 +10,7 @@ import {
   useState
 } from 'react'
 import {
+  IconArrowBackUp,
   IconArrowLeft,
   IconArrowUp,
   IconChevronRight,
@@ -502,6 +503,11 @@ export const FilesView = forwardRef(function FilesView(
     children: [],
     status: '选择一个终端会话以查看文件'
   })
+  // 文件树平时的根是会话 cwd（`root` 由 App 传进来）。从对话里点开一个目录时根要临时
+  // 切到那个目录，所以记一个覆盖值。带上它所属的 cwd：换会话时 `root` 一变就对不上，
+  // 覆盖自动作废，不需要额外的清理 effect（那会先按旧覆盖读一次盘）。
+  const [rootOverride, setRootOverride] = useState(null)
+  const overrideRoot = rootOverride && rootOverride.base === root ? rootOverride.path : null
   const treeRef = useLatest(tree)
   const [tabs, setTabsState] = useState([])
   const tabsRef = useRef([])
@@ -843,6 +849,32 @@ export const FilesView = forwardRef(function FilesView(
     [activateFile, ensureEditor, revealPosition, setActivePath, setTabs, showMessage]
   )
 
+  /**
+   * 对话里点路径的「在 Mica 中打开」：文件开编辑器、目录把文件树切过去。
+   * 目标是文件还是目录只能问运行时——`/a/b` 从文本上看不出来。stat 失败（不存在、
+   * 无权限）仍交给 openFile，让它那套「无法打开文件」的提示统一报出来。
+   */
+  const openPath = useCallback(
+    async (path, position = null) => {
+      if (!path) return
+      let info = null
+      try {
+        info = await window.mica.files.stat(path)
+      } catch {
+        info = null
+      }
+      if (info?.ok && info.kind === 'directory') {
+        // eslint-disable-next-line no-use-before-define -- 回调执行时 setter 早已定义
+        setMobileTreeVisible(false)
+        // 设完覆盖值就会触发下面那个 loadRoot effect（它自己接管「正在读取…」状态）
+        setRootOverride({ base: root, path: info.path })
+        return
+      }
+      await openFile(info?.ok ? info.path : path, position)
+    },
+    [openFile, root]
+  )
+
   const saveActive = useCallback(async () => {
     const tab = tabsRef.current.find((item) => item.path === activeRef.current)
     if (!tab?.model || tab.readOnly || !tab.dirty || tab.loading || tab.saving) return
@@ -956,8 +988,8 @@ export const FilesView = forwardRef(function FilesView(
   }, [])
 
   useEffect(() => {
-    if (visible) loadRoot(root)
-  }, [loadRoot, root, visible])
+    if (visible) loadRoot(overrideRoot || root)
+  }, [loadRoot, overrideRoot, root, visible])
 
   useEffect(() => {
     if (!visible) return undefined
@@ -1494,6 +1526,7 @@ export const FilesView = forwardRef(function FilesView(
   useImperativeHandle(
     ref,
     () => ({
+      openPath,
       openFile,
       openDocument,
       closeActive() {
@@ -1516,6 +1549,7 @@ export const FilesView = forwardRef(function FilesView(
     }),
     [
       closeFile,
+      openPath,
       openFile,
       openDocument,
       reloadAfterGitChange,
@@ -1639,6 +1673,17 @@ export const FilesView = forwardRef(function FilesView(
               >
                 {tree.root ? fileName(tree.root) : '资源管理器'}
               </div>
+              {overrideRoot ? (
+                <button
+                  type="button"
+                  title={root ? `返回工作区：${root}` : '返回工作区'}
+                  aria-label="返回工作区"
+                  className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white"
+                  onClick={() => setRootOverride(null)}
+                >
+                  <IconArrowBackUp size={16} />
+                </button>
+              ) : null}
               <button
                 type="button"
                 disabled={!tree.root}

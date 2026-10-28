@@ -28,14 +28,15 @@ describe('chat markdown path links', () => {
     expect(html).toContain('/Users/qironglin/Desktop/qirong-application')
     expect(html).toContain('role="link"')
     expect(html).toContain(
-      'title="点击在 Finder 中打开：/abs/Users/qironglin/Desktop/qirong-application'
+      'title="单击选择打开方式：/abs/Users/qironglin/Desktop/qirong-application'
     )
+    expect(html).toContain('直接在 Mica 中打开')
   })
 
   it('marks image paths so a click opens the preview', () => {
     const html = render('截图在 /tmp/shot.png')
     expect(html).toContain('chat-path-image')
-    expect(html).toContain('点击预览图片')
+    expect(html).toContain('单击预览图片')
   })
 
   it('falls back to plain text without a path action context', () => {

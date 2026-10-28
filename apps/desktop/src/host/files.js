@@ -464,6 +464,23 @@ export function registerFilesIpc() {
     return { ok: true, kind: 'file', path: target }
   })
 
+  // 路径点击要决定「在 Mica 中打开」是开文件还是把文件树切到那个目录：页面这边拿不到
+  // 文件系统，只能问运行时一次。不存在同样是正常结果（调用方据此提示），不走抛错。
+  ipcMain.handle('files:stat', async (_event, payload = {}) => {
+    const target = path.resolve(expandHome(payload.path))
+    try {
+      const info = await stat(target)
+      return {
+        ok: true,
+        path: target,
+        kind: info.isDirectory() ? 'directory' : 'file',
+        size: info.size
+      }
+    } catch {
+      return { ok: false, path: target, error: `路径不存在：${target}` }
+    }
+  })
+
   ipcMain.handle('files:read', async (_event, payload = {}) => {
     const filePath = normalizeDirectory(payload.path)
     const info = await stat(filePath)

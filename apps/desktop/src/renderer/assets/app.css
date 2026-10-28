@@ -2672,12 +2672,14 @@ body.is-resizing.is-resizing-terminal {
   white-space: nowrap;
 }
 
-/* 文本与回合日志里识别到的路径：默认只是很淡的点线下划线（能看出可点），
+/* 文本与回合日志里识别到的路径：常驻一条链接式下划线（淡，但一眼看得出能点），
    hover 才实心高亮。@scope 不适用——两处都是 .chat-view 的后代。 */
 .chat-path {
   border-radius: 3px;
   cursor: pointer;
-  text-decoration: underline dotted color-mix(in srgb, currentColor 42%, transparent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentColor 30%, transparent);
   text-underline-offset: 2px;
 }
 
@@ -2685,7 +2687,7 @@ body.is-resizing.is-resizing-terminal {
 .chat-path:focus-visible {
   background: color-mix(in srgb, var(--color-info) 20%, transparent);
   color: var(--color-fg);
-  text-decoration: underline;
+  text-decoration-color: currentColor;
   outline: none;
 }
 

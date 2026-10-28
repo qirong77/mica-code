@@ -1,4 +1,7 @@
 import { createContext, useContext, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { IconFolder, IconFolderOpen, IconPhoto } from '@tabler/icons-react'
+import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
 import { isImagePath, splitTextByPaths } from './chat-paths'
 
 /**
@@ -6,70 +9,124 @@ import { isImagePath, splitTextByPaths } from './chat-paths'
  * 打开面板/弹窗的方式），PathToken 只负责「怎么点」。
  *
  * 值：{ resolvePath(raw) -> 绝对路径, openFile(path, position), reveal(path), preview(path, text) }
+ *
+ * `openFile` 落到主区文件视图（文件开编辑器、目录把文件树切过去），`reveal` 交给
+ * 系统文件管理器——两者就是点击菜单里的那两个选项。
  */
 export const ChatPathContext = createContext(null)
-
-function runAction(run, event) {
-  event.preventDefault()
-  event.stopPropagation()
-  run()
-}
 
 /**
  * 文本里识别出的路径。
  *
- * 动作与终端链接保持同一套心智：单击是最轻的动作（Finder），带修饰键才开编辑器。
- * 唯一的例外是图片——单击直接弹窗预览，比在 Finder 里找到再双击更直接。
+ * 单击弹出打开方式（Finder / Mica），⌘ 点击直接走 Mica、中键同理；图片单击是预览，
+ * 右键才出菜单——预览图片比在 Finder 里找到再双击更直接。
  *
- * 渲染成 inline 元素、只在 hover 时加样式，所以不改变文本排版：同一段文字不管
- * 有没有被识别成路径，位置和换行都一样。
+ * 渲染成 inline 元素、样式只有下划线，所以不改变文本排版：同一段文字不管有没有被
+ * 识别成路径，位置和换行都一样。
  */
 export function PathToken({ path, text, line = null, column = null }) {
   const actions = useContext(ChatPathContext)
+  const [menu, setMenu] = useState(null)
   const [pending, setPending] = useState(false)
 
   if (!actions) return text
 
   const image = isImagePath(path)
-
   const resolved = actions.resolvePath ? actions.resolvePath(path) : path
-  const hint = image ? '点击预览图片' : '点击在 Finder 中打开'
-  const title = `${hint}：${resolved}\n⌘ / Ctrl 点击在编辑器中打开`
+  const title = image
+    ? `单击预览图片，右键选择打开方式：${resolved}\n⌘ / Ctrl 点击直接在 Mica 中打开`
+    : `单击选择打开方式：${resolved}\n⌘ / Ctrl 点击直接在 Mica 中打开`
 
-  const openInEditor = (event) =>
-    runAction(() => actions.openFile(resolved, { line, column }), event)
-  const previewImage = (event) => runAction(() => actions.preview(resolved, text), event)
-  const revealInFinder = (event) =>
-    runAction(() => {
-      if (pending) return
-      setPending(true)
-      Promise.resolve(actions.reveal(resolved)).finally(() => setPending(false))
-    }, event)
-
-  const activate = (event) => {
-    if (event.metaKey || event.ctrlKey) return openInEditor(event)
-    if (image) return previewImage(event)
-    return revealInFinder(event)
+  // 打开目标可能跨进程（远程运行时），期间压暗自己，避免连点开出两个面板
+  const run = (action) => {
+    if (pending) return
+    setMenu(null)
+    setPending(true)
+    const done = () => setPending(false)
+    try {
+      Promise.resolve(action()).finally(done)
+    } catch {
+      done()
+    }
   }
 
+  const openInFiles = () => run(() => actions.openFile(resolved, { line, column }))
+  const revealInFinder = () => run(() => actions.reveal(resolved))
+  const previewImage = () => run(() => actions.preview(resolved, text))
+
+  // 键盘触发时没有鼠标坐标，落到元素自身的位置
+  const menuPoint = (event) => {
+    const rect = event.currentTarget?.getBoundingClientRect?.()
+    return {
+      x: event.clientX || (rect ? rect.left : 0),
+      y: event.clientY || (rect ? rect.bottom + 2 : 0)
+    }
+  }
+
+  const openMenu = (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setMenu(menuPoint(event))
+  }
+
+  const activate = (event) => {
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault()
+      event.stopPropagation()
+      openInFiles()
+      return
+    }
+    if (image) {
+      event.preventDefault()
+      event.stopPropagation()
+      previewImage()
+      return
+    }
+    openMenu(event)
+  }
+
+  // 菜单挂到 body：它可能嵌在 markdown 的行内元素里，`div` 不能留在 `span` 内，
+  // 也免得被对话区的滚动/裁剪容器切掉。
+  const menuNode =
+    menu && typeof document !== 'undefined'
+      ? createPortal(
+          <FloatingMenu x={menu.x} y={menu.y} minWidth={220} onClose={() => setMenu(null)}>
+            <div className="truncate px-2 py-1 text-[11px] text-white/40" title={resolved}>
+              {resolved}
+            </div>
+            <MenuSeparator />
+            {image ? <MenuItem icon={IconPhoto} label="预览图片" onClick={previewImage} /> : null}
+            <MenuItem icon={IconFolderOpen} label="在 Finder 中打开" onClick={revealInFinder} />
+            <MenuItem icon={IconFolder} label="在 Mica 中打开" onClick={openInFiles} />
+          </FloatingMenu>,
+          document.body
+        )
+      : null
+
   return (
-    <span
-      className={`chat-path${image ? ' chat-path-image' : ''}${pending ? ' chat-path-pending' : ''}`}
-      role="link"
-      tabIndex={0}
-      title={title}
-      onClick={activate}
-      onAuxClick={(event) => {
-        // 中键 = 编辑器，与浏览器里中键开标签页的手感一致
-        if (event.button !== 1) return
-        openInEditor(event)
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') activate(event)
-      }}
-    >
-      {text}
-    </span>
+    <>
+      <span
+        className={`chat-path${image ? ' chat-path-image' : ''}${pending ? ' chat-path-pending' : ''}`}
+        role="link"
+        tabIndex={0}
+        title={title}
+        onClick={activate}
+        onContextMenu={openMenu}
+        onAuxClick={(event) => {
+          // 中键 = 直接在 Mica 中打开，与浏览器里中键开标签页的手感一致
+          if (event.button !== 1) return
+          event.preventDefault()
+          event.stopPropagation()
+          openInFiles()
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') activate(event)
+        }}
+      >
+        {text}
+      </span>
+      {menuNode}
+    </>
   )
 }
 

@@ -3127,7 +3127,7 @@ export function ChatView({
     }
   }, [appendNotice, nodeIdRef])
 
-  // 「点击路径」的默认动作：目录交给 Finder 打开、文件在文件管理器里定位。
+  // 路径菜单里的「在 Finder 中打开」：目录交给 Finder 打开、文件在文件管理器里定位。
   // 路径可能来自另一台机器（页面连的是远程运行时），失败必须提示而不是静默。
   const revealPathInFinder = useCallback(
     async (target) => {
