@@ -61,6 +61,15 @@ export function createPluginHostApi(pluginId) {
     /** 插件自己的那份数据（内容由插件定义，宿主不解析）。没有数据时 `{ value: null }`。 */
     readData: () => host.readData(pluginId),
     writeData: (value) => host.writeData(pluginId, value),
+    /**
+     * 运行时的远程访问策略：别的机器要进这台机器时要不要口令、口令是什么、别人从哪个
+     * 地址进来（`addresses`）。这是宿主自己的能力，不是插件的私有数据——请求分派用的是
+     * 同一份，所以界面显示和实际生效不会分叉。
+     */
+    access: {
+      get: () => host.access(),
+      set: (patch) => host.setAccess(patch)
+    },
     /** 打开另一个运行时：外壳里开新窗口，浏览器里开新标签页。 */
     open: (url) => openRuntimeTarget(url)
   }

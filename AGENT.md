@@ -208,8 +208,10 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 内置 skill 用 `ctx.skills.register()`：正文随包用 `import … with { type: 'text' }` 内嵌，元数据由 `micaSkills.parseMarkdown(SKILL.md)` 解析（frontmatter 是唯一来源），注册后与磁盘 skill 同权（prompt 索引 / `skill` 工具 / 会话能力开关）。磁盘上的同名 skill 优先，被遮蔽的条目从返回值 `skipped` 读出来并 `ctx.health.report()`。`baseDir` 必须是真能读到的目录——单二进制没有插件目录，所以随包资源要先落盘到 `$MICA_HOME/<插件目录>` 再注册（`plugins/computer-use` 是完整示例，源码内嵌由 `scripts/generate-computer-use-sources.mjs` 生成，改 `runtime/**` 必须重跑）。
 - 运行条件由清单 `desktop.checks` 声明，取值只能来自 `mica-plugin/PluginDesktop.ts` 的 `DESKTOP_CHECKS`；配置页 Settings → Plugins 的插件详情里渲染成「运行条件」一节（状态 + 打开系统设置），插件跑在 app-server 子进程里、探测不到也渲染不了。新增一种检查项 = 在 `DESKTOP_CHECKS` 登记 + 桌面端实现探测器（`src/main/system/`）。声明了它就写 `requires: ["desktop"]`。
 - `desktop` 能力只有桌面端 spawn 的 app-server 提供：`buildSpawnEnv` 注入 `MICA_PLUGIN_DESKTOP_HOST=1`（别用 `MICA_DESKTOP_HOST`，那是运行时的绑定地址），`runAppServer` 据此传 `desktopHost` 给 `HeadlessPluginHost`。CLI / TUI / `mica exec` 里没有它，依赖插件整块跳过。
-- 桌面入口由清单 `desktop.entry`（`{ "entry": { "label": "连接" } }`）+ 插件目录里的 `desktop.jsx` 组成：`default` 导出卡片组件（props `{ api, onClose }`），可选命名导出 `summary(api)` 给入口行右侧那一行字。宿主只画一行与卡片容器（悬停/点击、浮层定位、Esc 与点外部收起都在 `renderer/src/PluginEntries.jsx`），按 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里登记**。只对随包插件生效：页面是构建期打的包，`$MICA_HOME/plugins` 里没有它的模块，用户插件声明了也渲染不出入口。
-- 插件前端模块的能力只有四件，来自 `renderer/src/plugin-host.js` 的 `createPluginHostApi`：`currentHost()`（页面所在运行时的 origin）、`probe(address)`、`readData()` / `writeData(value)`、`open(url)`。探活与数据读写必须由运行时代劳（页面读不到跨源响应、也没有文件系统），落在 `host/plugin-host.js` 的 `plugin-host:probe` 与 `plugin-host:read-data|write-data`；数据文件统一在 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构。`open` 是纯页面行为，分支在 `shell-env.js` 的 `isElectronShell`。
+- 桌面入口由清单 `desktop.entry`（`{ "entry": { "label": "Connections" } }`）+ 插件目录里的 `desktop.jsx` 组成：`default` 导出卡片组件（props `{ api, onClose }`），可选命名导出 `summary(api)` 给入口行右侧那一行字。宿主只画一行与卡片容器（悬停/点击、浮层定位、Esc 与点外部收起都在 `renderer/src/PluginEntries.jsx`），按 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里登记**。只对随包插件生效：页面是构建期打的包，`$MICA_HOME/plugins` 里没有它的模块，用户插件声明了也渲染不出入口。
+- 插件前端模块用到的 Tailwind 工具类必须被扫描到：`plugins/` 不在 `apps/desktop` 下，`app.css` 里用 `@source '../../.../plugins'` 显式纳入，否则插件里的间距、`group-hover/*`、`max-md:*` 一个都不会生成（表现为间距全塌、悬停不出现）。
+- 插件清单的 `name` 与 `desktop.entry.label` 一律英文（侧栏其它入口也是英文），描述这类正文才写中文。
+- 插件前端模块的能力只有五件，来自 `renderer/src/plugin-host.js` 的 `createPluginHostApi`：`currentHost()`（页面所在运行时的 origin）、`probe(address)`、`readData()` / `writeData(value)`、`open(url)`、`access`（读改写这台机器的远程访问策略）。探活、数据读写与访问策略必须由运行时代劳（页面读不到跨源响应、碰不到请求分派、也没有文件系统），落在 `host/plugin-host.js` 的 `plugin-host:probe` / `plugin-host:read-data|write-data` / `plugin-host:access-get|set`；数据文件统一在 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构。`open` 是纯页面行为，分支在 `shell-env.js` 的 `isElectronShell`。
 - 设置项在清单 `settings` 里声明，类型 `text` / `password` / `textarea` / `select` / `number` / `switch`；数字项可带 `step` 与 `unit`，开关值只能是 `"true"` / `"false"`。值存 `$MICA_HOME/plugin-settings/<id>.json`，读取按 mtime 判断是否变化。
 - 校验只有 `validatePluginSettingValues()` 一处：写盘前拒绝，插件读值时同样过一遍；非法值既不落盘也不静默通过。
 - 需要按会话调整的项标 `perSession`：默认值仍是 `settings`（配置页写），会话里只存**改过**的键（`pluginSessionSettings[pluginId]`），没改过的继续跟随默认值。插件读 `ctx.sessionSettings.get()`（合并后的生效值），界面由 `mica/pluginSettings/get|set` 驱动，桌面端从会话设置→插件进入。只存改过的键是硬约束：整份存会把当时的默认值固化进老会话。
@@ -223,7 +225,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 命令结果给用户看走 `ctx.ui.notice(content, { command, status, surface, variant })`：`surface: 'command_panel'` 是输入框上方的运行中面板（被同一 `command` 的下一条 notice 收尾），默认进对话的 notice；headless 宿主直接落进 turn notice 日志。
 - 插件自己问一次模型（起标题、写提交说明、整理记忆）只声明 `plugin.json` 的 `llm`，代码里用 `ctx.llm.request()`：接口地址 / Key / 协议 / 模型由声明生成（`group: 'llm'` 的普通设置项），页面把这几项收进同一个「模型接口」面板并带「测试连接」。`llm.followMain` 允许「跟随主配置」，由宿主解析成当前 provider（会话钉住的优先，其次模型名的 `provider/model` 前缀）。请求走 `ctx.llm` → `ctx.models` → `mica-agent/modelText.ts` + `apps/cli/src/plugins/pluginModels.ts`，协议分支、超时中断与用量记账只有一份实现，记录以 `origin: 'plugin'` 落进会话的 `subagentUsageHistory`；配置页的「测试连接」用同一个执行器（`probeModelConnection`，不记账）。插件里不自建模型 HTTP 客户端，也不自己拼地址 / Key。
 - `llm` 的四个键不允许再在 `settings` 里重复声明；`required` 只在关掉「跟随主配置」后生效（`requiredWhen`）。
-- 官方插件：`todo`（进程内待办 + `plan` prompt 段落，计划纪律在 `plugins/todo/prompt.ts`，`requires` 含 `prompt`）、`btw`（`/btw` 旁问：`ctx.subagents.thread` 开一条可复用的隔离子代理，结果经 `ctx.ui.notice` 呈现）、`session-notes`（会话笔记）、`session-tags`（会话颜色标签）、`session-rename`（每轮前自动起标题）、`auto-compact`（自动压缩）、`memory`（跨会话记忆：`user` / `memory` / `project` 三块 markdown 文件，`ctx.prompt` 注入会话内冻结的快照、`memory` 工具维护预算内的条目、turn:after 可选整理；整理可走宿主子代理，也可配独立的接口地址 / Key / 协议 / 模型，缺 `subagents` 时降级为独立接口）、`web-search`（`web_search` 工具）、`subagent`（7 种子代理类型、`agent` 工具、委派 prompt 段落与委派倾向设置）、`commit`（`/commit` 命令：确定性 git 分析 + 一次模型请求写提交说明 + add / commit / push；模型可跟随主配置，也可单独配接口地址 / Key / 协议 / 模型）、`computer-use`（macOS 桌面自动化 skill：AX 元素树 + CGEvent 键鼠 + 截图，随包 runtime 落盘到 `$MICA_HOME/computer-use`，首次用到时 clang 编译 helper；权限状态显示在配置页插件详情的「运行条件」里）、`connections`（侧栏「连接」：接另一台机器上的运行时，连接清单存 `plugin-data/connections/data.json`；能力全在 `desktop.jsx`，后端 setup 是空的）。
+- 官方插件：`todo`（进程内待办 + `plan` prompt 段落，计划纪律在 `plugins/todo/prompt.ts`，`requires` 含 `prompt`）、`btw`（`/btw` 旁问：`ctx.subagents.thread` 开一条可复用的隔离子代理，结果经 `ctx.ui.notice` 呈现）、`session-notes`（会话笔记）、`session-tags`（会话颜色标签）、`session-rename`（每轮前自动起标题）、`auto-compact`（自动压缩）、`memory`（跨会话记忆：`user` / `memory` / `project` 三块 markdown 文件，`ctx.prompt` 注入会话内冻结的快照、`memory` 工具维护预算内的条目、turn:after 可选整理；整理可走宿主子代理，也可配独立的接口地址 / Key / 协议 / 模型，缺 `subagents` 时降级为独立接口）、`web-search`（`web_search` 工具）、`subagent`（7 种子代理类型、`agent` 工具、委派 prompt 段落与委派倾向设置）、`commit`（`/commit` 命令：确定性 git 分析 + 一次模型请求写提交说明 + add / commit / push；模型可跟随主配置，也可单独配接口地址 / Key / 协议 / 模型）、`computer-use`（macOS 桌面自动化 skill：AX 元素树 + CGEvent 键鼠 + 截图，随包 runtime 落盘到 `$MICA_HOME/computer-use`，首次用到时 clang 编译 helper；权限状态显示在配置页插件详情的「运行条件」里）、`connections`（侧栏 `Connections`：接另一台机器上的运行时，连接清单存 `plugin-data/connections/data.json`；能力全在 `desktop.jsx`，后端 setup 是空的）。
 - 新增插件：建目录 → 两处登记 → 测试放插件目录内（vitest 覆盖 `plugins/**`）。
 - 运行观察走通用 `agent:observe` hook（`AgentObservationEvent`，owner/runId 关联）：运行开始/终态、请求边界、最终 prompt、工具调用/结果、用量、重试与历史改写。观察失败不得中断任务；范围是 `AgentRuntime.run`，helper 客户端内部轨迹尚未覆盖。官方 `harness-review` 插件异步写 `$MICA_HOME/plugin-data/harness-review`，通过 `/harness-review list|report|assess` 和 `harness_review` 查看、导出、记录人工评估；按 cwd 复盘，不自动修改 harness。
 
@@ -328,7 +330,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 运行时只有一份 workspace / drafts / layout / rightTerms / terminalOpenByChat / cwd / Git 偏好，落盘 `userData/ui-state.json`；语义在 `mica-web-shared/ui-state.ts`。
 - 条目补丁用 `setUiStateEntries`，null 表示删除；回声在 store 的 `applyRemote` 认领一次，组件不得各自认领。
 - 同一 session 在所有页面是同一 node、run、终端；`dedupeSessionNodes` 合并重复页签。
-- 默认 `0.0.0.0:8787`，运行时无认证；README 保留风险说明。
+- 默认 `0.0.0.0:8787`，运行时无认证；README 保留风险说明。路径级收窄只在「谁在连」这一侧：非回环（且不在 `MICA_DESKTOP_TRUSTED_CLIENTS` 里）的连接只拿得到 `/share` + `/api/*` + 静态资源，其余页面与 `/remote/*`、`/mcp/*` 回 404——判定唯一实现在 `host/access-core.js` 的 `remoteRequestAllowed`，不要另写第二份路径白名单。
 - 端口常量唯一出口 `mica-web-shared/runtime-port.js`；页面路径约定唯一出口 `app-paths.ts`。
 - 单端口路由：`/`、`/mica-web`、`/share`、`/files`、`/terminal-control`、`/mcp/browser`、`/mcp/terminal`、`/api/*`、`/remote/control/*`、`/remote/terminal/*`。
 - 受控浏览器与终端服务走 `userData` 下的 Unix socket；`apps/config-web` 是独立宿主（默认 13987）。
@@ -384,13 +386,14 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 ### 侧栏入口与整页设置
 
-- 会话侧栏顶部保持一行入口的固定顺序：New Session / Stats / Settings / 插件声明的桌面入口 / Plugins。插件入口由清单 `desktop.entry` 声明、按清单顺序渲染（当前的「连接」就是这么一个入口），宿主只画一行和卡片容器，不知道里面是什么；加一个桌面插件只改插件目录，不改侧栏代码。Plugins 虽然在最末，但它只是一个页面入口——点它进插件整页（目录 → 点一张卡进详情），不做下拉面板、不在侧栏里列插件。
+- 会话侧栏顶部保持一行入口的固定顺序：New Session / Stats / Settings / 插件声明的桌面入口 / Plugins。插件入口由清单 `desktop.entry` 声明、按清单顺序渲染（当前的 `Connections` 就是这么一个入口），宿主只画一行和卡片容器，不知道里面是什么；加一个桌面插件只改插件目录，不改侧栏代码。Plugins 虽然在最末，但它只是一个页面入口——点它进插件整页（目录 → 点一张卡进详情），不做下拉面板、不在侧栏里列插件。
 - 设置与插件页都以覆盖整窗的一层打开（`configPage` 状态 + `fixed inset-0` + 顶部拖拽条），不在对话区右侧再开一栏：配置页自带侧栏导航，套两层侧栏只会把内容挤窄。返回走配置页侧栏顶部的「返回对话」，主区顶栏的返回只管 Files / Stats。
 - `SettingsView` 每次打开重新挂载，`key` 含 section 与插件 id：入口决定落在哪一页，残留的上一页导航会让人以为点错了地方。
 
 ### 受控浏览器与终端控制
 
 - 主进程业务例外：`src/main/browser/`、`src/main/terminal/`、`src/main/system/`；端点目录各自唯一（`browser-docs.js` / `terminal-docs.js` / `system-docs.js`），路由、文档与 MCP 操作清单同源。系统检查只服务宿主自己（`MICA_SYSTEM_SOCKET` 由运行时经 `host/system-checks.js` 直连，不做 `/remote/*` 代理、不暴露 MCP），探测用 `systemPreferences`、跳转用 `shell.openExternal`（renderer 的 `window.open` 只放行 http(s)）；配置页插件详情的「运行条件」经 `readDesktopChecks` / `openDesktopSettings` 两个桌面专有动作读它。
+- 远程访问默认只有分享视图：判定唯一实现在 `host/access-core.js` 的 `remoteRequestAllowed`，接线在 `server/index.js` 的 `isLocalClient` / `requestPathname`。要让别的机器用完整界面，用侧栏 Connections 卡片的「其他机器访问这台机器」（口令默认 `0000`，策略落 `$MICA_HOME/remote-access.json`，判定在 `host/remote-access-core.js` 的 `remoteAccessDecision`）；口令登录页与 cookie 签发只在 `server/index.js`，`/api/*` 在策略开启后同样需要口令或分享页 cookie。`MICA_DESKTOP_TRUSTED_CLIENTS` 仍可整段免密。
 - 两者都走 Unix socket，由运行时在既有端口上代理；agent 侧各暴露一个 MCP tool `control`。
 - 浏览器窗口默认隐藏；依赖显示面的操作走 `withShownWindow` + `browser-reveal.js`（`setOpacity(0)` + `showInactive`，空闲 1.5s 收起）。
 - 同一 `persist:mica-browser` 分区共享 Cookie；服务保持 Origin/Host 守卫。

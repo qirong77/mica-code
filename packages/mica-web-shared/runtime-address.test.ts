@@ -42,7 +42,7 @@ describe('runtime identity helpers', () => {
   });
 
   it('labels loopback as 本机 and everything else by host:port', () => {
-    expect(runtimeLabel('http://127.0.0.1:8787')).toBe('本机');
+    expect(runtimeLabel('http://127.0.0.1:8787')).toBe('Local');
     expect(runtimeLabel('http://10.0.0.2:9102')).toBe('10.0.0.2:9102');
     // 认不出来的串原样返回：一行空白比原串更难排查
     expect(runtimeLabel('nonsense')).toBe('nonsense');

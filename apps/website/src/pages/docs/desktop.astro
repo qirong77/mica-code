@@ -153,16 +153,28 @@ npm run build:win</code></pre>
   <h2>连接、分享与访问边界</h2>
   <aside class="callout">
     <p>
-      <strong>运行时没有内置认证。</strong>默认监听 <code>0.0.0.0:8787</code>
-      ，所有可连接的客户端拥有完整宿主能力，包括文件与命令执行。仅供本机使用时，请显式绑定 <code>127.0.0.1</code>
-      ；跨设备访问应放在可信网络或带认证的访问网关后。
+      <strong>运行时默认只把分享视图对外开放。</strong>默认监听 <code>0.0.0.0:8787</code>
+      。登录进完整界面的客户端拥有完整宿主能力，包括文件与命令执行；默认的一串数字口令不足以当安全边界，
+      仅供本机使用时请显式绑定 <code>127.0.0.1</code>，跨设备访问应放在可信网络或带认证的访问网关后。
     </p>
   </aside>
   <pre><code>{localWeb}</code></pre>
   <p>
-    分享链接形如 <code>/share?session=&lt;id&gt;</code>，用于呈现会话。<code>/share</code>{' '}
-    的显示方式不构成权限隔离，也没有访问 token、有效期或撤销授权机制。<code>--no-share</code>{' '}
-    只关闭分享视图路由，完整应用与 API 仍然可用。
+    分享链接形如 <code>/share?session=&lt;id&gt;</code>，用于呈现会话。它没有 token、有效期或撤销机制，
+    分享视图也不构成权限隔离：拿到链接的人同样能经 API 使用这台机器（终端、文件、配置页都包含在内）。
+  </p>
+  <p>
+    从别的设备访问时运行时只提供分享视图：主页 <code>/</code>、<code>/mica-web</code>、文件页、终端窗口、
+    <code>/remote/*</code> 与 <code>/mcp/*</code> 一律 404，所以把
+    <code>http://&lt;局域网 IP&gt;:8787</code> 发给别人不会打开你的完整界面。需要让另一台机器用完整应用访问
+    （例如侧栏的 Connections）时，在被访问的那台打开侧栏 Connections 卡片里的「其他机器访问这台机器」，
+    对方访问时输入那个访问口令即可（默认 <code>0000</code>，请改掉）；也可以设置
+    <code>MICA_DESKTOP_TRUSTED_CLIENTS=&lt;对方地址&gt;</code> 让指定地址免密。
+    <code>--no-share</code> 只关闭分享视图路由。
+  </p>
+  <p>
+    打开访问口令后，<code>/api/*</code> 也会要求口令（或从分享页拿到的同源 cookie）；分享链接本身仍然免密，
+    所以发给别人的链接不需要对方输口令。
   </p>
   <p>
     通过反向代理访问时，使用 <code>MICA_DESKTOP_ALLOWED_HOSTS</code> 配置允许的代理主机名；

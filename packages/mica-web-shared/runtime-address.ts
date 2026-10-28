@@ -72,13 +72,14 @@ export function isSameRuntime(a: unknown, b: unknown): boolean {
 }
 
 /**
- * 界面上代表这台运行时的名字：回环一律叫「本机」，其余用 host:port。
+ * 界面上代表这台运行时的名字：回环一律叫 `Local`，其余用 host:port。
  *
+ * 名字跟着桌面侧栏一起用英文（那一行里其它入口都是英文），说明正文才写中文。
  * 拿不到 host 时退回原串而不是空：一条认不出来的记录也比一行空白好排查。
  */
 export function runtimeLabel(value: unknown): string {
   const url = parseAddress(value);
   if (!url) return String(value ?? '');
-  if (isLoopbackRuntime(value)) return '本机';
+  if (isLoopbackRuntime(value)) return 'Local';
   return url.host || url.hostname;
 }

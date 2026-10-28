@@ -358,7 +358,10 @@ function createWebApi(env) {
     pluginHost: {
       probe: (address) => invoke('plugin-host:probe', { address }),
       readData: (pluginId) => invoke('plugin-host:read-data', { pluginId }),
-      writeData: (pluginId, value) => invoke('plugin-host:write-data', { pluginId, value })
+      writeData: (pluginId, value) => invoke('plugin-host:write-data', { pluginId, value }),
+      // 运行时的远程访问策略（要不要口令、口令是什么、别人从哪个地址进来）
+      access: () => invoke('plugin-host:access-get'),
+      setAccess: (patch) => invoke('plugin-host:access-set', patch ?? {})
     },
 
     // 粘贴文件时把系统剪贴板里的路径交回页面：页面只有文件名（Chromium 不暴露路径），

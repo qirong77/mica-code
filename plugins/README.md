@@ -221,7 +221,7 @@ CLI / TUI / `mica exec` 里整插件跳过（而不是装上了却永远显示�
 再把卡片写成插件目录里的 `desktop.jsx`：
 
 ```json
-"desktop": { "entry": { "label": "连接" } }
+"desktop": { "entry": { "label": "Connections" } }
 ```
 
 ```jsx
@@ -235,10 +235,11 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   （`apps/desktop/src/renderer/src/PluginEntries.jsx`）负责。
 - 宿主按插件 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里
   登记**——加一个桌面入口只改插件目录。
-- 模块拿到的 `api` 只有四件事：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
+- 模块拿到的 `api` 只有五件事：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
   （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value)`
   （插件自己的 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构）、`open(url)`
-  （外壳里开新窗口、浏览器里开新标签页）。
+  （外壳里开新窗口、浏览器里开新标签页）、`access`（`get()` / `set({ enabled, password })`
+  读写这台机器的远程访问策略——请求分派只存在于运行时进程，页面自己改不了）。
 - **只对随包插件生效**：桌面页面是构建期打的包，只能收录打包时仓库里存在的
   `plugins/<id>/desktop.jsx`；用户插件装在运行时才出现的 `$MICA_HOME/plugins`，声明了也
   渲染不出入口，所以 `desktop.entry` 不必也不能靠 `requires: ["desktop"]` 表达——

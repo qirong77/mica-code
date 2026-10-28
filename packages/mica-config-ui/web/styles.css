@@ -4002,6 +4002,18 @@
     min-width: 0;
   }
 
+  /* 没有可配置项时的单列：说明 + 信息表往下排，宽度收到阅读宽度，不要拉满整页。 */
+  .plugin-columns.is-solo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .plugin-solo {
+    display: grid;
+    gap: 12px;
+    max-width: 460px;
+    min-width: 0;
+  }
+
   @container page (max-width: 980px) {
     .plugin-columns {
       grid-template-columns: minmax(0, 1fr);

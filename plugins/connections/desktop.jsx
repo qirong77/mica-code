@@ -17,7 +17,7 @@ import {
 } from './peers';
 
 /**
- * 「连接」的卡片：连接到另一台机器上的 Mica 运行时。
+ * Connections 的卡片：连接到另一台机器上的 Mica 运行时。
  *
  * 页面由哪台运行时托管就代表在用哪台，所以「切过去」= 打开那个地址：外壳里弹一个新
  * 窗口，浏览器里开新标签页。连过的地址记在插件自己的数据文件里（`plugin-data/connections`），
@@ -136,7 +136,7 @@ export default function ConnectionsCard({ api, onClose }) {
 
   return (
     <>
-      <h2 className="mb-1 text-sm font-semibold text-white/95">连接</h2>
+      <h2 className="mb-1 text-sm font-semibold text-white/95">Connections</h2>
       <p className="mb-2.5 text-[11px] leading-4 text-white/40">
         连接到另一台机器上的 Mica 运行时，文件、终端、会话都来自那台机器（在当前窗口之外打开）。
       </p>
@@ -203,7 +203,7 @@ export default function ConnectionsCard({ api, onClose }) {
         <input
           value={value}
           spellCheck={false}
-          placeholder="另一台机器的地址，如 192.168.1.5:8787"
+          placeholder="192.168.1.5:8787"
           className="h-8 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-xs text-white focus:border-white/30"
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
@@ -222,8 +222,140 @@ export default function ConnectionsCard({ api, onClose }) {
           连接
         </button>
       </div>
+      <RemoteAccess api={api} />
       <p className="mt-2 text-[10px] leading-4 text-white/30">桌面应用内可用 ⇧⌘M 回到本机窗口。</p>
     </>
+  );
+}
+
+/**
+ * 「其他机器访问这台机器」：这台运行时要不要口令、口令是什么。
+ *
+ * 这一节回答的是**别人怎么进来**，和上面「连到别的机器」正好相反，所以单列一段。
+ * 值来自运行时的远程访问策略（`api.access`），与请求分派读的是同一份——卡片上看到的
+ * 就是别人实际会遇到的。
+ */
+function RemoteAccess({ api }) {
+  const [state, setState] = useState(null);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void api.access
+      .get()
+      .then((value) => {
+        if (!alive) return;
+        setState(value);
+        setDraft(value?.password ?? '');
+      })
+      .catch((caught) => {
+        if (alive) setError(caught?.message || String(caught));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [api]);
+
+  // 「已保存」只是确认，不是状态：两秒后自己收起来
+  useEffect(() => {
+    if (!saved) return undefined;
+    const timer = setTimeout(() => setSaved(false), 2000);
+    return () => clearTimeout(timer);
+  }, [saved]);
+
+  const patch = async (next) => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const written = await api.access.set(next);
+      setState((previous) => ({ ...(previous ?? {}), ...written }));
+      setDraft(written?.password ?? '');
+      setSaved(true);
+    } catch (caught) {
+      setError(caught?.message || String(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const enabled = state?.enabled === true;
+  const password = state?.password ?? '';
+  const address = state?.addresses?.[0] ?? '';
+  const savePassword = () => {
+    const next = draft.trim();
+    if (!next || next === password) return;
+    void patch({ password: next });
+  };
+
+  return (
+    <div className="mt-3 border-t border-line pt-2.5">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="min-w-0 flex-1 text-[11px] text-white/70">其他机器访问这台机器</span>
+        {saved && <span className="shrink-0 text-[10px] text-emerald-400/80">已保存</span>}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="要求访问口令"
+          disabled={!state || busy}
+          className={`relative h-4 w-7 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+            enabled ? 'bg-emerald-500/70' : 'bg-white/15'
+          }`}
+          onClick={() => void patch({ enabled: !enabled })}
+        >
+          <span
+            className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${
+              enabled ? 'left-3.5' : 'left-0.5'
+            }`}
+          />
+        </button>
+      </div>
+      <p className="text-[10px] leading-4 text-white/30">
+        {enabled
+          ? '打开完整界面要求先输口令（分享链接不受影响）。'
+          : '现在别的机器只能看分享视图；打开完整界面需要先开启口令。'}
+      </p>
+
+      {enabled && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <input
+            value={draft}
+            spellCheck={false}
+            maxLength={64}
+            aria-label="访问口令"
+            placeholder="访问口令"
+            className="h-7 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2 font-mono text-[11px] tracking-wider text-white placeholder:text-white/25 focus:border-white/30"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                savePassword();
+              }
+            }}
+            onBlur={savePassword}
+          />
+          <span className="shrink-0 text-[10px] text-white/30">回车保存</span>
+        </div>
+      )}
+
+      {enabled && address && (
+        <p className="mt-1.5 text-[10px] leading-4 text-white/30">
+          别人打开 <span className="text-white/50">{address}</span> 时输入这个口令
+          {password === '0000' && <span className="text-amber-300/70">（默认 0000，建议改掉）</span>}
+        </p>
+      )}
+
+      {!state && !error && <p className="text-[10px] text-white/25">读取中…</p>}
+      {error && (
+        <p className="mt-1 rounded-sm border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] leading-4 text-red-300">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

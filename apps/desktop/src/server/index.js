@@ -6,7 +6,30 @@ import { fileURLToPath } from 'node:url'
 import { networkInterfaces, release as osRelease } from 'node:os'
 import { createGzip } from 'node:zlib'
 import { setBroadcast, invokeChannel, ipcMain } from './electron-shim.js'
-import { registerAccessIpc, setRuntimeAddress, verifyRequestOrigin } from '../host/access.js'
+import {
+  registerAccessIpc,
+  setRuntimeAddress,
+  trustedClients,
+  verifyRequestOrigin
+} from '../host/access.js'
+import { isLoopbackAddress, isTrustedClientAddress } from '../host/access-core.js'
+import {
+  REMOTE_ACCESS_COOKIE,
+  REMOTE_ACCESS_LOGIN_ENDPOINT,
+  REMOTE_ACCESS_LOGIN_PATH,
+  REMOTE_ACCESS_LOGOUT_ENDPOINT,
+  REMOTE_ACCESS_MAX_AGE,
+  SHARE_SCOPE_COOKIE,
+  clearedCookie,
+  hasScopeToken,
+  parseCookies,
+  remoteAccessCookie,
+  remoteAccessDecision,
+  remoteAccessToken,
+  safeNextPath,
+  verifyRemoteAccessPassword
+} from '../host/remote-access-core.js'
+import { readRemoteAccessPolicy, setRemoteAccessPort } from '../host/remote-access.js'
 import { createNotifyServer } from '../host/notifyServer.js'
 import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from '../host/terminals.js'
 import {
@@ -95,6 +118,11 @@ const runtimeLog = logger('runtime')
  * 所有这些是同一台运行时、同一份状态（无账号体系，能连上就等于能操作）。分享视图上
  * 少画一个侧栏只是**呈现**，不是权限边界——别把它当访问控制用。
  *
+ * 唯一的路径级收窄在「谁在连」这一侧：非本机（非回环、也不在 `MICA_DESKTOP_TRUSTED_CLIENTS`
+ * 里）的连接只拿得到分享视图与它用到的 `/api/*`，主页面 / 文件页 / 终端窗口 / `/remote/*`
+ * / `/mcp/*` 一律 404。目的不是给它一个只读视图（分享本来就是把 agent 借出去），而是别让
+ * 「同一个局域网 + 一个 IP」就等于拿到这台机器的入口。
+ *
  * 用法：node out/server/index.mjs [--host 0.0.0.0] [--port 8787] [--no-share]
  *                                [--renderer <dir>]
  */
@@ -171,6 +199,256 @@ function sendJson(res, status, body) {
     'cache-control': 'no-store'
   })
   res.end(payload)
+}
+
+/**
+ * 这个连接算不算「本机」：回环，或使用者显式信任的客户端（`MICA_DESKTOP_TRUSTED_CLIENTS`）。
+ *
+ * 只看连接的对端地址，**不看** `Host` / `X-Forwarded-For`：那些是请求方自己写的，拿它们
+ * 判断等于把「你是不是本机」交给对方回答。代价是隧道 / 反向代理后面的请求全部看起来
+ * 来自回环——那种部署本来就是把这台机器放到公网上，边界交给隧道自己。
+ */
+function isLocalClient(req) {
+  const address = req?.socket?.remoteAddress || ''
+  return isLoopbackAddress(address) || isTrustedClientAddress(address, trustedClients())
+}
+
+/**
+ * 请求行里的路径部分，只接受 origin-form（一个前导斜杠）。
+ *
+ * 不用 `url.pathname` 判可见性：`new URL('//host/x', base)` 会把它当成**协议相对地址**
+ * （host 变成 host、pathname 变成 `/x`），于是 `//evil.example/share` 在判定里看起来就是
+ * `/share`，而静态服务取文件时走的又是另一个路径。别的形态（协议相对、absolute-form）
+ * 一律返回 null，交给调用方按拒绝处理。
+ */
+function requestPathname(req) {
+  const target = String(req?.url || '')
+  if (!target.startsWith('/') || target.startsWith('//')) return null
+  const cut = target.search(/[?#]/)
+  return cut < 0 ? target : target.slice(0, cut)
+}
+
+/**
+ * 远程请求碰到了分享视图之外的东西。
+ *
+ * 回 404 而不是 403：对远程来说这个地址上就是「没有这些页面」，403 等于承认那里有东西。
+ * 浏览器导航给一段能自己解释的提示（同事输错地址时不用猜是不是运行时坏了），其余请求
+ * 走和「路径不存在」一样的 JSON。
+ */
+function sendRemoteNotFound(req, res) {
+  if (!/\btext\/html\b/.test(String(req.headers?.accept || ''))) {
+    return sendJson(res, 404, { ok: false, error: 'Not found' })
+  }
+  const body = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Not Found</title>
+<style>
+:root { color-scheme: dark }
+body {
+  margin: 0; min-height: 100vh; display: grid; place-items: center;
+  background: #1e1f22; color: #d7dae0;
+  font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+main { max-width: 32rem; padding: 2rem }
+h1 { margin: 0 0 0.75rem; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.08em; color: #8b909a }
+p { margin: 0.4rem 0 }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #cdd3dd }
+</style>
+</head>
+<body>
+<main>
+<h1>NOT FOUND</h1>
+<p>这个地址只提供分享出去的会话：请用分享链接（<code>/share?session=…</code>）打开。</p>
+<p>其余页面只在运行这本机的 Mica Code 里可用。</p>
+</main>
+</body>
+</html>`
+  res.writeHead(404, {
+    'content-type': MIME_TYPES['.html'],
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store'
+  })
+  res.end(body)
+}
+
+/**
+ * 登录失败的上限：口令默认就是 `0000`，四位数字只有一万种组合，不限速等于没有口令。
+ * 按来源地址计，连续失败 5 次锁 60 秒；成功登录清空。进程内记录——重启即清空，
+ * 这符合「这条口令本来就不是账号体系」的定位。
+ */
+const LOGIN_MAX_FAILURES = 5
+const LOGIN_LOCK_MS = 60_000
+const loginFailures = new Map()
+
+function loginThrottle(req) {
+  const key = String(req?.socket?.remoteAddress || '')
+  const record = loginFailures.get(key)
+  if (!record) return { blocked: false, key }
+  if (record.blockedUntil > Date.now()) return { blocked: true, key }
+  if (record.blockedUntil) loginFailures.delete(key)
+  return { blocked: false, key }
+}
+
+function recordLoginFailure(key) {
+  const record = loginFailures.get(key) ?? { failures: 0, blockedUntil: 0 }
+  record.failures += 1
+  if (record.failures >= LOGIN_MAX_FAILURES) {
+    record.failures = 0
+    record.blockedUntil = Date.now() + LOGIN_LOCK_MS
+  }
+  loginFailures.set(key, record)
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * 口令登录页。刻意做成一张自包含的静态表单：它要在**页面产物之外**工作——
+ * 没过口令时主界面根本不该被下发，这里也就不能依赖它。
+ */
+function renderLoginPage({ next = '/', error = '', locked = false } = {}) {
+  const hint = error
+    ? `<p class="error">${escapeHtml(error)}</p>`
+    : `<p class="hint">这台机器上的 Mica Code 要求先输入访问口令。口令在它侧栏的 Connections 卡片里（「其他机器访问这台机器」）。</p>`
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Mica Code</title>
+<style>
+:root { color-scheme: dark }
+body {
+  margin: 0; min-height: 100vh; display: grid; place-items: center;
+  background: #1e1f22; color: #d7dae0;
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+}
+main { width: min(22rem, calc(100vw - 3rem)); padding: 2rem 0 }
+h1 { margin: 0 0 0.2rem; font-size: 1rem; font-weight: 600 }
+.sub { margin: 0 0 1.2rem; font-size: 0.72rem; letter-spacing: 0.1em; color: #8b909a }
+.hint, .error { margin: 0 0 1rem; font-size: 0.75rem; line-height: 1.7; color: #8b909a }
+.error { color: #f0a8a8 }
+form { display: grid; gap: 0.6rem }
+input {
+  height: 2.25rem; padding: 0 0.7rem; border-radius: 4px;
+  border: 1px solid #3a3d44; background: #26282c; color: #e6e8ec;
+  font-size: 0.95rem; letter-spacing: 0.18em;
+}
+input:focus { outline: none; border-color: #5c6470 }
+button {
+  height: 2.25rem; border: 0; border-radius: 4px; cursor: pointer;
+  background: #3f4550; color: #f0f2f5; font-size: 0.85rem;
+}
+button:hover { background: #4a515d }
+button:disabled, input:disabled { background: #2f333a; color: #6d737d; cursor: default }
+</style>
+</head>
+<body>
+<main>
+<h1>Mica Code</h1>
+<p class="sub">REMOTE ACCESS</p>
+${hint}
+<form method="post" action="${REMOTE_ACCESS_LOGIN_ENDPOINT}">
+<input type="hidden" name="next" value="${escapeHtml(next)}" />
+<input type="password" name="password" autocomplete="current-password" placeholder="访问口令" autofocus ${locked ? 'disabled' : ''} />
+<button type="submit" ${locked ? 'disabled' : ''}>${locked ? '稍后再试' : '进入'}</button>
+</form>
+</main>
+</body>
+</html>`
+}
+
+function sendLoginPage(req, res, options = {}) {
+  const body = renderLoginPage(options)
+  res.writeHead(options.locked ? 429 : options.error ? 401 : 200, {
+    'content-type': MIME_TYPES['.html'],
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store'
+  })
+  res.end(body)
+}
+
+function parseFormBody(text) {
+  const params = new URLSearchParams(String(text ?? ''))
+  return { password: params.get('password') ?? '', next: params.get('next') ?? '/' }
+}
+
+/** 登录提交：过限速 → 校验口令 → 发 cookie → 回到原来想去的路径。 */
+async function handleLoginSubmit(req, res) {
+  const throttle = loginThrottle(req)
+  if (throttle.blocked) {
+    return sendLoginPage(req, res, { locked: true, error: '尝试次数过多，请稍后再试' })
+  }
+  let form = { password: '', next: '/' }
+  try {
+    form = parseFormBody(await readBody(req))
+  } catch {
+    return sendLoginPage(req, res, { error: '请求体读不出来' })
+  }
+  const policy = readRemoteAccessPolicy()
+  if (!verifyRemoteAccessPassword(form.password, policy)) {
+    recordLoginFailure(throttle.key)
+    return sendLoginPage(req, res, { next: safeNextPath(form.next), error: '口令不对' })
+  }
+  loginFailures.delete(throttle.key)
+  res.setHeader(
+    'set-cookie',
+    remoteAccessCookie(REMOTE_ACCESS_COOKIE, remoteAccessToken(policy, 'access'), {
+      maxAge: REMOTE_ACCESS_MAX_AGE
+    })
+  )
+  res.writeHead(303, { location: safeNextPath(form.next), 'cache-control': 'no-store' })
+  res.end()
+}
+
+function handleLogout(_req, res) {
+  res.setHeader('set-cookie', [
+    clearedCookie(REMOTE_ACCESS_COOKIE),
+    clearedCookie(SHARE_SCOPE_COOKIE)
+  ])
+  res.writeHead(303, { location: REMOTE_ACCESS_LOGIN_PATH, 'cache-control': 'no-store' })
+  res.end()
+}
+
+/** 一个远程请求过不过门（判定本身在 remote-access-core）。 */
+function remoteGate(req, pathname) {
+  const policy = readRemoteAccessPolicy()
+  const cookies = parseCookies(req?.headers?.cookie)
+  return remoteAccessDecision({
+    local: isLocalClient(req),
+    policy,
+    pathname: pathname ?? '',
+    hasAccess: hasScopeToken(cookies, policy, 'access'),
+    hasShare: hasScopeToken(cookies, policy, 'share')
+  })
+}
+
+/**
+ * 没过口令。
+ *
+ * 浏览器导航送去登录页并记住原来想去的地址；其余（`fetch`、curl）回 401——它们没有
+ * 表单可填，给一个 HTML 只会让调用方更难判断。
+ */
+function sendLoginRequired(req, res, pathname, search = '') {
+  const acceptsHtml = /\btext\/html\b/.test(String(req?.headers?.accept || ''))
+  if (!acceptsHtml) {
+    return sendJson(res, 401, { ok: false, error: '需要访问口令', login: REMOTE_ACCESS_LOGIN_PATH })
+  }
+  const next = `${pathname}${search}`
+  res.writeHead(302, {
+    location: `${REMOTE_ACCESS_LOGIN_PATH}?next=${encodeURIComponent(safeNextPath(next))}`,
+    'cache-control': 'no-store'
+  })
+  res.end()
 }
 
 function errorMessage(error) {
@@ -510,6 +788,8 @@ export async function startDesktopServer(options = {}) {
   // 分享链接要拼出「别人能连到」的地址（自己这个端口 + /share），所以必须在端口确定
   // （可能已回退）之后告知
   setRuntimeAddress({ port, host, sharing })
+  // 口令卡片要回答「别人从哪个地址进来」，端口可能已从默认值回退，所以只能等到这里才告知
+  setRemoteAccessPort(port)
 
   // 会话进程按这个地址拼 MCP 端点（`${origin}/mcp/browser`）；端口可能从默认值回退，
   // 所以只能等到这里才写。
@@ -624,6 +904,45 @@ function createRequestHandler({
     void (async () => {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
       try {
+        const pathname = requestPathname(req)
+
+        // 口令登录页 / 登录 / 登出：它就是这道门本身，必须在判定之前处理。
+        if (
+          pathname === REMOTE_ACCESS_LOGIN_PATH &&
+          (req.method === 'GET' || req.method === 'HEAD')
+        ) {
+          return sendLoginPage(req, res, {
+            next: safeNextPath(url.searchParams.get('next')),
+            locked: loginThrottle(req).blocked
+          })
+        }
+        if (pathname === REMOTE_ACCESS_LOGIN_ENDPOINT && req.method === 'POST') {
+          return await handleLoginSubmit(req, res)
+        }
+        if (pathname === REMOTE_ACCESS_LOGOUT_ENDPOINT) return handleLogout(req, res)
+
+        // 同一个端口上挂着整台机器，而分享出去的链接只是 `/share?session=<id>`：
+        // 远程只有三件事可做——打开分享视图、用它的资源、在开启口令后凭口令进完整应用。
+        // 判定在 remote-access-core 的 remoteAccessDecision 里，这里只负责接线。
+        if (pathname === null) return sendRemoteNotFound(req, res)
+        const gate = remoteGate(req, pathname)
+        if (gate === 'not-found') return sendRemoteNotFound(req, res)
+        if (gate === 'login') return sendLoginRequired(req, res, pathname, url.search)
+
+        // 开启口令后，分享页要先拿到一张「打开过分享页」的凭据才能用 `/api/*`：
+        // 分享链接因此不必让人输口令，而裸 curl 打接口不再直接可用。
+        const accessPolicy = readRemoteAccessPolicy()
+        if (
+          accessPolicy.enabled &&
+          isSharePath(url.pathname) &&
+          /\btext\/html\b/.test(String(req.headers.accept || ''))
+        ) {
+          res.setHeader(
+            'set-cookie',
+            remoteAccessCookie(SHARE_SCOPE_COOKIE, remoteAccessToken(accessPolicy, 'share'))
+          )
+        }
+
         // 分享视图（/share 与其子路径）：关掉分享时直接 404，免得以为还能分享。
         if (isSharePath(url.pathname) && !sharing) {
           return sendJson(res, 404, { ok: false, error: '分享视图已关闭' })
@@ -702,6 +1021,11 @@ function createRequestHandler({
                   : null
             })
           }
+          // `/api/` 下没命中的路径没有东西可给了：**不能**掉进下面的静态服务。它会把
+          // `/api/任意东西` 回退成 index.html——那是主应用页面，而 `/api/*` 恰好是远程
+          // 唯一被放行的非分享前缀（分享页要用它），于是 `GET /api/invoke` 就等于「用
+          // 浏览器拿到完整界面」。
+          return sendJson(res, 404, { ok: false, error: 'Not found' })
         }
         // 受控浏览器：主进程的窗口服务只监听 Unix socket，这里把它代理成运行时端口上的
         // /remote/control/*。校验与 /api 同款（curl 没有 Origin、Host 是本机，正常放行；

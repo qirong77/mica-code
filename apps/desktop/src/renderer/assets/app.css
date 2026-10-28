@@ -1,6 +1,10 @@
 @import 'tailwindcss';
 @import '@xterm/xterm/css/xterm.css';
 
+/* 插件的前端模块写在仓库根的 plugins/ 里（不在 apps/desktop 下），Tailwind 自动扫描
+   扫不到它们，插件用到的间距、变体一个都不会生成。这里显式把插件目录纳入扫描。 */
+@source '../../../../../plugins';
+
 /*
  * Darcula theme — the single source of truth for every colour in the renderer.
  *

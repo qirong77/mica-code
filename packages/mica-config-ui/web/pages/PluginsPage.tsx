@@ -312,6 +312,8 @@ function PluginDetail({
   const RefreshIcon = appIcons.refresh;
   const enabled = plugin.state !== 'disabled';
   const status = pluginStatus(plugin);
+  // 没有任何「要动的东西」时不摆两列：右边信息栏贴着一条空的左栏，读起来像内容没加载出来。
+  const hasConfigurable = plugin.desktopChecks.length > 0 || plugin.settings.fields.length > 0;
   return (
     <div className="plugin-detail">
       <header className="plugin-detail-bar">
@@ -375,22 +377,27 @@ function PluginDetail({
           </div>
         ) : null}
 
-        <div className="plugin-columns">
-          <div className="plugin-column">
-            {plugin.desktopChecks.length > 0 ? <PluginChecksGroup plugin={plugin} /> : null}
-            {plugin.settings.fields.length > 0 ? (
-              <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
-            ) : null}
-            {plugin.desktopChecks.length === 0 && plugin.settings.fields.length === 0 ? (
-              // 没有可配置项时留一句说明，而不是一个 240px 高的空盒子：它旁边就是信息表，
-              // 空盒子会读成「内容没加载出来」。
-              <p className="plugin-note">这个插件没有可配置项，装上就在工作。</p>
-            ) : null}
+        {hasConfigurable ? (
+          <div className="plugin-columns">
+            <div className="plugin-column">
+              {plugin.desktopChecks.length > 0 ? <PluginChecksGroup plugin={plugin} /> : null}
+              {plugin.settings.fields.length > 0 ? (
+                <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
+              ) : null}
+            </div>
+            <aside className="plugin-column">
+              <PluginInfoGroup plugin={plugin} />
+            </aside>
           </div>
-          <aside className="plugin-column">
-            <PluginInfoGroup plugin={plugin} />
-          </aside>
-        </div>
+        ) : (
+          // 没有可配置项：一行说明接信息表，单列往下排，不留半页空白
+          <div className="plugin-columns is-solo">
+            <div className="plugin-solo">
+              <p className="plugin-note">这个插件没有可配置项。</p>
+              <PluginInfoGroup plugin={plugin} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

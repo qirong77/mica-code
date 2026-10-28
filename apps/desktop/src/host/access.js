@@ -14,6 +14,10 @@
  *   正在用的那个地址，端口一律是本运行时实际绑定的端口（分享视图就是同一个端口上的
  *   `/share`，见 @packages/mica-web-shared 的 app-paths）。
  *
+ * 「谁来连」的收窄不在这个文件里判：请求落在哪个路径上由 `access-core` 的
+ * `remoteRequestAllowed` 回答（非本机只给分享视图），接线在 server/index.js。这里只提供
+ * 那份判定的输入——显式信任清单（`MICA_DESKTOP_TRUSTED_CLIENTS`）。
+ *
  * 风险与边界写在 apps/desktop/README.md（「访问」一节），改这里时一并同步。
  */
 
@@ -29,6 +33,8 @@ import { SHARE_BASE_PATH } from '@packages/mica-web-shared'
 
 /** 缓存的主机名白名单；网卡变化很罕见，进程内复用即可。 */
 let allowedHostnamesCache = null
+/** 显式信任的客户端地址（`MICA_DESKTOP_TRUSTED_CLIENTS`）：这些来源按「本机」看待。 */
+let trustedClientsCache = null
 /** 运行时实际监听在哪，由 server 启动（含端口回退）后告知——分享链接要拼出别人能连的地址。 */
 let runtimeAddress = null
 
@@ -57,7 +63,26 @@ export function allowedHostnames() {
 
 export function resetAccessForTests() {
   allowedHostnamesCache = null
+  trustedClientsCache = null
   runtimeAddress = null
+}
+
+/**
+ * 显式信任的客户端地址，逗号分隔，支持末段通配（`172.22.240.*`）。
+ *
+ * 运行时默认只把整台机器给本机（回环）连接；跨机器用完整应用（`connections` 连别的
+ * 运行时、手机当完整客户端）必须在**被连的那台**上写下对方的地址。空清单 = 谁都不给，
+ * 这是默认状态，不是「没配置就放开」。
+ */
+export function trustedClients() {
+  if (trustedClientsCache) return trustedClientsCache
+  const names = new Set()
+  for (const entry of String(process.env.MICA_DESKTOP_TRUSTED_CLIENTS || '').split(',')) {
+    const value = entry.trim().toLowerCase()
+    if (value) names.add(value)
+  }
+  trustedClientsCache = names
+  return names
 }
 
 /** server 启动（含端口回退）后调用；`host` 仅用于日志，端口才参与地址拼接。 */

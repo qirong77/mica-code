@@ -11,7 +11,7 @@
  * 读写状态在 access.js，接线在 server/index.js。
  */
 
-import { SHARE_BASE_PATH } from '@packages/mica-web-shared'
+import { SHARE_BASE_PATH, isSharePath, normalizePathname } from '@packages/mica-web-shared'
 
 const LOOPBACK_NAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
 
@@ -32,12 +32,38 @@ export function isPrivateLanAddress(address) {
  */
 export function isLoopbackAddress(address) {
   if (typeof address !== 'string' || !address) return false
-  const value = address.startsWith('::ffff:') ? address.slice(7) : address
+  const value = stripMappedPrefix(address)
   if (value === '::1') return true
   const parts = value.split('.')
   if (parts.length !== 4) return false
   if (!parts.every((part) => /^\d{1,3}$/.test(part))) return false
   return Number(parts[0]) === 127
+}
+
+/**
+ * 双栈 socket 上 Node 把 IPv4 报成 `::ffff:172.22.240.9`，判网段与比对地址前都要先剥掉。
+ */
+function stripMappedPrefix(address) {
+  const value = String(address || '')
+  return value.startsWith('::ffff:') ? value.slice(7) : value
+}
+
+/**
+ * 客户端地址是否在显式信任清单里（`MICA_DESKTOP_TRUSTED_CLIENTS`）。
+ *
+ * 信任清单是「这台机器允许谁当 owner」的唯一旋钮：分享链接是给对方的（只能看 `/share`），
+ * 而 `connections` 这类用途要的是**完整的这台机器**（对方的主页面、侧栏、终端）。默认空，
+ * 也就是谁都不给；需要时由本机使用者自己写下那台机器的地址。支持末段通配
+ * （`172.22.240.*`），因为同一张网里 DHCP 换地址是常事。
+ */
+export function isTrustedClientAddress(address, trustedClients) {
+  const value = stripMappedPrefix(address)
+  if (!value) return false
+  if (!(trustedClients instanceof Set) || trustedClients.size === 0) return false
+  if (trustedClients.has(value)) return true
+  const dot = value.lastIndexOf('.')
+  if (dot < 0) return false
+  return trustedClients.has(`${value.slice(0, dot + 1)}*`)
 }
 
 /** 取 `Host` 头里的主机名（去端口，保留 IPv6 的方括号）。 */
@@ -194,4 +220,96 @@ function normalizeBasePath(value) {
   if (!text || text === '/') return ''
   const withLeading = text.startsWith('/') ? text : `/${text}`
   return withLeading.replace(/\/+$/, '')
+}
+
+/**
+ * 产物里的静态资源类型：分享页自己也要 JS / CSS / 字体 / 图片才画得出来，这些对远程
+ * 必须可读。`.html` 刻意不在表里——文档入口就是「页面」，远程只能拿分享那一个。
+ */
+const REMOTE_ASSET_EXTENSIONS = new Set([
+  '.js',
+  '.mjs',
+  '.css',
+  '.map',
+  '.json',
+  '.webmanifest',
+  '.svg',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.avif',
+  '.ico',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.wasm',
+  '.txt'
+])
+
+/**
+ * 判定用的规范化路径：先解一次百分号编码，再把 `..` / 多余斜杠折掉。
+ *
+ * 只靠原始 `req.url` 判前缀会被 `/share/../terminal.html` 这种路径绕过去（前缀确实是
+ * `/share`），所以这里按「真正会被打开的那个路径」判。
+ */
+export function canonicalPathname(pathname) {
+  const text = String(pathname ?? '')
+  // 调用方偶尔会连 query 一起传进来（`/share?session=x`）：路径判定不看查询串
+  const cut = text.search(/[?#]/)
+  const raw = cut < 0 ? text : text.slice(0, cut)
+  let decoded = raw
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    // 编码坏掉的路径按原样判：下面命不中白名单，等于拒绝
+  }
+  // 手写折叠而不是过 `new URL(decoded, base)`：`//host/x` 会被 URL 当成协议相对地址，
+  // pathname 变成 `/x`，前缀判定就被骗过去了。
+  const segments = []
+  for (const segment of decoded.split('/')) {
+    if (!segment || segment === '.') continue
+    if (segment === '..') {
+      segments.pop()
+      continue
+    }
+    segments.push(segment)
+  }
+  return normalizePathname(`/${segments.join('/')}`)
+}
+
+/**
+ * 非本机请求能碰到的东西：只有分享视图。
+ *
+ * 运行时把整台机器挂在同一个端口上（终端是一个真 shell、files 是任意读写、配置页里有
+ * API key、stats 是全部会话），而分享出去的链接只是 `/share?session=<id>`。拿到这个端口
+ * 不等于该拿到主页面，所以远程请求只放行三类路径：
+ *
+ * 1. 分享视图（`/share` 及其下资源）；
+ * 2. `/api/*`——分享页和主应用共用同一份接口，收窄它等于把分享链接废掉（分享的语义就是
+ *    「把这条会话连同它背后的 agent 借给对方」，见 apps/desktop/README.md 的访问一节）；
+ * 3. 产物里的静态资源（白名单扩展名）。
+ *
+ * 其余一律当不存在：主页面（`/`、`/mica-web`）、`/files`、`/terminal-control`、
+ * `/remote/*`（受控浏览器与终端）、`/mcp/*`、`/terminal.html`、`/files.html`。
+ *
+ * 白名单而不是黑名单是刻意的：以后新增一个页面入口不会自动对远程开放。漏掉某种资源
+ * 扩展名的表现是分享页缺个文件（一眼可见），而不是把新界面悄悄暴露出去。
+ */
+export function remoteRequestAllowed(pathname) {
+  const value = canonicalPathname(pathname)
+  if (isSharePath(value)) return true
+  // 只认 `/api/`：`/api` 本身没有处理器，会落到「SPA 回退成 index.html」上
+  if (value.startsWith('/api/')) return true
+  return isAssetPath(value)
+}
+
+/** 产物里的静态资源（白名单扩展名）。分享页与登录页都要靠它才画得出来。 */
+export function isAssetPath(pathname) {
+  const value = canonicalPathname(pathname)
+  const last = value.slice(value.lastIndexOf('/') + 1)
+  const dot = last.lastIndexOf('.')
+  return dot > 0 && REMOTE_ASSET_EXTENSIONS.has(last.slice(dot).toLowerCase())
 }

@@ -4,6 +4,7 @@ import { ipcMain } from 'electron'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { probeRuntime } from './runtime-probe-core'
 import { decodePluginData, encodePluginData, pluginDataPath } from './plugin-data-core'
+import { applyRemoteAccessPatch, describeRemoteAccess } from './remote-access.js'
 
 /**
  * 插件在桌面端的**能力面**（宿主只提供能力，不认识任何具体插件）。
@@ -15,6 +16,9 @@ import { decodePluginData, encodePluginData, pluginDataPath } from './plugin-dat
  * - `plugin-host:read-data` / `plugin-host:write-data`：读写插件自己的那份数据文件
  *   （`$MICA_HOME/plugin-data/<pluginId>/data.json`）。页面没有文件系统，插件的清单、
  *   连接、草稿都只能落在这里；内容由插件自己定义，宿主不解析、不改写。
+ * - `plugin-host:access-get` / `plugin-host:access-set`：运行时的**远程访问策略**（是否
+ *   要求口令、口令是什么）。这是宿主自己的能力，不属于某个插件——任何要解释或调整「别的
+ *   机器怎么进这台机器」的插件都读同一份，宿主的请求分派也读同一份。
  *
  * 判断逻辑分别在 runtime-probe-core.js 与 plugin-data-core.js（纯函数，便于单测）。
  */
@@ -73,5 +77,16 @@ export function registerPluginHostIpc() {
   ipcMain.handle('plugin-host:write-data', (_event, payload) => {
     writePluginData(payload?.pluginId, payload?.value)
     return { ok: true }
+  })
+
+  /**
+   * 运行时自己的远程访问策略。口令会原样回给页面：它要显示「别人该输什么」，而能调到这里
+   * 的页面要么在本机、要么已经过了这道口令（远程未过门时 `/api/invoke` 会被 401）。
+   */
+  ipcMain.handle('plugin-host:access-get', () => describeRemoteAccess())
+
+  ipcMain.handle('plugin-host:access-set', (_event, payload) => {
+    const written = applyRemoteAccessPatch(payload)
+    return { enabled: written.enabled, password: written.password }
   })
 }

@@ -112,7 +112,7 @@ export function peerRows(current: unknown, store: PeerStore): PeerEntry[] {
   });
 }
 
-/** 卡片上这一行的名字：起过备注就用备注，否则退回地址的显示名（回环叫「本机」）。 */
+/** 卡片上这一行的名字：起过备注就用备注，否则退回地址的显示名（回环叫 `Local`）。 */
 export function peerLabel(peer: PeerEntry): string {
   return peer.note || runtimeLabel(peer.url);
 }

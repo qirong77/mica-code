@@ -223,6 +223,9 @@ Environment variables with the same meaning: `MICA_DESKTOP_HOST`, `MICA_DESKTOP_
 `MICA_DESKTOP_SHARE_PORT` (on/off only, see below), `MICA_DESKTOP_RENDERER`. The runtime prints both the loopback and LAN URLs
 on startup, plus a machine-readable `[mica-desktop] ready {"url":…,"port":…}` line the Electron
 container parses. `GET /api/health` answers whether a port is already serving Mica Code.
+`MICA_DESKTOP_TRUSTED_CLIENTS` (comma-separated addresses) is how another machine gets the *full* app
+without a password; the everyday way is the remote access password in the `Connections` card. Both are
+explained in "Who can see which path".
 
 It listens on **one** port and distinguishes its services by path (the conventions live in
 `packages/mica-web-shared/app-paths.ts`, shared with the renderer). That port's number — `8787`
@@ -243,7 +246,8 @@ The paths:
 - `/` and `/mica-web` — the whole app (session list, files, terminals, settings);
 - `/share` — the surface a share link points at: `/share?session=<id>` opens that one conversation
   **without the left session list**, and `/share` itself is the list of links that have been shared
-  (`分享链接`);
+  (`分享链接`). It is also the only page a client that is not on this machine can reach — see "Who can
+  see which path" below;
 - `/terminal-control` — the terminal window page (`?session=<id>`), a separate Vite entry;
 - `/remote/control/*` — the controlled browser, forwarded to the main process (below). `/remote/control`
   itself answers with the entry points (`/browser/docs`, `/browser/health`), so opening it in a browser
@@ -441,7 +445,7 @@ instead of doing nothing at all.
 The write-back waits until a session is actually open (`urlSessionRef.current`), so the first frame cannot
 clobber the param with an empty session and leave the page showing nothing.
 
-#### There is no authorization boundary
+#### Access is a door, not an account system
 
 The runtime has no accounts and no access control beyond two things that do not restrict normal use:
 
@@ -458,12 +462,77 @@ The runtime has no accounts and no access control beyond two things that do not 
   Mica Code 运行时" screen even though the tunnel is fine. It is read once per process — restart the app
   after changing it.
 
-`src/host/access-core.js` holds these two judgements as pure logic with unit tests;
+`src/host/access-core.js` holds these judgements as pure logic with unit tests;
 `src/host/access.js` wires them up and computes the reachable base URL; `src/server/index.js` runs them
-on every request. There is no token, no cookie and no per-session visitor scope: **every client is a
-full client.** Connecting to the port is equivalent to having a shell on the host — the terminal is a
-real shell, files are read/write, and the config page holds your API keys. The default `0.0.0.0` bind is
-a product decision (a phone on the LAN can drive the agent), so keep the warning in this file honest.
+on every request. There are no accounts and no per-client scope: a remote client either gets through
+the door or does not, and **every client that is in is a full client.** Getting in is equivalent to
+having a shell on the host — the terminal is a real shell, files are read/write, and the config page
+holds your API keys. The default `0.0.0.0` bind is a product decision (a phone on the LAN can drive the
+agent), so keep the warning in this file honest.
+
+#### Who can see which path
+
+`remoteRequestAllowed` in `src/host/access-core.js` is the one place that narrows paths, and it judges
+by **who is connecting**, not by origin:
+
+- a loopback connection — or one listed in `MICA_DESKTOP_TRUSTED_CLIENTS` (comma-separated addresses,
+  last-octet wildcard allowed: `172.22.240.*`) — is a full client and sees every path;
+- everyone else only gets the share surface: `/share` and everything below it and the built assets
+  (whitelisted extensions). `/`, `/mica-web`, `/files`, `/terminal-control`, `/terminal.html`,
+  `/files.html`, `/remote/*` and `/mcp/*` answer `404`: a browser navigation gets a one-line
+  explanation, everything else the same `{"ok":false,"error":"Not found"}` an unknown path gets.
+
+Remote access is judged by `remoteAccessDecision` in `src/host/remote-access-core.js` (the path
+whitelist above is its "no password configured" case):
+
+| remote client | no password configured | password enabled |
+| --- | --- | --- |
+| `/share*`, built assets | allowed | allowed |
+| `/api/*` | allowed | needs a token (see below) |
+| `/`, `/mica-web`, `/files`, `/terminal*`, `/remote/*`, `/mcp/*` | `404` | redirect to the login page |
+
+This is deliberately **not** a permission model. The share surface talks to the same `/api/*`, so a
+remote client that opens a share link can still do what it could before — list sessions,
+`POST /api/invoke`, open a shell. What it removes is the bad default: typing
+`http://<lan-ip>:8787` into a browser used to render this machine's full app (session list, files,
+settings, share index); now it gets a 404, or a login page once a password is set.
+
+#### The remote access password
+
+`Connections` (the sidebar entry) has a section called `其他机器访问这台机器`: a switch plus a
+password, **default `0000`**. With it on, another machine that opens this runtime gets a one-field
+login page (`/__access`) instead of the app; posting the right password sets `mica_remote_access`
+(HttpOnly, SameSite=Lax, 7 days) and everything is as if the request came from this machine.
+
+- Storage is `$MICA_HOME/remote-access.json` (`{ version, enabled, password, secret }`, written
+  `0600`). `secret` is generated once by the runtime; the cookie value is
+  `HMAC(secret, "access|share:" + password)`, so changing the password invalidates every issued
+  cookie without keeping a revocation list. Deleting the file resets everything to off / `0000`.
+- The share view stays password-free on purpose. Enabling the password protects the *full* app, not
+  the link you already handed out — a share link must keep working. Since `/api/*` does require a
+  token once the password is on, opening a share page hands out a `mica_share_scope` cookie (same
+  HMAC, different scope) that only unlocks `/api/*`; it cannot open the app.
+- Login is throttled per peer address: five wrong attempts lock that address for 60 s (`429`). A
+  four-digit default is guessable in 10 000 tries, so the throttle is what makes it a door rather
+  than a speed bump — change the password if the port is reachable by people you don't know.
+- It is a door, not an account system: one password, no users, no per-client scope, and after it
+  you are a full client exactly like a loopback connection. `MICA_DESKTOP_TRUSTED_CLIENTS` still
+  exists as a password-free list of addresses (useful on a trusted LAN).
+
+Two consequences worth knowing. The judgement reads only the socket's peer address, never `Host` or
+`X-Forwarded-For` — the requester writes those, so trusting them hands the decision to the requester;
+under a tunnel or reverse proxy every connection looks loopback, and such a deployment has to carry its
+own auth at the tunnel. And `connections` (the sidebar entry that opens another machine's runtime) needs
+the *full* app on the other side: the target machine either lists this one in
+`MICA_DESKTOP_TRUSTED_CLIENTS` or has a remote access password set (you then log in once per machine —
+the cookie is per browser profile), otherwise that window lands on the 404 page.
+
+Unmatched `/api/*` paths answer that same `404` instead of falling through to the SPA fallback. Without
+that, `GET /api/invoke` in a browser came back as `index.html` — the full app — and `/api/*` is exactly
+the one non-share prefix a remote client is allowed to touch.
+
+The login page lives at `/__access` and is served by the runtime itself (`renderLoginPage` in
+`src/server/index.js`), not by the renderer bundle: it has to work *before* the app is allowed to load.
 
 #### A share link
 
@@ -643,6 +712,8 @@ var(--vvh, 100dvh) }` rather than `html, body, #root`, because a later styleshee
 
 > There is no authentication: anyone who can reach the port gets a shell on the host. The runtime
 > binds `0.0.0.0` by default (so phones can join); pass `--host 127.0.0.1` when you don't want that.
+> Remote clients are served only the share surface (`/share` + `/api/*`), so a browser on the LAN no
+> longer lands on the full app — see "Who can see which path".
 
 ### App icon
 

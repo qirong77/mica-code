@@ -16,6 +16,11 @@ import { usePluginEntries } from './plugin-entries'
  */
 
 const CARD_WIDTH = 320
+// 卡片与入口行之间留 6px：鼠标从行滑到卡片要跨过这段，它必须算在 wrapper 的盒内
+const CARD_GAP = 6
+// 与行右边缘相距不超过这个值的祖先，算「同一条侧栏」——侧栏内的内边距（行左侧 px-2）
+// 都在这条线以内，再往外就是主区了。
+const SIDEBAR_EDGE_SLACK = 40
 
 export function PluginEntries() {
   const entries = usePluginEntries()
@@ -117,17 +122,35 @@ function PluginEntryRow({ entry }) {
   )
 }
 
-/** 把卡片浮在入口行右侧，并桥接这 6px 缝隙（鼠标划过去不会先触发关闭） */
+/**
+ * 卡片贴在侧栏右边界上（而不是贴着这一行的右边缘）：行有内边距，按行算会让卡片压在
+ * 分隔线上、差几个像素。这里从行往上找同一条侧栏里最靠右的那条边。
+ */
+function sidebarRightEdge(rowEl) {
+  const rowRight = rowEl.getBoundingClientRect().right
+  let edge = rowRight
+  let el = rowEl.parentElement
+  while (el && el !== document.body) {
+    const right = el.getBoundingClientRect().right
+    if (right - rowRight > SIDEBAR_EDGE_SLACK) break
+    edge = Math.max(edge, right)
+    el = el.parentElement
+  }
+  return edge
+}
+
+/** 把卡片浮在侧栏右边界上，并桥接这 6px 缝隙（鼠标划过去不会先触发关闭） */
 function EntryPopover({ anchorRef, onPointerEnter, onPointerLeave, children }) {
   const ref = useRef(null)
   const [pos, setPos] = useState(null)
 
   const place = useCallback(() => {
-    const anchor = anchorRef.current?.getBoundingClientRect()
+    const rowEl = anchorRef.current
+    const anchor = rowEl?.getBoundingClientRect()
     const wrap = ref.current?.getBoundingClientRect()
     if (!anchor || !wrap) return
-    // 贴着行的右边缘起算，6px 的间距由 pl-1.5 撑出来（那段留白也算 wrapper 的盒内，可悬停）
-    let left = anchor.right
+    // wrapper 的 pl-1.5 就是那 6px 缝隙，所以卡片本身落在侧栏边界上
+    let left = sidebarRightEdge(rowEl) - CARD_GAP
     let top = anchor.top
     if (left + wrap.width > window.innerWidth - 4)
       left = Math.max(4, window.innerWidth - wrap.width - 4)

@@ -4,7 +4,9 @@ import {
   hostnameOf,
   isLoopbackAddress,
   isPrivateLanAddress,
+  isTrustedClientAddress,
   pickShareBaseUrl,
+  remoteRequestAllowed,
   sameSiteOriginAllowed
 } from './access-core'
 
@@ -106,6 +108,69 @@ describe('sameSiteOriginAllowed', () => {
     )
     // 回环名不依赖调用方传参
     expect(sameSiteOriginAllowed('http://localhost:5173', '127.0.0.1:8799', undefined)).toBe(true)
+  })
+})
+
+describe('isTrustedClientAddress', () => {
+  it('matches exact addresses, IPv4-mapped forms and a last-octet wildcard', () => {
+    const trusted = new Set(['172.22.240.5', '10.0.0.*'])
+    expect(isTrustedClientAddress('172.22.240.5', trusted)).toBe(true)
+    // 双栈 socket 上 Node 给的是这个形状，漏了它白名单就等于没配
+    expect(isTrustedClientAddress('::ffff:172.22.240.5', trusted)).toBe(true)
+    expect(isTrustedClientAddress('10.0.0.9', trusted)).toBe(true)
+    expect(isTrustedClientAddress('172.22.240.6', trusted)).toBe(false)
+    // 通配只吃最后一段，不会把 10.0.1.9 也算进来
+    expect(isTrustedClientAddress('10.0.1.9', trusted)).toBe(false)
+  })
+
+  it('trusts nobody by default', () => {
+    expect(isTrustedClientAddress('172.22.240.5', new Set())).toBe(false)
+    expect(isTrustedClientAddress('172.22.240.5', undefined)).toBe(false)
+    expect(isTrustedClientAddress('', new Set(['172.22.240.5']))).toBe(false)
+  })
+})
+
+describe('remoteRequestAllowed', () => {
+  it('lets a remote client reach the share view and nothing else that is a page', () => {
+    // 分享链接本身：页面 + 它下面的资源
+    expect(remoteRequestAllowed('/share')).toBe(true)
+    expect(remoteRequestAllowed('/share/')).toBe(true)
+    expect(remoteRequestAllowed('/share/assets/index-abc.js')).toBe(true)
+    // 主页面、显式基路径、独立窗口、控制端点都不给
+    expect(remoteRequestAllowed('/')).toBe(false)
+    expect(remoteRequestAllowed('/mica-web')).toBe(false)
+    expect(remoteRequestAllowed('/mica-web/')).toBe(false)
+    expect(remoteRequestAllowed('/files')).toBe(false)
+    expect(remoteRequestAllowed('/terminal-control')).toBe(false)
+    expect(remoteRequestAllowed('/terminal.html')).toBe(false)
+    expect(remoteRequestAllowed('/files.html')).toBe(false)
+    expect(remoteRequestAllowed('/index.html')).toBe(false)
+    expect(remoteRequestAllowed('/remote/control')).toBe(false)
+    expect(remoteRequestAllowed('/remote/terminal/sessions')).toBe(false)
+    expect(remoteRequestAllowed('/mcp/terminal')).toBe(false)
+  })
+
+  it('lets the share page load its own assets from the origin root', () => {
+    // 打开 `/share?session=x` 时相对引用按 `/` 解析，资源落在根路径下
+    expect(remoteRequestAllowed('/assets/index-abc.js')).toBe(true)
+    expect(remoteRequestAllowed('/assets/index-abc.css')).toBe(true)
+    expect(remoteRequestAllowed('/favicon.ico')).toBe(true)
+    expect(remoteRequestAllowed('/manifest.webmanifest')).toBe(true)
+  })
+
+  it('keeps the api the share page talks to, but not the bare /api path', () => {
+    // 分享视图与主应用共用同一份接口：收窄它等于把分享链接废掉
+    expect(remoteRequestAllowed('/api/invoke')).toBe(true)
+    expect(remoteRequestAllowed('/api/events')).toBe(true)
+    expect(remoteRequestAllowed('/api/health')).toBe(true)
+    // `/api` 没有处理器，会落到「SPA 回退成 index.html」上——那是主页面
+    expect(remoteRequestAllowed('/api')).toBe(false)
+  })
+
+  it('cannot be smuggled out of the share prefix', () => {
+    expect(remoteRequestAllowed('/share/../terminal.html')).toBe(false)
+    expect(remoteRequestAllowed('/share/%2e%2e/terminal.html')).toBe(false)
+    expect(remoteRequestAllowed('//evil.example/share')).toBe(false)
   })
 })
 
