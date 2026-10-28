@@ -290,6 +290,14 @@ export type ConfigWebPlugin = {
    * 检查目录，插件只声明 id——它跑在 app-server 子进程里，探测不到这些状态。
    */
   desktopChecks: ConfigWebPluginCheck[];
+  /**
+   * 清单的 `desktop.entry`：这个插件在桌面端侧栏里有一行入口，卡片内容由插件目录里的
+   * `desktop.jsx` 渲染。`null` 表示它不占侧栏位置。
+   *
+   * 只有随包插件会被打包进页面，所以用户插件这一项永远是 null——声明了也画不出来，
+   * 页面那边没有它的模块。
+   */
+  desktopEntry: ConfigWebPluginDesktopEntry | null;
   /** 这个插件今天的日志文件（系统 temp 目录），排查时直接打开。 */
   logFile: string;
   /** 插件自报的最近一次状态（正常 / 待配置 / 出错）；没上报过为 null。 */
@@ -297,6 +305,11 @@ export type ConfigWebPlugin = {
   /** plugin-status.json 记录的上一次加载结果。 */
   loadStatus?: 'loaded' | 'registered' | 'failed' | 'skipped' | 'unknown';
   error?: string;
+};
+
+/** 桌面端侧栏入口的静态描述：清单只给文案，卡片内容是插件自己的模块。 */
+export type ConfigWebPluginDesktopEntry = {
+  label: string;
 };
 
 /** 一项运行条件的静态描述；此刻是否满足由 `readDesktopChecks()` 另取。 */

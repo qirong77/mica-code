@@ -12,12 +12,18 @@ import {
   type TodoStatus,
 } from '@packages/mica-common/todoState.js';
 import { TodoWriteTool } from './TodoTool.js';
+import { buildTodoGuidance } from './prompt.js';
 
 export { formatTodoSummary, parseTodoInput, resolveTodoPanel } from '@packages/mica-common/todoState.js';
+export { TODO_GUIDANCE, buildTodoGuidance } from './prompt.js';
 export type { TodoItem, TodoStatus } from '@packages/mica-common/todoState.js';
 
 const PLUGIN_ID = 'todo';
 const STATUS_ITEM_ID = 'todo.list';
+/**
+ * 计划段落排在委派（100）之前：先确定做什么，再决定要不要分出去。
+ */
+const PROMPT_SECTION_ORDER = 50;
 const TODO_KIND = '📝(todo)';
 const TODO_KIND_WIDTH = 12;
 const TODO_STATUS_WIDTH = 10;
@@ -110,6 +116,15 @@ export class TodoPlugin implements MicaPlugin {
     if (!ctx.tools) throw new Error('todo requires ctx.tools');
     const toolRegistration = ctx.tools.register(tool, { icon: '📝', primaryAgentOnly: true });
     ctx.onDispose(() => toolRegistration.dispose());
+
+    // 计划纪律随插件走：`todo_write` 不在工具表里时，这段指引也不该出现在 prompt 里。
+    if (!ctx.prompt) throw new Error('todo requires ctx.prompt');
+    const promptSection = ctx.prompt.section({
+      id: 'plan',
+      order: PROMPT_SECTION_ORDER,
+      render: () => buildTodoGuidance(),
+    });
+    ctx.onDispose(() => promptSection.dispose());
 
     ctx.ui?.status?.upsert({ id: STATUS_ITEM_ID, component: TodoStatusList });
     ctx.onDispose(() => {

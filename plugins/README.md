@@ -215,6 +215,35 @@ ctx.skills.register({ ...skill, name: skill.name!, description: skill.descriptio
 依赖这个能力的插件用 `requires: ["desktop"]` 声明：只有桌面端 spawn 的 app-server 才提供它，
 CLI / TUI / `mica exec` 里整插件跳过（而不是装上了却永远显示不了状态）。
 
+## 桌面入口
+
+插件想让自己的能力出现在**桌面端侧栏**（一行入口 + 点开的卡片）时，在同一段里声明入口，
+再把卡片写成插件目录里的 `desktop.jsx`：
+
+```json
+"desktop": { "entry": { "label": "连接" } }
+```
+
+```jsx
+// desktop.jsx
+export default function MyCard({ api, onClose }) { … }
+export function summary(api) { return api.currentHost() } // 可选：入口行右侧那一行字
+```
+
+- 入口的文案来自清单，图标用清单的 `icon`；`label` 不写就退化成插件的 `name`。
+- 卡片**只画内容**：定宽、浮层定位、悬停/点击展开、Esc 与点外面收起都由宿主
+  （`apps/desktop/src/renderer/src/PluginEntries.jsx`）负责。
+- 宿主按插件 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里
+  登记**——加一个桌面入口只改插件目录。
+- 模块拿到的 `api` 只有四件事：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
+  （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value)`
+  （插件自己的 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构）、`open(url)`
+  （外壳里开新窗口、浏览器里开新标签页）。
+- **只对随包插件生效**：桌面页面是构建期打的包，只能收录打包时仓库里存在的
+  `plugins/<id>/desktop.jsx`；用户插件装在运行时才出现的 `$MICA_HOME/plugins`，声明了也
+  渲染不出入口，所以 `desktop.entry` 不必也不能靠 `requires: ["desktop"]` 表达——
+  它不依赖 app-server 的能力面。
+
 插件自身的故障要能被用户看见，而不是只落在日志里：
 
 - `ctx.health.report({ level: 'warn' | 'error', message, hint })` 写

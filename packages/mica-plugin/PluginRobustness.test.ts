@@ -73,6 +73,7 @@ function manifest(requires: string[]) {
     settings: [],
     requires: requires as never,
     desktopChecks: [],
+    desktopEntry: null,
   };
 }
 

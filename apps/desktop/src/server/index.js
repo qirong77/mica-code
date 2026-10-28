@@ -65,7 +65,7 @@ import { registerMcpCandidatesIpc } from '../host/mcp-candidates.js'
 import { registerPerfIpc } from '../host/perf.js'
 import { logger, flushLogs, registerDiagnosticsIpc } from '../host/log.js'
 import { registerClipboardIpc } from '../host/clipboard.js'
-import { registerServersIpc } from '../host/servers.js'
+import { registerPluginHostIpc } from '../host/plugin-host.js'
 import { registerConfigWebIpc } from '../host/configWeb.js'
 import { flushUiState, registerUiStateIpc, setUiStateSender } from '../host/ui-state.js'
 import { registerSharedSessionIpc } from '../host/shared-sessions.js'
@@ -475,7 +475,7 @@ export async function startDesktopServer(options = {}) {
   registerPerfIpc()
   registerDiagnosticsIpc(ipcMain)
   registerClipboardIpc()
-  registerServersIpc()
+  registerPluginHostIpc()
   registerConfigWebIpc()
   registerAccessIpc()
   registerSharedSessionIpc()

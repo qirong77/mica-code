@@ -1,0 +1,67 @@
+import { isElectronShell } from './shell-env'
+
+/**
+ * 插件的前端模块能用的宿主能力。
+ *
+ * 插件卡片跑在页面里，但它需要的东西有一半在运行时那边：探活某个地址、读写自己的数据
+ * 文件（页面没有文件系统）。这份 API 就是那层封口——插件只认它，不认 `window.mica`，
+ * 宿主换实现时插件不用改。
+ *
+ * `open` 反过来是纯页面能力：打开另一个运行时就是一次 `location.assign`，外壳接管它
+ * 并弹出新窗口（见 src/main/index.js 的 will-navigate），浏览器里开新标签页。
+ */
+
+/** 当前页面所在的运行时：页面就是它托管的，所以 origin 即地址。 */
+export function currentRuntimeAddress() {
+  return String(window.location?.origin || '')
+}
+
+/**
+ * 打开另一个运行时的地址。
+ *
+ * 外壳里交给主进程：`location.assign` 触发的导航会被 `will-navigate` 接管，改成弹出新
+ * 窗口、本窗口不动。浏览器里开新标签页，被弹窗拦截时退回本标签页。依赖可注入，便于单测。
+ */
+export function openRuntimeTarget(url, { userAgent, open, assign } = {}) {
+  const agent = userAgent ?? (typeof navigator === 'undefined' ? '' : navigator.userAgent)
+  const navigate = assign ?? ((target) => window.location.assign(target))
+
+  if (isElectronShell(agent)) {
+    navigate(url)
+    return 'window'
+  }
+
+  const spawnTab = open ?? ((target) => window.open(target, '_blank'))
+  const spawned = spawnTab(url)
+  if (spawned) {
+    // 不用 window.open 的 `noopener` 特性串：它会让 window.open 恒返回 null，弹窗被
+    // 拦截时就分辨不出来、退路也没了；直接在拿到的窗口上掐掉 opener 等价。
+    try {
+      spawned.opener = null
+    } catch {
+      // 某些浏览器不让写，忽略
+    }
+    return 'tab'
+  }
+  navigate(url)
+  return 'same-tab'
+}
+
+/**
+ * 交给插件 `desktop.jsx` 的那份 api。`pluginId` 由宿主注入，插件不必自己拼——它也
+ * 拼不对：数据文件按插件 id 落在 `$MICA_HOME/plugin-data/<id>/data.json`。
+ */
+export function createPluginHostApi(pluginId) {
+  const host = window.mica?.pluginHost
+  return {
+    pluginId,
+    currentHost: () => currentRuntimeAddress(),
+    /** 这个地址上是不是一台 Mica 运行时：跨源探测页面做不了，由运行时代查。 */
+    probe: (address) => host.probe(String(address ?? '')),
+    /** 插件自己的那份数据（内容由插件定义，宿主不解析）。没有数据时 `{ value: null }`。 */
+    readData: () => host.readData(pluginId),
+    writeData: (value) => host.writeData(pluginId, value),
+    /** 打开另一个运行时：外壳里开新窗口，浏览器里开新标签页。 */
+    open: (url) => openRuntimeTarget(url)
+  }
+}

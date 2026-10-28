@@ -15,6 +15,10 @@
 - 全部完成时在运行中仍显示（收成一行 `all done`），收起由轮次结束负责，不由「做完了」负责。
 - `/todo [show|hide|clear]` 控制面板显隐与清空。`/todo show` 在轮次结束后也能打开，
   但那些条目已不再执行，`in_progress` 会按 `pending` 呈现，不会再出现假的进行中。
+- **计划纪律跟着插件走**：什么时候该写计划、条目怎么切、状态怎么维护，作为 `plan`
+  段落经 `ctx.prompt.section()` 注入 system prompt（正文在 `prompt.ts`）。停用插件后
+  工具和这段指引一起消失，不会出现「提示词要求写计划、工具却不在工具表里」。所以
+  清单的 `requires` 里有 `prompt`，排在委派段落（`plugins/subagent`，order 100）之前。
 
 ## 工具契约
 
@@ -51,6 +55,7 @@ resume 带得回来。
 | `index.ts`           | 入口，`default` 导出 setup             |
 | `TodoPlugin.tsx`     | 面板、命令、事件与钩子接线             |
 | `TodoTool.ts`        | `todo_write` 工具定义                  |
+| `prompt.ts`          | `plan` prompt 段落正文（计划纪律）     |
 | `TodoPlugin.test.ts` | 归一化规则、投影、面板显隐与收口的测试 |
 
 纯逻辑在 `packages/mica-common/todoState.ts`（含自己的测试）。

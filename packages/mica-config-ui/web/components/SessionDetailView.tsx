@@ -203,7 +203,7 @@ export function SessionDetailView({
 
       {error ? <div className="ui-alert session-detail-alert">{error}</div> : null}
 
-      <div className="session-tab-body">
+      <div className={`session-tab-body${tab === 'raw' ? ' session-tab-body-fill' : ''}`}>
         {tab === 'conversation' ? (
           <ConversationPane key={`conversation:${sessionId}:${version}`} sessionId={sessionId} refreshToken={version} />
         ) : null}

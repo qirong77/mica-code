@@ -6,7 +6,11 @@ import {
   type PluginSettingType,
 } from './PluginSettings.js';
 import { pluginLlmSettingFields, type PluginLlmSpec } from './PluginLlm.js';
-import { isDesktopCheckId, type DesktopCheckId } from './PluginDesktop.js';
+import {
+  isDesktopCheckId,
+  type DesktopCheckId,
+  type PluginDesktopEntry,
+} from './PluginDesktop.js';
 
 /**
  * 插件包的清单（`plugin.json`）。
@@ -81,6 +85,11 @@ export type PluginManifest = {
    * 展示「开了没有 / 去哪里开」——插件代码只跑在 app-server 子进程里，探测不到这些。
    */
   desktopChecks: DesktopCheckId[];
+  /**
+   * 桌面端侧栏入口（清单 `desktop.entry`）。声明了就有一行入口，卡片内容由插件目录里的
+   * `desktop.jsx` 渲染；没声明（null）的插件在侧栏里不占位置。
+   */
+  desktopEntry: PluginDesktopEntry | null;
 };
 
 /**
@@ -188,8 +197,8 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const requires = readRequires(input.requires);
   if (!requires.ok) return requires;
 
-  const desktopChecks = readDesktopChecks(input.desktop);
-  if (!desktopChecks.ok) return desktopChecks;
+  const desktop = readDesktop(input.desktop, name);
+  if (!desktop.ok) return desktop;
 
   return {
     ok: true,
@@ -209,7 +218,8 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       settings: [...settings.value, ...llmFields],
       llm: llm.value ?? null,
       requires: requires.value,
-      desktopChecks: desktopChecks.value,
+      desktopChecks: desktop.value.checks,
+      desktopEntry: desktop.value.entry,
     },
   };
 }
@@ -257,26 +267,40 @@ function readLlm(input: unknown): { ok: true; value: PluginLlmSpec | null } | { 
 }
 
 /**
- * `desktop.checks` 的结构。
+ * `desktop` 段：运行条件（`checks`）与侧栏入口（`entry`）。
  *
- * 校验从严的理由与设置项一致：设置页完全按这份声明显示，检查项 id 写错就等于永远
- * 显示不出一行状态——用户在配置页看到一条可读的错误，比看到一个缺项的面板强。
+ * 校验从严的理由与设置项一致：设置页与侧栏完全按这份声明显示，检查项 id 写错就等于
+ * 永远显示不出一行状态——用户在配置页看到一条可读的错误，比看到一个缺项的面板强。
  */
-function readDesktopChecks(input: unknown): { ok: true; value: DesktopCheckId[] } | { ok: false; error: string } {
-  if (input === undefined) return { ok: true, value: [] };
+function readDesktop(
+  input: unknown,
+  pluginName: string,
+): { ok: true; value: { checks: DesktopCheckId[]; entry: PluginDesktopEntry | null } } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: { checks: [], entry: null } };
   if (!isRecord(input)) return { ok: false, error: 'desktop 必须是对象' };
-  const rawChecks = input.checks;
-  if (rawChecks === undefined) return { ok: true, value: [] };
-  if (!Array.isArray(rawChecks)) return { ok: false, error: 'desktop.checks 必须是数组' };
 
-  const value: DesktopCheckId[] = [];
-  for (const check of rawChecks) {
-    if (!isDesktopCheckId(check)) {
-      return { ok: false, error: `desktop.checks 里有未知检查项：${String(check)}` };
+  const rawChecks = input.checks;
+  const checks: DesktopCheckId[] = [];
+  if (rawChecks !== undefined) {
+    if (!Array.isArray(rawChecks)) return { ok: false, error: 'desktop.checks 必须是数组' };
+    for (const check of rawChecks) {
+      if (!isDesktopCheckId(check)) {
+        return { ok: false, error: `desktop.checks 里有未知检查项：${String(check)}` };
+      }
+      if (!checks.includes(check)) checks.push(check);
     }
-    if (!value.includes(check)) value.push(check);
   }
-  return { ok: true, value };
+
+  const rawEntry = input.entry;
+  if (rawEntry === undefined) return { ok: true, value: { checks, entry: null } };
+  if (!isRecord(rawEntry)) return { ok: false, error: 'desktop.entry 必须是对象' };
+  const rawLabel = rawEntry.label;
+  if (rawLabel !== undefined && typeof rawLabel !== 'string') {
+    return { ok: false, error: 'desktop.entry.label 必须是字符串' };
+  }
+  // 侧栏那一行只有一行的宽度：文案留空的退化成语义（用插件名）而不是画一行空白。
+  const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
+  return { ok: true, value: { checks, entry: { label } } };
 }
 
 /**

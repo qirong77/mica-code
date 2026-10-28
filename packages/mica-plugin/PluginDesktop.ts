@@ -57,6 +57,22 @@ export type PluginDesktopRequirements = {
   checks: DesktopCheckId[];
 };
 
+/**
+ * 桌面端入口（清单 `desktop.entry`）。
+ *
+ * 插件想让自己的能力以「侧栏一行入口 + 点开的卡片」出现在桌面端时声明它，宿主按
+ * 约定去插件目录找 `desktop.jsx`（default 导出 React 组件）渲染卡片内容——宿主因此
+ * 不需要认识任何具体插件。
+ *
+ * 只对**随包插件**生效：桌面端的页面是构建期打包的，`plugins/<id>/desktop.jsx` 只有在
+ * 打包时被收录才会被加载。用户插件声明这一段不会渲染出入口，`$MICA_HOME/plugins` 是
+ * 运行时才出现的目录，页面那边没有它的模块。
+ */
+export type PluginDesktopEntry = {
+  /** 侧栏那一行显示的文案；清单没写时用插件的 name。 */
+  label: string;
+};
+
 /** 宿主实际提供给插件的 desktop 能力面：只表明身份，页面数据来自清单。 */
 export type PluginDesktopApi = {
   host: 'desktop';

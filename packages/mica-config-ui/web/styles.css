@@ -1160,14 +1160,15 @@
   }
 
   .session-detail {
-    display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
     min-height: 0;
   }
 
   /* 详情头部：标题 + 状态、目录、一行事实。压成 3 行，把篇幅留给对话。 */
   .session-detail-head {
     display: grid;
+    flex: none;
     gap: 4px;
     padding: 12px 16px 11px;
     border-bottom: 1px solid var(--line-soft);
@@ -1729,14 +1730,17 @@
 
   /* 原始文件编辑器吃满详情区剩下的高度：上下都不留白，滚动交给编辑器自己。 */
   .session-raw-editor {
-    height: 100%;
-    min-height: 320px;
+    flex: 1 1 auto;
+    min-height: 240px;
     border: 0;
     border-radius: 0;
   }
 
   .session-raw {
-    display: grid;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
     gap: 8px;
   }
 
@@ -1829,9 +1833,13 @@
 
   .session-tabs {
     display: flex;
+    /* 列布局里页签行是固定高度：让相邻的滚动区去抢剩下的空间，不把标签压扁。 */
+    flex: none;
     align-items: center;
     gap: 20px;
     overflow-x: auto;
+    /* 下划线画在页签盒内，多出来的 1px 会让 overflow-y 也变 auto，页签行右侧凭空多一条竖向滚动条。 */
+    overflow-y: hidden;
     overscroll-behavior-x: contain;
     padding: 0 16px;
     border-bottom: 1px solid var(--line);
@@ -1864,7 +1872,7 @@
     content: '';
     position: absolute;
     right: 0;
-    bottom: -1px;
+    bottom: 0;
     left: 0;
     height: 2px;
     border-radius: 2px;
@@ -1893,10 +1901,19 @@
   }
 
   .session-tab-body {
+    flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: 14px 16px 16px;
+  }
+
+  /* 原始文件页签自己就是滚动容器（编辑器内部滚动），外面这层不滚，好让编辑器吃满剩余高度。 */
+  .session-tab-body-fill {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 14px;
   }
 
   /* 标签页本身已是一张卡，里面的分区不要再套一层边框（双层描边看起来像没对齐的嵌套卡片）。 */

@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
-import { micaPlugin, type PluginContext, type PluginStatusItem } from '@packages/mica-plugin/index.js';
+import {
+  micaPlugin,
+  type PluginContext,
+  type PluginPromptSection,
+  type PluginStatusItem,
+} from '@packages/mica-plugin/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, type MicaTool } from '@packages/mica-tools/index.js';
 import { TodoPlugin } from './TodoPlugin.js';
@@ -40,6 +45,19 @@ describe('TodoPlugin', () => {
     for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
     expect(harness.remove).toHaveBeenCalledWith('todo.list');
     expect(micaTools.getDefinitions().some((tool) => tool.name === 'todo_write')).toBe(false);
+  });
+
+  it('contributes the plan guidance as a prompt section that goes away with the tool', async () => {
+    const harness = createTodoHarness(disposeCallbacks);
+    const rendered = harness.promptSections.render();
+
+    expect(rendered).toContain('# 计划');
+    expect(rendered).toContain('`todo_write`');
+    // 与工具描述同源：段落不能和 schema 说相反的话。
+    expect(rendered).toContain('只在清单确实变化时重发整份清单');
+
+    for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
+    expect(harness.promptSections.size).toBe(0);
   });
 
   it('accepts a list with several in-progress items instead of failing the call', async () => {
@@ -170,6 +188,7 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>) 
   const commands = new micaCommands.CommandRegistry();
   const hooks = new micaPlugin.HookRegistry();
   const events = new micaRuntime.RuntimeEventBus();
+  const promptSections = new micaPlugin.PluginPromptSections();
   const showMessage = vi.fn();
   const upsert = vi.fn<(item: PluginStatusItem) => void>();
   const remove = vi.fn<(id: string) => boolean>(() => true);
@@ -183,10 +202,11 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>) 
     hooks,
     events,
     tools: { register: registerTool },
+    prompt: { section: (section: PluginPromptSection) => promptSections.add('todo', section) },
     ui: { submit: vi.fn(), showMessage, status: { upsert, remove } },
     onDispose: (dispose: () => void | Promise<void>) => disposeCallbacks.push(dispose),
   } as unknown as PluginContext;
 
   new TodoPlugin().setup(ctx);
-  return { commands, events, hooks, registerTool, remove, showMessage, upsert };
+  return { commands, events, hooks, promptSections, registerTool, remove, showMessage, upsert };
 }

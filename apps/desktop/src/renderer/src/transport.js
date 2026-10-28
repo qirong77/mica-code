@@ -349,12 +349,16 @@ function createWebApi(env) {
 
     app: {
       getWindowState: async () => ({ ...appState }),
-      onWindowState: (callback) => subscribe('app:window-state', callback),
-      // 「切换 Mica 服务器」：目标探活由运行时代查（页面跨源 fetch 受 CORS 限制读不到
-      // 结果）；打开新窗口/新标签页由页面自己做，见 renderer 的 servers.js
-      servers: {
-        probe: (url) => invoke('app:servers:probe', { url })
-      }
+      onWindowState: (callback) => subscribe('app:window-state', callback)
+    },
+
+    // 插件的前端模块（`plugins/<id>/desktop.jsx`）能用到的宿主能力，见 renderer 的
+    // plugin-host.js。宿主不认识任何具体插件，这里也只有两件事：探活一个地址（页面
+    // 跨源 fetch 读不到结果）与读写插件自己的数据文件（页面没有文件系统）。
+    pluginHost: {
+      probe: (address) => invoke('plugin-host:probe', { address }),
+      readData: (pluginId) => invoke('plugin-host:read-data', { pluginId }),
+      writeData: (pluginId, value) => invoke('plugin-host:write-data', { pluginId, value })
     },
 
     // 粘贴文件时把系统剪贴板里的路径交回页面：页面只有文件名（Chromium 不暴露路径），

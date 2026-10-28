@@ -3,6 +3,7 @@ import autoCompactManifest from '../../plugins/auto-compact/plugin.json';
 import btwManifest from '../../plugins/btw/plugin.json';
 import commitManifest from '../../plugins/commit/plugin.json';
 import computerUseManifest from '../../plugins/computer-use/plugin.json';
+import connectionsManifest from '../../plugins/connections/plugin.json';
 import harnessReviewManifest from '../../plugins/harness-review/plugin.json';
 import memoryManifest from '../../plugins/memory/plugin.json';
 import sessionRenameManifest from '../../plugins/session-rename/plugin.json';
@@ -34,6 +35,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(sessionTagsManifest),
   readManifest(subagentManifest),
   readManifest(computerUseManifest),
+  readManifest(connectionsManifest),
 ];
 
 export const officialPluginIds = new Set(officialPluginManifests.map((manifest) => manifest.id));

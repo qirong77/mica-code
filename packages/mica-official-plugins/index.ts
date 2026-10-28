@@ -3,6 +3,7 @@ import autoCompactSetup from '../../plugins/auto-compact/index.js';
 import btwSetup from '../../plugins/btw/index.js';
 import commitSetup from '../../plugins/commit/index.js';
 import computerUseSetup from '../../plugins/computer-use/index.js';
+import connectionsSetup from '../../plugins/connections/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
@@ -34,6 +35,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   'session-tags': sessionTagsSetup,
   subagent: subagentSetup,
   'computer-use': computerUseSetup,
+  connections: connectionsSetup,
 };
 
 export const officialPlugins: MicaPlugin[] = officialPluginManifests.map((manifest) => {

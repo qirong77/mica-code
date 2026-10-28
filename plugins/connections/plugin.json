@@ -1,0 +1,14 @@
+{
+  "id": "connections",
+  "name": "连接",
+  "icon": "cable",
+  "version": "1.0.0",
+  "description": "连接另一台机器上的 Mica 运行时：文件、终端、会话都来自那台机器；连过的地址记在清单里，可以起备注。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 30,
+  "mica": { "apiVersion": 1 },
+  "requires": [],
+  "desktop": { "entry": { "label": "连接" } }
+}

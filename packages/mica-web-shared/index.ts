@@ -14,6 +14,12 @@ export {
   parseRuntimePort,
 } from './runtime-port.js';
 export {
+  isLoopbackRuntime,
+  isSameRuntime,
+  normalizeRuntimeAddress,
+  runtimeLabel,
+} from './runtime-address.js';
+export {
   APP_BASE_PATH,
   FILES_PAGE_PATH,
   SHARE_BASE_PATH,

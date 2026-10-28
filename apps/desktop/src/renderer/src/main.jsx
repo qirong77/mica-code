@@ -6,7 +6,7 @@ import ShareIndex from './ShareIndex'
 import '../assets/app.css'
 import { ensureMicaApi } from './transport'
 import { ensureUiState } from './ui-state'
-import { LOCAL_SERVER_URL, currentServerUrl, isLoopbackServer } from './servers'
+import { DEFAULT_RUNTIME_URL, isLoopbackRuntime } from '@packages/mica-web-shared/index.js'
 import { readAppUrl } from './app-url'
 import { createDesktopConfigWebClient } from './config-web'
 
@@ -88,13 +88,13 @@ function renderBootError(error) {
 
   // 地址是切过去的另一台 mica 时（那台关机/重启了）给一条回本机的退路，
   // 否则整页停在错误页、连切换入口都点不到。
-  if (!isLoopbackServer(currentServerUrl(window.location))) {
+  if (!isLoopbackRuntime(window.location.origin)) {
     const home = document.createElement('button')
     home.type = 'button'
     home.className =
       'mt-2 rounded-sm border border-white/10 bg-white/[.06] px-3 py-1 text-xs text-white hover:bg-white/10'
     home.textContent = '返回本机'
-    home.addEventListener('click', () => window.location.assign(LOCAL_SERVER_URL))
+    home.addEventListener('click', () => window.location.assign(DEFAULT_RUNTIME_URL))
     box.append(home)
   }
   root.replaceChildren(box)

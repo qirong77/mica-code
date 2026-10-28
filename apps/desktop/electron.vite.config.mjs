@@ -82,9 +82,15 @@ export default defineConfig({
       alias: {
         '@renderer': resolve('src/renderer/src'),
         '@packages': resolve('../../packages'),
+        // 插件自己的桌面入口（`plugins/<id>/desktop.jsx`）：页面按 id 去插件目录找模块，
+        // 宿主因此不需要登记任何具体插件。指向仓库根，glob 才能收录这些文件。
+        '@plugins': resolve('../../plugins'),
         // 配置页组件来自 packages/mica-config-ui：显式指向 .tsx 入口，页面代码是 .jsx，
         // 写 `.../index.js` 不会回退到 TypeScript 源码
         '@mica-config-ui/web': resolve('../../packages/mica-config-ui/web/index.tsx'),
+        // 插件入口行的图标要在侧栏首屏就画出来，而整个配置页是懒加载的独立 chunk：
+        // 深路径直接指向图标表，别为了一个图标把配置页拖进主包
+        '@mica-config-ui/plugin-icons': resolve('../../packages/mica-config-ui/web/pluginIcons.tsx'),
       }
     },
     server: {

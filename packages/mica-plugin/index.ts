@@ -176,6 +176,7 @@ export type {
   DesktopCheckDefinition,
   DesktopCheckId,
   PluginDesktopApi,
+  PluginDesktopEntry,
   PluginDesktopRequirements,
   PluginSkillDefinition,
   PluginSkillRegistration,

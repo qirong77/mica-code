@@ -171,6 +171,7 @@ describe('parsePluginManifest', () => {
         llm: null,
         requires: [],
         desktopChecks: [],
+        desktopEntry: null,
       },
     });
   });

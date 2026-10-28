@@ -22,7 +22,6 @@ import {
   IconNotebook,
   IconPlus,
   IconRocket,
-  IconServer,
   IconSettings,
   IconTerminal,
   IconTerminal2,
@@ -32,11 +31,11 @@ import {
 import { BranchPicker } from './BranchPicker'
 import { ChatView } from './ChatView'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
-import { ServerCard, ServerCardPopover } from './ServerCard'
+import { PluginEntries } from './PluginEntries'
 import { SessionTree } from './SessionTree'
 import { SessionNotesDialog } from './SessionNotesDialog'
 import TerminalKeyBar from './TerminalKeyBar'
-import { currentServerUrl, isElectronShell, openServerTarget, serverLabel } from './servers'
+import { isElectronShell } from './shell-env'
 import { detachedFilesUrl, readAppUrl, sessionShareUrl, urlWithState } from './app-url'
 import { TextPrompt } from './text-prompt'
 import { copyText } from './transport'
@@ -834,13 +833,6 @@ export default function App() {
   // 用底部居中一行提示，不弹窗、不挡内容（见 showToast）。
   const [toast, setToast] = useState(null)
   const toastTimer = useRef(null)
-  // 「切换 Mica 服务器」：切换 = 打开另一台运行时的地址（见 ServerCard）。
-  // 桌面上鼠标移到 Server 行就浮出卡片（强阻断的弹窗在这里没有必要），手机上点一下
-  // 在抽屉里原地展开。
-  const [serverMenuOpen, setServerMenuOpen] = useState(false)
-  const serverRowRef = useRef(null)
-  const serverCloseTimer = useRef(null)
-  const currentServer = currentServerUrl(window.location)
   useEffect(() => {
     if (!isMobile) setSessionsOpen(false)
   }, [isMobile])
@@ -853,55 +845,6 @@ export default function App() {
     setToast({ text, error })
     toastTimer.current = setTimeout(() => setToast(null), error ? 4000 : 1800)
   }, [])
-
-  // Server 卡片：桌面上悬停即开、移开（含移进卡片再移出）延迟关闭；触屏没有悬停，
-  // 点一下切换。
-  const coarsePointer = useMemo(
-    () => typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches,
-    []
-  )
-  const openServerMenu = useCallback(() => {
-    clearTimeout(serverCloseTimer.current)
-    setServerMenuOpen(true)
-  }, [])
-  const scheduleServerMenuClose = useCallback(() => {
-    clearTimeout(serverCloseTimer.current)
-    serverCloseTimer.current = setTimeout(() => setServerMenuOpen(false), 160)
-  }, [])
-  const toggleServerMenu = useCallback(() => {
-    // 桌面端点行不关卡片（悬停已经把它打开了，点一下就关会很难用）
-    if (!coarsePointer) {
-      openServerMenu()
-      return
-    }
-    setServerMenuOpen((open) => !open)
-  }, [coarsePointer, openServerMenu])
-  const hoverServerRow = !isMobile && !coarsePointer
-
-  useEffect(() => {
-    if (!serverMenuOpen) return undefined
-    const onKey = (event) => {
-      if (event.key === 'Escape') setServerMenuOpen(false)
-    }
-    const onPointerDown = (event) => {
-      if (event.target.closest?.('[data-server-card]')) return
-      if (serverRowRef.current?.contains(event.target)) return
-      setServerMenuOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      document.removeEventListener('pointerdown', onPointerDown)
-    }
-  }, [serverMenuOpen])
-
-  useEffect(() => {
-    if (isMobile && !sessionsOpen) setServerMenuOpen(false)
-  }, [isMobile, sessionsOpen])
-
-  // 切到另一台运行时 = 打开它的地址：外壳里由主进程弹一个新窗口，浏览器里开新标签页
-  const switchServer = useCallback((url) => openServerTarget(url), [])
 
   const promptResolver = useRef(null)
   const [git, setGit] = useState({
@@ -2475,28 +2418,9 @@ export default function App() {
                 <IconSettings size={14} className="shrink-0 opacity-75" />
                 <span>Settings</span>
               </button>
-              <div
-                ref={serverRowRef}
-                className="relative"
-                onMouseEnter={hoverServerRow ? openServerMenu : undefined}
-                onMouseLeave={hoverServerRow ? scheduleServerMenuClose : undefined}
-              >
-                <button
-                  type="button"
-                  aria-expanded={serverMenuOpen}
-                  title="切换 Mica 服务器（连接另一台机器上的 Mica）"
-                  className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] transition-colors hover:bg-white/[.05] hover:text-white ${
-                    serverMenuOpen ? 'bg-white/[.05] text-white' : 'text-white/60'
-                  }`}
-                  onClick={toggleServerMenu}
-                >
-                  <IconServer size={14} className="shrink-0 opacity-60" />
-                  <span className="shrink-0">Server</span>
-                  <span className="ml-auto min-w-0 truncate text-[11px] text-white/35">
-                    {serverLabel(currentServer)}
-                  </span>
-                </button>
-              </div>
+              {/* 插件声明的桌面入口（清单 `desktop.entry` + 插件目录里的 desktop.jsx）：
+                  宿主只画一行和一张卡片，里面是什么由插件决定。 */}
+              <PluginEntries />
               {/* 插件入口排在最后：插件是「装进来的能力」，属于调整类入口，和 Server /
                   Settings 一起收在同一列末尾。点它进插件整页（目录 → 点一张卡进详情），
                   不做下拉面板。 */}
@@ -2513,15 +2437,6 @@ export default function App() {
                 <span>Plugins</span>
               </button>
             </nav>
-            {serverMenuOpen && isMobile && (
-              <div className="no-drag shrink-0 px-2 pb-2">
-                <ServerCard
-                  current={currentServer}
-                  onSwitch={switchServer}
-                  onDismiss={() => setServerMenuOpen(false)}
-                />
-              </div>
-            )}
             <SessionTree
               sessions={sessions}
               pins={pins}
@@ -3004,16 +2919,6 @@ export default function App() {
             setCwdModalOpen(false)
             changeChatCwd(dir)
           }}
-        />
-      )}
-      {serverMenuOpen && !isMobile && (
-        <ServerCardPopover
-          anchorRef={serverRowRef}
-          onPointerEnter={openServerMenu}
-          onPointerLeave={scheduleServerMenuClose}
-          current={currentServer}
-          onSwitch={switchServer}
-          onDismiss={() => setServerMenuOpen(false)}
         />
       )}
       {/* 设置 / 插件：盖住整个窗口的一层。留一条顶部拖动条，否则整页打开后窗口没法拖

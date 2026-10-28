@@ -40,7 +40,7 @@ class SystemPromptBuilder {
       const listing = formatSkillsIndex(skills);
       this.append(
         'skills',
-        `可用 skills 索引如下。这里只是索引；需要使用时通过 Skill 工具读取完整说明。\n\n${listing}`,
+        `可用 skills 索引如下。这里只是索引；需要使用时通过 \`skill\` 工具读取完整说明。\n\n${listing}`,
       );
     }
 

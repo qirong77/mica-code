@@ -50,6 +50,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         settings: readSettings(manifest.id, manifest.settings, configRoot),
         llm: readLlm(manifest.id, manifest.llm, manifest.settings, configRoot),
         desktopChecks: resolveDesktopChecks(manifest.desktopChecks),
+        desktopEntry: manifest.desktopEntry,
         health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(manifest.id),
         loadStatus: status?.status,
@@ -75,6 +76,8 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         settings: readSettings(plugin.id, plugin.settings, configRoot),
         llm: readLlm(plugin.id, plugin.llm, plugin.settings, configRoot),
         desktopChecks: resolveDesktopChecks(plugin.desktopChecks),
+        // 用户插件没有打包进页面的前端模块，声明了 `desktop.entry` 也渲染不出入口。
+        desktopEntry: null,
         health: micaPlugin.readPluginHealth(plugin.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(plugin.id),
         loadStatus: status?.status,
