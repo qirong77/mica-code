@@ -44,15 +44,20 @@ export function remoteAccessFile() {
   return join(micaHome(), 'remote-access.json')
 }
 
-/** 读策略。文件不存在、读不出来、内容坏掉，一律回到默认（不启用 + 默认口令）。 */
+/**
+ * 读策略。文件不存在、读不出来、内容坏掉，一律回到默认（不启用 + 默认口令）。
+ *
+ * `secret` 一定会被补齐并落盘：分享链接的凭据也由它派生，而分享在口令关闭时照常可用
+ * （默认状态）。少了 secret 就只有拼出空令牌，分享页里的接口调用会全部失败。
+ */
 export function readRemoteAccessPolicy() {
   const file = remoteAccessFile()
   let stat = null
   try {
     stat = statSync(file)
   } catch {
-    cacheStamp = { file, mtimeMs: -1, size: -1 }
-    cache = emptyRemoteAccessPolicy()
+    cache = ensureSecret(emptyRemoteAccessPolicy())
+    cacheStamp = stampOf(file)
     return cache
   }
   if (
@@ -69,9 +74,28 @@ export function readRemoteAccessPolicy() {
   } catch {
     raw = null
   }
-  cache = normalizeRemoteAccessPolicy(raw)
-  cacheStamp = { file, mtimeMs: stat.mtimeMs, size: stat.size }
+  cache = ensureSecret(normalizeRemoteAccessPolicy(raw))
+  cacheStamp = stampOf(file)
   return cache
+}
+
+function stampOf(file) {
+  try {
+    const stat = statSync(file)
+    return { file, mtimeMs: stat.mtimeMs, size: stat.size }
+  } catch {
+    return { file, mtimeMs: -1, size: -1 }
+  }
+}
+
+/** 老文件、手改丢掉的 secret：补一个并写回（写不了盘就只活这次进程）。 */
+function ensureSecret(policy) {
+  if (policy.secret) return policy
+  try {
+    return writeRemoteAccessPolicy(policy)
+  } catch {
+    return withGeneratedSecret(policy)
+  }
 }
 
 /**

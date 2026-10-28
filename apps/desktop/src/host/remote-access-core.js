@@ -1,7 +1,8 @@
 /**
  * 远程访问口令：纯逻辑（不碰磁盘、electron、node:http），便于单测。
  *
- * 运行时的默认边界在 `access-core.remoteRequestAllowed`——非本机只拿得到分享视图。
+ * 运行时的默认边界在 `access-core.classifyRemotePath` + 这里的 `remoteAccessDecision`——
+ * 非本机只拿得到「他手上那条链接指向的分享视图」和它的静态资源。
  * 但「另一台机器用完整应用」是个正当需求（connections 连别的运行时、手机当完整客户端），
  * 所以这里给它一条通道：**口令对了就当本机**。
  *
@@ -9,8 +10,9 @@
  *
  * 1. 口令不是账号体系：只有一条口令、没有用户名、没有按会话的可见范围。过门之后依旧是
  *    「对等的完整客户端」，和回环连接完全一样。多一层角色分叉只会让边界更难解释。
- * 2. 分享视图永远免密。分享出去的链接本来就是「把这条会话借给对方」，给它加一道口令等于
- *    把已经发出去的链接全部作废；开启口令保护的是「完整界面」。
+ * 2. 分享链接永远免密。分享出去的链接本来就是「把这条会话（连同它背后的 agent）借给
+ *    对方」，给它加一道口令等于把已经发出去的链接全部作废——**链接本身就是那张凭据**，
+ *    所以它必须指向一条真实存在的会话：`/share` 裸路径不给凭据，随便编一个 id 也不给。
  * 3. cookie 里的令牌由 `secret` + 口令派生，不落库、不存清单：改口令即全部失效，也不存在
  *    「已签发的令牌列表」这种需要清理的状态。代价是无法单独踢掉某台设备。
  *
@@ -18,8 +20,7 @@
  */
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { isSharePath } from '@packages/mica-web-shared'
-import { canonicalPathname, isAssetPath } from './access-core.js'
+import { classifyRemotePath } from './access-core.js'
 
 export const REMOTE_ACCESS_VERSION = 1
 
@@ -180,30 +181,70 @@ export function safeNextPath(value) {
 }
 
 /**
+ * 登录失败限速：同一来源连续错 `maxFailures` 次锁 `lockMs`。
+ *
+ * 默认口令是四位数，10 000 次就能穷举——挡住穷举的不是口令本身，是这把锁。计数按来源
+ * 地址隔离，成功一次即清零；锁过期后重新计数。
+ */
+export function createLoginThrottle({ maxFailures = 5, lockMs = 60_000, now = Date.now } = {}) {
+  const failures = new Map()
+  const blockedUntil = (key, at) => {
+    const entry = failures.get(key)
+    if (!entry?.lockedUntil) return 0
+    if (entry.lockedUntil > at) return entry.lockedUntil - at
+    failures.delete(key)
+    return 0
+  }
+  return {
+    /** 还要等多少毫秒才能重试，0 表示可以试。 */
+    retryAfterMs(key) {
+      return blockedUntil(key, now())
+    },
+    recordFailure(key) {
+      const at = now()
+      const entry = failures.get(key) ?? { count: 0, lockedUntil: 0 }
+      entry.count += 1
+      if (entry.count >= maxFailures) {
+        entry.lockedUntil = at + lockMs
+        entry.count = 0
+      }
+      failures.set(key, entry)
+    },
+    recordSuccess(key) {
+      failures.delete(key)
+    }
+  }
+}
+
+/**
  * 一个远程请求该被怎么处理。
  *
- * - `allow`：放行（本机、令牌有效、分享视图与它要用的资源）；
- * - `login`：需要口令（完整界面，或开启口令后的 `/api/*`）；
- * - `not-found`：按不存在处理（没开口令时碰到了分享视图之外的东西）。
+ * - `allow`：放行（本机、口令令牌有效、打开过有效分享链接的浏览器取它的资源和接口）；
+ * - `login`：需要口令（开启口令后碰到了凭据之外的东西）；
+ * - `not-found`：按不存在处理（没开口令时，除了那条链接什么都看不到）。
  *
- * 分享视图与静态资源始终放行：已经发出去的链接不该因为开了口令而失效。开启口令之后，
- * `/api/*` 要求令牌——裸 curl 不再能直接操作这台机器，而分享页打开时会先拿到
- * share 作用域的 cookie，所以分享出来的那一页照旧能用。
+ * 三条边界值得记牢：
+ *
+ * 1. **拿不到凭据就什么都看不到。** 没开口令时 `/api/*` 也不对外开放——它等于整台机器
+ *    （shell、文件、配置里的 API key）。以前靠「密码关闭时放行」维持分享页能用，那条路
+ *    等于让任何人绕开口令；现在分享页靠的是打开链接时签发的 share 作用域 cookie。
+ * 2. **链接必须指向真实存在的会话。** `shareLink` 由调用方用「会话文件是否存在」算出来，
+ *    这里不猜：裸 `/share`（分享列表页）和编造的 id 都不算链接，远程拿到的是登录页或 404。
+ * 3. **静态资源始终放行**：登录页与分享页都要靠它们才画得出来，它们本身不含任何数据。
  */
 export function remoteAccessDecision({
   local = false,
   policy = emptyRemoteAccessPolicy(),
   pathname,
   hasAccess = false,
-  hasShare = false
+  hasShare = false,
+  shareLink = false
 } = {}) {
   if (local || hasAccess) return 'allow'
   if (typeof pathname !== 'string' || !pathname) return policy.enabled ? 'login' : 'not-found'
-  const value = canonicalPathname(pathname)
-  if (isSharePath(value) || isAssetPath(value)) return 'allow'
-  if (value.startsWith('/api/')) {
-    if (!policy.enabled) return 'allow'
-    return hasShare ? 'allow' : 'login'
-  }
+  const kind = classifyRemotePath(pathname)
+  if (kind === 'asset') return 'allow'
+  if (kind === 'share' && shareLink) return 'allow'
+  if (kind === 'api' && hasShare) return 'allow'
   return policy.enabled ? 'login' : 'not-found'
 }

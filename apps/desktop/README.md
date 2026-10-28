@@ -472,30 +472,33 @@ agent), so keep the warning in this file honest.
 
 #### Who can see which path
 
-`remoteRequestAllowed` in `src/host/access-core.js` is the one place that narrows paths, and it judges
-by **who is connecting**, not by origin:
+`classifyRemotePath` in `src/host/access-core.js` is the one place that sorts a path into
+`share` / `api` / `asset` / `other`, and `remoteAccessDecision` in
+`src/host/remote-access-core.js` decides what a given remote request gets. Both judge by **who is
+connecting and what they hold**, never by origin:
 
 - a loopback connection — or one listed in `MICA_DESKTOP_TRUSTED_CLIENTS` (comma-separated addresses,
   last-octet wildcard allowed: `172.22.240.*`) — is a full client and sees every path;
-- everyone else only gets the share surface: `/share` and everything below it and the built assets
-  (whitelisted extensions). `/`, `/mica-web`, `/files`, `/terminal-control`, `/terminal.html`,
-  `/files.html`, `/remote/*` and `/mcp/*` answer `404`: a browser navigation gets a one-line
-  explanation, everything else the same `{"ok":false,"error":"Not found"}` an unknown path gets.
+- **a valid share link is the only thing that is public**: `/share?session=<id>` where that session
+  file exists. Opening it is what hands out the `mica_share_scope` cookie, and that cookie is what
+  unlocks `/api/*`. Bare `/share` (the share index) and invented ids are *not* links.
 
-Remote access is judged by `remoteAccessDecision` in `src/host/remote-access-core.js` (the path
-whitelist above is its "no password configured" case):
-
-| remote client | no password configured | password enabled |
+| remote request | no password configured | password enabled |
 | --- | --- | --- |
-| `/share*`, built assets | allowed | allowed |
-| `/api/*` | allowed | needs a token (see below) |
-| `/`, `/mica-web`, `/files`, `/terminal*`, `/remote/*`, `/mcp/*` | `404` | redirect to the login page |
+| `/share?session=<existing id>` | allowed, issues the share cookie | allowed, issues the share cookie |
+| built assets (whitelisted extensions) | allowed | allowed |
+| `/api/*` **with** the share cookie | allowed | allowed |
+| `/api/*` **without** it | `404` | `401` / login page |
+| `/share` (index), `/`, `/mica-web`, `/files`, `/terminal*`, `/remote/*`, `/mcp/*` | `404` | redirect to the login page |
 
-This is deliberately **not** a permission model. The share surface talks to the same `/api/*`, so a
-remote client that opens a share link can still do what it could before — list sessions,
-`POST /api/invoke`, open a shell. What it removes is the bad default: typing
-`http://<lan-ip>:8787` into a browser used to render this machine's full app (session list, files,
-settings, share index); now it gets a 404, or a login page once a password is set.
+So: someone who has only the address gets **nothing at all** — not even `/api/*`, which is the whole
+machine (a real shell, read/write files, the API keys in the config page). Someone you handed a link
+to gets what the link implies, exactly as before: that session *and* the API behind it. An expired or
+deleted session turns the link into a 404. `/api/*` answers `404` rather than `401` while no password
+is configured, because "there is nothing here" is the truth a stranger should see.
+
+This is deliberately **not** a permission model — a link holder is an API client — but the bad
+default is gone: typing `http://<lan-ip>:8787` into a browser no longer even renders the app.
 
 #### The remote access password
 
@@ -508,10 +511,11 @@ login page (`/__access`) instead of the app; posting the right password sets `mi
   `0600`). `secret` is generated once by the runtime; the cookie value is
   `HMAC(secret, "access|share:" + password)`, so changing the password invalidates every issued
   cookie without keeping a revocation list. Deleting the file resets everything to off / `0000`.
-- The share view stays password-free on purpose. Enabling the password protects the *full* app, not
-  the link you already handed out — a share link must keep working. Since `/api/*` does require a
-  token once the password is on, opening a share page hands out a `mica_share_scope` cookie (same
-  HMAC, different scope) that only unlocks `/api/*`; it cannot open the app.
+- Share links stay password-free on purpose. Enabling the password protects the *full* app, not the
+  link you already handed out — a share link must keep working. The `mica_share_scope` cookie (same
+  HMAC, different scope) is issued **only** when an existing session's link is opened, and it only
+  unlocks `/api/*`; it cannot open the app. That distinction is the whole door: before it, any
+  request to `/share` was enough to mint that cookie, so the password protected nothing.
 - Login is throttled per peer address: five wrong attempts lock that address for 60 s (`429`). A
   four-digit default is guessable in 10 000 tries, so the throttle is what makes it a door rather
   than a speed bump — change the password if the port is reachable by people you don't know.
@@ -528,8 +532,8 @@ the *full* app on the other side: the target machine either lists this one in
 the cookie is per browser profile), otherwise that window lands on the 404 page.
 
 Unmatched `/api/*` paths answer that same `404` instead of falling through to the SPA fallback. Without
-that, `GET /api/invoke` in a browser came back as `index.html` — the full app — and `/api/*` is exactly
-the one non-share prefix a remote client is allowed to touch.
+that, `GET /api/invoke` in a browser came back as `index.html` — the full app — and `/api/*` is the
+prefix a share-link holder is allowed to touch.
 
 The login page lives at `/__access` and is served by the runtime itself (`renderLoginPage` in
 `src/server/index.js`), not by the renderer bundle: it has to work *before* the app is allowed to load.
@@ -710,10 +714,11 @@ var(--vvh, 100dvh) }` rather than `html, body, #root`, because a later styleshee
   stayed behind the keyboard while `--vvh` was computed perfectly. Page-level height chains belong
   to whichever host owns the whole page, never to the shared config stylesheet.
 
-> There is no authentication: anyone who can reach the port gets a shell on the host. The runtime
-> binds `0.0.0.0` by default (so phones can join); pass `--host 127.0.0.1` when you don't want that.
-> Remote clients are served only the share surface (`/share` + `/api/*`), so a browser on the LAN no
-> longer lands on the full app — see "Who can see which path".
+> There are no accounts: a client either gets through the door or does not, and everyone who is in
+> gets a shell on the host. The runtime binds `0.0.0.0` by default (so phones can join); pass
+> `--host 127.0.0.1` when you don't want that. Remote clients are served only the share surface
+> (`/share` + assets) until the remote access password is enabled in the `Connections` card, so a
+> browser on the LAN no longer lands on the full app — see "Who can see which path".
 
 ### App icon
 

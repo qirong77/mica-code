@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  classifyRemotePath,
   hostAllowed,
   hostnameOf,
   isLoopbackAddress,
   isPrivateLanAddress,
   isTrustedClientAddress,
   pickShareBaseUrl,
-  remoteRequestAllowed,
   sameSiteOriginAllowed
 } from './access-core'
 
@@ -130,47 +130,51 @@ describe('isTrustedClientAddress', () => {
   })
 })
 
-describe('remoteRequestAllowed', () => {
-  it('lets a remote client reach the share view and nothing else that is a page', () => {
-    // 分享链接本身：页面 + 它下面的资源
-    expect(remoteRequestAllowed('/share')).toBe(true)
-    expect(remoteRequestAllowed('/share/')).toBe(true)
-    expect(remoteRequestAllowed('/share/assets/index-abc.js')).toBe(true)
-    // 主页面、显式基路径、独立窗口、控制端点都不给
-    expect(remoteRequestAllowed('/')).toBe(false)
-    expect(remoteRequestAllowed('/mica-web')).toBe(false)
-    expect(remoteRequestAllowed('/mica-web/')).toBe(false)
-    expect(remoteRequestAllowed('/files')).toBe(false)
-    expect(remoteRequestAllowed('/terminal-control')).toBe(false)
-    expect(remoteRequestAllowed('/terminal.html')).toBe(false)
-    expect(remoteRequestAllowed('/files.html')).toBe(false)
-    expect(remoteRequestAllowed('/index.html')).toBe(false)
-    expect(remoteRequestAllowed('/remote/control')).toBe(false)
-    expect(remoteRequestAllowed('/remote/terminal/sessions')).toBe(false)
-    expect(remoteRequestAllowed('/mcp/terminal')).toBe(false)
+describe('classifyRemotePath', () => {
+  it('marks the share view as its own class', () => {
+    expect(classifyRemotePath('/share')).toBe('share')
+    expect(classifyRemotePath('/share/')).toBe('share')
+    expect(classifyRemotePath('/share/assets/index-abc.js')).toBe('share')
+  })
+
+  it('keeps the pages remote clients must never see out of every allowed class', () => {
+    for (const pathname of [
+      '/',
+      '/mica-web',
+      '/mica-web/',
+      '/files',
+      '/terminal-control',
+      '/terminal.html',
+      '/files.html',
+      '/index.html',
+      '/remote/control',
+      '/remote/terminal/sessions',
+      '/mcp/terminal'
+    ]) {
+      expect(classifyRemotePath(pathname)).toBe('other')
+    }
   })
 
   it('lets the share page load its own assets from the origin root', () => {
     // 打开 `/share?session=x` 时相对引用按 `/` 解析，资源落在根路径下
-    expect(remoteRequestAllowed('/assets/index-abc.js')).toBe(true)
-    expect(remoteRequestAllowed('/assets/index-abc.css')).toBe(true)
-    expect(remoteRequestAllowed('/favicon.ico')).toBe(true)
-    expect(remoteRequestAllowed('/manifest.webmanifest')).toBe(true)
+    expect(classifyRemotePath('/assets/index-abc.js')).toBe('asset')
+    expect(classifyRemotePath('/assets/index-abc.css')).toBe('asset')
+    expect(classifyRemotePath('/favicon.ico')).toBe('asset')
+    expect(classifyRemotePath('/manifest.webmanifest')).toBe('asset')
   })
 
-  it('keeps the api the share page talks to, but not the bare /api path', () => {
-    // 分享视图与主应用共用同一份接口：收窄它等于把分享链接废掉
-    expect(remoteRequestAllowed('/api/invoke')).toBe(true)
-    expect(remoteRequestAllowed('/api/events')).toBe(true)
-    expect(remoteRequestAllowed('/api/health')).toBe(true)
+  it('marks the api the share page talks to, but not the bare /api path', () => {
+    expect(classifyRemotePath('/api/invoke')).toBe('api')
+    expect(classifyRemotePath('/api/events')).toBe('api')
+    expect(classifyRemotePath('/api/health')).toBe('api')
     // `/api` 没有处理器，会落到「SPA 回退成 index.html」上——那是主页面
-    expect(remoteRequestAllowed('/api')).toBe(false)
+    expect(classifyRemotePath('/api')).toBe('other')
   })
 
   it('cannot be smuggled out of the share prefix', () => {
-    expect(remoteRequestAllowed('/share/../terminal.html')).toBe(false)
-    expect(remoteRequestAllowed('/share/%2e%2e/terminal.html')).toBe(false)
-    expect(remoteRequestAllowed('//evil.example/share')).toBe(false)
+    expect(classifyRemotePath('/share/../terminal.html')).toBe('other')
+    expect(classifyRemotePath('/share/%2e%2e/terminal.html')).toBe('other')
+    expect(classifyRemotePath('//evil.example/share')).not.toBe('share')
   })
 })
 

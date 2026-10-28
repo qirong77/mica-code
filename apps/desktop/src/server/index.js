@@ -21,6 +21,7 @@ import {
   REMOTE_ACCESS_MAX_AGE,
   SHARE_SCOPE_COOKIE,
   clearedCookie,
+  createLoginThrottle,
   hasScopeToken,
   parseCookies,
   remoteAccessCookie,
@@ -36,6 +37,7 @@ import {
   disposeAllChatRuns,
   registerChatIpc,
   runLoopTurn,
+  sessionExists,
   setChatNotifyServer
 } from '../host/chat.js'
 import { disposeLoops, registerLoopIpc, setLoopBroadcaster, setLoopRunner } from '../host/loops.js'
@@ -275,31 +277,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #cdd3
 }
 
 /**
- * 登录失败的上限：口令默认就是 `0000`，四位数字只有一万种组合，不限速等于没有口令。
- * 按来源地址计，连续失败 5 次锁 60 秒；成功登录清空。进程内记录——重启即清空，
- * 这符合「这条口令本来就不是账号体系」的定位。
+ * 限速本身在 `remote-access-core` 的 `createLoginThrottle` 里（要能单测）；这里只是按
+ * 来源地址取一个键。进程内记录，重启即清空——这条口令不是账号体系。
  */
-const LOGIN_MAX_FAILURES = 5
-const LOGIN_LOCK_MS = 60_000
-const loginFailures = new Map()
+const loginThrottle = createLoginThrottle()
 
-function loginThrottle(req) {
-  const key = String(req?.socket?.remoteAddress || '')
-  const record = loginFailures.get(key)
-  if (!record) return { blocked: false, key }
-  if (record.blockedUntil > Date.now()) return { blocked: true, key }
-  if (record.blockedUntil) loginFailures.delete(key)
-  return { blocked: false, key }
-}
-
-function recordLoginFailure(key) {
-  const record = loginFailures.get(key) ?? { failures: 0, blockedUntil: 0 }
-  record.failures += 1
-  if (record.failures >= LOGIN_MAX_FAILURES) {
-    record.failures = 0
-    record.blockedUntil = Date.now() + LOGIN_LOCK_MS
-  }
-  loginFailures.set(key, record)
+function loginPeer(req) {
+  return String(req?.socket?.remoteAddress || '')
 }
 
 function escapeHtml(value) {
@@ -314,10 +298,12 @@ function escapeHtml(value) {
  * 口令登录页。刻意做成一张自包含的静态表单：它要在**页面产物之外**工作——
  * 没过口令时主界面根本不该被下发，这里也就不能依赖它。
  */
-function renderLoginPage({ next = '/', error = '', locked = false } = {}) {
-  const hint = error
-    ? `<p class="error">${escapeHtml(error)}</p>`
-    : `<p class="hint">这台机器上的 Mica Code 要求先输入访问口令。口令在它侧栏的 Connections 卡片里（「其他机器访问这台机器」）。</p>`
+function renderLoginPage({ next = '/', error = '', locked = false, enabled = true } = {}) {
+  const hint = !enabled
+    ? `<p class="hint">这台机器没有开启远程访问：完整界面只在本机可用，别的设备只能打开分享链接。</p>`
+    : error
+      ? `<p class="error">${escapeHtml(error)}</p>`
+      : `<p class="hint">这台机器上的 Mica Code 要求先输入访问口令。口令在它侧栏的 Connections 卡片里（「其他机器访问这台机器」）。</p>`
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -359,8 +345,8 @@ button:disabled, input:disabled { background: #2f333a; color: #6d737d; cursor: d
 ${hint}
 <form method="post" action="${REMOTE_ACCESS_LOGIN_ENDPOINT}">
 <input type="hidden" name="next" value="${escapeHtml(next)}" />
-<input type="password" name="password" autocomplete="current-password" placeholder="访问口令" autofocus ${locked ? 'disabled' : ''} />
-<button type="submit" ${locked ? 'disabled' : ''}>${locked ? '稍后再试' : '进入'}</button>
+<input type="password" name="password" autocomplete="current-password" placeholder="访问口令" autofocus ${locked || !enabled ? 'disabled' : ''} />
+<button type="submit" ${locked || !enabled ? 'disabled' : ''}>${locked ? '稍后再试' : enabled ? '进入' : '未开启'}</button>
 </form>
 </main>
 </body>
@@ -368,7 +354,7 @@ ${hint}
 }
 
 function sendLoginPage(req, res, options = {}) {
-  const body = renderLoginPage(options)
+  const body = renderLoginPage({ ...options, enabled: readRemoteAccessPolicy().enabled })
   res.writeHead(options.locked ? 429 : options.error ? 401 : 200, {
     'content-type': MIME_TYPES['.html'],
     'content-length': Buffer.byteLength(body),
@@ -384,8 +370,8 @@ function parseFormBody(text) {
 
 /** 登录提交：过限速 → 校验口令 → 发 cookie → 回到原来想去的路径。 */
 async function handleLoginSubmit(req, res) {
-  const throttle = loginThrottle(req)
-  if (throttle.blocked) {
+  const peer = loginPeer(req)
+  if (loginThrottle.retryAfterMs(peer) > 0) {
     return sendLoginPage(req, res, { locked: true, error: '尝试次数过多，请稍后再试' })
   }
   let form = { password: '', next: '/' }
@@ -396,10 +382,10 @@ async function handleLoginSubmit(req, res) {
   }
   const policy = readRemoteAccessPolicy()
   if (!verifyRemoteAccessPassword(form.password, policy)) {
-    recordLoginFailure(throttle.key)
+    loginThrottle.recordFailure(peer)
     return sendLoginPage(req, res, { next: safeNextPath(form.next), error: '口令不对' })
   }
-  loginFailures.delete(throttle.key)
+  loginThrottle.recordSuccess(peer)
   res.setHeader(
     'set-cookie',
     remoteAccessCookie(REMOTE_ACCESS_COOKIE, remoteAccessToken(policy, 'access'), {
@@ -428,8 +414,28 @@ function remoteGate(req, pathname) {
     policy,
     pathname: pathname ?? '',
     hasAccess: hasScopeToken(cookies, policy, 'access'),
-    hasShare: hasScopeToken(cookies, policy, 'share')
+    hasShare: hasScopeToken(cookies, policy, 'share'),
+    shareLink: Boolean(shareLinkSessionId(req?.url))
   })
+}
+
+/**
+ * 这个路径是不是「一条有效的分享链接」：必须是 `/share` 本身、带 `session` 参数，而且那条
+ * 会话在这台机器上确实存在。
+ *
+ * 分享链接就是凭据（见 remote-access-core 的注释），所以这里绝不能只看到 `/share` 就认：
+ * 裸 `/share` 是分享列表页，随便编个 id 更不该换到任何东西。
+ */
+function shareLinkSessionId(target) {
+  // 用原始请求目标而不是 requestPathname：后者已经把查询串去掉了，`?session=` 就丢了
+  const value = String(target ?? '')
+  if (!value.startsWith('/') || value.startsWith('//')) return ''
+  const cut = value.search(/[?#]/)
+  const path = cut < 0 ? value : value.slice(0, cut)
+  if (path !== SHARE_BASE_PATH) return ''
+  const query = cut < 0 ? '' : value.slice(cut).replace(/^[?#]/, '')
+  const sessionId = new URLSearchParams(query).get('session')
+  return sessionId && sessionExists(sessionId) ? sessionId : ''
 }
 
 /**
@@ -913,7 +919,7 @@ function createRequestHandler({
         ) {
           return sendLoginPage(req, res, {
             next: safeNextPath(url.searchParams.get('next')),
-            locked: loginThrottle(req).blocked
+            locked: loginThrottle.retryAfterMs(loginPeer(req)) > 0
           })
         }
         if (pathname === REMOTE_ACCESS_LOGIN_ENDPOINT && req.method === 'POST') {
@@ -929,14 +935,12 @@ function createRequestHandler({
         if (gate === 'not-found') return sendRemoteNotFound(req, res)
         if (gate === 'login') return sendLoginRequired(req, res, pathname, url.search)
 
-        // 开启口令后，分享页要先拿到一张「打开过分享页」的凭据才能用 `/api/*`：
-        // 分享链接因此不必让人输口令，而裸 curl 打接口不再直接可用。
+        // 打开一条**有效**的分享链接，才给它一张用 `/api/*` 的凭据：链接本身即凭据，
+        // 所以裸 `/share`、编造的 id 都换不到。分享页因此不必输口令，而没拿到链接的人
+        // 连接口都摸不到——之前只要请求一次 `/share` 就能换到这张 cookie，等于口令形同虚设。
         const accessPolicy = readRemoteAccessPolicy()
-        if (
-          accessPolicy.enabled &&
-          isSharePath(url.pathname) &&
-          /\btext\/html\b/.test(String(req.headers.accept || ''))
-        ) {
+        const shareLinkSession = shareLinkSessionId(req.url)
+        if (shareLinkSession && /\btext\/html\b/.test(String(req.headers.accept || ''))) {
           res.setHeader(
             'set-cookie',
             remoteAccessCookie(SHARE_SCOPE_COOKIE, remoteAccessToken(accessPolicy, 'share'))

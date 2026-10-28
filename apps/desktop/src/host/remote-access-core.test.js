@@ -3,6 +3,7 @@ import {
   DEFAULT_REMOTE_ACCESS_PASSWORD,
   SHARE_SCOPE_COOKIE,
   REMOTE_ACCESS_COOKIE,
+  createLoginThrottle,
   emptyRemoteAccessPolicy,
   hasScopeToken,
   normalizeRemoteAccessPassword,
@@ -142,28 +143,56 @@ describe('remoteAccessDecision', () => {
     }
   })
 
-  it('shows the share surface to everyone, password or not', () => {
+  it('shows a share link that points at a real session, password or not', () => {
     for (const policy of [off, on]) {
-      expect(remoteAccessDecision({ policy, pathname: '/share' })).toBe('allow')
-      expect(remoteAccessDecision({ policy, pathname: '/share?session=x' })).toBe('allow')
+      expect(remoteAccessDecision({ policy, pathname: '/share', shareLink: true })).toBe('allow')
+      // 资源本身不含数据：登录页和分享页都要靠它才画得出来
       expect(remoteAccessDecision({ policy, pathname: '/assets/index-abc.js' })).toBe('allow')
     }
   })
 
-  it('hides the rest when no password is configured', () => {
-    // 没开口令时的行为与之前一致：完整界面按不存在处理
+  it('does not treat a bare /share or an invented id as a link', () => {
+    // 分享列表页会列出所有分享过的会话：它不是「别人手上那条链接」
+    expect(remoteAccessDecision({ policy: off, pathname: '/share' })).toBe('not-found')
+    expect(remoteAccessDecision({ policy: on, pathname: '/share' })).toBe('login')
+    expect(remoteAccessDecision({ policy: off, pathname: '/share?session=nope' })).toBe('not-found')
+    expect(remoteAccessDecision({ policy: on, pathname: '/share?session=nope' })).toBe('login')
+    // 打开过链接的浏览器可以回到链接本身
+    expect(
+      remoteAccessDecision({ policy: on, pathname: '/share', hasShare: true, shareLink: true })
+    ).toBe('allow')
+  })
+
+  it('hides everything else when no password is configured', () => {
     expect(remoteAccessDecision({ policy: off, pathname: '/' })).toBe('not-found')
     expect(remoteAccessDecision({ policy: off, pathname: '/mica-web' })).toBe('not-found')
     expect(remoteAccessDecision({ policy: off, pathname: '/files' })).toBe('not-found')
-    // 没开口令时接口照旧（分享链接的权限不变）
-    expect(remoteAccessDecision({ policy: off, pathname: '/api/invoke' })).toBe('allow')
+    // 接口等于整台机器（shell、文件、配置里的 key）：没口令、也没有分享链接就不给
+    expect(remoteAccessDecision({ policy: off, pathname: '/api/invoke' })).toBe('not-found')
+    expect(remoteAccessDecision({ policy: off, pathname: '/api/events' })).toBe('not-found')
+  })
+
+  it('opens the api only for a browser that already opened a valid link', () => {
+    // 分享页自己要调接口：凭据来自打开链接时签发的那张 cookie
+    expect(remoteAccessDecision({ policy: off, pathname: '/api/invoke', hasShare: true })).toBe(
+      'allow'
+    )
+    expect(remoteAccessDecision({ policy: on, pathname: '/api/invoke', hasShare: true })).toBe(
+      'allow'
+    )
+    // 但那张 cookie 开不了完整界面
+    expect(remoteAccessDecision({ policy: on, pathname: '/', hasShare: true })).toBe('login')
+    expect(remoteAccessDecision({ policy: off, pathname: '/', hasShare: true })).toBe('not-found')
+    expect(remoteAccessDecision({ policy: off, pathname: '/files', hasShare: true })).toBe(
+      'not-found'
+    )
   })
 
   it('asks for the password once it is enabled', () => {
     expect(remoteAccessDecision({ policy: on, pathname: '/' })).toBe('login')
     expect(remoteAccessDecision({ policy: on, pathname: '/mica-web' })).toBe('login')
     expect(remoteAccessDecision({ policy: on, pathname: '/terminal.html' })).toBe('login')
-    // 开启后裸接口调用要凭据：分享页打开时拿到的 share 凭据算
+    // 裸接口调用要凭据：口令进来的算，打开过分享链接的也算
     expect(remoteAccessDecision({ policy: on, pathname: '/api/invoke' })).toBe('login')
     expect(remoteAccessDecision({ policy: on, pathname: '/api/invoke', hasShare: true })).toBe(
       'allow'
@@ -173,5 +202,25 @@ describe('remoteAccessDecision', () => {
   it('treats a missing path as hidden rather than as the app', () => {
     expect(remoteAccessDecision({ policy: off, pathname: '' })).toBe('not-found')
     expect(remoteAccessDecision({ policy: on, pathname: undefined })).toBe('login')
+  })
+
+  describe('createLoginThrottle', () => {
+    it('locks one peer after the failure budget and clears on success', () => {
+      let clock = 1_000
+      const throttle = createLoginThrottle({ maxFailures: 3, lockMs: 500, now: () => clock })
+      expect(throttle.retryAfterMs('a')).toBe(0)
+      throttle.recordFailure('a')
+      throttle.recordFailure('a')
+      expect(throttle.retryAfterMs('a')).toBe(0)
+      throttle.recordFailure('a')
+      expect(throttle.retryAfterMs('a')).toBe(500)
+      // 另一个来源不受牵连
+      expect(throttle.retryAfterMs('b')).toBe(0)
+      clock += 500
+      expect(throttle.retryAfterMs('a')).toBe(0)
+      throttle.recordFailure('a')
+      throttle.recordSuccess('a')
+      expect(throttle.retryAfterMs('a')).toBe(0)
+    })
   })
 })

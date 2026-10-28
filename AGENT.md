@@ -330,7 +330,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 运行时只有一份 workspace / drafts / layout / rightTerms / terminalOpenByChat / cwd / Git 偏好，落盘 `userData/ui-state.json`；语义在 `mica-web-shared/ui-state.ts`。
 - 条目补丁用 `setUiStateEntries`，null 表示删除；回声在 store 的 `applyRemote` 认领一次，组件不得各自认领。
 - 同一 session 在所有页面是同一 node、run、终端；`dedupeSessionNodes` 合并重复页签。
-- 默认 `0.0.0.0:8787`，运行时无认证；README 保留风险说明。路径级收窄只在「谁在连」这一侧：非回环（且不在 `MICA_DESKTOP_TRUSTED_CLIENTS` 里）的连接只拿得到 `/share` + `/api/*` + 静态资源，其余页面与 `/remote/*`、`/mcp/*` 回 404——判定唯一实现在 `host/access-core.js` 的 `remoteRequestAllowed`，不要另写第二份路径白名单。
+- 默认 `0.0.0.0:8787`，没有账号体系，只有一道可选的口令；README 保留风险说明。非回环（且不在 `MICA_DESKTOP_TRUSTED_CLIENTS` 里）的连接**只公开别人手上那条分享链接**：`/share?session=<存在的会话>`，其余页面、`/remote/*`、`/mcp/*` 回 404 或登录页，**`/api/*` 没有凭据也回 404/401**（它等于整台机器）。路径分类唯一实现在 `host/access-core.js` 的 `classifyRemotePath`，放行判定在 `host/remote-access-core.js` 的 `remoteAccessDecision`，不要另写第二份白名单。
 - 端口常量唯一出口 `mica-web-shared/runtime-port.js`；页面路径约定唯一出口 `app-paths.ts`。
 - 单端口路由：`/`、`/mica-web`、`/share`、`/files`、`/terminal-control`、`/mcp/browser`、`/mcp/terminal`、`/api/*`、`/remote/control/*`、`/remote/terminal/*`。
 - 受控浏览器与终端服务走 `userData` 下的 Unix socket；`apps/config-web` 是独立宿主（默认 13987）。
@@ -393,7 +393,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 ### 受控浏览器与终端控制
 
 - 主进程业务例外：`src/main/browser/`、`src/main/terminal/`、`src/main/system/`；端点目录各自唯一（`browser-docs.js` / `terminal-docs.js` / `system-docs.js`），路由、文档与 MCP 操作清单同源。系统检查只服务宿主自己（`MICA_SYSTEM_SOCKET` 由运行时经 `host/system-checks.js` 直连，不做 `/remote/*` 代理、不暴露 MCP），探测用 `systemPreferences`、跳转用 `shell.openExternal`（renderer 的 `window.open` 只放行 http(s)）；配置页插件详情的「运行条件」经 `readDesktopChecks` / `openDesktopSettings` 两个桌面专有动作读它。
-- 远程访问默认只有分享视图：判定唯一实现在 `host/access-core.js` 的 `remoteRequestAllowed`，接线在 `server/index.js` 的 `isLocalClient` / `requestPathname`。要让别的机器用完整界面，用侧栏 Connections 卡片的「其他机器访问这台机器」（口令默认 `0000`，策略落 `$MICA_HOME/remote-access.json`，判定在 `host/remote-access-core.js` 的 `remoteAccessDecision`）；口令登录页与 cookie 签发只在 `server/index.js`，`/api/*` 在策略开启后同样需要口令或分享页 cookie。`MICA_DESKTOP_TRUSTED_CLIENTS` 仍可整段免密。
+- 远程访问默认只有分享视图：路径分类在 `host/access-core.js` 的 `classifyRemotePath`，放行判定在 `host/remote-access-core.js` 的 `remoteAccessDecision`，接线在 `server/index.js` 的 `isLocalClient` / `shareLinkSessionId`（后者用 `chat.js` 的 `sessionExists`，且必须看原始 `req.url`——`requestPathname` 已经吃掉查询串）。分享链接即凭据：只有「指向存在会话的 `/share?session=`」才签发 `mica_share_scope` cookie，裸 `/share` 与编造 id 都换不到。要让别的机器用完整界面，用侧栏 Connections 卡片的「其他机器访问这台机器」（口令默认 `0000`，策略落 `$MICA_HOME/remote-access.json`，`secret` 由 `readRemoteAccessPolicy` 补齐落盘）；口令登录页与 cookie 签发只在 `server/index.js`。`MICA_DESKTOP_TRUSTED_CLIENTS` 仍可整段免密。
 - 两者都走 Unix socket，由运行时在既有端口上代理；agent 侧各暴露一个 MCP tool `control`。
 - 浏览器窗口默认隐藏；依赖显示面的操作走 `withShownWindow` + `browser-reveal.js`（`setOpacity(0)` + `showInactive`，空闲 1.5s 收起）。
 - 同一 `persist:mica-browser` 分区共享 Cookie；服务保持 Origin/Host 守卫。

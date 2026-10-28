@@ -228,6 +228,16 @@ function sessionsDir() {
 }
 
 /**
+ * 会话文件是否存在。分享链接的有效性用它判定（链接就是凭据，指向的会话不在就当没这条
+ * 链接），所以这里只认「文件名合法 + 文件在」：id 里的 `/`、`..` 一律不成立。
+ */
+export function sessionExists(sessionId) {
+  const id = String(sessionId ?? '').trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)) return false
+  return existsSync(join(sessionsDir(), `${id}.json`))
+}
+
+/**
  * 另一个进程（第二个运行时实例，或终端里的 TUI / `mica exec`）是否正持有该 session 的
  * turn lease。桌面 host 自己从不取 lease——它的 turn 跑在 spawn 出去的 app-server 子进程里，
  * 由那个子进程持锁——所以本进程里跑着的会话由 `isChatSessionRunning` 拦，这里管的是别处。

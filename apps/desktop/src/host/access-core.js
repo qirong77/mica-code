@@ -281,29 +281,32 @@ export function canonicalPathname(pathname) {
 }
 
 /**
- * 非本机请求能碰到的东西：只有分享视图。
+ * 一个路径对非本机请求属于哪一类。给「要不要放行」的判定提供唯一一份路径分类。
  *
  * 运行时把整台机器挂在同一个端口上（终端是一个真 shell、files 是任意读写、配置页里有
  * API key、stats 是全部会话），而分享出去的链接只是 `/share?session=<id>`。拿到这个端口
- * 不等于该拿到主页面，所以远程请求只放行三类路径：
+ * 不等于该拿到主页面，所以远程看到的只有四类：
  *
- * 1. 分享视图（`/share` 及其下资源）；
- * 2. `/api/*`——分享页和主应用共用同一份接口，收窄它等于把分享链接废掉（分享的语义就是
- *    「把这条会话连同它背后的 agent 借给对方」，见 apps/desktop/README.md 的访问一节）；
- * 3. 产物里的静态资源（白名单扩展名）。
- *
- * 其余一律当不存在：主页面（`/`、`/mica-web`）、`/files`、`/terminal-control`、
- * `/remote/*`（受控浏览器与终端）、`/mcp/*`、`/terminal.html`、`/files.html`。
+ * 1. `share`：分享视图（`/share` 及其下资源）；
+ * 2. `api`：`/api/*`——分享页和主应用共用同一份接口，收窄它等于把分享链接废掉（分享的
+ *    语义就是「把这条会话连同它背后的 agent 借给对方」，见 apps/desktop/README.md）；
+ * 3. `asset`：产物里的静态资源（白名单扩展名）；
+ * 4. `other`：其余一切——主页面（`/`、`/mica-web`）、`/files`、`/terminal-control`、
+ *    `/remote/*`（受控浏览器与终端）、`/mcp/*`、`/terminal.html`、`/files.html`。
  *
  * 白名单而不是黑名单是刻意的：以后新增一个页面入口不会自动对远程开放。漏掉某种资源
  * 扩展名的表现是分享页缺个文件（一眼可见），而不是把新界面悄悄暴露出去。
+ *
+ * 分类只是「这类东西归谁」，是否放行还要看请求带的是不是有效凭据——判定在
+ * `remote-access-core.remoteAccessDecision`。
  */
-export function remoteRequestAllowed(pathname) {
+export function classifyRemotePath(pathname) {
   const value = canonicalPathname(pathname)
-  if (isSharePath(value)) return true
+  if (isSharePath(value)) return 'share'
   // 只认 `/api/`：`/api` 本身没有处理器，会落到「SPA 回退成 index.html」上
-  if (value.startsWith('/api/')) return true
-  return isAssetPath(value)
+  if (value.startsWith('/api/')) return 'api'
+  if (isAssetPath(value)) return 'asset'
+  return 'other'
 }
 
 /** 产物里的静态资源（白名单扩展名）。分享页与登录页都要靠它才画得出来。 */

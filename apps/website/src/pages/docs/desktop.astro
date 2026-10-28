@@ -160,8 +160,8 @@ npm run build:win</code></pre>
   </aside>
   <pre><code>{localWeb}</code></pre>
   <p>
-    分享链接形如 <code>/share?session=&lt;id&gt;</code>，用于呈现会话。它没有 token、有效期或撤销机制，
-    分享视图也不构成权限隔离：拿到链接的人同样能经 API 使用这台机器（终端、文件、配置页都包含在内）。
+    分享链接形如 <code>/share?session=&lt;id&gt;</code>，用于呈现会话。它没有独立 token、有效期或撤销机制，
+    链接本身就是凭据：拿到链接的人能经 API 使用这台机器（终端、文件、配置页都包含在内），所以只发给信任的人。
   </p>
   <p>
     从别的设备访问时运行时只提供分享视图：主页 <code>/</code>、<code>/mica-web</code>、文件页、终端窗口、
@@ -173,8 +173,9 @@ npm run build:win</code></pre>
     <code>--no-share</code> 只关闭分享视图路由。
   </p>
   <p>
-    打开访问口令后，<code>/api/*</code> 也会要求口令（或从分享页拿到的同源 cookie）；分享链接本身仍然免密，
-    所以发给别人的链接不需要对方输口令。
+    <code>/api/*</code> 一律要求凭据：访问口令，或打开一条有效分享链接后拿到的同源 cookie。它等于整台机器
+    （真 shell、任意读写、配置里的 API key），所以「知道地址」不等于「能用」。分享链接本身仍然免密，
+    发给别人的链接不需要对方输口令——链接就是那张凭据，只有指向真实存在会话的链接才算数。
   </p>
   <p>
     通过反向代理访问时，使用 <code>MICA_DESKTOP_ALLOWED_HOSTS</code> 配置允许的代理主机名；
