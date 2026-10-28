@@ -4,9 +4,9 @@ import type {
   MicaBtwThread,
   MicaBtwToolCall,
 } from '@packages/mica-runtime/index.js';
-// 直接从子路径取：`@packages/mica-builtin-commands/index.js` 会经 commands/btw.js
-// 拖进 Ink/React，而 app-server 是 headless 进程（见 commands/btwThread.ts 的说明）。
-import { createBtwThread, type BtwThread } from '@packages/mica-builtin-commands/commands/btwThread.js';
+// 直接从子路径取：`@packages/mica-builtin-commands/index.js` 会拖进 Ink/React，
+// 而 app-server 是 headless 进程（见 shared/btwThread.ts 的说明）。
+import { createBtwThread, type BtwThread } from '@packages/mica-builtin-commands/shared/btwThread.js';
 import { recordHelperSubagentUsage } from '@packages/mica-builtin-commands/subagentUsage.js';
 import type { CommandAgent, CommandSessionController } from '@packages/mica-builtin-commands/services.js';
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';

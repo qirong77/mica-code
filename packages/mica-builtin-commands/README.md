@@ -4,7 +4,7 @@
 
 ## 主要能力
 
-- 提供全部产品内置命令实现：`/btw`、`/cd`、`/clear`、`/compact`、`/config`、`/exit`、`/fork`、`/model`、`/effort`、`/role`、`/capabilities`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/new`、`/rename`、`/resume`、`/rewind`、`/loop`。`/commit` 由官方插件 `plugins/commit` 提供，不在本包。
+- 提供全部产品内置命令实现：`/cd`、`/clear`、`/compact`、`/config`、`/exit`、`/fork`、`/model`、`/effort`、`/role`、`/capabilities`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/new`、`/rename`、`/resume`、`/rewind`、`/loop`。`/commit` 由官方插件 `plugins/commit`、`/btw` 由官方插件 `plugins/btw` 提供，不在本包；本包只保留它们共用的 `shared/btwThread.ts`。
 - `/harness-review list|report|assess <id> <状态> <依据>` 由官方插件 `plugins/harness-review` 提供：查看当前工作区运行复盘、导出报告、记录人工评估；运行中可用。
 - 通过 `CommandHostService` 支持 `plugins/command-*.ts` 装配层注册全部命令（TUI 与 headless 共用）。
 - 提供命令所需的服务类型与注入入口。
@@ -49,13 +49,14 @@ packages/mica-builtin-commands/
   tests/                   包内全部测试
 ```
 
-- `commands/`：全部命令工厂，`btw`（含 btwThread 线程辅助）、`capabilities`、`cd`、`clear`、`compact`、`config`、`context`、`effort`、`exit`、`fork`、`loop`（含 loop 工具）、`mcp`、`model`、`new`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task`。
+- `commands/`：全部命令工厂，`capabilities`、`cd`、`clear`、`compact`、`config`、`context`、`effort`、`exit`、`fork`、`loop`（含 loop 工具）、`mcp`、`model`、`new`、`rename`、`resume`、`rewind`、`role`、`skills`、`status`、`task`。
 - `shared/`：
   - `commandInput.ts`：列表选择键盘导航。
   - `selectCommand.tsx`：通用选择面板。
   - `configSwitch.ts`：provider/model/effort 切换辅助。
+  - `btwThread.ts`：旁问线程的纯逻辑（对话记录、system prompt 拼装、子代理线程构造），`plugins/btw` 与 desktop「By The Way」抽屉共用。
   - `ScrollableCommandDialog.tsx`：命令面板共用的滚动容器与滚动控制器。
 - `services.ts`：`CommandRuntimeServices` 与相关类型，避免命令直接依赖应用层。
-- `subagentUsage.ts`：helper 子代理（btw / compact 摘要）的用量记账入口（`recordHelperSubagentUsage`），写进当前会话的 `subagentUsageHistory`。
+- `subagentUsage.ts`：helper 子代理（desktop 旁问抽屉 / compact 摘要）的用量记账入口（`recordHelperSubagentUsage`），写进当前会话的 `subagentUsageHistory`；`/btw` 命令的用量由插件线程的宿主记账（`origin: 'plugin'`）。
 - `commandHost.ts`：向单文件命令插件暴露 active agent、session controller、runtime services 和统一注册函数。
 - `index.ts`：稳定公共导出入口；应用层只应从这里引用。

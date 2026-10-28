@@ -9,15 +9,16 @@ import type { Skill } from '@packages/mica-skills/index.js';
 import type { CommandAgent } from '../services.js';
 
 /**
- * btw（By The Way）里与「谁显示回答」无关的部分：背景记录的取法、系统提示词、
- * 隔离子代理，以及线程（可复用的子代理 + 已记账请求数）。
+ * btw（By The Way）里与「谁显示回答」无关的部分：背景记录的取法、系统提示词，以及
+ * 常驻 host 用的线程（可复用的子代理 + 已记账请求数）。
  *
- * 单独成文件是因为有两类消费者，而它们的依赖必须分开：
- * - CLI 的 `/btw`（`./btw.ts`）经 `mica-ui` 显示 notice —— 会拖进 Ink/React；
+ * 有两类消费者，依赖必须分开：
+ * - 官方插件 `plugins/btw`（CLI 的 `/btw`）只取提示词与记录整理，子代理由
+ *   `ctx.subagents.thread` 建 —— 走插件能力面，不碰这一层的 `CommandAgent`；
  * - `mica app-server` 的 btw 面板（`apps/cli/src/runtime/btwThread.ts`）在 headless
- *   进程里跑，**不能**拉 Ink 进来，只能从本文件取这些纯逻辑。
+ *   进程里跑，**不能**拉 Ink 进来，用这里的 `createBtwThread`。
  *
- * 背景记录、提示词与工具开关两边必须一致，所以只有这一处实现。
+ * 背景记录与提示词两边必须一致（同一个旁问语义），所以只有这一处实现。
  */
 
 export type BtwSubagent = {
@@ -56,8 +57,6 @@ export type BtwSubagent = {
 /** 一条 btw 线程：可复用（`-continue` / 面板里追问）的隔离子代理 + 已记账的请求数。 */
 export type BtwThread = { subagent: BtwSubagent; recordedRequests: number };
 
-export type BtwArgsParse = { question: string; isContinue: boolean } | null;
-
 /** 主流程当前角色的提示词：名字 + `$MICA_HOME/role/*.md` 原文（default 是内置模板）。 */
 export type BtwRoleContext = { name: string; prompt: string };
 
@@ -67,17 +66,6 @@ export type BtwPromptContext = {
   /** skills 索引的输入；不传等价于「当前已加载的 skills」（与主流程一致）。 */
   skills?: Skill[];
 };
-
-export function parseBtwArgs(rawArgs: string): BtwArgsParse {
-  const trimmed = rawArgs.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith('-continue')) {
-    const question = trimmed.slice('-continue'.length).trim();
-    if (!question) return null;
-    return { question, isContinue: true };
-  }
-  return { question: trimmed, isContinue: false };
-}
 
 /** 把模型消息里纯 user/assistant 的文本对话，按顺序整理成可读的「对话记录」。 */
 export function messagesToTranscript(messages: unknown[]): string {
@@ -161,11 +149,6 @@ function describeSkills(skills?: Skill[]): string {
     listing,
     '</skills>',
   ].join('\n');
-}
-
-export function formatBtwNotice(question: string, answer: string, isFallback = false): string {
-  const fallback = isFallback ? ['', '_没有可延续的 btw 对话，已作为一条新问题处理_'] : [];
-  return [`> ${question}`, ...fallback, '', answer, '', '── `/btw -continue` 继续与该 btw 对话 ──'].join('\n');
 }
 
 /**

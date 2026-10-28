@@ -138,9 +138,16 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。
 机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定有哪些类型、`agent` 工具长什么样。
+需要一条能反复追问的隔离上下文（旁问、连续修订）时用 `ctx.subagents.thread()`：一次建线程、多次
+`ask()`，同一线程串行、`usage()` 读请求数、`dispose()` 收尾；它不进任务列表、不拿路径租约，每次 ask
+的用量同样以 `origin: 'plugin'` 记账。system prompt 是整体替换，插件要自己带上需要的上下文。
 `models` 是插件自己的模型请求入口（`ctx.models.request`），见下节——**插件不要自己 `fetch` 模型接口**。
 `skills` 是内置 skill 的注册面（`ctx.skills.register`），`desktop` 只有桌面端运行时才提供（见下节）。
 少声明一项的后果是在 setup 里撞上 `undefined` 并连带算作加载失败，所以不要把可选项当默认存在。
+
+命令结果给用户看走 `ctx.ui.notice(content, { command, status, surface })`：`surface: 'command_panel'`
+是输入框上方的运行中面板（被同一个 `command` 的下一条 notice 收尾），默认写进对话的 notice；
+headless 宿主把同一条 notice 落进 turn 的日志。插件不用自己画面板，也不往会话里塞假消息。
 
 ## 插件自己的模型请求
 

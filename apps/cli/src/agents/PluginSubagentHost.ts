@@ -22,6 +22,8 @@ import type {
   PluginSubagentWriteMode,
 } from '@packages/mica-plugin/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
+import { createPluginThread } from './PluginSubagentThread.js';
+import { buildSubagentToolFilter } from './subagentToolFilter.js';
 import { SubagentTaskManager, summarizeSubagentUsage, type SubagentTaskRecord } from './SubagentTaskManager.js';
 
 /**
@@ -36,6 +38,17 @@ export type PluginSubagentHostOptions = {
   /** 没有工具上下文可解析时用的 agent（与旧 ToolAgent 的 fallbackAgent 同义）。 */
   defaultAgent: AgentRuntime;
   taskManager: SubagentTaskManager;
+  /**
+   * 「当前会话」的 agent。旁问线程（`ctx.subagents.thread`）不是工具调用触发的，
+   * 没有 `caller` 可以带 owner，所以由宿主回答「现在在哪条会话上开线程」——TUI
+   * 多会话下这是当前选中的那一条，headless 下就是它自己。
+   */
+  resolveCurrentAgent?: () => AgentRuntime | null;
+  /**
+   * 插件线程记完一次用量后调用。turn 内不要插一次保存（本轮 checkpoint 会带上），
+   * 空闲时立刻落盘——旁问不属于任何 turn，没有别的保存时机。
+   */
+  persistUsage?: (owner: AgentRuntime) => void;
 };
 
 const SUBAGENT_INSTRUCTIONS = [
@@ -79,12 +92,15 @@ export function createPluginSubagentHost(
   options: PluginSubagentHostOptions,
 ): PluginSubagentRegistry & { disposeAll(): void } {
   const { defaultAgent, taskManager } = options;
+  const resolveCurrentAgent = (): AgentRuntime => options.resolveCurrentAgent?.() ?? defaultAgent;
   const pathLeases = new SubagentPathLeaseManager();
   const typesByPlugin = new Map<string, Map<string, PluginSubagentType>>();
   const apis = new Map<string, PluginSubagentApi>();
   // 任务记录里没有「这次委派由哪个父调用发起」，而 tasks.get 需要它；顺带在这里
   // 记住 owner，插件按 id 访问任务时不必自己带 agent。
   const spawnMeta = new Map<string, SpawnMeta>();
+  /** 旁问线程的序号：只用于用量记录里的线程标识，不参与任何调度。 */
+  const threadSeq = { next: 0 };
 
   const typesFor = (pluginId: string): Map<string, PluginSubagentType> => {
     let types = typesByPlugin.get(pluginId);
@@ -479,6 +495,17 @@ export function createPluginSubagentHost(
           ...(toolCallId ? { toolCallId } : {}),
         } satisfies PluginSubagentCaller;
       },
+
+      thread(threadOptions) {
+        threadSeq.next += 1;
+        return createPluginThread({
+          owner: resolveCurrentAgent(),
+          pluginId,
+          threadId: String(threadSeq.next),
+          options: threadOptions,
+          ...(options.persistUsage ? { persistUsage: options.persistUsage } : {}),
+        });
+      },
     };
 
     apis.set(pluginId, api);
@@ -547,18 +574,6 @@ function buildSubagentSystemPrompt(definition: PluginSubagentType): string {
   return [micaAgent.buildSystemPrompt(), '', SUBAGENT_INSTRUCTIONS, '', writePolicy, '', definition.systemPrompt].join(
     '\n',
   );
-}
-
-function buildSubagentToolFilter(definition: PluginSubagentType): (toolName: string) => boolean {
-  const allowed = new Set(definition.allowedTools ?? ['*']);
-  const disallowed = new Set(definition.disallowedTools ?? []);
-  return (toolName: string) => {
-    if (micaTools.isPrimaryAgentOnly(toolName)) return false;
-    if (disallowed.has(toolName)) return false;
-    // skills 与 MCP 是进程级能力，与父代理共享，不该被某个类型的工具白名单削弱。
-    if (toolName === 'skill' || toolName.startsWith('mcp__')) return true;
-    return allowed.has('*') || allowed.has(toolName);
-  };
 }
 
 function resolveContextMode(

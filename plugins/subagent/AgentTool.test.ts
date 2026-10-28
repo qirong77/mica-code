@@ -253,6 +253,9 @@ function createApi(
     registerType: () => ({ dispose: () => undefined }),
     listTypes: () => types,
     getType: (name) => types.find((type) => type.name === name) ?? null,
+    thread: () => {
+      throw new Error('thread() is not used by the agent tool');
+    },
     run: async (request) => {
       spawns.push(request);
       events.push(`run:${request.type}`);

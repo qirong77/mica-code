@@ -114,6 +114,70 @@ export type PluginSubagentAwaitOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * 一条可复用的隔离子代理线程（旁问线程）的构造参数。
+ *
+ * 与 `run` / `background` 的差别：那些是「派一次任务」，每次都是新的子代理；线程
+ * 是**同一个子代理连续追问**，它的消息数组就是这条线程的上下文，所以第二次问能
+ * 看到第一次读过什么。系统提示词由插件整体提供（替换主 prompt），因为线程要回答
+ * 什么不该由内核猜。
+ */
+export type PluginSubagentThreadOptions = {
+  /** 记账用的类型名；Stats 的「By plugin」按它分组。 */
+  type: string;
+  /** 系统提示词：整体替换主流程的 prompt，不叠加。 */
+  systemPrompt: string;
+  /** 记账用的默认描述；每次提问可以覆盖。 */
+  description?: string;
+  /** 是否给工具，默认给。主会话专属工具（`primaryAgentOnly`）始终不给。 */
+  tools?: boolean;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  model?: string;
+  /** 每个问题的最大模型请求数；不传不限。 */
+  maxTurns?: number;
+};
+
+/**
+ * 问一次线程。
+ *
+ * 流式回调是可选的：挂上就是主对话那套实时渲染（正文 / 思考 / 工具行），不挂就是
+ * 「问一句、等最终文本」。终端里的旁问只有一条 notice，没有实时渲染的空间，所以
+ * 不挂不是降级，而是那一边本来就不需要。
+ */
+export type PluginSubagentThreadAskOptions = {
+  signal?: AbortSignal;
+  description?: string;
+  onText?: (text: string) => void;
+  onThinking?: (thinking: string) => void;
+  onToolCall?: (name: string, args: string, id?: string) => void;
+  onToolResult?: (name: string, result: string, id?: string) => void;
+};
+
+export type PluginSubagentThreadUsage = {
+  /** 这条线程已经发出过多少次模型请求。 */
+  requests: number;
+  last: {
+    inputTokens: number;
+    cachedInputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  } | null;
+};
+
+export type PluginSubagentThread = {
+  /**
+   * 问一个问题；线程自己的历史会保留，下一次问接着上一轮。
+   *
+   * 失败以异常抛回：线程被中止、模型报错都算。宿主在返回前已经把这一问产生的用量
+   * 记进会话（`origin: 'plugin'`），插件不需要自己记账。
+   */
+  ask(question: string, options?: PluginSubagentThreadAskOptions): Promise<string>;
+  usage(): PluginSubagentThreadUsage;
+  /** 丢掉线程与它的上下文；之后再问必须重新 `thread()`。 */
+  dispose(): void;
+};
+
 export type PluginSubagentApi = {
   /** 注册一种类型；重复名字报错。返回的 disposable 只摘掉这一条。 */
   registerType(type: PluginSubagentType): Disposable;
@@ -144,6 +208,14 @@ export type PluginSubagentApi = {
   };
   /** 从工具执行回调的 `context` 里解出当前调用所属的委派来源。 */
   caller(context: unknown): PluginSubagentCaller | null;
+  /**
+   * 开一条可复用的隔离子代理线程（旁问线程），绑在当前会话上。
+   *
+   * 它不进任务列表：线程是插件自己持有的状态，生命周期由插件决定（`dispose`）。
+   * 用量按每一次 `ask` 记进当前会话的 `subagentUsageHistory`（`origin: 'plugin'`，
+   * 带插件 id），所以追问不会把前面的请求重复计费。
+   */
+  thread(options: PluginSubagentThreadOptions): PluginSubagentThread;
 };
 
 /**

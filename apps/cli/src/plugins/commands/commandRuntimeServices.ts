@@ -10,6 +10,7 @@ import {
 } from '@packages/mica-builtin-commands/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
+import type { PluginNoticeOptions } from '@packages/mica-plugin/index.js';
 import { startConfigWeb } from '@apps/config-web/index.js';
 import {
   micaUi,
@@ -192,6 +193,26 @@ function showNoticeForSession(
   }
   const { surface: _surface, status: _status, ...noticeOptions } = options;
   upsertNoticeForSession(context, ownerSessionId, text, { ...noticeOptions, status: options.status }, true);
+}
+
+/**
+ * `ctx.ui.notice` 的 TUI 实现：插件的 notice 与内置命令的 notice 走同一条通道
+ * （`command_panel` 固定面板、完成后落进对话、跟着会话保存），差别只在谁来写。
+ *
+ * `owner` 是内核的不透明句柄（插件从 `ctx.session` 拿到的 agent）：找不到对应会话时
+ * 直接不写，而不是把内容塞进用户当前看着的另一条会话。
+ */
+export function showPluginNotice(content: string, options: PluginNoticeOptions = {}): void {
+  const context = currentContext();
+  const ownerSessionId =
+    options.owner === undefined ? undefined : context?.agentSessions.findByAgent(options.owner as AgentRuntime)?.id;
+  if (options.owner !== undefined && !ownerSessionId) return;
+  showNoticeForSession(context, ownerSessionId, content, {
+    ...(options.variant ? { variant: options.variant } : {}),
+    ...(options.command ? { command: options.command } : {}),
+    ...(options.surface ? { surface: options.surface } : {}),
+    ...(options.status ? { status: options.status } : {}),
+  });
 }
 
 function upsertNoticeForSession(

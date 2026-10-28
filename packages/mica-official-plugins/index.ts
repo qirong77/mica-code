@@ -1,5 +1,6 @@
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import autoCompactSetup from '../../plugins/auto-compact/index.js';
+import btwSetup from '../../plugins/btw/index.js';
 import commitSetup from '../../plugins/commit/index.js';
 import computerUseSetup from '../../plugins/computer-use/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
@@ -22,6 +23,7 @@ export { OFFICIAL_PLUGINS_DIR, officialPluginIds, officialPluginManifests } from
  */
 const officialSetups: Record<string, MicaPlugin['setup']> = {
   'auto-compact': autoCompactSetup,
+  btw: btwSetup,
   commit: commitSetup,
   'harness-review': harnessReviewSetup,
   memory: memorySetup,

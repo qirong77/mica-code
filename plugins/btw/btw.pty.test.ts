@@ -13,7 +13,7 @@ import { PtyDriver } from '@packages/mica-pty/index.js';
  * the answer, and a `/btw -continue` affordance) without breaking the main flow.
  *
  *   bun run build
- *   npx vitest run packages/mica-builtin-commands/tests/btw.pty.test.ts
+ *   npx vitest run plugins/btw/btw.pty.test.ts
  */
 const BIN = process.env.MICA_PTY_BIN ?? join(process.cwd(), 'dist', 'mica');
 const enabled = existsSync(BIN);

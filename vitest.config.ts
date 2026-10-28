@@ -52,6 +52,8 @@ const PROCESS_TESTS = [
   'apps/**/*.flows.test.ts',
   'packages/mica-pty/**/*.test.ts',
   'packages/mica-builtin-commands/**/*.pty.test.ts',
+  // 插件自己的 E2E 同样要真起 `dist/mica`，不能进并行的 unit 池。
+  'plugins/**/*.pty.test.ts',
 ];
 
 export default defineConfig({

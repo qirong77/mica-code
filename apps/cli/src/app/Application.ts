@@ -31,6 +31,7 @@ import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
 import { createPluginModels, recordPluginModelUsage } from '../plugins/pluginModels.js';
+import { showPluginNotice } from '../plugins/commands/commandRuntimeServices.js';
 import type { ApplicationContext } from './ApplicationContext.js';
 import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
@@ -118,7 +119,16 @@ export class Application {
       this.subagentTasks = subagentTasks;
       agentSessions.registerCurrent(agent, sessionController);
       // 子代理是插件能力面：`agent` 工具由插件注册，内核只提供创建/运行/记账/租约机制。
-      const pluginSubagents = createPluginSubagentHost({ defaultAgent: agent, taskManager: subagentTasks });
+      const pluginSubagents = createPluginSubagentHost({
+        defaultAgent: agent,
+        taskManager: subagentTasks,
+        // 旁问线程没有工具调用可以带 owner：它绑在用户当前看着的那条会话上。
+        resolveCurrentAgent: () => resolvePluginSession(agentSessions, undefined)?.agent ?? agent,
+        persistUsage: (owner) => {
+          if (owner.isRunning) return;
+          resolvePluginSession(agentSessions, owner)?.sessionController.saveCurrent({ allowEmpty: true });
+        },
+      });
       this.pluginSubagents = pluginSubagents;
       // 插件重写模型请求的那条链需要知道「这次请求属于哪条会话」，而 agent 本身不持有
       // 会话身份（一条会话可以被 fork、可以有多个 agent），所以由这一层回答。
@@ -168,6 +178,7 @@ export class Application {
               title: session.titleOverride ?? session.sessionController.getCurrentDisplayTitle(),
               titleSource: session.sessionController.getCurrentTitleSource(),
               cwd: process.cwd(),
+              role: session.agent.role,
             };
           },
           messages: (owner) => resolvePluginSession(agentSessions, owner)?.agent.toConversationMessages() ?? [],
@@ -253,6 +264,7 @@ export class Application {
         ui: {
           submit: (text, options) => micaUi.terminalInput.submit(text, options),
           showMessage: (text, ttl = 3000) => showPluginMessage(text, ttl),
+          notice: (content, options) => showPluginNotice(content, options ?? {}),
           components: {
             createElement: React.createElement,
             Dialog: micaUi.Dialog,

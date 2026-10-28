@@ -162,6 +162,7 @@ export type { PluginContext } from './PluginContext.js';
 export type {
   PluginFileMentionItem,
   PluginFileMentionProvider,
+  PluginNoticeOptions,
   PluginSessionApi,
   PluginSessionInfo,
   PluginSessionRenameOptions,
@@ -191,6 +192,10 @@ export type {
   PluginSubagentTaskHandle,
   PluginSubagentTaskSnapshot,
   PluginSubagentTaskStatus,
+  PluginSubagentThread,
+  PluginSubagentThreadAskOptions,
+  PluginSubagentThreadOptions,
+  PluginSubagentThreadUsage,
   PluginSubagentType,
   PluginSubagentWriteMode,
 } from './PluginSubagents.js';

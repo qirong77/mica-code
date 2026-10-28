@@ -1,0 +1,16 @@
+{
+  "id": "btw",
+  "name": "By The Way",
+  "icon": "message-square",
+  "version": "1.0.0",
+  "description": "`/btw`：在隔离子代理里旁问一句，不打断主流程，也不写回主对话上下文。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "required": true,
+  "priority": 0,
+  "requires": ["commands", "session", "subagents", "ui"],
+  "mica": {
+    "apiVersion": 1
+  }
+}

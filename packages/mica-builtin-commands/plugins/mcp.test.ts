@@ -91,7 +91,7 @@ function setupPlugin(withUi = true) {
     health: { path: null, read: () => null, report: () => {}, clear: () => {} },
     skills: { register: () => ({ dispose() {}, skipped: [] }) },
     onDispose: (dispose) => disposers.push(dispose),
-    ...(withUi ? { ui: { submit: vi.fn(), showMessage } } : {}),
+    ...(withUi ? { ui: { submit: vi.fn(), showMessage, notice: vi.fn() } } : {}),
   };
 
   setupMcp(context);

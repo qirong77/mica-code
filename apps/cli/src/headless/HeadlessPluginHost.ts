@@ -160,7 +160,16 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     submit: options.submit,
   });
   // headless 下 `agent` 就是当前会话的 agent：没有多会话菜单，所以它就是默认 owner。
-  const pluginSubagents = createPluginSubagentHost({ defaultAgent: agent, taskManager: subagentTasks });
+  const pluginSubagents = createPluginSubagentHost({
+    defaultAgent: agent,
+    taskManager: subagentTasks,
+    resolveCurrentAgent: () => agent,
+    // 旁问不属于任何 turn：记完立刻落盘，否则重启后这次开销就没了。
+    persistUsage: (owner) => {
+      if (owner.isRunning) return;
+      sessionController.saveCurrent({ allowEmpty: true });
+    },
+  });
 
   const hostRegistration = services.register(commandHostToken, {
     agent,
@@ -240,6 +249,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
         title: sessionController.getCurrentDisplayTitle(),
         titleSource: sessionController.getCurrentTitleSource(),
         cwd: process.cwd(),
+        role: agent.role,
       }),
       messages: () => agent.toConversationMessages(),
       rename: (title, renameOptions) =>
@@ -303,6 +313,14 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     ui: {
       submit() {},
       showMessage() {},
+      notice(content, noticeOptions = {}) {
+        runtimeServices.showNotice(content, undefined, {
+          ...(noticeOptions.variant ? { variant: noticeOptions.variant } : {}),
+          ...(noticeOptions.command ? { command: noticeOptions.command } : {}),
+          ...(noticeOptions.surface ? { surface: noticeOptions.surface } : {}),
+          ...(noticeOptions.status ? { status: noticeOptions.status } : {}),
+        });
+      },
       status: {
         upsert() {},
         remove() {

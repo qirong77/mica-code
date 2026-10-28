@@ -48,17 +48,10 @@ export { createNewCommand } from './commands/new.js';
 export { createRenameCommand } from './commands/rename.js';
 export { createResumeCommand, formatResumeSessionTitle } from './commands/resume.js';
 export { createRewindCommand, rewindCheckpointCells } from './commands/rewind.js';
-export {
-  createBtwCommand,
-  parseBtwArgs,
-  formatBtwNotice,
-  buildBtwSystemPrompt,
-  messagesToTranscript,
-} from './commands/btw.js';
-// btw 的纯逻辑单独成文件：headless 的 btw 面板（app-server）不能拉 Ink 进来，
-// 只能从 './commands/btwThread.js' 直接取，见那里的说明。
-export { createBtwThread } from './commands/btwThread.js';
-export type { BtwThread, BtwSubagent } from './commands/btwThread.js';
+// btw 的纯逻辑单独成文件：headless 的 btw 面板（app-server）与官方插件 `btw`
+// 各自按需从这个子路径取，见那里的说明（插件不能经本入口，那会把 Ink 拖进去）。
+export { buildBtwSystemPrompt, createBtwThread, messagesToTranscript } from './shared/btwThread.js';
+export type { BtwPromptContext, BtwRoleContext, BtwSubagent, BtwThread } from './shared/btwThread.js';
 
 export type {
   ClearIdleAgentsResult,
@@ -86,7 +79,6 @@ export { recordHelperSubagentUsage } from './subagentUsage.js';
 export { default as setupCommandCd } from './plugins/command-cd.js';
 export { default as setupCommandClear } from './plugins/command-clear.js';
 export { default as setupCommandCompact } from './plugins/command-compact.js';
-export { default as setupCommandBtw } from './plugins/command-btw.js';
 export { default as setupCommandExit } from './plugins/command-exit.js';
 export { default as setupCommandFork } from './plugins/command-fork.js';
 export { default as setupCommandNew } from './plugins/command-new.js';

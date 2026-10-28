@@ -49,6 +49,34 @@ export type PluginSessionInfo = {
    * 不要缓存成进程启动时的 cwd。按工作区归档的插件（记忆、统计）靠它区分项目。
    */
   cwd?: string;
+  /**
+   * 这条会话正在使用的角色名（`$MICA_HOME/role/<name>.md`，`default` 是内置的）。
+   *
+   * 需要在旁问里带上「主流程以谁的规则在回答」的插件读它，再自己取角色正文；
+   * 与 `/role` 切换同步，不要在插件里缓存成启动时的值。
+   */
+  role?: string;
+};
+
+/**
+ * 插件往会话里追加一条 notice。
+ *
+ * notice 只属于界面：它落在会话的对话消息里（跟着会话保存、resume 后还在），但
+ * **不进 provider history**，模型看不到它。所以它是插件汇报长期结果的地方——
+ * 不要用 `ui.showMessage`（那是一条几秒后消失的提示条）代替。
+ */
+export type PluginNoticeOptions = {
+  /** 归到哪条命令下；同一个 `command` 的 running notice 会被下一条替换。 */
+  command?: string;
+  status?: 'running' | 'success' | 'warning' | 'error' | 'info';
+  /**
+   * `command_panel` 把内容固定在输入框上方（运行中的进度），收尾时发一条不带
+   * surface 的同 `command` notice 就把它撤掉并落进对话。
+   */
+  surface?: 'conversation' | 'command_panel';
+  variant?: 'commit' | 'config' | 'compact' | 'error';
+  /** 写进哪条会话；不传就是当前会话。句柄来自 `ctx.session` 的 owner。 */
+  owner?: unknown;
 };
 
 export type PluginSessionRenameOptions = {
@@ -196,6 +224,7 @@ export type PluginContext = {
   ui?: {
     submit(text: string, options?: { displayText?: string }): void;
     showMessage(text: string, ttl?: number): void;
+    notice(content: string, options?: PluginNoticeOptions): void;
     status?: {
       upsert(item: PluginStatusItem): void;
       remove(id: string): boolean;
