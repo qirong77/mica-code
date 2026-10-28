@@ -1,0 +1,12 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "fd85d5f133071ebd942240df7e06e790ea9a0c33",
+  "prompts": {},
+  "humans": {
+    "h_a456b67147438e": {
+      "author": "qirong77"
+    }
+  }
+}
