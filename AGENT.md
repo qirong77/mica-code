@@ -359,7 +359,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - 主文本共用 `--chat-text-size`；用户块与回答使用不同底色。
 - 自动链接唯一实现在 `mica-common/autolink.ts`；desktop 的 remark 插件在 `remarkGfm` / `remarkPathLinks` 之前，CLI 用 `splitTerminalLink`。
-- 路径识别在 `chat-paths.js` / `PathToken`；图片单击预览，失败给 notice。
+- 路径识别在 `chat-paths.js` / `PathToken`；单击弹「在 Finder 中打开 / 在 Mica 中打开」菜单（⌘ 点击直接走 Mica），图片单击预览、失败给 notice。
+- 「在 Mica 中打开」由 `files:stat` 判类型：文件进编辑器、目录把文件树临时切到那里（`FilesView` 的 `rootOverride`，换会话即作废，树头有「返回工作区」）。任何新入口按路径打开都走 `FilesView.openPath`，不要各自 read。
 - 用户消息超过 10 行默认折叠，含 `[Image]` 的不折叠；折叠态悬停用 `chat-hover-tooltip.jsx`，不用原生 `title`。
 - 回合日志工具行单行省略，点行开 `ToolDetailDialog`；思考整段折行。
 - 详情弹窗统一 `chat-modal.jsx` 的 `ModalShell`；`--chat-*` 变量要能穿过 portal。
@@ -430,6 +431,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - Config 页只按字段编辑 providers；`mcpServers`、`capabilityDefaults` 只读展示并跳到各自页面。
 - 服务商在分组里是一行：折叠显示名称/协议/地址/模型数，展开接字段行；有错误强制展开并标「待修正」。
 - Sessions 左栏的会话信息由 `src/server/sessionHead.ts` 只读文件头 8KB 解析，两个宿主共用。
+- 浏览器侧（`web/`）只能 import 纯子模块：`mica-plugin` / `mica-common` 的包入口会顺带导出读写文件的模块，dev 下整页白屏且 tsc 与单测都看不出来（`web/browserImports.test.ts` 静态挡住）。
+- 密钥类输入统一用 `web/components/SecretInput.tsx`：默认密文 + 眼睛按钮切明文，明文状态在组件内，收起或换页自动回到密文。
 - 配置页不提供 effort 开关：由模型规则按模型名决定。
 - 表单转换唯一实现 `web/configDraft.ts`；写入保留未知键，已知键固定顺序，可选字段留空即删键。
 - Capabilities 页改 `config.capabilityDefaults`，读写实现在 `src/server/capabilityDefaults.ts`。

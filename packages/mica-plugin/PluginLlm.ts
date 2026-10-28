@@ -1,5 +1,6 @@
 import type { PluginModelProtocol, PluginModelResult, PluginModelsApi } from './PluginModels.js';
 import type { PluginSettingField, PluginSettingOption } from './PluginSettings.js';
+import { resolveUseMainProvider } from '@packages/mica-common/index.js';
 
 /**
  * 插件需要自己调模型时的那一份配置。
@@ -132,7 +133,7 @@ export function resolvePluginLlmConfig(
   spec: PluginLlmSpec | null,
   values: Record<string, string | undefined>,
 ): PluginLlmConfig {
-  const useMainProvider = resolveUseMainProvider(spec, values);
+  const useMainProvider = resolveUseMainProvider(spec?.followMain, values);
   const protocol = values.protocol;
   return {
     useMainProvider,
@@ -145,24 +146,6 @@ export function resolvePluginLlmConfig(
       : DEFAULT_PLUGIN_LLM_PROTOCOL,
     model: (values.model ?? '').trim(),
   };
-}
-
-/**
- * 「跟随主配置」现在到底开没开。
- *
- * 三态：开关被用户明确拨过就以它为准；没表态时看有没有填自己的地址——**留空就是跟随
- * 主配置**，这也是 commit 这类插件一直以来的习惯。只认显式值的话，已经填过地址的老
- * 配置会因为「开关默认开」而突然改走主配置，而页面上又看不出原因。
- */
-export function resolveUseMainProvider(
-  spec: PluginLlmSpec | null,
-  values: Record<string, string | undefined>,
-): boolean {
-  if (spec?.followMain !== true) return false;
-  const explicit = (values.useMainProvider ?? '').trim();
-  if (explicit === 'true') return true;
-  if (explicit === 'false') return false;
-  return !(values.baseUrl ?? '').trim();
 }
 
 /** 缺少配置时插件应当上报「待配置」，而不是发一次注定失败的请求。 */

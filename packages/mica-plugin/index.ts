@@ -19,7 +19,6 @@ import {
   isPluginLlmConfigured,
   pluginLlmSettingFields,
   resolvePluginLlmConfig,
-  resolveUseMainProvider,
 } from './PluginLlm.js';
 import {
   PLUGIN_HEALTH_DIR,
@@ -90,7 +89,6 @@ export const micaPlugin = {
   resolvePluginSettingsPath,
   validatePluginSettingValues,
   resolvePluginLlmConfig,
-  resolveUseMainProvider,
   isPluginLlmConfigured,
   describePluginLlm,
   pluginLlmSettingFields,
@@ -227,7 +225,6 @@ export {
   isPluginLlmSettingKey,
   pluginLlmSettingFields,
   resolvePluginLlmConfig,
-  resolveUseMainProvider,
 } from './PluginLlm.js';
 export type {
   CreatePluginLlmApiOptions,

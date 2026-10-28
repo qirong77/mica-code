@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { resolveUseMainProvider } from '@packages/mica-plugin/index.js';
+// 深路径而不是包入口：mica-common 的 index 会一起导出读写文件的模块，
+// 浏览器侧只认这个纯函数的子模块。
+import { resolveUseMainProvider } from '@packages/mica-common/pluginLlm.js';
 import type { ConfigWebPlugin, ConfigWebPluginLlmTest } from '../../src/shared/types.js';
 import { testPluginLlm } from '../api.js';
 import { Button, SettingRow, SettingsGroup, Tag } from './Ui.js';
@@ -36,7 +38,7 @@ export function LlmSettingsSection({
 
   const fields = plugin.settings.fields.filter((field) => field.group === 'llm');
   // 开关是「跟随主配置 / 自己填」的二选一，与内核用同一个判定：没表态时看有没有填地址。
-  const followsMain = resolveUseMainProvider({ followMain: llm.followMain }, values);
+  const followsMain = resolveUseMainProvider(llm.followMain, values);
   const visible = fields.filter((field) => !followsMain || field.key === 'useMainProvider');
 
   const runTest = async () => {

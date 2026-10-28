@@ -121,6 +121,7 @@ export {
 } from './sessionNotes.js';
 export { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 export type { StoredBtwThread } from './btwState.js';
+export { resolveUseMainProvider } from './pluginLlm.js';
 export {
   MAX_TODOS,
   MAX_TODO_TEXT_LENGTH,

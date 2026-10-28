@@ -1,4 +1,5 @@
 import { Switch } from './Ui.js';
+import { SecretInput } from './SecretInput.js';
 import type { ConfigWebPluginSetting } from '../../src/shared/types.js';
 
 /**
@@ -99,11 +100,26 @@ export function PluginSettingInput({
     );
   }
 
+  // 密钥行统一走 SecretInput：眼睛按钮切明文，与配置页服务商的 API Key 同一个控件。
+  if (field.type === 'password') {
+    return (
+      <SecretInput
+        id={inputId}
+        value={value}
+        placeholder={field.placeholder}
+        ariaLabel={field.label}
+        invalid={invalid}
+        disabled={disabled}
+        onChange={onChange}
+      />
+    );
+  }
+
   return (
     <input
       id={inputId}
       className={`text-input${invalid ? ' is-invalid' : ''}`}
-      type={field.type === 'password' ? 'password' : 'text'}
+      type="text"
       value={value}
       spellCheck={false}
       autoComplete="off"

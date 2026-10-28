@@ -3,19 +3,18 @@ import { appIcons } from '../icons.js';
 import { providerProtocolLabel } from '../labels.js';
 import { PROVIDER_PROTOCOL_VALUES, readProviderDraft, type ProviderDraft } from '../configDraft.js';
 import { Button, SettingRow } from './Ui.js';
+import { SecretInput } from './SecretInput.js';
 
 type ProviderEditorProps = {
   raw: unknown;
   index: number;
   /** 取这个 provider 上某个字段的错误文案（键是字段名，不含 `providers.N.`）。 */
   errorFor(field: string): string | undefined;
-  revealed: boolean;
   removable: boolean;
   expanded: boolean;
   /** 校验出错时强制展开，避免错误藏在折叠行里。 */
   hasError: boolean;
   disabled?: boolean;
-  onToggleReveal(): void;
   onToggleExpanded(): void;
   onChange(next: ProviderDraft): void;
   onRemove(): void;
@@ -32,12 +31,10 @@ export function ProviderEditor({
   raw,
   index,
   errorFor,
-  revealed,
   removable,
   expanded,
   hasError,
   disabled = false,
-  onToggleReveal,
   onToggleExpanded,
   onChange,
   onRemove,
@@ -45,8 +42,6 @@ export function ProviderEditor({
   const fields = readProviderDraft(raw);
   const [modelInput, setModelInput] = useState('');
   const TrashIcon = appIcons.trash;
-  const ShowIcon = appIcons.show;
-  const HideIcon = appIcons.hide;
   const ChevronIcon = appIcons.chevronRight;
   const open = expanded || hasError;
 
@@ -135,29 +130,14 @@ export function ProviderEditor({
           </SettingRow>
 
           <SettingRow label="API Key" hint="留空表示不需要鉴权" error={errorFor('api_key')}>
-            <span className="config-input-with-action">
-              <input
-                className={invalidClass(errorFor('api_key'))}
-                type={revealed ? 'text' : 'password'}
-                value={fields.apiKey}
-                disabled={disabled}
-                spellCheck={false}
-                autoComplete="off"
-                placeholder="sk-…"
-                aria-label={`服务商 ${index + 1} API Key`}
-                aria-invalid={Boolean(errorFor('api_key'))}
-                onChange={(event) => patch({ apiKey: event.target.value })}
-              />
-              <button
-                type="button"
-                className="config-input-action"
-                title={revealed ? '隐藏明文' : '显示明文'}
-                aria-label={revealed ? '隐藏明文' : '显示明文'}
-                onClick={onToggleReveal}
-              >
-                {revealed ? <HideIcon size={14} /> : <ShowIcon size={14} />}
-              </button>
-            </span>
+            <SecretInput
+              value={fields.apiKey}
+              disabled={disabled}
+              placeholder="sk-…"
+              ariaLabel={`服务商 ${index + 1} API Key`}
+              invalid={Boolean(errorFor('api_key'))}
+              onChange={(apiKey) => patch({ apiKey })}
+            />
           </SettingRow>
 
           <SettingRow label="协议" error={errorFor('protocol')}>

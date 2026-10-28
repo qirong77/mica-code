@@ -37,7 +37,6 @@ export function ConfigPage() {
   const [path, setPath] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set());
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
   const RefreshIcon = appIcons.refresh;
   const AddIcon = appIcons.add;
@@ -86,11 +85,10 @@ export function ConfigPage() {
     setExpanded((prev) => new Set(prev).add(providerEntries(next).length - 1));
   }
 
-  /** 删除后索引会整体前移，展开/明文这类按序号记录的本地状态要跟着挪。 */
+  /** 删除后索引会整体前移，展开这种按序号记录的本地状态要跟着挪。 */
   function removeProvider(index: number) {
     applyDraft(removeProviderDraft(draft ?? {}, index));
     setExpanded((prev) => shiftIndexSet(prev, index));
-    setRevealed((prev) => shiftIndexSet(prev, index));
   }
 
   /** 直接编辑 JSON：解析成功才回写 draft，失败只提示、保留原文。 */
@@ -205,17 +203,8 @@ export function ConfigPage() {
                     errorFor={(field) => errors.get(`providers.${index}.${field}`)}
                     hasError={[...errors.keys()].some((key) => key.startsWith(`providers.${index}.`))}
                     expanded={expanded.has(index)}
-                    revealed={revealed.has(index)}
                     onToggleExpanded={() =>
                       setExpanded((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(index)) next.delete(index);
-                        else next.add(index);
-                        return next;
-                      })
-                    }
-                    onToggleReveal={() =>
-                      setRevealed((prev) => {
                         const next = new Set(prev);
                         if (next.has(index)) next.delete(index);
                         else next.add(index);
