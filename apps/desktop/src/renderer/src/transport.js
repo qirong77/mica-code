@@ -255,6 +255,16 @@ function createWebApi(env) {
       // 选择落在会话快照里，同一会话的其他窗口通过 onCapabilitiesUpdated 同步。
       capabilities: (id, { sessionId, cwd } = {}) =>
         invoke('chat:capabilities', { id, sessionId: sessionId || null, cwd: cwd || null }),
+      pluginSettings: (id, { sessionId, cwd } = {}) =>
+        invoke('chat:plugin-settings', { id, sessionId: sessionId || null, cwd: cwd || null }),
+      setPluginSettings: (id, { sessionId, cwd, pluginId, values } = {}) =>
+        invoke('chat:set-plugin-settings', {
+          id,
+          sessionId: sessionId || null,
+          cwd: cwd || null,
+          pluginId,
+          values
+        }),
       setCapabilities: (id, selection, { sessionId, cwd } = {}) =>
         invoke('chat:set-capabilities', {
           id,

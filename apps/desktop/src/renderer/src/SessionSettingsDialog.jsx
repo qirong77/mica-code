@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { IconAdjustments, IconClock } from '@tabler/icons-react'
+import { IconAdjustments, IconClock, IconPuzzle } from '@tabler/icons-react'
 // 设置页的同一批控件：会话级开关与默认值表单必须是同一套 UI，不在两端各写一份
 import {
   CapabilityList,
@@ -9,14 +9,15 @@ import {
 } from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
 import { LoopPanel } from './LoopPanel'
+import { PluginSettingsPanel } from './SessionPluginSettings'
 
 /**
- * 输入框旁的「会话设置」弹窗：会话能力 / 定时任务两块。
+ * 输入框旁的「会话设置」弹窗：会话能力 / 定时任务 / 插件三块。
  *
- * 两块都属于**当前会话**，不是应用级设置——同一应用里另一条会话照旧按默认值走。
+ * 三块都属于**当前会话**，不是应用级设置——同一应用里另一条会话照旧按默认值走。
  * 能力默认值在设置页的 Capabilities、定时任务在 CLI `/loop` 里（定时任务本身也只挂在
- * 当前会话上）。自动压缩不在这里：它是插件（见 `plugins/auto-compact`），设置与计数
- * 都归插件自己管，入口统一在配置页的 Plugins 一节。
+ * 当前会话上）。插件一节按清单渲染：只有插件把设置项标成 `perSession`，它才会出现，
+ * 因此自动压缩的阈值这类「每条会话可以不一样」的配置由插件自己声明，内核不认识它。
  *
  * 数据来自常驻 chat host 的 `mica/capabilities/get`；提交走对应的 set 方法，成功后
  * host 发 `mica/capabilities/updated`，同一会话的其他窗口据此同步。
@@ -24,7 +25,8 @@ import { LoopPanel } from './LoopPanel'
 
 const SECTIONS = [
   { id: 'capabilities', label: '会话能力', icon: IconAdjustments },
-  { id: 'loop', label: '定时任务', icon: IconClock }
+  { id: 'loop', label: '定时任务', icon: IconClock },
+  { id: 'plugins', label: '插件', icon: IconPuzzle }
 ]
 
 // 页签定义直接交给 CapabilityList，字段名必须与它的 CapabilityGroupDef 对齐（`key`）。
@@ -258,6 +260,10 @@ export function SessionSettingsDialog({
 
           {section === 'loop' ? <LoopPanel {...loopProps} /> : null}
 
+          {section === 'plugins' ? (
+            <PluginSettingsPanel nodeId={nodeId} sessionId={sessionId} cwd={cwd} running={running} />
+          ) : null}
+
           {error ? <p className="session-settings-error">{error}</p> : null}
         </div>
       </div>
@@ -340,6 +346,8 @@ function CapabilityDetail({ detail, item, enabled, running, onToggle, onClose })
 
 function sectionMeta(id, { catalog, loopProps, totalCount, disabledCount }) {
   if (id === 'capabilities') return catalog ? `${totalCount - disabledCount}/${totalCount}` : ''
+  // 插件一节按需加载，导航项先不显示计数（显示 0 会让人以为没有可配置的插件）。
+  if (id === 'plugins') return ''
   const loop = loopProps?.loop
   if (!loop) return '未设置'
   return loop.status === 'active' ? '运行中' : '已暂停'

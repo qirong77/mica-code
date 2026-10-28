@@ -87,10 +87,16 @@ plugins/<id>/
 校验只有一份实现（`validatePluginSettingValues`）：页面保存前用它拒绝，插件运行时读值也用它，
 所以不会出现「页面显示已保存、插件却认为配置不可用」。
 
+字段加 `perSession: true` 表示这条会话可以单独覆盖：默认值仍写在同一个设置文件里（配置页改），
+会话里的改动只存**改过**的键（快照 `pluginSessionSettings`），没动过的继续跟随默认值——整份存会把
+当时的默认值固化进老会话。插件用 `ctx.sessionSettings.get()` 读合并后的生效值，声明了它就同时把
+`sessionSettings` 写进 `requires`；界面由内核的 `mica/pluginSettings/get|set` 驱动，桌面端在
+会话设置 → 插件 里按清单渲染，内核不认识任何具体插件。
+
 ## 健康状态与失败可见
 
 `requires` 要写全插件实际触碰的每一面 `ctx.*`：`commands`、`desktop`、`events`、`hooks`、`prompt`、
-`session`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`。宿主缺哪个，
+`session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`。宿主缺哪个，
 插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。

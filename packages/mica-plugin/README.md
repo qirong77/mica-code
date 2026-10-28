@@ -11,7 +11,7 @@
 - 定义 `PluginContext` capability，由应用注入 runtime queue、工具注册和 UI 扩展入口。
 - 定义插件包格式：`plugin.json` 清单（id / name / version / main / assets / dependencies / required / priority / settings / requires / `mica.apiVersion`）、目录加载器与只读扫描（配置页用）。
 - 维护启停状态（`$MICA_HOME/plugins-state.json`），停用的插件在启动阶段就不注册。
-- 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。
+- 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。字段标 `perSession: true` 表示「这条会话可以不一样」：会话覆盖存在快照的 `pluginSessionSettings`（只存改过的键），插件改用 `ctx.sessionSettings.get()` 读合并后的生效值，`overrides()` / `set()` / `clear()` 改本会话，需要 `requires` 里有 `sessionSettings`。
 - 插件日志：`ctx.logger` 自带文件输出，落在系统临时目录并按天分片、按大小轮转。
 - 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 出错」。
 - 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。

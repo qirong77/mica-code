@@ -159,6 +159,7 @@ describe('parsePluginManifest', () => {
         name: 'Demo',
         version: '0.1.0',
         description: '',
+        icon: '',
         author: undefined,
         main: 'index.js',
         assets: [],

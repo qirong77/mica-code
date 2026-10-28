@@ -396,6 +396,7 @@ function toPersistedSnapshot(
     // （turn/start 刚应用的 role 会被快照里的旧角色盖回去）。
     ...(snapshot.capabilitiesCustomized ? { capabilitiesCustomized: true } : {}),
     pluginState: snapshot.pluginState,
+    pluginSessionSettings: snapshot.pluginSessionSettings,
     contextWindowSize: micaConfig.getModelRule(snapshot.model).contextSize,
     messages: snapshot.messages,
     conversationMessages,
@@ -418,6 +419,7 @@ function fromPersistedSnapshot(
     capabilitySelection: snapshot.capabilitySelection,
     capabilitiesCustomized: snapshot.capabilitiesCustomized,
     pluginState: snapshot.pluginState,
+    pluginSessionSettings: snapshot.pluginSessionSettings,
     messages: snapshot.messages,
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,

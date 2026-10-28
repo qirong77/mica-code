@@ -86,7 +86,18 @@ const plugin: MicaPlugin = {
 };
 
 function readSettings(ctx: PluginContext) {
-  const settings = settingsFromValues(ctx.settings.get());
+  // 宿主没给会话设置这一面时整插件本该被跳过（`requires: ['sessionSettings']`），
+  // 走到这里说明宿主接线漏了：报一次可见的故障，别拿默认值假装正常。
+  if (!ctx.sessionSettings) {
+    ctx.health.report({
+      level: 'error',
+      message: '宿主没有提供会话级插件设置，自动压缩按全局默认值工作',
+      hint: '这是宿主能力缺失，升级 Mica 后重开会话；会话内的调整不会生效。',
+    });
+    return settingsFromValues(ctx.settings.get());
+  }
+  // 读的是本会话生效的值：会话里改过的项覆盖全局设置，其余跟随默认值。
+  const settings = settingsFromValues(ctx.sessionSettings.get());
   const issues = ctx.settings.validate();
   if (issues.length > 0) {
     ctx.health.report({

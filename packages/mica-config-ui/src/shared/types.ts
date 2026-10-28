@@ -206,6 +206,8 @@ export type ConfigWebPluginSetting = {
   default?: string;
   /** 必填项：页面在字段下方据此提示「需要填写」。 */
   required?: boolean;
+  /** 这条会话可以单独覆盖（默认值仍由插件设置提供）。 */
+  perSession?: boolean;
   format?: 'url' | 'number';
   min?: number;
   max?: number;
@@ -232,6 +234,11 @@ export type ConfigWebPlugin = {
   name: string;
   version: string;
   description: string;
+  /**
+   * 清单声明的图标名（kebab-case，取值见 `web/pluginIcons.tsx`）。空字符串表示清单没写，
+   * 界面用默认图标兜底。
+   */
+  icon: string;
   author?: string;
   source: ConfigWebPluginSource;
   /** 启用 / 停用 / 加载失败。停用的插件在启动阶段就不会注册。 */

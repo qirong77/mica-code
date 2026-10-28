@@ -62,6 +62,7 @@ function manifest(requires: string[]) {
     name: 'x',
     version: '1.0.0',
     description: '',
+    icon: '',
     main: 'index.js',
     assets: [],
     dependencies: [],

@@ -180,6 +180,41 @@ export type MicaNotesSnapshot = {
   content: string;
 };
 
+export const MICA_PLUGIN_SETTINGS_NOTIFICATIONS = {
+  updated: 'mica/pluginSettings/updated',
+} as const;
+
+/**
+ * `mica/pluginSettings/get` 的载荷：一个插件的会话级设置。
+ *
+ * `fields` 只包含清单里标了 `perSession` 的项，`values` 是**生效值**（会话覆盖 >
+ * 全局设置 > 字段默认值），`overrides` 只含本会话真正改过的键——界面据此显示
+ * 「跟随默认 / 本会话已改」。
+ */
+export type MicaPluginSessionSettings = {
+  pluginId: string;
+  name: string;
+  description?: string;
+  fields: {
+    key: string;
+    label: string;
+    type: 'text' | 'password' | 'textarea' | 'select' | 'number' | 'switch';
+    description?: string;
+    placeholder?: string;
+    options?: { value: string; label: string }[];
+    default?: string;
+    required?: boolean;
+    format?: 'url' | 'number';
+    min?: number;
+    max?: number;
+    step?: number;
+    unit?: string;
+    pattern?: string;
+  }[];
+  values: Record<string, string>;
+  overrides: Record<string, string>;
+};
+
 /** `MICA_CAPABILITY_NOTIFICATIONS.updated` payload. */
 export type MicaCapabilitiesSnapshot = {
   threadId: string | null;
@@ -419,6 +454,18 @@ export const MICA_METHODS = {
    * 落盘后其他窗口经 `mica/notes/updated` 同步。
    */
   notesSet: 'mica/notes/set',
+  /**
+   * 读本会话的插件设置：哪些插件声明了可按会话覆盖的项、每项的字段描述、
+   * 全局默认值、本会话已覆盖的值。
+   *
+   * 通用入口：内核不理解具体插件，界面按返回的字段描述渲染。
+   */
+  pluginSettingsGet: 'mica/pluginSettings/get',
+  /**
+   * 覆盖本会话的某几个插件设置项（值为 null 表示退回跟随全局）。
+   * 落盘后其他窗口经 `mica/pluginSettings/updated` 同步。
+   */
+  pluginSettingsSet: 'mica/pluginSettings/set',
 } as const;
 
 export type MicaBtwAskParams = {

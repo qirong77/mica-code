@@ -36,6 +36,13 @@ export type PluginManifest = {
   name: string;
   version: string;
   description: string;
+  /**
+   * 界面代表插件的图标名。
+   *
+   * 取值是界面图标库里的 kebab-case 名称（见 `mica-config-ui/web/pluginIcons.tsx` 的
+   * `PLUGIN_ICONS`），空字符串表示由界面用默认图标兜底：插件页与桌面端的插件菜单都读这一份。
+   */
+  icon: string;
   author?: string;
   /** 入口文件，相对插件目录。 */
   main: string;
@@ -81,6 +88,7 @@ export const PLUGIN_REQUIREMENTS = [
   'prompt',
   'runtime',
   'session',
+  'sessionSettings',
   'sessionState',
   'settings',
   'skills',
@@ -99,6 +107,8 @@ export type PluginManifestParseResult = { ok: true; manifest: PluginManifest } |
 
 const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)*$/;
+/** 图标名要进界面图标表查：写错了界面只能回退成默认图标，不如解析阶段就报出来。 */
+const PLUGIN_ICON_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
  * 解析并校验 `plugin.json` 的内容。
@@ -126,6 +136,11 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
 
   const description = readString(input.description)?.trim() ?? '';
   const author = readString(input.author)?.trim() || undefined;
+
+  const icon = readString(input.icon)?.trim() ?? '';
+  if (icon && !PLUGIN_ICON_PATTERN.test(icon)) {
+    return { ok: false, error: `icon 只能由小写字母、数字与 "-" 组成：${icon}` };
+  }
 
   const main = (readString(input.main)?.trim() || PLUGIN_ENTRY_CANDIDATES[0]).replace(/^\.\//, '');
   if (!isSafePluginRelativePath(main)) {
@@ -162,6 +177,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       name,
       version: rawVersion,
       description,
+      icon,
       author,
       main,
       assets: assets.value,
@@ -182,9 +198,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
  * 校验从严的理由与设置项一致：设置页完全按这份声明显示，检查项 id 写错就等于永远
  * 显示不出一行状态——用户在配置页看到一条可读的错误，比看到一个缺项的面板强。
  */
-function readDesktopChecks(
-  input: unknown,
-): { ok: true; value: DesktopCheckId[] } | { ok: false; error: string } {
+function readDesktopChecks(input: unknown): { ok: true; value: DesktopCheckId[] } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: [] };
   if (!isRecord(input)) return { ok: false, error: 'desktop 必须是对象' };
   const rawChecks = input.checks;
@@ -253,6 +267,7 @@ function readSettings(input: unknown): { ok: true; value: PluginSettingField[] }
       step: readFiniteNumber(entry.step),
       unit: readString(entry.unit)?.trim() || undefined,
       pattern: readString(entry.pattern)?.trim() || undefined,
+      perSession: entry.perSession === true ? true : undefined,
     });
   }
   return { ok: true, value: fields };

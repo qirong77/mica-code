@@ -20,8 +20,11 @@ import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import { applyIterationRewrites } from './iterationRewrite.js';
 import {
   PluginPromptSections,
+  normalizePluginSessionSettingsRecord,
   normalizePluginStateRecord,
   validatePluginStateValue,
+  type PluginSessionSettingsRecord,
+  type PluginSettingValues,
   type PluginStateRecord,
 } from '@packages/mica-plugin/index.js';
 import {
@@ -70,6 +73,8 @@ export type AgentRuntimeSnapshot = {
    * 会话笔记是最早的用法，但它只是众多消费者之一。
    */
   pluginState?: PluginStateRecord;
+  /** 插件设置的会话覆盖：插件 id → 只记改过的键。 */
+  pluginSessionSettings?: PluginSessionSettingsRecord;
   /** Derived model context window in tokens, used by headless/session tooling. */
   contextWindowSize?: number;
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
@@ -142,6 +147,7 @@ export class AgentRuntime {
    * 也不会出现「插件重启后状态还在、会话已经换了」的错配。
    */
   private pluginState: PluginStateRecord = {};
+  private pluginSessionSettings: PluginSessionSettingsRecord = {};
   /** 插件向 system prompt 贡献的段落，每轮重新渲染。 */
   readonly promptSections = new PluginPromptSections();
   private lastStatusKey: string | null = null;
@@ -225,6 +231,22 @@ export class AgentRuntime {
   /** 丢掉某个插件的状态（插件自行清空时用）。 */
   clearPluginState(pluginId: string): void {
     delete this.pluginState[pluginId];
+  }
+
+  /** 本会话对某个插件设置的覆盖（只含改过的键）。 */
+  getPluginSessionSettings(pluginId: string): PluginSettingValues | undefined {
+    const value = this.pluginSessionSettings[pluginId];
+    return value ? { ...value } : undefined;
+  }
+
+  /** 覆盖某个插件在本会话里的设置；传 undefined 表示清空覆盖、全部跟随默认值。 */
+  setPluginSessionSettings(pluginId: string, value: PluginSettingValues | undefined): void {
+    if (!pluginId.trim()) throw new Error('plugin id must not be empty');
+    if (value === undefined) {
+      delete this.pluginSessionSettings[pluginId];
+      return;
+    }
+    this.pluginSessionSettings[pluginId] = { ...value };
   }
 
   /** 当前会话可用的 skills（已应用本会话开关）。 */
@@ -383,6 +405,7 @@ export class AgentRuntime {
     // /clear 与新建会话都是「这条会话从这里重来」：插件状态属于会话，跟着一起清掉，
     // 否则新会话会莫名其妙继承上一轮的结论。
     this.pluginState = {};
+    this.pluginSessionSettings = {};
     this.emitStatus({ type: 'idle' });
   }
 
@@ -397,6 +420,7 @@ export class AgentRuntime {
       capabilitySelection: this.capabilitySelection,
       capabilitiesCustomized: this.capabilitiesCustomized,
       pluginState: this.pluginState,
+      pluginSessionSettings: this.pluginSessionSettings,
       contextWindowSize: this.currentConfig.provider.contextWindowSize,
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
@@ -472,6 +496,7 @@ export class AgentRuntime {
     this.capabilitiesCustomized = snapshot.capabilitiesCustomized === true;
     this.capabilities = normalizeCapabilitySelection(snapshot.capabilitySelection ?? this.resolveDefaultCapabilities());
     this.pluginState = normalizePluginStateRecord(snapshot.pluginState);
+    this.pluginSessionSettings = normalizePluginSessionSettingsRecord(snapshot.pluginSessionSettings);
     this.recreateClient();
     this.client?.loadSnapshot({
       model: snapshot.model,

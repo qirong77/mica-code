@@ -8,6 +8,7 @@ import type { ServiceContainer } from './ServiceContainer.js';
 import type { PluginIterationRewriter } from './PluginAgent.js';
 import type { PluginPromptSection } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
+import type { PluginSessionSettingsApi } from './PluginSessionSettings.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginHealthStore } from './PluginHealth.js';
 import type { PluginSettingIssue, PluginSettingValues } from './PluginSettings.js';
@@ -97,6 +98,16 @@ export type PluginContext = {
    * 之外（例如协议方法里）改动，需要调用方自己触发保存。
    */
   sessionState?: PluginSessionStateApi;
+  /**
+   * 本插件的设置值，含**当前会话**的覆盖。
+   *
+   * `ctx.settings.get()` 读的是全局那一份；这里读的是「这个会话实际会用的值」——
+   * 用户在会话设置里改过的项优先，其余跟随全局。要区分两者用 `overrides()`。
+   *
+   * 只有清单里标了 `perSession` 的字段能覆盖，所以两者在没标 `perSession` 的插件里
+   * 永远相等。
+   */
+  sessionSettings?: PluginSessionSettingsApi;
   /**
    * 向 system prompt 贡献段落。每轮重新渲染，空串表示本轮不贡献。
    *

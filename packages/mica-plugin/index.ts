@@ -205,6 +205,21 @@ export { PLUGIN_REQUIREMENTS, isPluginRequirement } from './PluginManifest.js';
 export type { PluginRequirement } from './PluginManifest.js';
 export { MAX_PLUGIN_STATE_BYTES, normalizePluginStateRecord, validatePluginStateValue } from './PluginSessionState.js';
 export type { PluginSessionStateApi, PluginStateRecord } from './PluginSessionState.js';
+export {
+  MAX_PLUGIN_SESSION_SETTINGS_BYTES,
+  createPluginSessionSettingsApi,
+  mergeSessionSettingOverrides,
+  normalizePluginSessionSettingsRecord,
+  resolveEffectiveSettingValues,
+  sessionScopedSettingFields,
+  validateSessionSettingValues,
+} from './PluginSessionSettings.js';
+export type {
+  PluginSessionSettingsApi,
+  PluginSessionSettingsHostApi,
+  PluginSessionSettingsRecord,
+  PluginSessionSettingsView,
+} from './PluginSessionSettings.js';
 export type { HookRegistry } from './HookRegistry.js';
 export type { GuardHookResult, HookExecutionContext, HookHandler, HookKind, HookOptions } from './HookTypes.js';
 export type { ServiceContainer } from './ServiceContainer.js';

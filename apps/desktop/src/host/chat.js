@@ -1994,6 +1994,28 @@ export function registerChatIpc() {
     )
   })
 
+  // 插件的会话级设置：清单里标了 perSession 的字段才出现。默认值在插件设置里
+  // （配置页写），这里读写的是本会话的覆盖，跟会话快照一起落盘。
+  ipcMain.handle('chat:plugin-settings', async (event, { id, sessionId, cwd } = {}) => {
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return unwrapHostResult(await hostTaskRequest(ensured.run, 'mica/pluginSettings/get', {}))
+  })
+
+  ipcMain.handle(
+    'chat:set-plugin-settings',
+    async (event, { id, sessionId, cwd, pluginId, values } = {}) => {
+      if (!id) return { ok: false, error: 'chat id 缺失' }
+      if (typeof pluginId !== 'string' || !pluginId) return { ok: false, error: 'pluginId 缺失' }
+      const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+      if (!ensured.run) return { ok: false, error: ensured.error }
+      return unwrapHostResult(
+        await hostTaskRequest(ensured.run, 'mica/pluginSettings/set', { pluginId, values })
+      )
+    }
+  )
+
   ipcMain.handle('chat:compact', async (_event, { sessionId, mode } = {}) => {
     if (!sessionId || typeof sessionId !== 'string') return { ok: false, error: 'sessionId 缺失' }
     const resolvedMode = mode === 'local' ? 'local' : 'model'

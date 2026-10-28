@@ -38,6 +38,8 @@ describe('codex protocol framing', () => {
       capabilitiesGet: 'mica/capabilities/get',
       capabilitiesSet: 'mica/capabilities/set',
       notesGet: 'mica/notes/get',
+      pluginSettingsGet: 'mica/pluginSettings/get',
+      pluginSettingsSet: 'mica/pluginSettings/set',
       notesSet: 'mica/notes/set',
     });
   });

@@ -159,7 +159,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 配置迁移与语义校验统一在 `startup/validate-config.js`，配置页保存复用它。
 - 仅当所有 provider 都没有 api_key 时，`envProvider.ts` 从 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 合成运行时 provider；环境 provider 永不写回 config.json。
 - session 是 version 1 JSON；新增字段要有版本策略、默认值与 sanitize，字段类型不对按损坏拒绝。
-- 会话级状态都在快照里：`capabilitySelection` / `capabilitiesCustomized`、`pluginState`（插件自己的 JSON）、`notes`。`startNewSession` 清空，resume/fork 沿用，rewind 随 checkpoint 回滚。
+- 会话级状态都在快照里：`capabilitySelection` / `capabilitiesCustomized`、`pluginState`（插件自己的 JSON）、`pluginSessionSettings`（插件设置的会话覆盖，只存改过的键）、`notes`。`startNewSession` 清空，resume/fork 沿用，rewind 随 checkpoint 回滚。
 - `subagentUsageHistory` 独立于主 `usageHistory`；fork 清空两类历史，只保留描述继承上下文的 `lastUsage`。
 - compact 保留 `lastUsage` / `usageHistory` 供 Stats 对账；界面 ctx 优先读 `displayUsage`。
 - 无手动标题时取最后一条真实用户消息（最长 60 字符）；自动改名不得覆盖 `titleSource === 'manual'`。
@@ -264,7 +264,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - 本地清理替换工具结果、可识别媒体与工具参数正文；tool-call arguments 必须仍是合法 JSON，只裁正文/长命令，保留路径、pattern、name、offset。
 - 裁剪规则集中在 `mica-context/CompactionService.ts`（正文/命令阈值 200/400），幂等标记 `[omitted `。
-- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次、间隔 30 分钟。设置在插件 `settings`，计数在会话 `pluginState['auto-compact']`。
+- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次、间隔 30 分钟。设置在插件 `settings`（每项都标 `perSession`，可在会话设置里按会话覆盖），计数在会话 `pluginState['auto-compact']`。
 - 自动压缩只在常驻会话生效：`mica exec` 是一次性运行（`agent.mode === 'one-shot'`），改变成本或输出的策略一律跳过。
 - 压缩只改发给模型的历史，不改 `conversationMessages`；自动压缩失败只记 note，不中断 turn。
 - 所有压缩保留 usage 记账；需要模型的 compact / review / commit 走 subagent 或 exclusive task，不污染运行中的主 turn。

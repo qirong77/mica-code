@@ -37,6 +37,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         name: manifest.name,
         version: manifest.version,
         description: manifest.description,
+        icon: manifest.icon,
         author: manifest.author,
         source: 'official',
         location: `${OFFICIAL_PLUGINS_DIR}/${manifest.id}`,
@@ -63,6 +64,8 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         name: plugin.name,
         version: plugin.version ?? '0.0.0',
         description: plugin.description,
+        // 图标暂由界面兜底：插件检查结果里的 icon 字段还没进这个提交。
+        icon: '',
         source: 'user',
         location: plugin.root,
         entryFile: plugin.entryFile || undefined,

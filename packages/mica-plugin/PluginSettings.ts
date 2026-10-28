@@ -45,6 +45,16 @@ export type PluginSettingField = {
   unit?: string;
   /** 额外的正则约束，作用于字符串值。 */
   pattern?: string;
+  /**
+   * 允许按会话覆盖。
+   *
+   * 声明之后这一项有两层：默认值仍是 `$MICA_HOME/plugin-settings/<id>.json`（配置页
+   * 写的那一份），用户在某个会话里改的值只记在**那条会话**的快照里，并且只记改过的
+   * 键——没记的键继续跟随默认值，之后调默认值照样能落到这条会话上。
+   *
+   * 不参与覆盖的项只在全局声明，会话设置里不会出现，避免「页面上能改、实际不影响」。
+   */
+  perSession?: boolean;
 };
 
 export type PluginSettingValues = Record<string, string>;

@@ -253,6 +253,16 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       },
       clear: () => agent.clearPluginState?.(pluginId),
     }),
+    // 会话级的插件设置覆盖：写不到会话上就抛错，别让界面显示「已保存」而实际没存。
+    sessionSettingsFor: (pluginId) => ({
+      read: () => agent.getPluginSessionSettings?.(pluginId),
+      write: (value) => {
+        if (!agent.setPluginSessionSettings) {
+          throw new Error(`session settings unavailable for ${pluginId}`);
+        }
+        agent.setPluginSessionSettings(pluginId, value);
+      },
+    }),
     promptSections: agent.promptSections,
     agentRegistry: {
       mode: options.oneShot ? 'one-shot' : 'session',

@@ -28,3 +28,7 @@ export type {
 export { applyGroupEnabled, buildCapabilitySections } from './capabilityGroups.js';
 export type { CapabilityGroupRef, CapabilitySection } from './capabilityGroups.js';
 export { Switch as ConfigSwitch } from './components/Ui.js';
+export { SettingRow, SettingsGroup } from './components/Ui.js';
+
+/** 单个插件设置字段的控件：插件详情与会话设置共用，保证两处控件一致。 */
+export { PluginSettingInput, nudgeSettingValue } from './components/PluginSettingInput.js';

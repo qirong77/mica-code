@@ -90,6 +90,18 @@ describe('auto-compact plugin', () => {
     expect(harness.compactCalls).toEqual([]);
   });
 
+  it('follows the session override instead of the global default', async () => {
+    // 全局开着，但这条会话关掉了：读不到会话层就等于「按会话配置」没实现。
+    const harness = createHarness({
+      inputTokens: 250_000,
+      settings: { ...configured, enabled: 'true' },
+      sessionValues: { ...configured, enabled: 'false' },
+    });
+
+    await expect(harness.rewrite()).resolves.toBeNull();
+    expect(harness.compactCalls).toEqual([]);
+  });
+
   it('stops after the configured number of runs', async () => {
     // 只允许快速压缩（模型压缩次数为 0）：用完之后同一段上下文不再被压。
     const harness = createHarness({
@@ -116,6 +128,8 @@ function createHarness(options: {
   inputTokens: number;
   mode?: 'session' | 'one-shot';
   settings?: PluginSettingValues;
+  /** 本会话覆盖之后的生效值；省略表示与全局设置相同。 */
+  sessionValues?: PluginSettingValues;
   savedTokens?: number[];
   fail?: string;
   issues?: string[];
@@ -144,6 +158,7 @@ function createHarness(options: {
   };
 
   const settings = options.settings ?? configured;
+  const sessionValues = options.sessionValues ?? settings;
   const ctx = {
     pluginId: 'auto-compact',
     settings: {
@@ -151,6 +166,14 @@ function createHarness(options: {
       get: () => settings,
       validate: () =>
         (options.issues ?? []).map((message) => ({ key: 'quickThresholdK', label: '快速压缩阈值', message })),
+    },
+    // 插件读的是「本会话生效的值」：宿主把会话覆盖合进全局设置后交给它，
+    // 因此这里直接返回同一份 settings 就代表「本会话没有覆盖」。
+    sessionSettings: {
+      get: () => sessionValues,
+      overrides: () => ({}),
+      set: vi.fn(),
+      clear: vi.fn(),
     },
     agent: {
       onIterationRewrite: (handler: PluginIterationRewriter) => {

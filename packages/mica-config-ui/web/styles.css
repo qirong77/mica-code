@@ -150,7 +150,7 @@
 
   .app-shell {
     display: grid;
-    grid-template-columns: 188px minmax(0, 1fr);
+    grid-template-columns: 208px minmax(0, 1fr);
     width: 100%;
     height: 100%;
     min-height: 0;
@@ -162,9 +162,9 @@
     min-width: 0;
     min-height: 0;
     flex-direction: column;
-    gap: 14px;
-    overflow-y: auto;
-    padding: 14px 12px;
+    gap: 12px;
+    overflow: hidden;
+    padding: 14px 10px 12px;
     border-right: 1px solid var(--line);
     background: var(--sidebar-bg);
   }
@@ -174,6 +174,29 @@
     align-items: center;
     gap: 8px;
     padding: 4px 0;
+  }
+
+  /* 回到应用：设置页在桌面端是整页打开的一层，顶上必须有一个出口。 */
+  .sidebar-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    align-self: flex-start;
+    height: 26px;
+    margin-bottom: 2px;
+    padding: 0 8px 0 5px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-soft);
+    cursor: pointer;
+    font-size: var(--text-aux);
+    font-weight: 500;
+  }
+
+  .sidebar-back:hover {
+    background: var(--panel);
+    color: var(--text);
   }
 
   .brand-mark {
@@ -190,9 +213,22 @@
     letter-spacing: -0.01em;
   }
 
+  /* 品牌后面挂一个「设置」，页面与对话区的区分不再只靠导航列表判断。 */
+  .brand-tag {
+    margin-left: auto;
+    color: var(--text-faint);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+  }
+
   .nav-menu {
     display: grid;
     gap: 3px;
+    /* 导航自己滚：底部提示条要一直贴在左下角，不能跟着列表滚走。 */
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .nav-group {
@@ -270,13 +306,35 @@
     font-weight: 600;
   }
 
+  /* 侧栏底部的常驻提示：与导航列表分开（margin-top: auto），滚到哪一行都看得见。 */
+  .sidebar-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: auto;
+    padding: 9px 9px 0;
+    border-top: 1px solid var(--line-soft);
+    color: var(--text-faint);
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .sidebar-foot-dot {
+    width: 5px;
+    height: 5px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: var(--green);
+    opacity: 0.75;
+  }
+
   .content-shell {
     display: grid;
     grid-template-rows: minmax(0, 1fr);
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    padding: 20px 28px 24px;
+    padding: 18px 28px 22px;
     background: var(--bg);
   }
 
@@ -296,7 +354,7 @@
      以前标题、路径、操作各占一行，页头能吃掉 70px，内容区还没开始就只有半屏。 */
   .page-head {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
     padding: 0 2px 12px;
@@ -304,6 +362,12 @@
   }
 
   .page-head-copy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .page-head-title {
     display: flex;
     align-items: baseline;
     gap: 12px;
@@ -313,10 +377,24 @@
   .page-head-copy h1 {
     flex: none;
     margin: 0;
-    font-size: var(--text-title);
+    font-size: var(--text-heading);
     font-weight: 650;
     line-height: 1.3;
     letter-spacing: -0.01em;
+  }
+
+  /* 一句话说明这一页管什么。与路径同色阶：都比标题弱一档，不抢标题。 */
+  .page-description {
+    margin: 0;
+    max-width: 82ch;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+  }
+
+  /* 页头操作与标题首行对齐（页头不再垂直居中：有了说明行后居中会让按钮浮在中间）。 */
+  .page-head > .page-head-actions {
+    margin-top: 1px;
   }
 
   .page-path {
@@ -961,12 +1039,6 @@
     .setting-row-label {
       padding-top: 0;
     }
-
-    /* 上下排时「值 + 跳转」靠左接在标签下面：仍然右对齐会甩到一行之外的末端。 */
-    .setting-row-inline {
-      justify-content: flex-start;
-      min-height: 0;
-    }
   }
 
   .table-panel-title strong,
@@ -1505,11 +1577,21 @@
 
     .sidebar {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-columns: auto auto minmax(0, 1fr);
       align-items: center;
       overflow: hidden;
       border-right: 0;
       border-bottom: 1px solid var(--line);
+    }
+
+    /* 窄屏是一行入口条：底部的自动保存提示与品牌后缀都收起来，只留返回、品牌与页签。 */
+    .sidebar-foot,
+    .brand-tag {
+      display: none;
+    }
+
+    .sidebar-back {
+      margin-bottom: 0;
     }
 
     .nav-menu {
@@ -2469,17 +2551,6 @@
     line-height: 1.5;
   }
 
-  /* 只读事实行（其他页面管理、其他字段）：值与跳转按钮同排，值可以省略 */
-  .setting-row-inline {
-    display: flex;
-    align-items: center;
-    /* 值与跳转都靠右：中间那段空白只会让它们看起来不属于同一行。 */
-    justify-content: flex-end;
-    gap: 12px;
-    min-width: 0;
-    min-height: 30px;
-  }
-
   .setting-row-value {
     min-width: 0;
     overflow: hidden;
@@ -2493,18 +2564,6 @@
     color: var(--text-soft);
     font-family: var(--font-mono);
     font-size: var(--text-aux);
-  }
-
-  /* 只读事实行背后的配置键：小一号的等宽标签，说明这一行写在 config.json 的哪个键上。 */
-  .setting-row-key {
-    flex: none;
-    padding: 0 5px;
-    border-radius: var(--radius-sm);
-    background: var(--panel-muted);
-    color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    line-height: 17px;
   }
 
   /*
@@ -3143,60 +3202,85 @@
     transform: rotate(90deg);
   }
 
-  /* 插件页：左列表 / 右详情。详情里依次是描述、健康状态、设置分组、信息分组。
-     设置表单用共享的「标签列 + 控件列」行，不再自己画一套。 */
-  .plugin-page {
-    height: 100%;
-    min-height: 0;
-  }
-
-  /* 列表栏里的分组：两个来源（官方 / 用户）各一段，标题即小节名。 */
-  .split-rail-section {
+  /* 插件页：一页卡片目录 + 每个插件自己的整页详情。
+     目录按来源分节（官方 / 用户），卡片本身就是入口；详情页有自己的页头（图标、名字、
+     启停）和两列内容（设置 / 运行条件 + 信息）。 */
+  .plugin-catalog {
     display: grid;
-    gap: 1px;
     align-content: start;
+    gap: 22px;
   }
 
-  .split-rail-section + .split-rail-section {
-    margin-top: 6px;
-    padding-top: 6px;
-    border-top: 1px solid var(--line-soft);
-  }
-
-  .split-rail-empty-hint {
-    display: block;
-    margin-top: 4px;
-    overflow-wrap: anywhere;
-    color: var(--text-faint);
-    font-size: 11px;
-  }
-
-  .plugin-detail {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    min-height: 0;
-  }
-
-  .plugin-detail-head {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--line-soft);
-  }
-
-  .plugin-detail-title {
+  /* 目录的工具条：左边一句规模说明，右边搜索框。与页头分开一层，滚动时不跟着重复。 */
+  .plugin-catalog-toolbar {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    min-width: 0;
+    gap: 12px;
   }
 
-  .plugin-detail-title-copy {
+  .plugin-catalog-summary {
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+  }
+
+  .plugin-catalog-filter {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 220px;
+    max-width: 100%;
+  }
+
+  .plugin-catalog-filter > svg {
+    position: absolute;
+    left: 9px;
+    color: var(--text-faint);
+    pointer-events: none;
+  }
+
+  .plugin-catalog-filter input {
+    width: 100%;
+    height: var(--control-h);
+    padding: 0 9px 0 28px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--panel);
+    color: var(--text);
+    font-size: var(--text-aux);
+  }
+
+  .plugin-catalog-filter input::placeholder {
+    color: var(--text-faint);
+  }
+
+  .plugin-catalog-filter input:focus-visible {
+    border-color: var(--line-strong);
+    outline: none;
+  }
+
+  .plugin-section {
+    display: grid;
+    gap: 10px;
+  }
+
+  .plugin-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .plugin-section-copy {
     display: grid;
     gap: 2px;
     min-width: 0;
   }
 
-  .plugin-detail-title h2 {
+  .plugin-section-copy h2 {
+    display: flex;
+    align-items: center;
+    gap: 7px;
     margin: 0;
     color: var(--text);
     font-size: var(--text-subhead);
@@ -3204,27 +3288,294 @@
     line-height: 1.4;
   }
 
-  .plugin-detail-meta {
-    overflow: hidden;
+  .plugin-section-count {
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--panel-muted);
     color: var(--text-faint);
-    font-size: 11.5px;
+    font-size: var(--text-micro);
+    font-weight: 500;
+    line-height: 17px;
+  }
+
+  .plugin-section-copy p {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
     line-height: 1.5;
+  }
+
+  .plugin-section-empty {
+    display: grid;
+    gap: 4px;
+    padding: 18px 14px;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius-lg);
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.6;
+  }
+
+  /* 卡片网格：按容器宽度自适应列数。卡片只承载「认出来 + 状态」，细节都在详情页。 */
+  .plugin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+    gap: 10px;
+  }
+
+  .plugin-card {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: start;
+    gap: 11px;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+    color: var(--text-soft);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      border-color 110ms ease,
+      background 110ms ease,
+      transform 110ms ease;
+  }
+
+  .plugin-card:hover {
+    border-color: var(--line-strong);
+    background: var(--panel-hover);
+  }
+
+  .plugin-card:focus-visible {
+    border-color: var(--line-strong);
+    outline: none;
+  }
+
+  /* 停用的插件整张压暗：不是变成灰色按钮，而是不再抢注意力。 */
+  .plugin-card.is-inactive .plugin-card-icon,
+  .plugin-card.is-inactive .plugin-card-name {
+    opacity: 0.6;
+  }
+
+  /* 图标格：方形圆角容器，和插件自己的图标形态一致（图片加载失败也不会跳形）。 */
+  .plugin-card-icon {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .plugin-card-body {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .plugin-card-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .plugin-card-name {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: var(--text-body);
+    font-weight: 600;
+    line-height: 1.4;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .plugin-detail-location {
+  .plugin-card-version {
+    flex: none;
+    color: var(--text-faint);
     font-family: var(--font-mono);
+    font-size: 10.5px;
   }
 
-  .plugin-detail-actions {
+  /* 描述固定两行：卡片高度一致，网格不会因为某个插件写了长段落而参差。 */
+  .plugin-card-description {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .plugin-card-foot {
     display: flex;
-    flex: 0 0 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 1px;
+  }
+
+  .plugin-card-note {
+    color: var(--text-faint);
+    font-size: 11px;
+  }
+
+  /* ---- 插件详情：整页 ---------------------------------------------------- */
+  .plugin-detail {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100%;
+    min-height: 0;
+  }
+
+  /* 详情页自己的页头：返回目录在左，路径居中偏左，重新加载在右。与全局页头同一高度，
+     切页面时标题行不会上下跳。 */
+  .plugin-detail-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 38px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .plugin-back {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+    padding: 0 7px 0 4px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-soft);
+    cursor: pointer;
+    font-size: var(--text-aux);
+    font-weight: 500;
+  }
+
+  .plugin-back:hover {
+    background: var(--panel-muted);
+    color: var(--text);
+  }
+
+  .plugin-detail-bar-title {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plugin-detail-bar-actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+
+  .plugin-detail-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 18px 2px 8px;
+    /* 与目录页同一个阅读宽度：详情页不是另一套排版。 */
+    max-width: 1160px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  /* 分组在被 flex 容器压缩时保持内容高度，滚动交给外层。 */
+  .plugin-detail-scroll > * {
+    flex: none;
+  }
+
+  /* 详情页头：图标 + 名字/版本 + 启停。身份和操作在同一行，阅读顺序就是「这是什么 → 它在干什么」。 */
+  .plugin-hero {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 13px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .plugin-hero-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+    color: var(--text);
+  }
+
+  .plugin-hero-copy {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .plugin-hero-copy h1 {
+    margin: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: var(--text-title);
+    font-weight: 650;
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plugin-hero-copy p {
+    margin: 0;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plugin-hero-actions {
+    display: flex;
+    flex: none;
     align-items: center;
     gap: 10px;
   }
 
-  /* 启停开关 + 文案同一行：开关自己占位，标签只解释当前状态。 */
+  /* 两列：左边是「要动的东西」（运行条件、设置），右边是「查的东西」（信息、文件）。
+     窄容器下退化为单列，右侧信息排到最后。 */
+  .plugin-columns {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    align-items: start;
+    gap: 16px;
+  }
+
+  .plugin-column {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  @container page (max-width: 980px) {
+    .plugin-columns {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
   .plugin-toggle {
     display: inline-flex;
     align-items: center;
@@ -3234,68 +3585,12 @@
     cursor: pointer;
   }
 
-  .plugin-detail-scroll {
-    /* flex 而不是 grid：grid 的自动行在定高容器里会被拉伸/压缩，分组会被裁成等高方块。 */
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 14px 16px 18px;
-  }
-
-  /* 分组在被 flex 容器压缩时保持内容高度，滚动交给外层。 */
-  .plugin-detail-scroll > * {
-    flex: none;
-  }
-
-  .plugin-detail-description {
+  .plugin-description {
     margin: 0;
-    max-width: 72ch;
+    max-width: 76ch;
     color: var(--text-soft);
     font-size: var(--text-aux);
-    line-height: 1.6;
-  }
-
-  .plugin-state {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 0 7px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    color: var(--text-soft);
-    font-size: var(--text-micro);
-    line-height: 18px;
-    white-space: nowrap;
-  }
-
-  .plugin-state::before {
-    content: '';
-    width: 5px;
-    height: 5px;
-    border-radius: 999px;
-    background: currentColor;
-  }
-
-  .plugin-state.is-on {
-    border-color: color-mix(in srgb, var(--green) 40%, transparent);
-    color: var(--green);
-  }
-
-  .plugin-state.is-off {
-    color: var(--text-faint);
-  }
-
-  .plugin-state.is-warn {
-    border-color: color-mix(in srgb, var(--amber) 40%, transparent);
-    color: var(--amber);
-  }
-
-  .plugin-state.is-error {
-    border-color: color-mix(in srgb, var(--red) 45%, transparent);
-    color: var(--red);
+    line-height: 1.65;
   }
 
   /* 健康状态：一条横条，不套卡片边框（外层分组已经是一块面）。 */
@@ -3352,6 +3647,65 @@
     color: var(--accent);
     font-size: 10px;
     line-height: 15px;
+  }
+
+  /* 默认值之外还能按会话覆盖：标在中性的灰底上，不抢必填提示的强调色。 */
+  .plugin-setting-session {
+    margin-left: 5px;
+    padding: 0 5px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 15px;
+  }
+
+  /* 会话设置里的插件一节：一行控件 + 退回继承的次要动作，与配置页同行高。 */
+  .session-plugin-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .session-plugin-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  /* 覆盖状态跟着标签走：与配置页的「必填」同一处，不额外占一行。 */
+  .session-plugin-tag {
+    margin-left: 6px;
+    padding: 0 5px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    font-size: 10px;
+    line-height: 15px;
+  }
+
+  .session-plugin-reset {
+    flex: none;
+    height: var(--control-h);
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .session-plugin-reset:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+
+  .session-plugin-reset:disabled {
+    opacity: 0.55;
+    cursor: default;
   }
 
   .plugin-file-list {

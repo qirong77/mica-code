@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
-import { VERSION_LABEL } from '@packages/mica-config/brand.js';
+import { VERSION_LABEL, resolveMicaHome } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import {
@@ -75,6 +75,7 @@ import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory
 import { SessionController } from '../session/SessionController.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
 import { resolveRuntimeConfigOverride } from './modelCatalog.js';
+import { applyPluginSessionSettings, listPluginSessionSettings } from './pluginSessionSettings.js';
 
 export type AppServerOptions = {
   sessionId?: string;
@@ -610,6 +611,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       await handleCodexRequest(id, method, params, {
         agent: agent!,
         sessionController: sessionController!,
+        plugins: pluginHost?.plugins,
+        configDir: resolveMicaHome(),
         subagentTasks: subagentTasks!,
         refreshTaskSnapshots: () => pushTaskSnapshots(),
         runtimeOverride,
@@ -640,6 +643,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
 type HostContext = {
   agent: AgentRuntime;
   sessionController: SessionController;
+  /** 插件表：会话设置这类「按插件声明渲染」的界面要按清单列出字段。 */
+  plugins?: import('@packages/mica-plugin/index.js').PluginManager;
+  /** 插件设置的落盘目录，读全局默认值用（缺了只能读到字段默认值）。 */
+  configDir?: string;
   /** Live subagent task manager: the desktop detail modal reads records here. */
   subagentTasks: SubagentTaskManager;
   /** Push a fresh background/subagent snapshot after a task mutation. */
@@ -1490,6 +1497,20 @@ async function handleCodexRequest(
     }
     case MICA_METHODS.notesGet: {
       ctx.writeResponse({ ok: true, content: readSessionNotes(ctx.agent) });
+      return;
+    }
+    case MICA_METHODS.pluginSettingsGet: {
+      ctx.writeResponse({ ok: true, plugins: listPluginSessionSettings(ctx) });
+      return;
+    }
+    case MICA_METHODS.pluginSettingsSet: {
+      const result = applyPluginSessionSettings(ctx, params);
+      if (!result.ok) {
+        ctx.writeResponse({ ok: false, error: result.error, issues: result.issues });
+        return;
+      }
+      if (ctx.sessionId) ctx.sessionController.saveCurrent({ allowEmpty: true });
+      ctx.writeResponse({ ok: true, plugins: listPluginSessionSettings(ctx) });
       return;
     }
     case MICA_METHODS.notesSet: {

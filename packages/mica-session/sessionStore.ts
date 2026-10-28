@@ -48,6 +48,13 @@ export type PersistedRuntimeSnapshot = {
    * 笔记、循环任务说明）留在 system prompt 里。缺失表示没有任何插件写过状态。
    */
   pluginState?: Record<string, unknown>;
+  /**
+   * 插件设置的会话级覆盖：插件 id → 该会话里改过的键。
+   *
+   * 与 `pluginState` 分开：这一份是用户对插件配置的显式选择，界面按字段渲染，
+   * 插件自己不该有机会改写它。只存改过的键，其余继续跟随全局设置。
+   */
+  pluginSessionSettings?: Record<string, Record<string, string>>;
   /** Model context window in tokens; informational for the web console's
    *  context usage display. Optional so older snapshots parse cleanly. */
   contextWindowSize?: number;
@@ -708,6 +715,16 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   // 插件状态缺失允许（没有任何插件写过），存在就必须是普通对象——它是「插件 id →
   // JSON」的映射，别的形状进不了读写路径，只会让每次保存都原样写回脏数据。
   if (session.snapshot.pluginState !== undefined && !isPlainRecord(session.snapshot.pluginState)) return null;
+  // 覆盖只可能是「插件 id → 字符串映射」；别的形状读进来会让界面按字段渲染出一堆
+  // 不存在的项，所以在解析阶段就拒绝，而不是留到运行期再清洗。
+  if (session.snapshot.pluginSessionSettings !== undefined) {
+    const record = session.snapshot.pluginSessionSettings;
+    if (!isPlainRecord(record)) return null;
+    for (const value of Object.values(record)) {
+      if (!isPlainRecord(value)) return null;
+      if (!Object.values(value).every((item) => typeof item === 'string')) return null;
+    }
+  }
   const turnState = isPersistedSessionTurnState(session.turnState) ? session.turnState : 'completed';
   let protocol = session.snapshot.protocol;
   if (!isProviderProtocol(protocol)) {

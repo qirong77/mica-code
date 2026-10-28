@@ -5,9 +5,11 @@ import type { PluginAgentRegistry } from './PluginAgent.js';
 import type { PluginRequirement } from './PluginManifest.js';
 import type { PluginPromptSections } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
+import type { PluginSessionSettingsHostApi } from './PluginSessionSettings.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
+import { createPluginSessionSettingsApi } from './PluginSessionSettings.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 
@@ -47,6 +49,11 @@ export type PluginBaseContext = Omit<
    */
   sessionStateFor?: (pluginId: string) => PluginSessionStateApi;
   /**
+   * 按插件 id 生成本会话的设置覆盖读写面。宿主不提供时插件拿不到 `sessionSettings`，
+   * 声明了 `requires: ['sessionSettings']` 的插件会被跳过，而不是读不到配置还假装在跑。
+   */
+  sessionSettingsFor?: (pluginId: string) => PluginSessionSettingsHostApi;
+  /**
    * 内核持有的 prompt 段落表。manager 会为每个插件包一层只写自己段落的入口，
    * 宿主只需要把 `AgentRuntime.promptSections` 交出来。
    */
@@ -73,6 +80,16 @@ export class PluginManager {
     this.plugins.set(plugin.id, plugin);
   }
 
+  /**
+   * 已登记的插件，含 setup 失败的那些：配置页与协议要按清单如实列出插件级声明
+   * （会话设置字段），看不到就等于没声明。
+   */
+  list(): MicaPlugin[] {
+    return [...this.plugins.values()];
+  }
+
+  
+
   async setupAll(baseContext: PluginBaseContext): Promise<PluginSetupReport> {
     const report: PluginSetupReport = { loaded: [], failed: [], skipped: [] };
     this.watchHookErrors(baseContext);
@@ -81,9 +98,17 @@ export class PluginManager {
       const localDisposables: Disposable[] = [];
       const logger = createPluginLogger(plugin.id, baseContext.logger);
       const configDir = baseContext.paths?.config;
-      // `sessionStateFor` / `promptSections` 由 manager 消费（下面按 pluginId 生成
-      // 本插件专属的入口），不能原样漏进 ctx，否则插件会看到一个能读别人状态的入口。
-      const { sessionStateFor, promptSections: promptRegistry, agentRegistry, subagentsFor, ...shared } = baseContext;
+      // `sessionStateFor` / `sessionSettingsFor` / `promptSections` 由 manager 消费
+      // （下面按 pluginId 生成本插件专属的入口），不能原样漏进 ctx，否则插件会看到一个
+      // 能读别人状态的入口。
+      const {
+        sessionStateFor,
+        sessionSettingsFor,
+        promptSections: promptRegistry,
+        agentRegistry,
+        subagentsFor,
+        ...shared
+      } = baseContext;
       const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
       const health = createPluginHealthStore(plugin.id, { configDir });
       const ctx: PluginContext = {
@@ -112,6 +137,15 @@ export class PluginManager {
         },
         onDispose: (dispose) => localDisposables.push({ dispose }),
       };
+      const sessionSettingsHost = sessionSettingsFor?.(plugin.id);
+      if (sessionSettingsHost) {
+        ctx.sessionSettings = createPluginSessionSettingsApi({
+          fields: plugin.manifest?.settings ?? [],
+          readGlobal: () => settings.get(),
+          readOverrides: () => sessionSettingsHost.read(),
+          writeOverrides: (value) => sessionSettingsHost.write(value),
+        });
+      }
       const sessionState = sessionStateFor?.(plugin.id);
       if (sessionState) ctx.sessionState = sessionState;
       if (promptRegistry) {
