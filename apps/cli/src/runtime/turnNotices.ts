@@ -101,6 +101,51 @@ export class TurnNoticeLog {
   }
 }
 
+/**
+ * 插件提交的轮次里，会话记录该显示「为什么跑这一轮」而不是整段提示词。
+ *
+ * 本轮跑完之后用户消息进了 provider 历史（原文很长），而 `extra` 里那条是要展示的
+ * 版本。直接在末尾追加会变成两条用户消息、顺序也反了（回答在前）。所以这里把原文
+ * 那条就地换成展示版本、再丢掉末尾的副本——位置、顺序与 notice 锚点都不动。
+ *
+ * 原文对不上（历史被改写、消息已被删）时返回原数组：宁可多一条消息，也不要改错。
+ */
+export function mergeInFlightUserMessage(
+  messages: MicaUiConversationMessage[],
+  inFlight: { message: MicaUiConversationMessage; rawContent: unknown },
+): MicaUiConversationMessage[] {
+  const pendingIndex = messages.lastIndexOf(inFlight.message);
+  if (pendingIndex < 0) return messages;
+  const rawIndex = messages.findIndex(
+    (entry, index) => index !== pendingIndex && entry.role === 'user' && sameContent(entry.content, inFlight.rawContent),
+  );
+  if (rawIndex < 0) return messages;
+  const next = [...messages];
+  next[rawIndex] = inFlight.message;
+  next.splice(pendingIndex, 1);
+  return next;
+}
+
+/**
+ * 同一段输入在 provider 历史与 `RuntimeInput` 里的形态可能不同（字符串 vs 文本块数组），
+ * 所以按「取出的文本」比较，而不是按结构比较。
+ */
+function sameContent(a: unknown, b: unknown): boolean {
+  const left = contentText(a);
+  return left.length > 0 && left === contentText(b);
+}
+
+function contentText(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (!Array.isArray(value)) return '';
+  return value
+    .map((part) =>
+      part && typeof part === 'object' && 'text' in part ? String((part as { text?: unknown }).text ?? '') : '',
+    )
+    .join('')
+    .trim();
+}
+
 export function createRetryNotice(error: unknown, attempt: number, maxAttempts: number, delayMs: number): TurnNotice {
   const seconds = Math.max(1, Math.ceil(delayMs / 1000));
   return {

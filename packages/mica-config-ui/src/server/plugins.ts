@@ -59,6 +59,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         desktopChecks: resolveDesktopChecks(manifest.desktopChecks),
         desktopEntry: manifest.desktopEntry,
         status: readStatus(manifest.id, manifest.status, configRoot),
+        desktopPanel: manifest.desktopPanel,
         health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(manifest.id),
         loadStatus: status?.status,
@@ -87,6 +88,8 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         // 用户插件没有打包进页面的前端模块，声明了 `desktop.entry` 也渲染不出入口。
         desktopEntry: null,
         status: readStatus(plugin.id, plugin.status ?? [], configRoot),
+        // 面板反过来是数据驱动的，所以用户插件声明了就有。
+        desktopPanel: plugin.desktopPanel,
         health: micaPlugin.readPluginHealth(plugin.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(plugin.id),
         loadStatus: status?.status,

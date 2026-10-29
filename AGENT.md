@@ -119,7 +119,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - `LocalRuntimeController.submit()` 先 trim 并解析命令，再经 `input:received` guard hook 处理普通输入；未被处理的输入进入 turn。
 - 每个写 session 的 turn 必须持有 turn lease，在 `refreshFromStore()` 之前获取；拿不到就拒绝。lease 必须在 `turn:after` 前释放，finally 保留幂等兜底。
 - 保存顺序：`running` → 每次工具迭代 checkpoint → 成功 assistant + `completed`；失败/中止存 `error` / `aborted`。非 completed 会话在 `/resume` 标 `（uncompleted）`。
-- turn 启动即保存本轮用户输入；headless 只对 `input.source === 'ui'` 写入，后续 checkpoint 不得重复追加。
+- turn 启动即保存本轮用户输入；headless 对**非 `system`** 的输入都写入（插件 `ctx.runtime.submit` 的一轮在客户端没有乐观气泡，不写就只剩回答），内容取 `displayText`，缺省用真正发给模型的输入。本轮跑完后原文进了 provider 历史，保存时用展示文本**就地替换**那一条（`mergeInFlightUserMessage`），不追加第二条。
 - `MessageQueueService` 的每个操作都带 owner；pending input 只放 `pendingInputs`，不提前追加对话或 provider history。
 - TUI 与 desktop 的 Enter / Tab / Shift+Tab 统一 `after_iteration`；`after_turn` 仅供 `/loop` 等显式请求。
 - 当前 turn 没有后续迭代时由 message-queue 的 `turn:after` 兜底；仅 `completed` 自动发送，失败/中止保留输入供撤回。
@@ -178,13 +178,15 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - `HeadlessTurnExecutor` 不触碰 Ink/UI；每轮顺序：取 lease → `refreshFromStore()` → `reserveRunId()`；取锁失败返回 `busy-remote`。
 - 每轮都发 `turn:finish`，结果只有 completed / aborted / error；排队轮次同样逐轮取 lease。
-- `HeadlessPluginHost` 是 exec / app-server 共用的插件装配层；MCP 显式初始化，不注册输入框、命令 UI 与用户文件插件。
+- `HeadlessPluginHost` 是 exec / app-server 共用的插件装配层；MCP 显式初始化，不注册输入框与命令 UI。用户插件（`$MICA_HOME/plugins`）只在常驻宿主装：`loadUserPlugins` + `writeUserPluginStatus`（`createHeadlessPluginHost({ loadUserPlugins: true })`，app-server 传 true、exec 不传），面板与桌面入口都靠它。
+- `mica/turn/input`（`MICA_TURN_NOTIFICATIONS.input`）在插件发起的轮次启动**之前**发出，带展示文本；晚于 `turn/started` 会让页面把上一轮的文本当成本轮用户消息。
 - `attachPluginLayer()` 同步替换 executor queue，避免插件写入与 loop 读取不同实例。
 - `mica app-server` 是每会话常驻进程；stdin/stdout 使用 Codex v2 JSONL。framing 在 `mica-runtime/codexProtocol.ts`，事件投影在 `runtime/CodexProjector.ts`。
 - `mica/*` 扩展通知直接送 renderer，不进 turn 重放缓冲：queue、tasks、BTW、history、capabilities、turn retrying。
 - `mica/capabilities/get|set` 读写会话能力；运行中 set 返回 `ok:false`。
 - `turn/start` / `mica/turn/editMessage` 可传 role，由 host 在启动 turn 前应用；edit 时必须在 `loadSnapshot()` 之后应用。角色缺失只 warning 并保留原角色，不为切角色重建 host。
 - `mica/notes/get|set` 读写会话笔记，落盘跟随本轮 checkpoint，不在 handler 里抢占 lease。
+- `mica/pluginPanel/view|action` 读一块插件面板的视图、转发一次动作（`pluginId + action/key/values`）；面板处理器活在常驻会话宿主里（插件就在那个进程），没有宿主时桌面端按需起一个。
 - 改名先找常驻 host 调 `SessionController.renameCurrent`；无 host 且无其他进程 lease 时才直接写盘。
 - `mica/turn/editMessage` 把 provider history 截断到目标用户消息之前，再用新文本重跑；定位共用 `mica-common/promptText.ts`。启动失败恢复原快照。
 - `mica exec` 默认人读文本，`--json` 为 Codex ThreadEvent JSONL；保留 codex-family 参数兼容（`--cd`、`-c`、`--` 与裸 prompt）。
@@ -212,6 +214,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 运行状态由清单 `status` 声明（`key` / `label` / `type: text|link`），值由插件写进 `$MICA_HOME/plugin-data/<id>/data.json`，配置页插件详情渲染成「运行状态」一节。值是字符串或 `{ text, tone: ok|warn|error }`——插件判断语义，页面只上色；没写过的键显示「尚未上报」，不隐藏。插件详情因此不需要为每个插件各写一套状态界面。
 - `desktop` 能力只有桌面端 spawn 的 app-server 提供：`buildSpawnEnv` 注入 `MICA_PLUGIN_DESKTOP_HOST=1`（别用 `MICA_DESKTOP_HOST`，那是运行时的绑定地址），`runAppServer` 据此传 `desktopHost` 给 `HeadlessPluginHost`。CLI / TUI / `mica exec` 里没有它，依赖插件整块跳过。
 - 桌面入口由清单 `desktop.entry`（`{ "entry": { "label": "Connections" } }`）+ 插件目录里的 `desktop.jsx` 组成：`default` 导出卡片组件（props `{ api, onClose }`），可选命名导出 `summary(api)` 给入口行右侧那一行字。宿主只画一行与卡片容器（悬停/点击、浮层定位、Esc 与点外部收起都在 `renderer/src/PluginEntries.jsx`），按 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里登记**。只对随包插件生效：页面是构建期打的包，`$MICA_HOME/plugins` 里没有它的模块，用户插件声明了也渲染不出入口。
+- 对话右侧面板由清单 `desktop.panel`（`{ "panel": { "label": "需求开发", "roles": ["需求开发"], "shortcuts": [...] } }`）+ `ctx.desktop.panel({ view, action })` 组成：**插件给数据、宿主画出来**，所以用户插件也有。视图是纯数据（`title` / `status` / `sections〔rows, items, fields, actions〕`），宿主统一归一化（长度、条目数与字段类型）后渲染，畸形视图不会让页面崩掉；每个 section 是一块独立折叠卡片（`collapsed` 决定初始是否收起）；动作只回 `{ action, key?, values? }`，宿主每次动作后重新取一次视图。一个插件最多一块面板（再注册会替换）。`roles` 是显示条件（会话角色名，空数组＝任何角色）；声明了它就要写 `requires: ["desktop"]`，但**没有** `desktop.entry` 那条「只对随包插件生效」的限制。`shortcuts` 是输入框正上方那排按钮，每个二选一：`action` 直接触发插件动作（不打开面板），`section` 打开面板并展开同名 section——常用动作与配置项因此各走各的路，不用挤进一块抽屉；动作可以 `return { message }` 回一句话，页面显示在按钮旁边（常驻宿主里 `ctx.ui.notice` 用户看不到）。
 - 插件前端模块用到的 Tailwind 工具类必须被扫描到：`plugins/` 不在 `apps/desktop` 下，`app.css` 里用 `@source '../../.../plugins'` 显式纳入，否则插件里的间距、`group-hover/*`、`max-md:*` 一个都不会生成（表现为间距全塌、悬停不出现）。
 - 插件清单的 `name` 与 `desktop.entry.label` 一律英文（侧栏其它入口也是英文），描述这类正文才写中文。
 - 插件前端模块的能力只有五件，来自 `renderer/src/plugin-host.js` 的 `createPluginHostApi`：`currentHost()`（页面所在运行时的 origin）、`probe(address)`、`readData()` / `writeData(value)`、`open(url)`、`access`（读改写这台机器的远程访问策略）。探活、数据读写与访问策略必须由运行时代劳（页面读不到跨源响应、碰不到请求分派、也没有文件系统），落在 `host/plugin-host.js` 的 `plugin-host:probe` / `plugin-host:read-data|write-data` / `plugin-host:access-get|set`；数据文件统一在 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构。`open` 是纯页面行为，分支在 `shell-env.js` 的 `isElectronShell`。
@@ -357,6 +360,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 角色入口在输入条箭头，随下一次发送/编辑的 role 参数持久化。
 - 输入条齿轮与时钟打开 `SessionSettingsDialog`：会话能力（Tools / Skills / MCP 三页签）/ 定时任务 / 插件。声明了 `perSession` 的插件是左侧导航「插件」下面的子项，内容区只画选中的那一个；自动压缩的阈值这类按会话可调的项就在这里，默认值仍在配置页 Plugins。
 - 顶栏「会话笔记」图标打开 `SessionNotesDialog`（Monaco，700ms 防抖，无保存按钮）。
+- 插件入口是**输入框正上方那排胶囊按钮**（`PluginQuickBar`，来自清单 `desktop.panel.shortcuts`）：`action` 类按钮点一下直接调插件动作（立即返回，不在页面里跑外部命令或等模型），`section` 类按钮打开盖在对话区右侧的抽屉并展开那一块（`PluginPanels`，宽 340、不挤窄对话）；抽屉折叠状态与 ChatView 的 `pluginPanelOpen` / `pluginPanelSection` 共用。哪些插件有面板、`roles` 门槛、是否停用都从 `readPluginsDetails` 拿（用户插件也在里面），规则在 `renderer/src/plugin-panels.js`；RPC 走 `window.mica.chat.pluginPanels.view|action` → `chat:plugin-panel-view|action`。host 侧返回的载荷在 `hostTaskRequest` 的信封里，必须过 `unwrapHostResult`，否则页面只看到 `{ok:true}`、视图全 undefined。
 - 双击用户消息就地编辑，仅空闲且非空时提交，经 `chat:edit-message` 截断重跑；失败保留编辑文本。
 - **会话详情只有一个组件**：`mica-config-ui` 的 `SessionDetailView`（头部 + 对话记录 / Context 分析 / 原始文件，原始文件自动保存）。配置页 Sessions 页、Stats 的会话详情弹窗（额外带「用量」页签）与状态栏上下文弹窗都渲染它，桌面端只包一层 `.mica-config-ui.is-embed` 的外壳与 `chat-modal-session-detail` 尺寸；不要再写第二套会话详情或上下文分组，上下文分类 / 信封 / 差额的唯一计算在 `mica-config-ui/src/server/contextBreakdown.ts`。
 

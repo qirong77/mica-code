@@ -4,6 +4,7 @@ import { HookRegistry } from './HookRegistry.js';
 import { ServiceContainer } from './ServiceContainer.js';
 import { createServiceToken } from './ServiceToken.js';
 import { inspectPlugins, loadFilePlugins } from './FilePluginLoader.js';
+import { loadUserPlugins, writeUserPluginStatus } from './UserPlugins.js';
 import { parsePluginManifest, PLUGIN_API_VERSION, PLUGIN_MANIFEST_FILE } from './PluginManifest.js';
 import {
   PLUGIN_SETTINGS_DIR,
@@ -29,6 +30,12 @@ import {
   writePluginHealth,
 } from './PluginHealth.js';
 import { PluginPromptSections } from './PluginPrompt.js';
+import {
+  PluginPanelRegistry,
+  normalizePluginPanelAction,
+  normalizePluginPanelActionResult,
+  normalizePluginPanelView,
+} from './PluginPanel.js';
 import { PluginSettingsValidationError, validatePluginSettingValues } from './PluginSettings.js';
 import { MAX_PLUGIN_STATE_BYTES, normalizePluginStateRecord, validatePluginStateValue } from './PluginSessionState.js';
 import {
@@ -81,6 +88,8 @@ export const micaPlugin = {
   createServiceToken,
   loadFilePlugins,
   inspectPlugins,
+  loadUserPlugins,
+  writeUserPluginStatus,
   parsePluginManifest,
   createPluginSettingsStore,
   normalizePluginSettingValues,
@@ -101,6 +110,10 @@ export const micaPlugin = {
   clearPluginHealth,
   resolvePluginHealthPath,
   PluginPromptSections,
+  PluginPanelRegistry,
+  normalizePluginPanelAction,
+  normalizePluginPanelActionResult,
+  normalizePluginPanelView,
   MAX_PLUGIN_STATE_BYTES,
   normalizePluginStateRecord,
   validatePluginStateValue,
@@ -118,6 +131,14 @@ export const micaPlugin = {
 
 export type { Plugin } from './Plugin.js';
 export type { MicaPlugin } from './Plugin.js';
+export {
+  PluginPanelRegistry,
+  normalizePluginPanelAction,
+  normalizePluginPanelActionResult,
+  normalizePluginPanelView,
+} from './PluginPanel.js';
+export { loadUserPlugins, writeUserPluginStatus } from './UserPlugins.js';
+export type { UserPluginStatus } from './UserPlugins.js';
 export {
   PLUGIN_API_VERSION,
   PLUGIN_MANIFEST_FILE,
@@ -249,6 +270,21 @@ export {
   resolvePluginHealthPath,
 } from './PluginHealth.js';
 export type { PluginHealthLevel, PluginHealthReport, PluginHealthStore } from './PluginHealth.js';
+export type {
+  PluginPanelAction,
+  PluginPanelActionInput,
+  PluginPanelButtonTone,
+  PluginPanelField,
+  PluginPanelHandler,
+  PluginPanelItem,
+  PluginPanelItemAction,
+  PluginPanelRegistration,
+  PluginPanelRow,
+  PluginPanelSection,
+  PluginPanelTone,
+  PluginPanelView,
+  PluginPanelViewInput,
+} from './PluginPanel.js';
 export type { PluginSettingIssue } from './PluginSettings.js';
 export { PLUGIN_REQUIREMENTS, isPluginRequirement } from './PluginManifest.js';
 export type { PluginRequirement } from './PluginManifest.js';

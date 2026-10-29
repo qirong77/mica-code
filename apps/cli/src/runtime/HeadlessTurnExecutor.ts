@@ -10,7 +10,7 @@ import type { SessionController } from '../session/SessionController.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { uncommittedResponseText } from './conversationHistory.js';
-import { TurnNoticeLog, createRetryNotice, createTurnErrorNotice } from './turnNotices.js';
+import { TurnNoticeLog, createRetryNotice, createTurnErrorNotice, mergeInFlightUserMessage } from './turnNotices.js';
 
 export type HeadlessTurnStatus = 'completed' | 'aborted' | 'error';
 
@@ -338,6 +338,14 @@ export class HeadlessTurnExecutor {
       await this.failTurn(input, startedAt, error);
       return;
     }
+    // 除了 `system`（提示词内部注入，用户从没打过这句话）之外都要留下用户消息：
+    // 插件提交的一轮（`ctx.runtime.submit`）在客户端没有乐观气泡，不写进去就只剩回答，
+    // 会话记录里看不到「这一轮是为什么跑起来的」。`displayText` 优先——插件可以给一句
+    // 短标题，而真正发给模型的提示词可能很长。
+    const inFlightUser: InFlightUserMessage | undefined =
+      input.source === 'system'
+        ? undefined
+        : { message: { role: 'user', content: displayUserContent(input, content) }, rawContent: content };
     try {
       // Refresh the persisted signature before this turn's saves: another host
       // (a second app-server for the same session or a CLI
@@ -348,9 +356,7 @@ export class HeadlessTurnExecutor {
       // the run id, and reserving first would make this turn look aborted.
       this.options.sessionController.refreshFromStore();
       const reservedRunId = agent.reserveRunId();
-      const pendingUserMessage: MicaUiConversationMessage | undefined =
-        input.source === 'ui' ? { role: 'user', content } : undefined;
-      this.saveCurrent({ allowEmpty: true, turnState: 'running' }, pendingUserMessage);
+      this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
       let runContent = content;
       if (this.options.hooks) {
         await this.options.hooks.emit('turn:before', { runtime: this.options.host, input, content });
@@ -382,7 +388,7 @@ export class HeadlessTurnExecutor {
             if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot);
             this.responseBuffer = '';
             this.committedResponseBuffer = '';
-            this.saveCurrent({ allowEmpty: true, turnState: 'running' }, pendingUserMessage);
+            this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
             await waitForRetryDelay(agent, retryDelayMs);
           }
           try {
@@ -443,7 +449,7 @@ export class HeadlessTurnExecutor {
             result: runResult,
           });
         }
-        this.saveCurrent({ turnState: 'completed' });
+        this.saveCurrent({ turnState: 'completed' }, inFlightUser);
         if (this.options.hooks) await this.emitTurnAfter(input, 'completed', Date.now() - startedAt, false);
         onEvent({ type: 'turn:finish', input, status: 'completed', elapsedMs: Date.now() - startedAt });
       } finally {
@@ -458,7 +464,7 @@ export class HeadlessTurnExecutor {
           runContentOr(input),
           uncommittedResponseText(this.responseBuffer, this.committedResponseBuffer) || undefined,
         );
-        this.saveCurrent({ turnState: 'aborted' });
+        this.saveCurrent({ turnState: 'aborted' }, inFlightUser);
         if (this.options.hooks) await this.emitTurnAfter(input, 'aborted', Date.now() - startedAt, false);
         onEvent({ type: 'turn:finish', input, status: 'aborted', elapsedMs: Date.now() - startedAt });
         return;
@@ -466,11 +472,16 @@ export class HeadlessTurnExecutor {
       if (this.options.hooks) {
         await this.options.hooks.emit('turn:error', { runtime: this.options.host, input, content, error });
       }
-      await this.failTurn(input, startedAt, error);
+      await this.failTurn(input, startedAt, error, inFlightUser);
     }
   }
 
-  private async failTurn(input: RuntimeInput, startedAt: number, error: unknown): Promise<void> {
+  private async failTurn(
+    input: RuntimeInput,
+    startedAt: number,
+    error: unknown,
+    inFlightUser?: InFlightUserMessage,
+  ): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     this.options.agent.preserveAbortedTurn(
       runContentOr(input),
@@ -480,7 +491,7 @@ export class HeadlessTurnExecutor {
     // transient Codex `turn/completed.status=failed` payload: the desktop app
     // used to lose it on reload. Notices stay out of the provider history.
     this.options.notices?.ensure().upsert(createTurnErrorNotice(error));
-    this.saveCurrent({ turnState: 'error' });
+    this.saveCurrent({ turnState: 'error' }, inFlightUser);
     if (this.options.hooks) await this.emitTurnAfter(input, 'error', Date.now() - startedAt, true);
     this.options.onEvent({
       type: 'turn:finish',
@@ -536,16 +547,19 @@ export class HeadlessTurnExecutor {
    */
   private saveCurrent(
     options: { allowEmpty?: boolean; turnState: 'running' | 'completed' | 'aborted' | 'error' },
-    pendingUserMessage?: MicaUiConversationMessage,
+    inFlightUser?: InFlightUserMessage,
   ): void {
     if (this.options.save === false) return;
     // The in-flight prompt goes through the host's composer: notices created
     // for this turn must stay behind it, not in front of the user bubble.
     const hostMessages = this.options.getConversationMessages?.(
-      pendingUserMessage ? [pendingUserMessage] : undefined,
+      inFlightUser ? [inFlightUser.message] : undefined,
     );
-    const conversationMessages = pendingUserMessage
-      ? (hostMessages ?? [...this.options.agent.toConversationMessages(), pendingUserMessage])
+    const conversationMessages = inFlightUser
+      ? mergeInFlightUserMessage(
+          hostMessages ?? [...this.options.agent.toConversationMessages(), inFlightUser.message],
+          inFlightUser,
+        )
       : hostMessages;
     this.options.sessionController.saveCurrent(conversationMessages ? { ...options, conversationMessages } : options);
   }
@@ -565,6 +579,26 @@ export class HeadlessTurnExecutor {
 
 function runContentOr(input: RuntimeInput): AgentQueryContent {
   return (input.content as AgentQueryContent | undefined) ?? input.text;
+}
+
+/** 本轮的用户消息：`message` 是会话记录里展示的版本，`rawContent` 是真正发给模型的内容。 */
+export type InFlightUserMessage = {
+  message: MicaUiConversationMessage;
+  rawContent: unknown;
+};
+
+/**
+ * 会话记录里那条用户消息的内容。
+ *
+ * `displayText` 存在时用它（插件提交的提示词往往很长，界面上只需要一句「为什么跑这一轮」）；
+ * 否则用本轮真正的输入内容，与客户端发起的轮次完全一致。
+ */
+export function displayUserContent(
+  input: RuntimeInput,
+  content: AgentQueryContent,
+): string | AgentQueryContent {
+  const display = typeof input.displayText === 'string' ? input.displayText.trim() : '';
+  return display || content;
 }
 
 /** Fixed-delay wait that aborts early (throws AgentAbortError) when the agent

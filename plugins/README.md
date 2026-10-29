@@ -267,6 +267,68 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   渲染不出入口，所以 `desktop.entry` 不必也不能靠 `requires: ["desktop"]` 表达——
   它不依赖 app-server 的能力面。
 
+## 对话右侧面板
+
+插件想在**对话界面**里放一块自己的界面（配置、状态、一列可操作的条目）时声明面板。和侧栏入口
+相反，面板是**插件给数据、宿主画出来**，所以 `$MICA_HOME/plugins` 里的用户插件也能有：
+
+```json
+"desktop": {
+  "panel": {
+    "label": "需求开发",
+    "roles": ["需求开发"],
+    "shortcuts": [
+      { "label": "立刻检查", "action": "check.now" },
+      { "label": "频道设置", "section": "聊天频道" }
+    ]
+  }
+}
+```
+
+```js
+ctx.desktop.panel({
+  // 会被反复调用（打开、每次动作之后、页面每 4 秒轮询）：只读自己缓存的状态，
+  // 不要在这里跑外部命令或请求模型——那些属于动作或插件的定时器。
+  view: () => ({
+    title: '需求开发',
+    subtitle: '角色：需求开发',
+    status: { label: '2 个频道', tone: 'ok' },
+    sections: [
+      {
+        title: '聊天频道',
+        items: [{ key: 'group:需求群', label: '需求群', value: '群 · 未读', actions: [{ id: 'remove', label: '删除' }] }],
+        empty: '还没有频道',
+        fields: [{ key: 'target', label: '群名', placeholder: '例如 租车-需求群' }],
+        actions: [{ id: 'add', label: '添加频道', tone: 'primary' }],
+      },
+      { title: '定期复盘', collapsed: true, rows: [{ label: '触发条件', value: '每 8 轮或每 120 分钟' }] },
+    ],
+  }),
+  // 只回 id，视图由宿主再取一次：插件不需要回传「新视图」。
+  action: async ({ action, key, values }) => { … },
+});
+```
+
+- `roles` 是显示条件（会话角色名，`$MICA_HOME/role/<name>.md`）；空数组表示任何角色都显示。
+  宿主按当前会话角色过滤，插件在页面里判断不了这件事。
+- 一个插件只有一块面板（`ctx.desktop.panel()` 再调用会替换上一块）：对话右侧只有一条位置，
+  多块就变成插件之间的版面竞争。
+- `shortcuts` 是**输入框正上方那排按钮**，每个二选一：`action` 点了直接把该动作交给
+  `action` 处理器（不打开面板，例如「立刻检查」）；`section` 点了打开面板并展开同名的那一块
+  （例如「频道设置」）。没有常用动作插件就别声明，一条空按钮比没有更糟。
+- 面板只表达「几行只读状态 + 一列条目 + 几个输入框 + 几个按钮」。宿主会裁剪长度、条目数与
+  字段类型，畸形视图不会让页面崩掉；它拿到的动作只有 `{ action, key?, values? }`。
+- 每个 section 是一块独立折叠卡片（`collapsed: true` 表示初始收起），抽屉盖在对话区右侧。
+- 点击 `shortcut` 的 `action` 必须立刻返回：页面在等这个 invoke 的回包，外部命令与模型
+  请求应当做成「投一段话进会话，让模型自己去做」，而不是在按钮回调里同步等。
+- 动作做不了（少了配置、频道为空）时 `return { message: '先添加频道' }`：页面会在按钮旁边
+  显示这一行。`ctx.ui.notice()` 在常驻宿主里只落进 notice 记录，用户点完按钮往往看不到。
+- 只有清单声明了 `desktop.panel` 时 `ctx.desktop.panel` 才存在——不声明却被静默接受注册，
+  插件会以为界面已经出现，实际页面上什么都没有。所以声明 `desktop.panel` 的插件同样要写
+  `requires: ["desktop"]`。
+- 插件投递工作时用 `ctx.runtime.submit(text, { source: 'plugin', displayText })`：这一轮会像
+  用户说的话一样进会话记录（`displayText` 是界面上那一句，`text` 是真正发给模型的提示词）。
+
 插件自身的故障要能被用户看见，而不是只落在日志里：
 
 - `ctx.health.report({ level: 'warn' | 'error', message, hint })` 写
@@ -302,3 +364,15 @@ os.tmpdir()/mica-logs/plugin-<id>-<YYYYMMDD>[-n].jsonl
 ```
 
 停用的插件在启动阶段就不会被注册（工具、命令、钩子一起消失），改完需要重开会话才生效。
+
+## 装在自己机器上的插件
+
+`$MICA_HOME/plugins/<id>/` 下的插件与官方插件同格式（目录 + `plugin.json` + 入口，入口里
+`export default function setup(ctx)`），id 一律加 `user.` 前缀。它们由 `mica app-server`
+（桌面端）与 TUI 启动时加载，`mica exec` 这类一次性运行不加载——避免插件的定时器、外部命令
+与额外模型请求混进一次基准运行。加载结果写 `$MICA_HOME/plugin-status.json`，配置页据此显示
+「加载失败 / 缺少宿主能力」。
+
+用户插件没有构建步骤，入口是纯 JS：只用 Node 内置模块与 `ctx`，不要 `import` 仓库里的
+`@packages/*`（单二进制里没有那些路径）。要界面就用上面的 `desktop.panel`；要定时逻辑就在
+`setup()` 里起定时器，并用 `ctx.onDispose()` 收尾。

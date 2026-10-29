@@ -304,6 +304,13 @@ export type ConfigWebPlugin = {
    * 插件还没写过这个键时为 `null`，页面显示占位。
    */
   status: ConfigWebPluginStatusField[];
+  /**
+   * 清单的 `desktop.panel`：这个插件在对话右侧有一块面板（插件给数据、宿主渲染）。
+   *
+   * 与 `desktopEntry` 不同，它对**用户插件同样有效**——面板不需要前端模块，页面那边只按
+   * 这份数据画按钮，点开源码在会话的 app-server 里问插件要视图。
+   */
+  desktopPanel: ConfigWebPluginDesktopPanel | null;
   /** 这个插件今天的日志文件（系统 temp 目录），排查时直接打开。 */
   logFile: string;
   /** 插件自报的最近一次状态（正常 / 待配置 / 出错）；没上报过为 null。 */
@@ -330,6 +337,27 @@ export type ConfigWebPluginStatusField = {
    * 页面只按 `ok | warn | error` 上色，不解释语义。
    */
   tone: 'ok' | 'warn' | 'error' | null;
+};
+
+/**
+ * 对话右侧面板的静态描述。
+ *
+ * `roles` 是显示条件：只有当前会话的角色命中时才出现（空数组表示任何角色都显示）。
+ * 角色属于会话事实，插件不该在页面里自己去猜「现在是不是我要的那个角色」。
+ */
+export type ConfigWebPluginDesktopPanel = {
+  label: string;
+  roles: string[];
+  /**
+   * 输入框上方那排快捷按钮。`action` 直接触发插件动作，`section` 打开面板并展开那一块。
+   */
+  shortcuts: ConfigWebPluginPanelShortcut[];
+};
+
+export type ConfigWebPluginPanelShortcut = {
+  label: string;
+  action?: string;
+  section?: string;
 };
 
 /** 一项运行条件的静态描述；此刻是否满足由 `readDesktopChecks()` 另取。 */

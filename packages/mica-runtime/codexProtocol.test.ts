@@ -41,6 +41,8 @@ describe('codex protocol framing', () => {
       pluginSettingsGet: 'mica/pluginSettings/get',
       pluginSettingsSet: 'mica/pluginSettings/set',
       notesSet: 'mica/notes/set',
+      pluginPanelView: 'mica/pluginPanel/view',
+      pluginPanelAction: 'mica/pluginPanel/action',
     });
   });
 

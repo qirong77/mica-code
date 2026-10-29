@@ -7,6 +7,7 @@ import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type {
   HookRegistry,
   MicaPlugin,
+  PluginPanelRegistry,
   PluginManager,
   PluginBaseContext,
   ServiceContainer,
@@ -62,6 +63,13 @@ export type HeadlessPluginHostOptions = {
    * 装载成功却什么都做不了。
    */
   desktopHost?: boolean;
+  /**
+   * 是否加载 `$MICA_HOME/plugins` 下的用户插件。
+   *
+   * 常驻宿主（`mica app-server`）要加载；`mica exec` 这类一次性运行不加载，避免插件的
+   * 定时器、外部命令与额外模型请求混进一次基准运行。
+   */
+  loadUserPlugins?: boolean;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -74,6 +82,8 @@ export type HeadlessPluginHost = {
   commands: CommandRegistry;
   events: RuntimeEventBus;
   plugins: PluginManager;
+  /** 对话右侧面板的登记表：协议层按 pluginId 取视图、转发动作。 */
+  panels: PluginPanelRegistry;
   /** Single-slot queue shared with the HeadlessTurnExecutor. */
   queue: MessageQueueService;
   getCurrentSessionId(): string;
@@ -134,6 +144,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   const commands = new micaCommands.CommandRegistry();
   const events = new micaRuntime.RuntimeEventBus();
   const plugins = new micaPlugin.PluginManager();
+  const panels = new micaPlugin.PluginPanelRegistry();
   const queue = new micaRuntime.MessageQueueService();
   // Notices live in the session file's conversationMessages, not in the
   // provider history: they are display-only and never reach the model.
@@ -238,6 +249,9 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   const baseContext: PluginBaseContext = {
     paths,
     ...(options.desktopHost ? { desktop: { host: 'desktop' as const } } : {}),
+    // 面板是「插件给数据、宿主画出来」的界面，只有桌面宿主有位置渲染它；CLI / exec 里
+    // 传了登记表也没人读，所以跟着 desktopHost 一起开关。
+    ...(options.desktopHost ? { desktopPanels: panels } : {}),
     services,
     hooks,
     commands,
@@ -347,7 +361,23 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     },
   };
 
-  const setupPromise = plugins.setupAll(baseContext);
+  // `mica app-server`（桌面端的常驻宿主）也要装用户插件：桌面入口、对话右侧面板都要靠
+  // 它。`mica exec` 是一次性运行，不装——那边任何定时器/外部命令都会污染一次基准运行。
+  const setupPromise = (async () => {
+    const userPlugins = options.loadUserPlugins
+      ? await micaPlugin.loadUserPlugins(plugins, { pluginsDir: paths.plugins })
+      : null;
+    const report = await plugins.setupAll(baseContext);
+    if (userPlugins) {
+      micaPlugin.writeUserPluginStatus({
+        pluginsDir: paths.plugins,
+        configDir: paths.config,
+        filePlugins: userPlugins,
+        setupReport: report,
+      });
+    }
+    return report;
+  })();
 
   const host: HeadlessPluginHost = {
     hooks,
@@ -355,6 +385,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     commands,
     events,
     plugins,
+    panels,
     queue,
     getCurrentSessionId: () => sessionController.getCurrentSessionId(),
     getConversationMessages,

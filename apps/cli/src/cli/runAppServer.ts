@@ -40,6 +40,8 @@ import {
   type MicaSubagentTaskDetail,
   type MicaSubagentTaskItem,
   type MicaTurnRetrying,
+  type MicaTurnInput,
+  type RuntimeInput,
   type MicaWaitTaskItem,
 } from '@packages/mica-runtime/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
@@ -494,6 +496,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       // 桌面端的运行时 spawn 这个进程时会带上标记（见 apps/desktop/src/host/chat.js）。
       // 插件据此决定自己要不要提供只有桌面页面能兑现的能力。
       desktopHost: process.env.MICA_PLUGIN_DESKTOP_HOST === '1',
+      // 桌面端常驻宿主：装上 `$MICA_HOME/plugins` 里的用户插件（面板、桌面入口都靠它）。
+      loadUserPlugins: true,
       isBusy: () => executor!.isBusy,
       submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
     });
@@ -622,6 +626,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         agent: agent!,
         sessionController: sessionController!,
         plugins: pluginHost?.plugins,
+        panels: pluginHost?.panels,
         configDir: resolveMicaHome(),
         subagentTasks: subagentTasks!,
         refreshTaskSnapshots: () => pushTaskSnapshots(),
@@ -656,6 +661,11 @@ type HostContext = {
   sessionController: SessionController;
   /** 插件表：会话设置这类「按插件声明渲染」的界面要按清单列出字段。 */
   plugins?: import('@packages/mica-plugin/index.js').PluginManager;
+  /**
+   * 对话右侧面板的登记表（只有桌面宿主才有）。协议层按 pluginId 取视图、转发动作——
+   * 具体插件长什么样、有哪些按钮，全在插件自己的处理器里。
+   */
+  panels?: import('@packages/mica-plugin/index.js').PluginPanelRegistry;
   /** 插件设置的落盘目录，读全局默认值用（缺了只能读到字段默认值）。 */
   configDir?: string;
   /** Live subagent task manager: the desktop detail modal reads records here. */
@@ -1542,9 +1552,81 @@ async function handleCodexRequest(
       ctx.writeResponse({ ok: true, content });
       return;
     }
+    case MICA_METHODS.pluginPanelView: {
+      const result = await readPluginPanel(ctx, params);
+      ctx.writeResponse(result);
+      return;
+    }
+    case MICA_METHODS.pluginPanelAction: {
+      const pluginId = paramString(params, 'pluginId');
+      const panel = pluginId ? ctx.panels?.get(pluginId) : null;
+      if (!pluginId || !panel) {
+        ctx.writeResponse({ ok: false, error: '插件面板不可用（插件未加载或未声明面板）' });
+        return;
+      }
+      const action = micaPlugin.normalizePluginPanelAction({
+        action: params.action,
+        key: params.key,
+        values: params.values,
+      });
+      if (!action) {
+        ctx.writeResponse({ ok: false, error: '动作缺少 id' });
+        return;
+      }
+      let outcome: unknown;
+      try {
+        outcome = await panel.action(action);
+      } catch (error) {
+        // 动作失败不该让面板整块消失：把原因回给页面，用户还能继续操作。
+        ctx.writeResponse({
+          ok: false,
+          pluginId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      // 动作可以回一句话（「先添加频道」这类），页面把它显示在按钮旁边。
+      ctx.writeResponse({
+        ...(await readPluginPanel(ctx, params)),
+        ...micaPlugin.normalizePluginPanelActionResult(outcome),
+      });
+      return;
+    }
     default:
       ctx.writeError(CODEX_ERROR_METHOD_NOT_FOUND, `Method not found: ${method}`);
       return;
+  }
+}
+
+/**
+ * 读一块插件面板的视图。
+ *
+ * 视图由插件给、宿主只做归一化：插件是自己写的代码，返回畸形视图不该让整块面板（乃至
+ * 页面）崩掉，所以长度、条目数与字段类型都在 `normalizePluginPanelView` 里收敛一次。
+ */
+async function readPluginPanel(
+  ctx: HostContext,
+  params: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const pluginId = paramString(params, 'pluginId');
+  const panel = pluginId ? ctx.panels?.get(pluginId) : null;
+  if (!pluginId || !panel) {
+    return { ok: false, error: '插件面板不可用（插件未加载或未声明面板）' };
+  }
+  try {
+    const view = await panel.view({ role: ctx.agent.role });
+    const name = ctx.plugins?.list().find((plugin) => plugin.id === pluginId)?.name;
+    return {
+      ok: true,
+      pluginId,
+      view: micaPlugin.normalizePluginPanelView(view, name || pluginId),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      pluginId,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -1566,6 +1648,12 @@ type TurnLifecycle = {
   endTurn: () => void;
 };
 
+/** 推送用户消息时用的文本：插件给的 `displayText` 优先，它是给用户看的那一句。 */
+function displayInputText(input: RuntimeInput): string {
+  const display = typeof input.displayText === 'string' ? input.displayText.trim() : '';
+  return display || input.text;
+}
+
 function handleTurnEvent(
   writeNotification: (method: string, params: unknown) => void,
   event: HeadlessTurnEvent,
@@ -1574,6 +1662,19 @@ function handleTurnEvent(
 ): void {
   switch (event.type) {
     case 'turn:start':
+      // 插件提交的轮次（`ctx.runtime.submit`）在客户端没有乐观气泡：把启动文本推过去，
+      // 桌面端才能把这条用户消息补进对话。必须**先于** turn/started——客户端在那条通知
+      // 上就会把本轮的用户消息补出来，文本得已经就位。客户端自己发起的轮次不推：那边
+      // 已有一行，重复推送会让同一句话出现两次。
+      // 只有「客户端没发起、但会话记录里会有这条用户消息」的轮次才推（与 executor 写
+      // 用户消息的条件一致）：`system` 是内部注入，推过去会多出一条没落盘的假消息。
+      if (event.input.source !== 'ui' && event.input.source !== 'system') {
+        writeNotification(MICA_TURN_NOTIFICATIONS.input, {
+          threadId: sessionId,
+          turnId: lifecycle.getTurnId(),
+          text: displayInputText(event.input),
+        } satisfies MicaTurnInput);
+      }
       // Every executor turn owns a turn id and a turn/started, including turns
       // drained from the host queue. The request handler no longer pre-assigns
       // the id: a drained turn used to run with no turn/started and no

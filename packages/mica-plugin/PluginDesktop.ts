@@ -1,4 +1,5 @@
 import type { Skill } from '@packages/mica-skills/index.js';
+import type { PluginPanelHandler, PluginPanelRegistration } from './PluginPanel.js';
 
 /**
  * 插件在 desktop 宿主里的运行条件。
@@ -73,9 +74,53 @@ export type PluginDesktopEntry = {
   label: string;
 };
 
-/** 宿主实际提供给插件的 desktop 能力面：只表明身份，页面数据来自清单。 */
+/**
+ * 对话右侧的面板（清单 `desktop.panel`）。
+ *
+ * 与侧栏入口的区别：侧栏入口的卡片是插件自己的前端模块（只有随包插件才有），面板则是
+ * **插件给数据、宿主画出来**，所以用户装在 `$MICA_HOME/plugins` 的插件也能有。
+ *
+ * `roles` 是显示条件：只有当前会话的角色命中时才出现，空数组表示任何角色都显示。角色是
+ * 宿主自己的会话事实，插件不该（也没法）在页面里判断「现在是不是我要的那个角色」。
+ */
+export type PluginDesktopPanel = {
+  /** 面板标题与入口按钮的文案；清单没写时用插件的 name。 */
+  label: string;
+  /** 显示条件：会话角色名（`$MICA_HOME/role/<name>.md`）。 */
+  roles: string[];
+  /**
+   * 输入框上方那排快捷按钮，按声明顺序渲染。
+   *
+   * 声明它是因为「一个面板」通常承载两类不同的东西：**马上要做的一件事**（立刻检查）
+   * 和**要改的配置**（频道设置）。把它们都塞进一块抽屉，用户每次都得先打开抽屉、
+   * 找到那一块、再点按钮。快捷按钮让常用动作一步到位，配置项各开各的那一块。
+   */
+  shortcuts: PluginPanelShortcut[];
+};
+
+/**
+ * 一个快捷按钮。二选一：
+ * - `action`：点了直接把该动作交给插件的 `action` 处理器（不打开面板）；
+ * - `section`：点了打开面板并展开指定标题的那一块（`PluginPanelSection.title`）。
+ *
+ * 两者都没有、或者同时给两个都算清单错误——宿主不知道该怎么表现，只能猜。
+ */
+export type PluginPanelShortcut = {
+  label: string;
+  action?: string;
+  section?: string;
+};
+
+/** 宿主实际提供给插件的 desktop 能力面。 */
 export type PluginDesktopApi = {
   host: 'desktop';
+  /**
+   * 注册对话右侧那块面板。
+   *
+   * 只在清单声明了 `desktop.panel` 时可用：没声明就没有位置可画，静默接受注册会让插件
+   * 以为自己的界面已经出现。一个插件只有一块面板，再注册会替换上一块。
+   */
+  panel?(handler: PluginPanelHandler): PluginPanelRegistration;
 };
 
 /**

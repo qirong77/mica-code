@@ -854,13 +854,16 @@ function editRunMessage(sender, id, payload = {}) {
  * queries/commands: a missing child (or a host that died between write and reply)
  * must resolve as a failure instead of leaving the caller spinning. */
 const HOST_TASK_REQUEST_TIMEOUT_MS = 15_000
-function hostTaskRequest(run, method, params) {
+// 插件面板的动作可能要落盘、跑一次外部命令（导出聊天记录）再回视图，所以给它的往返
+// 留更长一点的预算；超时只影响这一次点击，面板本身照旧可用。
+const HOST_PANEL_REQUEST_TIMEOUT_MS = 60_000
+function hostTaskRequest(run, method, params, { timeoutMs = HOST_TASK_REQUEST_TIMEOUT_MS } = {}) {
   if (!run?.child?.stdin?.writable)
     return Promise.resolve({ ok: false, error: 'chat host 不可用，请重试' })
   return new Promise((resolve) => {
     const timer = setTimeout(
       () => resolve({ ok: false, error: 'chat host 请求超时，请重试' }),
-      HOST_TASK_REQUEST_TIMEOUT_MS
+      timeoutMs
     )
     const settle = (result) => {
       clearTimeout(timer)
@@ -1155,6 +1158,15 @@ function handleHostNotification(id, run, notification) {
     // 与 turn/started 同步发出：渲染层只有在这一轮不是自己发起的时候（定时任务、
     // after_turn 排队重放、另一个窗口发起的发送）才需要它，见 pushRunStarted。
     pushRunStarted(id, run)
+  } else if (method === 'mica/turn/input') {
+    // 插件提交的一轮（`ctx.runtime.submit`）：客户端没有为它插过乐观气泡，启动文本只在
+    // 这条通知里。补进对话的用户行由渲染层的 appendRunStartedMessage 负责，它按
+    // clientMessageId / 末尾同文本幂等，重复推送不会多出一行。
+    const text = typeof params.text === 'string' ? params.text.trim() : ''
+    if (text) {
+      run.prompt = text
+      pushRunStarted(id, run)
+    }
   } else if (method === 'turn/completed') {
     run.running = false
     run.currentTurnId = null
@@ -1880,6 +1892,50 @@ export function registerChatIpc() {
     if (!sessionId) return []
     return readHistory(sessionId)
   })
+
+  /**
+   * 对话右侧的插件面板：读视图 / 转发动作。
+   *
+   * 面板的处理器活在会话的常驻 host 里（插件就在那个进程里），所以这里与能力面板同一条
+   * 起法：有常驻进程就用，没有就按需起一个——刚打开一条历史会话时点开面板是很典型的
+   * 场景，要求先发一条消息才能点等于把最该成立的用法挡在门外。宿主不认识任何具体插件：
+   * 它只转 `pluginId + action`，视图长什么样由插件决定。
+   */
+  const pluginPanelRequest = (event, payload, method) => {
+    const { id } = payload || {}
+    const pluginId = typeof payload?.pluginId === 'string' ? payload.pluginId.trim() : ''
+    if (!id) return { ok: false, error: 'chat id 缺失' }
+    if (!pluginId) return { ok: false, error: '缺少插件 id' }
+    const ensured = ensureCapabilityRun(id, event, {
+      sessionId: payload?.sessionId,
+      cwd: payload?.cwd
+    })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    return hostTaskRequest(
+      ensured.run,
+      method,
+      {
+        pluginId,
+        ...(method === 'mica/pluginPanel/action'
+          ? {
+              action: typeof payload?.action === 'string' ? payload.action : '',
+              key: typeof payload?.key === 'string' ? payload.key : '',
+              values: payload?.values && typeof payload.values === 'object' ? payload.values : {}
+            }
+          : {})
+      },
+      { timeoutMs: HOST_PANEL_REQUEST_TIMEOUT_MS }
+      // 载荷在信封的 `result` 里；渲染层读的是 `{ ok, view }` / `{ ok, error }`。
+    ).then(unwrapHostResult)
+  }
+
+  ipcMain.handle('chat:plugin-panel-view', (event, payload = {}) =>
+    pluginPanelRequest(event, payload, 'mica/pluginPanel/view')
+  )
+
+  ipcMain.handle('chat:plugin-panel-action', (event, payload = {}) =>
+    pluginPanelRequest(event, payload, 'mica/pluginPanel/action')
+  )
 
   // Mica extension (`mica/session/rename`): renaming has to go through whichever
   // process owns the session file. The resident host rewrites it from its

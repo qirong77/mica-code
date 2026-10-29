@@ -81,6 +81,85 @@ describe('parsePluginManifest desktop entry', () => {
   });
 });
 
+describe('parsePluginManifest desktop panel', () => {
+  it('reads the panel label and the roles it is bound to', () => {
+    const result = parsePluginManifest(base({ desktop: { panel: { label: '需求开发', roles: ['需求开发', ' 辅助 '] } } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.desktopPanel).toEqual({
+        label: '需求开发',
+        roles: ['需求开发', '辅助'],
+        shortcuts: [],
+      });
+    }
+  });
+
+  it('falls back to the plugin name and treats a missing role list as "any role"', () => {
+    const blank = parsePluginManifest(base({ desktop: { panel: { label: ' ' } } }));
+    expect(blank.ok).toBe(true);
+    if (blank.ok) expect(blank.manifest.desktopPanel).toEqual({ label: 'Demo', roles: [], shortcuts: [] });
+  });
+
+  it('dedupes roles so the same role cannot render twice', () => {
+    const result = parsePluginManifest(base({ desktop: { panel: { roles: ['需求开发', '需求开发'] } } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPanel?.roles).toEqual(['需求开发']);
+  });
+
+  it('rejects a malformed panel instead of silently hiding the entry', () => {
+    const notObject = parsePluginManifest(base({ desktop: { panel: 'demand-dev' } }));
+    expect(notObject.ok).toBe(false);
+    if (!notObject.ok) expect(notObject.error).toContain('desktop.panel');
+
+    const badRoles = parsePluginManifest(base({ desktop: { panel: { roles: '需求开发' } } }));
+    expect(badRoles.ok).toBe(false);
+    if (!badRoles.ok) expect(badRoles.error).toContain('roles');
+  });
+
+  it('has no panel by default', () => {
+    const result = parsePluginManifest(base());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPanel).toBeNull();
+  });
+
+  it('keeps the quick-bar shortcuts in declaration order', () => {
+    const result = parsePluginManifest(
+      base({
+        desktop: {
+          panel: {
+            roles: ['需求开发'],
+            shortcuts: [
+              { label: '立刻检查', action: 'check.now' },
+              { label: '频道设置', section: '频道设置' },
+            ],
+          },
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.desktopPanel?.shortcuts).toEqual([
+        { label: '立刻检查', action: 'check.now' },
+        { label: '频道设置', section: '频道设置' },
+      ]);
+    }
+  });
+
+  it('rejects a shortcut that could not do anything when clicked', () => {
+    const noTarget = parsePluginManifest(
+      base({ desktop: { panel: { shortcuts: [{ label: '立刻检查' }] } } }),
+    );
+    expect(noTarget.ok).toBe(false);
+    if (!noTarget.ok) expect(noTarget.error).toContain('action 或 section');
+
+    const both = parsePluginManifest(
+      base({ desktop: { panel: { shortcuts: [{ label: '立刻检查', action: 'a', section: 'b' }] } } }),
+    );
+    expect(both.ok).toBe(false);
+    if (!both.ok) expect(both.error).toContain('不能同时');
+  });
+});
+
 describe('parsePluginManifest requirements', () => {
   it('accepts the skills and desktop capability names', () => {
     const result = parsePluginManifest(base({ requires: ['skills', 'desktop', 'settings'] }));

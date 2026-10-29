@@ -152,7 +152,23 @@ export const MICA_SESSION_NOTIFICATIONS = {
  */
 export const MICA_TURN_NOTIFICATIONS = {
   retrying: 'mica/turn/retrying',
+  /**
+   * 这一轮是**宿主内部**发起的（插件 `ctx.runtime.submit`），客户端没有为它插过乐观
+   * 气泡。带上启动文本，桌面端才能把用户消息补进对话——否则运行中只看到回答，用户消息
+   * 要等重新加载会话才出现。
+   *
+   * 客户端自己发起的轮次不发这条：那边已经有乐观行了。
+   */
+  input: 'mica/turn/input',
 } as const;
+
+/** `MICA_TURN_NOTIFICATIONS.input` payload. */
+export type MicaTurnInput = {
+  threadId: string | null;
+  turnId: string | null;
+  /** 展示给用户的那段文本（插件给的 `displayText` 优先）。 */
+  text: string;
+};
 
 /**
  * Mica extension notification: the resident host changed this session's
@@ -466,6 +482,16 @@ export const MICA_METHODS = {
    * 落盘后其他窗口经 `mica/pluginSettings/updated` 同步。
    */
   pluginSettingsSet: 'mica/pluginSettings/set',
+  /**
+   * 对话右侧的插件面板：读视图 / 转发一个动作。
+   *
+   * 页面是构建期打的包，用户插件没有前端模块，所以插件要往页面上放东西只能「插件给数据、
+   * 宿主画出来」。视图与动作都落在插件自己的处理器里，宿主不认识任何具体插件。
+   *
+   * 两个方法都返回 `{ ok, pluginId, view }`：动作之后顺带回一份新视图，页面不需要再取一次。
+   */
+  pluginPanelView: 'mica/pluginPanel/view',
+  pluginPanelAction: 'mica/pluginPanel/action',
 } as const;
 
 export type MicaBtwAskParams = {

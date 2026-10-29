@@ -28,6 +28,13 @@
   `DESKTOP_CHECKS` 目录（`PluginDesktop.ts` 是宿主与插件共用的单一事实来源）。状态由桌面端探测
   并渲染在配置页的插件详情里——插件跑在 app-server 子进程里，既探测不到也渲染不了。
   依赖桌面能力面的插件用 `requires: ["desktop"]` 声明，其它宿主在注册阶段整插件跳过。
+- 对话右侧面板：清单的 `desktop.panel` 声明标题与显示条件（角色名），插件用
+  `ctx.desktop.panel({ view, action })` 交出纯数据的视图与动作分派。宿主负责归一化与渲染，
+  所以用户插件（没有前端模块）也有界面；`PluginPanel.ts` 里是类型、进程内登记表
+  （`PluginPanelRegistry`）与视图/动作的归一化函数。只在清单声明了面板时才提供这个入口。
+- 用户插件装载：`loadUserPlugins()` 扫描 `$MICA_HOME/plugins` 并注册进 manager，
+  `writeUserPluginStatus()` 把「加载 / 缺少宿主能力 / 失败」写进 `plugin-status.json`
+  （配置页读它）。常驻宿主（TUI、`mica app-server`）共用这两步，`mica exec` 不装用户插件。
 
 ## 使用入口
 
@@ -106,6 +113,8 @@ context.onDispose(() => registration.dispose());
 - `PluginPrompt.ts`：插件贡献的 system prompt 片段收集。
 - `PluginDesktop.ts`：桌面宿主的能力面——检查项目录（`DESKTOP_CHECKS`）、运行条件声明与
   skill 注册的类型。新增一项检查 = 在这里登记 + 桌面端（`apps/desktop/src/main/system/`）实现探测器。
+- `PluginPanel.ts`：对话右侧面板的视图类型、`PluginPanelRegistry` 与视图/动作归一化。
+- `UserPlugins.ts`：`$MICA_HOME/plugins` 的装载与 `plugin-status.json` 写盘。
 - `PluginSubagents.ts`：委派子代理的能力面类型（类型声明、spawn 入参、任务快照、`PluginSubagentRegistry`），宿主实现机制、插件提供策略。
 - `PluginSessionState.ts`：插件存进会话快照的状态的大小上限与校验。
 - `PluginLlm.ts`：`ctx.llm` 的声明类型、设置字段生成、生效值解析与请求封装（「跟随主配置」由宿主解析）。

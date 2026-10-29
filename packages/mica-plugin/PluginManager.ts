@@ -10,6 +10,7 @@ import { createPluginSessionSettingsApi, type PluginSessionSettingsHostApi } fro
 import { createPluginLlmApi } from './PluginLlm.js';
 import { createPluginBackgroundScheduler } from './PluginBackground.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
+import type { PluginPanelHandler, PluginPanelRegistry } from './PluginPanel.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
@@ -74,6 +75,11 @@ export type PluginBaseContext = Omit<
    * 插件身份；没有会话可记的宿主（`mica commit`）照样提供，只是不入账。
    */
   pluginModels?: PluginModelsHandler;
+  /**
+   * 对话右侧面板的登记表。宿主提供它、并在插件清单声明了 `desktop.panel` 时，插件才能
+   * 拿到 `ctx.desktop.panel()`——没声明就静默接受注册会让插件以为界面已经出现。
+   */
+  desktopPanels?: PluginPanelRegistry;
 };
 
 export class PluginManager {
@@ -119,6 +125,7 @@ export class PluginManager {
         agentRegistry,
         subagentsFor,
         pluginModels: modelsHandler,
+        desktopPanels,
         ...shared
       } = baseContext;
       const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
@@ -188,6 +195,18 @@ export class PluginManager {
       if (subagentsFor) ctx.subagents = subagentsFor(plugin.id);
       if (modelsHandler) {
         ctx.models = { request: (request) => modelsHandler(plugin.id, request) };
+      }
+      // desktop 能力面有两半：宿主身份（`host: 'desktop'`，由 host 提供）与对话右侧面板的
+      // 注册口。面板只在清单声明了 `desktop.panel` 时才有位置可画——不声明却接受注册，
+      // 插件会以为自己的界面已经出现，实际页面上什么都没有。
+      if (baseContext.desktop) {
+        const panels = baseContext.desktopPanels;
+        ctx.desktop = {
+          host: 'desktop',
+          ...(panels && plugin.manifest?.desktopPanel
+            ? { panel: (handler: PluginPanelHandler) => panels.add(plugin.id, handler) }
+            : {}),
+        };
       }
       if (plugin.manifest?.llm && modelsHandler) {
         // 生效值 = 全局设置 + 本会话覆盖；每次调用重新合并，配置页改完立刻生效。

@@ -13,6 +13,7 @@ import {
 import type { DesktopCheckId } from './PluginDesktop.js';
 import type { PluginSettingField } from './PluginSettings.js';
 import type { PluginLlmSpec } from './PluginLlm.js';
+import type { PluginDesktopPanel } from './PluginDesktop.js';
 import type { MicaPlugin } from './Plugin.js';
 
 export type FilePluginLoaderOptions = {
@@ -61,6 +62,8 @@ export type PluginInspection = {
   desktopChecks: DesktopCheckId[];
   /** 清单声明要在页面展示的运行状态行；清单坏掉时为空。 */
   status: PluginStatusField[];
+  /** 清单声明的对话右侧面板；没声明（或清单坏掉）时为 null。 */
+  desktopPanel: PluginDesktopPanel | null;
   /** 清单解析 / 入口缺失等静态问题；加载期错误由 plugin-status.json 提供。 */
   error?: string;
 };
@@ -210,6 +213,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     llm: null,
     desktopChecks: [],
     status: [],
+    desktopPanel: null,
   };
 
   let parsed: unknown;
@@ -237,6 +241,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     llm: manifest.llm,
     desktopChecks: manifest.desktopChecks,
     status: manifest.status,
+    desktopPanel: manifest.desktopPanel,
     error: existsSync(entryFile) ? undefined : `入口文件不存在：${manifest.main}`,
   };
 }

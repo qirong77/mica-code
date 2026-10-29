@@ -95,6 +95,7 @@ import {
 } from './chat-completions'
 import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { BtwDrawer } from './BtwDrawer'
+import { PluginPanels, PluginQuickBar } from './PluginPanels'
 import { LoopBadge } from './LoopBadge'
 import { SessionSettingsDialog } from './SessionSettingsDialog'
 import { Popover } from './Popover'
@@ -5286,6 +5287,16 @@ export function ChatView({
     modelEfforts?.[activeEffortKey]?.defaultEffort
   )
   const activeRole = activeOverrides.role || meta?.role || 'default'
+
+  // 插件面板（清单 `desktop.panel`）的开合状态：按钮在状态行里，抽屉在 `.chat-view` 直属
+  // 子节点上，两处共享这一份状态。
+  // 插件面板：打开的是哪个插件、以及要展开它的哪一块（快捷按钮「频道设置」这类入口）。
+  const [pluginPanelOpen, setPluginPanelOpen] = useState('')
+  const [pluginPanelSection, setPluginPanelSection] = useState('')
+  const closePluginPanel = useCallback(() => {
+    setPluginPanelOpen('')
+    setPluginPanelSection('')
+  }, [])
   const contextUsage = usageValues(meta?.lastUsage)
   const contextTokens = contextUsage?.total ?? 0
   const windowSize = meta?.contextWindowSize ?? 0
@@ -5903,6 +5914,19 @@ export function ChatView({
               onClose={() => setSettingsSection(null)}
             />
           )}
+          {/* 插件快捷按钮：悬浮在输入框正上方（插件的「立刻检查」「频道设置」这类入口）。 */}
+          <PluginQuickBar
+            nodeId={nodeId}
+            sessionId={node?.sessionId || sessionIdRef.current || null}
+            cwd={cwd}
+            role={activeRole}
+            openPlugin={pluginPanelOpen}
+            focusSection={pluginPanelSection}
+            onTogglePanel={(id, section) => {
+              setPluginPanelOpen(id)
+              setPluginPanelSection(section || '')
+            }}
+          />
           <div
             className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''} ${loopTone}`}
             style={
@@ -6262,6 +6286,18 @@ export function ChatView({
         )}
         {/* By The Way 的抽屉：挂在 `.chat-view` 直属子节点上（不是输入条里），这样它
             能占满对话区的高度，而不是像浮层那样被输入条那一条盒子限住。 */}
+        {/* 插件声明的对话右侧面板（清单 `desktop.panel`）：抽屉挂在 `.chat-view` 直属
+            子节点上（和下面的 BTW 同理），入口是输入框上方那排快捷按钮。角色条件由插件
+            在清单里声明，宿主只按当前会话角色过滤。 */}
+        <PluginPanels
+          nodeId={nodeId}
+          sessionId={node?.sessionId || sessionIdRef.current || null}
+          cwd={cwd}
+          role={activeRole}
+          openPlugin={pluginPanelOpen}
+          focusSection={pluginPanelSection}
+          onClose={closePluginPanel}
+        />
         {btwOpen && (
           <BtwDrawer
             thread={btwThread}

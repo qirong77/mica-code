@@ -10,6 +10,8 @@ import {
   isDesktopCheckId,
   type DesktopCheckId,
   type PluginDesktopEntry,
+  type PluginDesktopPanel,
+  type PluginPanelShortcut,
 } from './PluginDesktop.js';
 
 /**
@@ -97,6 +99,11 @@ export type PluginManifest = {
    * 不导入插件代码，也不认识任何具体插件，按 key 取值渲染。插件没写过的 key 显示占位。
    */
   status: PluginStatusField[];
+  /**
+   * 对话右侧的面板（清单 `desktop.panel`）。声明了就有一块面板，内容由插件经
+   * `ctx.desktop.panel()` 给数据、宿主渲染——用户插件也能用，不依赖前端模块。
+   */
+  desktopPanel: PluginDesktopPanel | null;
 };
 
 export type PluginStatusField = {
@@ -244,6 +251,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       desktopChecks: desktop.value.checks,
       desktopEntry: desktop.value.entry,
       status: status.value,
+      desktopPanel: desktop.value.panel,
     },
   };
 }
@@ -299,8 +307,11 @@ function readLlm(input: unknown): { ok: true; value: PluginLlmSpec | null } | { 
 function readDesktop(
   input: unknown,
   pluginName: string,
-): { ok: true; value: { checks: DesktopCheckId[]; entry: PluginDesktopEntry | null } } | { ok: false; error: string } {
-  if (input === undefined) return { ok: true, value: { checks: [], entry: null } };
+): {
+  ok: true;
+  value: { checks: DesktopCheckId[]; entry: PluginDesktopEntry | null; panel: PluginDesktopPanel | null };
+} | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: { checks: [], entry: null, panel: null } };
   if (!isRecord(input)) return { ok: false, error: 'desktop 必须是对象' };
 
   const rawChecks = input.checks;
@@ -315,8 +326,10 @@ function readDesktop(
     }
   }
 
+  const panel = readDesktopPanel(input.panel, pluginName);
+  if (!panel.ok) return panel;
   const rawEntry = input.entry;
-  if (rawEntry === undefined) return { ok: true, value: { checks, entry: null } };
+  if (rawEntry === undefined) return { ok: true, value: { checks, entry: null, panel: panel.value } };
   if (!isRecord(rawEntry)) return { ok: false, error: 'desktop.entry 必须是对象' };
   const rawLabel = rawEntry.label;
   if (rawLabel !== undefined && typeof rawLabel !== 'string') {
@@ -324,7 +337,75 @@ function readDesktop(
   }
   // 侧栏那一行只有一行的宽度：文案留空的退化成语义（用插件名）而不是画一行空白。
   const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
-  return { ok: true, value: { checks, entry: { label } } };
+  return { ok: true, value: { checks, entry: { label }, panel: panel.value } };
+}
+
+/**
+ * `desktop.panel`：对话右侧那块面板。
+ *
+ * `roles` 是显示条件——只有这些角色下的会话才出现。写成字符串数组是因为角色名就是
+ * `$MICA_HOME/role/<name>.md` 的文件名，插件与用户看到的是同一个值。
+ */
+function readDesktopPanel(
+  input: unknown,
+  pluginName: string,
+): { ok: true; value: PluginDesktopPanel | null } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: null };
+  if (typeof input === 'boolean') {
+    // `"panel": true` 是最常见的写法，语义就是「一块面板，任何角色都显示」。
+    return input
+      ? { ok: true, value: { label: pluginName, roles: [], shortcuts: [] } }
+      : { ok: true, value: null };
+  }
+  if (!isRecord(input)) return { ok: false, error: 'desktop.panel 必须是对象或 true' };
+  const rawLabel = input.label;
+  if (rawLabel !== undefined && typeof rawLabel !== 'string') {
+    return { ok: false, error: 'desktop.panel.label 必须是字符串' };
+  }
+  const rawRoles = input.roles;
+  const roles: string[] = [];
+  if (rawRoles !== undefined) {
+    if (!Array.isArray(rawRoles)) return { ok: false, error: 'desktop.panel.roles 必须是数组' };
+    for (const role of rawRoles) {
+      if (typeof role !== 'string' || !role.trim()) {
+        return { ok: false, error: 'desktop.panel.roles 里只能放角色名' };
+      }
+      if (!roles.includes(role.trim())) roles.push(role.trim());
+    }
+  }
+  const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
+  const shortcuts = readPanelShortcuts(input.shortcuts);
+  if (!shortcuts.ok) return shortcuts;
+  return { ok: true, value: { label, roles, shortcuts: shortcuts.value } };
+}
+
+/**
+ * `desktop.panel.shortcuts`：输入框上方那排按钮。
+ *
+ * 每个按钮要么是 `action`（直接交给插件的动作处理器），要么是 `section`（打开面板并展开
+ * 那一块）。只给标签的按钮在页面上点不动，所以这种清单错误直接拒绝。
+ */
+function readPanelShortcuts(
+  input: unknown,
+): { ok: true; value: PluginPanelShortcut[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(input)) return { ok: false, error: 'desktop.panel.shortcuts 必须是数组' };
+  const shortcuts: PluginPanelShortcut[] = [];
+  for (const entry of input) {
+    if (!isRecord(entry)) return { ok: false, error: 'desktop.panel.shortcuts 的每一项必须是对象' };
+    const label = readString(entry.label)?.trim();
+    if (!label) return { ok: false, error: 'desktop.panel.shortcuts 项缺少 label' };
+    const action = readString(entry.action)?.trim();
+    const section = readString(entry.section)?.trim();
+    if (!action && !section) {
+      return { ok: false, error: `desktop.panel.shortcuts「${label}」需要 action 或 section` };
+    }
+    if (action && section) {
+      return { ok: false, error: `desktop.panel.shortcuts「${label}」不能同时给 action 与 section` };
+    }
+    shortcuts.push({ label, ...(action ? { action } : {}), ...(section ? { section } : {}) });
+  }
+  return { ok: true, value: shortcuts };
 }
 
 /**

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
-import { TurnNoticeLog, createRetryNotice, createTurnErrorNotice, type TurnNotice } from './turnNotices.js';
+import {
+  TurnNoticeLog,
+  createRetryNotice,
+  createTurnErrorNotice,
+  mergeInFlightUserMessage,
+  type TurnNotice,
+} from './turnNotices.js';
 
 function notice(content: string, command = '/note'): TurnNotice {
   return { role: 'notice', content, variant: 'error', command };
@@ -107,6 +113,39 @@ describe('TurnNoticeLog', () => {
 });
 
 describe('notice message builders', () => {
+  it('swaps the raw prompt for the display text without moving it', () => {
+    const pending: MicaUiConversationMessage = { role: 'user', content: '（插件）巡检：群 A' };
+    const messages: MicaUiConversationMessage[] = [
+      { role: 'user', content: '你好' },
+      { role: 'assistant', content: '在' },
+      { role: 'user', content: '【巡检】请检查频道更新' },
+      { role: 'assistant', content: '收到' },
+      pending,
+    ];
+
+    const merged = mergeInFlightUserMessage(messages, {
+      message: pending,
+      rawContent: '【巡检】请检查频道更新',
+    });
+
+    expect(merged.map((message) => message.content)).toEqual(['你好', '在', '（插件）巡检：群 A', '收到']);
+  });
+
+  it('matches text blocks against plain text (provider history vs input)', () => {
+    const pending: MicaUiConversationMessage = { role: 'user', content: '（插件）标题' };
+    const merged = mergeInFlightUserMessage(
+      [{ role: 'user', content: [{ type: 'text', text: '长提示词' }] }, pending],
+      { message: pending, rawContent: '长提示词' },
+    );
+    expect(merged).toEqual([{ role: 'user', content: '（插件）标题' }]);
+  });
+
+  it('leaves the history alone when the raw prompt is not there', () => {
+    const pending: MicaUiConversationMessage = { role: 'user', content: '（插件）标题' };
+    const messages: MicaUiConversationMessage[] = [{ role: 'user', content: '上一轮' }, pending];
+    expect(mergeInFlightUserMessage(messages, { message: pending, rawContent: '这一轮' })).toBe(messages);
+  });
+
   it('formats the retry hint with the attempt and the delay', () => {
     expect(createRetryNotice(new Error('socket closed'), 2, 5, 10_000)).toEqual({
       role: 'notice',

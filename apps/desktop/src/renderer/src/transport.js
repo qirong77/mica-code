@@ -257,6 +257,27 @@ function createWebApi(env) {
         invoke('chat:capabilities', { id, sessionId: sessionId || null, cwd: cwd || null }),
       pluginSettings: (id, { sessionId, cwd } = {}) =>
         invoke('chat:plugin-settings', { id, sessionId: sessionId || null, cwd: cwd || null }),
+      // 对话右侧的插件面板（清单 `desktop.panel`）：视图与动作都由插件给，宿主只转发。
+      // 走 chat 是因为插件活在会话的常驻 host 里——面板要有状态，就得在同一个进程。
+      pluginPanels: {
+        view: (id, { pluginId, sessionId, cwd } = {}) =>
+          invoke('chat:plugin-panel-view', {
+            id,
+            pluginId,
+            sessionId: sessionId || null,
+            cwd: cwd || null
+          }),
+        action: (id, { pluginId, action, key, values, sessionId, cwd } = {}) =>
+          invoke('chat:plugin-panel-action', {
+            id,
+            pluginId,
+            action,
+            ...(key ? { key } : {}),
+            ...(values ? { values } : {}),
+            sessionId: sessionId || null,
+            cwd: cwd || null
+          })
+      },
       setPluginSettings: (id, { sessionId, cwd, pluginId, values } = {}) =>
         invoke('chat:set-plugin-settings', {
           id,
