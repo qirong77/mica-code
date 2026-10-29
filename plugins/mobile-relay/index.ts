@@ -6,6 +6,7 @@ import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { registerBridgeSupervisor } from './BridgeSupervisor.js';
 import { createPanelHandler } from './Panel.js';
 import { MobileRelayTool } from './MobileRelayTool.js';
+import { registerMachine } from './registerMachine.js';
 
 const SKILL_NAME = 'mobile-relay';
 
@@ -65,6 +66,7 @@ export default function setup(ctx: PluginContext): void {
   registerSkill(ctx, dataDir);
   registerBridgeSupervisor(ctx, dataDir);
   registerPanel(ctx, dataDir);
+  registerActions(ctx, dataDir);
 
   const tools = ctx.tools;
   if (!tools) {
@@ -76,6 +78,18 @@ export default function setup(ctx: PluginContext): void {
     return;
   }
   tools.register(new MobileRelayTool(ctx));
+}
+
+/**
+ * 配置页上的按钮（清单 `actions`）：在插件设置下方直接点，不跳去对话。
+ *
+ * 执行它的是一个一次性插件进程，因此这里不能假设有会话、有桥在跑——只读设置、
+ * 发一次注册请求、把口令写回设置。
+ */
+function registerActions(ctx: PluginContext, dataDir: string | null): void {
+  const actions = ctx.actions;
+  if (!actions) return;
+  actions.register('register', async ({ values }) => registerMachine(ctx, values, dataDir));
 }
 
 /**

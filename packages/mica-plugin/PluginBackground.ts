@@ -61,8 +61,14 @@ export function createPluginBackgroundScheduler(options: {
   pluginId: string;
   onError: (taskId: string, error: unknown) => void;
   now?: () => number;
+  /**
+   * `false` 表示这个宿主不跑常驻任务（配置页动作那种一次性进程）：注册照收，但不排期。
+   * 插件仍能拿到 `ctx.background`，因此不会因为「缺能力」而整块跳过或写出误导性的健康状态。
+   */
+  enabled?: boolean;
 }): PluginBackgroundApi {
   const now = options.now ?? Date.now;
+  const enabled = options.enabled ?? true;
   const tasks = new Map<string, RegisteredTask>();
 
   type RegisteredTask = {
@@ -131,7 +137,7 @@ export function createPluginBackgroundScheduler(options: {
         stopped: false,
       };
       tasks.set(task.id, entry);
-      schedule(entry, task.immediate ? 0 : (task.delay ?? intervalOf(task)));
+      if (enabled) schedule(entry, task.immediate ? 0 : (task.delay ?? intervalOf(task)));
 
       return {
         dispose: () => {

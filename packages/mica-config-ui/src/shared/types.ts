@@ -307,6 +307,11 @@ export type ConfigWebPlugin = {
    */
   status: ConfigWebPluginStatusField[];
   /**
+   * 清单声明的配置页动作（清单 `actions`）。页面只画按钮，点一下交给插件自己执行——
+   * 注册、测试连接这类事不需要会话，所以不用跳去对话里。
+   */
+  actions: ConfigWebPluginAction[];
+  /**
    * 清单的 `desktop.panel`：这个插件在对话右侧有一块面板（插件给数据、宿主渲染）。
    *
    * 与 `desktopEntry` 不同，它对**用户插件同样有效**——面板不需要前端模块，页面那边只按
@@ -325,6 +330,20 @@ export type ConfigWebPlugin = {
 /** 桌面端侧栏入口的静态描述：清单只给文案，卡片内容是插件自己的模块。 */
 export type ConfigWebPluginDesktopEntry = {
   label: string;
+};
+
+/** 配置页上的一个动作按钮：清单声明文案，插件执行。 */
+export type ConfigWebPluginAction = {
+  key: string;
+  label: string;
+  description: string;
+  tone: 'primary' | 'neutral' | 'danger';
+};
+
+/** 插件动作的返回：一句给人看的结果，外加一条可以直接点开/复制的地址。 */
+export type ConfigWebPluginActionResult = {
+  message: string;
+  link?: string;
 };
 
 /** 一条运行状态：清单声明标签与类型，插件提供值。 */

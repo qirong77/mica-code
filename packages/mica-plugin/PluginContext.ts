@@ -15,6 +15,7 @@ import type { PluginModelsApi } from './PluginModels.js';
 import type { PluginLlmApi } from './PluginLlm.js';
 import type { PluginHealthStore } from './PluginHealth.js';
 import type { PluginSettingIssue, PluginSettingValues } from './PluginSettings.js';
+import type { PluginActionHandler } from './PluginActions.js';
 import type { PluginDesktopApi, PluginSkillsApi } from './PluginDesktop.js';
 import type React from 'react';
 
@@ -213,6 +214,17 @@ export type PluginContext = {
      * 插件自己拿到了值就该自己写回去——让用户复制粘贴一个口令，是最容易出错的一步。
      */
     set(values: Record<string, unknown>): PluginSettingValues;
+  };
+  /**
+   * 配置页上的动作按钮。
+   *
+   * 宿主不认任何具体插件：页面上有哪个按钮来自清单 `actions`，点下去由这里注册的处理器
+   * 执行。它不依赖会话，所以配置页能直接调用——「注册到中转机、拿到访问链接」这类操作
+   * 因此不必跳去对话。
+   */
+  actions?: {
+    /** 只能注册清单里声明过的 key；重复注册会报错。 */
+    register(key: string, handler: PluginActionHandler): Disposable;
   };
   /**
    * 插件自报状态（正常 / 需要配置 / 出错）。

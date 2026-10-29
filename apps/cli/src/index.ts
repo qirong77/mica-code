@@ -175,6 +175,26 @@ if (invocation.mode === 'commit') {
   await exitAfterStdoutFlush(exitCode);
 }
 
+if (invocation.mode === 'plugin-action') {
+  // 配置页的按钮：插件自己的逻辑，一次性进程里跑，不建会话（同 `mica commit`）。
+  const { runPluginAction } = await import('./cli/runPluginAction.js');
+  let exitCode = 0;
+  try {
+    const result = await runPluginAction({
+      pluginId: invocation.pluginId,
+      action: invocation.action,
+      values: invocation.values
+    });
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (!result.ok) exitCode = 1;
+  } catch (error) {
+    exitCode = 1;
+    const message = error instanceof Error ? error.message : String(error);
+    process.stdout.write(`${JSON.stringify({ ok: false, code: 'error', error: message })}\n`);
+  }
+  await exitAfterStdoutFlush(exitCode);
+}
+
 if (invocation.mode === 'app-server') {
   const { runAppServer } = await import('./cli/runAppServer.js');
   const { encodeCodexNotification, CODEX_NOTIFICATIONS } = await import('@packages/mica-runtime/index.js');

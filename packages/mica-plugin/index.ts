@@ -37,6 +37,7 @@ import {
   normalizePluginPanelView,
 } from './PluginPanel.js';
 import { PluginSettingsValidationError, validatePluginSettingValues } from './PluginSettings.js';
+import { PluginActionRegistry } from './PluginActions.js';
 import { MAX_PLUGIN_STATE_BYTES, normalizePluginStateRecord, validatePluginStateValue } from './PluginSessionState.js';
 import {
   PLUGIN_DATA_DIR,
@@ -120,6 +121,7 @@ export const micaPlugin = {
   normalizePluginPanelAction,
   normalizePluginPanelActionResult,
   normalizePluginPanelView,
+  PluginActionRegistry,
   MAX_PLUGIN_STATE_BYTES,
   normalizePluginStateRecord,
   validatePluginStateValue,
@@ -147,6 +149,17 @@ export {
   normalizePluginPanelActionResult,
   normalizePluginPanelView,
 } from './PluginPanel.js';
+export {
+  PLUGIN_ACTION_TONES,
+  PluginActionRegistry,
+} from './PluginActions.js';
+export type {
+  PluginActionDeclaration,
+  PluginActionHandler,
+  PluginActionInput,
+  PluginActionResult,
+  PluginActionTone,
+} from './PluginActions.js';
 export { loadUserPlugins, writeUserPluginStatus } from './UserPlugins.js';
 export type { UserPluginStatus } from './UserPlugins.js';
 export {

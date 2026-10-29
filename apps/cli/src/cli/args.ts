@@ -33,6 +33,19 @@ export type CommitCliInvocation = {
   cwd?: string;
 };
 
+/**
+ * 配置页动作的一次性执行入口（配置页的「注册」这类按钮调它）。
+ *
+ * 内部通道，不出现在 usage 里：调用方是配置页宿主，参数形状由 `mica-config-ui` 决定。
+ */
+export type PluginActionCliInvocation = {
+  mode: 'plugin-action';
+  pluginId: string;
+  action: string;
+  /** 页面带上来的设置草稿；没传就是「按磁盘上的设置执行」。 */
+  values?: Record<string, string>;
+};
+
 export type AppServerCliInvocation = {
   mode: 'app-server';
   sessionId?: string;
@@ -54,6 +67,7 @@ export type CliInvocation =
   | ExecCliInvocation
   | CompactCliInvocation
   | CommitCliInvocation
+  | PluginActionCliInvocation
   | AppServerCliInvocation
   | { mode: 'models'; verbose: boolean; json: boolean }
   | { mode: 'version' }
@@ -185,6 +199,35 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       return cliError(`Unknown commit option: ${arg}`);
     }
     return { mode: 'commit', cwd };
+  }
+  if (argv[0] === 'plugin-action') {
+    let pluginId = '';
+    let action = '';
+    let values: Record<string, string> | undefined;
+    for (let index = 1; index < argv.length; index++) {
+      const arg = argv[index]!;
+      const valueOption = parseValueOption(arg, argv, index, ['--plugin', '--action', '--values']);
+      if (!valueOption) return cliError(`Unknown plugin-action option: ${arg}`);
+      if (!valueOption.ok) return valueOption.error;
+      index = valueOption.nextIndex;
+      if (valueOption.name === '--plugin') pluginId = valueOption.value;
+      if (valueOption.name === '--action') action = valueOption.value;
+      if (valueOption.name === '--values') {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(valueOption.value);
+        } catch {
+          return cliError('--values 必须是 JSON 对象');
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return cliError('--values 必须是 JSON 对象');
+        }
+        values = parsed as Record<string, string>;
+      }
+    }
+    if (!pluginId) return cliError('plugin-action 缺少 --plugin');
+    if (!action) return cliError('plugin-action 缺少 --action');
+    return { mode: 'plugin-action', pluginId, action, values };
   }
   if (argv[0] === 'app-server') {
     let sessionId: string | undefined;

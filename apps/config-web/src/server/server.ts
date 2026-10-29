@@ -268,6 +268,10 @@ async function resolveApiCall(
       // 试连是一次真实的模型请求，所以用 POST：它不是幂等的读，也不该被缓存。
       if (method !== 'POST') return METHOD_NOT_ALLOWED;
       return get('testPluginLlm', { id: body.id, values: body.values });
+    case '/api/details/plugin-action':
+      // 动作会改状态（注册会写回口令），所以用 POST。
+      if (method !== 'POST') return METHOD_NOT_ALLOWED;
+      return get('runPluginAction', { id: body.id, action: body.action, values: body.values });
     case '/api/details/sessions':
       return method === 'GET' ? get('readSessionsDetails') : METHOD_NOT_ALLOWED;
 

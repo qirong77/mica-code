@@ -16,6 +16,11 @@ import { publishPluginSkills } from './PluginSkills.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
+import {
+  PluginActionRegistry,
+  type PluginActionInput,
+  type PluginActionResult,
+} from './PluginActions.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 
 export type PluginSetupReport = {
@@ -87,6 +92,25 @@ export type PluginBaseContext = Omit<
 export class PluginManager {
   private readonly plugins = new Map<string, MicaPlugin>();
   private readonly disposables: Disposable[] = [];
+  /**
+   * 配置页动作的登记表。
+   *
+   * 登记本身不需要宿主设施（只是把处理器存起来），所以它跟着 manager 走，任何宿主都
+   * 能提供 `ctx.actions`；真正执行动作的是「配置页宿主」——它可以是常驻会话进程，也可以
+   * 是一次性进程（`mica plugin-action`）。
+   */
+  private readonly actions = new PluginActionRegistry(
+    (pluginId) => (this.plugins.get(pluginId)?.manifest?.actions ?? []).map((entry) => entry.key),
+  );
+
+  /** 执行某个插件声明的配置页动作。找不到处理器时报错由调用方翻译成用户能读懂的话。 */
+  runPluginAction(pluginId: string, key: string, input: PluginActionInput): Promise<PluginActionResult> {
+    return this.actions.run(pluginId, key, input);
+  }
+
+  hasPluginAction(pluginId: string, key: string): boolean {
+    return this.actions.has(pluginId, key);
+  }
 
   register(plugin: MicaPlugin): void {
     if (this.plugins.has(plugin.id)) {
@@ -109,12 +133,30 @@ export class PluginManager {
    * `quietSkips` 给「只跑一条命令」的一次性宿主用（`mica commit`）：那种进程本来就只
    * 提供命令相关的几面能力，别的插件因为缺能力被跳过是设计如此，不该把用户的插件健康
    * 状态写成「宿主未提供能力」。
+   *
+   * `only` 把装配收窄到指定插件（`mica plugin-action` 只为一个插件的动作用）：一次性宿主
+   * 不提供 `tools` / `background` 这类能力，装配无关插件只会多出一堆「缺能力」的跳过。
+   *
+   * `ignoreRequirements` 与 `only` 配套：动作宿主只兑现「动作」这一面，插件声明它还要
+   * `tools` / `background` 是给常驻宿主看的，不该成为「按钮点不了」的理由。跳过能力检查
+   * 之后，插件必须自己判断 `ctx.<capability>` 在不在（这也是插件一直以来的写法）。
+   *
+   * `backgroundTasks: false` 让常驻任务只登记不排期：点一次配置页按钮不该顺手起一个桥进程。
    */
-  async setupAll(baseContext: PluginBaseContext, options: { quietSkips?: boolean } = {}): Promise<PluginSetupReport> {
+  async setupAll(
+    baseContext: PluginBaseContext,
+    options: {
+      quietSkips?: boolean;
+      only?: readonly string[];
+      ignoreRequirements?: boolean;
+      backgroundTasks?: boolean;
+    } = {},
+  ): Promise<PluginSetupReport> {
     const report: PluginSetupReport = { loaded: [], failed: [], skipped: [] };
     this.watchHookErrors(baseContext);
 
     for (const plugin of this.sortedPlugins()) {
+      if (options.only && !options.only.includes(plugin.id)) continue;
       const localDisposables: Disposable[] = [];
       const logger = createPluginLogger(plugin.id, baseContext.logger);
       const configDir = baseContext.paths?.config;
@@ -184,6 +226,7 @@ export class PluginManager {
       // 插件没手动 dispose 的循环随 localDisposables 一起回收，所以停用插件 = 循环停止。
       const background = createPluginBackgroundScheduler({
         pluginId: plugin.id,
+        enabled: options.backgroundTasks !== false,
         onError: (taskId, error) => {
           const message = errorMessage(error);
           logger.warn('plugin:background-failed', { taskId, error: message });
@@ -219,6 +262,14 @@ export class PluginManager {
             : {}),
         };
       }
+      // 配置页动作：不需要会话，也不属于 `desktop` 那半边（一次性进程同样提供）。
+      // 清单声明了按钮才有注册口，理由同面板：没按钮还接受注册等于骗插件。
+      if ((plugin.manifest?.actions.length ?? 0) > 0) {
+        const actionStore = this.actions;
+        ctx.actions = {
+          register: (key, handler) => actionStore.add(plugin.id, key, handler),
+        };
+      }
       if (plugin.manifest?.llm && modelsHandler) {
         // 生效值 = 全局设置 + 本会话覆盖；每次调用重新合并，配置页改完立刻生效。
         const llmSpec = plugin.manifest.llm;
@@ -231,7 +282,9 @@ export class PluginManager {
 
       // 清单声明的能力必须都能兑现，否则插件一定会在运行期踩空。放在 setup 之前判断，
       // 装配出来的 ctx 就是事实，不需要插件自己再猜。
-      const missing = missingRequirements(plugin.manifest?.requires ?? [], ctx);
+      const missing = options.ignoreRequirements
+        ? []
+        : missingRequirements(plugin.manifest?.requires ?? [], ctx);
       if (missing.length > 0) {
         report.skipped.push({ pluginId: plugin.id, missing });
         if (!options.quietSkips) {

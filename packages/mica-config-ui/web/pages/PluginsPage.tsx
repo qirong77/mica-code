@@ -8,12 +8,19 @@ import {
   openDesktopSettings,
   readDesktopChecks,
   readPluginsDetails,
+  runPluginAction,
   setPluginEnabled,
   supportsPluginSettings,
   supportsPluginToggle,
   writePluginSettings,
 } from '../api.js';
-import type { ConfigWebDesktopCheckStatus, ConfigWebPlugin, ConfigWebPluginsDetails } from '../../src/shared/types.js';
+import type {
+  ConfigWebDesktopCheckStatus,
+  ConfigWebPlugin,
+  ConfigWebPluginAction,
+  ConfigWebPluginActionResult,
+  ConfigWebPluginsDetails,
+} from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
 import { desktopCheckStatusLabel, pluginLoadStatusLabel, pluginSourceLabel, pluginStateLabel } from '../labels.js';
 import { useAutoSave } from '../useAutoSave.js';
@@ -38,15 +45,9 @@ const DESKTOP_CHECK_TONE = { granted: 'green', denied: 'red', unknown: 'default'
 export function PluginsPage({
   pluginId = null,
   onSelectPlugin = () => {},
-  onOpenPluginPanel,
 }: {
   pluginId?: string | null;
   onSelectPlugin?(pluginId: string | null): void;
-  /**
-   * 在对话里打开这个插件的面板。只有能访问会话的宿主（桌面端）提供；浏览器宿主不传，
-   * 详情页也就不会出现这个按钮——面板数据活在会话的 app-server 里。
-   */
-  onOpenPluginPanel?(pluginId: string): void;
 } = {}) {
   const [details, setDetails] = useState<ConfigWebPluginsDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -105,7 +106,6 @@ export function PluginsPage({
         onRefresh={() => void load()}
         onToggleEnabled={(enabled) => void toggle(openPlugin, enabled)}
         onSaved={setDetails}
-        onOpenPluginPanel={onOpenPluginPanel}
       />
     );
   }
@@ -302,7 +302,6 @@ function PluginDetail({
   onRefresh,
   onToggleEnabled,
   onSaved,
-  onOpenPluginPanel,
 }: {
   plugin: ConfigWebPlugin;
   busy: boolean;
@@ -315,7 +314,6 @@ function PluginDetail({
   onRefresh(): void;
   onToggleEnabled(enabled: boolean): void;
   onSaved(next: ConfigWebPluginsDetails): void;
-  onOpenPluginPanel?(pluginId: string): void;
 }) {
   const BackIcon = appIcons.chevronLeft;
   const RefreshIcon = appIcons.refresh;
@@ -361,17 +359,6 @@ function PluginDetail({
             <Tag tone={status.tone} dot>
               {status.label}
             </Tag>
-            {/* 面板是插件在对话里的操作界面（接入、检查这类「现在要做一件事」）。
-                只有能访问会话的宿主才给这个回调，浏览器宿主没有会话可开，就不画按钮。 */}
-            {onOpenPluginPanel && plugin.desktopPanel && enabled ? (
-              <Button
-                variant="primary"
-                title={`在对话里打开「${plugin.desktopPanel.label}」面板`}
-                onClick={() => onOpenPluginPanel(plugin.id)}
-              >
-                {plugin.desktopPanel.label || '打开面板'}
-              </Button>
-            ) : null}
             <label className="plugin-toggle" title="停用后它的工具、命令与钩子都不会注册；重开会话生效">
               <Switch
                 checked={enabled}
@@ -405,6 +392,9 @@ function PluginDetail({
               {plugin.settings.fields.length > 0 ? (
                 <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
               ) : null}
+              {plugin.actions.length > 0 && plugin.settings.fields.length === 0 ? (
+                <PluginActionsGroup plugin={plugin} values={plugin.settings.values} onDone={onSaved} />
+              ) : null}
             </div>
             <aside className="plugin-column">
               <PluginInfoGroup plugin={plugin} />
@@ -415,6 +405,9 @@ function PluginDetail({
           <div className="plugin-columns is-solo">
             <div className="plugin-solo">
               <PluginStatusGroup plugin={plugin} />
+              {plugin.actions.length > 0 ? (
+                <PluginActionsGroup plugin={plugin} values={plugin.settings.values} onDone={onSaved} />
+              ) : null}
               <p className="plugin-note">这个插件没有可配置项。</p>
               <PluginInfoGroup plugin={plugin} />
             </div>
@@ -437,6 +430,81 @@ function PluginDetail({
  * 插件没上报过的键显示占位而不是隐藏——那一行本来就在声明里，消失会让人以为
  * 声明写错了。
  */
+/**
+ * 配置页动作（清单 `actions`）：按钮由清单声明，点一下由插件自己执行。
+ *
+ * 结果就写在这块里——注册这类动作的产出是一条链接，让它出现在插件配置里，
+ * 比跳到对话再回来更自然。动作通常会顺手改设置或状态，所以成功后重读一次详情。
+ */
+function PluginActionsGroup({
+  plugin,
+  values,
+  onDone,
+}: {
+  plugin: ConfigWebPlugin;
+  values: Record<string, string>;
+  onDone: (next: ConfigWebPluginsDetails) => void;
+}) {
+  const [running, setRunning] = useState<string | null>(null);
+  const [results, setResults] = useState<Record<string, ConfigWebPluginActionResult>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function run(action: ConfigWebPluginAction) {
+    setRunning(action.key);
+    setErrors((prev) => ({ ...prev, [action.key]: '' }));
+    try {
+      const result = await runPluginAction(plugin.id, action.key, values);
+      setResults((prev) => ({ ...prev, [action.key]: result }));
+      onDone(await readPluginsDetails());
+    } catch (error) {
+      setErrors((prev) => ({
+        ...prev,
+        [action.key]: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      setRunning(null);
+    }
+  }
+
+  return (
+    <SettingsGroup title="操作" description="点一下就地执行，不需要打开会话">
+      {plugin.actions.map((action) => {
+        const result = results[action.key];
+        const error = errors[action.key];
+        return (
+          <div className="plugin-action-row" key={action.key}>
+            <div className="plugin-action-copy">
+              {action.description ? <span className="plugin-action-hint">{action.description}</span> : null}
+              {error ? <span className="plugin-action-error">{error}</span> : null}
+              {result ? (
+                <span className="plugin-action-result">
+                  {result.message}
+                  {result.link ? (
+                    <>
+                      {' '}
+                      <a href={result.link} target="_blank" rel="noreferrer">
+                        {result.link}
+                      </a>
+                    </>
+                  ) : null}
+                </span>
+              ) : null}
+            </div>
+            <Button
+              variant={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : 'default'}
+              loading={running === action.key}
+              disabled={running !== null && running !== action.key}
+              onClick={() => void run(action)}
+            >
+              {action.label}
+            </Button>
+          </div>
+        );
+      })}
+    </SettingsGroup>
+  );
+}
+
 function PluginStatusGroup({ plugin }: { plugin: ConfigWebPlugin }) {
   if (plugin.status.length === 0) return null;
   return (
@@ -706,6 +774,9 @@ function PluginSettingsForm({
         onChange={update}
         disabled={!canSave}
       />
+      {plugin.actions.length > 0 ? (
+        <PluginActionsGroup plugin={plugin} values={values} onDone={onSaved} />
+      ) : null}
     </>
   );
 }

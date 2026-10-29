@@ -10,7 +10,8 @@ import type {
 } from '@packages/mica-plugin/index.js';
 import { buildStatus, readBridgePid } from './BridgeSupervisor.js';
 import { findRendererDir, readDeployState, runSetup } from './DeployRunner.js';
-import { machineIdentity, registerWithRelay } from './Registrar.js';
+import { machineIdentity } from './Registrar.js';
+import { registerMachine } from './registerMachine.js';
 
 /**
  * 对话右侧那块面板：接中转机、看状态、开关桥，全部点按钮完成。
@@ -317,22 +318,11 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
 
       if (action === 'register') {
         const relayUrl = drafts.relayUrl || String(ctx.settings.get().relayUrl ?? '').trim();
-        if (!relayUrl) {
-          throw new Error('先填中转地址：就是手机链接那个域名，例如 https://mica.qirong77.com');
-        }
-        if (!ctx.settings.path) throw new Error('没有配置目录，检查 MICA_HOME 是否可写');
-
-        const result = await registerWithRelay({
-          relayUrl,
-          enrollKey: drafts.enrollKey || undefined,
-          label: drafts.label || undefined
-        });
-        ctx.settings.set({ relayUrl, token: result.token });
-        return {
-          message: result.created
-            ? `已在这台中转机上注册「${result.label}」，桥几秒内起来`
-            : `这台机器早就注册过了（${result.label}），沿用同一个口令`
-        };
+        return registerMachine(
+          ctx,
+          { relayUrl, enrollKey: drafts.enrollKey, label: drafts.label },
+          dataDir
+        );
       }
 
       if (action === 'apply') {

@@ -7,6 +7,7 @@ import type {
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
   ConfigWebPluginLlmTest,
+  ConfigWebPluginActionResult,
   ConfigWebPluginsDetails,
   ConfigWebRolesDetails,
   ConfigWebSessionDetails,
@@ -56,6 +57,11 @@ export function createHttpConfigWebClient(): ConfigWebClient {
       request<ConfigWebPluginsDetails>('/api/details/plugin-settings', { method: 'PUT', body: { id, values } }),
     testPluginLlm: (id, values) =>
       request<ConfigWebPluginLlmTest>('/api/details/plugin-llm-test', { method: 'POST', body: { id, values } }),
+    runPluginAction: (id, action, values) =>
+      request<ConfigWebPluginActionResult>('/api/details/plugin-action', {
+        method: 'POST',
+        body: { id, action, values },
+      }),
 
     readSessionsDetails: () => request<ConfigWebSessionsDetails>('/api/details/sessions'),
     readSessionDetails: (id) => request<ConfigWebSessionDetails>(`/api/details/session?id=${encodeURIComponent(id)}`),

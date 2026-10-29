@@ -26,6 +26,7 @@ import {
   setPluginSettings as setPluginSettingsInStore,
   testPluginLlm as testPluginLlmInStore
 } from '@mica-config-ui/plugins'
+import { runPluginAction as runPluginActionProcess } from '@mica-config-ui/plugin-action'
 import { summarizeSessionFile } from '@mica-config-ui/session-head'
 // 内置 default role 与 CLI 同源：提示词模板就是 packages/mica-agent/prompt/system.md，
 // 展开品牌占位符后原样展示（只读），桌面宿主不自己留一份副本。
@@ -532,6 +533,14 @@ export const configWebActions = {
   // 试连插件声明的模型接口：与插件运行时同一条请求实现，测通了就代表它能工作。
   testPluginLlm: (input) =>
     testPluginLlmInStore(text(input, 'id'), isRecord(input?.values) ? input.values : undefined),
+  // 清单声明的配置页动作（注册这类）：由一次性的 `mica plugin-action` 执行，
+  // 页面不用为此跳到对话里，也不再需要会话宿主在线。
+  runPluginAction: (input) =>
+    runPluginActionProcess({
+      id: text(input, 'id'),
+      action: text(input, 'action'),
+      values: isRecord(input?.values) ? input.values : undefined
+    }),
 
   // 插件声明了运行条件（清单 desktop.checks）时，插件详情页据此显示「开了没有 / 去哪开」。
   // 探测在 Electron 主进程（TCC 权限属于有 app 身份的那个进程），见 system-checks.js。

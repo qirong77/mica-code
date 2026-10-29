@@ -7,6 +7,11 @@ import {
 } from './PluginSettings.js';
 import { pluginLlmSettingFields, type PluginLlmSpec } from './PluginLlm.js';
 import {
+  PLUGIN_ACTION_TONES,
+  type PluginActionDeclaration,
+  type PluginActionTone,
+} from './PluginActions.js';
+import {
   isDesktopCheckId,
   type DesktopCheckId,
   type PluginDesktopEntry,
@@ -100,6 +105,11 @@ export type PluginManifest = {
    */
   status: PluginStatusField[];
   /**
+   * 配置页上的动作按钮（清单 `actions`）。声明了就有一排按钮，点下去由插件实现的
+   * `ctx.actions` 处理器执行——不需要会话，也不跳去别处。
+   */
+  actions: PluginActionDeclaration[];
+  /**
    * 对话右侧的面板（清单 `desktop.panel`）。声明了就有一块面板，内容由插件经
    * `ctx.desktop.panel()` 给数据、宿主渲染——用户插件也能用，不依赖前端模块。
    */
@@ -122,6 +132,7 @@ export type PluginStatusType = (typeof PLUGIN_STATUS_TYPES)[number];
  * 宿主可以向插件提供的能力面。取值来自 `PluginContext` 的可选字段，新增能力时两处同步。
  */
 export const PLUGIN_REQUIREMENTS = [
+  'actions',
   'agent',
   'background',
   'commands',
@@ -230,6 +241,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const status = readStatus(input.status);
   if (!status.ok) return status;
 
+  const actions = readActions(input.actions);
+  if (!actions.ok) return actions;
+
   return {
     ok: true,
     manifest: {
@@ -251,6 +265,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       desktopChecks: desktop.value.checks,
       desktopEntry: desktop.value.entry,
       status: status.value,
+      actions: actions.value,
       desktopPanel: desktop.value.panel,
     },
   };
@@ -436,6 +451,45 @@ function readStatus(input: unknown): { ok: true; value: PluginStatusField[] } | 
     fields.push({ key, label: raw.label.trim(), type });
   }
   return { ok: true, value: fields };
+}
+
+/**
+ * 配置页动作（清单 `actions`）。
+ *
+ * 只声明按钮长什么样：实现由插件在 `setup` 里经 `ctx.actions.register(key, handler)` 提供。
+ * key 必须唯一——页面按 key 找处理器，重复的 key 会让一个按钮永远没反应。
+ */
+function readActions(
+  input: unknown,
+): { ok: true; value: PluginActionDeclaration[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(input)) return { ok: false, error: 'actions 必须是数组' };
+
+  const actions: PluginActionDeclaration[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    if (!isRecord(raw)) return { ok: false, error: 'actions 的每一项必须是对象' };
+    const key = typeof raw.key === 'string' ? raw.key.trim() : '';
+    if (!key) return { ok: false, error: 'actions 缺少 key' };
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(key)) {
+      return { ok: false, error: `actions 的 key 只能用小写字母、数字、点、下划线与短横线：${key}` };
+    }
+    if (seen.has(key)) return { ok: false, error: `actions 的 key 重复：${key}` };
+    seen.add(key);
+    if (typeof raw.label !== 'string' || !raw.label.trim()) {
+      return { ok: false, error: `actions.${key} 缺少 label` };
+    }
+    const tone = raw.tone ?? 'neutral';
+    if (!PLUGIN_ACTION_TONES.includes(tone as PluginActionTone)) {
+      return {
+        ok: false,
+        error: `actions.${key} 的 tone 只能是 ${PLUGIN_ACTION_TONES.join(' / ')}`,
+      };
+    }
+    const description = typeof raw.description === 'string' ? raw.description.trim() : '';
+    actions.push({ key, label: raw.label.trim(), description, tone: tone as PluginActionTone });
+  }
+  return { ok: true, value: actions };
 }
 
 /**

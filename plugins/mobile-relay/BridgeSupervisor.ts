@@ -141,7 +141,7 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
       ctx.health.report({
         level: 'warn',
         message: '这台机器还没接入中转机',
-        hint: '在「手机访问」面板填中转地址，点「注册这台机器」，口令由插件自己拿到。',
+        hint: '在插件设置里填「中转地址」，再点「注册到中转机」——口令由插件自己拿到。',
       });
       return { pid: null, changed: false };
     }

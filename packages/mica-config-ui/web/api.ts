@@ -9,6 +9,7 @@ import type {
   ConfigWebMcpDetails,
   ConfigWebPerformanceDetails,
   ConfigWebPluginLlmTest,
+  ConfigWebPluginActionResult,
   ConfigWebPluginsDetails,
   ConfigWebRolesDetails,
   ConfigWebSessionDetails,
@@ -57,6 +58,17 @@ export type ConfigWebClient = {
   /** 保存插件设置。与启停不同，写的是设置文件，运行期就能被插件读到。 */
   writePluginSettings?(id: string, values: Record<string, string>): Promise<ConfigWebPluginsDetails>;
   testPluginLlm?(id: string, values?: Record<string, string>): Promise<ConfigWebPluginLlmTest>;
+  /**
+   * 执行清单声明的配置页动作（`actions`）。
+   *
+   * 与设置、启停不同，这一步会真的去跑插件代码——注册、探测这类事因此不用跳去对话里，
+   * 也不需要会话宿主在线。两个宿主都支持。
+   */
+  runPluginAction?(
+    id: string,
+    action: string,
+    values?: Record<string, string>,
+  ): Promise<ConfigWebPluginActionResult>;
   /**
    * 插件声明的运行条件（辅助功能、屏幕录制等）此刻是否满足。
    *
@@ -204,6 +216,17 @@ export function writePluginSettings(id: string, values: Record<string, string>):
   const current = requireClient();
   if (typeof current.writePluginSettings !== 'function') throw new Error('当前宿主不支持插件设置');
   return current.writePluginSettings(id, values);
+}
+
+/** 跑一次插件声明的配置页动作；返回插件自己写的一句话和（可能的）一个可点地址。 */
+export function runPluginAction(
+  id: string,
+  action: string,
+  values?: Record<string, string>,
+): Promise<ConfigWebPluginActionResult> {
+  const current = requireClient();
+  if (typeof current.runPluginAction !== 'function') throw new Error('当前宿主不支持插件动作');
+  return current.runPluginAction(id, action, values);
 }
 
 /**

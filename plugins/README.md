@@ -33,6 +33,7 @@ plugins/<id>/
 | `priority`        | 否   | 加载顺序，小的先执行                                                                               |
 | `mica.apiVersion` | 否   | 当前只支持 `1`                                                                                     |
 | `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读、`ctx.settings.set()` 写回          |
+| `actions`         | 否   | 配置页上的按钮声明，见「配置页动作」一节；插件用 `ctx.actions.register()` 提供实现                 |
 | `llm`             | 否   | 需要自己调模型时声明一次，见「模型接口」一节；插件用 `ctx.llm` 读取与请求                          |
 | `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                                         |
 | `desktop`         | 否   | 声明依赖的桌面端运行条件，见「运行条件」一节；用它的插件要同时声明 `requires: ["desktop"]`         |
@@ -75,6 +76,41 @@ plugins/<id>/
 插件自己拿到了值（注册换回的口令、探测到的地址）用 `ctx.settings.set({ token })` 写回去：
 只改传入的键，其余保持原样，写盘前过同一份校验。**不要让用户复制粘贴插件本该自己拿到的东西**——
 那是这类配置最容易出错的一步，也不会有人看得懂「口令至少 16 位」这种提示。
+
+### 配置页动作（`actions`）
+
+有些操作属于插件、却不属于任何一次会话：注册到中转机、试连一次接口、重新生成访问链接。
+在 `plugin.json` 里声明按钮，配置页会把它画在设置下方，点一下就地执行、就地显示结果：
+
+```json
+"actions": [
+  {
+    "key": "register",
+    "label": "注册到中转机",
+    "description": "按本机标识登记，拿回手机访问链接",
+    "tone": "primary"
+  }
+]
+```
+
+```ts
+export default function setup(ctx: PluginContext) {
+  ctx.actions?.register('register', async ({ values }) => {
+    const token = await registerWithRelay(values.relayUrl);
+    ctx.settings.set({ token });
+    return { message: '已注册', link: `${values.relayUrl}/?t=${token}` };
+  });
+}
+```
+
+`label` 是按钮上的字，`description` 是它上面那行说明，`tone` 取 `primary` / `neutral` / `danger`。
+处理器的入参 `values` 是页面当前的设置值（可能还没写盘），返回值是 `{ message?, link? }`。
+没在清单里声明的 key 注册会被拒绝——页面上没有那个按钮，静默接受只会让插件以为用户点得到。
+
+执行它的是 `mica plugin-action --plugin <id> --action <key>`：**一个只装配目标插件的一次性进程**，
+没有 agent、没有 turn、没有会话。所以这类操作不需要先打开一条会话，也不会把人从设置页拽走；
+反过来，处理器里也不能假设 `ctx.tools` / `ctx.background` 存在（要另外声明 `requires` 并自己判断）。
+动作通常会顺手写设置与 `plugin-data/<id>/data.json`，页面刷新后仍能看到结果。
 
 ### 运行状态（`status`）
 
@@ -152,7 +188,7 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 
 ## 健康状态与失败可见
 
-`requires` 要写全插件实际触碰的每一面 `ctx.*`：`background`、`commands`、`desktop`、`events`、`hooks`、`prompt`、
+`requires` 要写全插件实际触碰的每一面 `ctx.*`：`actions`、`background`、`commands`、`desktop`、`events`、`hooks`、`prompt`、
 `session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`、`models`、`llm`。宿主缺哪个，
 插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。

@@ -28,6 +28,8 @@ export type RegistrationResult = {
   label: string;
   /** 中转机上新登记了一台机器；false 表示复用已有的那条。 */
   created: boolean;
+  /** 这台中转机上现在一共登记了几台（中转机回报，缺省就不说）。 */
+  machines?: number;
 };
 
 export type MachineIdentity = {
@@ -180,6 +182,7 @@ export async function registerWithRelay(options: RegisterOptions): Promise<Regis
   return {
     token,
     label: typeof payload.label === 'string' ? payload.label : machine.label,
-    created: payload.created === true
+    created: payload.created === true,
+    machines: typeof payload.machines === 'number' ? payload.machines : undefined
   };
 }

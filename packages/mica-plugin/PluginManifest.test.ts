@@ -280,3 +280,46 @@ describe('parsePluginManifest status rows', () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe('parsePluginManifest settings-page actions', () => {
+  it('keeps declared buttons in order with a neutral default tone', () => {
+    const result = parsePluginManifest(
+      base({
+        actions: [
+          { key: 'register', label: '注册到中转机', description: '拿回手机链接', tone: 'primary' },
+          { key: 'test-connection', label: '测试连接' },
+        ],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.actions).toEqual([
+      { key: 'register', label: '注册到中转机', description: '拿回手机链接', tone: 'primary' },
+      { key: 'test-connection', label: '测试连接', description: '', tone: 'neutral' },
+    ]);
+  });
+
+  it('is empty when the plugin declares nothing', () => {
+    const result = parsePluginManifest(base());
+    if (result.ok) expect(result.manifest.actions).toEqual([]);
+  });
+
+  // 页面按 key 找处理器：重复的 key 会让其中一个按钮永远没反应，加载阶段就报出来
+  it('rejects broken declarations', () => {
+    expect(parsePluginManifest(base({ actions: 'register' })).ok).toBe(false);
+    expect(parsePluginManifest(base({ actions: [{ label: '缺 key' }] })).ok).toBe(false);
+    expect(parsePluginManifest(base({ actions: [{ key: 'Register It', label: 'x' }] })).ok).toBe(false);
+    expect(parsePluginManifest(base({ actions: [{ key: 'a' }] })).ok).toBe(false);
+    expect(parsePluginManifest(base({ actions: [{ key: 'a', label: 'A', tone: 'loud' }] })).ok).toBe(false);
+    expect(
+      parsePluginManifest(
+        base({
+          actions: [
+            { key: 'a', label: 'A' },
+            { key: 'a', label: 'B' },
+          ],
+        }),
+      ).ok,
+    ).toBe(false);
+  });
+});

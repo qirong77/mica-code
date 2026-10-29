@@ -49,6 +49,11 @@ export default defineConfig({
         find: '@mica-config-ui/plugins',
         replacement: resolve('../../packages/mica-config-ui/src/server/plugins.ts')
       },
+      // 配置页的插件动作：宿主没有插件运行时，实际执行交给一次性的 `mica plugin-action`。
+      {
+        find: '@mica-config-ui/plugin-action',
+        replacement: resolve('../../packages/mica-config-ui/src/server/pluginAction.ts')
+      },
       // 会话列表行（标题 / cwd / 模型 / 状态）在两边是同一套解析：都只读文件头一个窗口，
       // 不整份解析几 MB 的快照。
       {

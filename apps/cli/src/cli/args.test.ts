@@ -155,6 +155,29 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['commit', '--nope'])).toMatchObject({ mode: 'error' });
   });
 
+  // 配置页按钮走这个隐藏入口：它必须和 `--plugin` / `--action` 一起出现，缺一个就说清楚
+  it('parses plugin-action invocations', () => {
+    expect(
+      parseCliArgs(['plugin-action', '--plugin=mobile-relay', '--action=register', '--values={"relayUrl":"https://x"}']),
+    ).toEqual({
+      mode: 'plugin-action',
+      pluginId: 'mobile-relay',
+      action: 'register',
+      values: { relayUrl: 'https://x' },
+    });
+    expect(parseCliArgs(['plugin-action', '--plugin', 'mobile-relay', '--action', 'register'])).toEqual({
+      mode: 'plugin-action',
+      pluginId: 'mobile-relay',
+      action: 'register',
+      values: undefined,
+    });
+    expect(parseCliArgs(['plugin-action', '--action=register'])).toMatchObject({ mode: 'error' });
+    expect(parseCliArgs(['plugin-action', '--plugin=mobile-relay'])).toMatchObject({ mode: 'error' });
+    expect(parseCliArgs(['plugin-action', '--plugin=a', '--action=b', '--values=nope'])).toMatchObject({
+      mode: 'error',
+    });
+  });
+
   it('accepts a Multica prompt whose first character is a dash', () => {
     expect(parseCliArgs(['exec', '- fix the checklist'])).toMatchObject({
       mode: 'exec',

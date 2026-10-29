@@ -9,13 +9,21 @@
   "assets": ["README.md", "skill/SKILL.md"],
   "priority": 40,
   "mica": { "apiVersion": 1 },
-  "requires": ["settings", "tools", "background", "skills"],
+  "requires": ["settings", "tools", "background", "skills", "actions"],
   "desktop": {
     "panel": {
       "label": "手机访问",
       "roles": []
     }
   },
+  "actions": [
+    {
+      "key": "register",
+      "label": "注册到中转机",
+      "description": "按本机标识在中转机上登记，拿回手机访问链接；同一台机器再点仍是同一个口令。",
+      "tone": "primary"
+    }
+  ],
   "status": [
     { "key": "phoneUrl", "label": "手机链接", "type": "link" },
     { "key": "bridge", "label": "本机桥", "type": "text" },
@@ -26,27 +34,26 @@
   "settings": [
     {
       "key": "enabled",
-      "label": "启用桥",
+      "label": "启用手机访问",
       "type": "switch",
       "default": "true",
-      "description": "关掉会立刻停掉本机的桥进程，手机再也连不进来；不会留下还在外联的后台服务。"
+      "description": "关掉后本机不再向外轮询，手机上也就打不开会话"
     },
     {
       "key": "relayUrl",
       "label": "中转地址",
       "type": "text",
-      "default": "",
-      "required": true,
-      "placeholder": "https://1-2-3-4.sslip.io",
-      "description": "在插件面板里点「接入这台机器」会自动填好；手填则填中转机的公网地址，带 https://、不带末尾斜杠。"
+      "format": "url",
+      "placeholder": "https://mica.example.com",
+      "description": "中转机的公网地址，带 https://、不带末尾斜杠；填好点下面的「注册到中转机」"
     },
     {
       "key": "token",
       "label": "访问口令",
       "type": "password",
-      "default": "",
-      "required": true,
-      "description": "由插件注册后自动写入，不用手工填；想换一台机器就回「手机访问」面板点「注册这台机器」。"
+      "pattern": "^.{16,}$",
+      "patternMessage": "至少 16 位。这个值由「注册到中转机」生成，手填的值中转机不认",
+      "description": "点「注册到中转机」自动填好，不用手抄；手机链接里的 ?t= 就是它"
     }
   ]
 }

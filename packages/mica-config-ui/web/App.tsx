@@ -24,11 +24,6 @@ export type ConfigWebAppProps = {
   /** 回到应用：由宿主提供时导航栏顶部出现「返回应用」，浏览器宿主不传。 */
   onClose?(): void;
   closeLabel?: string;
-  /**
-   * 在对话里打开某个插件的面板。只有桌面端提供：面板数据活在会话的 app-server 里，
-   * 浏览器宿主（apps/config-web）没有会话可开。
-   */
-  onOpenPluginPanel?(pluginId: string): void;
 };
 
 export function App({
@@ -36,7 +31,6 @@ export function App({
   initialPluginId = null,
   onClose,
   closeLabel,
-  onOpenPluginPanel,
 }: ConfigWebAppProps = {}) {
   const [section, setSection] = useState<ConfigWebAppSection>(() => initialSection ?? readInitialSection());
   // 当前打开的插件详情：宿主（插件菜单）或地址栏（浏览器深链）指定，插件页只负责呈现。
@@ -84,11 +78,7 @@ export function App({
           {section === 'skills' ? <SkillsPage /> : null}
           {section === 'capabilities' ? <CapabilitiesPage /> : null}
           {section === 'plugins' ? (
-            <PluginsPage
-              pluginId={pluginId}
-              onSelectPlugin={selectPlugin}
-              onOpenPluginPanel={onOpenPluginPanel}
-            />
+            <PluginsPage pluginId={pluginId} onSelectPlugin={selectPlugin} />
           ) : null}
         </div>
       </main>

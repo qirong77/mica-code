@@ -4298,6 +4298,58 @@
     text-decoration: underline;
   }
 
+  /*
+   * 配置页动作：说明在左、按钮在右，结果就写在说明下面。
+   * 按钮与说明同一行对齐，结果换行铺满整行——一条链接经常比半页还长。
+   */
+  .plugin-action-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px;
+    padding: 12px 16px;
+  }
+
+  .plugin-action-row + .plugin-action-row {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .plugin-action-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .plugin-action-hint {
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+  }
+
+  .plugin-action-result {
+    color: var(--text);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .plugin-action-result a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .plugin-action-result a:hover {
+    text-decoration: underline;
+  }
+
+  .plugin-action-error {
+    color: var(--red);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
   .plugin-meta-empty {
     color: var(--text-faint);
   }

@@ -1,4 +1,5 @@
 import { readConfigWebFile, writeConfigWebFile } from './configFiles.js';
+import { runPluginAction as runPluginActionProcess } from './pluginAction.js';
 import {
   createMcpServer,
   createRole,
@@ -76,6 +77,12 @@ export const configWebActions = {
     testPluginLlmInStore(text(input, 'id'), isRecord(input?.values) ? (input.values as Record<string, unknown>) : undefined),
   writePluginSettings: (input: ConfigWebActionInput) =>
     setPluginSettingsInStore(text(input, 'id'), record(input, 'values')),
+  runPluginAction: (input: ConfigWebActionInput) =>
+    runPluginActionProcess({
+      id: text(input, 'id'),
+      action: text(input, 'action'),
+      values: optionalStringRecord(input.values),
+    }),
 
   readSessionsDetails: (_input: ConfigWebActionInput) => getSessionsDetails(),
   readSessionDetails: (input: ConfigWebActionInput) => getSessionDetails(text(input, 'id')),
@@ -130,6 +137,17 @@ function record(input: ConfigWebActionInput, field: string): Record<string, unkn
   if (value === undefined || value === null) return {};
   if (typeof value !== 'object' || Array.isArray(value)) throw new Error(`${field} must be object`);
   return value as Record<string, unknown>;
+}
+
+/** 插件动作的入参按「设置键 → 文本值」收窄：这些值会原样交给插件，形状必须确定。 */
+function optionalStringRecord(value: unknown): Record<string, string> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('values must be object');
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === 'string') result[key] = entry;
+  }
+  return result;
 }
 
 function integer(input: ConfigWebActionInput, field: string, fallback: number): number {

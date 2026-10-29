@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { machineIdentity, registerWithRelay } from './Registrar.js';
 import { createPanelHandler } from './Panel.js';
+import { registerMachine } from './registerMachine.js';
+import { PluginActionRegistry } from '@packages/mica-plugin/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 
 /**
@@ -256,11 +258,44 @@ describe('panel register action', () => {
     expect(store.relayUrl).toBe(relay.url);
     const token = store.token;
     expect(token).toHaveLength(48);
+    // 运行状态由 data.json 驱动，注册完不必等桥起来
+    const data = JSON.parse(readFileSync(join(dataDir, 'data.json'), 'utf8')) as { phoneUrl?: string };
+    expect(data.phoneUrl).toBe(`${relay.url}/?t=${token}`);
 
     const second = await handler.action({ action: 'register', values: { relayUrl: relay.url } });
     expect(second).toMatchObject({ message: expect.stringMatching(/早就注册过|沿用/) });
     expect(store.token).toBe(token);
     expect(agentCount(relay)).toBe(2);
+  });
+});
+
+describe('config page action', () => {
+  let relay: Relay;
+  let dataDir: string;
+
+  beforeAll(async () => {
+    relay = await startRelay();
+    dataDir = mkdtempSync(join(tmpdir(), 'mica-relay-config-action-'));
+  });
+
+  afterAll(async () => {
+    await relay.stop();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  // 配置页的按钮走 `ctx.actions`：一次性的插件进程里没有会话，也不能有。
+  it('注册后返回手机链接，并把口令写进设置', async () => {
+    const store: Record<string, string> = { enabled: 'true', relayUrl: '', token: '' };
+    const actions = new PluginActionRegistry(() => ['register']);
+    actions.add('mobile-relay', 'register', async ({ values }) =>
+      registerMachine(panelContext(store), values, dataDir),
+    );
+
+    const result = await actions.run('mobile-relay', 'register', { values: { relayUrl: relay.url } });
+
+    expect(result).toMatchObject({ message: expect.stringMatching(/注册/) });
+    expect(store.relayUrl).toBe(relay.url);
+    expect(result?.link).toBe(`${relay.url}/?t=${store.token}`);
   });
 });
 

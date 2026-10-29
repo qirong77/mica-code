@@ -31,6 +31,8 @@ export function createDesktopConfigWebClient() {
     setPluginEnabled: (id, enabled) => invoke('setPluginEnabled', { id, enabled }),
     writePluginSettings: (id, values) => invoke('writePluginSettings', { id, values }),
     testPluginLlm: (id, values) => invoke('testPluginLlm', { id, values }),
+    // 配置页上的插件动作（注册这类）：真正跑插件代码的是一次性 CLI 进程，这里只转发。
+    runPluginAction: (id, action, values) => invoke('runPluginAction', { id, action, values }),
     // 插件详情页的运行条件（辅助功能 / 屏幕录制等）：探测在 Electron 主进程
     readDesktopChecks: () => invoke('readDesktopChecks'),
     openDesktopSettings: (pane) => invoke('openDesktopSettings', { pane }),
