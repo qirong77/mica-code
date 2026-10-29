@@ -2422,6 +2422,8 @@ export function ChatView({
   loops = [],
   findRequest = null,
   onFindRequestHandled,
+  panelRequest = null,
+  onPanelRequestHandled,
   onSessionBound,
   onOpenFile,
   onOpenDocument,
@@ -5293,6 +5295,15 @@ export function ChatView({
   // 插件面板：打开的是哪个插件、以及要展开它的哪一块（快捷按钮「频道设置」这类入口）。
   const [pluginPanelOpen, setPluginPanelOpen] = useState('')
   const [pluginPanelSection, setPluginPanelSection] = useState('')
+  // 设置页的插件详情里点「打开面板」：面板挂在这一层，所以由这里开。
+  // 不可见时不消费——开了也看不到，请求留在 App 里等切回这条会话。
+  useEffect(() => {
+    if (!panelRequest || !visible) return
+    setPluginPanelOpen(panelRequest.pluginId)
+    setPluginPanelSection('')
+    onPanelRequestHandled?.()
+  }, [onPanelRequestHandled, panelRequest, visible])
+
   const closePluginPanel = useCallback(() => {
     setPluginPanelOpen('')
     setPluginPanelSection('')
@@ -5897,6 +5908,11 @@ export function ChatView({
               cwd={cwd}
               running={running || remoteRunning}
               section={settingsSection}
+              onOpenPluginPanel={(id) => {
+                setPluginPanelOpen(id)
+                setPluginPanelSection('')
+                setSettingsSection(null)
+              }}
               loopProps={{
                 loop: activeLoop,
                 running: loopRunning,

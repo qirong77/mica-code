@@ -226,9 +226,12 @@ export type MicaPluginSessionSettings = {
     step?: number;
     unit?: string;
     pattern?: string;
+    patternMessage?: string;
   }[];
   values: Record<string, string>;
   overrides: Record<string, string>;
+  /** 这个插件在会话里有可打开的面板时给出标题；界面据此画「打开面板」。 */
+  panel?: { label: string } | null;
 };
 
 /** `MICA_CAPABILITY_NOTIFICATIONS.updated` payload. */

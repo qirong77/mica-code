@@ -219,6 +219,8 @@ export type ConfigWebPluginSetting = {
   /** 数字项的单位（`k tokens` / `分钟` / `次`）。 */
   unit?: string;
   pattern?: string;
+  /** `pattern` 不匹配时给人看的一句话；缺省显示正则本身。 */
+  patternMessage?: string;
 };
 
 export type ConfigWebPluginSettings = {

@@ -77,7 +77,7 @@ export function usePluginSessionSettings({ nodeId, sessionId, cwd, enabled }) {
   return { plugins, error, savingKey, save }
 }
 
-export function PluginSettingsPanel({ plugin, running, savingKey, error, onSave }) {
+export function PluginSettingsPanel({ plugin, running, savingKey, error, onSave, onOpenPanel }) {
   if (!plugin) {
     return <p className="capability-note">{error || '正在加载…'}</p>
   }
@@ -85,6 +85,19 @@ export function PluginSettingsPanel({ plugin, running, savingKey, error, onSave 
   return (
     <div className="session-plugin-settings">
       <SettingsGroup title={plugin.name} description={plugin.description || ''}>
+        {/* 面板入口放在插件自己的设置里：输入框上方不再占一排按钮，插件没有会话级
+            字段时也有地方可点（有面板的插件即使 fields 为空也会出现在这一节）。 */}
+        {plugin.panel ? (
+          <SettingRow label={plugin.panel.label} hint="在对话右侧打开面板，可随时收起">
+            <button
+              type="button"
+              className="session-plugin-open-panel"
+              onClick={() => onOpenPanel?.(plugin.id)}
+            >
+              打开
+            </button>
+          </SettingRow>
+        ) : null}
         {plugin.fields.map((field) => renderField({ plugin, field, running, savingKey, onSave }))}
       </SettingsGroup>
       {error ? <p className="session-settings-error">{error}</p> : null}

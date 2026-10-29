@@ -34,17 +34,31 @@ afterEach(() => {
   rmSync(configDir, { recursive: true, force: true });
 });
 
-function createHost(initial: Record<string, Record<string, string>> = {}) {
+type StubPlugin = {
+  id: string;
+  name: string;
+  manifest: { settings?: PluginSettingField[]; desktopPanel?: { label: string; roles: string[] } | null };
+};
+
+const basePlugins: StubPlugin[] = [
+  { id: 'auto-compact', name: 'Auto Compact', manifest: { settings: AUTO_COMPACT_FIELDS } },
+  { id: 'web-search', name: 'Web Search', manifest: { settings: WEB_SEARCH_FIELDS } },
+];
+
+function createHost(
+  initial: Record<string, Record<string, string>> = {},
+  options: { role?: string; plugins?: StubPlugin[]; panelIds?: string[] } = {}
+) {
   const store: Record<string, Record<string, string>> = { ...initial };
-  const plugins = [
-    { id: 'auto-compact', name: 'Auto Compact', manifest: { settings: AUTO_COMPACT_FIELDS } },
-    { id: 'web-search', name: 'Web Search', manifest: { settings: WEB_SEARCH_FIELDS } },
-  ];
+  const plugins = options.plugins ?? basePlugins;
+  const panelIds = new Set(options.panelIds ?? []);
   return {
     store,
     configDir,
     plugins: { list: () => plugins },
+    panels: { get: (pluginId: string) => (panelIds.has(pluginId) ? {} : null) },
     agent: {
+      role: options.role ?? 'default',
       getPluginSessionSettings: (pluginId: string) => store[pluginId],
       setPluginSessionSettings: (pluginId: string, value: Record<string, string> | undefined) => {
         if (value) store[pluginId] = value;
@@ -74,6 +88,47 @@ describe('listPluginSessionSettings', () => {
 
   it('插件表缺失时返回空列表，不抛错', () => {
     expect(listPluginSessionSettings({ agent: {} as never })).toEqual([]);
+  });
+
+  it('没有会话字段但有面板的插件也会出现，带上开关面板的文案', () => {
+    const list = listPluginSessionSettings(
+      createHost(
+        {},
+        {
+          plugins: [
+            ...basePlugins,
+            { id: 'mobile-relay', name: 'Mobile Relay', manifest: { desktopPanel: { label: '手机访问', roles: [] } } },
+          ],
+          panelIds: ['mobile-relay'],
+        }
+      )
+    );
+    expect(list.map((entry) => entry.id)).toEqual(['auto-compact', 'mobile-relay']);
+    expect(list[1].fields).toEqual([]);
+    expect(list[1].panel).toEqual({ label: '手机访问' });
+    // 没有会话字段就没有覆盖，界面不该显示「仅本会话」
+    expect(list[1].overrides).toEqual({});
+  });
+
+  it('清单声明了面板但插件没注册处理器时不出现：那个按钮点不开', () => {
+    const list = listPluginSessionSettings(
+      createHost(
+        {},
+        {
+          plugins: [{ id: 'mobile-relay', name: 'Mobile Relay', manifest: { desktopPanel: { label: '手机访问', roles: [] } } }],
+          panelIds: [],
+        }
+      )
+    );
+    expect(list).toEqual([]);
+  });
+
+  it('面板的角色门槛按当前会话角色判定', () => {
+    const plugins = [
+      { id: 'ops', name: 'Ops', manifest: { desktopPanel: { label: '运维', roles: ['需求开发'] } } },
+    ];
+    expect(listPluginSessionSettings(createHost({}, { plugins, panelIds: ['ops'], role: '需求开发' }))).toHaveLength(1);
+    expect(listPluginSessionSettings(createHost({}, { plugins, panelIds: ['ops'], role: 'default' }))).toEqual([]);
   });
 });
 

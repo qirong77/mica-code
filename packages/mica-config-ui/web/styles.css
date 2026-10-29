@@ -4197,6 +4197,25 @@
     cursor: default;
   }
 
+  /* 打开插件面板：与「跟随默认」同一个形状，但它是这一行的主动作，所以提亮一档。 */
+  .session-plugin-open-panel {
+    flex: none;
+    height: var(--control-h);
+    padding: 0 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--panel-hover);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .session-plugin-open-panel:hover:not(:disabled) {
+    background: var(--panel-muted);
+  }
+
   /*
    * 插件详情右侧的信息表：标签窄、值单行省略。
    *

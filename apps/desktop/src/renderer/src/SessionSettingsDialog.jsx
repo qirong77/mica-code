@@ -66,6 +66,8 @@ export function SessionSettingsDialog({
   running,
   section: initialSection = 'capabilities',
   loopProps = null,
+  /** 打开插件面板：设置弹窗先关掉，再交给对话区去收起/展开右侧抽屉。 */
+  onOpenPluginPanel,
   onClose
 }) {
   const [section, setSection] = useState(initialSection)
@@ -324,6 +326,7 @@ export function SessionSettingsDialog({
               savingKey={pluginSettings.savingKey}
               error={pluginSettings.error}
               onSave={pluginSettings.save}
+              onOpenPanel={onOpenPluginPanel}
             />
           ) : null}
 

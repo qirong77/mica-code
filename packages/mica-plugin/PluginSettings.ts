@@ -58,6 +58,12 @@ export type PluginSettingField = {
   /** 额外的正则约束，作用于字符串值。 */
   pattern?: string;
   /**
+   * `pattern` 不匹配时给人看的一句话。
+   *
+   * 没有它就只能显示正则本身（`需要匹配 ^.{16,}$`），用户看不出到底要求什么。
+   */
+  patternMessage?: string;
+  /**
    * 允许按会话覆盖。
    *
    * 声明之后这一项有两层：默认值仍是 `$MICA_HOME/plugin-settings/<id>.json`（配置页
@@ -187,7 +193,13 @@ export function validatePluginSettingValues(
         // 清单里的正则写坏了是插件作者的问题，不能变成「用户配置非法」。
         matched = true;
       }
-      if (!matched) issues.push({ key: field.key, label: field.label, message: `需要匹配 ${field.pattern}` });
+      if (!matched) {
+        issues.push({
+          key: field.key,
+          label: field.label,
+          message: field.patternMessage || `需要匹配 ${field.pattern}`,
+        });
+      }
     }
   }
   return issues;

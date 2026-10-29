@@ -737,6 +737,10 @@ export default function App() {
   // 和已经消费过的号撞上，查找条再也不开）。这里用一条只增不减的序号。
   const findRequestSeqRef = useRef(0)
   const handleFindRequestHandled = useCallback(() => setFindRequest(null), [])
+  // 配置页的插件详情里点「打开面板」：面板活在对话里，所以这里先关掉整页设置，再把
+  // 请求交给当前会话的 ChatView 去开——与上面的查找请求同一条一次性通道。
+  const [panelRequest, setPanelRequest] = useState(null)
+  const handlePanelRequestHandled = useCallback(() => setPanelRequest(null), [])
   // 主区视图：chat | files | stats。对话里的路径链接与顶栏的文件夹按钮都落到这一层
   // （后者另开一个独立窗口，见 openFilesWindow）；终端是主区底部可收起的下拉面板。
   // 设置与插件不在这套视图里：它们是盖住整个窗口的一层（见下面的 configPage）。
@@ -2704,6 +2708,8 @@ export default function App() {
                 loops={loops}
                 findRequest={findRequest?.nodeId === node.id ? findRequest : null}
                 onFindRequestHandled={handleFindRequestHandled}
+                panelRequest={panelRequest?.nodeId === node.id ? panelRequest : null}
+                onPanelRequestHandled={handlePanelRequestHandled}
                 onSessionBound={setSessionId}
                 onOpenFile={openChatFile}
                 onOpenDocument={openDocumentInView}
@@ -2945,6 +2951,15 @@ export default function App() {
               <SettingsView
                 section={configPage.section}
                 pluginId={configPage.pluginId}
+                onOpenPluginPanel={(pluginId) => {
+                  // 面板挂在会话里：没有打开的会话就没有地方开，说清楚而不是静默无反应。
+                  if (!activeId) {
+                    showToast('先打开一条会话，再打开插件面板', true)
+                    return
+                  }
+                  closeConfigPage()
+                  setPanelRequest({ nodeId: activeId, pluginId })
+                }}
                 onClose={closeConfigPage}
               />
             </Suspense>

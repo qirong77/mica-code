@@ -60,6 +60,13 @@ export type PluginSessionSettingsView = {
   values: PluginSettingValues;
   /** 本会话真正覆盖过的键；界面据此提示「跟随全局」还是「仅本会话」。 */
   overrides: PluginSettingValues;
+  /**
+   * 这个插件在会话里有没有可打开的面板（清单 `desktop.panel` + `ctx.desktop.panel()`）。
+   *
+   * 面板的入口就在这一节：插件既可以只有面板没有会话设置，也可以两者都有。
+   * 没有面板时是 null，界面据此不画「打开面板」。
+   */
+  panel: { label: string } | null;
 };
 
 /** 会话里能覆盖的字段：清单声明了 `perSession` 的那些。 */

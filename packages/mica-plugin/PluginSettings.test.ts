@@ -6,6 +6,7 @@ import {
   createPluginSettingsStore,
   readPluginSettings,
   resolvePluginSettingsPath,
+  validatePluginSettingValues,
   writePluginSettings,
   type PluginSettingField,
 } from './PluginSettings.js';
@@ -27,6 +28,27 @@ const fields: PluginSettingField[] = [
   { key: 'apiKey', label: 'Key', type: 'password' },
   { key: 'minIntervalSeconds', label: '间隔', type: 'number', default: '0' },
 ];
+
+describe('validatePluginSettingValues', () => {
+  it('pattern 不匹配时说 patternMessage，而不是把正则甩给用户', () => {
+    const tokenField: PluginSettingField = {
+      key: 'token',
+      label: '访问口令',
+      type: 'password',
+      pattern: '^.{16,}$',
+      patternMessage: '口令至少 16 位',
+    };
+    expect(validatePluginSettingValues([tokenField], { token: 'dd' })).toEqual([
+      { key: 'token', label: '访问口令', message: '口令至少 16 位' },
+    ]);
+    expect(validatePluginSettingValues([tokenField], { token: 'a'.repeat(16) })).toEqual([]);
+  });
+
+  it('没写 patternMessage 时退回显示正则', () => {
+    const field: PluginSettingField = { key: 'code', label: '编号', type: 'text', pattern: '^[0-9]+$' };
+    expect(validatePluginSettingValues([field], { code: 'abc' })[0].message).toBe('需要匹配 ^[0-9]+$');
+  });
+});
 
 describe('readPluginSettings', () => {
   it('falls back to defaults when nothing was saved', () => {

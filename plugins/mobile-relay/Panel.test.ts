@@ -84,11 +84,18 @@ describe('mobile-relay panel', () => {
 
   it('shows the phone link once there is a relay and a token', () => {
     const view = buildPanelView(
-      fakeContext({ relayUrl: 'https://mica.example.com', token: 'abc' }),
+      fakeContext({ relayUrl: 'https://mica.example.com', token: '0123456789abcdef' }),
       dir
     );
     const row = view.sections?.[0]?.rows?.find((item) => item.label === '手机链接');
-    expect(row?.value).toBe('https://mica.example.com/?t=abc');
+    expect(row?.value).toBe('https://mica.example.com/?t=0123456789abcdef');
+  });
+
+  // 没登记过的短口令在中转机上一律 401：那种链接打不开，不该出现在面板里
+  it('hides the phone link for a token that was never registered', () => {
+    const view = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com', token: 'dd' }), dir);
+    const row = view.sections?.[0]?.rows?.find((item) => item.label === '手机链接');
+    expect(row).toBeUndefined();
   });
 
   it('turns a save action into an error instead of a silent no-op', async () => {

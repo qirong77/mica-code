@@ -117,14 +117,24 @@ describe('mobile-relay bridge supervisor', () => {
 describe('buildStatus', () => {
   // 卡片只读这一份；链接、开关状态与三个在线标记都必须在这里定死
   it('builds a phone link that already carries the token', () => {
-    const status = buildStatus({ relayUrl: 'https://1-2-3-4.sslip.io/', token: 'abc123' }, null, null, 1_000);
+    const status = buildStatus(
+      { relayUrl: 'https://1-2-3-4.sslip.io/', token: '0123456789abcdef0123' },
+      null,
+      null,
+      1_000
+    );
     expect(status.relayUrl).toBe('https://1-2-3-4.sslip.io');
-    expect(status.phoneUrl).toBe('https://1-2-3-4.sslip.io/?t=abc123');
+    expect(status.phoneUrl).toBe('https://1-2-3-4.sslip.io/?t=0123456789abcdef0123');
   });
 
   it('leaves the link empty when the address or the token is missing', () => {
     expect(buildStatus({ relayUrl: 'https://x.test', token: '' }, null, null, 1).phoneUrl).toBe('');
     expect(buildStatus({ token: 'abc' }, null, null, 1).phoneUrl).toBe('');
+  });
+
+  // 短口令（自己编的、没在中转机上登记过）一定 401：给出一条打不开的链接只会误导
+  it('leaves the link empty when the token is too short to be registered', () => {
+    expect(buildStatus({ relayUrl: 'https://x.test', token: 'dd' }, null, null, 1).phoneUrl).toBe('');
   });
 
   it('marks the relay unreachable without inventing liveness', () => {

@@ -38,9 +38,15 @@ const DESKTOP_CHECK_TONE = { granted: 'green', denied: 'red', unknown: 'default'
 export function PluginsPage({
   pluginId = null,
   onSelectPlugin = () => {},
+  onOpenPluginPanel,
 }: {
   pluginId?: string | null;
   onSelectPlugin?(pluginId: string | null): void;
+  /**
+   * 在对话里打开这个插件的面板。只有能访问会话的宿主（桌面端）提供；浏览器宿主不传，
+   * 详情页也就不会出现这个按钮——面板数据活在会话的 app-server 里。
+   */
+  onOpenPluginPanel?(pluginId: string): void;
 } = {}) {
   const [details, setDetails] = useState<ConfigWebPluginsDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,6 +105,7 @@ export function PluginsPage({
         onRefresh={() => void load()}
         onToggleEnabled={(enabled) => void toggle(openPlugin, enabled)}
         onSaved={setDetails}
+        onOpenPluginPanel={onOpenPluginPanel}
       />
     );
   }
@@ -295,6 +302,7 @@ function PluginDetail({
   onRefresh,
   onToggleEnabled,
   onSaved,
+  onOpenPluginPanel,
 }: {
   plugin: ConfigWebPlugin;
   busy: boolean;
@@ -307,6 +315,7 @@ function PluginDetail({
   onRefresh(): void;
   onToggleEnabled(enabled: boolean): void;
   onSaved(next: ConfigWebPluginsDetails): void;
+  onOpenPluginPanel?(pluginId: string): void;
 }) {
   const BackIcon = appIcons.chevronLeft;
   const RefreshIcon = appIcons.refresh;
@@ -352,6 +361,17 @@ function PluginDetail({
             <Tag tone={status.tone} dot>
               {status.label}
             </Tag>
+            {/* 面板是插件在对话里的操作界面（接入、检查这类「现在要做一件事」）。
+                只有能访问会话的宿主才给这个回调，浏览器宿主没有会话可开，就不画按钮。 */}
+            {onOpenPluginPanel && plugin.desktopPanel && enabled ? (
+              <Button
+                variant="primary"
+                title={`在对话里打开「${plugin.desktopPanel.label}」面板`}
+                onClick={() => onOpenPluginPanel(plugin.id)}
+              >
+                {plugin.desktopPanel.label || '打开面板'}
+              </Button>
+            ) : null}
             <label className="plugin-toggle" title="停用后它的工具、命令与钩子都不会注册；重开会话生效">
               <Switch
                 checked={enabled}

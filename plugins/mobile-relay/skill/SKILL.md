@@ -93,7 +93,7 @@ sleep 20 && curl -s https://<域名>/api/health
 
 ## 日常
 
-- **看状态 / 拿链接**：输入框上方的「手机访问」按钮打开面板；或 `mobile_relay action=link`。
+- **看状态 / 拿链接**：设置 → 插件 → Mobile Relay 的「手机访问」按钮打开面板（会话设置 → 插件里也有「打开面板」）；或 `mobile_relay action=link`。
 - **临时关掉**：配置页 → 插件 → Mobile Relay 的「启用桥」，或停用插件。
   桥进程由 `ctx.background` 监管，关掉就真的杀了，不会留着后台还在外联。
 - **换中转机**：重跑一次 `setup.mjs`，旧口令作废。

@@ -490,6 +490,7 @@ function readSettings(input: unknown): { ok: true; value: PluginSettingField[] }
       step: readFiniteNumber(entry.step),
       unit: readString(entry.unit)?.trim() || undefined,
       pattern: readString(entry.pattern)?.trim() || undefined,
+      patternMessage: readString(entry.patternMessage)?.trim() || undefined,
       perSession: entry.perSession === true ? true : undefined,
     });
   }

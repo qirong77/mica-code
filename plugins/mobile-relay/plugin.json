@@ -13,11 +13,7 @@
   "desktop": {
     "panel": {
       "label": "手机访问",
-      "roles": [],
-      "shortcuts": [
-        { "label": "手机访问", "section": "接中转机" },
-        { "label": "检查连接", "action": "test" }
-      ]
+      "roles": []
     }
   },
   "status": [
@@ -42,7 +38,7 @@
       "default": "",
       "required": true,
       "placeholder": "https://1-2-3-4.sslip.io",
-      "description": "跑 setup.mjs 时会自动填好；手填则填中转机的公网地址，带 https://、不带末尾斜杠。"
+      "description": "在插件面板里点「接入这台机器」会自动填好；手填则填中转机的公网地址，带 https://、不带末尾斜杠。"
     },
     {
       "key": "token",
@@ -50,7 +46,9 @@
       "type": "password",
       "default": "",
       "required": true,
-      "description": "中转机与本机共用的口令：既是手机打开页面时的凭据，也用来派生轮询体的加密密钥。两端必须一致。"
+      "pattern": "^.{16,}$",
+      "patternMessage": "口令至少 16 位，而且要是在中转机上登记过的那个",
+      "description": "由「接入这台机器」在中转机上登记后自动填好，不是自己编的：中转机只认登记过的口令，手填一个没登记的值永远连不上。口令至少 16 位。"
     }
   ]
 }

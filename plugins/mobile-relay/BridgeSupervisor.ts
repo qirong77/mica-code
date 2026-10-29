@@ -211,8 +211,10 @@ export function buildStatus(
   const phoneOnline = relay?.phoneOnline === true;
   return {
     relayUrl,
-    // 链接里带口令：手机扫一眼就能开，不用再去翻设置
-    phoneUrl: relayUrl && token ? `${relayUrl}/?t=${encodeURIComponent(token)}` : '',
+    // 链接里带口令：手机扫一眼就能开，不用再去翻设置。
+    // 没登记过口令（短于 16 位的中转机一律 401）时不给链接：那条 URL 打不开，
+    // 显示出来只会让人以为「已经配好了、只是连不上」。
+    phoneUrl: relayUrl && token.length >= 16 ? `${relayUrl}/?t=${encodeURIComponent(token)}` : '',
     bridgePid: pid,
     enabled,
     relayOnline,

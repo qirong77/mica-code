@@ -16,13 +16,15 @@ import {
   type PluginSessionSettingsView,
 } from '@packages/mica-plugin/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
-import type { PluginManager } from '@packages/mica-plugin/index.js';
+import type { PluginManager, PluginPanelRegistry } from '@packages/mica-plugin/index.js';
 
 type HostLike = {
   agent: AgentRuntime;
   plugins?: PluginManager;
   /** 插件设置的落盘目录（`$MICA_HOME`）。缺了就只能读到字段默认值。 */
   configDir?: string;
+  /** 面板处理器。声明了面板的插件要出现在这一节里，用户从那里打开它。 */
+  panels?: PluginPanelRegistry;
 };
 
 /**
@@ -36,9 +38,11 @@ function globalSettings(plugin: { id: string; manifest?: { settings?: PluginSett
 /** 当前会话里所有可配置插件，按插件表顺序（官方在前）列出。 */
 export function listPluginSessionSettings(host: HostLike): PluginSessionSettingsView[] {
   if (!host.plugins) return [];
+  const role = host.agent.role;
   return host.plugins.list().flatMap((plugin) => {
     const fields = sessionScopedSettingFields(plugin.manifest?.settings ?? []);
-    if (fields.length === 0) return [];
+    const panel = panelEntry(host, plugin, role);
+    if (fields.length === 0 && !panel) return [];
     const global = globalSettings(plugin, host.configDir);
     const overrides = host.agent.getPluginSessionSettings(plugin.id) ?? {};
     return [
@@ -49,9 +53,25 @@ export function listPluginSessionSettings(host: HostLike): PluginSessionSettings
         fields,
         values: resolveEffectiveSettingValues(fields, global, overrides),
         overrides,
+        panel,
       },
     ];
   });
+}
+
+/**
+ * 插件在这一节里的面板入口。三条都是硬条件：真的注册了处理器（声明了清单却没调用
+ * `ctx.desktop.panel()` 的插件打不开）、清单写了面板、当前会话角色命中。
+ */
+function panelEntry(
+  host: HostLike,
+  plugin: { id: string; name?: string; manifest?: { desktopPanel?: { label: string; roles: string[] } | null } },
+  role: string
+): { label: string } | null {
+  const declared = plugin.manifest?.desktopPanel ?? null;
+  if (!declared || !host.panels?.get(plugin.id)) return null;
+  if (declared.roles.length > 0 && !declared.roles.includes(role)) return null;
+  return { label: declared.label || plugin.name || plugin.id };
 }
 
 export type ApplyPluginSessionSettingsResult =
