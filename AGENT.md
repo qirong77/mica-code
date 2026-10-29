@@ -220,6 +220,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 插件前端模块的能力只有五件，来自 `renderer/src/plugin-host.js` 的 `createPluginHostApi`：`currentHost()`（页面所在运行时的 origin）、`probe(address)`、`readData()` / `writeData(value)`、`open(url)`、`access`（读改写这台机器的远程访问策略）。探活、数据读写与访问策略必须由运行时代劳（页面读不到跨源响应、碰不到请求分派、也没有文件系统），落在 `host/plugin-host.js` 的 `plugin-host:probe` / `plugin-host:read-data|write-data` / `plugin-host:access-get|set`；数据文件统一在 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构。`open` 是纯页面行为，分支在 `shell-env.js` 的 `isElectronShell`。
 - 设置项在清单 `settings` 里声明，类型 `text` / `password` / `textarea` / `select` / `number` / `switch`；数字项可带 `step` 与 `unit`，开关值只能是 `"true"` / `"false"`。值存 `$MICA_HOME/plugin-settings/<id>.json`，读取按 mtime 判断是否变化。
 - 校验只有 `validatePluginSettingValues()` 一处：写盘前拒绝，插件读值时同样过一遍；非法值既不落盘也不静默通过。
+- 插件自己拿到值（注册换回的口令、探测到的地址）就用 `ctx.settings.set()` 写回去，只改传入的键、其余保持原样，写盘前过同一份校验——不要要求用户复制粘贴，那正是最容易出错的一步。
 - 需要按会话调整的项标 `perSession`：默认值仍是 `settings`（配置页写），会话里只存**改过**的键（`pluginSessionSettings[pluginId]`），没改过的继续跟随默认值。插件读 `ctx.sessionSettings.get()`（合并后的生效值），界面由 `mica/pluginSettings/get|set` 驱动，桌面端从会话设置→插件进入。只存改过的键是硬约束：整份存会把当时的默认值固化进老会话。
 - 用户可见故障（缺配置、外部服务拒绝、请求失败）必须 `ctx.health.report({ level, message, hint })`，不能只写日志。
 - `ctx.logger` 按 pluginId 注入，同时写 `os.tmpdir()/mica-logs/plugin-<id>-<day>[-n].jsonl`（2 MB 分片、3 天清理、`MICA_PLUGIN_LOG=0` 关闭）。排查插件问题先看它。

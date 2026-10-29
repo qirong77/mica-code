@@ -207,6 +207,12 @@ export type PluginContext = {
      * 插件应当用它决定「要不要跳过本轮工作」，并把原因上报到 `ctx.health`。
      */
     validate(): PluginSettingIssue[];
+    /**
+     * 改其中几项，其余保持原样（写盘前过同一份校验）。
+     *
+     * 插件自己拿到了值就该自己写回去——让用户复制粘贴一个口令，是最容易出错的一步。
+     */
+    set(values: Record<string, unknown>): PluginSettingValues;
   };
   /**
    * 插件自报状态（正常 / 需要配置 / 出错）。

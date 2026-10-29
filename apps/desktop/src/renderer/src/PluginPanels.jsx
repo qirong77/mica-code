@@ -144,6 +144,14 @@ function PluginPanelDock({ pluginId, label, nodeId, sessionId, cwd, focusSection
   const [collapsed, setCollapsed] = useState({})
   const aliveRef = useRef(true)
 
+  // 分区动作也能回一句话（注册成功/失败原因）：显示在面板顶部，几秒后自己消失。
+  const [feedback, setFeedback] = useState('')
+  useEffect(() => {
+    if (!feedback) return undefined
+    const timer = setTimeout(() => setFeedback(''), 8000)
+    return () => clearTimeout(timer)
+  }, [feedback])
+
   useEffect(() => {
     aliveRef.current = true
     return () => {
@@ -197,6 +205,7 @@ function PluginPanelDock({ pluginId, label, nodeId, sessionId, cwd, focusSection
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
       setBusy('')
       applyView(result, { resetDrafts: true })
+      setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
     },
     [applyView, cwd, drafts, nodeId, pluginId, sessionId]
   )
@@ -259,6 +268,11 @@ function PluginPanelDock({ pluginId, label, nodeId, sessionId, cwd, focusSection
         </button>
       </header>
       {view?.subtitle && <p className="chat-plugin-dock-subtitle">{view.subtitle}</p>}
+      {feedback && (
+        <p className="chat-plugin-feedback" role="status">
+          {feedback}
+        </p>
+      )}
       <div className="chat-plugin-dock-body">
         {error && <p className="chat-plugin-error">{error}</p>}
         {!view && !error && (

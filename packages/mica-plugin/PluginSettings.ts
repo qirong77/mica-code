@@ -288,6 +288,12 @@ export type PluginSettingsStore = {
   get(): PluginSettingValues;
   /** 当前生效值的校验结果；空数组表示这组配置可用。 */
   validate(): PluginSettingIssue[];
+  /**
+   * 只改这几项，其余保持原样；写盘前过同一份校验，非法值直接抛错。
+   *
+   * 给「插件自己拿到了值」的场景用（例如注册拿到的口令），省掉手工粘贴。
+   */
+  set(values: Record<string, unknown>): PluginSettingValues;
 };
 
 /**
@@ -323,6 +329,12 @@ export function createPluginSettingsStore(
     fields,
     get: read,
     validate: () => validatePluginSettingValues(fields, read()),
+    set: (values) => {
+      const merged = { ...readStoredValues(pluginId, configDir), ...values };
+      const written = writePluginSettings(pluginId, merged, fields, { configDir });
+      cached = null;
+      return written;
+    },
   };
 }
 

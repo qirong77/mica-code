@@ -7,12 +7,17 @@ import { buildPanelView, createPanelHandler, readDrafts } from './Panel.js';
 import { materializeBundle, normalizeHost, readDeployState } from './DeployRunner.js';
 
 function fakeContext(values: Record<string, string> = {}): PluginContext {
+  const store = { enabled: 'true', relayUrl: '', token: '', ...values };
   return {
     pluginId: 'mobile-relay',
     settings: {
       path: null,
-      get: () => ({ enabled: 'true', relayUrl: '', token: '', ...values }),
+      get: () => ({ ...store }),
       validate: () => [],
+      set: (patch: Record<string, unknown>) => {
+        Object.assign(store, patch);
+        return { ...store };
+      },
     },
     health: { report: vi.fn() },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -104,8 +109,36 @@ describe('mobile-relay panel', () => {
     await expect(handler.action({ action: 'test', values: {} })).rejects.toThrow(/中转地址/);
   });
 
+  it('offers a register button that needs only the relay address', () => {
+    const empty = buildPanelView(fakeContext(), dir);
+    const section = empty.sections?.find((item) => item.title === '注册这台机器');
+    expect(section).toBeTruthy();
+    const button = section?.actions?.find((item) => item.id === 'register');
+    expect(button?.disabled).toBe(true);
+    expect(section?.fields?.map((field) => field.key)).toEqual(['relayUrl', 'enrollKey']);
+
+    const withAddress = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com' }), dir);
+    const ready = withAddress.sections
+      ?.find((item) => item.title === '注册这台机器')
+      ?.actions?.find((item) => item.id === 'register');
+    expect(ready?.disabled).toBe(false);
+    expect(ready?.label).toBe('注册这台机器');
+  });
+
+  it('asks for an address instead of a token when registering', async () => {
+    const handler = createPanelHandler(fakeContext(), dir);
+    await expect(handler.action({ action: 'register', values: {} })).rejects.toThrow(/中转地址/);
+  });
+
   it('writes the typed values into the panel draft file', () => {
     writeFileSync(join(dir, 'panel.json'), JSON.stringify({ sshHost: 'root@10.0.0.1', sshPort: '' }), 'utf8');
-    expect(readDrafts(dir)).toEqual({ sshHost: 'root@10.0.0.1', sshPort: '22', label: '', renderer: '' });
+    expect(readDrafts(dir)).toEqual({
+      sshHost: 'root@10.0.0.1',
+      sshPort: '22',
+      label: '',
+      renderer: '',
+      relayUrl: '',
+      enrollKey: '',
+    });
   });
 });

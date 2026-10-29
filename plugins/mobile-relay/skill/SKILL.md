@@ -57,7 +57,12 @@ node plugins/mobile-relay/setup.mjs --host root@<公网IP>
 
 ### 中转机已经部署过（第二台以后的电脑）
 
-**不要重新完整部署。** 同一条命令即可，`setup.mjs` 会先看 `systemctl is-active mobile-relay`：
+**先看用户想要什么形态**：这台机器的插件面板里有一个「注册这台机器」按钮，
+只填中转地址就能自助拿到口令（中转机按机器标识认领，重复注册是同一个口令）。用户能自己点就让他点，
+不需要 SSH，也不需要 agent 跑命令。
+
+只有在需要「agent 代劳」时才走命令行。**不要重新完整部署**：同一条命令即可，`setup.mjs`
+会先看 `systemctl is-active mobile-relay`：
 
 ```bash
 node plugins/mobile-relay/setup.mjs --host root@<同一台中转机> --ssh-port 2222

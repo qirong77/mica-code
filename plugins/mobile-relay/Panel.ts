@@ -10,6 +10,7 @@ import type {
 } from '@packages/mica-plugin/index.js';
 import { buildStatus, readBridgePid } from './BridgeSupervisor.js';
 import { findRendererDir, readDeployState, runSetup } from './DeployRunner.js';
+import { machineIdentity, registerWithRelay } from './Registrar.js';
 
 /**
  * 对话右侧那块面板：接中转机、看状态、开关桥，全部点按钮完成。
@@ -22,10 +23,26 @@ const FIELD_HOST = 'sshHost';
 const FIELD_SSH_PORT = 'sshPort';
 const FIELD_LABEL = 'label';
 const FIELD_RENDERER = 'renderer';
+const FIELD_RELAY = 'relayUrl';
+const FIELD_ENROLL = 'enrollKey';
 
-type Drafts = { sshHost: string; sshPort: string; label: string; renderer: string };
+type Drafts = {
+  sshHost: string;
+  sshPort: string;
+  label: string;
+  renderer: string;
+  relayUrl: string;
+  enrollKey: string;
+};
 
-const EMPTY_DRAFTS: Drafts = { sshHost: '', sshPort: '22', label: '', renderer: '' };
+const EMPTY_DRAFTS: Drafts = {
+  sshHost: '',
+  sshPort: '22',
+  label: '',
+  renderer: '',
+  relayUrl: '',
+  enrollKey: ''
+};
 
 export function readDrafts(dataDir: string | null): Drafts {
   if (!dataDir) return { ...EMPTY_DRAFTS };
@@ -36,6 +53,8 @@ export function readDrafts(dataDir: string | null): Drafts {
       sshPort: typeof parsed.sshPort === 'string' && parsed.sshPort ? parsed.sshPort : '22',
       label: typeof parsed.label === 'string' ? parsed.label : '',
       renderer: typeof parsed.renderer === 'string' ? parsed.renderer : '',
+      relayUrl: typeof parsed.relayUrl === 'string' ? parsed.relayUrl : '',
+      enrollKey: typeof parsed.enrollKey === 'string' ? parsed.enrollKey : '',
     };
   } catch {
     return { ...EMPTY_DRAFTS };
@@ -48,6 +67,8 @@ function saveDrafts(dataDir: string | null, values: Record<string, string>): Dra
     sshPort: String(values[FIELD_SSH_PORT] ?? '').trim() || '22',
     label: String(values[FIELD_LABEL] ?? '').trim(),
     renderer: String(values[FIELD_RENDERER] ?? '').trim(),
+    relayUrl: String(values[FIELD_RELAY] ?? '').trim(),
+    enrollKey: String(values[FIELD_ENROLL] ?? '').trim(),
   };
   if (dataDir) {
     try {
@@ -160,6 +181,59 @@ function askAgentSection(rendererFound: boolean): PluginPanelSection {
   };
 }
 
+/**
+ * 注册：只需一个中转地址，口令由插件自己拿到并写回设置。
+ *
+ * 同一台机器重复点拿到的是同一个口令（中转机按机器标识认领），所以这个按钮
+ * 点了也没有副作用——重装插件、换会话都不用重新理解什么。
+ */
+function registrationSection(ctx: PluginContext, drafts: Drafts): PluginPanelSection {
+  const values = ctx.settings.get();
+  const settingsUrl = String(values.relayUrl ?? '').trim();
+  const token = String(values.token ?? '').trim();
+  const machine = machineIdentity();
+  const registered = token.length >= 16;
+  const relayUrl = drafts.relayUrl || settingsUrl;
+
+  return {
+    title: '注册这台机器',
+    collapsed: registered,
+    rows: [
+      { label: '这台机器', value: `${machine.label} · ${machine.platform}`, tone: 'muted' },
+      {
+        label: '注册状态',
+        value: registered ? '已注册 · 再注册一次仍是这个口令' : '还没注册',
+        tone: registered ? 'ok' : 'warn',
+      },
+    ],
+    fields: [
+      {
+        key: FIELD_RELAY,
+        label: '中转地址',
+        value: relayUrl,
+        placeholder: 'https://mica.example.com',
+        hint: '填手机链接那个域名就行；不需要 SSH。已经部署过中转机的机器会自动带出来。',
+      },
+      {
+        key: FIELD_ENROLL,
+        label: '接入口令',
+        value: drafts.enrollKey,
+        placeholder: '中转机没口令就留空',
+        hint: '只有中转机设了 enrollKey 才需要，默认没有。',
+      },
+    ],
+    actions: [
+      {
+        id: 'register',
+        label: registered ? '重新注册（同一个口令）' : '注册这台机器',
+        tone: 'primary',
+        disabled: !relayUrl,
+        hint: '把本机标识加密发给中转机，换回一个口令并自动写入设置。',
+      },
+    ],
+  };
+}
+
 export function buildPanelView(ctx: PluginContext, dataDir: string | null): PluginPanelView {
   const drafts = readDrafts(dataDir);
   const deploy = readDeployState(dataDir);
@@ -168,6 +242,7 @@ export function buildPanelView(ctx: PluginContext, dataDir: string | null): Plug
 
   const sections: PluginPanelSection[] = [
     { title: '状态', rows: statusRows(ctx, dataDir) },
+    registrationSection(ctx, drafts),
     setupSection(ctx, dataDir, drafts),
     askAgentSection(rendererFound),
   ];
@@ -238,6 +313,26 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
         } catch (error) {
           throw new Error(`连不上：${error instanceof Error ? error.message : String(error)}`);
         }
+      }
+
+      if (action === 'register') {
+        const relayUrl = drafts.relayUrl || String(ctx.settings.get().relayUrl ?? '').trim();
+        if (!relayUrl) {
+          throw new Error('先填中转地址：就是手机链接那个域名，例如 https://mica.qirong77.com');
+        }
+        if (!ctx.settings.path) throw new Error('没有配置目录，检查 MICA_HOME 是否可写');
+
+        const result = await registerWithRelay({
+          relayUrl,
+          enrollKey: drafts.enrollKey || undefined,
+          label: drafts.label || undefined
+        });
+        ctx.settings.set({ relayUrl, token: result.token });
+        return {
+          message: result.created
+            ? `已在这台中转机上注册「${result.label}」，桥几秒内起来`
+            : `这台机器早就注册过了（${result.label}），沿用同一个口令`
+        };
       }
 
       if (action === 'apply') {

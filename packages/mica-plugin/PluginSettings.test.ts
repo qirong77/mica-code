@@ -114,4 +114,29 @@ describe('createPluginSettingsStore', () => {
     expect(store.path).toBeNull();
     expect(store.get()).toEqual({ baseUrl: '', apiKey: '', minIntervalSeconds: '0' });
   });
+
+  it('writes a single key and keeps the rest, so a plugin can store what it fetched', () => {
+    const configDir = mkTempDir();
+    const store = createPluginSettingsStore('demo', fields, { configDir });
+
+    writePluginSettings('demo', { baseUrl: 'https://relay.test', minIntervalSeconds: '30' }, fields, {
+      configDir,
+    });
+    store.set({ apiKey: 'token-from-registration' });
+
+    expect(store.get()).toMatchObject({
+      baseUrl: 'https://relay.test',
+      apiKey: 'token-from-registration',
+      minIntervalSeconds: '30',
+    });
+    expect(readPluginSettings('demo', fields, { configDir }).apiKey).toBe('token-from-registration');
+  });
+
+  it('refuses to write a value that the same rules reject', () => {
+    const configDir = mkTempDir();
+    const numeric: PluginSettingField[] = [{ key: 'count', label: '数量', type: 'number', min: 1, max: 5 }];
+    const store = createPluginSettingsStore('demo', numeric, { configDir });
+    expect(() => store.set({ count: '9' })).toThrow();
+    expect(store.get().count).toBe('');
+  });
 });

@@ -102,7 +102,12 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     if (!lockPath || !dir) return null;
     const script = materializeBridge(dir);
     const nodeBin = process.env.MICA_BRIDGE_NODE || 'node';
-    const child = spawn(nodeBin, [script], { detached: true, stdio: 'ignore', env: process.env });
+    // 宿主被 SIGKILL 时 onDispose 跑不到：桥自己盯着父进程，父进程没了就退，避免留下孤儿进程
+    const child = spawn(nodeBin, [script], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, MICA_RELAY_PARENT_PID: String(process.pid) }
+    });
     child.on('error', (error) => {
       ctx.logger.error('bridge:spawn-failed', { error: error instanceof Error ? error.message : String(error) });
     });
@@ -127,6 +132,19 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
 
   /** 保证「该跑的跑着、不该跑的不跑」。 */
   const ensure = (): { pid: number | null; changed: boolean } => {
+    const values = ctx.settings.get();
+    const relayUrl = String(values.relayUrl ?? '').trim();
+    const token = String(values.token ?? '').trim();
+    if (!relayUrl || !token) {
+      // 还没接入：不留一个只会失败的进程在外联，也不把「缺哪个字段」当报错甩给用户
+      stop();
+      ctx.health.report({
+        level: 'warn',
+        message: '这台机器还没接入中转机',
+        hint: '在「手机访问」面板填中转地址，点「注册这台机器」，口令由插件自己拿到。',
+      });
+      return { pid: null, changed: false };
+    }
     const issues = ctx.settings.validate();
     if (issues.length > 0) {
       // 配置不全时不要留着一个连不上中转机的进程在外联
@@ -137,16 +155,10 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
       });
       return { pid: null, changed: false };
     }
-    const values = ctx.settings.get();
     if (String(values.enabled ?? 'true') === 'false') {
       const stopped = stop();
       if (stopped) ctx.logger.info('bridge:stopped', { reason: 'disabled' });
       return { pid: null, changed: stopped };
-    }
-    // 没填地址/口令时不要拉起一个只会失败的进程；用户在页面上填好，下一轮自己就起来了。
-    if (!String(values.relayUrl ?? '').trim() || !String(values.token ?? '').trim()) {
-      stop();
-      return { pid: null, changed: false };
     }
     const current = runningPid();
     if (current !== null) {

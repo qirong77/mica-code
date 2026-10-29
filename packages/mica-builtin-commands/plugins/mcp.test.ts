@@ -87,7 +87,14 @@ function setupPlugin(withUi = true) {
     services: new micaPlugin.ServiceContainer(),
     events: new micaRuntime.RuntimeEventBus(),
     logger,
-    settings: { path: null, get: () => ({}), validate: () => [] },
+    settings: {
+      path: null,
+      get: () => ({}),
+      validate: () => [],
+      set: () => {
+        throw new Error('只读测试上下文');
+      },
+    },
     health: { path: null, read: () => null, report: () => {}, clear: () => {} },
     skills: { register: () => ({ dispose() {}, skipped: [] }) },
     onDispose: (dispose) => disposers.push(dispose),

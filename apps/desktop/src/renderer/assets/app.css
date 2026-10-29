@@ -5475,6 +5475,18 @@ body.is-resizing-btw {
   color: var(--color-danger, #e06c75);
 }
 
+.chat-plugin-feedback {
+  flex: none;
+  margin: 0;
+  padding: 5px 10px 6px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-accent-subtle, #cc783224);
+  color: var(--color-fg-strong);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .chat-plugin-spin {
   animation: chat-plugin-spin 900ms linear infinite;
 }

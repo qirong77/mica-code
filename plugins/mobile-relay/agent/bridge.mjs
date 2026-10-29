@@ -481,7 +481,25 @@ async function main() {
   envPayload = await readLocalEnv()
   if (state_ok()) void subscribeLocalEvents()
   log(`[relay-agent] ${settings.localUrl} -> ${settings.relayUrl}`)
-  while (!stopping) await tick()
+  while (!stopping) {
+    if (!parentAlive()) {
+      log('[relay-agent] 父进程已退出，桥自行结束')
+      process.exit(0)
+    }
+    await tick()
+  }
+}
+
+// 宿主被杀（SIGKILL / 崩溃）时 onDispose 跑不到，桥要自己退出，否则会留下一直轮询的孤儿进程
+function parentAlive() {
+  const pid = Number(process.env.MICA_RELAY_PARENT_PID || 0)
+  if (!pid) return true
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function state_ok() {

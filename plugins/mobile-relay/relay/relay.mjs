@@ -18,7 +18,16 @@
 import { createServer as createHttpServer } from 'node:http'
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto'
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createPublicKey,
+  diffieHellman,
+  generateKeyPairSync,
+  hkdfSync,
+  randomBytes
+} from 'node:crypto'
 import { extname, join, normalize } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
 
@@ -39,6 +48,10 @@ const IMAGE_CACHE_LIMIT = 24 * 1024 * 1024
 const RESULT_CACHE_LIMIT = 200
 /** 手机浏览器最多记住这么多台机器。 */
 const MAX_REMEMBERED = 8
+/** 自助注册的上限：防止有人把这个域名当成免费隧道。 */
+const MAX_AGENTS = Number(process.env.RELAY_MAX_AGENTS || 32)
+const REGISTER_WINDOW_MS = 60_000
+const REGISTER_PER_WINDOW = 6
 
 /* ------------------------------------------------------------ 机器与状态 */
 
@@ -63,6 +76,7 @@ function createState(entry) {
   return {
     id: agentId(entry.token),
     label: typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : '未命名机器',
+    identityHash: typeof entry.identityHash === 'string' ? entry.identityHash : '',
     token: entry.token,
     key: channelKey(entry.token),
     createdAt: Number(entry.createdAt) || Date.now(),
@@ -178,6 +192,7 @@ function persistAgents() {
       id: state.id,
       label: state.label,
       token: state.token,
+      ...(state.identityHash ? { identityHash: state.identityHash } : {}),
       createdAt: state.createdAt
     }))
   }
@@ -195,6 +210,149 @@ function agentOnline(state) {
 
 function phoneOnline(state) {
   return state.phones.size > 0
+}
+
+/* ---------------------------------------------------------------- 自助注册 */
+
+/**
+ * 注册通道的临时密钥对。
+ *
+ * 申请里带的是「这台机器是谁」的哈希和它的名字，不该以明文躺在中间环节里，
+ * 所以走一次 ECDH：本机拿这把公钥协商出会话密钥，申请与返回的口令都封装起来。
+ * 密钥对只在内存里，重启重生成——注册是低频动作，不需要持久化。
+ */
+const registerKeys = generateKeyPairSync('x25519')
+const registerPublicDer = registerKeys.publicKey.export({ type: 'spki', format: 'der' })
+
+function registerChannelKey(peerDer) {
+  const shared = diffieHellman({
+    privateKey: registerKeys.privateKey,
+    publicKey: createPublicKey({ key: peerDer, format: 'der', type: 'spki' })
+  })
+  return Buffer.from(hkdfSync('sha256', shared, registerPublicDer, Buffer.from('mica-relay-register-v1'), 32))
+}
+
+function enrollKeyOf() {
+  try {
+    const parsed = JSON.parse(readFileSync(AGENTS_FILE, 'utf8'))
+    return typeof parsed?.enrollKey === 'string' ? parsed.enrollKey.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+const registerHits = new Map()
+
+function registerAllowed(ip) {
+  const now = Date.now()
+  const hits = (registerHits.get(ip) || []).filter((at) => now - at < REGISTER_WINDOW_MS)
+  if (hits.length >= REGISTER_PER_WINDOW) {
+    registerHits.set(ip, hits)
+    return false
+  }
+  hits.push(now)
+  registerHits.set(ip, hits)
+  if (registerHits.size > 512) {
+    for (const [key, value] of registerHits) {
+      if (!value.some((at) => now - at < REGISTER_WINDOW_MS)) registerHits.delete(key)
+    }
+  }
+  return true
+}
+
+function findRegistered(identityHash, label) {
+  for (const state of agents.values()) {
+    if (state.identityHash && state.identityHash === identityHash) return state
+  }
+  // 旧清单里的机器没有身份哈希：按名字认领，免得同一台机器重注册多出一条
+  for (const state of agents.values()) {
+    if (!state.identityHash && sameLabel(state.label, label)) {
+      state.identityHash = identityHash
+      persistAgents()
+      return state
+    }
+  }
+  return null
+}
+
+/** `xxx.local` 与 `xxx` 是同一台机器：macOS 主机名带后缀，界面上不带。 */
+function sameLabel(left, right) {
+  const normalize = (value) => String(value).trim().toLowerCase().replace(/\.local$/, '')
+  return normalize(left) === normalize(right) && normalize(left) !== ''
+}
+
+function handleRegisterKey(req, res) {
+  sendJson(res, 200, {
+    ok: true,
+    key: registerPublicDer.toString('base64url'),
+    requiresKey: Boolean(enrollKeyOf()),
+    capacity: MAX_AGENTS
+  })
+}
+
+async function handleRegister(req, res) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '')
+    .split(',')[0]
+    .trim()
+  if (!registerAllowed(ip)) return sendJson(res, 429, { ok: false, error: 'too-many-requests' })
+
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch {
+    return sendJson(res, 400, { ok: false, error: 'bad-body' })
+  }
+
+  let channelKeyValue
+  let request
+  try {
+    channelKeyValue = registerChannelKey(Buffer.from(String(body.peer || ''), 'base64url'))
+    request = open(
+      channelKeyValue,
+      Buffer.concat([
+        Buffer.from(String(body.iv || ''), 'base64url'),
+        Buffer.from(String(body.tag || ''), 'base64url'),
+        Buffer.from(String(body.data || ''), 'base64url')
+      ])
+    )
+  } catch {
+    return sendJson(res, 400, { ok: false, error: 'bad-envelope' })
+  }
+
+  const enrollKey = enrollKeyOf()
+  if (enrollKey && String(request?.key || '') !== enrollKey) {
+    return sendJson(res, 403, { ok: false, error: 'enroll-key-required' })
+  }
+
+  const identityHash = String(request?.identity || '')
+  if (!/^[0-9a-f]{32,64}$/.test(identityHash)) {
+    return sendJson(res, 400, { ok: false, error: 'bad-identity' })
+  }
+  const label = String(request?.label || '').trim().slice(0, 60) || '未命名机器'
+
+  let state = findRegistered(identityHash, label)
+  let created = false
+  if (!state) {
+    if (agents.size >= MAX_AGENTS) return sendJson(res, 429, { ok: false, error: 'no-capacity' })
+    const token = randomBytes(24).toString('hex')
+    state = createState({ token, label, identityHash, createdAt: Date.now() })
+    agents.set(token, state)
+    persistAgents()
+    created = true
+    console.log(`[relay] 注册机器 ${state.label}（共 ${agents.size} 台）`)
+  } else {
+    console.log(`[relay] 机器重复注册 ${state.label}（沿用原口令）`)
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    sealed: seal(channelKeyValue, {
+      token: state.token,
+      label: state.label,
+      id: state.id,
+      created
+    }).toString('base64url')
+  })
 }
 
 /* ------------------------------------------------------------------ 加密 */
@@ -726,6 +884,9 @@ async function route(req, res) {
 
   // 轮询自带机器标识（不是凭据），因此排在口令鉴权之前。
   if (path === '/api/poll' && req.method === 'POST') return handlePoll(req, res)
+  // 注册也是无凭据入口：新机器还没有口令，凭的是 ECDH 封装的机器标识。
+  if (path === '/api/register-key' && req.method === 'GET') return handleRegisterKey(req, res)
+  if (path === '/api/register' && req.method === 'POST') return handleRegister(req, res)
 
   const state = currentState(req, url)
 

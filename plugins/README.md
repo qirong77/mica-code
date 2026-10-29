@@ -32,7 +32,7 @@ plugins/<id>/
 | `required`        | 否   | setup 失败是否中断启动；用户插件默认 `false`                                                       |
 | `priority`        | 否   | 加载顺序，小的先执行                                                                               |
 | `mica.apiVersion` | 否   | 当前只支持 `1`                                                                                     |
-| `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读取                                   |
+| `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读、`ctx.settings.set()` 写回          |
 | `llm`             | 否   | 需要自己调模型时声明一次，见「模型接口」一节；插件用 `ctx.llm` 读取与请求                          |
 | `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                                         |
 | `desktop`         | 否   | 声明依赖的桌面端运行条件，见「运行条件」一节；用它的插件要同时声明 `requires: ["desktop"]`         |
@@ -71,6 +71,10 @@ plugins/<id>/
 `type` 支持 `text` / `password` / `textarea` / `select` / `number` / `switch`。值统一按字符串存进
 `$MICA_HOME/plugin-settings/<id>.json`，未声明的键不会被写入；`select` 必须带 `options`，
 `switch` 存 `"true"` / `"false"`。插件每轮读取时会比对文件 mtime，用户改完不需要重启。
+
+插件自己拿到了值（注册换回的口令、探测到的地址）用 `ctx.settings.set({ token })` 写回去：
+只改传入的键，其余保持原样，写盘前过同一份校验。**不要让用户复制粘贴插件本该自己拿到的东西**——
+那是这类配置最容易出错的一步，也不会有人看得懂「口令至少 16 位」这种提示。
 
 ### 运行状态（`status`）
 
