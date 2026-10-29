@@ -5,6 +5,7 @@ import { micaSkills } from '@packages/mica-skills/index.js';
 import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { registerBridgeSupervisor } from './BridgeSupervisor.js';
 import { createPanelHandler } from './Panel.js';
+import { runPageSync } from './PageSyncAction.js';
 import { MobileRelayTool } from './MobileRelayTool.js';
 import { registerMachine } from './registerMachine.js';
 
@@ -90,6 +91,7 @@ function registerActions(ctx: PluginContext, dataDir: string | null): void {
   const actions = ctx.actions;
   if (!actions) return;
   actions.register('register', async ({ values }) => registerMachine(ctx, values, dataDir));
+  actions.register('sync-page', async () => runPageSync(ctx, dataDir));
 }
 
 /**

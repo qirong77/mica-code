@@ -73,6 +73,21 @@ node plugins/mobile-relay/setup.mjs --host root@<同一台中转机> --ssh-port 
 
 确认接入结果：
 
+### 只更新手机端页面（Mica 升级之后）
+
+不要为此重新部署。插件设置里的「操作 → 更新中转机页面」做的是同一件事：
+算出版本号、和 `/api/health` 的 `pageVersion` 比，不一致才打包上传，中转机原子替换 `public/`。
+不做定时检查，也不在后台自动上传——用户点了才会传；没点就继续用当前那份，
+插件详情里会显示「落后 · 手机端 x，本机 y」。
+
+只有在插件报「找不到页面产物」、而用户同意由你代劳时才走命令行：
+
+```bash
+node plugins/mobile-relay/setup.mjs --host root@<中转机> --ssh-port 2222 --redeploy   # 迫于无奈才用
+```
+
+`--redeploy` 会连 nginx / 证书一起重做，属于重部署；页面旧了不该用它。
+
 ```bash
 T=$(node -e "console.log(require(process.env.HOME+'/.mica/plugin-settings/mobile-relay.json').token)")
 curl -s "https://<域名>/api/health?t=$T"   # label 应是你这台机器的名字

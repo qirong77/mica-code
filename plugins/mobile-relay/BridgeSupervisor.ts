@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { join } from 'node:path';
 import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
 import { BRIDGE_SOURCE } from './bridgeSource.js';
+import { pageVersionOf } from './PageSync';
+import { rendererDirFor } from './PageSyncAction';
 
 /**
  * 常驻桥进程的监管。
@@ -203,6 +205,7 @@ export type BridgeStatus = {
    * 插件自己判断通/不通，页面只按 `tone` 上色——配置页不该认识这台机器的运行语义。
    */
   bridge: StatusLine;
+  page: StatusLine;
   relay: StatusLine;
   phone: StatusLine;
   /** 内置部署 skill 的源码位置（正文随包内嵌，这里只给可点开的地方）。 */
@@ -215,12 +218,15 @@ export function buildStatus(
   relay: Record<string, unknown> | null,
   pid: number | null,
   now: number,
+  localPage: string | null = null,
 ): BridgeStatus {
   const relayUrl = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
   const token = String(values.token ?? '').trim();
   const enabled = String(values.enabled ?? 'true') !== 'false';
   const relayOnline = relay !== null;
   const phoneOnline = relay?.phoneOnline === true;
+  const remotePage = typeof relay?.pageVersion === 'string' ? relay.pageVersion : '';
+  const localPageVersion = localPage ?? '';
   return {
     relayUrl,
     // 链接里带口令：手机扫一眼就能开，不用再去翻设置。
@@ -247,6 +253,14 @@ export function buildStatus(
       : phoneOnline
         ? { text: '正在查看', tone: 'ok' }
         : { text: '未连接', tone: 'warn' },
+    // 手机端页面是随包产物的一份拷贝，Mica 升级后这里会指出来，免得手机上跑的是旧界面。
+    page: !remotePage
+      ? { text: '未知', tone: 'warn' }
+      : remotePage === localPageVersion
+        ? { text: `已同步 · ${remotePage}`, tone: 'ok' }
+        : localPageVersion
+          ? { text: `落后 · 手机端 ${remotePage}，本机 ${localPageVersion}`, tone: 'warn' }
+          : { text: `手机端 ${remotePage} · 本机找不到页面产物`, tone: 'warn' },
     // 部署不在插件里做：给出内置 skill 的源码位置，用户对着 agent 说一句话就能装。
     skill: SKILL_URL,
     updatedAt: now,
@@ -290,7 +304,9 @@ function publishStatus(
   previous: string | null
 ): string | null {
   if (!dir) return previous;
-  const status = buildStatus(ctx.settings.get(), relay, pid, Date.now());
+  const values = ctx.settings.get();
+  const localPage = pageVersionOf(rendererDirFor(ctx));
+  const status = buildStatus(values, relay, pid, Date.now(), localPage);
   const body = `${JSON.stringify(status, null, 2)}\n`;
   if (body === previous) return previous;
   try {

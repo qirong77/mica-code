@@ -12,6 +12,7 @@ import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
  * 由 agent 现场取仓库、构建、部署。所以这里验证的是「注册这条路真的通」。
  */
 type Captured = { skill: PluginSkillDefinition | null; health: Array<{ level: string; message: string }> };
+type WithTasks = Captured & { tasks: string[] };
 
 function fakeContext(dataDir: string, captured: Captured): PluginContext {
   return {
@@ -27,7 +28,10 @@ function fakeContext(dataDir: string, captured: Captured): PluginContext {
       },
     },
     background: {
-      register: () => ({ dispose: () => {}, runNow: async () => {} }),
+      register: (task: { id: string }) => {
+        (captured as WithTasks).tasks?.push(task.id);
+        return { dispose: () => {}, runNow: async () => {} };
+      },
     },
     tools: { register: () => ({ dispose: () => {} }) },
     health: {
@@ -94,5 +98,12 @@ describe('mobile-relay plugin setup', () => {
     // 这条是设计约束，不是文案偏好：从 app.asar 里抠产物会随版本漂移
     expect(SKILL_MD).toContain('app.asar');
     expect(SKILL_MD).toContain('electron-vite build');
+  });
+
+  // 页面更新只有配置页那个按钮：不在后台排期，也就不会替用户往外传 3MB。
+  it('schedules only the bridge, never a page-sync task', () => {
+    const captured: WithTasks = { skill: null, health: [], tasks: [] };
+    setup(fakeContext(dataDir, captured));
+    expect(captured.tasks).toEqual(['bridge']);
   });
 });

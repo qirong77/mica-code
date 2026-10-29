@@ -323,6 +323,12 @@ if (!joinMode && !skipCert) {
   });
 }
 
+// certbot 自己写的 443 server 块默认只说 HTTP/1.1；手机首屏要并发拉十几个资源，
+// 换成 HTTP/2 能省掉串行往返。已经在就别重复插。
+ssh(`grep -q "http2 on;" /etc/nginx/sites-available/mobile-relay || ` +
+  `sed -i '/listen 443 ssl/ a\\    http2 on;' /etc/nginx/sites-available/mobile-relay; ` +
+  `nginx -t && systemctl reload nginx`);
+
 step('验证');
 const base = skipCert ? `http://${domain}` : `https://${domain}`;
 let healthy = false;

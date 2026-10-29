@@ -16,7 +16,18 @@
  * 轮询体是二进制：iv(12) | tag(16) | ciphertext(gzip(json))，没有 base64 膨胀。
  */
 import { createServer as createHttpServer } from 'node:http'
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import {
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import {
   createCipheriv,
@@ -29,7 +40,7 @@ import {
   randomBytes
 } from 'node:crypto'
 import { extname, join, normalize } from 'node:path'
-import { gzipSync, gunzipSync } from 'node:zlib'
+import { brotliCompressSync, constants as zlibConstants, gzipSync, gunzipSync } from 'node:zlib'
 
 const PORT = Number(process.env.RELAY_PORT || 9200)
 /** 默认只绑回环：公网入口只有 nginx 那一个，本进程不直接暴露。 */
@@ -39,7 +50,23 @@ const ROOT = process.env.RELAY_ROOT || join(import.meta.dirname, 'public')
 const STATE_DIR = process.env.RELAY_STATE_DIR || '/var/lib/mobile-relay'
 const AGENTS_FILE = join(STATE_DIR, 'agents.json')
 
-const AGENT_STALE_MS = 20_000
+// 空闲轮询 15 秒一次，留三次的余量：任何一次抖动都不该让手机看到「机器离线」。
+const AGENT_STALE_MS = 45_000
+
+// 页面壳与构建产物：不含用户数据，不需要口令就能取，否则少一个 cookie 就是白屏。
+const PUBLIC_ASSETS = new Set([
+  '/relay-awake.js',
+  '/favicon-32.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
+  '/manifest.webmanifest',
+  '/manifest.json'
+])
+
+function isPublicAsset(pathname) {
+  return pathname.startsWith('/assets/') || PUBLIC_ASSETS.has(pathname)
+}
 const INVOKE_TIMEOUT_MS = 90_000
 /** 页面有交互后，把轮询提速到这期间。 */
 const AWAKE_MS = 20_000
@@ -459,6 +486,81 @@ const MIME = {
 
 const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.json', '.webmanifest', '.svg', '.txt', '.map'])
 
+/**
+ * 页面产物的指纹。index.html 引用的资源名都带内容哈希，页面一变它就变。
+ * 手机端不需要它，本机靠它判断「中转机上跑的是不是当前这版」。
+ */
+function computePageVersion() {
+  try {
+    return createHash('sha256').update(readFileSync(join(ROOT, 'index.html'))).digest('hex').slice(0, 12)
+  } catch {
+    return ''
+  }
+}
+
+let pageVersion = computePageVersion()
+
+/** 预压缩文件名后缀。命中时直接发，不必为每个请求现场压一遍。 */
+const PRECOMPRESSED = ['.br', '.gz']
+
+/**
+ * 给静态产物生成 `.br` / `.gz`。
+ *
+ * 发布是低频动作，压缩一次就够；请求时现场 `gzipSync` 会把整个进程卡住
+ * （monaco 那块 3.5MB，手机恰好在拉就明显卡顿）。
+ */
+function precompress(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const absolute = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      precompress(absolute)
+      continue
+    }
+    const ext = extname(entry.name).toLowerCase()
+    if (!COMPRESSIBLE.has(ext)) continue
+    let info
+    try {
+      info = statSync(absolute)
+    } catch {
+      continue
+    }
+    if (!info.isFile() || info.size > 4 * 1024 * 1024) continue
+    const raw = readFileSync(absolute)
+    // 大文件用低档：q9 对 3.5MB 要十几秒，q5 只慢一点、体积差不到 1%。
+    const quality = info.size > 512 * 1024 ? 5 : 9
+    for (const [suffix, packed] of [
+      ['.br', () => brotliCompressSync(raw, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: quality } })],
+      ['.gz', () => gzipSync(raw, { level: 9 })]
+    ]) {
+      const target = absolute + suffix
+      try {
+        if (existsSync(target) && statSync(target).mtimeMs >= info.mtimeMs) continue
+      } catch {
+        // 读不到旧产物就重压
+      }
+      writeFileSync(target, packed())
+    }
+  }
+}
+
+/** 按 `accept-encoding` 挑一份预压缩产物；没有就返回 null，退回原文件。 */
+function precompressedFor(req, absolute, ext) {
+  if (!COMPRESSIBLE.has(ext)) return null
+  const accepts = String(req.headers['accept-encoding'] || '')
+  for (const suffix of PRECOMPRESSED) {
+    const encoding = suffix === '.br' ? 'br' : 'gzip'
+    if (!accepts.includes(encoding)) continue
+    const candidate = absolute + suffix
+    if (!existsSync(candidate)) continue
+    try {
+      return { path: candidate, encoding, size: statSync(candidate).size }
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
 function sendJson(res, status, body) {
   const payload = Buffer.from(JSON.stringify(body))
   res.writeHead(status, {
@@ -804,6 +906,55 @@ const AWAKE_SCRIPT = `(() => {
 })()
 `
 
+/**
+ * 收下一份新的页面产物（gzip 过的 tar），整体替换 `public/`。
+ *
+ * 只认已登记机器的口令：这条路径会在中转机上落文件，不能给未注册的请求开口子。
+ * 替换是原子的——先解到 `public.next`，校验有 index.html 再两次 rename，
+ * 手机在发布过程中拿到的始终是完整的一份（旧的或新的），不会看到半个目录。
+ */
+const MAX_PUBLISH_BYTES = 96 * 1024 * 1024
+
+async function handlePublish(req, res) {
+  const body = await readRaw(req, MAX_PUBLISH_BYTES)
+  if (!body.length) return sendJson(res, 400, { ok: false, error: '空包' })
+
+  const next = `${ROOT}.next`
+  const previous = `${ROOT}.prev`
+  rmSync(next, { recursive: true, force: true })
+  mkdirSync(next, { recursive: true })
+  try {
+    execFileSync('tar', ['-xzf', '-', '-C', next], {
+      input: body,
+      timeout: 180_000,
+      maxBuffer: 8 * 1024 * 1024
+    })
+  } catch (error) {
+    rmSync(next, { recursive: true, force: true })
+    return sendJson(res, 400, { ok: false, error: `解包失败：${error?.message || error}` })
+  }
+  if (!existsSync(join(next, 'index.html'))) {
+    rmSync(next, { recursive: true, force: true })
+    return sendJson(res, 400, { ok: false, error: '包里没有 index.html' })
+  }
+
+  precompress(next)
+  try {
+    rmSync(previous, { recursive: true, force: true })
+    renameSync(ROOT, previous)
+    renameSync(next, ROOT)
+  } catch (error) {
+    // 换不过来就把旧的放回去，别让手机面对一个不存在的目录
+    if (!existsSync(ROOT) && existsSync(previous)) renameSync(previous, ROOT)
+    rmSync(next, { recursive: true, force: true })
+    return sendJson(res, 500, { ok: false, error: `替换失败：${error?.message || error}` })
+  }
+  rmSync(previous, { recursive: true, force: true })
+  pageVersion = computePageVersion()
+  console.log(`[relay] 页面已更新 ${pageVersion}`)
+  return sendJson(res, 200, { ok: true, pageVersion })
+}
+
 async function serveIndex(req, res) {
   const absolute = join(ROOT, 'index.html')
   if (!existsSync(absolute)) return sendJson(res, 404, { ok: false, error: 'renderer 未部署' })
@@ -863,14 +1014,13 @@ async function serveStatic(req, res, url, state) {
     'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache'
   }
 
-  const acceptsGzip = String(req.headers['accept-encoding'] || '').includes('gzip')
-  if (acceptsGzip && COMPRESSIBLE.has(ext) && info.size < 4 * 1024 * 1024) {
-    const packed = gzipSync(await readFile(absolute))
-    headers['content-encoding'] = 'gzip'
-    headers['content-length'] = packed.length
+  const pre = precompressedFor(req, absolute, ext)
+  if (pre) {
+    headers['content-encoding'] = pre.encoding
+    headers['content-length'] = pre.size
     headers.vary = 'accept-encoding'
     res.writeHead(200, headers)
-    return res.end(packed)
+    return createReadStream(pre.path).pipe(res)
   }
 
   headers['content-length'] = info.size
@@ -899,13 +1049,15 @@ async function route(req, res) {
       phoneOnline: phoneOnline(state),
       awake: Date.now() < state.awakeUntil,
       pending: state.pending.size,
-      queued: state.commands.length
+      queued: state.commands.length,
+      pageVersion
     })
   }
 
   if (path.startsWith('/api/')) {
     if (!state) return sendJson(res, 401, { ok: false, error: 'bad token' })
     if (path === '/api/invoke' && req.method === 'POST') return handleInvoke(req, res, state)
+    if (path === '/api/publish' && req.method === 'POST') return handlePublish(req, res)
     if (path === '/api/awake' && req.method === 'POST') return handleAwake(req, res, state)
     if (path === '/api/events') return handleEvents(req, res, state)
     if (path === '/api/env') return handleEnv(req, res, state)
@@ -933,6 +1085,10 @@ async function route(req, res) {
     return serveIndex(req, res)
   }
 
+  // 构建产物按内容 hash 命名，不含任何用户数据。它们必须公开可读：
+  // 否则浏览器没带 cookie 时，每个 JS 请求都会拿到登录页 HTML，整页空白。
+  if (isPublicAsset(path)) return serveStatic(req, res, url, state)
+
   if (!state) return loginPage(res, false)
   return serveStatic(req, res, url, state)
 }
@@ -954,4 +1110,12 @@ server.listen(PORT, BIND, () => {
   console.log(
     `[relay] http://${BIND}:${PORT}  root=${ROOT}  agents=${agents.size}  （TLS 由前置 nginx 终结）`
   )
+  // 老部署里没有预压缩产物：启动后补一遍，别拖慢首次就绪。
+  setImmediate(() => {
+    try {
+      if (existsSync(ROOT)) precompress(ROOT)
+    } catch (error) {
+      console.error('[relay] 预压缩失败', error?.message || error)
+    }
+  })
 })

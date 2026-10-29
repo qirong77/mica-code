@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -24,6 +25,21 @@ import { appPageKey, isAppPageTarget } from './app-page-target.js'
  */
 
 const RUNTIME_ENTRY = join(__dirname, '../server/index.mjs')
+
+/**
+ * 一份「外部进程读得到」的页面产物目录。
+ *
+ * 开发时就是 out/renderer；打包后页面在 app.asar 里，只有 Electron 自己能读，
+ * 所以 build 把 out/renderer 解包到 app.asar.unpacked（插件要打包上传给中转机）。
+ * 两者都没有时返回空串——插件会如实说「找不到页面产物」，而不是去抠 asar。
+ */
+function publishableRendererDir() {
+  const candidates = [
+    join(__dirname, '../renderer'),
+    join(process.resourcesPath || '', 'app.asar.unpacked', 'out', 'renderer')
+  ]
+  return candidates.find((dir) => dir && existsSync(join(dir, 'index.html'))) || ''
+}
 const READY_PREFIX = '[mica-desktop] ready '
 // 与渲染层的顶栏高度（App.jsx 的 h-8）保持一致：macOS 的系统窗口按钮浮在顶栏上，
 // y 要让它在这一条里居中，setSheetOffset 决定原生提示框挂下来时贴在哪。
@@ -106,7 +122,10 @@ function spawnRuntime(port, { pageFromDevServer }) {
       // 再把它注入给每个 agent 进程（MICA_BROWSER_URL），所以这里不再传端口或地址。
       MICA_BROWSER_SOCKET: browserHost?.socketPath || '',
       MICA_TERMINAL_SOCKET: terminalHost?.socketPath || '',
-      MICA_SYSTEM_SOCKET: systemHost?.socketPath || ''
+      MICA_SYSTEM_SOCKET: systemHost?.socketPath || '',
+      // 页面产物目录：插件要把「手机上看到的这份界面」同步到中转机，
+      // 而打包版默认只有 asar 里的一份（外部进程读不到）。
+      MICA_DESKTOP_RENDERER: publishableRendererDir() || ''
     },
     stdio: ['pipe', 'pipe', 'pipe']
   })

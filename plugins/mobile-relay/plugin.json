@@ -22,6 +22,11 @@
       "label": "注册到中转机",
       "description": "按本机标识在中转机上登记，拿回手机访问链接；同一台机器再点仍是同一个口令。",
       "tone": "primary"
+    },
+    {
+      "key": "sync-page",
+      "label": "更新中转机页面",
+      "description": "手动把手机端页面更新到这台机器的版本；一致时不上传，不会自己跑。"
     }
   ],
   "status": [
@@ -29,6 +34,7 @@
     { "key": "bridge", "label": "本机桥", "type": "text" },
     { "key": "relay", "label": "中转机", "type": "text" },
     { "key": "phone", "label": "手机", "type": "text" },
+    { "key": "page", "label": "页面版本", "type": "text" },
     { "key": "skill", "label": "部署 skill", "type": "link" }
   ],
   "settings": [
@@ -54,6 +60,14 @@
       "pattern": "^.{16,}$",
       "patternMessage": "至少 16 位。这个值由「注册到中转机」生成，手填的值中转机不认",
       "description": "点「注册到中转机」自动填好，不用手抄；手机链接里的 ?t= 就是它"
+    }
+    ,
+    {
+      "key": "rendererDir",
+      "label": "页面产物目录",
+      "type": "text",
+      "placeholder": "留空自动查找",
+      "description": "「更新中转机页面」打包上传的目录；留空时依次找 MICA_DESKTOP_RENDERER 与仓库里的 apps/desktop/out/renderer"
     }
   ]
 }

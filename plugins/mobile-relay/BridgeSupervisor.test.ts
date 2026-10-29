@@ -158,6 +158,22 @@ describe('buildStatus', () => {
     expect(buildStatus({ enabled: 'false' }, null, null, 1).enabled).toBe(false);
   });
 
+  // 手机端页面是随包产物的一份拷贝：Mica 升级后这里要能看出手机上还是旧界面
+  it('compares the page version the relay serves with the local one', () => {
+    const same = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, 'abc123');
+    expect(same.page).toEqual({ text: '已同步 · abc123', tone: 'ok' });
+
+    const behind = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, 'def456');
+    expect(behind.page.tone).toBe('warn');
+    expect(behind.page.text).toContain('落后');
+    expect(behind.page.text).toContain('def456');
+
+    expect(buildStatus({ relayUrl: 'https://x.test', token: 'a' }, null, 9, 1, null).page).toEqual({
+      text: '未知',
+      tone: 'warn',
+    });
+  });
+
   // 配置页直接渲染这三行，语气由插件给：页面不认识「桥是什么」，只按 tone 上色
   it('describes the three runtime rows the config page shows', () => {
     const offline = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, null, 12, 1);

@@ -14,6 +14,8 @@ files:
 asarUnpack:
   - resources/**
   - node_modules/node-pty/**
+  # 手机端页面靠它对中转机做增量发布；asar 里的副本外部进程读不到。
+  - out/renderer/**
 win:
   executableName: mica-code-app
   icon: build/icon.ico
