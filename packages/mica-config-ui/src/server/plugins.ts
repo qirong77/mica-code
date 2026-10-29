@@ -37,7 +37,8 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
   const root = getPluginsRootPath();
   const configRoot = getConfigRootPath();
   const disabled = micaPlugin.readDisabledPluginIds();
-  const statuses = readPluginStatuses();
+  const lastRun = readPluginStatusFile();
+  const statuses = lastRun.entries;
   const inspection = micaPlugin.inspectPlugins({ pluginsDir: root });
 
   const official: ConfigWebPlugin[] = officialPluginManifests.map((manifest) => {
@@ -65,7 +66,11 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(manifest.id),
         loadStatus: status?.status,
-        error: status?.error,
+        loadHost: status ? lastRun.host : undefined,
+        // 跳过的说明是「这个宿主没有这一面」，不是「插件坏了」：它只进 skipReason，
+        // 不能变成红色错误，否则 TUI 里跑一次就足以让桌面端把整个插件报成失败。
+        error: status?.status === 'failed' ? status.error : undefined,
+        skipReason: status?.status === 'skipped' ? status.error : undefined,
       },
       disabled,
     );
@@ -97,7 +102,9 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         health: micaPlugin.readPluginHealth(plugin.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(plugin.id),
         loadStatus: status?.status,
-        error: plugin.error ?? status?.error,
+        loadHost: status ? lastRun.host : undefined,
+        error: plugin.error ?? (status?.status === 'failed' ? status.error : undefined),
+        skipReason: status?.status === 'skipped' ? status.error : undefined,
       },
       disabled,
     );
@@ -314,35 +321,38 @@ function withState(plugin: Omit<ConfigWebPlugin, 'state'>, disabled: Set<string>
 }
 
 type PluginStatusEntry = {
-  status: 'loaded' | 'registered' | 'failed' | 'skipped' | 'unknown';
+  status: 'loaded' | 'failed' | 'skipped' | 'unknown';
   error?: string;
 };
 
 /**
- * 读 `plugin-status.json`：加载成功的按 id 建索引，加载失败的按插件目录建索引。
+ * 读 `plugin-status.json`：装配过的插件按 id 建索引，加载失败的按插件目录建索引。
  *
  * 清单坏掉、入口导入失败的插件没有可用的 id，只能靠目录路径对上；页面按 id → 目录的顺序查。
+ * `host` 跟着记录一起回给页面：装配结论只对写下它的那个宿主成立（TUI 没有 `desktop`，
+ * 桌面宿主没有 TUI 的输入框），页面要连宿主一起说，读者才不会把跨宿主的跳过当成故障。
  */
-function readPluginStatuses(): Map<string, PluginStatusEntry> {
+function readPluginStatusFile(): { host?: string; entries: Map<string, PluginStatusEntry> } {
   const path = getPluginStatusPath();
-  if (!existsSync(path)) return new Map();
+  const entries = new Map<string, PluginStatusEntry>();
+  if (!existsSync(path)) return { entries };
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as {
+      host?: string;
       plugins?: Array<{ id?: string; file?: string; status?: string; error?: string }>;
       loadFailed?: Array<{ id?: string; file?: string; status?: string; error?: string }>;
     };
-    const statuses = new Map<string, PluginStatusEntry>();
     for (const entry of [...(parsed.plugins ?? []), ...(parsed.loadFailed ?? [])]) {
       const value: PluginStatusEntry = { status: normalizeStatus(entry.status), error: entry.error };
-      if (typeof entry.id === 'string' && entry.id) statuses.set(entry.id, value);
-      if (typeof entry.file === 'string' && entry.file) statuses.set(entry.file, value);
+      if (typeof entry.id === 'string' && entry.id) entries.set(entry.id, value);
+      if (typeof entry.file === 'string' && entry.file) entries.set(entry.file, value);
     }
-    return statuses;
+    return { host: typeof parsed.host === 'string' ? parsed.host : undefined, entries };
   } catch {
-    return new Map();
+    return { entries };
   }
 }
 
 function normalizeStatus(value: string | undefined): PluginStatusEntry['status'] {
-  return value === 'loaded' || value === 'registered' || value === 'failed' ? value : 'unknown';
+  return value === 'loaded' || value === 'failed' || value === 'skipped' ? value : 'unknown';
 }

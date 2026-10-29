@@ -136,10 +136,6 @@ export class PluginManager {
   /**
    * 装配全部已登记的插件。
    *
-   * `quietSkips` 给「只跑一条命令」的一次性宿主用（`mica commit`）：那种进程本来就只
-   * 提供命令相关的几面能力，别的插件因为缺能力被跳过是设计如此，不该把用户的插件健康
-   * 状态写成「宿主未提供能力」。
-   *
    * `only` 把装配收窄到指定插件（`mica plugin-action` 只为一个插件的动作用）：一次性宿主
    * 不提供 `tools` / `background` 这类能力，装配无关插件只会多出一堆「缺能力」的跳过。
    *
@@ -152,7 +148,6 @@ export class PluginManager {
   async setupAll(
     baseContext: PluginBaseContext,
     options: {
-      quietSkips?: boolean;
       only?: readonly string[];
       ignoreRequirements?: boolean;
       backgroundTasks?: boolean;
@@ -305,11 +300,12 @@ export class PluginManager {
         ? []
         : missingRequirements(plugin.manifest?.requires ?? [], ctx);
       if (missing.length > 0) {
+        // 缺宿主能力是**这一份宿主**的事实，不是插件「现在怎么样」：TUI、`mica exec`、
+        // `mica commit` 本来就没有 `desktop` 这些面。写进所有宿主共享的 plugin-health 会
+        // 让桌面端显示一条别的宿主留下的「待配置」，而插件在桌面端其实好好的。留痕走日志
+        // 与 skipped 报告（用户插件那份落进 plugin-status.json）。
         report.skipped.push({ pluginId: plugin.id, missing });
-        if (!options.quietSkips) {
-          logger.warn('plugin:skipped', { missing });
-          ctx.health.report({ level: 'warn', message: `宿主未提供能力：${missing.join(', ')}` });
-        }
+        logger.warn('plugin:skipped', { missing });
         continue;
       }
 

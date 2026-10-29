@@ -58,9 +58,6 @@ export async function runPluginCommand(options: PluginCommandRunOptions): Promis
       // `mica commit` 也有「跟随主配置」这条路：没有会话，就用配置里的当前 provider。
       pluginModels: createPluginModels({ resolveMainProvider: (model) => readActiveProviderConfig(model ? { model } : {}) }),
     },
-    // 这里只有命令相关的几面能力，别的插件因为缺能力被跳过是正常现象，
-    // 不能把「跳过」写进用户的插件健康状态。
-    { quietSkips: true },
   );
 
   const command = `/${options.name.trim().replace(/^\//, '')}`;

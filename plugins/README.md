@@ -191,6 +191,8 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 `requires` 要写全插件实际触碰的每一面 `ctx.*`：`actions`、`background`、`commands`、`desktop`、`events`、`hooks`、`prompt`、
 `session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`、`models`、`llm`。宿主缺哪个，
 插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
+这条跳过**不写插件的健康状态**：缺哪一面取决于当前宿主（TUI / `mica exec` 没有 `desktop`），
+写进所有宿主共享的 `plugin-health` 会让桌面端显示一条别的宿主留下的「待配置」。
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
 `ctx.agent.compactIdleHistory()` 是同一个能力面的另一半：在轮次之外把**已经落盘的**历史快速压
 一次（本地清理，不调模型），只在能独占写会话文件的常驻宿主里提供——`mica exec` 不落盘、TUI 走
@@ -420,6 +422,8 @@ ctx.desktop.sessionMenu({
 
 - `ctx.health.report({ level: 'warn' | 'error', message, hint })` 写
   `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「待配置 / 出错」以及原因。
+- 只上报插件自己的状态：缺宿主能力由宿主记进 `plugin-status.json` 的 `skipped`，
+  不要为了让页面「显示点什么」替宿主写一条健康状态。
 - 缺配置、外部服务拒绝、上一次请求失败，都属于必须上报的情况。
 - hook 抛错由宿主记录并继续运行；需要某项宿主能力却没声明 `requires`，会在 setup 时抛错。
 
@@ -507,7 +511,8 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 `export default function setup(ctx)`），id 一律加 `user.` 前缀。它们由 `mica app-server`
 （桌面端）与 TUI 启动时加载，`mica exec` 这类一次性运行不加载——避免插件的定时器、外部命令
 与额外模型请求混进一次基准运行。加载结果写 `$MICA_HOME/plugin-status.json`，配置页据此显示
-「加载失败 / 缺少宿主能力」。
+「已加载 / 已跳过 / 加载失败」。这份记录**包含官方插件**，并带上是哪个宿主装配的（`host`）：
+同一个插件在 TUI 里被跳过、在桌面宿主里正常运行都是正常的，页面因此把宿主一起说出来。
 
 用户插件没有构建步骤，入口是纯 JS：只用 Node 内置模块与 `ctx`，不要 `import` 仓库里的
 `@packages/*`（单二进制里没有那些路径）。要界面就用上面的 `desktop.panel`，要往右键菜单里加

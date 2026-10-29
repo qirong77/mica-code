@@ -181,7 +181,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - `HeadlessTurnExecutor` 不触碰 Ink/UI；每轮顺序：取 lease → `refreshFromStore()` → `reserveRunId()`；取锁失败返回 `busy-remote`。
 - 每轮都发 `turn:finish`，结果只有 completed / aborted / error；排队轮次同样逐轮取 lease。
-- `HeadlessPluginHost` 是 exec / app-server 共用的插件装配层；MCP 显式初始化，不注册输入框与命令 UI。用户插件（`$MICA_HOME/plugins`）只在常驻宿主装：`loadUserPlugins` + `writeUserPluginStatus`（`createHeadlessPluginHost({ loadUserPlugins: true })`，app-server 传 true、exec 不传），面板与桌面入口都靠它。
+- `HeadlessPluginHost` 是 exec / app-server 共用的插件装配层；MCP 显式初始化，不注册输入框与命令 UI。用户插件（`$MICA_HOME/plugins`）只在常驻宿主装：`loadUserPlugins` + `writePluginStatus`（`createHeadlessPluginHost({ loadUserPlugins: true })`，app-server 传 true、exec 不传），面板与桌面入口都靠它。
 - `mica/turn/input`（`MICA_TURN_NOTIFICATIONS.input`）在插件发起的轮次启动**之前**发出，带展示文本；晚于 `turn/started` 会让页面把上一轮的文本当成本轮用户消息。
 - `attachPluginLayer()` 同步替换 executor queue，避免插件写入与 loop 读取不同实例。
 - `mica app-server` 是每会话常驻进程；stdin/stdout 使用 Codex v2 JSONL。framing 在 `mica-runtime/codexProtocol.ts`，事件投影在 `runtime/CodexProjector.ts`。
@@ -215,7 +215,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 官方插件在仓库根 `plugins/<id>/`：清单登记在 `mica-official-plugins/manifests.ts`，入口登记在 `index.ts`。用户插件在 `$MICA_HOME/plugins/<id>/`，由 `FilePluginLoader` 启动时加载，id 一律加 `user.` 前缀。
 - 没有 `plugin.json` 的目录、散落成文件的 `.js` / `.mjs` 都不是插件，加载器不猜。
 - 启停状态在 `$MICA_HOME/plugins-state.json`（`{ "disabled": [...] }`）；停用的插件在注册阶段跳过，改完重开会话生效。
-- `requires` 必须写全插件触碰的每一面：`actions` / `agent` / `background` / `commands` / `desktop` / `events` / `git` / `hooks` / `llm` / `models` / `prompt` / `runtime` / `session` / `sessionSettings` / `sessionState` / `settings` / `skills` / `subagents` / `tools` / `ui`。缺一项整插件跳过，原因写进 `plugin-status.json` 的 `skipped`。
+- `requires` 必须写全插件触碰的每一面：`actions` / `agent` / `background` / `commands` / `desktop` / `events` / `git` / `hooks` / `llm` / `models` / `prompt` / `runtime` / `session` / `sessionSettings` / `sessionState` / `settings` / `skills` / `subagents` / `tools` / `ui`。缺一项整插件跳过，原因写进 `plugin-status.json` 的 `skipped`；跳过**不写** `plugin-health`——缺哪一面是当前宿主的事实（TUI / `mica exec` 没有 `desktop`），写进所有宿主共享的健康状态会让桌面端显示别的宿主留下的「待配置」。
+- `plugin-status.json` 由 `mica-plugin` 的 `writePluginStatus()` 唯一写盘：记**全部**装配过的插件（官方与用户一视同仁）、写下 `host`（`tui` / `app-server`）。配置页显示「已跳过 · TUI」，跳过不参与「插件坏了」的判定；没有记录时页面如实说「尚未加载」，不给官方插件编默认值。
 - 属于插件、但不属于任何一次会话的操作（注册到中转机、试连接口、生成访问链接）声明成清单 `actions`，实现用 `ctx.actions.register(key, handler)`，结果是 `{ message?, link? }`。配置页在插件设置下方画按钮、就地显示结果，**不要**为此把用户跳去对话、也不要为此要求会话宿主在线：执行它的是 `mica plugin-action --plugin <id> --action <key>`，一个只装配目标插件的一次性进程（没有 agent、没有 turn）。动作通常要顺手写设置与状态文件（`ctx.settings.set()` + `plugin-data/<id>/data.json`），这样页面刷新后仍能看到结果。
 - 需要「一直在跑」的东西（周期轮询、心跳、增量同步）注册成 `ctx.background.register(...)`，不要自己 `setInterval`，更不要装成 launchd / systemd 服务：那种形态在插件停用后还在跑，用户以为关了其实没有。间隔用 `every: number | (() => number)` 声明，退避策略留在插件里；单轮抛错只记健康状态与日志。跟着插件一起结束的子进程在 `ctx.onDispose()` 里杀掉，状态写 `$MICA_HOME/plugin-data/<id>/`。
 - 官方插件载在**每会话**的 app-server 里（会话关掉进程就退），所以「必须活得比会话久」的常驻工作不能只靠进程内循环，要由常驻任务监管一个脱离父进程的子进程；随包脚本先落盘到 `$MICA_HOME` 再用 `node` 跑（`packages/mica-pty` 的 helper 与 computer-use 的 runtime 都是这个模式），源码内嵌由脚本生成。

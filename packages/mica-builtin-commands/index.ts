@@ -108,7 +108,7 @@ export {
 } from './startup/validate-config.js';
 export type { ConfigChange, ConfigIssue, ConfigValidationResult } from './startup/validate-config.js';
 export { default as setupProcessDiagnostics } from './startup/process-diagnostics.js';
-export { default as setupFilePlugins, writeFilePluginStatus } from './startup/file-plugins.js';
+export { default as setupFilePlugins } from './startup/file-plugins.js';
 export { default as setupModelEffortContext } from './startup/model-effort-context/index.js';
 export {
   __resetModelsCacheForTests,

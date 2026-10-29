@@ -403,9 +403,10 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       : null;
     const report = await plugins.setupAll(baseContext);
     if (userPlugins) {
-      micaPlugin.writeUserPluginStatus({
+      micaPlugin.writePluginStatus({
         pluginsDir: paths.plugins,
         configDir: paths.config,
+        host: 'app-server',
         filePlugins: userPlugins,
         setupReport: report,
       });

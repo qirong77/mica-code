@@ -37,7 +37,7 @@ import { clearActiveContext, setActiveContext } from './activeContext.js';
 import { LocalRuntimeController } from './adapters/LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './adapters/MicaUiRuntimeBridge.js';
 import { finalizeInteractiveUi } from './finalizeInteractiveUi.js';
-import setupFilePlugins, { writeFilePluginStatus } from '@packages/mica-builtin-commands/startup/file-plugins.js';
+import setupFilePlugins from '@packages/mica-builtin-commands/startup/file-plugins.js';
 import validateConfigPlugin from '@packages/mica-builtin-commands/startup/validate-config.js';
 import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 
@@ -295,7 +295,13 @@ export class Application {
         },
         logger: pluginLogger,
       });
-      writeFilePluginStatus({ paths: pluginPaths, logger: pluginLogger }, filePlugins, setupReport);
+      micaPlugin.writePluginStatus({
+        pluginsDir: pluginPaths.plugins,
+        configDir: pluginPaths.config,
+        host: 'tui',
+        filePlugins,
+        setupReport,
+      });
       syncCommandDropdown(commands, runtime);
 
       const resumed = startupSession ? sessionController.resumeLoaded(startupSession) : null;

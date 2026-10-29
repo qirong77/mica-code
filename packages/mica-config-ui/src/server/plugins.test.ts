@@ -99,6 +99,42 @@ describe('getPluginsDetails', () => {
     });
   });
 
+  it('reports a host-capability skip without calling the plugin broken', () => {
+    // TUI 里没有 `desktop` 这一面：被跳过不等于插件坏了，页面必须同时给出宿主，
+    // 否则「在别的宿主里跳过」会被读成故障。
+    writeFileSync(
+      join(process.env.MICA_HOME!, 'plugin-status.json'),
+      JSON.stringify({
+        host: 'tui',
+        plugins: [
+          { id: 'session-copy', status: 'skipped', error: '缺少宿主能力：desktop' },
+          { id: 'todo', status: 'loaded' },
+        ],
+      }),
+    );
+
+    const details = getPluginsDetails();
+    const skipped = details.plugins.find((plugin) => plugin.id === 'session-copy');
+    expect(skipped).toMatchObject({
+      state: 'enabled',
+      loadStatus: 'skipped',
+      loadHost: 'tui',
+      skipReason: '缺少宿主能力：desktop',
+    });
+    expect(skipped?.error).toBeUndefined();
+    expect(details.plugins.find((plugin) => plugin.id === 'todo')).toMatchObject({
+      state: 'enabled',
+      loadStatus: 'loaded',
+      loadHost: 'tui',
+    });
+  });
+
+  it('does not invent a load status for official plugins nobody has assembled yet', () => {
+    const plugin = getPluginsDetails().plugins.find((entry) => entry.id === 'todo');
+    expect(plugin?.loadStatus).toBeUndefined();
+    expect(plugin?.loadHost).toBeUndefined();
+  });
+
   it('resolves declared desktop checks into the catalog rows the page renders', () => {
     const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'needs-permissions');
     mkdirSync(pluginDir, { recursive: true });

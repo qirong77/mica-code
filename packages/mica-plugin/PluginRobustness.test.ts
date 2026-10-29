@@ -104,8 +104,9 @@ describe('PluginManager robustness', () => {
     expect(setup).not.toHaveBeenCalled();
     expect(report.skipped).toEqual([{ pluginId: 'needs-prompt', missing: ['prompt'] }]);
     expect(report.failed).toEqual([]);
-    // 跳过必须留痕，否则页面上只能看到一个「已启用」却什么都不做的插件。
-    expect(readPluginHealth('needs-prompt', { configDir })?.message).toContain('prompt');
+    // 跳过只进报告与日志，不进插件健康状态：缺哪一面取决于当前宿主（TUI / exec 没有
+    // desktop），写进所有宿主共享的 plugin-health 会让别的宿主看到一条过时的「待配置」。
+    expect(readPluginHealth('needs-prompt', { configDir })).toBeNull();
   });
 
   it('records invalid settings as a health warning without blocking startup', async () => {
@@ -121,19 +122,6 @@ describe('PluginManager robustness', () => {
 
     expect(report.loaded).toEqual(['needs-config']);
     expect(readPluginHealth('needs-config', { configDir })?.level).toBe('warn');
-  });
-
-  it('leaves plugin health untouched when the host asked for quiet skips', async () => {
-    const manager = new PluginManager();
-    const setup = vi.fn();
-    manager.register(plugin('needs-prompt', setup, manifest(['prompt'])));
-
-    const report = await manager.setupAll(baseContext(configDir), { quietSkips: true });
-
-    expect(setup).not.toHaveBeenCalled();
-    expect(report.skipped).toEqual([{ pluginId: 'needs-prompt', missing: ['prompt'] }]);
-    // 一次性命令宿主只提供命令相关的几面能力：跳过是设计如此，不能写进用户的插件健康状态。
-    expect(readPluginHealth('needs-prompt', { configDir })).toBeNull();
   });
 
   it('surfaces hook handler errors through the plugin health channel', async () => {

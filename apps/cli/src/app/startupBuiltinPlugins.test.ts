@@ -1,22 +1,11 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import startConfigWebWorker from './configWebWorker.js';
-import setupFilePlugins, { writeFilePluginStatus } from '@packages/mica-builtin-commands/startup/file-plugins.js';
+import setupFilePlugins from '@packages/mica-builtin-commands/startup/file-plugins.js';
 import setupProcessDiagnostics, {
   defaultProcessTitle,
 } from '@packages/mica-builtin-commands/startup/process-diagnostics.js';
 import { parsePluginManifest } from '@packages/mica-plugin/index.js';
-
-const tempDirectories: string[] = [];
-
-afterEach(() => {
-  for (const directory of tempDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
 
 describe('file-plugins startup plugin', () => {
   it('loads and registers non-duplicate file plugins', async () => {
@@ -50,36 +39,6 @@ describe('file-plugins startup plugin', () => {
     expect(register).toHaveBeenCalledOnce();
     expect(register).toHaveBeenCalledWith(available);
     expect(result.plugins).toEqual([duplicate, available]);
-  });
-
-  it('writes setup and import failures to the Config Web status file', () => {
-    const config = createTempDirectory();
-    const status = writeFilePluginStatus(
-      { paths: { config, plugins: '/plugins' } },
-      {
-        loaded: [
-          { pluginId: 'user.ready', file: '/plugins/ready/index.js', manifest: manifestFor('ready') },
-          { pluginId: 'user.broken', file: '/plugins/broken/index.js', manifest: manifestFor('broken') },
-        ],
-        failed: [{ file: '/plugins/import-error', error: new Error('import failed') }],
-      },
-      {
-        loaded: ['user.ready'],
-        failed: [{ pluginId: 'user.broken', error: new Error('setup failed') }],
-        skipped: [],
-      },
-    );
-
-    const persisted = JSON.parse(readFileSync(join(config, 'plugin-status.json'), 'utf-8'));
-    expect(persisted).toMatchObject({
-      root: '/plugins',
-      plugins: [
-        { id: 'user.ready', status: 'loaded' },
-        { id: 'user.broken', status: 'failed', error: 'setup failed' },
-      ],
-      loadFailed: [{ file: '/plugins/import-error', status: 'failed', error: 'import failed' }],
-    });
-    expect(status.updatedAt).toEqual(expect.any(String));
   });
 });
 
@@ -122,12 +81,6 @@ describe('process-diagnostics startup plugin', () => {
     expect(reportError).toHaveBeenCalledTimes(2);
   });
 });
-
-function createTempDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), 'mica-startup-plugin-'));
-  tempDirectories.push(directory);
-  return directory;
-}
 
 function manifestFor(id: string) {
   const result = parsePluginManifest({ id, name: id, version: '1.0.0' });

@@ -22,7 +22,13 @@ import type {
   ConfigWebPluginsDetails,
 } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
-import { desktopCheckStatusLabel, pluginLoadStatusLabel, pluginSourceLabel, pluginStateLabel } from '../labels.js';
+import {
+  desktopCheckStatusLabel,
+  pluginHostLabel,
+  pluginLoadStatusLabel,
+  pluginSourceLabel,
+  pluginStateLabel,
+} from '../labels.js';
 import { useAutoSave } from '../useAutoSave.js';
 
 /** 运行条件状态 → 标签色调。未知用中性色：没探测到不等于没问题。 */
@@ -541,8 +547,12 @@ function PluginInfoGroup({ plugin }: { plugin: ConfigWebPlugin }) {
     { label: '标识', value: plugin.id, mono: true },
     {
       label: '加载',
-      value: pluginLoadStatusLabel(plugin.loadStatus ?? (plugin.source === 'official' ? 'loaded' : 'unknown')),
+      // 没有记录就如实说「尚未加载」：官方插件确实随包分发，但「装上了」不等于「这个宿主
+      // 把它装配成功了」，替它编一个「已加载」正是这条提示曾经误导人的地方。
+      value: loadStatusText(plugin),
+      title: plugin.skipReason ?? plugin.loadStatus,
     },
+    ...(plugin.skipReason ? [{ label: '跳过原因', value: plugin.skipReason, title: plugin.skipReason }] : []),
     { label: '目录', value: plugin.location, mono: true },
     { label: '日志', value: plugin.logFile, mono: true },
   ];
@@ -560,6 +570,13 @@ function PluginInfoGroup({ plugin }: { plugin: ConfigWebPlugin }) {
       </dl>
     </SettingsGroup>
   );
+}
+
+/** 「已加载 · TUI」：结论与写它的宿主一起读，跨宿主的跳过才不会被当成故障。 */
+function loadStatusText(plugin: ConfigWebPlugin): string {
+  const status = pluginLoadStatusLabel(plugin.loadStatus);
+  const host = pluginHostLabel(plugin.loadHost);
+  return plugin.loadStatus && host ? `${status} · ${host}` : status;
 }
 
 /**

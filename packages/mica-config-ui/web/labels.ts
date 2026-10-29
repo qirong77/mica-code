@@ -39,10 +39,21 @@ export function pluginStateLabel(state: string | undefined): string {
 /** `plugin-status.json` 里的机器值不上屏，统一翻成中文。 */
 export function pluginLoadStatusLabel(status: string | undefined): string {
   if (status === 'loaded') return '已加载';
-  if (status === 'registered') return '已注册';
   if (status === 'failed') return '加载失败';
   if (status === 'skipped') return '已跳过';
   return '尚未加载';
+}
+
+/**
+ * 装配记录来自哪个宿主。
+ *
+ * 两个宿主能兑现的能力不同（TUI 没有 `desktop`，桌面宿主没有终端输入框），所以「已跳过」
+ * 必须连宿主一起读，否则会被当成插件坏了。
+ */
+export function pluginHostLabel(host: string | undefined): string {
+  if (host === 'tui') return 'TUI';
+  if (host === 'app-server') return '会话宿主（app-server）';
+  return host ?? '';
 }
 
 /** 插件运行条件的状态；「未知」是探测不到（例如浏览器宿主），不是「没开」。 */

@@ -330,8 +330,17 @@ export type ConfigWebPlugin = {
   logFile: string;
   /** 插件自报的最近一次状态（正常 / 待配置 / 出错）；没上报过为 null。 */
   health: ConfigWebPluginHealth | null;
-  /** plugin-status.json 记录的上一次加载结果。 */
-  loadStatus?: 'loaded' | 'registered' | 'failed' | 'skipped' | 'unknown';
+  /** plugin-status.json 记录的上一次装配结果；没被任何宿主装配过时为 undefined。 */
+  loadStatus?: 'loaded' | 'failed' | 'skipped' | 'unknown';
+  /**
+   * 写下那条记录的宿主（`tui` / `app-server`）。
+   *
+   * 装配结论只对它成立：同一个插件在 TUI 里被跳过、在桌面宿主里正常运行都很正常。
+   * 页面必须把宿主说出来，否则读者会把跨宿主的跳过当成插件故障。
+   */
+  loadHost?: string;
+  /** 被跳过时缺的宿主能力（「缺少宿主能力：desktop」）。不是故障，不进 `error`。 */
+  skipReason?: string;
   error?: string;
 };
 

@@ -76,7 +76,6 @@ export async function runPluginAction(options: PluginActionRunOptions): Promise<
     // 只装目标插件：这个进程不提供 tools / background 这类能力，无关插件装配进来
     // 只会得到一堆「缺能力」的跳过记录。
     {
-      quietSkips: true,
       only: [options.pluginId],
       ignoreRequirements: true,
       // 一次点击不该留下常驻进程：常驻任务只登记，不排期。

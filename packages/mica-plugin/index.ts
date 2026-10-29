@@ -4,7 +4,8 @@ import { HookRegistry } from './HookRegistry.js';
 import { ServiceContainer } from './ServiceContainer.js';
 import { createServiceToken } from './ServiceToken.js';
 import { inspectPlugins, loadFilePlugins } from './FilePluginLoader.js';
-import { loadUserPlugins, writeUserPluginStatus } from './UserPlugins.js';
+import { loadUserPlugins } from './UserPlugins.js';
+import { writePluginStatus } from './PluginStatus.js';
 import { parsePluginManifest, PLUGIN_API_VERSION, PLUGIN_MANIFEST_FILE } from './PluginManifest.js';
 import {
   PLUGIN_SETTINGS_DIR,
@@ -101,7 +102,7 @@ export const micaPlugin = {
   loadFilePlugins,
   inspectPlugins,
   loadUserPlugins,
-  writeUserPluginStatus,
+  writePluginStatus,
   parsePluginManifest,
   createPluginSettingsStore,
   normalizePluginSettingValues,
@@ -180,8 +181,9 @@ export type {
   PluginSessionMenuRegistration,
   PluginSessionMenuResult,
 } from './PluginSessionMenu.js';
-export { loadUserPlugins, writeUserPluginStatus } from './UserPlugins.js';
-export type { UserPluginStatus } from './UserPlugins.js';
+export { loadUserPlugins } from './UserPlugins.js';
+export { writePluginStatus } from './PluginStatus.js';
+export type { PluginHostKind, PluginStatusEntry, PluginStatusFile } from './PluginStatus.js';
 export {
   PLUGIN_API_VERSION,
   PLUGIN_MANIFEST_FILE,

@@ -15,7 +15,7 @@
 - 维护启停状态（`$MICA_HOME/plugins-state.json`），停用的插件在启动阶段就不注册。
 - 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。字段标 `perSession: true` 表示「这条会话可以不一样」：会话覆盖存在快照的 `pluginSessionSettings`（只存改过的键），插件改用 `ctx.sessionSettings.get()` 读合并后的生效值，`overrides()` / `set()` / `clear()` 改本会话，需要 `requires` 里有 `sessionSettings`。
 - 插件日志：`ctx.logger` 自带文件输出，落在 `resolveLogDir()`（与运行时日志同目录），按天分片、按大小轮转。
-- 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 出错」。
+- 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 出错」。只有插件自己的状态写这里；缺宿主能力由 manager 记 `plugin-status.json` 的 `skipped`（见 `PluginManager.setupAll`），不进健康文件。
 - 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
 - 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。
@@ -37,9 +37,11 @@
   立刻画出菜单（不能为它冷启动一个 app-server），处理器留在插件所在进程里；`run()` 回
   `{ copyText?, message? }`，剪贴板由页面写。`PluginSessionMenu.ts` 里是类型、进程内登记表
   （`PluginSessionMenuRegistry`）与入参/结果归一化。只在清单声明了菜单项时才提供这个入口。
-- 用户插件装载：`loadUserPlugins()` 扫描 `$MICA_HOME/plugins` 并注册进 manager，
-  `writeUserPluginStatus()` 把「加载 / 缺少宿主能力 / 失败」写进 `plugin-status.json`
-  （配置页读它）。常驻宿主（TUI、`mica app-server`）共用这两步，`mica exec` 不装用户插件。
+- 用户插件装载：`loadUserPlugins()` 扫描 `$MICA_HOME/plugins` 并注册进 manager。常驻宿主
+  （TUI、`mica app-server`）都要做这一步，`mica exec` 不装用户插件。
+- 装配结论：`writePluginStatus()` 把「加载 / 跳过（缺宿主能力）/ 失败」写进
+  `plugin-status.json`，**官方与用户插件都记**，并写下是哪个宿主装配的（`host`）。配置页
+  据此显示「已跳过 · TUI」这类结论；缺哪一面取决于宿主，所以跳过不等于插件坏了。
 
 ## 使用入口
 
@@ -134,7 +136,8 @@ context.onDispose(() => registration.dispose());
   skill 注册的类型。新增一项检查 = 在这里登记 + 桌面端（`apps/desktop/src/main/system/`）实现探测器。
 - `PluginPanel.ts`：对话右侧面板的视图类型、`PluginPanelRegistry` 与视图/动作归一化。
 - `PluginSessionMenu.ts`：会话右键菜单动作的类型、`PluginSessionMenuRegistry` 与入参/结果归一化。
-- `UserPlugins.ts`：`$MICA_HOME/plugins` 的装载与 `plugin-status.json` 写盘。
+- `UserPlugins.ts`：`$MICA_HOME/plugins` 的装载。
+- `PluginStatus.ts`：`plugin-status.json` 的形状与写盘（全部插件的装配结论 + 写它的宿主）。
 - `PluginSubagents.ts`：委派子代理的能力面类型（类型声明、spawn 入参、任务快照、`PluginSubagentRegistry`），宿主实现机制、插件提供策略。
 - `PluginSessionState.ts`：插件存进会话快照的状态的大小上限与校验。
 - `PluginLlm.ts`：`ctx.llm` 的声明类型、设置字段生成、生效值解析与请求封装（「跟随主配置」由宿主解析）。
