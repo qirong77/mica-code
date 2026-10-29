@@ -7,6 +7,35 @@ export function activeRightTermId(terms = [], savedId) {
   return terms[0]?.id ?? null
 }
 
+/**
+ * 解析界面状态里存下的终端面板清单（`rightTerms` 键）。
+ *
+ * 页面必须用这份值给 `useState` 播种，不能从空表开始等远端推过来：面板展开着
+ * （`terminalOpenByChat` 也是存下来的）而首帧看起来「这个会话没有终端」时，补建
+ * 终端的 effect 会立刻加一个，于是每开一个窗口、每刷新一次页面就多一个「终端 N」。
+ * 存下来的值来自别的进程，形状不可信，这里顺手把认不出的条目丢掉。
+ */
+export function resolveStoredRightTerms(stored) {
+  const byChat = {}
+  const active = {}
+  const source = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {}
+  const storedByChat = source.byChat
+  if (storedByChat && typeof storedByChat === 'object' && !Array.isArray(storedByChat)) {
+    for (const [chatId, terms] of Object.entries(storedByChat)) {
+      if (!Array.isArray(terms)) continue
+      const list = terms.filter((term) => term && typeof term.id === 'string' && term.id)
+      if (list.length > 0) byChat[chatId] = list
+    }
+  }
+  const storedActive = source.active
+  if (storedActive && typeof storedActive === 'object' && !Array.isArray(storedActive)) {
+    for (const [chatId, termId] of Object.entries(storedActive)) {
+      if (typeof termId === 'string' && termId) active[chatId] = termId
+    }
+  }
+  return { byChat, active }
+}
+
 /** 右侧终端的保留时长与回收扫描间隔 */
 export const TERMINAL_PANEL_RETAIN_MS = 8 * 60 * 60 * 1000
 export const TERMINAL_PANEL_SWEEP_MS = 10 * 60 * 1000

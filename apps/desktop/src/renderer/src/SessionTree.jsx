@@ -30,7 +30,8 @@ import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { nestSessions } from './session-nesting'
-import { draftMenuItems, sessionMenuItems } from './session-menu'
+import { draftMenuItems, sessionMenuItems, withExtraMenuItems } from './session-menu'
+import { parseSessionMenuAction } from './session-menu-plugins'
 import {
   annotationBadges,
   annotationMenuItems,
@@ -354,6 +355,7 @@ export function SessionTree({
   draftNodes,
   loops,
   annotations,
+  sessionMenuPlugins,
   onOpenSession,
   onSelectDraft,
   onTogglePin,
@@ -370,7 +372,8 @@ export function SessionTree({
   onMoveGroup,
   onDeleteGroup,
   onCreateSessionInGroup,
-  onToggleAnnotation
+  onToggleAnnotation,
+  onRunSessionMenu
 }) {
   const [menu, setMenu] = useState(null)
   const [detailSessionId, setDetailSessionId] = useState(null)
@@ -720,7 +723,14 @@ export function SessionTree({
 
   const runAction = (action, menuPayload) => {
     const annotation = parseAnnotationAction(action)
-    if (annotation) {
+    const pluginMenu = parseSessionMenuAction(action)
+    if (pluginMenu) {
+      // 插件动作在会话的常驻 host 里跑（插件就在那个进程），页面只负责把结果写进剪贴板。
+      onRunSessionMenu?.(
+        { sessionId: menuPayload.session.id, cwd: menuPayload.session.cwd },
+        pluginMenu
+      )
+    } else if (annotation) {
       const target = toggleTarget(annotations, menuPayload.session.id, annotation)
       onToggleAnnotation?.(menuPayload.session.id, target)
     } else if (action === 'pin' || action === 'unpin') onTogglePin(menuPayload.session.id)
@@ -744,13 +754,12 @@ export function SessionTree({
       pinned: !!pins[session.id],
       inProject: sectionOf(session.id).section === 'project'
     })
-    const annotationsItems = annotationMenuItems(annotations, session.id)
-    if (!annotationsItems.length) return items
-    const dangerIndex = items.findIndex((item) => Array.isArray(item) && item[2])
-    if (dangerIndex < 0) return [...items, 'separator', ...annotationsItems]
-    const head = items.slice(0, dangerIndex)
-    while (head[head.length - 1] === 'separator') head.pop()
-    return [...head, 'separator', ...annotationsItems, 'separator', ...items.slice(dangerIndex)]
+    // 插件贡献的两类项都插在删除之前：会话标记（数据，画点/勾）与插件动作（跑一段
+    // 插件代码，例如把会话导出成 markdown 放进剪贴板）。
+    return withExtraMenuItems(items, [
+      ...annotationMenuItems(annotations, session.id),
+      ...(Array.isArray(sessionMenuPlugins) ? sessionMenuPlugins : [])
+    ])
   }
 
   const groupMenuItems = () => [

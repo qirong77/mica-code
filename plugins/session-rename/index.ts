@@ -200,7 +200,7 @@ export default function setup(ctx: PluginContext): void {
             `会话：${info ? `${info.id}（titleSource: ${info.titleSource ?? 'derived'}）` : '无'}`,
             `设置文件：${ctx.settings.path ?? '不可用'}`,
             `健康：${ctx.health.path ?? '不可用'}`,
-            '日志：os.tmpdir()/mica-logs/plugin-session-rename-*.jsonl',
+            `日志：${pluginLogPath(ctx.pluginId)}`,
           ].join('\n'),
           8000,
         );

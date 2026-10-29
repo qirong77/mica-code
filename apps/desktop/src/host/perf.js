@@ -3,7 +3,7 @@
 // 由 renderer 的 perf-probe.js 每 15 秒按批推送：每秒一个采样点，全量记录不筛选
 // （只记"异常"会漏掉用户主观觉得卡、但没越过阈值的时刻，也拿不到卡顿前的上下文）。
 //
-// 落到 `os.tmpdir()/mica-logs/perf-YYYYMMDD.jsonl`，开机由 launchd 清空；
+// 落到 `~/Library/Logs/mica/perf-YYYYMMDD.jsonl`，保留 7 天，重启不丢；
 // 一行一个采样点，每批带一条 batch 事件标记批次。
 import { ipcMain } from 'electron'
 import { logger } from './log.js'

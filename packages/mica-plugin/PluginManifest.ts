@@ -18,6 +18,7 @@ import {
   type PluginDesktopPanel,
   type PluginPanelShortcut,
 } from './PluginDesktop.js';
+import type { PluginSessionMenuItem } from './PluginSessionMenu.js';
 
 /**
  * 插件包的清单（`plugin.json`）。
@@ -114,6 +115,14 @@ export type PluginManifest = {
    * `ctx.desktop.panel()` 给数据、宿主渲染——用户插件也能用，不依赖前端模块。
    */
   desktopPanel: PluginDesktopPanel | null;
+  /**
+   * 会话右键菜单里的动作项（清单 `desktop.sessionMenu`）。清单只声明「菜单上有哪几行」，
+   * 点了做什么由插件经 `ctx.desktop.sessionMenu()` 注册的处理器决定。
+   *
+   * 声明在清单里是因为右键要同步出菜单：页面从配置页那份插件数据就能列出这些项，
+   * 不需要为了「有没有菜单项」冷启动一个 app-server。
+   */
+  desktopSessionMenu: PluginSessionMenuItem[];
 };
 
 export type PluginStatusField = {
@@ -267,6 +276,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       status: status.value,
       actions: actions.value,
       desktopPanel: desktop.value.panel,
+      desktopSessionMenu: desktop.value.sessionMenu,
     },
   };
 }
@@ -324,9 +334,16 @@ function readDesktop(
   pluginName: string,
 ): {
   ok: true;
-  value: { checks: DesktopCheckId[]; entry: PluginDesktopEntry | null; panel: PluginDesktopPanel | null };
+  value: {
+    checks: DesktopCheckId[];
+    entry: PluginDesktopEntry | null;
+    panel: PluginDesktopPanel | null;
+    sessionMenu: PluginSessionMenuItem[];
+  };
 } | { ok: false; error: string } {
-  if (input === undefined) return { ok: true, value: { checks: [], entry: null, panel: null } };
+  if (input === undefined) {
+    return { ok: true, value: { checks: [], entry: null, panel: null, sessionMenu: [] } };
+  }
   if (!isRecord(input)) return { ok: false, error: 'desktop 必须是对象' };
 
   const rawChecks = input.checks;
@@ -343,8 +360,15 @@ function readDesktop(
 
   const panel = readDesktopPanel(input.panel, pluginName);
   if (!panel.ok) return panel;
+  const sessionMenu = readSessionMenu(input.sessionMenu);
+  if (!sessionMenu.ok) return sessionMenu;
   const rawEntry = input.entry;
-  if (rawEntry === undefined) return { ok: true, value: { checks, entry: null, panel: panel.value } };
+  if (rawEntry === undefined) {
+    return {
+      ok: true,
+      value: { checks, entry: null, panel: panel.value, sessionMenu: sessionMenu.value },
+    };
+  }
   if (!isRecord(rawEntry)) return { ok: false, error: 'desktop.entry 必须是对象' };
   const rawLabel = rawEntry.label;
   if (rawLabel !== undefined && typeof rawLabel !== 'string') {
@@ -352,7 +376,36 @@ function readDesktop(
   }
   // 侧栏那一行只有一行的宽度：文案留空的退化成语义（用插件名）而不是画一行空白。
   const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
-  return { ok: true, value: { checks, entry: { label }, panel: panel.value } };
+  return {
+    ok: true,
+    value: { checks, entry: { label }, panel: panel.value, sessionMenu: sessionMenu.value },
+  };
+}
+
+/**
+ * `desktop.sessionMenu`：会话右键菜单里的动作项。
+ *
+ * 每项必须有文案与动作 id——只给文案的菜单项点了没反应，只给 id 的在菜单上看不出来，
+ * 两种都是清单错误。动作 id 在同一插件里必须唯一，否则两个菜单项会跑到同一个分支。
+ */
+function readSessionMenu(
+  input: unknown,
+): { ok: true; value: PluginSessionMenuItem[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(input)) return { ok: false, error: 'desktop.sessionMenu 必须是数组' };
+  const items: PluginSessionMenuItem[] = [];
+  for (const entry of input) {
+    if (!isRecord(entry)) return { ok: false, error: 'desktop.sessionMenu 的每一项必须是对象' };
+    const label = readString(entry.label)?.trim();
+    const action = readString(entry.action)?.trim();
+    if (!label) return { ok: false, error: 'desktop.sessionMenu 项缺少 label' };
+    if (!action) return { ok: false, error: `desktop.sessionMenu「${label}」缺少 action` };
+    if (items.some((item) => item.action === action)) {
+      return { ok: false, error: `desktop.sessionMenu 有重复的 action：${action}` };
+    }
+    items.push({ label, action });
+  }
+  return { ok: true, value: items };
 }
 
 /**

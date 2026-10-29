@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
+import { pluginLogPath } from '@packages/mica-plugin/index.js';
 import {
   CURATOR_SYSTEM_PROMPT,
   applyCuratorOperations,
@@ -186,7 +187,7 @@ const plugin: MicaPlugin = {
         ctx.health.report({
           level: 'warn',
           message: `记忆整理出错：${message}`,
-          hint: '查看插件日志（os.tmpdir()/mica-logs/plugin-memory-*.jsonl）。',
+          hint: `查看插件日志（${pluginLogPath(ctx.pluginId)}）。`,
         });
         return { ok: false, message: `记忆整理出错：${message}` };
       } finally {

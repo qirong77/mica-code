@@ -4,6 +4,7 @@ import {
   decideAutoCompactStep,
   normalizeCounters,
   settingsFromValues,
+  shouldCompactOnReturn,
   shouldEscalateToModel,
   type AutoCompactCounters,
   type AutoCompactStep,
@@ -16,12 +17,14 @@ const PLUGIN_ID = 'auto-compact';
  * 下一次请求还没发出」的间隙把历史压小，而不是等整个 turn 跑完——长任务里 turn 可能
  * 还要跑几十次请求，等到结束再压缩等于整段都在为膨胀的上下文付费。
  *
- * 三条规则：
+ * 四条规则：
  * - 快速压缩：ctx ≥ quickThresholdK 且次数没用完，本地把工具结果 / 工具参数正文 /
  *   媒体块换成占位符（不调用模型、不丢轮次）。
  * - 模型压缩：本地清理后仍 ≥ modelThresholdK 且次数没用完，调用模型生成 checkpoint 摘要。
  * - 节流：两次压缩之间至少间隔 minIntervalMinutes，免得同一段上下文被反复触发。唯一
  *   的例外是同一次触发里「快速 →（清不掉）模型」的升级：它在同一次调用里发生，算一次。
+ * - 空闲回来：会话空闲超过 idleMinutes、用户又在输入框里重新敲字时，先压一次快速压缩。
+ *   这一条不看阈值——它抢的是「下一轮请求马上就到」的提前量，把压缩从请求里挪到间隙里。
  *
  * 计数存在**会话快照的插件状态**里（`ctx.sessionState`），不是宿主的一张全局表：
  * 一条会话压过几次，是这条会话自己的事实，resume / fork 都该跟着走。设置的默认值在
@@ -44,6 +47,9 @@ const plugin: MicaPlugin = {
     // 启动即校验一次：配置残缺时用户应该马上在插件页看到「待配置」，而不是等到
     // 第一次压缩才发现插件其实没法工作。
     readSettings(ctx);
+    // 这条会话最后一次活动的时间：「空闲了多久」就靠它。轮次开始/结束也算活动——
+    // 一轮跑了半小时之后紧接着敲字，不该被当成离开了很久。
+    let lastActivityAt = seedLastActivity(ctx);
 
     const registration = agentApi.onIterationRewrite(async (messages, agent) => {
       if (agent.mode === 'one-shot') return null;
@@ -79,6 +85,32 @@ const plugin: MicaPlugin = {
     });
     ctx.onDispose(() => registration.dispose());
 
+    // 空闲后重新输入。只有「宿主能独占写会话文件 + 有会话级状态」时才成立：`mica exec`
+    // 不落盘，TUI 的压缩走 `/compact`。缺这条通路时连订阅都不建，免得每敲一次字都白算。
+    if (ctx.sessionState && agentApi.compactIdleHistory) {
+      const markActivity = (at: number) => {
+        lastActivityAt = at;
+        persistState(ctx, {
+          ...normalizeCounters(ctx.sessionState!.get()),
+          lastActivityAt: new Date(at).toISOString(),
+        });
+      };
+      const events = ctx.events.on('event', (event) => {
+        if (event.type !== 'input:activity') return;
+        const now = Date.now();
+        const idleMs = now - lastActivityAt;
+        lastActivityAt = now;
+        void compactOnReturn(ctx, agentApi, idleMs, now);
+      });
+      const turnBefore = ctx.hooks.on('turn:before', () => markActivity(Date.now()));
+      const turnAfter = ctx.hooks.on('turn:after', () => markActivity(Date.now()));
+      ctx.onDispose(() => {
+        events.dispose();
+        turnBefore.dispose();
+        turnAfter.dispose();
+      });
+    }
+
     if (ctx.settings.validate().length === 0) {
       ctx.health.report({ level: 'ok', message: '自动压缩已就绪' });
     }
@@ -107,6 +139,69 @@ function readSettings(ctx: PluginContext) {
     });
   }
   return settings;
+}
+
+/**
+ * 会话状态里没有活动时间（第一次跑这条会话、或者从更早的版本升上来）时当成「刚刚
+ * 活动过」：少压一次无害，把一条刚打开的会话当成空闲三天反而会平白多写一次盘。
+ */
+function seedLastActivity(ctx: PluginContext): number {
+  const parsed = Date.parse(normalizeCounters(ctx.sessionState?.get()).lastActivityAt ?? '');
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function persistState(ctx: PluginContext, value: AutoCompactCounters): void {
+  ctx.sessionState?.set(value);
+}
+
+/**
+ * 用户回来了：会话空闲够久就先做一次快速压缩，让接下来那一轮请求按压小的历史发出。
+ *
+ * 宿主返回 `null` 表示这次没压成（会话正忙、别的进程持锁、没有可清理的内容），
+ * 那也不消耗次数——下一次请求仍按阈值判断。
+ */
+async function compactOnReturn(
+  ctx: PluginContext,
+  agentApi: NonNullable<PluginContext['agent']>,
+  idleMs: number,
+  nowMs: number,
+): Promise<void> {
+  const compact = agentApi.compactIdleHistory;
+  if (!compact) return;
+  const settings = readSettings(ctx);
+  const counters = normalizeCounters(ctx.sessionState?.get());
+  if (!shouldCompactOnReturn({ settings, counters, idleMs, nowMs })) return;
+
+  try {
+    const result = await compact();
+    if (!result) {
+      ctx.logger.info('auto-compact:idle-skipped', { idleMs });
+      return;
+    }
+    // 重新读一次而不是复用上面那份：压缩本身会改会话状态（计数也在里面），
+    // 按最新的合并才不会把谁的写入抹掉。
+    const next = normalizeCounters(ctx.sessionState?.get());
+    next.quickRuns += 1;
+    next.lastKind = 'quick';
+    next.lastRunAt = new Date(nowMs).toISOString();
+    next.lastSavedTokens = result.savedTokens;
+    next.lastActivityAt = new Date(nowMs).toISOString();
+    persistState(ctx, next);
+    ctx.logger.info('auto-compact:idle-applied', { idleMs, savedTokens: result.savedTokens });
+    ctx.health.report({
+      level: 'ok',
+      message: `空闲 ${Math.round(idleMs / 60_000)} 分钟后重新输入，快速压缩省下约 ${result.savedTokens} tokens`,
+    });
+  } catch (error) {
+    // 提前量失败不该影响用户说话：记日志 + 一条可见但不打断的状态。
+    const message = error instanceof Error ? error.message : String(error);
+    ctx.logger.warn('auto-compact:idle-failed', { error: message });
+    ctx.health.report({
+      level: 'warn',
+      message: `空闲后的快速压缩未能生效：${message}`,
+      hint: '会话下次请求时仍会按阈值自动压缩；持续出现请查看插件日志。',
+    });
+  }
 }
 
 async function tryCompact(

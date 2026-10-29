@@ -9,6 +9,7 @@ import memorySetup from '../../plugins/memory/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
 import sessionNotesSetup from '../../plugins/session-notes/index.js';
+import sessionCopySetup from '../../plugins/session-copy/index.js';
 import sessionTagsSetup from '../../plugins/session-tags/index.js';
 import sidecarSetup from '../../plugins/sidecar/index.js';
 import subagentSetup from '../../plugins/subagent/index.js';
@@ -33,6 +34,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   'web-search': webSearchSetup,
   todo: todoSetup,
   'session-notes': sessionNotesSetup,
+  'session-copy': sessionCopySetup,
   'session-rename': sessionRenameSetup,
   'session-tags': sessionTagsSetup,
   sidecar: sidecarSetup,

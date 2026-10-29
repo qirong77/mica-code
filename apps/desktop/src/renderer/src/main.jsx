@@ -20,7 +20,7 @@ if (new URLSearchParams(window.location.search).get('viewport-debug') === '1') {
     .catch((error) => console.warn('无法启动视口诊断', error))
 }
 
-// 性能埋点默认开启：每秒采样、每 15 秒整批落到系统 temp（开机自动清空）。
+// 性能埋点默认开启：每秒采样、每 15 秒整批落到日志目录（保留 7 天，重启不丢）。
 // `?perf=0` 只在需要排除探针干扰时关闭。
 const perfParam = new URLSearchParams(window.location.search).get('perf')
 if (perfParam !== '0') {

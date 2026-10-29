@@ -191,9 +191,11 @@ npm run start:web          # 运行已构建的 Web 运行时
   会话 id，客户端手里那份 thread 就对不上落盘文件名了。
 - `mica/*` 扩展通知直接送 renderer，不进 turn 重放缓冲：queue、tasks、BTW、history、capabilities、turn retrying。
 - `mica/capabilities/get|set` 读写会话能力；运行中 set 返回 `ok:false`。
+- `mica/input/activity` 是「用户在输入框敲了字」（不是提交）：宿主只把它翻成运行期事件 `input:activity`，由插件决定要不要动作。桌面端在 `ChatView` 里节流 2s 发出，没有常驻进程时 host 直接吞掉（绝不为几个按键 spawn 一个）；TUI 与 `mica exec` 不发。
 - `turn/start` / `mica/turn/editMessage` 可传 role，由 host 在启动 turn 前应用；edit 时必须在 `loadSnapshot()` 之后应用。角色缺失只 warning 并保留原角色，不为切角色重建 host。
 - `mica/notes/get|set` 读写会话笔记，落盘跟随本轮 checkpoint，不在 handler 里抢占 lease。
 - `mica/pluginPanel/view|action` 读一块插件面板的视图、转发一次动作（`pluginId + action/key/values`）；面板处理器活在常驻会话宿主里（插件就在那个进程），没有宿主时桌面端按需起一个。
+- `mica/sessionMenu/run` 转发一次会话右键菜单动作（`pluginId + action`），插件回 `{ copyText?, message? }`；处理器与面板一样活在常驻会话宿主里，没有宿主时桌面端按需起一个。
 - 改名先找常驻 host 调 `SessionController.renameCurrent`；无 host 且无其他进程 lease 时才直接写盘。
 - `mica/turn/editMessage` 把 provider history 截断到目标用户消息之前，再用新文本重跑；定位共用 `mica-common/promptText.ts`。启动失败恢复原快照。
 - `mica exec` 默认人读文本，`--json` 为 Codex ThreadEvent JSONL；保留 codex-family 参数兼容（`--cd`、`-c`、`--` 与裸 prompt）。
@@ -223,7 +225,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 运行状态由清单 `status` 声明（`key` / `label` / `type: text|link`），值由插件写进 `$MICA_HOME/plugin-data/<id>/data.json`，配置页插件详情渲染成「运行状态」一节。值是字符串或 `{ text, tone: ok|warn|error }`——插件判断语义，页面只上色；没写过的键显示「尚未上报」，不隐藏。插件详情因此不需要为每个插件各写一套状态界面。
 - `desktop` 能力只有桌面端 spawn 的 app-server 提供：`buildSpawnEnv` 注入 `MICA_PLUGIN_DESKTOP_HOST=1`（别用 `MICA_DESKTOP_HOST`，那是运行时的绑定地址），`runAppServer` 据此传 `desktopHost` 给 `HeadlessPluginHost`。CLI / TUI / `mica exec` 里没有它，依赖插件整块跳过。
 - 桌面入口由清单 `desktop.entry`（`{ "entry": { "label": "Connections" } }`）+ 插件目录里的 `desktop.jsx` 组成：`default` 导出卡片组件（props `{ api, onClose }`），可选命名导出 `summary(api)` 给入口行右侧那一行字。宿主只画一行与卡片容器（悬停/点击、浮层定位、Esc 与点外部收起都在 `renderer/src/PluginEntries.jsx`），按 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里登记**。只对随包插件生效：页面是构建期打的包，`$MICA_HOME/plugins` 里没有它的模块，用户插件声明了也渲染不出入口。
-- 对话右侧面板由清单 `desktop.panel`（`{ "panel": { "label": "需求开发", "roles": ["需求开发"], "shortcuts": [...] } }`）+ `ctx.desktop.panel({ view, action })` 组成：**插件给数据、宿主画出来**，所以用户插件也有。视图是纯数据（`title` / `status` / `sections〔rows, items, fields, commit, actions〕`），宿主统一归一化（长度、条目数与字段类型）后渲染，畸形视图不会让页面崩掉；每个 section 是一块独立折叠卡片（`collapsed` 决定初始是否收起）；有输入框的 section 用 `commit` 声明自动保存动作，宿主在输入停顿约 0.5s 后带字段值调它，设置类因此不用再点按钮；动作只回 `{ action, key?, values? }`，宿主每次动作后重新取一次视图。一个插件最多一块面板（再注册会替换）。`roles` 是显示条件（会话角色名，空数组＝任何角色）；声明了它就要写 `requires: ["desktop"]`，但**没有** `desktop.entry` 那条「只对随包插件生效」的限制。`shortcuts` 是输入框正上方那排按钮，每个二选一：`action` 直接触发插件动作（不打开面板），`section` 打开面板并展开同名 section——常用动作与配置项因此各走各的路，不用挤进一块抽屉；动作可以 `return { message }` 回一句话，页面显示在按钮旁边（常驻宿主里 `ctx.ui.notice` 用户看不到）。
+- 对话右侧面板由清单 `desktop.panel`（`{ "panel": { "label": "需求开发", "roles": ["需求开发"], "shortcuts": [...] } }`）+ `ctx.desktop.panel({ view, action })` 组成：**插件给数据、宿主画出来**，所以用户插件也有。视图是纯数据（`title` / `status` / `sections〔rows, items, fields, commit, actions〕`），宿主统一归一化（长度、条目数与字段类型）后渲染，畸形视图不会让页面崩掉；每个 section 是一块独立折叠卡片（`collapsed` 决定初始是否收起）；有输入框的 section 用 `commit` 声明自动保存动作，宿主在输入停顿约 0.5s 后带字段值调它，设置类因此不用再点按钮；动作只回 `{ action, key?, values? }`，宿主每次动作后重新取一次视图。一个插件最多一块面板（再注册会替换）。`roles` 是显示条件（会话角色名，空数组＝任何角色）；声明了它就要写 `requires: ["desktop"]`，但**没有** `desktop.entry` 那条「只对随包插件生效」的限制。`shortcuts` 是输入框正上方那排按钮，每个二选一：`action` 直接触发插件动作（不打开面板），`section` 打开面板并展开同名 section——常用动作与配置项因此各走各的路，不用挤进一块抽屉；动作可以 `return { message }` 回一句话，页面显示在按钮旁边（常驻宿主里 `ctx.ui.notice` 用户看不到）；动作改到的 `ctx.sessionState` 由宿主在动作返回后补一次会话落盘，插件不用自己触发保存。
 - 插件前端模块用到的 Tailwind 工具类必须被扫描到：`plugins/` 不在 `apps/desktop` 下，`app.css` 里用 `@source '../../.../plugins'` 显式纳入，否则插件里的间距、`group-hover/*`、`max-md:*` 一个都不会生成（表现为间距全塌、悬停不出现）。
 - 插件清单的 `name` 与 `desktop.entry.label` 一律英文（侧栏其它入口也是英文），描述这类正文才写中文。
 - 插件前端模块的能力只有五件，来自 `renderer/src/plugin-host.js` 的 `createPluginHostApi`：`currentHost()`（页面所在运行时的 origin）、`probe(address)`、`readData()` / `writeData(value)`、`open(url)`、`access`（读改写这台机器的远程访问策略）。探活、数据读写与访问策略必须由运行时代劳（页面读不到跨源响应、碰不到请求分派、也没有文件系统），落在 `host/plugin-host.js` 的 `plugin-host:probe` / `plugin-host:read-data|write-data` / `plugin-host:access-get|set`；数据文件统一在 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构。`open` 是纯页面行为，分支在 `shell-env.js` 的 `isElectronShell`。
@@ -232,16 +234,18 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 插件自己拿到值（注册换回的口令、探测到的地址）就用 `ctx.settings.set()` 写回去，只改传入的键、其余保持原样，写盘前过同一份校验——不要要求用户复制粘贴，那正是最容易出错的一步。
 - 需要按会话调整的项标 `perSession`：默认值仍是 `settings`（配置页写），会话里只存**改过**的键（`pluginSessionSettings[pluginId]`），没改过的继续跟随默认值。插件读 `ctx.sessionSettings.get()`（合并后的生效值），界面由 `mica/pluginSettings/get|set` 驱动，桌面端从会话设置→插件进入。只存改过的键是硬约束：整份存会把当时的默认值固化进老会话。
 - 用户可见故障（缺配置、外部服务拒绝、请求失败）必须 `ctx.health.report({ level, message, hint })`，不能只写日志。
-- `ctx.logger` 按 pluginId 注入，同时写 `os.tmpdir()/mica-logs/plugin-<id>-<day>[-n].jsonl`（2 MB 分片、3 天清理、`MICA_PLUGIN_LOG=0` 关闭）。排查插件问题先看它。
+- `ctx.logger` 按 pluginId 注入，同时写 `resolveLogDir()/plugin-<id>-<day>[-n].jsonl`（macOS `~/Library/Logs/mica`，2 MB 分片、7 天清理、`MICA_PLUGIN_LOG=0` 关闭）。排查插件问题先看它。
 - 插件感知会话用 `ctx.session`：`describe(owner)`（含 `cwd`，按工作区归档的插件读它而不是缓存进程 cwd）、`messages(owner)`、`rename(title, { owner, source })`；`source: 'auto'` 在人工命名过时被拒绝。
 - 宿主形态由 `ctx.agent.mode` 回答（`session` / `one-shot`，后者是 `mica exec`），与迭代重写句柄上的同名属性一致；会改变成本或输出的策略只在 `session` 生效。
 - 影响模型请求的插件用 `ctx.agent.onIterationRewrite(handler)`：在迭代边界改写接下来要发送的历史。句柄只暴露 `sessionId`、`mode`、`lastUsage()`、`getState()` / `setState()`、`compact()`。
+- 同一能力面的另一半是 `ctx.agent.compactIdleHistory()`：在轮次之外把已落盘的历史快速压一次（本地清理，不调模型）。它由宿主提供（`HeadlessTurnExecutor.runIdleMaintenance` 取 turn lease → 对齐磁盘 → 调 `compactIdleSessionHistory` → 落盘），会话忙或别的进程持锁时返回 `null`，插件当作「这次没压成」不消耗次数；`mica exec` 不落盘、TUI 走 `/compact`，两边都不提供，插件必须当可选能力。
 - 委派子代理用 `ctx.subagents`：`registerType()` 注册类型（工具白/黑名单、写策略、`maxTurns`）、`run` / `background` 跑一个、`tasks.list|get|kill|wait` 管后台任务、`caller(context)` 解出本次调用所属的委派来源。机制（建子代理、用量记账、路径租约、完成回注）在宿主，策略（有哪些类型、工具形状、什么时候委派）在插件；子代理类型挂在注册它的插件名下，插件停用即消失。
 - 需要「可复用的隔离子代理」（旁问、连续追问）用 `ctx.subagents.thread({ type, systemPrompt, tools, allowedTools, disallowedTools, model, maxTurns })`：一次建线程、多次 `ask()`，同一线程串行（并发 ask 直接报错）、可用 `usage()` 读请求数与最近用量、`dispose()` 收尾。线程不占 `tasks`、不拿路径租约、绑定 `ask` 当时的当前会话；每次 ask 的用量由宿主以 `origin: 'plugin'` 记进会话 `subagentUsageHistory`。system prompt 是整体替换，插件要自己带上它需要的上下文。
 - 命令结果给用户看走 `ctx.ui.notice(content, { command, status, surface, variant })`：`surface: 'command_panel'` 是输入框上方的运行中面板（被同一 `command` 的下一条 notice 收尾），默认进对话的 notice；headless 宿主直接落进 turn notice 日志。
 - 插件自己问一次模型（起标题、写提交说明、整理记忆）只声明 `plugin.json` 的 `llm`，代码里用 `ctx.llm.request()`：接口地址 / Key / 协议 / 模型由声明生成（`group: 'llm'` 的普通设置项），页面把这几项收进同一个「模型接口」面板并带「测试连接」。`llm.followMain` 允许「跟随主配置」，由宿主解析成当前 provider（会话钉住的优先，其次模型名的 `provider/model` 前缀）。请求走 `ctx.llm` → `ctx.models` → `mica-agent/modelText.ts` + `apps/cli/src/plugins/pluginModels.ts`，协议分支、超时中断与用量记账只有一份实现，记录以 `origin: 'plugin'` 落进会话的 `subagentUsageHistory`；配置页的「测试连接」用同一个执行器（`probeModelConnection`，不记账）。插件里不自建模型 HTTP 客户端，也不自己拼地址 / Key。
 - `llm` 的四个键不允许再在 `settings` 里重复声明；`required` 只在关掉「跟随主配置」后生效（`requiredWhen`）。
-- 官方插件：`todo`（进程内待办 + `plan` prompt 段落，计划纪律在 `plugins/todo/prompt.ts`，`requires` 含 `prompt`）、`btw`（`/btw` 旁问：`ctx.subagents.thread` 开一条可复用的隔离子代理，结果经 `ctx.ui.notice` 呈现）、`session-notes`（会话笔记）、`session-tags`（会话颜色标签）、`session-rename`（每轮前自动起标题）、`auto-compact`（自动压缩）、`memory`（跨会话记忆：`user` / `memory` / `project` 三块 markdown 文件，`ctx.prompt` 注入会话内冻结的快照、`memory` 工具维护预算内的条目、turn:after 可选整理；整理可走宿主子代理，也可配独立的接口地址 / Key / 协议 / 模型，缺 `subagents` 时降级为独立接口）、`web-search`（`web_search` 工具）、`subagent`（7 种子代理类型、`agent` 工具、委派 prompt 段落与委派倾向设置）、`commit`（`/commit` 命令：确定性 git 分析 + 一次模型请求写提交说明 + add / commit / push；模型可跟随主配置，也可单独配接口地址 / Key / 协议 / 模型）、`computer-use`（macOS 桌面自动化 skill：AX 元素树 + CGEvent 键鼠 + 截图，随包 runtime 落盘到 `$MICA_HOME/computer-use`，首次用到时 clang 编译 helper；权限状态显示在配置页插件详情的「运行条件」里）、`connections`（侧栏 `Connections`：接另一台机器上的运行时，连接清单存 `plugin-data/connections/data.json`；能力全在 `desktop.jsx`，后端 setup 是空的）、`sidecar`（派生并驱动子会话：随包 skill `sidecar` + `sidecar_*` 工具，每个子会话是一个 `mica app-server` 子进程，`--parent` 写进会话文件让侧栏嵌套；事件走 Codex v2 JSONL，投影在 `plugins/sidecar/transcript.ts`）。
+- 会话右键菜单由清单 `desktop.sessionMenu`（`[{ "label": "复制会话 Markdown", "action": "copy" }]`）+ `ctx.desktop.sessionMenu({ run })` 组成：**菜单项来自清单、处理器来自插件注册**——右键是同步交互，不能为「有没有菜单项」去冷启动 app-server；处理器只活在插件所在进程里，页面只转发 `pluginId + action`。`run()` 只认 `copyText`（页面写系统剪贴板：插件进程里没有剪贴板，也不该为三个平台各调一次系统命令）与 `message`（回给用户的一句话）。动作要立刻返回，不要在里面等模型请求。声明它就要写 `requires: ["desktop"]`；用户插件同样有。
+- 官方插件：`todo`（进程内待办 + `plan` prompt 段落，计划纪律在 `plugins/todo/prompt.ts`，`requires` 含 `prompt`）、`btw`（`/btw` 旁问：`ctx.subagents.thread` 开一条可复用的隔离子代理，结果经 `ctx.ui.notice` 呈现）、`session-notes`（会话笔记）、`session-tags`（会话颜色标签）、`session-copy`（会话右键菜单「复制会话 Markdown」：`plugins/session-copy/markdown.ts` 确定性拼装标题 / 路径 / 模型 / 用户与助手正文，工具调用、思考与 notice 都不进导出，**不调用 `ctx.llm`**）、`session-rename`（每轮前自动起标题）、`auto-compact`（自动压缩）、`memory`（跨会话记忆：`user` / `memory` / `project` 三块 markdown 文件，`ctx.prompt` 注入会话内冻结的快照、`memory` 工具维护预算内的条目、turn:after 可选整理；整理可走宿主子代理，也可配独立的接口地址 / Key / 协议 / 模型，缺 `subagents` 时降级为独立接口）、`web-search`（`web_search` 工具）、`subagent`（7 种子代理类型、`agent` 工具、委派 prompt 段落与委派倾向设置）、`commit`（`/commit` 命令：确定性 git 分析 + 一次模型请求写提交说明 + add / commit / push；模型可跟随主配置，也可单独配接口地址 / Key / 协议 / 模型）、`computer-use`（macOS 桌面自动化 skill：AX 元素树 + CGEvent 键鼠 + 截图，随包 runtime 落盘到 `$MICA_HOME/computer-use`，首次用到时 clang 编译 helper；权限状态显示在配置页插件详情的「运行条件」里）、`connections`（侧栏 `Connections`：接另一台机器上的运行时，连接清单存 `plugin-data/connections/data.json`；能力全在 `desktop.jsx`，后端 setup 是空的）、`sidecar`（派生并驱动子会话：随包 skill `sidecar` + 9 个 `sidecar_*` 工具，每个子会话是一个 `mica app-server` 子进程，`--parent` 写进会话文件让侧栏嵌套；事件走 Codex v2 JSONL，投影在 `plugins/sidecar/transcript.ts`，分层的读法在 `views.ts`；不传 `role` 时继承父会话角色，深度由 `MICA_SIDECAR_DEPTH` 限制在 2 层，子进程在 `onDispose` 里一路降到 SIGKILL 收掉）。
 - 新增插件：建目录 → 两处登记 → 测试放插件目录内（vitest 覆盖 `plugins/**`）。
 - 运行观察走通用 `agent:observe` hook（`AgentObservationEvent`，owner/runId 关联）：运行开始/终态、请求边界、最终 prompt、工具调用/结果、用量、重试与历史改写。观察失败不得中断任务；范围是 `AgentRuntime.run`，helper 客户端内部轨迹尚未覆盖。官方 `harness-review` 插件异步写 `$MICA_HOME/plugin-data/harness-review`，通过 `/harness-review list|report|assess` 和 `harness_review` 查看、导出、记录人工评估；按 cwd 复盘，不自动修改 harness。
 
@@ -301,7 +305,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - 本地清理替换工具结果、可识别媒体与工具参数正文；tool-call arguments 必须仍是合法 JSON，只裁正文/长命令，保留路径、pattern、name、offset。
 - 裁剪规则集中在 `mica-context/CompactionService.ts`（正文/命令阈值 200/400），幂等标记 `[omitted `。
-- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次、间隔 30 分钟。设置在插件 `settings`（每项都标 `perSession`，可在会话设置里按会话覆盖），计数在会话 `pluginState['auto-compact']`。
+- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次、间隔 30 分钟。另有一条不看阈值的触发：会话空闲 ≥ `idleMinutes`（默认 15）后用户在输入框敲字（运行期事件 `input:activity`，桌面端经 `mica/input/activity` 送出），就经 `ctx.agent.compactIdleHistory()` 在轮次之外把已落盘的历史快速压一次——宿主（`HeadlessTurnExecutor.runIdleMaintenance`）负责取 turn lease、对齐磁盘与落盘，会话忙 / 别的进程持锁时返回 `null` 且不消耗次数。设置在插件 `settings`（每项都标 `perSession`，可在会话设置里按会话覆盖），计数与最后活动时间在会话 `pluginState['auto-compact']`。
 - 自动压缩只在常驻会话生效：`mica exec` 是一次性运行（`agent.mode === 'one-shot'`），改变成本或输出的策略一律跳过。
 - 压缩只改发给模型的历史，不改 `conversationMessages`；自动压缩失败只记 note，不中断 turn。
 - 所有压缩保留 usage 记账；需要模型的 compact / review 走 subagent 或 exclusive task，不污染运行中的主 turn。
@@ -367,6 +371,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 文件补全 CLI / desktop 共用 `mica-file-mentions`；`@` 与 `/` skill 补全只在词首触发，选中只插文本（文件插 `@路径`，skill 插 `SKILL.md` 绝对路径）。
 - `/` 浮层混排 skill 与 MCP server；插入 MCP 时只写 server 名与已知工具名。两边都包含**内置能力**，不需要用户配置：skill 来自磁盘扫描 + 插件发布的 `$MICA_HOME/plugin-skills` 索引（`skills-core.js`），MCP 来自 `config.json` + 运行时按 socket 能力算出的 `mica-browser` / `mica-terminal`（`mcp-candidates-core.js`）；内置条目的说明列标「内置」，插入文本与普通条目一致。
 - desktop composer 不分派斜杠命令；输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻。
+- 输入框内容变化会节流 2s 发一次 `chat:input-activity` → `mica/input/activity`（空输入不发）：它只服务「这个人回来了」这类提前量（自动压缩的空闲触发），没有常驻进程时直接丢弃，不回包也不影响输入。
 - 粘贴共用 `composer-paste.js`：图片转 `[Image](路径)`，文件插绝对路径。
 - 角色入口在输入条箭头，随下一次发送/编辑的 role 参数持久化。
 - 输入条齿轮与时钟打开 `SessionSettingsDialog`：会话能力（Tools / Skills / MCP 三页签）/ 定时任务 / 插件。声明了 `perSession` 的插件是左侧导航「插件」下面的子项，内容区只画选中的那一个；自动压缩的阈值这类按会话可调的项就在这里，默认值仍在配置页 Plugins。
@@ -399,6 +404,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - Git 轮询只在可见且聚焦时进行（Files 3s / 其他 10s），不重叠；会话视图只取仓库根与分支（`git:status` 一次 `rev-parse`），`git:summary` 的全树 status + numstat 与分支对比只在文件视图跑。
 - Pinned / Projects / Recent 互斥，归属经 `stats:move-session`；拖放判定在 `session-dnd.js`。
 - 会话行共用操作列/图标列/名称栅格；状态优先级沿用 `session-state.js`，error 红点由后续 completed 清除。
+- 会话行右键菜单 = 固定项（改名 / 标记 / 删除等）+ 插件动作：插件项来自清单 `desktop.sessionMenu`，由 `renderer/src/session-menu-plugins.js` 收集（读 `readPluginsDetails`，用户插件也在里面），页面只转发 `pluginId + action` 到 `window.mica.chat.sessionMenuRun` → `chat:session-menu-run` → `mica/sessionMenu/run`；插件回的 `copyText` 由页面写剪贴板（`transport.js` 的 `copyText`），`message` 进 toast。没开过标签页的会话按需起一个 app-server 取快照，不需要页面先有 chat run。
 - 派生关系（`parentSessionId`）只改渲染顺序：父行在前、紧跟它的子树（`session-nesting.js` 的
   `nestSessions`），父会话不在当前分区时子会话当顶层，环与自指都退化成顶层。折叠状态是
   页面内 Set，父行折叠时用 `mergeRowStates` 代显子行状态；子行继承父行的分区与搜索命中。
@@ -428,7 +434,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 ### 日志与性能
 
-- `host/log.js` 是运行时唯一日志写入器：JSONL 落 `os.tmpdir()/mica-logs/`，2s 批量 flush，留 1000 条环形缓冲。
+- `host/log.js` 是运行时唯一日志写入器：JSONL 落 `resolveLogDir()`（macOS `~/Library/Logs/mica`，与插件日志同目录），2s 批量 flush，留 1000 条环形缓冲；保留 7 天、总容量 256 MB，超了从最旧的删。日志**不放系统 temp**：temp 每次登录被系统清空，重启后就只剩当次运行，跨天的问题无法回头查。`MICA_LOG_DIR` 覆盖目录（测试与隔离实例用）。
 - 通道耗时只在 `handleInvoke` 用 `logger('invoke').timed()` 量一次；超过 `SLOW_MS`（默认 300ms）记 warn。新增功能不要自己再包一层计时。
 - `chat:compact` 额外记一条 `compact.finished`（请求模式、子进程回报的 strategy、前后 token 估算）——只按通道计时分不出本地清理与模型摘要。
 - 只读会话顶层字段（cwd、标题等）用 `host/session-file-head.js` 读文件头，不要为单个字段整份 `JSON.parse`：最大的一份会话 52MB。
@@ -512,7 +518,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 ### 验证
 
 - 局部改动跑相关测试 + `bun run typecheck` + `git diff --check`；全量测试约 90s（unit ~25-30s + process ~55-60s），仅发布、跨慢套件或 CI 要求时跑。
-- `bun run test` 走 `scripts/run-tests.mjs`：先 `scripts/prune-test-temp.mjs` 清掉 `os.tmpdir()` 下过期的 `mica*` 测试目录（保留 `mica-tasks` / `mica-logs`，`MICA_TEST_TEMP_MAX_AGE_HOURS` 默认 6h），再串行跑两个 project，unit 失败即跳过 process。`test/globalSetup.ts` 用 `MICA_TEST_ROOT` 作整轮唯一的临时根并在结束时删除；worker 是被直接杀掉的，`setupFiles` 里的 exit 钩子不会触发，清理只能放在 globalSetup。
+- `bun run test` 走 `scripts/run-tests.mjs`：先 `scripts/prune-test-temp.mjs` 清掉 `os.tmpdir()` 下过期的 `mica*` 测试目录（保留 `mica-tasks`，`MICA_TEST_TEMP_MAX_AGE_HOURS` 默认 6h），再串行跑两个 project，unit 失败即跳过 process。`test/globalSetup.ts` 用 `MICA_TEST_ROOT` 作整轮唯一的临时根并在结束时删除；worker 是被直接杀掉的，`setupFiles` 里的 exit 钩子不会触发，清理只能放在 globalSetup。
 - 测试分两个 project（`vitest.config.ts`）：`unit` 是进程内单测、按文件并行；`process` 是真实子进程 / PTY / TUI 的 E2E，文件串行、文件内用例并发。慢的根源是每个用例 spawn 一次真实 `mica`（冷启动 1–1.5s），所以新增 E2E 用例要用 `it.concurrent` 语义（每用例自带 mock provider 与 `MICA_HOME`），不要把 `process` 项目丢回并行池：它和 unit 的 worker 抢 CPU 时会打挂 `btw.pty`、turn lease 这类时序敏感用例。
 - `testTimeout` 显式给定而不是沿用 Vitest 默认 5s：unit 里有真实 git 仓库与文件 I/O，process 的 PTY 用例内部就按 20s 等待。机器一忙（多个 worker + 开发者自己的进程）5s 会打挂与代码无关的用例。并发上限同理：`unit` 的 `maxWorkers` 固定 4、`process` 的 `maxConcurrency` 固定 3，再往上不更快，只是把时间换成偶发超时。
 - 根测试用 Vitest / Node；`PtyDriver` 仅 Node/vitest 可用，Bun 用 manager + Node helper。

@@ -1,5 +1,10 @@
 import type { PluginContext } from '@packages/mica-plugin/index.js';
-import { SidecarProcess, type SidecarProcessOptions } from './sidecarProcess.js';
+import {
+  currentSidecarDepth,
+  MAX_SIDECAR_DEPTH,
+  SidecarProcess,
+  type SidecarProcessOptions,
+} from './sidecarProcess.js';
 import type { SidecarTranscript, SidecarTurn } from './transcript.js';
 import { clip } from './views.js';
 
@@ -20,6 +25,17 @@ export type SidecarEntry = {
 export type SpawnResult = { ok: true; entry: SidecarEntry } | { ok: false; error: string };
 
 /**
+ * 子会话用哪个角色。
+ *
+ * 显式给了就用给的；没给就**继承父会话当前的角色**，而不是回到配置里的 `default`。
+ * 子会话是「同一个 agent 换个上下文干活」——默认换一套行为规则，读起来不像同一个
+ * agent 在做事。父会话也没有角色（`undefined`）时返回 undefined，让宿主用自己的默认值。
+ */
+export function resolveSidecarRole(inputRole: string | undefined, parentRole: string | undefined): string | undefined {
+  return inputRole?.trim() || parentRole?.trim() || undefined;
+}
+
+/**
  * 子会话的登记表。
  *
  * 只活在父会话的 app-server 进程里：父会话结束，子会话进程一起收掉（见 index.ts 的
@@ -32,6 +48,11 @@ export class SidecarRegistry {
     private readonly ctx: PluginContext,
     private readonly parentSessionId: string | null,
     private readonly defaultCwd: string,
+    /**
+     * 父会话当前的角色：子会话不指定 role 时沿用它，而不是回到配置默认值。
+     * 用函数而不是值——会话里切过角色之后再派，跟的要是切完的那个。
+     */
+    private readonly currentRole: () => string | undefined,
   ) {}
 
   list(): SidecarEntry[] {
@@ -61,15 +82,25 @@ export class SidecarRegistry {
         error: `已经有 ${MAX_SIDECARS} 个子会话在跑，先 sidecar_close 掉不再需要的再开新的。`,
       };
     }
+    // 深度上限：每层子会话都是完整的 mica 进程，不限深就是指数级的进程树。
+    if (currentSidecarDepth() >= MAX_SIDECAR_DEPTH) {
+      return {
+        ok: false,
+        error: `已经套了 ${MAX_SIDECAR_DEPTH} 层子会话，不再往下派生：每层都是完整进程，再深会拖死机器。这一层请直接自己做完。`,
+      };
+    }
     // 工作目录的规范化（绝对路径、~ 展开、存在性）统一在 SidecarProcess.start 里做：
     // 那里才知道这个值会同时被当作子进程 cwd 和 --dir。
     const cwd = input.cwd?.trim() || this.defaultCwd;
     const prompt = input.prompt.trim();
     if (!prompt) return { ok: false, error: 'prompt 不能为空：子会话需要一句话才知道自己该做什么。' };
+    const role = resolveSidecarRole(input.role, this.currentRole());
 
     const options: SidecarProcessOptions = {
       cwd,
-      ...(input.role ? { role: input.role } : {}),
+      // 不传 role 时沿用父会话的角色：子会话是「同一个 agent 换个上下文干活」，
+      // 默认落到配置里的 default 会让它的行为规则跟父会话不一致。
+      ...(role ? { role } : {}),
       ...(input.model ? { model: input.model } : {}),
       ...(input.effort ? { effort: input.effort } : {}),
       ...(input.maxTurns ? { maxTurns: input.maxTurns } : {}),
@@ -128,10 +159,17 @@ export class SidecarRegistry {
     }
   }
 
-  async closeAll(): Promise<void> {
+  /**
+   * 收掉全部子会话。
+   *
+   * `graceMs` 由调用方定：用户主动关（`sidecar_close`）用默认的 3s，让当前那一轮
+   * 落盘；进程退出时压到几百毫秒，因为宿主只留了有限的清理预算。
+   */
+  async closeAll(graceMs?: number): Promise<void> {
     const entries = this.list();
     this.entries.clear();
-    await Promise.all(entries.map((entry) => entry.process.close().catch(() => undefined)));
+    // 并行收：四个子进程各自等 grace，串行会把退出时间乘上四。
+    await Promise.all(entries.map((entry) => entry.process.close(graceMs).catch(() => undefined)));
   }
 }
 

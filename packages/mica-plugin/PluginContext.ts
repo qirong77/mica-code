@@ -5,7 +5,7 @@ import type { MicaTool } from '@packages/mica-tools/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from './HookRegistry.js';
 import type { ServiceContainer } from './ServiceContainer.js';
-import type { PluginIterationRewriter } from './PluginAgent.js';
+import type { PluginIdleCompactResult, PluginIterationRewriter } from './PluginAgent.js';
 import type { PluginBackgroundApi } from './PluginBackground.js';
 import type { PluginPromptSection } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
@@ -58,6 +58,21 @@ export type PluginSessionInfo = {
    * 与 `/role` 切换同步，不要在插件里缓存成启动时的值。
    */
   role?: string;
+  /**
+   * 派生它的那条会话 id（会话文件顶层 `parentSessionId`），空表示这是一条顶层会话。
+   *
+   * 子会话靠它知道自己是被派出来干活的，而不是用户直接开的那条；要回报「我挂在谁
+   * 下面」或据此调整行为时读它，不要自己猜。
+   */
+  parentSessionId?: string;
+  /**
+   * 这条会话正在用的服务商（名字，没有名字时是 id）与模型。
+   *
+   * 与会话配置一样每轮可能变（`/model`、桌面端选择器），所以每次读，不要缓存。
+   * 需要「把这条会话原样描述出来」的插件（导出、记录、排障）读它，不必自己去猜配置来源。
+   */
+  provider?: string;
+  model?: string;
 };
 
 /**
@@ -176,6 +191,16 @@ export type PluginContext = {
     /** 宿主形态，与 `PluginIterationRewriter.mode` 同义：`one-shot` 没有下一轮。 */
     readonly mode: 'session' | 'one-shot';
     onIterationRewrite(handler: PluginIterationRewriter): Disposable;
+    /**
+     * 在轮次之外把**已经落盘的**会话历史快速压缩一次（本地清理，不调用模型）。
+     *
+     * 用途是「用户回来了」这类提前量：桌面端在用户敲字时发 `input:activity` 事件，
+     * 插件判断会话已经空闲够久就调它，让接下来那一轮请求直接按压小的历史发出。
+     *
+     * 只在能独占写会话文件的常驻宿主里提供（`mica app-server`）。返回 `null` 表示
+     * 这一次没压成（会话正忙、另一个进程持有 turn lease、没有可清理的内容），不是错误。
+     */
+    compactIdleHistory?(): Promise<PluginIdleCompactResult | null>;
   };
   /**
    * 委派子代理：注册子代理类型、前台/后台跑一个、管后台任务。

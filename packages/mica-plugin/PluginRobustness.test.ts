@@ -78,6 +78,7 @@ function manifest(requires: string[]) {
     status: [],
     actions: [],
     desktopPanel: null,
+    desktopSessionMenu: [],
   };
 }
 

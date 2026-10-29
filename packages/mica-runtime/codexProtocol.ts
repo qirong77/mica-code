@@ -426,6 +426,14 @@ export type MicaBtwThreadUpdated = MicaBtwThread & {
  */
 export const MICA_METHODS = {
   editMessage: 'mica/turn/editMessage',
+  /**
+   * 用户在输入框里敲了字（不是提交）。客户端节流后发，宿主把它变成 `input:activity`
+   * 运行期事件：插件据此判断「会话空闲了很久，这个人回来了」。
+   *
+   * 没有它，插件只能在一次模型请求里才知道用户又要说话了——那时候压缩已经来不及省下
+   * 这一次请求的开销。
+   */
+  inputActivity: 'mica/input/activity',
   /** Pull a queued (after_iteration) input back out of the host's single slot
    * so the client can restore it to its composer — the CLI's shift + ←. */
   queueRecall: 'mica/queue/recall',
@@ -495,6 +503,13 @@ export const MICA_METHODS = {
    */
   pluginPanelView: 'mica/pluginPanel/view',
   pluginPanelAction: 'mica/pluginPanel/action',
+  /**
+   * 会话右键菜单里的插件动作（清单 `desktop.sessionMenu` + `ctx.desktop.sessionMenu()`）。
+   *
+   * 返回 `{ ok, copyText?, message? }`：`copyText` 由页面写进剪贴板——插件进程里没有
+   * 剪贴板，也不该为三个平台各调一次系统命令。
+   */
+  pluginSessionMenuRun: 'mica/sessionMenu/run',
 } as const;
 
 export type MicaBtwAskParams = {

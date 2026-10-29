@@ -11,6 +11,7 @@ import { createPluginLlmApi } from './PluginLlm.js';
 import { createPluginBackgroundScheduler } from './PluginBackground.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginPanelHandler, PluginPanelRegistry } from './PluginPanel.js';
+import type { PluginSessionMenuHandler, PluginSessionMenuRegistry } from './PluginSessionMenu.js';
 import type { PluginSkillDefinition } from './PluginDesktop.js';
 import { publishPluginSkills } from './PluginSkills.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
@@ -40,7 +41,7 @@ export type PluginSetupReport = {
  * 每个插件在 setup 时拿到的东西，去掉几项「按插件生成」的：
  *
  * - `pluginId` / `onDispose`：生命周期绑定，只由 PluginManager 决定；
- * - `logger`：包装成带插件 id 的文件日志，写进 `os.tmpdir()/mica-logs/`；
+ * - `logger`：包装成带插件 id 的文件日志，写进 `resolveLogDir()`（与运行时日志同目录）；
  * - `settings`：按插件清单里的 `settings` 声明读取，路径跟着 `paths.config` 走；
  * - `health`：插件自报状态，落到 `$MICA_HOME/plugin-health/<id>.json`；
  * - `prompt`：包一层只写自己段落的入口。
@@ -87,6 +88,11 @@ export type PluginBaseContext = Omit<
    * 拿到 `ctx.desktop.panel()`——没声明就静默接受注册会让插件以为界面已经出现。
    */
   desktopPanels?: PluginPanelRegistry;
+  /**
+   * 会话右键菜单动作的登记表。与面板同理：宿主提供它、清单声明了 `desktop.sessionMenu`
+   * 时，插件才能注册自己的处理器。
+   */
+  desktopSessionMenus?: PluginSessionMenuRegistry;
 };
 
 export class PluginManager {
@@ -172,6 +178,7 @@ export class PluginManager {
         subagentsFor,
         pluginModels: modelsHandler,
         desktopPanels,
+        desktopSessionMenus,
         ...shared
       } = baseContext;
       const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
@@ -244,6 +251,11 @@ export class PluginManager {
         ctx.agent = {
           mode: agentRegistry.mode,
           onIterationRewrite: (handler) => agentRegistry.onIterationRewrite(plugin.id, handler),
+          ...(agentRegistry.compactIdleHistory
+            ? {
+                compactIdleHistory: () => agentRegistry.compactIdleHistory!(plugin.id),
+              }
+            : {}),
         };
       }
       if (subagentsFor) ctx.subagents = subagentsFor(plugin.id);
@@ -255,10 +267,17 @@ export class PluginManager {
       // 插件会以为自己的界面已经出现，实际页面上什么都没有。
       if (baseContext.desktop) {
         const panels = baseContext.desktopPanels;
+        const sessionMenus = baseContext.desktopSessionMenus;
         ctx.desktop = {
           host: 'desktop',
           ...(panels && plugin.manifest?.desktopPanel
             ? { panel: (handler: PluginPanelHandler) => panels.add(plugin.id, handler) }
+            : {}),
+          ...(sessionMenus && (plugin.manifest?.desktopSessionMenu.length ?? 0) > 0
+            ? {
+                sessionMenu: (handler: PluginSessionMenuHandler) =>
+                  sessionMenus.add(plugin.id, handler),
+              }
             : {}),
         };
       }

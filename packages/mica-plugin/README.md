@@ -14,7 +14,7 @@
 - 定义插件包格式：`plugin.json` 清单（id / name / version / main / assets / dependencies / required / priority / settings / requires / `mica.apiVersion`）、目录加载器与只读扫描（配置页用）。
 - 维护启停状态（`$MICA_HOME/plugins-state.json`），停用的插件在启动阶段就不注册。
 - 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。字段标 `perSession: true` 表示「这条会话可以不一样」：会话覆盖存在快照的 `pluginSessionSettings`（只存改过的键），插件改用 `ctx.sessionSettings.get()` 读合并后的生效值，`overrides()` / `set()` / `clear()` 改本会话，需要 `requires` 里有 `sessionSettings`。
-- 插件日志：`ctx.logger` 自带文件输出，落在系统临时目录并按天分片、按大小轮转。
+- 插件日志：`ctx.logger` 自带文件输出，落在 `resolveLogDir()`（与运行时日志同目录），按天分片、按大小轮转。
 - 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 出错」。
 - 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
@@ -32,6 +32,11 @@
   `ctx.desktop.panel({ view, action })` 交出纯数据的视图与动作分派。宿主负责归一化与渲染，
   所以用户插件（没有前端模块）也有界面；`PluginPanel.ts` 里是类型、进程内登记表
   （`PluginPanelRegistry`）与视图/动作的归一化函数。只在清单声明了面板时才提供这个入口。
+- 会话右键菜单：清单的 `desktop.sessionMenu` 声明菜单项（`label` + `action`），插件用
+  `ctx.desktop.sessionMenu({ run })` 交出按 `action` 分派的处理器。菜单项走清单是因为右键要
+  立刻画出菜单（不能为它冷启动一个 app-server），处理器留在插件所在进程里；`run()` 回
+  `{ copyText?, message? }`，剪贴板由页面写。`PluginSessionMenu.ts` 里是类型、进程内登记表
+  （`PluginSessionMenuRegistry`）与入参/结果归一化。只在清单声明了菜单项时才提供这个入口。
 - 用户插件装载：`loadUserPlugins()` 扫描 `$MICA_HOME/plugins` 并注册进 manager，
   `writeUserPluginStatus()` 把「加载 / 缺少宿主能力 / 失败」写进 `plugin-status.json`
   （配置页读它）。常驻宿主（TUI、`mica app-server`）共用这两步，`mica exec` 不装用户插件。
@@ -89,6 +94,20 @@ context.onDispose(() => registration.dispose());
 插件拿到的是**句柄**而不是 agent 本体：只能读最近一次用量、读写自己的会话状态、请求压缩，
 改不到 provider 配置、别的插件状态与会话读写面。声明 `requires: ["agent"]` 才会拿到它。
 
+### 轮次之外的压缩
+
+`context.agent.compactIdleHistory()` 把**已经落盘的**会话历史快速压一次（本地清理，不调用
+模型）。与上面那个句柄里的 `compact()` 的区别是改哪一份：那里改的是一次请求即将发送的历史，
+这里改的是会话文件本身，所以它能在用户还没按下发送时就把上下文降下来。
+
+它只在能独占写会话文件的常驻宿主里提供（`mica app-server`）：没有 turn 在跑、没有别的进程
+持有 turn lease 时才会执行，否则返回 `null`。`mica exec` 不落盘、TUI 由 `/compact` 负责，
+两边都不提供——插件应当把它当可选能力。
+
+触发它的事件是 `input:activity`（`context.events.on('event', …)`）：用户在输入框里敲了字。
+桌面端在敲字时节流发 `mica/input/activity`，宿主翻成这条运行期事件；TUI 与 `exec` 不发，
+插件不能把它当成一定会来。
+
 ## 设计约束
 
 - 本包只提供插件机制，不包含具体产品插件。
@@ -114,10 +133,11 @@ context.onDispose(() => registration.dispose());
 - `PluginDesktop.ts`：桌面宿主的能力面——检查项目录（`DESKTOP_CHECKS`）、运行条件声明与
   skill 注册的类型。新增一项检查 = 在这里登记 + 桌面端（`apps/desktop/src/main/system/`）实现探测器。
 - `PluginPanel.ts`：对话右侧面板的视图类型、`PluginPanelRegistry` 与视图/动作归一化。
+- `PluginSessionMenu.ts`：会话右键菜单动作的类型、`PluginSessionMenuRegistry` 与入参/结果归一化。
 - `UserPlugins.ts`：`$MICA_HOME/plugins` 的装载与 `plugin-status.json` 写盘。
 - `PluginSubagents.ts`：委派子代理的能力面类型（类型声明、spawn 入参、任务快照、`PluginSubagentRegistry`），宿主实现机制、插件提供策略。
 - `PluginSessionState.ts`：插件存进会话快照的状态的大小上限与校验。
 - `PluginLlm.ts`：`ctx.llm` 的声明类型、设置字段生成、生效值解析与请求封装（「跟随主配置」由宿主解析）。
-- `PluginLog.ts`：插件文件日志（`os.tmpdir()/mica-logs/plugin-<id>-<day>[-n].jsonl`），带分片与过期清理。
+- `PluginLog.ts`：插件文件日志（`resolveLogDir()/plugin-<id>-<day>[-n].jsonl`），带分片与过期清理。
 - `sessionAnnotations.ts`：`$MICA_HOME/plugin-data/<pluginId>/session-annotations.json` 的归一化读写。
 - `index.ts`：公共 API 聚合导出。

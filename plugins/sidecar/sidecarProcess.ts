@@ -17,6 +17,31 @@ import { SidecarTranscript } from './transcript.js';
 export type SidecarCliCommand = { command: string; prefixArgs: string[] };
 
 /**
+ * 最多套几层子会话。
+ *
+ * 2 层已经够用（子会话里再派一个去查东西），再多就是在烧机器：每层都是一个完整的
+ * mica 进程。这个上限与 `MAX_SIDECARS`（每进程 4 个）是两件事——后者管宽度，这里管深度。
+ */
+export const MAX_SIDECAR_DEPTH = 2;
+
+/** 当前进程处在第几层（顶层会话是 0）。 */
+export function currentSidecarDepth(): number {
+  const raw = Number(process.env.MICA_SIDECAR_DEPTH);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
+}
+
+/** 等一件事最多 ms，问的是「它发生了没有」，不是「拿它的值」。 */
+function settledWithin(promise: Promise<void>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    void promise.then(() => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+}
+
+/**
  * 重新拼出「启动当前这个 CLI」的命令。
  *
  * 生产环境是单二进制（`process.execPath` 就是 mica）；dev / 测试下 `bun` 或 `node`
@@ -120,6 +145,14 @@ export class SidecarProcess {
     const env: NodeJS.ProcessEnv = { ...process.env };
     // 子会话是纯 headless 宿主：它没有界面，「桌面端才有的能力面」不该被假装提供。
     delete env.MICA_PLUGIN_DESKTOP_HOST;
+    // 深度标记：每派生一层 +1，超过上限就不许再派生。
+    //
+    // 没有它就是一个**指数级**风险：每个子会话自己也是一个完整 mica 进程、带着
+    // 自己的 registry 和 `MAX_SIDECARS`，4 层就是 4^4=256 个进程，每个还在加载
+    // MCP 与插件——足以把整台机器拖死。而 `MICA_SIDECAR_DEPTH` 在 dev 下还顺带
+    // 挡住另一种事故：`resolveCliCommand` 用 `process.argv[1]` 推导入口，探针脚本
+    // 会让子进程重跑探针，从而无限自我派生。
+    env.MICA_SIDECAR_DEPTH = String(currentSidecarDepth() + 1);
 
     const child = spawn(cli.command, args, {
       cwd,
@@ -217,6 +250,10 @@ export class SidecarProcess {
    *
    * 不能一上来就 SIGTERM：那一轮的回答与 `completed` 状态会一起丢，用户看到的
    * 就是一条永远 running 的会话。
+   *
+   * **必须一路降到 SIGKILL**：只发 SIGTERM 就返回，等于把「它到底退了没有」交给
+   * 下一个信号——而退出路径上没有下一个信号。父进程 process.exit 之后，一个不响应
+   * SIGTERM 的子进程就成了没人收的孤儿，继续跑它那一轮、继续烧 token。
    */
   async close(graceMs = 3_000): Promise<void> {
     if (this.closed) return;
@@ -229,15 +266,20 @@ export class SidecarProcess {
     } catch {
       // stdin 可能已经关了，下面等退出即可。
     }
-    const timeout = new Promise<void>((resolve) => setTimeout(resolve, graceMs));
-    await Promise.race([exited, timeout]);
-    if (!this.closed) {
-      try {
-        this.child.kill('SIGTERM');
-      } catch {
-        // 进程可能刚好已经退出。
-      }
+    if (await settledWithin(exited, graceMs)) return;
+    try {
+      this.child.kill('SIGTERM');
+    } catch {
+      // 进程可能刚好已经退出。
     }
+    if (await settledWithin(exited, 1_500)) return;
+    try {
+      this.child.kill('SIGKILL');
+    } catch {
+      // 同上。
+    }
+    // 等 close 事件跑完，否则 pid 还没回收，下一次判断仍会看到它在跑。
+    await settledWithin(exited, 500);
   }
 
   /** 等一次可见变化（或超时）。等待类工具靠它避免忙轮询。 */

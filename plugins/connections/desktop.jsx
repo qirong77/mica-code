@@ -223,13 +223,12 @@ export default function ConnectionsCard({ api, onClose }) {
         </button>
       </div>
       <RemoteAccess api={api} />
-      <p className="mt-2 text-[10px] leading-4 text-white/30">桌面应用内可用 ⇧⌘M 回到本机窗口。</p>
     </>
   );
 }
 
 /**
- * 「其他机器访问这台机器」：这台运行时要不要口令、口令是什么。
+ * 「局域网/公网可访问」：这台运行时要不要口令、口令是什么。
  *
  * 这一节回答的是**别人怎么进来**，和上面「连到别的机器」正好相反，所以单列一段。
  * 值来自运行时的远程访问策略（`api.access`），与请求分派读的是同一份——卡片上看到的
@@ -294,13 +293,13 @@ function RemoteAccess({ api }) {
   return (
     <div className="mt-3 border-t border-line pt-2.5">
       <div className="mb-1 flex items-center gap-2">
-        <span className="min-w-0 flex-1 text-[11px] text-white/70">其他机器访问这台机器</span>
+        <span className="min-w-0 flex-1 text-[11px] text-white/70">局域网/公网可访问</span>
         {saved && <span className="shrink-0 text-[10px] text-emerald-400/80">已保存</span>}
         <button
           type="button"
           role="switch"
           aria-checked={enabled}
-          aria-label="要求访问口令"
+          aria-label="局域网/公网可访问"
           disabled={!state || busy}
           className={`relative h-4 w-7 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
             enabled ? 'bg-emerald-500/70' : 'bg-white/15'
@@ -314,12 +313,6 @@ function RemoteAccess({ api }) {
           />
         </button>
       </div>
-      <p className="text-[10px] leading-4 text-white/30">
-        {enabled
-          ? '打开完整界面要求先输口令（分享链接不受影响）。'
-          : '现在别的机器只能看分享视图；打开完整界面需要先开启口令。'}
-      </p>
-
       {enabled && (
         <div className="mt-1.5 flex items-center gap-2">
           <input

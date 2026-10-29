@@ -36,6 +36,11 @@ import {
   normalizePluginPanelActionResult,
   normalizePluginPanelView,
 } from './PluginPanel.js';
+import {
+  PluginSessionMenuRegistry,
+  normalizePluginSessionMenuInput,
+  normalizePluginSessionMenuResult,
+} from './PluginSessionMenu.js';
 import { PluginSettingsValidationError, validatePluginSettingValues } from './PluginSettings.js';
 import { PluginActionRegistry } from './PluginActions.js';
 import { MAX_PLUGIN_STATE_BYTES, normalizePluginStateRecord, validatePluginStateValue } from './PluginSessionState.js';
@@ -122,6 +127,9 @@ export const micaPlugin = {
   normalizePluginPanelActionResult,
   normalizePluginPanelView,
   PluginActionRegistry,
+  PluginSessionMenuRegistry,
+  normalizePluginSessionMenuInput,
+  normalizePluginSessionMenuResult,
   MAX_PLUGIN_STATE_BYTES,
   normalizePluginStateRecord,
   validatePluginStateValue,
@@ -160,6 +168,18 @@ export type {
   PluginActionResult,
   PluginActionTone,
 } from './PluginActions.js';
+export {
+  PluginSessionMenuRegistry,
+  normalizePluginSessionMenuInput,
+  normalizePluginSessionMenuResult,
+} from './PluginSessionMenu.js';
+export type {
+  PluginSessionMenuHandler,
+  PluginSessionMenuInput,
+  PluginSessionMenuItem,
+  PluginSessionMenuRegistration,
+  PluginSessionMenuResult,
+} from './PluginSessionMenu.js';
 export { loadUserPlugins, writeUserPluginStatus } from './UserPlugins.js';
 export type { UserPluginStatus } from './UserPlugins.js';
 export {
@@ -262,6 +282,7 @@ export type {
   PluginAgentUsage,
   PluginCompactMode,
   PluginCompactResult,
+  PluginIdleCompactResult,
   PluginIterationRewriter,
 } from './PluginAgent.js';
 export type {

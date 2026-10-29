@@ -13,6 +13,12 @@ export type AutoCompactSettings = {
   modelThresholdK: number;
   modelLimit: number;
   minIntervalMs: number;
+  /**
+   * 会话空闲多久之后、用户在输入框里重新敲字，就先做一次快速压缩。0 表示关掉这个触发。
+   *
+   * 它与阈值无关：阈值判断的是「上下文是不是已经很大」，这里判断的是「人是不是刚回来」。
+   */
+  idleMs: number;
 };
 
 export type AutoCompactCounters = {
@@ -22,6 +28,13 @@ export type AutoCompactCounters = {
   lastRunAt: string | null;
   lastKind: 'quick' | 'model' | null;
   lastSavedTokens: number;
+  /**
+   * 这条会话最后一次活动的时间（ISO）：一轮开始/结束、或者用户在输入框里敲字。
+   *
+   * 存进会话状态是为了冷启动后还能算「这次回来隔了多久」——只在内存里的话，
+   * 每次打开应用都会把用户当成刚说过话。
+   */
+  lastActivityAt: string | null;
 };
 
 export type AutoCompactStep = 'quick' | 'model';
@@ -33,6 +46,7 @@ export const DEFAULT_SETTINGS: AutoCompactSettings = {
   modelThresholdK: 200,
   modelLimit: 999,
   minIntervalMs: 30 * 60 * 1000,
+  idleMs: 15 * 60 * 1000,
 };
 
 export const EMPTY_COUNTERS: AutoCompactCounters = {
@@ -41,6 +55,7 @@ export const EMPTY_COUNTERS: AutoCompactCounters = {
   lastRunAt: null,
   lastKind: null,
   lastSavedTokens: 0,
+  lastActivityAt: null,
 };
 
 const MAX_RUNS = 1_000_000;
@@ -62,6 +77,7 @@ export function settingsFromValues(values: Record<string, string | undefined>): 
       0,
       Math.round(readNumber(values.minIntervalMinutes, DEFAULT_SETTINGS.minIntervalMs / 60_000) * 60_000),
     ),
+    idleMs: Math.max(0, Math.round(readNumber(values.idleMinutes, DEFAULT_SETTINGS.idleMs / 60_000) * 60_000)),
   };
 }
 
@@ -82,6 +98,7 @@ export function normalizeCounters(input: unknown): AutoCompactCounters {
     lastRunAt: typeof source.lastRunAt === 'string' && source.lastRunAt ? source.lastRunAt : null,
     lastKind: source.lastKind === 'quick' || source.lastKind === 'model' ? source.lastKind : null,
     lastSavedTokens: count(source.lastSavedTokens),
+    lastActivityAt: typeof source.lastActivityAt === 'string' && source.lastActivityAt ? source.lastActivityAt : null,
   };
 }
 
@@ -131,4 +148,27 @@ export function shouldEscalateToModel(input: {
 }): boolean {
   const { settings, counters, ctxTokens } = input;
   return counters.modelRuns < settings.modelLimit && ctxTokens >= settings.modelThresholdK * 1000;
+}
+
+/**
+ * 用户空闲很久之后重新敲字：要不要趁这个间隙先做一次快速压缩？
+ *
+ * 这里不看上下文大小——「这次请求马上就到」本身就是理由，小上下文压不动也无所谓
+ * （宿主会返回「没有可清理内容」，不消耗次数）。真正拦住重复工作的是次数上限与
+ * 最小间隔：同一段上下文连着被两只手压一遍没有意义。
+ */
+export function shouldCompactOnReturn(input: {
+  settings: AutoCompactSettings;
+  counters: AutoCompactCounters;
+  /** 距这条会话上一次活动过去了多久。 */
+  idleMs: number;
+  /** 当前时间（测试可注入）。 */
+  nowMs?: number;
+}): boolean {
+  const { settings, counters, idleMs } = input;
+  if (!settings.enabled) return false;
+  if (!Number.isFinite(settings.idleMs) || settings.idleMs <= 0) return false;
+  if (!Number.isFinite(idleMs) || idleMs < settings.idleMs) return false;
+  if (counters.quickRuns >= settings.quickLimit) return false;
+  return !withinMinInterval(settings, counters, input.nowMs ?? Date.now());
 }

@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const MAX_AGE_MS = Number(process.env.MICA_TEST_TEMP_MAX_AGE_HOURS ?? 6) * 60 * 60 * 1000;
-// mica-tasks 是本会话后台任务的输出目录，mica-logs 是运行时日志，都不属于测试产物。
-const KEEP = new Set(['mica-tasks', 'mica-logs']);
+// mica-tasks 是本会话后台任务的输出目录，不属于测试产物。
+const KEEP = new Set(['mica-tasks']);
 
 const root = tmpdir();
 const cutoff = Date.now() - MAX_AGE_MS;

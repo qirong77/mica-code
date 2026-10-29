@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { readPluginsDetails } from './plugins-details'
 
 /**
  * 对话右侧能出现的插件面板（清单 `desktop.panel`）。
@@ -20,8 +21,7 @@ export function usePluginPanels(role) {
   useEffect(() => {
     let alive = true
     void (async () => {
-      const plugins = await readPlugins()
-      if (!plugins) return
+      const plugins = await readPluginsDetails()
       if (alive) setPanels(selectPluginPanels(plugins, role))
     })()
     return () => {
@@ -53,23 +53,4 @@ export function selectPluginPanels(plugins, role) {
       icon: plugin.icon || '',
       shortcuts: Array.isArray(plugin.desktopPanel.shortcuts) ? plugin.desktopPanel.shortcuts : []
     }))
-}
-
-/**
- * 一次会话里按钮与抽屉各调一次这个 hook：两处各发一次 `readPluginsDetails` 只是浪费，
- * 清单又是静态的（改插件要重开会话），所以共享同一个 in-flight promise。
- */
-const PLUGINS_CACHE_MS = 60_000
-let pluginsCache = { at: 0, promise: null }
-
-function readPlugins() {
-  const fresh = pluginsCache.promise && Date.now() - pluginsCache.at < PLUGINS_CACHE_MS
-  if (fresh) return pluginsCache.promise
-  const promise = window.mica?.configWeb
-    ?.invoke('readPluginsDetails')
-    .then((details) => (Array.isArray(details?.plugins) ? details.plugins : []))
-    // 读不到插件目录就不画按钮：画出来也点不开，反而让人以为功能坏了
-    .catch(() => [])
-  pluginsCache = { at: Date.now(), promise: promise ?? null }
-  return promise ?? Promise.resolve(null)
 }

@@ -1,0 +1,18 @@
+{
+  "id": "session-copy",
+  "name": "Copy Session",
+  "icon": "file-text",
+  "version": "1.0.0",
+  "description": "右键把当前会话导出成 Markdown（路径、模型、用户与助手的对话）并写进剪贴板；纯代码拼装，不调用模型。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 30,
+  "mica": {
+    "apiVersion": 1
+  },
+  "desktop": {
+    "sessionMenu": [{ "label": "复制会话 Markdown", "action": "copy" }]
+  },
+  "requires": ["desktop", "session"]
+}

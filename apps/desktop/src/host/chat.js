@@ -110,6 +110,19 @@ function runSessionId(run) {
   return run?.sessionId || run?.requestedSessionId || null
 }
 
+/**
+ * 已经有页签在服务这条会话时返回它的 chat id：动作要落到同一个 host 上，否则同一个会话
+ * 会有两个进程各自持有一份快照（页签那份才是用户正在看的）。进程没起来也没关系——
+ * `ensureCapabilityRun` 会在同一个 id 上补起一个。
+ */
+function liveRunIdForSession(sessionId) {
+  if (!sessionId) return ''
+  for (const [id, run] of runs) {
+    if (runSessionId(run) === sessionId) return id
+  }
+  return ''
+}
+
 function queuedItems(id) {
   return queuedRuns.values(id).map((item, index) => ({
     id: item.payload?.clientMessageId || `queued:${id}:${index}`,
@@ -1717,6 +1730,24 @@ export function registerChatIpc() {
     return editRunMessage(event.sender, id, payload)
   })
 
+  /**
+   * 用户在输入框里敲了字（`mica/input/activity`）。
+   *
+   * 只为「会话已经空闲很久」这类提前量服务：插件拿到这条信号后可以先把历史压小，
+   * 下一轮请求就不必为膨胀的上下文付费。宿主不认识任何策略，只转发。
+   *
+   * 没有常驻进程就直接吞掉——绝不能为了几个按键去 spawn 一个 host。渲染层已经节流，
+   * 所以这里不再攒批。
+   */
+  ipcMain.handle('chat:input-activity', (event, { id } = {}) => {
+    const run = runs.get(id)
+    if (!run?.child?.stdin?.writable) return { ok: true, forwarded: false }
+    run.sender = event.sender
+    // 不等回包：用户还在打字，这次压缩的结果与界面无关（插件自己记日志与状态）。
+    void hostTaskRequest(run, 'mica/input/activity', {}).catch(() => {})
+    return { ok: true, forwarded: true }
+  })
+
   // Mica extensions (mica/backgroundTasks/*, mica/subagentTasks/*): the tasks
   // live in the resident host process, so these are plain request round-trips,
   // not turn starts. They never touch run.running/hostPending and stay usable
@@ -1942,6 +1973,37 @@ export function registerChatIpc() {
   ipcMain.handle('chat:plugin-panel-action', (event, payload = {}) =>
     pluginPanelRequest(event, payload, 'mica/pluginPanel/action')
   )
+
+  /**
+   * 会话右键菜单的插件动作（清单 `desktop.sessionMenu`）。
+   *
+   * 与面板同一条起法：处理器活在会话的常驻 host 里（插件就在那个进程），没有常驻进程就
+   * 按需起一个。结果里的 `copyText` 不在这里写剪贴板——页面拿到后自己写（运行时可能被
+   * 局域网里另一台机器打开，那边写的是「用户眼前的剪贴板」）。
+   */
+  ipcMain.handle('chat:session-menu-run', async (event, payload = {}) => {
+    const pluginId = typeof payload?.pluginId === 'string' ? payload.pluginId.trim() : ''
+    const action = typeof payload?.action === 'string' ? payload.action.trim() : ''
+    if (!pluginId || !action) return { ok: false, error: '缺少插件 id 或动作' }
+    const requested = typeof payload?.id === 'string' ? payload.id.trim() : ''
+    const sessionId = typeof payload?.sessionId === 'string' ? payload.sessionId.trim() : ''
+    // 侧栏右键不带 chat id：这条会话可能开在某个页签里（用它已有的常驻 host，插件状态
+    // 就是内存里那份），也可能根本没打开过（按需起一个，从会话文件 resume）。
+    const id =
+      requested || liveRunIdForSession(sessionId) || `session-menu:${sessionId || randomUUID()}`
+    const ensured = ensureCapabilityRun(id, event, {
+      sessionId: payload?.sessionId,
+      cwd: payload?.cwd
+    })
+    if (!ensured.run) return { ok: false, error: ensured.error }
+    const result = await hostTaskRequest(
+      ensured.run,
+      'mica/sessionMenu/run',
+      { pluginId, action },
+      { timeoutMs: HOST_PANEL_REQUEST_TIMEOUT_MS }
+    ).then(unwrapHostResult)
+    return result
+  })
 
   // Mica extension (`mica/session/rename`): renaming has to go through whichever
   // process owns the session file. The resident host rewrites it from its

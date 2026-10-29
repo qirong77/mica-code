@@ -1,5 +1,9 @@
 import type { Skill } from '@packages/mica-skills/index.js';
 import type { PluginPanelHandler, PluginPanelRegistration } from './PluginPanel.js';
+import type {
+  PluginSessionMenuHandler,
+  PluginSessionMenuRegistration,
+} from './PluginSessionMenu.js';
 
 /**
  * 插件在 desktop 宿主里的运行条件。
@@ -121,6 +125,13 @@ export type PluginDesktopApi = {
    * 以为自己的界面已经出现。一个插件只有一块面板，再注册会替换上一块。
    */
   panel?(handler: PluginPanelHandler): PluginPanelRegistration;
+  /**
+   * 注册会话右键菜单的动作处理器。
+   *
+   * 只在清单声明了 `desktop.sessionMenu` 时可用——菜单上有哪几项来自清单，点了做什
+   * 么来自这里；没声明却接受注册，插件会以为菜单项已经出现，实际右键里什么都没有。
+   */
+  sessionMenu?(handler: PluginSessionMenuHandler): PluginSessionMenuRegistration;
 };
 
 /**

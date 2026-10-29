@@ -1910,6 +1910,76 @@ suite('mica app-server real-user flows (mock provider)', () => {
     );
   });
 
+  itE2E('mica/input/activity compacts the stored history after the session sat idle', async () => {
+    mock!.state.mode = 'tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    // 上下文占用远低于任何阈值：这一条压不压完全由「人回来了」决定。
+    mock!.state.inputTokens = 10;
+    mock!.state.toolFileContent = 'y'.repeat(20_000);
+
+    const home = makeHome('input-activity');
+    mkdirSync(join(home, 'plugin-settings'), { recursive: true });
+    writeFileSync(
+      join(home, 'plugin-settings', 'auto-compact.json'),
+      JSON.stringify({
+        enabled: 'true',
+        // 阈值抬到用不到的高度：能压下来只能是空闲触发那条路。
+        quickThresholdK: '10000',
+        modelThresholdK: '10000',
+        quickLimit: '999',
+        modelLimit: '0',
+        minIntervalMinutes: '0',
+        // 0.02 分钟 = 1.2s：等得起，同时证明「要空闲够久」。
+        idleMinutes: '0.02',
+      }),
+    );
+
+    const host = spawnHost('input-activity', [], home);
+    hosts.push(host);
+    mock!.state.toolFilePath = join(host.cwd, 'idle-compact-notes.txt');
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '写一个很大的文件' }],
+      model: 'mock/mock-chat',
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (input activity)');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    await waitFor(host, turnCompleted(turnId), 'turn/completed (input activity)', 30_000);
+
+    const sessionPath = () =>
+      join(
+        host.home,
+        'sessions',
+        readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'))[0]!,
+      );
+    // turn 结束时历史是完整的（阈值没到、也没有空闲触发）。
+    expect(readFileSync(sessionPath(), 'utf8')).not.toContain('[Old tool result content cleared');
+    const requestsBeforeActivity = mock!.state.requests.length;
+
+    // 会话空闲够久之后用户回到输入框：宿主把这一下敲字翻成运行期事件，插件据此
+    // 在轮次之外把已经落盘的历史压小——下一轮请求不必再为这段工具结果付费。
+    await sleep(1_500);
+    await send(host, 2, 'mica/input/activity', {});
+    await waitFor(host, (m) => m.id === 2, 'mica/input/activity response');
+
+    // 压缩不等回包（用户还在打字），轮询落盘结果。
+    let persisted = '';
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      persisted = readFileSync(sessionPath(), 'utf8');
+      if (persisted.includes('[Old tool result content cleared during compact]')) break;
+      await sleep(100);
+    }
+    expect(persisted).toContain('[Old tool result content cleared during compact]');
+    // 请求数没变：这次压缩全在本地，没有偷偷发起一次模型请求。
+    expect(mock!.state.requests).toHaveLength(requestsBeforeActivity);
+    expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);
+  });
+
   itE2E('capabilities/set pins the session selection over the config defaults', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];

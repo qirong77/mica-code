@@ -1,7 +1,8 @@
 // 本地诊断日志：desktop 运行时（host/server）各功能共用的唯一写入器。
 //
 // 目标不是遥测，而是「事后能查」。所以：
-// - 位置在 os.tmpdir()/mica-logs/，macOS 开机由 launchd 清空，不需要保留策略；
+// - 位置由 `resolveLogDir()` 决定（macOS `~/Library/Logs/mica`），不写系统 temp：
+//   temp 每次登录被系统清空，重启就只剩当次运行，跨天的问题无法回头查；
 // - JSONL 一行一个事件，直接 tail / grep / jq 就能看；
 // - 内存排队 + 定时批量落盘，高频事件（如流式输出）不会把主线程拖慢；
 // - 同时保留最近 N 条在内存里，供 `diagnostics:snapshot` 立刻取现场。
@@ -17,11 +18,15 @@ import {
   statSync,
   unlinkSync
 } from 'fs'
-import { tmpdir } from 'os'
 import { join } from 'path'
+import { resolveLogDir } from '@packages/mica-config/brand.js'
 
 const MAX_BYTES = 16 * 1024 * 1024
-const KEEP_DAYS = 3
+const KEEP_DAYS = 7
+// 常态化保留之后目录会跨天累积，再加一道总容量兜底：超了从最旧的开始删。
+const MAX_TOTAL_BYTES = 256 * 1024 * 1024
+// 清理跑在 flush 里（每 2s），但扫描目录没必要这么勤。
+const PRUNE_MS = 60 * 60 * 1000
 const RING_SIZE = 1000
 const FLUSH_MS = 2000
 const FLUSH_BATCH = 100
@@ -36,10 +41,16 @@ let ring = []
 let flushTimer = null
 let slowStats = new Map()
 let dropped = 0
+let lastPrune = 0
+let lastPruneDir = ''
 
 function logDir() {
-  const dir = join(tmpdir(), 'mica-logs')
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const dir = resolveLogDir()
+  try {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  } catch {
+    // 目录建不出来时让它抛在 appendFileSync 里，按「本批丢弃」处理，不影响调用方
+  }
   return dir
 }
 
@@ -63,9 +74,13 @@ function fileFor(scope, now) {
   return join(dir, `${scope}-${dayStamp(now)}-${now}.jsonl`)
 }
 
-// 长时间不重启时兜底清理；开机时整个 temp 会被 launchd 清空。
+// 保留期 + 总容量兜底清理。
 function prune(now) {
   const dir = logDir()
+  // 换了目录（MICA_LOG_DIR 覆盖、隔离实例）就立即清一次，别让上一个目录的节流带过来。
+  if (dir === lastPruneDir && now - lastPrune < PRUNE_MS) return
+  lastPrune = now
+  lastPruneDir = dir
   const cutoff = now - KEEP_DAYS * 24 * 60 * 60 * 1000
   let names = []
   try {
@@ -73,13 +88,31 @@ function prune(now) {
   } catch {
     return
   }
+  const kept = []
   for (const name of names) {
     if (!name.endsWith('.jsonl')) continue
     const path = join(dir, name)
     try {
-      if (statSync(path).mtimeMs < cutoff) unlinkSync(path)
+      const info = statSync(path)
+      if (info.mtimeMs < cutoff) {
+        unlinkSync(path)
+        continue
+      }
+      kept.push({ path, size: info.size, mtimeMs: info.mtimeMs })
     } catch {
       // 删不掉不影响写入
+    }
+  }
+  let total = kept.reduce((sum, file) => sum + file.size, 0)
+  if (total <= MAX_TOTAL_BYTES) return
+  kept.sort((a, b) => a.mtimeMs - b.mtimeMs)
+  for (const file of kept) {
+    if (total <= MAX_TOTAL_BYTES) break
+    try {
+      unlinkSync(file.path)
+      total -= file.size
+    } catch {
+      // 同上
     }
   }
 }

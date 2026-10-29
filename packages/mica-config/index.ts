@@ -138,4 +138,5 @@ export {
   VERSION_LABEL,
   resolveMicaHome,
   resolveMicaHomePath,
+  resolveLogDir,
 } from './brand.js';

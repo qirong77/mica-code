@@ -66,6 +66,14 @@ function formatTokens(value) {
 }
 
 /**
+ * 「用户在敲字」信号的最小间隔。
+ *
+ * 它只是给插件的提前量（自动压缩据此判断会话空闲了多久），不是每个按键都要通知：
+ * 输入框每变一次就发一次请求，打一行字就是十几次往返。
+ */
+const INPUT_ACTIVITY_INTERVAL_MS = 2000
+
+/**
  * By The Way 草稿的键：`节点:线程`。
  *
  * 一个节点可以有多个 tab，每个 tab 都是另一条对话，所以半句话必须按 tab 分开存
@@ -2468,6 +2476,9 @@ export function ChatView({
   }
   // 本页最后为某个节点设置过/应用过的草稿文本，用来区分「别的窗口改了」与「自己的回声」。
   const draftReportRef = useRef({ nodeId: null, text: '' })
+  // 上一次把「用户在敲字」告诉 host 的时间（`{ nodeId, at }`）。按节点记：切到另一条
+  // 会话时不该被上一条会话的节流窗口吞掉。
+  const inputActivityRef = useRef({ nodeId: null, at: 0 })
   const todoHiddenRef = useRef(new Map())
   // 输入历史与 CLI 共享（~/.mica/storage.json 的 inputHistory），跨节点共用
   // 一份数组；挂载时从磁盘加载，发送时异步回写。
@@ -3889,6 +3900,18 @@ export function ChatView({
     if (reported.nodeId === nodeId && reported.text === text) return
     draftReportRef.current = { nodeId, text }
     draftsRef.current.set(nodeId, text)
+  }, [input, nodeId])
+
+  // 开始敲字就给常驻 host 一个「这个人回来了」的信号（节流 2s，空输入不算）：
+  // 会话空闲够久时自动压缩会趁这个间隙先把历史压小，下一轮请求不必再为膨胀的上下文付费。
+  // 没有常驻进程时 host 直接吞掉，不 spawn；失败也不影响输入。
+  useEffect(() => {
+    if (!nodeId || !input || !input.trim()) return
+    const now = Date.now()
+    const last = inputActivityRef.current
+    if (last.nodeId === nodeId && now - last.at < INPUT_ACTIVITY_INTERVAL_MS) return
+    inputActivityRef.current = { nodeId, at: now }
+    void window.mica?.chat?.inputActivity?.(nodeId)?.catch?.(() => {})
   }, [input, nodeId])
 
   // 别的窗口改了本会话的草稿：跟它走（单一实例下两边是同一个界面）。自己的回声由 ui-state

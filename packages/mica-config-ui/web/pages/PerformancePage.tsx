@@ -13,7 +13,7 @@ import type {
 /**
  * Performance：本机性能与诊断面板。
  *
- * 数据全部来自运行时自己写的 JSONL（`host/log.js`，落在系统 temp，开机自动清空）：
+ * 数据全部来自运行时自己写的 JSONL（`host/log.js`，落在 `~/Library/Logs/mica`，保留 7 天）：
  * - 渲染层每秒一个采样点：事件循环延迟（lag）、长任务（long/longN）、DOM 规模、堆大小；
  * - 每个 host 通道的调用耗时，超阈值记为 slow；
  * - 渲染层 console.error 与未捕获异常；

@@ -15,6 +15,7 @@ import type { PluginSettingField } from './PluginSettings.js';
 import type { PluginLlmSpec } from './PluginLlm.js';
 import type { PluginDesktopPanel } from './PluginDesktop.js';
 import type { PluginActionDeclaration } from './PluginActions.js';
+import type { PluginSessionMenuItem } from './PluginSessionMenu.js';
 import type { MicaPlugin } from './Plugin.js';
 
 export type FilePluginLoaderOptions = {
@@ -67,6 +68,8 @@ export type PluginInspection = {
   actions: PluginActionDeclaration[];
   /** 清单声明的对话右侧面板；没声明（或清单坏掉）时为 null。 */
   desktopPanel: PluginDesktopPanel | null;
+  /** 清单声明的会话右键菜单项；没声明（或清单坏掉）时为空。 */
+  desktopSessionMenu: PluginSessionMenuItem[];
   /** 清单解析 / 入口缺失等静态问题；加载期错误由 plugin-status.json 提供。 */
   error?: string;
 };
@@ -218,6 +221,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     status: [],
     actions: [],
     desktopPanel: null,
+    desktopSessionMenu: [],
   };
 
   let parsed: unknown;
@@ -247,6 +251,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     status: manifest.status,
     actions: manifest.actions,
     desktopPanel: manifest.desktopPanel,
+    desktopSessionMenu: manifest.desktopSessionMenu,
     error: existsSync(entryFile) ? undefined : `入口文件不存在：${manifest.main}`,
   };
 }

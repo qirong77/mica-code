@@ -5,6 +5,7 @@ import {
   decideAutoCompactStep,
   normalizeCounters,
   settingsFromValues,
+  shouldCompactOnReturn,
   shouldEscalateToModel,
   type AutoCompactCounters,
   type AutoCompactSettings,
@@ -29,6 +30,12 @@ describe('settingsFromValues', () => {
   it('converts minutes to milliseconds and keeps 0 as "no throttle"', () => {
     expect(settingsFromValues({ minIntervalMinutes: '0' }).minIntervalMs).toBe(0);
     expect(settingsFromValues({ minIntervalMinutes: '1.5' }).minIntervalMs).toBe(90_000);
+  });
+
+  it('reads the idle trigger in minutes and keeps 0 as "off"', () => {
+    expect(settingsFromValues({}).idleMs).toBe(DEFAULT_SETTINGS.idleMs);
+    expect(settingsFromValues({ idleMinutes: '20' }).idleMs).toBe(20 * 60_000);
+    expect(settingsFromValues({ idleMinutes: '0' }).idleMs).toBe(0);
   });
 
   it('treats a switch that is off as disabled, and anything else as on', () => {
@@ -59,6 +66,7 @@ describe('normalizeCounters', () => {
       lastRunAt: '2026-10-01T00:00:00.000Z',
       lastKind: 'model',
       lastSavedTokens: 4096,
+      lastActivityAt: '2026-09-30T23:00:00.000Z',
     };
     expect(normalizeCounters(stored)).toEqual(stored);
   });
@@ -136,6 +144,42 @@ describe('shouldEscalateToModel', () => {
   it('stops at the model allowance', () => {
     expect(
       shouldEscalateToModel({ settings: settings(), counters: counters({ modelRuns: 999 }), ctxTokens: 900_000 }),
+    ).toBe(false);
+  });
+});
+
+describe('shouldCompactOnReturn', () => {
+  const idleSettings = (patch: Partial<AutoCompactSettings> = {}) => settings({ idleMs: 15 * 60_000, ...patch });
+
+  it('fires only once the session has been idle long enough', () => {
+    expect(shouldCompactOnReturn({ settings: idleSettings(), counters: counters(), idleMs: 14 * 60_000 })).toBe(false);
+    expect(shouldCompactOnReturn({ settings: idleSettings(), counters: counters(), idleMs: 16 * 60_000 })).toBe(true);
+  });
+
+  it('is off when the threshold is 0 or the plugin is disabled', () => {
+    expect(
+      shouldCompactOnReturn({ settings: idleSettings({ idleMs: 0 }), counters: counters(), idleMs: 600_000 }),
+    ).toBe(false);
+    expect(
+      shouldCompactOnReturn({ settings: idleSettings({ enabled: false }), counters: counters(), idleMs: 600_000 }),
+    ).toBe(false);
+  });
+
+  it('shares the quick allowance and the minimum interval', () => {
+    expect(
+      shouldCompactOnReturn({
+        settings: idleSettings({ quickLimit: 1 }),
+        counters: counters({ quickRuns: 1 }),
+        idleMs: 600_000,
+      }),
+    ).toBe(false);
+    expect(
+      shouldCompactOnReturn({
+        settings: idleSettings({ minIntervalMs: 60_000 }),
+        counters: counters({ quickRuns: 1, lastRunAt: new Date(1_000_000).toISOString() }),
+        idleMs: 600_000,
+        nowMs: 1_030_000,
+      }),
     ).toBe(false);
   });
 });

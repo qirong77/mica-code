@@ -303,7 +303,7 @@ function renderLoginPage({ next = '/', error = '', locked = false, enabled = tru
     ? `<p class="hint">这台机器没有开启远程访问：完整界面只在本机可用，别的设备只能打开分享链接。</p>`
     : error
       ? `<p class="error">${escapeHtml(error)}</p>`
-      : `<p class="hint">这台机器上的 Mica Code 要求先输入访问口令。口令在它侧栏的 Connections 卡片里（「其他机器访问这台机器」）。</p>`
+      : `<p class="hint">这台机器上的 Mica Code 要求先输入访问口令。口令在它侧栏的 Connections 卡片里（「局域网/公网可访问」）。</p>`
   return `<!doctype html>
 <html lang="zh-CN">
 <head>

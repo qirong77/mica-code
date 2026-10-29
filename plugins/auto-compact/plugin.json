@@ -76,6 +76,18 @@
       "unit": "分钟",
       "description": "免得同一段上下文被反复触发；0 表示不限制。",
       "perSession": true
+    },
+    {
+      "key": "idleMinutes",
+      "label": "空闲后输入触发压缩",
+      "type": "number",
+      "default": "15",
+      "min": 0,
+      "max": 1440,
+      "step": 5,
+      "unit": "分钟",
+      "description": "会话空闲这么久之后，用户又在输入框里敲字就先做一次快速压缩（本地清理，不调用模型），下一轮请求不必再为膨胀的历史付费。仍受「两次压缩的最小间隔」限制；0 表示关掉这个触发。",
+      "perSession": true
     }
   ]
 }

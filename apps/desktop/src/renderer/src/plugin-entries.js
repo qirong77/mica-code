@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { readPluginsDetails } from './plugins-details'
 
 /**
  * 插件在桌面端侧栏的入口。
@@ -40,14 +41,8 @@ export function usePluginEntries() {
   useEffect(() => {
     let alive = true
     void (async () => {
-      let plugins = []
-      try {
-        const details = await window.mica?.configWeb?.invoke('readPluginsDetails')
-        plugins = Array.isArray(details?.plugins) ? details.plugins : []
-      } catch {
-        // 读不到插件状态就不画入口：画出来也点不开，反而让人以为功能坏了
-        return
-      }
+      // 读不到插件状态就不画入口：画出来也点不开，反而让人以为功能坏了
+      const plugins = await readPluginsDetails()
 
       const loaded = await Promise.all(
         plugins.map(async (plugin) => {

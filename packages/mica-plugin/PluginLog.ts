@@ -1,25 +1,25 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resolveLogDir } from '@packages/mica-config/brand.js';
 
 /**
- * 插件日志：每个插件一份 JSONL，写在系统 temp 目录，出问题时直接 tail / grep。
+ * 插件日志：每个插件一份 JSONL，和 desktop 运行时日志同一个目录，出问题时直接 tail / grep。
  *
  * 插件跑在 CLI 进程里（TUI 或 app-server），拿不到 desktop `host/log.js` 的写入器，
  * 所以这里是一个独立的小实现，规则和它保持一致：
  *
- * - 目录 `os.tmpdir()/mica-logs/`，**不放用户 home**：日志是诊断产物，不该在用户目录里
- *   越积越多，macOS 开机也会清掉 temp；
+ * - 目录来自 `resolveLogDir()`（macOS `~/Library/Logs/mica`），与运行时日志同处一地。
+ *   不放系统 temp：temp 每次登录被清空，重启后连「上一个版本为什么失败」都查不到；
+ *   堆积靠下面两条规则控制，而不是靠系统清空；
  * - 一天一个文件，单文件超过 `MAX_FILE_BYTES` 就换下一个分片，不原地无限增长；
  * - 超过 `KEEP_DAYS` 天的旧分片在下次写入时清掉；
  * - 写盘失败、目录不可写一律吞掉：日志永远不能成为插件失败的原因。
  *
  * `MICA_PLUGIN_LOG=0` 关闭落盘（仍然转发给 host 的 logger）。
  */
-const LOG_DIR_NAME = 'mica-logs';
 const PLUGIN_FILE_PREFIX = 'plugin-';
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
-const KEEP_DAYS = 3;
+const KEEP_DAYS = 7;
 
 export type PluginLogPayload = Record<string, unknown> | unknown;
 
@@ -38,7 +38,7 @@ export type PluginLogOptions = {
 
 /** 插件日志目录。与 desktop `host/log.js` 同一个目录，只是文件前缀不同。 */
 export function pluginLogDir(options: PluginLogOptions = {}): string {
-  return options.dir ?? join(tmpdir(), LOG_DIR_NAME);
+  return options.dir ?? resolveLogDir();
 }
 
 /**

@@ -27,6 +27,17 @@ export type PluginCompactResult = {
   savedTokens: number;
 };
 
+/**
+ * 一次「轮次之外的压缩」的结果。
+ *
+ * `null`（方法返回 null）表示这一次没有压成：会话正忙、另一个进程持有 turn lease，
+ * 或者历史里本来就没有可清理的内容。三种情况都不是错误，插件据此决定要不要计入次数。
+ */
+export type PluginIdleCompactResult = {
+  /** 这次压缩大约省下多少 token（估算值，仅用于展示）。 */
+  savedTokens: number;
+};
+
 /** 一次模型请求所属 agent 的句柄。 */
 export type PluginAgentHandle = {
   readonly sessionId: string | null;
@@ -67,4 +78,15 @@ export type PluginAgentRegistry = {
   /** 宿主形态，原样交给 `ctx.agent.mode`。 */
   mode: 'session' | 'one-shot';
   onIterationRewrite(pluginId: string, handler: PluginIterationRewriter): Disposable;
+  /**
+   * 在轮次之外对当前会话**已经存下来的**历史做一次快速压缩（只做本地清理，不调用模型）。
+   *
+   * 与 `onIterationRewrite` 里的 `compact` 的区别是「改哪一份」：那里改的是一次请求
+   * 即将发送的历史（不落盘），这里改的是会话文件本身，所以它能真正省掉下一轮请求的
+   * 上下文——用户空闲很久之后重新敲字时，压缩因此可以提前发生，而不是等请求已经在路上。
+   *
+   * 宿主给不出这条通路时省略（`mica exec` 不落盘，TUI 由 `/compact` 负责）；插件必须
+   * 把它当成可选能力，不能因为读不到就报错。
+   */
+  compactIdleHistory?(pluginId: string): Promise<PluginIdleCompactResult | null>;
 };

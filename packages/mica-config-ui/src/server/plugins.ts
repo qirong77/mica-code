@@ -61,6 +61,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         status: readStatus(manifest.id, manifest.status, configRoot),
         actions: manifest.actions,
         desktopPanel: manifest.desktopPanel,
+        desktopSessionMenu: manifest.desktopSessionMenu,
         health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(manifest.id),
         loadStatus: status?.status,
@@ -92,6 +93,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         actions: plugin.actions ?? [],
         // 面板反过来是数据驱动的，所以用户插件声明了就有。
         desktopPanel: plugin.desktopPanel,
+        desktopSessionMenu: plugin.desktopSessionMenu ?? [],
         health: micaPlugin.readPluginHealth(plugin.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(plugin.id),
         loadStatus: status?.status,

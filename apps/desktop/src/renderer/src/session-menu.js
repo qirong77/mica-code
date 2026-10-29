@@ -19,3 +19,23 @@ export function sessionMenuItems({ pinned, inProject }) {
 export function draftMenuItems() {
   return [['rename', '重命名'], 'separator', ['delete', '删除对话', true]]
 }
+
+/**
+ * 把插件贡献的项插到「删除」之前：删除永远排最后，误点就找不回来了。
+ *
+ * `extra` 里既有会话标记（打勾项）也有插件动作（`session-menu:<pluginId>:<action>`），
+ * 两者都由插件提供，宿主只负责摆放位置。
+ */
+export function withExtraMenuItems(items, extra) {
+  const additions = Array.isArray(extra) ? extra.filter(Boolean) : []
+  if (!additions.length) return items
+  const dangerIndex = items.findIndex((item) => Array.isArray(item) && item[2])
+  if (dangerIndex < 0) {
+    const head = [...items]
+    while (head.at(-1) === 'separator') head.pop()
+    return [...head, 'separator', ...additions]
+  }
+  const head = items.slice(0, dangerIndex)
+  while (head[head.length - 1] === 'separator') head.pop()
+  return [...head, 'separator', ...additions, 'separator', ...items.slice(dangerIndex)]
+}

@@ -73,6 +73,9 @@ const plugin: MicaPlugin = {
     const describe = ctx.session.describe();
     const parentSessionId = describe?.id ?? null;
     const defaultCwd = describe?.cwd || process.cwd();
+    // 父会话当前的角色。每次 spawn 重新读：会话里切角色（`/role`、输入条）之后
+    // 再派子会话，应该跟的是切完的那个。
+    const currentRole = () => ctx.session?.describe()?.role;
 
     const runtimeDir = resolveRuntimeDir(ctx.paths?.config);
     const skillContent = SKILL.content;
@@ -111,7 +114,7 @@ const plugin: MicaPlugin = {
       });
     }
 
-    const registry = new SidecarRegistry(ctx, parentSessionId, defaultCwd);
+    const registry = new SidecarRegistry(ctx, parentSessionId, defaultCwd, currentRole);
     // primaryAgentOnly：子代理不该再派生会话，否则会变成没人收的进程树。
     const options = { primaryAgentOnly: true } as const;
     const tools = [
@@ -125,11 +128,16 @@ const plugin: MicaPlugin = {
       ctx.tools.register(new SidecarAbortTool(registry), options),
       ctx.tools.register(new SidecarCloseTool(registry), options),
     ];
-    ctx.onDispose(() => {
+    ctx.onDispose(async () => {
       for (const tool of tools) tool.dispose();
       // 子进程必须跟着插件一起走：父会话关掉还在跑的 sidecar 会一直烧 token，
       // 而用户已经看不到它了（它挂在一条已经结束的会话名下）。
-      void registry.closeAll();
+      //
+      // 这里必须 **await**：`disposeAll` 会等这个回调，而 app-server 在它返回后
+      // 立刻 `process.exit` —— 用 `void` 等于在子进程还没死的时候就撒手。
+      // graceMs 压到 800 是给退出路径留预算：正常子进程收到 stdin EOF 几十毫秒
+      // 就退了，只有卡住的才走满 SIGTERM/SIGKILL 那段。
+      await registry.closeAll(800);
     });
 
     if (!registration.skipped.length) {

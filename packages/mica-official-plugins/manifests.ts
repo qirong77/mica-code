@@ -9,6 +9,7 @@ import memoryManifest from '../../plugins/memory/plugin.json';
 import mobileRelayManifest from '../../plugins/mobile-relay/plugin.json';
 import sessionRenameManifest from '../../plugins/session-rename/plugin.json';
 import sessionNotesManifest from '../../plugins/session-notes/plugin.json';
+import sessionCopyManifest from '../../plugins/session-copy/plugin.json';
 import sessionTagsManifest from '../../plugins/session-tags/plugin.json';
 import sidecarManifest from '../../plugins/sidecar/plugin.json';
 import subagentManifest from '../../plugins/subagent/plugin.json';
@@ -33,6 +34,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(webSearchManifest),
   readManifest(todoManifest),
   readManifest(sessionNotesManifest),
+  readManifest(sessionCopyManifest),
   readManifest(sessionRenameManifest),
   readManifest(sessionTagsManifest),
   readManifest(sidecarManifest),

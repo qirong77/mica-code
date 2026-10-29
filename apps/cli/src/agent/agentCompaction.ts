@@ -1,6 +1,9 @@
 import { recordSubagentTaskUsage } from '@packages/mica-agent/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
+import type { CompactResult } from '@packages/mica-context/index.js';
+import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { AgentRuntime } from './AgentRuntime.js';
+import type { SessionController } from '../session/SessionController.js';
 
 /**
  * 把「这段 provider 历史压小」这件事本身做成内核能力。
@@ -68,4 +71,62 @@ export async function compactAgentMessages(
 /** 「没有可清理内容」与真正的失败要分开：前者不是错误，只是这次没压出东西。 */
 export function isNothingToCompact(error: unknown): boolean {
   return micaContext.isCompactionNotNeededError(error);
+}
+
+/**
+ * 把当前会话**已经存下来的**历史快速压一次，并落盘。
+ *
+ * 与 `compactAgentMessages('quick')` 的区别是改哪一份：那个改的是一次请求即将发送的
+ * 历史（不落盘、随请求结束消失），这个改的是会话文件本身——所以它能在用户还没按下
+ * 发送时就把上下文降下来，下一轮请求不必再为膨胀的历史付费。
+ *
+ * 只做本地清理（工具结果 / 工具参数正文 / 媒体块换成占位符），不调用模型、不丢轮次、
+ * 不改对话文本，所以随时可做，失败也不会损坏会话。
+ *
+ * 调用方必须已经独占这条会话（持有 turn lease）：这里会直接覆盖会话文件。
+ */
+export async function compactIdleSessionHistory(input: {
+  agent: AgentRuntime;
+  sessionController: SessionController;
+  /** 落盘时要写回的对话记录（含 notice）；不给就退回 agent 自己的投影。 */
+  conversationMessages?: () => MicaUiConversationMessage[] | undefined;
+}): Promise<{ savedTokens: number } | null> {
+  const { agent, sessionController } = input;
+  const snapshot = agent.getSnapshot();
+  if (snapshot.messages.length < 2) return null;
+
+  let result: CompactResult;
+  try {
+    result = await new micaContext.CompactionService().compact({
+      messages: snapshot.messages,
+      options: { toolResultsOnly: true, contextWindowSize: snapshot.contextWindowSize },
+    });
+  } catch (error) {
+    // 「没有可清理内容」是常态（干净的会话每次敲字都会走到这里），不是故障。
+    if (isNothingToCompact(error)) return null;
+    throw error;
+  }
+  if (result.messages.length === 0) return null;
+
+  try {
+    agent.loadSnapshot({
+      ...snapshot,
+      messages: result.messages,
+      // 用量统计不跟着压缩走：清掉会把压缩前的开销从 Stats 里抹掉。
+      usageHistory: snapshot.usageHistory,
+      lastUsage: snapshot.lastUsage,
+      // loadSnapshot 整组替换该字段：显式带上，别丢掉摘要/插件请求刚记的用量。
+      subagentUsageHistory: agent.getSubagentUsageHistory(),
+    });
+  } catch (error) {
+    agent.loadSnapshot(snapshot);
+    throw error;
+  }
+
+  const conversationMessages = input.conversationMessages?.();
+  sessionController.saveCurrent({
+    preserveTitle: true,
+    ...(conversationMessages ? { conversationMessages } : {}),
+  });
+  return { savedTokens: Math.max(0, result.savedTokenEstimate) };
 }

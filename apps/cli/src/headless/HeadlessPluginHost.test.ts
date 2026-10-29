@@ -48,6 +48,9 @@ function mockSessionController(saveSpy: ReturnType<typeof vi.fn>): SessionContro
     // 官方插件会在 turn:before 里读展示标题（session-rename），桩缺了它整条 hook 会抛错。
     getCurrentDisplayTitle: () => 'headless test session',
     getCurrentTitleSource: () => 'derived',
+    // describe() 会读它：桩缺了这个方法，插件 setup 里的 describe() 直接抛，
+    // 整批插件注册中断（表现为「memory 工具不见了」）。
+    getParentSessionId: () => null,
     saveCurrent: saveSpy,
     refreshFromStore: () => null,
     startNewSession: () => {},

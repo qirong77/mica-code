@@ -10,6 +10,7 @@ import type {
   PluginPanelRegistry,
   PluginManager,
   PluginBaseContext,
+  PluginSessionMenuRegistry,
   ServiceContainer,
 } from '@packages/mica-plugin/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
@@ -24,6 +25,7 @@ import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { configureIterationRewrite, registerIterationRewrite } from '../agent/iterationRewrite.js';
+import { compactIdleSessionHistory } from '../agent/agentCompaction.js';
 import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
 import { createPluginModels, recordPluginModelUsage } from '../plugins/pluginModels.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
@@ -70,6 +72,13 @@ export type HeadlessPluginHostOptions = {
    * 定时器、外部命令与额外模型请求混进一次基准运行。
    */
   loadUserPlugins?: boolean;
+  /**
+   * 轮次之外独占会话做一次改写（自动压缩拿它把历史提前压小）。
+   *
+   * 由常驻会话宿主提供（它持有 turn lease 与落盘时机）；`mica exec` 不传，插件因此
+   * 拿不到 `compactIdleHistory`。
+   */
+  runIdleTask?: <T>(task: () => Promise<T | null>) => Promise<T | null>;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -84,6 +93,8 @@ export type HeadlessPluginHost = {
   plugins: PluginManager;
   /** 对话右侧面板的登记表：协议层按 pluginId 取视图、转发动作。 */
   panels: PluginPanelRegistry;
+  /** 会话右键菜单动作的登记表：协议层按 pluginId 转发一次动作。 */
+  sessionMenus: PluginSessionMenuRegistry;
   /** Single-slot queue shared with the HeadlessTurnExecutor. */
   queue: MessageQueueService;
   getCurrentSessionId(): string;
@@ -145,6 +156,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   const events = new micaRuntime.RuntimeEventBus();
   const plugins = new micaPlugin.PluginManager();
   const panels = new micaPlugin.PluginPanelRegistry();
+  const sessionMenus = new micaPlugin.PluginSessionMenuRegistry();
   const queue = new micaRuntime.MessageQueueService();
   // Notices live in the session file's conversationMessages, not in the
   // provider history: they are display-only and never reach the model.
@@ -252,19 +264,27 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     // 面板是「插件给数据、宿主画出来」的界面，只有桌面宿主有位置渲染它；CLI / exec 里
     // 传了登记表也没人读，所以跟着 desktopHost 一起开关。
     ...(options.desktopHost ? { desktopPanels: panels } : {}),
+    // 会话右键菜单同理：菜单在桌面上，动作处理器活在插件所在的这个进程里。
+    ...(options.desktopHost ? { desktopSessionMenus: sessionMenus } : {}),
     services,
     hooks,
     commands,
     events,
     // 一个进程一条会话：owner 在这里不参与解析，改名也只会落到当前会话上。
     session: {
-      describe: () => ({
-        id: sessionController.getCurrentSessionId(),
-        title: sessionController.getCurrentDisplayTitle(),
-        titleSource: sessionController.getCurrentTitleSource(),
-        cwd: process.cwd(),
-        role: agent.role,
-      }),
+      describe: () => {
+        const parentSessionId = sessionController.getParentSessionId();
+        return {
+          id: sessionController.getCurrentSessionId(),
+          title: sessionController.getCurrentDisplayTitle(),
+          titleSource: sessionController.getCurrentTitleSource(),
+          cwd: process.cwd(),
+          role: agent.role,
+          ...(parentSessionId ? { parentSessionId } : {}),
+          provider: agent.config.provider.name ?? agent.config.provider.id,
+          model: agent.config.model,
+        };
+      },
       messages: () => agent.toConversationMessages(),
       rename: (title, renameOptions) =>
         sessionController.renameCurrent(title, { source: renameOptions?.source ?? 'auto' }),
@@ -289,6 +309,20 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     agentRegistry: {
       mode: options.oneShot ? 'one-shot' : 'session',
       onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
+      // 轮次之外的压缩走同一条落盘路径：由宿主决定「现在能不能写」（lease + 对齐磁盘），
+      // 插件只决定「什么时候值得压」。
+      ...(options.runIdleTask
+        ? {
+            compactIdleHistory: () =>
+              options.runIdleTask!(() =>
+                compactIdleSessionHistory({
+                  agent,
+                  sessionController,
+                  conversationMessages: () => getConversationMessages(),
+                }),
+              ),
+          }
+        : {}),
     },
     subagentsFor: (pluginId) => pluginSubagents.forPlugin(pluginId),
     // 插件自己的模型请求同样要记账：app-server 就是常驻会话，漏了这一笔 Stats 会少算。
@@ -386,6 +420,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     events,
     plugins,
     panels,
+    sessionMenus,
     queue,
     getCurrentSessionId: () => sessionController.getCurrentSessionId(),
     getConversationMessages,

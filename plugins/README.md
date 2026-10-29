@@ -18,25 +18,25 @@ plugins/<id>/
 
 `plugin.json`：
 
-| 字段              | 必填 | 说明                                                                                               |
-| ----------------- | ---- | -------------------------------------------------------------------------------------------------- |
-| `id`              | 是   | 小写字母、数字、`.`、`_`、`-`；用户插件会在运行期加 `user.` 前缀，避免和内置插件撞名               |
-| `name`            | 是   | 展示名                                                                                             |
-| `version`         | 是   | `1.0.0` 形式                                                                                       |
-| `description`     | 否   | 配置页与详情里显示的一句话说明                                                                     |
-| `icon`            | 否   | 插件图标名（kebab-case），取值见 `packages/mica-config-ui/web/pluginIcons.tsx`；缺省用默认方块图标 |
-| `author`          | 否   | 作者                                                                                               |
-| `main`            | 否   | 入口文件，默认 `index.js`；必须在插件目录内                                                        |
-| `assets`          | 否   | 随插件分发的资源（样式、文档、图标），同样不许跳出版块目录                                         |
-| `dependencies`    | 否   | 需要先 setup 的插件 id                                                                             |
-| `required`        | 否   | setup 失败是否中断启动；用户插件默认 `false`                                                       |
-| `priority`        | 否   | 加载顺序，小的先执行                                                                               |
-| `mica.apiVersion` | 否   | 当前只支持 `1`                                                                                     |
-| `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读、`ctx.settings.set()` 写回          |
-| `actions`         | 否   | 配置页上的按钮声明，见「配置页动作」一节；插件用 `ctx.actions.register()` 提供实现                 |
-| `llm`             | 否   | 需要自己调模型时声明一次，见「模型接口」一节；插件用 `ctx.llm` 读取与请求                          |
-| `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                                         |
-| `desktop`         | 否   | 声明依赖的桌面端运行条件，见「运行条件」一节；用它的插件要同时声明 `requires: ["desktop"]`         |
+| 字段              | 必填 | 说明                                                                                                        |
+| ----------------- | ---- | ----------------------------------------------------------------------------------------------------------- |
+| `id`              | 是   | 小写字母、数字、`.`、`_`、`-`；用户插件会在运行期加 `user.` 前缀，避免和内置插件撞名                        |
+| `name`            | 是   | 展示名                                                                                                      |
+| `version`         | 是   | `1.0.0` 形式                                                                                                |
+| `description`     | 否   | 配置页与详情里显示的一句话说明                                                                              |
+| `icon`            | 否   | 插件图标名（kebab-case），取值见 `packages/mica-config-ui/web/pluginIcons.tsx`；缺省用默认方块图标          |
+| `author`          | 否   | 作者                                                                                                        |
+| `main`            | 否   | 入口文件，默认 `index.js`；必须在插件目录内                                                                 |
+| `assets`          | 否   | 随插件分发的资源（样式、文档、图标），同样不许跳出版块目录                                                  |
+| `dependencies`    | 否   | 需要先 setup 的插件 id                                                                                      |
+| `required`        | 否   | setup 失败是否中断启动；用户插件默认 `false`                                                                |
+| `priority`        | 否   | 加载顺序，小的先执行                                                                                        |
+| `mica.apiVersion` | 否   | 当前只支持 `1`                                                                                              |
+| `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读、`ctx.settings.set()` 写回                   |
+| `actions`         | 否   | 配置页上的按钮声明，见「配置页动作」一节；插件用 `ctx.actions.register()` 提供实现                          |
+| `llm`             | 否   | 需要自己调模型时声明一次，见「模型接口」一节；插件用 `ctx.llm` 读取与请求                                   |
+| `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                                                  |
+| `desktop`         | 否   | 桌面端界面入口（`entry` / `panel` / `sessionMenu`）与运行条件；用它的插件要同时声明 `requires: ["desktop"]` |
 
 ## 设置项
 
@@ -192,6 +192,10 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 `session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`、`models`、`llm`。宿主缺哪个，
 插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
+`ctx.agent.compactIdleHistory()` 是同一个能力面的另一半：在轮次之外把**已经落盘的**历史快速压
+一次（本地清理，不调模型），只在能独占写会话文件的常驻宿主里提供——`mica exec` 不落盘、TUI 走
+`/compact`，两边都没有它，插件要当成可选能力。它的触发信号是运行期事件 `input:activity`
+（用户在输入框敲字，桌面端经 `mica/input/activity` 送进来）。
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。
 机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定有哪些类型、`agent` 工具长什么样。
 需要一条能反复追问的隔离上下文（旁问、连续修订）时用 `ctx.subagents.thread()`：一次建线程、多次
@@ -370,11 +374,47 @@ ctx.desktop.panel({
   请求应当做成「投一段话进会话，让模型自己去做」，而不是在按钮回调里同步等。
 - 动作做不了（少了配置、频道为空）时 `return { message: '先添加频道' }`：页面会在按钮旁边
   显示这一行。`ctx.ui.notice()` 在常驻宿主里只落进 notice 记录，用户点完按钮往往看不到。
+- 面板动作可以改 `ctx.sessionState`（这块面板上的频道、调度参数这类按会话存的配置），
+  宿主在动作返回后补一次会话落盘——不然用户配完关掉窗口就丢，也许久不会开下一轮。
+  反过来说，**跨会话共享的配置不要塞进面板动作**：那是 `ctx.settings` 的事。
 - 只有清单声明了 `desktop.panel` 时 `ctx.desktop.panel` 才存在——不声明却被静默接受注册，
   插件会以为界面已经出现，实际页面上什么都没有。所以声明 `desktop.panel` 的插件同样要写
   `requires: ["desktop"]`。
 - 插件投递工作时用 `ctx.runtime.submit(text, { source: 'plugin', displayText })`：这一轮会像
   用户说的话一样进会话记录（`displayText` 是界面上那一句，`text` 是真正发给模型的提示词）。
+
+### 会话右键菜单
+
+插件可以在会话侧栏的右键菜单里加一行动作（复制、导出、投递到外部系统这类）：
+
+```json
+{
+  "requires": ["desktop", "session"],
+  "desktop": { "sessionMenu": [{ "action": "copy", "label": "复制会话 Markdown" }] }
+}
+```
+
+```ts
+ctx.desktop.sessionMenu({
+  run({ action }) {
+    if (action !== 'copy') return { message: `未知动作：${action}` };
+    const session = ctx.session.describe();
+    return { copyText: buildMarkdown(session, ctx.session.messages()), message: '已复制' };
+  },
+});
+```
+
+- **有哪些项**写在清单里，**点了做什么**由插件在常驻宿主里注册：右键是同步交互，菜单要立刻
+  画出来，不能为了「这个插件有没有菜单项」去冷启动一个 app-server。处理器只活在插件所在的
+  进程里，所以页面永远只转发 `pluginId + action`，宿主不认识任何具体插件。
+- `run()` 的结果只有两个字段有用：`copyText` 写进系统剪贴板，`message` 作为一句话回给页面。
+  剪贴板必须由页面写——插件跑在 `mica app-server` 里，那里面没有剪贴板，也不该为三个平台
+  各调一次系统命令。
+- 动作要与面板里的按钮一样**立刻返回**：它是用户点菜单后的直接反馈，不要在处理器里等模型
+  请求、外部命令或网络往返。需要模型参与的事让 `ctx.runtime.submit()` 投一段话进会话。
+- 只有清单声明了 `desktop.sessionMenu` 时 `ctx.desktop.sessionMenu` 才存在，因此同样要写
+  `requires: ["desktop"]`；处理器读会话信息时再声明 `requires: ["session"]`。
+- 一个插件一个处理器，按 `action` 自己分派（与面板一致）：清单是 JSON，只能放数据。
 
 插件自身的故障要能被用户看见，而不是只落在日志里：
 
@@ -387,13 +427,14 @@ ctx.desktop.panel({
 
 需要观察运行的插件可以订阅只读 `agent:observe` hook（类型 `AgentObservationEvent`）：宿主提供 owner/runId、运行开始与终态、实际请求边界与工具定义、最终 prompt、工具调用与结果、用量、重试和历史改写。通过 `HookRegistry.notify()` 派发：按顺序调用但不等待异步 handler；失败或挂起不阻塞任务，观察插件自己维护 IO 队列并在 dispose 时 flush。观察者不得修改事件中的运行输入。它覆盖 `AgentRuntime.run`，直接创建的 helper 模型客户端目前不在完整观察范围内。官方 [Harness Review](harness-review/README.md) 用这个接口异步记录并生成复盘报告。
 
-插件拿到的 `ctx.logger` 自带文件输出，写在系统临时目录，不占用户配置目录：
+插件拿到的 `ctx.logger` 自带文件输出，和运行时日志同一个目录（`resolveLogDir()`，macOS 是
+`~/Library/Logs/mica`）。不放系统 temp：temp 每次登录被清空，重启后就查不到上一次运行了：
 
 ```
-os.tmpdir()/mica-logs/plugin-<id>-<YYYYMMDD>[-n].jsonl
+~/Library/Logs/mica/plugin-<id>-<YYYYMMDD>[-n].jsonl
 ```
 
-单文件超过 2 MB 自动分片，超过 3 天的文件在下次写入时清理；`MICA_PLUGIN_LOG=0` 关闭。
+单文件超过 2 MB 自动分片，超过 7 天的文件在下次写入时清理；`MICA_PLUGIN_LOG=0` 关闭。
 排查插件问题时先看这里，配置页插件详情里也会显示当前日志路径。
 
 ## 派生一个子会话（sidecar）
@@ -435,6 +476,15 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 只回一行）。一个满配的 `full` 投影是几万字符，而轮询命中安静路径只有几十字符——不裁剪的话，
 接手这个能力的模型十次 `status` 就会把父会话的上下文吃光。
 
+**派生必须有深度上限**。每个子会话都是一个完整的 mica 进程（自带 registry、加载 MCP 与插件），
+而 `MAX_SIDECARS` 只限制单个进程的宽度：不限制深度就是指数级的进程树，四层足以把机器拖死。
+派生子进程时写 `MICA_SIDECAR_DEPTH`（当前层数 + 1），超过上限直接拒绝派生。
+
+**进程退出要一路降到 SIGKILL**。只发 SIGTERM 就返回等于把「它退了没有」交给一个不存在的下一个
+信号：宿主紧接着 `process.exit`，不响应 SIGTERM 的子进程就成了没人收的孤儿，继续跑它那一轮、
+继续烧 token。`close()` 的顺序是 stdin EOF → SIGTERM → SIGKILL，每步都等到事件落定；
+插件在 `ctx.onDispose()` 里必须 **await** 它（用 `void` 撒手等于没做）。
+
 ## 加一个新插件
 
 1. 新建 `plugins/<id>/`，写 `plugin.json` 与 `index.ts`（`export default function setup(ctx)`）。
@@ -460,5 +510,6 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 「加载失败 / 缺少宿主能力」。
 
 用户插件没有构建步骤，入口是纯 JS：只用 Node 内置模块与 `ctx`，不要 `import` 仓库里的
-`@packages/*`（单二进制里没有那些路径）。要界面就用上面的 `desktop.panel`；要定时逻辑就在
+`@packages/*`（单二进制里没有那些路径）。要界面就用上面的 `desktop.panel`，要往右键菜单里加
+动作就用 `desktop.sessionMenu`；要定时逻辑就在
 `setup()` 里起定时器，并用 `ctx.onDispose()` 收尾。

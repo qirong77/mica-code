@@ -175,6 +175,7 @@ describe('parsePluginManifest', () => {
         status: [],
         actions: [],
         desktopPanel: null,
+        desktopSessionMenu: [],
       },
     });
   });

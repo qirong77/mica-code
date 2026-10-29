@@ -54,7 +54,7 @@ export type ConfigWebPerfTimelinePoint = {
 
 export type ConfigWebPerformanceDetails = {
   available: boolean;
-  /** 日志目录（系统 temp，开机自动清空）。 */
+  /** 日志目录（`resolveLogDir()`，macOS 是 `~/Library/Logs/mica`，保留 7 天）。 */
   dir: string;
   files: Array<{ name: string; bytes: number; modifiedAt: number }>;
   totals: {
@@ -318,7 +318,15 @@ export type ConfigWebPlugin = {
    * 这份数据画按钮，点开源码在会话的 app-server 里问插件要视图。
    */
   desktopPanel: ConfigWebPluginDesktopPanel | null;
-  /** 这个插件今天的日志文件（系统 temp 目录），排查时直接打开。 */
+  /**
+   * 清单的 `desktop.sessionMenu`：这个插件在**会话右键菜单**里有哪几项。
+   *
+   * 只声明「菜单上有哪几行」，点了做什么由插件在自己的常驻宿主里注册。列在这里是因为
+   * 右键必须同步出菜单：页面从这份数据就能画出来，不必为了「有没有菜单项」去冷启动一个
+   * app-server。
+   */
+  desktopSessionMenu: ConfigWebPluginSessionMenuItem[];
+  /** 这个插件今天的日志文件（日志目录下），排查时直接打开。 */
   logFile: string;
   /** 插件自报的最近一次状态（正常 / 待配置 / 出错）；没上报过为 null。 */
   health: ConfigWebPluginHealth | null;
@@ -344,6 +352,12 @@ export type ConfigWebPluginAction = {
 export type ConfigWebPluginActionResult = {
   message: string;
   link?: string;
+};
+
+/** 会话右键菜单里的一项：菜单文案 + 交给插件分派的动作 id。 */
+export type ConfigWebPluginSessionMenuItem = {
+  label: string;
+  action: string;
 };
 
 /** 一条运行状态：清单声明标签与类型，插件提供值。 */

@@ -129,7 +129,16 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
         );
       }
     }
-    if (options.role) agent.setRole(options.role);
+    if (options.role) {
+      // 与 app-server 同一策略：角色文件缺失只降级成 warning，不终止这次运行。
+      // 一次 `mica exec --role 打错字` 不该比模型请求失败还严重。
+      try {
+        agent.setRole(options.role);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error(`Role "${options.role}" could not be applied: ${detail}. Continuing with the current role.`);
+      }
+    }
     throwIfAborted(options.signal);
 
     sessionId = sessionController.getCurrentSessionId();

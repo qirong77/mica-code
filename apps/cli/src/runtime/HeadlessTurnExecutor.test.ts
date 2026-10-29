@@ -165,6 +165,40 @@ function input(text: string, queueMode?: 'after_iteration' | 'after_turn') {
 }
 
 describe('HeadlessTurnExecutor', () => {
+  it('runs an idle maintenance task outside a turn and frees the lease afterwards', async () => {
+    const { executor } = createHarness();
+    let ran = 0;
+
+    const result = await executor.runIdleMaintenance(async () => {
+      ran++;
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+    expect(ran).toBe(1);
+    // lease 已释放：紧接着的一轮不该被自己的空闲任务挡成 busy-remote。
+    await expect(executor.start(input('after idle'))).resolves.toBe('started');
+  });
+
+  it('refuses idle maintenance while a turn is running', async () => {
+    const { executor } = createHarness();
+    await executor.start(input('hello'));
+
+    await expect(executor.runIdleMaintenance(async () => 'ok')).resolves.toBeNull();
+  });
+
+  it('makes a turn wait for an in-flight idle task instead of reporting busy-remote', async () => {
+    const { agent, executor } = createHarness();
+    const idle = executor.runIdleMaintenance(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return 'ok';
+    });
+
+    await expect(executor.start(input('hello'))).resolves.toBe('started');
+    await expect(idle).resolves.toBe('ok');
+    expect(agent.runCalls).toHaveLength(1);
+  });
+
   it('runs the first input immediately and reports turn:start', async () => {
     const { agent, executor, events } = createHarness();
     const result = await executor.start(input('hello'));

@@ -5342,7 +5342,7 @@ body.is-resizing-btw {
   margin: 0;
   padding: 0;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
   list-style: none;
 }
 
@@ -5350,10 +5350,18 @@ body.is-resizing-btw {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px;
-  border: 1px solid var(--color-line);
-  border-radius: 5px;
-  background: rgb(255 255 255 / 2%);
+  padding: 4px 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.chat-plugin-item + .chat-plugin-item {
+  border-top: 1px solid var(--color-line);
+}
+
+.chat-plugin-item:hover {
+  background: rgb(255 255 255 / 3%);
 }
 
 .chat-plugin-item-main {
@@ -5384,6 +5392,29 @@ body.is-resizing-btw {
   display: flex;
   flex: none;
   gap: 4px;
+}
+
+.chat-plugin-item-actions .chat-plugin-button {
+  height: 20px;
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--chat-muted);
+  line-height: 18px;
+}
+
+.chat-plugin-item-actions .chat-plugin-button:hover:not(:disabled) {
+  border-color: var(--color-line);
+  color: var(--color-fg);
+}
+
+.chat-plugin-item-actions .chat-plugin-button.tone-danger {
+  color: color-mix(in srgb, var(--color-danger, #e06c75) 78%, transparent);
+}
+
+.chat-plugin-item-actions .chat-plugin-button.tone-danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-danger, #e06c75) 40%, transparent);
+  color: var(--color-danger, #e06c75);
 }
 
 .chat-plugin-fields {

@@ -126,6 +126,12 @@ export class HeadlessTurnExecutor {
    */
   private committedResponseBuffer = '';
   private lease: SessionTurnLease | null = null;
+  /**
+   * 轮次之外改会话文件的任务（插件触发的空闲压缩）。与 turn 互斥：它在跑的时候
+   * `start()` 先等它收尾，它在 `start()` 已经开始之后就不再接受新任务。
+   */
+  private idleTask: Promise<unknown> | null = null;
+  private starting = false;
 
   constructor(options: HeadlessTurnExecutorOptions) {
     this.options = options;
@@ -174,6 +180,18 @@ export class HeadlessTurnExecutor {
   }
 
   async start(input: RuntimeInput): Promise<HeadlessTurnStartResult> {
+    // 先让轮次之外的那次改写收尾：它持有 turn lease，抢在前面取锁只会让用户看到
+    // 「该会话正在另一个窗口运行」，而这里明明是同一个进程。
+    this.starting = true;
+    try {
+      if (this.idleTask) await this.idleTask;
+      return await this.startTurn(input);
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  private async startTurn(input: RuntimeInput): Promise<HeadlessTurnStartResult> {
     if (this.options.hooks) {
       const guardResult = await this.options.hooks.guard('input:received', {
         input,
@@ -210,6 +228,41 @@ export class HeadlessTurnExecutor {
     this.options.onEvent({ type: 'turn:start', input });
     void this.loop(input);
     return 'started';
+  }
+
+  /**
+   * 在轮次之外独占一次会话，让调用方改它（自动压缩用它把历史压小）。
+   *
+   * 三种情况返回 `null`，都不是错误：这一轮正在跑、另一个进程（另一个窗口 / 终端）
+   * 持有 turn lease、或者刚好有人按了发送（`starting`）。调用方据此决定「这次没压成」，
+   * 不要重试、也不要当成失败。
+   */
+  async runIdleMaintenance<T>(task: () => Promise<T | null>): Promise<T | null> {
+    if (this.running || this.starting) return null;
+    // 同一时刻只做一次：第二次触发直接当成「这次没压成」，不排队也不合并两个任务。
+    if (this.idleTask) return null;
+    const run = (async (): Promise<T | null> => {
+      const lease = this.acquireTurnLease();
+      if (this.persistsSession && !lease) return null;
+      try {
+        // 另一个宿主可能在我们上次保存之后写过这条会话：先对齐磁盘，否则这次压缩
+        // 会把它那一轮覆盖掉。
+        this.options.sessionController.refreshFromStore();
+        return await task();
+      } finally {
+        try {
+          lease?.release();
+        } catch {
+          // 释放是尽力而为；孤儿锁由 pid 存活判定回收。
+        }
+      }
+    })();
+    this.idleTask = run;
+    try {
+      return await run;
+    } finally {
+      if (this.idleTask === run) this.idleTask = null;
+    }
   }
 
   /** Stops the active turn; queued inputs keep draining after it finishes. */

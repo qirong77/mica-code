@@ -33,6 +33,7 @@ import { ChatView } from './ChatView'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { PluginEntries } from './PluginEntries'
 import { SessionTree } from './SessionTree'
+import { useSessionMenuPlugins } from './session-menu-plugins'
 import { SessionNotesDialog } from './SessionNotesDialog'
 import TerminalKeyBar from './TerminalKeyBar'
 import { isElectronShell } from './shell-env'
@@ -59,6 +60,7 @@ import {
   TERMINAL_PANEL_SWEEP_MS,
   activeRightTermId,
   reclaimableRightTermIds,
+  resolveStoredRightTerms,
   staleRightTermIds
 } from './right-terms'
 import {
@@ -705,14 +707,18 @@ export default function App() {
   const nodesRef = useLatest(nodes)
   // 底部终端面板里的 shell 终端按会话（左侧对话节点 id）分组归属：切换会话时整组
   // 跟着切走，PTY 的 cwd 也跟随所属会话的路径。
-  const [rightTermsByChat, setRightTermsByChat] = useState({})
+  // 和工作区一样从取回的界面状态播种，不能从空表开始等远端推：面板展开着的时候，
+  // 「首帧看起来这个会话没有终端」会让补建终端的 effect 立刻加一个，于是每开一个
+  // 窗口、每刷新一次页面就多一个「终端 N」。
+  const [bootstrapRightTerms] = useState(() => resolveStoredRightTerms(uiStateKeys().rightTerms))
+  const [rightTermsByChat, setRightTermsByChat] = useState(bootstrapRightTerms.byChat)
   const rightTermsByChatRef = useLatest(rightTermsByChat)
   // 受控浏览器（AI 打开的网页窗口）活在 Electron 主进程里，运行时经 HTTP 把它们抄成
   // 一份列表推过来（`browser:changed`）。纯浏览器宿主没有这套服务，列表恒为空。
   const [browsers, setBrowsers] = useState([])
   // 终端控制：主进程里的真实 PTY + 后台窗口，列表同样由运行时抄送（`terminal:changed`）。
   const [terminals, setTerminals] = useState([])
-  const [rightActiveTermByChat, setRightActiveTermByChat] = useState({})
+  const [rightActiveTermByChat, setRightActiveTermByChat] = useState(bootstrapRightTerms.active)
   const rightActiveTermByChatRef = useLatest(rightActiveTermByChat)
   // 终端的最近活动时间只喂给定时回收，不参与渲染：每次敲键都 setState 会
   // 白白重渲染整个面板，所以放 ref 里。
@@ -959,6 +965,41 @@ export default function App() {
   const applyLoops = useCallback((loops) => {
     setLoops(Array.isArray(loops) ? loops : [])
   }, [])
+
+  // 会话右键里的插件项来自清单（页面同步就能画出来），点了才去这条会话的常驻 host
+  // 转发一次动作。结果里的 `copyText` 在这里写剪贴板——写的是「用户眼前这台机器」的
+  // 剪贴板，运行时可能跑在另一台机器上。
+  const sessionMenuPlugins = useSessionMenuPlugins()
+  const runSessionMenuAction = useCallback(
+    async ({ sessionId, cwd }, { pluginId, action }) => {
+      showToast('正在准备…')
+      try {
+        const result = await window.mica.chat.sessionMenuRun({
+          pluginId,
+          action,
+          sessionId,
+          cwd
+        })
+        if (result?.ok === false) {
+          showToast(result.error || '插件动作失败', true)
+          return
+        }
+        if (result?.copyText) {
+          const copied = await copyText(result.copyText)
+          if (copied === false) {
+            showToast(result.message || '复制失败：剪贴板不可用', true)
+            return
+          }
+          showToast(result.message || '已复制到剪贴板')
+          return
+        }
+        showToast(result?.message || '插件没有返回内容', true)
+      } catch (error) {
+        showToast(`插件动作失败：${error?.message || error}`, true)
+      }
+    },
+    [showToast]
+  )
 
   const refreshLoops = useCallback(() => {
     window.mica.loops
@@ -2455,7 +2496,9 @@ export default function App() {
               draftNodes={draftNodes}
               loops={loops}
               annotations={annotations}
+              sessionMenuPlugins={sessionMenuPlugins}
               onToggleAnnotation={toggleAnnotation}
+              onRunSessionMenu={runSessionMenuAction}
               onOpenSession={(session, options) => {
                 closeMobileDrawer()
                 openSession(session, options)

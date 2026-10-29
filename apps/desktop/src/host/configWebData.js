@@ -554,7 +554,7 @@ export const configWebActions = {
   readBrowserControlDetails: () => readBrowserControlDetailsFromHost(),
   readTerminalControlDetails: () => readTerminalControlDetailsFromHost(),
 
-  // 性能与诊断：读的是 host/log.js 写在系统 temp 下的 JSONL，聚合在 host 侧做完。
+  // 性能与诊断：读的是 host/log.js 写在日志目录下的 JSONL，聚合在 host 侧做完。
   readPerformanceDetails: (input) => readPerformanceSummary(input ?? {}),
   clearPerformanceLogs: () => clearLogs(),
 

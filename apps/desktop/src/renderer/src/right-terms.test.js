@@ -1,5 +1,37 @@
 import { describe, expect, it } from 'bun:test'
-import { activeRightTermId, reclaimableRightTermIds, staleRightTermIds } from './right-terms'
+import {
+  activeRightTermId,
+  reclaimableRightTermIds,
+  resolveStoredRightTerms,
+  staleRightTermIds
+} from './right-terms'
+
+describe('resolveStoredRightTerms', () => {
+  it('seeds the terminal lists saved by the runtime', () => {
+    const stored = {
+      byChat: { chatA: [{ id: 'rt-1', text: '终端 1' }], chatB: [{ id: 'rt-2' }] },
+      active: { chatA: 'rt-1' }
+    }
+    expect(resolveStoredRightTerms(stored)).toEqual(stored)
+  })
+
+  it('starts empty when nothing was saved', () => {
+    expect(resolveStoredRightTerms(null)).toEqual({ byChat: {}, active: {} })
+    expect(resolveStoredRightTerms('oops')).toEqual({ byChat: {}, active: {} })
+    expect(resolveStoredRightTerms({})).toEqual({ byChat: {}, active: {} })
+  })
+
+  it('drops entries it cannot render instead of failing to boot', () => {
+    const stored = {
+      byChat: { chatA: 'nope', chatB: [{ id: '' }, null, { id: 'rt-2' }], chatC: [] },
+      active: { chatA: 42, chatB: 'rt-2' }
+    }
+    expect(resolveStoredRightTerms(stored)).toEqual({
+      byChat: { chatB: [{ id: 'rt-2' }] },
+      active: { chatB: 'rt-2' }
+    })
+  })
+})
 
 describe('activeRightTermId', () => {
   const terms = [{ id: 'rt-1' }, { id: 'rt-2' }]

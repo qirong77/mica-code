@@ -41,13 +41,13 @@ TUI 里可用 `/session-rename now` 立刻手动触发一次（例如验证 Key 
 
 ## 日志
 
-插件日志写在系统临时目录，避免长期堆积：
+插件日志和运行时日志同一个目录（`resolveLogDir()`，macOS 是 `~/Library/Logs/mica`），重启不丢：
 
 ```
-os.tmpdir()/mica-logs/plugin-session-rename-<YYYYMMDD>[-n].jsonl
+~/Library/Logs/mica/plugin-session-rename-<YYYYMMDD>[-n].jsonl
 ```
 
-每个文件超过 2 MB 自动换下一个分片，超过 3 天的文件在写入时被清理。`MICA_PLUGIN_LOG=0` 可整体关闭。同一会话的失败原因都会带上 `reason` 字段（`not-configured`、`manual-title`、`timeout`、`request-failed` 等），排查时先看这里；配置页的插件详情里也直接给出当前日志路径。
+每个文件超过 2 MB 自动换下一个分片，超过 7 天的文件在写入时被清理。`MICA_PLUGIN_LOG=0` 可整体关闭。同一会话的失败原因都会带上 `reason` 字段（`not-configured`、`manual-title`、`timeout`、`request-failed` 等），排查时先看这里；配置页的插件详情里也直接给出当前日志路径。
 
 ## 文件
 

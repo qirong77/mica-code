@@ -323,3 +323,52 @@ describe('parsePluginManifest settings-page actions', () => {
     ).toBe(false);
   });
 });
+
+describe('parsePluginManifest desktop session menu', () => {
+  it('reads the declared items in order', () => {
+    const result = parsePluginManifest(
+      base({
+        desktop: { sessionMenu: [{ label: '复制会话', action: 'copy' }] },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopSessionMenu).toEqual([{ label: '复制会话', action: 'copy' }]);
+  });
+
+  it('is empty when the plugin declares nothing', () => {
+    const result = parsePluginManifest(base());
+    if (result.ok) expect(result.manifest.desktopSessionMenu).toEqual([]);
+  });
+
+  // 只给文案的菜单项点了没反应，只给 id 的在菜单上看不出来
+  it('rejects items without a label or action', () => {
+    expect(parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '复制' }] } })).ok).toBe(false);
+    expect(parsePluginManifest(base({ desktop: { sessionMenu: [{ action: 'copy' }] } })).ok).toBe(false);
+    expect(parsePluginManifest(base({ desktop: { sessionMenu: { label: '复制' } } })).ok).toBe(false);
+  });
+
+  // 两个菜单项跑到同一个分支等于其中一个做了另一件事
+  it('rejects duplicate action ids', () => {
+    const result = parsePluginManifest(
+      base({
+        desktop: {
+          sessionMenu: [
+            { label: '复制', action: 'copy' },
+            { label: '再复制', action: 'copy' },
+          ],
+        },
+      }),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('keeps panel and session menu independent under the same desktop section', () => {
+    const result = parsePluginManifest(
+      base({ desktop: { panel: { label: '面板' }, sessionMenu: [{ label: '复制', action: 'copy' }] } }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.desktopPanel?.label).toBe('面板');
+    expect(result.manifest.desktopSessionMenu).toHaveLength(1);
+  });
+});

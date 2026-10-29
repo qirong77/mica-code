@@ -167,7 +167,7 @@ npm run build:win</code></pre>
     从别的设备访问时运行时只提供分享视图：主页 <code>/</code>、<code>/mica-web</code>、文件页、终端窗口、
     <code>/remote/*</code> 与 <code>/mcp/*</code> 一律 404，所以把
     <code>http://&lt;局域网 IP&gt;:8787</code> 发给别人不会打开你的完整界面。需要让另一台机器用完整应用访问
-    （例如侧栏的 Connections）时，在被访问的那台打开侧栏 Connections 卡片里的「其他机器访问这台机器」，
+    （例如侧栏的 Connections）时，在被访问的那台打开侧栏 Connections 卡片里的「局域网/公网可访问」，
     对方访问时输入那个访问口令即可（默认 <code>0000</code>，请改掉）；也可以设置
     <code>MICA_DESKTOP_TRUSTED_CLIENTS=&lt;对方地址&gt;</code> 让指定地址免密。
     <code>--no-share</code> 只关闭分享视图路由。

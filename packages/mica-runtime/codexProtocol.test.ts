@@ -22,6 +22,7 @@ describe('codex protocol framing', () => {
   it('pins the Mica extension request names', () => {
     expect(MICA_METHODS).toEqual({
       editMessage: 'mica/turn/editMessage',
+      inputActivity: 'mica/input/activity',
       queueRecall: 'mica/queue/recall',
       queueHold: 'mica/queue/hold',
       killBackgroundTask: 'mica/backgroundTasks/kill',
@@ -43,6 +44,7 @@ describe('codex protocol framing', () => {
       notesSet: 'mica/notes/set',
       pluginPanelView: 'mica/pluginPanel/view',
       pluginPanelAction: 'mica/pluginPanel/action',
+      pluginSessionMenuRun: 'mica/sessionMenu/run',
     });
   });
 

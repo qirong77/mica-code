@@ -173,12 +173,14 @@ export class Application {
           describe: (owner) => {
             const session = resolvePluginSession(agentSessions, owner);
             if (!session) return null;
+            const parentSessionId = session.sessionController.getParentSessionId();
             return {
               id: session.id,
               title: session.titleOverride ?? session.sessionController.getCurrentDisplayTitle(),
               titleSource: session.sessionController.getCurrentTitleSource(),
               cwd: process.cwd(),
               role: session.agent.role,
+              ...(parentSessionId ? { parentSessionId } : {}),
             };
           },
           messages: (owner) => resolvePluginSession(agentSessions, owner)?.agent.toConversationMessages() ?? [],

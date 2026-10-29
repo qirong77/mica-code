@@ -211,6 +211,9 @@ function createWebApi(env) {
         invoke('chat:hold-queued', { id, clientMessageId, held }),
       // 改写一条已发送的用户消息并重跑（Codex 协议扩展 mica/turn/editMessage）
       editMessage: (payload) => invoke('chat:edit-message', payload),
+      // 用户正在输入框里敲字（扩展 mica/input/activity）：让插件知道「这个人回来了」，
+      // 会话空闲够久时它可以先把历史压小。渲染层已节流，收不到回包也不影响界面。
+      inputActivity: (id) => invoke('chat:input-activity', { id }),
       // 终止一个后台 shell 任务 / 读取它的输出（Codex 协议扩展 mica/backgroundTasks/*）
       killBackgroundTask: (id, taskId, forceAfterMs) =>
         invoke('chat:kill-background-task', { id, taskId, forceAfterMs }),
@@ -278,6 +281,18 @@ function createWebApi(env) {
             cwd: cwd || null
           })
       },
+      // 会话右键菜单里的插件动作（清单 `desktop.sessionMenu`）：结果里的 `copyText`
+      // 由页面写进剪贴板，插件进程不碰剪贴板。
+      // `id` 是这条会话已经打开的页签（有就复用它的常驻 host）；不传时由运行时自己找
+      // 一条在服务这个会话的 host，找不到再按需起一个。
+      sessionMenuRun: ({ id, pluginId, action, sessionId, cwd } = {}) =>
+        invoke('chat:session-menu-run', {
+          id: id || null,
+          pluginId,
+          action,
+          sessionId: sessionId || null,
+          cwd: cwd || null
+        }),
       setPluginSettings: (id, { sessionId, cwd, pluginId, values } = {}) =>
         invoke('chat:set-plugin-settings', {
           id,

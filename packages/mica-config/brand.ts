@@ -42,3 +42,21 @@ export function resolveMicaHome(): string {
 export function resolveMicaHomePath(...parts: string[]): string {
   return resolve(resolveMicaHome(), ...parts);
 }
+
+/**
+ * Resolve the diagnostic log directory.
+ *
+ * 放用户目录而不是系统 temp：temp 在 macOS 登录时被系统清空，重启之后就只能看当次运行，
+ * 「昨天那次卡顿慢在哪」这类问题永远查不了。`MICA_LOG_DIR` 覆盖目录（测试、隔离实例用）。
+ */
+export function resolveLogDir(): string {
+  const override = process.env.MICA_LOG_DIR;
+  if (override) return resolve(override);
+  if (process.platform === 'darwin') return resolve(homedir(), 'Library', 'Logs', RUNTIME_NAME);
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA ?? resolve(homedir(), 'AppData', 'Local');
+    return resolve(base, RUNTIME_NAME, 'logs');
+  }
+  const base = process.env.XDG_STATE_HOME ?? resolve(homedir(), '.local', 'state');
+  return resolve(base, RUNTIME_NAME, 'logs');
+}

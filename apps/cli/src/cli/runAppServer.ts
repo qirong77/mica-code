@@ -285,7 +285,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     ]);
     if (pluginHost) {
       await cleanupTask('stop headless plugins', () => pluginHost!.emitRuntimeStop());
-      await cleanupTask('dispose headless plugins', () => pluginHost!.dispose());
+      // 比默认的 2s 宽：插件收尾可能要等子进程退出（sidecar 一路降到 SIGKILL），
+      // 2s 会在子进程还没死的时候切断，留下没人收的孤儿进程。正常情况几十毫秒就返回。
+      await cleanupTask('dispose headless plugins', () => pluginHost!.dispose(), 6_000);
     }
     disposeModelEffortContext();
   };
@@ -421,7 +423,22 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         );
       }
     }
-    if (options.role) agent.setRole(options.role);
+    if (options.role) {
+      // 角色文件被删掉不该让宿主起不来：这是宿主，不是一次性命令。降级成
+      // 默认角色 + 一条 warning，与 applyRoleOverride（turn/start 路径）和
+      // resume 的角色回退同一策略。不接住的话 `sidecar_spawn({role})` 写错
+      // 一个名字就得到「app-server 已退出（code 1）」，看不出是角色的问题。
+      try {
+        agent.setRole(options.role);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error(`Failed to apply --role ${options.role}: ${detail}`);
+        writeWarning(
+          sessionController.getCurrentSessionId() ?? '',
+          `角色 "${options.role}" 无法应用（${detail}），已沿用默认角色。`,
+        );
+      }
+    }
 
     sessionId = sessionController.getCurrentSessionId();
     // 恢复这个会话上次留下的 By The Way 线程（问答 + 子代理消息），
@@ -506,6 +523,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       // 桌面端常驻宿主：装上 `$MICA_HOME/plugins` 里的用户插件（面板、桌面入口都靠它）。
       loadUserPlugins: true,
       isBusy: () => executor!.isBusy,
+      // 用户在输入框敲字时插件可能要提前改一次会话（自动压缩）。Executor 负责
+      // 「现在能不能写」：轮次中、别的进程持锁、或者刚好有人按了发送都返回 null。
+      runIdleTask: (task) => executor!.runIdleMaintenance(task),
       submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
     });
     executor.attachPluginLayer({
@@ -634,6 +654,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         sessionController: sessionController!,
         plugins: pluginHost?.plugins,
         panels: pluginHost?.panels,
+        sessionMenus: pluginHost?.sessionMenus,
+        events: pluginHost?.events,
         configDir: resolveMicaHome(),
         subagentTasks: subagentTasks!,
         refreshTaskSnapshots: () => pushTaskSnapshots(),
@@ -674,8 +696,18 @@ type HostContext = {
    * 具体插件长什么样、有哪些按钮，全在插件自己的处理器里。
    */
   panels?: import('@packages/mica-plugin/index.js').PluginPanelRegistry;
+  /**
+   * 会话右键菜单动作的登记表（只有桌面宿主才有）。协议层按 pluginId 转发一次动作，
+   * 结果里的剪贴板内容交回页面去写。
+   */
+  sessionMenus?: import('@packages/mica-plugin/index.js').PluginSessionMenuRegistry;
   /** 插件设置的落盘目录，读全局默认值用（缺了只能读到字段默认值）。 */
   configDir?: string;
+  /**
+   * 插件看到的那条运行期事件总线。协议层把客户端信号（`mica/input/activity`）
+   * 翻译成事件，插件订阅同一条总线决定自己的动作。
+   */
+  events?: import('@packages/mica-runtime/index.js').RuntimeEventBus;
   /** Live subagent task manager: the desktop detail modal reads records here. */
   subagentTasks: SubagentTaskManager;
   /** Push a fresh background/subagent snapshot after a task mutation. */
@@ -1224,6 +1256,14 @@ async function handleCodexRequest(
       ctx.writeResponse({ turn: turnSnapshot(turnId, 'inProgress') });
       return;
     }
+    case MICA_METHODS.inputActivity: {
+      // Mica extension: 用户在输入框敲了字（不是提交）。只翻译成一次运行期事件，
+      // 由插件自己判断「这次回来的间隔够不够长、要不要先把历史压小」——宿主不认识
+      // 任何具体策略。轮次运行中同样转发：插件自己会看到会话正忙。
+      ctx.events?.publish({ type: 'input:activity', owner: ctx.agent });
+      ctx.writeResponse({});
+      return;
+    }
     case MICA_METHODS.queueRecall: {
       // Mica extension: pull a queued after_iteration input back out of the
       // host's single slot so the client can restore it to its composer (the
@@ -1614,10 +1654,49 @@ async function handleCodexRequest(
         });
         return;
       }
+      // 面板动作可以改会话级插件状态（渠道清单、调度参数这类），而会话状态平时只在
+      // 本轮结束时随 checkpoint 落盘。动作之后不补一次落盘，用户配完关掉窗口就丢，
+      // 也许久不会开下一轮。落盘交给宿主，插件不需要知道这件事。
+      if (ctx.sessionId) ctx.sessionController.saveCurrent({ allowEmpty: true });
       // 动作可以回一句话（「先添加频道」这类），页面把它显示在按钮旁边。
       ctx.writeResponse({
         ...(await readPluginPanel(ctx, params)),
         ...micaPlugin.normalizePluginPanelActionResult(outcome),
+      });
+      return;
+    }
+    case MICA_METHODS.pluginSessionMenuRun: {
+      // 菜单项来自插件清单，处理器来自插件自己的注册：宿主只认 `pluginId + action`，
+      // 不认识任何具体插件，也不替它组织结果。
+      const pluginId = paramString(params, 'pluginId');
+      const menu = pluginId ? ctx.sessionMenus?.get(pluginId) : null;
+      if (!pluginId || !menu) {
+        ctx.writeResponse({ ok: false, error: '插件菜单动作不可用（插件未加载或未声明菜单项）' });
+        return;
+      }
+      const input = micaPlugin.normalizePluginSessionMenuInput({
+        action: params.action,
+        sessionId: ctx.sessionId ?? '',
+      });
+      if (!input) {
+        ctx.writeResponse({ ok: false, error: '动作缺少 id' });
+        return;
+      }
+      let outcome: unknown;
+      try {
+        outcome = await menu.run(input);
+      } catch (error) {
+        ctx.writeResponse({
+          ok: false,
+          pluginId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      ctx.writeResponse({
+        ok: true,
+        pluginId,
+        ...micaPlugin.normalizePluginSessionMenuResult(outcome),
       });
       return;
     }
