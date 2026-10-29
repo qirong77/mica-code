@@ -157,7 +157,7 @@ export function slashCompletionOptions(
       kind: 'skill',
       item: skill,
       name: String(skill?.name ?? ''),
-      description: String(skill?.description ?? '')
+      description: skillDescription(skill)
     })),
     ...(Array.isArray(mcpServers) ? mcpServers : []).map((server) => ({
       kind: 'mcp',
@@ -174,7 +174,7 @@ export function slashCompletionOptions(
 
 function skillOption(skill, query) {
   const name = String(skill?.name ?? '')
-  const description = String(skill?.description ?? '')
+  const description = skillDescription(skill)
   return {
     key: `skill:${name}`,
     kind: 'skill',
@@ -182,18 +182,33 @@ function skillOption(skill, query) {
     path: String(skill?.path ?? ''),
     label: `/${name}`,
     description,
+    ...(skill?.builtin ? { builtin: true } : {}),
     // label 前面多了一个 `/`，名称里的下标整体右移一位
     highlights: matchIndexes(name, query).map((index) => index + 1),
     descriptionHighlights: matchIndexes(description, query)
   }
 }
 
+/**
+ * skill 候选的说明列。
+ *
+ * 内置 skill（插件随包分发，如 computer-use）标出「内置」：它在用户的 skills 目录里
+ * 找不到，不标的话用户会以为扫描漏了自己的机器。这段文本同时也是查询匹配的文本。
+ */
+function skillDescription(skill) {
+  const raw = String(skill?.description ?? '')
+  if (!skill?.builtin) return raw
+  return raw ? `内置 · ${raw}` : '内置'
+}
+
 /** MCP 候选的说明列：工具名（未知时给连接方式），同时也是查询匹配的文本。 */
 function mcpDescription(server) {
   const tools = Array.isArray(server?.tools) ? server.tools.filter(Boolean) : []
+  // 内置的那两个（受控浏览器 / 终端）不来自 config.json，标出来区别「用户配的」。
+  const label = server?.builtin ? '内置 MCP' : 'MCP'
   return tools.length
-    ? `MCP · 工具：${tools.join('、')}`
-    : `MCP · ${server?.type === 'stdio' ? '本地进程' : 'HTTP'}`
+    ? `${label} · 工具：${tools.join('、')}`
+    : `${label} · ${server?.type === 'stdio' ? '本地进程' : 'HTTP'}`
 }
 
 /** MCP 候选：label 带 `mcp:` 前缀，说明里是工具名（未知时给连接方式）。 */
@@ -209,6 +224,7 @@ function mcpOption(server, query) {
     tools,
     label,
     description,
+    ...(server?.builtin ? { builtin: true } : {}),
     // label 前面多了 `mcp:` 四个字符，名称里的下标整体右移
     highlights: matchIndexes(name, query).map((index) => index + 'mcp:'.length),
     descriptionHighlights: matchIndexes(description, query)

@@ -215,6 +215,11 @@ ctx.skills.register({ ...skill, name: skill.name!, description: skill.descriptio
 - **没有磁盘路径**：只落盘 `SKILL.md` 是不够的——`baseDir` 必须是宿主真能读到的目录，正文里引用的
   脚本都相对它解析。所以插件要把随包资源先写到 `$MICA_HOME/<自己的目录>`，再用落盘路径注册。
   单二进制里没有插件目录可读，内嵌 + 落盘是唯一可行路径（参考 `plugins/computer-use`）。
+- **正文必须落成 `baseDir/SKILL.md`**：注册时会发布一份索引到
+  `$MICA_HOME/plugin-skills/<pluginId>.json`（一个插件一份，整份重写），桌面端输入框的 `/` 补全
+  直接扫它——补全插入的是这条 `SKILL.md` 的绝对路径，所以文件不存在的 skill 不会进列表。
+  索引不主动删除：读的时候按 `plugins-state.json` 的停用名单和文件是否还在过滤，停用或卸掉插件
+  之后就自动消失了。
 
 配置页的 Skills 页面只管磁盘上的 skill（新建 / 删除 / 编辑文件），内置 skill 出现在会话能力页签里。
 

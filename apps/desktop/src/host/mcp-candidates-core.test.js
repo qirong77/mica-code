@@ -36,10 +36,55 @@ describe('composer MCP candidates', () => {
       'sequential-thinking': { command: 'npx', args: ['-y', 'server'] }
     })
 
+    // 纯 Web 宿主没有浏览器 / 终端 socket，所以这里只有配置里那两个
     expect(listMcpCandidates()).toEqual([
       { name: 'mica-terminal', type: 'http', tools: [] },
       { name: 'sequential-thinking', type: 'stdio', tools: [] }
     ])
+  })
+
+  it('lists the built-in control servers without any user config', () => {
+    const previous = {
+      browser: process.env.MICA_BROWSER_SOCKET,
+      terminal: process.env.MICA_TERMINAL_SOCKET,
+      origin: process.env.MICA_DESKTOP_ORIGIN
+    }
+    process.env.MICA_BROWSER_SOCKET = '/tmp/mica-browser.sock'
+    process.env.MICA_TERMINAL_SOCKET = '/tmp/mica-terminal.sock'
+    process.env.MICA_DESKTOP_ORIGIN = 'http://127.0.0.1:8787'
+    try {
+      // 没有 config.json 也要列出来：内置能力不该要求用户抄一份配置
+      expect(listMcpCandidates()).toEqual([
+        {
+          name: 'mica-browser',
+          type: 'http',
+          tools: ['control'],
+          builtin: true,
+          url: 'http://127.0.0.1:8787/mcp/browser'
+        },
+        {
+          name: 'mica-terminal',
+          type: 'http',
+          tools: ['control'],
+          builtin: true,
+          url: 'http://127.0.0.1:8787/mcp/terminal'
+        }
+      ])
+
+      // 用户自己抄一份同名的：内置的那份带 owner 头，仍然以它为准
+      writeConfig({ 'mica-browser': { type: 'http', url: 'http://127.0.0.1:1/mcp/x' } })
+      expect(listMcpCandidates().filter((server) => server.name === 'mica-browser')).toHaveLength(1)
+      expect(listMcpCandidates()[0].url).toBe('http://127.0.0.1:8787/mcp/browser')
+    } finally {
+      for (const [key, value] of [
+        ['MICA_BROWSER_SOCKET', previous.browser],
+        ['MICA_TERMINAL_SOCKET', previous.terminal],
+        ['MICA_DESKTOP_ORIGIN', previous.origin]
+      ]) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
   })
 
   it('returns nothing when the config file is missing or broken', () => {

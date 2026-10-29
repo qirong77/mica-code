@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearPluginHealth, createPluginHealthStore, readPluginHealth, writePluginHealth } from './PluginHealth.js';
+import { readPublishedPluginSkills } from './PluginSkills.js';
 import { HookRegistry } from './HookRegistry.js';
 import { PluginManager } from './PluginManager.js';
 import { micaCommands } from '@packages/mica-commands/index.js';
@@ -156,5 +157,44 @@ describe('PluginManager robustness', () => {
     const report = readPluginHealth('boom', { configDir });
     expect(report?.level).toBe('error');
     expect(report?.message).toContain('hook exploded');
+  });
+
+  it('publishes the skills that actually took effect so other hosts can scan them', async () => {
+    const skillDir = join(configDir, 'builtin', 'demo-skill');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: demo-skill\n---\n', 'utf-8');
+    const register = (ctx: Parameters<MicaPlugin['setup']>[0], description: string) => {
+      ctx.skills.register({
+        name: 'demo-skill',
+        description,
+        content: 'body',
+        baseDir: skillDir,
+      });
+    };
+
+    const manager = new PluginManager();
+    manager.register({
+      id: 'demo-builtin',
+      name: 'demo-builtin',
+      manifest: manifest(['skills']),
+      setup: (ctx) => register(ctx, '内置能力'),
+    });
+    manager.register({
+      id: 'demo-late',
+      name: 'demo-late',
+      manifest: manifest(['skills']),
+      // 同名第二次注册会被运行期注册表拒绝（磁盘/先注册的那份优先）
+      setup: (ctx) => register(ctx, '第二份'),
+    });
+
+    try {
+      const report = await manager.setupAll(baseContext(configDir));
+      expect(report.loaded).toEqual(['demo-builtin', 'demo-late']);
+      expect(readPublishedPluginSkills({ configDir }).map((skill) => [skill.pluginId, skill.name])).toEqual([
+        ['demo-builtin', 'demo-skill'],
+      ]);
+    } finally {
+      await manager.disposeAll();
+    }
   });
 });

@@ -634,6 +634,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         executor: executor!,
         btw: btwController,
         mcpReady: mcpInitPromise ?? Promise.resolve(),
+        ...(options.mcpConfigPath ? { mcpConfigPath: resolve(options.mcpConfigPath) } : {}),
         sessionId,
         setSessionId: (nextSessionId) => {
           sessionId = nextSessionId;
@@ -678,6 +679,11 @@ type HostContext = {
   btw: BtwThreads | null;
   /** Resolves once the background MCP init finished (never rejects). */
   mcpReady: Promise<unknown>;
+  /**
+   * 会话级的 `--mcp-config` 路径（桌面端把受控浏览器 / 终端按会话挂进来）。
+   * 能力目录要据此列出这些 server：它们不在用户的 `config.json` 里。
+   */
+  mcpConfigPath?: string;
   sessionId: string;
   setSessionId: (sessionId: string) => void;
   getCurrentTurnId: () => string | null;
@@ -1459,6 +1465,9 @@ async function handleCodexRequest(
       // 之前从没发过消息）时状态列表是空的，但「本会话禁用哪个 server」仍然可配，
       // 所以用配置补上缺失的名字，状态标成 configured。
       const configuredMcp = await micaMcp.loadConfig();
+      // 会话自己带的 `--mcp-config`（桌面端的受控浏览器 / 终端）同样属于这条会话的能力，
+      // 但它从不写进用户配置：漏掉它，界面上既看不到也关不掉。
+      const sessionMcp = ctx.mcpConfigPath ? await micaMcp.readConfig(ctx.mcpConfigPath).catch(() => ({})) : {};
       const statusByName = new Map(micaMcp.servers.get().map((server) => [server.name, server]));
       ctx.writeResponse({
         ok: true,
@@ -1478,16 +1487,11 @@ async function handleCodexRequest(
             group: tool.group,
           }))
           .sort((a, b) => a.name.localeCompare(b.name)),
-        mcpServers: Object.keys(configuredMcp)
-          .sort((a, b) => a.localeCompare(b))
-          .map((name) => {
-            const status = statusByName.get(name);
-            return {
-              name,
-              status: status?.status ?? 'configured',
-              toolCount: status?.toolCount ?? 0,
-            };
-          }),
+        mcpServers: micaMcp.catalog({
+          configured: configuredMcp,
+          extra: sessionMcp,
+          statuses: statusByName,
+        }),
       });
       return;
     }

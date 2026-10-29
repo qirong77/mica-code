@@ -63,6 +63,12 @@ import {
   setPluginDisabled,
   writePluginState,
 } from './PluginState.js';
+import {
+  PLUGIN_SKILLS_DIR,
+  publishPluginSkills,
+  readPublishedPluginSkills,
+  resolvePluginSkillsDir,
+} from './PluginSkills.js';
 
 export const micaPlugin = {
   Plugin,
@@ -127,6 +133,10 @@ export const micaPlugin = {
   PLUGIN_API_VERSION,
   PLUGIN_SETTINGS_DIR,
   PLUGIN_STATE_FILE,
+  PLUGIN_SKILLS_DIR,
+  publishPluginSkills,
+  readPublishedPluginSkills,
+  resolvePluginSkillsDir,
 };
 
 export type { Plugin } from './Plugin.js';
@@ -177,6 +187,13 @@ export {
   writePluginState,
 } from './PluginState.js';
 export type { PluginBaseContext, PluginManager, PluginSetupReport } from './PluginManager.js';
+export {
+  PLUGIN_SKILLS_DIR,
+  publishPluginSkills,
+  readPublishedPluginSkills,
+  resolvePluginSkillsDir,
+} from './PluginSkills.js';
+export type { PublishedPluginSkill } from './PluginSkills.js';
 export type { PluginContext } from './PluginContext.js';
 export type {
   PluginFileMentionItem,

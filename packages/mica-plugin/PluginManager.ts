@@ -11,6 +11,8 @@ import { createPluginLlmApi } from './PluginLlm.js';
 import { createPluginBackgroundScheduler } from './PluginBackground.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginPanelHandler, PluginPanelRegistry } from './PluginPanel.js';
+import type { PluginSkillDefinition } from './PluginDesktop.js';
+import { publishPluginSkills } from './PluginSkills.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
@@ -116,6 +118,8 @@ export class PluginManager {
       const localDisposables: Disposable[] = [];
       const logger = createPluginLogger(plugin.id, baseContext.logger);
       const configDir = baseContext.paths?.config;
+      // 这个插件注册成功的 skill：每次注册后整份重写它的索引文件（见 PluginSkills.ts）。
+      const publishedSkills: PluginSkillDefinition[] = [];
       // `sessionStateFor` / `promptSections` 由 manager 消费（下面按 pluginId 生成
       // 本插件专属的入口），不能原样漏进 ctx，否则插件会看到一个能读别人状态的入口。
       const {
@@ -162,6 +166,13 @@ export class PluginManager {
                   .map((item) => `${item.name}（${item.reason}）`)
                   .join('；')}`,
               });
+            }
+            // 生效的那几条顺带落一份索引：不 setup 插件的宿主（桌面运行时的 `/` 补全）
+            // 靠它列出内置 skill，不必为本会话冷启动一个 app-server。
+            const name = skill.name.trim();
+            if (!registration.skipped.some((item) => item.name === name)) {
+              publishedSkills.push(skill);
+              publishPluginSkills(plugin.id, publishedSkills, { configDir });
             }
             localDisposables.push({ dispose: () => registration.dispose() });
             return { dispose: registration.dispose, skipped: registration.skipped };

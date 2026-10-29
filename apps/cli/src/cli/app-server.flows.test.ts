@@ -1915,9 +1915,24 @@ suite('mica app-server real-user flows (mock provider)', () => {
     mock!.state.requests = [];
     mock!.state.responsesFinished = 0;
     mock!.state.delayBeforeTextMs = 0;
-    type CapabilityGetResult = { selection?: { disabledTools?: string[] } };
+    type CapabilityGetResult = {
+      selection?: { disabledTools?: string[] };
+      mcpServers?: { name: string; status: string }[];
+    };
 
-    const host = spawnHost('capabilities-pin');
+    // 桌面端把受控浏览器 / 终端按会话挂进 --mcp-config，它们不在用户的 config.json 里。
+    // 能力目录必须照样列出来，否则界面上看不到也关不掉这些内置 server。
+    const home = makeHome('capabilities-pin');
+    const mcpConfigPath = join(home, 'session-mcp.json');
+    writeFileSync(
+      mcpConfigPath,
+      JSON.stringify({
+        mcpServers: { 'builtin-demo': { type: 'http', url: 'http://127.0.0.1:1/mcp/demo' } },
+      }),
+      'utf-8',
+    );
+
+    const host = spawnHost('capabilities-pin', ['--mcp-config', mcpConfigPath], home);
     hosts.push(host);
     await waitFor(host, hostReady, 'host ready or error', 30_000);
 
@@ -1931,6 +1946,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const initial = await waitFor(host, (m) => m.id === 2, 'capabilities/get (initial)');
     const initialSelection = (initial.result as CapabilityGetResult).selection;
     expect(initialSelection?.disabledTools).toEqual([]);
+    expect((initial.result as CapabilityGetResult).mcpServers?.map((server) => server.name)).toContain('builtin-demo');
 
     // 用户在会话里改过之后就固定用这份选择，再 get 拿到的还是它。
     await send(host, 3, 'mica/capabilities/set', {

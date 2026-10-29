@@ -56,6 +56,50 @@ describe('host skill scanning', () => {
     ])
   })
 
+  it('lists built-in skills published by plugins, and lets disk skills win', () => {
+    // 插件注册的内置 skill：正文随包落到 $MICA_HOME/computer-use，索引由插件系统写
+    const builtinDir = join(home, 'computer-use')
+    mkdirSync(builtinDir, { recursive: true })
+    writeFileSync(join(builtinDir, 'SKILL.md'), '---\nname: computer-use\n---\n', 'utf-8')
+    const indexDir = join(home, 'plugin-skills')
+    mkdirSync(indexDir, { recursive: true })
+    writeFileSync(
+      join(indexDir, 'computer-use.json'),
+      JSON.stringify({
+        pluginId: 'computer-use',
+        skills: [
+          {
+            name: 'computer-use',
+            description: '操作 macOS 桌面',
+            path: join(builtinDir, 'SKILL.md')
+          }
+        ]
+      }),
+      'utf-8'
+    )
+    writeSkill(join(home, 'skills'), 'cooper', '---\ndescription: Cooper docs\n---\n')
+
+    const skills = listSkills(null)
+    expect(skills.map((skill) => skill.name)).toEqual(['computer-use', 'cooper'])
+    expect(skills[0]).toEqual({
+      name: 'computer-use',
+      path: join(builtinDir, 'SKILL.md'),
+      description: '操作 macOS 桌面',
+      builtin: true
+    })
+
+    // 用户装一份同名 skill：磁盘优先，插件不抢名字（与运行期注册表同一规则）
+    writeSkill(join(home, 'skills'), 'computer-use', '---\ndescription: mine\n---\n')
+    const shadowed = listSkills(null).filter((skill) => skill.name === 'computer-use')
+    expect(shadowed).toEqual([
+      {
+        name: 'computer-use',
+        path: join(home, 'skills', 'computer-use', 'SKILL.md'),
+        description: 'mine'
+      }
+    ])
+  })
+
   it('keeps the project skill when a user skill has the same name', () => {
     writeSkill(join(project, '.agent_context', 'skills'), 'dup', '---\nname: dup\n---\n')
     writeSkill(join(home, 'skills'), 'dup', '---\nname: dup\ndescription: user copy\n---\n')

@@ -1,3 +1,4 @@
+import { buildMcpCatalog } from './catalog.js';
 import { mcpServersAtom } from './client.js';
 import { expandMcpEnv, loadMcpConfig, MCP_CONFIG_PATH, readMcpConfig } from './config.js';
 import { initMcp, reconnectMcpServer, shutdownMcp } from './service.js';
@@ -17,8 +18,12 @@ export const micaMcp = {
   expandEnv: expandMcpEnv,
   servers: mcpServersAtom,
   configPath: MCP_CONFIG_PATH,
+  /** 会话能力目录里的 MCP 一栏（配置 + 会话级 `--mcp-config` + 连接状态）。 */
+  catalog: buildMcpCatalog,
 };
 
 export type { McpServerStatus } from './client.js';
+export { buildMcpCatalog } from './catalog.js';
+export type { McpCatalogEntry, McpCatalogInput } from './catalog.js';
 export type { InitMcpOptions } from './service.js';
 export type { McpServerConfig, McpHttpServerConfig, McpStdioServerConfig } from './config.js';

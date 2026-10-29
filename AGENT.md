@@ -209,7 +209,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - `requires` 必须写全插件触碰的每一面：`agent` / `background` / `commands` / `desktop` / `events` / `git` / `hooks` / `llm` / `models` / `prompt` / `runtime` / `session` / `sessionSettings` / `sessionState` / `settings` / `skills` / `subagents` / `tools` / `ui`。缺一项整插件跳过，原因写进 `plugin-status.json` 的 `skipped`。
 - 需要「一直在跑」的东西（周期轮询、心跳、增量同步）注册成 `ctx.background.register(...)`，不要自己 `setInterval`，更不要装成 launchd / systemd 服务：那种形态在插件停用后还在跑，用户以为关了其实没有。间隔用 `every: number | (() => number)` 声明，退避策略留在插件里；单轮抛错只记健康状态与日志。跟着插件一起结束的子进程在 `ctx.onDispose()` 里杀掉，状态写 `$MICA_HOME/plugin-data/<id>/`。
 - 官方插件载在**每会话**的 app-server 里（会话关掉进程就退），所以「必须活得比会话久」的常驻工作不能只靠进程内循环，要由常驻任务监管一个脱离父进程的子进程；随包脚本先落盘到 `$MICA_HOME` 再用 `node` 跑（`packages/mica-pty` 的 helper 与 computer-use 的 runtime 都是这个模式），源码内嵌由脚本生成。
-- 内置 skill 用 `ctx.skills.register()`：正文随包用 `import … with { type: 'text' }` 内嵌，元数据由 `micaSkills.parseMarkdown(SKILL.md)` 解析（frontmatter 是唯一来源），注册后与磁盘 skill 同权（prompt 索引 / `skill` 工具 / 会话能力开关）。磁盘上的同名 skill 优先，被遮蔽的条目从返回值 `skipped` 读出来并 `ctx.health.report()`。`baseDir` 必须是真能读到的目录——单二进制没有插件目录，所以随包资源要先落盘到 `$MICA_HOME/<插件目录>` 再注册（`plugins/computer-use` 是完整示例，源码内嵌由 `scripts/generate-computer-use-sources.mjs` 生成，改 `runtime/**` 必须重跑）。
+- 内置 skill 用 `ctx.skills.register()`：正文随包用 `import … with { type: 'text' }` 内嵌，元数据由 `micaSkills.parseMarkdown(SKILL.md)` 解析（frontmatter 是唯一来源），注册后与磁盘 skill 同权（prompt 索引 / `skill` 工具 / 会话能力开关）。磁盘上的同名 skill 优先，被遮蔽的条目从返回值 `skipped` 读出来并 `ctx.health.report()`。`baseDir` 必须是真能读到的目录——单二进制没有插件目录，所以随包资源要先落盘到 `$MICA_HOME/<插件目录>` 再注册（`plugins/computer-use` 是完整示例，源码内嵌由 `scripts/generate-computer-use-sources.mjs` 生成，改 `runtime/**` 必须重跑）；**正文不落盘（`baseDir/SKILL.md` 不存在）的 skill 不会进补全列表**，因为补全插入的就是这条路径。
+- 注册成功的内置 skill 由插件系统顺带发布到 `$MICA_HOME/plugin-skills/<pluginId>.json`（`PluginSkills.ts`，一个插件一份、整份重写）：不 setup 插件的宿主（桌面运行时给 `/` 补全、配置页）靠这份索引列出内置 skill，不必为两个名字冷启动会话进程。索引不主动清理（多进程会互相踩），读的时候按 `plugins-state.json` 的停用名单与 `SKILL.md` 是否还在过滤——所以停用插件、卸掉插件之后它立刻从列表消失。
 - 运行条件由清单 `desktop.checks` 声明，取值只能来自 `mica-plugin/PluginDesktop.ts` 的 `DESKTOP_CHECKS`；配置页 Settings → Plugins 的插件详情里渲染成「运行条件」一节（状态 + 打开系统设置），插件跑在 app-server 子进程里、探测不到也渲染不了。新增一种检查项 = 在 `DESKTOP_CHECKS` 登记 + 桌面端实现探测器（`src/main/system/`）。声明了它就写 `requires: ["desktop"]`。
 - 运行状态由清单 `status` 声明（`key` / `label` / `type: text|link`），值由插件写进 `$MICA_HOME/plugin-data/<id>/data.json`，配置页插件详情渲染成「运行状态」一节。值是字符串或 `{ text, tone: ok|warn|error }`——插件判断语义，页面只上色；没写过的键显示「尚未上报」，不隐藏。插件详情因此不需要为每个插件各写一套状态界面。
 - `desktop` 能力只有桌面端 spawn 的 app-server 提供：`buildSpawnEnv` 注入 `MICA_PLUGIN_DESKTOP_HOST=1`（别用 `MICA_DESKTOP_HOST`，那是运行时的绑定地址），`runAppServer` 据此传 `desktopHost` 给 `HeadlessPluginHost`。CLI / TUI / `mica exec` 里没有它，依赖插件整块跳过。
@@ -261,6 +262,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 ### MCP 与 Skills
 
 - `mica-mcp` 管理 `config.json.mcpServers` 生命周期；读取时展开 `url` / `headers` 里的 `${VAR}` 与 `${VAR:-默认值}`，`command` / `args` / `env` 不展开。
+- 会话能力目录（`mica/capabilities/get` 的 `mcpServers`）由 `micaMcp.catalog()` 合并三处：用户配置、会话自己的 `--mcp-config`、已连上的 server。桌面端把受控浏览器 / 终端挂进 `--mcp-config` 而不写用户配置，漏掉第二处界面上就看不到也关不掉它们。
 - MCP 工具名由 `mcpToolNamePrefix()` 生成；按 server 关闭时用前缀匹配，断开/重连失败同步清理并刷新 registry。
 - headless 显式初始化/关闭 MCP，支持独立配置与超时参数。
 - skills 只扫描解析缓存、不执行；扫描 `$MICA_HOME/skills` 与项目 `.mica/skills`、`.agents/skills`、`.deveco/skills`、`.agent_context/skills`；未设 MICA_HOME 时额外共享 `~/.agents/skills`、`~/.config/deveco/skills`。插件注册的内置 skill 与磁盘 skill 合流在同一份 `getLoaded()` 里（`registerRuntime` / `clearRuntime`），磁盘同名优先；`parseMarkdown` 是内嵌 SKILL.md 取元数据的唯一入口。
@@ -355,7 +357,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 每次模型请求后立即转发 usage；实时 usage 不改 turnState / updatedAt。
 - 阶段文案与计时读 `statusLinePhase`；`mica/turn/retrying` 让状态行显示 `retrying n/5`。
 - 文件补全 CLI / desktop 共用 `mica-file-mentions`；`@` 与 `/` skill 补全只在词首触发，选中只插文本（文件插 `@路径`，skill 插 `SKILL.md` 绝对路径）。
-- `/` 浮层混排 skill 与 MCP server；插入 MCP 时只写 server 名与已知工具名。
+- `/` 浮层混排 skill 与 MCP server；插入 MCP 时只写 server 名与已知工具名。两边都包含**内置能力**，不需要用户配置：skill 来自磁盘扫描 + 插件发布的 `$MICA_HOME/plugin-skills` 索引（`skills-core.js`），MCP 来自 `config.json` + 运行时按 socket 能力算出的 `mica-browser` / `mica-terminal`（`mcp-candidates-core.js`）；内置条目的说明列标「内置」，插入文本与普通条目一致。
 - desktop composer 不分派斜杠命令；输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻。
 - 粘贴共用 `composer-paste.js`：图片转 `[Image](路径)`，文件插绝对路径。
 - 角色入口在输入条箭头，随下一次发送/编辑的 role 参数持久化。

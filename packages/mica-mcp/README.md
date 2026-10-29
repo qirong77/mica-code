@@ -11,6 +11,9 @@
 - 从显式路径严格读取 MCP 配置：`micaMcp.readConfig(path)`。
 - 展开配置里的环境变量占位符：`micaMcp.expandEnv(value)`。
 - 暴露 MCP server 状态 store：`micaMcp.servers`。
+- 拼会话能力目录的 MCP 一栏：`micaMcp.catalog({ configured, extra, statuses })`——用户配置、
+  会话自己的 `--mcp-config`、已连上的 server 三处合并。桌面端把受控浏览器 / 终端挂在会话
+  `--mcp-config` 上而不写用户配置，能力目必须把这一处也算进去。
 
 ## 使用入口
 

@@ -231,6 +231,43 @@ describe('composer completions', () => {
     )
   })
 
+  it('labels built-in skills and MCP servers so they are not mistaken for user config', () => {
+    const options = slashCompletionOptions(
+      {
+        skills: [
+          {
+            name: 'computer-use',
+            description: '操作 macOS 桌面',
+            path: '/h/computer-use/SKILL.md',
+            builtin: true
+          }
+        ],
+        mcpServers: [{ name: 'mica-browser', type: 'http', tools: ['control'], builtin: true }]
+      },
+      ''
+    )
+
+    expect(options[0]).toMatchObject({
+      kind: 'skill',
+      builtin: true,
+      description: '内置 · 操作 macOS 桌面',
+      // 内置 skill 插入的仍是 SKILL.md 的绝对路径
+      path: '/h/computer-use/SKILL.md'
+    })
+    expect(options[1]).toMatchObject({
+      kind: 'mcp',
+      builtin: true,
+      description: '内置 MCP · 工具：control'
+    })
+
+    // 说明里的前缀也参与匹配，高亮下标跟着最终文本走
+    const [match] = slashCompletionOptions(
+      { skills: [{ name: 'computer-use', description: '操作桌面', builtin: true }] },
+      '内置'
+    )
+    expect(match.descriptionHighlights).toEqual([0, 1])
+  })
+
   it('caps the listed tools so one pick cannot flood the composer', () => {
     const tools = Array.from({ length: 9 }, (_, index) => `tool-${index}`)
     expect(mcpCompletionInsertText({ name: 'big', tools })).toBe(
