@@ -4,32 +4,26 @@
  * 托管桌面端真正的 renderer 产物；页面经同源 `/api/invoke` 与 `/api/events` 与本机运行时通信。
  *
  * 两条通道分别加密：
- * - 手机 ↔ 中转机：TLS（自动签发自签证书，`RELAY_TLS=off` 可关）；
+ * - 手机 ↔ 中转机：TLS 由前置 nginx 终结（Let's Encrypt 证书）；本进程只监听回环，
+ *   从不直接面对公网，因此不自己处理证书；
  * - 公司机 ↔ 中转机：应用层 AES-256-GCM，密钥由口令经 HKDF 派生。
  *   即便链路上有 TLS 拦截代理，轮询体也是不可读的密文。
  *
  * 轮询体是二进制：iv(12) | tag(16) | ciphertext(gzip(json))，没有 base64 膨胀。
  */
 import { createServer as createHttpServer } from 'node:http'
-import { createServer as createHttpsServer } from 'node:https'
-import { execFileSync } from 'node:child_process'
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto'
-import { dirname, extname, join, normalize } from 'node:path'
+import { extname, join, normalize } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
 
 const PORT = Number(process.env.RELAY_PORT || 9200)
-/** 放在 nginx 后面时绑回环：公网只留 nginx 那个入口。 */
-const BIND = process.env.RELAY_BIND || '0.0.0.0'
-/** `RELAY_TLS=off` 表示 TLS 由前面的反向代理终结。 */
-const TLS_ON = String(process.env.RELAY_TLS || 'on').toLowerCase() !== 'off'
+/** 默认只绑回环：公网入口只有 nginx 那一个，本进程不直接暴露。 */
+const BIND = process.env.RELAY_BIND || '127.0.0.1'
 const TOKEN = String(process.env.RELAY_TOKEN || '')
 const ROOT = process.env.RELAY_ROOT || join(import.meta.dirname, 'public')
 const AGENT_STALE_MS = 20_000
-/** 只存「为什么下线」这一件事：relay 重启后不该忘记正在时段外。 */
-const STATE_DIR = process.env.RELAY_STATE_DIR || '/var/lib/mobile-relay'
-const STATE_FILE = join(STATE_DIR, 'state.json')
 const INVOKE_TIMEOUT_MS = 90_000
 /** 页面有交互后，把轮询提速到这期间。 */
 const AWAKE_MS = 20_000
@@ -91,36 +85,13 @@ const agent = {
   lastPollAt: 0,
   lastPollTs: 0,
   watch: null,
-  env: null,
-  /** 主动下线（不在允许时段）时由公司机上报告。 */
-  offline: null
+  env: null
 }
 
 const phoneClients = new Set()
 const imageCache = new Map()
 const IMAGE_CACHE_LIMIT = 24 * 1024 * 1024
 let awakeUntil = 0
-
-function loadOfflineState() {
-  try {
-    const saved = JSON.parse(readFileSync(STATE_FILE, 'utf8'))
-    if (saved?.offline && Number(saved.offline.until) > Date.now()) return saved.offline
-  } catch {
-    /* 首次启动或文件损坏 */
-  }
-  return null
-}
-
-function saveOfflineState(offline) {
-  try {
-    mkdirSync(STATE_DIR, { recursive: true })
-    writeFileSync(STATE_FILE, JSON.stringify({ offline: offline ?? null }))
-  } catch {
-    /* 状态目录不可写时只是丢了「为什么离线」，不影响服务 */
-  }
-}
-
-agent.offline = loadOfflineState()
 
 const commands = []
 const resultCache = new Map()
@@ -131,8 +102,6 @@ function cacheKey(channel, payload) {
 }
 
 function agentOnline() {
-  // 主动下线（不在允许时段）时别再等一个不会到来的轮询：手机端要立刻拿到原因
-  if (agent.offline && Number(agent.offline.until) > Date.now()) return false
   return Date.now() - agent.lastPollAt < AGENT_STALE_MS
 }
 
@@ -191,21 +160,12 @@ async function readJsonBody(req) {
   return JSON.parse(raw.toString('utf8'))
 }
 
-function offlineMessage() {
-  if (!agent.offline) return null
-  // 钟点由公司机按它自己的时区格式化好；中转机只管展示
-  const label =
-    agent.offline.label ||
-    (agent.offline.until ? new Date(agent.offline.until).toISOString().slice(11, 16) + ' UTC' : '稍后')
-  return `不在允许的开启时段，预计 ${label} 恢复`
-}
-
 function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 }
 
-function offlinePage() {
-  const reason = offlineMessage() || '公司机当前没有连上中转机，桌面端可能没有运行。'
+function unavailablePage() {
+  const reason = '公司机当前没有连上中转机，桌面端可能没有运行。'
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -228,8 +188,7 @@ function offlinePage() {
 
 function invokeRemote(channel, payload) {
   if (!agentOnline()) {
-    const message = offlineMessage() || '公司机当前没有连上中转机（poller 未运行）'
-    return Promise.resolve({ ok: false, error: message, status: 503 })
+    return Promise.resolve({ ok: false, error: '公司机当前没有连上中转机', status: 503 })
   }
   const id = randomUUIDLike()
   return new Promise((resolve) => {
@@ -292,10 +251,6 @@ async function handlePoll(req, res) {
 
   const servedFreshly = now - agent.lastPollAt > AGENT_STALE_MS
   agent.lastPollAt = now
-  const nextOffline = body.offline ?? null
-  const changed = Boolean(nextOffline) !== Boolean(agent.offline)
-  agent.offline = nextOffline
-  if (changed) saveOfflineState(nextOffline)
   if (body.watch !== undefined) agent.watch = body.watch
   if (body.env) agent.env = body.env
 
@@ -312,11 +267,13 @@ async function handlePoll(req, res) {
   const batch = commands.splice(0, commands.length)
   const streaming = events.length > 0
   const awake = Date.now() < awakeUntil
+  // 间隔按「有没有人在用」分档：没人看时只要保证手机打开后能很快接上，
+  // 15 秒足够，也把公司机的常态外联压到每小时 240 次以内。
   let intervalMs
   if (batch.length || streaming) intervalMs = 300
   else if (awake) intervalMs = 1000
   else if (phoneOnline()) intervalMs = 3000
-  else intervalMs = 6000
+  else intervalMs = 15_000
 
   const payload = seal({
     ok: true,
@@ -492,7 +449,7 @@ async function serveStatic(req, res, url) {
   }
   if (pathname === '/' || pathname === '/mica-web' || pathname === '/mica-web/') {
     if (!agentOnline()) {
-      const body = Buffer.from(offlinePage())
+      const body = Buffer.from(unavailablePage())
       res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'content-length': body.length })
       return res.end(body)
     }
@@ -577,8 +534,7 @@ async function route(req, res) {
       phoneOnline: phoneOnline(),
       awake: Date.now() < awakeUntil,
       pending: agent.pending.size,
-      queued: commands.length,
-      offline: agent.offline
+      queued: commands.length
     })
   }
   if (path === '/api/invoke' && req.method === 'POST') return handleInvoke(req, res)
@@ -600,7 +556,7 @@ async function route(req, res) {
       return loginPage(res, Boolean(token))
     }
     if (!agentOnline()) {
-      const body = Buffer.from(offlinePage())
+      const body = Buffer.from(unavailablePage())
       res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'content-length': body.length })
       return res.end(body)
     }
@@ -608,30 +564,6 @@ async function route(req, res) {
   }
 
   return serveStatic(req, res, url)
-}
-
-/* ---------------------------------------------------------------- TLS */
-
-function ensureCertificate() {
-  const certPath = process.env.RELAY_CERT || join(import.meta.dirname, 'cert.pem')
-  const keyPath = process.env.RELAY_KEY || join(import.meta.dirname, 'key.pem')
-  if (existsSync(certPath) && existsSync(keyPath)) return { certPath, keyPath }
-
-  mkdirSync(dirname(certPath), { recursive: true })
-  const host = process.env.RELAY_HOST || ''
-  const san = ['DNS:localhost', 'IP:127.0.0.1', host ? `IP:${host}` : ''].filter(Boolean).join(',')
-  execFileSync(
-    'openssl',
-    [
-      'req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-days', '825', '-nodes',
-      '-keyout', keyPath, '-out', certPath,
-      '-subj', '/CN=mica-relay',
-      '-addext', `subjectAltName=${san}`
-    ],
-    { stdio: 'ignore' }
-  )
-  console.log(`[relay] 已生成自签证书 ${certPath}`)
-  return { certPath, keyPath }
 }
 
 function buildServer() {
@@ -643,22 +575,10 @@ function buildServer() {
     })
   }
 
-  if (!TLS_ON) return { server: createHttpServer(handler), scheme: 'http' }
-  try {
-    const { certPath, keyPath } = ensureCertificate()
-    const server = createHttpsServer(
-      { cert: readFileSync(certPath), key: readFileSync(keyPath), minVersion: 'TLSv1.2' },
-      handler
-    )
-    return { server, scheme: 'https' }
-  } catch (error) {
-    // 不静默降级：用户以为在加密、其实在明文，比启动失败更糟
-    console.error('[relay] TLS 初始化失败：', String(error?.message || error))
-    process.exit(1)
-  }
+  return createHttpServer(handler)
 }
 
-const { server, scheme } = buildServer()
+const server = buildServer()
 server.listen(PORT, BIND, () => {
-  console.log(`[relay] ${scheme}://${BIND}:${PORT}  root=${ROOT}`)
+  console.log(`[relay] http://${BIND}:${PORT}  root=${ROOT}  （TLS 由前置 nginx 终结）`)
 })

@@ -52,9 +52,6 @@ function readSettings() {
   return {
     relayUrl: pick('relayUrl', 'RELAY_URL').replace(/\/+$/, ''),
     token: pick('token', 'RELAY_TOKEN'),
-    activeHours: pick('activeHours', 'RELAY_ACTIVE_HOURS'),
-    activeDays: pick('activeDays', 'RELAY_ACTIVE_DAYS'),
-    jitter: Number(pick('jitter', 'RELAY_JITTER') || 35),
     // 默认严格校验证书：中转机给了真证书时，中间人拿不到那条 TLS 也伪造不了
     verifyTls: !(String(values?.verifyTls ?? 'true').toLowerCase() === 'false'),
     localUrl: String(process.env.LOCAL_URL || 'http://127.0.0.1:8787').replace(/\/+$/, ''),
@@ -96,83 +93,6 @@ function open(buffer) {
   return JSON.parse(gunzipSync(plain).toString('utf8'))
 }
 
-/* ---------------------------------------------------------------- 时段 */
-
-/** `08:30-12:00,13:30-18:30`；空串表示不限。`end < start` 视为跨午夜。 */
-function parseWindows(spec) {
-  const text = String(spec || '').trim()
-  if (!text) return null
-  const windows = []
-  for (const part of text.split(',')) {
-    const match = part.trim().match(/^(\d{1,2}):(\d{2})\s*[-~]\s*(\d{1,2}):(\d{2})$/)
-    if (!match) continue
-    windows.push({ start: Number(match[1]) * 60 + Number(match[2]), end: Number(match[3]) * 60 + Number(match[4]) })
-  }
-  return windows.length ? windows : null
-}
-
-/** `1-5` 表示周一到周五（0 是周日）；空串表示每天。 */
-function parseDays(spec) {
-  const text = String(spec || '').trim()
-  if (!text) return null
-  const days = new Set()
-  for (const part of text.split(',')) {
-    const range = part.trim().match(/^(\d)\s*-\s*(\d)$/)
-    if (range) {
-      for (let day = Number(range[1]); day <= Number(range[2]); day += 1) days.add(day)
-      continue
-    }
-    if (/^\d$/.test(part.trim())) days.add(Number(part.trim()))
-  }
-  return days.size ? days : null
-}
-
-function nextOpen(now, windows, days) {
-  const list = windows || [{ start: 0, end: 1440 }]
-  for (let offset = 0; offset <= 7; offset += 1) {
-    const probe = new Date(now.getTime() + offset * 86_400_000)
-    if (days && !days.has(probe.getDay())) continue
-    for (const window of list) {
-      const at = new Date(
-        probe.getFullYear(),
-        probe.getMonth(),
-        probe.getDate(),
-        Math.floor(window.start / 60),
-        window.start % 60,
-        0,
-        0
-      )
-      if (at.getTime() > now.getTime()) return at.getTime()
-    }
-  }
-  return now.getTime() + 3_600_000
-}
-
-function gate(now = new Date()) {
-  const windows = parseWindows(settings.activeHours)
-  const days = parseDays(settings.activeDays)
-  if (!windows && !days) return { allowed: true }
-
-  const minutes = now.getHours() * 60 + now.getMinutes()
-  const dayOk = !days || days.has(now.getDay())
-  if (dayOk) {
-    for (const window of windows || [{ start: 0, end: 1440 }]) {
-      const inside =
-        window.end >= window.start
-          ? minutes >= window.start && minutes < window.end
-          : minutes >= window.start || minutes < window.end
-      if (inside) return { allowed: true }
-    }
-  }
-  return { allowed: false, nextOpenAt: nextOpen(now, windows, days) }
-}
-
-function scheduleLabel() {
-  const windows = String(settings.activeHours || '').trim()
-  const days = String(settings.activeDays || '').trim()
-  if (!windows) return ''
-  return days ? `${windows} 周${days}` : windows
-}
 
 /* ---------------------------------------------------------------- 传输 */
 
@@ -326,13 +246,12 @@ const MAX_EVENT_BYTES = 1_500_000
 
 let eventBuffer = []
 let eventBytes = 0
-let relayParams = { intervalMs: 6000, watch: null }
+let relayParams = { intervalMs: 15_000, watch: null }
 /** 中转机是否有人在看。没人看时不攒事件、不催轮询。 */
 let wanted = false
 const resultHashes = new Map()
 let pendingResults = []
 let envPayload = null
-let offlineReported = false
 let stopping = false
 
 function log(...args) {
@@ -492,65 +411,8 @@ function createHashOf(text) {
 
 /* ---------------------------------------------------------------- 主循环 */
 
-function jitter(ms) {
-  const percent = Math.max(0, Math.min(80, settings.jitter))
-  const factor = 1 + ((Math.random() * 2 - 1) * percent) / 100
-  return Math.max(200, Math.round(ms * factor))
-}
-
-async function reportOffline(nextOpenAt) {
-  try {
-    await relayPoll({
-      // 由这台机器按本地时区格式化：中转机可能在别的时区，它算出来的钟点会差几个小时
-      offline: { until: nextOpenAt, label: formatClock(nextOpenAt), windows: scheduleLabel() },
-      events: [],
-      results: [],
-      watch: relayParams.watch
-    })
-    log(`[schedule] 已通知中转机下线，${new Date(nextOpenAt).toLocaleString()} 恢复`)
-  } catch (error) {
-    log('[schedule] 通知失败:', String(error?.message || error))
-  }
-}
-
-function formatClock(timestamp) {
-  const when = new Date(timestamp)
-  const time = `${String(when.getHours()).padStart(2, '0')}:${String(when.getMinutes()).padStart(2, '0')}`
-  const today = new Date()
-  const sameDay =
-    when.getFullYear() === today.getFullYear() &&
-    when.getMonth() === today.getMonth() &&
-    when.getDate() === today.getDate()
-  return sameDay ? time : `${when.getMonth() + 1}/${when.getDate()} ${time}`
-}
-
-/** 睡到允许时段开始；分段睡，顺带让配置改动能在 1 分钟内生效。 */
-async function sleepUntil(target) {
-  let until = target
-  while (!stopping && Date.now() < until) {
-    await sleep(Math.min(60_000, until - Date.now()))
-    settings = readSettings()
-    CHANNEL_KEY = deriveKey(settings.token)
-    const state = gate()
-    if (state.allowed) return
-    // 配置可能被改过，按新的下次开启时间重算，两个方向都能在 1 分钟内生效
-    until = state.nextOpenAt
-  }
-}
-
 async function tick() {
   settings = readSettings()
-
-  const state = gate()
-  if (!state.allowed) {
-    if (!offlineReported) {
-      await reportOffline(state.nextOpenAt)
-      offlineReported = true
-    }
-    await sleepUntil(state.nextOpenAt)
-    offlineReported = false
-    return
-  }
 
   let intervalMs = relayParams.intervalMs
   const events = takeEvents()
@@ -603,7 +465,7 @@ async function tick() {
       clearTimeout(timer)
       resolve()
     }
-    const timer = setTimeout(finish, jitter(intervalMs))
+    const timer = setTimeout(finish, intervalMs)
     wakeResolve = finish
   })
 }
@@ -611,7 +473,7 @@ async function tick() {
 async function main() {
   envPayload = await readLocalEnv()
   if (state_ok()) void subscribeLocalEvents()
-  log(`[relay-agent] ${settings.localUrl} -> ${settings.relayUrl}  时段=${scheduleLabel() || '不限'}  抖动=${settings.jitter}%`)
+  log(`[relay-agent] ${settings.localUrl} -> ${settings.relayUrl}`)
   while (!stopping) await tick()
 }
 

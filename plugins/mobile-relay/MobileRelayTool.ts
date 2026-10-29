@@ -1,17 +1,25 @@
+import { join } from 'node:path';
 import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
 import { MicaTool } from '@packages/mica-tools/MicaTool.js';
 import type { ToolExecuteCallbacks, ToolInput } from '@packages/mica-tools/MicaTool.js';
 import type { ToolResult } from '@packages/mica-tools/types.js';
+import { readBridgePid } from './BridgeSupervisor.js';
+
+const LOCAL_RUNTIME = 'http://127.0.0.1:8787';
 
 export class MobileRelayTool extends MicaTool {
   constructor(private readonly ctx: PluginContext) {
     super(
       'mobile_relay',
-      '查看手机远程访问通道：中转机是否在线、这台机器是否已连上、手机要打开的链接。',
+      '手机远程访问通道：中转机与本机是否接通、手机链接，以及一步步排查连不上的原因。',
       {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['status', 'link'], description: '默认 status' },
+          action: {
+            type: 'string',
+            enum: ['status', 'link', 'doctor'],
+            description: 'status 概况 / link 手机链接 / doctor 逐项排查',
+          },
         },
         additionalProperties: false,
       },
@@ -20,17 +28,97 @@ export class MobileRelayTool extends MicaTool {
   }
 
   onToolUseDisplayText(input: ToolInput): string {
-    return input?.action === 'link' ? 'mobile_relay link' : 'mobile_relay status';
+    const action = String(input?.action ?? 'status');
+    return action === 'link' ? 'mobile_relay link' : `mobile_relay ${action}`;
   }
 
   async execute(input: ToolInput, _callbacks?: ToolExecuteCallbacks): Promise<ToolResult> {
-    const relayUrl = String(this.ctx.settings.get().relayUrl ?? '').trim().replace(/\/+$/, '');
-    const token = String(this.ctx.settings.get().token ?? '').trim();
-    if (!relayUrl || !token) {
-      return '还没有配置中转地址与口令：打开 设置 → 插件 → Mobile Relay 填好 `relayUrl` 与 `token`。';
-    }
-    if (input?.action === 'link') return `${relayUrl}/?t=${token}`;
+    const values = this.ctx.settings.get();
+    const relayUrl = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
+    const token = String(values.token ?? '').trim();
+    const action = String(input?.action ?? 'status');
+
+    if (action === 'doctor') return this.doctor(relayUrl, token);
+    if (!relayUrl || !token) return this.setupHint();
+    if (action === 'link') return `${relayUrl}/?t=${token}`;
     return this.describe(relayUrl, token);
+  }
+
+  private setupHint(): string {
+    return [
+      '还没有配置中转地址与口令。两种方式任选：',
+      '',
+      '1. 一条命令搞定（推荐）：在中转机能 SSH 登录的前提下，仓库里跑',
+      '     node plugins/mobile-relay/setup.mjs --host root@<中转机 IP>',
+      '   它会装好 relay、配 nginx、申请证书，并把设置直接写进本机配置。',
+      '',
+      '2. 手动：配置页 → 插件 → Mobile Relay，填「中转地址」与「访问口令」。',
+    ].join('\n');
+  }
+
+  private dataDir(): string | null {
+    return this.ctx.paths?.config ? join(this.ctx.paths.config, 'plugin-data', 'mobile-relay') : null;
+  }
+
+  private async doctor(relayUrl: string, token: string): Promise<string> {
+    const lines: string[] = [];
+    const ok = (text: string) => lines.push(`✓ ${text}`);
+    const bad = (text: string, hint: string) => lines.push(`✗ ${text}\n    → ${hint}`);
+
+    const issues = this.ctx.settings.validate();
+    if (issues.length > 0) {
+      bad(`配置不完整：${issues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`, '把它填完，其余检查才有意义');
+      return lines.join('\n');
+    }
+    ok('配置已填（地址与口令）');
+
+    if (String(this.ctx.settings.get().enabled ?? 'true') === 'false') {
+      bad('「启用桥」是关的', '打开它，桥才会启动');
+    } else {
+      ok('「启用桥」是开的');
+    }
+
+    const pid = readBridgePid(this.dataDir());
+    if (pid) ok(`桥进程在跑（pid ${pid}）`);
+    else bad('桥进程没在跑', '插件每 15 秒检查一次；若配置刚改完，等半分钟再看。仍不启动就重开一次会话');
+
+    try {
+      const res = await fetch(`${LOCAL_RUNTIME}/api/invoke`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ channel: 'app:info', payload: {} }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (res.ok) ok(`桌面运行时可达（${LOCAL_RUNTIME}）`);
+      else bad(`桌面运行时返回 HTTP ${res.status}`, '桌面端可能正在启动或异常，重开一次');
+    } catch {
+      bad(`连不上桌面运行时（${LOCAL_RUNTIME}）`, '桌面端没开的时候桥无事可做；先启动桌面端');
+    }
+
+    try {
+      const started = Date.now();
+      const res = await fetch(`${relayUrl}/api/health`, {
+        headers: { 'x-relay-token': token },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (res.status === 401) {
+        bad('中转机可达，但口令不对', '两边的 token 必须一致：中转机在 /opt/mobile-relay/relay.env');
+      } else if (!res.ok) {
+        bad(`中转机返回 HTTP ${res.status}`, '看中转机日志：journalctl -u mobile-relay -n 50');
+      } else {
+        const info = (await res.json()) as { agentOnline?: boolean; phoneOnline?: boolean };
+        ok(`中转机可达（${Date.now() - started}ms）`);
+        if (info.agentOnline) ok('本机已连上中转机');
+        else bad('中转机说本机没连上', '桥进程刚起来要等一轮（最多 15 秒）；仍不行就检查中转地址是否是 https');
+        ok(info.phoneOnline ? '最近有手机访问过' : '当前没有手机在看（不影响，打开手机即可）');
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      bad(`连不上中转机 ${relayUrl}：${reason}`, '域名解析、防火墙 443、证书是否有效；自签证书会让浏览器直接白屏');
+    }
+
+    lines.push('', `手机链接：${relayUrl}/?t=${token}`);
+    return lines.join('\n');
   }
 
   private async describe(relayUrl: string, token: string): Promise<string> {
@@ -42,17 +130,10 @@ export class MobileRelayTool extends MicaTool {
       });
       if (res.status === 401) return `中转机 ${relayUrl} 可达，但口令不对。`;
       if (!res.ok) return `中转机 ${relayUrl} 返回 HTTP ${res.status}。`;
-      const info = (await res.json()) as {
-        agentOnline?: boolean;
-        phoneOnline?: boolean;
-        offline?: { until?: number; label?: string } | null;
-      };
-      const offline = info.offline
-        ? `未连上 — 不在允许的开启时段，预计 ${info.offline.label ?? '稍后'} 恢复`
-        : '未连上 — 桥进程没在跑，或地址 / 口令不对';
+      const info = (await res.json()) as { agentOnline?: boolean; phoneOnline?: boolean };
       return [
         `中转机：${relayUrl}（${Date.now() - started}ms）`,
-        `这台机器：${info.agentOnline ? '已连上并持续上报' : offline}`,
+        `这台机器：${info.agentOnline ? '已连上并持续上报' : '未连上 — 用 mobile_relay doctor 逐项排查'}`,
         `手机：${info.phoneOnline ? '最近有访问' : '当前没有手机在看'}`,
         '',
         `手机链接：${relayUrl}/?t=${token}`,

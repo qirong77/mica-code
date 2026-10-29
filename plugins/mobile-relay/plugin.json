@@ -29,28 +29,6 @@
       "label": "访问口令",
       "type": "password",
       "default": ""
-    },
-    {
-      "key": "activeHours",
-      "label": "开启时段",
-      "type": "text",
-      "default": "08:30-12:00,13:30-18:30",
-      "placeholder": "08:30-12:00,13:30-18:30；留空表示全天"
-    },
-    {
-      "key": "activeDays",
-      "label": "开启星期",
-      "type": "text",
-      "default": "1-5",
-      "placeholder": "1-5 表示周一到周五；0 是周日；留空表示每天"
-    },
-    {
-      "key": "jitter",
-      "label": "间隔抖动",
-      "type": "number",
-      "default": "35",
-      "step": "5",
-      "unit": "%"
     }
   ]
 }

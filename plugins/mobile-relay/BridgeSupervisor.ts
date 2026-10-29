@@ -191,3 +191,17 @@ export function bridgeScriptMtime(path: string | null): number | null {
     return null;
   }
 }
+
+/** 读 lock 判断桥在不在跑，给 `mobile_relay doctor` 用（不启动任何东西）。 */
+export function readBridgePid(dataDir: string | null): number | null {
+  if (!dataDir) return null;
+  const lockPath = join(dataDir, LOCK_NAME);
+  if (!existsSync(lockPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(lockPath, 'utf8')) as Partial<LockRecord>;
+    if (typeof parsed.pid !== 'number' || !isAlive(parsed.pid)) return null;
+    return parsed.pid;
+  } catch {
+    return null;
+  }
+}
