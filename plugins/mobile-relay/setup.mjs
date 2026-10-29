@@ -11,9 +11,9 @@
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 const args = process.argv.slice(2);
 const flag = (name, fallback = '') => {
@@ -24,16 +24,27 @@ const has = (name) => args.includes(`--${name}`);
 
 const target = flag('host', process.env.RELAY_SSH || '');
 const port = flag('port', '9200');
-const token = flag('token', process.env.RELAY_TOKEN || randomBytes(18).toString('hex'));
+/** 不少机器把 SSH 挪到非标准端口（22 直接超时），别让它成为部署的绊脚石。 */
+const sshPort = flag('ssh-port', process.env.RELAY_SSH_PORT || '22');
+/** 显式给口令才用它；否则先看本机已有设置、再看中转机上有没有同名机器。 */
+const forcedToken = flag('token', process.env.RELAY_TOKEN || '');
+const label = flag('label', hostname());
 const skipCert = has('no-cert');
 const dryRun = has('dry-run');
 const remoteDir = '/opt/mobile-relay';
+const stateDir = '/var/lib/mobile-relay';
+const agentsFile = `${stateDir}/agents.json`;
 const here = import.meta.dirname;
 
 if (!target) {
-  console.error('用法：node setup.mjs --host root@1.2.3.4 [--domain 1-2-3-4.sslip.io] [--port 9200] [--no-cert]');
+  console.error(
+    '用法：node setup.mjs --host root@1.2.3.4 [--ssh-port 22] [--domain 1-2-3-4.sslip.io] [--port 9200] [--label 机器名] [--no-cert]',
+  );
   process.exit(1);
 }
+
+/** 和中转机同一套：口令派生出的路由标识。 */
+const agentIdOf = (value) => createHash('sha256').update(value).digest('hex').slice(0, 12);
 
 function fail(message) {
   console.error(`\n✗ ${message}`);
@@ -47,6 +58,7 @@ function ssh(command, { input, timeout = 120_000 } = {}) {
     '-o', 'StrictHostKeyChecking=accept-new',
     '-o', 'ConnectTimeout=8',
     '-o', 'ServerAliveInterval=10',
+    '-p', sshPort,
     target,
     command,
   ], {
@@ -61,13 +73,48 @@ function step(label) {
   process.stdout.write(`\n▸ ${label}\n`);
 }
 
+/**
+ * 找到桌面端的 renderer 产物。
+ *
+ * 中转机托管的就是这一份页面，而它只能从仓库构建出来。**不要**去读已安装应用里的产物：
+ * 打包后在 `app.asar` 里，只有 Electron 自己读得到，硬抠出来是 hack，还会随版本漂移。
+ * 所以只认「仓库里的构建产物」与显式指定的目录，缺了就明确告诉人去构建。
+ */
+function resolveRendererDir() {
+  const looksLikeRenderer = (dir) => Boolean(dir) && existsSync(join(dir, 'index.html'));
+  const explicit = flag('renderer', process.env.MICA_DESKTOP_RENDERER || '');
+  if (explicit) {
+    if (!looksLikeRenderer(explicit)) fail(`--renderer 指向的目录里没有 index.html：${explicit}`);
+    return explicit;
+  }
+
+  const candidates = [
+    join(here, '..', '..', 'apps', 'desktop', 'out', 'renderer'),
+    join(process.cwd(), 'apps', 'desktop', 'out', 'renderer'),
+  ];
+  for (const dir of candidates) {
+    if (looksLikeRenderer(dir)) return dir;
+  }
+
+  fail(
+    [
+      '找不到页面产物（renderer）。中转机托管的那份页面必须从仓库构建：',
+      '  cd apps/desktop && npm install && npx electron-vite build',
+      '  或用 --renderer 指向另一台已构建机器上的 out/renderer。',
+      `  已查找：${candidates.join('、')}`,
+    ].join('\n'),
+  );
+}
+
 let publicIp = '';
 if (!dryRun) {
   step('检查 SSH 连通性');
   try {
     ssh('echo ok');
   } catch {
-    fail(`连不上 ${target}。先确认 ssh ${target} 可以直接登录（本机已配好免密密钥）。`);
+    fail(
+      `连不上 ${target}（端口 ${sshPort}）。先确认 ssh -p ${sshPort} ${target} 可以直接登录（本机已配好免密密钥）。`,
+    );
   }
 
   step('探测中转机环境');
@@ -96,11 +143,64 @@ if (!dryRun) {
 const domain = flag('domain', publicIp ? `${publicIp.replaceAll('.', '-')}.sslip.io` : 'PRETEND.sslip.io');
 if (!domain) fail('无法推断公网 IP，请用 --domain 指定域名');
 
-step('打包并上传（relay + 页面产物）');
-const rendererDir = join(here, '..', '..', 'apps', 'desktop', 'out', 'renderer');
-if (!existsSync(rendererDir)) {
-  fail(`找不到页面产物 ${rendererDir}\n  先在仓库根跑：cd apps/desktop && npm run build:server`);
+step('核对这台机器在中转机上的登记');
+const home = process.env.MICA_HOME || join(homedir(), '.mica');
+const settingsDir = join(home, 'plugin-settings');
+const settingsPath = join(settingsDir, 'mobile-relay.json');
+let localSettings = {};
+try {
+  localSettings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+} catch {
+  // 还没配过，按新机器处理
 }
+
+/** 中转机上已登记的机器；首次部署时为空。 */
+let knownAgents = [];
+try {
+  const raw = String(ssh(`cat ${agentsFile} 2>/dev/null || true`) || '').trim();
+  const parsed = raw ? JSON.parse(raw) : { agents: [] };
+  knownAgents = Array.isArray(parsed?.agents) ? parsed.agents : [];
+} catch {
+  knownAgents = [];
+}
+
+/**
+ * 口令复用：只有「本机设置已经指向这台中转机、且它的口令还在清单里」才算同一台机器。
+ * 这样重跑 setup 不会把已经连着的手机关在外面，也不会挤掉别的机器。
+ */
+const sameRelay = String(localSettings?.relayUrl || '').includes(domain);
+/** 同一台机器换域名重跑时，按名字认领回原来的口令，别在中转机上留一条重复记录。 */
+const sameLabel = knownAgents.find((agent) => agent?.label === label);
+const reusable =
+  (sameLabel && typeof sameLabel.token === 'string' && sameLabel.token.length >= 16 ? sameLabel.token : '') ||
+  (typeof localSettings?.token === 'string' &&
+  localSettings.token.length >= 16 &&
+  sameRelay &&
+  knownAgents.some((agent) => agent?.token === localSettings.token)
+    ? localSettings.token
+    : '');
+const token = forcedToken || reusable || randomBytes(18).toString('hex');
+const previous = knownAgents.find((agent) => agent?.token === token);
+process.stdout.write(
+  `  ${previous ? '复用已有口令' : '登记为新机器'}（中转机上现有 ${knownAgents.length} 台）\n`,
+);
+
+const agentsPayload = {
+  version: 1,
+  agents: [
+    ...knownAgents.filter((agent) => agent?.token !== token),
+    {
+      id: agentIdOf(token),
+      label,
+      token,
+      createdAt: Number(previous?.createdAt) || Date.now(),
+    },
+  ],
+};
+
+step('打包并上传（relay + 页面产物）');
+const rendererDir = resolveRendererDir();
+process.stdout.write(`  页面产物 ${rendererDir}\n`);
 const work = mkdtempSync(join(tmpdir(), 'mica-relay-setup-'));
 try {
   const bundle = join(work, 'bundle');
@@ -111,8 +211,8 @@ try {
     join(bundle, 'relay.env'),
     [
       `RELAY_PORT=${port}`,
-      `RELAY_TOKEN=${token}`,
       'RELAY_BIND=127.0.0.1',
+      `RELAY_STATE_DIR=${stateDir}`,
       '',
     ].join('\n'),
   );
@@ -132,12 +232,25 @@ try {
 
 if (dryRun) {
   process.stdout.write(`\n✓ 预演结束，没有向 ${target} 写任何东西。\n`);
-  process.stdout.write(`  将要部署：domain=${domain} port=${port} token=${token}\n`);
+  process.stdout.write(`  将要部署：domain=${domain} port=${port} label=${label} token=${token}\n`);
+  process.stdout.write(`  将登记 ${agentsPayload.agents.length} 台机器\n`);
   process.exit(0);
 }
 
-step('安装 systemd 服务');
+step('登记到中转机的机器清单');
+// heredoc 的终止符必须独占一行，所以这段单独发一次，别和后面的命令用 && 串起来。
+ssh(`mkdir -p ${stateDir}`);
+ssh(`cat > ${agentsFile} <<'MICA_AGENTS'\n${JSON.stringify(agentsPayload, null, 2)}\nMICA_AGENTS`);
 ssh(
+  [
+    `chown -R www-data:www-data ${stateDir}`,
+    `chmod 600 ${agentsFile}`,
+  ].join(' && '),
+);
+
+step('安装 systemd 服务');
+try {
+  ssh(
   [
     `chown -R www-data:www-data ${remoteDir}`,
     `chmod 600 ${remoteDir}/relay.env`,
@@ -145,10 +258,16 @@ ssh(
     'systemctl daemon-reload',
     'systemctl enable mobile-relay >/dev/null 2>&1 || true',
     'systemctl restart mobile-relay',
-    'sleep 2',
+    // 服务可能先经历一次 activating，等它稳定下来再判定，别把正常启动当成失败。
+    'for i in $(seq 1 20); do systemctl is-active --quiet mobile-relay && break; sleep 1; done',
     'systemctl is-active mobile-relay',
   ].join(' && '),
-);
+  );
+} catch {
+  // 起不来时把日志带上来，否则只剩一句 is-active（exit 3），看不出原因。
+  const why = String(ssh('journalctl -u mobile-relay -n 15 --no-pager | tail -10 || true') || '');
+  fail(`中转机上的 mobile-relay 没启动：\n${why}`);
+}
 
 step('配置 nginx');
 const site = readFileSync(join(here, 'relay', 'nginx-site.conf'), 'utf8')
@@ -175,7 +294,9 @@ const base = skipCert ? `http://${domain}` : `https://${domain}`;
 let healthy = false;
 for (let attempt = 0; attempt < 8; attempt += 1) {
   try {
-    const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(8_000) });
+    const res = await fetch(`${base}/api/health?t=${encodeURIComponent(token)}`, {
+      signal: AbortSignal.timeout(8_000),
+    });
     if (res.ok) {
       const info = await res.json();
       healthy = true;
@@ -192,21 +313,22 @@ if (!healthy) {
 }
 
 step('写入本地插件设置');
-const home = process.env.MICA_HOME || join(homedir(), '.mica');
-const settingsDir = join(home, 'plugin-settings');
-const settingsPath = join(settingsDir, 'mobile-relay.json');
 mkdirSync(settingsDir, { recursive: true });
-const existing = existsSync(settingsPath) ? JSON.parse(readFileSync(settingsPath, 'utf8')) : {};
 writeFileSync(
   settingsPath,
-  `${JSON.stringify({ ...existing, enabled: 'true', relayUrl: base, token }, null, 2)}\n`,
+  `${JSON.stringify({ ...localSettings, enabled: 'true', relayUrl: base, token }, null, 2)}\n`,
 );
 
+const total = agentsPayload.agents.length;
 console.log(`
-✓ 完成
+✓ 完成（这台机器：${label}${total > 1 ? `，中转机上共 ${total} 台` : ''}）
 
   手机打开： ${base}/?t=${token}
   插件设置： ${settingsPath}
 
   启停桥进程：配置页 → 插件 → Mobile Relay 的「启用桥」，或改上面那个文件。
-`);
+${
+  total > 1
+    ? `  手机打开过任一机器的链接后，再访问 ${base}/ 会让它选机器。\n`
+    : ''
+}`);

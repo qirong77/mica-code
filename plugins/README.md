@@ -72,6 +72,22 @@ plugins/<id>/
 `$MICA_HOME/plugin-settings/<id>.json`，未声明的键不会被写入；`select` 必须带 `options`，
 `switch` 存 `"true"` / `"false"`。插件每轮读取时会比对文件 mtime，用户改完不需要重启。
 
+### 运行状态（`status`）
+
+插件有运行态要给人看（连没连上、现在是哪台机器、链接是什么）时，在 `plugin.json` 里声明
+「页面有哪几行」，值自己写进 `$MICA_HOME/plugin-data/<id>/data.json`：
+
+```json
+"status": [
+  { "key": "phoneUrl", "label": "手机链接", "type": "link" },
+  { "key": "relay", "label": "中转机", "type": "text" }
+]
+```
+
+`data.json` 里对应的键可以是字符串，也可以是 `{ "text": "可达", "tone": "ok" }`
+（`tone` 取 `ok` / `warn` / `error`）。**语义由插件判断，页面只按语气上色**——配置页不认识
+任何具体插件，也不替它编造值；没写过的键显示「尚未上报」。卡片（`desktop.jsx`）读的是同一份文件。
+
 ### 模型接口（`llm`）
 
 插件要自己问一次模型（起标题、写提交说明、整理记忆）时，不要在 `settings` 里手写那四项：

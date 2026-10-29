@@ -46,13 +46,13 @@ export class MobileRelayTool extends MicaTool {
 
   private setupHint(): string {
     return [
-      '还没有配置中转地址与口令。两种方式任选：',
+      '还没有配置中转地址与口令。中转机交给内置 skill 现场部署：',
       '',
-      '1. 一条命令搞定（推荐）：在中转机能 SSH 登录的前提下，仓库里跑',
-      '     node plugins/mobile-relay/setup.mjs --host root@<中转机 IP>',
-      '   它会装好 relay、配 nginx、申请证书，并把设置直接写进本机配置。',
+      '  用 skill 工具加载 `mobile-relay-setup` 并按它执行（会取仓库、必要时构建页面产物、',
+      '  跑 setup.mjs，并把地址与口令写回本插件设置）。',
       '',
-      '2. 手动：配置页 → 插件 → Mobile Relay，填「中转地址」与「访问口令」。',
+      '  手动：git clone https://github.com/qirong77/mica-code',
+      '        node plugins/mobile-relay/setup.mjs --host root@<中转机IP>',
     ].join('\n');
   }
 
@@ -102,7 +102,7 @@ export class MobileRelayTool extends MicaTool {
         signal: AbortSignal.timeout(10_000),
       });
       if (res.status === 401) {
-        bad('中转机可达，但口令不对', '两边的 token 必须一致：中转机在 /opt/mobile-relay/relay.env');
+        bad('中转机可达，但口令不对', '这台机器的口令不在中转机清单里：中转机上 /var/lib/mobile-relay/agents.json');
       } else if (!res.ok) {
         bad(`中转机返回 HTTP ${res.status}`, '看中转机日志：journalctl -u mobile-relay -n 50');
       } else {

@@ -186,6 +186,7 @@ export type {
   PluginSkillRegistration,
   PluginSkillsApi,
 } from './PluginDesktop.js';
+export type { PluginStatusField, PluginStatusType } from './PluginManifest.js';
 export type {
   PluginSubagentApi,
   PluginSubagentAwaitOptions,

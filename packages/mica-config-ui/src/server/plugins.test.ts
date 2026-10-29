@@ -126,6 +126,67 @@ describe('getPluginsDetails', () => {
   it('reports no desktop checks for a plugin that declares none', () => {
     expect(getPluginsDetails().plugins.find((plugin) => plugin.id === 'todo')?.desktopChecks).toEqual([]);
   });
+
+  /*
+   * 运行状态的值由插件自己写进 plugin-data：配置页只按声明取值，不认识具体插件，
+   * 也就无法替它判断「通不通」——所以这里只验证取值与语气原样透传。
+   */
+  it('fills declared status rows from the plugin data file', () => {
+    const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'hello');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'index.js'), 'export default () => {};\n');
+    writeFileSync(
+      join(pluginDir, 'plugin.json'),
+      JSON.stringify({
+        id: 'hello',
+        name: 'Hello',
+        version: '1.0.0',
+        main: 'index.js',
+        status: [
+          { key: 'link', label: '链接', type: 'link' },
+          { key: 'relay', label: '中转机', type: 'text' },
+          { key: 'missing', label: '没写过', type: 'text' },
+        ],
+      }),
+    );
+    const dataDir = join(process.env.MICA_HOME!, 'plugin-data', 'user.hello');
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(
+      join(dataDir, 'data.json'),
+      JSON.stringify({ link: 'https://x.test/?t=a', relay: { text: '可达', tone: 'ok' } }),
+    );
+
+    const plugin = getPluginsDetails().plugins.find((entry) => entry.id === 'user.hello');
+    expect(plugin?.status).toEqual([
+      { key: 'link', label: '链接', type: 'link', value: 'https://x.test/?t=a', tone: null },
+      { key: 'relay', label: '中转机', type: 'text', value: '可达', tone: 'ok' },
+      // 插件还没上报：占位而不是隐藏，那一行本来就在声明里
+      { key: 'missing', label: '没写过', type: 'text', value: null, tone: null },
+    ]);
+  });
+
+  it('treats an unreadable data file as "not reported yet" instead of failing the page', () => {
+    const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'hello');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'index.js'), 'export default () => {};\n');
+    writeFileSync(
+      join(pluginDir, 'plugin.json'),
+      JSON.stringify({
+        id: 'hello',
+        name: 'Hello',
+        version: '1.0.0',
+        main: 'index.js',
+        status: [{ key: 'relay', label: '中转机', type: 'text' }],
+      }),
+    );
+    const dataDir = join(process.env.MICA_HOME!, 'plugin-data', 'user.hello');
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, 'data.json'), '{ 半截');
+
+    expect(getPluginsDetails().plugins.find((entry) => entry.id === 'user.hello')?.status).toEqual([
+      { key: 'relay', label: '中转机', type: 'text', value: null, tone: null },
+    ]);
+  });
 });
 
 describe('setPluginEnabled', () => {

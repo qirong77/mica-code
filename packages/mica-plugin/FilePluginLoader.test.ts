@@ -172,6 +172,7 @@ describe('parsePluginManifest', () => {
         requires: [],
         desktopChecks: [],
         desktopEntry: null,
+        status: [],
       },
     });
   });

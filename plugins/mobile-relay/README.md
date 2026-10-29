@@ -26,9 +26,13 @@
 
 ## 安装
 
-先在有公网 IP 的 Linux 机器上装好 `node`（≥ 18）与 `nginx`，然后在本仓库根目录：
+**交给 agent 做。** 插件带一个内置 skill（`mobile-relay-setup`），在会话里说「帮我配一下手机
+访问」，它会取仓库、必要时构建页面产物、部署中转机、把你的地址与口令写回设置并验证。
+
+自己做的场合，先在有公网 IP 的 Linux 机器上装好 `node`（≥ 18）与 `nginx`，然后在本仓库根目录：
 
 ```bash
+cd apps/desktop && npm install && npx electron-vite build && cd ../..   # 只在需要现场构建时
 node plugins/mobile-relay/setup.mjs --host root@<公网IP>
 ```
 
@@ -37,14 +41,38 @@ node plugins/mobile-relay/setup.mjs --host root@<公网IP>
 把地址和口令**写进本机的插件设置**。
 
 ```bash
+# 用自己的域名（要先把它的 A 记录指到中转机）
 node plugins/mobile-relay/setup.mjs --host root@1.2.3.4 --domain mica.example.com
+# 服务器 SSH 不在 22
+node plugins/mobile-relay/setup.mjs --host root@1.2.3.4 --ssh-port 2222
 ```
 
 有域名就传 `--domain`，没有就用自动域名。`--no-cert` 跳过证书（仅限内网调试）。
 装完手机直接开打印出来的链接，不需要手动填设置。
 
+域名走 Cloudflare 代理时要把记录设成 **DNS only**（灰云）：橙云会用自己的证书终结 TLS，
+让 certbot 签不出源站证书，事件流也要多绕一层。同一台机器换域名重跑会按 `--label`
+（默认取主机名）认领回原口令，不会在中转机上留下重复记录。
+
+renderer 只从**仓库的构建产物**取（`apps/desktop/out/renderer`），或用 `--renderer` 指向
+另一台机器上已构建好的那份。刻意不去读已安装应用里的产物：打包后在 `app.asar` 内，
+只有 Electron 读得到，硬抠出来属于 hack 且会随版本漂移。
+
 排查问题：`mobile_relay action=doctor`（在会话里让模型跑），逐项检查设置、桥进程、
 TLS、口令、本机运行时。
+
+## 日常怎么用
+
+1. **这台机器**：桌面端开着就行，不用管窗口。桥由插件监管，开机自启、崩溃重拉；
+   关掉「启用桥」或停用插件，进程立刻被杀掉，不会留下还在外联的东西。
+2. **手机**：打开侧栏 `Mobile` 卡片里那条链接（`https://<中转机>/?t=<口令>`），
+   建议加到主屏。看到的就是桌面端同一套界面、同一份会话。
+3. **看状态**：`Mobile` 卡片显示桥在不在跑、中转机通不通、手机是不是正在看。
+   卡片读的是插件自己的数据文件，不额外占用链路。
+4. **换机器 / 重装中转机**：再跑一次 `setup.mjs` 即可，它会覆盖中转机上的部署并
+   重写本机设置；旧口令作废。
+
+手机端不提供终端与文件编辑，这两项在白名单里就是拒的。
 
 桥脚本首次由插件落盘到 `$MICA_HOME/plugin-data/mobile-relay/bridge.mjs`，需要系统里有 `node`
 （或用 `MICA_BRIDGE_NODE` 指定）。
@@ -70,3 +98,15 @@ TLS、口令、本机运行时。
 
 `agent/bridge.mjs` 是唯一源码；改完跑 `bun scripts/generate-mobile-relay-sources.mjs`
 重新生成 `bridgeSource.ts`（随包运行的是内嵌那份）。
+
+## 为什么部署不在插件里
+
+插件只做一件事：**本机这座桥**（进程监管、设置、状态、`mobile_relay` 工具、内置 skill）。
+
+中转机的部署放在 skill 里、由 agent 现场执行，原因有三条：
+
+1. 中转机需要的是「这台机器上跑的那个页面」，而它只能从仓库构建——把构建产物塞进插件
+   等于把一份会过期的副本编进二进制。
+2. 部署要装包、申请证书、改 nginx，失败模式又杂又长，写在 skill 里能给出可读的原因；
+   塞进插件只能抛一句错误。
+3. 版本解耦：relay 改一行只要重新部署，不必发一个插件版本。

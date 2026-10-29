@@ -4,7 +4,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { CONFIG_DIR_NAME } from '@packages/mica-config/brand.js';
-import { parsePluginManifest, PLUGIN_MANIFEST_FILE, type PluginManifest } from './PluginManifest.js';
+import {
+  parsePluginManifest,
+  PLUGIN_MANIFEST_FILE,
+  type PluginManifest,
+  type PluginStatusField,
+} from './PluginManifest.js';
 import type { DesktopCheckId } from './PluginDesktop.js';
 import type { PluginSettingField } from './PluginSettings.js';
 import type { PluginLlmSpec } from './PluginLlm.js';
@@ -54,6 +59,8 @@ export type PluginInspection = {
   llm: PluginLlmSpec | null;
   /** 清单声明的桌面端运行条件；清单坏掉时为空。 */
   desktopChecks: DesktopCheckId[];
+  /** 清单声明要在页面展示的运行状态行；清单坏掉时为空。 */
+  status: PluginStatusField[];
   /** 清单解析 / 入口缺失等静态问题；加载期错误由 plugin-status.json 提供。 */
   error?: string;
 };
@@ -202,6 +209,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     settings: [],
     llm: null,
     desktopChecks: [],
+    status: [],
   };
 
   let parsed: unknown;
@@ -228,6 +236,7 @@ function inspectPlugin(dir: string, manifestFile: string, dirName: string): Plug
     settings: manifest.settings,
     llm: manifest.llm,
     desktopChecks: manifest.desktopChecks,
+    status: manifest.status,
     error: existsSync(entryFile) ? undefined : `入口文件不存在：${manifest.main}`,
   };
 }

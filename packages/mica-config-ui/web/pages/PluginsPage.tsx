@@ -380,6 +380,7 @@ function PluginDetail({
         {hasConfigurable ? (
           <div className="plugin-columns">
             <div className="plugin-column">
+              <PluginStatusGroup plugin={plugin} />
               {plugin.desktopChecks.length > 0 ? <PluginChecksGroup plugin={plugin} /> : null}
               {plugin.settings.fields.length > 0 ? (
                 <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
@@ -393,6 +394,7 @@ function PluginDetail({
           // 没有可配置项：一行说明接信息表，单列往下排，不留半页空白
           <div className="plugin-columns is-solo">
             <div className="plugin-solo">
+              <PluginStatusGroup plugin={plugin} />
               <p className="plugin-note">这个插件没有可配置项。</p>
               <PluginInfoGroup plugin={plugin} />
             </div>
@@ -409,6 +411,43 @@ function PluginDetail({
  * 每行都单行省略（完整值在 `title` 里）：这里是排查用的索引，不是文件浏览器，
  * 一列换行的路径会把这张表读成两栏错位。
  */
+/**
+ * 运行状态：清单声明「有哪几行」，值由插件自己写进 `plugin-data/<id>/data.json`。
+ *
+ * 插件没上报过的键显示占位而不是隐藏——那一行本来就在声明里，消失会让人以为
+ * 声明写错了。
+ */
+function PluginStatusGroup({ plugin }: { plugin: ConfigWebPlugin }) {
+  if (plugin.status.length === 0) return null;
+  return (
+    <SettingsGroup title="运行状态">
+      <dl className="plugin-meta">
+        {plugin.status.map((row) => (
+          <div className="plugin-meta-row" key={row.key}>
+            <dt>{row.label}</dt>
+            <dd
+              className={row.value ? (row.tone ? `is-${row.tone}` : undefined) : undefined}
+              title={row.value ?? '插件还没上报'}
+            >
+              {row.value ? (
+                row.type === 'link' ? (
+                  <a href={row.value} target="_blank" rel="noreferrer">
+                    {row.value}
+                  </a>
+                ) : (
+                  row.value
+                )
+              ) : (
+                <span className="plugin-meta-empty">尚未上报</span>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </SettingsGroup>
+  );
+}
+
 function PluginInfoGroup({ plugin }: { plugin: ConfigWebPlugin }) {
   const rows: { label: string; value: string; mono?: boolean; title?: string }[] = [
     { label: '标识', value: plugin.id, mono: true },

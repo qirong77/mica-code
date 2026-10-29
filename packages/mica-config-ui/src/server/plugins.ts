@@ -1,8 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { probeModelConnection } from '@packages/mica-agent/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
-import type { PluginLlmSpec, PluginModelRequest, PluginSettingField } from '@packages/mica-plugin/index.js';
+import type {
+  PluginLlmSpec,
+  PluginModelRequest,
+  PluginSettingField,
+  PluginStatusField,
+} from '@packages/mica-plugin/index.js';
 import { DESKTOP_CHECKS } from '@packages/mica-plugin/index.js';
 import { OFFICIAL_PLUGINS_DIR, officialPluginManifests } from '@packages/mica-official-plugins/manifests.js';
 import { getConfigRootPath, getPluginsRootPath, getPluginStatePath, getPluginStatusPath } from './paths.js';
@@ -12,6 +18,7 @@ import type {
   ConfigWebPluginLlm,
   ConfigWebPluginLlmTest,
   ConfigWebPluginSettings,
+  ConfigWebPluginStatusField,
   ConfigWebPluginsDetails,
 } from '../shared/types.js';
 
@@ -51,6 +58,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         llm: readLlm(manifest.id, manifest.llm, manifest.settings, configRoot),
         desktopChecks: resolveDesktopChecks(manifest.desktopChecks),
         desktopEntry: manifest.desktopEntry,
+        status: readStatus(manifest.id, manifest.status, configRoot),
         health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(manifest.id),
         loadStatus: status?.status,
@@ -78,6 +86,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         desktopChecks: resolveDesktopChecks(plugin.desktopChecks),
         // 用户插件没有打包进页面的前端模块，声明了 `desktop.entry` 也渲染不出入口。
         desktopEntry: null,
+        status: readStatus(plugin.id, plugin.status ?? [], configRoot),
         health: micaPlugin.readPluginHealth(plugin.id, { configDir: configRoot }),
         logFile: micaPlugin.pluginLogPath(plugin.id),
         loadStatus: status?.status,
@@ -182,6 +191,47 @@ function readSettings(id: string, fields: PluginSettingField[], configRoot: stri
   const values = micaPlugin.readPluginSettings(id, fields, { configDir: configRoot });
   // 磁盘上可能是旧版本写下的、或手改过的值：页面要能把它们标出来，而不是照样显示「已保存」。
   return { fields, values, issues: micaPlugin.validatePluginSettingValues(fields, values) };
+}
+
+/**
+ * 运行状态：清单只声明「哪几行、叫什么、能不能点」，值由插件写进自己的数据文件。
+ *
+ * 读不出来（没写过、JSON 坏了）就当作「还没上报」，页面显示占位——配置页不去猜插件的
+ * 运行态，也不为了让页面好看而编一个值。
+ */
+function readStatus(
+  id: string,
+  fields: PluginStatusField[],
+  configRoot: string,
+): ConfigWebPluginStatusField[] {
+  if (fields.length === 0) return [];
+  let data: Record<string, unknown> = {};
+  try {
+    const file = join(micaPlugin.pluginDataDir(configRoot, id), 'data.json');
+    if (existsSync(file)) {
+      const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        data = parsed as Record<string, unknown>;
+      }
+    }
+  } catch {
+    // 插件正在写文件时可能读到半截，下一次刷新再显示。
+  }
+
+  return fields.map((field) => {
+    const raw = data[field.key];
+    const text = typeof raw === 'string' ? raw : isToneValue(raw) ? raw.text : null;
+    const tone = isToneValue(raw) ? raw.tone ?? null : null;
+    return { key: field.key, label: field.label, type: field.type, value: text || null, tone };
+  });
+}
+
+/** 插件可以用 `{ text, tone }` 表达「通/不通」，页面只按语气上色。 */
+function isToneValue(value: unknown): value is { text: string; tone?: 'ok' | 'warn' | 'error' } {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.text !== 'string') return false;
+  return record.tone === undefined || record.tone === 'ok' || record.tone === 'warn' || record.tone === 'error';
 }
 
 /**

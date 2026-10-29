@@ -157,3 +157,47 @@ describe('parsePluginManifest llm', () => {
     if (result.ok) expect(result.manifest.llm).toBeNull();
   });
 });
+
+describe('parsePluginManifest status rows', () => {
+  it('defaults a row to text and keeps link as written', () => {
+    const result = parsePluginManifest(
+      base({
+        status: [
+          { key: 'phoneUrl', label: '手机链接', type: 'link' },
+          { key: 'bridge', label: '本机桥' },
+        ],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.status).toEqual([
+      { key: 'phoneUrl', label: '手机链接', type: 'link' },
+      { key: 'bridge', label: '本机桥', type: 'text' },
+    ]);
+  });
+
+  it('is empty when the plugin declares nothing', () => {
+    const result = parsePluginManifest(base());
+    if (result.ok) expect(result.manifest.status).toEqual([]);
+  });
+
+  // 声明写错会让页面画出一行取不到值的状态，宁可加载阶段就报出来
+  it('rejects rows without a key or with an unknown type', () => {
+    expect(parsePluginManifest(base({ status: [{ label: '缺 key' }] })).ok).toBe(false);
+    expect(parsePluginManifest(base({ status: [{ key: 'a', label: 'A', type: 'chart' }] })).ok).toBe(false);
+    expect(parsePluginManifest(base({ status: [{ key: 'a' }] })).ok).toBe(false);
+    expect(parsePluginManifest(base({ status: 'phoneUrl' })).ok).toBe(false);
+  });
+
+  it('rejects duplicate keys', () => {
+    const result = parsePluginManifest(
+      base({
+        status: [
+          { key: 'a', label: 'A' },
+          { key: 'a', label: 'B' },
+        ],
+      }),
+    );
+    expect(result.ok).toBe(false);
+  });
+});

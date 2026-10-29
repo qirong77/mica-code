@@ -13,7 +13,7 @@ import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } f
 import { readFileSync, statSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
 
@@ -66,6 +66,8 @@ if (!settings.relayUrl || !settings.token) {
 }
 
 let CHANNEL_KEY = deriveKey(settings.token)
+/** 机器名只在启动后第一轮上报一次，之后以中转机上存的名字为准。 */
+let labelPending = hostname()
 
 function deriveKey(token) {
   return Buffer.from(
@@ -110,7 +112,10 @@ function postBinary(target, body) {
         port: url.port,
         path: `${url.pathname}${url.search}`,
         method: 'POST',
-        headers: { 'content-type': 'application/octet-stream', 'content-length': body.length },
+        headers: {
+          'content-type': 'application/octet-stream',
+          'content-length': body.length
+        },
         rejectUnauthorized: settings.verifyTls,
         timeout: 30_000
       },
@@ -425,9 +430,11 @@ async function tick() {
       body.env = envPayload
       envPayload = null
     }
+    if (labelPending) body.label = labelPending
     const started = Date.now()
     const rawBytes = Buffer.byteLength(JSON.stringify(body))
     const response = await relayPoll(body)
+    labelPending = ''
     relayParams.intervalMs = Number(response?.intervalMs) || intervalMs
     intervalMs = relayParams.intervalMs
 

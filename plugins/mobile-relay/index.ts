@@ -1,14 +1,68 @@
-import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { PluginContext } from '@packages/mica-plugin/index.js';
+import { micaSkills } from '@packages/mica-skills/index.js';
+import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { registerBridgeSupervisor } from './BridgeSupervisor.js';
 import { MobileRelayTool } from './MobileRelayTool.js';
+
+const SKILL_NAME = 'mobile-relay';
+
+/**
+ * 内置 skill：把「怎么部署中转机」讲清楚，让 agent 现场去做。
+ *
+ * 中转机的部署不进插件代码——脚本在仓库里，agent 缺什么装什么、要构建就构建。
+ * 插件只负责本机这座桥，两件事因此不会互相拖累版本。
+ */
+function registerSkill(ctx: PluginContext, dataDir: string | null): void {
+  const skills = ctx.skills;
+  if (!skills || !dataDir) return;
+
+  // skill 的 baseDir 必须是一个真能读到的目录（索引与 `skill` 工具都从它取文件）。
+  // 内容随包内嵌，落到插件自己的数据目录下，不去碰用户的 skills 目录。
+  const baseDir = join(dataDir, 'skill');
+  const skillContent = SKILL_MD;
+  try {
+    mkdirSync(baseDir, { recursive: true });
+    writeFileSync(join(baseDir, 'SKILL.md'), skillContent, 'utf8');
+  } catch (error) {
+    ctx.health.report({
+      level: 'warn',
+      message: `skill 落盘失败：${error instanceof Error ? error.message : String(error)}`,
+      hint: `检查 ${baseDir} 是否可写`,
+    });
+    return;
+  }
+
+  const meta = micaSkills.parseMarkdown(skillContent);
+  const registration = skills.register({
+    name: meta.name || SKILL_NAME,
+    description: meta.description || SKILL_NAME,
+    whenToUse: meta.whenToUse,
+    argumentHint: meta.argumentHint,
+    content: skillContent,
+    baseDir,
+  });
+
+  if (registration.skipped.length > 0) {
+    const names = registration.skipped.map((entry) => entry.name).join('、');
+    ctx.logger.warn('mobile-relay:skill-shadowed', { names });
+    ctx.health.report({
+      level: 'warn',
+      message: `内置 skill 被磁盘上的同名 skill 覆盖（${names}）`,
+      hint: '删掉 $MICA_HOME/skills 下的同名目录后重开会话，才会用内置这份。',
+    });
+  }
+}
 
 export default function setup(ctx: PluginContext): void {
   // 桥的启停跟着插件走：停用插件就杀掉那个常驻进程，不留任何还在外联的东西。
   // 数据目录跟插件的其余状态一致放在 `$MICA_HOME/plugin-data/<id>`（`paths.config` 就是
   // MICA_HOME；`paths.home` 是系统 home，写到那里会污染用户目录）。
-  const lockDir = ctx.paths?.config ? join(ctx.paths.config, 'plugin-data', 'mobile-relay') : null;
-  registerBridgeSupervisor(ctx, lockDir);
+  const dataDir = ctx.paths?.config ? join(ctx.paths.config, 'plugin-data', 'mobile-relay') : null;
+
+  registerSkill(ctx, dataDir);
+  registerBridgeSupervisor(ctx, dataDir);
 
   const tools = ctx.tools;
   if (!tools) {

@@ -2,33 +2,46 @@
   "id": "mobile-relay",
   "name": "Mobile Relay",
   "icon": "message-square",
-  "version": "1.1.0",
-  "description": "手机经中转机打开这台机器上的 Mica（真实界面）：中转机托管页面并开窄 API，本机只做短轮询，不转发端口、不建常驻隧道。上行应用层加密，可限制开启时段并随机化间隔。",
+  "version": "1.4.0",
+  "description": "手机经一台公网中转机打开这台机器上的 Mica：同一份会话、同样的流式输出。本机只做短轮询，不开监听端口、不转发端口；轮询体单独用 AES-256-GCM 加密。中转机通过内置 skill 交给 agent 现场部署，插件只管本机这座桥。",
   "author": "Mica Code",
   "main": "index.ts",
-  "assets": ["README.md"],
+  "assets": ["README.md", "skill/SKILL.md"],
   "priority": 40,
   "mica": { "apiVersion": 1 },
-  "requires": ["settings", "tools", "background"],
+  "requires": ["settings", "tools", "background", "skills"],
+  "desktop": { "entry": { "label": "Mobile" } },
+  "status": [
+    { "key": "phoneUrl", "label": "手机链接", "type": "link" },
+    { "key": "bridge", "label": "本机桥", "type": "text" },
+    { "key": "relay", "label": "中转机", "type": "text" },
+    { "key": "phone", "label": "手机", "type": "text" },
+    { "key": "skill", "label": "部署 skill", "type": "link" }
+  ],
   "settings": [
     {
       "key": "enabled",
       "label": "启用桥",
       "type": "switch",
-      "default": "true"
+      "default": "true",
+      "description": "关掉会立刻停掉本机的桥进程，手机再也连不进来；不会留下还在外联的后台服务。"
     },
     {
       "key": "relayUrl",
       "label": "中转地址",
       "type": "text",
       "default": "",
-      "placeholder": "https://1.2.3.4:9200"
+      "required": true,
+      "placeholder": "https://1-2-3-4.sslip.io",
+      "description": "跑 setup.mjs 时会自动填好；手填则填中转机的公网地址，带 https://、不带末尾斜杠。"
     },
     {
       "key": "token",
       "label": "访问口令",
       "type": "password",
-      "default": ""
+      "default": "",
+      "required": true,
+      "description": "中转机与本机共用的口令：既是手机打开页面时的凭据，也用来派生轮询体的加密密钥。两端必须一致。"
     }
   ]
 }

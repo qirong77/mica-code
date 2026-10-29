@@ -298,6 +298,12 @@ export type ConfigWebPlugin = {
    * 页面那边没有它的模块。
    */
   desktopEntry: ConfigWebPluginDesktopEntry | null;
+  /**
+   * 清单声明的运行状态行（清单 `status`）。值来自插件自己写的
+   * `plugin-data/<id>/data.json`，宿主管不到插件的运行态，也就不替它编造；
+   * 插件还没写过这个键时为 `null`，页面显示占位。
+   */
+  status: ConfigWebPluginStatusField[];
   /** 这个插件今天的日志文件（系统 temp 目录），排查时直接打开。 */
   logFile: string;
   /** 插件自报的最近一次状态（正常 / 待配置 / 出错）；没上报过为 null。 */
@@ -310,6 +316,20 @@ export type ConfigWebPlugin = {
 /** 桌面端侧栏入口的静态描述：清单只给文案，卡片内容是插件自己的模块。 */
 export type ConfigWebPluginDesktopEntry = {
   label: string;
+};
+
+/** 一条运行状态：清单声明标签与类型，插件提供值。 */
+export type ConfigWebPluginStatusField = {
+  key: string;
+  label: string;
+  type: 'text' | 'link';
+  /** 插件写下的值；`null` 表示它还没上报过这个键。 */
+  value: string | null;
+  /**
+   * 这一行的语气。插件可以写成 `{ text, tone }` 表达「通/不通」，
+   * 页面只按 `ok | warn | error` 上色，不解释语义。
+   */
+  tone: 'ok' | 'warn' | 'error' | null;
 };
 
 /** 一项运行条件的静态描述；此刻是否满足由 `readDesktopChecks()` 另取。 */

@@ -21,6 +21,9 @@ import { BRIDGE_SOURCE } from './bridgeSource.js';
 
 const LOCK_NAME = 'bridge.lock';
 const SCRIPT_NAME = 'bridge.mjs';
+const DATA_NAME = 'data.json';
+/** 随包 skill 的源码位置；正文内嵌在二进制里，这一条只是给人点开看的地方。 */
+const SKILL_URL = 'https://github.com/qironglin77/mica-code/tree/main/plugins/mobile-relay/skill';
 
 type LockRecord = { pid: number; startedAt: number };
 
@@ -141,6 +144,110 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
   return { ensure, stop, runningPid, scriptPath: () => (dir ? join(dir, SCRIPT_NAME) : null) };
 }
 
+/** 一条状态行：插件自己判断语气，页面只负责上色。 */
+export type StatusLine = { text: string; tone: 'ok' | 'warn' | 'error' };
+
+/** 卡片读的那份状态。字段少而直接，改结构要同步 `desktop.jsx`。 */
+export type BridgeStatus = {
+  relayUrl: string;
+  phoneUrl: string;
+  bridgePid: number | null;
+  enabled: boolean;
+  relayOnline: boolean;
+  agentOnline: boolean;
+  phoneOnline: boolean;
+  updatedAt: number;
+  /**
+   * 配置页「运行状态」要的那几行（清单 `status` 声明）。
+   *
+   * 插件自己判断通/不通，页面只按 `tone` 上色——配置页不该认识这台机器的运行语义。
+   */
+  bridge: StatusLine;
+  relay: StatusLine;
+  phone: StatusLine;
+  /** 内置部署 skill 的源码位置（正文随包内嵌，这里只给可点开的地方）。 */
+  skill: string;
+};
+
+/** 纯函数：把设置与中转机健康合成卡片要显示的那一份（便于单测，不碰网络）。 */
+export function buildStatus(
+  values: Record<string, string | undefined>,
+  relay: Record<string, unknown> | null,
+  pid: number | null,
+  now: number,
+): BridgeStatus {
+  const relayUrl = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
+  const token = String(values.token ?? '').trim();
+  const enabled = String(values.enabled ?? 'true') !== 'false';
+  const relayOnline = relay !== null;
+  const phoneOnline = relay?.phoneOnline === true;
+  return {
+    relayUrl,
+    // 链接里带口令：手机扫一眼就能开，不用再去翻设置
+    phoneUrl: relayUrl && token ? `${relayUrl}/?t=${encodeURIComponent(token)}` : '',
+    bridgePid: pid,
+    enabled,
+    relayOnline,
+    agentOnline: relay?.agentOnline === true,
+    phoneOnline,
+    bridge: !enabled
+      ? { text: '已停用', tone: 'warn' }
+      : pid
+        ? { text: `运行中 · pid ${pid}`, tone: 'ok' }
+        : { text: '未运行', tone: 'error' },
+    relay: !relayUrl
+      ? { text: '未配置', tone: 'warn' }
+      : relayOnline
+        ? { text: '可达', tone: 'ok' }
+        : { text: '不可达', tone: 'error' },
+    phone: !relayUrl
+      ? { text: '未配置', tone: 'warn' }
+      : phoneOnline
+        ? { text: '正在查看', tone: 'ok' }
+        : { text: '未连接', tone: 'warn' },
+    // 部署不在插件里做：给出内置 skill 的源码位置，用户对着 agent 说一句话就能装。
+    skill: SKILL_URL,
+    updatedAt: now,
+  };
+}
+
+/**
+ * 把当前状态写进插件自己的 `plugin-data/mobile-relay/data.json`。
+ *
+ * 卡片只能 `readData()` 读这一份，读不到 `plugin-settings`，所以「手机链接是什么、
+ * 现在通没通」得由这里替它算好。写的是自己的数据文件，不是别人的。
+ */
+async function publishStatus(ctx: PluginContext, dir: string | null, pid: number | null): Promise<void> {
+  if (!dir) return;
+  const values = ctx.settings.get();
+  const relayUrl = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
+  const token = String(values.token ?? '');
+
+  let relay: Record<string, unknown> | null = null;
+  if (relayUrl) {
+    try {
+      // 带上口令才拿得到「这一台」的在线状态；不带只能知道中转机活着。
+      const response = await fetch(`${relayUrl}/api/health`, {
+        headers: token ? { 'x-relay-token': token } : {},
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (response.ok) relay = (await response.json()) as Record<string, unknown>;
+    } catch {
+      // 中转机不可达是正常状态（关机、重建中），卡片显示「不可达」即可
+    }
+  }
+
+  const status = buildStatus(values, relay, pid, Date.now());
+
+  try {
+    writeFileSync(join(dir, DATA_NAME), `${JSON.stringify(status, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    ctx.logger.warn('bridge:status-write-failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /**
  * 把监管注册成一个常驻任务。
  *
@@ -164,6 +271,7 @@ export function registerBridgeSupervisor(ctx: PluginContext, dataDir: string | n
     immediate: true,
     async run() {
       const { pid, changed } = supervisor.ensure();
+      await publishStatus(ctx, dataDir, pid);
       if (!changed) return;
       ctx.health.report({
         level: pid ? 'ok' : 'warn',

@@ -90,7 +90,26 @@ export type PluginManifest = {
    * `desktop.jsx` 渲染；没声明（null）的插件在侧栏里不占位置。
    */
   desktopEntry: PluginDesktopEntry | null;
+  /**
+   * 页面要展示的运行状态字段（清单 `status`）。
+   *
+   * 只声明「显示什么」，值由插件自己写进 `$MICA_HOME/plugin-data/<id>/data.json`——配置页
+   * 不导入插件代码，也不认识任何具体插件，按 key 取值渲染。插件没写过的 key 显示占位。
+   */
+  status: PluginStatusField[];
 };
+
+export type PluginStatusField = {
+  /** `data.json` 里的键名。 */
+  key: string;
+  /** 页面上的标签。 */
+  label: string;
+  /** `link` 渲染成可点开的地址；`text` 就是一行字。 */
+  type: PluginStatusType;
+};
+
+export const PLUGIN_STATUS_TYPES = ['text', 'link'] as const;
+export type PluginStatusType = (typeof PLUGIN_STATUS_TYPES)[number];
 
 /**
  * 宿主可以向插件提供的能力面。取值来自 `PluginContext` 的可选字段，新增能力时两处同步。
@@ -201,6 +220,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const desktop = readDesktop(input.desktop, name);
   if (!desktop.ok) return desktop;
 
+  const status = readStatus(input.status);
+  if (!status.ok) return status;
+
   return {
     ok: true,
     manifest: {
@@ -221,6 +243,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       requires: requires.value,
       desktopChecks: desktop.value.checks,
       desktopEntry: desktop.value.entry,
+      status: status.value,
     },
   };
 }
@@ -302,6 +325,36 @@ function readDesktop(
   // 侧栏那一行只有一行的宽度：文案留空的退化成语义（用插件名）而不是画一行空白。
   const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
   return { ok: true, value: { checks, entry: { label } } };
+}
+
+/**
+ * 运行状态字段声明（清单 `status`）。
+ *
+ * 只声明「页面上哪几行、叫什么、能不能点」，值由插件自己写进
+ * `$MICA_HOME/plugin-data/<id>/data.json`——宿主管不到插件的运行态，也不该替它编造。
+ */
+function readStatus(input: unknown): { ok: true; value: PluginStatusField[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(input)) return { ok: false, error: 'status 必须是数组' };
+
+  const fields: PluginStatusField[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    if (!isRecord(raw)) return { ok: false, error: 'status 的每一项必须是对象' };
+    const key = typeof raw.key === 'string' ? raw.key.trim() : '';
+    if (!key) return { ok: false, error: 'status 缺少 key' };
+    if (seen.has(key)) return { ok: false, error: `status 的 key 重复：${key}` };
+    seen.add(key);
+    if (typeof raw.label !== 'string' || !raw.label.trim()) {
+      return { ok: false, error: `status.${key} 缺少 label` };
+    }
+    const type = raw.type ?? 'text';
+    if (type !== 'text' && type !== 'link') {
+      return { ok: false, error: `status.${key} 的 type 只能是 text 或 link` };
+    }
+    fields.push({ key, label: raw.label.trim(), type });
+  }
+  return { ok: true, value: fields };
 }
 
 /**

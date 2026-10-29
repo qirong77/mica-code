@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
-import { createBridgeSupervisor, materializeBridge } from './BridgeSupervisor.js';
+import { buildStatus, createBridgeSupervisor, materializeBridge } from './BridgeSupervisor.js';
 import { BRIDGE_SOURCE } from './bridgeSource.js';
 
 type FakeContext = PluginContext & {
@@ -89,5 +89,63 @@ describe('mobile-relay bridge supervisor', () => {
     expect(kill).toHaveBeenCalledWith(process.pid, 'SIGTERM');
     expect(() => statSync(join(dir, 'bridge.lock'))).toThrow();
     kill.mockRestore();
+  });
+});
+
+describe('buildStatus', () => {
+  // 卡片只读这一份；链接、开关状态与三个在线标记都必须在这里定死
+  it('builds a phone link that already carries the token', () => {
+    const status = buildStatus({ relayUrl: 'https://1-2-3-4.sslip.io/', token: 'abc123' }, null, null, 1_000);
+    expect(status.relayUrl).toBe('https://1-2-3-4.sslip.io');
+    expect(status.phoneUrl).toBe('https://1-2-3-4.sslip.io/?t=abc123');
+  });
+
+  it('leaves the link empty when the address or the token is missing', () => {
+    expect(buildStatus({ relayUrl: 'https://x.test', token: '' }, null, null, 1).phoneUrl).toBe('');
+    expect(buildStatus({ token: 'abc' }, null, null, 1).phoneUrl).toBe('');
+  });
+
+  it('marks the relay unreachable without inventing liveness', () => {
+    const status = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, null, 42, 7);
+    expect(status).toMatchObject({
+      relayOnline: false,
+      agentOnline: false,
+      phoneOnline: false,
+      bridgePid: 42,
+      updatedAt: 7,
+    });
+  });
+
+  it('reports what the relay health says when it answers', () => {
+    const status = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { agentOnline: true, phoneOnline: true }, 9, 1);
+    expect(status).toMatchObject({ relayOnline: true, agentOnline: true, phoneOnline: true });
+  });
+
+  it('treats only the literal false as switched off', () => {
+    expect(buildStatus({}, null, null, 1).enabled).toBe(true);
+    expect(buildStatus({ enabled: 'false' }, null, null, 1).enabled).toBe(false);
+  });
+
+  // 配置页直接渲染这三行，语气由插件给：页面不认识「桥是什么」，只按 tone 上色
+  it('describes the three runtime rows the config page shows', () => {
+    const offline = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, null, 12, 1);
+    expect(offline.bridge).toEqual({ text: '运行中 · pid 12', tone: 'ok' });
+    expect(offline.relay).toEqual({ text: '不可达', tone: 'error' });
+    expect(offline.phone).toEqual({ text: '未连接', tone: 'warn' });
+
+    const online = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { phoneOnline: true }, null, 1);
+    expect(online.bridge).toEqual({ text: '未运行', tone: 'error' });
+    expect(online.relay).toEqual({ text: '可达', tone: 'ok' });
+    expect(online.phone).toEqual({ text: '正在查看', tone: 'ok' });
+  });
+
+  it('says 未配置 rather than 不通 when no relay address is set yet', () => {
+    const status = buildStatus({ token: 'a' }, null, 5, 1);
+    expect(status.relay).toEqual({ text: '未配置', tone: 'warn' });
+    expect(status.phone).toEqual({ text: '未配置', tone: 'warn' });
+  });
+
+  it('switched off reports the bridge as stopped instead of running', () => {
+    expect(buildStatus({ enabled: 'false' }, null, 5, 1).bridge).toEqual({ text: '已停用', tone: 'warn' });
   });
 });

@@ -4241,6 +4241,48 @@
     font-family: var(--font-mono);
   }
 
+  /*
+   * 运行状态值：插件自己判断「通/不通」，页面只按语气上色。
+   * 用前置圆点而不是整行底色——一列状态里只有一两条是异常时，底色会把注意力带偏。
+   */
+  .plugin-meta-row dd.is-ok::before,
+  .plugin-meta-row dd.is-warn::before,
+  .plugin-meta-row dd.is-error::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    border-radius: 50%;
+    vertical-align: middle;
+    background: currentcolor;
+  }
+
+  .plugin-meta-row dd.is-ok {
+    color: var(--green);
+  }
+
+  .plugin-meta-row dd.is-warn {
+    color: var(--amber);
+  }
+
+  .plugin-meta-row dd.is-error {
+    color: var(--red);
+  }
+
+  .plugin-meta-row dd a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .plugin-meta-row dd a:hover {
+    text-decoration: underline;
+  }
+
+  .plugin-meta-empty {
+    color: var(--text-faint);
+  }
+
   .control-endpoint-body {
     display: grid;
     gap: 12px;

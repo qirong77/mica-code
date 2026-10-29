@@ -1,5 +1,9 @@
 /**
- * 手机访问网关。
+ * 手机访问网关（多机器）。
+ *
+ * 一台中转机可以接多台公司机：每台机器一个口令，手机用各自的口令打开各自的页面。
+ * 状态（轮询时间、待办、命令队列、结果缓存、SSE 客户端、图片缓存）全部按口令隔离，
+ * 一台机器的手机看不到另一台的任何内容。
  *
  * 托管桌面端真正的 renderer 产物；页面经同源 `/api/invoke` 与 `/api/events` 与本机运行时通信。
  *
@@ -12,49 +16,214 @@
  * 轮询体是二进制：iv(12) | tag(16) | ciphertext(gzip(json))，没有 base64 膨胀。
  */
 import { createServer as createHttpServer } from 'node:http'
-import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto'
 import { extname, join, normalize } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
 
 const PORT = Number(process.env.RELAY_PORT || 9200)
 /** 默认只绑回环：公网入口只有 nginx 那一个，本进程不直接暴露。 */
 const BIND = process.env.RELAY_BIND || '127.0.0.1'
-const TOKEN = String(process.env.RELAY_TOKEN || '')
 const ROOT = process.env.RELAY_ROOT || join(import.meta.dirname, 'public')
+/** 机器清单（id / 名字 / 口令）。由 setup.mjs 写入，本进程只读 + 回写名字。 */
+const STATE_DIR = process.env.RELAY_STATE_DIR || '/var/lib/mobile-relay'
+const AGENTS_FILE = join(STATE_DIR, 'agents.json')
+
 const AGENT_STALE_MS = 20_000
 const INVOKE_TIMEOUT_MS = 90_000
 /** 页面有交互后，把轮询提速到这期间。 */
 const AWAKE_MS = 20_000
 const REPLAY_WINDOW_MS = 120_000
+const IMAGE_CACHE_LIMIT = 24 * 1024 * 1024
+const RESULT_CACHE_LIMIT = 200
+/** 手机浏览器最多记住这么多台机器。 */
+const MAX_REMEMBERED = 8
 
-if (!TOKEN) {
-  console.error('RELAY_TOKEN 未设置：拒绝在没有口令的情况下启动。')
+/* ------------------------------------------------------------ 机器与状态 */
+
+function fail(message) {
+  console.error(`[relay] ${message}`)
   process.exit(1)
 }
 
-/** 轮询通道的对称密钥：两端口令相同即可互通，不需要额外分发密钥。 */
-const CHANNEL_KEY = Buffer.from(
-  hkdfSync('sha256', Buffer.from(TOKEN, 'utf8'), Buffer.from('mica-relay-v1'), Buffer.from('poll-channel'), 32)
-)
+/** 口令派生出的路由标识：只用来在海量机器里 O(1) 找对一格，不是凭据。 */
+function agentId(token) {
+  return createHash('sha256').update(token).digest('hex').slice(0, 12)
+}
 
-function seal(value) {
+/** 轮询通道的对称密钥：两端口令相同即可互通，不需要额外分发密钥。 */
+function channelKey(token) {
+  return Buffer.from(
+    hkdfSync('sha256', Buffer.from(token, 'utf8'), Buffer.from('mica-relay-v1'), Buffer.from('poll-channel'), 32)
+  )
+}
+
+function createState(entry) {
+  return {
+    id: agentId(entry.token),
+    label: typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : '未命名机器',
+    token: entry.token,
+    key: channelKey(entry.token),
+    createdAt: Number(entry.createdAt) || Date.now(),
+    lastPollAt: 0,
+    lastPollTs: 0,
+    watch: null,
+    env: null,
+    awakeUntil: 0,
+    pending: new Map(),
+    commands: [],
+    resultCache: new Map(),
+    phones: new Set(),
+    imageCache: new Map()
+  }
+}
+
+function loadAgents() {
+  let raw
+  try {
+    raw = readFileSync(AGENTS_FILE, 'utf8')
+  } catch {
+    fail(`没有 ${AGENTS_FILE}。先跑一次 setup.mjs 把机器登记进来。`)
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    fail(`${AGENTS_FILE} 不是合法 JSON。`)
+  }
+  const list = Array.isArray(parsed?.agents) ? parsed.agents : []
+  const usable = list.filter((entry) => typeof entry?.token === 'string' && entry.token.length >= 16)
+  if (!usable.length) fail(`${AGENTS_FILE} 里没有任何机器。先跑一次 setup.mjs。`)
+  return usable
+}
+
+const agents = new Map()
+for (const entry of loadAgents()) agents.set(createState(entry).token, createState(entry))
+
+/**
+ * 用口令试解信封，解开的那个就是发起方。
+ *
+ * 不用额外的机器标识头：凭据只有口令一份，少一个「两边必须同步派生」的东西，
+ * 老客户端也不会因为缺头被拒。机器数是个位数，几次 AES-GCM 是微秒级。
+ */
+function openAny(buffer) {
+  for (const state of agents.values()) {
+    try {
+      return { state, body: open(state.key, buffer) }
+    } catch {
+      // 不是这一台，继续试
+    }
+  }
+  return null
+}
+
+/** 名字改了才写盘；失败只记日志，不影响服务。 */
+function persistAgents() {
+  const payload = {
+    version: 1,
+    agents: [...agents.values()].map((state) => ({
+      id: state.id,
+      label: state.label,
+      token: state.token,
+      createdAt: state.createdAt
+    }))
+  }
+  try {
+    mkdirSync(STATE_DIR, { recursive: true })
+    writeFileSync(AGENTS_FILE, `${JSON.stringify(payload, null, 2)}\n`)
+  } catch (error) {
+    console.error('[relay] 写 agents.json 失败', error?.message || error)
+  }
+}
+
+function agentOnline(state) {
+  return Date.now() - state.lastPollAt < AGENT_STALE_MS
+}
+
+function phoneOnline(state) {
+  return state.phones.size > 0
+}
+
+/* ------------------------------------------------------------------ 加密 */
+
+function seal(key, value) {
   const iv = randomBytes(12)
-  const cipher = createCipheriv('aes-256-gcm', CHANNEL_KEY, iv)
+  const cipher = createCipheriv('aes-256-gcm', key, iv)
   const body = gzipSync(Buffer.from(JSON.stringify(value)))
   const ciphertext = Buffer.concat([cipher.update(body), cipher.final()])
   return Buffer.concat([iv, cipher.getAuthTag(), ciphertext])
 }
 
-function open(buffer) {
+function open(key, buffer) {
   if (buffer.length < 29) throw new Error('envelope too short')
   const iv = buffer.subarray(0, 12)
   const tag = buffer.subarray(12, 28)
-  const decipher = createDecipheriv('aes-256-gcm', CHANNEL_KEY, iv)
+  const decipher = createDecipheriv('aes-256-gcm', key, iv)
   decipher.setAuthTag(tag)
   const plain = Buffer.concat([decipher.update(buffer.subarray(28)), decipher.final()])
   return JSON.parse(gunzipSync(plain).toString('utf8'))
+}
+
+/* ------------------------------------------------------------- 口令与 cookie */
+
+/** 单一口令：header → query → cookie。接口鉴权都走这条。 */
+function tokenFrom(req, url) {
+  const header = req.headers['x-relay-token']
+  if (typeof header === 'string' && header) return header
+  if (url.searchParams.get('t')) return url.searchParams.get('t')
+  const cookie = req.headers.cookie || ''
+  for (const part of cookie.split(';')) {
+    const [key, ...rest] = part.trim().split('=')
+    if (key === 'mica_relay') return decodeURIComponent(rest.join('='))
+  }
+  return ''
+}
+
+/** 这台手机记住的全部口令，只用于选机器那一页。 */
+function rememberedTokens(req) {
+  const cookie = req.headers.cookie || ''
+  for (const part of cookie.split(';')) {
+    const [key, ...rest] = part.trim().split('=')
+    if (key !== 'mica_relays') continue
+    return decodeURIComponent(rest.join('='))
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .filter((value) => agents.has(value))
+      .slice(-MAX_REMEMBERED)
+  }
+  return []
+}
+
+function rememberTokens(req, url) {
+  const current = tokenFrom(req, url)
+  const list = rememberedTokens(req)
+  if (current && agents.has(current) && !list.includes(current)) list.push(current)
+  const secure = isSecure(req) ? '; Secure' : ''
+  const base = '; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000'
+  const cookies = []
+  if (current && agents.has(current)) cookies.push(`mica_relay=${encodeURIComponent(current)}${base}${secure}`)
+  if (list.length) cookies.push(`mica_relays=${encodeURIComponent(list.join(','))}${base}${secure}`)
+  return cookies
+}
+
+/** 反向代理后面判断「是不是 https」，用来给 cookie 加 Secure。 */
+function isSecure(req) {
+  if (req.socket?.encrypted) return true
+  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim()
+  return proto === 'https'
+}
+
+/** 页面请求对应的机器：当前口令优先，其次 cookie 里记住的第一台。 */
+function currentState(req, url) {
+  const explicit = tokenFrom(req, url)
+  if (explicit && agents.has(explicit)) return agents.get(explicit)
+  for (const token of rememberedTokens(req)) {
+    const state = agents.get(token)
+    if (state) return state
+  }
+  return null
 }
 
 const MIME = {
@@ -79,59 +248,6 @@ const MIME = {
 }
 
 const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.json', '.webmanifest', '.svg', '.txt', '.map'])
-
-/** 公司机侧状态。 */
-const agent = {
-  lastPollAt: 0,
-  lastPollTs: 0,
-  watch: null,
-  env: null
-}
-
-const phoneClients = new Set()
-const imageCache = new Map()
-const IMAGE_CACHE_LIMIT = 24 * 1024 * 1024
-let awakeUntil = 0
-
-const commands = []
-const resultCache = new Map()
-const RESULT_CACHE_LIMIT = 200
-
-function cacheKey(channel, payload) {
-  return `${channel}\u0000${JSON.stringify(payload ?? {})}`
-}
-
-function agentOnline() {
-  return Date.now() - agent.lastPollAt < AGENT_STALE_MS
-}
-
-function phoneOnline() {
-  return phoneClients.size > 0
-}
-
-function tokenFrom(req, url) {
-  const header = req.headers['x-relay-token']
-  if (typeof header === 'string' && header) return header
-  if (url.searchParams.get('t')) return url.searchParams.get('t')
-  const cookie = req.headers.cookie || ''
-  for (const part of cookie.split(';')) {
-    const [key, ...rest] = part.trim().split('=')
-    if (key === 'mica_relay') return decodeURIComponent(rest.join('='))
-  }
-  return ''
-}
-
-function authorized(req, url) {
-  const value = tokenFrom(req, url)
-  return value.length > 0 && value === TOKEN
-}
-
-/** 反向代理后面判断「是不是 https」，用来给 cookie 加 Secure。 */
-function isSecure(req) {
-  if (req.socket?.encrypted) return true
-  const proto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim()
-  return proto === 'https'
-}
 
 function sendJson(res, status, body) {
   const payload = Buffer.from(JSON.stringify(body))
@@ -164,49 +280,97 @@ function escapeHtml(text) {
   return String(text).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
 }
 
-function unavailablePage() {
-  const reason = '公司机当前没有连上中转机，桌面端可能没有运行。'
-  return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mica · 暂时不可用</title>
+function shellPage(title, inner, extraStyle = '') {
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>${escapeHtml(title)}</title>
 <style>
+  :root{color-scheme:dark}
   html,body{height:100%;margin:0;background:#1e1f22;color:#d6d6d6;
     font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
-  .w{display:flex;height:100%;align-items:center;justify-content:center;padding:24px}
-  .c{max-width:340px}
-  h1{font-size:17px;font-weight:600;margin:0 0 10px;color:#e8e8e8}
-  p{margin:0;color:#8b8b8b}
-  button{margin-top:18px;padding:9px 18px;border-radius:8px;border:1px solid #3a3b40;
-    background:#2a2b30;color:#d6d6d6;font-size:14px}
-</style></head>
-<body><div class="w"><div class="c">
-  <h1>暂时不可用</h1><p>${escapeHtml(reason)}</p>
-  <button onclick="location.reload()">重新检查</button>
-</div></div></body></html>`
+  .wrap{max-width:520px;margin:0 auto;padding:18vh 22px 0}
+  h1{font-size:17px;font-weight:600;margin:0 0 10px}
+  p{color:#9a9a9a;font-size:13px;margin:0 0 14px}
+  button{background:#4c8bf5;border:0;border-radius:8px;padding:9px 14px;color:#fff;font-size:14px;font-weight:600}
+  a.item{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-bottom:8px;border-radius:10px;
+    background:#26282c;border:1px solid #33363b;color:inherit;text-decoration:none}
+  a.item:active{background:#2d3035}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .ok{background:#4ec9a0}
+  .idle{background:#6b6f76}
+  .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .meta{color:#7d828a;font-size:12px}
+  ${extraStyle}
+</style></head><body>${inner}</body></html>`
 }
 
-function invokeRemote(channel, payload) {
-  if (!agentOnline()) {
-    return Promise.resolve({ ok: false, error: '公司机当前没有连上中转机', status: 503 })
+function unavailablePage(state) {
+  const label = escapeHtml(state.label)
+  const inner = `<div class="wrap">
+<h1>${label} 暂时不可用</h1>
+<p>这台机器当前没有连上中转机，桌面端可能没有运行。</p>
+<button onclick="location.reload()">重新检查</button>
+</div>`
+  return shellPage('Mica · 暂时不可用', inner)
+}
+
+function pickerPage(states) {
+  const items = states
+    .map((state) => {
+      const online = agentOnline(state)
+      return `<a class="item" href="/?t=${encodeURIComponent(state.token)}">
+<span class="dot ${online ? 'ok' : 'idle'}"></span>
+<span class="name">${escapeHtml(state.label)}</span>
+<span class="meta">${online ? '在线' : '离线'}</span>
+</a>`
+    })
+    .join('\n')
+  const inner = `<div class="wrap"><h1>选择机器</h1><p>这台手机记住的 Mica</p>${items}</div>`
+  return shellPage('Mica · 选择机器', inner)
+}
+
+function loginPage(res, badToken) {
+  const inner = `<div class="wrap">
+<form method="get" action="/" style="display:flex;flex-direction:column;gap:12px">
+<h1>Mica Code</h1><p>输入访问口令</p>
+<input name="t" type="password" autofocus autocomplete="current-password" placeholder="访问口令"
+  style="background:#2b2d31;border:1px solid #3a3d42;border-radius:8px;padding:10px 12px;color:inherit;font-size:16px;outline:none">
+${badToken ? '<p style="color:#f48771">口令不对</p>' : ''}
+<button type="submit" style="padding:10px">进入</button></form></div>`
+  const body = shellPage('Mica · 连接', inner)
+  res.writeHead(badToken ? 401 : 200, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store'
+  })
+  res.end(body)
+}
+
+/* ---------------------------------------------------------------- 调用通道 */
+
+function cacheKey(channel, payload) {
+  return `${channel}\u0000${JSON.stringify(payload ?? {})}`
+}
+
+function invokeRemote(state, channel, payload) {
+  if (!agentOnline(state)) {
+    return Promise.resolve({ ok: false, error: `${state.label} 当前没有连上中转机`, status: 503 })
   }
   const id = randomUUIDLike()
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      agent.pending.delete(id)
+      state.pending.delete(id)
       resolve({ ok: false, error: `调用 ${channel} 超时`, status: 504 })
     }, INVOKE_TIMEOUT_MS)
-    agent.pending.set(id, {
+    state.pending.set(id, {
       resolve: (value) => {
         clearTimeout(timer)
         resolve(value)
       }
     })
-    commands.push({ id, channel, payload })
+    state.commands.push({ id, channel, payload })
   })
 }
-
-agent.pending = new Map()
 
 let idCounter = 0
 function randomUUIDLike() {
@@ -214,77 +378,93 @@ function randomUUIDLike() {
   return `${Date.now().toString(36)}-${idCounter.toString(36)}-${randomBytes(3).toString('hex')}`
 }
 
-function resolveResult(item) {
+function resolveResult(state, item) {
   if (item?.ok === false) return { ok: false, error: item.error || '调用失败', status: item.status }
   const key = cacheKey(item.channel, item.payload)
   if (item.unchanged) {
-    const cached = resultCache.get(key)
+    const cached = state.resultCache.get(key)
     if (cached && cached.hash === item.hash) return { ok: true, result: cached.value }
   }
   const value = item.result ?? null
-  resultCache.delete(key)
-  resultCache.set(key, { hash: item.hash ?? '', value })
-  if (resultCache.size > RESULT_CACHE_LIMIT) {
-    const oldest = resultCache.keys().next().value
-    if (oldest !== undefined) resultCache.delete(oldest)
+  state.resultCache.delete(key)
+  state.resultCache.set(key, { hash: item.hash ?? '', value })
+  if (state.resultCache.size > RESULT_CACHE_LIMIT) {
+    const oldest = state.resultCache.keys().next().value
+    if (oldest !== undefined) state.resultCache.delete(oldest)
   }
   return { ok: true, result: value }
 }
 
-async function handlePoll(req, res) {
-  let body
-  try {
-    body = open(await readRaw(req))
-  } catch {
-    // 解不开就是没密钥 / 被篡改 / 被替换。不区分原因，统一 401。
-    return sendJson(res, 401, { ok: false, error: 'bad envelope' })
+/* ------------------------------------------------------------------ 处理函数 */
+
+function broadcastEvents(state, events) {
+  if (!state.phones.size) return
+  let frame = ''
+  for (const event of events) frame += `data: ${JSON.stringify(event)}\n\n`
+  for (const client of state.phones) {
+    try {
+      client.write(frame)
+    } catch {
+      state.phones.delete(client)
+    }
   }
+}
+
+async function handlePoll(req, res) {
+  const opened = openAny(await readRaw(req))
+  // 解不开就是没密钥 / 被篡改 / 被替换 / 不是这台中转机的机器。不区分原因，统一 401。
+  if (!opened) return sendJson(res, 401, { ok: false, error: 'bad envelope' })
+  const hinted = opened.state
+  const body = opened.body
   const now = Date.now()
   const ts = Number(body?.ts || 0)
   if (!ts || Math.abs(now - ts) > REPLAY_WINDOW_MS) {
     return sendJson(res, 401, { ok: false, error: 'stale envelope' })
   }
-  if (ts < agent.lastPollTs - 5_000) {
+  if (ts < hinted.lastPollTs - 5_000) {
     return sendJson(res, 401, { ok: false, error: 'replayed envelope' })
   }
-  agent.lastPollTs = ts
+  hinted.lastPollTs = ts
 
-  const servedFreshly = now - agent.lastPollAt > AGENT_STALE_MS
-  agent.lastPollAt = now
-  if (body.watch !== undefined) agent.watch = body.watch
-  if (body.env) agent.env = body.env
+  const servedFreshly = now - hinted.lastPollAt > AGENT_STALE_MS
+  hinted.lastPollAt = now
+  if (typeof body.label === 'string' && body.label.trim() && body.label.trim() !== hinted.label) {
+    hinted.label = body.label.trim()
+    persistAgents()
+  }
+  if (body.watch !== undefined) hinted.watch = body.watch
+  if (body.env) hinted.env = body.env
 
   for (const item of Array.isArray(body.results) ? body.results : []) {
-    const entry = agent.pending.get(item?.id)
+    const entry = hinted.pending.get(item?.id)
     if (!entry) continue
-    agent.pending.delete(item.id)
-    entry.resolve(resolveResult(item))
+    hinted.pending.delete(item.id)
+    entry.resolve(resolveResult(hinted, item))
   }
 
   const events = Array.isArray(body.events) ? body.events : []
-  if (events.length) broadcastEvents(events)
+  if (events.length) broadcastEvents(hinted, events)
 
-  const batch = commands.splice(0, commands.length)
+  const batch = hinted.commands.splice(0, hinted.commands.length)
   const streaming = events.length > 0
-  const awake = Date.now() < awakeUntil
+  const awake = Date.now() < hinted.awakeUntil
   // 间隔按「有没有人在用」分档：没人看时只要保证手机打开后能很快接上，
   // 15 秒足够，也把公司机的常态外联压到每小时 240 次以内。
   let intervalMs
   if (batch.length || streaming) intervalMs = 300
   else if (awake) intervalMs = 1000
-  else if (phoneOnline()) intervalMs = 3000
+  else if (phoneOnline(hinted)) intervalMs = 3000
   else intervalMs = 15_000
 
-  const payload = seal({
+  const payload = seal(hinted.key, {
     ok: true,
     commands: batch,
     intervalMs,
-    watch: agent.watch,
+    watch: hinted.watch,
     // 没有手机连着就别让公司机往外送事件：那是纯浪费的上行
-    wanted: phoneOnline(),
+    wanted: phoneOnline(hinted),
     resetCache: servedFreshly
   })
-
   res.writeHead(200, {
     'content-type': 'application/octet-stream',
     'content-length': payload.length,
@@ -293,23 +473,7 @@ async function handlePoll(req, res) {
   res.end(payload)
 }
 
-function broadcastEvents(events) {
-  if (!phoneClients.size) return
-  let frame = ''
-  for (const event of events) frame += `data: ${JSON.stringify(event)}\n\n`
-  for (const client of phoneClients) {
-    try {
-      client.write(frame)
-    } catch {
-      phoneClients.delete(client)
-    }
-  }
-}
-
-function handleEvents(req, res) {
-  const url = new URL(req.url, 'http://relay')
-  if (!authorized(req, url)) return sendJson(res, 401, { ok: false, error: 'bad token' })
-
+function handleEvents(req, res, state) {
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
     'cache-control': 'no-cache, no-transform',
@@ -317,9 +481,9 @@ function handleEvents(req, res) {
     'x-accel-buffering': 'no'
   })
   res.write(': connected\n\n')
-  phoneClients.add(res)
+  state.phones.add(res)
   // 刚连上就提速一轮，否则首屏要等一个退避周期
-  awakeUntil = Date.now() + AWAKE_MS
+  state.awakeUntil = Date.now() + AWAKE_MS
 
   const heartbeat = setInterval(() => {
     try {
@@ -332,16 +496,13 @@ function handleEvents(req, res) {
 
   const cleanup = () => {
     clearInterval(heartbeat)
-    phoneClients.delete(res)
+    state.phones.delete(res)
   }
   req.on('close', cleanup)
   req.on('error', cleanup)
 }
 
-async function handleInvoke(req, res) {
-  const url = new URL(req.url, 'http://relay')
-  if (!authorized(req, url)) return sendJson(res, 401, { ok: false, error: 'bad token' })
-
+async function handleInvoke(req, res, state) {
   let body
   try {
     body = await readJsonBody(req)
@@ -351,22 +512,18 @@ async function handleInvoke(req, res) {
   const channel = String(body?.channel || '')
   if (!channel) return sendJson(res, 400, { ok: false, error: '缺少 channel' })
 
-  const result = await invokeRemote(channel, body?.payload ?? {})
+  const result = await invokeRemote(state, channel, body?.payload ?? {})
   if (result.ok) return sendJson(res, 200, { ok: true, result: result.result })
   return sendJson(res, result.status || 200, { ok: false, error: result.error })
 }
 
-function handleAwake(req, res) {
-  const url = new URL(req.url, 'http://relay')
-  if (!authorized(req, url)) return sendJson(res, 401, { ok: false, error: 'bad token' })
-  awakeUntil = Date.now() + AWAKE_MS
-  sendJson(res, 200, { ok: true, until: awakeUntil })
+function handleAwake(req, res, state) {
+  state.awakeUntil = Date.now() + AWAKE_MS
+  sendJson(res, 200, { ok: true, until: state.awakeUntil })
 }
 
-function handleEnv(req, res) {
-  const url = new URL(req.url, 'http://relay')
-  if (!authorized(req, url)) return sendJson(res, 401, { ok: false, error: 'bad token' })
-  const env = agent.env || {}
+function handleEnv(req, res, state) {
+  const env = state.env || {}
   sendJson(res, 200, {
     platform: env.platform || 'darwin',
     homeDir: env.homeDir || '',
@@ -376,26 +533,34 @@ function handleEnv(req, res) {
   })
 }
 
-async function handleImage(req, res) {
-  const url = new URL(req.url, 'http://relay')
-  if (!authorized(req, url)) return sendJson(res, 401, { ok: false, error: 'bad token' })
+async function handleImage(req, res, state, url) {
   const file = url.searchParams.get('path')
   if (!file) return sendJson(res, 400, { ok: false, error: '缺少 path' })
 
-  const cached = imageCache.get(file)
+  const cached = state.imageCache.get(file)
   if (cached) {
     res.writeHead(200, { 'content-type': cached.type, 'cache-control': 'private, max-age=600' })
     return res.end(cached.buffer)
   }
 
-  const result = await invokeRemote('__image', { path: file })
+  const result = await invokeRemote(state, '__image', { path: file })
   if (!result.ok) return sendJson(res, 404, { ok: false, error: result.error || '读取失败' })
   const buffer = Buffer.from(result.result.data, 'base64')
-  imageCache.set(file, { buffer, type: result.result.type })
-  const total = [...imageCache.values()].reduce((sum, item) => sum + item.buffer.length, 0)
-  if (total > IMAGE_CACHE_LIMIT) imageCache.clear()
+  state.imageCache.set(file, { buffer, type: result.result.type })
+  const total = [...state.imageCache.values()].reduce((sum, item) => sum + item.buffer.length, 0)
+  if (total > IMAGE_CACHE_LIMIT) state.imageCache.clear()
   res.writeHead(200, { 'content-type': result.result.type, 'cache-control': 'private, max-age=600' })
   res.end(buffer)
+}
+
+function sendHtml(res, status, body) {
+  const payload = Buffer.from(body)
+  res.writeHead(status, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': payload.length,
+    'cache-control': 'no-store'
+  })
+  res.end(payload)
 }
 
 /** 页面交互信标：让公司机在「有人真的在操作」时才提速。 */
@@ -416,7 +581,7 @@ const AWAKE_SCRIPT = `(() => {
 })()
 `
 
-async function serveIndex(req, res, url) {
+async function serveIndex(req, res) {
   const absolute = join(ROOT, 'index.html')
   if (!existsSync(absolute)) return sendJson(res, 404, { ok: false, error: 'renderer 未部署' })
   const html = readFileSync(absolute, 'utf8').replace(
@@ -433,11 +598,10 @@ async function serveIndex(req, res, url) {
     'content-length': acceptsGzip ? packed.length : Buffer.byteLength(html)
   })
   res.end(acceptsGzip ? packed : html)
-  void url
 }
 
-async function serveStatic(req, res, url) {
-  let pathname = decodeURIComponent(url.pathname)
+async function serveStatic(req, res, url, state) {
+  const pathname = decodeURIComponent(url.pathname)
   if (pathname === '/relay-awake.js') {
     const body = Buffer.from(AWAKE_SCRIPT)
     res.writeHead(200, {
@@ -447,15 +611,11 @@ async function serveStatic(req, res, url) {
     })
     return res.end(body)
   }
-  if (pathname === '/' || pathname === '/mica-web' || pathname === '/mica-web/') {
-    if (!agentOnline()) {
-      const body = Buffer.from(unavailablePage())
-      res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'content-length': body.length })
-      return res.end(body)
-    }
-    return serveIndex(req, res, url)
+  if (pathname === '/mica-web' || pathname === '/mica-web/') {
+    if (!agentOnline(state)) return sendHtml(res, 503, unavailablePage(state))
+    return serveIndex(req, res)
   }
-  if (!extname(pathname)) return serveIndex(req, res, url)
+  if (!extname(pathname)) return serveIndex(req, res)
 
   const safe = normalize(pathname).replace(/^(\.\.[/\\])+/, '')
   const absolute = join(ROOT, safe)
@@ -495,75 +655,60 @@ async function serveStatic(req, res, url) {
   createReadStream(absolute).pipe(res)
 }
 
-function loginPage(res, badToken) {
-  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Mica · 连接</title><style>
-:root{color-scheme:dark}
-body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#1e1f22;
-color:#e6e6e6;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-form{width:min(320px,80vw);display:flex;flex-direction:column;gap:12px}
-h1{font-size:16px;font-weight:600;margin:0 0 4px}
-p{color:#9a9a9a;font-size:13px;margin:0}
-input{background:#2b2d31;border:1px solid #3a3d42;border-radius:8px;padding:10px 12px;color:inherit;
-font-size:16px;outline:none}
-input:focus{border-color:#4c8bf5}
-button{background:#4c8bf5;border:0;border-radius:8px;padding:10px;color:#fff;font-size:15px;font-weight:600}
-.err{color:#f48771;font-size:13px}
-</style></head><body><form method="get" action="/">
-<h1>Mica Code</h1><p>输入访问口令</p>
-<input name="t" type="password" autofocus autocomplete="current-password" placeholder="访问口令">
-${badToken ? '<div class="err">口令不对</div>' : ''}
-<button type="submit">进入</button></form></body></html>`
-  res.writeHead(badToken ? 401 : 200, {
-    'content-type': 'text/html; charset=utf-8',
-    'cache-control': 'no-store'
-  })
-  res.end(html)
-}
-
 async function route(req, res) {
   const url = new URL(req.url, 'http://relay')
   const path = url.pathname
 
+  // 轮询自带机器标识（不是凭据），因此排在口令鉴权之前。
   if (path === '/api/poll' && req.method === 'POST') return handlePoll(req, res)
+
+  const state = currentState(req, url)
+
   if (path === '/api/health') {
+    if (!state) return sendJson(res, 200, { ok: true, agents: agents.size })
     return sendJson(res, 200, {
       ok: true,
-      agentOnline: agentOnline(),
-      phoneOnline: phoneOnline(),
-      awake: Date.now() < awakeUntil,
-      pending: agent.pending.size,
-      queued: commands.length
+      label: state.label,
+      agentOnline: agentOnline(state),
+      phoneOnline: phoneOnline(state),
+      awake: Date.now() < state.awakeUntil,
+      pending: state.pending.size,
+      queued: state.commands.length
     })
   }
-  if (path === '/api/invoke' && req.method === 'POST') return handleInvoke(req, res)
-  if (path === '/api/awake' && req.method === 'POST') return handleAwake(req, res)
-  if (path === '/api/events') return handleEvents(req, res)
-  if (path === '/api/env') return handleEnv(req, res)
-  if (path === '/api/image') return handleImage(req, res)
-  if (path === '/api/paste') return sendJson(res, 501, { ok: false, error: '手机上不支持粘贴文件' })
 
-  if (path === '/') {
-    const token = url.searchParams.get('t')
-    if (token && token === TOKEN) {
-      res.setHeader(
-        'set-cookie',
-        `mica_relay=${encodeURIComponent(TOKEN)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000` +
-          (isSecure(req) ? '; Secure' : '')
-      )
-    } else if (!authorized(req, url)) {
-      return loginPage(res, Boolean(token))
-    }
-    if (!agentOnline()) {
-      const body = Buffer.from(unavailablePage())
-      res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'content-length': body.length })
-      return res.end(body)
-    }
-    return serveIndex(req, res, url)
+  if (path.startsWith('/api/')) {
+    if (!state) return sendJson(res, 401, { ok: false, error: 'bad token' })
+    if (path === '/api/invoke' && req.method === 'POST') return handleInvoke(req, res, state)
+    if (path === '/api/awake' && req.method === 'POST') return handleAwake(req, res, state)
+    if (path === '/api/events') return handleEvents(req, res, state)
+    if (path === '/api/env') return handleEnv(req, res, state)
+    if (path === '/api/image') return handleImage(req, res, state, url)
+    if (path === '/api/paste') return sendJson(res, 501, { ok: false, error: '手机上不支持粘贴文件' })
+    return sendJson(res, 404, { ok: false, error: 'not found' })
   }
 
-  return serveStatic(req, res, url)
+  if (path === '/') {
+    const explicit = url.searchParams.get('t')
+    if (explicit && !agents.has(explicit)) return loginPage(res, true)
+
+    const remembered = rememberedTokens(req)
+      .map((token) => agents.get(token))
+      .filter(Boolean)
+    if (!explicit && !remembered.length) return loginPage(res, false)
+
+    const cookies = rememberTokens(req, url)
+    if (cookies.length) res.setHeader('set-cookie', cookies)
+
+    if (!explicit && remembered.length > 1) return sendHtml(res, 200, pickerPage(remembered))
+
+    const target = explicit ? agents.get(explicit) : remembered[0]
+    if (!agentOnline(target)) return sendHtml(res, 503, unavailablePage(target))
+    return serveIndex(req, res)
+  }
+
+  if (!state) return loginPage(res, false)
+  return serveStatic(req, res, url, state)
 }
 
 function buildServer() {
@@ -580,5 +725,7 @@ function buildServer() {
 
 const server = buildServer()
 server.listen(PORT, BIND, () => {
-  console.log(`[relay] http://${BIND}:${PORT}  root=${ROOT}  （TLS 由前置 nginx 终结）`)
+  console.log(
+    `[relay] http://${BIND}:${PORT}  root=${ROOT}  agents=${agents.size}  （TLS 由前置 nginx 终结）`
+  )
 })
