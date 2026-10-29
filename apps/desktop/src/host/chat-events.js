@@ -123,6 +123,7 @@ export function buildChatEnv(env = process.env) {
 // and MCP re-init, and queued inputs get real after_iteration injection.
 export function buildAppServerArgs({
   sessionId,
+  parentSessionId,
   cwd,
   model,
   variant,
@@ -134,6 +135,9 @@ export function buildAppServerArgs({
   // status line, matching the pre-codex `mica run --format json --thinking`.
   const args = ['app-server', '--thinking']
   if (sessionId) args.push('--session', sessionId)
+  // 只有新会话（没有 --session）才传 --parent：resume 时父会话以文件里记录的为准，
+  // 再用页签参数覆盖会把一条老会话的来历改成当前页签。
+  if (!sessionId && parentSessionId) args.push('--parent', parentSessionId)
   if (cwd) args.push('--dir', cwd)
   if (model) args.push('--model', model)
   if (variant) args.push('--variant', variant)

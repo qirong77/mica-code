@@ -77,6 +77,8 @@ import { applyPluginSessionSettings, listPluginSessionSettings } from './pluginS
 
 export type AppServerOptions = {
   sessionId?: string;
+  /** 新建会话时记录的父会话（侧栏据此嵌套）；resume 时以文件里记录的为准。 */
+  parentSessionId?: string;
   cwd?: string;
   model?: string;
   variant?: string;
@@ -341,6 +343,11 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         },
       },
     });
+    // `--parent` 只在新建会话时有意义：resume 的父会话以文件里记录的那条为准，
+    // 用启动参数覆盖它会把一条老会话的来历悄悄改掉。
+    if (!options.sessionId && options.parentSessionId) {
+      sessionController.startNewSession({ parentSessionId: options.parentSessionId });
+    }
     subagentTasks = new SubagentTaskManager();
 
     // By The Way（CLI 的 `/btw`）在桌面端的等价物：输入条上的一个抽屉，每个 tab 一条线程。
@@ -868,6 +875,7 @@ function threadResponse(ctx: HostContext): Record<string, unknown> {
     modelProvider: ctx.agent.config.provider.id,
     role: ctx.agent.role,
     cwd: process.cwd(),
+    parentSessionId: ctx.sessionController.getParentSessionId(),
     approvalPolicy: MICA_APPROVAL_POLICY,
     sandboxPolicy: MICA_SANDBOX_POLICY,
   };
@@ -894,6 +902,23 @@ async function handleCodexRequest(
       const cwdParam = paramString(params, 'cwd');
       if (cwdParam) process.chdir(resolve(cwdParam));
       warnIfCodexPolicyCannotBeEnforced(ctx, params);
+      // Mica extension: `parentSessionId` records which session spawned this
+      // one so the sidebar can nest it. Only adopted by a session that has not
+      // been persisted yet — a client re-opening an existing thread must not
+      // rewrite where it came from.
+      const parentSessionId = paramString(params, 'parentSessionId');
+      const currentSessionId = ctx.sessionController.getCurrentSessionId();
+      // `getParentSessionId()` 有值时说明这台宿主已经为本次会话定过来历（启动参数或
+      // 上一次 thread/start）。再 startNewSession 会换掉会话 id，而客户端手里拿的
+      // 还是上一份 thread —— 落盘时文件名与它记的 id 就对不上了。
+      if (
+        parentSessionId &&
+        !ctx.sessionController.getParentSessionId() &&
+        !ctx.sessionController.load(currentSessionId)
+      ) {
+        ctx.sessionController.startNewSession({ parentSessionId });
+        ctx.setSessionId(ctx.sessionController.getCurrentSessionId());
+      }
       // A codex-family driver (e.g. Multica) conveys the agent's model via
       // thread/start's `model` field, not via a launch flag. Honor it here like
       // turn/start does, otherwise the requested model is silently replaced by
@@ -1608,10 +1633,7 @@ async function handleCodexRequest(
  * 视图由插件给、宿主只做归一化：插件是自己写的代码，返回畸形视图不该让整块面板（乃至
  * 页面）崩掉，所以长度、条目数与字段类型都在 `normalizePluginPanelView` 里收敛一次。
  */
-async function readPluginPanel(
-  ctx: HostContext,
-  params: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
+async function readPluginPanel(ctx: HostContext, params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const pluginId = paramString(params, 'pluginId');
   const panel = pluginId ? ctx.panels?.get(pluginId) : null;
   if (!pluginId || !panel) {

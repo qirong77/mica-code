@@ -88,6 +88,14 @@ export type PersistedSession = {
   createdAt: string;
   updatedAt: string;
   cwd: string;
+  /**
+   * 这条会话是从哪条会话派生出来的（子会话 / fork）。
+   *
+   * 只用于展示与检索，不是权限或生命周期约束：父会话被删掉、被改名、正在
+   * 另一个进程里跑，都不影响子会话能不能打开。侧栏据此把子会话挂到父会话
+   * 下面，父会话不在当前列表里时子会话按顶层渲染。
+   */
+  parentSessionId?: string;
   turnState: PersistedSessionTurnState;
   snapshot: PersistedRuntimeSnapshot;
 };
@@ -98,6 +106,8 @@ export type SessionSummary = {
   createdAt?: string;
   updatedAt: string;
   cwd: string;
+  /** 派生自哪条会话，见 {@link PersistedSession.parentSessionId}。 */
+  parentSessionId?: string;
   providerId: string;
   model: string;
   uncompleted: boolean;
@@ -143,8 +153,10 @@ type SessionIndex = { sessions: SessionSummary[]; rejects: IndexReject[] };
 const MICA_HOME = resolveMicaHome();
 export const SESSION_DIR = resolve(MICA_HOME, 'sessions');
 const SESSION_INDEX_FILE = resolve(MICA_HOME, 'session-index.json');
-/** v2 起索引还会记下「读不出摘要的文件」，见 {@link IndexReject}。 */
-const SESSION_INDEX_VERSION = 2;
+/** v2 起索引还会记下「读不出摘要的文件」，见 {@link IndexReject}；v3 起摘要带
+ * `parentSessionId`。版本对不上就整份重建——索引只是缓存，重建比逐条猜「这条
+ * 摘要是不是旧版本写的」便宜得多。 */
+const SESSION_INDEX_VERSION = 3;
 const MALFORMED_LEASE_STALE_MS = 60_000;
 // A session persistent without any conversation is a leftover from an
 // allowEmpty turn-start save (see SessionController.saveCurrent) that never
@@ -320,6 +332,9 @@ export class SessionStore implements SessionStoreLike {
       if (!existsSync(SESSION_INDEX_FILE)) return null;
       const data = JSON.parse(readFileSync(SESSION_INDEX_FILE, 'utf-8')) as unknown;
       if (!data || typeof data !== 'object') return null;
+      // 版本对不上就重建：旧索引里的摘要缺新字段（例如 v2 没有 parentSessionId），
+      // 留着会让侧栏一直按「没有父会话」渲染，直到那一条会话恰好被改写。
+      if ((data as { version?: unknown }).version !== SESSION_INDEX_VERSION) return null;
       const sessions = (data as { sessions?: unknown }).sessions;
       if (!Array.isArray(sessions)) return null;
       const rejects = (data as { rejects?: unknown }).rejects;
@@ -516,6 +531,7 @@ function toSessionSummary(session: PersistedSession): SessionSummary {
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     cwd: session.cwd,
+    ...(session.parentSessionId ? { parentSessionId: session.parentSessionId } : {}),
     providerId: session.snapshot.providerId,
     model: session.snapshot.model,
     uncompleted: session.turnState !== 'completed',
@@ -609,6 +625,8 @@ function isSessionSummary(value: unknown): value is SessionSummary {
     typeof session.providerId === 'string' &&
     typeof session.model === 'string' &&
     typeof session.uncompleted === 'boolean' &&
+    // 侧栏按它做嵌套：非字符串的脏值会让渲染层把每个 id 都当父 id。
+    (session.parentSessionId === undefined || typeof session.parentSessionId === 'string') &&
     // Entries written before the junk rule started honouring conversation
     // content lack these fields. Rejecting them forces one rebuild (the index
     // is only a cache), which also guarantees the junk rule never reads an
@@ -629,11 +647,7 @@ function ensureSessionDir() {
 function isIndexReject(value: unknown): value is IndexReject {
   if (!value || typeof value !== 'object') return false;
   const reject = value as Record<string, unknown>;
-  return (
-    typeof reject.id === 'string' &&
-    typeof reject.size === 'number' &&
-    typeof reject.mtimeMs === 'number'
-  );
+  return typeof reject.id === 'string' && typeof reject.size === 'number' && typeof reject.mtimeMs === 'number';
 }
 
 /** sessions/ 里当前所有会话文件的 id（不含索引自身的两个保留名）。 */
@@ -739,6 +753,9 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   const role = isNonEmptyString(session.snapshot.role) ? session.snapshot.role : 'default';
   return {
     ...session,
+    // 父会话只是展示线索：坏值（不存在的形状、自指）丢掉就行，不为了一个
+    // 可选的展示字段拒绝整条会话。
+    parentSessionId: normalizeParentSessionId(session.parentSessionId, session.id),
     turnState,
     snapshot: {
       ...session.snapshot,
@@ -749,6 +766,14 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
       displayUsage: normalizeDisplayUsage(session.snapshot.displayUsage),
     },
   } as PersistedSession;
+}
+
+/** 父会话 id 必须是能落到磁盘的会话 id，且不能是自己（自指会让侧栏嵌套成环）。 */
+function normalizeParentSessionId(value: unknown, selfId: string): string | undefined {
+  if (!isNonEmptyString(value)) return undefined;
+  const id = value.trim();
+  if (id === selfId) return undefined;
+  return sanitizeSessionId(id) === id ? id : undefined;
 }
 
 function normalizeDisplayUsage(value: unknown): PersistedSnapshotDisplayUsage | undefined {

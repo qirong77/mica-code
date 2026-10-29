@@ -16,6 +16,8 @@ export function forkSessionSnapshot(session, id, now = new Date().toISOString())
     id,
     title: `${title} (fork)`,
     titleSource: 'manual',
+    // fork 是源会话的分支：父会话换成源会话，而不是继承源会话自己的父。
+    parentSessionId: session.id,
     revision: 1,
     createdAt: now,
     updatedAt: now,

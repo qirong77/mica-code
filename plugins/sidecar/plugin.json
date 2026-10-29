@@ -1,0 +1,14 @@
+{
+  "id": "sidecar",
+  "name": "Sidecar",
+  "icon": "git-branch",
+  "version": "1.0.0",
+  "description": "派一个独立的 mica 会话去干活并观测它：开子会话、投消息、看进度、等结果、打断、收进程。子会话挂在当前会话下面出现在侧栏。",
+  "author": "Mica",
+  "main": "index.ts",
+  "assets": ["README.md", "skill/SKILL.md"],
+  "priority": 205,
+  "required": false,
+  "mica": { "apiVersion": 1 },
+  "requires": ["session", "skills", "tools"]
+}

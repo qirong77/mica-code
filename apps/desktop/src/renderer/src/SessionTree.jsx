@@ -14,6 +14,7 @@ import {
   IconChevronRight,
   IconClock,
   IconDots,
+  IconCornerDownRight,
   IconFolder,
   IconFolderOpen,
   IconListTree,
@@ -28,6 +29,7 @@ import { relativeTimeShort } from './relative-time'
 import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './loop-command'
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
+import { nestSessions } from './session-nesting'
 import { draftMenuItems, sessionMenuItems } from './session-menu'
 import {
   annotationBadges,
@@ -174,9 +176,7 @@ function RowAnnotationDots({ badges }) {
           style={{ backgroundColor: badge.color }}
         />
       ))}
-      {hidden > 0 && (
-        <span className="text-[10px] leading-none text-white/40">+{hidden}</span>
-      )}
+      {hidden > 0 && <span className="text-[10px] leading-none text-white/40">+{hidden}</span>}
     </span>
   )
 }
@@ -392,6 +392,8 @@ export function SessionTree({
     project: false
   })
   const [collapsedGroups, setCollapsedGroups] = useState({})
+  // 派生会话（子会话 / fork）的折叠：只影响渲染，父子的存续关系由会话文件决定。
+  const [collapsedChildren, setCollapsedChildren] = useState(() => new Set())
   const [recentLimit, setRecentLimit] = useState(RECENT_PREVIEW_LIMIT)
   const [drag, setDrag] = useState(null) // { kind: 'session'|'draft'|'group', id, section, groupId }
   const [over, setOver] = useState(null) // { section, id?, groupId?, position?, cross?, header? }
@@ -431,6 +433,17 @@ export function SessionTree({
   const recentOverflow = Math.max(0, recentCandidates.length - recentList.length)
   const recentPageSize = Math.min(RECENT_PAGE_SIZE, recentOverflow)
 
+  // 派生会话（子会话 / fork）挂在父会话下面：nestSessions 只重排渲染顺序，
+  // 分页与拖放仍然按平铺列表算，改的只是「谁紧跟谁显示」。
+  const pinnedRows = useMemo(
+    () => nestSessions(pinned, { collapsed: collapsedChildren }),
+    [pinned, collapsedChildren]
+  )
+  const recentRows = useMemo(
+    () => nestSessions(recentList, { collapsed: collapsedChildren }),
+    [recentList, collapsedChildren]
+  )
+
   const sessionById = useMemo(
     () => new Map(sessions.map((session) => [session.id, session])),
     [sessions]
@@ -448,6 +461,15 @@ export function SessionTree({
     }
     return map
   }, [pins, projects, sessionById, sortOrder])
+
+  /** 分组里的渲染顺序（带派生嵌套）。归属与折叠状态仍来自上面那份平铺列表。 */
+  const groupRows = useMemo(() => {
+    const map = new Map()
+    for (const [groupId, items] of groupSessions) {
+      map.set(groupId, nestSessions(items, { collapsed: collapsedChildren }))
+    }
+    return map
+  }, [collapsedChildren, groupSessions])
 
   const groupIds = useMemo(
     () => new Set((projects?.groups || []).map((group) => group.id)),
@@ -837,10 +859,20 @@ export function SessionTree({
   const rowOverState = (section, id, groupId = null) =>
     over?.id === id && over?.section === section && (over?.groupId ?? null) === (groupId ?? null)
 
-  const renderSessionRow = (session, indent, section, groupId = null) => {
+  /**
+   * 一行会话。`nesting` 来自 `nestSessions`：派生会话多缩进一层、行首带分支标记；
+   * 父会话在有子会话时第一列变成折叠箭头，收起后状态由父行代显（与分组同一套规则）。
+   */
+  const renderSessionRow = (session, indent, section, groupId = null, nesting = null) => {
     const nodeId = openBySession[session.id]
     const active = !!nodeId && activeSessionId === session.id
-    const state = rowStateOfSession(session)
+    const ownState = rowStateOfSession(session)
+    const state = nesting?.collapsed
+      ? mergeRowStates([ownState, ...nesting.hidden.map(rowStateOfSession)])
+      : ownState
+    const childDepth = nesting?.depth ?? 0
+    const canCollapse = (nesting?.childCount ?? 0) > 0
+    const childCollapsed = !!nesting?.collapsed
     const unreadState = unread[nodeId]
     const editingThis = editing?.kind === 'session' && editing.id === session.id
     const isOver = rowOverState(section, session.id, groupId)
@@ -858,7 +890,7 @@ export function SessionTree({
         <div
           className={`${rowClass} ${active ? 'bg-white/[.1] text-white' : 'text-white/70'} ${draggingThis ? 'opacity-40' : ''}`}
           style={{
-            paddingLeft: rowIndent(indent),
+            paddingLeft: rowIndent(indent + childDepth),
             boxShadow: isOver
               ? over.cross
                 ? dropShadow
@@ -874,7 +906,7 @@ export function SessionTree({
                 ? `${session.title || session.id} — ${session.cwd}`
                 : session.title || session.id
           }
-          draggable={!editingThis}
+          draggable={!editingThis && childDepth === 0}
           // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
           {...longPressHandlers((event) =>
             openMenu(event, {
@@ -894,7 +926,37 @@ export function SessionTree({
             })
           }
         >
-          <Slot />
+          {canCollapse ? (
+            <Slot>
+              <button
+                type="button"
+                className="grid h-4 w-4 place-items-center rounded text-white/40 hover:bg-white/10 hover:text-white/80"
+                title={
+                  childCollapsed
+                    ? `展开 ${nesting.childCount} 个派生会话`
+                    : `收起 ${nesting.childCount} 个派生会话`
+                }
+                onClick={(event) => {
+                  // 这一列是行内动作：折叠不能顺带把会话打开。
+                  event.stopPropagation()
+                  setCollapsedChildren((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(session.id)) next.delete(session.id)
+                    else next.add(session.id)
+                    return next
+                  })
+                }}
+              >
+                <IconChevronRight
+                  size={12}
+                  stroke={2}
+                  className={`transition-transform ${childCollapsed ? '' : 'rotate-90'}`}
+                />
+              </button>
+            </Slot>
+          ) : (
+            <Slot />
+          )}
           <RowLeading
             state={state}
             unreadKey={unreadState?.lastEventAt ?? 'running'}
@@ -913,6 +975,11 @@ export function SessionTree({
             />
           ) : (
             <span className="flex min-w-0 flex-1 items-center gap-1.5">
+              {childDepth > 0 && (
+                <span className="shrink-0 text-white/30" title="由上一个会话派生的子会话">
+                  <IconCornerDownRight size={12} stroke={2} />
+                </span>
+              )}
               {loop && (
                 <span className="shrink-0 text-warn">
                   <IconClock size={12} stroke={2} />
@@ -1096,7 +1163,7 @@ export function SessionTree({
   const renderGroup = (group, depth = 0) => {
     const nesting = childGroups(projects, group.id)
     const groupId = group.id
-    const sessionsHere = groupSessions.get(groupId) || []
+    const sessionsHere = groupRows.get(groupId) || []
     const draftsHere = draftsByGroup.get(groupId) || []
     const collapsed = !!collapsedGroups[groupId]
     const open = !collapsed
@@ -1106,7 +1173,7 @@ export function SessionTree({
     const childRows = [
       ...nesting.map((child) => renderGroup(child, depth + 1)).filter(Boolean),
       ...draftsHere.map((node) => renderDraftRow(node, depth, groupId)),
-      ...sessionsHere.map((session) => renderSessionRow(session, depth, 'project', groupId))
+      ...sessionsHere.map((row) => renderSessionRow(row.session, depth, 'project', groupId, row))
     ]
     const toggleOpen = () => setCollapsedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }))
     return (
@@ -1387,7 +1454,7 @@ export function SessionTree({
               {sectionOpen('pinned') &&
                 (pinned.length ? (
                   <ul className="flex flex-col gap-px">
-                    {pinned.map((session) => renderSessionRow(session, 0, 'pinned'))}
+                    {pinnedRows.map((row) => renderSessionRow(row.session, 0, 'pinned', null, row))}
                   </ul>
                 ) : (
                   <p
@@ -1437,7 +1504,9 @@ export function SessionTree({
                       {rootDrafts.map((node) =>
                         renderDraftRow(node, 0, null, loopForNode(loops, node.id))
                       )}
-                      {recentList.map((session) => renderSessionRow(session, 0, 'recent'))}
+                      {recentRows.map((row) =>
+                        renderSessionRow(row.session, 0, 'recent', null, row)
+                      )}
                     </ul>
                     {recentOverflow > 0 && (
                       <button

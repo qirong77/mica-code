@@ -2811,6 +2811,11 @@ body.is-resizing.is-resizing-terminal {
   max-width: var(--modal-w-narrow);
 }
 
+/* 表单弹窗（新建文件、重命名、新建分组）没有图标：不占图标位，标题的左边缘与下面的输入框对齐 */
+.chat-modal-prompt .chat-modal-mark.is-empty {
+  display: none;
+}
+
 /* 套在另一个弹窗里：不再压暗一次背景，靠阴影与描边区分层级 */
 .chat-modal-overlay.is-nested {
   z-index: 10010;

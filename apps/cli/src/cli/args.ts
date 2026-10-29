@@ -36,6 +36,8 @@ export type CommitCliInvocation = {
 export type AppServerCliInvocation = {
   mode: 'app-server';
   sessionId?: string;
+  /** 派生出这条会话的父会话 id（新建时才用；resume 以文件里记录的为准）。 */
+  parentSessionId?: string;
   cwd?: string;
   model?: string;
   variant?: string;
@@ -69,9 +71,11 @@ export const CLI_USAGE = [
   `  ${RUNTIME_NAME} compact --session <id> [--dir <path>] [--force] [--prune-only] [--tool-results-only]`,
   `  ${RUNTIME_NAME} commit [--dir <path>]`,
   `  ${RUNTIME_NAME} app-server [--session <id>] [--dir <path>] [--model <id>] [--variant <effort>] [--role <name>]`,
+  '                                    [--parent <session-id>]',
   '',
   'Run options:',
   '  --session <id>                    Resume a Mica session',
+  '  --parent <session-id>             Record which session spawned this new one (nests it in the sidebar)',
   '  --dir, --cd <path>                Set the task working directory',
   '  --model <provider/model>          Override provider and model',
   '  --variant <effort>                Model-declared level (see `models --json` efforts)',
@@ -184,6 +188,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
   }
   if (argv[0] === 'app-server') {
     let sessionId: string | undefined;
+    let parentSessionId: string | undefined;
     let cwd: string | undefined;
     let model: string | undefined;
     let variant: string | undefined;
@@ -197,6 +202,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
       const arg = argv[index]!;
       const valueOption = parseValueOption(arg, argv, index, [
         '--session',
+        '--parent',
         '--dir',
         '--model',
         '--variant',
@@ -209,6 +215,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
         if (!valueOption.ok) return valueOption.error;
         index = valueOption.nextIndex;
         if (valueOption.name === '--session') sessionId = valueOption.value;
+        if (valueOption.name === '--parent') parentSessionId = valueOption.value;
         if (valueOption.name === '--dir') cwd = valueOption.value;
         if (valueOption.name === '--model') model = valueOption.value;
         if (valueOption.name === '--variant') variant = valueOption.value;
@@ -243,6 +250,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     return {
       mode: 'app-server',
       sessionId,
+      parentSessionId,
       cwd,
       model,
       variant,

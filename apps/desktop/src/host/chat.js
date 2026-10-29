@@ -889,6 +889,11 @@ function spawnChatHost(id, sender, payload) {
   const variant =
     typeof payload.variant === 'string' && payload.variant.trim() ? payload.variant.trim() : ''
   const role = typeof payload.role === 'string' && payload.role.trim() ? payload.role.trim() : ''
+  // 派生关系（子会话）：侧栏据此把这条会话挂到父会话下面。
+  const parentSessionId =
+    typeof payload.parentSessionId === 'string' && payload.parentSessionId.trim()
+      ? payload.parentSessionId.trim()
+      : ''
 
   // 这个进程是谁：绑定会话后就是会话 id，草稿态用页签 id。
   const owner = sessionId || id
@@ -904,6 +909,7 @@ function spawnChatHost(id, sender, payload) {
 
   const args = buildAppServerArgs({
     sessionId,
+    parentSessionId,
     cwd,
     model,
     variant,

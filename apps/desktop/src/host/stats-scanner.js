@@ -46,10 +46,17 @@ function parseSessionMeta(raw) {
   const updatedAtMs = Date.parse(raw.updatedAt)
   if (!Number.isFinite(updatedAtMs)) return null
   const createdAtMs = Date.parse(raw.createdAt)
+  // 侧栏据此把子会话挂到父会话下面。没有父会话时整个键都不出现：行对象的形状对
+  // 「有没有派生关系」保持稳定，也让缓存指纹不必为一个 null 多记一个字段。
+  const parentSessionId =
+    typeof raw.parentSessionId === 'string' && raw.parentSessionId.trim()
+      ? raw.parentSessionId.trim()
+      : null
   return {
     id: raw.id || null,
     title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null,
     cwd: typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null,
+    ...(parentSessionId ? { parentSessionId } : {}),
     updatedAtMs,
     createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
     turnState: raw.turnState || 'completed'

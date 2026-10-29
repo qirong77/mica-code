@@ -193,6 +193,13 @@ describe('parseCliArgs', () => {
     });
   });
 
+  it('carries the derived-session parent through app-server', () => {
+    expect(parseCliArgs(['app-server', '--parent', 'session-123'])).toMatchObject({
+      mode: 'app-server',
+      parentSessionId: 'session-123',
+    });
+  });
+
   it('accepts a codex exec invocation verbatim', () => {
     expect(
       parseCliArgs([

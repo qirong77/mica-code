@@ -252,6 +252,37 @@ describe('SessionStore.replaceValidated', () => {
     expect(JSON.stringify(raw)).toBe(before);
     expect(parsePersistedSession({ ...raw, snapshot: { ...raw.snapshot, usageHistory: {} } })).toBeNull();
   });
+
+  it('keeps a parent session id only when it could be a real session', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const raw = {
+      version: 1,
+      id: 'child',
+      title: 'Child',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      cwd: '/tmp/project',
+      parentSessionId: 'parent',
+      snapshot: {
+        providerId: 'test',
+        model: 'test-model',
+        effort: 'none',
+        messages: [],
+        conversationMessages: [],
+        usageHistory: [],
+      },
+    };
+    expect(parsePersistedSession(raw)).toMatchObject({ parentSessionId: 'parent' });
+    // 坏值只丢这一个展示线索，不拒绝整条会话——否则一条脏数据会让会话从列表里消失。
+    expect(parsePersistedSession({ ...raw, parentSessionId: 42 })).toMatchObject({ parentSessionId: undefined });
+    expect(parsePersistedSession({ ...raw, parentSessionId: '../escape' })).toMatchObject({
+      parentSessionId: undefined,
+    });
+    // 自指会让侧栏嵌套成环。
+    expect(parsePersistedSession({ ...raw, parentSessionId: 'child' })).toMatchObject({
+      parentSessionId: undefined,
+    });
+  });
 });
 
 describe('SessionStore index reconciliation', () => {
@@ -376,7 +407,12 @@ describe('SessionStore junk session cleanup', () => {
       // Hiding it would make the session look lost after an unexpected
       // termination, which is exactly the case the user must be able to find
       // in /resume (rendered as `（uncompleted）`).
-      expect(store.listRecent(10).map((session) => session.id).sort()).toEqual(['junk-running', 'real']);
+      expect(
+        store
+          .listRecent(10)
+          .map((session) => session.id)
+          .sort(),
+      ).toEqual(['junk-running', 'real']);
       expect(existsSync(runningPath)).toBe(true);
     } finally {
       rmSync(micaHome, { recursive: true, force: true });
@@ -402,7 +438,10 @@ describe('SessionStore junk session cleanup', () => {
         writeFileSync(join(SESSION_DIR, `${id}.json`), JSON.stringify(placeholderSession(id, turnState)), 'utf-8');
       }
 
-      const listed = store.listRecent(10).map((session) => session.id).sort();
+      const listed = store
+        .listRecent(10)
+        .map((session) => session.id)
+        .sort();
       expect(listed).toEqual(['placeholder-usage-only', 'placeholder-with-conversation']);
     } finally {
       rmSync(micaHome, { recursive: true, force: true });

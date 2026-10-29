@@ -63,6 +63,8 @@ export class SessionController {
   private currentTitleOverride: string | null = null;
   private currentTitleSource: 'derived' | 'auto' | 'manual' = 'derived';
   private currentTurnState: PersistedSessionTurnState = 'completed';
+  /** 这条会话派生自哪条会话；resume 时从文件读回来，新会话由调用方给。 */
+  private currentParentSessionId: string | null = null;
   private currentPersistedSignature: string | null = null;
   private readonly agent: SessionAgentAdapter;
   private readonly store: SessionStoreLike;
@@ -99,9 +101,17 @@ export class SessionController {
     return this.store.load(id);
   }
 
-  startNewSession(): void {
+  /**
+   * 开一条新会话。
+   *
+   * `parentSessionId` 是"谁派生的这条会话"（spawn 出来的子会话、fork 出的分支）。
+   * 只影响侧栏的归档方式，不改变这条会话的任何行为——父会话在不在、跑没跑，
+   * 都不影响这里。
+   */
+  startNewSession(options: { parentSessionId?: string | null } = {}): void {
     this.discardCurrentIfEmpty();
     this.currentSessionId = micaSession.createId();
+    this.currentParentSessionId = normalizeParentSessionId(options.parentSessionId);
     // 能力开关属于会话，不属于 agent：新会话重新跟随 config 里的默认值（不继承
     // 上一条会话关掉的工具，也不继承它的「已定制」状态）。
     this.agent.resetCapabilitiesToDefaults?.();
@@ -111,6 +121,11 @@ export class SessionController {
     this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
     this.currentPersistedSignature = null;
+  }
+
+  /** 当前会话的父会话 id（没有则为 null）。 */
+  getParentSessionId(): string | null {
+    return this.currentParentSessionId;
   }
 
   saveCurrent(
@@ -165,6 +180,9 @@ export class SessionController {
       createdAt: existing?.createdAt ?? now,
       updatedAt: existing?.updatedAt ?? now,
       cwd: process.cwd(),
+      // 父会话写在第一次保存时，之后由已有的值续写：父会话被删掉了也保留这条线索
+      // （指向一个不存在的 id 只是让侧栏把它当顶层，不该悄悄改写成"没有父会话"）。
+      ...resolveParentField(this.currentParentSessionId ?? existing?.parentSessionId),
       turnState: this.currentTurnState,
       snapshot: {
         ...toPersistedSnapshot(snapshot, conversationMessages),
@@ -215,6 +233,7 @@ export class SessionController {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
+      ...resolveParentField(this.currentParentSessionId ?? existing?.parentSessionId),
       turnState: existing?.turnState ?? this.currentTurnState,
       snapshot: existing?.snapshot ?? toPersistedSnapshot(snapshot, conversationMessages),
     };
@@ -256,6 +275,7 @@ export class SessionController {
     this.agent.loadSnapshot(fromPersistedSnapshot(resolvedSnapshot, restoredRole));
     this.currentSessionId = session.id;
     this.currentTurnState = session.turnState ?? 'completed';
+    this.currentParentSessionId = session.parentSessionId ?? null;
     this.currentPersistedSignature = sessionSignature(session);
     const conversationMessages = getPersistedConversationMessages(session.snapshot);
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
@@ -328,6 +348,18 @@ function hasConversation(providerMessages: unknown[], conversationMessages: Mica
 
 function normalizeSessionTitle(title: string): string {
   return title.trim() || 'Untitled session';
+}
+
+/** 父会话 id 只接受非空字符串；其余（`undefined` / 空串 / 自己）一律当没有。 */
+function normalizeParentSessionId(value: string | null | undefined): string | null {
+  const id = typeof value === 'string' ? value.trim() : '';
+  return id || null;
+}
+
+/** 落盘时只在有父会话时写这个键：没有就整条不出现，老会话的读法不受影响。 */
+function resolveParentField(parentSessionId: string | null | undefined): { parentSessionId?: string } {
+  const id = normalizeParentSessionId(parentSessionId);
+  return id ? { parentSessionId: id } : {};
 }
 
 const defaultSessionConfigAdapter: SessionConfigAdapter = {

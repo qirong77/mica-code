@@ -119,8 +119,8 @@ plugins/<id>/
 代码里只读生效值、只给提示词：
 
 ```ts
-const llm = ctx.llm;                       // 清单声明了 llm 才有
-if (!llm?.configured()) return;            // 没配置就别发请求
+const llm = ctx.llm; // 清单声明了 llm 才有
+if (!llm?.configured()) return; // 没配置就别发请求
 const { text } = await llm.request({ purpose: '自动起标题', system, user });
 ```
 
@@ -181,14 +181,14 @@ headless 宿主把同一条 notice 落进 turn 的日志。插件不用自己画
 
 ```ts
 const { text, usage } = await ctx.models.request({
-  purpose: '自动起标题',       // Stats 里显示的用途
+  purpose: '自动起标题', // Stats 里显示的用途
   system: prompt,
   user: transcript,
-  baseUrl: settings.baseUrl,   // 插件自己的接口地址
+  baseUrl: settings.baseUrl, // 插件自己的接口地址
   apiKey: settings.apiKey,
   protocol: settings.protocol, // openai_chat_completions | openai_responses
   model: settings.model,
-  timeoutMs: 60_000,           // 可选，宿主会真的中断请求而不是只 reject
+  timeoutMs: 60_000, // 可选，宿主会真的中断请求而不是只 reject
 });
 ```
 
@@ -359,6 +359,45 @@ os.tmpdir()/mica-logs/plugin-<id>-<YYYYMMDD>[-n].jsonl
 
 单文件超过 2 MB 自动分片，超过 3 天的文件在下次写入时清理；`MICA_PLUGIN_LOG=0` 关闭。
 排查插件问题时先看这里，配置页插件详情里也会显示当前日志路径。
+
+## 派生一个子会话（sidecar）
+
+一个插件想让「另一条会话」替它干活时，不要用受控浏览器去点界面：那一轮要几十次读屏，
+界面一改就碎。直接起一个 `mica app-server` 子进程，走 Codex v2 JSONL：
+
+```ts
+const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thisSessionId]);
+// initialize → thread/start（回 thread.id = 子会话 id）→ turn/start / turn/steer / turn/interrupt
+```
+
+- **`--parent` 决定侧栏位置**：会话文件里的 `parentSessionId` 让桌面端把这条会话嵌在父会话
+  下面。子会话是独立进程、独立上下文，关掉父会话时由 `ctx.onDispose()` 一并结束。
+- **事件是结构化的**：正文 delta、工具调用与结果、用量、轮次终态都在同一条 stdout 上，
+  不需要读 DOM，也不需要轮询会话文件。
+- **会话仍然落盘**：子会话写完第一轮就在 `$MICA_HOME/sessions/` 下出现，桌面侧栏（10s 轮询）
+  和 `/resume` 都能直接打开它——用户能看到，但不必为了看到而操作界面。
+- **一次 spawn 就是一个会话**，不要给一个子进程投两轮以上之外的期望：`turn/start` 在忙时
+  会报错，需要排队就用 `turn/steer`（等价的用户操作是按回车）。
+
+`plugins/sidecar` 是完整示例：`sidecarProcess.ts` 负责协议与进程，`transcript.ts` 把事件投影
+成轮次（纯函数，可单测），`tools.ts` 把它包成 `sidecar_*` 工具。
+
+**读对话要分层，不要一步到位**。`sidecar_turns`（每轮一行）→ `sidecar_grep`（命中行）→
+`sidecar_transcript`（正文，按字符预算截断）成本差一个数量级。`sidecar_transcript` 只给用户与助手的
+正文、不含工具与思考；预算不够时丢最早轮次并写明丢了几轮。
+
+**用户消息只能本地记，但它落在哪一轮要等宿主消费才能定**。`turn/steer` 在宿主里是
+`queueMode: 'after_iteration'`：同一条消息可能被吞进当前轮的下一迭代，也可能因为这一轮已经结束
+而变成新的一轮。事件流里唯一的判定信号是 `mica/queue/dequeue`（`HeadlessTurnExecutor` 在
+`takeQueuedIterationInput` 与轮末 drain 时各发一次）：**收到它时还在跑就是当前轮，否则等下一个
+`turn/started` 归属**。按「发送时谁在跑就算谁的」会把问题记到上一轮，读起来变成「问了却没答、
+答了却没问」。
+
+**子会话的回传必须按量裁剪**。工具输出直接进父会话的上下文，而这个能力天生会被反复查询，
+所以两层都要有上限：转录层截断单轮正文与单条工具输出、限制保留的轮数与工具条数；渲染层只给
+最近一轮、工具只列最近几条，并按 `transcript.revision` 认出「什么都没发生」（`quietWhenUnchanged`
+只回一行）。一个满配的 `full` 投影是几万字符，而轮询命中安静路径只有几十字符——不裁剪的话，
+接手这个能力的模型十次 `status` 就会把父会话的上下文吃光。
 
 ## 加一个新插件
 

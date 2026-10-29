@@ -74,7 +74,7 @@ export function ModalShell({
         onClick={(event) => event.stopPropagation()}
       >
         <header className="chat-modal-header">
-          {/* 没有图标也占住标记位：标题的左边缘在所有弹窗里保持一致 */}
+          {/* 没有图标也占住标记位：标题的左边缘在所有弹窗里保持一致（表单弹窗除外，见 .chat-modal-prompt） */}
           <span className={`chat-modal-mark${icon ? '' : ' is-empty'}`} aria-hidden="true">
             {icon}
           </span>

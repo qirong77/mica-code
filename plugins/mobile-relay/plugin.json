@@ -1,7 +1,7 @@
 {
   "id": "mobile-relay",
   "name": "Mobile Relay",
-  "icon": "message-square",
+  "icon": "smartphone",
   "version": "1.4.0",
   "description": "手机经一台公网中转机打开这台机器上的 Mica：同一份会话、同样的流式输出。本机只做短轮询，不开监听端口、不转发端口；轮询体单独用 AES-256-GCM 加密。中转机通过内置 skill 交给 agent 现场部署，插件只管本机这座桥。",
   "author": "Mica Code",

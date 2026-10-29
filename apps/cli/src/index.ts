@@ -182,6 +182,7 @@ if (invocation.mode === 'app-server') {
   try {
     await runAppServer({
       sessionId: invocation.sessionId,
+      parentSessionId: invocation.parentSessionId,
       cwd: invocation.cwd,
       model: invocation.model,
       variant: invocation.variant,

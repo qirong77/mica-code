@@ -74,6 +74,17 @@ function createHarness(options = {}) {
 }
 
 describe('incremental session scanner', () => {
+  test('projects parentSessionId only for sessions that have one', () => {
+    const harness = createHarness()
+    harness.write('child', fixture('child', { parentSessionId: '  parent-1  ' }))
+    harness.write('root', fixture('root', { parentSessionId: '' }))
+
+    const rows = harness.scanner.scanMeta()
+    expect(rows.find((row) => row.id === 'child').parentSessionId).toBe('parent-1')
+    // 没有父会话时整个键都不出现：行对象的形状对「有没有派生关系」保持稳定。
+    expect('parentSessionId' in rows.find((row) => row.id === 'root')).toBe(false)
+  })
+
   test('cold scan reads every JSON file and preserves metadata semantics', () => {
     const harness = createHarness()
     harness.write(
