@@ -291,6 +291,7 @@ function shellPage(title, inner, extraStyle = '') {
   .wrap{max-width:520px;margin:0 auto;padding:18vh 22px 0}
   h1{font-size:17px;font-weight:600;margin:0 0 10px}
   p{color:#9a9a9a;font-size:13px;margin:0 0 14px}
+  p.hint{color:#6f747c;font-size:12px;margin:0 0 8px}
   button{background:#4c8bf5;border:0;border-radius:8px;padding:9px 14px;color:#fff;font-size:14px;font-weight:600}
   a.item{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-bottom:8px;border-radius:10px;
     background:#26282c;border:1px solid #33363b;color:inherit;text-decoration:none}
@@ -306,10 +307,22 @@ function shellPage(title, inner, extraStyle = '') {
 
 function unavailablePage(state) {
   const label = escapeHtml(state.label)
+  const seen = state.lastPollAt ? `${Math.max(1, Math.round((Date.now() - state.lastPollAt) / 1000))} 秒前` : '从未'
   const inner = `<div class="wrap">
 <h1>${label} 暂时不可用</h1>
 <p>这台机器当前没有连上中转机，桌面端可能没有运行。</p>
-<button onclick="location.reload()">重新检查</button>
+<p class="hint">最近一次连上：${seen}</p>
+<p class="hint"><span id="count">5</span> 秒后自动重试</p>
+<button onclick="clearInterval(timer);location.reload()">立即重试</button>
+<script>
+let left = 5
+const label = document.getElementById('count')
+const timer = setInterval(() => {
+  left -= 1
+  if (left <= 0) { clearInterval(timer); location.reload(); return }
+  if (label) label.textContent = String(left)
+}, 1000)
+</script>
 </div>`
   return shellPage('Mica · 暂时不可用', inner)
 }
