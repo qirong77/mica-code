@@ -29,6 +29,18 @@ describe('normalizePluginPanelView', () => {
     expect(view.sections?.[0].actions?.[0].tone).toBe('primary');
   });
 
+  it('keeps the auto-commit action only when the section has fields', () => {
+    const view = normalizePluginPanelView({
+      title: 'x',
+      sections: [
+        { title: '设置', fields: [{ key: 'n', label: '每多少轮' }], commit: 'settings.save' },
+        { title: '动作', actions: [{ id: 'go', label: '执行' }], commit: 'ignored' },
+      ],
+    });
+    expect(view.sections?.[0].commit).toBe('settings.save');
+    expect(view.sections?.[1].commit).toBeUndefined();
+  });
+
   it('falls back to the plugin name and drops malformed entries', () => {
     const view = normalizePluginPanelView(
       {

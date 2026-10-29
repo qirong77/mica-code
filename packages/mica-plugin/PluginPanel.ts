@@ -72,6 +72,11 @@ export type PluginPanelSection = {
   empty?: string;
   /** 输入框；当前值由插件给，动作之后重新取视图。 */
   fields?: PluginPanelField[];
+  /**
+   * 字段改完自动生效：声明后宿主在输入停顿约 0.5s 时用这个动作提交整块字段值，
+   * 不需要用户再点按钮。设置类 section 用它，动作类 section 留空。
+   */
+  commit?: string;
   /** 按钮，成组渲染在 section 底部。 */
   actions?: PluginPanelAction[];
 };
@@ -280,6 +285,8 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     .map((entry) => actionOf(entry))
     .filter((entry): entry is PluginPanelAction => entry !== null);
   const empty = text(raw.empty, 200);
+  // 只有真有输入框时，自动提交才有意义
+  const commit = fields.length > 0 ? text(raw.commit, 60) : '';
   if (!title && rows.length === 0 && items.length === 0 && fields.length === 0 && actions.length === 0)
     return null;
   return {
@@ -289,6 +296,7 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     ...(items.length > 0 ? { items } : {}),
     ...(empty ? { empty } : {}),
     ...(fields.length > 0 ? { fields } : {}),
+    ...(commit ? { commit } : {}),
     ...(actions.length > 0 ? { actions } : {}),
   };
 }

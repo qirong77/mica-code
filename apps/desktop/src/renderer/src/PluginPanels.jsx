@@ -290,6 +290,7 @@ function PluginPanelDock({ pluginId, label, nodeId, sessionId, cwd, focusSection
               onToggle={() => toggleSection(key)}
               drafts={drafts}
               setDrafts={setDrafts}
+              commit={section.commit ? () => runAction(section.commit) : null}
               busy={busy}
               runAction={runAction}
             />
@@ -300,9 +301,39 @@ function PluginPanelDock({ pluginId, label, nodeId, sessionId, cwd, focusSection
   )
 }
 
+/**
+ * 声明了 `commit` 的 section（设置类）在输入停顿后自己提交，用户不用再点按钮；
+ * 没声明的仍靠 section 底部的动作按钮带上 `values`。
+ */
+const COMMIT_DELAY_MS = 500
+
 /** 一块折叠卡片：标题行可点，内容只在展开时渲染。 */
-function PluginPanelSection({ section, collapsed, onToggle, drafts, setDrafts, busy, runAction }) {
+function PluginPanelSection({
+  section,
+  collapsed,
+  onToggle,
+  drafts,
+  setDrafts,
+  commit,
+  busy,
+  runAction
+}) {
   const toggleable = Boolean(section.title)
+  const commitTimer = useRef(null)
+  // 计时器要调「最新一次渲染」的提交回调：它闭包里带着最新的字段值，
+  // 直接用 onChange 那一刻的回调会把改动前的 drafts 提交上去。
+  const commitRef = useRef(commit)
+  commitRef.current = commit
+
+  useEffect(() => () => clearTimeout(commitTimer.current), [])
+
+  const changeDraft = (key, value) => {
+    setDrafts((previous) => ({ ...previous, [key]: value }))
+    if (!commit) return
+    clearTimeout(commitTimer.current)
+    commitTimer.current = setTimeout(() => void commitRef.current?.(), COMMIT_DELAY_MS)
+  }
+
   return (
     <section className={`chat-plugin-section ${collapsed ? 'is-collapsed' : ''}`}>
       {section.title &&
@@ -382,9 +413,7 @@ function PluginPanelSection({ section, collapsed, onToggle, drafts, setDrafts, b
                     inputMode={field.type === 'number' ? 'numeric' : undefined}
                     value={drafts[field.key] ?? ''}
                     placeholder={field.placeholder || ''}
-                    onChange={(event) =>
-                      setDrafts((previous) => ({ ...previous, [field.key]: event.target.value }))
-                    }
+                    onChange={(event) => changeDraft(field.key, event.target.value)}
                   />
                   {field.hint && <span className="chat-plugin-field-hint">{field.hint}</span>}
                 </label>
