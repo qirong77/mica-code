@@ -32,6 +32,7 @@ import { BranchPicker } from './BranchPicker'
 import { ChatView } from './ChatView'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { PluginEntries } from './PluginEntries'
+import { PluginPage } from './PluginPage'
 import { SessionTree } from './SessionTree'
 import { useSessionMenuPlugins } from './session-menu-plugins'
 import { SessionNotesDialog } from './SessionNotesDialog'
@@ -776,6 +777,13 @@ export default function App() {
       window.history.replaceState(null, '', url)
     }
   }, [])
+  // 插件的整页视图（清单 `desktop.page`）：和配置页一样盖住整个窗口。存的是入口本身
+  // （含已加载的模块），所以页面里不再重读插件列表。
+  const [pluginPage, setPluginPage] = useState(null)
+  const openPluginPage = useCallback((entry) => {
+    setPluginPage(entry)
+  }, [])
+  const closePluginPage = useCallback(() => setPluginPage(null), [])
   // 文件视图按需挂载：打开过一次后保持挂载（切回对话再切回来不丢已打开/未保存的文件），
   // 但没被打开过时它的 chunk（文件树、图标清单）不进启动路径。
   const [filesMounted, setFilesMounted] = useState(view === 'files')
@@ -2221,7 +2229,9 @@ export default function App() {
   const createChatSession = useCallback(
     (cwd = null) => {
       setView('chat')
-      createTerminal({ cwd: cwd || recentChatCwd() || null })
+      // 返回节点 id：插件要「在新会话里跑一段提示词」时，得知道把那次启动交给哪个节点
+      // （见 ChatView 的 launchPluginSession）。
+      return createTerminal({ cwd: cwd || recentChatCwd() || null })
     },
     [createTerminal]
   )
@@ -2463,8 +2473,8 @@ export default function App() {
                 <span>Settings</span>
               </button>
               {/* 插件声明的桌面入口（清单 `desktop.entry` + 插件目录里的 desktop.jsx）：
-                  宿主只画一行和一张卡片，里面是什么由插件决定。 */}
-              <PluginEntries />
+                  宿主只画一行和一张卡片 / 一层整页，里面是什么由插件决定。 */}
+              <PluginEntries onOpenPage={openPluginPage} />
               {/* 插件入口排在最后：插件是「装进来的能力」，属于调整类入口，和 Server /
                   Settings 一起收在同一列末尾。点它进插件整页（目录 → 点一张卡进详情），
                   不做下拉面板。 */}
@@ -2996,6 +3006,8 @@ export default function App() {
           </div>
         </div>
       )}
+      {/* 插件的整页视图：与配置页同一层，盖住整个窗口，左上角返回对话。 */}
+      {pluginPage && <PluginPage entry={pluginPage} onClose={closePluginPage} />}
       {toast && (
         <div
           role="status"

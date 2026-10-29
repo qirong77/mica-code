@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { selectPluginPanels } from './plugin-panels'
+import { applyPanelResult, selectPluginPanels } from './plugin-panels'
 
 const plugin = (overrides = {}) => ({
   id: 'user.demand-dev',
@@ -68,5 +68,49 @@ describe('selectPluginPanels', () => {
   test('survives a missing list', () => {
     expect(selectPluginPanels(null, '需求开发')).toEqual([])
     expect(selectPluginPanels([null, undefined, plugin()], '需求开发')).toHaveLength(1)
+  })
+})
+
+describe('applyPanelResult', () => {
+  const effects = () => {
+    const seen = { composed: '', launched: null }
+    return {
+      seen,
+      handlers: {
+        onCompose: (text) => {
+          seen.composed = text
+        },
+        onLaunchSession: (task) => {
+          seen.launched = task
+        }
+      }
+    }
+  }
+
+  test('hands a composed prompt to the composer', () => {
+    const { seen, handlers } = effects()
+    applyPanelResult({ ok: true, compose: '看一眼群' }, handlers)
+    expect(seen.composed).toBe('看一眼群')
+    expect(seen.launched).toBeNull()
+  })
+
+  test('hands a new-session task to the host page', () => {
+    const { seen, handlers } = effects()
+    applyPanelResult({ ok: true, newSession: { prompt: '复盘', role: '需求开发' } }, handlers)
+    expect(seen.launched).toEqual({ prompt: '复盘', role: '需求开发' })
+    expect(seen.composed).toBe('')
+  })
+
+  test('does nothing for a failed action', () => {
+    const { seen, handlers } = effects()
+    applyPanelResult({ ok: false, compose: 'x', newSession: { prompt: 'y' } }, handlers)
+    expect(seen).toEqual({ composed: '', launched: null })
+  })
+
+  test('ignores blank or malformed payloads', () => {
+    const { seen, handlers } = effects()
+    applyPanelResult({ ok: true, compose: '   ', newSession: { prompt: 42 } }, handlers)
+    applyPanelResult(null, handlers)
+    expect(seen).toEqual({ composed: '', launched: null })
   })
 })

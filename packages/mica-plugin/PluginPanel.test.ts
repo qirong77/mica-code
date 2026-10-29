@@ -94,6 +94,30 @@ describe('normalizePluginPanelAction', () => {
     expect(normalizePluginPanelActionResult({ message: 'x'.repeat(300) }).message?.length).toBe(120);
   });
 
+  it('carries text meant for the composer without sending it', () => {
+    expect(normalizePluginPanelActionResult({ compose: '  看一眼群消息  ' })).toEqual({
+      compose: '看一眼群消息',
+    });
+    expect(normalizePluginPanelActionResult({ compose: '   ' })).toEqual({});
+  });
+
+  it('carries a new-session task and defaults to asking first', () => {
+    expect(normalizePluginPanelActionResult({ newSession: { prompt: '复盘' } })).toEqual({
+      newSession: { prompt: '复盘' },
+    });
+    expect(
+      normalizePluginPanelActionResult({
+        newSession: { prompt: '复盘', role: ' 需求开发 ', cwd: '/tmp/w', confirm: false },
+      }),
+    ).toEqual({ newSession: { prompt: '复盘', role: '需求开发', cwd: '/tmp/w', confirm: false } });
+  });
+
+  it('drops a new-session task without a prompt', () => {
+    expect(normalizePluginPanelActionResult({ newSession: { role: '需求开发' } })).toEqual({});
+    expect(normalizePluginPanelActionResult({ newSession: { prompt: '   ' } })).toEqual({});
+    expect(normalizePluginPanelActionResult({ newSession: '复盘' })).toEqual({});
+  });
+
   it('keeps action, key and string values only', () => {
     const action = normalizePluginPanelAction({ action: 'channel.add', key: 12, values: { a: 'x', b: 3, c: '  y  ' } });
     expect(action).toEqual({ action: 'channel.add', values: { a: 'x', c: 'y' } });

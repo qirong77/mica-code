@@ -2219,7 +2219,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(mock!.state.requests.length).toBe(2);
   });
 
-  itE2E('abort keeps the queued input draining on the same host', async () => {
+  itE2E('abort keeps the queued input pending instead of starting it', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];
     mock!.state.responsesFinished = 0;
@@ -2240,47 +2240,98 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await send(host, 2, 'turn/steer', {
       threadId: '',
       expectedTurnId: turn1,
-      input: [{ type: 'text', text: '排队的话（abort 后继续）' }],
+      input: [{ type: 'text', text: '排队的话（abort 后不该发出去）' }],
       clientMessageId: 'queued-after-abort',
     });
     await waitFor(host, (m) => m.method === 'mica/queue/queued', 'mica/queue/queued (abort)');
 
     // turn/started precedes provider IO. Interrupting before the first request
-    // arrives makes the drained turn request #1, invalidating the #2 assertion.
+    // arrives makes the queued input request #1, invalidating the count assertion.
     const requestDeadline = Date.now() + 10_000;
     while (mock!.state.requests.length === 0 && Date.now() < requestDeadline) await sleep(10);
     expect(mock!.state.requests.length).toBeGreaterThanOrEqual(1);
 
-    // User hits stop: interrupt the active turn, then the queued input must
-    // still drain on the same host.
+    // User hits stop: only the active turn is interrupted.
     await send(host, 3, 'turn/interrupt', { threadId: '', turnId: turn1 });
     const completed1 = await waitFor(host, turnCompleted(turn1), 'turn/completed (interrupted)', 30_000);
     expect((completed1.params?.turn as { status?: string }).status).toBe('interrupted');
 
-    const queuedAt = Date.now();
-    while (Date.now() - queuedAt < 30_000) {
-      if (mock!.state.requests.length >= 2) break;
-      await sleep(100);
-    }
-    // The queued text reached the provider as the second request after abort.
-    expect(JSON.stringify(mock!.state.requests[1]?.input ?? [])).toContain('排队的话（abort 后继续）');
-
-    // The drained turn is a real turn for the client: it must announce its own
-    // turn/started (new id), scope its deltas to it, and finish with
-    // turn/completed. Without this the app stayed "idle" while the host was
-    // busy, so stop did nothing and the next message was rejected.
-    const started2 = await waitFor(
+    // 中止的一轮不会把排队输入变成下一轮：否则用户点完停止会看到「先停、再把排队
+    // 的话发出去、再马上停一次」。它留在单槽里，状态仍是 pending（可撤回）。
+    const pendingChanged = await waitFor(
       host,
-      (m) => m.method === 'turn/started' && (m.params?.turn as { id?: string })?.id !== turn1,
-      'drained turn/started',
+      (m) =>
+        m.method === 'mica/queue/changed' &&
+        JSON.stringify(m.params?.pending ?? []).includes('排队的话（abort 后不该发出去）'),
+      'queued input stays pending after abort',
       30_000,
     );
-    const turn2 = (started2.params?.turn as { id?: string }).id!;
-    expect(turn2).not.toBe(turn1);
-    const completed2 = await waitFor(host, turnCompleted(turn2), 'drained turn/completed', 30_000);
-    expect((completed2.params?.turn as { status?: string }).status).toBe('completed');
-    const drainedDelta = host.lines.find((m) => m.method === 'item/agentMessage/delta' && m.params?.turnId === turn2);
-    expect(drainedDelta).toBeTruthy();
+    expect(pendingChanged.params?.pending).toHaveLength(1);
+    // 留出「偷偷起一轮」的窗口，然后确认宿主没有再发第二次 provider 请求、也没有
+    // 第二个 turn/started。
+    await sleep(1500);
+    expect(mock!.state.requests).toHaveLength(1);
+    expect(host.lines.filter((m) => m.method === 'turn/started')).toHaveLength(1);
+
+    // 撤回（桌面 Shift+←）照旧可用，原文回到客户端。
+    await send(host, 4, 'mica/queue/recall', { clientMessageId: 'queued-after-abort' });
+    const recalled = await waitFor(host, (m) => m.id === 4, 'queue recall after abort', 10_000);
+    expect(recalled.result).toMatchObject({
+      ok: true,
+      input: { id: 'queued-after-abort', text: '排队的话（abort 后不该发出去）' },
+      pending: [],
+    });
+  });
+
+  // 桌面端点停止是「撤回排队 + 中断」一次动作：撤回不带 clientMessageId（页面可能还没
+  // 收到确认，不知道那条的 id），取回原文后排队槽必须真的是空的，否则中断完它还会被当成
+  // 下一轮发出去。
+  itE2E('recall before interrupt leaves the queue empty and sends nothing', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 3000;
+
+    const host = spawnHost('stop-recall');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '第一句话（慢慢说）' }],
+      model: 'mock/mock-chat',
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (stop recall)');
+    const turn1 = (started.params?.turn as { id?: string }).id!;
+    await send(host, 2, 'turn/steer', {
+      threadId: '',
+      expectedTurnId: turn1,
+      input: [{ type: 'text', text: '排队的话（应该回到输入框）' }],
+      clientMessageId: 'queued-before-stop',
+    });
+    await waitFor(host, (m) => m.method === 'mica/queue/queued', 'mica/queue/queued (stop recall)');
+
+    // 停止按钮做的事：先不带 id 撤回（取槽里那一条），再中断。
+    await send(host, 3, 'mica/queue/recall', {});
+    const recalled = await waitFor(host, (m) => m.id === 3, 'queue recall (stop)', 10_000);
+    expect(recalled.error).toBeFalsy();
+    expect(recalled.result).toMatchObject({
+      ok: true,
+      input: { id: 'queued-before-stop', text: '排队的话（应该回到输入框）' },
+      pending: [],
+    });
+
+    await send(host, 4, 'turn/interrupt', { threadId: '', turnId: turn1 });
+    const completed = await waitFor(host, turnCompleted(turn1), 'turn/completed (stop recall)', 30_000);
+    expect((completed.params?.turn as { status?: string }).status).toBe('interrupted');
+
+    // 撤回之后再中止：没有第二轮、排队的话也从没进过 provider。
+    await sleep(1000);
+    expect(mock!.state.requests).toHaveLength(1);
+    expect(host.lines.filter((m) => m.method === 'turn/started')).toHaveLength(1);
+    expect(JSON.stringify(mock!.state.requests.map((request) => request.input ?? []))).not.toContain(
+      '排队的话（应该回到输入框）',
+    );
   });
 
   itE2E('two hosts racing on one session keep persisting both turns (no silent skip)', async () => {

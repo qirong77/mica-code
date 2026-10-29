@@ -285,6 +285,26 @@ describe('HeadlessTurnExecutor', () => {
     expect(getIdleCount()).toBeGreaterThan(0);
   });
 
+  it('keeps a queued input pending after an aborted turn instead of sending it', async () => {
+    const { agent, executor, events } = createHarness();
+    await executor.start(input('first'));
+    await expect(executor.start(input('second'))).resolves.toBe('queued');
+
+    // 用户点了停止：只有正在跑的这一轮被中止。
+    executor.abort();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    // 排队的那条留在队列里（仍可撤回）而不是被当成新一轮偷偷发出去——否则界面上
+    // 会「先停止、再发一次、再马上停」。
+    expect(agent.runCalls).toHaveLength(1);
+    expect(executor.pendingInputs.map((pending) => pending.text)).toEqual(['second']);
+    expect(events.filter((event) => event.type === 'turn:start')).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({
+      type: 'queue:changed',
+      pending: [expect.objectContaining({ text: 'second' })],
+    });
+  });
+
   it('marks the turn aborted when the agent is aborted', async () => {
     const { executor, events } = createHarness();
     await executor.start(input('hello'));

@@ -81,6 +81,34 @@ describe('parsePluginManifest desktop entry', () => {
   });
 });
 
+describe('parsePluginManifest desktop page', () => {
+  it('turns the entry into a full page when desktop.page is declared', () => {
+    const result = parsePluginManifest(
+      base({ desktop: { entry: { label: 'Schedule' }, page: { title: '排期' } } }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPage).toEqual({ title: '排期' });
+  });
+
+  it('accepts page: true and falls back to the entry label as the title', () => {
+    const result = parsePluginManifest(base({ desktop: { entry: { label: 'Schedule' }, page: true } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPage).toEqual({ title: 'Schedule' });
+  });
+
+  it('refuses a page without an entry: nothing would open it', () => {
+    const result = parsePluginManifest(base({ desktop: { page: true } }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('desktop.entry');
+  });
+
+  it('leaves the page off by default', () => {
+    const result = parsePluginManifest(base({ desktop: { entry: { label: '连接' } } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPage).toBeNull();
+  });
+});
+
 describe('parsePluginManifest desktop panel', () => {
   it('reads the panel label and the roles it is bound to', () => {
     const result = parsePluginManifest(base({ desktop: { panel: { label: '需求开发', roles: ['需求开发', ' 辅助 '] } } }));

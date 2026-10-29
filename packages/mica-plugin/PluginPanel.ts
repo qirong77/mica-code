@@ -104,8 +104,40 @@ export type PluginPanelActionInput = {
  * 说「这个动作做不了，因为…」时用它：`ctx.ui.notice()` 在常驻宿主里只落进 notice
  * 记录，用户点完按钮往往看不到任何反应；把原因放这里，页面会紧挨着按钮显示一次。
  */
+/**
+ * 在**另一个会话**里跑一段提示词。
+ *
+ * 面板里点一个按钮就开一个会话（例如「复盘」不该污染当前这轮对话）有两种做法：插件自己
+ * 起一个子会话进程，或者把「要跑什么」交给宿主。后者才是通用能力——建会话、绑角色、
+ * 起进程、把新页签摆到用户眼前都是宿主的事，插件只声明意图。
+ */
+export type PluginPanelNewSession = {
+  /** 新会话的第一条消息。 */
+  prompt: string;
+  /** 新会话的角色；缺省沿用当前会话的角色。 */
+  role?: string;
+  /** 新会话的工作目录；缺省沿用当前会话的。 */
+  cwd?: string;
+  /**
+   * 发送前是否先让用户看一眼提示词，默认 `true`。
+   *
+   * 开一个会话是有成本的动作（一次完整请求、一个新页签、侧栏多一条记录），默认让用户
+   * 先确认；只有按钮本身已经表示「就是要开」时才关掉它。
+   */
+  confirm?: boolean;
+};
+
+/**
+ * 动作的回包：一句话 + 两种「跨出面板一步」的效果。
+ *
+ * - `compose` —— 把这段文本放进当前会话的输入框，**不发送**。用户还能改、能删，按回车才
+ *   算数。需要模型「先看一眼再决定发不发」的时候用它，比直接投递更可控。
+ * - `newSession` —— 新开一个会话，把这段提示词作为它的第一条消息发出去。
+ */
 export type PluginPanelActionResult = {
   message?: string;
+  compose?: string;
+  newSession?: PluginPanelNewSession;
 };
 
 export type PluginPanelViewInput = {
@@ -167,6 +199,8 @@ const MAX_ITEMS = 40;
 const MAX_FIELDS = 12;
 const MAX_ACTIONS = 8;
 const MAX_SECTIONS = 8;
+/** 提示词整段回传的上限：它是一段给模型看的正文，不是一行状态。 */
+const MAX_PROMPT = 20_000;
 
 const TONES: readonly PluginPanelTone[] = ['muted', 'ok', 'warn', 'error', 'accent'];
 const BUTTON_TONES: readonly PluginPanelButtonTone[] = ['primary', 'ghost', 'danger'];
@@ -344,9 +378,35 @@ export function normalizePluginPanelAction(input: unknown): PluginPanelActionInp
   };
 }
 
-/** 动作回包的归一化：只有一句非空文本会被带回页面，其余一律当作「没说话」。 */
+/**
+ * 动作回包的归一化：一句非空文本 + 两种可选效果，其余一律当作「没说话」。
+ *
+ * 提示词的长度上限比普通文案大得多（它是给模型看的一整段），但仍然有上限：插件不该用
+ * 这条通道搬运整个文件，那是 `compose` 之外的事。
+ */
 export function normalizePluginPanelActionResult(input: unknown): PluginPanelActionResult {
   const raw = record(input);
   const message = text(raw.message, 120);
-  return message ? { message } : {};
+  const compose = text(raw.compose, MAX_PROMPT);
+  const newSession = newSessionOf(raw.newSession);
+  return {
+    ...(message ? { message } : {}),
+    ...(compose ? { compose } : {}),
+    ...(newSession ? { newSession } : {}),
+  };
+}
+
+function newSessionOf(value: unknown): PluginPanelNewSession | undefined {
+  const raw = record(value);
+  const prompt = text(raw.prompt, MAX_PROMPT);
+  if (!prompt) return undefined;
+  const role = text(raw.role, 40);
+  const cwd = text(raw.cwd, 1000);
+  return {
+    prompt,
+    ...(role ? { role } : {}),
+    ...(cwd ? { cwd } : {}),
+    // 只有显式 `false` 才跳过确认：认不出的一律按「要确认」处理，那才是安全的一侧。
+    ...(raw.confirm === false ? { confirm: false } : {}),
+  };
 }

@@ -7,6 +7,7 @@ import connectionsSetup from '../../plugins/connections/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
+import scheduleSetup from '../../plugins/schedule/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
 import sessionNotesSetup from '../../plugins/session-notes/index.js';
 import sessionCopySetup from '../../plugins/session-copy/index.js';
@@ -42,6 +43,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   'computer-use': computerUseSetup,
   connections: connectionsSetup,
   'mobile-relay': mobileRelaySetup,
+  schedule: scheduleSetup,
 };
 
 export const officialPlugins: MicaPlugin[] = officialPluginManifests.map((manifest) => {

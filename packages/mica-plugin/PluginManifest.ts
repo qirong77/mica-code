@@ -15,6 +15,7 @@ import {
   isDesktopCheckId,
   type DesktopCheckId,
   type PluginDesktopEntry,
+  type PluginDesktopPage,
   type PluginDesktopPanel,
   type PluginPanelShortcut,
 } from './PluginDesktop.js';
@@ -98,6 +99,11 @@ export type PluginManifest = {
    * `desktop.jsx` 渲染；没声明（null）的插件在侧栏里不占位置。
    */
   desktopEntry: PluginDesktopEntry | null;
+  /**
+   * 桌面端整页视图（清单 `desktop.page`）。声明了点侧栏那一行打开整页而不是卡片，
+   * 组件来自插件目录 `desktop.jsx` 的 `Page` 导出。
+   */
+  desktopPage: PluginDesktopPage | null;
   /**
    * 页面要展示的运行状态字段（清单 `status`）。
    *
@@ -273,6 +279,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       requires: requires.value,
       desktopChecks: desktop.value.checks,
       desktopEntry: desktop.value.entry,
+      desktopPage: desktop.value.page,
       status: status.value,
       actions: actions.value,
       desktopPanel: desktop.value.panel,
@@ -337,12 +344,13 @@ function readDesktop(
   value: {
     checks: DesktopCheckId[];
     entry: PluginDesktopEntry | null;
+    page: PluginDesktopPage | null;
     panel: PluginDesktopPanel | null;
     sessionMenu: PluginSessionMenuItem[];
   };
 } | { ok: false; error: string } {
   if (input === undefined) {
-    return { ok: true, value: { checks: [], entry: null, panel: null, sessionMenu: [] } };
+    return { ok: true, value: { checks: [], entry: null, page: null, panel: null, sessionMenu: [] } };
   }
   if (!isRecord(input)) return { ok: false, error: 'desktop 必须是对象' };
 
@@ -364,9 +372,12 @@ function readDesktop(
   if (!sessionMenu.ok) return sessionMenu;
   const rawEntry = input.entry;
   if (rawEntry === undefined) {
+    if (input.page !== undefined) {
+      return { ok: false, error: 'desktop.page 需要同时声明 desktop.entry：侧栏那一行是它的入口' };
+    }
     return {
       ok: true,
-      value: { checks, entry: null, panel: panel.value, sessionMenu: sessionMenu.value },
+      value: { checks, entry: null, page: null, panel: panel.value, sessionMenu: sessionMenu.value },
     };
   }
   if (!isRecord(rawEntry)) return { ok: false, error: 'desktop.entry 必须是对象' };
@@ -376,10 +387,35 @@ function readDesktop(
   }
   // 侧栏那一行只有一行的宽度：文案留空的退化成语义（用插件名）而不是画一行空白。
   const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
+  const page = readDesktopPage(input.page, label);
+  if (!page.ok) return page;
   return {
     ok: true,
-    value: { checks, entry: { label }, panel: panel.value, sessionMenu: sessionMenu.value },
+    value: { checks, entry: { label }, page: page.value, panel: panel.value, sessionMenu: sessionMenu.value },
   };
+}
+
+/**
+ * `desktop.page`：把入口做成整页而不是悬停卡片。
+ *
+ * 只关心标题：页面长什么样是插件的事，宿主只画外面那层壳（返回、标题、拖动条）。
+ * `true` 是最常见的写法，等价于「标题取侧栏那一行」。
+ */
+function readDesktopPage(
+  input: unknown,
+  entryLabel: string,
+): { ok: true; value: PluginDesktopPage | null } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: null };
+  if (typeof input === 'boolean') {
+    return input ? { ok: true, value: { title: entryLabel } } : { ok: true, value: null };
+  }
+  if (!isRecord(input)) return { ok: false, error: 'desktop.page 必须是对象或 true' };
+  const rawTitle = input.title;
+  if (rawTitle !== undefined && typeof rawTitle !== 'string') {
+    return { ok: false, error: 'desktop.page.title 必须是字符串' };
+  }
+  const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : entryLabel;
+  return { ok: true, value: { title } };
 }
 
 /**

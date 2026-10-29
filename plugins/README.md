@@ -308,11 +308,16 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   （`apps/desktop/src/renderer/src/PluginEntries.jsx`）负责。
 - 宿主按插件 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里
   登记**——加一个桌面入口只改插件目录。
-- 模块拿到的 `api` 只有五件事：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
+- 模块拿到的 `api` 只有六件事：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
   （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value)`
   （插件自己的 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构）、`open(url)`
   （外壳里开新窗口、浏览器里开新标签页）、`access`（`get()` / `set({ enabled, password })`
-  读写这台机器的远程访问策略——请求分派只存在于运行时进程，页面自己改不了）。
+  读写这台机器的远程访问策略——请求分派只存在于运行时进程，页面自己改不了）、
+  `action(key)`（执行清单 `actions` 里声明过的一个动作，结果是 `{ ok, message?, link?, error? }`）。
+- `action` 是「卡片要真的干一件事」：页面里没有插件自己的代码，所以按 key 请宿主去跑
+  `mica plugin-action`——与配置页点按钮同一条路，不需要会话。没在清单里声明的 key 会被拒绝，
+  所以卡片能用哪些动作和配置页看到哪些按钮是同一份声明。动作可能真的在干活（同步一批数据），
+  插件应当自己设好预算、在超时前交出部分结果，而不是干等到被掐断。
 - **只对随包插件生效**：桌面页面是构建期打的包，只能收录打包时仓库里存在的
   `plugins/<id>/desktop.jsx`；用户插件装在运行时才出现的 `$MICA_HOME/plugins`，声明了也
   渲染不出入口，所以 `desktop.entry` 不必也不能靠 `requires: ["desktop"]` 表达——
@@ -376,6 +381,17 @@ ctx.desktop.panel({
   请求应当做成「投一段话进会话，让模型自己去做」，而不是在按钮回调里同步等。
 - 动作做不了（少了配置、频道为空）时 `return { message: '先添加频道' }`：页面会在按钮旁边
   显示这一行。`ctx.ui.notice()` 在常驻宿主里只落进 notice 记录，用户点完按钮往往看不到。
+- 动作还能做两件「跨出面板一步」的事，插件只声明意图，页面去做：
+  - `return { compose: '一整段提示词' }` 把文本放进**当前会话的输入框**，**不发送**。
+    用户还能改、能删，按回车才算数——适合「先看一眼再决定发不发」的场合。
+  - `return { newSession: { prompt, role?, cwd?, confirm? } }` 开一个**新会话**，把这段
+    提示词作为它的第一条消息发出去。`confirm` 默认 `true`：页面先弹窗显示**完整提示词**
+    （可编辑），用户点「开始」才真的建会话；只有按钮本身已经表示「就是要开」时才设
+    `confirm: false`。
+
+  两件都不该由插件自己模拟：建会话、绑角色、摆新页签、控制发送时机都是宿主的事，插件
+  碰不到也不该碰。反过来，需要周期性自己发起的动作（到点复盘）仍用
+  `ctx.runtime.submit`，那没有页面可交互。
 - 面板动作可以改 `ctx.sessionState`（这块面板上的频道、调度参数这类按会话存的配置），
   宿主在动作返回后补一次会话落盘——不然用户配完关掉窗口就丢，也许久不会开下一轮。
   反过来说，**跨会话共享的配置不要塞进面板动作**：那是 `ctx.settings` 的事。

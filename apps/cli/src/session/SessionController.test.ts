@@ -204,6 +204,61 @@ describe('SessionController', () => {
     expect((persisted as PersistedSession | null)?.title).toBe('after the switch');
   });
 
+  it('never wipes a persisted conversation through an allowEmpty save', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    // 文件里有历史，但 agent 里是空的（resume 没把历史装进来）：面板动作、能力开关这类
+    // 不跑 turn 的入口调 allowEmpty 存盘时，不能把这份历史写成空。
+    const persisted = {
+      version: 1 as const,
+      id: 'session-under-test',
+      title: 'kept',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      cwd: '/tmp',
+      turnState: 'completed' as const,
+      snapshot: {
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages: [],
+        conversationMessages: [{ role: 'user', content: 'history that must survive' }],
+        usageHistory: [],
+        lastUsage: undefined,
+      },
+    };
+    const save = vi.fn();
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages: [],
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => []),
+    };
+    const controller = new SessionController({
+      agent,
+      store: {
+        list: () => [],
+        listRecent: () => [],
+        load: () => persisted,
+        save,
+        delete: () => false,
+      },
+    });
+
+    expect(controller.saveCurrent({ allowEmpty: true })).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('still allows an explicit empty crash-recovery checkpoint', async () => {
     const { SessionController } = await import('./SessionController.js');
     const save = vi.fn();

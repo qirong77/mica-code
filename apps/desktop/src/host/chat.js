@@ -63,6 +63,8 @@ import {
 
 const NOTIFY_TIMEOUT_MS = 1500
 const ABORT_FORCE_KILL_MS = 5000
+/** 停止时取回排队消息的等待上限：这是交互动作，不该为一条可能不存在的队列陪等。 */
+const ABORT_RECALL_TIMEOUT_MS = 1500
 const MAX_STDERR_CHARS = 32 * 1024
 const MAX_COMPLETED_RUNS = 40
 const MAX_QUEUED_RUNS = 50
@@ -1210,7 +1212,10 @@ function handleHostNotification(id, run, notification) {
     // error/aborted 的日志被隐藏，并误报 "mica 进程已退出（code 1）"。
     if (event) pushChatEvent(run, event)
     sendChatExit(id, run, { exitCode: reason === 'error' ? 1 : 0 })
-    replayQueuedTurn(id, run)
+    // 排队输入只在**真正完成**的一轮之后接着发；中止/失败时留在队列里等用户
+    // 撤回或下一次完成（与 message-queue 插件的 turn:after 同一条规则）。
+    if (reason === 'completed') replayQueuedTurn(id, run)
+    else pushQueueState(id, run)
     return
   } else if (method === 'item/commandExecution/outputDelta') {
     const itemId = params.itemId
@@ -1442,29 +1447,78 @@ function disposeHost(id) {
   timer.unref?.()
 }
 
-function abortRun(id) {
+/**
+ * 点停止时把排队消息一起取回来。
+ *
+ * 「停下来」不等于「停下并把刚才排的那句话发出去」：用户按的是停止，排队消息应该回到
+ * 输入框。两个槽都要取——本地 after_turn 队列，以及 host 的 after_iteration 单槽
+ * （它活在 app-server 进程里，只能经 `mica/queue/recall` 取）。
+ *
+ * 取不到就留着（已经注入给模型，或 host 不响应）：中止之后它仍留在队列里，用户还能
+ * 按 Shift+← 手动撤回，不会凭空消失。
+ */
+async function recallQueuedForAbort(id, run) {
+  const recalled = []
+  for (let item = queuedRuns.take(id); item; item = queuedRuns.take(id)) {
+    recalled.push({ id: item.payload?.clientMessageId || '', text: item.payload?.prompt || '' })
+  }
+  if (!run?.child) return recalled
+  // 单槽：最多一条。`run.hostPending` 只是 host 通知的镜像，可能落后（确认还在路上），
+  // 所以先按已知 id 取；取不到再不带 id 取一次——宿主那边 `mica/queue/recall` 不带 id
+  // 时取的就是槽里那一条，刚入队、确认还没到的消息因此也能取回。
+  const pendingId = run.hostPending?.[0]?.id
+  const candidates = pendingId ? [pendingId, undefined] : [undefined]
+  for (const clientMessageId of candidates) {
+    const response = await hostTaskRequest(
+      run,
+      'mica/queue/recall',
+      clientMessageId ? { clientMessageId } : {},
+      // 停止是交互动作，不能为了取队列陪 host 等满默认超时：取不到就当没排队。
+      { timeoutMs: ABORT_RECALL_TIMEOUT_MS }
+    )
+    const input = response?.result?.input
+    if (!response?.ok || !input) continue
+    recalled.push({ id: input.id || clientMessageId || '', text: input.text || '' })
+    break
+  }
+  return recalled
+}
+
+async function abortRun(id) {
   const run = runs.get(id)
-  if (!run?.child || !run.running) return false
+  if (!run?.child) return { ok: false, recalled: [] }
+  // 先撤回排队、再中断：撤回是唯一能保证「这段话没有被发出去」的顺序。
+  const recalled = await recallQueuedForAbort(id, run)
+  if (recalled.length) pushQueueState(id, run)
+  // host 已经空闲、队列里却还留着一条（上一轮被中止、用户还没撤回）：停止同样把它
+  // 退回输入框，界面不必再等一次点按。
+  if (!run.running) return { ok: false, recalled }
   run.aborting = true
+  // 强杀兜底只针对「点停止时正在跑的这一轮」：中止之后 host 可能立刻起了新的一轮
+  // （排队重放、用户紧接着发的消息），那一轮是新的 turn/started（`aborting` 已被它
+  // 清掉、turn id 也换了）。按旧的 5s 定时器不区分对象地杀进程，就会让新的一轮
+  // 刚跑起来就被连人带 host 一起干掉——用户看到的就是「停止后它又跑了一下然后马上停」。
+  const abortedTurnId = run.currentTurnId || null
   if (!sendInterrupt(run)) {
     try {
       run.child.kill('SIGTERM')
     } catch {
       // ignore
     }
-    return true
+    return { ok: true, recalled }
   }
   const timer = setTimeout(() => {
-    if (runs.get(id) === run && run.running) {
-      try {
-        run.child.kill('SIGTERM')
-      } catch {
-        // ignore
-      }
+    if (runs.get(id) !== run) return
+    if (!run.running || !run.aborting) return
+    if (abortedTurnId && run.currentTurnId && run.currentTurnId !== abortedTurnId) return
+    try {
+      run.child.kill('SIGTERM')
+    } catch {
+      // ignore
     }
   }, ABORT_FORCE_KILL_MS)
   timer.unref?.()
-  return true
+  return { ok: true, recalled }
 }
 
 function runModelsCommand(mica, args) {
@@ -1698,8 +1752,8 @@ export function registerChatIpc() {
     return startCommitRun(event.sender, commitId, payload)
   })
 
-  ipcMain.handle('chat:abort', (_event, { id } = {}) => {
-    if (!id) return false
+  ipcMain.handle('chat:abort', async (_event, { id } = {}) => {
+    if (!id) return { ok: false, recalled: [] }
     return abortRun(id)
   })
 

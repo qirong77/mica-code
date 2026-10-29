@@ -59,6 +59,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         llm: readLlm(manifest.id, manifest.llm, manifest.settings, configRoot),
         desktopChecks: resolveDesktopChecks(manifest.desktopChecks),
         desktopEntry: manifest.desktopEntry,
+        desktopPage: manifest.desktopPage,
         status: readStatus(manifest.id, manifest.status, configRoot),
         actions: manifest.actions,
         desktopPanel: manifest.desktopPanel,
@@ -94,6 +95,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         desktopChecks: resolveDesktopChecks(plugin.desktopChecks),
         // 用户插件没有打包进页面的前端模块，声明了 `desktop.entry` 也渲染不出入口。
         desktopEntry: null,
+        desktopPage: null,
         status: readStatus(plugin.id, plugin.status ?? [], configRoot),
         actions: plugin.actions ?? [],
         // 面板反过来是数据驱动的，所以用户插件声明了就有。

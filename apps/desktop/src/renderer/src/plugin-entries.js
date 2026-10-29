@@ -51,8 +51,17 @@ export function usePluginEntries() {
           if (!load) return null
           try {
             const module = await load()
-            if (!module?.default) return null
-            return { id: plugin.id, label: plugin.desktopEntry.label, icon: plugin.icon, module }
+            // 整页入口只要求模块有 `Page`（可以是 default），卡片入口要求有 default
+            const page = plugin.desktopPage ?? null
+            const component = page ? (module?.Page ?? module?.default) : module?.default
+            if (!component) return null
+            return {
+              id: plugin.id,
+              label: plugin.desktopEntry.label,
+              icon: plugin.icon,
+              module,
+              page,
+            }
           } catch {
             return null
           }

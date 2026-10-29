@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'bun:test'
-import { resolveQueueRecall } from './chat-recall'
+import { mergeRecalledDraft, resolveQueueRecall } from './chat-recall'
 
 describe('resolveQueueRecall', () => {
   it('restores the draft when the host took the message back', () => {
     expect(
-      resolveQueueRecall({ id: 'msg-1', pending: false, ok: true, queuedItems: [], runActive: true })
+      resolveQueueRecall({
+        id: 'msg-1',
+        pending: false,
+        ok: true,
+        queuedItems: [],
+        runActive: true
+      })
     ).toBe('restore')
   })
 
@@ -38,7 +44,13 @@ describe('resolveQueueRecall', () => {
   // 不能继续挂在排队区。
   it('marks the row as sent while a turn is still running', () => {
     expect(
-      resolveQueueRecall({ id: 'msg-1', pending: false, ok: false, queuedItems: [], runActive: true })
+      resolveQueueRecall({
+        id: 'msg-1',
+        pending: false,
+        ok: false,
+        queuedItems: [],
+        runActive: true
+      })
     ).toBe('sent')
   })
 
@@ -59,7 +71,30 @@ describe('resolveQueueRecall', () => {
   // 拿不到队列快照时不能假设消息发出去了。
   it('keeps a confirmed row when the host reported no queue snapshot', () => {
     expect(
-      resolveQueueRecall({ id: 'msg-1', pending: false, ok: false, queuedItems: null, runActive: false })
+      resolveQueueRecall({
+        id: 'msg-1',
+        pending: false,
+        ok: false,
+        queuedItems: null,
+        runActive: false
+      })
     ).toBe('keep')
+  })
+})
+
+describe('mergeRecalledDraft', () => {
+  it('fills an empty composer with the recalled text', () => {
+    expect(mergeRecalledDraft('', '排队的话')).toBe('排队的话')
+    expect(mergeRecalledDraft('   ', '排队的话')).toBe('排队的话')
+  })
+
+  // 已经在写的草稿不能和被撤回的那句粘成一句。
+  it('appends to an existing draft on its own line', () => {
+    expect(mergeRecalledDraft('写了一半', '排队的话')).toBe('写了一半\n\n排队的话')
+  })
+
+  it('leaves the draft alone when nothing came back', () => {
+    expect(mergeRecalledDraft('写了一半', '')).toBe('写了一半')
+    expect(mergeRecalledDraft('写了一半', null)).toBe('写了一半')
   })
 })

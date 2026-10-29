@@ -75,6 +75,7 @@ function manifest(requires: string[]) {
     requires: requires as never,
     desktopChecks: [],
     desktopEntry: null,
+    desktopPage: null,
     status: [],
     actions: [],
     desktopPanel: null,

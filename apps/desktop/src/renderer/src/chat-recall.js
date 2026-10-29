@@ -20,3 +20,15 @@ export function resolveQueueRecall({ id, pending, ok, queuedItems, runActive }) 
   }
   return pending ? 'restore' : 'keep'
 }
+
+/**
+ * 撤回的原文怎么并进输入框：原来有内容就空一行接在后面，否则两句话会粘成一句。
+ *
+ * 两条入口共用这一条规则——Shift+← 手动撤回，以及点停止时 host 一并取回的排队消息。
+ */
+export function mergeRecalledDraft(current, text) {
+  const recalled = String(text ?? '').trim()
+  const existing = String(current ?? '')
+  if (!recalled) return existing
+  return existing.trim() ? `${existing}\n\n${recalled}` : recalled
+}

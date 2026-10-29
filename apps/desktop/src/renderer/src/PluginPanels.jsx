@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, Loader2, X } from 'lucide-react'
-import { usePluginPanels } from './plugin-panels'
+import { applyPanelResult, usePluginPanels } from './plugin-panels'
 
 /**
  * 对话右侧的插件面板：仓库侧那一条按钮 + 点开的抽屉。
@@ -31,7 +31,9 @@ export function PluginQuickBar({
   role,
   openPlugin,
   focusSection,
-  onTogglePanel
+  onTogglePanel,
+  onCompose,
+  onLaunchSession
 }) {
   const panels = usePluginPanels(role)
   const [pending, setPending] = useState('')
@@ -67,6 +69,7 @@ export function PluginQuickBar({
           cwd
         })
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
+      applyPanelResult(result, { onCompose, onLaunchSession })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
     } finally {
       setPending('')
@@ -112,7 +115,17 @@ export function PluginQuickBar({
 }
 
 /** 抽屉本体：只画 `openPlugin` 指定的那一块。 */
-export function PluginPanels({ nodeId, sessionId, cwd, role, openPlugin, focusSection, onClose }) {
+export function PluginPanels({
+  nodeId,
+  sessionId,
+  cwd,
+  role,
+  openPlugin,
+  focusSection,
+  onClose,
+  onCompose,
+  onLaunchSession
+}) {
   const panels = usePluginPanels(role)
   const open = panels.find((panel) => panel.id === openPlugin) || null
 
@@ -132,11 +145,23 @@ export function PluginPanels({ nodeId, sessionId, cwd, role, openPlugin, focusSe
       cwd={cwd}
       focusSection={focusSection}
       onClose={onClose}
+      onCompose={onCompose}
+      onLaunchSession={onLaunchSession}
     />
   )
 }
 
-function PluginPanelDock({ pluginId, label, nodeId, sessionId, cwd, focusSection, onClose }) {
+function PluginPanelDock({
+  pluginId,
+  label,
+  nodeId,
+  sessionId,
+  cwd,
+  focusSection,
+  onClose,
+  onCompose,
+  onLaunchSession
+}) {
   const [view, setView] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
@@ -205,9 +230,10 @@ function PluginPanelDock({ pluginId, label, nodeId, sessionId, cwd, focusSection
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
       setBusy('')
       applyView(result, { resetDrafts: true })
+      applyPanelResult(result, { onCompose, onLaunchSession })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
     },
-    [applyView, cwd, drafts, nodeId, pluginId, sessionId]
+    [applyView, cwd, drafts, nodeId, onCompose, onLaunchSession, pluginId, sessionId]
   )
 
   const sections = useMemo(() => view?.sections || [], [view])

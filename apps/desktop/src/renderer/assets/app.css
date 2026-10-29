@@ -2807,6 +2807,28 @@ body.is-resizing.is-resizing-terminal {
   outline-offset: 0;
 }
 
+/* 多行文本（插件要开新会话时给用户看的提示词）：与单行输入同一套描边，撑满弹窗正文，
+   用户在这里改完再点开始。 */
+.chat-modal-textarea {
+  width: 100%;
+  min-height: 260px;
+  max-height: 52vh;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 4px;
+  background: rgb(255 255 255 / 4%);
+  color: var(--color-fg-max);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.chat-modal-textarea:focus {
+  outline: 1px solid rgb(255 255 255 / 12%);
+  outline-offset: 0;
+}
+
 .chat-modal-prompt {
   max-width: var(--modal-w-narrow);
 }

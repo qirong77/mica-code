@@ -389,12 +389,14 @@ function createWebApi(env) {
     },
 
     // 插件的前端模块（`plugins/<id>/desktop.jsx`）能用到的宿主能力，见 renderer 的
-    // plugin-host.js。宿主不认识任何具体插件，这里也只有两件事：探活一个地址（页面
-    // 跨源 fetch 读不到结果）与读写插件自己的数据文件（页面没有文件系统）。
+    // plugin-host.js。宿主不认识任何具体插件：探活一个地址（页面跨源 fetch 读不到结果）、
+    // 读写插件自己的数据文件（页面没有文件系统）、执行一个清单里声明过的动作（页面跑不了
+    // 插件自己的代码）。
     pluginHost: {
       probe: (address) => invoke('plugin-host:probe', { address }),
       readData: (pluginId) => invoke('plugin-host:read-data', { pluginId }),
       writeData: (pluginId, value) => invoke('plugin-host:write-data', { pluginId, value }),
+      runAction: (pluginId, action) => invoke('plugin-host:run-action', { pluginId, action }),
       // 运行时的远程访问策略（要不要口令、口令是什么、别人从哪个地址进来）
       access: () => invoke('plugin-host:access-get'),
       setAccess: (patch) => invoke('plugin-host:access-set', patch ?? {})

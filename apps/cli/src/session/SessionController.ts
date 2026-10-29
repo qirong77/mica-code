@@ -150,6 +150,17 @@ export class SessionController {
       return false;
     }
 
+    // `allowEmpty` 是「草稿也存一份」，不是「允许把已有历史写空」：resume 没把历史装进
+    // agent 的进程（插件面板动作、能力开关这类不跑 turn 的入口）如果照原样存，
+    // 用户几百条对话会被一次点击抹掉。宁可这次不落盘。
+    if (
+      options.allowEmpty &&
+      !hasConversation(snapshot.messages, conversationMessages) &&
+      this.persistedConversationCount() > 0
+    ) {
+      return false;
+    }
+
     const now = new Date().toISOString();
     const existing = this.store.load(this.currentSessionId);
     if (this.currentPersistedSignature !== null && !existing) {
@@ -257,6 +268,19 @@ export class SessionController {
 
   getCurrentSessionId(): string {
     return this.currentSessionId;
+  }
+
+  /**
+   * 落盘那份会话里已有多少条对话。
+   *
+   * 用来发现「内存里是空的、文件里却有历史」这种不一致：宿主在某些路径上会直接
+   * 存一次（插件面板动作改会话级状态），如果 resume 没成功把历史装进 agent，
+   * 这一次存盘就会把用户的历史整段抹掉。
+   */
+  persistedConversationCount(): number {
+    const session = this.store.load(this.currentSessionId);
+    if (!session) return 0;
+    return getPersistedConversationMessages(session.snapshot).length;
   }
 
   resume(id: string): ResumeSessionResult {

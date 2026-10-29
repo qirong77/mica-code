@@ -2,9 +2,11 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { dirname } from 'node:path'
 import { ipcMain } from 'electron'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
+import { runPluginAction } from '@mica-config-ui/plugin-action'
 import { probeRuntime } from './runtime-probe-core'
-import { decodePluginData, encodePluginData, pluginDataPath } from './plugin-data-core'
+import { decodePluginData, encodePluginData, isValidPluginId, pluginDataPath } from './plugin-data-core'
 import { applyRemoteAccessPatch, describeRemoteAccess } from './remote-access.js'
+import { resolveMicaExecutable } from './mica-cli'
 
 /**
  * 插件在桌面端的**能力面**（宿主只提供能力，不认识任何具体插件）。
@@ -19,9 +21,18 @@ import { applyRemoteAccessPatch, describeRemoteAccess } from './remote-access.js
  * - `plugin-host:access-get` / `plugin-host:access-set`：运行时的**远程访问策略**（是否
  *   要求口令、口令是什么）。这是宿主自己的能力，不属于某个插件——任何要解释或调整「别的
  *   机器怎么进这台机器」的插件都读同一份，宿主的请求分派也读同一份。
+ * - `plugin-host:run-action`：执行清单里声明过的一个动作（`refresh`、`register` …）。
+ *   卡片能读能写数据，但「去干一件事」只能由插件自己的进程做，所以这里转给
+ *   `mica plugin-action`——一次性的插件宿主，与配置页点按钮走的是同一条路。
  *
  * 判断逻辑分别在 runtime-probe-core.js 与 plugin-data-core.js（纯函数，便于单测）。
  */
+
+/**
+ * 动作可能真的在干活（同步一批群、读一遍群公告），所以给它比配置页更宽的预算；
+ * 插件自己应当在预算用完前交出部分结果，而不是干等到被掐断。
+ */
+const ACTION_TIMEOUT_MS = 180_000
 
 function micaHome() {
   return process.env.MICA_HOME || resolveMicaHome()
@@ -88,5 +99,27 @@ export function registerPluginHostIpc() {
   ipcMain.handle('plugin-host:access-set', (_event, payload) => {
     const written = applyRemoteAccessPatch(payload)
     return { enabled: written.enabled, password: written.password }
+  })
+
+  /**
+   * 卡片触发插件动作。
+   *
+   * 失败把原因回给页面而不是抛异常：卡片上的一行红字比一个没人接的 rejected promise
+   * 有用得多。
+   */
+  ipcMain.handle('plugin-host:run-action', async (_event, payload) => {
+    const pluginId = payload?.pluginId
+    const action = payload?.action
+    if (!isValidPluginId(pluginId)) return { ok: false, error: '插件 id 非法：只能是小写字母、数字与 . _ -' }
+    if (typeof action !== 'string' || !action.trim()) return { ok: false, error: '缺少动作名' }
+    try {
+      const result = await runPluginAction(
+        { id: pluginId, action: action.trim() },
+        { cliPath: resolveMicaExecutable() ?? undefined, timeoutMs: ACTION_TIMEOUT_MS },
+      )
+      return { ok: true, message: result.message, link: result.link }
+    } catch (error) {
+      return { ok: false, error: error?.message || String(error) }
+    }
   })
 }

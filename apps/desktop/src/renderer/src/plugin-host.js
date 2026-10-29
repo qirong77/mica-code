@@ -9,6 +9,10 @@ import { isElectronShell } from './shell-env'
  *
  * `open` 反过来是纯页面能力：打开另一个运行时就是一次 `location.assign`，外壳接管它
  * 并弹出新窗口（见 src/main/index.js 的 will-navigate），浏览器里开新标签页。
+ *
+ * `action` 是「卡片要真的干一件事」：刷新一批数据、试连一次接口。页面里没有插件自己的
+ * 代码，所以只能按清单里声明过的 key 请宿主去跑——执行它的是 `mica plugin-action`，
+ * 与配置页点按钮同一条路，同样不需要打开会话。
  */
 
 /** 当前页面所在的运行时：页面就是它托管的，所以 origin 即地址。 */
@@ -71,6 +75,13 @@ export function createPluginHostApi(pluginId) {
       set: (patch) => host.setAccess(patch)
     },
     /** 打开另一个运行时：外壳里开新窗口，浏览器里开新标签页。 */
-    open: (url) => openRuntimeTarget(url)
+    open: (url) => openRuntimeTarget(url),
+    /**
+     * 执行清单里声明过的一个动作（`plugin.json` 的 `actions[].key`）。
+     *
+     * 结果是 `{ ok, message?, link?, error? }`：失败不抛异常，卡片上一行红字比一个没人接
+     * 的 rejected promise 有用。没声明的 key 会被拒绝——页面上本来就没有那个按钮。
+     */
+    action: (key) => host.runAction(pluginId, String(key ?? ''))
   }
 }

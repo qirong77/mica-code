@@ -301,6 +301,11 @@ export type ConfigWebPlugin = {
    */
   desktopEntry: ConfigWebPluginDesktopEntry | null;
   /**
+   * 清单的 `desktop.page`：点侧栏那一行打开的是整页（插件模块的 `Page` 导出），而不是
+   * 悬停卡片。只对随包插件有效，理由与 `desktopEntry` 相同。
+   */
+  desktopPage: ConfigWebPluginDesktopPage | null;
+  /**
    * 清单声明的运行状态行（清单 `status`）。值来自插件自己写的
    * `plugin-data/<id>/data.json`，宿主管不到插件的运行态，也就不替它编造；
    * 插件还没写过这个键时为 `null`，页面显示占位。
@@ -347,6 +352,11 @@ export type ConfigWebPlugin = {
 /** 桌面端侧栏入口的静态描述：清单只给文案，卡片内容是插件自己的模块。 */
 export type ConfigWebPluginDesktopEntry = {
   label: string;
+};
+
+/** 侧栏入口打开的整页视图（清单 `desktop.page`）：宿主只画标题，内容来自插件模块。 */
+export type ConfigWebPluginDesktopPage = {
+  title: string;
 };
 
 /** 配置页上的一个动作按钮：清单声明文案，插件执行。 */

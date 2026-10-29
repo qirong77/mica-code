@@ -104,6 +104,7 @@ import {
 import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { BtwDrawer } from './BtwDrawer'
 import { PluginPanels, PluginQuickBar } from './PluginPanels'
+import { queuePluginLaunch, takePluginLaunch } from './plugin-launch'
 import { LoopBadge } from './LoopBadge'
 import { SessionSettingsDialog } from './SessionSettingsDialog'
 import { Popover } from './Popover'
@@ -126,7 +127,7 @@ import {
 import { longPressHandlers, useLatest } from './hooks'
 import { canGoToPreviousConversation, conversationNavTarget } from './chat-conversation-nav'
 import { readScrollEntry, resolveScrollRestore, writeScrollEntry } from './chat-scroll'
-import { resolveQueueRecall } from './chat-recall'
+import { mergeRecalledDraft, resolveQueueRecall } from './chat-recall'
 import { uid } from './workspace'
 import { setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState } from './ui-state'
 import {
@@ -451,15 +452,18 @@ function UserMessageBody({ text }) {
   )
 }
 
-function QueueDock({ items, onRecall, recallingId }) {
+function QueueDock({ items, onRecall, recallingId, running }) {
   if (!items.length) return null
   // 文案与 CLI 的 waiting queue 提示完全一致（含 shift + ← 撤回提示，app 也
   // 支持这个快捷键，另外每条还提供按钮）。忙时的 Enter/Tab/Shift+Tab 都走
   // host 的 after_iteration 单槽（mica/queue/queued 扩展通知，注入活跃
   // turn），after_turn 只留给显式请求，标题按投递时机区分。
   const queueMode = items[0]?.queueMode
-  const headerText =
-    queueMode === 'after_iteration'
+  // 轮次已经结束（用户点了停止 / 这一轮失败）时排队条目仍留在单槽里等撤回，
+  // 此刻已经没有「正在跑的迭代」可注入，标题不能说还在等迭代边界。
+  const headerText = !running
+    ? 'waiting for the next turn'
+    : queueMode === 'after_iteration'
       ? 'waiting to send after a complete tool-call iteration'
       : 'waiting to send after current turn'
   return (
@@ -1022,6 +1026,46 @@ function TaskDetailModal({
 
 /** 时间线默认只渲染末尾这么多步，更早的折成一行按钮（长任务动辄上百步）。 */
 const SUBAGENT_STEP_WINDOW = 24
+
+/**
+ * 插件要「在新会话里跑一段提示词」时的确认弹窗。
+ *
+ * 让用户先看见**将要发出去的全部内容**：这一下要开一个新会话、跑一整轮请求，代价不小，
+ * 而提示词里带着时间窗、频道清单这类会随手改的东西。所以文本可编辑，改完再点开始。
+ */
+function PluginTaskDialog({ task, onChange, onConfirm, onClose }) {
+  return (
+    <ModalShell
+      title="在新会话里运行"
+      subtitle="确认后会开一个新会话，把下面这段作为它的第一条消息发出去"
+      meta={task.role ? <ModalMeta items={[`角色：${task.role}`]} /> : null}
+      onClose={onClose}
+      className="chat-modal-prompt"
+      footer={
+        <>
+          <button type="button" className="session-action" onClick={onClose}>
+            取消
+          </button>
+          <button
+            type="button"
+            className="session-action session-action-primary"
+            onClick={onConfirm}
+            disabled={!task.prompt.trim()}
+          >
+            开始
+          </button>
+        </>
+      }
+    >
+      <textarea
+        className="chat-modal-textarea"
+        value={task.prompt}
+        spellCheck={false}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </ModalShell>
+  )
+}
 
 /**
  * subagent 的活动记录：**与主对话共用一套展示件**。
@@ -2644,6 +2688,8 @@ export function ChatView({
   const [commitRunning, setCommitRunning] = useState(false)
   // 双击用户消息进入的就地编辑（单槽位）：{ id, prompt, text } | null
   const [messageEdit, setMessageEdit] = useState(null)
+  // 插件要开新会话时先给用户看的提示词（确认后才真的建会话、发消息）。
+  const [pluginTask, setPluginTask] = useState(null)
   const commitTaskRef = useRef(null) // { id, noticeId, cwd, nodeId }
   // 输入框区域手动设定的最小高度（px）；null 表示跟随默认 30px
   const [composerMinHeight, setComposerMinHeight] = useState(null)
@@ -5015,6 +5061,51 @@ export function ChatView({
     ]
   )
 
+  /**
+   * 停止时把排队消息放回输入框。
+   *
+   * host 已经把它们从队列里取走了（见 `recallQueuedForAbort`），这里只做界面收尾：
+   * 摘掉对话里的乐观行与排队行，原文接在输入框现有内容后面——与 Shift+← 撤回同一
+   * 种落地方式，用户改两字就能再发。
+   */
+  const restoreRecalledQueue = useCallback(
+    (recalled, targetNodeId) => {
+      const ids = recalled.map((item) => item?.id).filter(Boolean)
+      const text = recalled
+        .map((item) => String(item?.text || '').trim())
+        .filter(Boolean)
+        .join('\n\n')
+      if (ids.length) {
+        queuedMessageIdsRef.current = queuedMessageIdsRef.current.filter((id) => !ids.includes(id))
+        setQueuedItems((items) => items.filter((item) => !ids.includes(item.id)))
+        updateMessages((previous) => previous.filter((message) => !ids.includes(message.id)))
+      }
+      if (!text) return
+      // 停止期间用户已经切到别的会话：文本仍写进那个节点的草稿，切回去就在输入框里。
+      const current = nodeIdRef.current
+      if (current !== targetNodeId) {
+        draftsRef.current.set(
+          targetNodeId,
+          mergeRecalledDraft(draftsRef.current.get(targetNodeId), text)
+        )
+        return
+      }
+      setInput((previous) => {
+        const next = mergeRecalledDraft(previous, text)
+        draftsRef.current.set(targetNodeId, next)
+        return next
+      })
+      historyCursorRef.current = -1
+      requestAnimationFrame(() => {
+        const element = textareaRef.current
+        if (!element) return
+        element.focus()
+        element.setSelectionRange(element.value.length, element.value.length)
+      })
+    },
+    [nodeIdRef, updateMessages]
+  )
+
   const stop = useCallback(() => {
     if (!nodeId || stopping) return
     const targetNodeId = nodeId
@@ -5024,9 +5115,12 @@ export function ChatView({
       // 中止打到持有这个 run 的节点上：附着在别的页签的 run 时是本节点不能直接停的，
       // 但用户看到的就是同一轮，允许他在这里停。
       .abort(runKey)
-      .then((aborted) => {
+      .then((result) => {
+        // host 在中断之前先把排队消息取了出来：它们没被发出去，回到输入框。
+        const recalled = Array.isArray(result?.recalled) ? result.recalled : []
+        if (recalled.length) restoreRecalledQueue(recalled, targetNodeId)
         if (nodeIdRef.current !== targetNodeId) return
-        if (!aborted) {
+        if (!result?.ok) {
           setStopping(false)
           setRunning(false)
           setPhase('idle')
@@ -5035,7 +5129,97 @@ export function ChatView({
       .catch(() => {
         if (nodeIdRef.current === targetNodeId) setStopping(false)
       })
-  }, [nodeId, nodeIdRef, runKey, stopping])
+  }, [nodeId, nodeIdRef, restoreRecalledQueue, runKey, stopping])
+
+  /**
+   * 插件要求「把这段放进输入框」：填好、聚焦，**不发送**。
+   *
+   * 用户可能想改几个字、换个时间窗再发，所以这条路径不经过 send，也不发生任何请求；
+   * 按回车才算数。草稿同样写进共享草稿表，切走再回来文本还在。
+   */
+  const composeFromPlugin = useCallback((text) => {
+    const target = nodeIdRef.current
+    const value = String(text ?? '')
+    if (!target || !value.trim()) return
+    draftsRef.current.set(target, value)
+    setInput(value)
+    textareaRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  const sendRef = useLatest(send)
+
+  /**
+   * 插件要求「在一个新会话里跑这段提示词」。
+   *
+   * 建会话是 App 的事（页签、草稿复用、cwd 都在那边），这里只负责把「要跑什么」交接给
+   * 那个即将挂载的 ChatView（见 `plugin-launch.js`）；万一复用到的是当前这个空草稿，
+   * 就直接在这里发。
+   */
+  const launchPluginSession = useCallback(
+    (task) => {
+      const prompt = String(task?.prompt ?? '').trim()
+      if (!prompt) return
+      const role = typeof task?.role === 'string' ? task.role.trim() : ''
+      const target = onNewSessionRef.current?.(task?.cwd || cwdRef.current || null)
+      if (!target) {
+        appendNotice('插件要新开一个会话，但当前没有可用的工作目录', 'error')
+        return
+      }
+      if (target === nodeIdRef.current) {
+        if (role)
+          overridesRef.current.set(target, { ...(overridesRef.current.get(target) || {}), role })
+        sendRef.current(prompt)
+        return
+      }
+      queuePluginLaunch(target, { prompt, role })
+    },
+    [appendNotice, cwdRef, nodeIdRef]
+  )
+
+  // 新会话挂载并读完历史后，把交接单里的那条提示词发出去。等 `historyLoaded` 而不是
+  // 挂载即可：草稿节点拿到 sessionId 之前发消息会另起一条会话，交接就丢在半路。
+  useEffect(() => {
+    if (!nodeId || !historyLoaded) return
+    const task = takePluginLaunch(nodeId)
+    if (!task) return
+    if (task.role) {
+      overridesRef.current.set(nodeId, {
+        ...(overridesRef.current.get(nodeId) || {}),
+        role: task.role
+      })
+    }
+    sendRef.current(task.prompt)
+  }, [historyLoaded, nodeId, sendRef])
+
+  const closePluginTask = useCallback(() => setPluginTask(null), [])
+  const changePluginTaskPrompt = useCallback((value) => {
+    setPluginTask((current) => (current ? { ...current, prompt: value } : current))
+  }, [])
+  const confirmPluginTask = useCallback(() => {
+    const task = pluginTask
+    if (!task) return
+    setPluginTask(null)
+    launchPluginSession(task)
+  }, [launchPluginSession, pluginTask])
+
+  /**
+   * 面板动作要开新会话时的确认弹窗。
+   *
+   * 开一个会话意味着一整轮请求、一个新页签、侧栏多一条记录，所以默认让用户先看到
+   * **完整提示词**再决定（插件可以用 `confirm: false` 跳过，但那要它自己有把握）。
+   * 提示词可编辑：看到「上次检查：…」发现时间窗不对时，就地改掉比取消重来省事。
+   */
+  const requestPluginSession = useCallback(
+    (task) => {
+      if (!task?.prompt) return
+      if (task.confirm === false) {
+        launchPluginSession(task)
+        return
+      }
+      setPluginTask({ prompt: task.prompt, role: task.role || '', cwd: task.cwd || '' })
+    },
+    [launchPluginSession]
+  )
 
   const startMessageEdit = useCallback((message) => {
     if (!message?.id || message.queued) return
@@ -5164,7 +5348,7 @@ export function ChatView({
         const recalledText = String(text || '')
         if (!recalledText) return
         setInput((current) => {
-          const next = current.trim() ? `${current}\n\n${recalledText}` : recalledText
+          const next = mergeRecalledDraft(current, recalledText)
           draftsRef.current.set(nodeId, next)
           return next
         })
@@ -5907,6 +6091,7 @@ export function ChatView({
             items={queuedDisplayItems}
             onRecall={recallQueued}
             recallingId={recallingQueueId}
+            running={running}
           />
           <ComposerImageStrip
             text={input}
@@ -5954,6 +6139,8 @@ export function ChatView({
               setPluginPanelOpen(id)
               setPluginPanelSection(section || '')
             }}
+            onCompose={composeFromPlugin}
+            onLaunchSession={requestPluginSession}
           />
           <div
             className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''} ${loopTone}`}
@@ -6325,7 +6512,17 @@ export function ChatView({
           openPlugin={pluginPanelOpen}
           focusSection={pluginPanelSection}
           onClose={closePluginPanel}
+          onCompose={composeFromPlugin}
+          onLaunchSession={requestPluginSession}
         />
+        {pluginTask && (
+          <PluginTaskDialog
+            task={pluginTask}
+            onChange={changePluginTaskPrompt}
+            onConfirm={confirmPluginTask}
+            onClose={closePluginTask}
+          />
+        )}
         {btwOpen && (
           <BtwDrawer
             thread={btwThread}

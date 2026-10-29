@@ -101,8 +101,10 @@ export type HeadlessNoticeSource = {
  *   queued ones drained after the first, emits `turn:start` + `turn:finish`;
  *   streamed text/tool/usage stays on the consumer side (CodexProjector or a
  *   caller's event sink), so this class never owns an output protocol;
- * - aborts stop the active turn but keep the queue draining, matching the
- *   desktop app's current abort-then-continue behavior.
+ * - a queued input is only run once the turn before it completed; an aborted or
+ *   failed turn leaves it in the queue (same rule as the message-queue plugin's
+ *   turn:after and the interactive runtime), so the user can still recall it
+ *   instead of watching a stopped turn hand its queued text to a fresh run.
  *
  * When a plugin layer is attached, the turn hooks mirror the interactive
  * runtime's ordering: input:received guard on submit, turn:before +
@@ -265,7 +267,10 @@ export class HeadlessTurnExecutor {
     }
   }
 
-  /** Stops the active turn; queued inputs keep draining after it finishes. */
+  /**
+   * Stops the active turn. A queued input is *not* sent afterwards: it stays in
+   * the queue (recallable) until a turn actually completes.
+   */
   abort(): void {
     this.options.agent.abort();
   }
@@ -310,6 +315,7 @@ export class HeadlessTurnExecutor {
       // stale lock.
       const lease = first ? this.lease : this.acquireTurnLease();
       first = false;
+      let status: HeadlessTurnStatus = 'error';
       if (this.persistsSession && !lease) {
         // Another window/terminal claimed this session between our turns. The
         // queued input cannot run without writing a file someone else is
@@ -326,7 +332,7 @@ export class HeadlessTurnExecutor {
       } else {
         this.lease = lease;
         try {
-          await this.runTurn(input);
+          status = await this.runTurn(input);
         } catch (error) {
           // runTurn handles abort/error itself; this guards the drain loop.
           if (this.options.hooks) await this.emitTurnAfter(input, 'error', 0, true);
@@ -341,6 +347,10 @@ export class HeadlessTurnExecutor {
           this.releaseTurnLease();
         }
       }
+      // 排队输入只在一轮**真的完成**之后才接着跑（message-queue 插件与交互式
+      // runtime 的 turn:after 同一条规则）。失败/中止时把它留在队列里：还在排队、
+      // 用户仍能撤回，而不是「点了停止之后排队的那条又被偷偷送出去跑一轮」。
+      if (status !== 'completed') break;
       input = this.queue.dequeue();
       if (input) this.options.onEvent({ type: 'dequeue', input });
     }
@@ -374,7 +384,7 @@ export class HeadlessTurnExecutor {
     }
   }
 
-  private async runTurn(input: RuntimeInput): Promise<void> {
+  private async runTurn(input: RuntimeInput): Promise<HeadlessTurnStatus> {
     const { agent, onEvent } = this.options;
     const startedAt = Date.now();
     this.responseBuffer = '';
@@ -389,7 +399,7 @@ export class HeadlessTurnExecutor {
             : await this.parseImageRefs(input.text);
     } catch (error) {
       await this.failTurn(input, startedAt, error);
-      return;
+      return 'error';
     }
     // 除了 `system`（提示词内部注入，用户从没打过这句话）之外都要留下用户消息：
     // 插件提交的一轮（`ctx.runtime.submit`）在客户端没有乐观气泡，不写进去就只剩回答，
@@ -493,7 +503,7 @@ export class HeadlessTurnExecutor {
         // check is surfaced by agent.run() as an AgentAbortError; never return
         // here silently or the client never receives a turn/completed
         // notification and the app stays "running" forever.
-        if (!agent.isCurrent(runResult!.runId)) return;
+        if (!agent.isCurrent(runResult!.runId)) return 'aborted';
         if (this.options.hooks) {
           await this.options.hooks.emit('turn:beforePersist', {
             runtime: this.options.host,
@@ -505,6 +515,7 @@ export class HeadlessTurnExecutor {
         this.saveCurrent({ turnState: 'completed' }, inFlightUser);
         if (this.options.hooks) await this.emitTurnAfter(input, 'completed', Date.now() - startedAt, false);
         onEvent({ type: 'turn:finish', input, status: 'completed', elapsedMs: Date.now() - startedAt });
+        return 'completed';
       } finally {
         agent.events.off('toolCall', markToolCall);
       }
@@ -520,12 +531,13 @@ export class HeadlessTurnExecutor {
         this.saveCurrent({ turnState: 'aborted' }, inFlightUser);
         if (this.options.hooks) await this.emitTurnAfter(input, 'aborted', Date.now() - startedAt, false);
         onEvent({ type: 'turn:finish', input, status: 'aborted', elapsedMs: Date.now() - startedAt });
-        return;
+        return 'aborted';
       }
       if (this.options.hooks) {
         await this.options.hooks.emit('turn:error', { runtime: this.options.host, input, content, error });
       }
       await this.failTurn(input, startedAt, error, inFlightUser);
+      return 'error';
     }
   }
 
