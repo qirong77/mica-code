@@ -4,6 +4,7 @@ import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { registerBridgeSupervisor } from './BridgeSupervisor.js';
+import { createPanelHandler } from './Panel.js';
 import { MobileRelayTool } from './MobileRelayTool.js';
 
 const SKILL_NAME = 'mobile-relay';
@@ -63,6 +64,7 @@ export default function setup(ctx: PluginContext): void {
 
   registerSkill(ctx, dataDir);
   registerBridgeSupervisor(ctx, dataDir);
+  registerPanel(ctx, dataDir);
 
   const tools = ctx.tools;
   if (!tools) {
@@ -74,4 +76,16 @@ export default function setup(ctx: PluginContext): void {
     return;
   }
   tools.register(new MobileRelayTool(ctx));
+}
+
+/**
+ * 对话右侧的面板：接入中转机、看状态、开关桥。
+ *
+ * 声明在清单 `desktop.panel` 里，内容全由插件给数据、宿主渲染，所以用户插件也能用。
+ * 只有桌面宿主提供 `ctx.desktop`；CLI / `mica exec` 里没有这块界面，跳过即可。
+ */
+function registerPanel(ctx: PluginContext, dataDir: string | null): void {
+  const panel = ctx.desktop?.panel;
+  if (!panel) return;
+  panel.call(ctx.desktop, createPanelHandler(ctx, dataDir));
 }

@@ -23,7 +23,7 @@ const flag = (name, fallback = '') => {
 const has = (name) => args.includes(`--${name}`);
 
 const target = flag('host', process.env.RELAY_SSH || '');
-const port = flag('port', '9200');
+let port = flag('port', '9200');
 /** 不少机器把 SSH 挪到非标准端口（22 直接超时），别让它成为部署的绊脚石。 */
 const sshPort = flag('ssh-port', process.env.RELAY_SSH_PORT || '22');
 /** 显式给口令才用它；否则先看本机已有设置、再看中转机上有没有同名机器。 */
@@ -140,7 +140,35 @@ if (!dryRun) {
   process.stdout.write(`  node ${nodeVersion}\n`);
 }
 
-const domain = flag('domain', publicIp ? `${publicIp.replaceAll('.', '-')}.sslip.io` : 'PRETEND.sslip.io');
+/**
+ * 这台中转机是否已经部署过。
+ *
+ * 已经部署过就只「登记这台机器」：另一台电脑接入不该重传页面、重配 nginx、重签证书——
+ * 那些步骤与它无关，还会把已经连着的手机打断一次。用 --redeploy 强制完整部署。
+ */
+const alreadyDeployed =
+  !dryRun &&
+  !has('redeploy') &&
+  String(ssh('test -f /opt/mobile-relay/relay.mjs && systemctl is-active --quiet mobile-relay && echo YES || echo NO') || '').includes('YES');
+const joinMode = alreadyDeployed;
+
+/** 已部署时沿用中转机现有的域名与端口，别按公网 IP 推一个新的出来。 */
+const existingSite = joinMode
+  ? String(ssh("grep -m1 -oP 'server_name\\s+\\K[^;]+' /etc/nginx/sites-available/mobile-relay 2>/dev/null || true") || '').trim()
+  : '';
+const existingPort = joinMode
+  ? String(ssh("grep -m1 -oP '^RELAY_PORT=\\K[0-9]+' /opt/mobile-relay/relay.env 2>/dev/null || true") || '').trim()
+  : '';
+if (joinMode && existingPort) port = existingPort;
+
+if (joinMode) {
+  process.stdout.write(`  中转机已部署（${existingSite || '未知域名'}），只登记这台机器\n`);
+}
+
+const domain = flag(
+  'domain',
+  existingSite || (publicIp ? `${publicIp.replaceAll('.', '-')}.sslip.io` : ''),
+);
 if (!domain) fail('无法推断公网 IP，请用 --domain 指定域名');
 
 step('核对这台机器在中转机上的登记');
@@ -198,6 +226,7 @@ const agentsPayload = {
   ],
 };
 
+if (!joinMode) {
 step('打包并上传（relay + 页面产物）');
 const rendererDir = resolveRendererDir();
 process.stdout.write(`  页面产物 ${rendererDir}\n`);
@@ -229,6 +258,7 @@ try {
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
+}
 
 if (dryRun) {
   process.stdout.write(`\n✓ 预演结束，没有向 ${target} 写任何东西。\n`);
@@ -248,6 +278,7 @@ ssh(
   ].join(' && '),
 );
 
+if (!joinMode) {
 step('安装 systemd 服务');
 try {
   ssh(
@@ -268,7 +299,9 @@ try {
   const why = String(ssh('journalctl -u mobile-relay -n 15 --no-pager | tail -10 || true') || '');
   fail(`中转机上的 mobile-relay 没启动：\n${why}`);
 }
+}
 
+if (!joinMode) {
 step('配置 nginx');
 const site = readFileSync(join(here, 'relay', 'nginx-site.conf'), 'utf8')
   .replaceAll('__DOMAIN__', domain)
@@ -281,8 +314,9 @@ ssh(
     'systemctl reload nginx',
   ].join(' && '),
 );
+}
 
-if (!skipCert) {
+if (!joinMode && !skipCert) {
   step('申请证书（Let\'s Encrypt）');
   ssh(`certbot --nginx -d ${domain} --non-interactive --agree-tos --register-unsafely-without-email --redirect`, {
     timeout: 300_000,
@@ -299,9 +333,13 @@ for (let attempt = 0; attempt < 8; attempt += 1) {
     });
     if (res.ok) {
       const info = await res.json();
-      healthy = true;
-      process.stdout.write(`  中转机可达，agentOnline=${info.agentOnline}\n`);
-      break;
+      // join 模式下这台刚写进清单，中转机最多 5 秒后热加载；没加载出来就继续等，
+      // 否则会显示 agentOnline=undefined 让用户以为没接上。
+      if (!joinMode || info.label) {
+        healthy = true;
+        process.stdout.write(`  中转机可达，agentOnline=${info.agentOnline}\n`);
+        break;
+      }
     }
   } catch {
     // 证书刚签发，等一会儿再试
@@ -318,6 +356,10 @@ writeFileSync(
   settingsPath,
   `${JSON.stringify({ ...localSettings, enabled: 'true', relayUrl: base, token }, null, 2)}\n`,
 );
+
+if (joinMode) {
+  process.stdout.write('  桥会在插件下一跳（≤3 秒）自动按新设置连上\n');
+}
 
 const total = agentsPayload.agents.length;
 console.log(`

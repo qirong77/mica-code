@@ -90,6 +90,28 @@ describe('mobile-relay bridge supervisor', () => {
     expect(() => statSync(join(dir, 'bridge.lock'))).toThrow();
     kill.mockRestore();
   });
+
+  it('restarts the bridge when the relay address or token changes', () => {
+    const values: Record<string, string> = { relayUrl: 'https://old.example', token: 'tok-old' };
+    const ctx = fakeContext(values);
+    ctx.settings.get = () => ({ enabled: 'true', ...values });
+    // 假装桥是本实例刚拉起的，且用的是 old.example
+    writeFileSync(join(dir, 'bridge.lock'), JSON.stringify({ pid: process.pid, startedAt: 0 }), 'utf8');
+    const supervisor = createBridgeSupervisor(ctx, { dataDir: dir });
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    // 第一次 ensure 把当前配置认作「这份桥的配置」
+    process.env.MICA_BRIDGE_NODE = 'false';
+    expect(supervisor.ensure()).toEqual({ pid: process.pid, changed: false });
+
+    values.token = 'tok-new';
+    // 换了口令：先停，下一跳按新配置拉起
+    expect(supervisor.ensure()).toEqual({ pid: null, changed: true });
+    expect(kill).toHaveBeenCalledWith(process.pid, 'SIGTERM');
+    expect(() => statSync(join(dir, 'bridge.lock'))).toThrow();
+    kill.mockRestore();
+    delete process.env.MICA_BRIDGE_NODE;
+  });
 });
 
 describe('buildStatus', () => {

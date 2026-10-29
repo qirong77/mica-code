@@ -55,6 +55,26 @@ node plugins/mobile-relay/setup.mjs --host root@<公网IP>
 
 `setup.mjs` 会自己找 `apps/desktop/out/renderer`；指向别处的构建产物用 `--renderer <dir>`。
 
+### 中转机已经部署过（第二台以后的电脑）
+
+**不要重新完整部署。** 同一条命令即可，`setup.mjs` 会先看 `systemctl is-active mobile-relay`：
+
+```bash
+node plugins/mobile-relay/setup.mjs --host root@<同一台中转机> --ssh-port 2222
+```
+
+已部署时它只登记这台机器（往 `agents.json` 追加一条，~20 秒），不传页面、不碰 nginx、
+不重签证书、不重启服务——relay 会热加载清单，已经连着的手机不受影响。
+
+确认接入结果：
+
+```bash
+T=$(node -e "console.log(require(process.env.HOME+'/.mica/plugin-settings/mobile-relay.json').token)")
+curl -s "https://<域名>/api/health?t=$T"   # label 应是你这台机器的名字
+```
+
+只有要升级 relay 本身时才用 `--redeploy` 走完整部署。
+
 ## 验证（不要跳）
 
 ```bash
@@ -73,7 +93,7 @@ sleep 20 && curl -s https://<域名>/api/health
 
 ## 日常
 
-- **看状态 / 拿链接**：侧栏 `Mobile` 卡片；或 `mobile_relay action=link`。
+- **看状态 / 拿链接**：输入框上方的「手机访问」按钮打开面板；或 `mobile_relay action=link`。
 - **临时关掉**：配置页 → 插件 → Mobile Relay 的「启用桥」，或停用插件。
   桥进程由 `ctx.background` 监管，关掉就真的杀了，不会留着后台还在外联。
 - **换中转机**：重跑一次 `setup.mjs`，旧口令作废。

@@ -76,6 +76,19 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     }
   };
 
+  /**
+   * 启动这一份桥时用的「地址 + 口令」。
+   *
+   * 桥只在启动时读一次配置，所以换了中转机必须重启它；空字符串表示「这份桥不是本实例
+   * 启动的」（比如上次会话留下的），此时只记录当前配置、不贸然杀掉。
+   */
+  let runningFor = '';
+  const configFingerprint = (): string => {
+    const values = ctx.settings.get();
+    const url = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
+    return `${url}|${String(values.token ?? '')}`;
+  };
+
   const runningPid = (): number | null => {
     const lock = readLock();
     if (!lock) return null;
@@ -96,6 +109,7 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     child.unref();
     if (!child.pid) return null;
     writeFileSync(lockPath, JSON.stringify({ pid: child.pid, startedAt: Date.now() }), 'utf8');
+    runningFor = configFingerprint();
     return child.pid;
   };
 
@@ -135,7 +149,21 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
       return { pid: null, changed: false };
     }
     const current = runningPid();
-    if (current !== null) return { pid: current, changed: false };
+    if (current !== null) {
+      const want = configFingerprint();
+      if (!runningFor) {
+        // 上一轮会话留下的桥：认领它，不改动
+        runningFor = want;
+        return { pid: current, changed: false };
+      }
+      if (runningFor !== want) {
+        // 换了中转机或口令：先停，下一跳按新配置拉起
+        stop();
+        ctx.logger.info('bridge:restart-reason', { reason: 'settings-changed' });
+        return { pid: null, changed: true };
+      }
+      return { pid: current, changed: false };
+    }
     const started = start();
     if (started !== null) ctx.logger.info('bridge:started', { pid: started });
     return { pid: started, changed: true };
@@ -217,41 +245,61 @@ export function buildStatus(
  * 卡片只能 `readData()` 读这一份，读不到 `plugin-settings`，所以「手机链接是什么、
  * 现在通没通」得由这里替它算好。写的是自己的数据文件，不是别人的。
  */
-async function publishStatus(ctx: PluginContext, dir: string | null, pid: number | null): Promise<void> {
-  if (!dir) return;
+async function probeRelay(ctx: PluginContext): Promise<Record<string, unknown> | null> {
   const values = ctx.settings.get();
   const relayUrl = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
   const token = String(values.token ?? '');
-
-  let relay: Record<string, unknown> | null = null;
-  if (relayUrl) {
-    try {
-      // 带上口令才拿得到「这一台」的在线状态；不带只能知道中转机活着。
-      const response = await fetch(`${relayUrl}/api/health`, {
-        headers: token ? { 'x-relay-token': token } : {},
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (response.ok) relay = (await response.json()) as Record<string, unknown>;
-    } catch {
-      // 中转机不可达是正常状态（关机、重建中），卡片显示「不可达」即可
-    }
-  }
-
-  const status = buildStatus(values, relay, pid, Date.now());
-
+  if (!relayUrl) return null;
   try {
-    writeFileSync(join(dir, DATA_NAME), `${JSON.stringify(status, null, 2)}\n`, 'utf8');
+    // 带上口令才拿得到「这一台」的在线状态；不带只能知道中转机活着。
+    const response = await fetch(`${relayUrl}/api/health`, {
+      headers: token ? { 'x-relay-token': token } : {},
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (response.ok) return (await response.json()) as Record<string, unknown>;
+  } catch {
+    // 中转机不可达是正常状态（关机、重建中），卡片显示「不可达」即可
+  }
+  return null;
+}
+
+/**
+ * 内容没变就不落盘，免得每跳都改一次文件。
+ *
+ * 上一轮的内容由调用方保管（不放在模块级），否则同一进程里的多个会话实例会互相压制。
+ */
+function publishStatus(
+  ctx: PluginContext,
+  dir: string | null,
+  pid: number | null,
+  relay: Record<string, unknown> | null,
+  previous: string | null
+): string | null {
+  if (!dir) return previous;
+  const status = buildStatus(ctx.settings.get(), relay, pid, Date.now());
+  const body = `${JSON.stringify(status, null, 2)}\n`;
+  if (body === previous) return previous;
+  try {
+    writeFileSync(join(dir, DATA_NAME), body, 'utf8');
+    return body;
   } catch (error) {
     ctx.logger.warn('bridge:status-write-failed', {
       error: error instanceof Error ? error.message : String(error),
     });
+    return previous;
   }
 }
+
+/** 中转机探活间隔：比监管跳数稀，避免检查本身变成额外的周期性请求。 */
+const RELAY_PROBE_MS = 15_000
+/** 监管跳数。ensure() 只读配置和 lock，开销极小；跳得密是为了桥一挂就拉起来。 */
+const SUPERVISE_MS = 3_000
 
 /**
  * 把监管注册成一个常驻任务。
  *
- * 15 秒一跳：桥自己会按有没有人在线退避，这里只负责「进程还在不在」，不需要更密。
+ * 3 秒一跳：桥的存活取决于宿主进程，宿主随最后一个会话页签退出，
+ * 所以恢复越快越好；中转机探活另按 15 秒节流。
  */
 export function registerBridgeSupervisor(ctx: PluginContext, dataDir: string | null) {
   const background = ctx.background;
@@ -265,13 +313,33 @@ export function registerBridgeSupervisor(ctx: PluginContext, dataDir: string | n
   }
 
   const supervisor = createBridgeSupervisor(ctx, { dataDir });
+  // 探活缓存：上一轮的中转机状态与它的探活时刻
+  let relay: Record<string, unknown> | null = null;
+  let relayProbedAt = 0;
+  let relayProbedFor = '';
+  let published: string | null = null;
   const registration = background.register({
     id: 'bridge',
-    every: 15_000,
+    every: SUPERVISE_MS,
     immediate: true,
     async run() {
       const { pid, changed } = supervisor.ensure();
-      await publishStatus(ctx, dataDir, pid);
+
+      const values = ctx.settings.get();
+      const relayUrl = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
+      // 换地址/口令后立刻重探，别让卡片显示上一台中转机的状态
+      if (relayUrl !== relayProbedFor) {
+        relay = null;
+        relayProbedAt = 0;
+        relayProbedFor = relayUrl;
+      }
+      const now = Date.now();
+      if (now - relayProbedAt >= RELAY_PROBE_MS) {
+        relay = await probeRelay(ctx);
+        relayProbedAt = now;
+      }
+
+      published = publishStatus(ctx, dataDir, pid, relay, published);
       if (!changed) return;
       ctx.health.report({
         level: pid ? 'ok' : 'warn',

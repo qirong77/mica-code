@@ -102,6 +102,58 @@ const agents = new Map()
 for (const entry of loadAgents()) agents.set(createState(entry).token, createState(entry))
 
 /**
+ * 机器清单热加载。
+ *
+ * 另一台电脑接入时只追加一条记录，不该为了让它生效去重启服务——那会把已经连着的
+ * 手机全部踢断一下。改动落在 mtime 上，重读时保留每台的运行态（轮询时刻、队列、在线设备）。
+ */
+let agentsMtime = 0
+try {
+  agentsMtime = statSync(AGENTS_FILE).mtimeMs
+} catch {
+  // 文件刚被删掉：保留内存里的清单，下一次成功读取再更新
+}
+
+function reloadAgents() {
+  let mtime = 0
+  try {
+    mtime = statSync(AGENTS_FILE).mtimeMs
+  } catch {
+    return
+  }
+  if (mtime === agentsMtime) return
+  agentsMtime = mtime
+  let parsed
+  try {
+    parsed = JSON.parse(readFileSync(AGENTS_FILE, 'utf8'))
+  } catch {
+    return
+  }
+  const list = Array.isArray(parsed?.agents) ? parsed.agents : []
+  const usable = list.filter((entry) => typeof entry?.token === 'string' && entry.token.length >= 16)
+  if (!usable.length) return
+  const next = new Map()
+  for (const entry of usable) {
+    const existing = agents.get(entry.token)
+    if (existing) {
+      const name = typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : existing.label
+      next.set(entry.token, { ...existing, label: name })
+    } else {
+      const state = createState(entry)
+      next.set(state.token, state)
+      console.log(`[relay] 新增机器 ${state.label}`)
+    }
+  }
+  for (const token of agents.keys()) {
+    if (!next.has(token)) console.log(`[relay] 移除机器 ${agents.get(token).label}`)
+  }
+  agents.clear()
+  for (const [token, state] of next) agents.set(token, state)
+}
+
+setInterval(reloadAgents, 5_000).unref()
+
+/**
  * 用口令试解信封，解开的那个就是发起方。
  *
  * 不用额外的机器标识头：凭据只有口令一份，少一个「两边必须同步派生」的东西，

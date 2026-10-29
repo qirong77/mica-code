@@ -10,7 +10,16 @@
   "priority": 40,
   "mica": { "apiVersion": 1 },
   "requires": ["settings", "tools", "background", "skills"],
-  "desktop": { "entry": { "label": "Mobile" } },
+  "desktop": {
+    "panel": {
+      "label": "手机访问",
+      "roles": [],
+      "shortcuts": [
+        { "label": "手机访问", "section": "接中转机" },
+        { "label": "检查连接", "action": "test" }
+      ]
+    }
+  },
   "status": [
     { "key": "phoneUrl", "label": "手机链接", "type": "link" },
     { "key": "bridge", "label": "本机桥", "type": "text" },
