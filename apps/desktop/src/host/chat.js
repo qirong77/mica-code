@@ -1324,13 +1324,16 @@ function handleHostNotification(id, run, notification) {
     // directly like the task snapshots: it is a snapshot, not a turn delta.
     const sessionID = run.sessionId || params.threadId || null
     const history = sessionID ? readHistory(sessionID) : []
+    // 连同会话元信息一起交回：压缩会写 `displayUsage`，输入框左下角的 ctx 徽标读的是
+    // 它。只换消息不换 meta，压完那数字还停在压缩前，看着像没生效。
+    const meta = sessionID ? readSessionMeta(sessionID) : null
     const replacedEvent = codexNotificationToEvent(notification)
     if (replacedEvent && run.sender && !run.sender.isDestroyed()) {
       run.sender.send('chat:event', {
         id,
         sessionId: runSessionId(run),
         sequence: ++run.sequence,
-        event: { ...replacedEvent, history }
+        event: { ...replacedEvent, history, ...(meta ? { meta } : {}) }
       })
     }
     return

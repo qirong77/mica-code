@@ -235,17 +235,18 @@ export class HeadlessTurnExecutor {
   /**
    * 在轮次之外独占一次会话，让调用方改它（自动压缩用它把历史压小）。
    *
-   * 三种情况返回 `null`，都不是错误：这一轮正在跑、另一个进程（另一个窗口 / 终端）
-   * 持有 turn lease、或者刚好有人按了发送（`starting`）。调用方据此决定「这次没压成」，
-   * 不要重试、也不要当成失败。
+   * 拿不到独占权时返回 `busy`（调用方给的值），这不是错误：这一轮正在跑、另一个进程
+   * （另一个窗口 / 终端）持有 turn lease、或者刚好有人按了发送（`starting`）。调用方
+   * 据此「这次没做」，不要重试、也不要当成失败——但要把原因说出来，否则用户和日志都
+   * 分不清「没得做」和「做不上」。
    */
-  async runIdleMaintenance<T>(task: () => Promise<T | null>): Promise<T | null> {
-    if (this.running || this.starting) return null;
-    // 同一时刻只做一次：第二次触发直接当成「这次没压成」，不排队也不合并两个任务。
-    if (this.idleTask) return null;
-    const run = (async (): Promise<T | null> => {
+  async runIdleMaintenance<T>(task: () => Promise<T>, busy: T): Promise<T> {
+    if (this.running || this.starting) return busy;
+    // 同一时刻只做一次：第二次触发直接当成「这次没做」，不排队也不合并两个任务。
+    if (this.idleTask) return busy;
+    const run = (async (): Promise<T> => {
       const lease = this.acquireTurnLease();
-      if (this.persistsSession && !lease) return null;
+      if (this.persistsSession && !lease) return busy;
       try {
         // 另一个宿主可能在我们上次保存之后写过这条会话：先对齐磁盘，否则这次压缩
         // 会把它那一轮覆盖掉。

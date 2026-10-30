@@ -4,9 +4,7 @@ import {
   axisCells,
   buildGantt,
   clampZoom,
-  GROUP_ROW_HEIGHT,
   pxPerDayOf,
-  STAGE_ROW_HEIGHT,
   todayScrollLeft,
   zoomAnchor,
 } from './gantt.js';
@@ -25,12 +23,12 @@ describe('buildGantt', () => {
     expect(layout.end > '2026-10-29').toBe(true);
     expect(layout.days).toBeGreaterThan(0);
     // 偏移量是相对时间轴左端算的
-    const stageRow = layout.rows.find((row) => row.kind === 'stage')!;
-    expect(stageRow.kind === 'stage' && stageRow.offset).toBeGreaterThan(0);
-    expect(stageRow.kind === 'stage' && stageRow.span).toBe(5);
+    const bar = layout.rows[0]!.bars[0]!;
+    expect(bar.offset).toBeGreaterThan(0);
+    expect(bar.span).toBe(5);
   });
 
-  it('gives every stage its own row under its group', () => {
+  it('keeps one row per project and splits overlaps into lanes', () => {
     const layout = buildGantt(
       [
         {
@@ -41,10 +39,23 @@ describe('buildGantt', () => {
       ],
       { today: '2026-10-29' },
     );
-    expect(layout.rows.map((row) => row.kind)).toEqual(['group', 'stage', 'stage']);
-    // 行高累加，左侧标签与右侧时间轴靠同一份 top 对齐
-    expect(layout.rows.map((row) => row.top)).toEqual([0, GROUP_ROW_HEIGHT, GROUP_ROW_HEIGHT + STAGE_ROW_HEIGHT]);
-    expect(layout.height).toBe(GROUP_ROW_HEIGHT + STAGE_ROW_HEIGHT * 2);
+    expect(layout.rows).toHaveLength(1);
+    expect(layout.rows[0]!.lanes).toBe(2);
+    expect(layout.rows[0]!.bars.map((bar) => bar.lane)).toEqual([0, 1]);
+  });
+
+  it('keeps sequential stages on the same lane', () => {
+    const layout = buildGantt(
+      [
+        {
+          id: 'a',
+          name: 'A',
+          stages: [stage('dev', '2026-10-20', '2026-10-24'), stage('testing', '2026-10-25', '2026-10-27')],
+        },
+      ],
+      { today: '2026-10-29' },
+    );
+    expect(layout.rows[0]!.lanes).toBe(1);
   });
 
   it('ranks live work first, then upcoming, then finished', () => {
@@ -56,8 +67,7 @@ describe('buildGantt', () => {
       ],
       { today: '2026-10-29' },
     );
-    const groupNames = layout.rows.filter((row) => row.kind === 'group').map((row) => row.name);
-    expect(groupNames).toEqual(['进行中', '待开始', '已结束']);
+    expect(layout.rows.map((row) => row.name)).toEqual(['进行中', '待开始', '已结束']);
   });
 
   it('drops groups without stages instead of drawing empty rows', () => {

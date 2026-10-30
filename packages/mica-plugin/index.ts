@@ -284,7 +284,8 @@ export type {
   PluginAgentUsage,
   PluginCompactMode,
   PluginCompactResult,
-  PluginIdleCompactResult,
+  PluginIdleCompactHook,
+  PluginIdleCompactOutcome,
   PluginIterationRewriter,
 } from './PluginAgent.js';
 export type {

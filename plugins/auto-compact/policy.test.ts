@@ -165,7 +165,7 @@ describe('shouldCompactOnReturn', () => {
     ).toBe(false);
   });
 
-  it('shares the quick allowance and the minimum interval', () => {
+  it('shares the quick allowance with the threshold trigger', () => {
     expect(
       shouldCompactOnReturn({
         settings: idleSettings({ quickLimit: 1 }),
@@ -175,11 +175,22 @@ describe('shouldCompactOnReturn', () => {
     ).toBe(false);
     expect(
       shouldCompactOnReturn({
-        settings: idleSettings({ minIntervalMs: 60_000 }),
-        counters: counters({ quickRuns: 1, lastRunAt: new Date(1_000_000).toISOString() }),
-        idleMs: 600_000,
-        nowMs: 1_030_000,
+        settings: idleSettings({ quickLimit: 1 }),
+        counters: counters({ quickRuns: 0 }),
+        idleMs: 16 * 60_000,
       }),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  // 最小间隔是给「同一段上下文被反复按阈值压」准备的。用户离开再回来时，这期间
+  // 历史又长大了，套上间隔只会让最常见的场景（工作密集、一会儿压一会儿走）静默失效。
+  it('ignores the minimum interval between compactions', () => {
+    expect(
+      shouldCompactOnReturn({
+        settings: idleSettings({ minIntervalMs: 60 * 60_000 }),
+        counters: counters({ quickRuns: 3, lastRunAt: new Date(Date.now() - 60_000).toISOString() }),
+        idleMs: 20 * 60_000,
+      }),
+    ).toBe(true);
   });
 });

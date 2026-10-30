@@ -1,28 +1,16 @@
 import { daysBetween, STAGE_LABELS, type ScheduleStage } from './parse.js';
 
 /**
- * 甘特图的纯逻辑：时间轴范围、任务树（组 + 阶段行）、刻度和缩放。
+ * 甘特图的纯逻辑：时间轴范围、行、刻度和缩放。
  *
- * 一行一个阶段而不是一行一个群：阶段名写不进 14px 宽的条里，挤在条上的结果就是周/月
- * 刻度下满屏色块。界面那一侧只按 `rows` 从上往下画、不做日期算术。
+ * 一个项目一行，它的阶段是这行里的条；时间重叠的阶段上下错开一条道，不叠在一起。
+ * 界面那一侧只按 `rows` 从上往下画、不做日期算术。
  */
 
 export type GanttStage = ScheduleStage;
 
-export type GanttGroupRow = {
-  kind: 'group';
-  id: string;
-  name: string;
-  author: string;
-  announcedAt: number;
-  /** 这一行在整张图里的纵向起点与高度（像素由渲染侧按 groupHeight/stageHeight 定） */
-  top: number;
-  height: number;
-};
-
-export type GanttStageRow = {
-  kind: 'stage';
-  /** `${groupId}:${key}:${start}`，React key 与点击定位都用它 */
+export type GanttBar = {
+  /** `${groupId}:${key}:${start}:${lane}`，React key 与点击定位都用它 */
   id: string;
   groupId: string;
   key: string;
@@ -31,15 +19,23 @@ export type GanttStageRow = {
   end: string;
   days: string[];
   range: boolean;
+  /** 本行内的第几条道：同一项目里时间重叠的阶段（测试跨过上线）不会叠在一起 */
+  lane: number;
   /** 离时间轴左端几天 */
   offset: number;
   /** 占几天（含首尾） */
   span: number;
-  top: number;
-  height: number;
 };
 
-export type GanttRow = GanttGroupRow | GanttStageRow;
+export type GanttRow = {
+  groupId: string;
+  name: string;
+  author: string;
+  announcedAt: number;
+  /** 这行有几条道（决定行高） */
+  lanes: number;
+  bars: GanttBar[];
+};
 
 export type GanttLayout = {
   rows: GanttRow[];
@@ -47,13 +43,7 @@ export type GanttLayout = {
   start: string;
   end: string;
   days: number;
-  /** 所有行的总高度 */
-  height: number;
 };
-
-/** 组标题行与阶段行的高度：固定值，左侧标签与右侧时间轴必须用同一份 */
-export const GROUP_ROW_HEIGHT = 34;
-export const STAGE_ROW_HEIGHT = 24;
 
 const DAY_MS = 86_400_000;
 
@@ -76,11 +66,11 @@ export function addDays(date: string, delta: number): string {
 const AXIS_PADDING_DAYS = 4;
 
 /**
- * 把各群的阶段排成甘特图的任务树。
+ * 把各群的阶段排成甘特图的行：一个项目一行，阶段是这行里的条。
  *
- * - 每个群一条组标题行，下面按开始时间列出它的阶段，一个阶段占一行；
+ * - 行内按开始时间排，时间重叠的阶段上下错开一条道；
  * - 时间轴从最早一个阶段到最晚一个阶段，两端各留几天，并保证今天在轴内；
- * - 组序按「谁更急着看」：正在进行的排最前，然后是还没开始的，全都结束的沉底。
+ * - 行序按「谁更急着看」：正在进行的排最前，然后是还没开始的，全都结束的沉底。
  */
 export function buildGantt(
   groups: Array<{
@@ -93,27 +83,13 @@ export function buildGantt(
   options: { today: string },
 ): GanttLayout {
   const today = options.today;
-  const prepared: Array<{
-    group: (typeof groups)[number];
-    stages: GanttStage[];
-    rank: number;
-    firstStart: string;
-  }> = [];
-
+  const prepared: Array<{ group: (typeof groups)[number]; stages: GanttStage[] }> = [];
   for (const group of groups) {
     const stages = [...group.stages]
       .filter((stage) => stage.start && stage.end)
       .sort((left, right) => left.start.localeCompare(right.start) || left.key.localeCompare(right.key));
-    if (stages.length === 0) continue;
-    prepared.push({ group, stages, rank: groupRank(stages, today), firstStart: stages[0]!.start });
+    if (stages.length > 0) prepared.push({ group, stages });
   }
-
-  prepared.sort(
-    (left, right) =>
-      left.rank - right.rank ||
-      left.firstStart.localeCompare(right.firstStart) ||
-      left.group.name.localeCompare(right.group.name),
-  );
 
   const allStarts = prepared.flatMap((item) => item.stages.map((stage) => stage.start));
   const allEnds = prepared.flatMap((item) => item.stages.map((stage) => stage.end));
@@ -123,49 +99,57 @@ export function buildGantt(
   const end = addDays(last, AXIS_PADDING_DAYS);
   const days = daysBetween(start, end) + 1;
 
-  const rows: GanttRow[] = [];
-  let top = 0;
-  for (const item of prepared) {
-    rows.push({
-      kind: 'group',
-      id: `group:${item.group.id}`,
-      name: item.group.name,
-      author: item.group.author ?? '',
-      announcedAt: item.group.announcedAt ?? 0,
-      top,
-      height: GROUP_ROW_HEIGHT,
-    });
-    top += GROUP_ROW_HEIGHT;
-    for (const stage of item.stages) {
-      rows.push({
-        kind: 'stage',
-        id: `${item.group.id}:${stage.key}:${stage.start}`,
-        groupId: item.group.id,
+  const rows: GanttRow[] = prepared.map(({ group, stages }) => {
+    const laneEnds: string[] = [];
+    const bars: GanttBar[] = stages.map((stage) => {
+      let lane = laneEnds.findIndex((laneEnd) => daysBetween(laneEnd, stage.start) > 0);
+      if (lane < 0) {
+        lane = laneEnds.length;
+        laneEnds.push(stage.end);
+      } else {
+        laneEnds[lane] = stage.end;
+      }
+      return {
+        id: `${group.id}:${stage.key}:${stage.start}:${lane}`,
+        groupId: group.id,
         key: stage.key,
         label: stage.label || STAGE_LABELS[stage.key] || stage.key,
         start: stage.start,
         end: stage.end,
         days: stage.days,
         range: stage.range,
+        lane,
         offset: daysBetween(start, stage.start),
         span: daysBetween(stage.start, stage.end) + 1,
-        top,
-        height: STAGE_ROW_HEIGHT,
-      });
-      top += STAGE_ROW_HEIGHT;
-    }
-  }
+      };
+    });
+    return {
+      groupId: group.id,
+      name: group.name,
+      author: group.author ?? '',
+      announcedAt: group.announcedAt ?? 0,
+      lanes: Math.max(1, laneEnds.length),
+      bars,
+    };
+  });
 
-  return { rows, start, end, days, height: top };
+  rows.sort(
+    (left, right) =>
+      rowRank(left, today) - rowRank(right, today) ||
+      left.bars[0]!.start.localeCompare(right.bars[0]!.start) ||
+      left.name.localeCompare(right.name),
+  );
+
+  return { rows, start, end, days };
 }
 
 /** 正在进行（0）→ 还没开始（1）→ 已经全部结束（2）。 */
-function groupRank(stages: GanttStage[], today: string): number {
+function rowRank(row: GanttRow, today: string): number {
   let future = false;
-  for (const stage of stages) {
-    // daysBetween(from, to) = to - from：今天落在阶段的区间里
-    if (daysBetween(today, stage.start) <= 0 && daysBetween(today, stage.end) >= 0) return 0;
-    if (stage.start > today) future = true;
+  for (const bar of row.bars) {
+    // daysBetween(from, to) = to - from：今天落在条的区间里
+    if (daysBetween(today, bar.start) <= 0 && daysBetween(today, bar.end) >= 0) return 0;
+    if (bar.start > today) future = true;
   }
   return future ? 1 : 2;
 }

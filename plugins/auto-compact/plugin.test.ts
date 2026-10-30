@@ -136,7 +136,54 @@ describe('auto-compact plugin', () => {
 
     expect(harness.idleCompactCalls).toHaveLength(1);
     expect(harness.state).toMatchObject({ quickRuns: 1, lastKind: 'quick', lastSavedTokens: 12_000 });
+    // 对话里留一行：否则「到底压没压」只能翻插件日志。
+    expect(harness.notices.at(-1)).toContain('已快速压缩历史');
+    expect(harness.notices.at(-1)).toContain('空闲 30 分钟');
     expect(harness.healthReports.at(-1)?.level).toBe('ok');
+  });
+
+  // 计数必须在宿主落盘之前写好：压缩与记账是同一次写。晚一步写等于「压了但没记账」，
+  // 用户一关页面就没了（真实事故：文件里压缩生效了，pluginState 还是旧的）。
+  it('stamps the counters before the host writes the session', async () => {
+    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, lastActivityAt: minutesAgo(30) });
+
+    await harness.typeInComposer();
+
+    expect(harness.stateSeenByHost).toMatchObject({ quickRuns: 1, lastKind: 'quick' });
+  });
+
+  it('ignores the threshold-trigger interval when the user comes back', async () => {
+    // 工作密集时刚按阈值压过一次、20 分钟后又回来：这一条不该被「最小间隔」拦住，
+    // 否则最常见的场景（一会儿压、一会儿走）会静默失效。
+    const harness = createHarness({
+      inputTokens: 30_000,
+      idleCompact: true,
+      settings: { ...configured, minIntervalMinutes: '30' },
+      lastRunAt: minutesAgo(5),
+      lastActivityAt: minutesAgo(20),
+    });
+
+    await harness.typeInComposer();
+
+    expect(harness.idleCompactCalls).toHaveLength(1);
+  });
+
+  it('says why nothing happened when the host reports the session busy', async () => {
+    const harness = createHarness({
+      inputTokens: 30_000,
+      idleCompact: true,
+      idleSkipped: 'busy',
+      lastActivityAt: minutesAgo(30),
+    });
+
+    await harness.typeInComposer();
+
+    expect(harness.logger.info).toHaveBeenCalledWith('auto-compact:idle-skipped', {
+      idleMs: expect.any(Number),
+      reason: 'busy',
+    });
+    expect(harness.state?.quickRuns).toBeUndefined();
+    expect(harness.notices).toEqual([]);
   });
 
   it('stays quiet while the user has been typing all along', async () => {
@@ -224,7 +271,11 @@ function createHarness(options: {
   lastActivityAt?: string;
   /** 空闲压缩由宿主报告的节省量；`null` 表示宿主说「这次没压成」。 */
   idleSavedTokens?: number | null;
+  /** 宿主说这一次做不了（会话正忙 / 别的进程持锁）。 */
+  idleSkipped?: 'busy' | 'empty';
   idleFail?: string;
+  /** 会话状态里记的上一次压缩时间（ISO）：节流判断的基线。 */
+  lastRunAt?: string;
   /** 不提供会话级状态：用来验证插件不会因为缺能力就崩。 */
   withoutSessionState?: boolean;
 }) {
@@ -233,19 +284,27 @@ function createHarness(options: {
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const healthReports: Array<{ level: string; message: string }> = [];
   const idleCompactCalls: number[] = [];
+  const notices: string[] = [];
+  let stateSeenByHost: Record<string, unknown> | undefined;
   const eventHandlers: Array<(event: { type: string }) => void> = [];
   const hookHandlers = new Map<string, Array<() => void>>();
   let state: Record<string, unknown> | undefined = options.lastActivityAt
-    ? { lastActivityAt: options.lastActivityAt }
+    ? { lastActivityAt: options.lastActivityAt, ...(options.lastRunAt ? { lastRunAt: options.lastRunAt } : {}) }
     : undefined;
   let rewriter: PluginIterationRewriter | null = null;
   const disposeHandlers: Array<() => void> = [];
   const compactIdleHistory = options.idleCompact
-    ? async () => {
+    ? async (hook?: { afterApply?: (result: { savedTokens: number }) => void }) => {
         idleCompactCalls.push(Date.now());
         if (options.idleFail) throw new Error(options.idleFail);
-        if (options.idleSavedTokens === null) return null;
-        return { savedTokens: options.idleSavedTokens ?? 12_000 };
+        if (options.idleSkipped) return { status: 'skipped', reason: options.idleSkipped } as const;
+        if (options.idleSavedTokens === null) return { status: 'skipped', reason: 'empty' } as const;
+        const savedTokens = options.idleSavedTokens ?? 12_000;
+        // 真宿主在落盘之前调它：插件在这里写状态与 notice。
+        hook?.afterApply?.({ savedTokens });
+        // 宿主随后读这份快照去写文件——记录那一刻看到的状态。
+        stateSeenByHost = state;
+        return { status: 'applied', savedTokens } as const;
       }
     : null;
 
@@ -322,6 +381,8 @@ function createHarness(options: {
       report: (report: { level: string; message: string }) => healthReports.push(report),
       clear() {},
     },
+    // 压缩落地后在对话里留一行，让人不用翻日志也知道「刚才压过」。
+    ui: { notice: (content: string) => notices.push(content) },
     logger,
     onDispose: (handler: () => void) => disposeHandlers.push(handler),
   } as unknown as PluginContext;
@@ -331,6 +392,10 @@ function createHarness(options: {
   return {
     logger,
     healthReports,
+    notices,
+    get stateSeenByHost() {
+      return stateSeenByHost;
+    },
     compactCalls,
     idleCompactCalls,
     get state() {

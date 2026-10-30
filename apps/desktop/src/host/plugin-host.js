@@ -4,7 +4,12 @@ import { ipcMain } from 'electron'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { runPluginAction } from '@mica-config-ui/plugin-action'
 import { probeRuntime } from './runtime-probe-core'
-import { decodePluginData, encodePluginData, isValidPluginId, pluginDataPath } from './plugin-data-core'
+import {
+  decodePluginData,
+  encodePluginData,
+  isValidPluginId,
+  pluginDataPath
+} from './plugin-data-core'
 import { applyRemoteAccessPatch, describeRemoteAccess } from './remote-access.js'
 import { resolveMicaExecutable } from './mica-cli'
 
@@ -110,12 +115,13 @@ export function registerPluginHostIpc() {
   ipcMain.handle('plugin-host:run-action', async (_event, payload) => {
     const pluginId = payload?.pluginId
     const action = payload?.action
-    if (!isValidPluginId(pluginId)) return { ok: false, error: '插件 id 非法：只能是小写字母、数字与 . _ -' }
+    if (!isValidPluginId(pluginId))
+      return { ok: false, error: '插件 id 非法：只能是小写字母、数字与 . _ -' }
     if (typeof action !== 'string' || !action.trim()) return { ok: false, error: '缺少动作名' }
     try {
       const result = await runPluginAction(
         { id: pluginId, action: action.trim() },
-        { cliPath: resolveMicaExecutable() ?? undefined, timeoutMs: ACTION_TIMEOUT_MS },
+        { cliPath: resolveMicaExecutable() ?? undefined, timeoutMs: ACTION_TIMEOUT_MS }
       )
       return { ok: true, message: result.message, link: result.link }
     } catch (error) {

@@ -5,7 +5,7 @@ import type { MicaTool } from '@packages/mica-tools/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from './HookRegistry.js';
 import type { ServiceContainer } from './ServiceContainer.js';
-import type { PluginIdleCompactResult, PluginIterationRewriter } from './PluginAgent.js';
+import type { PluginIdleCompactHook, PluginIdleCompactOutcome, PluginIterationRewriter } from './PluginAgent.js';
 import type { PluginBackgroundApi } from './PluginBackground.js';
 import type { PluginPromptSection } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
@@ -197,10 +197,14 @@ export type PluginContext = {
      * 用途是「用户回来了」这类提前量：桌面端在用户敲字时发 `input:activity` 事件，
      * 插件判断会话已经空闲够久就调它，让接下来那一轮请求直接按压小的历史发出。
      *
-     * 只在能独占写会话文件的常驻宿主里提供（`mica app-server`）。返回 `null` 表示
-     * 这一次没压成（会话正忙、另一个进程持有 turn lease、没有可清理的内容），不是错误。
+     * 只在能独占写会话文件的常驻宿主里提供（`mica app-server`）。`skipped` 表示这一次
+     * 没压成（`busy`：会话正忙或另一个进程持有 turn lease；`empty`：历史里没有可清理的
+     * 内容），不是错误，也不消耗次数。
+     *
+     * 要在压缩结果旁边一并落盘的东西（计数、notice）写在 `options.afterApply` 里：宿主
+     * 会在**落盘之前**调用它，然后一次写下去；等 `await` 返回后再写就晚了。
      */
-    compactIdleHistory?(): Promise<PluginIdleCompactResult | null>;
+    compactIdleHistory?(options?: PluginIdleCompactHook): Promise<PluginIdleCompactOutcome>;
   };
   /**
    * 委派子代理：注册子代理类型、前台/后台跑一个、管后台任务。

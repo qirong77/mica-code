@@ -24,7 +24,9 @@ const SIDEBAR_EDGE_SLACK = 40
 
 export function PluginEntries({ onOpenPage }) {
   const entries = usePluginEntries()
-  return entries.map((entry) => <PluginEntryRow key={entry.id} entry={entry} onOpenPage={onOpenPage} />)
+  return entries.map((entry) => (
+    <PluginEntryRow key={entry.id} entry={entry} onOpenPage={onOpenPage} />
+  ))
 }
 
 function PluginEntryRow({ entry, onOpenPage }) {
@@ -106,7 +108,11 @@ function PluginEntryRow({ entry, onOpenPage }) {
             open ? 'bg-white/[.05] text-white' : 'text-white/60'
           }`}
           onClick={
-            isPage ? () => onOpenPage(entry) : hoverOpens ? openRow : () => setOpen((value) => !value)
+            isPage
+              ? () => onOpenPage(entry)
+              : hoverOpens
+                ? openRow
+                : () => setOpen((value) => !value)
           }
         >
           <PluginIcon name={entry.icon} size={14} className="shrink-0 opacity-75" />

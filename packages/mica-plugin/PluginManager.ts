@@ -248,7 +248,7 @@ export class PluginManager {
           onIterationRewrite: (handler) => agentRegistry.onIterationRewrite(plugin.id, handler),
           ...(agentRegistry.compactIdleHistory
             ? {
-                compactIdleHistory: () => agentRegistry.compactIdleHistory!(plugin.id),
+                compactIdleHistory: (hook) => agentRegistry.compactIdleHistory!(plugin.id, hook),
               }
             : {}),
         };

@@ -155,20 +155,22 @@ export function shouldEscalateToModel(input: {
  *
  * 这里不看上下文大小——「这次请求马上就到」本身就是理由，小上下文压不动也无所谓
  * （宿主会返回「没有可清理内容」，不消耗次数）。真正拦住重复工作的是次数上限与
- * 最小间隔：同一段上下文连着被两只手压一遍没有意义。
+ * 本地清理的幂等性：没有新内容时宿主直接回「没压成」，不写盘也不计次。
+ *
+ * 也**不**看「两次压缩的最小间隔」：那个间隔是为同一段上下文被反复按阈值压准备的，
+ * 而这里判断的是「人回来了」。刚压过一次就返回的人恰恰是最需要提前量的一批：他离开
+ * 之后的历史又长大了，压一次才有意义；把间隔套在这里，最常见的场景（工作正密集、
+ * 一会儿压一会儿走）就会静默失效。
  */
 export function shouldCompactOnReturn(input: {
   settings: AutoCompactSettings;
   counters: AutoCompactCounters;
   /** 距这条会话上一次活动过去了多久。 */
   idleMs: number;
-  /** 当前时间（测试可注入）。 */
-  nowMs?: number;
 }): boolean {
   const { settings, counters, idleMs } = input;
   if (!settings.enabled) return false;
   if (!Number.isFinite(settings.idleMs) || settings.idleMs <= 0) return false;
   if (!Number.isFinite(idleMs) || idleMs < settings.idleMs) return false;
-  if (counters.quickRuns >= settings.quickLimit) return false;
-  return !withinMinInterval(settings, counters, input.nowMs ?? Date.now());
+  return counters.quickRuns < settings.quickLimit;
 }

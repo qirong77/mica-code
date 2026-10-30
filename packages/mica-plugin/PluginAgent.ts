@@ -30,12 +30,25 @@ export type PluginCompactResult = {
 /**
  * 一次「轮次之外的压缩」的结果。
  *
- * `null`（方法返回 null）表示这一次没有压成：会话正忙、另一个进程持有 turn lease，
- * 或者历史里本来就没有可清理的内容。三种情况都不是错误，插件据此决定要不要计入次数。
+ * `skipped` 不是错误，也不消耗次数：`busy` 是「现在不能写」（这一轮正在跑、另一个
+ * 进程持有 turn lease、用户刚好按下发送），`empty` 是「历史里没有可清理的内容」——
+ * 干净的会话每次敲字都会走到后者。分开两种原因是为了让插件能记一条能读的日志，
+ * 而不是把「本来就没得压」和「压不上」混成一句。
  */
-export type PluginIdleCompactResult = {
-  /** 这次压缩大约省下多少 token（估算值，仅用于展示）。 */
-  savedTokens: number;
+export type PluginIdleCompactOutcome =
+  | { status: 'applied'; /** 这次压缩大约省下多少 token（估算值，仅用于展示）。 */ savedTokens: number }
+  | { status: 'skipped'; reason: 'busy' | 'empty' };
+
+/**
+ * 压缩真正应用之后、落盘之前的那一刻。
+ *
+ * 插件在这里写会话状态、发 notice：宿主随后会把压缩结果与这些写入**一起**存下来。
+ * 压缩结束之后再写就晚了——那时宿主已经落过盘（或租约已经放掉），下一轮才可能被
+ * 带下去，而用户可能直接关掉页面。回调抛错会让宿主回滚这次压缩并不落盘。
+ */
+export type PluginIdleCompactHook = {
+  /** `savedTokens` 是这一次压缩的估算节省量（与最终结果里的同一个值）。 */
+  afterApply?: (result: { savedTokens: number }) => void;
 };
 
 /** 一次模型请求所属 agent 的句柄。 */
@@ -88,5 +101,5 @@ export type PluginAgentRegistry = {
    * 宿主给不出这条通路时省略（`mica exec` 不落盘，TUI 由 `/compact` 负责）；插件必须
    * 把它当成可选能力，不能因为读不到就报错。
    */
-  compactIdleHistory?(pluginId: string): Promise<PluginIdleCompactResult | null>;
+  compactIdleHistory?(pluginId: string, options?: PluginIdleCompactHook): Promise<PluginIdleCompactOutcome>;
 };

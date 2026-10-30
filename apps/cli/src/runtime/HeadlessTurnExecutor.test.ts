@@ -172,7 +172,7 @@ describe('HeadlessTurnExecutor', () => {
     const result = await executor.runIdleMaintenance(async () => {
       ran++;
       return 'ok';
-    });
+    }, 'busy');
 
     expect(result).toBe('ok');
     expect(ran).toBe(1);
@@ -184,7 +184,7 @@ describe('HeadlessTurnExecutor', () => {
     const { executor } = createHarness();
     await executor.start(input('hello'));
 
-    await expect(executor.runIdleMaintenance(async () => 'ok')).resolves.toBeNull();
+    await expect(executor.runIdleMaintenance(async () => 'ok', 'busy')).resolves.toBe('busy');
   });
 
   it('makes a turn wait for an in-flight idle task instead of reporting busy-remote', async () => {
@@ -192,7 +192,7 @@ describe('HeadlessTurnExecutor', () => {
     const idle = executor.runIdleMaintenance(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
       return 'ok';
-    });
+    }, 'busy');
 
     await expect(executor.start(input('hello'))).resolves.toBe('started');
     await expect(idle).resolves.toBe('ok');

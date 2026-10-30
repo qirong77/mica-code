@@ -60,7 +60,7 @@ export function usePluginEntries() {
               label: plugin.desktopEntry.label,
               icon: plugin.icon,
               module,
-              page,
+              page
             }
           } catch {
             return null

@@ -106,8 +106,14 @@ context.onDispose(() => registration.dispose());
 这里改的是会话文件本身，所以它能在用户还没按下发送时就把上下文降下来。
 
 它只在能独占写会话文件的常驻宿主里提供（`mica app-server`）：没有 turn 在跑、没有别的进程
-持有 turn lease 时才会执行，否则返回 `null`。`mica exec` 不落盘、TUI 由 `/compact` 负责，
-两边都不提供——插件应当把它当可选能力。
+持有 turn lease 时才会执行，否则回 `{ status: 'skipped', reason: 'busy' }`；历史里没有可
+清理的内容回 `reason: 'empty'`。两者都不是错误、不消耗次数。`mica exec` 不落盘、TUI 由
+`/compact` 负责，两边都不提供——插件应当把它当可选能力。
+
+要在压缩结果旁边一并落盘的东西（计数、`context.ui.notice` 留的那行提示）写在
+`compactIdleHistory({ afterApply })` 里：宿主在**落盘之前**调它，所以压缩、状态与提示是同一次
+写。等 `await` 返回之后再写就晚了——那时文件已经写过，状态要等下一轮才带下去，而用户可能
+已经关掉页面了。
 
 触发它的事件是 `input:activity`（`context.events.on('event', …)`）：用户在输入框里敲了字。
 桌面端在敲字时节流发 `mica/input/activity`，宿主翻成这条运行期事件；TUI 与 `exec` 不发，

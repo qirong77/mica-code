@@ -1975,6 +1975,19 @@ suite('mica app-server real-user flows (mock provider)', () => {
       await sleep(100);
     }
     expect(persisted).toContain('[Old tool result content cleared during compact]');
+    // 记账与压缩是同一次写：文件里必须已经有计数与那次 notice。分开写会出现
+    // 「历史压了、pluginState 还是旧的」——用户关掉页面后就再也对不上账。
+    expect(persisted).toContain('"quickRuns": 1');
+    expect(persisted).toContain('已快速压缩历史');
+    // 输入框左下角的 ctx 徽标读 displayUsage：压缩后它必须降到压缩后的占用，
+    // 否则界面还写着压缩前的数字，看着像没生效（lastUsage 保持不变是 Stats 的口径）。
+    const idleSnapshot = JSON.parse(persisted).snapshot as {
+      displayUsage?: { totalTokens?: number; compactedAt?: string };
+    };
+    expect(idleSnapshot.displayUsage?.totalTokens).toBeGreaterThan(0);
+    expect(idleSnapshot.displayUsage?.compactedAt).toEqual(expect.any(String));
+    // 轮次之外改掉的历史要通知客户端重载，否则页面一直显示压缩前的记录。
+    await waitFor(host, (m) => m.method === 'mica/sessionHistory/replaced', 'history replaced notification', 10_000);
     // 请求数没变：这次压缩全在本地，没有偷偷发起一次模型请求。
     expect(mock!.state.requests).toHaveLength(requestsBeforeActivity);
     expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);

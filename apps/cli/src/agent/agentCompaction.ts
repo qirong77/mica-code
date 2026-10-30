@@ -90,6 +90,13 @@ export async function compactIdleSessionHistory(input: {
   sessionController: SessionController;
   /** 落盘时要写回的对话记录（含 notice）；不给就退回 agent 自己的投影。 */
   conversationMessages?: () => MicaUiConversationMessage[] | undefined;
+  /**
+   * 压缩已应用到内存、还没落盘的那一刻。插件在这里写会话状态与 notice，随后它们
+   * 会和压缩结果一起被存下去——晚于落盘再写只能等下一轮，用户可能已经关了页面。
+   *
+   * 抛错会回滚这次压缩并不落盘。
+   */
+  afterApply?: (result: { savedTokens: number }) => void;
 }): Promise<{ savedTokens: number } | null> {
   const { agent, sessionController } = input;
   const snapshot = agent.getSnapshot();
@@ -123,10 +130,27 @@ export async function compactIdleSessionHistory(input: {
     throw error;
   }
 
+  const savedTokens = Math.max(0, result.savedTokenEstimate);
+  try {
+    input.afterApply?.({ savedTokens });
+  } catch (error) {
+    // 回调里通常是插件写会话状态或发 notice 失败：退回压缩前的快照，别让磁盘上出现
+    // 「压了但没记账」的半状态。
+    agent.loadSnapshot(snapshot);
+    throw error;
+  }
+
   const conversationMessages = input.conversationMessages?.();
   sessionController.saveCurrent({
     preserveTitle: true,
     ...(conversationMessages ? { conversationMessages } : {}),
+    // 压缩后的上下文占用：`lastUsage` 仍是压缩前那次真实请求（Stats 的对账口径，
+    // 也是重试与自动压缩判断阈值的依据），所以界面上的 ctx 徽标读这一份，否则压完
+    // 输入框左下角还写着压缩前的数字，看着像「没生效」。与 `mica compact` 同一种写法：
+    // 下一次真实请求会把它替换掉。
+    ...(result.afterTokenEstimate > 0
+      ? { displayUsage: { totalTokens: result.afterTokenEstimate, compactedAt: new Date().toISOString() } }
+      : {}),
   });
-  return { savedTokens: Math.max(0, result.savedTokenEstimate) };
+  return { savedTokens };
 }

@@ -21,7 +21,12 @@ export function PluginPage({ entry, onClose }) {
     <div className="fixed inset-0 z-[9500] flex flex-col bg-canvas">
       {/* 桌面端留一条拖动条：整页盖住窗口后没有别处可以拖（macOS 的交通灯由系统画在
           页面之上，不受这层影响）。 */}
-      {!isMobile && <div className="drag-region h-8 shrink-0 border-b border-line bg-panel" aria-hidden="true" />}
+      {!isMobile && (
+        <div
+          className="drag-region h-8 shrink-0 border-b border-line bg-panel"
+          aria-hidden="true"
+        />
+      )}
       <div className="no-drag flex min-h-0 flex-1 flex-col">
         <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-2">
           <button
@@ -34,11 +39,15 @@ export function PluginPage({ entry, onClose }) {
             <IconArrowLeft size={13} />
             <span className="text-xs">返回对话</span>
           </button>
-          <span className="min-w-0 truncate text-xs font-medium text-white/75">{entry.page.title || entry.label}</span>
+          <span className="min-w-0 truncate text-xs font-medium text-white/75">
+            {entry.page.title || entry.label}
+          </span>
         </header>
         <div className="min-h-0 flex-1 overflow-hidden">
           <Suspense
-            fallback={<div className="grid h-full place-items-center text-xs text-white/40">正在加载…</div>}
+            fallback={
+              <div className="grid h-full place-items-center text-xs text-white/40">正在加载…</div>
+            }
           >
             <Page api={api} onClose={onClose} />
           </Suspense>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, Crosshair, RefreshCw, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { CalendarDays, Crosshair, RefreshCw, X } from 'lucide-react';
 import {
   addDays,
   axisCells,
@@ -7,7 +7,6 @@ import {
   clampZoom,
   isWeekend,
   pxPerDayOf,
-  STAGE_ROW_HEIGHT,
   todayScrollLeft,
   zoomAnchor,
   ZOOM_STEP,
@@ -28,8 +27,12 @@ import { dayLabel, freshness, shortDate, todayOf } from './view';
  */
 
 const LABEL_WIDTH = 190;
+const BAR_HEIGHT = 24;
+const LANE_GAP = 4;
 const DAY_HEADER_HEIGHT = 24;
 const MAJOR_HEADER_HEIGHT = 20;
+/** 滚轮累计多少像素才走一档缩放：鼠标滚一格（约 100px）恰好一档，触控板不会一滑到底。 */
+const WHEEL_STEP_PX = 100;
 
 /** 阶段配色：同一天里不同阶段的条不靠文字也能分开。 */
 const STAGE_TONE = {
@@ -126,12 +129,11 @@ export default function SchedulePage({ api }) {
   const pxPerDay = pxPerDayOf(scale, zoom);
   const width = Math.max(320, Math.round(layout.days * pxPerDay));
   const cells = useMemo(() => axisCells(layout.start, layout.days, scale), [layout.start, layout.days, scale]);
-  const rowsHeight = layout.height;
+  const rowsHeight = layout.rows.reduce((sum, row) => sum + rowHeight(row.lanes), 0);
   const todayOffset = daysBetween(layout.start, today);
   const todayInAxis = todayOffset >= 0 && todayOffset < layout.days;
-  const groupOf = useCallback((groupId) => snapshot.groups.find((group) => group.id === groupId), [snapshot]);
 
-  // 换刻度 / 换了数据才回到今天；缩放不走这里（锚点由 changeZoom 自己保持）。
+  // 换刻度 / 换了数据才回到今天；缩放不走这里（锚点由滚轮自己保持）。
   const scrollToToday = useCallback(() => {
     const host = scrollRef.current;
     if (!host) return;
@@ -144,16 +146,31 @@ export default function SchedulePage({ api }) {
     host.scrollLeft = todayScrollLeft(layout.start, today, pxPerDayOf(scale, zoomRef.current), host.clientWidth);
   }, [scale, layout.start, layout.days, today]);
 
-  // ⌘/Ctrl + 滚轮缩放（锚在光标），Shift + 滚轮横向平移。普通滚轮留给纵向滚动——
-  // 群多的时候纵向才是主要动作，缩放有工具栏按钮。
+  // 滚轮就是缩放（锚在光标）：上下滚一档一档来，Shift 或触控板横滑才平移。
+  // 滚轮既然给了缩放，纵向滚动交给滚动条——一次滚动只改一样，手感才不会两件事一起动。
   useEffect(() => {
     const host = scrollRef.current;
     if (!host) return undefined;
+    let acc = 0;
     const onWheel = (event) => {
-      if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      const next = clampZoom(zoom * (event.deltaY > 0 ? 1 / ZOOM_STEP : ZOOM_STEP));
-      if (next === zoom) return;
+      // deltaMode：0=像素 1=行 2=页，统一折成像素再累计，免得鼠标滚一格跳好几档
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
+      const dx = event.deltaX * unit;
+      const dy = event.deltaY * unit;
+      if (event.shiftKey || Math.abs(dx) > Math.abs(dy)) {
+        acc = 0;
+        host.scrollLeft += Math.abs(dx) > Math.abs(dy) ? dx : dy;
+        return;
+      }
+      if (dy * acc < 0) acc = 0;
+      acc += dy;
+      const steps = Math.trunc(acc / WHEEL_STEP_PX);
+      if (!steps) return;
+      acc -= steps * WHEEL_STEP_PX;
+      // 向下滚 = 缩小，和地图类应用一致
+      const next = clampZoom(zoomRef.current * ZOOM_STEP ** -steps);
+      if (next === zoomRef.current) return;
       const anchored = zoomAnchor({
         start: layout.start,
         scrollLeft: host.scrollLeft,
@@ -170,30 +187,7 @@ export default function SchedulePage({ api }) {
     };
     host.addEventListener('wheel', onWheel, { passive: false });
     return () => host.removeEventListener('wheel', onWheel);
-  }, [zoom, layout.start, pxPerDay, scale]);
-
-  const changeZoom = (factor) => {
-    const host = scrollRef.current;
-    const next = clampZoom(zoom * factor);
-    if (next === zoom) return;
-    if (host) {
-      const anchored = zoomAnchor({
-        start: layout.start,
-        scrollLeft: host.scrollLeft,
-        pxPerDay,
-        scale,
-        zoom: next,
-        anchorX: null,
-        viewportWidth: host.clientWidth,
-      });
-      setZoom(next);
-      requestAnimationFrame(() => {
-        host.scrollLeft = anchored.scrollLeft;
-      });
-      return;
-    }
-    setZoom(next);
-  };
+  }, [layout.start, pxPerDay, scale]);
 
   const toggleStage = (key) => {
     setHidden((prev) => {
@@ -236,36 +230,9 @@ export default function SchedulePage({ api }) {
             ))}
           </div>
 
-          <div className="flex items-center rounded-md border border-line bg-white/[.03] p-0.5">
-            <button
-              type="button"
-              title="缩小（⌘/Ctrl + 滚轮也行）"
-              aria-label="缩小"
-              disabled={zoom <= 0.5}
-              onClick={() => changeZoom(1 / ZOOM_STEP)}
-              className="grid h-6 w-6 place-items-center rounded-sm text-white/50 hover:bg-white/[.06] hover:text-white disabled:text-white/20 disabled:hover:bg-transparent"
-            >
-              <ZoomOut size={12} />
-            </button>
-            <button
-              type="button"
-              title="恢复默认缩放"
-              onClick={() => setZoom(1)}
-              className="h-6 w-9 text-[10px] tabular-nums text-white/50 hover:text-white"
-            >
-              {Math.round(zoom * 100)}%
-            </button>
-            <button
-              type="button"
-              title="放大（⌘/Ctrl + 滚轮也行）"
-              aria-label="放大"
-              disabled={zoom >= 3}
-              onClick={() => changeZoom(ZOOM_STEP)}
-              className="grid h-6 w-6 place-items-center rounded-sm text-white/50 hover:bg-white/[.06] hover:text-white disabled:text-white/20 disabled:hover:bg-transparent"
-            >
-              <ZoomIn size={12} />
-            </button>
-          </div>
+          <span className="text-[10px] tabular-nums text-white/35" title="滚轮缩放，Shift + 滚轮平移">
+            {Math.round(zoom * 100)}%
+          </span>
 
           <button
             type="button"
@@ -328,41 +295,25 @@ export default function SchedulePage({ api }) {
           <div className="flex shrink-0 flex-col border-r border-line bg-panel/40" style={{ width: LABEL_WIDTH }}>
             <div className="shrink-0 border-b border-line" style={{ height: MAJOR_HEADER_HEIGHT + DAY_HEADER_HEIGHT }} />
             <div className="min-h-0 flex-1 overflow-hidden">
-              <div className="relative" style={{ height: layout.height, transform: `translateY(${-scrollTop}px)` }}>
-                {layout.rows.map((row) =>
-                  row.kind === 'group' ? (
-                    <div
-                      key={row.id}
-                      className="absolute inset-x-0 flex flex-col justify-center border-b border-white/[.08] bg-white/[.03] px-2.5"
-                      style={{ top: row.top, height: row.height }}
+              <div style={{ transform: `translateY(${-scrollTop}px)` }}>
+                {layout.rows.map((row) => (
+                  <div
+                    key={row.groupId}
+                    className="flex flex-col justify-center border-b border-white/[.06] px-2.5"
+                    style={{ height: rowHeight(row.lanes) }}
+                  >
+                    <span className="truncate text-[12px] text-white/80" title={row.name}>
+                      {row.name}
+                    </span>
+                    <span
+                      className="truncate text-[10px] text-white/30"
+                      title={`公告：${row.author} ${row.announcedAt ? new Date(row.announcedAt).toLocaleString('zh-CN', { hour12: false }) : ''}`}
                     >
-                      <span className="truncate text-[12px] text-white/85" title={row.name}>
-                        {row.name}
-                      </span>
-                      <span
-                        className="truncate text-[10px] text-white/30"
-                        title={`公告：${row.author} ${row.announcedAt ? new Date(row.announcedAt).toLocaleString('zh-CN', { hour12: false }) : ''}`}
-                      >
-                        {row.author || '公告'}
-                        {row.announcedAt ? ` · ${shortDate(new Date(row.announcedAt).toISOString().slice(0, 10))}` : ''}
-                      </span>
-                    </div>
-                  ) : (
-                    <div
-                      key={row.id}
-                      className={`absolute inset-x-0 flex items-center gap-1 border-b border-white/[.04] pl-4 pr-2 ${
-                        hidden.has(row.key) ? 'opacity-35' : ''
-                      }`}
-                      style={{ top: row.top, height: row.height }}
-                    >
-                      <span className="min-w-0 flex-1 truncate text-[11px] text-white/60">{row.label}</span>
-                      <span className="shrink-0 text-[10px] tabular-nums text-white/30">
-                        {shortDate(row.start)}
-                        {row.start === row.end ? '' : `–${shortDate(row.end)}`}
-                      </span>
-                    </div>
-                  ),
-                )}
+                      {row.author || '公告'}
+                      {row.announcedAt ? ` · ${shortDate(new Date(row.announcedAt).toISOString().slice(0, 10))}` : ''}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -378,7 +329,8 @@ export default function SchedulePage({ api }) {
               }
             }}
           >
-            <div style={{ width }}>
+            {/* 缩小到比视口还窄时也撑满：否则行分隔线到内容右边界就断掉，看着像画到一半 */}
+            <div style={{ width, minWidth: '100%' }}>
               <div className="sticky top-0 z-10 bg-panel/95 backdrop-blur">
                 <div className="relative border-b border-white/10" style={{ height: MAJOR_HEADER_HEIGHT }}>
                   {cells.major.map((cell) => (
@@ -447,30 +399,26 @@ export default function SchedulePage({ api }) {
                   />
                 ))}
 
-                {layout.rows.map((row) =>
-                  row.kind === 'group' ? (
-                    <div
-                      key={row.id}
-                      className="absolute inset-x-0 border-b border-white/[.08] bg-white/[.03]"
-                      style={{ top: row.top, height: row.height }}
-                    />
-                  ) : (
-                    <div
-                      key={row.id}
-                      className="absolute inset-x-0 border-b border-white/[.04]"
-                      style={{ top: row.top, height: row.height }}
-                    >
-                      {!hidden.has(row.key) && (
-                        <StageBar
-                          row={row}
-                          pxPerDay={pxPerDay}
-                          active={selected?.stage.id === row.id}
-                          onClick={() => setSelected({ stage: row })}
-                        />
-                      )}
-                    </div>
-                  ),
-                )}
+                {(() => {
+                  let top = 0;
+                  return layout.rows.map((row) => {
+                    const height = rowHeight(row.lanes);
+                    const rowTop = top;
+                    top += height;
+                    return (
+                      <Row
+                        key={row.groupId}
+                        row={row}
+                        height={height}
+                        top={rowTop}
+                        pxPerDay={pxPerDay}
+                        hidden={hidden}
+                        selectedId={selected?.bar.id ?? ''}
+                        onSelect={(bar) => setSelected({ bar, row })}
+                      />
+                    );
+                  });
+                })()}
               </div>
             </div>
           </div>
@@ -480,23 +428,23 @@ export default function SchedulePage({ api }) {
       {/* 选中的阶段：固定条不遮挡时间轴，也不做浮层（浮层一多时间轴就没法看了） */}
       {selected && (
         <div className="flex shrink-0 items-center gap-3 border-t border-line bg-panel/60 px-3 py-2 text-[11px]">
-          <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] ${toneOf(selected.stage.key)}`}>
-            {selected.stage.label}
+          <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] ${toneOf(selected.bar.key)}`}>
+            {selected.bar.label}
           </span>
-          <span className="min-w-0 truncate text-white/85">{groupOf(selected.stage.groupId)?.name ?? ''}</span>
+          <span className="min-w-0 truncate text-white/85">{selected.row.name}</span>
           <span className="shrink-0 tabular-nums text-white/55">
-            {shortDate(selected.stage.start)}
-            {selected.stage.start === selected.stage.end ? '' : ` – ${shortDate(selected.stage.end)}`}
-            <span className="ml-1 text-white/35">共 {selected.stage.span} 天</span>
+            {shortDate(selected.bar.start)}
+            {selected.bar.start === selected.bar.end ? '' : ` – ${shortDate(selected.bar.end)}`}
+            <span className="ml-1 text-white/35">共 {selected.bar.span} 天</span>
           </span>
           <span className="min-w-0 truncate text-white/35">
-            {groupOf(selected.stage.groupId)?.author ? `公告 ${groupOf(selected.stage.groupId).author}` : '来自群公告'}
-            {groupOf(selected.stage.groupId)?.announcedAt
-              ? ` · ${new Date(groupOf(selected.stage.groupId).announcedAt).toLocaleString('zh-CN', { hour12: false })}`
+            {selected.row.author ? `公告 ${selected.row.author}` : '来自群公告'}
+            {selected.row.announcedAt
+              ? ` · ${new Date(selected.row.announcedAt).toLocaleString('zh-CN', { hour12: false })}`
               : ''}
           </span>
           <span className="ml-auto shrink-0 text-white/35">
-            {dayLabel(selected.stage.start)} 开始
+            {dayLabel(selected.bar.start)} 开始
           </span>
           <button
             type="button"
@@ -519,24 +467,46 @@ export default function SchedulePage({ api }) {
   );
 }
 
-/** 一个阶段一根条。名称已经写在左侧那一列，条里只在够宽时补一遍日期。 */
-function StageBar({ row, pxPerDay, active, onClick }) {
-  const left = row.offset * pxPerDay;
-  const width = Math.max(6, row.span * pxPerDay - 2);
+function rowHeight(lanes) {
+  return lanes * BAR_HEIGHT + (lanes - 1) * LANE_GAP + 12;
+}
+
+/** 一行：这个项目的阶段条。名称在左侧列，条上不放字（窄条只剩「联..」）。 */
+function Row({ row, height, top, pxPerDay, hidden, selectedId, onSelect }) {
+  return (
+    <div className="absolute inset-x-0 border-b border-white/[.06]" style={{ height, top }}>
+      {row.bars
+        .filter((bar) => !hidden.has(bar.key))
+        .map((bar) => (
+          <Bar
+            key={bar.id}
+            bar={bar}
+            pxPerDay={pxPerDay}
+            active={selectedId === bar.id}
+            onClick={() => onSelect(bar)}
+          />
+        ))}
+    </div>
+  );
+}
+
+function Bar({ bar, pxPerDay, active, onClick }) {
+  const left = bar.offset * pxPerDay;
+  const width = Math.max(6, bar.span * pxPerDay - 2);
+  const top = 6 + bar.lane * (BAR_HEIGHT + LANE_GAP);
   // 「10.28」这种写法比一整串 ISO 日期好读，窄条上也放得下
-  const range = row.start === row.end ? shortDate(row.start) : `${shortDate(row.start)}–${shortDate(row.end)}`;
+  const range = bar.start === bar.end ? shortDate(bar.start) : `${shortDate(bar.start)}–${shortDate(bar.end)}`;
   return (
     <button
       type="button"
       onClick={onClick}
-      title={`${row.label}｜${range}｜${row.span} 天`}
-      className={`absolute flex items-center overflow-hidden rounded-sm border px-1.5 text-left text-[11px] transition-[filter] hover:brightness-125 ${toneOf(row.key)} ${
+      title={`${bar.label}｜${range}｜${bar.span} 天`}
+      className={`absolute flex items-center overflow-hidden rounded-sm border px-1.5 text-left text-[11px] transition-[filter] hover:brightness-125 ${toneOf(bar.key)} ${
         active ? 'ring-1 ring-white/70' : ''
       }`}
-      style={{ left, width, top: 4, height: STAGE_ROW_HEIGHT - 8 }}
+      style={{ left, width, top, height: BAR_HEIGHT }}
     >
-      {/* 太窄的条放字只会剩下「联..」，日期留给左侧那一列与点击后的详情条 */}
-      {width >= 64 && <span className="min-w-0 flex-1 truncate text-[10px] opacity-80">{range}</span>}
+      {width >= 46 && <span className="min-w-0 flex-1 truncate">{bar.label}</span>}
     </button>
   );
 }

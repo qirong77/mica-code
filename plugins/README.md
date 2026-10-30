@@ -323,6 +323,20 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   渲染不出入口，所以 `desktop.entry` 不必也不能靠 `requires: ["desktop"]` 表达——
   它不依赖 app-server 的能力面。
 
+### 整页（`page`）
+
+浮层只有 320px 宽、也没有高度预算，时间轴、看板这类要整屏的界面放不下。同一个 `desktop.jsx`
+再声明 `page`，点这一行就不进浮层、直接打开整页：
+
+```json
+"desktop": { "entry": { "label": "Schedule" }, "page": { "title": "排期" } }
+```
+
+页面由宿主渲染在 `renderer/src/PluginPage.jsx` 里：盖住整个窗口，顶部一条 `← 返回对话` + 标题，
+正文就是这个模块的 `default` 组件（props 与卡片一样是 `{ api }`），所以 `summary` 之类的导出
+照旧。什么时候用整页、什么时候用浮层只看一件事：这块界面需不需要房间。侧栏入口的顺序与
+`icon` 不受影响。
+
 ## 对话右侧面板
 
 插件想在**对话界面**里放一块自己的界面（配置、状态、一列可操作的条目）时声明面板。和侧栏入口

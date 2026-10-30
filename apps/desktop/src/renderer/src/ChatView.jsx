@@ -3796,6 +3796,8 @@ export function ChatView({
             const queued = previous.filter((message) => message.queued)
             return queued.length > 0 ? [...rows, ...queued] : rows
           })
+          // 历史被改写通常也改了上下文占用（压缩写 displayUsage），徽标要跟着走。
+          if (event.meta) setMeta(event.meta)
           setHistoryLoaded(true)
           break
         }

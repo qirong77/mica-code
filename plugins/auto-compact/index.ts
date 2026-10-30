@@ -154,11 +154,20 @@ function persistState(ctx: PluginContext, value: AutoCompactCounters): void {
   ctx.sessionState?.set(value);
 }
 
+/** 空闲时长的说法：「22 分钟」「3.5 小时」比「1320 分钟」好读。 */
+function formatIdle(idleMs: number): string {
+  const minutes = idleMs / 60_000;
+  if (minutes < 1) return '不到 1 分钟';
+  if (minutes < 60) return `${Math.round(minutes)} 分钟`;
+  const hours = minutes / 60;
+  return `${hours < 10 ? hours.toFixed(1) : Math.round(hours)} 小时`;
+}
+
 /**
  * 用户回来了：会话空闲够久就先做一次快速压缩，让接下来那一轮请求按压小的历史发出。
  *
- * 宿主返回 `null` 表示这次没压成（会话正忙、别的进程持锁、没有可清理的内容），
- * 那也不消耗次数——下一次请求仍按阈值判断。
+ * 宿主回 `skipped` 表示这次没压成（`busy` 会话正忙 / 别的进程持锁，`empty` 没有可清理
+ * 的内容），那也不消耗次数——下一次请求仍按阈值判断。
  */
 async function compactOnReturn(
   ctx: PluginContext,
@@ -170,27 +179,34 @@ async function compactOnReturn(
   if (!compact) return;
   const settings = readSettings(ctx);
   const counters = normalizeCounters(ctx.sessionState?.get());
-  if (!shouldCompactOnReturn({ settings, counters, idleMs, nowMs })) return;
+  if (!shouldCompactOnReturn({ settings, counters, idleMs })) return;
 
   try {
-    const result = await compact();
-    if (!result) {
-      ctx.logger.info('auto-compact:idle-skipped', { idleMs });
+    const outcome = await compact({
+      // 计数与提示必须在落盘**之前**写：宿主压缩完就把会话文件写死了，之后写的状态
+      // 只能等下一轮才带上——用户可能直接关掉页面，那次压缩就变成「压了但没记账」。
+      afterApply: ({ savedTokens }) => {
+        const next = normalizeCounters(ctx.sessionState?.get());
+        next.quickRuns += 1;
+        next.lastKind = 'quick';
+        next.lastRunAt = new Date(nowMs).toISOString();
+        next.lastSavedTokens = Math.round(savedTokens) || 0;
+        next.lastActivityAt = new Date(nowMs).toISOString();
+        persistState(ctx, next);
+        // 界面上看得见的一次：否则「到底压没压」只能翻插件日志。
+        ctx.ui?.notice(
+          `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史（约省下 ${Math.round(savedTokens)} tokens）`,
+        );
+      },
+    });
+    if (outcome.status === 'skipped') {
+      ctx.logger.info('auto-compact:idle-skipped', { idleMs, reason: outcome.reason });
       return;
     }
-    // 重新读一次而不是复用上面那份：压缩本身会改会话状态（计数也在里面），
-    // 按最新的合并才不会把谁的写入抹掉。
-    const next = normalizeCounters(ctx.sessionState?.get());
-    next.quickRuns += 1;
-    next.lastKind = 'quick';
-    next.lastRunAt = new Date(nowMs).toISOString();
-    next.lastSavedTokens = result.savedTokens;
-    next.lastActivityAt = new Date(nowMs).toISOString();
-    persistState(ctx, next);
-    ctx.logger.info('auto-compact:idle-applied', { idleMs, savedTokens: result.savedTokens });
+    ctx.logger.info('auto-compact:idle-applied', { idleMs, savedTokens: outcome.savedTokens });
     ctx.health.report({
       level: 'ok',
-      message: `空闲 ${Math.round(idleMs / 60_000)} 分钟后重新输入，快速压缩省下约 ${result.savedTokens} tokens`,
+      message: `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史（约省下 ${outcome.savedTokens} tokens）`,
     });
   } catch (error) {
     // 提前量失败不该影响用户说话：记日志 + 一条可见但不打断的状态。

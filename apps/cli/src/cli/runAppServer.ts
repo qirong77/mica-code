@@ -524,8 +524,18 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       loadUserPlugins: true,
       isBusy: () => executor!.isBusy,
       // 用户在输入框敲字时插件可能要提前改一次会话（自动压缩）。Executor 负责
-      // 「现在能不能写」：轮次中、别的进程持锁、或者刚好有人按了发送都返回 null。
-      runIdleTask: (task) => executor!.runIdleMaintenance(task),
+      // 「现在能不能写」：轮次中、别的进程持锁、或者刚好有人按了发送都返回 busy。
+      runIdleTask: (task, busy) =>
+        executor!.runIdleMaintenance(task, busy).then((outcome) => {
+          // 轮次之外改掉的历史没有对应的 Codex 事件，客户端会一直显示旧记录（压缩后的
+          // 工具结果、插件随压缩写的 notice 都看不到）。复用「历史被替换」这条通知重载。
+          if ((outcome as { status?: string } | null)?.status === 'applied') {
+            writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, {
+              threadId: sessionController!.getCurrentSessionId(),
+            });
+          }
+          return outcome;
+        }),
       submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
     });
     executor.attachPluginLayer({

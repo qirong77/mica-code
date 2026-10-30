@@ -7,6 +7,7 @@ import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type {
   HookRegistry,
   MicaPlugin,
+  PluginIdleCompactOutcome,
   PluginPanelRegistry,
   PluginManager,
   PluginBaseContext,
@@ -78,7 +79,7 @@ export type HeadlessPluginHostOptions = {
    * 由常驻会话宿主提供（它持有 turn lease 与落盘时机）；`mica exec` 不传，插件因此
    * 拿不到 `compactIdleHistory`。
    */
-  runIdleTask?: <T>(task: () => Promise<T | null>) => Promise<T | null>;
+  runIdleTask?: <T>(task: () => Promise<T>, busy: T) => Promise<T>;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -313,13 +314,22 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       // 插件只决定「什么时候值得压」。
       ...(options.runIdleTask
         ? {
-            compactIdleHistory: () =>
-              options.runIdleTask!(() =>
-                compactIdleSessionHistory({
-                  agent,
-                  sessionController,
-                  conversationMessages: () => getConversationMessages(),
-                }),
+            compactIdleHistory: (_pluginId, hook) =>
+              options.runIdleTask!<PluginIdleCompactOutcome>(
+                async (): Promise<PluginIdleCompactOutcome> => {
+                  const applied = await compactIdleSessionHistory({
+                    agent,
+                    sessionController,
+                    conversationMessages: () => getConversationMessages(),
+                    ...(hook?.afterApply ? { afterApply: hook.afterApply } : {}),
+                  });
+                  // 没有可清理的内容是常态（干净的会话每次敲字都会走到这里），
+                  // 与「压不上」分开报，日志才读得懂。
+                  return applied
+                    ? { status: 'applied', savedTokens: applied.savedTokens }
+                    : { status: 'skipped', reason: 'empty' };
+                },
+                { status: 'skipped', reason: 'busy' },
               ),
           }
         : {}),
