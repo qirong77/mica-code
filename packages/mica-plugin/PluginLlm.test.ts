@@ -165,3 +165,124 @@ describe('createPluginLlmApi', () => {
     expect(describePluginLlm(own)).not.toContain('sk-secret');
   });
 });
+
+describe('createPluginLlmApi fallback', () => {
+  function setup(initial: Record<string, string>, handler: (request: PluginModelRequest) => Promise<string>) {
+    const values = { ...initial };
+    const requests: PluginModelRequest[] = [];
+    const reported: string[] = [];
+    const api = createPluginLlmApi({
+      spec: { followMain: true },
+      readValues: () => values,
+      models: async (request) => {
+        requests.push(request);
+        return { text: await handler(request), usage: null };
+      },
+      health: {
+        report: (entry) => {
+          reported.push(entry.message);
+        },
+      },
+    });
+    return { api, requests, reported, values };
+  }
+
+  const ownConfig = { useMainProvider: 'false', baseUrl: 'https://x.test/v1', apiKey: 'k', model: 'mini' };
+
+  it('falls back to the main config when the configured endpoint fails', async () => {
+    const { api, requests, reported } = setup(ownConfig, async (request) => {
+      if (!request.useMainProvider) throw new Error('404 model not found');
+      return 'ok';
+    });
+
+    await expect(api.request({ purpose: 'p', system: 's', user: 'u' })).resolves.toMatchObject({ text: 'ok' });
+
+    expect(requests).toHaveLength(2);
+    // 降级时连模型名一起交给主配置：那个名字在自己的接口里有、在主配置里未必有。
+    expect(requests[1]).toMatchObject({ useMainProvider: true, model: '', baseUrl: '', apiKey: '' });
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toContain('404 model not found');
+    expect(api.describe()).toContain('已降级');
+  });
+
+  it('remembers the failure so later requests go straight to the main config', async () => {
+    const { api, requests, reported } = setup(ownConfig, async (request) => {
+      if (!request.useMainProvider) throw new Error('401 unauthorized');
+      return 'ok';
+    });
+
+    await api.request({ purpose: 'p', system: 's', user: 'u' });
+    await api.request({ purpose: 'p', system: 's', user: 'u' });
+
+    // 第二次不再先打一遍注定失败的地址，健康状态也只报一次。
+    expect(requests).toHaveLength(3);
+    expect(requests[2]).toMatchObject({ useMainProvider: true, model: '' });
+    expect(reported).toHaveLength(1);
+  });
+
+  it('tries its own endpoint again after the configuration changes', async () => {
+    const { api, requests, values } = setup(ownConfig, async (request) => {
+      if (request.baseUrl === 'https://x.test/v1') throw new Error('503 unavailable');
+      return 'ok';
+    });
+
+    await api.request({ purpose: 'p', system: 's', user: 'u' });
+    expect(api.describe()).toContain('已降级');
+
+    values.baseUrl = 'https://y.test/v1';
+    await api.request({ purpose: 'p', system: 's', user: 'u' });
+
+    expect(requests.at(-1)).toMatchObject({ useMainProvider: false, baseUrl: 'https://y.test/v1' });
+    expect(api.describe()).not.toContain('已降级');
+  });
+
+  it('drops a named model the main config cannot serve', async () => {
+    const { api, requests } = setup({ useMainProvider: 'true', model: 'gone-model' }, async (request) => {
+      if (request.model) throw new Error('404 no such model');
+      return 'ok';
+    });
+
+    await api.request({ purpose: 'p', system: 's', user: 'u' });
+
+    expect(requests[1]).toMatchObject({ useMainProvider: true, model: '' });
+  });
+
+  it('does not retry when it already follows the main config without a named model', async () => {
+    const { api, requests, reported } = setup({ useMainProvider: 'true', model: '' }, async () => {
+      throw new Error('network down');
+    });
+
+    await expect(api.request({ purpose: 'p', system: 's', user: 'u' })).rejects.toThrow('network down');
+    expect(requests).toHaveLength(1);
+    expect(reported).toHaveLength(0);
+  });
+
+  it('does not resend after the caller aborted', async () => {
+    const { api, requests } = setup(ownConfig, async () => {
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(api.request({ purpose: 'p', system: 's', user: 'u', signal: controller.signal })).rejects.toThrow(
+      'aborted',
+    );
+    expect(requests).toHaveLength(1);
+  });
+
+  it('keeps the original error and stays put when the fallback fails too', async () => {
+    const { api, requests, reported } = setup(ownConfig, async (request) => {
+      throw new Error(request.useMainProvider ? 'main provider down' : '404 model not found');
+    });
+
+    await expect(api.request({ purpose: 'p', system: 's', user: 'u' })).rejects.toThrow(
+      /404 model not found；降级为主配置也失败：main provider down/,
+    );
+    // 两边都失败时不记住这次降级：下一次仍先试用户自己的配置。
+    expect(api.describe()).not.toContain('已降级');
+    expect(reported).toHaveLength(0);
+
+    await expect(api.request({ purpose: 'p', system: 's', user: 'u' })).rejects.toThrow(/404 model not found/);
+    expect(requests[2]).toMatchObject({ useMainProvider: false });
+  });
+});

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentUsageRecord, ModelClientOptions } from '@packages/mica-agent/index.js';
+import { createPluginLlmApi } from '@packages/mica-plugin/index.js';
 import { createPluginModels, recordPluginModelUsage, type PluginModelClient } from './pluginModels.js';
 
 const usage: AgentUsageRecord = {
@@ -235,5 +236,42 @@ describe('createPluginModels follow-main', () => {
     await expect(models('commit', { ...baseRequest, useMainProvider: true, baseUrl: '', model: '' })).rejects.toThrow(
       /没有提供主配置/,
     );
+  });
+});
+
+describe('ctx.llm fallback through the host', () => {
+  it('retries on the main endpoint and model after the plugin endpoint fails', async () => {
+    const built: Array<{ baseURL?: string; apiKey?: string; model?: string }> = [];
+    const models = createPluginModels({
+      resolveMainProvider: () => ({
+        baseUrl: 'https://main.test/v1',
+        apiKey: 'main-key',
+        protocol: 'openai_chat_completions',
+        model: 'main-model',
+      }),
+      createClient: ((options: { baseURL?: string; apiKey?: string; model?: string }) => {
+        built.push({ baseURL: options.baseURL, apiKey: options.apiKey, model: options.model });
+        return {
+          query: async () => {
+            if (options.baseURL === 'https://own.test/v1') throw new Error('404 model not found');
+            return 'ok';
+          },
+          usageHistory: [],
+        };
+      }) as never,
+    });
+    const llm = createPluginLlmApi({
+      spec: { followMain: true },
+      readValues: () => ({ useMainProvider: 'false', baseUrl: 'https://own.test/v1', apiKey: 'k', model: 'gone' }),
+      models: (request) => models('commit', request),
+    });
+
+    await expect(llm.request({ purpose: 'p', system: 's', user: 'u' })).resolves.toMatchObject({ text: 'ok' });
+
+    // 第二次真的换了地址、Key 与模型：降级不是「同一个请求再发一遍」。
+    expect(built).toEqual([
+      { baseURL: 'https://own.test/v1', apiKey: 'k', model: 'gone' },
+      { baseURL: 'https://main.test/v1', apiKey: 'main-key', model: 'main-model' },
+    ]);
   });
 });

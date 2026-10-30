@@ -61,6 +61,9 @@ export type PluginModelsApi = {
    *
    * 失败以异常形态抛回：要不要重试、要不要降级、要不要上报健康状态都由插件决定。
    * 不会触碰主对话上下文，也不会写进 `usageHistory`（那是主请求的位置）。
+   *
+   * `ctx.llm` 在这一层之上做的自动降级与它无关：那是「插件配置的模型不可用」这一件事的
+   * 统一处理，写在这里的话每个插件都得自己抄一遍，而且拿不到主配置。
    */
   request(request: PluginModelRequest): Promise<PluginModelResult>;
 };

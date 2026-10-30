@@ -1,4 +1,5 @@
 import type { PluginModelProtocol, PluginModelResult, PluginModelsApi } from './PluginModels.js';
+import type { PluginHealthStore } from './PluginHealth.js';
 import type { PluginSettingField, PluginSettingOption } from './PluginSettings.js';
 import { resolveUseMainProvider } from '@packages/mica-common/index.js';
 
@@ -193,7 +194,7 @@ export type PluginLlmApi = {
   /** 当前生效的配置（全局设置 + 本会话覆盖）。 */
   config(): PluginLlmConfig;
   configured(): boolean;
-  /** 人读的一句话，便于健康状态与命令输出。 */
+  /** 人读的一句话，便于健康状态与命令输出；已降级到主配置时会标出来。 */
   describe(): string;
   request(request: PluginLlmRequest): Promise<PluginModelResult>;
 };
@@ -204,30 +205,110 @@ export type CreatePluginLlmApiOptions = {
   readValues: () => Record<string, string | undefined>;
   /** 宿主的请求实现（已按插件 id 绑定，记账挂在插件名下）。 */
   models?: PluginModelsApi['request'];
+  /**
+   * 降级时上报一次：配置的接口/模型坏了是用户可见的故障，不能只留在日志里。
+   * 不传就不上报（测试与没有健康通道的宿主）。
+   */
+  health?: Pick<PluginHealthStore, 'report'>;
 };
 
 export function createPluginLlmApi(options: CreatePluginLlmApiOptions): PluginLlmApi {
   const readConfig = () => resolvePluginLlmConfig(options.spec, options.readValues());
+  // 配置的接口/模型不可用时降级为主配置。记住「这一份配置已经失败过」：之后的请求直接
+  // 走降级，不再先白白失败一次；用户改过任何一项（指纹变化）就重新尝试自己的配置。
+  let degradedFingerprint: string | null = null;
+  let reportedFingerprint: string | null = null;
+
+  const send = (request: PluginLlmRequest, config: PluginLlmConfig, degraded: boolean) => {
+    const models = options.models;
+    if (!models) throw new Error('宿主没有提供模型请求能力（requires 里缺 models）');
+    // 「跟随主配置」与「降级」都要宿主解析地址：插件不掌握 provider 配置。
+    const useMainProvider = degraded || config.useMainProvider;
+    return models({
+      purpose: request.purpose,
+      system: request.system,
+      user: request.user,
+      timeoutMs: request.timeoutMs,
+      signal: request.signal,
+      // 降级时把模型名也清空：让宿主用主配置当前的模型，而不是继续索要那个
+      // 在别处并不存在的名字。
+      model: degraded ? '' : request.model?.trim() || config.model,
+      baseUrl: useMainProvider ? '' : config.baseUrl,
+      apiKey: useMainProvider ? '' : config.apiKey,
+      protocol: useMainProvider ? undefined : config.protocol,
+      useMainProvider,
+    });
+  };
+
   return {
     config: readConfig,
     configured: () => isPluginLlmConfigured(readConfig()),
-    describe: () => describePluginLlm(readConfig()),
+    describe: () => {
+      const config = readConfig();
+      const text = describePluginLlm(config);
+      // 跟随主配置时也可能降级（点名的模型在主配置下不存在），所以这里不写「为主配置」。
+      return degradedFingerprint === pluginLlmFingerprint(config) ? `${text}（已降级）` : text;
+    },
     async request(request) {
       const config = readConfig();
       if (!options.models) throw new Error('宿主没有提供模型请求能力（requires 里缺 models）');
       if (!isPluginLlmConfigured(config)) throw new Error('模型接口未配置：请在插件设置里填写接口地址与模型');
-      return options.models({
-        purpose: request.purpose,
-        system: request.system,
-        user: request.user,
-        timeoutMs: request.timeoutMs,
-        signal: request.signal,
-        model: request.model?.trim() || config.model,
-        baseUrl: config.baseUrl,
-        apiKey: config.apiKey,
-        protocol: config.protocol,
-        useMainProvider: config.useMainProvider,
-      });
+      const fingerprint = pluginLlmFingerprint(config);
+      if (degradedFingerprint === fingerprint) return send(request, config, true);
+
+      try {
+        return await send(request, config, false);
+      } catch (error) {
+        // 已经是最稳的目标（跟随主配置且没点名模型）或用户主动中断时，重发没有意义。
+        if (!canFallback(request, config, error)) throw error;
+        let result: PluginModelResult;
+        try {
+          result = await send(request, config, true);
+        } catch (fallbackError) {
+          throw withFallbackFailure(error, fallbackError);
+        }
+        // 只有降级确实成功了才记住：两边都失败多半是网络问题，下次仍先试用户自己的配置。
+        degradedFingerprint = fingerprint;
+        if (reportedFingerprint !== fingerprint) {
+          reportedFingerprint = fingerprint;
+          options.health?.report({
+            level: 'warn',
+            message: `配置的模型不可用，已降级为主配置：${errorMessage(error)}`,
+            hint: '到插件设置里检查接口地址、Key 与模型名；改动后会自动重新尝试。',
+          });
+        }
+        return result;
+      }
     },
   };
+}
+
+/** 一份插件模型配置的身份：用户改过任何一项就重新尝试自己的接口。 */
+function pluginLlmFingerprint(config: PluginLlmConfig): string {
+  return JSON.stringify([config.useMainProvider, config.baseUrl, config.apiKey, config.protocol, config.model]);
+}
+
+/**
+ * 还有没有第二个目标可试。
+ *
+ * 已经跟随主配置、又没有点名模型时，「降级」只是把同一个目标再发一次；用户主动中断
+ * （关页面、按停止）时也不能悄悄再发一次请求。
+ */
+function canFallback(request: PluginLlmRequest, config: PluginLlmConfig, error: unknown): boolean {
+  if (request.signal?.aborted) return false;
+  const name = error && typeof error === 'object' ? (error as { name?: unknown }).name : undefined;
+  if (name === 'AbortError') return false;
+  if (!config.useMainProvider) return true;
+  return Boolean(request.model?.trim() || config.model);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** 降级也没成功时抛原始错误（信息量更大），把降级失败的原因附在后面。 */
+function withFallbackFailure(primary: unknown, fallback: unknown): Error {
+  const error = primary instanceof Error ? primary : new Error(errorMessage(primary));
+  error.message = `${error.message}；降级为主配置也失败：${errorMessage(fallback)}`;
+  return error;
 }

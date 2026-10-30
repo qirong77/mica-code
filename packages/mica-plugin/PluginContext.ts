@@ -221,6 +221,9 @@ export type PluginContext = {
    *
    * 比 `ctx.models` 高一层：它把「用哪个地址/Key/协议/模型」也收进来，插件不必自己拼
    * 四个字段、也不必各写一遍「没配置就别发」。记账仍走 `ctx.models`。
+   *
+   * 配置的接口/模型用不了时自己降级为主配置（当前会话的 provider 与模型）再试一次，
+   * 插件拿到的仍是成功结果；降级原因写进 `ctx.health`，改过配置后自动恢复。
    */
   llm?: PluginLlmApi;
   /**

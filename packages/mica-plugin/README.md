@@ -156,7 +156,7 @@ context.onDispose(() => registration.dispose());
 - `PluginStatus.ts`：`plugin-status.json` 的形状与写盘（全部插件的装配结论 + 写它的宿主）。
 - `PluginSubagents.ts`：委派子代理的能力面类型（类型声明、spawn 入参、任务快照、`PluginSubagentRegistry`），宿主实现机制、插件提供策略。
 - `PluginSessionState.ts`：插件存进会话快照的状态的大小上限与校验。
-- `PluginLlm.ts`：`ctx.llm` 的声明类型、设置字段生成、生效值解析与请求封装（「跟随主配置」由宿主解析）。
+- `PluginLlm.ts`：`ctx.llm` 的声明类型、设置字段生成、生效值解析与请求封装（「跟随主配置」由宿主解析；配置的接口/模型不可用时自动降级为主配置一次，成功后记住这份配置并上报健康状态，改配置即重新尝试）。
 - `PluginLog.ts`：插件文件日志（`resolveLogDir()/plugin-<id>-<day>[-n].jsonl`），带分片与过期清理。
 - `sessionAnnotations.ts`：`$MICA_HOME/plugin-data/<pluginId>/session-annotations.json` 的归一化读写。
 - `index.ts`：公共 API 聚合导出。

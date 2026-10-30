@@ -300,6 +300,8 @@ export class PluginManager {
           spec: llmSpec,
           readValues: () => ({ ...settings.get(), ...(sessionSettingsHost?.read() ?? {}) }),
           models: (request) => modelsHandler(plugin.id, request),
+          // 配置的接口/模型不可用时组件会自动降级为主配置，这里留一条「为什么降级了」。
+          health,
         });
       }
 

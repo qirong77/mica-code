@@ -121,7 +121,8 @@ describe('session-rename plugin', () => {
 
   it('swallows request failures instead of breaking the turn', async () => {
     const harness = createHarness();
-    query.mockRejectedValueOnce(new Error('401 invalid key'));
+    // 持续失败：`ctx.llm` 会用主配置再试一次，两次都失败才走插件的失败分支。
+    query.mockRejectedValue(new Error('401 invalid key'));
 
     await expect(harness.emitTurnBefore()).resolves.toBeUndefined();
     await vi.waitFor(() => expect(harness.logger.warn).toHaveBeenCalled());
