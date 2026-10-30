@@ -91,7 +91,7 @@ export function PathToken({ path, text, line = null, column = null }) {
     menu && typeof document !== 'undefined'
       ? createPortal(
           <FloatingMenu x={menu.x} y={menu.y} minWidth={220} onClose={() => setMenu(null)}>
-            <div className="truncate px-2 py-1 text-[11px] text-white/40" title={resolved}>
+            <div className="truncate px-2 py-1 text-[11px] text-fg-muted" title={resolved}>
               {resolved}
             </div>
             <MenuSeparator />

@@ -1982,7 +1982,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
   return (
     <div
       ref={ref}
-      className="fixed z-[10000] min-w-[220px] rounded-md border border-white/12 bg-panel/98 p-1 shadow-2xl backdrop-blur"
+      className="fixed z-[10000] min-w-[220px] rounded-md border border-line bg-panel/98 p-1 shadow-2xl backdrop-blur"
       style={{ left: pos.x, top: pos.y }}
       role="menu"
       data-no-chat-focus
@@ -1990,7 +1990,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
     >
       {items.map((item, index) =>
         item.separator ? (
-          <div key={`separator-${index}`} className="mx-1 my-1 h-px bg-white/10" />
+          <div key={`separator-${index}`} className="mx-1 my-1 h-px bg-overlay-strong" />
         ) : (
           <button
             key={item.id}
@@ -1998,7 +1998,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
             role="menuitem"
             disabled={item.disabled}
             title={item.title}
-            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] enabled:hover:bg-white/[.08] disabled:opacity-35 ${item.danger ? 'text-danger-soft' : 'text-white/90 enabled:hover:text-white'}`}
+            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] enabled:hover:bg-overlay-strong disabled:opacity-35 ${item.danger ? 'text-danger-soft' : 'text-fg-strong enabled:hover:text-fg-max'}`}
             onClick={() => onAction(item.id)}
           >
             <span className="grid w-4 shrink-0 place-items-center">

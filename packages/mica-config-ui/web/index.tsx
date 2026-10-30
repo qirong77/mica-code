@@ -16,6 +16,13 @@ export type { ConfigWebEditor, ConfigWebEditorProps } from './editor.js';
 export type { ConfigWebSection } from '../src/shared/types.js';
 
 /**
+ * Appearance 页签的主题能力由宿主注册（桌面宿主存运行时界面状态，浏览器宿主存
+ * localStorage）。没注册时这一页不出现在导航里——见 `hasConfigWebThemeHost`。
+ */
+export { hasConfigWebThemeHost, setConfigWebThemeHost, useThemePreference, THEME_OPTIONS } from './theme.js';
+export type { ConfigWebThemeHost, ThemeOption, ThemePreference } from './theme.js';
+
+/**
  * 会话级设置（桌面端会话设置弹窗）复用同一批控件：
  * 能力列表与开关。宿主把它们包在 `.mica-config-ui is-embed` 里，
  * 就能拿到与设置页完全一致的形态，不用另写一套。

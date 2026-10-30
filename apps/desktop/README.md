@@ -8,6 +8,14 @@ around that same page: it starts the runtime, points a window at it, and adds na
 
 The Chat tab replaces the old terminal-hosted Mica view: every chat node keeps one resident `mica app-server` child process (Codex v2 App Server protocol over stdio) and renders reasoning / text / tool calls / finish states as a terminal-style web conversation. Sessions are shared with the Mica CLI (`~/.mica/sessions`), so conversations started in the terminal or the app can be resumed in either place. The Git status bar opens a VS Code-style branch picker for searching and switching local branches and creating branches from the current or a selected ref.
 
+## Theme
+
+The renderer ships two palettes and lets the user pick one in **Settings → Appearance** (follow system / light / dark, labelled 跟随系统 / 浅色 / 深色). The preference lives in the runtime UI state (`ui-state` key `theme`, values `auto|light|dark`, default `auto`), so every window of the same runtime — and the phone/LAN page — shows the same palette and a reload keeps it. `src/renderer/src/theme.js` is the only renderer-side entry: it resolves `auto` through `prefers-color-scheme`, writes `<html data-theme="light|dark">` plus `color-scheme`/`theme-color`, and broadcasts the resolved theme to consumers that cannot read CSS variables. `public/theme-boot.js` is the synchronous, CSP-safe classic script in every page entry that applies the cached preference before first paint; the durable value from `ui-state` wins once the page boots.
+
+The dark palette is the Darcula (VSCode JetBrains) theme that `assets/app.css` has always used. The light palette follows the DeepSeek harness web design system: its `--dsw-static-*` palette and `--dsw-alias-*` semantics (neutral-bluish surface/label ramps, deepseek-500 `#4176e6` for accent/link/focus, amber/red/green state steps) mapped onto this app's `--color-*` tokens. All colours live in `@theme` (dark) and the unlayered `html[data-theme='light']` block of `assets/app.css`; components must not hardcode colours — translucent hover/selection layers are `--color-overlay*`, and xterm/Monaco subscribe to `theme.js` instead of reading CSS. The settings shell has its own token block in `packages/mica-config-ui/web/styles.css`, overridden the same way under `html[data-theme='light'] .mica-config-ui`.
+
+Switching is instant (one attribute change, no reload), which is also the quickest way to review both palettes.
+
 ## Tech stack
 
 - Dependency-free Node HTTP + SSE runtime (`src/server`) hosting the renderer

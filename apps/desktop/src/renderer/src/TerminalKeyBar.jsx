@@ -42,7 +42,7 @@ export default function TerminalKeyBar({ onSend }) {
   }, [onSend, showHint])
 
   const buttonClass =
-    'flex h-7 min-w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-hi px-2 font-mono text-xs text-white/70 active:bg-active active:text-white'
+    'flex h-7 min-w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-hi px-2 font-mono text-xs text-fg-soft active:bg-active active:text-fg-max'
 
   return (
     <div
@@ -51,7 +51,7 @@ export default function TerminalKeyBar({ onSend }) {
       aria-label="终端功能键"
     >
       {hint ? (
-        <span className="truncate text-xs text-white/45">{hint}</span>
+        <span className="truncate text-xs text-fg-muted">{hint}</span>
       ) : (
         <>
           {TERMINAL_KEYS.map((key) => (

@@ -6,6 +6,13 @@ import '@xterm/xterm/css/xterm.css'
 import './terminal-page.css'
 import { terminalControlPath } from '@packages/mica-web-shared/index.js'
 import { ErrorBoundary } from './ErrorBoundary'
+import {
+  THEME_CACHE_KEY,
+  currentThemeName,
+  initThemeFromCache,
+  subscribeTheme,
+  syncThemeFromCache
+} from './theme'
 
 /**
  * 终端控制窗口的页面。
@@ -17,7 +24,8 @@ import { ErrorBoundary } from './ErrorBoundary'
  * 地址约定见 `mica-web-shared/app-paths.ts`），所以窗口不需要 preload，也不需要外壳业务 IPC。
  */
 
-/* 与主应用的 TerminalHost.jsx 同一套 Darcula 值；xterm 读不到 CSS 变量，只能手工同步 */
+/* 与主应用的 TerminalHost.jsx 同一套值；xterm 读不到 CSS 变量，只能手工同步。
+   暗色沿用 Darcula，亮色取 app.css 的亮色 token（见 LIGHT_TERMINAL_THEME 的注释）。 */
 const TERMINAL_THEME = {
   background: '#2b2b2b',
   foreground: '#a9b7c6',
@@ -39,6 +47,36 @@ const TERMINAL_THEME = {
   brightMagenta: '#ff99ff',
   brightCyan: '#6cdada',
   brightWhite: '#ffffff'
+}
+
+/* 亮色终端：内容面 --color-canvas #ffffff、正文 --color-fg #2c2c2e、光标
+   --color-fg-max #0f1115、选中 --color-accent 的 22%；ANSI 用亮色状态 token，
+   bright 档在浅底上改用 soft 档保持对比度，white/brightWhite 退到前景灰阶。 */
+const LIGHT_TERMINAL_THEME = {
+  background: '#ffffff',
+  foreground: '#2c2c2e',
+  cursor: '#0f1115',
+  selectionBackground: 'rgba(65, 118, 230, 0.22)',
+  black: '#0f1115',
+  red: '#ec1313',
+  green: '#2b8a3e',
+  yellow: '#b45309',
+  blue: '#4176e6',
+  magenta: '#6741d9',
+  cyan: '#0f766e',
+  white: '#81858c',
+  brightBlack: '#61666b',
+  brightRed: '#f25a5a',
+  brightGreen: '#2f9e44',
+  brightYellow: '#dd8629',
+  brightBlue: '#3b82f6',
+  brightMagenta: '#6741d9',
+  brightCyan: '#0f766e',
+  brightWhite: '#979da6'
+}
+
+function terminalThemeFor(theme) {
+  return theme === 'light' ? LIGHT_TERMINAL_THEME : TERMINAL_THEME
 }
 
 const FONT_FAMILY =
@@ -156,13 +194,17 @@ function TerminalPage() {
       cursorBlink: true,
       fontSize: 13,
       fontFamily: FONT_FAMILY,
-      theme: TERMINAL_THEME,
+      theme: terminalThemeFor(currentThemeName()),
       allowProposedApi: true,
       scrollback: 5000
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(host)
+    // 主题切换只换 xterm 的 options.theme：PTY、屏幕缓冲与滚动位置都不重建。
+    const unsubscribeTheme = subscribeTheme((theme) => {
+      term.options.theme = terminalThemeFor(theme)
+    })
     // 窗口通常是先隐藏创建、后显示：没有焦点时键盘输入会落到 body，看起来像终端卡死
     term.focus()
 
@@ -389,6 +431,7 @@ function TerminalPage() {
       if (resizeTimer) clearTimeout(resizeTimer)
       if (hiddenRebuildTimer) clearTimeout(hiddenRebuildTimer)
       inputSubscription.dispose()
+      unsubscribeTheme()
       term.dispose()
     }
   }, [])
@@ -430,7 +473,14 @@ function TerminalPage() {
   )
 }
 
-// 这个窗口本身就是一块黑底：渲染抛错时没有任何线索，所以同样套一层兜底。
+// 终端控制窗口没有 window.mica，也没有 ui-state 通道：主题只能读 theme.js 的缓存。
+// 首帧先按缓存上色，之后主窗口改主题会写缓存并在本窗口触发 storage 事件，这里跟着对齐。
+initThemeFromCache()
+window.addEventListener('storage', (event) => {
+  if (event.key === THEME_CACHE_KEY) syncThemeFromCache()
+})
+
+// 这个窗口本身就是一块终端底色：渲染抛错时没有任何线索，所以同样套一层兜底。
 createRoot(document.getElementById('root')).render(
   <ErrorBoundary>
     <TerminalPage />

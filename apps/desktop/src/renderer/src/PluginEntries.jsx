@@ -104,8 +104,8 @@ function PluginEntryRow({ entry, onOpenPage }) {
           type="button"
           aria-expanded={open}
           title={`${entry.label}（${entry.id} 插件）`}
-          className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] transition-colors hover:bg-white/[.05] hover:text-white ${
-            open ? 'bg-white/[.05] text-white' : 'text-white/60'
+          className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] transition-colors hover:bg-overlay hover:text-fg-max ${
+            open ? 'bg-overlay text-fg-max' : 'text-fg-soft'
           }`}
           onClick={
             isPage
@@ -118,7 +118,7 @@ function PluginEntryRow({ entry, onOpenPage }) {
           <PluginIcon name={entry.icon} size={14} className="shrink-0 opacity-75" />
           <span className="shrink-0">{entry.label}</span>
           {summary && (
-            <span className="ml-auto min-w-0 truncate text-[11px] text-white/35">{summary}</span>
+            <span className="ml-auto min-w-0 truncate text-[11px] text-fg-dim">{summary}</span>
           )}
         </button>
         {/* 手机上卡片跟着行走：抽屉里没有「浮在右边」的位置 */}

@@ -1,18 +1,39 @@
 import { createRoot } from 'react-dom/client'
-import { setConfigWebClient } from '@mica-config-ui/web'
+import { setConfigWebClient, setConfigWebThemeHost } from '@mica-config-ui/web'
 import App from './App'
 import { ErrorBoundary } from './ErrorBoundary'
 import ShareIndex from './ShareIndex'
 import '../assets/app.css'
 import { ensureMicaApi } from './transport'
-import { ensureUiState } from './ui-state'
-import { DEFAULT_RUNTIME_URL, isLoopbackRuntime } from '@packages/mica-web-shared/index.js'
+import { ensureUiState, subscribeUiState, uiStateKeys } from './ui-state'
+import {
+  THEME_UI_STATE_KEY,
+  DEFAULT_RUNTIME_URL,
+  isLoopbackRuntime
+} from '@packages/mica-web-shared/index.js'
 import { readAppUrl } from './app-url'
 import { createDesktopConfigWebClient } from './config-web'
+import {
+  currentThemePreference,
+  initThemeFromCache,
+  setThemePreference,
+  subscribeThemePreference,
+  syncThemeFromUiState
+} from './theme'
 
 // 配置页的数据源在这里接一次：会话详情（对话记录 / Context 分析 / 原始文件）也会在
 // 对话区与统计页里打开，那些入口不经过设置页，不能等到 SettingsView 被懒加载才注册。
 setConfigWebClient(createDesktopConfigWebClient())
+
+// 主题：首帧已经在 theme-boot.js 里按缓存上过色，这里把运行时的偏好接进来。
+// 设置页（Appearance）通过这个宿主读写主题——桌面端的唯一事实来源是运行时界面状态，
+// 所以两个窗口同时开着设置页也会同步，关掉重开、换设备都还是同一个选择。
+initThemeFromCache()
+setConfigWebThemeHost({
+  get: currentThemePreference,
+  set: setThemePreference,
+  subscribe: subscribeThemePreference
+})
 
 if (new URLSearchParams(window.location.search).get('viewport-debug') === '1') {
   void import('./viewport-diagnostics')
@@ -45,29 +66,34 @@ ensureMicaApi()
   })
   .then((api) => {
     if (!api) return
-    // `/share` 本身是「分享链接列表」：这一页不需要工作区/草稿那些界面状态，也不该按
-    // 「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。带 `?session=<id>`
-    // 时仍旧渲染 App（只是不画左侧会话列表，见 App.jsx 的 shareView）。
-    if (api.shareView && !readAppUrl(window.location.search).sessionId) {
-      createRoot(document.getElementById('root')).render(
-        <ErrorBoundary>
-          <ShareIndex />
-        </ErrorBoundary>
-      )
-      return
-    }
-    // 界面状态（草稿/工作区/面板布局）来自运行时：先取回来再渲染，第一帧就是上一次
-    // 留下的样子，不用先画一个空界面再对齐。取不到不阻断启动——只是回到默认界面，
+    // 界面状态（草稿/工作区/面板布局/主题偏好）来自运行时：先取回来再渲染，第一帧就是
+    // 上一次留下的样子，不用先画一个空界面再对齐。取不到不阻断启动——只是回到默认界面，
     // 比整页停在一个错误提示上可用。
     return ensureUiState()
       .catch((error) => console.error('初始化界面状态失败', error))
-      .then(() =>
+      .then(() => {
+        // 运行时保存的偏好比首帧缓存权威：以它为准重新上色，并让其他窗口的修改
+        // （ui-state 广播）继续跟随。分享页也走这条路径，看到的是同一套配色。
+        syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY])
+        subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
+
+        // `/share` 本身是「分享链接列表」：这一页不需要工作区/草稿那些界面状态，也不该按
+        // 「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。带 `?session=<id>`
+        // 时仍旧渲染 App（只是不画左侧会话列表，见 App.jsx 的 shareView）。
+        if (api.shareView && !readAppUrl(window.location.search).sessionId) {
+          createRoot(document.getElementById('root')).render(
+            <ErrorBoundary>
+              <ShareIndex />
+            </ErrorBoundary>
+          )
+          return
+        }
         createRoot(document.getElementById('root')).render(
           <ErrorBoundary>
             <App />
           </ErrorBoundary>
         )
-      )
+      })
   })
 
 function renderBootError(error) {
@@ -92,7 +118,7 @@ function renderBootError(error) {
     const home = document.createElement('button')
     home.type = 'button'
     home.className =
-      'mt-2 rounded-sm border border-white/10 bg-white/[.06] px-3 py-1 text-xs text-white hover:bg-white/10'
+      'mt-2 rounded-sm border border-line bg-panel-hi px-3 py-1 text-xs text-fg hover:bg-active'
     home.textContent = '返回本机'
     home.addEventListener('click', () => window.location.assign(DEFAULT_RUNTIME_URL))
     box.append(home)

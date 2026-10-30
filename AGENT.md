@@ -493,7 +493,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 所有页面不设保存按钮：`useAutoSave`（400ms 防抖、串行写盘、卸载补发）；校验不过不写盘。
 - 新建/删除/放弃用 `DialogHost` 的 confirmDialog / promptDialog。
 - 改配置页后跑 `bun run build:config-web` 并提交 `generatedStaticAssets.ts`。
-- 样式限定 `.mica-config-ui`；桌面 app.css 与配置页共用 Darcula token；页面级 html/body 高度链归宿主。
+- 样式限定 `.mica-config-ui`；桌面 app.css 与配置页共用 Darcula 暗色 token（亮色是另一层 DSH 设计系统 token，见下条）；页面级 html/body 高度链归宿主。
+- 主题是默认能力：桌面 UI 支持 浅色 / 深色 / 跟随系统，设置在 Settings → Appearance（偏好存运行时界面状态 `theme`，默认 `auto`，`apps/desktop/src/renderer/src/theme.js` 是渲染层唯一入口）。颜色只用 `--color-*` / `.mica-config-ui` 容器变量：暗色值在 `@theme`，亮色值在 `html[data-theme='light']` 覆盖块（对齐 DeepSeek harness design-system token）；切换只改 `data-theme` 属性，不重载页面。xterm / monaco 读不到 CSS 变量，必须订阅 `theme.js` 的 `subscribeTheme` 同步 options/主题。
 
 ### 界面审查清单（新增页面、面板、弹窗必查）
 

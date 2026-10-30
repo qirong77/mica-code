@@ -201,8 +201,8 @@ function EmptyEditorWatermark() {
         <dl className="mt-10 w-full space-y-0.5 text-[12px]">
           {shortcuts.map(([label, keys]) => (
             <div key={label} className="flex items-baseline justify-between gap-4">
-              <dt className="truncate text-white/40">{label}</dt>
-              <dd className="shrink-0 font-mono text-[11px] text-white/30">{keys}</dd>
+              <dt className="truncate text-fg-muted">{label}</dt>
+              <dd className="shrink-0 font-mono text-[11px] text-fg-dim">{keys}</dd>
             </div>
           ))}
         </dl>
@@ -321,10 +321,10 @@ function FileTreeRows({
     // 被 .gitignore 忽略的条目整体置灰（图标一并脱色），但仍然可以打开/展开
     const tone =
       node.path === activePath
-        ? 'bg-white/[.075] text-white'
+        ? 'bg-overlay-strong text-fg-max'
         : ignored
-          ? 'text-white/30 hover:text-white/50'
-          : 'text-white/70 hover:text-white'
+          ? 'text-fg-dim hover:text-fg-muted'
+          : 'text-fg-soft hover:text-fg-max'
     return (
       <div key={node.path}>
         <button
@@ -379,11 +379,11 @@ function FileTreeRows({
           }}
         >
           <span
-            className={`grid size-4 shrink-0 place-items-center text-white/40 ${node.expanded ? 'rotate-90' : ''}`}
+            className={`grid size-4 shrink-0 place-items-center text-fg-muted ${node.expanded ? 'rotate-90' : ''}`}
           >
             {directory && <IconChevronRight size={14} />}
           </span>
-          <span className="grid size-4 shrink-0 place-items-center text-white/50">
+          <span className="grid size-4 shrink-0 place-items-center text-fg-muted">
             <FileSystemIcon
               name={node.name}
               type={node.type}
@@ -397,7 +397,7 @@ function FileTreeRows({
           >
             {node.name}
           </span>
-          {node.loading && <span className="text-white/35">…</span>}
+          {node.loading && <span className="text-fg-dim">…</span>}
           {fileStatus && (
             <span
               className="ml-1.5 shrink-0 font-mono text-[11px] font-semibold"
@@ -425,7 +425,7 @@ function FileTreeRows({
             </div>
           ) : node.loaded && !node.children.length ? (
             <div
-              className="py-1 pr-2 text-[11px] text-white/30"
+              className="py-1 pr-2 text-[11px] text-fg-dim"
               style={{ paddingLeft: TREE_LABEL_INSET + (depth + 1) * TREE_INDENT }}
             >
               空文件夹
@@ -435,7 +435,7 @@ function FileTreeRows({
               {/* 缩进参考线：与 VS Code 一样落在父级箭头的中心线上（只有展开的分支才画）。 */}
               <span
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-y-0 w-px bg-white/[.09]"
+                className="pointer-events-none absolute inset-y-0 w-px bg-overlay-strong"
                 style={{ left: TREE_LABEL_INSET - TREE_LABEL_OFFSET + 8 + depth * TREE_INDENT }}
               />
               <FileTreeRows
@@ -1600,8 +1600,8 @@ export const FilesView = forwardRef(function FilesView(
               <span
                 className={`grid size-8 place-items-center rounded-md transition-colors ${
                   active
-                    ? 'bg-white/[.09] text-white'
-                    : 'text-white/45 group-hover:bg-white/[.06] group-hover:text-white'
+                    ? 'bg-overlay-strong text-fg-max'
+                    : 'text-fg-muted group-hover:bg-overlay group-hover:text-fg-max'
                 }`}
               >
                 <Icon size={24} className="shrink-0" />
@@ -1677,7 +1677,7 @@ export const FilesView = forwardRef(function FilesView(
           <>
             <header className="flex h-[35px] shrink-0 items-center gap-0.5 pl-4 pr-2">
               <div
-                className="min-w-0 flex-1 truncate text-[13px] font-semibold text-white/80"
+                className="min-w-0 flex-1 truncate text-[13px] font-semibold text-fg-strong"
                 title={tree.root || ''}
               >
                 {tree.root ? fileName(tree.root) : '资源管理器'}
@@ -1687,7 +1687,7 @@ export const FilesView = forwardRef(function FilesView(
                   type="button"
                   title={root ? `返回工作区：${root}` : '返回工作区'}
                   aria-label="返回工作区"
-                  className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white"
+                  className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max"
                   onClick={() => setRootOverride(null)}
                 >
                   <IconArrowBackUp size={16} />
@@ -1698,7 +1698,7 @@ export const FilesView = forwardRef(function FilesView(
                 disabled={!tree.root}
                 title="新建文件"
                 aria-label="新建文件"
-                className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
                 onClick={() =>
                   runFileAction('new-file', {
                     path: tree.root,
@@ -1714,7 +1714,7 @@ export const FilesView = forwardRef(function FilesView(
                 disabled={!tree.root}
                 title="新建文件夹"
                 aria-label="新建文件夹"
-                className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
                 onClick={() =>
                   runFileAction('new-directory', {
                     path: tree.root,
@@ -1730,7 +1730,7 @@ export const FilesView = forwardRef(function FilesView(
                 disabled={!tree.root}
                 title="刷新"
                 aria-label="刷新"
-                className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
                 onClick={refresh}
               >
                 <IconRefresh size={16} />
@@ -1740,7 +1740,7 @@ export const FilesView = forwardRef(function FilesView(
                 disabled={!tree.root}
                 title="折叠所有文件夹"
                 aria-label="折叠所有文件夹"
-                className="grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
                 onClick={collapseAll}
               >
                 <IconSquareMinus size={16} />
@@ -1752,8 +1752,8 @@ export const FilesView = forwardRef(function FilesView(
                 aria-haspopup="menu"
                 data-menu-anchor="explorer"
                 aria-expanded={explorerMenu ? 'true' : 'false'}
-                className={`grid size-6 shrink-0 place-items-center rounded-sm hover:bg-white/[.06] hover:text-white ${
-                  explorerMenu ? 'bg-white/[.06] text-white' : 'text-white/45'
+                className={`grid size-6 shrink-0 place-items-center rounded-sm hover:bg-overlay hover:text-fg-max ${
+                  explorerMenu ? 'bg-overlay text-fg-max' : 'text-fg-muted'
                 }`}
                 onClick={openExplorerMenu}
               >
@@ -1787,7 +1787,7 @@ export const FilesView = forwardRef(function FilesView(
               {tree.status && (
                 <div
                   role="status"
-                  className="absolute inset-0 grid place-items-center bg-panel px-4 text-center text-[11px] text-white/35"
+                  className="absolute inset-0 grid place-items-center bg-panel px-4 text-center text-[11px] text-fg-dim"
                 >
                   {tree.status}
                 </div>
@@ -1938,7 +1938,7 @@ export const FilesView = forwardRef(function FilesView(
                 type="button"
                 title="返回文件列表"
                 aria-label="返回文件列表"
-                className={`sticky left-0 z-10 grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-white/60 ${TAB_UNDERLINE}`}
+                className={`sticky left-0 z-10 grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-fg-soft ${TAB_UNDERLINE}`}
                 onClick={() => setMobileTreeVisible(true)}
               >
                 <IconArrowLeft size={15} />
@@ -1951,7 +1951,7 @@ export const FilesView = forwardRef(function FilesView(
                 type="button"
                 title="显示文件目录与 Git"
                 aria-label="显示文件目录与 Git"
-                className={`grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-white/60 hover:text-white ${TAB_UNDERLINE}`}
+                className={`grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-fg-soft hover:text-fg-strong ${TAB_UNDERLINE}`}
                 onClick={() => setFocusMode(false)}
               >
                 <IconArrowLeft size={15} />
@@ -1964,8 +1964,8 @@ export const FilesView = forwardRef(function FilesView(
                 title={tab.path}
                 className={`group relative flex h-8 min-w-32 max-w-64 flex-[0_1_184px] items-center gap-2 border-r border-line px-2.5 text-[13px] ${
                   tab.path === activePath
-                    ? 'bg-canvas text-white'
-                    : `text-white/50 hover:bg-white/[.035] hover:text-white/75 ${TAB_UNDERLINE}`
+                    ? 'bg-canvas text-fg-max'
+                    : `text-fg-muted hover:bg-overlay-subtle hover:text-fg-strong ${TAB_UNDERLINE}`
                 }`}
                 onAuxClick={(event) => event.button === 1 && closeFile(tab.path)}
               >
@@ -1984,7 +1984,7 @@ export const FilesView = forwardRef(function FilesView(
                   <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
                     <span className="min-w-0 truncate">{tab.name}</span>
                     {tabNameCounts.get(tab.name) > 1 && (
-                      <span className="shrink truncate text-[9px] text-white/30">
+                      <span className="shrink truncate text-[9px] text-fg-dim">
                         {parentName(tab.path)}
                       </span>
                     )}
@@ -1993,13 +1993,13 @@ export const FilesView = forwardRef(function FilesView(
                 <span className="relative grid size-5 shrink-0 place-items-center">
                   {(tab.loading || tab.saving) && (
                     <span
-                      className="size-2.5 animate-spin rounded-full border border-white/25 border-t-white/75"
+                      className="size-2.5 animate-spin rounded-full border border-fg-ghost border-t-fg-strong"
                       aria-hidden="true"
                     />
                   )}
                   {tab.dirty && !tab.loading && !tab.saving && (
                     <span
-                      className="size-1.75 rounded-full bg-white/65 group-hover:hidden group-focus-within:hidden"
+                      className="size-1.75 rounded-full bg-fg-soft group-hover:hidden group-focus-within:hidden"
                       aria-hidden="true"
                     />
                   )}
@@ -2015,7 +2015,7 @@ export const FilesView = forwardRef(function FilesView(
                             ? 'opacity-70'
                             : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
                           : ''
-                      } absolute inset-0 grid place-items-center rounded-sm text-white/45 hover:bg-white/10 hover:text-white`}
+                      } absolute inset-0 grid place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max`}
                       onClick={(event) => {
                         event.stopPropagation()
                         closeFile(tab.path)
@@ -2031,16 +2031,16 @@ export const FilesView = forwardRef(function FilesView(
             <div aria-hidden="true" className={`min-w-px flex-1 ${TAB_UNDERLINE}`} />
           </div>
           {activeTab && (
-            <div className="flex h-[22px] shrink-0 items-center gap-1 overflow-hidden border-b border-line px-3 text-[11px] text-white/40">
+            <div className="flex h-[22px] shrink-0 items-center gap-1 overflow-hidden border-b border-line px-3 text-[11px] text-fg-muted">
               {breadcrumbs.map((part, index) => (
                 <span key={`${part}-${index}`} className="contents">
-                  {index > 0 && <span className="shrink-0 text-xs text-white/25">›</span>}
+                  {index > 0 && <span className="shrink-0 text-xs text-fg-faint">›</span>}
                   {/* 与 VS Code 一样，文件名前面带一个文件图标；中间的目录只有文字 */}
                   {index === breadcrumbs.length - 1 && (
                     <FileIcon name={activeTab.name} className="mr-0.5 size-3.5 shrink-0" />
                   )}
                   <span
-                    className={`truncate ${index === breadcrumbs.length - 1 ? 'text-white/70' : ''}`}
+                    className={`truncate ${index === breadcrumbs.length - 1 ? 'text-fg-soft' : ''}`}
                   >
                     {part}
                   </span>
@@ -2063,7 +2063,7 @@ export const FilesView = forwardRef(function FilesView(
             {message && !message.transient && (
               <div
                 role="status"
-                className="absolute inset-0 grid place-items-center bg-canvas p-6 text-center text-xs text-white/35"
+                className="absolute inset-0 grid place-items-center bg-canvas p-6 text-center text-xs text-fg-dim"
               >
                 {message.text}
               </div>
@@ -2074,7 +2074,7 @@ export const FilesView = forwardRef(function FilesView(
       {message?.transient && (
         <div
           role="status"
-          className={`absolute bottom-3.5 right-4 z-20 max-w-[calc(100%-32px)] rounded-sm border bg-panel/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-danger/40 text-danger-soft' : 'border-white/15 text-white/70'}`}
+          className={`absolute bottom-3.5 right-4 z-20 max-w-[calc(100%-32px)] rounded-sm border bg-panel/96 px-2.5 py-1.5 text-xs shadow-xl ${message.error ? 'border-danger/40 text-danger-soft' : 'border-line text-fg-soft'}`}
         >
           {message.text}
         </div>

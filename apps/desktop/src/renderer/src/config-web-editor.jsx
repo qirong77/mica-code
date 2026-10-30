@@ -22,9 +22,9 @@ export function LocalJsonEditor({ value, language = 'json', readOnly = false, on
       const monaco = await loadMonaco()
       if (disposed || !hostRef.current) return
       model = monaco.editor.createModel(valueRef.current ?? '', language)
+      // 不传 theme：跟随 monaco-runtime 按当前主题设置的全局主题，设置页也能跟着主题切换。
       editor = monaco.editor.create(hostRef.current, {
         model,
-        theme: 'mica-dark',
         minimap: { enabled: false },
         fontSize: 13,
         lineHeight: 21,

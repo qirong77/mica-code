@@ -33,20 +33,20 @@ export function PluginPage({ entry, onClose }) {
             type="button"
             title="返回对话"
             aria-label="返回对话"
-            className="flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-white/50 transition-colors hover:bg-white/[.06] hover:text-white"
+            className="flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max"
             onClick={onClose}
           >
             <IconArrowLeft size={13} />
             <span className="text-xs">返回对话</span>
           </button>
-          <span className="min-w-0 truncate text-xs font-medium text-white/75">
+          <span className="min-w-0 truncate text-xs font-medium text-fg-strong">
             {entry.page.title || entry.label}
           </span>
         </header>
         <div className="min-h-0 flex-1 overflow-hidden">
           <Suspense
             fallback={
-              <div className="grid h-full place-items-center text-xs text-white/40">正在加载…</div>
+              <div className="grid h-full place-items-center text-xs text-fg-muted">正在加载…</div>
             }
           >
             <Page api={api} onClose={onClose} />

@@ -1,6 +1,6 @@
-import { app, BrowserWindow, dialog, shell } from 'electron'
+import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -572,6 +572,27 @@ function applyBadge(count) {
  * 开一个窗口装载 `url`。`primary` 是启动时那个本机窗口：关掉它只是隐藏（应用继续留在
  * dock 里），其余窗口（切过去的那几台）关掉就真的关掉，不会攒下一堆看不见的窗口。
  */
+/**
+ * 窗口底色：页面加载出第一帧之前、以及窗口缩放露出的边，看到的是这个颜色。
+ * 深色沿用原来的 #0e0e0e；浅色用画布白。偏好存在渲染层界面状态（ui-state.json，
+ * 与渲染层同一份），auto 跟系统主题——和页面自己的解析规则保持一致，避免
+ * 浅色主题下先闪一块深色。读不到文件（首次启动）就按系统主题。
+ */
+function windowBackgroundColor() {
+  const dark = '#0e0e0e'
+  const light = '#ffffff'
+  const systemLight = !nativeTheme.shouldUseDarkColors
+  try {
+    const stored = JSON.parse(readFileSync(join(app.getPath('userData'), 'ui-state.json'), 'utf8'))
+    const preference = stored?.keys?.theme
+    if (preference === 'light') return light
+    if (preference === 'dark') return dark
+    return systemLight ? light : dark
+  } catch {
+    return systemLight ? light : dark
+  }
+}
+
 function createWindow(url, { primary = false, frameName = '' } = {}) {
   const isMac = process.platform === 'darwin'
   const win = new BrowserWindow({
@@ -582,7 +603,7 @@ function createWindow(url, { primary = false, frameName = '' } = {}) {
     show: false,
     autoHideMenuBar: true,
     title: 'Mica Code',
-    backgroundColor: '#0e0e0e',
+    backgroundColor: windowBackgroundColor(),
     ...(isMac
       ? {
           titleBarStyle: 'hidden',

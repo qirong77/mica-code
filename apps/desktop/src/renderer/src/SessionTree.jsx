@@ -65,7 +65,7 @@ const SessionDetailModal = lazy(() =>
 )
 
 const rowClassBase =
-  'group relative flex min-h-6 cursor-pointer gap-2 rounded-md pr-2 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white active:bg-white/[.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20'
+  'group relative flex min-h-6 cursor-pointer gap-2 rounded-md pr-2 text-sm leading-5 text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max active:bg-overlay-strong focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-line-strong'
 
 const rowClass = `${rowClassBase} items-center`
 
@@ -74,7 +74,7 @@ const rowClass = `${rowClassBase} items-center`
 const rowClassTall = `${rowClassBase} items-start py-1`
 
 const groupRowClass =
-  'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-1.5 text-sm leading-5 text-white/70 transition-colors hover:bg-white/[.06] hover:text-white'
+  'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-1.5 text-sm leading-5 text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max'
 
 const dropShadow = 'inset 0 0 0 1px rgba(90,167,232,.9)'
 
@@ -122,7 +122,7 @@ function Highlighted({ text, ranges }) {
     if (start > at) parts.push(text.slice(at, start))
     if (end > start) {
       parts.push(
-        <mark key={`hit-${index}`} className="rounded-[2px] bg-warn/25 text-white/95">
+        <mark key={`hit-${index}`} className="rounded-[2px] bg-warn/25 text-fg-max">
           {text.slice(start, end)}
         </mark>
       )
@@ -151,7 +151,7 @@ function RenameInput({ value, onCommit, onCancel }) {
       ref={ref}
       defaultValue={value}
       spellCheck={false}
-      className="h-5 min-w-0 flex-1 rounded-sm border border-white/20 bg-white/[.06] px-1.5 text-[13px] text-white"
+      className="h-5 min-w-0 flex-1 rounded-sm border border-line bg-overlay px-1.5 text-[13px] text-fg-max"
       onClick={(event) => event.stopPropagation()}
       onBlur={(event) => onCommit(event.currentTarget.value)}
       onKeyDown={(event) => {
@@ -182,7 +182,7 @@ function RowAnnotationDots({ badges }) {
           style={{ backgroundColor: badge.color }}
         />
       ))}
-      {hidden > 0 && <span className="text-[10px] leading-none text-white/40">+{hidden}</span>}
+      {hidden > 0 && <span className="text-[10px] leading-none text-fg-muted">+{hidden}</span>}
     </span>
   )
 }
@@ -191,11 +191,11 @@ function RowTail({ label, labelTitle, relativeTime }) {
   return (
     <span className="relative flex min-w-4 shrink-0 items-center justify-end gap-2">
       {label && (
-        <span className="max-w-[88px] truncate text-[11px] text-white/30" title={labelTitle}>
+        <span className="max-w-[88px] truncate text-[11px] text-fg-dim" title={labelTitle}>
           {label}
         </span>
       )}
-      <span className="block shrink-0 text-[11px] tabular-nums text-white/30">{relativeTime}</span>
+      <span className="block shrink-0 text-[11px] tabular-nums text-fg-dim">{relativeTime}</span>
     </span>
   )
 }
@@ -304,12 +304,12 @@ function ContextMenu({ menu, onClose, onAction }) {
     <div
       ref={ref}
       data-session-menu
-      className="fixed z-[10000] min-w-[200px] rounded-md border border-white/12 bg-panel/98 p-1 shadow-2xl backdrop-blur"
+      className="fixed z-[10000] min-w-[200px] rounded-md border border-line bg-panel/98 p-1 shadow-2xl backdrop-blur"
       style={{ left: pos.x, top: pos.y }}
     >
       {items.map((item, index) => {
         if (item === 'separator')
-          return <div key={`sep-${index}`} className="mx-1 my-1 h-px bg-white/10" />
+          return <div key={`sep-${index}`} className="mx-1 my-1 h-px bg-overlay-strong" />
         // 元组是常用的简写；插件给的标记项要带色点和对勾，所以也接受对象。
         const [action, label, danger, dot, checked] = Array.isArray(item)
           ? item
@@ -319,8 +319,8 @@ function ContextMenu({ menu, onClose, onAction }) {
             key={action}
             type="button"
             aria-label={label}
-            className={`flex h-7 w-full items-center gap-2 px-2 text-left text-[13px] transition-colors hover:bg-white/[.08] ${
-              danger ? 'text-danger' : 'text-white/90'
+            className={`flex h-7 w-full items-center gap-2 px-2 text-left text-[13px] transition-colors hover:bg-overlay-strong ${
+              danger ? 'text-danger' : 'text-fg-strong'
             }`}
             onClick={() => {
               onClose()
@@ -329,13 +329,13 @@ function ContextMenu({ menu, onClose, onAction }) {
           >
             {dot ? (
               <span
-                className="size-2.5 shrink-0 rounded-full ring-1 ring-white/25"
+                className="size-2.5 shrink-0 rounded-full ring-1 ring-line-strong"
                 style={{ backgroundColor: dot }}
               />
             ) : null}
             <span className="min-w-0 flex-1 truncate">{label}</span>
             {checked ? (
-              <IconCheck size={12} stroke={2.5} className="shrink-0 text-white/70" />
+              <IconCheck size={12} stroke={2.5} className="shrink-0 text-fg-soft" />
             ) : null}
           </button>
         )
@@ -906,7 +906,7 @@ export function SessionTree({
     return (
       <li key={session.id}>
         <div
-          className={`${rowClass} ${active ? 'bg-white/[.1] text-white' : 'text-white/70'} ${draggingThis ? 'opacity-40' : ''}`}
+          className={`${rowClass} ${active ? 'bg-overlay-strong text-fg-max' : 'text-fg-soft'} ${draggingThis ? 'opacity-40' : ''}`}
           style={{
             paddingLeft: rowIndent(indent + childDepth),
             boxShadow: isOver
@@ -948,7 +948,7 @@ export function SessionTree({
             <Slot>
               <button
                 type="button"
-                className="grid h-4 w-4 place-items-center rounded text-white/40 hover:bg-white/10 hover:text-white/80"
+                className="grid h-4 w-4 place-items-center rounded text-fg-muted hover:bg-overlay-strong hover:text-fg-strong"
                 title={
                   childCollapsed
                     ? `展开 ${nesting.childCount} 个派生会话`
@@ -994,7 +994,7 @@ export function SessionTree({
           ) : (
             <span className="flex min-w-0 flex-1 items-center gap-1.5">
               {childDepth > 0 && (
-                <span className="shrink-0 text-white/30" title="由上一个会话派生的子会话">
+                <span className="shrink-0 text-fg-dim" title="由上一个会话派生的子会话">
                   <IconCornerDownRight size={12} stroke={2} />
                 </span>
               )}
@@ -1032,7 +1032,7 @@ export function SessionTree({
     return (
       <li key={node.id}>
         <div
-          className={`${rowClass} ${active ? 'bg-white/[.1] text-white' : 'text-white/70'} ${drag?.kind === 'draft' && drag.id === node.id ? 'opacity-40' : ''}`}
+          className={`${rowClass} ${active ? 'bg-overlay-strong text-fg-max' : 'text-fg-soft'} ${drag?.kind === 'draft' && drag.id === node.id ? 'opacity-40' : ''}`}
           style={{
             paddingLeft: rowIndent(indent),
             boxShadow: isOver ? dropShadow : undefined
@@ -1114,10 +1114,10 @@ export function SessionTree({
           data-search-index={index}
           className={`${snippet || cwdLine ? rowClassTall : rowClass} ${
             active
-              ? 'bg-white/[.1] text-white'
+              ? 'bg-overlay-strong text-fg-max'
               : searchFocus === index
-                ? 'bg-white/[.06] text-white'
-                : 'text-white/70'
+                ? 'bg-overlay text-fg-max'
+                : 'text-fg-soft'
           }`}
           style={{ paddingLeft: rowIndent(0) }}
           title={[
@@ -1152,12 +1152,12 @@ export function SessionTree({
               </span>
             </span>
             {snippet && (
-              <span className="min-w-0 truncate text-[11px] leading-4 text-white/40">
+              <span className="min-w-0 truncate text-[11px] leading-4 text-fg-muted">
                 <Highlighted text={snippet.text} ranges={snippet.ranges} />
               </span>
             )}
             {cwdLine && (
-              <span className="min-w-0 truncate text-[11px] leading-4 text-white/40">
+              <span className="min-w-0 truncate text-[11px] leading-4 text-fg-muted">
                 <Highlighted text={cwdLine} ranges={item.cwdRanges} />
               </span>
             )}
@@ -1234,7 +1234,7 @@ export function SessionTree({
               type="button"
               aria-label={open ? `折叠 ${group.name}` : `展开 ${group.name}`}
               aria-expanded={open}
-              className="grid size-4 place-items-center rounded text-white/35 hover:text-white"
+              className="grid size-4 place-items-center rounded text-fg-dim hover:text-fg-max"
               // 冒泡到分组行会再触发一次 toggleOpen，两次抵消等于点了没反应
               onClick={(event) => {
                 event.stopPropagation()
@@ -1248,7 +1248,7 @@ export function SessionTree({
             </button>
           </Slot>
           <Slot>
-            <span className="text-white/40" title="分组">
+            <span className="text-fg-muted" title="分组">
               {open ? <IconFolderOpen size={14} /> : <IconFolder size={14} />}
             </span>
             <RowBadge state={open ? null : hiddenGroupStates.get(groupId)} scope={group.name} />
@@ -1271,7 +1271,7 @@ export function SessionTree({
               type="button"
               title="在此分组新建会话"
               aria-label={`在 ${group.name} 中新建会话`}
-              className="grid size-5 shrink-0 place-items-center rounded text-white/45 hover:bg-white/[.12] hover:text-white"
+              className="grid size-5 shrink-0 place-items-center rounded text-fg-muted hover:bg-overlay-heavy hover:text-fg-max"
               onClick={(event) => {
                 event.stopPropagation()
                 onCreateSessionInGroup(groupId)
@@ -1283,7 +1283,7 @@ export function SessionTree({
               type="button"
               title="分组操作"
               aria-label={`${group.name} 分组操作`}
-              className="grid size-5 shrink-0 place-items-center rounded text-white/45 hover:bg-white/[.12] hover:text-white"
+              className="grid size-5 shrink-0 place-items-center rounded text-fg-muted hover:bg-overlay-heavy hover:text-fg-max"
               onClick={(event) => openMenuAtElement(event, { group, items: groupMenuItems() })}
             >
               <IconDots size={13} />
@@ -1329,7 +1329,7 @@ export function SessionTree({
       >
         <button
           type="button"
-          className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-[13px] font-medium text-white/45 transition-colors hover:bg-white/[.05] hover:text-white/85"
+          className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-[13px] font-medium text-fg-muted transition-colors hover:bg-overlay hover:text-fg-strong"
           // sectionOpen 返回的是查询串或布尔值，aria 只接受 "true"/"false"
           aria-expanded={!!sectionOpen(name)}
           onClick={() => toggleSection(name)}
@@ -1337,21 +1337,21 @@ export function SessionTree({
           <Slot>
             <IconChevronRight
               size={14}
-              className={`text-white/30 transition-transform ${sectionOpen(name) ? 'rotate-90' : ''}`}
+              className={`text-fg-dim transition-transform ${sectionOpen(name) ? 'rotate-90' : ''}`}
             />
           </Slot>
           <Slot>
-            <Icon size={14} className="text-white/30" />
+            <Icon size={14} className="text-fg-dim" />
             <RowBadge state={hiddenState} scope={label} />
           </Slot>
-          <span className="flex-1 truncate text-white/50">{label}</span>
+          <span className="flex-1 truncate text-fg-muted">{label}</span>
         </button>
         {onAdd && (
           <button
             type="button"
             title={addTitle}
             aria-label={addTitle}
-            className="mr-1 grid size-5 shrink-0 place-items-center rounded text-white/40 opacity-0 transition-opacity group-hover/header:opacity-100 hover:bg-white/[.1] hover:text-white focus-visible:opacity-100 max-md:opacity-100"
+            className="mr-1 grid size-5 shrink-0 place-items-center rounded text-fg-muted opacity-0 transition-opacity group-hover/header:opacity-100 hover:bg-overlay-strong hover:text-fg-max focus-visible:opacity-100 max-md:opacity-100"
             onClick={onAdd}
           >
             <IconPlus size={14} />
@@ -1367,8 +1367,8 @@ export function SessionTree({
         {/* 搜索框钉在滚动容器顶部：会话一多就要往下滚，搜索框跟着滚出去的话，想搜索
             还得先滚回顶部。`-mx-2 px-2` 让底色铺满整条，滚过去的内容不会从两侧透出来。 */}
         <div className="sticky top-0 z-10 -mx-2 mb-1.5 bg-panel px-2 pt-0.5 pb-1.5">
-          <div className="flex h-7 items-center gap-1.5 rounded-md bg-white/[.05] px-2 transition-colors focus-within:bg-white/[.08]">
-            <IconSearch size={13} className="shrink-0 text-white/35" />
+          <div className="flex h-7 items-center gap-1.5 rounded-md bg-overlay px-2 transition-colors focus-within:bg-overlay-strong">
+            <IconSearch size={13} className="shrink-0 text-fg-dim" />
             <input
               ref={searchInputRef}
               type="search"
@@ -1376,7 +1376,7 @@ export function SessionTree({
               placeholder="搜索会话（⌘K）"
               aria-label="搜索会话"
               spellCheck={false}
-              className="h-full min-w-0 flex-1 appearance-none bg-transparent text-[13px] text-white placeholder:text-white/35 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+              className="h-full min-w-0 flex-1 appearance-none bg-transparent text-[13px] text-fg-max placeholder:text-fg-dim focus:outline-none [&::-webkit-search-cancel-button]:hidden"
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown') {
@@ -1402,7 +1402,7 @@ export function SessionTree({
                 type="button"
                 title="清除搜索"
                 aria-label="清除搜索"
-                className="grid size-5 shrink-0 place-items-center rounded text-white/40 hover:bg-white/[.1] hover:text-white"
+                className="grid size-5 shrink-0 place-items-center rounded text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
                 onClick={() => setQuery('')}
               >
                 <IconX size={14} />
@@ -1415,7 +1415,7 @@ export function SessionTree({
               aria-label="搜索时间范围"
               className="mt-1 flex items-center gap-1 text-[11px]"
             >
-              <span className="shrink-0 text-white/30">时间</span>
+              <span className="shrink-0 text-fg-dim">时间</span>
               {SESSION_SEARCH_RANGES.map((range) => (
                 <button
                   key={range.id}
@@ -1426,15 +1426,15 @@ export function SessionTree({
                   }
                   className={`rounded px-1.5 py-0.5 transition-colors ${
                     rangeId === range.id
-                      ? 'bg-white/10 text-white/85'
-                      : 'text-white/40 hover:bg-white/[.06] hover:text-white/70'
+                      ? 'bg-overlay-strong text-fg-strong'
+                      : 'text-fg-muted hover:bg-overlay hover:text-fg-soft'
                   }`}
                   onClick={() => setRangeId(range.id)}
                 >
                   {range.label}
                 </button>
               ))}
-              <span className="ml-auto shrink-0 pl-1 text-white/30" title={searchCountTitle}>
+              <span className="ml-auto shrink-0 pl-1 text-fg-dim" title={searchCountTitle}>
                 {searchCountLabel}
               </span>
             </div>
@@ -1448,12 +1448,12 @@ export function SessionTree({
                 {searchItems.map((item, index) => renderSearchRow(item, index))}
               </ul>
             ) : (
-              <p className="py-1 pr-2 text-xs text-white/35" style={{ paddingLeft: NAME_OFFSET }}>
+              <p className="py-1 pr-2 text-xs text-fg-dim" style={{ paddingLeft: NAME_OFFSET }}>
                 {searchingContent ? '正在搜索会话内容…' : '没有匹配的会话。'}
                 {!searchingContent && rangeId !== 'all' && (
                   <button
                     type="button"
-                    className="ml-1 text-white/55 underline-offset-2 hover:text-white hover:underline"
+                    className="ml-1 text-fg-soft underline-offset-2 hover:text-fg-max hover:underline"
                     onClick={() => setRangeId('all')}
                   >
                     搜索全部时间
@@ -1475,10 +1475,7 @@ export function SessionTree({
                     {pinnedRows.map((row) => renderSessionRow(row.session, 0, 'pinned', null, row))}
                   </ul>
                 ) : (
-                  <p
-                    className="py-1 pr-2 text-xs text-white/35"
-                    style={{ paddingLeft: NAME_OFFSET }}
-                  >
+                  <p className="py-1 pr-2 text-xs text-fg-dim" style={{ paddingLeft: NAME_OFFSET }}>
                     暂无置顶会话。
                   </p>
                 ))}
@@ -1499,10 +1496,7 @@ export function SessionTree({
                     {childGroups(projects, null).map((group) => renderGroup(group))}
                   </ul>
                 ) : (
-                  <p
-                    className="py-1 pr-2 text-xs text-white/35"
-                    style={{ paddingLeft: NAME_OFFSET }}
-                  >
+                  <p className="py-1 pr-2 text-xs text-fg-dim" style={{ paddingLeft: NAME_OFFSET }}>
                     暂无项目分组，先新建一个分组。
                   </p>
                 ))}
@@ -1529,7 +1523,7 @@ export function SessionTree({
                     {recentOverflow > 0 && (
                       <button
                         type="button"
-                        className={`${rowClass} w-full text-white/45 hover:text-white/75`}
+                        className={`${rowClass} w-full text-fg-muted hover:text-fg-strong`}
                         style={{ paddingLeft: rowIndent(0) }}
                         onClick={() => setRecentLimit((prev) => prev + RECENT_PAGE_SIZE)}
                       >
@@ -1545,10 +1539,7 @@ export function SessionTree({
                     )}
                   </>
                 ) : (
-                  <p
-                    className="py-1 pr-2 text-xs text-white/35"
-                    style={{ paddingLeft: NAME_OFFSET }}
-                  >
+                  <p className="py-1 pr-2 text-xs text-fg-dim" style={{ paddingLeft: NAME_OFFSET }}>
                     暂无最近会话。
                   </p>
                 ))}

@@ -257,7 +257,7 @@ function CwdModal({ cwd, invalid, recent, onClose, onApply, anchorRef = null }) 
           <button
             type="button"
             disabled={!value.trim()}
-            className="shrink-0 rounded-sm px-2 py-0.5 text-[11px] text-white/75 hover:bg-white/10 hover:text-white disabled:text-white/25"
+            className="shrink-0 rounded-sm px-2 py-0.5 text-[11px] text-fg-strong hover:bg-overlay-strong hover:text-fg-max disabled:text-fg-faint"
             onClick={submit}
           >
             应用
@@ -326,7 +326,7 @@ function DirectoryPicker({ initialPath, onClose, onPick }) {
         aria-modal="true"
         className="flex h-[min(520px,80vh)] w-[min(520px,calc(100vw-24px))] flex-col overflow-hidden rounded-md border border-line bg-panel/98 shadow-2xl"
       >
-        <h2 className="shrink-0 border-b border-line px-3.5 py-2.5 text-sm font-semibold text-white/95">
+        <h2 className="shrink-0 border-b border-line px-3.5 py-2.5 text-sm font-semibold text-fg-max">
           选择文件夹
         </h2>
         <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-line px-3.5 py-2">
@@ -335,29 +335,29 @@ function DirectoryPicker({ initialPath, onClose, onPick }) {
             title="上级目录"
             aria-label="上级目录"
             disabled={!parent}
-            className="grid size-6 shrink-0 place-items-center rounded-md text-white/60 hover:bg-white/[.08] hover:text-white disabled:opacity-30"
+            className="grid size-6 shrink-0 place-items-center rounded-md text-fg-soft hover:bg-overlay-strong hover:text-fg-max disabled:opacity-30"
             onClick={() => void load(parent)}
           >
             <IconArrowUp size={14} />
           </button>
-          <span className="min-w-0 flex-1 truncate text-xs text-white/55" title={current}>
+          <span className="min-w-0 flex-1 truncate text-xs text-fg-soft" title={current}>
             {current || '…'}
           </span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
           {error ? (
-            <p className="px-2 py-1.5 text-xs leading-5 text-red-300">{error}</p>
+            <p className="px-2 py-1.5 text-xs leading-5 text-danger">{error}</p>
           ) : loading ? (
-            <p className="px-2 py-1.5 text-xs text-white/40">读取中…</p>
+            <p className="px-2 py-1.5 text-xs text-fg-muted">读取中…</p>
           ) : entries.length === 0 ? (
-            <p className="px-2 py-1.5 text-xs text-white/35">没有子目录</p>
+            <p className="px-2 py-1.5 text-xs text-fg-dim">没有子目录</p>
           ) : (
             entries.map((entry) => (
               <button
                 key={entry.path}
                 type="button"
                 title={entry.path}
-                className="flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-white/70 hover:bg-white/[.06] hover:text-white"
+                className="flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-fg-soft hover:bg-overlay hover:text-fg-max"
                 onClick={() => void load(entry.path)}
               >
                 <IconFolder size={14} className="shrink-0 opacity-70" />
@@ -370,14 +370,14 @@ function DirectoryPicker({ initialPath, onClose, onPick }) {
           <button
             type="button"
             disabled={!current}
-            className="h-9 flex-1 rounded-sm bg-white/10 px-3.5 text-xs text-white/85 hover:bg-white/15 disabled:text-white/25"
+            className="h-9 flex-1 rounded-sm bg-overlay-strong px-3.5 text-xs text-fg-strong hover:bg-overlay-heavy disabled:text-fg-faint"
             onClick={() => current && onPick(current)}
           >
             选择此文件夹
           </button>
           <button
             type="button"
-            className="h-9 rounded-sm border border-white/15 px-3.5 text-xs text-white/70 hover:bg-white/[.06] hover:text-white"
+            className="h-9 rounded-sm border border-line px-3.5 text-xs text-fg-soft hover:bg-overlay hover:text-fg-max"
             onClick={onClose}
           >
             取消
@@ -2407,18 +2407,18 @@ export default function App() {
                 aria-orientation="vertical"
                 aria-label="调整侧栏宽度"
                 title="拖动调整侧栏宽度"
-                className={`absolute inset-y-0 right-[-2px] z-10 w-1 cursor-col-resize touch-none select-none hover:bg-white/20 ${resizingSidebar ? 'bg-white/30' : ''}`}
+                className={`absolute inset-y-0 right-[-2px] z-10 w-1 cursor-col-resize touch-none select-none hover:bg-overlay-heavy ${resizingSidebar ? 'bg-overlay-heavy' : ''}`}
                 onPointerDown={startSidebarResize}
               />
             )}
             {isMobile ? (
               <div className="flex h-8 shrink-0 items-center justify-between border-b border-line pl-3.5 pr-2">
-                <span className="text-xs font-semibold text-white/70">会话</span>
+                <span className="text-xs font-semibold text-fg-soft">会话</span>
                 <button
                   type="button"
                   title="关闭"
                   aria-label="关闭会话列表"
-                  className="grid size-7 place-items-center rounded-md text-white/55 hover:bg-white/[.08] hover:text-white"
+                  className="grid size-7 place-items-center rounded-md text-fg-soft hover:bg-overlay-strong hover:text-fg-max"
                   onClick={closeMobileDrawer}
                 >
                   <IconX size={15} />
@@ -2431,7 +2431,7 @@ export default function App() {
               <button
                 type="button"
                 title="New Session"
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={() => {
                   closeMobileDrawer()
                   createSession()
@@ -2446,8 +2446,8 @@ export default function App() {
                 title="查看使用统计"
                 className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
                   view === 'stats'
-                    ? 'bg-white/[.10] text-white'
-                    : 'text-white/60 hover:bg-white/[.05] hover:text-white'
+                    ? 'bg-overlay-strong text-fg-max'
+                    : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
                 }`}
                 onClick={() => {
                   closeMobileDrawer()
@@ -2460,7 +2460,7 @@ export default function App() {
               <button
                 type="button"
                 title="打开 Mica 设置"
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={() => {
                   closeMobileDrawer()
                   openConfigPage('config')
@@ -2478,7 +2478,7 @@ export default function App() {
               <button
                 type="button"
                 title="插件（查看已装载的插件与它们的设置）"
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-white/60 transition-colors hover:bg-white/[.05] hover:text-white"
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={() => {
                   closeMobileDrawer()
                   openConfigPage('plugins')
@@ -2564,7 +2564,7 @@ export default function App() {
         )}
         <main className="relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas">
           <header
-            className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-white/60 transition-[padding] ${!isMobile && !shareView && sidebarCollapsed ? 'pl-30' : ''}`}
+            className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-fg-soft transition-[padding] ${!isMobile && !shareView && sidebarCollapsed ? 'pl-30' : ''}`}
           >
             {isMobile && !shareView && (
               <button
@@ -2572,7 +2572,7 @@ export default function App() {
                 title="会话列表"
                 aria-label="会话列表"
                 aria-expanded={sessionsOpen}
-                className="no-drag -ml-1 grid size-7 shrink-0 place-items-center rounded-md text-white/55 hover:bg-white/[.06] hover:text-white"
+                className="no-drag -ml-1 grid size-7 shrink-0 place-items-center rounded-md text-fg-soft hover:bg-overlay hover:text-fg-max"
                 onClick={() => setSessionsOpen((open) => !open)}
               >
                 <IconMenu2 size={16} />
@@ -2588,7 +2588,7 @@ export default function App() {
                 type="button"
                 title="返回对话"
                 aria-label="返回对话"
-                className="no-drag flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-white/50 transition-colors hover:bg-white/[.06] hover:text-white"
+                className="no-drag flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={() => setView('chat')}
               >
                 <IconMessage size={13} />
@@ -2596,7 +2596,7 @@ export default function App() {
               </button>
             )}
             {view === 'chat' && (
-              <span className="min-w-0 truncate text-white/75">
+              <span className="min-w-0 truncate text-fg-strong">
                 {terminalNodes.find((node) => node.id === activeId)?.text || '对话'}
               </span>
             )}
@@ -2613,8 +2613,8 @@ export default function App() {
                   aria-expanded={notesOpen}
                   className={`grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
                     notesOpen
-                      ? 'bg-white/10 text-white hover:bg-white/15'
-                      : 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                      ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
+                      : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
                   }`}
                   onClick={() => setNotesOpen((open) => !open)}
                 >
@@ -2640,15 +2640,15 @@ export default function App() {
                     onClick={() => toggleTerminalControl(terminal)}
                     className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
                       terminal.windowVisible
-                        ? 'bg-white/10 text-white hover:bg-white/15'
+                        ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
                         : owned
-                          ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                          : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
+                          ? 'text-fg-soft hover:bg-overlay hover:text-fg-max'
+                          : 'text-fg-dim hover:bg-overlay hover:text-fg-soft'
                     }`}
                   >
                     <IconTerminal size={14} />
                     {badge && (
-                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
+                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-fg-muted">
                         {badge}
                       </span>
                     )}
@@ -2674,10 +2674,10 @@ export default function App() {
                     onClick={() => toggleBrowser(browser)}
                     className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
                       browser.visible
-                        ? 'bg-white/10 text-white hover:bg-white/15'
+                        ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
                         : owned
-                          ? 'text-white/55 hover:bg-white/[.06] hover:text-white'
-                          : 'text-white/35 hover:bg-white/[.06] hover:text-white/70'
+                          ? 'text-fg-soft hover:bg-overlay hover:text-fg-max'
+                          : 'text-fg-dim hover:bg-overlay hover:text-fg-soft'
                     }`}
                   >
                     <IconWorld
@@ -2685,7 +2685,7 @@ export default function App() {
                       className={browser.loading ? 'animate-pulse' : undefined}
                     />
                     {badge && (
-                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-white/50">
+                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-fg-muted">
                         {badge}
                       </span>
                     )}
@@ -2699,8 +2699,8 @@ export default function App() {
                 aria-pressed={terminalVisible}
                 className={`grid size-6 place-items-center rounded-md transition-colors ${
                   terminalVisible
-                    ? 'bg-white/10 text-white hover:bg-white/15'
-                    : 'text-white/55 hover:bg-white/[.06] hover:text-white'
+                    ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
+                    : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
                 }`}
                 onClick={toggleTerminalPanel}
               >
@@ -2710,7 +2710,7 @@ export default function App() {
                 type="button"
                 title="在新窗口中打开文件"
                 aria-label="在新窗口中打开文件"
-                className="grid size-6 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                className="grid size-6 place-items-center rounded-md text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={openFilesWindow}
               >
                 <IconFile size={14} />
@@ -2781,7 +2781,7 @@ export default function App() {
               />
             ))}
             {!activeId && view === 'chat' && (
-              <div className="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-white/25">
+              <div className="pointer-events-none absolute inset-0 grid place-items-center text-[13px] text-fg-faint">
                 选择或新建一个会话
               </div>
             )}
@@ -2818,8 +2818,8 @@ export default function App() {
                         key={node.id}
                         className={`group flex h-6 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
                           active
-                            ? 'bg-white/[.10] text-white'
-                            : 'text-white/55 hover:bg-white/[.05] hover:text-white'
+                            ? 'bg-overlay-strong text-fg-max'
+                            : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
                         }`}
                       >
                         <button
@@ -2836,7 +2836,7 @@ export default function App() {
                         <button
                           type="button"
                           title="关闭终端"
-                          className={`grid h-4 w-4 shrink-0 place-items-center rounded text-white/40 transition-opacity hover:bg-white/[.08] hover:text-white ${
+                          className={`grid h-4 w-4 shrink-0 place-items-center rounded text-fg-muted transition-opacity hover:bg-overlay-strong hover:text-fg-max ${
                             isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                           }`}
                           onClick={() => closeRightTerm(node.id)}
@@ -2851,7 +2851,7 @@ export default function App() {
                   type="button"
                   title="新建终端"
                   aria-label="新建终端"
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
                   onClick={createRightTerm}
                 >
                   <IconPlus size={14} />
@@ -2860,7 +2860,7 @@ export default function App() {
                   type="button"
                   title="收起终端 (Ctrl+`)"
                   aria-label="收起终端"
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-white/55 transition-colors hover:bg-white/[.06] hover:text-white"
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
                   onClick={() => setTerminalOpen(false)}
                 >
                   <IconX size={13} />
@@ -2870,7 +2870,7 @@ export default function App() {
                 {/* 分块还没到就先给个说明：空白面板和「终端坏了」在屏幕上是一样的。 */}
                 <Suspense
                   fallback={
-                    <div className="grid flex-1 place-items-center text-xs text-white/40">
+                    <div className="grid flex-1 place-items-center text-xs text-fg-muted">
                       正在加载终端…
                     </div>
                   }
@@ -2896,7 +2896,7 @@ export default function App() {
               </div>
             </section>
           )}
-          <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-white/10 bg-black/10 px-3 text-xs text-white/65 no-drag">
+          <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-line-soft bg-shade px-3 text-xs text-fg-soft no-drag">
             {gitIsCurrent && git.status?.root ? (
               <button
                 ref={branchButtonRef}
@@ -2905,7 +2905,7 @@ export default function App() {
                 aria-haspopup="dialog"
                 aria-expanded={branchPickerOpen}
                 // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
-                className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-white/[.08] hover:text-white ${
+                className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-overlay-strong hover:text-fg-max ${
                   activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
                 }`}
                 onClick={() => setBranchPickerOpen(true)}
@@ -2923,10 +2923,10 @@ export default function App() {
                     ? activeCwd
                     : `${activeCwd}\n当前目录不存在或已被移动，点击切换正确的项目目录`
                 }
-                className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-white/[.06] ${
+                className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-overlay ${
                   cwdValid
-                    ? 'text-white/35 hover:text-white/75'
-                    : 'text-red-400 hover:bg-red-500/[.1] hover:text-red-300'
+                    ? 'text-fg-dim hover:text-fg-strong'
+                    : 'text-danger hover:bg-danger/10 hover:text-danger'
                 }`}
                 onClick={() => setCwdModalOpen(true)}
               >
@@ -2943,7 +2943,7 @@ export default function App() {
           aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
           aria-expanded={!sidebarCollapsed}
           /* top-1 + size-6：中心与顶栏（h-8）里的图标同一水平线，别用 top-2 那种整体偏低的尺寸。 */
-          className="no-drag fixed top-1 z-50 grid size-6 place-items-center rounded-sm text-white/55 hover:bg-white/[.06] hover:text-white"
+          className="no-drag fixed top-1 z-50 grid size-6 place-items-center rounded-sm text-fg-soft hover:bg-overlay hover:text-fg-max"
           style={{
             left: sidebarCollapsed
               ? SIDEBAR_TOGGLE_COLLAPSED_LEFT
@@ -3002,7 +3002,7 @@ export default function App() {
           <div className="no-drag flex min-h-0 flex-1 flex-col">
             <Suspense
               fallback={
-                <div className="grid flex-1 place-items-center text-xs text-white/40">
+                <div className="grid flex-1 place-items-center text-xs text-fg-muted">
                   正在加载…
                 </div>
               }
@@ -3024,7 +3024,7 @@ export default function App() {
           className={`no-drag pointer-events-none fixed bottom-12 left-1/2 z-[12000] max-w-[min(560px,calc(100vw-32px))] -translate-x-1/2 truncate rounded-sm border px-3 py-1.5 text-xs shadow-2xl ${
             toast.error
               ? 'border-danger/40 bg-panel text-danger'
-              : 'border-line bg-panel text-white/85'
+              : 'border-line bg-panel text-fg-strong'
           }`}
         >
           {toast.text}

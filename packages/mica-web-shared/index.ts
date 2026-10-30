@@ -59,3 +59,13 @@ export {
   uiStateChangeSet,
   uiStateValuesEqual,
 } from './ui-state.js';
+export {
+  DEFAULT_THEME_PREFERENCE,
+  THEME_COLOR_META,
+  THEME_PREFERENCES,
+  THEME_UI_STATE_KEY,
+  isThemePreference,
+  normalizeThemePreference,
+  resolveThemeName,
+} from './theme.js';
+export type { ResolvedTheme, ThemePreference } from './theme.js';

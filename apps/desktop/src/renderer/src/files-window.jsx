@@ -51,7 +51,7 @@ export function FilesWindow() {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas">
       <header className="safe-top drag-region flex h-8 shrink-0 items-center border-b border-line bg-panel pl-30 pr-3">
-        <span className="min-w-0 truncate text-xs font-medium text-white/55" title={cwd || ''}>
+        <span className="min-w-0 truncate text-xs font-medium text-fg-soft" title={cwd || ''}>
           {cwd || '文件'}
         </span>
       </header>

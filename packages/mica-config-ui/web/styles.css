@@ -30,6 +30,20 @@
   --amber: #d6bf55; /* terminal.ansiYellow */
   --violet: #b48ee0; /* derived: thinking / reasoning 的紫（Darcula 的语法高亮紫） */
 
+  /* 叠层：暗色靠白 alpha 提亮，亮色块里反相成同倍率的黑 alpha（单靠颜色 token 无法反相，
+     所以叠层单独成一组变量）。 */
+  --overlay-subtle: rgb(255 255 255 / 2.5%);
+  --overlay: rgb(255 255 255 / 3%);
+  --overlay-strong: rgb(255 255 255 / 6%);
+  --focus-ring: rgb(255 255 255 / 7%);
+  --selection-bg: rgb(255 255 255 / 20%);
+  /* 内凹面（性能时间线底板）：比 panel 深一档，暗色里恰好就是画布色。 */
+  --panel-inset: #2b2b2b;
+  /* 强调色实心底上的前景：Darcula 的橙底压深字，亮色块的蓝底必须翻成白字。 */
+  --accent-contrast: #1e1f22;
+  /* 弹层投影：亮色下同一条阴影要收轻，否则白底上像糊了一块灰。 */
+  --shadow-modal: 0 24px 60px rgb(0 0 0 / 60%);
+
   /* Type scale — one principled ladder (code-by-wire parity). px shown at the 16px root. */
   --text-micro: 0.6875rem; /* 11px — micro overlines, tabular meta */
   --text-label: 0.75rem; /* 12px — section labels, badges */
@@ -67,6 +81,39 @@
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   box-sizing: border-box;
+}
+
+/* 亮色皮肤：只覆盖颜色变量与 color-scheme，尺寸、间距、字体沿用暗色那一套。
+   取值对齐 DeepSeek harness 的亮色 token（见 temp/theme-token-mapping.md）；
+   新增颜色变量必须同步写进这一块，appearance-tokens.test.ts 会拦漏项。 */
+html[data-theme='light'] .mica-config-ui {
+  color-scheme: light;
+  --bg: #ffffff;
+  --panel: #f5f6f7;
+  --panel-muted: #f1f3f5;
+  --panel-hover: #e9ecf2;
+  --sidebar-bg: #f9fafb;
+  --line: #0000001a;
+  --line-soft: #0000000f;
+  --line-strong: #00000029;
+  --text: #1b1b1c;
+  --text-soft: #61666b;
+  --text-faint: #979da6;
+  --accent: #4176e6;
+  --accent-hover: #2563eb;
+  --blue: #4176e6;
+  --green: #2b8a3e;
+  --red: #ec1313;
+  --amber: #b45309;
+  --violet: #6741d9;
+  --overlay-subtle: rgb(0 0 0 / 2.5%);
+  --overlay: rgb(0 0 0 / 3%);
+  --overlay-strong: rgb(0 0 0 / 6%);
+  --focus-ring: rgb(0 0 0 / 8%);
+  --selection-bg: rgb(0 0 0 / 12%);
+  --panel-inset: #f9fafb;
+  --accent-contrast: #ffffff;
+  --shadow-modal: 0 24px 60px rgb(0 0 0 / 18%);
 }
 
 /* 内嵌变体：把这份样式当成「一段内容」放进别的容器（桌面端会话设置弹窗）用。
@@ -107,7 +154,7 @@
   }
 
   ::selection {
-    background: rgb(255 255 255 / 20%);
+    background: var(--selection-bg);
     color: inherit;
   }
 
@@ -681,7 +728,7 @@
   }
 
   .collapsible-summary:hover {
-    background: rgb(255 255 255 / 2.5%);
+    background: var(--overlay-subtle);
   }
 
   .collapsible-summary::-webkit-details-marker {
@@ -841,6 +888,171 @@
     color: var(--red);
     font-size: 11.5px;
     line-height: 1.45;
+  }
+
+  /* ---- 外观：主题单选卡 -------------------------------------------------- */
+  .theme-card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    max-width: 720px;
+  }
+
+  .theme-card {
+    display: grid;
+    gap: 9px;
+    min-width: 0;
+    padding: 9px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel-muted);
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    transition:
+      border-color 120ms ease,
+      background 120ms ease;
+  }
+
+  .theme-card:hover {
+    border-color: var(--line-strong);
+    background: var(--panel-hover);
+  }
+
+  /* 选中态靠 accent 描边 + 极淡的 accent 底，不用竖条（界面审查清单）。 */
+  .theme-card-active,
+  .theme-card-active:hover {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  }
+
+  .theme-card-preview,
+  .theme-card-split {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .theme-card-split {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px;
+  }
+
+  /* 主题预览自带一套局部色：卡片要同时展示「另一种主题」的样子，不能跟着当前主题的
+     容器变量走。局部色与上面的 token 同值，改亮色块时同步这里。 */
+  .theme-preview {
+    --preview-bg: #2b2b2b;
+    --preview-panel: #3c3f41;
+    --preview-line: #4b4b4b;
+    --preview-text: #a1a1a1;
+    --preview-accent: #cc7832;
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 5px;
+    height: 62px;
+    padding: 5px;
+    overflow: hidden;
+    border: 1px solid var(--preview-line);
+    border-radius: var(--radius-md);
+    background: var(--preview-bg);
+  }
+
+  .theme-preview[data-preview-theme='light'] {
+    --preview-bg: #ffffff;
+    --preview-panel: #f1f3f5;
+    --preview-line: #0000001a;
+    --preview-text: #61666b;
+    --preview-accent: #4176e6;
+  }
+
+  .theme-preview-rail {
+    display: grid;
+    align-content: start;
+    gap: 3px;
+    padding: 4px 3px;
+    border-radius: 2px;
+    background: var(--preview-panel);
+  }
+
+  .theme-preview-rail i {
+    display: block;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--preview-line);
+  }
+
+  .theme-preview-rail i:first-child {
+    width: 70%;
+    background: var(--preview-accent);
+  }
+
+  .theme-preview-main {
+    display: grid;
+    align-content: start;
+    gap: 4px;
+    padding-top: 4px;
+  }
+
+  .theme-preview-line {
+    width: 82%;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--preview-text);
+  }
+
+  .theme-preview-line.is-short {
+    width: 55%;
+  }
+
+  .theme-preview-card {
+    height: 15px;
+    margin-top: 1px;
+    border: 1px solid var(--preview-line);
+    border-radius: 2px;
+    background: var(--preview-panel);
+  }
+
+  .theme-preview-button {
+    width: 36%;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--preview-accent);
+  }
+
+  .theme-card-copy {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .theme-card-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text);
+    font-size: var(--text-aux);
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  .theme-card-check {
+    display: inline-flex;
+    margin-left: auto;
+    color: var(--accent);
+  }
+
+  .theme-card-desc {
+    color: var(--text-faint);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+
+  /* 页面窄时改单列：三张带预览的卡并排会把预览压成一条缝。 */
+  @container page (max-width: 620px) {
+    .theme-card-grid {
+      grid-template-columns: minmax(0, 1fr);
+      max-width: none;
+    }
   }
 
   /* ---- 左列表 / 右详情 --------------------------------------------------- */
@@ -1326,7 +1538,7 @@
   }
 
   .role-list-item:hover {
-    background: rgb(255 255 255 / 3%);
+    background: var(--overlay);
     color: var(--text);
   }
 
@@ -1684,7 +1896,7 @@
 
   .chat-composer textarea:focus {
     border-color: var(--line-strong);
-    box-shadow: 0 0 0 2px rgb(255 255 255 / 7%);
+    box-shadow: 0 0 0 2px var(--focus-ring);
     background: var(--panel);
   }
 
@@ -1736,7 +1948,6 @@
         'desc desc';
       gap: 4px 10px;
     }
-
   }
 
   /* Chat transcript (ChatGPT-like) */
@@ -1972,7 +2183,6 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-
 
   /* 详情里的错误不挤掉页签：贴在标签条下面一行，内容仍可读。 */
   .session-detail-alert {
@@ -2830,7 +3040,7 @@
     border: 1px solid var(--line);
     border-radius: var(--radius-xl);
     background: var(--panel);
-    box-shadow: 0 24px 60px rgb(0 0 0 / 60%);
+    box-shadow: var(--shadow-modal);
   }
 
   .modal-card-wide {
@@ -3821,7 +4031,7 @@
   }
 
   .control-endpoint-summary:hover {
-    background: rgb(255 255 255 / 2.5%);
+    background: var(--overlay-subtle);
   }
 
   .control-endpoint-summary::-webkit-details-marker {
@@ -4723,7 +4933,7 @@
   .perf-chip-active {
     border-color: var(--accent);
     background: var(--accent);
-    color: #1e1f22;
+    color: var(--accent-contrast);
   }
 
   /* 自动刷新是个开关：圆点表示当前是否在自动拉数据，标签保持稳定（不写「开/关」） */
@@ -4749,7 +4959,7 @@
     padding: 6px 8px;
     border: 1px solid var(--line);
     border-radius: 6px;
-    background: #2b2b2b;
+    background: var(--panel-inset);
   }
 
   .perf-bar {
@@ -4965,7 +5175,7 @@
 }
 
 .capability-row:hover {
-  background: var(--hover, rgb(255 255 255 / 3%));
+  background: var(--hover, var(--overlay));
 }
 
 /* 工具分组：组头是同一套滑块 + 组名 + 启用计数，点它是整组开关。
@@ -5055,7 +5265,7 @@
 }
 
 .capability-description:hover {
-  background: var(--hover, rgb(255 255 255 / 6%));
+  background: var(--hover, var(--overlay-strong));
   color: var(--text-soft);
 }
 

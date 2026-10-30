@@ -34,7 +34,8 @@ const languages = {
 }
 
 export const editorOptions = {
-  theme: 'mica-dark',
+  // 主题由 monaco-runtime 按 theme.js 的当前主题统一 setTheme；这里不能写 theme，
+  // 否则每新建一个编辑器都会把全局主题拉回写死的那一套（切换主题后立刻失效）。
   automaticLayout: true,
   minimap: { enabled: false },
   // Scrollbars are hidden app-wide (see assets/app.css); Monaco paints its own

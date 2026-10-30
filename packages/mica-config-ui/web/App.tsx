@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { DialogHost } from './components/DialogHost.js';
 import { Sidebar, type ConfigWebAppSection } from './layout/Sidebar.js';
 import { CapabilitiesPage } from './pages/CapabilitiesPage.js';
+import { AppearancePage } from './pages/AppearancePage.js';
 import { ConfigPage } from './pages/ConfigPage.js';
 import { BrowserControlPage } from './pages/BrowserControlPage.js';
 import { McpPage } from './pages/McpPage.js';
@@ -26,12 +27,7 @@ export type ConfigWebAppProps = {
   closeLabel?: string;
 };
 
-export function App({
-  initialSection,
-  initialPluginId = null,
-  onClose,
-  closeLabel,
-}: ConfigWebAppProps = {}) {
+export function App({ initialSection, initialPluginId = null, onClose, closeLabel }: ConfigWebAppProps = {}) {
   const [section, setSection] = useState<ConfigWebAppSection>(() => initialSection ?? readInitialSection());
   // 当前打开的插件详情：宿主（插件菜单）或地址栏（浏览器深链）指定，插件页只负责呈现。
   const [pluginId, setPluginId] = useState<string | null>(() => initialPluginId ?? readInitialPluginId());
@@ -69,6 +65,7 @@ export function App({
         />
         <div className="content-shell">
           {section === 'config' ? <ConfigPage /> : null}
+          {section === 'appearance' ? <AppearancePage /> : null}
           {section === 'browserControl' ? <BrowserControlPage /> : null}
           {section === 'terminalControl' ? <TerminalControlPage /> : null}
           {section === 'performance' ? <PerformancePage /> : null}
@@ -77,9 +74,7 @@ export function App({
           {section === 'mcp' ? <McpPage /> : null}
           {section === 'skills' ? <SkillsPage /> : null}
           {section === 'capabilities' ? <CapabilitiesPage /> : null}
-          {section === 'plugins' ? (
-            <PluginsPage pluginId={pluginId} onSelectPlugin={selectPlugin} />
-          ) : null}
+          {section === 'plugins' ? <PluginsPage pluginId={pluginId} onSelectPlugin={selectPlugin} /> : null}
         </div>
       </main>
       <DialogHost />
@@ -115,6 +110,7 @@ function isSectionAvailable(candidate: string | null): boolean {
   if (!candidate) return false;
   const known: ConfigWebAppSection[] = [
     'config',
+    'appearance',
     'browserControl',
     'terminalControl',
     'performance',

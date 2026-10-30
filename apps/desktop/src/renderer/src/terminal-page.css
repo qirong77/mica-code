@@ -1,12 +1,46 @@
 /*
  * 终端控制窗口的样式。
  *
- * 与主应用共用 Darcula：内容面 #2b2b2b、外框 #3c3f41、分界 #4b4b4b。
- * xterm 自己按 options.theme 画，这里的色值只负责外壳。
+ * 外壳颜色跟着 `<html data-theme>` 走（首帧由 theme-boot.js 上色，之后由
+ * terminal-page.jsx 监听 theme.js 的缓存同步）：暗色沿用 Darcula（内容面 #2b2b2b、
+ * 外框 #3c3f41、分界 #4b4b4b），亮色取 app.css 的亮色 token（内容面 #ffffff、
+ * 外框 #f9fafb、分界 #0000001a）。xterm 自己按 options.theme 画，两份主题在
+ * terminal-page.jsx 里手工同步。
  */
 
 :root {
   color-scheme: dark;
+  --terminal-bg: #2b2b2b;
+  --terminal-panel: #3c3f41;
+  --terminal-line: #4b4b4b;
+  --terminal-fg: #cccccc;
+  --terminal-fg-soft: #a1a1a1;
+  --terminal-fg-dim: #888888;
+  --terminal-fg-faint: #707070;
+  --terminal-success: #a8c023;
+  --terminal-warn: #d6bf55;
+  --terminal-overlay-bg: rgb(43 43 43 / 82%);
+  --terminal-error-bg: rgb(75 45 45 / 92%);
+  --terminal-error-border: #4b2d2d;
+  --terminal-error-fg: #ff8785;
+}
+
+/* 亮色覆盖块：取值与 app.css 的 `html[data-theme='light']` 一一对应。 */
+html[data-theme='light'] {
+  color-scheme: light;
+  --terminal-bg: #ffffff;
+  --terminal-panel: #f9fafb;
+  --terminal-line: #0000001a;
+  --terminal-fg: #2c2c2e;
+  --terminal-fg-soft: #43454a;
+  --terminal-fg-dim: #81858c;
+  --terminal-fg-faint: #979da6;
+  --terminal-success: #2b8a3e;
+  --terminal-warn: #b45309;
+  --terminal-overlay-bg: rgb(255 255 255 / 82%);
+  --terminal-error-bg: #fef2f2;
+  --terminal-error-border: #ec131333;
+  --terminal-error-fg: #ec1313;
 }
 
 html,
@@ -17,8 +51,8 @@ body,
 }
 
 body {
-  background: #2b2b2b;
-  color: #cccccc;
+  background: var(--terminal-bg);
+  color: var(--terminal-fg);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
   overflow: hidden;
@@ -39,10 +73,10 @@ body {
   gap: 10px;
   height: 32px;
   padding: 0 10px;
-  border-bottom: 1px solid #4b4b4b;
-  background: #3c3f41;
+  border-bottom: 1px solid var(--terminal-line);
+  background: var(--terminal-panel);
   font-size: 12px;
-  color: #a1a1a1;
+  color: var(--terminal-fg-soft);
   user-select: none;
 }
 
@@ -51,16 +85,16 @@ body {
   height: 7px;
   flex: 0 0 auto;
   border-radius: 999px;
-  background: #707070;
+  background: var(--terminal-fg-faint);
 }
 
 .terminal-dot.is-online {
-  background: #a8c023;
+  background: var(--terminal-success);
 }
 
 .terminal-title {
   font-weight: 600;
-  color: #cccccc;
+  color: var(--terminal-fg);
 }
 
 .terminal-meta {
@@ -82,7 +116,7 @@ body {
 }
 
 .terminal-state.is-exited {
-  color: #d6bf55;
+  color: var(--terminal-warn);
 }
 
 .terminal-host {
@@ -113,10 +147,10 @@ body {
   gap: 12px;
   min-height: 24px;
   padding: 0 10px;
-  border-top: 1px solid #4b4b4b;
-  background: #3c3f41;
+  border-top: 1px solid var(--terminal-line);
+  background: var(--terminal-panel);
   font-size: 11px;
-  color: #888888;
+  color: var(--terminal-fg-dim);
   user-select: none;
 }
 
@@ -148,9 +182,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgb(43 43 43 / 82%);
+  background: var(--terminal-overlay-bg);
   font-size: 13px;
-  color: #a1a1a1;
+  color: var(--terminal-fg-soft);
 }
 
 .terminal-error {
@@ -159,9 +193,9 @@ body {
   bottom: 34px;
   left: 12px;
   padding: 8px 10px;
-  border: 1px solid #4b2d2d;
+  border: 1px solid var(--terminal-error-border);
   border-radius: 4px;
-  background: rgb(75 45 45 / 92%);
+  background: var(--terminal-error-bg);
   font-size: 12px;
-  color: #ff8785;
+  color: var(--terminal-error-fg);
 }

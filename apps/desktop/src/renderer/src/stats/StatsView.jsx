@@ -280,8 +280,8 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
             const row = byDayMap.get(day)
             return (
               <div className="flex flex-col gap-0.5">
-                <div className="font-medium text-white/90">{day}</div>
-                <div className="text-white/50">
+                <div className="font-medium text-fg-strong">{day}</div>
+                <div className="text-fg-muted">
                   {row
                     ? `${row.sessions} sessions · ${row.requests} requests · ${tokensShort(row.tokens)} tokens`
                     : 'No activity'}
@@ -382,8 +382,8 @@ function DailyCard({ sessions, range }) {
           const d = days[i]
           return (
             <div className="flex flex-col gap-0.5">
-              <div className="font-medium text-white/90">{d.day === today ? '今天' : d.day}</div>
-              <div className="text-white/50">
+              <div className="font-medium text-fg-strong">{d.day === today ? '今天' : d.day}</div>
+              <div className="text-fg-muted">
                 {d.requests} requests · {tokensShort(d.tokens)} tokens
               </div>
             </div>

@@ -48,19 +48,19 @@ const INITIAL_READ_DELAY_MS = 250;
 
 /** 阶段配色：同一天里不同阶段的条不靠文字也能分开。 */
 const STAGE_TONE = {
-  review: 'border-slate-400/45 bg-slate-400/20 text-slate-100',
-  dev: 'border-sky-400/50 bg-sky-500/25 text-sky-50',
-  integration: 'border-violet-400/50 bg-violet-500/25 text-violet-50',
-  submit: 'border-indigo-400/50 bg-indigo-500/25 text-indigo-50',
-  'case-review': 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fuchsia-50',
-  testing: 'border-amber-400/50 bg-amber-500/25 text-amber-50',
-  acceptance: 'border-teal-400/50 bg-teal-500/25 text-teal-50',
-  walkthrough: 'border-lime-400/45 bg-lime-500/20 text-lime-50',
-  release: 'border-rose-400/55 bg-rose-500/30 text-rose-50',
-  showcase: 'border-cyan-400/50 bg-cyan-500/25 text-cyan-50',
+  review: 'border-slate-400/45 bg-slate-400/20 text-fg-max',
+  dev: 'border-sky-400/50 bg-sky-500/25 text-fg-max',
+  integration: 'border-violet-400/50 bg-violet-500/25 text-fg-max',
+  submit: 'border-indigo-400/50 bg-indigo-500/25 text-fg-max',
+  'case-review': 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fg-max',
+  testing: 'border-amber-400/50 bg-amber-500/25 text-fg-max',
+  acceptance: 'border-teal-400/50 bg-teal-500/25 text-fg-max',
+  walkthrough: 'border-lime-400/45 bg-lime-500/20 text-fg-max',
+  release: 'border-rose-400/55 bg-rose-500/30 text-fg-max',
+  showcase: 'border-cyan-400/50 bg-cyan-500/25 text-fg-max',
 };
 
-const FALLBACK_TONE = 'border-white/25 bg-white/10 text-white/85';
+const FALLBACK_TONE = 'border-line-strong bg-overlay-strong text-fg-strong';
 
 function toneOf(key) {
   return STAGE_TONE[key] ?? FALLBACK_TONE;
@@ -540,15 +540,15 @@ export default function SchedulePage({ api }) {
     <div className="flex h-full min-h-0 flex-col bg-canvas">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <CalendarDays size={14} className="shrink-0 text-white/45" />
-          <span className="min-w-0 truncate text-[11px] text-white/40">
+          <CalendarDays size={14} className="shrink-0 text-fg-muted" />
+          <span className="min-w-0 truncate text-[11px] text-fg-muted">
             {snapshot.coverage || '还没有整理过'}
             {snapshot.updatedAt ? ` · ${freshness(snapshot.updatedAtMs)}` : ''}
           </span>
         </div>
 
         <div className="ml-auto flex items-center gap-1.5">
-          <div className="flex items-center rounded-md border border-line bg-white/[.03] p-0.5">
+          <div className="flex items-center rounded-md border border-line bg-overlay-subtle p-0.5">
             {[
               ['day', '日'],
               ['week', '周'],
@@ -560,7 +560,7 @@ export default function SchedulePage({ api }) {
                 onClick={() => setScale(key)}
                 aria-pressed={scale === key}
                 className={`h-6 w-7 rounded-sm text-[11px] transition-colors ${
-                  scale === key ? 'bg-white/[.12] text-white' : 'text-white/50 hover:text-white/85'
+                  scale === key ? 'bg-overlay-heavy text-fg-max' : 'text-fg-muted hover:text-fg-strong'
                 }`}
               >
                 {label}
@@ -568,7 +568,7 @@ export default function SchedulePage({ api }) {
             ))}
           </div>
 
-          <span className="text-[10px] tabular-nums text-white/35" title="滚轮缩放，Shift + 滚轮平移">
+          <span className="text-[10px] tabular-nums text-fg-dim" title="滚轮缩放，Shift + 滚轮平移">
             {Math.round(zoom * 100)}%
           </span>
 
@@ -576,7 +576,7 @@ export default function SchedulePage({ api }) {
             type="button"
             title="回到今天"
             onClick={scrollToToday}
-            className="flex h-6 items-center gap-1 rounded-md border border-line bg-white/[.03] px-2 text-[11px] text-white/60 hover:border-white/25 hover:text-white"
+            className="flex h-6 items-center gap-1 rounded-md border border-line bg-overlay-subtle px-2 text-[11px] text-fg-soft hover:border-line-strong hover:text-fg-max"
           >
             <Crosshair size={11} />
             今天
@@ -588,7 +588,7 @@ export default function SchedulePage({ api }) {
             aria-label="重新整理排期"
             disabled={busy}
             onClick={() => void refresh()}
-            className="flex h-6 items-center gap-1 rounded-md border border-line bg-white/[.03] px-2 text-[11px] text-white/60 hover:border-white/25 hover:text-white disabled:text-white/25"
+            className="flex h-6 items-center gap-1 rounded-md border border-line bg-overlay-subtle px-2 text-[11px] text-fg-soft hover:border-line-strong hover:text-fg-max disabled:text-fg-ghost"
           >
             <RefreshCw size={11} className={busy ? 'animate-spin' : ''} />
             {busy ? '整理中' : '刷新'}
@@ -610,7 +610,7 @@ export default function SchedulePage({ api }) {
                 hidden.has(key) ? 'border-line opacity-35' : toneOf(key)
               }`}
             >
-              <span className={`size-1.5 rounded-full ${hidden.has(key) ? 'bg-white/40' : 'bg-current'}`} />
+              <span className={`size-1.5 rounded-full ${hidden.has(key) ? 'bg-fg-muted' : 'bg-current'}`} />
               {STAGE_LABELS[key]}
             </button>
           ))}
@@ -618,10 +618,10 @@ export default function SchedulePage({ api }) {
       )}
 
       {loading ? (
-        <div className="grid min-h-0 flex-1 place-items-center text-xs text-white/40">正在读取排期…</div>
+        <div className="grid min-h-0 flex-1 place-items-center text-xs text-fg-muted">正在读取排期…</div>
       ) : layout.rows.length === 0 ? (
         <div className="grid min-h-0 flex-1 place-items-center px-6">
-          <div className="max-w-sm text-center text-xs leading-5 text-white/45">
+          <div className="max-w-sm text-center text-xs leading-5 text-fg-muted">
             {snapshot.updatedAtMs
               ? '最近一次整理的窗口里没有群公告写着排期。'
               : '还没整理过。点右上角「刷新」，从 D-Chat 群公告里读一遍排期。'}
@@ -640,14 +640,14 @@ export default function SchedulePage({ api }) {
                 {layout.rows.map((row) => (
                   <div
                     key={row.groupId}
-                    className="flex flex-col justify-center border-b border-white/[.06] px-2.5"
+                    className="flex flex-col justify-center border-b border-line-soft px-2.5"
                     style={{ height: rowHeight(row.lanes) }}
                   >
-                    <span className="truncate text-[12px] text-white/80" title={row.name}>
+                    <span className="truncate text-[12px] text-fg-strong" title={row.name}>
                       {row.name}
                     </span>
                     <span
-                      className="truncate text-[10px] text-white/30"
+                      className="truncate text-[10px] text-fg-dim"
                       title={`公告：${row.author} ${row.announcedAt ? new Date(row.announcedAt).toLocaleString('zh-CN', { hour12: false }) : ''}`}
                     >
                       {row.author || '公告'}
@@ -673,11 +673,11 @@ export default function SchedulePage({ api }) {
             {/* 缩小到比视口还窄时也撑满：否则行分隔线到内容右边界就断掉，看着像画到一半 */}
             <div style={{ width, minWidth: '100%' }}>
               <div className="sticky top-0 z-10 bg-panel/95 backdrop-blur">
-                <div className="relative border-b border-white/10" style={{ height: MAJOR_HEADER_HEIGHT }}>
+                <div className="relative border-b border-line-soft" style={{ height: MAJOR_HEADER_HEIGHT }}>
                   {cells.major.map((cell) => (
                     <div
                       key={`major-${cell.offset}`}
-                      className="absolute top-0 flex h-full items-center overflow-hidden border-r border-white/10 px-1.5 text-[10px] text-white/45"
+                      className="absolute top-0 flex h-full items-center overflow-hidden border-r border-line-soft px-1.5 text-[10px] text-fg-muted"
                       style={{ left: cell.offset * pxPerDay, width: cell.span * pxPerDay }}
                     >
                       {cell.label}
@@ -685,7 +685,7 @@ export default function SchedulePage({ api }) {
                   ))}
                   {todayInAxis && (
                     <span
-                      className="absolute top-0 flex h-full items-center text-[10px] font-medium text-sky-300"
+                      className="absolute top-0 flex h-full items-center text-[10px] font-medium text-info"
                       style={{ left: todayOffset * pxPerDay + 3 }}
                     >
                       今天
@@ -696,11 +696,11 @@ export default function SchedulePage({ api }) {
                   {cells.minor.map((cell) => (
                     <div
                       key={`minor-${cell.offset}`}
-                      className="absolute top-0 flex h-full items-center justify-center gap-1 overflow-hidden border-r border-white/[.07] text-[10px] tabular-nums text-white/55"
+                      className="absolute top-0 flex h-full items-center justify-center gap-1 overflow-hidden border-r border-line-soft text-[10px] tabular-nums text-fg-soft"
                       style={{ left: cell.offset * pxPerDay, width: cell.span * pxPerDay }}
                     >
                       <span>{cell.label}</span>
-                      {cell.sub && <span className="text-white/30">{cell.sub}</span>}
+                      {cell.sub && <span className="text-fg-dim">{cell.sub}</span>}
                     </div>
                   ))}
                 </div>
@@ -715,27 +715,27 @@ export default function SchedulePage({ api }) {
                     return (
                       <div
                         key={`weekend-${index}`}
-                        className="absolute top-0 bg-white/[.035]"
+                        className="absolute top-0 bg-overlay-subtle"
                         style={{ left: index * pxPerDay, width: pxPerDay, height: rowsHeight }}
                       />
                     );
                   })}
                 {todayInAxis && (
                   <div
-                    className="pointer-events-none absolute top-0 bg-sky-400/[.06]"
+                    className="pointer-events-none absolute top-0 bg-info/[.06]"
                     style={{
                       left: todayOffset * pxPerDay,
                       width: Math.max(1, scale === 'day' ? pxPerDay : 2),
                       height: rowsHeight,
                     }}
                   >
-                    <div className="h-full w-px bg-sky-400/50" />
+                    <div className="h-full w-px bg-info/50" />
                   </div>
                 )}
                 {cells.minor.map((cell) => (
                   <div
                     key={`grid-${cell.offset}`}
-                    className="absolute top-0 w-px bg-white/[.05]"
+                    className="absolute top-0 w-px bg-overlay"
                     style={{ left: cell.offset * pxPerDay, height: rowsHeight }}
                   />
                 ))}
@@ -743,14 +743,14 @@ export default function SchedulePage({ api }) {
                 {/* 空白处框选：铺满所有行的半透明块，松手后弹阶段菜单 */}
                 {creating && (
                   <div
-                    className="pointer-events-none absolute top-0 rounded-sm border border-sky-300/70 bg-sky-400/[.18]"
+                    className="pointer-events-none absolute top-0 rounded-sm border border-info/70 bg-info/[.18]"
                     style={{
                       left: daysBetween(layout.start, creating.from) * pxPerDay,
                       width: (daysBetween(creating.from, creating.to) + 1) * pxPerDay,
                       height: rowsHeight,
                     }}
                   >
-                    <span className="absolute -top-0.5 left-1 whitespace-nowrap text-[10px] text-sky-200">
+                    <span className="absolute -top-0.5 left-1 whitespace-nowrap text-[10px] text-info">
                       {shortDate(creating.from)}
                       {creating.from === creating.to ? '' : ` – ${shortDate(creating.to)}`}
                       {` · ${daysBetween(creating.from, creating.to) + 1} 天`}
@@ -805,31 +805,31 @@ export default function SchedulePage({ api }) {
             <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] ${toneOf(selectedBar.bar.key)}`}>
               {selectedBar.bar.label}
             </span>
-            <span className="min-w-0 truncate text-white/85">{selectedBar.row.name}</span>
-            <span className="shrink-0 tabular-nums text-white/55">
+            <span className="min-w-0 truncate text-fg-strong">{selectedBar.row.name}</span>
+            <span className="shrink-0 tabular-nums text-fg-soft">
               {shortDate(selectedBar.bar.start)}
               {selectedBar.bar.start === selectedBar.bar.end ? '' : ` – ${shortDate(selectedBar.bar.end)}`}
-              <span className="ml-1 text-white/35">共 {selectedBar.bar.span} 天</span>
+              <span className="ml-1 text-fg-dim">共 {selectedBar.bar.span} 天</span>
             </span>
             {selectedBar.bar.edited && (
-              <span className="shrink-0 rounded-sm bg-white/[.06] px-1 py-0.5 text-[10px] text-amber-200/85">
+              <span className="shrink-0 rounded-sm bg-overlay px-1 py-0.5 text-[10px] text-warn-soft">
                 {selectedBar.bar.added ? '本地新增' : '手动调整过'}
               </span>
             )}
             {selectedBar.bar.edited && selectedBar.bar.originalStart && (
-              <span className="shrink-0 tabular-nums text-white/30">
+              <span className="shrink-0 tabular-nums text-fg-dim">
                 公告原值 {shortDate(selectedBar.bar.originalStart)}
                 {selectedBar.bar.originalStart === selectedBar.bar.originalEnd
                   ? ''
                   : `–${shortDate(selectedBar.bar.originalEnd)}`}
               </span>
             )}
-            <span className="ml-auto shrink-0 text-white/35">{dayLabel(selectedBar.bar.start)} 开始</span>
+            <span className="ml-auto shrink-0 text-fg-dim">{dayLabel(selectedBar.bar.start)} 开始</span>
             {selectedBar.bar.edited && (
               <button
                 type="button"
                 title={selectedBar.bar.added ? '删掉这条本地新增' : '还原成公告里的日期'}
-                className="flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line px-1.5 text-[10px] text-white/55 hover:border-white/25 hover:text-white"
+                className="flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line px-1.5 text-[10px] text-fg-soft hover:border-line-strong hover:text-fg-max"
                 onClick={dropSelectedEdit}
               >
                 {selectedBar.bar.added ? <Trash2 size={10} /> : <RotateCcw size={10} />}
@@ -840,13 +840,13 @@ export default function SchedulePage({ api }) {
               type="button"
               title="取消选中"
               aria-label="取消选中"
-              className="grid size-5 shrink-0 place-items-center rounded-sm text-white/40 hover:bg-white/[.06] hover:text-white"
+              className="grid size-5 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max"
               onClick={() => setSelected(null)}
             >
               <X size={12} />
             </button>
           </div>
-          <div className="flex items-center gap-2 text-[10px] text-white/30">
+          <div className="flex items-center gap-2 text-[10px] text-fg-dim">
             <span className="shrink-0">拖条体平移，拖两端改起止；← → 挪一天，Shift + ← → 改结束，Alt + ← → 改开始</span>
             <span className="min-w-0 truncate">
               {selectedBar.row.author ? `公告 ${selectedBar.row.author}` : '来自群公告'}
@@ -870,13 +870,13 @@ export default function SchedulePage({ api }) {
             }}
           >
             <div className="mb-1.5 flex items-baseline justify-between gap-2">
-              <span className="shrink-0 text-[10px] text-white/40">加一条</span>
-              <span className="min-w-0 truncate text-[10px] tabular-nums text-white/70">
+              <span className="shrink-0 text-[10px] text-fg-muted">加一条</span>
+              <span className="min-w-0 truncate text-[10px] tabular-nums text-fg-soft">
                 {shortDate(picker.start)}
                 {picker.start === picker.end ? '' : ` – ${shortDate(picker.end)}`}
               </span>
             </div>
-            <div className="mb-1.5 min-w-0 truncate text-[10px] text-white/35" title={picker.name}>
+            <div className="mb-1.5 min-w-0 truncate text-[10px] text-fg-dim" title={picker.name}>
               {picker.name}
             </div>
             <div className="grid grid-cols-2 gap-1">
@@ -899,9 +899,9 @@ export default function SchedulePage({ api }) {
       {(message || error) && (
         <div className="flex shrink-0 items-center border-t border-line px-3 py-1.5 text-[11px]">
           {error ? (
-            <span className="min-w-0 truncate text-rose-300">{error}</span>
+            <span className="min-w-0 truncate text-danger">{error}</span>
           ) : (
-            <span className="min-w-0 truncate text-emerald-300/80">{message}</span>
+            <span className="min-w-0 truncate text-success-soft">{message}</span>
           )}
         </div>
       )}
@@ -936,7 +936,7 @@ function Row({
 }) {
   return (
     <div
-      className="absolute inset-x-0 border-b border-white/[.06]"
+      className="absolute inset-x-0 border-b border-line-soft"
       style={{ height, top }}
       onPointerDown={(event) => onRowDown(event, row)}
       onPointerMove={onRowMove}
@@ -983,13 +983,13 @@ function Bar({ bar, pxPerDay, active, preview, onClick, onPointerDown, onPointer
       title={`${bar.label}｜${range}｜${preview?.span ?? bar.span} 天${note}`}
       className={`group/bar absolute flex cursor-grab items-center overflow-hidden rounded-sm border px-1.5 text-left text-[11px] transition-[filter] hover:brightness-125 ${
         bar.edited ? 'border-dashed' : ''
-      } ${toneOf(bar.key)} ${active ? 'ring-1 ring-white/70' : ''}`}
+      } ${toneOf(bar.key)} ${active ? 'ring-1 ring-fg-max/70' : ''}`}
       // pan-y：手机上竖着还能滚，横着才是拖条
       style={{ left, width, top, height: BAR_HEIGHT, touchAction: 'pan-y' }}
     >
       {/* 两端的改期手柄：只做视觉与光标提示，判定还是按按下位置（见 dragModeAt） */}
-      <span className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize rounded-l-sm group-hover/bar:bg-white/20" />
-      <span className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize rounded-r-sm group-hover/bar:bg-white/20" />
+      <span className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize rounded-l-sm group-hover/bar:bg-overlay-heavy" />
+      <span className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize rounded-r-sm group-hover/bar:bg-overlay-heavy" />
       {width >= 46 && <span className="min-w-0 flex-1 truncate">{bar.label}</span>}
     </button>
   );

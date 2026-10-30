@@ -8,6 +8,8 @@
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; worker-src 'self' blob:"
     />
     <meta name="theme-color" content="#2b2b2b" />
+    <!-- 首帧主题（与 index.html 同一份脚本）：独立文件窗口不能跟主窗口各走一套配色。 -->
+    <script src="./theme-boot.js"></script>
     <title>文件</title>
   </head>
   <body>

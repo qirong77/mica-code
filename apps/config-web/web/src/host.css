@@ -11,3 +11,18 @@ body,
   min-height: 0;
   margin: 0;
 }
+
+/* 主题底色：页面本身铺满视口，但滚动回弹和首帧会露出根元素与 body，
+   所以根上也要跟着 data-theme 换底色，否则亮色下会闪出一块深色。
+   主题属性由 index.html 的首帧脚本 / src/main.tsx 的 ConfigWebThemeHost 写入。 */
+html,
+body {
+  background: #2b2b2b;
+  color-scheme: dark;
+}
+
+html[data-theme='light'],
+html[data-theme='light'] body {
+  background: #ffffff;
+  color-scheme: light;
+}

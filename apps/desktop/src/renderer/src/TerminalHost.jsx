@@ -14,12 +14,14 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { createFileLinkProvider, openWebLink } from './terminal-links'
 import { softKeyboardFallbackKey } from './terminal-keys'
 import { useLatest } from './hooks'
+import { currentThemeName, subscribeTheme } from './theme'
 
 /* xterm 6's core only ships the DOM renderer (rows are spans inside .xterm-rows;
    the single real <canvas> is the overview ruler), and it takes colors from this
-   options object instead of CSS custom properties. Either way the Darcula tokens
-   in assets/app.css have to be mirrored here by hand. Keep them in sync. */
-const terminalTheme = {
+   options object instead of CSS custom properties. Either way the app.css tokens
+   have to be mirrored here by hand — both the Darcula (dark) set and the light
+   set — and kept in sync with the palette. */
+const TERMINAL_THEME = {
   background: '#2b2b2b',
   foreground: '#a9b7c6',
   cursor: '#a9b7c6',
@@ -40,6 +42,38 @@ const terminalTheme = {
   brightMagenta: '#ff99ff',
   brightCyan: '#6cdada',
   brightWhite: '#ffffff'
+}
+
+/* 亮色终端：内容面取 --color-canvas（#ffffff），正文取 --color-fg（#2c2c2e），
+   光标取 --color-fg-max（#0f1115），选中取 --color-accent 的 22%（#4176e6）；
+   ANSI 用亮色状态 token（danger/success/warn/accent/purple/teal），bright 档在浅底上
+   不再提亮主色，改用各自的 soft 档保持对比度，white/brightWhite 退到前景灰阶，
+   否则白字落在白底上直接消失。 */
+const LIGHT_TERMINAL_THEME = {
+  background: '#ffffff',
+  foreground: '#2c2c2e',
+  cursor: '#0f1115',
+  selectionBackground: 'rgba(65, 118, 230, 0.22)',
+  black: '#0f1115',
+  red: '#ec1313',
+  green: '#2b8a3e',
+  yellow: '#b45309',
+  blue: '#4176e6',
+  magenta: '#6741d9',
+  cyan: '#0f766e',
+  white: '#81858c',
+  brightBlack: '#61666b',
+  brightRed: '#f25a5a',
+  brightGreen: '#2f9e44',
+  brightYellow: '#dd8629',
+  brightBlue: '#3b82f6',
+  brightMagenta: '#6741d9',
+  brightCyan: '#0f766e',
+  brightWhite: '#979da6'
+}
+
+function terminalThemeFor(theme) {
+  return theme === 'light' ? LIGHT_TERMINAL_THEME : TERMINAL_THEME
 }
 
 export const SIDEBAR_TRANSITION_MS = 150
@@ -96,7 +130,7 @@ function TerminalPane({ ptyId, sessionId, active, onRegister, onRead }) {
       fontSize: 13,
       fontFamily:
         '"JetBrains Mono", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace',
-      theme: terminalTheme,
+      theme: terminalThemeFor(currentThemeName()),
       allowProposedApi: true,
       ...(windowsPty ? { windowsPty } : {})
     })
@@ -107,6 +141,10 @@ function TerminalPane({ ptyId, sessionId, active, onRegister, onRead }) {
     term.loadAddon(new WebLinksAddon((event, url) => openWebLink(event, url, window.mica.platform)))
     term.unicode.activeVersion = '11'
     term.open(host)
+    // 主题切换只换 xterm 的 options.theme，不重建终端：屏幕缓冲、PTY 与滚动位置都不能丢。
+    const unsubscribeTheme = subscribeTheme((theme) => {
+      term.options.theme = terminalThemeFor(theme)
+    })
     term.registerLinkProvider(createFileLinkProvider(term, ptyId, window.mica.platform))
 
     // 触屏软键盘没有 keypress 兜底，xterm 会丢掉空格与 A–Z（见 terminal-keys.js 的
@@ -154,6 +192,7 @@ function TerminalPane({ ptyId, sessionId, active, onRegister, onRead }) {
       host.removeEventListener('keydown', intercept, true)
       host.removeEventListener('keypress', intercept, true)
       host.removeEventListener('pointerdown', pointer)
+      unsubscribeTheme()
       term.dispose()
     }
   }, [ptyId, sessionId, onReadRef, onRegister])
@@ -553,12 +592,12 @@ export const TerminalHost = forwardRef(function TerminalHost(
                   key={`${ptyId}-failure`}
                   className={`absolute inset-0 grid place-items-center bg-canvas px-6 text-center ${shown ? '' : 'hidden'}`}
                 >
-                  <div className="max-w-md space-y-2 text-xs text-white/70">
-                    <div className="text-white/90">终端未能启动</div>
-                    <div className="break-words text-white/50">{failure}</div>
+                  <div className="max-w-md space-y-2 text-xs text-fg-soft">
+                    <div className="text-fg-strong">终端未能启动</div>
+                    <div className="break-words text-fg-muted">{failure}</div>
                     <button
                       type="button"
-                      className="rounded-md border border-line px-2 py-1 text-white/80 transition-colors hover:bg-white/[.06]"
+                      className="rounded-md border border-line px-2 py-1 text-fg-strong transition-colors hover:bg-overlay"
                       onClick={() => retry(ptyId)}
                     >
                       重试

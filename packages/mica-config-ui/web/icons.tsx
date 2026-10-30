@@ -16,6 +16,7 @@ import {
   Globe,
   History,
   MoreHorizontal,
+  Palette,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -31,6 +32,7 @@ import {
 
 export const appIcons = {
   config: Braces,
+  appearance: Palette,
   sessions: History,
   roles: ContactRound,
   mcp: Cable,

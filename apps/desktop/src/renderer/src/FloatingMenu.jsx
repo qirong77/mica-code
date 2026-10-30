@@ -36,7 +36,7 @@ export function FloatingMenu({ x, y, minWidth, onClose, ignoreSelector, children
   return (
     <div
       ref={ref}
-      className="fixed z-[10000] rounded-md border border-white/12 bg-panel/98 p-1 shadow-2xl backdrop-blur"
+      className="fixed z-[10000] rounded-md border border-line bg-panel/98 p-1 shadow-2xl backdrop-blur"
       style={{ left: pos.x, top: pos.y, minWidth }}
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}
@@ -47,7 +47,7 @@ export function FloatingMenu({ x, y, minWidth, onClose, ignoreSelector, children
 }
 
 export function MenuSeparator() {
-  return <div className="mx-1 my-1 h-px bg-white/10" />
+  return <div className="mx-1 my-1 h-px bg-overlay-strong" />
 }
 
 export function MenuItem({ icon: Icon, label, hint, title, danger, disabled, onClick }) {
@@ -57,8 +57,8 @@ export function MenuItem({ icon: Icon, label, hint, title, danger, disabled, onC
       role="menuitem"
       disabled={disabled}
       title={title}
-      className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] hover:bg-white/[.08] disabled:opacity-40 disabled:hover:bg-transparent ${
-        danger ? 'text-danger-soft' : 'text-white/90 hover:text-white'
+      className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] hover:bg-overlay-strong disabled:opacity-40 disabled:hover:bg-transparent ${
+        danger ? 'text-danger-soft' : 'text-fg-strong hover:text-fg-max'
       }`}
       onClick={onClick}
     >
@@ -66,7 +66,7 @@ export function MenuItem({ icon: Icon, label, hint, title, danger, disabled, onC
         <Icon size={14} className="shrink-0 opacity-75" />
       </span>
       <span className="flex-1 truncate">{label}</span>
-      {hint && <span className="shrink-0 text-[11px] text-white/35">{hint}</span>}
+      {hint && <span className="shrink-0 text-[11px] text-fg-dim">{hint}</span>}
     </button>
   )
 }

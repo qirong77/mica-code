@@ -21,18 +21,18 @@ import {
 // 面板外壳的尺寸取自 VS Code 实测值：栏头 35px（标题 13px 半粗，左侧 16px 内边距），
 // 行高 22px、圆角 2px，行内是「16px 图标格 + 5px 间隙」。
 const PANEL_HEADER = 'flex h-[35px] shrink-0 items-center gap-1 pl-4 pr-2'
-const PANEL_TITLE = 'min-w-0 flex-1 truncate text-[13px] font-semibold text-white/80'
+const PANEL_TITLE = 'min-w-0 flex-1 truncate text-[13px] font-semibold text-fg-strong'
 const PANEL_ACTION =
-  'grid size-6 shrink-0 place-items-center rounded-sm text-white/45 hover:bg-white/[.06] hover:text-white'
+  'grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max'
 // 列表行：22px 高、4px 圆角（VS Code 的列表行悬浮块），悬浮底色比面板更暗。
 const ROW_BASE = 'flex h-[22px] w-full items-center rounded text-left'
 const FIELD_BASE =
-  'h-[26px] w-full rounded-[2px] border bg-white/[.02] px-2 text-[12px] text-white/85 placeholder:text-white/30 focus:outline-none'
+  'h-[26px] w-full rounded-[2px] border bg-overlay-subtle px-2 text-[12px] text-fg-strong placeholder:text-fg-dim focus:outline-none'
 
 function Spinner() {
   return (
     <span
-      className="size-3 shrink-0 animate-spin rounded-full border border-white/25 border-t-white/75"
+      className="size-3 shrink-0 animate-spin rounded-full border border-fg-ghost border-t-fg-strong"
       aria-hidden="true"
     />
   )
@@ -47,7 +47,9 @@ function Toggle({ active, label, title, onClick }) {
       aria-label={title}
       aria-pressed={active}
       className={`grid h-5 min-w-5 shrink-0 place-items-center rounded-[3px] px-0.5 font-mono text-[11px] leading-none ${
-        active ? 'bg-white/20 text-white' : 'text-white/45 hover:bg-white/[.08] hover:text-white/85'
+        active
+          ? 'bg-overlay-heavy text-fg-max'
+          : 'text-fg-muted hover:bg-overlay-strong hover:text-fg-strong'
       }`}
       onClick={onClick}
     >
@@ -189,13 +191,13 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
         </button>
       </header>
       <div className="shrink-0 space-y-1 px-2 pb-1">
-        <div className="flex h-[26px] items-center gap-1 rounded-[2px] border border-white/[.12] bg-white/[.03] px-2 focus-within:border-accent/70">
+        <div className="flex h-[26px] items-center gap-1 rounded-[2px] border border-line bg-overlay-subtle px-2 focus-within:border-accent/70">
           <input
             type="text"
             value={query}
             placeholder="搜索"
             aria-label="搜索文件内容"
-            className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-white/90 placeholder:text-white/30 focus:outline-none"
+            className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-fg-strong placeholder:text-fg-dim focus:outline-none"
             onChange={(event) => setQuery(event.target.value)}
           />
           {busy && <Spinner />}
@@ -224,7 +226,7 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
           placeholder="包含的文件"
           aria-label="包含的文件"
           title="逗号分隔的文件名或路径通配（*.ts、src/**）"
-          className={`${FIELD_BASE} border-white/[.08]`}
+          className={`${FIELD_BASE} border-line-soft`}
           onChange={(event) => setInclude(event.target.value)}
         />
         <input
@@ -233,19 +235,19 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
           placeholder="排除的文件"
           aria-label="排除的文件"
           title="逗号分隔的文件名或路径通配（*.test.ts、dist/**）"
-          className={`${FIELD_BASE} border-white/[.08]`}
+          className={`${FIELD_BASE} border-line-soft`}
           onChange={(event) => setExclude(event.target.value)}
         />
       </div>
       {matchCount > 0 && (
-        <div className="shrink-0 truncate px-4 pb-1 text-[12px] text-white/45">
+        <div className="shrink-0 truncate px-4 pb-1 text-[12px] text-fg-muted">
           {fileCount} 个文件中有 {matchCount} 个结果
           {result.truncated ? '（已达上限）' : ''}
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-3">
         {status && (
-          <div className="px-3 py-4 text-[13px] leading-relaxed text-white/40">{status}</div>
+          <div className="px-3 py-4 text-[13px] leading-relaxed text-fg-muted">{status}</div>
         )}
         {groups.map((group) => {
           const closed = collapsed.has(group.path)
@@ -255,22 +257,22 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
                 type="button"
                 title={group.path}
                 aria-expanded={!closed}
-                className={`${ROW_BASE} gap-1 pl-1 pr-1.5 text-[13px] text-white/75 hover:bg-list-hover hover:text-white`}
+                className={`${ROW_BASE} gap-1 pl-1 pr-1.5 text-[13px] text-fg-strong hover:bg-list-hover hover:text-fg-max`}
                 onClick={() => toggleGroup(group.path)}
               >
                 <span
-                  className={`grid size-4 shrink-0 place-items-center text-white/40 ${closed ? '' : 'rotate-90'}`}
+                  className={`grid size-4 shrink-0 place-items-center text-fg-muted ${closed ? '' : 'rotate-90'}`}
                 >
                   <IconChevronRight size={14} />
                 </span>
-                <span className="grid size-4 shrink-0 place-items-center text-white/50">
+                <span className="grid size-4 shrink-0 place-items-center text-fg-muted">
                   <FileSystemIcon name={group.name} className="size-4" />
                 </span>
                 <span className="ml-[5px] min-w-0 shrink-0 truncate">{group.name}</span>
-                <span className="ml-1.5 min-w-0 flex-1 truncate text-[12px] text-white/35">
+                <span className="ml-1.5 min-w-0 flex-1 truncate text-[12px] text-fg-dim">
                   {group.directory}
                 </span>
-                <span className="ml-1.5 grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-white/10 px-1 text-[11px] leading-none text-white/70 tabular-nums">
+                <span className="ml-1.5 grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-overlay-strong px-1 text-[11px] leading-none text-fg-soft tabular-nums">
                   {group.matches.length}
                 </span>
               </button>
@@ -281,7 +283,9 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
                     type="button"
                     title={`${match.path}:${match.line}`}
                     className={`${ROW_BASE} pr-1.5 font-mono text-[12px] hover:bg-list-hover ${
-                      activePath === match.path ? 'text-white' : 'text-white/60 hover:text-white/85'
+                      activePath === match.path
+                        ? 'text-fg-max'
+                        : 'text-fg-soft hover:text-fg-strong'
                     }`}
                     style={{ paddingLeft: 22 }}
                     onClick={() => onOpenFile(match.path, match.line)}
@@ -360,7 +364,7 @@ function RowActionButton({ label, Icon, run }) {
       type="button"
       title={label}
       aria-label={label}
-      className="grid size-5 shrink-0 place-items-center rounded-sm text-white/55 hover:bg-white/[.08] hover:text-white"
+      className="grid size-5 shrink-0 place-items-center rounded-sm text-fg-soft hover:bg-overlay-strong hover:text-fg-max"
       onClick={(event) => {
         event.stopPropagation()
         run()
@@ -429,7 +433,7 @@ function GitFileRow({
   return (
     <div
       className={`group flex h-[22px] w-full items-center rounded-sm pr-1.5 ${
-        selected ? 'bg-white/[.075]' : 'hover:bg-list-hover'
+        selected ? 'bg-overlay-strong' : 'hover:bg-list-hover'
       }`}
       style={{ paddingLeft: 5 + depth * 8 }}
       onContextMenu={(event) => onContextMenu?.(event, file)}
@@ -445,13 +449,13 @@ function GitFileRow({
         </span>
         <span
           className={`ml-[5px] min-w-0 shrink truncate text-[13px] ${
-            selected ? 'text-white' : 'text-white/75 group-hover:text-white'
+            selected ? 'text-fg-max' : 'text-fg-strong group-hover:text-fg-max'
           }`}
         >
           {name}
         </span>
         {showDirectory && directory && (
-          <span className="ml-1.5 min-w-0 flex-1 truncate text-[12px] text-white/[.58]">
+          <span className="ml-1.5 min-w-0 flex-1 truncate text-[12px] text-fg-soft">
             {directory}
           </span>
         )}
@@ -516,7 +520,7 @@ export function GitPanel({
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-3">
         {!repository && (
-          <div className="px-3 py-4 text-[13px] text-white/40">
+          <div className="px-3 py-4 text-[13px] text-fg-muted">
             {loading
               ? '正在读取 Git 工作区…'
               : !cwd
@@ -535,7 +539,7 @@ export function GitPanel({
                   <button
                     type="button"
                     aria-expanded={!collapsed.has(section.key)}
-                    className="flex h-full min-w-0 flex-1 items-center gap-1 pl-1 pr-1.5 text-[12px] font-semibold text-white/70"
+                    className="flex h-full min-w-0 flex-1 items-center gap-1 pl-1 pr-1.5 text-[12px] font-semibold text-fg-soft"
                     onClick={() =>
                       setCollapsed((current) => {
                         const next = new Set(current)
@@ -601,7 +605,7 @@ export function GitPanel({
                 {!collapsed.has(section.key) &&
                   section.key === 'changes' &&
                   !section.files.length && (
-                    <div className="px-5 py-2 text-[12px] text-white/40">工作区没有文件变化</div>
+                    <div className="px-5 py-2 text-[12px] text-fg-muted">工作区没有文件变化</div>
                   )}
               </Fragment>
             ))}

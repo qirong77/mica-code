@@ -81,14 +81,14 @@ export default function ShareIndex() {
   return (
     <div className="safe-top safe-bottom flex h-full min-h-0 flex-col overflow-y-auto bg-canvas">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-4">
-        <IconLink size={15} className="shrink-0 text-white/45" />
-        <h1 className="text-[13px] font-semibold text-white/90">分享链接</h1>
-        <span className="min-w-0 truncate text-[11px] text-white/35">{subtitle}</span>
+        <IconLink size={15} className="shrink-0 text-fg-muted" />
+        <h1 className="text-[13px] font-semibold text-fg-strong">分享链接</h1>
+        <span className="min-w-0 truncate text-[11px] text-fg-dim">{subtitle}</span>
         <button
           type="button"
           title="刷新"
           aria-label="刷新"
-          className="ml-auto grid size-7 shrink-0 place-items-center rounded-md text-white/50 hover:bg-white/[.06] hover:text-white"
+          className="ml-auto grid size-7 shrink-0 place-items-center rounded-md text-fg-muted hover:bg-overlay hover:text-fg-max"
           onClick={() => void load()}
         >
           <IconRefresh size={14} />
@@ -97,7 +97,7 @@ export default function ShareIndex() {
 
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-2 p-4">
         {empty && (
-          <p className="rounded-md border border-dashed border-white/12 px-3 py-6 text-center text-xs leading-relaxed text-white/40">
+          <p className="rounded-md border border-dashed border-line px-3 py-6 text-center text-xs leading-relaxed text-fg-muted">
             还没有分享出去的对话。
             <br />
             在桌面端的会话上右键 →「分享链接」，那条会出现在这里。
@@ -110,17 +110,17 @@ export default function ShareIndex() {
             className="flex items-start gap-2 rounded-md border border-line bg-panel/80 px-2.5 py-2"
           >
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] text-white/85" title={row.title}>
+              <span className="block truncate text-[13px] text-fg-strong" title={row.title}>
                 {row.title}
               </span>
-              <span className="mt-0.5 block truncate text-[11px] text-white/35">
+              <span className="mt-0.5 block truncate text-[11px] text-fg-dim">
                 {[shareRowTime(row), row.cwd].filter(Boolean).join(' · ')}
               </span>
             </span>
             <div className="flex shrink-0 items-center gap-1 pt-0.5">
               <span
                 className={`mr-1 text-[10px] ${
-                  copied.startsWith(`${row.sessionId}:failed`) ? 'text-danger' : 'text-white/35'
+                  copied.startsWith(`${row.sessionId}:failed`) ? 'text-danger' : 'text-fg-dim'
                 }`}
               >
                 {copied.startsWith(`${row.sessionId}:copied`) ? '已复制' : ''}
@@ -131,7 +131,7 @@ export default function ShareIndex() {
                 title={row.url ? '复制分享链接' : '这台机器没有可用的分享地址'}
                 aria-label="复制分享链接"
                 disabled={!row.url}
-                className="grid size-7 place-items-center rounded-md text-white/50 hover:bg-white/[.06] hover:text-white disabled:text-white/20 disabled:hover:bg-transparent"
+                className="grid size-7 place-items-center rounded-md text-fg-muted hover:bg-overlay hover:text-fg-max disabled:text-fg-ghost disabled:hover:bg-transparent"
                 onClick={() => void copy(row)}
               >
                 <IconCopy size={14} />
@@ -140,7 +140,7 @@ export default function ShareIndex() {
                 type="button"
                 title="在本页打开这条对话"
                 aria-label="打开"
-                className="grid size-7 place-items-center rounded-md text-white/50 hover:bg-white/[.06] hover:text-white"
+                className="grid size-7 place-items-center rounded-md text-fg-muted hover:bg-overlay hover:text-fg-max"
                 onClick={() =>
                   window.location.assign(
                     `${window.location.pathname}?session=${encodeURIComponent(row.sessionId)}`
@@ -153,7 +153,7 @@ export default function ShareIndex() {
                 type="button"
                 title="从分享列表中移除"
                 aria-label="移除"
-                className="grid size-7 place-items-center rounded-md text-white/50 hover:bg-white/[.06] hover:text-white"
+                className="grid size-7 place-items-center rounded-md text-fg-muted hover:bg-overlay hover:text-fg-max"
                 onClick={() => void remove(row)}
               >
                 <IconTrash size={14} />
@@ -162,7 +162,7 @@ export default function ShareIndex() {
           </section>
         ))}
 
-        <p className="mt-2 text-[11px] leading-relaxed text-white/30">
+        <p className="mt-2 text-[11px] leading-relaxed text-fg-dim">
           拿到链接的人看到的是同一条对话的完整界面（可以继续对话、看文件与终端），链接里只有会话
           id。这台运行时没有账号体系，请只发给信任的人。
         </p>

@@ -39,6 +39,7 @@ render(<ConfigWebApp />)
 ```
 
 - 宿主可以带 `initialSection` / `initialPluginId` 决定打开时落在哪一页（桌面端设置按钮进 config、插件菜单进 plugins 的某个插件详情），带 `onClose`（`closeLabel` 改文案）时侧栏顶部出现「返回对话」；浏览器宿主不传，导航完全由地址栏 `?section=` / `?plugin=` 驱动。
+- **Appearance**（主题：跟随系统 / 浅色 / 深色）由宿主注册的主题能力提供（`setConfigWebThemeHost`，见 `web/theme.ts`）：桌面宿主存运行时 ui-state，浏览器宿主存 localStorage；页面（`web/pages/AppearancePage.tsx`）只展示与转发，点卡片立即生效。没注册时侧栏不出现这一页。
 - 插件目录的图标来自清单的 `icon` 字段，映射表在 `web/pluginIcons.tsx`（未登记的名字回落 `puzzle`）。桌面端插件菜单只取图标，经 `@mica-config-ui/pluginIcons` alias 引入，不把整份页面拉进主 bundle。
 
 - 浏览器宿主用 `apps/config-web/web/src/http-client.ts`（`fetch('/api/*')`）+ CDN 版 monaco（`monaco-editor.tsx`）。

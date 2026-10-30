@@ -1,5 +1,6 @@
 export type ConfigWebSection =
   | 'config'
+  | 'appearance'
   | 'sessions'
   | 'roles'
   | 'mcp'

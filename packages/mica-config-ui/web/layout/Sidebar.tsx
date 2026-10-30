@@ -1,5 +1,6 @@
 import type { ConfigWebSection } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
+import { hasConfigWebThemeHost } from '../theme.js';
 // 品牌标志全仓库只有一份（apps/desktop/resources/icon.svg），这里直接引用，不要另存副本。
 import markUrl from '../../../../apps/desktop/resources/icon.svg?url&no-inline';
 
@@ -13,7 +14,7 @@ type SidebarGroup = { key: string; label?: string; items: SidebarEntry[] };
 // 再说会话数据，最后才是只有桌面运行时才有的能力与诊断。原先是 11 个入口平铺，顺序
 // 既不是字母序也不是使用频次，读的人要在整列里找。
 //
-// 带 `available` 的条目由宿主能力决定是否出现（当前没有这样的条目，留作扩展点）。
+// 带 `available` 的条目由宿主能力决定是否出现（Appearance 依赖宿主注册的主题能力）。
 //
 // Browser Control 与 Terminal Control **刻意不带这个门控**：它们是「Mica 里有一套能真正
 // 打开的浏览器 / 终端」这件事的唯一说明处，藏起来会让人以为 Mica 没有这个能力。服务没开
@@ -22,7 +23,11 @@ type SidebarGroup = { key: string; label?: string; items: SidebarEntry[] };
 const groups: SidebarGroup[] = [
   {
     key: 'general',
-    items: [{ key: 'config', label: 'Config' }],
+    items: [
+      { key: 'config', label: 'Config' },
+      // 主题能力由宿主注册；没注册时这一页不出现（不给点了没反应的单选）。
+      { key: 'appearance', label: 'Appearance', available: hasConfigWebThemeHost },
+    ],
   },
   {
     key: 'agent',

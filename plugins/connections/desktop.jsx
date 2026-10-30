@@ -1,11 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Monitor, Pencil } from 'lucide-react';
-import {
-  DEFAULT_RUNTIME_URL,
-  isLoopbackRuntime,
-  relayTokenOf,
-  runtimeLabel,
-} from '@packages/mica-web-shared/index.js';
+import { DEFAULT_RUNTIME_URL, isLoopbackRuntime, relayTokenOf, runtimeLabel } from '@packages/mica-web-shared/index.js';
 import {
   MAX_PEER_NOTE_LENGTH,
   emptyPeerStore,
@@ -142,7 +137,7 @@ export default function ConnectionsCard({ api, onClose }) {
       // 直接开窗只会得到一个 404 页面。这里说清该去哪台机器上做什么。
       if (result.access === 'off') {
         setError(
-          `${result.url} 上的 Mica 没有开启「局域网/公网可访问」：在那台机器上打开侧栏 Connections，打开这个开关并设一个口令，再回来重连。`
+          `${result.url} 上的 Mica 没有开启「局域网/公网可访问」：在那台机器上打开侧栏 Connections，打开这个开关并设一个口令，再回来重连。`,
         );
         return;
       }
@@ -166,21 +161,19 @@ export default function ConnectionsCard({ api, onClose }) {
 
   return (
     <>
-      <h2 className="mb-1 text-sm font-semibold text-white/95">Connections</h2>
-      <p className="mb-2.5 text-[11px] leading-4 text-white/40">
+      <h2 className="mb-1 text-sm font-semibold text-fg-max">Connections</h2>
+      <p className="mb-2.5 text-[11px] leading-4 text-fg-muted">
         连接到另一台机器上的 Mica 运行时，文件、终端、会话都来自那台机器（在当前窗口之外打开）。
       </p>
 
-      <div className="mb-2.5 rounded-sm border border-line bg-white/[.03]">
+      <div className="mb-2.5 rounded-sm border border-line bg-overlay-subtle">
         <div className="group/peer flex items-center gap-2 px-2.5 py-1.5">
-          <Monitor size={14} className="shrink-0 text-white/45" />
+          <Monitor size={14} className="shrink-0 text-fg-muted" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[11px] text-white/35">{current}</span>
-            {currentEntry?.note && (
-              <span className="block truncate text-[11px] text-white/60">{currentEntry.note}</span>
-            )}
+            <span className="block truncate text-[11px] text-fg-dim">{current}</span>
+            {currentEntry?.note && <span className="block truncate text-[11px] text-fg-soft">{currentEntry.note}</span>}
           </span>
-          <span className="shrink-0 text-[10px] text-green-400/70">当前</span>
+          <span className="shrink-0 text-[10px] text-success-soft">当前</span>
           {currentEntry && <NoteEditButton onClick={() => startNoteEdit(currentEntry.url)} />}
         </div>
         {noteTarget && samePeer(noteTarget, current) && noteInput}
@@ -189,20 +182,20 @@ export default function ConnectionsCard({ api, onClose }) {
       {rows.map((entry) => (
         <div
           key={entry.url}
-          className="mb-1.5 rounded-sm border border-line bg-white/[.03] hover:border-white/25 hover:bg-white/[.07]"
+          className="mb-1.5 rounded-sm border border-line bg-overlay-subtle hover:border-line-strong hover:bg-overlay"
         >
           <div className="group/peer flex items-center gap-2 px-2.5 py-1.5">
-            <Monitor size={14} className="shrink-0 text-white/45" />
+            <Monitor size={14} className="shrink-0 text-fg-muted" />
             <button
               type="button"
               disabled={Boolean(busy)}
               className="min-w-0 flex-1 text-left disabled:opacity-60"
               onClick={() => void connect(entry.url)}
             >
-              <span className="block truncate text-[11px] text-white/35">{displayAddress(entry.url)}</span>
-              {entry.note && <span className="block truncate text-[11px] text-white/60">{entry.note}</span>}
+              <span className="block truncate text-[11px] text-fg-dim">{displayAddress(entry.url)}</span>
+              {entry.note && <span className="block truncate text-[11px] text-fg-soft">{entry.note}</span>}
             </button>
-            {busy === entry.url && <span className="shrink-0 text-[10px] text-white/40">连接中…</span>}
+            {busy === entry.url && <span className="shrink-0 text-[10px] text-fg-muted">连接中…</span>}
             <NoteEditButton onClick={() => startNoteEdit(entry.url)} />
           </div>
           {noteTarget === entry.url && noteInput}
@@ -213,18 +206,18 @@ export default function ConnectionsCard({ api, onClose }) {
         <button
           type="button"
           disabled={Boolean(busy)}
-          className="mb-2 flex h-8 w-full items-center gap-2 rounded-sm border border-dashed border-white/15 bg-white/[.02] px-2.5 text-left text-xs text-white/60 hover:border-white/35 hover:text-white disabled:text-white/25"
+          className="mb-2 flex h-8 w-full items-center gap-2 rounded-sm border border-dashed border-line bg-overlay-subtle px-2.5 text-left text-xs text-fg-soft hover:border-line-strong hover:text-fg-max disabled:text-fg-ghost"
           onClick={() => void connect(DEFAULT_RUNTIME_URL)}
         >
           <Monitor size={13} className="shrink-0" />
           <span className="shrink-0">本机</span>
-          <span className="min-w-0 flex-1 truncate text-[10px] text-white/30">{DEFAULT_RUNTIME_URL}</span>
+          <span className="min-w-0 flex-1 truncate text-[10px] text-fg-dim">{DEFAULT_RUNTIME_URL}</span>
           {busy === DEFAULT_RUNTIME_URL && <span className="text-[10px]">连接中…</span>}
         </button>
       )}
 
       {error && (
-        <div className="mb-2 rounded-sm border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs leading-relaxed text-red-300">
+        <div className="mb-2 rounded-sm border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-xs leading-relaxed text-danger">
           {error}
         </div>
       )}
@@ -234,7 +227,7 @@ export default function ConnectionsCard({ api, onClose }) {
           value={value}
           spellCheck={false}
           placeholder="192.168.1.5:8787 或 https://…/?t=…"
-          className="h-8 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-xs text-white focus:border-white/30"
+          className="h-8 min-w-0 flex-1 rounded-sm border border-line bg-overlay-subtle px-2.5 text-xs text-fg-strong focus:border-line-strong"
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
@@ -246,7 +239,7 @@ export default function ConnectionsCard({ api, onClose }) {
         <button
           type="button"
           disabled={!value.trim() || Boolean(busy)}
-          className="h-8 shrink-0 rounded-sm bg-white/10 px-3.5 text-xs text-white/85 hover:bg-white/15 disabled:text-white/25"
+          className="h-8 shrink-0 rounded-sm bg-overlay-strong px-3.5 text-xs text-fg-strong hover:bg-overlay-heavy disabled:text-fg-ghost"
           onClick={() => void connect(value)}
         >
           连接
@@ -323,8 +316,8 @@ function RemoteAccess({ api }) {
   return (
     <div className="mt-3 border-t border-line pt-2.5">
       <div className="mb-1 flex items-center gap-2">
-        <span className="min-w-0 flex-1 text-[11px] text-white/70">局域网/公网可访问</span>
-        {saved && <span className="shrink-0 text-[10px] text-emerald-400/80">已保存</span>}
+        <span className="min-w-0 flex-1 text-[11px] text-fg-soft">局域网/公网可访问</span>
+        {saved && <span className="shrink-0 text-[10px] text-success-soft">已保存</span>}
         <button
           type="button"
           role="switch"
@@ -332,7 +325,7 @@ function RemoteAccess({ api }) {
           aria-label="局域网/公网可访问"
           disabled={!state || busy}
           className={`relative h-4 w-7 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-            enabled ? 'bg-emerald-500/70' : 'bg-white/15'
+            enabled ? 'bg-success/70' : 'bg-overlay-heavy'
           }`}
           onClick={() => void patch({ enabled: !enabled })}
         >
@@ -351,7 +344,7 @@ function RemoteAccess({ api }) {
             maxLength={64}
             aria-label="访问口令"
             placeholder="访问口令"
-            className="h-7 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2 font-mono text-[11px] tracking-wider text-white placeholder:text-white/25 focus:border-white/30"
+            className="h-7 min-w-0 flex-1 rounded-sm border border-line bg-overlay-subtle px-2 font-mono text-[11px] tracking-wider text-fg-strong placeholder:text-fg-faint focus:border-line-strong"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
@@ -361,20 +354,20 @@ function RemoteAccess({ api }) {
             }}
             onBlur={savePassword}
           />
-          <span className="shrink-0 text-[10px] text-white/30">回车保存</span>
+          <span className="shrink-0 text-[10px] text-fg-dim">回车保存</span>
         </div>
       )}
 
       {enabled && address && (
-        <p className="mt-1.5 text-[10px] leading-4 text-white/30">
-          别人打开 <span className="text-white/50">{address}</span> 时输入这个口令
-          {password === '0000' && <span className="text-amber-300/70">（默认 0000，建议改掉）</span>}
+        <p className="mt-1.5 text-[10px] leading-4 text-fg-dim">
+          别人打开 <span className="text-fg-muted">{address}</span> 时输入这个口令
+          {password === '0000' && <span className="text-warn-soft">（默认 0000，建议改掉）</span>}
         </p>
       )}
 
-      {!state && !error && <p className="text-[10px] text-white/25">读取中…</p>}
+      {!state && !error && <p className="text-[10px] text-fg-faint">读取中…</p>}
       {error && (
-        <p className="mt-1 rounded-sm border border-red-500/30 bg-red-500/10 px-2 py-1 text-[10px] leading-4 text-red-300">
+        <p className="mt-1 rounded-sm border border-danger/30 bg-danger/10 px-2 py-1 text-[10px] leading-4 text-danger">
           {error}
         </p>
       )}
@@ -389,7 +382,7 @@ function NoteEditButton({ onClick }) {
       type="button"
       title="备注"
       aria-label="备注"
-      className="shrink-0 rounded-sm p-0.5 text-white/35 opacity-0 transition-opacity hover:bg-white/10 hover:text-white group-hover/peer:opacity-100 max-md:opacity-100"
+      className="shrink-0 rounded-sm p-0.5 text-fg-dim opacity-0 transition-opacity hover:bg-overlay-strong hover:text-fg-max group-hover/peer:opacity-100 max-md:opacity-100"
       onClick={onClick}
     >
       <Pencil size={12} />
@@ -430,12 +423,12 @@ function NoteInput({ value, onChange, onSave, onCancel }) {
         maxLength={MAX_PEER_NOTE_LENGTH}
         spellCheck={false}
         placeholder="备注，如「办公室的 Mac」"
-        className="h-7 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2 text-[11px] text-white placeholder:text-white/25 focus:border-white/30"
+        className="h-7 min-w-0 flex-1 rounded-sm border border-line bg-overlay-subtle px-2 text-[11px] text-fg-strong placeholder:text-fg-faint focus:border-line-strong"
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={onKeyDown}
         onBlur={onBlur}
       />
-      <span className="shrink-0 text-[10px] text-white/30">回车保存</span>
+      <span className="shrink-0 text-[10px] text-fg-dim">回车保存</span>
     </div>
   );
 }

@@ -3,7 +3,33 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#2b2b2b" />
     <title>Mica Config</title>
+    <!-- 首帧主题：在页面组件加载前同步执行，否则亮色用户会先看到一帧深色。
+         这是 classic script（不能 import），只读 main.tsx 写入的 localStorage 缓存，
+         按 prefers-color-scheme 解析 auto，把 data-theme / color-scheme / theme-color 定下来。
+         常量与解析规则要和 src/main.tsx、packages/mica-web-shared/theme.ts 保持一致。 -->
+    <script>
+      (function bootTheme() {
+        var key = 'mica.theme.preference';
+        var preference = 'auto';
+        try {
+          var cached = window.localStorage.getItem(key);
+          if (cached === 'light' || cached === 'dark' || cached === 'auto') preference = cached;
+        } catch (error) {
+          // 存储在隐私模式下不可用：退化为跟随系统。
+          preference = 'auto';
+        }
+        var prefersLight =
+          typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: light)').matches;
+        var theme = preference === 'light' ? 'light' : preference === 'dark' ? 'dark' : prefersLight ? 'light' : 'dark';
+        var root = document.documentElement;
+        root.setAttribute('data-theme', theme);
+        root.style.colorScheme = theme;
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute('content', theme === 'light' ? '#ffffff' : '#2b2b2b');
+      })();
+    </script>
     <!-- 品牌标志全仓库只有一份，直接引用 apps/desktop/resources/icon.svg。
          Vite 会把它作为资源产出并改写这里的 href。 -->
     <link rel="icon" type="image/svg+xml" href="../../desktop/resources/icon.svg" />

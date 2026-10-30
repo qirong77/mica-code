@@ -37,7 +37,7 @@ import {
 const EMPTY_FILES = []
 const EMPTY_REVIEWED = {}
 const ACTION =
-  'grid size-6 shrink-0 place-items-center rounded-sm text-white/50 hover:bg-white/[.08] hover:text-white focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-30'
+  'grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-30'
 
 function ReviewCheckbox({ row, onToggle }) {
   const ref = useRef(null)
@@ -101,7 +101,7 @@ function CompareRow({
       aria-label={`${row.path}, ${directory ? `${row.total} 个更改` : statusLabel(row.status)}`}
       tabIndex={focused ? 0 : -1}
       title={`${row.path}${row.uncommitted ? '\n包含未提交更改' : ''}${row.binary ? '\n二进制文件' : ''}`}
-      className={`group relative flex h-[22px] shrink-0 cursor-default items-center pr-1 text-[13px] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent ${selected ? 'bg-accent/15 text-white' : 'text-white/75 hover:bg-list-hover'}`}
+      className={`group relative flex h-[22px] shrink-0 cursor-default items-center pr-1 text-[13px] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent ${selected ? 'bg-accent/15 text-fg-max' : 'text-fg-strong hover:bg-list-hover'}`}
       style={{ paddingLeft: 5 + row.depth * 8 }}
       onFocus={onFocus}
       onClick={onActivate}
@@ -114,11 +114,11 @@ function CompareRow({
         <span
           key={index}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 border-l border-white/[.08]"
+          className="pointer-events-none absolute inset-y-0 border-l border-line-soft"
           style={{ left: 12 + index * 8 }}
         />
       ))}
-      <span className="grid size-4 shrink-0 place-items-center text-white/45">
+      <span className="grid size-4 shrink-0 place-items-center text-fg-muted">
         {directory && <IconChevronRight size={14} className={closed ? '' : 'rotate-90'} />}
       </span>
       {preferences.showCheckboxes && <ReviewCheckbox row={row} onToggle={onToggleReviewed} />}
@@ -136,7 +136,7 @@ function CompareRow({
         {row.name}
       </span>
       {preferences.viewMode === 'list' && row.directory && (
-        <span className="ml-1.5 min-w-0 flex-1 truncate text-[11px] text-white/35">
+        <span className="ml-1.5 min-w-0 flex-1 truncate text-[11px] text-fg-dim">
           {row.directory}
         </span>
       )}
@@ -151,7 +151,7 @@ function CompareRow({
               tabIndex={-1}
               title="放弃更改"
               aria-label={`放弃更改：${row.path}`}
-              className="grid size-[18px] shrink-0 place-items-center rounded-sm text-white/50 hover:bg-white/10 hover:text-white"
+              className="grid size-[18px] shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
               onClick={(event) => {
                 event.stopPropagation()
                 onDiscard(row.files)
@@ -167,7 +167,7 @@ function CompareRow({
               tabIndex={-1}
               title="打开文件"
               aria-label={`打开文件：${row.path}`}
-              className="grid size-[18px] shrink-0 place-items-center rounded-sm text-white/50 hover:bg-white/10 hover:text-white"
+              className="grid size-[18px] shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
               onClick={(event) => {
                 event.stopPropagation()
                 onOpenFile(row.files[0])
@@ -192,11 +192,11 @@ function CompareRow({
         <span
           aria-label="包含未提交更改"
           title="包含未提交更改"
-          className="ml-1.5 size-1 shrink-0 rounded-full bg-white/45"
+          className="ml-1.5 size-1 shrink-0 rounded-full bg-fg-muted"
         />
       )}
       {directory ? (
-        <span className="ml-1.5 min-w-3 shrink-0 text-right text-[10px] tabular-nums text-white/35">
+        <span className="ml-1.5 min-w-3 shrink-0 text-right text-[10px] tabular-nums text-fg-dim">
           {row.total}
         </span>
       ) : preferences.iconStyle === 'file' ? (
@@ -441,7 +441,7 @@ export function GitComparePanel({
 
   return (
     <section
-      className="flex h-full min-h-0 flex-col text-white/80"
+      className="flex h-full min-h-0 flex-col text-fg-strong"
       aria-label="Git 比较"
       aria-busy={Boolean(loading)}
     >
@@ -516,10 +516,10 @@ export function GitComparePanel({
         </button>
       </header>
 
-      <div className="mx-2 mb-1 flex min-h-8 shrink-0 items-center rounded-sm border border-white/[.08] bg-white/[.025]">
+      <div className="mx-2 mb-1 flex min-h-8 shrink-0 items-center rounded-sm border border-line-soft bg-overlay-subtle">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 self-stretch px-2 text-left hover:bg-white/[.05] focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
+          className="flex min-w-0 flex-1 items-center gap-2 self-stretch px-2 text-left hover:bg-overlay focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
           disabled={!cwd || !onCompareBaseChange}
           title={`比较基线：${baseName} · 点击选择分支、标签或提交`}
           aria-haspopup="dialog"
@@ -527,8 +527,8 @@ export function GitComparePanel({
           onClick={() => setPickerOpen(true)}
         >
           <IconGitCompare size={16} className="shrink-0 text-info-soft" />
-          <span className="min-w-0 flex-1 truncate text-[12px] text-white/90">{baseName}</span>
-          <IconChevronRight size={12} className="shrink-0 rotate-90 text-white/40" />
+          <span className="min-w-0 flex-1 truncate text-[12px] text-fg-strong">{baseName}</span>
+          <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
         </button>
         <button
           type="button"
@@ -541,7 +541,7 @@ export function GitComparePanel({
                 ? '完整比较：直接与基线比较，点击切换到合并基点'
                 : '合并比较：从共同祖先计算更改，点击切换到完整比较'
           }
-          className="mr-1 shrink-0 rounded-sm border-l border-white/10 px-1.5 py-0.5 text-[10px] text-white/50 hover:bg-white/[.08] hover:text-white disabled:opacity-35"
+          className="mr-1 shrink-0 rounded-sm border-l border-line-soft px-1.5 py-0.5 text-[10px] text-fg-muted hover:bg-overlay-strong hover:text-fg-max disabled:opacity-35"
           onClick={() =>
             onCompareBaseChange?.({
               ...(compareBase || { kind: 'auto', ref: null, name: '自动基线' }),
@@ -554,14 +554,14 @@ export function GitComparePanel({
       </div>
 
       {searchOpen && (
-        <div className="mx-2 mb-1 flex h-[26px] shrink-0 items-center gap-1 rounded-sm border border-white/15 bg-white/[.025] px-2 focus-within:border-accent/70">
-          <IconSearch size={13} className="shrink-0 text-white/40" />
+        <div className="mx-2 mb-1 flex h-[26px] shrink-0 items-center gap-1 rounded-sm border border-line bg-overlay-subtle px-2 focus-within:border-accent/70">
+          <IconSearch size={13} className="shrink-0 text-fg-muted" />
           <input
             ref={searchRef}
             aria-label="按路径筛选更改"
             placeholder="筛选文件或路径"
             value={query}
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-white/35"
+            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-fg-dim"
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
@@ -577,7 +577,7 @@ export function GitComparePanel({
           />
           <button
             type="button"
-            className="text-white/40 hover:text-white"
+            className="text-fg-muted hover:text-fg-max"
             title="关闭筛选"
             aria-label="关闭筛选"
             onClick={() => {
@@ -614,13 +614,13 @@ export function GitComparePanel({
         >
           <IconChevronRight
             size={14}
-            className={`shrink-0 text-white/50 ${rootCollapsed ? '' : 'rotate-90'}`}
+            className={`shrink-0 text-fg-muted ${rootCollapsed ? '' : 'rotate-90'}`}
           />
-          <IconGitBranch size={12} className="shrink-0 text-white/35" />
-          <span className="min-w-0 flex-1 truncate text-[11px] text-white/60">
+          <IconGitBranch size={12} className="shrink-0 text-fg-dim" />
+          <span className="min-w-0 flex-1 truncate text-[11px] text-fg-soft">
             {branchName} · 工作区
           </span>
-          <span className="mr-1 text-[10px] tabular-nums text-white/40">
+          <span className="mr-1 text-[10px] tabular-nums text-fg-muted">
             {filtered ? `${visibleFiles.length}/` : ''}
             {files.length}
           </span>
@@ -647,16 +647,16 @@ export function GitComparePanel({
             </button>
           </div>
         ) : !cwd ? (
-          <p className="px-4 py-4 text-[12px] leading-relaxed text-white/45">
+          <p className="px-4 py-4 text-[12px] leading-relaxed text-fg-muted">
             选择一个项目或终端会话以比较 Git 更改。
           </p>
         ) : !repository ? (
-          <p role="status" className="px-4 py-4 text-[12px] leading-relaxed text-white/45">
+          <p role="status" className="px-4 py-4 text-[12px] leading-relaxed text-fg-muted">
             {loading ? '正在读取仓库…' : '当前目录不属于 Git 仓库。'}
           </p>
         ) : !files.length ? (
-          <div role="status" className="px-4 py-5 text-[12px] leading-relaxed text-white/45">
-            <IconCheck size={22} className="mb-2 text-white/25" />
+          <div role="status" className="px-4 py-5 text-[12px] leading-relaxed text-fg-muted">
+            <IconCheck size={22} className="mb-2 text-fg-faint" />
             <p>
               {loading
                 ? '正在比较…'
@@ -673,7 +673,7 @@ export function GitComparePanel({
             </button>
           </div>
         ) : !visibleFiles.length ? (
-          <div role="status" className="px-4 py-5 text-[12px] leading-relaxed text-white/45">
+          <div role="status" className="px-4 py-5 text-[12px] leading-relaxed text-fg-muted">
             <p>
               {preferences.unreviewedOnly && progress.checked
                 ? '全部更改已审阅。'
@@ -731,7 +731,7 @@ export function GitComparePanel({
         )}
       </div>
       <footer
-        className="flex h-6 shrink-0 items-center gap-2 border-t border-white/[.06] px-3 text-[10px] tabular-nums text-white/40"
+        className="flex h-6 shrink-0 items-center gap-2 border-t border-line-soft px-3 text-[10px] tabular-nums text-fg-muted"
         aria-live="polite"
       >
         <span className="min-w-0 flex-1 truncate">
@@ -749,7 +749,7 @@ export function GitComparePanel({
             aria-valuemin={0}
             aria-valuemax={progress.total}
             aria-valuenow={progress.count}
-            className="h-1 w-9 overflow-hidden rounded bg-white/10"
+            className="h-1 w-9 overflow-hidden rounded bg-overlay-strong"
           >
             <span
               className="block h-full bg-success-soft/70"

@@ -46,24 +46,24 @@ export function AppCrashNotice({ error }) {
   }
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-canvas px-6 text-center">
-      <div className="text-sm text-white/90">界面渲染失败</div>
-      <div className="max-w-xl text-xs leading-relaxed text-white/50">
+      <div className="text-sm text-fg-strong">界面渲染失败</div>
+      <div className="max-w-xl text-xs leading-relaxed text-fg-muted">
         这不是网络问题：页面在渲染时抛了异常。重新加载通常能恢复；如果反复出现，把下面的详情发出来。
       </div>
-      <pre className="max-h-64 w-full max-w-xl overflow-auto rounded-lg border border-line bg-black/30 p-3 text-left text-[11px] leading-relaxed text-white/60">
+      <pre className="max-h-64 w-full max-w-xl overflow-auto rounded-lg border border-line bg-overlay-subtle p-3 text-left text-[11px] leading-relaxed text-fg-soft">
         {details}
       </pre>
       <div className="flex items-center gap-2">
         <button
           type="button"
-          className="rounded-md border border-line px-3 py-1 text-xs text-white/80 transition-colors hover:bg-white/[.06]"
+          className="rounded-md border border-line px-3 py-1 text-xs text-fg-strong transition-colors hover:bg-overlay"
           onClick={reload}
         >
           重新加载
         </button>
         <button
           type="button"
-          className="rounded-md border border-line px-3 py-1 text-xs text-white/60 transition-colors hover:bg-white/[.06]"
+          className="rounded-md border border-line px-3 py-1 text-xs text-fg-soft transition-colors hover:bg-overlay"
           onClick={copy}
         >
           复制详情

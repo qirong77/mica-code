@@ -103,12 +103,12 @@ export function CalendarHeatmap({
                       height={cellSize}
                       rx={Math.min(2, cellSize * 0.15)}
                       fill={colors[levelOf(dayCell.day)] ?? colors[0]}
-                      stroke={dayCell.day === selectedDay ? 'rgba(255,255,255,.75)' : 'none'}
+                      stroke={dayCell.day === selectedDay ? 'var(--color-fg-strong)' : 'none'}
                       strokeWidth={dayCell.day === selectedDay ? 1.5 : 0}
                       tabIndex={0}
                       role="button"
                       aria-label={ariaLabelOf(dayCell.day)}
-                      className="cursor-pointer focus-visible:outline focus-visible:outline-1 focus-visible:outline-white/60"
+                      className="cursor-pointer focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg-soft"
                       onMouseEnter={() => showAt(dayCell.day, ci, ri)}
                       onMouseLeave={() => hideIf(dayCell.day)}
                       onFocus={() => showAt(dayCell.day, ci, ri)}
@@ -130,7 +130,7 @@ export function CalendarHeatmap({
       </div>
       {hovered && (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-white/15 bg-panel px-2 py-1.5 text-xs shadow-xl"
+          className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md border border-line bg-panel px-2 py-1.5 text-xs shadow-xl"
           style={{ left: hovered.x, top: CAL_MONTH_ROW_H + hovered.y - 4 }}
         >
           {renderTooltip(hovered.day)}
@@ -220,7 +220,7 @@ export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
           </svg>
           {hovered != null && (
             <div
-              className="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/15 bg-panel px-2 py-1.5 text-xs shadow-xl"
+              className="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-line bg-panel px-2 py-1.5 text-xs shadow-xl"
               style={{ left: `${((hovered + 0.5) / Math.max(n, 1)) * 100}%` }}
             >
               {renderTooltip(hovered)}
