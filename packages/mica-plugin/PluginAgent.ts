@@ -36,7 +36,14 @@ export type PluginCompactResult = {
  * 而不是把「本来就没得压」和「压不上」混成一句。
  */
 export type PluginIdleCompactOutcome =
-  | { status: 'applied'; /** 这次压缩大约省下多少 token（估算值，仅用于展示）。 */ savedTokens: number }
+  | {
+      status: 'applied';
+      /** 这次压缩大约省下多少 token（估算值，仅用于展示）。 */
+      savedTokens: number;
+      /** 压缩前后的估算占用，用来在界面上写成「792.5K → 46.2K」而不是一个孤零零的节省量。 */
+      beforeTokens: number;
+      afterTokens: number;
+    }
   | { status: 'skipped'; reason: 'busy' | 'empty' };
 
 /**
@@ -47,8 +54,8 @@ export type PluginIdleCompactOutcome =
  * 带下去，而用户可能直接关掉页面。回调抛错会让宿主回滚这次压缩并不落盘。
  */
 export type PluginIdleCompactHook = {
-  /** `savedTokens` 是这一次压缩的估算节省量（与最终结果里的同一个值）。 */
-  afterApply?: (result: { savedTokens: number }) => void;
+  /** 字段含义与最终结果一致，压缩结果随这条回调一起落盘。 */
+  afterApply?: (result: { savedTokens: number; beforeTokens: number; afterTokens: number }) => void;
 };
 
 /** 一次模型请求所属 agent 的句柄。 */

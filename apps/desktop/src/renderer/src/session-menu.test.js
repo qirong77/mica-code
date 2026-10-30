@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test'
-import { draftMenuItems, sessionMenuItems, withExtraMenuItems } from './session-menu'
+import {
+  draftMenuItems,
+  renameTargetOf,
+  sessionMenuItems,
+  withExtraMenuItems
+} from './session-menu'
 
 describe('sessionMenuItems', () => {
   it('always offers 删除对话 as a danger action', () => {
@@ -48,6 +53,24 @@ describe('draftMenuItems', () => {
       'separator',
       ['delete', '删除对话', true]
     ])
+  })
+})
+
+describe('renameTargetOf', () => {
+  it('renames the session row itself', () => {
+    expect(renameTargetOf({ session: { id: 's1' } })).toEqual({ kind: 'session', id: 's1' })
+  })
+
+  it('renames a draft (new conversation with no session yet)', () => {
+    expect(renameTargetOf({ draft: { id: 'draft-1' } })).toEqual({
+      kind: 'draft',
+      id: 'draft-1'
+    })
+  })
+
+  it('returns null when neither is present', () => {
+    expect(renameTargetOf({})).toBeNull()
+    expect(renameTargetOf(undefined)).toBeNull()
   })
 })
 

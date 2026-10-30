@@ -23,6 +23,7 @@ const EVENT_CHANNELS = [
   'notify:changed',
   'ui-state:changed',
   'loops:changed',
+  'stats:changed',
   'browser:changed',
   'terminal:changed',
   'app:window-state'
@@ -347,7 +348,10 @@ function createWebApi(env) {
       onCommitExit: (callback) => subscribe('chat:commit-exit', callback),
       // Rename goes through the chat host so a running turn's own save keeps the
       // title (it persists the host's in-memory title, not the file we read).
-      renameSession: (sessionId, title) => invoke('chat:rename-session', { sessionId, title })
+      renameSession: (sessionId, title) => invoke('chat:rename-session', { sessionId, title }),
+      // 还没有会话的草稿（新对话）改名：宿主会把这条会话连同名字立刻建出来，返回
+      // sessionId 让页面绑定。见 host/chat.js 的 chat:rename-session。
+      renameDraft: (id, cwd, title) => invoke('chat:rename-session', { id, cwd, title })
     },
 
     workspace: {
@@ -500,7 +504,10 @@ function createWebApi(env) {
       deleteProjectGroup: (groupId) => invoke('stats:delete-project-group', { groupId }),
       // 侧栏唯一的「换位置」入口：pinned / project / recent 三选一
       moveSession: (sessionId, section, groupId = null) =>
-        invoke('stats:move-session', { sessionId, section, groupId })
+        invoke('stats:move-session', { sessionId, section, groupId }),
+      // 会话统计索引在后台构建（以及会话文件有变化）时通知页面重读：首次扫描要遍历
+      // 全部会话文件，页面不靠轮询等它跑完。
+      onChanged: (callback) => subscribe('stats:changed', callback)
     },
 
     configWeb: {

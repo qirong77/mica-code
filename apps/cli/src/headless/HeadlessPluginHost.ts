@@ -326,7 +326,12 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
                   // 没有可清理的内容是常态（干净的会话每次敲字都会走到这里），
                   // 与「压不上」分开报，日志才读得懂。
                   return applied
-                    ? { status: 'applied', savedTokens: applied.savedTokens }
+                    ? {
+                        status: 'applied',
+                        savedTokens: applied.savedTokens,
+                        beforeTokens: applied.beforeTokens,
+                        afterTokens: applied.afterTokens,
+                      }
                     : { status: 'skipped', reason: 'empty' };
                 },
                 { status: 'skipped', reason: 'busy' },

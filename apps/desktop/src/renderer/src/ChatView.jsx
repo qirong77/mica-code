@@ -1637,9 +1637,24 @@ function isActivityMessage(message) {
   return message?.kind === 'reasoning' || message?.kind === 'tool'
 }
 
+/**
+ * 当前轮次的活动行（思考 / 工具）。
+ *
+ * `turnId` 取自 `turn/started` 转来的 `step_start`。窗口在轮次中途才附着上来时
+ * （切走再切回、重开窗口、另一个窗口发起的那一轮），重放的是 host 的事件缓冲，
+ * 它有 500 条上限——一轮跑得久，`step_start` 早就被挤出去了。那时重放出来的
+ * 思考与工具行一条轮次键都拿不到，`turnId` 也是 null：按 null 过滤会把整块日志
+ * 清空，状态行明明写着 thinking，页面上却什么都没有。
+ *
+ * 所以 `turnId` 为 null 按「这一轮的行都没有键」处理，而不是「没有当前轮次」：
+ * 有键时仍然严格匹配，跨轮不会串；没键时只放行同样没键的行，历史里那些带键的
+ * 旧行依旧不会冒出来。
+ */
 export function currentTurnActivityMessages(messages, turnId) {
-  if (!turnId) return []
-  return messages.filter((message) => message.turnId === turnId && isActivityMessage(message))
+  return messages.filter((message) => {
+    if (!isActivityMessage(message)) return false
+    return turnId ? message.turnId === turnId : !message.turnId
+  })
 }
 
 function TurnLogItemView({ message, now, onOpen }) {
@@ -4724,20 +4739,21 @@ export function ChatView({
           appendCommandResult(parsed.raw, 'Usage: /rename <title>', '', { variant: 'error' })
           return
         }
-        if (!sessionIdRef.current) {
-          appendCommandResult(parsed.raw, '发送第一条消息后才能重命名会话', '', {
-            variant: 'error'
-          })
-          return
-        }
-        const targetSessionId = sessionIdRef.current
-        const result = await window.mica.chat.renameSession(targetSessionId, parsed.args)
+        // 还没有会话时起名 = 这条会话现在就要存在：宿主会为它建出会话文件（名字记成
+        // 手动标题），把 sessionId 交回来立刻绑到这一页上。见 host/chat.js 的
+        // chat:rename-session。
+        const result = sessionIdRef.current
+          ? await window.mica.chat.renameSession(sessionIdRef.current, parsed.args)
+          : await window.mica.chat
+              .renameDraft(nodeIdRef.current, cwdRef.current || null, parsed.args)
+              .catch((error) => ({ ok: false, error: String(error?.message || error) }))
         if (!isCurrentNode()) return
-        if (!result?.ok) {
+        if (!result?.ok || (!sessionIdRef.current && !result.sessionId)) {
           appendCommandResult(parsed.raw, '重命名失败', result?.error || '', { variant: 'error' })
           return
         }
-        appendCommandResult(parsed.raw, `会话已重命名为 ${result.title}`)
+        if (!sessionIdRef.current) onSessionBoundRef.current?.(nodeIdRef.current, result.sessionId)
+        appendCommandResult(parsed.raw, `会话已重命名为 ${result.title || parsed.args}`)
         onSessionRenamedRef.current?.()
         return
       }
@@ -4937,6 +4953,7 @@ export function ChatView({
       nodeIdRef,
       onNewSessionRef,
       onResumeSessionRef,
+      onSessionBoundRef,
       onSessionRenamedRef,
       openPicker,
       phase,

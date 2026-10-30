@@ -1039,6 +1039,31 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(userTexts).toEqual(['先做点长活']);
   });
 
+  itE2E('mica/session/rename persists an empty named session before the first turn', async () => {
+    const host = spawnHost('rename-draft');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    // 还没有任何消息就改名（桌面端「给新对话起个名字」）：空会话要当场落盘，
+    // 名字记成手动标题，并把 sessionId 交回客户端去绑定。
+    await send(host, 1, 'mica/session/rename', { title: '先起个名字' });
+    const renamed = await waitFor(host, (m) => m.id === 1, 'rename response', 10_000);
+    expect(renamed.error).toBeUndefined();
+    const sessionId = (renamed.result as { sessionId?: string }).sessionId;
+    expect(typeof sessionId).toBe('string');
+    expect(renamed.result).toMatchObject({ ok: true, title: '先起个名字' });
+
+    const file = join(host.home, 'sessions', `${sessionId}.json`);
+    expect(existsSync(file)).toBe(true);
+    const session = JSON.parse(readFileSync(file, 'utf8')) as {
+      title?: string;
+      titleSource?: string;
+      snapshot?: { conversationMessages?: unknown[] };
+    };
+    expect(session).toMatchObject({ title: '先起个名字', titleSource: 'manual' });
+    expect(session.snapshot?.conversationMessages ?? []).toHaveLength(0);
+  });
+
   itE2E('mica/session/rename renames the session while its turn is running', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];
@@ -1979,6 +2004,8 @@ suite('mica app-server real-user flows (mock provider)', () => {
     // 「历史压了、pluginState 还是旧的」——用户关掉页面后就再也对不上账。
     expect(persisted).toContain('"quickRuns": 1');
     expect(persisted).toContain('已快速压缩历史');
+    // 效果写成「压缩前 → 压缩后（省 N%）」：只报省下多少读不出量级。
+    expect(persisted).toMatch(/已快速压缩历史：[\d.]+M?K? → [\d.]+M?K?（省 \d+%）/);
     // 输入框左下角的 ctx 徽标读 displayUsage：压缩后它必须降到压缩后的占用，
     // 否则界面还写着压缩前的数字，看着像没生效（lastUsage 保持不变是 Stats 的口径）。
     const idleSnapshot = JSON.parse(persisted).snapshot as {

@@ -1,4 +1,5 @@
 import type { ScheduleGroup } from './refresh.js';
+import { isValidRange, type ScheduleEdit } from './edits.js';
 
 /**
  * 卡片读的那份数据（`plugin-data/schedule/data.json`）。
@@ -7,7 +8,7 @@ import type { ScheduleGroup } from './refresh.js';
  * 所以 `updatedAt`、`coverage` 是给人看的字符串，程序要用的时间戳另存 `updatedAtMs`。
  */
 
-export const SCHEDULE_VERSION = 1;
+export const SCHEDULE_VERSION = 2;
 
 export type ScheduleSnapshot = {
   version: number;
@@ -29,6 +30,13 @@ export type ScheduleSnapshot = {
   groups: ScheduleGroup[];
   /** 某个群没扫成的原因；展示时只取前几条。 */
   errors: Array<{ name: string; message: string }>;
+  /**
+   * 用户在本机上把条拖到别的日子留下的修订。
+   *
+   * 与 `groups` 分开存：`groups` 是群公告的解析结果，下一轮整理整份重写；修订要活过
+   * 每一次整理，所以整理完只做一次「还对得上吗」的裁剪（见 `pruneEdits`）。
+   */
+  edits: ScheduleEdit[];
 };
 
 export function emptySnapshot(): ScheduleSnapshot {
@@ -41,13 +49,12 @@ export function emptySnapshot(): ScheduleSnapshot {
     scope: { days: 0, scanned: 0, total: 0, partial: false },
     groups: [],
     errors: [],
+    edits: [],
   };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 function asArray(value: unknown): unknown[] {
@@ -98,6 +105,24 @@ export function normalizeSnapshot(value: unknown): ScheduleSnapshot {
     }))
     .filter((entry) => entry.name || entry.message);
 
+  const edits: ScheduleEdit[] = [];
+  for (const entry of asArray(record.edits)) {
+    const edit = asRecord(entry);
+    if (!edit) continue;
+    const { id, groupId, key, start, end } = edit;
+    if ([id, groupId, key, start, end].some((field) => typeof field !== 'string' || !field)) continue;
+    if (!isValidRange(start as string, end as string)) continue;
+    edits.push({
+      id: id as string,
+      groupId: groupId as string,
+      key: key as string,
+      added: edit.added === true,
+      start: start as string,
+      end: end as string,
+      at: typeof edit.at === 'number' ? edit.at : 0,
+    });
+  }
+
   return {
     version: typeof record.version === 'number' ? record.version : SCHEDULE_VERSION,
     updatedAtMs: typeof record.updatedAtMs === 'number' ? record.updatedAtMs : 0,
@@ -112,5 +137,36 @@ export function normalizeSnapshot(value: unknown): ScheduleSnapshot {
     },
     groups,
     errors,
+    edits,
   };
+}
+
+/**
+ * 首屏读数据的重试：宿主的 IPC 可能比页面晚一步就绪，一次读到空不该直接画「还没有整理过」
+ * ——那会让人以为没数据，实际只是还没到。
+ *
+ * 只在读到空值时重试，且次数固定（默认 3 次 × 250ms）：真的没整理过时最多多等 0.75s，
+ * 比让空态闪一下、用户以为插件坏了要好。读成功一次就立刻返回，不影响正常路径的时延。
+ */
+export type ReadRetryOptions = {
+  attempts: number;
+  delayMs: number;
+  /** 便于测试注入，默认真的等 `delayMs`。 */
+  wait?: (ms: number) => Promise<void>;
+};
+
+const defaultWait = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+export async function readWithRetry<T>(read: () => Promise<T | null>, options: ReadRetryOptions): Promise<T | null> {
+  const wait = options.wait ?? defaultWait;
+  const attempts = Math.max(1, options.attempts);
+  let value = await read();
+  for (let attempt = 1; value == null && attempt < attempts; attempt += 1) {
+    await wait(options.delayMs);
+    value = await read();
+  }
+  return value;
 }

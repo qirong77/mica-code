@@ -96,8 +96,8 @@ export async function compactIdleSessionHistory(input: {
    *
    * 抛错会回滚这次压缩并不落盘。
    */
-  afterApply?: (result: { savedTokens: number }) => void;
-}): Promise<{ savedTokens: number } | null> {
+  afterApply?: (result: { savedTokens: number; beforeTokens: number; afterTokens: number }) => void;
+}): Promise<{ savedTokens: number; beforeTokens: number; afterTokens: number } | null> {
   const { agent, sessionController } = input;
   const snapshot = agent.getSnapshot();
   if (snapshot.messages.length < 2) return null;
@@ -131,8 +131,11 @@ export async function compactIdleSessionHistory(input: {
   }
 
   const savedTokens = Math.max(0, result.savedTokenEstimate);
+  const beforeTokens = Math.max(0, result.beforeTokenEstimate);
+  const afterTokens = Math.max(0, result.afterTokenEstimate);
+  const summary = { savedTokens, beforeTokens, afterTokens };
   try {
-    input.afterApply?.({ savedTokens });
+    input.afterApply?.(summary);
   } catch (error) {
     // 回调里通常是插件写会话状态或发 notice 失败：退回压缩前的快照，别让磁盘上出现
     // 「压了但没记账」的半状态。
@@ -152,5 +155,5 @@ export async function compactIdleSessionHistory(input: {
       ? { displayUsage: { totalTokens: result.afterTokenEstimate, compactedAt: new Date().toISOString() } }
       : {}),
   });
-  return { savedTokens };
+  return summary;
 }

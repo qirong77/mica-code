@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { localDayKey } from '@packages/mica-web-shared/stats-day.js'
 
 /** 把消息 content（string 或 blocks 数组）投影为纯文本，图片/特殊块用占位符。 */
 export function projectContent(content, limit) {
@@ -80,17 +81,11 @@ export function usageIdentity(usage) {
 }
 
 /**
- * 该会话在去重后真正拥有的用量事件身份集合；会话不在去重结果里（老格式文件）时返回
- * null，调用方应保持原样。详情视图必须与列表共用同一个集合：fork 复制过来的记录归属
- * 来源会话，详情也不能把它们算成自己的。
+ * 按「本会话真正拥有的用量事件身份」过滤一份原始记录；identities 为 null 时原样返回。
+ *
+ * 身份集合来自扫描器的归属判定（fork 复制过来的记录归来源会话），详情视图与列表因此
+ * 共用同一个口径。
  */
-export function ownedUsageIdentities(sessions, sessionId) {
-  const session = sessions.find((entry) => entry.id === sessionId)
-  if (!session) return null
-  return new Set(session.usageEvents.map((event) => event.identity))
-}
-
-/** 按 {@link ownedUsageIdentities} 过滤一份原始用量记录；identities 为 null 时原样返回。 */
 export function filterOwnedUsage(usageHistory, identities) {
   if (!identities) return usageHistory
   const records = Array.isArray(usageHistory) ? usageHistory : []
@@ -150,61 +145,13 @@ export function normalizeUsageEvent(usage, fallbackTime, fallbackModel) {
   }
 }
 
-function summarizeEvents(session, usageEvents) {
-  const modelMap = new Map()
-  let inputTokens = 0
-  let outputTokens = 0
-  let cachedInputTokens = 0
-  let uncachedInputTokens = 0
-  let totalTokens = 0
-
-  for (const usage of usageEvents) {
-    const row = modelMap.get(usage.model) || {
-      model: usage.model,
-      requests: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedInputTokens: 0,
-      uncachedInputTokens: 0,
-      totalTokens: 0
-    }
-    row.requests++
-    for (const key of [
-      'inputTokens',
-      'outputTokens',
-      'cachedInputTokens',
-      'uncachedInputTokens',
-      'totalTokens'
-    ]) {
-      row[key] += usage[key]
-    }
-    modelMap.set(usage.model, row)
-    inputTokens += usage.inputTokens
-    outputTokens += usage.outputTokens
-    cachedInputTokens += usage.cachedInputTokens
-    uncachedInputTokens += usage.uncachedInputTokens
-    totalTokens += usage.totalTokens
-  }
-
-  const modelUsage = [...modelMap.values()].sort(
-    (a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests
-  )
-  return {
-    ...session,
-    model: modelUsage[0]?.model || session.model,
-    requests: usageEvents.length,
-    inputTokens,
-    outputTokens,
-    cachedInputTokens,
-    uncachedInputTokens,
-    totalTokens,
-    modelUsage,
-    usageEvents,
-    legacyUsageRecords: usageEvents.filter((usage) => usage.dateAccuracy !== 'exact').length
-  }
-}
-
-export function parseStatsSession(raw) {
+/**
+ * 把一个会话文件解析成「元信息 + 用量事件」。事件仍带完整字段（子代理/插件来源、请求
+ * 时间、身份），调用方决定怎么聚合：扫描器按本地日压缩，详情视图按原始记录展示。
+ *
+ * 结构不完整的文件返回 null（没有可用的创建/更新时间）。
+ */
+export function parseSessionEvents(raw) {
   const createdAtMs = validTime(raw.createdAt)
   const updatedAtMs = validTime(raw.updatedAt)
   if (createdAtMs == null || updatedAtMs == null || createdAtMs <= 0) return null
@@ -221,6 +168,9 @@ export function parseStatsSession(raw) {
     id: raw.id || null,
     title: raw.title || null,
     cwd: raw.cwd || null,
+    ...(typeof raw.parentSessionId === 'string' && raw.parentSessionId.trim()
+      ? { parentSessionId: raw.parentSessionId.trim() }
+      : {}),
     createdAtMs,
     updatedAtMs,
     turnState: raw.turnState || 'completed',
@@ -276,35 +226,159 @@ export function parseStatsSession(raw) {
     }
   }
   const usageEvents = [...mainEvents, ...subagentEvents]
-  const summary = summarizeEvents(session, usageEvents)
-  return { ...summary, subagentTasks: subagentTaskCount, pluginRequests: pluginRequestCount }
+  return {
+    session: { ...session, subagentTasks: subagentTaskCount, pluginRequests: pluginRequestCount },
+    events: usageEvents,
+    identities: usageEvents.map((usage) => usage.identity)
+  }
+}
+
+const TOKEN_KEYS = [
+  'inputTokens',
+  'cachedInputTokens',
+  'uncachedInputTokens',
+  'outputTokens',
+  'totalTokens'
+]
+
+function emptyTokenTotals() {
+  return {
+    requests: 0,
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    uncachedInputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0
+  }
+}
+
+function addTokens(row, usage) {
+  row.requests += 1
+  for (const key of TOKEN_KEYS) row[key] += usage[key]
+}
+
+function dayRow(day) {
+  return {
+    day,
+    at: 0,
+    ...emptyTokenTotals(),
+    turns: new Set(),
+    legacy: 0,
+    models: new Map(),
+    subagents: new Map(),
+    plugins: new Map()
+  }
 }
 
 /**
- * A fork used to carry its source's usage history verbatim. Records have stable IDs, so assign
- * each event to the oldest surviving session and count it once; records without an ID fall back
- * to a digest of their own content — the only trace a legacy fork copy leaves, and it also
- * merges two genuinely identical records (repeating the same short prompt looks exactly like a
- * copy and nothing in the file can tell them apart).
+ * 把用量事件聚合成「本地日」行。统计页的所有范围都是整天边界（今天 / 近 N 天 / 单日 /
+ * 全部），日粒度足够表达，所以逐条事件没有传出去的必要。
  *
- * New sessions no longer inherit usage (see forkSessionSnapshot / AgentRuntime.getForkSnapshot),
- * so this only repairs files written before that change. Attribution still follows the oldest
- * surviving session, which is what keeps the totals from dropping when the source is deleted.
+ * 每个维度行保留自己的 requests 与 token，renderer 只做加法就能得到任一范围的结果：
+ * 模型占比、子代理类型、插件后台请求、每日柱状图都从这几层聚出来。
  */
-export function dedupeStatsSessions(sessions) {
-  const ordered = sessions
-    .slice()
-    .sort((a, b) => a.createdAtMs - b.createdAtMs || String(a.id).localeCompare(String(b.id)))
-  const seen = new Set()
-  const deduped = ordered.map((session) => {
-    const usageEvents = session.usageEvents.filter((usage) => {
-      if (seen.has(usage.identity)) return false
-      seen.add(usage.identity)
-      return true
-    })
-    return summarizeEvents(session, usageEvents)
-  })
-  return deduped.sort((a, b) => a.createdAtMs - b.createdAtMs)
+export function summarizeStatsDays(usageEvents) {
+  const days = new Map()
+  for (const usage of usageEvents) {
+    const day = localDayKey(usage.occurredAtMs)
+    let row = days.get(day)
+    if (!row) {
+      row = dayRow(day)
+      days.set(day, row)
+    }
+    if (usage.occurredAtMs > row.at) row.at = usage.occurredAtMs
+    addTokens(row, usage)
+    if (Number.isInteger(usage.turnId)) row.turns.add(usage.turnId)
+    if (usage.dateAccuracy !== 'exact') row.legacy += 1
+
+    let model = row.models.get(usage.model)
+    if (!model) {
+      model = { model: usage.model, ...emptyTokenTotals() }
+      row.models.set(usage.model, model)
+    }
+    addTokens(model, usage)
+
+    if (usage.isSubagent) {
+      const type = usage.subagentType || 'unknown'
+      let subagent = row.subagents.get(type)
+      if (!subagent) {
+        subagent = {
+          type,
+          tasks: new Set(),
+          requests: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0
+        }
+        row.subagents.set(type, subagent)
+      }
+      if (usage.subagentTaskId) subagent.tasks.add(usage.subagentTaskId)
+      subagent.requests += 1
+      subagent.inputTokens += usage.inputTokens
+      subagent.outputTokens += usage.outputTokens
+      subagent.totalTokens += usage.totalTokens
+    }
+
+    if (usage.isPlugin) {
+      const pluginId = usage.pluginId || 'unknown'
+      let plugin = row.plugins.get(pluginId)
+      if (!plugin) {
+        plugin = { pluginId, purposes: new Set(), ...emptyTokenTotals() }
+        row.plugins.set(pluginId, plugin)
+      }
+      if (usage.pluginPurpose) plugin.purposes.add(usage.pluginPurpose)
+      addTokens(plugin, usage)
+    }
+  }
+
+  return [...days.values()]
+    .map((row) => ({
+      ...row,
+      turns: row.turns.size,
+      models: [...row.models.values()],
+      subagents: [...row.subagents.values()].map((subagent) => ({
+        ...subagent,
+        tasks: [...subagent.tasks]
+      })),
+      plugins: [...row.plugins.values()].map((plugin) => ({
+        ...plugin,
+        purposes: [...plugin.purposes]
+      }))
+    }))
+    .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))
+}
+
+/**
+ * 统计页拿到的会话行：元信息 + 任取范围的加法底座（日行） + 全量合计。
+ *
+ * 顶层合计让「全部」范围不必再滚动求和；其它范围由 renderer 按日行相加（见 StatsView
+ * 的 scopeSession）。逐条用量事件不离开 host —— 上千个会话是几十 MB。
+ */
+export function summarizeStatsSession(session, usageEvents) {
+  const days = summarizeStatsDays(usageEvents)
+  const totals = emptyTokenTotals()
+  let legacyUsageRecords = 0
+  for (const day of days) {
+    totals.requests += day.requests
+    for (const key of TOKEN_KEYS) totals[key] += day[key]
+    legacyUsageRecords += day.legacy
+  }
+  return { ...session, ...totals, legacyUsageRecords, days }
+}
+
+/**
+ * 统计投影的压缩形态：会话行 + 该会话文件里的用量事件身份。
+ *
+ * `identities` 有两个用途，都不能省：扫描器靠它把老 fork 文件复制来的记录判给源会话，
+ * 会话详情靠它判断某条原始记录归谁。
+ */
+export function compressSessionStats(raw) {
+  const parsed = parseSessionEvents(raw)
+  if (!parsed) return null
+  return {
+    session: summarizeStatsSession(parsed.session, parsed.events),
+    identities: parsed.identities
+  }
 }
 
 /** 内容搜索的正文上限（每个会话）：够长到能查到上下文，又不至于把几百个会话全留在内存里。 */

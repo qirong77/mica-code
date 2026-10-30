@@ -2068,10 +2068,35 @@ export function registerChatIpc() {
   // silently reverted by that host's next turn — and is refused outright while
   // one runs. With no host around (idle session, or a host that was disposed)
   // nothing else writes the file and the direct path is exact.
-  ipcMain.handle('chat:rename-session', async (event, { sessionId, title } = {}) => {
-    const target = typeof sessionId === 'string' ? sessionId.trim() : ''
+  //
+  // 还没有会话的草稿（新对话）带 `id` 而不是 `sessionId`：给它起名字等于「这条会话
+  // 现在就要存在」，所以先按需起一个常驻 host，让它在改名时把空会话连同手动标题
+  // 一起落盘，再把新的 sessionId 交回页面绑定。会话文件只能由宿主写，这条路径
+  // 也不能在主机侧直接造。
+  ipcMain.handle('chat:rename-session', async (event, { id, sessionId, cwd, title } = {}) => {
     const nextTitle = typeof title === 'string' ? title.trim() : ''
-    if (!isValidSessionId(target) || !nextTitle) return { ok: false, error: '会话标题无效' }
+    const target = typeof sessionId === 'string' ? sessionId.trim() : ''
+    if (!nextTitle) return { ok: false, error: '会话标题无效' }
+    if (!target) {
+      const nodeId = typeof id === 'string' ? id.trim() : ''
+      if (!nodeId) return { ok: false, error: '会话标题无效' }
+      const ensured = ensureCapabilityRun(nodeId, event, { cwd })
+      if (!ensured.run) return { ok: false, error: ensured.error }
+      const created = await hostTaskRequest(ensured.run, 'mica/session/rename', {
+        title: nextTitle
+      })
+      if (created?.ok === false) return { ok: false, error: created.error || '重命名失败' }
+      const createdSessionId = typeof created?.sessionId === 'string' ? created.sessionId : ''
+      if (!createdSessionId) return { ok: false, error: '重命名失败' }
+      // 之后这条 run 就是这个会话的宿主：消息、改名、能力开关都要按会话 id 找得到它。
+      ensured.run.requestedSessionId = createdSessionId
+      return {
+        ok: true,
+        title: typeof created?.title === 'string' ? created.title : nextTitle,
+        sessionId: createdSessionId
+      }
+    }
+    if (!isValidSessionId(target)) return { ok: false, error: '会话标题无效' }
     for (const run of runs.values()) {
       if (run.sessionId !== target && run.requestedSessionId !== target) continue
       if (!run.child?.stdin?.writable) continue

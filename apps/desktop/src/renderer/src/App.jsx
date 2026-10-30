@@ -1316,10 +1316,14 @@ export default function App() {
     }
     window.addEventListener('focus', onVisibility)
     document.addEventListener('visibilitychange', onVisibility)
+    // 会话索引在运行时就绪（首次构建完成、别的进程写了新会话）时主动推一次，侧栏不必
+    // 等到下一个 10s 轮询才出现内容。
+    const offStats = window.mica.stats.onChanged?.(() => refreshSessions())
     return () => {
       clearInterval(timer)
       window.removeEventListener('focus', onVisibility)
       document.removeEventListener('visibilitychange', onVisibility)
+      offStats?.()
     }
   }, [refreshPins, refreshProjects, refreshLoops, refreshSessions, refreshSort])
 
@@ -2541,11 +2545,24 @@ export default function App() {
                     .catch((error) => showToast(`重命名失败：${error?.message || error}`, true))
                 }
               }}
-              onRenameDraft={(nodeId, text) =>
+              onRenameDraft={(nodeId, title) => {
+                const text = (title || '').trim()
+                if (!text) return
+                const node = nodesRef.current.find((item) => item.id === nodeId)
+                // 给新对话起名字 = 这条会话此刻就要存在：宿主用它的常驻进程建出会话文件，
+                // 手动标题一起写进去（之后自动起标题不会再覆盖），页面拿到 sessionId 立刻
+                // 绑定，侧栏里就出现一条真实会话。失败时退回只改页签名，别让用户白打一遍字。
                 setNodes((items) =>
-                  items.map((node) => (node.id === nodeId ? { ...node, text } : node))
+                  items.map((item) => (item.id === nodeId ? { ...item, text } : item))
                 )
-              }
+                window.mica.chat
+                  .renameDraft(nodeId, node?.cwd || null, text)
+                  .then((result) => {
+                    if (result?.ok === false) return showToast(result.error || '重命名失败', true)
+                    if (result?.sessionId) setSessionId(nodeId, result.sessionId)
+                  })
+                  .catch((error) => showToast(`重命名失败：${error?.message || error}`, true))
+              }}
               onDeleteSession={deleteSession}
               onDeleteDraft={deleteDraft}
               onShareSession={shareSession}

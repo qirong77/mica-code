@@ -139,7 +139,25 @@ describe('auto-compact plugin', () => {
     // 对话里留一行：否则「到底压没压」只能翻插件日志。
     expect(harness.notices.at(-1)).toContain('已快速压缩历史');
     expect(harness.notices.at(-1)).toContain('空闲 30 分钟');
+    // 省下的量要换算成 k、并给出压缩前后的对比：孤零零的 806469 读不出量级。
+    expect(harness.notices.at(-1)).toContain('52K → 40K');
     expect(harness.healthReports.at(-1)?.level).toBe('ok');
+  });
+
+  // 大数字要换算：真实会话里省下的量动辄六位数，写成「806469 tokens」读不出量级。
+  it('reads the gain in k and M for a large history', async () => {
+    const harness = createHarness({
+      inputTokens: 30_000,
+      idleCompact: true,
+      lastActivityAt: minutesAgo(90),
+      idleBeforeTokens: 1_200_000,
+      idleSavedTokens: 806_469,
+    });
+
+    await harness.typeInComposer();
+
+    expect(harness.notices.at(-1)).toContain('1.2M → 394K（省 67%）');
+    expect(harness.notices.at(-1)).not.toContain('806469');
   });
 
   // 计数必须在宿主落盘之前写好：压缩与记账是同一次写。晚一步写等于「压了但没记账」，
@@ -271,6 +289,8 @@ function createHarness(options: {
   lastActivityAt?: string;
   /** 空闲压缩由宿主报告的节省量；`null` 表示宿主说「这次没压成」。 */
   idleSavedTokens?: number | null;
+  /** 空闲压缩前的估算占用（默认按节省量 + 40K 合成，好让「a → b」两半都不同）。 */
+  idleBeforeTokens?: number;
   /** 宿主说这一次做不了（会话正忙 / 别的进程持锁）。 */
   idleSkipped?: 'busy' | 'empty';
   idleFail?: string;
@@ -294,17 +314,21 @@ function createHarness(options: {
   let rewriter: PluginIterationRewriter | null = null;
   const disposeHandlers: Array<() => void> = [];
   const compactIdleHistory = options.idleCompact
-    ? async (hook?: { afterApply?: (result: { savedTokens: number }) => void }) => {
+    ? async (hook?: {
+        afterApply?: (result: { savedTokens: number; beforeTokens: number; afterTokens: number }) => void;
+      }) => {
         idleCompactCalls.push(Date.now());
         if (options.idleFail) throw new Error(options.idleFail);
         if (options.idleSkipped) return { status: 'skipped', reason: options.idleSkipped } as const;
         if (options.idleSavedTokens === null) return { status: 'skipped', reason: 'empty' } as const;
         const savedTokens = options.idleSavedTokens ?? 12_000;
+        const beforeTokens = options.idleBeforeTokens ?? savedTokens + 40_000;
+        const afterTokens = beforeTokens - savedTokens;
         // 真宿主在落盘之前调它：插件在这里写状态与 notice。
-        hook?.afterApply?.({ savedTokens });
+        hook?.afterApply?.({ savedTokens, beforeTokens, afterTokens });
         // 宿主随后读这份快照去写文件——记录那一刻看到的状态。
         stateSeenByHost = state;
-        return { status: 'applied', savedTokens } as const;
+        return { status: 'applied', savedTokens, beforeTokens, afterTokens } as const;
       }
     : null;
 

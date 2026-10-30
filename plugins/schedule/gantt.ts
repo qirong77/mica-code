@@ -1,4 +1,5 @@
 import { daysBetween, STAGE_LABELS, type ScheduleStage } from './parse.js';
+import type { EditedStage } from './edits.js';
 
 /**
  * 甘特图的纯逻辑：时间轴范围、行、刻度和缩放。
@@ -7,14 +8,24 @@ import { daysBetween, STAGE_LABELS, type ScheduleStage } from './parse.js';
  * 界面那一侧只按 `rows` 从上往下画、不做日期算术。
  */
 
-export type GanttStage = ScheduleStage;
+/** 应用过修订的阶段（界面传进来的那份），纯解析结果也能直接用。 */
+export type GanttStage = ScheduleStage &
+  Partial<Pick<EditedStage, 'stageId' | 'edited' | 'added' | 'originalStart' | 'originalEnd'>>;
 
 export type GanttBar = {
   /** `${groupId}:${key}:${start}:${lane}`，React key 与点击定位都用它 */
   id: string;
+  /** 这条阶段的身份（公告阶段 `key:start`，新建的 `new:…`）；拖动后仍不变，用来存修订 */
+  stageId: string;
   groupId: string;
   key: string;
   label: string;
+  /** 用户拖过（或新建）；界面画虚线与「还原」 */
+  edited: boolean;
+  added: boolean;
+  /** 公告里的原区间，只在 `edited` 时有 */
+  originalStart?: string;
+  originalEnd?: string;
   start: string;
   end: string;
   days: string[];
@@ -111,9 +122,14 @@ export function buildGantt(
       }
       return {
         id: `${group.id}:${stage.key}:${stage.start}:${lane}`,
+        stageId: stage.stageId ?? `${stage.key}:${stage.start}`,
         groupId: group.id,
         key: stage.key,
         label: stage.label || STAGE_LABELS[stage.key] || stage.key,
+        edited: stage.edited === true,
+        added: stage.added === true,
+        originalStart: stage.originalStart,
+        originalEnd: stage.originalEnd,
         start: stage.start,
         end: stage.end,
         days: stage.days,

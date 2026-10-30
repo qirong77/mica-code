@@ -30,7 +30,12 @@ import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
 import { nestSessions } from './session-nesting'
-import { draftMenuItems, sessionMenuItems, withExtraMenuItems } from './session-menu'
+import {
+  draftMenuItems,
+  renameTargetOf,
+  sessionMenuItems,
+  withExtraMenuItems
+} from './session-menu'
 import { parseSessionMenuAction } from './session-menu-plugins'
 import {
   annotationBadges,
@@ -737,8 +742,12 @@ export function SessionTree({
     else if (action === 'unassign') onMoveSession(menuPayload.session.id, { section: 'recent' })
     else if (action === 'detail') setDetailSessionId(menuPayload.session.id)
     else if (action === 'share') onShareSession?.(menuPayload.session.id)
-    else if (action === 'rename') setEditing({ kind: 'session', id: menuPayload.session.id })
-    else if (action === 'delete')
+    // 会话行带 session，草稿行（新对话）只有 draft：两者都要认，否则草稿的重命名抛错、
+    // 编辑态进不去，表现成「点了没反应」。
+    else if (action === 'rename') {
+      const target = renameTargetOf(menuPayload)
+      if (target) setEditing(target)
+    } else if (action === 'delete')
       menuPayload.session
         ? onDeleteSession(menuPayload.session.id)
         : onDeleteDraft(menuPayload.draft.id)

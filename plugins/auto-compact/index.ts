@@ -1,4 +1,5 @@
 import type { MicaPlugin, PluginAgentHandle, PluginContext } from '@packages/mica-plugin/index.js';
+import { formatTokenCount } from '@packages/mica-common/format.js';
 import {
   EMPTY_COUNTERS,
   decideAutoCompactStep,
@@ -164,6 +165,19 @@ function formatIdle(idleMs: number): string {
 }
 
 /**
+ * 「792.5K → 46.2K（省 94%）」：压缩的效果是「从多少降到多少」，只说省下多少没法判断
+ * 这一压值不值——806469 这个数字本身也要换算成 k 才读得出量级。
+ */
+function formatCompactGain(beforeTokens: number, afterTokens: number, savedTokens: number): string {
+  // 取整到 k：notice 是给人扫一眼的，「806K → 46K」比「806.5K → 46.2K」好读。
+  const show = (tokens: number) => formatTokenCount(tokens, { roundedThousands: true });
+  const drop = `${show(beforeTokens)} → ${show(afterTokens)}`;
+  if (beforeTokens <= 0) return drop;
+  const ratio = Math.round((savedTokens / beforeTokens) * 100);
+  return ratio > 0 && ratio <= 100 ? `${drop}（省 ${ratio}%）` : drop;
+}
+
+/**
  * 用户回来了：会话空闲够久就先做一次快速压缩，让接下来那一轮请求按压小的历史发出。
  *
  * 宿主回 `skipped` 表示这次没压成（`busy` 会话正忙 / 别的进程持锁，`empty` 没有可清理
@@ -185,7 +199,7 @@ async function compactOnReturn(
     const outcome = await compact({
       // 计数与提示必须在落盘**之前**写：宿主压缩完就把会话文件写死了，之后写的状态
       // 只能等下一轮才带上——用户可能直接关掉页面，那次压缩就变成「压了但没记账」。
-      afterApply: ({ savedTokens }) => {
+      afterApply: ({ savedTokens, beforeTokens, afterTokens }) => {
         const next = normalizeCounters(ctx.sessionState?.get());
         next.quickRuns += 1;
         next.lastKind = 'quick';
@@ -195,7 +209,7 @@ async function compactOnReturn(
         persistState(ctx, next);
         // 界面上看得见的一次：否则「到底压没压」只能翻插件日志。
         ctx.ui?.notice(
-          `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史（约省下 ${Math.round(savedTokens)} tokens）`,
+          `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史：${formatCompactGain(beforeTokens, afterTokens, savedTokens)}`,
         );
       },
     });
@@ -203,10 +217,15 @@ async function compactOnReturn(
       ctx.logger.info('auto-compact:idle-skipped', { idleMs, reason: outcome.reason });
       return;
     }
-    ctx.logger.info('auto-compact:idle-applied', { idleMs, savedTokens: outcome.savedTokens });
+    ctx.logger.info('auto-compact:idle-applied', {
+      idleMs,
+      savedTokens: outcome.savedTokens,
+      beforeTokens: outcome.beforeTokens,
+      afterTokens: outcome.afterTokens,
+    });
     ctx.health.report({
       level: 'ok',
-      message: `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史（约省下 ${outcome.savedTokens} tokens）`,
+      message: `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史：${formatCompactGain(outcome.beforeTokens, outcome.afterTokens, outcome.savedTokens)}`,
     });
   } catch (error) {
     // 提前量失败不该影响用户说话：记日志 + 一条可见但不打断的状态。
@@ -242,7 +261,7 @@ async function tryCompact(
     });
     ctx.health.report({
       level: 'ok',
-      message: `最近一次${{ quick: '快速', model: '模型' }[mode]}压缩省下约 ${counters.lastSavedTokens} tokens`,
+      message: `最近一次${{ quick: '快速', model: '模型' }[mode]}压缩省下约 ${formatTokenCount(counters.lastSavedTokens)} tokens`,
     });
     return result;
   } catch (error) {

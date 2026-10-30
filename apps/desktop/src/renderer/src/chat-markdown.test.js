@@ -329,6 +329,31 @@ describe('structured activity state', () => {
     ])
   })
 
+  it('keeps the turn log when the replay window lost the turn id', () => {
+    // 回归点：窗口在轮次中途附着上来（切走再切回、重开窗口）时，host 的事件缓冲
+    // 可能已经把 step_start 挤出去，重放出来的思考与工具行一个轮次键都拿不到。
+    // 这条路径下状态行说在 thinking，日志区却整块消失。
+    const messages = [
+      { id: 'old', kind: 'reasoning', turnId: 'turn-1', text: 'old thought' },
+      { id: 'live-thought', kind: 'reasoning', turnId: null, text: 'current thought' },
+      {
+        id: 'live-tool',
+        kind: 'tool',
+        turnId: null,
+        tool: { tool: 'read_file', status: 'running' }
+      }
+    ]
+
+    expect(currentTurnActivityMessages(messages, null).map((message) => message.id)).toEqual([
+      'live-thought',
+      'live-tool'
+    ])
+    // 有轮次键时仍然严格匹配：上一轮的思考不能跟着回到日志区。
+    expect(currentTurnActivityMessages(messages, 'turn-1').map((message) => message.id)).toEqual([
+      'old'
+    ])
+  })
+
   it('shows the plan only while its own turn runs', () => {
     const messages = [
       {

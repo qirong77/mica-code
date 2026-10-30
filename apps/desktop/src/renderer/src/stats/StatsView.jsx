@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { BarSeries, CalendarHeatmap } from './charts'
 import { SessionDetailModal } from './SessionDetailModal'
+import { bucketByDay, isDayRange, rangeStart, scopeSession } from './scope'
 import {
   addDays,
   calendarGrid,
   currentStreak,
-  dayStartMs,
   daysBetween,
   intensityLevel,
   intensityThresholds,
@@ -23,8 +23,8 @@ const RANGE_OPTIONS = [
 ]
 const PROJECT_BATCH = 7
 const SESSION_BATCH = 11
-// stats:read 的载荷是「每个会话的用量事件」，上千会话时是几十 MB；3 秒一次会把
-// 主进程序列化和 renderer 解析都压满。面板只看总量，半分钟一次足够。
+// 载荷是「会话 × 本地日」的聚合结果（上千个会话约 1MB，见 host/stats-core），面板只看
+// 总量，半分钟一次足够；首次构建索引期间运行时另行推送 stats:changed，不靠这个间隔。
 const STATS_REFRESH_MS = 30_000
 const MONTH_SHORT = [
   'Jan',
@@ -50,74 +50,6 @@ const CALENDAR_RAMP = [
 
 const CARD_CLASS = 'rounded-[5px] border border-line bg-panel'
 const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
-
-function isDayRange(range) {
-  return typeof range === 'object'
-}
-
-/** 范围起点（毫秒）：preset 为区间起点，day 为当天零点，all 为 0 */
-function rangeStart(range) {
-  if (isDayRange(range)) return dayStartMs(range.day)
-  if (range === 'all') return 0
-  const today = localDayKey(Date.now())
-  if (range === 'today') return dayStartMs(today)
-  return dayStartMs(addDays(today, -(Number.parseInt(range, 10) - 1)))
-}
-
-function usageInRange(usage, range) {
-  if (isDayRange(range)) return localDayKey(usage.occurredAtMs) === range.day
-  return range === 'all' || usage.occurredAtMs >= rangeStart(range)
-}
-
-/** Rebuild one session from only the request-level usage events inside the selected range. */
-function scopeSession(session, range) {
-  const usageEvents = (session.usageEvents || []).filter((usage) => usageInRange(usage, range))
-  if (usageEvents.length === 0) return null
-  const modelMap = new Map()
-  const totals = {
-    requests: usageEvents.length,
-    inputTokens: 0,
-    outputTokens: 0,
-    cachedInputTokens: 0,
-    uncachedInputTokens: 0,
-    totalTokens: 0
-  }
-  for (const usage of usageEvents) {
-    const row = modelMap.get(usage.model) || {
-      model: usage.model,
-      requests: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cachedInputTokens: 0,
-      uncachedInputTokens: 0,
-      totalTokens: 0
-    }
-    row.requests++
-    for (const key of [
-      'inputTokens',
-      'outputTokens',
-      'cachedInputTokens',
-      'uncachedInputTokens',
-      'totalTokens'
-    ]) {
-      row[key] += usage[key]
-      totals[key] += usage[key]
-    }
-    modelMap.set(usage.model, row)
-  }
-  const modelUsage = [...modelMap.values()].sort((a, b) => b.totalTokens - a.totalTokens)
-  const exactTurns = new Set(usageEvents.map((usage) => usage.turnId).filter(Number.isInteger)).size
-  return {
-    ...session,
-    ...totals,
-    usageEvents,
-    modelUsage,
-    model: modelUsage[0]?.model || session.model,
-    turns: exactTurns || session.turns,
-    updatedAtMs: Math.max(...usageEvents.map((usage) => usage.occurredAtMs)),
-    legacyUsageRecords: usageEvents.filter((usage) => usage.dateAccuracy !== 'exact').length
-  }
-}
 
 function basename(cwd) {
   if (!cwd) return '~'
@@ -146,34 +78,6 @@ function dayShort(day) {
   return `${Number(d[1])}/${Number(d[2])}`
 }
 
-/** 按每次模型请求的时间聚合到本地日历日。 */
-function bucketByDay(sessions) {
-  const map = new Map()
-  for (const s of sessions) {
-    for (const usage of s.usageEvents || []) {
-      const day = localDayKey(usage.occurredAtMs)
-      const row = map.get(day) || {
-        day,
-        sessionIds: new Set(),
-        requests: 0,
-        turns: new Set(),
-        tokens: 0
-      }
-      row.sessionIds.add(s.id)
-      row.requests++
-      if (Number.isInteger(usage.turnId)) row.turns.add(`${s.id}:${usage.turnId}`)
-      row.tokens += usage.totalTokens
-      map.set(day, row)
-    }
-  }
-  return new Map(
-    [...map].map(([day, row]) => [
-      day,
-      { ...row, sessions: row.sessionIds.size, turns: row.turns.size }
-    ])
-  )
-}
-
 function KpiTile({ label, value, title, className = '' }) {
   return (
     <div className={`flex min-w-0 flex-col px-4 py-3.5 ${className}`} title={title}>
@@ -195,9 +99,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
 
   const allDays = useMemo(() => {
     const days = new Set()
-    for (const s of sessions) {
-      for (const usage of s.usageEvents || []) days.add(localDayKey(usage.occurredAtMs))
-    }
+    for (const s of sessions) for (const day of s.days || []) days.add(day.day)
     return [...days].sort()
   }, [sessions])
 
@@ -550,9 +452,8 @@ function BySubagentCard({ scoped }) {
   const rows = useMemo(() => {
     const byType = new Map()
     for (const s of scoped) {
-      for (const usage of s.usageEvents || []) {
-        if (!usage.isSubagent) continue
-        const type = usage.subagentType || 'unknown'
+      for (const usage of s.subagentUsage || []) {
+        const type = usage.type
         const row = byType.get(type) || {
           type,
           tasks: new Set(),
@@ -561,8 +462,8 @@ function BySubagentCard({ scoped }) {
           outputTokens: 0,
           totalTokens: 0
         }
-        if (usage.subagentTaskId) row.tasks.add(usage.subagentTaskId)
-        row.requests++
+        for (const task of usage.tasks) row.tasks.add(task)
+        row.requests += usage.requests
         row.inputTokens += usage.inputTokens
         row.outputTokens += usage.outputTokens
         row.totalTokens += usage.totalTokens
@@ -645,9 +546,8 @@ function ByPluginCard({ scoped }) {
   const rows = useMemo(() => {
     const map = new Map()
     for (const s of scoped) {
-      for (const usage of s.usageEvents || []) {
-        if (!usage.isPlugin) continue
-        const pluginId = usage.pluginId || 'unknown'
+      for (const usage of s.pluginUsage || []) {
+        const pluginId = usage.pluginId
         const row = map.get(pluginId) || {
           pluginId,
           sessions: new Set(),
@@ -658,11 +558,11 @@ function ByPluginCard({ scoped }) {
           purposes: new Set()
         }
         row.sessions.add(s.id)
-        row.requests++
+        row.requests += usage.requests
         row.inputTokens += usage.inputTokens
         row.outputTokens += usage.outputTokens
         row.totalTokens += usage.totalTokens
-        if (usage.pluginPurpose) row.purposes.add(usage.pluginPurpose)
+        for (const purpose of usage.purposes) row.purposes.add(purpose)
         map.set(pluginId, row)
       }
     }
@@ -977,10 +877,7 @@ export function StatsView({ visible }) {
   useEffect(() => {
     if (!visible) return undefined
     let alive = true
-    const tick = () => {
-      // 一次 stats:read 要把每个会话的用量事件都传过来（上千个会话时是几十 MB），
-      // 隐藏窗口里刷新纯属白烧 CPU/内存，失焦时也没人在看。
-      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+    const read = () => {
       window.mica.stats
         .read()
         .then((data) => {
@@ -988,15 +885,26 @@ export function StatsView({ visible }) {
         })
         .catch((error) => console.error('read stats failed', error))
     }
+    const tick = () => {
+      // 会话统计索引由运行时按文件签名增量维护；隐藏窗口里刷新纯属白烧 CPU。
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+      read()
+    }
     tick()
     const timer = window.setInterval(tick, STATS_REFRESH_MS)
     // 回到窗口时立刻补一次，免得刚打开就看到几十秒前的数字。
     const onFocus = () => tick()
     window.addEventListener('focus', onFocus)
+    // 首次构建索引要遍历全部会话文件：运行时按进度推送，这里跟着刷新，页面因此是
+    // 逐个填充而不是先空着等一次全量扫描。
+    const offChanged = window.mica.stats.onChanged?.(() => {
+      if (alive) read()
+    })
     return () => {
       alive = false
       window.clearInterval(timer)
       window.removeEventListener('focus', onFocus)
+      offChanged?.()
     }
   }, [visible])
 
@@ -1005,11 +913,7 @@ export function StatsView({ visible }) {
   const calendar = useMemo(() => {
     const today = localDayKey(Date.now())
     const years = new Set()
-    for (const s of sessions) {
-      for (const usage of s.usageEvents || []) {
-        years.add(localDayKey(usage.occurredAtMs).slice(0, 4))
-      }
-    }
+    for (const s of sessions) for (const day of s.days || []) years.add(day.day.slice(0, 4))
     const yearList = [...years].sort().reverse()
     const startDay = calendarYear != null ? `${calendarYear}-01-01` : addDays(today, -364)
     const endDay =
@@ -1033,6 +937,7 @@ export function StatsView({ visible }) {
   )
 
   const hasAny = sessions.some((session) => (Number(session.requests) || 0) > 0)
+  const progress = snap?.progress
   const legacyUsageRecords = scoped.reduce(
     (total, session) => total + (Number(session.legacyUsageRecords) || 0),
     0
@@ -1087,10 +992,17 @@ export function StatsView({ visible }) {
           </div>
           {!hasAny ? (
             <div className="grid place-items-center rounded-[5px] border border-dashed border-line py-16 text-xs text-fg-faint">
-              No usage yet. Complete an AI session to see statistics.
+              {progress?.building
+                ? `正在统计会话用量 ${progress.done} / ${progress.total}…`
+                : 'No usage yet. Complete an AI session to see statistics.'}
             </div>
           ) : (
             <>
+              {progress?.building && (
+                <div className="rounded-[5px] border border-line bg-panel px-3 py-2 text-[11px] text-fg-faint">
+                  正在统计会话用量 {progress.done} / {progress.total}，先展示已统计的部分…
+                </div>
+              )}
               <OverviewCard
                 snap={snap}
                 range={range}

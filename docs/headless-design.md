@@ -215,7 +215,10 @@ methods with `-32601`):
   through the host.
 - `mica/session/rename`: rename the session on the host. A turn running (or the
   host merely idle but alive) holds the in-memory snapshot, so a client-side
-  read-modify-write would be overwritten by the host's next save.
+  read-modify-write would be overwritten by the host's next save. Renaming also
+  persists a session that has no turn yet (the desktop's "name a new
+  conversation"), and the reply carries the `sessionId` so the client can bind
+  it — a manually named session is never treated as a disposable draft.
 - `mica/capabilities/get` / `mica/capabilities/set`: read the session's
   tool/skill/MCP selection with the full catalog, or replace it (`set` is
   refused while a turn runs).

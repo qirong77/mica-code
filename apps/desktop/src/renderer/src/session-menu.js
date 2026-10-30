@@ -21,6 +21,19 @@ export function draftMenuItems() {
 }
 
 /**
+ * 「重命名」该进哪一行的编辑态。
+ *
+ * 右键菜单的载荷两种形态：会话行带 `session`，草稿行（还未绑定真实会话的新对话）只带
+ * `draft`。按 `session` 去取 id 会在草稿上抛错，编辑态永远进不去——新对话看起来就是
+ * 「点了重命名没反应」。所以两种都要认，都没有时返回 null（调用方什么都不做）。
+ */
+export function renameTargetOf(menuPayload) {
+  if (menuPayload?.session?.id) return { kind: 'session', id: menuPayload.session.id }
+  if (menuPayload?.draft?.id) return { kind: 'draft', id: menuPayload.draft.id }
+  return null
+}
+
+/**
  * 把插件贡献的项插到「删除」之前：删除永远排最后，误点就找不回来了。
  *
  * `extra` 里既有会话标记（打勾项）也有插件动作（`session-menu:<pluginId>:<action>`），

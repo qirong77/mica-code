@@ -110,7 +110,7 @@ describe('SessionController', () => {
     expect(resolved.providerId).toBe('available');
   });
 
-  it('does not retain an empty session, including one created by rename', async () => {
+  it('retains an empty session the user named by hand', async () => {
     const { SessionController } = await import('./SessionController.js');
     let persisted: PersistedSession | null = null;
     const agent: SessionAgentAdapter = {
@@ -145,9 +145,89 @@ describe('SessionController', () => {
 
     controller.renameCurrent('Named before chatting');
     expect((persisted as PersistedSession | null)?.title).toBe('Named before chatting');
+    expect((persisted as PersistedSession | null)?.titleSource).toBe('manual');
+    // 重命名就是「这条会话要留下」：还没有任何消息时存盘也不能把它删掉，
+    // 否则侧栏里那条刚命名好的会话会在下一次落盘时凭空消失。
+    expect(controller.saveCurrent()).toBe(true);
+    expect(store.delete).not.toHaveBeenCalled();
+    expect(persisted).not.toBeNull();
+  });
+
+  it('drops an empty session that was never named', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    let persisted: PersistedSession | null = null;
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages: [],
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => []),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn(() => persisted),
+      save: vi.fn((session: PersistedSession) => {
+        persisted = session;
+      }),
+      delete: vi.fn(() => {
+        const deleted = persisted !== null;
+        persisted = null;
+        return deleted;
+      }),
+    };
+    const controller = new SessionController({ agent, store });
+
     expect(controller.saveCurrent()).toBe(false);
     expect(store.delete).toHaveBeenCalledWith(controller.getCurrentSessionId());
-    expect(persisted).toBeNull();
+  });
+
+  it('keeps a named empty session when switching sessions', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    let persisted: PersistedSession | null = null;
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(() => ({
+        providerId: 'openai',
+        protocol: 'openai_chat_completions' as const,
+        model: 'test-model',
+        effort: 'none' as const,
+        role: 'default',
+        messages: [],
+        usageHistory: [],
+        lastUsage: undefined,
+      })),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => []),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn(() => persisted),
+      save: vi.fn((session: PersistedSession) => {
+        persisted = session;
+      }),
+      delete: vi.fn(() => {
+        const deleted = persisted !== null;
+        persisted = null;
+        return deleted;
+      }),
+    };
+    const controller = new SessionController({ agent, store });
+
+    controller.renameCurrent('Named before chatting');
+    // `/new`、resume 另一条会话都会先把当前会话当草稿丢掉；手动命名过的不能丢。
+    controller.startNewSession();
+    expect(store.delete).not.toHaveBeenCalled();
+    expect(persisted).toMatchObject({ title: 'Named before chatting', titleSource: 'manual' });
   });
 
   it('keeps persisting after an empty save removed the session file', async () => {

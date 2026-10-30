@@ -84,7 +84,7 @@ import {
 } from '@packages/mica-web-shared'
 import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
-import { registerStatsIpc } from '../host/stats.js'
+import { registerStatsIpc, setStatsBroadcaster } from '../host/stats.js'
 import { registerSkillsIpc } from '../host/skills.js'
 import { registerMcpCandidatesIpc } from '../host/mcp-candidates.js'
 import { registerPerfIpc } from '../host/perf.js'
@@ -737,6 +737,8 @@ export async function startDesktopServer(options = {}) {
   // 定时循环跑在运行时里（页签关掉也继续），发送走 chat host 的同一条链路
   setLoopBroadcaster(broadcast)
   setLoopRunner(runLoopTurn)
+  // 会话统计索引在后台构建：页面的会话列表与统计页跟着进度刷新，不用轮询等它
+  setStatsBroadcaster(broadcast)
   // 受控浏览器窗口活在 Electron 主进程里（只有主进程能开窗口），运行时经 HTTP 访问它；
   // 浏览器状态变化要实时推给所有页面，图标才知道该不该亮
   setBrowserControlBroadcaster(broadcast)

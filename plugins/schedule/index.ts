@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { createDwsRunner, resolveDws } from './dws.js';
+import { pruneEdits } from './edits.js';
 import { refreshSchedules, type RefreshOutcome } from './refresh.js';
 import { emptySnapshot, normalizeSnapshot, SCHEDULE_VERSION, type ScheduleSnapshot } from './snapshot.js';
 
@@ -104,7 +105,11 @@ export default function setup(ctx: PluginContext): void {
     const command = resolveDws(values.dwsPath);
     if (!command) {
       const message = '没找到 dws（D-Chat 命令行）';
-      ctx.health.report({ level: 'error', message, hint: '在插件设置里填 dws 脚本的绝对路径，或者把 dws 装到 PATH 上。' });
+      ctx.health.report({
+        level: 'error',
+        message,
+        hint: '在插件设置里填 dws 脚本的绝对路径，或者把 dws 装到 PATH 上。',
+      });
       return { ok: false, message };
     }
     if (!acquireLock(lockFile)) {
@@ -138,6 +143,9 @@ export default function setup(ctx: PluginContext): void {
         scope: { days, scanned, total: outcome.planned, partial: outcome.partial },
         groups: outcome.groups,
         errors: outcome.errors.slice(0, MAX_ERRORS),
+        // 用户在本机拖过的条要在这一轮之后继续有效：写盘前现读一次（整理跑的这几十秒里
+        // 页面可能正好存了一条修订），只保留「公告里还对得上」的那些。
+        edits: pruneEdits(outcome.groups, readSnapshot(dataFile).edits),
       };
       writeSnapshot(dataFile, snapshot);
       ctx.logger.info('schedule:refreshed', {

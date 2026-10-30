@@ -35,16 +35,34 @@ function fixture(id, overrides = {}) {
       conversationMessages: [{ id: 'c1', role: 'user', text: 'hi' }],
       usageHistory: []
     },
-    value: 1,
-    ...overrides
+    ...overrides,
+    value: undefined
   }
+}
+
+function memoryIndexStore() {
+  return {
+    text: null,
+    async read() {
+      if (this.text == null) throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+      return this.text
+    },
+    async write(text) {
+      this.text = text
+    }
+  }
+}
+
+/** 等一轮宏任务，让索引的后台写入跑完（测试里 debounce 设为 0）。 */
+function flushIndex() {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 function createHarness(options = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'mica-stats-scanner-'))
   temporaryDirectories.push(dir)
   const reads = []
-  const parses = []
+  const store = options.store ?? memoryIndexStore()
   const fileSystem = {
     readdirSync: options.readdirSync ?? readdirSync,
     statSync,
@@ -56,38 +74,41 @@ function createHarness(options = {}) {
   const scanner = createStatsScanner({
     directory: () => dir,
     fileSystem,
-    parseStats(raw) {
-      parses.push(raw.id)
-      return raw.statsValid === false ? null : { id: raw.id, value: raw.value }
-    },
-    dedupeStats: (rows) => rows
+    indexStore: store,
+    indexWriteDelayMs: 0,
+    ...options.scanner
   })
   return {
     dir,
     reads,
-    parses,
+    store,
     scanner,
-    write(name, value) {
-      writeFileSync(join(dir, `${name}.json`), JSON.stringify(value), 'utf8')
+    files: {
+      write(name, value) {
+        writeFileSync(join(dir, `${name}.json`), JSON.stringify(value), 'utf8')
+      },
+      remove(name) {
+        unlinkSync(join(dir, `${name}.json`))
+      }
     }
   }
 }
 
 describe('incremental session scanner', () => {
-  test('projects parentSessionId only for sessions that have one', () => {
+  test('projects parentSessionId only for sessions that have one', async () => {
     const harness = createHarness()
-    harness.write('child', fixture('child', { parentSessionId: '  parent-1  ' }))
-    harness.write('root', fixture('root', { parentSessionId: '' }))
+    harness.files.write('child', fixture('child', { parentSessionId: '  parent-1  ' }))
+    harness.files.write('root', fixture('root', { parentSessionId: '' }))
 
-    const rows = harness.scanner.scanMeta()
+    const rows = await harness.scanner.scanMeta()
     expect(rows.find((row) => row.id === 'child').parentSessionId).toBe('parent-1')
     // 没有父会话时整个键都不出现：行对象的形状对「有没有派生关系」保持稳定。
     expect('parentSessionId' in rows.find((row) => row.id === 'root')).toBe(false)
   })
 
-  test('cold scan reads every JSON file and preserves metadata semantics', () => {
+  test('cold scan reads every JSON file and preserves metadata semantics', async () => {
     const harness = createHarness()
-    harness.write(
+    harness.files.write(
       'older',
       fixture('older', {
         title: '  Older title  ',
@@ -97,14 +118,11 @@ describe('incremental session scanner', () => {
         turnState: ''
       })
     )
-    harness.write(
-      'newer',
-      fixture('newer', { updatedAt: '2025-01-03T00:00:00.000Z', statsValid: false })
-    )
-    harness.write('ignored', fixture('ignored', { updatedAt: 'invalid' }))
+    harness.files.write('newer', fixture('newer', { updatedAt: '2025-01-03T00:00:00.000Z' }))
+    harness.files.write('ignored', fixture('ignored', { updatedAt: 'invalid' }))
     writeFileSync(join(harness.dir, 'notes.txt'), '{}', 'utf8')
 
-    expect(harness.scanner.scanMeta()).toEqual([
+    expect(await harness.scanner.scanMeta()).toEqual([
       {
         id: 'newer',
         title: 'Session newer',
@@ -123,168 +141,120 @@ describe('incremental session scanner', () => {
       }
     ])
     expect(harness.reads).toHaveLength(3)
-    expect(harness.parses).toHaveLength(0)
-    const stats = harness.scanner.scanStats()
-    expect(stats).toHaveLength(2)
-    expect(stats).toContainEqual({ id: 'older', value: 1 })
-    expect(stats).toContainEqual({ id: 'ignored', value: 1 })
-    expect(harness.reads).toHaveLength(6)
-    expect(harness.parses).toHaveLength(3)
+
+    // 统计投影要求创建/更新时间都合法，所以 createdAt 无效的 older 与 updatedAt
+    // 无效的 ignored 都不出现在这里。
+    const stats = await harness.scanner.scanStats()
+    expect(stats.map((row) => row.id)).toEqual(['newer'])
   })
 
-  test('warm scans reuse all parsed entries', () => {
+  test('warm scans reuse all parsed entries and keep array identity', async () => {
     const harness = createHarness()
-    harness.write('one', fixture('one'))
-    harness.write('two', fixture('two'))
+    harness.files.write('one', fixture('one'))
+    harness.files.write('two', fixture('two'))
 
-    harness.scanner.scanStats()
-    harness.scanner.scanStats()
-    harness.scanner.scanMeta()
+    const firstStats = await harness.scanner.scanStats()
+    expect(await harness.scanner.scanStats()).toBe(firstStats)
+    const firstMeta = await harness.scanner.scanMeta()
+    expect(await harness.scanner.scanMeta()).toBe(firstMeta)
 
-    expect(harness.reads).toHaveLength(4)
-    expect(harness.parses).toHaveLength(2)
+    expect(harness.reads).toHaveLength(2)
   })
 
-  test('changing one file only rereads that file', () => {
+  test('changing one file only rereads that file', async () => {
     const harness = createHarness()
-    harness.write('one', fixture('one'))
-    harness.write('two', fixture('two'))
-    harness.scanner.scanStats()
+    harness.files.write('one', fixture('one'))
+    harness.files.write('two', fixture('two'))
+    await harness.scanner.scanStats()
 
-    harness.write('two', fixture('two', { value: 22222 }))
+    harness.files.write(
+      'two',
+      fixture('two', {
+        snapshot: {
+          ...fixture('two').snapshot,
+          usageHistory: [{ usageId: 'u-2', inputTokens: 7, outputTokens: 1 }]
+        }
+      })
+    )
 
-    expect(harness.scanner.scanStats()).toContainEqual({ id: 'two', value: 22222 })
+    const stats = await harness.scanner.scanStats()
+    expect(stats.find((row) => row.id === 'two').requests).toBe(1)
     expect(harness.reads).toHaveLength(3)
     expect(harness.reads.at(-1)).toBe(join(harness.dir, 'two.json'))
   })
 
-  test('rereads metadata when only the session title changes', () => {
+  test('rereads metadata when only the session title changes', async () => {
     const harness = createHarness()
-    harness.write('one', fixture('one', { title: 'First prompt' }))
+    harness.files.write('one', fixture('one', { title: 'First prompt' }))
 
-    expect(harness.scanner.scanMeta()).toEqual([
+    expect(await harness.scanner.scanMeta()).toEqual([
       expect.objectContaining({ id: 'one', title: 'First prompt' })
     ])
 
     // The CLI rewrites title on every turn, so the sidebar must pick the new
     // value up from the next scan without any other field changing.
-    harness.write('one', fixture('one', { title: 'A much later prompt' }))
+    harness.files.write('one', fixture('one', { title: 'A much later prompt' }))
 
-    expect(harness.scanner.scanMeta()).toEqual([
+    expect(await harness.scanner.scanMeta()).toEqual([
       expect.objectContaining({ id: 'one', title: 'A much later prompt' })
     ])
     expect(harness.reads).toHaveLength(2)
   })
 
-  test('adding a file only reads the new file', () => {
+  test('adding a file only reads the new file', async () => {
     const harness = createHarness()
-    harness.write('one', fixture('one'))
-    harness.scanner.scanStats()
+    harness.files.write('one', fixture('one'))
+    await harness.scanner.scanStats()
 
-    harness.write('two', fixture('two'))
+    harness.files.write('two', fixture('two'))
 
-    expect(harness.scanner.scanStats()).toEqual([
-      { id: 'one', value: 1 },
-      { id: 'two', value: 1 }
-    ])
+    expect((await harness.scanner.scanStats()).map((row) => row.id)).toEqual(['one', 'two'])
     expect(harness.reads).toHaveLength(2)
     expect(harness.reads.at(-1)).toBe(join(harness.dir, 'two.json'))
   })
 
-  // readdir order is filesystem-specific (APFS is close to lexicographic, ext4 is
-  // hash order), so scanStats must not depend on it: no second sort is applied to
-  // the stats projection.
-  test('keeps a stable row order regardless of the directory listing order', () => {
+  test('keeps a stable row order regardless of the directory listing order', async () => {
     const harness = createHarness({
       readdirSync: (dir) => [...readdirSync(dir)].reverse()
     })
-    harness.write('one', fixture('one'))
-    harness.write('two', fixture('two'))
+    harness.files.write('one', fixture('one'))
+    harness.files.write('two', fixture('two'))
 
-    expect(harness.scanner.scanStats()).toEqual([
-      { id: 'one', value: 1 },
-      { id: 'two', value: 1 }
-    ])
+    expect((await harness.scanner.scanStats()).map((row) => row.id)).toEqual(['one', 'two'])
   })
 
-  test('deleting a file removes its cached row without reading another file', () => {
+  test('deleting a file removes its cached row without reading another file', async () => {
     const harness = createHarness()
-    harness.write('one', fixture('one'))
-    harness.write('two', fixture('two'))
-    harness.scanner.scanStats()
+    harness.files.write('one', fixture('one'))
+    harness.files.write('two', fixture('two'))
+    await harness.scanner.scanStats()
 
-    unlinkSync(join(harness.dir, 'one.json'))
+    harness.files.remove('one')
 
-    expect(harness.scanner.scanStats()).toEqual([{ id: 'two', value: 1 }])
+    expect((await harness.scanner.scanStats()).map((row) => row.id)).toEqual(['two'])
     expect(harness.reads).toHaveLength(2)
   })
 
-  test('caches a damaged file as null and reads it again after repair', () => {
+  test('caches a damaged file and reads it again after repair', async () => {
     const harness = createHarness()
     writeFileSync(join(harness.dir, 'broken.json'), '{broken', 'utf8')
 
-    expect(harness.scanner.scanStats()).toEqual([])
-    expect(harness.scanner.scanMeta()).toEqual([])
-    expect(harness.reads).toHaveLength(2)
-
-    harness.write('broken', fixture('repaired', { value: 123456 }))
-
-    expect(harness.scanner.scanStats()).toEqual([{ id: 'repaired', value: 123456 }])
-    expect(harness.reads).toHaveLength(3)
-  })
-
-  test('loads metadata and full statistics lazily, then caches both projections', () => {
-    const harness = createHarness()
-    harness.write('one', fixture('one'))
-
-    expect(harness.scanner.scanMeta()).toHaveLength(1)
+    expect(await harness.scanner.scanStats()).toEqual([])
+    expect(await harness.scanner.scanMeta()).toEqual([])
     expect(harness.reads).toHaveLength(1)
-    expect(harness.parses).toEqual([])
-    expect(harness.scanner.scanStats()).toEqual([{ id: 'one', value: 1 }])
-    expect(harness.scanner.scanMeta()).toHaveLength(1)
-    expect(harness.scanner.scanStats()).toEqual([{ id: 'one', value: 1 }])
 
+    harness.files.write('broken', fixture('repaired'))
+
+    expect((await harness.scanner.scanStats()).map((row) => row.id)).toEqual(['repaired'])
     expect(harness.reads).toHaveLength(2)
-    expect(harness.parses).toEqual(['one'])
   })
 
-  test('all signature fields participate in cache invalidation', () => {
-    let reads = 0
-    const signature = {
-      dev: 1n,
-      ino: 2n,
-      size: 3n,
-      mtimeNs: 4n,
-      ctimeNs: 5n
-    }
-    const scanner = createStatsScanner({
-      directory: () => '/sessions',
-      fileSystem: {
-        readdirSync: () => ['one.json'],
-        statSync: () => ({ ...signature }),
-        readFileSync: () => {
-          reads += 1
-          return JSON.stringify(fixture('one'))
-        }
-      },
-      parseStats: (raw) => ({ id: raw.id }),
-      dedupeStats: (rows) => rows
-    })
-
-    scanner.scanStats()
-    for (const field of ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs']) {
-      signature[field] += 1n
-      scanner.scanStats()
-    }
-
-    expect(reads).toBe(6)
-  })
-
-  test('does not cache a parse when the signature changes during its read', () => {
+  test('does not cache a parse when the signature changes during its read', async () => {
     let reads = 0
     let stats = 0
     const scanner = createStatsScanner({
       directory: () => '/sessions',
+      indexStore: null,
       fileSystem: {
         readdirSync: () => ['one.json'],
         statSync: () => {
@@ -296,24 +266,23 @@ describe('incremental session scanner', () => {
           reads += 1
           return JSON.stringify(fixture('one'))
         }
-      },
-      parseStats: (raw) => ({ id: raw.id }),
-      dedupeStats: (rows) => rows
+      }
     })
 
-    expect(scanner.scanStats()).toEqual([])
-    expect(scanner.scanStats()).toEqual([{ id: 'one' }])
-    expect(scanner.scanStats()).toEqual([{ id: 'one' }])
+    expect(await scanner.scanStats()).toEqual([])
+    expect((await scanner.scanStats()).map((row) => row.id)).toEqual(['one'])
+    expect((await scanner.scanStats()).map((row) => row.id)).toEqual(['one'])
 
     expect(reads).toBe(2)
   })
 
-  test('keeps the last stable rows on transient directory errors and clears them on ENOENT', () => {
+  test('keeps the last stable rows on transient directory errors and clears them on ENOENT', async () => {
     const harness = createHarness()
-    harness.write('one', fixture('one'))
+    harness.files.write('one', fixture('one'))
     let transientFailure = false
     const scanner = createStatsScanner({
       directory: () => harness.dir,
+      indexStore: null,
       fileSystem: {
         readdirSync(directory) {
           if (transientFailure) throw Object.assign(new Error('too many files'), { code: 'EMFILE' })
@@ -321,110 +290,182 @@ describe('incremental session scanner', () => {
         },
         statSync,
         readFileSync
-      },
-      parseStats: (raw) => ({ id: raw.id }),
-      dedupeStats: (rows) => rows
-    })
-
-    const stable = scanner.scanMeta()
-    transientFailure = true
-    expect(scanner.scanMeta()).toEqual(stable)
-
-    transientFailure = false
-    rmSync(harness.dir, { recursive: true, force: true })
-    expect(scanner.scanMeta()).toEqual([])
-  })
-
-  test('does not recompute global statistics while file signatures stay unchanged', () => {
-    const harness = createHarness()
-    harness.write('one', fixture('one'))
-    let dedupes = 0
-    const scanner = createStatsScanner({
-      directory: () => harness.dir,
-      fileSystem: { readdirSync, statSync, readFileSync },
-      parseStats: (raw) => ({ id: raw.id }),
-      dedupeStats(rows) {
-        dedupes += 1
-        return rows
       }
     })
 
-    scanner.scanStats()
-    scanner.scanStats()
+    const stable = await scanner.scanMeta()
+    transientFailure = true
+    expect(await scanner.scanMeta()).toBe(stable)
 
-    expect(dedupes).toBe(1)
+    transientFailure = false
+    rmSync(harness.dir, { recursive: true, force: true })
+    expect(await scanner.scanMeta()).toEqual([])
   })
 
-  test('readText parses a session body once per file signature', () => {
+  test('attributes a usage record copied by an old fork to the oldest session', async () => {
+    const shared = { usageId: 'shared', inputTokens: 100, outputTokens: 10 }
     const harness = createHarness()
-    harness.write('one', fixture('one'))
+    harness.files.write(
+      'source',
+      fixture('source', {
+        createdAt: '2025-01-01T00:00:00.000Z',
+        snapshot: { ...fixture('source').snapshot, usageHistory: [shared] }
+      })
+    )
+    harness.files.write(
+      'fork',
+      fixture('fork', {
+        createdAt: '2025-02-01T00:00:00.000Z',
+        snapshot: {
+          ...fixture('fork').snapshot,
+          usageHistory: [shared, { usageId: 'own', inputTokens: 20, outputTokens: 2 }]
+        }
+      })
+    )
+
+    const stats = await harness.scanner.scanStats()
+    expect(stats.map((row) => [row.id, row.requests, row.totalTokens])).toEqual([
+      ['source', 1, 110],
+      ['fork', 1, 22]
+    ])
+    expect((await harness.scanner.ownedIdentities('source')).has('id:shared')).toBe(true)
+    expect((await harness.scanner.ownedIdentities('fork')).has('id:shared')).toBe(false)
+    expect(await harness.scanner.ownedIdentities('missing')).toBeNull()
+  })
+
+  test('gives a copied record back when the session that owned it is deleted', async () => {
+    const shared = { usageId: 'shared', inputTokens: 100, outputTokens: 10 }
+    const harness = createHarness()
+    harness.files.write(
+      'source',
+      fixture('source', {
+        createdAt: '2025-01-01T00:00:00.000Z',
+        snapshot: { ...fixture('source').snapshot, usageHistory: [shared] }
+      })
+    )
+    harness.files.write(
+      'fork',
+      fixture('fork', {
+        createdAt: '2025-02-01T00:00:00.000Z',
+        snapshot: { ...fixture('fork').snapshot, usageHistory: [shared] }
+      })
+    )
+    expect((await harness.scanner.scanStats()).map((row) => row.totalTokens)).toEqual([110, 0])
+
+    harness.files.remove('source')
+    const stats = await harness.scanner.scanStats()
+    expect(stats.map((row) => [row.id, row.totalTokens])).toEqual([['fork', 110]])
+  })
+
+  test('reuses the on-disk index instead of parsing every session again', async () => {
+    const harness = createHarness()
+    harness.files.write('one', fixture('one'))
+    harness.files.write('two', fixture('two'))
+    await harness.scanner.scanStats()
+    await flushIndex()
+    expect(harness.store.text).toBeTruthy()
+
+    const readsBefore = harness.reads.length
+    const restarted = createStatsScanner({
+      directory: () => harness.dir,
+      fileSystem: {
+        readdirSync,
+        statSync,
+        readFileSync(file, encoding) {
+          harness.reads.push(file)
+          return readFileSync(file, encoding)
+        }
+      },
+      indexStore: harness.store,
+      indexWriteDelayMs: 0
+    })
+    const rows = await restarted.scanStats()
+
+    expect(rows.map((row) => row.id)).toEqual(['one', 'two'])
+    expect(harness.reads).toHaveLength(readsBefore)
+  })
+
+  test('rebuilds the index when its format version is unknown', async () => {
+    const harness = createHarness()
+    harness.files.write('one', fixture('one'))
+    await harness.scanner.scanStats()
+    await flushIndex()
+
+    harness.store.text = JSON.stringify({ version: 999, files: {} })
+    const restarted = createStatsScanner({
+      directory: () => harness.dir,
+      fileSystem: { readdirSync, statSync, readFileSync },
+      indexStore: harness.store,
+      indexWriteDelayMs: 0
+    })
+
+    expect((await restarted.scanStats()).map((row) => row.id)).toEqual(['one'])
+  })
+
+  test('readText parses a session body once per file signature', async () => {
+    const harness = createHarness()
+    harness.files.write('one', fixture('one'))
     let parses = 0
     const scanner = createStatsScanner({
       directory: () => harness.dir,
+      indexStore: null,
       fileSystem: { readdirSync, statSync, readFileSync },
-      parseStats: (raw) => ({ id: raw.id }),
       parseText(raw) {
         parses += 1
         return { id: raw.id, text: '正文', truncated: false }
-      },
-      dedupeStats: (rows) => rows
+      }
     })
     const file = join(harness.dir, 'one.json')
 
-    expect(scanner.readText(file)).toEqual({ id: 'one', text: '正文', truncated: false })
-    expect(scanner.readText(file)).toEqual({ id: 'one', text: '正文', truncated: false })
+    expect(await scanner.readText(file)).toEqual({ id: 'one', text: '正文', truncated: false })
+    expect(await scanner.readText(file)).toEqual({ id: 'one', text: '正文', truncated: false })
     expect(parses).toBe(1)
 
     // 文件被改写后签名变化，下次读取重新解析。
-    harness.write('one', fixture('one', { value: 2 }))
-    scanner.readText(file)
+    harness.files.write('one', fixture('one', { title: 'changed' }))
+    await scanner.readText(file)
     expect(parses).toBe(2)
   })
 
-  test('readText tolerates a missing file and caches an unsearchable body', () => {
+  test('readText tolerates a missing file and caches an unsearchable body', async () => {
     const harness = createHarness()
     let parses = 0
     const scanner = createStatsScanner({
       directory: () => harness.dir,
+      indexStore: null,
       fileSystem: { readdirSync, statSync, readFileSync },
-      parseStats: (raw) => ({ id: raw.id }),
       parseText() {
         parses += 1
         return null
-      },
-      dedupeStats: (rows) => rows
+      }
     })
 
-    expect(scanner.readText(join(harness.dir, 'missing.json'))).toBeNull()
+    expect(await scanner.readText(join(harness.dir, 'missing.json'))).toBeNull()
     expect(parses).toBe(0)
 
-    harness.write('empty', fixture('empty'))
+    harness.files.write('empty', fixture('empty'))
     const file = join(harness.dir, 'empty.json')
-    expect(scanner.readText(file)).toBeNull()
-    expect(scanner.readText(file)).toBeNull()
+    expect(await scanner.readText(file)).toBeNull()
+    expect(await scanner.readText(file)).toBeNull()
     // 没有正文的会话只解析一次，不会每个查询都重读。
     expect(parses).toBe(1)
   })
 
-  test('readText keeps the statistics cache intact', () => {
+  test('reports progress while the index is being built', async () => {
     const harness = createHarness()
-    harness.write('one', fixture('one'))
-    let dedupes = 0
+    for (const id of ['a', 'b', 'c']) harness.files.write(id, fixture(id))
+    const seen = []
     const scanner = createStatsScanner({
       directory: () => harness.dir,
+      indexStore: null,
       fileSystem: { readdirSync, statSync, readFileSync },
-      parseStats: (raw) => ({ id: raw.id }),
-      parseText: (raw) => ({ id: raw.id, text: '正文', truncated: false }),
-      dedupeStats(rows) {
-        dedupes += 1
-        return rows
+      onProgress(progress) {
+        seen.push({ ...progress })
       }
     })
 
-    scanner.scanStats()
-    scanner.readText(join(harness.dir, 'one.json'))
-    scanner.scanStats()
-
-    expect(dedupes).toBe(1)
+    await scanner.scanStats()
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.at(-1)).toEqual({ building: false, done: 3, total: 3 })
   })
 })

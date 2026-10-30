@@ -35,6 +35,7 @@ export {
   toAssetPath,
 } from './app-paths.js';
 export { formatTokens } from './format.js';
+export { DAY_MS, addDays, dayStartMs, localDayKey } from './stats-day.js';
 export { toolIcon, toolLabel } from './tools.js';
 export {
   DEFAULT_SESSION_SEARCH_RANGE,

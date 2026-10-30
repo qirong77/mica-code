@@ -141,7 +141,11 @@ export class SessionController {
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = options.conversationMessages ?? getPersistableConversationMessages(this.agent);
     this.currentTurnState = options.turnState ?? this.currentTurnState;
-    if (!hasConversation(snapshot.messages, conversationMessages) && !options.allowEmpty) {
+    if (
+      !hasConversation(snapshot.messages, conversationMessages) &&
+      !options.allowEmpty &&
+      this.currentTitleSource !== 'manual'
+    ) {
       this.store.delete(this.currentSessionId);
       // The file is gone, so the recorded signature no longer describes
       // anything on disk. Clearing it keeps the next save (this session is
@@ -338,6 +342,9 @@ export class SessionController {
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = getPersistableConversationMessages(this.agent);
     if (hasConversation(snapshot.messages, conversationMessages)) return false;
+    // 用户亲手起过名字的空会话不是草稿：重命名就是「这条会话要留下」的表达。
+    // 换会话时把它删掉，侧栏里那条刚命名好的会话就会凭空消失。
+    if (this.currentTitleSource === 'manual') return false;
     return this.store.delete(this.currentSessionId);
   }
 }

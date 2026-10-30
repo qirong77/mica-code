@@ -15,7 +15,6 @@ import {
 import {
   filterOwnedSubagentRecords,
   filterOwnedUsage,
-  ownedUsageIdentities,
   projectSubagentRecords,
   projectUsage
 } from './stats-core'
@@ -38,7 +37,46 @@ function sessionsDir() {
   return micaHome ? join(micaHome, 'sessions') : join(app.getPath('home'), '.mica', 'sessions')
 }
 
-const statsScanner = createStatsScanner({ directory: sessionsDir })
+/**
+ * 统计投影的磁盘索引：与 sessions 目录同级（不进 sessions，否则会被当成会话文件）。
+ * 上千个会话文件合计几百 MB，整份解析要好几秒；索引把「每个文件解析成什么」按签名
+ * 缓存下来，进程重启后只解析变过的那些。
+ */
+function statsIndexFile() {
+  return join(dirname(sessionsDir()), 'desktop-stats-index.json')
+}
+
+let broadcastStats = () => {}
+
+/** 由 server 注入：索引在后台构建 / 有会话变化时通知页面重读（页面不需要轮询等它）。 */
+export function setStatsBroadcaster(fn) {
+  broadcastStats = typeof fn === 'function' ? fn : () => {}
+}
+
+let lastBroadcastAt = 0
+const BROADCAST_INTERVAL_MS = 500
+
+const statsScanner = createStatsScanner({
+  directory: sessionsDir,
+  indexFile: statsIndexFile,
+  onProgress(progress) {
+    // 首次构建（升级后的第一次打开）会持续几秒：按节流把已有结果推给页面，
+    // 侧栏与统计页因此是「逐渐填充」而不是先空白再一次性出现。
+    if (!progress.building) {
+      lastBroadcastAt = 0
+      broadcastStats('stats:changed', { reason: 'built' })
+      return
+    }
+    const now = Date.now()
+    if (now - lastBroadcastAt < BROADCAST_INTERVAL_MS) return
+    lastBroadcastAt = now
+    broadcastStats('stats:changed', {
+      reason: 'progress',
+      done: progress.done,
+      total: progress.total
+    })
+  }
+})
 
 const hasLiveTurnLease = createTurnLeaseProbe({
   lockDir: () => join(sessionsDir(), '.turn-locks')
@@ -214,8 +252,8 @@ function deleteSession(sessionId) {
  * 持有者可能在文件没变的情况下消失），但结果不变时要把数组与行对象的引用原样交回去——
  * 侧栏用引用相等来判断是否需要重渲染，每次 refresh 都换新数组会让它白刷一遍。
  */
-function scanMeta() {
-  const rows = statsScanner.scanMeta()
+async function scanMeta() {
+  const rows = await statsScanner.scanMeta()
   // `interrupted`（running 但没人持锁 = 崩溃残留）与 `remoteRunning`（有活租约 =
   // 某个进程正在写这个会话，可能是另一个窗口/另一个运行时实例）是同一次探测的两种
   // 结论，所以每个会话只读一次锁文件，两个标记也一起进缓存键。
@@ -246,7 +284,7 @@ function scanMeta() {
   return value
 }
 
-/** 扫描全部 session 统计，并由 stats-core 过滤、去重。 */
+/** 扫描全部 session 统计（已按会话去重、按本地日聚合）。 */
 function scan() {
   return statsScanner.scanStats()
 }
@@ -265,13 +303,13 @@ const SEARCH_MAX_RESULTS = 100
  *
  * 返回的 `truncated` 表示候选被上限截断（说明只搜了最近的一部分），界面据此告知用户。
  */
-function searchSessions({ query, sinceMs, limit } = {}) {
+async function searchSessions({ query, sinceMs, limit } = {}) {
   const tokens = tokenizeSearchQuery(query)
   if (!tokens.length) return { results: [], scanned: 0, truncated: false }
   const since = Number(sinceMs) > 0 ? Number(sinceMs) : 0
   const max =
     Number.isFinite(limit) && limit > 0 ? Math.min(limit, SEARCH_MAX_RESULTS) : SEARCH_MAX_RESULTS
-  const candidates = scanMeta().filter((row) => !since || row.updatedAtMs >= since)
+  const candidates = (await scanMeta()).filter((row) => !since || row.updatedAtMs >= since)
 
   const results = []
   let scanned = 0
@@ -287,7 +325,7 @@ function searchSessions({ query, sinceMs, limit } = {}) {
     }
     const file = sessionFile(row.id)
     if (!file) continue
-    const text = statsScanner.readText(file)
+    const text = await statsScanner.readText(file)
     if (!text) continue
     scanned += 1
     const snippet = extractSnippet(text.text, tokens)
@@ -298,11 +336,13 @@ function searchSessions({ query, sinceMs, limit } = {}) {
 
 export function registerStatsIpc() {
   ipcMain.handle('stats:search-sessions', (_event, payload = {}) => searchSessions(payload))
-  ipcMain.handle('stats:read', () => ({
-    sessions: scan(),
+  ipcMain.handle('stats:read', async () => ({
+    sessions: await scan(),
+    // 首次构建索引时页面据此显示进度，构建完成后由 stats:changed 通知重读。
+    progress: { ...statsScanner.progress },
     scannedAt: Date.now()
   }))
-  ipcMain.handle('stats:session-detail', (_event, { sessionId } = {}) => {
+  ipcMain.handle('stats:session-detail', async (_event, { sessionId } = {}) => {
     const file = sessionFile(sessionId)
     if (!file || !existsSync(file)) throw new Error('Session not found')
     const raw = JSON.parse(readFileSync(file, 'utf8'))
@@ -311,9 +351,9 @@ export function registerStatsIpc() {
     const subagentRecords = Array.isArray(snap.subagentUsageHistory)
       ? snap.subagentUsageHistory.filter((record) => record && typeof record === 'object')
       : []
-    // 列表与详情必须共用同一个归属口径（见 ownedUsageIdentities）。scan() 用的是带缓存
-    // 的增量扫描，打开详情不会重新读一遍所有会话文件。
-    const owned = ownedUsageIdentities(scan(), sessionId)
+    // 列表与详情必须共用同一个归属口径（见统计扫描器的归属表）：老 fork 文件里复制的
+    // 用量记录归来源会话，详情不能把它们展示成自己的。
+    const owned = await statsScanner.ownedIdentities(sessionId)
     const lastUsage = snap.lastUsage ? projectUsage(snap.lastUsage) : null
     const displayUsage = normalizeDisplayUsage(snap.displayUsage)
     return {
@@ -338,7 +378,7 @@ export function registerStatsIpc() {
       )
     }
   })
-  ipcMain.handle('stats:list-sessions', () => ({ sessions: scanMeta() }))
+  ipcMain.handle('stats:list-sessions', async () => ({ sessions: await scanMeta() }))
   // 会话行上的插件标记（标签色点等）：宿主只提供通用读写面，具体有哪些、叫什么由插件决定。
   ipcMain.handle('stats:list-annotations', () => listSessionAnnotations())
   ipcMain.handle('stats:set-annotation', (_event, payload = {}) => setSessionAnnotation(payload))

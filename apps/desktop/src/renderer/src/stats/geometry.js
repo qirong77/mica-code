@@ -1,26 +1,8 @@
-export const DAY_MS = 86400000
+// 日边界与 host 的统计聚合共用一份实现（mica-web-shared/stats-day），这里的
+// 导出面保持不变，其余几何函数直接引它。
+import { DAY_MS, addDays, dayStartMs, localDayKey } from '@packages/mica-web-shared/stats-day.js'
 
-/** 本地日历日键 'YYYY-MM-DD'（基于机器本地时区） */
-export function localDayKey(ms) {
-  const d = new Date(ms)
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${m}-${day}`
-}
-
-/** 'YYYY-MM-DD' 键的本地当日零点毫秒 */
-export function dayStartMs(day) {
-  const [y, m, d] = day.split('-').map(Number)
-  return new Date(y, m - 1, d).getTime()
-}
-
-/** 本地日 day 往后 n 天（n 可为负） */
-export function addDays(day, n) {
-  const [y, m, d] = day.split('-').map(Number)
-  const dt = new Date(y, m - 1, d)
-  dt.setDate(dt.getDate() + n)
-  return localDayKey(dt.getTime())
-}
+export { DAY_MS, addDays, dayStartMs, localDayKey }
 
 /** 本地日键的星期：0=周日 … 6=周六 */
 export function weekdayOf(day) {

@@ -1529,7 +1529,13 @@ async function handleCodexRequest(
         return;
       }
       ctx.sessionController.renameCurrent(title);
-      ctx.writeResponse({ ok: true, title: ctx.sessionController.getCurrentTitle() ?? title });
+      // 回 sessionId 是给「还没有消息、只改过名字」的会话用的：宿主在改名时就把空会话
+      // 落盘了，客户端要拿这个 id 把它绑成一条真实会话（见 desktop 的 chat:rename-session）。
+      ctx.writeResponse({
+        ok: true,
+        title: ctx.sessionController.getCurrentTitle() ?? title,
+        sessionId: ctx.sessionId,
+      });
       return;
     }
     case MICA_METHODS.capabilitiesGet: {
