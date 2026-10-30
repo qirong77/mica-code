@@ -5376,17 +5376,18 @@ body.is-resizing-btw {
 
 .chat-plugin-quickbar-button {
   display: inline-flex;
-  height: 22px;
+  height: 24px;
   flex: none;
   align-items: center;
   gap: 4px;
-  padding: 0 9px;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: transparent;
-  color: rgb(255 255 255 / 52%);
+  color: var(--color-fg-soft);
   font: inherit;
   font-size: 11.5px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
   transition:
@@ -5396,20 +5397,21 @@ body.is-resizing-btw {
 }
 
 .chat-plugin-quickbar-button:hover {
+  background: var(--color-panel-hi);
+  color: var(--color-fg-strong);
+}
+
+/* 打开着的那一块：底色 + 描边，与页签的「当前」是同一层意思，不另造一种强调。 */
+.chat-plugin-quickbar-button.is-active {
   border-color: var(--color-line-strong);
   background: var(--color-panel-hi);
   color: var(--color-fg-strong);
 }
 
-.chat-plugin-quickbar-button.is-active {
-  border-color: var(--color-accent);
-  color: var(--color-fg-strong);
-}
-
-/* 主操作（立刻检查这类「真要干点什么」的按钮）比配置入口更亮一档。 */
+/* 主操作（真要干点什么）比配置入口亮一档：文字色拉满，其余保持同尺寸。 */
 .chat-plugin-quickbar-button.is-primary {
-  border-color: rgb(255 255 255 / 22%);
-  color: var(--color-fg-strong);
+  color: var(--color-fg-max);
+  font-weight: 600;
 }
 
 .chat-plugin-quickbar-button:disabled {
@@ -5425,6 +5427,141 @@ body.is-resizing-btw {
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 面板弹窗定高：切页签时内容长短不一，不定高就会一伸一缩。内容在 .chat-plugin-panel-body
+   里自己滚，页签行留在顶上。 */
+.chat-plugin-modal {
+  width: min(920px, 100%);
+  max-width: min(920px, 100%);
+  height: min(84vh, 760px);
+}
+
+/* 内容区交给面板自己排版：ModalShell 默认的 16px 内边距会让页签行与行内容错开一条。 */
+.chat-plugin-modal .chat-modal-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* 设置页那套控件的外壳：页签 + 可滚动内容。 */
+.chat-plugin-panel {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-plugin-panel-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 14px 16px 16px;
+  overscroll-behavior: contain;
+}
+
+/* 页签下的那一块：行本身就带分隔线，外面不再套卡片（弹窗已经是那个「面」）。 */
+.chat-plugin-tab-pane {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.chat-plugin-tab-pane > .chat-plugin-rows > .setting-row:first-child {
+  border-top: 0;
+}
+
+/* 一行的值：单行省略，悬停看全文。 */
+.chat-plugin-value {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-plugin-value.tone-ok {
+  color: var(--green);
+}
+
+.chat-plugin-value.tone-warn {
+  color: var(--amber);
+}
+
+.chat-plugin-value.tone-error {
+  color: var(--red);
+}
+
+.chat-plugin-value.tone-accent {
+  color: var(--blue);
+}
+
+.chat-plugin-value.tone-muted {
+  color: var(--text-faint);
+}
+
+/* 条目行：值在左，动作贴右；值太长时先让值省略，按钮不动。 */
+.chat-plugin-item {
+  display: flex;
+  /* grid 子项默认 min-width: auto，值里的长路径会把整行撑出弹窗。 */
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-plugin-item-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-plugin-item > .chat-plugin-value {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 分区底部的整块动作（打开目录、编辑项目事实）：与行内容左对齐。 */
+.chat-plugin-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* 空态放在已经在「一块面」里的地方：外框由分区块提供，这里不再套第二层描边。 */
+.chat-plugin-tab-pane .ui-empty-wrap,
+.collapsible-body .ui-empty-wrap {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.chat-plugin-rows > .ui-empty-wrap .ui-empty {
+  padding: 0 16px 14px;
+  color: var(--text-faint);
+  font-size: var(--text-aux);
+  line-height: 1.55;
+}
+
+.chat-plugin-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 4px 0;
+  color: var(--text-faint);
+  font-size: var(--text-aux);
 }
 
 .chat-plugin-dock {
@@ -5513,282 +5650,6 @@ body.is-resizing-btw {
   padding: 8px 10px 14px;
 }
 
-.chat-plugin-section {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
-  background: var(--chat-panel-bg, transparent);
-  overflow: hidden;
-}
-
-.chat-plugin-section-head {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  padding: 7px 9px;
-  border: 0;
-  background: transparent;
-  color: var(--chat-muted);
-  text-align: left;
-  cursor: pointer;
-}
-
-.chat-plugin-section-head:hover {
-  color: var(--chat-text);
-}
-
-.chat-plugin-section-chevron {
-  flex: none;
-  transition: transform 120ms ease;
-  transform: rotate(90deg);
-}
-
-.chat-plugin-section.is-collapsed .chat-plugin-section-chevron {
-  transform: rotate(0deg);
-}
-
-.chat-plugin-section-title {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-
-.chat-plugin-section-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 0 9px 9px;
-}
-
-.chat-plugin-chip {
-  flex: none;
-  padding: 0 6px;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 400;
-  line-height: 16px;
-}
-
-.chat-plugin-rows {
-  display: flex;
-  margin: 0;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.chat-plugin-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.chat-plugin-row dt {
-  flex: none;
-  min-width: 62px;
-  color: var(--chat-muted);
-}
-
-.chat-plugin-row dd {
-  min-width: 0;
-  margin: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  color: var(--color-fg);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-plugin-items {
-  display: flex;
-  margin: 0;
-  padding: 0;
-  flex-direction: column;
-  gap: 0;
-  list-style: none;
-}
-
-.chat-plugin-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 2px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-}
-
-.chat-plugin-item + .chat-plugin-item {
-  border-top: 1px solid var(--color-line);
-}
-
-.chat-plugin-item:hover {
-  background: rgb(255 255 255 / 3%);
-}
-
-.chat-plugin-item-main {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.chat-plugin-item-label,
-.chat-plugin-item-value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-plugin-item-label {
-  color: var(--color-fg-strong);
-}
-
-.chat-plugin-item-value {
-  color: var(--chat-muted);
-  font-size: 10.5px;
-}
-
-.chat-plugin-item-actions {
-  display: flex;
-  flex: none;
-  gap: 4px;
-}
-
-.chat-plugin-item-actions .chat-plugin-button {
-  height: 20px;
-  padding: 0 6px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--chat-muted);
-  line-height: 18px;
-}
-
-.chat-plugin-item-actions .chat-plugin-button:hover:not(:disabled) {
-  border-color: var(--color-line);
-  color: var(--color-fg);
-}
-
-.chat-plugin-item-actions .chat-plugin-button.tone-danger {
-  color: color-mix(in srgb, var(--color-danger, #e06c75) 78%, transparent);
-}
-
-.chat-plugin-item-actions .chat-plugin-button.tone-danger:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--color-danger, #e06c75) 40%, transparent);
-  color: var(--color-danger, #e06c75);
-}
-
-.chat-plugin-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.chat-plugin-field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.chat-plugin-field-label {
-  color: var(--chat-muted);
-  font-size: 11px;
-}
-
-.chat-plugin-field-hint {
-  color: var(--chat-subtle);
-  font-size: 10.5px;
-}
-
-.chat-plugin-input {
-  height: 24px;
-  padding: 0 6px;
-  border: 1px solid var(--color-line);
-  border-radius: 4px;
-  background: var(--color-canvas);
-  color: var(--color-fg-strong);
-  font-family: inherit;
-  font-size: 12px;
-}
-
-.chat-plugin-input:focus {
-  border-color: var(--color-accent);
-  outline: none;
-}
-
-.chat-plugin-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.chat-plugin-button {
-  height: 22px;
-  padding: 0 9px;
-  border: 1px solid var(--color-line);
-  border-radius: 4px;
-  background: rgb(255 255 255 / 4%);
-  color: var(--color-fg);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 11px;
-  line-height: 20px;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
-}
-
-.chat-plugin-button:hover:not(:disabled) {
-  border-color: var(--color-line-strong);
-  background: rgb(255 255 255 / 9%);
-}
-
-.chat-plugin-button:disabled {
-  color: rgb(255 255 255 / 25%);
-  cursor: default;
-}
-
-.chat-plugin-button.tone-primary {
-  border-color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
-  color: var(--color-fg-strong);
-}
-
-.chat-plugin-button.tone-danger {
-  color: var(--color-danger, #e06c75);
-}
-
-.chat-plugin-empty,
-.chat-plugin-error {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: 0;
-  color: var(--chat-muted);
-  font-size: 11px;
-}
-
-.chat-plugin-error {
-  color: var(--color-danger, #e06c75);
-}
-
-.chat-plugin-feedback {
-  flex: none;
-  margin: 0;
-  padding: 5px 10px 6px;
-  border-bottom: 1px solid var(--color-line);
-  background: var(--color-accent-subtle, #cc783224);
-  color: var(--color-fg-strong);
-  font-size: 11px;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
 .chat-plugin-spin {
   animation: chat-plugin-spin 900ms linear infinite;
 }
@@ -5797,36 +5658,6 @@ body.is-resizing-btw {
   to {
     transform: rotate(360deg);
   }
-}
-
-.chat-plugin-chip.tone-ok,
-.chat-plugin-item-label.tone-ok,
-.chat-plugin-row dd.tone-ok {
-  color: var(--color-ok, #8ec07c);
-}
-
-.chat-plugin-chip.tone-warn,
-.chat-plugin-item-label.tone-warn,
-.chat-plugin-row dd.tone-warn {
-  color: var(--color-warn);
-}
-
-.chat-plugin-chip.tone-error,
-.chat-plugin-item-label.tone-error,
-.chat-plugin-row dd.tone-error {
-  color: var(--color-danger, #e06c75);
-}
-
-.chat-plugin-chip.tone-accent,
-.chat-plugin-item-label.tone-accent,
-.chat-plugin-row dd.tone-accent {
-  color: var(--color-accent);
-}
-
-.chat-plugin-chip.tone-muted,
-.chat-plugin-item-label.tone-muted,
-.chat-plugin-row dd.tone-muted {
-  color: var(--chat-muted);
 }
 
 @media (max-width: 767px) {

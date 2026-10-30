@@ -125,7 +125,8 @@ export function Tag({
   dot = false,
 }: {
   children: ReactNode;
-  tone?: 'default' | 'green' | 'red' | 'blue';
+  /** `amber` 是「需要注意但没坏」（待配置、有偏离），与 `red` 的「出错了」分开。 */
+  tone?: 'default' | 'green' | 'red' | 'blue' | 'amber';
   dot?: boolean;
 }) {
   return (

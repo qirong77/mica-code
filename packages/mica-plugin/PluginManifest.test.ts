@@ -117,6 +117,7 @@ describe('parsePluginManifest desktop panel', () => {
       expect(result.manifest.desktopPanel).toEqual({
         label: '需求开发',
         roles: ['需求开发', '辅助'],
+        display: 'drawer',
         shortcuts: [],
       });
     }
@@ -125,7 +126,23 @@ describe('parsePluginManifest desktop panel', () => {
   it('falls back to the plugin name and treats a missing role list as "any role"', () => {
     const blank = parsePluginManifest(base({ desktop: { panel: { label: ' ' } } }));
     expect(blank.ok).toBe(true);
-    if (blank.ok) expect(blank.manifest.desktopPanel).toEqual({ label: 'Demo', roles: [], shortcuts: [] });
+    if (blank.ok)
+      expect(blank.manifest.desktopPanel).toEqual({
+        label: 'Demo',
+        roles: [],
+        display: 'drawer',
+        shortcuts: [],
+      });
+  });
+
+  it('reads the display form and rejects an unknown one', () => {
+    const modal = parsePluginManifest(base({ desktop: { panel: { display: 'modal' } } }));
+    expect(modal.ok).toBe(true);
+    if (modal.ok) expect(modal.manifest.desktopPanel?.display).toBe('modal');
+
+    const bad = parsePluginManifest(base({ desktop: { panel: { display: 'sheet' } } }));
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain('display');
   });
 
   it('dedupes roles so the same role cannot render twice', () => {

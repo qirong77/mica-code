@@ -51,6 +51,7 @@ export function selectPluginPanels(plugins, role) {
       id: plugin.id,
       label: plugin.desktopPanel.label || plugin.name || plugin.id,
       icon: plugin.icon || '',
+      display: plugin.desktopPanel.display === 'modal' ? 'modal' : 'drawer',
       shortcuts: Array.isArray(plugin.desktopPanel.shortcuts) ? plugin.desktopPanel.shortcuts : []
     }))
 }
@@ -77,4 +78,20 @@ export function applyPanelResult(
   if (result.openPath && typeof result.openPath.path === 'string' && result.openPath.path.trim()) {
     onOpenPath?.(result.openPath.path, result.openPath.line)
   }
+}
+
+/**
+ * 弹窗形态的页签：一块分区一个页签，标题就是页签名。
+ *
+ * 没有标题的分区（插件可以不给）也得有个能点的名字，按位置叫「第 N 项」；
+ * `focusSection` 是快捷按钮点名要看的那一块，命中就切过去，没有（或那块已被插件删掉）
+ * 就落回第一块——不能因为一个失效的名字把弹窗开成空白。
+ */
+export function pluginPanelTabs(sections, focusSection) {
+  const tabs = (Array.isArray(sections) ? sections : []).map((section, index) => ({
+    key: section?.title || `section-${index}`,
+    label: section?.title || `第 ${index + 1} 项`
+  }))
+  const focused = tabs.findIndex((tab) => tab.key === focusSection)
+  return { tabs, activeIndex: focused >= 0 ? focused : 0 }
 }

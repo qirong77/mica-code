@@ -29,7 +29,8 @@
   `DESKTOP_CHECKS` 目录（`PluginDesktop.ts` 是宿主与插件共用的单一事实来源）。状态由桌面端探测
   并渲染在配置页的插件详情里——插件跑在 app-server 子进程里，既探测不到也渲染不了。
   依赖桌面能力面的插件用 `requires: ["desktop"]` 声明，其它宿主在注册阶段整插件跳过。
-- 对话右侧面板：清单的 `desktop.panel` 声明标题与显示条件（角色名），插件用
+- 对话右侧面板：清单的 `desktop.panel` 声明标题、显示条件（角色名）与呈现形态
+  （`display: 'drawer' | 'modal'`，默认抽屉；内容超过一屏时用 `modal`，里面按 section 切成页签），插件用
   `ctx.desktop.panel({ view, action })` 交出纯数据的视图与动作分派。宿主负责归一化与渲染，
   所以用户插件（没有前端模块）也有界面；`PluginPanel.ts` 里是类型、进程内登记表
   （`PluginPanelRegistry`）与视图/动作的归一化函数。只在清单声明了面板时才提供这个入口。

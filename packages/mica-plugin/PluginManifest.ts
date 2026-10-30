@@ -12,11 +12,13 @@ import {
   type PluginActionTone,
 } from './PluginActions.js';
 import {
+  PLUGIN_PANEL_DISPLAYS,
   isDesktopCheckId,
   type DesktopCheckId,
   type PluginDesktopEntry,
   type PluginDesktopPage,
   type PluginDesktopPanel,
+  type PluginPanelDisplay,
   type PluginPanelShortcut,
 } from './PluginDesktop.js';
 import type { PluginSessionMenuItem } from './PluginSessionMenu.js';
@@ -497,7 +499,7 @@ function readDesktopPanel(
   if (typeof input === 'boolean') {
     // `"panel": true` 是最常见的写法，语义就是「一块面板，任何角色都显示」。
     return input
-      ? { ok: true, value: { label: pluginName, roles: [], shortcuts: [] } }
+      ? { ok: true, value: { label: pluginName, roles: [], display: 'drawer', shortcuts: [] } }
       : { ok: true, value: null };
   }
   if (!isRecord(input)) return { ok: false, error: 'desktop.panel 必须是对象或 true' };
@@ -517,9 +519,25 @@ function readDesktopPanel(
     }
   }
   const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
+  const display = readPanelDisplay(input.display);
+  if (!display.ok) return display;
   const shortcuts = readPanelShortcuts(input.shortcuts);
   if (!shortcuts.ok) return shortcuts;
-  return { ok: true, value: { label, roles, shortcuts: shortcuts.value } };
+  return { ok: true, value: { label, roles, display: display.value, shortcuts: shortcuts.value } };
+}
+
+/** `desktop.panel.display`：不写默认抽屉，写错直接拒绝（猜一个会画成另一种形态）。 */
+function readPanelDisplay(
+  input: unknown,
+): { ok: true; value: PluginPanelDisplay } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: 'drawer' };
+  if (typeof input !== 'string' || !PLUGIN_PANEL_DISPLAYS.includes(input as PluginPanelDisplay)) {
+    return {
+      ok: false,
+      error: `desktop.panel.display 只能是 ${PLUGIN_PANEL_DISPLAYS.join(' / ')}`,
+    };
+  }
+  return { ok: true, value: input as PluginPanelDisplay };
 }
 
 /**

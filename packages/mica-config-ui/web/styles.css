@@ -1098,6 +1098,12 @@
     background: color-mix(in srgb, var(--blue) 9%, transparent);
   }
 
+  .ui-tag-amber {
+    color: var(--amber);
+    border-color: color-mix(in srgb, var(--amber) 30%, transparent);
+    background: color-mix(in srgb, var(--amber) 9%, transparent);
+  }
+
   .tool-item p,
   .skill-preview,
   .code-preview {

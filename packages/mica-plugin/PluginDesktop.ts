@@ -106,6 +106,14 @@ export type PluginDesktopPanel = {
   /** 显示条件：会话角色名（`$MICA_HOME/role/<name>.md`）。 */
   roles: string[];
   /**
+   * 面板以什么形态出现：`drawer` 贴着对话右侧（默认），`modal` 盖住整窗的弹窗。
+   *
+   * 抽屉适合「几行状态 + 一个开关」这种一瞥即走的面板；内容本身超过一屏（设置分组多、
+   * 条目列表长）时抽屉太窄，读和点都费劲，那就声明 `modal`。这是纯呈现选择——同一份
+   * 视图数据两种形态都画得出来，插件不需要为此改代码。
+   */
+  display: PluginPanelDisplay;
+  /**
    * 输入框上方那排快捷按钮，按声明顺序渲染。
    *
    * 声明它是因为「一个面板」通常承载两类不同的东西：**马上要做的一件事**（立刻检查）
@@ -114,6 +122,11 @@ export type PluginDesktopPanel = {
    */
   shortcuts: PluginPanelShortcut[];
 };
+
+/** `desktop.panel.display` 的取值（单一事实来源，清单解析与界面共用）。 */
+export const PLUGIN_PANEL_DISPLAYS = ['drawer', 'modal'] as const;
+
+export type PluginPanelDisplay = (typeof PLUGIN_PANEL_DISPLAYS)[number];
 
 /**
  * 一个快捷按钮。二选一：
