@@ -235,8 +235,8 @@ function SubagentCard({ record }) {
 }
 
 /**
- * 会话详情：与上下文弹窗、配置页的 Sessions 页共用 `SessionDetailView`（对话记录 /
- * Context 分析 / 原始文件），这里只多一个统计页专属的「用量」页签。
+ * 会话详情：与上下文弹窗、配置页的 Sessions 页共用 `SessionDetailView`（系统提示词 /
+ * 对话记录 / Context 分析 / 原始文件），这里只多一个统计页专属的「用量」页签。
  */
 export function SessionDetailModal({ sessionId, onClose }) {
   const [detail, setDetail] = useState(null)
@@ -403,7 +403,11 @@ export function SessionDetailModal({ sessionId, onClose }) {
         </div>
       ) : (
         <div className="mica-config-ui is-embed session-detail-embed">
-          <SessionDetailView sessionId={sessionId} extraTabs={[usageTab]} />
+          <SessionDetailView
+            sessionId={sessionId}
+            defaultTab="conversation"
+            extraTabs={[usageTab]}
+          />
         </div>
       )}
     </ModalShell>

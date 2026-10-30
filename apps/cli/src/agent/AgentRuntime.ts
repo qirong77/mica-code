@@ -78,6 +78,12 @@ export type AgentRuntimeSnapshot = {
   pluginSessionSettings?: PluginSessionSettingsRecord;
   /** Derived model context window in tokens, used by headless/session tooling. */
   contextWindowSize?: number;
+  /**
+   * 最近一次请求实际发出的 system prompt 全文（角色 + 项目说明 + skills + 插件段落）。
+   *
+   * 只随会话快照落盘供界面查看，不会用来重建请求：下一轮仍然重新拼装。
+   */
+  systemPrompt?: string;
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
@@ -162,6 +168,13 @@ export class AgentRuntime {
   private pluginSessionSettings: PluginSessionSettingsRecord = {};
   /** 插件向 system prompt 贡献的段落，每轮重新渲染。 */
   readonly promptSections = new PluginPromptSections();
+  /**
+   * 最近一次真正发给模型的主请求 system prompt。
+   *
+   * 只在主 client 的 resolver 里记录（子代理 / BTW 有自己的提示词，不覆盖会话视图），
+   * 随快照落盘后界面就能回答「这次请求到底带了什么」。
+   */
+  private lastSystemPrompt: string | undefined;
   private lastStatusKey: string | null = null;
   private activeRunStartedAt: number | null = null;
   private activeStatusModuleStartedAt: number | null = null;
@@ -418,6 +431,8 @@ export class AgentRuntime {
     // 否则新会话会莫名其妙继承上一轮的结论。
     this.pluginState = {};
     this.pluginSessionSettings = {};
+    // 记下来的提示词也属于这条会话：新会话的第一轮请求会重新记录。
+    this.lastSystemPrompt = undefined;
     this.emitStatus({ type: 'idle' });
   }
 
@@ -434,6 +449,7 @@ export class AgentRuntime {
       pluginState: this.pluginState,
       pluginSessionSettings: this.pluginSessionSettings,
       contextWindowSize: this.currentConfig.provider.contextWindowSize,
+      systemPrompt: this.lastSystemPrompt,
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
       lastUsage: snapshot?.lastUsage,
@@ -509,6 +525,8 @@ export class AgentRuntime {
     this.capabilities = normalizeCapabilitySelection(snapshot.capabilitySelection ?? this.resolveDefaultCapabilities());
     this.pluginState = normalizePluginStateRecord(snapshot.pluginState);
     this.pluginSessionSettings = normalizePluginSessionSettingsRecord(snapshot.pluginSessionSettings);
+    // 恢复上一次请求的提示词：还没发新请求时，界面看到的是这条会话真正用过的那一份。
+    this.lastSystemPrompt = typeof snapshot.systemPrompt === 'string' ? snapshot.systemPrompt : undefined;
     this.recreateClient();
     this.client?.loadSnapshot({
       model: snapshot.model,
@@ -690,6 +708,9 @@ export class AgentRuntime {
     return this.createClientOptions({
       systemPrompt: () => {
         const prompt = this.buildSystemPrompt();
+        // 会话快照保留这一份：界面上的「系统提示词」看的就是真正发出去的内容，而不是
+        // 角色文件里那一段（skills 索引、AGENT.md 与插件段落都只在这里可见）。
+        this.lastSystemPrompt = prompt;
         // Only the main client's resolver observes the returned prompt. Shared
         // createClientOptions() callbacks used by subrequests do not report it.
         this.observeActive({ type: 'prompt:resolved', prompt });

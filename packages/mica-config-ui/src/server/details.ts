@@ -18,6 +18,7 @@ import type {
   ConfigWebConversationItem,
   ConfigWebConversationPage,
   ConfigWebSessionDetails,
+  ConfigWebSessionPrompt,
   ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
 } from '../shared/types.js';
@@ -237,7 +238,7 @@ export function getSessionContextAnalysis(id: string): ConfigWebContextAnalysis 
       providerId: session.snapshot.providerId,
       protocol: session.snapshot.protocol,
       model: session.snapshot.model,
-      systemPrompt: role?.prompt ?? '',
+      systemPrompt: sessionSystemPrompt(session, role?.prompt),
       messages: session.snapshot.messages,
     },
     {
@@ -247,6 +248,25 @@ export function getSessionContextAnalysis(id: string): ConfigWebContextAnalysis 
       displayUsage: session.snapshot.displayUsage,
     },
   );
+}
+
+/**
+ * 这条会话最近一次请求发出的完整提示词。
+ *
+ * 会话快照里存着真正发出去的那一份（含 skills 索引、AGENT.md 与插件段落）；旧会话没有记录，
+ * 此时 `prompt` 为空串、`rolePrompt` 只有角色文件里那一段，界面据此说明「没法重放」。
+ */
+export function getSessionSystemPrompt(id: string): ConfigWebSessionPrompt {
+  const { value: session } = loadSessionCached(id);
+  return {
+    prompt: session.snapshot.systemPrompt ?? '',
+    rolePrompt: micaAgent.roles.get(session.snapshot.role)?.prompt ?? '',
+  };
+}
+
+/** 展示用的提示词：有记录就用真实发出的一份，旧会话退回角色提示词。 */
+function sessionSystemPrompt(session: PersistedSession, rolePrompt: string | undefined): string {
+  return session.snapshot.systemPrompt ?? rolePrompt ?? '';
 }
 
 export function getSessionContent(id: string): { content: string } {
@@ -305,7 +325,7 @@ function loadConversationItemsCached(id: string, session: PersistedSession): Con
     providerId: session.snapshot.providerId,
     protocol: session.snapshot.protocol,
     model: session.snapshot.model,
-    systemPrompt: role?.prompt ?? '',
+    systemPrompt: sessionSystemPrompt(session, role?.prompt),
     messages: session.snapshot.messages,
   });
   const entry = { mtimeMs, size, value: items };

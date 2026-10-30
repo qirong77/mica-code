@@ -171,6 +171,7 @@ npm run start:web          # 运行已构建的 Web 运行时
   `thread/start`、fork（父会话换成源会话）。非法值（非字符串、id 形状不对、自指）丢弃而不是拒绝整个
   会话——它只影响侧栏嵌套。`sessions/session-index.json` 的版本号跟着升，旧索引直接重建。
 - 会话级状态都在快照里：`capabilitySelection` / `capabilitiesCustomized`、`pluginState`（插件自己的 JSON）、`pluginSessionSettings`（插件设置的会话覆盖，只存改过的键）、`notes`。`startNewSession` 清空，resume/fork 沿用，rewind 随 checkpoint 回滚。
+- `snapshot.systemPrompt` 是「最近一次请求真正发出去的 system prompt」的存档（角色 + 项目说明 + skills 索引 + 环境信息 + 插件段落），只给界面看，绝不用于重建请求——下一轮仍然现场拼装。写在 `AgentRuntime` 解析 `systemPrompt` 的那一刻，随 checkpoint 落盘；旧会话没有这个字段，界面如实说「没有记录」而不重新拼一份冒充。
 - `subagentUsageHistory` 独立于主 `usageHistory`；fork 清空两类历史，只保留描述继承上下文的 `lastUsage`。
 - compact 保留 `lastUsage` / `usageHistory` 供 Stats 对账；界面 ctx 优先读 `displayUsage`。
 - 无手动标题时取最后一条真实用户消息（最长 60 字符）；自动改名不得覆盖 `titleSource === 'manual'`。
@@ -393,7 +394,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 顶栏「会话笔记」图标打开 `SessionNotesDialog`（Monaco，700ms 防抖，无保存按钮）。
 - 插件入口是**输入框正上方那排胶囊按钮**（`PluginQuickBar`，来自清单 `desktop.panel.shortcuts`）：`action` 类按钮点一下直接调插件动作（立即返回，不在页面里跑外部命令或等模型），`section` 类按钮打开盖在对话区右侧的抽屉并展开那一块（`PluginPanels`，宽 340、不挤窄对话）；抽屉折叠状态与 ChatView 的 `pluginPanelOpen` / `pluginPanelSection` 共用。哪些插件有面板、`roles` 门槛、是否停用都从 `readPluginsDetails` 拿（用户插件也在里面），规则在 `renderer/src/plugin-panels.js`；RPC 走 `window.mica.chat.pluginPanels.view|action` → `chat:plugin-panel-view|action`。host 侧返回的载荷在 `hostTaskRequest` 的信封里，必须过 `unwrapHostResult`，否则页面只看到 `{ok:true}`、视图全 undefined。
 - 双击用户消息就地编辑，仅空闲且非空时提交，经 `chat:edit-message` 截断重跑；失败保留编辑文本。
-- **会话详情只有一个组件**：`mica-config-ui` 的 `SessionDetailView`（头部 + 对话记录 / Context 分析 / 原始文件，原始文件自动保存）。配置页 Sessions 页、Stats 的会话详情弹窗（额外带「用量」页签）与状态栏上下文弹窗都渲染它，桌面端只包一层 `.mica-config-ui.is-embed` 的外壳与 `chat-modal-session-detail` 尺寸；不要再写第二套会话详情或上下文分组，上下文分类 / 信封 / 差额的唯一计算在 `mica-config-ui/src/server/contextBreakdown.ts`。
+- **会话详情只有一个组件**：`mica-config-ui` 的 `SessionDetailView`（头部 + 对话记录 / Context 分析 / 系统提示词 / 原始文件，原始文件自动保存）。配置页 Sessions 页、Stats 的会话详情弹窗（额外带「用量」页签）与状态栏上下文弹窗都渲染它，桌面端只包一层 `.mica-config-ui.is-embed` 的外壳与 `chat-modal-session-detail` 尺寸；不要再写第二套会话详情或上下文分组，上下文分类 / 信封 / 差额的唯一计算在 `mica-config-ui/src/server/contextBreakdown.ts`。
+- 「系统提示词」页签读 `snapshot.systemPrompt`（按需 `readSessionSystemPrompt`，不跟着 2 秒轮询），用 `web/promptView.ts` 按顶层标签切成角色 / 项目说明 / skills / 环境信息 / 其它注入几段说明体积去向，全文进只读编辑器。对话记录与 Context 分析里那条 System 也用同一份记录（没有记录时才回落到角色提示词），三处口径一致。
 
 ### 展示
 

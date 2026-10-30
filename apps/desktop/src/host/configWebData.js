@@ -419,7 +419,9 @@ function conversationSource(session) {
     providerId: session.snapshot.providerId,
     protocol: session.snapshot.protocol,
     model: session.snapshot.model,
-    systemPrompt: rolePromptOf(session.snapshot.role),
+    // 会话快照里存着最近一次请求真正发出的完整提示词；旧会话没有记录，退回角色文件里那一段
+    // （只含 <system>，不含 skills 索引 / AGENT.md / 插件段落）。
+    systemPrompt: session.snapshot.systemPrompt || rolePromptOf(session.snapshot.role),
     messages: session.snapshot.messages
   }
 }
@@ -454,6 +456,14 @@ function readSessionContextAnalysis(id) {
     lastUsage: session.snapshot.lastUsage,
     displayUsage: session.snapshot.displayUsage
   })
+}
+
+function readSessionSystemPrompt(id) {
+  const { session } = loadSession(id)
+  return {
+    prompt: typeof session.snapshot.systemPrompt === 'string' ? session.snapshot.systemPrompt : '',
+    rolePrompt: rolePromptOf(session.snapshot.role)
+  }
 }
 
 /* ------------------------------------------------------------ 受控浏览器 */
@@ -567,6 +577,7 @@ export const configWebActions = {
     ),
   readSessionItem: (input) => readSessionItem(text(input, 'id'), integer(input, 'sequence', 1)),
   readSessionContextAnalysis: (input) => readSessionContextAnalysis(text(input, 'id')),
+  readSessionSystemPrompt: (input) => readSessionSystemPrompt(text(input, 'id')),
   writeSession: (input) => writeSession(text(input, 'id'), text(input, 'content'))
 }
 

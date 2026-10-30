@@ -1,6 +1,7 @@
 import type { AgentUsageRecord } from '@packages/mica-agent/index.js';
 import { buildConfigWebConversationItems, type ConfigWebConversationSource } from './conversation.js';
 import { summarizeContextItems } from './contextBreakdown.js';
+import { estimateTextTokens } from '../shared/text.js';
 import type {
   ConfigWebContextAnalysis,
   ConfigWebContextEntry,
@@ -15,25 +16,8 @@ const IMAGE_MARKER = '[Image]';
 const TURN_PREVIEW_CHARS = 160;
 const ENTRY_PREVIEW_CHARS = 220;
 
-/** Rough token estimate: CJK chars count as 1 token, other chars as 1/4 token. */
-export function estimateTextTokens(text: string): number {
-  const value = typeof text === 'string' ? text : String(text ?? '');
-  let cjk = 0;
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i);
-    if (
-      (code >= 0x3400 && code <= 0x4dbf) || // CJK Extension A
-      (code >= 0x4e00 && code <= 0x9fff) || // CJK Unified
-      (code >= 0xf900 && code <= 0xfaff) || // CJK Compatibility
-      (code >= 0x3040 && code <= 0x30ff) || // Kana
-      (code >= 0xac00 && code <= 0xd7af) || // Hangul
-      (code >= 0xff00 && code <= 0xffef) // Full-width forms
-    ) {
-      cjk++;
-    }
-  }
-  return cjk + Math.ceil((value.length - cjk) / 4);
-}
+/** 与界面共用的粗估口径，实现见 `src/shared/text.ts`。 */
+export { estimateTextTokens };
 
 export function buildConfigWebContextAnalysis(
   source: ConfigWebConversationSource,

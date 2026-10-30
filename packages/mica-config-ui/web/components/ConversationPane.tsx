@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { readSessionConversationPage } from '../api.js';
 import { Tag } from './Ui.js';
 import { appIcons } from '../icons.js';
+import { formatCharCount } from '../format.js';
 import type { ConfigWebConversationItem, ConfigWebConversationItemType } from '../../src/shared/types.js';
 
 const PAGE_SIZE = 80;
@@ -141,6 +142,10 @@ function ConversationItemCard({ item }: { item: ConfigWebConversationItem }) {
             </div>
           </div>
           <span className="conversation-card-trailing">
+            {/* 体积写在行尾：工具结果动辄几万字符，扫一眼就知道哪条把 context 吃掉了。 */}
+            <span className="conversation-card-size" title={`${item.content.length.toLocaleString()} 字符`}>
+              {formatCharCount(item.content.length)} 字符
+            </span>
             <ChevronIcon className="conversation-chevron" size={15} aria-hidden="true" />
           </span>
         </summary>

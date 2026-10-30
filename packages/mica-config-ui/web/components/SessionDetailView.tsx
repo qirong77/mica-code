@@ -4,10 +4,11 @@ import { useAutoSave } from '../useAutoSave.js';
 import { ConversationPane } from './ConversationPane.js';
 import { ContextPane } from './ContextPane.js';
 import { JsonEditor } from './JsonEditor.js';
+import { SystemPromptPane } from './SystemPromptPane.js';
 import { Button, Empty, SaveStatus, Tag } from './Ui.js';
 import type { ConfigWebSessionDetails } from '../../src/shared/types.js';
 
-export type SessionDetailTab = 'conversation' | 'context' | 'raw';
+export type SessionDetailTab = 'conversation' | 'context' | 'prompt' | 'raw';
 
 /** 宿主自带的页签（桌面端的用量 / 子代理）：内容由宿主渲染，这里只负责接入标签条。 */
 export type SessionDetailExtraTab = {
@@ -16,27 +17,28 @@ export type SessionDetailExtraTab = {
   content: ReactNode;
 };
 
-const BASE_TABS: { id: SessionDetailTab; label: string }[] = [
-  { id: 'conversation', label: '对话记录' },
-  { id: 'context', label: 'Context 分析' },
-  { id: 'raw', label: '原始文件' },
-];
+const PROMPT_TAB = { id: 'prompt' as string, label: '系统提示词' };
+const CONVERSATION_TAB = { id: 'conversation' as string, label: '对话记录' };
+const CONTEXT_TAB = { id: 'context' as string, label: 'Context 分析' };
+const RAW_TAB = { id: 'raw' as string, label: '原始文件' };
 
 /**
  * 会话详情：一份快照的三个观察角度。
  *
+ * 「系统提示词」看每轮请求开头真正发出去的那几十 KB（角色 + AGENT.md + skills + 插件段落），
  * 「对话记录」看模型实际收到/产出了什么，「Context 分析」看这些内容各自占了多大体积，
- * 「原始文件」看落盘的 JSON 本身。三个页签读同一个 sessionId 的不同投影，所以放在同一个
+ * 「原始文件」看落盘的 JSON 本身。几个页签读同一个 sessionId 的不同投影，所以放在同一个
  * 组件里：桌面端的会话详情、上下文弹窗与配置页的 Sessions 页都用它，同一个会话在任何入口
  * 都不会长得不一样。
  */
 export function SessionDetailView({
   sessionId,
-  defaultTab = 'conversation',
+  defaultTab = 'prompt',
   extraTabs = [],
   showHead = true,
 }: {
   sessionId: string;
+  /** 默认落在哪个页签。缺省是第一个（系统提示词）：标签条的首项与打开时看到的一致。 */
   defaultTab?: SessionDetailTab;
   extraTabs?: SessionDetailExtraTab[];
   showHead?: boolean;
@@ -156,11 +158,17 @@ export function SessionDetailView({
     }
   }
 
+  // 系统提示词排在最前：它是每轮请求的输入起点，其余页签都是它的结果。宿主自带的页签
+  // （桌面端的用量 / 子代理）跟在三个内置页签之后，原始文件放最后——那是落盘的样子。
   const tabs = [
-    ...BASE_TABS.slice(0, 2).map((item) => ({ id: item.id as string, label: item.label })),
+    PROMPT_TAB,
+    CONVERSATION_TAB,
+    CONTEXT_TAB,
     ...extraTabs.map((item) => ({ id: item.id, label: item.label })),
-    { id: 'raw' as string, label: BASE_TABS[2].label },
+    RAW_TAB,
   ];
+  // 提示词页签与原始文件页签自己就是滚动容器（编辑器内部滚动），外面这层不滚。
+  const fillBody = tab === 'raw' || tab === 'prompt';
 
   if (loading && !header) return <div className="page-loading">正在加载 Session…</div>;
   if (!header) {
@@ -203,12 +211,19 @@ export function SessionDetailView({
 
       {error ? <div className="ui-alert session-detail-alert">{error}</div> : null}
 
-      <div className={`session-tab-body${tab === 'raw' ? ' session-tab-body-fill' : ''}`}>
+      <div
+        className={`session-tab-body${fillBody ? ' session-tab-body-fill' : ''}`}
+        role="tabpanel"
+        aria-label={tabs.find((item) => item.id === tab)?.label ?? 'Session 视图'}
+      >
         {tab === 'conversation' ? (
           <ConversationPane key={`conversation:${sessionId}:${version}`} sessionId={sessionId} refreshToken={version} />
         ) : null}
         {tab === 'context' ? (
           <ContextPane key={`context:${sessionId}:${version}`} sessionId={sessionId} refreshToken={version} />
+        ) : null}
+        {tab === 'prompt' ? (
+          <SystemPromptPane key={`prompt:${sessionId}:${version}`} sessionId={sessionId} refreshToken={version} />
         ) : null}
         {extraTabs.map((item) =>
           tab === item.id ? <div key={item.id}>{item.content}</div> : null,
@@ -240,7 +255,12 @@ export function SessionDetailView({
   );
 }
 
-/** 详情头部：标题 + 身份行 + 一行事实。摘要不再单独占一张卡，避免它比正文还抢眼。 */
+/**
+ * 详情头部：三行——标题（状态、更新时间靠右）、目录、一行事实。
+ *
+ * 事实用「标签 + 值」横排而不是小号大写标签压在上面：中文标签大写没有变化，反而多占一倍
+ * 行高；横排之后同一行塞得下 5 项，正文就能多留一条消息的高度。
+ */
 function SessionHead({ session }: { session: ConfigWebSessionDetails }) {
   const status = presentStatus(session.turnState);
   return (
@@ -250,6 +270,9 @@ function SessionHead({ session }: { session: ConfigWebSessionDetails }) {
         <Tag tone={status.tone} dot>
           {status.label}
         </Tag>
+        <span className="session-detail-updated" title={formatDate(session.updatedAt)}>
+          更新 {formatShortDate(session.updatedAt)}
+        </span>
       </div>
       <p className="session-detail-path" title={session.cwd}>
         {shortenDir(session.cwd)}
@@ -257,11 +280,9 @@ function SessionHead({ session }: { session: ConfigWebSessionDetails }) {
       <dl className="session-detail-facts">
         <MetaFact label="模型" value={`${session.providerId} · ${session.model}`} />
         <MetaFact label="角色" value={session.role} />
-        <MetaFact label="更新" value={formatDate(session.updatedAt)} />
-        <MetaFact
-          label="文件"
-          value={`${formatBytes(session.fileSizeBytes)} · ${session.messageCount} 条消息 · ${session.usageCount} 条用量`}
-        />
+        <MetaFact label="消息" value={`${session.messageCount} 条`} />
+        <MetaFact label="用量" value={`${session.usageCount} 次请求`} />
+        <MetaFact label="文件" value={formatBytes(session.fileSizeBytes)} />
       </dl>
     </header>
   );
@@ -284,6 +305,14 @@ function shortenDir(cwd: string): string {
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleString();
+}
+
+/** 头部那一行只要「什么时候」，日期年份用不到：今天看得懂就够了，完整时间在 title 里。 */
+function formatShortDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const pad = (input: number) => String(input).padStart(2, '0');
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function formatBytes(value: number): string {

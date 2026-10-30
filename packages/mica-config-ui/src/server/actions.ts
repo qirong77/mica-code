@@ -17,6 +17,7 @@ import {
   getSessionDetails,
   getSessionItem,
   getSessionsDetails,
+  getSessionSystemPrompt,
   getSkillsDetails,
   writeMcpServer,
   writeRole,
@@ -96,6 +97,7 @@ export const configWebActions = {
     ),
   readSessionItem: (input: ConfigWebActionInput) => getSessionItem(text(input, 'id'), integer(input, 'sequence', 1)),
   readSessionContextAnalysis: (input: ConfigWebActionInput) => getSessionContextAnalysis(text(input, 'id')),
+  readSessionSystemPrompt: (input: ConfigWebActionInput) => getSessionSystemPrompt(text(input, 'id')),
   writeSession: (input: ConfigWebActionInput) => writeSessionDetails(text(input, 'id'), text(input, 'content')),
 } satisfies Record<string, ConfigWebAction>;
 

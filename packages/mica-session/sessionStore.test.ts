@@ -283,6 +283,37 @@ describe('SessionStore.replaceValidated', () => {
       parentSessionId: undefined,
     });
   });
+
+  it('keeps the last request system prompt and drops a malformed one', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const raw = {
+      version: 1,
+      id: 'prompted',
+      title: 'Prompted',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      cwd: '/tmp/project',
+      snapshot: {
+        providerId: 'test',
+        model: 'test-model',
+        effort: 'none',
+        systemPrompt: '<system>\nbe brief\n</system>',
+        messages: [],
+        conversationMessages: [],
+        usageHistory: [],
+      },
+    };
+    expect(parsePersistedSession(raw)).toMatchObject({
+      snapshot: { systemPrompt: '<system>\nbe brief\n</system>' },
+    });
+    // 只影响提示词页签，脏值丢弃而不是拒绝整条会话。
+    expect(parsePersistedSession({ ...raw, snapshot: { ...raw.snapshot, systemPrompt: '' } })).toMatchObject({
+      snapshot: { systemPrompt: undefined },
+    });
+    expect(parsePersistedSession({ ...raw, snapshot: { ...raw.snapshot, systemPrompt: 42 } })).toMatchObject({
+      snapshot: { systemPrompt: undefined },
+    });
+  });
 });
 
 describe('SessionStore index reconciliation', () => {

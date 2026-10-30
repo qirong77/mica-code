@@ -50,6 +50,8 @@ export function createDesktopConfigWebClient() {
       invoke('readSessionConversationPage', { id, offset, limit, tail }),
     readSessionItem: (id, sequence) => invoke('readSessionItem', { id, sequence }),
     readSessionContextAnalysis: (id) => invoke('readSessionContextAnalysis', { id }),
+    // 最近一次请求真正发出的完整提示词（角色 + 项目说明 + skills + 插件段落）。
+    readSessionSystemPrompt: (id) => invoke('readSessionSystemPrompt', { id }),
     writeSession: (id, content) => invoke('writeSession', { id, content })
   }
 }

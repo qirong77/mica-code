@@ -193,4 +193,35 @@ describe('config web sessions', () => {
     expect(page.total).toBe(7);
     expect(page.items.at(-1)?.content).toBe('sure');
   });
+
+  it('exposes the system prompt actually sent and uses it in the conversation view', async () => {
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    const session = makeSession();
+    const sentPrompt = [
+      '<system>',
+      'Role prompt body.',
+      '</system>',
+      '',
+      '<skills>',
+      '- demo: does demo things',
+      '</skills>',
+      '',
+      '<session_notes>',
+      'ship on Friday',
+      '</session_notes>',
+    ].join('\n');
+    session.snapshot.systemPrompt = sentPrompt;
+    micaSession.createStore().save(session);
+
+    const prompt = detailsApi.getSessionSystemPrompt(session.id);
+    expect(prompt.prompt).toBe(sentPrompt);
+    expect(prompt.rolePrompt).not.toBe('');
+
+    // 对话记录与上下文分解读的都是同一份「发出去的提示词」，不是角色文件里那一段。
+    const page = detailsApi.getSessionConversationPage(session.id, 0, 1);
+    expect(page.items[0]).toMatchObject({ type: 'system', content: sentPrompt });
+    // Context 分析的第一轮前言也读这一份：它比角色文件多出 skills 与插件段落。
+    const analysis = detailsApi.getSessionContextAnalysis(session.id);
+    expect(analysis.turns[0].entries[0]?.preview).toContain('Role prompt body.');
+  });
 });

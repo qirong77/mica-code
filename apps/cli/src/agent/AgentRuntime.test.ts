@@ -174,6 +174,24 @@ describe('AgentRuntime tool status', () => {
     expect((options?.systemPrompt as () => string)()).toContain('<system>\nReview carefully.\n</system>');
   });
 
+  it('records the system prompt actually sent into the snapshot', async () => {
+    const { micaAgent } = await import('@packages/mica-agent/index.js');
+    const createModelClient = vi.mocked(micaAgent.createModelClient);
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    // 还没发过请求：快照里没有提示词，界面据此说「这条会话没有记录」。
+    expect(agent.getSnapshot().systemPrompt).toBeUndefined();
+
+    const options = createModelClient.mock.calls.at(-1)?.[0];
+    const sent = (options?.systemPrompt as () => string)();
+    expect(sent).toContain('<context>');
+    expect(agent.getSnapshot().systemPrompt).toBe(sent);
+
+    // 恢复会话带回来的那份要留着，否则「没发新请求」时界面会以为它从没记录过。
+    agent.loadSnapshot({ ...agent.getSnapshot(), systemPrompt: 'recorded earlier' });
+    expect(agent.getSnapshot().systemPrompt).toBe('recorded earlier');
+  });
+
   it('carries recorded subagent usage through snapshots and emits an event', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();

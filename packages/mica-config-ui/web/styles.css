@@ -1171,13 +1171,15 @@
     min-height: 0;
   }
 
-  /* 详情头部：标题 + 状态、目录、一行事实。压成 3 行，把篇幅留给对话。 */
+  /* 详情头部：标题 + 状态、目录、一行事实。压成 3 行，把篇幅留给对话。
+     底色比正文浅一档：头部是「这条会话是什么」，正文是「里面有什么」，一眼就能分开。 */
   .session-detail-head {
     display: grid;
     flex: none;
-    gap: 4px;
-    padding: 12px 16px 11px;
+    gap: 5px;
+    padding: 13px 18px 12px;
     border-bottom: 1px solid var(--line-soft);
+    background: color-mix(in srgb, var(--panel-muted) 45%, transparent);
   }
 
   .session-detail-title {
@@ -1199,6 +1201,16 @@
     white-space: nowrap;
   }
 
+  /* 更新时间靠右：它是这一行里最不重要的信息，不与标题争视线。 */
+  .session-detail-updated {
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
   .session-detail-path {
     margin: 0;
     overflow: hidden;
@@ -1210,26 +1222,28 @@
     white-space: nowrap;
   }
 
-  /* 事实行：标签压在值上方，四项排一行；长模型名自己省略，不撑破头部。 */
+  /* 事实行：标签与值横排，五项挤一行；长模型名自己省略，不撑破头部。 */
   .session-detail-facts {
     display: flex;
     flex-wrap: wrap;
-    gap: 2px 24px;
-    margin: 4px 0 0;
+    align-items: baseline;
+    gap: 3px 20px;
+    margin: 2px 0 0;
   }
 
   .session-detail-fact {
-    display: grid;
-    gap: 1px;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
     min-width: 0;
-    max-width: 320px;
+    max-width: 340px;
   }
 
   .session-detail-fact dt {
+    flex: 0 0 auto;
     color: var(--text-faint);
-    font-size: 10.5px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    font-size: 11px;
+    white-space: nowrap;
   }
 
   .session-detail-fact dd {
@@ -1240,6 +1254,7 @@
     line-height: 1.4;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
 
   /* 列表行的状态点：一行只留一个颜色信号，文字说明留给详情头部。 */
@@ -1548,6 +1563,14 @@
     gap: 8px;
   }
 
+  /* 行尾的体积：大工具结果一眼可见，不用展开就知道是哪条把 context 撑大了。 */
+  .conversation-card-size {
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
   .conversation-chevron {
     color: var(--text-faint);
     transition: transform 160ms ease;
@@ -1758,9 +1781,202 @@
     min-width: 0;
   }
 
+  /* 系统提示词：上方一行统计 + 一张构成表，下面只读编辑器吃掉剩余高度。
+     与原始文件页签同一套骨架，所以两个「大文本」页签看起来是一件事。 */
+  .prompt-pane {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    gap: 10px;
+  }
+
+  .prompt-toolbar {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 12px;
+    min-width: 0;
+  }
+
+  .prompt-facts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 12px;
+    color: var(--text-faint);
+    font-size: 12px;
+  }
+
+  .prompt-facts strong {
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .prompt-toolbar-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .prompt-notice {
+    color: var(--green);
+    font-size: 11.5px;
+  }
+
+  /* 构成表：一行一段，条与数字都在同一列上，长标签自己省略。 */
+  .prompt-parts {
+    display: grid;
+    flex: none;
+    gap: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .prompt-parts-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .prompt-parts-head h3 {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--text-aux);
+    font-weight: 650;
+  }
+
+  .prompt-parts-head .muted-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .prompt-part-list {
+    display: grid;
+    gap: 5px;
+    max-height: 132px;
+    overflow-y: auto;
+  }
+
+  .prompt-part {
+    display: grid;
+    grid-template-columns: minmax(96px, 180px) minmax(0, 1fr) 56px 64px;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  /* 表头与数据行共用同一套列宽：两列数字在同一个位置对齐。 */
+  .prompt-part-head {
+    padding-bottom: 2px;
+    color: var(--text-faint);
+    font-size: 11px;
+  }
+
+  .prompt-part-head .prompt-part-size {
+    text-align: right;
+  }
+
+  .prompt-part-label {
+    overflow: hidden;
+    color: var(--text-soft);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .prompt-part-track {
+    display: block;
+    height: 6px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--panel-muted);
+  }
+
+  .prompt-part-track i {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--blue) 75%, transparent);
+  }
+
+  .prompt-part-size {
+    text-align: right;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* 提示词编辑器吃满剩余高度：它自己滚，外层不再套一层滚动。 */
+  .prompt-editor {
+    flex: 1 1 auto;
+    min-height: 200px;
+    border: 0;
+    border-radius: 0;
+  }
+
+  /* 没有记录时的说明：说清「为什么没有」，并把角色提示词作为参考折叠在下面。 */
+  .prompt-empty {
+    display: grid;
+    gap: 8px;
+    max-width: 760px;
+  }
+
+  .prompt-empty h3 {
+    margin: 0;
+    color: var(--text);
+    font-size: var(--text-subhead);
+    font-weight: 650;
+  }
+
+  .prompt-empty p {
+    margin: 0;
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+    line-height: 1.65;
+  }
+
+  .prompt-role-fallback {
+    margin-top: 4px;
+    border-top: 1px solid var(--line-soft);
+    padding-top: 8px;
+  }
+
+  .prompt-role-fallback summary {
+    color: var(--text-faint);
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .prompt-role-fallback pre {
+    max-height: 320px;
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    overflow: auto;
+    border-radius: var(--radius-md);
+    background: var(--panel-muted);
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+
   /* 详情里的错误不挤掉页签：贴在标签条下面一行，内容仍可读。 */
   .session-detail-alert {
-    margin: 0 16px;
+    margin: 10px 18px 0;
   }
 
   .text-input {
@@ -1847,7 +2063,7 @@
     /* 下划线画在页签盒内，多出来的 1px 会让 overflow-y 也变 auto，页签行右侧凭空多一条竖向滚动条。 */
     overflow-y: hidden;
     overscroll-behavior-x: contain;
-    padding: 0 16px;
+    padding: 0 18px;
     border-bottom: 1px solid var(--line);
   }
 
@@ -1911,7 +2127,7 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 14px 16px 16px;
+    padding: 14px 18px 16px;
   }
 
   /* 原始文件页签自己就是滚动容器（编辑器内部滚动），外面这层不滚，好让编辑器吃满剩余高度。 */

@@ -11,6 +11,7 @@ import type {
   ConfigWebPluginsDetails,
   ConfigWebRolesDetails,
   ConfigWebSessionDetails,
+  ConfigWebSessionPrompt,
   ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
 } from '@packages/mica-config-ui/src/shared/types.js';
@@ -79,6 +80,8 @@ export function createHttpConfigWebClient(): ConfigWebClient {
       ),
     readSessionContextAnalysis: (id) =>
       request<ConfigWebContextAnalysis>(`/api/details/session?id=${encodeURIComponent(id)}&view=context`),
+    readSessionSystemPrompt: (id) =>
+      request<ConfigWebSessionPrompt>(`/api/details/session?id=${encodeURIComponent(id)}&view=prompt`),
     writeSession: (id, content) => request<unknown>('/api/files/session', { method: 'PUT', body: { id, content } }),
 
     connectHeartbeat: (onEvent) => {

@@ -11,7 +11,7 @@ type SessionIndex = ConfigWebSessionsDetails;
 /**
  * Sessions：左边一列会话、右边看选中的那一条。
  *
- * 右栏由 `SessionDetailView` 负责（对话记录 / Context 分析 / 原始文件），与桌面端的会话详情、
+ * 右栏由 `SessionDetailView` 负责（系统提示词 / 对话记录 / Context 分析 / 原始文件），与桌面端的会话详情、
  * 上下文弹窗是同一个组件——这里只管列表、选中与刷新，不再自己拼详情页。
  */
 export function SessionsPage() {

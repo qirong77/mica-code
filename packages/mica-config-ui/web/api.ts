@@ -13,6 +13,7 @@ import type {
   ConfigWebPluginsDetails,
   ConfigWebRolesDetails,
   ConfigWebSessionDetails,
+  ConfigWebSessionPrompt,
   ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
   ConfigWebTerminalControlDetails,
@@ -127,6 +128,12 @@ export type ConfigWebClient = {
   ): Promise<ConfigWebConversationPage>;
   readSessionItem(id: string, sequence: number): Promise<ConfigWebConversationItem>;
   readSessionContextAnalysis(id: string): Promise<ConfigWebContextAnalysis>;
+  /**
+   * 这条会话最近一次请求实际发出的 system prompt。
+   *
+   * 与 `readSessionContent` 一样按需读：提示词可以有几十 KB，不必跟着 2 秒一次的详情轮询。
+   */
+  readSessionSystemPrompt(id: string): Promise<ConfigWebSessionPrompt>;
   writeSession(id: string, content: string): Promise<unknown>;
 
   connectHeartbeat?(onEvent?: (event: { type?: string }) => void): { close(): void } | null;
@@ -404,6 +411,10 @@ export function readSessionItem(id: string, sequence: number): Promise<ConfigWeb
 
 export function readSessionContextAnalysis(id: string): Promise<ConfigWebContextAnalysis> {
   return requireClient().readSessionContextAnalysis(id);
+}
+
+export function readSessionSystemPrompt(id: string): Promise<ConfigWebSessionPrompt> {
+  return requireClient().readSessionSystemPrompt(id);
 }
 
 export function writeSession(id: string, content: string): Promise<unknown> {

@@ -236,6 +236,7 @@ async function resolveApiCall(
       if (query.view === 'conversation') return get('readSessionConversationPage', query);
       if (query.view === 'item') return get('readSessionItem', query);
       if (query.view === 'context') return get('readSessionContextAnalysis', { id: query.id });
+      if (query.view === 'prompt') return get('readSessionSystemPrompt', { id: query.id });
       return get('readSessionDetails', { id: query.id });
 
     case '/api/files/session':

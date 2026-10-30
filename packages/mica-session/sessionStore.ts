@@ -63,6 +63,15 @@ export type PersistedRuntimeSnapshot = {
    *  post-compact figure is stored separately and dropped as soon as a newer
    *  usage record exists. Display-only; optional for older snapshots. */
   displayUsage?: PersistedSnapshotDisplayUsage;
+  /**
+   * 最近一次请求实际发给模型的 system prompt 全文。
+   *
+   * 只用于展示与排查（配置页 / 桌面端的「系统提示词」页签）：它像上下文一样是现场拼出来的
+   * ——角色提示词 + 项目说明 + skills 索引 + 环境信息 + 插件段落——只有把发出去的那一份
+   * 存下来，界面才答得出「这次请求到底带了什么」。恢复会话不会拿它重建提示词，下一轮请求
+   * 仍然重新拼装。缺失表示这条会话还没发过请求（或早于本字段出现）。
+   */
+  systemPrompt?: string;
   messages: unknown[];
   conversationMessages: unknown[];
   usageHistory: AgentUsageRecord[];
@@ -751,6 +760,7 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   // `normalizeModelEffort` 在恢复会话时收敛。
   if (!isEffortLevelName(session.snapshot.effort)) return null;
   const role = isNonEmptyString(session.snapshot.role) ? session.snapshot.role : 'default';
+  const systemPrompt = normalizeSystemPrompt(session.snapshot.systemPrompt);
   return {
     ...session,
     // 父会话只是展示线索：坏值（不存在的形状、自指）丢掉就行，不为了一个
@@ -764,6 +774,7 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
       // 宽松解析：只认 true，其他值当作「未定制」，不因此拒绝整条会话。
       capabilitiesCustomized: session.snapshot.capabilitiesCustomized === true ? true : undefined,
       displayUsage: normalizeDisplayUsage(session.snapshot.displayUsage),
+      systemPrompt,
     },
   } as PersistedSession;
 }
@@ -783,6 +794,12 @@ function normalizeDisplayUsage(value: unknown): PersistedSnapshotDisplayUsage | 
   if (!Number.isFinite(totalTokens) || totalTokens <= 0) return undefined;
   if (!isNonEmptyString(record.compactedAt)) return undefined;
   return { totalTokens, compactedAt: record.compactedAt };
+}
+
+/** 提示词只用于展示：坏值（不是字符串 / 空串）丢掉就行，不为了一个可选镜像拒绝整条会话。 */
+function normalizeSystemPrompt(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.trim() ? value : undefined;
 }
 
 function isNonEmptyString(value: unknown): value is string {
