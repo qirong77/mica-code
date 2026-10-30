@@ -694,6 +694,7 @@ function invokeRemote(state, channel, payload) {
       }
     })
     state.commands.push({ id, channel, payload })
+    wakePoll(state)
   })
 }
 
@@ -771,24 +772,34 @@ async function handlePoll(req, res) {
   if (events.length) broadcastEvents(hinted, events)
 
   const batch = hinted.commands.splice(0, hinted.commands.length)
-  const streaming = events.length > 0
-  const awake = Date.now() < hinted.awakeUntil
-  // 间隔按「有没有人在用」分档：没人看时只要保证手机打开后能很快接上，
-  // 15 秒足够，也把公司机的常态外联压到每小时 240 次以内。
-  let intervalMs
-  if (batch.length || streaming) intervalMs = 300
-  else if (awake) intervalMs = 1000
-  else if (phoneOnline(hinted)) intervalMs = 3000
-  else intervalMs = 15_000
+  if (batch.length || events.length) {
+    respondPoll(res, hinted, batch, 300, servedFreshly)
+    return
+  }
+  // 没活干时把这次轮询挂起，而不是立刻回一个空响应：页面上的按键/提交一到
+  // 就能立刻推给公司机（见 wakePoll），延迟因此只受网络 RTT 限制。
+  parkPoll(res, hinted, servedFreshly)
+}
 
-  const payload = seal(hinted.key, {
+/** 一次挂起最多挂多久：按「有没有人在用」分档。 */
+function parkWait(state) {
+  if (Date.now() < state.awakeUntil) return 1000
+  if (phoneOnline(state)) return 3000
+  // 没人看时只要保证手机打开后能很快接上；15 秒也把常态外联压到每小时 240 次以内
+  return 15_000
+}
+
+function respondPoll(res, state, batch, intervalMs, resetCache) {
+  if (state.parked && state.parked.res === res) state.parked = null
+  if (res.writableEnded) return
+  const payload = seal(state.key, {
     ok: true,
     commands: batch,
     intervalMs,
-    watch: hinted.watch,
+    watch: state.watch,
     // 没有手机连着就别让公司机往外送事件：那是纯浪费的上行
-    wanted: phoneOnline(hinted),
-    resetCache: servedFreshly
+    wanted: phoneOnline(state),
+    resetCache
   })
   res.writeHead(200, {
     'content-type': 'application/octet-stream',
@@ -796,6 +807,37 @@ async function handlePoll(req, res) {
     'cache-control': 'no-store'
   })
   res.end(payload)
+}
+
+/** 挂起到下一档间隔，或提前被 wakePoll 叫醒。 */
+function parkPoll(res, state, resetCache) {
+  // 同一台机器不该同时挂两个轮询（重连时会短暂出现）：先把上一个回掉，
+  // 否则它要等 socket 超时才结束。
+  state.parked?.done([])
+  const wait = parkWait(state)
+  const done = (batch) => {
+    if (!state.parked || state.parked.res !== res) return
+    state.parked = null
+    clearTimeout(timer)
+    // 空响应让桥立刻发起下一次轮询，下一次继续挂着：请求数不变，延迟最小
+    respondPoll(res, state, batch, batch.length ? 300 : 0, resetCache)
+  }
+  const timer = setTimeout(() => done([]), wait)
+  timer.unref?.()
+  state.parked = { res, done }
+  const cleanup = () => {
+    if (state.parked && state.parked.res === res) state.parked = null
+    clearTimeout(timer)
+  }
+  res.on('close', cleanup)
+  res.on('error', cleanup)
+}
+
+/** 有命令要下发了：提前结束挂起的轮询。 */
+function wakePoll(state) {
+  if (!state.parked) return
+  const batch = state.commands.splice(0, state.commands.length)
+  state.parked.done(batch)
 }
 
 function handleEvents(req, res, state) {

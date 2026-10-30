@@ -130,7 +130,8 @@ sleep 20 && curl -s https://<域名>/api/health
 
 ## 边界
 
-- 手机端不提供终端与文件编辑：`terminal:*`、`files:write*`、`git:stage`、`config-web:invoke`
+- 手机端**支持终端**（`terminal:create|write|resize|...`，PTY 开在本机运行时里），
+  但不做文件编辑与写工作区的 Git：`files:write*`、`git:stage`、`config-web:invoke` 一律拒绝
   在桥的白名单里就是拒的。
 - 需要桌面端在运行，关掉就没有会话可看。
 - 用户插件（`$MICA_HOME/plugins`）的卡片在手机上渲染不出——页面是构建期打的包。

@@ -232,14 +232,24 @@ const ALLOWED = new Set([
   'loops:set-interval',
   'loops:set-task',
   'loops:set-status',
-  'loops:fire-now'
+  'loops:fire-now',
+  // 终端：会话面板里的那个真实 PTY（跑在运行时进程里）。手机只负责读写屏幕，
+  // 所以不含 terminal-control:*（那是主进程的受控窗口，依赖桌面外壳）。
+  'terminal:create',
+  'terminal:write',
+  'terminal:resize',
+  'terminal:clear',
+  'terminal:get-cwd',
+  'terminal:resolve-file-links',
+  'terminal:dispose',
+  'terminal:dispose-all'
 ])
 
 /**
  * 刻意不放行的通道，写在这里是为了让「为什么没有它」有据可查：
  *
- * - `terminal:*` / `dialog:*` / `clipboard:*` / `browser-control:*`：依赖这台机器的
- *   GUI 与会话，手机端做不了，放行也只是报错；
+ * - `dialog:*` / `clipboard:*` / `browser-control:*`：依赖这台机器的 GUI 与会话，
+ *   手机端做不了，放行也只是报错；
  * - `files:write|create|delete|move|rename|duplicate|copy-*`：手机上不改文件；
  * - `git:stage|unstage|discard|checkout|create-branch`：会改工作区；
  * - `config-web:invoke`：配置页能改 provider 与密钥，等于把整台机器交出去；
