@@ -24,6 +24,7 @@ import {
   type AgentUsageRecord,
 } from '../core/Agent.js';
 import { isRetryableError, withRetry } from '../core/retry.js';
+import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
@@ -258,7 +259,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
             { signal: options?.signal },
           );
 
-          for await (const event of stream) {
+          // 上游可能握手成功后长时间不吐事件；空闲超过 60s 按超时处理并重试。
+          for await (const event of withIdleTimeout(stream)) {
             throwIfQueryStopped(options);
             if (RESPONSE_TERMINAL_ERROR_TYPES.has(event.type)) throw responseEventError(event);
 

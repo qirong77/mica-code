@@ -6,6 +6,8 @@ import {
   btwContextTitle,
   btwEntryElapsedMs,
   btwEntryPhase,
+  btwEntryRetryable,
+  btwHistoryStep,
   btwPhaseText,
   btwRunningEntry,
   btwRunningTool
@@ -184,5 +186,33 @@ describe('btwContextMenuItems', () => {
     expect(byId(empty, 'compact').disabled).toBe(true)
     expect(byId(empty, 'quote').disabled).toBe(true)
     expect(byId(empty, 'close-thread').disabled).toBe(true)
+  })
+})
+
+describe('btwEntryRetryable', () => {
+  it('offers a retry for failures and interruptions only', () => {
+    expect(btwEntryRetryable({ status: 'error', question: '问题' })).toBe(true)
+    expect(btwEntryRetryable({ status: 'aborted', question: '问题' })).toBe(true)
+    expect(btwEntryRetryable({ status: 'completed', question: '问题' })).toBe(false)
+    expect(btwEntryRetryable({ status: 'running', question: '问题' })).toBe(false)
+    expect(btwEntryRetryable({ status: 'error', question: '   ' })).toBe(false)
+    expect(btwEntryRetryable(null)).toBe(false)
+  })
+})
+
+describe('btwHistoryStep', () => {
+  it('walks from the draft into older questions and back', () => {
+    expect(btwHistoryStep({ index: -1, count: 2, direction: 1 })).toEqual({ index: 0 })
+    expect(btwHistoryStep({ index: 0, count: 2, direction: 1 })).toEqual({ index: 1 })
+    // 已到最早一条
+    expect(btwHistoryStep({ index: 1, count: 2, direction: 1 })).toBeNull()
+    expect(btwHistoryStep({ index: 0, count: 2, direction: -1 })).toEqual({ index: -1 })
+    // 已经在草稿上，再往下没有变化
+    expect(btwHistoryStep({ index: -1, count: 2, direction: -1 })).toBeNull()
+  })
+
+  it('does nothing without history', () => {
+    expect(btwHistoryStep({ index: -1, count: 0, direction: 1 })).toBeNull()
+    expect(btwHistoryStep({})).toBeNull()
   })
 })

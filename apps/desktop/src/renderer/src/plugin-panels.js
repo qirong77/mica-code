@@ -56,15 +56,17 @@ export function selectPluginPanels(plugins, role) {
 }
 
 /**
- * 动作回包里「跨出面板一步」的两种效果。
+ * 动作回包里「跨出面板一步」的三种效果。
  *
  * 插件只声明意图（`compose` 放一段文本进输入框、`newSession` 开个会话跑提示词），
  * 真正动页面的是宿主：输入框、页签、角色、发送时机都属于页面，插件碰不到也不该碰。
+ * `dialog` 也一样：表格内容由插件给，弹窗、排版、把链接交给系统浏览器是页面的事。
  */
-export function applyPanelResult(result, { onCompose, onLaunchSession } = {}) {
+export function applyPanelResult(result, { onCompose, onLaunchSession, onDialog } = {}) {
   if (!result || result.ok === false) return
   if (typeof result.compose === 'string' && result.compose.trim()) onCompose?.(result.compose)
   if (result.newSession && typeof result.newSession.prompt === 'string') {
     onLaunchSession?.(result.newSession)
   }
+  if (result.dialog && Array.isArray(result.dialog.rows)) onDialog?.(result.dialog)
 }

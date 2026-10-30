@@ -73,7 +73,7 @@ describe('selectPluginPanels', () => {
 
 describe('applyPanelResult', () => {
   const effects = () => {
-    const seen = { composed: '', launched: null }
+    const seen = { composed: '', launched: null, dialog: null }
     return {
       seen,
       handlers: {
@@ -82,6 +82,9 @@ describe('applyPanelResult', () => {
         },
         onLaunchSession: (task) => {
           seen.launched = task
+        },
+        onDialog: (dialog) => {
+          seen.dialog = dialog
         }
       }
     }
@@ -101,16 +104,34 @@ describe('applyPanelResult', () => {
     expect(seen.composed).toBe('')
   })
 
+  test('hands a table dialog to the host page', () => {
+    const { seen, handlers } = effects()
+    const dialog = { title: '需求环境', columns: ['类型', '链接'], rows: [] }
+    applyPanelResult({ ok: true, dialog }, handlers)
+    expect(seen.dialog).toEqual(dialog)
+    expect(seen.composed).toBe('')
+    expect(seen.launched).toBeNull()
+  })
+
+  test('ignores a dialog without rows', () => {
+    const { seen, handlers } = effects()
+    applyPanelResult({ ok: true, dialog: { title: '空的' } }, handlers)
+    expect(seen.dialog).toBeNull()
+  })
+
   test('does nothing for a failed action', () => {
     const { seen, handlers } = effects()
-    applyPanelResult({ ok: false, compose: 'x', newSession: { prompt: 'y' } }, handlers)
-    expect(seen).toEqual({ composed: '', launched: null })
+    applyPanelResult(
+      { ok: false, compose: 'x', newSession: { prompt: 'y' }, dialog: { rows: [] } },
+      handlers
+    )
+    expect(seen).toEqual({ composed: '', launched: null, dialog: null })
   })
 
   test('ignores blank or malformed payloads', () => {
     const { seen, handlers } = effects()
     applyPanelResult({ ok: true, compose: '   ', newSession: { prompt: 42 } }, handlers)
     applyPanelResult(null, handlers)
-    expect(seen).toEqual({ composed: '', launched: null })
+    expect(seen).toEqual({ composed: '', launched: null, dialog: null })
   })
 })

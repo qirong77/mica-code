@@ -698,12 +698,23 @@ export class BtwThreadController {
  *
  * 三条边界：
  * - **一定有上限**：一个 tab 一个子代理、一份消息数组，无上限地开会把 host 的内存吃光。
- *   超出时淘汰最早、且不在回答中的那条（正在回答的绝不淘汰）。
+ *   到上限时如实拒绝新的 tab，不悄悄淘汰旧线程——淘汰会让客户端手里那个 tab 变成
+ *   host 已经不认识的幽灵（点进去提问会用同一个 id 重建空线程，之前的问答就没了）。
  * - **持久化是整份覆盖**：状态只有几十 KB，按会话存一个文件，`flush` 时才写；
  *   失败只记 stderr——btw 是辅助能力，不能因为存不下来就让问答失败。
  * - **不碰 turn 生命周期**：问答照旧与主流程完全无关（见 chat.js 的 chat:btw-ask）。
  */
 export const MAX_BTW_THREADS = 6;
+
+/**
+ * 一条线程有没有真正问过。
+ *
+ * 空 tab（点了「+」还没提问）不落盘、也不从磁盘恢复：它没有任何内容，重启后却会在
+ * 抽屉里长出一排「新线程」——用户得逐个关掉才能找回自己那几条。
+ */
+export function hasBtwContent(thread: { entries?: unknown[] } | null | undefined): boolean {
+  return Array.isArray(thread?.entries) && thread.entries.length > 0;
+}
 
 /**
  * 落盘位置与读写逻辑在 `@packages/mica-common/btwState.js`：
@@ -767,8 +778,27 @@ export class BtwThreads {
       },
     });
     this.controllers.set(controller.id, controller);
-    this.evict();
     return controller;
+  }
+
+  /**
+   * 打开（必要时新建）一条线程，满了就拒绝。
+   *
+   * `ensure` 只负责「建」，上限判定在这里：调用方拿到的拒绝是可展示的一句话，
+   * 而不是一条悄悄把别的 tab 挤掉的新线程。
+   */
+  open(
+    threadId?: string | null,
+  ): { ok: true; threadId: string } | { ok: false; message: string } {
+    const id = typeof threadId === 'string' ? threadId.trim() : '';
+    if (id && this.controllers.has(id)) return { ok: true, threadId: id };
+    if (this.controllers.size >= MAX_BTW_THREADS) {
+      return {
+        ok: false,
+        message: `最多同时打开 ${MAX_BTW_THREADS} 条 By The Way 线程，先关掉一条再开`,
+      };
+    }
+    return { ok: true, threadId: this.ensure(id).id };
   }
 
   /**
@@ -780,7 +810,10 @@ export class BtwThreads {
     question: string,
     options: { queue?: boolean } = {},
   ): { ok: true; threadId: string } | { ok: false; message: string } {
-    const controller = this.ensure(threadId);
+    const opened = this.open(threadId);
+    if (!opened.ok) return opened;
+    const controller = this.controllers.get(opened.threadId);
+    if (!controller) return { ok: false, message: '这条 By The Way 线程已经不存在了' };
     const result = controller.ask(question, options);
     if (!result.ok) return result;
     return { ok: true, threadId: controller.id };
@@ -825,6 +858,7 @@ export class BtwThreads {
     if (!Array.isArray(stored)) return;
     for (const item of stored) {
       if (!item || typeof item.id !== 'string' || !item.id) continue;
+      if (!hasBtwContent(item)) continue;
       if (this.controllers.has(item.id)) continue;
       const controller = this.ensure(item.id);
       // ensure 只带 id；entries 与消息要在这里灌进去（顺序不能反：先建成一条空线程）。
@@ -834,7 +868,9 @@ export class BtwThreads {
   }
 
   exportState(): MicaBtwStoredThread[] {
-    return [...this.controllers.values()].map((controller) => controller.exportState());
+    return [...this.controllers.values()]
+      .map((controller) => controller.exportState())
+      .filter((thread) => hasBtwContent(thread));
   }
 
   /** 立刻落盘（host 退出前调，别把最后 500ms 的回答丢掉）。 */
@@ -860,12 +896,4 @@ export class BtwThreads {
     (this.persistTimer as { unref?: () => void }).unref?.();
   }
 
-  /** 淘汰最早、且不在回答中的线程（回答中的绝不能丢）。 */
-  private evict(): void {
-    while (this.controllers.size > MAX_BTW_THREADS) {
-      const victim = [...this.controllers.values()].find((controller) => !controller.running);
-      if (!victim) return;
-      this.controllers.delete(victim.id);
-    }
-  }
 }

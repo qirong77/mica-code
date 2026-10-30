@@ -10,6 +10,7 @@ import {
   IconPhoto,
   IconPlus,
   IconQuote,
+  IconRefresh,
   IconSend,
   IconSquare,
   IconTrash,
@@ -26,6 +27,8 @@ import {
   btwContextLabel,
   btwContextTitle,
   btwEntryElapsedMs,
+  btwEntryRetryable,
+  btwHistoryStep,
   btwPhaseText,
   btwRunningEntry
 } from './btw-thread'
@@ -155,6 +158,10 @@ export function BtwDrawer({
   const running = Boolean(runningEntry)
   const [threadId, setThreadId] = useState(thread?.id || '')
   const [now, setNow] = useState(() => Date.now())
+  // 输入历史：Alt+↑ 往回翻这条线程问过的问题（与主输入条同一个键位），
+  // `stash` 是进入历史前那半句话——翻回底部要能拿回来。
+  const historyRef = useRef({ index: -1, stash: '' })
+  const questionHistory = entries.map((entry) => entry.question).filter(Boolean)
   // 点开的工具详情：只存「哪一条 entry 的哪个工具」，host 每 80ms 换一份快照，
   // 存对象会停在点开那一刻。
   const [activityDetail, setActivityDetail] = useState(null)
@@ -258,6 +265,7 @@ export function BtwDrawer({
   useEffect(() => {
     if (!thread?.id || thread.id === threadId) return
     setThreadId(thread.id)
+    historyRef.current = { index: -1, stash: '' }
     inputRef.current?.focus()
   }, [thread?.id, threadId])
 
@@ -347,9 +355,40 @@ export function BtwDrawer({
   const submit = () => {
     const text = String(draft || '').trim()
     if (!text || sending) return
+    historyRef.current = { index: -1, stash: '' }
     // 回答期间提交 = 排队（单槽位，答完自动接上），与主对话的 after_iteration 同一心智：
     // 用户不必盯着等它说完再问下一句。
     onAsk?.(text, { queue: running })
+  }
+
+  /**
+   * Alt+↑ / Alt+↓ 翻这条线程问过的问题。
+   *
+   * 只在本线程的历史里翻（不跨 tab）：每个 tab 是一个独立话题，把别的 tab 的问题
+   * 翻出来再发一遍只会让人分不清自己在哪条线程上。
+   */
+  const moveHistory = (direction) => {
+    const step = btwHistoryStep({
+      index: historyRef.current.index,
+      count: questionHistory.length,
+      direction
+    })
+    if (!step) return
+    const state = historyRef.current
+    // 第一步进入历史时记住当前草稿（不论是翻到哪一条）；翻回 -1 时还给它。
+    if (state.index === -1) state.stash = draftRef.current || ''
+    state.index = step.index
+    const next =
+      step.index === -1
+        ? state.stash
+        : questionHistory[questionHistory.length - 1 - step.index] || ''
+    onDraftChange?.(next)
+    requestAnimationFrame(() => {
+      const node = inputRef.current
+      if (!node) return
+      node.setSelectionRange(next.length, next.length)
+      node.focus()
+    })
   }
 
   // 标题行右侧：回答中就报阶段与耗时（「正在调用 grep_search… 12.4s」），否则说明这条
@@ -529,6 +568,18 @@ export function BtwDrawer({
                         <span className="chat-btw-caret" aria-hidden="true" />
                       </div>
                     ) : null}
+                    {/* 失败或被停止：原问题就在手边，重问一次比重新打一遍顺手 */}
+                    {btwEntryRetryable(entry) && onAsk ? (
+                      <button
+                        type="button"
+                        className="chat-btw-retry"
+                        title="用同一个问题再问一次"
+                        onClick={() => onAsk(entry.question, { queue: running })}
+                      >
+                        <IconRefresh size={11} />
+                        重试
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -609,6 +660,11 @@ export function BtwDrawer({
             onPaste={handlePaste}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return
+              if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+                event.preventDefault()
+                moveHistory(event.key === 'ArrowUp' ? 1 : -1)
+                return
+              }
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 submit()

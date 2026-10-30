@@ -2833,6 +2833,79 @@ body.is-resizing.is-resizing-terminal {
   max-width: var(--modal-w-narrow);
 }
 
+/* 插件声明的表格弹窗（需求环境这类链接清单）：列宽跟着内容走，超长链接单行省略，
+   完整地址留在 title。表格自己不撑宽弹窗——横向滚动留给外层。 */
+.chat-modal-table {
+  max-width: var(--modal-w-wide);
+}
+
+.chat-plugin-table-wrap {
+  overflow-x: auto;
+}
+
+.chat-plugin-dialog-text {
+  margin: 0;
+  color: var(--color-fg-max);
+  font-size: 13px;
+  line-height: 1.7;
+  /* 插件给的是一段纯文本，换行就是它自己的分段 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-plugin-dialog-text + .chat-plugin-table-wrap {
+  margin-top: 12px;
+}
+
+.chat-plugin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.chat-plugin-table th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--color-line-strong);
+  color: var(--color-fg-muted);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.chat-plugin-table td {
+  max-width: 420px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-fg-max);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-plugin-table tr:last-child td {
+  border-bottom: none;
+}
+
+.chat-plugin-table td.tone-muted {
+  color: var(--color-fg-dim);
+}
+
+.chat-plugin-table-link {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.chat-plugin-table-link:hover {
+  text-decoration: underline;
+}
+
+.chat-plugin-table-note {
+  margin: 10px 0 0;
+  color: var(--color-fg-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 /* 表单弹窗（新建文件、重命名、新建分组）没有图标：不占图标位，标题的左边缘与下面的输入框对齐 */
 .chat-modal-prompt .chat-modal-mark.is-empty {
   display: none;
@@ -3879,6 +3952,25 @@ body.is-resizing-btw {
 
 .chat-btw-error {
   color: var(--color-danger);
+}
+
+/* 失败 / 被停止的那一条：一个贴着正文的小按钮，不抢答案的份量 */
+.chat-btw-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  color: var(--color-fg-faint);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.chat-btw-retry:hover {
+  border-color: var(--color-line-strong);
+  color: var(--color-fg);
 }
 
 /* 这个回答正在跑（标题行右侧的呼吸点，与侧栏「运行中」同一个 keyframes） */

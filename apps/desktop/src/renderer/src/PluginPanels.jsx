@@ -33,7 +33,8 @@ export function PluginQuickBar({
   focusSection,
   onTogglePanel,
   onCompose,
-  onLaunchSession
+  onLaunchSession,
+  onDialog
 }) {
   const panels = usePluginPanels(role)
   const [pending, setPending] = useState('')
@@ -69,7 +70,7 @@ export function PluginQuickBar({
           cwd
         })
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
-      applyPanelResult(result, { onCompose, onLaunchSession })
+      applyPanelResult(result, { onCompose, onLaunchSession, onDialog })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
     } finally {
       setPending('')
@@ -124,7 +125,8 @@ export function PluginPanels({
   focusSection,
   onClose,
   onCompose,
-  onLaunchSession
+  onLaunchSession,
+  onDialog
 }) {
   const panels = usePluginPanels(role)
   const open = panels.find((panel) => panel.id === openPlugin) || null
@@ -147,6 +149,7 @@ export function PluginPanels({
       onClose={onClose}
       onCompose={onCompose}
       onLaunchSession={onLaunchSession}
+      onDialog={onDialog}
     />
   )
 }
@@ -160,7 +163,8 @@ function PluginPanelDock({
   focusSection,
   onClose,
   onCompose,
-  onLaunchSession
+  onLaunchSession,
+  onDialog
 }) {
   const [view, setView] = useState(null)
   const [error, setError] = useState('')
@@ -230,10 +234,10 @@ function PluginPanelDock({
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
       setBusy('')
       applyView(result, { resetDrafts: true })
-      applyPanelResult(result, { onCompose, onLaunchSession })
+      applyPanelResult(result, { onCompose, onLaunchSession, onDialog })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
     },
-    [applyView, cwd, drafts, nodeId, onCompose, onLaunchSession, pluginId, sessionId]
+    [applyView, cwd, drafts, nodeId, onCompose, onDialog, onLaunchSession, pluginId, sessionId]
   )
 
   const sections = useMemo(() => view?.sections || [], [view])

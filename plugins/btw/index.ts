@@ -1,18 +1,37 @@
 import type { PluginContext, PluginSubagentThread } from '@packages/mica-plugin/index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { buildBtwSystemPrompt, messagesToTranscript } from '@packages/mica-builtin-commands/shared/btwThread.js';
-import { formatBtwNotice, parseBtwArgs } from './message.js';
+import {
+  btwHelpText,
+  formatBtwNotice,
+  formatBtwProgress,
+  formatBtwStopped,
+  parseBtwArgs,
+} from './message.js';
+
+const BTW_COMMAND = '/btw';
+/** 进度面板的刷新间隔：终端里每秒一次已经足够「它还活着」，再快只是白重渲染。 */
+const PROGRESS_TICK_MS = 1_000;
+/** 流式事件（工具切换、正文 delta）也要尽快反映，但不必每个 delta 都重渲染一次。 */
+const PROGRESS_MIN_INTERVAL_MS = 250;
+/** 停止时展示的部分回答上限：它是「已经流出来的那半段」，不是完整答案。 */
+const MAX_PARTIAL_ANSWER_CHARS = 20_000;
 
 /**
  * `/btw`（By The Way）：在主流程旁边开一条隔离子代理，问一句、答一句，不打断主流程、
  * 不写回主对话上下文。
  *
- * 它只做三件事，其余都在宿主：
+ * 它只做四件事，其余都在宿主：
  * - 从 `ctx.session` 取主流程的对话记录与角色，用共享的提示词构造器拼出旁问的
  *   system prompt（与桌面端抽屉同一份，见 `mica-builtin-commands/shared/btwThread.ts`）；
  * - 用 `ctx.subagents.thread` 开一条可复用的子代理线程，`-continue` 复用它（它的消息
  *   数组就是这条旁问的上下文，所以追问能看到上一轮读过什么）；
- * - 用 `ctx.ui.notice` 回报进度与答案：运行中固定在输入框上方，完成后落进对话。
+ * - 把子代理的流式回调折成输入框上方那一条进度（正在调用哪个工具、已经出了多少字、
+ *   跑了多久），长回答在终端里也不再是「一片安静」；
+ * - `/btw -stop` 中断正在回答的那一问，已经流出的正文仍然展示出来。
+ *
+ * 一次只回答一个问题：同一个子代理的消息数组不是并发安全的，而且两条回答共用一条
+ * `/btw` notice，并发只会互相覆盖到看不懂。
  *
  * 记账由宿主在做（每次提问只记新增的请求，`origin: 'plugin'`），这里不碰用量。
  */
@@ -23,67 +42,213 @@ export default function setupBtw(ctx: PluginContext): void {
   if (!ctx.ui) throw new Error('btw requires ctx.ui');
 
   // 一条旁问线程按会话保存：同一个会话里的 `-continue` 要接着同一份上下文。
-  const threads = new Map<string, PluginSubagentThread>();
+  const states = new Map<string, BtwState>();
 
   const registration = ctx.commands.register({
     name: 'btw',
-    description: 'By The Way：用一个隔离子代理回答，不打扰主流程（用法：/btw 问题，/btw -continue 追问）',
+    description:
+      'By The Way：用一个隔离子代理回答，不打扰主流程（/btw 问题，/btw -continue 追问，/btw -stop 停止）',
     scope: 'local-only',
     // 主流程正在运行时也能问：旁问的意义就是「不插进主流程的队列」。
     allowDuringTurn: true,
     pluginId: ctx.pluginId,
+    completionItems: [
+      { arg: '-continue', label: '-continue', description: '在同一个 btw 线程里追问' },
+      { arg: '-stop', label: '-stop', description: '停止正在回答的旁问' },
+    ],
     async handler(_commandCtx, args) {
-      await runBtw(ctx, threads, args ?? '');
+      await runBtw(ctx, states, args ?? '');
       return { ok: true };
     },
   });
   ctx.onDispose(() => registration.dispose());
   ctx.onDispose(() => {
-    for (const thread of threads.values()) thread.dispose();
-    threads.clear();
+    for (const state of states.values()) {
+      state.controller?.abort();
+      state.thread?.dispose();
+    }
+    states.clear();
   });
 
   ctx.logger.info('btw:ready');
 }
 
+/** 一条会话的旁问状态：可复用线程 + 当前那一问的运行态。 */
+type BtwState = {
+  thread: PluginSubagentThread | null;
+  controller: AbortController | null;
+  running: boolean;
+  /** 正在回答（或刚回答完）的问题，用于 `/btw -stop` 的进度面板。 */
+  question: string;
+  startedAt: number;
+  tool: string;
+  /** 已经流出的正文：停止时它是这一问唯一的记录。 */
+  answer: string;
+};
+
+function ensureState(states: Map<string, BtwState>, sessionId: string): BtwState {
+  let state = states.get(sessionId);
+  if (!state) {
+    state = {
+      thread: null,
+      controller: null,
+      running: false,
+      question: '',
+      startedAt: 0,
+      tool: '',
+      answer: '',
+    };
+    states.set(sessionId, state);
+  }
+  return state;
+}
+
 async function runBtw(
   ctx: PluginContext,
-  threads: Map<string, PluginSubagentThread>,
+  states: Map<string, BtwState>,
   rawArgs: string,
 ): Promise<void> {
   const parsed = parseBtwArgs(rawArgs);
-  if (!parsed) {
-    ctx.ui?.notice('用法：/btw <问题>，或在一条 btw 完成后用 /btw -continue <追问> 继续', {
-      command: '/btw',
-      status: 'info',
-    });
+  if (parsed.kind === 'help') {
+    ctx.ui?.notice(btwHelpText(), { command: BTW_COMMAND, status: 'info' });
     return;
   }
 
   const session = ctx.session?.describe();
   if (!session) {
-    ctx.ui?.notice('btw 需要先有一条会话', { command: '/btw', status: 'error' });
+    ctx.ui?.notice('btw 需要先有一条会话', { command: BTW_COMMAND, status: 'error' });
+    return;
+  }
+  const state = ensureState(states, session.id);
+
+  if (parsed.kind === 'stop') {
+    if (!state.running || !state.controller) {
+      ctx.ui?.notice('当前没有正在回答的 btw', { command: BTW_COMMAND, status: 'info' });
+      return;
+    }
+    state.controller.abort();
+    // 收尾（warning notice）在 ask 的 catch 里做：那里才知道已经流出了多少正文。
+    ctx.ui?.notice(`> ${state.question}\n\n正在停止…`, {
+      command: BTW_COMMAND,
+      status: 'running',
+      surface: 'command_panel',
+    });
+    return;
+  }
+
+  if (state.running) {
+    ctx.ui?.notice(
+      `> ${state.question}\n\n上一个 btw 还在回答中：用 /btw -stop 停止，或等它答完再追问`,
+      { command: BTW_COMMAND, status: 'warning' },
+    );
     return;
   }
 
   const { question, isContinue } = parsed;
-  let thread = isContinue ? threads.get(session.id) : undefined;
-  const isFallback = isContinue && !thread;
-  if (!thread) {
+  const isFallback = isContinue && !state.thread;
+  if (!isContinue) {
+    // 不带 -continue 就是新话题：旧线程的上下文不再需要，且必须显式丢掉——
+    // 每问一句都换一个新子代理，不 dispose 会让它们连同消息数组一直挂在会话上。
+    disposeThread(state);
+  }
+  if (!state.thread) {
     const created = createThread(ctx, question, session.role);
     if (!created) return;
-    thread = created;
-    threads.set(session.id, created);
+    state.thread = created;
   }
 
-  ctx.ui?.notice(`> ${question}\n\n正在思考…`, { command: '/btw', status: 'running', surface: 'command_panel' });
+  await ask(ctx, state, question, isFallback);
+}
+
+/** 问一次当前线程，把过程写进同一条 `/btw` 进度面板。 */
+async function ask(
+  ctx: PluginContext,
+  state: BtwState,
+  question: string,
+  isFallback: boolean,
+): Promise<void> {
+  const thread = state.thread;
+  if (!thread) return;
+  const beforeRequests = thread.usage().requests;
+  state.running = true;
+  state.controller = new AbortController();
+  state.question = question;
+  state.startedAt = Date.now();
+  state.tool = '';
+  state.answer = '';
+
+  const controller = state.controller;
+  let lastEmit = 0;
+  const emitProgress = (force = false): void => {
+    const now = Date.now();
+    // 定时器每次都要刷新（耗时在走字）；delta 与工具切换只是在两 tick 之间补一次。
+    if (!force && now - lastEmit < PROGRESS_MIN_INTERVAL_MS) return;
+    lastEmit = now;
+    ctx.ui?.notice(
+      formatBtwProgress({
+        question,
+        tool: state.tool,
+        answerChars: state.answer.length,
+        elapsedMs: now - state.startedAt,
+      }),
+      { command: BTW_COMMAND, status: 'running', surface: 'command_panel' },
+    );
+  };
+  emitProgress();
+  // 模型长时间不出字时也要让耗时走字：只靠 delta 触发的话，面板会停在 0.0s 一动不动。
+  const ticker = setInterval(() => emitProgress(true), PROGRESS_TICK_MS);
+  (ticker as unknown as { unref?: () => void }).unref?.();
+
   try {
-    const reply = await thread.ask(question, { description: question });
-    ctx.ui?.notice(formatBtwNotice(question, reply, isFallback), { command: '/btw', status: 'success' });
+    const answer = await thread.ask(question, {
+      description: question,
+      signal: controller.signal,
+      onText: (text) => {
+        if (!text) return;
+        state.answer = (state.answer + text).slice(0, MAX_PARTIAL_ANSWER_CHARS);
+        emitProgress();
+      },
+      onToolCall: (name) => {
+        state.tool = name;
+        // 工具切换是低频事件，且「正在调用什么」是最该及时看到的一行：绕过节流。
+        emitProgress(true);
+      },
+      onToolResult: (name) => {
+        if (state.tool === name) state.tool = '';
+        emitProgress(true);
+      },
+    });
+    const elapsedMs = Date.now() - state.startedAt;
+    const requests = thread.usage().requests - beforeRequests;
+    ctx.ui?.notice(formatBtwNotice(question, answer, { isFallback, elapsedMs, requests }), {
+      command: BTW_COMMAND,
+      status: 'success',
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    ctx.ui?.notice(`> ${question}\n\nbtw 出错：${message}`, { command: '/btw', status: 'error' });
+    if (controller.signal.aborted) {
+      // 停止不是失败：已经流出来的那半段就是这一问的答案，不能丢。
+      ctx.ui?.notice(formatBtwStopped(question, state.answer), {
+        command: BTW_COMMAND,
+        status: 'warning',
+      });
+    } else {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui?.notice(`> ${question}\n\nbtw 出错：${message}`, {
+        command: BTW_COMMAND,
+        status: 'error',
+      });
+    }
+  } finally {
+    clearInterval(ticker);
+    state.running = false;
+    state.controller = null;
+    state.tool = '';
   }
+}
+
+function disposeThread(state: BtwState): void {
+  state.thread?.dispose();
+  state.thread = null;
 }
 
 /** 开一条新线程：背景就是主流程当前的文字对话记录（只读，不进主上下文）。 */
@@ -106,7 +271,7 @@ function createThread(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    ctx.ui?.notice(`btw 暂时不可用：${message}`, { command: '/btw', status: 'error' });
+    ctx.ui?.notice(`btw 暂时不可用：${message}`, { command: BTW_COMMAND, status: 'error' });
     return null;
   }
 }

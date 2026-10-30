@@ -1430,18 +1430,17 @@ async function handleCodexRequest(
         return;
       }
       // 走哪个 tab：带了 threadId 就在那条线程上追问（`/btw -continue`），没带就是
-      // 新开一条（抽屉上的 `+`）。host 里找不到这个 id（重启过、被淘汰）时按同一个
+      // 新开一条（抽屉上的 `+`）。host 里找不到这个 id（重启过、被关掉）时按同一个
       // id 重建，客户端不必自己处理「线程丢了」。
       const threadIdParam = paramString(params, 'threadId') ?? '';
       const question = (paramString(params, 'question') ?? '').trim();
       if (!question) {
         // 空问题 = 只把这条线程建出来（点 `+` 时要先把 id 拿到手才能渲染 tab）。
-        if (threadIdParam) {
-          ctx.writeResponse({ ok: true, threadId: ctx.btw.ensure(threadIdParam).id });
-          return;
-        }
-        const created = ctx.btw.ensure(null);
-        ctx.writeResponse({ ok: true, threadId: created.id });
+        // 上限在 `open` 里判定：到上限时如实拒绝，而不是悄悄把最早的 tab 淘汰掉。
+        const opened = ctx.btw.open(threadIdParam || null);
+        ctx.writeResponse(
+          opened.ok ? { ok: true, threadId: opened.threadId } : { ok: false, message: opened.message },
+        );
         return;
       }
       // 回答期间再提交 = 排队等这一条答完（面板的 Enter/Tab），不是并发的第二次提问。

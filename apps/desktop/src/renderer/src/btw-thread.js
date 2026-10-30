@@ -62,6 +62,32 @@ export function btwEntryElapsedMs(entry, now) {
   return Math.max(0, (Number.isFinite(finished) ? finished : Number(now) || 0) - started)
 }
 
+/**
+ * 这一条能不能「拿原问题再问一次」。
+ *
+ * 只有出错和被中断的那一条需要它：完成的答案已经在那儿，重问只会白花一次请求。
+ * 中断的那一问也一样——半段回答通常接不上，重来一遍比让用户重打一遍顺手。
+ */
+export function btwEntryRetryable(entry) {
+  const question = String(entry?.question || '').trim()
+  return Boolean(question) && (entry?.status === 'error' || entry?.status === 'aborted')
+}
+
+/**
+ * 输入历史的步进（Alt+↑ 往更早，Alt+↓ 往更新）。
+ *
+ * `index` 是「从最新往回数的第几条」，-1 表示不在历史里（显示进入历史前的草稿）。
+ * 返回 null 表示这一步没有变化（没有历史、或已经到头）。
+ */
+export function btwHistoryStep({ index = -1, count = 0, direction }) {
+  const total = Math.max(0, Number(count) || 0)
+  if (total === 0) return null
+  const step = Number(direction) > 0 ? 1 : -1
+  const next = Math.min(Math.max((Number(index) || 0) + step, -1), total - 1)
+  if (next === index) return null
+  return { index: next }
+}
+
 /** 12_400 → `12.4k`，与主对话状态栏同一个读法。 */
 function shortTokens(value) {
   const tokens = Number(value)

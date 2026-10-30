@@ -2,6 +2,7 @@ import type { CommandRegistry } from '@packages/mica-commands/index.js';
 import type { Disposable } from '@packages/mica-common/index.js';
 import type { RuntimeEventBus, RuntimePluginQueue, SubmitOptions, SubmitResult } from '@packages/mica-runtime/index.js';
 import type { MicaTool } from '@packages/mica-tools/index.js';
+import type { PluginToolDescriptor } from '@packages/mica-tools/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from './HookRegistry.js';
 import type { ServiceContainer } from './ServiceContainer.js';
@@ -267,7 +268,14 @@ export type PluginContext = {
     queue?: RuntimePluginQueue;
   };
   tools?: {
-    register(tool: MicaTool, options?: PluginToolRegistrationOptions): Disposable;
+    /**
+     * 注册一个只在本次会话存在的工具。
+     *
+     * 收 `MicaTool` 实例或纯描述（`PluginToolDescriptor`）：随包插件能继承基类，用户插件
+     * 没有仓库模块可导入，只能给 `{ name, description, input_schema, execute }`，宿主负责
+     * 换成真正的工具实例。返回值按描述注册时与传入对象不是同一个东西，反注册用它。
+     */
+    register(tool: MicaTool | PluginToolDescriptor, options?: PluginToolRegistrationOptions): Disposable;
   };
   /**
    * 常驻工作（周期轮询、心跳、增量同步）。

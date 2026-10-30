@@ -253,11 +253,11 @@ export class Application {
         },
         tools: {
           register: (tool, options = {}) => {
-            micaTools.registerRuntime(tool, { primaryAgentOnly: options.primaryAgentOnly });
-            const unregisterIcon = options.icon ? micaUi.registerToolIcon(tool.name, options.icon) : null;
+            const registered = micaTools.registerRuntime(tool, { primaryAgentOnly: options.primaryAgentOnly });
+            const unregisterIcon = options.icon ? micaUi.registerToolIcon(registered.name, options.icon) : null;
             return {
               dispose: () => {
-                micaTools.unregisterRuntime(tool);
+                micaTools.unregisterRuntime(registered);
                 unregisterIcon?.();
               },
             };

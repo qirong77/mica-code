@@ -14,6 +14,7 @@ import {
 } from '../core/Agent.js';
 import { providerContentToAgentContent } from '../core/Content.js';
 import { isRetryableError, withRetry } from '../core/retry.js';
+import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
@@ -223,7 +224,8 @@ export class ChatCompletionsClient extends BaseAgent<
             { signal: options?.signal },
           );
 
-          for await (const chunk of stream) {
+          // 上游可能握手成功后长时间不吐事件；空闲超过 60s 按超时处理并重试。
+          for await (const chunk of withIdleTimeout(stream)) {
             throwIfQueryStopped(options);
             if (chunk.usage) {
               attemptHadOutput = true;

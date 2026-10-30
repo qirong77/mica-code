@@ -238,6 +238,14 @@ suite('/btw PTY end-to-end (mock provider)', () => {
       const t1 = await driver.waitTurnCompleted(0, { timeoutMs: 90_000 });
       if (t1 !== 'completed') fail(`turn1 未完成: ${String(t1)}`);
 
+      // /btw -h：用法与子命令能直接查（-continue / -stop 都写在这一段里）
+      await driver.typeText('/btw', 15);
+      await driver.waitIdle(300, 10_000);
+      await driver.typeText(' -h', 15);
+      driver.enter();
+      const gotHelp = await driver.waitFor(/\/btw -stop/, { timeoutMs: 30_000 });
+      if (!gotHelp) fail('未看到 /btw 帮助');
+
       // /btw：一条 By The Way 问题，主流程不等待
       // The slash dropdown re-renders on every keystroke; typing the space in the
       // same burst occasionally loses it and turns the line into `/btw这个方案...`,

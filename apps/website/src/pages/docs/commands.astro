@@ -31,7 +31,7 @@ const groups = [
       ['/new', '创建独立代理；/new <任务描述> 在新代理中后台执行任务。', true],
       ['/fork', '从当前历史分叉新代理；/fork <任务描述> 在分叉代理中后台执行。', true],
       ['/task', '查看代理、保留的子代理任务与运行中的后台 shell；/task clear 清理空闲任务。', true],
-      ['/btw', '发起不进入主对话上下文的旁问；/btw -continue 继续上一问。', true],
+      ['/btw', '发起不进入主对话上下文的旁问；/btw -continue 继续上一问，/btw -stop 停止回答。', true],
       ['/loop', '启动定时任务；/loop status 查看状态，/loop stop 停止。', false],
       ['/capabilities', '本会话设置：选择可用的工具、Skills 与 MCP 服务；只影响当前会话，不改变配置页的默认值。', false],
       ['/mcp', '查看 MCP 服务器与工具；/mcp reconnect <server> 重连。', false],
@@ -104,7 +104,12 @@ const groups = [
   </p>
   <pre><code>/fork 检查当前实现的边界情况，给出测试建议
 /task
-/btw 这里的乐观锁和互斥锁分别适用于什么情况？</code></pre>
+/btw 这里的乐观锁和互斥锁分别适用于什么情况？
+/btw -continue 那并发写的时候呢？</code></pre>
+  <p>
+    旁问在输入框上方显示正在调用哪个工具、已经输出多少字；回答太长时用
+    <code>/btw -stop</code> 停下，已经说出来的部分会保留。
+  </p>
 
   <h3>定时执行重复任务</h3>
   <pre><code>/loop 30m 检查测试结果，汇报新增失败

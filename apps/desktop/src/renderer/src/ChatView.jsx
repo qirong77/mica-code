@@ -1072,6 +1072,71 @@ function PluginTaskDialog({ task, onChange, onConfirm, onClose }) {
 }
 
 /**
+ * 插件声明的表格弹窗（需求环境这类链接清单）。
+ *
+ * 插件只给列与格子，排版与点击行为都在这里：超长链接单行省略（完整地址留在 `title`），
+ * 带 `link` 的格子点了交给系统浏览器——页面自己跳转会把整个应用导航走。
+ */
+function PluginTableDialog({ dialog, onClose }) {
+  return (
+    <ModalShell
+      title={dialog.title}
+      subtitle={dialog.subtitle || null}
+      onClose={onClose}
+      className="chat-modal-table"
+      footer={
+        <button type="button" className="session-action" onClick={onClose}>
+          关闭
+        </button>
+      }
+    >
+      {dialog.text ? <p className="chat-plugin-dialog-text">{dialog.text}</p> : null}
+      {dialog.columns.length > 0 ? (
+        <div className="chat-plugin-table-wrap">
+          <table className="chat-plugin-table">
+            <thead>
+              <tr>
+                {dialog.columns.map((column) => (
+                  <th key={column}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {dialog.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} className={cell.tone ? `tone-${cell.tone}` : undefined}>
+                      {cell.link ? (
+                        <a
+                          href={cell.link}
+                          title={cell.text}
+                          className="chat-plugin-table-link"
+                          onClick={(event) => {
+                            event.preventDefault()
+                            if (isExternalHref(cell.link)) {
+                              window.mica.terminal.openExternal(cell.link).catch(() => {})
+                            }
+                          }}
+                        >
+                          {cell.text}
+                        </a>
+                      ) : (
+                        <span title={cell.text}>{cell.text}</span>
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {dialog.note && <p className="chat-plugin-table-note">{dialog.note}</p>}
+    </ModalShell>
+  )
+}
+
+/**
  * subagent 的活动记录：**与主对话共用一套展示件**。
  *
  * 思考与工具行直接用回合日志那份（`chat-tool-views.jsx`）：思考整段折行、工具行
@@ -2709,6 +2774,8 @@ export function ChatView({
   const [messageEdit, setMessageEdit] = useState(null)
   // 插件要开新会话时先给用户看的提示词（确认后才真的建会话、发消息）。
   const [pluginTask, setPluginTask] = useState(null)
+  // 插件声明的表格弹窗（需求环境这类链接清单）：{ title, subtitle?, columns, rows, note? } | null
+  const [pluginDialog, setPluginDialog] = useState(null)
   const commitTaskRef = useRef(null) // { id, noticeId, cwd, nodeId }
   // 输入框区域手动设定的最小高度（px）；null 表示跟随默认 30px
   const [composerMinHeight, setComposerMinHeight] = useState(null)
@@ -3026,6 +3093,11 @@ export function ChatView({
       if (nodeIdRef.current !== targetNodeId) return
       if (!res?.ok) {
         appendNotice(`新建 By The Way 失败：${res?.error || '未知错误'}`, 'error')
+        return
+      }
+      // 业务性拒绝（例如已经开到线程上限）走 result，原因要原样告诉用户。
+      if (res.result?.ok === false) {
+        appendNotice(`新建 By The Way 失败：${res.result.message || '未知错误'}`, 'warn')
         return
       }
       const createdId = res.result?.threadId
@@ -5224,6 +5296,7 @@ export function ChatView({
   }, [historyLoaded, nodeId, sendRef])
 
   const closePluginTask = useCallback(() => setPluginTask(null), [])
+  const closePluginDialog = useCallback(() => setPluginDialog(null), [])
   const changePluginTaskPrompt = useCallback((value) => {
     setPluginTask((current) => (current ? { ...current, prompt: value } : current))
   }, [])
@@ -5798,6 +5871,23 @@ export function ChatView({
     setBtwOpen(false)
   }, [nodeId])
 
+  // Cmd/Ctrl+Shift+B 打开 / 收起 By The Way（与输入条上那个按钮同一动作）。
+  // 焦点在这块对话区（或没有焦点）时才接管：终端、编辑器里的同名快捷键不属于这里。
+  useEffect(() => {
+    if (!visible || !hasSession || remoteRunning) return undefined
+    const onKeyDown = (event) => {
+      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return
+      if (event.key?.toLocaleLowerCase() !== 'b') return
+      const active = document.activeElement
+      if (active && active !== document.body && !active.closest?.('.chat-view')) return
+      event.preventDefault()
+      event.stopPropagation()
+      setBtwOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [visible, hasSession, remoteRunning])
+
   // 输入框行首标记（与 CLI 的 prompt 同款）：非默认角色时在标记前显示角色名。
   // 内容与 tooltip 在「可点 / 只读」两种形态之间共用，只有外层元素不同——分享范围里
   // 角色是分享者的会话配置（服务端也锁着），所以只留展示、不给切换入口。
@@ -6173,6 +6263,7 @@ export function ChatView({
             }}
             onCompose={composeFromPlugin}
             onLaunchSession={requestPluginSession}
+            onDialog={setPluginDialog}
           />
           <div
             className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''} ${loopTone}`}
@@ -6386,7 +6477,7 @@ export function ChatView({
                       ? '该会话正在另一个进程里运行'
                       : btwRunning
                         ? 'By The Way：正在回答…（点击查看）'
-                        : 'By The Way：不打扰主流程地问一句（回答不进入本会话上下文）'
+                        : 'By The Way：不打扰主流程地问一句（回答不进入本会话上下文，Cmd/Ctrl+Shift+B）'
                 }
                 aria-label="By The Way"
                 // 抽屉不是浮层：没有「点外面就关」需要它自己认领这次点击，所以不带
@@ -6546,6 +6637,7 @@ export function ChatView({
           onClose={closePluginPanel}
           onCompose={composeFromPlugin}
           onLaunchSession={requestPluginSession}
+          onDialog={setPluginDialog}
         />
         {pluginTask && (
           <PluginTaskDialog
@@ -6555,6 +6647,7 @@ export function ChatView({
             onClose={closePluginTask}
           />
         )}
+        {pluginDialog && <PluginTableDialog dialog={pluginDialog} onClose={closePluginDialog} />}
         {btwOpen && (
           <BtwDrawer
             thread={btwThread}

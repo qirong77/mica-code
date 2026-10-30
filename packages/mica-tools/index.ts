@@ -52,6 +52,8 @@ export const micaTools = {
 };
 
 export { MicaTool } from './MicaTool.js';
+export { createPluginTool } from './PluginTool.js';
+export type { PluginToolDescriptor } from './PluginTool.js';
 export { ToolRunShell } from './ToolRunShell.js';
 export { ToolBackgroundStart } from './ToolBackgroundStart.js';
 export { ToolBackgroundRead } from './ToolBackgroundRead.js';

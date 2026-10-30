@@ -118,6 +118,63 @@ describe('normalizePluginPanelAction', () => {
     expect(normalizePluginPanelActionResult({ newSession: '复盘' })).toEqual({});
   });
 
+  it('keeps a dialog table with its columns, cells and links', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: {
+        title: '需求环境',
+        subtitle: '这个会话',
+        columns: ['类型', '链接'],
+        rows: [
+          ['PRD', { text: 'https://a/prd', link: 'https://a/prd' }],
+          [{ text: '未填写', tone: 'muted' }, ''],
+        ],
+        note: '在面板里填写',
+      },
+    });
+    expect(result.dialog).toEqual({
+      title: '需求环境',
+      columns: ['类型', '链接'],
+      rows: [
+        [{ text: 'PRD' }, { text: 'https://a/prd', link: 'https://a/prd' }],
+        [{ text: '未填写', tone: 'muted' }, { text: '' }],
+      ],
+      subtitle: '这个会话',
+      note: '在面板里填写',
+    });
+  });
+
+  it('drops a dialog without a title, body or columns', () => {
+    expect(normalizePluginPanelActionResult({ dialog: { rows: [['a']] } })).toEqual({});
+    expect(normalizePluginPanelActionResult({ dialog: { title: '表', columns: [], rows: [] } })).toEqual({});
+    expect(normalizePluginPanelActionResult({ dialog: 'PRD' })).toEqual({});
+  });
+
+  it('keeps a prose-only dialog without a table', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: { title: '需求描述', text: '这个需求是给客服加一个入口。\n改完之后新建单据更快。' },
+    });
+    expect(result.dialog).toEqual({
+      title: '需求描述',
+      columns: [],
+      rows: [],
+      text: '这个需求是给客服加一个入口。\n改完之后新建单据更快。',
+    });
+  });
+
+  it('trims cells to the column count and drops empty rows', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: {
+        title: '表',
+        columns: ['A', 'B'],
+        rows: [['1', '2', '多余'], ['', ''], 'not-a-row', ['只有一格']],
+      },
+    });
+    expect(result.dialog?.rows).toEqual([
+      [{ text: '1' }, { text: '2' }],
+      [{ text: '只有一格' }, { text: '' }],
+    ]);
+  });
+
   it('keeps action, key and string values only', () => {
     const action = normalizePluginPanelAction({ action: 'channel.add', key: 12, values: { a: 'x', b: 3, c: '  y  ' } });
     expect(action).toEqual({ action: 'channel.add', values: { a: 'x', c: 'y' } });

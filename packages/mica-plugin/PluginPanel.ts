@@ -133,11 +133,49 @@ export type PluginPanelNewSession = {
  * - `compose` —— 把这段文本放进当前会话的输入框，**不发送**。用户还能改、能删，按回车才
  *   算数。需要模型「先看一眼再决定发不发」的时候用它，比直接投递更可控。
  * - `newSession` —— 新开一个会话，把这段提示词作为它的第一条消息发出去。
+ * - `dialog` —— 弹一张只读表格（链接清单、对照表这类）。宿主管渲染，插件给数据。
  */
 export type PluginPanelActionResult = {
   message?: string;
   compose?: string;
   newSession?: PluginPanelNewSession;
+  dialog?: PluginPanelDialog;
+};
+
+/**
+ * 弹窗表格里的一个格子。
+ *
+ * `link` 是给宿主的信号：这一格可以点，点了用系统浏览器打开（页面自己不做跳转）。插件
+ * 不该把一段「点这里」的说明当链接传进来——宿主只认 `http(s)` / `mailto`，其余当普通文本。
+ */
+export type PluginPanelDialogCell = {
+  text: string;
+  link?: string;
+  tone?: PluginPanelTone;
+};
+
+/**
+ * 一张插件声明的只读表格弹窗。
+ *
+ * 为什么是表格而不是「更多行」：链接清单要的是对齐的列（类型 / 地址 / 备注），一行
+ * 「标签 — 值」说不清哪一列是什么。插件仍然只给纯数据，宿主负责排版、省略超长链接、
+ * 以及把 `link` 交给系统浏览器。
+ */
+export type PluginPanelDialog = {
+  title: string;
+  subtitle?: string;
+  /**
+   * 弹窗正文：一段会换行的纯文本（需求描述、结论这类不适合塞进格子的内容）。
+   *
+   * 表格的格子是单行省略的——给链接清单对得很齐，但放过一段话只会剩一行省略号。
+   * 所以正文单独成一栏，表格可以没有：只有正文时它就是一个只读的文字弹窗。
+   */
+  text?: string;
+  /** 列标题；行里的单元格按顺序对齐到这里。 */
+  columns: string[];
+  rows: PluginPanelDialogCell[][];
+  /** 表格下面的一句说明（「还没填」时指向去哪里填）。 */
+  note?: string;
 };
 
 export type PluginPanelViewInput = {
@@ -199,6 +237,11 @@ const MAX_ITEMS = 40;
 const MAX_FIELDS = 12;
 const MAX_ACTIONS = 8;
 const MAX_SECTIONS = 8;
+const MAX_DIALOG_COLUMNS = 6;
+const MAX_DIALOG_ROWS = 50;
+const MAX_DIALOG_TEXT = 4000;
+/** 弹窗里的一格：链接地址可以很长（带查询串的分享链接），但仍然有上限。 */
+const MAX_CELL_LINK = 2000;
 /** 提示词整段回传的上限：它是一段给模型看的正文，不是一行状态。 */
 const MAX_PROMPT = 20_000;
 
@@ -389,10 +432,66 @@ export function normalizePluginPanelActionResult(input: unknown): PluginPanelAct
   const message = text(raw.message, 120);
   const compose = text(raw.compose, MAX_PROMPT);
   const newSession = newSessionOf(raw.newSession);
+  const dialog = dialogOf(raw.dialog);
   return {
     ...(message ? { message } : {}),
     ...(compose ? { compose } : {}),
     ...(newSession ? { newSession } : {}),
+    ...(dialog ? { dialog } : {}),
+  };
+}
+
+function dialogCellOf(value: unknown): PluginPanelDialogCell | null {
+  // 纯字符串是常见写法（表头下的普通列），别强迫插件给每一格都包一层对象
+  if (typeof value === 'string') {
+    const cellText = text(value, MAX_TEXT);
+    return cellText ? { text: cellText } : null;
+  }
+  const raw = record(value);
+  const cellText = text(raw.text, MAX_TEXT);
+  if (!cellText) return null;
+  const link = text(raw.link, MAX_CELL_LINK);
+  return {
+    text: cellText,
+    ...(link ? { link } : {}),
+    ...(tone(raw.tone) ? { tone: tone(raw.tone) } : {}),
+  };
+}
+
+/**
+ * 弹窗的归一化：没有标题就什么都不画。
+ *
+ * 正文与表格都是可选的，但至少要有一样，否则这个弹窗只剩标题（那时它的意义就是一句
+ * message）。每行裁到列数、空行丢掉；单格认不出就当空格——表结构本身不该因为一格畸形而消失。
+ */
+function dialogOf(value: unknown): PluginPanelDialog | undefined {
+  const raw = record(value);
+  const title = text(raw.title, 60);
+  if (!title) return undefined;
+  const columns = list(raw.columns)
+    .slice(0, MAX_DIALOG_COLUMNS)
+    .map((column) => text(column, 30))
+    .filter(Boolean);
+  const body = text(raw.text, MAX_DIALOG_TEXT);
+  if (columns.length === 0 && !body) return undefined;
+  const rows = list(raw.rows)
+    .slice(0, MAX_DIALOG_ROWS)
+    .map((row) => {
+      const cells = list(row).slice(0, columns.length).map((cell) => dialogCellOf(cell));
+      if (!cells.some((cell) => cell !== null)) return null;
+      // 补齐到列数：宿主按列画格子，短行不该让后面的列错位
+      return columns.map((_, index) => cells[index] ?? { text: '' });
+    })
+    .filter((row): row is PluginPanelDialogCell[] => row !== null);
+  const subtitle = text(raw.subtitle, 200);
+  const note = text(raw.note, 400);
+  return {
+    title,
+    columns,
+    rows,
+    ...(body ? { text: body } : {}),
+    ...(subtitle ? { subtitle } : {}),
+    ...(note ? { note } : {}),
   };
 }
 

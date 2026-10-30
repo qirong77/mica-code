@@ -10,6 +10,7 @@ import {
   resolveBtwToolIndex,
   MAX_BTW_THINKING_CHARS,
   MAX_BTW_TOOL_OUTPUT_CHARS,
+  MAX_BTW_THREADS,
 } from './btwThread.js';
 import type { MicaBtwThread } from '@packages/mica-runtime/codexProtocol.js';
 import type { CommandAgent, CommandSessionController } from '@packages/mica-builtin-commands/services.js';
@@ -591,5 +592,56 @@ describe('BtwThreads', () => {
 
     threads.flush();
     expect(JSON.stringify(persisted.at(-1))).toContain('上次问的');
+  });
+
+  it('refuses a new tab at the cap instead of evicting an old one', () => {
+    const harness = makeHarness();
+    const threads = new BtwThreads({
+      agent: harness.agent,
+      sessionController: { saveCurrent: vi.fn() } as unknown as CommandSessionController,
+      onUpdate: () => {},
+      flushIntervalMs: 0,
+    });
+    const ids: string[] = [];
+    for (let index = 0; index < MAX_BTW_THREADS; index += 1) {
+      const opened = threads.open(null);
+      expect(opened.ok).toBe(true);
+      if (opened.ok) ids.push(opened.threadId);
+    }
+
+    // 满了就如实拒绝：悄悄淘汰会让客户端手里那个 tab 变成 host 不认识的幽灵
+    expect(threads.open(null)).toMatchObject({ ok: false });
+    expect(threads.ask(null, '第七个问题')).toMatchObject({ ok: false });
+    expect(threads.list().map((item) => item.id)).toEqual(ids);
+  });
+
+  it('leaves empty tabs out of the persisted state and the restore', () => {
+    const harness = makeHarness();
+    const persisted: unknown[][] = [];
+    const threads = new BtwThreads({
+      agent: harness.agent,
+      sessionController: { saveCurrent: vi.fn() } as unknown as CommandSessionController,
+      onUpdate: () => {},
+      onPersist: (state) => persisted.push(state),
+      flushIntervalMs: 0,
+    });
+
+    // 「+」新建的 tab 还没提问：没有任何内容可存，重启后也不该长出一条「新线程」
+    threads.ensure(null);
+    threads.flush();
+    expect(persisted.at(-1)).toEqual([]);
+
+    threads.restore([
+      { id: 'empty', entries: [], messages: [] },
+      {
+        id: 'kept',
+        entries: [{ id: 'e1', question: '问过', status: 'completed', startedAt: '' }],
+        messages: [],
+      },
+    ]);
+    // 已经建出来的空 tab 仍在内存里（用户眼前确实有一个），但磁盘上的空线程不会被恢复
+    const ids = threads.list().map((item) => item.id);
+    expect(ids).toContain('kept');
+    expect(ids).not.toContain('empty');
   });
 });

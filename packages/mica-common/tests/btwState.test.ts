@@ -56,6 +56,14 @@ describe('read/write', () => {
     writeFileSync(join(home, 'btw', 'bad.json'), 'not json')
     expect(readBtwState('bad')).toEqual([])
   })
+
+  it('drops threads that never asked anything', () => {
+    writeBtwState('s4', [
+      { id: 'empty', entries: [], messages: [] },
+      { id: 'asked', entries: [{ id: 'e1', question: '问' }], messages: [] },
+    ])
+    expect(readBtwState('s4').map((thread) => thread.id)).toEqual(['asked'])
+  })
 })
 
 describe('deleteBtwState', () => {

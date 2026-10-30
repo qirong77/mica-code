@@ -50,7 +50,10 @@ export function readBtwState(sessionId: string): StoredBtwThread[] {
       threads?: unknown;
     };
     if (!parsed || parsed.version !== BTW_STATE_VERSION || !Array.isArray(parsed.threads)) return [];
-    return parsed.threads.filter((item): item is StoredBtwThread => isStoredThread(item));
+    // 空线程（没有任何问答）不返回：它只是界面上一个还没提问的 tab，不是可恢复的内容。
+    return parsed.threads.filter(
+      (item): item is StoredBtwThread => isStoredThread(item) && item.entries.length > 0,
+    );
   } catch {
     return [];
   }

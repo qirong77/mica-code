@@ -129,6 +129,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - turn 级重试最多 5 次、间隔 10s；仅在错误可重试且本轮没有非只读工具调用时自动重试，先恢复 pre-turn snapshot。
 - provider 的 `withRetry` 只在尚无文本/工具输出时重发（thinking 不算输出），退避 2/4/8/16/30s。
+- 流空闲超过 60s 视为超时（`core/streamIdleTimeout.ts`）：SDK 的超时只覆盖到响应头，网关握手成功却不再吐事件时由看门狗关流并抛 `TimeoutError`，交给上面的重试判定。
 - 重试清空 responseBuffer，重放已消费的 `after_iteration` 输入，等待能被 abort 立即打断。
 - `turn:retrying` 不得投影为 Codex `error`，否则 desktop 会提前结束 run。
 - 重试与失败写成 notice 存进 `conversationMessages`（`runtime/turnNotices.ts`），不进 provider history。
@@ -228,7 +229,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 运行状态由清单 `status` 声明（`key` / `label` / `type: text|link`），值由插件写进 `$MICA_HOME/plugin-data/<id>/data.json`，配置页插件详情渲染成「运行状态」一节。值是字符串或 `{ text, tone: ok|warn|error }`——插件判断语义，页面只上色；没写过的键显示「尚未上报」，不隐藏。插件详情因此不需要为每个插件各写一套状态界面。
 - `desktop` 能力只有桌面端 spawn 的 app-server 提供：`buildSpawnEnv` 注入 `MICA_PLUGIN_DESKTOP_HOST=1`（别用 `MICA_DESKTOP_HOST`，那是运行时的绑定地址），`runAppServer` 据此传 `desktopHost` 给 `HeadlessPluginHost`。CLI / TUI / `mica exec` 里没有它，依赖插件整块跳过。
 - 桌面入口由清单 `desktop.entry`（`{ "entry": { "label": "Connections" } }`）+ 插件目录里的 `desktop.jsx` 组成：`default` 导出卡片组件（props `{ api, onClose }`），可选命名导出 `summary(api)` 给入口行右侧那一行字。宿主只画一行与卡片容器（悬停/点击、浮层定位、Esc 与点外部收起都在 `renderer/src/PluginEntries.jsx`），按 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里登记**。只对随包插件生效：页面是构建期打的包，`$MICA_HOME/plugins` 里没有它的模块，用户插件声明了也渲染不出入口。同一个 `desktop.jsx` 若在清单里另外声明 `desktop.page`（`{ "page": { "title": "排期" } }`），点这一行不进浮层而是打开整页：宿主把它渲染在 `renderer/src/PluginPage.jsx` 里（盖住整窗、顶部一条 `← 返回对话` + 标题，内容是插件模块自己的组件，props 同样是 `{ api }`），`App.jsx` 用 `pluginPage` 状态承接、清掉浮层的悬停展开——时间轴、看板这类要整屏宽高的界面走这条，浮层的 320px 放不下。
-- 对话右侧面板由清单 `desktop.panel`（`{ "panel": { "label": "需求开发", "roles": ["需求开发"], "shortcuts": [...] } }`）+ `ctx.desktop.panel({ view, action })` 组成：**插件给数据、宿主画出来**，所以用户插件也有。视图是纯数据（`title` / `status` / `sections〔rows, items, fields, commit, actions〕`），宿主统一归一化（长度、条目数与字段类型）后渲染，畸形视图不会让页面崩掉；每个 section 是一块独立折叠卡片（`collapsed` 决定初始是否收起）；有输入框的 section 用 `commit` 声明自动保存动作，宿主在输入停顿约 0.5s 后带字段值调它，设置类因此不用再点按钮；动作只回 `{ action, key?, values? }`，宿主每次动作后重新取一次视图。一个插件最多一块面板（再注册会替换）。`roles` 是显示条件（会话角色名，空数组＝任何角色）；声明了它就要写 `requires: ["desktop"]`，但**没有** `desktop.entry` 那条「只对随包插件生效」的限制。`shortcuts` 是输入框正上方那排按钮，每个二选一：`action` 直接触发插件动作（不打开面板），`section` 打开面板并展开同名 section——常用动作与配置项因此各走各的路，不用挤进一块抽屉；动作可以 `return { message }` 回一句话，页面显示在按钮旁边（常驻宿主里 `ctx.ui.notice` 用户看不到）、回 `{ compose }` 把文本放进当前会话输入框（不发送）、或回 `{ newSession: { prompt, role?, cwd?, confirm? } }` 开一个新会话跑这段提示词（默认先弹窗让用户看见并编辑，点开始才发）；建会话、摆页签、控制发送时机都由页面负责，插件只声明意图；动作改到的 `ctx.sessionState` 由宿主在动作返回后补一次会话落盘，插件不用自己触发保存。
+- 对话右侧面板由清单 `desktop.panel`（`{ "panel": { "label": "需求开发", "roles": ["需求开发"], "shortcuts": [...] } }`）+ `ctx.desktop.panel({ view, action })` 组成：**插件给数据、宿主画出来**，所以用户插件也有。视图是纯数据（`title` / `status` / `sections〔rows, items, fields, commit, actions〕`），宿主统一归一化（长度、条目数与字段类型）后渲染，畸形视图不会让页面崩掉；每个 section 是一块独立折叠卡片（`collapsed` 决定初始是否收起）；有输入框的 section 用 `commit` 声明自动保存动作，宿主在输入停顿约 0.5s 后带字段值调它，设置类因此不用再点按钮；动作只回 `{ action, key?, values? }`，宿主每次动作后重新取一次视图。一个插件最多一块面板（再注册会替换）。`roles` 是显示条件（会话角色名，空数组＝任何角色）；声明了它就要写 `requires: ["desktop"]`，但**没有** `desktop.entry` 那条「只对随包插件生效」的限制。`shortcuts` 是输入框正上方那排按钮，每个二选一：`action` 直接触发插件动作（不打开面板），`section` 打开面板并展开同名 section——常用动作与配置项因此各走各的路，不用挤进一块抽屉；动作可以 `return { message }` 回一句话，页面显示在按钮旁边（常驻宿主里 `ctx.ui.notice` 用户看不到）、回 `{ compose }` 把文本放进当前会话输入框（不发送）、回 `{ newSession: { prompt, role?, cwd?, confirm? } }` 开一个新会话跑这段提示词（默认先弹窗让用户看见并编辑，点开始才发）、或回 `{ dialog: { title, subtitle?, text?, columns, rows, note? } }` 弹一个只读弹窗（`text` 是会换行的正文、表格可以没有；`columns` + `rows` 给对齐的表格，格子 `{ text, link? }`，带 `link` 的交给系统浏览器打开，纯展示、编辑仍回面板 section）；建会话、摆页签、控制发送时机、弹窗排版都由页面负责，插件只声明意图；动作改到的 `ctx.sessionState` 由宿主在动作返回后补一次会话落盘，插件不用自己触发保存。
 - 插件前端模块用到的 Tailwind 工具类必须被扫描到：`plugins/` 不在 `apps/desktop` 下，`app.css` 里用 `@source '../../.../plugins'` 显式纳入，否则插件里的间距、`group-hover/*`、`max-md:*` 一个都不会生成（表现为间距全塌、悬停不出现）。
 - 插件清单的 `name` 与 `desktop.entry.label` 一律英文（侧栏其它入口也是英文），描述这类正文才写中文。
 - 插件前端模块的能力只有六件，来自 `renderer/src/plugin-host.js` 的 `createPluginHostApi`：`currentHost()`（页面所在运行时的 origin）、`probe(address)`、`readData()` / `writeData(value)`、`open(url)`、`access`（读改写这台机器的远程访问策略）、`action(key)`（执行清单 `actions` 里声明过的动作，宿主转给一次性插件进程 `mica plugin-action`；卡片要「真的干一件事」时用它，不要用 `writeData` 伪造一个请求位再等后端轮询，没声明的 key 会被拒绝，卡片能做的动作与配置页的按钮是同一份声明）。探活、数据读写、访问策略与动作必须由运行时代劳（页面读不到跨源响应、碰不到请求分派、也没有文件系统），落在 `host/plugin-host.js` 的 `plugin-host:probe` / `plugin-host:read-data|write-data` / `plugin-host:access-get|set` / `plugin-host:run-action`；数据文件统一在 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构。`open` 是纯页面行为，分支在 `shell-env.js` 的 `isElectronShell`。
@@ -322,11 +323,14 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 ### By The Way
 
-- `/btw` 是官方插件 `plugins/btw/`：经 `ctx.commands.register({ allowDuringTurn: true })` 注册，靠 `ctx.subagents.thread()` 起一条可复用的隔离子代理线程，输出走 `ctx.ui.notice()`；停用该插件后命令消失。
+- `/btw` 是官方插件 `plugins/btw/`：经 `ctx.commands.register({ allowDuringTurn: true })` 注册，靠 `ctx.subagents.thread()` 起一条可复用的隔离子代理线程，输出走 `ctx.ui.notice()`；停用该插件后命令消失。同一会话一次只答一条（再问如实拒绝），`-stop` 走 `AbortController` 中断并保留已流出的正文；不带 `-continue` 的新话题会 dispose 上一条线程。
+- CLI 也把子代理的 `onText` / `onToolCall` / `onToolResult` 折成输入框上方的进度（正在调用什么工具、已出多少字、跑了多久，工具切换即时刷新、正文按 250ms 节流），完成后带耗时与本次请求数——终端里没有流式正文的位置，但「它还在动」必须看得见。
 - 纯逻辑（主流程对话记录、system prompt 拼装、子代理线程构造）唯一实现在 `mica-builtin-commands/shared/btwThread.ts`，desktop「By The Way」抽屉与插件共用；headless 不导入 builtin commands 总出口，避免把 Ink/React 拖进进程。
 - 子代理的 system prompt 是整体替换，必须显式带上：btw 规则、主会话角色名 + role prompt 全文、skills 索引、一次性主流程对话记录。工具集用 `btwToolFilter` 排除 `primaryAgentOnly`（插件侧由宿主线程提供的同名过滤兜底）。
 - desktop `BtwThreadController` 立即 ack，结果经 `mica/btw/updated` 流式推送，不堵塞 interrupt / steer / recall。
 - 同线程单子代理串行，允许一条排队与撤回；不同线程可并行。线程落盘 `$MICA_HOME/btw/<sessionId>.json`，共享路径在 `mica-common/btwState.ts`。
+- 空线程（点了「+」还没提问）不落盘、不从磁盘恢复：`BtwThreads` 的 `exportState` / `restore` 与 `readBtwState` 都按 `entries.length > 0` 过滤，否则重启后抽屉里会多出一排「新线程」。抽屉对失败/被中断的条目给「重试」，Alt+↑/↓ 翻本线程问过的问题，Cmd/Ctrl+Shift+B 开关抽屉。
+- 线程上限 6（`MAX_BTW_THREADS`）：到上限时 `BtwThreads.open` 返回可展示的拒绝，**不再**悄悄淘汰最早的空闲线程——被淘汰的 tab 在客户端还在，点进去只会用一个 host 已不认识的 id 重建空线程，之前的问答就丢了。
 - BTW 不进主对话上下文、不占主队列、不改 run 生命周期；用量单独记账（插件线程记 `origin: 'plugin'`，抽屉侧记 subagent `btw`）。
 
 ## 9. Desktop

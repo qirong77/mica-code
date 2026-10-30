@@ -9,6 +9,8 @@ import { ToolGrepSearch } from './ToolGrepSearch.js';
 import { ToolWebFetch } from './ToolWebFetch.js';
 import { ToolSkill } from './ToolSkill.js';
 import { MicaTool } from './MicaTool.js';
+import { toMicaTool } from './PluginTool.js';
+import type { PluginToolDescriptor } from './PluginTool.js';
 import { ToolRunShell } from './ToolRunShell.js';
 import { ToolBackgroundStart } from './ToolBackgroundStart.js';
 import { ToolBackgroundTasks } from './ToolBackgroundTasks.js';
@@ -123,9 +125,21 @@ export function unregisterMcpTools(): void {
   mcpTools = [];
 }
 
-export function registerRuntimeTool(tool: MicaTool, options: RuntimeToolRegistrationOptions = {}): void {
-  runtimeTools = [...runtimeTools.filter((entry) => entry !== tool), tool];
-  runtimeToolOptions.set(tool, options);
+/**
+ * 注册一个会话期工具（插件注册走这里）。
+ *
+ * 收纯描述或 `MicaTool` 实例：用户插件没有仓库模块可导入，只能给描述（见
+ * `PluginTool.ts`）。返回真正注册的那个实例，调用方按它反注册——传进来的描述对象
+ * 与它并不是同一个东西。
+ */
+export function registerRuntimeTool(
+  tool: MicaTool | PluginToolDescriptor,
+  options: RuntimeToolRegistrationOptions = {},
+): MicaTool {
+  const registered = toMicaTool(tool);
+  runtimeTools = [...runtimeTools.filter((entry) => entry !== registered), registered];
+  runtimeToolOptions.set(registered, options);
+  return registered;
 }
 
 export function unregisterRuntimeTool(nameOrTool: string | MicaTool): void {
