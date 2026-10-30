@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { APP_PAGE_PATHS, appPageKey, appPagePath, isAppPageTarget } from './app-page-target.js'
+import {
+  APP_PAGE_PATHS,
+  appPageKey,
+  appPagePath,
+  isAppPageTarget,
+  relayEntryKey
+} from './app-page-target.js'
 
 describe('isAppPageTarget', () => {
   const origins = ['http://127.0.0.1:8787']
@@ -84,5 +90,31 @@ describe('appPageKey', () => {
   it('returns an empty key for an unparsable address', () => {
     expect(appPageKey('')).toBe('')
     expect(appPageKey(undefined)).toBe('')
+  })
+})
+
+describe('relayEntryKey', () => {
+  it('keys a relay entry by origin plus token', () => {
+    expect(relayEntryKey('https://r.example/?t=abc&session=s1')).toBe('https://r.example?t=abc')
+  })
+
+  it('treats two machines behind one relay as two windows', () => {
+    // 同一台中转机后面可以是两台机器：只按 origin 认窗口会「点 B 却端出 A」
+    expect(relayEntryKey('https://r.example/?t=abc')).not.toBe(
+      relayEntryKey('https://r.example/?t=def')
+    )
+  })
+
+  it('folds different sessions of the same machine into one window', () => {
+    expect(relayEntryKey('https://r.example/?t=abc&session=s1')).toBe(
+      relayEntryKey('https://r.example/?t=abc&session=s2')
+    )
+  })
+
+  it('has no key for a plain runtime address', () => {
+    // 直连的机器仍然按 origin 认窗口
+    expect(relayEntryKey('http://192.168.1.5:8787')).toBe('')
+    expect(relayEntryKey('http://192.168.1.5:8787/?session=s1')).toBe('')
+    expect(relayEntryKey('')).toBe('')
   })
 })

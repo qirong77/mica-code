@@ -25,7 +25,13 @@ import { stripControlSockets } from './control-env'
 import { resolveDefaultChatMeta } from './chat-meta'
 import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
-import { createChatQueue, mergeQueuedItems, resolveBusyDispatch } from './chat-queue'
+import {
+  createChatQueue,
+  mergeQueuedItems,
+  resolveBusyDispatch,
+  resolveMaintenanceDispatch
+} from './chat-queue'
+import { resolveWarmAction } from './chat-warm'
 import { settlePendingHostRequests } from './chat-host-requests'
 import { unwrapHostResult } from './chat-capabilities'
 import { getShellEnvSnapshot } from './shell-env'
@@ -130,7 +136,8 @@ function queuedItems(id) {
     id: item.payload?.clientMessageId || `queued:${id}:${index}`,
     text: item.payload?.prompt || '',
     position: index + 1,
-    queueMode: 'after_turn'
+    queueMode: 'after_turn',
+    ...(item.payload?.waitingFor ? { waitingFor: item.payload.waitingFor } : {})
   }))
 }
 
@@ -593,6 +600,43 @@ function startRun(sender, id, payload) {
     //   busy + explicit after_turn -> queue locally; replayed as turn/start when
     //                                 the current turn completes
     existing.sender = sender
+    // 宿主正在轮次之外占着会话（自动压缩）：压缩是同步的，这几秒发过去的 turn/start
+    // 只会静静排在它的 stdin 里，界面上看不出任何东西。先本地排队——排队行可见、
+    // 可撤回——宿主报告压缩结束（`mica/host/maintenance` active:false）时自动补发。
+    const queuedBefore = allQueuedItems(id, existing)
+    const maintenance = resolveMaintenanceDispatch({
+      compacting: existing.compacting === true,
+      queuedCount: queuedBefore.length
+    })
+    if (maintenance.action === 'reject') {
+      return {
+        ok: false,
+        error: maintenance.message,
+        queuedCount: queuedBefore.length,
+        queuedItems: queuedBefore
+      }
+    }
+    if (maintenance.action === 'enqueue') {
+      const enqueued = queuedRuns.enqueue(id, {
+        sender,
+        payload: { ...payload, prompt, waitingFor: 'compaction' }
+      })
+      if (!enqueued.ok) {
+        return {
+          ok: false,
+          error: '排队消息已达上限，请先发送或取消排队',
+          queuedCount: 0,
+          queuedItems: []
+        }
+      }
+      pushQueueState(id, existing)
+      return {
+        ok: true,
+        queued: true,
+        position: enqueued.position,
+        queuedItems: allQueuedItems(id, existing)
+      }
+    }
     if (existing.running) {
       // 单槽排队（对齐 CLI）：已有任意排队（本地 after_turn 或 host
       // after_iteration）时，Enter/Tab/Shift+Tab 都拒绝新的排队输入。
@@ -601,7 +645,7 @@ function startRun(sender, id, payload) {
       const queuedItemsNow = allQueuedItems(id, existing)
       const queuedCount = queuedItemsNow.length
       const dispatch = resolveBusyDispatch({
-        running: true,
+        running: existing.running,
         queueMode: payload.queueMode,
         queuedCount
       })
@@ -963,6 +1007,8 @@ function spawnChatHost(id, sender, payload) {
     prompt: '',
     startedAt: Date.now(),
     running: false,
+    // 宿主正在轮次之外占着会话（自动压缩）：这段时间的发送先本地排队。
+    compacting: false,
     aborting: false,
     exitSent: false,
     sequence: 0,
@@ -1263,6 +1309,13 @@ function handleHostNotification(id, run, notification) {
     run.hostPending = Array.isArray(params.pending) ? params.pending : []
     pushQueueState(id, run)
     return
+  } else if (method === 'mica/host/maintenance') {
+    // 宿主在轮次之外占着会话（自动压缩）：压缩跑着的时候它读不到 stdin，这一段
+    // 发过去的 turn/start 只会排在管道里。压完（active:false）立刻补发排队的那一条。
+    run.compacting = params.active === true
+    if (run.compacting) return
+    replayCompactionQueue(id, run)
+    return
   } else if (
     method === 'mica/backgroundTasks/updated' ||
     method === 'mica/subagentTasks/updated' ||
@@ -1392,6 +1445,21 @@ function replayQueuedTurn(id, run) {
   pushQueueState(id, run)
   run.running = true
   if (!sendTurnStart(run, next.payload)) run.running = false
+}
+
+/**
+ * 宿主报告压缩结束：只补发因为压缩排队的那一条。
+ *
+ * 别的排队条目（显式 after_turn、中止后留给用户撤回的）各有自己的时机，不能顺手
+ * 发出去——尤其中止后那条，用户可能正按着 Shift+←。
+ */
+function replayCompactionQueue(id, run) {
+  const [first] = queuedRuns.values(id)
+  if (first?.payload?.waitingFor !== 'compaction') {
+    pushQueueState(id, run)
+    return
+  }
+  replayQueuedTurn(id, run)
 }
 
 function sendChatExit(id, run, payload) {
@@ -2124,6 +2192,33 @@ export function registerChatIpc() {
     rememberChatSender(_event)
     if (!sessionId) return readDefaultMeta(cwd)
     return readSessionMeta(sessionId)
+  })
+
+  /**
+   * 常驻宿主预热：App 起来后问一次「现在有没有宿主」，一个都没有才起当前节点。
+   *
+   * 插件（mobile-relay 的桥、定时循环等）只活在会话宿主里，而宿主是按需 spawn 的：
+   * 重启桌面端后只要没人发消息就没有宿主，桥随之停摆，手机端看到的是「暂时不可用」。
+   * 这里只保证「App 开着就至少有一个宿主」——切页签不会各自养一个进程，内存不随页签数
+   * 增长；关掉最后一个页签后新起的草稿会再补一个。
+   */
+  ipcMain.handle('chat:warm', (event, { id, sessionId, cwd } = {}) => {
+    rememberChatSender(event)
+    const nodeId = typeof id === 'string' ? id.trim() : ''
+    if (!nodeId) return { ok: false, error: '缺少节点 id' }
+    const action = resolveWarmAction(runs, nodeId)
+    if (action === 'reused') {
+      const current = runs.get(nodeId)
+      current.sender = event.sender
+      return { ok: true, reused: true }
+    }
+    if (action === 'skipped') return { ok: true, skipped: true }
+    const ensured = ensureCapabilityRun(nodeId, event, {
+      sessionId: typeof sessionId === 'string' ? sessionId : '',
+      cwd: typeof cwd === 'string' ? cwd : ''
+    })
+    if (!ensured.run) return { ok: false, error: ensured.error || '宿主未启动' }
+    return { ok: true, spawned: true }
   })
 
   ipcMain.handle('chat:dispose', (_event, { id } = {}) => {

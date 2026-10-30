@@ -308,7 +308,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - 本地清理替换工具结果、可识别媒体与工具参数正文；tool-call arguments 必须仍是合法 JSON，只裁正文/长命令，保留路径、pattern、name、offset。
 - 裁剪规则集中在 `mica-context/CompactionService.ts`（正文/命令阈值 200/400），幂等标记 `[omitted `。
-- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次、间隔 30 分钟。另有一条不看阈值、也不看最小间隔的触发：会话空闲 ≥ `idleMinutes`（默认 15）后用户在输入框敲字（运行期事件 `input:activity`，桌面端经 `mica/input/activity` 送出），就经 `ctx.agent.compactIdleHistory()` 在轮次之外把已落盘的历史快速压一次——宿主（`HeadlessTurnExecutor.runIdleMaintenance`）负责取 turn lease、对齐磁盘与落盘，会话忙 / 别的进程持锁时回 `skipped: busy` 且不消耗次数；压成后在对话里留一行 notice，并随压缩结果同一次落盘（`afterApply` 在保存之前调用），再由 app-server 发 `mica/sessionHistory/replaced` 让页面重载。设置在插件 `settings`（每项都标 `perSession`，可在会话设置里按会话覆盖），计数与最后活动时间在会话 `pluginState['auto-compact']`。
+- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次、间隔 30 分钟。另有一条不看阈值、也不看最小间隔的触发：会话空闲 ≥ `idleMinutes`（默认 15）后用户在输入框敲字（运行期事件 `input:activity`，桌面端经 `mica/input/activity` 送出），就经 `ctx.agent.compactIdleHistory()` 在轮次之外把已落盘的历史快速压一次——宿主（`HeadlessTurnExecutor.runIdleMaintenance`）负责取 turn lease、对齐磁盘与落盘，会话忙 / 别的进程持锁时回 `skipped: busy` 且不消耗次数；压成后在对话里留一行 notice，并随压缩结果同一次落盘（`afterApply` 在保存之前调用），再由 app-server 发 `mica/sessionHistory/replaced` 让页面重载。压缩是同步的（`readFileSync` + 纯 CPU），它跑着的时候宿主读不到 stdin 上的下一条 `turn/start`：用户这几秒发的消息只会静静排在管道里，界面上什么也看不出来。所以宿主在动手之前先发 `mica/host/maintenance`（`{ active, reason: 'compaction' }`），桌面端据此把这段时间的发送放进本地队列——条目带 `waitingFor: 'compaction'`，排队行提示「等自动压缩结束」、可撤回——宿主报 `active: false` 后自动补发（`chat.js` 的 `replayCompactionQueue` 只补发这一种，别的排队条目各有自己的时机）。设置在插件 `settings`（每项都标 `perSession`，可在会话设置里按会话覆盖），计数与最后活动时间在会话 `pluginState['auto-compact']`。
 - 自动压缩只在常驻会话生效：`mica exec` 是一次性运行（`agent.mode === 'one-shot'`），改变成本或输出的策略一律跳过。
 - 压缩只改发给模型的历史，不改 `conversationMessages`；自动压缩失败只记 note，不中断 turn。
 - 所有压缩保留 usage 记账；需要模型的 compact / review 走 subagent 或 exclusive task，不污染运行中的主 turn。
@@ -360,13 +360,15 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 受控浏览器与终端服务走 `userData` 下的 Unix socket；`apps/config-web` 是独立宿主（默认 13987）。
 - `shareView` 只影响呈现，不是权限边界；`access-core.js` 校验 Origin / Host 防跨站与 DNS rebinding。
 - 分享地址用 `access:info.shareBaseUrl`，不以本机 `location.origin` 兜底；链接形如 `/share?session=<id>`。
-- 切换服务器：页面 origin 即当前服务器；由 host 探活后开新窗口/标签页，不做代理或跨源 API 层。
+- 切换服务器：页面 origin 即当前服务器；由 host 探活后开新窗口/标签页，不做代理或跨源 API 层。探活与打开都用**完整入口**（`@packages/mica-web-shared` 的 `probeRuntime`）：中转机链接丢了 `?t=` 只是台没人认识的域名，外壳会把它当外链丢给系统浏览器；中转机窗口的身份是「origin + t」，所以同一台中转机后面的两台机器各开一个窗口。
 - 运行时里的用户终端面板与主进程终端控制是两套，不复用会话。
 
 ### 对话与输入
 
 - chat run 按 nodeId 存于 `host/chat.js`；请求级发送错误走 `chat:queue-error`，回滚乐观消息并恢复草稿。host 进程在应答 `turn/start` 之前就退出时走同一条路径（`chat-host-requests.js` 结算未应答请求）：那一轮从未跑过，气泡必须撤回，否则消息看起来已发送、会话里却不存在，双击编辑只会得到「找不到要编辑的消息」。
-- 队列唯一投影 `chat-queue.js.mergeQueuedItems`：host after_iteration 在前，本地 after_turn 在后。
+- 常驻宿主预热：渲染层每换到一个节点调一次 `chat:warm`，宿主侧只保证「App 开着就至少有一个宿主」（`chat-warm.js` 的 `resolveWarmAction`，已有活着的宿主就跳过，切页签不会各自养一个进程）。插件只载在会话宿主里，而宿主是按需 spawn 的——没有预热时重启桌面端后不发消息就没有宿主，桥与定时循环停摆，手机端显示「暂时不可用」。
+- 队列唯一投影 `chat-queue.js.mergeQueuedItems`：host after_iteration 在前，本地 after_turn 在后；宿主在轮次之外占着会话时（自动压缩）条目带 `waitingFor: 'compaction'`，排队行据此说「等自动压缩结束」而不是等迭代边界。
+- 宿主报告 `mica/host/maintenance active` 期间（自动压缩，宿主此刻读不到 stdin）新输入走 `startRun` 的 `compacting` 分支：第一条进本地队列并如实回 `queued`，已有排队就按单槽就地拒绝。渲染层拿到 `queued` 时若这一条本来没在排队，要把乐观的「正在运行」收回去——它确实还没跑。
 - `mica/queue/hold` 冻结待撤回条目，结果由 `chat-recall.js.resolveQueueRecall` 判定为回输入框 / 已发送 / 保留。
 - `run.events` / `run.prompt` 每轮重置；恢复先用 `historyBeforeRunReplay` 裁掉本轮已保存回答再重放。
 - 每次模型请求后立即转发 usage；实时 usage 不改 turnState / updatedAt。

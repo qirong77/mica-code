@@ -205,6 +205,9 @@ function createWebApi(env) {
 
     chat: {
       start: (payload) => invoke('chat:start', payload),
+      // 预热常驻宿主：插件（mobile-relay 的桥）只活在会话宿主里，而宿主是按需 spawn 的。
+      // App 启动后调一次，宿主侧保证「至少有一个」，已有就跳过，不会每页签养一个进程。
+      warm: (payload) => invoke('chat:warm', payload),
       abort: (id) => invoke('chat:abort', { id }),
       recallQueued: (id, clientMessageId) => invoke('chat:recall-queued', { id, clientMessageId }),
       // 冻结排队消息（撤回往返窗口内不让迭代边界注入），`held: false` 释放

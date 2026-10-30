@@ -10,7 +10,10 @@ import { resolveTerminalSocketPath, startTerminalHost } from './terminal/termina
 import { resolveSystemSocketPath, startSystemHost } from './system/system-host.js'
 import { TERMINAL_PAGE_PATH } from '@mica-app-paths'
 import { RUNTIME_PORT_ENV, loopbackRuntimeUrl, parseRuntimePort } from '@packages/mica-web-shared'
-import { appPageKey, isAppPageTarget } from './app-page-target.js'
+// 与运行时、插件同一份探活逻辑（含「中转机链接要带 ?t=」的判定），这里只是为了与
+// 上面那个「端口上是不是我们自己的运行时」的 probeRuntime 区分而改名
+import { probeRuntime as probeRemoteRuntime } from '../host/runtime-probe-core.js'
+import { appPageKey, isAppPageTarget, relayEntryKey } from './app-page-target.js'
 
 /**
  * Electron 外壳。
@@ -206,20 +209,6 @@ function originOf(value) {
   }
 }
 
-/** 这个地址上是不是一台 Mica Code 运行时（/api/health 会自报 app 名） */
-async function probeMicaRuntime(origin) {
-  try {
-    const response = await fetch(`${origin}/api/health`, {
-      signal: AbortSignal.timeout(1200)
-    })
-    if (!response.ok) return false
-    const body = await response.json()
-    return body?.app === 'mica-code-app'
-  } catch {
-    return false
-  }
-}
-
 function applyWindowTitle(state) {
   if (state.win.isDestroyed()) return
   state.win.setTitle(`${state.title}${state.suffix ? ` — ${state.suffix}` : ''}`)
@@ -340,7 +329,8 @@ async function enterWindow(state) {
   showWindow(state)
   if (state.win.webContents.isLoading()) return
   if ((await pageState(state)) !== 'blank') return
-  const target = state.server || state.win.webContents.getURL()
+  // 优先用页面自己的地址：中转机入口的 `?t=` 只在地址里，退回 state.server 会把入口丢掉
+  const target = state.win.webContents.getURL() || state.server
   if (!target) return
   console.warn('[mica-code-app] 窗口里是空白页，重新加载', target)
   void loadPage(state, target)
@@ -357,6 +347,12 @@ function findServerWindow(origin) {
         (item.server === origin || (item.local && origin === localOrigin))
     ) || null
   )
+}
+
+/** 中转机入口对应的窗口（同一台中转机上的不同机器各算一个） */
+function findEntryWindow(key) {
+  if (!key) return null
+  return [...windows].find((item) => !item.win.isDestroyed() && item.entryKey === key) || null
 }
 
 /**
@@ -410,16 +406,21 @@ async function navigateToServer(state, target) {
     shell.openExternal(target)
     return
   }
-  const existing = findServerWindow(origin)
+  // 中转机链接要看完整入口：`?t=` 才是「连哪一台机器」，光有 origin 只会探到中转机本身
+  const entryKey = relayEntryKey(target)
+  const existing = entryKey ? findEntryWindow(entryKey) : findServerWindow(origin)
   if (existing && existing !== state) {
     void enterWindow(existing)
     return
   }
-  if (await probeMicaRuntime(origin)) {
-    createWindow(origin)
+  // 探活与打开都用**完整入口**：带 `?t=` 的中转机链接丢了查询串就只是一台没人认识的域名，
+  // 外壳于是把它当外链丢给系统浏览器（这也是「Connections 里点开会跳浏览器」的旧行为）。
+  const probe = await probeRemoteRuntime(target)
+  if (!probe.ok) {
+    shell.openExternal(target)
     return
   }
-  shell.openExternal(target)
+  createWindow(probe.url)
 }
 
 /** 窗口落在哪台运行时上：标题后缀与未读徽标订阅都跟着它 */
@@ -428,10 +429,17 @@ function syncWindowServer(state, target) {
   const local = Boolean(localPageUrl) && origin === originOf(localPageUrl)
   state.server = origin
   state.local = local
-  const apiUrl = local ? runtime?.url || origin : origin
-  if (apiUrl && apiUrl !== state.apiUrl) {
+  state.entryKey = relayEntryKey(target)
+  // 中转机窗口不挂未读订阅：那要再让一条 SSE 穿过中转机，而页面自己已经挂着一条了，
+  // 徽标留给本机与直连的另一台机器。
+  const apiUrl = state.entryKey ? '' : local ? runtime?.url || origin : origin
+  if (apiUrl !== state.apiUrl) {
     state.apiUrl = apiUrl
-    watchUnread(state, apiUrl)
+    if (apiUrl) watchUnread(state, apiUrl)
+    else {
+      stopUnreadWatcher(state)
+      state.unread = 0
+    }
   }
   state.suffix = local ? '' : origin.replace(/^https?:\/\//i, '')
   applyWindowTitle(state)
@@ -596,6 +604,8 @@ function createWindow(url, { primary = false, frameName = '' } = {}) {
     // 复用同一个窗口，重复点按钮不会攒出一堆窗口。
     frameName,
     server: originOf(url),
+    // 中转机入口的窗口身份（origin + t）；直连别的机器时为空
+    entryKey: relayEntryKey(url),
     local: false,
     apiUrl: '',
     unread: 0,

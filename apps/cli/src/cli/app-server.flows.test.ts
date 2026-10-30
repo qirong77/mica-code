@@ -2015,6 +2015,17 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(idleSnapshot.displayUsage?.compactedAt).toEqual(expect.any(String));
     // 轮次之外改掉的历史要通知客户端重载，否则页面一直显示压缩前的记录。
     await waitFor(host, (m) => m.method === 'mica/sessionHistory/replaced', 'history replaced notification', 10_000);
+    // 压缩是同步的，它跑着的时候宿主连 stdin 都读不到：动手之前先告诉客户端
+    // （`mica/host/maintenance`），客户端据此把这几秒里的发送排进队列、压完再补发。
+    // 顺序必须是「开始 → 换历史 → 结束」，页面才能先换上新记录再发排队那条。
+    const maintenance = host.lines.filter((m) => m.method === 'mica/host/maintenance');
+    expect(maintenance.map((m) => m.params?.active)).toEqual([true, false]);
+    expect(maintenance.every((m) => m.params?.reason === 'compaction')).toBe(true);
+    const beganAt = host.lines.indexOf(maintenance[0]!);
+    const endedAt = host.lines.indexOf(maintenance[1]!);
+    const replacedAt = host.lines.findIndex((m) => m.method === 'mica/sessionHistory/replaced');
+    expect(beganAt).toBeLessThan(replacedAt);
+    expect(replacedAt).toBeLessThan(endedAt);
     // 请求数没变：这次压缩全在本地，没有偷偷发起一次模型请求。
     expect(mock!.state.requests).toHaveLength(requestsBeforeActivity);
     expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);

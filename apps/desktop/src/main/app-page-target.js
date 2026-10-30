@@ -8,6 +8,7 @@
  */
 
 import { APP_BASE_PATH, FILES_PAGE_PATH } from '@packages/mica-web-shared/app-paths.js'
+import { relayTokenOf } from '@packages/mica-web-shared/runtime-address.js'
 
 function parseUrl(value) {
   try {
@@ -62,4 +63,17 @@ export function appPageKey(value) {
   url.hash = ''
   url.pathname = pathnameOf(url)
   return url.toString()
+}
+
+/**
+ * 中转机入口的窗口身份：`origin + t`。
+ *
+ * 一台中转机后面可以接多台机器（每台一个访问口令），只比 origin 会让「点 B 的链接却端出
+ * A 的窗口」。同一台机器的不同 `?session=` 仍算同一个窗口，所以只取 `t`。
+ * 不是中转机入口（没有 `t`）时返回空串，调用方回落到「按服务器认窗口」。
+ */
+export function relayEntryKey(value) {
+  const token = relayTokenOf(value)
+  const url = parseUrl(value)
+  return token && url ? `${url.origin}?t=${token}` : ''
 }

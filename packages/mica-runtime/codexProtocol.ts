@@ -114,6 +114,11 @@ export type MicaQueueItem = {
   id: string;
   text: string;
   queueMode?: 'after_iteration' | 'after_turn' | null;
+  /**
+   * 这条输入在等什么。缺省是「等当前这一轮的迭代边界」/「等本轮结束」；
+   * `compaction` 表示宿主在轮次之外占着会话（自动压缩），压完就自动发出去。
+   */
+  waitingFor?: 'compaction' | null;
 };
 
 /**
@@ -178,6 +183,26 @@ export type MicaTurnInput = {
 export const MICA_CAPABILITY_NOTIFICATIONS = {
   updated: 'mica/capabilities/updated',
 } as const;
+
+/**
+ * Mica extension notification: the host is about to occupy the session outside a
+ * turn (idle history compaction). Compaction is synchronous, so while it runs the
+ * host cannot read the next `turn/start` off stdin — a send in that window would
+ * just sit in the pipe with no feedback at all. The host therefore announces it
+ * first: the client queues those sends locally (visible, recallable) and replays
+ * them once the host reports `active: false`.
+ */
+export const MICA_HOST_NOTIFICATIONS = {
+  maintenance: 'mica/host/maintenance',
+} as const;
+
+/** `MICA_HOST_NOTIFICATIONS.maintenance` payload. */
+export type MicaHostMaintenance = {
+  threadId: string | null;
+  active: boolean;
+  /** 宿主在轮次之外做什么：目前只有空闲压缩。 */
+  reason: 'compaction';
+};
 
 /**
  * 会话笔记被**面板**改写（`mica/notes/set`）。同一会话的其他窗口据此刷新，

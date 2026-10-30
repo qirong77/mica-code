@@ -461,11 +461,15 @@ function QueueDock({ items, onRecall, recallingId, running }) {
   const queueMode = items[0]?.queueMode
   // 轮次已经结束（用户点了停止 / 这一轮失败）时排队条目仍留在单槽里等撤回，
   // 此刻已经没有「正在跑的迭代」可注入，标题不能说还在等迭代边界。
-  const headerText = !running
-    ? 'waiting for the next turn'
-    : queueMode === 'after_iteration'
-      ? 'waiting to send after a complete tool-call iteration'
-      : 'waiting to send after current turn'
+  // 自动压缩在轮次之外占着会话时同理：等的是压缩收尾，不是迭代边界。
+  const headerText =
+    items[0]?.waitingFor === 'compaction'
+      ? 'waiting for auto-compaction to finish'
+      : !running
+        ? 'waiting for the next turn'
+        : queueMode === 'after_iteration'
+          ? 'waiting to send after a complete tool-call iteration'
+          : 'waiting to send after current turn'
   return (
     <section className="chat-queue-dock" aria-label="等待发送的消息">
       <div className="chat-queue-dock-header">
@@ -5052,6 +5056,15 @@ export function ChatView({
               )
             )
             setQueuedItems(Array.isArray(result.queuedItems) ? result.queuedItems : [])
+            // 这一条其实还没开跑（宿主在轮次之外占着会话，比如正在压缩历史）：
+            // 把乐观的「正在运行」收回去，界面上只剩一条排队中的消息——这才对得上
+            // 宿主真正的状态，等它空闲了排队那条会自己发出去。
+            if (!queueing) {
+              setRunning(false)
+              setPhase('idle')
+              finishedRef.current = true
+              if (turnRef.current === `pending:${optimisticId}`) turnRef.current = previousTurnId
+            }
           } else {
             queuedMessageIdsRef.current = queuedMessageIdsRef.current.filter(
               (id) => id !== optimisticId

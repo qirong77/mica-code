@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test'
-import { createChatQueue, mergeQueuedItems, resolveBusyDispatch } from './chat-queue'
+import {
+  createChatQueue,
+  mergeQueuedItems,
+  resolveBusyDispatch,
+  resolveMaintenanceDispatch
+} from './chat-queue'
 
 describe('chat run queue', () => {
   it('keeps queued prompts FIFO and isolated by node', () => {
@@ -72,6 +77,21 @@ describe('chat run queue', () => {
         })
       }
     })
+
+    // 自动压缩在轮次之外占着会话：压缩跑着的时候宿主连 stdin 都读不到，
+    // 所以这一条只能先进本地队列，压完再补发（`mica/host/maintenance`）。
+    it('queues the send while the host compacts instead of sending it', () => {
+      expect(resolveMaintenanceDispatch({ compacting: true, queuedCount: 0 })).toEqual({
+        action: 'enqueue'
+      })
+      expect(resolveMaintenanceDispatch({ compacting: true, queuedCount: 1 })).toEqual({
+        action: 'reject',
+        message: '已有一条排队消息，等待发送或重新编辑'
+      })
+      expect(resolveMaintenanceDispatch({ compacting: false, queuedCount: 0 })).toEqual({
+        action: 'start'
+      })
+    })
   })
 
   // host 侧 after_iteration 槽（mica/queue/*）与本地 after_turn 队列必须合并成
@@ -104,6 +124,26 @@ describe('chat run queue', () => {
           text: 'no id',
           position: 1,
           queueMode: 'after_iteration'
+        }
+      ])
+    })
+
+    // 自动压缩在轮次之外占着会话：这条排队消息等的是压缩收尾，不是迭代边界，
+    // 排队行的标题要能说清区别。
+    it('carries the compaction hold so the dock can label it', () => {
+      expect(
+        mergeQueuedItems(
+          'node-a',
+          [{ id: 'msg-1', text: 'after compaction', queueMode: 'after_iteration', waitingFor: 'compaction' }],
+          []
+        )
+      ).toEqual([
+        {
+          id: 'msg-1',
+          text: 'after compaction',
+          position: 1,
+          queueMode: 'after_iteration',
+          waitingFor: 'compaction'
         }
       ])
     })

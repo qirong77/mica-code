@@ -822,6 +822,21 @@ export default function App() {
   useEffect(() => {
     if (terminalOpen) setTerminalMounted(true)
   }, [terminalOpen])
+  // 常驻宿主预热：插件（mobile-relay 的桥、定时循环）只活在会话宿主里，而宿主是按需
+  // spawn 的——重启桌面端后只要没人发消息就没有宿主，桥随之停摆，手机端看到「暂时不可用」。
+  // 每次换到新节点都要一次；宿主侧只保证「至少有一个」，已有宿主时直接跳过，所以切页签
+  // 不会各自养一个进程。失败静默：预热不该在界面上留下任何痕迹。
+  useEffect(() => {
+    if (!activeId) return
+    const node = nodesRef.current.find((item) => item.id === activeId)
+    window.mica?.chat
+      ?.warm?.({
+        id: activeId,
+        sessionId: typeof node?.sessionId === 'string' ? node.sessionId : '',
+        cwd: typeof node?.cwd === 'string' ? node.cwd : ''
+      })
+      .catch(() => {})
+  }, [activeId, nodesRef])
   // 移动端：三栏（这里是两栏）退化为单栏，侧栏改为覆盖式抽屉
   const isMobile = useIsMobile()
   // 软键盘弹起时让根容器跟着可见区缩，否则底部输入条/终端键栏会被键盘盖住

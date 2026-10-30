@@ -20,6 +20,7 @@ import {
   CODEX_NOTIFICATIONS,
   MICA_NOTES_NOTIFICATIONS,
   MICA_BTW_NOTIFICATIONS,
+  MICA_HOST_NOTIFICATIONS,
   MICA_METHODS,
   MICA_QUEUE_NOTIFICATIONS,
   MICA_SESSION_NOTIFICATIONS,
@@ -36,6 +37,7 @@ import {
   type CodexTurn,
   type CodexUserInput,
   type MicaBackgroundTaskItem,
+  type MicaHostMaintenance,
   type MicaQueueItem,
   type MicaSubagentTaskDetail,
   type MicaSubagentTaskItem,
@@ -219,6 +221,14 @@ export function projectSubagentTaskDetail(record: SubagentTaskRecord): MicaSubag
 export async function runAppServer(options: AppServerOptions): Promise<void> {
   const writeNotification = (method: string, params: unknown) => {
     process.stdout.write(encodeCodexNotification(method, params));
+  };
+  /** 轮次之外占着会话（空闲压缩）的开始 / 收尾，客户端据此排队这几秒里的发送。 */
+  const announceMaintenance = (active: boolean) => {
+    writeNotification(MICA_HOST_NOTIFICATIONS.maintenance, {
+      threadId: sessionController?.getCurrentSessionId() ?? null,
+      active,
+      reason: 'compaction',
+    } satisfies MicaHostMaintenance);
   };
   /**
    * Non-fatal degradation (stale --dir, failed MCP init, stray rejection).
@@ -526,16 +536,28 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       // 用户在输入框敲字时插件可能要提前改一次会话（自动压缩）。Executor 负责
       // 「现在能不能写」：轮次中、别的进程持锁、或者刚好有人按了发送都返回 busy。
       runIdleTask: (task, busy) =>
-        executor!.runIdleMaintenance(task, busy).then((outcome) => {
-          // 轮次之外改掉的历史没有对应的 Codex 事件，客户端会一直显示旧记录（压缩后的
-          // 工具结果、插件随压缩写的 notice 都看不到）。复用「历史被替换」这条通知重载。
-          if ((outcome as { status?: string } | null)?.status === 'applied') {
-            writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, {
-              threadId: sessionController!.getCurrentSessionId(),
-            });
+        executor!.runIdleMaintenance(async () => {
+          // 压缩是同步的：它跑着的时候宿主读不到 stdin 上的下一条 turn/start，用户这几秒
+          // 发的消息只会静静排在管道里，界面上什么也看不出来。动手之前先说一声，客户端
+          // 据此把这段时间的发送放进队列（可见、可撤回），压完收到 active:false 再补发。
+          announceMaintenance(true);
+          try {
+            const outcome = await task();
+
+            // 轮次之外改掉的历史没有对应的 Codex 事件，客户端会一直显示旧记录（压缩后的
+            // 工具结果、插件随压缩写的 notice 都看不到）。复用「历史被替换」这条通知重载
+            // ——排在 active:false 之前，页面先换上压缩后的记录，再把排队那条发过来。
+            if ((outcome as { status?: string } | null)?.status === 'applied') {
+              writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, {
+                threadId: sessionController!.getCurrentSessionId(),
+              });
+            }
+
+            return outcome;
+          } finally {
+            announceMaintenance(false);
           }
-          return outcome;
-        }),
+        }, busy),
       submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
     });
     executor.attachPluginLayer({
