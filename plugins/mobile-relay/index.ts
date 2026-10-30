@@ -71,11 +71,9 @@ export default function setup(ctx: PluginContext): void {
 
   const tools = ctx.tools;
   if (!tools) {
-    ctx.health.report({
-      level: 'warn',
-      message: '缺少 tools 能力，mobile_relay 工具未注册（桥仍然在跑）',
-      hint: '检查 plugin.json 的 requires 是否包含 tools',
-    });
+    // 一次性动作宿主（配置页按钮）只有 actions，没有 tools。缺能力是宿主的事实，
+    // 由 requires 与 plugin-status 表达，不该写成插件的健康告警。
+    ctx.logger.info('mobile-relay:no-tools', {});
     return;
   }
   tools.register(new MobileRelayTool(ctx));

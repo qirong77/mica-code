@@ -54,6 +54,57 @@ function parseAddress(value: unknown): URL | null {
   }
 }
 
+/**
+ * 宽松解析一条**入口链接**：允许省略协议，端口缺省时跟协议（https 就是 443）。
+ *
+ * 和 `normalizeRuntimeAddress` 的区别是它不补 8787、也不丢路径与查询串——一条中转机
+ * 链接（`https://mica.qirong77.com/?t=…&session=…`）本身就是「要打开的那一页」，
+ * 把查询串抹掉就等于把凭据抹掉。省协议时按主机名猜：IP / localhost / `.local` 当内网
+ * 用 http，其余域名用 https。
+ */
+function parseEntryAddress(input: unknown): URL | null {
+  const raw = String(input ?? '').trim();
+  if (!raw || /\s/.test(raw)) return null;
+  let candidate = raw;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    const authority = raw.split(/[/?#]/)[0] ?? '';
+    const host = authority.split(':')[0] ?? '';
+    const internal =
+      /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ||
+      host === 'localhost' ||
+      host.endsWith('.local') ||
+      bareIpv6(host);
+    candidate = `${internal ? 'http' : 'https'}://${raw}`;
+  }
+  const url = parseAddress(candidate);
+  if (!url) return null;
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  return url.hostname ? url : null;
+}
+
+/**
+ * 入口链接里的中转机令牌（`?t=…`）。不是这种链接就返回 null。
+ *
+ * 约定来自 mobile-relay：那个插件把「本机」借出去的凭据就是这个查询参数，
+ * 链接本身就是凭据，所以只认它、不另立一套。
+ */
+export function relayTokenOf(input: unknown): string | null {
+  const url = parseEntryAddress(input);
+  const token = url?.searchParams.get('t')?.trim();
+  return token ? token : null;
+}
+
+/**
+ * 规范一条**可打开的入口地址**：保留路径与查询串，缺协议时补上，端口缺省不动。
+ *
+ * 运行时直连地址仍然走 `normalizeRuntimeAddress`（补 8787、丢路径）——两者语义不同，
+ * 混用会把 `https://host/?t=…` 改成 `https://host:8787`，那是一个连不上的地址。
+ */
+export function normalizeEntryAddress(input: unknown): string | null {
+  const url = parseEntryAddress(input);
+  return url ? url.toString() : null;
+}
+
 /** 这个地址是不是本机（回环）：界面上它叫「本机」，回程入口也只在不是本机时才有意义。 */
 export function isLoopbackRuntime(value: unknown): boolean {
   const url = parseAddress(value);

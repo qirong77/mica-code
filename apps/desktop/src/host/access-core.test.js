@@ -166,7 +166,10 @@ describe('classifyRemotePath', () => {
   it('marks the api the share page talks to, but not the bare /api path', () => {
     expect(classifyRemotePath('/api/invoke')).toBe('api')
     expect(classifyRemotePath('/api/events')).toBe('api')
-    expect(classifyRemotePath('/api/health')).toBe('api')
+    // 探活是「另一台机器能不能认出这里有运行时」的唯一入口，必须在口令之前可达；
+    // 它只回 { ok, app, access }，没有会话与数据。
+    expect(classifyRemotePath('/api/health')).toBe('health')
+    expect(classifyRemotePath('/api/health?probe=1')).toBe('health')
     // `/api` 没有处理器，会落到「SPA 回退成 index.html」上——那是主页面
     expect(classifyRemotePath('/api')).toBe('other')
   })

@@ -334,11 +334,8 @@ const SUPERVISE_MS = 3_000
 export function registerBridgeSupervisor(ctx: PluginContext, dataDir: string | null) {
   const background = ctx.background;
   if (!background) {
-    ctx.health.report({
-      level: 'warn',
-      message: '宿主没有提供 background 能力，桥不会随插件启停',
-      hint: '检查 plugin.json 的 requires 是否包含 background',
-    });
+    // 同上：一次性动作宿主不排期常驻任务，这是正常形态，不是插件故障。
+    ctx.logger.info('bridge:no-background', {});
     return null;
   }
 

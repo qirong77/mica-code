@@ -157,3 +157,43 @@ describe('peerRows', () => {
     expect(rows[0]).toEqual({ url: 'http://10.0.0.2:9102', note: '办公室的 Mac' });
   });
 });
+
+// 中转机链接是「别人借给你的入口」，凭据在查询串里：任何一步把它规范化成 origin
+// 都会把 t= 抹掉，于是「清单里有这条却打不开」。
+describe('relay links', () => {
+  const token = '90843bfaa98d07e22ba537d172adccf54d76';
+  const link = (session: string) => `https://mica.qirong77.com/?t=${token}&session=${session}`;
+
+  it('keeps the token and session instead of turning it into a bare origin', () => {
+    const peers = store([link('s1')]);
+    expect(peers.peers[0]?.url).toBe(link('s1'));
+  });
+
+  it('同一台机器的不同会话是一条记录，入口跟着最新那条更新', () => {
+    let peers = rememberPeer(emptyPeerStore(), link('s1'));
+    peers = rememberPeer(peers, link('s2'));
+    expect(peers.peers).toHaveLength(1);
+    expect(peers.peers[0]?.url).toBe(link('s2'));
+  });
+
+  it('不同令牌是不同机器，即使共用一台中转机', () => {
+    let peers = rememberPeer(emptyPeerStore(), link('s1'));
+    peers = rememberPeer(peers, `https://mica.qirong77.com/?t=another-token-0123456789`);
+    expect(peers.peers).toHaveLength(2);
+  });
+
+  it('探活带回来的机器名成为默认备注，用户改过就不再覆盖', () => {
+    let peers = rememberPeer(emptyPeerStore(), link('s1'), 'Office Mac');
+    expect(findPeer(peers, link('s9'))?.note).toBe('Office Mac');
+    peers = setPeerNote(peers, link('s1'), '公司的机器');
+    peers = rememberPeer(peers, link('s1'), 'Office Mac');
+    expect(findPeer(peers, link('s1'))?.note).toBe('公司的机器');
+  });
+
+  it('页面由中转机托管时，「当前」能认回清单里那一条', () => {
+    // 页面里 location.origin 是不带查询串的，凭它就要匹配上
+    const peers = rememberPeer(emptyPeerStore(), link('s1'), 'Office Mac');
+    expect(findPeer(peers, 'https://mica.qirong77.com')).not.toBeNull();
+    expect(peerRows('https://mica.qirong77.com', peers)).toEqual([]);
+  });
+});

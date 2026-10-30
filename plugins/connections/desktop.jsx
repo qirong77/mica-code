@@ -3,7 +3,7 @@ import { Monitor, Pencil } from 'lucide-react';
 import {
   DEFAULT_RUNTIME_URL,
   isLoopbackRuntime,
-  isSameRuntime,
+  relayTokenOf,
   runtimeLabel,
 } from '@packages/mica-web-shared/index.js';
 import {
@@ -13,8 +13,18 @@ import {
   normalizePeerStore,
   peerRows,
   rememberPeer,
+  samePeer,
   setPeerNote,
 } from './peers';
+
+/**
+ * 行里显示的地址：中转机链接的 `t=` 是凭据，不能明文摊在侧栏上。
+ * 别的部分（尤其 `session`）照旧显示，否则两条链接看起来一模一样。
+ */
+function displayAddress(url) {
+  const text = String(url ?? '');
+  return relayTokenOf(text) ? text.replace(/([?&])t=[^&]*/, '$1t=…') : text;
+}
 
 /**
  * Connections 的卡片：连接到另一台机器上的 Mica 运行时。
@@ -116,8 +126,28 @@ export default function ConnectionsCard({ api, onClose }) {
         setError(result?.error || '连接失败');
         return;
       }
+      // 中转机链接：它背后是另一台机器的完整界面（手机用的就是这条）。
+      // 桥没连上时页面会是自动重试那一页，先说明原因，仍然打开——桥一起来它就自己恢复。
+      if (result.kind === 'relay') {
+        if (!result.online) {
+          setError(`中转机连着，但 ${result.label} 上的 Mica 没在运行：页面打开后会自己重试。`);
+        }
+        // 名字取中转机回报的机器名，作为这条记录的默认备注（用户改过就不动）
+        update((previous) => rememberPeer(previous, result.url, result.label));
+        api.open(result.url);
+        onClose?.();
+        return;
+      }
+      // 对方没开「局域网/公网可访问」时，除了探活指纹之外什么都拿不到：
+      // 直接开窗只会得到一个 404 页面。这里说清该去哪台机器上做什么。
+      if (result.access === 'off') {
+        setError(
+          `${result.url} 上的 Mica 没有开启「局域网/公网可访问」：在那台机器上打开侧栏 Connections，打开这个开关并设一个口令，再回来重连。`
+        );
+        return;
+      }
       // 连回自己这台（比如从别的机器的错误页点回来）不必记进清单：它本来就在侧栏上
-      if (!isSameRuntime(result.url, current)) {
+      if (!samePeer(result.url, current)) {
         // 探通了才记：地址已经规范成 origin，下次直接从这里点回去
         update((previous) => rememberPeer(previous, result.url));
         api.open(result.url);
@@ -153,7 +183,7 @@ export default function ConnectionsCard({ api, onClose }) {
           <span className="shrink-0 text-[10px] text-green-400/70">当前</span>
           {currentEntry && <NoteEditButton onClick={() => startNoteEdit(currentEntry.url)} />}
         </div>
-        {noteTarget && isSameRuntime(noteTarget, current) && noteInput}
+        {noteTarget && samePeer(noteTarget, current) && noteInput}
       </div>
 
       {rows.map((entry) => (
@@ -169,7 +199,7 @@ export default function ConnectionsCard({ api, onClose }) {
               className="min-w-0 flex-1 text-left disabled:opacity-60"
               onClick={() => void connect(entry.url)}
             >
-              <span className="block truncate text-[11px] text-white/35">{entry.url}</span>
+              <span className="block truncate text-[11px] text-white/35">{displayAddress(entry.url)}</span>
               {entry.note && <span className="block truncate text-[11px] text-white/60">{entry.note}</span>}
             </button>
             {busy === entry.url && <span className="shrink-0 text-[10px] text-white/40">连接中…</span>}
@@ -203,7 +233,7 @@ export default function ConnectionsCard({ api, onClose }) {
         <input
           value={value}
           spellCheck={false}
-          placeholder="192.168.1.5:8787"
+          placeholder="192.168.1.5:8787 或 https://…/?t=…"
           className="h-8 min-w-0 flex-1 rounded-sm border border-white/15 bg-white/[.04] px-2.5 text-xs text-white focus:border-white/30"
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {

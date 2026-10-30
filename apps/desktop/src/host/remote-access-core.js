@@ -244,6 +244,9 @@ export function remoteAccessDecision({
   if (typeof pathname !== 'string' || !pathname) return policy.enabled ? 'login' : 'not-found'
   const kind = classifyRemotePath(pathname)
   if (kind === 'asset') return 'allow'
+  // 探活指纹：远程先能认出这是一台运行时，才有「拿口令进来」这回事。
+  // 应答里只有 `{ ok, app, access }`，不含会话与数据。
+  if (kind === 'health') return 'allow'
   if (kind === 'share' && shareLink) return 'allow'
   if (kind === 'api' && hasShare) return 'allow'
   return policy.enabled ? 'login' : 'not-found'

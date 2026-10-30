@@ -2,7 +2,9 @@ import {
   DEFAULT_RUNTIME_URL,
   isLoopbackRuntime,
   isSameRuntime,
+  normalizeEntryAddress,
   normalizeRuntimeAddress,
+  relayTokenOf,
   runtimeLabel,
 } from '@packages/mica-web-shared/index.js';
 
@@ -31,6 +33,53 @@ export function emptyPeerStore(): PeerStore {
   return { version: PEER_STORE_VERSION, peers: [] };
 }
 
+/** 入口链接的 host（含端口），用来把「当前页面」和它在清单里的那条对上。 */
+function hostOf(value: unknown): string | null {
+  const url = normalizeEntryAddress(value);
+  if (!url) return null;
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 中转机链接的键：同一个中转机上的同一台机器。
+ *
+ * 不带 `session` 是有意的——那是「打开哪条会话」，不是「哪台机器」。同一台机器的链接
+ * 换了一条会话之后仍然是一条记录，只是记住的入口跟着更新。
+ */
+function relayKey(value: unknown): string | null {
+  const token = relayTokenOf(value);
+  if (!token) return null;
+  const url = normalizeEntryAddress(value);
+  if (!url) return null;
+  try {
+    return `${new URL(url).origin}|${token}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 两条记录是不是同一台机器。
+ *
+ * 直连地址照旧按 host 比（`192.168.1.5` 与 `http://192.168.1.5:8787` 是同一台）；
+ * 中转机链接按「中转机 + 令牌」比，因为它背后那台机器的 origin 根本不在链接里。
+ * 一条链接对一条裸 origin 时按 host 比：页面由中转机托管时「当前」就是那个 origin。
+ */
+export function samePeer(a: unknown, b: unknown): boolean {
+  const left = relayKey(a);
+  const right = relayKey(b);
+  if (left && right) return left === right;
+  if (left || right) {
+    const host = hostOf(a);
+    return host !== null && host === hostOf(b);
+  }
+  return isSameRuntime(a, b);
+}
+
 /**
  * 读出来的清单可能是旧版本或被手改过的：非法项丢掉、同 host 去重、超上限截断。
  *
@@ -43,7 +92,7 @@ export function normalizePeerStore(raw: unknown): PeerStore {
     const candidate = typeof value === 'string' ? { url: value, note: '' } : value;
     const entry = asPeerEntry(candidate);
     if (!entry) continue;
-    if (peers.some((existing) => isSameRuntime(existing.url, entry.url))) continue;
+    if (peers.some((existing) => samePeer(existing.url, entry.url))) continue;
     peers.push(entry);
     if (peers.length >= MAX_PEERS) break;
   }
@@ -62,14 +111,17 @@ export function normalizePeerNote(value: unknown): string {
  * 备注属于这台机器（「办公室的 Mac」不会因为又连了一次就不成立），所以重新连接只调整
  * 位置。地址非法时原样返回 store，调用方照旧渲染。
  */
-export function rememberPeer(store: PeerStore, url: unknown): PeerStore {
+export function rememberPeer(store: PeerStore, url: unknown, label?: unknown): PeerStore {
   const entry = asPeerEntry({ url, note: '' });
   if (!entry) return store;
   const current = normalizePeerStore(store);
-  const existing = current.peers.find((peer) => isSameRuntime(peer.url, entry.url));
+  const existing = current.peers.find((peer) => samePeer(peer.url, entry.url));
+  // 探活带回来的名字（中转机那台机器的 `label`）只作为「还没有备注」时的默认值：
+  // 用户自己起的备注永远优先，重新连接也不会被覆盖。
+  const fallback = normalizePeerNote(label);
   const peers = [
-    { url: entry.url, note: existing?.note ?? '' },
-    ...current.peers.filter((peer) => !isSameRuntime(peer.url, entry.url)),
+    { url: entry.url, note: existing?.note || fallback },
+    ...current.peers.filter((peer) => !samePeer(peer.url, entry.url)),
   ];
   return { version: PEER_STORE_VERSION, peers: peers.slice(0, MAX_PEERS) };
 }
@@ -79,10 +131,11 @@ export function rememberPeer(store: PeerStore, url: unknown): PeerStore {
  * 没有这一条就无处安放备注，也不该凭一个备注把没连过的地址记进来。
  */
 export function setPeerNote(store: PeerStore, url: unknown, note: unknown): PeerStore {
-  const target = normalizeRuntimeAddress(url);
+  // 先规范化再比：用户可能只写 `10.0.0.2:9102`，而清单里存的是补过协议的地址
+  const target = normalizeEntryAddress(url);
   if (!target) return store;
   const peers = normalizePeerStore(store).peers;
-  const index = peers.findIndex((peer) => isSameRuntime(peer.url, target));
+  const index = peers.findIndex((peer) => samePeer(peer.url, target));
   if (index < 0) return store;
   const next = [...peers];
   next[index] = { url: peers[index]!.url, note: normalizePeerNote(note) };
@@ -91,9 +144,9 @@ export function setPeerNote(store: PeerStore, url: unknown, note: unknown): Peer
 
 /** 清单里某个地址的那条记录（没有就返回 null）。 */
 export function findPeer(store: PeerStore, url: unknown): PeerEntry | null {
-  const target = normalizeRuntimeAddress(url);
+  const target = normalizeEntryAddress(url);
   if (!target) return null;
-  return normalizePeerStore(store).peers.find((peer) => isSameRuntime(peer.url, target)) ?? null;
+  return normalizePeerStore(store).peers.find((peer) => samePeer(peer.url, target)) ?? null;
 }
 
 /**
@@ -104,9 +157,12 @@ export function findPeer(store: PeerStore, url: unknown): PeerEntry | null {
  */
 export function peerRows(current: unknown, store: PeerStore): PeerEntry[] {
   const target = normalizeRuntimeAddress(current);
+  const entry = normalizeEntryAddress(current);
   const showLocal = !target || !isLoopbackRuntime(target);
   return normalizePeerStore(store).peers.filter((peer) => {
-    if (target && isSameRuntime(peer.url, target)) return false;
+    // 用原始 current 而不是补过端口的 target：页面由中转机托管时它就是那个 origin，
+    // 补成 `:8787` 会跟清单里的链接对不上。
+    if (entry && samePeer(peer.url, entry)) return false;
     if (showLocal && isSameRuntime(peer.url, DEFAULT_RUNTIME_URL)) return false;
     return true;
   });
@@ -126,7 +182,10 @@ function readPeerList(raw: unknown): unknown[] {
 
 function asPeerEntry(value: unknown): PeerEntry | null {
   if (!isRecord(value)) return null;
-  const url = normalizeRuntimeAddress(value.url);
+  // 中转机链接必须原样保留（`t` 与 `session` 都在查询串里），直连地址才补 8787 丢路径
+  const url = relayTokenOf(value.url)
+    ? normalizeEntryAddress(value.url)
+    : normalizeRuntimeAddress(value.url);
   if (!url) return null;
   return { url, note: normalizePeerNote(value.note) };
 }

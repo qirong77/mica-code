@@ -106,4 +106,19 @@ describe('mobile-relay plugin setup', () => {
     setup(fakeContext(dataDir, captured));
     expect(captured.tasks).toEqual(['bridge']);
   });
+
+  // 配置页动作跑在只装配 actions 的一次性宿主里，那里没有 tools / background。
+  // 缺哪一面是宿主的事实（requires 已声明），不该写成插件的健康状态——
+  // 否则点一次「注册到中转机」就把卡片打成「待配置」，等常驻宿主起来才自己消失。
+  it('reports no health problem when the host has no tools or background', () => {
+    const captured: Captured = { skill: null, health: [] };
+    const ctx = fakeContext(dataDir, captured) as unknown as Record<string, unknown>;
+    delete ctx.tools;
+    delete ctx.background;
+
+    setup(ctx as unknown as PluginContext);
+
+    expect(captured.health).toEqual([]);
+    expect(captured.skill).not.toBeNull();
+  });
 });

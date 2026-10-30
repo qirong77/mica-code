@@ -188,6 +188,17 @@ describe('remoteAccessDecision', () => {
     )
   })
 
+  // 侧栏 Connections 连另一台机器时，是先探活再开窗的：探活若被口令挡住，
+  // 那个功能就永远只能报「连接失败」，无论对方配置得多正确。
+  it('lets any remote client read the health fingerprint', () => {
+    for (const policy of [off, on]) {
+      expect(remoteAccessDecision({ policy, pathname: '/api/health' })).toBe('allow')
+    }
+    // 指纹之外照旧要口令：能探活 ≠ 能用接口
+    expect(remoteAccessDecision({ policy: on, pathname: '/api/invoke' })).toBe('login')
+    expect(remoteAccessDecision({ policy: off, pathname: '/api/invoke' })).toBe('not-found')
+  })
+
   it('asks for the password once it is enabled', () => {
     expect(remoteAccessDecision({ policy: on, pathname: '/' })).toBe('login')
     expect(remoteAccessDecision({ policy: on, pathname: '/mica-web' })).toBe('login')

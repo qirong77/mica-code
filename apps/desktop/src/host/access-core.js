@@ -303,6 +303,9 @@ export function canonicalPathname(pathname) {
 export function classifyRemotePath(pathname) {
   const value = canonicalPathname(pathname)
   if (isSharePath(value)) return 'share'
+  // 探活指纹对远程开放：另一台机器要判断「这个地址上是不是一台运行时」才能连过来，
+  // 而它本身只回 `{ ok, app, access }`，没有会话、没有数据。
+  if (value === '/api/health') return 'health'
   // 只认 `/api/`：`/api` 本身没有处理器，会落到「SPA 回退成 index.html」上
   if (value.startsWith('/api/')) return 'api'
   if (isAssetPath(value)) return 'asset'

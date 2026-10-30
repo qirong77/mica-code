@@ -16,7 +16,9 @@ export {
 export {
   isLoopbackRuntime,
   isSameRuntime,
+  normalizeEntryAddress,
   normalizeRuntimeAddress,
+  relayTokenOf,
   runtimeLabel,
 } from './runtime-address.js';
 export {

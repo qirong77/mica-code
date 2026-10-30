@@ -993,11 +993,13 @@ function createRequestHandler({
         }
 
         // 探活接口：另一台运行时（Node）靠它判断「这个端口上是不是一台 Mica Code」，
-        // 所以只回一个不含任何数据的指纹。
+        // 所以只回一个不含任何数据的指纹。`access` 说明「别人进来要不要口令」——
+        // 对方据此才能给出可操作的提示，而不是干巴巴一句连接失败。
         if (req.method === 'GET' && url.pathname === '/api/health') {
           return sendJson(res, 200, {
             ok: true,
-            app: 'mica-code-app'
+            app: 'mica-code-app',
+            access: accessPolicy.enabled ? 'password' : 'off'
           })
         }
 
