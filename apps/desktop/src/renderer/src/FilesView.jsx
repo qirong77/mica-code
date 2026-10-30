@@ -507,6 +507,9 @@ export const FilesView = forwardRef(function FilesView(
   // 切到那个目录，所以记一个覆盖值。带上它所属的 cwd：换会话时 `root` 一变就对不上，
   // 覆盖自动作废，不需要额外的清理 effect（那会先按旧覆盖读一次盘）。
   const [rootOverride, setRootOverride] = useState(null)
+  // 只开编辑器：活动栏、文件树、Git 面板全部收起，整块宽度给编辑器。插件面板里点
+  // 「编辑」走这条（见 openPath 的 focus），标签条最左给一个「显示文件目录」把侧栏放回来。
+  const [focusMode, setFocusMode] = useState(false)
   const overrideRoot = rootOverride && rootOverride.base === root ? rootOverride.path : null
   const treeRef = useLatest(tree)
   const [tabs, setTabsState] = useState([])
@@ -855,8 +858,12 @@ export const FilesView = forwardRef(function FilesView(
    * 无权限）仍交给 openFile，让它那套「无法打开文件」的提示统一报出来。
    */
   const openPath = useCallback(
-    async (path, position = null) => {
+    async (path, position = null, options = {}) => {
       if (!path) return
+      // 「只开编辑器」是每次打开时定的：插件从面板里点「编辑」是要改这一份文件，
+      // 不是来逛工作区的，进来就把活动栏、文件树、Git 面板收起来。任何一次不带
+      // focus 的打开（对话里的路径链接、搜索、目录）都回到常规形态。
+      setFocusMode(options?.focus === true)
       let info = null
       try {
         info = await window.mica.files.stat(path)
@@ -1568,7 +1575,7 @@ export const FilesView = forwardRef(function FilesView(
     >
       <nav
         className={`w-12 shrink-0 flex-col items-center border-r border-line bg-panel py-1 ${
-          isMobile && editorOpen ? 'hidden' : 'flex'
+          focusMode || (isMobile && editorOpen) ? 'hidden' : 'flex'
         }`}
         aria-label="活动栏"
       >
@@ -1613,7 +1620,9 @@ export const FilesView = forwardRef(function FilesView(
       </nav>
       <aside
         className={`min-h-0 flex-col bg-panel ${
-          isMobile && editorOpen ? 'hidden' : `flex ${editorOpen ? 'shrink-0' : 'min-w-0 flex-1'}`
+          focusMode || (isMobile && editorOpen)
+            ? 'hidden'
+            : `flex ${editorOpen ? 'shrink-0' : 'min-w-0 flex-1'}`
         }`}
         style={editorOpen && !isMobile ? { width } : undefined}
         aria-label="侧边面板"
@@ -1803,7 +1812,9 @@ export const FilesView = forwardRef(function FilesView(
       )}
       <div
         {...separatorProps}
-        className={`pane-resizer z-10 w-1.25 shrink-0 ${editorOpen && !isMobile ? '' : 'hidden'}`}
+        className={`pane-resizer z-10 w-1.25 shrink-0 ${
+          editorOpen && !isMobile && !focusMode ? '' : 'hidden'
+        }`}
         role="separator"
         aria-label="调整文件目录宽度"
         aria-orientation="vertical"
@@ -1811,7 +1822,7 @@ export const FilesView = forwardRef(function FilesView(
         aria-valuenow={width}
         tabIndex={0}
       />
-      {onCornerResizeStart && (
+      {onCornerResizeStart && !focusMode && (
         <div
           className="pane-corner-resizer absolute z-30"
           style={{ left: width + 2.5, top: '100%' }}
@@ -1918,7 +1929,7 @@ export const FilesView = forwardRef(function FilesView(
             ref={tabListRef}
             // 标签条底色比编辑器还暗（VS Code 的 editorGroupHeader.tabsBackground），
             // 活动标签用 canvas 才显得「亮出来」；Darcula 没有顶部高亮线，不加。
-            className={`h-8 shrink-0 overflow-x-auto overflow-y-hidden bg-tabstrip ${tabs.length ? 'flex' : 'hidden'}`}
+            className={`h-8 shrink-0 overflow-x-auto overflow-y-hidden bg-tabstrip ${focusMode || tabs.length ? 'flex' : 'hidden'}`}
             role="tablist"
             aria-label="打开的文件"
           >
@@ -1929,6 +1940,19 @@ export const FilesView = forwardRef(function FilesView(
                 aria-label="返回文件列表"
                 className={`sticky left-0 z-10 grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-white/60 ${TAB_UNDERLINE}`}
                 onClick={() => setMobileTreeVisible(true)}
+              >
+                <IconArrowLeft size={15} />
+              </button>
+            )}
+            {/* 只开编辑器时侧栏是收起的，这里是把它放回来的唯一入口（否则用户只能退回
+                对话再从别处进文件视图）。 */}
+            {focusMode && !isMobile && (
+              <button
+                type="button"
+                title="显示文件目录与 Git"
+                aria-label="显示文件目录与 Git"
+                className={`grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-white/60 hover:text-white ${TAB_UNDERLINE}`}
+                onClick={() => setFocusMode(false)}
               >
                 <IconArrowLeft size={15} />
               </button>

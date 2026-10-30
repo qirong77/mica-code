@@ -106,8 +106,8 @@ describe('applyPanelResult', () => {
         onDialog: (dialog) => {
           seen.dialog = dialog
         },
-        onOpenPath: (path, line) => {
-          seen.opened = { path, line }
+        onOpenPath: (path, line, options) => {
+          seen.opened = { path, line, options }
         }
       }
     }
@@ -162,8 +162,21 @@ describe('applyPanelResult', () => {
     )
     expect(seen.opened).toEqual({
       path: '/Users/me/.mica/plugins/demand-dev/skills/a/SKILL.md',
-      line: 12
+      line: 12,
+      options: { focus: false }
     })
+  })
+
+  test('passes the focus flag through so the host can hide the explorer', () => {
+    const { seen, handlers } = effects()
+    applyPanelResult(
+      {
+        ok: true,
+        openPath: { path: '/Users/me/.mica/plugins/demand-dev/skills/a/SKILL.md', focus: true }
+      },
+      handlers
+    )
+    expect(seen.opened?.options).toEqual({ focus: true })
   })
 
   test('ignores an openPath without a path', () => {

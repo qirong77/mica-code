@@ -151,10 +151,14 @@ export type PluginPanelActionResult = {
  *
  * 路径是插件自己算出来的绝对路径（插件数据目录、随包资源落盘位置），宿主只负责打开，
  * 不猜它属于谁。`line` 用来落到某一行，编辑长文件时省一次滚动。
+ *
+ * `focus` 让宿主只画编辑器、把文件树与 Git 面板收起来：插件打开的是它自己的一份配置
+ * 或规则，用户此刻要的是改这一份文件，不是逛工作区。不给就按普通打开（带侧栏）。
  */
 export type PluginPanelOpenPath = {
   path: string;
   line?: number;
+  focus?: boolean;
 };
 
 /**
@@ -472,6 +476,7 @@ function openPathOf(value: unknown): PluginPanelOpenPath | undefined {
   return {
     path,
     ...(Number.isFinite(line) && line > 0 ? { line: Math.floor(line) } : {}),
+    ...(raw.focus === true ? { focus: true } : {}),
   };
 }
 

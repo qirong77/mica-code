@@ -204,6 +204,19 @@ describe('plugin panel openPath', () => {
     expect(normalizePluginPanelActionResult({ openPath: { line: 3 } }).openPath).toBeUndefined();
     expect(normalizePluginPanelActionResult({ openPath: '   ' }).openPath).toBeUndefined();
   });
+
+  it('carries focus only when the plugin explicitly asks for it', () => {
+    expect(
+      normalizePluginPanelActionResult({ openPath: { path: '/tmp/a.md', focus: true } }).openPath
+    ).toEqual({ path: '/tmp/a.md', focus: true });
+    // 只认真正的 true：字符串 "true"、1 这类都不能让宿主悄悄切到「只开编辑器」
+    expect(
+      normalizePluginPanelActionResult({ openPath: { path: '/tmp/a.md', focus: 'true' } }).openPath
+    ).toEqual({ path: '/tmp/a.md' });
+    expect(
+      normalizePluginPanelActionResult({ openPath: { path: '/tmp/a.md', focus: false } }).openPath
+    ).toEqual({ path: '/tmp/a.md' });
+  });
 });
 
 describe('PluginPanelRegistry', () => {

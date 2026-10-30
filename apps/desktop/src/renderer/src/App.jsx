@@ -797,7 +797,7 @@ export default function App() {
     if (!pending) return
     pendingFileOpenRef.current = null
     if (pending.document) void filesRef.current?.openDocument(pending.document)
-    else filesRef.current?.openPath(pending.path, pending.position)
+    else filesRef.current?.openPath(pending.path, pending.position, pending.options)
   }, [filesReady, view])
   // 底部终端面板：展开状态跟着会话走——按对话节点 id 记在界面状态里（默认收起），切到
   // 另一个会话时看到的是那个会话自己的样子，而不是上一个会话展开着的那一屏；高度是全局的
@@ -2165,15 +2165,15 @@ export default function App() {
   // 文件视图并打开那个目标——文件开编辑器，目录把文件树切过去（判断在 FilesView 里，
   // 它才知道文件系统）。FilesView 能立刻打开就直接开（它隐藏时也能接收），只有按需
   // 挂载的 chunk 还没到位时才把这次请求记下来，等 FilesView 挂上来再补开。
-  const openFileInView = useCallback((path, position) => {
+  const openFileInView = useCallback((path, position, options) => {
     setFilesMounted(true)
     setView('files')
     const files = filesRef.current
     if (files) {
-      files.openPath(path, position)
+      files.openPath(path, position, options)
       return
     }
-    pendingFileOpenRef.current = { path, position }
+    pendingFileOpenRef.current = { path, position, options }
   }, [])
   const openSearchFile = openFileInView
   const openChatFile = openFileInView

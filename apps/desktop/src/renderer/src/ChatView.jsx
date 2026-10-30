@@ -6764,7 +6764,11 @@ export function ChatView({
           onCompose={composeFromPlugin}
           onLaunchSession={requestPluginSession}
           onDialog={setPluginDialog}
-          onOpenPath={(path, line) => onOpenFileRef.current?.(path, line ? { line } : {})}
+          // 打开文件之后面板要收起来：文件落在主区，面板再盖着就成了「点完没反应」。
+          onOpenPath={(path, line, options) => {
+            closePluginPanel()
+            onOpenFileRef.current?.(path, line ? { line } : {}, options)
+          }}
         />
         {pluginTask && (
           <PluginTaskDialog

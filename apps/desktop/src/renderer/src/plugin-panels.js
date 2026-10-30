@@ -76,7 +76,9 @@ export function applyPanelResult(
   // 面板只有 340px：超过一屏的正文（插件自己的规则文件、随包分发的 skill）在抽屉里既看
   // 不清也改不动。插件只声明「打开哪个文件」，落到宿主的编辑器由页面负责。
   if (result.openPath && typeof result.openPath.path === 'string' && result.openPath.path.trim()) {
-    onOpenPath?.(result.openPath.path, result.openPath.line)
+    onOpenPath?.(result.openPath.path, result.openPath.line, {
+      focus: result.openPath.focus === true
+    })
   }
 }
 
