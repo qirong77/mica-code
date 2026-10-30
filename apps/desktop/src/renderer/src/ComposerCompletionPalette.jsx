@@ -5,8 +5,9 @@ import { IconCommand } from '@tabler/icons-react'
  * 输入框上方的补全候选浮层（`@` 文件 / `/` skill）。
  *
  * 只负责展示与选中回调，选中后怎么改写输入框由 ChatView 决定——这里不执行任何动作。
- * 每行是「名称 | 说明」两列：名称按内容取宽且永不压缩（它是扫描目标），说明吃掉剩余
- * 宽度、放不下就省略号截断（浮层跟着输入框走，窄的时候只剩名称也是可用的）。
+ * 每行是「名称 | 说明 | 来源」三列：名称按内容取宽且永不压缩（它是扫描目标），说明吃掉
+ * 剩余宽度、放不下就省略号截断（浮层跟着输入框走，窄的时候只剩名称也是可用的），来源是
+ * 一枚靠右的小标记（内置 / 插件 xxx / .mica/skills / config.json），悬停看完整位置。
  * 名称与说明里命中查询的字符都会高亮（`highlights` / `descriptionHighlights` 是下标数组）。
  *
  * 滚动只发生在候选列表（`.chat-command-palette-body`）上：标题行与键位提示固定在顶部，
@@ -51,8 +52,8 @@ export default function ComposerCompletionPalette({
             role="option"
             aria-selected={index === activeIndex}
             className={index === activeIndex ? 'chat-command-active' : ''}
-            // skill 插入的是路径而不是 `/name`，悬停时先让人看清会插进去什么
-            title={item.kind === 'skill' ? item.path || undefined : undefined}
+            // 悬停给出处：skill 是 SKILL.md 的绝对路径（插入的也是它），MCP 是配置位置
+            title={completionTitle(item)}
             onMouseEnter={() => onActiveIndex(index)}
             // 按下就插入，避免 mousedown 先把焦点从 textarea 拿走
             onMouseDown={(event) => event.preventDefault()}
@@ -65,11 +66,27 @@ export default function ComposerCompletionPalette({
                 highlights={item.descriptionHighlights}
               />
             </span>
+            {item.source && (
+              <span
+                className={`chat-command-source is-${item.source.kind}`}
+                title={item.source.detail || undefined}
+              >
+                {item.source.label}
+              </span>
+            )}
           </button>
         ))}
       </div>
     </div>
   )
+}
+
+/** 悬停提示：出处（插件 id / 配置文件）与「会插进去的东西」都摊开，不给原生 title 猜。 */
+function completionTitle(item) {
+  const lines = []
+  if (item?.source?.detail && item.source.detail !== item.path) lines.push(item.source.detail)
+  if (item?.path) lines.push(item.path)
+  return lines.length > 0 ? lines.join('\n') : undefined
 }
 
 /** 把标出的字符包成 `<mark>`，其余原样输出（下标是文本的字符下标）。 */

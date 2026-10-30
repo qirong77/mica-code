@@ -62,11 +62,19 @@ export function selectPluginPanels(plugins, role) {
  * 真正动页面的是宿主：输入框、页签、角色、发送时机都属于页面，插件碰不到也不该碰。
  * `dialog` 也一样：表格内容由插件给，弹窗、排版、把链接交给系统浏览器是页面的事。
  */
-export function applyPanelResult(result, { onCompose, onLaunchSession, onDialog } = {}) {
+export function applyPanelResult(
+  result,
+  { onCompose, onLaunchSession, onDialog, onOpenPath } = {}
+) {
   if (!result || result.ok === false) return
   if (typeof result.compose === 'string' && result.compose.trim()) onCompose?.(result.compose)
   if (result.newSession && typeof result.newSession.prompt === 'string') {
     onLaunchSession?.(result.newSession)
   }
   if (result.dialog && Array.isArray(result.dialog.rows)) onDialog?.(result.dialog)
+  // 面板只有 340px：超过一屏的正文（插件自己的规则文件、随包分发的 skill）在抽屉里既看
+  // 不清也改不动。插件只声明「打开哪个文件」，落到宿主的编辑器由页面负责。
+  if (result.openPath && typeof result.openPath.path === 'string' && result.openPath.path.trim()) {
+    onOpenPath?.(result.openPath.path, result.openPath.line)
+  }
 }

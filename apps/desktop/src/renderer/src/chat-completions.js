@@ -26,6 +26,12 @@ export const MAX_LISTED_TOOLS = 6
 export const FILE_COMPLETION_DEBOUNCE_MS = 100
 
 /**
+ * 候选来源标记的取值。浮层按它给那枚小标记上不同颜色，未知取值一律不显示——
+ * 来源是宿主给的提示，猜不出来就当没有，不编一个。
+ */
+export const COMPLETION_SOURCE_KINDS = ['builtin', 'plugin', 'project', 'user', 'config']
+
+/**
  * 光标前是否正处在一个补全触发里；是则返回 `{ kind, start, query }`。
  *
  * `/`：**自己在词首**（文本开头或空白之后）且到光标之间没有空白/斜杠，所以 `/` 不必在
@@ -124,11 +130,14 @@ export function rankCompletions(items, query, limit = SKILL_COMPLETION_LIMIT) {
   list.forEach((item, index) => {
     const target = String(item?.name ?? '').toLowerCase()
     const description = String(item?.description ?? '').toLowerCase()
+    // 来源标记也参与匹配：用户会按「插件」两个字找插件带来的那些。
+    const source = String(item?.sourceLabel ?? '').toLowerCase()
     let rank = -1
     if (target === q) rank = 0
     else if (target.startsWith(q)) rank = 1
     else if (target.includes(q)) rank = 2
     else if (description.includes(q)) rank = 3
+    else if (source.includes(q)) rank = 4
     if (rank >= 0) scored.push({ item, rank, index })
   })
   scored.sort((a, b) => a.rank - b.rank || a.index - b.index)
@@ -157,13 +166,15 @@ export function slashCompletionOptions(
       kind: 'skill',
       item: skill,
       name: String(skill?.name ?? ''),
-      description: skillDescription(skill)
+      description: skillDescription(skill),
+      sourceLabel: sourceOf(skill)?.label ?? ''
     })),
     ...(Array.isArray(mcpServers) ? mcpServers : []).map((server) => ({
       kind: 'mcp',
       item: server,
       name: String(server?.name ?? ''),
-      description: mcpDescription(server)
+      description: mcpDescription(server),
+      sourceLabel: sourceOf(server)?.label ?? ''
     }))
   ]
   const ranked = rankCompletions(entries, query, limit)
@@ -172,9 +183,27 @@ export function slashCompletionOptions(
   )
 }
 
+/**
+ * 一条候选的来源标记。
+ *
+ * 宿主给的是 `{ kind, label, detail? }`；`kind` 不在白名单里（宿主升级、字段写错）时整条
+ * 丢掉，而不是在界面上画一个看不懂的标记。`detail` 是悬停时看的完整位置（SKILL.md 路径、
+ * config.json 路径、插件 id）。
+ */
+function sourceOf(item) {
+  const raw = item?.source
+  if (!raw || typeof raw !== 'object') return null
+  const kind = String(raw.kind ?? '')
+  const label = String(raw.label ?? '').trim()
+  if (!label || !COMPLETION_SOURCE_KINDS.includes(kind)) return null
+  const detail = String(raw.detail ?? '').trim()
+  return { kind, label, ...(detail ? { detail } : {}) }
+}
+
 function skillOption(skill, query) {
   const name = String(skill?.name ?? '')
   const description = skillDescription(skill)
+  const source = sourceOf(skill)
   return {
     key: `skill:${name}`,
     kind: 'skill',
@@ -182,7 +211,7 @@ function skillOption(skill, query) {
     path: String(skill?.path ?? ''),
     label: `/${name}`,
     description,
-    ...(skill?.builtin ? { builtin: true } : {}),
+    ...(source ? { source, sourceLabel: source.label } : {}),
     // label 前面多了一个 `/`，名称里的下标整体右移一位
     highlights: matchIndexes(name, query).map((index) => index + 1),
     descriptionHighlights: matchIndexes(description, query)
@@ -192,23 +221,18 @@ function skillOption(skill, query) {
 /**
  * skill 候选的说明列。
  *
- * 内置 skill（插件随包分发，如 computer-use）标出「内置」：它在用户的 skills 目录里
- * 找不到，不标的话用户会以为扫描漏了自己的机器。这段文本同时也是查询匹配的文本。
+ * 来源不写在这里：它有自己的标记列（`source`），混进说明里会把「这个 skill 干什么」
+ * 挤到后面，而两者都不是同一个问题的答案。
  */
 function skillDescription(skill) {
-  const raw = String(skill?.description ?? '')
-  if (!skill?.builtin) return raw
-  return raw ? `内置 · ${raw}` : '内置'
+  return String(skill?.description ?? '')
 }
 
 /** MCP 候选的说明列：工具名（未知时给连接方式），同时也是查询匹配的文本。 */
 function mcpDescription(server) {
   const tools = Array.isArray(server?.tools) ? server.tools.filter(Boolean) : []
-  // 内置的那两个（受控浏览器 / 终端）不来自 config.json，标出来区别「用户配的」。
-  const label = server?.builtin ? '内置 MCP' : 'MCP'
-  return tools.length
-    ? `${label} · 工具：${tools.join('、')}`
-    : `${label} · ${server?.type === 'stdio' ? '本地进程' : 'HTTP'}`
+  if (tools.length) return `工具：${tools.join('、')}`
+  return server?.type === 'stdio' ? '本地进程' : 'HTTP'
 }
 
 /** MCP 候选：label 带 `mcp:` 前缀，说明里是工具名（未知时给连接方式）。 */
@@ -216,6 +240,7 @@ function mcpOption(server, query) {
   const name = String(server?.name ?? '')
   const tools = Array.isArray(server?.tools) ? server.tools.filter(Boolean) : []
   const description = mcpDescription(server)
+  const source = sourceOf(server)
   const label = `mcp:${name}`
   return {
     key: `mcp:${name}`,
@@ -224,7 +249,7 @@ function mcpOption(server, query) {
     tools,
     label,
     description,
-    ...(server?.builtin ? { builtin: true } : {}),
+    ...(source ? { source, sourceLabel: source.label } : {}),
     // label 前面多了 `mcp:` 四个字符，名称里的下标整体右移
     highlights: matchIndexes(name, query).map((index) => index + 'mcp:'.length),
     descriptionHighlights: matchIndexes(description, query)

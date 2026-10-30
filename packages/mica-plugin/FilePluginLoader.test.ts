@@ -177,6 +177,7 @@ describe('parsePluginManifest', () => {
         actions: [],
         desktopPanel: null,
         desktopSessionMenu: [],
+        skills: [],
       },
     });
   });

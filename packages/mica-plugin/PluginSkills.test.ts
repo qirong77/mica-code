@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PLUGIN_SKILLS_DIR, publishPluginSkills, readPublishedPluginSkills } from './PluginSkills.js';
+import {
+  PLUGIN_SKILLS_DIR,
+  loadManifestSkills,
+  publishPluginSkills,
+  readPublishedPluginSkills,
+} from './PluginSkills.js';
 import { PLUGIN_STATE_FILE } from './PluginState.js';
 import type { Skill } from '@packages/mica-skills/types.js';
 
@@ -32,6 +37,32 @@ afterEach(() => {
 });
 
 describe('plugin skill index', () => {
+  it('reads a declared skill directory as one skill, and a container as its children', () => {
+    const root = join(base, 'plugin');
+    writeSkillFile(join(root, 'skills'), 'alpha');
+    writeSkillFile(join(root, 'skills'), 'beta');
+    writeSkillFile(root, 'solo');
+
+    const container = loadManifestSkills(root, ['skills']);
+    expect(container.problems).toEqual([]);
+    expect(container.skills.map((skill) => skill.name).sort()).toEqual(['alpha', 'beta']);
+    // baseDir 就是正文所在目录：`/` 补全插入的 SKILL.md 路径得住在这里
+    expect(container.skills[0].baseDir.startsWith(join(root, 'skills'))).toBe(true);
+
+    const single = loadManifestSkills(root, ['.']);
+    expect(single.skills.map((skill) => skill.name)).toEqual(['solo']);
+  });
+
+  it('reports a missing directory instead of failing the plugin silently', () => {
+    const root = join(base, 'plugin');
+    mkdirSync(root, { recursive: true });
+
+    const result = loadManifestSkills(root, ['skills', 'nope']);
+    expect(result.skills).toEqual([]);
+    expect(result.problems).toHaveLength(2);
+    expect(result.problems.join('\n')).toContain('nope');
+  });
+
   it('publishes the SKILL.md path next to the metadata', () => {
     const skill = writeSkillFile(base, 'computer-use');
 

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { usePluginsDetails } from './plugins-details'
+import { copyText } from './transport'
 
 /**
  * 会话右键菜单里的插件动作（清单 `desktop.sessionMenu`）。
@@ -44,7 +45,7 @@ export function useSessionMenuPlugins() {
   return useMemo(() => sessionMenuPluginItems(plugins), [plugins])
 }
 
-/** `session-menu:<pluginId>:<action>` → { pluginId, action }；不是插件项返回 null。 */
+/** `session-menu:<pluginId>:<action>` → { pluginId, pluginAction }；不是插件项返回 null。 */
 export function parseSessionMenuAction(value) {
   if (typeof value !== 'string' || !value.startsWith(PREFIX)) return null
   const rest = value.slice(PREFIX.length)
@@ -54,5 +55,44 @@ export function parseSessionMenuAction(value) {
   const pluginId = rest.slice(0, split)
   const action = rest.slice(split + 1)
   if (!action) return null
-  return { pluginId, action }
+  return { pluginId, pluginAction: action }
+}
+
+/**
+ * 跑一个插件菜单项，把结果折成「一句话」交给调用方显示。
+ *
+ * 两个使用点（侧栏会话行、对话区）共用这一份：动作怎么转发、什么算失败、剪贴板写失败
+ * 怎么算，都不能各写一遍——否则同一个插件在两个入口表现不一样。
+ *
+ * `run` / `copy` 只为测试注入：默认是页面的 `sessionMenuRun` 与 `copyText`。
+ */
+export async function runSessionMenuPluginAction({ item, target = {}, run, copy } = {}) {
+  const pluginId = item?.pluginId
+  const pluginAction = item?.pluginAction
+  if (!pluginId || !pluginAction) return { ok: false, message: '插件动作无效' }
+  const invoke = run || ((payload) => window.mica.chat.sessionMenuRun(payload))
+  const writeClipboard = copy || ((text) => copyText(text))
+  let result
+  try {
+    result = await invoke({
+      id: target.id || null,
+      pluginId,
+      action: pluginAction,
+      sessionId: target.sessionId || null,
+      cwd: target.cwd || null
+    })
+  } catch (error) {
+    return { ok: false, message: `插件动作失败：${error?.message || error}` }
+  }
+  if (result?.ok === false) return { ok: false, message: result.error || '插件动作失败' }
+  const text = typeof result?.copyText === 'string' ? result.copyText : ''
+  if (text) {
+    const copied = await writeClipboard(text)
+    if (copied === false) {
+      return { ok: false, message: result.message || '复制失败：剪贴板不可用' }
+    }
+    return { ok: true, message: result.message || '已复制到剪贴板' }
+  }
+  if (result?.message) return { ok: true, message: result.message }
+  return { ok: false, message: '插件没有返回内容' }
 }

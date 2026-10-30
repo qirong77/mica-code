@@ -23,6 +23,8 @@ import { readCachedMcpResult } from './mcp-probe.js'
  *
  * 与 `skills-core.listSkills` 相对：两者共同组成 `/` 的候选列表，都只负责「列出来」，
  * 选中后插什么文本由渲染层决定（见 chat-completions.js）。
+ *
+ * 每条候选带 `source`：内置（运行时挂的）与配置里的分开标，用户才知道要改去哪里。
  */
 
 const MAX_TOOLS = 50
@@ -53,7 +55,7 @@ export function builtinMcpCandidates(env = process.env) {
         type: 'http',
         // 这两个 server 只有一个 tool，名字是契约的一部分（见 control-mcp.js），不必探测。
         tools: [CONTROL_TOOL_NAME],
-        builtin: true,
+        source: { kind: 'builtin', label: '内置' },
         ...(url ? { url } : {})
       }
     })
@@ -86,7 +88,9 @@ export function listMcpCandidates() {
       return {
         name,
         type: config && typeof config.url === 'string' ? 'http' : 'stdio',
-        tools
+        tools,
+        // 配置文件的绝对路径放进 `detail`：悬停就知道该改哪个文件。
+        source: { kind: 'config', label: 'config.json', detail: path }
       }
     })
 

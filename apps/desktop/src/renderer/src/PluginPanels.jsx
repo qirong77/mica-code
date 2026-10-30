@@ -34,7 +34,8 @@ export function PluginQuickBar({
   onTogglePanel,
   onCompose,
   onLaunchSession,
-  onDialog
+  onDialog,
+  onOpenPath
 }) {
   const panels = usePluginPanels(role)
   const [pending, setPending] = useState('')
@@ -70,7 +71,7 @@ export function PluginQuickBar({
           cwd
         })
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
-      applyPanelResult(result, { onCompose, onLaunchSession, onDialog })
+      applyPanelResult(result, { onCompose, onLaunchSession, onDialog, onOpenPath })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
     } finally {
       setPending('')
@@ -126,7 +127,8 @@ export function PluginPanels({
   onClose,
   onCompose,
   onLaunchSession,
-  onDialog
+  onDialog,
+  onOpenPath
 }) {
   const panels = usePluginPanels(role)
   const open = panels.find((panel) => panel.id === openPlugin) || null
@@ -150,6 +152,7 @@ export function PluginPanels({
       onCompose={onCompose}
       onLaunchSession={onLaunchSession}
       onDialog={onDialog}
+      onOpenPath={onOpenPath}
     />
   )
 }
@@ -164,7 +167,8 @@ function PluginPanelDock({
   onClose,
   onCompose,
   onLaunchSession,
-  onDialog
+  onDialog,
+  onOpenPath
 }) {
   const [view, setView] = useState(null)
   const [error, setError] = useState('')
@@ -234,10 +238,21 @@ function PluginPanelDock({
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
       setBusy('')
       applyView(result, { resetDrafts: true })
-      applyPanelResult(result, { onCompose, onLaunchSession, onDialog })
+      applyPanelResult(result, { onCompose, onLaunchSession, onDialog, onOpenPath })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
     },
-    [applyView, cwd, drafts, nodeId, onCompose, onDialog, onLaunchSession, pluginId, sessionId]
+    [
+      applyView,
+      cwd,
+      drafts,
+      nodeId,
+      onCompose,
+      onDialog,
+      onLaunchSession,
+      onOpenPath,
+      pluginId,
+      sessionId
+    ]
   )
 
   const sections = useMemo(() => view?.sections || [], [view])

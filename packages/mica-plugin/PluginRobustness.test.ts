@@ -80,6 +80,7 @@ function manifest(requires: string[]) {
     actions: [],
     desktopPanel: null,
     desktopSessionMenu: [],
+    skills: [],
   };
 }
 
@@ -184,6 +185,56 @@ describe('PluginManager robustness', () => {
       expect(readPublishedPluginSkills({ configDir }).map((skill) => [skill.pluginId, skill.name])).toEqual([
         ['demo-builtin', 'demo-skill'],
       ]);
+    } finally {
+      await manager.disposeAll();
+    }
+  });
+
+  it('registers the skills declared in the manifest without the plugin calling ctx.skills', async () => {
+    const root = join(configDir, 'plugins', 'demo');
+    const skillDir = join(root, 'skills', 'rules');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: demo-rules\ndescription: 规则\n---\n\n正文\n', 'utf-8');
+
+    const manager = new PluginManager();
+    const setup = vi.fn();
+    manager.register({
+      id: 'demo-manifest',
+      name: 'demo-manifest',
+      // 插件目录是清单相对声明的根：插件在哪，它带的 skill 就在哪
+      root,
+      manifest: { ...manifest(['skills']), skills: ['skills'] },
+      setup,
+    });
+
+    try {
+      const report = await manager.setupAll(baseContext(configDir));
+      expect(report.loaded).toEqual(['demo-manifest']);
+      expect(setup).toHaveBeenCalled();
+      // 生效的两处都要有：进程级注册表（模型能调用）与磁盘索引（不 setup 插件的宿主能列出）
+      expect(readPublishedPluginSkills({ configDir })).toEqual([
+        expect.objectContaining({ pluginId: 'demo-manifest', name: 'demo-rules', path: join(skillDir, 'SKILL.md') }),
+      ]);
+    } finally {
+      await manager.disposeAll();
+    }
+  });
+
+  it('reports a declared skill directory it cannot read instead of failing the plugin', async () => {
+    const manager = new PluginManager();
+    manager.register({
+      id: 'demo-missing',
+      name: 'demo-missing',
+      root: join(configDir, 'plugins', 'demo-missing'),
+      manifest: { ...manifest(['skills']), skills: ['skills'] },
+      setup: () => {},
+    });
+
+    try {
+      const report = await manager.setupAll(baseContext(configDir));
+      // 目录写错不该让整个插件起不来：插件其余能力照常可用，问题显示在配置页
+      expect(report.loaded).toEqual(['demo-missing']);
+      expect(readPluginHealth('demo-missing', { configDir })?.message).toContain('skill 目录');
     } finally {
       await manager.disposeAll();
     }

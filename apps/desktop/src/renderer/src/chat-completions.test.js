@@ -203,7 +203,7 @@ describe('composer completions', () => {
       name: 'mica-browser',
       label: 'mcp:mica-browser',
       tools: ['control'],
-      description: 'MCP · 工具：control'
+      description: '工具：control'
     })
     // 名称里从第 5 个字符（`mica-` 之后）开始命中，再右移 `mcp:` 的 4 个字符
     expect(options[0].highlights).toEqual([9, 10, 11, 12, 13, 14, 15])
@@ -231,7 +231,7 @@ describe('composer completions', () => {
     )
   })
 
-  it('labels built-in skills and MCP servers so they are not mistaken for user config', () => {
+  it('carries a source marker so every row says where it came from', () => {
     const options = slashCompletionOptions(
       {
         skills: [
@@ -239,33 +239,66 @@ describe('composer completions', () => {
             name: 'computer-use',
             description: '操作 macOS 桌面',
             path: '/h/computer-use/SKILL.md',
-            builtin: true
+            source: { kind: 'plugin', label: '插件 computer-use', detail: 'computer-use' }
+          },
+          {
+            name: 'demand-verify',
+            description: '联调验收',
+            path: '/p/.mica/skills/demand-verify/SKILL.md',
+            source: { kind: 'project', label: '.mica/skills' }
           }
         ],
-        mcpServers: [{ name: 'mica-browser', type: 'http', tools: ['control'], builtin: true }]
+        mcpServers: [
+          {
+            name: 'mica-browser',
+            type: 'http',
+            tools: ['control'],
+            source: { kind: 'builtin', label: '内置' }
+          }
+        ]
       },
       ''
     )
 
-    expect(options[0]).toMatchObject({
-      kind: 'skill',
-      builtin: true,
-      description: '内置 · 操作 macOS 桌面',
-      // 内置 skill 插入的仍是 SKILL.md 的绝对路径
-      path: '/h/computer-use/SKILL.md'
-    })
-    expect(options[1]).toMatchObject({
-      kind: 'mcp',
-      builtin: true,
-      description: '内置 MCP · 工具：control'
-    })
+    // 名字排序：computer-use < demand-verify < mica-browser
+    expect(options.map((option) => option.source)).toEqual([
+      { kind: 'plugin', label: '插件 computer-use', detail: 'computer-use' },
+      { kind: 'project', label: '.mica/skills' },
+      { kind: 'builtin', label: '内置' }
+    ])
+    // 说明列只讲「这个 skill 干什么」，来源不挤进去
+    expect(options[0].description).toBe('操作 macOS 桌面')
+    expect(options[2].description).toBe('工具：control')
+    // 内置 skill 插入的仍是 SKILL.md 的绝对路径
+    expect(options[0].path).toBe('/h/computer-use/SKILL.md')
+  })
 
-    // 说明里的前缀也参与匹配，高亮下标跟着最终文本走
+  it('still matches on the source label, without pretending it is part of the description', () => {
+    // 用户会按「插件」两个字找插件带来的那些；命中落在来源上，说明列不高亮
     const [match] = slashCompletionOptions(
-      { skills: [{ name: 'computer-use', description: '操作桌面', builtin: true }] },
-      '内置'
+      {
+        skills: [
+          {
+            name: 'computer-use',
+            description: '操作桌面',
+            source: { kind: 'plugin', label: '插件 computer-use' }
+          }
+        ]
+      },
+      '插件'
     )
-    expect(match.descriptionHighlights).toEqual([0, 1])
+    expect(match.name).toBe('computer-use')
+    expect(match.descriptionHighlights).toEqual([])
+    expect(match.sourceLabel).toBe('插件 computer-use')
+  })
+
+  it('ignores a source the host spelled wrong instead of drawing a broken badge', () => {
+    const [option] = slashCompletionOptions(
+      { skills: [{ name: 'x', description: '', source: { kind: 'telepathy', label: '心灵感应' } }] },
+      ''
+    )
+    expect(option.source).toBeUndefined()
+    expect(slashCompletionOptions({ skills: [{ name: 'y', source: {} }] }, '')[0].source).toBeUndefined()
   })
 
   it('caps the listed tools so one pick cannot flood the composer', () => {

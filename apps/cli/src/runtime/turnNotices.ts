@@ -1,4 +1,5 @@
 import type { MicaUiCommandStatus, MicaUiConversationMessage } from '@packages/mica-ui/index.js';
+import { comparableText } from '@packages/mica-common/promptText.js';
 
 export type TurnNotice = Extract<MicaUiConversationMessage, { role: 'notice' }>;
 
@@ -116,23 +117,41 @@ export function mergeInFlightUserMessage(
 ): MicaUiConversationMessage[] {
   const pendingIndex = messages.lastIndexOf(inFlight.message);
   if (pendingIndex < 0) return messages;
-  const rawIndex = messages.findIndex(
-    (entry, index) => index !== pendingIndex && entry.role === 'user' && sameContent(entry.content, inFlight.rawContent),
+  const rawKey = promptKey(inFlight.rawContent);
+  if (!rawKey) return messages;
+  const rawIndex = messages.findLastIndex(
+    (entry, index) => index !== pendingIndex && entry.role === 'user' && promptKey(entry.content) === rawKey,
   );
   if (rawIndex < 0) return messages;
   const next = [...messages];
-  next[rawIndex] = inFlight.message;
+  // 落盘那条已经显示的就是本轮（compact 改写过的占位版本也算）：只丢掉末尾的副本，
+  // 不拿 in-flight 的原图覆盖它——否则一次本地清理的结果会被下一次保存顶回去。
+  const displayKey = promptKey(inFlight.message.content);
+  if (!displayKey || promptKey(messages[rawIndex].content) !== displayKey) {
+    next[rawIndex] = inFlight.message;
+  }
   next.splice(pendingIndex, 1);
   return next;
 }
 
 /**
- * 同一段输入在 provider 历史与 `RuntimeInput` 里的形态可能不同（字符串 vs 文本块数组），
- * 所以按「取出的文本」比较，而不是按结构比较。
+ * 同一段输入在 provider 历史与 `RuntimeInput` 里的形态并不一致（字符串 vs 文本块数组），
+ * 落盘之后还可能被改写：compact 把图片块换成 `[image omitted during compact]` 占位文本，
+ * 原文就不再逐字相等。按原文比较会让这里找不到本轮那条用户消息，于是末尾那条展示副本
+ * 留下不合并 —— 会话里多出一条用户气泡（重开 APP 读回 conversationMessages 时最明显）。
+ *
+ * 所以用共享的媒体剥离归一化（`comparableText`）比正文；只有纯媒体消息归一化后是空串，
+ * 退回用引用的图片路径当身份（`[Image](路径)` 文本块在 compact 之后仍然保留）。
  */
-function sameContent(a: unknown, b: unknown): boolean {
-  const left = contentText(a);
-  return left.length > 0 && left === contentText(b);
+const IMAGE_REF_RE = /\[Image\]\(([^)]+)\)/g;
+
+function promptKey(value: unknown): string {
+  const text = contentText(value);
+  if (!text) return '';
+  const body = comparableText(text);
+  if (body) return body;
+  const refs = [...text.matchAll(IMAGE_REF_RE)].map((match) => match[1]!.trim());
+  return refs.length > 0 ? `[media] ${refs.join(' ')}` : '';
 }
 
 function contentText(value: unknown): string {

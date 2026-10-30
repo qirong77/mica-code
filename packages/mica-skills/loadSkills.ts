@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { Disposable } from '@packages/mica-common/index.js';
@@ -124,15 +124,22 @@ export function parseSkillMarkdown(raw: string): ParsedSkillMarkdown {
   };
 }
 
-function loadSkillFromDir(skillDir: string, name: string): Skill | null {
+/**
+ * 读一个 skill 目录。`name` 只作 frontmatter 没写 name 时的兜底，省略就用目录名。
+ *
+ * 插件把自己的 skill 放在插件目录里随包分发时，宿主也用这一份实现读它——解析规则
+ * 只有一处，插件不必自己拼 frontmatter。
+ */
+export function loadSkillFromDir(skillDir: string, name?: string): Skill | null {
   const skillFilePath = join(skillDir, 'SKILL.md');
   if (!existsSync(skillFilePath)) return null;
+  const fallback = name || basename(skillDir);
 
   try {
     const parsed = parseSkillMarkdown(readFileSync(skillFilePath, 'utf-8'));
     return {
-      name: parsed.name || name,
-      description: parsed.description || name,
+      name: parsed.name || fallback,
+      description: parsed.description || fallback,
       whenToUse: parsed.whenToUse,
       argumentHint: parsed.argumentHint,
       content: parsed.content,

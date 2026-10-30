@@ -52,7 +52,12 @@ describe('host skill scanning', () => {
     writeFileSync(join(home, 'skills', 'loose.md'), 'nope', 'utf-8')
 
     expect(listSkills(null)).toEqual([
-      { name: 'plain', path: join(home, 'skills', 'plain', 'SKILL.md'), description: '' }
+      {
+        name: 'plain',
+        path: join(home, 'skills', 'plain', 'SKILL.md'),
+        description: '',
+        source: { kind: 'user', label: '$MICA_HOME/skills' }
+      }
     ])
   })
 
@@ -81,11 +86,12 @@ describe('host skill scanning', () => {
 
     const skills = listSkills(null)
     expect(skills.map((skill) => skill.name)).toEqual(['computer-use', 'cooper'])
+    // 来源标记说清它是插件带的，而不是用户目录里的某个文件
     expect(skills[0]).toEqual({
       name: 'computer-use',
       path: join(builtinDir, 'SKILL.md'),
       description: '操作 macOS 桌面',
-      builtin: true
+      source: { kind: 'plugin', label: '插件 computer-use', detail: 'computer-use' }
     })
 
     // 用户装一份同名 skill：磁盘优先，插件不抢名字（与运行期注册表同一规则）
@@ -95,7 +101,8 @@ describe('host skill scanning', () => {
       {
         name: 'computer-use',
         path: join(home, 'skills', 'computer-use', 'SKILL.md'),
-        description: 'mine'
+        description: 'mine',
+        source: { kind: 'user', label: '$MICA_HOME/skills' }
       }
     ])
   })
@@ -107,6 +114,55 @@ describe('host skill scanning', () => {
     const skills = listSkills(project)
     expect(skills).toHaveLength(1)
     expect(skills[0].description).toBe('')
+  })
+
+  it("lists a plugin's declared skills before it was ever set up", () => {
+    // 索引只有插件 setup 过才存在。第一次打开 `/` 也要能看见随包 skill，
+    // 所以这里只放清单与文件、不放 plugin-skills 索引。
+    const pluginRoot = join(home, 'plugins', 'demand-dev')
+    writeSkill(
+      join(pluginRoot, 'skills'),
+      'demand-verify',
+      '---\nname: demand-verify\ndescription: 联调验收\n---\n'
+    )
+    writeFileSync(
+      join(pluginRoot, 'plugin.json'),
+      JSON.stringify({
+        id: 'demand-dev',
+        name: 'Demand Dev',
+        version: '1.0.0',
+        skills: ['skills']
+      }),
+      'utf-8'
+    )
+
+    const skills = listSkills(null)
+    expect(skills).toEqual([
+      {
+        name: 'demand-verify',
+        path: join(pluginRoot, 'skills', 'demand-verify', 'SKILL.md'),
+        description: '联调验收',
+        // 标记与索引那条同写法，跑过会话前后不会换一个
+        source: { kind: 'plugin', label: '插件 demand-dev', detail: 'user.demand-dev' }
+      }
+    ])
+  })
+
+  it('respects the disabled list for declared plugin skills', () => {
+    const pluginRoot = join(home, 'plugins', 'demo')
+    writeSkill(join(pluginRoot, 'skills'), 'quiet', '---\nname: quiet\n---\n')
+    writeFileSync(
+      join(pluginRoot, 'plugin.json'),
+      JSON.stringify({ id: 'demo', name: 'Demo', version: '1.0.0', skills: ['skills'] }),
+      'utf-8'
+    )
+    writeFileSync(
+      join(home, 'plugins-state.json'),
+      JSON.stringify({ disabled: ['user.demo'] }),
+      'utf-8'
+    )
+
+    expect(listSkills(null)).toEqual([])
   })
 
   it('includes the cwd skill dirs only when a cwd is given', () => {

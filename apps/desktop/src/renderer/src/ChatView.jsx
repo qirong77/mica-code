@@ -26,6 +26,7 @@ import {
   IconMessageChatbot,
   IconMinimize,
   IconPhoto,
+  IconPuzzle,
   IconQuote,
   IconSend,
   IconShare,
@@ -60,6 +61,11 @@ import { CodeView } from './CodeView'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 import { canCollapseMessage, measureChatCollapse } from './chat-collapse'
 import { useChatTooltip } from './chat-hover-tooltip'
+import {
+  parseSessionMenuAction,
+  runSessionMenuPluginAction,
+  useSessionMenuPlugins
+} from './session-menu-plugins'
 
 function formatTokens(value) {
   return formatSharedTokens(value, { millionDecimals: 2 })
@@ -1849,7 +1855,7 @@ function readTranscriptSelection() {
 }
 
 /** 选中对话文字后浮在选区上方的操作条，替代右键菜单里的「引用」。 */
-function ChatSelectionBar({ bar, onQuote, onCopy, copied }) {
+function ChatSelectionBar({ bar, onQuote, onAskBtw, canAskBtw = true, onCopy, copied }) {
   const ref = useRef(null)
   const [pos, setPos] = useState({ left: bar.x, top: bar.y })
   useLayoutEffect(() => {
@@ -1877,6 +1883,18 @@ function ChatSelectionBar({ bar, onQuote, onCopy, copied }) {
       >
         引用
       </button>
+      {/* 选中的这段字正好想问一句时，不必先引用到主输入框再回头开抽屉：直接开抽屉、
+          把这段字作为引用块带进去。btw 的意义就是「顺手问一句」。 */}
+      <button
+        type="button"
+        className="chat-selection-bar-btn"
+        title="用选中的这段字向 By The Way 提问"
+        disabled={!canAskBtw}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={onAskBtw}
+      >
+        问 btw
+      </button>
       <button
         type="button"
         className="chat-selection-bar-btn"
@@ -1889,7 +1907,7 @@ function ChatSelectionBar({ bar, onQuote, onCopy, copied }) {
   )
 }
 
-function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
+function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, pluginItems = [] }) {
   const ref = useRef(null)
   const [pos, setPos] = useState({ x: menu.x, y: menu.y })
   useEffect(() => {
@@ -1914,6 +1932,14 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
     if (py + h > window.innerHeight - 4) py = Math.max(4, window.innerHeight - h - 4)
     setPos({ x: px, y: py })
   }, [menu.x, menu.y])
+  // 插件贡献的项（清单 `desktop.sessionMenu`）：和侧栏会话行是同一份清单，宿主不认识
+  // 任何具体插件。动作要读会话内容，没有会话时给不出东西，所以跟着「分享链接」的门槛走。
+  const pluginActions = (Array.isArray(pluginItems) ? pluginItems : []).map((item) => ({
+    id: item.action,
+    label: item.label,
+    icon: IconPuzzle,
+    disabled: !menu.hasSession
+  }))
   const allItems = [
     {
       id: 'compact-local',
@@ -1945,6 +1971,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false }) {
       icon: IconShare,
       disabled: !menu.hasSession
     },
+    ...pluginActions,
     { separator: true },
     { id: 'clear', label: 'Clear', icon: IconTrash, disabled: menu.running, danger: true }
   ].filter(Boolean)
@@ -2662,6 +2689,20 @@ export function ChatView({
   const [btwDraft, setBtwDraft] = useState('')
   const [btwSending, setBtwSending] = useState(false)
   const [btwCompacting, setBtwCompacting] = useState(false)
+  /**
+   * 抽屉关着时有新回答落地：入口按钮上留一个点。
+   *
+   * 抽屉是后台能力（可以在主流程跑的时候问、也可以关了继续等），回答到达时**不**抢焦点
+   * 也不弹窗，但总得让人看得见——只靠对话里那条 notice 的话，滚上去就找不着了。
+   */
+  const [btwUnread, setBtwUnread] = useState(false)
+  /**
+   * 抽屉自己的提示（业务性失败：线程满了、host 不在、压缩不了…）。
+   *
+   * 抽屉开着时这些话必须出现在抽屉里：写到主对话的 notice 会落在抽屉背后，用户看到
+   * 的只是「点了没反应」。
+   */
+  const [btwNotice, setBtwNotice] = useState(null)
   // 上一次渲染的线程快照（在 applyBtwThread 里比较「刚回答完的那一条」），
   // 面板关着时补一条提示用；同时兼作「回答到达」的去重依据。
   const btwThreadsRef = useRef({})
@@ -2751,6 +2792,8 @@ export function ChatView({
   const canPrevConversationRef = useRef(false)
   const [meta, setMeta] = useState(null)
   const [todoHidden, setTodoHidden] = useState(false)
+  // 会话右键菜单里的插件项（清单 `desktop.sessionMenu`），来自缓存的插件列表。
+  const sessionMenuPlugins = useSessionMenuPlugins()
   const overridesRef = useRef(new Map()) // nodeId -> { model, variant, role }
   const forceRender = useReducer((version) => version + 1, 0)[1]
   const [picker, setPicker] = useState(null) // { kind, title, options, loading, error }
@@ -3018,6 +3061,31 @@ export function ChatView({
   )
 
   /**
+   * 报告一次 By The Way 的业务失败（线程满了、host 不在、压不动…）。
+   *
+   * 抽屉开着就写在抽屉自己的提示条里：写到主对话的 notice 会落在抽屉背后，用户看到的
+   * 只是「点了没反应」。抽屉关着时回答与失败本来就发生在后台，才走会话 notice 留痕。
+   */
+  const notifyBtw = useCallback(
+    (text, variant = 'error') => {
+      if (!text) return
+      if (btwOpenRef.current) {
+        setBtwNotice({ id: uid('btw-notice'), text, variant })
+        return
+      }
+      appendNotice(text, variant)
+    },
+    [appendNotice]
+  )
+
+  /** 打开抽屉的唯一入口：顺带清掉未读点与上一条过期的提示。 */
+  const openBtw = useCallback(() => {
+    setBtwOpen(true)
+    setBtwUnread(false)
+    setBtwNotice(null)
+  }, [])
+
+  /**
    * By The Way（CLI 的 `/btw`）。**不占队列、不改 run 状态**：host 收下问题立刻回，
    * 回答随后作为 `btw_thread` 快照到达——所以主流程正在跑也能问，问完也不用等它。
    * 失败（host 不在、已有问题在回答）时保留草稿，用户可以直接重试。
@@ -3046,11 +3114,11 @@ export function ChatView({
         })
         if (nodeIdRef.current !== targetNodeId) return
         if (!res?.ok) {
-          appendNotice(`By The Way 失败：${res?.error || '未知错误'}`, 'error')
+          notifyBtw(`By The Way 失败：${res?.error || '未知错误'}`, 'error')
           return
         }
         if (res.result?.ok === false) {
-          appendNotice(`By The Way 失败：${res.result.message || '未知错误'}`, 'warn')
+          notifyBtw(`By The Way 失败：${res.result.message || '未知错误'}`, 'warn')
           return
         }
         // host 可能新开了一条线程（原先没有 tab），按它给的 id 切过去；
@@ -3064,7 +3132,7 @@ export function ChatView({
         setBtwDraft('')
       } catch (error) {
         if (nodeIdRef.current === targetNodeId) {
-          appendNotice(
+          notifyBtw(
             `By The Way 失败：${error instanceof Error ? error.message : String(error)}`,
             'error'
           )
@@ -3074,7 +3142,7 @@ export function ChatView({
       }
     },
     // useLatest 返回的是稳定的 ref 盒子，列进来只为消掉 exhaustive-deps 的误报。
-    [appendNotice, btwSending, cwdRef, nodeIdRef]
+    [notifyBtw, btwSending, cwdRef, nodeIdRef]
   )
 
   /**
@@ -3092,12 +3160,12 @@ export function ChatView({
       })
       if (nodeIdRef.current !== targetNodeId) return
       if (!res?.ok) {
-        appendNotice(`新建 By The Way 失败：${res?.error || '未知错误'}`, 'error')
+        notifyBtw(`新建 By The Way 失败：${res?.error || '未知错误'}`, 'error')
         return
       }
       // 业务性拒绝（例如已经开到线程上限）走 result，原因要原样告诉用户。
       if (res.result?.ok === false) {
-        appendNotice(`新建 By The Way 失败：${res.result.message || '未知错误'}`, 'warn')
+        notifyBtw(`新建 By The Way 失败：${res.result.message || '未知错误'}`, 'warn')
         return
       }
       const createdId = res.result?.threadId
@@ -3112,13 +3180,13 @@ export function ChatView({
       setBtwDraft('')
     } catch (error) {
       if (nodeIdRef.current === targetNodeId) {
-        appendNotice(
+        notifyBtw(
           `新建 By The Way 失败：${error instanceof Error ? error.message : String(error)}`,
           'error'
         )
       }
     }
-  }, [appendNotice, cwdRef, nodeIdRef])
+  }, [notifyBtw, cwdRef, nodeIdRef])
 
   /** 切 tab：把当前 tab 的半句话存下、把目标 tab 的草稿取回来。 */
   const selectBtwThread = useCallback(
@@ -3133,6 +3201,27 @@ export function ChatView({
     [btwDraft, nodeIdRef]
   )
 
+  /**
+   * 主对话里选中的一段字 → 抽屉草稿（选区工具条的「问 btw」）。
+   *
+   * 引用块与主输入条同一套语法（`quoteIntoDraft`），所以模型看到的仍是「引用对话（我）：
+   * …」＋接下来的问题。同一段字再点一次不会重复插入，只把光标送回那个块。
+   */
+  const quoteSelectionIntoBtw = useCallback(
+    (selection) => {
+      const text = String(selection?.text || '').trim()
+      if (!text) return
+      const source = String(btwDraft || '')
+      const next = quoteIntoDraft(source, source.length, {
+        role: selection.role || null,
+        text
+      })
+      changeBtwDraft(next.text)
+      openBtw()
+    },
+    [btwDraft, changeBtwDraft, openBtw]
+  )
+
   /** 关 tab：host 侧线程也要删（正在回答的那条会被拒绝，原因如实提示）。 */
   const closeBtwThread = useCallback(
     async (threadId) => {
@@ -3143,11 +3232,11 @@ export function ChatView({
         const res = await window.mica.chat.btwClose(targetNodeId, target)
         if (nodeIdRef.current !== targetNodeId) return
         if (res?.result?.ok === false) {
-          appendNotice(`关闭失败：${res.result.message || '未知错误'}`, 'warn')
+          notifyBtw(`关闭失败：${res.result.message || '未知错误'}`, 'warn')
           return
         }
         if (!res?.ok) {
-          appendNotice(`关闭失败：${res?.error || 'chat host 不可用'}`, 'error')
+          notifyBtw(`关闭失败：${res?.error || 'chat host 不可用'}`, 'error')
           return
         }
         btwDraftsRef.current.delete(btwDraftKey(targetNodeId, target))
@@ -3168,14 +3257,11 @@ export function ChatView({
         }
       } catch (error) {
         if (nodeIdRef.current === targetNodeId) {
-          appendNotice(
-            `关闭失败：${error instanceof Error ? error.message : String(error)}`,
-            'error'
-          )
+          notifyBtw(`关闭失败：${error instanceof Error ? error.message : String(error)}`, 'error')
         }
       }
     },
-    [appendNotice, nodeIdRef]
+    [notifyBtw, nodeIdRef]
   )
 
   /**
@@ -3195,15 +3281,15 @@ export function ChatView({
       })
       if (nodeIdRef.current !== targetNodeId) return
       if (!res?.ok) {
-        appendNotice(`压缩失败：${res?.error || 'chat host 不可用'}`, 'error')
+        notifyBtw(`压缩失败：${res?.error || 'chat host 不可用'}`, 'error')
         return
       }
       if (res.result?.ok === false) {
-        appendNotice(`压缩失败：${res.result.message || '未知错误'}`, 'warn')
+        notifyBtw(`压缩失败：${res.result.message || '未知错误'}`, 'warn')
         return
       }
       const saved = Number(res.result?.savedTokens) || 0
-      appendNotice(
+      notifyBtw(
         saved > 0
           ? `已压缩 By The Way 上下文，释放约 ${formatTokens(saved)} token`
           : '已压缩 By The Way 上下文',
@@ -3211,12 +3297,12 @@ export function ChatView({
       )
     } catch (error) {
       if (nodeIdRef.current === targetNodeId) {
-        appendNotice(`压缩失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+        notifyBtw(`压缩失败：${error instanceof Error ? error.message : String(error)}`, 'error')
       }
     } finally {
       setBtwCompacting(false)
     }
-  }, [appendNotice, btwCompacting, nodeIdRef])
+  }, [notifyBtw, btwCompacting, nodeIdRef])
 
   /** 停止正在回答的那一问（抽屉输入条的停止按钮）。只发中断、不 await 结果。 */
   const stopBtw = useCallback(async () => {
@@ -3230,14 +3316,14 @@ export function ChatView({
       })
       if (nodeIdRef.current !== targetNodeId) return
       // 收尾（aborted 状态）由 host 经 `mica/btw/updated` 推回，这里只报业务性失败。
-      if (!res?.ok) appendNotice(`停止失败：${res?.error || 'chat host 不可用'}`, 'error')
-      else if (res.result?.ok === false) appendNotice(res.result.message || '停止失败', 'warn')
+      if (!res?.ok) notifyBtw(`停止失败：${res?.error || 'chat host 不可用'}`, 'error')
+      else if (res.result?.ok === false) notifyBtw(res.result.message || '停止失败', 'warn')
     } catch (error) {
       if (nodeIdRef.current === targetNodeId) {
-        appendNotice(`停止失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+        notifyBtw(`停止失败：${error instanceof Error ? error.message : String(error)}`, 'error')
       }
     }
-  }, [appendNotice, nodeIdRef])
+  }, [notifyBtw, nodeIdRef])
 
   /**
    * 撤回排队中的问题：把问题取回输入框（等价主对话的 shift+←），不丢字。
@@ -3255,11 +3341,11 @@ export function ChatView({
       })
       if (nodeIdRef.current !== targetNodeId) return
       if (!res?.ok) {
-        appendNotice(`取回失败：${res?.error || 'chat host 不可用'}`, 'error')
+        notifyBtw(`取回失败：${res?.error || 'chat host 不可用'}`, 'error')
         return
       }
       if (res.result?.ok === false) {
-        appendNotice(res.result.message || '没有排队中的问题', 'warn')
+        notifyBtw(res.result.message || '没有排队中的问题', 'warn')
         return
       }
       const recalled = String(res.result?.question || '')
@@ -3271,10 +3357,10 @@ export function ChatView({
       setBtwDraft(next)
     } catch (error) {
       if (nodeIdRef.current === targetNodeId) {
-        appendNotice(`取回失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+        notifyBtw(`取回失败：${error instanceof Error ? error.message : String(error)}`, 'error')
       }
     }
-  }, [appendNotice, nodeIdRef])
+  }, [notifyBtw, nodeIdRef])
 
   // 路径菜单里的「在 Finder 中打开」：目录交给 Finder 打开、文件在文件管理器里定位。
   // 路径可能来自另一台机器（页面连的是远程运行时），失败必须提示而不是静默。
@@ -3659,7 +3745,11 @@ export function ChatView({
         setBtwActiveId(next.id)
       }
       if (btwOpenRef.current) return
-      for (const entry of newlyAnsweredBtwEntries(previous, next)) {
+      const answered = newlyAnsweredBtwEntries(previous, next)
+      // 抽屉关着时回答落地：入口按钮留一个点。通知只说明「有过一次」，而入口是用户
+      // 回头找它时唯一可靠的位置（notice 会随对话滚走）。
+      if (answered.length > 0) setBtwUnread(true)
+      for (const entry of answered) {
         if (entry.status === 'error') {
           appendNotice(
             `By The Way 失败：${compactLine(entry.error || entry.question, 120)}`,
@@ -5743,6 +5833,22 @@ export function ChatView({
   const runContextMenuAction = useCallback(
     async (action) => {
       setContextMenu(null)
+      // 插件提供的那几项：转发给这条会话的常驻 host（插件就在那个进程里），结果里的
+      // `copyText` 在页面写剪贴板。和侧栏会话行共用同一个执行器，行为不会分叉。
+      const pluginMenu = parseSessionMenuAction(action)
+      if (pluginMenu) {
+        const sessionId = sessionIdRef.current
+        if (!sessionId) {
+          appendNotice('发送第一条消息后才能复制会话内容', 'error')
+          return
+        }
+        const { ok, message } = await runSessionMenuPluginAction({
+          item: pluginMenu,
+          target: { id: nodeIdRef.current, sessionId, cwd: cwdRef.current }
+        })
+        appendNotice(message, ok ? 'info' : 'error')
+        return
+      }
       if (action === 'compact-local' || action === 'compact-model' || action === 'clear') {
         await runSlashCommand({
           name: action === 'clear' ? 'clear' : 'compact',
@@ -5863,12 +5969,24 @@ export function ChatView({
   const btwRunning = btwTabList.some((item) =>
     (item.entries || []).some((entry) => entry.status === 'running')
   )
+  // 入口按钮的悬停说明：「为什么点不了 / 现在是什么状态 / 它能做什么」三选一。
+  const btwEntryTitle = !hasSession
+    ? 'By The Way 需要先有一条会话'
+    : remoteRunning
+      ? '该会话正在另一个进程里运行'
+      : btwRunning
+        ? 'By The Way：正在回答…（点击查看）'
+        : btwUnread && !btwOpen
+          ? 'By The Way：有新的回答（点击查看）'
+          : 'By The Way：不打扰主流程地问一句（回答不进入本会话上下文，Cmd/Ctrl+Shift+B）'
   // 抽屉宽度是界面状态（所有窗口一致、重启还在）；拖动期间只改 DOM，松手才写回。
   const [btwWidth, setBtwWidth] = useSharedState('btwWidth', null)
   // 切到别的对话时收起定时任务与 btw 面板：两者描述的都是上一个会话。
   useEffect(() => {
     setSettingsSection(null)
     setBtwOpen(false)
+    setBtwUnread(false)
+    setBtwNotice(null)
   }, [nodeId])
 
   // Cmd/Ctrl+Shift+B 打开 / 收起 By The Way（与输入条上那个按钮同一动作）。
@@ -5882,11 +6000,12 @@ export function ChatView({
       if (active && active !== document.body && !active.closest?.('.chat-view')) return
       event.preventDefault()
       event.stopPropagation()
-      setBtwOpen((open) => !open)
+      if (btwOpenRef.current) setBtwOpen(false)
+      else openBtw()
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [visible, hasSession, remoteRunning])
+  }, [visible, hasSession, remoteRunning, openBtw])
 
   // 输入框行首标记（与 CLI 的 prompt 同款）：非默认角色时在标记前显示角色名。
   // 内容与 tooltip 在「可点 / 只读」两种形态之间共用，只有外层元素不同——分享范围里
@@ -6469,28 +6588,25 @@ export function ChatView({
                   也就没有主流程记录可当背景，所以那时禁用。 */}
               <button
                 type="button"
-                className={`chat-composer-btw ${btwRunning ? 'is-active' : ''}`}
-                title={
-                  !hasSession
-                    ? 'By The Way 需要先有一条会话'
-                    : remoteRunning
-                      ? '该会话正在另一个进程里运行'
-                      : btwRunning
-                        ? 'By The Way：正在回答…（点击查看）'
-                        : 'By The Way：不打扰主流程地问一句（回答不进入本会话上下文，Cmd/Ctrl+Shift+B）'
-                }
+                className={`chat-composer-btw ${btwRunning ? 'is-active' : ''}${btwUnread && !btwOpen ? ' has-unread' : ''}`}
+                title={btwEntryTitle}
                 aria-label="By The Way"
                 // 抽屉不是浮层：没有「点外面就关」需要它自己认领这次点击，所以不带
                 // data-popover-trigger，改用 aria-expanded 描述它控制着一个可展开区域。
                 aria-expanded={btwOpen}
                 disabled={!hasSession || remoteRunning}
-                onClick={() => setBtwOpen((open) => !open)}
+                onClick={() => (btwOpen ? setBtwOpen(false) : openBtw())}
               >
                 {btwRunning ? (
                   <IconLoader2 size={13} className="animate-spin" />
                 ) : (
                   <IconMessageChatbot size={13} />
                 )}
+                {/* 回答在抽屉关着时落地：入口上留一个点，否则用户只能靠对话里那条
+                    会滚走的 notice 才知道有结果。 */}
+                {btwUnread && !btwOpen ? (
+                  <span className="chat-composer-btw-dot" aria-hidden="true" />
+                ) : null}
               </button>
               {/* 电脑上用 Enter 发送，发送/排队按钮只在移动端保留（触屏没有回车键）。
                   「停止生成」与运行态无关，两端都要有。 */}
@@ -6603,6 +6719,7 @@ export function ChatView({
             onAction={runContextMenuAction}
             onClose={closeContextMenu}
             commitRunning={commitRunning}
+            pluginItems={sessionMenuPlugins}
           />
         )}
         {selectionBar && (
@@ -6614,6 +6731,15 @@ export function ChatView({
               window.getSelection?.()?.removeAllRanges?.()
               setSelectionBar(null)
             }}
+            // 选中的就是「想问的那段字」：开抽屉、把它带进草稿，用户接着打问题。
+            onAskBtw={() => {
+              quoteSelectionIntoBtw(selectionBar)
+              window.getSelection?.()?.removeAllRanges?.()
+              setSelectionBar(null)
+            }}
+            // 与入口按钮同一条门槛：没有会话就没有 host，没有主流程记录可当背景；
+            // 会话正在别的进程里跑时抽屉也打不开。
+            canAskBtw={hasSession && !remoteRunning}
             onCopy={() => {
               navigator.clipboard?.writeText?.(selectionBar.text)?.then?.(
                 () => setSelectionCopied(true),
@@ -6638,6 +6764,7 @@ export function ChatView({
           onCompose={composeFromPlugin}
           onLaunchSession={requestPluginSession}
           onDialog={setPluginDialog}
+          onOpenPath={(path, line) => onOpenFileRef.current?.(path, line ? { line } : {})}
         />
         {pluginTask && (
           <PluginTaskDialog
@@ -6657,6 +6784,8 @@ export function ChatView({
             draft={btwDraft}
             sending={btwSending}
             compacting={btwCompacting}
+            notice={btwNotice}
+            onDismissNotice={() => setBtwNotice(null)}
             onDraftChange={changeBtwDraft}
             onAsk={askBtw}
             onStop={stopBtw}
@@ -6672,7 +6801,6 @@ export function ChatView({
             renderQuestion={renderBtwQuestion}
             onPreviewImage={pathActions.preview}
             onOpenDocument={openToolDocument}
-            onNotice={appendNotice}
             onClose={() => setBtwOpen(false)}
           />
         )}

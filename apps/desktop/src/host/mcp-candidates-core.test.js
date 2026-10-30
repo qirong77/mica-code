@@ -38,8 +38,18 @@ describe('composer MCP candidates', () => {
 
     // 纯 Web 宿主没有浏览器 / 终端 socket，所以这里只有配置里那两个
     expect(listMcpCandidates()).toEqual([
-      { name: 'mica-terminal', type: 'http', tools: [] },
-      { name: 'sequential-thinking', type: 'stdio', tools: [] }
+      {
+        name: 'mica-terminal',
+        type: 'http',
+        tools: [],
+        source: { kind: 'config', label: 'config.json', detail: join(home, 'config.json') }
+      },
+      {
+        name: 'sequential-thinking',
+        type: 'stdio',
+        tools: [],
+        source: { kind: 'config', label: 'config.json', detail: join(home, 'config.json') }
+      }
     ])
   })
 
@@ -59,14 +69,14 @@ describe('composer MCP candidates', () => {
           name: 'mica-browser',
           type: 'http',
           tools: ['control'],
-          builtin: true,
+          source: { kind: 'builtin', label: '内置' },
           url: 'http://127.0.0.1:8787/mcp/browser'
         },
         {
           name: 'mica-terminal',
           type: 'http',
           tools: ['control'],
-          builtin: true,
+          source: { kind: 'builtin', label: '内置' },
           url: 'http://127.0.0.1:8787/mcp/terminal'
         }
       ])

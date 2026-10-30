@@ -34,7 +34,7 @@ import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { PluginEntries } from './PluginEntries'
 import { PluginPage } from './PluginPage'
 import { SessionTree } from './SessionTree'
-import { useSessionMenuPlugins } from './session-menu-plugins'
+import { runSessionMenuPluginAction, useSessionMenuPlugins } from './session-menu-plugins'
 import { SessionNotesDialog } from './SessionNotesDialog'
 import TerminalKeyBar from './TerminalKeyBar'
 import { isElectronShell } from './shell-env'
@@ -994,32 +994,10 @@ export default function App() {
   // 剪贴板，运行时可能跑在另一台机器上。
   const sessionMenuPlugins = useSessionMenuPlugins()
   const runSessionMenuAction = useCallback(
-    async ({ sessionId, cwd }, { pluginId, action }) => {
+    async (target, item) => {
       showToast('正在准备…')
-      try {
-        const result = await window.mica.chat.sessionMenuRun({
-          pluginId,
-          action,
-          sessionId,
-          cwd
-        })
-        if (result?.ok === false) {
-          showToast(result.error || '插件动作失败', true)
-          return
-        }
-        if (result?.copyText) {
-          const copied = await copyText(result.copyText)
-          if (copied === false) {
-            showToast(result.message || '复制失败：剪贴板不可用', true)
-            return
-          }
-          showToast(result.message || '已复制到剪贴板')
-          return
-        }
-        showToast(result?.message || '插件没有返回内容', true)
-      } catch (error) {
-        showToast(`插件动作失败：${error?.message || error}`, true)
-      }
+      const { ok, message } = await runSessionMenuPluginAction({ item, target })
+      showToast(message, !ok)
     },
     [showToast]
   )

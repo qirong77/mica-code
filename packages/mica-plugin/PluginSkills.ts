@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
+import { micaSkills } from '@packages/mica-skills/index.js';
 import type { Skill } from '@packages/mica-skills/types.js';
 import { PLUGIN_STATE_FILE, readDisabledPluginIds } from './PluginState.js';
 
@@ -159,4 +160,54 @@ export function readPublishedPluginSkills(options: PluginSkillsOptions = {}): Pu
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 把清单 `skills` 声明的目录读成 skill。
+ *
+ * 一个路径两种读法：目录里直接有 `SKILL.md` → 那是一条 skill；否则当容器，扫它下面一层
+ * 子目录。这样「一个插件带一条 skill」（`["."]` 或 `["skills/my-skill"]`）与「带一组」
+ * （`["skills"]`）都只用同一条配置写出来，不必为两种规模发明两种字段。
+ *
+ * 读不到的一律跳过并回一条原因：插件目录被挪走、`SKILL.md` 写坏，都该在配置页显示成
+ * 一条状态，而不是让插件带着半个能力安静启动。
+ */
+export function loadManifestSkills(
+  root: string,
+  dirs: readonly string[],
+): { skills: Skill[]; problems: string[] } {
+  const skills: Skill[] = [];
+  const problems: string[] = [];
+  for (const relative of dirs) {
+    const target = join(root, relative);
+    if (!existsSync(target)) {
+      problems.push(`${relative}：目录不存在`);
+      continue;
+    }
+    const single = readSkillDir(target);
+    if (single) {
+      skills.push(single);
+      continue;
+    }
+    let children: string[] = [];
+    try {
+      children = readdirSync(target, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(target, entry.name));
+    } catch {
+      problems.push(`${relative}：读不到目录内容`);
+      continue;
+    }
+    const found = children
+      .map((child) => readSkillDir(child))
+      .filter((skill): skill is Skill => skill !== null);
+    if (found.length === 0) problems.push(`${relative}：下面没有找到 SKILL.md`);
+    skills.push(...found);
+  }
+  return { skills, problems };
+}
+
+function readSkillDir(dir: string): Skill | null {
+  const loaded = micaSkills.loadDir(dir);
+  return loaded && loaded.name.trim() ? loaded : null;
 }

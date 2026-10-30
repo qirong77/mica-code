@@ -183,7 +183,9 @@ export class Application {
               ...(parentSessionId ? { parentSessionId } : {}),
             };
           },
-          messages: (owner) => resolvePluginSession(agentSessions, owner)?.agent.toConversationMessages() ?? [],
+          // 与 app-server 同一个口径：用户眼前的那份对话（落盘快照），provider history 在
+          // compact 后只是摘要，导出会话的插件据此拼出来会缺正文。
+          messages: (owner) => resolvePluginSession(agentSessions, owner)?.sessionController.getConversationMessages() ?? [],
           rename: (title, options) => {
             const session = resolvePluginSession(agentSessions, options?.owner);
             if (!session) return false;

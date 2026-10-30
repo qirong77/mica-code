@@ -74,6 +74,61 @@ export function btwEntryRetryable(entry) {
 }
 
 /**
+ * tab 条上那颗状态点该是什么：`running` / `error` / `aborted`，其余为空串。
+ *
+ * 只看**最后一条**：tab 是一个话题，用户关心的是「这个话题现在怎么样了」。正在跑优先于
+ * 之前的失败——它已经在重新回答了，还挂着红点会让人以为又出错了。
+ */
+export function btwTabMark(tab) {
+  const entries = Array.isArray(tab?.entries) ? tab.entries : []
+  if (btwRunningEntry(entries)) return 'running'
+  const last = entries[entries.length - 1]
+  if (last?.status === 'error') return 'error'
+  if (last?.status === 'aborted') return 'aborted'
+  return ''
+}
+
+/** tab 的悬停说明：标题是截断过的第一个问题，这里补上「几条问答」与失败原因。 */
+export function btwTabTitle(tab) {
+  const entries = Array.isArray(tab?.entries) ? tab.entries : []
+  const first = String(entries[0]?.question || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const mark = btwTabMark(tab)
+  const lines = [first || '新线程']
+  if (entries.length > 1) lines.push(`${entries.length} 条问答`)
+  if (mark === 'running') lines.push('正在回答…')
+  if (mark === 'error') {
+    const error = String(entries[entries.length - 1]?.error || '').trim()
+    lines.push(error ? `上一次失败：${error}` : '上一次失败')
+  }
+  if (mark === 'aborted') lines.push('上一次被停止')
+  return lines.join('\n')
+}
+
+/**
+ * 把整条线程拼成 Markdown（右键「复制整条线程」）。
+ *
+ * 只收问答本体：思考、工具调用、notice 都留在抽屉里——复制出去是为了把结论带走或贴给
+ * 别人，过程只会让正文变长。与本会话的「复制会话 Markdown」同一条原则（确定性拼装，
+ * 不调用模型）。
+ */
+export function btwThreadMarkdown(thread) {
+  const entries = Array.isArray(thread?.entries) ? thread.entries : []
+  const blocks = []
+  for (const entry of entries) {
+    const question = String(entry?.question || '').trim()
+    if (!question) continue
+    const answer = String(entry?.answer || '').trim()
+    const error = String(entry?.error || '').trim()
+    const body = answer || (error ? `_失败：${error}_` : '_（还没有回答）_')
+    blocks.push(`> ${question.replace(/\n/g, '\n> ')}\n\n${body}`)
+  }
+  if (!blocks.length) return ''
+  return ['# By The Way', '', blocks.join('\n\n---\n\n')].join('\n')
+}
+
+/**
  * 输入历史的步进（Alt+↑ 往更早，Alt+↓ 往更新）。
  *
  * `index` 是「从最新往回数的第几条」，-1 表示不在历史里（显示进入历史前的草稿）。
@@ -188,13 +243,19 @@ export function btwContextMenuItems({
       disabled: !hasSelection && !text
     },
     {
+      id: 'copy-thread',
+      label: '复制整条线程',
+      title: '把这条线程的全部问答复制成 Markdown（不含思考与工具调用）',
+      disabled: !hasEntries
+    },
+    {
       id: 'quote',
       label: '引用到主对话',
       title: '把这段字作为引用块插进主对话的输入框（随后由你决定发不发）',
       disabled: !text || !canQuote
     },
     { separator: true },
-    { id: 'new-thread', label: '新话题', title: '开一条新线程，上下文与当前这条互不影响' },
+    { id: 'new-thread', label: '新线程', title: '开一条新线程，上下文与当前这条互不影响' },
     {
       id: 'compact',
       label: '快速压缩',

@@ -20,6 +20,7 @@ import {
   writeBtwState,
   type StoredBtwThread,
 } from '@packages/mica-common/index.js';
+import { BTW_MAX_THREADS } from '@packages/mica-common/btwLimits.js';
 
 /**
  * 常驻 host（`mica app-server`）里的 By The Way（btw）线程。
@@ -704,7 +705,7 @@ export class BtwThreadController {
  *   失败只记 stderr——btw 是辅助能力，不能因为存不下来就让问答失败。
  * - **不碰 turn 生命周期**：问答照旧与主流程完全无关（见 chat.js 的 chat:btw-ask）。
  */
-export const MAX_BTW_THREADS = 6;
+export { BTW_MAX_THREADS };
 
 /**
  * 一条线程有没有真正问过。
@@ -792,10 +793,10 @@ export class BtwThreads {
   ): { ok: true; threadId: string } | { ok: false; message: string } {
     const id = typeof threadId === 'string' ? threadId.trim() : '';
     if (id && this.controllers.has(id)) return { ok: true, threadId: id };
-    if (this.controllers.size >= MAX_BTW_THREADS) {
+    if (this.controllers.size >= BTW_MAX_THREADS) {
       return {
         ok: false,
-        message: `最多同时打开 ${MAX_BTW_THREADS} 条 By The Way 线程，先关掉一条再开`,
+        message: `最多同时打开 ${BTW_MAX_THREADS} 条 By The Way 线程，先关掉一条再开`,
       };
     }
     return { ok: true, threadId: this.ensure(id).id };
@@ -863,7 +864,7 @@ export class BtwThreads {
       const controller = this.ensure(item.id);
       // ensure 只带 id；entries 与消息要在这里灌进去（顺序不能反：先建成一条空线程）。
       controller.adopt(item);
-      if (this.controllers.size >= MAX_BTW_THREADS) break;
+      if (this.controllers.size >= BTW_MAX_THREADS) break;
     }
   }
 

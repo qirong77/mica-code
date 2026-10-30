@@ -400,3 +400,35 @@ describe('parsePluginManifest desktop session menu', () => {
     expect(result.manifest.desktopSessionMenu).toHaveLength(1);
   });
 });
+
+describe('parsePluginManifest skills', () => {
+  it('reads relative skill directories in declaration order and drops repeats', () => {
+    const result = parsePluginManifest(base({ skills: ['skills', 'skills', 'skills/solo'] }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.skills).toEqual(['skills', 'skills/solo']);
+  });
+
+  it('defaults to none so a plugin without skills reads the same as before', () => {
+    const result = parsePluginManifest(base());
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.skills).toEqual([]);
+  });
+
+  it('rejects paths that leave the plugin directory', () => {
+    // 绝对路径能让一份插件指向机器上任意目录，`..` 能爬出插件目录——两者都让
+    // 「这个插件带了什么」变得不可读，而这正是 plugin.json 存在的意义。
+    const absolute = parsePluginManifest(base({ skills: ['/Users/me/skills'] }));
+    expect(absolute.ok).toBe(false);
+    if (!absolute.ok) expect(absolute.error).toContain('相对插件目录');
+
+    const escaping = parsePluginManifest(base({ skills: ['../elsewhere'] }));
+    expect(escaping.ok).toBe(false);
+    if (!escaping.ok) expect(escaping.error).toContain('插件目录之外');
+
+    const notArray = parsePluginManifest(base({ skills: 'skills' }));
+    expect(notArray.ok).toBe(false);
+    if (!notArray.ok) expect(notArray.error).toContain('必须是数组');
+  });
+});

@@ -10,7 +10,10 @@ import {
   btwHistoryStep,
   btwPhaseText,
   btwRunningEntry,
-  btwRunningTool
+  btwRunningTool,
+  btwTabMark,
+  btwTabTitle,
+  btwThreadMarkdown
 } from './btw-thread'
 
 const entry = (extra) => ({
@@ -167,7 +170,18 @@ describe('btwContextMenuItems', () => {
     const ids = btwContextMenuItems({ entry: answer, hasEntries: true })
       .filter((item) => !item.separator)
       .map((item) => item.id)
-    expect(ids).toEqual(['copy', 'quote', 'new-thread', 'compact', 'close-thread'])
+    expect(ids).toEqual(['copy', 'copy-thread', 'quote', 'new-thread', 'compact', 'close-thread'])
+  })
+
+  it('only offers a whole-thread copy once there is something to copy', () => {
+    expect(
+      btwContextMenuItems({ entry: answer, hasEntries: true }).find(
+        (item) => item.id === 'copy-thread'
+      )
+    ).toMatchObject({ disabled: false })
+    expect(btwContextMenuItems({ hasEntries: false })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'copy-thread', disabled: true })])
+    )
   })
 
   it('disables destructive actions while an answer is streaming', () => {
@@ -214,5 +228,61 @@ describe('btwHistoryStep', () => {
   it('does nothing without history', () => {
     expect(btwHistoryStep({ index: -1, count: 0, direction: 1 })).toBeNull()
     expect(btwHistoryStep({})).toBeNull()
+  })
+})
+
+describe('btwTabMark', () => {
+  it('reports the state of the last entry, with running winning over an older failure', () => {
+    expect(btwTabMark({ entries: [{ status: 'completed' }] })).toBe('')
+    expect(btwTabMark({ entries: [{ status: 'error' }] })).toBe('error')
+    expect(btwTabMark({ entries: [{ status: 'aborted' }] })).toBe('aborted')
+    // 重新问过一遍、现在正在跑：不该继续挂着上一轮的红点
+    expect(btwTabMark({ entries: [{ status: 'error' }, { status: 'running' }] })).toBe('running')
+    expect(btwTabMark({ entries: [] })).toBe('')
+    expect(btwTabMark(null)).toBe('')
+  })
+})
+
+describe('btwTabTitle', () => {
+  it('explains the count and why the last answer failed', () => {
+    const tab = {
+      entries: [
+        { question: '第一问', status: 'completed' },
+        { question: '第二问', status: 'error', error: '模型挂了' }
+      ]
+    }
+    expect(btwTabTitle(tab)).toBe('第一问\n2 条问答\n上一次失败：模型挂了')
+  })
+
+  it('falls back to a plain label for an empty tab', () => {
+    expect(btwTabTitle({ entries: [] })).toBe('新线程')
+  })
+})
+
+describe('btwThreadMarkdown', () => {
+  it('keeps the questions and answers, and drops thinking and tool rows', () => {
+    const markdown = btwThreadMarkdown({
+      entries: [
+        {
+          question: '乐观锁怎么用？',
+          answer: '用版本号。',
+          thinking: '想一想',
+          tools: [{ id: 't1', tool: 'grep' }],
+          status: 'completed'
+        },
+        { question: '那并发写呢？', status: 'error', error: '模型挂了' }
+      ]
+    })
+    expect(markdown).toContain('> 乐观锁怎么用？')
+    expect(markdown).toContain('用版本号。')
+    expect(markdown).toContain('> 那并发写呢？')
+    expect(markdown).toContain('_失败：模型挂了_')
+    expect(markdown).not.toContain('grep')
+    expect(markdown).not.toContain('想一想')
+  })
+
+  it('returns an empty string without questions', () => {
+    expect(btwThreadMarkdown({ entries: [] })).toBe('')
+    expect(btwThreadMarkdown(null)).toBe('')
   })
 })

@@ -10,7 +10,7 @@ import {
   resolveBtwToolIndex,
   MAX_BTW_THINKING_CHARS,
   MAX_BTW_TOOL_OUTPUT_CHARS,
-  MAX_BTW_THREADS,
+  BTW_MAX_THREADS,
 } from './btwThread.js';
 import type { MicaBtwThread } from '@packages/mica-runtime/codexProtocol.js';
 import type { CommandAgent, CommandSessionController } from '@packages/mica-builtin-commands/services.js';
@@ -603,7 +603,7 @@ describe('BtwThreads', () => {
       flushIntervalMs: 0,
     });
     const ids: string[] = [];
-    for (let index = 0; index < MAX_BTW_THREADS; index += 1) {
+    for (let index = 0; index < BTW_MAX_THREADS; index += 1) {
       const opened = threads.open(null);
       expect(opened.ok).toBe(true);
       if (opened.ok) ids.push(opened.threadId);

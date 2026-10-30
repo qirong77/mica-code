@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   IconAlertCircle,
+  IconArrowDown,
   IconBolt,
   IconCopy,
+  IconInfoCircle,
   IconLoader2,
   IconMessageChatbot,
   IconMessagePlus,
@@ -16,6 +18,7 @@ import {
   IconTrash,
   IconX
 } from '@tabler/icons-react'
+import { BTW_MAX_THREADS } from '@packages/mica-common/btwLimits.js'
 import { ComposerImageStrip } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
@@ -30,7 +33,10 @@ import {
   btwEntryRetryable,
   btwHistoryStep,
   btwPhaseText,
-  btwRunningEntry
+  btwRunningEntry,
+  btwTabMark,
+  btwTabTitle,
+  btwThreadMarkdown
 } from './btw-thread'
 import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
 import { longPressHandlers, useLatest } from './hooks'
@@ -44,6 +50,7 @@ export const BTW_MAX_WIDTH = 900
 /** 菜单项 id → 图标。判定（哪些项、什么时候禁用）全在 `btwContextMenuItems`。 */
 const BTW_MENU_ICONS = {
   copy: IconCopy,
+  'copy-thread': IconCopy,
   quote: IconQuote,
   'new-thread': IconMessagePlus,
   compact: IconBolt,
@@ -124,6 +131,8 @@ export function BtwDrawer({
   draft = '',
   sending = false,
   compacting = false,
+  notice = null,
+  onDismissNotice,
   onDraftChange,
   onAsk,
   onStop,
@@ -137,7 +146,6 @@ export function BtwDrawer({
   renderQuestion,
   onPreviewImage,
   onOpenDocument,
-  onNotice,
   onClose
 }) {
   const bodyRef = useRef(null)
@@ -154,10 +162,56 @@ export function BtwDrawer({
       .trim()
     return text ? (text.length > 14 ? `${text.slice(0, 14)}…` : text) : '新线程'
   }
+  const tabCount = Array.isArray(tabs) ? tabs.length : 0
+  const atThreadLimit = tabCount >= BTW_MAX_THREADS
   const runningEntry = btwRunningEntry(entries)
   const running = Boolean(runningEntry)
   const [threadId, setThreadId] = useState(thread?.id || '')
   const [now, setNow] = useState(() => Date.now())
+  /**
+   * 抽屉自己的提示条：上传失败、复制失败、线程上限这类「做了但没成」的话必须说在原地。
+   *
+   * 它们以前被抛到主对话的 notice 里——抽屉开着时那条话落在抽屉背后，用户只会看到
+   * 「点了没反应」。组件内部产生的提示走这里，ChatView 传来的业务失败走 `notice`。
+   */
+  const [localNotice, setLocalNotice] = useState(null)
+  const noticeTimerRef = useRef(null)
+  const notify = useCallback((text, variant = 'error') => {
+    if (!text) return
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    noticeTimerRef.current = null
+    setLocalNotice({ id: `btw-local-${Date.now()}`, text, variant })
+    // 成功类反馈（「已复制」）自己走开；失败要留着，用户得看清为什么没成。
+    if (variant === 'info') {
+      noticeTimerRef.current = setTimeout(() => {
+        noticeTimerRef.current = null
+        setLocalNotice(null)
+      }, 2_500)
+    }
+  }, [])
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current)
+    },
+    []
+  )
+  const activeNotice = localNotice || notice
+  const dismissNotice = () => {
+    setLocalNotice(null)
+    if (notice) onDismissNotice?.()
+  }
+  const dismissRef = useLatest(onDismissNotice)
+  // 外部来了一条新的业务提示（换了一条失败原因）时，把本地那条顶掉：同一时刻只该有
+  // 一条「为什么没成」。信息类提示（「已压缩」）自己走开，错误留着等用户看完。
+  useEffect(() => {
+    if (!notice?.id) return undefined
+    setLocalNotice(null)
+    if (notice.variant === 'info') {
+      const timer = setTimeout(() => dismissRef.current?.(), 2_500)
+      return () => clearTimeout(timer)
+    }
+    return undefined
+  }, [notice?.id, notice?.variant, dismissRef])
   // 输入历史：Alt+↑ 往回翻这条线程问过的问题（与主输入条同一个键位），
   // `stash` 是进入历史前那半句话——翻回底部要能拿回来。
   const historyRef = useRef({ index: -1, stash: '' })
@@ -216,6 +270,21 @@ export function BtwDrawer({
   }
   // 读者是否还贴着底部。上翻看已经读过的答案时不该被流式的正文拽回来（与对话区同一手感）。
   const stickToBottomRef = useRef(true)
+  // 同一个状态再镜像一份给渲染用：按钮要在「已经离开底部」时出现，而 ref 不会触发渲染。
+  const [atBottom, setAtBottom] = useState(true)
+
+  /**
+   * 回到最新。
+   *
+   * 上翻读旧答案时新内容照常到达，抽屉不会把人拽下去（那是刻意的）；但长线程里滚回
+   * 底部要一路手动滑，所以给一个明确的出口，顺便把「跟随」重新打开。
+   */
+  const scrollToLatest = () => {
+    const body = bodyRef.current
+    stickToBottomRef.current = true
+    setAtBottom(true)
+    if (body) body.scrollTop = body.scrollHeight
+  }
 
   /**
    * 右键菜单。
@@ -242,7 +311,15 @@ export function BtwDrawer({
     setMenu(null)
     if (id === 'copy') {
       void copyText(menu?.selection || text).then((ok) => {
-        if (!ok) onNotice?.('复制失败：浏览器拒绝了剪贴板写入', 'error')
+        notify(ok ? '已复制' : '复制失败：浏览器拒绝了剪贴板写入', ok ? 'info' : 'error')
+      })
+      return
+    }
+    if (id === 'copy-thread') {
+      const markdown = btwThreadMarkdown(thread)
+      if (!markdown) return
+      void copyText(markdown).then((ok) => {
+        notify(ok ? '已复制整条线程' : '复制失败：浏览器拒绝了剪贴板写入', ok ? 'info' : 'error')
       })
       return
     }
@@ -267,6 +344,18 @@ export function BtwDrawer({
     setThreadId(thread.id)
     historyRef.current = { index: -1, stash: '' }
     inputRef.current?.focus()
+    // 换 tab 是换一个话题：滚动位置属于上一条线程，停在半截会让人从一个陌生的地方
+    // 开始读。落到最新那一条（内容可能还在 Markdown 渲染，下一帧再落一次）。
+    const jump = () => {
+      const body = bodyRef.current
+      if (!body) return
+      stickToBottomRef.current = true
+      setAtBottom(true)
+      body.scrollTop = body.scrollHeight
+    }
+    jump()
+    const frame = requestAnimationFrame(jump)
+    return () => cancelAnimationFrame(frame)
   }, [thread?.id, threadId])
 
   // 只在回答期间走表：阶段文案与耗时每秒都要动，但不该让抽屉常驻一个定时器。
@@ -312,9 +401,9 @@ export function BtwDrawer({
   // 绝对路径。抽屉是另一条对话，粘贴的行为不该长出第二种。
   const handlePaste = useCallback(
     (event) => {
-      void pasteIntoComposer(event, { insertText, notify: onNotice })
+      void pasteIntoComposer(event, { insertText, notify })
     },
-    [insertText, onNotice]
+    [insertText, notify]
   )
 
   // 相册/拍照：手机上粘贴不可用，只能靠文件选择器（与主输入条同一个 accept）
@@ -327,15 +416,15 @@ export function BtwDrawer({
         try {
           const result = await window.mica.chat.savePastedImage({ file })
           if (result?.ok && result.ref) refs.push(result.ref)
-          else onNotice?.(result?.error || `上传 ${file.name || '图片'} 失败`, 'error')
+          else notify(result?.error || `上传 ${file.name || '图片'} 失败`)
         } catch (error) {
           // 失败就不插引用（草稿里不该出现一个打不开的路径），但要说明为什么没反应
-          onNotice?.(`上传 ${file.name || '图片'} 失败：${error?.message || error}`, 'error')
+          notify(`上传 ${file.name || '图片'} 失败：${error?.message || error}`)
         }
       }
       if (refs.length) insertText(refs.map((ref) => `[Image](${ref})`).join(' '))
     },
-    [insertText, onNotice]
+    [insertText, notify]
   )
 
   // Esc 关闭。抽屉刻意**不**照搬浮层的「点外面就关」：边看主对话边滚动是常态，误关一次
@@ -356,6 +445,8 @@ export function BtwDrawer({
     const text = String(draft || '').trim()
     if (!text || sending) return
     historyRef.current = { index: -1, stash: '' }
+    // 上一次「为什么没成」已经过去：新的问题发出后没有理由继续挂在头顶。
+    if (activeNotice) dismissNotice()
     // 回答期间提交 = 排队（单槽位，答完自动接上），与主对话的 after_iteration 同一心智：
     // 用户不必盯着等它说完再问下一句。
     onAsk?.(text, { queue: running })
@@ -443,7 +534,7 @@ export function BtwDrawer({
           可以并排问几件不相干的事，这也是「新话题」在桌面端的样子。 */}
       <div className="chat-btw-tabs" role="tablist" aria-label="By The Way 线程">
         {(Array.isArray(tabs) ? tabs : []).map((tab) => {
-          const tabRunning = btwRunningEntry(tab.entries)
+          const mark = btwTabMark(tab)
           return (
             <div
               key={tab.id}
@@ -454,18 +545,22 @@ export function BtwDrawer({
               <button
                 type="button"
                 className="chat-btw-tab-label"
-                title={tabTitle(tab)}
+                title={btwTabTitle(tab)}
                 onClick={() => onSelectThread?.(tab.id)}
               >
-                {tabRunning ? <span className="chat-btw-live" aria-hidden="true" /> : null}
+                {mark === 'running' ? (
+                  <span className="chat-btw-live" aria-hidden="true" />
+                ) : mark ? (
+                  <span className={`chat-btw-tab-mark is-${mark}`} aria-hidden="true" />
+                ) : null}
                 {tabTitle(tab)}
               </button>
               <button
                 type="button"
                 className="chat-btw-tab-close"
                 aria-label="关闭这个线程"
-                title={tabRunning ? '正在回答中，答完才能关' : '关闭这个线程'}
-                disabled={Boolean(tabRunning)}
+                title={mark === 'running' ? '正在回答中，答完才能关' : '关闭这个线程'}
+                disabled={mark === 'running'}
                 onClick={() => onCloseThread?.(tab.id)}
               >
                 <IconX size={10} />
@@ -477,20 +572,47 @@ export function BtwDrawer({
           type="button"
           className="chat-btw-tab-add"
           aria-label="新建线程"
-          title="新建一条线程（另一个话题，上下文互不影响）"
+          title={
+            atThreadLimit
+              ? `最多同时打开 ${BTW_MAX_THREADS} 条线程，先关掉一条再开`
+              : '新建一条线程（另一个话题，上下文互不影响）'
+          }
+          disabled={atThreadLimit}
           onClick={() => onNewThread?.()}
         >
           <IconPlus size={11} />
         </button>
       </div>
+      {/* 提示条固定在 tab 与正文之间：失败原因不该落在抽屉背后的主对话里，也不该随
+          正文滚走（它解释的正是「刚才那一下为什么没成」）。 */}
+      {activeNotice ? (
+        <div className={`chat-btw-notice is-${activeNotice.variant || 'info'}`} role="status">
+          {activeNotice.variant === 'info' ? (
+            <IconInfoCircle size={12} className="chat-btw-notice-icon" aria-hidden="true" />
+          ) : (
+            <IconAlertCircle size={12} className="chat-btw-notice-icon" aria-hidden="true" />
+          )}
+          <span className="chat-btw-notice-text">{activeNotice.text}</span>
+          <button
+            type="button"
+            className="chat-btw-notice-close"
+            aria-label="关闭提示"
+            title="关闭提示"
+            onClick={dismissNotice}
+          >
+            <IconX size={11} />
+          </button>
+        </div>
+      ) : null}
       {/* 整个抽屉里唯一滚动的地方，所以「滚到底」打在这个元素上 */}
       <div
         className="chat-btw-body"
         ref={bodyRef}
         onScroll={(event) => {
           const element = event.currentTarget
-          stickToBottomRef.current =
-            element.scrollHeight - element.scrollTop - element.clientHeight < 24
+          const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 24
+          stickToBottomRef.current = nearBottom
+          setAtBottom((previous) => (previous === nearBottom ? previous : nearBottom))
         }}
       >
         {entries.length === 0 ? (
@@ -587,6 +709,19 @@ export function BtwDrawer({
           </div>
         )}
       </div>
+      {/* 上翻读旧答案时新内容照常到达、也不会把人拽下去；但长线程手动滑回底部很费劲，
+          所以离开底部就给一个明确的出口（同时也是「继续跟随」的开关）。 */}
+      {!atBottom && entries.length > 0 ? (
+        <button
+          type="button"
+          className="chat-btw-jump"
+          title="回到最新（恢复自动跟随）"
+          onClick={scrollToLatest}
+        >
+          <IconArrowDown size={12} />
+          最新
+        </button>
+      ) : null}
       {/* 这条线程自己的模型与上下文占用（+ 本地快速压缩）：btw 是一次独立运行，
           主状态栏那份与它无关。放在输入条上方——和主对话「状态行贴着输入条」同一位置。 */}
       <div className="chat-btw-status">

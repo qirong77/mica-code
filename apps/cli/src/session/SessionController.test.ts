@@ -1106,4 +1106,105 @@ describe('SessionController', () => {
     expect(controller.saveCurrent()).toBe(true);
     expect(controller.refreshFromStore()).toBeNull();
   });
+
+  /**
+   * 插件读会话正文（右键导出、旁问背景）要的是「用户眼前那份对话」，不是 provider history：
+   * 刚 resume 的会话在进程里还没跑过轮次，history 是空的；compact 之后它又只剩摘要。
+   */
+  it('reports the persisted conversation instead of the empty provider history', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const persisted = {
+      version: 1,
+      revision: 1,
+      id: 'resumed-session',
+      title: '旧会话',
+      titleSource: 'auto',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      cwd: '/tmp/work',
+      turnState: 'completed',
+      snapshot: {
+        providerId: 'openai',
+        protocol: 'openai_chat_completions',
+        model: 'test-model',
+        effort: 'none',
+        role: 'default',
+        contextWindowSize: 128000,
+        messages: [],
+        conversationMessages: [
+          { role: 'user', content: '你好' },
+          { role: 'assistant', content: '你好，有什么可以帮你？' },
+        ],
+        usageHistory: [],
+        subagentUsageHistory: [],
+      },
+    } as unknown as PersistedSession;
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(
+        (): AgentRuntimeSnapshot => ({
+          providerId: 'openai',
+          protocol: 'openai_chat_completions',
+          model: 'test-model',
+          effort: 'none',
+          role: 'default',
+          capabilitySelection: { version: 1, disabledSkills: [], disabledTools: [], disabledMcpServers: [] },
+          capabilitiesCustomized: false,
+          messages: [],
+          usageHistory: [],
+          lastUsage: undefined,
+        }),
+      ),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => []),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn(() => persisted),
+      save: vi.fn(),
+      delete: vi.fn(() => false),
+    };
+    const controller = new SessionController({ agent, store });
+
+    expect(controller.resume('resumed-session').ok).toBe(true);
+    expect(controller.getConversationMessages()).toEqual([
+      { role: 'user', content: '你好' },
+      { role: 'assistant', content: '你好，有什么可以帮你？' },
+    ]);
+  });
+
+  /** 还没落盘的新会话（含 `mica exec`）没有快照可读，退回这个进程里的那一份。 */
+  it('falls back to this process conversation when nothing is persisted yet', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const agent: SessionAgentAdapter = {
+      getSnapshot: vi.fn(
+        (): AgentRuntimeSnapshot => ({
+          providerId: 'openai',
+          protocol: 'openai_chat_completions',
+          model: 'test-model',
+          effort: 'none',
+          role: 'default',
+          capabilitySelection: { version: 1, disabledSkills: [], disabledTools: [], disabledMcpServers: [] },
+          capabilitiesCustomized: false,
+          messages: [],
+          usageHistory: [],
+          lastUsage: undefined,
+        }),
+      ),
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: vi.fn(() => [{ role: 'user' as const, content: '刚打的字' }]),
+    };
+    const store: SessionStoreLike = {
+      list: vi.fn(() => []),
+      listRecent: vi.fn(() => []),
+      load: vi.fn(() => null),
+      save: vi.fn(),
+      delete: vi.fn(() => false),
+    };
+    const controller = new SessionController({ agent, store });
+
+    expect(controller.getConversationMessages()).toEqual([{ role: 'user', content: '刚打的字' }]);
+  });
 });

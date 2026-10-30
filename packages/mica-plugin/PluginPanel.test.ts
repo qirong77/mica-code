@@ -186,6 +186,26 @@ describe('normalizePluginPanelAction', () => {
   });
 });
 
+describe('plugin panel openPath', () => {
+  it('carries an absolute path and an optional line', () => {
+    const result = normalizePluginPanelActionResult({
+      openPath: { path: '/Users/me/.mica/plugins/demand-dev/skills/x/SKILL.md', line: 12.7 },
+    });
+    expect(result.openPath).toEqual({
+      path: '/Users/me/.mica/plugins/demand-dev/skills/x/SKILL.md',
+      line: 12,
+    });
+  });
+
+  it('accepts a bare string and drops a path-less object', () => {
+    expect(normalizePluginPanelActionResult({ openPath: '/tmp/a.md' }).openPath).toEqual({
+      path: '/tmp/a.md',
+    });
+    expect(normalizePluginPanelActionResult({ openPath: { line: 3 } }).openPath).toBeUndefined();
+    expect(normalizePluginPanelActionResult({ openPath: '   ' }).openPath).toBeUndefined();
+  });
+});
+
 describe('PluginPanelRegistry', () => {
   it('registers one panel per plugin and replaces on re-register', () => {
     const registry = new PluginPanelRegistry();

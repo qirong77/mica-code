@@ -85,6 +85,9 @@ describe('applyPanelResult', () => {
         },
         onDialog: (dialog) => {
           seen.dialog = dialog
+        },
+        onOpenPath: (path, line) => {
+          seen.opened = { path, line }
         }
       }
     }
@@ -126,6 +129,24 @@ describe('applyPanelResult', () => {
       handlers
     )
     expect(seen).toEqual({ composed: '', launched: null, dialog: null })
+  })
+
+  test('opens a plugin file in the editor with its line', () => {
+    const { seen, handlers } = effects()
+    applyPanelResult(
+      { ok: true, openPath: { path: '/Users/me/.mica/plugins/demand-dev/skills/a/SKILL.md', line: 12 } },
+      handlers
+    )
+    expect(seen.opened).toEqual({
+      path: '/Users/me/.mica/plugins/demand-dev/skills/a/SKILL.md',
+      line: 12
+    })
+  })
+
+  test('ignores an openPath without a path', () => {
+    const { seen, handlers } = effects()
+    applyPanelResult({ ok: true, openPath: { line: 3 } }, handlers)
+    expect(seen.opened).toBeUndefined()
   })
 
   test('ignores blank or malformed payloads', () => {

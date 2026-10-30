@@ -286,7 +286,9 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
           model: agent.config.model,
         };
       },
-      messages: () => agent.toConversationMessages(),
+      // 用户眼前的那份对话（落盘快照），不是 provider history：后者在 compact 后是摘要，
+      // 刚恢复还没跑过轮次的会话在进程里甚至是空的。
+      messages: () => sessionController.getConversationMessages(),
       rename: (title, renameOptions) =>
         sessionController.renameCurrent(title, { source: renameOptions?.source ?? 'auto' }),
     },

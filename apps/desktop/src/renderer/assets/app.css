@@ -662,9 +662,14 @@ body.is-resizing.is-resizing-terminal {
   white-space: nowrap;
 }
 
-.chat-selection-bar-btn:hover {
+.chat-selection-bar-btn:hover:not(:disabled) {
   background: rgb(255 255 255 / 8%);
   color: var(--color-fg-strong);
+}
+
+/* 「问 btw」在不可用时只掉颜色，尺寸与位置不动（与其它禁用态同一条规则） */
+.chat-selection-bar-btn:disabled {
+  color: var(--color-fg-ghost);
 }
 
 /* 点「引用」插进用户消息里的引用块：只在渲染上包一层引用区，原文没有改动。 */
@@ -2107,6 +2112,34 @@ body.is-resizing.is-resizing-terminal {
   color: rgb(255 255 255 / 32%);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 补全浮层多一列「来源」：名称 | 说明 | 标记。这一行只有它自己的三列，别的命令面板
+   仍然是原来的四列。 */
+.chat-completion-palette .chat-command-palette-body > button {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+/* 来源标记：靠右、永不压缩（它是这一行最该看清的归属性信息），宽度只随文字取。 */
+.chat-command-source {
+  flex: none;
+  max-width: 132px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: rgb(255 255 255 / 28%);
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 内置（运行时自带，如受控浏览器 / 终端）与插件带的：这两类用户改不动，
+   与「自己目录里的文件」用不同颜色分开。 */
+.chat-command-source.is-builtin,
+.chat-command-source.is-plugin {
+  border-color: color-mix(in srgb, var(--color-info) 32%, transparent);
+  color: color-mix(in srgb, var(--color-info) 58%, transparent);
 }
 
 .chat-command-availability {
@@ -3646,8 +3679,27 @@ body.is-resizing.is-resizing-terminal {
 }
 
 /* By The Way（btw）入口：正在回答时点亮（旋转图标自带反馈，这里只给颜色）。 */
+.chat-composer-btw {
+  /* 未读点挂在右上角，不占动作条的格子 */
+  position: relative;
+}
+
 .chat-composer-btw.is-active {
   color: var(--color-warn);
+}
+
+/* 抽屉关着时有回答落地：入口留一个点。通知那条字会随对话滚走，入口才是回头找它的
+   地方；打开抽屉（或换会话）即清除。 */
+.chat-composer-btw-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-teal);
+  /* 描一圈底色，压在图标上时也分得清（动作条是外框面） */
+  box-shadow: 0 0 0 1px var(--color-panel);
 }
 
 /* -------------------------------------------------------- By The Way（btw）抽屉
@@ -3792,9 +3844,66 @@ body.is-resizing-btw {
   color: rgb(255 255 255 / 38%);
 }
 
-.chat-btw-tab-add:hover {
+.chat-btw-tab-add:hover:not(:disabled) {
   background: rgb(255 255 255 / 8%);
   color: var(--color-fg);
+}
+
+/* 到线程上限时「+」是禁用的：上限在点之前就该看得见，而不是点了才收到一句拒绝 */
+.chat-btw-tab-add:disabled {
+  color: rgb(255 255 255 / 12%);
+}
+
+/* 提示条：固定在 tab 与正文之间。失败原因属于「刚才那一下」，不该随正文滚走，
+   更不该写到抽屉背后的主对话里。 */
+.chat-btw-notice {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px 6px 12px;
+  border-bottom: 1px solid var(--color-line);
+  background: rgb(255 255 255 / 4%);
+  color: var(--color-fg-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.chat-btw-notice.is-error {
+  background: rgb(255 92 92 / 10%);
+  color: var(--color-danger);
+}
+
+.chat-btw-notice.is-warn {
+  background: rgb(255 196 84 / 8%);
+  color: var(--color-warn);
+}
+
+.chat-btw-notice-icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.chat-btw-notice-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.chat-btw-notice-close {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  place-items: center;
+  border-radius: 3px;
+  color: inherit;
+  opacity: 0.6;
+}
+
+.chat-btw-notice-close:hover {
+  background: rgb(255 255 255 / 8%);
+  opacity: 1;
 }
 
 .chat-btw-head {
@@ -3908,6 +4017,30 @@ body.is-resizing-btw {
   background: var(--color-canvas);
 }
 
+/* 「回到最新」：上翻之后才能看到。贴在正文右下角、状态行与输入条之上（那两块固定，
+   所以用一个足够大的 bottom 落在它们上面），不改布局高度。 */
+.chat-btw-jump {
+  position: absolute;
+  z-index: 4;
+  right: 14px;
+  bottom: 96px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  background: var(--color-panel);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 35%);
+  color: var(--color-fg-dim);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.chat-btw-jump:hover {
+  color: var(--color-fg);
+}
+
 .chat-btw-thread {
   display: flex;
   flex-direction: column;
@@ -3982,6 +4115,25 @@ body.is-resizing-btw {
   border-radius: 50%;
   background: var(--color-teal);
   animation: chat-dot-breathe 1.6s ease-in-out infinite;
+}
+
+/* 不跑的 tab 也要说明它现在是什么状态：失败过的留红点、被停止的留黄点。
+   与呼吸点同尺寸同位置，切换状态时 tab 标题不会跳。 */
+.chat-btw-tab-mark {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  flex: none;
+  margin-right: 5px;
+  border-radius: 50%;
+}
+
+.chat-btw-tab-mark.is-error {
+  background: var(--color-danger);
+}
+
+.chat-btw-tab-mark.is-aborted {
+  background: var(--color-warn);
 }
 
 /* 思考与工具行：直接复用回合日志那套（`chat-tool-views.jsx`），这里只负责把它

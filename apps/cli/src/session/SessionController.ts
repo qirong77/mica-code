@@ -294,6 +294,20 @@ export class SessionController {
     return this.resumeLoaded(session);
   }
 
+  /**
+   * 会话当前的对话记录（UI 视角）。
+   *
+   * 读落盘快照里的 `conversationMessages`，而不是 provider history：compact 会把历史改写成
+   * 摘要、history normalizer 也会按协议丢掉不认识的消息，而用户眼前仍是原文。刚恢复的会话
+   * 在进程里还没跑过轮次时，provider 那份更是空的——插件按它导出会得到一条空对话。
+   * 只有还没落盘的新会话（含 `mica exec`）才退回内存里的那一份。
+   */
+  getConversationMessages(): MicaUiConversationMessage[] {
+    const persisted = this.currentSessionId ? this.store.load(this.currentSessionId) : null;
+    const fromDisk = persisted ? getPersistedConversationMessages(persisted.snapshot) : [];
+    return fromDisk.length ? fromDisk : getPersistableConversationMessages(this.agent);
+  }
+
   resumeLoaded(session: PersistedSession): ResumeSessionResult {
     if (session.id !== this.currentSessionId) this.discardCurrentIfEmpty();
     const requestedRole = session.snapshot.role ?? DEFAULT_ROLE_NAME;

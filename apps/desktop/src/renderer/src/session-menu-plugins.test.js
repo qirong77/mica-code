@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { parseSessionMenuAction, sessionMenuPluginItems } from './session-menu-plugins'
+import {
+  parseSessionMenuAction,
+  runSessionMenuPluginAction,
+  sessionMenuPluginItems
+} from './session-menu-plugins'
 
 const plugin = (overrides = {}) => ({
   id: 'session-copy',
@@ -59,11 +63,11 @@ describe('parseSessionMenuAction', () => {
   test('splits plugin id from action', () => {
     expect(parseSessionMenuAction('session-menu:user.demand-dev:copy')).toEqual({
       pluginId: 'user.demand-dev',
-      action: 'copy'
+      pluginAction: 'copy'
     })
     expect(parseSessionMenuAction('session-menu:session-copy:copy-plain')).toEqual({
       pluginId: 'session-copy',
-      action: 'copy-plain'
+      pluginAction: 'copy-plain'
     })
   })
 
@@ -74,5 +78,79 @@ describe('parseSessionMenuAction', () => {
     expect(parseSessionMenuAction('session-menu:only-plugin')).toBeNull()
     expect(parseSessionMenuAction('session-menu:plugin:')).toBeNull()
     expect(parseSessionMenuAction(undefined)).toBeNull()
+  })
+})
+
+describe('runSessionMenuPluginAction', () => {
+  const item = { pluginId: 'session-copy', pluginAction: 'copy' }
+  const target = { id: 'tab-1', sessionId: 's-1', cwd: '/tmp/repo' }
+
+  test('forwards the action to the host and copies the returned text', async () => {
+    const calls = []
+    const copied = []
+    const result = await runSessionMenuPluginAction({
+      item,
+      target,
+      run: async (payload) => {
+        calls.push(payload)
+        return { ok: true, copyText: '# 标题', message: '已复制 2 条对话' }
+      },
+      copy: async (text) => {
+        copied.push(text)
+        return true
+      }
+    })
+    expect(calls).toEqual([
+      { id: 'tab-1', pluginId: 'session-copy', action: 'copy', sessionId: 's-1', cwd: '/tmp/repo' }
+    ])
+    expect(copied).toEqual(['# 标题'])
+    expect(result).toEqual({ ok: true, message: '已复制 2 条对话' })
+  })
+
+  test('defaults the message when the plugin copied without one', async () => {
+    const result = await runSessionMenuPluginAction({
+      item,
+      target,
+      run: async () => ({ ok: true, copyText: 'x' }),
+      copy: async () => true
+    })
+    expect(result).toEqual({ ok: true, message: '已复制到剪贴板' })
+  })
+
+  test('surfaces a clipboard failure as an error instead of a silent no-op', async () => {
+    const result = await runSessionMenuPluginAction({
+      item,
+      target,
+      run: async () => ({ ok: true, copyText: 'x' }),
+      copy: async () => false
+    })
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('剪贴板')
+  })
+
+  test('reports host rejections and thrown transport errors', async () => {
+    const rejected = await runSessionMenuPluginAction({
+      item,
+      target,
+      run: async () => ({ ok: false, error: '会话正在运行' }),
+      copy: async () => true
+    })
+    expect(rejected).toEqual({ ok: false, message: '会话正在运行' })
+
+    const thrown = await runSessionMenuPluginAction({
+      item,
+      target,
+      run: async () => {
+        throw new Error('host 不在')
+      },
+      copy: async () => true
+    })
+    expect(thrown.ok).toBe(false)
+    expect(thrown.message).toContain('host 不在')
+  })
+
+  test('rejects an item without a plugin action', async () => {
+    const result = await runSessionMenuPluginAction({ item: { pluginId: 'x' }, target })
+    expect(result).toEqual({ ok: false, message: '插件动作无效' })
   })
 })

@@ -134,12 +134,27 @@ export type PluginPanelNewSession = {
  *   算数。需要模型「先看一眼再决定发不发」的时候用它，比直接投递更可控。
  * - `newSession` —— 新开一个会话，把这段提示词作为它的第一条消息发出去。
  * - `dialog` —— 弹一张只读表格（链接清单、对照表这类）。宿主管渲染，插件给数据。
+ * - `openPath` —— 让宿主把这个文件在应用里打开（文件视图的编辑器就位）。面板只有 340px，
+ *   超过一屏的正文（插件自己的配置、随包分发的 skill）在那里既看不清也改不动；编辑器是
+ *   宿主已有的能力，插件只声明「打开哪个文件」。
  */
 export type PluginPanelActionResult = {
   message?: string;
   compose?: string;
   newSession?: PluginPanelNewSession;
   dialog?: PluginPanelDialog;
+  openPath?: PluginPanelOpenPath;
+};
+
+/**
+ * 让宿主在应用里打开一个文件。
+ *
+ * 路径是插件自己算出来的绝对路径（插件数据目录、随包资源落盘位置），宿主只负责打开，
+ * 不猜它属于谁。`line` 用来落到某一行，编辑长文件时省一次滚动。
+ */
+export type PluginPanelOpenPath = {
+  path: string;
+  line?: number;
 };
 
 /**
@@ -244,6 +259,8 @@ const MAX_DIALOG_TEXT = 4000;
 const MAX_CELL_LINK = 2000;
 /** 提示词整段回传的上限：它是一段给模型看的正文，不是一行状态。 */
 const MAX_PROMPT = 20_000;
+/** 打开文件只传路径，上限只是别让插件把整份正文塞进这条通道。 */
+const MAX_PATH = 4096;
 
 const TONES: readonly PluginPanelTone[] = ['muted', 'ok', 'warn', 'error', 'accent'];
 const BUTTON_TONES: readonly PluginPanelButtonTone[] = ['primary', 'ghost', 'danger'];
@@ -433,11 +450,28 @@ export function normalizePluginPanelActionResult(input: unknown): PluginPanelAct
   const compose = text(raw.compose, MAX_PROMPT);
   const newSession = newSessionOf(raw.newSession);
   const dialog = dialogOf(raw.dialog);
+  const openPath = openPathOf(raw.openPath);
   return {
     ...(message ? { message } : {}),
     ...(compose ? { compose } : {}),
     ...(newSession ? { newSession } : {}),
     ...(dialog ? { dialog } : {}),
+    ...(openPath ? { openPath } : {}),
+  };
+}
+
+function openPathOf(value: unknown): PluginPanelOpenPath | undefined {
+  if (typeof value === 'string') {
+    const path = text(value, MAX_PATH);
+    return path ? { path } : undefined;
+  }
+  const raw = record(value);
+  const path = text(raw.path, MAX_PATH);
+  if (!path) return undefined;
+  const line = Number(raw.line);
+  return {
+    path,
+    ...(Number.isFinite(line) && line > 0 ? { line: Math.floor(line) } : {}),
   };
 }
 

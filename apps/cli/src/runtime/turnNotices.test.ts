@@ -146,6 +146,58 @@ describe('notice message builders', () => {
     expect(mergeInFlightUserMessage(messages, { message: pending, rawContent: '这一轮' })).toBe(messages);
   });
 
+  // compact 会把已落盘那条用户消息里的图片块换成占位文本，正文与 `RuntimeInput` 不再逐字
+  // 相等；按原文比较就会合并不上，末尾的展示副本留下来变成第二条用户气泡（重开 APP 读回
+  // conversationMessages 时最明显）。
+  it('merges the in-flight prompt after compaction rewrote its images', () => {
+    const raw: MicaUiConversationMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'bug1：https://example.com/detail/1\nbug2：' },
+        { type: 'text', text: '[Image](~/.mica/images/a.png)' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } },
+        { type: 'text', text: ' ' },
+        { type: 'text', text: '[Image](~/.mica/images/b.png)' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'BB==' } },
+      ],
+    };
+    const compacted: MicaUiConversationMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'bug1：https://example.com/detail/1\nbug2：' },
+        { type: 'text', text: '[Image](~/.mica/images/a.png)' },
+        { type: 'text', text: '[image omitted during compact]' },
+        { type: 'text', text: ' ' },
+        { type: 'text', text: '[Image](~/.mica/images/b.png)' },
+        { type: 'text', text: '[image omitted during compact]' },
+      ],
+    };
+    const merged = mergeInFlightUserMessage(
+      [compacted, { role: 'assistant', content: '两个 bug 我先分别定性' }, raw],
+      { message: raw, rawContent: raw.content },
+    );
+    expect(merged).toEqual([compacted, { role: 'assistant', content: '两个 bug 我先分别定性' }]);
+  });
+
+  it('merges a media-only prompt by its image references', () => {
+    const raw: MicaUiConversationMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: '[Image](~/.mica/images/a.png)' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AA==' } },
+      ],
+    };
+    const compacted: MicaUiConversationMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: '[Image](~/.mica/images/a.png)' },
+        { type: 'text', text: '[image omitted during compact]' },
+      ],
+    };
+    const merged = mergeInFlightUserMessage([compacted, raw], { message: raw, rawContent: raw.content });
+    expect(merged).toEqual([compacted]);
+  });
+
   it('formats the retry hint with the attempt and the delay', () => {
     expect(createRetryNotice(new Error('socket closed'), 2, 5, 10_000)).toEqual({
       role: 'notice',

@@ -154,7 +154,7 @@ async function loadPluginEntry(
     throw new Error(`入口文件不存在：${manifest.main}`);
   }
   const setup = await importSetup(entryFile);
-  const plugin = createFilePlugin(manifest, setup, pluginId);
+  const plugin = createFilePlugin(manifest, setup, pluginId, dir);
   return { plugin, record: { pluginId: plugin.id, file: entryFile, manifest } };
 }
 
@@ -170,7 +170,12 @@ async function readManifest(manifestFile: string): Promise<PluginManifest> {
   return result.manifest;
 }
 
-function createFilePlugin(manifest: PluginManifest, setup: MicaPlugin['setup'], pluginId: string): MicaPlugin {
+function createFilePlugin(
+  manifest: PluginManifest,
+  setup: MicaPlugin['setup'],
+  pluginId: string,
+  root: string,
+): MicaPlugin {
   return {
     id: pluginId,
     name: manifest.name,
@@ -179,6 +184,8 @@ function createFilePlugin(manifest: PluginManifest, setup: MicaPlugin['setup'], 
     dependencies: manifest.dependencies.length > 0 ? manifest.dependencies : undefined,
     required: manifest.required,
     manifest,
+    // 清单里的相对声明（`skills` 等）以插件目录为根：插件在哪，它带的东西就在哪。
+    root,
     setup,
   };
 }

@@ -21,9 +21,10 @@
 - 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。
 - 模型请求重写：`ctx.agent.onIterationRewrite()` 在两次模型请求之间改写要发送的历史（自动压缩用它）；`ctx.agent.mode` 回答宿主形态（`session` / `one-shot`），一次性运行里不该跑会额外花钱的后台策略。
 - 委派子代理：`ctx.subagents` 注册子代理类型、前台/后台跑一个、管后台任务。机制（建子代理、用量记账、路径租约、完成回注）由宿主提供，插件只决定有哪些类型与工具形状。
-- 内置 skill：`ctx.skills.register()` 把随包分发的 skill 注册进运行期 skill 表。注册进来的 skill 与
-  磁盘扫描出来的完全同权（system prompt 索引、`skill` 工具、会话能力开关）；磁盘上的同名 skill 优先，
-  被遮蔽的条目从返回值的 `skipped` 读出来，插件应当把它报成一条健康状态。
+- 内置 skill：**清单 `skills` 声明相对插件目录的路径**（目录里有 `SKILL.md` 就是一条，否则扫一层子目录），
+  manager 按 `MicaPlugin.root` 读进来注册，插件不必写代码。注册进来的 skill 与磁盘扫描出来的完全同权
+  （system prompt 索引、`skill` 工具、会话能力开关）；磁盘上的同名 skill 优先，被遮蔽的条目会报成一条
+  健康状态。正文来自内存 / 需要运行时生成时仍用 `ctx.skills.register()`，`skipped` 同理。
 - 运行条件：清单里的 `desktop.checks` 声明插件依赖的权限与外部工具，取值只能来自
   `DESKTOP_CHECKS` 目录（`PluginDesktop.ts` 是宿主与插件共用的单一事实来源）。状态由桌面端探测
   并渲染在配置页的插件详情里——插件跑在 app-server 子进程里，既探测不到也渲染不了。
@@ -42,6 +43,7 @@
   立刻画出菜单（不能为它冷启动一个 app-server），处理器留在插件所在进程里；`run()` 回
   `{ copyText?, message? }`，剪贴板由页面写。`PluginSessionMenu.ts` 里是类型、进程内登记表
   （`PluginSessionMenuRegistry`）与入参/结果归一化。只在清单声明了菜单项时才提供这个入口。
+  同一份清单同时喂两个入口（侧栏会话行与对话区右键），插件侧只有一套处理器。
 - 用户插件装载：`loadUserPlugins()` 扫描 `$MICA_HOME/plugins` 并注册进 manager。常驻宿主
   （TUI、`mica app-server`）都要做这一步，`mica exec` 不装用户插件。
 - 装配结论：`writePluginStatus()` 把「加载 / 跳过（缺宿主能力）/ 失败」写进

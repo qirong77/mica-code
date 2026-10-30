@@ -13,7 +13,9 @@ import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginPanelHandler, PluginPanelRegistry } from './PluginPanel.js';
 import type { PluginSessionMenuHandler, PluginSessionMenuRegistry } from './PluginSessionMenu.js';
 import type { PluginSkillDefinition } from './PluginDesktop.js';
-import { publishPluginSkills } from './PluginSkills.js';
+import type { RuntimeSkillRegistration } from '@packages/mica-skills/index.js';
+import type { Skill } from '@packages/mica-skills/types.js';
+import { loadManifestSkills, publishPluginSkills } from './PluginSkills.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
@@ -178,6 +180,33 @@ export class PluginManager {
       } = baseContext;
       const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
       const health = createPluginHealthStore(plugin.id, { configDir });
+      /**
+       * 注册一条 skill 并把归属记在这个插件名下。
+       *
+       * 清单声明的与插件在 setup 里自己注册的走同一条路：磁盘上同名的优先（用户装一份
+       * 就能覆盖内置），没注册上的报成一条用户可见状态，生效的顺手重写一份索引——不 setup
+       * 插件的宿主（桌面运行时的 `/` 补全、配置页）靠它列出内置 skill，不必为此冷启动一个
+       * 会话进程。
+       */
+      const registerSkill = (skill: Skill): RuntimeSkillRegistration => {
+        const registration = micaSkills.registerRuntime(plugin.id, [skill]);
+        if (registration.skipped.length > 0) {
+          logger.warn('plugin:skill-shadowed', { skipped: registration.skipped });
+          health.report({
+            level: 'warn',
+            message: `skill 未注册：${registration.skipped
+              .map((item) => `${item.name}（${item.reason}）`)
+              .join('；')}`,
+          });
+        }
+        const name = skill.name.trim();
+        if (!registration.skipped.some((item) => item.name === name)) {
+          publishedSkills.push(skill);
+          publishPluginSkills(plugin.id, publishedSkills, { configDir });
+        }
+        localDisposables.push({ dispose: () => registration.dispose() });
+        return registration;
+      };
       // 宿主的会话级读写面按 pluginId 绑定；没有它就退化成「只有全局设置」，
       // 插件通过 `requires: ['sessionSettings']` 声明这一点，缺能力时注册阶段跳过。
       const sessionSettingsHost = sessionSettingsFor?.(plugin.id);
@@ -200,27 +229,7 @@ export class PluginManager {
         // skill 是进程级注册表（磁盘扫描 + 插件注册合流），所以不需要宿主接线：
         // 注册归属这个插件，卸载时按 pluginId 一起摘掉。
         skills: {
-          register: (skill) => {
-            const registration = micaSkills.registerRuntime(plugin.id, [skill]);
-            if (registration.skipped.length > 0) {
-              logger.warn('plugin:skill-shadowed', { skipped: registration.skipped });
-              health.report({
-                level: 'warn',
-                message: `skill 未注册：${registration.skipped
-                  .map((item) => `${item.name}（${item.reason}）`)
-                  .join('；')}`,
-              });
-            }
-            // 生效的那几条顺带落一份索引：不 setup 插件的宿主（桌面运行时的 `/` 补全）
-            // 靠它列出内置 skill，不必为本会话冷启动一个 app-server。
-            const name = skill.name.trim();
-            if (!registration.skipped.some((item) => item.name === name)) {
-              publishedSkills.push(skill);
-              publishPluginSkills(plugin.id, publishedSkills, { configDir });
-            }
-            localDisposables.push({ dispose: () => registration.dispose() });
-            return { dispose: registration.dispose, skipped: registration.skipped };
-          },
+          register: (skill) => registerSkill(skill),
         },
         onDispose: (dispose) => localDisposables.push({ dispose }),
       };
@@ -318,6 +327,25 @@ export class PluginManager {
           level: 'warn',
           message: `配置不完整：${settingIssues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`,
         });
+      }
+
+      // 清单声明的 skill：以插件目录为根读进来，随插件一起装、一起停。放在能力检查之后，
+      // 因为被跳过的插件不该往进程级注册表里塞任何东西。
+      const skillDirs = plugin.manifest?.skills ?? [];
+      if (skillDirs.length > 0) {
+        if (!plugin.root) {
+          health.report({
+            level: 'warn',
+            message: '清单声明了 skills，但插件不是从目录加载的，读不到 skill 正文',
+          });
+        } else {
+          const { skills, problems } = loadManifestSkills(plugin.root, skillDirs);
+          for (const problem of problems) {
+            logger.warn('plugin:skill-dir', { problem });
+            health.report({ level: 'warn', message: `skill 目录：${problem}` });
+          }
+          for (const skill of skills) registerSkill(skill);
+        }
       }
 
       try {

@@ -129,6 +129,15 @@ export type PluginManifest = {
    * 不需要为了「有没有菜单项」冷启动一个 app-server。
    */
   desktopSessionMenu: PluginSessionMenuItem[];
+  /**
+   * 随插件分发的 skill（清单 `skills`），每条是相对插件目录的路径。
+   *
+   * 目录里直接有 `SKILL.md` 就是一条 skill；否则把它当容器，扫它下面一层的子目录。
+   * 宿主负责读成注册表要的形状，插件不用再写 `ctx.skills.register()`，也不用把正文抄到
+   * `$MICA_HOME`：**编辑插件目录里的文件就是编辑 skill**。磁盘上 `~/.mica/skills` 里的
+   * 同名 skill 仍然优先（用户覆盖内置那一份的规则不变）。
+   */
+  skills: string[];
 };
 
 export type PluginStatusField = {
@@ -259,6 +268,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const actions = readActions(input.actions);
   if (!actions.ok) return actions;
 
+  const skills = readSkillDirs(input.skills);
+  if (!skills.ok) return skills;
+
   return {
     ok: true,
     manifest: {
@@ -284,8 +296,35 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       actions: actions.value,
       desktopPanel: desktop.value.panel,
       desktopSessionMenu: desktop.value.sessionMenu,
+      skills: skills.value,
     },
   };
+}
+
+/**
+ * `skills`：随插件分发的 skill 目录。
+ *
+ * 只收相对路径：绝对路径能让一份插件指向机器上任意目录，`..` 则能爬出插件目录——两者都
+ * 让「这个插件带了什么」变得不可读，而 `plugin.json` 存在的意义正是这一点。
+ */
+function readSkillDirs(input: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(input)) return { ok: false, error: 'skills 必须是数组' };
+  const dirs: string[] = [];
+  for (const entry of input) {
+    if (typeof entry !== 'string' || !entry.trim()) {
+      return { ok: false, error: 'skills 里的每一项都必须是非空字符串' };
+    }
+    const value = entry.trim();
+    if (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)) {
+      return { ok: false, error: `skills 只能用相对插件目录的路径：${value}` };
+    }
+    if (value.split(/[\\/]/).includes('..')) {
+      return { ok: false, error: `skills 不能指向插件目录之外：${value}` };
+    }
+    if (!dirs.includes(value)) dirs.push(value);
+  }
+  return { ok: true, value: dirs };
 }
 
 /**
