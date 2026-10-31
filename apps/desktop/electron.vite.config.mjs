@@ -102,7 +102,7 @@ export default defineConfig({
       }
     },
     build: {
-      // 三个页面入口：主应用、独立文件窗口（顶栏文件夹开出来的，运行时按 /files 提供）
+      // 三个页面入口：主应用、独立文件窗口（顶栏编辑器按钮开出来的，运行时按 /files 提供）
       // 与终端控制窗口（由 Electron 主进程加载，运行时按 /terminal-control 提供）。
       rollupOptions: {
         input: {

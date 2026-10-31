@@ -13,7 +13,7 @@
 export const SESSION_PARAM = 'session'
 
 /**
- * 独立文件窗口的页面：顶栏的文件夹按钮把文件视图开成一个**只有文件树与编辑器**的窗口
+ * 独立文件窗口的页面：顶栏的编辑器按钮把文件视图开成一个**只有文件树与编辑器**的窗口
  * （见 `detachedFilesUrl`），主窗口因此留在对话里。运行时上它挂在 `/files`，dev 下页面
  * 由 Vite 直接提供、走 `/files.html`；两者是同一个入口（`files-window.jsx`）。
  */

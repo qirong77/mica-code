@@ -11,7 +11,7 @@ describe('isAppPageTarget', () => {
   const origins = ['http://127.0.0.1:8787']
 
   it('accepts the files page the folder button opens', () => {
-    // 顶栏的文件夹就是 `window.open('/files?cwd=…')`：它得由外壳开成应用窗口
+    // 顶栏的编辑器按钮就是 `window.open('/files?cwd=…')`：它得由外壳开成应用窗口
     expect(isAppPageTarget('http://127.0.0.1:8787/files?cwd=%2Fw', { origins })).toBe(true)
   })
 

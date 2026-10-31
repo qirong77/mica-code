@@ -11,8 +11,8 @@ import {
 import {
   IconArrowUp,
   IconBlocks,
+  IconBrandVscode,
   IconChartBar,
-  IconFile,
   IconFolder,
   IconFolderOpen,
   IconGitBranch,
@@ -746,7 +746,7 @@ export default function App() {
   const handleFindRequestHandled = useCallback(() => setFindRequest(null), [])
   // 配置页的插件详情里点「打开面板」：面板活在对话里，所以这里先关掉整页设置，再把
   // 请求交给当前会话的 ChatView 去开——与上面的查找请求同一条一次性通道。
-  // 主区视图：chat | files | stats。对话里的路径链接与顶栏的文件夹按钮都落到这一层
+  // 主区视图：chat | files | stats。对话里的路径链接与顶栏的编辑器按钮都落到这一层
   // （后者另开一个独立窗口，见 openFilesWindow）；终端是主区底部可收起的下拉面板。
   // 设置与插件不在这套视图里：它们是盖住整个窗口的一层（见下面的 configPage）。
   const [view, setView] = useState(() => {
@@ -2190,7 +2190,7 @@ export default function App() {
     }
     pendingFileOpenRef.current = { document }
   }, [])
-  // 顶栏的文件夹按钮：把这台运行时上的 `/files` 页面开成独立窗口 —— 那一页只画文件树与
+  // 顶栏的编辑器按钮：把这台运行时上的 `/files` 页面开成独立窗口 —— 那一页只画文件树与
   // 编辑器，没有左侧会话列表也没有「返回对话」，主窗口因此留在对话里，两者可以并排看。
   // 外壳把同源的 `/files` 开成应用窗口（见 main/index.js 的 openAppPageWindow），浏览器里
   // 就是一个新窗口；`FILES_WINDOW_NAME` 让它复用同一个窗口，重复点只是把它端到前面。
@@ -2708,12 +2708,12 @@ export default function App() {
               </button>
               <button
                 type="button"
-                title="在新窗口中打开文件"
-                aria-label="在新窗口中打开文件"
+                title="打开编辑器窗口"
+                aria-label="打开编辑器窗口"
                 className="grid size-6 place-items-center rounded-md text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={openFilesWindow}
               >
-                <IconFile size={14} />
+                <IconBrandVscode size={14} />
               </button>
             </div>
           </header>

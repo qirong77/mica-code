@@ -7,7 +7,7 @@ import { useGitWorkspace } from './useGitWorkspace'
 /**
  * 独立文件窗口（`/files`，dev 下 `files.html`）。
  *
- * 顶栏的文件夹按钮开的就是这一页：**只有文件树与编辑器**，没有左侧会话列表、没有「返回
+ * 顶栏的编辑器按钮开的就是这一页：**只有文件树与编辑器**，没有左侧会话列表、没有「返回
  * 对话」、也没有别的视图入口——主窗口留在对话里，两者并排看。目录从地址的 `?cwd=` 来，
  * 所以刷新、换台机器打开都还停在同一处；没带目录时就是文件视图自己的空态。
  *
@@ -21,7 +21,7 @@ export function FilesWindow() {
   const promptResolver = useRef(null)
 
   useEffect(() => {
-    document.title = cwd ? `${baseName(cwd)} — 文件` : '文件'
+    document.title = cwd ? `${baseName(cwd)} — 编辑器` : '编辑器'
   }, [cwd])
 
   const askText = useCallback(
