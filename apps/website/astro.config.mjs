@@ -14,4 +14,5 @@ export default defineConfig({
   site: 'https://qirong77.github.io/',
   base,
   output: 'static',
+  devToolbar: { enabled: false },
 });

@@ -12,6 +12,11 @@ const MAX_LIST_ITEMS = 12;
 const MAX_ITEM_CHARS = 400;
 const MAX_SUMMARY_CHARS = 2_000;
 /**
+ * 失败原因单独成段，不跟着 raw 一起被截断：raw 只保留开头，而错误总是在结尾，
+ * 长输出的失败任务会因此把「为什么失败」整段丢掉。
+ */
+const MAX_ERROR_CHARS = 1_000;
+/**
  * 原始结果的展示上限。
  *
  * 结构化那几段已经把要点摘出来了，这里再贴一份全文只会把所有内容在父代理上下文里
@@ -25,14 +30,18 @@ export function formatStructuredSubagentResult(options: {
   description: string;
   result: string;
   status?: StructuredSubagentResult['status'];
+  /** 宿主报告的失败原因；有值时单独成段，避免被 raw 的长度上限吃掉。 */
+  error?: string;
 }): string {
   const structured = parseStructuredSubagentResult(options.result, options.status ?? 'completed');
   // 宿主知道请求是否被中止或失败；子代理自己写的 JSON 不能把这类结果升级成成功。
   const status = options.status && options.status !== 'completed' ? options.status : structured.status;
+  const error = options.error?.trim();
   return [
     `Subagent: ${options.type}`,
     `Task: ${options.description}`,
     `Status: ${status}`,
+    ...(error ? ['', '## Error', clampText(error, MAX_ERROR_CHARS)] : []),
     '',
     '## Summary',
     structured.summary || '(empty summary)',

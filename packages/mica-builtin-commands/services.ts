@@ -121,7 +121,7 @@ export type RunningAgentRecord = {
   updatedAt: string;
 };
 
-export type SubagentTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
+export type SubagentTaskStatus = 'running' | 'completed' | 'partial' | 'failed' | 'killed';
 
 export type SubagentTaskOwner = {
   sessionId: string;

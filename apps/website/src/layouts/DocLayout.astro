@@ -1,6 +1,8 @@
 ---
 import BaseLayout from './BaseLayout.astro';
+import Icon from '../components/Icon.astro';
 import { docGroups, docPages } from '../content/docs';
+import '../styles/docs.css';
 interface Props {
   title: string;
   description?: string;
@@ -9,26 +11,27 @@ interface Props {
 const { title, description, active } = Astro.props;
 const base = import.meta.env.BASE_URL;
 const index = docPages.findIndex((page) => page.key === active);
-const previous = docPages[index - 1];
+const previous = index > 0 ? docPages[index - 1] : undefined;
 const next = docPages[index + 1];
-const group = docGroups.find((group) => group.items.some((page) => page.key === active));
+const group = docGroups.find((section) => section.items.some((page) => page.key === active));
 ---
 
 <BaseLayout title={title} description={description}>
   <div class="docs-shell" data-doc-base={base}>
     <aside class="doc-side" aria-label="文档导航">
-      <div class="doc-side-head">
-        <a href={`${base}docs/`}>
-          使用文档 <span>GUIDES</span>
-        </a>
-      </div>
-      <button class="search-trigger" type="button">
-        <span>搜索文档</span>
+      <a class="doc-side-head" href={`${base}docs/`} aria-current={active === 'overview' ? 'page' : undefined}>
+        <Icon name="book" size={17} />
+        使用文档<span>GUIDES</span>
+      </a>
+      <button class="search-trigger" type="button" aria-haspopup="dialog">
+        <Icon name="search" size={15} />
+        <span>搜索文档…</span>
         <kbd>⌘ K</kbd>
       </button>
       <details class="doc-navigation" open>
         <summary>
-          文档目录 <span aria-hidden="true">＋</span>
+          浏览文档
+          <Icon name="chevron" size={14} />
         </summary>
         <nav aria-label="文档章节">
           {docGroups.map((section) => (
@@ -50,25 +53,33 @@ const group = docGroups.find((group) => group.items.some((page) => page.key === 
             </div>
           ))}
           <a class="doc-map-link" href={`${base}architecture/`}>
-            交互架构图 <span>↗</span>
+            <Icon name="branch" size={14} />
+            交互架构图
+            <Icon name="external" size={11} />
           </a>
         </nav>
       </details>
       <a class="doc-help" href="https://github.com/qirong77/mica-code/issues">
-        遇到问题？<span>在 GitHub 提交反馈 ↗</span>
+        <span>遇到问题或有改进建议？</span>在 GitHub 反馈
+        <Icon name="external" size={11} />
       </a>
     </aside>
     <div class="doc-content">
-      <div class="doc-breadcrumb">
-        <a href={base}>Mica Code</a>
-        <span>/</span>
-        <span>{group?.label || '文档'}</span>
-        <span>/</span>
-        <span>{title}</span>
-      </div>
+      <nav class="doc-breadcrumb" aria-label="当前位置">
+        <a href={`${base}docs/`}>文档</a>
+        <Icon name="chevron" size={10} />
+        <span>{group?.label || '概览'}</span>
+        {group && (
+          <>
+            <Icon name="chevron" size={10} />
+            <span>{title}</span>
+          </>
+        )}
+      </nav>
       <details class="doc-mobile-toc">
         <summary>
-          本页内容 <span aria-hidden="true">＋</span>
+          本页内容
+          <Icon name="chevron" size={13} />
         </summary>
         <nav aria-label="本页章节"></nav>
       </details>
@@ -76,9 +87,12 @@ const group = docGroups.find((group) => group.items.some((page) => page.key === 
         <slot />
       </article>
       <div class="doc-edit">
-        <span>帮助我们让文档更好</span>
-        <a href={`https://github.com/qirong77/mica-code/edit/main/apps/website/src/pages/docs/${active}.astro`}>
-          编辑此页 ↗
+        <span>文档随项目持续更新</span>
+        <a
+          href={`https://github.com/qirong77/mica-code/edit/main/apps/website/src/pages/docs/${active === 'overview' ? 'index' : active}.astro`}
+        >
+          编辑此页
+          <Icon name="external" size={12} />
         </a>
       </div>
       <nav class="doc-pagination" aria-label="相邻文档">
@@ -108,214 +122,21 @@ const group = docGroups.find((group) => group.items.some((page) => page.key === 
   </div>
   <dialog class="search-dialog" aria-label="搜索文档">
     <div class="search-heading">
-      <label for="docs-query">搜索文档</label>
+      <label for="docs-query">
+        <Icon name="search" size={17} />
+        搜索文档
+      </label>
       <button type="button" class="search-close" aria-label="关闭搜索">
         Esc
       </button>
     </div>
-    <input id="docs-query" type="search" placeholder="搜索配置、MCP、快捷键…" autocomplete="off" />
+    <input id="docs-query" type="search" placeholder="搜索模型、插件、远程访问…" autocomplete="off" />
     <div id="search-results" class="search-results" aria-live="polite"></div>
     <div class="search-footer" role="status">
       搜索标题与正文 · ↑ ↓ 选择 · Enter 打开
     </div>
   </dialog>
   <script>
-    import { docPages } from '../content/docs';
-    const base = document.querySelector<HTMLElement>('[data-doc-base]')!.dataset.docBase!;
-    const headings = [...document.querySelectorAll<HTMLElement>('.doc-main h2, .doc-main h3')];
-    const ids = new Set<string>();
-    headings.forEach((heading, index) => {
-      const original =
-        heading.id ||
-        heading
-          .textContent!.trim()
-          .toLowerCase()
-          .replace(/[^\p{L}\p{N}]+/gu, '-')
-          .replace(/^-|-$/g, '') ||
-        `section-${index}`;
-      let id = original;
-      let suffix = 2;
-      while (ids.has(id)) id = `${original}-${suffix++}`;
-      ids.add(id);
-      heading.id = id;
-      const link = document.createElement('a');
-      link.href = `#${encodeURIComponent(id)}`;
-      link.textContent = heading.textContent;
-      link.dataset.heading = id;
-      if (heading.tagName === 'H3') link.className = 'toc-child';
-      document.getElementById('page-toc')!.append(link);
-      document.querySelector('.doc-mobile-toc nav')!.append(link.cloneNode(true));
-      const permalink = document.createElement('a');
-      permalink.className = 'heading-permalink';
-      permalink.href = link.href;
-      permalink.textContent = '#';
-      permalink.setAttribute('aria-label', `${heading.textContent}：章节链接`);
-      heading.append(permalink);
-    });
-    document.querySelector('.doc-mobile-toc nav')!.addEventListener('click', (event) => {
-      if ((event.target as Element).closest('a')) {
-        document.querySelector<HTMLDetailsElement>('.doc-mobile-toc')!.open = false;
-      }
-    });
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.find((entry) => entry.isIntersecting);
-        if (!visible) return;
-        document.querySelectorAll('#page-toc a').forEach((link) => {
-          if ((link as HTMLElement).dataset.heading === visible.target.id)
-            link.setAttribute('aria-current', 'location');
-          else link.removeAttribute('aria-current');
-        });
-      },
-      { rootMargin: '-80px 0px -65% 0px' },
-    );
-    headings.forEach((heading) => observer.observe(heading));
-    if (location.hash) {
-      try {
-        document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
-      } catch {
-        /* Invalid fragment. */
-      }
-    }
-    const navigation = document.querySelector<HTMLDetailsElement>('.doc-navigation')!;
-    const desktop = matchMedia('(min-width: 1000px)');
-    const setNavigation = () => {
-      navigation.open = desktop.matches;
-    };
-    desktop.addEventListener('change', setNavigation);
-    setNavigation();
-    const dialog = document.querySelector<HTMLDialogElement>('.search-dialog')!;
-    const query = document.querySelector<HTMLInputElement>('#docs-query')!;
-    const results = document.querySelector<HTMLElement>('#search-results')!;
-    const searchStatus = document.querySelector<HTMLElement>('.search-footer')!;
-    type SearchEntry = { title: string; description: string; text: string; url: string };
-    const articleText = document.querySelector('.doc-main')?.textContent?.replace(/\s+/g, ' ').trim() || '';
-    let searchEntries: SearchEntry[] = docPages.map((page) => ({
-      ...page,
-      text: location.pathname.replace(/\/$/, '').endsWith(`/docs/${page.key}`) ? articleText : '',
-      url: `${base}docs/${page.key}/`,
-    }));
-    let loading: Promise<void> | undefined;
-    let indexing = false;
-    let failedPages = 0;
-    let selectedIndex = -1;
-    const updateSelection = (index: number) => {
-      const links = [...results.querySelectorAll<HTMLAnchorElement>('a')];
-      selectedIndex = index;
-      links.forEach((link, position) => link.classList.toggle('search-selected', position === index));
-      links[index]?.scrollIntoView({ block: 'nearest' });
-    };
-    const render = () => {
-      const terms = query.value.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-      const matches = searchEntries.filter((entry) =>
-        terms.every((term) => `${entry.title} ${entry.description} ${entry.text}`.toLocaleLowerCase().includes(term)),
-      );
-      const focused = results.contains(document.activeElement)
-        ? (document.activeElement as HTMLAnchorElement).href
-        : undefined;
-      results.replaceChildren();
-      selectedIndex = -1;
-      for (const entry of matches) {
-        const link = document.createElement('a');
-        link.href = entry.url;
-        const title = document.createElement('strong');
-        title.textContent = entry.title;
-        const excerpt = document.createElement('span');
-        const matchAt = terms.length ? entry.text.toLocaleLowerCase().indexOf(terms[0]) : -1;
-        excerpt.textContent =
-          matchAt >= 0 ? `…${entry.text.slice(Math.max(0, matchAt - 24), matchAt + 96)}…` : entry.description;
-        link.append(title, excerpt);
-        results.append(link);
-      }
-      if (focused) {
-        const links = [...results.querySelectorAll<HTMLAnchorElement>('a')];
-        const index = links.findIndex((link) => link.href === focused);
-        if (index >= 0) {
-          updateSelection(index);
-          links[index].focus({ preventScroll: true });
-        }
-      }
-      if (!matches.length) {
-        results.textContent = indexing
-          ? '正在搜索文档正文…'
-          : failedPages
-            ? '未在已加载内容中找到结果，请检查网络后重试。'
-            : '没有找到相关内容，试试其他关键词。';
-      }
-      results.setAttribute('aria-busy', String(indexing));
-      searchStatus.textContent = indexing
-        ? '正在加载正文索引，标题搜索已可用…'
-        : failedPages
-          ? '部分正文未能加载 · 再次打开搜索可重试'
-          : `${matches.length} 篇相关文档 · ↑ ↓ 选择 · Enter 打开`;
-    };
-    const loadSearch = () => {
-      if (loading) return loading;
-      indexing = true;
-      failedPages = 0;
-      render();
-      loading = Promise.all(
-        searchEntries.map(async (entry, index) => {
-          if (entry.text) return;
-          try {
-            const response = await fetch(entry.url, { signal: AbortSignal.timeout(10000) });
-            if (!response.ok) throw new Error('Page unavailable');
-            const page = new DOMParser().parseFromString(await response.text(), 'text/html');
-            const text = page.querySelector('.doc-main')?.textContent?.replace(/\s+/g, ' ').trim();
-            if (!text) throw new Error('Page content unavailable');
-            searchEntries[index] = { ...entry, text };
-            render();
-          } catch {
-            failedPages++;
-          }
-        }),
-      ).then(() => {
-        indexing = false;
-        if (failedPages) loading = undefined;
-        render();
-      });
-      return loading;
-    };
-    const open = () => {
-      dialog.showModal();
-      query.focus();
-      render();
-      void loadSearch();
-    };
-    document.querySelector('.search-trigger')!.addEventListener('click', open);
-    document.querySelector('.search-close')!.addEventListener('click', () => dialog.close());
-    dialog.addEventListener('click', (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    query.addEventListener('input', render);
-    dialog.addEventListener('keydown', (event) => {
-      const links = [...results.querySelectorAll<HTMLAnchorElement>('a')];
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        if (!links.length) return;
-        event.preventDefault();
-        const current = links.indexOf(document.activeElement as HTMLAnchorElement);
-        const start = current >= 0 ? current : selectedIndex;
-        updateSelection(
-          event.key === 'ArrowDown' ? (start + 1) % links.length : (start <= 0 ? links.length : start) - 1,
-        );
-        links[selectedIndex].focus();
-      }
-      if (event.key === 'Enter' && event.target === query && links.length) {
-        event.preventDefault();
-        links[Math.max(0, selectedIndex)].click();
-      }
-    });
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && dialog.open) {
-        event.preventDefault();
-        dialog.close();
-        return;
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        if (dialog.open) dialog.close();
-        else open();
-      }
-    });
+    import '../scripts/docs';
   </script>
 </BaseLayout>

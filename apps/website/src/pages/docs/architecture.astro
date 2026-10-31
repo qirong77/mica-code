@@ -1,5 +1,6 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
 const base = import.meta.env.BASE_URL;
 const applications = [
   ['apps/cli', '交互式终端、exec 与 app-server 入口，负责应用装配和会话任务编排。'],
@@ -15,6 +16,7 @@ const packages = [
   ['mica-context', '本地清理与模型摘要压缩。'],
   ['mica-commands / mica-builtin-commands', '命令机制、产品命令与官方运行期扩展。'],
   ['mica-plugin / mica-skills', '插件生命周期与 Skills 的发现、解析和缓存。'],
+  ['mica-official-plugins', '随产品分发的官方插件清单与入口登记。'],
   ['mica-ui / mica-pty', 'Ink 终端界面与 Node helper 承载的 PTY 能力。'],
   ['mica-common / mica-web-shared / mica-file-mentions', '跨入口复用的纯逻辑、Web 状态约定与文件引用。'],
   ['mica-config-ui', '终端配置页与桌面设置共用的配置界面。'],
@@ -64,7 +66,7 @@ const packages = [
   </p>
   <p>
     内置工具和 MCP 远端工具进入同一个注册入口。MCP 模块管理连接、工具发现与关闭；Skills
-    提供按需读取的任务知识。两者对接方式见 <a href={`${base}docs/extensions`}>扩展指南</a>。
+    提供按需读取的任务知识。两者对接方式见 <a href={`${base}docs/extensions/`}>扩展指南</a>。
   </p>
 
   <h2>上下文、缓存与恢复</h2>
@@ -112,10 +114,14 @@ const packages = [
   </div>
   <p>
     浏览器与 Electron 页面连接同一个运行时。独立 Web 部署仍有对话、文件、Git 和工作区终端，但没有 Electron
-    提供的两项控制服务。详细启动与访问边界见 <a href={`${base}docs/desktop`}>桌面与浏览器</a>。
+    提供的两项控制服务。详细启动与访问边界见 <a href={`${base}docs/desktop/`}>桌面与浏览器</a>。
   </p>
 
   <h2>源码导航</h2>
+  <p>
+    官方插件源码位于仓库根目录的 <code>plugins/</code>，通过共享包登记并随产品分发；用户插件位于{' '}
+    <code>$MICA_HOME/plugins/</code>。插件的使用与管理见<a href={`${base}docs/plugins/`}>插件指南</a>。
+  </p>
   <h3>应用入口</h3>
   <div class="table-wrap">
     <table>
@@ -165,18 +171,17 @@ const packages = [
 
   <h2>构建与验证</h2>
   <p>在仓库根目录执行：</p>
-  <pre><code>bun install
-bun run dev
-bun run typecheck
-bun run test -- path/to/relevant.test.ts
-bun run build</code></pre>
+  <CodeBlock
+    code={'bun install\nbun run dev\nbun run typecheck\nbun run test -- path/to/relevant.test.ts\nbun run build'}
+    lang="bash"
+  />
   <p>
     根测试套件使用 Vitest，需通过 <code>bun run test</code> 调用。CLI
     构建会编译程序、生成配置页资源，并安装本机入口；PTY 工具还会通过 Node helper 加载随包的原生依赖。
   </p>
   <p>
-    桌面应用有独立的 npm 构建与验证命令，见 <a href={`${base}docs/desktop`}>桌面源码启动指南</a>。协议集成见{' '}
-    <a href={`${base}docs/headless`}>自动化与协议</a>；深入实现时可阅读{' '}
+    桌面应用有独立的 npm 构建与验证命令，见 <a href={`${base}docs/desktop/`}>桌面源码启动指南</a>。协议集成见{' '}
+    <a href={`${base}docs/headless/`}>自动化与协议</a>；深入实现时可阅读{' '}
     <a href="https://github.com/qirong77/mica-code/blob/main/docs/headless-design.md">Headless 执行层设计</a> 与{' '}
     <a href="https://github.com/qirong77/mica-code/blob/main/packages/README.md">共享包索引</a>。
   </p>

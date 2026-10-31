@@ -30,6 +30,7 @@ const SHARED_BULLETS = [
   '- 后台子代理运行期间先继续独立工作；需要结果才能继续时再用 `agent(operation=await/join)`。等待可与同一条消息里的其他工具重叠执行、结果一起返回；仍有工作时把等待与工作放在同一条消息，别单独空等。shell 后台任务才用 `wait_for(kind=task)`。',
   '- 同一 owner 前后台合计最多 4 个并发，不要为了并行把任务切得过碎。',
   '- 收到结果后自己核对再交付：关键结论与实际的文件内容、测试输出一致，不要把 subagent 的汇报直接当成最终答案。',
+  '- 子代理失败时先读它的错误与任务记录再决定下一步：只读任务可以原样重跑，可写任务重开前先确认它已经改到哪一步，避免重复写入或覆盖。',
 ];
 
 export function buildDelegationGuidance(mode: DelegationMode = 'proactive'): string {

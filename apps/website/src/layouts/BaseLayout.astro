@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import Icon from '../components/Icon.astro';
 import markUrl from '../../../desktop/resources/icon.svg?url&no-inline';
 
 interface Props {
@@ -8,22 +9,23 @@ interface Props {
 }
 const {
   title,
-  description = 'Mica Code 是缓存优先的开源 AI coding agent。在终端、桌面和自动化流程中完成代码探索、修改与验证。',
+  description = '开源、缓存优先的 AI 编程工作区。连接自己的模型，在终端、桌面和浏览器中理解项目、修改代码、运行验证。',
 } = Astro.props;
-const pageTitle = title === 'Mica Code' ? 'Mica Code — 让思路成为可运行的代码' : `${title} · Mica Code`;
 const base = import.meta.env.BASE_URL;
+const isHome = Astro.url.pathname.replace(/\/$/, '') === base.replace(/\/$/, '');
+const isDocs = Astro.url.pathname.includes('/docs');
+const pageTitle = isHome ? 'Mica Code — 从想法到可运行的代码' : `${title} · Mica Code`;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const image = new URL(`${base}social-card.png`, Astro.site);
-const isDocs = Astro.url.pathname.includes('/docs');
 ---
 
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
-    <meta name="theme-color" content="#f7f9fa" />
+    <meta name="theme-color" content="#0b1017" />
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:type" content="website" />
@@ -36,72 +38,129 @@ const isDocs = Astro.url.pathname.includes('/docs');
     <link rel="canonical" href={canonical} />
     <link rel="icon" type="image/svg+xml" href={markUrl} />
     <title>{pageTitle}</title>
+    <script is:inline>
+      try {
+        const theme = localStorage.getItem('mica-site-theme');
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
   </head>
-  <body>
+  <body class:list={{ 'home-page': isHome, 'docs-page': isDocs }}>
     <a class="skip-link" href="#main">
       跳到正文
     </a>
-    <header class="nav">
+    <header class="site-nav">
       <div class="nav-inner">
-        <a class="nav-brand" href={base} aria-label="Mica Code 首页">
-          <img src={markUrl} width="28" height="28" alt="" />
-          Mica<span>Code</span>
+        <a class="brand" href={base} aria-label="Mica Code 首页">
+          <img src={markUrl} width="30" height="30" alt="" />
+          <span>
+            Mica<span class="brand-code">Code</span>
+          </span>
         </a>
         <nav class="nav-links" aria-label="主导航">
-          <a class:list={{ 'nav-active': !isDocs }} href={`${base}#features`}>
+          <a class:list={{ active: isHome }} href={`${base}#features`}>
             产品
           </a>
-          <a href={`${base}#benchmark`} class="nav-benchmark">
+          <a class="nav-secondary" href={`${base}#benchmark`}>
             评测
           </a>
-          <a class:list={{ 'nav-active': isDocs }} href={`${base}docs/`}>
+          <a class:list={{ active: isDocs }} href={`${base}docs/`}>
             文档
           </a>
-          <a class="nav-github" href="https://github.com/qirong77/mica-code" target="_blank" rel="noopener noreferrer">
-            GitHub <span aria-hidden="true">↗</span>
+          <a class="nav-github" href="https://github.com/qirong77/mica-code">
+            <Icon name="github" size={17} />
+            <span>GitHub</span>
+            <Icon name="external" size={12} />
           </a>
         </nav>
+        <button class="theme-toggle icon-button" type="button" aria-label="切换到浅色主题" title="切换到浅色主题">
+          <Icon name="sun" size={18} class="theme-sun" />
+          <Icon name="moon" size={18} class="theme-moon" />
+        </button>
       </div>
     </header>
     <main id="main">
       <slot />
     </main>
-    <footer class="footer">
-      <div class="footer-inner">
-        <div>
-          <a class="nav-brand" href={base}>
-            <img src={markUrl} width="24" height="24" alt="" />
-            Mica<span>Code</span>
+    <footer class="site-footer">
+      <div class="container footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href={base}>
+            <img src={markUrl} width="28" height="28" alt="" />
+            <span>
+              Mica<span class="brand-code">Code</span>
+            </span>
           </a>
-          <p>Minimal, Intelligent, Cache-first Agent.</p>
+          <p>为专注构建的人而做。</p>
+          <span class="mono-label">MINIMAL. INTELLIGENT. CACHE-FIRST.</span>
         </div>
-        <div class="footer-links">
-          <a href={`${base}docs/getting-started/`}>使用文档</a>
+        <div class="footer-group">
+          <strong>开始构建</strong>
+          <a href={`${base}docs/getting-started/`}>快速开始</a>
+          <a href={`${base}docs/desktop/`}>桌面与浏览器</a>
+          <a href={`${base}docs/configuration/`}>连接模型</a>
+        </div>
+        <div class="footer-group">
+          <strong>深入了解</strong>
+          <a href={`${base}docs/plugins/`}>插件与扩展</a>
+          <a href={`${base}docs/headless/`}>自动化集成</a>
           <a href={`${base}architecture/`}>交互架构图</a>
-          <a href="https://github.com/qirong77/mica-code/issues">反馈问题 ↗</a>
+        </div>
+        <div class="footer-group">
+          <strong>一起改进</strong>
           <a href="https://github.com/qirong77/mica-code">源代码 ↗</a>
+          <a href="https://github.com/qirong77/mica-code/issues">问题反馈 ↗</a>
+          <a href="https://github.com/qirong77/mica-code/releases">版本发布 ↗</a>
         </div>
       </div>
-      <div class="footer-bottom">
-        <span>为专注构建的人而做。</span>
+      <div class="container footer-bottom">
         <span>© {new Date().getFullYear()} Mica Code</span>
+        <span>Built in the open. Made to build.</span>
       </div>
     </footer>
     <div id="copy-status" class="sr-only" role="status" aria-live="polite"></div>
     <script>
-      document.querySelectorAll('table, .benchmark-chart').forEach((element) => {
-        element.setAttribute('tabindex', '0');
+      const root = document.documentElement;
+      const themeButton = document.querySelector<HTMLButtonElement>('.theme-toggle')!;
+      const updateThemeLabel = () => {
+        const label = root.dataset.theme === 'dark' ? '切换到浅色主题' : '切换到深色主题';
+        themeButton.setAttribute('aria-label', label);
+        themeButton.title = label;
+        document
+          .querySelector('meta[name="theme-color"]')
+          ?.setAttribute('content', root.dataset.theme === 'dark' ? '#0b1017' : '#fafbfc');
+      };
+      updateThemeLabel();
+      themeButton.addEventListener('click', () => {
+        root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+        try {
+          localStorage.setItem('mica-site-theme', root.dataset.theme);
+        } catch {}
+        updateThemeLabel();
       });
-      document.querySelectorAll('pre').forEach((pre) => {
-        pre.setAttribute('tabindex', '0');
+      document.querySelectorAll<HTMLElement>('pre').forEach((pre) => {
+        pre.tabIndex = 0;
         pre.setAttribute('role', 'region');
-        pre.setAttribute('aria-label', '代码示例');
         const code = pre.querySelector('code');
         if (!code || pre.hasAttribute('data-no-copy')) return;
-        const wrapper = document.createElement('div');
-        wrapper.className = 'code-block';
-        pre.before(wrapper);
-        wrapper.append(pre);
+        let wrapper = pre.closest<HTMLElement>('.code-block');
+        if (!wrapper) {
+          wrapper = document.createElement('div');
+          wrapper.className = 'code-block';
+          pre.before(wrapper);
+          wrapper.append(pre);
+        }
+        const label = wrapper.dataset.label || (/^\s*[{[]/.test(code.textContent || '') ? 'JSON' : 'TERMINAL');
+        pre.setAttribute('aria-label', `${label} 代码示例`);
+        let header = wrapper.querySelector<HTMLElement>('.code-header');
+        if (!header) {
+          header = document.createElement('div');
+          header.className = 'code-header';
+          const title = document.createElement('span');
+          title.textContent = label;
+          header.append(title);
+          wrapper.prepend(header);
+        }
         const button = document.createElement('button');
         button.className = 'copy-button';
         button.type = 'button';
@@ -110,7 +169,7 @@ const isDocs = Astro.url.pathname.includes('/docs');
         button.addEventListener('click', async () => {
           try {
             await navigator.clipboard.writeText(code.textContent || '');
-            button.textContent = '已复制';
+            button.textContent = '已复制 ✓';
             document.getElementById('copy-status')!.textContent = '代码已复制';
           } catch {
             button.textContent = '请手动复制';
@@ -119,7 +178,14 @@ const isDocs = Astro.url.pathname.includes('/docs');
             button.textContent = '复制';
           }, 2200);
         });
-        wrapper.append(button);
+        header.append(button);
+      });
+      document.querySelectorAll<HTMLElement>('.table-wrap, .benchmark-chart').forEach((element) => {
+        if (element.scrollWidth > element.clientWidth) {
+          element.tabIndex = 0;
+          element.setAttribute('role', 'region');
+          element.setAttribute('aria-label', '可横向滚动的表格或图表');
+        }
       });
     </script>
   </body>

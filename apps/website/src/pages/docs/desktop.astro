@@ -1,41 +1,39 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
 const base = import.meta.env.BASE_URL;
-const localWeb = `npm run start:web -- --host 127.0.0.1 --port 8787 --no-share`;
-const devDesktop = `# 在仓库根目录
+const desktop = `# 在 mica-code 仓库根目录开始
 bun install
 bun run build
 cd apps/desktop
 npm install
 npm run dev`;
-const buildWeb = `# 在仓库根目录
+const web = `# 在 mica-code 仓库根目录开始
 bun install
 cd apps/desktop
 npm install
 npm run build
-npm run start:web -- --host 127.0.0.1 --port 8787`;
+npm run start:web -- --host 127.0.0.1 --port 8787 --no-share`;
 ---
 
 <DocLayout
   title="桌面与浏览器"
   active="desktop"
-  description="构建和启动 Mica 桌面应用或 Web 工作区，理解会话、文件、Git、终端与远程访问的使用边界。"
+  description="从源码启动 Mica 桌面或 Web 工作区，使用对话、文件编辑、Git diff 和工作区终端。"
 >
   <h1>桌面与浏览器</h1>
   <p class="lead">
-    把对话、代码文件、Git
-    差异和终端放在同一工作区。桌面外壳与浏览器使用同一套页面和运行时，移动设备也可以连接到运行这套服务的主机。
+    把对话、代码、Git 与终端放在同一个工作区。Electron 桌面与浏览器共用同一套页面，工作在运行时所在的主机上执行。
   </p>
-
   <figure>
     <img
       src={`${base}screenshots/chat.png`}
-      width="1800"
-      height="1113"
-      alt="桌面工作区的项目会话与代码修改记录，演示环境截图"
+      width="1440"
+      height="900"
+      alt="Mica 当前工作区，在隔离的示例项目中完成任务队列修改"
       loading="lazy"
     />
-    <figcaption>演示环境截图 · 会话与代码工作区</figcaption>
+    <figcaption>当前界面 · 隔离示例项目与脚本化模型响应，图中用量为演示值。</figcaption>
   </figure>
 
   <h2>选择运行方式</h2>
@@ -43,163 +41,139 @@ npm run start:web -- --host 127.0.0.1 --port 8787`;
     <table>
       <thead>
         <tr>
-          <th>方式</th>
-          <th>适用场景</th>
-          <th>能力</th>
+          <th>入口</th>
+          <th>适合什么场景</th>
+          <th>提供的能力</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>Electron 桌面应用</td>
+          <td>Electron 桌面</td>
           <td>日常本机开发</td>
-          <td>完整工作区、桌面窗口，以及受控浏览器和终端控制服务。</td>
+          <td>完整工作区，以及主进程提供的受控浏览器、受控终端窗口。</td>
         </tr>
         <tr>
-          <td>独立 Web 运行时</td>
-          <td>浏览器访问、开发机常驻工作区</td>
-          <td>对话、文件、Git、工作区终端；没有 Electron 主进程提供的受控浏览器与终端控制服务。</td>
+          <td>独立 Web</td>
+          <td>在浏览器中访问开发机</td>
+          <td>对话、文件、Git 和工作区终端。</td>
         </tr>
         <tr>
           <td>浏览器连接桌面运行时</td>
-          <td>从其他浏览器或设备继续操作</td>
-          <td>操作同一主机上的会话与工作区；桌面运行时已启用的专属服务也由该主机提供。</td>
+          <td>换个窗口或设备继续</td>
+          <td>共用主机上的会话与工作区，以及该运行时已启用的服务。</td>
         </tr>
       </tbody>
     </table>
   </div>
-  <p>无论从哪个页面访问，模型请求、文件操作和 shell 命令都在运行时所在的主机执行。</p>
-
-  <h2>从源码启动桌面应用</h2>
   <p>
-    准备 Git、Bun、Node.js 22+ 与 npm，并先获取 <a href="https://github.com/qirong77/mica-code">项目源码</a>
-    。以下命令适用于 macOS/Linux，在仓库根目录开始执行：
-  </p>
-  <pre><code>{devDesktop}</code></pre>
-  <p>
-    <code>bun run build</code> 会构建并安装当前 CLI。桌面运行时调用该 CLI，因此首次开发启动前需要完成这一步；以后修改
-    CLI 源码也应重新构建。<code>npm run dev</code> 构建 Web 运行时并启动 Electron 与 Vite。
-  </p>
-  <p>
-    模型连接在桌面设置中配置，与终端共用 <code>MICA_HOME</code> 下的用户配置和会话。配置字段见{' '}
-    <a href={`${base}docs/configuration`}>模型与配置</a>。
+    当前发布流程提供 CLI 预构建包。桌面与独立 Web 工作区按下面的源码步骤启动；不要把 <code>mica app-server</code>{' '}
+    当作浏览器 HTTP 服务，它是客户端集成用的 stdio 入口。
   </p>
 
-  <h3>构建可运行产物与安装包</h3>
+  <h2 id="启动桌面应用">启动桌面应用</h2>
   <p>
-    在 <code>apps/desktop</code> 中执行：
+    先<a href="https://github.com/qirong77/mica-code">获取源码</a>，准备 Git、Bun、Node.js 22+ 与 npm。以下步骤以 macOS
+    / Linux 为例：
   </p>
-  <pre><code>npm run build
-npm run start</code></pre>
+  <CodeBlock code={desktop} />
   <p>
-    <code>npm run build</code> 同时构建 CLI、Electron 页面与 Web
-    服务。需要安装包时选择当前平台对应的命令；这些命令也会先运行构建：
+    <code>bun run build</code> 会构建并安装 CLI。桌面默认调用已安装的 <code>mica</code>
+    ，所以首次开发启动前需要先完成这一步。<code>npm run dev</code> 随后构建 Web 服务并启动 Electron 与 Vite。
   </p>
-  <pre><code>npm run build:mac
-npm run build:linux
-npm run build:win</code></pre>
   <p>
-    本机验证打包结果可以用 <code>npm run build:unpack</code>{' '}
-    生成未压缩目录。原生依赖与安装包受平台工具链影响，上述命令不代表已验证跨平台交叉打包。Windows 的 CLI 自动安装仍使用
-    POSIX launcher，桌面源码运行链路需要另行验证，不能直接照搬 macOS/Linux 的安装步骤。
+    打开 <strong>Settings</strong> 配置模型，然后选择项目目录。终端与桌面共享 <code>MICA_HOME</code>{' '}
+    下的配置、会话和个人扩展；模型字段见<a href={`${base}docs/configuration/`}>模型与配置</a>。
   </p>
 
-  <h2>启动浏览器工作区</h2>
-  <p>首次构建可独立使用的 Web 运行时：</p>
-  <pre><code>{buildWeb}</code></pre>
+  <h2 id="启动浏览器工作区">启动浏览器工作区</h2>
+  <p>首次运行先完成构建。下面的命令只在本机回环地址提供服务：</p>
+  <CodeBlock code={web} />
   <p>
-    在本机打开 <code>http://127.0.0.1:8787</code>。已有构建时只需在 <code>apps/desktop</code> 中重新执行{' '}
-    <code>npm run start:web</code> 并传入需要的参数。也可以使用{' '}
-    <code>npm run serve:web -- --host 127.0.0.1 --port 8787</code> 完成构建后启动。
+    打开日志中的地址，通常是 <code>http://127.0.0.1:8787</code>。端口被占用时可能回退到其他端口，请以实际日志为准。
   </p>
   <p>
-    端口被占用时运行时可能回退到其他端口，请以启动日志中的实际地址为准。修改主机、端口也可使用{' '}
-    <code>MICA_DESKTOP_HOST</code> 与 <code>MICA_DESKTOP_PORT</code> 环境变量。
-  </p>
-
-  <h2>完成一次开发任务</h2>
-  <ol class="steps">
-    <li>
-      <strong>选择工作目录并开始对话。</strong>会话绑定项目路径，模型面板用于选择
-      provider、模型和推理强度；角色入口用于切换工作方式。
-    </li>
-    <li>
-      <strong>查看执行过程。</strong>
-      回合日志展示工具、思考与计划，点开工具行查看完整参数和结果。后台任务与子代理有独立详情。
-    </li>
-    <li>
-      <strong>审阅和修改文件。</strong>文件区打开项目代码，Git
-      面板分别显示暂存区、工作区及基线比较；可以暂存、取消暂存或按确认提示丢弃改动。
-    </li>
-    <li>
-      <strong>运行验证。</strong>工作区终端保留当前会话对应的 shell。检查测试输出和 Git 差异后，再决定如何提交。
-    </li>
-    <li>
-      <strong>恢复与继续。</strong>
-      在侧栏搜索和打开历史会话，通过置顶与项目分组组织任务；运行中的会话状态会同步到连接的页面。
-    </li>
-  </ol>
-  <p>
-    输入 <code>@</code> 引用文件；输入区的斜杠补全用于 Skills。终端斜杠命令不会在桌面对话框中作为 UI
-    命令执行，模型、压缩和循环任务请使用对应面板。
+    已有构建时，只需在 <code>apps/desktop</code> 中执行最后一行。也可用{' '}
+    <code>npm run serve:web -- --host 127.0.0.1 --port 8787</code> 构建后启动。跨设备连接的方法与访问范围见
+    <a href={`${base}docs/remote-access/`}>远程与手机访问</a>。
   </p>
 
+  <h2 id="使用工作区">使用工作区</h2>
+  <h3>会话与项目</h3>
+  <p>
+    从 <strong>New Session</strong>{' '}
+    开始，选择工作目录，在输入区选择模型与角色。历史会话可以搜索、置顶并按项目分组；通过侧栏重新打开即可继续。
+  </p>
+  <p>
+    输入 <code>@</code> 引用文件，输入 <code>/</code> 选择 Skill 或 MCP
+    引用。桌面对话框的斜杠补全用于能力引用；终端专用的 <code>/model</code>、<code>/compact</code>{' '}
+    等命令通过对应面板操作。
+  </p>
+  <h3>文件与 Git</h3>
+  <p>
+    在文件视图打开和编辑代码，在 Git
+    面板查看工作区、暂存区与基线比较。可按文件暂存、取消暂存或确认后丢弃改动。提交前先检查实际 diff 与验证结果。
+  </p>
+  <h3>终端与执行记录</h3>
+  <p>
+    工作区终端用于运行当前项目的命令。回合日志展示思考与工具执行，点击工具行可以查看参数、输出和错误；后台 shell
+    与子代理有独立详情。
+  </p>
+  <figure>
+    <img
+      src={`${base}screenshots/turn-log.png`}
+      width="1440"
+      height="900"
+      alt="示例任务的执行记录，包含工具调用与验证命令"
+      loading="lazy"
+    />
+    <figcaption>执行过程来自真实运行时；模型响应由演示脚本生成。</figcaption>
+  </figure>
   <h3>补充要求与旁问</h3>
   <p>
-    任务运行时继续输入可以排队补充要求；输入框为空时按 <code>Shift+←</code> 撤回待发消息。需要独立追问时使用 By The Way
-    面板，回答保留在独立线程，不加入主对话上下文。
-  </p>
-  <p>双击用户消息可在空闲时编辑并重新执行。重新执行会截断该消息之后的历史，适合修正上一轮要求。</p>
-
-  <h2>连接、分享与访问边界</h2>
-  <aside class="callout">
-    <p>
-      <strong>运行时默认只把分享视图对外开放。</strong>默认监听 <code>0.0.0.0:8787</code>
-      。登录进完整界面的客户端拥有完整宿主能力，包括文件与命令执行；默认的一串数字口令不足以当安全边界，
-      仅供本机使用时请显式绑定 <code>127.0.0.1</code>，跨设备访问应放在可信网络或带认证的访问网关后。
-    </p>
-  </aside>
-  <pre><code>{localWeb}</code></pre>
-  <p>
-    分享链接形如 <code>/share?session=&lt;id&gt;</code>，用于呈现会话。它没有独立 token、有效期或撤销机制，
-    链接本身就是凭据：拿到链接的人能经 API 使用这台机器（终端、文件、配置页都包含在内），所以只发给信任的人。
+    运行中继续输入可以补充要求；输入框为空时按 <code>Shift+←</code>{' '}
+    撤回尚未发送的消息。双击用户消息可在空闲时编辑并重新执行，之后的对话历史会被截断。
   </p>
   <p>
-    从别的设备访问时运行时只提供分享视图：主页 <code>/</code>、<code>/mica-web</code>、文件页、终端窗口、
-    <code>/remote/*</code> 与 <code>/mcp/*</code> 一律 404，所以把
-    <code>http://&lt;局域网 IP&gt;:8787</code> 发给别人不会打开你的完整界面。需要让另一台机器用完整应用访问
-    （例如侧栏的 Connections）时，在被访问的那台打开侧栏 Connections 卡片里的「局域网/公网可访问」，
-    对方访问时输入那个访问口令即可（默认 <code>0000</code>，请改掉）；也可以设置
-    <code>MICA_DESKTOP_TRUSTED_CLIENTS=&lt;对方地址&gt;</code> 让指定地址免密。
-    <code>--no-share</code> 只关闭分享视图路由。
+    临时追问可以使用 <strong>By The Way</strong> 抽屉，快捷键为 <code>⌘/Ctrl+Shift+B</code>
+    。旁问保留独立线程，回答不加入主对话上下文。
   </p>
+  <h3>会话笔记、能力与插件</h3>
   <p>
-    <code>/api/*</code> 一律要求凭据：访问口令，或打开一条有效分享链接后拿到的同源 cookie。它等于整台机器
-    （真 shell、任意读写、配置里的 API key），所以「知道地址」不等于「能用」。分享链接本身仍然免密，
-    发给别人的链接不需要对方输口令——链接就是那张凭据，只有指向真实存在会话的链接才算数。
-  </p>
-  <p>
-    通过反向代理访问时，使用 <code>MICA_DESKTOP_ALLOWED_HOSTS</code> 配置允许的代理主机名；
-    <code>MICA_DESKTOP_PUBLIC_URL</code> 可设置分享链接的公开基础地址。Origin/Host
-    检查用于防范跨站请求，不能替代用户认证。
+    顶栏的会话笔记用于保留需求与关键决定。输入区的会话设置可以调整工具、Skills、MCP、定时任务和支持会话覆盖的插件设置。更完整的工作方法见
+    <a href={`${base}docs/workflows/`}>日常开发流程</a>。
   </p>
 
-  <h2>排查启动问题</h2>
+  <h2 id="构建运行产物">构建运行产物</h2>
+  <p>
+    在 <code>apps/desktop</code> 中构建并运行：
+  </p>
+  <CodeBlock code={'npm run build\nnpm run start'} />
+  <p>
+    生成本机可检查的未压缩应用目录，用 <code>npm run build:unpack</code>。需要安装包时选择对应平台：
+  </p>
+  <CodeBlock code={'npm run build:mac\nnpm run build:linux\nnpm run build:win'} />
+  <p>这些命令会先执行构建。安装包受平台工具链与原生依赖约束；仓库提供命令不代表支持在任意系统上交叉打包所有平台。</p>
+
+  <h2 id="排查问题">排查问题</h2>
   <ul>
     <li>
-      桌面行为与源码不一致：重新运行根目录的 <code>bun run build</code>，更新桌面实际调用的 CLI。
+      <strong>CLI 行为与源码不一致：</strong>回到仓库根目录运行 <code>bun run build</code> 更新已安装入口。也可以通过{' '}
+      <code>MICA_CLI_PATH</code> 指向需要验证的可执行文件。
     </li>
     <li>
-      启动后连接到旧服务：检查端口上是否已有实例；开发验证时可使用 <code>MICA_DESKTOP_PORT=8899 npm run dev</code>{' '}
+      <strong>连接到旧服务：</strong>确认启动日志中的端口；开发时可用 <code>MICA_DESKTOP_PORT=8899 npm run dev</code>{' '}
       指定独立端口。
     </li>
-    <li>独立 Web 模式提示控制服务不可用：受控浏览器和终端控制依赖 Electron 主进程；工作区终端属于另一项能力。</li>
     <li>
-      需要隔离配置和界面状态：分别设置 <code>MICA_HOME</code> 与 <code>MICA_DESKTOP_USER_DATA</code>
-      ，避免测试实例读写日常使用的数据。
+      <strong>Web 中受控窗口服务不可用：</strong>它们依赖 Electron 主进程。Web 工作区内的终端仍属于独立可用的能力。
+    </li>
+    <li>
+      <strong>隔离测试与日常数据：</strong>为测试实例分别设置 <code>MICA_HOME</code>、
+      <code>MICA_DESKTOP_USER_DATA</code> 和独立端口；Electron 还应指定独立的 <code>--user-data-dir</code>。
     </li>
   </ul>
   <p>
-    需要让编辑器或脚本直接驱动会话，见 <a href={`${base}docs/headless`}>自动化与集成</a>；实现边界见{' '}
-    <a href={`${base}docs/architecture`}>架构概览</a>。
+    下一步可以<a href={`${base}docs/remote-access/`}>连接手机与其他开发机</a>，或
+    <a href={`${base}docs/plugins/`}>按需管理插件与能力</a>。
   </p>
 </DocLayout>

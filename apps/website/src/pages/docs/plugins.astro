@@ -1,0 +1,270 @@
+---
+import DocLayout from '../../layouts/DocLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
+const base = import.meta.env.BASE_URL;
+const searchExample = `{
+  "searxngUrl": "http://127.0.0.1:8080",
+  "defaultCount": "5"
+}`;
+const pluginTree = `~/.mica/plugins/
+└── my-workflow/
+    ├── plugin.json
+    ├── index.mjs
+    └── skills/
+        └── review/
+            └── SKILL.md`;
+---
+
+<DocLayout
+  title="插件与能力管理"
+  active="plugins"
+  description="按工作需要选择官方与用户插件，配置模型接口，并区分默认能力、会话覆盖和插件运行条件。"
+>
+  <h1>插件与能力管理</h1>
+  <p class="lead">
+    记忆、联网搜索、子代理和手机访问等能力通过插件提供。在设置中选择需要的插件，再按会话调整工具与参数，让每项工作使用合适的能力。
+  </p>
+
+  <h2>从 Settings → Plugins 开始</h2>
+  <p>
+    桌面端打开 Settings → Plugins；终端可用 <code>/config</code> 打开配置页，再进入 Plugins。
+    插件目录区分随产品分发的官方插件与本机安装的用户插件。点开卡片查看配置、加载状态，以及插件声明的运行条件和操作。
+  </p>
+  <p>
+    官方插件已随 Mica 分发，无需逐个下载。启用、停用或安装插件后，需要启动新的宿主进程，才会重新装配工具、命令与提示词。
+    终端中退出后重新运行 <code>mica</code>；桌面与 Web 中新建会话，或重启应用后继续已有会话。 终端里的 <code>/new</code>{' '}
+    只重置会话，不会重新加载插件。 普通设置在保存后由插件后续读取；具体行为取决于插件何时读取该项设置。
+  </p>
+  <p>
+    表单改动停下后自动保存，先留意字段校验与保存状态。目录中的“重新加载”用于刷新页面看到的插件信息；启停后的运行状态需在新启动的宿主中确认。
+  </p>
+
+  <h2 id="区分插件-默认能力与会话设置">区分插件、默认能力与会话设置</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>调整位置</th>
+          <th>影响范围</th>
+          <th>适合做什么</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Settings → Plugins</td>
+          <td>插件是否加载，以及插件参数的默认值。</td>
+          <td>停用整项功能，配置搜索地址、记忆整理或插件模型。</td>
+        </tr>
+        <tr>
+          <td>Settings → Capabilities</td>
+          <td>Tools、Skills、MCP servers 的默认开关。</td>
+          <td>为跟随默认的会话决定可用能力；已经单独定制的会话保留自己的选择。</td>
+        </tr>
+        <tr>
+          <td>
+            桌面端会话设置；终端 <code>/capabilities</code>
+          </td>
+          <td>当前会话的能力开关。</td>
+          <td>为本次任务缩小工具、Skill 或 MCP 服务的可用范围。</td>
+        </tr>
+        <tr>
+          <td>桌面端会话设置 → 插件</td>
+          <td>当前会话可覆盖的插件参数。</td>
+          <td>为长任务调整压缩策略，或为特定会话选用不同的插件模型。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    只有插件声明为可按会话配置的字段才会出现在会话设置中。会话只保存改过的项，其余继续跟随默认；使用“跟随默认”可移除覆盖。
+    能力开关也可以恢复为默认。当前轮次运行时不能提交能力切换，先等本轮结束或停止执行。
+  </p>
+  <p>
+    关闭某个工具只调整模型在该会话中可用的能力。若要连同插件的自动行为、命令和提示词一起停用，应在 Plugins
+    中停用插件，再按上述方式启动新宿主。
+  </p>
+
+  <h2>按目的选择官方插件</h2>
+  <p>以下是日常工作常用的插件。各插件所需的模型、外部服务或系统权限不同，先读详情中的条件，再按实际需要配置。</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>想完成的事</th>
+          <th>插件</th>
+          <th>使用要点</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>记住偏好与项目经验</td>
+          <td>
+            <code>memory</code>
+          </td>
+          <td>跨会话保存用户、通用与项目记忆；可配置自动整理与字符预算。</td>
+        </tr>
+        <tr>
+          <td>保留当前任务的目标与决策</td>
+          <td>
+            <code>session-notes</code>、<code>todo</code>
+          </td>
+          <td>笔记随会话保存；待办用于跟踪当前一轮的工作计划。</td>
+        </tr>
+        <tr>
+          <td>继续较长的会话</td>
+          <td>
+            <code>auto-compact</code>
+          </td>
+          <td>按策略清理历史或生成模型摘要，支持按会话调整。</td>
+        </tr>
+        <tr>
+          <td>查证最新信息与官方资料</td>
+          <td>
+            <code>web-search</code>
+          </td>
+          <td>
+            提供搜索工具，需要可用的 SearXNG；找到链接后用 <code>web_fetch</code> 阅读页面。
+          </td>
+        </tr>
+        <tr>
+          <td>委派探索、实现与审阅</td>
+          <td>
+            <code>subagent</code>
+          </td>
+          <td>提供子代理工具；委派倾向可选主动拆分或仅在明确要求时委派。</td>
+        </tr>
+        <tr>
+          <td>把完整任务交给另一条会话</td>
+          <td>
+            <code>sidecar</code>
+          </td>
+          <td>独立上下文与会话历史，主代理可继续发消息、观察和收尾。</td>
+        </tr>
+        <tr>
+          <td>主任务进行时问一个旁支问题</td>
+          <td>
+            <code>btw</code>
+          </td>
+          <td>
+            终端提供 <code>/btw</code>；桌面端使用 By The Way 抽屉。
+          </td>
+        </tr>
+        <tr>
+          <td>复盘 agent 的运行问题</td>
+          <td>
+            <code>harness-review</code>
+          </td>
+          <td>查看有证据的问题候选并导出报告；人工记录评估结论。</td>
+        </tr>
+        <tr>
+          <td>生成提交说明并完成 Git 提交</td>
+          <td>
+            <code>commit</code>
+          </td>
+          <td>
+            提供 <code>/commit</code>、<code>mica commit</code> 与桌面提交入口，可按设置推送。
+          </td>
+        </tr>
+        <tr>
+          <td>整理与导出会话</td>
+          <td>
+            <code>session-rename</code>、<code>session-tags</code>、<code>session-copy</code>
+          </td>
+          <td>自动命名、颜色标签，以及从桌面会话菜单复制 Markdown。</td>
+        </tr>
+        <tr>
+          <td>连接另一台开发机</td>
+          <td>
+            <code>connections</code>
+          </td>
+          <td>桌面侧栏 Connections 连接对方运行时；需要对方地址与访问条件。</td>
+        </tr>
+        <tr>
+          <td>从手机访问当前机器</td>
+          <td>
+            <code>mobile-relay</code>
+          </td>
+          <td>需要公网中转机和本机在线的 Mica 运行时，在插件详情注册并获取链接。</td>
+        </tr>
+        <tr>
+          <td>让模型操作 macOS 应用</td>
+          <td>
+            <code>computer-use</code>
+          </td>
+          <td>仅适用于 macOS 桌面端，需要辅助功能、屏幕录制与 Command Line Tools。</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    会话笔记、记忆、压缩与三种协作方式的具体分工，见 <a href={`${base}docs/workflows/`}>日常开发流程</a>。
+    手机与其他机器的接入步骤见 <a href={`${base}docs/remote-access/`}>远程与手机访问</a>。
+  </p>
+
+  <h3 id="联网搜索需要-searxng">联网搜索需要 SearXNG</h3>
+  <p>
+    Web Search 插件不会安装或托管搜索服务。先准备一个可访问的 SearXNG 实例，在该实例的 <code>settings.yml</code> 中通过{' '}
+    <code>search.formats</code> 启用 <code>json</code> 输出，再填写插件详情的“SearXNG 地址”。
+    本地地址只有在相同机器上确实运行了实例时才可用。
+  </p>
+  <p>
+    地址按“插件设置 → <code>SEARXNG_URL</code> 环境变量 → <code>http://127.0.0.1:8080</code>”解析。 也可以直接编辑{' '}
+    <code>$MICA_HOME/plugin-settings/web-search.json</code>；例如：
+  </p>
+  <CodeBlock code={searchExample} lang="json" />
+  <p>
+    实例未启动、未开放 JSON 格式或网络不可达时，搜索会返回错误，并在插件健康状态中显示原因。 内置 <code>web_fetch</code>{' '}
+    负责读取具体 URL，不依赖 SearXNG。
+  </p>
+
+  <h2>插件使用哪个模型</h2>
+  <p>
+    自动命名、压缩摘要、记忆整理和提交说明等功能可能发起额外模型请求。声明了模型接口的插件会显示“复用当前会话模型”开关，通常默认开启；以插件详情中的实际设置为准。
+    复用时使用当前会话选择的服务与模型，没有会话的一次性插件操作使用全局模型配置。
+  </p>
+  <p>
+    关闭复用后，可以为插件填写独立的接口地址、Key、协议与模型，例如为摘要选择另一项服务。
+    使用“测试连接”确认接口可达；它会发送一次最小模型请求。支持按会话配置的模型字段，也可在会话设置中覆盖或恢复默认。
+  </p>
+  <p>
+    独立接口失败时，通用模型接口会尝试用当前会话模型重发，并在健康状态显示降级原因；成功降级后会继续使用该模型，直到相关配置发生变化。
+    会话中的插件模型调用可在 Stats 按来源查看。模型选择、输入内容与服务计费都会影响实际开销。
+  </p>
+
+  <h2>安装用户插件</h2>
+  <p>
+    将完整插件目录放入 <code>~/.mica/plugins/</code>；设置 <code>MICA_HOME</code> 后改为{' '}
+    <code>$MICA_HOME/plugins/</code>。 按插件作者说明准备依赖，再刷新插件目录并启动新的宿主。典型结构如下：
+  </p>
+  <CodeBlock code={pluginTree} lang="text" />
+  <p>
+    <code>plugin.json</code> 声明插件身份、入口、设置与所需能力，入口为默认导出 <code>setup(ctx)</code> 的 JavaScript
+    模块。 用户插件建议分发可运行的 <code>.js</code> 或 <code>.mjs</code>{' '}
+    入口；没有清单的目录或单独散落的脚本不会被识别。运行时会给用户插件 ID 加上 <code>user.</code> 前缀。
+  </p>
+  <p>
+    插件可以一起提供工具、命令、提示词和 Skills。Skill 是模型按需读取的工作指南，MCP
+    是连接外部工具服务的协议，它们都可以单独配置，不必为了添加一份 Skill 或一个 MCP 服务编写插件。 文件位置与示例见{' '}
+    <a href={`${base}docs/extensions/`}>Skills、MCP 与角色</a>。
+  </p>
+
+  <h2>插件没有生效时</h2>
+  <ol>
+    <li>
+      确认插件已启用，并在启停或安装后重新启动终端 CLI 或新建桌面会话；检查当前会话是否关闭了相关工具、Skill 或 MCP
+      服务。
+    </li>
+    <li>在插件详情查看加载状态与宿主。显示“已跳过”时先阅读缺少的能力；例如依赖桌面宿主的插件会在 TUI 中跳过。</li>
+    <li>区分“尚未加载”、加载失败与运行报错。没有加载记录时不能据此判断插件是否工作，先在目标宿主打开会话再检查。</li>
+    <li>检查设置校验、模型连接和外部服务；有“运行条件”的插件还要检查系统权限与依赖。</li>
+  </ol>
+  <p>
+    Computer Use 需要把权限授予运行 Mica 桌面端的应用，修改后重启该应用。其他平台不会注册它的桌面操作 Skill。
+    运行条件的探测依赖桌面宿主，普通浏览器中的配置页不一定能提供同样的系统检查。
+  </p>
+  <p>
+    需要继续定位时，插件详情会提供跳过或错误原因；加载记录位于 <code>$MICA_HOME/plugin-status.json</code>，插件设置位于{' '}
+    <code>$MICA_HOME/plugin-settings/</code>。 Harness Review
+    适合复盘运行记录中的重复调用、失败与重试；其候选需要人工判断，不会自动修改指令、工具或记忆，也不替你执行评测。
+  </p>
+</DocLayout>

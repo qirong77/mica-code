@@ -1243,6 +1243,7 @@ function SubagentTranscript({ steps, running, onOpenTool }) {
 
 function subagentStatusClass(status) {
   if (status === 'running') return 'is-running'
+  if (status === 'partial') return 'is-partial'
   if (status === 'failed') return 'is-error'
   return 'is-done'
 }

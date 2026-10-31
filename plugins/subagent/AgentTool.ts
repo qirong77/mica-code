@@ -1,3 +1,4 @@
+import { micaAgent } from '@packages/mica-agent/index.js';
 import type {
   PluginSubagentApi,
   PluginSubagentContextMode,
@@ -50,6 +51,22 @@ type RunRequest = {
 type BatchStatus = PluginSubagentRunResult['status'] | 'running' | 'skipped';
 
 /**
+ * 整轮重跑的次数上限。
+ *
+ * 单次模型请求的 provider 重试在 `withRetry` 里；这里处理的是「整轮子代理失败」——
+ * 请求层重试全部耗尽之后仍然失败时，再给只读任务一次机会。
+ */
+const MAX_SAFE_RETRIES = 1;
+
+/**
+ * `await` / `join` 省略 `timeout_ms` 时的等待上限。
+ *
+ * 不设上限时，一个跑飞的子代理会把父调用挂到只能靠用户中止，10 分钟后先回当前状态、
+ * 让模型自己决定继续等还是放弃。
+ */
+const DEFAULT_AWAIT_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
  * `agent`：父代理唯一能自己用的委派入口。
  *
  * 工具本身只做「参数整形 + 文案」，建子代理、用量记账、路径租约、完成回注全在宿主
@@ -89,7 +106,8 @@ export class AgentTool extends MicaTool {
           },
           timeout_ms: {
             type: 'number',
-            description: 'await/join 最长等待毫秒；超时后返回当前状态，不抛错。',
+            description:
+              'await/join 最长等待毫秒；超时后返回当前状态，不抛错。0 表示立即返回当前状态，省略默认 600000（10 分钟）。',
           },
           context_mode: {
             type: 'string',
@@ -114,7 +132,7 @@ export class AgentTool extends MicaTool {
           },
           max_parallel: {
             type: 'number',
-            description: 'run_many 单波最大并行数，默认 4。',
+            description: 'run_many 单波最大并行数，默认 4；同一会话前后台合计并发也是 4，超出会启动失败。',
           },
         },
       },
@@ -190,56 +208,68 @@ export class AgentTool extends MicaTool {
 
     const results: string[] = [];
     const remaining = new Map(planned.map((task) => [task.id, task]));
-    const completed = new Set<string>();
+    const settled = new Set<string>();
     const handles = new Map<string, PluginSubagentTaskHandle>();
     const statuses = new Map<string, BatchStatus>();
     const taskIdByPlanId = new Map<string, string>();
 
     while (remaining.size > 0) {
       callbacks?.signal?.throwIfAborted();
-      const ready = [...remaining.values()].filter((task) => task.depends_on.every((dep) => completed.has(dep)));
+      const ready = [...remaining.values()].filter((task) => task.depends_on.every((dep) => settled.has(dep)));
       if (ready.length === 0) throw new Error('run_many stalled: no runnable tasks without unmet dependencies.');
 
       const batchResults = await Promise.all(
         ready.map(async (task) => {
-          // 后台任务的启动并不代表成功；失败或被杀的依赖必须阻止下游继续执行。
-          for (const dep of task.depends_on) {
-            const handle = handles.get(dep);
-            if (handle) statuses.set(dep, (await waitForDependency(handle, callbacks?.signal)).status);
-          }
-          callbacks?.signal?.throwIfAborted();
-          const blocked = task.depends_on.filter((dep) => statuses.get(dep) !== 'completed');
-          if (blocked.length > 0) {
+          try {
+            // 后台任务的启动并不代表成功；失败或被杀的依赖必须阻止下游继续执行。
+            for (const dep of task.depends_on) {
+              const handle = handles.get(dep);
+              if (handle) statuses.set(dep, (await waitForDependency(handle, callbacks?.signal)).status);
+            }
+            callbacks?.signal?.throwIfAborted();
+            const blocked = task.depends_on.filter((dep) => statuses.get(dep) !== 'completed');
+            if (blocked.length > 0) {
+              return {
+                task,
+                status: 'skipped' as const,
+                taskId: undefined,
+                output: `Status: skipped\nDependencies did not complete successfully: ${blocked.join(', ')}`,
+              };
+            }
+            const request = toRunRequest(task);
+            if (request.runInBackground) {
+              const handle = this.startInBackground(request, callbacks);
+              handles.set(task.id, handle.handle);
+              return { task, output: handle.output, taskId: handle.handle.taskId, status: 'running' as const };
+            }
+            const result = await this.runForeground(request, callbacks);
+            return { task, output: result.output, status: result.status, taskId: undefined };
+          } catch (error) {
+            // 父请求被中止要立刻停下整批；其余启动失败（租约冲突、并发已满、宿主拒绝）
+            // 只结算这一条任务——否则已经启动的同批任务会连同结果一起丢掉。
+            if (callbacks?.signal?.aborted) throw error;
             return {
               task,
-              status: 'skipped' as const,
+              status: 'failed' as const,
               taskId: undefined,
-              output: `Status: skipped\nDependencies did not complete successfully: ${blocked.join(', ')}`,
+              output: `Status: failed\n\nThe subagent could not be started: ${formatErrorMessage(error)}`,
             };
           }
-          const request = toRunRequest(task);
-          if (request.runInBackground) {
-            const handle = this.startInBackground(request, callbacks);
-            handles.set(task.id, handle.handle);
-            return { task, output: handle.output, taskId: handle.handle.taskId, status: 'running' as const };
-          }
-          const result = await this.runForeground(request, callbacks);
-          return { task, ...result, taskId: undefined };
         }),
       );
 
       for (const { task, output, taskId, status } of batchResults) {
         remaining.delete(task.id);
-        completed.add(task.id);
+        settled.add(task.id);
         statuses.set(task.id, status);
-        const backgroundTaskId = taskId ?? output.match(/task_id:\s*(\S+)/)?.[1];
-        if (backgroundTaskId) taskIdByPlanId.set(task.id, backgroundTaskId);
+        if (taskId) taskIdByPlanId.set(task.id, taskId);
         results.push([`## ${task.id}: ${task.description}`, output].join('\n'));
       }
     }
 
     return [
       `run_many finished ${planned.length} task(s).`,
+      formatBatchTally(statuses),
       taskIdByPlanId.size > 0
         ? `background_task_ids: ${[...taskIdByPlanId.entries()].map(([id, taskId]) => `${id}=${taskId}`).join(', ')}`
         : '',
@@ -268,16 +298,32 @@ export class AgentTool extends MicaTool {
     const ownedPaths = resolveOwnedPaths(request.ownedPaths ?? [], type);
     const spawn = this.buildSpawnRequest(request, type, request.prompt.trim(), ownedPaths, callbacks);
 
-    callbacks?.onChunk?.(`[Agent:${type.name}] start ${request.description}\n`);
-    const result = await this.subagents.run(spawn);
+    let attempt = 0;
+    let result: PluginSubagentRunResult;
+    for (;;) {
+      attempt += 1;
+      const retryLabel = attempt > 1 ? ` (retry ${attempt - 1})` : '';
+      callbacks?.onChunk?.(`[Agent:${type.name}] start ${request.description}${retryLabel}\n`);
+      result = await this.subagents.run(spawn);
+      if (!shouldRetryRun(result, type, attempt, callbacks?.signal)) break;
+      callbacks?.onChunk?.(`[Agent:${type.name}] retry ${attempt}: ${summarizeError(result.error)}\n`);
+    }
     return {
       status: result.status,
-      output: formatStructuredSubagentResult({
-        type: type.name,
-        description: request.description,
-        result: withError(result),
-        status: toStructuredStatus(result.status),
-      }),
+      output: [
+        formatStructuredSubagentResult({
+          type: type.name,
+          description: request.description,
+          result: result.output,
+          status: toStructuredStatus(result.status),
+          ...(result.error ? { error: result.error } : {}),
+        }),
+        // 前台任务同样留在任务表里：失败后父代理可以用 read 取回用量与活动记录。
+        `task_id: ${result.taskId}`,
+        attempt > 1 ? `attempts: ${attempt}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
     };
   }
 
@@ -382,11 +428,21 @@ export class AgentTool extends MicaTool {
     if (taskIds.length === 0) return '错误：Agent await 操作需要 task_id 或 task_ids。';
     const inaccessible = this.findInaccessibleTask(taskIds, callbacks);
     if (inaccessible) return `Subagent task not found: ${inaccessible}`;
+    const timeoutMs = resolveTimeout(input);
     const tasks = await this.subagents.tasks.wait(taskIds, {
-      timeoutMs: resolveTimeout(input),
+      timeoutMs,
       signal: callbacks?.signal,
     });
-    return [`Awaited ${tasks.length} subagent task(s).`, ...tasks.map((task) => formatTaskRecord(task))].join('\n\n');
+    const running = tasks.filter((task) => task.status === 'running');
+    return [
+      `Awaited ${tasks.length} subagent task(s).`,
+      running.length > 0
+        ? `${running.length} task(s) still running after ${Math.round(timeoutMs / 1000)}s of waiting; await again to keep waiting.`
+        : '',
+      ...tasks.map((task) => formatTaskRecord(task)),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   }
 
   private async joinTasks(input: AgentToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
@@ -398,11 +454,12 @@ export class AgentTool extends MicaTool {
       timeoutMs: resolveTimeout(input),
       signal: callbacks?.signal,
     });
-    const completed = tasks.filter((task) => task.status !== 'running');
+    const completed = tasks.filter((task) => task.status === 'completed');
+    const partial = tasks.filter((task) => task.status === 'partial');
     const running = tasks.filter((task) => task.status === 'running');
     const failed = tasks.filter((task) => task.status === 'failed' || task.status === 'killed');
     return [
-      `Joined ${tasks.length} subagent task(s): completed=${completed.length - failed.length}, failed_or_killed=${failed.length}, running=${running.length}.`,
+      `Joined ${tasks.length} subagent task(s): completed=${completed.length}, partial=${partial.length}, failed_or_killed=${failed.length}, running=${running.length}.`,
       '## Combined structured results',
       ...tasks.map((task) => formatTaskRecord(task)),
       '',
@@ -433,6 +490,7 @@ function buildDescription(types: PluginSubagentType[]): string {
     'await/join 等待已有子任务，可与同一条消息里的其他工具重叠执行，全部结果一起返回；仍有独立工作时先继续做，或把等待和工作放在同一条消息，别单独等待。shell 后台任务用 wait_for(kind=task)。',
     `可用 subagent_type: ${types.map((type) => `${type.name} (${type.description})`).join('; ')}。`,
     'effort 取子代理模型自己声明的档位名（模型不同档位集合也不同），省略时继承主 agent 当前 effort。',
+    '只读与提案类子代理（write_mode none/proposal）遇到可重试的 provider 错误会自动整轮重试一次；可写子代理失败后不会自动重跑，需要重新提交。',
   ].join(' ');
 }
 
@@ -488,10 +546,12 @@ function resolveOwnedPaths(value: string[], type: PluginSubagentType): string[] 
   return ownedPaths;
 }
 
-function resolveTimeout(input: AgentToolInput): number | undefined {
-  return typeof input.timeout_ms === 'number' && Number.isFinite(input.timeout_ms) && input.timeout_ms > 0
-    ? Math.floor(input.timeout_ms)
-    : undefined;
+function resolveTimeout(input: AgentToolInput): number {
+  // 0 是「马上看一眼」而不是「不限时」：模型用它做非阻塞轮询，负数才当没传。
+  if (typeof input.timeout_ms !== 'number' || !Number.isFinite(input.timeout_ms) || input.timeout_ms < 0) {
+    return DEFAULT_AWAIT_TIMEOUT_MS;
+  }
+  return Math.floor(input.timeout_ms);
 }
 
 function toStructuredStatus(status: PluginSubagentRunResult['status']): StructuredSubagentResult['status'] {
@@ -499,8 +559,48 @@ function toStructuredStatus(status: PluginSubagentRunResult['status']): Structur
   return status === 'partial' ? 'partial' : 'failed';
 }
 
-function withError(result: PluginSubagentRunResult): string {
-  return [result.output.trim(), result.error ? `[Error: ${result.error}]` : ''].filter(Boolean).join('\n\n');
+/**
+ * 整轮重跑只对不落盘的类型做：`none` / `proposal` 重跑不会重复执行写操作，
+ * 可写类型失败后交给父代理决定（可能已经改了一半的代码）。
+ */
+function shouldRetryRun(
+  result: PluginSubagentRunResult,
+  type: PluginSubagentType,
+  attempt: number,
+  signal: AbortSignal | undefined,
+): boolean {
+  if (attempt > MAX_SAFE_RETRIES) return false;
+  if (result.status !== 'failed') return false;
+  if (signal?.aborted) return false;
+  const writeMode = type.writeMode ?? 'unrestricted';
+  if (writeMode !== 'none' && writeMode !== 'proposal') return false;
+  // 只认「错误本身可重试」（429 / 5xx / 超时 / 网络）。单次请求的重试已在 provider
+  // 里做满，能走到这里说明那几次都没成功——网络恢复后整轮重来仍有意义。
+  return Boolean(result.error) && micaAgent.isRetryableError({ message: result.error });
+}
+
+function formatBatchTally(statuses: Map<string, BatchStatus>): string {
+  const tally = { completed: 0, partial: 0, failed: 0, skipped: 0, running: 0 };
+  for (const status of statuses.values()) {
+    if (status === 'completed') tally.completed += 1;
+    else if (status === 'partial') tally.partial += 1;
+    else if (status === 'skipped') tally.skipped += 1;
+    else if (status === 'running') tally.running += 1;
+    else tally.failed += 1;
+  }
+  return `status: completed=${tally.completed} partial=${tally.partial} failed=${tally.failed} skipped=${tally.skipped} running=${tally.running}`;
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function summarizeError(error: string | undefined): string {
+  const compact = String(error ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!compact) return 'failed';
+  return compact.length <= 160 ? compact : `${compact.slice(0, 159)}…`;
 }
 
 function parseStringArray(value: unknown, field: string): string[] {

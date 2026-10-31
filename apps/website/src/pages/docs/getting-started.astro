@@ -1,131 +1,173 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
 const base = import.meta.env.BASE_URL;
+const install = `curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
+mica --version`;
+const source = `git clone https://github.com/qirong77/mica-code.git
+cd mica-code
+bun install
+bun run dev`;
+const firstTask = `阅读项目结构和测试配置，找出测试入口。
+先说明你准备怎么改，再为一个边界情况补充测试，运行验证并汇报结果。`;
 ---
 
 <DocLayout
   title="快速开始"
   active="getting-started"
-  description="安装 Mica Code、连接模型，并在项目中开始第一次编程任务。"
+  description="安装 Mica CLI、连接自己的模型，并在真实项目中完成第一个开发任务。"
 >
   <h1>快速开始</h1>
-  <p class="lead">
-    从项目目录启动 Mica
-    Code，用自然语言理解代码、实现修改并运行验证。先连接一个支持工具调用的模型，再开始你的第一个任务。
+  <p class="lead">连接一个模型，进入你的项目。让 Mica 从理解代码开始，接着完成修改和验证。</p>
+  <aside class="callout callout-subtle">
+    <strong>开始前准备</strong>
+    <p>
+      准备一个支持工具调用的模型服务及其 API key。完整终端能力需要 <strong>Node.js 22+</strong>；从源码运行还需要 Git 和
+      Bun。想使用图形工作区，可以直接看<a href={`${base}docs/desktop/`}>桌面与浏览器指南</a>。
+    </p>
+  </aside>
+
+  <h2 id="安装-cli">1. 安装 CLI</h2>
+  <p>macOS 与 Linux 使用预构建安装器，支持 Apple Silicon、Intel Mac，以及 ARM64 / x64 Linux：</p>
+  <CodeBlock code={install} />
+  <p>
+    看到版本号就表示命令已可用。预构建 CLI 无需 Bun；安装器会校验 SHA-256，将程序与随包依赖放在{' '}
+    <code>~/.local/lib/mica</code>，入口是 <code>~/.local/bin/mica</code>。
+  </p>
+  <p>
+    如果提示找不到 <code>mica</code>，在当前终端补上 PATH，并将相同设置加入自己的 shell 配置：
+  </p>
+  <CodeBlock code={'export PATH="$HOME/.local/bin:$PATH"'} />
+  <p>
+    升级到最新发布版本时，重新运行安装命令即可。也可以在{' '}
+    <a href="https://github.com/qirong77/mica-code/releases">GitHub Releases</a> 选择对应平台的归档。
   </p>
 
-  <h2>安装 Mica Code</h2>
-  <h3>macOS 与 Linux</h3>
-  <p>安装脚本支持 Apple Silicon、Intel Mac，以及 ARM64、x64 Linux。它会下载对应平台的预构建包，并校验 SHA-256。</p>
-  <pre><code>curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
-mica --version</code></pre>
+  <h3 id="从源码运行">从源码运行</h3>
+  <p>需要参与开发或使用 Windows 时，通过源码入口启动：</p>
+  <CodeBlock code={source} />
   <p>
-    默认入口是 <code>~/.local/bin/mica</code>，程序及随包依赖位于 <code>~/.local/lib/mica</code>
-    。如果终端提示找不到命令，将入口目录加入 shell 配置中的 PATH；当前终端可先执行：
+    <code>bun run dev</code> 直接运行终端 TUI。macOS / Linux 开发者也可用 <code>bun run build</code> 构建并安装本机
+    CLI，之后在任意项目中使用 <code>mica</code>。
   </p>
-  <pre><code>export PATH="$HOME/.local/bin:$PATH"</code></pre>
   <p>
-    运行预构建 CLI 无需安装 Bun。PTY 交互工具会启动 Node 子进程，请准备 Node.js 22 或更高版本；默认 MCP 示例使用{' '}
-    <code>npx</code>，也需要 Node.js 与 npm。
+    发布安装器目前提供 macOS / Linux 包；源码构建的自动安装步骤会生成 POSIX launcher，Windows 请使用上面的源码运行入口。
   </p>
 
-  <h3>从源码运行，包括 Windows</h3>
-  <p>准备 Git、Bun 和 Node.js 22+，在终端执行：</p>
-  <pre><code>git clone https://github.com/qirong77/mica-code.git
-cd mica-code
-bun install
-bun run dev</code></pre>
+  <h2 id="连接模型">2. 连接模型</h2>
   <p>
-    Windows 请使用源码入口。发布安装脚本仅支持 macOS 与 Linux；源码构建后的自动安装器会写入 POSIX shell
-    launcher，因此这里不把它作为 Windows 的安装步骤。
+    在项目目录启动 Mica，再通过终端里的 <code>/config</code> 打开配置页：
   </p>
-
-  <h2>连接模型</h2>
+  <CodeBlock code={'cd your-project\nmica'} />
   <ol class="steps">
     <li>
-      运行 <code>mica</code>，输入 <code>/config</code> 打开配置页面。源码运行时使用 <code>bun run dev</code>。
+      <strong>填写 provider。</strong>配置 API 地址与 API key。默认配置提供 DeepSeek 入口，也可以接入自己的兼容服务。
     </li>
     <li>
-      为 provider 填写 API 地址、API key 与协议。默认配置提供 DeepSeek 入口；也可以添加支持 OpenAI Chat Completions 或
-      Responses 协议的服务。
+      <strong>选择正确的协议。</strong>
+      <code>openai_chat_completions</code> 对应 Chat Completions；<code>openai_responses</code> 对应
+      Responses。按服务实际支持的接口填写。
     </li>
     <li>
-      保存后，用 <code>/model</code> 选择 provider 和模型，再发送消息。界面能启动并不代表 API key 已配置成功。
+      <strong>选择模型。</strong>回到终端，用 <code>/model</code> 选择 provider 和模型。服务没有模型列表接口时，可以在
+      provider 中填写固定的 <code>models</code>。
     </li>
   </ol>
   <p>
-    手动配置、环境变量和兼容服务示例见 <a href={`${base}docs/configuration`}>模型与配置</a>。
+    配置页自动保存有效设置。API 地址、协议与模型配置的完整示例见<a href={`${base}docs/configuration/`}>模型与配置</a>。
   </p>
 
-  <h2>开始第一个任务</h2>
-  <p>在需要处理的项目目录启动。工作目录决定文件搜索、命令执行和项目指令的范围。</p>
-  <pre><code>cd your-project
-mica</code></pre>
-  <p>可以先从一个有明确交付物的任务开始：</p>
-  <pre><code>阅读项目结构和测试配置，说明主要模块的职责，找出运行测试的命令。
-
-为登录表单补充输入校验，复用现有组件，完成后运行相关测试并说明改动。</code></pre>
+  <h2 id="第一个任务">3. 完成第一个任务</h2>
+  <p>从范围明确、可以运行验证的任务开始。例如：</p>
+  <CodeBlock code={firstTask} lang="text" title="发给 Mica 的任务" />
   <p>
-    输入 <code>@</code>{' '}
-    搜索并引用工作区文件。模型执行期间可继续提交补充要求，消息会在工具迭代边界送入当前任务；输入框为空时按{' '}
-    <code>Shift+←</code> 可以撤回尚未发送的排队消息。按 <code>Ctrl+C</code> 中止当前任务。
+    运行过程中会看到思考、工具调用和执行结果。输入 <code>@</code>{' '}
+    可以引用工作区文件，继续输入则可以补充要求。完成后查看改动和测试输出，再决定是否提交。
   </p>
-
-  <h2>继续工作与管理上下文</h2>
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>需求</th>
-          <th>操作</th>
+          <th>你想做什么</th>
+          <th>怎么操作</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>继续历史会话</td>
+          <td>补充要求</td>
+          <td>运行中提交消息，在工具迭代边界进入当前任务。</td>
+        </tr>
+        <tr>
+          <td>撤回待发消息</td>
           <td>
-            使用 <code>/resume</code> 选择会话，或 <code>mica --resume &lt;session-id&gt;</code>。
+            输入框为空时按 <code>Shift+←</code>。
           </td>
         </tr>
         <tr>
-          <td>检查当前模型和用量</td>
+          <td>停止当前任务</td>
           <td>
-            <code>/status</code> 查看模型状态，<code>/context</code> 查看上下文占用。
+            终端按 <code>Ctrl+C</code>，桌面点击停止。
           </td>
         </tr>
         <tr>
-          <td>减小上下文</td>
+          <td>确认模型和用量</td>
           <td>
-            <code>/compact</code> 在本地清理工具结果；<code>/compact llm</code> 使用模型生成摘要。
+            终端使用 <code>/status</code>，<code>/context</code> 查看上下文占用。
           </td>
         </tr>
         <tr>
-          <td>另开一条思路</td>
+          <td>下次继续</td>
           <td>
-            <code>/new</code> 创建独立会话，<code>/fork</code> 从当前历史分叉。
+            使用 <code>/resume</code>，或在桌面侧栏打开历史会话。
           </td>
         </tr>
       </tbody>
     </table>
   </div>
 
-  <h2>选择下一步</h2>
+  <h2 id="数据在哪里">配置与会话放在哪里</h2>
+  <p>
+    默认用户目录是 <code>~/.mica</code>。模型配置在 <code>config.json</code>，会话在 <code>sessions/</code>，个人 Skills
+    在 <code>skills/</code>。终端与桌面共用同一份用户数据。
+  </p>
+  <p>
+    需要隔离项目或测试环境时，启动前设置 <code>MICA_HOME</code>：
+  </p>
+  <CodeBlock code={'MICA_HOME="$HOME/.mica-work" mica'} />
+  <p>这个目录会同时隔离用户配置、会话与个人扩展。项目目录里的 Skills 和项目指令仍按当前工作目录发现。</p>
+
+  <h2 id="遇到问题">遇到问题</h2>
+  <ul>
+    <li>
+      <strong>无法连接模型：</strong>核对 API 地址、协议、key 和服务商返回的错误，见
+      <a href={`${base}docs/configuration/`}>连接排查</a>。
+    </li>
+    <li>
+      <strong>PTY 或 npx 无法运行：</strong>确认启动 Mica 的环境能找到 Node.js 22+ 和 npm。
+    </li>
+    <li>
+      <strong>行为与预期不同：</strong>用 <code>mica --version</code> 确认版本；源码开发中修改 CLI
+      后需要重新构建已安装的入口。
+    </li>
+  </ul>
+
+  <h2 id="接下来">接下来</h2>
   <div class="card-grid">
-    <a class="doc-card" href={`${base}docs/commands`}>
-      <h3>终端命令</h3>
-      <p>会话、上下文、并行任务与快捷键参考。</p>
+    <a class="doc-card" href={`${base}docs/workflows/`}>
+      <h3>推进日常开发</h3>
+      <p>长任务、上下文、笔记与多 agent 协作。</p>
     </a>
-    <a class="doc-card" href={`${base}docs/desktop`}>
-      <h3>桌面与浏览器</h3>
-      <p>在同一工作区管理对话、文件、Git 与终端。</p>
+    <a class="doc-card" href={`${base}docs/desktop/`}>
+      <h3>打开桌面工作区</h3>
+      <p>对话、文件、Git 与终端就在同一处。</p>
     </a>
-    <a class="doc-card" href={`${base}docs/extensions`}>
-      <h3>扩展能力</h3>
-      <p>连接 MCP、添加 Skills、定义自己的角色。</p>
+    <a class="doc-card" href={`${base}docs/plugins/`}>
+      <h3>按需组合能力</h3>
+      <p>插件、会话能力与可复用的工作方法。</p>
     </a>
-    <a class="doc-card" href={`${base}docs/headless`}>
-      <h3>自动化与集成</h3>
-      <p>将 Mica 接入脚本、编辑器与持续运行的客户端。</p>
+    <a class="doc-card" href={`${base}docs/headless/`}>
+      <h3>接入自动化</h3>
+      <p>用脚本或自己的客户端驱动 agent。</p>
     </a>
   </div>
 </DocLayout>

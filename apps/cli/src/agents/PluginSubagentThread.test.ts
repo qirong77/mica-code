@@ -72,7 +72,7 @@ describe('createPluginThread', () => {
     expect(onText).toHaveBeenCalledWith('delta');
     expect(harness.child.onText).toBeUndefined();
     expect(harness.child.onThinking).toBeUndefined();
-    expect(harness.query).toHaveBeenCalledWith('问题', {});
+    expect(harness.query).toHaveBeenCalledWith('问题', expect.objectContaining({ signal: expect.any(AbortSignal) }));
   });
 
   it('bills only the requests each ask produced, as plugin-origin usage', async () => {
@@ -186,6 +186,31 @@ describe('createPluginThread', () => {
     await expect(thread.ask('   ')).rejects.toThrow('问题不能为空');
     thread.dispose();
     await expect(thread.ask('问题')).rejects.toThrow('已经关闭');
+  });
+
+  it('aborts the in-flight ask on dispose and records it as killed', async () => {
+    const harness = makeHarness();
+    harness.query.mockImplementationOnce(
+      (_prompt, options = {}) =>
+        new Promise<string>((_resolve, reject) => {
+          // 被中断的请求同样可能已经计过费，所以先记一笔再等中断。
+          harness.pushUsage(2);
+          // 真实子代理在 abort 时拒绝；这里照同一个约定，验证 dispose 真的传到了请求上。
+          options.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }),
+    );
+    const thread = createPluginThread({
+      owner: harness.owner,
+      pluginId: 'btw',
+      threadId: '1',
+      options: { type: 'btw', systemPrompt: 'p' },
+    });
+
+    const pending = thread.ask('问题');
+    thread.dispose();
+
+    await expect(pending).rejects.toThrow('aborted');
+    expect((harness.recordSubagentUsage.mock.calls[0]?.[0] as { status: string }).status).toBe('killed');
   });
 });
 

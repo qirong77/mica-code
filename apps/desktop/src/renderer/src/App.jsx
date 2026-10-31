@@ -55,6 +55,7 @@ const { FilesView, QuickSearch, SettingsView, StatsView, TerminalHost } = {
 }
 import { longPressHandlers, useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
 import { collectRecentCwds, normalizeCwd, rankCwdMatches, splitCwd } from './cwd-recents'
+import { gitChangeBadge } from './git-badge'
 import { loopNodeIds } from './loop-command'
 import { resolveGroupCwd } from './session-projects'
 import {
@@ -95,6 +96,15 @@ import {
  * 另有 focus / visibilitychange 立即补一次。
  */
 const SESSION_POLL_MS = 10000
+
+/**
+ * 顶栏 Git 徽标的取数节奏（只有非文件视图会走到这条路上）。
+ *
+ * 它要跑一遍全树 `status -z` + `diff --numstat`，比 `git:status` 的一次 `rev-parse`
+ * 贵一个数量级，所以不跟 Git 轮询同频：20 秒一次够用，一轮跑完的瞬间还会强制刷一次
+ * （见下面的 turn 结束 effect）。文件视图里由 `git:summary` 顺带算好，不额外取。
+ */
+const GIT_COUNTS_TTL_MS = 20000
 
 /** notify 事件里的 terminalId 是 `<节点id>:<pane>`，转回树节点 id */
 function nodeIdFor(ptyId) {
@@ -885,11 +895,16 @@ export default function App() {
     // 当前分支相对基线分支的变更（GIT TREE 面板用），与 repository（工作区）分开。
     branch: null,
     status: null,
+    // 顶栏徽标的变更量 `{ root, files, additions, deletions }`；null = 还没取到或
+    // 不是仓库。与 repository 的区别是它不带文件明细，别的视图也肯付这份钱。
+    counts: null,
     loading: false
   })
   const gitRef = useLatest(git)
   const gitRequest = useRef(0)
   const gitPollBusy = useRef(false)
+  // 上一次拿到 counts 的目录与时刻：非文件视图按 TTL 决定这一轮要不要再取。
+  const gitCountsAt = useRef({ cwd: null, at: 0 })
   // GIT 变更树的比较基线，按工作目录各记一份（界面状态键 gitCompareBase）：空对象必须是
   // 模块级常量，否则每次渲染都换引用，依赖它的 refreshGit 会跟着重建、无限重拉 Git。
   const compareBases = useUiStateValue('gitCompareBase', EMPTY_COMPARE_BASES)
@@ -1321,7 +1336,7 @@ export default function App() {
   }, [refreshPins, refreshProjects, refreshLoops, refreshSessions, refreshSort])
 
   const refreshGit = useCallback(
-    async ({ quiet = false, cwd: requestedCwd = null } = {}) => {
+    async ({ quiet = false, cwd: requestedCwd = null, forceCounts = false } = {}) => {
       const id = activeRef.current
       const request = ++gitRequest.current
       if (!id) {
@@ -1331,6 +1346,7 @@ export default function App() {
           repository: null,
           branch: null,
           status: null,
+          counts: null,
           loading: false
         })
         return
@@ -1345,6 +1361,7 @@ export default function App() {
           repository: null,
           branch: null,
           status: null,
+          counts: null,
           loading: false
         })
         return
@@ -1352,7 +1369,15 @@ export default function App() {
       setGit((current) =>
         current.terminalId === id && current.cwd === cwd
           ? current
-          : { terminalId: id, cwd, repository: null, branch: null, status: null, loading: true }
+          : {
+              terminalId: id,
+              cwd,
+              repository: null,
+              branch: null,
+              status: null,
+              counts: null,
+              loading: true
+            }
       )
       try {
         // 会话视图只用仓库根与分支（`refreshGit` 下面的 status），而 `git:summary`
@@ -1382,6 +1407,19 @@ export default function App() {
               : current
           )
         }
+        // 顶栏徽标的变更量。文件视图那一下的 summary 已经把它算出来了，别处只有
+        // 过了 TTL 才单独取一次——全树 numstat 不该跟着 10s 的 Git 轮询跑。
+        const countsStale =
+          gitCountsAt.current.cwd !== cwd ||
+          Date.now() - gitCountsAt.current.at >= GIT_COUNTS_TTL_MS
+        const countsPromise =
+          status?.status && viewRef.current !== 'files' && (forceCounts || countsStale)
+            ? window.mica.git
+                .changeCounts(cwd)
+                .then((result) => (result?.counts ? { cwd, counts: result.counts } : null))
+                // 徽标是锦上添花：取不到（非仓库、目录被删）就不画，别打断整次刷新。
+                .catch(() => null)
+            : null
         let summary = await summaryPromise
         let branch = await branchPromise
         const fallbackRoot = gitRef.current.status?.root
@@ -1406,13 +1444,26 @@ export default function App() {
           branch = fallback[1]
           status = fallback[2]
         }
+        const fromSummary = summary?.repository
+          ? {
+              cwd,
+              counts: {
+                root: summary.repository.root,
+                files: summary.repository.files.length,
+                additions: summary.repository.additions,
+                deletions: summary.repository.deletions
+              }
+            }
+          : null
+        const fetchedCounts = countsPromise ? await countsPromise : null
+        const counts = fromSummary || fetchedCounts || null
+        if (counts) gitCountsAt.current = { cwd: counts.cwd, at: Date.now() }
         if (request === gitRequest.current && id === activeRef.current) {
           // 会话视图不查 summary，就沿用同一个仓库上一次的结果，免得切回文件视图时
           // 文件树的 Git 装饰先被清空再补回来（闪一下）。
           const previous = gitRef.current
-          const repository =
-            summary?.repository ||
-            (previous.terminalId === id && previous.cwd === cwd ? previous.repository : null)
+          const sameDirectory = previous.terminalId === id && previous.cwd === cwd
+          const repository = summary?.repository || (sameDirectory ? previous.repository : null)
           setGit({
             terminalId: id,
             cwd,
@@ -1420,6 +1471,8 @@ export default function App() {
             branch: branch?.repository || null,
             compareError: branch?.error || null,
             status: status?.status || null,
+            // 同一目录沿用上一次的数字（TTL 没到就没取），别让徽标每次都闪空。
+            counts: counts?.counts || (sameDirectory ? previous.counts : null),
             loading: false
           })
         }
@@ -1432,6 +1485,7 @@ export default function App() {
             repository: null,
             branch: null,
             status: null,
+            counts: null,
             loading: false
           })
         }
@@ -1503,6 +1557,16 @@ export default function App() {
     if (view !== 'files') return
     refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
   }, [view, activeRef, refreshGit, terminalCwd])
+  // 一轮跑完，agent 刚改过的文件要立刻反映到顶栏徽标上：等下一个 20s 的 TTL
+  // 太迟钝，而这时候用户正盯着图标看「它到底改了多少」。
+  const activeRunning = !!notifications.states?.[activeId]?.running
+  const wasRunningRef = useRef(false)
+  useEffect(() => {
+    if (wasRunningRef.current && !activeRunning) {
+      refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current), forceCounts: true })
+    }
+    wasRunningRef.current = activeRunning
+  }, [activeRunning, activeRef, refreshGit, terminalCwd])
 
   const askText = useCallback(
     (title, initial = '', hint = '') =>
@@ -2135,6 +2199,7 @@ export default function App() {
   )
   const gitIsCurrent = git.terminalId === activeId
   const activeCwd = terminalCwd(activeId) || (gitIsCurrent ? git.cwd : null)
+  const gitBadge = gitIsCurrent ? gitChangeBadge(git.counts) : null
   useEffect(() => {
     let cancelled = false
     if (!activeCwd) {
@@ -2708,12 +2773,27 @@ export default function App() {
               </button>
               <button
                 type="button"
-                title="打开编辑器窗口"
-                aria-label="打开编辑器窗口"
-                className="grid size-6 place-items-center rounded-md text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
+                title={gitBadge ? `${gitBadge.title}\n打开编辑器窗口` : '打开编辑器窗口'}
+                aria-label={gitBadge ? `打开编辑器窗口（${gitBadge.title}）` : '打开编辑器窗口'}
+                className="flex h-6 items-center gap-1 rounded-md px-1 text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={openFilesWindow}
               >
                 <IconBrandVscode size={14} />
+                {/* 变更量：加绿减红，千位以上缩写（见 git-badge.js）。精确行数与
+                    文件数在 tooltip 里，不为几个数字把顶栏撑宽。 */}
+                {gitBadge && (
+                  <span className="flex items-center gap-1 text-[10px] font-medium leading-none tabular-nums">
+                    {gitBadge.additions && (
+                      <span className="text-success-soft">{gitBadge.additions}</span>
+                    )}
+                    {gitBadge.deletions && (
+                      <span className="text-danger-soft">{gitBadge.deletions}</span>
+                    )}
+                    {gitBadge.fallback && (
+                      <span className="text-fg-muted">{gitBadge.fallback}</span>
+                    )}
+                  </span>
+                )}
               </button>
             </div>
           </header>

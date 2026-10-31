@@ -110,7 +110,74 @@ describe('AgentTool', () => {
     const output = await tool.execute({ operation: 'run', description: 'work', prompt: 'do it' });
 
     expect(output).toContain('Status: failed');
-    expect(output).toContain('[Error: parent aborted]');
+    expect(output).toContain('## Error');
+    expect(output).toContain('parent aborted');
+    expect(output).toContain('task_id: task-1');
+  });
+
+  it('retries a read-only run once when the provider error is retryable', async () => {
+    let calls = 0;
+    const { api, spawns } = createApi({
+      run: async () => {
+        calls += 1;
+        return calls === 1
+          ? { taskId: 'task-1', status: 'failed', output: '', error: '429 rate limit exceeded' }
+          : { taskId: 'task-2', status: 'completed', output: 'all good' };
+      },
+    });
+
+    const output = await new AgentTool(api).execute({
+      operation: 'run',
+      description: 'inspect loader',
+      prompt: 'look',
+      subagent_type: 'Explore',
+    });
+
+    expect(spawns).toHaveLength(2);
+    expect(output).toContain('Status: completed');
+    expect(output).toContain('all good');
+    expect(output).toContain('attempts: 2');
+    expect(output).toContain('task_id: task-2');
+  });
+
+  it('does not retry a writable run, a non-retryable error, or a killed run', async () => {
+    const retryable = () => ({
+      taskId: 'task-1',
+      status: 'failed' as const,
+      output: '',
+      error: '503 service unavailable',
+    });
+    const writable = createApi({ run: async () => retryable() });
+    await new AgentTool(writable.api).execute({
+      operation: 'run',
+      description: 'implement',
+      prompt: 'go',
+      subagent_type: 'Implementer',
+      owned_paths: ['src'],
+    });
+    expect(writable.spawns).toHaveLength(1);
+
+    const permanent = createApi({
+      run: async () => ({ taskId: 'task-1', status: 'failed' as const, output: '', error: 'Unknown model: foo' }),
+    });
+    await new AgentTool(permanent.api).execute({
+      operation: 'run',
+      description: 'inspect loader',
+      prompt: 'look',
+      subagent_type: 'Explore',
+    });
+    expect(permanent.spawns).toHaveLength(1);
+
+    const killed = createApi({
+      run: async () => ({ taskId: 'task-1', status: 'killed' as const, output: '', error: 'timeout' }),
+    });
+    await new AgentTool(killed.api).execute({
+      operation: 'run',
+      description: 'inspect loader',
+      prompt: 'look',
+      subagent_type: 'Explore',
+    });
+    expect(killed.spawns).toHaveLength(1);
   });
 
   it('returns the background handle summary instead of blocking', async () => {
@@ -182,6 +249,25 @@ describe('AgentTool', () => {
     expect(await tool.execute({ operation: 'list' })).toBe('No subagent tasks found for this agent.');
   });
 
+  it('passes an explicit zero timeout through so await can poll without blocking', async () => {
+    const { api } = createApi({ tasks: [snapshot({ id: 'task-1', status: 'running', result: undefined })] });
+    const wait = vi.spyOn(api.tasks, 'wait');
+
+    await new AgentTool(api).execute({ operation: 'await', task_id: 'task-1', timeout_ms: 0 });
+
+    expect(wait).toHaveBeenCalledWith(['task-1'], expect.objectContaining({ timeoutMs: 0 }));
+  });
+
+  it('bounds an await without an explicit timeout so a runaway task cannot hang the turn', async () => {
+    const { api } = createApi({ tasks: [snapshot({ id: 'task-1', status: 'running', result: undefined })] });
+    const wait = vi.spyOn(api.tasks, 'wait');
+
+    const output = await new AgentTool(api).execute({ operation: 'await', task_id: 'task-1' });
+
+    expect(wait).toHaveBeenCalledWith(['task-1'], expect.objectContaining({ timeoutMs: 600_000 }));
+    expect(output).toContain('still running after 600s');
+  });
+
   it('awaits and joins task snapshots', async () => {
     const { api } = createApi({
       tasks: [snapshot({ id: 'task-1' }), snapshot({ id: 'task-2', status: 'running', result: undefined })],
@@ -197,7 +283,7 @@ describe('AgentTool', () => {
     expect(awaited).toContain('任务仍在后台运行');
 
     const joined = await tool.execute({ operation: 'join', task_id: 'task-2' });
-    expect(joined).toContain('Joined 1 subagent task(s): completed=0, failed_or_killed=0, running=1.');
+    expect(joined).toContain('Joined 1 subagent task(s): completed=0, partial=0, failed_or_killed=0, running=1.');
     expect(joined).toContain('## Parent merge guidance');
   });
 
@@ -322,6 +408,36 @@ describe('AgentTool', () => {
       ),
     ).rejects.toThrow();
     expect(spawns.map((spawn) => spawn.description)).toEqual(['first']);
+  });
+
+  it('isolates a task that cannot start instead of losing the rest of the batch', async () => {
+    const { api } = createApi({
+      run: async (request) => {
+        if (request.description === 'blocked') {
+          throw new Error('Too many subagents are running (4/4). Read or stop an existing task first.');
+        }
+        return { taskId: `task-${request.description}`, status: 'completed', output: `done ${request.description}` };
+      },
+    });
+
+    const output = await new AgentTool(api).execute({
+      operation: 'run_many',
+      tasks: [
+        { id: 'blocked', description: 'blocked', prompt: 'go', subagent_type: 'Explore' },
+        { id: 'ok', description: 'ok', prompt: 'go', subagent_type: 'Reviewer' },
+        { id: 'dep', description: 'dep', prompt: 'go', subagent_type: 'Explore', depends_on: ['blocked'] },
+      ],
+    });
+
+    expect(output).toContain('run_many finished 3 task(s).');
+    expect(output).toContain('status: completed=1 partial=0 failed=1 skipped=1 running=0');
+    expect(output).toContain('## blocked: blocked');
+    expect(output).toContain('could not be started');
+    expect(output).toContain('Too many subagents are running');
+    expect(output).toContain('## ok: ok');
+    expect(output).toContain('done ok');
+    expect(output).toContain('## dep: dep');
+    expect(output).toContain('Status: skipped');
   });
 
   it('scopes read, kill, await and join to the calling owner just like list', async () => {

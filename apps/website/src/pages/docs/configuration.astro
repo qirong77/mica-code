@@ -1,5 +1,6 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
 const base = import.meta.env.BASE_URL;
 const providerExample = `{
   "providers": [
@@ -65,21 +66,21 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
   <h2>连接模型服务</h2>
   <h3>Chat Completions 示例</h3>
   <p>下面使用仓库默认提供的 DeepSeek API 地址，通过模型列表接口获取可选模型：</p>
-  <pre><code>{providerExample}</code></pre>
+  <CodeBlock code={providerExample} lang="json" />
 
   <h3>Responses 示例</h3>
   <p>
     连接支持 OpenAI Responses 的服务时，显式选择 <code>openai_responses</code>
     。动态列表中仍需选择支持该协议和工具调用的模型。
   </p>
-  <pre><code>{responsesExample}</code></pre>
+  <CodeBlock code={responsesExample} lang="json" />
 
   <h3>兼容服务与固定模型列表</h3>
   <p>
     将以下对象加入 <code>providers</code> 数组，并替换 API 地址、凭证和模型 ID。对没有模型列表接口的服务，使用{' '}
     <code>models</code>；服务不接受推理强度参数时，将 <code>supportsEffort</code> 设为 <code>false</code>。
   </p>
-  <pre><code>{compatibleExample}</code></pre>
+  <CodeBlock code={compatibleExample} lang="json" />
 
   <h3>Provider 字段参考</h3>
   <div class="table-wrap">
@@ -96,7 +97,8 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
             <code>id</code>
           </td>
           <td>
-            唯一的名称，既用于 <code>provider/model</code> 形式的模型 ID，也是界面上显示的名字。建议使用简短、稳定的名称。
+            唯一的名称，既用于 <code>provider/model</code> 形式的模型
+            ID，也是界面上显示的名字。建议使用简短、稳定的名称。
           </td>
         </tr>
         <tr>
@@ -155,17 +157,16 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
   <h2>选择模型与推理强度</h2>
   <p>
     终端使用 <code>/model</code> 选择模型，用 <code>/effort</code> 选择推理强度。可用档位就是该模型自己声明的取值：
-    有的模型是 <code>minimal</code>/<code>low</code>/<code>medium</code>/<code>high</code>，有的最高档叫 <code>max</code>，
-    有的只有开关（<code>none</code>/<code>on</code>）。Mica 不做档位换算，也不会给不支持推理参数的模型凑出五档。
-    自建网关或私有部署的模型名如果不在 models.dev 里，可在该 provider 上写{' '}
-    <code>effortLevels</code> 声明服务端真实接受的档位。桌面端在输入区的模型面板中完成同样的操作。
+    有的模型是 <code>minimal</code>/<code>low</code>/<code>medium</code>/<code>high</code>，有的最高档叫{' '}
+    <code>max</code>， 有的只有开关（<code>none</code>/<code>on</code>）。Mica
+    不做档位换算，也不会给不支持推理参数的模型凑出五档。 自建网关或私有部署的模型名如果不在 models.dev 里，可在该
+    provider 上写 <code>effortLevels</code> 声明服务端真实接受的档位。桌面端在输入区的模型面板中完成同样的操作。
   </p>
-  <pre><code>mica models
-mica models --json</code></pre>
+  <CodeBlock code={'mica models\nmica models --json'} lang="bash" />
   <p>
     上面的命令列出 <code>provider/model</code> ID；JSON 输出还包含可用推理强度。使用该 ID 指定一次自动化任务的模型：
   </p>
-  <pre><code>mica exec --model "PROVIDER_ID/MODEL_ID" --variant medium "解释项目的测试策略"</code></pre>
+  <CodeBlock code={'mica exec --model "PROVIDER_ID/MODEL_ID" --variant medium "解释项目的测试策略"'} lang="bash" />
   <p>
     模型与推理强度的选择会保存为本地使用偏好；写在 <code>config.json</code> 顶层的 <code>model</code> 或{' '}
     <code>effort</code> 在保存时会被丢弃。已有对话切换 API 协议受到限制；需要切换协议时新建会话。
@@ -176,7 +177,7 @@ mica models --json</code></pre>
     CI 或临时容器可以通过环境变量创建进程内的 <code>openai</code> provider。把 <code>YOUR_MODEL_ID</code>{' '}
     替换为账户可用的模型名称；以下为 POSIX shell 示例：
   </p>
-  <pre><code>{envExample}</code></pre>
+  <CodeBlock code={envExample} lang="bash" />
   <p>
     这种方式仅在配置中的所有 provider 都没有非空 API key，且没有 ID 为 <code>openai</code> 的 provider
     时生效。使用独立的 <code>MICA_HOME</code> 可以避免已有配置影响任务。由环境变量创建的 provider 不会写回配置文件。
@@ -241,9 +242,8 @@ mica models --json</code></pre>
   <p>
     <code>web_search</code> 由官方插件 <code>web-search</code> 提供，使用 SearXNG 实例，实例需启用 JSON
     格式响应。地址在配置页的 <code>Plugins</code> → <code>Web Search</code> 中填写：插件设置里的地址优先，
-    留空时读取环境变量 <code>SEARXNG_URL</code>，两者都未提供则使用 <code>http://127.0.0.1:8080</code>。
-    这项配置保存在 <code>$MICA_HOME/plugin-settings/web-search.json</code>，与模型 API 分开管理，不写在{' '}
-    <code>config.json</code>。
+    留空时读取环境变量 <code>SEARXNG_URL</code>，两者都未提供则使用 <code>http://127.0.0.1:8080</code>。 这项配置保存在{' '}
+    <code>$MICA_HOME/plugin-settings/web-search.json</code>，与模型 API 分开管理，不写在 <code>config.json</code>。
   </p>
   <h2>排查连接问题</h2>
   <ul>
@@ -259,7 +259,7 @@ mica models --json</code></pre>
     </li>
   </ul>
   <p>
-    接下来可以 <a href={`${base}docs/extensions`}>配置 MCP、Skills 和角色</a>，或查看{' '}
-    <a href={`${base}docs/headless`}>自动化调用方式</a>。
+    接下来可以 <a href={`${base}docs/extensions/`}>配置 MCP、Skills 和角色</a>，或查看{' '}
+    <a href={`${base}docs/headless/`}>自动化调用方式</a>。
   </p>
 </DocLayout>

@@ -1,6 +1,6 @@
 ---
 // 架构图页：内嵌两张 Archify 生成的自包含交互式架构图（源文件见 /architecture/*.architecture.json）。
-// 产物是静态文件（public/architecture/*.html），iframe 里用 ?theme=dark 对齐官网的深色主题。
+// 产物是静态文件（public/architecture/*.html），iframe 内也可独立切换主题。
 import BaseLayout from '../layouts/BaseLayout.astro';
 
 const base = import.meta.env.BASE_URL;
@@ -9,7 +9,7 @@ const diagrams = [
   {
     file: 'mica-code-cli.html',
     title: 'CLI 运行时',
-    desc: '终端 TUI 与 headless 共用同一条 turn loop：命令分发 → mica-agent → provider adapter，工具统一走 mica-tools registry，插件与 MCP 都向它注册；会话落盘由 turn lease 仲裁单写者。',
+    desc: '终端 TUI 与 headless 分别编排任务，共享 mica-agent、provider adapter、工具与会话能力。插件与 MCP 向统一的工具入口注册，会话写入由跨进程 turn lease 协调。',
     source: 'mica-code-cli.architecture.json',
   },
   {

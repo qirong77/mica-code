@@ -28,10 +28,10 @@ const BAR_H = 18;
 const AXIS_MIN = 95;
 const AXIS_MAX = 100;
 
-const MUTED = '#6b7280';
-const FAINT = '#9ca3af';
-const STRONG = '#111827';
-const TRACK = 'rgba(148,163,184,0.16)';
+const MUTED = 'var(--muted)';
+const FAINT = 'var(--faint)';
+const STRONG = 'var(--strong)';
+const TRACK = 'var(--track)';
 
 const fmt = (value) => String(Number(value.toFixed(1)));
 const pct = (passed) => (passed / TOTAL) * 100;
@@ -43,7 +43,13 @@ const parts = [];
 parts.push(
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${HEIGHT}" width="${WIDTH}" height="${HEIGHT}" role="img" aria-label="DeepSWE 任务自主评测：五款 agent 在 9 项任务、${TOTAL} 个自定义检查项上的得分、缓存命中率、耗时与模型请求数对比">`,
 );
-parts.push(`<rect x="0" y="0" width="${WIDTH}" height="${HEIGHT}" rx="14" fill="#fdfdfd"/>`);
+parts.push(`<style>
+  svg { --bg: #fafbfc; --muted: #53657a; --faint: #61758b; --strong: #172536; --track: #e7edf2; --bar: #a4b8c2; --accent: #087d96; }
+  @media (prefers-color-scheme: dark) {
+    svg { --bg: #111822; --muted: #a1afc0; --faint: #7d8ea3; --strong: #edf2f8; --track: #24303e; --bar: #4e6579; --accent: #74d9e9; }
+  }
+</style>`);
+parts.push(`<rect x="0" y="0" width="${WIDTH}" height="${HEIGHT}" rx="14" fill="var(--bg)"/>`);
 parts.push(
   `<g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Helvetica Neue',Arial,sans-serif">`,
 );
@@ -61,7 +67,7 @@ rows.forEach((row, index) => {
   parts.push(`<rect x="${BAR_X}" y="${y}" width="${BAR_W}" height="${BAR_H}" rx="4" fill="${TRACK}"/>`);
   parts.push(
     `<rect x="${BAR_X}" y="${y}" width="${barWidth(row.passed)}" height="${BAR_H}" rx="4" fill="${
-      row.highlight ? '#1287a1' : '#a4b8c2'
+      row.highlight ? 'var(--accent)' : 'var(--bar)'
     }"/>`,
   );
   parts.push(
@@ -99,7 +105,7 @@ parts.push(
 });
 
 parts.push(
-  `<text x="532" y="${axisY + 19}" font-size="10.5" fill="${FAINT}">未通过的检查项：Codex 2 · Mica 4.5 · MiniMax 4.5 · DSH 6 · Claude 7</text>`,
+  `<text x="532" y="${axisY + 19}" font-size="10.5" fill="${FAINT}">未通过的检查项：${rows.map((row) => `${row.name.replace(' Code', '').replace(' Standard', '')} ${fmt(TOTAL - row.passed)}`).join(' · ')}</text>`,
 );
 parts.push('</g></svg>');
 

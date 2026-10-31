@@ -37,7 +37,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
   {
     name: 'agent',
     description:
-      '启动和管理 subagent。operation 默认为 run；支持 list/read/kill/await/run_many/join。 subagent 默认注入 brief 任务上下文；可用 context_mode=none|brief|recent|files 控制。 可写 subagent 使用 owned_paths 路径租约；Implementer/Tester/Proposal 必填。 Proposal 模式不落盘，只返回 patch 提案；run_many 支持 depends_on 与 max_parallel。 前台 run 会阻塞当前 turn 直到子代理返回；同一条消息里的多个前台调用会并行执行。需要主流程继续推进时用 run_in_background: true，完成后经 operation=read/join 取结果。 await/join 等待已有子任务，可与同一条消息里的其他工具重叠执行，全部结果一起返回；仍有独立工作时先继续做，或把等待和工作放在同一条消息，别单独等待。shell 后台任务用 wait_for(kind=task)。 可用 subagent_type: general-purpose (General-purpose subagent for multi-step research, code investigation, and focused implementation help.); Explore (Read-only code exploration subagent for searching, reading, and summarizing relevant project context.); Implementer (Writable implementation subagent for scoped code changes. Requires owned_paths and only writes inside that lease.); Reviewer (Read-only code review subagent for diffs, risks, and missing tests.); Tester (Verification subagent that can run tests/typecheck within owned_paths and report outcomes.); Planner (Planning subagent that returns a task graph and ownership plan without modifying files.); Proposal (Proposal-mode implementation subagent. Requires owned_paths, cannot write files, and must return patch proposals for parent apply.)。 effort 取子代理模型自己声明的档位名（模型不同档位集合也不同），省略时继承主 agent 当前 effort。',
+      '启动和管理 subagent。operation 默认为 run；支持 list/read/kill/await/run_many/join。 subagent 默认注入 brief 任务上下文；可用 context_mode=none|brief|recent|files 控制。 可写 subagent 使用 owned_paths 路径租约；Implementer/Tester/Proposal 必填。 Proposal 模式不落盘，只返回 patch 提案；run_many 支持 depends_on 与 max_parallel。 前台 run 会阻塞当前 turn 直到子代理返回；同一条消息里的多个前台调用会并行执行。需要主流程继续推进时用 run_in_background: true，完成后经 operation=read/join 取结果。 await/join 等待已有子任务，可与同一条消息里的其他工具重叠执行，全部结果一起返回；仍有独立工作时先继续做，或把等待和工作放在同一条消息，别单独等待。shell 后台任务用 wait_for(kind=task)。 可用 subagent_type: general-purpose (General-purpose subagent for multi-step research, code investigation, and focused implementation help.); Explore (Read-only code exploration subagent for searching, reading, and summarizing relevant project context.); Implementer (Writable implementation subagent for scoped code changes. Requires owned_paths and only writes inside that lease.); Reviewer (Read-only code review subagent for diffs, risks, and missing tests.); Tester (Verification subagent that can run tests/typecheck within owned_paths and report outcomes.); Planner (Planning subagent that returns a task graph and ownership plan without modifying files.); Proposal (Proposal-mode implementation subagent. Requires owned_paths, cannot write files, and must return patch proposals for parent apply.)。 effort 取子代理模型自己声明的档位名（模型不同档位集合也不同），省略时继承主 agent 当前 effort。 只读与提案类子代理（write_mode none/proposal）遇到可重试的 provider 错误会自动整轮重试一次；可写子代理失败后不会自动重跑，需要重新提交。',
     readOnly: false,
     parameters: [
       {
@@ -93,7 +93,8 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
         name: 'timeout_ms',
         type: 'number',
         required: false,
-        description: 'await/join 最长等待毫秒；超时后返回当前状态，不抛错。',
+        description:
+          'await/join 最长等待毫秒；超时后返回当前状态，不抛错。0 表示立即返回当前状态，省略默认 600000（10 分钟）。',
       },
       {
         name: 'context_mode',
@@ -124,7 +125,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
         name: 'max_parallel',
         type: 'number',
         required: false,
-        description: 'run_many 单波最大并行数，默认 4。',
+        description: 'run_many 单波最大并行数，默认 4；同一会话前后台合计并发也是 4，超出会启动失败。',
       },
     ],
   },

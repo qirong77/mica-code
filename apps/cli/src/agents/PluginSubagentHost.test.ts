@@ -175,11 +175,13 @@ describe('PluginSubagentHost run', () => {
     const harness = createHarness({ query: pending.query });
     harness.api.registerType(exploreType({ activity: 'maintenance' }));
     const seen: string[] = [];
-    const subscription = harness.taskManager.subscribe((task) => { seen.push(task.activity ?? 'delegation'); });
+    const subscription = harness.taskManager.subscribe((task) => {
+      seen.push(task.activity ?? 'delegation');
+    });
     const request = harness.api.run({ description: 'maintain state', prompt: 'update internal notes' });
     await flushAsyncWork();
     expect(seen.length).toBeGreaterThan(0);
-    expect(seen.every(value => value === 'maintenance')).toBe(true);
+    expect(seen.every((value) => value === 'maintenance')).toBe(true);
     pending.settle('done');
     const result = await request;
     expect(result.status).toBe('completed');
@@ -298,6 +300,9 @@ describe('PluginSubagentHost run', () => {
     expect(harness.recordSubagentUsage).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'partial', subagentType: 'Explore' }),
     );
+    // 任务表要与 run 的结果一致：跑满轮次是「部分完成」，不是一次失败。
+    expect(harness.taskManager.get(result.taskId, harness.runtime)?.status).toBe('partial');
+    expect(harness.api.tasks.get(result.taskId)?.status).toBe('partial');
   });
 
   it('settles as killed when the caller aborts a running subagent', async () => {
@@ -435,6 +440,23 @@ describe('PluginSubagentHost caller', () => {
 });
 
 describe('PluginSubagentHost path leases', () => {
+  it('rejects a lease conflict before creating a task record or a subagent', async () => {
+    const pending = createPendingQuery();
+    const harness = createHarness({ query: pending.query });
+    harness.api.registerType(exploreType({ writeMode: 'owned_paths' }));
+
+    const first = harness.api.background({ description: 'first', prompt: 'edit a', ownedPaths: [fakePath('a')] });
+    const spawned = harness.createSubAgent.mock.calls.length;
+
+    await expect(
+      harness.api.run({ description: 'second', prompt: 'edit a again', ownedPaths: [fakePath('a')] }),
+    ).rejects.toThrow(/owned_paths conflict/);
+
+    // 冲突在 prepareSpawn 里就拒绝：没有多余的任务记录，也没有白建一个子代理。
+    expect(harness.createSubAgent.mock.calls.length).toBe(spawned);
+    expect(harness.taskManager.list(harness.runtime).map((task) => task.id)).toEqual([first.taskId]);
+  });
+
   it('rejects overlapping owned paths from one owner and allows disjoint ones', () => {
     const pending = createPendingQuery();
     const harness = createHarness({ query: pending.query });

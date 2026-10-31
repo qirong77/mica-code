@@ -1,0 +1,175 @@
+---
+import DocLayout from '../../layouts/DocLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
+const base = import.meta.env.BASE_URL;
+---
+
+<DocLayout
+  title="远程与手机访问"
+  active="remote-access"
+  description="通过 Connections 或 Mobile Relay 连接开发机，了解会话分享、访问口令与远程操作的范围。"
+>
+  <h1>远程与手机访问</h1>
+  <p class="lead">
+    在另一台电脑或手机上继续同一项工作。模型请求、文件操作与命令执行仍发生在开发机，设备只是访问工作区的入口。
+  </p>
+
+  <h2 id="选择连接方式">选择连接方式</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>方式</th>
+          <th>适合什么场景</th>
+          <th>如何进入</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Connections 直连</td>
+          <td>设备可以直接访问开发机，例如同一局域网。</td>
+          <td>打开主机地址，输入访问口令；也可从另一台 Mica 的 Connections 添加地址。</td>
+        </tr>
+        <tr>
+          <td>Mobile Relay</td>
+          <td>手机与开发机不在同一网络。</td>
+          <td>部署或接入公网中转机，打开插件生成的手机链接。</td>
+        </tr>
+        <tr>
+          <td>会话分享链接</td>
+          <td>给可信的人提供特定会话的操作入口。</td>
+          <td>
+            打开 <code>/share?session=…</code> 链接，无需另外输入口令。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <aside class="callout">
+    <strong>远程连接可以执行真实操作</strong>
+    <p>
+      完整工作区拥有宿主机的文件与命令能力。分享视图也能调用运行时 API；分享链接应按访问凭据保管。Mobile Relay
+      同样允许对话与真实终端，不能作为只读访问使用。
+    </p>
+  </aside>
+
+  <h2 id="在局域网连接">在局域网连接</h2>
+  <ol class="steps">
+    <li>
+      在开发机启动桌面或 Web 运行时。默认监听地址为 <code>0.0.0.0:8787</code>
+      ；要被其他设备连接，服务必须监听可达的网络地址。
+    </li>
+    <li>
+      在侧栏打开 <strong>Connections</strong>，启用<strong>局域网/公网可访问</strong>。
+    </li>
+    <li>
+      修改初始访问口令 <code>0000</code>。输入新口令后回车或移出输入框保存。
+    </li>
+    <li>在另一台设备打开卡片显示的主机地址，输入口令进入工作区。实际端口以启动日志为准。</li>
+  </ol>
+  <p>
+    如果另一台电脑也运行 Mica，可在它的 Connections
+    中添加这个地址，探测后打开对应运行时。手机浏览器会使用移动布局，操作的仍是相同的会话和工作区。
+  </p>
+  <figure class="mobile-figure">
+    <img
+      src={`${base}screenshots/mobile.png`}
+      width="390"
+      height="844"
+      alt="Mica 移动视口的会话界面，展示示例任务与输入区"
+      loading="lazy"
+    />
+    <figcaption>移动视口预览 · 示例项目与脚本化模型响应。</figcaption>
+  </figure>
+  <p>
+    直连无法打开时，先确认设备能访问主机 IP 与端口，再检查监听地址和访问设置。绑定 <code>127.0.0.1</code>{' '}
+    的运行时只能从本机访问。
+  </p>
+
+  <h2 id="通过公网中转连接手机">通过公网中转连接手机</h2>
+  <p>
+    Mobile Relay 由插件管理开发机与中转机之间的桥。开发机向外轮询，无需把本机运行时端口转发到公网。手机通过 HTTPS
+    访问中转机。
+  </p>
+  <h3>已有中转机</h3>
+  <ol>
+    <li>
+      打开 <strong>Settings → Plugins → Mobile Relay</strong>。
+    </li>
+    <li>
+      填写中转地址，例如 <code>https://mica.example.com</code>。
+    </li>
+    <li>
+      点击<strong>注册到中转机</strong>。插件会把生成的凭据保存到本机，并显示手机链接。
+    </li>
+    <li>
+      在手机上打开完整链接，包括其中的 <code>?t=</code> 参数。可加入主屏幕以便再次访问。
+    </li>
+  </ol>
+  <p>手机链接使用独立 token，和 Connections 的访问口令分开。不要自己编写 token；中转机只接受已经登记的值。</p>
+  <h3>首次部署</h3>
+  <p>
+    准备一台可通过 SSH 管理的公网 Linux 主机。在会话设置的 Mobile Relay 中打开<strong>手机访问</strong>面板，填写中转机
+    SSH 等信息，再执行接入 / 部署。缺少页面构建产物时，面板可以把构建部署任务交给 agent。
+  </p>
+  <p>
+    也可以明确要求 Mica“使用 mobile-relay-setup 配置手机访问”。部署涉及服务器与域名设置，完整前提与手动流程见
+    <a href="https://github.com/qirong77/mica-code/tree/main/plugins/mobile-relay">插件说明</a>。
+  </p>
+  <h3>运行与更新</h3>
+  <p>
+    保持开发机上的运行时与插件宿主可用。插件详情会显示本机桥、中转机、手机和页面版本状态；升级后可点击
+    <strong>更新中转机页面</strong>上传本机页面产物。
+  </p>
+  <p>
+    连接异常时，可以让 Mica 使用 <code>mobile_relay</code> 的 <code>doctor</code>{' '}
+    操作逐项排查。停止手机访问可关闭插件中的<strong>启用手机访问</strong>，或停用整个插件。
+  </p>
+  <h3>手机入口的能力范围</h3>
+  <p>
+    中转支持会话操作、流式输出、工作区终端、只读文件与 Git 视图。文件和 Git
+    的直接写入操作、配置页调用、受控浏览器与受控终端窗口不在中转白名单中。
+  </p>
+  <p>这些界面限制不构成执行沙箱：对话中的 agent 与工作区终端仍可在开发机执行命令。</p>
+
+  <h2 id="分享一条会话">分享一条会话</h2>
+  <p>从会话的分享入口复制链接。链接形如：</p>
+  <CodeBlock code={'http://YOUR_HOST:8787/share?session=SESSION_ID'} lang="text" title="分享链接格式" />
+  <p>
+    接收者无需额外输入口令。只有指向真实存在会话的链接才会换取分享凭据；裸 <code>/share</code> 和无效会话 ID
+    不会取得凭据。
+  </p>
+  <p>
+    分享凭据可以调用通用运行时 API，包括文件、终端与配置能力。页面聚焦一条会话，并不限制 API
+    只能访问这条会话。链接没有独立有效期或逐链接撤销机制，请仅发给可信的人。
+  </p>
+  <p>
+    <code>--no-share</code> 关闭分享页面路由，不会撤销已经签发的分享凭据。修改访问口令会使已有 cookie
+    失效，但原有效分享链接仍可能再次换取凭据；也不要把关闭远程访问开关当作已有凭据的撤销动作。
+  </p>
+
+  <h2 id="仅在本机使用">仅在本机使用</h2>
+  <p>
+    只需本机浏览器工作区时，在 <code>apps/desktop</code> 中启动已有构建：
+  </p>
+  <CodeBlock code={'npm run start:web -- --host 127.0.0.1 --port 8787 --no-share'} />
+  <p>
+    回环连接与 <code>MICA_DESKTOP_TRUSTED_CLIENTS</code>{' '}
+    显式信任的来源按本机放行。默认完整远程访问开关关闭；没有完整访问凭据的远端通常只能进入有效分享链接。
+    <code>/api/health</code> 仅用于探测运行时指纹与访问状态，保持开放。
+  </p>
+
+  <h2 id="反向代理与访问地址">反向代理与访问地址</h2>
+  <p>
+    经反向代理访问时，使用 <code>MICA_DESKTOP_ALLOWED_HOSTS</code> 配置允许的主机名；用{' '}
+    <code>MICA_DESKTOP_PUBLIC_URL</code> 指定生成分享链接时使用的公开基础地址。
+  </p>
+  <p>
+    运行时按直接连接的对端地址识别本机。反向代理或隧道从回环转入的请求会按本机放行，这条链路的认证需要由代理提供。Host /
+    Origin 检查用于防范跨站请求，不能替代代理端的访问认证。
+  </p>
+  <p>
+    需要理解不同运行方式，见<a href={`${base}docs/desktop/`}>桌面与浏览器</a>；插件配置入口见
+    <a href={`${base}docs/plugins/`}>插件与能力管理</a>。
+  </p>
+</DocLayout>

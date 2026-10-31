@@ -45,6 +45,8 @@ export function createPluginThread(input: PluginSubagentThreadHostOptions): Plug
   let recordedRequests = 0;
   let disposed = false;
   let answering = false;
+  // 关闭线程要能停下正在跑的那一轮：dispose 之后没人看结果，继续跑完只是白烧 token。
+  const shutdown = new AbortController();
 
   const recordUsage = (startedAt: string, status: 'completed' | 'failed' | 'killed', description: string): void => {
     const history = child.usageHistory ?? [];
@@ -90,9 +92,10 @@ export function createPluginThread(input: PluginSubagentThreadHostOptions): Plug
       answering = true;
       attachCallbacks(child, askOptions);
       const startedAt = new Date().toISOString();
+      const signal = askOptions.signal ? AbortSignal.any([askOptions.signal, shutdown.signal]) : shutdown.signal;
       try {
         const answer = await child.query(text, {
-          ...(askOptions.signal ? { signal: askOptions.signal } : {}),
+          signal,
           ...(options.maxTurns === undefined ? {} : { maxTurns: options.maxTurns }),
         });
         recordUsage(startedAt, 'completed', askOptions.description ?? options.description ?? options.type);
@@ -100,7 +103,7 @@ export function createPluginThread(input: PluginSubagentThreadHostOptions): Plug
       } catch (error) {
         recordUsage(
           startedAt,
-          askOptions.signal?.aborted ? 'killed' : 'failed',
+          signal.aborted ? 'killed' : 'failed',
           askOptions.description ?? options.description ?? options.type,
         );
         throw error;
@@ -115,6 +118,7 @@ export function createPluginThread(input: PluginSubagentThreadHostOptions): Plug
     dispose() {
       if (disposed) return;
       disposed = true;
+      shutdown.abort(new Error('这条子代理线程已经关闭'));
       detachCallbacks(child);
     },
   };

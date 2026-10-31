@@ -27,7 +27,8 @@ const TIMELINE_CHAR_LIMITS: Record<SubagentTaskTimelineKind, number> = {
   tool_result: 1_200,
 };
 
-export type SubagentTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
+/** `partial` 是跑到轮次上限的子代理：有可用的部分成果，但没完成任务。 */
+export type SubagentTaskStatus = 'running' | 'completed' | 'partial' | 'failed' | 'killed';
 
 export type SubagentTaskActivity = {
   id: string;
@@ -151,7 +152,7 @@ export class SubagentTaskManager {
           if (managed.record.status !== 'running') return;
           if (error instanceof AgentMaxTurnsError) {
             this.complete(managed, {
-              status: 'failed',
+              status: 'partial',
               result: error.partialResult,
               error: error.message,
               usage: readTaskUsage(options.getUsage),
@@ -181,7 +182,14 @@ export class SubagentTaskManager {
         this.attachExecution(promise);
       },
       complete: (result, usage) => finish({ status: 'completed', result, usage }),
-      fail: (error, result, usage) => finish({ status: 'failed', error: formatErrorMessage(error), result, usage }),
+      fail: (error, result, usage) =>
+        finish({
+          // 轮次用尽的子代理有部分成果，与 start() 保持同一判定。
+          status: error instanceof AgentMaxTurnsError ? 'partial' : 'failed',
+          error: formatErrorMessage(error),
+          result: result ?? (error instanceof AgentMaxTurnsError ? error.partialResult : undefined),
+          usage,
+        }),
     };
   }
 

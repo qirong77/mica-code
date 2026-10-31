@@ -1,7 +1,13 @@
 import { readFile } from 'fs/promises'
 import path from 'path'
 import { ipcMain } from 'electron'
-import { compareChangePaths, parseNumstat, parseStatusCode, statusFromCode } from './git-core'
+import {
+  compareChangePaths,
+  parseNumstat,
+  parseStatusCode,
+  statusFromCode,
+  sumLineChanges
+} from './git-core'
 import {
   countLines,
   getBranchSummary,
@@ -59,11 +65,20 @@ async function getSummary(cwd) {
   }
 
   files.sort((a, b) => compareChangePaths(a.path, b.path))
+  return { root, files, ...sumLineChanges(files) }
+}
+
+/**
+ * 顶栏徽标只要「多少变更」：文件数与加/删行合计。故意复用 `getSummary` 而不是另算
+ * 一遍——徽标和 GIT 面板显示的是同一个工作区，数字不一致比数字不准更糟。
+ */
+async function getChangeCounts(cwd) {
+  const summary = await getSummary(cwd)
   return {
-    root,
-    files,
-    additions: files.reduce((total, file) => total + file.additions, 0),
-    deletions: files.reduce((total, file) => total + file.deletions, 0)
+    root: summary.root,
+    files: summary.files.length,
+    additions: summary.additions,
+    deletions: summary.deletions
   }
 }
 
@@ -107,6 +122,14 @@ export function registerGitIpc() {
       return { repository: await getSummary(cwd), error: null }
     } catch (error) {
       return { repository: null, error: gitErrorMessage(error) }
+    }
+  })
+
+  ipcMain.handle('git:change-counts', async (_event, { cwd } = {}) => {
+    try {
+      return { counts: await getChangeCounts(cwd), error: null }
+    } catch (error) {
+      return { counts: null, error: gitErrorMessage(error) }
     }
   })
 

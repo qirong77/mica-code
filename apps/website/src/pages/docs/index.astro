@@ -1,40 +1,63 @@
 ---
-import BaseLayout from '../../layouts/BaseLayout.astro';
+import DocLayout from '../../layouts/DocLayout.astro';
+import Icon from '../../components/Icon.astro';
 import { docGroups } from '../../content/docs';
 const base = import.meta.env.BASE_URL;
 ---
 
-<BaseLayout title="使用文档" description="从安装 Mica Code 到模型配置、桌面工作区、扩展与自动化，一站查找使用指南。">
-  <section class="docs-landing container">
+<DocLayout
+  title="文档概览"
+  active="overview"
+  description="从第一次安装到长任务、插件和自动化集成，找到适合你的 Mica Code 使用路径。"
+>
+  <div class="doc-overview">
     <p class="eyebrow">MICA CODE / DOCUMENTATION</p>
     <h1>从这里，开始构建。</h1>
     <p class="lead">
       第一次使用，先连接模型并完成一个任务。
       <br />
-      已经熟悉 Mica？按工作场景查找需要的指南。
+      已经熟悉 Mica？沿着你的工作场景继续探索。
     </p>
-    <a class="btn btn-primary" href={`${base}docs/getting-started/`}>
-      快速开始 <span>→</span>
+  </div>
+  <div class="start-grid">
+    <a class="start-card" href={`${base}docs/getting-started/`}>
+      <Icon name="terminal" size={25} />
+      <h3>在终端开始</h3>
+      <p>安装 CLI，接入自己的模型，在项目里发送第一个开发任务。</p>
+      <span>
+        阅读快速开始
+        <Icon name="arrow" size={14} />
+      </span>
     </a>
-    {docGroups.map((group) => (
-      <section class="docs-landing-group">
-        <h2>{group.label}</h2>
-        <div class="guide-grid">
-          {group.items.map((page) => (
-            <a class="guide-card" href={`${base}docs/${page.key}/`}>
-              <span class="guide-arrow" aria-hidden="true">
-                ↗
-              </span>
-              <h3>{page.title}</h3>
-              <p>{page.description}</p>
-            </a>
-          ))}
-        </div>
-      </section>
-    ))}
-    <div class="docs-landing-bottom">
-      <a href={`${base}architecture/`}>交互架构图 ↗</a>
-      <a href="https://github.com/qirong77/mica-code/issues">问题反馈 ↗</a>
-    </div>
-  </section>
-</BaseLayout>
+    <a class="start-card" href={`${base}docs/desktop/`}>
+      <Icon name="monitor" size={25} />
+      <h3>打开完整工作区</h3>
+      <p>从源码启动桌面或 Web，把对话、代码、Git 与终端放在一起。</p>
+      <span>
+        启动桌面与浏览器
+        <Icon name="arrow" size={14} />
+      </span>
+    </a>
+  </div>
+  {docGroups.map((group) => (
+    <section>
+      <h2>{group.label}</h2>
+      <div class="guide-grid">
+        {group.items.map((page) => (
+          <a class="guide-card" href={`${base}docs/${page.key}/`}>
+            <Icon name="arrow" size={13} />
+            <h3>{page.title}</h3>
+            <p>{page.description}</p>
+          </a>
+        ))}
+      </div>
+    </section>
+  ))}
+  <aside class="callout callout-subtle">
+    <strong>文档与源码一起更新</strong>
+    <p>
+      使用指南围绕当前代码编写。需要查看实现，可从<a href={`${base}docs/architecture/`}>架构概览</a>
+      进入；遇到与文档不一致的行为，可以在<a href="https://github.com/qirong77/mica-code/issues"> GitHub 提交反馈</a>。
+    </p>
+  </aside>
+</DocLayout>

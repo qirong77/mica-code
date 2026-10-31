@@ -1,321 +1,162 @@
-/**
- * 脚本化的 OpenAI Responses 兼容 provider，只用于生成 README / 文档截图与本地演示。
- *
- * 故意不接真实模型：截图需要稳定、可复现的对话形态（思考 → 工具 → 工具 → 总结），
- * 真实模型每次跑出来的内容都不一样。
- *
- * 每轮对话按「最后一条用户消息里的关键词」选一段脚本（`ROUNDS`），脚本里的每个步骤
- * 对应一次 provider 请求：`tool` 步骤产生函数调用（agent 会带着结果继续下一次请求），
- * `text` 步骤产出最终回答并把该段脚本的指针复位。
- *
- * 用法：
- *   node scripts/demo-mock-provider.mjs [port]        # 默认 8898
- *   MICA_HOME=<临时目录> mica                          # config 里把 provider 指向它
- *
- * 完整的截图流程见 AGENT.md「对外文档与演示素材」。
- */
+#!/usr/bin/env node
+/** Local Responses SSE fixture for reproducible screenshots; never calls a model. */
 import { createServer } from 'node:http';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { BASE_QUEUE, BASE_TESTS, ABORT_QUEUE, ABORT_TESTS } from './prepare-doc-demo.mjs';
 
-const PORT = Number(process.argv[2] || 8898);
-const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const updateFile = (path, before, after) => `*** Update File: ${path}\n@@\n${before.trimEnd().split('\n').map((line) => `-${line}`).join('\n')}\n${after.trimEnd().split('\n').map((line) => `+${line}`).join('\n')}\n`;
+export const DEMO_PATCH = `*** Begin Patch\n${updateFile('src/task-queue.mjs', BASE_QUEUE, ABORT_QUEUE)}${updateFile('test/task-queue.test.mjs', BASE_TESTS, ABORT_TESTS)}*** End Patch`;
 
-const ROUNDS = [
-  {
-    match: /可取消|cancel|AbortController/,
-    steps: [
-      {
-        reason: '先看清事件总线现在怎么分发，再决定改动范围。',
-        calls: [
-          {
-            name: 'grep_search',
-            args: { pattern: 'emit\\(|dispatch\\(|subscribe\\(', path: 'packages/mica-runtime', include: '*.ts' },
-          },
-          { name: 'read_file', args: { file_path: 'packages/mica-runtime/events.ts', limit: 120 } },
-        ],
-      },
-      {
-        reason: '派发循环加 abort 检查，再用 patch 一次性落地。',
-        calls: [
-          {
-            name: 'apply_patch',
-            args: {
-              patch:
-                '*** Begin Patch\n*** Update File: packages/mica-runtime/events.ts\n@@ export class EventBus\n-    for (const handler of this.handlers.get(name) ?? []) handler(payload)\n+    for (const handler of this.handlers.get(name) ?? []) {\n+      if (signal?.aborted) return\n+      handler(payload)\n+    }\n*** End Patch',
-            },
-          },
-          { name: 'run_shell', args: { command: 'bun run test -- packages/mica-runtime/events.test.ts', timeout_ms: 60 } },
-        ],
-      },
-      {
-        text: `改完了，三处变更都在 \`packages/mica-runtime\`：
+const milestones = ['确认串行执行与失败恢复行为', '为任务队列补充 AbortSignal 支持', '验证取消行为与原有测试'];
+const todos = (statuses) => ({ name: 'todo_write', args: { todos: milestones.map((content, index) => ({ content, status: statuses[index] })) } });
+const guard = `node -e 'const fs = require("node:fs"); const path = require("node:path"); const root = fs.realpathSync("../.."); const marker = JSON.parse(fs.readFileSync(path.join(root, ".mica-docs-demo.json"), "utf8")); const pkg = JSON.parse(fs.readFileSync("package.json", "utf8")); if (marker.kind !== "mica-docs-demo" || marker.version !== 1 || marker.root !== root || fs.realpathSync(process.cwd()) !== path.join(root, "workspace", "task-queue") || pkg.name !== "task-queue-demo" || pkg.private !== true) throw new Error("Use the prepared isolated demo workspace"); console.log("Isolated documentation fixture confirmed");'`;
+const QUEUE_STEPS = [
+  { reason: '先确认当前目录是独立演示仓库，再查看队列和测试。', calls: [{ name: 'run_shell', args: { command: guard, timeout_ms: 10000 } }] },
+  { reason: '把工作分为行为确认、取消支持和验证三步。读取现有实现，保留 FIFO 与失败恢复语义。', calls: [
+    todos(['in_progress', 'pending', 'pending']),
+    { name: 'grep_search', args: { pattern: 'TaskQueue|queue.add|test\\(', path: '.', include: '*.mjs', head_limit: 40 } },
+    { name: 'read_file', args: { file_path: 'src/task-queue.mjs', limit: 120 } },
+    { name: 'read_file', args: { file_path: 'test/task-queue.test.mjs', limit: 160 } },
+  ] },
+  { reason: '增加可选 signal：排队期间取消会跳过任务；运行中的任务通过收到的 signal 协作退出，队列等待清理完成。', calls: [
+    todos(['completed', 'in_progress', 'pending']),
+    { name: 'apply_patch', args: { patch: DEMO_PATCH } },
+  ] },
+  { reason: '实现和三条取消测试已写入。现在运行 Node 原生测试，并检查补丁空白错误。', calls: [
+    todos(['completed', 'completed', 'in_progress']),
+    { name: 'run_shell', args: { command: 'node --test --test-reporter=tap && git diff --check && git diff --stat', timeout_ms: 30000 } },
+  ] },
+  { reason: '根据工具返回核对测试数量与退出码，然后更新计划。', calls: [todos(['completed', 'completed', 'completed'])] },
+  { text: `已为任务队列补充 **AbortSignal** 支持，改动保留在示例仓库中，尚未提交。
 
-1. **\`EventBus.emit\` 接受可选 \`signal\`**：每次派发前检查 \`signal.aborted\`，命中立即返回，已注册的 handler 不再被调用。
-2. **\`subscribe\` 返回 dispose**：取消订阅由调用方持有，和 abort 走同一条退出路径。
-3. **补了 3 条测试**：取消后不再派发、派发中途取消、重复 dispose 幂等。
+- \`add(task, { signal })\`：已取消的信号直接拒绝；排队中的任务取消后不会执行。
+- 运行中的任务收到同一个 \`signal\`，可协作处理取消。队列等待它结束和清理，再启动下一项。
+- 取消监听器在任务结束时移除，原有 FIFO 与失败后继续执行的行为保留。
 
-\`\`\`ts
-const controller = new AbortController()
-bus.emit('tool:start', payload, { signal: controller.signal })
-controller.abort() // 之后注册的 handler 不会再被触发
-\`\`\`
+\`node --test\` 的实际工具输出确认 **5 项测试通过、0 项失败**：原有 2 项，加上提前取消、排队取消和运行中取消 3 项。\`git diff --check\` 也已通过。
 
-\`\`\`bash
-$ bun run test -- packages/mica-runtime/events.test.ts
+\`src/task-queue.mjs\` 和 \`test/task-queue.test.mjs\` 可在文件与变更面板继续查看。
 
- ✓ packages/mica-runtime/events.test.ts (12 tests) 84ms
-   ✓ 取消后不再派发
-   ✓ 派发中途取消
-   ✓ 重复 dispose 幂等
-
- Test Files  1 passed (1)
-      Tests  12 passed (12)
-\`\`\`
-
-没有改动 provider 层：\`emit\` 的旧签名仍然兼容，只是多了可选参数。`,
-      },
-    ],
-  },
-  {
-    match: /lease|锁|跨进程/,
-    steps: [
-      {
-        reason: '先确认 lease 的写入点和 release 时机。',
-        calls: [
-          {
-            name: 'grep_search',
-            args: { pattern: 'turn-lock|acquireTurnLease|turn:after', path: 'packages/mica-session' },
-          },
-          { name: 'read_file', args: { file_path: 'packages/mica-session/turnLocks.ts', limit: 160 } },
-        ],
-      },
-      {
-        text: `turn lease 的作用只有一个：**同一时刻只允许一个进程写同一条 session**。
-
-它必须跨进程，因为同一条会话可能同时被 TUI、\`mica exec\`、桌面 app-server 打开——它们各自是独立进程，内存里的互斥完全看不见对方。
-
-- 锁文件是 \`sessions/.turn-locks/<id>.lock\`，用 \`wx\` 抢占，写 owner pid
-- 抢不到就拒绝启动这一轮，而不是排队等：两个写者交错刷新快照会直接把历史写坏
-- 必须在 \`turn:after\` **之前**释放：插件在 \`turn:after\` 里提交下一轮时，会立刻来抢同一把锁
-- 孤儿锁靠 pid 存活判定回收，pid 复用是已知边界
-
-顺序是：拿 lease → \`refreshFromStore()\` → 跑 turn → 存盘 → 发 \`turn:after\` 前释放。`,
-      },
-    ],
-  },
-  {
-    match: /缓存|cache|前缀/,
-    steps: [
-      {
-        text: `缓存优先是 Mica 的结构性选择，不是某个开关。
-
-**会话默认 append-only**：system prompt、角色、skills 索引、工具描述都固定在同一段前缀里，历史只往后追加，于是提供商的前缀缓存每一轮都能命中。
-
-**改动会被显式隔离**：切角色、切模型、压缩历史都会重建前缀，所以它们都被放在明确的边界上（新 turn 之前、compact checkpoint 之后），不会在对话中间悄悄换掉前缀。
-
-**压缩只碰工具结果**：默认的快速压缩把工具输出换占位符、把写文件正文裁掉，但对话文本和轮次顺序不变——前缀还能接着命中；需要模型摘要时才显式走 \`/compact llm\`。
-
-实测的长会话里，输入侧缓存命中率稳定在 94%–99%，token 账单主要花在新追加的那一段上。`,
-      },
-    ],
-  },
-  {
-    match: /typecheck|README|测试/,
-    steps: [
-      {
-        reason: '先把任务拆成可执行的几步，再并行查两处线索。',
-        calls: [
-          {
-            name: 'TodoWrite',
-            args: {
-              todos: [
-                { content: '定位 event bus 的派发入口', status: 'completed', activeForm: '定位 event bus 的派发入口' },
-                { content: '改造为可取消的派发', status: 'in_progress', activeForm: '改造为可取消的派发' },
-                { content: '补取消语义的测试', status: 'pending', activeForm: '补取消语义的测试' },
-                { content: '跑 typecheck 与相关测试', status: 'pending', activeForm: '跑 typecheck 与相关测试' },
-              ],
-            },
-          },
-          { name: 'grep_search', args: { pattern: 'emit\\(|dispatch\\(|subscribe\\(', path: 'packages/mica-runtime' } },
-          { name: 'read_file', args: { file_path: 'packages/mica-runtime/events.ts', limit: 120 } },
-        ],
-      },
-      {
-        reason: '跑一遍类型检查和 runtime 的测试，确认没有回退。',
-        calls: [{ name: 'run_shell', args: { command: 'bun run typecheck', timeout_ms: 180 } }],
-      },
-      {
-        reason: '类型干净了，再跑一遍事件总线的测试。',
-        calls: [
-          {
-            name: 'run_shell',
-            args: { command: 'bun run test -- packages/mica-runtime/events.test.ts', timeout_ms: 120 },
-          },
-        ],
-      },
-      {
-        text: `我先在后台跑一遍 typecheck，同时把派发改成可取消。
-
-- \`EventBus.emit(name, payload, { signal })\`：每次派发前检查 \`signal.aborted\`，命中就立即返回
-- \`subscribe\` 返回 dispose，取消订阅和 abort 走同一条退出路径
-- 补三条测试：取消后不再派发、派发中途取消、重复 dispose 幂等
-
-typecheck 结果出来后我再补测试，然后一起过一遍 \`packages/mica-runtime\` 的 README。`,
-      },
-    ],
-  },
+> 此会话由本地演示脚本驱动；界面中的模型用量为演示占位值。` },
+];
+const READONLY_ROUNDS = [
+  { key: 'fifo', match: /只读.*(?:FIFO|串行|设计)/i, steps: [
+    { reason: '只读查看示例队列，说明串行调度的方式。', calls: [{ name: 'read_file', args: { file_path: 'src/task-queue.mjs', limit: 120 } }] },
+    { text: '这个示例用一条 Promise 链串起任务。每个任务接到队尾，前一个任务结束后才运行下一个；单个任务失败不会阻断后续任务。\n\n取消正在运行的任务需要任务自身配合：signal 通知取消，清理完成后队列继续。可结合主会话中的实际实现与测试查看。\n\n> 本地脚本演示；模型用量为演示占位值。' },
+  ] },
+  { key: 'tests', match: /只读.*(?:测试|边界|取消)/i, steps: [
+    { reason: '只读查看测试文件，整理取消行为应覆盖的边界。', calls: [{ name: 'read_file', args: { file_path: 'test/task-queue.test.mjs', limit: 180 } }] },
+    { text: '取消行为需要覆盖三个时间点：提交前已经取消、等待执行时取消、开始执行后取消。运行中取消还应确认后续任务会等待清理结束。\n\n同时保留 FIFO 与失败恢复测试，防止引入取消支持时破坏原有行为。测试是否通过，以主会话执行 node --test 的真实输出为准。\n\n> 本地脚本演示；模型用量为演示占位值。' },
+  ] },
 ];
 
-/** 每段脚本的步骤指针；text 步骤结束后复位，下一轮从头开始。 */
-const cursors = new Map();
-
-function pickRound(prompt) {
-  return ROUNDS.find((round) => round.match.test(prompt)) ?? ROUNDS[0];
+function plainText(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((part) => part?.text ?? '').join('\n');
+  return JSON.stringify(value ?? '');
 }
 
-function lastUserText(body) {
+/** Derive the next step from this turn's real outputs, without shared cursors. */
+export function selectStep(body) {
   const input = Array.isArray(body?.input) ? body.input : [];
-  for (let i = input.length - 1; i >= 0; i -= 1) {
-    const item = input[i];
-    const parts = Array.isArray(item?.content) ? item.content : [];
-    const text = parts.map((part) => part?.text ?? '').join(' ');
-    if (item?.role === 'user' && text.trim()) return text;
+  let start = -1;
+  for (let index = input.length - 1; index >= 0; index -= 1) {
+    if (input[index]?.role === 'user') { start = index; break; }
   }
-  return '';
+  const prompt = start < 0 ? '' : plainText(input[start].content);
+  const round = READONLY_ROUNDS.find((item) => item.match.test(prompt)) ?? { key: 'queue', steps: QUEUE_STEPS };
+  const outputs = input.slice(start + 1).filter((item) => item?.type === 'function_call_output' && String(item.call_id).startsWith(`call_demo_${round.key}_`));
+  let next = 0;
+  for (const output of outputs) {
+    const match = String(output.call_id).match(/^call_demo_[a-z]+_s(\d+)_/);
+    if (match) next = Math.max(next, Number(match[1]) + 1);
+    const text = plainText(output.output);
+    if (/工具执行失败|工具.*(?:不存在|未找到)|Tool execution failed|exit_code:\s*(?:[1-9]\d*|null)\b/i.test(text)) {
+      return { key: round.key, index: next, text: `演示在真实工具执行处停止，尚不能报告任务完成或测试通过。请检查工具返回，确认工作目录来自 prepare-doc-demo.mjs；若已运行过补丁，使用全新示例目录再试。\n\n工具返回：\n\n\`\`\`text\n${text.slice(0, 1800)}\n\`\`\`` };
+    }
+  }
+  if (round.key === 'queue' && next >= 4) {
+    const result = outputs.find((item) => String(item.call_id).includes('_s3_') && /# tests\s+5\b/.test(plainText(item.output)));
+    const text = plainText(result?.output);
+    if (!/# pass\s+5\b/.test(text) || !/# fail\s+0\b/.test(text) || !/exit_code:\s*0\b/.test(text)) {
+      return { key: round.key, index: next, text: '补丁工具已返回，但没有收到可核实的 5 项测试通过、0 项失败与成功退出码。请查看 node --test 的真实输出；本次不报告测试通过。' };
+    }
+  }
+  return { key: round.key, index: next, ...round.steps[Math.min(next, round.steps.length - 1)] };
 }
 
-let requestCount = 0;
-
-createServer((req, res) => {
-  if (req.method === 'GET' && req.url?.includes('/models')) {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ data: [{ id: 'mica-demo', object: 'model' }] }));
-    return;
-  }
-  if (req.method !== 'POST' || !req.url?.includes('/responses')) {
-    res.writeHead(404).end();
-    return;
-  }
-  let raw = '';
-  req.on('data', (chunk) => (raw += chunk));
-  req.on('end', async () => {
-    let body = {};
-    try {
-      body = JSON.parse(raw);
-    } catch {
-      // 解析失败时按第一段脚本处理
-    }
-    requestCount += 1;
-    const prompt = lastUserText(body);
-    const round = pickRound(prompt);
-    const key = ROUNDS.indexOf(round);
-    const index = cursors.get(key) ?? 0;
-    const step = round.steps[Math.min(index, round.steps.length - 1)];
-    cursors.set(key, step.text ? 0 : index + 1);
-
-    // 用量形状要真实：输入远大于输出、绝大部分命中缓存，状态栏才会显示合理的 ctx 占比。
-    const inputTokens = 96000 + requestCount * 4200;
-    const usage = {
-      input_tokens: inputTokens,
-      input_tokens_details: { cached_tokens: Math.round(inputTokens * 0.94) },
-      output_tokens: 320,
-      total_tokens: inputTokens + 320,
-    };
-    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-    const emit = (event) => res.write(`data: ${JSON.stringify(event)}\n\n`);
-
-    emit({ type: 'response.created', response: { id: 'resp_1', object: 'response' } });
-    emit({ type: 'response.in_progress', response: { id: 'resp_1', object: 'response' } });
-
-    const finish = () => {
-      emit({
-        type: 'response.completed',
-        response: { id: 'resp_done', object: 'response', status: 'completed', usage },
-      });
-      emit({ type: 'response.done', response: { id: 'resp_done', object: 'response', status: 'completed', usage } });
-      res.end();
-    };
-
-    if (step.reason) {
-      const id = `rs_${requestCount}`;
-      emit({
-        type: 'response.reasoning_summary_text.delta',
-        item_id: id,
-        output_index: 0,
-        content_index: 0,
-        delta: step.reason,
-      });
-      emit({
-        type: 'response.reasoning_summary_text.done',
-        item_id: id,
-        output_index: 0,
-        content_index: 0,
-        text: step.reason,
-      });
-    }
-
-    if (step.text) {
-      const msgId = `msg_${requestCount}`;
-      emit({
-        type: 'response.output_item.added',
-        output_index: 0,
-        item: { id: msgId, type: 'message', status: 'in_progress', role: 'assistant', content: [] },
-      });
-      for (const chunk of step.text.match(/[\s\S]{1,12}/g) ?? []) {
-        emit({ type: 'response.output_text.delta', item_id: msgId, output_index: 0, content_index: 0, delta: chunk });
-        await delay(18);
-      }
-      emit({ type: 'response.output_text.done', item_id: msgId, output_index: 0, content_index: 0, text: step.text });
-      emit({
-        type: 'response.output_item.done',
-        output_index: 0,
-        item: {
-          id: msgId,
-          type: 'message',
-          status: 'completed',
-          role: 'assistant',
-          content: [{ type: 'output_text', text: step.text }],
-        },
-      });
-      finish();
+export function startDemoProvider({ port = Number(process.env.MICA_DEMO_PROVIDER_PORT || 8898), delayScale = Number(process.env.MICA_DEMO_DELAY_SCALE ?? 1) } = {}) {
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid provider port');
+  if (!Number.isFinite(delayScale) || delayScale < 0) throw new Error('Invalid MICA_DEMO_DELAY_SCALE');
+  const delay = (ms) => new Promise((done) => setTimeout(done, ms * delayScale));
+  let requestCount = 0;
+  const server = createServer((req, res) => {
+    if (req.method === 'GET' && req.url === '/health') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, mode: 'scripted-demo', usage: 'placeholder' }));
       return;
     }
-
-    step.calls.forEach((call, callIndex) => {
-      const callId = `call_${requestCount}_${callIndex}`;
-      const itemId = `fc_${requestCount}_${callIndex}`;
-      const args = JSON.stringify(call.args);
-      emit({
-        type: 'response.output_item.added',
-        output_index: callIndex,
-        item: {
-          id: itemId,
-          type: 'function_call',
-          status: 'in_progress',
-          call_id: callId,
-          name: call.name,
-          arguments: '',
-        },
-      });
-      emit({ type: 'response.function_call_arguments.delta', output_index: callIndex, item_id: itemId, delta: args });
-      emit({
-        type: 'response.function_call_arguments.done',
-        output_index: callIndex,
-        item_id: itemId,
-        arguments: args,
-      });
-      emit({
-        type: 'response.output_item.done',
-        output_index: callIndex,
-        item: {
-          id: itemId,
-          type: 'function_call',
-          status: 'completed',
-          call_id: callId,
-          name: call.name,
-          arguments: args,
-        },
-      });
+    if (req.method === 'GET' && req.url === '/v1/models') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [{ id: 'mica-demo', object: 'model' }] }));
+      return;
+    }
+    if (req.method !== 'POST' || req.url !== '/v1/responses') { res.writeHead(404).end(); return; }
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', async () => {
+      let body;
+      try { body = JSON.parse(raw); }
+      catch { res.writeHead(400).end('Invalid JSON'); return; }
+      const step = selectStep(body);
+      const serial = ++requestCount;
+      const responseId = `resp_demo_${serial}`;
+      console.log(`[demo] request=${serial} round=${step.key} step=${step.index}`);
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+      const emit = (event) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(event)}\n\n`); };
+      const output = [];
+      emit({ type: 'response.created', response: { id: responseId, object: 'response', status: 'in_progress', output: [] } });
+      emit({ type: 'response.in_progress', response: { id: responseId, object: 'response', status: 'in_progress' } });
+      if (step.reason) {
+        const id = `rs_demo_${serial}`;
+        emit({ type: 'response.reasoning_summary_text.delta', item_id: id, output_index: 0, summary_index: 0, delta: step.reason });
+        emit({ type: 'response.reasoning_summary_text.done', item_id: id, output_index: 0, summary_index: 0, text: step.reason });
+      }
+      await delay(450);
+      if (step.text) {
+        const item = { id: `msg_demo_${serial}`, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: step.text, annotations: [] }] };
+        emit({ type: 'response.output_item.added', output_index: 0, item: { ...item, status: 'in_progress', content: [] } });
+        for (const chunk of step.text.match(/[\s\S]{1,16}/g) ?? []) {
+          if (res.destroyed) return;
+          emit({ type: 'response.output_text.delta', item_id: item.id, output_index: 0, content_index: 0, delta: chunk });
+          await delay(18);
+        }
+        emit({ type: 'response.output_text.done', item_id: item.id, output_index: 0, content_index: 0, text: step.text });
+        emit({ type: 'response.output_item.done', output_index: 0, item });
+        output.push(item);
+      } else {
+        for (const [index, call] of step.calls.entries()) {
+          const item = { id: `fc_demo_${serial}_${index}`, type: 'function_call', status: 'completed', call_id: `call_demo_${step.key}_s${step.index}_${serial}_${index}`, name: call.name, arguments: JSON.stringify(call.args) };
+          emit({ type: 'response.output_item.added', output_index: index, item: { ...item, status: 'in_progress', arguments: '' } });
+          emit({ type: 'response.function_call_arguments.delta', output_index: index, item_id: item.id, delta: item.arguments });
+          emit({ type: 'response.function_call_arguments.done', output_index: index, item_id: item.id, arguments: item.arguments });
+          emit({ type: 'response.output_item.done', output_index: index, item });
+          output.push(item);
+          await delay(220);
+        }
+      }
+      // Explicit zero placeholders, not measured token counts or cache metrics.
+      const response = { id: responseId, object: 'response', status: 'completed', output, usage: { input_tokens: 0, input_tokens_details: { cached_tokens: 0 }, output_tokens: 0, total_tokens: 0 } };
+      emit({ type: 'response.completed', response });
+      emit({ type: 'response.done', response });
+      res.end();
     });
-    finish();
   });
-}).listen(PORT, '127.0.0.1', () => console.log(`mock provider on http://127.0.0.1:${PORT}`));
+  server.listen(port, '127.0.0.1', () => console.log(`Scripted demo provider: http://127.0.0.1:${server.address().port}/v1 (usage: demo placeholders)`));
+  return server;
+}
+
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  startDemoProvider({ port: Number(process.argv[2] || process.env.MICA_DEMO_PROVIDER_PORT || 8898) });
+}

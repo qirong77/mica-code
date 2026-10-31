@@ -8,7 +8,8 @@ import {
   parseStatus,
   parseStatusCode,
   shortRefName,
-  statusFromCode
+  statusFromCode,
+  sumLineChanges
 } from './git-core'
 
 describe('statusFromCode', () => {
@@ -124,5 +125,22 @@ describe('compareChangePaths', () => {
   it('数字感知、忽略大小写', () => {
     const paths = ['src/a10.ts', 'src/a2.ts', 'src/B.ts']
     expect([...paths].sort(compareChangePaths)).toEqual(['src/a2.ts', 'src/a10.ts', 'src/B.ts'])
+  })
+})
+
+describe('sumLineChanges', () => {
+  it('把一批变更文件的行数加起来（缺字段按 0）', () => {
+    expect(
+      sumLineChanges([
+        { additions: 3, deletions: 1 },
+        { additions: 0, deletions: 40 },
+        { binary: true }
+      ])
+    ).toEqual({ additions: 3, deletions: 41 })
+  })
+
+  it('空列表是 0/0', () => {
+    expect(sumLineChanges([])).toEqual({ additions: 0, deletions: 0 })
+    expect(sumLineChanges(undefined)).toEqual({ additions: 0, deletions: 0 })
   })
 })

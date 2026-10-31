@@ -47,7 +47,7 @@ export type PluginSubagentType = {
   requireOwnedPaths?: boolean;
 };
 
-export type PluginSubagentTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
+export type PluginSubagentTaskStatus = 'running' | 'completed' | 'partial' | 'failed' | 'killed';
 
 export type PluginSubagentTaskSnapshot = {
   id: string;

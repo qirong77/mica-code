@@ -159,6 +159,11 @@ export function createPluginSubagentHost(
       const contextMode = resolveContextMode(request.contextMode, definition);
       const contextFiles = request.contextFiles ?? [];
       const ownedPaths = resolveOwnedPaths(request.ownedPaths ?? [], definition);
+      // 租约冲突要在这里就拒绝：还没建子代理实例，也不会留下一条从未跑过、
+      // 0 用量的失败任务记录（任务表与统计里都是噪音）。
+      if (ownedPaths.length > 0) {
+        pathLeases.assertAvailable({ ownerKey: owner.taskOwnerId, ownedPaths });
+      }
       const writeMode = definition.writeMode ?? 'unrestricted';
       const toolFilter = buildSubagentToolFilter(definition);
       const delegatedPrompt = buildDelegatedSubagentPrompt({
@@ -349,9 +354,6 @@ export function createPluginSubagentHost(
 
       background(request) {
         const prepared = prepareSpawn(request);
-        if (prepared.ownedPaths.length > 0) {
-          pathLeases.assertAvailable({ ownerKey: prepared.owner.taskOwnerId, ownedPaths: prepared.ownedPaths });
-        }
         let settle: (result: PluginSubagentRunResult) => void = () => undefined;
         const done = new Promise<PluginSubagentRunResult>((resolve) => {
           settle = resolve;

@@ -279,7 +279,6 @@ export type MicaTurnRetrying = {
   error: string;
 };
 
-
 /**
  * Mica extension notification: By The Way（btw）线程的快照。
  *
@@ -590,7 +589,7 @@ export type MicaSubagentTaskItem = {
   parentTaskId?: string | null;
   subagentType: string;
   description: string;
-  status: 'running' | 'completed' | 'failed' | 'killed';
+  status: 'running' | 'completed' | 'partial' | 'failed' | 'killed';
   startedAt: string;
   finishedAt?: string | null;
   activities?: { id: string; summary: string; toolName?: string; startedAt: string }[];
@@ -686,7 +685,7 @@ export type MicaSubagentTaskDetail = {
   parentTaskId?: string | null;
   subagentType: string;
   description: string;
-  status: 'running' | 'completed' | 'failed' | 'killed';
+  status: 'running' | 'completed' | 'partial' | 'failed' | 'killed';
   startedAt: string;
   finishedAt?: string | null;
   model?: string;

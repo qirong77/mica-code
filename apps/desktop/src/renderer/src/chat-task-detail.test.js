@@ -37,6 +37,7 @@ describe('status labels', () => {
   it('maps known subagent statuses and passes unknown ones through', () => {
     expect(subagentStatusLabel('running')).toBe('运行中')
     expect(subagentStatusLabel('completed')).toBe('已完成')
+    expect(subagentStatusLabel('partial')).toBe('部分完成')
     expect(subagentStatusLabel('failed')).toBe('失败')
     expect(subagentStatusLabel('killed')).toBe('已停止')
     expect(subagentStatusLabel('weird')).toBe('weird')

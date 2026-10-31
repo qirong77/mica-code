@@ -17,6 +17,7 @@ export function formatBytes(value) {
 const SUBAGENT_STATUS_LABELS = {
   running: '运行中',
   completed: '已完成',
+  partial: '部分完成',
   failed: '失败',
   killed: '已停止'
 }

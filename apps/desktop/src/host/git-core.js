@@ -107,3 +107,17 @@ export function isBaseBranch(ref, current) {
 export function compareChangePaths(left, right) {
   return left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' })
 }
+
+/**
+ * 一批变更文件的加/删行合计。GIT 面板的总计与顶栏徽标用同一份，两处数字从此只有
+ * 一个来源（徽标少报或多报一行都会被当成 bug）。
+ */
+export function sumLineChanges(files) {
+  let additions = 0
+  let deletions = 0
+  for (const file of files || []) {
+    additions += Math.max(0, file?.additions || 0)
+    deletions += Math.max(0, file?.deletions || 0)
+  }
+  return { additions, deletions }
+}

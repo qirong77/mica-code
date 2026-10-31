@@ -60,34 +60,36 @@ const total = data.tasks.reduce((sum, task) => sum + task.checks, 0);
   <p>
     下表保留本次评测的汇总值。正确性与效率分别聚合，效率样本未严格限定为与评分相同的一组运行记录；各列应按下方定义独立阅读。
   </p>
-  <table>
-    <thead>
-      <tr>
-        <th>Agent</th>
-        <th>检查项得分</th>
-        <th>通过率</th>
-        <th>缓存命中率</th>
-        <th>耗时汇总</th>
-        <th>模型请求数</th>
-      </tr>
-    </thead>
-    <tbody>
-      {data.results.map((row) => (
+  <div class="table-wrap">
+    <table>
+      <thead>
         <tr>
-          <td>
-            <strong>{row.name}</strong>
-          </td>
-          <td>
-            {row.passed}/{total}
-          </td>
-          <td>{((row.passed / total) * 100).toFixed(1)}%</td>
-          <td>{row.cachePercent}%</td>
-          <td>{row.minutes} 分钟</td>
-          <td>{row.requests}</td>
+          <th>Agent</th>
+          <th>检查项得分</th>
+          <th>通过率</th>
+          <th>缓存命中率</th>
+          <th>耗时汇总</th>
+          <th>模型请求数</th>
         </tr>
-      ))}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {data.results.map((row) => (
+          <tr>
+            <td>
+              <strong>{row.name}</strong>
+            </td>
+            <td>
+              {row.passed}/{total}
+            </td>
+            <td>{((row.passed / total) * 100).toFixed(1)}%</td>
+            <td>{row.cachePercent}%</td>
+            <td>{row.minutes} 分钟</td>
+            <td>{row.requests}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
   <p>图表通过率坐标为 95%–100%，用于显示高分区间的差异。轴的起点经过截取，条形长度应结合刻度和数值阅读。</p>
   <h2>指标定义</h2>
   <h3>检查项得分与通过率</h3>

@@ -2,16 +2,24 @@ export const docGroups = [
   {
     label: '开始使用',
     items: [
-      { key: 'getting-started', title: '快速开始', description: '安装 Mica，接入模型，完成第一个任务。' },
-      { key: 'configuration', title: '模型与配置', description: 'Provider、API 协议、模型列表与环境变量。' },
+      { key: 'getting-started', title: '快速开始', description: '安装 CLI，连接模型，完成第一个开发任务。' },
+      { key: 'configuration', title: '模型与配置', description: '连接模型服务，选择协议、模型与推理强度。' },
+      { key: 'desktop', title: '桌面与浏览器', description: '启动工作区，把对话、代码、Git 和终端放在一起。' },
     ],
   },
   {
     label: '日常工作',
     items: [
-      { key: 'desktop', title: '桌面与浏览器', description: '对话、文件、Git、终端与远程访问。' },
-      { key: 'commands', title: '命令与快捷键', description: '会话、上下文、任务管理与键盘操作。' },
-      { key: 'extensions', title: '扩展与协作', description: 'Skills、MCP、自定义角色与子代理。' },
+      { key: 'workflows', title: '日常开发流程', description: '推进长任务，保留上下文，协调多个 agent。' },
+      { key: 'commands', title: '命令与快捷键', description: '终端命令、运行中操作与键盘参考。' },
+      { key: 'remote-access', title: '远程与手机访问', description: '连接开发机，理解分享链接与访问权限。' },
+    ],
+  },
+  {
+    label: '按需扩展',
+    items: [
+      { key: 'plugins', title: '插件与能力管理', description: '管理官方与用户插件，调整会话能力。' },
+      { key: 'extensions', title: 'Skills、MCP 与角色', description: '复用工作方法，连接外部工具，定义工作方式。' },
     ],
   },
   {

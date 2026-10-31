@@ -159,7 +159,7 @@ export interface MicaUiBackgroundTaskItem {
   finishedAt?: string;
 }
 
-export type MicaUiSubagentTaskStatus = 'running' | 'completed' | 'failed' | 'killed';
+export type MicaUiSubagentTaskStatus = 'running' | 'completed' | 'partial' | 'failed' | 'killed';
 
 export interface MicaUiSubagentTaskActivity {
   id: string;

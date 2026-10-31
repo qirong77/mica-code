@@ -1,5 +1,6 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
 const base = import.meta.env.BASE_URL;
 const groups = [
   {
@@ -30,14 +31,24 @@ const groups = [
     rows: [
       ['/new', '创建独立代理；/new <任务描述> 在新代理中后台执行任务。', true],
       ['/fork', '从当前历史分叉新代理；/fork <任务描述> 在分叉代理中后台执行。', true],
-      ['/task', '查看代理、保留的子代理任务与运行中的后台 shell；/task clear 清理空闲任务。', true],
+      ['/task', '查看主会话、子代理与运行中的后台 shell；/task clear 移除当前终端里非当前、空闲的主会话。', true],
       ['/btw', '发起不进入主对话上下文的旁问；/btw -continue 继续上一问，/btw -stop 停止回答。', true],
       ['/loop', '启动定时任务；/loop status 查看状态，/loop stop 停止。', false],
-      ['/capabilities', '本会话设置：选择可用的工具、Skills 与 MCP 服务；只影响当前会话，不改变配置页的默认值。', false],
+      [
+        '/capabilities',
+        '本会话设置：选择可用的工具、Skills 与 MCP 服务；只影响当前会话，不改变配置页的默认值。',
+        false,
+      ],
       ['/mcp', '查看 MCP 服务器与工具；/mcp reconnect <server> 重连。', false],
       ['/skills', '查看当前发现的 Skills。', false],
+      ['/todo', 'show / hide / clear 查看、收起或清空本轮计划（官方插件 Todo 提供）。', true],
+      ['/memory', 'status / list / review / refresh / path 查看和整理跨会话记忆（官方插件 Memory 提供）。', false],
       ['/commit', '生成提交说明并执行 Git 提交、尝试推送（官方插件 commit 提供）。', true],
-      ['/harness-review', 'list 查看运行复盘；report 导出报告；assess <id> <状态> <依据> 记录人工评估（官方插件 Harness Review 提供）。', true],
+      [
+        '/harness-review',
+        'list 查看运行复盘；report 导出报告；assess <id> <状态> <依据> 记录人工评估（官方插件 Harness Review 提供）。',
+        true,
+      ],
     ],
   },
 ];
@@ -53,6 +64,9 @@ const groups = [
     在终端输入框中使用斜杠命令管理工作。按任务查找操作，并通过“运行中可用”一列判断是否需要等待当前任务结束。
   </p>
   <p>本页命令适用于交互式终端。桌面应用通过模型面板、侧栏和任务面板提供对应操作；桌面对话框不会分派这些终端命令。</p>
+  <p>
+    插件命令随相应插件启用；停用后不再注册。能力与插件的关系见<a href={`${base}docs/plugins/`}>插件与能力管理</a>。
+  </p>
 
   {groups.map((group) => (
     <section>
@@ -93,28 +107,26 @@ const groups = [
     不调用模型，保留对话与轮次并清理工具结果、媒体和过长的工具参数；<code>/compact llm</code>{' '}
     会调用模型生成摘要并重写模型历史。压缩保留已有用量统计。
   </p>
-  <pre><code>/context
-/compact
-/context detail</code></pre>
+  <CodeBlock code={'/context\n/compact\n/context detail'} lang="text" />
 
   <h3>分开处理两条思路</h3>
   <p>
     用 <code>/new</code> 从空白会话开始，用 <code>/fork</code> 继承当前上下文，再通过 <code>/task</code>{' '}
     查看和切换。旁问适合临时问题，不需要把答案放进主任务的上下文。
   </p>
-  <pre><code>/fork 检查当前实现的边界情况，给出测试建议
-/task
-/btw 这里的乐观锁和互斥锁分别适用于什么情况？
-/btw -continue 那并发写的时候呢？</code></pre>
+  <CodeBlock
+    code={
+      '/fork 检查当前实现的边界情况，给出测试建议\n/task\n/btw 这里的乐观锁和互斥锁分别适用于什么情况？\n/btw -continue 那并发写的时候呢？'
+    }
+    lang="text"
+  />
   <p>
     旁问在输入框上方显示正在调用哪个工具、已经输出多少字；回答太长时用
     <code>/btw -stop</code> 停下，已经说出来的部分会保留。
   </p>
 
   <h3>定时执行重复任务</h3>
-  <pre><code>/loop 30m 检查测试结果，汇报新增失败
-/loop status
-/loop stop</code></pre>
+  <CodeBlock code={'/loop 30m 检查测试结果，汇报新增失败\n/loop status\n/loop stop'} lang="text" />
   <p>
     省略间隔时默认每 30 分钟执行；支持 <code>90s</code>、<code>1h30m</code> 和表示秒的纯数字。间隔范围为 10
     秒至一周。终端循环依赖当前 Mica 进程保持运行，每轮开始前会进行本地上下文清理。
@@ -126,10 +138,27 @@ const groups = [
     ，确认工作区的所有改动都应被提交；多人或多会话共用工作区时尤其要确认范围。
   </p>
   <p>
-    这个命令由官方插件 <code>commit</code> 提供：分析 Git 变化、让模型写提交说明、执行 add / commit /
-    push 都在插件里。写提交说明的模型默认跟随主配置，也可以在配置页
+    这个命令由官方插件 <code>commit</code> 提供：分析 Git 变化、让模型写提交说明、执行 add / commit / push
+    都在插件里。写提交说明的模型默认跟随主配置，也可以在配置页
     <strong>Plugins → Git Commit</strong> 里单独配置接口地址、Key、协议与模型（例如换一个更便宜的小模型），
     还能关掉自动推送。停用该插件后命令消失，<code>mica commit</code> 与桌面右键提交也会一并失效。
+  </p>
+
+  <h3>查看记忆与本轮计划</h3>
+  <CodeBlock code={'/memory status\n/memory list project\n/memory refresh\n/todo show'} lang="text" />
+  <p>
+    <code>/memory review</code> 立即请求模型整理当前会话，可能产生额外用量；<code>/memory refresh</code>{' '}
+    让下一轮重新读取记忆文件。
+    <code>/todo show</code> 展示本轮计划，长期决定与待办更适合写入会话笔记。使用方法见
+    <a href={`${base}docs/workflows/`}>日常开发流程</a>。
+  </p>
+
+  <h3>复盘运行</h3>
+  <CodeBlock code={'/harness-review list\n/harness-review report'} lang="text" />
+  <p>
+    <code>/harness-review assess &lt;id&gt; &lt;状态&gt; &lt;判断依据&gt;</code> 记录人工评估，<code>prune [天数]</code>{' '}
+    删除较早运行记录，
+    <code>rebuild</code> 重新聚合历史候选问题。报告提供证据，改进是否有效仍需要实际验证。
   </p>
 
   <h2>键盘操作</h2>
@@ -187,7 +216,7 @@ const groups = [
     排队消息在当前工具迭代结束后进入任务；如果本轮已无后续迭代，则在本轮成功结束后发送。任务失败或被中止时，待发输入会保留，方便撤回后修改。
   </p>
   <p>
-    扩展配置见 <a href={`${base}docs/extensions`}>MCP、Skills 与角色</a>。脚本中的命令行调用见{' '}
-    <a href={`${base}docs/headless`}>自动化与协议</a>。
+    扩展配置见 <a href={`${base}docs/extensions/`}>MCP、Skills 与角色</a>。脚本中的命令行调用见{' '}
+    <a href={`${base}docs/headless/`}>自动化与协议</a>。
   </p>
 </DocLayout>

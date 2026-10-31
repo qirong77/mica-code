@@ -1,5 +1,6 @@
 ---
 import DocLayout from '../../layouts/DocLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
 const base = import.meta.env.BASE_URL;
 const execEvents = `{"type":"thread.started","thread_id":"example-session"}
 {"type":"turn.started"}
@@ -72,21 +73,26 @@ const steerRequest = `{"id":4,"method":"turn/steer","params":{"expectedTurnId":"
           <td>
             <code>mica commit</code>
           </td>
-          <td>执行 <code>commit</code> 插件命令：生成提交说明并执行 Git 提交、尝试推送。</td>
+          <td>
+            执行 <code>commit</code> 插件命令：生成提交说明并执行 Git 提交、尝试推送。
+          </td>
           <td>单行 JSON 结果。</td>
         </tr>
       </tbody>
     </table>
   </div>
   <p>
-    先按 <a href={`${base}docs/configuration`}>模型与配置</a> 配置 API，再执行 <code>mica models</code> 获取准确的模型
+    先按 <a href={`${base}docs/configuration/`}>模型与配置</a> 配置 API，再执行 <code>mica models</code> 获取准确的模型
     ID。全部参数也可通过 <code>mica --help</code> 查看。
   </p>
 
   <h2>执行一次任务</h2>
-  <pre><code>mica exec "概述当前项目的主要模块和测试命令"
-mica exec --dir ./your-project --no-save "检查安装文档是否与脚本一致"
-mica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修复"</code></pre>
+  <CodeBlock
+    code={
+      'mica exec "概述当前项目的主要模块和测试命令"\nmica exec --dir ./your-project --no-save "检查安装文档是否与脚本一致"\nmica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修复"'
+    }
+    lang="bash"
+  />
   <div class="table-wrap">
     <table>
       <thead>
@@ -115,7 +121,8 @@ mica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修
             <code>--variant &lt;effort&gt;</code>
           </td>
           <td>
-            选择模型自己声明的档位（取值见 <code>mica models --json</code> 的 <code>efforts</code>）。档位名不做换算，模型不声明档位时不发推理参数。
+            选择模型自己声明的档位（取值见 <code>mica models --json</code> 的 <code>efforts</code>
+            ）。档位名不做换算，模型不声明档位时不发推理参数。
           </td>
         </tr>
         <tr>
@@ -159,7 +166,7 @@ mica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修
   </div>
   <p>
     MCP 参数为 <code>--mcp-config &lt;file&gt;</code>、<code>--strict-mcp-config</code> 与{' '}
-    <code>--mcp-init-timeout-ms &lt;ms&gt;</code>。配置结构和合并规则见 <a href={`${base}docs/extensions`}>扩展指南</a>
+    <code>--mcp-init-timeout-ms &lt;ms&gt;</code>。配置结构和合并规则见 <a href={`${base}docs/extensions/`}>扩展指南</a>
     。提示词中也可使用 <code>[Image](本地路径)</code> 引用图片，实际处理能力取决于模型。
   </p>
 
@@ -167,7 +174,7 @@ mica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修
   <p>
     将 stdout 作为事件流读取，将 stderr 单独保存为诊断日志。下面是省略工具事件后的格式示例，ID、正文与用量均为示意值：
   </p>
-  <pre><code>{execEvents}</code></pre>
+  <CodeBlock code={execEvents} lang="json" />
   <p>
     事件包括 <code>thread.started</code>、<code>turn.started</code>、<code>item.started</code>、
     <code>item.updated</code>、<code>item.completed</code>、<code>turn.completed</code> 和 <code>error</code>。按 item
@@ -178,10 +185,10 @@ mica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修
     使用 <code>thread.started.thread_id</code>{' '}
     关联已保存会话。只有成功结束才应将任务视为完成；同时检查进程退出码和错误事件，保留失败日志。
   </p>
-  <pre><code>mica exec --json "检查项目依赖和测试入口" &gt; events.jsonl 2&gt; diagnostics.log</code></pre>
+  <CodeBlock code={'mica exec --json "检查项目依赖和测试入口" > events.jsonl 2> diagnostics.log'} lang="bash" />
 
   <h2>持续会话：app-server</h2>
-  <pre><code>mica app-server --dir ./your-project --thinking</code></pre>
+  <CodeBlock code={'mica app-server --dir ./your-project --thinking'} lang="bash" />
   <p>
     为一个会话持有一个常驻进程，持续写入 stdin、逐行读取 stdout。请求带 <code>id</code>，响应以相同 ID 返回{' '}
     <code>result</code> 或 <code>error</code>；通知不带 ID。消息不需要 <code>jsonrpc</code> 字段。
@@ -189,7 +196,7 @@ mica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修
   <p>
     下面的请求须由客户端按顺序发送：等待初始化响应，再创建线程，等待线程响应后启动任务。将项目路径替换为主机上的绝对路径。
   </p>
-  <pre><code>{appRequests}</code></pre>
+  <CodeBlock code={appRequests} lang="json" />
   <p>
     <code>turn/start</code> 的响应表示任务已开始，不表示任务已完成。持续读取通知，直到收到该轮的{' '}
     <code>turn/completed</code>，其状态为 <code>completed</code>、<code>interrupted</code> 或 <code>failed</code>。
@@ -257,7 +264,7 @@ mica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修
     用 <code>turn/started</code> 通知中的 turn ID 替换 <code>ACTIVE_TURN_ID</code>
     。下面展示两种独立操作，客户端按需发送：
   </p>
-  <pre><code>{steerRequest}</code></pre>
+  <CodeBlock code={steerRequest} lang="json" />
   <p>补充要求在完整工具迭代边界注入。任务已经结束或 ID 不匹配时，客户端应处理错误并重新判断状态。</p>
 
   <h3>通知与扩展</h3>
@@ -284,9 +291,12 @@ mica exec --json --thinking --max-turns 20 "查找测试失败原因并给出修
   </p>
 
   <h2>压缩已保存会话</h2>
-  <pre><code>mica compact --session SESSION_ID --tool-results-only
-mica compact --session SESSION_ID
-mica compact --session SESSION_ID --force</code></pre>
+  <CodeBlock
+    code={
+      'mica compact --session SESSION_ID --tool-results-only\nmica compact --session SESSION_ID\nmica compact --session SESSION_ID --force'
+    }
+    lang="bash"
+  />
   <p>
     将 <code>SESSION_ID</code> 替换为实际会话 ID，操作前等待会话空闲。输出单行 JSON，以 <code>ok</code>{' '}
     判断结果；内容较少或没有可清理内容时可能返回 <code>code: "not_needed"</code>。
@@ -304,10 +314,10 @@ mica compact --session SESSION_ID --force</code></pre>
   </ul>
 
   <h2>生成并执行 Git 提交</h2>
-  <pre><code>mica commit --dir ./your-project</code></pre>
+  <CodeBlock code={'mica commit --dir ./your-project'} lang="bash" />
   <p>
-    <code>mica commit</code> 以一次性插件命令执行官方插件 <code>commit</code> 的 <code>/commit</code>：收集
-    Git 变化，调用模型生成提交说明，然后执行 <code>git add -A</code>、提交并尝试推送。它会包含工作区中的全部
+    <code>mica commit</code> 以一次性插件命令执行官方插件 <code>commit</code> 的 <code>/commit</code>：收集 Git
+    变化，调用模型生成提交说明，然后执行 <code>git add -A</code>、提交并尝试推送。它会包含工作区中的全部
     可暂存变化，运行前应完成审阅。写提交说明的模型默认跟随主配置，也可以在
     <code>$MICA_HOME/plugin-settings/commit.json</code>（或配置页 Plugins → Git Commit）单独指定接口、模型与是否推送。
   </p>

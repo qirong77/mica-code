@@ -464,6 +464,9 @@ function createWebApi(env) {
     git: {
       status: (cwd) => invoke('git:status', { cwd }),
       summary: (cwd) => invoke('git:summary', { cwd }),
+      // 顶栏徽标用的变更量（文件数 + 加/删行）：与 summary 同口径但只回数字，
+      // 会话视图轮询它而不必带回每个文件的明细。
+      changeCounts: (cwd) => invoke('git:change-counts', { cwd }),
       // 当前工作区相对比较基线的变更：GIT TREE 面板用它。不传 base 时自动挑基线
       // （origin/HEAD → master/main），`direct` 表示与基线直接比（默认取 merge-base）。
       branchSummary: (cwd, options = null) =>

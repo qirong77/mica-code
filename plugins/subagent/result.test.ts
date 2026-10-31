@@ -73,4 +73,19 @@ describe('subagentResult', () => {
       expect(text).toContain(`Status: ${status}`);
     }
   });
+
+  it('keeps the host-reported error outside the raw result budget', () => {
+    const text = formatStructuredSubagentResult({
+      type: 'Explore',
+      description: 'inspect loader',
+      result: 'a'.repeat(60_000),
+      status: 'failed',
+      error: '429 rate limit exceeded after 3 retries',
+    });
+
+    expect(text).toContain('## Error');
+    expect(text).toContain('429 rate limit exceeded after 3 retries');
+    expect(text.indexOf('## Error')).toBeLessThan(text.indexOf('## Raw result'));
+    expect(text.length).toBeLessThan(9_000);
+  });
 });

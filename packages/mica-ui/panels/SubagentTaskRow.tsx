@@ -177,5 +177,7 @@ function normalizeDescription(description: string): string {
 function subagentStatusColor(status: MicaUiSubagentTaskStatus): string {
   if (status === 'running') return themeColors.info;
   if (status === 'completed') return themeColors.success;
+  // 轮次用尽的子代理有可用的部分成果，别用失败色把人吓走。
+  if (status === 'partial') return themeColors.warning;
   return themeColors.error;
 }

@@ -1,0 +1,25 @@
+---
+import { Code } from 'astro:components';
+interface Props {
+  code: string;
+  lang?: 'bash' | 'json' | 'typescript' | 'javascript' | 'markdown' | 'text';
+  title?: string;
+}
+const { code, lang = 'bash', title } = Astro.props;
+const labels = {
+  bash: 'TERMINAL',
+  json: 'JSON',
+  typescript: 'TYPESCRIPT',
+  javascript: 'JAVASCRIPT',
+  markdown: 'MARKDOWN',
+  text: 'TEXT',
+};
+const label = title || labels[lang];
+---
+
+<div class="code-block" data-label={label}>
+  <div class="code-header">
+    <span>{label}</span>
+  </div>
+  <Code code={code} lang={lang} themes={{ dark: 'github-dark', light: 'github-light' }} defaultColor="dark" />
+</div>

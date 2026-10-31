@@ -3301,6 +3301,10 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   color: var(--color-danger);
 }
 
+.chat-modal-status.is-partial {
+  color: var(--color-warn);
+}
+
 .chat-modal-status.is-done {
   color: var(--color-success-soft);
 }
@@ -4767,8 +4771,10 @@ body.is-resizing-btw {
 
 /* ------------------------------------------------------ 快速选择（quick pick）
    分支切换（左下角）、项目目录切换与「快速打开」共用这一套 VS Code 外观：
-   窄面板、方角、单行 22px 的紧凑行、选中行整行高亮。三个面板都用这里的类名，
+   窄面板、单行 22px 的紧凑行、选中行整行高亮。三个面板都用这里的类名，
    改尺寸只改一处，不要在各组件里各写一套。
+   选中只换底色（--color-active），和会话行、文件树、导航用的是同一支 token：
+   实心蓝底是 VS Code quick pick 的牌子，跟这套界面放在一起太跳。
    区别只在位置：「快速打开」是键盘唤起的，停在顶部居中；底栏两个按钮打开的
    面板用 `.is-anchored` 贴着按钮往上长。 */
 .quick-pick-overlay {
@@ -4837,7 +4843,8 @@ body.is-resizing-btw {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 2px 0;
+  /* 行本身带圆角选中底，留一圈内边距，实心底才不会贴着面板边被切掉。 */
+  padding: 4px 6px;
 }
 
 .quick-pick-separator {
@@ -4855,10 +4862,19 @@ body.is-resizing-btw {
   grid-template-areas: 'icon main tail';
   align-items: center;
   gap: 6px;
+  border-radius: 4px;
   padding: 0 10px 0 6px;
   color: var(--color-fg-soft);
   font-size: 13px;
   text-align: left;
+  transition:
+    background-color 100ms ease,
+    color 100ms ease;
+}
+
+.quick-pick-row:hover {
+  background: var(--color-overlay);
+  color: var(--color-fg-max);
 }
 
 .quick-pick-row.is-multiline {
@@ -4873,8 +4889,9 @@ body.is-resizing-btw {
 }
 
 .quick-pick-row.is-selected {
-  background: var(--color-info-deep);
-  color: #fff; /* 实心蓝底上的白字，两种主题一致 */
+  background: var(--color-active);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+  color: var(--color-fg-max);
 }
 
 .quick-pick-row-icon {
@@ -4937,12 +4954,13 @@ body.is-resizing-btw {
   white-space: nowrap;
 }
 
-/* 选中行是实心蓝底：次要文字与选中标记里的白字两种主题下都保持白色。 */
+/* 选中行只是换了一层底：次要文字跟着前景色走（fg-max 稀释），
+   两种主题下都比未选中的 faint 亮一档，又不会在灰底上糊成一片。 */
 .quick-pick-row.is-selected .quick-pick-row-tail,
 .quick-pick-row.is-selected .quick-pick-row-meta,
 .quick-pick-row.is-selected .quick-pick-row-path,
 .quick-pick-row.is-selected .quick-pick-row-detail {
-  color: color-mix(in srgb, #fff 78%, transparent);
+  color: color-mix(in srgb, var(--color-fg-max) 68%, transparent);
 }
 
 .quick-pick-row mark {
@@ -4951,8 +4969,8 @@ body.is-resizing-btw {
 }
 
 .quick-pick-row.is-selected mark {
-  background: color-mix(in srgb, var(--color-fg-max) 22%, transparent);
-  color: #fff;
+  background: color-mix(in srgb, var(--color-fg-max) 16%, transparent);
+  color: var(--color-fg-max);
 }
 
 .quick-pick-empty {

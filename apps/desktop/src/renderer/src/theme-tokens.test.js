@@ -223,11 +223,18 @@ describe('app.css 颜色 token 主题契约', () => {
     expect(ruleBody('.chat-image-preview-path')).toContain(
       'color-mix(in srgb, #fff 52%, transparent)'
     )
-    // 快速选择选中行是实心蓝底
-    expect(ruleBody('.quick-pick-row.is-selected .quick-pick-row-detail')).toContain(
-      'color-mix(in srgb, #fff 78%, transparent)'
-    )
     expect(ruleBody('.session-action-primary')).toContain('color: #fff')
+  })
+
+  it('快速选择选中行与会话行共用 --color-active，不再是实心蓝底白字', () => {
+    const selected = ruleBody('.quick-pick-row.is-selected')
+    expect(selected).toContain('background: var(--color-active)')
+    expect(selected).toContain('color: var(--color-fg-max)')
+    expect(selected).not.toContain('#fff')
+    // 次要文字跟着前景色稀释，两种主题下都不写死白
+    expect(ruleBody('.quick-pick-row.is-selected .quick-pick-row-detail')).toContain(
+      'color-mix(in srgb, var(--color-fg-max) 68%, transparent)'
+    )
   })
 
   it('亮色主题给每个重阴影配了同选择器的更轻阴影，暗色原值保持不动', () => {
