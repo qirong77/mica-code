@@ -2,8 +2,8 @@
   "id": "schedule",
   "name": "Schedule",
   "icon": "calendar",
-  "version": "2.0.0",
-  "description": "本地排期：一个计划一行、一个阶段一条。在页面里拖，或者直接跟模型说一句让它改。",
+  "version": "3.0.0",
+  "description": "本地排期：任务平铺在甘特图上，同色一行。点空白新建、拖条改期、点条编辑；在页面里改，或者直接跟模型说一句。",
   "author": "Mica Code",
   "main": "index.ts",
   "assets": ["README.md"],
@@ -15,7 +15,7 @@
     "page": { "title": "排期" }
   },
   "status": [
-    { "key": "summary", "label": "排期", "type": "text" },
+    { "key": "summary", "label": "任务", "type": "text" },
     { "key": "updatedAt", "label": "最近改动", "type": "text" }
   ]
 }

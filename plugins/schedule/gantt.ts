@@ -1,33 +1,25 @@
 import { DAY_MS, addDays, dayNumber, daysBetween, isValidDate } from './dates.js';
-import type { ScheduleStage } from './schedule.js';
+import { COLOR_KEYS, type ScheduleColor } from './palette.js';
+import type { ScheduleScale, ScheduleTask } from './schedule.js';
 
 /**
  * 甘特图的纯逻辑：时间轴范围、行、刻度和缩放。
  *
- * 一个项目一行，它的阶段是这行里的条；时间重叠的阶段上下错开一条道，不叠在一起。
- * 界面那一侧只按 `rows` 从上往下画、不做日期算术。
+ * 同色的任务排在同一行；同一行里时间重叠的任务上下错开一条道，不叠在一起。行序按
+ * `COLOR_KEYS` 固定，颜色换了位置也不会跳。界面那一侧只按 `rows` 从上往下画、不做日期算术。
  */
 
-export type GanttStage = Pick<ScheduleStage, 'id' | 'name' | 'start' | 'end'>;
-
-export type GanttPlanInput = {
-  id: string;
-  name: string;
-  note?: string;
-  stages: GanttStage[];
-};
-
 export type GanttBar = {
-  /** `${planId}:${stageId}:${lane}`，React key 用它（同一条阶段换了道也会重挂） */
+  /** `${taskId}:${lane}`，React key 用它（同一条任务换了道也会重挂） */
   id: string;
-  /** 阶段身份，选中态与改期都用它 */
-  stageId: string;
-  planId: string;
-  /** 条上的字（阶段名）；太窄时不画 */
+  /** 任务身份，拖拽与编辑都用它 */
+  taskId: string;
+  color: ScheduleColor;
+  /** 条上的字（任务名）；太窄时不画 */
   label: string;
   start: string;
   end: string;
-  /** 本行内的第几条道：同一计划里时间重叠的阶段（测试跨过上线）不会叠在一起 */
+  /** 本行内的第几条道 */
   lane: number;
   /** 离时间轴左端几天 */
   offset: number;
@@ -36,9 +28,7 @@ export type GanttBar = {
 };
 
 export type GanttRow = {
-  planId: string;
-  name: string;
-  note: string;
+  color: ScheduleColor;
   /** 这行有几条道（决定行高） */
   lanes: number;
   bars: GanttBar[];
@@ -56,88 +46,59 @@ export type GanttLayout = {
 const AXIS_PADDING_DAYS = 4;
 
 /**
- * 把各群的阶段排成甘特图的行：一个项目一行，阶段是这行里的条。
+ * 把任务排成甘特图的行：一个颜色一行。
  *
- * - 行内按开始时间排，时间重叠的阶段上下错开一条道；
- * - 时间轴从最早一个阶段到最晚一个阶段，两端各留几天，并保证今天在轴内；
- * - 行序按「谁更急着看」：正在进行的排最前，然后是还没开始的，全都结束的沉底。
+ * - 行内按开始时间排，时间重叠的任务上下错开一条道；
+ * - 时间轴从最早一条到最晚一条，两端各留几天，并保证今天在轴内；
+ * - 没有任务的颜色不占行——空行没有意义，新建任务的入口在空白处。
  */
-export function buildGantt(plans: GanttPlanInput[], options: { today: string }): GanttLayout {
+export function buildGantt(tasks: ScheduleTask[], options: { today: string }): GanttLayout {
   const today = options.today;
-  const prepared: Array<{ plan: GanttPlanInput; stages: GanttStage[] }> = [];
-  for (const plan of plans) {
-    // 没有阶段的计划也留一行：那一行是用户往里拖出第一条阶段的地方
-    const stages = [...plan.stages]
-      .filter((stage) => isValidDate(stage.start) && isValidDate(stage.end))
-      .sort((left, right) => left.start.localeCompare(right.start) || left.name.localeCompare(right.name));
-    prepared.push({ plan, stages });
-  }
+  const valid = tasks.filter((task) => isValidDate(task.start) && isValidDate(task.end));
 
-  const allStarts = prepared.flatMap((item) => item.stages.map((stage) => stage.start));
-  const allEnds = prepared.flatMap((item) => item.stages.map((stage) => stage.end));
-  const first = [today, ...allStarts].reduce((left, right) => (left < right ? left : right));
-  const last = [today, ...allEnds].reduce((left, right) => (left > right ? left : right));
+  const first = [today, ...valid.map((task) => task.start)].reduce((left, right) => (left < right ? left : right));
+  const last = [today, ...valid.map((task) => task.end)].reduce((left, right) => (left > right ? left : right));
   const start = addDays(first, -AXIS_PADDING_DAYS);
   const end = addDays(last, AXIS_PADDING_DAYS);
   const days = daysBetween(start, end) + 1;
 
-  const rows: GanttRow[] = prepared.map(({ plan, stages }) => {
+  const rows: GanttRow[] = [];
+  for (const color of COLOR_KEYS) {
+    const group = valid
+      .filter((task) => task.color === color)
+      .sort((left, right) => left.start.localeCompare(right.start) || left.name.localeCompare(right.name));
+    if (group.length === 0) continue;
+
     const laneEnds: string[] = [];
-    const bars: GanttBar[] = stages.map((stage) => {
-      let lane = laneEnds.findIndex((laneEnd) => daysBetween(laneEnd, stage.start) > 0);
+    const bars: GanttBar[] = group.map((task) => {
+      let lane = laneEnds.findIndex((laneEnd) => daysBetween(laneEnd, task.start) > 0);
       if (lane < 0) {
         lane = laneEnds.length;
-        laneEnds.push(stage.end);
+        laneEnds.push(task.end);
       } else {
-        laneEnds[lane] = stage.end;
+        laneEnds[lane] = task.end;
       }
       return {
-        id: `${plan.id}:${stage.id}:${lane}`,
-        stageId: stage.id,
-        planId: plan.id,
-        label: stage.name,
-        start: stage.start,
-        end: stage.end,
+        id: `${task.id}:${lane}`,
+        taskId: task.id,
+        color: task.color,
+        label: task.name,
+        start: task.start,
+        end: task.end,
         lane,
-        offset: daysBetween(start, stage.start),
-        span: daysBetween(stage.start, stage.end) + 1,
+        offset: daysBetween(start, task.start),
+        span: daysBetween(task.start, task.end) + 1,
       };
     });
-    return {
-      planId: plan.id,
-      name: plan.name,
-      note: plan.note ?? '',
-      lanes: Math.max(1, laneEnds.length),
-      bars,
-    };
-  });
-
-  rows.sort(
-    (left, right) =>
-      rowRank(left, today) - rowRank(right, today) ||
-      (left.bars[0]?.start ?? '').localeCompare(right.bars[0]?.start ?? '') ||
-      left.name.localeCompare(right.name),
-  );
+    rows.push({ color, lanes: Math.max(1, laneEnds.length), bars });
+  }
 
   return { rows, start, end, days };
 }
 
-/** 正在进行（0）→ 还没开始 / 空计划（1）→ 已经全部结束（2）。 */
-function rowRank(row: GanttRow, today: string): number {
-  let future = false;
-  for (const bar of row.bars) {
-    // daysBetween(from, to) = to - from：今天落在条的区间里
-    if (daysBetween(today, bar.start) <= 0 && daysBetween(today, bar.end) >= 0) return 0;
-    if (bar.start > today) future = true;
-  }
-  return future ? 1 : 2;
-}
-
 /* ------------------------------------------------------------------ 刻度 */
 
-export type GanttScale = 'day' | 'week' | 'month';
-
-type ScaleSpec = { key: GanttScale; label: string; pxPerDay: number };
+type ScaleSpec = { key: ScheduleScale; label: string; pxPerDay: number };
 
 /** 三档密度的基准像素；实际宽度还要乘缩放倍数 */
 export const SCALES: ScaleSpec[] = [
@@ -146,20 +107,29 @@ export const SCALES: ScaleSpec[] = [
   { key: 'month', label: '月', pxPerDay: 4.5 },
 ];
 
-export function scaleSpec(scale: GanttScale): ScaleSpec {
+export function scaleSpec(scale: ScheduleScale): ScaleSpec {
   return SCALES.find((item) => item.key === scale) ?? SCALES[0]!;
 }
 
-export const ZOOM_MIN = 0.5;
-export const ZOOM_MAX = 3;
+export const ZOOM_MIN = 0.35;
+export const ZOOM_MAX = 6;
 export const ZOOM_STEP = 1.25;
 
 export function clampZoom(value: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
 }
 
-export function pxPerDayOf(scale: GanttScale, zoom: number): number {
+export function pxPerDayOf(scale: ScheduleScale, zoom: number): number {
   return scaleSpec(scale).pxPerDay * clampZoom(zoom);
+}
+
+/** 任务条的高度、行内边距与行高：页面与测试共用。 */
+export const BAR_HEIGHT = 28;
+export const LANE_GAP = 4;
+export const ROW_PADDING = 6;
+
+export function rowHeight(lanes: number): number {
+  return ROW_PADDING * 2 + Math.max(1, lanes) * BAR_HEIGHT + (Math.max(1, lanes) - 1) * LANE_GAP;
 }
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -191,13 +161,17 @@ function monthLabel(date: string): string {
   return `${Number(date.slice(5, 7))} 月`;
 }
 
+function yearMonthLabel(date: string): string {
+  return `${date.slice(0, 4)} 年 ${monthLabel(date)}`;
+}
+
 /**
  * 时间轴的两层刻度。
  *
  * 日视角：上层按月的区间、下层每天（数字 + 周几）；周视角：下层按周；月视角：上层按年、
  * 下层按月。区间里的第一格带上名字，其余留空——标签只在需要的地方出现。
  */
-export function axisCells(start: string, days: number, scale: GanttScale): { major: AxisCell[]; minor: AxisCell[] } {
+export function axisCells(start: string, days: number, scale: ScheduleScale): { major: AxisCell[]; minor: AxisCell[] } {
   const major: AxisCell[] = [];
   const minor: AxisCell[] = [];
   const end = addDays(start, days);
@@ -210,7 +184,7 @@ export function axisCells(start: string, days: number, scale: GanttScale): { maj
       const from = cursor < start ? start : cursor;
       const to = next > end ? end : next;
       major.push({
-        label: monthLabel(cursor),
+        label: yearMonthLabel(cursor),
         offset: daysBetween(start, from),
         span: Math.max(1, daysBetween(from, to)),
       });
@@ -289,7 +263,7 @@ export function zoomAnchor(input: {
   start: string;
   scrollLeft: number;
   pxPerDay: number;
-  scale: GanttScale;
+  scale: ScheduleScale;
   zoom: number;
   anchorX: number | null;
   viewportWidth: number;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayLabel, describeWhen, freshness, shortDate, spanDays } from './view.js';
+import { dayLabel, describeWhen, shortDate, spanDays } from './view.js';
 
 describe('shortDate / dayLabel', () => {
   it('drops the year and leading zeros', () => {
@@ -19,11 +19,11 @@ describe('describeWhen', () => {
     expect(describeWhen('2026-11-02', '2026-11-05', '2026-10-29')).toBe('4 天后开始');
   });
 
-  it('says which day of a running stage it is', () => {
+  it('says which day of a running task it is', () => {
     expect(describeWhen('2026-10-28', '2026-10-31', '2026-10-29')).toBe('进行中，第 2/4 天');
   });
 
-  it('says how long ago a finished stage ended', () => {
+  it('says how long ago a finished task ended', () => {
     expect(describeWhen('2026-10-01', '2026-10-03', '2026-10-08')).toBe('已结束 5 天');
   });
 
@@ -31,24 +31,5 @@ describe('describeWhen', () => {
     expect(spanDays('2026-10-01', '2026-10-01')).toBe(1);
     expect(spanDays('2026-10-01', '2026-10-07')).toBe(7);
     expect(describeWhen('2026-10-05', '2026-10-05', '2026-10-05')).toBe('进行中，第 1/1 天');
-  });
-});
-
-describe('freshness', () => {
-  const now = Date.UTC(2026, 9, 29, 12, 0, 0);
-
-  it('says nothing has been saved yet when there is no timestamp', () => {
-    expect(freshness(0, now)).toBe('还没改过');
-  });
-
-  it('rounds to minutes, hours, then days', () => {
-    expect(freshness(now - 30_000, now)).toBe('刚刚改过');
-    expect(freshness(now - 20 * 60_000, now)).toBe('20 分钟前改过');
-    expect(freshness(now - 5 * 3_600_000, now)).toBe('5 小时前改过');
-    expect(freshness(now - 3 * 86_400_000, now)).toBe('3 天前改过');
-  });
-
-  it('never reports a negative age when the clock jumps back', () => {
-    expect(freshness(now + 60_000, now)).toBe('刚刚改过');
   });
 });

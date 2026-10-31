@@ -11,8 +11,8 @@ import { SCHEDULE_DATA_FILE } from './store.js';
  * `schedule`：这台机器上的一份本地排期。
  *
  * 它不属于任何聊天工具——数据就在 `$MICA_HOME/plugin-data/schedule/data.json`，两个入口改
- * 同一份：桌面端整页甘特图（拖条、建计划），和 `schedule` 工具（用户跟模型说一句「把联调
- * 推到下周」）。随包 skill 讲清楚怎么用那个工具，所以模型不需要用户教它字段。
+ * 同一份：桌面端整页甘特图（拖条、建任务、写备注），和 `schedule` 工具（用户跟模型说一句
+ * 「把联调推到下周」）。随包 skill 讲清楚怎么用那个工具，所以模型不需要用户教它字段。
  */
 
 const SKILL_NAME = 'schedule';

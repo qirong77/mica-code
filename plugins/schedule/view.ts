@@ -28,7 +28,7 @@ export function dayLabel(date: string): string {
   return `${pad(month!)}-${pad(day!)} ${weekday}`;
 }
 
-/** 一条阶段占几天（含首尾）。 */
+/** 一条任务占几天（含首尾）。 */
 export function spanDays(start: string, end: string): number {
   return daysBetween(start, end) + 1;
 }
@@ -40,15 +40,4 @@ export function describeWhen(start: string, end: string, today: string = todayOf
   if (toStart > 0) return toStart === 1 ? '明天开始' : `${toStart} 天后开始`;
   if (toEnd < 0) return `已结束 ${-toEnd} 天`;
   return `进行中，第 ${-toStart + 1}/${spanDays(start, end)} 天`;
-}
-
-/** 数据多久以前改的：页面顶部用它提醒「这份是几时的」。 */
-export function freshness(updatedAtMs: number, now: number = Date.now()): string {
-  if (!updatedAtMs) return '还没改过';
-  const minutes = Math.max(0, Math.round((now - updatedAtMs) / 60_000));
-  if (minutes < 2) return '刚刚改过';
-  if (minutes < 60) return `${minutes} 分钟前改过`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} 小时前改过`;
-  return `${Math.round(hours / 24)} 天前改过`;
 }

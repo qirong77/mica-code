@@ -1,6 +1,14 @@
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 import { daysBetween, todayOf } from './dates.js';
-import { applyOperation, formatSchedule, newId, type ScheduleData, type ScheduleOperation } from './schedule.js';
+import { COLOR_KEYS, COLOR_META, isScheduleColor, type ScheduleColor } from './palette.js';
+import {
+  applyOperation,
+  formatSchedule,
+  newId,
+  type ScheduleData,
+  type ScheduleOperation,
+  type ScheduleTask,
+} from './schedule.js';
 import { mutateSchedule, readScheduleData } from './store.js';
 
 /**
@@ -12,26 +20,20 @@ import { mutateSchedule, readScheduleData } from './store.js';
  * 所以两边同时改不会互相覆盖。
  *
  * 操作按 id 定位、只改一条，而不是「把整份排期交回去」：整份覆盖是最容易把别人刚改的
- * 东西抹掉的做法，而模型本来也不需要知道别的计划长什么样。
+ * 东西抹掉的做法，而模型本来也不需要知道别的任务长什么样。
  */
 
-const OPERATIONS = [
-  'list',
-  'add_plan',
-  'update_plan',
-  'delete_plan',
-  'add_stage',
-  'update_stage',
-  'delete_stage',
-] as const;
+const OPERATIONS = ['list', 'add_task', 'update_task', 'delete_task'] as const;
 
 type Operation = (typeof OPERATIONS)[number];
 
 const DESCRIPTION = [
   'Read and edit the local schedule (the gantt page "Schedule" in this app). The schedule is independent local data — it has nothing to do with any chat app.',
-  'Layout: plans are rows (one project / topic each); each plan has stages (bars with a start and end date).',
-  "Always call operation=list first: it returns every plan_id and stage_id together with today's date. Dates are plain `YYYY-MM-DD`; a stage covers its start and end day.",
-  'Writes are per item (by id), so unrelated plans are never touched. To reschedule a stage use update_stage with the new start/end; to add work use add_stage.',
+  'Every task has a name, a start and end date, a color, and an optional Markdown note. Tasks with the same color are drawn on one row; the color only groups rows visually.',
+  "Always call operation=list first: it returns every task_id together with today's date and a status relative to today. Dates are plain `YYYY-MM-DD`; a task covers its start and end day.",
+  `Writes are per item (by id), so unrelated tasks are never touched. To reschedule use update_task with the new start/end; to add work use add_task. Colors: ${COLOR_KEYS.join(
+    ' / ',
+  )} (default blue).`,
   'After writing, report the change to the user in one short sentence — do not paste the whole schedule unless they asked to see it.',
 ].join(' ');
 
@@ -44,24 +46,22 @@ export class ScheduleTool extends MicaTool {
           type: 'string',
           enum: [...OPERATIONS],
           description:
-            'list = read the whole schedule. add_plan = create a plan. update_plan = rename or change the note. delete_plan = remove a plan and its stages. add_stage = add a stage to a plan. update_stage = rename or reschedule a stage. delete_stage = remove one stage.',
+            'list = read the whole schedule. add_task = create a task. update_task = rename, reschedule, recolor or change the note. delete_task = remove one task.',
         },
-        plan_id: {
-          type: 'string',
-          description: 'Plan id from `list` (required by add_stage / update_plan / delete_plan).',
-        },
-        stage_id: { type: 'string', description: 'Stage id from `list` (required by update_stage / delete_stage).' },
-        name: {
-          type: 'string',
-          description: 'Plan or stage name, e.g. "钱包改版", "联调", "上线". Required by add_plan / add_stage.',
-        },
-        note: { type: 'string', description: 'Plan note (optional; empty string clears it).' },
-        start: { type: 'string', description: 'Start date `YYYY-MM-DD` (required by add_stage).' },
+        task_id: { type: 'string', description: 'Task id from `list` (required by update_task / delete_task).' },
+        name: { type: 'string', description: 'Task name, e.g. "联调", "上线", "客户验收". Required by add_task.' },
+        start: { type: 'string', description: 'Start date `YYYY-MM-DD` (required by add_task).' },
         end: {
           type: 'string',
           description:
-            'End date `YYYY-MM-DD`, inclusive. Defaults to `start` for add_stage; defaults to the current end for update_stage.',
+            'End date `YYYY-MM-DD`, inclusive. Defaults to `start` for add_task; defaults to the current end for update_task.',
         },
+        color: {
+          type: 'string',
+          enum: [...COLOR_KEYS],
+          description: 'Row color. Defaults to blue for add_task; unchanged for update_task.',
+        },
+        note: { type: 'string', description: 'Markdown note (optional; empty string clears it).' },
       },
       required: ['operation'],
       additionalProperties: false,
@@ -76,7 +76,7 @@ export class ScheduleTool extends MicaTool {
     }
 
     const message = await mutateSchedule(this.dataFile, (data) => {
-      const request = toScheduleOperation(operation, input);
+      const request = toScheduleOperation(operation, input, data.tasks.length);
       const next = applyOperation(data, request);
       return { data: next, message: describeOperation(request, data, next, today) };
     });
@@ -88,18 +88,12 @@ export class ScheduleTool extends MicaTool {
     switch (input.operation) {
       case 'list':
         return 'Reading schedule';
-      case 'add_plan':
-        return `Adding plan ${String(input.name ?? '')}`.trim();
-      case 'update_plan':
-        return 'Updating plan';
-      case 'delete_plan':
-        return 'Deleting plan';
-      case 'add_stage':
-        return `Adding stage ${String(input.name ?? '')}`.trim();
-      case 'update_stage':
-        return 'Rescheduling';
-      case 'delete_stage':
-        return 'Deleting stage';
+      case 'add_task':
+        return `Adding task ${String(input.name ?? '')}`.trim();
+      case 'update_task':
+        return 'Updating task';
+      case 'delete_task':
+        return 'Deleting task';
       default:
         return 'Updating schedule';
     }
@@ -135,61 +129,49 @@ function readNote(input: ToolInput): string | undefined {
   return value.trim();
 }
 
+function readColor(input: ToolInput): ScheduleColor | undefined {
+  const value = input.color;
+  if (value === undefined || value === null || value === '') return undefined;
+  if (!isScheduleColor(value)) throw new Error(`color 只能是 ${COLOR_KEYS.join(' / ')}`);
+  return value;
+}
+
 /** 把工具入参翻成一条写操作。校验只做「字段齐不齐」，日期合法性在 `applyOperation` 里。 */
-function toScheduleOperation(operation: Operation, input: ToolInput): ScheduleOperation {
+function toScheduleOperation(operation: Operation, input: ToolInput, taskCount: number): ScheduleOperation {
   switch (operation) {
-    case 'add_plan':
-      return {
-        type: 'add-plan',
-        plan: { id: newId('p'), name: readString(input, 'name', true)!, note: readNote(input) ?? '', stages: [] },
-      };
-    case 'update_plan':
-      return {
-        type: 'update-plan',
-        planId: readString(input, 'plan_id', true)!,
-        name: readString(input, 'name', false),
-        note: readNote(input),
-      };
-    case 'delete_plan':
-      return { type: 'delete-plan', planId: readString(input, 'plan_id', true)! };
-    case 'add_stage': {
+    case 'add_task': {
+      const name = readString(input, 'name', true)!;
       const start = readString(input, 'start', true)!;
-      return {
-        type: 'add-stage',
-        planId: readString(input, 'plan_id', true)!,
-        stage: {
-          id: newId('s'),
-          name: readString(input, 'name', true)!,
-          start,
-          end: readString(input, 'end', false) ?? start,
-        },
+      const task: ScheduleTask = {
+        id: newId(),
+        name,
+        start,
+        end: readString(input, 'end', false) ?? start,
+        // 模型没指定颜色时换着用，和页面里「新建任务」的默认行为一致
+        color: readColor(input) ?? COLOR_KEYS[taskCount % COLOR_KEYS.length]!,
+        note: readNote(input) ?? '',
       };
+      return { type: 'add-task', task };
     }
-    case 'update_stage':
+    case 'update_task':
       return {
-        type: 'update-stage',
-        stageId: readString(input, 'stage_id', true)!,
+        type: 'update-task',
+        taskId: readString(input, 'task_id', true)!,
         name: readString(input, 'name', false),
         start: readString(input, 'start', false),
         end: readString(input, 'end', false),
+        color: readColor(input),
+        note: readNote(input),
       };
-    case 'delete_stage':
-      return { type: 'delete-stage', stageId: readString(input, 'stage_id', true)! };
+    case 'delete_task':
+      return { type: 'delete-task', taskId: readString(input, 'task_id', true)! };
     default:
       throw new Error(`operation ${operation} 不需要写盘`);
   }
 }
 
-function findPlan(data: ScheduleData, planId: string) {
-  return data.plans.find((plan) => plan.id === planId);
-}
-
-function findStage(data: ScheduleData, stageId: string) {
-  for (const plan of data.plans) {
-    const stage = plan.stages.find((item) => item.id === stageId);
-    if (stage) return { plan, stage };
-  }
-  return null;
+function findTask(data: ScheduleData, taskId: string): ScheduleTask | undefined {
+  return data.tasks.find((task) => task.id === taskId);
 }
 
 function span(start: string, end: string): string {
@@ -210,38 +192,28 @@ function describeOperation(
   today: string,
 ): string {
   switch (operation.type) {
-    case 'add-plan': {
-      const plan = findPlan(after, operation.plan.id)!;
-      return `已新建计划「${plan.name}」（${plan.id}）`;
+    case 'add-task': {
+      const task = findTask(after, operation.task.id)!;
+      return `已添加任务「${task.name}」：${span(task.start, task.end)}`;
     }
-    case 'update-plan': {
-      const plan = findPlan(after, operation.planId)!;
-      const previous = findPlan(before, operation.planId);
-      if (previous && previous.name !== plan.name) return `计划已改名为「${plan.name}」`;
-      return plan.note ? `已更新计划「${plan.name}」的备注` : `已清空计划「${plan.name}」的备注`;
-    }
-    case 'delete-plan': {
-      const plan = findPlan(before, operation.planId)!;
-      return `已删除计划「${plan.name}」${plan.stages.length > 0 ? `（含 ${plan.stages.length} 条阶段）` : ''}`;
-    }
-    case 'add-stage': {
-      const found = findStage(after, operation.stage.id);
-      const plan = found ? found.plan.name : '';
-      const stage = found?.stage ?? operation.stage;
-      return `已在「${plan}」加了一条「${stage.name}」：${span(stage.start, stage.end)}`;
-    }
-    case 'update-stage': {
-      const previous = findStage(before, operation.stageId)!.stage;
-      const stage = findStage(after, operation.stageId)!.stage;
-      if (previous.start !== stage.start || previous.end !== stage.end) {
-        return `「${stage.name}」改成 ${span(stage.start, stage.end)}${stage.end < today ? '（已结束）' : ''}`;
+    case 'update-task': {
+      const previous = findTask(before, operation.taskId)!;
+      const task = findTask(after, operation.taskId)!;
+      if (previous.start !== task.start || previous.end !== task.end) {
+        return `「${task.name}」改成 ${span(task.start, task.end)}${task.end < today ? '（已结束）' : ''}`;
       }
-      if (previous.name !== stage.name) return `阶段已改名为「${stage.name}」`;
-      return `「${stage.name}」没有变化`;
+      if (previous.name !== task.name) return `任务已改名为「${task.name}」`;
+      if (previous.color !== task.color) return `「${task.name}」的颜色改成${COLOR_META[task.color].label}`;
+      if (previous.note !== task.note) {
+        return task.note ? `已更新任务「${task.name}」的备注` : `已清空任务「${task.name}」的备注`;
+      }
+      return `「${task.name}」没有变化`;
     }
-    case 'delete-stage': {
-      const stage = findStage(before, operation.stageId)!.stage;
-      return `已删除阶段「${stage.name}」（${span(stage.start, stage.end)}）`;
+    case 'delete-task': {
+      const task = findTask(before, operation.taskId)!;
+      return `已删除任务「${task.name}」（${span(task.start, task.end)}）`;
     }
+    default:
+      return '已更新排期';
   }
 }

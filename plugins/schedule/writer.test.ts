@@ -7,16 +7,9 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 function initial(): ScheduleData {
   return {
     ...emptyData(),
-    plans: [
-      {
-        id: 'p1',
-        name: '钱包改版',
-        note: '',
-        stages: [
-          { id: 's1', name: '开发', start: '2026-11-02', end: '2026-11-06' },
-          { id: 's2', name: '测试', start: '2026-11-09', end: '2026-11-12' },
-        ],
-      },
+    tasks: [
+      { id: 't1', name: '开发', start: '2026-11-02', end: '2026-11-06', color: 'blue', note: '' },
+      { id: 't2', name: '测试', start: '2026-11-09', end: '2026-11-12', color: 'amber', note: '' },
     ],
   };
 }
@@ -58,12 +51,12 @@ describe('createScheduleWriter', () => {
     const errors: string[] = [];
     const writer = createScheduleWriter({ host: page.host, onError: (message) => errors.push(message) });
 
-    writer.push({ type: 'update-stage', stageId: 's1', start: '2026-11-03', end: '2026-11-07' });
-    writer.push({ type: 'update-stage', stageId: 's2', start: '2026-11-10', end: '2026-11-13' });
+    writer.push({ type: 'update-task', taskId: 't1', start: '2026-11-03', end: '2026-11-07' });
+    writer.push({ type: 'update-task', taskId: 't2', start: '2026-11-10', end: '2026-11-13' });
 
     await expect(writer.flush()).resolves.toBe(true);
-    const stages = page.disk().plans[0]!.stages;
-    expect(stages.map((stage) => [stage.start, stage.end])).toEqual([
+    const tasks = page.disk().tasks;
+    expect(tasks.map((task) => [task.start, task.end])).toEqual([
       ['2026-11-03', '2026-11-07'],
       ['2026-11-10', '2026-11-13'],
     ]);
@@ -77,18 +70,18 @@ describe('createScheduleWriter', () => {
     const write = page.writeData.getMockImplementation()!;
     page.writeData.mockImplementationOnce(async () => {
       // 另一个窗口刚好把「测试」挪走了：这一条必须保留下来
-      page.otherWriter({ type: 'update-stage', stageId: 's2', start: '2026-11-16', end: '2026-11-18' });
+      page.otherWriter({ type: 'update-task', taskId: 't2', start: '2026-11-16', end: '2026-11-18' });
       return { ok: false, conflict: true, error: 'conflict' };
     });
     page.writeData.mockImplementation(write);
 
     const writer = createScheduleWriter({ host: page.host, onError: (message) => errors.push(message) });
-    writer.push({ type: 'update-stage', stageId: 's1', start: '2026-11-03', end: '2026-11-07' });
+    writer.push({ type: 'update-task', taskId: 't1', start: '2026-11-03', end: '2026-11-07' });
     await expect(writer.flush()).resolves.toBe(true);
 
-    const stages = page.disk().plans[0]!.stages;
-    expect(stages[0]).toMatchObject({ id: 's1', start: '2026-11-03', end: '2026-11-07' });
-    expect(stages[1]).toMatchObject({ id: 's2', start: '2026-11-16', end: '2026-11-18' });
+    const tasks = page.disk().tasks;
+    expect(tasks[0]).toMatchObject({ id: 't1', start: '2026-11-03', end: '2026-11-07' });
+    expect(tasks[1]).toMatchObject({ id: 't2', start: '2026-11-16', end: '2026-11-18' });
     expect(errors).toEqual([]);
   });
 
@@ -98,12 +91,12 @@ describe('createScheduleWriter', () => {
     const writer = createScheduleWriter({ host: page.host, onError: (message) => errors.push(message) });
     page.writeData.mockImplementation(async () => ({ ok: false, error: '磁盘满了' }));
 
-    writer.push({ type: 'delete-stage', stageId: 's1' });
-    writer.push({ type: 'delete-stage', stageId: 's2' });
+    writer.push({ type: 'delete-task', taskId: 't1' });
+    writer.push({ type: 'delete-task', taskId: 't2' });
     await expect(writer.flush()).resolves.toBe(false);
     expect(errors).toEqual(['磁盘满了']);
     expect(writer.pending()).toBe(0);
-    expect(page.disk().plans[0]!.stages).toHaveLength(2);
+    expect(page.disk().tasks).toHaveLength(2);
   });
 
   it('reports a missing target (deleted by someone else) instead of retrying forever', async () => {
@@ -112,10 +105,10 @@ describe('createScheduleWriter', () => {
     const writer = createScheduleWriter({ host: page.host, onError: (message) => errors.push(message) });
     await expect(
       (async () => {
-        writer.push({ type: 'delete-stage', stageId: 'gone' });
+        writer.push({ type: 'delete-task', taskId: 'gone' });
         return writer.flush();
       })(),
     ).resolves.toBe(false);
-    expect(errors[0]).toContain('这条阶段已经不在了');
+    expect(errors[0]).toContain('这个任务已经不在了');
   });
 });

@@ -1,50 +1,39 @@
-import { daysBetween, formatStamp, isValidDate, isValidRange, todayOf } from './dates.js';
+import { addDays, daysBetween, formatStamp, isValidDate, isValidRange, startOfWeek, todayOf } from './dates.js';
+import { COLOR_KEYS, isScheduleColor, normalizeColor, type ScheduleColor } from './palette.js';
 
 /**
  * 排期的数据模型与全部写操作。
  *
- * 排期是**插件自己的数据**，不再从群公告里读：一行是一个计划（项目 / 主题），行里的条
- * 是它的阶段。界面拖拽与模型经 `schedule` 工具改的都是同一份 `data.json`，改法都是这里的
- * 几条操作——两边各写一套迟早会写出两种语义（一边允许交叉、一边拒绝之类）。
+ * 一份排期就是一串任务：每条有名字、起止日期、颜色和 Markdown 备注。同色的任务在页面里
+ * 排成同一行，所以颜色也是数据的一部分，而不是显示时从名字临时猜出来的。
+ *
+ * 界面拖拽与模型经 `schedule` 工具改的都是同一份 `data.json`，改法都是这里的几条操作——
+ * 两边各写一套迟早会写出两种语义。
  *
  * 这个文件也被渲染层直接用，所以不能 import 任何 node 模块。
  */
 
 export const SCHEDULE_VERSION = 1;
-export const MAX_PLANS = 40;
-export const MAX_STAGES_PER_PLAN = 40;
-export const MAX_NAME_LENGTH = 40;
-export const MAX_NOTE_LENGTH = 200;
+export const MAX_TASKS = 300;
+export const MAX_NAME_LENGTH = 60;
+export const MAX_NOTE_LENGTH = 4000;
+export const MAX_TITLE_LENGTH = 40;
+export const DEFAULT_TITLE = '我的排期';
 
-/** 新建阶段时给用户挑的常用名字；阶段名本身是自由的，颜色按名字猜。 */
-export const STAGE_NAMES = [
-  '评审',
-  '开发',
-  '联调',
-  '提测',
-  'case 评审',
-  '测试',
-  '验收',
-  '走查',
-  '上线',
-  'showcase',
-] as const;
+export const SCALES = ['day', 'week', 'month'] as const;
+export type ScheduleScale = (typeof SCALES)[number];
 
-export type ScheduleStage = {
+export type ScheduleTask = {
   id: string;
-  /** 显示名，如「联调」「上线」；也决定条的配色。 */
+  /** 显示名，如「联调」「上线」。 */
   name: string;
   /** `YYYY-MM-DD`，含首尾。 */
   start: string;
   end: string;
-};
-
-export type SchedulePlan = {
-  id: string;
-  name: string;
-  /** 备注，可空。 */
+  /** 同色的任务排在同一行。 */
+  color: ScheduleColor;
+  /** Markdown 备注，可空。 */
   note: string;
-  stages: ScheduleStage[];
 };
 
 export type ScheduleData = {
@@ -53,9 +42,13 @@ export type ScheduleData = {
   updatedAtMs: number;
   /** 同上，给人看：`10-29 20:40`。配置页的「运行状态」读它。 */
   updatedAt: string;
-  /** 给人看的一句话：`3 个计划 · 12 条阶段`。配置页的「运行状态」读它。 */
+  /** 给人看的一句话：`12 个任务`。配置页的「运行状态」读它。 */
   summary: string;
-  plans: SchedulePlan[];
+  /** 这份排期的名字，显示在页面顶部。 */
+  title: string;
+  /** 上次关掉页面时的刻度；打开时沿用它。 */
+  scale: ScheduleScale;
+  tasks: ScheduleTask[];
 };
 
 export function emptyData(): ScheduleData {
@@ -64,7 +57,9 @@ export function emptyData(): ScheduleData {
     updatedAtMs: 0,
     updatedAt: '',
     summary: '',
-    plans: [],
+    title: DEFAULT_TITLE,
+    scale: 'day',
+    tasks: [],
   };
 }
 
@@ -74,14 +69,12 @@ export function emptyData(): ScheduleData {
  * 不用 `node:crypto`：这个模块要进渲染层。时间戳 + 随机后缀在单机一份排期里够用
  * （同一毫秒连建两条也不会撞），而且 id 只在本地被引用，不需要全局唯一。
  */
-export function newId(prefix: 'p' | 's'): string {
-  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+export function newId(): string {
+  return `t_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
-export function summarize(plans: SchedulePlan[]): string {
-  if (plans.length === 0) return '还没有计划';
-  const stages = plans.reduce((sum, plan) => sum + plan.stages.length, 0);
-  return `${plans.length} 个计划 · ${stages} 条阶段`;
+export function summarize(tasks: ScheduleTask[]): string {
+  return tasks.length === 0 ? '还没有任务' : `${tasks.length} 个任务`;
 }
 
 /** 写盘前打一次时间戳与摘要：界面顶部和配置页的运行状态都读这两个字段。 */
@@ -91,7 +84,7 @@ export function stamp(data: ScheduleData, now: Date = new Date()): ScheduleData 
     version: SCHEDULE_VERSION,
     updatedAtMs: now.getTime(),
     updatedAt: formatStamp(now),
-    summary: summarize(data.plans),
+    summary: summarize(data.tasks),
   };
 }
 
@@ -107,46 +100,53 @@ function text(value: unknown, limit: number): string {
   return typeof value === 'string' ? value.trim().slice(0, limit) : '';
 }
 
+export function normalizeTitle(value: unknown): string {
+  return text(value, MAX_TITLE_LENGTH) || DEFAULT_TITLE;
+}
+
+export function normalizeScale(value: unknown): ScheduleScale {
+  return typeof value === 'string' && (SCALES as readonly string[]).includes(value) ? (value as ScheduleScale) : 'day';
+}
+
 /**
  * 读回的数据一律过一遍这里。
  *
  * 这份文件可能被别的版本写过、被 `$MICA_HOME` 拷来拷去、也可能被手改坏：认不出的部分
- * 丢掉，能显示的照常显示——一条坏阶段不该让整张时间线消失。
+ * 丢掉，能显示的照常显示——一条坏任务不该让整张时间线消失。
+ *
+ * 旧形态（`plans` / `stages`）不再支持：这里只读 `tasks`，旧文件读出来就是一张空排期。
  */
 export function normalizeData(value: unknown): ScheduleData {
   const record = asRecord(value);
   if (!record) return emptyData();
-  const seenPlans = new Set<string>();
-  const seenStages = new Set<string>();
-  const plans: SchedulePlan[] = [];
-  for (const entry of asArray(record.plans)) {
-    const plan = asRecord(entry);
-    if (!plan) continue;
-    const id = text(plan.id, MAX_NAME_LENGTH);
-    const name = text(plan.name, MAX_NAME_LENGTH);
-    if (!id || !name || seenPlans.has(id)) continue;
-    seenPlans.add(id);
-    const stages: ScheduleStage[] = [];
-    for (const item of asArray(plan.stages)) {
-      const stage = asRecord(item);
-      if (!stage) continue;
-      const stageId = text(stage.id, MAX_NAME_LENGTH);
-      const stageName = text(stage.name, MAX_NAME_LENGTH);
-      const start = text(stage.start, 10);
-      const end = text(stage.end, 10) || start;
-      if (!stageId || !stageName || seenStages.has(stageId)) continue;
-      if (!isValidRange(start, end)) continue;
-      seenStages.add(stageId);
-      stages.push({ id: stageId, name: stageName, start, end });
-    }
-    plans.push({ id, name, note: text(plan.note, MAX_NOTE_LENGTH), stages });
+  const seen = new Set<string>();
+  const tasks: ScheduleTask[] = [];
+  for (const entry of asArray(record.tasks)) {
+    const task = asRecord(entry);
+    if (!task) continue;
+    const id = text(task.id, MAX_NAME_LENGTH);
+    const name = text(task.name, MAX_NAME_LENGTH);
+    const start = text(task.start, 10);
+    const end = text(task.end, 10) || start;
+    if (!id || !name || seen.has(id) || !isValidRange(start, end)) continue;
+    seen.add(id);
+    tasks.push({
+      id,
+      name,
+      start,
+      end,
+      color: normalizeColor(task.color),
+      note: text(task.note, MAX_NOTE_LENGTH),
+    });
   }
   return {
     version: typeof record.version === 'number' ? record.version : SCHEDULE_VERSION,
     updatedAtMs: typeof record.updatedAtMs === 'number' ? record.updatedAtMs : 0,
     updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
-    summary: typeof record.summary === 'string' ? record.summary : summarize(plans),
-    plans,
+    summary: typeof record.summary === 'string' ? record.summary : summarize(tasks),
+    title: normalizeTitle(record.title),
+    scale: normalizeScale(record.scale),
+    tasks,
   };
 }
 
@@ -159,17 +159,26 @@ export function normalizeData(value: unknown): ScheduleData {
  * 或模型刚改的）原样保留。所以操作里带的是「目标改成什么」，不是「整份数据长什么样」。
  */
 export type ScheduleOperation =
-  | { type: 'add-plan'; plan: SchedulePlan }
-  | { type: 'update-plan'; planId: string; name?: string; note?: string }
-  | { type: 'delete-plan'; planId: string }
-  | { type: 'add-stage'; planId: string; stage: ScheduleStage }
-  | { type: 'update-stage'; stageId: string; name?: string; start?: string; end?: string }
-  | { type: 'delete-stage'; stageId: string };
+  | { type: 'add-task'; task: ScheduleTask }
+  | {
+      type: 'update-task';
+      taskId: string;
+      name?: string;
+      start?: string;
+      end?: string;
+      color?: ScheduleColor;
+      note?: string;
+    }
+  | { type: 'delete-task'; taskId: string }
+  | { type: 'update-title'; title: string }
+  | { type: 'update-scale'; scale: ScheduleScale }
+  | { type: 'replace'; title: string; scale: ScheduleScale; tasks: ScheduleTask[] }
+  | { type: 'clear-tasks' };
 
 function requireName(value: string | undefined): string {
   const name = (value ?? '').trim();
-  if (!name) throw new Error('名称不能为空');
-  if (name.length > MAX_NAME_LENGTH) throw new Error(`名称最多 ${MAX_NAME_LENGTH} 个字`);
+  if (!name) throw new Error('任务名称不能为空');
+  if (name.length > MAX_NAME_LENGTH) throw new Error(`任务名称最多 ${MAX_NAME_LENGTH} 个字`);
   return name;
 }
 
@@ -180,100 +189,139 @@ function requireRange(start: string, end: string): { start: string; end: string 
   return { start, end };
 }
 
-function findPlan(data: ScheduleData, planId: string): SchedulePlan {
-  const plan = data.plans.find((item) => item.id === planId);
-  if (!plan) throw new Error('这个计划已经不在了（可能刚被删掉），先重新读一次排期');
-  return plan;
+function requireColor(value: unknown): ScheduleColor {
+  if (!isScheduleColor(value)) throw new Error(`颜色只能是 ${COLOR_KEYS.join(' / ')}`);
+  return value;
 }
 
-function findStage(data: ScheduleData, stageId: string): { plan: SchedulePlan; stage: ScheduleStage } {
-  for (const plan of data.plans) {
-    const stage = plan.stages.find((item) => item.id === stageId);
-    if (stage) return { plan, stage };
+function findTask(data: ScheduleData, taskId: string): ScheduleTask {
+  const task = data.tasks.find((item) => item.id === taskId);
+  if (!task) throw new Error('这个任务已经不在了（可能刚被删掉），先重新读一次排期');
+  return task;
+}
+
+function normalizeTask(task: ScheduleTask): ScheduleTask {
+  const name = requireName(task.name);
+  const range = requireRange(task.start, task.end || task.start);
+  return {
+    id: task.id,
+    name,
+    ...range,
+    color: normalizeColor(task.color),
+    note: (task.note ?? '').slice(0, MAX_NOTE_LENGTH),
+  };
+}
+
+function normalizeTasks(tasks: ScheduleTask[]): ScheduleTask[] {
+  if (tasks.length > MAX_TASKS) throw new Error(`任务最多 ${MAX_TASKS} 条`);
+  const seen = new Set<string>();
+  const normalized: ScheduleTask[] = [];
+  for (const task of tasks) {
+    if (!task.id || seen.has(task.id)) continue;
+    seen.add(task.id);
+    normalized.push(normalizeTask(task));
   }
-  throw new Error('这条阶段已经不在了（可能刚被删掉），先重新读一次排期');
+  return normalized;
 }
 
 /**
  * 把一次操作应用到数据上，返回新数据；不修改入参。
  *
- * 计划 / 阶段已经不在时抛错而不是静默跳过：界面上是「刚被别的窗口删了」，工具那边是
+ * 任务已经不在时抛错而不是静默跳过：界面上是「刚被别的窗口删了」，工具那边是
  * 「你手里的 id 过期了」，两种都该让人看见，而不是改了个寂寞。
  */
 export function applyOperation(data: ScheduleData, operation: ScheduleOperation): ScheduleData {
   switch (operation.type) {
-    case 'add-plan': {
-      const name = requireName(operation.plan.name);
-      const note = (operation.plan.note ?? '').slice(0, MAX_NOTE_LENGTH);
-      const existing = data.plans.find((plan) => plan.id === operation.plan.id);
-      if (existing) {
-        return {
-          ...data,
-          plans: data.plans.map((plan) => (plan.id === existing.id ? { ...plan, name, note } : plan)),
-        };
-      }
-      if (data.plans.length >= MAX_PLANS) throw new Error(`计划最多 ${MAX_PLANS} 个`);
-      return { ...data, plans: [...data.plans, { id: operation.plan.id, name, note, stages: [] }] };
-    }
-    case 'update-plan': {
-      const plan = findPlan(data, operation.planId);
-      const name = operation.name === undefined ? plan.name : requireName(operation.name);
-      const note = operation.note === undefined ? plan.note : operation.note.slice(0, MAX_NOTE_LENGTH);
-      return {
-        ...data,
-        plans: data.plans.map((item) => (item.id === plan.id ? { ...item, name, note } : item)),
-      };
-    }
-    case 'delete-plan':
-      findPlan(data, operation.planId);
-      return { ...data, plans: data.plans.filter((plan) => plan.id !== operation.planId) };
-    case 'add-stage': {
-      const plan = findPlan(data, operation.planId);
-      const name = requireName(operation.stage.name);
-      const range = requireRange(operation.stage.start, operation.stage.end || operation.stage.start);
-      const stage: ScheduleStage = { id: operation.stage.id, name, ...range };
+    case 'add-task': {
+      const task = normalizeTask(operation.task);
       // 同一次操作重放（写盘超时后重试）不该变成两条
-      const replaced = plan.stages.some((item) => item.id === stage.id);
-      if (!replaced && plan.stages.length >= MAX_STAGES_PER_PLAN) {
-        throw new Error(`一个计划最多 ${MAX_STAGES_PER_PLAN} 条阶段`);
-      }
+      const existing = data.tasks.some((item) => item.id === task.id);
+      if (!existing && data.tasks.length >= MAX_TASKS) throw new Error(`任务最多 ${MAX_TASKS} 条`);
       return {
         ...data,
-        plans: data.plans.map((item) => {
-          if (item.id !== plan.id) return item;
-          return {
-            ...item,
-            stages: replaced
-              ? item.stages.map((existing) => (existing.id === stage.id ? stage : existing))
-              : [...item.stages, stage],
-          };
-        }),
+        tasks: existing ? data.tasks.map((item) => (item.id === task.id ? task : item)) : [...data.tasks, task],
       };
     }
-    case 'update-stage': {
-      const { plan, stage } = findStage(data, operation.stageId);
-      const name = operation.name === undefined ? stage.name : requireName(operation.name);
-      const range = requireRange(operation.start ?? stage.start, operation.end ?? stage.end);
-      const next: ScheduleStage = { id: stage.id, name, ...range };
+    case 'update-task': {
+      const task = findTask(data, operation.taskId);
+      const name = operation.name === undefined ? task.name : requireName(operation.name);
+      const range = requireRange(operation.start ?? task.start, operation.end ?? task.end);
+      const color = operation.color === undefined ? task.color : requireColor(operation.color);
+      const note = operation.note === undefined ? task.note : operation.note.slice(0, MAX_NOTE_LENGTH);
+      const next: ScheduleTask = { id: task.id, name, ...range, color, note };
+      return { ...data, tasks: data.tasks.map((item) => (item.id === task.id ? next : item)) };
+    }
+    case 'delete-task':
+      findTask(data, operation.taskId);
+      return { ...data, tasks: data.tasks.filter((task) => task.id !== operation.taskId) };
+    case 'update-title':
+      return { ...data, title: normalizeTitle(operation.title) };
+    case 'update-scale':
+      return { ...data, scale: normalizeScale(operation.scale) };
+    case 'replace':
       return {
         ...data,
-        plans: data.plans.map((item) =>
-          item.id === plan.id
-            ? { ...item, stages: item.stages.map((existing) => (existing.id === stage.id ? next : existing)) }
-            : item,
-        ),
+        title: normalizeTitle(operation.title),
+        scale: normalizeScale(operation.scale),
+        tasks: normalizeTasks(operation.tasks),
       };
-    }
-    case 'delete-stage': {
-      const { plan, stage } = findStage(data, operation.stageId);
-      return {
-        ...data,
-        plans: data.plans.map((item) =>
-          item.id === plan.id ? { ...item, stages: item.stages.filter((existing) => existing.id !== stage.id) } : item,
-        ),
-      };
-    }
+    case 'clear-tasks':
+      return { ...data, tasks: [] };
   }
+}
+
+/* ------------------------------------------------------------------ 导入 / 导出 / 示例 */
+
+export type ScheduleDocument = {
+  version: number;
+  title: string;
+  scale: ScheduleScale;
+  tasks: ScheduleTask[];
+};
+
+/** 导出的 JSON 与参考项目同形（title / scale / tasks），双方可以互相导入。 */
+export function exportDocument(data: ScheduleData): ScheduleDocument {
+  return { version: SCHEDULE_VERSION, title: data.title, scale: data.scale, tasks: data.tasks };
+}
+
+/**
+ * 导入：解析失败或没有任何合法任务都直接报错，避免用户以为导入成功了。
+ * 认不出的字段（包括旧形态的 `plans`）被丢掉；颜色、日期不合法的任务不会进来。
+ */
+export function parseImport(value: unknown): { title: string; scale: ScheduleScale; tasks: ScheduleTask[] } {
+  const data = normalizeData(value);
+  if (data.tasks.length === 0) throw new Error('任务列表为空或全部字段不合法');
+  if (data.tasks.length > MAX_TASKS) throw new Error(`任务最多 ${MAX_TASKS} 条`);
+  return { title: data.title, scale: data.scale, tasks: data.tasks };
+}
+
+/** 「载入示例」：以本周一为第 0 天排布，落到哪一周都好看。 */
+export function sampleData(today: string = todayOf()): ScheduleData {
+  const monday = startOfWeek(today);
+  const samples: Array<[name: string, from: number, to: number, color: ScheduleColor]> = [
+    ['调研与竞品分析', 0, 4, 'slate'],
+    ['需求梳理与评审', 5, 6, 'slate'],
+    ['原型与视觉稿', 4, 9, 'violet'],
+    ['数据模型与服务端存储', 7, 11, 'blue'],
+    ['甘特图时间轴视图', 10, 17, 'blue'],
+    ['任务编辑与拖拽调整', 14, 21, 'cyan'],
+    ['移动端适配', 20, 25, 'emerald'],
+    ['联调与自测', 26, 30, 'amber'],
+    ['文档与部署', 29, 33, 'rose'],
+  ];
+  return {
+    ...emptyData(),
+    title: DEFAULT_TITLE,
+    scale: 'day',
+    tasks: samples.map(([name, from, to, color]) => ({
+      id: newId(),
+      name,
+      start: addDays(monday, from),
+      end: addDays(monday, to),
+      color,
+      note: '',
+    })),
+  };
 }
 
 /* ------------------------------------------------------------------ 给模型看 */
@@ -283,32 +331,38 @@ function daysLabel(start: string, end: string): string {
   return span <= 1 ? '1 天' : `${span} 天`;
 }
 
-/** 一条阶段的相对时间提示：正在走 / 还有几天 / 已结束。 */
-export function stageHint(stage: Pick<ScheduleStage, 'start' | 'end'>, today: string): string {
-  const toStart = daysBetween(today, stage.start);
-  const toEnd = daysBetween(today, stage.end);
+/** 一条任务的相对时间提示：进行中 / 还有几天 / 已结束。 */
+export function taskHint(task: Pick<ScheduleTask, 'start' | 'end'>, today: string): string {
+  const toStart = daysBetween(today, task.start);
+  const toEnd = daysBetween(today, task.end);
   if (toStart > 0) return toStart === 1 ? '明天开始' : `${toStart} 天后开始`;
   if (toEnd < 0) return `已结束 ${-toEnd} 天`;
-  return `进行中，第 ${daysBetween(stage.start, today) + 1}/${daysBetween(stage.start, stage.end) + 1} 天`;
+  return `进行中，第 ${daysBetween(task.start, today) + 1}/${daysBetween(task.start, task.end) + 1} 天`;
+}
+
+function noteLine(note: string): string {
+  const flat = note.replace(/\s+/g, ' ').trim();
+  if (!flat) return '';
+  return `\n   备注：${flat.length > 120 ? `${flat.slice(0, 120)}…` : flat}`;
 }
 
 /** 工具回复里的排期：id 与日期都写全，模型下一句话就能直接拿 id 去改。 */
 export function formatSchedule(data: ScheduleData, today: string = todayOf()): string {
-  if (data.plans.length === 0) return `今天 ${today}\n排期是空的（还没有任何计划）。`;
-  const lines = [`今天 ${today}`];
-  data.plans.forEach((plan, index) => {
-    lines.push(`${index + 1}. ${plan.name}（${plan.id}）${plan.note ? ` — ${plan.note}` : ''}`);
-    if (plan.stages.length === 0) {
-      lines.push('   （还没有阶段，用 add_stage 往里加）');
-      return;
-    }
-    const stages = [...plan.stages].sort((left, right) => left.start.localeCompare(right.start));
-    for (const stage of stages) {
-      const range = stage.start === stage.end ? stage.start : `${stage.start} → ${stage.end}`;
-      lines.push(
-        `   - ${stage.name}｜${range}｜${daysLabel(stage.start, stage.end)}｜${stageHint(stage, today)}｜${stage.id}`,
-      );
-    }
+  if (data.tasks.length === 0) return `今天 ${today}\n排期「${data.title}」是空的（还没有任何任务）。`;
+  const lines = [`今天 ${today}`, `排期「${data.title}」 · ${data.tasks.length} 个任务`];
+  const tasks = [...data.tasks].sort(
+    (left, right) => left.start.localeCompare(right.start) || left.name.localeCompare(right.name),
+  );
+  tasks.forEach((task, index) => {
+    const range = task.start === task.end ? task.start : `${task.start} → ${task.end}`;
+    lines.push(
+      `${index + 1}. [${task.id}] ${task.name}｜${range}｜${daysLabel(task.start, task.end)}｜${taskHint(
+        task,
+        today,
+      )}｜${task.color}`,
+    );
+    const note = noteLine(task.note);
+    if (note) lines.push(note);
   });
   return lines.join('\n');
 }

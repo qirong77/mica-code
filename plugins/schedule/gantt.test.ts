@@ -1,86 +1,85 @@
 import { describe, expect, it } from 'vitest';
 import { addDays } from './dates.js';
-import { axisCells, buildGantt, clampZoom, pxPerDayOf, todayScrollLeft, zoomAnchor } from './gantt.js';
+import {
+  ZOOM_MAX,
+  ZOOM_MIN,
+  axisCells,
+  buildGantt,
+  clampZoom,
+  pxPerDayOf,
+  rowHeight,
+  todayScrollLeft,
+  zoomAnchor,
+} from './gantt.js';
+import type { ScheduleTask } from './schedule.js';
 
-function stage(id: string, start: string, end: string, name = id) {
-  return { id, name, start, end };
+function task(id: string, start: string, end: string, color: ScheduleTask['color'] = 'blue', name = id): ScheduleTask {
+  return { id, name, start, end, color, note: '' };
 }
 
 describe('buildGantt', () => {
-  it('pads the axis around the stages and keeps today inside it', () => {
-    const layout = buildGantt([{ id: 'a', name: 'A', stages: [stage('dev', '2026-10-01', '2026-10-05')] }], {
-      today: '2026-10-29',
-    });
+  it('pads the axis around the tasks and keeps today inside it', () => {
+    const layout = buildGantt([task('dev', '2026-10-01', '2026-10-05')], { today: '2026-10-29' });
     expect(layout.start < '2026-10-01').toBe(true);
     expect(layout.end > '2026-10-29').toBe(true);
     expect(layout.days).toBeGreaterThan(0);
-    // 偏移量是相对时间轴左端算的
     const bar = layout.rows[0]!.bars[0]!;
     expect(bar.offset).toBeGreaterThan(0);
     expect(bar.span).toBe(5);
   });
 
-  it('keeps one row per plan and splits overlaps into lanes', () => {
+  it('groups tasks by color and keeps the palette order, not the urgency order', () => {
     const layout = buildGantt(
       [
-        {
-          id: 'a',
-          name: 'A',
-          stages: [stage('testing', '2026-10-28', '2026-10-30'), stage('release', '2026-10-29', '2026-10-29')],
-        },
+        task('done', '2026-09-01', '2026-09-03', 'amber'),
+        task('next', '2026-11-10', '2026-11-12', 'blue'),
+        task('live', '2026-10-28', '2026-11-02', 'slate'),
       ],
       { today: '2026-10-29' },
     );
-    expect(layout.rows).toHaveLength(1);
-    expect(layout.rows[0]!.lanes).toBe(2);
-    expect(layout.rows[0]!.bars.map((bar) => bar.lane)).toEqual([0, 1]);
+    // COLOR_KEYS = blue / violet / emerald / amber / rose / cyan / slate
+    expect(layout.rows.map((row) => row.color)).toEqual(['blue', 'amber', 'slate']);
+    expect(layout.rows.map((row) => row.bars[0]!.taskId)).toEqual(['next', 'done', 'live']);
   });
 
-  it('keeps sequential stages on the same lane', () => {
-    const layout = buildGantt(
-      [
-        {
-          id: 'a',
-          name: 'A',
-          stages: [stage('dev', '2026-10-20', '2026-10-24'), stage('testing', '2026-10-25', '2026-10-27')],
-        },
-      ],
+  it('splits overlaps inside one color into lanes and shares a lane for sequential work', () => {
+    const overlapping = buildGantt(
+      [task('testing', '2026-10-28', '2026-10-30'), task('release', '2026-10-29', '2026-10-29')],
       { today: '2026-10-29' },
     );
-    expect(layout.rows[0]!.lanes).toBe(1);
-  });
+    expect(overlapping.rows).toHaveLength(1);
+    expect(overlapping.rows[0]!.lanes).toBe(2);
+    expect(overlapping.rows[0]!.bars.map((bar) => bar.lane)).toEqual([0, 1]);
 
-  it('ranks live work first, then upcoming, then finished', () => {
-    const layout = buildGantt(
-      [
-        { id: 'done', name: '已结束', stages: [stage('dev', '2026-09-01', '2026-09-03')] },
-        { id: 'next', name: '待开始', stages: [stage('dev', '2026-11-10', '2026-11-12')] },
-        { id: 'live', name: '进行中', stages: [stage('testing', '2026-10-28', '2026-11-02')] },
-      ],
+    const sequential = buildGantt(
+      [task('dev', '2026-10-20', '2026-10-24'), task('testing', '2026-10-25', '2026-10-27')],
       { today: '2026-10-29' },
     );
-    expect(layout.rows.map((row) => row.name)).toEqual(['进行中', '待开始', '已结束']);
+    expect(sequential.rows[0]!.lanes).toBe(1);
   });
 
-  it('keeps an empty plan as a row — that row is where its first stage gets dragged in', () => {
-    const layout = buildGantt([{ id: 'empty', name: '空', stages: [] }], { today: '2026-10-29' });
-    expect(layout.rows).toHaveLength(1);
-    expect(layout.rows[0]).toMatchObject({ planId: 'empty', lanes: 1, bars: [] });
+  it('never puts two colors on one row', () => {
+    const layout = buildGantt(
+      [task('a', '2026-10-20', '2026-10-24', 'blue'), task('b', '2026-10-21', '2026-10-25', 'rose')],
+      { today: '2026-10-29' },
+    );
+    expect(layout.rows).toHaveLength(2);
+    expect(layout.rows.map((row) => row.lanes)).toEqual([1, 1]);
+  });
+
+  it('has no rows when there are no tasks, but still gives a usable axis around today', () => {
+    const layout = buildGantt([], { today: '2026-10-29' });
+    expect(layout.rows).toEqual([]);
     expect(layout.start < '2026-10-29' && layout.end > '2026-10-29').toBe(true);
+    expect(rowHeight(1)).toBe(40);
+    expect(rowHeight(2)).toBe(72);
   });
 
-  it('drops a stage with an invalid date instead of breaking the row', () => {
-    const layout = buildGantt(
-      [
-        {
-          id: 'a',
-          name: 'A',
-          stages: [stage('bad', '2026-02-30', '2026-03-02'), stage('ok', '2026-10-01', '2026-10-02')],
-        },
-      ],
-      { today: '2026-10-29' },
-    );
-    expect(layout.rows[0]!.bars.map((bar) => bar.stageId)).toEqual(['ok']);
+  it('drops a task with an invalid date instead of breaking the row', () => {
+    const layout = buildGantt([task('bad', '2026-02-30', '2026-03-02'), task('ok', '2026-10-01', '2026-10-02')], {
+      today: '2026-10-29',
+    });
+    expect(layout.rows[0]!.bars.map((bar) => bar.taskId)).toEqual(['ok']);
   });
 });
 
@@ -89,7 +88,7 @@ describe('axis cells', () => {
     const { major, minor } = axisCells('2026-10-26', 7, 'day');
     expect(minor).toHaveLength(7);
     expect(minor[0]).toMatchObject({ label: '26', sub: '一' });
-    expect(major[0]).toMatchObject({ label: '10 月', offset: 0 });
+    expect(major[0]).toMatchObject({ label: '2026 年 10 月', offset: 0 });
   });
 
   it('starts week ticks on mondays', () => {
@@ -113,8 +112,8 @@ describe('axis cells', () => {
 
 describe('zoom helpers', () => {
   it('clamps zoom into range', () => {
-    expect(clampZoom(0.1)).toBe(0.5);
-    expect(clampZoom(9)).toBe(3);
+    expect(clampZoom(0.1)).toBe(ZOOM_MIN);
+    expect(clampZoom(9)).toBe(ZOOM_MAX);
   });
 
   it('keeps the day under the cursor in place', () => {

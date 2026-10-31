@@ -13,7 +13,7 @@ import { emptyData, normalizeData, stamp, type ScheduleData } from './schedule.j
  * - **先写临时文件再 rename**，页面随时在读，不能让它读到半份 JSON。
  *
  * 所以工具这边拿到锁之后是「现读 → 改一条 → 原子写」，而不是把内存里那份整份盖回去：
- * 用户可能刚拖过另一条。
+ * 用户可能刚拖过另一条任务。
  */
 
 export const SCHEDULE_DATA_FILE = 'data.json';

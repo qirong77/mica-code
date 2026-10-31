@@ -35,6 +35,12 @@ export function daysBetween(from: string, to: string): number {
   return dayNumber(to) - dayNumber(from);
 }
 
+/** 这一天所在周的周一（参考项目的示例数据与周刻度都按周一起算）。 */
+export function startOfWeek(date: string): string {
+  const weekday = new Date(dayNumber(date) * DAY_MS).getUTCDay();
+  return addDays(date, -((weekday + 6) % 7));
+}
+
 /** 真日期：形状对，并且回写一遍不变（挡掉 2 月 30 日这类会被 Date 悄悄换掉的输入）。 */
 export function isValidDate(value: string): boolean {
   if (!DATE_SHAPE.test(value)) return false;
