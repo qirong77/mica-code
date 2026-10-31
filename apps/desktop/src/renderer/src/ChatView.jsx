@@ -2003,7 +2003,9 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
       id: 'commit',
       label: 'Commit',
       icon: IconGitCommit,
-      disabled: menu.running || commitRunning,
+      // commit 是独立的 `mica commit` 一次性进程（只看 cwd 的 git 变化），不碰会话、不拿
+      // turn lease，所以一轮跑着也能用；只有上一次 commit 还没结束才拦。
+      disabled: commitRunning,
       title: commitRunning ? 'commit 任务正在执行' : undefined
     },
     { id: 'fork', label: 'Fork', icon: IconGitFork, disabled: !menu.hasSession || menu.running },
