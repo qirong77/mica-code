@@ -2952,6 +2952,12 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   opacity: 0.62;
 }
 
+/* `/` 补全插进来的能力引用（`skill:cooper`）：只有连目标都没有的极少情况才用到它，
+   有目标的那两种分别复用 .chat-path 与 .chat-link。 */
+.chat-capability-ref {
+  color: var(--color-info);
+}
+
 /*
  * 详情弹窗（`chat-modal.jsx`）：上下文占用、子代理、后台任务、工具调用、思考共用一套壳。
  *

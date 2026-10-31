@@ -46,10 +46,15 @@ import {
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
 import { SessionDetailView } from '@mica-config-ui/web'
-import { ChatPathContext, PathText, PathToken } from './PathToken'
+import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { findPresetForSearch } from './chat-find-preset'
-import { parsePathHref, remarkPathLinks, splitTextByImages } from './chat-paths'
+import {
+  parsePathHref,
+  remarkPathLinks,
+  splitTextByCapabilityRefs,
+  splitTextByImages
+} from './chat-paths'
 import { protectEmphasisAutolinks, remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
@@ -363,7 +368,8 @@ function ImageLink({ source, alt }) {
  */
 export function MessageText({ text }) {
   const segments = useMemo(() => splitTextByImages(text), [text])
-  if (!segments.some((segment) => segment.type === 'image')) return <PathText text={text} />
+  if (!segments.some((segment) => segment.type === 'image'))
+    return <CapabilityAwareText text={text} />
   return segments.map((segment, index) =>
     segment.type === 'image' ? (
       <ImageLink
@@ -372,9 +378,42 @@ export function MessageText({ text }) {
         alt={segment.alt}
       />
     ) : (
+      <CapabilityAwareText key={`text:${index}`} text={segment.text} />
+    )
+  )
+}
+
+/**
+ * 能力引用（`/` 补全插进来的 `[skill:cooper](…)`）与路径、链接混排的纯文本。
+ *
+ * 原文不能改——编辑重发按文本定位，改了就落到别的消息上。所以这里只换渲染：
+ * 方括号里那段长长的链接收成 `skill:cooper` / `mcp:mica-browser` 一枚短标签，
+ * 点开仍是完整目标（skill 是 `SKILL.md`，MCP 是它的接口地址）。
+ */
+function CapabilityAwareText({ text }) {
+  const segments = useMemo(() => splitTextByCapabilityRefs(text), [text])
+  if (!segments.some((segment) => segment.type === 'capability')) return <PathText text={text} />
+  return segments.map((segment, index) =>
+    segment.type === 'capability' ? (
+      <CapabilityRef
+        key={`capability:${index}:${segment.name}`}
+        kind={segment.kind}
+        name={segment.name}
+        target={segment.target}
+      />
+    ) : (
       <PathText key={`text:${index}`} text={segment.text} />
     )
   )
+}
+
+function CapabilityRef({ kind, name, target }) {
+  const label = `${kind}:${name}`
+  // HTTP 的 MCP server 目标是一个地址，点开交给系统浏览器；skill 与 stdio 的 server
+  // 指向本地文件（`SKILL.md` / `config.json`），走路径那套打开方式。
+  if (/^https?:/i.test(target)) return <ChatLink url={target} text={label} />
+  if (!target) return <span className="chat-capability-ref">{label}</span>
+  return <PathToken path={target} text={label} />
 }
 
 /**

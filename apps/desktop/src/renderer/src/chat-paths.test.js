@@ -8,6 +8,7 @@ import {
   pathHref,
   remarkPathLinks,
   splitLocation,
+  splitTextByCapabilityRefs,
   splitTextByImages,
   splitTextByPaths
 } from './chat-paths'
@@ -205,5 +206,33 @@ describe('image references', () => {
     expect(findImageReferences(text)).toHaveLength(2)
     expect(findImageReferences(text)).toHaveLength(2)
     expect(splitTextByImages(text).filter((s) => s.type === 'image')).toHaveLength(2)
+  })
+
+  it('splits the composer capability references out of the written text', () => {
+    // `/` 补全插进来的就是这一段；消息体把它收成 `skill:cooper` 一枚短标签
+    expect(splitTextByCapabilityRefs('用 [skill:cooper](/h/skills/cooper/SKILL.md) 看下')).toEqual([
+      { type: 'text', text: '用 ' },
+      { type: 'capability', kind: 'skill', name: 'cooper', target: '/h/skills/cooper/SKILL.md' },
+      { type: 'text', text: ' 看下' }
+    ])
+  })
+
+  it('reads an angle-wrapped target and still decodes the encoded form', () => {
+    expect(splitTextByCapabilityRefs('[skill:ask](</home/a b/SKILL.md>)')[0].target).toBe(
+      '/home/a b/SKILL.md'
+    )
+    // 手写或旧会话里的百分号编码形式照旧认
+    expect(splitTextByCapabilityRefs('[skill:ask](/home/a%20b/SKILL.md)')[0].target).toBe(
+      '/home/a b/SKILL.md'
+    )
+    const [broken] = splitTextByCapabilityRefs('[mcp:x](http://h/%E0%A4%A)')
+    expect(broken.target).toBe('http://h/%E0%A4%A')
+  })
+
+  it('leaves ordinary markdown links and plain text alone', () => {
+    expect(splitTextByCapabilityRefs('看 [文档](https://example.com)')).toEqual([
+      { type: 'text', text: '看 [文档](https://example.com)' }
+    ])
+    expect(splitTextByCapabilityRefs('')).toEqual([])
   })
 })

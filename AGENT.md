@@ -385,8 +385,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - `run.events` / `run.prompt` 每轮重置；恢复先用 `historyBeforeRunReplay` 裁掉本轮已保存回答再重放。
 - 每次模型请求后立即转发 usage；实时 usage 不改 turnState / updatedAt。
 - 阶段文案与计时读 `statusLinePhase`；`mica/turn/retrying` 让状态行显示 `retrying n/5`。
-- 文件补全 CLI / desktop 共用 `mica-file-mentions`；`@` 与 `/` skill 补全只在词首触发，选中只插文本（文件插 `@路径`，skill 插 `SKILL.md` 绝对路径）。
-- `/` 浮层混排 skill 与 MCP server；插入 MCP 时只写 server 名与已知工具名。两边都包含**内置能力**，不需要用户配置：skill 来自磁盘扫描 + 插件发布的 `$MICA_HOME/plugin-skills` 索引 + **插件清单声明的 skill 目录**（后者只解析 `plugin.json`、不导入插件代码，所以第一次打开就看得见随包 skill，不用等插件 setup 过一次；`skills-core.js`），MCP 来自 `config.json` + 运行时按 socket 能力算出的 `mica-browser` / `mica-terminal`（`mcp-candidates-core.js`）；插入文本与普通条目一致。
+- 文件补全 CLI / desktop 共用 `mica-file-mentions`；`@` 与 `/` skill 补全只在词首触发，选中只插文本（文件插 `@路径`，skill 插 `[skill:name](SKILL.md 绝对路径)`）。
+- `/` 浮层混排 skill 与 MCP server；插入的都是一枚 markdown 链接：`[skill:name](SKILL.md 绝对路径)`、`[mcp:name](接口地址)`（http 的 server 才有地址，stdio 退回 `config.json`）。目标含空白或括号时整条包进 `<…>`（CommonMark 允许），**不**做百分号编码——那会让模型读到一个要再解一次才成路径的东西。消息体里这类引用由 `splitTextByCapabilityRefs` 收成 `skill:name` 一枚短标签，点开仍是完整目标（原文一个字不改，编辑重发靠它定位）。两边都包含**内置能力**，不需要用户配置：skill 来自磁盘扫描 + 插件发布的 `$MICA_HOME/plugin-skills` 索引 + **插件清单声明的 skill 目录**（后者只解析 `plugin.json`、不导入插件代码，所以第一次打开就看得见随包 skill，不用等插件 setup 过一次；`skills-core.js`），MCP 来自 `config.json` + 运行时按 socket 能力算出的 `mica-browser` / `mica-terminal`（`mcp-candidates-core.js`）；插入文本与普通条目一致。
 - 每行是「名称 | 说明 | 类型 | 来源」四列，列数必须与行内子元素一一对应（多出来的子元素会掉到第二行，浮层看起来就是歪的）。类型标记写 `skill` / `MCP`（`@` 文件补全的 `file` 不画，一整屏都是文件时标一排只是噪声）；来源标记是 `source: { kind, label, detail? }`，kind 取 `builtin` / `plugin` / `project` / `user` / `config`：插件带的写「插件 <id>」、项目目录写 `.mica/skills` 这样的相对路径、用户目录写 `$MICA_HOME/skills` / `~/.agents/skills`、MCP 写「内置」或 `config.json`；`detail`（SKILL.md 路径、`config.json` 路径、插件 id）放悬停提示。来源由 host 两个扫描器给，渲染层只做白名单校验（不认识的 kind 整条丢掉），`label` 同时参与查询匹配但没有高亮——说明列只讲「这东西干什么」。
 - desktop composer 不分派斜杠命令；输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻。
 - 输入框内容变化会节流 2s 发一次 `chat:input-activity` → `mica/input/activity`（空输入不发）：它只服务「这个人回来了」这类提前量（自动压缩的空闲触发），没有常驻进程时直接丢弃，不回包也不影响输入。

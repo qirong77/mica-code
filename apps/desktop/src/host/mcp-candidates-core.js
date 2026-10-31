@@ -85,9 +85,12 @@ export function listMcpCandidates() {
         .slice(0, MAX_TOOLS)
         .map((tool) => String(tool?.name ?? ''))
         .filter(Boolean)
+      // http 的 server 有接口地址，输入框插入的链接就指向它；stdio 没有。
+      const url = typeof config?.url === 'string' ? config.url : ''
       return {
         name,
-        type: config && typeof config.url === 'string' ? 'http' : 'stdio',
+        type: url ? 'http' : 'stdio',
+        ...(url ? { url } : {}),
         tools,
         // 配置文件的绝对路径放进 `detail`：悬停就知道该改哪个文件。
         source: { kind: 'config', label: 'config.json', detail: path }

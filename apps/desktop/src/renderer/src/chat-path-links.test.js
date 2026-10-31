@@ -171,6 +171,32 @@ describe('chat plain text links', () => {
   })
 })
 
+// `/` 补全插进输入框的是一枚 `[skill:cooper](…/SKILL.md)` 链接：输入框里保持原样
+// （那是要发给模型的文本），消息体里收成一枚短标签，点开仍是完整目标。
+describe('composer capability references', () => {
+  it('collapses a skill reference to a short clickable label', () => {
+    const html = renderUser('用 [skill:cooper](/Users/q/.mica/skills/cooper/SKILL.md) 看下')
+    expect(html).toContain('chat-path')
+    expect(html).toContain('>skill:cooper<')
+    // 目标仍在 title 里，点开打开的是 SKILL.md 本身
+    expect(html).toContain('/abs/Users/q/.mica/skills/cooper/SKILL.md')
+    expect(html).not.toContain('[skill:cooper](')
+  })
+
+  it('opens an http MCP reference through the external link path', () => {
+    const html = renderUser('[mcp:mica-browser](http://127.0.0.1:8787/mcp/browser) 已连上')
+    expect(html).toContain('class="chat-link"')
+    expect(html).toContain('href="http://127.0.0.1:8787/mcp/browser"')
+    expect(html).toContain('>mcp:mica-browser<')
+  })
+
+  it('keeps a path with spaces readable instead of percent-encoding it', () => {
+    const html = renderUser('[skill:ask](</home/a b/skills/ask/SKILL.md>)')
+    expect(html).toContain('>skill:ask<')
+    expect(html).toContain('/abs/home/a b/skills/ask/SKILL.md')
+  })
+})
+
 // 模型几乎总是用反引号写 URL 和路径（`http://x`、`src/app.ts`），所以行内代码里的
 // 这两种写法也必须可点：外壳仍是 <code>，样式不变，内容换成可点元素。
 describe('chat links inside inline code', () => {

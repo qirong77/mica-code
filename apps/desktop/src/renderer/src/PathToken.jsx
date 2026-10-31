@@ -137,7 +137,7 @@ export function PathToken({ path, text, line = null, column = null }) {
  * markdown 链接一致：交给运行时打开系统浏览器（`terminal.openExternal`）；没有
  * 运行时（比如静态渲染）时退回浏览器自己的跳转。
  */
-function ChatLink({ url, text, children }) {
+export function ChatLink({ url, text, children }) {
   const open = (event) => {
     event.preventDefault()
     event.stopPropagation()

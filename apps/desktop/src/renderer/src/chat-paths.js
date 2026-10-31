@@ -111,6 +111,44 @@ export function splitTextByImages(text) {
 }
 
 /**
+ * `/` 补全插进输入框的能力引用：`[skill:cooper](/…/skills/cooper/SKILL.md)`、
+ * `[mcp:mica-browser](http://127.0.0.1:8787/mcp/browser)`（见 chat-completions.js）。
+ *
+ * 消息体不按 markdown 渲染用户那一侧，所以这里单独认一遍：认出来才能把这段长长的
+ * 链接收成 `skill:cooper` 那样的短标签，点击仍是完整的目标。
+ */
+// 目标两种写法都认：插入时含空白与括号的会包在 `<…>` 里（见 chat-completions.js），
+// 手写或旧会话里出现的百分号编码形式也照旧解开。
+const CAPABILITY_REFERENCE = /\[(skill|mcp):([^\]\n]+)\]\((?:<([^>\n]*)>|([^)\s]*))\)/g
+
+/**
+ * 把文本切成「能力引用」与「其余文本」。目标在插入时就写成可读形态（含空白与括号的
+ * 包在 `<…>` 里），这里只把可能存在的百分号编码解回原样；解码失败（手写的畸形转义）
+ * 就保留原文，不让整段渲染报错。
+ */
+export function splitTextByCapabilityRefs(text) {
+  const value = String(text || '')
+  const segments = []
+  const pattern = new RegExp(CAPABILITY_REFERENCE.source, 'g')
+  let lastIndex = 0
+  let match
+  while ((match = pattern.exec(value))) {
+    if (match.index > lastIndex)
+      segments.push({ type: 'text', text: value.slice(lastIndex, match.index) })
+    let target = match[3] ?? match[4] ?? ''
+    try {
+      target = decodeURIComponent(target)
+    } catch {
+      // 保留原文
+    }
+    segments.push({ type: 'capability', kind: match[1], name: match[2], target })
+    lastIndex = pattern.lastIndex
+  }
+  if (lastIndex < value.length) segments.push({ type: 'text', text: value.slice(lastIndex) })
+  return segments
+}
+
+/**
  * 这个片段像不像一个真实路径。
  * 锚定写法（`/a`、`~/a`、`./a`、`C:\a`）一律采纳；相对写法要求「≥2 层目录」或
  * 「尾段带扩展名」，把 `and/or`、`TCP/IP` 这类斜杠词排除在外。

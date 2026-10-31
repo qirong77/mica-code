@@ -5,7 +5,6 @@ import {
   applyCompletion,
   completionInsertText,
   fileCompletionOptions,
-  mcpCompletionInsertText,
   matchIndexes,
   rankCompletions,
   skillCompletionOptions,
@@ -46,17 +45,21 @@ describe('composer completions', () => {
         name: 'ask',
         path: '/home/u/.mica/skills/ask/SKILL.md'
       })
-    ).toBe('/home/u/.mica/skills/ask/SKILL.md ')
+    ).toBe('[skill:ask](/home/u/.mica/skills/ask/SKILL.md) ')
     expect(completionInsertText({ kind: 'file', path: 'src/a.ts' })).toBe('@src/a.ts ')
     expect(completionInsertText({ kind: 'file', path: 'a b/c.ts' })).toBe('@"a b/c.ts" ')
   })
 
-  it('quotes the skill path when it contains spaces and falls back to the name', () => {
+  it('angle-wraps a path with spaces so the target stays readable', () => {
     expect(
       completionInsertText({ kind: 'skill', name: 'ask', path: '/home/a b/skills/ask/SKILL.md' })
-    ).toBe('"/home/a b/skills/ask/SKILL.md" ')
-    // 老候选（没有 path）退回 `/name`，不至于插出一段空白
-    expect(completionInsertText({ kind: 'skill', name: 'ask' })).toBe('/ask ')
+    ).toBe('[skill:ask](</home/a b/skills/ask/SKILL.md>) ')
+    // 括号在目标里同样会截断链接，一并包进去
+    expect(completionInsertText({ kind: 'skill', name: 'ask', path: '/home/a(1)/SKILL.md' })).toBe(
+      '[skill:ask](</home/a(1)/SKILL.md>) '
+    )
+    // 没有可打开的位置时只留名字，不编一枚点了没反应的链接
+    expect(completionInsertText({ kind: 'skill', name: 'ask' })).toBe('[skill:ask] ')
   })
 
   it('keeps the file insert text identical to the CLI mention', () => {
@@ -209,6 +212,42 @@ describe('composer completions', () => {
     expect(options[0].highlights).toEqual([9, 10, 11, 12, 13, 14, 15])
   })
 
+  it('keeps the MCP endpoint on the option so the insert text can link to it', () => {
+    const [option] = slashCompletionOptions(
+      {
+        mcpServers: [
+          { name: 'mica-browser', type: 'http', url: 'http://127.0.0.1:8787/mcp/browser' }
+        ]
+      },
+      ''
+    )
+
+    expect(option.path).toBe('http://127.0.0.1:8787/mcp/browser')
+    expect(completionInsertText(option)).toBe(
+      '[mcp:mica-browser](http://127.0.0.1:8787/mcp/browser) '
+    )
+  })
+
+  it('falls back to the config file for a stdio server, which has no endpoint', () => {
+    const [option] = slashCompletionOptions(
+      {
+        mcpServers: [
+          {
+            name: 'sequential-thinking',
+            type: 'stdio',
+            source: { kind: 'config', label: 'config.json', detail: '/home/u/.mica/config.json' }
+          }
+        ]
+      },
+      ''
+    )
+
+    expect(option.path).toBe('/home/u/.mica/config.json')
+    expect(completionInsertText(option)).toBe(
+      '[mcp:sequential-thinking](/home/u/.mica/config.json) '
+    )
+  })
+
   it('still lists skills when the MCP side is empty or failed', () => {
     const options = slashCompletionOptions(
       { skills: [{ name: 'cooper', description: '' }], mcpServers: [] },
@@ -218,16 +257,25 @@ describe('composer completions', () => {
     expect(slashCompletionOptions({}, '')).toEqual([])
   })
 
-  it('inserts the MCP server with its tool names', () => {
-    expect(mcpCompletionInsertText({ name: 'mica-browser', tools: ['control'] })).toBe(
-      '使用 MCP server「mica-browser」（工具：control） '
-    )
-    expect(completionInsertText({ kind: 'mcp', name: 'mica-browser', tools: ['control'] })).toBe(
-      '使用 MCP server「mica-browser」（工具：control） '
-    )
-    // 工具名未知时只留 server 名，不编一段空括号
+  it('links the MCP server to its endpoint, falling back to the name', () => {
+    expect(
+      completionInsertText({
+        kind: 'mcp',
+        name: 'mica-browser',
+        url: 'http://127.0.0.1:8787/mcp/browser',
+        tools: ['control']
+      })
+    ).toBe('[mcp:mica-browser](http://127.0.0.1:8787/mcp/browser) ')
+    expect(
+      completionInsertText({
+        kind: 'mcp',
+        name: 'mica-browser',
+        url: 'http://127.0.0.1:8787/mcp/browser'
+      })
+    ).toBe('[mcp:mica-browser](http://127.0.0.1:8787/mcp/browser) ')
+    // stdio 的 server 没有接口地址，也没有可打开的位置：只留名字
     expect(completionInsertText({ kind: 'mcp', name: 'sequential-thinking', tools: [] })).toBe(
-      '使用 MCP server「sequential-thinking」 '
+      '[mcp:sequential-thinking] '
     )
   })
 
@@ -296,18 +344,20 @@ describe('composer completions', () => {
 
   it('ignores a source the host spelled wrong instead of drawing a broken badge', () => {
     const [option] = slashCompletionOptions(
-      { skills: [{ name: 'x', description: '', source: { kind: 'telepathy', label: '心灵感应' } }] },
+      {
+        skills: [{ name: 'x', description: '', source: { kind: 'telepathy', label: '心灵感应' } }]
+      },
       ''
     )
     expect(option.source).toBeUndefined()
-    expect(slashCompletionOptions({ skills: [{ name: 'y', source: {} }] }, '')[0].source).toBeUndefined()
+    expect(
+      slashCompletionOptions({ skills: [{ name: 'y', source: {} }] }, '')[0].source
+    ).toBeUndefined()
   })
 
-  it('caps the listed tools so one pick cannot flood the composer', () => {
+  it('keeps the insert text one short link however many tools the server has', () => {
     const tools = Array.from({ length: 9 }, (_, index) => `tool-${index}`)
-    expect(mcpCompletionInsertText({ name: 'big', tools })).toBe(
-      '使用 MCP server「big」（工具：tool-0、tool-1、tool-2、tool-3、tool-4、tool-5 等） '
-    )
+    expect(completionInsertText({ kind: 'mcp', name: 'big', tools })).toBe('[mcp:big] ')
   })
 
   it('matchIndexes finds every occurrence, ignoring case', () => {

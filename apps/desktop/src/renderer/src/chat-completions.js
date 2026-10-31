@@ -11,7 +11,6 @@
 import {
   MAX_FILE_MENTION_RESULTS,
   activeFileMention,
-  mentionPath,
   mentionText
 } from '@packages/mica-file-mentions/rank.js'
 
@@ -19,8 +18,6 @@ import {
 // 用户按 `/` 是想浏览或按关键字挑一个，藏掉大半候选就只能靠记名字了。
 export const SKILL_COMPLETION_LIMIT = 200
 export const FILE_COMPLETION_LIMIT = MAX_FILE_MENTION_RESULTS
-// 插入文本里最多列出几个工具名：再长就只是把一屏工具清单塞进输入框。
-export const MAX_LISTED_TOOLS = 6
 // 与 CLI 一致：有查询时挡 100ms 的连续击键，空查询立即给出工作区文件（扫描结果在
 // host 侧按工作区缓存，所以这一下不会重新遍历目录）。
 export const FILE_COMPLETION_DEBOUNCE_MS = 100
@@ -52,36 +49,42 @@ export function activeCompletion(value, caret) {
   return null
 }
 
-/** 与 CLI 的 mention 一致：路径含空白或引号时整条 JSON 化，避免被拆成两个词。 */
-export function completionMentionPath(path) {
-  return mentionPath(path)
-}
-
 export function completionInsertText(item) {
   if (!item) return ''
-  // skill 插入的是 SKILL.md 的绝对路径：桌面端不把 `/name` 当命令执行，发出去的
-  // `/name` 对模型只是一段没头没尾的文本，而路径能让它直接读到完整说明。
-  if (item.kind === 'skill') return item.path ? `${mentionPath(item.path)} ` : `/${item.name} `
-  if (item.kind === 'mcp') return mcpCompletionInsertText(item)
+  if (item.kind === 'skill' || item.kind === 'mcp') {
+    // `path` 是浮层选项上的统一字段；host 的原始候选里 MCP 叫 `url`。
+    return completionLink(item.kind, item.name, item.path || item.url)
+  }
   return mentionText(item.path ?? item.name)
 }
 
 /**
- * 选中一个 MCP server 时插入的文本。
+ * 插入的是一枚 markdown 链接：方括号里是「哪一类 + 叫什么」，圆括号里是它能点开的位置。
  *
- * 和 skill 不同，MCP 没有可读的文件，能用的是已经注册进会话的工具，所以直接把 server 与
- * 工具名列出来——模型据此知道该调哪个，用户也不必自己记工具名。工具名未知（没探过、
- * 或 stdio 尚未连接）时只留 server 名。
+ * 只写类型（`[mcp](…)`）在输入框里认不出是哪一台 server，而这段文本首先是给人看的；
+ * 类型仍留在最前面，滑一眼扫下来就知道插的是 skill 还是 MCP。位置对 skill 是 `SKILL.md`
+ * 的绝对路径（点开就是完整说明），对 MCP 是它的接口地址，stdio 的 server 没有地址，
+ * 退回配置文件——否则只能插一枚点了没反应的空链接。
  */
-export function mcpCompletionInsertText(item) {
-  if (!item) return ''
-  const name = String(item.name ?? '')
-  const tools = Array.isArray(item.tools)
-    ? item.tools.filter(Boolean).slice(0, MAX_LISTED_TOOLS)
-    : []
-  if (tools.length === 0) return `使用 MCP server「${name}」 `
-  const suffix = Number(item.tools?.length ?? 0) > tools.length ? ' 等' : ''
-  return `使用 MCP server「${name}」（工具：${tools.join('、')}${suffix}） `
+function completionLink(kind, name, target) {
+  const trimmed = String(name ?? '').trim()
+  const label = trimmed ? `${kind}:${trimmed}` : kind
+  const value = String(target ?? '').trim()
+  // 没有可打开的位置时只留名字：编一个目标只会得到一枚点了没反应的链接。
+  if (!value) return `[${label}] `
+  return `[${label}](${linkDestination(value)}) `
+}
+
+/**
+ * markdown 链接目标里不能直接出现空白与括号，否则整条链接解析不成立（`[skill](/a b/x)`
+ * 的目的地只剩 `/a`）。含这些字符时用 `<…>` 包住——CommonMark 允许这么写，目标里留的
+ * 还是真实路径：**这一点比格式好看更要紧**，模型读到的就是 `/a b/x`，不用先解一遍
+ * 百分号编码再拼回去。
+ */
+function linkDestination(value) {
+  if (!/[\s()]/.test(value)) return value
+  // 尖括号内部不能再有 `<>`，否则解析在它那里就断了；这两个字符在路径里也罕见。
+  return `<${value.replace(/[<>]/g, (char) => encodeURIComponent(char))}>`
 }
 
 /** host 的 mention 候选 → 浮层选项：`label` 是文件名，`description` 是工作区相对路径。 */
@@ -246,6 +249,9 @@ function mcpOption(server, query) {
     key: `mcp:${name}`,
     kind: 'mcp',
     name,
+    // 与 skill 的 `path` 同一含义：这个 server 能点开的位置。http 的是接口地址，
+    // stdio 没有地址，退回配置文件（`source.detail` 就是它的路径）。
+    path: String(server?.url ?? '') || String(source?.detail ?? ''),
     tools,
     label,
     description,

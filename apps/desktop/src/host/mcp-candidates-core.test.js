@@ -41,6 +41,7 @@ describe('composer MCP candidates', () => {
       {
         name: 'mica-terminal',
         type: 'http',
+        url: 'http://127.0.0.1:1/mcp/terminal',
         tools: [],
         source: { kind: 'config', label: 'config.json', detail: join(home, 'config.json') }
       },

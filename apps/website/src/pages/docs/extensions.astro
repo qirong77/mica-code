@@ -144,7 +144,8 @@ EOF`;
   <pre><code>{skillExample}</code></pre>
   <p>
     重新启动后用 <code>/skills</code> 检查是否发现该 Skill，再在请求中明确说“使用 review-checklist
-    审查本次改动”。桌面对话框也支持通过斜杠补全插入 Skill 名称。
+    审查本次改动”。桌面对话框也支持用斜杠补全把 Skill
+    插入成一枚链接（<code>[skill:name](SKILL.md 绝对路径)</code>），模型据此直接读到完整说明。
   </p>
   <p>
     模型先看到 Skills 的名称与说明索引，执行相关任务时通过 <code>skill</code>{' '}
