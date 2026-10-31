@@ -1,5 +1,5 @@
-import { daysBetween, STAGE_LABELS, type ScheduleStage } from './parse.js';
-import type { EditedStage } from './edits.js';
+import { DAY_MS, addDays, dayNumber, daysBetween, isValidDate } from './dates.js';
+import type { ScheduleStage } from './schedule.js';
 
 /**
  * 甘特图的纯逻辑：时间轴范围、行、刻度和缩放。
@@ -8,29 +8,26 @@ import type { EditedStage } from './edits.js';
  * 界面那一侧只按 `rows` 从上往下画、不做日期算术。
  */
 
-/** 应用过修订的阶段（界面传进来的那份），纯解析结果也能直接用。 */
-export type GanttStage = ScheduleStage &
-  Partial<Pick<EditedStage, 'stageId' | 'edited' | 'added' | 'originalStart' | 'originalEnd'>>;
+export type GanttStage = Pick<ScheduleStage, 'id' | 'name' | 'start' | 'end'>;
+
+export type GanttPlanInput = {
+  id: string;
+  name: string;
+  note?: string;
+  stages: GanttStage[];
+};
 
 export type GanttBar = {
-  /** `${groupId}:${key}:${start}:${lane}`，React key 与点击定位都用它 */
+  /** `${planId}:${stageId}:${lane}`，React key 用它（同一条阶段换了道也会重挂） */
   id: string;
-  /** 这条阶段的身份（公告阶段 `key:start`，新建的 `new:…`）；拖动后仍不变，用来存修订 */
+  /** 阶段身份，选中态与改期都用它 */
   stageId: string;
-  groupId: string;
-  key: string;
+  planId: string;
+  /** 条上的字（阶段名）；太窄时不画 */
   label: string;
-  /** 用户拖过（或新建）；界面画虚线与「还原」 */
-  edited: boolean;
-  added: boolean;
-  /** 公告里的原区间，只在 `edited` 时有 */
-  originalStart?: string;
-  originalEnd?: string;
   start: string;
   end: string;
-  days: string[];
-  range: boolean;
-  /** 本行内的第几条道：同一项目里时间重叠的阶段（测试跨过上线）不会叠在一起 */
+  /** 本行内的第几条道：同一计划里时间重叠的阶段（测试跨过上线）不会叠在一起 */
   lane: number;
   /** 离时间轴左端几天 */
   offset: number;
@@ -39,10 +36,9 @@ export type GanttBar = {
 };
 
 export type GanttRow = {
-  groupId: string;
+  planId: string;
   name: string;
-  author: string;
-  announcedAt: number;
+  note: string;
   /** 这行有几条道（决定行高） */
   lanes: number;
   bars: GanttBar[];
@@ -56,23 +52,6 @@ export type GanttLayout = {
   days: number;
 };
 
-const DAY_MS = 86_400_000;
-
-function dayNumber(date: string): number {
-  const [year, month, day] = date.split('-').map(Number);
-  return Date.UTC(year, month - 1, day) / DAY_MS;
-}
-
-function isoFromDayNumber(value: number): string {
-  const date = new Date(value * DAY_MS);
-  const pad = (part: number) => String(part).padStart(2, '0');
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`;
-}
-
-export function addDays(date: string, delta: number): string {
-  return isoFromDayNumber(dayNumber(date) + delta);
-}
-
 /** 时间轴两端各留几天：条贴着边缘看不出它有没有超出 */
 const AXIS_PADDING_DAYS = 4;
 
@@ -83,23 +62,15 @@ const AXIS_PADDING_DAYS = 4;
  * - 时间轴从最早一个阶段到最晚一个阶段，两端各留几天，并保证今天在轴内；
  * - 行序按「谁更急着看」：正在进行的排最前，然后是还没开始的，全都结束的沉底。
  */
-export function buildGantt(
-  groups: Array<{
-    id: string;
-    name: string;
-    author?: string;
-    announcedAt?: number;
-    stages: GanttStage[];
-  }>,
-  options: { today: string },
-): GanttLayout {
+export function buildGantt(plans: GanttPlanInput[], options: { today: string }): GanttLayout {
   const today = options.today;
-  const prepared: Array<{ group: (typeof groups)[number]; stages: GanttStage[] }> = [];
-  for (const group of groups) {
-    const stages = [...group.stages]
-      .filter((stage) => stage.start && stage.end)
-      .sort((left, right) => left.start.localeCompare(right.start) || left.key.localeCompare(right.key));
-    if (stages.length > 0) prepared.push({ group, stages });
+  const prepared: Array<{ plan: GanttPlanInput; stages: GanttStage[] }> = [];
+  for (const plan of plans) {
+    // 没有阶段的计划也留一行：那一行是用户往里拖出第一条阶段的地方
+    const stages = [...plan.stages]
+      .filter((stage) => isValidDate(stage.start) && isValidDate(stage.end))
+      .sort((left, right) => left.start.localeCompare(right.start) || left.name.localeCompare(right.name));
+    prepared.push({ plan, stages });
   }
 
   const allStarts = prepared.flatMap((item) => item.stages.map((stage) => stage.start));
@@ -110,7 +81,7 @@ export function buildGantt(
   const end = addDays(last, AXIS_PADDING_DAYS);
   const days = daysBetween(start, end) + 1;
 
-  const rows: GanttRow[] = prepared.map(({ group, stages }) => {
+  const rows: GanttRow[] = prepared.map(({ plan, stages }) => {
     const laneEnds: string[] = [];
     const bars: GanttBar[] = stages.map((stage) => {
       let lane = laneEnds.findIndex((laneEnd) => daysBetween(laneEnd, stage.start) > 0);
@@ -121,29 +92,21 @@ export function buildGantt(
         laneEnds[lane] = stage.end;
       }
       return {
-        id: `${group.id}:${stage.key}:${stage.start}:${lane}`,
-        stageId: stage.stageId ?? `${stage.key}:${stage.start}`,
-        groupId: group.id,
-        key: stage.key,
-        label: stage.label || STAGE_LABELS[stage.key] || stage.key,
-        edited: stage.edited === true,
-        added: stage.added === true,
-        originalStart: stage.originalStart,
-        originalEnd: stage.originalEnd,
+        id: `${plan.id}:${stage.id}:${lane}`,
+        stageId: stage.id,
+        planId: plan.id,
+        label: stage.name,
         start: stage.start,
         end: stage.end,
-        days: stage.days,
-        range: stage.range,
         lane,
         offset: daysBetween(start, stage.start),
         span: daysBetween(stage.start, stage.end) + 1,
       };
     });
     return {
-      groupId: group.id,
-      name: group.name,
-      author: group.author ?? '',
-      announcedAt: group.announcedAt ?? 0,
+      planId: plan.id,
+      name: plan.name,
+      note: plan.note ?? '',
       lanes: Math.max(1, laneEnds.length),
       bars,
     };
@@ -152,14 +115,14 @@ export function buildGantt(
   rows.sort(
     (left, right) =>
       rowRank(left, today) - rowRank(right, today) ||
-      left.bars[0]!.start.localeCompare(right.bars[0]!.start) ||
+      (left.bars[0]?.start ?? '').localeCompare(right.bars[0]?.start ?? '') ||
       left.name.localeCompare(right.name),
   );
 
   return { rows, start, end, days };
 }
 
-/** 正在进行（0）→ 还没开始（1）→ 已经全部结束（2）。 */
+/** 正在进行（0）→ 还没开始 / 空计划（1）→ 已经全部结束（2）。 */
 function rowRank(row: GanttRow, today: string): number {
   let future = false;
   for (const bar of row.bars) {
@@ -234,11 +197,7 @@ function monthLabel(date: string): string {
  * 日视角：上层按月的区间、下层每天（数字 + 周几）；周视角：下层按周；月视角：上层按年、
  * 下层按月。区间里的第一格带上名字，其余留空——标签只在需要的地方出现。
  */
-export function axisCells(
-  start: string,
-  days: number,
-  scale: GanttScale,
-): { major: AxisCell[]; minor: AxisCell[] } {
+export function axisCells(start: string, days: number, scale: GanttScale): { major: AxisCell[]; minor: AxisCell[] } {
   const major: AxisCell[] = [];
   const minor: AxisCell[] = [];
   const end = addDays(start, days);

@@ -1,82 +1,54 @@
 import { describe, expect, it } from 'vitest';
-import type { AgendaItem } from './parse.js';
-import {
-  dayLabel,
-  describeWhen,
-  formatRange,
-  freshness,
-  groupByDay,
-  shortDate,
-  stageTone,
-  todayOf,
-} from './view.js';
+import { dayLabel, describeWhen, freshness, shortDate, spanDays } from './view.js';
 
-function item(overrides: Partial<AgendaItem>): AgendaItem {
-  return {
-    groupId: '1',
-    groupName: '违章处置线上化',
-    key: 'testing',
-    label: '测试',
-    start: '2026-10-28',
-    end: '2026-10-30',
-    range: true,
-    startIn: -1,
-    endIn: 1,
-    span: 3,
-    dayIndex: 2,
-    ...overrides,
-  };
-}
+describe('shortDate / dayLabel', () => {
+  it('drops the year and leading zeros', () => {
+    expect(shortDate('2026-10-28')).toBe('10.28');
+    expect(shortDate('2026-01-05')).toBe('1.5');
+  });
 
-describe('view', () => {
-  it('日期按本地时区取，不跟着 UTC 跨天', () => {
-    expect(todayOf(new Date(2026, 9, 29, 0, 5))).toBe('2026-10-29');
-    expect(todayOf(new Date(2026, 9, 29, 23, 55))).toBe('2026-10-29');
-    expect(shortDate('2026-11-02')).toBe('11.2');
+  it('puts the weekday on the date label', () => {
     expect(dayLabel('2026-11-02')).toBe('11-02 周一');
+    expect(dayLabel('2026-11-01')).toBe('11-01 周日');
+  });
+});
+
+describe('describeWhen', () => {
+  it('counts days to the start', () => {
+    expect(describeWhen('2026-10-30', '2026-11-02', '2026-10-29')).toBe('明天开始');
+    expect(describeWhen('2026-11-02', '2026-11-05', '2026-10-29')).toBe('4 天后开始');
   });
 
-  it('连续的写区间，不连续的列日期', () => {
-    expect(formatRange({ start: '2026-10-28', end: '2026-10-28', days: ['2026-10-28'], range: true })).toBe('10.28');
-    expect(
-      formatRange({ start: '2026-10-28', end: '2026-10-30', days: ['2026-10-28', '2026-10-30'], range: true }),
-    ).toBe('10.28–10.30');
-    expect(
-      formatRange({ start: '2026-10-30', end: '2026-11-02', days: ['2026-10-30', '2026-11-02'], range: false }),
-    ).toBe('10.30、11.2');
+  it('says which day of a running stage it is', () => {
+    expect(describeWhen('2026-10-28', '2026-10-31', '2026-10-29')).toBe('进行中，第 2/4 天');
   });
 
-  it('时间提示说人话', () => {
-    expect(describeWhen(item({}))).toBe('第 2/3 天');
-    expect(describeWhen(item({ dayIndex: 0, startIn: 0 }))).toBe('今天');
-    expect(describeWhen(item({ dayIndex: 0, startIn: 1 }))).toBe('明天');
-    expect(describeWhen(item({ dayIndex: 0, startIn: 3 }))).toBe('3 天后');
+  it('says how long ago a finished stage ended', () => {
+    expect(describeWhen('2026-10-01', '2026-10-03', '2026-10-08')).toBe('已结束 5 天');
   });
 
-  it('接下来的节点按天分组，同一天的上线排前面', () => {
-    const groups = groupByDay([
-      item({ key: 'walkthrough', start: '2026-11-02', end: '2026-11-02' }),
-      item({ key: 'release', start: '2026-11-02', end: '2026-11-02' }),
-      item({ key: 'dev', start: '2026-11-03', end: '2026-11-09' }),
-    ]);
-    expect(groups.map((group) => group.date)).toEqual(['2026-11-02', '2026-11-03']);
-    expect(groups[0]!.items.map((entry) => entry.key)).toEqual(['walkthrough', 'release']);
+  it('counts the last day as the end day', () => {
+    expect(spanDays('2026-10-01', '2026-10-01')).toBe(1);
+    expect(spanDays('2026-10-01', '2026-10-07')).toBe(7);
+    expect(describeWhen('2026-10-05', '2026-10-05', '2026-10-05')).toBe('进行中，第 1/1 天');
+  });
+});
+
+describe('freshness', () => {
+  const now = Date.UTC(2026, 9, 29, 12, 0, 0);
+
+  it('says nothing has been saved yet when there is no timestamp', () => {
+    expect(freshness(0, now)).toBe('还没改过');
   });
 
-  it('阶段只分三类颜色', () => {
-    expect(stageTone('release')).toBe('release');
-    expect(stageTone('walkthrough')).toBe('review');
-    expect(stageTone('showcase')).toBe('review');
-    expect(stageTone('testing')).toBe('normal');
-    expect(stageTone('unknown-stage')).toBe('normal');
+  it('rounds to minutes, hours, then days', () => {
+    expect(freshness(now - 30_000, now)).toBe('刚刚改过');
+    expect(freshness(now - 20 * 60_000, now)).toBe('20 分钟前改过');
+    expect(freshness(now - 5 * 3_600_000, now)).toBe('5 小时前改过');
+    expect(freshness(now - 3 * 86_400_000, now)).toBe('3 天前改过');
   });
 
-  it('新鲜度按分钟/小时/天说，没整理过就直说', () => {
-    const now = Date.UTC(2026, 9, 29, 12, 0, 0);
-    expect(freshness(0, now)).toBe('还没整理过');
-    expect(freshness(now - 30_000, now)).toBe('刚刚整理');
-    expect(freshness(now - 12 * 60_000, now)).toBe('12 分钟前整理');
-    expect(freshness(now - 5 * 3_600_000, now)).toBe('5 小时前整理');
-    expect(freshness(now - 3 * 86_400_000, now)).toBe('3 天前整理');
+  it('never reports a negative age when the clock jumps back', () => {
+    expect(freshness(now + 60_000, now)).toBe('刚刚改过');
   });
 });

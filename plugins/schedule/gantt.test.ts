@@ -1,24 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import {
-  addDays,
-  axisCells,
-  buildGantt,
-  clampZoom,
-  pxPerDayOf,
-  todayScrollLeft,
-  zoomAnchor,
-} from './gantt.js';
+import { addDays } from './dates.js';
+import { axisCells, buildGantt, clampZoom, pxPerDayOf, todayScrollLeft, zoomAnchor } from './gantt.js';
 
-function stage(key: string, start: string, end: string, days = [start, end], range = true) {
-  return { key, label: key, start, end, days, range };
+function stage(id: string, start: string, end: string, name = id) {
+  return { id, name, start, end };
 }
 
 describe('buildGantt', () => {
   it('pads the axis around the stages and keeps today inside it', () => {
-    const layout = buildGantt(
-      [{ id: 'a', name: 'A', stages: [stage('dev', '2026-10-01', '2026-10-05')] }],
-      { today: '2026-10-29' },
-    );
+    const layout = buildGantt([{ id: 'a', name: 'A', stages: [stage('dev', '2026-10-01', '2026-10-05')] }], {
+      today: '2026-10-29',
+    });
     expect(layout.start < '2026-10-01').toBe(true);
     expect(layout.end > '2026-10-29').toBe(true);
     expect(layout.days).toBeGreaterThan(0);
@@ -28,7 +20,7 @@ describe('buildGantt', () => {
     expect(bar.span).toBe(5);
   });
 
-  it('keeps one row per project and splits overlaps into lanes', () => {
+  it('keeps one row per plan and splits overlaps into lanes', () => {
     const layout = buildGantt(
       [
         {
@@ -70,9 +62,25 @@ describe('buildGantt', () => {
     expect(layout.rows.map((row) => row.name)).toEqual(['进行中', '待开始', '已结束']);
   });
 
-  it('drops groups without stages instead of drawing empty rows', () => {
+  it('keeps an empty plan as a row — that row is where its first stage gets dragged in', () => {
     const layout = buildGantt([{ id: 'empty', name: '空', stages: [] }], { today: '2026-10-29' });
-    expect(layout.rows).toEqual([]);
+    expect(layout.rows).toHaveLength(1);
+    expect(layout.rows[0]).toMatchObject({ planId: 'empty', lanes: 1, bars: [] });
+    expect(layout.start < '2026-10-29' && layout.end > '2026-10-29').toBe(true);
+  });
+
+  it('drops a stage with an invalid date instead of breaking the row', () => {
+    const layout = buildGantt(
+      [
+        {
+          id: 'a',
+          name: 'A',
+          stages: [stage('bad', '2026-02-30', '2026-03-02'), stage('ok', '2026-10-01', '2026-10-02')],
+        },
+      ],
+      { today: '2026-10-29' },
+    );
+    expect(layout.rows[0]!.bars.map((bar) => bar.stageId)).toEqual(['ok']);
   });
 });
 

@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, Crosshair, RefreshCw, RotateCcw, Trash2, X } from 'lucide-react';
-import { applyEdits, dragRange, dropEdit, mergeEditChanges, newStageId, pruneEdits, upsertEdit } from './edits';
+import { CalendarDays, Check, Crosshair, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { addDays, daysBetween, todayOf } from './dates';
 import {
-  addDays,
   axisCells,
   buildGantt,
   clampZoom,
@@ -12,20 +11,21 @@ import {
   zoomAnchor,
   ZOOM_STEP,
 } from './gantt';
-import { daysBetween, STAGE_LABELS } from './parse';
-import { emptySnapshot, normalizeSnapshot, readWithRetry, SCHEDULE_VERSION } from './snapshot';
-import { dayLabel, freshness, shortDate, todayOf } from './view';
+import { applyOperation, emptyData, newId, normalizeData, stamp, STAGE_NAMES } from './schedule';
+import { dayLabel, describeWhen, freshness, shortDate, spanDays } from './view';
+import { createScheduleWriter } from './writer';
 
 /**
- * 排期页：把群公告里的阶段画成一条甘特时间轴。
+ * 排期页：一行一个计划，行里的彩色条是它的阶段。
  *
- * 为什么是整页而不是侧栏卡片：时间轴要的是宽度（几十天）与高度（每群一行），320px 的
- * 浮层里只能退化成列表。交互按「看排期」这件事组织——横向是日历、纵向是项目、条是阶段，
+ * 为什么是整页而不是侧栏卡片：时间轴要的是宽度（几十天）与高度（每计划一行），320px 的
+ * 浮层里只能退化成列表。交互按「看排期」这件事组织——横向是日历、纵向是计划、条是阶段，
  * 一眼能看出谁和谁撞在同一天。
  *
- * 数据是「群公告解析结果 + 本地修订」两层：公告那层只读，用户拖动的结果存成修订
- * （`edits`，见 edits.ts），下一轮整理照旧保留——公告本身不动，所以别人看到的还是原样。
- * 要拿最新公告就点右上角刷新，它转给插件后端重新抓一遍。
+ * 数据只有一层：`data.json` 里的计划与阶段，没有「公告」这种外部事实来源。页面改它、
+ * 模型经 `schedule` 工具改它，走的是同一条写盘链（`writer.ts`）：按 id 改一条、版本对不上
+ * 就重读重放。页面自己那份只是乐观显示，15 秒轮询一次把别的写入（模型、另一个窗口）
+ * 收进来。
  */
 
 const LABEL_WIDTH = 190;
@@ -39,57 +39,103 @@ const WHEEL_STEP_PX = 100;
 const EDGE_PX = 8;
 /** 空白处按下后至少要挪这么多像素才算框选（否则当一次点击，只用来取消选中）。 */
 const CREATE_MIN_PX = 4;
-/**
- * 首屏读数据的重试：宿主的 IPC 可能比页面晚一步就绪，一次读到空不该直接画「还没有整理过」
- * ——那会让人以为没数据。只在首屏且读到空值时重试，最多多等 0.75s。
- */
+/** 首屏读数据：宿主的 IPC 可能比页面晚一步就绪，读到空值再重试几次，最长多等 0.75s。 */
 const INITIAL_READ_ATTEMPTS = 3;
 const INITIAL_READ_DELAY_MS = 250;
+/** 别的写入（模型、另一个窗口）多久同步一次。读的是一份小 JSON，代价可以忽略。 */
+const POLL_MS = 15_000;
 
-/** 阶段配色：同一天里不同阶段的条不靠文字也能分开。 */
-const STAGE_TONE = {
-  review: 'border-slate-400/45 bg-slate-400/20 text-fg-max',
-  dev: 'border-sky-400/50 bg-sky-500/25 text-fg-max',
-  integration: 'border-violet-400/50 bg-violet-500/25 text-fg-max',
-  submit: 'border-indigo-400/50 bg-indigo-500/25 text-fg-max',
-  'case-review': 'border-fuchsia-400/45 bg-fuchsia-500/20 text-fg-max',
-  testing: 'border-amber-400/50 bg-amber-500/25 text-fg-max',
-  acceptance: 'border-teal-400/50 bg-teal-500/25 text-fg-max',
-  walkthrough: 'border-lime-400/45 bg-lime-500/20 text-fg-max',
-  release: 'border-rose-400/55 bg-rose-500/30 text-fg-max',
-  showcase: 'border-cyan-400/50 bg-cyan-500/25 text-fg-max',
-};
+/** 阶段按名字上色：名字自由，配色不该跟着自由。 */
+const TONES = [
+  { match: /上线|发布|release/i, className: 'border-rose-400/55 bg-rose-500/30 text-fg-max' },
+  { match: /验收|accept/i, className: 'border-teal-400/50 bg-teal-500/25 text-fg-max' },
+  { match: /测试|test/i, className: 'border-amber-400/50 bg-amber-500/25 text-fg-max' },
+  { match: /联调|integration/i, className: 'border-violet-400/50 bg-violet-500/25 text-fg-max' },
+  { match: /提测/, className: 'border-indigo-400/50 bg-indigo-500/25 text-fg-max' },
+  { match: /开发|dev/i, className: 'border-sky-400/50 bg-sky-500/25 text-fg-max' },
+  { match: /走查|walk/i, className: 'border-lime-400/45 bg-lime-500/20 text-fg-max' },
+  { match: /评审|review/i, className: 'border-slate-400/45 bg-slate-400/20 text-fg-max' },
+  { match: /showcase|演示/i, className: 'border-cyan-400/50 bg-cyan-500/25 text-fg-max' },
+];
 
-const FALLBACK_TONE = 'border-line-strong bg-overlay-strong text-fg-strong';
+/** 认不出的名字用一组固定底色，按名字散开——不会全是一个颜色，也不会每次刷新换色。 */
+const FALLBACK_TONES = [
+  'border-orange-400/45 bg-orange-500/20 text-fg-max',
+  'border-emerald-400/45 bg-emerald-500/20 text-fg-max',
+  'border-blue-400/45 bg-blue-500/20 text-fg-max',
+  'border-purple-400/45 bg-purple-500/20 text-fg-max',
+];
 
-function toneOf(key) {
-  return STAGE_TONE[key] ?? FALLBACK_TONE;
+function toneOf(name) {
+  for (const tone of TONES) if (tone.match.test(name)) return tone.className;
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.codePointAt(0)) % 997;
+  return FALLBACK_TONES[hash % FALLBACK_TONES.length];
 }
 
-/** 收集当前数据里出现过的阶段（图例与筛选都按它来，顺序沿用公告里的规范顺序）。 */
-function stageKeysOf(groups) {
-  const seen = new Set();
-  for (const group of groups) for (const stage of group.stages) seen.add(stage.key);
-  return Object.keys(STAGE_LABELS).filter((key) => seen.has(key));
+/** 当前数据里出现过的阶段名（图例与筛选都按它来，顺序按最早的开始日）。 */
+function stageNamesOf(plans) {
+  const first = new Map();
+  for (const plan of plans) {
+    for (const stage of plan.stages) {
+      if (!first.has(stage.name) || stage.start < first.get(stage.name)) first.set(stage.name, stage.start);
+    }
+  }
+  return [...first.entries()].sort((left, right) => left[1].localeCompare(right[1])).map(([name]) => name);
+}
+
+function rowHeight(lanes) {
+  return lanes * BAR_HEIGHT + (lanes - 1) * LANE_GAP + 12;
+}
+
+/** 一次拖动 / 一次方向键之后的起止；两端手柄碰到对面就收成一天，不会跨过去。 */
+function dragRange({ mode, baseStart, baseEnd, deltaDays }) {
+  if (mode === 'move') {
+    return { start: addDays(baseStart, deltaDays), end: addDays(baseEnd, deltaDays) };
+  }
+  if (mode === 'start') {
+    const start = addDays(baseStart, deltaDays);
+    return start <= baseEnd ? { start, end: baseEnd } : { start: baseEnd, end: baseEnd };
+  }
+  const end = addDays(baseEnd, deltaDays);
+  return end >= baseStart ? { start: baseStart, end } : { start: baseStart, end: baseStart };
+}
+
+function errorText(caught) {
+  return caught instanceof Error ? caught.message : String(caught);
+}
+
+async function readWithRetry(read) {
+  let value = await read();
+  for (let attempt = 1; value == null && attempt < INITIAL_READ_ATTEMPTS; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, INITIAL_READ_DELAY_MS));
+    value = await read();
+  }
+  return value;
 }
 
 export default function SchedulePage({ api }) {
-  const [snapshot, setSnapshot] = useState(emptySnapshot);
+  const [data, setData] = useState(emptyData);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [scale, setScale] = useState('day');
   const [zoom, setZoom] = useState(1);
   const [hidden, setHidden] = useState(() => new Set());
-  /** 选中的是「哪条阶段」，不是某个坐标：拖动后 id 变了也还选着它 */
+  /** 选中的是「哪条阶段」，不是某个坐标：拖动后 bar.id 变了也还选着它 */
   const [selected, setSelected] = useState(null);
-  /** 拖动中的预览：`{ groupId, stageId, mode, start, end }`，松手前不改数据 */
+  /** 拖动中的预览：`{ planId, stageId, start, end }`，松手前不改数据 */
   const [drag, setDrag] = useState(null);
   /** 空白处框选的范围（预览） */
   const [creating, setCreating] = useState(null);
-  /** 框选松手后弹的阶段菜单（自己选一个阶段建条） */
+  /** 框选松手后弹的阶段菜单 */
   const [picker, setPicker] = useState(null);
+  /** 计划名编辑：`{ mode: 'create' }` 或 `{ mode: 'rename', planId }` */
+  const [planEdit, setPlanEdit] = useState(null);
+  const [planDraft, setPlanDraft] = useState('');
+  /** 待确认删除的计划（删除不可撤销，问一句） */
+  const [confirmPlan, setConfirmPlan] = useState(null);
+
   const scrollRef = useRef(null);
   const rowsRef = useRef(null);
   const labelsRef = useRef(null);
@@ -97,73 +143,27 @@ export default function SchedulePage({ api }) {
   // 缩放只影响像素密度，不该把视野拉回今天；effect 里读这份最新值而不是进依赖
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
-  // 只认最后一次读的结果：首屏那一轮还在重试时用户点了刷新，旧值不该盖掉新的
+  // 只认最后一次读的结果：轮询那一轮还在跑时用户点了什么，旧值不该盖掉新状态
   const readSeqRef = useRef(0);
-  // 事件回调里要读最新一份数据：拖完一条要基于「现在的修订」再追加，不能拿渲染时那份闭包
-  const snapshotRef = useRef(snapshot);
-  snapshotRef.current = snapshot;
+  // 事件回调里要读最新一份数据：拖完一条要基于「现在这份」再算
+  const dataRef = useRef(data);
   const dragRef = useRef(null);
   const createRef = useRef(null);
   const suppressClickRef = useRef(false);
   /** 方向键连按时上一格的结果：state 还没重渲染，不能拿旧条算下一次 */
   const nudgeRef = useRef(null);
-  /** 修订列表的权威副本（比 state 早一步），写盘也排在这条链上 */
-  const editsRef = useRef([]);
-  const savedEditsRef = useRef([]);
-  const writeChainRef = useRef(Promise.resolve());
-  const pendingWritesRef = useRef(0);
-  const editVersionRef = useRef(0);
-  const saveNoteRef = useRef('');
-  const refreshBusyRef = useRef(false);
   const flashTimerRef = useRef(0);
+  /** Esc 取消重命名：先置位再 blur，否则 blur 的提交会把刚取消的名字写回去 */
+  const skipPlanCommitRef = useRef(false);
+  const writerRef = useRef(null);
 
-  const load = useCallback(
-    async ({ retryIfEmpty = false } = {}) => {
-      if (pendingWritesRef.current > 0) return;
-      const seq = ++readSeqRef.current;
-      const read = async () => {
-        const result = await api.readData();
-        if (result?.ok === false) throw new Error(result.error || '读取排期失败');
-        return result?.value ?? null;
-      };
-      try {
-        const value = retryIfEmpty
-          ? await readWithRetry(read, {
-              attempts: INITIAL_READ_ATTEMPTS,
-              delayMs: INITIAL_READ_DELAY_MS,
-            })
-          : await read();
-        if (seq !== readSeqRef.current) return;
-        const next = normalizeSnapshot(value);
-        editsRef.current = next.edits;
-        savedEditsRef.current = next.edits;
-        setSnapshot(next);
-      } catch (caught) {
-        if (seq !== readSeqRef.current) return;
-        setError(caught?.message || String(caught));
-      } finally {
-        if (seq === readSeqRef.current) setLoading(false);
-      }
-      nudgeRef.current = null;
-    },
-    [api],
-  );
-
-  useEffect(() => {
-    void load({ retryIfEmpty: true });
-  }, [load]);
-
-  // 后台每 10 分钟按设置判断是否要重新整理；页面开着时顺手跟一次，免得看到隔夜数据。
-  useEffect(() => {
-    const timer = setInterval(() => {
-      // 正在拖动时不刷新：读到的新数据会把指针底下那条换掉，手一松就对不上了
-      if (dragRef.current || createRef.current) return;
-      void load();
-    }, 60_000);
-    return () => clearInterval(timer);
-  }, [load]);
-
-  useEffect(() => () => clearTimeout(flashTimerRef.current), []);
+  if (!writerRef.current) {
+    writerRef.current = createScheduleWriter({
+      host: api,
+      onError: (text) => setError(text),
+    });
+  }
+  const writer = writerRef.current;
 
   const flash = useCallback((text) => {
     setMessage(text);
@@ -171,116 +171,74 @@ export default function SchedulePage({ api }) {
     flashTimerRef.current = setTimeout(() => setMessage(''), 2000);
   }, []);
 
-  /**
-   * 存一次修订。
-   *
-   * 写盘前重新读一次，而不是把手里这份整份盖回去：整理（几十秒）可能刚好在这期间跑完，
-   * 拿旧快照盖回去等于把刚抓到的公告丢了。修订按「群 + 阶段身份」定位，盖到最新那份上
-   * 是对的；读不到数据（文件被清空）才退回内存里这份。
-   */
-  const writeEdits = useCallback(async () => {
-    // 修订列表以 ref 为准：state 要等下一次渲染，连着改两条时后者会看不到前者
-    try {
-      if (typeof api.writeData !== 'function') throw new Error('这个版本的宿主还不能保存改动，请更新桌面端');
-      const current = snapshotRef.current;
-      const edits = editsRef.current;
-      const previous = savedEditsRef.current;
-      let merged;
-      for (let attempt = 0; attempt < 8; attempt++) {
+  const load = useCallback(
+    async ({ retryIfEmpty = false } = {}) => {
+      if (writer.pending() > 0) return;
+      const seq = ++readSeqRef.current;
+      const read = async () => {
         const result = await api.readData();
         if (result?.ok === false) throw new Error(result.error || '读取排期失败');
-        const base = result?.value == null ? current : normalizeSnapshot(result.value);
-        merged = {
-          ...base,
-          version: SCHEDULE_VERSION,
-          edits: pruneEdits(base.groups, mergeEditChanges(base.edits, previous, edits), current.groups),
-        };
-        const version = result?.version;
-        const options = typeof version === 'string' || version === null ? { expectedVersion: version } : undefined;
-        const saved = await api.writeData(merged, options);
-        if (saved?.ok !== false) break;
-        if (!saved.conflict) throw new Error(saved.error || '保存排期失败');
-        if (attempt === 7) throw new Error('排期正在其他窗口更新，请稍后重试');
+        return result?.value ?? null;
+      };
+      try {
+        const value = retryIfEmpty ? await readWithRetry(read) : await read();
+        if (seq !== readSeqRef.current || writer.pending() > 0) return;
+        const next = normalizeData(value);
+        dataRef.current = next;
+        setData(next);
+        setError('');
+      } catch (caught) {
+        if (seq !== readSeqRef.current) return;
+        setError(errorText(caught));
+      } finally {
+        if (seq === readSeqRef.current) setLoading(false);
       }
-      savedEditsRef.current = merged.edits;
-      // 写盘时下一次按键可能已经改了 ref；只收敛本次仍然是最新的那份，避免吃掉后来的改动。
-      editsRef.current = mergeEditChanges(merged.edits, edits, editsRef.current);
-      const next = { ...merged, edits: editsRef.current };
-      snapshotRef.current = next;
-      setSnapshot(next);
-      setError('');
-      return true;
-    } catch (caught) {
-      setError(caught?.message || String(caught));
-      return false;
-    }
-  }, [api]);
-
-  /** 写盘串成一条链：连按方向键时两次写不能各读到对方之前的那份，否则后一次覆盖前一次。 */
-  const saveEdits = useCallback(
-    (edits, note) => {
-      readSeqRef.current += 1;
-      editVersionRef.current += 1;
-      saveNoteRef.current = note;
-      editsRef.current = edits;
-      const next = { ...snapshotRef.current, edits };
-      snapshotRef.current = next;
-      setSnapshot(next);
-      setError('');
-      if (pendingWritesRef.current > 0) return writeChainRef.current;
-      pendingWritesRef.current = 1;
-      const run = writeChainRef.current.then(async () => {
-        let saved;
-        for (;;) {
-          const version = editVersionRef.current;
-          saved = await writeEdits();
-          if (version === editVersionRef.current) break;
-        }
-        pendingWritesRef.current = 0;
-        if (saved) flash(saveNoteRef.current);
-        else await load();
-      });
-      writeChainRef.current = run.catch(() => {});
-      return run;
+      nudgeRef.current = null;
     },
-    [writeEdits, load, flash],
+    [api, writer],
   );
 
-  const commitEdit = useCallback((edit) => saveEdits(upsertEdit(editsRef.current, edit), '已保存'), [saveEdits]);
+  useEffect(() => {
+    void load({ retryIfEmpty: true });
+  }, [load]);
 
-  const refresh = async () => {
-    if (refreshBusyRef.current) return;
-    if (typeof api.action !== 'function') {
-      setError('这个版本的宿主还不能从页面触发刷新，请到配置页的插件设置里点「重新整理排期」');
-      return;
-    }
-    refreshBusyRef.current = true;
-    readSeqRef.current += 1;
-    setBusy(true);
-    setMessage('');
-    setError('');
-    try {
-      const result = await api.action('refresh');
-      if (result?.ok === false) setError(result.error || result.message || '整理失败');
-      else setMessage(result?.message || '已整理');
-      await writeChainRef.current;
-      await load();
-    } catch (caught) {
-      setError(caught?.message || String(caught));
-    } finally {
-      refreshBusyRef.current = false;
-      setBusy(false);
-    }
-  };
+  useEffect(() => () => clearTimeout(flashTimerRef.current), []);
+
+  // 别处的改动（模型、另一个窗口）跟着轮询进来；正在拖 / 正在存的时候不刷新，
+  // 读到的新数据会把指针底下那条换掉，手一松就对不上了
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (dragRef.current || createRef.current || picker || planEdit || confirmPlan) return;
+      void load();
+    }, POLL_MS);
+    return () => clearInterval(timer);
+  }, [load, picker, planEdit, confirmPlan]);
+
+  const commit = useCallback(
+    (operation, note) => {
+      let next;
+      try {
+        next = stamp(applyOperation(dataRef.current, operation));
+      } catch (caught) {
+        setError(errorText(caught));
+        return false;
+      }
+      dataRef.current = next;
+      setData(next);
+      setError('');
+      writer.push(operation);
+      void writer.flush().then((ok) => {
+        if (ok) flash(note);
+        else void load();
+      });
+      return true;
+    },
+    [flash, load, writer],
+  );
 
   const today = todayOf();
-  // 公告那份只读，拖动结果在 `snapshot.edits` 里；这里把两层合成界面要画的那份
-  const editedGroups = useMemo(() => applyEdits(snapshot.groups, snapshot.edits), [snapshot]);
-  const groups = useMemo(
-    () => editedGroups.filter((group) => !group.stages.every((stage) => hidden.has(stage.key))),
-    [editedGroups, hidden],
-  );
-  const layout = useMemo(() => buildGantt(groups, { today }), [groups, today]);
+  const plans = data.plans;
+  const layout = useMemo(() => buildGantt(plans, { today }), [plans, today]);
   const pxPerDay = pxPerDayOf(scale, zoom);
   const width = Math.max(320, Math.round(layout.days * pxPerDay));
   const cells = useMemo(() => axisCells(layout.start, layout.days, scale), [layout.start, layout.days, scale]);
@@ -288,12 +246,12 @@ export default function SchedulePage({ api }) {
   const hasTimeline = !loading && layout.rows.length > 0;
   const todayOffset = daysBetween(layout.start, today);
   const todayInAxis = todayOffset >= 0 && todayOffset < layout.days;
+  const stageNames = useMemo(() => stageNamesOf(plans), [plans]);
 
-  // 选中态按身份找当前那条（拖动后 `bar.id` 会变，身份不变）
   const selectedBar = useMemo(() => {
     if (!selected) return null;
     for (const row of layout.rows) {
-      const bar = row.bars.find((item) => item.groupId === selected.groupId && item.stageId === selected.stageId);
+      const bar = row.bars.find((item) => item.stageId === selected.stageId);
       if (bar) return { bar, row };
     }
     return null;
@@ -303,7 +261,6 @@ export default function SchedulePage({ api }) {
   const dragPreview = useMemo(() => {
     if (!drag) return null;
     return {
-      groupId: drag.groupId,
       stageId: drag.stageId,
       start: drag.start,
       end: drag.end,
@@ -312,7 +269,6 @@ export default function SchedulePage({ api }) {
     };
   }, [drag, layout.start]);
 
-  // 换刻度 / 换了数据才回到今天；缩放不走这里（锚点由滚轮自己保持）。
   const scrollToToday = useCallback(() => {
     const host = scrollRef.current;
     if (!host) return;
@@ -368,12 +324,71 @@ export default function SchedulePage({ api }) {
     return () => host.removeEventListener('wheel', onWheel);
   }, [hasTimeline, layout.start, pxPerDay, scale]);
 
-  const toggleStage = (key) => {
+  const toggleStage = (name) => {
     setHidden((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
       return next;
+    });
+  };
+
+  /* ------------------------------------------------------------ 计划 */
+
+  const startCreatePlan = () => {
+    setPlanEdit({ mode: 'create' });
+    setPlanDraft('');
+    setConfirmPlan(null);
+  };
+
+  const startRenamePlan = (row) => {
+    setPlanEdit({ mode: 'rename', planId: row.planId });
+    setPlanDraft(row.name);
+    setConfirmPlan(null);
+  };
+
+  const submitPlan = () => {
+    if (skipPlanCommitRef.current) {
+      skipPlanCommitRef.current = false;
+      setPlanEdit(null);
+      setPlanDraft('');
+      return;
+    }
+    const name = planDraft.trim();
+    if (!name) {
+      setPlanEdit(null);
+      return;
+    }
+    if (planEdit?.mode === 'create') {
+      commit({ type: 'add-plan', plan: { id: newId('p'), name, note: '', stages: [] } }, `已新建「${name}」`);
+    } else if (planEdit?.mode === 'rename') {
+      commit({ type: 'update-plan', planId: planEdit.planId, name }, '已改名');
+    }
+    setPlanEdit(null);
+    setPlanDraft('');
+  };
+
+  const deletePlan = (planId) => {
+    setConfirmPlan(null);
+    if (selected?.planId === planId) setSelected(null);
+    commit({ type: 'delete-plan', planId }, '已删除计划');
+  };
+
+  /**
+   * 不用拖也能加一条：行右侧的「＋」从今天起给一周，选名字之后在编辑栏里改日期。
+   *
+   * 拖选是主路径（快、所见即所得），但月视角一天只有几像素、触控板上也不好拉，
+   * 总得留一条不依赖精确拖拽的入口。
+   */
+  const openStagePicker = (row) => {
+    setSelected(null);
+    setPicker({
+      x: Math.max(8, window.innerWidth / 2 - 152),
+      y: Math.max(8, window.innerHeight / 3),
+      planId: row.planId,
+      planName: row.name,
+      start: today,
+      end: addDays(today, 6),
     });
   };
 
@@ -447,7 +462,7 @@ export default function SchedulePage({ api }) {
     });
     active.start = next.start;
     active.end = next.end;
-    setDrag({ groupId: active.row.groupId, stageId: active.bar.stageId, mode: active.mode, ...next });
+    setDrag({ planId: active.row.planId, stageId: active.bar.stageId, ...next });
   };
 
   const endDrag = () => {
@@ -460,15 +475,7 @@ export default function SchedulePage({ api }) {
     const start = active.start ?? active.baseStart;
     const end = active.end ?? active.baseEnd;
     if (start === active.baseStart && end === active.baseEnd) return;
-    void commitEdit({
-      id: active.bar.stageId,
-      groupId: active.row.groupId,
-      key: active.bar.key,
-      added: active.bar.added,
-      start,
-      end,
-      at: Date.now(),
-    });
+    commit({ type: 'update-stage', stageId: active.bar.stageId, start, end }, '已保存');
   };
 
   const cancelDrag = () => {
@@ -497,7 +504,7 @@ export default function SchedulePage({ api }) {
     }
     // 空白处按下就是「取消选中」——一次点击只表达一件事
     setSelected(null);
-    setCreating({ groupId: row.groupId, from: date, to: date });
+    setCreating({ planId: row.planId, from: date, to: date });
   };
 
   const moveCreate = (event) => {
@@ -511,7 +518,7 @@ export default function SchedulePage({ api }) {
     const to = active.anchor < date ? date : active.anchor;
     active.from = from;
     active.to = to;
-    setCreating({ groupId: active.row.groupId, from, to });
+    setCreating({ planId: active.row.planId, from, to });
   };
 
   const endCreate = (event) => {
@@ -522,8 +529,8 @@ export default function SchedulePage({ api }) {
     setPicker({
       x: event.clientX,
       y: event.clientY,
-      groupId: active.row.groupId,
-      name: active.row.name,
+      planId: active.row.planId,
+      planName: active.row.name,
       start: active.from,
       end: active.to,
     });
@@ -534,41 +541,40 @@ export default function SchedulePage({ api }) {
     setCreating(null);
   };
 
-  const addStage = (key) => {
+  const addStage = (name) => {
     const target = picker;
     if (!target) return;
-    const at = Date.now();
-    const id = newStageId(key, at);
+    const stage = { id: newId('s'), name, start: target.start, end: target.end };
     setPicker(null);
-    setSelected({ groupId: target.groupId, stageId: id });
-    void commitEdit({ id, groupId: target.groupId, key, added: true, start: target.start, end: target.end, at });
+    if (commit({ type: 'add-stage', planId: target.planId, stage }, `已加「${name}」`)) {
+      setSelected({ planId: target.planId, stageId: stage.id });
+    }
   };
 
-  /** 只删掉本地的这条修订：改过的是还原公告值，自己新建的是整条删掉。 */
-  const dropSelectedEdit = () => {
-    if (!selectedBar) return;
+  const deleteStage = (bar) => {
     nudgeRef.current = null;
-    const { bar } = selectedBar;
-    void saveEdits(dropEdit(editsRef.current, bar.groupId, bar.stageId), bar.added ? '已删除' : '已还原为公告值');
+    if (commit({ type: 'delete-stage', stageId: bar.stageId }, '已删除')) setSelected(null);
   };
 
   // 选中之后的方向键：拖不准的时候（月视角一天只有几像素）靠它一天一天挪
   useEffect(() => {
-    if (!picker && !selectedBar) return undefined;
+    if (!picker && !selectedBar && !planEdit) return undefined;
     const onKey = (event) => {
+      const target = event.target;
+      const typing =
+        target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if (event.key === 'Escape') {
         if (picker) setPicker(null);
+        else if (planEdit) setPlanEdit(null);
         else setSelected(null);
         return;
       }
-      if (!selectedBar || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
-      const target = event.target;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (typing || !selectedBar || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
       // ⌘/Ctrl + 方向键留给系统（切桌面、浏览器前进后退），这里只认裸键与 Shift/Alt
       if (event.metaKey || event.ctrlKey) return;
       event.preventDefault();
       const mode = event.shiftKey ? 'end' : event.altKey ? 'start' : 'move';
-      const identity = `${selectedBar.bar.groupId}:${selectedBar.bar.stageId}`;
+      const identity = selectedBar.bar.stageId;
       // 按住不放时 keydown 每秒来几十次，拿还没重渲染的旧条算会吃掉其中几格
       const base = nudgeRef.current?.identity === identity ? nudgeRef.current : null;
       const next = dragRange({
@@ -578,33 +584,22 @@ export default function SchedulePage({ api }) {
         deltaDays: event.key === 'ArrowLeft' ? -1 : 1,
       });
       nudgeRef.current = { identity, start: next.start, end: next.end };
-      void commitEdit({
-        id: selectedBar.bar.stageId,
-        groupId: selectedBar.bar.groupId,
-        key: selectedBar.bar.key,
-        added: selectedBar.bar.added,
-        start: next.start,
-        end: next.end,
-        at: Date.now(),
-      });
+      commit({ type: 'update-stage', stageId: identity, start: next.start, end: next.end }, '已保存');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedBar, picker, commitEdit]);
+  }, [selectedBar, picker, planEdit, commit]);
+
+  const hasPlans = plans.length > 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-canvas">
+    <div className="relative flex h-full min-h-0 flex-col bg-canvas">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <CalendarDays size={14} className="shrink-0 text-fg-muted" />
-          <span
-            className="min-w-0 truncate text-[11px] text-fg-muted"
-            title={snapshot.errors.map((entry) => `${entry.name}：${entry.message}`).join('\n')}
-          >
-            {snapshot.coverage || '还没有整理过'}
-            {snapshot.scope.partial ? ' · 没扫全（未更新的群保留上次结果）' : ''}
-            {snapshot.errors.length > 0 ? ` · ${snapshot.errors.length} 个群没扫成` : ''}
-            {snapshot.updatedAt ? ` · ${freshness(snapshot.updatedAtMs)}` : ''}
+          <span className="min-w-0 truncate text-[11px] text-fg-muted">
+            {data.summary || '还没有计划'}
+            {data.updatedAt ? ` · ${freshness(data.updatedAtMs)}` : ''}
           </span>
         </div>
 
@@ -645,34 +640,70 @@ export default function SchedulePage({ api }) {
 
           <button
             type="button"
-            title="重新整理排期（读一遍群公告）"
-            aria-label="重新整理排期"
-            disabled={busy}
-            onClick={() => void refresh()}
-            className="flex h-6 items-center gap-1 rounded-md border border-line bg-overlay-subtle px-2 text-[11px] text-fg-soft hover:border-line-strong hover:text-fg-max disabled:text-fg-ghost"
+            title="新建一个计划（一行）"
+            onClick={startCreatePlan}
+            className="flex h-6 items-center gap-1 rounded-md border border-line-strong bg-overlay-subtle px-2 text-[11px] text-fg-strong hover:text-fg-max"
           >
-            <RefreshCw size={11} className={busy ? 'animate-spin' : ''} />
-            {busy ? '整理中' : '刷新'}
+            <Plus size={11} />
+            新建计划
           </button>
         </div>
+
+        {planEdit && (
+          <form
+            className="absolute right-3 top-11 z-30 flex items-center gap-1.5 rounded-md border border-line bg-panel px-2 py-1.5 shadow-2xl"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitPlan();
+            }}
+          >
+            <span className="shrink-0 text-[10px] text-fg-muted">{planEdit.mode === 'create' ? '新计划' : '改名'}</span>
+            <input
+              // eslint-disable-next-line jsx-a11y/no-autofocus
+              autoFocus
+              value={planDraft}
+              onChange={(event) => setPlanDraft(event.target.value)}
+              placeholder="项目或主题的名字"
+              maxLength={40}
+              className="h-6 w-48 rounded-sm border border-line bg-canvas px-1.5 text-[11px] text-fg-strong outline-none focus:border-line-strong"
+            />
+            <button
+              type="submit"
+              title="保存"
+              aria-label="保存"
+              className="grid size-6 place-items-center rounded-sm border border-line text-fg-soft hover:text-fg-max"
+            >
+              <Check size={11} />
+            </button>
+            <button
+              type="button"
+              title="取消"
+              aria-label="取消"
+              onClick={() => setPlanEdit(null)}
+              className="grid size-6 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max"
+            >
+              <X size={11} />
+            </button>
+          </form>
+        )}
       </div>
 
       {/* 图例兼筛选：点一下把这个阶段的条收起来，用来对比某两条线 */}
-      {snapshot.groups.length > 0 && (
+      {stageNames.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-1.5">
-          {stageKeysOf(editedGroups).map((key) => (
+          {stageNames.map((name) => (
             <button
-              key={key}
+              key={name}
               type="button"
-              onClick={() => toggleStage(key)}
-              aria-pressed={!hidden.has(key)}
-              title={hidden.has(key) ? `显示「${STAGE_LABELS[key]}」` : `隐藏「${STAGE_LABELS[key]}」`}
+              onClick={() => toggleStage(name)}
+              aria-pressed={!hidden.has(name)}
+              title={hidden.has(name) ? `显示「${name}」` : `隐藏「${name}」`}
               className={`flex h-5 items-center gap-1 rounded-sm border px-1.5 text-[10px] transition-opacity ${
-                hidden.has(key) ? 'border-line opacity-35' : toneOf(key)
+                hidden.has(name) ? 'border-line text-fg-muted opacity-35' : toneOf(name)
               }`}
             >
-              <span className={`size-1.5 rounded-full ${hidden.has(key) ? 'bg-fg-muted' : 'bg-current'}`} />
-              {STAGE_LABELS[key]}
+              <span className={`size-1.5 rounded-full ${hidden.has(name) ? 'bg-fg-muted' : 'bg-current'}`} />
+              {name}
             </button>
           ))}
         </div>
@@ -680,17 +711,29 @@ export default function SchedulePage({ api }) {
 
       {loading ? (
         <div className="grid min-h-0 flex-1 place-items-center text-xs text-fg-muted">正在读取排期…</div>
-      ) : layout.rows.length === 0 ? (
+      ) : !hasPlans ? (
         <div className="grid min-h-0 flex-1 place-items-center px-6">
-          <div className="max-w-sm text-center text-xs leading-5 text-fg-muted">
-            {snapshot.updatedAtMs
-              ? '最近一次整理的窗口里没有群公告写着排期。'
-              : '还没整理过。点右上角「刷新」，从 D-Chat 群公告里读一遍排期。'}
+          <div className="max-w-md text-center text-xs leading-5 text-fg-muted">
+            <p className="mb-2 text-[13px] text-fg-strong">排期还是空的</p>
+            <p>点右上角「新建计划」加一行，然后在这一行里横拖出时间条（也可以点行右侧的 ＋ 直接加一条）。</p>
+            <p className="mt-1">
+              也可以直接跟模型说一句，比如「下周一开发、两周后上线，帮我排进 X 项目」——它会用
+              <span className="mx-1 rounded-sm bg-overlay px-1 text-[11px] text-fg-soft">schedule</span>
+              技能改这份排期。
+            </p>
+            <button
+              type="button"
+              onClick={startCreatePlan}
+              className="mt-3 inline-flex h-7 items-center gap-1 rounded-md border border-line-strong bg-overlay-subtle px-3 text-[11px] text-fg-strong hover:text-fg-max"
+            >
+              <Plus size={12} />
+              新建计划
+            </button>
           </div>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1">
-          {/* 左侧固定的项目列：横向滚动时不跟着走 */}
+          {/* 左侧固定的计划列：横向滚动时不跟着走 */}
           <div className="flex shrink-0 flex-col border-r border-line bg-panel/40" style={{ width: LABEL_WIDTH }}>
             <div
               className="shrink-0 border-b border-line"
@@ -700,20 +743,90 @@ export default function SchedulePage({ api }) {
               <div ref={labelsRef} style={{ transform: `translateY(${-scrollTopRef.current}px)` }}>
                 {layout.rows.map((row) => (
                   <div
-                    key={row.groupId}
-                    className="flex flex-col justify-center border-b border-line-soft px-2.5"
+                    key={row.planId}
+                    className="group/row flex items-center gap-1 border-b border-line-soft px-2.5"
                     style={{ height: rowHeight(row.lanes) }}
                   >
-                    <span className="truncate text-[12px] text-fg-strong" title={row.name}>
-                      {row.name}
-                    </span>
-                    <span
-                      className="truncate text-[10px] text-fg-dim"
-                      title={`公告：${row.author} ${row.announcedAt ? new Date(row.announcedAt).toLocaleString('zh-CN', { hour12: false }) : ''}`}
-                    >
-                      {row.author || '公告'}
-                      {row.announcedAt ? ` · ${shortDate(new Date(row.announcedAt).toISOString().slice(0, 10))}` : ''}
-                    </span>
+                    {planEdit?.mode === 'rename' && planEdit.planId === row.planId ? (
+                      <input
+                        // eslint-disable-next-line jsx-a11y/no-autofocus
+                        autoFocus
+                        value={planDraft}
+                        onChange={(event) => setPlanDraft(event.target.value)}
+                        onBlur={submitPlan}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') submitPlan();
+                          if (event.key === 'Escape') {
+                            skipPlanCommitRef.current = true;
+                            event.currentTarget.blur();
+                          }
+                        }}
+                        maxLength={40}
+                        className="h-6 w-full rounded-sm border border-line bg-canvas px-1.5 text-[12px] text-fg-strong outline-none focus:border-line-strong"
+                      />
+                    ) : confirmPlan === row.planId ? (
+                      <div className="flex w-full items-center gap-1">
+                        <span className="min-w-0 flex-1 truncate text-[10px] text-danger">删除这个计划？</span>
+                        <button
+                          type="button"
+                          title="确认删除"
+                          aria-label="确认删除"
+                          onClick={() => deletePlan(row.planId)}
+                          className="grid size-5 shrink-0 place-items-center rounded-sm text-danger hover:bg-overlay"
+                        >
+                          <Check size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          title="取消"
+                          aria-label="取消"
+                          onClick={() => setConfirmPlan(null)}
+                          className="grid size-5 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[12px] text-fg-strong" title={row.name}>
+                            {row.name}
+                          </div>
+                          <div className="truncate text-[10px] text-fg-dim" title={row.note}>
+                            {row.note || (row.bars.length > 0 ? `${row.bars.length} 条阶段` : '还没有阶段')}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/row:opacity-100">
+                          <button
+                            type="button"
+                            title="给这个计划加一条阶段"
+                            aria-label="给这个计划加一条阶段"
+                            onClick={() => openStagePicker(row)}
+                            className="grid size-5 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max"
+                          >
+                            <Plus size={10} />
+                          </button>
+                          <button
+                            type="button"
+                            title="重命名计划"
+                            aria-label="重命名计划"
+                            onClick={() => startRenamePlan(row)}
+                            className="grid size-5 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max"
+                          >
+                            <Pencil size={10} />
+                          </button>
+                          <button
+                            type="button"
+                            title="删除计划"
+                            aria-label="删除计划"
+                            onClick={() => setConfirmPlan(row.planId)}
+                            className="grid size-5 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-danger"
+                          >
+                            <Trash2 size={10} />
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -814,7 +927,7 @@ export default function SchedulePage({ api }) {
                     <span className="absolute -top-0.5 left-1 whitespace-nowrap text-[10px] text-info">
                       {shortDate(creating.from)}
                       {creating.from === creating.to ? '' : ` – ${shortDate(creating.to)}`}
-                      {` · ${daysBetween(creating.from, creating.to) + 1} 天`}
+                      {` · ${spanDays(creating.from, creating.to)} 天`}
                     </span>
                   </div>
                 )}
@@ -827,7 +940,7 @@ export default function SchedulePage({ api }) {
                     top += height;
                     return (
                       <Row
-                        key={row.groupId}
+                        key={row.planId}
                         row={row}
                         height={height}
                         top={rowTop}
@@ -841,7 +954,7 @@ export default function SchedulePage({ api }) {
                             suppressClickRef.current = false;
                             return;
                           }
-                          setSelected({ groupId: row.groupId, stageId: bar.stageId });
+                          setSelected({ planId: row.planId, stageId: bar.stageId });
                         }}
                         onBarDown={startDrag}
                         onBarMove={moveDrag}
@@ -863,100 +976,23 @@ export default function SchedulePage({ api }) {
 
       {/* 选中的阶段：固定条不遮挡时间轴，也不做浮层（浮层一多时间轴就没法看了） */}
       {selectedBar && (
-        <div className="flex shrink-0 flex-col gap-1 border-t border-line bg-panel/60 px-3 py-2 text-[11px]">
-          <div className="flex items-center gap-3">
-            <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] ${toneOf(selectedBar.bar.key)}`}>
-              {selectedBar.bar.label}
-            </span>
-            <span className="min-w-0 truncate text-fg-strong">{selectedBar.row.name}</span>
-            <span className="shrink-0 tabular-nums text-fg-soft">
-              {shortDate(selectedBar.bar.start)}
-              {selectedBar.bar.start === selectedBar.bar.end ? '' : ` – ${shortDate(selectedBar.bar.end)}`}
-              <span className="ml-1 text-fg-dim">共 {selectedBar.bar.span} 天</span>
-            </span>
-            {selectedBar.bar.edited && (
-              <span className="shrink-0 rounded-sm bg-overlay px-1 py-0.5 text-[10px] text-warn-soft">
-                {selectedBar.bar.added ? '本地新增' : '手动调整过'}
-              </span>
-            )}
-            {selectedBar.bar.edited && selectedBar.bar.originalStart && (
-              <span className="shrink-0 tabular-nums text-fg-dim">
-                公告原值 {shortDate(selectedBar.bar.originalStart)}
-                {selectedBar.bar.originalStart === selectedBar.bar.originalEnd
-                  ? ''
-                  : `–${shortDate(selectedBar.bar.originalEnd)}`}
-              </span>
-            )}
-            <span className="ml-auto shrink-0 text-fg-dim">{dayLabel(selectedBar.bar.start)} 开始</span>
-            {selectedBar.bar.edited && (
-              <button
-                type="button"
-                title={selectedBar.bar.added ? '删掉这条本地新增' : '还原成公告里的日期'}
-                className="flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line px-1.5 text-[10px] text-fg-soft hover:border-line-strong hover:text-fg-max"
-                onClick={dropSelectedEdit}
-              >
-                {selectedBar.bar.added ? <Trash2 size={10} /> : <RotateCcw size={10} />}
-                {selectedBar.bar.added ? '删除' : '还原'}
-              </button>
-            )}
-            <button
-              type="button"
-              title="取消选中"
-              aria-label="取消选中"
-              className="grid size-5 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max"
-              onClick={() => setSelected(null)}
-            >
-              <X size={12} />
-            </button>
-          </div>
-          <div className="flex items-center gap-2 text-[10px] text-fg-dim">
-            <span className="shrink-0">拖条体平移，拖两端改起止；← → 挪一天，Shift + ← → 改结束，Alt + ← → 改开始</span>
-            <span className="min-w-0 truncate">
-              {selectedBar.row.author ? `公告 ${selectedBar.row.author}` : '来自群公告'}
-              {selectedBar.row.announcedAt
-                ? ` · ${new Date(selectedBar.row.announcedAt).toLocaleString('zh-CN', { hour12: false })}`
-                : ''}
-            </span>
-          </div>
-        </div>
+        <StageEditor
+          bar={selectedBar.bar}
+          planName={selectedBar.row.name}
+          onChange={(patch) => commit({ type: 'update-stage', stageId: selectedBar.bar.stageId, ...patch }, '已保存')}
+          onDelete={() => deleteStage(selectedBar.bar)}
+          onClose={() => setSelected(null)}
+        />
       )}
 
-      {/* 框选松手后的阶段菜单：先选「这是个什么阶段」，再建条。点外面或 Esc 取消 */}
+      {/* 框选松手后的阶段菜单：选一个名字（或自己写一个），这条就加到那个计划里 */}
       {picker && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setPicker(null)} aria-hidden="true" />
-          <div
-            className="fixed z-20 w-52 rounded-md border border-line bg-panel p-2 shadow-2xl"
-            style={{
-              left: Math.max(8, Math.min(picker.x, window.innerWidth - 216)),
-              top: Math.max(8, Math.min(picker.y, window.innerHeight - 260)),
-            }}
-          >
-            <div className="mb-1.5 flex items-baseline justify-between gap-2">
-              <span className="shrink-0 text-[10px] text-fg-muted">加一条</span>
-              <span className="min-w-0 truncate text-[10px] tabular-nums text-fg-soft">
-                {shortDate(picker.start)}
-                {picker.start === picker.end ? '' : ` – ${shortDate(picker.end)}`}
-              </span>
-            </div>
-            <div className="mb-1.5 min-w-0 truncate text-[10px] text-fg-dim" title={picker.name}>
-              {picker.name}
-            </div>
-            <div className="grid grid-cols-2 gap-1">
-              {Object.entries(STAGE_LABELS).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => addStage(key)}
-                  className={`flex h-5 items-center gap-1 rounded-sm border px-1.5 text-[10px] ${toneOf(key)}`}
-                >
-                  <span className="size-1.5 shrink-0 rounded-full bg-current" />
-                  <span className="truncate">{label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </>
+        <StagePicker
+          picker={picker}
+          onPick={addStage}
+          onRange={(range) => setPicker((prev) => (prev ? { ...prev, ...range } : prev))}
+          onCancel={() => setPicker(null)}
+        />
       )}
 
       {(message || error) && (
@@ -972,12 +1008,202 @@ export default function SchedulePage({ api }) {
   );
 }
 
-function rowHeight(lanes) {
-  return lanes * BAR_HEIGHT + (lanes - 1) * LANE_GAP + 12;
+/**
+ * 选中一条阶段后的编辑条：名称与起止日期都能直接改（拖动在月视角下只有几像素，靠它精修）。
+ *
+ * 名称用本地输入、失焦或回车才写盘：每敲一个字发一条操作会把写盘链塞满，也没有必要。
+ */
+function StageEditor({ bar, planName, onChange, onDelete, onClose }) {
+  const [name, setName] = useState(bar.label);
+  /** Esc 放弃这次改名：先置位再 blur，免得上一次输入被 onBlur 提交上去 */
+  const cancelNameRef = useRef(false);
+
+  useEffect(() => {
+    setName(bar.label);
+  }, [bar.stageId, bar.label]);
+
+  const commitName = () => {
+    if (cancelNameRef.current) {
+      cancelNameRef.current = false;
+      setName(bar.label);
+      return;
+    }
+    const next = name.trim();
+    if (!next || next === bar.label) return;
+    onChange({ name: next });
+  };
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line bg-panel/60 px-3 py-2 text-[11px]">
+      <span className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] ${toneOf(bar.label)}`}>{bar.label}</span>
+      <span className="min-w-0 max-w-[180px] truncate text-fg-strong" title={planName}>
+        {planName}
+      </span>
+      <label className="flex shrink-0 items-center gap-1 text-[10px] text-fg-dim">
+        名称
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          onBlur={commitName}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.currentTarget.blur();
+            }
+            if (event.key === 'Escape') {
+              cancelNameRef.current = true;
+              event.currentTarget.blur();
+            }
+          }}
+          maxLength={40}
+          className="h-6 w-28 rounded-sm border border-line bg-canvas px-1.5 text-[11px] text-fg-strong outline-none focus:border-line-strong"
+        />
+      </label>
+      <label className="flex shrink-0 items-center gap-1 text-[10px] text-fg-dim">
+        起
+        <input
+          type="date"
+          value={bar.start}
+          onChange={(event) => {
+            const start = event.target.value;
+            if (!start) return;
+            onChange({ start, end: bar.end < start ? start : bar.end });
+          }}
+          className="h-6 rounded-sm border border-line bg-canvas px-1 text-[11px] tabular-nums text-fg-strong outline-none focus:border-line-strong"
+        />
+      </label>
+      <label className="flex shrink-0 items-center gap-1 text-[10px] text-fg-dim">
+        止
+        <input
+          type="date"
+          value={bar.end}
+          onChange={(event) => {
+            const end = event.target.value;
+            if (!end) return;
+            onChange({ start: bar.start > end ? end : bar.start, end });
+          }}
+          className="h-6 rounded-sm border border-line bg-canvas px-1 text-[11px] tabular-nums text-fg-strong outline-none focus:border-line-strong"
+        />
+      </label>
+      <span className="shrink-0 tabular-nums text-fg-soft">
+        共 {spanDays(bar.start, bar.end)} 天 · {dayLabel(bar.start)} 开始
+      </span>
+      <span className="shrink-0 text-fg-dim">{describeWhen(bar.start, bar.end)}</span>
+      <span className="ml-auto shrink-0 text-[10px] text-fg-dim">
+        拖条体平移，拖两端改起止；← → 挪一天，Shift + ← → 改结束，Alt + ← → 改开始
+      </span>
+      <button
+        type="button"
+        title="删掉这条阶段"
+        className="flex h-5 shrink-0 items-center gap-1 rounded-sm border border-line px-1.5 text-[10px] text-fg-soft hover:border-line-strong hover:text-danger"
+        onClick={onDelete}
+      >
+        <Trash2 size={10} />
+        删除
+      </button>
+      <button
+        type="button"
+        title="取消选中"
+        aria-label="取消选中"
+        className="grid size-5 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max"
+        onClick={onClose}
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
 }
 
 /**
- * 一行：这个项目的阶段条。名称在左侧列，条上不放字（窄条只剩「联..」）。
+ * 框选松手后的名字菜单：常用阶段点一下就走，也可以自己写一个。
+ *
+ * 用的是「名字」而不是「类型」：阶段本来就是用户自己的说法，页面按名字猜颜色，
+ * 不需要先教用户一套分类。
+ */
+function StagePicker({ picker, onPick, onRange, onCancel }) {
+  const [custom, setCustom] = useState('');
+  return (
+    <>
+      <div className="fixed inset-0 z-10" onClick={onCancel} aria-hidden="true" />
+      <div
+        className="fixed z-20 w-72 rounded-md border border-line bg-panel p-2 shadow-2xl"
+        style={{
+          left: Math.max(8, Math.min(picker.x, window.innerWidth - 296)),
+          top: Math.max(8, Math.min(picker.y, window.innerHeight - 300)),
+        }}
+      >
+        <div className="mb-1.5 flex items-baseline justify-between gap-2">
+          <span className="shrink-0 text-[10px] text-fg-muted">加一条阶段</span>
+          <span className="min-w-0 truncate text-[10px] tabular-nums text-fg-soft">
+            {`${spanDays(picker.start, picker.end)} 天`}
+          </span>
+        </div>
+        <div className="mb-1.5 min-w-0 truncate text-[10px] text-fg-dim" title={picker.planName}>
+          {picker.planName}
+        </div>
+        <div className="mb-1.5 flex items-center gap-1">
+          <input
+            type="date"
+            value={picker.start}
+            onChange={(event) => {
+              const start = event.target.value;
+              if (start) onRange({ start, end: picker.end < start ? start : picker.end });
+            }}
+            className="h-6 min-w-0 flex-1 rounded-sm border border-line bg-canvas px-1 text-[10px] tabular-nums text-fg-strong outline-none focus:border-line-strong"
+          />
+          <span className="shrink-0 text-[10px] text-fg-dim">→</span>
+          <input
+            type="date"
+            value={picker.end}
+            onChange={(event) => {
+              const end = event.target.value;
+              if (end) onRange({ start: picker.start > end ? end : picker.start, end });
+            }}
+            className="h-6 min-w-0 flex-1 rounded-sm border border-line bg-canvas px-1 text-[10px] tabular-nums text-fg-strong outline-none focus:border-line-strong"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-1">
+          {STAGE_NAMES.map((name) => (
+            <button
+              key={name}
+              type="button"
+              onClick={() => onPick(name)}
+              className={`flex h-5 items-center gap-1 rounded-sm border px-1.5 text-[10px] ${toneOf(name)}`}
+            >
+              <span className="size-1.5 shrink-0 rounded-full bg-current" />
+              <span className="truncate">{name}</span>
+            </button>
+          ))}
+        </div>
+        <form
+          className="mt-1.5 flex items-center gap-1 border-t border-line-soft pt-1.5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const name = custom.trim();
+            if (name) onPick(name);
+          }}
+        >
+          <input
+            value={custom}
+            onChange={(event) => setCustom(event.target.value)}
+            placeholder="自己写一个名字"
+            maxLength={40}
+            className="h-6 min-w-0 flex-1 rounded-sm border border-line bg-canvas px-1.5 text-[11px] text-fg-strong outline-none focus:border-line-strong"
+          />
+          <button
+            type="submit"
+            title="加这一条"
+            className="grid size-6 shrink-0 place-items-center rounded-sm border border-line text-fg-soft hover:text-fg-max"
+          >
+            <Plus size={11} />
+          </button>
+        </form>
+      </div>
+    </>
+  );
+}
+
+/**
+ * 一行：这个计划的阶段条。
  *
  * 行自己就是「空白处」：按在行上＝框选新建，按在条上＝拖动改期（条会 stopPropagation）。
  */
@@ -1009,14 +1235,14 @@ function Row({
       onPointerCancel={onRowCancel}
     >
       {row.bars
-        .filter((bar) => !hidden.has(bar.key))
+        .filter((bar) => !hidden.has(bar.label))
         .map((bar) => (
           <Bar
             key={bar.id}
             bar={bar}
             pxPerDay={pxPerDay}
-            active={selected?.groupId === row.groupId && selected?.stageId === bar.stageId}
-            preview={preview?.groupId === row.groupId && preview?.stageId === bar.stageId ? preview : null}
+            active={selected?.stageId === bar.stageId}
+            preview={preview?.stageId === bar.stageId ? preview : null}
             onClick={() => onSelect(bar)}
             onPointerDown={(event) => onBarDown(event, row, bar)}
             onPointerMove={onBarMove}
@@ -1037,7 +1263,6 @@ function Bar({ bar, pxPerDay, active, preview, onClick, onPointerDown, onPointer
   const start = preview?.start ?? bar.start;
   const end = preview?.end ?? bar.end;
   const range = start === end ? shortDate(start) : `${shortDate(start)}–${shortDate(end)}`;
-  const note = bar.added ? '｜本地新增' : bar.edited ? '｜手动调整过' : '';
   return (
     <button
       type="button"
@@ -1046,17 +1271,22 @@ function Bar({ bar, pxPerDay, active, preview, onClick, onPointerDown, onPointer
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
-      title={`${bar.label}｜${range}｜${preview?.span ?? bar.span} 天${note}`}
-      className={`group/bar absolute flex cursor-grab items-center overflow-hidden rounded-sm border px-1.5 text-left text-[11px] transition-[filter] hover:brightness-125 ${
-        bar.edited ? 'border-dashed' : ''
-      } ${toneOf(bar.key)} ${active ? 'ring-1 ring-fg-max/70' : ''}`}
+      title={`${bar.label}｜${start} → ${end}（${spanDays(start, end)} 天）｜${describeWhen(start, end)}`}
+      className={`group/bar absolute flex cursor-grab items-center overflow-hidden rounded-sm border px-1.5 text-left text-[11px] transition-[filter] hover:brightness-125 ${toneOf(
+        bar.label,
+      )} ${active ? 'ring-1 ring-fg-max/70' : ''}`}
       // pan-y：手机上竖着还能滚，横着才是拖条
       style={{ left, width, top, height: BAR_HEIGHT, touchAction: 'pan-y' }}
     >
       {/* 两端的改期手柄：只做视觉与光标提示，判定还是按按下位置（见 dragModeAt） */}
       <span className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize rounded-l-sm group-hover/bar:bg-overlay-heavy" />
       <span className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize rounded-r-sm group-hover/bar:bg-overlay-heavy" />
-      {width >= 46 && <span className="min-w-0 flex-1 truncate">{bar.label}</span>}
+      {width >= 46 && (
+        <span className="flex min-w-0 flex-1 items-baseline gap-1">
+          <span className="truncate">{bar.label}</span>
+          {width >= 110 && <span className="shrink-0 tabular-nums opacity-60">{range}</span>}
+        </span>
+      )}
     </button>
   );
 }

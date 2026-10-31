@@ -2,64 +2,17 @@
   "id": "schedule",
   "name": "Schedule",
   "icon": "calendar",
-  "version": "1.0.0",
-  "description": "把 D-Chat 群公告里的开发排期整理成一条时间线：今天在哪个阶段、下一步什么时候上线，摆在侧栏里随时看一眼。",
+  "version": "2.0.0",
+  "description": "本地排期：一个计划一行、一个阶段一条。在页面里拖，或者直接跟模型说一句让它改。",
   "author": "Mica Code",
   "main": "index.ts",
   "assets": ["README.md"],
   "priority": 35,
   "mica": { "apiVersion": 1 },
-  "requires": ["settings", "actions", "background", "desktop"],
+  "requires": ["tools", "skills"],
   "desktop": { "entry": { "label": "Schedule" }, "page": { "title": "排期" } },
-  "actions": [
-    {
-      "key": "refresh",
-      "label": "重新整理排期",
-      "description": "现在跑一遍：读群公告、解析排期、写回排期页读的那份数据。群多时要一两分钟。",
-      "tone": "primary"
-    }
-  ],
   "status": [
-    { "key": "updatedAt", "label": "最近整理", "type": "text" },
-    { "key": "coverage", "label": "覆盖", "type": "text" }
-  ],
-  "settings": [
-    {
-      "key": "dwsPath",
-      "label": "dws 路径",
-      "type": "text",
-      "default": "",
-      "placeholder": "~/.SmartWork/skills/smartwork-cli/smartwork-shared/assets/dws-unix.sh",
-      "description": "D-Chat 命令行。留空先找 SmartWork 自带的脚本，再找 PATH 上的 dws。"
-    },
-    {
-      "key": "groups",
-      "label": "看哪些群",
-      "type": "textarea",
-      "default": "",
-      "description": "一行一个群名或群 id。留空＝最近 7 天有消息的全部群（更全，但一轮要跑更久）。"
-    },
-    {
-      "key": "days",
-      "label": "回看天数",
-      "type": "number",
-      "default": "14",
-      "min": 1,
-      "max": 30,
-      "step": 1,
-      "unit": "天",
-      "description": "公告只在被改动时进入消息流，所以窗口太短会漏掉没改过的公告。上限 30 天是 D-Chat 接口的限制。"
-    },
-    {
-      "key": "autoRefreshHours",
-      "label": "自动整理间隔",
-      "type": "number",
-      "default": "6",
-      "min": 0,
-      "max": 168,
-      "step": 1,
-      "unit": "小时",
-      "description": "数据比这个旧时，会话进程会自己整理一次（多个窗口同时开也只会跑一遍）。0 = 只手动刷新。"
-    }
+    { "key": "summary", "label": "排期", "type": "text" },
+    { "key": "updatedAt", "label": "最近改动", "type": "text" }
   ]
 }
