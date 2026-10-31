@@ -52,8 +52,8 @@ describe('Stats usage aggregation', () => {
     expect(session.id).toBe('one')
   })
 
-  test('flattens subagent usage records into the event stream with task lineage', () => {
-    const { session, events } = parseSessionEvents({
+  test('flattens subagent usage records into the event stream with source lineage', () => {
+    const { events } = parseSessionEvents({
       id: 'with-subagent',
       createdAt: '2026-08-01T01:00:00.000Z',
       updatedAt: '2026-08-01T02:00:00.000Z',
@@ -90,20 +90,16 @@ describe('Stats usage aggregation', () => {
         ]
       }
     })
-    expect(session.subagentTasks).toBe(1)
     expect(events).toHaveLength(2)
     expect(events.reduce((sum, event) => sum + event.inputTokens, 0)).toBe(600)
     expect(events).toEqual([
       expect.objectContaining({ usageId: 'main-1' }),
       expect.objectContaining({
         usageId: 'sub-1',
-        isSubagent: true,
-        subagentTaskId: 'task-1',
-        subagentParentTaskId: 'task-0',
-        initiatedByCallId: 'call-abc',
-        subagentType: 'Explore',
-        subagentStatus: 'completed',
-        subagentDescription: 'search files',
+        // 带着发起它的 tool call = 主对话派出去的委派，归到 subagentType 名下。
+        source: { kind: 'delegation', id: 'Explore', pluginId: null },
+        taskId: 'task-1',
+        purpose: 'search files',
         occurredAtMs: Date.parse('2026-08-01T01:30:05.000Z'),
         inputTokens: 100,
         outputTokens: 20
@@ -111,8 +107,8 @@ describe('Stats usage aggregation', () => {
     ])
   })
 
-  test('separates plugin model requests from delegated subagents', () => {
-    const { session, events } = parseSessionEvents({
+  test('classifies delegated, plugin and built-in helper requests as different sources', () => {
+    const { events } = parseSessionEvents({
       id: 'with-plugin-request',
       createdAt: '2026-08-01T01:00:00.000Z',
       updatedAt: '2026-08-01T02:00:00.000Z',
@@ -139,15 +135,33 @@ describe('Stats usage aggregation', () => {
     // 插件请求照样算进本会话的开销，但不该被当成一次委派子代理任务。
     expect(events).toHaveLength(2)
     expect(events.reduce((sum, event) => sum + event.inputTokens, 0)).toBe(580)
-    expect(session.subagentTasks).toBe(0)
-    expect(session.pluginRequests).toBe(1)
     expect(events[1]).toMatchObject({
       usageId: 'plugin-1',
-      isSubagent: false,
-      isPlugin: true,
-      pluginId: 'session-rename',
-      pluginPurpose: '自动起标题'
+      source: { kind: 'plugin', id: 'session-rename', pluginId: 'session-rename' },
+      purpose: '自动起标题'
     })
+
+    // 没有 pluginId 也没有发起它的 tool call：内核后台助手（压缩摘要、桌面旁问）。
+    const helper = parseSessionEvents({
+      id: 'with-helper',
+      createdAt: '2026-08-01T01:00:00.000Z',
+      updatedAt: '2026-08-01T02:00:00.000Z',
+      snapshot: {
+        model: 'main-model',
+        messages: [],
+        usageHistory: [],
+        subagentUsageHistory: [
+          {
+            taskId: 'auto-compact-summary',
+            subagentType: 'auto-compact',
+            description: '压缩摘要',
+            startedAt: '2026-08-01T01:10:00.000Z',
+            requests: [{ usageId: 'helper-1', inputTokens: 5 }]
+          }
+        ]
+      }
+    })
+    expect(helper.events[0].source).toEqual({ kind: 'helper', id: 'auto-compact', pluginId: null })
   })
 
   test('gives raw records and projected events the same identity', () => {
@@ -342,6 +356,7 @@ describe('Stats usage aggregation', () => {
         subagentUsageHistory: [
           {
             taskId: 'task-1',
+            initiatedByCallId: 'call-1',
             subagentType: 'Explore',
             startedAt: firstDay.toISOString(),
             requests: [{ usageId: 'sub-1', inputTokens: 30, outputTokens: 3 }]
@@ -381,22 +396,41 @@ describe('Stats usage aggregation', () => {
     expect(first.models).toContainEqual(
       expect.objectContaining({ model: 'side-model', requests: 1, totalTokens: 55 })
     )
-    expect(first.subagents).toEqual([
+    // 主对话与委派各占一行来源：插件提供委派也要能和主对话分账。
+    expect(first.sources).toEqual([
+      expect.objectContaining({
+        kind: 'main',
+        id: 'main',
+        requests: 2,
+        totalTokens: 165,
+        tasks: [],
+        purposes: []
+      }),
       {
-        type: 'Explore',
+        kind: 'delegation',
+        id: 'Explore',
         tasks: ['task-1'],
+        purposes: [],
         requests: 1,
         inputTokens: 30,
+        cachedInputTokens: 0,
+        uncachedInputTokens: 30,
         outputTokens: 3,
         totalTokens: 33
       }
     ])
-    expect(first.plugins).toEqual([])
 
     expect(second.day).toBe(localDayKey(secondDay.getTime()))
-    expect(second.plugins).toEqual([
+    expect(second.sources).toEqual([
       expect.objectContaining({
-        pluginId: 'session-rename',
+        kind: 'main',
+        id: 'main',
+        requests: 1,
+        totalTokens: 22
+      }),
+      expect.objectContaining({
+        kind: 'plugin',
+        id: 'session-rename',
         purposes: ['自动起标题'],
         requests: 1,
         totalTokens: 9

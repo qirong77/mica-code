@@ -302,7 +302,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - turn 结束即收尾它起的后台子代理（`killRunningForOwner(owner, 'Parent turn finished.')`）：这一轮已经交付，结果只能经 `agent operation=read` 取回，而下一轮的模型不会去读上个 turn 的 `task_id`。留着它们只会在状态栏挂一条永远 running 的条目并继续烧 token。收尾在 `turn:after` 之前（TUI 在 `LocalRuntimeController.runTurn` 的 finally，headless 在 `HeadlessTurnExecutor.emitTurnAfter`），且不发完成通知。
 - `context_mode` 为 none/brief/recent/files，默认 brief；Implementer / Tester / Proposal 必填 `owned_paths`，写工具与 shell cwd 校验租约（判定唯一实现在 `mica-tools/utils/pathOwnership.ts`）。
 - 委派倾向由插件设置 `delegationMode` 决定（`proactive` 默认 / `on-request`），prompt 段落每轮按设置重新渲染。
-- 非主请求都要记账：Agent 走 `recordSubagentUsage`；BTW、摘要等走 `recordSubagentTaskUsage` / `recordHelperSubagentUsage`；插件自己的模型请求走 `ctx.models.request`，宿主在发起时绑定会话 id，以 `origin: 'plugin'` 记进原会话的 `subagentUsageHistory`（Stats 的 By plugin 卡片与会话详情可见）。等待期间切换会话不改变归属，旧会话已删除则不重建。插件里不出现自己拼的模型 HTTP 客户端——那笔开销没人记。
+- 非主请求都要记账：Agent 走 `recordSubagentUsage`；BTW、摘要等走 `recordSubagentTaskUsage` / `recordHelperSubagentUsage`；插件自己的模型请求走 `ctx.models.request`，宿主在发起时绑定会话 id，以 `origin: 'plugin'` + `pluginId` 记进原会话的 `subagentUsageHistory`（Stats 的 By source 卡片与会话详情可见）；`ctx.subagents.run/background` 起的后台子代理也写 `pluginId`，主对话经工具委派的那条写 `origin: 'delegation'`。等待期间切换会话不改变归属，旧会话已删除则不重建。插件里不出现自己拼的模型 HTTP 客户端——那笔开销没人记。
 - 插件异步回写先通过 `ctx.session.captureOwner?.(callbacks.context)` 捕获发起者（命令不传上下文则取当前会话），notice 显式传回 owner；`turn:before` / `turn:after` 与会话生命周期按 owner 隔离临时状态，`primaryAgentOnly` 不代表整个 TUI 只有一条主会话。
 
 ### 压缩
@@ -466,6 +466,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 会话列表整份返回，但内容没变时按字段指纹（`session-state.js` 的 `sameSessionSnapshot`）跳过 setState，空闲轮询不触发重渲染。
 - 会话统计走磁盘索引：`host/stats-scanner.js` 按文件签名把每个会话的投影缓存在 `$MICA_HOME/desktop-stats-index.json`（与 `sessions/` 同级，不是会话文件），进程重启只解析变过的文件。首次构建（升级后第一次）分批让出事件循环，并经 `stats:changed` 推送进度，界面「逐渐填充」而不是空白几秒。
 - `stats:read` 的载荷是「会话 × 本地日」聚合行（上千会话约 1 MB），不是逐条 usage 事件；区间切换只是对日行做加法（`renderer/src/stats/scope.js`），不要再把事件级明细塞回载荷。跨会话的用量去重靠扫描器的「身份归属表」（最早创建的会话拥有），`stats:session-detail` 与列表共用同一份归属。
+- 每一次模型请求都要能在统计页上看到，所以来源只有一个口径（`mica-web-shared/usage-source` 的 `usageSourceOf`）：`main` 主对话、`delegation` 委派、`plugin`（+`pluginId`）插件、`helper` 内核后台。判定顺序是 `origin: 'delegation'` / `initiatedByCallId` → 委派、`origin: 'plugin'` / `pluginId` → 插件、其余 → 内核 helper；host 的日行聚合与会话详情都调这一份，不各算一套。插件起的子代理由宿主写 `pluginId`（`ctx.subagents.run/background` 记到插件名下，委派带 `initiatedByCallId` 记成 `delegation`）。
+- 没有会话可写的请求（`mica commit` 这类一次性插件命令，含桌面右键 commit；以及 `mica plugin-action` 里真的问了一次模型的插件动作）追加进 `$MICA_HOME/usage-ledger.jsonl`（形状与解析唯一实现在 `mica-web-shared/usage-ledger`，写入在 `apps/cli/src/plugins/usageLedger.ts`）。扫描器把它读成「按 cwd 分组的无会话行」（`ledger: true`、`id: null`），并进概览 / By model / By source / By project，但不冒充会话：不进 `scanMeta`、不算进「Active sessions」、不进 By session。不要为此跨进程改写会话快照——那会绕过 turn lock。配置页的「测试连接」仍不入账（`probeModelConnection` 只是一次连通性探测，没有回答）。
 
 ## 10. UI 规范
 

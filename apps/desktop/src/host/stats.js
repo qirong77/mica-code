@@ -46,6 +46,14 @@ function statsIndexFile() {
   return join(dirname(sessionsDir()), 'desktop-stats-index.json')
 }
 
+/**
+ * 无会话用量的账本：与 sessions 目录同级（不是会话文件）。`mica commit` 这类一次性
+ * 插件命令没有会话可写，用量落在这一份里，统计页把它当成「没有会话的插件请求」并入总量。
+ */
+function usageLedgerFile() {
+  return join(dirname(sessionsDir()), 'usage-ledger.jsonl')
+}
+
 let broadcastStats = () => {}
 
 /** 由 server 注入：索引在后台构建 / 有会话变化时通知页面重读（页面不需要轮询等它）。 */
@@ -59,6 +67,7 @@ const BROADCAST_INTERVAL_MS = 500
 const statsScanner = createStatsScanner({
   directory: sessionsDir,
   indexFile: statsIndexFile,
+  ledgerFile: usageLedgerFile,
   onProgress(progress) {
     // 首次构建（升级后的第一次打开）会持续几秒：按节流把已有结果推给页面，
     // 侧栏与统计页因此是「逐渐填充」而不是先空白再一次性出现。

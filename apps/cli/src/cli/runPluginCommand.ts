@@ -7,6 +7,7 @@ import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { readActiveProviderConfig } from '@packages/mica-config/index.js';
 import { createPluginModels } from '../plugins/pluginModels.js';
 import { createPluginPaths } from '../plugins/pluginPaths.js';
+import { appendPluginUsage } from '../plugins/usageLedger.js';
 
 /**
  * 一次性执行某个已注册的插件命令（`mica commit` 走这里）。
@@ -54,9 +55,20 @@ export async function runPluginCommand(options: PluginCommandRunOptions): Promis
       commands,
       events,
       // 命令里也可能要模型（`/commit` 的提交说明）：请求由宿主代发，
-      // 这个进程没有会话，所以只发请求、不入账。
+      // 这个进程没有会话可写，用量记进无会话账本（`$MICA_HOME/usage-ledger.jsonl`），
+      // 桌面统计页把它当成「没有会话的插件请求」并进总量。
       // `mica commit` 也有「跟随主配置」这条路：没有会话，就用配置里的当前 provider。
-      pluginModels: createPluginModels({ resolveMainProvider: (model) => readActiveProviderConfig(model ? { model } : {}) }),
+      pluginModels: createPluginModels({
+        resolveMainProvider: (model) => readActiveProviderConfig(model ? { model } : {}),
+        record: (entry) =>
+          appendPluginUsage({
+            pluginId: entry.pluginId,
+            purpose: entry.purpose,
+            cwd: process.cwd(),
+            requests: entry.requests,
+            fallbackAt: entry.finishedAt,
+          }),
+      }),
     },
   );
 

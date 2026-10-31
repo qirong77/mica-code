@@ -219,6 +219,9 @@ describe('PluginSubagentHost run', () => {
         description: 'look around',
         model: 'test-model',
         status: 'completed',
+        // 没有发起它的 tool call：这是插件自己起的后台任务，统计页要记到插件名下。
+        origin: 'plugin',
+        pluginId: 'test-plugin',
       }),
     );
     expect(harness.api.tasks.get(result.taskId)).toMatchObject({
@@ -229,6 +232,35 @@ describe('PluginSubagentHost run', () => {
       model: 'test-model',
       effort: 'medium',
     });
+  });
+
+  it('records tool-call delegations as delegations, not as plugin background work', async () => {
+    const harness = createHarness();
+    harness.api.registerType(exploreType());
+    const caller = harness.api.caller({
+      agent: harness.runtime,
+      taskId: 'parent-task',
+      toolCallId: 'call-1',
+    }) as NonNullable<ReturnType<typeof harness.api.caller>>;
+
+    const result = await harness.api.run({
+      type: 'Explore',
+      description: 'delegated run',
+      prompt: 'look around',
+      caller,
+    });
+
+    // 委派本身由插件提供，但这一笔是主对话派出去的活：统计页归到 Delegated，
+    // 而不是「插件后台请求」。
+    expect(harness.recordSubagentUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: result.taskId,
+        origin: 'delegation',
+        initiatedByCallId: 'call-1',
+        subagentType: 'Explore',
+      }),
+    );
+    expect(harness.recordSubagentUsage.mock.calls[0][0]).not.toHaveProperty('pluginId');
   });
 
   it('returns a failed result instead of throwing when the query fails', async () => {

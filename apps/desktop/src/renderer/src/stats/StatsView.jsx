@@ -3,6 +3,7 @@ import { IconChevronDown } from '@tabler/icons-react'
 import { BarSeries, CalendarHeatmap } from './charts'
 import { SessionDetailModal } from './SessionDetailModal'
 import { bucketByDay, isDayRange, rangeStart, scopeSession } from './scope'
+import { USAGE_SOURCE_LABELS } from '@packages/mica-web-shared/usage-source.js'
 import {
   addDays,
   calendarGrid,
@@ -48,6 +49,16 @@ const CALENDAR_RAMP = [
   'var(--color-fg-muted)',
   'var(--color-fg-strong)'
 ]
+
+// 每一次模型请求都归到四类来源之一（判定在 `mica-web-shared/usage-source`）：
+// 主对话、委派子代理、插件、内核后台。顺序固定，颜色只用来区分种类。
+const SOURCE_ORDER = ['main', 'delegation', 'plugin', 'helper']
+const SOURCE_COLORS = {
+  main: 'var(--color-fg-strong)',
+  delegation: 'var(--color-info)',
+  plugin: 'var(--color-accent)',
+  helper: 'var(--color-fg-ghost)'
+}
 
 const CARD_CLASS = 'rounded-[5px] border border-line bg-panel'
 const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
@@ -114,7 +125,8 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
     let processedTokens = 0
     for (const s of scoped) {
       const sessionRequests = Number(s.requests) || 0
-      if (sessionRequests > 0) activeSessions++
+      // 账本里的无会话用量不是一条会话，别把活跃会话数算多。
+      if (sessionRequests > 0 && !s.ledger) activeSessions++
       requests += sessionRequests
       inputTokens += Number(s.inputTokens) || 0
       outputTokens += Number(s.outputTokens) || 0
@@ -132,6 +144,24 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
       processedTokens,
       cacheRate: inputTokens > 0 ? cachedInputTokens / inputTokens : 0
     }
+  }, [scoped])
+
+  const sourceSplit = useMemo(() => {
+    const byKind = new Map()
+    let all = 0
+    for (const s of scoped) {
+      for (const row of s.sourceUsage || []) {
+        const acc = byKind.get(row.kind) || { kind: row.kind, tokens: 0, requests: 0 }
+        acc.tokens += Number(row.totalTokens) || 0
+        acc.requests += Number(row.requests) || 0
+        byKind.set(row.kind, acc)
+        all += Number(row.totalTokens) || 0
+      }
+    }
+    return SOURCE_ORDER.filter((kind) => byKind.has(kind)).map((kind) => ({
+      ...byKind.get(kind),
+      share: all > 0 ? byKind.get(kind).tokens / all : 0
+    }))
   }, [scoped])
 
   const topModel = useMemo(() => {
@@ -211,7 +241,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
         <KpiTile
           label="Model requests"
           className={cellBorder(1)}
-          title={`${totals.requests.toLocaleString()} requests (含 subagent 子任务请求)`}
+          title={`${totals.requests.toLocaleString()} requests (主对话 + 委派 + 插件 + 内核后台)`}
           value={totals.requests.toLocaleString()}
         />
         <KpiTile
@@ -251,6 +281,44 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
           value={topModel?.model || '—'}
         />
       </div>
+      {sourceSplit.length > 1 && (
+        <>
+          <div aria-hidden className="h-px bg-panel-hi" />
+          <div className="px-4 py-3">
+            <div className="flex items-baseline justify-between gap-2">
+              <h2 className={OVERLINE_CLASS}>Usage by source</h2>
+              <span className="text-[11px] text-fg-faint">
+                {totals.processedTokens.toLocaleString()} tokens
+              </span>
+            </div>
+            <div className="mt-2 flex h-[6px] overflow-hidden rounded-full bg-panel-hi">
+              {sourceSplit.map((row) => (
+                <div
+                  key={row.kind}
+                  style={{ width: `${row.share * 100}%`, background: SOURCE_COLORS[row.kind] }}
+                  title={`${USAGE_SOURCE_LABELS[row.kind]} · ${(row.share * 100).toFixed(1)}%`}
+                />
+              ))}
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-fg-faint">
+              {sourceSplit.map((row) => (
+                <span key={row.kind} className="inline-flex items-center gap-1.5">
+                  <span
+                    aria-hidden
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ background: SOURCE_COLORS[row.kind] }}
+                  />
+                  {USAGE_SOURCE_LABELS[row.kind]}
+                  <strong className="font-medium text-fg-muted tabular-nums">
+                    {(row.share * 100).toFixed(1)}%
+                  </strong>
+                  <span className="tabular-nums">{tokensShort(row.tokens)}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
       <div aria-hidden className="h-px bg-panel-hi" />
       <div className="p-4">
         <header className="mb-4 flex items-center justify-between gap-2">
@@ -455,154 +523,92 @@ function ByModelCard({ scoped }) {
   )
 }
 
-/** 按 subagent 类型聚合（Explore / Implementer / Tester …），仅在范围内有 subagent 请求时展示 */
-function BySubagentCard({ scoped }) {
+/**
+ * 按来源聚合。每一类用量都在这张表里：主对话、委派出去的子代理、插件自己的请求
+ * （含插件起的后台任务）与内核自带的后台请求。分成两张卡（By subagent / By plugin）
+ * 曾经贴切，但委派本身就是插件提供的，界线不再成立——用户要的是「一共花了多少、
+ * 花在谁身上」。
+ */
+// 一行来源的副标题：会话数 + 委派任务数 + 用途。委派行的用途是每个任务的 prompt 摘要
+// （十几个任务拼起来就是一大段），所以委派只报任务数，插件/内核才列用途。
+function sourceRowDetail(row) {
+  const parts = []
+  if (row.sessions > 0) parts.push(`${row.sessions} sessions`)
+  if (row.kind === 'delegation') {
+    if (row.tasks > 0) parts.push(`${row.tasks} tasks`)
+  } else if (row.purposes.length > 0) {
+    const shown = row.purposes.slice(0, 2).join(' / ')
+    parts.push(row.purposes.length > 2 ? `${shown} +${row.purposes.length - 2}` : shown)
+  }
+  return parts.join(' · ')
+}
+
+function BySourceCard({ scoped }) {
   const rows = useMemo(() => {
-    const byType = new Map()
+    const map = new Map()
     for (const s of scoped) {
-      for (const usage of s.subagentUsage || []) {
-        const type = usage.type
-        const row = byType.get(type) || {
-          type,
+      for (const usage of s.sourceUsage || []) {
+        const key = `${usage.kind}:${usage.id}`
+        const row = map.get(key) || {
+          key,
+          kind: usage.kind,
+          id: usage.id,
+          sessions: new Set(),
           tasks: new Set(),
+          purposes: new Set(),
           requests: 0,
           inputTokens: 0,
           outputTokens: 0,
           totalTokens: 0
         }
+        // 账本里的无会话用量没有 id，不能算进「几个会话」。
+        if (s.id) row.sessions.add(s.id)
         for (const task of usage.tasks) row.tasks.add(task)
-        row.requests += usage.requests
-        row.inputTokens += usage.inputTokens
-        row.outputTokens += usage.outputTokens
-        row.totalTokens += usage.totalTokens
-        byType.set(type, row)
-      }
-    }
-    return [...byType.values()]
-      .map((row) => ({ ...row, tasks: row.tasks.size }))
-      .sort((a, b) => b.totalTokens - a.totalTokens || b.requests - a.requests)
-  }, [scoped])
-
-  if (rows.length === 0) return null
-
-  return (
-    <section className={`${CARD_CLASS} p-4`}>
-      <header className="mb-2 flex items-center justify-between">
-        <h2 className={OVERLINE_CLASS}>By subagent</h2>
-        <span className="text-[11px] text-fg-faint">{rows.length} types</span>
-      </header>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] table-fixed text-[13px]">
-          <colgroup>
-            <col className="w-[34%]" />
-            <col className="w-[16%]" />
-            <col className="w-[16%]" />
-            <col className="w-[17%]" />
-            <col className="w-[17%]" />
-          </colgroup>
-          <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-left font-normal">
-                Type
-              </th>
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
-                Tasks
-              </th>
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
-                Requests
-              </th>
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
-                Input
-              </th>
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
-                Output
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.type} className="border-t border-line">
-                <td className="py-1 pr-3 text-xs text-fg-strong">{row.type}</td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {row.tasks}
-                </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {row.requests.toLocaleString()}
-                </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {tokensShort(row.inputTokens)}
-                </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {tokensShort(row.outputTokens)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-/**
- * 插件自己的模型请求（自动起标题、写 commit message、整理记忆…）。
- *
- * 这些请求不进主上下文，但花的是同一条会话的钱，所以和 subagent 一样计入总量；
- * 单独成卡是因为它们不是委派——用户要知道「钱花在哪个插件的后台任务上」。
- */
-function ByPluginCard({ scoped }) {
-  const rows = useMemo(() => {
-    const map = new Map()
-    for (const s of scoped) {
-      for (const usage of s.pluginUsage || []) {
-        const pluginId = usage.pluginId
-        const row = map.get(pluginId) || {
-          pluginId,
-          sessions: new Set(),
-          requests: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          purposes: new Set()
-        }
-        row.sessions.add(s.id)
-        row.requests += usage.requests
-        row.inputTokens += usage.inputTokens
-        row.outputTokens += usage.outputTokens
-        row.totalTokens += usage.totalTokens
         for (const purpose of usage.purposes) row.purposes.add(purpose)
-        map.set(pluginId, row)
+        row.requests += usage.requests
+        row.inputTokens += usage.inputTokens
+        row.outputTokens += usage.outputTokens
+        row.totalTokens += usage.totalTokens
+        map.set(key, row)
       }
     }
     return [...map.values()]
       .map((row) => ({
         ...row,
         sessions: row.sessions.size,
+        tasks: row.tasks.size,
         purposes: [...row.purposes]
       }))
-      .sort((a, b) => b.totalTokens - a.totalTokens || a.pluginId.localeCompare(b.pluginId))
+      .sort(
+        (a, b) =>
+          b.totalTokens - a.totalTokens ||
+          SOURCE_ORDER.indexOf(a.kind) - SOURCE_ORDER.indexOf(b.kind) ||
+          a.id.localeCompare(b.id)
+      )
   }, [scoped])
 
   if (rows.length === 0) return null
+  const totalTokens = rows.reduce((sum, row) => sum + row.totalTokens, 0)
 
   return (
     <section className={`${CARD_CLASS} p-4`}>
       <header className="mb-2 flex items-center justify-between">
-        <h2 className={OVERLINE_CLASS}>By plugin</h2>
-        <span className="text-[11px] text-fg-faint">{rows.length} plugins</span>
+        <h2 className={OVERLINE_CLASS}>By source</h2>
+        <span className="text-[11px] text-fg-faint">{rows.length} sources</span>
       </header>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] table-fixed text-[13px]">
+        <table className="w-full min-w-[640px] table-fixed text-[13px]">
           <colgroup>
-            <col className="w-[46%]" />
-            <col className="w-[18%]" />
-            <col className="w-[18%]" />
-            <col className="w-[18%]" />
+            <col className="w-[40%]" />
+            <col className="w-[14%]" />
+            <col className="w-[15%]" />
+            <col className="w-[15%]" />
+            <col className="w-[16%]" />
           </colgroup>
           <thead>
             <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
               <th scope="col" className="whitespace-nowrap pb-1.5 text-left font-normal">
-                Plugin
+                Source
               </th>
               <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
                 Requests
@@ -613,18 +619,33 @@ function ByPluginCard({ scoped }) {
               <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
                 Output
               </th>
+              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
+                Share
+              </th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.pluginId} className="border-t border-line">
+              <tr key={row.key} className="border-t border-line">
                 <td className="py-1 pr-3">
-                  <span className="block truncate text-xs text-fg-strong" title={row.pluginId}>
-                    {row.pluginId}
-                  </span>
-                  <span className="mt-0.5 block truncate text-[11px] text-fg-faint">
-                    {row.sessions} sessions
-                    {row.purposes.length > 0 ? ` · ${row.purposes.join(' / ')}` : ''}
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ background: SOURCE_COLORS[row.kind] }}
+                    />
+                    <span
+                      className="min-w-0 truncate text-xs text-fg-strong"
+                      title={row.kind === 'main' ? 'Main conversation' : row.id}
+                    >
+                      {row.kind === 'main' ? 'Main conversation' : row.id}
+                    </span>
+                    <span className="shrink-0 rounded-[3px] bg-panel-hi px-1.5 py-0.5 text-[10px] text-fg-dim">
+                      {USAGE_SOURCE_LABELS[row.kind]}
+                    </span>
+                  </div>
+                  <span className="mt-0.5 block truncate pl-3.5 text-[11px] text-fg-faint">
+                    {sourceRowDetail(row)}
                   </span>
                 </td>
                 <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
@@ -635,6 +656,24 @@ function ByPluginCard({ scoped }) {
                 </td>
                 <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {tokensShort(row.outputTokens)}
+                </td>
+                <td className="py-1 pr-3 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <div className="h-[5px] w-16 overflow-hidden rounded-full bg-panel-hi">
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${totalTokens > 0 ? (row.totalTokens / totalTokens) * 100 : 0}%`,
+                          background: SOURCE_COLORS[row.kind]
+                        }}
+                      />
+                    </div>
+                    <span className="w-10 shrink-0 text-right font-mono text-[11px] text-fg-faint tabular-nums">
+                      {totalTokens > 0
+                        ? `${((row.totalTokens / totalTokens) * 100).toFixed(1)}%`
+                        : '—'}
+                    </span>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -652,7 +691,8 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
     for (const s of scoped) {
       const cwd = s.cwd || '~'
       const row = map.get(cwd) || { cwd, project: basename(cwd), sessions: 0, turns: 0, tokens: 0 }
-      row.sessions++
+      // 无会话的账本用量（一次性命令）只加 token，不算一条会话。
+      if (!s.ledger) row.sessions++
       row.turns += s.turns
       row.tokens += s.totalTokens
       map.set(cwd, row)
@@ -818,8 +858,8 @@ function BySessionCard({ scoped, onDetail }) {
                   </span>
                   <span className="mt-0.5 block truncate text-[11px] text-fg-faint">
                     {basename(s.cwd)} · {s.id ? s.id.slice(0, 8) : ''}
-                    {Number(s.subagentTasks) > 0 && (
-                      <span className="text-warn-soft"> · {s.subagentTasks} sub</span>
+                    {Number(s.delegationTasks) > 0 && (
+                      <span className="text-warn-soft"> · {s.delegationTasks} delegated</span>
                     )}
                     {Number(s.pluginRequests) > 0 && (
                       <span className="text-fg-faint"> · {s.pluginRequests} plugin</span>
@@ -943,6 +983,8 @@ export function StatsView({ visible }) {
     () => scoped.filter((session) => (Number(session.requests) || 0) > 0),
     [scoped]
   )
+  // 账本里的无会话用量没有 id，进不了按会话的明细表。
+  const sessionScoped = useMemo(() => activeScoped.filter((session) => session.id), [activeScoped])
 
   const hasAny = sessions.some((session) => (Number(session.requests) || 0) > 0)
   const progress = snap?.progress
@@ -1020,20 +1062,19 @@ export function StatsView({ visible }) {
               {legacyUsageRecords > 0 && (
                 <div className="rounded-[5px] border border-warn/30 bg-warn/8 px-3 py-2 text-[11px] text-warn-soft">
                   {legacyUsageRecords.toLocaleString()} 条旧 usage
-                  没有请求时间，已稳定归档到会话创建日（subagent
-                  记录归档到任务开始时间）；升级后产生的数据会按实际请求时间统计。
+                  没有请求时间，已稳定归档到会话创建日（委派与插件的记录归档到任务开始时间）；
+                  升级后产生的数据会按实际请求时间统计。
                 </div>
               )}
               <DailyCard sessions={sessions} range={range} />
               <ByModelCard scoped={activeScoped} />
-              <BySubagentCard scoped={activeScoped} />
-              <ByPluginCard scoped={activeScoped} />
+              <BySourceCard scoped={activeScoped} />
               <ByProjectCard
                 scoped={activeScoped}
                 visibleRows={visibleRows}
                 onShowMore={() => setVisibleRows((v) => v + PROJECT_BATCH)}
               />
-              <BySessionCard scoped={activeScoped} onDetail={setDetailSessionId} />
+              <BySessionCard scoped={sessionScoped} onDetail={setDetailSessionId} />
             </>
           )}
         </div>

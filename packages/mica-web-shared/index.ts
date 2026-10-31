@@ -38,6 +38,16 @@ export {
 } from './app-paths.js';
 export { formatTokens } from './format.js';
 export { DAY_MS, addDays, dayStartMs, localDayKey } from './stats-day.js';
+export {
+  countUsageRequests,
+  MAIN_USAGE_SOURCE,
+  USAGE_SOURCE_LABELS,
+  usageSourceKey,
+  usageSourceOf,
+} from './usage-source.js';
+export type { UsageSource, UsageSourceKind } from './usage-source.js';
+export { parseUsageLedger } from './usage-ledger.js';
+export type { UsageLedgerEntry } from './usage-ledger.js';
 export { toolIcon, toolLabel } from './tools.js';
 export {
   DEFAULT_SESSION_SEARCH_RANGE,

@@ -1,9 +1,15 @@
 import * as nodeFs from 'node:fs'
 import { join } from 'node:path'
-import { parseSessionEvents, parseSessionText, summarizeStatsSession } from './stats-core'
+import { parseUsageLedger } from '@packages/mica-web-shared/usage-ledger.js'
+import {
+  parseSessionEvents,
+  parseSessionText,
+  summarizeLedgerEntries,
+  summarizeStatsSession
+} from './stats-core'
 
 /** 索引格式版本。形态一变就整份重建，不做迁移。 */
-const INDEX_VERSION = 1
+const INDEX_VERSION = 2
 /** 每批解析多少个会话文件就让出一次事件循环。 */
 const BATCH_FILES = 16
 /** 单批最多占用主线程多久（毫秒）；大会话文件会超过这个预算，靠批次之间让出恢复响应。 */
@@ -80,6 +86,10 @@ function yieldToEventLoop() {
  * - `meta`：侧栏用的轻量行；
  * - `stats`：统计页用的「会话 × 本地日」聚合行（见 stats-core 的 summarizeStatsSession）。
  *
+ * 统计投影另加一份「无会话用量」：`usage-ledger.jsonl`（`mica commit` 这类一次性插件
+ * 命令写的账本）按工作目录聚成会话形状的行，标记 `ledger: true`——它进总量与来源占比，
+ * 但不是一条会话，侧栏、活跃会话数与「按会话」里都不出现。
+ *
  * 统计投影以前要整份 JSON.parse 所有会话文件（上千个文件、几百 MB），而且同步跑在主
  * 进程里——点开 Stats 会把整个运行时按住好几秒。现在结果按文件签名缓存在
  * `stats-index.json` 里，进程重启后只解析变过的文件；首次构建分批让出事件循环，界面
@@ -92,9 +102,11 @@ function yieldToEventLoop() {
 export function createStatsScanner({
   directory,
   indexFile = null,
+  ledgerFile = null,
   fileSystem = nodeFs,
   parseEvents = parseSessionEvents,
   summarize = summarizeStatsSession,
+  summarizeLedger = summarizeLedgerEntries,
   parseText = parseSessionText,
   indexStore = null,
   onProgress = null,
@@ -115,6 +127,11 @@ export function createStatsScanner({
   // 行对象来自 entries，引用本来就稳定；数组也一起缓存，侧栏才能靠引用相等跳过重渲染。
   let metaCache = null
   let statsCache = null
+  // 无会话用量账本（`mica commit` 这类一次性命令）：按文件签名只解析一次。
+  const noLedgerRows = []
+  let ledgerRows = noLedgerRows
+  let ledgerSignature = null
+  let ledgerLoaded = false
   const progress = { building: false, done: 0, total: 0 }
 
   function invalidateRows() {
@@ -422,9 +439,41 @@ export function createStatsScanner({
   function statsRows() {
     const rows = []
     for (const entry of entries.values()) if (entry.stats) rows.push(entry.stats)
+    return rows
+  }
+
+  function sortStats(rows) {
     return rows.sort(
       (a, b) => a.createdAtMs - b.createdAtMs || String(a.id).localeCompare(String(b.id))
     )
+  }
+
+  /**
+   * 无会话用量账本的行。文件不存在就是没有（绝大多数人不会跑一次性插件命令），
+   * 签名没变时复用上一次的结果，所以每 30 秒的轮询不会重读它。
+   */
+  function currentLedgerRows() {
+    if (typeof ledgerFile !== 'function') return noLedgerRows
+    const file = ledgerFile()
+    if (!file) return noLedgerRows
+    const signature = signatureOf(file)
+    if (ledgerLoaded && signature === ledgerSignature) return ledgerRows
+    ledgerLoaded = true
+    ledgerSignature = signature
+    let rows = noLedgerRows
+    if (signature) {
+      let text = ''
+      try {
+        text = fileSystem.readFileSync(file, 'utf8')
+      } catch {
+        // 读不到（权限/IO）时当作没有账本，不让它把整个统计打挂。
+        text = ''
+      }
+      rows = summarizeLedger(parseUsageLedger(text))
+    }
+    ledgerRows = rows
+    statsCache = null
+    return rows
   }
 
   return {
@@ -442,9 +491,10 @@ export function createStatsScanner({
 
     /** 统计页数据：按创建时间升序（与去重结果的稳定顺序一致）。 */
     async scanStats() {
-      if (progress.building) return statsRows()
+      if (progress.building) return sortStats(statsRows())
       await refresh()
-      if (!statsCache) statsCache = statsRows()
+      const ledger = currentLedgerRows()
+      if (!statsCache) statsCache = sortStats([...statsRows(), ...ledger])
       return statsCache
     },
 

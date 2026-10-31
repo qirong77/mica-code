@@ -73,6 +73,7 @@ function createHarness(options = {}) {
   }
   const scanner = createStatsScanner({
     directory: () => dir,
+    ledgerFile: () => join(dir, 'usage-ledger.jsonl'),
     fileSystem,
     indexStore: store,
     indexWriteDelayMs: 0,
@@ -89,6 +90,13 @@ function createHarness(options = {}) {
       },
       remove(name) {
         unlinkSync(join(dir, `${name}.json`))
+      },
+      writeLedger(entries) {
+        writeFileSync(
+          join(dir, 'usage-ledger.jsonl'),
+          entries.map((entry) => JSON.stringify(entry)).join('\n'),
+          'utf8'
+        )
       }
     }
   }
@@ -467,5 +475,61 @@ describe('incremental session scanner', () => {
     await scanner.scanStats()
     expect(seen.length).toBeGreaterThan(0)
     expect(seen.at(-1)).toEqual({ building: false, done: 3, total: 3 })
+  })
+
+  test('adds session-less ledger usage as project rows and refreshes when it grows', async () => {
+    const harness = createHarness()
+    harness.files.write('one', fixture('one'))
+    harness.files.writeLedger([
+      {
+        id: 'commit-1',
+        occurredAt: '2025-01-05T10:00:00.000Z',
+        model: 'deepseek-chat',
+        pluginId: 'commit',
+        purpose: '写提交说明',
+        cwd: '/work/one',
+        inputTokens: 120,
+        cachedInputTokens: 20,
+        outputTokens: 30
+      }
+    ])
+
+    const first = await harness.scanner.scanStats()
+    const ledgerRow = first.find((row) => row.ledger)
+    // 一次性命令没有会话可写：它以「项目 + 来源」的形式进统计，但不冒充一条会话。
+    expect(ledgerRow).toMatchObject({ id: null, ledger: true, cwd: '/work/one', requests: 1 })
+    expect(ledgerRow.days[0].sources).toEqual([
+      expect.objectContaining({ kind: 'plugin', id: 'commit', purposes: ['写提交说明'] })
+    ])
+    expect(first.find((row) => row.id === 'one').requests).toBe(0)
+    // 会话元信息里不该出现账本行（侧栏只列真会话）。
+    expect((await harness.scanner.scanMeta()).map((row) => row.id)).toEqual(['one'])
+
+    harness.files.writeLedger([
+      {
+        id: 'commit-1',
+        occurredAt: '2025-01-05T10:00:00.000Z',
+        model: 'deepseek-chat',
+        pluginId: 'commit',
+        purpose: '写提交说明',
+        cwd: '/work/one',
+        inputTokens: 120,
+        cachedInputTokens: 20,
+        outputTokens: 30
+      },
+      {
+        id: 'commit-2',
+        occurredAt: '2025-01-06T10:00:00.000Z',
+        model: 'deepseek-chat',
+        pluginId: 'commit',
+        purpose: '写提交说明',
+        cwd: '/work/one',
+        inputTokens: 60,
+        outputTokens: 10
+      }
+    ])
+    const second = await harness.scanner.scanStats()
+    expect(second.find((row) => row.ledger).requests).toBe(2)
+    expect(second.find((row) => row.ledger)).not.toBe(ledgerRow)
   })
 })

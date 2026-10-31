@@ -28,8 +28,7 @@ function dayRow(overrides = {}) {
         totalTokens: 110
       }
     ],
-    subagents: [],
-    plugins: [],
+    sources: [],
     ...overrides
   }
 }
@@ -45,8 +44,6 @@ function session(overrides = {}) {
     model: 'config-model',
     turns: 5,
     durationMs: 1000,
-    subagentTasks: 0,
-    pluginRequests: 0,
     requests: 0,
     inputTokens: 0,
     cachedInputTokens: 0,
@@ -99,27 +96,33 @@ describe('Stats range scoping', () => {
     expect(scoped.modelUsage).toHaveLength(1)
   })
 
-  test('merges subagent tasks and plugin purposes across days', () => {
+  test('merges usage sources across days', () => {
     const scoped = scopeSession(
       session({
         days: [
           dayRow({
-            subagents: [
+            sources: [
               {
-                type: 'Explore',
+                kind: 'delegation',
+                id: 'Explore',
                 tasks: ['t1'],
+                purposes: [],
                 requests: 1,
                 inputTokens: 10,
+                cachedInputTokens: 0,
+                uncachedInputTokens: 10,
                 outputTokens: 1,
                 totalTokens: 11
-              }
-            ],
-            plugins: [
+              },
               {
-                pluginId: 'p',
+                kind: 'plugin',
+                id: 'p',
+                tasks: [],
                 purposes: ['title'],
                 requests: 1,
                 inputTokens: 10,
+                cachedInputTokens: 0,
+                uncachedInputTokens: 10,
                 outputTokens: 1,
                 totalTokens: 11
               }
@@ -127,22 +130,28 @@ describe('Stats range scoping', () => {
           }),
           dayRow({
             day: day(2026, 8, 3),
-            subagents: [
+            sources: [
               {
-                type: 'Explore',
+                kind: 'delegation',
+                id: 'Explore',
                 tasks: ['t1', 't2'],
+                purposes: [],
                 requests: 2,
                 inputTokens: 20,
+                cachedInputTokens: 0,
+                uncachedInputTokens: 20,
                 outputTokens: 2,
                 totalTokens: 22
-              }
-            ],
-            plugins: [
+              },
               {
-                pluginId: 'p',
+                kind: 'plugin',
+                id: 'p',
+                tasks: [],
                 purposes: ['title', 'review'],
                 requests: 2,
                 inputTokens: 20,
+                cachedInputTokens: 0,
+                uncachedInputTokens: 20,
                 outputTokens: 2,
                 totalTokens: 22
               }
@@ -152,11 +161,16 @@ describe('Stats range scoping', () => {
       }),
       'all'
     )
-    expect(scoped.subagentUsage).toHaveLength(1)
-    expect([...scoped.subagentUsage[0].tasks].sort()).toEqual(['t1', 't2'])
-    expect(scoped.subagentUsage[0].requests).toBe(3)
-    expect([...scoped.pluginUsage[0].purposes].sort()).toEqual(['review', 'title'])
-    expect(scoped.pluginUsage[0].requests).toBe(3)
+    expect(scoped.sourceUsage).toHaveLength(2)
+    const delegated = scoped.sourceUsage.find((row) => row.kind === 'delegation')
+    const plugin = scoped.sourceUsage.find((row) => row.kind === 'plugin')
+    expect([...delegated.tasks].sort()).toEqual(['t1', 't2'])
+    expect(delegated.requests).toBe(3)
+    expect([...plugin.purposes].sort()).toEqual(['review', 'title'])
+    expect(plugin.requests).toBe(3)
+    // 会话行上的两个来源标记来自同一份聚合。
+    expect(scoped.delegationTasks).toBe(2)
+    expect(scoped.pluginRequests).toBe(3)
   })
 
   test('drops sessions without usage in the range', () => {

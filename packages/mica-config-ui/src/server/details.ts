@@ -8,6 +8,7 @@ import { buildConfigWebConversationItems } from './conversation.js';
 import { summarizeSessionFile } from './sessionHead.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { getSkillsRootPath } from './paths.js';
+import { countUsageRequests } from '@packages/mica-web-shared/usage-source.js';
 import type { McpServerConfig } from '@packages/mica-mcp/index.js';
 import type { Skill } from '@packages/mica-skills/index.js';
 import type {
@@ -183,7 +184,8 @@ export function getSessionDetails(id: string): ConfigWebSessionDetails {
     role: session.snapshot.role,
     fileSizeBytes: statSessionFile(session.id).size,
     messageCount: session.snapshot.messages.length,
-    usageCount: session.snapshot.usageHistory.length,
+    // 委派与插件的请求也是这条会话花的钱，只数主对话会让标题栏和「用量」页签对不上。
+    usageCount: countUsageRequests(session.snapshot),
     contextWindowSize: session.snapshot.contextWindowSize,
     lastUsage: lastUsage
       ? {

@@ -24,10 +24,12 @@ export type SubagentUsageRecord = {
   /**
    * 谁发起了这批请求：委派子代理（缺省）还是某个插件自己的模型请求。
    *
-   * 两者都是「本会话产生、但不进主上下文」的开销，所以共用同一份记账；界面上
-   * 需要分开呈现（`By subagent` / `By plugin`），就靠这个字段区分。
+   * 两者都是「本会话产生、但不进主上下文」的开销，所以共用同一份记账；统计页
+   * 靠这几个字段把用量归到「主对话 / 委派 / 插件 / 内核后台」（`usageSourceOf`）。
+   * 委派写 `delegation`，插件自己起的后台任务写 `plugin` + `pluginId`，内核 helper
+   * （压缩摘要、桌面旁问）写 `helper`；缺省值按 `initiatedByCallId` / `pluginId` 推断。
    */
-  origin?: 'subagent' | 'plugin';
+  origin?: 'delegation' | 'plugin' | 'helper';
   /** `origin === 'plugin'` 时发起这批请求的插件 id。 */
   pluginId?: string;
   /** The provider tool-call id of the parent agent's Agent invocation. */
@@ -78,7 +80,7 @@ export type SubagentUsageTaskMeta = {
   taskId: string;
   parentTaskId?: string;
   initiatedByCallId?: string;
-  origin?: 'subagent' | 'plugin';
+  origin?: 'delegation' | 'plugin' | 'helper';
   pluginId?: string;
   subagentType: string;
   description: string;

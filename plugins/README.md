@@ -173,7 +173,7 @@ if (!llm?.configured()) return; // 没配置就别发请求
 const { text } = await llm.request({ purpose: '自动起标题', system, user });
 ```
 
-请求由宿主代发并记账（`origin: 'plugin'`，记进会话的 `subagentUsageHistory`），插件里不要
+请求由宿主代发并记账（`origin: 'plugin'` + `pluginId`，记进会话的 `subagentUsageHistory`），插件里不要
 自己拼地址 / Key，也不要自己发 HTTP。`requires` 里同时写上 `llm`。
 
 **自动降级**：配置的接口地址 / Key / 模型发一次请求失败（模型名不存在、Key 失效、网关拒绝、
@@ -262,8 +262,10 @@ const { text, usage } = await ctx.models.request({
 ```
 
 请求由宿主发出，所以三件事只有一份实现：协议分支（Chat Completions / Responses）、超时与中断、
-**用量记账**——这笔开销会以 `origin: 'plugin'` 记进发起请求时的会话的 `subagentUsageHistory`，在
-Stats 的「By plugin」卡片与会话详情里能看到。插件自己 `fetch` 的请求没有会话写面可以记，
+**用量记账**——这笔开销会以 `origin: 'plugin'` + `pluginId` 记进发起请求时的会话的
+`subagentUsageHistory`，在 Stats 的「By source」卡片与会话详情里能看到；插件用
+`ctx.subagents.run/background/thread` 起的后台子代理同样记在插件名下（主对话经工具委派的那条
+记成 `delegation`，由 `initiatedByCallId` 区分）。插件自己 `fetch` 的请求没有会话写面可以记，
 用户在 Stats 里就永远看不到它花了多少。
 
 ## 内置 skill

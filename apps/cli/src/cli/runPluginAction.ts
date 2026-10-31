@@ -6,6 +6,7 @@ import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { readActiveProviderConfig } from '@packages/mica-config/index.js';
 import { createPluginModels } from '../plugins/pluginModels.js';
 import { createPluginPaths } from '../plugins/pluginPaths.js';
+import { appendPluginUsage } from '../plugins/usageLedger.js';
 
 /**
  * 一次性执行某个插件的配置页动作（配置页的「注册」「测试连接」这类按钮走这里）。
@@ -71,6 +72,16 @@ export async function runPluginAction(options: PluginActionRunOptions): Promise<
       // 因此只发请求、不入账。
       pluginModels: createPluginModels({
         resolveMainProvider: (model) => readActiveProviderConfig(model ? { model } : {}),
+        // 动作里真的问了一次模型时（不是「测试连接」——那个走 probe，不记账）同样不能漏：
+        // 这个进程没有会话，用量记进无会话账本，统计页并进总量。
+        record: (entry) =>
+          appendPluginUsage({
+            pluginId: entry.pluginId,
+            purpose: entry.purpose,
+            cwd: process.cwd(),
+            requests: entry.requests,
+            fallbackAt: entry.finishedAt,
+          }),
       }),
     },
     // 只装目标插件：这个进程不提供 tools / background 这类能力，无关插件装配进来

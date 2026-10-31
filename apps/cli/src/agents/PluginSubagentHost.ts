@@ -232,6 +232,10 @@ export function createPluginSubagentHost(
           description: prepared.description,
           model: prepared.model,
           effort: prepared.effort,
+          // 统计页要能把这份开销归到正确的来源：主对话经工具委派的那条记成 delegation
+          // （插件只是它背后的实现），插件自己起的后台任务记成 plugin + pluginId。
+          ...(prepared.initiatedByCallId ? { origin: 'delegation' as const } : { origin: 'plugin' as const }),
+          ...(prepared.initiatedByCallId ? {} : { pluginId }),
           status,
           startedAt: prepared.startedAt,
           finishedAt: new Date().toISOString(),

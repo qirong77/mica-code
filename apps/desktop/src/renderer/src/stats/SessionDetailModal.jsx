@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { SessionDetailView } from '@mica-config-ui/web'
+import { USAGE_SOURCE_LABELS, usageSourceOf } from '@packages/mica-web-shared/usage-source.js'
 import { ModalMeta, ModalShell } from '../chat-modal'
 
 const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
@@ -34,7 +35,28 @@ function StatCard({ label, primary, secondary }) {
   )
 }
 
-function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defaultPageSize = 10 }) {
+/** 某一类来源（委派 / 插件 / 内核后台）的请求数与 token 合计。 */
+function sumRecords(groups, kind) {
+  const totals = { requests: 0, input: 0, cached: 0, output: 0, total: 0 }
+  const group = groups.find((item) => item.kind === kind)
+  if (!group) return totals
+  for (const { record } of group.items) {
+    totals.requests += (record.requests || []).length
+    totals.input += record.summary?.inputTokens || 0
+    totals.cached += record.summary?.cachedInputTokens || 0
+    totals.output += record.summary?.outputTokens || 0
+    totals.total += record.summary?.totalTokens || 0
+  }
+  return totals
+}
+
+function UsageTable({
+  rows,
+  title,
+  showSource = false,
+  pageSizeOptions = [5, 10, 20, 50, 100],
+  defaultPageSize = 10
+}) {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(defaultPageSize)
   if (!rows || rows.length === 0) return null
@@ -66,6 +88,7 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
         <table className="w-full min-w-[640px] table-fixed text-[11px]">
           <colgroup>
             <col className="w-[17%]" />
+            {showSource && <col className="w-[9%]" />}
             <col className="w-[22%]" />
             <col className="w-[13%]" />
             <col className="w-[13%]" />
@@ -78,6 +101,11 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
               <th scope="col" className="whitespace-nowrap pb-1 text-left font-normal">
                 时间
               </th>
+              {showSource && (
+                <th scope="col" className="whitespace-nowrap pb-1 text-left font-normal">
+                  来源
+                </th>
+              )}
               <th scope="col" className="whitespace-nowrap pb-1 text-left font-normal">
                 模型
               </th>
@@ -104,6 +132,11 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
                 <td className="py-1 pr-2 whitespace-nowrap font-mono text-[10px] text-fg-dim tabular-nums">
                   {fmtTime(u.occurredAt)}
                 </td>
+                {showSource && (
+                  <td className="truncate py-1 pr-2 text-[10px] text-fg-dim">
+                    {u.sourceLabel || '—'}
+                  </td>
+                )}
                 <td
                   className="truncate py-1 pr-2 font-mono text-[10px] text-fg-muted"
                   title={u.model}
@@ -178,14 +211,19 @@ function UsageTable({ rows, title, pageSizeOptions = [5, 10, 20, 50, 100], defau
   )
 }
 
-function SubagentCard({ record }) {
+function UsageRecordCard({ record, source }) {
   const requests = record.requests || []
   const summary = record.summary || {}
+  const title =
+    source.kind === 'plugin' ? source.pluginId || record.subagentType : record.subagentType
   return (
     <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
         <span className="rounded-[3px] bg-warn/12 px-1.5 py-0.5 text-[10px] font-semibold text-warn">
-          {record.subagentType || 'subagent'}
+          {title || 'request'}
+        </span>
+        <span className="rounded-[3px] bg-panel px-1.5 py-0.5 text-[10px] text-fg-dim">
+          {USAGE_SOURCE_LABELS[source.kind]}
         </span>
         <span
           className={`rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium uppercase ${
@@ -227,11 +265,22 @@ function SubagentCard({ record }) {
             <span className="group-open:hidden">展开逐条请求</span>
             <span className="hidden group-open:inline">收起逐条请求</span>
           </summary>
-          <UsageTable rows={requests} title={`${record.subagentType || 'subagent'} 请求`} />
+          <UsageTable rows={requests} title={`${title || '请求'} 请求`} />
         </details>
       )}
     </div>
   )
+}
+
+const SOURCE_SECTION_TITLES = {
+  delegation: 'Delegated subagents',
+  plugin: '插件请求',
+  helper: '内核后台请求'
+}
+const SOURCE_SECTION_HINTS = {
+  delegation: '主对话经工具派出去的子代理：自己的上下文，但花的是同一条会话的钱。',
+  plugin: '插件自己的模型请求与它起的后台任务（自动起标题、写提交说明、整理记忆…）。',
+  helper: '内核自带的助手请求（压缩摘要、桌面旁问）：不进主上下文，但同样计入本会话。'
 }
 
 /**
@@ -261,21 +310,58 @@ export function SessionDetailModal({ sessionId, onClose }) {
 
   const usageHistory = useMemo(() => detail?.usageHistory || [], [detail])
   const records = useMemo(() => detail?.subagentUsageHistory || [], [detail])
-  // 同一份数组里既有委派子代理，也有插件自己的模型请求（`origin: 'plugin'`）：
-  // 两者都计入本会话开销，但「谁发起的」不同，界面上分开列。
-  const subagents = useMemo(() => records.filter((record) => record.origin !== 'plugin'), [records])
-  const pluginRequests = useMemo(
-    () => records.filter((record) => record.origin === 'plugin'),
-    [records]
-  )
-  const subRequests = useMemo(() => records.flatMap((record) => record.requests || []), [records])
+  // 同一份数组里装着所有「不进主上下文」的请求：委派子代理、插件自己的模型请求、
+  // 内核后台助手。归到哪一类由 `usageSourceOf` 统一判定，和统计页的总表同源。
+  const groups = useMemo(() => {
+    const byKind = new Map()
+    let allRecords = 0
+    for (const record of records) {
+      const source = usageSourceOf(record)
+      const list = byKind.get(source.kind) || []
+      list.push({ record, source })
+      byKind.set(source.kind, list)
+      allRecords += (record.requests || []).length
+    }
+    const ordered = ['delegation', 'plugin', 'helper']
+      .filter((kind) => byKind.has(kind))
+      .map((kind) => ({
+        kind,
+        items: byKind
+          .get(kind)
+          .sort(
+            (a, b) =>
+              (b.record.summary?.totalTokens || 0) - (a.record.summary?.totalTokens || 0) ||
+              String(a.source.id).localeCompare(String(b.source.id))
+          )
+      }))
+    const totals = { requests: 0, input: 0, cached: 0, output: 0, total: 0 }
+    for (const { record } of ordered.flatMap((group) => group.items)) {
+      totals.requests += (record.requests || []).length
+      totals.input += record.summary?.inputTokens || 0
+      totals.cached += record.summary?.cachedInputTokens || 0
+      totals.output += record.summary?.outputTokens || 0
+      totals.total += record.summary?.totalTokens || 0
+    }
+    return { ordered, totals, allRecords }
+  }, [records])
+
+  const delegatedTotals = useMemo(() => sumRecords(groups.ordered, 'delegation'), [groups])
+  const pluginTotals = useMemo(() => sumRecords(groups.ordered, 'plugin'), [groups])
+  const helperTotals = useMemo(() => sumRecords(groups.ordered, 'helper'), [groups])
+
   const allUsage = useMemo(() => {
     const rows = [
-      ...usageHistory.map((u) => ({ ...u, source: 'main' })),
-      ...subRequests.map((u) => ({ ...u, source: 'sub' }))
+      ...usageHistory.map((u) => ({ ...u, sourceLabel: USAGE_SOURCE_LABELS.main })),
+      ...records.flatMap((record) => {
+        const source = usageSourceOf(record)
+        return (record.requests || []).map((u) => ({
+          ...u,
+          sourceLabel: USAGE_SOURCE_LABELS[source.kind]
+        }))
+      })
     ]
     return rows.sort((a, b) => (a.occurredAt || '').localeCompare(b.occurredAt || ''))
-  }, [usageHistory, subRequests])
+  }, [usageHistory, records])
 
   const totals = useMemo(() => {
     const sum = (list) =>
@@ -290,18 +376,16 @@ export function SessionDetailModal({ sessionId, onClose }) {
         { input: 0, cached: 0, output: 0, total: 0 }
       )
     const main = sum(usageHistory)
-    const sub = sum(subRequests)
     return {
       main,
-      sub,
       all: {
-        input: main.input + sub.input,
-        cached: main.cached + sub.cached,
-        output: main.output + sub.output,
-        total: main.total + sub.total
+        input: main.input + groups.totals.input,
+        cached: main.cached + groups.totals.cached,
+        output: main.output + groups.totals.output,
+        total: main.total + groups.totals.total
       }
     }
-  }, [usageHistory, subRequests])
+  }, [groups, usageHistory])
 
   const usageTab = useMemo(
     () => ({
@@ -309,16 +393,26 @@ export function SessionDetailModal({ sessionId, onClose }) {
       label: '用量',
       content: (
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
             <StatCard
-              label="主 agent"
+              label="主对话"
               primary={`${usageHistory.length} req`}
               secondary={`${fmtTokens(totals.main.input)} in · ${fmtTokens(totals.main.output)} out`}
             />
             <StatCard
-              label="子任务 / 插件"
-              primary={`${subRequests.length} req`}
-              secondary={`${fmtTokens(totals.sub.input)} in · ${fmtTokens(totals.sub.output)} out`}
+              label="委派子代理"
+              primary={`${delegatedTotals.requests} req`}
+              secondary={`${fmtTokens(delegatedTotals.input)} in · ${fmtTokens(delegatedTotals.output)} out`}
+            />
+            <StatCard
+              label="插件"
+              primary={`${pluginTotals.requests} req`}
+              secondary={`${fmtTokens(pluginTotals.input)} in · ${fmtTokens(pluginTotals.output)} out`}
+            />
+            <StatCard
+              label="内核后台"
+              primary={`${helperTotals.requests} req`}
+              secondary={`${fmtTokens(helperTotals.input)} in · ${fmtTokens(helperTotals.output)} out`}
             />
             <StatCard
               label="合计"
@@ -335,47 +429,35 @@ export function SessionDetailModal({ sessionId, onClose }) {
               secondary={`${totals.all.cached.toLocaleString()} cached`}
             />
           </div>
-          <UsageTable rows={allUsage} title="逐条请求（主 + sub 合并，按时间排序）" />
+          <UsageTable
+            rows={allUsage}
+            title="逐条请求（主对话 + 委派 + 插件 + 内核后台，按时间排序）"
+            showSource
+          />
           <p className="text-[10px] leading-relaxed text-fg-ghost">
             输入逐条上涨多为上一轮的输出被回放：思考型模型（reasoning）的思考内容同样计入下一次
             input，所以「输出」和「输入增长」会一起变大。
           </p>
 
-          {subagents.length > 0 && (
-            <section>
-              <h3 className={OVERLINE_CLASS}>Sub-agents</h3>
+          {groups.ordered.map((group) => (
+            <section key={group.kind}>
+              <h3 className={OVERLINE_CLASS}>{SOURCE_SECTION_TITLES[group.kind]}</h3>
+              <p className="mt-1 text-[10px] text-fg-ghost">{SOURCE_SECTION_HINTS[group.kind]}</p>
               <div className="mt-2 flex flex-col gap-2">
-                {subagents.map((record) => (
-                  <SubagentCard
-                    key={record.taskId || record.initiatedByCallId || record.description}
+                {group.items.map(({ record, source }) => (
+                  <UsageRecordCard
+                    key={`${source.kind}-${source.id}-${record.taskId || record.startedAt}`}
                     record={record}
+                    source={source}
                   />
                 ))}
               </div>
             </section>
-          )}
-
-          {pluginRequests.length > 0 && (
-            <section>
-              <h3 className={OVERLINE_CLASS}>插件请求</h3>
-              <p className="mt-1 text-[10px] text-fg-ghost">
-                插件自己的模型请求（自动起标题、写 commit message、整理记忆…）：不进主上下文，
-                但同样计入本会话的请求与 token。
-              </p>
-              <div className="mt-2 flex flex-col gap-2">
-                {pluginRequests.map((record) => (
-                  <SubagentCard
-                    key={`${record.pluginId || 'plugin'}-${record.taskId || record.description}`}
-                    record={record}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
+          ))}
         </div>
       )
     }),
-    [allUsage, pluginRequests, subagents, subRequests.length, totals, usageHistory.length]
+    [allUsage, delegatedTotals, groups, helperTotals, pluginTotals, totals, usageHistory.length]
   )
 
   return (

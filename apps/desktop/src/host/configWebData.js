@@ -10,6 +10,7 @@ import {
 } from 'node:fs'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
+import { countUsageRequests } from '@packages/mica-web-shared/usage-source.js'
 import {
   buildConfigWebConversationItems,
   buildConfigWebContextAnalysis
@@ -388,7 +389,8 @@ function readSessionDetails(id) {
     cwd: session.cwd,
     fileSizeBytes: statSync(path).size,
     messageCount: session.snapshot.messages.length,
-    usageCount: session.snapshot.usageHistory.length,
+    // 同一个口径：主对话 + 委派 + 插件 + 内核后台的请求数（见 usage-source）。
+    usageCount: countUsageRequests(session.snapshot),
     contextWindowSize: session.snapshot.contextWindowSize,
     lastUsage: lastUsage
       ? {

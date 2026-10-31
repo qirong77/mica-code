@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { localDayKey } from '@packages/mica-web-shared/stats-day.js'
+import { MAIN_USAGE_SOURCE, usageSourceOf } from '@packages/mica-web-shared/usage-source.js'
 
 /** 把消息 content（string 或 blocks 数组）投影为纯文本，图片/特殊块用占位符。 */
 export function projectContent(content, limit) {
@@ -43,7 +44,9 @@ export function projectSubagentRecords(records) {
     taskId: record.taskId || null,
     parentTaskId: record.parentTaskId || null,
     initiatedByCallId: record.initiatedByCallId || null,
-    origin: record.origin === 'plugin' ? 'plugin' : 'subagent',
+    // 原样保留 `origin`（delegation / plugin / helper）：详情弹窗靠它加 `initiatedByCallId`
+    // 走 `usageSourceOf`，和统计总表同一个口径。
+    origin: typeof record.origin === 'string' ? record.origin : null,
     pluginId: record.pluginId || null,
     subagentType: record.subagentType || null,
     description: record.description || null,
@@ -146,6 +149,14 @@ export function normalizeUsageEvent(usage, fallbackTime, fallbackModel) {
 }
 
 /**
+ * 一条用量事件归哪一类来源（主对话 / 委派 / 插件 / 内核后台），见
+ * `mica-web-shared/usage-source` 的判定。事件只要能进同一套聚合，就必须先带上它。
+ */
+function withSource(event, source, extra = {}) {
+  return { ...event, source, ...extra }
+}
+
+/**
  * 把一个会话文件解析成「元信息 + 用量事件」。事件仍带完整字段（子代理/插件来源、请求
  * 时间、身份），调用方决定怎么聚合：扫描器按本地日压缩，详情视图按原始记录展示。
  *
@@ -180,54 +191,40 @@ export function parseSessionEvents(raw) {
     durationMs: Math.max(0, updatedAtMs - createdAtMs)
   }
   const mainEvents = usageHistory.map((usage) =>
-    normalizeUsageEvent(usage, createdAtMs, snap.model)
+    withSource(normalizeUsageEvent(usage, createdAtMs, snap.model), MAIN_USAGE_SOURCE)
   )
   // Subagent requests are persisted per task under snapshot.subagentUsageHistory;
-  // flatten them into the same usage-event stream, tagged with task lineage so
-  // the UI can filter or group by subagent later.
+  // flatten them into the same usage-event stream, tagged with task lineage and
+  // the source they belong to (delegation / plugin / built-in helper).
   //
   // 同一份数组里还躺着插件自己的模型请求（`origin: 'plugin'`，例如自动起标题、写
-  // commit message）：它们同样是本会话的开销，但来源不是子代理，界面要分开呈现。
+  // commit message）与插件注册的子代理类型（memory-curator 整理、旁问线程）：它们
+  // 同样是本会话的开销，但发起者不同，统计页要按来源分开呈现。
   const subagentEvents = []
-  let subagentTaskCount = 0
-  let pluginRequestCount = 0
   for (const record of subagentRecords) {
-    const isPlugin = record.origin === 'plugin' || Boolean(record.pluginId)
-    if (isPlugin) pluginRequestCount += Array.isArray(record.requests) ? record.requests.length : 0
-    else subagentTaskCount += 1
     const recordModel = record.model || snap.model
     // Subagent requests rarely carry occurredAt on legacy records; the task's
     // startedAt is closer to the true request time than the session createdAt.
     const recordStartMs = validTime(record.startedAt) ?? createdAtMs
+    const source = usageSourceOf(record)
     const requests = Array.isArray(record.requests)
       ? record.requests.filter((usage) => usage && typeof usage === 'object')
       : []
     for (const usage of requests) {
-      subagentEvents.push({
-        ...normalizeUsageEvent(usage, recordStartMs, recordModel),
-        isSubagent: !isPlugin,
-        ...(isPlugin
-          ? {
-              isPlugin: true,
-              pluginId: record.pluginId || null,
-              pluginPurpose: record.description || null
-            }
-          : {}),
-        subagentTaskId: record.taskId || null,
-        subagentParentTaskId: record.parentTaskId || null,
-        subagentType: record.subagentType || null,
-        subagentStatus: record.status || null,
-        subagentDescription:
-          typeof record.description === 'string' && record.description.trim()
-            ? record.description.trim()
-            : null,
-        initiatedByCallId: record.initiatedByCallId || null
-      })
+      subagentEvents.push(
+        withSource(normalizeUsageEvent(usage, recordStartMs, recordModel), source, {
+          taskId: record.taskId || null,
+          purpose:
+            typeof record.description === 'string' && record.description.trim()
+              ? record.description.trim()
+              : null
+        })
+      )
     }
   }
   const usageEvents = [...mainEvents, ...subagentEvents]
   return {
-    session: { ...session, subagentTasks: subagentTaskCount, pluginRequests: pluginRequestCount },
+    session,
     events: usageEvents,
     identities: usageEvents.map((usage) => usage.identity)
   }
@@ -265,8 +262,7 @@ function dayRow(day) {
     turns: new Set(),
     legacy: 0,
     models: new Map(),
-    subagents: new Map(),
-    plugins: new Map()
+    sources: new Map()
   }
 }
 
@@ -275,7 +271,7 @@ function dayRow(day) {
  * 全部），日粒度足够表达，所以逐条事件没有传出去的必要。
  *
  * 每个维度行保留自己的 requests 与 token，renderer 只做加法就能得到任一范围的结果：
- * 模型占比、子代理类型、插件后台请求、每日柱状图都从这几层聚出来。
+ * 模型占比、来源占比（主对话 / 委派 / 插件 / 内核后台）、每日柱状图都从这几层聚出来。
  */
 export function summarizeStatsDays(usageEvents) {
   const days = new Map()
@@ -298,37 +294,22 @@ export function summarizeStatsDays(usageEvents) {
     }
     addTokens(model, usage)
 
-    if (usage.isSubagent) {
-      const type = usage.subagentType || 'unknown'
-      let subagent = row.subagents.get(type)
-      if (!subagent) {
-        subagent = {
-          type,
-          tasks: new Set(),
-          requests: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0
-        }
-        row.subagents.set(type, subagent)
+    const source = usage.source || MAIN_USAGE_SOURCE
+    const sourceKey = `${source.kind}:${source.id}`
+    let sourceRow = row.sources.get(sourceKey)
+    if (!sourceRow) {
+      sourceRow = {
+        kind: source.kind,
+        id: source.id,
+        tasks: new Set(),
+        purposes: new Set(),
+        ...emptyTokenTotals()
       }
-      if (usage.subagentTaskId) subagent.tasks.add(usage.subagentTaskId)
-      subagent.requests += 1
-      subagent.inputTokens += usage.inputTokens
-      subagent.outputTokens += usage.outputTokens
-      subagent.totalTokens += usage.totalTokens
+      row.sources.set(sourceKey, sourceRow)
     }
-
-    if (usage.isPlugin) {
-      const pluginId = usage.pluginId || 'unknown'
-      let plugin = row.plugins.get(pluginId)
-      if (!plugin) {
-        plugin = { pluginId, purposes: new Set(), ...emptyTokenTotals() }
-        row.plugins.set(pluginId, plugin)
-      }
-      if (usage.pluginPurpose) plugin.purposes.add(usage.pluginPurpose)
-      addTokens(plugin, usage)
-    }
+    if (usage.taskId) sourceRow.tasks.add(usage.taskId)
+    if (usage.purpose) sourceRow.purposes.add(usage.purpose)
+    addTokens(sourceRow, usage)
   }
 
   return [...days.values()]
@@ -336,13 +317,10 @@ export function summarizeStatsDays(usageEvents) {
       ...row,
       turns: row.turns.size,
       models: [...row.models.values()],
-      subagents: [...row.subagents.values()].map((subagent) => ({
-        ...subagent,
-        tasks: [...subagent.tasks]
-      })),
-      plugins: [...row.plugins.values()].map((plugin) => ({
-        ...plugin,
-        purposes: [...plugin.purposes]
+      sources: [...row.sources.values()].map((source) => ({
+        ...source,
+        tasks: [...source.tasks],
+        purposes: [...source.purposes]
       }))
     }))
     .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0))
@@ -379,6 +357,74 @@ export function compressSessionStats(raw) {
     session: summarizeStatsSession(parsed.session, parsed.events),
     identities: parsed.identities
   }
+}
+
+/** 无会话用量的伪会话标题：它出现在项目卡片里，不能再假装成一条对话。 */
+export const LEDGER_SESSION_TITLE = '一次性命令'
+
+/**
+ * 把「无会话请求账本」聚成会话形状的行，一个工作目录一行。
+ *
+ * `mica commit` 这类一次性命令没有会话可写，用量只能记进账本（见 mica-web-shared 的
+ * usage-ledger）。统计页把它当成一批来源为插件的用量：`ledger: true` 让它在「活跃会话」
+ * 与「按会话」里都不计为一条会话，但 token / 请求数照常进总量、模型与来源占比——否则
+ * 「所有模型使用都在一个页面里」这句话就不成立。
+ */
+export function summarizeLedgerEntries(entries) {
+  const groups = new Map()
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (!entry || typeof entry !== 'object') continue
+    const occurredAtMs = validTime(entry.occurredAt)
+    const pluginId = typeof entry.pluginId === 'string' ? entry.pluginId.trim() : ''
+    if (occurredAtMs == null || !pluginId) continue
+    const cwd = typeof entry.cwd === 'string' && entry.cwd.trim() ? entry.cwd.trim() : null
+    const key = cwd || ''
+    let group = groups.get(key)
+    if (!group) {
+      group = { cwd, events: [], createdAtMs: occurredAtMs, updatedAtMs: occurredAtMs }
+      groups.set(key, group)
+    }
+    group.createdAtMs = Math.min(group.createdAtMs, occurredAtMs)
+    group.updatedAtMs = Math.max(group.updatedAtMs, occurredAtMs)
+    group.events.push(
+      withSource(
+        normalizeUsageEvent(
+          {
+            usageId: entry.id,
+            occurredAt: entry.occurredAt,
+            model: entry.model,
+            inputTokens: entry.inputTokens,
+            cachedInputTokens: entry.cachedInputTokens,
+            outputTokens: entry.outputTokens
+          },
+          occurredAtMs,
+          entry.model
+        ),
+        { kind: 'plugin', id: pluginId, pluginId },
+        { purpose: typeof entry.purpose === 'string' && entry.purpose ? entry.purpose : null }
+      )
+    )
+  }
+  return [...groups.values()]
+    .map((group) =>
+      summarizeStatsSession(
+        {
+          id: null,
+          ledger: true,
+          title: LEDGER_SESSION_TITLE,
+          cwd: group.cwd,
+          createdAtMs: group.createdAtMs,
+          updatedAtMs: group.updatedAtMs,
+          turnState: 'completed',
+          model: group.events[group.events.length - 1]?.model || null,
+          providerId: null,
+          turns: 0,
+          durationMs: Math.max(0, group.updatedAtMs - group.createdAtMs)
+        },
+        group.events
+      )
+    )
+    .sort((a, b) => a.createdAtMs - b.createdAtMs)
 }
 
 /** 内容搜索的正文上限（每个会话）：够长到能查到上下文，又不至于把几百个会话全留在内存里。 */
