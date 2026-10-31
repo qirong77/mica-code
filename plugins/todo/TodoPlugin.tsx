@@ -32,9 +32,8 @@ const TODO_ITEM_INDENT = '     ⎿  ';
 /**
  * 面板状态。
  *
- * 只有一份：`todo_write` 是 `primaryAgentOnly`，子代理与 btw 都调不到它，所以
- * 「按 owner 分清单」从来只会有一个 key，纯粹是多余的分支。真正的隔离来自
- * 会话边界（`session:cleared` / `session:invalidated` 清空）。
+ * 每个会话 owner 保有独立视图：主会话之间也能并行运行，后台会话的工具与生命周期
+ * 只更新自己的清单。旧宿主没有 owner 能力时沿用单会话视图。
  *
  * `live` 表示「这一轮还在跑」，`pinned` 表示用户用 `/todo show` 手动打开了面板。
  * 两者合成「现在要不要显示」，但只有 `live` 决定 `in_progress` 是否算仍在进行——
@@ -53,19 +52,24 @@ export class TodoPlugin implements MicaPlugin {
   readonly required = true;
 
   setup(ctx: PluginContext): void {
-    const todos = atom<TodoViewState>(createTodoViewState());
-    const patch = (update: (current: TodoViewState) => TodoViewState) => {
-      const current = todos.get();
+    const fallbackOwner = Symbol('todo.session');
+    const captureOwner = (context?: unknown): unknown => ctx.session?.captureOwner?.(context) ?? fallbackOwner;
+    const eventOwner = (event: { owner?: unknown }): unknown => event.owner ?? captureOwner();
+    const todos = atom(new Map<unknown, TodoViewState>());
+    const patch = (owner: unknown, update: (current: TodoViewState) => TodoViewState) => {
+      const views = todos.get();
+      const current = views.get(owner) ?? createTodoViewState();
       const next = update(current);
-      if (next !== current) todos.set(next);
+      if (next !== current) todos.set(new Map(views).set(owner, next));
     };
 
-    const tool = new TodoWriteTool((items) => {
-      patch((current) => ({ ...current, items, live: true }));
+    const tool = new TodoWriteTool((items, callbacks) => {
+      patch(captureOwner(callbacks?.context), (current) => ({ ...current, items, live: true }));
     });
 
     function TodoStatusList(): React.ReactNode {
-      const state = micaUi.useScheduleState(todos);
+      const views = micaUi.useScheduleState(todos);
+      const state = views.get(captureOwner()) ?? createTodoViewState();
       // 清单只属于一轮：这一轮不在跑、用户也没手动打开时就什么都不显示。
       const panel = resolveTodoPanel(
         { items: state.items, turnId: null },
@@ -133,9 +137,12 @@ export class TodoPlugin implements MicaPlugin {
 
     const eventSubscription = ctx.events.on('event', (event) => {
       if (event.type === 'session:cleared' || event.type === 'session:invalidated') {
-        todos.set(createTodoViewState());
+        patch(eventOwner(event), () => createTodoViewState());
+      } else if (event.type === 'session:disposed') {
+        const views = new Map(todos.get());
+        if (views.delete(eventOwner(event))) todos.set(views);
       } else if (event.type === 'turn:aborted') {
-        patch((current) => ({ ...current, live: false }));
+        patch(eventOwner(event), (current) => ({ ...current, live: false }));
       }
     });
     ctx.onDispose(() => eventSubscription.dispose());
@@ -143,8 +150,8 @@ export class TodoPlugin implements MicaPlugin {
     // 新一轮开始即作废上一轮的清单：否则「这一轮没写计划」时屏幕上还挂着上一轮的进度。
     const turnBeforeSubscription = ctx.hooks.on<RuntimeTurnBeforeHookEvent>(
       'turn:before',
-      () => {
-        patch((current) =>
+      (event) => {
+        patch(eventOwner(event), (current) =>
           current.live || current.pinned || current.items.length > 0
             ? { ...current, items: [], live: false, pinned: false }
             : current,
@@ -156,9 +163,9 @@ export class TodoPlugin implements MicaPlugin {
 
     const turnAfterSubscription = ctx.hooks.on<RuntimeTurnAfterHookEvent>(
       'turn:after',
-      () => {
+      (event) => {
         // 只收面板，不改数据：`in_progress` 已经不再进行，但也不代表做完了。
-        patch((current) => ({ ...current, live: false }));
+        patch(eventOwner(event), (current) => ({ ...current, live: false }));
       },
       { pluginId: ctx.pluginId },
     );
@@ -177,10 +184,11 @@ export class TodoPlugin implements MicaPlugin {
       pluginId: ctx.pluginId,
       handler: (_commandCtx, args) => {
         const action = args.trim().toLowerCase();
-        const current = todos.get();
+        const owner = captureOwner();
+        const current = todos.get().get(owner) ?? createTodoViewState();
 
         if (!action || action === 'show') {
-          patch((state) => ({ ...state, hidden: false, pinned: true }));
+          patch(owner, (state) => ({ ...state, hidden: false, pinned: true }));
           // 回显必须和面板看到的一致：本轮已结束时 in_progress 已按 pending 呈现，
           // 这里不能再报一份「进行中」的清单。
           const shown = resolveTodoPanel(
@@ -191,12 +199,12 @@ export class TodoPlugin implements MicaPlugin {
           return { ok: true };
         }
         if (action === 'hide') {
-          patch((state) => ({ ...state, hidden: true, pinned: false }));
+          patch(owner, (state) => ({ ...state, hidden: true, pinned: false }));
           ctx.ui?.showMessage('Todo list hidden. Use /todo show to restore it.');
           return { ok: true };
         }
         if (action === 'clear') {
-          patch((state) => ({ ...state, items: [] }));
+          patch(owner, (state) => ({ ...state, items: [] }));
           ctx.ui?.showMessage('Todo list cleared.');
           return { ok: true };
         }

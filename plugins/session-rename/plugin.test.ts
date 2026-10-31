@@ -145,7 +145,104 @@ describe('session-rename plugin', () => {
     expect(harness.renameCalls).toEqual([]);
   });
 
-  it('asks once per user request, not again for the trailing turn:before of one-shot hosts', async () => {
+  it('does not rename a different session when a delayed response arrives', async () => {
+    const harness = createHarness();
+    let finish: (title: string) => void = () => {};
+    query.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    await harness.emitTurnBefore();
+    harness.session.id = 'session-2';
+    finish('属于旧会话的标题');
+    await harness.flush();
+
+    expect(harness.renameCalls).toEqual([]);
+  });
+
+  it('aborts the previous session title request as soon as a new session starts a turn', async () => {
+    const harness = createHarness();
+    let finish: (title: string) => void = () => {};
+    query.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve; }));
+    await harness.emitTurnBefore();
+    harness.session.id = 'session-2';
+    await harness.emitTurnBefore({ inputId: 'second', text: '新会话任务' });
+    expect(harness.signals[0]?.aborted).toBe(true);
+    finish('旧会话标题');
+    await harness.flush();
+    expect(harness.renameCalls).toHaveLength(1);
+  });
+
+  it('cancels a delayed request on disposal and ignores a response that arrives anyway', async () => {
+    const harness = createHarness();
+    let finish: (title: string) => void = () => {};
+    query.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    await harness.emitTurnBefore();
+    harness.dispose();
+    expect(harness.signals[0]?.aborted).toBe(true);
+    finish('插件已卸载');
+    await harness.flush();
+
+    expect(harness.renameCalls).toEqual([]);
+    expect(harness.logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('uses the newest input while a previous title request is still running', async () => {
+    const harness = createHarness();
+    let finishFirst: (title: string) => void = () => {};
+    query.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          finishFirst = resolve;
+        }),
+    );
+    query.mockResolvedValueOnce('修复新任务');
+
+    await harness.emitTurnBefore({ inputId: 'first', text: '旧任务' });
+    await harness.emitTurnBefore({ inputId: 'second', text: '新任务' });
+    await vi.waitFor(() => expect(harness.renameCalls).toHaveLength(1));
+    finishFirst('修复旧任务');
+    await harness.flush();
+
+    expect(harness.signals[0]?.aborted).toBe(true);
+    expect(harness.renameCalls).toEqual([{ title: '修复新任务', source: 'auto' }]);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it('renames distinct inputs that repeat the same words', async () => {
+    const harness = createHarness();
+    await harness.emitTurnBefore({ inputId: 'first', text: '继续' });
+    await vi.waitFor(() => expect(harness.renameCalls).toHaveLength(1));
+    await harness.flush();
+    await harness.emitTurnBefore({ inputId: 'second', text: '继续' });
+    await vi.waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+  });
+
+  it('reports an empty title as a visible failure', async () => {
+    const harness = createHarness();
+    query.mockResolvedValue('   ');
+
+    await harness.emitTurnBefore();
+    await vi.waitFor(() =>
+      expect(harness.healthReports.at(-1)).toMatchObject({
+        level: 'error',
+        message: expect.stringContaining('空标题'),
+      }),
+    );
+
+    expect(harness.renameCalls).toEqual([]);
+  });
+
+  it('asks once per input id when the host emits the same hook twice', async () => {
     const harness = createHarness();
 
     await harness.emitTurnBefore();
@@ -177,6 +274,7 @@ function createHarness(options: HarnessOptions = {}) {
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const healthReports: Array<{ level: string; message: string }> = [];
   const disposeHandlers: Array<() => void> = [];
+  const signals: Array<AbortSignal | undefined> = [];
   const session: PluginSessionInfo = {
     id: 'session-1',
     title: options.title ?? '旧标题',
@@ -194,7 +292,11 @@ function createHarness(options: HarnessOptions = {}) {
       },
     },
     events: { on: () => ({ dispose() {} }) },
-    settings: { path: '/tmp/plugin-settings/session-rename.json', get: () => options.settings ?? configuredSettings },
+    settings: {
+      path: '/tmp/plugin-settings/session-rename.json',
+      get: () => options.settings ?? configuredSettings,
+      validate: () => [],
+    },
     session: {
       describe: () => session,
       messages: () => options.messages ?? messages,
@@ -216,7 +318,10 @@ function createHarness(options: HarnessOptions = {}) {
     llm: createPluginLlmApi({
       spec: {},
       readValues: () => options.settings ?? configuredSettings,
-      models: async (request) => ({ text: await query(request.user), usage: null }),
+      models: async (request) => {
+        signals.push(request.signal);
+        return { text: await query(request.user), usage: null };
+      },
     }),
     onDispose: (handler: () => void) => disposeHandlers.push(handler),
   } as unknown as PluginContext;
@@ -228,17 +333,22 @@ function createHarness(options: HarnessOptions = {}) {
     healthReports,
     renameCalls,
     renamed,
+    session,
+    signals,
+    dispose: () => {
+      for (const dispose of [...disposeHandlers].reverse()) dispose();
+    },
     /**
      * 派发一次 `turn:before`。
      *
      * handler 是同步返回的（改名只是发起），所以这里 resolve 时请求多半还没回来；
      * 要等结果用 `renamed` 或 `vi.waitFor`。
      */
-    async emitTurnBefore(options: { text?: string; source?: RuntimeInputSource } = {}) {
+    async emitTurnBefore(options: { text?: string; source?: RuntimeInputSource; inputId?: string } = {}) {
       await hooks.emit<RuntimeTurnBeforeHookEvent>('turn:before', {
         runtime: {},
         input: {
-          id: 'input-1',
+          id: options.inputId ?? 'input-1',
           text: options.text ?? '登录老是超时',
           source: options.source ?? 'ui',
           createdAt: 0,

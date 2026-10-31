@@ -22,7 +22,6 @@ export const KNOWN_CONFIG_KEYS = ['providers', 'mcpServers', 'capabilityDefaults
 const CONFIG_KEY_ORDER: readonly string[] = KNOWN_CONFIG_KEYS;
 const PROVIDER_KEY_ORDER = [
   'id',
-  'name',
   'api_base',
   'api_key',
   'protocol',
@@ -37,7 +36,6 @@ export type ConfigDraft = Record<string, unknown>;
 
 export type ProviderDraft = {
   id: string;
-  name: string;
   apiBase: string;
   apiKey: string;
   protocol: ProviderProtocolValue;
@@ -72,7 +70,6 @@ export function readProviderDraft(raw: unknown): ProviderDraft {
   const record = isRecord(raw) ? raw : {};
   return {
     id: text(record.id),
-    name: text(record.name),
     apiBase: text(record.api_base),
     apiKey: text(record.api_key),
     protocol: isProtocol(record.protocol) ? record.protocol : DEFAULT_PROVIDER_PROTOCOL,
@@ -92,7 +89,6 @@ export function addProviderDraft(draft: ConfigDraft): ConfigDraft {
   providers.push(
     buildProviderRecord(undefined, {
       id: uniqueProviderId(providerEntries(draft)),
-      name: '',
       apiBase: '',
       apiKey: '',
       protocol: DEFAULT_PROVIDER_PROTOCOL,
@@ -167,14 +163,13 @@ export function issueMap(draft: ConfigDraft): Map<string, string> {
 function buildProviderRecord(raw: unknown, fields: ProviderDraft): ConfigDraft {
   const next: ConfigDraft = { ...(isRecord(raw) ? raw : {}) };
   const id = fields.id.trim();
-  const name = fields.name.trim();
   const apiBase = fields.apiBase.trim();
   const getModelUrl = fields.getModelUrl.trim();
 
+  // name 已并入 id：旧配置里残留的显示名称不再有对应字段，写盘时一并清掉。
+  delete next.name;
   if (id) next.id = id;
   else delete next.id;
-  if (name) next.name = name;
-  else delete next.name;
   if (apiBase) next.api_base = apiBase;
   else delete next.api_base;
   // api_key：原本有键就保留（空串表示「显式清空」），原本没有、现在也没填就不写。

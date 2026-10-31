@@ -24,10 +24,10 @@ export type PluginStateRecord = Record<string, unknown>;
  */
 export type PluginSessionStateApi = {
   /** 当前会话里本插件的状态；没写过返回 undefined。 */
-  get<T = unknown>(): T | undefined;
+  get<T = unknown>(owner?: unknown): T | undefined;
   /** 覆盖本插件的状态。超出配额直接抛错，让插件自己知道写不进去。 */
-  set(value: unknown): void;
-  clear(): void;
+  set(value: unknown, owner?: unknown): void;
+  clear(owner?: unknown): void;
 };
 
 /**

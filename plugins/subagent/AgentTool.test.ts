@@ -6,12 +6,40 @@ import type {
   PluginSubagentTaskSnapshot,
   PluginSubagentType,
 } from '@packages/mica-plugin/index.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AgentTool } from './AgentTool.js';
 import { BUILTIN_SUBAGENTS } from './definitions.js';
 import { RUNTIME_TOOL_DESCRIPTORS } from '@packages/mica-tools/runtimeToolDescriptors.js';
 
 describe('AgentTool', () => {
+  it('cancels a batch while a background dependency has not acknowledged cancellation', async () => {
+    const { api } = createApi();
+    let waitingForDependency = false;
+    const done = new Promise<PluginSubagentRunResult>(() => undefined);
+    api.background = vi.fn(() => ({
+      taskId: 'dependency',
+      get done() {
+        waitingForDependency = true;
+        return done;
+      },
+    }));
+    const controller = new AbortController();
+    const running = new AgentTool(api).execute(
+      {
+        operation: 'run_many',
+        tasks: [
+          { id: 'first', description: 'first', prompt: 'work', subagent_type: 'Explore', run_in_background: true },
+          { id: 'second', description: 'second', prompt: 'work', subagent_type: 'Explore', depends_on: ['first'] },
+        ],
+      },
+      { signal: controller.signal },
+    );
+    const rejection = expect(running).rejects.toThrow('parent cancelled');
+    await vi.waitFor(() => expect(waitingForDependency).toBe(true));
+    controller.abort(new Error('parent cancelled'));
+    await rejection;
+  });
+
   it('describes every registered type and keeps the static guidance prefix', () => {
     const tool = new AgentTool(createApi().api);
 
@@ -233,6 +261,103 @@ describe('AgentTool', () => {
         ],
       }),
     ).rejects.toThrow('owned_paths conflict');
+  });
+
+  it('validates every task before starting any part of run_many', async () => {
+    const { api, spawns } = createApi();
+    const tool = new AgentTool(api);
+    await expect(
+      tool.execute({
+        operation: 'run_many',
+        tasks: [
+          { description: 'valid', prompt: 'go', run_in_background: true },
+          { description: 'invalid', prompt: 'go', subagent_type: 'does-not-exist' },
+        ],
+      }),
+    ).rejects.toThrow('Unknown subagent_type');
+    expect(spawns).toEqual([]);
+  });
+
+  it.each([false, true])('skips dependents of a failed task (background=%s)', async (background) => {
+    const { api, spawns } = createApi({
+      run: async () => ({ taskId: 'task-1', status: 'failed', output: '', error: 'provider failed' }),
+    });
+    if (background) {
+      api.background = (request) => {
+        spawns.push(request);
+        return { taskId: 'task-1', done: Promise.resolve({ taskId: 'task-1', status: 'killed', output: '' }) };
+      };
+    }
+    const output = await new AgentTool(api).execute({
+      operation: 'run_many',
+      tasks: [
+        { id: 'a', description: 'prerequisite', prompt: 'go', run_in_background: background },
+        { id: 'b', description: 'dependent', prompt: 'go', depends_on: ['a'] },
+        { id: 'c', description: 'transitive dependent', prompt: 'go', depends_on: ['b'] },
+      ],
+    });
+    expect(spawns.map((spawn) => spawn.description)).toEqual(['prerequisite']);
+    expect(output).toContain('Status: skipped');
+    expect(output).toContain('## c: transitive dependent');
+  });
+
+  it('never starts a dependent when the caller aborts after its prerequisite finishes', async () => {
+    const controller = new AbortController();
+    const { api, spawns } = createApi({
+      run: async () => {
+        controller.abort();
+        return { taskId: 'task-1', status: 'completed', output: 'done' };
+      },
+    });
+    await expect(
+      new AgentTool(api).execute(
+        {
+          operation: 'run_many',
+          tasks: [
+            { id: 'a', description: 'first', prompt: 'go' },
+            { id: 'b', description: 'second', prompt: 'go', depends_on: ['a'] },
+          ],
+        },
+        { signal: controller.signal },
+      ),
+    ).rejects.toThrow();
+    expect(spawns.map((spawn) => spawn.description)).toEqual(['first']);
+  });
+
+  it('scopes read, kill, await and join to the calling owner just like list', async () => {
+    const owner = {};
+    const { api } = createApi({ caller: { owner }, tasks: [snapshot({ id: 'other-owner-task' })] });
+    api.tasks.list = vi.fn(() => []);
+    const get = vi.spyOn(api.tasks, 'get');
+    const kill = vi.spyOn(api.tasks, 'kill');
+    const wait = vi.spyOn(api.tasks, 'wait');
+    const tool = new AgentTool(api);
+    for (const operation of ['read', 'kill', 'await', 'join'] as const) {
+      const output = await tool.execute({ operation, task_id: 'other-owner-task' }, { context: {} });
+      expect(output).toBe('Subagent task not found: other-owner-task');
+    }
+    expect(api.tasks.list).toHaveBeenCalledWith(owner);
+    expect(get).not.toHaveBeenCalled();
+    expect(kill).not.toHaveBeenCalled();
+    expect(wait).not.toHaveBeenCalled();
+  });
+});
+
+describe('AgentTool owner lookup cost', () => {
+  it.each(['await', 'join'] as const)('checks a large %s request against one owner snapshot', async (operation) => {
+    const owner = {};
+    const tasks = Array.from({ length: 200 }, (_, index) => snapshot({ id: `task-${index}` }));
+    const { api } = createApi({ caller: { owner }, tasks });
+    const list = vi.spyOn(api.tasks, 'list');
+    const wait = vi.spyOn(api.tasks, 'wait');
+    await new AgentTool(api).execute({ operation, task_ids: tasks.map((task) => task.id) }, { context: {} });
+    console.info(
+      'agent owner lookup',
+      JSON.stringify({ operation, requested: tasks.length, snapshots: list.mock.calls.length }),
+    );
+    expect(list).toHaveBeenCalledOnce();
+    expect(list).toHaveBeenCalledWith(owner);
+    expect(wait).toHaveBeenCalledOnce();
   });
 });
 

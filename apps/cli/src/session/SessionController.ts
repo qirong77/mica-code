@@ -4,6 +4,7 @@ import {
   calculateCachedTokenRate,
   micaAgent,
   type AgentUsageRecord,
+  type SubagentUsageRecord,
 } from '@packages/mica-agent/index.js';
 import type { MicaUiCommandStatus, MicaUiConversationMessage, MicaUiTextBlock } from '@packages/mica-ui/index.js';
 import { AgentRuntime, type AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
@@ -36,6 +37,8 @@ export type SessionAgentAdapter = {
   resetCapabilitiesToDefaults?(): unknown;
   /** 可选：`/clear`、`/new` 之后清空插件在会话里的状态（含会话笔记）。 */
   clearSession?(): void;
+  recordSubagentUsage?(record: SubagentUsageRecord): void;
+  readonly isRunning?: boolean;
   toConversationMessages(): MicaUiConversationMessage[];
 };
 
@@ -99,6 +102,29 @@ export class SessionController {
 
   load(id: string): PersistedSession | null {
     return this.store.load(id);
+  }
+
+  /** 后台模型用量按发起时的会话归账；resume 之后只更新旧快照的用量字段。 */
+  recordSubagentUsageForSession(sessionId: string, record: SubagentUsageRecord): boolean {
+    if (sessionId === this.currentSessionId) {
+      if (!this.agent.recordSubagentUsage) return false;
+      this.agent.recordSubagentUsage(record);
+      if (!this.agent.isRunning) this.saveCurrent({ allowEmpty: true });
+      return true;
+    }
+    const session = this.store.load(sessionId);
+    // 用户可能已经删除旧会话：迟到的请求不能把它重新建回来。
+    if (!session) return false;
+    this.store.save({
+      ...session,
+      revision: (session.revision ?? 0) + 1,
+      updatedAt: new Date().toISOString(),
+      snapshot: {
+        ...session.snapshot,
+        subagentUsageHistory: [...(session.snapshot.subagentUsageHistory ?? []), record],
+      },
+    });
+    return true;
   }
 
   /**

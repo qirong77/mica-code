@@ -203,6 +203,24 @@ describe('applyCuratorOperations', () => {
     ]);
   });
 
+  it('keeps other stores working and counts successful writes when a store throws an IO error', () => {
+    const { applier } = createApplier();
+    const outcome = applyCuratorOperations(
+      {
+        apply: (target, operations) => {
+          if (target === 'memory') throw new Error('permission denied');
+          return applier.apply(target, operations);
+        },
+      },
+      [
+        { target: 'user', action: 'add', content: 'a' },
+        { target: 'memory', action: 'add', content: 'b' },
+        { target: 'project', action: 'add', content: 'c' },
+      ],
+    );
+    expect(outcome).toEqual({ applied: 2, failures: [{ target: 'memory', message: 'permission denied' }] });
+  });
+
   it('keeps other stores working when one store rejects the batch', () => {
     const { applier } = createApplier(['memory']);
 

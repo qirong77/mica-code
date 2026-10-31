@@ -4,7 +4,15 @@ import { readBtwState } from '@packages/mica-common/btwState.js'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { spawn } from 'child_process'
 import { randomUUID } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync
+} from 'fs'
 import { homedir } from 'os'
 import { basename, join } from 'path'
 import { resolveMicaExecutable } from './mica-cli'
@@ -1638,7 +1646,51 @@ function runModelsCommand(mica, args) {
   })
 }
 
+/**
+ * 模型目录的缓存。
+ *
+ * `chat:models` 每次都要起一个 `mica models --json` 进程（本机实测 0.2s，机器一忙
+ * 就到 2–4s，日志里 `slow` 记录多的就是它），而它会话切换、打开模型选择器、判定档位
+ * 都会调一次。目录本身只在配置变化时变，所以按「配置文件 mtime + TTL」缓存，并发
+ * 调用共用一次请求。
+ */
+const MODELS_CACHE_TTL_MS = 10 * 60_000
+let modelsCache = { key: null, at: 0, value: null }
+let modelsInflight = null
+
+function modelsCacheKey() {
+  const file = join(micaHomeDir(), 'config.json')
+  try {
+    return `${file}:${statSync(file).mtimeMs}`
+  } catch {
+    return `${file}:missing`
+  }
+}
+
 async function listModels() {
+  const key = modelsCacheKey()
+  if (
+    modelsCache.key === key &&
+    modelsCache.value &&
+    Date.now() - modelsCache.at < MODELS_CACHE_TTL_MS
+  ) {
+    return modelsCache.value
+  }
+  if (modelsInflight && modelsInflight.key === key) return modelsInflight.promise
+  const promise = loadModels()
+    .then((value) => {
+      // 失败不进缓存：下一次调用应该重新试，而不是把错误记十分钟。
+      if (value?.ok) modelsCache = { key, at: Date.now(), value }
+      return value
+    })
+    .finally(() => {
+      if (modelsInflight?.promise === promise) modelsInflight = null
+    })
+  modelsInflight = { key, promise }
+  return promise
+}
+
+async function loadModels() {
   const mica = resolveMicaExecutable()
   if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
   const { provider } = readMicaConfig()

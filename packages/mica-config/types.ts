@@ -21,7 +21,6 @@ export type ModelEffortRule = Partial<Record<ProviderProtocol, ModelRequestPatch
 
 export interface ProviderDefinition {
   id: string;
-  name?: string;
   api_base: string;
   api_key?: string;
   protocol: ProviderProtocol;

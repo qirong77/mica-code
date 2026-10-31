@@ -137,6 +137,12 @@ describe('pruneEdits', () => {
     expect(pruneEdits(groups, [edit({ id: 'dev:2026-10-18' })])).toEqual([]);
   });
 
+  it('公告只改结束日期时也作废修订，避免继续遮住新公告', () => {
+    const changed = [group('g1', [stage('dev', '2026-10-20', '2026-10-25')])];
+    expect(pruneEdits(changed, [edit()], groups)).toEqual([]);
+    expect(pruneEdits(groups, [edit()], groups)).toHaveLength(1);
+  });
+
   it('群不在了就作废，新建的条也一样', () => {
     expect(pruneEdits([], [edit(), edit({ id: 'new:dev:1', added: true })])).toEqual([]);
   });

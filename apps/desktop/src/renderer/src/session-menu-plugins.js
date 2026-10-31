@@ -89,7 +89,7 @@ export async function runSessionMenuPluginAction({ item, target = {}, run, copy 
   if (text) {
     const copied = await writeClipboard(text)
     if (copied === false) {
-      return { ok: false, message: result.message || '复制失败：剪贴板不可用' }
+      return { ok: false, message: '复制失败：剪贴板不可用' }
     }
     return { ok: true, message: result.message || '已复制到剪贴板' }
   }

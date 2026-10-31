@@ -118,7 +118,7 @@ describe('auto-compact plugin', () => {
     const harness = createHarness({ inputTokens: 250_000, fail: 'nothing to compact' });
 
     await expect(harness.rewrite()).resolves.toBeNull();
-    expect(harness.state).toBeUndefined();
+    expect(harness.state).toMatchObject({ quickRuns: 0, modelRuns: 0, lastAttemptTokens: 250_000 });
     expect(harness.healthReports.at(-1)?.level).toBe('warn');
     expect(harness.logger.warn).toHaveBeenCalled();
   });
@@ -162,6 +162,61 @@ describe('auto-compact plugin', () => {
     expect(harness.compactCalls).toHaveLength(1);
   });
 
+  // 间隔是「模型还在同一轮里跑」的节流，不是跨轮冷却：上一轮压过之后，这一轮又超
+  // 阈值时必须立刻压。否则用户会看到上下文已经很大、插件却要等半小时才肯动手。
+  it('does not carry the minimum interval into a new turn', async () => {
+    const harness = createHarness({
+      inputTokens: 250_000,
+      savedTokens: [200_000],
+      settings: { ...configured, minIntervalMinutes: '30' },
+      lastRunAt: minutesAgo(5),
+      turnStartedAt: minutesAgo(10),
+    });
+
+    await expect(harness.rewrite()).resolves.toBeNull();
+    expect(harness.compactCalls).toEqual([]);
+
+    harness.emitHook('turn:before', {});
+    await harness.rewrite();
+
+    expect(harness.compactCalls.map((call) => call.mode)).toEqual(['quick']);
+  });
+
+  it('keeps throttling repeated compactions while the same turn is still running', async () => {
+    const harness = createHarness({
+      inputTokens: 250_000,
+      savedTokens: [200_000],
+      settings: { ...configured, minIntervalMinutes: '30' },
+      lastRunAt: minutesAgo(5),
+      turnStartedAt: minutesAgo(10),
+    });
+
+    await expect(harness.rewrite()).resolves.toBeNull();
+    expect(harness.compactCalls).toEqual([]);
+  });
+
+  // 空闲压缩发生在轮次之外，它不该成为下一轮的冷却：快速压缩已经用完、上下文仍高于
+  // 模型阈值时，新一轮的第一次请求就该做模型摘要。
+  it('does not let an idle compaction block the model pass in the next turn', async () => {
+    const harness = createHarness({
+      inputTokens: 250_000,
+      savedTokens: [12_000],
+      idleCompact: true,
+      lastActivityAt: minutesAgo(30),
+      settings: { ...configured, minIntervalMinutes: '30' },
+    });
+
+    await harness.typeInComposer();
+    expect(harness.idleCompactCalls).toHaveLength(1);
+
+    harness.emitHook('turn:before', {});
+    // 记本轮起点只加时间戳，不能把已经用掉的次数冲掉。
+    expect(harness.state).toMatchObject({ quickRuns: 1 });
+    await harness.rewrite();
+
+    expect(harness.compactCalls.map((call) => call.mode)).toEqual(['model']);
+  });
+
   it('reports incomplete settings as a health warning instead of silently doing nothing', async () => {
     const harness = createHarness({ inputTokens: 30_000, issues: ['快速压缩阈值 不能小于 150'] });
 
@@ -188,6 +243,21 @@ describe('auto-compact plugin', () => {
     // 省下的量要换算成 k、并给出压缩前后的对比：孤零零的 806469 读不出量级。
     expect(harness.notices.at(-1)).toContain('52K → 40K');
     expect(harness.healthReports.at(-1)?.level).toBe('ok');
+  });
+
+  it('keeps idle compaction on the session that reported the activity', async () => {
+    const harness = createHarness({
+      inputTokens: 30_000,
+      idleCompact: true,
+      lastActivityAt: minutesAgo(30),
+    });
+    const owner = {};
+
+    harness.stateOwners.length = 0;
+    await harness.typeInComposer(owner);
+
+    expect(harness.stateOwners.length).toBeGreaterThan(0);
+    expect(harness.stateOwners.every((seen) => seen === owner)).toBe(true);
   });
 
   // 大数字要换算：真实会话里省下的量动辄六位数，写成「806469 tokens」读不出量级。
@@ -246,7 +316,7 @@ describe('auto-compact plugin', () => {
       idleMs: expect.any(Number),
       reason: 'busy',
     });
-    expect(harness.state?.quickRuns).toBeUndefined();
+    expect(harness.state?.quickRuns).toBe(0);
     expect(harness.notices).toEqual([]);
   });
 
@@ -279,7 +349,7 @@ describe('auto-compact plugin', () => {
     await harness.typeInComposer();
 
     expect(harness.idleCompactCalls).toHaveLength(1);
-    expect(harness.state?.quickRuns).toBeUndefined();
+    expect(harness.state?.quickRuns).toBe(0);
   });
 
   it('reports a failed idle compaction without spending a run', async () => {
@@ -292,7 +362,7 @@ describe('auto-compact plugin', () => {
 
     await harness.typeInComposer();
 
-    expect(harness.state?.quickRuns).toBeUndefined();
+    expect(harness.state?.quickRuns).toBe(0);
     expect(harness.healthReports.at(-1)?.level).toBe('warn');
     expect(harness.logger.warn).toHaveBeenCalled();
   });
@@ -312,6 +382,39 @@ describe('auto-compact plugin', () => {
 
     await harness.typeInComposer();
 
+    expect(harness.idleCompactCalls).toEqual([]);
+  });
+});
+
+describe('auto-compact restored activity', () => {
+  it('reads activity restored after plugin setup before checking for an idle return', async () => {
+    const harness = createHarness({ inputTokens: 30_000, idleCompact: true });
+    harness.restoreState({ lastActivityAt: minutesAgo(30) });
+
+    await harness.typeInComposer();
+
+    expect(harness.idleCompactCalls).toHaveLength(1);
+    expect(harness.state).toMatchObject({ quickRuns: 1 });
+  });
+
+  it('tracks typing in persisted session state even when no compaction is due', async () => {
+    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, lastActivityAt: minutesAgo(1) });
+    await harness.typeInComposer();
+    expect(Date.parse(String(harness.state?.lastActivityAt))).toBeGreaterThan(Date.now() - 10_000);
+
+    harness.restoreState({ lastActivityAt: minutesAgo(30) });
+    await harness.typeInComposer();
+    expect(harness.idleCompactCalls).toHaveLength(1);
+  });
+
+  it('never subscribes to idle compaction in one-shot mode', async () => {
+    const harness = createHarness({
+      inputTokens: 30_000,
+      mode: 'one-shot',
+      idleCompact: true,
+      lastActivityAt: minutesAgo(30),
+    });
+    await harness.typeInComposer();
     expect(harness.idleCompactCalls).toEqual([]);
   });
 });
@@ -342,6 +445,8 @@ function createHarness(options: {
   idleFail?: string;
   /** 会话状态里记的上一次压缩时间（ISO）：节流判断的基线。 */
   lastRunAt?: string;
+  /** 会话状态里记的本轮开始时间（ISO）：最小间隔只在同一轮里生效。 */
+  turnStartedAt?: string;
   /** 不提供会话级状态：用来验证插件不会因为缺能力就崩。 */
   withoutSessionState?: boolean;
   /** 宿主给的模型组件：`configured` 决定它能不能用，缺省不提供（退回内核摘要子代理）。 */
@@ -355,11 +460,14 @@ function createHarness(options: {
   const idleCompactCalls: number[] = [];
   const notices: string[] = [];
   let stateSeenByHost: Record<string, unknown> | undefined;
-  const eventHandlers: Array<(event: { type: string }) => void> = [];
-  const hookHandlers = new Map<string, Array<() => void>>();
-  let state: Record<string, unknown> | undefined = options.lastActivityAt
-    ? { lastActivityAt: options.lastActivityAt, ...(options.lastRunAt ? { lastRunAt: options.lastRunAt } : {}) }
-    : undefined;
+  const stateOwners: unknown[] = [];
+  const eventHandlers: Array<(event: { type: string; owner?: unknown }) => void> = [];
+  const hookHandlers = new Map<string, Array<(event?: { owner?: unknown }) => void>>();
+  const seedState: Record<string, unknown> = {};
+  if (options.lastActivityAt) seedState.lastActivityAt = options.lastActivityAt;
+  if (options.lastRunAt) seedState.lastRunAt = options.lastRunAt;
+  if (options.turnStartedAt) seedState.turnStartedAt = options.turnStartedAt;
+  let state: Record<string, unknown> | undefined = Object.keys(seedState).length ? seedState : undefined;
   let rewriter: PluginIterationRewriter | null = null;
   const disposeHandlers: Array<() => void> = [];
   const compactIdleHistory = options.idleCompact
@@ -381,10 +489,12 @@ function createHarness(options: {
       }
     : null;
 
+  const estimates = new WeakMap<unknown[], number>();
   const agent: PluginAgentHandle = {
     sessionId: 'session-1',
     mode: options.mode ?? 'session',
     lastUsage: () => ({ inputTokens: options.inputTokens, model: 'mock/mock-chat' }),
+    estimateTokens: (messages) => estimates.get(messages) ?? options.inputTokens,
     getState: <T>() => state as T | undefined,
     setState: (value: unknown) => {
       state = value as Record<string, unknown>;
@@ -393,7 +503,10 @@ function createHarness(options: {
       compactCalls.push({ mode: compactOptions.mode });
       summarizers.push(compactOptions.summarize);
       if (options.fail) throw new Error(options.fail);
-      return { messages: [{ role: 'compacted' }], savedTokens: savedTokens.shift() ?? 0 };
+      const saved = savedTokens.shift() ?? 0;
+      const messages = [{ role: 'compacted' }];
+      estimates.set(messages, Math.max(0, agent.estimateTokens(_messages) - saved));
+      return { messages, savedTokens: saved };
     },
   };
 
@@ -422,12 +535,16 @@ function createHarness(options: {
     // 插件读的是「本会话生效的值」：宿主把会话覆盖合进全局设置后交给它，
     // 因此这里直接返回同一份 settings 就代表「本会话没有覆盖」。
     sessionSettings: {
-      get: () => sessionValues,
+      get: (owner?: unknown) => {
+        stateOwners.push(owner);
+        return sessionValues;
+      },
       overrides: () => ({}),
       set: vi.fn(),
       clear: vi.fn(),
     },
     agent: {
+      mode: options.mode ?? 'session',
       onIterationRewrite: (handler: PluginIterationRewriter) => {
         rewriter = handler;
         return { dispose() {} };
@@ -439,11 +556,16 @@ function createHarness(options: {
       ? {}
       : {
           sessionState: {
-            get: <T>() => state as T | undefined,
-            set: (value: unknown) => {
+            get: <T>(owner?: unknown) => {
+              stateOwners.push(owner);
+              return state as T | undefined;
+            },
+            set: (value: unknown, owner?: unknown) => {
+              stateOwners.push(owner);
               state = value as Record<string, unknown>;
             },
-            clear: () => {
+            clear: (owner?: unknown) => {
+              stateOwners.push(owner);
               state = undefined;
             },
           },
@@ -480,6 +602,7 @@ function createHarness(options: {
     logger,
     healthReports,
     notices,
+    stateOwners,
     get stateSeenByHost() {
       return stateSeenByHost;
     },
@@ -489,17 +612,20 @@ function createHarness(options: {
     get state() {
       return state;
     },
+    restoreState: (restored: Record<string, unknown>) => {
+      state = restored;
+    },
     rewrite: async () => {
       if (!rewriter) throw new Error('plugin did not register a rewriter');
       return await rewriter(history, agent);
     },
     /** 模拟用户在输入框里敲字，并等插件那边（异步）处理完。 */
-    typeInComposer: async () => {
-      for (const handler of eventHandlers) handler({ type: 'input:activity' });
+    typeInComposer: async (owner?: unknown) => {
+      for (const handler of eventHandlers) handler({ type: 'input:activity', owner });
       await new Promise((resolve) => setTimeout(resolve, 0));
     },
-    emitHook: (name: string) => {
-      for (const handler of hookHandlers.get(name) ?? []) handler();
+    emitHook: (name: string, event?: { owner?: unknown }) => {
+      for (const handler of hookHandlers.get(name) ?? []) handler(event);
     },
   };
 }

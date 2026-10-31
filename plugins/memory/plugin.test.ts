@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -45,6 +45,7 @@ function thread(...core: [string, string][]): { role: string; content: string }[
 }
 
 type HarnessOptions = {
+  home?: string;
   settings?: PluginSettingValues;
   issues?: PluginSettingIssue[];
   messages?: { role: string; content: unknown }[];
@@ -56,20 +57,24 @@ type HarnessOptions = {
   cwd?: string;
   /** 可变的 cwd，用来模拟会话中途 `/cd`。 */
   cwdRef?: { current: string };
+  sessionIdRef?: { current: string };
   mode?: 'session' | 'one-shot';
+  curatorCompletion?: () => Promise<string>;
 };
 
 function createHarness(options: HarnessOptions = {}) {
-  const home = tempDir();
+  const home = options.home ?? tempDir();
   const hooks = new HookRegistry();
   const commands = new micaCommands.CommandRegistry();
   const tools: MemoryTool[] = [];
+  const activeTools = new Set<MemoryTool>();
   const promptSections: { id: string; order?: number; render(): string }[] = [];
   const healthReports: { level: string; message: string; hint?: string }[] = [];
   const shown: string[] = [];
   const subagentTypes: PluginSubagentType[] = [];
   const disposers: (() => void)[] = [];
   const runs: { type?: string; prompt: string }[] = [];
+  const signals: AbortSignal[] = [];
   const models: { purpose: string; system: string; user: string }[] = [];
 
   const settings: PluginSettingValues = {
@@ -96,7 +101,7 @@ function createHarness(options: HarnessOptions = {}) {
     events: {},
     session: {
       describe: () => ({
-        id: 'session-1',
+        id: options.sessionIdRef?.current ?? 'session-1',
         title: 'test',
         cwd: options.cwdRef?.current ?? options.cwd ?? '/repo/mica',
       }),
@@ -111,7 +116,12 @@ function createHarness(options: HarnessOptions = {}) {
     tools: {
       register: (tool: MemoryTool) => {
         tools.push(tool);
-        return { dispose() {} };
+        activeTools.add(tool);
+        return {
+          dispose: () => {
+            activeTools.delete(tool);
+          },
+        };
       },
     },
     prompt: {
@@ -148,12 +158,13 @@ function createHarness(options: HarnessOptions = {}) {
             },
             listTypes: () => subagentTypes,
             getType: () => null,
-            run: async (request: { type?: string; prompt: string }) => {
+            run: async (request: { type?: string; prompt: string; signal: AbortSignal }) => {
               runs.push({ type: request.type, prompt: request.prompt });
+              signals.push(request.signal);
               return {
                 taskId: 'task-1',
                 status: options.curatorStatus ?? ('completed' as const),
-                output: nextCuratorOutput(),
+                output: options.curatorCompletion ? await options.curatorCompletion() : nextCuratorOutput(),
               };
             },
             background: () => ({ taskId: 'task-1', done: Promise.resolve({ status: 'completed' as const }) }),
@@ -169,11 +180,14 @@ function createHarness(options: HarnessOptions = {}) {
     hooks,
     commands,
     tools,
+    activeTools,
+    settings,
     promptSections,
     healthReports,
     shown,
     subagentTypes,
     runs,
+    signals,
     models,
     disposers,
     async emitTurnAfter(event: Record<string, unknown> = { outcome: 'completed', owner: {} }) {
@@ -193,6 +207,7 @@ describe('memory plugin setup', () => {
     expect(harness.commands.list().map((command) => command.name)).toEqual(['memory']);
     expect(harness.subagentTypes[0]).toMatchObject({
       name: 'memory-curator',
+      activity: 'maintenance',
       allowedTools: [],
       writeMode: 'none',
       contextModeDefault: 'none',
@@ -209,12 +224,12 @@ describe('memory plugin setup', () => {
     expect(harness.healthReports.at(-1)?.message).toContain('0 条');
   });
 
-  it('does nothing when memory is disabled', () => {
+  it('leaves the prompt and tools off while retaining the command when memory is disabled', () => {
     const harness = createHarness({ settings: { enabled: 'false' } });
 
     expect(harness.tools).toHaveLength(0);
-    expect(harness.promptSections).toHaveLength(0);
-    expect(harness.commands.list()).toHaveLength(0);
+    expect(harness.promptSections[0]!.render()).toBe('');
+    expect(harness.commands.list().map((command) => command.name)).toEqual(['memory']);
     expect(harness.healthReports.at(-1)?.message).toContain('已关闭');
   });
 
@@ -231,6 +246,36 @@ describe('memory plugin setup', () => {
 });
 
 describe('memory prompt snapshot', () => {
+  it('applies changes to enabled without restarting and refuses calls to an old tool', async () => {
+    const harness = createHarness({ settings: { enabled: 'false', autoCapture: 'true' } });
+    harness.settings.enabled = 'true';
+    expect(harness.promptSections[0]!.render()).toContain('持久记忆');
+    expect(harness.activeTools.size).toBe(1);
+
+    const tool = harness.tools[0]!;
+    harness.settings.enabled = 'false';
+    await expect(
+      tool.execute({ target: 'user', operations: [{ action: 'add', content: '不该保存' }] }),
+    ).rejects.toThrow(/disabled/);
+    expect(harness.promptSections[0]!.render()).toBe('');
+    expect(harness.activeTools.size).toBe(0);
+    await harness.emitTurnAfter();
+    expect(harness.runs).toHaveLength(0);
+    expect(existsSync(join(harness.home, 'memory', 'USER.md'))).toBe(false);
+  });
+
+  it('uses the current budget when rendering a frozen snapshot', async () => {
+    const harness = createHarness();
+    await harness.tools[0]!.execute({ target: 'memory', operations: [{ action: 'add', content: 'x'.repeat(400) }] });
+    const section = harness.promptSections[0]!;
+    expect(section.render()).toContain('x'.repeat(400));
+
+    harness.settings.memoryCharLimit = '200';
+
+    expect(section.render()).not.toContain('x'.repeat(200));
+    expect(section.render()).toContain('400/200');
+  });
+
   it('freezes the section until /memory refresh is run', async () => {
     const harness = createHarness();
     const section = harness.promptSections[0]!;
@@ -241,6 +286,28 @@ describe('memory prompt snapshot', () => {
 
     await harness.commands.execute('/memory refresh');
     expect(section.render()).toContain('项目用 bun');
+  });
+
+  it('refreshes only the current session and leaves other frozen snapshots intact', async () => {
+    const sessionIdRef = { current: 'first' };
+    const harness = createHarness({ sessionIdRef });
+    const tool = harness.tools[0]!;
+    const section = harness.promptSections[0]!;
+    await tool.execute({ target: 'user', operations: [{ action: 'add', content: '原有偏好' }] });
+    expect(section.render()).toContain('原有偏好');
+    sessionIdRef.current = 'second';
+    expect(section.render()).toContain('原有偏好');
+    await tool.execute({
+      target: 'user',
+      operations: [{ action: 'patch', old_text: '原有偏好', content: '新的偏好' }],
+    });
+
+    sessionIdRef.current = 'first';
+    await harness.commands.execute('/memory refresh');
+    expect(section.render()).toContain('新的偏好');
+    sessionIdRef.current = 'second';
+    expect(section.render()).toContain('原有偏好');
+    expect(section.render()).not.toContain('新的偏好');
   });
 
   it('swaps only project memory when the session changes directory', async () => {
@@ -263,6 +330,139 @@ describe('memory prompt snapshot', () => {
 });
 
 describe('memory auto capture', () => {
+  it('reads only the recent message budget while retaining the minimum conversation threshold', async () => {
+    let reads = 0;
+    const messages = Array.from({ length: 20_000 }, (_, index) => ({
+      role: index % 2 ? 'assistant' : 'user',
+      get content() { reads += 1; return `message ${index}`; },
+    }));
+    const harness = createHarness({ settings: { maxMessages: '2' }, messages });
+    await harness.commands.execute('/memory review');
+    expect(harness.runs).toHaveLength(1);
+    expect(harness.runs[0]?.prompt).toContain('message 19999');
+    expect(harness.runs[0]?.prompt).not.toContain('message 19997');
+    expect(reads).toBe(8);
+  });
+
+  it('does not retry malformed output after automatic capture is switched off', async () => {
+    let finish: (text: string) => void = () => {};
+    const harness = createHarness({
+      settings: { autoCapture: 'true' },
+      messages: thread(['偏好中文', '好的']),
+      curatorCompletion: () => new Promise<string>((resolve) => { finish = resolve; }),
+    });
+    await harness.emitTurnAfter();
+    harness.settings.autoCapture = 'false';
+    finish('invalid JSON');
+    await vi.waitFor(() => expect(readdirSync(join(harness.home, 'memory', 'curator.lock.owners'))).toEqual([]));
+    expect(harness.runs).toHaveLength(1);
+    expect(harness.signals[0]?.aborted).toBe(true);
+    expect(existsSync(join(harness.home, 'memory', 'USER.md'))).toBe(false);
+  });
+
+  it('records a paid attempt before awaiting its response, so a cancelled review is still throttled', async () => {
+    let finish: (text: string) => void = () => {};
+    const harness = createHarness({
+      settings: { autoCapture: 'true', minIntervalMinutes: '60' },
+      messages: thread(['偏好中文', '好的']),
+      curatorCompletion: () => new Promise<string>((resolve) => { finish = resolve; }),
+    });
+    await harness.emitTurnAfter();
+    expect(existsSync(join(harness.home, 'memory', 'state.json'))).toBe(true);
+    harness.settings.enabled = 'false';
+    harness.promptSections[0]!.render();
+    finish('{"operations":[]}');
+    await vi.waitFor(() => expect(readdirSync(join(harness.home, 'memory', 'curator.lock.owners'))).toEqual([]));
+    harness.settings.enabled = 'true';
+    await harness.emitTurnAfter();
+    expect(harness.runs).toHaveLength(1);
+  });
+
+  it('writes a delayed review to the project it reviewed after the session changes directory', async () => {
+    const cwdRef = { current: '/repo/alpha' };
+    let finish: (text: string) => void = () => {};
+    const harness = createHarness({
+      cwdRef,
+      messages: thread(['alpha 用 pnpm', '记住了']),
+      curatorCompletion: () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    });
+
+    const review = harness.commands.execute('/memory review');
+    await vi.waitFor(() => expect(harness.runs).toHaveLength(1));
+    cwdRef.current = '/repo/beta';
+    finish('{"operations":[{"target":"project","action":"add","content":"alpha 用 pnpm"}]}');
+    await review;
+
+    expect(
+      readFileSync(join(harness.home, 'memory', 'projects', projectSlug('/repo/alpha'), 'MEMORY.md'), 'utf-8'),
+    ).toBe('alpha 用 pnpm\n');
+    expect(existsSync(join(harness.home, 'memory', 'projects', projectSlug('/repo/beta'), 'MEMORY.md'))).toBe(false);
+  });
+
+  it('serializes curator requests across hosts sharing the memory directory', async () => {
+    let finish: (text: string) => void = () => {};
+    const common = {
+      settings: { autoCapture: 'true', minIntervalMinutes: '60' },
+      messages: thread(['偏好中文', '好的']),
+    };
+    const first = createHarness({
+      ...common,
+      curatorCompletion: () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const second = createHarness({ ...common, home: first.home });
+
+    await first.emitTurnAfter();
+    await second.emitTurnAfter();
+    expect(first.runs).toHaveLength(1);
+    expect(second.runs).toHaveLength(0);
+    finish('{"operations":[]}');
+    await vi.waitFor(() => expect(existsSync(join(first.home, 'memory', 'state.json'))).toBe(true));
+    await second.emitTurnAfter();
+    expect(second.runs).toHaveLength(0);
+    expect(readdirSync(join(first.home, 'memory', 'curator.lock.owners'))).toEqual([]);
+  });
+
+  it('drops a delayed response after the plugin is disposed', async () => {
+    let finish: (text: string) => void = () => {};
+    const harness = createHarness({
+      messages: thread(['偏好中文', '好的']),
+      curatorCompletion: () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    const review = harness.commands.execute('/memory review');
+    await vi.waitFor(() => expect(harness.runs).toHaveLength(1));
+    for (const dispose of [...harness.disposers].reverse()) dispose();
+    finish('{"operations":[{"target":"user","action":"add","content":"偏好中文"}]}');
+    await review;
+    expect(existsSync(join(harness.home, 'memory', 'USER.md'))).toBe(false);
+    expect(readdirSync(join(harness.home, 'memory', 'curator.lock.owners'))).toEqual([]);
+  });
+
+  it('records thrown request errors so failures also respect the global interval', async () => {
+    const harness = createHarness({
+      settings: { autoCapture: 'true', minIntervalMinutes: '60' },
+      messages: thread(['偏好中文', '好的']),
+      curatorCompletion: async () => {
+        throw new Error('network disconnected');
+      },
+    });
+    await harness.emitTurnAfter();
+    await vi.waitFor(() => expect(existsSync(join(harness.home, 'memory', 'state.json'))).toBe(true));
+    await harness.emitTurnAfter();
+    expect(harness.runs).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(harness.home, 'memory', 'state.json'), 'utf-8')).lastError).toBe(
+      'network disconnected',
+    );
+  });
+
   it('does not run the curator when auto capture is off', async () => {
     const harness = createHarness();
 
@@ -330,6 +530,20 @@ describe('memory auto capture', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(harness.runs).toHaveLength(0);
+  });
+
+  it('uses maxMessages as an input cap rather than making the conversation permanently too short', async () => {
+    const harness = createHarness({
+      settings: { autoCapture: 'true', maxMessages: '2' },
+      messages: thread(['偏好中文', '好的']),
+    });
+
+    await harness.emitTurnAfter();
+    await vi.waitFor(() => expect(existsSync(join(harness.home, 'memory', 'state.json'))).toBe(true));
+
+    expect(harness.runs).toHaveLength(1);
+    expect(harness.runs[0]?.prompt).toContain('偏好中文');
+    expect(harness.runs[0]?.prompt).not.toContain('先看下这个仓库');
   });
 
   it('respects the configured interval between runs', async () => {

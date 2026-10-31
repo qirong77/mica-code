@@ -30,16 +30,43 @@ const ROLE_LABELS: Record<string, string> = {
  * 空白折叠成单行以外的空行保留：对话里的分段就是用户敲出来的结构。
  */
 export function messageText(content: unknown): string {
-  if (typeof content === 'string') return content.trim();
+  if (typeof content === 'string') return replaceImageReferences(content).trim();
   if (!Array.isArray(content)) return '';
   const parts: string[] = [];
+  let previousImageRef = false;
   for (const block of content) {
     if (!block || typeof block !== 'object') continue;
     const record = block as Record<string, unknown>;
-    if (typeof record.text === 'string') parts.push(record.text);
-    else if (typeof record.type === 'string' && record.type.includes('image')) parts.push('[图片]');
+    if (['text', 'input_text', 'output_text'].includes(String(record.type)) && typeof record.text === 'string') {
+      parts.push(replaceImageReferences(record.text));
+      previousImageRef = /^\s*\[Image\]\([^)]+\)\s*$/.test(record.text);
+    } else {
+      if (['image', 'image_url', 'input_image', 'output_image'].includes(String(record.type)) && !previousImageRef)
+        parts.push('[图片]');
+      previousImageRef = false;
+    }
   }
   return parts.join('\n').trim();
+}
+
+/** 未闭合的引用只搜索一次结尾，避免逐个起点重复扫描同一段长文本。 */
+function replaceImageReferences(text: string): string {
+  const parts: string[] = [];
+  let cursor = 0;
+  let search = 0;
+  while (search < text.length) {
+    const start = text.indexOf('[Image](', search);
+    if (start < 0) break;
+    const end = text.indexOf(')', start + 8);
+    if (end < 0) break;
+    search = end + 1;
+    if (end === start + 8) continue;
+    parts.push(text.slice(cursor, start), '[图片]');
+    cursor = end + 1;
+  }
+  if (cursor === 0) return text;
+  parts.push(text.slice(cursor));
+  return parts.join('');
 }
 
 /** 只留用户与助手的文本消息：工具调用、思考、notice 都不进导出（它们不是对话）。 */
@@ -93,6 +120,14 @@ export function sessionMarkdown(
   meta: SessionCopyMeta,
   messages: readonly MicaUiConversationMessage[] | undefined,
 ): string {
+  return sessionMarkdownExport(meta, messages).markdown;
+}
+
+/** 导出与计数共用同一份正文，菜单不需要再清洗一次整段历史。 */
+export function sessionMarkdownExport(
+  meta: SessionCopyMeta,
+  messages: readonly MicaUiConversationMessage[] | undefined,
+): { markdown: string; turnCount: number } {
   const turns = conversationTurns(messages);
   const title = meta.title?.trim() || meta.sessionId?.trim() || '未命名会话';
   const lines: string[] = [`# ${title}`, ''];
@@ -106,11 +141,11 @@ export function sessionMarkdown(
   lines.push(...metaLines, '');
   if (turns.length === 0) {
     lines.push('（这条会话还没有对话内容）');
-    return `${lines.join('\n').trimEnd()}\n`;
+    return { markdown: `${lines.join('\n').trimEnd()}\n`, turnCount: 0 };
   }
   lines.push('## 对话', '');
   turns.forEach((turn, index) => {
     lines.push(`### ${index + 1}. ${ROLE_LABELS[turn.role]}`, '', turn.text, '');
   });
-  return `${lines.join('\n').trimEnd()}\n`;
+  return { markdown: `${lines.join('\n').trimEnd()}\n`, turnCount: turns.length };
 }

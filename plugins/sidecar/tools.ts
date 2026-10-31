@@ -1,5 +1,5 @@
 import { MicaTool, type ToolExecuteCallbacks } from '@packages/mica-tools/MicaTool.js';
-import { MAX_SIDECARS, waitSatisfied, type SidecarRegistry } from './registry.js';
+import { MAX_SIDECARS, waitBaseline, waitSatisfied, type SidecarRegistry } from './registry.js';
 import {
   DEFAULT_TURN_INDEX_LIMIT,
   DEFAULT_TRANSCRIPT_CHARS,
@@ -52,7 +52,7 @@ export class SidecarSpawnTool extends MicaTool {
           role: { type: 'string', description: '角色名（$MICA_HOME/role/<name>.md），默认沿用当前配置。' },
           model: { type: 'string', description: '模型 id（provider/model），默认沿用当前配置。' },
           effort: { type: 'string', description: '推理档位，取该模型声明的档位名。' },
-          max_turns: { type: 'number', description: '最多几轮模型往返，用来兜住跑飞的任务。' },
+          max_turns: { type: 'integer', minimum: 1, description: '最多几轮模型往返，用来兜住跑飞的任务。' },
         },
         required: ['prompt'],
       },
@@ -69,7 +69,7 @@ export class SidecarSpawnTool extends MicaTool {
       effort?: string;
       max_turns?: number;
     },
-    _callbacks?: ToolExecuteCallbacks,
+    callbacks?: ToolExecuteCallbacks,
   ): Promise<string> {
     const result = await this.registry.spawn({
       prompt: String(input.prompt ?? ''),
@@ -78,7 +78,8 @@ export class SidecarSpawnTool extends MicaTool {
       ...(input.role ? { role: input.role } : {}),
       ...(input.model ? { model: input.model } : {}),
       ...(input.effort ? { effort: input.effort } : {}),
-      ...(input.max_turns ? { maxTurns: input.max_turns } : {}),
+      ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
+      ...(callbacks?.signal ? { signal: callbacks.signal } : {}),
     });
     if (!result.ok) return result.error;
     const { entry } = result;
@@ -159,7 +160,7 @@ export class SidecarStatusTool extends MicaTool {
   }
 
   async execute(input: { session_id?: string; full?: boolean }): Promise<string> {
-    this.registry.prune();
+    this.registry.sweep();
     if (input.session_id) {
       const entry = this.registry.get(String(input.session_id));
       if (!entry) return `找不到子会话：${input.session_id}`;
@@ -170,16 +171,20 @@ export class SidecarStatusTool extends MicaTool {
     if (!entries.length) {
       return '当前没有子会话。需要时用 sidecar_spawn 开一个。';
     }
-    return entries
-      .map((entry) => {
-        const transcript = entry.process.transcript;
-        const latest = transcript.latestTurn;
-        const state = entry.process.closed ? '已退出' : transcript.busy ? '运行中' : '空闲';
-        const head = `${entry.id} · ${state} · ${transcript.allTurns().length} 轮 · ${clip(entry.title, 40)}`;
-        const tail = latest ? clip((latest.text || '').replace(/\s+/g, ' '), 160) : '（还没有内容）';
-        return `${head}\n  ${tail}`;
-      })
-      .join('\n');
+    const lines = entries.map((entry) => {
+      const transcript = entry.process.transcript;
+      const latest = transcript.latestTurn;
+      const state = entry.process.closed ? '已退出' : transcript.busy ? '运行中' : '空闲';
+      const head = `${entry.id} · ${state} · ${transcript.totalTurnCount} 轮 · ${clip(entry.title, 40)}`;
+      const tail = latest ? clip((latest.text || '').replace(/\s+/g, ' '), 160) : '（还没有内容）';
+      return `${head}\n  ${tail}`;
+    });
+    if (entries.some((entry) => entry.process.closed)) {
+      // 死会话留着是为了能读最后一轮（见 registry 的 MAX_DEAD_ENTRIES），得让模型
+      // 知道别一直拿它当「空闲」，也别忘了收。
+      lines.push('（已退出的会话仍能读最后一轮；不再需要时用 sidecar_close 清掉）');
+    }
+    return lines.join('\n');
   }
 
   onToolUseDisplayText(input: Record<string, unknown>): string {
@@ -210,7 +215,7 @@ export class SidecarTurnsTool extends MicaTool {
   }
 
   async execute(input: { session_id: string; limit?: number }): Promise<string> {
-    this.registry.prune();
+    this.registry.sweep();
     const entry = this.registry.get(String(input.session_id ?? ''));
     if (!entry) return `找不到子会话：${input.session_id}。用 sidecar_status 列出当前有哪些。`;
     return renderTurnIndex(entry, input.limit ? { limit: Number(input.limit) } : {});
@@ -242,7 +247,7 @@ export class SidecarGrepTool extends MicaTool {
   }
 
   async execute(input: { session_id: string; pattern: string; max_matches?: number }): Promise<string> {
-    this.registry.prune();
+    this.registry.sweep();
     const entry = this.registry.get(String(input.session_id ?? ''));
     if (!entry) return `找不到子会话：${input.session_id}`;
     if (!input.pattern) return 'pattern 不能为空。';
@@ -297,7 +302,7 @@ export class SidecarTranscriptTool extends MicaTool {
     include_user?: boolean;
     max_chars?: number;
   }): Promise<string> {
-    this.registry.prune();
+    this.registry.sweep();
     const entry = this.registry.get(String(input.session_id ?? ''));
     if (!entry) return `找不到子会话：${input.session_id}`;
     return renderTranscript(entry, {
@@ -324,8 +329,9 @@ export class SidecarWaitTool extends MicaTool {
           session_id: { type: 'string', description: '会话 id 或唯一前缀。' },
           until: {
             type: 'string',
+            enum: ['idle', 'text', 'turn'],
             description:
-              'idle = 等这一轮结束；text = 等最近一轮正文匹配 pattern；turn = 等新的一轮开始并结束。默认 idle。',
+              'idle = 等当前与排队消息全部结束；text = 在最近一轮完整正文匹配 pattern（已出现也算）；turn = 等至少一轮在调用后结束，包含当前正在运行的轮次。默认 idle。',
           },
           pattern: { type: 'string', description: 'until=text 时的正则（区分大小写），在最近一轮正文里匹配。' },
           timeout_ms: { type: 'number', description: `等待上限，默认 ${DEFAULT_WAIT_TIMEOUT_MS}ms，最大 900000。` },
@@ -340,6 +346,12 @@ export class SidecarWaitTool extends MicaTool {
     input: { session_id: string; until?: string; pattern?: string; timeout_ms?: number },
     callbacks?: ToolExecuteCallbacks,
   ): Promise<string> {
+    if (input.until !== undefined && input.until !== 'idle' && input.until !== 'text' && input.until !== 'turn') {
+      return 'until 必须为 idle、text 或 turn。';
+    }
+    if (input.timeout_ms !== undefined && (!Number.isFinite(input.timeout_ms) || input.timeout_ms <= 0)) {
+      return 'timeout_ms 必须为正数。';
+    }
     const entry = this.registry.get(String(input.session_id ?? ''));
     if (!entry) return `找不到子会话：${input.session_id}`;
     const until = input.until === 'text' || input.until === 'turn' ? input.until : 'idle';
@@ -354,7 +366,7 @@ export class SidecarWaitTool extends MicaTool {
     }
 
     const transcript = entry.process.transcript;
-    const baseline = transcript.allTurns().length;
+    const baseline = waitBaseline(transcript);
     const deadline = Date.now() + parseTimeout(input.timeout_ms);
 
     while (true) {
@@ -373,7 +385,7 @@ export class SidecarWaitTool extends MicaTool {
         return `等待超时（${parseTimeout(input.timeout_ms)}ms）。它可能还在跑，用 sidecar_status 继续看。\n\n${renderSidecar(entry, { quietWhenUnchanged: true })}`;
       }
       // 有变化就重新判断，没变化就等到下一次通知或 500ms 兜底——不忙轮询。
-      await entry.process.waitForChange(Math.min(remaining, 500));
+      await entry.process.waitForChange(Math.min(remaining, 500), callbacks?.signal);
     }
   }
 

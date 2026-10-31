@@ -1,7 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import {
   normalizeSessionAnnotations,
-  readSessionAnnotations,
   sessionAnnotationsPath,
   writeSessionAnnotations,
 } from '@packages/mica-plugin/sessionAnnotations.js';
@@ -13,10 +14,12 @@ import {
   clearSessionTags,
   describeTagStore,
   formatTagList,
+  maxTagNameWords,
   normalizeTagStore,
   removeSessionTag,
   renameTagLabel,
   resolveTagColor,
+  resolveTagTokens,
   tagsOf,
   type TagStore,
 } from './tags.js';
@@ -60,28 +63,48 @@ export default function setup(ctx: PluginContext): void {
     }
   };
 
-  /** 读：文件里缺的色槽自动补上（7 个槽是产品契约，不能被一次手改抹掉）。 */
-  const readStore = (): TagStore => {
+  const readRawStore = (): unknown => {
     try {
-      return normalizeTagStore(readSessionAnnotations(home, pluginId));
+      const raw: unknown = JSON.parse(readFileSync(annotationsPath, 'utf8'));
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('标签文件格式不正确');
+      return raw;
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
       reportStoreError(error);
-      return normalizeTagStore(undefined);
+      throw error;
     }
   };
+  /** 文件里缺的色槽自动补上，同时保留已存在的归属。 */
+  const readStore = (): TagStore => normalizeTagStore(readRawStore());
 
   const writeStore = (store: TagStore) => {
     try {
       writeSessionAnnotations(home, pluginId, store);
+      if (storeErrorReported) ctx.health.report({ level: 'ok', message: '标签文件读写已恢复' });
       storeErrorReported = false;
     } catch (error) {
       reportStoreError(error);
+      throw error;
     }
   };
 
   // 首次运行时把 7 个色槽写出来：宿主那边「有 options 才列菜单」，空文件等于界面上没有这个插件。
-  if (normalizeSessionAnnotations(readSessionAnnotations(home, pluginId)).options.length === 0) {
-    writeStore(normalizeTagStore(undefined));
+  const lockStore = () => {
+    const release = acquireProcessLock(`${annotationsPath}.lock`);
+    if (!release) throw new Error('其他会话正在更新标签，稍后重试。');
+    return release;
+  };
+  try {
+    const release = lockStore();
+    try {
+      const raw = readRawStore();
+      const initial = normalizeTagStore(raw);
+      if (JSON.stringify(normalizeSessionAnnotations(raw)) !== JSON.stringify(initial)) writeStore(initial);
+    } finally {
+      release();
+    }
+  } catch {
+    // 保留损坏文件供修复，命令仍注册并准确返回读写错误。
   }
 
   const currentSessionId = () => session.describe()?.id ?? null;
@@ -93,15 +116,10 @@ export default function setup(ctx: PluginContext): void {
     if (!sessionId) return '当前没有会话，标签是挂到会话上的，先开一个对话再打标。';
     if (tokens.length === 0) return `用法：/tags ${add ? 'add' : 'remove'} <颜色>`;
 
-    const unknown: string[] = [];
+    const { colors, unknown } = resolveTagTokens(store, tokens);
     let next = store;
     const applied: string[] = [];
-    for (const token of tokens) {
-      const color = resolveTagColor(store, token);
-      if (!color) {
-        unknown.push(token);
-        continue;
-      }
+    for (const color of colors) {
       const before = next;
       next = add ? addSessionTag(next, sessionId, color) : removeSessionTag(next, sessionId, color);
       if (next !== before) applied.push(store.options.find((option) => option.id === color)?.label ?? color);
@@ -131,52 +149,71 @@ export default function setup(ctx: PluginContext): void {
     allowDuringTurn: false,
     pluginId,
     handler: (_commandCtx, args) => {
-      const [verb = 'list', ...rest] = args.trim().split(/\s+/).filter(Boolean);
-      switch (verb) {
-        case 'list':
-          ctx.ui?.showMessage(describeTagStore(readStore(), currentSessionId()).join('\n'), 8000);
-          return { ok: true };
-        case 'add':
-        case 'remove':
-          ctx.ui?.showMessage(applyToCurrentSession(rest, verb === 'add'), 8000);
-          return { ok: true };
-        case 'clear': {
-          const store = readStore();
-          const sessionId = currentSessionId();
-          if (!sessionId) {
-            ctx.ui?.showMessage('当前没有会话。');
+      let release: (() => void) | undefined;
+      try {
+        const [verb = 'list', ...rest] = args.trim().split(/\s+/).filter(Boolean);
+        if (['add', 'remove', 'clear', 'rename'].includes(verb)) release = lockStore();
+        switch (verb) {
+          case 'list':
+            ctx.ui?.showMessage(describeTagStore(readStore(), currentSessionId()).join('\n'), 8000);
+            return { ok: true };
+          case 'add':
+          case 'remove':
+            ctx.ui?.showMessage(applyToCurrentSession(rest, verb === 'add'), 8000);
+            return { ok: true };
+          case 'clear': {
+            const store = readStore();
+            const sessionId = currentSessionId();
+            if (!sessionId) {
+              ctx.ui?.showMessage('当前没有会话。');
+              return { ok: true };
+            }
+            const next = clearSessionTags(store, sessionId);
+            if (next === store) {
+              ctx.ui?.showMessage('当前会话本来就没有标签。');
+              return { ok: true };
+            }
+            writeStore(next);
+            ctx.ui?.showMessage('已清空当前会话的标签。');
             return { ok: true };
           }
-          const next = clearSessionTags(store, sessionId);
-          if (next === store) {
-            ctx.ui?.showMessage('当前会话本来就没有标签。');
+          case 'rename': {
+            const store = readStore();
+            let color = null;
+            let split = 0;
+            for (let end = Math.min(rest.length - 1, maxTagNameWords(store)); end > 0; end -= 1) {
+              color = resolveTagColor(store, rest.slice(0, end).join(' '));
+              if (color) {
+                split = end;
+                break;
+              }
+            }
+            const name = cleanTagLabel(rest.slice(split).join(' '));
+            if (!color) {
+              ctx.ui?.showMessage(`用法：/tags rename <颜色> <新名字>（可用：${TAG_COLORS.join(' / ')}）`);
+              return { ok: true };
+            }
+            if (!name) {
+              ctx.ui?.showMessage('新名字不能为空。');
+              return { ok: true };
+            }
+            const next = renameTagLabel(store, color, name);
+            if (next !== store) writeStore(next);
+            ctx.ui?.showMessage(
+              `色槽 ${color} 现在叫「${next.options.find((option) => option.id === color)?.label}」。`,
+            );
             return { ok: true };
           }
-          writeStore(next);
-          ctx.ui?.showMessage('已清空当前会话的标签。');
-          return { ok: true };
+          default:
+            ctx.ui?.showMessage('用法：/tags [list|add <颜色>|remove <颜色>|rename <颜色> <名字>|clear]');
+            return { ok: true };
         }
-        case 'rename': {
-          const [token, ...nameParts] = rest;
-          const store = readStore();
-          const color = token ? resolveTagColor(store, token) : null;
-          const name = cleanTagLabel(nameParts.join(' '));
-          if (!color) {
-            ctx.ui?.showMessage(`用法：/tags rename <颜色> <新名字>（可用：${TAG_COLORS.join(' / ')}）`);
-            return { ok: true };
-          }
-          if (!name) {
-            ctx.ui?.showMessage('新名字不能为空。');
-            return { ok: true };
-          }
-          const next = renameTagLabel(store, color, name);
-          if (next !== store) writeStore(next);
-          ctx.ui?.showMessage(`色槽 ${color} 现在叫「${next.options.find((option) => option.id === color)?.label}」。`);
-          return { ok: true };
-        }
-        default:
-          ctx.ui?.showMessage('用法：/tags [list|add <颜色>|remove <颜色>|rename <颜色> <名字>|clear]');
-          return { ok: true };
+      } catch (error) {
+        const message = `标签操作失败：${error instanceof Error ? error.message : String(error)}`;
+        ctx.ui?.showMessage(message, 8000);
+        return { ok: false, error, message };
+      } finally {
+        release?.();
       }
     },
   });

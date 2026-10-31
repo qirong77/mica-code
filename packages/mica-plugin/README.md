@@ -7,7 +7,7 @@
 - 只读运行观察：`AgentObservationEvent` 定义 `agent:observe`，由 `HookRegistry.notify()` 按注册顺序调用，观察者抛错或返回挂起的 Promise 均不阻塞任务。异步完成顺序由观察插件负责，磁盘队列在插件 dispose 时 flush。覆盖 `AgentRuntime.run` 的起止、实际请求边界与工具定义、最终 prompt、工具调用/结果、用量、重试及历史改写；直接创建的 helper 模型客户端内部轨迹暂未覆盖。
 
 - 定义 class-based plugin 的基础结构。
-- 管理插件加载、启动和销毁生命周期。
+- 管理插件加载、启动和销毁生命周期。正常卸载与启动失败都按资源注册的逆序释放；单项清理失败仍继续释放其余资源，正常卸载结束后以 `AggregateError` 汇总失败。
 - 提供 hook registry，用于扩展运行时流程。
 - 提供 service container 和 service token，用于插件间共享能力。
 - 定义 `PluginContext` capability，由应用注入 runtime queue、工具注册和 UI 扩展入口。
@@ -21,6 +21,7 @@
 - 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。
 - 模型请求重写：`ctx.agent.onIterationRewrite()` 在两次模型请求之间改写要发送的历史（自动压缩用它）；`ctx.agent.mode` 回答宿主形态（`session` / `one-shot`），一次性运行里不该跑会额外花钱的后台策略。
 - 委派子代理：`ctx.subagents` 注册子代理类型、前台/后台跑一个、管后台任务。机制（建子代理、用量记账、路径租约、完成回注）由宿主提供，插件只决定有哪些类型与工具形状。
+- 会话归属：`ctx.session.captureOwner?.(context)` 捕获工具上下文所属 owner，不传上下文则捕获当前会话；异步 notice 传回该 owner，临时状态按生命周期事件的 owner 隔离。
 - 内置 skill：**清单 `skills` 声明相对插件目录的路径**（目录里有 `SKILL.md` 就是一条，否则扫一层子目录），
   manager 按 `MicaPlugin.root` 读进来注册，插件不必写代码。注册进来的 skill 与磁盘扫描出来的完全同权
   （system prompt 索引、`skill` 工具、会话能力开关）；磁盘上的同名 skill 优先，被遮蔽的条目会报成一条
@@ -136,7 +137,7 @@ context.onDispose(() => registration.dispose());
 - 插件通过 context、hooks 和 services 与外部交互，避免直接耦合应用层单例。
 - 官方运行期插件位于 `packages/mica-builtin-commands/plugins` 与仓库根 `plugins/`，都不应反向导入 `src/**`。
 - 插件包格式见仓库根 `plugins/README.md`：一个插件是一个目录，入口 `default` 导出 `setup(ctx)`。
-- 生命周期中注册的资源需要可释放，避免长期运行中的泄漏。
+- 生命周期中注册的资源需要可释放，避免长期运行中的泄漏。`ctx.actions.register()`、`ctx.desktop.panel()` 与 `ctx.desktop.sessionMenu()` 的登记由 manager 自动回收，正常卸载与启动失败都生效；其余资源用 `ctx.onDispose()` 登记清理。
 
 ## 目录说明
 

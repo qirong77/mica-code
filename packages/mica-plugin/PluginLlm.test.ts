@@ -163,6 +163,39 @@ describe('createPluginLlmApi', () => {
     expect(requests[0]).toMatchObject({ useMainProvider: true, model: '' });
   });
 
+  it('ignores the inactive endpoint and model after switching back to the session model', async () => {
+    const requests: PluginModelRequest[] = [];
+    const api = makeApi(
+      {
+        useMainProvider: 'true',
+        baseUrl: 'https://old.test/v1',
+        apiKey: 'old-key',
+        model: 'old-provider/old-model',
+        protocol: 'openai_responses',
+      },
+      requests,
+    );
+
+    await api.request({ purpose: 'p', system: 's', user: 'u' });
+
+    expect(requests[0]).toMatchObject({
+      useMainProvider: true,
+      model: '',
+      baseUrl: '',
+      apiKey: '',
+      protocol: undefined,
+    });
+  });
+
+  it('allows an explicit request model while reusing the session provider', async () => {
+    const requests: PluginModelRequest[] = [];
+    const api = makeApi({ useMainProvider: 'true', model: 'inactive-model' }, requests);
+
+    await api.request({ purpose: 'p', system: 's', user: 'u', model: 'explicit-model' });
+
+    expect(requests[0]).toMatchObject({ useMainProvider: true, model: 'explicit-model' });
+  });
+
   it('refuses to send a request when the interface is not configured', async () => {
     const requests: PluginModelRequest[] = [];
     const api = makeApi({ useMainProvider: 'false', baseUrl: '', model: '' }, requests);
@@ -198,11 +231,7 @@ describe('describePluginLlmView', () => {
 
   it('keeps the error reason when the session has no usable model', () => {
     expect(
-      describePluginLlmView(
-        {},
-        { useMainProvider: 'true' },
-        { summary: '当前会话没有可用的模型', available: false },
-      ),
+      describePluginLlmView({}, { useMainProvider: 'true' }, { summary: '当前会话没有可用的模型', available: false }),
     ).toMatchObject({
       configured: false,
       summary: '当前会话没有可用的模型',
@@ -292,12 +321,12 @@ describe('createPluginLlmApi fallback', () => {
   });
 
   it('drops a named model the main config cannot serve', async () => {
-    const { api, requests } = setup({ useMainProvider: 'true', model: 'gone-model' }, async (request) => {
+    const { api, requests } = setup({ useMainProvider: 'true' }, async (request) => {
       if (request.model) throw new Error('404 no such model');
       return 'ok';
     });
 
-    await api.request({ purpose: 'p', system: 's', user: 'u' });
+    await api.request({ purpose: 'p', system: 's', user: 'u', model: 'gone-model' });
 
     expect(requests[1]).toMatchObject({ useMainProvider: true, model: '' });
   });

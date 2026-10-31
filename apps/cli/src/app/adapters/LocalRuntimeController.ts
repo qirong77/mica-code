@@ -593,7 +593,7 @@ export class LocalRuntimeController implements RuntimeController {
 
     try {
       sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
-      await this.hooks.emit('turn:before', { runtime: this, input, content });
+      await this.hooks.emit('turn:before', { runtime: this, owner: agent, input, content });
       const promptBuildEvent = await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
       const runContent = promptBuildEvent.content ?? content;
 

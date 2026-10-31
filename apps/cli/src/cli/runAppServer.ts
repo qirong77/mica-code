@@ -126,7 +126,7 @@ export function projectBackgroundTasks(tasks: BackgroundTaskMeta[]): MicaBackgro
  * can render the same in-flight tool rows as the CLI. */
 export function projectSubagentTasks(tasks: SubagentTaskRecord[]): MicaSubagentTaskItem[] {
   return tasks
-    .filter((task) => task.status === 'running')
+    .filter((task) => task.status === 'running' && task.activity !== 'maintenance')
     .map((task) => ({
       taskId: task.id,
       ...(task.parent_task_id ? { parentTaskId: task.parent_task_id } : {}),

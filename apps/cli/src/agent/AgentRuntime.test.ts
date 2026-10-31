@@ -19,7 +19,6 @@ const testConfig: IMicaConfig = {
   providers: [
     {
       id: 'test-provider',
-      name: 'Test Provider',
       api_base: 'https://example.com/v1',
       api_key: 'test-key',
       protocol: 'openai_chat_completions',

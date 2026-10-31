@@ -20,7 +20,6 @@ function registerRules(rules: Parameters<typeof micaConfig.registerModelRules>[0
 function provider(protocol: ProviderProtocol, supportsEffort?: boolean): ProviderDefinition {
   return {
     id: 'gateway',
-    name: 'gateway',
     api_base: 'http://127.0.0.1:1',
     protocol,
     ...(supportsEffort === undefined ? {} : { supportsEffort }),

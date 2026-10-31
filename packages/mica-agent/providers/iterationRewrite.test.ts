@@ -64,7 +64,7 @@ describe('iteration boundary message rewrite', () => {
 
     // The hook sees session messages only; the system prompt is assembled
     // separately so a rewrite can never drop it.
-    expect(seen[0]).toEqual([{ role: 'user' }, { role: 'assistant' }, { role: 'tool' }]);
+    expect(seen).toEqual([[{ role: 'user' }], [{ role: 'user' }, { role: 'assistant' }, { role: 'tool' }]]);
     expect(secondRequest?.messages[0]?.role).toBe('system');
     const toolMessages = (secondRequest?.messages ?? []).filter((message) => message.role === 'tool');
     expect(toolMessages.map((message) => message.content)).toEqual(['[cleared]']);
@@ -134,7 +134,7 @@ describe('iteration boundary message rewrite', () => {
       },
     });
 
-    expect(seen[0]).toEqual([{ type: 'message' }, { type: 'function_call' }, { type: 'function_call_output' }]);
+    expect(seen).toEqual([[{ type: 'message' }], [{ type: 'message' }, { type: 'function_call' }, { type: 'function_call_output' }]]);
     const secondRequest = openaiMocks.responsesCreate.mock.calls[1]![0] as {
       instructions?: string;
       input: Array<{ type: string; output?: unknown }>;

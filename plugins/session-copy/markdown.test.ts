@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { conversationTurns, describeModel, messageText, sessionMarkdown } from './markdown.js';
 
 describe('messageText', () => {
+  it('preserves unterminated image references and matches replacement semantics for nested references', () => {
+    const inputs = [
+      '[Image]('.repeat(10_000),
+      '[Image](unterminated [Image](/tmp/valid.png) tail',
+      '[Image](/tmp/a.png) [Image]() [Image](/tmp/b.png)',
+      'text [Image](path with spaces.png) tail [Image](',
+    ];
+    for (const input of inputs) {
+      expect(messageText(input)).toBe(input.replace(/\[Image\]\([^)]+\)/g, '[图片]').trim());
+    }
+  });
+
   it('keeps a plain string as-is', () => {
     expect(messageText('  帮我看看这个报错  ')).toBe('帮我看看这个报错');
   });
@@ -19,6 +31,27 @@ describe('messageText', () => {
   it('ignores malformed blocks', () => {
     expect(messageText([null, 42, { type: 'text' }])).toBe('');
     expect(messageText(undefined)).toBe('');
+  });
+
+  it('replaces native image references and avoids duplicating their image blocks', () => {
+    expect(messageText('看图 [Image](/private/home/images/test.png)')).toBe('看图 [图片]');
+    expect(
+      messageText([
+        { type: 'text', text: '[Image](/private/home/images/test.png)' },
+        { type: 'image', source: 'base64' },
+        { type: 'image', source: 'another image' },
+      ]),
+    ).toBe('[图片]\n[图片]');
+  });
+
+  it('does not export thinking or tool blocks that happen to carry text', () => {
+    expect(
+      messageText([
+        { type: 'thinking', text: 'private reasoning' },
+        { type: 'tool_result', text: 'tool output' },
+        { type: 'text', text: 'visible answer' },
+      ]),
+    ).toBe('visible answer');
   });
 });
 

@@ -183,7 +183,6 @@ function makeAgent(usageHistory: AgentUsageRecord[]): CommandAgent {
       provider: {
         api_base: 'https://api.openai.com',
         id: 'openai',
-        name: 'OpenAI',
         protocol: 'openai_chat_completions',
         contextWindowSize: 256000,
         supportsEffort: true,

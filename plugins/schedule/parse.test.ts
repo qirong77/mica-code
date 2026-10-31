@@ -36,6 +36,12 @@ function keys(stages: ScheduleStage[]): string[] {
 }
 
 describe('parseSchedule', () => {
+  it('不把不存在的月日换算成其它日期，闰年日期正常保留', () => {
+    expect(parseSchedule('测试：2.30，上线：4.31', { reference: '2026-02-01' })).toEqual([]);
+    expect(parseSchedule('测试：2.30-3.02', { reference: '2026-02-01' })).toEqual([]);
+    expect(parseSchedule('测试：2.29', { reference: '2026-02-01' })).toEqual([]);
+    expect(parseSchedule('测试：2.29', { reference: '2028-02-01' })[0]?.start).toBe('2028-02-29');
+  });
   it('读「日期在前、阶段词在后」的写法', () => {
     const stages = parseSchedule(ANNOUNCEMENTS.weizhang, { reference: REFERENCE });
     expect(keys(stages)).toEqual([
@@ -90,7 +96,9 @@ describe('parseSchedule', () => {
   it('没有阶段词的公告返回空数组，不当成错误', () => {
     expect(parseSchedule(ANNOUNCEMENTS.env, { reference: REFERENCE })).toEqual([]);
     expect(parseSchedule('', { reference: REFERENCE })).toEqual([]);
-    expect(parseSchedule('知识库空间：https://cooper.didichuxing.com/knowledge/share/book/Ty6KDC', { reference: REFERENCE })).toEqual([]);
+    expect(
+      parseSchedule('知识库空间：https://cooper.didichuxing.com/knowledge/share/book/Ty6KDC', { reference: REFERENCE }),
+    ).toEqual([]);
   });
 
   it('跨年排期顺延到明年，旧日期不跟着顺延', () => {
@@ -102,10 +110,7 @@ describe('parseSchedule', () => {
 
   it('长阶段词吃掉被它包住的短词，同一个阶段不重复出行', () => {
     const stages = parseSchedule('case评审:10.26，测试:10.27~10.28', { reference: REFERENCE });
-    expect(keys(stages)).toEqual([
-      'case-review:2026-10-26~2026-10-26',
-      'testing:2026-10-27~2026-10-28',
-    ]);
+    expect(keys(stages)).toEqual(['case-review:2026-10-26~2026-10-26', 'testing:2026-10-27~2026-10-28']);
   });
 });
 
@@ -125,10 +130,7 @@ describe('buildAgenda', () => {
 
   it('今天的阶段按结束日排，并标出跑到第几天', () => {
     const { active, upcoming } = buildAgenda(groups, { today: '2026-10-29' });
-    expect(active.map((item) => `${item.groupName}/${item.key}`)).toEqual([
-      '违章处置线上化/testing',
-      '长租/dev',
-    ]);
+    expect(active.map((item) => `${item.groupName}/${item.key}`)).toEqual(['违章处置线上化/testing', '长租/dev']);
     expect(active[0]).toMatchObject({ dayIndex: 2, span: 3, endIn: 1 });
     // 上线日还没到，落在「接下来」里；同一天的走查排在它后面
     expect(upcoming.map((item) => `${item.groupName}/${item.key}`)).toEqual([

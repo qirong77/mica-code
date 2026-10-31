@@ -36,6 +36,7 @@ import { prepareImageForApi } from '@packages/mica-common/index.js';
 ## 目录说明
 
 - `disposable.ts`：资源释放接口和辅助方法。
+- `processLock.ts`：非阻塞跨进程文件锁；每次申请使用唯一的 PID/UUID 标记，释放和孤儿回收只删除对应标记，稳定容器目录不主动移除。竞争时允许双方退让，由调用方重试。
 - `eventBus.ts`：事件总线相关类型与实现。
 - `json.ts`：JSON 类型定义。
 - `result.ts`：结果类型。

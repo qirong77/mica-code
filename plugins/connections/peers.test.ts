@@ -8,6 +8,7 @@ import {
   normalizePeerStore,
   peerRows,
   rememberPeer,
+  samePeer,
   setPeerNote,
 } from './peers.js';
 
@@ -190,10 +191,12 @@ describe('relay links', () => {
     expect(findPeer(peers, link('s1'))?.note).toBe('公司的机器');
   });
 
-  it('页面由中转机托管时，「当前」能认回清单里那一条', () => {
-    // 页面里 location.origin 是不带查询串的，凭它就要匹配上
-    const peers = rememberPeer(emptyPeerStore(), link('s1'), 'Office Mac');
-    expect(findPeer(peers, 'https://mica.qirong77.com')).not.toBeNull();
-    expect(peerRows('https://mica.qirong77.com', peers)).toEqual([]);
+  it('裸中转机 origin 不冒充任何一台机器，避免隐藏同一中转机上的全部连接', () => {
+    let peers = rememberPeer(emptyPeerStore(), link('s1'), 'Office Mac');
+    peers = rememberPeer(peers, 'https://mica.qirong77.com/?t=another-token-0123456789', 'Home Mac');
+    expect(findPeer(peers, 'https://mica.qirong77.com')).toBeNull();
+    expect(peerRows('https://mica.qirong77.com', peers)).toHaveLength(2);
+    expect(samePeer(link('s1'), 'https://mica.qirong77.com')).toBe(false);
+    expect(peerRows(link('s1'), peers).map((peer) => peer.note)).toEqual(['Home Mac']);
   });
 });

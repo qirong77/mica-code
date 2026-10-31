@@ -14,7 +14,6 @@ const SOURCE = {
   providers: [
     {
       id: 'deepseek',
-      name: 'DeepSeek',
       api_base: 'https://api.deepseek.com',
       api_key: 'sk-test',
       protocol: 'openai_chat_completions',
@@ -50,7 +49,6 @@ describe('config draft providers', () => {
   it('reads form fields from a raw provider', () => {
     expect(readProviderDraft(providerEntries(draftOf(SOURCE))[0])).toEqual({
       id: 'deepseek',
-      name: 'DeepSeek',
       apiBase: 'https://api.deepseek.com',
       apiKey: 'sk-test',
       protocol: 'openai_chat_completions',
@@ -63,15 +61,17 @@ describe('config draft providers', () => {
     const draft = draftOf({
       ...SOURCE,
       extraTop: { keep: true },
-      providers: [{ ...SOURCE.providers[0], customFlag: 'keep-me' }],
+      providers: [{ ...SOURCE.providers[0], customFlag: 'keep-me', name: 'DeepSeek 官方' }],
     });
     const next = writeProviderDraft(draft, 0, {
       ...readProviderDraft(providerEntries(draft)[0]),
-      name: 'DeepSeek 官方',
+      apiBase: 'https://api.deepseek.com/v1',
     });
     const [provider] = providerEntries(next) as Record<string, unknown>[];
     expect(provider.customFlag).toBe('keep-me');
-    expect(provider.name).toBe('DeepSeek 官方');
+    // 显示名称已并入 id，旧配置里的 name 在保存时被清掉。
+    expect('name' in provider).toBe(false);
+    expect(provider.api_base).toBe('https://api.deepseek.com/v1');
     expect(next.extraTop).toEqual({ keep: true });
     expect((next.mcpServers as Record<string, unknown>)['sequential-thinking']).toBeDefined();
   });
@@ -80,12 +80,10 @@ describe('config draft providers', () => {
     const draft = draftOf(SOURCE);
     const next = writeProviderDraft(draft, 0, {
       ...readProviderDraft(providerEntries(draft)[0]),
-      name: '',
       getModelUrl: '',
       models: [],
     });
     const [provider] = providerEntries(next) as Record<string, unknown>[];
-    expect('name' in provider).toBe(false);
     expect('get_model_url' in provider).toBe(false);
     expect('models' in provider).toBe(false);
     // 原本就有的 api_key 保留空串表示「显式清空」，而不是删键

@@ -4,7 +4,6 @@ import type { ProviderDefinition } from './types.js';
 
 const DEEPSEEK: ProviderDefinition = {
   id: 'deepseek',
-  name: 'DeepSeek',
   api_base: 'https://api.deepseek.com',
   protocol: 'openai_chat_completions',
   api_key: '',
@@ -41,7 +40,6 @@ describe('synthesizeEnvProviders', () => {
     expect(providers).toHaveLength(2);
     expect(providers[0]).toEqual({
       id: 'openai',
-      name: 'OpenAI (environment)',
       api_base: 'https://api.openai.com/v1',
       api_key: 'sk-test',
       protocol: 'openai_responses',

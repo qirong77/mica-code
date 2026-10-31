@@ -1,8 +1,10 @@
 import { resolveMicaHome } from '@packages/mica-config/index.js'
+import { acquireProcessLock } from '@packages/mica-common/processLock.js'
 import {
   annotationsOf,
   readAllSessionAnnotations,
   readSessionAnnotations,
+  sessionAnnotationsPath,
   sessionAnnotationsExists,
   setSessionAnnotations,
   toggleSessionAnnotation,
@@ -57,9 +59,16 @@ export function setSessionAnnotation({ pluginId, sessionId, optionId, on } = {})
   }
   if (!sessionAnnotationsExists(home, id)) return { ok: false, error: '插件没有提供会话标记' }
 
-  const data = readSessionAnnotations(home, id)
-  if (!data.options.some((item) => item.id === option)) return { ok: false, error: '未知的标记项' }
+  // 和插件自己的命令共用同一把跨进程锁：两边都先读再写，否则后写的一方会覆盖另一方的修改。
+  const release = acquireProcessLock(`${sessionAnnotationsPath(home, id)}.lock`)
+  if (!release) return { ok: false, error: '其他会话正在更新标记，稍后重试' }
+  try {
+    const data = readSessionAnnotations(home, id)
+    if (!data.options.some((item) => item.id === option)) return { ok: false, error: '未知的标记项' }
 
-  writeSessionAnnotations(home, id, applyAnnotation(data, session, option, on))
-  return { ok: true, providers: readAllSessionAnnotations(home) }
+    writeSessionAnnotations(home, id, applyAnnotation(data, session, option, on))
+    return { ok: true, providers: readAllSessionAnnotations(home) }
+  } finally {
+    release()
+  }
 }

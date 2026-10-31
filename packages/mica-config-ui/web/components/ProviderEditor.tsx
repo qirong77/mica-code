@@ -71,8 +71,8 @@ export function ProviderEditor({
           onClick={onToggleExpanded}
         >
           <ChevronIcon size={13} className="provider-row-chevron" aria-hidden="true" />
-          <span className="provider-row-name" title={fields.name || fields.id}>
-            {fields.name.trim() || fields.id.trim() || '新的服务商'}
+          <span className="provider-row-name" title={fields.id}>
+            {fields.id.trim() || '新的服务商'}
           </span>
           <span className="provider-row-protocol">{providerProtocolLabel(fields.protocol)}</span>
           <span className="provider-row-meta" title={fields.apiBase}>
@@ -92,27 +92,16 @@ export function ProviderEditor({
 
       {open ? (
         <div className="provider-row-body">
-          <SettingRow label="标识" hint="会话里按这个名字引用" error={errorFor('id')}>
+          <SettingRow label="名称" hint="会话里按这个名字引用" error={errorFor('id')}>
             <input
               className={invalidClass(errorFor('id'))}
               value={fields.id}
               disabled={disabled}
               spellCheck={false}
               placeholder="例如 deepseek"
-              aria-label={`服务商 ${index + 1} 标识`}
+              aria-label={`服务商 ${index + 1} 名称`}
               aria-invalid={Boolean(errorFor('id'))}
               onChange={(event) => patch({ id: event.target.value })}
-            />
-          </SettingRow>
-
-          <SettingRow label="显示名称" error={errorFor('name')}>
-            <input
-              className="text-input"
-              value={fields.name}
-              disabled={disabled}
-              placeholder="可选"
-              aria-label={`服务商 ${index + 1} 显示名称`}
-              onChange={(event) => patch({ name: event.target.value })}
             />
           </SettingRow>
 

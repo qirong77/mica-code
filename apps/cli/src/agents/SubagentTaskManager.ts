@@ -68,6 +68,7 @@ export type SubagentTaskRecord = {
   parent_task_id?: string;
   /** 发起这次委派的插件 id（插件能力面），用于按插件收窄任务视图。 */
   pluginId?: string;
+  activity?: 'delegation' | 'maintenance';
   activities?: SubagentTaskActivity[];
   timeline?: SubagentTaskTimelineEntry[];
   /** True once older timeline entries were dropped to bound the record. */
@@ -101,6 +102,7 @@ export type StartSubagentTaskOptions = {
   ownedPaths?: string[];
   parentTaskId?: string;
   pluginId?: string;
+  activity?: 'delegation' | 'maintenance';
   run: (signal: AbortSignal) => Promise<{ result: string; usage?: AgentUsageSummary }>;
   getUsage?: () => AgentUsageSummary;
 };
@@ -216,6 +218,7 @@ export class SubagentTaskManager {
       status: 'running',
       ...(options.parentTaskId ? { parent_task_id: options.parentTaskId } : {}),
       ...(options.pluginId ? { pluginId: options.pluginId } : {}),
+      ...(options.activity ? { activity: options.activity } : {}),
       activities: [],
       started_at: new Date().toISOString(),
     };

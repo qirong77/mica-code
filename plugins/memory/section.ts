@@ -56,8 +56,8 @@ export class MemorySnapshotCache {
 
     // 命中也要重新插入：Map 的插入顺序当 LRU 用，否则长期运行的进程会先淘汰掉
     // 正在用的会话。
-    this.entries.delete(key);
     if (cached.projectDir === projectDir) {
+      this.entries.delete(key);
       this.entries.set(key, cached);
       return cached.snapshots;
     }
@@ -158,7 +158,11 @@ function formatStoreHeader(snapshot: MemoryStoreSnapshot, clamped: ClampedEntrie
   const label = storeTitle(snapshot);
   const percent = snapshot.limit > 0 ? Math.round((snapshot.chars / snapshot.limit) * 100) : 0;
   const location = snapshot.projectDir ? `（${snapshot.projectDir}）` : '';
-  const over = clamped.dropped > 0 ? ` · 超出预算，已省略 ${clamped.dropped} 条` : '';
+  const over = clamped.clipped
+    ? ` · 超出预算，已截断条目${clamped.dropped > 0 ? `，省略 ${clamped.dropped} 条` : ''}`
+    : clamped.dropped > 0
+      ? ` · 超出预算，已省略 ${clamped.dropped} 条`
+      : '';
   return `### ${label}${location} · ${percent}% · ${snapshot.chars}/${snapshot.limit} 字符${over}`;
 }
 

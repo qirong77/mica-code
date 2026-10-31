@@ -76,14 +76,12 @@ async function resolveRef(cwd, ref, kinds = ['branch', 'tag']) {
   return { root: refs.root, match }
 }
 
-async function createBranch(cwd, name, startRef) {
+async function createBranch(cwd, name) {
   const branch = typeof name === 'string' ? name.trim() : ''
   if (!branch) throw new Error('请输入分支名称')
   const { root } = await getRepository(cwd)
   await git(root, ['check-ref-format', '--branch', branch])
-  let start
-  if (startRef) start = (await resolveRef(root, startRef)).match.ref
-  await git(root, ['checkout', '-b', branch, ...(start ? [start] : [])])
+  await git(root, ['checkout', '-b', branch])
   return getStatus(root)
 }
 
@@ -136,9 +134,9 @@ export function registerGitIpc() {
     }
   })
 
-  ipcMain.handle('git:create-branch', async (_event, { cwd, name, startRef } = {}) => {
+  ipcMain.handle('git:create-branch', async (_event, { cwd, name } = {}) => {
     try {
-      return { status: await createBranch(cwd, name, startRef), error: null }
+      return { status: await createBranch(cwd, name), error: null }
     } catch (error) {
       return { status: null, error: gitErrorMessage(error) }
     }

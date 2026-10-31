@@ -128,6 +128,16 @@ describe('runSessionMenuPluginAction', () => {
     expect(result.message).toContain('剪贴板')
   })
 
+  test('does not show the plugin success message when the clipboard write fails', async () => {
+    const result = await runSessionMenuPluginAction({
+      item,
+      target,
+      run: async () => ({ ok: true, copyText: '# 会话', message: '已复制会话 Markdown' }),
+      copy: async () => false
+    })
+    expect(result).toEqual({ ok: false, message: '复制失败：剪贴板不可用' })
+  })
+
   test('reports host rejections and thrown transport errors', async () => {
     const rejected = await runSessionMenuPluginAction({
       item,

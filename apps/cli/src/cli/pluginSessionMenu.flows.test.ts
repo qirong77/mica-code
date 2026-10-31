@@ -251,7 +251,7 @@ suite('会话右键菜单动作（用户插件 + mock provider）', () => {
       const [path, model, providerId, messageCount] = String(result.copyText).split('|');
       expect(realpathSync(String(path))).toBe(realpathSync(join(home, 'work')));
       expect(model).toBe('mock-chat');
-      expect(providerId).toBe('Mock');
+      expect(providerId).toBe('mock');
       // 一轮「你好」+ 一条回答
       expect(messageCount).toBe('2');
     } finally {

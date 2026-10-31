@@ -170,6 +170,24 @@ describe('PluginSubagentHost type registry', () => {
 });
 
 describe('PluginSubagentHost run', () => {
+  it('classifies maintenance before publishing the first task update and still records usage', async () => {
+    const pending = createPendingQuery();
+    const harness = createHarness({ query: pending.query });
+    harness.api.registerType(exploreType({ activity: 'maintenance' }));
+    const seen: string[] = [];
+    const subscription = harness.taskManager.subscribe((task) => { seen.push(task.activity ?? 'delegation'); });
+    const request = harness.api.run({ description: 'maintain state', prompt: 'update internal notes' });
+    await flushAsyncWork();
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every(value => value === 'maintenance')).toBe(true);
+    pending.settle('done');
+    const result = await request;
+    expect(result.status).toBe('completed');
+    expect(harness.recordSubagentUsage).toHaveBeenCalledTimes(1);
+    expect(harness.taskManager.get(result.taskId, harness.runtime)).toMatchObject({ activity: 'maintenance' });
+    subscription();
+  });
+
   it('runs a subagent and records its usage once', async () => {
     const pending = createPendingQuery();
     const harness = createHarness({

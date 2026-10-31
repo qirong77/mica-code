@@ -23,9 +23,9 @@ describe('parseNotesInput', () => {
       ok: false,
       message: 'append requires content to be a string',
     });
-    expect(parseNotesInput({ action: 'replace', content: '   ' })).toEqual({
+    expect(parseNotesInput({ action: 'append', content: '   ' })).toEqual({
       ok: false,
-      message: 'replace requires non-empty content',
+      message: 'append requires non-empty content',
     });
   });
 
@@ -81,6 +81,15 @@ describe('SessionNotesTool', () => {
     const result = await tool.execute({ action: 'replace', content: '# 新内容' });
     expect(notes()).toBe('# 新内容');
     expect(result).toBe('Session notes replaced: now 5 characters, 1 lines.');
+  });
+
+  it('clears obsolete notes with an empty replacement', async () => {
+    const { tool, notes } = createTool('# 已失效的约束');
+
+    await tool.execute({ action: 'replace', content: '' });
+
+    expect(notes()).toBe('');
+    await expect(tool.execute({ action: 'read' })).resolves.toBe('Session notes are empty.');
   });
 
   it('normalizes trailing whitespace so an unchanged save is not seen as an edit', async () => {

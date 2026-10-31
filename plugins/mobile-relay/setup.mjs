@@ -184,9 +184,11 @@ try {
 
 /** 中转机上已登记的机器；首次部署时为空。 */
 let knownAgents = [];
+let relayConfiguration = {};
 try {
   const raw = String(ssh(`cat ${agentsFile} 2>/dev/null || true`) || '').trim();
   const parsed = raw ? JSON.parse(raw) : { agents: [] };
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) relayConfiguration = parsed;
   knownAgents = Array.isArray(parsed?.agents) ? parsed.agents : [];
 } catch {
   knownAgents = [];
@@ -214,10 +216,12 @@ process.stdout.write(
 );
 
 const agentsPayload = {
+  ...relayConfiguration,
   version: 1,
   agents: [
     ...knownAgents.filter((agent) => agent?.token !== token),
     {
+      ...previous,
       id: agentIdOf(token),
       label,
       token,

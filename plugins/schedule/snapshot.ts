@@ -86,7 +86,7 @@ export function normalizeSnapshot(value: unknown): ScheduleSnapshot {
         days: asArray(item.days).filter((day): day is string => typeof day === 'string'),
         range: item.range !== false,
       }))
-      .filter((item) => item.start && item.end);
+      .filter((item) => isValidRange(item.start, item.end));
     if (stages.length === 0) continue;
     groups.push({
       id: group.id,

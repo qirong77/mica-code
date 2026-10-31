@@ -75,11 +75,52 @@ describe('formatMemorySection', () => {
 
     expect(text).toContain('- 长');
     expect(text).toContain('…');
+    expect(text).toContain('超出预算，已截断条目');
     expect(text).not.toContain('长'.repeat(21));
   });
 });
 
 describe('MemorySnapshotCache', () => {
+  it('retains the frozen user and memory snapshot when loading a different project fails', () => {
+    const cache = new MemorySnapshotCache();
+    const initial = cache.get(
+      'session-a',
+      '/repo/old',
+      loaderFor((target) => snapshot({ target, entries: ['frozen'] })),
+    );
+    expect(() =>
+      cache.get('session-a', '/repo/new', {
+        loadAll: () => [],
+        loadTarget: () => {
+          throw new Error('temporary read failure');
+        },
+      }),
+    ).toThrow('temporary read failure');
+    expect(
+      cache.get(
+        'session-a',
+        '/repo/old',
+        loaderFor(() => snapshot({ entries: ['changed'] })),
+      ),
+    ).toBe(initial);
+  });
+
+  it('keeps active snapshots frozen through frequent rendering and session eviction', () => {
+    const cache = new MemorySnapshotCache();
+    let reads = 0;
+    const loader = loaderFor((target) => {
+      reads += 1;
+      return snapshot({ target });
+    });
+    const frozen = cache.get('active', '/repo', loader);
+    for (let index = 0; index < 2_000; index += 1) {
+      cache.get(`other-${index}`, '/repo', loader);
+      expect(cache.get('active', '/repo', loader)).toBe(frozen);
+    }
+    expect(cache.size).toBe(32);
+    expect(reads).toBe(6_003);
+  });
+
   it('freezes the snapshot per key until it is invalidated', () => {
     const cache = new MemorySnapshotCache();
     let version = 1;

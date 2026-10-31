@@ -67,7 +67,7 @@ export type PluginSessionInfo = {
    */
   parentSessionId?: string;
   /**
-   * 这条会话正在用的服务商（名字，没有名字时是 id）与模型。
+   * 这条会话正在用的服务商 id 与模型。
    *
    * 与会话配置一样每轮可能变（`/model`、桌面端选择器），所以每次读，不要缓存。
    * 需要「把这条会话原样描述出来」的插件（导出、记录、排障）读它，不必自己去猜配置来源。
@@ -111,6 +111,8 @@ export type PluginSessionRenameOptions = {
  * 在内核里，否则一个插件就能破坏 turn 的时序假设。
  */
 export type PluginSessionApi = {
+  /** 捕获当前会话或工具上下文所属的不透明 owner，供异步 notice 和会话隔离使用。 */
+  captureOwner?(context?: unknown): unknown;
   describe(owner?: unknown): PluginSessionInfo | null;
   /** 已提交的对话消息（UI 视角，不含 notice 与工具消息）。 */
   messages(owner?: unknown): MicaUiConversationMessage[];

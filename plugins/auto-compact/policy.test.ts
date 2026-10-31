@@ -64,15 +64,39 @@ describe('normalizeCounters', () => {
       quickRuns: 2,
       modelRuns: 1,
       lastRunAt: '2026-10-01T00:00:00.000Z',
+      turnStartedAt: '2026-09-30T23:59:00.000Z',
       lastKind: 'model',
       lastSavedTokens: 4096,
       lastActivityAt: '2026-09-30T23:00:00.000Z',
+      lastAttemptAt: null,
+      lastAttemptTokens: 0,
     };
     expect(normalizeCounters(stored)).toEqual(stored);
   });
 });
 
 describe('decideAutoCompactStep', () => {
+  it.each([32_000, 128_000, 256_000])(
+    'uses model capacity before the fixed threshold for a %d-token model',
+    (window) => {
+      const input = { settings: settings(), counters: counters(), contextWindowSize: window };
+      expect(decideAutoCompactStep({ ...input, ctxTokens: window * 0.54 })).toBeNull();
+      expect(decideAutoCompactStep({ ...input, ctxTokens: window * 0.56 })).toBe('quick');
+      expect(shouldEscalateToModel({ ...input, ctxTokens: window * 0.76 })).toBe(true);
+    },
+  );
+
+  it('bypasses a successful-run interval near capacity but backs off after a recent no-op', () => {
+    const nowMs = Date.parse('2026-10-31T00:00:00Z');
+    const input = { settings: settings({ minIntervalMs: 30 * 60_000 }), contextWindowSize: 128_000, nowMs };
+    const state = counters({ lastRunAt: new Date(nowMs - 120_000).toISOString() });
+    expect(decideAutoCompactStep({ ...input, counters: state, ctxTokens: 100_000 })).toBeNull();
+    expect(decideAutoCompactStep({ ...input, counters: state, ctxTokens: 120_000 })).toBe('quick');
+    const attempted = { ...state, lastAttemptAt: new Date(nowMs - 500).toISOString(), lastAttemptTokens: 120_000 };
+    expect(decideAutoCompactStep({ ...input, counters: attempted, ctxTokens: 120_001 })).toBeNull();
+    expect(decideAutoCompactStep({ ...input, counters: attempted, ctxTokens: 140_000 })).toBe('quick');
+  });
+
   it('does nothing while the context is below both thresholds', () => {
     expect(decideAutoCompactStep({ settings: settings(), counters: counters(), ctxTokens: 50_000 })).toBeNull();
   });
@@ -118,6 +142,37 @@ describe('decideAutoCompactStep', () => {
       decideAutoCompactStep({ settings: throttled, counters: recent, ctxTokens: 900_000, nowMs: 1_030_000 }),
     ).toBeNull();
     expect(decideAutoCompactStep({ settings: throttled, counters: recent, ctxTokens: 900_000, nowMs: 1_061_000 })).toBe(
+      'quick',
+    );
+  });
+
+  // 间隔只服务于「模型还在同一轮里跑」：跨轮再超阈值时必须立刻压，否则用户会看到
+  // 插件明明该工作时却因为半小时前压过而装死。
+  it('only throttles repeated compactions inside the same running turn', () => {
+    const nowMs = Date.parse('2026-10-31T00:00:00Z');
+    const throttled = settings({ minIntervalMs: 30 * 60_000 });
+    const lastRunAt = new Date(nowMs - 5 * 60_000).toISOString();
+
+    const newTurn = counters({
+      quickRuns: 1,
+      lastRunAt,
+      turnStartedAt: new Date(nowMs - 60_000).toISOString(),
+    });
+    expect(decideAutoCompactStep({ settings: throttled, counters: newTurn, ctxTokens: 310_000, nowMs })).toBe('quick');
+
+    const sameTurn = counters({
+      quickRuns: 1,
+      lastRunAt,
+      turnStartedAt: new Date(nowMs - 10 * 60_000).toISOString(),
+    });
+    expect(decideAutoCompactStep({ settings: throttled, counters: sameTurn, ctxTokens: 310_000, nowMs })).toBeNull();
+
+    const intervalElapsed = counters({
+      quickRuns: 1,
+      lastRunAt: new Date(nowMs - 31 * 60_000).toISOString(),
+      turnStartedAt: new Date(nowMs - 40 * 60_000).toISOString(),
+    });
+    expect(decideAutoCompactStep({ settings: throttled, counters: intervalElapsed, ctxTokens: 310_000, nowMs })).toBe(
       'quick',
     );
   });

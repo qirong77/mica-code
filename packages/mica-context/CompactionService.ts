@@ -1,3 +1,5 @@
+import { estimateContextTokens, estimateTextTokens } from './tokenEstimate.js';
+
 export const COMPACT_SUMMARY_PREFIX = '[Mica compact checkpoint]';
 export const COMPACT_BOUNDARY_PREFIX = '[Mica compact boundary]';
 
@@ -64,6 +66,7 @@ export type CompactInput = {
    */
   summarize?(transcript: string, prompt: string): Promise<string>;
   options?: CompactOptions;
+  signal?: AbortSignal;
 };
 
 export type CompactMode = 'summarized' | 'pruned';
@@ -98,6 +101,12 @@ export type CompactOptions = {
   minRecentRounds?: number;
   maxRecentRounds?: number;
   summaryInputTokenBudget?: number;
+  /** Keep newest messages verbatim, extending the boundary to keep tool pairs together. */
+  preserveRecentMessages?: number;
+  /** Keep newest user rounds verbatim to protect the current task during automatic compaction. */
+  preserveRecentRounds?: number;
+  /** Keep the latest user request verbatim while summarizing older batches within that turn. */
+  preserveLatestUserMessage?: boolean;
 };
 
 export type CompactResult = {
@@ -155,6 +164,7 @@ export function isCompactionNotNeededError(error: unknown): boolean {
 
 export class CompactionService {
   async compact(input: CompactInput): Promise<CompactResult> {
+    input.signal?.throwIfAborted();
     const originalMessages = input.messages;
     const beforeCount = originalMessages.length;
     const options = input.options ?? {};
@@ -172,7 +182,7 @@ export class CompactionService {
     if (activeMessages.length < minMessages) {
       throw new CompactionNotNeededError();
     }
-    if (!options.lightweightPrune && groupMessagesByRound(activeMessages).length < 2) {
+    if (!options.lightweightPrune && !options.preserveLatestUserMessage && groupMessagesByRound(activeMessages).length < 2) {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
 
@@ -264,20 +274,26 @@ export class CompactionService {
       throw new CompactionNotNeededError('当前会话没有可本地清理的内容，暂不需要快速压缩');
     }
 
-    if (groupMessagesByRound(activeMessages).length < 2) {
+    if (groupMessagesByRound(activeMessages).length < 2 && !options.preserveLatestUserMessage) {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
 
-    let splitIndex = chooseRecentStartIndex(activeMessages, compactedActiveMessages, options);
+    const protectedStart = protectedRecentStart(activeMessages, options);
+    let splitIndex = Math.min(chooseRecentStartIndex(activeMessages, compactedActiveMessages, options), protectedStart);
     splitIndex = adjustStartForToolPairs(activeMessages, splitIndex);
+    // One user turn may contain hundreds of tool batches. Keep its exact request
+    // separately so the accumulated work can still be summarized.
+    if (splitIndex <= 0 && options.preserveLatestUserMessage && protectedStart > 0) {
+      splitIndex = protectedStart;
+    }
     if (splitIndex <= 0 && options.force) {
-      splitIndex = chooseForcedRecentStartIndex(activeMessages, compactedActiveMessages, options);
+      splitIndex = Math.min(chooseForcedRecentStartIndex(activeMessages, compactedActiveMessages, options), protectedStart);
       splitIndex = adjustStartForToolPairs(activeMessages, splitIndex);
     }
 
     let messagesToSummarize = compactedActiveMessages.slice(0, splitIndex);
-    let keptMessages = compactedActiveMessages.slice(splitIndex);
-    if (messagesToSummarize.length === 0 && options.force) {
+    let keptMessages = (protectedStart < activeMessages.length ? activeMessages : compactedActiveMessages).slice(splitIndex);
+    if (messagesToSummarize.length === 0 && options.force && protectedStart === activeMessages.length) {
       messagesToSummarize = compactedActiveMessages;
       keptMessages = [];
     }
@@ -285,6 +301,10 @@ export class CompactionService {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
 
+    const latestUserIndex = options.preserveLatestUserMessage ? findLatestUserIndex(activeMessages) : -1;
+    if (latestUserIndex >= 0 && latestUserIndex < splitIndex) {
+      keptMessages = [activeMessages[latestUserIndex], ...keptMessages];
+    }
     let summarizedMessageCount = messagesToSummarize.length;
     messagesToSummarize = fitMessagesToSummaryBudget(messagesToSummarize, getSummaryInputTokenBudget(options));
     if (messagesToSummarize.length === 0) {
@@ -314,10 +334,12 @@ export class CompactionService {
         throw new Error('compact requires a summarize callback for model summarization');
       }
       for (;;) {
+        input.signal?.throwIfAborted();
         const transcript = buildTranscript(messagesToSummarize);
         summaryInputTokenEstimate = estimateTokens(transcript);
         try {
           summary = cleanSummary(await summarize(transcript, prompt));
+          input.signal?.throwIfAborted();
         } catch (error) {
           if (!isPromptTooLongError(error) || promptTooLongRetries >= maxRetries) throw error;
           promptTooLongRetries++;
@@ -341,7 +363,9 @@ export class CompactionService {
 
     await summarizeCurrentMessages();
 
-    let finalKeptMessages = compactKeptMessages(keptMessages, options, getRecentTokenBudget(options));
+    let finalKeptMessages = options.preserveRecentRounds || options.preserveRecentMessages
+      ? keptMessages
+      : compactKeptMessages(keptMessages, options, getRecentTokenBudget(options));
     const initialKeptRounds = groupMessagesByRound(finalKeptMessages).length;
     let reducedRecentRounds = 0;
     let strategy: CompactStrategy = finalKeptMessages.length > 0 ? 'summary_with_recent' : 'summary_only_fallback';
@@ -366,6 +390,7 @@ export class CompactionService {
 
       const nextKeptMessages = dropOldestRecentRound(finalKeptMessages);
       if (nextKeptMessages.length === finalKeptMessages.length) break;
+      if (activeMessages.length - nextKeptMessages.length > protectedStart) break;
 
       const movedToSummary = finalKeptMessages.slice(0, finalKeptMessages.length - nextKeptMessages.length);
       summarizedMessageCount += movedToSummary.length;
@@ -373,11 +398,9 @@ export class CompactionService {
         [createCompactSummaryMessage(summary, true, userMessageTemplate), ...movedToSummary],
         getSummaryInputTokenBudget(options),
       );
-      finalKeptMessages = compactKeptMessages(
-        nextKeptMessages,
-        options,
-        Math.floor(getRecentTokenBudget(options) * 0.75),
-      );
+      finalKeptMessages = options.preserveRecentRounds || options.preserveRecentMessages
+        ? nextKeptMessages
+        : compactKeptMessages(nextKeptMessages, options, Math.floor(getRecentTokenBudget(options) * 0.75));
       const nextKeptRounds = groupMessagesByRound(finalKeptMessages).length;
       reducedRecentRounds = Math.max(reducedRecentRounds, Math.max(0, initialKeptRounds - nextKeptRounds));
       strategy = finalKeptMessages.length > 0 ? 'summary_with_recent' : 'summary_only_fallback';
@@ -772,7 +795,14 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
   let trimmedArguments = 0;
   let replacedMediaItems = 0;
   const compactedMessages: unknown[] = [];
-  for (const message of messages) {
+  const protectedStart = protectedRecentStart(messages, options);
+  const latestUserIndex = options.preserveLatestUserMessage ? findLatestUserIndex(messages) : -1;
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index];
+    if (index >= protectedStart || index === latestUserIndex) {
+      compactedMessages.push(message);
+      continue;
+    }
     // 这条路径会剥掉 encrypted_content，reasoning 条目随之永久失效：ResponsesClient
     // 发送请求与恢复快照时都会丢弃没有 encrypted_content 的 reasoning item
     // （stripUnusableResponseInputItems），所以留着它既不会被发送也不会被落盘，
@@ -833,10 +863,29 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
   };
 }
 
+function protectedRecentStart(messages: unknown[], options: CompactOptions): number {
+  let start = messages.length;
+  if (Number.isFinite(options.preserveRecentMessages) && options.preserveRecentMessages! > 0) {
+    start = Math.max(0, messages.length - Math.ceil(options.preserveRecentMessages!));
+  }
+  if (Number.isFinite(options.preserveRecentRounds) && options.preserveRecentRounds! > 0) {
+    const rounds = groupMessagesByRound(messages);
+    start = Math.min(start, rounds[Math.max(0, rounds.length - Math.ceil(options.preserveRecentRounds!))]?.start ?? 0);
+  }
+  return adjustStartForToolPairs(messages, start);
+}
+
 // 找出消息里所有工具调用的 arguments 并做语义化裁剪。Responses 的
 // function_call 是 `{ name, arguments }`，Chat Completions 的 tool_calls 条目是
 // `{ function: { name, arguments } }`——两条路径的 arguments 都与 name 同级，
 // 所以这里按 `arguments` 键递归即可，不需要额外定位工具名。
+function findLatestUserIndex(messages: unknown[]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (isConversationUserMessage(messages[index])) return index;
+  }
+  return -1;
+}
+
 function trimToolArguments(value: unknown, counter: { trimmed: number }): unknown {
   if (Array.isArray(value)) {
     let changed = false;
@@ -1468,11 +1517,11 @@ function extractText(value: unknown): string {
 }
 
 function estimateMessagesTokens(messages: unknown[]): number {
-  return estimateTokens(stringifyValue(messages));
+  return estimateContextTokens(messages);
 }
 
 function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  return estimateTextTokens(text);
 }
 
 function cleanSummary(summary: string): string {

@@ -54,13 +54,16 @@ export default function setup(ctx: PluginContext): void {
 
       if (!result.ok) {
         // 「没有可提交的变化」这类状态不是故障：报成 warn 会把插件的健康状态一路标红。
-        // 没有 code 就是执行期抛错（模型请求失败、git 命令失败）。
-        const failed = result.code === undefined;
+        // 执行期抛错与提交后的推送失败都需要用户处理。
+        const failed = result.code === undefined || result.code === 'push_failed';
         if (failed) {
           ctx.health.report({
             level: 'error',
             message: `上一次提交失败：${result.error ?? '未知错误'}`,
-            hint: '检查工作区状态与接口配置，然后重试',
+            hint:
+              result.code === 'push_failed'
+                ? '提交已完成，检查远程连接后直接重试 git push'
+                : '检查工作区状态与接口配置，然后重试',
           });
         }
         notify(ctx, failed ? 'error' : 'warn', `commit: ${result.error}`);

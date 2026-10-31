@@ -29,6 +29,8 @@ export type PluginModelRequest = {
    * 同一插件可以有多条用途，各自单独记账。
    */
   purpose: string;
+  /** Opaque originating session captured before asynchronous work starts. */
+  owner?: unknown;
   /** 系统提示词。 */
   system: string;
   /** 唯一的用户消息正文。 */

@@ -247,9 +247,13 @@ export function applyCuratorOperations(applier: MemoryApplier, operations: Curat
   let applied = 0;
   const failures: CuratorApplyOutcome['failures'] = [];
   for (const [target, batch] of grouped) {
-    const result = applier.apply(target, batch);
-    if (result.ok) applied += result.applied.length;
-    else failures.push({ target, message: result.error.message });
+    try {
+      const result = applier.apply(target, batch);
+      if (result.ok) applied += result.applied.length;
+      else failures.push({ target, message: result.error.message });
+    } catch (error) {
+      failures.push({ target, message: error instanceof Error ? error.message : String(error) });
+    }
   }
   return { applied, failures };
 }

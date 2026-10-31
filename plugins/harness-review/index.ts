@@ -5,6 +5,7 @@ import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
 import { HarnessRecorder, type CaptureOptions } from './engine.js';
 
 const STATUSES = ['open', 'accepted', 'dismissed', 'validated', 'regressed'] as const;
+const DEFAULT_CAPTURE: CaptureOptions = { captureContent: true, maxEventChars: 4000, maxEventsPerRun: 2000 };
 type ReviewStatus = (typeof STATUSES)[number];
 
 /** Recording is driven by runtime hooks; it never asks the task model to remember to reflect. */
@@ -19,15 +20,23 @@ export default function setup(ctx: PluginContext): void {
   const hook = ctx.hooks.on<AgentObservationEvent>(
     'agent:observe',
     (event) => {
-      const values = ctx.settings.get();
-      // A setting change takes effect on the next run. The recorder retains a run's initial options.
-      if (event.type === 'run:start' && values.enabled === 'false') return;
-      const options: CaptureOptions = {
-        captureContent: values.captureContent !== 'false',
-        maxEventChars: count(values.maxEventChars, 4000, 200, 20000),
-        maxEventsPerRun: count(values.maxEventsPerRun, 2000, 20, 10000),
-      };
-      recorder.observe(event, ctx.session?.describe(event.owner) ?? null, options);
+      // Options and session metadata are frozen at run:start. Settings reads may
+      // stat the filesystem, so keep them out of the per-event observation path.
+      if (event.type !== 'run:start') {
+        recorder.observe(event, null, DEFAULT_CAPTURE);
+        return;
+      }
+      try {
+        const values = ctx.settings.get();
+        if (values.enabled === 'false') return;
+        recorder.observe(event, ctx.session?.describe(event.owner) ?? null, {
+          captureContent: values.captureContent !== 'false',
+          maxEventChars: count(values.maxEventChars, 4000, 200, 20000),
+          maxEventsPerRun: count(values.maxEventsPerRun, 2000, 20, 10000),
+        });
+      } catch {
+        // Observing a task must never interrupt it, including settings/session failures.
+      }
     },
     { pluginId: ctx.pluginId },
   );
@@ -152,7 +161,7 @@ export class HarnessReviewTool extends MicaTool {
     try {
       return JSON.stringify(await this.run(input), null, 2);
     } catch (error) {
-      return JSON.stringify({ error: error instanceof Error ? error.message : '复盘操作失败' });
+      return JSON.stringify({ ok: false, error: error instanceof Error ? error.message : '复盘操作失败' });
     }
   }
 

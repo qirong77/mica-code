@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SidecarTranscript } from './transcript.js';
-import { waitSatisfied, type SidecarEntry } from './registry.js';
+import { waitBaseline, waitSatisfied, type SidecarEntry } from './registry.js';
 import { renderSidecar } from './views.js';
 
 const delta = (text: string) => ({ method: 'item/agentMessage/delta', params: { delta: text } });
@@ -80,7 +80,7 @@ describe('SidecarTranscript', () => {
     expect(transcript.turns[0]).toMatchObject({ status: 'failed', error: 'provider 401' });
   });
 
-  it('marks still-running tools done when the turn ends', () => {
+  it('marks a still-running tool interrupted when the turn is cut short', () => {
     const transcript = new SidecarTranscript();
     transcript.apply(turnStarted());
     transcript.apply({
@@ -88,7 +88,44 @@ describe('SidecarTranscript', () => {
       params: { item: { type: 'commandExecution', id: 'c1', displayText: 'x' } },
     });
     transcript.apply(turnCompleted('interrupted'));
-    expect(transcript.turns[0]?.tools[0]?.status).toBe('completed');
+    // 记成 completed 会让「被打断的 sleep 60」看起来像正常跑完了。
+    expect(transcript.turns[0]?.tools[0]?.status).toBe('interrupted');
+  });
+
+  it('marks a still-running tool as failed when the turn fails', () => {
+    const transcript = new SidecarTranscript();
+    transcript.apply(turnStarted());
+    transcript.apply({
+      method: 'item/started',
+      params: { item: { type: 'commandExecution', id: 'c1', displayText: 'x' } },
+    });
+    transcript.apply(turnCompleted('failed', 'provider 401'));
+    expect(transcript.turns[0]?.tools[0]?.status).toBe('error');
+  });
+
+  it('stops re-copying the body once it hits the cap', () => {
+    const transcript = new SidecarTranscript();
+    transcript.apply(turnStarted());
+    transcript.apply(delta('x'.repeat(30_000)));
+    const capped = transcript.activeTurn!.text;
+    expect(capped).toContain('[截断');
+    // 到上限之后的 delta 不再把 24k 字符的正文复制一遍：一条刷屏的回答有几千个
+    // delta，旧写法光拼接就要复制几百 MB，而复制出来的部分马上被切掉。
+    expect(transcript.apply(delta('y'.repeat(10)))).toBe(false);
+    expect(transcript.activeTurn!.text).toBe(capped);
+  });
+
+  it('resumes appending when a later completed message is short again', () => {
+    const transcript = new SidecarTranscript();
+    transcript.apply(turnStarted());
+    transcript.apply(delta('x'.repeat(30_000)));
+    transcript.apply({
+      method: 'item/completed',
+      params: { item: { type: 'agentMessage', id: 'm1', text: '短' } },
+    });
+    expect(transcript.activeTurn?.text).toBe('短');
+    expect(transcript.apply(delta('。'))).toBe(true);
+    expect(transcript.activeTurn?.text).toBe('短。');
   });
 
   it('projects token usage and surfaces the last warning once', () => {
@@ -224,30 +261,82 @@ describe('renderSidecar', () => {
 describe('waitSatisfied', () => {
   it('waits for idle only once a turn has actually finished', () => {
     const transcript = new SidecarTranscript();
-    expect(waitSatisfied(transcript, 'idle', null, 0).done).toBe(true);
+    expect(waitSatisfied(transcript, 'idle', null, waitBaseline(transcript)).done).toBe(true);
     transcript.apply(turnStarted());
-    expect(waitSatisfied(transcript, 'idle', null, 0).done).toBe(false);
+    expect(waitSatisfied(transcript, 'idle', null, waitBaseline(transcript)).done).toBe(false);
     transcript.apply(turnCompleted());
-    expect(waitSatisfied(transcript, 'idle', null, 0).done).toBe(true);
+    expect(waitSatisfied(transcript, 'idle', null, waitBaseline(transcript)).done).toBe(true);
   });
 
-  it('matches text while the turn is still streaming', () => {
+  it('does not call it idle while a steer is still waiting to be consumed', () => {
+    // 真实时序：send 之后这一轮刚好收尾，那条追加要等下一轮才被消费。只看 busy
+    // 的等待会在这里返回，拿到的是不含追加的结果。
+    const transcript = new SidecarTranscript();
+    transcript.apply(turnStarted('t1'));
+    const baseline = waitBaseline(transcript);
+    transcript.recordUserInput('追加一句');
+    transcript.apply(turnCompleted());
+    expect(transcript.busy).toBe(false);
+    expect(waitSatisfied(transcript, 'idle', null, baseline).done).toBe(false);
+    transcript.apply(turnStarted('t2'));
+    expect(waitSatisfied(transcript, 'idle', null, baseline).done).toBe(false);
+    transcript.apply(turnCompleted());
+    expect(waitSatisfied(transcript, 'idle', null, baseline).done).toBe(true);
+  });
+
+  it('matches the latest full text, including output already present when the wait starts', () => {
     const transcript = new SidecarTranscript();
     transcript.apply(turnStarted());
     transcript.apply(delta('构建失败：找不到模块 a'));
-    expect(waitSatisfied(transcript, 'text', /构建失败/, 0)).toMatchObject({ done: true });
-    expect(waitSatisfied(transcript, 'text', /成功/, 0).done).toBe(false);
+    expect(waitSatisfied(transcript, 'text', /构建失败/, waitBaseline(transcript)).done).toBe(true);
+
+    const baseline = waitBaseline(transcript);
+    transcript.apply(delta('，改完重新构建成功'));
+    expect(waitSatisfied(transcript, 'text', /重新构建成功/, baseline)).toMatchObject({ done: true });
+    expect(waitSatisfied(transcript, 'text', /找不到模块/, baseline).done).toBe(true);
+    expect(waitSatisfied(transcript, 'text', /模块 a，改完/, baseline).done).toBe(true);
+    transcript.apply(turnCompleted());
+    expect(waitSatisfied(transcript, 'text', /重新构建成功/, waitBaseline(transcript)).done).toBe(true);
   });
 
   it('waits for a new finished turn when asked for turn', () => {
     const transcript = new SidecarTranscript();
     transcript.apply(turnStarted());
     transcript.apply(turnCompleted());
-    // baseline 是开始等待时已有的轮数（这里 1）：再等一轮。
-    expect(waitSatisfied(transcript, 'turn', null, 1).done).toBe(false);
+    // baseline 是开始等待时的快照：再等一轮。
+    const baseline = waitBaseline(transcript);
+    expect(waitSatisfied(transcript, 'turn', null, baseline).done).toBe(false);
     transcript.apply(turnStarted('t2'));
-    expect(waitSatisfied(transcript, 'turn', null, 1).done).toBe(false);
+    expect(waitSatisfied(transcript, 'turn', null, baseline).done).toBe(false);
     transcript.apply(turnCompleted());
-    expect(waitSatisfied(transcript, 'turn', null, 1).done).toBe(true);
+    expect(waitSatisfied(transcript, 'turn', null, baseline).done).toBe(true);
+  });
+
+  it('counts a turn absorbed by the running one as the awaited turn', () => {
+    // steer 被当前轮的下一迭代吸收时不会产生新轮次：用「轮次数量变多」判断会一直
+    // 等不到，只能耗满超时。
+    const transcript = new SidecarTranscript();
+    transcript.apply(turnStarted('t1'));
+    const baseline = waitBaseline(transcript);
+    transcript.recordUserInput('追加');
+    transcript.apply({ method: 'mica/queue/dequeue', params: { input: { text: '追加' } } });
+    expect(transcript.pendingInputCount).toBe(0);
+    transcript.apply(turnCompleted());
+    expect(waitSatisfied(transcript, 'turn', null, baseline).done).toBe(true);
+  });
+
+  it('keeps counting turns past the retention window', () => {
+    // 只保留最近 20 轮：拿 turns.length 当基线，第 21 轮之后的等待永远等不到。
+    const transcript = new SidecarTranscript();
+    for (let index = 0; index < 25; index++) {
+      transcript.apply(turnStarted(`t${index}`));
+      transcript.apply(turnCompleted());
+    }
+    expect(transcript.turns).toHaveLength(20);
+    expect(transcript.finishedTurnCount).toBe(25);
+    const baseline = waitBaseline(transcript);
+    transcript.apply(turnStarted('t25'));
+    transcript.apply(turnCompleted());
+    expect(waitSatisfied(transcript, 'turn', null, baseline).done).toBe(true);
   });
 });

@@ -24,7 +24,10 @@ export type ParsedMemoryInput =
  * 省略 `operations` 就是查询：模型在覆盖一条记忆前需要先看到它。
  */
 export class MemoryTool extends MicaTool {
-  constructor(private readonly repository: MemoryRepository) {
+  constructor(
+    private readonly repository: MemoryRepository,
+    private readonly enabled: () => boolean = () => true,
+  ) {
     super(
       TOOL_NAME,
       [
@@ -86,6 +89,7 @@ export class MemoryTool extends MicaTool {
   }
 
   async execute(input: ToolInput, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+    if (!this.enabled()) throw new Error('Memory is disabled in plugin settings.');
     const parsed = parseMemoryInput(input);
     if (!parsed.ok) throw new Error(parsed.message);
 

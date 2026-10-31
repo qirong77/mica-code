@@ -29,7 +29,7 @@ export async function requestSessionTitle(
   llm: PluginLlmApi,
   config: TitleRequestConfig,
   transcript: string,
-  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal; owner?: unknown } = {},
 ): Promise<TitleRequestResult> {
   const result = await llm.request({
     purpose: '自动起标题',
@@ -37,6 +37,7 @@ export async function requestSessionTitle(
     user: transcript,
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     signal: options.signal,
+    ...(options.owner === undefined ? {} : { owner: options.owner }),
   });
   return { title: sanitizeTitle(result.text), usage: result.usage };
 }

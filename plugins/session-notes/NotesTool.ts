@@ -38,7 +38,7 @@ export class SessionNotesTool extends MicaTool {
             type: 'string',
             enum: ['read', 'append', 'replace'],
             description:
-              'read returns the current notes; append adds content below what is already there; replace overwrites the whole document.',
+              'read returns the current notes; append adds content below what is already there; replace overwrites the whole document (use empty content to clear it).',
           },
           content: {
             type: 'string',
@@ -107,7 +107,7 @@ export function parseNotesInput(input: unknown): ParsedNotesInput {
   if (typeof input.content !== 'string') {
     return { ok: false, message: `${input.action} requires content to be a string` };
   }
-  if (!input.content.trim()) {
+  if (input.action === 'append' && !input.content.trim()) {
     return { ok: false, message: `${input.action} requires non-empty content` };
   }
   if (input.content.length > MAX_SESSION_NOTES_LENGTH) {

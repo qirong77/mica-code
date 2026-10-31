@@ -1,5 +1,5 @@
 import type { PluginContext } from '@packages/mica-plugin/index.js';
-import { sessionMarkdown } from './markdown.js';
+import { sessionMarkdownExport } from './markdown.js';
 
 export { conversationTurns, describeModel, messageText, sessionMarkdown } from './markdown.js';
 export type { SessionCopyMeta } from './markdown.js';
@@ -38,7 +38,7 @@ export default function setup(ctx: PluginContext): void {
       if (!info?.id) return { message: '当前没有会话，先打开一条对话再复制。' };
 
       const messages = session.messages();
-      const markdown = sessionMarkdown(
+      const { markdown, turnCount } = sessionMarkdownExport(
         {
           title: info.title,
           sessionId: info.id,
@@ -50,11 +50,10 @@ export default function setup(ctx: PluginContext): void {
         messages,
       );
       // 条数只数真正的对话：notice 之类不属于这次对话，数进去会让提示对不上剪贴板里的内容。
-      const turns = messages.filter((message) => message.role === 'user' || message.role === 'assistant').length;
-      if (turns === 0) return { copyText: markdown, message: '已复制路径与模型信息（还没有对话内容）' };
+      if (turnCount === 0) return { copyText: markdown, message: '已复制路径与模型信息（还没有对话内容）' };
       return {
         copyText: markdown,
-        message: `已复制 ${turns} 条对话（${markdown.length} 字符）`,
+        message: `已复制 ${turnCount} 条对话（${markdown.length} 字符）`,
       };
     },
   });

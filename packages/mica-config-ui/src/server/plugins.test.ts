@@ -1,8 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getPluginsDetails, setPluginEnabled } from './plugins.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { micaConfig } from '@packages/mica-config/index.js';
+import * as micaAgent from '@packages/mica-agent/index.js';
+import { getPluginsDetails, setPluginEnabled, setPluginSettings, testPluginLlm } from './plugins.js';
 
 const tempDirectories: string[] = [];
 let previousHome: string | undefined;
@@ -13,6 +15,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   if (previousHome === undefined) delete process.env.MICA_HOME;
   else process.env.MICA_HOME = previousHome;
   for (const directory of tempDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -233,6 +236,51 @@ describe('setPluginEnabled', () => {
     expect(getPluginsDetails().plugins.find((plugin) => plugin.id === 'todo')?.state).toBe('disabled');
 
     expect(setPluginEnabled('todo', true).plugins.find((plugin) => plugin.id === 'todo')?.state).toBe('enabled');
+  });
+});
+
+describe('reusing the session model', () => {
+  const main = {
+    providerId: 'main',
+    baseUrl: 'https://main.test/v1',
+    apiKey: 'main-key',
+    protocol: 'openai_chat_completions' as const,
+    model: 'session-model',
+  };
+  const values = {
+    useMainProvider: 'true',
+    baseUrl: 'https://old.test/v1',
+    model: 'inactive-model',
+  };
+
+  it('describes the active model even when an independent model is still stored', () => {
+    vi.spyOn(micaConfig, 'readActiveProviderConfig').mockReturnValue(main);
+
+    const details = setPluginSettings('session-rename', values);
+
+    expect(details.plugins.find((plugin) => plugin.id === 'session-rename')?.llm).toMatchObject({
+      summary: '复用当前会话 · Chat Completions · session-model',
+      configured: true,
+    });
+  });
+
+  it('probes the active model rather than the hidden independent model', async () => {
+    vi.spyOn(micaConfig, 'readActiveProviderConfig').mockReturnValue(main);
+    const probe = vi.spyOn(micaAgent, 'probeModelConnection').mockResolvedValue({
+      ok: true,
+      message: 'ok',
+      model: main.model,
+      latencyMs: 1,
+    });
+
+    await testPluginLlm('session-rename', values);
+
+    expect(probe).toHaveBeenCalledWith({
+      baseUrl: main.baseUrl,
+      apiKey: main.apiKey,
+      protocol: main.protocol,
+      model: main.model,
+    });
   });
 });
 

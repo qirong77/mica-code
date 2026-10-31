@@ -81,6 +81,7 @@ const MAX_SCANNED_RUNS = 10_000;
 const MAX_FINDINGS = 100;
 const MAX_EVIDENCE = 20;
 const MAX_KEYS = 1000;
+const MAX_PENDING_TRACE_BYTES = 4 * 1024 * 1024;
 const STATUSES = new Set<FindingStatus>(['open', 'accepted', 'dismissed', 'validated', 'regressed']);
 const OUTCOMES = new Set<Outcome>(['running', 'completed', 'aborted', 'error', 'interrupted']);
 const SENSITIVE_KEY = /api.?key|access.?key|token|password|passwd|authorization|cookie|secret|credential|private.?key/i;
@@ -100,6 +101,13 @@ function storedText(value: unknown): string {
     if (typeof item.message === 'string') return item.message;
   }
   return value === undefined ? '' : JSON.stringify(value);
+}
+
+function hasCompleteContent(value: unknown): boolean {
+  if (typeof value === 'string') return true;
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.content === 'string' && item.truncated !== true;
 }
 
 /** Bytes on disk for one run directory, so prune can report what it reclaimed. */
@@ -401,6 +409,12 @@ export class HarnessRecorder {
   private tail: Promise<void> = Promise.resolve();
   private readonly writeWarnings: string[] = [];
   private disposed = false;
+  private readonly pendingWrites = new Map<
+    RunState,
+    { lines: string[]; sequences: Set<number>; bytes: number; checkpoint: boolean }
+  >();
+  private pendingTraceBytes = 0;
+  private drainScheduled = false;
 
   constructor(
     root: string,
@@ -410,15 +424,16 @@ export class HarnessRecorder {
   }
 
   private enqueue(work: () => Promise<void>): void {
-    this.tail = this.tail.then(work).catch((error: unknown) => {
-      if (this.writeWarnings.length < 100)
-        this.writeWarnings.push(`Persistence error: ${boundedText(error instanceof Error ? error.message : error)}`);
-      try {
-        this.onError(error);
-      } catch {
-        /* reporting must not break the host task */
-      }
-    });
+    this.tail = this.tail.then(work).catch((error: unknown) => this.persistenceError(error));
+  }
+  private persistenceError(error: unknown): void {
+    if (this.writeWarnings.length < 100)
+      this.writeWarnings.push(`Persistence error: ${boundedText(error instanceof Error ? error.message : error)}`);
+    try {
+      this.onError(error);
+    } catch {
+      /* reporting must not break the host task */
+    }
   }
   private async directory(path: string): Promise<void> {
     await mkdir(path, { recursive: true, mode: 0o700 });
@@ -446,19 +461,66 @@ export class HarnessRecorder {
     state.prepared = true;
     return directory;
   }
-  private save(state: RunState): void {
+  private save(state: RunState, line?: string, seq?: number): boolean {
+    let batch = this.pendingWrites.get(state);
+    if (!batch) {
+      batch = { lines: [], sequences: new Set(), bytes: 0, checkpoint: false };
+      this.pendingWrites.set(state, batch);
+    }
+    if (line === undefined) batch.checkpoint = true;
+    const bytes = line === undefined ? 0 : Buffer.byteLength(line);
+    const accepted = this.pendingTraceBytes + bytes <= MAX_PENDING_TRACE_BYTES;
+    if (line !== undefined && accepted) {
+      batch.lines.push(line);
+      batch.sequences.add(seq!);
+      batch.bytes += bytes;
+      this.pendingTraceBytes += bytes;
+    }
+    if (this.drainScheduled) return accepted;
+    this.drainScheduled = true;
     this.enqueue(async () => {
-      const directory = await this.runDirectory(state);
-      await this.atomic(join(directory, 'summary.json'), JSON.stringify(state.summary, null, 2));
+      try {
+        while (this.pendingWrites.size > 0) {
+          const [current, pending] = this.pendingWrites.entries().next().value!;
+          this.pendingWrites.delete(current);
+          try {
+            const directory = await this.runDirectory(current);
+            if (pending.lines.length > 0) {
+              await appendFile(current.summary.traceFile, pending.lines.join(''), { mode: 0o600 });
+              for (const finding of current.summary.findings)
+                for (const evidence of finding.evidence)
+                  if (pending.sequences.has(evidence.seq)) evidence.available = true;
+            }
+            if (pending.checkpoint)
+              await this.atomic(join(directory, 'summary.json'), JSON.stringify(current.summary, null, 2));
+          } catch (error) {
+            // A failed run directory must not block persistence for other owners.
+            this.persistenceError(error);
+          } finally {
+            // In-flight lines still occupy memory until their append completes.
+            this.pendingTraceBytes -= pending.bytes;
+          }
+        }
+      } finally {
+        this.drainScheduled = false;
+      }
     });
+    return accepted;
   }
   /**
    * Findings are derived data, so the live writer and `rebuild` must share one
    * implementation: anything derivable from a stored trace has to be derivable
    * again later, otherwise a classification fix can never reach existing runs.
    */
-  private noteToolCall(state: RunState, seq: number, name: string, args: string, correlation?: string): string {
-    const argsHash = digest(canonicalArgs(args));
+  private noteToolCall(
+    state: RunState,
+    seq: number,
+    name: string,
+    args: string,
+    correlation?: string,
+    recordedHash?: string,
+  ): string {
+    const argsHash = recordedHash ?? digest(canonicalArgs(args));
     const pendingKey = correlation ?? `name:${name}`;
     if (state.pending.size >= 200) state.pending.delete(state.pending.keys().next().value!);
     state.pending.set(pendingKey, { name, argsHash });
@@ -492,11 +554,12 @@ export class HarnessRecorder {
     name: string,
     result: string,
     correlation?: string,
+    recordedCategory?: string | null,
   ): string | null {
     const pendingKey = correlation ?? `name:${name}`;
     const call = state.pending.get(pendingKey);
     state.pending.delete(pendingKey);
-    const category = errorCategory(result, name);
+    const category = recordedCategory === undefined ? errorCategory(result, name) : recordedCategory;
     if (!category) return null;
     state.summary.toolErrors++;
     const guidance = errorGuidance(name, category);
@@ -516,6 +579,31 @@ export class HarnessRecorder {
       `Error category: ${category}; arguments ${call?.argsHash?.slice(0, 12) ?? 'unknown'}. A tool error does not establish task failure.`,
     );
     return category;
+  }
+
+  private noteRuntimeError(
+    state: RunState,
+    seq: number,
+    kind: 'retry' | 'run-error',
+    category: string,
+    attempt?: number,
+  ): void {
+    const retry = kind === 'retry';
+    this.addFinding(
+      state,
+      kind,
+      `${state.summary.config.providerId}\n${state.summary.config.model}\n${category}`,
+      seq,
+      retry ? `Request retry: ${category}` : `Run ended with an error: ${category}`,
+      'runtime',
+      retry
+        ? 'Inspect provider availability, limits, and retry configuration before proposing a runtime change.'
+        : 'Inspect the final error and preceding trace before identifying a runtime or guidance change.',
+      retry
+        ? 'Run comparable requests and compare retry rate, latency, and completion without masking persistent errors.'
+        : 'Replay the original acceptance criteria and confirm both task completion and an independent user or test check.',
+      retry ? `Attempt ${attempt}; category ${category}.` : `Runtime reported error: ${category}.`,
+    );
   }
 
   private addFinding(
@@ -634,17 +722,18 @@ export class HarnessRecorder {
     if (!state) return;
     const seq = ++state.seq;
     state.summary.eventCount = seq;
+    const captureTrace = state.written < state.options.maxEventsPerRun;
     const stored: StoredEvent = { seq, type: event.type, timestamp: timestamp(event.timestamp) };
     switch (event.type) {
       case 'run:start':
         stored.config = copy(state.summary.config);
-        stored.input = payload(event.input, state.options);
+        if (captureTrace) stored.input = payload(event.input, state.options);
         break;
       case 'request:start': {
         state.summary.requestCount++;
         stored.messageCount = event.messageCount;
         const tools = (event as unknown as { tools?: unknown }).tools;
-        if (tools !== undefined) stored.tools = payload(tools, state.options);
+        if (captureTrace && tools !== undefined) stored.tools = payload(tools, state.options);
         break;
       }
       case 'prompt:resolved': {
@@ -666,7 +755,7 @@ export class HarnessRecorder {
         const name = boundedText(event.name, 200);
         const argsHash = this.noteToolCall(state, seq, name, event.args, event.id ? digest(event.id) : undefined);
         stored.name = name;
-        stored.args = payload(event.args, state.options);
+        if (captureTrace) stored.args = payload(event.args, state.options);
         stored.argsHash = argsHash;
         // Tool IDs are opaque correlation values; hash them rather than persist arbitrary content.
         if (event.id) stored.idHash = digest(event.id);
@@ -676,10 +765,11 @@ export class HarnessRecorder {
         const name = boundedText(event.name, 200);
         const category = this.noteToolResult(state, seq, name, event.result, event.id ? digest(event.id) : undefined);
         stored.name = name;
-        stored.result = payload(
-          event.result,
-          /(?:^|[.:/])harness_review$/.test(name) ? { ...state.options, captureContent: false } : state.options,
-        );
+        if (captureTrace)
+          stored.result = payload(
+            event.result,
+            /(?:^|[.:/])harness_review$/.test(name) ? { ...state.options, captureContent: false } : state.options,
+          );
         stored.errorCategory = category;
         if (event.id) stored.idHash = digest(event.id);
         break;
@@ -700,19 +790,10 @@ export class HarnessRecorder {
         state.summary.retries++;
         stored.attempt = event.attempt;
         stored.delayMs = event.delayMs;
-        stored.error = payload(event.error, state.options);
+        if (captureTrace) stored.error = payload(event.error, state.options);
         const category = classifyError(event.error);
-        this.addFinding(
-          state,
-          'retry',
-          `${state.summary.config.providerId}\n${state.summary.config.model}\n${category}`,
-          seq,
-          `Request retry: ${category}`,
-          'runtime',
-          'Inspect provider availability, limits, and retry configuration before proposing a runtime change.',
-          'Run comparable requests and compare retry rate, latency, and completion without masking persistent errors.',
-          `Attempt ${event.attempt}; category ${category}.`,
-        );
+        stored.errorCategory = category;
+        this.noteRuntimeError(state, seq, 'retry', category, event.attempt);
         break;
       }
       case 'run:finish': {
@@ -723,36 +804,21 @@ export class HarnessRecorder {
         stored.elapsedMs = state.summary.elapsedMs;
         if (event.error) {
           if (state.options.captureContent) state.summary.error = boundedText(event.error, state.options.maxEventChars);
-          stored.error = payload(event.error, state.options);
+          if (captureTrace) stored.error = payload(event.error, state.options);
         }
         if (event.outcome === 'error') {
           const category = classifyError(event.error ?? '');
-          this.addFinding(
-            state,
-            'run-error',
-            `${state.summary.config.providerId}\n${state.summary.config.model}\n${category}`,
-            seq,
-            `Run ended with an error: ${category}`,
-            'runtime',
-            'Inspect the final error and preceding trace before identifying a runtime or guidance change.',
-            'Replay the original acceptance criteria and confirm both task completion and an independent user or test check.',
-            `Runtime reported error: ${category}.`,
-          );
+          stored.errorCategory = category;
+          this.noteRuntimeError(state, seq, 'run-error', category);
         }
         break;
       }
     }
-    if (state.written < state.options.maxEventsPerRun) {
-      state.written++;
+    if (captureTrace) {
       // Serialize synchronously: no caller-owned objects survive into the queue.
       const line = `${JSON.stringify(stored)}\n`;
-      const path = state.summary.traceFile;
-      this.enqueue(async () => {
-        await this.runDirectory(state!);
-        await appendFile(path, line, { mode: 0o600 });
-        for (const finding of state!.summary.findings)
-          for (const evidence of finding.evidence) if (evidence.seq === seq) evidence.available = true;
-      });
+      if (this.save(state, line, seq)) state.written++;
+      else state.summary.droppedEvents++;
     } else state.summary.droppedEvents++;
     if (event.type === 'run:finish' || seq % 25 === 0) this.save(state);
     if (event.type === 'run:finish') {
@@ -954,6 +1020,8 @@ export class HarnessRecorder {
     skippedActive: number;
   }> {
     await this.flush();
+    if (!Number.isFinite(options.olderThanDays) || options.olderThanDays < 1)
+      throw new Error('Invalid retention window');
     const days = Math.max(1, Math.floor(options.olderThanDays));
     const cutoff = Date.now() - days * 86_400_000;
     const scope = options.cwd ? canonicalCwd(options.cwd) : undefined;
@@ -975,14 +1043,17 @@ export class HarnessRecorder {
       const directory = join(this.root, 'runs', entry.name);
       let summary: RunSummary | null = null;
       try {
-        summary = JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8')) as RunSummary;
+        const file = join(directory, 'summary.json');
+        if ((await stat(file)).size > 4_000_000) throw new Error('summary exceeds size limit');
+        summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
+        if (!validSummary(summary, entry.name)) throw new Error('invalid summary schema');
       } catch {
         // Unreadable runs carry no evidence: keep them so the review keeps
         // reporting them as corrupt instead of silently disappearing.
         keptRuns++;
         continue;
       }
-      if (scope && summary.cwd && canonicalCwd(summary.cwd) !== scope) {
+      if (scope && (!summary.cwd || canonicalCwd(summary.cwd) !== scope)) {
         keptRuns++;
         continue;
       }
@@ -1045,21 +1116,30 @@ export class HarnessRecorder {
       const directory = join(this.root, 'runs', id);
       let summary: RunSummary;
       try {
-        summary = JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8')) as RunSummary;
-        if (!validSummary(summary, id)) throw new Error('invalid summary schema');
+        const file = join(directory, 'summary.json');
+        if ((await stat(file)).size > 4_000_000) throw new Error('summary exceeds size limit');
+        summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
+        if (!validSummary(summary, id) || summary.traceFile !== join(directory, 'events.jsonl'))
+          throw new Error('invalid summary schema');
       } catch {
         skippedUnreadable++;
         continue;
       }
-      if (scope && summary.cwd && canonicalCwd(summary.cwd) !== scope) continue;
+      if (scope && (!summary.cwd || canonicalCwd(summary.cwd) !== scope)) continue;
       // A live run keeps deriving findings in memory and would overwrite this on
       // its next checkpoint; leave it alone.
       if (summary.outcome === 'running') {
         skippedRunning++;
         continue;
       }
+      // 被采集上限截断的轨迹无法恢复全部问题，不能拿部分结果覆盖已有证据。
+      if (summary.droppedEvents > 0) {
+        skippedUnreadable++;
+        continue;
+      }
       let lines: string[];
       try {
+        if ((await stat(summary.traceFile)).size > 20_000_000) throw new Error('trace exceeds size limit');
         lines = (await readFile(summary.traceFile, 'utf8')).split('\n').filter(Boolean);
       } catch {
         skippedUnreadable++;
@@ -1085,13 +1165,31 @@ export class HarnessRecorder {
           break;
         }
         // seq must stay consecutive: evidence points at it by number.
-        if (event.seq !== ++expected) {
+        if (
+          !event ||
+          event.seq !== ++expected ||
+          typeof event.type !== 'string' ||
+          typeof event.timestamp !== 'string' ||
+          !Number.isFinite(Date.parse(event.timestamp))
+        ) {
+          usable = false;
+          break;
+        }
+        const hasArgsHash = typeof event.argsHash === 'string' && /^[a-f0-9]{64}$/.test(event.argsHash);
+        const hasCategory = typeof event.errorCategory === 'string' || event.errorCategory === null;
+        if (
+          (event.type === 'tool:call' && !hasArgsHash && !hasCompleteContent(event.args)) ||
+          (event.type === 'tool:result' && !hasCategory && !hasCompleteContent(event.result)) ||
+          ((event.type === 'retry' || (event.type === 'run:finish' && event.outcome === 'error')) &&
+            typeof event.errorCategory !== 'string' &&
+            !hasCompleteContent(event.error))
+        ) {
           usable = false;
           break;
         }
         this.replay(state, event);
       }
-      if (!usable) {
+      if (!usable || expected !== summary.eventCount) {
         skippedUnreadable++;
         continue;
       }
@@ -1125,20 +1223,27 @@ export class HarnessRecorder {
     // The persisted idHash is what correlates a call with its result on replay.
     const correlation = typeof event.idHash === 'string' ? event.idHash : undefined;
     const name = boundedText(String(event.name ?? ''), 200);
-    if (event.type === 'tool:call') this.noteToolCall(state, seq, name, storedText(event.args), correlation);
-    else if (event.type === 'tool:result') this.noteToolResult(state, seq, name, storedText(event.result), correlation);
-    else if (event.type === 'run:finish' && event.outcome === 'error') {
-      const category = classifyError(storedText(event.error));
-      this.addFinding(
+    if (event.type === 'tool:call') {
+      const argsHash =
+        typeof event.argsHash === 'string' && /^[a-f0-9]{64}$/.test(event.argsHash) ? event.argsHash : undefined;
+      this.noteToolCall(state, seq, name, storedText(event.args), correlation, argsHash);
+    } else if (event.type === 'tool:result') {
+      const category =
+        !hasCompleteContent(event.result) && (typeof event.errorCategory === 'string' || event.errorCategory === null)
+          ? event.errorCategory
+          : undefined;
+      this.noteToolResult(state, seq, name, storedText(event.result), correlation, category);
+    } else if (event.type === 'retry' || (event.type === 'run:finish' && event.outcome === 'error')) {
+      const category =
+        !hasCompleteContent(event.error) && typeof event.errorCategory === 'string'
+          ? event.errorCategory
+          : classifyError(storedText(event.error));
+      this.noteRuntimeError(
         state,
-        'run-error',
-        `${state.summary.config.providerId}\n${state.summary.config.model}\n${category}`,
         seq,
-        `Run ended with an error: ${category}`,
-        'runtime',
-        'Inspect the final error and preceding trace before identifying a runtime or guidance change.',
-        'Replay the original acceptance criteria and confirm both task completion and an independent user or test check.',
-        `Runtime reported error: ${category}.`,
+        event.type === 'retry' ? 'retry' : 'run-error',
+        category,
+        Number(event.attempt),
       );
     }
   }
@@ -1265,7 +1370,9 @@ async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<vo
         if (
           !event ||
           !Number.isInteger(event.seq) ||
-          event.seq !== previous + 1 ||
+          event.seq <= previous ||
+          (summary.droppedEvents === 0 && event.seq !== previous + 1) ||
+          event.seq > summary.eventCount ||
           typeof event.type !== 'string' ||
           typeof event.timestamp !== 'string' ||
           !Number.isFinite(Date.parse(event.timestamp))

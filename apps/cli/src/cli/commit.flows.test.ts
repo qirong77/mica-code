@@ -323,7 +323,14 @@ suite('mica commit real-user flows (mock provider)', () => {
 
     const result = await runCli(['commit', '--dir', repo], { MICA_HOME: home });
     expect(result.code).toBe(1);
-    expect(payload(result.stdout)).toMatchObject({ ok: false, code: 'error' });
+    expect(payload(result.stdout)).toMatchObject({
+      ok: false,
+      code: 'push_failed',
+      pushed: false,
+      commitHash: execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(),
+      subject: 'fix: 更新提交流程 🐛',
+      error: expect.stringContaining('git push'),
+    });
     expect(result.stderr).toContain('remote rejected commit flow push');
     expect(execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: repo, encoding: 'utf8' }).trim()).toBe(
       'fix: 更新提交流程 🐛',

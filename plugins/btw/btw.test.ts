@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type MockInstance } from 'vitest';
 import { micaCommands, type CommandRegistry } from '@packages/mica-commands/index.js';
+import { micaRuntime } from '@packages/mica-runtime/index.js';
 import type {
   PluginContext,
   PluginNoticeOptions,
@@ -73,9 +74,7 @@ describe('formatBtwNotice', () => {
   });
 
   it('says so when a continue had no thread to continue', () => {
-    expect(formatBtwNotice('没有前文', '答案', { isFallback: true })).toContain(
-      '没有可延续的 btw 对话',
-    );
+    expect(formatBtwNotice('没有前文', '答案', { isFallback: true })).toContain('没有可延续的 btw 对话');
   });
 });
 
@@ -114,10 +113,7 @@ describe('/btw plugin', () => {
     expect(command?.scope).toBe('local-only');
     expect(command?.allowDuringTurn).toBe(true);
     expect(command?.pluginId).toBe('btw');
-    const items =
-      typeof command?.completionItems === 'function'
-        ? command.completionItems()
-        : command?.completionItems;
+    const items = typeof command?.completionItems === 'function' ? command.completionItems() : command?.completionItems;
     expect(items?.map((item) => item.arg)).toEqual(['-continue', '-stop']);
   });
 
@@ -281,15 +277,169 @@ describe('/btw plugin', () => {
 
     expect(harness.disposed).toHaveBeenCalledOnce();
   });
+
+  it('does not write an old session answer or progress into the newly selected session', async () => {
+    const harness = makeHarness({ ask: deferredAsk() });
+    const first = harness.run('/btw 第一问');
+    await vi.waitFor(() => expect(harness.ask).toHaveBeenCalledOnce());
+    const noticesBeforeSwitch = harness.notices.length;
+    harness.setSession('s2');
+    harness.ask.mock.calls[0]?.[1]?.onToolCall?.('grep_search', '{}', 'call-1');
+    harness.resolveAsk('第一条会话的答案');
+    await first;
+    expect(harness.notices).toHaveLength(noticesBeforeSwitch);
+  });
+
+  it('routes progress and the completed answer to the captured owner after switching away', async () => {
+    const harness = makeHarness({ ask: deferredAsk(), captureOwner: true });
+    const first = harness.run('/btw 第一问');
+    await vi.waitFor(() => expect(harness.ask).toHaveBeenCalledOnce());
+    const ownerA = harness.notices[0]?.options?.owner;
+    expect(ownerA).toBeDefined();
+    const noticesBeforeSwitch = harness.notices.length;
+    harness.setSession('s2');
+    harness.ask.mock.calls[0]?.[1]?.onToolCall?.('grep_search', '{}', 'call-1');
+    harness.resolveAsk('第一条会话的答案');
+    await first;
+
+    expect(harness.notices).toHaveLength(noticesBeforeSwitch + 2);
+    expect(harness.notices.slice(noticesBeforeSwitch).every((notice) => notice.options?.owner === ownerA)).toBe(true);
+    expect(harness.notices.at(-1)?.content).toContain('第一条会话的答案');
+    expect(harness.notices.at(-1)?.options?.status).toBe('success');
+  });
+
+  it('drops callbacks when the captured controller resumed a different session', async () => {
+    const harness = makeHarness({ ask: deferredAsk(), captureOwner: true });
+    const first = harness.run('/btw 第一问');
+    await vi.waitFor(() => expect(harness.ask).toHaveBeenCalledOnce());
+    const ownerA = harness.notices[0]?.options?.owner;
+    const noticesBeforeResume = harness.notices.length;
+    harness.setSession('s2');
+    harness.resumeOwner(ownerA, 's3');
+    harness.ask.mock.calls[0]?.[1]?.onToolCall?.('grep_search', '{}', 'call-1');
+    harness.resolveAsk('恢复前的过期答案');
+    await first;
+    expect(harness.notices).toHaveLength(noticesBeforeResume);
+  });
+
+  it('drops callbacks after the captured owner is disposed', async () => {
+    const harness = makeHarness({ ask: deferredAsk(), captureOwner: true });
+    const first = harness.run('/btw 第一问');
+    await vi.waitFor(() => expect(harness.ask).toHaveBeenCalledOnce());
+    const ownerA = harness.notices[0]?.options?.owner;
+    const noticesBeforeDispose = harness.notices.length;
+    harness.setSession('s2');
+    harness.disposeOwner(ownerA);
+    harness.ask.mock.calls[0]?.[1]?.onToolCall?.('grep_search', '{}', 'call-1');
+    harness.resolveAsk('已关闭会话的答案');
+    await first;
+    expect(harness.notices).toHaveLength(noticesBeforeDispose);
+  });
+
+  it('stops emitting notices when the plugin is disposed during an ask', async () => {
+    const harness = makeHarness({ ask: deferredAsk() });
+    const first = harness.run('/btw 第一问');
+    await vi.waitFor(() => expect(harness.ask).toHaveBeenCalledOnce());
+    const noticesBeforeDispose = harness.notices.length;
+    harness.dispose();
+    harness.ask.mock.calls[0]?.[1]?.onToolCall?.('grep_search', '{}', 'call-1');
+    await first;
+    expect(harness.notices).toHaveLength(noticesBeforeDispose);
+  });
+
+  it('keeps the stopped outcome when the provider resolves after cancellation', async () => {
+    const harness = makeHarness({ ask: deferredAsk(true) });
+    const first = harness.run('/btw 第一问');
+    await vi.waitFor(() => expect(harness.ask).toHaveBeenCalledOnce());
+    harness.ask.mock.calls[0]?.[1]?.onText?.('部分答案');
+    await harness.run('/btw -stop');
+    harness.resolveAsk('provider swallowed the abort');
+    await first;
+    expect(harness.notices.at(-1)?.options?.status).toBe('warning');
+    expect(harness.notices.at(-1)?.content).toContain('已停止');
+    expect(harness.notices.at(-1)?.content).toContain('部分答案');
+  });
+
+  it('clears the progress timer immediately on disposal even if the provider delays aborting', async () => {
+    vi.useFakeTimers();
+    const harness = makeHarness({ ask: deferredAsk(true) });
+    const first = harness.run('/btw 问题');
+    try {
+      expect(harness.ask).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(1);
+      harness.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      harness.resolveAsk('finished');
+      await first;
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('/btw long-running resources', () => {
+  it('disposes closed-session threads over hundreds of session lifecycles and retains other owners', async () => {
+    const harness = makeHarness({ captureOwner: true });
+    await harness.run('/btw retained owner');
+    const ownerA = harness.notices[0]?.options?.owner;
+    for (let index = 0; index < 200; index++) {
+      harness.setSession(`closed-${index}`);
+      await harness.run('/btw temporary question');
+      harness.disposeOwner(harness.notices.at(-1)?.options?.owner);
+    }
+    console.info(
+      'btw lifecycle retention',
+      JSON.stringify({ created: harness.threadOptions.length, disposed: harness.disposed.mock.calls.length }),
+    );
+    expect(harness.disposed).toHaveBeenCalledTimes(200);
+    harness.setSession('s1');
+    await harness.run('/btw -continue retained follow-up');
+    expect(harness.notices.at(-1)?.options?.owner).toBe(ownerA);
+    expect(harness.threadOptions).toHaveLength(201);
+    harness.dispose();
+    expect(harness.disposed).toHaveBeenCalledTimes(201);
+    expect(harness.lifecycleDisposed).toHaveBeenCalledOnce();
+    harness.events.publish({ type: 'session:disposed', owner: ownerA });
+    expect(harness.disposed).toHaveBeenCalledTimes(201);
+  });
+
+  it('counts streamed output beyond the partial-answer cap and labels the retained prefix on stop', async () => {
+    vi.useFakeTimers();
+    const harness = makeHarness({ ask: deferredAsk(true) });
+    const running = harness.run('/btw long answer');
+    try {
+      const onText = harness.ask.mock.calls[0]?.[1]?.onText;
+      for (let index = 0; index < 100; index++) onText?.('x'.repeat(1_000));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(harness.notices.at(-1)?.content).toContain('100k 字');
+      await harness.run('/btw -stop');
+      expect(vi.getTimerCount()).toBe(0);
+      onText?.('discard-after-stop');
+      harness.resolveAsk('provider resolved after stop');
+      await running;
+      expect(harness.notices.at(-1)?.content).toContain('截断');
+      expect(harness.notices.at(-1)?.content).not.toContain('discard-after-stop');
+      expect(harness.notices.at(-1)!.content.length).toBeLessThan(21_000);
+    } finally {
+      harness.resolveAsk('finished');
+      await running;
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
 });
 
 type Harness = {
+  events: InstanceType<typeof micaRuntime.RuntimeEventBus>;
+  lifecycleDisposed: MockInstance;
   commands: CommandRegistry;
   notices: Array<{ content: string; options?: PluginNoticeOptions }>;
   ask: ReturnType<typeof vi.fn>;
   threadOptions: Array<Record<string, unknown>>;
   disposed: ReturnType<typeof vi.fn>;
   setSession(id: string): void;
+  resumeOwner(owner: unknown, id: string): void;
+  disposeOwner(owner: unknown): void;
   clearSession(): void;
   dispose(): void;
   run(raw: string): Promise<unknown>;
@@ -300,14 +450,14 @@ function harnessNotices(harness: Harness): Harness['notices'] {
 }
 
 /** 一问答到一半的 ask：等测试显式 resolve，返回的 promise 才结算。 */
-function deferredAsk() {
+function deferredAsk(ignoreAbort = false) {
   let resolve!: (answer: string) => void;
   const ask = vi.fn(
     (_question: string, options?: PluginSubagentThreadAskOptions) =>
       new Promise<string>((done, reject) => {
         resolve = done;
         // 与真实宿主一致：中断时这一问以异常结束，收尾（展示已流出的正文）在 catch 里。
-        options?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        if (!ignoreAbort) options?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
       }),
   );
   return Object.assign(ask, {
@@ -316,9 +466,11 @@ function deferredAsk() {
 }
 
 function makeHarness(
-  overrides: { ask?: ReturnType<typeof vi.fn>; threadError?: Error } = {},
+  overrides: { ask?: ReturnType<typeof vi.fn>; threadError?: Error; captureOwner?: boolean } = {},
 ): Harness & { resolveAsk(answer: string): void } {
   const commands = new micaCommands.CommandRegistry();
+  const events = new micaRuntime.RuntimeEventBus();
+  const subscriptions = vi.spyOn(events, 'on');
   const notices: Harness['notices'] = [];
   const ask = overrides.ask ?? vi.fn(async () => '答案');
   const disposed = vi.fn();
@@ -326,12 +478,17 @@ function makeHarness(
   const threadOptions: Array<Record<string, unknown>> = [];
   const disposes: Array<() => void> = [];
   let session: { id: string; title: string; role: string } | null = { id: 's1', title: 'session', role: 'default' };
+  let currentOwner: unknown = {};
+  const ownersById = new Map<string, unknown>([['s1', currentOwner]]);
+  const sessionsByOwner = new Map<unknown, typeof session>([[currentOwner, session]]);
 
   const ctx = {
     pluginId: 'btw',
     commands,
+    events,
     session: {
-      describe: () => session,
+      captureOwner: overrides.captureOwner ? () => currentOwner : undefined,
+      describe: (owner?: unknown) => (owner === undefined ? session : (sessionsByOwner.get(owner) ?? null)),
       messages: () => [
         { role: 'user', content: '主流程在写代码' },
         { role: 'assistant', content: '收到。' },
@@ -362,12 +519,28 @@ function makeHarness(
 
   return {
     commands,
+    events,
     notices,
+    lifecycleDisposed: vi.spyOn(subscriptions.mock.results[0]!.value, 'dispose'),
     ask,
     threadOptions,
     disposed,
     setSession(id) {
-      session = { id, title: id, role: 'default' };
+      currentOwner = ownersById.get(id) ?? {};
+      ownersById.set(id, currentOwner);
+      session = sessionsByOwner.get(currentOwner) ?? { id, title: id, role: 'default' };
+      sessionsByOwner.set(currentOwner, session);
+    },
+    resumeOwner(owner, id) {
+      const resumed = { id, title: id, role: 'default' };
+      sessionsByOwner.set(owner, resumed);
+      if (owner === currentOwner) session = resumed;
+      events.publish({ type: 'session:invalidated', reason: 'resume', owner });
+    },
+    disposeOwner(owner) {
+      sessionsByOwner.delete(owner);
+      if (owner === currentOwner) session = null;
+      events.publish({ type: 'session:disposed', owner });
     },
     clearSession() {
       session = null;

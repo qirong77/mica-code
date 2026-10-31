@@ -1,7 +1,17 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { acquireMemoryLock } from './locking.js';
 import {
   EMPTY_MEMORY_STATE,
   MemoryRepository,
@@ -55,6 +65,18 @@ describe('entry parsing', () => {
 });
 
 describe('MemoryRepository', () => {
+  it('does not rewrite unchanged memory during repeated duplicate tool calls', () => {
+    const { repository, root } = createRepository();
+    repository.apply('memory', [{ action: 'add', content: '偏好使用中文' }]);
+    const path = join(root, 'MEMORY.md');
+    utimesSync(path, new Date(1_000), new Date(1_000));
+    for (let index = 0; index < 100; index += 1) {
+      expect(repository.apply('memory', [{ action: 'add', content: '偏好使用中文' }]).ok).toBe(true);
+    }
+    expect(statSync(path).mtimeMs).toBe(1_000);
+    expect(repository.read('memory')).toEqual(['偏好使用中文']);
+  });
+
   it('adds entries, dedupes normalized duplicates, and writes them to disk', () => {
     const { repository, root } = createRepository();
 
@@ -155,7 +177,7 @@ describe('MemoryRepository', () => {
     if (!result.ok) {
       expect(result.error.kind).toBe('budget');
       expect(result.error.overflow).toBeGreaterThan(0);
-      expect(result.error.store?.chars).toBe(60);
+      expect(result.error.store?.chars).toBe(0);
     }
     expect(repository.read('memory')).toEqual([]);
     expect(() => readFileSync(join(root, 'MEMORY.md'), 'utf-8')).toThrow();
@@ -175,6 +197,24 @@ describe('MemoryRepository', () => {
 
     expect(result.ok).toBe(false);
     expect(repository.read('memory')).toEqual(['第一条', '第二条']);
+    if (!result.ok) expect(result.error.store?.entries).toEqual(['第一条', '第二条']);
+  });
+
+  it('rejects concurrent writers instead of reading and overwriting their work', () => {
+    const { repository, root } = createRepository();
+    repository.apply('memory', [{ action: 'add', content: '原有事实' }]);
+    const release = acquireMemoryLock(join(root, 'MEMORY.md.lock'));
+    expect(release).not.toBeNull();
+    try {
+      const result = repository.apply('memory', [{ action: 'add', content: '并发事实' }]);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.kind).toBe('unavailable');
+      expect(repository.read('memory')).toEqual(['原有事实']);
+    } finally {
+      release?.();
+    }
+    expect(repository.apply('memory', [{ action: 'add', content: '并发事实' }]).ok).toBe(true);
+    expect(repository.read('memory')).toEqual(['原有事实', '并发事实']);
   });
 
   it('keeps project memory per working directory', () => {

@@ -256,7 +256,6 @@ describe('loadProviderModels', () => {
   it('keeps dynamically fetched models in memory and applies the fixed model rule', async () => {
     const provider = {
       id: 'kimi',
-      name: 'Kimi',
       api_base: 'https://api.moonshot.cn/v1',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -295,7 +294,6 @@ describe('loadProviderModels', () => {
   it('does not rewrite read-only config.json after dynamic models are loaded', async () => {
     const provider = {
       id: 'kimi',
-      name: 'Kimi',
       api_base: 'https://api.moonshot.cn/v1',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -336,7 +334,6 @@ describe('loadProviderModels', () => {
   it('preserves a configured model that is absent from a dynamic catalog', async () => {
     const provider = {
       id: 'partial-catalog',
-      name: 'Partial Catalog',
       api_base: 'https://example.com/v1',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -371,7 +368,6 @@ function baseConfig(): IMicaConfig {
     providers: [
       {
         id: 'deepseek',
-        name: 'DeepSeek',
         api_base: 'https://api.deepseek.com',
         api_key: 'test-key',
         protocol: 'openai_chat_completions',
@@ -379,7 +375,6 @@ function baseConfig(): IMicaConfig {
       },
       {
         id: 'krill-codex',
-        name: 'Krill-Codex',
         api_base: 'https://api.cdn-krill-ai.com/codex/v1',
         api_key: 'test-key',
         protocol: 'openai_responses',

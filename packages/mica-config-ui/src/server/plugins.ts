@@ -196,7 +196,7 @@ export async function testPluginLlm(id: string, values?: Record<string, unknown>
       baseUrl: main.baseUrl,
       apiKey: main.apiKey,
       protocol: main.protocol,
-      model: config.model || main.model,
+      model: main.model,
     };
   } else {
     target = { baseUrl: config.baseUrl, apiKey: config.apiKey, protocol: config.protocol, model: config.model };
@@ -268,7 +268,7 @@ function readLlm(
   if (config.useMainProvider) {
     try {
       const active = micaConfig.readActiveProviderConfig();
-      const model = config.model || active.model;
+      const model = active.model;
       const protocol = active.protocol === 'openai_responses' ? 'Responses' : 'Chat Completions';
       main = {
         summary: model ? `复用当前会话 · ${protocol} · ${model}` : '当前会话没有可用的模型',

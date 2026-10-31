@@ -204,6 +204,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       if (host.hooks) {
         await host.hooks.emit('turn:before', {
           runtime: host,
+          owner: agent,
           input: micaRuntime.createRuntimeInput(prompt, 'ui'),
           content: undefined,
         });

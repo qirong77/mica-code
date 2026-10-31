@@ -6,6 +6,7 @@ import type { PersistedSession, SessionStoreLike } from '@packages/mica-session/
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import type { SessionAgentAdapter } from './SessionController.js';
+import { buildSubagentUsageRecord } from '@packages/mica-agent/index.js';
 
 const previousHome = process.env.HOME;
 const previousMicaHome = process.env.MICA_HOME;
@@ -31,6 +32,86 @@ afterAll(() => {
 });
 
 describe('SessionController', () => {
+  it.each([false, true])(
+    'records late plugin usage in the original persisted session (deleted: %s)',
+    async (deleted) => {
+      const { SessionController } = await import('./SessionController.js');
+      const original = {
+        version: 1,
+        revision: 3,
+        id: 'original',
+        title: '原会话',
+        createdAt: new Date(0).toISOString(),
+        updatedAt: new Date(0).toISOString(),
+        snapshot: { messages: [{ role: 'user', content: '保留这段对话' }], subagentUsageHistory: [] },
+      } as unknown as PersistedSession;
+      const recordSubagentUsage = vi.fn();
+      const agent = { recordSubagentUsage, isRunning: false } as unknown as SessionAgentAdapter;
+      const store: SessionStoreLike = {
+        list: () => [],
+        listRecent: () => [],
+        load: (id) => (id === original.id && !deleted ? original : null),
+        save: vi.fn(),
+        delete: () => false,
+      };
+      const controller = new SessionController({ agent, store });
+      const record = buildSubagentUsageRecord({
+        taskId: 'plugin:memory',
+        origin: 'plugin',
+        pluginId: 'memory',
+        subagentType: 'plugin:memory',
+        description: '整理记忆',
+        model: 'mini',
+        status: 'completed',
+        startedAt: new Date(0).toISOString(),
+        finishedAt: new Date(1).toISOString(),
+        requests: [],
+      });
+
+      expect(controller.recordSubagentUsageForSession(original.id, record)).toBe(!deleted);
+
+      expect(recordSubagentUsage).not.toHaveBeenCalled();
+      if (deleted) expect(store.save).not.toHaveBeenCalled();
+      else
+        expect(store.save).toHaveBeenCalledWith({
+          ...original,
+          revision: 4,
+          updatedAt: expect.any(String),
+          snapshot: { ...original.snapshot, subagentUsageHistory: [record] },
+        });
+    },
+  );
+
+  it.each([false, true])(
+    'records current-session plugin usage and saves only when idle (running: %s)',
+    async (running) => {
+      const { SessionController } = await import('./SessionController.js');
+      const recordSubagentUsage = vi.fn();
+      const controller = new SessionController({
+        agent: { recordSubagentUsage, isRunning: running } as unknown as SessionAgentAdapter,
+      });
+      const save = vi.spyOn(controller, 'saveCurrent').mockReturnValue(true);
+      const record = buildSubagentUsageRecord({
+        taskId: 'plugin:memory',
+        origin: 'plugin',
+        pluginId: 'memory',
+        subagentType: 'plugin:memory',
+        description: '整理记忆',
+        model: 'mini',
+        status: 'completed',
+        startedAt: new Date(0).toISOString(),
+        finishedAt: new Date(1).toISOString(),
+        requests: [],
+      });
+
+      expect(controller.recordSubagentUsageForSession(controller.getCurrentSessionId(), record)).toBe(true);
+
+      expect(recordSubagentUsage).toHaveBeenCalledWith(record);
+      if (running) expect(save).not.toHaveBeenCalled();
+      else expect(save).toHaveBeenCalledWith({ allowEmpty: true });
+    },
+  );
+
   it('falls back to the active provider and model when a resumed session references removed config', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
     const { applySessionConfig } = await import('./SessionController.js');
@@ -248,7 +329,8 @@ describe('SessionController', () => {
       loadSnapshot: vi.fn(),
       reloadConfig: vi.fn(),
       toConversationMessages: vi.fn(
-        () => messages.map((message) => ({ role: message.role, content: message.content })) as MicaUiConversationMessage[],
+        () =>
+          messages.map((message) => ({ role: message.role, content: message.content })) as MicaUiConversationMessage[],
       ),
     };
     const store: SessionStoreLike = {

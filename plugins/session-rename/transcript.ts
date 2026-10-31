@@ -38,7 +38,10 @@ export function buildTranscript(
   const maxChars = options.maxCharsPerMessage ?? DEFAULT_MAX_CHARS_PER_MESSAGE;
   const entries: TranscriptEntry[] = [];
 
-  for (const message of messages) {
+  // 只抽取最终会发送的后缀，避免每轮都清洗整条长会话。
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (options.maxMessages > 0 && entries.length >= options.maxMessages) break;
+    const message = messages[index]!;
     const role = message.role;
     if (role !== 'user' && role !== 'assistant') continue;
     if (isPluginInjected(message)) continue;
@@ -50,6 +53,7 @@ export function buildTranscript(
     entries.push({ role, text: truncate(text, maxChars) });
   }
 
+  entries.reverse();
   appendLatestUserText(entries, options.latestUserText, maxChars);
   return options.maxMessages > 0 ? entries.slice(-options.maxMessages) : entries;
 }
@@ -89,12 +93,8 @@ function appendLatestUserText(entries: TranscriptEntry[], latestUserText: string
   const text = latestUserText ? messageText(latestUserText) : '';
   if (!text) return;
   const latest = truncate(text, maxChars);
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (!entry || entry.role !== 'user') continue;
-    if (entry.text === latest) return;
-    break;
-  }
+  const last = entries.at(-1);
+  if (last?.role === 'user' && last.text === latest) return;
   entries.push({ role: 'user', text: latest });
 }
 

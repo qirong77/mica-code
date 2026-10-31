@@ -47,6 +47,8 @@ type RunRequest = {
   runInBackground?: boolean;
 };
 
+type BatchStatus = PluginSubagentRunResult['status'] | 'running' | 'skipped';
+
 /**
  * `agent`：父代理唯一能自己用的委派入口。
  *
@@ -128,10 +130,10 @@ export class AgentTool extends MicaTool {
   async execute(input: AgentToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const operation = normalizeOperation(input.operation);
     if (operation === 'list') return this.listTasks(callbacks);
-    if (operation === 'read') return this.readTask(input.task_id);
-    if (operation === 'kill') return this.killTask(input.task_id);
-    if (operation === 'await') return this.awaitTasks(input, callbacks?.signal);
-    if (operation === 'join') return this.joinTasks(input, callbacks?.signal);
+    if (operation === 'read') return this.readTask(input.task_id, callbacks);
+    if (operation === 'kill') return this.killTask(input.task_id, callbacks);
+    if (operation === 'await') return this.awaitTasks(input, callbacks);
+    if (operation === 'join') return this.joinTasks(input, callbacks);
     if (operation === 'run_many') return this.runMany(input, callbacks);
 
     return this.runOne(
@@ -179,36 +181,57 @@ export class AgentTool extends MicaTool {
           : 4,
     });
 
+    // 校验整批任务后再启动，避免非法参数留下已经启动却拿不到 id 的后台任务。
+    for (const task of planned) {
+      const type = getBuiltinSubagent(this.subagents.listTypes(), task.subagent_type);
+      resolveOwnedPaths(task.owned_paths, type);
+      resolveContextMode(task.context_mode, type);
+    }
+
     const results: string[] = [];
     const remaining = new Map(planned.map((task) => [task.id, task]));
     const completed = new Set<string>();
     const handles = new Map<string, PluginSubagentTaskHandle>();
+    const statuses = new Map<string, BatchStatus>();
     const taskIdByPlanId = new Map<string, string>();
 
     while (remaining.size > 0) {
+      callbacks?.signal?.throwIfAborted();
       const ready = [...remaining.values()].filter((task) => task.depends_on.every((dep) => completed.has(dep)));
       if (ready.length === 0) throw new Error('run_many stalled: no runnable tasks without unmet dependencies.');
 
       const batchResults = await Promise.all(
         ready.map(async (task) => {
-          // 依赖的后台子任务还没结算时先等它：波形只保证「依赖已启动」，不保证「依赖已跑完」。
+          // 后台任务的启动并不代表成功；失败或被杀的依赖必须阻止下游继续执行。
           for (const dep of task.depends_on) {
             const handle = handles.get(dep);
-            if (handle) await handle.done;
+            if (handle) statuses.set(dep, (await waitForDependency(handle, callbacks?.signal)).status);
+          }
+          callbacks?.signal?.throwIfAborted();
+          const blocked = task.depends_on.filter((dep) => statuses.get(dep) !== 'completed');
+          if (blocked.length > 0) {
+            return {
+              task,
+              status: 'skipped' as const,
+              taskId: undefined,
+              output: `Status: skipped\nDependencies did not complete successfully: ${blocked.join(', ')}`,
+            };
           }
           const request = toRunRequest(task);
           if (request.runInBackground) {
             const handle = this.startInBackground(request, callbacks);
             handles.set(task.id, handle.handle);
-            return { task, output: handle.output, taskId: handle.handle.taskId };
+            return { task, output: handle.output, taskId: handle.handle.taskId, status: 'running' as const };
           }
-          return { task, output: await this.runOne(request, callbacks), taskId: undefined };
+          const result = await this.runForeground(request, callbacks);
+          return { task, ...result, taskId: undefined };
         }),
       );
 
-      for (const { task, output, taskId } of batchResults) {
+      for (const { task, output, taskId, status } of batchResults) {
         remaining.delete(task.id);
         completed.add(task.id);
+        statuses.set(task.id, status);
         const backgroundTaskId = taskId ?? output.match(/task_id:\s*(\S+)/)?.[1];
         if (backgroundTaskId) taskIdByPlanId.set(task.id, backgroundTaskId);
         results.push([`## ${task.id}: ${task.description}`, output].join('\n'));
@@ -232,20 +255,30 @@ export class AgentTool extends MicaTool {
     const description = request.description.trim();
     if (!description) return '错误：Agent run 操作需要非空 description。';
 
-    const type = getBuiltinSubagent(this.subagents.listTypes(), request.subagentType);
     if (request.runInBackground) return this.startInBackground(request, callbacks).output;
 
-    const ownedPaths = resolveOwnedPaths(request.ownedPaths ?? [], type);
-    const spawn = this.buildSpawnRequest(request, type, prompt, ownedPaths, callbacks);
+    return (await this.runForeground(request, callbacks)).output;
+  }
 
-    callbacks?.onChunk?.(`[Agent:${type.name}] start ${description}\n`);
+  private async runForeground(
+    request: RunRequest,
+    callbacks?: ToolExecuteCallbacks,
+  ): Promise<{ output: string; status: PluginSubagentRunResult['status'] }> {
+    const type = getBuiltinSubagent(this.subagents.listTypes(), request.subagentType);
+    const ownedPaths = resolveOwnedPaths(request.ownedPaths ?? [], type);
+    const spawn = this.buildSpawnRequest(request, type, request.prompt.trim(), ownedPaths, callbacks);
+
+    callbacks?.onChunk?.(`[Agent:${type.name}] start ${request.description}\n`);
     const result = await this.subagents.run(spawn);
-    return formatStructuredSubagentResult({
-      type: type.name,
-      description,
-      result: withError(result),
-      status: toStructuredStatus(result.status),
-    });
+    return {
+      status: result.status,
+      output: formatStructuredSubagentResult({
+        type: type.name,
+        description: request.description,
+        result: withError(result),
+        status: toStructuredStatus(result.status),
+      }),
+    };
   }
 
   /**
@@ -311,17 +344,19 @@ export class AgentTool extends MicaTool {
     return JSON.stringify(tasks.map(taskSummary), null, 2);
   }
 
-  private readTask(taskIdInput: string | undefined): string {
+  private readTask(taskIdInput: string | undefined, callbacks?: ToolExecuteCallbacks): string {
     const taskId = String(taskIdInput ?? '').trim();
     if (!taskId) return '错误：Agent read 操作需要 task_id。';
+    if (!this.canAccessTask(taskId, callbacks)) return `Subagent task not found: ${taskId}`;
     const task = this.subagents.tasks.get(taskId);
     if (!task) return `Subagent task not found: ${taskId}`;
     return formatTaskRecord(task);
   }
 
-  private killTask(taskIdInput: string | undefined): string {
+  private killTask(taskIdInput: string | undefined, callbacks?: ToolExecuteCallbacks): string {
     const taskId = String(taskIdInput ?? '').trim();
     if (!taskId) return '错误：Agent kill 操作需要 task_id。';
+    if (!this.canAccessTask(taskId, callbacks)) return `Subagent task not found: ${taskId}`;
     if (this.subagents.tasks.kill(taskId)) {
       const task = this.subagents.tasks.get(taskId);
       return task ? formatTaskRecord(task) : `Killed subagent task: ${taskId}`;
@@ -331,17 +366,38 @@ export class AgentTool extends MicaTool {
     return `Subagent task ${taskId} is already finished (status: ${existing.status}).`;
   }
 
-  private async awaitTasks(input: AgentToolInput, signal?: AbortSignal): Promise<string> {
+  private canAccessTask(taskId: string, callbacks?: ToolExecuteCallbacks): boolean {
+    return this.findInaccessibleTask([taskId], callbacks) === undefined;
+  }
+
+  private findInaccessibleTask(taskIds: string[], callbacks?: ToolExecuteCallbacks): string | undefined {
+    const owner = this.subagents.caller(callbacks?.context)?.owner;
+    if (owner === undefined) return undefined;
+    const accessible = new Set(this.subagents.tasks.list(owner).map((task) => task.id));
+    return taskIds.find((id) => !accessible.has(id));
+  }
+
+  private async awaitTasks(input: AgentToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const taskIds = collectTaskIds(input);
     if (taskIds.length === 0) return '错误：Agent await 操作需要 task_id 或 task_ids。';
-    const tasks = await this.subagents.tasks.wait(taskIds, { timeoutMs: resolveTimeout(input), signal });
+    const inaccessible = this.findInaccessibleTask(taskIds, callbacks);
+    if (inaccessible) return `Subagent task not found: ${inaccessible}`;
+    const tasks = await this.subagents.tasks.wait(taskIds, {
+      timeoutMs: resolveTimeout(input),
+      signal: callbacks?.signal,
+    });
     return [`Awaited ${tasks.length} subagent task(s).`, ...tasks.map((task) => formatTaskRecord(task))].join('\n\n');
   }
 
-  private async joinTasks(input: AgentToolInput, signal?: AbortSignal): Promise<string> {
+  private async joinTasks(input: AgentToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const taskIds = collectTaskIds(input);
     if (taskIds.length === 0) return '错误：Agent join 操作需要 task_id 或 task_ids。';
-    const tasks = await this.subagents.tasks.wait(taskIds, { timeoutMs: resolveTimeout(input), signal });
+    const inaccessible = this.findInaccessibleTask(taskIds, callbacks);
+    if (inaccessible) return `Subagent task not found: ${inaccessible}`;
+    const tasks = await this.subagents.tasks.wait(taskIds, {
+      timeoutMs: resolveTimeout(input),
+      signal: callbacks?.signal,
+    });
     const completed = tasks.filter((task) => task.status !== 'running');
     const running = tasks.filter((task) => task.status === 'running');
     const failed = tasks.filter((task) => task.status === 'failed' || task.status === 'killed');
@@ -378,6 +434,24 @@ function buildDescription(types: PluginSubagentType[]): string {
     `可用 subagent_type: ${types.map((type) => `${type.name} (${type.description})`).join('; ')}。`,
     'effort 取子代理模型自己声明的档位名（模型不同档位集合也不同），省略时继承主 agent 当前 effort。',
   ].join(' ');
+}
+
+async function waitForDependency(
+  handle: PluginSubagentTaskHandle,
+  signal?: AbortSignal,
+): Promise<PluginSubagentRunResult> {
+  signal?.throwIfAborted();
+  if (!signal) return handle.done;
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+  });
+  try {
+    return await Promise.race([handle.done, cancelled]);
+  } finally {
+    signal.removeEventListener('abort', abort);
+  }
 }
 
 function toRunRequest(task: PlannedSubagentRun): RunRequest {

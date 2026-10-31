@@ -121,6 +121,11 @@ function parseRunSpec(value: unknown, index: number): SubagentRunSpec {
   const record = value as Record<string, unknown>;
   const description = asRequiredString(record.description, `tasks[${index}].description`);
   const prompt = asRequiredString(record.prompt, `tasks[${index}].prompt`);
+  for (const field of ['depends_on', 'owned_paths', 'context_files'] as const) {
+    if (record[field] !== undefined && !Array.isArray(record[field])) {
+      throw new Error(`tasks[${index}].${field} must be an array of strings.`);
+    }
+  }
   return {
     description,
     prompt,

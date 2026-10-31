@@ -107,6 +107,8 @@ export default function setup(ctx: PluginContext) {
 处理器的入参 `values` 是页面当前的设置值（可能还没写盘），返回值是 `{ message?, link? }`。
 没在清单里声明的 key 注册会被拒绝——页面上没有那个按钮，静默接受只会让插件以为用户点得到。
 
+动作、桌面面板与会话菜单的登记会随插件自动回收，启动失败时也会撤销，无须再登记清理回调。
+
 执行它的是 `mica plugin-action --plugin <id> --action <key>`：**一个只装配目标插件的一次性进程**，
 没有 agent、没有 turn、没有会话。所以这类操作不需要先打开一条会话，也不会把人从设置页拽走；
 反过来，处理器里也不能假设 `ctx.tools` / `ctx.background` 存在（要另外声明 `requires` 并自己判断）。
@@ -146,8 +148,9 @@ export default function setup(ctx: PluginContext) {
 「模型接口」面板：
 
 - **每个声明 `llm` 的插件都自带「复用当前会话模型」开关**，插件不用（也不能）逐个声明。
-  **默认就是开的**：地址 / Key / 协议 / 模型都取自当前会话（模型名带 `provider/model` 前缀时
-  按前缀路由），自己那四项直接隐藏。会话里已经有一个用户付过钱、也认得上下文的模型，没理由
+  **默认就是开的**：地址 / Key / 协议 / 模型都取自当前会话（请求显式指定的模型名带 `provider/model` 前缀时
+  按前缀路由），自己那四项直接隐藏，也不参与请求、摘要或试连。只有单次
+  `ctx.llm.request({ model })` 可以显式覆盖模型。会话里已经有一个用户付过钱、也认得上下文的模型，没理由
   让每个插件各填一套；
 - `reuseByDefault`：把开关的初始状态改成关，面板一开始就摊开那四项。只给「换更便宜的模型 /
   另一家服务才好用」的插件用；用户拨过之后以存下来的值为准，这个字段不再起作用；
@@ -207,6 +210,11 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 
 ## 健康状态与失败可见
 
+需要异步回写会话时，先用 `ctx.session.captureOwner?.()` 捕获不透明 owner；工具调用可传入
+`callbacks.context` 解析发起者。回写 notice 时把这个 owner 传给 `ctx.ui.notice`，不要等请求
+结束后再选择当前会话。`turn:before`、`turn:after` 和会话生命周期事件也携带 owner，多主会话
+插件应按 owner 隔离自己的临时状态。
+
 `requires` 要写全插件实际触碰的每一面 `ctx.*`：`actions`、`background`、`commands`、`desktop`、`events`、`hooks`、`prompt`、
 `session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`、`models`、`llm`。宿主缺哪个，
 插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
@@ -254,7 +262,7 @@ const { text, usage } = await ctx.models.request({
 ```
 
 请求由宿主发出，所以三件事只有一份实现：协议分支（Chat Completions / Responses）、超时与中断、
-**用量记账**——这笔开销会以 `origin: 'plugin'` 记进当前会话的 `subagentUsageHistory`，在
+**用量记账**——这笔开销会以 `origin: 'plugin'` 记进发起请求时的会话的 `subagentUsageHistory`，在
 Stats 的「By plugin」卡片与会话详情里能看到。插件自己 `fetch` 的请求没有会话写面可以记，
 用户在 Stats 里就永远看不到它花了多少。
 
@@ -343,11 +351,14 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 - 宿主按插件 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里
   登记**——加一个桌面入口只改插件目录。
 - 模块拿到的 `api` 只有六件事：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
-  （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value)`
+  （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value, options?)`
   （插件自己的 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构）、`open(url)`
   （外壳里开新窗口、浏览器里开新标签页）、`access`（`get()` / `set({ enabled, password })`
   读写这台机器的远程访问策略——请求分派只存在于运行时进程，页面自己改不了）、
   `action(key)`（执行清单 `actions` 里声明过的一个动作，结果是 `{ ok, message?, link?, error? }`）。
+- 数据读取返回 `{ value, version }`（缺文件时两者为 null）；IO 失败应显式报错。读改写时将版本作为
+  `writeData(value, { expectedVersion })` 传回；宿主在跨进程互斥下比较版本并原子替换，冲突返回
+  `{ ok: false, conflict: true }`，插件重读后只重放本次修改。未传版本仍可整份写入。
 - `action` 是「卡片要真的干一件事」：页面里没有插件自己的代码，所以按 key 请宿主去跑
   `mica plugin-action`——与配置页点按钮同一条路，不需要会话。没在清单里声明的 key 会被拒绝，
   所以卡片能用哪些动作和配置页看到哪些按钮是同一份声明。动作可能真的在干活（同步一批数据），
@@ -524,6 +535,9 @@ ctx.desktop.sessionMenu({
 排查插件问题时先看这里，配置页插件详情里也会显示当前日志路径。
 
 ## 派生一个子会话（sidecar）
+
+等待条件：`idle` 等当前轮次及已投递消息全部结束；`turn` 等至少一轮在调用后结束，包含调用时
+正在运行的轮次；`text` 匹配最新一轮的完整正文，调用前已出现的目标文字也会立即命中。
 
 一个插件想让「另一条会话」替它干活时，不要用受控浏览器去点界面：那一轮要几十次读屏，
 界面一改就碎。直接起一个 `mica app-server` 子进程，走 Codex v2 JSONL：

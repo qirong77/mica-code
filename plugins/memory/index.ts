@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
+import type { Disposable } from '@packages/mica-common/index.js';
 import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
 import { pluginLogPath } from '@packages/mica-plugin/index.js';
 import {
@@ -30,7 +31,7 @@ import { registerMemoryCommand, type MemoryReviewOutcome } from './commands.js';
  * - **注入**：`ctx.prompt.section()`，会话内冻结，避免记忆变化打掉 prompt cache；
  * - **写入**：`memory` 工具，模型在对话中主动保存，预算写死、超限必须先整理；
  * - **整理**：turn 结束后可选跑一次（宿主子代理或独立 provider），把一轮对话收敛成
- *   几条操作。默认关闭：后台整理花的是模型的钱，不该因为装了插件就自动开始。
+ *   几条操作。默认开启，以全局间隔控制模型调用成本。
  */
 
 const PLUGIN_ID = 'memory';
@@ -57,12 +58,6 @@ const plugin: MicaPlugin = {
     const prompt = ctx.prompt;
     if (!tools || !prompt) throw new Error('memory 需要宿主提供 tools 与 prompt 能力');
 
-    const initial = readSettings(ctx);
-    if (!initial.enabled) {
-      ctx.health.report({ level: 'ok', message: '记忆已关闭：插件设置里的「启用记忆」关掉了' });
-      return;
-    }
-
     const repository = new MemoryRepository({
       rootDir: join(ctx.paths?.config ?? resolveMicaHome(), MEMORY_DIR_NAME),
       resolveBudgets: () => readSettings(ctx).budgets,
@@ -77,21 +72,46 @@ const plugin: MicaPlugin = {
 
     // primaryAgentOnly：记忆属于这条会话/用户，子代理写它会让归属变模糊
     // （临时发现未必长期成立），与 session-notes 同一取舍。
-    const tool = tools.register(new MemoryTool(repository), { icon: '🧠', primaryAgentOnly: true });
-    ctx.onDispose(() => tool.dispose());
+    let disposed = false;
+    let active: AbortController | null = null;
+    let tool: Disposable | undefined;
+    const syncEnabled = () => {
+      const enabled = !disposed && readSettings(ctx).enabled;
+      if (enabled && !tool) {
+        tool = tools.register(new MemoryTool(repository, () => !disposed && readSettings(ctx).enabled), {
+          icon: '🧠',
+          primaryAgentOnly: true,
+        });
+      } else if (!enabled) {
+        tool?.dispose();
+        tool = undefined;
+        active?.abort();
+      }
+      return enabled;
+    };
+    syncEnabled();
+    ctx.onDispose(() => {
+      disposed = true;
+      active?.abort();
+      tool?.dispose();
+    });
 
     // order 900：记忆内容在会话内是冻结的，但仍然排在会话笔记（1000）之前，让最容易
     // 变化的那一段保持在最后。
     const section = prompt.section({
       id: 'memory',
       order: PROMPT_SECTION_ORDER,
-      render: () =>
-        formatMemorySection(
-          snapshots.get(sessionKey(), repository.projectDir(), {
-            loadAll: () => repository.snapshots(),
-            loadTarget: (target) => repository.snapshot(target),
-          }),
-        ),
+      render: () => {
+        if (!syncEnabled()) return '';
+        return formatMemorySection(
+          snapshots
+            .get(sessionKey(), repository.projectDir(), {
+              loadAll: () => repository.snapshots(),
+              loadTarget: (target) => repository.snapshot(target),
+            })
+            .map((snapshot) => ({ ...snapshot, limit: repository.limitFor(snapshot.target) })),
+        );
+      },
     });
     ctx.onDispose(() => section.dispose());
 
@@ -100,6 +120,8 @@ const plugin: MicaPlugin = {
       description:
         'Consolidate a finished session into memory operations. Read-only, single turn, no context inheritance.',
       systemPrompt: CURATOR_SYSTEM_PROMPT,
+      // 回答结束后的自动整理不是用户发起的委派：它照常记账，但不该让子代理 dock 闪一下。
+      activity: 'maintenance',
       allowedTools: [],
       writeMode: 'none',
       contextModeDefault: 'none',
@@ -113,8 +135,13 @@ const plugin: MicaPlugin = {
     const runCurator = async (options: { manual: boolean; owner?: unknown }): Promise<MemoryReviewOutcome> => {
       if (running) return { ok: false, message: '记忆整理正在进行中，稍后再试。' };
       running = true;
+      const controller = new AbortController();
+      active = controller;
+      let release: (() => void) | null = null;
+      let attempted: MemorySettings | null = null;
       try {
-        const settings = readSettings(ctx);
+        const settings = readSettings(ctx, options.owner);
+        if (disposed || !settings.enabled) return { ok: false, message: '记忆已关闭。' };
         // 一次性运行（`mica exec`）没有「下一次会话」：整理只会多花一次模型调用，
         // 而且写下的记忆这次也用不上。
         if (ctx.agent?.mode === 'one-shot') {
@@ -124,17 +151,51 @@ const plugin: MicaPlugin = {
           return { ok: true, message: '自动整理未开启。' };
         }
 
+        release = repository.acquireCuratorLock();
+        if (!release) return { ok: false, message: '其他会话正在整理记忆，稍后再试。' };
         const state = repository.readState();
         if (!options.manual && withinInterval(state.lastRunAt, settings.minIntervalMinutes)) {
           return { ok: true, message: '距上次整理还不到间隔，跳过。' };
         }
 
-        const messages = collectConversation(ctx, options.owner, settings.maxMessages);
+        const messages = collectConversation(
+          ctx,
+          options.owner,
+          Math.max(MIN_CONVERSATION_MESSAGES, settings.maxMessages),
+        );
         if (messages.length < MIN_CONVERSATION_MESSAGES) {
           return { ok: true, message: '对话太短，跳过整理。' };
         }
 
-        const requested = await requestOperations(ctx, settings, repository.snapshots(), messages);
+        const source = repository.forProject(
+          ctx.session?.describe(options.owner)?.cwd ?? null,
+          () => readSettings(ctx, options.owner).budgets,
+        );
+        const ensureActive = () => {
+          const current = readSettings(ctx, options.owner);
+          if (disposed || !current.enabled || (!options.manual && !current.autoCapture)) controller.abort();
+          controller.signal.throwIfAborted();
+        };
+        // 发起付费请求前保留节流基线；取消、进程退出也不能让下次自动整理立即重发。
+        repository.writeState({
+          lastRunAt: new Date().toISOString(),
+          lastMode: settings.curatorMode,
+          lastApplied: 0,
+          lastError: null,
+        });
+        attempted = settings;
+        const requested = await requestOperations(
+          ctx,
+          settings,
+          source.snapshots(),
+          messages.slice(-settings.maxMessages),
+          {
+            owner: options.owner,
+            signal: controller.signal,
+            ensureActive,
+          },
+        );
+        ensureActive();
         if (!requested.ok) {
           repository.writeState({
             lastRunAt: new Date().toISOString(),
@@ -153,7 +214,7 @@ const plugin: MicaPlugin = {
           return { ok: false, message: `记忆整理失败：${requested.error}` };
         }
 
-        const outcome = applyCuratorOperations(repository, requested.operations);
+        const outcome = applyCuratorOperations(source, requested.operations);
         const error = outcome.failures.map((failure) => `${failure.target}: ${failure.message}`).join('；');
         repository.writeState({
           lastRunAt: new Date().toISOString(),
@@ -182,7 +243,20 @@ const plugin: MicaPlugin = {
         const detail = error ? `\n未能写入：${error}` : '';
         return { ok: !error, message: `${summary}${detail}` };
       } catch (error) {
+        if (controller.signal.aborted) return { ok: true, message: '记忆整理已取消。' };
         const message = error instanceof Error ? error.message : String(error);
+        if (attempted) {
+          try {
+            repository.writeState({
+              lastRunAt: new Date().toISOString(),
+              lastMode: attempted.curatorMode,
+              lastApplied: 0,
+              lastError: message,
+            });
+          } catch (stateError) {
+            ctx.logger.warn('memory:state-write-failed', { error: String(stateError) });
+          }
+        }
         ctx.logger.warn('memory:curator-failed', { error: message });
         ctx.health.report({
           level: 'warn',
@@ -191,6 +265,8 @@ const plugin: MicaPlugin = {
         });
         return { ok: false, message: `记忆整理出错：${message}` };
       } finally {
+        release?.();
+        active = null;
         running = false;
       }
     };
@@ -200,7 +276,9 @@ const plugin: MicaPlugin = {
       (event) => {
         const payload = event as { outcome?: string; owner?: unknown } | null;
         if (!payload || payload.outcome !== 'completed') return;
-        const settings = readSettings(ctx);
+        if (disposed) return;
+        const settings = readSettings(ctx, payload.owner);
+        if (!settings.enabled) return;
         if (!settings.autoCapture) return;
         // 不 await：整理要发一次模型请求，不能把 turn:after 后面的队列启动、
         // 下一轮输入都拖住。`running` 标志保证同一时间只有一个整理在跑。
@@ -212,7 +290,7 @@ const plugin: MicaPlugin = {
 
     const command = registerMemoryCommand(ctx, {
       repository,
-      refreshPrompt: () => snapshots.invalidate(),
+      refreshPrompt: () => snapshots.invalidate(sessionKey()),
       runReview: () => runCurator({ manual: true }),
       describeRuntime: () => describeRuntime(ctx, repository),
     });
@@ -240,9 +318,12 @@ async function requestOperations(
   settings: MemorySettings,
   snapshotList: ReturnType<MemoryRepository['snapshots']>,
   messages: CuratorConversationMessage[],
+  options: { owner?: unknown; signal: AbortSignal; ensureActive(): void },
 ): Promise<CuratorRequestOutcome> {
   const user = buildCuratorUserPrompt({ snapshots: snapshotList, messages });
-  const first = await runCuratorPrompt(ctx, settings, user);
+  options.ensureActive();
+  const first = await runCuratorPrompt(ctx, settings, user, options);
+  options.ensureActive();
   if (first.ok || !first.retryable) return first;
 
   ctx.logger.warn('memory:curator-retry', { error: first.error });
@@ -255,7 +336,7 @@ async function requestOperations(
     '只输出一个 JSON 对象，字段名只能是 target / action / old_text / content。',
     '</correction>',
   ].join('\n');
-  const second = await runCuratorPrompt(ctx, settings, correction);
+  const second = await runCuratorPrompt(ctx, settings, correction, options);
   return second.ok ? second : { ok: false, error: second.error };
 }
 
@@ -263,7 +344,12 @@ type CuratorAttempt =
   | (CuratorRequestOutcome & { ok: true })
   | { ok: false; error: string; retryable: boolean; raw?: string };
 
-async function runCuratorPrompt(ctx: PluginContext, settings: MemorySettings, user: string): Promise<CuratorAttempt> {
+async function runCuratorPrompt(
+  ctx: PluginContext,
+  settings: MemorySettings,
+  user: string,
+  options: { owner?: unknown; signal: AbortSignal },
+): Promise<CuratorAttempt> {
   const settle = (text: string): CuratorAttempt => {
     const parsed = parseCuratorOutput(text);
     return parsed.ok ? parsed : { ok: false, error: parsed.error, retryable: true, raw: parsed.raw };
@@ -271,7 +357,7 @@ async function runCuratorPrompt(ctx: PluginContext, settings: MemorySettings, us
 
   if (settings.curatorMode === 'direct') {
     const llm = ctx.llm;
-    if (!llm || !curatorReady(llm)) {
+    if (!llm || !llm.configured(options.owner)) {
       return {
         ok: false,
         retryable: false,
@@ -279,7 +365,14 @@ async function runCuratorPrompt(ctx: PluginContext, settings: MemorySettings, us
           '整理接口未配置完整：需要接口地址与模型名（插件设置 → Memory）；Key 填 ${ENV_VAR} 时该环境变量需要在启动 Mica 的进程里可见',
       };
     }
-    return settle(await requestCuratorCompletion(llm, { system: CURATOR_SYSTEM_PROMPT, user }));
+    return settle(
+      await requestCuratorCompletion(llm, {
+        system: CURATOR_SYSTEM_PROMPT,
+        user,
+        signal: options.signal,
+        owner: options.owner,
+      }),
+    );
   }
 
   if (!ctx.subagents) {
@@ -296,6 +389,8 @@ async function runCuratorPrompt(ctx: PluginContext, settings: MemorySettings, us
     prompt: user,
     contextMode: 'none',
     maxTurns: 1,
+    signal: options.signal,
+    caller: { owner: options.owner },
   });
   // partial 也接受：整理子代理没有工具，partial 通常只是最后一句被截断，
   // 只要拿到了可解析的 JSON 就没必要整次丢掉。
@@ -314,13 +409,14 @@ async function runCuratorPrompt(ctx: PluginContext, settings: MemorySettings, us
 function collectConversation(ctx: PluginContext, owner: unknown, maxMessages: number): CuratorConversationMessage[] {
   const raw = ctx.session?.messages(owner) ?? [];
   const messages: CuratorConversationMessage[] = [];
-  for (const message of raw) {
+  for (let index = raw.length - 1; index >= 0 && messages.length < maxMessages; index -= 1) {
+    const message = raw[index]!;
     if (message.role !== 'user' && message.role !== 'assistant') continue;
     const text = extractText(message.content);
     if (!text.trim()) continue;
     messages.push({ role: message.role, content: text });
   }
-  return messages.slice(-Math.max(2, maxMessages));
+  return messages.reverse();
 }
 
 function extractText(content: unknown): string {
@@ -361,6 +457,10 @@ function describeRuntime(ctx: PluginContext, repository: MemoryRepository): stri
 }
 
 function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository): void {
+  if (!readSettings(ctx).enabled) {
+    ctx.health.report({ level: 'ok', message: '记忆已关闭：插件设置里的「启用记忆」关掉了' });
+    return;
+  }
   const issues = ctx.settings.validate();
   if (issues.length > 0) {
     ctx.health.report({
@@ -392,8 +492,8 @@ function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository): 
   });
 }
 
-function readSettings(ctx: PluginContext): MemorySettings {
-  return settingsFromValues(ctx.settings.get());
+function readSettings(ctx: PluginContext, owner?: unknown): MemorySettings {
+  return settingsFromValues(ctx.sessionSettings?.get(owner) ?? ctx.settings.get());
 }
 
 export default function setup(ctx: PluginContext): void {

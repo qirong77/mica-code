@@ -217,7 +217,7 @@ export class TerminalAgentSessionManager {
         ),
       cwd: process.cwd(),
       providerId: provider.id,
-      providerName: provider.name ?? provider.id,
+      providerName: provider.id,
       model,
       status: session.status,
       current: session.id === this.currentSessionId,

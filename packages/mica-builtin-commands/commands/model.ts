@@ -53,8 +53,8 @@ export function showModelSelector(
         .map((model) => ({
           name: encodeModelSelection({ providerId: provider.id, model }),
           label: model,
-          description: provider.name ?? provider.id,
-          searchField: `${model} ${provider.name ?? ''} ${provider.id}`,
+          description: provider.id,
+          searchField: `${model} ${provider.id}`,
         }));
     }),
     emptyMessage: 'no models available',
@@ -114,7 +114,7 @@ async function applyModelSelection(
       },
       successMessage: (config) => {
         const provider = config.providers.find((item) => item.id === config.provider);
-        return `Model: ${provider?.name ?? config.provider} / ${config.model}`;
+        return `Model: ${provider?.id ?? config.provider} / ${config.model}`;
       },
       successHint: 'Prompt cache may be invalidated. Consider /compact',
     });

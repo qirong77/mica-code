@@ -56,6 +56,7 @@ function createMockProvider() {
     toolFileContent: 'hello from mock',
     /** Second tool call content (kept separate so the two calls are distinct). */
     toolFileContent2: 'hello from mock (second call)',
+    toolRounds: 2,
     /** `shell` mode: the command the mock asks `background_tasks_start` to
      * start, so the tests can drive `mica/backgroundTasks/*`.
      * `/bin/echo` instead of the shell builtin: bash block-buffers builtin output
@@ -332,7 +333,7 @@ function createMockProvider() {
         };
         const finish = () => {
           const requestIndex = state.requests.length;
-          if (state.mode === 'tool' && (requestIndex === 1 || requestIndex === 2)) {
+          if (state.mode === 'tool' && requestIndex <= state.toolRounds) {
             emitToolCallEvents(requestIndex);
             // emitToolCallEvents already schedules its own completion via
             // delayBeforeTextMs; res.end happens inside emitCompleted.
@@ -1878,11 +1879,13 @@ suite('mica app-server real-user flows (mock provider)', () => {
     mock!.state.requests = [];
     mock!.state.responsesFinished = 0;
     mock!.state.delayBeforeTextMs = 0;
-    // 上下文占用超过快速压缩阈值（阈值的单位是 k，usage 的 input_tokens 是原始值）。
-    mock!.state.inputTokens = 250_000;
+    // Deliberately under-report provider usage: pending history drives the trigger.
+    mock!.state.inputTokens = 10;
+    mock!.state.toolRounds = 6;
     // 一次巨大的 write_file 正文：快速压缩把正文换成指向性摘要，同一 turn 的下一次
     // 请求立刻变小 —— 这正是「不等所有任务跑完」才有的收益。
     mock!.state.toolFileContent = 'y'.repeat(20_000);
+    mock!.state.toolFileContent2 = 'y'.repeat(20_000);
 
     // 阈值归插件自己的设置管（配置页 Plugins 一节写的也是这个文件），所以在起进程
     // 之前就写好：插件的 setup 读一次设置。
@@ -1892,7 +1895,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
       join(home, 'plugin-settings', 'auto-compact.json'),
       JSON.stringify({
         enabled: 'true',
-        quickThresholdK: '200',
+        quickThresholdK: '1',
         quickLimit: '1',
         modelThresholdK: '120',
         modelLimit: '0',
@@ -1914,8 +1917,10 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const turnId = (started.params?.turn as { id?: string }).id!;
     await waitFor(host, turnCompleted(turnId), 'turn/completed (auto compact)', 30_000);
 
-    // 第二次请求带的就是压缩后的历史：2 万字符正文只剩摘要，工具结果换成占位符。
-    const secondInput = mock!.state.requests[1]!.input as Array<{
+    // The first tool batch is still unread on request 2, so it must stay intact.
+    expect(JSON.stringify(mock!.state.requests[1]!.input)).toContain('y'.repeat(1_000));
+    // Once the task has made progress, old batches shrink before the next request.
+    const secondInput = mock!.state.requests.at(-1)!.input as Array<{
       type?: string;
       arguments?: string;
       output?: unknown;
@@ -1926,6 +1931,10 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(secondInput.find((item) => item.type === 'function_call_output')?.output).toBe(
       '[Old tool result content cleared during compact]',
     );
+
+    const newestCall = [...secondInput].reverse().find((item) => item.type === 'function_call');
+    expect(newestCall?.arguments).toContain('y'.repeat(1_000));
+    expect(mock!.state.requests).toHaveLength(7);
 
     // 压缩后的历史随 turn 落盘（重开会话读到的就是压缩后的上下文）。
     const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));

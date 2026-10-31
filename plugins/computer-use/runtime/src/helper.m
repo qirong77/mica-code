@@ -983,10 +983,13 @@ static void postFlags(CGKeyCode code, CGEventFlags flags) {
 }
 
 static int cmdMove(double x, double y) {
+    CGPoint before = mousePos();
     warpTo(x, y);
-    usleep(60 * 1000);
+    // 原有 60ms + JS 等待 120ms 的读回窗口放在同一进程里，省掉两次 helper 启动。
+    usleep(180 * 1000);
     CGPoint after = mousePos();
-    printf("{\"ok\":true,\"x\":%.1f,\"y\":%.1f}\n", after.x, after.y);
+    printf("{\"ok\":true,\"x\":%.1f,\"y\":%.1f,\"before\":{\"x\":%.1f,\"y\":%.1f}}\n",
+           after.x, after.y, before.x, before.y);
     return 0;
 }
 
@@ -1104,24 +1107,27 @@ static int cmdChord(const char *spec) {
         while (*p == ' ') p++;
         char *end = p + strlen(p);
         while (end > p && end[-1] == ' ') *--end = 0;
-        if (*p) parts[np++] = p;
+        if (!*p || (plus && !plus[1])) return failJson("组合键不能有空段");
+        parts[np++] = p;
         p = plus ? plus + 1 : NULL;
     }
     if (np == 0) return failJson("组合键为空");
+    if (p && *p) return failJson("组合键最多支持 8 段");
 
     const KeyDef *defs[8];
     for (int i = 0; i < np; i++) {
         defs[i] = findKey(parts[i]);
         if (!defs[i]) return failJson("未知键名: %s（来自 %s）", parts[i], spec);
+        // 所有参数都确认合法后才发事件，避免 cmd+a+b 出错时留下已按下的 cmd。
+        if (i < np - 1 && !defs[i]->isModifier) {
+            return failJson("%s 不是修饰键（组合键里除最后一个都必须是 cmd/shift/alt/ctrl）",
+                            parts[i]);
+        }
     }
 
     const KeyDef *mainKey = defs[np - 1];
     CGEventFlags flags = 0;
     for (int i = 0; i < np - 1; i++) {
-        if (!defs[i]->isModifier) {
-            return failJson("%s 不是修饰键（组合键里除最后一个都必须是 cmd/shift/alt/ctrl）",
-                            parts[i]);
-        }
         flags |= defs[i]->flag;
         postFlags(defs[i]->code, flags);
         usleep(12 * 1000);

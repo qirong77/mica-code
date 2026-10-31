@@ -30,24 +30,24 @@ export type PluginSessionSettingsRecord = Record<string, PluginSettingValues>;
 
 /** 宿主提供的原始存取：只做「读/写这份会话的覆盖」，字段语义由内核解释。 */
 export type PluginSessionSettingsHostApi = {
-  read(): PluginSettingValues | undefined;
-  write(value: PluginSettingValues | undefined): void;
+  read(owner?: unknown): PluginSettingValues | undefined;
+  write(value: PluginSettingValues | undefined, owner?: unknown): void;
 };
 
 /** 插件看到的会话设置接口。`pluginId` 在绑定阶段固定，读不到也改不到别人的。 */
 export type PluginSessionSettingsApi = {
   /** 本会话生效的值：会话覆盖 > 全局设置 > 字段默认值。 */
-  get(): PluginSettingValues;
+  get(owner?: unknown): PluginSettingValues;
   /** 只返回本会话真正覆盖过的键（界面用它区分「跟随默认」与「本会话已改」）。 */
-  overrides(): PluginSettingValues;
+  overrides(owner?: unknown): PluginSettingValues;
   /**
    * 覆盖若干键。值传 `null` 表示删掉这个覆盖、退回跟随默认。
    *
    * 校验不通过直接抛错并且**一个键都不写**：部分写入会让用户看到「改了一半」的状态。
    */
-  set(values: Record<string, string | null>): void;
+  set(values: Record<string, string | null>, owner?: unknown): void;
   /** 清空本会话的全部覆盖。 */
-  clear(): void;
+  clear(owner?: unknown): void;
 };
 
 /** 界面描述一个插件的会话设置：字段 + 生效值 + 本会话改过的键。 */
@@ -173,29 +173,29 @@ export function resolveEffectiveSettingValues(
 export function createPluginSessionSettingsApi(options: {
   fields: readonly PluginSettingField[];
   readGlobal: () => PluginSettingValues;
-  readOverrides: () => PluginSettingValues | undefined;
-  writeOverrides: (values: PluginSettingValues | undefined) => void;
+  readOverrides: (owner?: unknown) => PluginSettingValues | undefined;
+  writeOverrides: (values: PluginSettingValues | undefined, owner?: unknown) => void;
 }): PluginSessionSettingsApi {
   const { fields, readGlobal, readOverrides, writeOverrides } = options;
 
-  const overrides = (): PluginSettingValues => {
-    const raw = readOverrides();
+  const overrides = (owner?: unknown): PluginSettingValues => {
+    const raw = readOverrides(owner);
     if (!raw) return {};
     return mergeSessionSettingOverrides(fields, {}, raw);
   };
 
   return {
-    get: () => resolveEffectiveSettingValues(fields, readGlobal(), overrides()),
+    get: (owner) => resolveEffectiveSettingValues(fields, readGlobal(), overrides(owner)),
     overrides,
-    set: (patch) => {
+    set: (patch, owner) => {
       const issues = validateSessionSettingValues(fields, patch);
       if (issues.length > 0) {
         throw new Error(issues.map((issue) => `${issue.label}：${issue.message}`).join('；'));
       }
-      const next = mergeSessionSettingOverrides(fields, overrides(), patch);
-      writeOverrides(Object.keys(next).length > 0 ? next : undefined);
+      const next = mergeSessionSettingOverrides(fields, overrides(owner), patch);
+      writeOverrides(Object.keys(next).length > 0 ? next : undefined, owner);
     },
-    clear: () => writeOverrides(undefined),
+    clear: (owner) => writeOverrides(undefined, owner),
   };
 }
 

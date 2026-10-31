@@ -297,7 +297,9 @@ export class MicaUiRuntimeBridge {
 
   syncSubagentTaskItems(): void {
     micaUi.panels.setSubagentTaskItems(
-      (this.subagentTasks?.list(this.agent) ?? []).filter((task) => task.status === 'running').map(toUiSubagentTask),
+      (this.subagentTasks?.list(this.agent) ?? [])
+        .filter((task) => task.status === 'running' && task.activity !== 'maintenance')
+        .map(toUiSubagentTask),
     );
   }
 

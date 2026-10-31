@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Crosshair, RefreshCw, RotateCcw, Trash2, X } from 'lucide-react';
-import { applyEdits, dragRange, dropEdit, newStageId, pruneEdits, upsertEdit } from './edits';
+import { applyEdits, dragRange, dropEdit, mergeEditChanges, newStageId, pruneEdits, upsertEdit } from './edits';
 import {
   addDays,
   axisCells,
@@ -92,8 +92,8 @@ export default function SchedulePage({ api }) {
   const [picker, setPicker] = useState(null);
   const scrollRef = useRef(null);
   const rowsRef = useRef(null);
+  const labelsRef = useRef(null);
   const scrollTopRef = useRef(0);
-  const [scrollTop, setScrollTop] = useState(0);
   // 缩放只影响像素密度，不该把视野拉回今天；effect 里读这份最新值而不是进依赖
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
@@ -109,14 +109,21 @@ export default function SchedulePage({ api }) {
   const nudgeRef = useRef(null);
   /** 修订列表的权威副本（比 state 早一步），写盘也排在这条链上 */
   const editsRef = useRef([]);
+  const savedEditsRef = useRef([]);
   const writeChainRef = useRef(Promise.resolve());
+  const pendingWritesRef = useRef(0);
+  const editVersionRef = useRef(0);
+  const saveNoteRef = useRef('');
+  const refreshBusyRef = useRef(false);
   const flashTimerRef = useRef(0);
 
   const load = useCallback(
     async ({ retryIfEmpty = false } = {}) => {
+      if (pendingWritesRef.current > 0) return;
       const seq = ++readSeqRef.current;
       const read = async () => {
         const result = await api.readData();
+        if (result?.ok === false) throw new Error(result.error || '读取排期失败');
         return result?.value ?? null;
       };
       try {
@@ -129,6 +136,7 @@ export default function SchedulePage({ api }) {
         if (seq !== readSeqRef.current) return;
         const next = normalizeSnapshot(value);
         editsRef.current = next.edits;
+        savedEditsRef.current = next.edits;
         setSnapshot(next);
       } catch (caught) {
         if (seq !== readSeqRef.current) return;
@@ -170,61 +178,97 @@ export default function SchedulePage({ api }) {
    * 拿旧快照盖回去等于把刚抓到的公告丢了。修订按「群 + 阶段身份」定位，盖到最新那份上
    * 是对的；读不到数据（文件被清空）才退回内存里这份。
    */
-  const writeEdits = useCallback(
-    async (note) => {
-      // 修订列表以 ref 为准：state 要等下一次渲染，连着改两条时后者会看不到前者
-      try {
-        if (typeof api.writeData !== 'function') throw new Error('这个版本的宿主还不能保存改动，请更新桌面端');
-        const disk = normalizeSnapshot((await api.readData())?.value ?? null);
-        const current = snapshotRef.current;
-        const base = disk.groups.length > 0 || current.groups.length === 0 ? disk : current;
-        // 页面上存过修订就说明这份文件是新形态了：版本号跟着写对，别让下一个人以为还是旧结构
-        const merged = { ...base, version: SCHEDULE_VERSION, edits: pruneEdits(base.groups, editsRef.current) };
-        await api.writeData(merged);
-        editsRef.current = merged.edits;
-        setSnapshot(merged);
-        flash(note);
-      } catch (caught) {
-        setError(caught?.message || String(caught));
-        // 没存上就别让页面停在「看着已经改了」的状态
-        await load();
+  const writeEdits = useCallback(async () => {
+    // 修订列表以 ref 为准：state 要等下一次渲染，连着改两条时后者会看不到前者
+    try {
+      if (typeof api.writeData !== 'function') throw new Error('这个版本的宿主还不能保存改动，请更新桌面端');
+      const current = snapshotRef.current;
+      const edits = editsRef.current;
+      const previous = savedEditsRef.current;
+      let merged;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const result = await api.readData();
+        if (result?.ok === false) throw new Error(result.error || '读取排期失败');
+        const base = result?.value == null ? current : normalizeSnapshot(result.value);
+        merged = {
+          ...base,
+          version: SCHEDULE_VERSION,
+          edits: pruneEdits(base.groups, mergeEditChanges(base.edits, previous, edits), current.groups),
+        };
+        const version = result?.version;
+        const options = typeof version === 'string' || version === null ? { expectedVersion: version } : undefined;
+        const saved = await api.writeData(merged, options);
+        if (saved?.ok !== false) break;
+        if (!saved.conflict) throw new Error(saved.error || '保存排期失败');
+        if (attempt === 7) throw new Error('排期正在其他窗口更新，请稍后重试');
       }
-    },
-    [api, flash, load],
-  );
+      savedEditsRef.current = merged.edits;
+      // 写盘时下一次按键可能已经改了 ref；只收敛本次仍然是最新的那份，避免吃掉后来的改动。
+      editsRef.current = mergeEditChanges(merged.edits, edits, editsRef.current);
+      const next = { ...merged, edits: editsRef.current };
+      snapshotRef.current = next;
+      setSnapshot(next);
+      setError('');
+      return true;
+    } catch (caught) {
+      setError(caught?.message || String(caught));
+      return false;
+    }
+  }, [api]);
 
   /** 写盘串成一条链：连按方向键时两次写不能各读到对方之前的那份，否则后一次覆盖前一次。 */
   const saveEdits = useCallback(
     (edits, note) => {
+      readSeqRef.current += 1;
+      editVersionRef.current += 1;
+      saveNoteRef.current = note;
       editsRef.current = edits;
-      setSnapshot({ ...snapshotRef.current, edits });
+      const next = { ...snapshotRef.current, edits };
+      snapshotRef.current = next;
+      setSnapshot(next);
       setError('');
-      const run = writeChainRef.current.then(() => writeEdits(note));
+      if (pendingWritesRef.current > 0) return writeChainRef.current;
+      pendingWritesRef.current = 1;
+      const run = writeChainRef.current.then(async () => {
+        let saved;
+        for (;;) {
+          const version = editVersionRef.current;
+          saved = await writeEdits();
+          if (version === editVersionRef.current) break;
+        }
+        pendingWritesRef.current = 0;
+        if (saved) flash(saveNoteRef.current);
+        else await load();
+      });
       writeChainRef.current = run.catch(() => {});
       return run;
     },
-    [writeEdits],
+    [writeEdits, load, flash],
   );
 
   const commitEdit = useCallback((edit) => saveEdits(upsertEdit(editsRef.current, edit), '已保存'), [saveEdits]);
 
   const refresh = async () => {
-    if (busy) return;
+    if (refreshBusyRef.current) return;
     if (typeof api.action !== 'function') {
       setError('这个版本的宿主还不能从页面触发刷新，请到配置页的插件设置里点「重新整理排期」');
       return;
     }
+    refreshBusyRef.current = true;
+    readSeqRef.current += 1;
     setBusy(true);
     setMessage('');
     setError('');
     try {
       const result = await api.action('refresh');
-      if (result?.ok === false) setError(result.error || '整理失败');
+      if (result?.ok === false) setError(result.error || result.message || '整理失败');
       else setMessage(result?.message || '已整理');
+      await writeChainRef.current;
       await load();
     } catch (caught) {
       setError(caught?.message || String(caught));
     } finally {
+      refreshBusyRef.current = false;
       setBusy(false);
     }
   };
@@ -241,6 +285,7 @@ export default function SchedulePage({ api }) {
   const width = Math.max(320, Math.round(layout.days * pxPerDay));
   const cells = useMemo(() => axisCells(layout.start, layout.days, scale), [layout.start, layout.days, scale]);
   const rowsHeight = layout.rows.reduce((sum, row) => sum + rowHeight(row.lanes), 0);
+  const hasTimeline = !loading && layout.rows.length > 0;
   const todayOffset = daysBetween(layout.start, today);
   const todayInAxis = todayOffset >= 0 && todayOffset < layout.days;
 
@@ -278,7 +323,7 @@ export default function SchedulePage({ api }) {
     const host = scrollRef.current;
     if (!host || layout.days <= 0) return;
     host.scrollLeft = todayScrollLeft(layout.start, today, pxPerDayOf(scale, zoomRef.current), host.clientWidth);
-  }, [scale, layout.start, layout.days, today]);
+  }, [hasTimeline, scale, layout.start, layout.days, today]);
 
   // 滚轮就是缩放（锚在光标）：上下滚一档一档来，Shift 或触控板横滑才平移。
   // 滚轮既然给了缩放，纵向滚动交给滚动条——一次滚动只改一样，手感才不会两件事一起动。
@@ -321,7 +366,7 @@ export default function SchedulePage({ api }) {
     };
     host.addEventListener('wheel', onWheel, { passive: false });
     return () => host.removeEventListener('wheel', onWheel);
-  }, [layout.start, pxPerDay, scale]);
+  }, [hasTimeline, layout.start, pxPerDay, scale]);
 
   const toggleStage = (key) => {
     setHidden((prev) => {
@@ -426,6 +471,11 @@ export default function SchedulePage({ api }) {
     });
   };
 
+  const cancelDrag = () => {
+    dragRef.current = null;
+    setDrag(null);
+  };
+
   const dayAtClientX = (clientX) => {
     const host = rowsRef.current;
     if (!host) return null;
@@ -479,6 +529,11 @@ export default function SchedulePage({ api }) {
     });
   };
 
+  const cancelCreate = () => {
+    createRef.current = null;
+    setCreating(null);
+  };
+
   const addStage = (key) => {
     const target = picker;
     if (!target) return;
@@ -492,6 +547,7 @@ export default function SchedulePage({ api }) {
   /** 只删掉本地的这条修订：改过的是还原公告值，自己新建的是整条删掉。 */
   const dropSelectedEdit = () => {
     if (!selectedBar) return;
+    nudgeRef.current = null;
     const { bar } = selectedBar;
     void saveEdits(dropEdit(editsRef.current, bar.groupId, bar.stageId), bar.added ? '已删除' : '已还原为公告值');
   };
@@ -541,8 +597,13 @@ export default function SchedulePage({ api }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <CalendarDays size={14} className="shrink-0 text-fg-muted" />
-          <span className="min-w-0 truncate text-[11px] text-fg-muted">
+          <span
+            className="min-w-0 truncate text-[11px] text-fg-muted"
+            title={snapshot.errors.map((entry) => `${entry.name}：${entry.message}`).join('\n')}
+          >
             {snapshot.coverage || '还没有整理过'}
+            {snapshot.scope.partial ? ' · 没扫全（未更新的群保留上次结果）' : ''}
+            {snapshot.errors.length > 0 ? ` · ${snapshot.errors.length} 个群没扫成` : ''}
             {snapshot.updatedAt ? ` · ${freshness(snapshot.updatedAtMs)}` : ''}
           </span>
         </div>
@@ -636,7 +697,7 @@ export default function SchedulePage({ api }) {
               style={{ height: MAJOR_HEADER_HEIGHT + DAY_HEADER_HEIGHT }}
             />
             <div className="min-h-0 flex-1 overflow-hidden">
-              <div style={{ transform: `translateY(${-scrollTop}px)` }}>
+              <div ref={labelsRef} style={{ transform: `translateY(${-scrollTopRef.current}px)` }}>
                 {layout.rows.map((row) => (
                   <div
                     key={row.groupId}
@@ -666,7 +727,7 @@ export default function SchedulePage({ api }) {
               const next = event.currentTarget.scrollTop;
               if (next !== scrollTopRef.current) {
                 scrollTopRef.current = next;
-                setScrollTop(next);
+                if (labelsRef.current) labelsRef.current.style.transform = `translateY(${-next}px)`;
               }
             }}
           >
@@ -785,9 +846,11 @@ export default function SchedulePage({ api }) {
                         onBarDown={startDrag}
                         onBarMove={moveDrag}
                         onBarUp={endDrag}
+                        onBarCancel={cancelDrag}
                         onRowDown={startCreate}
                         onRowMove={moveCreate}
                         onRowUp={endCreate}
+                        onRowCancel={cancelCreate}
                       />
                     );
                   });
@@ -930,9 +993,11 @@ function Row({
   onBarDown,
   onBarMove,
   onBarUp,
+  onBarCancel,
   onRowDown,
   onRowMove,
   onRowUp,
+  onRowCancel,
 }) {
   return (
     <div
@@ -941,7 +1006,7 @@ function Row({
       onPointerDown={(event) => onRowDown(event, row)}
       onPointerMove={onRowMove}
       onPointerUp={onRowUp}
-      onPointerCancel={onRowUp}
+      onPointerCancel={onRowCancel}
     >
       {row.bars
         .filter((bar) => !hidden.has(bar.key))
@@ -956,13 +1021,14 @@ function Row({
             onPointerDown={(event) => onBarDown(event, row, bar)}
             onPointerMove={onBarMove}
             onPointerUp={onBarUp}
+            onPointerCancel={onBarCancel}
           />
         ))}
     </div>
   );
 }
 
-function Bar({ bar, pxPerDay, active, preview, onClick, onPointerDown, onPointerMove, onPointerUp }) {
+function Bar({ bar, pxPerDay, active, preview, onClick, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }) {
   // 拖动中用预览的几何，所以条跟着指针走；松手才写数据
   const left = (preview?.offset ?? bar.offset) * pxPerDay;
   const width = Math.max(6, (preview?.span ?? bar.span) * pxPerDay - 2);
@@ -979,7 +1045,7 @@ function Bar({ bar, pxPerDay, active, preview, onClick, onPointerDown, onPointer
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerCancel}
       title={`${bar.label}｜${range}｜${preview?.span ?? bar.span} 天${note}`}
       className={`group/bar absolute flex cursor-grab items-center overflow-hidden rounded-sm border px-1.5 text-left text-[11px] transition-[filter] hover:brightness-125 ${
         bar.edited ? 'border-dashed' : ''

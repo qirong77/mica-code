@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentUsageRecord, ModelClientOptions } from '@packages/mica-agent/index.js';
 import { createPluginLlmApi } from '@packages/mica-plugin/index.js';
-import { createPluginModels, recordPluginModelUsage, type PluginModelClient } from './pluginModels.js';
+import {
+  capturePluginModelUsageRecorder,
+  createPluginModels,
+  recordPluginModelUsage,
+  type PluginModelClient,
+} from './pluginModels.js';
 
 const usage: AgentUsageRecord = {
   provider: 'plugin:session-rename',
@@ -109,6 +114,25 @@ describe('createPluginModels', () => {
     });
   });
 
+  it('does not resend or reject a successful model response when local usage persistence fails', async () => {
+    const createClient = vi.fn((options: ModelClientOptions) => fakeClient(options, { text: 'already paid result', usage }));
+    const models = createPluginModels({
+      record: () => { throw new Error('local disk full'); },
+      createClient,
+    });
+    const result = await models('memory', baseRequest);
+    expect(result.text).toBe('already paid result');
+    expect(createClient).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the provider failure when recording partial usage also fails', async () => {
+    const models = createPluginModels({
+      record: () => { throw new Error('local disk full'); },
+      createClient: (options) => fakeClient(options, { error: new Error('provider failure'), usage }),
+    });
+    await expect(models('memory', baseRequest)).rejects.toThrow('provider failure');
+  });
+
   it('does not write an empty record when the failed request produced no usage', async () => {
     const record = vi.fn();
     const models = createPluginModels({
@@ -119,6 +143,40 @@ describe('createPluginModels', () => {
     await expect(models('commit', baseRequest)).rejects.toThrow('HTTP 401');
     expect(record).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    'binds the usage destination before a delayed request finishes (failed: %s)',
+    async (failed) => {
+      let activeSession = 'original';
+      const destinations: string[] = [];
+      const captureRecorder = vi.fn(() => {
+        const destination = activeSession;
+        return () => {
+          destinations.push(destination);
+        };
+      });
+      const models = createPluginModels({
+        captureRecorder,
+        createClient: () =>
+          ({
+            query: async () => {
+              activeSession = 'switched';
+              if (failed) throw new Error('late failure');
+              return 'ok';
+            },
+            usageHistory: [usage],
+            lastUsage: usage,
+          }) as unknown as PluginModelClient,
+      });
+
+      const request = models('memory', baseRequest);
+      if (failed) await expect(request).rejects.toThrow('late failure');
+      else await request;
+
+      expect(captureRecorder).toHaveBeenCalledTimes(1);
+      expect(destinations).toEqual(['original']);
+    },
+  );
 
   it('aborts the request when it exceeds the timeout', async () => {
     let signal: AbortSignal | undefined;
@@ -147,6 +205,27 @@ describe('createPluginModels', () => {
 });
 
 describe('recordPluginModelUsage', () => {
+  it('captures the session id even when a controller later resumes another session', () => {
+    let sessionId = 'original';
+    const recordSubagentUsageForSession = vi.fn();
+    const record = capturePluginModelUsageRecorder({
+      getCurrentSessionId: () => sessionId,
+      recordSubagentUsageForSession,
+    });
+    sessionId = 'switched';
+
+    record(entry);
+
+    expect(recordSubagentUsageForSession).toHaveBeenCalledWith(
+      'original',
+      expect.objectContaining({
+        origin: 'plugin',
+        pluginId: 'session-rename',
+        requests: [usage],
+      }),
+    );
+  });
+
   it('writes a plugin-tagged record and saves when the turn is idle', () => {
     const recordSubagentUsage = vi.fn();
     const save = vi.fn();

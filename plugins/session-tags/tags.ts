@@ -93,7 +93,7 @@ export function normalizeTagStore(raw: unknown): TagStore {
     return {
       id: color,
       label: found?.label || DEFAULT_TAG_LABELS[color],
-      color: found?.color || TAG_COLOR_HEX[color],
+      color: TAG_COLOR_HEX[color],
     };
   });
   return { ...data, options, assignments: sortAssignments(data.assignments) };
@@ -158,6 +158,30 @@ export function resolveTagColor(store: TagStore, token: string): TagColor | null
     if (labelOf(store, color).toLowerCase() === value) return color;
   }
   return null;
+}
+
+/** 名字可以包含空格；优先识别完整的最长名字，再继续解析后面的颜色。 */
+export function maxTagNameWords(store: TagStore): number {
+  return Math.max(1, ...store.options.map((option) => option.label.trim().split(/\s+/).length));
+}
+
+export function resolveTagTokens(store: TagStore, tokens: string[]): { colors: TagColor[]; unknown: string[] } {
+  const colors: TagColor[] = [];
+  const unknown: string[] = [];
+  const maxWords = maxTagNameWords(store);
+  for (let index = 0; index < tokens.length; ) {
+    let matched = false;
+    for (let end = Math.min(tokens.length, index + maxWords); end > index; end -= 1) {
+      const color = resolveTagColor(store, tokens.slice(index, end).join(' '));
+      if (!color) continue;
+      colors.push(color);
+      index = end;
+      matched = true;
+      break;
+    }
+    if (!matched) unknown.push(tokens[index++]!);
+  }
+  return { colors, unknown };
 }
 
 export function setSessionTags(store: TagStore, sessionId: string, colors: readonly unknown[]): TagStore {
@@ -232,9 +256,5 @@ export function describeTagStore(store: TagStore, sessionId?: string | null): st
   const counts = tagCounts(store);
   const lines = TAG_COLORS.map((color) => `  ● ${tagLabelText(store, color)} — ${counts[color]} 个会话`);
   const current = tagsOf(store, sessionId);
-  return [
-    '会话标签（7 个固定色槽，可改名）：',
-    ...lines,
-    `当前会话：${formatTagList(store, current)}`,
-  ];
+  return ['会话标签（7 个固定色槽，可改名）：', ...lines, `当前会话：${formatTagList(store, current)}`];
 }

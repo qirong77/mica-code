@@ -93,12 +93,13 @@ describe('normalizeSnapshot', () => {
           name: '群一',
           author: '张三',
           announcedAt: 456,
-          stages: [{ key: 'dev', label: '开发', start: '11-01', end: '11-03', days: ['11-01'] }],
+          stages: [{ key: 'dev', label: '开发', start: '2026-11-01', end: '2026-11-03', days: ['2026-11-01'] }],
         },
         // 没有阶段的组不该画成一条空行
         { id: 'g2', name: '群二', stages: [] },
         // 认不出的条目直接丢掉
         { name: '没有 id' },
+        { id: 'bad', name: '坏日期', stages: [{ key: 'dev', start: '2026-02-30', end: '2026-03-02' }] },
       ],
     });
     expect(snapshot.groups).toHaveLength(1);

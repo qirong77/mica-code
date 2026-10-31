@@ -16,7 +16,8 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { micaCommon, cloneCapabilitySelection, normalizeCapabilitySelection } from '@packages/mica-common/index.js';
 import type { CapabilitySelection } from '@packages/mica-common/index.js';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
-import { mcpToolNamePrefix } from '@packages/mica-tools/index.js';
+import { mcpToolNamePrefix, micaTools } from '@packages/mica-tools/index.js';
+import { estimateContextTokens, estimateTextTokens } from '@packages/mica-context/tokenEstimate.js';
 import type { AgentObservationEvent, HookRegistry } from '@packages/mica-plugin/index.js';
 import { applyIterationRewrites } from './iterationRewrite.js';
 import {
@@ -307,7 +308,7 @@ export class AgentRuntime {
 
   createSubAgent(options: Partial<ModelClientOptions> = {}) {
     if (!this.isConfigured) {
-      const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
+      const message = `${this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
       throw new Error(message);
     }
     return micaAgent.createSubAgent({
@@ -434,6 +435,19 @@ export class AgentRuntime {
     // 记下来的提示词也属于这条会话：新会话的第一轮请求会重新记录。
     this.lastSystemPrompt = undefined;
     this.emitStatus({ type: 'idle' });
+  }
+
+  getLastUsage(): AgentUsageRecord | undefined {
+    return this.client?.lastUsage;
+  }
+
+  /** The prompt and tool schemas share the provider's context budget. */
+  estimateRequestOverheadTokens(): number {
+    return estimateTextTokens(this.systemPrompt ?? '') + estimateContextTokens(micaTools.getDefinitions(this.isToolEnabledByCapabilities));
+  }
+
+  get systemPrompt(): string | undefined {
+    return this.lastSystemPrompt;
   }
 
   getSnapshot(): AgentRuntimeSnapshot {
@@ -563,7 +577,7 @@ export class AgentRuntime {
     try {
       if (!this.isCurrent(runId)) throw new AgentAbortError(runId);
       if (!this.client || !this.isConfigured) {
-        const message = `${this.currentConfig.provider.name ?? this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
+        const message = `${this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
         throw new Error(message);
       }
       if (!this.currentConfig.model) {
@@ -606,7 +620,7 @@ export class AgentRuntime {
           rewriteIterationMessages: async (messages) => {
             if (!this.isCurrent(runId)) return null;
             const beforeCount = messages.length;
-            const rewritten = await applyIterationRewrites(messages, this);
+            const rewritten = await applyIterationRewrites(messages, this, signal);
             if (rewritten && this.isCurrent(runId)) {
               this.observeActive({ type: 'history:rewritten', beforeCount, afterCount: rewritten.length });
             }

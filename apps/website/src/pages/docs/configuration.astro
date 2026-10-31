@@ -5,7 +5,6 @@ const providerExample = `{
   "providers": [
     {
       "id": "deepseek",
-      "name": "DeepSeek",
       "api_base": "https://api.deepseek.com",
       "api_key": "YOUR_API_KEY",
       "protocol": "openai_chat_completions",
@@ -18,7 +17,6 @@ const responsesExample = `{
   "providers": [
     {
       "id": "openai",
-      "name": "OpenAI",
       "api_base": "https://api.openai.com/v1",
       "api_key": "YOUR_API_KEY",
       "protocol": "openai_responses",
@@ -29,7 +27,6 @@ const responsesExample = `{
 }`;
 const compatibleExample = `{
   "id": "local",
-  "name": "Local API",
   "api_base": "http://127.0.0.1:8000/v1",
   "api_key": "YOUR_API_KEY",
   "protocol": "openai_chat_completions",
@@ -99,14 +96,8 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
             <code>id</code>
           </td>
           <td>
-            唯一标识，用于 <code>provider/model</code> 形式的模型 ID。建议使用简短、稳定的名称。
+            唯一的名称，既用于 <code>provider/model</code> 形式的模型 ID，也是界面上显示的名字。建议使用简短、稳定的名称。
           </td>
-        </tr>
-        <tr>
-          <td>
-            <code>name</code>
-          </td>
-          <td>可选的界面显示名称。</td>
         </tr>
         <tr>
           <td>

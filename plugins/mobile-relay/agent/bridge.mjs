@@ -121,10 +121,20 @@ function postBinary(target, body) {
       },
       (res) => {
         const chunks = []
-        res.on('data', (chunk) => chunks.push(chunk))
+        let bytes = 0
+        res.on('data', (chunk) => {
+          bytes += chunk.length
+          if (bytes > 4 * 1024 * 1024) req.destroy(new Error('relay response too large'))
+          else chunks.push(chunk)
+        })
+        res.on('error', reject)
         res.on('end', () => resolve({ status: res.statusCode || 0, body: Buffer.concat(chunks) }))
       }
     )
+    // socket timeout 只管空闲；持续滴流的响应也必须在总预算内结束。
+    const deadline = setTimeout(() => req.destroy(new Error('relay request deadline exceeded')), 30_000)
+    deadline.unref?.()
+    req.once('close', () => clearTimeout(deadline))
     req.on('timeout', () => req.destroy(new Error('timeout')))
     req.on('error', reject)
     req.end(body)
@@ -264,10 +274,19 @@ let eventBytes = 0
 let relayParams = { intervalMs: 15_000, watch: null }
 /** 中转机是否有人在看。没人看时不攒事件、不催轮询。 */
 let wanted = false
-const resultHashes = new Map()
+const resultHashes = { entries: new Map(), bytes: 0 }
+// 与中转机 resultCache 的上限一致：对方淘汰后必须重新传完整结果。
+const RESULT_CACHE_LIMIT = 200
+const RESULT_CACHE_BYTES = 4 * 1024 * 1024
 let pendingResults = []
 let envPayload = null
 let stopping = false
+let pollFailures = 0
+
+function retryDelay(failures) {
+  const base = Math.min(60_000, 5000 * 2 ** Math.min(failures - 1, 4))
+  return Math.min(60_000, Math.round(base * (0.8 + Math.random() * 0.4)))
+}
 
 function log(...args) {
   if (settings.debug) console.error(...args)
@@ -410,9 +429,6 @@ async function runCommand(command) {
 
     const json = JSON.stringify(result.result ?? null)
     const hash = createHashOf(json)
-    const key = `${channel}\u0000${JSON.stringify(payload)}`
-    if (resultHashes.get(key) === hash) return { id: command.id, channel, payload, ok: true, unchanged: true, hash }
-    resultHashes.set(key, hash)
     return { id: command.id, channel, payload, ok: true, hash, result: result.result }
   } catch (error) {
     return { id: command.id, ok: false, error: String(error?.message || error) }
@@ -424,32 +440,87 @@ function createHashOf(text) {
   return createHash('sha1').update(text).digest('hex')
 }
 
+function resultKey(item) {
+  return `${item.channel}\u0000${JSON.stringify(item.payload ?? {})}`
+}
+
+function clearResultCache(cache) {
+  cache.entries.clear()
+  cache.bytes = 0
+}
+
+function rememberResult(cache, item) {
+  if (item.ok !== true || typeof item.hash !== 'string' || item.unchanged) return
+  const key = resultKey(item)
+  const bytes = Buffer.byteLength(key) + Buffer.byteLength(JSON.stringify(item.result ?? null))
+  const previous = cache.entries.get(key)
+  if (previous) cache.bytes -= previous.bytes
+  cache.entries.delete(key)
+  if (bytes > RESULT_CACHE_BYTES) return
+  cache.entries.set(key, { hash: item.hash, bytes })
+  cache.bytes += bytes
+  while (cache.entries.size > RESULT_CACHE_LIMIT || cache.bytes > RESULT_CACHE_BYTES) {
+    const oldest = cache.entries.keys().next().value
+    cache.bytes -= cache.entries.get(oldest).bytes
+    cache.entries.delete(oldest)
+  }
+}
+
+/** 按回传顺序去重，不能让先完成的后一个请求被前一个请求引用。 */
+function resultsForPoll(results) {
+  const known = { entries: new Map(resultHashes.entries), bytes: resultHashes.bytes }
+  return results.map((item) => {
+    if (item.ok === true && typeof item.hash === 'string' && known.entries.get(resultKey(item))?.hash === item.hash) {
+      const { result, ...rest } = item
+      return { ...rest, unchanged: true }
+    }
+    rememberResult(known, item)
+    return item
+  })
+}
+
 /* ---------------------------------------------------------------- 主循环 */
 
 async function tick() {
-  settings = readSettings()
+  const nextSettings = readSettings()
+  if (nextSettings.relayUrl !== settings.relayUrl || nextSettings.token !== settings.token) {
+    // 切换机器身份时，旧调用的结果、缓存和事件都只属于原来的中转机。
+    CHANNEL_KEY = deriveKey(nextSettings.token)
+    pendingResults = []
+    clearResultCache(resultHashes)
+    eventBuffer = []
+    eventBytes = 0
+    wanted = false
+    relayParams = { intervalMs: 15_000, watch: null }
+    labelPending = hostname()
+    pollFailures = 0
+  }
+  settings = nextSettings
 
   let intervalMs = relayParams.intervalMs
   const events = takeEvents()
   const results = pendingResults
   pendingResults = []
+  const env = envPayload
 
   try {
-    const body = { events, results, watch: relayParams.watch }
-    if (envPayload) {
-      body.env = envPayload
-      envPayload = null
-    }
+    const sentResults = resultsForPoll(results)
+    const body = { events, results: sentResults, watch: relayParams.watch }
+    if (env) body.env = env
     if (labelPending) body.label = labelPending
     const started = Date.now()
     const rawBytes = Buffer.byteLength(JSON.stringify(body))
     const response = await relayPoll(body)
+    pollFailures = 0
+    if (envPayload === env) envPayload = null
     labelPending = ''
-    relayParams.intervalMs = Number(response?.intervalMs) || intervalMs
+    const nextInterval = Number(response?.intervalMs)
+    if (Number.isFinite(nextInterval) && nextInterval >= 0) relayParams.intervalMs = nextInterval
     intervalMs = relayParams.intervalMs
 
     wanted = response?.wanted === true
-    if (response?.resetCache) resultHashes.clear()
+    if (response?.resetCache) clearResultCache(resultHashes)
+    else for (const item of sentResults) rememberResult(resultHashes, item)
     if (!wanted) {
       eventBuffer = []
       eventBytes = 0
@@ -467,12 +538,16 @@ async function tick() {
       intervalMs = 0
     }
   } catch (error) {
+    // 结果按 id 结算，重复回传是幂等的；丢掉它们会让已经执行完的操作等到超时。
+    pendingResults.unshift(...results)
+    clearResultCache(resultHashes)
     log('[poll] failed:', String(error?.message || error))
-    intervalMs = 5000
+    intervalMs = retryDelay(++pollFailures)
   }
 
   if (stopping) return
-  if (intervalMs <= 0) return void setImmediate(tick)
+  // main() 已经负责下一轮；额外调 tick 会在每次执行命令后多出一条并行轮询。
+  if (intervalMs <= 0) return
   await new Promise((resolve) => {
     let settled = false
     const finish = () => {
@@ -483,7 +558,8 @@ async function tick() {
       resolve()
     }
     const timer = setTimeout(finish, intervalMs)
-    wakeResolve = finish
+    // 本机仍在流式输出时也遵守失败退避，避免 chat:event 把失败重试催成紧循环。
+    if (pollFailures === 0) wakeResolve = finish
   })
 }
 

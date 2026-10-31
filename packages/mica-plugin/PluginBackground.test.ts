@@ -109,6 +109,73 @@ describe('plugin background scheduler', () => {
     expect(scheduler.list()).toEqual([]);
   });
 
+  it('does not report shutdown cancellation as a plugin failure', async () => {
+    const onError = vi.fn();
+    const scheduler = createPluginBackgroundScheduler({ pluginId: 'demo', onError });
+    scheduler.register({
+      id: 'poll',
+      every: 1_000,
+      immediate: true,
+      run: ({ signal }) =>
+        new Promise<void>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('request aborted')), { once: true });
+        }),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    scheduler.disposeAll();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(scheduler.list()).toEqual([]);
+  });
+
+  it('bounds invalid intervals and survives failing interval/error observers', async () => {
+    const run = vi.fn();
+    const onError = vi.fn(() => { throw new Error('broken observer'); });
+    const every = vi.fn()
+      .mockReturnValueOnce(NaN)
+      .mockImplementationOnce(() => { throw new Error('broken interval'); })
+      .mockReturnValue(Infinity);
+    const scheduler = createPluginBackgroundScheduler({ pluginId: 'demo', onError });
+    scheduler.register({ id: 'poll', every, run });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(run).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(run).toHaveBeenCalledTimes(2);
+    scheduler.disposeAll();
+  });
+
+  it('increments attempt numbers after failures and rejects registration after disposal', async () => {
+    const attempts: number[] = [];
+    const scheduler = createPluginBackgroundScheduler({ pluginId: 'demo', onError: vi.fn() });
+    scheduler.register({
+      id: 'poll', every: 1_000, immediate: true,
+      run: ({ tick }) => { attempts.push(tick); if (tick < 3) throw new Error('retry'); },
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(attempts).toEqual([1, 2, 3]);
+    expect(scheduler.list()[0]).toMatchObject({ ticks: 1, failures: 2 });
+    scheduler.disposeAll();
+    expect(() => scheduler.register({ id: 'next', every: 1_000, run: () => {} })).toThrow(/disposed/);
+  });
+
+  it('does not erase a replacement when an old registration is disposed twice', async () => {
+    const scheduler = createPluginBackgroundScheduler({ pluginId: 'demo', onError: vi.fn() });
+    const first = scheduler.register({ id: 'poll', every: 1_000, run: () => {} });
+    first.dispose();
+    const replacement = vi.fn();
+    scheduler.register({ id: 'poll', every: 1_000, immediate: true, run: replacement });
+    first.dispose();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(scheduler.list()).toHaveLength(1);
+    expect(replacement).toHaveBeenCalledTimes(1);
+    scheduler.disposeAll();
+  });
+
   it('rejects duplicate ids inside one plugin', () => {
     const scheduler = createPluginBackgroundScheduler({ pluginId: 'demo', onError: vi.fn() });
     scheduler.register({ id: 'poll', every: 1_000, run: () => {} });

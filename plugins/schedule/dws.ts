@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -35,10 +36,7 @@ export function resolveDws(configured: string | undefined): DwsCommand | null {
     if (expanded.endsWith('.sh')) return { file: 'bash', prefix: [expanded] };
     return { file: expanded, prefix: [] };
   }
-  const bundled = join(
-    homedir(),
-    '.SmartWork/skills/smartwork-cli/smartwork-shared/assets/dws-unix.sh',
-  );
+  const bundled = join(homedir(), '.SmartWork/skills/smartwork-cli/smartwork-shared/assets/dws-unix.sh');
   if (existsSync(bundled)) return { file: 'bash', prefix: [bundled] };
   // 装过独立版本时 PATH 上会有 dws；找不到就是没配，由调用方报一条健康状态。
   return { file: 'dws', prefix: [] };
@@ -68,12 +66,18 @@ export function createDwsRunner(command: DwsCommand): DwsRunner {
 }
 
 function firstLine(text: string): string {
-  return text.split('\n').map((line) => line.trim()).find(Boolean) ?? '';
+  return (
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean) ?? ''
+  );
 }
 
-/** 读一份 `dws` 写出来的 JSON 文件；读完就删，缓存目录里不留历史导出。 */
-function readJsonFile(path: string): unknown {
+/** 导出无论成功或失败都清理文件，避免留下包含群消息的半份输出。 */
+async function readExport(run: DwsRunner, path: string, args: string[], timeoutMs: number): Promise<unknown> {
   try {
+    await run(args, { timeoutMs });
     return JSON.parse(readFileSync(path, 'utf8'));
   } finally {
     rmSync(path, { force: true });
@@ -81,9 +85,16 @@ function readJsonFile(path: string): unknown {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function exportEntries(payload: unknown, key: 'chats' | 'messages'): unknown[] {
+  const record = asRecord(payload);
+  if (record?.ok === false)
+    throw new Error(`dws 导出失败：${firstLine(String(record.error ?? record.message ?? '未知错误'))}`);
+  const entries = asRecord(record?.data)?.[key];
+  if (!Array.isArray(entries)) throw new Error(`dws 导出缺少有效的 ${key} 数据`);
+  return entries;
 }
 
 export type DwsChat = {
@@ -95,15 +106,10 @@ export type DwsChat = {
 };
 
 /** 群列表（`chat +dump-chats`），按最近活跃排序由调用方决定。 */
-export async function listChats(
-  run: DwsRunner,
-  cacheDir: string,
-): Promise<DwsChat[]> {
-  const file = join(cacheDir, `chats-${process.pid}.json`);
-  await run(['--output', 'json', 'chat', '+dump-chats', file], { timeoutMs: 120_000 });
-  const payload = asRecord(readJsonFile(file));
-  const data = asRecord(payload?.data);
-  const chats = Array.isArray(data?.chats) ? data!.chats : [];
+export async function listChats(run: DwsRunner, cacheDir: string, timeoutMs = 120_000): Promise<DwsChat[]> {
+  const file = join(cacheDir, `chats-${randomUUID()}.json`);
+  const payload = await readExport(run, file, ['--output', 'json', 'chat', '+dump-chats', file], timeoutMs);
+  const chats = exportEntries(payload, 'chats');
   const result: DwsChat[] = [];
   for (const entry of chats) {
     const chat = asRecord(entry);
@@ -141,8 +147,10 @@ export async function latestAnnouncement(
     timeoutMs?: number;
   },
 ): Promise<Announcement | null> {
-  const file = join(options.cacheDir, `chat-${options.chatId}-${process.pid}.json`);
-  await run(
+  const file = join(options.cacheDir, `chat-${randomUUID()}.json`);
+  const payload = await readExport(
+    run,
+    file,
     [
       '--output',
       'json',
@@ -158,11 +166,9 @@ export async function latestAnnouncement(
       String(options.limit ?? 3000),
       file,
     ],
-    { timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS },
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   );
-  const payload = asRecord(readJsonFile(file));
-  const data = asRecord(payload?.data);
-  const messages = Array.isArray(data?.messages) ? data!.messages : [];
+  const messages = exportEntries(payload, 'messages');
   let latest: Announcement | null = null;
   for (const entry of messages) {
     const message = asRecord(entry);
@@ -184,9 +190,9 @@ export async function latestAnnouncement(
 }
 
 /** 当前登录的人（`user info --self`）；拿不到返回空串，不影响排期本身。 */
-export async function readSelf(run: DwsRunner): Promise<string> {
+export async function readSelf(run: DwsRunner, timeoutMs = 20_000): Promise<string> {
   try {
-    const stdout = await run(['--output', 'json', 'user', 'info', '--self'], { timeoutMs: 20_000 });
+    const stdout = await run(['--output', 'json', 'user', 'info', '--self'], { timeoutMs });
     const payload = asRecord(JSON.parse(stdout));
     const user = asRecord(asRecord(payload?.data)?.user);
     const fullname = typeof user?.fullname === 'string' ? user.fullname.trim() : '';

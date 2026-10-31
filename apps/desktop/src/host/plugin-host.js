@@ -1,15 +1,9 @@
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
 import { ipcMain } from 'electron'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { runPluginAction } from '@mica-config-ui/plugin-action'
 import { probeRuntime } from './runtime-probe-core'
-import {
-  decodePluginData,
-  encodePluginData,
-  isValidPluginId,
-  pluginDataPath
-} from './plugin-data-core'
+import { isValidPluginId } from './plugin-data-core'
+import { readPluginData, writePluginData } from './plugin-data-store.js'
 import { applyRemoteAccessPatch, describeRemoteAccess } from './remote-access.js'
 import { resolveMicaExecutable } from './mica-cli'
 
@@ -43,56 +37,19 @@ function micaHome() {
   return process.env.MICA_HOME || resolveMicaHome()
 }
 
-function dataPathOf(pluginId) {
-  const file = pluginDataPath(micaHome(), pluginId)
-  if (!file) throw new Error('插件 id 非法：只能是小写字母、数字与 . _ -，不能带路径分隔符')
-  return file
-}
-
-/**
- * 读一份插件数据：pluginId 非法、文件不存在、读不出来或内容坏掉都返回 null——
- * 读不出东西不是错误，插件把 null 当成「还没有数据」。
- */
-function readPluginData(pluginId) {
-  const file = pluginDataPath(micaHome(), pluginId)
-  if (!file) return null
-  try {
-    return decodePluginData(readFileSync(file, 'utf8'))
-  } catch {
-    return null
-  }
-}
-
-/**
- * 写临时文件再 rename：插件与宿主可能同时读，不能让它读到半份 JSON，
- * 也不能因为写到一半失败就把原文件弄没了。
- */
-function writePluginData(pluginId, value) {
-  const file = dataPathOf(pluginId)
-  const encoded = encodePluginData(value)
-  if (!encoded.ok) throw new Error(encoded.error)
-  mkdirSync(dirname(file), { recursive: true })
-  const temp = `${file}.${process.pid}.tmp`
-  try {
-    writeFileSync(temp, `${encoded.json}\n`, 'utf8')
-    renameSync(temp, file)
-  } catch (error) {
-    rmSync(temp, { force: true })
-    throw new Error(`写入插件数据失败：${error?.message ?? error}`)
-  }
-}
-
 export function registerPluginHostIpc() {
   ipcMain.handle('plugin-host:probe', (_event, payload) => probeRuntime(payload?.address))
 
-  ipcMain.handle('plugin-host:read-data', (_event, payload) => ({
-    value: readPluginData(payload?.pluginId)
-  }))
+  ipcMain.handle('plugin-host:read-data', (_event, payload) =>
+    readPluginData(micaHome(), payload?.pluginId)
+  )
 
   // 失败直接抛：`POST /api/invoke` 会把 Error 的 message 变成 `{ ok: false, error }`。
   ipcMain.handle('plugin-host:write-data', (_event, payload) => {
-    writePluginData(payload?.pluginId, payload?.value)
-    return { ok: true }
+    const options = Object.hasOwn(payload ?? {}, 'expectedVersion')
+      ? { expectedVersion: payload.expectedVersion }
+      : {}
+    return writePluginData(micaHome(), payload?.pluginId, payload?.value, options)
   })
 
   /**

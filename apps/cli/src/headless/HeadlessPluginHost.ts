@@ -28,7 +28,7 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { configureIterationRewrite, registerIterationRewrite } from '../agent/iterationRewrite.js';
 import { compactIdleSessionHistory } from '../agent/agentCompaction.js';
 import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
-import { createPluginModels, recordPluginModelUsage } from '../plugins/pluginModels.js';
+import { capturePluginModelUsageRecorder, createPluginModels } from '../plugins/pluginModels.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import type { SessionController } from '../session/SessionController.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
@@ -273,6 +273,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     events,
     // 一个进程一条会话：owner 在这里不参与解析，改名也只会落到当前会话上。
     session: {
+      captureOwner: () => agent,
       describe: () => {
         const parentSessionId = sessionController.getParentSessionId();
         return {
@@ -282,7 +283,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
           cwd: process.cwd(),
           role: agent.role,
           ...(parentSessionId ? { parentSessionId } : {}),
-          provider: agent.config.provider.name ?? agent.config.provider.id,
+          provider: agent.config.provider.id,
           model: agent.config.model,
         };
       },
@@ -344,11 +345,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     subagentsFor: (pluginId) => pluginSubagents.forPlugin(pluginId),
     // 插件自己的模型请求同样要记账：app-server 就是常驻会话，漏了这一笔 Stats 会少算。
     pluginModels: createPluginModels({
-      record: (entry) =>
-        recordPluginModelUsage(entry, {
-          agent,
-          save: () => sessionController.saveCurrent({ allowEmpty: true }),
-        }),
+      captureRecorder: () => capturePluginModelUsageRecorder(sessionController),
       // 「跟随主配置」= 这条会话正在用的 provider；会话没起来时退回全局默认。
       resolveMainProvider: (model) => {
         if (model) return readActiveProviderConfig({ model });
@@ -451,8 +448,11 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       await hooks.emit('runtime:stop', { runtime: host });
     },
     async dispose() {
-      await plugins.disposeAll();
-      pluginSubagents.disposeAll();
+      try {
+        await plugins.disposeAll();
+      } finally {
+        pluginSubagents.disposeAll();
+      }
     },
   };
   return host;

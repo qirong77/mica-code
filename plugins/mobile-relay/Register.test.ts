@@ -54,7 +54,7 @@ async function waitForPort(port: number, timeoutMs = 10_000): Promise<void> {
 type Relay = { child: ChildProcess; url: string; stateDir: string; stop: () => Promise<void> };
 
 async function startRelay(
-  options: { enrollKey?: string; seedLabel?: string; seedToken?: string } = {}
+  options: { enrollKey?: string; seedLabel?: string; seedToken?: string } = {},
 ): Promise<Relay> {
   const stateDir = mkdtempSync(join(tmpdir(), 'mica-relay-register-'));
   mkdirSync(join(stateDir), { recursive: true });
@@ -69,13 +69,13 @@ async function startRelay(
             id: 'seed',
             label: options.seedLabel || '已有机器',
             token: options.seedToken || 'a'.repeat(48),
-            createdAt: Date.now()
-          }
-        ]
+            createdAt: Date.now(),
+          },
+        ],
       },
       null,
-      2
-    )}\n`
+      2,
+    )}\n`,
   );
   const port = await freePort();
   const child = spawn(process.execPath, [relayScript], {
@@ -84,9 +84,9 @@ async function startRelay(
       RELAY_PORT: String(port),
       RELAY_BIND: '127.0.0.1',
       RELAY_STATE_DIR: stateDir,
-      RELAY_ROOT: stateDir
+      RELAY_ROOT: stateDir,
     },
-    stdio: 'ignore'
+    stdio: 'ignore',
   });
   await waitForPort(port);
   return {
@@ -96,7 +96,7 @@ async function startRelay(
     stop: async () => {
       child.kill('SIGTERM');
       rmSync(stateDir, { recursive: true, force: true });
-    }
+    },
   };
 }
 
@@ -140,7 +140,7 @@ describe('relay registration', () => {
   it('a different machine gets a different token', async () => {
     const other = await registerWithRelay({
       relayUrl: relay.url,
-      identity: { identity: 'b'.repeat(64), label: '另一台机器', platform: 'linux-x64' }
+      identity: { identity: 'b'.repeat(64), label: '另一台机器', platform: 'linux-x64' },
     });
     expect(other.created).toBe(true);
 
@@ -172,7 +172,10 @@ describe('relay registration with an enroll key', () => {
 
   it('refuses a registration without the key', async () => {
     await expect(
-      registerWithRelay({ relayUrl: relay.url, identity: { identity: 'c'.repeat(64), label: '没口令', platform: 'x' } })
+      registerWithRelay({
+        relayUrl: relay.url,
+        identity: { identity: 'c'.repeat(64), label: '没口令', platform: 'x' },
+      }),
     ).rejects.toThrow(/接入口令/);
     expect(agentCount(relay)).toBe(1);
   });
@@ -181,10 +184,18 @@ describe('relay registration with an enroll key', () => {
     const result = await registerWithRelay({
       relayUrl: relay.url,
       enrollKey: 'enroll-secret-123',
-      identity: { identity: 'd'.repeat(64), label: '带口令的机器', platform: 'x' }
+      identity: { identity: 'd'.repeat(64), label: '带口令的机器', platform: 'x' },
     });
     expect(result.token).toHaveLength(48);
     expect(agentCount(relay)).toBe(2);
+    const saved = JSON.parse(readFileSync(join(relay.stateDir, 'agents.json'), 'utf8')) as { enrollKey?: string };
+    expect(saved.enrollKey).toBe('enroll-secret-123');
+    await expect(
+      registerWithRelay({
+        relayUrl: relay.url,
+        identity: { identity: 'f'.repeat(64), label: '注册后仍需口令', platform: 'x' },
+      }),
+    ).rejects.toThrow(/接入口令/);
   });
 });
 
@@ -228,10 +239,10 @@ function panelContext(store: Record<string, string>): PluginContext {
       set: (patch: Record<string, unknown>) => {
         Object.assign(store, patch);
         return { ...store };
-      }
+      },
     },
     health: { report: () => {} },
-    logger: { info: () => {}, warn: () => {}, error: () => {} }
+    logger: { info: () => {}, warn: () => {}, error: () => {} },
   } as unknown as PluginContext;
 }
 
@@ -305,16 +316,16 @@ describe('bridge lifecycle', () => {
     mkdirSync(join(home, 'plugin-settings'), { recursive: true });
     writeFileSync(
       join(home, 'plugin-settings', 'mobile-relay.json'),
-      JSON.stringify({ enabled: 'true', relayUrl: 'http://127.0.0.1:9', token: 'a'.repeat(32) })
+      JSON.stringify({ enabled: 'true', relayUrl: 'http://127.0.0.1:9', token: 'a'.repeat(32) }),
     );
     const child = spawn(process.execPath, [join(import.meta.dirname, 'agent', 'bridge.mjs')], {
       env: {
         ...process.env,
         MICA_HOME: home,
         LOCAL_URL: 'http://127.0.0.1:9',
-        MICA_RELAY_PARENT_PID: '999999'
+        MICA_RELAY_PARENT_PID: '999999',
       },
-      stdio: 'ignore'
+      stdio: 'ignore',
     });
     const code = await new Promise((resolve) => {
       child.on('exit', resolve);

@@ -1,5 +1,7 @@
 import type { MicaPlugin, PluginAgentHandle, PluginContext } from '@packages/mica-plugin/index.js';
 import { formatTokenCount } from '@packages/mica-common/format.js';
+import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
+import type { RuntimeTurnBeforeHookEvent, RuntimeTurnAfterHookEvent } from '@packages/mica-runtime/index.js';
 import {
   EMPTY_COUNTERS,
   decideAutoCompactStep,
@@ -14,16 +16,16 @@ import {
 const PLUGIN_ID = 'auto-compact';
 
 /**
- * 自动压缩：每完成一次模型请求就检查一次上下文占用，超过阈值就在「这次请求已经结束、
- * 下一次请求还没发出」的间隙把历史压小，而不是等整个 turn 跑完——长任务里 turn 可能
- * 还要跑几十次请求，等到结束再压缩等于整段都在为膨胀的上下文付费。
+ * 自动压缩：每次模型请求前按即将发送的历史检查，包括恢复会话后的首个请求。
+ * 自动清理保留最近的消息和完整工具批次；摘要保留当前用户轮次，最终回答后不再额外压缩。
  *
  * 四条规则：
  * - 快速压缩：ctx ≥ quickThresholdK 且次数没用完，本地把工具结果 / 工具参数正文 /
  *   媒体块换成占位符（不调用模型、不丢轮次）。
  * - 模型压缩：本地清理后仍 ≥ modelThresholdK 且次数没用完，调用模型生成 checkpoint 摘要。
- * - 节流：两次压缩之间至少间隔 minIntervalMinutes，免得同一段上下文被反复触发。唯一
- *   的例外是同一次触发里「快速 →（清不掉）模型」的升级：它在同一次调用里发生，算一次。
+ * - 节流：**同一轮运行中**两次压缩至少间隔 minIntervalMinutes，免得同一段上下文被模型
+ *   反复请求时来回压。跨轮不沿用这个冷却：上一轮压过、这一轮又超阈值就该马上压；空闲
+ *   触发也不看它。唯一的例外是同一次触发里「快速 →（清不掉）模型」的升级算一次。
  * - 空闲回来：会话空闲超过 idleMinutes、用户又在输入框里重新敲字时，先压一次快速压缩。
  *   这一条不看阈值——它抢的是「下一轮请求马上就到」的提前量，把压缩从请求里挪到间隙里。
  *
@@ -48,67 +50,131 @@ const plugin: MicaPlugin = {
     // 启动即校验一次：配置残缺时用户应该马上在插件页看到「待配置」，而不是等到
     // 第一次压缩才发现插件其实没法工作。
     readSettings(ctx);
-    // 这条会话最后一次活动的时间：「空闲了多久」就靠它。轮次开始/结束也算活动——
-    // 一轮跑了半小时之后紧接着敲字，不该被当成离开了很久。
-    let lastActivityAt = seedLastActivity(ctx);
-
+    const lifetime = new AbortController();
+    ctx.onDispose(() => lifetime.abort());
     const registration = agentApi.onIterationRewrite(async (messages, agent) => {
-      if (agent.mode === 'one-shot') return null;
-      const usage = agent.lastUsage();
-      if (!usage) return null;
-
-      const settings = readSettings(ctx);
+      if (agent.mode === 'one-shot' || agent.signal?.aborted || lifetime.signal.aborted) return null;
+      const settings = readSettings(ctx, agent.owner);
       if (!settings.enabled) return null;
 
       const counters = normalizeCounters(agent.getState<AutoCompactCounters>());
-      let ctxTokens = usage.inputTokens;
-      let step = decideAutoCompactStep({ settings, counters, ctxTokens });
+      let ctxTokens = agent.estimateTokens(messages);
+      const beforeTokens = ctxTokens;
+      const contextWindowSize = agent.contextWindowSize;
+      let step = decideAutoCompactStep({ settings, counters, ctxTokens, contextWindowSize });
       if (!step) return null;
+      counters.lastAttemptAt = new Date().toISOString();
+      counters.lastAttemptTokens = ctxTokens;
+      agent.setState({ ...counters });
+      const signal = agent.signal ? AbortSignal.any([agent.signal, lifetime.signal]) : lifetime.signal;
 
       let next = messages;
+      let modelAttempted = false;
       if (step === 'quick') {
-        const quick = await tryCompact(ctx, agent, messages, 'quick', counters);
+        const quick = await tryCompact(ctx, agent, messages, 'quick', counters, signal);
         if (quick) {
           next = quick.messages;
-          ctxTokens = Math.max(0, ctxTokens - quick.savedTokens);
+          ctxTokens = agent.estimateTokens(next);
         }
         // 快速压缩失败或没清出东西时 ctx 不变，这里按原 ctx 判定——不会因为它没生效
         // 就把这次模型压缩吞掉。
-        step = shouldEscalateToModel({ settings, counters, ctxTokens }) ? 'model' : null;
+        step = shouldEscalateToModel({ settings, counters, ctxTokens, contextWindowSize }) ? 'model' : null;
       }
-      if (step === 'model') {
-        const model = await tryCompact(ctx, agent, next, 'model', counters);
+      if (step === 'model' && !signal.aborted) {
+        modelAttempted = true;
+        ctx.ui?.notice('正在整理较早的上下文，当前任务和最新工具结果会保留…', {
+          owner: agent.owner,
+          command: 'auto-compact',
+          status: 'running',
+          surface: 'command_panel',
+          variant: 'compact',
+        });
+        const model = await tryCompact(ctx, agent, next, 'model', counters, signal);
         if (model) next = model.messages;
       }
 
-      if (next !== messages) agent.setState(counters);
+      if (signal.aborted) {
+        if (modelAttempted && !lifetime.signal.aborted)
+          ctx.ui?.notice('已取消自动压缩，保留原上下文', {
+            owner: agent.owner,
+            command: 'auto-compact',
+            status: 'info',
+            variant: 'compact',
+          });
+        return null;
+      }
+      if (next !== messages) {
+        agent.setState({ ...counters });
+        const afterTokens = agent.estimateTokens(next);
+        ctx.ui?.notice(
+          `自动压缩：${formatCompactGain(beforeTokens, afterTokens, beforeTokens - afterTokens)}，已保留最近上下文`,
+          {
+            owner: agent.owner,
+            command: 'auto-compact',
+            status: 'success',
+            variant: 'compact',
+          },
+        );
+      }
+      if (modelAttempted && next === messages)
+        ctx.ui?.notice('本次自动压缩未生效，继续使用原上下文', {
+          owner: agent.owner,
+          command: 'auto-compact',
+          status: 'warning',
+          variant: 'compact',
+        });
       return next === messages ? null : next;
     });
     ctx.onDispose(() => registration.dispose());
 
-    // 空闲后重新输入。只有「宿主能独占写会话文件 + 有会话级状态」时才成立：`mica exec`
-    // 不落盘，TUI 的压缩走 `/compact`。缺这条通路时连订阅都不建，免得每敲一次字都白算。
-    if (ctx.sessionState && agentApi.compactIdleHistory) {
-      const markActivity = (at: number) => {
-        lastActivityAt = at;
-        persistState(ctx, {
-          ...normalizeCounters(ctx.sessionState!.get()),
-          lastActivityAt: new Date(at).toISOString(),
-        });
-      };
-      const events = ctx.events.on('event', (event) => {
-        if (event.type !== 'input:activity') return;
+    // 记录本轮起点：最小间隔只约束同一轮里的重复压缩。没有会话级状态时写不进去，
+    // 压缩本身也就没有计数可用；一次性运行整条自动压缩都不生效。
+    if (agentApi.mode !== 'one-shot' && ctx.sessionState) {
+      const canCompactIdle = Boolean(agentApi.compactIdleHistory);
+      const markTurnStart = (owner?: unknown) => {
         const now = Date.now();
-        const idleMs = now - lastActivityAt;
-        lastActivityAt = now;
-        void compactOnReturn(ctx, agentApi, idleMs, now);
-      });
-      const turnBefore = ctx.hooks.on('turn:before', () => markActivity(Date.now()));
-      const turnAfter = ctx.hooks.on('turn:after', () => markActivity(Date.now()));
+        const counters = normalizeCounters(ctx.sessionState!.get(owner));
+        counters.turnStartedAt = new Date(now).toISOString();
+        // 活动时间只服务空闲触发；宿主没有这条通路时不必每轮多写一次。
+        if (canCompactIdle) counters.lastActivityAt = new Date(now).toISOString();
+        persistState(ctx, counters, owner);
+      };
+      const turnBefore = ctx.hooks.on<RuntimeTurnBeforeHookEvent>('turn:before', (event) =>
+        markTurnStart(event?.owner),
+      );
+      const disposers: Array<() => void> = [() => turnBefore.dispose()];
+
+      // 空闲后重新输入。只有「宿主能独占写会话文件」时才成立：`mica exec` 不落盘，
+      // TUI 的压缩走 `/compact`。缺这条通路时连订阅都不建，免得每敲一次字都白算。
+      if (canCompactIdle) {
+        const markActivity = (at: number, owner?: unknown) => {
+          persistState(
+            ctx,
+            {
+              ...normalizeCounters(ctx.sessionState!.get(owner)),
+              lastActivityAt: new Date(at).toISOString(),
+            },
+            owner,
+          );
+        };
+        const events = ctx.events.on('event', (event) => {
+          if (event.type !== 'input:activity') return;
+          const now = Date.now();
+          // setup 之后宿主才可能恢复会话，rewind 也会换掉状态；每次从当前快照读取。
+          const idleMs = now - seedLastActivity(ctx, event.owner);
+          markActivity(now, event.owner);
+          void compactOnReturn(ctx, agentApi, idleMs, now, event.owner);
+        });
+        const turnAfter = ctx.hooks.on<RuntimeTurnAfterHookEvent>('turn:after', (event) =>
+          markActivity(Date.now(), event?.owner),
+        );
+        disposers.push(
+          () => events.dispose(),
+          () => turnAfter.dispose(),
+        );
+      }
       ctx.onDispose(() => {
-        events.dispose();
-        turnBefore.dispose();
-        turnAfter.dispose();
+        for (const dispose of disposers) dispose();
       });
     }
 
@@ -118,7 +184,7 @@ const plugin: MicaPlugin = {
   },
 };
 
-function readSettings(ctx: PluginContext) {
+function readSettings(ctx: PluginContext, owner?: unknown) {
   // 宿主没给会话设置这一面时整插件本该被跳过（`requires: ['sessionSettings']`），
   // 走到这里说明宿主接线漏了：报一次可见的故障，别拿默认值假装正常。
   if (!ctx.sessionSettings) {
@@ -130,7 +196,7 @@ function readSettings(ctx: PluginContext) {
     return settingsFromValues(ctx.settings.get());
   }
   // 读的是本会话生效的值：会话里改过的项覆盖全局设置，其余跟随默认值。
-  const settings = settingsFromValues(ctx.sessionSettings.get());
+  const settings = settingsFromValues(ctx.sessionSettings.get(owner));
   const issues = ctx.settings.validate();
   if (issues.length > 0) {
     ctx.health.report({
@@ -146,13 +212,13 @@ function readSettings(ctx: PluginContext) {
  * 会话状态里没有活动时间（第一次跑这条会话、或者从更早的版本升上来）时当成「刚刚
  * 活动过」：少压一次无害，把一条刚打开的会话当成空闲三天反而会平白多写一次盘。
  */
-function seedLastActivity(ctx: PluginContext): number {
-  const parsed = Date.parse(normalizeCounters(ctx.sessionState?.get()).lastActivityAt ?? '');
+function seedLastActivity(ctx: PluginContext, owner?: unknown): number {
+  const parsed = Date.parse(normalizeCounters(ctx.sessionState?.get(owner)).lastActivityAt ?? '');
   return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
-function persistState(ctx: PluginContext, value: AutoCompactCounters): void {
-  ctx.sessionState?.set(value);
+function persistState(ctx: PluginContext, value: AutoCompactCounters, owner?: unknown): void {
+  ctx.sessionState?.set(value, owner);
 }
 
 /** 空闲时长的说法：「22 分钟」「3.5 小时」比「1320 分钟」好读。 */
@@ -188,11 +254,12 @@ async function compactOnReturn(
   agentApi: NonNullable<PluginContext['agent']>,
   idleMs: number,
   nowMs: number,
+  owner?: unknown,
 ): Promise<void> {
   const compact = agentApi.compactIdleHistory;
   if (!compact) return;
-  const settings = readSettings(ctx);
-  const counters = normalizeCounters(ctx.sessionState?.get());
+  const settings = readSettings(ctx, owner);
+  const counters = normalizeCounters(ctx.sessionState?.get(owner));
   if (!shouldCompactOnReturn({ settings, counters, idleMs })) return;
 
   try {
@@ -200,16 +267,17 @@ async function compactOnReturn(
       // 计数与提示必须在落盘**之前**写：宿主压缩完就把会话文件写死了，之后写的状态
       // 只能等下一轮才带上——用户可能直接关掉页面，那次压缩就变成「压了但没记账」。
       afterApply: ({ savedTokens, beforeTokens, afterTokens }) => {
-        const next = normalizeCounters(ctx.sessionState?.get());
+        const next = normalizeCounters(ctx.sessionState?.get(owner));
         next.quickRuns += 1;
         next.lastKind = 'quick';
         next.lastRunAt = new Date(nowMs).toISOString();
         next.lastSavedTokens = Math.round(savedTokens) || 0;
         next.lastActivityAt = new Date(nowMs).toISOString();
-        persistState(ctx, next);
+        persistState(ctx, next, owner);
         // 界面上看得见的一次：否则「到底压没压」只能翻插件日志。
         ctx.ui?.notice(
           `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史：${formatCompactGain(beforeTokens, afterTokens, savedTokens)}`,
+          { owner },
         );
       },
     });
@@ -245,18 +313,25 @@ async function compactOnReturn(
  * 没有这条通路（宿主不给 `llm` 能力）时返回 `undefined`，内核退回它默认的摘要子代理——
  * 插件不该因为模型组件缺席就完全不能压缩。
  */
-function summarizer(ctx: PluginContext): ((transcript: string, prompt: string) => Promise<string>) | undefined {
+function summarizer(
+  ctx: PluginContext,
+  owner: unknown,
+  signal: AbortSignal,
+): ((transcript: string, prompt: string) => Promise<string>) | undefined {
   const llm = ctx.llm;
   if (!llm) return undefined;
   return async (transcript, prompt) => {
     // 关掉「复用当前会话模型」又没填完，就不该悄悄拿会话模型顶上：那是用户明确
     // 表示要用另一个接口。直接给出可读原因，由调用方记进健康状态。
-    if (!llm.configured()) throw new Error('压缩摘要模型未配置：请在插件设置里复用当前会话模型，或填写接口地址与模型');
+    if (!llm.configured(owner))
+      throw new Error('压缩摘要模型未配置：请在插件设置里复用当前会话模型，或填写接口地址与模型');
     const result = await llm.request({
       purpose: '自动压缩摘要',
       system: prompt,
       user: transcript,
       timeoutMs: 120_000,
+      owner,
+      signal,
     });
     if (!result.text.trim()) throw new Error('压缩摘要请求返回了空内容');
     return result.text;
@@ -269,14 +344,19 @@ async function tryCompact(
   messages: unknown[],
   mode: AutoCompactStep,
   counters: AutoCompactCounters,
+  signal: AbortSignal,
 ): Promise<{ messages: unknown[]; savedTokens: number } | null> {
   try {
+    if (signal.aborted) return null;
     const result = await agent.compact(messages, {
       mode,
+      preserveRecentMessages: 8,
+      preserveLatestUserMessage: true,
       // 摘要走 `ctx.llm`（清单 `llm` 声明）：默认复用当前会话模型，也可以单独配一个
       // 更便宜的接口；失败会自动降级回会话模型。分段、预算与重试仍归内核。
-      summarize: mode === 'model' ? summarizer(ctx) : undefined,
+      summarize: mode === 'model' ? summarizer(ctx, agent.owner, signal) : undefined,
     });
+    if (signal.aborted || result.savedTokens <= 0) return null;
     if (mode === 'quick') counters.quickRuns += 1;
     else counters.modelRuns += 1;
     counters.lastKind = mode;
@@ -294,6 +374,11 @@ async function tryCompact(
     });
     return result;
   } catch (error) {
+    if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) return null;
+    if (isCompactionNotNeededError(error)) {
+      ctx.logger.info('auto-compact:not-needed', { mode });
+      return null;
+    }
     // 「没有可清理内容」不是错误，也不消耗次数：下一条请求仍可能清出东西。
     const message = error instanceof Error ? error.message : String(error);
     ctx.logger.warn('auto-compact:skipped', { mode, error: message });

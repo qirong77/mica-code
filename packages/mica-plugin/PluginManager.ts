@@ -161,6 +161,10 @@ export class PluginManager {
     for (const plugin of this.sortedPlugins()) {
       if (options.only && !options.only.includes(plugin.id)) continue;
       const localDisposables: Disposable[] = [];
+      const trackRegistration = <T extends Disposable>(registration: T): T => {
+        localDisposables.push(registration);
+        return registration;
+      };
       const logger = createPluginLogger(plugin.id, baseContext.logger);
       const configDir = baseContext.paths?.config;
       // 这个插件注册成功的 skill：每次注册后整份重写它的索引文件（见 PluginSkills.ts）。
@@ -220,8 +224,8 @@ export class PluginManager {
               sessionSettings: createPluginSessionSettingsApi({
                 fields: plugin.manifest?.settings ?? [],
                 readGlobal: () => settings.get(),
-                readOverrides: () => sessionSettingsHost.read(),
-                writeOverrides: (value) => sessionSettingsHost.write(value),
+                readOverrides: (owner) => sessionSettingsHost.read(owner),
+                writeOverrides: (value, owner) => sessionSettingsHost.write(value, owner),
               }),
             }
           : {}),
@@ -275,12 +279,12 @@ export class PluginManager {
         ctx.desktop = {
           host: 'desktop',
           ...(panels && plugin.manifest?.desktopPanel
-            ? { panel: (handler: PluginPanelHandler) => panels.add(plugin.id, handler) }
+            ? { panel: (handler: PluginPanelHandler) => trackRegistration(panels.add(plugin.id, handler)) }
             : {}),
           ...(sessionMenus && (plugin.manifest?.desktopSessionMenu.length ?? 0) > 0
             ? {
                 sessionMenu: (handler: PluginSessionMenuHandler) =>
-                  sessionMenus.add(plugin.id, handler),
+                  trackRegistration(sessionMenus.add(plugin.id, handler)),
               }
             : {}),
         };
@@ -290,7 +294,7 @@ export class PluginManager {
       if ((plugin.manifest?.actions.length ?? 0) > 0) {
         const actionStore = this.actions;
         ctx.actions = {
-          register: (key, handler) => actionStore.add(plugin.id, key, handler),
+          register: (key, handler) => trackRegistration(actionStore.add(plugin.id, key, handler)),
         };
       }
       if (plugin.manifest?.llm && modelsHandler) {
@@ -298,7 +302,7 @@ export class PluginManager {
         const llmSpec = plugin.manifest.llm;
         ctx.llm = createPluginLlmApi({
           spec: llmSpec,
-          readValues: () => ({ ...settings.get(), ...(sessionSettingsHost?.read() ?? {}) }),
+          readValues: (owner) => ({ ...settings.get(), ...(sessionSettingsHost?.read(owner) ?? {}) }),
           models: (request) => modelsHandler(plugin.id, request),
           // 配置的接口/模型不可用时组件会自动降级为主配置，这里留一条「为什么降级了」。
           health,
@@ -353,15 +357,14 @@ export class PluginManager {
       try {
         const disposable = await plugin.setup(ctx);
         if (disposable) localDisposables.push(disposable);
-        this.disposables.push(...localDisposables.reverse());
+        // 保留这份登记表：常驻插件在 setup 返回之后仍可能注册界面或清理回调。
+        this.disposables.push({ dispose: () => disposeResources(localDisposables) });
         report.loaded.push(plugin.id);
       } catch (error) {
-        for (const disposable of localDisposables.splice(0).reverse()) {
-          try {
-            await disposable.dispose();
-          } catch {
-            // Preserve the setup error as the canonical plugin failure.
-          }
+        try {
+          await disposeResources(localDisposables);
+        } catch {
+          // Preserve the setup error as the canonical plugin failure.
         }
         report.failed.push({ pluginId: plugin.id, error });
         logger.error('plugin:setup-failed', { error: errorMessage(error) });
@@ -378,9 +381,7 @@ export class PluginManager {
   }
 
   async disposeAll(): Promise<void> {
-    for (const disposable of this.disposables.splice(0).reverse()) {
-      await disposable.dispose();
-    }
+    await disposeResources(this.disposables);
   }
 
   private sortedPlugins(): MicaPlugin[] {
@@ -422,6 +423,18 @@ type HookErrorReporterInstaller = (reporter: (error: unknown, hook: string, plug
  */
 function missingRequirements(requires: readonly PluginRequirement[], ctx: PluginContext): PluginRequirement[] {
   return requires.filter((requirement) => ctx[requirement] === undefined);
+}
+
+async function disposeResources(disposables: Disposable[]): Promise<void> {
+  const errors: unknown[] = [];
+  while (disposables.length > 0) {
+    try {
+      await disposables.pop()!.dispose();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, 'Failed to dispose plugin resources');
 }
 
 function errorMessage(error: unknown): string {

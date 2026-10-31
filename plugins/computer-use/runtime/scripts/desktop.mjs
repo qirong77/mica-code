@@ -34,6 +34,12 @@ const fail = (msg, code = 1) => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function coordinates(count, usage) {
+  const raw = args.slice(1, count + 1);
+  if (raw.length !== count || raw.some((value) => !value.trim() || !Number.isFinite(Number(value)))) fail(usage);
+  return raw.map(Number);
+}
+
 // --------------------------------------------------------------- helper binary
 // 布局：<runtime>/scripts/desktop.mjs + <runtime>/src/helper.m → <runtime>/bin/helper
 // （也接受 desktop.mjs 与 helper.m 同目录的平铺布局）
@@ -296,13 +302,9 @@ Add --json for machine-readable output.`);
     }
 
     case 'move': {
-      const x = Number(args[1]);
-      const y = Number(args[2]);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) fail('move requires x y');
-      const before = helper('pos');
-      helper('move', x, y);
-      await sleep(120);
-      const after = helper('pos');
+      const [x, y] = coordinates(2, 'move requires x y');
+      const after = helper('move', x, y);
+      const before = after.before;
       // 没有辅助功能权限时 CGEvent 会被静默丢弃，所以必须读回校验
       const ok = Math.abs(after.x - x) <= 1.5 && Math.abs(after.y - y) <= 1.5;
       out(
@@ -325,13 +327,10 @@ Add --json for machine-readable output.`);
     case 'rclick': {
       const button = cmd === 'rclick' ? 'right' : 'left';
       const count = cmd === 'dclick' ? 2 : 1;
-      const hasXY = args[1] !== undefined && args[2] !== undefined;
+      const hasXY = args[1] !== undefined || args[2] !== undefined;
       let extra = [];
       if (hasXY) {
-        const x = Number(args[1]);
-        const y = Number(args[2]);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) fail(`${cmd} requires x y when given`);
-        extra = [x, y];
+        extra = coordinates(2, `${cmd} requires x y when given`);
       }
       const r = helper('click', ...extra, '--button', button, '--count', count);
       out(
@@ -342,9 +341,15 @@ Add --json for machine-readable output.`);
     }
 
     case 'drag': {
-      const [x1, y1, x2, y2] = args.slice(1, 5).map(Number);
-      if ([x1, y1, x2, y2].some((v) => !Number.isFinite(v))) fail('drag requires x1 y1 x2 y2');
-      const duration = Number(args[5] || 300);
+      const [x1, y1, x2, y2] = coordinates(4, 'drag requires x1 y1 x2 y2');
+      const duration = Number(args[5] ?? 300);
+      if (
+        (args[5] !== undefined && !args[5].trim()) ||
+        !Number.isFinite(duration) ||
+        duration < 0 ||
+        duration > 2147483647
+      )
+        fail('drag duration must be between 0 and 2147483647 milliseconds');
       const r = helper('drag', x1, y1, x2, y2, '--duration', duration);
       out(
         { from: { x: x1, y: y1 }, to: { x: x2, y: y2 }, endedAt: { x: round1(r.x), y: round1(r.y) } },
@@ -446,16 +451,17 @@ Add --json for machine-readable output.`);
     }
 
     case 'wait': {
-      const ms = Number(args[1] || 500);
-      if (!Number.isFinite(ms)) fail('wait requires milliseconds');
+      const ms = Number(args[1] ?? 500);
+      if ((args[1] !== undefined && !args[1].trim()) || !Number.isFinite(ms) || ms < 0 || ms > 2147483647)
+        fail('wait requires milliseconds between 0 and 2147483647');
       await sleep(ms);
       out({ waitedMs: ms }, `waited ${ms}ms`);
       break;
     }
 
     case 'highlight': {
-      const [x, y, w, h] = args.slice(1, 5).map(Number);
-      if ([x, y, w, h].some((v) => !Number.isFinite(v))) fail('highlight requires x y w h');
+      const [x, y, w, h] = coordinates(4, 'highlight requires x y w h');
+      if (w <= 0 || h <= 0) fail('highlight width and height must be positive');
       // 不画浮动窗口（那需要 AppKit）；直接把这块区域截出来，肉眼校对坐标最直接
       const path = resolve(tmpdir(), `mica-region-${Date.now()}.png`);
       const r = shotFile(path, { region: `${x},${y},${w},${h}` });
@@ -557,8 +563,14 @@ Add --json for machine-readable output.`);
 
     case 'wait-el': {
       if (!args[1] || !args[2]) fail('wait-el requires <app> <query> [timeoutMs]');
-      const timeout = Number(args[3] || 10000);
-      if (!Number.isFinite(timeout)) fail('wait-el timeout must be a number');
+      const timeout = Number(args[3] ?? 10000);
+      if (
+        (args[3] !== undefined && !args[3].trim()) ||
+        !Number.isFinite(timeout) ||
+        timeout < 0 ||
+        timeout > 2147483647
+      )
+        fail('wait-el timeout must be between 0 and 2147483647 milliseconds');
       const started = Date.now();
       const r = helperTry('wait-el', args[1], args[2], '--timeout', timeout);
       const waited = Date.now() - started;

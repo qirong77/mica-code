@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { createReadStream, lstatSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -18,12 +19,13 @@ export function git(args: string[], cwd: string, timeout = 30_000): string {
   return execFileSyncText(args, cwd, timeout);
 }
 
-export async function gitAsync(args: string[], cwd: string, timeout = 30_000): Promise<string> {
+export async function gitAsync(args: string[], cwd: string, timeout = 30_000, maxBuffer = MAX_BUFFER): Promise<string> {
   const { stdout } = await execFileAsync('git', args, {
     cwd,
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     encoding: 'utf8',
     timeout,
-    maxBuffer: MAX_BUFFER,
+    maxBuffer,
   });
   return stdout;
 }
@@ -40,6 +42,18 @@ export async function safeGitAsync(args: string[], cwd: string, timeout = 30_000
   try {
     return await gitAsync(args, cwd, timeout);
   } catch {
+    return '';
+  }
+}
+
+/** Read-only previews retain a bounded prefix even when Git exceeds the output budget. */
+export async function gitPreview(args: string[], cwd: string, maxBytes = 32_000): Promise<string> {
+  try {
+    return await gitAsync(args, cwd, 30_000, maxBytes);
+  } catch (error) {
+    const failure = error as { code?: string; stdout?: string };
+    if (failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' && typeof failure.stdout === 'string')
+      return `${failure.stdout}\n[git output truncated]`;
     return '';
   }
 }
@@ -73,9 +87,10 @@ export async function pushCurrentBranch(cwd: string): Promise<boolean> {
   }
 
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], cwd).trim();
-  const remoteBranch = safeGit(['ls-remote', '--heads', 'origin', branch], cwd).trim();
+  if (branch === 'HEAD' || !safeGit(['remote', 'get-url', 'origin'], cwd).trim()) return false;
+  const remoteBranch = (await gitAsync(['ls-remote', '--heads', 'origin', branch], cwd)).trim();
   if (!remoteBranch) return false;
-  await gitAsync(['push', 'origin', branch], cwd, 120_000);
+  await gitAsync(['push', '--set-upstream', 'origin', branch], cwd, 120_000);
   return true;
 }
 
@@ -85,15 +100,52 @@ export async function pushCurrentBranch(cwd: string): Promise<boolean> {
  * 有冲突时 `git add -A` 会把冲突标记当成改动提交进去，必须先拒绝。
  */
 export function hasUnmergedFiles(status: string): boolean {
-  return status
-    .split('\n')
-    .filter(Boolean)
-    .some((line) => ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(line.slice(0, 2)));
+  return parsePorcelainStatus(status).some((file) => ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(file.status));
+}
+
+/** `-z` 模式保留路径原值；重命名记录紧跟的新旧路径只取新路径。 */
+export function parsePorcelainStatus(status: string): Array<{ status: string; path: string }> {
+  const records = status.split('\0');
+  const files: Array<{ status: string; path: string }> = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index]!;
+    if (!record) continue;
+    const code = record.slice(0, 2);
+    files.push({ status: code, path: record.slice(3) });
+    if (/[RC]/.test(code)) index += 1;
+  }
+  return files;
+}
+
+/** 模型请求期间文件仍可能被 agent 或用户改写；提交前核对内容与索引，避免提交未分析过的变化。 */
+export async function worktreeFingerprint(cwd: string, status: string): Promise<string> {
+  const hash = createHash('sha256');
+  hash.update(status);
+  hash.update(safeGit(['rev-parse', '--verify', 'HEAD'], cwd));
+  hash.update(safeGit(['symbolic-ref', '-q', 'HEAD'], cwd));
+  hash.update(git(['diff', '--cached', '--raw', '-z', '--no-abbrev', '--no-renames'], cwd));
+  for (const file of parsePorcelainStatus(status)) {
+    hash.update(`\0${file.path}\0`);
+    const path = join(cwd, file.path);
+    try {
+      const info = lstatSync(path);
+      hash.update(String(info.mode));
+      if (info.isSymbolicLink()) hash.update(readlinkSync(path));
+      else if (info.isFile()) {
+        for await (const chunk of createReadStream(path)) hash.update(chunk);
+      } else if (info.isDirectory()) hash.update(safeGit(['-C', path, 'rev-parse', 'HEAD'], cwd));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      hash.update('[deleted]');
+    }
+  }
+  return hash.digest('hex');
 }
 
 function execFileSyncText(args: string[], cwd: string, timeout: number): string {
   return execFileSync('git', args, {
     cwd,
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     encoding: 'utf8',
     timeout,
     maxBuffer: MAX_BUFFER,

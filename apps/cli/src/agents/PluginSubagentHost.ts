@@ -209,6 +209,7 @@ export function createPluginSubagentHost(
       owner: prepared.owner,
       description: prepared.description,
       subagentType: prepared.definition.name,
+      activity: prepared.definition.activity,
       model: prepared.model,
       effort: prepared.effort,
       ...(prepared.maxTurns === undefined ? {} : { maxTurns: prepared.maxTurns }),

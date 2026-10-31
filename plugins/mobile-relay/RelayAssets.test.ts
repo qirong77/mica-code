@@ -57,12 +57,15 @@ beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'mica-relay-assets-'));
   stateDir = mkdtempSync(join(tmpdir(), 'mica-relay-assets-state-'));
   mkdirSync(join(root, 'assets'), { recursive: true });
-  writeFileSync(join(root, 'index.html'), '<!doctype html><html><body>shell<script src="./assets/app.js"></script></body></html>');
+  writeFileSync(
+    join(root, 'index.html'),
+    '<!doctype html><html><body>shell<script src="./assets/app.js"></script></body></html>',
+  );
   writeFileSync(join(root, 'assets', 'app.js'), 'console.log("asset-ok")');
   writeFileSync(join(root, 'manifest.webmanifest'), '{"name":"mica"}');
   writeFileSync(
     join(stateDir, 'agents.json'),
-    `${JSON.stringify({ version: 1, agents: [{ id: 'seed', label: '本机', token: TOKEN, createdAt: Date.now() }] })}\n`
+    `${JSON.stringify({ version: 1, agents: [{ id: 'seed', label: '本机', token: TOKEN, createdAt: Date.now() }] })}\n`,
   );
 
   const port = await freePort();
@@ -72,9 +75,9 @@ beforeAll(async () => {
       RELAY_PORT: String(port),
       RELAY_BIND: '127.0.0.1',
       RELAY_STATE_DIR: stateDir,
-      RELAY_ROOT: root
+      RELAY_ROOT: root,
     },
-    stdio: 'ignore'
+    stdio: 'ignore',
   });
   await waitForPort(port);
   base = `http://127.0.0.1:${port}`;
@@ -111,11 +114,20 @@ describe('relay static assets', () => {
     expect(response.status).toBe(401);
   });
 
+  it('rejects an invalid explicit token instead of switching to another remembered machine', async () => {
+    const headers = { cookie: `mica_relays=${TOKEN}` };
+    const response = await fetch(`${base}/api/env?t=invalid-token`, { headers });
+    expect(response.status).toBe(401);
+    const health = await fetch(`${base}/api/health?t=invalid-token`, { headers });
+    expect(health.status).toBe(401);
+    expect((await fetch(`${base}/api/health`)).status).toBe(200);
+  });
+
   it('explains an offline machine instead of failing silently', async () => {
-    const response = await fetch(`${base}/?t=${TOKEN}`)
-    expect(response.status).toBe(503)
-    const html = await response.text()
-    expect(html).toContain('暂时不可用')
-    expect(html).toContain('最近一次连上')
+    const response = await fetch(`${base}/?t=${TOKEN}`);
+    expect(response.status).toBe(503);
+    const html = await response.text();
+    expect(html).toContain('暂时不可用');
+    expect(html).toContain('最近一次连上');
   });
 });

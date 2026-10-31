@@ -19,7 +19,6 @@ import { configureIterationRewrite, registerIterationRewrite } from '../agent/it
 import {
   normalizeUiState,
   TerminalAgentSessionManager,
-  type TerminalAgentSession,
 } from '../agents/terminalAgentSessions.js';
 import {
   formatSubagentTaskDisplay,
@@ -30,7 +29,8 @@ import { applySessionConfig, SessionController } from '../session/SessionControl
 import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
-import { createPluginModels, recordPluginModelUsage } from '../plugins/pluginModels.js';
+import { capturePluginModelUsageRecorder, createPluginModels } from '../plugins/pluginModels.js';
+import { resolvePluginSession } from '../plugins/pluginSessionOwner.js';
 import { showPluginNotice } from '../plugins/commands/commandRuntimeServices.js';
 import type { ApplicationContext } from './ApplicationContext.js';
 import { clearActiveContext, setActiveContext } from './activeContext.js';
@@ -170,6 +170,10 @@ export class Application {
         commands,
         events: runtime.events,
         session: {
+          captureOwner: (context) => {
+            const owner = context && typeof context === 'object' ? (context as { agent?: unknown }).agent : undefined;
+            return resolvePluginSession(agentSessions, owner)?.agent;
+          },
           describe: (owner) => {
             const session = resolvePluginSession(agentSessions, owner);
             if (!session) return null;
@@ -181,6 +185,8 @@ export class Application {
               cwd: process.cwd(),
               role: session.agent.role,
               ...(parentSessionId ? { parentSessionId } : {}),
+              provider: session.agent.config.provider.id,
+              model: session.agent.config.model,
             };
           },
           // 与 app-server 同一个口径：用户眼前的那份对话（落盘快照），provider history 在
@@ -198,21 +204,21 @@ export class Application {
         // 插件状态跟着「当前 agent」走：多 agent 会话下 owner 决定写哪一条，
         // 不传 owner 就是当前会话。
         sessionStateFor: (pluginId) => ({
-          get: () => resolvePluginSession(agentSessions, undefined)?.agent.getPluginState(pluginId),
+          get: (owner) => resolvePluginSession(agentSessions, owner)?.agent.getPluginState(pluginId),
           // 没有会话就抛出：静默丢弃写入会让插件以为状态存住了，实际下一轮读回 undefined。
-          set: (value) => {
-            const agent = resolvePluginSession(agentSessions, undefined)?.agent;
+          set: (value, owner) => {
+            const agent = resolvePluginSession(agentSessions, owner)?.agent;
             if (!agent) throw new Error(`session state unavailable for ${pluginId}`);
             agent.setPluginState(pluginId, value);
           },
-          clear: () => resolvePluginSession(agentSessions, undefined)?.agent.clearPluginState(pluginId),
+          clear: (owner) => resolvePluginSession(agentSessions, owner)?.agent.clearPluginState(pluginId),
         }),
         // 会话级设置覆盖与插件状态一样跟着「当前 agent」走；没有会话时抛出，
         // 免得用户以为改动生效了、实际没落进任何快照。
         sessionSettingsFor: (pluginId) => ({
-          read: () => resolvePluginSession(agentSessions, undefined)?.agent.getPluginSessionSettings(pluginId),
-          write: (value) => {
-            const agent = resolvePluginSession(agentSessions, undefined)?.agent;
+          read: (owner) => resolvePluginSession(agentSessions, owner)?.agent.getPluginSessionSettings(pluginId),
+          write: (value, owner) => {
+            const agent = resolvePluginSession(agentSessions, owner)?.agent;
             if (!agent) throw new Error(`session settings unavailable for ${pluginId}`);
             agent.setPluginSessionSettings(pluginId, value);
           },
@@ -226,19 +232,18 @@ export class Application {
         // 插件自己的模型请求（起标题、写 commit message、整理记忆）由宿主代发：
         // 记账只有宿主做得到，请求实现也只该有一份。
         pluginModels: createPluginModels({
-          record: (entry) => {
-            const session = resolvePluginSession(agentSessions, undefined);
-            recordPluginModelUsage(entry, {
-              agent: session?.agent,
-              save: () => session?.sessionController.saveCurrent({ allowEmpty: true }),
-            });
+          captureRecorder: (owner) => {
+            const session = resolvePluginSession(agentSessions, owner);
+            return session ? capturePluginModelUsageRecorder(session.sessionController) : undefined;
           },
           // 「跟随主配置」跟的是这条会话正在用的 provider：会话切到别的服务商之后，
           // 插件请求跟着走，而不是打回配置页里的全局默认。
-          resolveMainProvider: (model) => {
+          resolveMainProvider: (model, owner) => {
             // 插件点名了模型：让 provider 跟着模型前缀走；否则跟会话正在用的那一个。
             if (model) return readActiveProviderConfig({ model });
-            const snapshot = resolvePluginSession(agentSessions, undefined)?.agent.getSnapshot();
+            const target = resolvePluginSession(agentSessions, owner);
+            if (owner !== undefined && !target) throw new Error('发起插件请求的会话已关闭');
+            const snapshot = target?.agent.getSnapshot();
             return readActiveProviderConfig(
               snapshot ? { providerId: snapshot.providerId, model: snapshot.model } : {},
             );
@@ -358,11 +363,14 @@ export class Application {
       this.subagentTasks = null;
       await subagentTasks?.stop();
       await runtimeStop;
-      await failedContext?.plugins.disposeAll();
-      failedContext?.agentSessions.stop();
-      if (failedContext) clearActiveContext(failedContext);
-      this.context = null;
-      process.exitCode = 1;
+      try {
+        await failedContext?.plugins.disposeAll();
+      } finally {
+        failedContext?.agentSessions.stop();
+        if (failedContext) clearActiveContext(failedContext);
+        this.context = null;
+        process.exitCode = 1;
+      }
     }
   }
 
@@ -400,10 +408,14 @@ export class Application {
     await subagentTasks?.stop();
     await terminateCurrentBackgroundTasks({ signal: 'SIGTERM', forceAfterMs: 1500 });
     await runtimeStop;
-    await this.context?.plugins.disposeAll();
-    this.context?.agentSessions.stop();
-    if (this.context) clearActiveContext(this.context);
-    this.context = null;
+    const context = this.context;
+    try {
+      await context?.plugins.disposeAll();
+    } finally {
+      context?.agentSessions.stop();
+      if (context) clearActiveContext(context);
+      this.context = null;
+    }
   }
 }
 
@@ -477,14 +489,6 @@ function createPluginPaths() {
  * 把 `turn:after` 事件里的 owner 解析成具体会话：不给 owner 就是当前会话。
  * 插件是按「产生这个 turn 的 agent」操作的，多 agent 场景下不能默认取当前那一条。
  */
-function resolvePluginSession(sessions: TerminalAgentSessionManager, owner: unknown): TerminalAgentSession | undefined {
-  if (owner) {
-    const matched = sessions.findByAgent(owner as AgentRuntime);
-    if (matched) return matched;
-  }
-  return sessions.current();
-}
-
 const pluginLogger = {
   info() {},
   warn() {},

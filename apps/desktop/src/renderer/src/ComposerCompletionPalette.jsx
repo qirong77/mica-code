@@ -5,9 +5,10 @@ import { IconCommand } from '@tabler/icons-react'
  * 输入框上方的补全候选浮层（`@` 文件 / `/` skill）。
  *
  * 只负责展示与选中回调，选中后怎么改写输入框由 ChatView 决定——这里不执行任何动作。
- * 每行是「名称 | 说明 | 来源」三列：名称按内容取宽且永不压缩（它是扫描目标），说明吃掉
- * 剩余宽度、放不下就省略号截断（浮层跟着输入框走，窄的时候只剩名称也是可用的），来源是
- * 一枚靠右的小标记（内置 / 插件 xxx / .mica/skills / config.json），悬停看完整位置。
+ * 每行是「名称 | 说明 | 类型 | 来源」四列：名称按内容取宽且永不压缩（它是扫描目标），
+ * 说明吃掉剩余宽度、放不下就省略号截断（浮层跟着输入框走，窄的时候只剩名称也是可用的），
+ * 最右两枚小标记分别回答两个不同的问题——「这是哪一类」（skill / MCP）与「它从哪来」
+ * （内置 / 插件 xxx / .mica/skills / config.json），后者悬停看完整位置。
  * 名称与说明里命中查询的字符都会高亮（`highlights` / `descriptionHighlights` 是下标数组）。
  *
  * 滚动只发生在候选列表（`.chat-command-palette-body`）上：标题行与键位提示固定在顶部，
@@ -66,6 +67,7 @@ export default function ComposerCompletionPalette({
                 highlights={item.descriptionHighlights}
               />
             </span>
+            <CompletionKindTag kind={item.kind} />
             {item.source && (
               <span
                 className={`chat-command-source is-${item.source.kind}`}
@@ -79,6 +81,20 @@ export default function ComposerCompletionPalette({
       </div>
     </div>
   )
+}
+
+/**
+ * 候选的类型标记。
+ *
+ * 只认 `/` 浮层里的两类：skill 与 MCP server。`@` 文件补全的 `file` 不画标记——那里
+ * 一整屏都是文件，标一排「file」只是噪声。
+ */
+const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP' }
+
+function CompletionKindTag({ kind }) {
+  const label = COMPLETION_KIND_LABELS[kind]
+  if (!label) return null
+  return <span className={`chat-command-kind is-${kind}`}>{label}</span>
 }
 
 /** 悬停提示：出处（插件 id / 配置文件）与「会插进去的东西」都摊开，不给原生 title 猜。 */

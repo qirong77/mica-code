@@ -130,6 +130,13 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session), tasks);
 
     bridge.start();
+    const maintenance = tasks.track({
+      owner: agent, description: 'internal state update', subagentType: 'plugin-maintenance',
+      model: 'test-model', effort: 'none', activity: 'maintenance',
+    });
+    expect(uiMocks.setSubagentTaskItems).toHaveBeenLastCalledWith([]);
+    maintenance.complete('done');
+    expect(uiMocks.setSubagentTaskItems.mock.calls.every(([items]) => items.length === 0)).toBe(true);
     const ownTask = tasks.start({
       owner: agent,
       description: 'inspect task UI',

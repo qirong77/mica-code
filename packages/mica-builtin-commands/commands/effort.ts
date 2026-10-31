@@ -37,7 +37,7 @@ export function showEffortSelector(
 ): void {
   if (agent.config.provider.supportsEffort === false) {
     services.showNotice(
-      `${agent.config.provider.name ?? agent.config.provider.id} does not use reasoning effort; nothing to select`,
+      `${agent.config.provider.id} does not use reasoning effort; nothing to select`,
       undefined,
       { command: '/effort', status: 'info' },
     );
@@ -90,7 +90,7 @@ async function applyEffortSelection(
     }
     if (agent.config.provider.supportsEffort === false) {
       services.showNotice(
-        `${agent.config.provider.name ?? agent.config.provider.id} does not use reasoning effort; status shows none`,
+        `${agent.config.provider.id} does not use reasoning effort; status shows none`,
         undefined,
         { command: '/effort', status: 'info' },
       );

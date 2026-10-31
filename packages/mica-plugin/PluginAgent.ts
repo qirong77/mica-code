@@ -29,6 +29,9 @@ export type PluginCompactResult = {
 
 export type PluginCompactOptions = {
   mode: PluginCompactMode;
+  preserveRecentMessages?: number;
+  preserveRecentRounds?: number;
+  preserveLatestUserMessage?: boolean;
   /**
    * 生成 checkpoint 摘要的那一次模型请求。
    *
@@ -81,7 +84,14 @@ export type PluginAgentHandle = {
    * `session` 生效。
    */
   readonly mode: 'session' | 'one-shot';
+  readonly contextWindowSize?: number;
+  /** Opaque originating session owner, for settings and notices while another session is selected. */
+  readonly owner?: unknown;
+  /** Aborted when the originating turn is stopped or replaced. */
+  readonly signal?: AbortSignal;
   lastUsage(): PluginAgentUsage | null;
+  /** Estimated size of these messages plus the system prompt without creating a full session snapshot. */
+  estimateTokens(messages: unknown[]): number;
   /** 本插件在这条会话里的状态；没写过返回 undefined。 */
   getState<T = unknown>(): T | undefined;
   setState(value: unknown): void;

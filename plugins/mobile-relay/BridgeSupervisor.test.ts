@@ -1,10 +1,23 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
-import { buildStatus, createBridgeSupervisor, materializeBridge } from './BridgeSupervisor.js';
+import type { PluginBackgroundTask } from '@packages/mica-plugin/PluginBackground.js';
+import {
+  buildStatus,
+  createBridgeSupervisor,
+  materializeBridge,
+  registerBridgeSupervisor,
+} from './BridgeSupervisor.js';
 import { BRIDGE_SOURCE } from './bridgeSource.js';
+
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:child_process')>()),
+  spawn: vi.fn(),
+}));
 
 type FakeContext = PluginContext & {
   healthLog: Array<{ level: string; message: string }>;
@@ -33,9 +46,12 @@ describe('mobile-relay bridge supervisor', () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'mica-relay-test-'));
+    vi.mocked(spawn).mockReset();
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -112,6 +128,146 @@ describe('mobile-relay bridge supervisor', () => {
     kill.mockRestore();
     delete process.env.MICA_BRIDGE_NODE;
   });
+
+  function backgroundHarness(values: Record<string, string>) {
+    const ctx = fakeContext(values);
+    let task!: PluginBackgroundTask;
+    ctx.background = {
+      register: (entry) => {
+        task = entry;
+        return { dispose() {} };
+      },
+      list: () => [],
+      disposeAll() {},
+    };
+    ctx.onDispose = vi.fn();
+    registerBridgeSupervisor(ctx, dir);
+    return { ctx, run: (signal = new AbortController().signal) => task.run({ signal, tick: 1 }) };
+  }
+
+  it('refreshes relay health immediately after only the token changes', async () => {
+    const values = { enabled: 'false', relayUrl: 'https://relay.test', token: 'old-token' };
+    const { ctx, run } = backgroundHarness(values);
+    ctx.settings.get = () => values;
+    const fetcher = vi.fn(
+      async (_url: string, init: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            phoneOnline: (init.headers as Record<string, string>)['x-relay-token'] === 'old-token',
+          }),
+        ),
+    );
+    vi.stubGlobal('fetch', fetcher);
+    await run();
+    values.token = 'new-token';
+    await run();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const status = JSON.parse(readFileSync(join(dir, 'data.json'), 'utf8'));
+    expect(status.phoneOnline).toBe(false);
+  });
+
+  it('cancels an in-flight health probe and does not publish after disposal', async () => {
+    const { run } = backgroundHarness({ enabled: 'false' });
+    const controller = new AbortController();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+          }),
+      ),
+    );
+    const running = run(controller.signal);
+    controller.abort();
+    await running;
+    expect(() => statSync(join(dir, 'data.json'))).toThrow();
+  });
+
+  it('does not rewrite unchanged status on every supervision tick', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100_000);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}')),
+    );
+    const { run } = backgroundHarness({ enabled: 'false' });
+    await run();
+    const first = readFileSync(join(dir, 'data.json'), 'utf8');
+    now.mockReturnValue(103_000);
+    await run();
+    expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe(first);
+  });
+
+  it('does not replace a lock while another session is starting the bridge', () => {
+    const lock = { pid: 0, ownerPid: process.pid, startedAt: Date.now() };
+    writeFileSync(join(dir, 'bridge.lock'), JSON.stringify(lock));
+    const supervisor = createBridgeSupervisor(fakeContext(), { dataDir: dir });
+    expect(supervisor.ensure().pid).toBeNull();
+    expect(JSON.parse(readFileSync(join(dir, 'bridge.lock'), 'utf8'))).toEqual(lock);
+  });
+
+  it('does not remove a stale lock or start a bridge while another supervisor owns the guard', () => {
+    const lockPath = join(dir, 'bridge.lock');
+    const stale = JSON.stringify({ pid: 2 ** 22 + 12345, startedAt: 0 });
+    writeFileSync(lockPath, stale);
+    const release = acquireProcessLock(`${lockPath}.guard`)!;
+    const supervisor = createBridgeSupervisor(fakeContext(), { dataDir: dir });
+    try {
+      expect(supervisor.ensure()).toEqual({ pid: null, changed: false });
+      expect(supervisor.runningPid()).toBeNull();
+      expect(readFileSync(lockPath, 'utf8')).toBe(stale);
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      release();
+    }
+  });
+
+  it.each(['missing', 'replaced'])('releases its own child even when its lock is %s', (state) => {
+    const child = { pid: 44001, on: vi.fn(), unref: vi.fn(), kill: vi.fn() };
+    vi.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
+    const supervisor = createBridgeSupervisor(fakeContext(), { dataDir: dir });
+    expect(supervisor.ensure().pid).toBe(child.pid);
+    const lockPath = join(dir, 'bridge.lock');
+    if (state === 'missing') rmSync(lockPath);
+    else writeFileSync(lockPath, JSON.stringify({ pid: process.pid, ownerPid: process.pid }));
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    expect(supervisor.stop({ ownedOnly: true })).toBe(true);
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(kill).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+    if (state === 'replaced') expect(JSON.parse(readFileSync(lockPath, 'utf8')).pid).toBe(process.pid);
+    expect(supervisor.stop({ ownedOnly: true })).toBe(false);
+  });
+
+  it('recovers an old incomplete lock without deleting a lock that is still being written', () => {
+    const lockPath = join(dir, 'bridge.lock');
+    writeFileSync(lockPath, '');
+    const supervisor = createBridgeSupervisor(fakeContext({ enabled: 'false' }), { dataDir: dir });
+    expect(supervisor.runningPid()).toBeNull();
+    expect(statSync(lockPath).isFile()).toBe(true);
+    utimesSync(lockPath, new Date(1), new Date(1));
+    expect(supervisor.runningPid()).toBeNull();
+    expect(() => statSync(lockPath)).toThrow();
+  });
+
+  it('does not stop another session’s bridge when an observing session closes', async () => {
+    writeFileSync(join(dir, 'bridge.lock'), JSON.stringify({ pid: process.pid, startedAt: Date.now() }));
+    const { ctx, run } = backgroundHarness({});
+    const dispose: Array<() => void> = [];
+    ctx.onDispose = (handler) => {
+      dispose.push(handler);
+    };
+    registerBridgeSupervisor(ctx, dir);
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}')),
+    );
+    await run();
+    for (const handler of dispose) handler();
+    expect(kill).not.toHaveBeenCalledWith(process.pid, 'SIGTERM');
+    expect(JSON.parse(readFileSync(join(dir, 'bridge.lock'), 'utf8')).pid).toBe(process.pid);
+  });
 });
 
 describe('buildStatus', () => {
@@ -121,7 +277,7 @@ describe('buildStatus', () => {
       { relayUrl: 'https://1-2-3-4.sslip.io/', token: '0123456789abcdef0123' },
       null,
       null,
-      1_000
+      1_000,
     );
     expect(status.relayUrl).toBe('https://1-2-3-4.sslip.io');
     expect(status.phoneUrl).toBe('https://1-2-3-4.sslip.io/?t=0123456789abcdef0123');
@@ -149,7 +305,12 @@ describe('buildStatus', () => {
   });
 
   it('reports what the relay health says when it answers', () => {
-    const status = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { agentOnline: true, phoneOnline: true }, 9, 1);
+    const status = buildStatus(
+      { relayUrl: 'https://x.test', token: 'a' },
+      { agentOnline: true, phoneOnline: true },
+      9,
+      1,
+    );
     expect(status).toMatchObject({ relayOnline: true, agentOnline: true, phoneOnline: true });
   });
 

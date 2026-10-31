@@ -10,6 +10,44 @@ const user = (text: string, extra: Partial<{ displayContent: string }> = {}): Mi
 const assistant = (text: string): MicaUiConversationMessage => ({ role: 'assistant', content: text });
 
 describe('buildTranscript', () => {
+  it('only reads the recent messages needed by the title budget in a long history', () => {
+    let reads = 0;
+    const history = Array.from({ length: 20_000 }, (_, index) => ({
+      role: index % 2 ? 'assistant' as const : 'user' as const,
+      get content() {
+        reads += 1;
+        return `message ${index}`;
+      },
+    }));
+    expect(buildTranscript(history, { maxMessages: 12 })).toHaveLength(12);
+    expect(reads).toBe(12);
+  });
+
+  it('appends repeated words as a new request when the previous user message was answered', () => {
+    expect(buildTranscript([user('继续'), assistant('正在排查')], {
+      maxMessages: 3,
+      latestUserText: '继续',
+    })).toEqual([
+      { role: 'user', text: '继续' },
+      { role: 'assistant', text: '正在排查' },
+      { role: 'user', text: '继续' },
+    ]);
+  });
+
+  it('keeps the same filtered suffix and pending input under different message budgets', () => {
+    const history = Array.from({ length: 300 }, (_, index) => index % 7 === 0
+      ? user('[Mica compact boundary]\n{}')
+      : index % 5 === 0
+        ? user('internal prompt', { displayContent: 'plugin notice' })
+        : index % 2 ? assistant(`reply ${index}`) : user(`request ${index}`));
+    for (const latestUserText of ['', 'next request', 'request 298']) {
+      const all = buildTranscript(history, { maxMessages: 0, latestUserText });
+      for (const maxMessages of [1, 2, 3, 12, 50]) {
+        expect(buildTranscript(history, { maxMessages, latestUserText })).toEqual(all.slice(-maxMessages));
+      }
+    }
+  });
+
   it('keeps user and assistant text only', () => {
     const entries = buildTranscript(
       [user('修一下登录超时'), assistant('看了下是 fetch 没设置 timeout'), { role: 'notice', content: '工具报错' }],

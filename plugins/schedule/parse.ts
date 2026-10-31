@@ -22,7 +22,7 @@ export const STAGE_LABELS: Record<string, string> = {
   acceptance: '验收',
   walkthrough: '走查',
   release: '上线',
-  showcase: 'showcase'
+  showcase: 'showcase',
 };
 
 /** 阶段在时间轴上的先后：同时命中多个阶段词时按它取，避免「测试开发」这类词串味。 */
@@ -36,7 +36,7 @@ const STAGE_SEQUENCE = [
   'acceptance',
   'walkthrough',
   'release',
-  'showcase'
+  'showcase',
 ];
 
 /**
@@ -56,7 +56,7 @@ const STAGE_WORDS: Array<[string, string[]]> = [
   ['walkthrough', ['走查', '体验走查']],
   ['release', ['上线', '发布', '灰度']],
   ['showcase', ['showcase', 'SHOWCASE', 'Showcase', '演示']],
-  ['dev', ['开发']]
+  ['dev', ['开发']],
 ];
 
 /** `M.D` / `M-D` / `M/D`；前后不能紧贴数字，否则会从 URL、单号里切出一截。 */
@@ -89,11 +89,7 @@ function formatDate(year: number, month: number, day: number): string {
  * 12 月发的公告写「1.5」，同一个年份里它是十个月前；1 月发的公告写「12.28」，同一个
  * 年份里它是十一个月后。这两种各挪一年，其余（包括公告里已经过去的旧日期）保持原年。
  */
-function inferYear(
-  month: number,
-  day: number,
-  reference: { year: number; month: number; day: number },
-): number {
+function inferYear(month: number, day: number, reference: { year: number; month: number; day: number }): number {
   const sameYear = Date.UTC(reference.year, month - 1, day) / 86_400_000;
   const today = Date.UTC(reference.year, reference.month - 1, reference.day) / 86_400_000;
   const delta = sameYear - today;
@@ -176,10 +172,7 @@ export type ScheduleStage = {
  *
  * 返回的多个阶段可能重叠（测试跨过上线是常事），调用方按日期聚合即可，这里不做裁剪。
  */
-export function parseSchedule(
-  text: string,
-  options: { reference: string },
-): ScheduleStage[] {
+export function parseSchedule(text: string, options: { reference: string }): ScheduleStage[] {
   if (!text.trim()) return [];
   const reference = parseDateOnly(options.reference);
   const stages: ScheduleStage[] = [];
@@ -205,9 +198,22 @@ export function parseSchedule(
 
     const days = [
       ...new Set(
-        dates.map((date) => formatDate(inferYear(date.month, date.day, reference), date.month, date.day)),
+        dates.flatMap((date) => {
+          const year = inferYear(date.month, date.day, reference);
+          const checked = new Date(Date.UTC(year, date.month - 1, date.day));
+          return checked.getUTCFullYear() === year &&
+            checked.getUTCMonth() === date.month - 1 &&
+            checked.getUTCDate() === date.day
+            ? [formatDate(year, date.month, date.day)]
+            : [];
+        }),
       ),
     ].sort();
+    if (
+      days.length === 0 ||
+      dates.some((date) => !days.includes(formatDate(inferYear(date.month, date.day, reference), date.month, date.day)))
+    )
+      continue;
     for (const key of keys) {
       stages.push({
         key,
@@ -215,7 +221,7 @@ export function parseSchedule(
         start: days[0]!,
         end: days[days.length - 1]!,
         days: [...days],
-        range: !listed
+        range: !listed,
       });
     }
   }
@@ -293,7 +299,7 @@ export function buildAgenda(
           startIn,
           endIn,
           span,
-          dayIndex: Math.min(offset + 1, span)
+          dayIndex: Math.min(offset + 1, span),
         });
         continue;
       }
@@ -309,7 +315,7 @@ export function buildAgenda(
         startIn,
         endIn,
         span,
-        dayIndex: 0
+        dayIndex: 0,
       });
     }
   }
@@ -322,7 +328,9 @@ export function buildAgenda(
   };
   active.sort(
     (left, right) =>
-      left.endIn - right.endIn || stageRank(left.key) - stageRank(right.key) || left.groupName.localeCompare(right.groupName),
+      left.endIn - right.endIn ||
+      stageRank(left.key) - stageRank(right.key) ||
+      left.groupName.localeCompare(right.groupName),
   );
   upcoming.sort(
     (left, right) =>

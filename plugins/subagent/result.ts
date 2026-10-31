@@ -27,10 +27,12 @@ export function formatStructuredSubagentResult(options: {
   status?: StructuredSubagentResult['status'];
 }): string {
   const structured = parseStructuredSubagentResult(options.result, options.status ?? 'completed');
+  // 宿主知道请求是否被中止或失败；子代理自己写的 JSON 不能把这类结果升级成成功。
+  const status = options.status && options.status !== 'completed' ? options.status : structured.status;
   return [
     `Subagent: ${options.type}`,
     `Task: ${options.description}`,
-    `Status: ${structured.status}`,
+    `Status: ${status}`,
     '',
     '## Summary',
     structured.summary || '(empty summary)',
@@ -89,10 +91,16 @@ export function parseStructuredSubagentResult(
 
 function tryParseJsonResult(raw: string): Record<string, unknown> | null {
   const candidates = [raw];
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) candidates.unshift(fenced[1].trim());
-  const objectMatch = raw.match(/\{[\s\S]*\}/);
-  if (objectMatch?.[0]) candidates.push(objectMatch[0]);
+  // 用边界定位代替重叠的正则量词：未闭合的大括号或代码块也只扫描一次。
+  const fence = /```(?:json)?/i.exec(raw);
+  if (fence) {
+    const start = fence.index + fence[0].length;
+    const end = raw.indexOf('```', start);
+    if (end >= 0) candidates.unshift(raw.slice(start, end).trim());
+  }
+  const objectStart = raw.indexOf('{');
+  const objectEnd = raw.lastIndexOf('}');
+  if (objectStart >= 0 && objectEnd > objectStart) candidates.push(raw.slice(objectStart, objectEnd + 1));
 
   for (const candidate of candidates) {
     try {
@@ -135,8 +143,14 @@ function extractBulletSection(text: string, headings: string[]): string[] {
 }
 
 function extractPathCandidates(text: string): string[] {
-  const matches = text.match(/(?:[A-Za-z]:)?(?:\.?\.?\/)?[\w.-]+(?:\/[\w.-]+)+/g) ?? [];
-  return [...new Set(matches.map((item) => item.trim()))].slice(0, MAX_LIST_ITEMS);
+  // 只从路径片段的边界开始尝试；否则一个没有斜杠的长 token 会在每个字符上重扫余下全文。
+  const pattern = /(?<![\w.-])(?:[A-Za-z]:)?(?:\.?\.?\/)?[\w.-]+(?:\/[\w.-]+)+/g;
+  const paths = new Set<string>();
+  for (const match of text.matchAll(pattern)) {
+    paths.add(clampText(match[0], MAX_ITEM_CHARS));
+    if (paths.size >= MAX_LIST_ITEMS) break;
+  }
+  return [...paths];
 }
 
 function formatList(items: string[]): string {

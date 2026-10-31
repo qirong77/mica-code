@@ -49,6 +49,11 @@ desktop 运行时 spawn `mica app-server` 时注入 `MICA_PLUGIN_DESKTOP_HOST=1`
 - Xcode Command Line Tools（`xcode-select --install`）：helper 需要 clang 编译一次；
 - 辅助功能 + 屏幕录制权限授予 **运行 Mica 桌面端的那个 app**，改完要重启它。
 
+## 命令执行边界
+
+鼠标移动在一次 helper 调用内读取原位置、移动并校验位置，减少两次 native 进程启动。
+坐标、持续时间与等待超时在调用 native 工具前校验；组合键的每一段都确认合法后才发出任何键盘事件，空段（如 `cmd++a`）直接报错。
+
 ## 验证
 
 ```bash

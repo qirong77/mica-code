@@ -152,13 +152,9 @@ describe('索引锁', () => {
   afterEach(() => rm(dir, { recursive: true, force: true }))
 
   it('读命令不写回索引，因此不会占用 .git/index.lock', async () => {
-    // 对照：不带 GIT_OPTIONAL_LOCKS=0 的 status 会刷新索引并写回磁盘（占一次锁），
-    // 这正是桌面端每 10s 轮询与用户点击抢锁的来源。
+    // 不把「裸 git status 一定写回索引」当对照：git 只在 stat 信息过期时刷新，
+    // 同一版本/文件系统下也可能跳过。这里只断言桌面轮询真正依赖的保证。
     await writeFile(path.join(dir, 'a.txt'), 'two\n')
-    const before = await indexSnapshot()
-    await execFileAsync('git', ['status', '--porcelain'], { cwd: dir })
-    expect(await indexSnapshot()).not.toBe(before)
-
     // 轮询走的读命令一律带 GIT_OPTIONAL_LOCKS=0：索引原封不动。
     await writeFile(path.join(dir, 'a.txt'), 'three\n')
     const stale = await indexSnapshot()

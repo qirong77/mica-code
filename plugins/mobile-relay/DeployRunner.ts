@@ -92,7 +92,7 @@ export function runSetup(
   ctx: PluginContext,
   dataDir: string,
   request: DeployRequest,
-  onState: (state: DeployState) => void
+  onState: (state: DeployState) => void,
 ): Promise<DeployState> {
   const host = normalizeHost(request.host);
   if (!host) {
@@ -113,9 +113,31 @@ export function runSetup(
   onState(state);
 
   const nodeBin = process.env.MICA_BRIDGE_NODE || 'node';
-  const child = spawn(nodeBin, args, { cwd: dataDir, env: process.env });
+  const child = spawn(nodeBin, args, { cwd: dataDir, env: process.env, detached: process.platform !== 'win32' });
+  let finished = false;
+  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+  ctx.onDispose(async () => {
+    if (finished) return;
+    const terminate = (signal: NodeJS.Signals) => {
+      try {
+        // setup 的 SSH 子进程也必须收掉，否则插件停用后部署仍会继续。
+        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch {
+        child.kill(signal);
+      }
+    };
+    terminate('SIGTERM');
+    const timer = setTimeout(() => terminate('SIGKILL'), 3_000);
+    try {
+      await closed;
+    } finally {
+      clearTimeout(timer);
+    }
+  });
 
   const push = (chunk: string) => {
+    if (finished) return;
     for (const raw of chunk.split('\n')) {
       const line = raw.trimEnd();
       if (!line.trim()) continue;
@@ -130,6 +152,8 @@ export function runSetup(
 
   return new Promise((resolve) => {
     child.on('error', (error) => {
+      if (finished) return;
+      finished = true;
       state.phase = 'failed';
       state.finishedAt = Date.now();
       state.lines = [...state.lines, `启动失败：${error.message}`].slice(-12);
@@ -138,6 +162,8 @@ export function runSetup(
       resolve(state);
     });
     child.on('close', (code) => {
+      if (finished) return;
+      finished = true;
       state.phase = code === 0 ? 'ok' : 'failed';
       state.finishedAt = Date.now();
       if (code !== 0) state.lines = [...state.lines, `退出码 ${code}`].slice(-12);
@@ -172,4 +198,3 @@ export function findRendererDir(explicit: string): string | null {
   const fromRepo = join(process.cwd(), 'apps', 'desktop', 'out', 'renderer');
   return looksRight(fromRepo) ? fromRepo : null;
 }
-

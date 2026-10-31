@@ -1,12 +1,9 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { IconCheck, IconGitBranch, IconGitFork, IconPlus, IconTag } from '@tabler/icons-react'
+import { IconCheck, IconGitBranch, IconPlus, IconTag } from '@tabler/icons-react'
 import { formatTracking, relativeDateZh } from './git-refs'
 import { useQuickPickAnchor } from './quick-pick-anchor'
 
-const actions = [
-  { id: 'create', label: '创建新分支…', icon: IconPlus },
-  { id: 'createFrom', label: '从…创建新分支…', icon: IconGitFork }
-]
+const createAction = { id: 'create', label: '创建新分支…', icon: IconPlus }
 
 const searchable = (item) =>
   [item.name, item.subject, item.author, item.hash, item.upstream].filter(Boolean).join(' ')
@@ -24,18 +21,17 @@ function RefRowBody({ item }) {
           <span className="quick-pick-row-meta">{formatTracking(item.tracking)}</span>
         )}
         {item.date && <span className="quick-pick-row-meta">{relativeDateZh(item.date)}</span>}
+        {item.subject && <span className="quick-pick-row-path">{item.subject}</span>}
       </span>
       <span className="quick-pick-row-tail">
         {item.current ? '当前' : item.kind === 'tag' ? '标签' : '分支'}
       </span>
-      <span className="quick-pick-row-detail">{detailOf(item)}</span>
     </>
   )
 }
 
 export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anchorRef = null }) {
   const [refs, setRefs] = useState({ branches: [], tags: [] })
-  const [mode, setMode] = useState('main')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -69,7 +65,6 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anc
   }, [cwd])
 
   useEffect(() => {
-    setMode('main')
     setQuery('')
     setSelected(0)
     load()
@@ -82,21 +77,17 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anc
   const items = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase()
     const matches = (item) => !needle || searchable(item).toLocaleLowerCase().includes(needle)
-    if (mode === 'main') {
-      const actionItems = actions
-        .filter((item) => !needle || item.label.toLocaleLowerCase().includes(needle))
-        .map((item) => ({ ...item, type: 'action' }))
-      return [
-        ...actionItems,
-        ...refs.branches.filter(matches).map((item) => ({ ...item, type: 'ref' }))
-      ]
-    }
-    return [...refs.branches, ...refs.tags]
-      .filter(matches)
-      .map((item) => ({ ...item, type: 'ref' }))
-  }, [mode, query, refs])
+    const actionItem =
+      !needle || createAction.label.toLocaleLowerCase().includes(needle)
+        ? [{ ...createAction, type: 'action' }]
+        : []
+    return [
+      ...actionItem,
+      ...[...refs.branches, ...refs.tags].filter(matches).map((item) => ({ ...item, type: 'ref' }))
+    ]
+  }, [query, refs])
 
-  useEffect(() => setSelected(0), [mode, query, refs])
+  useEffect(() => setSelected(0), [query, refs])
   useEffect(() => selectedRef.current?.scrollIntoView({ block: 'nearest' }), [selected])
 
   const restoreFocus = () => requestAnimationFrame(() => inputRef.current?.focus())
@@ -124,52 +115,34 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anc
     [canOperate, onChanged, onClose]
   )
 
-  const create = useCallback(
-    async (startRef = null) => {
-      const blocked = canOperate?.()
-      if (blocked) {
-        setError(blocked)
-        return
-      }
-      const name = await askText(
-        '创建新分支',
-        '',
-        startRef ? `新分支将基于 ${startRef.name} 创建并立即签出。` : '创建后将立即签出新分支。'
-      )
-      if (name === null) {
-        restoreFocus()
-        return
-      }
-      await operate(() => window.mica.git.createBranch(cwd, name, startRef?.ref || null))
-    },
-    [askText, canOperate, cwd, operate]
-  )
+  const create = useCallback(async () => {
+    const blocked = canOperate?.()
+    if (blocked) {
+      setError(blocked)
+      return
+    }
+    const name = await askText('创建新分支', '', '创建后将立即签出新分支。')
+    if (name === null) {
+      restoreFocus()
+      return
+    }
+    await operate(() => window.mica.git.createBranch(cwd, name))
+  }, [askText, canOperate, cwd, operate])
 
   const choose = useCallback(
     async (item) => {
       if (!item || busy || loading) return
       if (item.type === 'action') {
-        if (item.id === 'create') await create()
-        else {
-          setMode('from')
-          setQuery('')
-          setError('')
-          restoreFocus()
-        }
-        return
-      }
-      if (mode === 'from') {
-        await create(item)
+        await create()
         return
       }
       if (item.current) onClose()
       else await operate(() => window.mica.git.checkout(cwd, item.ref))
     },
-    [busy, create, cwd, loading, mode, onClose, operate]
+    [busy, create, cwd, loading, onClose, operate]
   )
 
-  const title = mode === 'from' ? '选择新分支的起点' : '选择要签出的分支或标记'
-  const hint = mode === 'from' ? 'Esc 返回' : 'Esc 关闭'
+  const title = '选择要签出的分支或标记'
 
   return (
     <div
@@ -215,12 +188,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anc
                 choose(items[selected])
               } else if (event.key === 'Escape') {
                 event.preventDefault()
-                if (mode === 'main') onClose()
-                else {
-                  setMode('main')
-                  setQuery('')
-                  setError('')
-                }
+                onClose()
               }
             }}
           />
@@ -270,7 +238,8 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anc
                     role="option"
                     aria-selected={active}
                     disabled={busy}
-                    className={`quick-pick-row is-multiline${active ? ' is-selected' : ''}`}
+                    title={detailOf(item)}
+                    className={`quick-pick-row${active ? ' is-selected' : ''}`}
                     onMouseEnter={() => setSelected(index)}
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => choose(item)}
@@ -285,7 +254,7 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anc
 
         <footer className="quick-pick-status">
           <span title={refs.root || cwd}>{refs.root || cwd}</span>
-          <span>{busy ? '正在执行 Git 操作…' : `↑↓ 选择 · Enter 确认 · ${hint}`}</span>
+          <span>{busy ? '正在执行 Git 操作…' : '↑↓ 选择 · Enter 确认 · Esc 关闭'}</span>
         </footer>
       </section>
     </div>

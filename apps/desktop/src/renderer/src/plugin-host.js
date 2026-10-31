@@ -62,9 +62,9 @@ export function createPluginHostApi(pluginId) {
     currentHost: () => currentRuntimeAddress(),
     /** 这个地址上是不是一台 Mica 运行时：跨源探测页面做不了，由运行时代查。 */
     probe: (address) => host.probe(String(address ?? '')),
-    /** 插件自己的那份数据（内容由插件定义，宿主不解析）。没有数据时 `{ value: null }`。 */
+    /** 插件自己的数据及内容版本。写入时可带 expectedVersion，冲突后重读并重放修改。 */
     readData: () => host.readData(pluginId),
-    writeData: (value) => host.writeData(pluginId, value),
+    writeData: (value, options) => host.writeData(pluginId, value, options),
     /**
      * 运行时的远程访问策略：别的机器要进这台机器时要不要口令、口令是什么、别人从哪个
      * 地址进来（`addresses`）。这是宿主自己的能力，不是插件的私有数据——请求分派用的是

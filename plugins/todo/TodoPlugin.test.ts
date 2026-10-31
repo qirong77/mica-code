@@ -7,7 +7,8 @@ import {
   type PluginStatusItem,
 } from '@packages/mica-plugin/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
-import { micaTools, type MicaTool } from '@packages/mica-tools/index.js';
+import { micaTools, type MicaTool, type ToolExecuteCallbacks } from '@packages/mica-tools/index.js';
+import { micaUi } from '@packages/mica-ui/index.js';
 import { TodoPlugin } from './TodoPlugin.js';
 
 describe('TodoPlugin', () => {
@@ -15,6 +16,7 @@ describe('TodoPlugin', () => {
 
   afterEach(async () => {
     for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
+    vi.restoreAllMocks();
   });
 
   it('registers the tool, status component, and command', async () => {
@@ -182,9 +184,119 @@ describe('TodoPlugin', () => {
       ['TODO 清单已更新：1/2 完成，剩 1 项。', '- [ ] Left over'].join('\n'),
     );
   });
+
+  it('isolates plans, tool writes, and turn lifecycle by opaque owner across session switches', async () => {
+    const harness = createTodoHarness(disposeCallbacks, true);
+    const ownerA = {};
+    const ownerB = {};
+    harness.setOwner(ownerA);
+    await micaTools.execute('todo_write', { todos: [{ content: 'A plan', status: 'in_progress' }] });
+
+    // 后台 B 的事件即使在 A 被选中时到达，也只能影响 B。
+    await harness.hooks.emit('turn:before', {
+      owner: ownerB,
+      runtime: {},
+      input: micaRuntime.createRuntimeInput('B starts', 'ui'),
+    });
+    harness.events.publish({ type: 'session:cleared', owner: ownerB });
+    harness.events.publish({ type: 'session:invalidated', reason: 'resume', owner: ownerB });
+    await harness.hooks.emit('turn:after', {
+      owner: ownerB,
+      input: micaRuntime.createRuntimeInput('B ends', 'ui'),
+      elapsedMs: 10,
+      hasError: false,
+      outcome: 'completed',
+    });
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('TODO 清单已更新：0/1 完成，剩 1 项。\n- [>] A plan');
+
+    // 工具归属来自 callbacks.context，不能取当前界面的 A。
+    const callbacks = { context: harness.contextFor(ownerB) } as ToolExecuteCallbacks;
+    await micaTools.execute('todo_write', { todos: [{ content: 'B plan', status: 'in_progress' }] }, callbacks);
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('TODO 清单已更新：0/1 完成，剩 1 项。\n- [>] A plan');
+    harness.setOwner(ownerB);
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('TODO 清单已更新：0/1 完成，剩 1 项。\n- [>] B plan');
+
+    await harness.commands.execute('/todo clear');
+    harness.setOwner(ownerA);
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('TODO 清单已更新：0/1 完成，剩 1 项。\n- [>] A plan');
+  });
+
+  it('renders the selected owner with independent visibility and idle in-progress projection', async () => {
+    vi.spyOn(micaUi, 'useScheduleState').mockImplementation((store) => store.get());
+    const harness = createTodoHarness(disposeCallbacks, true);
+    const render = harness.upsert.mock.calls[0]?.[0].component as () => unknown;
+    const expectItem = (content: string, status: string) => {
+      expect(render()).toMatchObject({
+        props: { children: [expect.anything(), [{ props: { item: { content, status } } }]] },
+      });
+    };
+    const ownerA = {};
+    const ownerB = {};
+    harness.setOwner(ownerA);
+    await micaTools.execute('todo_write', { todos: [{ content: 'A plan', status: 'in_progress' }] });
+    expectItem('A plan', 'in_progress');
+    harness.setOwner(ownerB);
+    await micaTools.execute('todo_write', { todos: [{ content: 'B plan', status: 'in_progress' }] });
+    expectItem('B plan', 'in_progress');
+    await harness.commands.execute('/todo hide');
+    expect(render()).toBeNull();
+
+    harness.setOwner(ownerA);
+    expectItem('A plan', 'in_progress');
+    await harness.hooks.emit('turn:after', {
+      owner: ownerA,
+      input: micaRuntime.createRuntimeInput('A ends', 'ui'),
+      elapsedMs: 10,
+      hasError: false,
+      outcome: 'completed',
+    });
+    expect(render()).toBeNull();
+    await harness.commands.execute('/todo show');
+    expectItem('A plan', 'pending');
+    await harness.hooks.emit('turn:before', {
+      owner: ownerA,
+      runtime: {},
+      input: micaRuntime.createRuntimeInput('A starts again', 'ui'),
+    });
+    expect(render()).toBeNull();
+
+    harness.setOwner(ownerB);
+    expect(render()).toBeNull();
+    await harness.commands.execute('/todo show');
+    expectItem('B plan', 'in_progress');
+  });
+
+  it('uses the current owner for unscoped events and releases only a disposed owner', async () => {
+    const harness = createTodoHarness(disposeCallbacks, true);
+    const ownerA = {};
+    const ownerB = {};
+    harness.setOwner(ownerA);
+    await micaTools.execute('todo_write', { todos: [{ content: 'A plan', status: 'in_progress' }] });
+    harness.setOwner(ownerB);
+    await micaTools.execute('todo_write', { todos: [{ content: 'B plan', status: 'in_progress' }] });
+    await harness.hooks.emit('turn:after', {
+      input: micaRuntime.createRuntimeInput('B ends', 'ui'),
+      elapsedMs: 10,
+      hasError: false,
+      outcome: 'completed',
+    });
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('TODO 清单已更新：0/1 完成，剩 1 项。\n- [ ] B plan');
+
+    harness.events.publish({ type: 'session:disposed', owner: ownerA });
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('TODO 清单已更新：0/1 完成，剩 1 项。\n- [ ] B plan');
+    harness.setOwner(ownerA);
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list is empty.');
+  });
 });
 
-function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>) {
+function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>, withOwners = false) {
   const commands = new micaCommands.CommandRegistry();
   const hooks = new micaPlugin.HookRegistry();
   const events = new micaRuntime.RuntimeEventBus();
@@ -196,11 +308,14 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>) 
     micaTools.registerRuntime(tool);
     return { dispose: () => micaTools.unregisterRuntime(tool) };
   });
+  let currentOwner: unknown;
+  const contextOwners = new Map<unknown, unknown>();
   const ctx = {
     pluginId: 'todo',
     commands,
     hooks,
     events,
+    session: withOwners ? { captureOwner: (context?: unknown) => contextOwners.get(context) ?? currentOwner } : undefined,
     tools: { register: registerTool },
     prompt: { section: (section: PluginPromptSection) => promptSections.add('todo', section) },
     ui: { submit: vi.fn(), showMessage, status: { upsert, remove } },
@@ -208,5 +323,22 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>) 
   } as unknown as PluginContext;
 
   new TodoPlugin().setup(ctx);
-  return { commands, events, hooks, promptSections, registerTool, remove, showMessage, upsert };
+  return {
+    commands,
+    events,
+    hooks,
+    promptSections,
+    registerTool,
+    remove,
+    showMessage,
+    upsert,
+    setOwner(owner: unknown) {
+      currentOwner = owner;
+    },
+    contextFor(owner: unknown) {
+      const context = {};
+      contextOwners.set(context, owner);
+      return context;
+    },
+  };
 }

@@ -140,6 +140,20 @@ describe('renderTranscript', () => {
     expect(text).not.toContain('问 0');
   });
 
+  it('counts questions, errors and headings against the total character budget', () => {
+    const transcript = new SidecarTranscript();
+    for (let index = 0; index < 4; index++) {
+      completeTurn(transcript, `最新问题 ${index}\n${'问'.repeat(2_000)}`, '答'.repeat(6_000), `t${index}`);
+      transcript.turns.at(-1)!.error = '错误'.repeat(2_000);
+    }
+    for (const maxChars of [240, 500, 2_000, 5_000]) {
+      const text = renderTranscript(entryFor(transcript), { lastTurns: 4, maxChars });
+      expect(text.length).toBeLessThanOrEqual(maxChars);
+      expect(text).toContain('[助手]');
+      expect(text).not.toContain('最新问题 0');
+    }
+  });
+
   it('handles a session that has not said anything yet', () => {
     expect(renderTranscript(entryFor(new SidecarTranscript()))).toContain('还没有任何一轮对话');
   });
@@ -212,5 +226,11 @@ describe('grepTranscript', () => {
     const transcript = new SidecarTranscript();
     completeTurn(transcript, '问', '答', 't1');
     expect(grepTranscript(entryFor(transcript), { pattern: /不存在的东西/ })).toContain('没有命中');
+  });
+
+  it('bounds excerpts even when a wildcard matches an entire long line', () => {
+    const transcript = new SidecarTranscript();
+    completeTurn(transcript, 'q', 'x'.repeat(24_000));
+    expect(grepTranscript(entryFor(transcript), { pattern: /.*/ }).length).toBeLessThan(500);
   });
 });

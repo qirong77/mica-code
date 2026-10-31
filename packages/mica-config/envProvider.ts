@@ -16,7 +16,6 @@ import { PROVIDER_PROTOCOLS, type ProviderDefinition, type ProviderProtocol } fr
 
 type EnvProviderSpec = {
   id: string;
-  name: string;
   apiKeyEnv: string;
   apiBaseEnv: string;
   defaultApiBase: string;
@@ -26,7 +25,6 @@ type EnvProviderSpec = {
 const ENV_PROVIDER_SPECS: EnvProviderSpec[] = [
   {
     id: 'openai',
-    name: 'OpenAI (environment)',
     apiKeyEnv: 'OPENAI_API_KEY',
     apiBaseEnv: 'OPENAI_BASE_URL',
     defaultApiBase: 'https://api.openai.com/v1',
@@ -56,7 +54,6 @@ export function synthesizeEnvProviders(providers: ProviderDefinition[]): Provide
     if (providers.some((provider) => provider.id === spec.id)) continue;
     synthesized.push({
       id: spec.id,
-      name: spec.name,
       api_base: process.env[spec.apiBaseEnv]?.trim() || spec.defaultApiBase,
       api_key: apiKey,
       protocol: resolveEnvProtocol(spec.defaultProtocol),

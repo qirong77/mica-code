@@ -24,30 +24,48 @@ export type CompactMessagesResult = {
 export async function compactAgentMessages(
   agent: AgentRuntime,
   messages: unknown[],
-  options: { mode: CompactMessagesMode; summarize?: (transcript: string, prompt: string) => Promise<string> },
+  options: {
+    mode: CompactMessagesMode;
+    summarize?: (transcript: string, prompt: string) => Promise<string>;
+    signal?: AbortSignal;
+    preserveRecentMessages?: number;
+    preserveRecentRounds?: number;
+    preserveLatestUserMessage?: boolean;
+  },
 ): Promise<CompactMessagesResult> {
   const { mode, summarize } = options;
+  options.signal?.throwIfAborted();
   const service = new micaContext.CompactionService();
+  const budget = {
+    contextWindowSize: agent.config.provider.contextWindowSize,
+    preserveRecentMessages: options.preserveRecentMessages,
+    preserveRecentRounds: options.preserveRecentRounds,
+    preserveLatestUserMessage: options.preserveLatestUserMessage,
+  };
   if (mode === 'quick') {
-    const result = await service.compact({ messages, options: { toolResultsOnly: true } });
+    const result = await service.compact({ messages, options: { toolResultsOnly: true, ...budget } });
     return { messages: result.messages, savedTokens: Math.max(0, result.savedTokenEstimate) };
   }
 
   const result = await service.compact({
     messages,
+    signal: options.signal,
     // 插件给了自己的摘要请求就用它：换模型是插件的策略，分段、预算与重试仍归内核。
-    summarize: summarize ?? ((transcript, prompt) => summarizeWithSubAgent(agent, transcript, prompt)),
+    summarize: summarize ?? ((transcript, prompt) => summarizeWithSubAgent(agent, transcript, prompt, options.signal)),
+    options: budget,
   });
+  options.signal?.throwIfAborted();
   return { messages: result.messages, savedTokens: Math.max(0, result.savedTokenEstimate) };
 }
 
-async function summarizeWithSubAgent(agent: AgentRuntime, transcript: string, prompt: string): Promise<string> {
+async function summarizeWithSubAgent(agent: AgentRuntime, transcript: string, prompt: string, signal?: AbortSignal): Promise<string> {
   // 摘要必须走子代理、禁用工具：它共享父代理的工具注册表，session_* 之类的
   // 工具会去改正在被压缩的会话本身（与 /compact llm 同一条路径）。
   const subAgent = agent.createSubAgent({ systemPrompt: prompt, tools: false });
   const startedAt = new Date().toISOString();
+  let status: 'completed' | 'failed' | 'aborted' = 'failed';
   try {
-    return await subAgent.query(
+    const summary = await subAgent.query(
       [
         'Summarize this conversation into a compact checkpoint for the next coding agent.',
         'Preserve concrete paths, commands, validation results, user constraints, and pending work.',
@@ -55,7 +73,10 @@ async function summarizeWithSubAgent(agent: AgentRuntime, transcript: string, pr
         '',
         transcript,
       ].join('\n'),
+      { signal },
     );
+    status = 'completed';
+    return summary;
   } finally {
     // 摘要请求不进主 usageHistory（那会污染 ctx 与 lastUsage），但要记进
     // subagentUsageHistory，否则这次开销在 Stats 里不可见。
@@ -65,7 +86,7 @@ async function summarizeWithSubAgent(agent: AgentRuntime, transcript: string, pr
       description: '自动模型压缩摘要',
       model: agent.config.model,
       effort: 'none',
-      status: 'completed',
+      status: signal?.aborted ? 'killed' : status,
       startedAt,
       finishedAt: new Date().toISOString(),
     });

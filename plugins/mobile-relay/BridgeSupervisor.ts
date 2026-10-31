@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
 import { BRIDGE_SOURCE } from './bridgeSource.js';
 import { pageVersionOf } from './PageSync';
@@ -27,7 +28,7 @@ const DATA_NAME = 'data.json';
 /** 随包 skill 的源码位置；正文内嵌在二进制里，这一条只是给人点开看的地方。 */
 const SKILL_URL = 'https://github.com/qironglin77/mica-code/tree/main/plugins/mobile-relay/skill';
 
-type LockRecord = { pid: number; startedAt: number };
+type LockRecord = { pid: number; startedAt: number; ownerPid?: number };
 
 function isAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -63,7 +64,7 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     try {
       const parsed = JSON.parse(readFileSync(lockPath, 'utf8')) as Partial<LockRecord>;
       if (typeof parsed.pid !== 'number') return null;
-      return { pid: parsed.pid, startedAt: Number(parsed.startedAt) || 0 };
+      return { pid: parsed.pid, startedAt: Number(parsed.startedAt) || 0, ownerPid: parsed.ownerPid };
     } catch {
       return null;
     }
@@ -85,15 +86,39 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
    * 启动的」（比如上次会话留下的），此时只记录当前配置、不贸然杀掉。
    */
   let runningFor = '';
+  let ownedPid: number | null = null;
+  let ownedChild: ReturnType<typeof spawn> | null = null;
+  const withLock = <T>(busy: T, run: () => T): T => {
+    if (!lockPath) return busy;
+    const release = acquireProcessLock(`${lockPath}.guard`);
+    if (!release) return busy;
+    try {
+      return run();
+    } finally {
+      release();
+    }
+  };
   const configFingerprint = (): string => {
     const values = ctx.settings.get();
-    const url = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
+    const url = String(values.relayUrl ?? '')
+      .trim()
+      .replace(/\/+$/, '');
     return `${url}|${String(values.token ?? '')}`;
   };
 
   const runningPid = (): number | null => {
     const lock = readLock();
-    if (!lock) return null;
+    if (!lock) {
+      // 刚拿到 wx 的写入者可能还没写完；坏锁超过启动窗口才回收。
+      try {
+        if (lockPath && Date.now() - statSync(lockPath).mtimeMs > 30_000) clearLock();
+      } catch {
+        // 没有 lock。
+      }
+      return null;
+    }
+    // 另一个宿主已经拿到启动权，尚未把子进程 pid 写回来。
+    if (lock.pid === 0 && lock.ownerPid && isAlive(lock.ownerPid)) return null;
     if (isAlive(lock.pid)) return lock.pid;
     // 进程已经没了：锁是垃圾，清掉，下一轮重新拉起
     clearLock();
@@ -104,18 +129,43 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     if (!lockPath || !dir) return null;
     const script = materializeBridge(dir);
     const nodeBin = process.env.MICA_BRIDGE_NODE || 'node';
+    try {
+      writeFileSync(lockPath, JSON.stringify({ pid: 0, ownerPid: process.pid, startedAt: Date.now() }), { flag: 'wx' });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return null;
+      throw error;
+    }
     // 宿主被 SIGKILL 时 onDispose 跑不到：桥自己盯着父进程，父进程没了就退，避免留下孤儿进程
-    const child = spawn(nodeBin, [script], {
-      detached: true,
-      stdio: 'ignore',
-      env: { ...process.env, MICA_RELAY_PARENT_PID: String(process.pid) }
-    });
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(nodeBin, [script], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, MICA_RELAY_PARENT_PID: String(process.pid) },
+      });
+    } catch (error) {
+      clearLock();
+      throw error;
+    }
     child.on('error', (error) => {
       ctx.logger.error('bridge:spawn-failed', { error: error instanceof Error ? error.message : String(error) });
     });
     child.unref();
-    if (!child.pid) return null;
-    writeFileSync(lockPath, JSON.stringify({ pid: child.pid, startedAt: Date.now() }), 'utf8');
+    if (!child.pid) {
+      clearLock();
+      return null;
+    }
+    ownedPid = child.pid;
+    ownedChild = child;
+    try {
+      writeFileSync(lockPath, JSON.stringify({ pid: child.pid, ownerPid: process.pid, startedAt: Date.now() }), 'utf8');
+    } catch (error) {
+      child.kill('SIGTERM');
+      ownedPid = null;
+      ownedChild = null;
+      clearLock();
+      throw error;
+    }
     runningFor = configFingerprint();
     return child.pid;
   };
@@ -129,6 +179,10 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
       // 已经退出
     }
     clearLock();
+    if (pid === ownedPid) {
+      ownedPid = null;
+      ownedChild = null;
+    }
     return true;
   };
 
@@ -183,7 +237,31 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     return { pid: started, changed: true };
   };
 
-  return { ensure, stop, runningPid, scriptPath: () => (dir ? join(dir, SCRIPT_NAME) : null) };
+  const stopOwned = () => {
+    const pid = ownedPid;
+    if (pid === null) return false;
+    // 子进程归属由启动时的 handle 决定；丢锁或锁已被替换也要释放自己的桥。
+    try {
+      ownedChild?.kill('SIGTERM');
+    } catch {
+      // 已退出。
+    }
+    ownedPid = null;
+    ownedChild = null;
+    withLock(false, () => {
+      const lock = readLock();
+      if (lock?.pid === pid && lock.ownerPid === process.pid) clearLock();
+      return true;
+    });
+    return true;
+  };
+
+  return {
+    ensure: () => withLock({ pid: null, changed: false }, ensure),
+    stop: (options: { ownedOnly?: boolean } = {}) => (options.ownedOnly ? stopOwned() : withLock(false, stop)),
+    runningPid: () => withLock<number | null>(null, runningPid),
+    scriptPath: () => (dir ? join(dir, SCRIPT_NAME) : null),
+  };
 }
 
 /** 一条状态行：插件自己判断语气，页面只负责上色。 */
@@ -220,7 +298,9 @@ export function buildStatus(
   now: number,
   localPage: string | null = null,
 ): BridgeStatus {
-  const relayUrl = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
+  const relayUrl = String(values.relayUrl ?? '')
+    .trim()
+    .replace(/\/+$/, '');
   const token = String(values.token ?? '').trim();
   const enabled = String(values.enabled ?? 'true') !== 'false';
   const relayOnline = relay !== null;
@@ -273,16 +353,18 @@ export function buildStatus(
  * 卡片只能 `readData()` 读这一份，读不到 `plugin-settings`，所以「手机链接是什么、
  * 现在通没通」得由这里替它算好。写的是自己的数据文件，不是别人的。
  */
-async function probeRelay(ctx: PluginContext): Promise<Record<string, unknown> | null> {
+async function probeRelay(ctx: PluginContext, signal: AbortSignal): Promise<Record<string, unknown> | null> {
   const values = ctx.settings.get();
-  const relayUrl = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
+  const relayUrl = String(values.relayUrl ?? '')
+    .trim()
+    .replace(/\/+$/, '');
   const token = String(values.token ?? '');
   if (!relayUrl) return null;
   try {
     // 带上口令才拿得到「这一台」的在线状态；不带只能知道中转机活着。
     const response = await fetch(`${relayUrl}/api/health`, {
       headers: token ? { 'x-relay-token': token } : {},
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
     });
     if (response.ok) return (await response.json()) as Record<string, unknown>;
   } catch {
@@ -301,17 +383,18 @@ function publishStatus(
   dir: string | null,
   pid: number | null,
   relay: Record<string, unknown> | null,
-  previous: string | null
+  previous: string | null,
 ): string | null {
   if (!dir) return previous;
   const values = ctx.settings.get();
   const localPage = pageVersionOf(rendererDirFor(ctx));
   const status = buildStatus(values, relay, pid, Date.now(), localPage);
   const body = `${JSON.stringify(status, null, 2)}\n`;
-  if (body === previous) return previous;
+  const fingerprint = JSON.stringify({ ...status, updatedAt: 0 });
+  if (fingerprint === previous) return previous;
   try {
     writeFileSync(join(dir, DATA_NAME), body, 'utf8');
-    return body;
+    return fingerprint;
   } catch (error) {
     ctx.logger.warn('bridge:status-write-failed', {
       error: error instanceof Error ? error.message : String(error),
@@ -321,9 +404,9 @@ function publishStatus(
 }
 
 /** 中转机探活间隔：比监管跳数稀，避免检查本身变成额外的周期性请求。 */
-const RELAY_PROBE_MS = 15_000
+const RELAY_PROBE_MS = 15_000;
 /** 监管跳数。ensure() 只读配置和 lock，开销极小；跳得密是为了桥一挂就拉起来。 */
-const SUPERVISE_MS = 3_000
+const SUPERVISE_MS = 3_000;
 
 /**
  * 把监管注册成一个常驻任务。
@@ -349,22 +432,39 @@ export function registerBridgeSupervisor(ctx: PluginContext, dataDir: string | n
     id: 'bridge',
     every: SUPERVISE_MS,
     immediate: true,
-    async run() {
+    async run({ signal }) {
+      if (signal.aborted) return;
       const { pid, changed } = supervisor.ensure();
 
       const values = ctx.settings.get();
-      const relayUrl = String(values.relayUrl ?? '').trim().replace(/\/+$/, '');
+      const relayUrl = String(values.relayUrl ?? '')
+        .trim()
+        .replace(/\/+$/, '');
+      const fingerprint = JSON.stringify([relayUrl, values.token ?? '']);
       // 换地址/口令后立刻重探，别让卡片显示上一台中转机的状态
-      if (relayUrl !== relayProbedFor) {
+      if (fingerprint !== relayProbedFor) {
         relay = null;
         relayProbedAt = 0;
-        relayProbedFor = relayUrl;
+        relayProbedFor = fingerprint;
       }
       const now = Date.now();
       if (now - relayProbedAt >= RELAY_PROBE_MS) {
-        relay = await probeRelay(ctx);
+        relay = await probeRelay(ctx, signal);
         relayProbedAt = now;
       }
+
+      if (signal.aborted) return;
+      const current = ctx.settings.get();
+      if (
+        fingerprint !==
+        JSON.stringify([
+          String(current.relayUrl ?? '')
+            .trim()
+            .replace(/\/+$/, ''),
+          current.token ?? '',
+        ])
+      )
+        return;
 
       published = publishStatus(ctx, dataDir, pid, relay, published);
       if (!changed) return;
@@ -379,7 +479,7 @@ export function registerBridgeSupervisor(ctx: PluginContext, dataDir: string | n
   // 因为「插件停了还有一个进程在外联」正是这套机制要消灭的东西。
   ctx.onDispose(() => {
     registration.dispose();
-    supervisor.stop();
+    supervisor.stop({ ownedOnly: true });
   });
 
   return supervisor;

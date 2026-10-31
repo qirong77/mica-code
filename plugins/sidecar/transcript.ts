@@ -9,7 +9,13 @@
 export type SidecarToolCall = {
   id: string;
   title: string;
-  status: 'running' | 'completed' | 'error';
+  /**
+   * `interrupted` 是「这一轮被打断时它还没结束」。
+   *
+   * 不能并进 `completed`：被打断的 `sleep 60` 显示成已完成，读的人会以为命令
+   * 正常跑完了，从而得出「测试通过」这样的结论。
+   */
+  status: 'running' | 'completed' | 'error' | 'interrupted';
   output?: string;
 };
 
@@ -34,6 +40,8 @@ export type SidecarTurn = {
   tools: SidecarToolCall[];
   /** 引发这一轮（或在其中追加）的用户消息，按投递顺序。 */
   userInputs: SidecarUserInput[];
+  /** 单轮追加过多时，省略的早期消息数。 */
+  omittedUserInputs?: number;
   error?: string;
   startedAt: number;
   finishedAt?: number;
@@ -67,6 +75,8 @@ const MAX_TOOLS = 20;
 const MAX_PENDING_INPUTS = 5;
 /** 单条用户消息的保留上限：投进去的是提示词，不是附件。 */
 const MAX_INPUT_TEXT = 8_000;
+/** 长任务的同一轮可能消费很多追加消息，归属之后也需要有保留上限。 */
+const MAX_TURN_INPUTS = 20;
 
 /** 工具条数超出上限时丢掉最早的（保留最近的那些）。 */
 function trimTools(tools: SidecarToolCall[]): void {
@@ -107,6 +117,16 @@ export class SidecarTranscript {
   private current: SidecarTurn | null = null;
   private pendingInputs: SidecarUserInput[] = [];
   private nextInputId = 1;
+  /**
+   * 正文/思考已经到上限，后面的 delta 直接丢掉。
+   *
+   * 少了这个标志位，每个 delta 都要把整段正文复制一遍再截断：一段 24k 字符的长
+   * 回答有几千个 delta，光拼接就要复制几百 MB，而复制出来的部分马上被切掉。
+   */
+  private textOverflow = false;
+  private thinkingOverflow = false;
+  /** 单调递增的「已结束轮次」计数：`turns` 会被 `MAX_TURNS` 截断，长度不能当基线。 */
+  private finishedTurns = 0;
 
   /**
    * 记下即将投递的一条用户消息，返回撤销用的 token。
@@ -150,6 +170,11 @@ export class SidecarTranscript {
     const [input] = this.pendingInputs.splice(index, 1);
     if (!input) return false;
     this.current.userInputs.push(input);
+    const excess = this.current.userInputs.length - MAX_TURN_INPUTS;
+    if (excess > 0) {
+      this.current.userInputs.splice(0, excess);
+      this.current.omittedUserInputs = (this.current.omittedUserInputs ?? 0) + excess;
+    }
     this.revision += 1;
     return true;
   }
@@ -164,6 +189,36 @@ export class SidecarTranscript {
 
   get busy(): boolean {
     return this.current?.status === 'running';
+  }
+
+  /**
+   * 投出去但还没被宿主消费的消息数。
+   *
+   * `steer` 是 `after_iteration` 注入：投出去的那一刻它既可能落进当前轮，也可能
+   * 要等这一轮结束后另起一轮。这期间 `busy` 可能为 false，但它显然还没干完活——
+   * 只看 `busy` 的等待会在这一轮结束时提前返回，拿到的是不含这条追加的结果。
+   */
+  get pendingInputCount(): number {
+    return this.pendingInputs.length;
+  }
+
+  /** 已结束的轮次数（含被 `MAX_TURNS` 丢掉的那些）。 */
+  get finishedTurnCount(): number {
+    return this.finishedTurns;
+  }
+
+  /** 含当前轮次的累计计数，不能用保留窗口长度代替。 */
+  get totalTurnCount(): number {
+    return this.finishedTurns + (this.current ? 1 : 0);
+  }
+
+  get omittedTurnCount(): number {
+    return this.finishedTurns - this.turns.length;
+  }
+
+  /** 真正停下来：没有在跑的轮次，也没有还没被消费的投递。 */
+  get settled(): boolean {
+    return !this.busy && this.pendingInputs.length === 0;
   }
 
   get activeTurn(): SidecarTurn | null {
@@ -206,26 +261,16 @@ export class SidecarTranscript {
         const turn = asRecord(params.turn);
         const id = asString(turn?.id) || `turn-${Date.now()}`;
         this.finishCurrent('interrupted', '新一轮开始时上一轮还没结束');
-        this.current = {
-          id,
-          status: 'running',
-          text: '',
-          thinking: '',
-          tools: [],
-          userInputs: this.takePendingInputs(),
-          startedAt: Date.now(),
-        };
+        this.startTurn(id);
         return true;
       }
       case 'item/agentMessage/delta': {
         if (!this.ensureTurn()) return false;
-        this.current!.text = clamp(this.current!.text + asString(params.delta), MAX_TEXT);
-        return true;
+        return this.appendBody('text', asString(params.delta));
       }
       case 'item/reasoning/textDelta': {
         if (!this.ensureTurn()) return false;
-        this.current!.thinking = clamp(this.current!.thinking + asString(params.delta), MAX_TEXT);
-        return true;
+        return this.appendBody('thinking', asString(params.delta));
       }
       case 'item/started': {
         const item = asRecord(params.item);
@@ -241,6 +286,8 @@ export class SidecarTranscript {
         if (!this.ensureTurn()) return false;
         const tool = this.findTool(asString(params.itemId));
         if (!tool) return false;
+        // 已经截断的输出不再拼接：一条刷屏的命令每秒几十个 delta，而尾巴注定要丢。
+        if ((tool.output ?? '').length >= MAX_TOOL_OUTPUT) return false;
         tool.output = clamp(`${tool.output ?? ''}${asString(params.delta)}`, MAX_TOOL_OUTPUT);
         return true;
       }
@@ -251,12 +298,12 @@ export class SidecarTranscript {
           // completed 带的是这一条消息的全文：比 delta 拼接更可靠（断线补发、
           // 多段消息都不会错位），所以以它为准。
           const text = asString(item.text);
-          if (text) this.current!.text = clamp(text, MAX_TEXT);
+          if (text) this.setBody('text', text);
           return true;
         }
         if (item.type === 'reasoning') {
           const content = Array.isArray(item.content) ? item.content.filter((part) => typeof part === 'string') : [];
-          if (content.length) this.current!.thinking = clamp(content.join('\n'), MAX_TEXT);
+          if (content.length) this.setBody('thinking', content.join('\n'));
           return true;
         }
         if (item.type === 'commandExecution') {
@@ -325,8 +372,13 @@ export class SidecarTranscript {
     if (this.current) return true;
     // 有些通知（尤其是错误）可能先于 turn/started 到达；补一条占位轮次，
     // 否则这段输出会落在一个不存在的地方、界面上什么都看不到。
+    this.startTurn(`turn-${Date.now()}`);
+    return true;
+  }
+
+  private startTurn(id: string): void {
     this.current = {
-      id: `turn-${Date.now()}`,
+      id,
       status: 'running',
       text: '',
       thinking: '',
@@ -334,7 +386,37 @@ export class SidecarTranscript {
       userInputs: this.takePendingInputs(),
       startedAt: Date.now(),
     };
+    this.textOverflow = false;
+    this.thinkingOverflow = false;
+  }
+
+  /**
+   * 追加一段 delta。返回 false 表示没有可见变化（已到上限、或 delta 为空），
+   * 等待类工具据此不再因为一条注定被丢弃的尾巴醒一次。
+   */
+  private appendBody(field: 'text' | 'thinking', delta: string): boolean {
+    const turn = this.current;
+    if (!turn || !delta) return false;
+    if (field === 'text' ? this.textOverflow : this.thinkingOverflow) return false;
+    const next = turn[field] + delta;
+    if (next.length <= MAX_TEXT) {
+      turn[field] = next;
+      return true;
+    }
+    turn[field] = clamp(next, MAX_TEXT);
+    if (field === 'text') this.textOverflow = true;
+    else this.thinkingOverflow = true;
     return true;
+  }
+
+  /** 用完整正文覆盖（`item/completed` 带的是权威全文），并重算是否已经到上限。 */
+  private setBody(field: 'text' | 'thinking', value: string): void {
+    const turn = this.current;
+    if (!turn) return;
+    turn[field] = clamp(value, MAX_TEXT);
+    const overflow = value.length > MAX_TEXT;
+    if (field === 'text') this.textOverflow = overflow;
+    else this.thinkingOverflow = overflow;
   }
 
   private findTool(id: string): SidecarToolCall | null {
@@ -345,15 +427,20 @@ export class SidecarTranscript {
   private finishCurrent(status: SidecarTurnStatus, error?: string): void {
     if (!this.current) return;
     const turn = this.current;
-    // 还在跑的工具不能留在 running：这一轮已经结束了。
+    // 还在跑的工具不能留在 running：这一轮已经结束了。但也不能一律记成 completed——
+    // 被打断的 `sleep 60` 显示「已完成」会让读的人以为它真的跑完了。
+    const unfinished = status === 'completed' ? 'completed' : status === 'failed' ? 'error' : 'interrupted';
     for (const tool of turn.tools) {
-      if (tool.status === 'running') tool.status = status === 'failed' ? 'error' : 'completed';
+      if (tool.status === 'running') tool.status = unfinished;
     }
     turn.status = status;
     if (error) turn.error = error;
     turn.finishedAt = Date.now();
     this.turns.push(turn);
     if (this.turns.length > MAX_TURNS) this.turns.splice(0, this.turns.length - MAX_TURNS);
+    this.finishedTurns += 1;
     this.current = null;
+    this.textOverflow = false;
+    this.thinkingOverflow = false;
   }
 }

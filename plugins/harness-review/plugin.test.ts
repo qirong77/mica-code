@@ -21,13 +21,15 @@ function harness() {
   const disposers: Array<() => void | Promise<void>> = [];
   const reports: unknown[] = [];
   const owner = {};
+  const readSettings = vi.fn(() => settings);
+  const describeSession = vi.fn(() => ({ id: 'session-test', title: 'Task', cwd: '/workspace/test' }));
   const ctx = {
     pluginId: 'harness-review',
     paths: { config: home, home, plugins: join(home, 'plugins') },
     hooks,
     commands,
-    session: { describe: () => ({ id: 'session-test', title: 'Task', cwd: '/workspace/test' }) },
-    settings: { get: () => settings, validate: () => [], path: null },
+    session: { describe: describeSession },
+    settings: { get: readSettings, validate: () => [], path: null },
     tools: {
       register(tool: MicaTool) {
         tools.push(tool);
@@ -60,10 +62,32 @@ function harness() {
     for (const dispose of disposers.reverse()) await dispose();
     rmSync(home, { recursive: true, force: true });
   });
-  return { home, hooks, commands, tools, settings, reports, emit, start, finish, review };
+  return {
+    home,
+    hooks,
+    commands,
+    tools,
+    settings,
+    reports,
+    emit,
+    start,
+    finish,
+    review,
+    readSettings,
+    describeSession,
+  };
 }
 
 describe('harness-review plugin', () => {
+  it('reads settings and session metadata once per run across a high-frequency event stream', async () => {
+    const h = harness();
+    await h.start();
+    for (let index = 0; index < 500; index++) await h.emit({ type: 'request:start', messageCount: index } as never);
+    await h.finish();
+    expect(h.readSettings).toHaveBeenCalledTimes(1);
+    expect(h.describeSession).toHaveBeenCalledTimes(1);
+    expect((await h.review()).runs[0].requestCount).toBe(500);
+  });
   it('automatically records evidence and exposes it through tool and command without reflection calls', async () => {
     const h = harness();
     await h.start();
@@ -102,6 +126,7 @@ describe('harness-review plugin', () => {
   it('requires an explicit reason and workspace-visible finding for assessments', async () => {
     const h = harness();
     const tool = h.tools[0]!;
+    expect(JSON.parse(toolResultToText(await tool.execute({ action: 'unknown' })))).toMatchObject({ ok: false });
     expect(
       JSON.parse(toolResultToText(await tool.execute({ action: 'assess', id: 'x', status: 'accepted' }))).error,
     ).toContain('note');

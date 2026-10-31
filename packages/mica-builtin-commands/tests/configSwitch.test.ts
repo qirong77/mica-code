@@ -68,7 +68,6 @@ describe('config switch commands', () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
     const provider = {
       id: 'openai',
-      name: 'OpenAI',
       api_base: 'https://api.openai.com/v1',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -104,7 +103,7 @@ describe('config switch commands', () => {
       expect(micaConfig.get().effort).toBe('low');
       expect(services.showNotice).toHaveBeenCalledTimes(1);
       expect(services.showNotice).toHaveBeenLastCalledWith(
-        'Model: OpenAI / gpt-5.5; Prompt cache may be invalidated. Consider /compact',
+        'Model: openai / gpt-5.5; Prompt cache may be invalidated. Consider /compact',
         undefined,
         {
           command: '/model',
@@ -134,7 +133,6 @@ describe('config switch commands', () => {
   it('reports an effort switch and its cache warning in one notice', async () => {
     const provider = {
       id: 'openai',
-      name: 'OpenAI',
       api_base: 'https://api.openai.com/v1',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -188,7 +186,6 @@ describe('config switch commands', () => {
   it('opens immediately when a dynamic provider catalog has not loaded yet', async () => {
     const provider = {
       id: 'dynamic',
-      name: 'Dynamic Provider',
       api_base: 'https://example.com/v1',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -222,7 +219,6 @@ describe('config switch commands', () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
     const openai = {
       id: 'openai',
-      name: 'OpenAI',
       api_base: 'https://api.openai.com/v1',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -230,7 +226,6 @@ describe('config switch commands', () => {
     };
     const deepseek = {
       id: 'deepseek',
-      name: 'DeepSeek',
       api_base: 'https://api.deepseek.com',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -283,7 +278,7 @@ describe('config switch commands', () => {
       });
       // 换模型会同时带出上下文窗口调整（gpt-5.4 与 deepseek-v4-pro 的真实上下文不同）。
       expect(services.showNotice).toHaveBeenLastCalledWith(
-        expect.stringContaining('Model: DeepSeek / deepseek-v4-pro;'),
+        expect.stringContaining('Model: deepseek / deepseek-v4-pro;'),
         undefined,
         {
           command: '/model',
@@ -301,7 +296,6 @@ describe('config switch commands', () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
     const deepseek = {
       id: 'deepseek',
-      name: 'DeepSeek',
       api_base: 'https://api.deepseek.com',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -309,7 +303,6 @@ describe('config switch commands', () => {
     };
     const openai = {
       id: 'openai',
-      name: 'OpenAI',
       api_base: 'https://api.openai.com/v1',
       api_key: 'test-key',
       protocol: 'openai_chat_completions' as const,
@@ -347,7 +340,7 @@ describe('config switch commands', () => {
       expect(micaConfig.get().provider).toBe('openai');
       expect(micaConfig.get().model).toBe('gpt-5.5');
       expect(services.showNotice).toHaveBeenLastCalledWith(
-        'Model: OpenAI / gpt-5.5; Prompt cache may be invalidated. Consider /compact',
+        'Model: openai / gpt-5.5; Prompt cache may be invalidated. Consider /compact',
         undefined,
         {
           command: '/model',

@@ -266,6 +266,8 @@ describe('composer completions', () => {
       { kind: 'project', label: '.mica/skills' },
       { kind: 'builtin', label: '内置' }
     ])
+    // 类型标记来自 kind：一行两枚标记，一枚说「这是什么」、一枚说「它从哪来」
+    expect(options.map((option) => option.kind)).toEqual(['skill', 'skill', 'mcp'])
     // 说明列只讲「这个 skill 干什么」，来源不挤进去
     expect(options[0].description).toBe('操作 macOS 桌面')
     expect(options[2].description).toBe('工具：control')

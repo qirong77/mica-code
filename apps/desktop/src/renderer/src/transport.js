@@ -402,7 +402,8 @@ function createWebApi(env) {
     pluginHost: {
       probe: (address) => invoke('plugin-host:probe', { address }),
       readData: (pluginId) => invoke('plugin-host:read-data', { pluginId }),
-      writeData: (pluginId, value) => invoke('plugin-host:write-data', { pluginId, value }),
+      writeData: (pluginId, value, options) =>
+        invoke('plugin-host:write-data', { pluginId, value, ...options }),
       runAction: (pluginId, action) => invoke('plugin-host:run-action', { pluginId, action }),
       // 运行时的远程访问策略（要不要口令、口令是什么、别人从哪个地址进来）
       access: () => invoke('plugin-host:access-get'),
@@ -473,8 +474,7 @@ function createWebApi(env) {
       refs: (cwd) => invoke('git:refs', { cwd }),
       resolveRef: (cwd, ref) => invoke('git:resolve-ref', { cwd, ref }),
       checkout: (cwd, ref) => invoke('git:checkout', { cwd, ref }),
-      createBranch: (cwd, name, startRef = null) =>
-        invoke('git:create-branch', { cwd, name, startRef }),
+      createBranch: (cwd, name) => invoke('git:create-branch', { cwd, name }),
       // 源代码管理面板行内悬浮出来的三个操作；discard 不可逆，调用方要先确认。
       stage: (cwd, filePath) => invoke('git:stage', { cwd, filePath }),
       unstage: (cwd, filePath) => invoke('git:unstage', { cwd, filePath }),

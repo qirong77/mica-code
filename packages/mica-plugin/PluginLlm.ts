@@ -218,6 +218,7 @@ export function describePluginLlmView(
 export type PluginLlmRequest = {
   /** 这次请求在 Stats 里叫什么，例如「自动起标题」。 */
   purpose: string;
+  owner?: unknown;
   system: string;
   user: string;
   /** 覆盖模型（同一插件里某一次想换小模型）；不填用配置里的。 */
@@ -239,17 +240,17 @@ export type PluginLlmRequest = {
  */
 export type PluginLlmApi = {
   /** 当前生效的配置（全局设置 + 本会话覆盖）。 */
-  config(): PluginLlmConfig;
-  configured(): boolean;
+  config(owner?: unknown): PluginLlmConfig;
+  configured(owner?: unknown): boolean;
   /** 人读的一句话，便于健康状态与命令输出；已降级到主配置时会标出来。 */
-  describe(): string;
+  describe(owner?: unknown): string;
   request(request: PluginLlmRequest): Promise<PluginModelResult>;
 };
 
 export type CreatePluginLlmApiOptions = {
   spec: PluginLlmSpec;
   /** 全局设置 + 会话覆盖合并后的值；每次调用重新读，改完立刻生效。 */
-  readValues: () => Record<string, string | undefined>;
+  readValues: (owner?: unknown) => Record<string, string | undefined>;
   /** 宿主的请求实现（已按插件 id 绑定，记账挂在插件名下）。 */
   models?: PluginModelsApi['request'];
   /**
@@ -260,7 +261,7 @@ export type CreatePluginLlmApiOptions = {
 };
 
 export function createPluginLlmApi(options: CreatePluginLlmApiOptions): PluginLlmApi {
-  const readConfig = () => resolvePluginLlmConfig(options.readValues());
+  const readConfig = (owner?: unknown) => resolvePluginLlmConfig(options.readValues(owner));
   // 配置的接口/模型不可用时降级为主配置。记住「这一份配置已经失败过」：之后的请求直接
   // 走降级，不再先白白失败一次；用户改过任何一项（指纹变化）就重新尝试自己的配置。
   let degradedFingerprint: string | null = null;
@@ -273,13 +274,14 @@ export function createPluginLlmApi(options: CreatePluginLlmApiOptions): PluginLl
     const useMainProvider = degraded || config.useMainProvider;
     return models({
       purpose: request.purpose,
+      ...(request.owner === undefined ? {} : { owner: request.owner }),
       system: request.system,
       user: request.user,
       timeoutMs: request.timeoutMs,
       signal: request.signal,
       // 降级时把模型名也清空：让宿主用主配置当前的模型，而不是继续索要那个
       // 在别处并不存在的名字。
-      model: degraded ? '' : request.model?.trim() || config.model,
+      model: degraded ? '' : request.model?.trim() || (useMainProvider ? '' : config.model),
       baseUrl: useMainProvider ? '' : config.baseUrl,
       apiKey: useMainProvider ? '' : config.apiKey,
       protocol: useMainProvider ? undefined : config.protocol,
@@ -289,15 +291,15 @@ export function createPluginLlmApi(options: CreatePluginLlmApiOptions): PluginLl
 
   return {
     config: readConfig,
-    configured: () => isPluginLlmConfigured(readConfig()),
-    describe: () => {
-      const config = readConfig();
+    configured: (owner) => isPluginLlmConfigured(readConfig(owner)),
+    describe: (owner) => {
+      const config = readConfig(owner);
       const text = describePluginLlm(config);
       // 跟随主配置时也可能降级（点名的模型在主配置下不存在），所以这里不写「为主配置」。
       return degradedFingerprint === pluginLlmFingerprint(config) ? `${text}（已降级）` : text;
     },
     async request(request) {
-      const config = readConfig();
+      const config = readConfig(request.owner);
       if (!options.models) throw new Error('宿主没有提供模型请求能力（requires 里缺 models）');
       if (!isPluginLlmConfigured(config)) throw new Error('模型接口未配置：请在插件设置里填写接口地址与模型');
       const fingerprint = pluginLlmFingerprint(config);
@@ -346,7 +348,7 @@ function canFallback(request: PluginLlmRequest, config: PluginLlmConfig, error: 
   const name = error && typeof error === 'object' ? (error as { name?: unknown }).name : undefined;
   if (name === 'AbortError') return false;
   if (!config.useMainProvider) return true;
-  return Boolean(request.model?.trim() || config.model);
+  return Boolean(request.model?.trim());
 }
 
 function errorMessage(error: unknown): string {

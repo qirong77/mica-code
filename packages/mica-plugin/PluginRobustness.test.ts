@@ -6,6 +6,8 @@ import { clearPluginHealth, createPluginHealthStore, readPluginHealth, writePlug
 import { readPublishedPluginSkills } from './PluginSkills.js';
 import { HookRegistry } from './HookRegistry.js';
 import { PluginManager } from './PluginManager.js';
+import { PluginPanelRegistry } from './PluginPanel.js';
+import { PluginSessionMenuRegistry } from './PluginSessionMenu.js';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { ServiceContainer } from './ServiceContainer.js';
@@ -96,6 +98,110 @@ function baseContext(configDir: string, hooks = new HookRegistry()) {
 }
 
 describe('PluginManager robustness', () => {
+  it('disposes plugins and their resources in reverse registration order', async () => {
+    const manager = new PluginManager();
+    const disposed: string[] = [];
+    for (const id of ['first', 'second']) {
+      manager.register(
+        plugin(id, (ctx) => {
+          ctx.onDispose(() => {
+            disposed.push(`${id}:early`);
+          });
+          ctx.onDispose(() => {
+            disposed.push(`${id}:late`);
+          });
+          return {
+            dispose: () => {
+              disposed.push(`${id}:returned`);
+            },
+          };
+        }),
+      );
+    }
+
+    await manager.setupAll(baseContext(configDir));
+    await manager.disposeAll();
+
+    expect(disposed).toEqual([
+      'second:returned',
+      'second:late',
+      'second:early',
+      'first:returned',
+      'first:late',
+      'first:early',
+    ]);
+    await manager.disposeAll();
+    expect(disposed).toHaveLength(6);
+  });
+
+  it('releases all remaining resources when one disposer fails', async () => {
+    const manager = new PluginManager();
+    const disposed: string[] = [];
+    manager.register(
+      plugin('first', (ctx) => {
+        ctx.onDispose(() => {
+          disposed.push('first');
+        });
+      }),
+    );
+    manager.register(
+      plugin('second', (ctx) => {
+        ctx.onDispose(() => {
+          disposed.push('second');
+        });
+        ctx.onDispose(() => {
+          throw new Error('cleanup failed');
+        });
+      }),
+    );
+
+    await manager.setupAll(baseContext(configDir));
+    await expect(manager.disposeAll()).rejects.toThrow(AggregateError);
+
+    expect(disposed).toEqual(['second', 'first']);
+    await expect(manager.disposeAll()).resolves.toBeUndefined();
+  });
+
+  it.each(['loaded', 'failed', 'late'])('removes desktop and action registrations after cleanup (%s)', async (mode) => {
+    const manager = new PluginManager();
+    const panels = new PluginPanelRegistry();
+    const menus = new PluginSessionMenuRegistry();
+    let registerHandlers = () => {};
+    manager.register({
+      id: 'desktop-demo',
+      name: 'desktop-demo',
+      manifest: {
+        ...manifest([]),
+        desktopPanel: { label: 'demo', roles: [], display: 'drawer', shortcuts: [] },
+        desktopSessionMenu: [{ action: 'copy', label: 'copy' }],
+        actions: [{ key: 'refresh', label: 'refresh', description: '', tone: 'neutral' }],
+      },
+      setup: (ctx) => {
+        registerHandlers = () => {
+          ctx.desktop!.panel!({ view: () => ({ title: 'demo' }), action: () => {} });
+          ctx.desktop!.sessionMenu!({ run: () => ({ message: 'demo' }) });
+          ctx.actions!.register('refresh', () => ({ message: 'demo' }));
+        };
+        if (mode !== 'late') registerHandlers();
+        if (mode === 'failed') throw new Error('setup failed');
+      },
+    });
+
+    const report = await manager.setupAll({
+      ...baseContext(configDir),
+      desktop: { host: 'desktop' },
+      desktopPanels: panels,
+      desktopSessionMenus: menus,
+    });
+    expect(report.failed).toHaveLength(mode === 'failed' ? 1 : 0);
+    if (mode === 'late') registerHandlers();
+    if (mode !== 'failed') await manager.disposeAll();
+
+    expect(panels.get('desktop-demo')).toBeNull();
+    expect(menus.get('desktop-demo')).toBeNull();
+    expect(manager.hasPluginAction('desktop-demo', 'refresh')).toBe(false);
+  });
+
   it('skips a plugin whose declared requirement the host cannot provide instead of crashing', async () => {
     const manager = new PluginManager();
     const setup = vi.fn();

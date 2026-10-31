@@ -2,9 +2,10 @@ import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statS
 import { dirname, join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
+import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import { createDwsRunner, resolveDws } from './dws.js';
 import { pruneEdits } from './edits.js';
-import { refreshSchedules, type RefreshOutcome } from './refresh.js';
+import { mergeRefreshedGroups, refreshSchedules, type RefreshOutcome } from './refresh.js';
 import { emptySnapshot, normalizeSnapshot, SCHEDULE_VERSION, type ScheduleSnapshot } from './snapshot.js';
 
 /**
@@ -133,21 +134,32 @@ export default function setup(ctx: PluginContext): void {
         budgetMs: reason === 'manual' ? 100_000 : 240_000,
       });
 
+      if (outcome.planned === 0 && outcome.errors.length > 0) {
+        throw new Error(outcome.errors.map((error) => `${error.name}：${error.message}`).join('；'));
+      }
       const scanned = outcome.scanned;
-      const snapshot: ScheduleSnapshot = {
-        version: SCHEDULE_VERSION,
-        updatedAtMs: Date.now(),
-        updatedAt: labelTime(new Date()),
-        coverage: `扫了 ${scanned} 个群 · ${outcome.groups.length} 个有排期`,
-        me: outcome.me,
-        scope: { days, scanned, total: outcome.planned, partial: outcome.partial },
-        groups: outcome.groups,
-        errors: outcome.errors.slice(0, MAX_ERRORS),
-        // 用户在本机拖过的条要在这一轮之后继续有效：写盘前现读一次（整理跑的这几十秒里
-        // 页面可能正好存了一条修订），只保留「公告里还对得上」的那些。
-        edits: pruneEdits(outcome.groups, readSnapshot(dataFile).edits),
-      };
-      writeSnapshot(dataFile, snapshot);
+      const release = acquireProcessLock(`${dataFile}.lock`);
+      if (!release) throw new Error('排期正在其他窗口保存，请稍后重新整理');
+      let snapshot: ScheduleSnapshot;
+      try {
+        const previous = readSnapshot(dataFile);
+        const groups = mergeRefreshedGroups(previous.groups, outcome);
+        snapshot = {
+          version: SCHEDULE_VERSION,
+          updatedAtMs: Date.now(),
+          updatedAt: labelTime(new Date()),
+          coverage: `扫了 ${scanned} 个群 · ${outcome.groups.length} 个有排期`,
+          me: outcome.me,
+          scope: { days, scanned, total: outcome.planned, partial: outcome.partial },
+          groups,
+          errors: outcome.errors.slice(0, MAX_ERRORS),
+          // 与页面的版本写入使用同一把锁，读取修订到原子落盘期间不能丢掉另一窗口的修改。
+          edits: pruneEdits(groups, previous.edits, previous.groups),
+        };
+        writeSnapshot(dataFile, snapshot);
+      } finally {
+        release();
+      }
       ctx.logger.info('schedule:refreshed', {
         reason,
         scanned,
@@ -161,6 +173,12 @@ export default function setup(ctx: PluginContext): void {
           level: 'warn',
           message: `${outcome.errors.length} 个群没扫成：${outcome.errors[0]!.name}`,
           hint: '多半是群名写错或那个群没有权限；改完设置再整理一次。',
+        });
+      } else if (outcome.partial) {
+        ctx.health.report({
+          level: 'warn',
+          message: '本次没扫全，未更新的群保留上次结果',
+          hint: '再次刷新可继续检查群公告。',
         });
       } else {
         ctx.health.report({ level: 'ok', message: snapshot.coverage });
@@ -188,6 +206,7 @@ export default function setup(ctx: PluginContext): void {
   // 侧栏卡片的「刷新」与配置页的按钮走同一个动作：它不需要会话，所以由一次性进程也能跑。
   ctx.actions?.register('refresh', async () => {
     const result = await runRefresh('manual');
+    if (!result.ok) throw new Error(result.message);
     return { message: result.message };
   });
 

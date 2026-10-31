@@ -423,7 +423,7 @@ export class HeadlessTurnExecutor {
       this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
       let runContent = content;
       if (this.options.hooks) {
-        await this.options.hooks.emit('turn:before', { runtime: this.options.host, input, content });
+        await this.options.hooks.emit('turn:before', { runtime: this.options.host, owner: agent, input, content });
         const promptBuildEvent = await this.options.hooks.pipeline('prompt:build', {
           runtime: this.options.host,
           input,

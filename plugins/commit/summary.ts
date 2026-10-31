@@ -1,6 +1,9 @@
-import { readFileSync, statSync } from 'node:fs';
+import { constants } from 'node:fs';
+import { lstat, open, readlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { safeGitAsync } from './git.js';
+import { gitPreview, parsePorcelainStatus } from './git.js';
+
+export { parsePorcelainStatus } from './git.js';
 
 /**
  * 把工作区改动压成一段可以塞进一次请求的描述。
@@ -30,12 +33,13 @@ export async function buildChangeSummary(cwd: string, status: string): Promise<s
   const changedFiles = parsePorcelainStatus(status);
 
   const [stat, nameStatus, diffSamples] = await Promise.all([
-    safeGitAsync(['diff', '--stat', '--no-color'], cwd).then(
-      (value) => value || safeGitAsync(['diff', '--cached', '--stat', '--no-color'], cwd),
-    ),
     Promise.all([
-      safeGitAsync(['diff', '--name-status', '--no-color'], cwd),
-      safeGitAsync(['diff', '--cached', '--name-status', '--no-color'], cwd),
+      gitPreview(['diff', '--stat', '--no-color'], cwd),
+      gitPreview(['diff', '--cached', '--stat', '--no-color'], cwd),
+    ]).then(([a, b]) => [a, b].filter(Boolean).join('\n')),
+    Promise.all([
+      gitPreview(['diff', '--name-status', '--no-color'], cwd),
+      gitPreview(['diff', '--cached', '--name-status', '--no-color'], cwd),
     ]).then(([a, b]) => [a, b].filter(Boolean).join('\n').trim()),
     buildDiffSamples(cwd, changedFiles),
   ]);
@@ -62,18 +66,6 @@ export async function buildChangeSummary(cwd: string, status: string): Promise<s
   ].join('\n');
 
   return truncate(summary, MAX_SUMMARY_CHARS);
-}
-
-/** `git status --porcelain=v1` 的每一行：前两列是状态码，后面是路径（改名取新路径）。 */
-export function parsePorcelainStatus(status: string): ChangedFile[] {
-  return status
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => {
-      const rawPath = line.slice(3).trim();
-      const path = rawPath.includes(' -> ') ? rawPath.split(' -> ').at(-1) || rawPath : rawPath;
-      return { status: line.slice(0, 2), path };
-    });
 }
 
 async function buildDiffSamples(cwd: string, files: ChangedFile[]): Promise<string> {
@@ -104,16 +96,21 @@ async function buildDiffSamples(cwd: string, files: ChangedFile[]): Promise<stri
 }
 
 async function getCompactDiff(cwd: string, file: ChangedFile): Promise<string> {
+  // Untracked paths have no index/worktree diff. Reading their bounded prefix
+  // avoids two Git process launches per file in repositories with many new files.
+  if (file.status === '??') {
+    if (isLowValueDiffFile(file.path)) return '[low-value large/generated file: ??]';
+    const sample = await readUntrackedFileSample(cwd, file.path);
+    return sample.trim() ? `[untracked file sample]\n${sample.trim()}` : '';
+  }
   if (isLowValueDiffFile(file.path)) return lowValueDiffSummary(cwd, file);
-  const [stagedDiff, unstagedDiff, untrackedSample] = await Promise.all([
-    safeGitAsync(['diff', '--cached', '--unified=0', '--no-color', '--', file.path], cwd),
-    safeGitAsync(['diff', '--unified=0', '--no-color', '--', file.path], cwd),
-    file.status === '??' ? readUntrackedFileSample(cwd, file.path) : Promise.resolve(''),
+  const [stagedDiff, unstagedDiff] = await Promise.all([
+    gitPreview(['--literal-pathspecs', 'diff', '--cached', '--unified=0', '--no-color', '--', file.path], cwd),
+    gitPreview(['--literal-pathspecs', 'diff', '--unified=0', '--no-color', '--', file.path], cwd),
   ]);
   return [
     stagedDiff.trim() ? `[staged]\n${compactDiff(stagedDiff)}` : '',
     unstagedDiff.trim() ? `[unstaged]\n${compactDiff(unstagedDiff)}` : '',
-    untrackedSample.trim() ? `[untracked file sample]\n${untrackedSample.trim()}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -129,8 +126,8 @@ function isLowValueDiffFile(path: string): boolean {
 
 async function lowValueDiffSummary(cwd: string, file: ChangedFile): Promise<string> {
   const [statA, statB] = await Promise.all([
-    safeGitAsync(['diff', '--stat', '--no-color', '--', file.path], cwd),
-    safeGitAsync(['diff', '--cached', '--stat', '--no-color', '--', file.path], cwd),
+    gitPreview(['--literal-pathspecs', 'diff', '--stat', '--no-color', '--', file.path], cwd),
+    gitPreview(['--literal-pathspecs', 'diff', '--cached', '--stat', '--no-color', '--', file.path], cwd),
   ]);
   const stat = statA || statB;
   return [`[low-value large/generated file: ${file.status.trim() || 'changed'}]`, stat.trim()]
@@ -209,20 +206,24 @@ function truncateByHunks(text: string, maxChars: number): string {
   return omitted > 0 ? `${truncate(result, maxChars)}\n[omitted/truncated ${omitted} hunks]` : result;
 }
 
-function readUntrackedFileSample(cwd: string, path: string): Promise<string> {
+async function readUntrackedFileSample(cwd: string, path: string): Promise<string> {
   try {
     const absolute = resolve(cwd, path);
-    const stat = statSync(absolute);
-    if (!stat.isFile() || stat.size > 512 * 1024) return Promise.resolve('');
-    const content = readFileSync(absolute, 'utf-8').slice(0, MAX_UNTRACKED_FILE_CHARS);
-    if (content.includes('\u0000')) return Promise.resolve('');
-    return Promise.resolve(
-      stat.size > MAX_UNTRACKED_FILE_CHARS
-        ? `${content}\n[untracked file truncated ${stat.size - MAX_UNTRACKED_FILE_CHARS} bytes]`
-        : content,
-    );
+    const info = await lstat(absolute);
+    if (info.isSymbolicLink()) return `[symbolic link] ${await readlink(absolute)}`;
+    if (!info.isFile()) return '';
+    const file = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const buffer = Buffer.alloc(MAX_UNTRACKED_FILE_CHARS);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+      const content = buffer.subarray(0, bytesRead).toString('utf8');
+      if (content.includes('\u0000')) return '';
+      return info.size > bytesRead ? `${content}\n[untracked file truncated ${info.size - bytesRead} bytes]` : content;
+    } finally {
+      await file.close();
+    }
   } catch {
-    return Promise.resolve('');
+    return '';
   }
 }
 

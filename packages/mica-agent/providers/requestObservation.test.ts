@@ -95,6 +95,39 @@ for (const protocol of protocols) {
   }
 
   describe(`${protocol} request observation`, () => {
+    it('does not send a request when compaction is cancelled while awaiting its result', async () => {
+      const controller = new AbortController();
+      const start = vi.fn();
+      await expect(client().query('hello', {
+        signal: controller.signal,
+        onRequestStart: start,
+        rewriteIterationMessages: async (messages) => {
+          controller.abort();
+          return messages.slice();
+        },
+      })).rejects.toThrow();
+      expect(create).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    it('checks queued input before the next request and never rewrites after the final answer', async () => {
+      create.mockImplementationOnce(toolStream).mockImplementationOnce(textStream);
+      const seen: string[] = [];
+      const queued = vi.fn(() => 'new requirement after the tool');
+      await client().query('hello', {
+        onIterationComplete: queued,
+        rewriteIterationMessages: (messages) => {
+          seen.push(JSON.stringify(messages));
+          return null;
+        },
+      });
+      expect(seen).toHaveLength(2);
+      expect(seen[0]).not.toContain('new requirement');
+      expect(seen[1]).toContain('new requirement after the tool');
+      expect(seen[1]).toContain('probe result');
+      expect(queued).toHaveBeenCalledTimes(1);
+    });
+
     it('starts before the first request and before output, and reports the filtered wire tools', async () => {
       const order: string[] = [];
       let info: RequestInfo | undefined;
@@ -121,7 +154,7 @@ for (const protocol of protocols) {
           },
         }),
       ).resolves.toBe('done');
-      expect(order).toEqual(['request:start', 'wire', 'text', 'rewrite']);
+      expect(order).toEqual(['rewrite', 'request:start', 'wire', 'text']);
       expect(info).toEqual({ messageCount: initialMessageCount, tools: expectedTools() });
       expect(definitions).toHaveBeenCalledTimes(1);
     });
@@ -147,7 +180,7 @@ for (const protocol of protocols) {
         ).rejects.toBe(error);
         expect(order).toEqual(['request:start', 'wire']);
         expect(start).toHaveBeenCalledExactlyOnceWith({ messageCount: initialMessageCount, tools: expectedTools() });
-        expect(rewrite).not.toHaveBeenCalled();
+        expect(rewrite).toHaveBeenCalledTimes(1);
       },
     );
 
@@ -226,7 +259,7 @@ for (const protocol of protocols) {
           },
         }),
       ).resolves.toBe('done');
-      expect(order).toEqual(['request:start', 'wire', 'tool', 'result', 'rewrite', 'request:start', 'wire', 'rewrite']);
+      expect(order).toEqual(['rewrite', 'request:start', 'wire', 'tool', 'result', 'rewrite', 'request:start', 'wire']);
       expect(starts).toHaveLength(2);
       for (const [index, info] of starts.entries()) {
         const request = requests[index]!;

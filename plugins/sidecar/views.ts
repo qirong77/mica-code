@@ -81,7 +81,7 @@ export function renderSidecar(
   const elapsed = Math.round((Date.now() - entry.createdAt) / 1000);
   const lines = [
     `会话 ${entry.id}`,
-    `状态：${busy ? '运行中' : '空闲'} · ${turns.length} 轮 · 已存在 ${elapsed}s`,
+    `状态：${busy ? '运行中' : '空闲'} · ${transcript.totalTurnCount} 轮 · 已存在 ${elapsed}s`,
     `标题：${entry.title}`,
     `目录：${entry.cwd}`,
   ];
@@ -137,15 +137,17 @@ export function renderTurnIndex(entry: SidecarEntry, options: { limit?: number }
   const limit = clampInt(options.limit ?? DEFAULT_TURN_INDEX_LIMIT, 1, 20);
   const shown = turns.slice(-limit);
   const offset = turns.length - shown.length;
+  const total = transcript.totalTurnCount;
   const lines = [
-    `会话 ${entry.id} · 共 ${turns.length} 轮 · ${transcript.busy ? '正在跑' : '空闲'}` +
+    `会话 ${entry.id} · 共 ${total} 轮 · ${transcript.busy ? '正在跑' : '空闲'}` +
+      (transcript.omittedTurnCount > 0 ? `（保留最近 ${turns.length} 轮）` : '') +
       (offset > 0 ? `（只列最近 ${shown.length} 轮）` : ''),
   ];
   shown.forEach((turn, index) => {
     const question = turn.userInputs.at(-1)?.text;
     lines.push(
-      `  ${offset + index + 1} · ${clock(turn.startedAt)} · ${turn.status} · ${duration(turn)}` +
-        ` · 问 ${turn.userInputs.length} 条 · 答 ${turn.text.length} 字`,
+      `  ${total - shown.length + index + 1} · ${clock(turn.startedAt)} · ${turn.status} · ${duration(turn)}` +
+        ` · 问 ${turn.userInputs.length + (turn.omittedUserInputs ?? 0)} 条 · 答 ${turn.text.length} 字`,
     );
     if (question) lines.push(`      问：${clip(oneLine(question), 90)}`);
     if (turn.text) lines.push(`      答：${clip(oneLine(turn.text), 110)}`);
@@ -170,53 +172,70 @@ export type TranscriptOptions = {
  * 而「一轮有多长」完全不可预测（一句话和一份报告都是「一轮」）。
  */
 export function renderTranscript(entry: SidecarEntry, options: TranscriptOptions = {}): string {
-  const turns = entry.process.transcript.allTurns();
+  const transcript = entry.process.transcript;
+  const turns = transcript.allTurns();
+  const total = transcript.totalTurnCount;
   if (!turns.length) return `子会话 ${entry.id} 还没有任何一轮对话。`;
-  const lastTurns = clampInt(options.lastTurns ?? 1, 1, turns.length);
+  const lastTurns = clampInt(options.lastTurns ?? 1, 1, Math.min(20, turns.length));
   const includeUser = options.includeUser !== false;
   const budget = clampInt(options.maxChars ?? DEFAULT_TRANSCRIPT_CHARS, MIN_BLOCK_CHARS, MAX_TRANSCRIPT_CHARS);
   const selected = turns.slice(turns.length - lastTurns);
+  const headerFor = (count: number): string => {
+    const header = [`会话 ${entry.id} · 共 ${total} 轮 · 显示第 ${total - count + 1}–${total} 轮`];
+    if (transcript.omittedTurnCount > 0) header.push(`（保留最近 ${turns.length} 轮；完整历史在子会话中）`);
+    const omitted = selected.length - count;
+    if (omitted > 0) {
+      header.push(
+        `（${omitted} 轮更早的对话没放进来：超出 ${budget} 字符预算。用 sidecar_turns 定位后再调大 max_chars）`,
+      );
+    }
+    return header.join('\n');
+  };
 
   // 从最新往回装，装不下就停：预算不够时丢掉的是最早的轮次，不是最新的结论。
   const blocksNewestFirst: string[] = [];
-  let remaining = budget;
+  let used = 0;
   for (let index = selected.length - 1; index >= 0; index--) {
-    if (remaining < MIN_BLOCK_CHARS) break;
+    const count = blocksNewestFirst.length + 1;
+    const remaining = budget - used - headerFor(count).length - count * 2;
+    if (remaining <= 0 || (blocksNewestFirst.length > 0 && remaining < MIN_BLOCK_CHARS)) break;
     const block = renderTurnBlock(selected[index]!, {
-      number: turns.length - selected.length + index + 1,
+      number: total - selected.length + index + 1,
       includeUser,
       capacity: Math.min(remaining, PER_MESSAGE_CHARS),
     });
     if (!block) break;
     blocksNewestFirst.push(block);
-    remaining -= block.length;
+    used += block.length;
   }
   const blocks = blocksNewestFirst.reverse();
-  const omitted = selected.length - blocks.length;
-  const shownFrom = turns.length - blocks.length + 1;
-  const header = [`会话 ${entry.id} · 共 ${turns.length} 轮 · 显示第 ${shownFrom}–${turns.length} 轮`];
-  if (omitted > 0) {
-    header.push(
-      `（${omitted} 轮更早的对话没放进来：超出 ${budget} 字符预算。用 sidecar_turns 定位后再调大 max_chars）`,
-    );
-  }
-  return [header.join('\n'), ...blocks].join('\n\n');
+  return [headerFor(blocks.length), ...blocks].join('\n\n');
 }
 
 function renderTurnBlock(
   turn: SidecarTurn,
   options: { number: number; includeUser: boolean; capacity: number },
 ): string | null {
-  if (options.capacity < MIN_BLOCK_CHARS) return null;
-  const parts: string[] = [`—— 第 ${options.number} 轮 · ${turn.status} ——`];
-  if (options.includeUser && turn.userInputs.length) {
-    const asked = turn.userInputs.map((input) => input.text).join('\n');
-    parts.push(`[用户] ${clip(asked, Math.min(options.capacity, 1_500))}`);
-  }
+  if (options.capacity <= 0) return null;
+  const heading = `—— 第 ${options.number} 轮 · ${turn.status}` +
+    (options.includeUser && turn.omittedUserInputs ? ` · 省略 ${turn.omittedUserInputs} 条早期用户消息` : '') + ' ——';
+  const asked = options.includeUser ? turn.userInputs.map((input) => input.text).join('\n') : '';
   const body = turn.text || (turn.status === 'running' ? '（还没有正文输出）' : '（这一轮没有正文）');
-  parts.push(`[助手] ${clip(body, options.capacity)}`);
-  if (turn.error) parts.push(`[错误] ${clip(turn.error, 600)}`);
+  const fixed = [heading, ...(asked ? ['[用户] '] : []), '[助手] ', ...(turn.error ? ['[错误] '] : [])].join('\n');
+  const remaining = Math.max(0, options.capacity - fixed.length);
+  const question = asked ? fitText(asked, Math.min(1_500, Math.floor(remaining / 3))) : '';
+  const error = turn.error ? fitText(turn.error, Math.min(600, Math.floor(remaining / 4))) : '';
+  const parts = [heading];
+  if (asked) parts.push(`[用户] ${question}`);
+  parts.push(`[助手] ${fitText(body, remaining - question.length - error.length)}`);
+  if (turn.error) parts.push(`[错误] ${error}`);
   return parts.join('\n');
+}
+
+/** 与 clip 不同，这里的省略号也计入硬字符预算。 */
+function fitText(text: string, capacity: number): string {
+  if (capacity <= 0) return '';
+  return text.length <= capacity ? text : `${text.slice(0, capacity - 1)}…`;
 }
 
 /**
@@ -229,7 +248,8 @@ export function grepTranscript(entry: SidecarEntry, options: { pattern: RegExp; 
   // 带 g / y 的正则在 test() 上是有状态的（lastIndex），逐行匹配会漏行。
   const pattern = new RegExp(options.pattern.source, options.pattern.flags.replace(/[gy]/g, ''));
   const maxMatches = clampInt(options.maxMatches ?? 8, 1, 30);
-  const turns = entry.process.transcript.allTurns();
+  const transcript = entry.process.transcript;
+  const turns = transcript.allTurns();
   const hits: string[] = [];
   let total = 0;
   turns.forEach((turn, index) => {
@@ -243,7 +263,7 @@ export function grepTranscript(entry: SidecarEntry, options: { pattern: RegExp; 
         if (!pattern.test(line)) continue;
         total += 1;
         if (hits.length < maxMatches) {
-          hits.push(`  [第${index + 1}轮 · ${source.role}] ${excerpt(line, pattern)}`);
+          hits.push(`  [第${transcript.omittedTurnCount + index + 1}轮 · ${source.role}] ${excerpt(line, pattern)}`);
         }
       }
     }
@@ -263,7 +283,7 @@ function excerpt(line: string, pattern: RegExp): string {
   if (!match || match.index === undefined) return clip(text, 160);
   const start = Math.max(0, match.index - 50);
   const end = Math.min(text.length, match.index + match[0].length + 110);
-  return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+  return clip(`${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`, 160);
 }
 
 function indent(text: string, prefix: string): string {

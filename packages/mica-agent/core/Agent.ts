@@ -32,9 +32,9 @@ export type AgentQueryOptions = {
   onRequestStart?: (info: { messageCount: number; tools?: unknown }) => void;
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
   /**
-   * Rewrites the in-flight session messages at an iteration boundary — the point
-   * between a completed model request (its assistant message and tool results
-   * are already appended) and the request that follows.
+   * Rewrites in-flight session messages immediately before each model request,
+   * including the first request and any input queued after a tool iteration.
+   * It does not run after a final answer or before a rejected maxTurns/abort guard.
    *
    * The loop keeps its own message array, so rewriting the client's snapshot
    * mid-query would NOT affect the rest of the turn; this hook is the only place

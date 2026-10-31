@@ -6,6 +6,8 @@ import {
   type ModelTextClient,
 } from '@packages/mica-agent/index.js';
 import type { PluginModelRequest, PluginModelsHandler, PluginModelUsage } from '@packages/mica-plugin/index.js';
+import { createPluginLogger } from '@packages/mica-plugin/PluginLog.js';
+import type { SessionController } from '../session/SessionController.js';
 
 /**
  * `ctx.models` 的宿主实现：替插件发一次「system + user → 文本」请求，并把用量记进
@@ -47,12 +49,14 @@ export type MainProviderConfig = {
 export type CreatePluginModelsOptions = {
   /** 每次请求结束调用一次（成功/失败都调）：宿主据此把开销记进会话。 */
   record?: PluginModelRecorder;
+  /** 在发起请求时绑定记账目标，防止后台请求结束前切换会话导致串账。 */
+  captureRecorder?: (owner?: unknown) => PluginModelRecorder | undefined;
   /**
    * 「跟随主配置」的解析入口。缺省时这种请求直接报错，而不是悄悄发到一个猜出来的地址。
    * 传函数而不是快照：会话可能在运行中被切到别的 provider。参数是插件点名的模型
    * （`cheap/xxx` 这类前缀决定该由哪个 provider 服务），没有就用会话当前的。
    */
-  resolveMainProvider?: (model?: string) => MainProviderConfig;
+  resolveMainProvider?: (model?: string, owner?: unknown) => MainProviderConfig;
   /** 测试注入点。 */
   createClient?: (options: ModelClientOptions) => ModelTextClient;
 };
@@ -62,6 +66,7 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
     const resolved = applyMainProvider(request, options.resolveMainProvider);
     const model = resolved.model.trim();
     const startedAt = new Date().toISOString();
+    const record = options.captureRecorder?.(request.owner) ?? options.record;
     try {
       const result = await runModelTextRequest({
         baseUrl: resolved.baseUrl,
@@ -74,7 +79,7 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
         signal: request.signal,
         createClient: options.createClient,
       });
-      options.record?.({
+      safelyRecord(record, {
         pluginId,
         purpose: request.purpose,
         model,
@@ -89,7 +94,7 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
       // 没有就不写空记录。
       const requests = usageHistoryOf(error);
       if (requests.length > 0) {
-        options.record?.({
+        safelyRecord(record, {
           pluginId,
           purpose: request.purpose,
           model,
@@ -112,13 +117,13 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
  */
 function applyMainProvider(
   request: PluginModelRequest,
-  resolve: ((model?: string) => MainProviderConfig) | undefined,
+  resolve: CreatePluginModelsOptions['resolveMainProvider'],
 ): { baseUrl: string; apiKey: string; protocol: PluginModelRequest['protocol']; model: string } {
   if (!request.useMainProvider) {
     return { baseUrl: request.baseUrl, apiKey: request.apiKey ?? '', protocol: request.protocol, model: request.model };
   }
   const requested = request.model.trim();
-  const main = resolve?.(requested || undefined);
+  const main = resolve?.(requested || undefined, request.owner);
   if (!main) throw new Error('插件请求要求跟随主配置，但宿主没有提供主配置');
   return {
     baseUrl: main.baseUrl,
@@ -129,6 +134,21 @@ function applyMainProvider(
     // 插件点名了模型就用它的，否则用主配置当前的模型。
     model: requested || main.model,
   };
+}
+
+function safelyRecord(record: PluginModelRecorder | undefined, entry: PluginModelUsageEntry): void {
+  try {
+    record?.(entry);
+  } catch (error) {
+    // Recording is local. A recording failure must not resend an already paid
+    // request through the provider fallback or replace its original error.
+    try {
+      createPluginLogger(entry.pluginId).error('plugin:model-usage-save-failed', {
+        purpose: entry.purpose,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } catch { /* A failing disk cannot alter the completed model result. */ }
+  }
 }
 
 function usageHistoryOf(error: unknown): AgentUsageRecord[] {
@@ -152,6 +172,18 @@ export type PluginUsageOwner = {
   readonly isRunning?: boolean;
 };
 
+/** 每次请求开始时捕获会话 id；同一个 agent/controller 可以在等待期间 resume 别的会话。 */
+export function capturePluginModelUsageRecorder(
+  controller: Pick<SessionController, 'getCurrentSessionId' | 'recordSubagentUsageForSession'>,
+): PluginModelRecorder {
+  const sessionId = controller.getCurrentSessionId();
+  return (entry) => {
+    if (entry.requests.length > 0) {
+      controller.recordSubagentUsageForSession(sessionId, pluginUsageRecord(entry));
+    }
+  };
+}
+
 /**
  * 把一次插件模型请求写进会话的 `subagentUsageHistory`。
  *
@@ -159,27 +191,32 @@ export type PluginUsageOwner = {
  * 之外（`turn:before` 的自动起标题、命令里手动触发）不会有别的保存时机，只留在内存里
  * 就等于没记，所以空闲时立刻落盘。
  */
-export function recordPluginModelUsage(entry: PluginModelUsageEntry, owner: {
-  agent?: PluginUsageOwner | null;
-  save?: () => void;
-}): void {
+export function recordPluginModelUsage(
+  entry: PluginModelUsageEntry,
+  owner: {
+    agent?: PluginUsageOwner | null;
+    save?: () => void;
+  },
+): void {
   const agent = owner.agent;
   if (!agent?.recordSubagentUsage || entry.requests.length === 0) return;
-  agent.recordSubagentUsage(
-    buildSubagentUsageRecord({
-      taskId: `plugin:${entry.pluginId}:${entry.purpose}`,
-      origin: 'plugin',
-      pluginId: entry.pluginId,
-      subagentType: `plugin:${entry.pluginId}`,
-      description: entry.purpose,
-      model: entry.model,
-      status: entry.status,
-      startedAt: entry.startedAt,
-      finishedAt: entry.finishedAt,
-      requests: entry.requests,
-    }),
-  );
+  agent.recordSubagentUsage(pluginUsageRecord(entry));
   if (!agent.isRunning) owner.save?.();
+}
+
+function pluginUsageRecord(entry: PluginModelUsageEntry): ReturnType<typeof buildSubagentUsageRecord> {
+  return buildSubagentUsageRecord({
+    taskId: `plugin:${entry.pluginId}:${entry.purpose}`,
+    origin: 'plugin',
+    pluginId: entry.pluginId,
+    subagentType: `plugin:${entry.pluginId}`,
+    description: entry.purpose,
+    model: entry.model,
+    status: entry.status,
+    startedAt: entry.startedAt,
+    finishedAt: entry.finishedAt,
+    requests: entry.requests,
+  });
 }
 
 /** 测试注入用：替身只需实现 query 与 usageHistory。 */

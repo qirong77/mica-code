@@ -205,6 +205,7 @@ describe('task snapshot projection (mica task extension)', () => {
         ],
       }),
       record({ id: 'task-2', status: 'completed', finished_at: '2026-08-06T00:01:00.000Z' }),
+      record({ id: 'maintenance', activity: 'maintenance', subagent_type: 'internal-memory' }),
     ]);
     expect(result).toEqual([
       {

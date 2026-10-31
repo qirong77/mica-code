@@ -1,16 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Pencil } from 'lucide-react';
 import { DEFAULT_RUNTIME_URL, isLoopbackRuntime, relayTokenOf, runtimeLabel } from '@packages/mica-web-shared/index.js';
-import {
-  MAX_PEER_NOTE_LENGTH,
-  emptyPeerStore,
-  findPeer,
-  normalizePeerStore,
-  peerRows,
-  rememberPeer,
-  samePeer,
-  setPeerNote,
-} from './peers';
+import { MAX_PEER_NOTE_LENGTH, emptyPeerStore, findPeer, peerRows, rememberPeer, samePeer, setPeerNote } from './peers';
+import { createPeerPersistence } from './persistence';
 
 /**
  * 行里显示的地址：中转机链接的 `t=` 是凭据，不能明文摊在侧栏上。
@@ -41,10 +33,13 @@ export default function ConnectionsCard({ api, onClose }) {
   const [store, setStore] = useState(emptyPeerStore);
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState('');
+  const connecting = useRef(false);
+  const savingNote = useRef(false);
   const [error, setError] = useState('');
   // 正在改备注的那条（地址），空串表示没在编辑
   const [noteTarget, setNoteTarget] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
+  const persistence = useMemo(() => createPeerPersistence(api), [api]);
 
   const current = api.currentHost();
   // 已经在回环地址上就说明人就在这台机器上，「本机」这个回程入口没有意义（页面可能跑在
@@ -60,38 +55,51 @@ export default function ConnectionsCard({ api, onClose }) {
 
   useEffect(() => {
     let alive = true;
-    void api
-      .readData()
+    void persistence
+      .load()
       .then((result) => {
-        if (alive) setStore(normalizePeerStore(result?.value));
+        if (alive) setStore(result);
       })
-      .catch(() => {
-        // 读不出来就当还没连过：下次连接成功会整份写回去
+      .catch((caught) => {
+        if (alive) setError(caught?.message || String(caught));
       });
     return () => {
       alive = false;
     };
-  }, [api]);
+  }, [persistence]);
 
-  /** 改清单：落盘跟着状态更新走，不另开一条写入路径 */
-  const update = (updater) => {
-    const next = updater(storeRef.current);
-    if (next === storeRef.current) return;
+  /** 写入成功后更新清单，避免界面把失败的保存显示成成功。 */
+  const update = async (updater) => {
+    const next = await persistence.update(updater);
     storeRef.current = next;
     setStore(next);
-    void api.writeData(next);
   };
+  const save = (updater) => void update(updater).catch((caught) => setError(caught?.message || String(caught)));
 
   const startNoteEdit = (url) => {
+    const note = findPeer(storeRef.current, url)?.note ?? '';
+    pendingNote.current = { url, note };
     setNoteTarget(url);
-    setNoteDraft(findPeer(storeRef.current, url)?.note ?? '');
+    setNoteDraft(note);
   };
-  const saveNote = () => {
-    if (!noteTarget) return;
+  const saveNote = async () => {
+    if (!noteTarget || savingNote.current || pendingNote.current?.url !== noteTarget) return;
     const target = noteTarget;
-    const draft = noteDraft;
-    setNoteTarget('');
-    update((previous) => setPeerNote(previous, target, draft));
+    const draft = pendingNote.current.note;
+    savingNote.current = true;
+    try {
+      await update((previous) => setPeerNote(previous, target, draft));
+      setError('');
+      // 保存期间可能已切到另一条备注，或继续修改了草稿。
+      if (pendingNote.current?.url === target && pendingNote.current.note === draft) {
+        pendingNote.current = null;
+        setNoteTarget('');
+      }
+    } catch (caught) {
+      setError(caught?.message || String(caught));
+    } finally {
+      savingNote.current = false;
+    }
   };
 
   // 卡片是悬停浮层，鼠标滑出去就收起来了：正在敲的备注在卸载时直接落盘，
@@ -103,7 +111,7 @@ export default function ConnectionsCard({ api, onClose }) {
   useEffect(
     () => () => {
       const pending = pendingNote.current;
-      if (pending) update((previous) => setPeerNote(previous, pending.url, pending.note));
+      if (pending) save((previous) => setPeerNote(previous, pending.url, pending.note));
     },
     // 只在卸载时跑一次：把「正在敲的备注」落盘，重跑会把中途状态当成最终值写回去
     [],
@@ -111,7 +119,8 @@ export default function ConnectionsCard({ api, onClose }) {
 
   const connect = async (address) => {
     const target = String(address || '').trim();
-    if (!target || busy) return;
+    if (!target || connecting.current) return;
+    connecting.current = true;
     setError('');
     setBusy(target);
     setNoteTarget('');
@@ -128,7 +137,7 @@ export default function ConnectionsCard({ api, onClose }) {
           setError(`中转机连着，但 ${result.label} 上的 Mica 没在运行：页面打开后会自己重试。`);
         }
         // 名字取中转机回报的机器名，作为这条记录的默认备注（用户改过就不动）
-        update((previous) => rememberPeer(previous, result.url, result.label));
+        await update((previous) => rememberPeer(previous, result.url, result.label));
         api.open(result.url);
         onClose?.();
         return;
@@ -144,19 +153,31 @@ export default function ConnectionsCard({ api, onClose }) {
       // 连回自己这台（比如从别的机器的错误页点回来）不必记进清单：它本来就在侧栏上
       if (!samePeer(result.url, current)) {
         // 探通了才记：地址已经规范成 origin，下次直接从这里点回去
-        update((previous) => rememberPeer(previous, result.url));
+        await update((previous) => rememberPeer(previous, result.url));
         api.open(result.url);
       }
       onClose?.();
     } catch (caught) {
       setError(caught?.message || String(caught));
     } finally {
+      connecting.current = false;
       setBusy('');
     }
   };
 
   const noteInput = (
-    <NoteInput value={noteDraft} onChange={setNoteDraft} onSave={saveNote} onCancel={() => setNoteTarget('')} />
+    <NoteInput
+      value={noteDraft}
+      onChange={(draft) => {
+        pendingNote.current = noteTarget ? { url: noteTarget, note: draft } : null;
+        setNoteDraft(draft);
+      }}
+      onSave={saveNote}
+      onCancel={() => {
+        pendingNote.current = null;
+        setNoteTarget('');
+      }}
+    />
   );
 
   return (
@@ -170,7 +191,7 @@ export default function ConnectionsCard({ api, onClose }) {
         <div className="group/peer flex items-center gap-2 px-2.5 py-1.5">
           <Monitor size={14} className="shrink-0 text-fg-muted" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[11px] text-fg-dim">{current}</span>
+            <span className="block truncate text-[11px] text-fg-dim">{displayAddress(current)}</span>
             {currentEntry?.note && <span className="block truncate text-[11px] text-fg-soft">{currentEntry.note}</span>}
           </span>
           <span className="shrink-0 text-[10px] text-success-soft">当前</span>
@@ -261,6 +282,7 @@ function RemoteAccess({ api }) {
   const [state, setState] = useState(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const writing = useRef(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
 
@@ -289,17 +311,21 @@ function RemoteAccess({ api }) {
   }, [saved]);
 
   const patch = async (next) => {
-    if (busy) return;
+    if (writing.current) return;
+    writing.current = true;
+    const submittedDraft = draft;
     setBusy(true);
+    setSaved(false);
     setError('');
     try {
       const written = await api.access.set(next);
       setState((previous) => ({ ...(previous ?? {}), ...written }));
-      setDraft(written?.password ?? '');
+      setDraft((previous) => (previous === submittedDraft ? (written?.password ?? '') : previous));
       setSaved(true);
     } catch (caught) {
       setError(caught?.message || String(caught));
     } finally {
+      writing.current = false;
       setBusy(false);
     }
   };

@@ -66,6 +66,12 @@ export function applyEdits(
   groups: ScheduleGroup[],
   edits: ScheduleEdit[],
 ): Array<ScheduleGroup & { stages: EditedStage[] }> {
+  const byGroup = new Map<string, ScheduleEdit[]>();
+  for (const edit of edits) {
+    const group = byGroup.get(edit.groupId);
+    if (group) group.push(edit);
+    else byGroup.set(edit.groupId, [edit]);
+  }
   return groups.map((group) => {
     const stages: EditedStage[] = group.stages.map((stage) => ({
       ...stage,
@@ -73,13 +79,18 @@ export function applyEdits(
       edited: false,
       added: false,
     }));
+    const byStage = new Map<string, EditedStage[]>();
+    for (const stage of stages) {
+      const matches = byStage.get(stage.stageId);
+      if (matches) matches.push(stage);
+      else byStage.set(stage.stageId, [stage]);
+    }
 
-    for (const edit of edits) {
-      if (edit.groupId !== group.id) continue;
+    for (const edit of byGroup.get(group.id) ?? []) {
       if (edit.added) {
         // 已经在本组里（同一次渲染被应用过）就不再重复加
-        if (stages.some((stage) => stage.stageId === edit.id)) continue;
-        stages.push({
+        if (byStage.has(edit.id)) continue;
+        const added: EditedStage = {
           key: edit.key,
           label: STAGE_LABELS[edit.key] ?? edit.key,
           start: edit.start,
@@ -89,12 +100,13 @@ export function applyEdits(
           stageId: edit.id,
           edited: true,
           added: true,
-        });
+        };
+        stages.push(added);
+        byStage.set(edit.id, [added]);
         continue;
       }
       // 公告里同 key 同日的重复阶段会一起改：它们本来就分不出彼此
-      for (const stage of stages) {
-        if (stage.stageId !== edit.id) continue;
+      for (const stage of byStage.get(edit.id) ?? []) {
         stage.originalStart = stage.start;
         stage.originalEnd = stage.end;
         stage.start = edit.start;
@@ -121,6 +133,28 @@ export function dropEdit(edits: ScheduleEdit[], groupId: string, id: string): Sc
   return edits.filter((item) => !(item.groupId === groupId && item.id === id));
 }
 
+/** 只重放本窗口相对已确认快照的变化，保留其它窗口对不同阶段的修改。 */
+export function mergeEditChanges(
+  current: ScheduleEdit[],
+  previous: ScheduleEdit[],
+  desired: ScheduleEdit[],
+): ScheduleEdit[] {
+  const identity = (edit: ScheduleEdit) => JSON.stringify([edit.groupId, edit.id]);
+  const before = new Map(previous.map((edit) => [identity(edit), edit]));
+  const after = new Map(desired.map((edit) => [identity(edit), edit]));
+  const changes = new Map<string, ScheduleEdit | undefined>();
+  for (const key of new Set([...before.keys(), ...after.keys()])) {
+    const old = before.get(key);
+    const next = after.get(key);
+    if (JSON.stringify(old) === JSON.stringify(next)) continue;
+    changes.set(key, next);
+  }
+  if (changes.size === 0) return current;
+  const merged = current.filter((edit) => !changes.has(identity(edit)));
+  for (const next of changes.values()) if (next) merged.push(next);
+  return merged;
+}
+
 /**
  * 整理完丢掉对不上的修订。
  *
@@ -130,15 +164,25 @@ export function dropEdit(edits: ScheduleEdit[], groupId: string, id: string): Sc
 export function pruneEdits(
   groups: Array<{ id: string; stages: ScheduleStage[] }>,
   edits: ScheduleEdit[],
+  previousGroups?: Array<{ id: string; stages: ScheduleStage[] }>,
 ): ScheduleEdit[] {
-  const byId = new Map<string, Set<string>>();
-  for (const group of groups) {
-    byId.set(group.id, new Set(group.stages.map((stage) => stageIdOf(stage))));
-  }
+  const byId = new Map(
+    groups.map((group) => [group.id, new Map(group.stages.map((stage) => [stageIdOf(stage), stage]))]),
+  );
+  const previous = new Map(
+    previousGroups?.map((group) => [group.id, new Map(group.stages.map((stage) => [stageIdOf(stage), stage]))]),
+  );
   return edits.filter((edit) => {
     const ids = byId.get(edit.groupId);
     if (!ids) return false;
-    return edit.added || ids.has(edit.id);
+    if (edit.added) return true;
+    const stage = ids.get(edit.id);
+    if (!stage) return false;
+    const before = previous.get(edit.groupId)?.get(edit.id);
+    return (
+      !before ||
+      (before.end === stage.end && before.range === stage.range && before.days.join(',') === stage.days.join(','))
+    );
   });
 }
 

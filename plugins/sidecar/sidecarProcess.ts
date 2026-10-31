@@ -67,6 +67,10 @@ export type SidecarProcessOptions = {
   maxTurns?: number;
   /** 显式指定启动命令（测试与探针用）；缺省按当前进程重建 CLI 命令。 */
   launch?: SidecarCliCommand;
+  /** 协议请求的等待上限；缺省 30s。测试用它把「握手超时」压到几百毫秒。 */
+  requestTimeoutMs?: number;
+  /** 启动尚未完成时宿主可以取消握手并回收进程。 */
+  signal?: AbortSignal;
 };
 
 /**
@@ -76,11 +80,11 @@ export type SidecarProcessOptions = {
  * `--dir` 是相对**它自己**的 cwd 解析的。传相对路径会解析两次（`/repo` + `api` 变成
  * `/repo/api/api`），子会话直接 chdir 失败。
  */
-export function resolveSessionCwd(cwd?: string): string {
+export function resolveSessionCwd(cwd?: string, baseCwd = process.cwd()): string {
   const raw = cwd?.trim();
-  if (!raw) return process.cwd();
+  if (!raw) return baseCwd;
   const expanded = raw === '~' ? homedir() : raw.startsWith('~/') ? join(homedir(), raw.slice(2)) : raw;
-  return isAbsolute(expanded) ? resolve(expanded) : resolve(process.cwd(), expanded);
+  return isAbsolute(expanded) ? resolve(expanded) : resolve(baseCwd, expanded);
 }
 
 /**
@@ -100,8 +104,15 @@ type PendingRequest = {
   timer: NodeJS.Timeout;
 };
 
+/**
+ * 请求超时。
+ *
+ * 与「服务端明确拒绝」不同：超时意味着**不知道**它收没收到，据此重发可能变成两条。
+ */
+class RequestTimeoutError extends Error {}
+
 /** 协议请求的等待上限：initialize/thread/start 是本地握手，turn/start 只是入队。 */
-const REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const STDERR_TAIL = 4_000;
 
 export class SidecarProcess {
@@ -116,6 +127,8 @@ export class SidecarProcess {
   private stderrTail = '';
   private exitReason = '';
   private waiters = new Set<() => void>();
+  private exitWaiters = new Set<() => void>();
+  private closing: Promise<void> | null = null;
 
   private constructor(
     child: ChildProcessWithoutNullStreams,
@@ -131,6 +144,7 @@ export class SidecarProcess {
     options: SidecarProcessOptions,
     cli = options.launch ?? resolveCliCommand(),
   ): Promise<SidecarProcess> {
+    options.signal?.throwIfAborted();
     // 解析成绝对路径再往下传：同一个值要用作子进程 cwd 和 --dir，相对路径会被解析两次。
     const cwd = resolveSessionCwd(options.cwd);
     assertUsableCwd(cwd);
@@ -160,7 +174,21 @@ export class SidecarProcess {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const process_ = new SidecarProcess(child, { ...options, cwd }, [cli.command, ...args].join(' '));
-    await process_.handshake();
+    const cancel = () => {
+      void process_.close(0);
+    };
+    options.signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      await process_.handshake();
+      options.signal?.throwIfAborted();
+    } catch (error) {
+      // 握手失败时子进程还活着，而调用方拿不到引用——它就成了没人收的进程：
+      // 继续跑、继续吃内存，还不占 MAX_SIDECARS 名额，重试几次就是一份进程堆积。
+      await process_.close(500);
+      throw error;
+    } finally {
+      options.signal?.removeEventListener('abort', cancel);
+    }
     return process_;
   }
 
@@ -175,6 +203,15 @@ export class SidecarProcess {
     lines.on('line', (line) => this.onLine(line));
     this.child.stderr.on('data', (chunk: Buffer) => {
       this.stderrTail = `${this.stderrTail}${chunk.toString('utf8')}`.slice(-STDERR_TAIL);
+    });
+    this.child.stdin.on('error', (error: Error) => {
+      this.stderrTail = `${this.stderrTail}\nstdin: ${error.message}`.slice(-STDERR_TAIL);
+      for (const pending of this.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(error);
+      }
+      this.pending.clear();
+      void this.close(0);
     });
     this.child.on('error', (error) => this.onExit(`无法启动 mica app-server：${error.message}`));
     this.child.on('close', (code, signal) => {
@@ -224,16 +261,34 @@ export class SidecarProcess {
         });
         return { queued: true };
       }
-      await this.request('turn/start', {
-        threadId: this.threadId,
-        input,
-        ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
-      });
+      await this.startTurnRequest(input);
       return { queued: false };
     } catch (error) {
+      // 这一轮在发出去的瞬间结束了：steer 因 expectedTurnId 不匹配被拒，消息并没有
+      // 投递成功。按「新的一轮」重发一次，否则用户以为话说出去了、其实丢了。
+      //
+      // 超时不算：那说明结果未知（见 RequestTimeoutError），重发可能变成两条。
+      const staleTurn = activeTurnId !== null && this.transcript.activeTurnId !== activeTurnId;
+      if (staleTurn && !(error instanceof RequestTimeoutError)) {
+        try {
+          await this.startTurnRequest(input);
+          return { queued: false };
+        } catch (retryError) {
+          this.transcript.dropUserInput(token);
+          throw retryError;
+        }
+      }
       this.transcript.dropUserInput(token);
       throw error;
     }
+  }
+
+  private startTurnRequest(input: Array<{ type: string; text: string }>): Promise<Record<string, unknown>> {
+    return this.request('turn/start', {
+      threadId: this.threadId,
+      input,
+      ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
+    });
   }
 
   /** 中断当前这一轮（不影响进程与会话，之后还能继续发）。 */
@@ -255,11 +310,16 @@ export class SidecarProcess {
    * 下一个信号——而退出路径上没有下一个信号。父进程 process.exit 之后，一个不响应
    * SIGTERM 的子进程就成了没人收的孤儿，继续跑它那一轮、继续烧 token。
    */
-  async close(graceMs = 3_000): Promise<void> {
-    if (this.closed) return;
+  close(graceMs = 3_000): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    this.closing ??= this.closeProcess(graceMs);
+    return this.closing;
+  }
+
+  private async closeProcess(graceMs: number): Promise<void> {
     const exited = new Promise<void>((resolve) => {
       if (this.closed) return resolve();
-      this.waiters.add(resolve);
+      this.exitWaiters.add(resolve);
     });
     try {
       this.child.stdin.end();
@@ -283,8 +343,8 @@ export class SidecarProcess {
   }
 
   /** 等一次可见变化（或超时）。等待类工具靠它避免忙轮询。 */
-  waitForChange(timeoutMs: number): Promise<boolean> {
-    if (this.closed) return Promise.resolve(false);
+  waitForChange(timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+    if (this.closed || signal?.aborted) return Promise.resolve(false);
     return new Promise((resolve) => {
       let settled = false;
       const done = (changed: boolean) => {
@@ -292,25 +352,29 @@ export class SidecarProcess {
         settled = true;
         this.waiters.delete(notify);
         clearTimeout(timer);
+        signal?.removeEventListener('abort', cancel);
         resolve(changed);
       };
       const notify = () => done(true);
+      const cancel = () => done(false);
       const timer = setTimeout(() => done(false), Math.max(0, timeoutMs));
       this.waiters.add(notify);
+      signal?.addEventListener('abort', cancel, { once: true });
     });
   }
 
   private request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(new Error(this.exitReason || '子会话已关闭'));
     const id = this.nextRequestId++;
+    const timeoutMs = this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         // 把实际起的命令带上：这个超时最常见的原因不是慢，而是启动命令本身错了
         // （例如宿主进程的 argv[1] 不是 mica 入口），光说「无响应」查不出来。
         const detail = this.closed ? this.exitReason : this.describeLaunched();
-        reject(new Error(`${method} 超时（${REQUEST_TIMEOUT_MS}ms 无响应）—— ${detail}`));
-      }, REQUEST_TIMEOUT_MS);
+        reject(new RequestTimeoutError(`${method} 超时（${timeoutMs}ms 无响应）—— ${detail}`));
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try {
         this.write({ id, method, params });
@@ -333,6 +397,7 @@ export class SidecarProcess {
     let message: Record<string, unknown>;
     try {
       message = JSON.parse(trimmed) as Record<string, unknown>;
+      if (!message || typeof message !== 'object' || Array.isArray(message)) return;
     } catch {
       // stdout 只该有协议行；非 JSON 一律当诊断信息，留在 stderr 尾部类似的位置。
       this.stderrTail = `${this.stderrTail}\n${trimmed}`.slice(-STDERR_TAIL);
@@ -375,6 +440,8 @@ export class SidecarProcess {
       this.pending.delete(id);
       pending.reject(new Error(this.describeFailure(reason)));
     }
+    for (const waiter of this.exitWaiters) waiter();
+    this.exitWaiters.clear();
     this.notify();
   }
 

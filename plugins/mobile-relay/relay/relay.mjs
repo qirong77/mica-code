@@ -68,11 +68,13 @@ function isPublicAsset(pathname) {
   return pathname.startsWith('/assets/') || PUBLIC_ASSETS.has(pathname)
 }
 const INVOKE_TIMEOUT_MS = 90_000
+const MAX_PENDING_CALLS = 128
 /** 页面有交互后，把轮询提速到这期间。 */
 const AWAKE_MS = 20_000
 const REPLAY_WINDOW_MS = 120_000
 const IMAGE_CACHE_LIMIT = 24 * 1024 * 1024
 const RESULT_CACHE_LIMIT = 200
+const RESULT_CACHE_BYTES = 4 * 1024 * 1024
 /** 手机浏览器最多记住这么多台机器。 */
 const MAX_REMEMBERED = 8
 /** 自助注册的上限：防止有人把这个域名当成免费隧道。 */
@@ -115,6 +117,7 @@ function createState(entry) {
     pending: new Map(),
     commands: [],
     resultCache: new Map(),
+    resultCacheBytes: 0,
     phones: new Set(),
     imageCache: new Map()
   }
@@ -178,7 +181,9 @@ function reloadAgents() {
     const existing = agents.get(entry.token)
     if (existing) {
       const name = typeof entry.label === 'string' && entry.label.trim() ? entry.label.trim() : existing.label
-      next.set(entry.token, { ...existing, label: name })
+      // 挂起轮询的 done/cleanup 闭包引用同一个状态；替换对象会留下已结束的 parked，吞掉后续命令。
+      existing.label = name
+      next.set(entry.token, existing)
     } else {
       const state = createState(entry)
       next.set(state.token, state)
@@ -213,8 +218,10 @@ function openAny(buffer) {
 
 /** 名字改了才写盘；失败只记日志，不影响服务。 */
 function persistAgents() {
+  const enrollKey = enrollKeyOf()
   const payload = {
     version: 1,
+    ...(enrollKey ? { enrollKey } : {}),
     agents: [...agents.values()].map((state) => ({
       id: state.id,
       label: state.label,
@@ -225,7 +232,13 @@ function persistAgents() {
   }
   try {
     mkdirSync(STATE_DIR, { recursive: true })
-    writeFileSync(AGENTS_FILE, `${JSON.stringify(payload, null, 2)}\n`)
+    const temp = `${AGENTS_FILE}.${process.pid}.tmp`
+    try {
+      writeFileSync(temp, `${JSON.stringify(payload, null, 2)}\n`)
+      renameSync(temp, AGENTS_FILE)
+    } finally {
+      rmSync(temp, { force: true })
+    }
   } catch (error) {
     console.error('[relay] 写 agents.json 失败', error?.message || error)
   }
@@ -455,7 +468,7 @@ function isSecure(req) {
 /** 页面请求对应的机器：当前口令优先，其次 cookie 里记住的第一台。 */
 function currentState(req, url) {
   const explicit = tokenFrom(req, url)
-  if (explicit && agents.has(explicit)) return agents.get(explicit)
+  if (explicit) return agents.get(explicit) || null
   for (const token of rememberedTokens(req)) {
     const state = agents.get(token)
     if (state) return state
@@ -677,22 +690,32 @@ function cacheKey(channel, payload) {
   return `${channel}\u0000${JSON.stringify(payload ?? {})}`
 }
 
-function invokeRemote(state, channel, payload) {
+function invokeRemote(state, channel, payload, signal) {
+  if (signal?.aborted) return Promise.resolve({ ok: false, error: '请求已取消', status: 499 })
   if (!agentOnline(state)) {
     return Promise.resolve({ ok: false, error: `${state.label} 当前没有连上中转机`, status: 503 })
   }
   const id = randomUUIDLike()
+  if (state.pending.size >= MAX_PENDING_CALLS) {
+    return Promise.resolve({ ok: false, error: '这台机器的待处理请求太多，请稍后重试', status: 429 })
+  }
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
+    let settled = false
+    const finish = (value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
       state.pending.delete(id)
-      resolve({ ok: false, error: `调用 ${channel} 超时`, status: 504 })
-    }, INVOKE_TIMEOUT_MS)
-    state.pending.set(id, {
-      resolve: (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      }
-    })
+      // 已经超时/关闭的页面不该在桥恢复连接后再执行之前排队的输入。
+      const index = state.commands.findIndex((command) => command.id === id)
+      if (index >= 0) state.commands.splice(index, 1)
+      resolve(value)
+    }
+    const abort = () => finish({ ok: false, error: '请求已取消', status: 499 })
+    const timer = setTimeout(() => finish({ ok: false, error: `调用 ${channel} 超时`, status: 504 }), INVOKE_TIMEOUT_MS)
+    signal?.addEventListener('abort', abort, { once: true })
+    state.pending.set(id, { resolve: finish })
     state.commands.push({ id, channel, payload })
     wakePoll(state)
   })
@@ -710,13 +733,23 @@ function resolveResult(state, item) {
   if (item.unchanged) {
     const cached = state.resultCache.get(key)
     if (cached && cached.hash === item.hash) return { ok: true, result: cached.value }
+    return { ok: false, error: '结果缓存已失效，请刷新后确认操作结果' }
   }
   const value = item.result ?? null
-  state.resultCache.delete(key)
-  state.resultCache.set(key, { hash: item.hash ?? '', value })
-  if (state.resultCache.size > RESULT_CACHE_LIMIT) {
-    const oldest = state.resultCache.keys().next().value
-    if (oldest !== undefined) state.resultCache.delete(oldest)
+  if (typeof item.hash === 'string') {
+    const bytes = Buffer.byteLength(key) + Buffer.byteLength(JSON.stringify(value))
+    const previous = state.resultCache.get(key)
+    if (previous) state.resultCacheBytes -= previous.bytes
+    state.resultCache.delete(key)
+    if (bytes <= RESULT_CACHE_BYTES) {
+      state.resultCache.set(key, { hash: item.hash, value, bytes })
+      state.resultCacheBytes += bytes
+      while (state.resultCache.size > RESULT_CACHE_LIMIT || state.resultCacheBytes > RESULT_CACHE_BYTES) {
+        const oldest = state.resultCache.keys().next().value
+        state.resultCacheBytes -= state.resultCache.get(oldest).bytes
+        state.resultCache.delete(oldest)
+      }
+    }
   }
   return { ok: true, result: value }
 }
@@ -762,10 +795,13 @@ async function handlePoll(req, res) {
   if (body.env) hinted.env = body.env
 
   for (const item of Array.isArray(body.results) ? body.results : []) {
+    if (!item || typeof item !== 'object') continue
+    // 迟到结果也同步缓存：桥收到本轮响应后会认为这些完整结果已经送达。
+    const result = resolveResult(hinted, item)
     const entry = hinted.pending.get(item?.id)
     if (!entry) continue
     hinted.pending.delete(item.id)
-    entry.resolve(resolveResult(hinted, item))
+    entry.resolve(result)
   }
 
   const events = Array.isArray(body.events) ? body.events : []
@@ -879,9 +915,22 @@ async function handleInvoke(req, res, state) {
   const channel = String(body?.channel || '')
   if (!channel) return sendJson(res, 400, { ok: false, error: '缺少 channel' })
 
-  const result = await invokeRemote(state, channel, body?.payload ?? {})
+  const result = await invokeForResponse(state, channel, body?.payload ?? {}, res)
+  if (res.destroyed) return
   if (result.ok) return sendJson(res, 200, { ok: true, result: result.result })
   return sendJson(res, result.status || 200, { ok: false, error: result.error })
+}
+
+async function invokeForResponse(state, channel, payload, res) {
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  res.once('close', abort)
+  if (res.destroyed) controller.abort()
+  try {
+    return await invokeRemote(state, channel, payload, controller.signal)
+  } finally {
+    res.off('close', abort)
+  }
 }
 
 function handleAwake(req, res, state) {
@@ -910,7 +959,8 @@ async function handleImage(req, res, state, url) {
     return res.end(cached.buffer)
   }
 
-  const result = await invokeRemote(state, '__image', { path: file })
+  const result = await invokeForResponse(state, '__image', { path: file }, res)
+  if (res.destroyed) return
   if (!result.ok) return sendJson(res, 404, { ok: false, error: result.error || '读取失败' })
   const buffer = Buffer.from(result.result.data, 'base64')
   state.imageCache.set(file, { buffer, type: result.result.type })
@@ -1083,6 +1133,7 @@ async function route(req, res) {
   const state = currentState(req, url)
 
   if (path === '/api/health') {
+    if (!state && tokenFrom(req, url)) return sendJson(res, 401, { ok: false, error: 'bad token' })
     if (!state) return sendJson(res, 200, { ok: true, agents: agents.size })
     return sendJson(res, 200, {
       ok: true,

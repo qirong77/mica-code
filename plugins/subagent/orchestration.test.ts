@@ -69,4 +69,13 @@ describe('subagentOrchestration', () => {
       planSubagentRuns(parseRunManySpecs([{ id: 'a', description: 'a', prompt: 'a', depends_on: ['b'] }])),
     ).toThrow('Unknown depends_on task id: b');
   });
+
+  it.each(['depends_on', 'owned_paths', 'context_files'])(
+    'rejects malformed %s instead of dropping the constraint',
+    (field) => {
+      expect(() => parseRunManySpecs([{ description: 'work', prompt: 'go', [field]: 'src' }])).toThrow(
+        `tasks[0].${field}`,
+      );
+    },
+  );
 });

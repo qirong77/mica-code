@@ -32,6 +32,8 @@ export type PluginSubagentType = {
   name: string;
   description: string;
   systemPrompt: string;
+  /** Maintenance stays out of the delegated-task dock; its usage remains recorded. */
+  activity?: 'delegation' | 'maintenance';
   allowedTools?: string[];
   disallowedTools?: string[];
   model?: string;

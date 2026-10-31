@@ -52,7 +52,7 @@
 - `mica-builtin-commands` 通过 services 注入外部能力，避免直接导入应用层单例。
 - `mica-tools` 统一管理工具定义和执行，MCP 工具也必须通过它注册。
 - `mica-session` 只负责持久化，不调用模型、不渲染 UI。
-- `mica-plugin` 只提供插件机制；官方插件实现放在仓库根 `plugins/`，由 `mica-official-plugins` 登记。
+- `mica-plugin` 只提供插件机制；官方插件实现放在仓库根 `plugins/`，由 `mica-official-plugins` 登记。动作、桌面面板与会话菜单的登记由 manager 随插件自动回收；资源按注册逆序释放，单项清理失败不跳过其余资源。
 
 如果新增代码会导致底层包依赖上层包，应优先通过类型、回调、service 或 adapter 注入能力。
 

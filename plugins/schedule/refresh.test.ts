@@ -7,6 +7,7 @@ import {
   activeChats,
   formatDwsTime,
   matchTargets,
+  mergeRefreshedGroups,
   refreshSchedules,
   toDateOnly,
   windowStart,
@@ -147,13 +148,65 @@ describe('refreshSchedules', () => {
     expect(outcome.scanned).toBe(2);
   });
 
+  it('点名全部写错时只报告缺失，不扫描其它活跃群', async () => {
+    const outcome = await refreshSchedules({
+      run: fakeRunner(CHATS),
+      cacheDir,
+      now: NOW,
+      targets: ['写错的群名'],
+      days: 14,
+    });
+    expect(outcome.scanned).toBe(0);
+    expect(outcome.planned).toBe(0);
+    expect(outcome.groups).toEqual([]);
+    expect(outcome.errors).toHaveLength(1);
+  });
+
+  it('未扫描和读取失败的群保留缓存，成功读到空的群移除旧排期', async () => {
+    const previous = (await refreshSchedules({ run: fakeRunner(CHATS), cacheDir, now: NOW, targets: [], days: 14 }))
+      .groups;
+    const partial = {
+      me: '',
+      scanned: 1,
+      planned: 2,
+      targetIds: ['111', '222'],
+      scannedIds: ['111'],
+      groups: [],
+      errors: [],
+      partial: true,
+    };
+    expect(mergeRefreshedGroups(previous, partial).map((group) => group.id)).toEqual(['222']);
+    expect(
+      mergeRefreshedGroups(previous, { ...partial, targetIds: ['111'], scannedIds: [] }).map((group) => group.id),
+    ).toEqual(['111']);
+  });
+
+  it('公告跨年时按发布日补年份，刷新日期不改变公告排期', async () => {
+    const chats = [
+      {
+        id: '1',
+        name: '跨年项目',
+        latestTs: NOW.getTime(),
+        messages: [announcement('开发：12.20-12.28，上线：1.5', new Date(2025, 11, 20).getTime())],
+      },
+    ];
+    const outcome = await refreshSchedules({
+      run: fakeRunner(chats),
+      cacheDir,
+      now: new Date(2026, 0, 10),
+      targets: ['1'],
+      days: 30,
+    });
+    expect(outcome.groups[0]?.stages.map((stage) => stage.start)).toEqual(['2025-12-20', '2026-01-05']);
+  });
+
   it('群列表读不出来就是一次失败，不留半份结果', async () => {
     const failing: DwsRunner = async () => {
       throw new Error('dws 未登录');
     };
-    await expect(
-      refreshSchedules({ run: failing, cacheDir, now: NOW, targets: [], days: 14 }),
-    ).rejects.toThrow('读不到群列表：dws 未登录');
+    await expect(refreshSchedules({ run: failing, cacheDir, now: NOW, targets: [], days: 14 })).rejects.toThrow(
+      '读不到群列表：dws 未登录',
+    );
   });
 });
 

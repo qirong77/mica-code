@@ -174,12 +174,6 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       { type: 'message', role: 'user', content: micaContentToResponsesContent(question) },
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
-      // Iteration boundary: an automatic compaction hook may return a rewritten
-      // (smaller) history. The loop below never rebuilds `messages` from
-      // `this.messages`, so the rewrite must land on this array to affect the
-      // rest of the turn; `this.messages` is kept in sync for persistence.
-      const rewritten = await options?.rewriteIterationMessages?.(messages);
-      if (Array.isArray(rewritten)) messages = rewritten as ResponseInputItem[];
       this.messages = takeNextInput
         ? stripUnusableResponseInputItems(messages)
         : prepareHistoricalResponsesInput(messages);
@@ -199,6 +193,15 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     while (true) {
       throwIfQueryStopped(options);
       throwIfAgentMaxTurnsReached(options, requestIndex, totalContent);
+      if (options?.rewriteIterationMessages) {
+        const rewritten = await options.rewriteIterationMessages(messages);
+        throwIfQueryStopped(options);
+        if (Array.isArray(rewritten)) {
+          messages = rewritten as ResponseInputItem[];
+          this.messages = stripUnusableResponseInputItems(messages);
+          this.turnCommitted = true;
+        }
+      }
       requestIndex++;
 
       const contentSeparator: string =

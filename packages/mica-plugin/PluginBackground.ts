@@ -21,7 +21,7 @@ export type PluginBackgroundTask = {
    * 但间隔小于 1000ms 会被抬到 1000ms，避免插件无意间把宿主拖成忙循环。
    */
   every: number | (() => number);
-  /** 一轮工作。抛错只记在该插件健康状态与日志里，不影响后续调度。 */
+  /** 一轮工作。tick 是尝试序号（失败后也递增）；抛错只记日志，不影响后续调度。 */
   run(context: { signal: AbortSignal; tick: number }): void | Promise<void>;
   /** 第一轮之前的等待，默认等于 `every`。 */
   delay?: number;
@@ -51,6 +51,7 @@ export type PluginBackgroundApi = {
 };
 
 const MIN_INTERVAL_MS = 1000;
+const MAX_INTERVAL_MS = 2 ** 31 - 1;
 
 /**
  * 一个插件名下的调度器。
@@ -70,6 +71,7 @@ export function createPluginBackgroundScheduler(options: {
   const now = options.now ?? Date.now;
   const enabled = options.enabled ?? true;
   const tasks = new Map<string, RegisteredTask>();
+  let disposed = false;
 
   type RegisteredTask = {
     task: PluginBackgroundTask;
@@ -77,16 +79,30 @@ export function createPluginBackgroundScheduler(options: {
     timer: ReturnType<typeof setTimeout> | null;
     controller: AbortController | null;
     stopped: boolean;
+    attempts: number;
   };
 
-  const intervalOf = (task: PluginBackgroundTask): number => {
-    const raw = typeof task.every === 'function' ? task.every() : task.every;
-    const value = Number.isFinite(raw) ? Math.floor(raw) : MIN_INTERVAL_MS;
-    return Math.max(MIN_INTERVAL_MS, value);
+  const reportFailure = (entry: RegisteredTask, error: unknown) => {
+    if (entry.stopped) return;
+    entry.state.failures++;
+    try { options.onError(entry.task.id, error); } catch { /* Observers cannot stop scheduling. */ }
+  };
+
+  const intervalOf = (entry: RegisteredTask): number => {
+    try {
+      const raw = typeof entry.task.every === 'function' ? entry.task.every() : entry.task.every;
+      if (raw === Infinity) return MAX_INTERVAL_MS;
+      const value = Number.isFinite(raw) ? Math.floor(raw) : MIN_INTERVAL_MS;
+      return Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, value));
+    } catch (error) {
+      reportFailure(entry, error);
+      return MIN_INTERVAL_MS;
+    }
   };
 
   const schedule = (entry: RegisteredTask, delay: number) => {
     if (entry.stopped) return;
+    delay = Math.min(MAX_INTERVAL_MS, Math.max(0, Number.isFinite(delay) ? Math.floor(delay) : MAX_INTERVAL_MS));
     entry.state.nextRunAt = now() + delay;
     entry.timer = setTimeout(() => {
       entry.timer = null;
@@ -101,23 +117,24 @@ export function createPluginBackgroundScheduler(options: {
     const controller = new AbortController();
     entry.controller = controller;
     entry.state.running = true;
+    entry.state.nextRunAt = null;
     try {
-      await entry.task.run({ signal: controller.signal, tick: entry.state.ticks + 1 });
+      await entry.task.run({ signal: controller.signal, tick: ++entry.attempts });
       entry.state.ticks += 1;
     } catch (error) {
-      entry.state.failures += 1;
-      options.onError(entry.task.id, error);
+      reportFailure(entry, error);
     } finally {
       entry.state.running = false;
       entry.state.lastRunAt = now();
       entry.controller = null;
     }
     if (entry.stopped) return;
-    schedule(entry, intervalOf(entry.task));
+    schedule(entry, intervalOf(entry));
   };
 
   return {
     register(task) {
+      if (disposed) throw new Error(`background scheduler disposed: ${options.pluginId}`);
       if (!task.id) throw new Error(`background task needs an id: ${options.pluginId}`);
       if (tasks.has(task.id)) {
         throw new Error(`background task already registered: ${options.pluginId}/${task.id}`);
@@ -135,9 +152,10 @@ export function createPluginBackgroundScheduler(options: {
         timer: null,
         controller: null,
         stopped: false,
+        attempts: 0,
       };
       tasks.set(task.id, entry);
-      if (enabled) schedule(entry, task.immediate ? 0 : (task.delay ?? intervalOf(task)));
+      if (enabled) schedule(entry, task.immediate ? 0 : (task.delay ?? intervalOf(entry)));
 
       return {
         dispose: () => {
@@ -147,7 +165,7 @@ export function createPluginBackgroundScheduler(options: {
           entry.state.nextRunAt = null;
           entry.controller?.abort();
           entry.controller = null;
-          tasks.delete(task.id);
+          if (tasks.get(task.id) === entry) tasks.delete(task.id);
         },
       };
     },
@@ -155,6 +173,7 @@ export function createPluginBackgroundScheduler(options: {
       return [...tasks.values()].map((entry) => ({ ...entry.state }));
     },
     disposeAll() {
+      disposed = true;
       for (const entry of [...tasks.values()]) {
         entry.stopped = true;
         if (entry.timer) clearTimeout(entry.timer);

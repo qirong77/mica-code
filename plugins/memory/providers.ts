@@ -18,6 +18,7 @@ export type CuratorCompletionRequest = {
   system: string;
   user: string;
   signal?: AbortSignal;
+  owner?: unknown;
 };
 
 export const DEFAULT_CURATOR_TIMEOUT_MS = 60_000;
@@ -40,6 +41,7 @@ export async function requestCuratorCompletion(llm: PluginLlmApi, request: Curat
       user: request.user,
       timeoutMs: DEFAULT_CURATOR_TIMEOUT_MS,
       signal: request.signal,
+      ...(request.owner === undefined ? {} : { owner: request.owner }),
     });
     if (!result.text.trim()) throw new CuratorProviderError('记忆整理请求返回了空内容');
     return result.text;

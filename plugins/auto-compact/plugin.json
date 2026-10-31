@@ -3,7 +3,7 @@
   "name": "Auto Compact",
   "icon": "archive",
   "version": "1.1.0",
-  "description": "一次模型请求跑完就检查上下文占用，超过阈值先做本地清理、仍超阈值再做模型摘要，不等整个任务结束；会话空闲很久后重新输入时也先压一次。",
+  "description": "每次模型请求前检查即将发送的历史，超过阈值先做本地清理、仍超阈值再做模型摘要，不等整个任务结束；会话空闲很久后重新输入时也先压一次。",
   "main": "index.js",
   "priority": 100,
   "required": false,
@@ -67,14 +67,14 @@
     },
     {
       "key": "minIntervalMinutes",
-      "label": "两次压缩的最小间隔",
+      "label": "同一轮内的压缩间隔",
       "type": "number",
       "default": "30",
       "min": 0,
       "max": 1440,
       "step": 5,
       "unit": "分钟",
-      "description": "免得同一段上下文被反复触发；只管按阈值的触发，空闲后重新输入那一条不看它。0 表示不限制。",
+      "description": "同一轮运行中模型反复请求时，两次压缩至少隔这么久；新一轮、空闲后重新输入都不看它。0 表示不限制。",
       "perSession": true
     },
     {

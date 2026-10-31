@@ -12,6 +12,7 @@ import {
   removeSessionTag,
   renameTagLabel,
   resolveTagColor,
+  resolveTagTokens,
   setSessionTags,
   tagCounts,
   tagsOf,
@@ -49,15 +50,37 @@ describe('normalizeTagStore', () => {
 
   it('空名字不覆盖默认名，过长名字被截断', () => {
     expect(labelOf(normalizeTagStore({ options: [{ id: 'red', label: '   ' }] }), 'red')).toBe('Red');
-    const long = labelOf(
-      normalizeTagStore({ options: [{ id: 'blue', label: 'x'.repeat(60) }] }),
-      'blue',
-    );
+    const long = labelOf(normalizeTagStore({ options: [{ id: 'blue', label: 'x'.repeat(60) }] }), 'blue');
     expect(long.length).toBe(24);
+  });
+
+  it('修复丢失或被修改的颜色值，保持固定七色槽', () => {
+    const store = normalizeTagStore({ options: [{ id: 'red', label: '重要', color: '#123456' }] });
+    expect(store.options[0]).toMatchObject({ id: 'red', label: '重要', color: '#FF3B30' });
   });
 });
 
 describe('色槽解析', () => {
+  it('未知的长命令按输入长度读取，不枚举整个后缀', () => {
+    let reads = 0;
+    const raw = Array.from({ length: 100 }, () => 'unknown');
+    const tokens = new Proxy(raw, {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads += 1;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    expect(resolveTagTokens(emptyTagStore(), tokens).unknown).toEqual(raw);
+    expect(reads).toBeLessThan(raw.length * 10);
+  });
+
+  it('包含空格的自定义名字可以与其它色槽一起解析', () => {
+    const store = renameTagLabel(emptyTagStore(), 'red', 'Needs Review');
+    expect(resolveTagTokens(store, ['Needs', 'Review', 'blue', 'unknown'])).toEqual({
+      colors: ['red', 'blue'],
+      unknown: ['unknown'],
+    });
+  });
   it('接受色槽 id、默认名与改过的名字', () => {
     const store = renameTagLabel(emptyTagStore(), 'red', '阻塞');
     expect(resolveTagColor(store, 'red')).toBe('red');
@@ -140,4 +163,3 @@ describe('用量与展示', () => {
     expect(describeTagStore(store, 's2').at(-1)).toContain('无标签');
   });
 });
-

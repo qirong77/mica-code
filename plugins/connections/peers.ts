@@ -33,17 +33,6 @@ export function emptyPeerStore(): PeerStore {
   return { version: PEER_STORE_VERSION, peers: [] };
 }
 
-/** 入口链接的 host（含端口），用来把「当前页面」和它在清单里的那条对上。 */
-function hostOf(value: unknown): string | null {
-  const url = normalizeEntryAddress(value);
-  if (!url) return null;
-  try {
-    return new URL(url).host;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * 中转机链接的键：同一个中转机上的同一台机器。
  *
@@ -67,16 +56,13 @@ function relayKey(value: unknown): string | null {
  *
  * 直连地址照旧按 host 比（`192.168.1.5` 与 `http://192.168.1.5:8787` 是同一台）；
  * 中转机链接按「中转机 + 令牌」比，因为它背后那台机器的 origin 根本不在链接里。
- * 一条链接对一条裸 origin 时按 host 比：页面由中转机托管时「当前」就是那个 origin。
+ * 裸 origin 没有机器身份，不能把它与该中转机背后的任意一台机器合并。
  */
 export function samePeer(a: unknown, b: unknown): boolean {
   const left = relayKey(a);
   const right = relayKey(b);
   if (left && right) return left === right;
-  if (left || right) {
-    const host = hostOf(a);
-    return host !== null && host === hostOf(b);
-  }
+  if (left || right) return false;
   return isSameRuntime(a, b);
 }
 
@@ -183,9 +169,7 @@ function readPeerList(raw: unknown): unknown[] {
 function asPeerEntry(value: unknown): PeerEntry | null {
   if (!isRecord(value)) return null;
   // 中转机链接必须原样保留（`t` 与 `session` 都在查询串里），直连地址才补 8787 丢路径
-  const url = relayTokenOf(value.url)
-    ? normalizeEntryAddress(value.url)
-    : normalizeRuntimeAddress(value.url);
+  const url = relayTokenOf(value.url) ? normalizeEntryAddress(value.url) : normalizeRuntimeAddress(value.url);
   if (!url) return null;
   return { url, note: normalizePeerNote(value.note) };
 }

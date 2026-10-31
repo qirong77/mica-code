@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { acquireMemoryLock } from './locking.js';
 
 /**
  * 记忆的存储层：三块按字符预算约束的 markdown 文件。
@@ -113,6 +114,20 @@ export class MemoryRepository {
     return this.rootDir;
   }
 
+  /** 异步整理绑定发起时的项目，避免等待模型时 /cd 把结果写到另一仓库。 */
+  forProject(projectDir: string | null, resolveBudgets = this.resolveBudgets): MemoryRepository {
+    return new MemoryRepository({
+      rootDir: this.rootDir,
+      budgets: this.budgets,
+      resolveBudgets,
+      resolveProjectDir: () => projectDir,
+    });
+  }
+
+  acquireCuratorLock(): (() => void) | null {
+    return acquireMemoryLock(join(this.rootDir, 'curator.lock'));
+  }
+
   /** 当前会话的项目目录；没有则项目记忆不可用。 */
   projectDir(): string | null {
     const dir = this.resolveProjectDir?.();
@@ -198,6 +213,21 @@ export class MemoryRepository {
       };
     }
 
+    const release = acquireMemoryLock(`${path}.lock`);
+    if (!release) {
+      return {
+        ok: false,
+        error: { kind: 'unavailable', message: `memory store '${target}' is being updated; retry shortly` },
+      };
+    }
+    try {
+      return this.applyLocked(target, path, operations);
+    } finally {
+      release();
+    }
+  }
+
+  private applyLocked(target: MemoryTarget, path: string, operations: MemoryOperation[]): MemoryApplyResult {
     let entries: string[];
     try {
       entries = [...this.read(target)];
@@ -211,6 +241,7 @@ export class MemoryRepository {
         },
       };
     }
+    const current = this.snapshotFrom(target, [...entries]);
     const applied: string[] = [];
 
     for (const operation of operations) {
@@ -220,7 +251,7 @@ export class MemoryRepository {
           ok: false,
           error: {
             ...result.error,
-            store: this.snapshotFrom(target, entries),
+            store: current,
           },
         };
       }
@@ -236,12 +267,14 @@ export class MemoryRepository {
           kind: 'budget',
           message: `memory store '${target}' would be ${chars} characters, over the ${limit} limit`,
           overflow: chars - limit,
-          store: this.snapshotFrom(target, entries),
+          store: current,
         },
       };
     }
 
-    this.write(path, entries);
+    if (entries.length !== current.entries.length || entries.some((entry, index) => entry !== current.entries[index])) {
+      this.write(path, entries);
+    }
     return { ok: true, store: this.snapshotFrom(target, entries), applied };
   }
 

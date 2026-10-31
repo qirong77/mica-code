@@ -21,7 +21,9 @@ export type { TodoItem, TodoStatus } from '@packages/mica-common/todoState.js';
  * 一轮并消耗一次上下文，换来的只是「格式干净」，不划算。
  */
 export class TodoWriteTool extends MicaTool {
-  constructor(private readonly replace: (items: TodoItem[]) => void = () => undefined) {
+  constructor(
+    private readonly replace: (items: TodoItem[], callbacks?: ToolExecuteCallbacks) => void = () => undefined,
+  ) {
     super(
       TODO_TOOL_NAME,
       [
@@ -70,11 +72,11 @@ export class TodoWriteTool extends MicaTool {
     );
   }
 
-  async execute(input: ToolInput, _callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const parsed = parseTodoInput(input);
     if (!parsed.ok) throw new Error(parsed.message);
 
-    this.replace(parsed.items);
+    this.replace(parsed.items, callbacks);
     return appendTodoNotes(formatTodoSummary(parsed.items), parsed.notes);
   }
 

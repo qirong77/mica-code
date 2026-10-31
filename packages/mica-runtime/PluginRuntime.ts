@@ -20,6 +20,8 @@ export type RuntimeInputReceivedHookEvent = {
 export type RuntimeTurnBeforeHookEvent = {
   /** 触发这一轮的宿主（交互式 runtime 或 headless host）。 */
   runtime: unknown;
+  /** 发起这一轮的会话；可能与用户当前选中的会话不同。 */
+  owner?: RuntimeOwner;
   input: RuntimeInput;
   /** 已解析的多模态内容；未解析时为 undefined。 */
   content?: unknown;

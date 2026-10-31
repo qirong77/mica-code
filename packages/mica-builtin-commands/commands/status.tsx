@@ -111,7 +111,7 @@ function formatCurrentStatusList(
   return formatStatusList([
     ['Model', model],
     ['Effort', provider.supportsEffort !== false ? effort : 'none'],
-    ['Provider', provider.name ?? provider.id],
+    ['Provider', provider.id],
     ['Role', role],
     ['Cwd', process.cwd()],
     ['Context', formatContextUsage(contextTokens, contextWindowSize)],

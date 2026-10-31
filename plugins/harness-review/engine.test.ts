@@ -1003,6 +1003,96 @@ test('rebuild skips live runs and reports unreadable traces instead of inventing
   assert.equal(result.skippedUnreadable, 1);
   assert.equal(result.rebuilt, 0);
 }, 20_000);
+test('rebuild preserves fingerprints, all finding kinds and decisions with metadata-only or truncated content', async (t) => {
+  const { recorder } = await fixture(t);
+  for (const [index, capture] of [
+    { ...options, captureContent: false },
+    { ...options, maxEventChars: 8 },
+  ].entries()) {
+    const cwd = resolve(`workspace-rebuild-${index}`);
+    const run = runner(recorder, { runId: index + 1, cwd, capture });
+    run.start();
+    for (const args of [
+      '{"path":"same"}',
+      '{"path":"same"}',
+      '{"path":"same"}',
+      '{"path":"other-a"}',
+      '{"path":"other-b"}',
+    ]) {
+      run.call(args);
+      run.result();
+    }
+    run.emit({ type: 'retry', attempt: 1, delayMs: 10, error: 'request timed out' });
+    run.finish('error', 'permission denied');
+    const before = await recorder.review(cwd);
+    assert.equal(before.findings.length, 4);
+    await recorder.decide(before.findings[0].id, 'accepted', 'Keep the existing decision');
+    const expected = await recorder.review(cwd);
+    assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+    const after = await recorder.review(cwd);
+    assert.deepEqual(after.findings, expected.findings);
+    assert.equal(after.runs[0].toolErrors, expected.runs[0].toolErrors);
+  }
+});
+
+test('rebuild leaves findings untouched when capture or a damaged trace is incomplete', async (t) => {
+  const { recorder } = await fixture(t);
+  const capped = runner(recorder, { capture: { ...options, maxEventsPerRun: 2 } });
+  capped.start();
+  capped.call();
+  capped.result();
+  capped.finish('error', 'timeout');
+  const damaged = runner(recorder, { runId: 2 });
+  damaged.start();
+  damaged.call();
+  damaged.result();
+  damaged.finish();
+  const before = await recorder.review();
+  const target = before.runs.find((run) => run.sourceRunId === 2)!;
+  await writeFile(target.traceFile, 'null\n');
+  const result = await recorder.rebuild();
+  assert.equal(result.rebuilt, 0);
+  assert.equal(result.skippedUnreadable, 2);
+  const after = await recorder.review();
+  assert.deepEqual(
+    after.findings.map((item) => [item.id, item.occurrences]),
+    before.findings.map((item) => [item.id, item.occurrences]),
+  );
+});
+
+test('scoped pruning and rebuilding keep runs without workspace metadata and malformed summaries', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const run = runner(recorder);
+  run.start();
+  run.finish();
+  const summary = (await recorder.review()).runs[0];
+  const file = join(root, 'runs', summary.id, 'summary.json');
+  const { cwd: _cwd, ...unscoped } = summary;
+  await writeFile(file, JSON.stringify({ ...unscoped, finishedAt: '2000-01-01T00:00:00.000Z' }));
+  const corrupt = join(root, 'runs', randomUUID());
+  await mkdir(corrupt);
+  await writeFile(join(corrupt, 'summary.json'), 'null');
+  const cwd = resolve('workspace-a');
+  assert.equal((await recorder.prune({ olderThanDays: 1, cwd })).deletedRuns, 0);
+  assert.equal((await recorder.rebuild({ cwd })).rebuilt, 0);
+  assert.equal((await readdir(join(root, 'runs'))).length, 2);
+  await assert.rejects(recorder.prune({ olderThanDays: Number.NaN }), /Invalid retention/);
+});
+
+test('rebuild preserves historical metadata-only findings whose trace cannot recover their category', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder, { capture: { ...options, captureContent: false } });
+  run.start();
+  run.emit({ type: 'retry', attempt: 1, delayMs: 10, error: 'timeout' });
+  run.finish();
+  const before = await recorder.review();
+  const events = await trace(before.runs[0]);
+  delete events[1].errorCategory;
+  await writeFile(before.runs[0].traceFile, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+  assert.equal((await recorder.rebuild()).skippedUnreadable, 1);
+  assert.deepEqual((await recorder.review()).findings, before.findings);
+});
+
 test('one recurring tool error stays one finding no matter how many argument variants hit it', async (t) => {
   const { recorder } = await fixture(t);
   const run = runner(recorder, { runId: 1 });

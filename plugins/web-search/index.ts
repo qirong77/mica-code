@@ -45,7 +45,15 @@ const plugin: MicaPlugin = {
       new WebSearchTool({
         baseUrl,
         defaultCount,
+        getOptions: () => {
+          const current = ctx.settings.get();
+          return {
+            baseUrl: resolveBaseUrl(current.searxngUrl),
+            defaultCount: resolveDefaultCount(current.defaultCount),
+          };
+        },
         onFailure: (message, hint) => ctx.health.report({ level: 'error', message, hint }),
+        onSuccess: (url) => ctx.health.report({ level: 'ok', message: `搜索服务：${url}` }),
       }),
       { icon: '🔍' },
     );
@@ -81,6 +89,7 @@ function resolveBaseUrl(configured: string | undefined): string {
 }
 
 function resolveDefaultCount(configured: string | undefined): number {
+  if (!configured?.trim()) return 5;
   const parsed = Number((configured ?? '').trim());
   if (!Number.isFinite(parsed)) return 5;
   return Math.min(Math.max(1, Math.round(parsed)), 20);

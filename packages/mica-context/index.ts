@@ -17,4 +17,5 @@ export const micaContext = {
 };
 
 export { CompactionNotNeededError, CompactionPromptTooLongError, isCompactionNotNeededError };
+export { estimateContextTokens, estimateTextTokens } from './tokenEstimate.js';
 export type { CompactInput, CompactMode, CompactOptions, CompactResult, CompactStrategy } from './CompactionService.js';

@@ -17,12 +17,13 @@ export const DEFAULT_PROMPT = [
 const DEFAULT_MAX_MESSAGES = 12;
 const DEFAULT_MIN_INTERVAL_SECONDS = 0;
 const MAX_MESSAGES_LIMIT = 50;
+const MAX_SESSION_STATES = 32;
 
 type SessionRenameState = {
-  running: boolean;
+  controller: AbortController | null;
   lastAttemptAt: number;
-  /** 上次成功起标题用的「最新请求」：同一条请求不重复请求模型。 */
-  lastRequestText: string;
+  /** 按输入 id 去重：不同轮次的「继续」仍然需要重新判断标题。 */
+  lastInputId: string;
 };
 
 /**
@@ -41,19 +42,38 @@ type SessionRenameState = {
  */
 export default function setup(ctx: PluginContext): void {
   const states = new Map<string, SessionRenameState>();
+  const storeState = (id: string, state: SessionRenameState) => {
+    states.delete(id);
+    states.set(id, state);
+    if (states.size > MAX_SESSION_STATES) {
+      const oldest = states.keys().next().value;
+      if (oldest !== undefined) {
+        states.get(oldest)?.controller?.abort();
+        states.delete(oldest);
+      }
+    }
+  };
+  let disposed = false;
+  ctx.onDispose(() => {
+    disposed = true;
+    for (const state of states.values()) state.controller?.abort();
+    states.clear();
+  });
   /** 「配置不完整」只上报一次；用户补好配置后成功改名会把状态覆写成 ok。 */
   let notConfiguredReported = false;
 
   // 模型接口由 `ctx.llm` 负责（清单 `llm` 声明）：这里只剩提示词。
-  const readConfig = (): TitleRequestConfig => ({
-    prompt: (ctx.settings.get().prompt ?? '').trim() || DEFAULT_PROMPT,
+  const values = (owner?: unknown) => ctx.sessionSettings?.get(owner) ?? ctx.settings.get();
+  const readConfig = (owner?: unknown): TitleRequestConfig => ({
+    prompt: (values(owner).prompt ?? '').trim() || DEFAULT_PROMPT,
   });
   /** 没配好就别发请求：`ctx.llm.request` 会抛错，但这里要提前给出可读的原因。 */
-  const llmReady = () => ctx.llm?.configured() === true;
+  const llmReady = (owner?: unknown) => ctx.llm?.configured(owner) === true;
 
-  const maxMessages = () => parseCount(ctx.settings.get().maxMessages, DEFAULT_MAX_MESSAGES, MAX_MESSAGES_LIMIT);
-  const minIntervalMs = () => {
-    const seconds = parseCount(ctx.settings.get().minIntervalSeconds, DEFAULT_MIN_INTERVAL_SECONDS, 24 * 60 * 60);
+  const maxMessages = (owner?: unknown) =>
+    parseCount(values(owner).maxMessages, DEFAULT_MAX_MESSAGES, MAX_MESSAGES_LIMIT);
+  const minIntervalMs = (owner?: unknown) => {
+    const seconds = parseCount(values(owner).minIntervalSeconds, DEFAULT_MIN_INTERVAL_SECONDS, 24 * 60 * 60);
     return seconds * 1000;
   };
 
@@ -70,18 +90,18 @@ export default function setup(ctx: PluginContext): void {
    * 不可用时**上报**而不是静默跳过：用户打开插件页就能看到「待配置 / 缺接口地址」，
    * 否则现象只是「开了插件但标题一直没变」，只能一路翻到 tmpdir 里查日志。
    */
-  const configProblem = (): string | null => {
+  const configProblem = (owner?: unknown): string | null => {
     const issues = ctx.settings.validate();
     if (issues.length > 0) {
       return `配置有问题：${issues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`;
     }
-    if (!llmReady()) return '模型接口未配置（接口地址与模型），自动改名不会运行';
+    if (!llmReady(owner)) return '模型接口未配置（接口地址与模型），自动改名不会运行';
     return null;
   };
 
   /** 返回这份配置能不能用；不能用时顺手把原因报到健康状态上。 */
-  const reportConfigHealth = (): boolean => {
-    const problem = configProblem();
+  const reportConfigHealth = (owner?: unknown): boolean => {
+    const problem = configProblem(owner);
     if (problem) {
       ctx.health.report({ level: 'warn', message: problem });
       return false;
@@ -92,26 +112,39 @@ export default function setup(ctx: PluginContext): void {
   const renameNow = async (owner: unknown): Promise<string> => {
     const session = ctx.session;
     if (!session) throw new Error('插件运行环境没有提供会话接口');
-    const config = readConfig();
-    if (!llmReady()) throw new Error('模型接口未配置：请到插件设置里填写接口地址与模型');
+    const config = readConfig(owner);
+    if (!llmReady(owner)) throw new Error('模型接口未配置：请到插件设置里填写接口地址与模型');
     const info = session.describe(owner);
     if (!info) throw new Error('当前没有会话');
-    const title = await rename({
-      ctx,
-      sessionId: info.id,
-      currentTitle: info.title,
-      config,
-      maxMessages: maxMessages(),
-      // 手动触发时这一轮已经跑完，最后一条用户消息就在历史里。
-      latestUserText: '',
-    });
-    if (title === null) throw new Error('这次没有生成新标题（内容不足，或用户已手动命名）');
-    return title;
+    if (info.titleSource === 'manual') throw new Error('用户已手动命名，保留当前标题');
+    const controller = new AbortController();
+    const previous = states.get(info.id);
+    previous?.controller?.abort();
+    storeState(info.id, { controller, lastAttemptAt: Date.now(), lastInputId: '' });
+    try {
+      const title = await rename({
+        ctx,
+        sessionId: info.id,
+        currentTitle: info.title,
+        config,
+        maxMessages: maxMessages(owner),
+        // 手动触发时这一轮已经跑完，最后一条用户消息就在历史里。
+        latestUserText: '',
+        signal: controller.signal,
+        owner,
+      });
+      if (title === null) throw new Error('这次没有生成新标题（内容不足，或会话已切换）');
+      return title;
+    } finally {
+      const current = states.get(info.id);
+      if (current?.controller === controller) current.controller = null;
+    }
   };
 
   const hookSubscription = ctx.hooks.on<RuntimeTurnBeforeHookEvent>(
     'turn:before',
     (event) => {
+      if (disposed) return;
       // 一次性运行（`mica exec`）不落会话、马上退出，生成的标题没有地方可留；
       // 默认复用会话模型之后它就成了实际的每日调用，更不该在这种宿主里白花一次。
       if (ctx.agent?.mode === 'one-shot') return;
@@ -121,33 +154,42 @@ export default function setup(ctx: PluginContext): void {
       const session = ctx.session;
       if (!session) return;
 
-      const info = session.describe();
+      const owner = event.owner;
+      const info = session.describe(owner);
       if (!info) return;
+      // 没有归属句柄的宿主只能提交当前会话；切换后尽早终止旧请求。
+      // 显式归属允许不同会话各自继续后台命名。
+      if (owner === undefined) {
+        for (const [id, state] of states) {
+          if (id !== info.id) state.controller?.abort();
+        }
+      }
       if (info.titleSource === 'manual') {
         ctx.logger.info('session-rename:skip', { reason: 'manual-title', sessionId: info.id });
         return;
       }
 
-      const config = readConfig();
+      const config = readConfig(owner);
       // 配置不完整时每轮都会走到这里：只在第一次上报，避免把健康文件刷成噪声。
-      if (!llmReady()) {
+      if (!llmReady(owner)) {
         if (!notConfiguredReported) {
           notConfiguredReported = true;
-          reportConfigHealth();
+          reportConfigHealth(owner);
         }
         return;
       }
 
+      notConfiguredReported = false;
       const latestUserText = messageText(event.input.text ?? '');
-      const state = states.get(info.id) ?? { running: false, lastAttemptAt: 0, lastRequestText: '' };
-      if (state.running) return;
-      // 同一条用户请求只起一次标题：`mica exec` 在一轮结束后会再补发一次 `turn:before`，
-      // 重复请求既改不动标题，也白花一次调用。
-      if (latestUserText && state.lastRequestText === latestUserText) return;
-      const interval = minIntervalMs();
+      const state = states.get(info.id) ?? { controller: null, lastAttemptAt: 0, lastInputId: '' };
+      if (state.lastInputId === event.input.id) return;
+      const interval = minIntervalMs(owner);
       if (interval > 0 && Date.now() - state.lastAttemptAt < interval) return;
 
-      states.set(info.id, { ...state, running: true, lastAttemptAt: Date.now() });
+      // 慢的起标题请求不能把下一轮吞掉，也不能在新标题之后写回旧标题。
+      state.controller?.abort();
+      const controller = new AbortController();
+      storeState(info.id, { controller, lastAttemptAt: Date.now(), lastInputId: event.input.id });
       // 不 await：这里只是发起，重命名失败绝不能拖住或打断 turn。
       void (async () => {
         try {
@@ -156,13 +198,18 @@ export default function setup(ctx: PluginContext): void {
             sessionId: info.id,
             currentTitle: info.title,
             config,
-            maxMessages: maxMessages(),
+            maxMessages: maxMessages(owner),
             latestUserText,
+            signal: controller.signal,
+            owner,
           });
-          if (title === null) return;
-          const current = states.get(info.id);
-          if (current) states.set(info.id, { ...current, lastRequestText: latestUserText });
+          if (title === null && states.get(info.id)?.controller === controller) {
+            states.get(info.id)!.lastInputId = '';
+          }
         } catch (error) {
+          if (controller.signal.aborted) return;
+          const current = states.get(info.id);
+          if (current?.controller === controller) current.lastInputId = '';
           const message = errorMessage(error);
           ctx.logger.warn('session-rename:failed', {
             sessionId: info.id,
@@ -172,7 +219,7 @@ export default function setup(ctx: PluginContext): void {
           ctx.health.report({ level: 'error', message: `上次自动改名失败：${message}` });
         } finally {
           const current = states.get(info.id);
-          if (current) states.set(info.id, { ...current, running: false });
+          if (current?.controller === controller) current.controller = null;
         }
       })();
     },
@@ -214,8 +261,10 @@ export default function setup(ctx: PluginContext): void {
           const title = await renameNow(undefined);
           ctx.ui?.showMessage(`已重命名：${title}`);
         } catch (error) {
-          ctx.health.report({ level: 'error', message: `手动改名失败：${errorMessage(error)}` });
-          ctx.ui?.showMessage(`重命名失败：${errorMessage(error)}`);
+          const message = `手动改名失败：${errorMessage(error)}`;
+          ctx.health.report({ level: 'error', message });
+          ctx.ui?.showMessage(message);
+          return { ok: false, error: error instanceof Error ? error : new Error(message), message };
         }
         return { ok: true };
       }
@@ -233,14 +282,16 @@ async function rename(input: {
   config: TitleRequestConfig;
   maxMessages: number;
   latestUserText: string;
+  signal: AbortSignal;
+  owner?: unknown;
 }): Promise<string | null> {
-  const { ctx, sessionId, currentTitle, config, maxMessages, latestUserText } = input;
+  const { ctx, sessionId, currentTitle, config, maxMessages, latestUserText, signal, owner } = input;
   const session = ctx.session;
   if (!session) return null;
   const llm = ctx.llm;
   if (!llm) throw new Error('插件运行环境没有提供模型接口（requires 里缺 llm）');
 
-  const entries = buildTranscript(session.messages(), { maxMessages, latestUserText });
+  const entries = buildTranscript(session.messages(owner), { maxMessages, latestUserText });
   if (!entries.some((entry) => entry.role === 'user')) {
     ctx.logger.info('session-rename:skip', { reason: 'not-enough-conversation', sessionId, entries: entries.length });
     return null;
@@ -252,21 +303,26 @@ async function rename(input: {
     entries: entries.length,
     chars: entries.reduce((total, entry) => total + entry.text.length, 0),
     latestChars: latestUserText.length,
-    llm: llm.describe(),
+    llm: llm.describe(owner),
   });
 
-  const { title: rawTitle, usage } = await requestSessionTitle(llm, config, formatTitleInput(entries));
+  const { title: rawTitle, usage } = await requestSessionTitle(llm, config, formatTitleInput(entries), {
+    signal,
+    owner,
+  });
+  // 会话切换或插件卸载后，即使 provider 没有响应 abort，也不能提交这个旧结果。
+  const current = session.describe(owner);
+  if (signal.aborted || current?.id !== sessionId || current.titleSource === 'manual') return null;
   const title = sanitizeTitle(rawTitle);
   if (!title) {
-    ctx.logger.warn('session-rename:empty-title', { sessionId, elapsedMs: Date.now() - startedAt });
-    return null;
+    throw new Error('起标题模型返回了空标题');
   }
-  if (title === currentTitle) {
+  if (title === current.title) {
     ctx.logger.info('session-rename:unchanged', { sessionId, title });
     return title;
   }
 
-  const renamed = session.rename(title, { source: 'auto' });
+  const renamed = session.rename(title, { source: 'auto', ...(owner === undefined ? {} : { owner }) });
   // 成功一次就把「待配置 / 上次失败」的状态收回去，页面上不会一直挂着旧故障。
   if (renamed) ctx.health.report({ level: 'ok', message: `最近一次改名成功：${title}` });
   ctx.logger.info('session-rename:renamed', {

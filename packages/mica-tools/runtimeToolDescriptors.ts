@@ -167,7 +167,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
         type: 'string',
         required: true,
         description:
-          'read returns the current notes; append adds content below what is already there; replace overwrites the whole document.',
+          'read returns the current notes; append adds content below what is already there; replace overwrites the whole document (use empty content to clear it).',
       },
       {
         name: 'content',

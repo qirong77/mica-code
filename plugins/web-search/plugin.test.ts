@@ -33,6 +33,7 @@ describe('web-search plugin', () => {
     expect(countHint('999')).toContain('默认 20');
     expect(countHint('0')).toContain('默认 1');
     expect(countHint('nope')).toContain('默认 5');
+    expect(countHint('')).toContain('默认 5');
   });
 
   it('contributes its own prompt section so the guidance disappears with the plugin', () => {
