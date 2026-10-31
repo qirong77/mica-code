@@ -18,6 +18,7 @@ import {
 import { createPluginLogger, pluginLogDir, pluginLogPath } from './PluginLog.js';
 import {
   describePluginLlm,
+  describePluginLlmView,
   isPluginLlmConfigured,
   pluginLlmSettingFields,
   resolvePluginLlmConfig,
@@ -113,6 +114,7 @@ export const micaPlugin = {
   resolvePluginLlmConfig,
   isPluginLlmConfigured,
   describePluginLlm,
+  describePluginLlmView,
   pluginLlmSettingFields,
   PluginSettingsValidationError,
   createPluginLogger,
@@ -158,10 +160,7 @@ export {
   normalizePluginPanelActionResult,
   normalizePluginPanelView,
 } from './PluginPanel.js';
-export {
-  PLUGIN_ACTION_TONES,
-  PluginActionRegistry,
-} from './PluginActions.js';
+export { PLUGIN_ACTION_TONES, PluginActionRegistry } from './PluginActions.js';
 export type {
   PluginActionDeclaration,
   PluginActionHandler,
@@ -241,11 +240,7 @@ export type {
   PluginToolRegistrationOptions,
 } from './PluginContext.js';
 export type { PluginPromptSection } from './PluginPrompt.js';
-export type {
-  PluginBackgroundApi,
-  PluginBackgroundState,
-  PluginBackgroundTask,
-} from './PluginBackground.js';
+export type { PluginBackgroundApi, PluginBackgroundState, PluginBackgroundTask } from './PluginBackground.js';
 export { createPluginBackgroundScheduler } from './PluginBackground.js';
 export { PluginPromptSections } from './PluginPrompt.js';
 export { DESKTOP_CHECKS, DESKTOP_CHECK_IDS, isDesktopCheckId } from './PluginDesktop.js';
@@ -283,6 +278,7 @@ export type {
   PluginAgentRegistry,
   PluginAgentUsage,
   PluginCompactMode,
+  PluginCompactOptions,
   PluginCompactResult,
   PluginIdleCompactHook,
   PluginIdleCompactOutcome,
@@ -302,6 +298,7 @@ export {
   DEFAULT_PLUGIN_LLM_PROTOCOL,
   createPluginLlmApi,
   describePluginLlm,
+  describePluginLlmView,
   expandEnvPlaceholders,
   isPluginLlmConfigured,
   isPluginLlmSettingKey,
@@ -312,8 +309,10 @@ export type {
   CreatePluginLlmApiOptions,
   PluginLlmApi,
   PluginLlmConfig,
+  PluginLlmMainInfo,
   PluginLlmRequest,
   PluginLlmSpec,
+  PluginLlmView,
 } from './PluginLlm.js';
 export {
   PLUGIN_HEALTH_DIR,

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { PluginSettingInput, SettingRow, SettingsGroup } from '@mica-config-ui/web'
+import {
+  LlmSettingsSection,
+  PluginSettingInput,
+  SettingRow,
+  SettingsGroup
+} from '@mica-config-ui/web'
 
 /**
  * 会话设置里的「插件」一节。
@@ -82,6 +87,13 @@ export function PluginSettingsPanel({ plugin, running, savingKey, error, onSave,
     return <p className="capability-note">{error || '正在加载…'}</p>
   }
 
+  // 模型接口那几项由共享组件渲染（配置页用的是同一份）：开关收起后不显示地址 / Key，
+  // 这里再逐个字段画一遍就会绕开「跟随 / 独立」的判定。
+  const fields = plugin.fields ?? []
+  const llmFields = fields.filter((field) => field.group === 'llm')
+  const usesLlmSection = Boolean(plugin.llm) && llmFields.length > 0
+  const plainFields = usesLlmSection ? fields.filter((field) => field.group !== 'llm') : fields
+
   return (
     <div className="session-plugin-settings">
       <SettingsGroup title={plugin.name} description={plugin.description || ''}>
@@ -98,8 +110,21 @@ export function PluginSettingsPanel({ plugin, running, savingKey, error, onSave,
             </button>
           </SettingRow>
         ) : null}
-        {plugin.fields.map((field) => renderField({ plugin, field, running, savingKey, onSave }))}
+        {plainFields.map((field) => renderField({ plugin, field, running, savingKey, onSave }))}
       </SettingsGroup>
+      {usesLlmSection ? (
+        <LlmSettingsSection
+          llm={plugin.llm}
+          fields={fields}
+          values={plugin.values ?? {}}
+          errors={[]}
+          onChange={(key, value) => void onSave(plugin.id, key, value)}
+          overrides={plugin.overrides ?? {}}
+          onReset={(key) => void onSave(plugin.id, key, null)}
+          disabled={running}
+          followLabel="当前会话模型"
+        />
+      ) : null}
       {error ? <p className="session-settings-error">{error}</p> : null}
     </div>
   )

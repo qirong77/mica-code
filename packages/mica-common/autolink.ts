@@ -43,3 +43,82 @@ export function splitAutolinkPunctuation(
 
   return { url: href.slice(0, index), text: label.slice(0, label.length - trailing.length), trailing };
 }
+
+/** 纯文本里识别到的一条链接。`text` 是原文片段，`url` 是点击要打开的目标。 */
+export type AutolinkMatch = {
+  url: string;
+  text: string;
+  start: number;
+  end: number;
+};
+
+// 纯文本里的链接候选：显式协议与 `www.` 前缀（与 GFM autolink literal 认的两种写法
+// 对齐）。前导边界排掉字母数字与 URL 自身会出现的字符，免得从词中间切出来。
+const AUTOLINK_CANDIDATE = /(?<![A-Za-z0-9_@/.:-])((?:https?:\/\/|www\.)[^\s<>"'`]+)/g;
+
+// 尾部可以直接丢掉的标点：ASCII 句读、引号、全角句读与括号状收尾（括号见下面平衡判断）。
+// `*` 与 `_` 也在里面：这两个是强调分隔符，`**http://x/a**` 里尾部那两个不属于地址
+// （GFM 自己的 trailing punctuation 同样收 `*` `_` `~`）。
+const AUTOLINK_TAIL_PUNCTUATION = /[.,;:!?'"’”…。，、；：！？）〕〉》」』】｝—～*_]/u;
+const AUTOLINK_TAIL_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  [')', '('],
+  [']', '['],
+  ['}', '{'],
+];
+
+/**
+ * 从尾部剥掉不属于地址的字符。
+ *
+ * 收尾括号要有平衡判断：`(https://x/a)` 里那个 `)` 不属于地址，而
+ * `https://en.wikipedia.org/wiki/Foo_(bar)` 里的属于。只按字符集裁会把后者切坏。
+ */
+function trimAutolinkTail(value: string): string {
+  let url = value;
+  for (;;) {
+    const last = url[url.length - 1];
+    if (!last) return url;
+    if (AUTOLINK_TAIL_PUNCTUATION.test(last)) {
+      url = url.slice(0, -1);
+      continue;
+    }
+    const pair = AUTOLINK_TAIL_PAIRS.find(([close]) => close === last);
+    if (pair) {
+      const [close, open] = pair;
+      let depth = 0;
+      for (const character of url) {
+        if (character === open) depth += 1;
+        else if (character === close) depth -= 1;
+      }
+      if (depth < 0) {
+        url = url.slice(0, -1);
+        continue;
+      }
+    }
+    return url;
+  }
+}
+
+/**
+ * 找出纯文本里的链接（`https://…` / `http://…` / `www.…`）。
+ *
+ * 对话区里只有助手消息走 markdown（GFM 自己会认链接），用户消息、引用块、notice、
+ * 思考这些纯文本区域要靠它把 URL 变成可点元素。判定与 `splitAutolinkPunctuation`
+ * 同源：全角标点处断开，不留进 href。
+ */
+export function findAutolinks(text: string): AutolinkMatch[] {
+  const source = String(text ?? '');
+  if (!source) return [];
+  const matches: AutolinkMatch[] = [];
+  const pattern = new RegExp(AUTOLINK_CANDIDATE.source, 'g');
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source))) {
+    // 全角标点一刀切：后面跟着的中文不是地址的一部分（`https://x/a，然后`）。
+    const stop = match[1].search(AUTOLINK_STOP_PUNCTUATION);
+    const raw = trimAutolinkTail(stop >= 0 ? match[1].slice(0, stop) : match[1]);
+    if (!raw) continue;
+    const url = raw.startsWith('www.') ? `http://${raw}` : raw;
+    const start = match.index;
+    matches.push({ url, text: raw, start, end: start + raw.length });
+  }
+  return matches;
+}

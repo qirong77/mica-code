@@ -8,7 +8,7 @@ const config = { prompt: DEFAULT_PROMPT };
 function fakeLlm(reply: string | Error, values: Record<string, string> = {}) {
   const calls: PluginModelRequest[] = [];
   const llm = createPluginLlmApi({
-    spec: { followMain: true },
+    spec: {},
     readValues: () => ({
       useMainProvider: 'false',
       baseUrl: 'https://api.example.test/v1',

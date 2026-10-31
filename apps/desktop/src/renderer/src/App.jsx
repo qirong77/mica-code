@@ -2431,7 +2431,7 @@ export default function App() {
               <button
                 type="button"
                 title="New Session"
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={() => {
                   closeMobileDrawer()
                   createSession()
@@ -2446,8 +2446,8 @@ export default function App() {
                 title="查看使用统计"
                 className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
                   view === 'stats'
-                    ? 'bg-overlay-strong text-fg-max'
-                    : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
+                    ? 'bg-active text-fg-max'
+                    : 'text-nav-fg hover:bg-overlay hover:text-fg-max'
                 }`}
                 onClick={() => {
                   closeMobileDrawer()
@@ -2460,7 +2460,7 @@ export default function App() {
               <button
                 type="button"
                 title="打开 Mica 设置"
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={() => {
                   closeMobileDrawer()
                   openConfigPage('config')
@@ -2478,7 +2478,7 @@ export default function App() {
               <button
                 type="button"
                 title="插件（查看已装载的插件与它们的设置）"
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
+                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={() => {
                   closeMobileDrawer()
                   openConfigPage('plugins')
@@ -2818,7 +2818,7 @@ export default function App() {
                         key={node.id}
                         className={`group flex h-6 min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors ${
                           active
-                            ? 'bg-overlay-strong text-fg-max'
+                            ? 'bg-active text-fg-max'
                             : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
                         }`}
                       >

@@ -220,7 +220,7 @@ describe('memory plugin setup', () => {
 
   it('warns when auto capture uses the direct provider without credentials', () => {
     const harness = createHarness({
-      settings: { autoCapture: 'true', curatorMode: 'direct' },
+      settings: { autoCapture: 'true', curatorMode: 'direct', useMainProvider: 'false' },
     });
 
     expect(harness.healthReports.at(-1)).toMatchObject({
@@ -417,6 +417,7 @@ describe('memory auto capture', () => {
       settings: {
         autoCapture: 'true',
         curatorMode: 'direct',
+        useMainProvider: 'false',
         baseUrl: 'https://api.example.test/v1',
         apiKey: 'sk-test',
         model: 'cheap-model',

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import { IconChevronDown } from '@tabler/icons-react'
 import { BarSeries, CalendarHeatmap } from './charts'
 import { SessionDetailModal } from './SessionDetailModal'
 import { bucketByDay, isDayRange, rangeStart, scopeSession } from './scope'
@@ -41,7 +42,7 @@ const MONTH_SHORT = [
   'Dec'
 ]
 const CALENDAR_RAMP = [
-  'var(--color-canvas)',
+  'var(--color-heat-empty)',
   'var(--color-fg-ghost)',
   'var(--color-fg-faint)',
   'var(--color-fg-muted)',
@@ -254,21 +255,28 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
       <div className="p-4">
         <header className="mb-4 flex items-center justify-between gap-2">
           <h2 className={OVERLINE_CLASS}>Contributions</h2>
-          <select
-            value={calendar.year ?? 'trailing'}
-            onChange={(e) =>
-              calendar.onYear(e.target.value === 'trailing' ? null : Number(e.target.value))
-            }
-            className="rounded-[4px] border border-line bg-panel-hi px-3 py-1.5 text-xs text-fg-muted"
-            aria-label="Contributions year"
-          >
-            <option value="trailing">Last 12 months</option>
-            {calendar.years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
+          <span className="relative inline-flex items-center">
+            <select
+              value={calendar.year ?? 'trailing'}
+              onChange={(e) =>
+                calendar.onYear(e.target.value === 'trailing' ? null : Number(e.target.value))
+              }
+              className="appearance-none rounded-[4px] border border-line bg-panel-hi py-1.5 pl-3 pr-7 text-xs text-fg-muted focus:outline-none"
+              aria-label="Contributions year"
+            >
+              <option value="trailing">Last 12 months</option>
+              {calendar.years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+            <IconChevronDown
+              size={12}
+              aria-hidden="true"
+              className="pointer-events-none absolute right-2.5 text-fg-muted"
+            />
+          </span>
         </header>
         <CalendarHeatmap
           weeks={calendarWeeks}

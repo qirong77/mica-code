@@ -8,6 +8,8 @@ function fakeLlm(text: string, values: Record<string, string> = {}) {
   const llm = createPluginLlmApi({
     spec: {},
     readValues: () => ({
+      // 默认是复用会话模型；这个用例测的是「用自己的接口」那条路。
+      useMainProvider: 'false',
       baseUrl: 'https://api.example.test/v1',
       apiKey: 'sk-test',
       protocol: 'openai_chat_completions',

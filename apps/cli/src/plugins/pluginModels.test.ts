@@ -261,7 +261,7 @@ describe('ctx.llm fallback through the host', () => {
       }) as never,
     });
     const llm = createPluginLlmApi({
-      spec: { followMain: true },
+      spec: {},
       readValues: () => ({ useMainProvider: 'false', baseUrl: 'https://own.test/v1', apiKey: 'k', model: 'gone' }),
       models: (request) => models('commit', request),
     });

@@ -12,6 +12,7 @@ import {
   setPluginEnabled,
   supportsPluginSettings,
   supportsPluginToggle,
+  testPluginLlm,
   writePluginSettings,
 } from '../api.js';
 import type {
@@ -781,7 +782,8 @@ function PluginSettingsForm({
           ))}
       </SettingsGroup>
       <LlmSettingsSection
-        plugin={plugin}
+        llm={plugin.llm}
+        fields={plugin.settings.fields}
         values={values}
         errors={Object.entries(fieldErrors).map(([key, message]) => ({
           key,
@@ -789,11 +791,10 @@ function PluginSettingsForm({
           message,
         }))}
         onChange={update}
+        onTest={(next) => testPluginLlm(plugin.id, next)}
         disabled={!canSave}
       />
-      {plugin.actions.length > 0 ? (
-        <PluginActionsGroup plugin={plugin} values={values} onDone={onSaved} />
-      ) : null}
+      {plugin.actions.length > 0 ? <PluginActionsGroup plugin={plugin} values={values} onDone={onSaved} /> : null}
     </>
   );
 }

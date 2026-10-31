@@ -1,4 +1,5 @@
 import { IconLoader2 } from '@tabler/icons-react'
+import { PathText } from './PathToken'
 import { toolIcon } from '@packages/mica-web-shared'
 import { formatLogElapsed, toolCallText, toolDurationMs } from './chat-tool-display'
 
@@ -32,10 +33,19 @@ function toolStatusClass(tool) {
   return 'chat-turn-log-complete'
 }
 
-/** 思考过程的一整段（`.chat-turn-log-thinking` 自己负责边框与折行）。 */
+/**
+ * 思考过程的一整段（`.chat-turn-log-thinking` 自己负责边框与折行）。
+ *
+ * 思考正文也是纯文本，里面的路径与链接同样可点：用户读到这里想打开文件/网址时，
+ * 不该先把它复制出去。
+ */
 export function ReasoningRow({ text }) {
   if (!text) return null
-  return <div className="chat-turn-log-thinking">{text}</div>
+  return (
+    <div className="chat-turn-log-thinking">
+      <PathText text={text} />
+    </div>
+  )
 }
 
 /**

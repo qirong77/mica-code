@@ -27,6 +27,18 @@ export type PluginCompactResult = {
   savedTokens: number;
 };
 
+export type PluginCompactOptions = {
+  mode: PluginCompactMode;
+  /**
+   * 生成 checkpoint 摘要的那一次模型请求。
+   *
+   * 只有 `mode: 'model'` 会用到。插件传它 = 用自己配的模型写摘要（通常经 `ctx.llm`，
+   * 于是「复用当前会话模型 / 独立接口 / 失败降级」那些规则由组件统一负责）；不传则
+   * 走宿主默认的摘要子代理。
+   */
+  summarize?: (transcript: string, prompt: string) => Promise<string>;
+};
+
 /**
  * 一次「轮次之外的压缩」的结果。
  *
@@ -76,10 +88,14 @@ export type PluginAgentHandle = {
   /**
    * 压缩这段 provider 消息。`quick` 只做本地清理（不调用模型），`model` 走摘要子代理。
    *
+   * `summarize` 让插件自己发那一次摘要请求（用 `ctx.llm` 选的模型）：不传就是宿主默认
+   * 的「会话模型 + 摘要子代理」。压缩怎么压仍归内核，换谁写摘要归插件——两者分开，
+   * 插件才不会为了换一个便宜模型去重写整套分段与预算逻辑。
+   *
    * 失败以异常的形态抛回给插件：压缩是插件的策略，失败要不要中断、要不要上报都由插件
    * 决定，内核不替它吞掉。
    */
-  compact(messages: unknown[], options: { mode: PluginCompactMode }): Promise<PluginCompactResult>;
+  compact(messages: unknown[], options: PluginCompactOptions): Promise<PluginCompactResult>;
 };
 
 /**

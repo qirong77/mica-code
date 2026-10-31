@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createPluginLlmApi } from '@packages/mica-plugin/index.js';
 import type {
   PluginAgentHandle,
   PluginContext,
   PluginIterationRewriter,
+  PluginModelRequest,
   PluginSettingValues,
 } from '@packages/mica-plugin/index.js';
 import setup from './index.js';
@@ -48,6 +50,50 @@ describe('auto-compact plugin', () => {
     await harness.rewrite();
 
     expect(harness.compactCalls.map((call) => call.mode)).toEqual(['quick', 'model']);
+  });
+
+  it('writes the checkpoint with the model from the llm component', async () => {
+    // 模型接口走清单的 `llm` 声明：默认复用当前会话模型，也能在插件设置里换一个便宜接口。
+    const requests: PluginModelRequest[] = [];
+    const harness = createHarness({
+      inputTokens: 250_000,
+      savedTokens: [1_000, 12_000],
+      llm: { configured: true, requests },
+    });
+
+    await harness.rewrite();
+
+    // 快速压缩不调用模型，只有模型压缩那一步拿到摘要请求。
+    expect(harness.summarizers[0]).toBeUndefined();
+    const summarize = harness.summarizers[1];
+    expect(summarize).toBeDefined();
+    await expect(summarize!('转录内容', '摘要系统提示词')).resolves.toBe('<summary>压好了</summary>');
+    expect(requests[0]).toMatchObject({
+      purpose: '自动压缩摘要',
+      system: '摘要系统提示词',
+      user: '转录内容',
+    });
+  });
+
+  it('refuses to summarize with a half-configured endpoint instead of quietly using the session model', async () => {
+    const harness = createHarness({
+      inputTokens: 250_000,
+      savedTokens: [1_000, 12_000],
+      llm: { configured: false, requests: [] },
+    });
+
+    await harness.rewrite();
+
+    await expect(harness.summarizers[1]!('转录内容', '提示词')).rejects.toThrow(/未配置/);
+  });
+
+  it('lets the kernel summarize with its own subagent when the host provides no llm', async () => {
+    const harness = createHarness({ inputTokens: 250_000, savedTokens: [1_000, 12_000] });
+
+    await harness.rewrite();
+
+    expect(harness.compactCalls.map((call) => call.mode)).toEqual(['quick', 'model']);
+    expect(harness.summarizers[1]).toBeUndefined();
   });
 
   it('does not spend a model request when the local pass already brought it down', async () => {
@@ -298,8 +344,11 @@ function createHarness(options: {
   lastRunAt?: string;
   /** 不提供会话级状态：用来验证插件不会因为缺能力就崩。 */
   withoutSessionState?: boolean;
+  /** 宿主给的模型组件：`configured` 决定它能不能用，缺省不提供（退回内核摘要子代理）。 */
+  llm?: { configured: boolean; requests: PluginModelRequest[] };
 }) {
   const compactCalls: Array<{ mode: string }> = [];
+  const summarizers: Array<((transcript: string, prompt: string) => Promise<string>) | undefined> = [];
   const savedTokens = [...(options.savedTokens ?? [])];
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const healthReports: Array<{ level: string; message: string }> = [];
@@ -342,10 +391,23 @@ function createHarness(options: {
     },
     compact: async (_messages, compactOptions) => {
       compactCalls.push({ mode: compactOptions.mode });
+      summarizers.push(compactOptions.summarize);
       if (options.fail) throw new Error(options.fail);
       return { messages: [{ role: 'compacted' }], savedTokens: savedTokens.shift() ?? 0 };
     },
   };
+
+  const llmApi = options.llm
+    ? createPluginLlmApi({
+        spec: {},
+        // 复用会话模型时天然可用；要测「没配好」就关掉复用又不填地址。
+        readValues: () => ({ useMainProvider: options.llm?.configured ? 'true' : 'false' }),
+        models: async (request) => {
+          options.llm?.requests.push(request);
+          return { text: '<summary>压好了</summary>', usage: null };
+        },
+      })
+    : undefined;
 
   const settings = options.settings ?? configured;
   const sessionValues = options.sessionValues ?? settings;
@@ -372,6 +434,7 @@ function createHarness(options: {
       },
       ...(compactIdleHistory ? { compactIdleHistory } : {}),
     },
+    ...(llmApi ? { llm: llmApi } : {}),
     ...(options.withoutSessionState
       ? {}
       : {
@@ -421,6 +484,7 @@ function createHarness(options: {
       return stateSeenByHost;
     },
     compactCalls,
+    summarizers,
     idleCompactCalls,
     get state() {
       return state;

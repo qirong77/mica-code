@@ -106,6 +106,10 @@ context.onDispose(() => registration.dispose());
 插件拿到的是**句柄**而不是 agent 本体：只能读最近一次用量、读写自己的会话状态、请求压缩，
 改不到 provider 配置、别的插件状态与会话读写面。声明 `requires: ["agent"]` 才会拿到它。
 
+`compact(messages, { mode: 'model', summarize })` 里的 `summarize` 让插件自己发那次摘要请求
+（通常就是 `ctx.llm.request`，于是「复用当前会话模型 / 独立接口 / 失败降级」由组件负责）；
+不传则走宿主默认的摘要子代理。压缩怎么压（分段、预算、重试）始终归内核。
+
 ### 轮次之外的压缩
 
 `context.agent.compactIdleHistory()` 把**已经落盘的**会话历史快速压一次（本地清理，不调用
@@ -156,7 +160,7 @@ context.onDispose(() => registration.dispose());
 - `PluginStatus.ts`：`plugin-status.json` 的形状与写盘（全部插件的装配结论 + 写它的宿主）。
 - `PluginSubagents.ts`：委派子代理的能力面类型（类型声明、spawn 入参、任务快照、`PluginSubagentRegistry`），宿主实现机制、插件提供策略。
 - `PluginSessionState.ts`：插件存进会话快照的状态的大小上限与校验。
-- `PluginLlm.ts`：`ctx.llm` 的声明类型、设置字段生成、生效值解析与请求封装（「跟随主配置」由宿主解析；配置的接口/模型不可用时自动降级为主配置一次，成功后记住这份配置并上报健康状态，改配置即重新尝试）。
+- `PluginLlm.ts`：`ctx.llm` 的声明类型、设置字段生成、生效值解析与请求封装。每个声明 `llm` 的插件都获得「复用当前会话模型」开关（插件无需声明；缺省就复用会话模型，只有先用自己的接口才好用的插件把 `llm.reuseByDefault` 写成 `false`），由宿主解析成会话当前 provider；配置的接口/模型不可用时自动降级为会话模型一次，成功后记住这份配置并上报健康状态，改配置即重新尝试。`describePluginLlmView()` 是配置页与会话设置共用的展示状态，界面组件不自行判断能不能用。
 - `PluginLog.ts`：插件文件日志（`resolveLogDir()/plugin-<id>-<day>[-n].jsonl`），带分片与过期清理。
 - `sessionAnnotations.ts`：`$MICA_HOME/plugin-data/<pluginId>/session-annotations.json` 的归一化读写。
 - `index.ts`：公共 API 聚合导出。

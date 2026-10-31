@@ -28,7 +28,6 @@
   "llm": {
     "label": "提交说明模型",
     "description": "执行 /commit 时用它根据改动生成提交说明。",
-    "followMain": true,
     "modelPlaceholder": "gpt-4.1-mini"
   }
 }

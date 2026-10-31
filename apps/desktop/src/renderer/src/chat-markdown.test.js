@@ -85,6 +85,42 @@ describe('chat Markdown', () => {
     // 显式链接的目标就是用户写的那一串，不能悄悄裁掉它的句号。
     expect(html).toContain('href="http://10.190.46.109:9200%E3%80%82"')
   })
+
+  it('keeps bold around a bare URL when full-width punctuation follows it', () => {
+    // autolink literal 会把收尾的 `**` 和其后的中文一起吃进链接，这对分隔符就再也配不上，
+    // 页面上留下字面量 `**`（模型最常写的正是这种「加粗一个地址」）。
+    const html = renderToStaticMarkup(
+      createElement(Markdown, { text: '页面已启动：**http://127.0.0.1:8877**（打开即可）。' })
+    )
+
+    expect(html).toContain('<strong><a href="http://127.0.0.1:8877">')
+    expect(html).toContain('</a></strong>（打开即可）。')
+    expect(html).not.toContain('**')
+  })
+
+  it('keeps bold around www addresses and emphasis around URLs with inner text', () => {
+    const www = renderToStaticMarkup(
+      createElement(Markdown, { text: '看 **www.example.com**（示例）' })
+    )
+    expect(www).toContain('<strong><a href="http://www.example.com">www.example.com</a></strong>')
+
+    const italic = renderToStaticMarkup(
+      createElement(Markdown, { text: '结束 *https://x.com/a，然后* 继续' })
+    )
+    expect(italic).toContain('<em><a href="https://x.com/a">https://x.com/a</a>，然后</em>')
+  })
+
+  it('leaves emphasis-wrapped URLs inside code alone', () => {
+    const inline = renderToStaticMarkup(
+      createElement(Markdown, { text: '写法 `**http://x/a**` 是代码' })
+    )
+    expect(inline).toContain('<code>**<a href="http://x/a">http://x/a</a>**</code>')
+
+    const fenced = renderToStaticMarkup(
+      createElement(Markdown, { text: '```\n**http://x/a**（说明）\n```' })
+    )
+    expect(fenced).toContain('**http://x/a**（说明）')
+  })
 })
 
 describe('fileTarget', () => {

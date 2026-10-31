@@ -44,6 +44,14 @@ export { Alert, Button, CollapsiblePanel, Empty, Tag } from './components/Ui.js'
 export { PluginSettingInput } from './components/PluginSettingInput.js';
 
 /**
+ * 插件模型接口的配置面板：配置页与会话设置共用。
+ *
+ * 插件只声明清单里的 `llm`，两个宿主都渲染这一份——「复用当前会话模型」开关、
+ * 隐藏独立配置、测试连接因此没有第二套实现。
+ */
+export { LlmSettingsSection } from './components/LlmSettingsSection.js';
+
+/**
  * 插件图标表：桌面端的插件菜单与配置页的插件卡片读同一份，插件清单里的 `icon`
  * 因此在两个宿主里落到同一个图形上。
  */

@@ -91,12 +91,12 @@ html[data-theme='light'] .mica-config-ui {
   --bg: #ffffff;
   --panel: #f5f6f7;
   --panel-muted: #f1f3f5;
-  --panel-hover: #e9ecf2;
+  --panel-hover: #ebeef2;
   --sidebar-bg: #f9fafb;
   --line: #0000001a;
-  --line-soft: #0000000f;
+  --line-soft: #0000000a;
   --line-strong: #00000029;
-  --text: #1b1b1c;
+  --text: #0f1115; /* label-primary：与桌面端正文同一个近黑 */
   --text-soft: #61666b;
   --text-faint: #979da6;
   --accent: #4176e6;
@@ -106,9 +106,9 @@ html[data-theme='light'] .mica-config-ui {
   --red: #ec1313;
   --amber: #b45309;
   --violet: #6741d9;
-  --overlay-subtle: rgb(0 0 0 / 2.5%);
-  --overlay: rgb(0 0 0 / 3%);
-  --overlay-strong: rgb(0 0 0 / 6%);
+  --overlay-subtle: rgb(38 49 72 / 4%);
+  --overlay: rgb(38 49 72 / 6%);
+  --overlay-strong: rgb(38 49 72 / 10%);
   --focus-ring: rgb(0 0 0 / 8%);
   --selection-bg: rgb(0 0 0 / 12%);
   --panel-inset: #f9fafb;
@@ -4551,6 +4551,23 @@ html[data-theme='light'] .mica-config-ui {
     border-top: 1px solid var(--border-subtle);
     color: var(--text-muted);
     font-size: 12px;
+  }
+
+  /* 「复用当前会话模型」时那一行只显示会用的模型：控件位置与独立配置对齐，
+     用户一眼看出这一项现在由谁决定。 */
+  .plugin-llm-summary {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+
+  /* 独立配置的一行（输入框 + 会话设置的「跟随默认」），与 .session-plugin-control 同形。 */
+  .plugin-llm-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
   }
 
   .plugin-llm-result {

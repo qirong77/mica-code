@@ -239,6 +239,30 @@ async function compactOnReturn(
   }
 }
 
+/**
+ * 摘要请求：交给 `ctx.llm` 决定发去哪。
+ *
+ * 没有这条通路（宿主不给 `llm` 能力）时返回 `undefined`，内核退回它默认的摘要子代理——
+ * 插件不该因为模型组件缺席就完全不能压缩。
+ */
+function summarizer(ctx: PluginContext): ((transcript: string, prompt: string) => Promise<string>) | undefined {
+  const llm = ctx.llm;
+  if (!llm) return undefined;
+  return async (transcript, prompt) => {
+    // 关掉「复用当前会话模型」又没填完，就不该悄悄拿会话模型顶上：那是用户明确
+    // 表示要用另一个接口。直接给出可读原因，由调用方记进健康状态。
+    if (!llm.configured()) throw new Error('压缩摘要模型未配置：请在插件设置里复用当前会话模型，或填写接口地址与模型');
+    const result = await llm.request({
+      purpose: '自动压缩摘要',
+      system: prompt,
+      user: transcript,
+      timeoutMs: 120_000,
+    });
+    if (!result.text.trim()) throw new Error('压缩摘要请求返回了空内容');
+    return result.text;
+  };
+}
+
 async function tryCompact(
   ctx: PluginContext,
   agent: PluginAgentHandle,
@@ -247,7 +271,12 @@ async function tryCompact(
   counters: AutoCompactCounters,
 ): Promise<{ messages: unknown[]; savedTokens: number } | null> {
   try {
-    const result = await agent.compact(messages, { mode });
+    const result = await agent.compact(messages, {
+      mode,
+      // 摘要走 `ctx.llm`（清单 `llm` 声明）：默认复用当前会话模型，也可以单独配一个
+      // 更便宜的接口；失败会自动降级回会话模型。分段、预算与重试仍归内核。
+      summarize: mode === 'model' ? summarizer(ctx) : undefined,
+    });
     if (mode === 'quick') counters.quickRuns += 1;
     else counters.modelRuns += 1;
     counters.lastKind = mode;

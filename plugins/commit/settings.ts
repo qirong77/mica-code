@@ -29,6 +29,6 @@ export function readCommitSettings(values: PluginSettingValues): CommitSettings 
  */
 export function commitLlmProblem(llm: PluginLlmApi | undefined): string | null {
   if (!llm) return '插件运行环境没有提供模型接口（requires 里缺 llm）';
-  if (!llm.configured()) return '未配置模型接口：请在插件设置里填写接口地址与模型';
+  if (!llm.configured()) return '未配置模型接口：请在插件设置里复用当前会话模型，或填写接口地址与模型';
   return null;
 }

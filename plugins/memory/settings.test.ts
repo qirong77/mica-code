@@ -63,7 +63,8 @@ describe('settingsFromValues', () => {
       curatorReady(
         createPluginLlmApi({
           spec: {},
-          readValues: () => ({ baseUrl: 'https://x.test/v1' }),
+          // 复用会话模型时「有没有地址」不决定可用性，所以要显式关掉才测得到这条。
+          readValues: () => ({ useMainProvider: 'false', baseUrl: 'https://x.test/v1' }),
           models: async () => ({ text: '', usage: null }),
         }),
       ),

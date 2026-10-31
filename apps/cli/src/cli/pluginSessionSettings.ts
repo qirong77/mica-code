@@ -6,10 +6,13 @@
  * 内核不认识任何具体插件，因此这段逻辑对每个声明了会话字段的插件都一样。
  */
 import {
+  describePluginLlmView,
   readPluginSettings,
   resolveEffectiveSettingValues,
   sessionScopedSettingFields,
   validateSessionSettingValues,
+  type PluginLlmSpec,
+  type PluginLlmView,
   type PluginSettingIssue,
   type PluginSettingField,
   type PluginSettingValues,
@@ -45,17 +48,35 @@ export function listPluginSessionSettings(host: HostLike): PluginSessionSettings
     if (fields.length === 0 && !panel) return [];
     const global = globalSettings(plugin, host.configDir);
     const overrides = host.agent.getPluginSessionSettings(plugin.id) ?? {};
+    const values = resolveEffectiveSettingValues(fields, global, overrides);
     return [
       {
         id: plugin.id,
         name: plugin.name ?? plugin.id,
         description: plugin.manifest?.description ?? null,
         fields,
-        values: resolveEffectiveSettingValues(fields, global, overrides),
+        values,
         overrides,
+        llm: sessionLlmView(host, plugin.manifest?.llm ?? null, values),
         panel,
       },
     ];
+  });
+}
+
+/**
+ * 模型接口在**这条会话**里的展示状态。
+ *
+ * 摘要用会话当前的模型，而不是配置页那份全局 provider：会话里切过模型之后，「复用
+ * 当前会话模型」指的就是它。读不到会话模型（还没起 turn）时如实标成不可用，
+ * 不拿全局值冒充。
+ */
+function sessionLlmView(host: HostLike, spec: PluginLlmSpec | null, values: PluginSettingValues): PluginLlmView | null {
+  if (!spec) return null;
+  const model = host.agent.getSnapshot?.().model ?? '';
+  return describePluginLlmView(spec, values, {
+    summary: model ? `复用当前会话 · ${model}` : '当前会话没有可用的模型',
+    available: Boolean(model),
   });
 }
 
@@ -66,7 +87,7 @@ export function listPluginSessionSettings(host: HostLike): PluginSessionSettings
 function panelEntry(
   host: HostLike,
   plugin: { id: string; name?: string; manifest?: { desktopPanel?: { label: string; roles: string[] } | null } },
-  role: string
+  role: string,
 ): { label: string } | null {
   const declared = plugin.manifest?.desktopPanel ?? null;
   if (!declared || !host.panels?.get(plugin.id)) return null;
@@ -110,7 +131,8 @@ export function applyPluginSessionSettings(
     incoming[key] = raw;
   }
 
-  const issues = validateSessionSettingValues(fields, incoming);
+  // 会话设置是逐键自动保存：先允许「必填项还没填」的状态落盘，界面用「待配置」提示。
+  const issues = validateSessionSettingValues(fields, incoming, { allowEmptyRequired: true });
   if (issues.length > 0) return { ok: false, error: '设置有误', issues };
 
   host.agent.setPluginSessionSettings(pluginId, Object.keys(next).length > 0 ? next : undefined);

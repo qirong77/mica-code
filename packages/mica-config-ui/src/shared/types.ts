@@ -251,16 +251,15 @@ export type ConfigWebPluginSettings = {
  * 插件声明的模型接口（清单 `llm`）。
  *
  * 四项配置字段本身仍在 `settings.fields` 里（`group: 'llm'`），这里只放面板需要的
- * 展示与状态：标题、说明、是否允许跟随主配置，以及「现在到底能不能用」。
+ * 展示与状态：标题、说明，以及「现在到底能不能用」。
  */
 export type ConfigWebPluginLlm = {
   label: string;
   description: string;
-  followMain: boolean;
   /** 生效配置的人读摘要（不含 Key）。 */
   summary: string;
   configured: boolean;
-  /** 不跟随主配置时这几项必填，页面据此加标记。 */
+  /** 不复用当前会话模型时这几项必填，页面据此加标记。 */
   required: boolean;
 };
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createPluginLlmApi,
   describePluginLlm,
+  describePluginLlmView,
   expandEnvPlaceholders,
   isPluginLlmConfigured,
   pluginLlmSettingFields,
@@ -15,27 +16,37 @@ afterEach(() => {
 });
 
 describe('pluginLlmSettingFields', () => {
-  it('exposes the four interface fields under the llm group', () => {
+  it('exposes the reuse switch and the four interface fields under the llm group', () => {
     const fields = pluginLlmSettingFields({});
-    expect(fields.map((field) => field.key)).toEqual(['baseUrl', 'apiKey', 'protocol', 'model']);
+    expect(fields.map((field) => field.key)).toEqual(['useMainProvider', 'baseUrl', 'apiKey', 'protocol', 'model']);
     expect(fields.every((field) => field.group === 'llm')).toBe(true);
     // 每一项都能按会话覆盖：同一条会话换个便宜模型是常见需求。
     expect(fields.every((field) => field.perSession)).toBe(true);
   });
 
-  it('adds a follow-main switch only when the plugin allows it', () => {
-    expect(pluginLlmSettingFields({}).some((field) => field.key === 'useMainProvider')).toBe(false);
-    const withFollow = pluginLlmSettingFields({ followMain: true });
-    // 默认留空：没表态时按「有没有填地址」推断，不能预设 true 把老配置改走主配置。
-    expect(withFollow[0]).toMatchObject({ key: 'useMainProvider', type: 'switch', default: '' });
+  it('gives every llm plugin the reuse switch, on by default', () => {
+    // 每个用模型的插件都有这条选项，默认就用会话模型：会话里那一个已经付过钱、也认得
+    // 上下文，没必要让每个插件各填一套地址。
+    expect(pluginLlmSettingFields({})[0]).toMatchObject({
+      key: 'useMainProvider',
+      type: 'switch',
+      default: 'true',
+    });
   });
 
-  it('requires address and model only when not following the main config', () => {
-    const fields = pluginLlmSettingFields({ followMain: true, required: true });
+  it('lets a plugin opt out when it only works well on its own endpoint', () => {
+    expect(pluginLlmSettingFields({ reuseByDefault: false })[0]).toMatchObject({
+      key: 'useMainProvider',
+      default: 'false',
+    });
+  });
+
+  it('requires address and model only when not reusing the session model', () => {
+    const fields = pluginLlmSettingFields({ required: true });
     const baseUrl = fields.find((field) => field.key === 'baseUrl')!;
     expect(baseUrl.requiredWhen).toEqual({ key: 'useMainProvider', equals: 'false' });
 
-    // 跟随主配置时不填不报错，关掉之后才报「不能为空」。
+    // 复用会话模型时不填不报错，关掉之后才报「不能为空」。
     expect(validatePluginSettingValues(fields, { useMainProvider: 'true' })).toEqual([]);
     expect(validatePluginSettingValues(fields, { useMainProvider: 'false' }).map((issue) => issue.key)).toEqual([
       'baseUrl',
@@ -52,7 +63,12 @@ describe('pluginLlmSettingFields', () => {
 describe('resolvePluginLlmConfig', () => {
   it('reads the four fields and normalizes the protocol', () => {
     expect(
-      resolvePluginLlmConfig({}, { baseUrl: ' https://x.test/v1 ', model: ' mini ', protocol: 'nonsense' }),
+      resolvePluginLlmConfig({
+        useMainProvider: 'false',
+        baseUrl: ' https://x.test/v1 ',
+        model: ' mini ',
+        protocol: 'nonsense',
+      }),
     ).toMatchObject({
       useMainProvider: false,
       baseUrl: 'https://x.test/v1',
@@ -61,18 +77,17 @@ describe('resolvePluginLlmConfig', () => {
     });
   });
 
-  it('follows the main config when the plugin allows it and no endpoint is filled', () => {
-    expect(resolvePluginLlmConfig({ followMain: true }, {}).useMainProvider).toBe(true);
-    expect(resolvePluginLlmConfig({ followMain: true }, { useMainProvider: 'false' }).useMainProvider).toBe(false);
-    // 填了自己的地址就用自己的：老配置不该因为「开关没写」而突然改走主配置。
-    expect(resolvePluginLlmConfig({ followMain: true }, { baseUrl: 'https://x.test' }).useMainProvider).toBe(false);
-    // 没声明 followMain 的插件永远用自己的配置。
-    expect(resolvePluginLlmConfig({}, { useMainProvider: 'false' }).useMainProvider).toBe(false);
+  it('reuses the session model unless the switch is off', () => {
+    expect(resolvePluginLlmConfig({}).useMainProvider).toBe(true);
+    // 填了自己的地址也不改变默认：要不要用自己那份，只看开关。
+    expect(resolvePluginLlmConfig({ baseUrl: 'https://x.test' }).useMainProvider).toBe(true);
+    expect(resolvePluginLlmConfig({ useMainProvider: 'true' }).useMainProvider).toBe(true);
+    expect(resolvePluginLlmConfig({ useMainProvider: 'false' }).useMainProvider).toBe(false);
   });
 
   it('expands ${VAR} in the api key so the secret can live in the environment', () => {
     vi.stubEnv('MY_KEY', 'sk-from-env');
-    expect(resolvePluginLlmConfig({}, { apiKey: '${MY_KEY}' }).apiKey).toBe('sk-from-env');
+    expect(resolvePluginLlmConfig({ apiKey: '${MY_KEY}' }).apiKey).toBe('sk-from-env');
     expect(expandEnvPlaceholders('${NOT_SET}')).toBe('');
   });
 });
@@ -101,7 +116,7 @@ describe('isPluginLlmConfigured', () => {
 describe('createPluginLlmApi', () => {
   function makeApi(values: Record<string, string>, requests: PluginModelRequest[]) {
     return createPluginLlmApi({
-      spec: { followMain: true },
+      spec: {},
       readValues: () => values,
       models: async (request) => {
         requests.push(request);
@@ -132,7 +147,7 @@ describe('createPluginLlmApi', () => {
 
   it('lets the caller override the model for one request', async () => {
     const requests: PluginModelRequest[] = [];
-    const api = makeApi({ baseUrl: 'https://x.test/v1', model: 'mini' }, requests);
+    const api = makeApi({ useMainProvider: 'false', baseUrl: 'https://x.test/v1', model: 'mini' }, requests);
 
     await api.request({ purpose: 'p', system: 's', user: 'u', model: 'cheaper' });
 
@@ -158,11 +173,51 @@ describe('createPluginLlmApi', () => {
 
   it('reports a readable description without leaking the key', () => {
     expect(
-      describePluginLlm(resolvePluginLlmConfig({ followMain: true }, { apiKey: 'sk-secret', model: 'mini' })),
-    ).toBe('跟随主配置');
-    const own = resolvePluginLlmConfig({}, { baseUrl: 'https://x.test', apiKey: 'sk-secret', model: 'mini' });
+      describePluginLlm(resolvePluginLlmConfig({ useMainProvider: 'true', apiKey: 'sk-secret', model: 'mini' })),
+    ).toBe('复用当前会话模型');
+    const own = resolvePluginLlmConfig({
+      useMainProvider: 'false',
+      baseUrl: 'https://x.test',
+      apiKey: 'sk-secret',
+      model: 'mini',
+    });
     expect(describePluginLlm(own)).toBe('Chat Completions · mini');
     expect(describePluginLlm(own)).not.toContain('sk-secret');
+  });
+});
+
+describe('describePluginLlmView', () => {
+  it('shows the session model while reusing it', () => {
+    expect(
+      describePluginLlmView({}, { useMainProvider: 'true' }, { summary: '复用当前会话 · gpt-5', available: true }),
+    ).toMatchObject({
+      configured: true,
+      summary: '复用当前会话 · gpt-5',
+    });
+  });
+
+  it('keeps the error reason when the session has no usable model', () => {
+    expect(
+      describePluginLlmView(
+        {},
+        { useMainProvider: 'true' },
+        { summary: '当前会话没有可用的模型', available: false },
+      ),
+    ).toMatchObject({
+      configured: false,
+      summary: '当前会话没有可用的模型',
+    });
+  });
+
+  it('describes its own endpoint when the plugin does not reuse the session model', () => {
+    const view = describePluginLlmView(
+      {},
+      { useMainProvider: 'false', baseUrl: 'https://x.test', model: 'mini' },
+      { summary: '复用当前会话 · gpt-5', available: true },
+    );
+    expect(view).toMatchObject({ configured: true, summary: 'Chat Completions · mini' });
+    // 关掉复用又没填地址：待配置，摘要不冒充会话模型。
+    expect(describePluginLlmView({}, { useMainProvider: 'false' })).toMatchObject({ configured: false });
   });
 });
 
@@ -172,7 +227,7 @@ describe('createPluginLlmApi fallback', () => {
     const requests: PluginModelRequest[] = [];
     const reported: string[] = [];
     const api = createPluginLlmApi({
-      spec: { followMain: true },
+      spec: {},
       readValues: () => values,
       models: async (request) => {
         requests.push(request);

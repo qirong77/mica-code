@@ -38,7 +38,7 @@
       "max": 86400
     }
   ],
-  "requires": ["commands", "hooks", "session", "settings", "ui", "llm"],
+  "requires": ["agent", "commands", "hooks", "session", "settings", "ui", "llm"],
   "llm": {
     "label": "起标题模型",
     "description": "每轮开始前把最近对话交给它，生成一个贴题的会话标题。建议用便宜、快的小模型。",

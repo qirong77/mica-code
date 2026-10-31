@@ -2,19 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { resolveUseMainProvider } from './pluginLlm.js';
 
 describe('resolveUseMainProvider', () => {
-  it('不声明 followMain 的插件永远用自己的接口', () => {
-    expect(resolveUseMainProvider(undefined, {})).toBe(false);
-    expect(resolveUseMainProvider(false, {})).toBe(false);
+  it('没拨开关就复用当前会话模型', () => {
+    expect(resolveUseMainProvider({})).toBe(true);
+    expect(resolveUseMainProvider({ useMainProvider: '' })).toBe(true);
+    // 填了自己的地址也不改变默认：要不要用自己那份，只看开关。
+    expect(resolveUseMainProvider({ baseUrl: 'https://x.test' })).toBe(true);
   });
 
-  it('没表态时留空就是跟随主配置', () => {
-    expect(resolveUseMainProvider(true, {})).toBe(true);
-    expect(resolveUseMainProvider(true, { baseUrl: '  ' })).toBe(true);
-    expect(resolveUseMainProvider(true, { baseUrl: 'https://x.test' })).toBe(false);
-  });
-
-  it('显式拨过的开关压过地址推断', () => {
-    expect(resolveUseMainProvider(true, { useMainProvider: 'true', baseUrl: 'https://x.test' })).toBe(true);
-    expect(resolveUseMainProvider(true, { useMainProvider: 'false' })).toBe(false);
+  it('只有明确关掉才用自己的接口', () => {
+    expect(resolveUseMainProvider({ useMainProvider: 'true' })).toBe(true);
+    expect(resolveUseMainProvider({ useMainProvider: 'false' })).toBe(false);
+    expect(resolveUseMainProvider({ useMainProvider: 'false', baseUrl: 'https://x.test' })).toBe(false);
   });
 });

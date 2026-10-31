@@ -73,7 +73,7 @@ function createHarness(options: { settings?: PluginSettingValues; text?: string 
   const settingsValues = options.settings ?? standaloneSettings;
   // 真组件 + 假底层：插件走的就是 `ctx.llm` 这条路。
   const llm = createPluginLlmApi({
-    spec: { followMain: true },
+    spec: {},
     readValues: () => ({ useMainProvider: 'false', ...settingsValues }),
     models: vi.fn(async (request: PluginModelRequest) => {
       requests.push(request);

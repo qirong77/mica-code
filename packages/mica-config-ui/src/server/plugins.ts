@@ -4,6 +4,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { probeModelConnection } from '@packages/mica-agent/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import type {
+  PluginLlmMainInfo,
   PluginLlmSpec,
   PluginModelRequest,
   PluginSettingField,
@@ -187,7 +188,7 @@ export async function testPluginLlm(id: string, values?: Record<string, unknown>
     };
   }
 
-  const config = micaPlugin.resolvePluginLlmConfig(manifest.llm, merged);
+  const config = micaPlugin.resolvePluginLlmConfig(merged);
   let target: { baseUrl: string; apiKey: string; protocol: PluginModelRequest['protocol']; model: string };
   if (config.useMainProvider) {
     const main = micaConfig.readActiveProviderConfig();
@@ -215,11 +216,7 @@ function readSettings(id: string, fields: PluginSettingField[], configRoot: stri
  * 读不出来（没写过、JSON 坏了）就当作「还没上报」，页面显示占位——配置页不去猜插件的
  * 运行态，也不为了让页面好看而编一个值。
  */
-function readStatus(
-  id: string,
-  fields: PluginStatusField[],
-  configRoot: string,
-): ConfigWebPluginStatusField[] {
+function readStatus(id: string, fields: PluginStatusField[], configRoot: string): ConfigWebPluginStatusField[] {
   if (fields.length === 0) return [];
   let data: Record<string, unknown> = {};
   try {
@@ -237,7 +234,7 @@ function readStatus(
   return fields.map((field) => {
     const raw = data[field.key];
     const text = typeof raw === 'string' ? raw : isToneValue(raw) ? raw.text : null;
-    const tone = isToneValue(raw) ? raw.tone ?? null : null;
+    const tone = isToneValue(raw) ? (raw.tone ?? null) : null;
     return { key: field.key, label: field.label, type: field.type, value: text || null, tone };
   });
 }
@@ -264,29 +261,24 @@ function readLlm(
 ): ConfigWebPluginLlm | null {
   if (!spec) return null;
   const values = micaPlugin.readPluginSettings(id, fields, { configDir: configRoot });
-  const config = micaPlugin.resolvePluginLlmConfig(spec, values);
-  let configured = micaPlugin.isPluginLlmConfigured(config);
-  let summary = micaPlugin.describePluginLlm(config);
-  if (configured && config.useMainProvider) {
+  const config = micaPlugin.resolvePluginLlmConfig(values);
+  // 复用当前会话模型时，「会话」在配置页是全局 provider：没有会话上下文，用它算
+  // 摘要与可用性；会话设置那边由 app-server 按当前会话的模型另算一份。
+  let main: PluginLlmMainInfo | undefined;
+  if (config.useMainProvider) {
     try {
-      const main = micaConfig.readActiveProviderConfig();
-      const model = config.model || main.model;
-      configured = Boolean(main.baseUrl && model);
-      if (configured)
-        summary = `跟随主配置 · ${main.protocol === 'openai_responses' ? 'Responses' : 'Chat Completions'} · ${model}`;
+      const active = micaConfig.readActiveProviderConfig();
+      const model = config.model || active.model;
+      const protocol = active.protocol === 'openai_responses' ? 'Responses' : 'Chat Completions';
+      main = {
+        summary: model ? `复用当前会话 · ${protocol} · ${model}` : '当前会话没有可用的模型',
+        available: Boolean(active.baseUrl && model),
+      };
     } catch (error) {
-      configured = false;
-      summary = error instanceof Error ? error.message : '主配置不可用';
+      main = { summary: error instanceof Error ? error.message : '当前会话模型不可用', available: false };
     }
   }
-  return {
-    label: spec.label ?? '模型接口',
-    description: spec.description ?? '这个插件会用它自己问一次模型。',
-    followMain: spec.followMain === true,
-    summary,
-    configured,
-    required: spec.required === true,
-  };
+  return micaPlugin.describePluginLlmView(spec, values, main);
 }
 
 /**

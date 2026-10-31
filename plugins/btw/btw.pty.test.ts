@@ -193,6 +193,9 @@ suite('/btw PTY end-to-end (mock provider)', () => {
     const home = mkdtempSync(join(tmpdir(), 'mica-btw-pty-home-'));
     const wd = mkdtempSync(join(tmpdir(), 'mica-btw-pty-wd-'));
     mkdirSync(join(home, 'sessions'), { recursive: true });
+    // 自动起标题现在默认复用会话模型，会在每轮之前多打一次模型请求，把这里的时序打乱：
+    // 这个用例量的是 /btw，不是标题。
+    writeFileSync(join(home, 'plugins-state.json'), JSON.stringify({ disabled: ['session-rename'] }));
     const wdReal = realpathSync(wd);
     writeFileSync(
       join(home, 'config.json'),

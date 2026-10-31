@@ -31,7 +31,8 @@ describe('llm readiness', () => {
     createPluginLlmApi({ spec: {}, readValues: () => values, models: async () => ({ text: '', usage: null }) });
 
   it('needs both base url and model', () => {
-    const base = { baseUrl: 'https://api.openai.com/v1', apiKey: 'k' };
+    // 默认复用会话模型；这条测的是「用自己的接口」时的完整性判定。
+    const base = { useMainProvider: 'false', baseUrl: 'https://api.openai.com/v1', apiKey: 'k' };
     expect(build({ ...base, model: 'gpt-4o-mini' }).configured()).toBe(true);
     expect(build({ ...base, model: '  ' }).configured()).toBe(false);
     expect(build({ ...base, baseUrl: ' ', model: 'm' }).configured()).toBe(false);
@@ -44,6 +45,7 @@ describe('requestSessionTitle', () => {
     const llm = createPluginLlmApi({
       spec: {},
       readValues: () => ({
+        useMainProvider: 'false',
         baseUrl: 'https://example.test/v1',
         apiKey: 'secret',
         protocol: 'openai_responses',

@@ -50,7 +50,7 @@ import { ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { findPresetForSearch } from './chat-find-preset'
 import { parsePathHref, remarkPathLinks, splitTextByImages } from './chat-paths'
-import { remarkAutolinkPunctuation } from './chat-autolink'
+import { protectEmphasisAutolinks, remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
@@ -383,14 +383,16 @@ export function MessageText({ text }) {
  * 只改渲染，**原文一个字都不改**——编辑重发按文本定位（comparableText +
  * promptOccurrenceFromEnd），改动文本会让定位落到别的消息上。
  */
-function UserMessageText({ text }) {
+export function UserMessageText({ text }) {
   const segments = useMemo(() => splitQuoteSegments(text), [text])
   if (segments.length <= 1) return <MessageText text={text} />
   return segments.map((segment, index) =>
     segment.type === 'quote' ? (
       <div className="chat-quote" key={`quote:${index}`}>
         <span className="chat-quote-label">{segment.label}</span>
-        <div className="chat-quote-text">{segment.text}</div>
+        <div className="chat-quote-text">
+          <PathText text={segment.text} />
+        </div>
       </div>
     ) : (
       <MessageText key={`text:${index}`} text={segment.text.replace(/^\n+|\n+$/g, '')} />
@@ -693,6 +695,7 @@ function MarkdownLink({ href, children, onOpenFile }) {
 const CHAT_REMARK_PLUGINS = [remarkAutolinkPunctuation, remarkGfm, remarkPathLinks]
 
 function MarkdownView({ text, muted = false, onOpenFile }) {
+  const source = useMemo(() => protectEmphasisAutolinks(text || ''), [text])
   const components = useMemo(
     () => ({
       a: ({ href, children }) => (
@@ -721,7 +724,7 @@ function MarkdownView({ text, muted = false, onOpenFile }) {
         urlTransform={chatUrlTransform}
         skipHtml
       >
-        {text || ''}
+        {source}
       </ReactMarkdown>
     </div>
   )

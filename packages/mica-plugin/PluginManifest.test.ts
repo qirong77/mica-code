@@ -244,9 +244,11 @@ describe('parsePluginManifest llm', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.manifest.llm).toMatchObject({ label: '起标题模型', followMain: false });
+    // 没声明就是「跟内核默认」：不能归一成 false，否则默认复用会话模型会失效。
+    expect(result.manifest.llm).toMatchObject({ label: '起标题模型', reuseByDefault: undefined });
     // 字段进同一个 settings 列表：存储、校验、按会话覆盖因此只有一条路径。
     expect(result.manifest.settings.map((field) => field.key)).toEqual([
+      'useMainProvider',
       'baseUrl',
       'apiKey',
       'protocol',
@@ -258,7 +260,7 @@ describe('parsePluginManifest llm', () => {
   it('refuses a second declaration of the same keys', () => {
     const result = parsePluginManifest(
       base({
-        llm: { followMain: true },
+        llm: {},
         settings: [{ key: 'baseUrl', label: '地址', type: 'text' }],
       }),
     );
@@ -268,7 +270,7 @@ describe('parsePluginManifest llm', () => {
   });
 
   it('rejects wrong types instead of rendering an unusable form', () => {
-    const wrongBool = parsePluginManifest(base({ llm: { followMain: 'yes' } }));
+    const wrongBool = parsePluginManifest(base({ llm: { required: 'yes' } }));
     expect(wrongBool.ok).toBe(false);
 
     const wrongString = parsePluginManifest(base({ llm: { label: 42 } }));

@@ -21,6 +21,8 @@ type Registration = {
   handler: PluginIterationRewriter;
 };
 
+type Summarize = (transcript: string, prompt: string) => Promise<string>;
+
 /** 一次性运行的宿主（`mica exec`）注册成 `one-shot`：没有第二轮，改历史只改成本。 */
 export type IterationHostMode = 'session' | 'one-shot';
 
@@ -87,7 +89,7 @@ function createAgentHandle(agent: AgentRuntime, pluginId: string) {
     },
     getState: <T = unknown>() => agent.getPluginState(pluginId) as T | undefined,
     setState: (value: unknown) => agent.setPluginState(pluginId, value),
-    compact: (messages: unknown[], options: { mode: 'quick' | 'model' }) =>
-      compactAgentMessages(agent, messages, options.mode),
+    compact: (messages: unknown[], options: { mode: 'quick' | 'model'; summarize?: Summarize }) =>
+      compactAgentMessages(agent, messages, options),
   };
 }

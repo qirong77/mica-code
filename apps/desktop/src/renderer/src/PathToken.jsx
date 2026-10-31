@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { IconFolder, IconFolderOpen, IconPhoto } from '@tabler/icons-react'
 import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
-import { isImagePath, splitTextByPaths } from './chat-paths'
+import { isImagePath, splitTextByLinksAndPaths, splitTextByPaths } from './chat-paths'
 
 /**
  * 聊天文本、回合日志里的路径动作。由 ChatView 在最外层提供（那里才知道会话 cwd 与
@@ -131,13 +131,44 @@ export function PathToken({ path, text, line = null, column = null }) {
 }
 
 /**
- * 把一段纯文本里识别到的路径渲染成可点元素，其余部分原样输出。
- * 没有任何路径时直接返回字符串，不额外包一层节点（markdown 里的行内文本要靠这个
+ * 纯文本里识别到的链接（`https://…` / `www.…`）。
+ *
+ * 用户消息、引用块、notice、思考都不走 markdown，链接得自己认出来。点击行为与
+ * markdown 链接一致：交给运行时打开系统浏览器（`terminal.openExternal`）；没有
+ * 运行时（比如静态渲染）时退回浏览器自己的跳转。
+ */
+function ChatLink({ url, text, children }) {
+  const open = (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (typeof window === 'undefined') return
+    const openExternal = window.mica?.terminal?.openExternal
+    if (typeof openExternal === 'function') {
+      Promise.resolve(openExternal(url)).catch(() => {})
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  return (
+    <a className="chat-link" href={url} rel="noreferrer" onClick={open} onAuxClick={open}>
+      {children ?? text}
+    </a>
+  )
+}
+
+/**
+ * 把一段纯文本里识别到的链接与路径渲染成可点元素，其余部分原样输出。
+ * 两者都没有时直接返回字符串，不额外包一层节点（markdown 里的行内文本要靠这个
  * 保持原样）。
  */
-export function PathText({ text }) {
-  const segments = useMemo(() => splitTextByPaths(text), [text])
-  if (!segments.some((segment) => segment.type === 'path')) return text || null
+export function PathText({ text, links = true }) {
+  const segments = useMemo(
+    () => (links ? splitTextByLinksAndPaths(text) : splitTextByPaths(text)),
+    [text, links]
+  )
+  if (!segments.some((segment) => segment.type === 'path' || segment.type === 'link'))
+    return text || null
   return segments.map((segment, index) =>
     segment.type === 'path' ? (
       <PathToken
@@ -147,6 +178,8 @@ export function PathText({ text }) {
         line={segment.line}
         column={segment.column}
       />
+    ) : segment.type === 'link' ? (
+      <ChatLink key={`link:${index}:${segment.start}`} url={segment.url} text={segment.text} />
     ) : (
       <span key={`text:${index}`}>{segment.text}</span>
     )

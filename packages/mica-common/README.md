@@ -42,7 +42,7 @@ import { prepareImageForApi } from '@packages/mica-common/index.js';
 - `ids.ts`：ID 生成。
 - `format.ts`：token 数量格式化。
 - `git.ts`：git 命令执行与错误格式化。
-- `autolink.ts`：自动链接在全角标点处断开的唯一判定，CLI 与桌面端渲染共用。
+- `autolink.ts`：自动链接的唯一判定——`splitAutolinkPunctuation` 在全角标点处断开（CLI 与桌面端 markdown 共用），`findAutolinks` 识别纯文本里的链接（用户消息、引用块、notice、思考）。
 - `promptText.ts`：消息文本归一化（剥掉媒体占位符再折叠空白）与 `comparableText` 系列，编辑重发、回退点按文本定位用户消息时共用。
 - `chatQuote.ts`：「引用对话」文本约定的唯一实现（格式化、解析、插入草稿、移除、标题派生时剥离前导引用块），CLI 与桌面端按子路径 `@packages/mica-common/chatQuote.js` 引入。
 - `capabilities.ts`：会话级能力选择（只保存被关掉的 skills / tools / MCP server），归一化与比较规则两端共用。

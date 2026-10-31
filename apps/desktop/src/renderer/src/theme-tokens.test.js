@@ -264,4 +264,127 @@ describe('app.css 颜色 token 主题契约', () => {
       'background: var(--color-canvas)'
     )
   })
+
+  /**
+   * 亮色主题的取值来自 DSH（deepseek-harness）的 `--dsw-static-*` / `--dsw-alias-*`
+   * 调色板。这几个是最容易被「看着调一下」改走的锚点，钉死它们：
+   * 正文与菜单是 label-primary（近黑），不是中灰；用户消息带是 deepseek-50 淡蓝；
+   * 面板是 neutral-bluish-50，选中行是 neutral-bluish-100。
+   */
+  it('亮色锚点取 DSH 的 label / surface 档位', () => {
+    expect(lightHexToken('panel')).toBe('#f9fafb') // neutral-bluish-50
+    expect(lightHexToken('active')).toBe('#ebeef2') // neutral-bluish-100
+    expect(lightHexToken('fg-max')).toBe('#0f1115') // label-primary
+    // 正文也是 label-primary：DSH 的 label 阶梯里没有比它更深的正文档，
+    // 亮色顶端两档因此并成同一个值（暗色里 #fff / #d4d4d4 仍然分开）。
+    expect(lightHexToken('fg-strong')).toBe('#0f1115') // label-primary
+    expect(lightHexToken('fg')).toBe('#1b1b1c') // neutral-bluish-900 — 正文
+    expect(lightHexToken('nav-fg')).toBe('#0f1115') // 侧栏/菜单 = label-primary
+    expect(lightHexToken('bubble')).toBe('#edf3fe') // --dsw-specific-bubble
+    expect(lightHexToken('inline-code-bg')).toBe('#fafafa') // markdown-inline-code
+    expect(lightHexToken('heat-empty')).toBe('#ebeef2') // neutral-bluish-100
+  })
+
+  it('菜单文字有专属 token，侧栏不得回退成中灰的 fg-soft', () => {
+    expect(themeBlock).toContain('--color-nav-fg:')
+    expect(lightBlock).toContain('--color-nav-fg:')
+    for (const token of [
+      '--color-bubble:',
+      '--color-inline-code:',
+      '--color-inline-code-bg:',
+      '--color-inline-code-border:'
+    ]) {
+      expect(themeBlock).toContain(token)
+      expect(lightBlock).toContain(token)
+    }
+
+    const offenders = []
+    for (const file of ['SessionTree.jsx', 'App.jsx']) {
+      const source = readFileSync(resolve(RENDERER_DIR, file), 'utf8')
+      source.split('\n').forEach((line, index) => {
+        // 行文本就是「这是菜单/会话行」的判定：带 text-fg-soft 的 className 必须换成 nav-fg
+        if (/text-\[13px\]|text-sm/.test(line) && line.includes('text-fg-soft')) {
+          offenders.push(`${file}:${index + 1}: ${line.trim()}`)
+        }
+      })
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('用户消息带与亮色次级文字接到各自的 token', () => {
+    expect(css).toMatch(/--chat-user:\s*var\(--color-bubble\)/)
+    expect(css).toMatch(
+      /html\[data-theme='light'\] \.chat-view,[\s\S]{0,120}--chat-muted:\s*var\(--color-fg-dim\)/
+    )
+  })
+
+  /**
+   * 过程文字（工具行、思考、时间戳）在 DSH 里是 label-tertiary：比正文低两档，
+   * 「做过什么」退到背景里、只有回答留在前景。取 label-secondary 会明显比 DeepSeek 重。
+   */
+  it('亮色过程文字取 label-tertiary，不跟着正文走', () => {
+    const body = blockFor(
+      cleanCss,
+      /^html\[data-theme='light'\] \.chat-view,\s*\nhtml\[data-theme='light'\] \.chat-modal-overlay\s*\{/m
+    )
+    expect(body).not.toBeNull()
+    expect(body).toContain('--chat-muted: var(--color-fg-dim)')
+    expect(body).toContain('--chat-subtle: var(--color-fg-faint)')
+  })
+
+  /**
+   * 选中行用 --color-active（DSH 的 neutral-bluish-100 / tab.activeBackground），
+   * 不是 10% 的洗色层：亮色下洗色层压出来是 #e2e6e9，比 DeepSeek 的选中行更重、更脏。
+   */
+  it('会话行、导航项与文件树选中态用 --color-active，不用洗色层', () => {
+    const offenders = []
+    const selected = /bg-overlay-strong/
+    for (const [file, pattern] of [
+      ['SessionTree.jsx', /active \? '([^']*)' : /g],
+      ['FileSidePanels.jsx', /selected \? '([^']*)' : /g]
+    ]) {
+      const source = readFileSync(resolve(RENDERER_DIR, file), 'utf8')
+      for (const match of source.matchAll(pattern)) {
+        if (selected.test(match[1])) offenders.push(`${file}: ${match[0]}`)
+      }
+    }
+    expect(offenders).toEqual([])
+
+    for (const file of ['SessionTree.jsx', 'App.jsx', 'FileSidePanels.jsx']) {
+      expect(readFileSync(resolve(RENDERER_DIR, file), 'utf8')).toContain('bg-active')
+    }
+  })
+
+  /**
+   * 亮色热力图的「没有活动」格子不能是 canvas：纯白铺在 #f9fafb 的卡片上等于没有网格。
+   * 暗色沿用 canvas 的深度，所以只钉 token 存在与亮色取值。
+   */
+  it('热力图空格用专属 token，不再拿 canvas 顶替', () => {
+    expect(themeBlock).toContain('--color-heat-empty:')
+    expect(lightBlock).toContain('--color-heat-empty:')
+    const stats = readFileSync(resolve(RENDERER_DIR, 'stats/StatsView.jsx'), 'utf8')
+    expect(stats).toContain("'var(--color-heat-empty)'")
+    expect(stats).not.toMatch(/CALENDAR_RAMP = \[\s*'var\(--color-canvas\)'/)
+  })
+
+  /**
+   * 亮底上的 ANSI bright 色不能比本色更浅：`#f25a5a` 这类亮红在白色终端上只剩 2.9:1，
+   * ls / git 的强调色反而糊掉。彩色档保持本色，只有黑白两对走灰度阶梯。
+   */
+  it('亮色终端的彩色 bright 档不比本色更浅（白底可读）', () => {
+    const source = readFileSync(resolve(RENDERER_DIR, 'TerminalHost.jsx'), 'utf8')
+    const body = blockFor(source, /const LIGHT_TERMINAL_THEME = \{/)
+    expect(body).not.toBeNull()
+    const value = (key) => {
+      const match = new RegExp(`\\b${key}: '(#[0-9a-fA-F]{6})'`).exec(body)
+      return match ? match[1].toLowerCase() : null
+    }
+    for (const name of ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan']) {
+      const base = value(name)
+      const bright = value(`bright${name[0].toUpperCase()}${name.slice(1)}`)
+      expect(base, name).not.toBeNull()
+      expect(bright, `bright${name}`).toBe(base)
+      expect(contrastOnWhite(base), `${name} 白底对比度`).toBeGreaterThanOrEqual(4.2)
+    }
+  })
 })

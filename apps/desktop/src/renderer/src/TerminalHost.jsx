@@ -63,10 +63,13 @@ const LIGHT_TERMINAL_THEME = {
   cyan: '#0f766e',
   white: '#81858c',
   brightBlack: '#61666b',
-  brightRed: '#f25a5a',
-  brightGreen: '#2f9e44',
-  brightYellow: '#dd8629',
-  brightBlue: '#3b82f6',
+  // 亮底上没有「更亮一档」的余地：bright* 若继续往浅里走，白底对比度会掉到 3:1 以下
+  // （#f25a5a 2.9、#dd8629 2.8），ls / git / npm 的强调色反而看不清。与 VS Code 的
+  // Light+ 一致：彩色档保持本色，只有黑白两对继续走灰度阶梯。
+  brightRed: '#ec1313',
+  brightGreen: '#2b8a3e',
+  brightYellow: '#b45309',
+  brightBlue: '#4176e6',
   brightMagenta: '#6741d9',
   brightCyan: '#0f766e',
   brightWhite: '#979da6'

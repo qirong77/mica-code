@@ -332,8 +332,8 @@ function readSkillDirs(input: unknown): { ok: true; value: string[] } | { ok: fa
 /**
  * `llm` 声明：插件要一个模型接口，字段由 `pluginLlmSettingFields` 统一生成。
  *
- * 校验从严与 settings 一致——面板完全按这份声明显示，写错的字段（例如 `followMain`
- * 给了字符串）会让页面渲染出一个不可用的表单，不如在加载阶段就报错。
+ * 校验从严与 settings 一致——面板完全按这份声明显示，写错的字段会让页面渲染出一个
+ * 不可用的表单，不如在加载阶段就报错。
  */
 function readLlm(input: unknown): { ok: true; value: PluginLlmSpec | null } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: null };
@@ -345,9 +345,8 @@ function readLlm(input: unknown): { ok: true; value: PluginLlmSpec | null } | { 
       return { ok: false, error: `llm.${key} 必须是字符串` };
     }
   }
-  for (const key of ['followMain', 'required'] as const) {
-    const value = input[key];
-    if (value !== undefined && typeof value !== 'boolean') {
+  for (const key of ['required', 'reuseByDefault'] as const) {
+    if (input[key] !== undefined && typeof input[key] !== 'boolean') {
       return { ok: false, error: `llm.${key} 必须是布尔值` };
     }
   }
@@ -357,7 +356,9 @@ function readLlm(input: unknown): { ok: true; value: PluginLlmSpec | null } | { 
     value: {
       label: typeof input.label === 'string' && input.label.trim() ? input.label.trim() : undefined,
       description: typeof input.description === 'string' && input.description.trim() ? input.description.trim() : undefined,
-      followMain: input.followMain === true,
+      // 三态：没写 = 跟随内核默认（复用会话模型），写 false 才是「先用自己的接口」。
+      // 归一成布尔会把「没表态」变成「明确关」，默认值就此失效。
+      reuseByDefault: typeof input.reuseByDefault === 'boolean' ? input.reuseByDefault : undefined,
       modelPlaceholder:
         typeof input.modelPlaceholder === 'string' && input.modelPlaceholder.trim()
           ? input.modelPlaceholder.trim()

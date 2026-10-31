@@ -65,7 +65,7 @@ const SessionDetailModal = lazy(() =>
 )
 
 const rowClassBase =
-  'group relative flex min-h-6 cursor-pointer gap-2 rounded-md pr-2 text-sm leading-5 text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max active:bg-overlay-strong focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-line-strong'
+  'group relative flex min-h-6 cursor-pointer gap-2 rounded-md pr-2 text-sm leading-5 text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max active:bg-overlay-strong focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-line-strong'
 
 const rowClass = `${rowClassBase} items-center`
 
@@ -74,7 +74,7 @@ const rowClass = `${rowClassBase} items-center`
 const rowClassTall = `${rowClassBase} items-start py-1`
 
 const groupRowClass =
-  'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-1.5 text-sm leading-5 text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max'
+  'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-1.5 text-sm leading-5 text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max'
 
 const dropShadow = 'inset 0 0 0 1px rgba(90,167,232,.9)'
 
@@ -906,7 +906,7 @@ export function SessionTree({
     return (
       <li key={session.id}>
         <div
-          className={`${rowClass} ${active ? 'bg-overlay-strong text-fg-max' : 'text-fg-soft'} ${draggingThis ? 'opacity-40' : ''}`}
+          className={`${rowClass} ${active ? 'bg-active text-fg-max' : 'text-nav-fg'} ${draggingThis ? 'opacity-40' : ''}`}
           style={{
             paddingLeft: rowIndent(indent + childDepth),
             boxShadow: isOver
@@ -1032,7 +1032,7 @@ export function SessionTree({
     return (
       <li key={node.id}>
         <div
-          className={`${rowClass} ${active ? 'bg-overlay-strong text-fg-max' : 'text-fg-soft'} ${drag?.kind === 'draft' && drag.id === node.id ? 'opacity-40' : ''}`}
+          className={`${rowClass} ${active ? 'bg-active text-fg-max' : 'text-nav-fg'} ${drag?.kind === 'draft' && drag.id === node.id ? 'opacity-40' : ''}`}
           style={{
             paddingLeft: rowIndent(indent),
             boxShadow: isOver ? dropShadow : undefined
@@ -1114,10 +1114,10 @@ export function SessionTree({
           data-search-index={index}
           className={`${snippet || cwdLine ? rowClassTall : rowClass} ${
             active
-              ? 'bg-overlay-strong text-fg-max'
+              ? 'bg-active text-fg-max'
               : searchFocus === index
                 ? 'bg-overlay text-fg-max'
-                : 'text-fg-soft'
+                : 'text-nav-fg'
           }`}
           style={{ paddingLeft: rowIndent(0) }}
           title={[
@@ -1329,7 +1329,7 @@ export function SessionTree({
       >
         <button
           type="button"
-          className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-[13px] font-medium text-fg-muted transition-colors hover:bg-overlay hover:text-fg-strong"
+          className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left text-[13px] font-medium text-fg-dim transition-colors hover:bg-overlay hover:text-fg-strong"
           // sectionOpen 返回的是查询串或布尔值，aria 只接受 "true"/"false"
           aria-expanded={!!sectionOpen(name)}
           onClick={() => toggleSection(name)}
@@ -1344,7 +1344,7 @@ export function SessionTree({
             <Icon size={14} className="text-fg-dim" />
             <RowBadge state={hiddenState} scope={label} />
           </Slot>
-          <span className="flex-1 truncate text-fg-muted">{label}</span>
+          <span className="flex-1 truncate text-fg-dim">{label}</span>
         </button>
         {onAdd && (
           <button

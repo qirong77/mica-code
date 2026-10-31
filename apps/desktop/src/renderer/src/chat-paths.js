@@ -7,6 +7,8 @@
 // 识别不做存在性探测：判定纯靠文本，点击后由 host 返回结果（见 PathToken）。
 // 这样每一条消息的渲染都不需要额外问一次文件系统。
 
+import { findAutolinks } from '@packages/mica-common/autolink.js'
+
 const IMAGE_EXTENSIONS = new Set([
   'png',
   'jpg',
@@ -200,6 +202,30 @@ export function splitTextByPaths(text) {
   return segments
 }
 
+/**
+ * 把纯文本切成 `text` / `link` / `path` 三种片段，供用户消息、引用块、notice、思考
+ * 这些不走 markdown 的区域渲染可点元素。
+ *
+ * 先切链接再在剩余片段里切路径：URL 该整条当链接，先切路径会让 `host/path` 这类
+ * 相对写法抢走一半。判定都在共享的 `@packages/mica-common/autolink.js` 与上面的
+ * findPathCandidates 里，这里只负责拼接。
+ */
+export function splitTextByLinksAndPaths(text) {
+  const source = String(text || '')
+  if (!source) return []
+  const links = findAutolinks(source)
+  if (!links.length) return splitTextByPaths(source)
+  const segments = []
+  let cursor = 0
+  for (const link of links) {
+    if (link.start > cursor) segments.push(...splitTextByPaths(source.slice(cursor, link.start)))
+    segments.push({ type: 'link', ...link })
+    cursor = link.end
+  }
+  if (cursor < source.length) segments.push(...splitTextByPaths(source.slice(cursor)))
+  return segments
+}
+
 // --- Markdown 接入 ---------------------------------------------------------
 //
 // 用 remark 插件把文本节点里的路径换成链接节点，再由 Markdown 的 `a` 组件渲染成
@@ -226,18 +252,42 @@ export function parsePathHref(href) {
 function linkifyTextNode(node) {
   const segments = splitTextByPaths(node.value)
   if (!segments.some((segment) => segment.type === 'path')) return [node]
-  return segments.map((segment) =>
-    segment.type === 'path'
-      ? {
-          type: 'link',
-          url: pathHref(segment),
-          children: [{ type: 'text', value: segment.text }]
-        }
-      : { type: 'text', value: segment.text }
-  )
+  return linkNodes(segments)
 }
 
 const SKIPPED_NODE_TYPES = new Set(['code', 'inlineCode', 'html', 'link', 'linkReference'])
+
+function linkNodes(segments) {
+  return segments.map((segment) => {
+    if (segment.type === 'path' || segment.type === 'link') {
+      return {
+        type: 'link',
+        url: segment.type === 'path' ? pathHref(segment) : segment.url,
+        children: [{ type: 'text', value: segment.text }]
+      }
+    }
+    return { type: 'text', value: segment.text }
+  })
+}
+
+/**
+ * 行内代码里的链接与路径。
+ *
+ * 模型几乎总是用反引号包 URL 和文件名（`` `npm run dev` ``、`` `src/app.ts:12` ``、
+ * `` `http://127.0.0.1:3080` ``），早先整段当代码跳过，于是对话里最常见的这两种写法
+ * 全都不可点。这里把含链接/路径的行内代码换成「带 `<code>` 外观的容器」，样式还是代码
+ * 样式，孩子节点照常经过 `a` 组件渲染成可点元素。围栏代码块不受影响（它渲染的是原文）。
+ */
+function linkifyInlineCode(node) {
+  const segments = splitTextByLinksAndPaths(node.value)
+  if (!segments.some((segment) => segment.type === 'path' || segment.type === 'link')) return null
+  return {
+    type: 'emphasis',
+    // mdast 的 inlineCode 是字面量（不能有孩子），这里借 hName 换成真正的 <code> 元素
+    data: { hName: 'code' },
+    children: linkNodes(segments)
+  }
+}
 
 function walkAndLinkify(node) {
   if (!node || !Array.isArray(node.children)) return
@@ -249,6 +299,14 @@ function walkAndLinkify(node) {
       if (replacement.length !== 1 || replacement[0] !== child) changed = true
       next.push(...replacement)
       continue
+    }
+    if (child?.type === 'inlineCode' && typeof child.value === 'string') {
+      const replacement = linkifyInlineCode(child)
+      if (replacement) {
+        changed = true
+        next.push(replacement)
+        continue
+      }
     }
     // 链接内部、代码块与原始 HTML 里的路径保持原样：前者已经是链接，后者是代码。
     if (!SKIPPED_NODE_TYPES.has(child?.type)) walkAndLinkify(child)

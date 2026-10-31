@@ -11,7 +11,7 @@ import { resolveUseMainProvider } from '@packages/mica-common/index.js';
  * 声明，字段（`baseUrl` / `apiKey` / `protocol` / `model`）由这里统一生成：
  *
  * - 存储、校验、按会话覆盖仍然走 `settings` 那一套，不新增第二种读写；
- * - 页面把 `group: 'llm'` 的字段收进同一个面板，带「跟随主配置」与「测试」；
+ * - 页面把 `group: 'llm'` 的字段收进同一个面板，带「复用当前会话模型」与「测试」；
  * - 插件通过 `ctx.llm.config()` / `ctx.llm.request()` 拿到解析好的配置，不用自己拼。
  */
 
@@ -26,21 +26,28 @@ export const DEFAULT_PLUGIN_LLM_PROTOCOL: PluginModelProtocol = 'openai_chat_com
 /**
  * 清单里的 `llm` 声明。
  *
- * 只有一项能力：「这个插件要一个模型接口」。允许跟随主配置的插件（例如 commit 留空就用
- * 当前 provider）把 `followMain` 打开，页面会多一个开关。
+ * 只有一项能力：「这个插件要一个模型接口」。所有声明的插件都自带两条路——自己填
+ * 接口地址 / Key / 协议 / 模型，或勾上「复用当前会话模型」；后者还是前者的兜底。
+ * 插件作者不需要（也不能）逐个开关这个能力。
  */
 export type PluginLlmSpec = {
   /** 面板标题，例如「起标题模型」。缺省用「模型接口」。 */
   label?: string;
   /** 面板说明：这一项在什么时候会被调用、花的是谁的钱。 */
   description?: string;
-  /** 允许「跟随主配置」（接口地址 / Key / 协议 / 模型都来自当前 provider）。 */
-  followMain?: boolean;
+  /**
+   * 开关的初始状态：缺省**复用当前会话模型**——插件声明了 `llm` 就是「我要问模型」，
+   * 而会话里已经有一个用户付钱、也认得上下文的模型，没有再让每个人各填一套地址的理由。
+   *
+   * 只影响「用户还没拨过」时的取值。少数必须用独立接口才好用的插件（换更便宜的模型、
+   * 另一家服务）可以写 `false`，让面板一开始就摊开那四项。
+   */
+  reuseByDefault?: boolean;
   /** 模型输入框的占位示例。 */
   modelPlaceholder?: string;
   /** 接口地址输入框的占位示例。 */
   baseUrlPlaceholder?: string;
-  /** 这一项必须配置（不填就跑不起来）；跟随主配置时自动不算空缺。 */
+  /** 这一项必须配置（不填就跑不起来）；复用会话模型时自动不算空缺。 */
   required?: boolean;
 };
 
@@ -67,27 +74,25 @@ export function isPluginLlmSettingKey(key: string): boolean {
  * 也只写一次声明。字段顺序就是面板里的顺序。
  */
 export function pluginLlmSettingFields(spec: PluginLlmSpec): PluginSettingField[] {
-  const followMain = spec.followMain === true;
   const required = spec.required === true;
-  // 跟随主配置时，这里填的东西不生效，所以不能因为「留空」报错；
-  // 反过来关掉跟随之后它就是必填项（如果插件声明了 required）。
-  const requiredWhen = followMain ? { key: 'useMainProvider', equals: 'false' } : undefined;
+  // 复用会话模型时，下面几项不生效，所以不能因为「留空」报错；
+  // 反过来关掉复用之后它就是必填项（如果插件声明了 required）。
+  const requiredWhen = { key: 'useMainProvider', equals: 'false' };
   const shared = { required, requiredWhen, group: 'llm' as const, perSession: true };
 
-  const fields: PluginSettingField[] = [];
-  if (followMain) {
-    fields.push({
+  const fields: PluginSettingField[] = [
+    {
       key: 'useMainProvider',
-      label: '跟随主配置',
+      label: '复用当前会话模型',
       type: 'switch',
-      // 不预设 true / false：没表态时按「填了自己的地址就用自己的」推断，见
-      // `resolveUseMainProvider`。预设 true 会让已经填过地址的老配置突然改走主配置。
-      default: '',
+      // 取插件声明的开箱行为；用户拨过之后就以存下来的值为准。
+      default: spec.reuseByDefault === false ? 'false' : 'true',
       group: 'llm',
       perSession: true,
-      description: '用主配置的接口地址、Key、协议与模型。关掉后单独填下面四项。',
-    });
-  }
+      description:
+        '直接使用当前会话正在用的接口、Key、协议与模型；请求失败时也会自动降级到这里。关掉后单独填下面四项。',
+    },
+  ];
   fields.push(
     {
       key: 'baseUrl',
@@ -130,11 +135,8 @@ export function pluginLlmSettingFields(spec: PluginLlmSpec): PluginSettingField[
 }
 
 /** 解析后的配置：设置文件里的字符串 → 运行期可直接用的四个字段。 */
-export function resolvePluginLlmConfig(
-  spec: PluginLlmSpec | null,
-  values: Record<string, string | undefined>,
-): PluginLlmConfig {
-  const useMainProvider = resolveUseMainProvider(spec?.followMain, values);
+export function resolvePluginLlmConfig(values: Record<string, string | undefined>): PluginLlmConfig {
+  const useMainProvider = resolveUseMainProvider(values);
   const protocol = values.protocol;
   return {
     useMainProvider,
@@ -162,9 +164,54 @@ export function expandEnvPlaceholders(value: string): string {
 
 /** 人读的一句话，用于健康状态与 `/commit` 这类输出（不打印 Key）。 */
 export function describePluginLlm(config: PluginLlmConfig): string {
-  if (config.useMainProvider) return '跟随主配置';
+  if (config.useMainProvider) return '复用当前会话模型';
   if (!config.baseUrl || !config.model) return '未配置';
   return `${config.protocol === 'openai_responses' ? 'Responses' : 'Chat Completions'} · ${config.model}`;
+}
+
+/**
+ * 面板需要的展示状态：模型配置组件（配置页与会话设置共用）只认这一份数据。
+ *
+ * `main` 是「复用当前会话模型」实际会用的那一个：配置页给全局 provider，会话设置给
+ * 当前会话的模型。调用方各自拼这句人读摘要——两个宿主知道的 provider 信息不同，
+ * 但「跟随 / 独立」的判定与是否可用必须同源，否则页面会显示一个不会发出去的值。
+ */
+export type PluginLlmMainInfo = {
+  /** 例如「复用当前会话 · Chat Completions · gpt-5」。 */
+  summary: string;
+  available: boolean;
+};
+
+export type PluginLlmView = {
+  label: string;
+  description: string;
+  /** 生效配置的人读摘要（不含 Key）。 */
+  summary: string;
+  configured: boolean;
+  /** 不复用会话模型时这几项必填，页面据此加标记。 */
+  required: boolean;
+};
+
+export function describePluginLlmView(
+  spec: PluginLlmSpec,
+  values: Record<string, string | undefined>,
+  main?: PluginLlmMainInfo,
+): PluginLlmView {
+  const config = resolvePluginLlmConfig(values);
+  const view = {
+    label: spec.label ?? '模型接口',
+    description: spec.description ?? '这个插件会用它自己问一次模型。',
+    required: spec.required === true,
+  };
+  if (!config.useMainProvider) {
+    return { ...view, summary: describePluginLlm(config), configured: isPluginLlmConfigured(config) };
+  }
+  const available = main?.available === true;
+  return {
+    ...view,
+    summary: main?.summary ?? '当前会话没有可用的模型',
+    configured: available,
+  };
 }
 
 /** `ctx.llm.request` 的入参：模型配置由组件填，插件只给提示词与用途。 */
@@ -213,7 +260,7 @@ export type CreatePluginLlmApiOptions = {
 };
 
 export function createPluginLlmApi(options: CreatePluginLlmApiOptions): PluginLlmApi {
-  const readConfig = () => resolvePluginLlmConfig(options.spec, options.readValues());
+  const readConfig = () => resolvePluginLlmConfig(options.readValues());
   // 配置的接口/模型不可用时降级为主配置。记住「这一份配置已经失败过」：之后的请求直接
   // 走降级，不再先白白失败一次；用户改过任何一项（指纹变化）就重新尝试自己的配置。
   let degradedFingerprint: string | null = null;

@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { PluginSettingField } from '@packages/mica-plugin/index.js';
+import { pluginLlmSettingFields, type PluginLlmSpec, type PluginSettingField } from '@packages/mica-plugin/index.js';
 import { applyPluginSessionSettings, listPluginSessionSettings } from './pluginSessionSettings.js';
 
 const AUTO_COMPACT_FIELDS: PluginSettingField[] = [
@@ -37,7 +37,11 @@ afterEach(() => {
 type StubPlugin = {
   id: string;
   name: string;
-  manifest: { settings?: PluginSettingField[]; desktopPanel?: { label: string; roles: string[] } | null };
+  manifest: {
+    settings?: PluginSettingField[];
+    llm?: PluginLlmSpec | null;
+    desktopPanel?: { label: string; roles: string[] } | null;
+  };
 };
 
 const basePlugins: StubPlugin[] = [
@@ -47,7 +51,7 @@ const basePlugins: StubPlugin[] = [
 
 function createHost(
   initial: Record<string, Record<string, string>> = {},
-  options: { role?: string; plugins?: StubPlugin[]; panelIds?: string[] } = {}
+  options: { role?: string; plugins?: StubPlugin[]; panelIds?: string[] } = {},
 ) {
   const store: Record<string, Record<string, string>> = { ...initial };
   const plugins = options.plugins ?? basePlugins;
@@ -59,6 +63,7 @@ function createHost(
     panels: { get: (pluginId: string) => (panelIds.has(pluginId) ? {} : null) },
     agent: {
       role: options.role ?? 'default',
+      getSnapshot: () => ({ model: 'gpt-5', providerId: 'openai' }),
       getPluginSessionSettings: (pluginId: string) => store[pluginId],
       setPluginSessionSettings: (pluginId: string, value: Record<string, string> | undefined) => {
         if (value) store[pluginId] = value;
@@ -90,6 +95,49 @@ describe('listPluginSessionSettings', () => {
     expect(listPluginSessionSettings({ agent: {} as never })).toEqual([]);
   });
 
+  it('模型接口带上当前会话模型，配置页与会话设置因此能共用同一块面板', () => {
+    const plugins: StubPlugin[] = [
+      {
+        id: 'session-rename',
+        name: 'Auto Session Rename',
+        manifest: {
+          settings: pluginLlmSettingFields({ label: '起标题模型' }),
+          llm: { label: '起标题模型' },
+        },
+      },
+    ];
+    // 每个声明 llm 的插件都有这个开关：打开就跟着当前会话的模型走。
+    const list = listPluginSessionSettings(
+      createHost({ 'session-rename': { useMainProvider: 'true' } }, { plugins }),
+    );
+    expect(list[0].llm).toMatchObject({
+      label: '起标题模型',
+      configured: true,
+      summary: '复用当前会话 · gpt-5',
+    });
+  });
+
+  it('关掉复用后摘要改成插件自己的接口', () => {
+    const plugins: StubPlugin[] = [
+      {
+        id: 'session-rename',
+        name: 'Auto Session Rename',
+        manifest: { settings: pluginLlmSettingFields({}), llm: {} },
+      },
+    ];
+    const list = listPluginSessionSettings(
+      createHost(
+        { 'session-rename': { useMainProvider: 'false', baseUrl: 'https://x.test', model: 'mini' } },
+        { plugins },
+      ),
+    );
+    expect(list[0].llm).toMatchObject({ configured: true, summary: 'Chat Completions · mini' });
+  });
+
+  it('没有声明 llm 的插件不带模型配置', () => {
+    expect(listPluginSessionSettings(createHost())[0].llm).toBeNull();
+  });
+
   it('没有会话字段但有面板的插件也会出现，带上开关面板的文案', () => {
     const list = listPluginSessionSettings(
       createHost(
@@ -100,8 +148,8 @@ describe('listPluginSessionSettings', () => {
             { id: 'mobile-relay', name: 'Mobile Relay', manifest: { desktopPanel: { label: '手机访问', roles: [] } } },
           ],
           panelIds: ['mobile-relay'],
-        }
-      )
+        },
+      ),
     );
     expect(list.map((entry) => entry.id)).toEqual(['auto-compact', 'mobile-relay']);
     expect(list[1].fields).toEqual([]);
@@ -115,18 +163,18 @@ describe('listPluginSessionSettings', () => {
       createHost(
         {},
         {
-          plugins: [{ id: 'mobile-relay', name: 'Mobile Relay', manifest: { desktopPanel: { label: '手机访问', roles: [] } } }],
+          plugins: [
+            { id: 'mobile-relay', name: 'Mobile Relay', manifest: { desktopPanel: { label: '手机访问', roles: [] } } },
+          ],
           panelIds: [],
-        }
-      )
+        },
+      ),
     );
     expect(list).toEqual([]);
   });
 
   it('面板的角色门槛按当前会话角色判定', () => {
-    const plugins = [
-      { id: 'ops', name: 'Ops', manifest: { desktopPanel: { label: '运维', roles: ['需求开发'] } } },
-    ];
+    const plugins = [{ id: 'ops', name: 'Ops', manifest: { desktopPanel: { label: '运维', roles: ['需求开发'] } } }];
     expect(listPluginSessionSettings(createHost({}, { plugins, panelIds: ['ops'], role: '需求开发' }))).toHaveLength(1);
     expect(listPluginSessionSettings(createHost({}, { plugins, panelIds: ['ops'], role: 'default' }))).toEqual([]);
   });
@@ -182,6 +230,23 @@ describe('applyPluginSessionSettings', () => {
   it('拒绝没有 perSession 字段的插件与未知插件', () => {
     expect(applyPluginSessionSettings(createHost(), { pluginId: 'web-search', values: {} }).ok).toBe(false);
     expect(applyPluginSessionSettings(createHost(), { pluginId: 'nope', values: {} }).ok).toBe(false);
+  });
+
+  it('允许先关掉「复用当前会话模型」再填接口：未填只算待配置，不算非法值', () => {
+    const plugins: StubPlugin[] = [
+      {
+        id: 'llm-plugin',
+        name: 'LLM Plugin',
+        manifest: { settings: pluginLlmSettingFields({ required: true }), llm: {} },
+      },
+    ];
+    const host = createHost({}, { plugins });
+    const result = applyPluginSessionSettings(host, {
+      pluginId: 'llm-plugin',
+      values: { useMainProvider: 'false' },
+    });
+    expect(result).toEqual({ ok: true });
+    expect(host.store['llm-plugin']).toEqual({ useMainProvider: 'false' });
   });
 
   it('values 不是对象时明确报错', () => {

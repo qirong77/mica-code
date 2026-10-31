@@ -433,7 +433,7 @@ function GitFileRow({
   return (
     <div
       className={`group flex h-[22px] w-full items-center rounded-sm pr-1.5 ${
-        selected ? 'bg-overlay-strong' : 'hover:bg-list-hover'
+        selected ? 'bg-active' : 'hover:bg-list-hover'
       }`}
       style={{ paddingLeft: 5 + depth * 8 }}
       onContextMenu={(event) => onContextMenu?.(event, file)}

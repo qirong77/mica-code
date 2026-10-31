@@ -24,8 +24,9 @@ export type CompactMessagesResult = {
 export async function compactAgentMessages(
   agent: AgentRuntime,
   messages: unknown[],
-  mode: CompactMessagesMode,
+  options: { mode: CompactMessagesMode; summarize?: (transcript: string, prompt: string) => Promise<string> },
 ): Promise<CompactMessagesResult> {
+  const { mode, summarize } = options;
   const service = new micaContext.CompactionService();
   if (mode === 'quick') {
     const result = await service.compact({ messages, options: { toolResultsOnly: true } });
@@ -34,38 +35,41 @@ export async function compactAgentMessages(
 
   const result = await service.compact({
     messages,
-    summarize: async (transcript, prompt) => {
-      // 摘要必须走子代理、禁用工具：它共享父代理的工具注册表，session_* 之类的
-      // 工具会去改正在被压缩的会话本身（与 /compact llm 同一条路径）。
-      const subAgent = agent.createSubAgent({ systemPrompt: prompt, tools: false });
-      const startedAt = new Date().toISOString();
-      try {
-        return await subAgent.query(
-          [
-            'Summarize this conversation into a compact checkpoint for the next coding agent.',
-            'Preserve concrete paths, commands, validation results, user constraints, and pending work.',
-            'Return only the requested <analysis> and <summary> blocks.',
-            '',
-            transcript,
-          ].join('\n'),
-        );
-      } finally {
-        // 摘要请求不进主 usageHistory（那会污染 ctx 与 lastUsage），但要记进
-        // subagentUsageHistory，否则这次开销在 Stats 里不可见。
-        recordSubagentTaskUsage(agent, subAgent, {
-          taskId: 'auto-compact-summary',
-          subagentType: 'auto-compact',
-          description: '自动模型压缩摘要',
-          model: agent.config.model,
-          effort: 'none',
-          status: 'completed',
-          startedAt,
-          finishedAt: new Date().toISOString(),
-        });
-      }
-    },
+    // 插件给了自己的摘要请求就用它：换模型是插件的策略，分段、预算与重试仍归内核。
+    summarize: summarize ?? ((transcript, prompt) => summarizeWithSubAgent(agent, transcript, prompt)),
   });
   return { messages: result.messages, savedTokens: Math.max(0, result.savedTokenEstimate) };
+}
+
+async function summarizeWithSubAgent(agent: AgentRuntime, transcript: string, prompt: string): Promise<string> {
+  // 摘要必须走子代理、禁用工具：它共享父代理的工具注册表，session_* 之类的
+  // 工具会去改正在被压缩的会话本身（与 /compact llm 同一条路径）。
+  const subAgent = agent.createSubAgent({ systemPrompt: prompt, tools: false });
+  const startedAt = new Date().toISOString();
+  try {
+    return await subAgent.query(
+      [
+        'Summarize this conversation into a compact checkpoint for the next coding agent.',
+        'Preserve concrete paths, commands, validation results, user constraints, and pending work.',
+        'Return only the requested <analysis> and <summary> blocks.',
+        '',
+        transcript,
+      ].join('\n'),
+    );
+  } finally {
+    // 摘要请求不进主 usageHistory（那会污染 ctx 与 lastUsage），但要记进
+    // subagentUsageHistory，否则这次开销在 Stats 里不可见。
+    recordSubagentTaskUsage(agent, subAgent, {
+      taskId: 'auto-compact-summary',
+      subagentType: 'auto-compact',
+      description: '自动模型压缩摘要',
+      model: agent.config.model,
+      effort: 'none',
+      status: 'completed',
+      startedAt,
+      finishedAt: new Date().toISOString(),
+    });
+  }
 }
 
 /** 「没有可清理内容」与真正的失败要分开：前者不是错误，只是这次没压出东西。 */

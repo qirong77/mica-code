@@ -441,6 +441,9 @@ function makeHome(tag: string): string {
     ),
   );
   mkdirSync(join(home, 'sessions'), { recursive: true });
+  // 这些用例量的是 turn 机制（请求顺序、排队、中断），不是自动起标题：插件现在默认
+  // 复用会话模型，会在每轮之前多打一次模型请求，把请求序列对乱。要测标题行为时单独开。
+  writeFileSync(join(home, 'plugins-state.json'), JSON.stringify({ disabled: ['session-rename'] }));
   return home;
 }
 

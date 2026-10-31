@@ -4,6 +4,7 @@ import {
   type PluginSettingIssue,
   type PluginSettingValues,
 } from './PluginSettings.js';
+import type { PluginLlmView } from './PluginLlm.js';
 
 /**
  * 插件设置的会话级覆盖。
@@ -61,6 +62,13 @@ export type PluginSessionSettingsView = {
   /** 本会话真正覆盖过的键；界面据此提示「跟随全局」还是「仅本会话」。 */
   overrides: PluginSettingValues;
   /**
+   * 清单声明了 `llm` 时的模型接口状态。
+   *
+   * 会话设置与配置页共用同一个模型配置组件，所以展示状态也由宿主算好一起给：摘要写的
+   * 是**当前会话**会用的模型，「能不能用」也按会话里的选择计算。
+   */
+  llm: PluginLlmView | null;
+  /**
    * 这个插件在会话里有没有可打开的面板（清单 `desktop.panel` + `ctx.desktop.panel()`）。
    *
    * 面板的入口就在这一节：插件既可以只有面板没有会话设置，也可以两者都有。
@@ -102,6 +110,12 @@ export function normalizePluginSessionSettingsRecord(input: unknown): PluginSess
 export function validateSessionSettingValues(
   fields: readonly PluginSettingField[],
   values: Record<string, string | null>,
+  /**
+   * 逐键自动保存的宿主（会话设置）会先写「复用当前会话模型 = 关」，此时地址与模型
+   * 还没填：这不是非法值，只是配置不完整，界面已用「待配置」标出来。允许它先落盘，
+   * 否则用户拨一下开关就会被拒，连填的机会都没有。配置页的整组保存仍然拦。
+   */
+  options: { allowEmptyRequired?: boolean } = {},
 ): PluginSettingIssue[] {
   const scoped = sessionScopedSettingFields(fields);
   const allowed = new Set(scoped.map((field) => field.key));
@@ -111,7 +125,8 @@ export function validateSessionSettingValues(
     if (value === null) continue;
     candidate[key] = value;
   }
-  return validatePluginSettingValues(scoped, candidate);
+  const issues = validatePluginSettingValues(scoped, candidate);
+  return options.allowEmptyRequired ? issues.filter((issue) => issue.message !== '不能为空') : issues;
 }
 
 /**

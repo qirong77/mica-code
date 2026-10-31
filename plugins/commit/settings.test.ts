@@ -22,7 +22,7 @@ describe('commit plugin settings', () => {
     const llm = {
       configured: () => false,
     } as never;
-    expect(commitLlmProblem(llm)).toBe('未配置模型接口：请在插件设置里填写接口地址与模型');
+    expect(commitLlmProblem(llm)).toBe('未配置模型接口：请在插件设置里复用当前会话模型，或填写接口地址与模型');
   });
 
   it('passes when the interface is configured', () => {

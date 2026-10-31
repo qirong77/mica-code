@@ -56,9 +56,7 @@ describe('findPathCandidates', () => {
   })
 
   it('recognizes a path right after a colon, half or full width', () => {
-    expect(findPathCandidates('目录：/Users/a/b').map((item) => item.path)).toEqual([
-      '/Users/a/b'
-    ])
+    expect(findPathCandidates('目录：/Users/a/b').map((item) => item.path)).toEqual(['/Users/a/b'])
     expect(findPathCandidates('config:/Users/a/b.json').map((item) => item.path)).toEqual([
       '/Users/a/b.json'
     ])
@@ -132,7 +130,7 @@ describe('remarkPathLinks', () => {
     expect(children[1].children[0].value).toBe('/Users/a/b')
   })
 
-  it('leaves code blocks and existing links alone', () => {
+  it('keeps fenced code literal and links inline code, leaving existing links alone', () => {
     const tree = run({
       type: 'root',
       children: [
@@ -147,7 +145,11 @@ describe('remarkPathLinks', () => {
       ]
     })
     expect(tree.children[0].type).toBe('code')
-    expect(tree.children[1].children[0].type).toBe('inlineCode')
+    // 行内代码换成「<code> 外观 + 可点孩子」：hName 让 mdast 渲染成 code 元素
+    const inline = tree.children[1].children[0]
+    expect(inline.data.hName).toBe('code')
+    expect(inline.children[0].type).toBe('link')
+    expect(parsePathHref(inline.children[0].url).path).toBe('/Users/a/b')
     expect(tree.children[2].children[0].url).toBe('https://example.com')
   })
 })

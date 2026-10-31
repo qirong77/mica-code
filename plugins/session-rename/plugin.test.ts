@@ -111,7 +111,10 @@ describe('session-rename plugin', () => {
   });
 
   it('stays silent when the endpoint is not configured yet', async () => {
-    const harness = createHarness({ settings: { ...configuredSettings, baseUrl: '', model: '' } });
+    // 默认是复用会话模型；「没配好」指的是关掉复用之后又没填完。
+    const harness = createHarness({
+      settings: { ...configuredSettings, useMainProvider: 'false', baseUrl: '', model: '' },
+    });
 
     await harness.emitTurnBefore();
 

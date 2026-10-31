@@ -112,6 +112,9 @@ export default function setup(ctx: PluginContext): void {
   const hookSubscription = ctx.hooks.on<RuntimeTurnBeforeHookEvent>(
     'turn:before',
     (event) => {
+      // 一次性运行（`mica exec`）不落会话、马上退出，生成的标题没有地方可留；
+      // 默认复用会话模型之后它就成了实际的每日调用，更不该在这种宿主里白花一次。
+      if (ctx.agent?.mode === 'one-shot') return;
       // 系统注入（compact 边界、插件通知）不是用户提的要求，拿它当标题依据只会得到
       // 一句内部文本。
       if (event.input.source === 'system') return;
