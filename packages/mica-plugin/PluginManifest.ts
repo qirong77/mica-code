@@ -13,11 +13,14 @@ import {
 } from './PluginActions.js';
 import {
   PLUGIN_PANEL_DISPLAYS,
+  PLUGIN_ENTRY_PLACEMENTS,
   isDesktopCheckId,
+  isPluginEntryPlacement,
   type DesktopCheckId,
   type PluginDesktopEntry,
   type PluginDesktopPage,
   type PluginDesktopPanel,
+  type PluginEntryPlacement,
   type PluginPanelDisplay,
   type PluginPanelShortcut,
 } from './PluginDesktop.js';
@@ -429,11 +432,27 @@ function readDesktop(
   }
   // 侧栏那一行只有一行的宽度：文案留空的退化成语义（用插件名）而不是画一行空白。
   const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
+  const rawPlacement = rawEntry.placement;
+  if (rawPlacement !== undefined && !isPluginEntryPlacement(rawPlacement)) {
+    return {
+      ok: false,
+      error: `desktop.entry.placement 只能是 ${PLUGIN_ENTRY_PLACEMENTS.join(' / ')}`,
+    };
+  }
+  const placement: PluginEntryPlacement = isPluginEntryPlacement(rawPlacement)
+    ? rawPlacement
+    : 'sidebar';
   const page = readDesktopPage(input.page, label);
   if (!page.ok) return page;
   return {
     ok: true,
-    value: { checks, entry: { label }, page: page.value, panel: panel.value, sessionMenu: sessionMenu.value },
+    value: {
+      checks,
+      entry: { label, placement },
+      page: page.value,
+      panel: panel.value,
+      sessionMenu: sessionMenu.value,
+    },
   };
 }
 

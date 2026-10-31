@@ -31,7 +31,7 @@ import {
 import { BranchPicker } from './BranchPicker'
 import { ChatView } from './ChatView'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
-import { PluginEntries } from './PluginEntries'
+import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
 import { PluginPage } from './PluginPage'
 import { SessionTree } from './SessionTree'
 import { runSessionMenuPluginAction, useSessionMenuPlugins } from './session-menu-plugins'
@@ -2667,6 +2667,10 @@ export default function App() {
             )}
             {/* 顶栏右侧：受控浏览器与终端控制的窗口图标（各按窗口/会话一个，没有就不出现）、终端面板开关、文件视图开关。 */}
             <div className="no-drag ml-auto flex shrink-0 items-center gap-0.5">
+              {/* 声明了 `desktop.entry.placement: "header"` 的插件入口：与侧栏那一行是
+                  同一份数据，这里只画图标，落在这一簇的最左边（窗口类图标仍贴最右）。
+                  分享视图不出现在这里——那页本来就没有侧栏，插件入口也跟着一起没有。 */}
+              {!shareView && <PluginHeaderEntries onOpenPage={openPluginPage} />}
               {/* 会话笔记：本会话的用户/模型共同维护的 markdown，存在会话快照里，
                   所以压缩不会把它冲掉。窗口类图标按窗口出现，这个是按会话出现。 */}
               {!shareView && activeNode && (

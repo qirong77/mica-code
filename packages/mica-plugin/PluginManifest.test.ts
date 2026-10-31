@@ -41,17 +41,35 @@ describe('parsePluginManifest desktop entry', () => {
   it('reads the sidebar label a plugin asks for', () => {
     const result = parsePluginManifest(base({ desktop: { entry: { label: '连接' } } }));
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.manifest.desktopEntry).toEqual({ label: '连接' });
+    if (result.ok) expect(result.manifest.desktopEntry).toEqual({ label: '连接', placement: 'sidebar' });
+  });
+
+  it('moves the entry into the top bar when the manifest asks for placement: header', () => {
+    const result = parsePluginManifest(
+      base({ desktop: { entry: { label: 'Schedule', placement: 'header' } } }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.desktopEntry).toEqual({ label: 'Schedule', placement: 'header' });
+    }
+  });
+
+  it('rejects an unknown placement instead of quietly drawing the entry elsewhere', () => {
+    const result = parsePluginManifest(
+      base({ desktop: { entry: { label: 'Schedule', placement: 'titlebar' } } }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('placement');
   });
 
   it('falls back to the plugin name when the label is empty or missing', () => {
     const blank = parsePluginManifest(base({ desktop: { entry: { label: '  ' } } }));
     expect(blank.ok).toBe(true);
-    if (blank.ok) expect(blank.manifest.desktopEntry).toEqual({ label: 'Demo' });
+    if (blank.ok) expect(blank.manifest.desktopEntry).toEqual({ label: 'Demo', placement: 'sidebar' });
 
     const absent = parsePluginManifest(base({ desktop: { entry: {} } }));
     expect(absent.ok).toBe(true);
-    if (absent.ok) expect(absent.manifest.desktopEntry).toEqual({ label: 'Demo' });
+    if (absent.ok) expect(absent.manifest.desktopEntry).toEqual({ label: 'Demo', placement: 'sidebar' });
   });
 
   it('keeps entry and checks independent under the same desktop section', () => {
@@ -61,7 +79,7 @@ describe('parsePluginManifest desktop entry', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.manifest.desktopChecks).toEqual(['accessibility']);
-    expect(result.manifest.desktopEntry).toEqual({ label: '连接' });
+    expect(result.manifest.desktopEntry).toEqual({ label: '连接', placement: 'sidebar' });
   });
 
   it('rejects a malformed entry instead of silently dropping the sidebar row', () => {

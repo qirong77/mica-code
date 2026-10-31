@@ -65,7 +65,7 @@ export type PluginDesktopRequirements = {
 /**
  * 桌面端入口（清单 `desktop.entry`）。
  *
- * 插件想让自己的能力以「侧栏一行入口 + 点开的卡片」出现在桌面端时声明它，宿主按
+ * 插件想让自己的能力以「一行入口 + 点开的卡片 / 整页」出现在桌面端时声明它，宿主按
  * 约定去插件目录找 `desktop.jsx`（default 导出 React 组件）渲染卡片内容——宿主因此
  * 不需要认识任何具体插件。
  *
@@ -74,9 +74,25 @@ export type PluginDesktopRequirements = {
  * 运行时才出现的目录，页面那边没有它的模块。
  */
 export type PluginDesktopEntry = {
-  /** 侧栏那一行显示的文案；清单没写时用插件的 name。 */
+  /** 入口显示的文案；清单没写时用插件的 name。`header` 形态把它收进 tooltip。 */
   label: string;
+  /**
+   * 入口画在哪一侧。
+   *
+   * `sidebar` 是侧栏里的一行（带文案与 `summary`），`header` 是主区顶栏的一枚图标按钮：
+   * 顶栏只有 32px 高、又要给窗口类图标留位置，所以那里只画图标。
+   */
+  placement: PluginEntryPlacement;
 };
+
+/** `desktop.entry.placement` 的取值（单一事实来源，清单解析与界面共用）。 */
+export const PLUGIN_ENTRY_PLACEMENTS = ['sidebar', 'header'] as const;
+
+export type PluginEntryPlacement = (typeof PLUGIN_ENTRY_PLACEMENTS)[number];
+
+export function isPluginEntryPlacement(value: unknown): value is PluginEntryPlacement {
+  return typeof value === 'string' && (PLUGIN_ENTRY_PLACEMENTS as readonly string[]).includes(value);
+}
 
 /**
  * 插件的整页视图（清单 `desktop.page`）。

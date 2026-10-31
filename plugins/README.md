@@ -348,6 +348,9 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 ```
 
 - 入口的文案来自清单，图标用清单的 `icon`；`label` 不写就退化成插件的 `name`。
+- `placement` 决定入口画在哪一侧：`sidebar`（默认）是侧栏里的一行，`header` 是主区顶栏右侧
+  的一枚图标按钮（32px 高的顶栏只容得下图标，文案进 tooltip）。两处用的是同一个
+  `desktop.jsx`，卡片与整页的行为不随位置改变。
 - 卡片**只画内容**：定宽、浮层定位、悬停/点击展开、Esc 与点外面收起都由宿主
   （`apps/desktop/src/renderer/src/PluginEntries.jsx`）负责。
 - 宿主按插件 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里

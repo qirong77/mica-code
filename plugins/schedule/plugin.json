@@ -10,7 +10,10 @@
   "priority": 35,
   "mica": { "apiVersion": 1 },
   "requires": ["tools", "skills"],
-  "desktop": { "entry": { "label": "Schedule" }, "page": { "title": "排期" } },
+  "desktop": {
+    "entry": { "label": "Schedule", "placement": "header" },
+    "page": { "title": "排期" }
+  },
   "status": [
     { "key": "summary", "label": "排期", "type": "text" },
     { "key": "updatedAt", "label": "最近改动", "type": "text" }

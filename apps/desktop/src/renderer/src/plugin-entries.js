@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { readPluginsDetails } from './plugins-details'
 
 /**
- * 插件在桌面端侧栏的入口。
+ * 插件在桌面端的入口（侧栏一行，或者顶栏的一枚图标按钮）。
  *
  * 两半数据来自两处：文案来自清单的 `desktop.entry`（配置页数据层已经读好了），卡片内容
  * 来自插件自己目录里的 `desktop.jsx`。宿主因此不认识任何具体插件——加一个桌面插件只需
@@ -58,6 +58,8 @@ export function usePluginEntries() {
             return {
               id: plugin.id,
               label: plugin.desktopEntry.label,
+              // 位置是清单说了算的呈现选择：`header` 走顶栏，其余一律按侧栏一行画
+              placement: plugin.desktopEntry.placement === 'header' ? 'header' : 'sidebar',
               icon: plugin.icon,
               module,
               page

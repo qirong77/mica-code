@@ -6,11 +6,12 @@ import { createPluginHostApi } from './plugin-host'
 import { usePluginEntries } from './plugin-entries'
 
 /**
- * 插件在侧栏里的入口行 + 卡片容器。
+ * 插件在桌面端的入口容器 + 卡片。
  *
- * 宿主只做容器：一行文字加图标、点开/悬停时把卡片浮在行右侧（手机上原地展开）。卡片
- * 内容由插件自己的 `desktop.jsx` 画，宿主不知道里面是什么——「连接」「看板」「待办」
- * 全都是同一个形状。
+ * 宿主只做容器，位置由清单的 `desktop.entry.placement` 决定：`sidebar`（默认）是侧栏里
+ * 一行文字加图标、点开/悬停时把卡片浮在行右侧（手机上原地展开）；`header` 是主区顶栏的
+ * 一枚图标按钮、点开时卡片浮在按钮下面。两处画的是同一个 `desktop.jsx`，宿主不知道里面
+ * 是什么——「连接」「排期」「待办」全都是同一个形状。
  *
  * 卡片的样式、定宽、浮层定位、Esc / 点外面收起都在这里，插件只管画内容。
  */
@@ -22,11 +23,92 @@ const CARD_GAP = 6
 // 都在这条线以内，再往外就是主区了。
 const SIDEBAR_EDGE_SLACK = 40
 
+/** 打开后：Esc 与点卡片外面都收起。点入口本身由 onClick 管，这里不拦截。 */
+function useDismissOnOutside(open, setOpen, anchorRef) {
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = (event) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    const onPointerDown = (event) => {
+      if (event.target.closest?.('[data-plugin-entry-card]')) return
+      if (anchorRef.current?.contains(event.target)) return
+      setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [open, setOpen, anchorRef])
+}
+
 export function PluginEntries({ onOpenPage }) {
   const entries = usePluginEntries()
-  return entries.map((entry) => (
-    <PluginEntryRow key={entry.id} entry={entry} onOpenPage={onOpenPage} />
-  ))
+  return entries
+    .filter((entry) => entry.placement !== 'header')
+    .map((entry) => <PluginEntryRow key={entry.id} entry={entry} onOpenPage={onOpenPage} />)
+}
+
+/**
+ * 顶栏右侧的入口（清单 `desktop.entry.placement: "header"`）。
+ *
+ * 顶栏只有 32px 高，所以这里只画图标，文案进 tooltip；点开的行为与侧栏那一行一致——
+ * 声明了 `desktop.page` 的开整页，否则在按钮下面浮出卡片。位置由 App 决定（放在顶栏右侧
+ * 那一簇的最左边，窗口类图标仍然贴在最右），这里只管画按钮和卡片。
+ */
+export function PluginHeaderEntries({ onOpenPage }) {
+  const entries = usePluginEntries()
+  return entries
+    .filter((entry) => entry.placement === 'header')
+    .map((entry) => <PluginHeaderEntry key={entry.id} entry={entry} onOpenPage={onOpenPage} />)
+}
+
+function PluginHeaderEntry({ entry, onOpenPage }) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef(null)
+  const api = useMemo(() => createPluginHostApi(entry.id), [entry.id])
+  const isPage = Boolean(entry.page) && typeof onOpenPage === 'function'
+
+  useDismissOnOutside(open, setOpen, anchorRef)
+
+  const Card = entry.module.default
+  const card = Card ? (
+    <section
+      data-plugin-entry-card
+      className="rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl backdrop-blur"
+      style={{ width: CARD_WIDTH }}
+    >
+      <Card api={api} onClose={() => setOpen(false)} />
+    </section>
+  ) : null
+
+  return (
+    <>
+      <div ref={anchorRef} className="shrink-0">
+        <button
+          type="button"
+          aria-expanded={open}
+          title={`${entry.label}（${entry.id} 插件）`}
+          aria-label={entry.label}
+          className={`grid size-6 place-items-center rounded-md transition-colors ${
+            open
+              ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
+              : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
+          }`}
+          onClick={isPage ? () => onOpenPage(entry) : () => setOpen((value) => !value)}
+        >
+          <PluginIcon name={entry.icon} size={14} />
+        </button>
+      </div>
+      {open && card && (
+        <EntryPopover anchorRef={anchorRef} placement="below">
+          {card}
+        </EntryPopover>
+      )}
+    </>
+  )
 }
 
 function PluginEntryRow({ entry, onOpenPage }) {
@@ -61,24 +143,7 @@ function PluginEntryRow({ entry, onOpenPage }) {
 
   useEffect(() => () => clearTimeout(closeTimer.current), [])
 
-  // 打开后：Esc 与点卡片外面都收起。点行本身由 onClick 管，这里不拦截。
-  useEffect(() => {
-    if (!open) return undefined
-    const onKey = (event) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    const onPointerDown = (event) => {
-      if (event.target.closest?.('[data-plugin-entry-card]')) return
-      if (rowRef.current?.contains(event.target)) return
-      setOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    document.addEventListener('pointerdown', onPointerDown)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      document.removeEventListener('pointerdown', onPointerDown)
-    }
-  }, [open])
+  useDismissOnOutside(open, setOpen, rowRef)
 
   const Card = entry.module.default
   // 入口行右侧那一行状态（「本机」「3 台」）由插件自己给：宿主不知道它的业务含义
@@ -150,25 +215,35 @@ function sidebarRightEdge(rowEl) {
   return edge
 }
 
-/** 把卡片浮在侧栏右边界上，并桥接这 6px 缝隙（鼠标划过去不会先触发关闭） */
-function EntryPopover({ anchorRef, onPointerEnter, onPointerLeave, children }) {
+/**
+ * 卡片浮层。`placement` 决定贴哪一边：`side` 贴在侧栏右边界上并桥接那 6px 缝隙（鼠标划
+ * 过去不会先触发关闭），`below` 贴在顶栏按钮下面、与按钮右对齐。
+ */
+function EntryPopover({ anchorRef, placement = 'side', onPointerEnter, onPointerLeave, children }) {
   const ref = useRef(null)
   const [pos, setPos] = useState(null)
 
   const place = useCallback(() => {
-    const rowEl = anchorRef.current
-    const anchor = rowEl?.getBoundingClientRect()
+    const anchorEl = anchorRef.current
+    const anchor = anchorEl?.getBoundingClientRect()
     const wrap = ref.current?.getBoundingClientRect()
     if (!anchor || !wrap) return
-    // wrapper 的 pl-1.5 就是那 6px 缝隙，所以卡片本身落在侧栏边界上
-    let left = sidebarRightEdge(rowEl) - CARD_GAP
-    let top = anchor.top
+    // wrapper 的 pl-1.5 / pt-1.5 就是那 6px 缝隙，所以卡片本身落在边界上
+    let left
+    let top
+    if (placement === 'below') {
+      left = anchor.right - wrap.width
+      top = anchor.bottom
+    } else {
+      left = sidebarRightEdge(anchorEl) - CARD_GAP
+      top = anchor.top
+    }
     if (left + wrap.width > window.innerWidth - 4)
       left = Math.max(4, window.innerWidth - wrap.width - 4)
     if (top + wrap.height > window.innerHeight - 4)
       top = Math.max(4, window.innerHeight - wrap.height - 4)
     setPos({ left, top })
-  }, [anchorRef])
+  }, [anchorRef, placement])
 
   useLayoutEffect(() => {
     place()
@@ -179,7 +254,7 @@ function EntryPopover({ anchorRef, onPointerEnter, onPointerLeave, children }) {
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[10500] overflow-y-auto pl-1.5"
+      className={`fixed z-[10500] overflow-y-auto ${placement === 'below' ? 'pt-1.5' : 'pl-1.5'}`}
       // 卡片内容由插件决定，长的能有好几屏（一个排期卡片能列出十几天的节点）。宿主管的是
       // 这块容器，所以高度上限也在这里：超出窗口的部分在卡片内滚动，而不是被窗口边缘切掉。
       //
