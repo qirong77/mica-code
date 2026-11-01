@@ -1,5 +1,5 @@
 import { addDays, daysBetween, formatStamp, isValidDate, isValidRange, startOfWeek, todayOf } from './dates.js';
-import { COLOR_KEYS, isScheduleColor, normalizeColor, type ScheduleColor } from './palette.js';
+import { COLOR_KEYS, isScheduleColor, nextColor, normalizeColor, type ScheduleColor } from './palette.js';
 
 /**
  * 排期的数据模型与全部写操作。
@@ -114,14 +114,35 @@ export function normalizeScale(value: unknown): ScheduleScale {
  * 这份文件可能被别的版本写过、被 `$MICA_HOME` 拷来拷去、也可能被手改坏：认不出的部分
  * 丢掉，能显示的照常显示——一条坏任务不该让整张时间线消失。
  *
- * 旧形态（`plans` / `stages`）不再支持：这里只读 `tasks`，旧文件读出来就是一张空排期。
+ * 旧形态（`plans` / `stages`）在读取时迁移成扁平任务：计划名并进任务名、计划备注放在
+ * 第一条、颜色按计划顺序分配，原来「一个计划一行」的分组因此保留下来。
  */
 export function normalizeData(value: unknown): ScheduleData {
   const record = asRecord(value);
   if (!record) return emptyData();
+  const legacy = isLegacyPlanShape(record);
+  const tasks = legacy ? migrateLegacyPlans(record) : normalizeTaskEntries(record.tasks);
+  return {
+    version: typeof record.version === 'number' && !legacy ? record.version : SCHEDULE_VERSION,
+    updatedAtMs: typeof record.updatedAtMs === 'number' ? record.updatedAtMs : 0,
+    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
+    summary: legacy || typeof record.summary !== 'string' ? summarize(tasks) : record.summary,
+    title: normalizeTitle(record.title),
+    scale: normalizeScale(record.scale),
+    tasks,
+  };
+}
+
+/** 旧版本把排期存成「计划 + 阶段」两层；现在只有一层任务。 */
+export function isLegacyPlanShape(value: unknown): boolean {
+  const record = asRecord(value);
+  return Boolean(record && !Array.isArray(record.tasks) && Array.isArray(record.plans));
+}
+
+function normalizeTaskEntries(value: unknown): ScheduleTask[] {
   const seen = new Set<string>();
   const tasks: ScheduleTask[] = [];
-  for (const entry of asArray(record.tasks)) {
+  for (const entry of asArray(value)) {
     const task = asRecord(entry);
     if (!task) continue;
     const id = text(task.id, MAX_NAME_LENGTH);
@@ -139,15 +160,44 @@ export function normalizeData(value: unknown): ScheduleData {
       note: text(task.note, MAX_NOTE_LENGTH),
     });
   }
-  return {
-    version: typeof record.version === 'number' ? record.version : SCHEDULE_VERSION,
-    updatedAtMs: typeof record.updatedAtMs === 'number' ? record.updatedAtMs : 0,
-    updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
-    summary: typeof record.summary === 'string' ? record.summary : summarize(tasks),
-    title: normalizeTitle(record.title),
-    scale: normalizeScale(record.scale),
-    tasks,
-  };
+  return tasks;
+}
+
+function migrateLegacyPlans(record: Record<string, unknown>): ScheduleTask[] {
+  const tasks: ScheduleTask[] = [];
+  const seen = new Set<string>();
+  asArray(record.plans).forEach((entry, planIndex) => {
+    if (tasks.length >= MAX_TASKS) return;
+    const plan = asRecord(entry);
+    if (!plan) return;
+    const planName = text(plan.name, MAX_NAME_LENGTH);
+    const planNote = text(plan.note, MAX_NOTE_LENGTH);
+    const color = nextColor(planIndex);
+    let firstStage = true;
+    asArray(plan.stages).forEach((stageEntry) => {
+      if (tasks.length >= MAX_TASKS) return;
+      const stage = asRecord(stageEntry);
+      if (!stage) return;
+      const stageName = text(stage.name, MAX_NAME_LENGTH);
+      const start = text(stage.start, 10);
+      const end = text(stage.end, 10) || start;
+      if (!stageName || !isValidRange(start, end)) return;
+      let id = text(stage.id, MAX_NAME_LENGTH);
+      if (!id) id = newId();
+      while (seen.has(id)) id = newId();
+      seen.add(id);
+      tasks.push({
+        id,
+        name: (planName ? `${planName} · ${stageName}` : stageName).slice(0, MAX_NAME_LENGTH),
+        start,
+        end,
+        color,
+        note: planNote && firstStage ? planNote : '',
+      });
+      firstStage = false;
+    });
+  });
+  return tasks;
 }
 
 /* ------------------------------------------------------------------ 写操作 */
@@ -286,7 +336,8 @@ export function exportDocument(data: ScheduleData): ScheduleDocument {
 
 /**
  * 导入：解析失败或没有任何合法任务都直接报错，避免用户以为导入成功了。
- * 认不出的字段（包括旧形态的 `plans`）被丢掉；颜色、日期不合法的任务不会进来。
+ * 认不出的字段被丢掉；旧形态（`plans` / `stages`）按迁移规则读成任务；
+ * 颜色、日期不合法的任务不会进来。
  */
 export function parseImport(value: unknown): { title: string; scale: ScheduleScale; tasks: ScheduleTask[] } {
   const data = normalizeData(value);

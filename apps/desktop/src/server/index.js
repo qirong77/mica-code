@@ -155,11 +155,7 @@ const MIME_TYPES = {
   '.txt': 'text/plain; charset=utf-8'
 }
 
-/**
- * 分享视图开关。历史上有过独立的分享端口（`--share-port 8890`、`0`/`off` 关掉），现在
- * 它只是自己端口上的 `/share`，所以这里只认「开/关」：`0`/`off`/`false` 关掉 `/share`
- * 路由，其余值（含历史上传过的端口号）一律表示开启，端口号本身不再有意义。
- */
+/** 分享视图开关：`0`/`off`/`false` 关掉 `/share` 路由，其余值表示开启。 */
 function parseSharing(value) {
   const text = String(value ?? '')
     .trim()
@@ -172,7 +168,7 @@ function parseArgs(argv) {
   const options = {
     host: process.env.MICA_DESKTOP_HOST || '0.0.0.0',
     port: parseRuntimePort(process.env[RUNTIME_PORT_ENV]),
-    sharing: parseSharing(process.env.MICA_DESKTOP_SHARE_PORT ?? process.env.MICA_DESKTOP_SHARING),
+    sharing: parseSharing(process.env.MICA_DESKTOP_SHARING),
     renderer: process.env.MICA_DESKTOP_RENDERER || join(PACKAGE_ROOT, 'out', 'renderer'),
     // dev 模式下页面由 Vite dev server 提供，服务端只承载 API
     requireRenderer: process.env.MICA_DESKTOP_ALLOW_MISSING_RENDERER !== '1'
@@ -182,9 +178,6 @@ function parseArgs(argv) {
     if (arg === '--host' && argv[index + 1]) options.host = argv[(index += 1)]
     else if (arg === '--port' && argv[index + 1])
       options.port = parseRuntimePort(argv[(index += 1)])
-    // 兼容历史上的 `--share-port 8890`（只认开关，端口号已无意义）与新的 `--no-share`
-    else if (arg === '--share-port' && argv[index + 1])
-      options.sharing = parseSharing(argv[(index += 1)])
     else if (arg === '--no-share') options.sharing = false
     else if (arg === '--share') options.sharing = true
     else if (arg === '--renderer' && argv[index + 1]) options.renderer = resolve(argv[(index += 1)])

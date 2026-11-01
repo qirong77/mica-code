@@ -1694,12 +1694,6 @@ async function loadModels() {
   const mica = resolveMicaExecutable()
   if (!mica) return { ok: false, error: '未找到 mica CLI，请先安装并确保 ~/.local/bin/mica 可用' }
   const { provider } = readMicaConfig()
-  const parsePlain = (stdout) =>
-    stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('#'))
-      .map((id) => ({ id, efforts: [], defaultEffort: null }))
   const buildResult = (entries) => ({
     ok: true,
     models: entries.map((entry) => ({
@@ -1712,24 +1706,15 @@ async function loadModels() {
     currentProtocol: protocolForProviderId(provider)
   })
 
-  // 新版 CLI 支持 --json（附带每个模型的 effort 选项）；旧版回退到纯文本行。
-  const jsonResult = await runModelsCommand(mica, ['models', '--json'])
-  if (jsonResult.ok) {
-    try {
-      const parsed = JSON.parse(jsonResult.stdout.trim())
-      if (Array.isArray(parsed)) return buildResult(parsed)
-    } catch {
-      // fall through to plain-text fallback
-    }
+  const result = await runModelsCommand(mica, ['models', '--json'])
+  if (!result.ok) return { ok: false, error: result.error }
+  try {
+    const parsed = JSON.parse(result.stdout.trim())
+    if (Array.isArray(parsed)) return buildResult(parsed)
+  } catch {
+    // 落到下面的统一错误
   }
-  const plainResult = await runModelsCommand(mica, ['models'])
-  if (!plainResult.ok) {
-    return {
-      ok: false,
-      error: jsonResult.ok ? jsonResult.error : plainResult.error || 'mica models 加载失败'
-    }
-  }
-  return buildResult(parsePlain(plainResult.stdout))
+  return { ok: false, error: 'mica models --json 输出不是模型列表' }
 }
 
 function listRoles() {

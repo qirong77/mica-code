@@ -33,6 +33,26 @@ describe('connection persistence', () => {
     expect(disk.peers.map((peer) => peer.url)).toEqual(['http://10.0.0.2:8787', 'http://10.0.0.1:8787']);
   });
 
+  it('rewrites the legacy address-array store into the current shape on load', async () => {
+    let disk: unknown = ['10.0.0.1', 'http://10.0.0.2:9102'];
+    const api = {
+      readData: vi.fn(async () => ({ value: disk, version: null })),
+      writeData: vi.fn(async (next: PeerStore) => {
+        disk = next;
+        return { ok: true };
+      }),
+    };
+    const store = await createPeerPersistence(api).load();
+    expect(store).toEqual({
+      version: 1,
+      peers: [
+        { url: 'http://10.0.0.1:8787', note: '' },
+        { url: 'http://10.0.0.2:9102', note: '' },
+      ],
+    });
+    expect(disk).toEqual(store);
+  });
+
   it('serializes note writes and preserves records saved by another window between edits', async () => {
     let disk = rememberPeer(emptyPeerStore(), '10.0.0.1');
     const firstWrite = deferred<void>();

@@ -1,4 +1,4 @@
-# mica-code-app
+# Mica Code desktop
 
 The app is a **web page**: `src/server` runs it as a dependency-free Node HTTP + SSE runtime, so any
 browser (including phones on the same LAN) gets the full workspace — session management, file
@@ -6,7 +6,7 @@ editing, workspace search, Git diff views and the chat view. Electron is an opti
 around that same page: it starts the runtime, points a window at it, and adds native touches
 (dock badge, taskbar attention, external links) that the browser simply does without.
 
-The Chat tab replaces the old terminal-hosted Mica view: every chat node keeps one resident `mica app-server` child process (Codex v2 App Server protocol over stdio) and renders reasoning / text / tool calls / finish states as a terminal-style web conversation. Sessions are shared with the Mica CLI (`~/.mica/sessions`), so conversations started in the terminal or the app can be resumed in either place. The Git status bar opens a VS Code-style branch picker for searching and switching local branches and creating branches from the current or a selected ref.
+The Chat tab keeps one resident `mica app-server` child process per chat node (Codex v2 App Server protocol over stdio) and renders reasoning / text / tool calls / finish states as a terminal-style web conversation. Sessions are shared with the Mica CLI (`~/.mica/sessions`), so conversations started in the terminal or the app can be resumed in either place. The Git status bar opens a VS Code-style branch picker for searching and switching local branches and creating branches from the current or a selected ref.
 
 ## Theme
 
@@ -228,7 +228,7 @@ $ node out/server/index.mjs --host 0.0.0.0 --port 8787 --renderer out/renderer \
 ```
 
 Environment variables with the same meaning: `MICA_DESKTOP_HOST`, `MICA_DESKTOP_PORT`,
-`MICA_DESKTOP_SHARE_PORT` (on/off only, see below), `MICA_DESKTOP_RENDERER`. The runtime prints both the loopback and LAN URLs
+`MICA_DESKTOP_SHARING` (on/off only, see below), `MICA_DESKTOP_RENDERER`. The runtime prints both the loopback and LAN URLs
 on startup, plus a machine-readable `[mica-desktop] ready {"url":…,"port":…}` line the Electron
 container parses. `GET /api/health` answers whether a port is already serving Mica Code.
 `MICA_DESKTOP_TRUSTED_CLIENTS` (comma-separated addresses) is how another machine gets the *full* app
@@ -265,12 +265,10 @@ The paths:
   each, `control`; see "Controlled browser windows" below);
 - `/api/*` — the runtime capabilities.
 
-That replaces the old second listener (share port `8890`, which used to scan upward to 8909): a share
-link is now `<reachable host>:<the runtime's own port>/share?session=<id>`. It also means the fallback
-policy is uniform — the port falls back to a random one when 8787 is taken (another runtime, or a dev
-server), so the share _base URL_ must always be read from `access:info` and never hard-coded. Sharing is
-switched with `--no-share` / `MICA_DESKTOP_SHARE_PORT=0`, which only disables the `/share` route
-(`--share-port <n>` is still accepted but treated as on/off, the number no longer means anything).
+A share link is `<reachable host>:<the runtime's own port>/share?session=<id>`. The port falls back to
+a random one when 8787 is taken (another runtime, or a dev server), so the share _base URL_ must always
+be read from `access:info` and never hard-coded. Sharing is switched with `--no-share` /
+`MICA_DESKTOP_SHARING=0`, which only disables the `/share` route.
 
 Everything on the port is the same runtime with the same state. Drawing one less panel in the share
 view is **presentation, not access control** — a client there can still invoke every channel (see "There

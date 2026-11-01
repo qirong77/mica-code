@@ -6,6 +6,7 @@ import {
   emptyData,
   exportDocument,
   formatSchedule,
+  isLegacyPlanShape,
   normalizeData,
   parseImport,
   sampleData,
@@ -65,8 +66,32 @@ describe('normalizeData', () => {
     expect(data.summary).toBe('1 个任务');
   });
 
-  it('drops the old plans/stages shape instead of pretending it can draw it', () => {
-    expect(normalizeData({ plans: [{ id: 'p1', name: 'A', stages: [] }] }).tasks).toEqual([]);
+  it('migrates the old plans/stages shape into flat tasks', () => {
+    const raw = {
+      version: 1,
+      summary: '2 个计划 · 3 条阶段',
+      plans: [
+        {
+          id: 'p1',
+          name: '钱包改版',
+          note: '11 月上线',
+          stages: [
+            { id: 's1', name: '评审', start: '2026-10-28', end: '2026-10-29' },
+            { id: 's2', name: '开发', start: '2026-11-01', end: '2026-11-10' },
+          ],
+        },
+        { id: 'p2', name: '官网', note: '', stages: [{ id: 's3', name: '设计', start: '2026-11-02' }] },
+      ],
+    };
+    const data = normalizeData(raw);
+    expect(isLegacyPlanShape(raw)).toBe(true);
+    expect(data.tasks).toEqual([
+      { id: 's1', name: '钱包改版 · 评审', start: '2026-10-28', end: '2026-10-29', color: 'blue', note: '11 月上线' },
+      { id: 's2', name: '钱包改版 · 开发', start: '2026-11-01', end: '2026-11-10', color: 'blue', note: '' },
+      { id: 's3', name: '官网 · 设计', start: '2026-11-02', end: '2026-11-02', color: 'violet', note: '' },
+    ]);
+    expect(data.summary).toBe('3 个任务');
+    expect(isLegacyPlanShape({ tasks: [] })).toBe(false);
   });
 });
 

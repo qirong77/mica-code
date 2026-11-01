@@ -6,7 +6,7 @@
 
 - 只读运行观察：`AgentObservationEvent` 定义 `agent:observe`，由 `HookRegistry.notify()` 按注册顺序调用，观察者抛错或返回挂起的 Promise 均不阻塞任务。异步完成顺序由观察插件负责，磁盘队列在插件 dispose 时 flush。覆盖 `AgentRuntime.run` 的起止、实际请求边界与工具定义、最终 prompt、工具调用/结果、用量、重试及历史改写；直接创建的 helper 模型客户端内部轨迹暂未覆盖。
 
-- 定义 class-based plugin 的基础结构。
+- 定义插件的唯一落盘形态（目录 + `plugin.json` + `setup(ctx)`），以及宿主进程内装配时用的 `Plugin` 基类。
 - 管理插件加载、启动和销毁生命周期。正常卸载与启动失败都按资源注册的逆序释放；单项清理失败仍继续释放其余资源，正常卸载结束后以 `AggregateError` 汇总失败。
 - 提供 hook registry，用于扩展运行时流程。
 - 提供 service container 和 service token，用于插件间共享能力。
@@ -56,20 +56,19 @@
 
 ## 使用入口
 
+随包插件与用户插件都只有一种形态：目录 + `plugin.json` + 入口文件 default 导出的 `setup(ctx)`：
+
 ```ts
-import { micaPlugin } from '@packages/mica-plugin/index.js';
+import type { PluginContext } from '@packages/mica-plugin/index.js';
 
-class ExamplePlugin extends micaPlugin.Plugin {
-  constructor() {
-    super({ id: 'example' });
-  }
-
-  setup(context) {
-    const hook = context.hooks.on('turn:after', async () => {});
-    context.onDispose(() => hook.dispose());
-  }
+export default function setup(context: PluginContext) {
+  const hook = context.hooks.on('turn:after', async () => {});
+  context.onDispose(() => hook.dispose());
 }
 ```
+
+`micaPlugin.Plugin` 这个基类只用于宿主进程内直接装配的内置插件（例如 TUI 的
+`BuiltInCommandsPlugin`）；文件插件不需要、也不会被包成 class。
 
 ### System prompt 扩展
 

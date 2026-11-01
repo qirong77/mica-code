@@ -19,7 +19,6 @@ export { buildConfigWebConversationDetails } from './src/server/conversation.js'
 export type { ConfigWebConversationSource } from './src/server/conversation.js';
 export {
   getConfigWebStatePath,
-  getConversationWorkspacePath,
   getMicaHome,
   getPluginStatusPath,
   getPluginsRootPath,

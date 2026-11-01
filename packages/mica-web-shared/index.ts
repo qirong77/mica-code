@@ -68,6 +68,7 @@ export {
   sanitizeUiStateKeys,
   uiStateChangeSet,
   uiStateValuesEqual,
+  resolveLegacyWorkspace,
 } from './ui-state.js';
 export {
   DEFAULT_THEME_PREFERENCE,

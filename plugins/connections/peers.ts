@@ -70,7 +70,7 @@ export function samePeer(a: unknown, b: unknown): boolean {
  * 读出来的清单可能是旧版本或被手改过的：非法项丢掉、同 host 去重、超上限截断。
  *
  * 旧版本存的是纯地址数组（`["http://10.0.0.2:9102"]`），这里一并读成
- * `{ url, note: '' }`——下一次写入就是新格式，不需要单独的迁移步骤。
+ * `{ url, note: '' }`；`persistence.load()` 检测到旧形状会立即回写新格式。
  */
 export function normalizePeerStore(raw: unknown): PeerStore {
   const peers: PeerEntry[] = [];

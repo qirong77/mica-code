@@ -11,32 +11,32 @@
 
 ```
 plugins/<id>/
-  plugin.json     清单：id / name / icon / version / description / main / assets / required / desktop
+  plugin.json     清单：id / name / version / main / settings / llm / requires / desktop …
   index.ts        入口，default 导出 setup(ctx)
   ...             实现文件、README、样式等资源
 ```
 
 `plugin.json`：
 
-| 字段              | 必填 | 说明                                                                                                        |
-| ----------------- | ---- | ----------------------------------------------------------------------------------------------------------- |
-| `id`              | 是   | 小写字母、数字、`.`、`_`、`-`；用户插件会在运行期加 `user.` 前缀，避免和内置插件撞名                        |
-| `name`            | 是   | 展示名                                                                                                      |
-| `version`         | 是   | `1.0.0` 形式                                                                                                |
-| `description`     | 否   | 配置页与详情里显示的一句话说明                                                                              |
-| `icon`            | 否   | 插件图标名（kebab-case），取值见 `packages/mica-config-ui/web/pluginIcons.tsx`；缺省用默认方块图标          |
-| `author`          | 否   | 作者                                                                                                        |
-| `main`            | 否   | 入口文件，默认 `index.js`；必须在插件目录内                                                                 |
-| `assets`          | 否   | 随插件分发的资源（样式、文档、图标），同样不许跳出版块目录                                                  |
-| `dependencies`    | 否   | 需要先 setup 的插件 id                                                                                      |
-| `required`        | 否   | setup 失败是否中断启动；用户插件默认 `false`                                                                |
-| `priority`        | 否   | 加载顺序，小的先执行                                                                                        |
-| `mica.apiVersion` | 否   | 当前只支持 `1`                                                                                              |
-| `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读、`ctx.settings.set()` 写回                   |
-| `actions`         | 否   | 配置页上的按钮声明，见「配置页动作」一节；插件用 `ctx.actions.register()` 提供实现                          |
-| `llm`             | 否   | 需要自己调模型时声明一次，见「模型接口」一节；插件用 `ctx.llm` 读取与请求                                   |
-| `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                                                  |
-| `desktop`         | 否   | 桌面端界面入口（`entry` / `panel` / `sessionMenu`）与运行条件；用它的插件要同时声明 `requires: ["desktop"]` |
+| 字段              | 必填 | 说明                                                                                                                                                                       |
+| ----------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | 是   | 小写字母、数字、`.`、`_`、`-`；用户插件会在运行期加 `user.` 前缀，避免和内置插件撞名                                                                                       |
+| `name`            | 是   | 展示名                                                                                                                                                                     |
+| `version`         | 是   | `1.0.0` 形式                                                                                                                                                               |
+| `description`     | 否   | 配置页与详情里显示的一句话说明                                                                                                                                             |
+| `icon`            | 否   | 插件图标名（kebab-case），取值见 `packages/mica-config-ui/web/pluginIcons.tsx`；缺省用默认方块图标                                                                         |
+| `author`          | 否   | 作者                                                                                                                                                                       |
+| `main`            | 否   | 入口文件，默认 `index.js`；必须在插件目录内                                                                                                                                |
+| `assets`          | 否   | 随插件分发的资源（样式、文档、图标），同样不许跳出版块目录                                                                                                                 |
+| `dependencies`    | 否   | 需要先 setup 的插件 id                                                                                                                                                     |
+| `required`        | 否   | setup 失败是否中断启动；用户插件默认 `false`                                                                                                                               |
+| `priority`        | 否   | 加载顺序，小的先执行                                                                                                                                                       |
+| `mica.apiVersion` | 否   | 当前只支持 `1`                                                                                                                                                             |
+| `settings`        | 否   | 面向设置页的配置项声明，见下节；插件用 `ctx.settings.get()` 读、`ctx.settings.set()` 写回                                                                                  |
+| `actions`         | 否   | 配置页上的按钮声明，见「配置页动作」一节；插件用 `ctx.actions.register()` 提供实现                                                                                         |
+| `llm`             | 否   | 需要自己调模型时声明一次，见「模型接口」一节；插件用 `ctx.llm` 读取与请求                                                                                                  |
+| `requires`        | 否   | 依赖的宿主能力，缺一个就整插件跳过，见下节                                                                                                                                 |
+| `desktop`         | 否   | 桌面端界面入口（`entry` / `panel` / `sessionMenu`）与运行条件；`panel` / `sessionMenu` / `checks` 要同时声明 `requires: ["desktop"]`，`entry` 不需要（页面是构建期打包的） |
 
 ## 设置项
 
@@ -230,7 +230,8 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 需要一条能反复追问的隔离上下文（旁问、连续修订）时用 `ctx.subagents.thread()`：一次建线程、多次
 `ask()`，同一线程串行、`usage()` 读请求数、`dispose()` 收尾；它不进任务列表、不拿路径租约，每次 ask
 的用量同样以 `origin: 'plugin'` 记账。system prompt 是整体替换，插件要自己带上需要的上下文。
-`models` 是插件自己的模型请求入口（`ctx.models.request`），见下节——**插件不要自己 `fetch` 模型接口**。
+`models` 是宿主代发模型请求的底层入口（`ctx.models.request`）；插件要问模型时优先声明 `llm` 并用
+`ctx.llm`（见「模型接口」一节）——**插件不要自己 `fetch` 模型接口**。
 `skills` 是内置 skill 的注册面（`ctx.skills.register`），`desktop` 只有桌面端运行时才提供（见下节）。
 `background` 是常驻工作的注册面（`ctx.background.register`）：周期轮询、心跳、增量同步这类
 「一直在跑」的东西交给宿主调度，插件停用或宿主退出时一起停。不要用 `setInterval` 自己起循环，
@@ -244,24 +245,29 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 是输入框上方的运行中面板（被同一个 `command` 的下一条 notice 收尾），默认写进对话的 notice；
 headless 宿主把同一条 notice 落进 turn 的日志。插件不用自己画面板，也不往会话里塞假消息。
 
-## 插件自己的模型请求
+## 模型请求的底层入口（`ctx.models`）
 
-后台请求（自动起标题、写 commit message、整理记忆…）一律走 `ctx.models.request`：
+后台请求（自动起标题、写 commit message、整理记忆…）的**默认写法是声明 `llm` 并用
+`ctx.llm.request()`**：配置页与会话设置渲染同一份模型表单，失败时自动降级到会话模型，
+插件不必自己拼地址 / Key。`ctx.llm` 背后调的就是 `ctx.models.request()`，后者是宿主提供的
+低层执行器：
 
 ```ts
 const { text, usage } = await ctx.models.request({
   purpose: '自动起标题', // Stats 里显示的用途
   system: prompt,
   user: transcript,
-  baseUrl: settings.baseUrl, // 插件自己的接口地址
-  apiKey: settings.apiKey,
-  protocol: settings.protocol, // openai_chat_completions | openai_responses
-  model: settings.model,
+  baseUrl, // 地址 / Key / 协议 / 模型由调用方给出
+  apiKey,
+  protocol: 'openai_chat_completions', // 或 openai_responses
+  model,
   timeoutMs: 60_000, // 可选，宿主会真的中断请求而不是只 reject
 });
 ```
 
-请求由宿主发出，所以三件事只有一份实现：协议分支（Chat Completions / Responses）、超时与中断、
+只有搞不清「这次请求该用哪份配置」的场合才直接用 `ctx.models`（例如 `mica plugin-action`
+的一次性进程里试连接）；能用 `llm` 就不要把四项拆回 `settings` 里手写。请求由宿主发出，
+所以三件事只有一份实现：协议分支（Chat Completions / Responses）、超时与中断、
 **用量记账**——这笔开销会以 `origin: 'plugin'` + `pluginId` 记进发起请求时的会话的
 `subagentUsageHistory`，在 Stats 的「By source」卡片与会话详情里能看到；插件用
 `ctx.subagents.run/background/thread` 起的后台子代理同样记在插件名下（主对话经工具委派的那条

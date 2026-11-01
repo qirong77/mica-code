@@ -12,7 +12,8 @@ import type {
  * 同一个会话在两处不会给出两个数字。
  *
  * 口径：
- * - `chars/4` 估 token，与 CLI 的 ctx 同口径；
+ * - `chars/4` 估 token：界面之间共用一个可以横向比较的粗口径，不是 CLI 的字节估算
+ *   （`mica-context/tokenEstimate`）那一份更保守的数字；
  * - 图片 / 文档块只记张数、不计字符（base64 长度与 vision token 无关）；
  * - 每条消息的结构字段（role / type / call_id / name）单列 `envelope`，线上请求同样会带上，
  *   混进正文会让「持久化消息体」明显偏小、差额全被当成 system prompt。

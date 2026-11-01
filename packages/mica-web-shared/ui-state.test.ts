@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyUiStatePatch,
   isUiStateKey,
+  resolveLegacyWorkspace,
   sanitizeUiStateKeys,
   uiStateChangeSet,
   uiStateValuesEqual,
@@ -76,6 +77,36 @@ describe('mica-web-shared ui-state', () => {
       });
       expect(sanitizeUiStateKeys(null)).toEqual({});
       expect(sanitizeUiStateKeys(['layout'])).toEqual({});
+    });
+  });
+
+  describe('resolveLegacyWorkspace', () => {
+    const legacy = { nodes: [{ id: 'chat-1' }] };
+
+    it('imports workspace.json only when ui-state does not exist yet', () => {
+      const result = resolveLegacyWorkspace({ hasStateFile: false, keys: { theme: 'dark' }, legacy });
+      expect(result.keys).toEqual({ theme: 'dark', workspace: legacy });
+      expect(result).toMatchObject({ imported: true, removeLegacy: false });
+    });
+
+    it('never resurrects a workspace the user cleared once ui-state exists', () => {
+      const result = resolveLegacyWorkspace({ hasStateFile: true, keys: { theme: 'dark' }, legacy });
+      expect(result.keys).toEqual({ theme: 'dark' });
+      expect(result).toMatchObject({ imported: false, removeLegacy: true });
+    });
+
+    it('leaves an existing workspace and a missing or malformed file alone', () => {
+      expect(resolveLegacyWorkspace({ hasStateFile: false, keys: { workspace: { nodes: [] } }, legacy })).toMatchObject(
+        { imported: false, removeLegacy: false },
+      );
+      expect(resolveLegacyWorkspace({ hasStateFile: false, keys: {}, legacy: { nodes: 'nope' } })).toMatchObject({
+        imported: false,
+        removeLegacy: false,
+      });
+      expect(resolveLegacyWorkspace({ hasStateFile: false, keys: {}, legacy: null })).toMatchObject({
+        imported: false,
+        removeLegacy: false,
+      });
     });
   });
 });

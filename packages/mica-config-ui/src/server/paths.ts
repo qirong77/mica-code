@@ -29,7 +29,3 @@ export function getPluginStatusPath(): string {
 export function getPluginStatePath(): string {
   return resolve(getMicaHome(), 'plugins-state.json');
 }
-
-export function getConversationWorkspacePath(): string {
-  return resolve(getMicaHome(), 'conversation-workspace.json');
-}

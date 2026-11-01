@@ -164,18 +164,19 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - `MICA_HOME` 覆盖全部用户路径，默认 `~/.mica`；品牌目录经 `brand.ts` 解析。
 - `PersistedMicaConfig` 只存静态字段；运行时用 `stripRuntimeFields` 去除 provider/model/effort/contextWindowSize。
+- 旧版本写在 `config.json` 的 `searxngUrl` 在启动时迁进 `plugin-settings/web-search.json`（已有值不覆盖）并删掉原键；搜索改成插件后只有插件设置生效。
 - 配置迁移与语义校验统一在 `startup/validate-config.js`，配置页保存复用它。
 - 仅当所有 provider 都没有 api_key 时，`envProvider.ts` 从 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 合成运行时 provider；环境 provider 永不写回 config.json。
 - session 是 version 1 JSON；新增字段要有版本策略、默认值与 sanitize，字段类型不对按损坏拒绝。
 - `parentSessionId` 是顶层元信息（与 `cwd` 同级），记录「谁派生的这条会话」：`--parent`、
   `thread/start`、fork（父会话换成源会话）。非法值（非字符串、id 形状不对、自指）丢弃而不是拒绝整个
-  会话——它只影响侧栏嵌套。`sessions/session-index.json` 的版本号跟着升，旧索引直接重建。
+  会话——它只影响侧栏嵌套。`$MICA_HOME/session-index.json` 的版本号跟着升，旧索引直接重建。
 - 会话级状态都在快照里：`capabilitySelection` / `capabilitiesCustomized`、`pluginState`（插件自己的 JSON）、`pluginSessionSettings`（插件设置的会话覆盖，只存改过的键）、`notes`。`startNewSession` 清空，resume/fork 沿用，rewind 随 checkpoint 回滚。
 - `snapshot.systemPrompt` 是「最近一次请求真正发出去的 system prompt」的存档（角色 + 项目说明 + skills 索引 + 环境信息 + 插件段落），只给界面看，绝不用于重建请求——下一轮仍然现场拼装。写在 `AgentRuntime` 解析 `systemPrompt` 的那一刻，随 checkpoint 落盘；旧会话没有这个字段，界面如实说「没有记录」而不重新拼一份冒充。
 - `subagentUsageHistory` 独立于主 `usageHistory`；fork 清空两类历史，只保留描述继承上下文的 `lastUsage`。
 - compact 保留 `lastUsage` / `usageHistory` 供 Stats 对账；界面 ctx 优先读 `displayUsage`。
 - 无手动标题时取最后一条真实用户消息（最长 60 字符）；自动改名不得覆盖 `titleSource === 'manual'`。
-- `$MICA_HOME/session-index.json` 是可重建缓存，不进 `sessions/`；索引 v2 记录读不出摘要的 `rejects`（id + size/mtime），避免每次全量重扫。
+- `$MICA_HOME/session-index.json` 是可重建缓存，不进 `sessions/`；索引 v3 记录读不出摘要的 `rejects`（id + size/mtime），避免每次全量重扫，并带上侧栏嵌套要用的 `parentSessionId`（v2 没有它，版本对不上就整份重建）。
 - `sessions/.turn-locks/<id>.lock` 是跨进程写入的唯一事实来源（`wx` + owner pid 存活判定）；孤儿锁在 acquire 时回收。
 - 垃圾占位须同时满足：默认占位标题、无对话、无 usage；`turnState === 'running'` 永不隐藏或删除。
 
@@ -254,7 +255,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 插件配置的模型不可用时 `ctx.llm` 自己降级：用当前会话的模型（配置文件里的 provider/模型，会话里切过就是会话自己的）把这次请求重发一次，成功后记住这份配置（改任意一项就重新尝试），降级原因以 `warn` 上报 `ctx.health`、`describe()` 标「已降级」。abort 不降级；已复用会话模型且没点名模型时没有第二目标，直接抛错。降级是组件行为，插件不写 `try 自己的 → catch 换会话模型` 这一套。
 - `llm` 的键（`useMainProvider` / `baseUrl` / `apiKey` / `protocol` / `model`）不允许再在 `settings` 里重复声明；`required` 只在关掉「复用当前会话模型」后生效（`requiredWhen`）。复用时隐藏的四项也不参与请求、摘要与试连，只有单次 `ctx.llm.request({ model })` 可以显式覆盖模型。
 - 会话右键菜单由清单 `desktop.sessionMenu`（`[{ "label": "复制会话 Markdown", "action": "copy" }]`）+ `ctx.desktop.sessionMenu({ run })` 组成：**菜单项来自清单、处理器来自插件注册**——右键是同步交互，不能为「有没有菜单项」去冷启动 app-server；处理器只活在插件所在进程里，页面只转发 `pluginId + action`。`run()` 只认 `copyText`（页面写系统剪贴板：插件进程里没有剪贴板，也不该为三个平台各调一次系统命令）与 `message`（回给用户的一句话）。动作要立刻返回，不要在里面等模型请求。声明它就要写 `requires: ["desktop"]`；用户插件同样有。
-- 官方插件：`todo`（进程内待办 + `plan` prompt 段落，计划纪律在 `plugins/todo/prompt.ts`，`requires` 含 `prompt`）、`btw`（`/btw` 旁问：`ctx.subagents.thread` 开一条可复用的隔离子代理，结果经 `ctx.ui.notice` 呈现）、`session-notes`（会话笔记）、`session-tags`（会话颜色标签）、`session-copy`（会话右键菜单「复制会话 Markdown」：`plugins/session-copy/markdown.ts` 确定性拼装标题 / 路径 / 模型 / 用户与助手正文，工具调用、思考与 notice 都不进导出，**不调用 `ctx.llm`**）、`session-rename`（每轮前自动起标题）、`auto-compact`（自动压缩）、`memory`（跨会话记忆：`user` / `memory` / `project` 三块 markdown 文件，`ctx.prompt` 注入会话内冻结的快照、`memory` 工具维护预算内的条目、turn:after 可选整理；整理可走宿主子代理，也可配独立的接口地址 / Key / 协议 / 模型，缺 `subagents` 时降级为独立接口）、`web-search`（`web_search` 工具）、`subagent`（7 种子代理类型、`agent` 工具、委派 prompt 段落与委派倾向设置）、`commit`（`/commit` 命令：确定性 git 分析 + 一次模型请求写提交说明 + add / commit / push；模型可复用当前会话，也可单独配接口地址 / Key / 协议 / 模型）、`computer-use`（macOS 桌面自动化 skill：AX 元素树 + CGEvent 键鼠 + 截图，随包 runtime 落盘到 `$MICA_HOME/computer-use`，首次用到时 clang 编译 helper；权限状态显示在配置页插件详情的「运行条件」里）、`connections`（侧栏 `Connections`：接另一台机器上的运行时，连接清单存 `plugin-data/connections/data.json`；能力全在 `desktop.jsx`，后端 setup 是空的）、`schedule`（本地排期，与任何聊天工具无关：数据就是 `plugin-data/schedule/data.json` 里的一串任务，每条有名称、起止、颜色与 Markdown 备注，同色的任务排在同一行。侧栏 `Schedule` 开整页甘特图：工具栏改标题 / 日周月 / 缩放 / 今天 / 新增任务 / 导入导出清空，空白处点或横拖新建、拖条体 / 两端改期、点条开弹窗改名称颜色备注，滚轮缩放（锚点换算在 `gantt.ts`）、Shift+滚轮平移，别处的写入 15 秒轮询进来；模型经 `schedule` 工具（`list` / `add|update|delete_task`，按 id 只改一条）与随包 skill `schedule` 读写同一份数据。写盘共用一把跨进程锁：工具侧「现读 → 改一条 → 原子写」（`store.ts`），页面侧按版本比较、冲突时把这条操作重放到最新数据上（`writer.ts`），所以拖动、另一个窗口、模型同时改不会互相覆盖）、`sidecar`（派生并驱动子会话：随包 skill `sidecar` + 9 个 `sidecar_*` 工具，每个子会话是一个 `mica app-server` 子进程，`--parent` 写进会话文件让侧栏嵌套；事件走 Codex v2 JSONL，投影在 `plugins/sidecar/transcript.ts`，分层的读法在 `views.ts`；不传 `role` 时继承父会话角色，深度由 `MICA_SIDECAR_DEPTH` 限制在 2 层，子进程在 `onDispose` 里一路降到 SIGKILL 收掉）。
+- 官方插件：`todo`（进程内待办 + `plan` prompt 段落，计划纪律在 `plugins/todo/prompt.ts`，`requires` 含 `prompt`）、`btw`（`/btw` 旁问：`ctx.subagents.thread` 开一条可复用的隔离子代理，结果经 `ctx.ui.notice` 呈现）、`session-notes`（会话笔记）、`session-tags`（会话颜色标签）、`session-copy`（会话右键菜单「复制会话 Markdown」：`plugins/session-copy/markdown.ts` 确定性拼装标题 / 路径 / 模型 / 用户与助手正文，工具调用、思考与 notice 都不进导出，**不调用 `ctx.llm`**）、`session-rename`（每轮前自动起标题）、`auto-compact`（自动压缩）、`memory`（跨会话记忆：`user` / `memory` / `project` 三块 markdown 文件，`ctx.prompt` 注入会话内冻结的快照、`memory` 工具维护预算内的条目、turn:after 可选整理；整理可走宿主子代理，也可配独立的接口地址 / Key / 协议 / 模型，缺 `subagents` 时降级为独立接口）、`web-search`（`web_search` 工具）、`subagent`（7 种子代理类型、`agent` 工具、委派 prompt 段落与委派倾向设置）、`commit`（`/commit` 命令：确定性 git 分析 + 一次模型请求写提交说明 + add / commit / push；模型可复用当前会话，也可单独配接口地址 / Key / 协议 / 模型）、`computer-use`（macOS 桌面自动化 skill：AX 元素树 + CGEvent 键鼠 + 截图，随包 runtime 落盘到 `$MICA_HOME/computer-use`，首次用到时 clang 编译 helper；权限状态显示在配置页插件详情的「运行条件」里）、`connections`（侧栏 `Connections`：接另一台机器上的运行时，连接清单存 `plugin-data/connections/data.json`；能力全在 `desktop.jsx`，后端 setup 是空的）、`schedule`（本地排期，与任何聊天工具无关：数据就是 `plugin-data/schedule/data.json` 里的一串任务，每条有名称、起止、颜色与 Markdown 备注，同色的任务排在同一行。侧栏 `Schedule` 开整页甘特图：工具栏改标题 / 日周月 / 缩放 / 今天 / 新增任务 / 导入导出清空，空白处点或横拖新建、拖条体 / 两端改期、点条开弹窗改名称颜色备注，滚轮缩放（锚点换算在 `gantt.ts`）、Shift+滚轮平移，别处的写入 15 秒轮询进来；模型经 `schedule` 工具（`list` / `add|update|delete_task`，按 id 只改一条）与随包 skill `schedule` 读写同一份数据。写盘共用一把跨进程锁：工具侧「现读 → 改一条 → 原子写」（`store.ts`），页面侧按版本比较、冲突时把这条操作重放到最新数据上（`writer.ts`），所以拖动、另一个窗口、模型同时改不会互相覆盖；旧的两层数据（`plans` / `stages`）读取时迁移成扁平任务（计划名并进任务名、计划备注放在第一条））、`sidecar`（派生并驱动子会话：随包 skill `sidecar` + 9 个 `sidecar_*` 工具，每个子会话是一个 `mica app-server` 子进程，`--parent` 写进会话文件让侧栏嵌套；事件走 Codex v2 JSONL，投影在 `plugins/sidecar/transcript.ts`，分层的读法在 `views.ts`；不传 `role` 时继承父会话角色，深度由 `MICA_SIDECAR_DEPTH` 限制在 2 层，子进程在 `onDispose` 里一路降到 SIGKILL 收掉）。
 - 新增插件：建目录 → 两处登记 → 测试放插件目录内（vitest 覆盖 `plugins/**`）。
 - 运行观察走通用 `agent:observe` hook（`AgentObservationEvent`，owner/runId 关联）：运行开始/终态、请求边界、最终 prompt、工具调用/结果、用量、重试与历史改写。观察失败不得中断任务；范围是 `AgentRuntime.run`，helper 客户端内部轨迹尚未覆盖。官方 `harness-review` 插件异步写 `$MICA_HOME/plugin-data/harness-review`，通过 `/harness-review list|report|assess` 和 `harness_review` 查看、导出、记录人工评估；按 cwd 复盘，不自动修改 harness。
 
@@ -366,7 +367,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 ### 共享状态与路由
 
-- 运行时只有一份 workspace / drafts / layout / rightTerms / terminalOpenByChat / cwd / Git 偏好，落盘 `userData/ui-state.json`；语义在 `mica-web-shared/ui-state.ts`。
+- 运行时只有一份 workspace / drafts / layout / rightTerms / terminalOpenByChat / cwd / Git 偏好，落盘 `userData/ui-state.json`；语义在 `mica-web-shared/ui-state.ts`。老版本单独存的 `workspace.json` 只在 ui-state 还不存在时导入一次、落盘后删除；ui-state 已存在就不再读它（否则用户清空过的工作区会被搬回来）。
 - 条目补丁用 `setUiStateEntries`，null 表示删除；回声在 store 的 `applyRemote` 认领一次，组件不得各自认领。
 - 同一 session 在所有页面是同一 node、run、终端；`dedupeSessionNodes` 合并重复页签。
 - 默认 `0.0.0.0:8787`，没有账号体系，只有一道可选的口令；README 保留风险说明。非回环（且不在 `MICA_DESKTOP_TRUSTED_CLIENTS` 里）的连接**只公开别人手上那条分享链接**：`/share?session=<存在的会话>`，其余页面、`/remote/*`、`/mcp/*` 回 404 或登录页，**`/api/*` 没有凭据也回 404/401**（它等于整台机器）。唯一例外是探活指纹 `GET /api/health`（只回 `{ ok, app, access }`）：侧栏 Connections 连另一台机器必须先探通它，`access` 说明对方要不要口令，没开时由卡片直接给出可操作的提示而不是打开一个 404 窗口。路径分类唯一实现在 `host/access-core.js` 的 `classifyRemotePath`，放行判定在 `host/remote-access-core.js` 的 `remoteAccessDecision`，不要另写第二份白名单。
@@ -531,7 +532,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - safe-area 处理；表单字号至少 16px（Monaco 除外）。
 - 根高度取 visual viewport / innerHeight / clientHeight 中明显更小的信号，保持 `--vvh-top` 补偿。
 - `TerminalKeyBar` 经 `term.input()`；xterm 使用 DOM 渲染器，字号/颜色走 options。
-- xterm 软键盘补发仅覆盖空格与 A–Z，须 preventDefault；升级含上游 #5614 的版本后删除并复验。
+- xterm 软键盘补发仅覆盖空格与 A–Z，须 preventDefault；上游 #5614 仍处于 closed（未合并）状态，`@xterm/xterm` 6.0.0 仍会丢这些 input，删除前必须在真机复验。
 
 ## 11. 构建、验证与交付
 

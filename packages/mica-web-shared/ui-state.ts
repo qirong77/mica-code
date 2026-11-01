@@ -90,3 +90,27 @@ export function sanitizeUiStateKeys(raw: unknown): Record<string, unknown> {
   }
   return next;
 }
+
+/**
+ * 老版本把工作区单独存在 `workspace.json`。只有 ui-state 还不存在时才导入一次；
+ * ui-state 一旦存在就是唯一事实来源——再读老文件会把用户清空过的工作区搬回来。
+ *
+ * 返回 `removeLegacy` 表示老文件已经没有用了（导入成功，或 ui-state 已经存在），
+ * 调用方落盘成功后删掉它；导入失败时保留，下次启动再试。
+ */
+export function resolveLegacyWorkspace(input: {
+  hasStateFile: boolean;
+  keys: Record<string, unknown>;
+  legacy: unknown;
+}): { keys: Record<string, unknown>; imported: boolean; removeLegacy: boolean } {
+  const { hasStateFile, keys, legacy } = input;
+  if (hasStateFile) return { keys, imported: false, removeLegacy: true };
+  if ('workspace' in keys) return { keys, imported: false, removeLegacy: false };
+  if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) {
+    return { keys, imported: false, removeLegacy: false };
+  }
+  if (!Array.isArray((legacy as { nodes?: unknown }).nodes)) {
+    return { keys, imported: false, removeLegacy: false };
+  }
+  return { keys: { ...keys, workspace: legacy }, imported: true, removeLegacy: false };
+}

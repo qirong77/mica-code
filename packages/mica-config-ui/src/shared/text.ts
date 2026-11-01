@@ -8,7 +8,8 @@
 /**
  * 粗估 token：CJK 字符按 1 token 计，其余字符按 1/4 token 计。
  *
- * 与 CLI 状态栏的 ctx 同口径，用来比较「谁占了 context」，不是真实 tokenizer 的结果。
+ * 用来比较「谁占了 context」，不是真实 tokenizer 的结果；CLI 的字节估算
+ * （`mica-context/tokenEstimate`）对 CJK 更保守，两处数字不要求相等。
  */
 export function estimateTextTokens(text: string): number {
   const value = typeof text === 'string' ? text : String(text ?? '');

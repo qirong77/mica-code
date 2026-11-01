@@ -1,7 +1,12 @@
 import { app, ipcMain } from 'electron'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
-import { applyUiStatePatch, sanitizeUiStateKeys, uiStateChangeSet } from '@packages/mica-web-shared'
+import {
+  applyUiStatePatch,
+  resolveLegacyWorkspace,
+  sanitizeUiStateKeys,
+  uiStateChangeSet
+} from '@packages/mica-web-shared'
 
 /**
  * 页面 UI 状态的唯一事实来源。
@@ -20,7 +25,7 @@ import { applyUiStatePatch, sanitizeUiStateKeys, uiStateChangeSet } from '@packa
  */
 
 const FILE_NAME = 'ui-state.json'
-/** 老版本把工作区单独存在这里，首次启动时搬进 ui-state 并停写。 */
+/** 老版本把工作区单独存在这里；首次启动搬进 ui-state 后删除。 */
 const LEGACY_WORKSPACE_FILE = 'workspace.json'
 /** 打字/拖动会连续产生补丁，落盘与广播都攒一下再发。 */
 const WRITE_DEBOUNCE_MS = 250
@@ -31,6 +36,7 @@ let writeTimer = null
 let broadcastTimer = null
 let pendingBroadcast = {}
 let send = () => {}
+let legacyWorkspaceImported = false
 
 /** 由运行时注入广播（server/index.js 的 SSE broadcast）。 */
 export function setUiStateSender(fn) {
@@ -39,6 +45,18 @@ export function setUiStateSender(fn) {
 
 function stateFile() {
   return join(app.getPath('userData'), FILE_NAME)
+}
+
+function legacyWorkspaceFile() {
+  return join(app.getPath('userData'), LEGACY_WORKSPACE_FILE)
+}
+
+function removeLegacyWorkspace() {
+  try {
+    rmSync(legacyWorkspaceFile(), { force: true })
+  } catch {
+    // 删不掉只影响下次启动再判断一次，不该阻断状态读写
+  }
 }
 
 function readJson(file) {
@@ -54,9 +72,16 @@ function load() {
   if (keys) return keys
   const stored = readJson(stateFile())
   keys = sanitizeUiStateKeys(stored?.keys)
-  if (!('workspace' in keys)) {
-    const legacy = readJson(join(app.getPath('userData'), LEGACY_WORKSPACE_FILE))
-    if (legacy && Array.isArray(legacy.nodes)) keys.workspace = legacy
+  const migration = resolveLegacyWorkspace({
+    hasStateFile: Boolean(stored),
+    keys,
+    legacy: stored ? null : readJson(legacyWorkspaceFile())
+  })
+  keys = migration.keys
+  if (migration.removeLegacy) removeLegacyWorkspace()
+  if (migration.imported) {
+    legacyWorkspaceImported = true
+    scheduleWrite()
   }
   return keys
 }
@@ -69,6 +94,10 @@ function writeNow() {
     const temporary = `${file}.tmp`
     writeFileSync(temporary, `${JSON.stringify({ version: 1, keys: load() }, null, 2)}\n`, 'utf8')
     renameSync(temporary, file)
+    if (legacyWorkspaceImported) {
+      legacyWorkspaceImported = false
+      removeLegacyWorkspace()
+    }
   } catch (error) {
     console.error('[mica-desktop] 保存界面状态失败:', error)
   }

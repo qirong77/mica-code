@@ -156,10 +156,6 @@ export const ipcMain = {
   }
 }
 
-export function registeredChannels() {
-  return [...handlers.keys()]
-}
-
 /**
  * 派发一次等价于 `ipcRenderer.invoke` 的调用。handler 抛错时同步抛出，
  * 由 server 转成 `{ ok: false, error }` 响应，renderer 侧再还原成 rejected promise。
@@ -230,12 +226,5 @@ export const dialog = {
   async showOpenDialog() {
     // 浏览器端改用应用内的目录选择器（renderer 的 workspace.selectDirectory 适配）
     return { canceled: true, filePaths: [] }
-  }
-}
-
-/** 仅为兼容潜在引用；server 入口不创建窗口 */
-export class BrowserWindow {
-  static getAllWindows() {
-    return []
   }
 }

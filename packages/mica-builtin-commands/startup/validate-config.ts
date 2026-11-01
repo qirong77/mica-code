@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { isEffortLevelName } from '@packages/mica-config/types.js';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { PROVIDER_PROTOCOLS, isEffortLevelName } from '@packages/mica-config/types.js';
 
-export const DEFAULT_PROVIDER_PROTOCOL = 'openai_chat_completions';
-export const PROVIDER_PROTOCOLS = [DEFAULT_PROVIDER_PROTOCOL, 'openai_responses'];
+export { PROVIDER_PROTOCOLS };
+export const DEFAULT_PROVIDER_PROTOCOL = PROVIDER_PROTOCOLS[0];
 
 export type ConfigIssue = {
   severity: 'error' | 'warning';
@@ -65,6 +65,50 @@ export default function setupValidateConfig(ctx: ValidateConfigContext): void {
 }
 
 /**
+ * 旧版本把 SearXNG 地址放在 `config.json.searxngUrl`；搜索改成插件后只有
+ * `plugin-settings/web-search.json` 会生效。把旧值搬过去，再删掉这个死键：
+ * 留着它只会让人以为改配置还能影响搜索。
+ */
+export function migrateLegacySearchSetting(
+  configRoot: string,
+  configPath: string,
+): void {
+  let config: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+    config = parsed as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  const legacy = typeof config.searxngUrl === 'string' ? config.searxngUrl.trim() : '';
+  if (!legacy) return;
+
+  const settingsPath = join(configRoot, 'plugin-settings', 'web-search.json');
+  let settings: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      settings = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // 还没写过插件设置：下面按空对象写入
+  }
+
+  try {
+    if (typeof settings.searxngUrl !== 'string' || !settings.searxngUrl.trim()) {
+      settings.searxngUrl = legacy;
+      mkdirSync(dirname(settingsPath), { recursive: true });
+      writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf-8');
+    }
+    delete config.searxngUrl;
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+  } catch {
+    // 写不进去就保持原样，下次启动再试；迁移失败不该阻断启动
+  }
+}
+
+/**
  * Applies backwards-compatible defaults without rejecting other semantic issues.
  * This runs before mica-config is imported so its module-level snapshot sees the
  * migrated file. Invalid JSON is left to mica-config's existing backup recovery.
@@ -78,6 +122,7 @@ export function applyConfigDefaultsToFile(configPath: string): ConfigValidationR
 
   const result = validateConfig(parsed.config);
   if (result.changed) writeConfigFile(configPath, result.config);
+  if (result.ok) migrateLegacySearchSetting(dirname(configPath), configPath);
   return result;
 }
 
@@ -146,7 +191,7 @@ export function validateConfig(input: unknown): ConfigValidationResult {
         `provider "${providerName}" 的 api_base 不能为空。`,
       );
     }
-    if (!PROVIDER_PROTOCOLS.includes(provider.protocol as string)) {
+    if (!(PROVIDER_PROTOCOLS as readonly string[]).includes(provider.protocol as string)) {
       add(
         'error',
         'provider_protocol_invalid',

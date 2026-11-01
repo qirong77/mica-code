@@ -58,9 +58,12 @@ Key behaviors that mirror the interactive `LocalRuntimeController`:
 
 `apps/cli/src/headless/HeadlessPluginHost.ts` runs the **same built-in plugins**
 as the interactive app, minus the inherently terminal-bound ones (file-mention,
-the `/model` / `/compact` command suite, user file plugins). The agent-shaping
-plugins — `session_*` autonomy, message queueing, command-memory guide,
-the `todo` plugin (`todo_write`), app-notify — behave identically.
+the `/model` / `/compact` command suite). `mica exec` also skips user file
+plugins (a one-shot run has no resident host for panels or desktop entries);
+`mica app-server` loads them with `loadUserPlugins: true`, because it is the
+per-session host those capabilities live in. The agent-shaping plugins —
+`session_*` autonomy, message queueing, command-memory guide, the `todo` plugin
+(`todo_write`), app-notify — behave identically on both surfaces.
 
 Differences are deliberate and documented:
 

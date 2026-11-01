@@ -1,9 +1,18 @@
-import { normalizePeerStore, type PeerStore } from './peers.js';
+import { PEER_STORE_VERSION, normalizePeerStore, type PeerStore } from './peers.js';
 
 type PeerDataApi = {
   readData(): Promise<{ value?: unknown; version?: string | null; ok?: boolean; error?: string } | null>;
   writeData(value: PeerStore, options?: { expectedVersion: string | null }): Promise<unknown>;
 };
+
+function isCurrentPeerStore(raw: unknown): boolean {
+  return (
+    typeof raw === 'object' &&
+    raw !== null &&
+    !Array.isArray(raw) &&
+    (raw as { version?: unknown }).version === PEER_STORE_VERSION
+  );
+}
 
 /** 卡片内串行，跨窗口用版本比较重放修改，保留其它窗口已保存的记录。 */
 export function createPeerPersistence(api: PeerDataApi) {
@@ -20,7 +29,23 @@ export function createPeerPersistence(api: PeerDataApi) {
   };
 
   return {
-    load: () => serialize(async () => normalizePeerStore((await read())?.value)),
+    load: () =>
+      serialize(async () => {
+        const snapshot = await read();
+        const store = normalizePeerStore(snapshot?.value);
+        if (!isCurrentPeerStore(snapshot?.value)) {
+          // 旧清单（纯地址数组 / 缺 version）读进来就落盘成当前格式；
+          // 写失败不影响这次展示，下一次加载再试。
+          try {
+            const version = snapshot?.version;
+            const options = typeof version === 'string' || version === null ? { expectedVersion: version } : undefined;
+            await api.writeData(store, options);
+          } catch {
+            // ignore: read path stays usable
+          }
+        }
+        return store;
+      }),
     update: (updater: (store: PeerStore) => PeerStore) =>
       serialize(async () => {
         for (let attempt = 0; attempt < 8; attempt++) {

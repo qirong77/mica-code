@@ -37,7 +37,9 @@
 读回来一律过 `normalizeData`：认不出的任务丢掉，坏掉的一条不该让整张时间线消失。颜色认不出落回
 蓝色，日期只留 `YYYY-MM-DD`。
 
-旧形态（`plans` / `stages`）不再支持：`normalizeData` 只读 `tasks`，旧文件读出来就是一张空排期。
+旧形态（`plans` / `stages`）在读取时迁移：每个计划按顺序分到一个颜色，阶段变成同色的任务，
+任务名写成「计划名 · 阶段名」，计划备注放在该计划的第一条任务上；页面读到旧文件会顺手落盘成
+新格式。迁移只做一次，之后只写 `tasks`。
 导出的 JSON 与 `qirong-application/apps/gantt` 同形（`title` / `scale` / `tasks`），两边可以互相导入。
 
 ## 页面怎么用
