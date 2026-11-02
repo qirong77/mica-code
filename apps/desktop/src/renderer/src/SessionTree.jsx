@@ -1,13 +1,5 @@
-import {
-  Suspense,
-  lazy,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState
-} from 'react'
+import { lazyView } from './lazy-view'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   IconCheck,
@@ -70,8 +62,10 @@ import {
 } from './session-search'
 
 // 会话详情弹窗复用 Stats 页的组件，按需加载——stats 目录的代码不进启动路径。
-const SessionDetailModal = lazy(() =>
-  import('./stats/SessionDetailModal').then((m) => ({ default: m.SessionDetailModal }))
+const SessionDetailModal = lazyView(
+  () => import('./stats/SessionDetailModal'),
+  'SessionDetailModal',
+  { overlay: true }
 )
 
 const rowClassBase =

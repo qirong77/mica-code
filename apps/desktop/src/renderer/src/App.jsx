@@ -1,13 +1,5 @@
-import {
-  Suspense,
-  lazy,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState
-} from 'react'
+import { lazyView } from './lazy-view'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   IconArrowUp,
   IconBlocks,
@@ -47,13 +39,13 @@ import { useQuickPickAnchor } from './quick-pick-anchor'
 
 // 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
 // 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
-// 按需加载才能让首屏不必先解析它们 —— 见下方 lazyViews 的说明。
+// 按需加载才能让首屏不必先解析它们。
 const { FilesView, QuickSearch, SettingsView, StatsView, TerminalHost } = {
-  FilesView: lazy(() => import('./FilesView').then((m) => ({ default: m.FilesView }))),
-  QuickSearch: lazy(() => import('./QuickSearch').then((m) => ({ default: m.QuickSearch }))),
-  SettingsView: lazy(() => import('./SettingsView').then((m) => ({ default: m.SettingsView }))),
-  StatsView: lazy(() => import('./stats/StatsView').then((m) => ({ default: m.StatsView }))),
-  TerminalHost: lazy(() => import('./TerminalHost').then((m) => ({ default: m.TerminalHost })))
+  FilesView: lazyView(() => import('./FilesView'), 'FilesView'),
+  QuickSearch: lazyView(() => import('./QuickSearch'), 'QuickSearch'),
+  SettingsView: lazyView(() => import('./SettingsView'), 'SettingsView', { overlay: true }),
+  StatsView: lazyView(() => import('./stats/StatsView'), 'StatsView'),
+  TerminalHost: lazyView(() => import('./TerminalHost'), 'TerminalHost')
 }
 import { longPressHandlers, useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
 import { collectRecentCwds, normalizeCwd, rankCwdMatches, splitCwd } from './cwd-recents'

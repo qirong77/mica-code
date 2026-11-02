@@ -1,7 +1,7 @@
+import { lazyView } from './lazy-view'
 import {
   Suspense,
   forwardRef,
-  lazy,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -57,9 +57,7 @@ import {
 import brandMark from '../../../resources/icon.svg?url&no-inline'
 
 // diff 视图静态依赖 monaco 本体，拆成独立模块后只在挑选 diff 时才下载。
-const GitDiffEditor = lazy(() =>
-  import('./GitDiffEditor').then((module) => ({ default: module.GitDiffEditor }))
-)
+const GitDiffEditor = lazyView(() => import('./GitDiffEditor'), 'GitDiffEditor')
 
 // 资源管理器的横向栅格，取自 VS Code 实测值：每层只缩进 8px，行内是
 // 「16px 箭头格 + 16px 图标格 + 5px 间隙」——所以文件名的左边距就是 57 + 8 * depth，

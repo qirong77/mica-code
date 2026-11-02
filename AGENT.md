@@ -364,7 +364,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - `package.json` 的 `dependencies` 只放主进程/运行时真正 require 的包；renderer 依赖全部归 `devDependencies`。
 - `electron.vite.config.mjs` 的 `resolve.dedupe: ['react', 'react-dom']` 不能删。
 - `tablerIconDeepImports()` 只影响 build，新增图标无需同步清单。
-- 页面根节点必须套 `renderer/src/ErrorBoundary.jsx`。
+- 页面根节点必须套 `renderer/src/ErrorBoundary.jsx`。按需视图统一用 `renderer/src/lazy-view.jsx` 的 `lazyView(loader, name)`：校验导出、局部捕获失败，重试时重建 lazy 实例；外层仍由 `Suspense` 提供加载占位，单个视图失败不能卸掉整个对话页面。
 - 运行时启动即 `stripContainerEnv()`；受控浏览器与终端 socket 只在 `will-quit` 关闭。
 - 同一时刻只起一个 Electron 实例；验证时串行。
 

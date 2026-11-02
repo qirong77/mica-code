@@ -72,7 +72,17 @@ export function startLogProbe(win) {
     const fn = original[level]
     if (typeof fn !== 'function') continue
     win.console[level] = (...args) => {
-      enqueue(level, args.map(safeString).join(' ').slice(0, 300), { source: 'console' })
+      // React 的 ErrorBoundary 会接住异常，只留下 console.error，不再触发 window.error。
+      // 必须单独保留 Error 与组件堆栈，不能让它们随 event 的 120 字符截断一起丢失。
+      const error = args.find((value) => value instanceof Error)
+      const componentStack = args.find(
+        (value) => typeof value === 'string' && /\n\s+at /.test(value)
+      )
+      enqueue(level, args.map(safeString).join(' ').slice(0, 300), {
+        source: 'console',
+        stack: stackOf(error),
+        componentStack
+      })
       fn.apply(win.console, args)
     }
   }

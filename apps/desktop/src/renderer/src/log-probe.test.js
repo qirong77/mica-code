@@ -45,6 +45,19 @@ function createHarness() {
 }
 
 describe('startLogProbe', () => {
+  it('保留被 React 边界捕获的异常与组件堆栈', async () => {
+    const harness = createHarness()
+    const probe = startLogProbe(harness.win)
+    const error = new Error('lazy component failed')
+    const componentStack = '\n    at Lazy\n    at App'
+    harness.win.console.error('[mica] 界面渲染失败', error, componentStack)
+    await probe.flush()
+    const [entry] = harness.posted[0].body.payload.entries
+    expect(entry.stack).toContain('lazy component failed')
+    expect(entry.componentStack).toBe(componentStack)
+    probe.stop()
+  })
+
   it('console.error 仍输出到控制台，同时进日志队列', async () => {
     const harness = createHarness()
     const probe = startLogProbe(harness.win)
