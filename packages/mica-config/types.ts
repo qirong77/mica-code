@@ -39,6 +39,12 @@ export interface ProviderDefinition {
 
 export interface PersistedMicaConfig {
   providers: ProviderDefinition[];
+  /** New-session model selection; omitted means the first provider and its first model. */
+  defaultModel?: {
+    provider: string;
+    model: string;
+    effort?: EffortOption;
+  };
   /**
    * Default capability selection copied into new sessions. Existing sessions keep
    * their own snapshot, so changing this never rewrites an open conversation.

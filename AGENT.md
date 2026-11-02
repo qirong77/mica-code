@@ -163,7 +163,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 ## 5. 配置、会话与存储
 
 - `MICA_HOME` 覆盖全部用户路径，默认 `~/.mica`；品牌目录经 `brand.ts` 解析。
-- `PersistedMicaConfig` 只存静态字段；运行时用 `stripRuntimeFields` 去除 provider/model/effort/contextWindowSize。
+- `PersistedMicaConfig` 只存静态字段；运行时用 `stripRuntimeFields` 去除 provider/model/effort/contextWindowSize。新会话默认值唯一来自 `config.json.defaultModel: { provider, model, effort? }`；未配置取 `providers[0].models[0]`（动态列表取返回首项），未填 effort 用模型默认档位。`micaConfig.resetSessionModelDefaults()` 重读默认值并保留已加载的动态模型列表，TUI `/new`、`/clear` 同样调用；恢复会话与显式选择保留自己的值。`storage.json` 不再读写目录模型偏好。
 - 旧版本写在 `config.json` 的 `searxngUrl` 在启动时迁进 `plugin-settings/web-search.json`（已有值不覆盖）并删掉原键；搜索改成插件后只有插件设置生效。
 - 配置迁移与语义校验统一在 `startup/validate-config.js`，配置页保存复用它。
 - 仅当所有 provider 都没有 api_key 时，`envProvider.ts` 从 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 合成运行时 provider；环境 provider 永不写回 config.json。
@@ -196,6 +196,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - `mica/*` 扩展通知直接送 renderer，不进 turn 重放缓冲：queue、tasks、BTW、history、capabilities、turn retrying。
 - `mica/capabilities/get|set` 读写会话能力；运行中 set 返回 `ok:false`。
 - `mica/input/activity` 是「用户在输入框敲了字」（不是提交）：宿主只把它翻成运行期事件 `input:activity`，由插件决定要不要动作。桌面端在 `ChatView` 里节流 2s 发出，没有常驻进程时 host 直接吞掉（绝不为几个按键 spawn 一个）；TUI 与 `mica exec` 不发。
+- `mica/input/focus` 是「焦点回到了输入框」（还没敲字）：同样只翻成运行期事件 `input:focus`。桌面端在 `TerminalComposer` 获得焦点时发，并且只在会话没在跑（本页或其他进程都没在跑）时发；轮次运行中漏过来的那一下由宿主的 turn lease 判定挡掉（插件拿到 `busy` 就跳过）。
 - `turn/start` / `mica/turn/editMessage` 可传 role，由 host 在启动 turn 前应用；edit 时必须在 `loadSnapshot()` 之后应用。角色缺失只 warning 并保留原角色，不为切角色重建 host。
 - `mica/notes/get|set` 读写会话笔记，落盘跟随本轮 checkpoint，不在 handler 里抢占 lease。
 - `mica/pluginPanel/view|action` 读一块插件面板的视图、转发一次动作（`pluginId + action/key/values`）；面板处理器活在常驻会话宿主里（插件就在那个进程），没有宿主时桌面端按需起一个。
@@ -319,7 +320,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - 本地清理替换工具结果、可识别媒体与工具参数正文；tool-call arguments 必须仍是合法 JSON，只裁正文/长命令，保留路径、pattern、name、offset。
 - 裁剪规则集中在 `mica-context/CompactionService.ts`（正文/命令阈值 200/400），幂等标记 `[omitted `。
-- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次。`minIntervalMinutes`（默认 30）只约束**同一轮运行中**的重复压缩：`turn:before` 把本轮起点写进 `turnStartedAt`，上一轮留下的 `lastRunAt` 早于它就不构成冷却——用户发来下一句、上下文又超阈值时立刻压；空闲触发也不看这个间隔。另有一条不看阈值的触发：会话空闲 ≥ `idleMinutes`（默认 15）后用户在输入框敲字（运行期事件 `input:activity`，桌面端经 `mica/input/activity` 送出），就经 `ctx.agent.compactIdleHistory()` 在轮次之外把已落盘的历史快速压一次——宿主（`HeadlessTurnExecutor.runIdleMaintenance`）负责取 turn lease、对齐磁盘与落盘，会话忙 / 别的进程持锁时回 `skipped: busy` 且不消耗次数；压成后在对话里留一行 notice，并随压缩结果同一次落盘（`afterApply` 在保存之前调用），再由 app-server 发 `mica/sessionHistory/replaced` 让页面重载。压缩是同步的（`readFileSync` + 纯 CPU），它跑着的时候宿主读不到 stdin 上的下一条 `turn/start`：用户这几秒发的消息只会静静排在管道里，界面上什么也看不出来。所以宿主在动手之前先发 `mica/host/maintenance`（`{ active, reason: 'compaction' }`），桌面端据此把这段时间的发送放进本地队列——条目带 `waitingFor: 'compaction'`，排队行提示「等自动压缩结束」、可撤回——宿主报 `active: false` 后自动补发（`chat.js` 的 `replayCompactionQueue` 只补发这一种，别的排队条目各有自己的时机）。设置在插件 `settings`（每项都标 `perSession`，可在会话设置里按会话覆盖），计数、最后活动时间与本轮起点在会话 `pluginState['auto-compact']`。模型那一路的摘要走清单 `llm`（「压缩摘要模型」面板）：默认复用当前会话模型，也能换成更便宜的独立接口，失败自动降级；插件只替换「谁写这段摘要」（`ctx.agent.compact` 的 `summarize`），分段、预算与重试仍归内核的 `CompactionService`。
+- 自动压缩是官方插件 `plugins/auto-compact/`：每次模型请求的迭代边界检查，先本地清理、仍超阈值再模型摘要；阈值 300k / 200k、各最多 999 次。`minIntervalMinutes`（默认 30）只约束**同一轮运行中**的重复压缩：`turn:before` 把本轮起点写进 `turnStartedAt`，上一轮留下的 `lastRunAt` 早于它就不构成冷却——用户发来下一句、上下文又超阈值时立刻压；空闲触发也不看这个间隔。另有一条不看阈值的触发：会话空闲 ≥ `idleMinutes`（默认 15）后用户在输入框敲字（运行期事件 `input:activity`，桌面端经 `mica/input/activity` 送出），就经 `ctx.agent.compactIdleHistory()` 在轮次之外把已落盘的历史快速压一次——宿主（`HeadlessTurnExecutor.runIdleMaintenance`）负责取 turn lease、对齐磁盘与落盘，会话忙 / 别的进程持锁时回 `skipped: busy` 且不消耗次数；压成后在对话里留一行 notice，并随压缩结果同一次落盘（`afterApply` 在保存之前调用），再由 app-server 发 `mica/sessionHistory/replaced` 让页面重载。另一条更早的触发不看空闲时长：用户**把焦点放回输入框**（运行期事件 `input:focus`，桌面端经 `mica/input/focus` 送出、只在会话没在跑时发）就压一次——人已经坐在输入框前，下一步就是按发送。它靠「上一次轮次之外压缩之后有没有跑过新一轮」去重：`turn:before` 把 `turnCount` 加一，压缩时把这个值记进 `compactedTurnCount`，两者相等就跳过，点进点出输入框不会反复全量扫一遍大会话。压缩是同步的（`readFileSync` + 纯 CPU），它跑着的时候宿主读不到 stdin 上的下一条 `turn/start`：用户这几秒发的消息只会静静排在管道里，界面上什么也看不出来。所以宿主在动手之前先发 `mica/host/maintenance`（`{ active, reason: 'compaction' }`），桌面端据此把这段时间的发送放进本地队列——条目带 `waitingFor: 'compaction'`，排队行提示「等自动压缩结束」、可撤回——宿主报 `active: false` 后自动补发（`chat.js` 的 `replayCompactionQueue` 只补发这一种，别的排队条目各有自己的时机）。设置在插件 `settings`（每项都标 `perSession`，可在会话设置里按会话覆盖），计数、最后活动时间与本轮起点在会话 `pluginState['auto-compact']`。模型那一路的摘要走清单 `llm`（「压缩摘要模型」面板）：默认复用当前会话模型，也能换成更便宜的独立接口，失败自动降级；插件只替换「谁写这段摘要」（`ctx.agent.compact` 的 `summarize`），分段、预算与重试仍归内核的 `CompactionService`。
 - 自动压缩只在常驻会话生效：`mica exec` 是一次性运行（`agent.mode === 'one-shot'`），改变成本或输出的策略一律跳过。
 - 压缩只改发给模型的历史，不改 `conversationMessages`；自动压缩失败只记 note，不中断 turn。
 - 所有压缩保留 usage 记账；需要模型的 compact / review 走 subagent 或 exclusive task，不污染运行中的主 turn。插件自带摘要请求时（`compact(..., { summarize })`）走 `ctx.llm`，用量以 `origin: 'plugin'` 记进同一份 `subagentUsageHistory`。
@@ -394,8 +395,10 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 每行是「名称 | 说明 | 类型 | 来源」四列，列数必须与行内子元素一一对应（多出来的子元素会掉到第二行，浮层看起来就是歪的）。类型标记写 `skill` / `MCP`（`@` 文件补全的 `file` 不画，一整屏都是文件时标一排只是噪声）；来源标记是 `source: { kind, label, detail? }`，kind 取 `builtin` / `plugin` / `project` / `user` / `config`：插件带的写「插件 <id>」、项目目录写 `.mica/skills` 这样的相对路径、用户目录写 `$MICA_HOME/skills` / `~/.agents/skills`、MCP 写「内置」或 `config.json`；`detail`（SKILL.md 路径、`config.json` 路径、插件 id）放悬停提示。来源由 host 两个扫描器给，渲染层只做白名单校验（不认识的 kind 整条丢掉），`label` 同时参与查询匹配但没有高亮——说明列只讲「这东西干什么」。
 - desktop composer 不分派斜杠命令；输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻。
 - 输入框内容变化会节流 2s 发一次 `chat:input-activity` → `mica/input/activity`（空输入不发）：它只服务「这个人回来了」这类提前量（自动压缩的空闲触发），没有常驻进程时直接丢弃，不回包也不影响输入。
+- 输入框获得焦点发一次 `chat:input-focus` → `mica/input/focus`（只在会话没在跑时发）：同样是提前量，自动压缩据此在用户还没敲第二个字之前就压完。两条都只在已有常驻 host 时转发，不为一次焦点去 spawn。
 - 粘贴共用 `composer-paste.js`：图片转 `[Image](路径)`，文件插绝对路径。
 - 角色入口在输入条箭头，随下一次发送/编辑的 role 参数持久化。
+- 输入条秒表图标打开「本轮耗时」（`TurnTimingDialog`）：最近一轮按「等模型 / 输出 / 跑工具」首尾相接切成区间，切分与聚合只在 `renderer/src/turn-timing.js`，数据来自本轮已收到的事件流（不新增协议、不落盘）。`step_start` 重置、只留最近一轮；页面重载后靠 host 对本轮事件的重放恢复，没有事件可重放时入口置灰。
 - 输入条齿轮与时钟打开 `SessionSettingsDialog`：会话能力（Tools / Skills / MCP 三页签）/ 定时任务 / 插件。声明了 `perSession` 的插件是左侧导航「插件」下面的子项，内容区只画选中的那一个；自动压缩的阈值这类按会话可调的项就在这里，默认值仍在配置页 Plugins。插件声明 `llm` 的字段由 `LlmSettingsSection` 按会话渲染（与配置页同一组件，摘要写会话当前模型、逐字段可「跟随默认」），不要在会话设置里另写一套模型表单。
 - 顶栏「会话笔记」图标打开 `SessionNotesDialog`（Monaco，700ms 防抖，无保存按钮）。
 - 插件入口是**输入框正上方那排胶囊按钮**（`PluginQuickBar`，来自清单 `desktop.panel.shortcuts`）：`action` 类按钮点一下直接调插件动作（立即返回，不在页面里跑外部命令或等模型），`section` 类按钮打开盖在对话区右侧的抽屉并展开那一块（`PluginPanels`，宽 340、不挤窄对话）；抽屉折叠状态与 ChatView 的 `pluginPanelOpen` / `pluginPanelSection` 共用。哪些插件有面板、`roles` 门槛、是否停用都从 `readPluginsDetails` 拿（用户插件也在里面），规则在 `renderer/src/plugin-panels.js`；RPC 走 `window.mica.chat.pluginPanels.view|action` → `chat:plugin-panel-view|action`。host 侧返回的载荷在 `hostTaskRequest` 的信封里，必须过 `unwrapHostResult`，否则页面只看到 `{ok:true}`、视图全 undefined。

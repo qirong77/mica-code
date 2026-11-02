@@ -29,7 +29,7 @@ printf 'Demo root: %s\nWorkspace: %s\n' "$DEMO_ROOT" "$DEMO_WORKSPACE"
 
 准备脚本创建 `home/config.json`、独立 `data/`、`logs/` 和 `workspace/task-queue/`，并在示例仓库中提交基线。示例无需安装依赖：`src/task-queue.mjs`、`test/task-queue.test.mjs` 和 `package.json` 使用 Node 原生测试。运行前可在独立 workspace 执行 `node --test`，基线有 2 项测试。
 
-配置字段已经对照 `packages/mica-config/types.ts`：provider 是 `demo`，模型是 `mica-demo`，协议是 `openai_responses`，API 为 `http://127.0.0.1:8898/v1`，key 为明确的假值。模型和推理档位选择放在 workspace 对应的 `home/storage.json` 中，provider 用 `effortLevels` 声明 `low/medium/high`，默认选择 `medium`。不要向配置添加未经支持的 `reasoning_effort` 或 `autoDetect` 开关。
+配置字段已经对照 `packages/mica-config/types.ts`：provider 是 `demo`，模型是 `mica-demo`，协议是 `openai_responses`，API 为 `http://127.0.0.1:8898/v1`，key 为明确的假值。模型和推理档位选择放在 `home/config.json` 的 `defaultModel: { "provider": "demo", "model": "mica-demo", "effort": "medium" }` 中，provider 用 `effortLevels` 声明 `low/medium/high`，默认选择 `medium`。不要向配置添加未经支持的 `reasoning_effort` 或 `autoDetect` 开关。
 
 自动探测通过明确的数据控制：provider 固定 `models`，不设置动态模型列表的 `get_model_url`，`mcpServers` 为空，并写入当天的本地 `home/cache/models-dev.json`，避免元数据联网刷新。该缓存有效期为 24 小时，跨天应重新准备。`session-rename`、`memory`、`auto-compact` 和 `mobile-relay` 在独立 `plugins-state.json` 中停用，避免额外模型请求或后台行为；`todo` 保持启用。
 

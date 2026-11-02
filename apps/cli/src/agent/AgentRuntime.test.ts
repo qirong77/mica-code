@@ -40,6 +40,14 @@ vi.mock('@packages/mica-config/index.js', async (importOriginal) => {
         configState = updater(configState);
         return configState;
       },
+      resetSessionModelDefaults: () => {
+        configState = { ...testConfig, providers: [...testConfig.providers] };
+        return configState;
+      },
+      prepareSessionModelDefaults: async () => {
+        configState = { ...testConfig, providers: [...testConfig.providers] };
+        return configState;
+      },
       assertValid: () => {},
       getModelRule: () => ({ contextSize: 1000 }),
     },
@@ -320,6 +328,48 @@ describe('AgentRuntime tool status', () => {
     expect(typeof options?.systemPrompt).toBe('function');
     expect((options?.systemPrompt as () => string)()).toContain('Plugin system guidance.');
   });
+
+  it('starts new terminal sessions with defaults without changing existing agents', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const { TerminalAgentSessionManager } = await import('../agents/terminalAgentSessions.js');
+    configState = { ...testConfig, model: 'previous-session-model' };
+    const existing = new AgentRuntime();
+    const sessions = new TerminalAgentSessionManager();
+    const created = sessions.createSession();
+
+    expect(created.model).toBe('test-model');
+    expect(existing.config.model).toBe('previous-session-model');
+    sessions.stop();
+  });
+
+  it.each([false, true])(
+    'clears headless sessions with defaults and preserves explicit CLI overrides: %s',
+    async (explicit) => {
+      const { AgentRuntime } = await import('./AgentRuntime.js');
+      const { createHeadlessRuntimeServices } = await import('../headless/headlessRuntimeServices.js');
+      const { SessionController } = await import('../session/SessionController.js');
+      testConfig.providers[0]!.supportsEffort = true;
+      try {
+        const agent = new AgentRuntime({ model: 'previous-session-model', effort: 'high' });
+        const controller = new SessionController(agent);
+        vi.spyOn(controller, 'saveCurrent').mockReturnValue(true);
+        const services = createHeadlessRuntimeServices({
+          agent,
+          sessionController: controller,
+          runtimeOverride: explicit ? { model: 'cli-model', effort: 'high' } : undefined,
+          subagentTasks: {} as never,
+          notices: { ensure: () => ({ clear() {}, compose: () => [] }) as never },
+          isBusy: () => false,
+          submit: vi.fn(),
+        });
+        await services.clearUI(agent as never);
+        expect(agent.config.model).toBe(explicit ? 'cli-model' : 'test-model');
+        expect(agent.config.effort).toBe(explicit ? 'high' : testConfig.effort);
+      } finally {
+        testConfig.providers[0]!.supportsEffort = false;
+      }
+    },
+  );
 
   it('shares system prompt hooks with agents created for new terminal sessions', async () => {
     const { micaPlugin } = await import('@packages/mica-plugin/index.js');

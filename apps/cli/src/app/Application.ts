@@ -97,9 +97,10 @@ export class Application {
         }
         const currentModel = micaConfig.get().model;
         if (currentModel)
-          void micaConfig
+          await micaConfig
             .ensureModelRule(currentModel, undefined, micaConfig.providerForModel(currentModel))
             .catch(() => undefined);
+        micaConfig.resetSessionModelDefaults();
       }
       const hooks = new micaPlugin.HookRegistry();
       const agent = new AgentRuntime({}, hooks);
@@ -331,8 +332,8 @@ export class Application {
 
       void micaConfig.loadMissingProviderModels().then(() => {
         if (!agent.isRunning) {
-          agent.reloadConfig(false);
-          syncModelDisplay(agent);
+          agent.configureForRun({});
+          if (agentSessions.current().agent === agent) syncModelDisplay(agent);
         }
       });
 

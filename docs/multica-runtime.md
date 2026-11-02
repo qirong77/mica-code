@@ -93,7 +93,7 @@ session ID, allowing callers to retry with a fresh session.
 `mica models` prints one model ID per line as `<provider-id>/<model-id>`. On a
 run, Mica resolves the longest configured provider prefix, so model IDs that
 themselves contain `/` remain intact. A daemon-selected model and effort are
-session-local overrides and do not change Mica's persisted last-used choice.
+session-local overrides and do not change Mica's configured new-session defaults.
 
 The `--dir` value is applied before model/runtime modules load. This matters
 because task runners write task context into that directory. Mica loads both

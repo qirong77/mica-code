@@ -732,6 +732,49 @@ async function stopMockContext(context: MockContext): Promise<void> {
 const hostReady = (m: HostMessage) => m.method === 'mica/backgroundTasks/updated' || m.method === 'error';
 
 suite('mica app-server real-user flows (mock provider)', () => {
+  for (const configuredDefault of [false, true]) {
+    itE2E(
+      `new session uses ${configuredDefault ? 'defaultModel and effort' : 'first configured model'} despite old directory preferences`,
+      async () => {
+        const tag = `session-default-${configuredDefault}`;
+        const home = makeHome(tag);
+        const config = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
+        config.providers[0].models = ['mock-first', 'mock-last-used'];
+        config.providers.push({ ...config.providers[0], id: 'preferred', models: ['mock-default'] });
+        if (configuredDefault) {
+          config.defaultModel = { provider: 'preferred', model: 'mock-default', effort: 'high' };
+        }
+        writeFileSync(join(home, 'config.json'), JSON.stringify(config));
+        writeFileSync(
+          join(home, 'storage.json'),
+          JSON.stringify({
+            version: 1,
+            lastUsedByDirectory: {
+              [join(home, 'work')]: {
+                provider: 'mock',
+                model: 'mock-last-used',
+                effort: 'low',
+                providerPreferences: { mock: { model: 'mock-last-used', effort: 'low' } },
+              },
+            },
+          }),
+        );
+        const host = spawnHost(tag, [], home);
+        hosts.push(host);
+        await waitFor(host, hostReady, 'host ready', 30_000);
+        await send(host, 1, 'turn/start', { input: [{ type: 'text', text: 'hello' }] });
+        const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+        const turnId = (started.params?.turn as { id: string }).id;
+        const completed = await waitFor(host, turnCompleted(turnId), 'turn/completed');
+        expect(completed.params?.turn).toMatchObject({ status: 'completed' });
+        expect(mock!.state.requests[0]).toMatchObject({
+          model: configuredDefault ? 'mock-default' : 'mock-first',
+          reasoning: { effort: configuredDefault ? 'high' : 'medium' },
+        });
+      },
+    );
+  }
+
   itE2E('new session + switched model (full provider/model id) + effort completes the turn', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];
@@ -2040,6 +2083,79 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(replacedAt).toBeLessThan(endedAt);
     // 请求数没变：这次压缩全在本地，没有偷偷发起一次模型请求。
     expect(mock!.state.requests).toHaveLength(requestsBeforeActivity);
+    expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);
+  });
+
+  itE2E('mica/input/focus compacts right after a turn, and only once per turn', async () => {
+    mock!.state.mode = 'tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    // 远低于任何阈值：压不压完全由「人回到输入框」决定。
+    mock!.state.inputTokens = 10;
+    mock!.state.toolFileContent = 'y'.repeat(20_000);
+
+    const home = makeHome('input-focus');
+    mkdirSync(join(home, 'plugin-settings'), { recursive: true });
+    writeFileSync(
+      join(home, 'plugin-settings', 'auto-compact.json'),
+      JSON.stringify({
+        enabled: 'true',
+        quickThresholdK: '10000',
+        modelThresholdK: '10000',
+        quickLimit: '999',
+        modelLimit: '0',
+        minIntervalMinutes: '0',
+        idleMinutes: '0',
+      }),
+    );
+
+    const host = spawnHost('input-focus', [], home);
+    hosts.push(host);
+    mock!.state.toolFilePath = join(host.cwd, 'focus-compact-notes.txt');
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '写一个很大的文件' }],
+      model: 'mock/mock-chat',
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (input focus)');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    await waitFor(host, turnCompleted(turnId), 'turn/completed (input focus)', 30_000);
+
+    const sessionPath = () =>
+      join(
+        host.home,
+        'sessions',
+        readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'))[0]!,
+      );
+    expect(readFileSync(sessionPath(), 'utf8')).not.toContain('[Old tool result content cleared');
+    const requestsBeforeFocus = mock!.state.requests.length;
+
+    // 会话还热着（远没到空闲阈值），焦点一回到输入框就压：用户正在输入框前，
+    // 下一步就是按发送，这是最后一个能白捡的间隙。
+    await send(host, 2, 'mica/input/focus', {});
+    await waitFor(host, (m) => m.id === 2, 'mica/input/focus response');
+
+    let persisted = '';
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      persisted = readFileSync(sessionPath(), 'utf8');
+      if (persisted.includes('[Old tool result content cleared during compact]')) break;
+      await sleep(100);
+    }
+    expect(persisted).toContain('[Old tool result content cleared during compact]');
+    expect(persisted).toContain('"quickRuns": 1');
+    expect(persisted).toContain('回到输入框，已快速压缩历史');
+    // 请求数没变：焦点触发的压缩全在本地，没有多问一次模型。
+    expect(mock!.state.requests).toHaveLength(requestsBeforeFocus);
+
+    // 再聚焦一次不该重复扫：这一轮的历史已经压过了，没有新内容。
+    await send(host, 3, 'mica/input/focus', {});
+    await waitFor(host, (m) => m.id === 3, 'second mica/input/focus response');
+    await sleep(1_000);
+    expect(readFileSync(sessionPath(), 'utf8')).toContain('"quickRuns": 1');
     expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);
   });
 

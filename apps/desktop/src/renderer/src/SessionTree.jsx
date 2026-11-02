@@ -14,7 +14,6 @@ import {
   IconChevronRight,
   IconClock,
   IconDots,
-  IconCornerDownRight,
   IconFolder,
   IconFolderOpen,
   IconListTree,
@@ -998,17 +997,20 @@ export function SessionTree({
             />
           ) : (
             <span className="flex min-w-0 flex-1 items-center gap-1.5">
-              {childDepth > 0 && (
-                <span className="shrink-0 text-fg-dim" title="由上一个会话派生的子会话">
-                  <IconCornerDownRight size={12} stroke={2} />
-                </span>
-              )}
               {loop && (
                 <span className="shrink-0 text-warn">
                   <IconClock size={12} stroke={2} />
                 </span>
               )}
               <span className="min-w-0 truncate">{session.title || session.id}</span>
+              {childDepth > 0 && (
+                <span
+                  className="shrink-0 rounded border border-line px-1 text-[10px] leading-4 text-fg-dim"
+                  title="子会话"
+                >
+                  sidecar
+                </span>
+              )}
               <RowAnnotationDots badges={annotationBadges(annotations, session.id)} />
             </span>
           )}

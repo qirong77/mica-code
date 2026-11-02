@@ -11,7 +11,7 @@
 - `mica-runtime`：运行时协议、事件、状态、输入、消息队列，以及 Codex 两套协议（`codexExecEvents.ts` 的 exec `ThreadEvent`、`codexProtocol.ts` 的 app-server v2 JSONL）。
 - `@anthropic/ink`：仓库内 vendored 的 Ink 分支，`mica-ui` 各组件唯一的 Ink 来源。
 - `mica-session`：会话快照的本地保存、读取和列表。
-- `mica-config`：本地配置读写和 provider 模型列表加载。
+- `mica-config`：本地配置读写和 provider 模型列表加载；`defaultModel` 配置新会话的 provider/model/effort，`micaConfig.resetSessionModelDefaults()` 重读默认值并保留动态模型缓存。
 - `mica-commands`：通用斜杠命令注册与分发。
 - `mica-builtin-commands`：Mica Code 内置产品命令。
 - `mica-context`：上下文管理能力，当前主要是 compact。

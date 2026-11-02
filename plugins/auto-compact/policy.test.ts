@@ -5,6 +5,7 @@ import {
   decideAutoCompactStep,
   normalizeCounters,
   settingsFromValues,
+  shouldCompactOnFocus,
   shouldCompactOnReturn,
   shouldEscalateToModel,
   type AutoCompactCounters,
@@ -65,6 +66,8 @@ describe('normalizeCounters', () => {
       modelRuns: 1,
       lastRunAt: '2026-10-01T00:00:00.000Z',
       turnStartedAt: '2026-09-30T23:59:00.000Z',
+      turnCount: 7,
+      compactedTurnCount: 6,
       lastKind: 'model',
       lastSavedTokens: 4096,
       lastActivityAt: '2026-09-30T23:00:00.000Z',
@@ -199,6 +202,42 @@ describe('shouldEscalateToModel', () => {
   it('stops at the model allowance', () => {
     expect(
       shouldEscalateToModel({ settings: settings(), counters: counters({ modelRuns: 999 }), ctxTokens: 900_000 }),
+    ).toBe(false);
+  });
+});
+
+describe('shouldCompactOnFocus', () => {
+  it('fires as soon as a new turn has run since the last quick pass', () => {
+    expect(shouldCompactOnFocus({ settings: settings(), counters: counters() })).toBe(false);
+    expect(shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 1 }) })).toBe(true);
+    expect(
+      shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 3, compactedTurnCount: 2 }) }),
+    ).toBe(true);
+  });
+
+  it('does nothing when the last pass already covered the latest turn', () => {
+    // 点进点出输入框很常见：每次全量扫历史在大会话上不便宜。
+    expect(
+      shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 3, compactedTurnCount: 3 }) }),
+    ).toBe(false);
+  });
+
+  it('ignores how long the session has been idle', () => {
+    // 与「空闲回来」的区别就在这里：人已经坐在输入框前，随时可能按发送。
+    expect(shouldCompactOnFocus({ settings: settings({ idleMs: 0 }), counters: counters({ turnCount: 1 }) })).toBe(
+      true,
+    );
+  });
+
+  it('is off when the plugin is disabled or the quick allowance is spent', () => {
+    expect(shouldCompactOnFocus({ settings: settings({ enabled: false }), counters: counters({ turnCount: 1 }) })).toBe(
+      false,
+    );
+    expect(
+      shouldCompactOnFocus({
+        settings: settings({ quickLimit: 2 }),
+        counters: counters({ turnCount: 1, quickRuns: 2 }),
+      }),
     ).toBe(false);
   });
 });

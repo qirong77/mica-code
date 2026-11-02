@@ -386,6 +386,98 @@ describe('auto-compact plugin', () => {
   });
 });
 
+describe('auto-compact on composer focus', () => {
+  it('compacts as soon as the composer gains focus, before the user types', async () => {
+    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, settings: { quickLimit: '99' } });
+    // 一轮跑完就是「有没过压缩的新历史」——焦点触发只看这个，不看空闲多久。
+    harness.emitHook('turn:before', {});
+    harness.emitHook('turn:after', {});
+
+    await harness.focusComposer();
+
+    expect(harness.idleCompactCalls).toHaveLength(1);
+    expect(harness.state).toMatchObject({ quickRuns: 1, lastKind: 'quick' });
+    expect(harness.notices.at(-1)).toContain('回到输入框，已快速压缩历史：52K → 40K');
+    // 记账里记下这次压缩覆盖到哪一轮：下一次聚焦据此判断有没有新内容。
+    expect(harness.state?.compactedTurnCount).toEqual(harness.state?.turnCount);
+  });
+
+  it('does not re-compact on the next focus when no turn ran in between', async () => {
+    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, settings: { quickLimit: '99' } });
+    harness.emitHook('turn:before', {});
+    harness.emitHook('turn:after', {});
+
+    await harness.focusComposer();
+    await harness.focusComposer();
+    await harness.focusComposer();
+
+    // 点进点出输入框很常见：每次全量扫一遍历史在大会话上不便宜。
+    expect(harness.idleCompactCalls).toHaveLength(1);
+  });
+
+  it('compacts again on focus once another turn has finished', async () => {
+    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, settings: { quickLimit: '99' } });
+    harness.emitHook('turn:before', {});
+    await harness.focusComposer();
+
+    harness.emitHook('turn:before', {});
+    harness.emitHook('turn:after', {});
+    await harness.focusComposer();
+
+    expect(harness.idleCompactCalls).toHaveLength(2);
+    expect(harness.state).toMatchObject({ quickRuns: 2 });
+  });
+
+  it('does not spend a run when the host is busy', async () => {
+    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, idleSkipped: 'busy' });
+    harness.emitHook('turn:before', {});
+
+    await harness.focusComposer();
+
+    expect(harness.idleCompactCalls).toHaveLength(1);
+    expect(harness.state?.quickRuns).toBe(0);
+    expect(harness.healthReports.some((report) => report.level === 'warn')).toBe(false);
+  });
+
+  it('stays off when the plugin is disabled', async () => {
+    const harness = createHarness({
+      inputTokens: 30_000,
+      idleCompact: true,
+      settings: { enabled: 'false' },
+    });
+    harness.emitHook('turn:before', {});
+
+    await harness.focusComposer();
+
+    expect(harness.idleCompactCalls).toEqual([]);
+  });
+
+  it('stays off once the quick-run budget is spent', async () => {
+    const harness = createHarness({
+      inputTokens: 30_000,
+      idleCompact: true,
+      settings: { quickLimit: '1' },
+      lastRunAt: minutesAgo(60),
+    });
+    harness.restoreState({ quickRuns: 1, lastRunAt: minutesAgo(60), turnStartedAt: minutesAgo(30) });
+
+    await harness.focusComposer();
+
+    expect(harness.idleCompactCalls).toEqual([]);
+  });
+
+  it('skips focus compaction when the host cannot rewrite stored history', async () => {
+    // TUI / mica exec：没有这条通路时既不订阅事件，也不该报错。
+    const harness = createHarness({ inputTokens: 30_000 });
+    harness.emitHook('turn:before', {});
+
+    await harness.focusComposer();
+
+    expect(harness.idleCompactCalls).toEqual([]);
+    expect(harness.healthReports.some((report) => report.level === 'warn')).toBe(false);
+  });
+});
+
 describe('auto-compact restored activity', () => {
   it('reads activity restored after plugin setup before checking for an idle return', async () => {
     const harness = createHarness({ inputTokens: 30_000, idleCompact: true });
@@ -622,6 +714,11 @@ function createHarness(options: {
     /** 模拟用户在输入框里敲字，并等插件那边（异步）处理完。 */
     typeInComposer: async (owner?: unknown) => {
       for (const handler of eventHandlers) handler({ type: 'input:activity', owner });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    },
+    /** 模拟鼠标点进输入框（还没敲字），并等插件那边（异步）处理完。 */
+    focusComposer: async (owner?: unknown) => {
+      for (const handler of eventHandlers) handler({ type: 'input:focus', owner });
       await new Promise((resolve) => setTimeout(resolve, 0));
     },
     emitHook: (name: string, event?: { owner?: unknown }) => {

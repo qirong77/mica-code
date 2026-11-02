@@ -54,7 +54,8 @@ export default function TerminalComposer({
   textareaRef,
   onChange,
   onKeyDown,
-  onPaste
+  onPaste,
+  onFocus
 }) {
   const preRef = useRef(null)
   const mirrorRef = useRef(null)
@@ -292,7 +293,8 @@ export default function TerminalComposer({
     setBlinkOn(true)
     resumeBlinking()
     sync()
-  }, [resumeBlinking, sync])
+    onFocus?.()
+  }, [onFocus, resumeBlinking, sync])
 
   const handleBlur = useCallback(() => {
     setFocused(false)

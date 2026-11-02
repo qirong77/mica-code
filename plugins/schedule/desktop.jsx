@@ -799,16 +799,21 @@ export default function SchedulePage({ api }) {
                 )}
               </div>
               <div className="relative border-b border-line" style={{ height: MINOR_HEADER_HEIGHT }}>
-                {cells.minor.map((cell) => (
-                  <div
-                    key={`minor-${cell.offset}`}
-                    className="absolute top-0 flex h-full items-center justify-center gap-1 overflow-hidden border-r border-line-soft text-[10px] tabular-nums text-fg-soft"
-                    style={{ left: cell.offset * pxPerDay, width: cell.span * pxPerDay }}
-                  >
-                    <span>{cell.label}</span>
-                    {cell.sub && <span className="text-fg-dim">{cell.sub}</span>}
-                  </div>
-                ))}
+                {cells.minor.map((cell) => {
+                  const hasToday = todayInAxis && todayOffset >= cell.offset && todayOffset < cell.offset + cell.span;
+                  return (
+                    <div
+                      key={`minor-${cell.offset}`}
+                      className={`absolute top-0 flex h-full items-center justify-center gap-1 overflow-hidden border-r border-line-soft text-[10px] tabular-nums ${
+                        hasToday ? 'bg-info/[.14] text-info' : 'text-fg-soft'
+                      }`}
+                      style={{ left: cell.offset * pxPerDay, width: cell.span * pxPerDay }}
+                    >
+                      <span className={hasToday ? 'font-semibold' : undefined}>{cell.label}</span>
+                      {cell.sub && <span className={hasToday ? 'text-info/70' : 'text-fg-dim'}>{cell.sub}</span>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -827,10 +832,12 @@ export default function SchedulePage({ api }) {
                 })}
               {todayInAxis && (
                 <div
-                  className="pointer-events-none absolute top-0 bg-danger/[.06]"
+                  className={`pointer-events-none absolute top-0 ${
+                    pxPerDay < 8 ? 'bg-info/55' : 'border-x border-info/30 bg-info/[.14]'
+                  }`}
                   style={{
                     left: todayOffset * pxPerDay,
-                    width: Math.max(2, scale === 'day' ? pxPerDay : 2),
+                    width: Math.max(2, pxPerDay),
                     height: rowsHeight,
                   }}
                 />

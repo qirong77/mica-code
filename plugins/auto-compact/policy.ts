@@ -26,6 +26,15 @@ export type AutoCompactCounters = {
   modelRuns: number;
   /** 上一次压缩成功的时间（ISO）。 */
   lastRunAt: string | null;
+  /** 这条会话一共跑过几轮（`turn:before` 自增）。 */
+  turnCount: number;
+  /**
+   * 上一次轮次之外压缩时，`turnCount` 的值。
+   *
+   * 用来回答「这次压缩之后有没有跑过新一轮」：相等就说明那段历史已经压过了，再点一次
+   * 输入框没有可压的东西。用序号而不是时间戳——同一毫秒里开始的轮次不会被误判成旧的。
+   */
+  compactedTurnCount: number;
   /**
    * 本轮开始的 ISO 时间。
    *
@@ -64,6 +73,8 @@ export const EMPTY_COUNTERS: AutoCompactCounters = {
   quickRuns: 0,
   modelRuns: 0,
   lastRunAt: null,
+  turnCount: 0,
+  compactedTurnCount: 0,
   turnStartedAt: null,
   lastKind: null,
   lastSavedTokens: 0,
@@ -110,6 +121,8 @@ export function normalizeCounters(input: unknown): AutoCompactCounters {
     quickRuns: count(source.quickRuns),
     modelRuns: count(source.modelRuns),
     lastRunAt: typeof source.lastRunAt === 'string' && source.lastRunAt ? source.lastRunAt : null,
+    turnCount: count(source.turnCount),
+    compactedTurnCount: count(source.compactedTurnCount),
     turnStartedAt: typeof source.turnStartedAt === 'string' && source.turnStartedAt ? source.turnStartedAt : null,
     lastKind: source.lastKind === 'quick' || source.lastKind === 'model' ? source.lastKind : null,
     lastSavedTokens: count(source.lastSavedTokens),
@@ -218,4 +231,32 @@ export function shouldCompactOnReturn(input: {
   if (!Number.isFinite(settings.idleMs) || settings.idleMs <= 0) return false;
   if (!Number.isFinite(idleMs) || idleMs < settings.idleMs) return false;
   return counters.quickRuns < settings.quickLimit;
+}
+
+/**
+ * 上一次轮次之外压缩之后有没有跑过新一轮。
+ *
+ * 没有它，用户点进点出输入框就会反复让宿主把整份历史扫一遍——压不出东西、不写盘也
+ * 不计次，但一次全量扫描在大会话上要解析几十 MB 的文件。判据是「这一轮的起点是不是
+ * 已经压过了」，不比较时间戳：同一毫秒里开始的轮次不会被误判成旧的。
+ *
+ * 只用在聚焦这条路上：点进点出输入框是高频动作，而「空闲回来」本身已经由空闲时长
+ * 兜底，返回一次最多多扫一遍。
+ */
+function hasUncompactedHistory(counters: AutoCompactCounters): boolean {
+  return counters.turnCount !== counters.compactedTurnCount;
+}
+
+/**
+ * 焦点回到输入框（这一轮没在跑）时要不要做一次快速压缩。
+ *
+ * 与「空闲回来」的区别是不看空闲时长：人已经坐在输入框前、随时可能按发送，这时候仍有
+ * 一个完整的间隙可用。守住不白干的是 `hasUncompactedHistory`——上一次压缩之后没有新
+ * 轮次，就没有可压的东西。
+ */
+export function shouldCompactOnFocus(input: { settings: AutoCompactSettings; counters: AutoCompactCounters }): boolean {
+  const { settings, counters } = input;
+  if (!settings.enabled) return false;
+  if (counters.quickRuns >= settings.quickLimit) return false;
+  return hasUncompactedHistory(counters);
 }

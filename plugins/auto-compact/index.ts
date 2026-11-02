@@ -7,6 +7,7 @@ import {
   decideAutoCompactStep,
   normalizeCounters,
   settingsFromValues,
+  shouldCompactOnFocus,
   shouldCompactOnReturn,
   shouldEscalateToModel,
   type AutoCompactCounters,
@@ -135,6 +136,7 @@ const plugin: MicaPlugin = {
         const now = Date.now();
         const counters = normalizeCounters(ctx.sessionState!.get(owner));
         counters.turnStartedAt = new Date(now).toISOString();
+        counters.turnCount += 1;
         // 活动时间只服务空闲触发；宿主没有这条通路时不必每轮多写一次。
         if (canCompactIdle) counters.lastActivityAt = new Date(now).toISOString();
         persistState(ctx, counters, owner);
@@ -158,6 +160,14 @@ const plugin: MicaPlugin = {
           );
         };
         const events = ctx.events.on('event', (event) => {
+          // 焦点回到输入框：用户随时可能按下发送，这是最后一个能白捡的间隙。比「敲了
+          // 第一个字」早一步——等按键时，压缩与这次请求已经撞在一起了。
+          if (event.type === 'input:focus') {
+            // 不动 `lastActivityAt`：它量的是「多久没说话」，点进输入框不算说话。改了它
+            // 会让紧接着的打字看到 idle≈0，空闲触发那条规则就再也不会生效。
+            void compactOnFocus(ctx, agentApi, Date.now(), event.owner);
+            return;
+          }
           if (event.type !== 'input:activity') return;
           const now = Date.now();
           // setup 之后宿主才可能恢复会话，rewind 也会换掉状态；每次从当前快照读取。
@@ -244,10 +254,77 @@ function formatCompactGain(beforeTokens: number, afterTokens: number, savedToken
 }
 
 /**
- * 用户回来了：会话空闲够久就先做一次快速压缩，让接下来那一轮请求按压小的历史发出。
+ * 两条提前量共用的一次快速压缩：空闲回来（`idle`）与焦点回到输入框（`focus`）。
+ *
+ * 记账与提示必须在落盘**之前**写（`afterApply`）：宿主压缩完就把会话文件写死了，之后
+ * 写的状态只能等下一轮才带上——用户可能直接关掉页面，那次压缩就变成「压了但没记账」。
  *
  * 宿主回 `skipped` 表示这次没压成（`busy` 会话正忙 / 别的进程持锁，`empty` 没有可清理
  * 的内容），那也不消耗次数——下一次请求仍按阈值判断。
+ */
+async function runQuickCompact(input: {
+  ctx: PluginContext;
+  agentApi: NonNullable<PluginContext['agent']>;
+  /** 日志里区分是哪条提前量触发的。 */
+  trigger: 'idle' | 'focus';
+  nowMs: number;
+  owner?: unknown;
+  /** 压缩前后的量只有落盘那一刻才知道，文案因此是个回调。 */
+  describe: (gain: string) => string;
+  /** 额外进日志的上下文（空闲多久回来的之类），只用于排查。 */
+  logContext?: Record<string, unknown>;
+}): Promise<void> {
+  const { ctx, agentApi, trigger, nowMs, owner, describe, logContext } = input;
+  const compact = agentApi.compactIdleHistory;
+  if (!compact) return;
+
+  const describeGain = (beforeTokens: number, afterTokens: number, savedTokens: number) =>
+    describe(formatCompactGain(beforeTokens, afterTokens, savedTokens));
+
+  try {
+    const outcome = await compact({
+      afterApply: ({ savedTokens, beforeTokens, afterTokens }) => {
+        const next = normalizeCounters(ctx.sessionState?.get(owner));
+        next.quickRuns += 1;
+        next.lastKind = 'quick';
+        next.lastRunAt = new Date(nowMs).toISOString();
+        // 记下这次压缩覆盖到哪一轮：下一次聚焦据此判断「有没有新内容」，不必再扫一遍。
+        next.compactedTurnCount = next.turnCount;
+        next.lastSavedTokens = Math.round(savedTokens) || 0;
+        next.lastActivityAt = new Date(nowMs).toISOString();
+        persistState(ctx, next, owner);
+        // 界面上看得见的一次：否则「到底压没压」只能翻插件日志。
+        ctx.ui?.notice(describeGain(beforeTokens, afterTokens, savedTokens), { owner });
+      },
+    });
+    if (outcome.status === 'skipped') {
+      ctx.logger.info(`auto-compact:${trigger}-skipped`, { ...logContext, reason: outcome.reason });
+      return;
+    }
+    const gain = describeGain(outcome.beforeTokens, outcome.afterTokens, outcome.savedTokens);
+    ctx.logger.info(`auto-compact:${trigger}-applied`, {
+      ...logContext,
+      savedTokens: outcome.savedTokens,
+      beforeTokens: outcome.beforeTokens,
+      afterTokens: outcome.afterTokens,
+    });
+    ctx.health.report({ level: 'ok', message: gain });
+  } catch (error) {
+    // 提前量失败不该影响用户说话：记日志 + 一条可见但不打断的状态。
+    const message = error instanceof Error ? error.message : String(error);
+    ctx.logger.warn(`auto-compact:${trigger}-failed`, { error: message });
+    ctx.health.report({
+      level: 'warn',
+      message: `快速压缩未能生效：${message}`,
+      hint: '会话下次请求时仍会按阈值自动压缩；持续出现请查看插件日志。',
+    });
+  }
+}
+
+/**
+ * 用户回来了：会话空闲够久就先做一次快速压缩，让接下来那一轮请求按压小的历史发出。
+ *
+ * 不看上下文大小——「这次请求马上就到」本身就是理由，小上下文压不动也无所谓。
  */
 async function compactOnReturn(
   ctx: PluginContext,
@@ -256,55 +333,43 @@ async function compactOnReturn(
   nowMs: number,
   owner?: unknown,
 ): Promise<void> {
-  const compact = agentApi.compactIdleHistory;
-  if (!compact) return;
   const settings = readSettings(ctx, owner);
   const counters = normalizeCounters(ctx.sessionState?.get(owner));
   if (!shouldCompactOnReturn({ settings, counters, idleMs })) return;
+  await runQuickCompact({
+    ctx,
+    agentApi,
+    trigger: 'idle',
+    nowMs,
+    owner,
+    describe: (gain) => `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史：${gain}`,
+    logContext: { idleMs },
+  });
+}
 
-  try {
-    const outcome = await compact({
-      // 计数与提示必须在落盘**之前**写：宿主压缩完就把会话文件写死了，之后写的状态
-      // 只能等下一轮才带上——用户可能直接关掉页面，那次压缩就变成「压了但没记账」。
-      afterApply: ({ savedTokens, beforeTokens, afterTokens }) => {
-        const next = normalizeCounters(ctx.sessionState?.get(owner));
-        next.quickRuns += 1;
-        next.lastKind = 'quick';
-        next.lastRunAt = new Date(nowMs).toISOString();
-        next.lastSavedTokens = Math.round(savedTokens) || 0;
-        next.lastActivityAt = new Date(nowMs).toISOString();
-        persistState(ctx, next, owner);
-        // 界面上看得见的一次：否则「到底压没压」只能翻插件日志。
-        ctx.ui?.notice(
-          `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史：${formatCompactGain(beforeTokens, afterTokens, savedTokens)}`,
-          { owner },
-        );
-      },
-    });
-    if (outcome.status === 'skipped') {
-      ctx.logger.info('auto-compact:idle-skipped', { idleMs, reason: outcome.reason });
-      return;
-    }
-    ctx.logger.info('auto-compact:idle-applied', {
-      idleMs,
-      savedTokens: outcome.savedTokens,
-      beforeTokens: outcome.beforeTokens,
-      afterTokens: outcome.afterTokens,
-    });
-    ctx.health.report({
-      level: 'ok',
-      message: `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史：${formatCompactGain(outcome.beforeTokens, outcome.afterTokens, outcome.savedTokens)}`,
-    });
-  } catch (error) {
-    // 提前量失败不该影响用户说话：记日志 + 一条可见但不打断的状态。
-    const message = error instanceof Error ? error.message : String(error);
-    ctx.logger.warn('auto-compact:idle-failed', { error: message });
-    ctx.health.report({
-      level: 'warn',
-      message: `空闲后的快速压缩未能生效：${message}`,
-      hint: '会话下次请求时仍会按阈值自动压缩；持续出现请查看插件日志。',
-    });
-  }
+/**
+ * 焦点回到输入框时的快速压缩：比「敲了第一个字」早一步。
+ *
+ * 不看空闲时长——人已经坐在输入框前、随时可能按发送。守住不白干的只有「上一次压缩之后
+ * 有没有新轮次」（`shouldCompactOnFocus`），以及宿主自己回的 `busy`。
+ */
+async function compactOnFocus(
+  ctx: PluginContext,
+  agentApi: NonNullable<PluginContext['agent']>,
+  nowMs: number,
+  owner?: unknown,
+): Promise<void> {
+  const settings = readSettings(ctx, owner);
+  const counters = normalizeCounters(ctx.sessionState?.get(owner));
+  if (!shouldCompactOnFocus({ settings, counters })) return;
+  await runQuickCompact({
+    ctx,
+    agentApi,
+    trigger: 'focus',
+    nowMs,
+    owner,
+    describe: (gain) => `回到输入框，已快速压缩历史：${gain}`,
+  });
 }
 
 /**

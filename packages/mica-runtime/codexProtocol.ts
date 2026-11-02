@@ -458,6 +458,14 @@ export const MICA_METHODS = {
    * 这一次请求的开销。
    */
   inputActivity: 'mica/input/activity',
+  /**
+   * 用户把焦点放回了输入框（还没开始敲字）。客户端在获得焦点时发，宿主把它变成
+   * `input:focus` 运行期事件：需要「下一轮请求之前先做准备」的插件靠它提前一步，
+   * 不必等第一个按键——用户点进来往往就是马上要说话。
+   *
+   * 轮次运行中不发（客户端知道自己没在跑才发）：那时候宿主忙着写会话，压缩没有间隙。
+   */
+  inputFocus: 'mica/input/focus',
   /** Pull a queued (after_iteration) input back out of the host's single slot
    * so the client can restore it to its composer — the CLI's shift + ←. */
   queueRecall: 'mica/queue/recall',

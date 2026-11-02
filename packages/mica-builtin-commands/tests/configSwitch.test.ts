@@ -111,18 +111,11 @@ describe('config switch commands', () => {
         },
       );
       const persistedConfig = JSON.parse(readFileSync(micaConfig.path, 'utf-8')) as Record<string, unknown>;
-      const persistedStorage = JSON.parse(readFileSync(micaConfig.storage.path, 'utf-8')) as {
-        lastUsedByDirectory?: Record<string, Record<string, unknown>>;
-      };
       expect(persistedConfig.provider).toBeUndefined();
       expect(persistedConfig.model).toBeUndefined();
       expect(persistedConfig.effort).toBeUndefined();
       expect(persistedConfig.contextWindowSize).toBeUndefined();
-      expect(persistedStorage.lastUsedByDirectory?.[process.cwd()]).toMatchObject({
-        provider: 'openai',
-        model: 'gpt-5.5',
-        effort: 'low',
-      });
+      expect(micaConfig.storage.read()).not.toHaveProperty('lastUsedByDirectory');
       expect(agent.reloadConfig).toHaveBeenCalledWith(false);
       expect(session.saveCurrent).toHaveBeenCalled();
     } finally {

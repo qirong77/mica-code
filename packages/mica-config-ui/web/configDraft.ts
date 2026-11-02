@@ -18,7 +18,7 @@ export type ProviderProtocolValue = (typeof PROVIDER_PROTOCOL_VALUES)[number];
 export const DEFAULT_PROVIDER_PROTOCOL: ProviderProtocolValue = 'openai_chat_completions';
 
 /** 表单已知的顶层字段，其余一律当「高级字段」原样保留。 */
-export const KNOWN_CONFIG_KEYS = ['providers', 'mcpServers', 'capabilityDefaults'] as const;
+export const KNOWN_CONFIG_KEYS = ['providers', 'defaultModel', 'mcpServers', 'capabilityDefaults'] as const;
 const CONFIG_KEY_ORDER: readonly string[] = KNOWN_CONFIG_KEYS;
 const PROVIDER_KEY_ORDER = [
   'id',
@@ -33,6 +33,12 @@ const PROVIDER_KEY_ORDER = [
 ];
 
 export type ConfigDraft = Record<string, unknown>;
+
+export type DefaultModelDraft = {
+  provider: string;
+  model: string;
+  effort: string;
+};
 
 export type ProviderDraft = {
   id: string;
@@ -64,6 +70,24 @@ export function serializeConfigDraft(draft: ConfigDraft): string {
 
 export function providerEntries(draft: ConfigDraft): unknown[] {
   return Array.isArray(draft.providers) ? draft.providers : [];
+}
+
+export function readDefaultModelDraft(draft: ConfigDraft): DefaultModelDraft {
+  const record = isRecord(draft.defaultModel) ? draft.defaultModel : {};
+  return { provider: text(record.provider), model: text(record.model), effort: text(record.effort) };
+}
+
+export function writeDefaultModelDraft(draft: ConfigDraft, fields: DefaultModelDraft): ConfigDraft {
+  const next = { ...draft };
+  const provider = fields.provider.trim();
+  const model = fields.model.trim();
+  const effort = fields.effort.trim();
+  if (!provider && !model && !effort) {
+    delete next.defaultModel;
+  } else {
+    next.defaultModel = { provider, model, ...(effort ? { effort } : {}) };
+  }
+  return next;
 }
 
 export function readProviderDraft(raw: unknown): ProviderDraft {
@@ -150,6 +174,35 @@ export function validateConfigDraft(draft: ConfigDraft): ConfigDraftIssue[] {
         issues.push({ key: `${base}.api_key`, message: '必须是字符串' });
       }
     });
+  }
+
+  if (draft.defaultModel !== undefined) {
+    const defaults = draft.defaultModel;
+    if (!isRecord(defaults)) {
+      issues.push({ key: 'defaultModel', message: '默认模型必须是对象，或清除配置' });
+    } else {
+      if (!isNonEmptyText(defaults.provider)) {
+        issues.push({ key: 'defaultModel.provider', message: '请选择默认模型的服务商' });
+      } else if (!providerEntries(draft).some((raw) => isRecord(raw) && raw.id === defaults.provider)) {
+        issues.push({ key: 'defaultModel.provider', message: '服务商不存在，请重新选择或清除默认模型' });
+      }
+      const provider = providerEntries(draft).find((raw) => isRecord(raw) && raw.id === defaults.provider);
+      if (!isNonEmptyText(defaults.model)) {
+        issues.push({ key: 'defaultModel.model', message: '默认模型名称不能为空' });
+      } else if (
+        isRecord(provider) &&
+        !isNonEmptyText(provider.get_model_url) &&
+        (!Array.isArray(provider.models) || !provider.models.includes(defaults.model))
+      ) {
+        issues.push({ key: 'defaultModel.model', message: '默认模型不在该服务商的模型列表中' });
+      }
+      if (
+        defaults.effort !== undefined &&
+        (typeof defaults.effort !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(defaults.effort))
+      ) {
+        issues.push({ key: 'defaultModel.effort', message: 'Effort 必须是合法档位名，或留空使用模型默认值' });
+      }
+    }
   }
 
   return issues;

@@ -170,10 +170,9 @@ export function prepareDemo(args = process.argv.slice(2)) {
   json(join(root, MARKER), { kind: 'mica-docs-demo', version: 1, root });
   json(join(paths.home, 'config.json'), {
     providers: [{ id: 'demo', api_base: `http://127.0.0.1:${port}/v1`, api_key: 'demo-only-not-a-secret', protocol: 'openai_responses', models: ['mica-demo'], supportsEffort: true, effortLevels: ['low', 'medium', 'high'] }],
+    defaultModel: { provider: 'demo', model: 'mica-demo', effort: 'medium' },
     mcpServers: {},
   });
-  // Runtime selection belongs to storage.json, not persisted config fields.
-  json(join(paths.home, 'storage.json'), { version: 1, lastUsedByDirectory: { [paths.workspace]: { provider: 'demo', model: 'mica-demo', effort: 'medium', providerPreferences: { demo: { model: 'mica-demo', effort: 'medium' } } } } });
   // Fresh local metadata avoids online models.dev discovery during screenshots.
   json(join(paths.home, 'cache', 'models-dev.json'), { version: 1, fetchedAt: Date.now(), payload: { demo: { api: `http://127.0.0.1:${port}/v1`, models: { 'mica-demo': { id: 'mica-demo', limit: { context: 65536 }, reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'medium', 'high'] }], modalities: { input: ['text'] } } } } } });
   json(join(paths.home, 'plugins-state.json'), { disabled: ['session-rename', 'memory', 'auto-compact', 'mobile-relay'] });

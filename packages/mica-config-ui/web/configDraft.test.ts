@@ -3,10 +3,12 @@ import {
   addProviderDraft,
   parseConfigDraft,
   providerEntries,
+  readDefaultModelDraft,
   readProviderDraft,
   removeProviderDraft,
   serializeConfigDraft,
   validateConfigDraft,
+  writeDefaultModelDraft,
   writeProviderDraft,
 } from './configDraft.js';
 
@@ -127,6 +129,110 @@ describe('config draft serialization', () => {
     expect(text.indexOf('"providers"')).toBeLessThan(text.indexOf('"mcpServers"'));
     expect(text.indexOf('"mcpServers"')).toBeLessThan(text.indexOf('"zebra"'));
     expect(text.endsWith('\n')).toBe(true);
+  });
+});
+
+describe('config draft default model', () => {
+  it('leaves unconfigured defaults absent when reading and serializing', () => {
+    const draft = draftOf(SOURCE);
+    expect(readDefaultModelDraft(draft)).toEqual({ provider: '', model: '', effort: '' });
+    expect(JSON.parse(serializeConfigDraft(draft))).not.toHaveProperty('defaultModel');
+  });
+
+  it('round trips the selected provider, model and arbitrary effort without losing other settings', () => {
+    const draft = draftOf({ ...SOURCE, extraTop: { keep: true } });
+    const next = writeDefaultModelDraft(draft, {
+      provider: ' deepseek ',
+      model: ' deepseek-chat ',
+      effort: ' custom-effort ',
+    });
+    const restored = draftOf(JSON.parse(serializeConfigDraft(next)));
+    expect(readDefaultModelDraft(restored)).toEqual({
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      effort: 'custom-effort',
+    });
+    expect(validateConfigDraft(restored)).toEqual([]);
+    expect(restored.providers).toEqual(SOURCE.providers);
+    expect(restored.mcpServers).toEqual(SOURCE.mcpServers);
+    expect(restored.extraTop).toEqual({ keep: true });
+    expect(draft).not.toHaveProperty('defaultModel');
+  });
+
+  it('deletes blank effort and deletes the entire optional setting when cleared', () => {
+    const draft = draftOf({
+      ...SOURCE,
+      defaultModel: { provider: 'deepseek', model: 'deepseek-chat', effort: 'high' },
+    });
+    const next = writeDefaultModelDraft(draft, { ...readDefaultModelDraft(draft), effort: ' ' });
+    expect(next.defaultModel).toEqual({ provider: 'deepseek', model: 'deepseek-chat' });
+    const cleared = writeDefaultModelDraft(next, { provider: '', model: ' ', effort: '' });
+    expect(cleared).not.toHaveProperty('defaultModel');
+    expect(JSON.parse(serializeConfigDraft(cleared))).not.toHaveProperty('defaultModel');
+    expect(validateConfigDraft(cleared)).toEqual([]);
+  });
+
+  it('accepts manually entered models for providers with dynamic model lists', () => {
+    const draft = draftOf({
+      providers: [{ ...SOURCE.providers[0], models: undefined }],
+      defaultModel: { provider: 'deepseek', model: 'new-dynamic-model' },
+    });
+    expect(validateConfigDraft(draft)).toEqual([]);
+  });
+
+  it('rejects a model outside a static provider list', () => {
+    const draft = draftOf({
+      providers: [{ ...SOURCE.providers[0], get_model_url: undefined }],
+      defaultModel: { provider: 'deepseek', model: 'missing' },
+    });
+    expect(validateConfigDraft(draft).map((issue) => issue.key)).toEqual(['defaultModel.model']);
+  });
+
+  it('blocks incomplete defaults until a model is entered', () => {
+    const draft = writeDefaultModelDraft(draftOf(SOURCE), { provider: 'deepseek', model: '', effort: '' });
+    expect(validateConfigDraft(draft).map((issue) => issue.key)).toEqual(['defaultModel.model']);
+  });
+
+  it.each([{ value: null }, { value: [] }, { value: 'deepseek' }])(
+    'rejects a non-object default model: $value',
+    ({ value: defaultModel }) => {
+      expect(validateConfigDraft(draftOf({ ...SOURCE, defaultModel })).map((issue) => issue.key)).toEqual([
+        'defaultModel',
+      ]);
+    },
+  );
+
+  it.each([
+    [{}, ['defaultModel.provider', 'defaultModel.model']],
+    [{ provider: 1, model: false }, ['defaultModel.provider', 'defaultModel.model']],
+    [{ provider: 'missing', model: 'model' }, ['defaultModel.provider']],
+    [{ provider: 'deepseek', model: ' ' }, ['defaultModel.model']],
+    [{ provider: 'deepseek', model: 'model', effort: '' }, ['defaultModel.effort']],
+    [{ provider: 'deepseek', model: 'model', effort: 2 }, ['defaultModel.effort']],
+    [{ provider: 'deepseek', model: 'model', effort: 'bad effort' }, ['defaultModel.effort']],
+  ])('reports field-specific default model errors for %j', (defaultModel, keys) => {
+    expect(validateConfigDraft(draftOf({ ...SOURCE, defaultModel })).map((issue) => issue.key)).toEqual(keys);
+  });
+
+  it('flags a default whose provider was removed', () => {
+    const draft = draftOf({
+      ...SOURCE,
+      providers: [...SOURCE.providers, { ...SOURCE.providers[0], id: 'other' }],
+      defaultModel: { provider: 'deepseek', model: 'deepseek-chat' },
+    });
+    expect(validateConfigDraft(removeProviderDraft(draft, 0)).map((issue) => issue.key)).toEqual([
+      'defaultModel.provider',
+    ]);
+  });
+
+  it('serializes defaults with known keys before advanced settings', () => {
+    const serialized = serializeConfigDraft({
+      extra: true,
+      mcpServers: {},
+      defaultModel: { provider: 'p', model: 'm' },
+      providers: [],
+    });
+    expect(Object.keys(JSON.parse(serialized))).toEqual(['providers', 'defaultModel', 'mcpServers', 'extra']);
   });
 });
 

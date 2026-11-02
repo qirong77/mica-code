@@ -15,6 +15,14 @@ export type RuntimeEvent =
    * `mica exec` 不发，插件不能把它当成一定会来的事件。
    */
   | { type: 'input:activity'; owner?: unknown }
+  /**
+   * 用户把焦点放回了输入框（点进来 / 快捷键聚焦），但还没敲字。
+   *
+   * 与 `input:activity` 的区别是「不依赖已经开始输入」：会趁下一轮请求发出之前压缩历史
+   * 的策略（自动压缩）靠它提前一步动手，不必等第一个按键。同样只有能观察输入框的宿主
+   * 才发，插件不能当成一定会来。
+   */
+  | { type: 'input:focus'; owner?: unknown }
   | { type: 'notification'; level: 'info' | 'warn' | 'error'; message: string; owner?: unknown; ttl?: number }
   | { type: 'turn:started'; input: RuntimeInput; owner?: unknown; preservePreviousTurnUi?: boolean }
   | { type: 'turn:finished'; input: RuntimeInput; elapsedMs: number; owner?: unknown }

@@ -1,5 +1,3 @@
-import { resolve } from 'path'
-
 const DEFAULT_PROTOCOL = 'openai_chat_completions'
 
 /**
@@ -14,40 +12,26 @@ function nonEmptyString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : ''
 }
 
-function supportsModel(provider, model) {
-  return (
-    !Array.isArray(provider?.models) ||
-    provider.models.length === 0 ||
-    provider.models.includes(model)
-  )
-}
-
-export function resolveDefaultChatMeta(config, storage, cwd) {
+export function resolveDefaultChatMeta(config) {
   const providers = Array.isArray(config?.providers) ? config.providers : []
-  const directory = nonEmptyString(cwd)
-  const normalizedDirectory = directory ? resolve(directory) : resolve(process.cwd())
-  const dirMap = storage?.lastUsedByDirectory || {}
-  const dirEntry = dirMap[normalizedDirectory] || dirMap[directory] || null
-  const requestedProvider = nonEmptyString(dirEntry?.provider) || nonEmptyString(config?.provider)
-  const provider =
-    providers.find((item) => item?.id === requestedProvider) || providers.find((item) => item?.id)
-  const providerId = nonEmptyString(provider?.id) || requestedProvider
+  const defaults = config?.defaultModel
+  const provider = defaults
+    ? providers.find((item) => item?.id === nonEmptyString(defaults.provider))
+    : providers[0]
+  const providerId = nonEmptyString(provider?.id)
   if (!providerId) return null
 
-  const providerPrefs = dirEntry?.providerPreferences?.[providerId]
-  const modelCandidates = [providerPrefs?.model, dirEntry?.model, provider?.models?.[0]]
-  const model = modelCandidates
-    .map(nonEmptyString)
-    .find((candidate) => candidate && supportsModel(provider, candidate))
+  // 动态模型列表由 CLI 拉取；预览不能跳到其他 provider 或复用上次会话。
+  const model = nonEmptyString(defaults ? defaults.model : provider?.models?.[0])
   if (!model) return null
 
-  const requestedEffort = nonEmptyString(providerPrefs?.effort) || nonEmptyString(dirEntry?.effort)
+  const requestedEffort = nonEmptyString(defaults?.effort)
   const effort =
     provider?.supportsEffort === false
       ? 'none'
       : isEffortLevelName(requestedEffort)
         ? requestedEffort
-        : 'medium'
+        : null
 
   return {
     providerId,

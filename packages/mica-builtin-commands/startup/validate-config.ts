@@ -254,6 +254,52 @@ export function validateConfig(input: unknown): ConfigValidationResult {
     }
   });
 
+  if (config.defaultModel !== undefined) {
+    const defaults = config.defaultModel;
+    if (!isRecord(defaults)) {
+      add('error', 'default_model_invalid', 'defaultModel', 'defaultModel 必须是包含 provider、model 的 object。');
+    } else {
+      const provider = config.providers.find((item) => isRecord(item) && item.id === defaults.provider);
+      if (!isNonEmptyString(defaults.provider)) {
+        add(
+          'error',
+          'default_model_provider_invalid',
+          'defaultModel.provider',
+          '默认模型的 provider 必须是非空字符串。',
+        );
+      } else if (!provider) {
+        add(
+          'error',
+          'default_model_provider_missing',
+          'defaultModel.provider',
+          `找不到默认模型的 provider "${defaults.provider}"。`,
+        );
+      }
+      if (!isNonEmptyString(defaults.model)) {
+        add('error', 'default_model_name_invalid', 'defaultModel.model', '默认模型的 model 必须是非空字符串。');
+      } else if (
+        isRecord(provider) &&
+        !isNonEmptyString(provider.get_model_url) &&
+        (!Array.isArray(provider.models) || !provider.models.includes(defaults.model))
+      ) {
+        add(
+          'error',
+          'default_model_unavailable',
+          'defaultModel.model',
+          `默认模型 "${defaults.model}" 不在该 provider 的 models 列表中。`,
+        );
+      }
+      if (defaults.effort !== undefined && !isEffortLevelName(defaults.effort)) {
+        add(
+          'error',
+          'default_model_effort_invalid',
+          'defaultModel.effort',
+          '默认模型的 effort 必须是合法档位名（如 low、high、max）。',
+        );
+      }
+    }
+  }
+
   validateMcpServers(config.mcpServers, add);
 
   return validationResult(config, changed, changes, issues);

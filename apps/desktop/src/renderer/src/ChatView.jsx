@@ -31,6 +31,7 @@ import {
   IconSend,
   IconShare,
   IconSquare,
+  IconStopwatch,
   IconTerminal,
   IconTrash,
   IconX
@@ -62,6 +63,8 @@ import { formatLogElapsed } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
+import { TurnTimingDialog } from './TurnTimingDialog'
+import { applyTurnTimingEvent, createTurnTimingState, summarizeTurnTiming } from './turn-timing'
 import { CodeView } from './CodeView'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 import { canCollapseMessage, measureChatCollapse } from './chat-collapse'
@@ -2699,11 +2702,19 @@ export function ChatView({
   const [input, setInput] = useState('')
   const inputRef = useLatest(input)
   const [running, setRunning] = useState(false)
+  const runningRef = useLatest(running)
   // 这个会话正被**另一个进程**跑着（终端里的 TUI / mica exec / 另一个运行时实例持着它的
   // turn lease）。同一运行时里的其它页面不算——工作区只有一份，它们跑的是同一个 run，
   // 事件流本来就会广播到这里。这种情况本页拿不到事件流，只能显示状态并挡下发送。
   const [remoteRunning, setRemoteRunning] = useState(false)
   const remoteRunningRef = useLatest(remoteRunning)
+  // 焦点回到输入框、且这一轮没在跑：告诉常驻 host「人回来了」。自动压缩据此在用户还没
+  // 敲字时就把落盘的历史压小，下一轮请求不必为膨胀的上下文付费。运行中不发——那时宿主
+  // 正持着 turn lease，压缩没有间隙。
+  const handleComposerFocus = useCallback(() => {
+    if (runningRef.current || remoteRunningRef.current) return
+    void window.mica?.chat?.inputFocus?.(nodeId)?.catch?.(() => {})
+  }, [nodeId])
   // run 级操作（中止、撤回排队、任务详情/终止）打给谁。工作区只有一份，同一个会话在所有
   // 页面里就是同一个 chat 节点、同一个 run，所以就是本节点的 id——不再需要「附着到别的
   // 页签那个 run」的概念。
@@ -2817,6 +2828,21 @@ export function ChatView({
   // 最近一次 turn 的结束结果：{ state: 'completed' | 'error', durationMs }。
   // 运行结束后状态行左侧展示它（对齐 CLI：completed 绿色带耗时、error 红色、aborted 不展示）。
   const [lastRun, setLastRun] = useState(null)
+  // 最近一轮的耗时分解（输入框「耗时分析」入口）。事件流按「等模型 / 输出 / 跑工具」
+  // 首尾相接切分，step_start 时重置——只留最近一轮。ref 保存最新值供每个 delta 延长
+  // 当前段，state 只在段结构变化（新工具、新一轮、结束）时更新，流式期间不重渲染。
+  const turnTimingRef = useRef(createTurnTimingState())
+  const [turnTimingState, setTurnTimingState] = useState(createTurnTimingState)
+  const [turnTimingOpen, setTurnTimingOpen] = useState(false)
+  const [turnTimingNow, setTurnTimingNow] = useState(() => Date.now())
+  const turnTiming = summarizeTurnTiming(turnTimingState, turnTimingNow)
+  // 运行中打开时才每秒走表：这一轮还在跑，总耗时与仍打开的那一段要跟着长。
+  const turnTimingRunning = Boolean(turnTiming?.running)
+  useEffect(() => {
+    if (!turnTimingOpen || !turnTimingRunning) return undefined
+    const timer = window.setInterval(() => setTurnTimingNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [turnTimingOpen, turnTimingRunning])
   // 当前阶段/工具的实时耗时（对齐 CLI WorkingStatus：状态文本带 elapsed，
   // working 阶段从最早 running 工具 startedAt 起算，其余阶段从阶段切换起算）。
   // 起算点在 statusLinePhase 换算之后的那一段：见下方 displayPhase 的 effect。
@@ -3836,6 +3862,20 @@ export function ChatView({
     (event) => {
       if (!event) return
       const timestamp = Number(event.timestamp) || Date.now()
+      // 耗时分解跟着同一份事件流走：段结构变化（新一轮、新工具、本轮结束）才触发
+      // 重渲染，流式 delta 只延长当前段——否则每个 token 都要重算一次弹窗。
+      const previousTiming = turnTimingRef.current
+      const nextTiming = applyTurnTimingEvent(previousTiming, event)
+      if (nextTiming !== previousTiming) {
+        turnTimingRef.current = nextTiming
+        if (
+          nextTiming.segments.length !== previousTiming.segments.length ||
+          nextTiming.openIndex !== previousTiming.openIndex ||
+          nextTiming.endedAt !== previousTiming.endedAt
+        ) {
+          setTurnTimingState(nextTiming)
+        }
+      }
       switch (event.type) {
         case 'step_start': {
           const queuedMessageId = queuedMessageIdsRef.current.shift()
@@ -4311,7 +4351,7 @@ export function ChatView({
         sessionId ? window.mica.chat.history(sessionId).catch(() => []) : [],
         sessionId
           ? window.mica.chat.meta(sessionId).catch(() => null)
-          : window.mica.chat.meta(null, cwd).catch(() => null)
+          : window.mica.chat.meta(null).catch(() => null)
       ])
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
       const restored = historyMessages(rows, sessionId || nodeId)
@@ -5722,7 +5762,7 @@ export function ChatView({
   }, [activityTurnId, messages, running, todoHidden])
   const activeOverrides = overridesRef.current.get(nodeId) || {}
   const activeModel = activeOverrides.model || meta?.model || ''
-  const activeEffort = activeOverrides.variant || meta?.effort || 'none'
+  const activeEffort = activeOverrides.variant || meta?.effort || null
   const activeEffortKey = activeOverrides.model || `${meta?.providerId || ''}/${meta?.model || ''}`
   const activeEffortLevels = modelEfforts?.[activeEffortKey]?.efforts
   // 状态行显示「这一轮真正会发出去的档位」，而不是上一次会话留下的值：
@@ -5772,7 +5812,7 @@ export function ChatView({
   const statusMetaTitle = modelSummaryTitle({
     ...meta,
     model: activeModel || null,
-    effort: activeEffort === 'none' ? null : activeEffort,
+    effort: activeEffortLabel === 'none' || activeEffortLabel === '—' ? null : activeEffortLabel,
     role: activeRole
   })
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
@@ -6334,7 +6374,7 @@ export function ChatView({
               selectedValue={
                 (overridesRef.current.get(nodeId) || {})[picker.kind] ||
                 (picker.kind === 'variant'
-                  ? meta?.effort || 'none'
+                  ? activeEffortLabel
                   : picker.kind === 'role'
                     ? meta?.role || 'default'
                     : meta?.model) ||
@@ -6491,6 +6531,7 @@ export function ChatView({
                 running ? '消息会在下一个工具调用迭代后发送' : 'Type something and press Enter...'
               }
               textareaRef={textareaRef}
+              onFocus={handleComposerFocus}
               onChange={(nextValue) => {
                 draftsRef.current.set(nodeId, nextValue)
                 historyCursorRef.current = -1
@@ -6693,6 +6734,23 @@ export function ChatView({
                   <IconSend size={13} />
                 </button>
               ) : null}
+              {/* 最近一轮的时间花在哪：等待模型 / 模型输出 / 工具调用。数据只来自
+                  本轮的事件流，没有跑过就没有可点的东西（不造假数据也不留空入口）。 */}
+              <button
+                type="button"
+                className={`chat-composer-timing${turnTimingOpen ? ' is-active' : ''}`}
+                title={turnTiming ? '耗时分析：本轮时间花在哪' : '本轮还没有耗时数据'}
+                aria-label="耗时分析"
+                aria-haspopup="dialog"
+                aria-expanded={turnTimingOpen}
+                disabled={!turnTiming}
+                onClick={() => {
+                  setTurnTimingNow(Date.now())
+                  setTurnTimingOpen((value) => !value)
+                }}
+              >
+                <IconStopwatch size={13} />
+              </button>
               {/* 会话设置固定排在动作区最右：它是常驻入口，不该跟着运行态（停止/发送）
                   在两端浮动。 */}
               <button
@@ -6725,6 +6783,9 @@ export function ChatView({
             onClose={() => setContextDetail(false)}
           />
         )}
+        {turnTimingOpen && turnTiming ? (
+          <TurnTimingDialog timing={turnTiming} onClose={() => setTurnTimingOpen(false)} />
+        ) : null}
         {taskDetail?.kind === 'subagent' && (
           <SubagentDetailModal
             runKey={runKey}
@@ -6866,7 +6927,7 @@ export function ChatView({
  * - 当前档位不属于这个模型：host 每轮会收敛到模型自己的默认档位，这里提前显示同一结果。
  */
 export function resolveDisplayedEffort(effort, levels, defaultEffort) {
-  if (!Array.isArray(levels)) return effort
+  if (!Array.isArray(levels)) return effort || '—'
   if (levels.length === 0) return '—'
   if (levels.includes(effort)) return effort
   return defaultEffort && levels.includes(defaultEffort) ? defaultEffort : '—'

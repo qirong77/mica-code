@@ -343,6 +343,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       }
     }
     await ensureChatHostModelRule(initialModel, providerHintForModel(initialModel));
+    micaConfig.resetSessionModelDefaults();
 
     const hooks = new micaPlugin.HookRegistry();
     agent = new AgentRuntime(runtimeOverride, hooks);
@@ -523,6 +524,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       },
     });
     pluginHost = createHeadlessPluginHost({
+      runtimeOverride,
       hooks,
       agent,
       sessionController,
@@ -1296,6 +1298,14 @@ async function handleCodexRequest(
       ctx.writeResponse({});
       return;
     }
+    case MICA_METHODS.inputFocus: {
+      // Mica extension: 用户把焦点放回了输入框（还没敲字）。同样只翻译成一次运行期
+      // 事件：客户端只在没在跑的时候发，轮次运行中到达的（状态晚了一拍）由插件与
+      // 宿主的 lease 判定挡掉。
+      ctx.events?.publish({ type: 'input:focus', owner: ctx.agent });
+      ctx.writeResponse({});
+      return;
+    }
     case MICA_METHODS.queueRecall: {
       // Mica extension: pull a queued after_iteration input back out of the
       // host's single slot so the client can restore it to its composer (the
@@ -1438,9 +1448,7 @@ async function handleCodexRequest(
         // 空问题 = 只把这条线程建出来（点 `+` 时要先把 id 拿到手才能渲染 tab）。
         // 上限在 `open` 里判定：到上限时如实拒绝，而不是悄悄把最早的 tab 淘汰掉。
         const opened = ctx.btw.open(threadIdParam || null);
-        ctx.writeResponse(
-          opened.ok ? { ok: true, threadId: opened.threadId } : { ok: false, message: opened.message },
-        );
+        ctx.writeResponse(opened.ok ? { ok: true, threadId: opened.threadId } : { ok: false, message: opened.message });
         return;
       }
       // 回答期间再提交 = 排队等这一条答完（面板的 Enter/Tab），不是并发的第二次提问。

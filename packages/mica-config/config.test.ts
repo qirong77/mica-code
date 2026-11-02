@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -18,12 +18,14 @@ const originalFetch = globalThis.fetch;
 let configApi: typeof import('./config.js');
 
 beforeAll(async () => {
+  vi.stubEnv('OPENAI_API_KEY', '');
   process.env.HOME = tempHome;
   process.env.MICA_HOME = tempHome;
   configApi = (await import('./config.js')) as typeof import('./config.js');
 });
 
 afterAll(() => {
+  vi.unstubAllEnvs();
   if (previousHome === undefined) {
     delete process.env.HOME;
   } else {
@@ -252,6 +254,276 @@ describe('model configuration', () => {
   });
 });
 
+describe('new-session defaults', () => {
+  it('selects the first configured provider and model regardless of prior runtime choices', () => {
+    configApi.updateConfig(() => baseConfig());
+    configApi.updateConfig((config) => ({ ...config, provider: 'krill-codex', model: 'gpt-5.4', effort: 'xhigh' }));
+
+    expect(configApi.readConfig()).toMatchObject({ provider: 'deepseek', model: 'deepseek-v4-flash', effort: 'none' });
+    expect(existsSync(join(tempHome, 'storage.json'))).toBe(false);
+  });
+
+  it('uses explicit defaults and provider-scoped rules for effort and context size', () => {
+    const unregister = configApi.registerModelRules({
+      'deepseek::shared': { contextSize: 12000, defaultEffort: 'low', efforts: { low: {} } },
+      'krill-codex::shared': { contextSize: 24000, defaultEffort: 'max', efforts: { max: {}, high: {} } },
+    });
+    try {
+      const providers = baseConfig().providers.map((provider) => ({ ...provider, models: ['shared'] }));
+      const save = (effort?: string) =>
+        writeFileSync(
+          configApi.CONFIG_PATH,
+          JSON.stringify({
+            providers,
+            defaultModel: { provider: 'krill-codex', model: 'shared', ...(effort ? { effort } : {}) },
+          }),
+        );
+      save();
+      expect(configApi.readConfig()).toMatchObject({
+        provider: 'krill-codex',
+        model: 'shared',
+        effort: 'max',
+        contextWindowSize: 24000,
+      });
+      save('high');
+      expect(configApi.readConfig().effort).toBe('high');
+      save('low');
+      expect(configApi.readConfig().effort).toBe('max');
+    } finally {
+      unregister();
+    }
+  });
+
+  it('takes the first model rule default when defaultModel is absent', () => {
+    const unregister = configApi.registerModelRules({
+      'deepseek::deepseek-v4-flash': { contextSize: 42000, defaultEffort: 'high', efforts: { high: {}, none: {} } },
+    });
+    try {
+      writeFileSync(configApi.CONFIG_PATH, JSON.stringify({ providers: baseConfig().providers }));
+      expect(configApi.readConfig()).toMatchObject({ effort: 'high', contextWindowSize: 42000 });
+    } finally {
+      unregister();
+    }
+  });
+
+  it('honors providers that disable effort even with an explicit default', () => {
+    writeFileSync(
+      configApi.CONFIG_PATH,
+      JSON.stringify({
+        providers: [{ ...baseConfig().providers[0], supportsEffort: false }],
+        defaultModel: { provider: 'deepseek', model: 'deepseek-v4-pro', effort: 'high' },
+      }),
+    );
+    expect(configApi.readConfig().effort).toBe('none');
+  });
+
+  it('reloads latest disk defaults on reset without persisting runtime selections', () => {
+    configApi.updateConfig(() => baseConfig());
+    const persisted = {
+      providers: baseConfig().providers,
+      defaultModel: { provider: 'krill-codex', model: 'gpt-5.4', effort: 'high' },
+    };
+    writeFileSync(configApi.CONFIG_PATH, JSON.stringify(persisted));
+    const before = readFileSync(configApi.CONFIG_PATH, 'utf8');
+    expect(configApi.resetSessionModelDefaults()).toMatchObject({
+      provider: 'krill-codex',
+      model: 'gpt-5.4',
+      effort: 'high',
+    });
+    expect(configApi.getConfig()).toEqual(configApi.readConfig());
+    expect(readFileSync(configApi.CONFIG_PATH, 'utf8')).toBe(before);
+  });
+
+  it('keeps cached dynamic catalogs and resets to their first model when no default is configured', async () => {
+    const provider = {
+      id: 'dynamic',
+      api_base: 'https://example.com/v1',
+      protocol: 'openai_responses' as const,
+      get_model_url: 'https://example.com/v1/models',
+    };
+    writeFileSync(
+      configApi.CONFIG_PATH,
+      JSON.stringify({
+        providers: [provider],
+        defaultModel: { provider: provider.id, model: 'outside-catalog' },
+      }),
+    );
+    configApi.resetSessionModelDefaults();
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ data: [{ id: 'first' }, { id: 'second' }] })),
+    ) as unknown as typeof fetch;
+    await configApi.loadProviderModels(provider.id);
+    expect(configApi.getConfig().model).toBe('outside-catalog');
+    writeFileSync(configApi.CONFIG_PATH, JSON.stringify({ providers: [provider] }));
+    expect(configApi.resetSessionModelDefaults()).toMatchObject({
+      provider: provider.id,
+      model: 'first',
+      providers: [{ ...provider, models: ['first', 'second', 'outside-catalog'] }],
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    writeFileSync(configApi.CONFIG_PATH, JSON.stringify({ providers: [{ ...provider, models: ['second'] }] }));
+    expect(configApi.resetSessionModelDefaults().model).toBe('second');
+    expect(configApi.getConfig().providers[0]?.models).toContain('first');
+    writeFileSync(
+      configApi.CONFIG_PATH,
+      JSON.stringify({ providers: [{ ...provider, get_model_url: 'https://new.example.com/models' }] }),
+    );
+    expect(configApi.resetSessionModelDefaults().model).toBe('');
+    expect(configApi.getConfig().providers[0]?.models).toBeUndefined();
+  });
+
+  it('uses the fetched first model default effort instead of the unresolved model effort', async () => {
+    const resolveRule = vi.fn(async () => ({
+      contextSize: 64000,
+      defaultEffort: 'high',
+      efforts: { none: {}, high: {} },
+    }));
+    const unregister = configApi.registerModelRuleResolver(resolveRule);
+    try {
+      writeFileSync(
+        configApi.CONFIG_PATH,
+        JSON.stringify({
+          providers: [
+            {
+              id: 'dynamic',
+              api_base: 'https://example.com/v1',
+              protocol: 'openai_responses',
+              get_model_url: 'https://example.com/v1/models',
+            },
+          ],
+        }),
+      );
+      configApi.updateConfig(() => configApi.readConfig());
+      expect(configApi.getConfig().model).toBe('');
+      globalThis.fetch = vi.fn(
+        async () => new Response(JSON.stringify({ data: [{ id: 'fetched' }] })),
+      ) as unknown as typeof fetch;
+      await configApi.loadProviderModels('dynamic');
+      expect(configApi.getConfig()).toMatchObject({ model: 'fetched', effort: 'high', contextWindowSize: 64000 });
+      expect(resolveRule).toHaveBeenCalledWith('fetched', undefined, expect.objectContaining({ id: 'dynamic' }));
+    } finally {
+      unregister();
+    }
+  });
+});
+
+describe('prepareSessionModelDefaults', () => {
+  it('loads an uncached dynamic catalog and reuses its first model on later sessions', async () => {
+    const provider = {
+      id: 'prepare-dynamic',
+      api_base: 'https://example.com/v1',
+      protocol: 'openai_responses' as const,
+      get_model_url: 'https://example.com/v1/models',
+    };
+    writeFileSync(configApi.CONFIG_PATH, JSON.stringify({ providers: [provider] }));
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ data: [{ id: 'first' }, { id: 'second' }] })),
+    ) as unknown as typeof fetch;
+    const resolveRule = vi.fn(async () => ({
+      contextSize: 64000,
+      defaultEffort: 'high',
+      efforts: { none: {}, high: {} },
+    }));
+    const unregister = configApi.registerModelRuleResolver(resolveRule);
+    try {
+      const before = readFileSync(configApi.CONFIG_PATH, 'utf8');
+      await expect(configApi.prepareSessionModelDefaults()).resolves.toMatchObject({
+        provider: provider.id,
+        model: 'first',
+        effort: 'high',
+        contextWindowSize: 64000,
+      });
+      expect(resolveRule).toHaveBeenCalledWith('first', undefined, expect.objectContaining({ id: provider.id }));
+      configApi.updateConfig((config) => ({ ...config, model: 'second', effort: 'none' }));
+      await expect(configApi.prepareSessionModelDefaults()).resolves.toMatchObject({ model: 'first', effort: 'high' });
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+      expect(readFileSync(configApi.CONFIG_PATH, 'utf8')).toBe(before);
+    } finally {
+      unregister();
+    }
+  });
+
+  it('reapplies the original explicit effort after asynchronous provider metadata replaces incomplete rules', async () => {
+    const provider = { ...baseConfig().providers[0]!, id: 'prepare-explicit', models: ['async-default'] };
+    writeFileSync(
+      configApi.CONFIG_PATH,
+      JSON.stringify({
+        providers: [provider],
+        defaultModel: { provider: provider.id, model: 'async-default', effort: 'max' },
+      }),
+    );
+    const resolveRule = vi.fn(async () => ({
+      contextSize: 128000,
+      defaultEffort: 'high',
+      efforts: { high: {}, max: {} },
+    }));
+    const unregister = configApi.registerModelRuleResolver(resolveRule, () => ({
+      contextSize: 32000,
+      defaultEffort: 'low',
+      efforts: { low: {} },
+    }));
+    try {
+      expect(configApi.resetSessionModelDefaults().effort).toBe('low');
+      await expect(configApi.prepareSessionModelDefaults()).resolves.toMatchObject({
+        model: 'async-default',
+        effort: 'max',
+        contextWindowSize: 128000,
+      });
+      expect(resolveRule).toHaveBeenCalledWith(
+        'async-default',
+        undefined,
+        expect.objectContaining({ id: provider.id }),
+      );
+    } finally {
+      unregister();
+    }
+  });
+
+  it('rejects with the provider and fetch failure instead of returning an empty model', async () => {
+    writeFileSync(
+      configApi.CONFIG_PATH,
+      JSON.stringify({
+        providers: [
+          {
+            id: 'prepare-failure',
+            api_base: 'https://example.com',
+            protocol: 'openai_responses',
+            get_model_url: 'https://example.com/models',
+          },
+        ],
+      }),
+    );
+    globalThis.fetch = vi.fn(async () => {
+      throw new Error('network unavailable');
+    }) as unknown as typeof fetch;
+    await expect(configApi.prepareSessionModelDefaults()).rejects.toThrow(
+      'provider prepare-failure: network unavailable',
+    );
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ data: [] }))) as unknown as typeof fetch;
+    await expect(configApi.prepareSessionModelDefaults()).rejects.toThrow(
+      'Invalid model list for provider prepare-failure',
+    );
+  });
+
+  it('rejects a provider with no configured model or dynamic catalog', async () => {
+    writeFileSync(
+      configApi.CONFIG_PATH,
+      JSON.stringify({
+        providers: [
+          {
+            id: 'prepare-empty',
+            api_base: 'https://example.com',
+            protocol: 'openai_responses',
+          },
+        ],
+      }),
+    );
+    await expect(configApi.prepareSessionModelDefaults()).rejects.toThrow(
+      'provider prepare-empty has no available model',
+    );
+  });
+});
+
 describe('loadProviderModels', () => {
   it('keeps dynamically fetched models in memory and applies the fixed model rule', async () => {
     const provider = {
@@ -355,7 +627,7 @@ describe('loadProviderModels', () => {
     await configApi.loadProviderModels(provider.id);
 
     expect(configApi.getConfig().model).toBe('configured-model');
-    expect(configApi.getConfig().providers[0]?.models).toEqual(['configured-model', 'catalog-model']);
+    expect(configApi.getConfig().providers[0]?.models).toEqual(['catalog-model', 'configured-model']);
   });
 });
 

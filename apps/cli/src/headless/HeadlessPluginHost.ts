@@ -46,6 +46,7 @@ import { TurnNoticeLog } from '../runtime/turnNotices.js';
 import type { HeadlessTurnStartResult } from '../runtime/HeadlessTurnExecutor.js';
 
 export type HeadlessPluginHostOptions = {
+  runtimeOverride?: import('../agent/AgentRuntimeConfig.js').AgentRuntimeConfigOverride;
   hooks: HookRegistry;
   agent: AgentRuntime;
   sessionController: SessionController;
@@ -176,6 +177,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   };
 
   const runtimeServices = createHeadlessRuntimeServices({
+    runtimeOverride: options.runtimeOverride,
     agent,
     sessionController,
     subagentTasks,

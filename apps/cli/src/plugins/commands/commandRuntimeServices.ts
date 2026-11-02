@@ -312,12 +312,12 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       context.uiBridge.syncSubagentTaskItems();
       return killed;
     },
-    clearUI(agent, sessionController) {
+    async clearUI(agent, sessionController) {
       const context = currentContext();
       const session = context?.agentSessions.current();
       context?.runtime.clear();
       context?.uiBridge.clearToolLogs();
-      clearUI(
+      await clearUI(
         session?.agent ?? (agent as AgentRuntime),
         session?.sessionController ?? (sessionController as SessionController | undefined),
       );
@@ -454,9 +454,14 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     async requestExit(exitCode = 0) {
       await micaUi.terminalInput.requestExit(exitCode);
     },
-    newAgentSession() {
+    async newAgentSession() {
+      const defaults = await micaConfig.prepareSessionModelDefaults();
       const context = currentContext();
-      const record = context?.agentSessions.createSession();
+      const record = context?.agentSessions.createSession({
+        providerId: defaults.provider,
+        model: defaults.model,
+        effort: defaults.effort,
+      });
       if (!context || !record) throw new Error('Application is not ready');
       const session = context.agentSessions.findById(record.id);
       if (session) context.uiBridge.watchAgent(session.agent);
@@ -488,7 +493,11 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       });
       // fork 不继承来源会话的用量记账，缓存率沿用来源会话自身的历史来展示。
       const sourceUsageHistory = sourceSession.agent.getSnapshot().usageHistory;
-      const created = context.agentSessions.createSession();
+      const created = context.agentSessions.createSession({
+        providerId: sourceSnapshot.providerId,
+        model: sourceSnapshot.model,
+        effort: sourceSnapshot.effort,
+      });
       const targetSession = context.agentSessions.findById(created.id);
       if (!targetSession) throw new Error(`Forked agent session not found: ${created.id}`);
 

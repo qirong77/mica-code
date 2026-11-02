@@ -1,7 +1,7 @@
 import { describe, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PtyDriver } from '@packages/mica-pty/index.js';
@@ -196,26 +196,14 @@ suite('/btw PTY end-to-end (mock provider)', () => {
     // 自动起标题现在默认复用会话模型，会在每轮之前多打一次模型请求，把这里的时序打乱：
     // 这个用例量的是 /btw，不是标题。
     writeFileSync(join(home, 'plugins-state.json'), JSON.stringify({ disabled: ['session-rename'] }));
-    const wdReal = realpathSync(wd);
     writeFileSync(
       join(home, 'config.json'),
       JSON.stringify({
-        providers: [{ id: 'mock', name: 'Mock', api_base: baseUrl, protocol: 'openai_responses', api_key: 'test' }],
+        providers: [{ id: 'mock', models: ['mock-chat'], api_base: baseUrl, protocol: 'openai_responses', api_key: 'test' }],
         searxngUrl: '',
         mcpServers: {},
       }),
     );
-    writeFileSync(
-      join(home, 'storage.json'),
-      JSON.stringify({
-        version: 1,
-        lastUsedByDirectory: {
-          [wd]: { provider: 'mock', model: 'mock-chat', effort: 'none' },
-          [wdReal]: { provider: 'mock', model: 'mock-chat', effort: 'none' },
-        },
-      }),
-    );
-
     const driver = PtyDriver.spawn([BIN], {
       cols: 140,
       rows: 40,

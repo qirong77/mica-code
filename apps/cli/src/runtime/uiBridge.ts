@@ -1,3 +1,4 @@
+import { micaConfig } from '@packages/mica-config/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { AgentRuntime, AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
@@ -28,9 +29,12 @@ export function syncModelDisplay(agent: AgentRuntime) {
   micaUi.terminalInput.role.set(agent.role);
 }
 
-export function clearUI(agent: AgentRuntime, sessionController?: SessionController) {
+export async function clearUI(agent: AgentRuntime, sessionController?: SessionController) {
+  const defaults = await micaConfig.prepareSessionModelDefaults();
   sessionController?.startNewSession();
   agent.clearSession();
+  agent.configureForRun({ providerId: defaults.provider, model: defaults.model, effort: defaults.effort }, false);
+  syncModelDisplay(agent);
   micaUi.conversation.clearMessages();
   micaUi.conversation.clearResponseText();
   micaUi.conversation.clearPendingInput();

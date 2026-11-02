@@ -218,6 +218,9 @@ function createWebApi(env) {
       // 用户正在输入框里敲字（扩展 mica/input/activity）：让插件知道「这个人回来了」，
       // 会话空闲够久时它可以先把历史压小。渲染层已节流，收不到回包也不影响界面。
       inputActivity: (id) => invoke('chat:input-activity', { id }),
+      // 焦点回到输入框（扩展 mica/input/focus）：比「敲了第一个字」早一步，插件可以在
+      // 用户还没开始打字时先把历史压小。只在没在跑的时候发。
+      inputFocus: (id) => invoke('chat:input-focus', { id }),
       // 终止一个后台 shell 任务 / 读取它的输出（Codex 协议扩展 mica/backgroundTasks/*）
       killBackgroundTask: (id, taskId, forceAfterMs) =>
         invoke('chat:kill-background-task', { id, taskId, forceAfterMs }),

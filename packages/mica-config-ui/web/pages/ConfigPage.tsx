@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { ProviderEditor } from '../components/ProviderEditor.js';
-import { Alert, Button, CollapsiblePanel, SaveStatus, SettingsGroup, Tag } from '../components/Ui.js';
+import { Alert, Button, CollapsiblePanel, SaveStatus, SettingRow, SettingsGroup, Tag } from '../components/Ui.js';
 import { readConfigFile, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
 import {
@@ -10,9 +10,12 @@ import {
   issueMap,
   parseConfigDraft,
   providerEntries,
+  readDefaultModelDraft,
+  readProviderDraft,
   removeProviderDraft,
   serializeConfigDraft,
   validateConfigDraft,
+  writeDefaultModelDraft,
   writeProviderDraft,
   type ConfigDraft,
 } from '../configDraft.js';
@@ -23,7 +26,7 @@ import { useAutoSave } from '../useAutoSave.js';
  * config.json 的配置页。
  *
  * 以前这里是个裸 JSON 编辑器：字段全靠记，写错一个逗号就保存不了。现在按字段编辑——
- * 表单只覆盖有结构的部分（providers），其余内容（mcpServers、
+ * 表单只覆盖有结构的部分（providers、defaultModel），其余内容（mcpServers、
  * capabilityDefaults、未来新增的键）在「直接编辑 JSON」里原样可见可改，写盘时不会丢。
  *
  * 没有保存按钮：改动停下就自动写盘。本地校验不过（必填项没填、JSON 还没写完）时先不写，
@@ -154,11 +157,14 @@ export function ConfigPage() {
   }, []);
 
   const providers = draft ? providerEntries(draft) : [];
+  const defaultModel = readDefaultModelDraft(draft ?? {});
+  const providerOptions = providers.map(readProviderDraft).filter((provider) => provider.id);
+  const defaultProvider = providerOptions.find((provider) => provider.id === defaultModel.provider);
 
   return (
     <PageFrame
       title="配置"
-      description="服务商与模型列表；这一页只改 config.json 里按字段可编辑的部分"
+      description="服务商、模型列表与新会话的默认模型"
       path={path || undefined}
       actions={
         <div className="toolbar">
@@ -216,6 +222,90 @@ export function ConfigPage() {
                   />
                 ))
               )}
+            </SettingsGroup>
+
+            <SettingsGroup
+              title="新会话默认模型"
+              description="未配置时使用第一个服务商的第一个模型，以及该模型的默认 effort。"
+              actions={
+                <Button
+                  disabled={draft.defaultModel === undefined}
+                  onClick={() => applyDraft(writeDefaultModelDraft(draft, { provider: '', model: '', effort: '' }))}
+                >
+                  清除默认模型
+                </Button>
+              }
+            >
+              {errors.get('defaultModel') ? <Alert message={errors.get('defaultModel')!} /> : null}
+              <SettingRow label="服务商" htmlFor="default-model-provider" error={errors.get('defaultModel.provider')}>
+                <select
+                  id="default-model-provider"
+                  className={`text-input${errors.has('defaultModel.provider') ? ' text-input-invalid' : ''}`}
+                  value={defaultModel.provider}
+                  aria-invalid={errors.has('defaultModel.provider')}
+                  onChange={(event) => {
+                    const provider = event.target.value;
+                    const selected = providerOptions.find((option) => option.id === provider);
+                    applyDraft(
+                      writeDefaultModelDraft(draft, { provider, model: selected?.models[0] ?? '', effort: '' }),
+                    );
+                  }}
+                >
+                  <option value="">跟随配置列表第一项</option>
+                  {defaultModel.provider && !defaultProvider ? (
+                    <option value={defaultModel.provider}>{defaultModel.provider}（已不存在）</option>
+                  ) : null}
+                  {providerOptions.map((provider, index) => (
+                    <option key={index} value={provider.id}>
+                      {provider.id}
+                    </option>
+                  ))}
+                </select>
+              </SettingRow>
+              <SettingRow
+                label="模型"
+                htmlFor="default-model-name"
+                hint="可从建议中选择，也可以直接输入模型名称。"
+                error={errors.get('defaultModel.model')}
+              >
+                <input
+                  id="default-model-name"
+                  className={`text-input${errors.has('defaultModel.model') ? ' text-input-invalid' : ''}`}
+                  list="default-model-suggestions"
+                  value={defaultModel.model}
+                  disabled={!defaultModel.provider}
+                  spellCheck={false}
+                  placeholder="输入模型名称"
+                  aria-invalid={errors.has('defaultModel.model')}
+                  onChange={(event) =>
+                    applyDraft(writeDefaultModelDraft(draft, { ...defaultModel, model: event.target.value }))
+                  }
+                />
+                <datalist id="default-model-suggestions">
+                  {defaultProvider?.models.map((model, index) => (
+                    <option key={index} value={model} />
+                  ))}
+                </datalist>
+              </SettingRow>
+              <SettingRow
+                label="Effort"
+                htmlFor="default-model-effort"
+                hint="可选，留空使用模型默认值；填写该模型支持的 effort。"
+                error={errors.get('defaultModel.effort')}
+              >
+                <input
+                  id="default-model-effort"
+                  className={`text-input${errors.has('defaultModel.effort') ? ' text-input-invalid' : ''}`}
+                  value={defaultModel.effort}
+                  disabled={!defaultModel.provider}
+                  spellCheck={false}
+                  placeholder="使用模型默认值"
+                  aria-invalid={errors.has('defaultModel.effort')}
+                  onChange={(event) =>
+                    applyDraft(writeDefaultModelDraft(draft, { ...defaultModel, effort: event.target.value }))
+                  }
+                />
+              </SettingRow>
             </SettingsGroup>
 
             <CollapsiblePanel

@@ -1,7 +1,9 @@
+import { micaConfig } from '@packages/mica-config/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { sanitizeUiContent } from '@packages/mica-ui/utils/sanitizeContent.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
+import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { AgentRuntime, type AgentRuntimeStatus } from '../agent/AgentRuntime.js';
 import { SessionController } from '../session/SessionController.js';
 import type {
@@ -83,8 +85,9 @@ export class TerminalAgentSessionManager {
     this.currentSessionId = session.id;
   }
 
-  createSession(): TerminalAgentSessionRecord {
-    const agent = new AgentRuntime({}, this.hooks);
+  createSession(override?: AgentRuntimeConfigOverride): TerminalAgentSessionRecord {
+    if (!override) micaConfig.resetSessionModelDefaults();
+    const agent = new AgentRuntime(override ?? {}, this.hooks);
     const sessionController = new SessionController(agent);
     const session = this.addSession(agent, sessionController);
     return this.toRecord(session);

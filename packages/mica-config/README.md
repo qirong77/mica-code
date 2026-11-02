@@ -3,7 +3,7 @@
 `mica-config` 负责 Mica Code 的本地 provider 配置、本地状态数据读取、更新和 provider 模型列表加载。
 
 配置文件默认位于：`~/.mica/config.json`。当配置文件不存在时，会基于 `default.json` 自动创建。
-本地状态默认位于：`~/.mica/storage.json`，其中最后一次使用的 provider/model/effort 按精确当前目录保存，输入框历史等数据仍为所有 Mica Code 实例共享。
+本地状态默认位于：`~/.mica/storage.json`，保存共享输入框历史、用户偏好和使用记录。模型和 effort 的运行态选择不写入本地状态。
 
 默认的 `~/.mica` 目录名是构建期的品牌化值：由根 `mica.build.env` 的 `MICA_CONFIG_DIR_NAME` 经 `bun build --define` 注入，经 `brand.ts` 暴露为 `CONFIG_DIR_NAME`。`MICA_HOME` 环境变量显式设置时始终优先；路径解析统一走 `brand.ts` 的 `resolveMicaHome`/`resolveMicaHomePath`。
 
@@ -12,6 +12,7 @@
 - 读取磁盘配置：`micaConfig.read()`。
 - 获取内存中的当前配置：`micaConfig.get()`。
 - 更新配置并写回磁盘：`micaConfig.update(updater)`。
+- 新建会话前调用 `await micaConfig.prepareSessionModelDefaults()`：重新读取磁盘默认值，必要时加载动态模型目录，等待 provider 作用域的模型规则后重算原始默认 effort；模型不可用时抛错，保留连接配置未变的动态目录缓存。同步重置可使用 `micaConfig.resetSessionModelDefaults()`。
 - 拉取指定 provider 的模型列表并缓存到内存运行态配置：`micaConfig.loadProviderModels(providerId)`。
 - 为动态 provider 批量加载运行时模型列表：`micaConfig.loadMissingProviderModels()`。
 - 读取本地状态：`micaConfig.storage.read()`。
@@ -35,15 +36,39 @@ micaConfig.update((current) => ({
 }));
 ```
 
+## 新会话默认模型
+
+在 `config.json` 中配置 `defaultModel`，provider 和 model 必填，effort 可选：
+
+```json
+{
+  "providers": [
+    {
+      "id": "openai",
+      "api_base": "https://api.openai.com/v1",
+      "api_key": "your-key",
+      "protocol": "openai_responses",
+      "models": ["gpt-5.4", "gpt-5.5"]
+    }
+  ],
+  "defaultModel": { "provider": "openai", "model": "gpt-5.5", "effort": "high" }
+}
+```
+
+- 配置了 `defaultModel` 就使用对应 provider/model；静态 provider 的 model 必须在 `models` 列表中，动态 provider 可以指定接口列表之外的 model。
+- 未配置 `defaultModel` 时取 provider 列表第一项的第一个 model。动态列表尚未加载时等待 `loadProviderModels` 获取后取返回的第一项。
+- effort 省略时使用该 provider 下模型规则的 `defaultEffort`；填写的档位必须符合档位名语法，不支持的档位按同一 provider 的模型规则收敛。`supportsEffort: false` 始终使用 `none`。
+- 上次会话的选择不会改变新会话默认值。`await prepareSessionModelDefaults()` 在新会话入口调用，重新读取磁盘并在目录与元数据就绪后重置 `provider`、`model`、`effort` 和 `contextWindowSize`；已有会话继续使用自己的模型状态。
+
 ## 设计约束
 
 - 静态 provider 配置读写统一通过本包完成，避免多个模块各自操作 `~/.mica/config.json`。
 - userConfig 类本地数据统一通过 `micaStorage.ts` 暴露 API，避免 UI 或 runtime 直接关心文件路径。
-- `config.json` 不保存最后一次使用的 provider/model/effort；这些运行时选择按精确当前目录写入 `storage.json` 的 `lastUsedByDirectory`。
+- `config.json` 的 `defaultModel` 是唯一的显式默认模型配置；当前会话的 provider/model/effort 只保存在运行态，不读取或写入历史默认模型偏好。
 - provider 配置了 `get_model_url` 时，模型列表属于运行时数据，只缓存到内存配置，不写回 `config.json`；没有动态模型接口的 provider 可以配置静态 `models`。
 - 仅当所有 provider 都没有 `api_key` 时，才从 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 合成运行时 provider；环境 provider 永不写回 `config.json`。
 - 启动配置迁移与语义校验集中在 `packages/mica-builtin-commands/startup/validate-config.js`；缺失的 provider `protocol` 会自动补为 `openai_chat_completions`。
-- 默认配置模板放在 `default.json`，新增字段需要提供明确默认值。
+- 默认配置模板放在 `default.json`；`defaultModel` 默认省略，采用配置列表首项。
 - 不在本包中处理 UI 展示；命令或应用层负责把配置变化同步给用户。
 
 ## 模型规则
@@ -63,7 +88,7 @@ micaConfig.update((current) => ({
 ## 目录说明
 
 - `config.ts`：静态配置读写、运行时配置合成、provider 模型拉取和类型定义。
-- `micaStorage.ts`：最后使用配置、共享输入框历史、用户偏好和使用记录等本地状态读写。
+- `micaStorage.ts`：共享输入框历史、用户偏好和使用记录等本地状态读写。
 - `effort.ts`：effort 档位名到 wire 参数的唯一转换入口。
 - `getModelRule.ts`：注册与解析模型规则（effort 档位、contextSize、请求参数补丁）。
 - `persistence.ts`：配置文件 IO。
