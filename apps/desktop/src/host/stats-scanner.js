@@ -9,7 +9,7 @@ import {
 } from './stats-core'
 
 /** 索引格式版本。形态一变就整份重建，不做迁移。 */
-const INDEX_VERSION = 2
+const INDEX_VERSION = 3
 /** 每批解析多少个会话文件就让出一次事件循环。 */
 const BATCH_FILES = 16
 /** 单批最多占用主线程多久（毫秒）；大会话文件会超过这个预算，靠批次之间让出恢复响应。 */
