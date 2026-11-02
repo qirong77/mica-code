@@ -66,7 +66,7 @@ describe('plugin skill index', () => {
   it('publishes the SKILL.md path next to the metadata', () => {
     const skill = writeSkillFile(base, 'computer-use');
 
-    const path = publishPluginSkills('computer-use', [skill], { configDir });
+    const path = publishPluginSkills('computer-use', [{ skill }], { configDir });
     expect(path).toBe(join(configDir, PLUGIN_SKILLS_DIR, 'computer-use.json'));
 
     const stored = JSON.parse(readFileSync(path!, 'utf-8'));
@@ -79,6 +79,7 @@ describe('plugin skill index', () => {
         name: 'computer-use',
         description: 'computer-use desc',
         path: join(skill.baseDir, 'SKILL.md'),
+        roles: [],
       },
     ]);
   });
@@ -87,7 +88,11 @@ describe('plugin skill index', () => {
     // 正文只在内存里（没落盘）的 skill 没法被补全插入，列出来只会误导
     publishPluginSkills(
       'memory-only',
-      [{ name: 'ghost', description: '', content: '', baseDir: join(base, 'nowhere') } as Skill],
+      [
+        {
+          skill: { name: 'ghost', description: '', content: '', baseDir: join(base, 'nowhere') } as Skill,
+        },
+      ],
       { configDir },
     );
 
@@ -99,9 +104,9 @@ describe('plugin skill index', () => {
     const kept = writeSkillFile(base, 'keep');
     const dropped = writeSkillFile(base, 'dropped');
     const disabled = writeSkillFile(base, 'disabled');
-    publishPluginSkills('plugin-a', [kept], { configDir });
-    publishPluginSkills('plugin-b', [dropped], { configDir });
-    publishPluginSkills('plugin-c', [disabled], { configDir });
+    publishPluginSkills('plugin-a', [{ skill: kept }], { configDir });
+    publishPluginSkills('plugin-b', [{ skill: dropped }], { configDir });
+    publishPluginSkills('plugin-c', [{ skill: disabled }], { configDir });
 
     writeFileSync(join(configDir, PLUGIN_STATE_FILE), `${JSON.stringify({ disabled: ['plugin-c'] })}\n`, 'utf-8');
     rmSync(join(dropped.baseDir, 'SKILL.md'));
@@ -112,7 +117,7 @@ describe('plugin skill index', () => {
   it('keeps one entry per name and drops the index when nothing is left', () => {
     const first = writeSkillFile(base, 'duplicate');
     const second = writeSkillFile(base, 'duplicate');
-    publishPluginSkills('plugin-a', [first, second], { configDir });
+    publishPluginSkills('plugin-a', [{ skill: first }, { skill: second }], { configDir });
     expect(readPublishedPluginSkills({ configDir })).toHaveLength(1);
 
     publishPluginSkills('plugin-a', [], { configDir });
@@ -122,9 +127,49 @@ describe('plugin skill index', () => {
 
   it('sanitizes the plugin id into a plain file name', () => {
     const skill = writeSkillFile(base, 'nested');
-    const path = publishPluginSkills('../evil/plugin', [skill], { configDir });
+    const path = publishPluginSkills('../evil/plugin', [{ skill }], { configDir });
 
     expect(path).toBe(join(configDir, PLUGIN_SKILLS_DIR, '_evil_plugin.json'));
     expect(readPublishedPluginSkills({ configDir })).toHaveLength(1);
+  });
+
+  it('只把声明了角色的 skill 给那个角色的会话看', () => {
+    const scoped = writeSkillFile(base, 'scoped');
+    const shared = writeSkillFile(base, 'shared');
+    publishPluginSkills(
+      'plugin-a',
+      [
+        { skill: scoped, roles: ['需求开发'] },
+        { skill: shared },
+      ],
+      { configDir },
+    );
+
+    // 别的角色（含没给角色的调用方）只看到不带门槛的那条
+    expect(readPublishedPluginSkills({ configDir }).map((skill) => skill.name)).toEqual(['shared']);
+    expect(
+      readPublishedPluginSkills({ configDir, role: 'default' }).map((skill) => skill.name),
+    ).toEqual(['shared']);
+    // 声明了角色的会话两条都能看到
+    expect(
+      readPublishedPluginSkills({ configDir, role: '需求开发' }).map((skill) => skill.name).sort(),
+    ).toEqual(['scoped', 'shared']);
+  });
+
+  it('旧形态的索引（没有角色、版本对不上）直接当没有，不猜', () => {
+    const skill = writeSkillFile(base, 'legacy');
+    const dir = join(configDir, PLUGIN_SKILLS_DIR);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'legacy.json'),
+      JSON.stringify({
+        version: 1,
+        pluginId: 'legacy',
+        skills: [{ name: 'legacy', description: '', path: join(skill.baseDir, 'SKILL.md') }],
+      }),
+      'utf-8',
+    );
+
+    expect(readPublishedPluginSkills({ configDir })).toEqual([]);
   });
 });

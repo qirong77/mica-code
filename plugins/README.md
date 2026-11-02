@@ -313,6 +313,10 @@ ctx.skills.register({ ...skill, name: skill.name!, description: skill.descriptio
   直接扫它——补全插入的是这条 `SKILL.md` 的绝对路径，所以文件不存在的 skill 不会进列表。
   索引不主动删除：读的时候按 `plugins-state.json` 的停用名单和文件是否还在过滤，停用或卸掉插件
   之后就自动消失了。
+- **角色专属的 skill 传 `{ roles }`**：`ctx.skills.register(skill, { roles: ['需求开发'] })`，空数组
+  等于所有角色。角色随条目写进索引，由读的一方（桌面端按会话当前角色）过滤——索引是全局一份，
+  判定留在读取侧，多个角色的会话同时开着才不会互相覆盖。只要一部分角色的插件整块按角色门控
+  （段落 / 工具 / 技能一起收），就都要走这条，否则别的角色的会话会在 `/` 里看见它们。
 
 配置页的 Skills 页面只管磁盘上的 skill（新建 / 删除 / 编辑文件），内置 skill 出现在会话能力页签里。
 

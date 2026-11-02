@@ -107,6 +107,84 @@ describe('resolveDrop', () => {
     expect(resolveDrop({ drag: null, section: 'pinned', targetId: 'a' })).toBeNull()
   })
 
+  describe('dragging a session into another session', () => {
+    const childDrag = (section, id, groupId, parentSessionId) => ({
+      ...dragFrom(section, id, groupId),
+      parentSessionId
+    })
+
+    it('nests under the row dropped on the middle', () => {
+      expect(
+        resolveDrop({
+          drag: dragFrom('recent', 'a'),
+          section: 'recent',
+          targetId: 'b',
+          position: 'into'
+        })
+      ).toEqual({ kind: 'nest', parentId: 'b' })
+      // 跨分区也是同一个意思：挂到那个会话下面，位置随父会话
+      expect(
+        resolveDrop({
+          drag: dragFrom('recent', 'a'),
+          section: 'pinned',
+          targetId: 'b',
+          position: 'into'
+        })
+      ).toEqual({ kind: 'nest', parentId: 'b' })
+    })
+
+    it('refuses its own subtree and the parent it already has', () => {
+      expect(
+        resolveDrop({
+          drag: dragFrom('recent', 'a'),
+          section: 'recent',
+          targetId: 'grandchild',
+          position: 'into',
+          descendantIds: new Set(['child', 'grandchild'])
+        })
+      ).toBeNull()
+      expect(
+        resolveDrop({
+          drag: childDrag('recent', 'child', null, 'a'),
+          section: 'recent',
+          targetId: 'a',
+          position: 'into'
+        })
+      ).toBeNull()
+    })
+
+    it('never nests a draft, which has no session file yet', () => {
+      expect(
+        resolveDrop({
+          drag: dragFrom('recent', 'draft-1', null, 'draft'),
+          section: 'recent',
+          targetId: 'a',
+          position: 'into'
+        })
+      ).toBeNull()
+    })
+
+    it('lifts a child out of its parent when dropped on a sibling or another section', () => {
+      // 同分区：只解除父子关系，不参与手动排序
+      expect(
+        resolveDrop({
+          drag: childDrag('pinned', 'child', null, 'a'),
+          section: 'pinned',
+          targetId: 'b',
+          items: sessions
+        })
+      ).toEqual({ kind: 'unnest' })
+      // 换分区：移动同时也解除父子关系
+      expect(
+        resolveDrop({
+          drag: childDrag('recent', 'child', null, 'a'),
+          section: 'pinned',
+          targetId: null
+        })
+      ).toEqual({ kind: 'move', target: { section: 'pinned', groupId: null }, clearParent: true })
+    })
+  })
+
   describe('dragging a group', () => {
     const groups = [
       { id: 'g1', parentId: null },

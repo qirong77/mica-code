@@ -71,12 +71,14 @@ describe('host skill scanning', () => {
     writeFileSync(
       join(indexDir, 'computer-use.json'),
       JSON.stringify({
+        version: 2,
         pluginId: 'computer-use',
         skills: [
           {
             name: 'computer-use',
             description: '操作 macOS 桌面',
-            path: join(builtinDir, 'SKILL.md')
+            path: join(builtinDir, 'SKILL.md'),
+            roles: []
           }
         ]
       }),
@@ -110,10 +112,38 @@ describe('host skill scanning', () => {
   it('keeps the project skill when a user skill has the same name', () => {
     writeSkill(join(project, '.agent_context', 'skills'), 'dup', '---\nname: dup\n---\n')
     writeSkill(join(home, 'skills'), 'dup', '---\nname: dup\ndescription: user copy\n---\n')
-
     const skills = listSkills(project)
     expect(skills).toHaveLength(1)
     expect(skills[0].description).toBe('')
+  })
+
+  it('只把角色专属的插件 skill 列给那个角色的会话', () => {
+    const builtinDir = join(home, 'demand-dev')
+    mkdirSync(builtinDir, { recursive: true })
+    writeFileSync(join(builtinDir, 'SKILL.md'), '---\nname: demand-verify\n---\n', 'utf-8')
+    const indexDir = join(home, 'plugin-skills')
+    mkdirSync(indexDir, { recursive: true })
+    writeFileSync(
+      join(indexDir, 'user.demand-dev.json'),
+      JSON.stringify({
+        version: 2,
+        pluginId: 'user.demand-dev',
+        skills: [
+          {
+            name: 'demand-verify',
+            description: '联调验收',
+            path: join(builtinDir, 'SKILL.md'),
+            roles: ['需求开发']
+          }
+        ]
+      }),
+      'utf-8'
+    )
+
+    // 别的角色（含没给角色的调用方）看不到：索引是全局一份，判定在读取这一侧
+    expect(listSkills(null, 'default')).toEqual([])
+    expect(listSkills(null)).toEqual([])
+    expect(listSkills(null, '需求开发').map((skill) => skill.name)).toEqual(['demand-verify'])
   })
 
   it("lists a plugin's declared skills before it was ever set up", () => {

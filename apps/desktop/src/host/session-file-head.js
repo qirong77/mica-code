@@ -18,23 +18,17 @@ function readHead(file, bytes) {
 }
 
 /**
- * 顶层 `cwd`；读不到返回 null，交给调用方回退到整份解析。
+ * 顶层字符串字段；读不到返回 null，交给调用方回退到整份解析。
  *
- * 只认 `snapshot` 之前出现的那一个 —— `snapshot` 内部也可能带 cwd 字段，
- * 那是嵌套值，不能当成会话的工作目录。
+ * 只认 `snapshot` 之前出现的那一个 —— `snapshot` 内部也可能带同名字段
+ * （例如 cwd），那是嵌套值，不能当成会话自身的元信息。
  */
-export function readTopLevelCwd(file, bytes = HEAD_BYTES) {
-  let head
-  try {
-    head = readHead(file, bytes)
-  } catch {
-    return null
-  }
-  const cwdAt = head.indexOf('"cwd"')
-  if (cwdAt < 0) return null
+function readTopLevelString(head, key) {
+  const keyAt = head.indexOf(`"${key}"`)
+  if (keyAt < 0) return null
   const snapshotAt = head.indexOf('"snapshot"')
-  if (snapshotAt >= 0 && snapshotAt < cwdAt) return null
-  const match = /"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(head.slice(cwdAt))
+  if (snapshotAt >= 0 && snapshotAt < keyAt) return null
+  const match = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(head.slice(keyAt))
   if (!match) return null
   try {
     // 捕获到的内容已经是合法的 JSON 字符串内层，补上引号就能还原转义。
@@ -43,4 +37,24 @@ export function readTopLevelCwd(file, bytes = HEAD_BYTES) {
   } catch {
     return null
   }
+}
+
+function readHeadOrNull(file, bytes) {
+  try {
+    return readHead(file, bytes)
+  } catch {
+    return null
+  }
+}
+
+/** 顶层 `cwd`：侧栏与分组给会话归位时用。 */
+export function readTopLevelCwd(file, bytes = HEAD_BYTES) {
+  const head = readHeadOrNull(file, bytes)
+  return head === null ? null : readTopLevelString(head, 'cwd')
+}
+
+/** 顶层 `parentSessionId`：会话树的父子关系，写盘后靠它判定成环。 */
+export function readTopLevelParentId(file, bytes = HEAD_BYTES) {
+  const head = readHeadOrNull(file, bytes)
+  return head === null ? null : readTopLevelString(head, 'parentSessionId')
 }

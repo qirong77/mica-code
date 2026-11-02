@@ -61,6 +61,30 @@ export function paginateSessionTrees(items, roots, limit) {
 }
 
 /**
+ * 一条会话的全部后代 id，拖放时用来拒绝「把一条会话拖进它自己的子树」——
+ * 那种数据只能靠 `sessionRoots` 断环，父会话会跑到顶层去。
+ */
+export function sessionDescendants(items, sessionId) {
+  const ids = new Set()
+  if (!sessionId) return ids
+  const childrenOf = new Map()
+  for (const item of items) {
+    const parentId = item.parentSessionId
+    if (!parentId) continue
+    if (!childrenOf.has(parentId)) childrenOf.set(parentId, [])
+    childrenOf.get(parentId).push(item.id)
+  }
+  const stack = [...(childrenOf.get(sessionId) || [])]
+  while (stack.length > 0) {
+    const id = stack.pop()
+    if (ids.has(id)) continue
+    ids.add(id)
+    for (const child of childrenOf.get(id) || []) stack.push(child)
+  }
+  return ids
+}
+
+/**
  * @param {Array<{id: string, parentSessionId?: string|null}>} items 已按分区规则排好序的会话
  * @param {{ collapsed?: Set<string> }} [options] `collapsed` 里的会话不渲染其子树（折叠）
  * @returns {Array<{

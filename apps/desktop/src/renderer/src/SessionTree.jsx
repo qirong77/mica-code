@@ -28,7 +28,12 @@ import { relativeTimeShort } from './relative-time'
 import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './loop-command'
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
-import { nestSessions, paginateSessionTrees, sessionRoots } from './session-nesting'
+import {
+  nestSessions,
+  paginateSessionTrees,
+  sessionDescendants,
+  sessionRoots
+} from './session-nesting'
 import {
   draftMenuItems,
   renameTargetOf,
@@ -44,7 +49,13 @@ import {
   toggleTarget,
   visibleBadges
 } from './session-annotations'
-import { childGroups, groupSubtreeIds, inheritedSessionSection, sessionSectionOf, sessionsByGroup } from './session-projects'
+import {
+  childGroups,
+  groupSubtreeIds,
+  inheritedSessionSection,
+  sessionSectionOf,
+  sessionsByGroup
+} from './session-projects'
 import { longPressHandlers } from './hooks'
 import { useSharedState } from './ui-state'
 import {
@@ -365,6 +376,7 @@ export function SessionTree({
   onSelectDraft,
   onTogglePin,
   onMoveSession,
+  onSetSessionParent,
   onMoveDraft,
   onRenameSession,
   onRenameDraft,
@@ -430,15 +442,19 @@ export function SessionTree({
     [roots, pins, projects]
   )
   const pinned = useMemo(
-    () => orderSessions(
-      sessions.filter((session) => effectiveSectionOf(session.id).section === 'pinned'),
-      sortOrder.pinned || [],
-      (a, b) => (pins[b.id] || 0) - (pins[a.id] || 0)
-    ),
+    () =>
+      orderSessions(
+        sessions.filter((session) => effectiveSectionOf(session.id).section === 'pinned'),
+        sortOrder.pinned || [],
+        (a, b) => (pins[b.id] || 0) - (pins[a.id] || 0)
+      ),
     [sessions, effectiveSectionOf, pins, sortOrder.pinned]
   )
   const recentCandidates = useMemo(
-    () => sessions.filter((session) => effectiveSectionOf(session.id).section === 'recent').sort(byUpdatedDesc),
+    () =>
+      sessions
+        .filter((session) => effectiveSectionOf(session.id).section === 'recent')
+        .sort(byUpdatedDesc),
     [sessions, effectiveSectionOf]
   )
   const recentPage = useMemo(
@@ -729,7 +745,8 @@ export function SessionTree({
   }
 
   const runAction = (action, menuPayload) => {
-    if (menuPayload.session?.parentSessionId && ['pin', 'unpin', 'unassign'].includes(action)) return
+    if (menuPayload.session?.parentSessionId && ['pin', 'unpin', 'unassign'].includes(action))
+      return
     const annotation = parseAnnotationAction(action)
     const pluginMenu = parseSessionMenuAction(action)
     if (pluginMenu) {
@@ -787,8 +804,8 @@ export function SessionTree({
   const sectionOrderKey = (section, groupId) =>
     section === 'project' ? `project:${groupId}` : section
 
-  const startDrag = (event, kind, section, id, groupId = null) => {
-    setDrag({ kind, section, id, groupId })
+  const startDrag = (event, kind, section, id, groupId = null, parentSessionId = null) => {
+    setDrag({ kind, section, id, groupId, parentSessionId })
     event.dataTransfer.effectAllowed = 'move'
     // Firefox 不设置 data 就不会真的开始拖拽
     event.dataTransfer.setData('text/plain', id)
@@ -797,10 +814,16 @@ export function SessionTree({
     setDrag(null)
     setOver(null)
   }
-  const moveDragged = (source, target) => {
+  const moveDragged = (source, target, options = {}) => {
     if (source.kind === 'draft') onMoveDraft?.(source.id, target)
-    else onMoveSession?.(source.id, target)
+    else onMoveSession?.(source.id, { ...target, ...options })
   }
+
+  /** 被拖动会话自己的子树：拖进子树会把父子关系弄成环，那种落点不亮也不生效。 */
+  const dragSubtree = useMemo(
+    () => (drag?.kind === 'session' ? sessionDescendants(sessions, drag.id) : new Set()),
+    [drag, sessions]
+  )
 
   /** 分组行的落点是否成立：不能落进自己或自己的子树，也不能是当前父级。 */
   const canNestInto = (draggedId, targetGroupId) => {
@@ -823,20 +846,48 @@ export function SessionTree({
       groups: projects?.groups || [],
       items,
       order,
-      position
+      position,
+      descendantIds: source?.kind === 'session' ? sessionDescendants(sessions, source.id) : null
     })
     if (!plan) return
-    if (plan.kind === 'move') moveDragged(source, plan.target)
+    if (plan.kind === 'nest') onSetSessionParent?.(source.id, plan.parentId)
+    else if (plan.kind === 'unnest') onSetSessionParent?.(source.id, null)
+    else if (plan.kind === 'move')
+      moveDragged(source, plan.target, { clearParent: plan.clearParent })
     else if (plan.kind === 'move-group') onMoveGroup?.(plan.groupId, plan.parentId)
     else onReorderSessions(sectionOrderKey(section, groupId), plan.ids)
   }
 
   const hoverRow =
-    (section, id, groupId = null) =>
+    (section, id, groupId = null, canNestInto = true) =>
     (event) => {
       if (!drag || drag.id === id) return
       // 分组只落在分组行与 Projects 标题上，落到会话行不做任何反应
       if (drag.kind === 'group') return
+      // 会话行中间那条带子 = 拖进这个会话，两侧仍是换分区 / 手动排序。
+      // 草稿还没落盘、拖进自己的子树会成环，两种都不亮。
+      const canNest =
+        canNestInto &&
+        drag.kind === 'session' &&
+        (drag.parentSessionId ?? null) !== id &&
+        !dragSubtree.has(id)
+      if (canNest) {
+        const rect = event.currentTarget.getBoundingClientRect()
+        const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
+        if (ratio > 0.25 && ratio < 0.75) {
+          event.preventDefault()
+          event.stopPropagation()
+          setOver((current) =>
+            current?.section === section &&
+            current?.id === id &&
+            current?.groupId === groupId &&
+            current?.into
+              ? current
+              : { section, id, groupId, into: true }
+          )
+          return
+        }
+      }
       event.preventDefault()
       event.stopPropagation()
       const sameTarget = (drag.groupId ?? null) === (groupId ?? null)
@@ -844,7 +895,8 @@ export function SessionTree({
         setOver({ section, id, groupId, cross: true })
         return
       }
-      if (section === 'recent') return
+      // 子会话的位置由父会话决定，Recent 按时间排：两种都不画「插到这一行前后」的线
+      if (drag.parentSessionId || section === 'recent') return
       const rect = event.currentTarget.getBoundingClientRect()
       const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
       setOver((current) =>
@@ -863,7 +915,8 @@ export function SessionTree({
       event.preventDefault()
       event.stopPropagation()
       const source = drag
-      const position = over?.section === section && over?.id === targetId ? over.position : null
+      const landed = over?.section === section && over?.id === targetId
+      const position = landed ? (over.into ? 'into' : over.position) : null
       clearDrag()
       if (source?.kind === 'group') return
       const items =
@@ -914,7 +967,7 @@ export function SessionTree({
           style={{
             paddingLeft: rowIndent(indent + childDepth),
             boxShadow: isOver
-              ? over.cross
+              ? over.cross || over.into
                 ? dropShadow
                 : over.position === 'before'
                   ? 'inset 0 2px 0 rgba(90,167,232,.9)'
@@ -928,7 +981,7 @@ export function SessionTree({
                 ? `${session.title || session.id} — ${session.cwd}`
                 : session.title || session.id
           }
-          draggable={!editingThis && !session.parentSessionId}
+          draggable={!editingThis}
           // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
           {...longPressHandlers((event) =>
             openMenu(event, {
@@ -937,8 +990,14 @@ export function SessionTree({
             })
           )}
           onDragStart={(event) => {
-            if (session.parentSessionId) event.preventDefault()
-            else startDrag(event, 'session', section, session.id, groupId)
+            startDrag(
+              event,
+              'session',
+              section,
+              session.id,
+              groupId,
+              session.parentSessionId ?? null
+            )
           }}
           onDragEnd={clearDrag}
           onDragOver={hoverRow(section, session.id, groupId)}
@@ -1006,14 +1065,6 @@ export function SessionTree({
                 </span>
               )}
               <span className="min-w-0 truncate">{session.title || session.id}</span>
-              {childDepth > 0 && (
-                <span
-                  className="shrink-0 rounded border border-line px-1 text-[10px] leading-4 text-fg-dim"
-                  title="子会话"
-                >
-                  sidecar
-                </span>
-              )}
               <RowAnnotationDots badges={annotationBadges(annotations, session.id)} />
             </span>
           )}
@@ -1056,7 +1107,7 @@ export function SessionTree({
           {...longPressHandlers((event) => openMenu(event, { draft: node, items }))}
           onDragStart={(event) => startDrag(event, 'draft', 'draft', node.id, groupId)}
           onDragEnd={clearDrag}
-          onDragOver={hoverRow(dropSection, node.id, groupId)}
+          onDragOver={hoverRow(dropSection, node.id, groupId, false)}
           onDrop={dropRow(dropSection, node.id, groupId)}
           onClick={() => onSelectDraft(node)}
           onContextMenu={(event) => openMenu(event, { draft: node, items })}

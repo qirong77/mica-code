@@ -2867,6 +2867,10 @@ export function ChatView({
   const sessionMenuPlugins = useSessionMenuPlugins()
   const overridesRef = useRef(new Map()) // nodeId -> { model, variant, role }
   const forceRender = useReducer((version) => version + 1, 0)[1]
+  // 生效的覆盖项：输入条能临时改角色/模型，`forceRender` 让读它的地方（补全、状态行、
+  // 插件面板）跟着更新，所以这里每次渲染现算。
+  const activeOverrides = overridesRef.current.get(nodeId) || {}
+  const activeRole = activeOverrides.role || meta?.role || 'default'
   const [picker, setPicker] = useState(null) // { kind, title, options, loading, error }
   const [pickerIndex, setPickerIndex] = useState(0)
   // 输入框补全（`@` 文件 / `/` skill）：选中后只往输入框插入文本，不执行任何动作
@@ -3604,7 +3608,7 @@ export function ChatView({
       // `/` 的候选是两个来源：本地 skills 与 config.json 里的 MCP server。任一失败仍然
       // 展示另一边，两边都拿不到才算失败。
       Promise.allSettled([
-        window.mica.skills.list(cwd || null),
+        window.mica.skills.list(cwd || null, activeRole),
         window.mica.mcp.listCandidates()
       ]).then(([skills, mcpServers]) => {
         if (cancelled) return
@@ -3645,7 +3649,8 @@ export function ChatView({
       cancelled = true
       window.clearTimeout(timer)
     }
-  }, [completion, cwd])
+    // 角色也参与：插件带的 skill 可以只属于某些角色，切角色后候选跟着变。
+  }, [completion, cwd, activeRole])
 
   useEffect(() => {
     setCompletionIndex(0)
@@ -5760,7 +5765,6 @@ export function ChatView({
   const todoPanel = useMemo(() => {
     return todoPanelForTurn(messages, activityTurnId, running, todoHidden)
   }, [activityTurnId, messages, running, todoHidden])
-  const activeOverrides = overridesRef.current.get(nodeId) || {}
   const activeModel = activeOverrides.model || meta?.model || ''
   const activeEffort = activeOverrides.variant || meta?.effort || null
   const activeEffortKey = activeOverrides.model || `${meta?.providerId || ''}/${meta?.model || ''}`
@@ -5773,8 +5777,6 @@ export function ChatView({
     activeEffortLevels,
     modelEfforts?.[activeEffortKey]?.defaultEffort
   )
-  const activeRole = activeOverrides.role || meta?.role || 'default'
-
   // 插件面板（清单 `desktop.panel`）的开合状态：按钮在状态行里，抽屉在 `.chat-view` 直属
   // 子节点上，两处共享这一份状态。
   // 插件面板：打开的是哪个插件、以及要展开它的哪一块（快捷按钮「频道设置」这类入口）。

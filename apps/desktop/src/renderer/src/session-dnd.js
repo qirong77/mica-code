@@ -41,8 +41,13 @@ function resolveGroupDrop({ drag, section, groupId, groups }) {
  * 一次 drop 该做什么：
  * - 跨分区（或跨分组）= 移动，目标分区由落点决定（Pinned / 某个分组 / Recent 三选一）；
  * - 拖的是分组 = 换父级（嵌套），见 resolveGroupDrop；
+ * - 落到会话行正中 = 成为它的子会话（`parentSessionId`）；拖的是子会话时，
+ *   落到别处 = 解除父子关系，见下面的 `kind: 'unnest'`；
  * - 同分区 = 手动重排（Recent 按时间排序，不参与）；
  * - 其余情况返回 null，表示这次 drop 不产生任何变更。
+ *
+ * `descendantIds` 是被拖动会话自己的子树：拖进子树会把父子关系弄成环，
+ * 所以那种落点一律拒绝（数据上不合法，不是界面偏好）。
  */
 export function resolveDrop({
   drag,
@@ -52,13 +57,28 @@ export function resolveDrop({
   groups = [],
   items = [],
   order = [],
-  position = null
+  position = null,
+  descendantIds = null
 }) {
   if (!drag) return null
   if (drag.kind === 'group') return resolveGroupDrop({ drag, section, groupId, groups })
   if (drag.id === targetId) return null
+  // 落到会话行正中 = 拖进这个会话。草稿还没落盘，没有可以挂父级的会话文件。
+  if (position === 'into') {
+    if (drag.kind !== 'session') return null
+    if ((drag.parentSessionId ?? null) === targetId) return null
+    if (descendantIds instanceof Set && descendantIds.has(targetId)) return null
+    return { kind: 'nest', parentId: targetId }
+  }
+  // 子会话在侧栏里的位置由父会话决定，所以它的每一次移动都先解除父子关系：
+  // 拖到别的分区 = 移出去，留在同分区 = 只把自己提到顶层。
+  const isChild = !!drag.parentSessionId
   const sameTarget = drag.section === section && (drag.groupId ?? null) === (groupId ?? null)
-  if (!sameTarget) return { kind: 'move', target: { section, groupId } }
+  if (!sameTarget) {
+    const plan = { kind: 'move', target: { section, groupId } }
+    return isChild ? { ...plan, clearParent: true } : plan
+  }
+  if (isChild) return { kind: 'unnest' }
   if (drag.kind !== 'session' || section === 'recent') return null
 
   const byId = new Map(items.map((session) => [session.id, session]))

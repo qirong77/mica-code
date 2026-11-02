@@ -190,6 +190,22 @@ export type PluginSkillRegistration = {
   skipped: { name: string; reason: string }[];
 };
 
+export type PluginSkillRegistrationOptions = {
+  /**
+   * 只在这些会话角色里生效，空数组/缺省 = 所有角色。取值与 `desktop.panel.roles` 同一套
+   * 角色名。
+   *
+   * 注册只发生在跑插件的那个进程里，而「一条 skill 属于谁」还要被不 setup 插件的宿主
+   * 读到（桌面端给输入框做 `/` 补全时扫 `$MICA_HOME/plugin-skills` 索引）。角色因此随
+   * 索引落盘，由读的一方按自己那个会话的角色过滤：不带角色，角色专属的 skill 会漏进别的
+   * 角色的会话。
+   */
+  roles?: readonly string[];
+};
+
 export type PluginSkillsApi = {
-  register(skill: PluginSkillDefinition): PluginSkillRegistration;
+  register(
+    skill: PluginSkillDefinition,
+    options?: PluginSkillRegistrationOptions,
+  ): PluginSkillRegistration;
 };

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test'
-import { nestSessions, paginateSessionTrees, sessionRoots } from './session-nesting'
+import {
+  nestSessions,
+  paginateSessionTrees,
+  sessionDescendants,
+  sessionRoots
+} from './session-nesting'
 import { inheritedSessionSection } from './session-projects'
 
 const session = (id, parentSessionId = null) => ({ id, parentSessionId })
@@ -69,13 +74,18 @@ describe('nestSessions', () => {
   })
 })
 
-
 describe('session tree sections and pagination', () => {
   it('inherits the visible root section and ignores stale child assignments', () => {
     const items = [session('child', 'root'), session('grandchild', 'child'), session('root')]
     const roots = sessionRoots(items)
-    const options = { pins: { child: 1 }, projects: { groups: [{ id: 'p' }], assignments: { root: 'p' } } }
-    expect(inheritedSessionSection('grandchild', roots, options)).toEqual({ section: 'project', groupId: 'p' })
+    const options = {
+      pins: { child: 1 },
+      projects: { groups: [{ id: 'p' }], assignments: { root: 'p' } }
+    }
+    expect(inheritedSessionSection('grandchild', roots, options)).toEqual({
+      section: 'project',
+      groupId: 'p'
+    })
     options.pins.root = 1
     expect(inheritedSessionSection('child', roots, options).section).toBe('pinned')
     delete options.pins.root
@@ -84,7 +94,12 @@ describe('session tree sections and pagination', () => {
   })
 
   it('pages roots and retains every descendant, including newer children', () => {
-    const items = [session('child', 'old'), session('new'), session('grandchild', 'child'), session('old')]
+    const items = [
+      session('child', 'old'),
+      session('new'),
+      session('grandchild', 'child'),
+      session('old')
+    ]
     const roots = sessionRoots(items)
     const page = paginateSessionTrees(items, roots, 1)
     expect(page.items.map((s) => s.id)).toEqual(['new'])
@@ -94,11 +109,32 @@ describe('session tree sections and pagination', () => {
   })
 
   it('handles missing parents and cycles consistently, including descendants entering a cycle', () => {
-    const items = [session('leaf', 'b'), session('a', 'b'), session('b', 'a'), session('orphan', 'gone'), session('self', 'self')]
+    const items = [
+      session('leaf', 'b'),
+      session('a', 'b'),
+      session('b', 'a'),
+      session('orphan', 'gone'),
+      session('self', 'self')
+    ]
     const roots = sessionRoots(items)
     expect([...roots.values()]).toEqual(['a', 'a', 'a', 'orphan', 'self'])
     const page = paginateSessionTrees(items, roots, 1)
     expect(page.items.map((s) => s.id)).toEqual(['leaf', 'a', 'b'])
     expect(nestSessions(page.items).map((row) => row.session.id)).toEqual(['a', 'b', 'leaf'])
+  })
+
+  it('collects the whole subtree of a session for drop validation', () => {
+    const items = [
+      session('root'),
+      session('child', 'root'),
+      session('grandchild', 'child'),
+      session('other')
+    ]
+    expect([...sessionDescendants(items, 'root')].sort()).toEqual(['child', 'grandchild'])
+    expect([...sessionDescendants(items, 'child')]).toEqual(['grandchild'])
+    expect([...sessionDescendants(items, 'other')]).toEqual([])
+    // 成环数据也要能收敛，不能死循环
+    const cyclic = [session('a', 'b'), session('b', 'a')]
+    expect([...sessionDescendants(cyclic, 'a')].sort()).toEqual(['a', 'b'])
   })
 })

@@ -50,6 +50,26 @@ describe('log writer', () => {
     expect(readdirSync(dir).length).toBe(1)
   })
 
+  it('rotates to the next shard instead of a new file per flush', () => {
+    const d = new Date()
+    const stamp = [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('')
+    const dayFile = path.join(dir, `perf-${stamp}.jsonl`)
+    writeFileSync(dayFile, 'x'.repeat(17 * 1024 * 1024))
+
+    const perf = logger('perf')
+    perf.info('sample', { lag: 1 })
+    flushLogs()
+    perf.info('sample', { lag: 2 })
+    flushLogs()
+
+    const shard = path.join(dir, `perf-${stamp}-1.jsonl`)
+    // 两次 flush 都落在同一个分片里，而不是各建一个文件
+    expect(readFileSync(shard, 'utf8').trim().split('\n')).toHaveLength(2)
+    expect(readdirSync(dir).filter((name) => name.startsWith(`perf-${stamp}`)).sort()).toEqual(
+      [`perf-${stamp}-1.jsonl`, `perf-${stamp}.jsonl`].sort()
+    )
+  })
+
   it('reads back every sample it wrote', () => {
     const perf = logger('perf')
     perf.info('batch', { count: 2 })

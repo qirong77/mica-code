@@ -43,6 +43,9 @@ let slowStats = new Map()
 let dropped = 0
 let lastPrune = 0
 let lastPruneDir = ''
+// 每个 scope 当天正在写的文件。分片必须按序号递增，不能按时间戳算文件名：
+// 日文件一满，按 flush 时刻取名等于每 2s 新建一个文件（一天几千个）。
+let activeFiles = new Map()
 
 function logDir() {
   const dir = resolveLogDir()
@@ -65,13 +68,26 @@ function dayStamp(now) {
 
 function fileFor(scope, now) {
   const dir = logDir()
-  const base = join(dir, `${scope}-${dayStamp(now)}.jsonl`)
-  try {
-    if (!existsSync(base) || statSync(base).size <= MAX_BYTES) return base
-  } catch {
-    return base
+  const key = `${scope}-${dayStamp(now)}`
+  const cached = activeFiles.get(key)
+  if (cached) {
+    try {
+      if (statSync(cached).size <= MAX_BYTES) return cached
+    } catch {
+      // 被清理或挪走，重新找一片
+    }
   }
-  return join(dir, `${scope}-${dayStamp(now)}-${now}.jsonl`)
+  for (let part = 0; part < 1000; part += 1) {
+    const path = part === 0 ? join(dir, `${key}.jsonl`) : join(dir, `${key}-${part}.jsonl`)
+    try {
+      if (statSync(path).size > MAX_BYTES) continue
+    } catch {
+      // 不存在就用它
+    }
+    activeFiles.set(key, path)
+    return path
+  }
+  return join(dir, `${key}.jsonl`)
 }
 
 // 保留期 + 总容量兜底清理。

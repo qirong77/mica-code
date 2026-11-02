@@ -12,10 +12,14 @@ import { createPluginBackgroundScheduler } from './PluginBackground.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginPanelHandler, PluginPanelRegistry } from './PluginPanel.js';
 import type { PluginSessionMenuHandler, PluginSessionMenuRegistry } from './PluginSessionMenu.js';
-import type { PluginSkillDefinition } from './PluginDesktop.js';
+import type { PluginSkillRegistrationOptions } from './PluginDesktop.js';
 import type { RuntimeSkillRegistration } from '@packages/mica-skills/index.js';
 import type { Skill } from '@packages/mica-skills/types.js';
-import { loadManifestSkills, publishPluginSkills } from './PluginSkills.js';
+import {
+  loadManifestSkills,
+  publishPluginSkills,
+  type PluginSkillPublishEntry,
+} from './PluginSkills.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
@@ -167,8 +171,9 @@ export class PluginManager {
       };
       const logger = createPluginLogger(plugin.id, baseContext.logger);
       const configDir = baseContext.paths?.config;
-      // 这个插件注册成功的 skill：每次注册后整份重写它的索引文件（见 PluginSkills.ts）。
-      const publishedSkills: PluginSkillDefinition[] = [];
+      // 这个插件注册成功的 skill 与它声明的角色：每次注册后整份重写它的索引文件
+      // （见 PluginSkills.ts）。
+      const publishedSkills: PluginSkillPublishEntry[] = [];
       // `sessionStateFor` / `promptSections` 由 manager 消费（下面按 pluginId 生成
       // 本插件专属的入口），不能原样漏进 ctx，否则插件会看到一个能读别人状态的入口。
       const {
@@ -192,7 +197,10 @@ export class PluginManager {
        * 插件的宿主（桌面运行时的 `/` 补全、配置页）靠它列出内置 skill，不必为此冷启动一个
        * 会话进程。
        */
-      const registerSkill = (skill: Skill): RuntimeSkillRegistration => {
+      const registerSkill = (
+        skill: Skill,
+        skillOptions: PluginSkillRegistrationOptions = {},
+      ): RuntimeSkillRegistration => {
         const registration = micaSkills.registerRuntime(plugin.id, [skill]);
         if (registration.skipped.length > 0) {
           logger.warn('plugin:skill-shadowed', { skipped: registration.skipped });
@@ -205,7 +213,7 @@ export class PluginManager {
         }
         const name = skill.name.trim();
         if (!registration.skipped.some((item) => item.name === name)) {
-          publishedSkills.push(skill);
+          publishedSkills.push({ skill, roles: skillOptions.roles ?? [] });
           publishPluginSkills(plugin.id, publishedSkills, { configDir });
         }
         localDisposables.push({ dispose: () => registration.dispose() });
@@ -233,7 +241,7 @@ export class PluginManager {
         // skill 是进程级注册表（磁盘扫描 + 插件注册合流），所以不需要宿主接线：
         // 注册归属这个插件，卸载时按 pluginId 一起摘掉。
         skills: {
-          register: (skill) => registerSkill(skill),
+          register: (skill, skillOptions) => registerSkill(skill, skillOptions ?? {}),
         },
         onDispose: (dispose) => localDisposables.push({ dispose }),
       };

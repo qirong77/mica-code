@@ -456,7 +456,7 @@ function createWebApi(env) {
 
     skills: {
       // 输入框 `/` 的 skill 候选：按会话所在目录现扫（项目级 + 用户级）
-      list: (cwd) => invoke('skills:list', { cwd })
+      list: (cwd, role) => invoke('skills:list', { cwd, role })
     },
 
     mcp: {
@@ -514,6 +514,9 @@ function createWebApi(env) {
       // 侧栏唯一的「换位置」入口：pinned / project / recent 三选一
       moveSession: (sessionId, section, groupId = null) =>
         invoke('stats:move-session', { sessionId, section, groupId }),
+      // 会话树的父子关系：拖进另一个会话 = 传它的 id，拖出来 = null
+      setSessionParent: (sessionId, parentId = null) =>
+        invoke('stats:set-session-parent', { sessionId, parentId }),
       // 会话统计索引在后台构建（以及会话文件有变化）时通知页面重读：首次扫描要遍历
       // 全部会话文件，页面不靠轮询等它跑完。
       onChanged: (callback) => subscribe('stats:changed', callback)

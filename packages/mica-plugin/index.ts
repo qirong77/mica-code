@@ -259,6 +259,7 @@ export type {
   PluginEntryPlacement,
   PluginSkillDefinition,
   PluginSkillRegistration,
+  PluginSkillRegistrationOptions,
   PluginSkillsApi,
 } from './PluginDesktop.js';
 export type { PluginStatusField, PluginStatusType } from './PluginManifest.js';

@@ -228,6 +228,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 官方插件载在**每会话**的 app-server 里（会话关掉进程就退），所以「必须活得比会话久」的常驻工作不能只靠进程内循环，要由常驻任务监管一个脱离父进程的子进程；随包脚本先落盘到 `$MICA_HOME` 再用 `node` 跑（`packages/mica-pty` 的 helper 与 computer-use 的 runtime 都是这个模式），源码内嵌由脚本生成。
 - 内置 skill 用 `ctx.skills.register()`：正文随包用 `import … with { type: 'text' }` 内嵌，元数据由 `micaSkills.parseMarkdown(SKILL.md)` 解析（frontmatter 是唯一来源），注册后与磁盘 skill 同权（prompt 索引 / `skill` 工具 / 会话能力开关）。磁盘上的同名 skill 优先，被遮蔽的条目从返回值 `skipped` 读出来并 `ctx.health.report()`。`baseDir` 必须是真能读到的目录——单二进制没有插件目录，所以随包资源要先落盘到 `$MICA_HOME/<插件目录>` 再注册（`plugins/computer-use` 是完整示例，源码内嵌由 `scripts/generate-computer-use-sources.mjs` 生成，改 `runtime/**` 必须重跑）；**正文不落盘（`baseDir/SKILL.md` 不存在）的 skill 不会进补全列表**，因为补全插入的就是这条路径。
 - 注册成功的内置 skill 由插件系统顺带发布到 `$MICA_HOME/plugin-skills/<pluginId>.json`（`PluginSkills.ts`，一个插件一份、整份重写）：不 setup 插件的宿主（桌面运行时给 `/` 补全、配置页）靠这份索引列出内置 skill，不必为两个名字冷启动会话进程。索引不主动清理（多进程会互相踩），读的时候按 `plugins-state.json` 的停用名单与 `SKILL.md` 是否还在过滤——所以停用插件、卸掉插件之后它立刻从列表消失。
+- 插件整块按会话角色门控时（段落、工具、技能一起只对某个角色出现），技能也要声明角色：`ctx.skills.register(skill, { roles: ['需求开发'] })`（空数组＝所有角色）。角色随条目写进索引（`version: 2`，缺 `roles` 的旧索引直接当没有），由读索引的一方按会话角色过滤——索引是全局一份、注册只发生在跑插件的那个进程里，判定只能留在读取侧。
 - **随插件分发的 skill 用清单 `skills` 声明**，不要手写 `ctx.skills.register()`，也不要把正文抄到 `$MICA_HOME`：每条是相对插件目录的路径，目录里有 `SKILL.md` 就是一条 skill、否则当容器扫一层子目录（`["skills"]` 带一组、`["./skills/x"]` 带一条）。宿主按 `MicaPlugin.root` 读成运行期 skill 并发布索引，**编辑插件目录里的文件就是编辑 skill**；相对路径以外（绝对路径、`..`）在清单解析阶段就拒绝。目录读不到只报一条健康状态、插件其余能力照常启动。`ctx.skills.register()` 仍然保留给「正文来自内存/需要动态生成」的场合（`plugins/computer-use` 的源码内嵌就是这一种）。
 - 运行条件由清单 `desktop.checks` 声明，取值只能来自 `mica-plugin/PluginDesktop.ts` 的 `DESKTOP_CHECKS`；配置页 Settings → Plugins 的插件详情里渲染成「运行条件」一节（状态 + 打开系统设置），插件跑在 app-server 子进程里、探测不到也渲染不了。新增一种检查项 = 在 `DESKTOP_CHECKS` 登记 + 桌面端实现探测器（`src/main/system/`）。声明了它就写 `requires: ["desktop"]`。
 - 运行状态由清单 `status` 声明（`key` / `label` / `type: text|link`），值由插件写进 `$MICA_HOME/plugin-data/<id>/data.json`，配置页插件详情渲染成「运行状态」一节。值是字符串或 `{ text, tone: ok|warn|error }`——插件判断语义，页面只上色；没写过的键显示「尚未上报」，不隐藏。插件详情因此不需要为每个插件各写一套状态界面。
@@ -391,7 +392,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 每次模型请求后立即转发 usage；实时 usage 不改 turnState / updatedAt。
 - 阶段文案与计时读 `statusLinePhase`；`mica/turn/retrying` 让状态行显示 `retrying n/5`。
 - 文件补全 CLI / desktop 共用 `mica-file-mentions`；`@` 与 `/` skill 补全只在词首触发，选中只插文本（文件插 `@路径`，skill 插 `[skill:name](SKILL.md 绝对路径)`）。
-- `/` 浮层混排 skill 与 MCP server；插入的都是一枚 markdown 链接：`[skill:name](SKILL.md 绝对路径)`、`[mcp:name](接口地址)`（http 的 server 才有地址，stdio 退回 `config.json`）。目标含空白或括号时整条包进 `<…>`（CommonMark 允许），**不**做百分号编码——那会让模型读到一个要再解一次才成路径的东西。消息体里这类引用由 `splitTextByCapabilityRefs` 收成 `skill:name` 一枚短标签，点开仍是完整目标（原文一个字不改，编辑重发靠它定位）。两边都包含**内置能力**，不需要用户配置：skill 来自磁盘扫描 + 插件发布的 `$MICA_HOME/plugin-skills` 索引 + **插件清单声明的 skill 目录**（后者只解析 `plugin.json`、不导入插件代码，所以第一次打开就看得见随包 skill，不用等插件 setup 过一次；`skills-core.js`），MCP 来自 `config.json` + 运行时按 socket 能力算出的 `mica-browser` / `mica-terminal`（`mcp-candidates-core.js`）；插入文本与普通条目一致。
+- `/` 浮层混排 skill 与 MCP server；插入的都是一枚 markdown 链接：`[skill:name](SKILL.md 绝对路径)`、`[mcp:name](接口地址)`（http 的 server 才有地址，stdio 退回 `config.json`）。目标含空白或括号时整条包进 `<…>`（CommonMark 允许），**不**做百分号编码——那会让模型读到一个要再解一次才成路径的东西。消息体里这类引用由 `splitTextByCapabilityRefs` 收成 `skill:name` 一枚短标签，点开仍是完整目标（原文一个字不改，编辑重发靠它定位）。两边都包含**内置能力**，不需要用户配置：skill 来自磁盘扫描 + 插件发布的 `$MICA_HOME/plugin-skills` 索引 + **插件清单声明的 skill 目录**（后者只解析 `plugin.json`、不导入插件代码，所以第一次打开就看得见随包 skill，不用等插件 setup 过一次；`skills-core.js`；索引里声明了角色的条目按会话当前角色过滤，`skills:list` 的 `role` 参数就是它，取输入条上还未发送的 `activeRole`），MCP 来自 `config.json` + 运行时按 socket 能力算出的 `mica-browser` / `mica-terminal`（`mcp-candidates-core.js`）；插入文本与普通条目一致。
 - 每行是「名称 | 说明 | 类型 | 来源」四列，列数必须与行内子元素一一对应（多出来的子元素会掉到第二行，浮层看起来就是歪的）。类型标记写 `skill` / `MCP`（`@` 文件补全的 `file` 不画，一整屏都是文件时标一排只是噪声）；来源标记是 `source: { kind, label, detail? }`，kind 取 `builtin` / `plugin` / `project` / `user` / `config`：插件带的写「插件 <id>」、项目目录写 `.mica/skills` 这样的相对路径、用户目录写 `$MICA_HOME/skills` / `~/.agents/skills`、MCP 写「内置」或 `config.json`；`detail`（SKILL.md 路径、`config.json` 路径、插件 id）放悬停提示。来源由 host 两个扫描器给，渲染层只做白名单校验（不认识的 kind 整条丢掉），`label` 同时参与查询匹配但没有高亮——说明列只讲「这东西干什么」。
 - desktop composer 不分派斜杠命令；输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻。
 - 输入框内容变化会节流 2s 发一次 `chat:input-activity` → `mica/input/activity`（空输入不发）：它只服务「这个人回来了」这类提前量（自动压缩的空闲触发），没有常驻进程时直接丢弃，不回包也不影响输入。
@@ -434,10 +435,15 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 会话行共用操作列/图标列/名称栅格；状态优先级沿用 `session-state.js`，error 红点由后续 completed 清除。
 - 会话右键菜单 = 固定项（改名 / 标记 / 删除等）+ 插件动作：插件项来自清单 `desktop.sessionMenu`，由 `renderer/src/session-menu-plugins.js` 收集（读 `readPluginsDetails`，用户插件也在里面），页面只转发 `pluginId + pluginAction` 到 `window.mica.chat.sessionMenuRun` → `chat:session-menu-run` → `mica/sessionMenu/run`；插件回的 `copyText` 由页面写剪贴板（`transport.js` 的 `copyText`），`message` 进 toast。没开过标签页的会话按需起一个 app-server 取快照，不需要页面先有 chat run。
 - 会话行右键与对话区右键（`ChatView` 的 `ChatContextMenu`）用的是同一份插件项和同一个执行器 `runSessionMenuPluginAction`：两处各写一遍会让同一个插件在两个入口表现不一样。对话区那一份插在「分享链接」之后、Clear 之前（危险项永远排最后），没有会话时禁用；结果在对话里落一条 notice，侧栏那处进 toast。
-- 派生关系（`parentSessionId`）只改渲染顺序：父行在前、紧跟它的子树（`session-nesting.js` 的
-  `nestSessions`），父会话不在当前分区时子会话当顶层，环与自指都退化成顶层。折叠状态是
-  页面内 Set，父行折叠时用 `mergeRowStates` 代显子行状态；子行继承父行的分区与搜索命中。
-  这条关系不影响拖放排序数据，子行不参与拖拽重排。
+- 父子关系（`parentSessionId`）是会话树的唯一事实来源，只改渲染顺序，**不区分来源**：sidecar
+  子会话、fork 分支与手动拖出来的层级共用这一个字段，侧栏不给它们加标签或图标。父行在前、
+  紧跟它的子树（`session-nesting.js` 的 `nestSessions`），父会话不在当前分区时子会话当顶层，环与
+  自指都退化成顶层。折叠状态是页面内 Set，父行折叠时用 `mergeRowStates` 代显子行状态；子行继承
+  父行的分区与搜索命中，也不参与手动排序——拖到会话行正中＝成为它的子会话（拖进自己的子树会被
+  拒），拖到别处＝先解除父子关系再换分区。写盘走 `stats:set-session-parent`
+  （`host/session-parent.js`）：只在没有 turn lease 时直接改文件，`parentSessionId` 固定写在
+  `snapshot` 之前（头部读取靠这个位置判成环），`updatedAt` 不动，否则调整层级会把会话顶到
+  Recent 最前面。
 - 会话搜索共用 `mica-web-shared/session-search.ts`；正文搜索每会话最多 20k 字符，默认最近 3 日、最多 600 个候选，截断须告知。
 - 上下文统计按整条消息 JSON 估算并排除媒体 payload；compact / rewind 后用 staleInput 说明。
 

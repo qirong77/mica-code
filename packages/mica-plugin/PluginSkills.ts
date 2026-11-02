@@ -19,7 +19,7 @@ import { PLUGIN_STATE_FILE, readDisabledPluginIds } from './PluginState.js';
 
 export const PLUGIN_SKILLS_DIR = 'plugin-skills';
 
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 2;
 const MAX_SKILLS = 200;
 
 export type PublishedPluginSkill = {
@@ -28,15 +28,39 @@ export type PublishedPluginSkill = {
   description: string;
   /** `SKILL.md` 的绝对路径：补全插入的就是它，模型据此读全文。 */
   path: string;
+  /** 只对这些会话角色可见；空数组 = 所有角色。 */
+  roles: string[];
 };
 
 type PluginSkillsOptions = {
   /** `$MICA_HOME`；省略时按品牌默认目录解析。 */
   configDir?: string;
+  /** 读的一方所在的会话角色：条目声明了角色时按它过滤。 */
+  role?: string;
+};
+
+/** 待写进索引的一条：skill 本身 + 它属于哪些会话角色（空数组 = 所有角色）。 */
+export type PluginSkillPublishEntry = {
+  skill: Skill;
+  roles?: readonly string[];
 };
 
 export function resolvePluginSkillsDir(options: PluginSkillsOptions = {}): string {
   return join(options.configDir || resolveMicaHome(), PLUGIN_SKILLS_DIR);
+}
+
+/**
+ * 会话角色名：空/非字符串一律当 `default`（与 `desktop.panel.roles` 的判定同一套）。
+ */
+function normalizeRole(role: unknown): string {
+  return String(typeof role === 'string' ? role : '').trim() || 'default';
+}
+
+/** 条目声明的角色：去空、去重；`null` = 这份数据没有这个字段（旧形态，不再支持）。 */
+function readRoles(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const roles = [...new Set(value.map((item) => String(item ?? '').trim()).filter(Boolean))];
+  return roles;
 }
 
 /**
@@ -59,7 +83,7 @@ function indexFileName(pluginId: string): string {
  */
 export function publishPluginSkills(
   pluginId: string,
-  skills: Skill[],
+  entries: readonly PluginSkillPublishEntry[],
   options: PluginSkillsOptions = {},
 ): string | null {
   const fileName = indexFileName(pluginId);
@@ -67,23 +91,30 @@ export function publishPluginSkills(
   const dir = resolvePluginSkillsDir(options);
   const path = join(dir, fileName);
 
-  const entries = new Map<string, { name: string; description: string; path: string }>();
-  for (const skill of skills) {
+  const byName = new Map<
+    string,
+    { name: string; description: string; path: string; roles: string[] }
+  >();
+  for (const entry of entries) {
+    const skill = entry?.skill;
     const name = String(skill?.name ?? '').trim();
-    if (!name || entries.has(name)) continue;
+    if (!name || byName.has(name)) continue;
     // 正文必须落盘：补全插入的是 `SKILL.md` 的绝对路径，插件只把内容放在内存里
     // 的话读不到文件，列出来反而误导。
     const skillPath = join(skill.baseDir, 'SKILL.md');
     if (!existsSync(skillPath)) continue;
-    entries.set(name, {
+    byName.set(name, {
       name,
       description: String(skill.description ?? '').trim(),
       path: skillPath,
+      // 角色是**这条 skill 属于谁**的事实，写进索引才能让读索引的宿主（桌面端输入框
+      // `/` 补全）按自己那个会话的角色过滤——skill 只活在注册它的进程里，索引却是全局的。
+      roles: [...new Set((entry.roles ?? []).map((role) => String(role ?? '').trim()).filter(Boolean))],
     });
-    if (entries.size >= MAX_SKILLS) break;
+    if (byName.size >= MAX_SKILLS) break;
   }
 
-  if (entries.size === 0) {
+  if (byName.size === 0) {
     rmSync(path, { force: true });
     return null;
   }
@@ -91,7 +122,7 @@ export function publishPluginSkills(
   const payload = {
     version: INDEX_VERSION,
     pluginId: pluginId.trim(),
-    skills: [...entries.values()],
+    skills: [...byName.values()],
   };
   try {
     mkdirSync(dir, { recursive: true });
@@ -111,6 +142,10 @@ export function publishPluginSkills(
  * 读的时候才过滤，写的时候不清理，因为「哪个插件停用了」是随时会变的状态，而索引文件
  * 只在那个插件被 setup 时才刷新：停用后没人再写它，只能靠这里按 `plugins-state.json`
  * 剔除。正文文件已不存在的条目同样丢掉（插件被删掉时不会有人来删它的索引）。
+ *
+ * 角色同理、也在读的时候过滤：只对某些角色生效的 skill（插件带角色门槛）由调用方传入
+ * 自己那个会话的角色，索引里记着它属于谁。一个插件一份文件、多个角色的会话共用它，
+ * 写在读的一侧才不会让后注册的那次覆盖掉前一个角色的可见性。
  */
 export function readPublishedPluginSkills(options: PluginSkillsOptions = {}): PublishedPluginSkill[] {
   const dir = resolvePluginSkillsDir(options);
@@ -118,6 +153,7 @@ export function readPublishedPluginSkills(options: PluginSkillsOptions = {}): Pu
 
   const configDir = options.configDir || resolveMicaHome();
   const disabled = readDisabledPluginIds({ path: join(configDir, PLUGIN_STATE_FILE) });
+  const role = normalizeRole(options.role);
   const skills: PublishedPluginSkill[] = [];
   const seen = new Set<string>();
 
@@ -136,7 +172,10 @@ export function readPublishedPluginSkills(options: PluginSkillsOptions = {}): Pu
     } catch {
       continue;
     }
-    if (!isRecord(parsed) || !Array.isArray(parsed.skills)) continue;
+    // 版本对不上就是旧形态，不再支持：索引是可重建的缓存，插件下次注册会整份重写。
+    if (!isRecord(parsed) || parsed.version !== INDEX_VERSION || !Array.isArray(parsed.skills)) {
+      continue;
+    }
     const pluginId = typeof parsed.pluginId === 'string' ? parsed.pluginId.trim() : '';
     if (!pluginId || disabled.has(pluginId)) continue;
 
@@ -145,12 +184,16 @@ export function readPublishedPluginSkills(options: PluginSkillsOptions = {}): Pu
       const name = typeof entry.name === 'string' ? entry.name.trim() : '';
       const path = typeof entry.path === 'string' ? entry.path : '';
       if (!name || !path || seen.has(name) || !existsSync(path)) continue;
+      const roles = readRoles(entry.roles);
+      if (!roles) continue;
+      if (roles.length > 0 && !roles.includes(role)) continue;
       seen.add(name);
       skills.push({
         pluginId,
         name,
         description: typeof entry.description === 'string' ? entry.description : '',
         path,
+        roles,
       });
     }
   }

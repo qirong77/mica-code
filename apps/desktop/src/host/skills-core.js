@@ -170,9 +170,12 @@ function scanDiskSkills(cwd) {
  *
  * 索引里已经是最新生效的那几条（停用的插件、正文文件不在了的条目在读的时候就被剔掉），
  * 所以这里只做形状转换；`builtin: true` 让浮层标出「内置」，用户据此知道它不来自磁盘。
+ *
+ * 角色也在这里过滤：插件可以声明「这条 skill 只属于某些角色」（`ctx.skills.register`
+ * 的 `roles`），索引是全局的一份，只有读的一侧知道当前会话是什么角色。
  */
-function publishedSkills() {
-  return readPublishedPluginSkills({ configDir: micaHome() }).map((skill) => ({
+function publishedSkills(role) {
+  return readPublishedPluginSkills({ configDir: micaHome(), role }).map((skill) => ({
     name: skill.name,
     path: skill.path,
     description: truncateDescription(skill.description),
@@ -233,11 +236,11 @@ function declaredSkills() {
   return skills
 }
 
-export function listSkills(cwd) {
+export function listSkills(cwd, role) {
   const skills = scanDiskSkills(cwd)
   const seen = new Set(skills.map((skill) => skill.name))
 
-  for (const skill of [...publishedSkills(), ...declaredSkills()]) {
+  for (const skill of [...publishedSkills(role), ...declaredSkills()]) {
     if (skills.length >= MAX_SKILLS) break
     if (seen.has(skill.name)) continue
     seen.add(skill.name)

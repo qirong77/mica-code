@@ -1138,12 +1138,46 @@ export default function App() {
         target.section === 'pinned' ? 'pinned' : target.section === 'project' ? 'project' : 'recent'
       const groupId = section === 'project' ? target.groupId || null : null
       if (section === 'project' && !groupId) return
-      window.mica.stats
-        .moveSession(sessionId, section, groupId)
-        .then(applyMoveResult)
-        .catch((error) => console.error('move session failed', error))
+      // 子会话的位置由父会话决定：先解除父子关系再从父会话下面拖出去，
+      // 否则服务端会以「不能移动子会话」拒绝这次移动。
+      const run = async () => {
+        if (target.clearParent) {
+          const detached = await window.mica.stats.setSessionParent(sessionId, null)
+          if (detached?.ok === false) throw new Error(detached.error || '解除父子关系失败')
+        }
+        return window.mica.stats.moveSession(sessionId, section, groupId)
+      }
+      run()
+        .then((result) => {
+          applyMoveResult(result)
+          if (target.clearParent) refreshSessions()
+        })
+        .catch((error) => {
+          console.error('move session failed', error)
+          showToast(error?.message || '移动会话失败', true)
+        })
     },
-    [applyMoveResult]
+    [applyMoveResult, refreshSessions, showToast]
+  )
+
+  /**
+   * 会话树的父子关系：拖一个会话到另一个会话上就是它的子会话，拖出来即解除。
+   * 只影响会话树怎么排——分区归属仍跟着父会话，恢复会话、派生子会话的行为都不变。
+   */
+  const setSessionParent = useCallback(
+    (sessionId, parentId = null) => {
+      window.mica.stats
+        .setSessionParent(sessionId, parentId)
+        .then((result) => {
+          if (result?.ok === false) throw new Error(result.error || '调整会话层级失败')
+          refreshSessions()
+        })
+        .catch((error) => {
+          console.error('set session parent failed', error)
+          showToast(error?.message || '调整会话层级失败', true)
+        })
+    },
+    [refreshSessions, showToast]
   )
 
   const togglePin = useCallback(
@@ -2581,6 +2615,7 @@ export default function App() {
               }}
               onTogglePin={togglePin}
               onMoveSession={moveSession}
+              onSetSessionParent={setSessionParent}
               onMoveDraft={moveDraft}
               onReorderSessions={reorderSessions}
               onCreateGroup={createGroup}

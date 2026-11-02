@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
-import { readTopLevelCwd } from './session-file-head'
+import { readTopLevelCwd, readTopLevelParentId } from './session-file-head'
 
 describe('readTopLevelCwd', () => {
   let dir
@@ -76,5 +76,40 @@ describe('readTopLevelCwd', () => {
     }
     const file = await write('g.json', JSON.stringify(session))
     expect(readTopLevelCwd(file)).toBe('/Users/someone/big')
+  })
+})
+
+describe('readTopLevelParentId', () => {
+  let dir
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'mica-session-head-'))
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+
+  it('读顶层 parentSessionId，snapshot 之后的同名字段不算', async () => {
+    const file = path.join(dir, 'a.json')
+    await writeFile(
+      file,
+      JSON.stringify(
+        { version: 1, id: 'child', parentSessionId: 'parent-1', snapshot: {} },
+        null,
+        2
+      )
+    )
+    expect(readTopLevelParentId(file)).toBe('parent-1')
+
+    const nested = path.join(dir, 'b.json')
+    await writeFile(
+      nested,
+      JSON.stringify({ version: 1, id: 'child', snapshot: { parentSessionId: 'ghost' } }, null, 2)
+    )
+    expect(readTopLevelParentId(nested)).toBeNull()
+  })
+
+  it('没有父会话或文件不在时返回 null', async () => {
+    const file = path.join(dir, 'c.json')
+    await writeFile(file, JSON.stringify({ version: 1, id: 'root' }))
+    expect(readTopLevelParentId(file)).toBeNull()
+    expect(readTopLevelParentId(path.join(dir, 'missing.json'))).toBeNull()
   })
 })

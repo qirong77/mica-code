@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { ProviderEditor } from '../components/ProviderEditor.js';
+import { SelectMenu } from '../components/SelectMenu.js';
 import { Alert, Button, CollapsiblePanel, SaveStatus, SettingRow, SettingsGroup, Tag } from '../components/Ui.js';
 import { readConfigFile, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
@@ -160,6 +161,10 @@ export function ConfigPage() {
   const defaultModel = readDefaultModelDraft(draft ?? {});
   const providerOptions = providers.map(readProviderDraft).filter((provider) => provider.id);
   const defaultProvider = providerOptions.find((provider) => provider.id === defaultModel.provider);
+  const providerSelectOptions = [
+    { value: '', label: '跟随配置列表第一项' },
+    ...providerOptions.map((provider) => ({ value: provider.id, label: provider.id })),
+  ];
 
   return (
     <PageFrame
@@ -238,29 +243,20 @@ export function ConfigPage() {
             >
               {errors.get('defaultModel') ? <Alert message={errors.get('defaultModel')!} /> : null}
               <SettingRow label="服务商" htmlFor="default-model-provider" error={errors.get('defaultModel.provider')}>
-                <select
+                <SelectMenu
                   id="default-model-provider"
-                  className={`text-input${errors.has('defaultModel.provider') ? ' text-input-invalid' : ''}`}
                   value={defaultModel.provider}
-                  aria-invalid={errors.has('defaultModel.provider')}
-                  onChange={(event) => {
-                    const provider = event.target.value;
+                  options={providerSelectOptions}
+                  fallbackLabel={defaultModel.provider ? `${defaultModel.provider}（已不存在）` : undefined}
+                  invalid={errors.has('defaultModel.provider')}
+                  ariaLabel="默认服务商"
+                  onChange={(provider) => {
                     const selected = providerOptions.find((option) => option.id === provider);
                     applyDraft(
                       writeDefaultModelDraft(draft, { provider, model: selected?.models[0] ?? '', effort: '' }),
                     );
                   }}
-                >
-                  <option value="">跟随配置列表第一项</option>
-                  {defaultModel.provider && !defaultProvider ? (
-                    <option value={defaultModel.provider}>{defaultModel.provider}（已不存在）</option>
-                  ) : null}
-                  {providerOptions.map((provider, index) => (
-                    <option key={index} value={provider.id}>
-                      {provider.id}
-                    </option>
-                  ))}
-                </select>
+                />
               </SettingRow>
               <SettingRow
                 label="模型"
