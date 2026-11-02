@@ -154,6 +154,7 @@ export interface MicaUiBackgroundTaskItem {
   pid?: number;
   outputPath: string;
   outputSize: number;
+  exitCode?: number | null;
   status: MicaUiBackgroundTaskStatus;
   startedAt: string;
   finishedAt?: string;

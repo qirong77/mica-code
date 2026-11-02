@@ -1,3 +1,4 @@
+import { claimSubagentRestart, commitSubagentRestart, releaseSubagentRestart, subagentExecutionEnded } from '@packages/mica-common/subagentState.js';
 import {
   AgentMaxTurnsError,
   summarizeUsageHistory,
@@ -69,11 +70,15 @@ export type SubagentTaskRecord = {
   parent_task_id?: string;
   /** 发起这次委派的插件 id（插件能力面），用于按插件收窄任务视图。 */
   pluginId?: string;
+  provider_id?: string;
+  protocol?: string;
   activity?: 'delegation' | 'maintenance';
   activities?: SubagentTaskActivity[];
   timeline?: SubagentTaskTimelineEntry[];
   /** True once older timeline entries were dropped to bound the record. */
   timeline_truncated?: boolean;
+  execution_pid?: number;
+  execution_pending?: boolean;
   started_at: string;
   finished_at?: string;
   result?: string;
@@ -81,12 +86,16 @@ export type SubagentTaskRecord = {
   usage?: AgentUsageSummary;
 };
 
+type RestartAttempt = { committed: boolean; tasks: ManagedSubagentTask[] };
+
 type ManagedSubagentTask = {
   record: SubagentTaskRecord;
   owner: AgentRuntime;
   controller: AbortController;
   promise: Promise<void>;
   resolvePromise: () => void;
+  executionPending: boolean;
+  restored?: boolean;
 };
 
 export type StartSubagentTaskOptions = {
@@ -103,6 +112,8 @@ export type StartSubagentTaskOptions = {
   ownedPaths?: string[];
   parentTaskId?: string;
   pluginId?: string;
+  providerId?: string;
+  protocol?: string;
   activity?: 'delegation' | 'maintenance';
   run: (signal: AbortSignal) => Promise<{ result: string; usage?: AgentUsageSummary }>;
   getUsage?: () => AgentUsageSummary;
@@ -122,6 +133,8 @@ export type SubagentTaskManagerOptions = {
   maxConcurrentTasks?: number;
   maxRetainedTasks?: number;
   onTaskFinished?: (task: SubagentTaskRecord, owner: AgentRuntime) => void | Promise<void>;
+  onChange?: (task: SubagentTaskRecord, owner: AgentRuntime) => void;
+  readRestoredTasks?: (owner: AgentRuntime) => SubagentTaskRecord[];
 };
 
 export type SubagentTaskChangeListener = (task: SubagentTaskRecord, owner: AgentRuntime) => void;
@@ -133,19 +146,86 @@ export class SubagentTaskManager {
   private readonly maxConcurrentTasks: number;
   private readonly maxRetainedTasks: number;
   private readonly onTaskFinished: SubagentTaskManagerOptions['onTaskFinished'];
+  private readonly onChange: SubagentTaskManagerOptions['onChange'];
+  private readonly readRestoredTasks: SubagentTaskManagerOptions['readRestoredTasks'];
   private stopping = false;
+  private restartHandler?: (task: SubagentTaskRecord, owner: AgentRuntime) => string;
+  private restartAttempt?: RestartAttempt;
+
+  setRestartHandler(handler: (task: SubagentTaskRecord, owner: AgentRuntime) => string): void {
+    this.restartHandler = handler;
+  }
+
+  restart(id: string, owner: AgentRuntime): string {
+    const task = this.get(id, owner);
+    if (!task) throw new Error(`Subagent task not found: ${id}`);
+    if (task.status === 'running') throw new Error('A running subagent cannot be restarted.');
+    if (this.tasks.get(id)?.executionPending) throw new Error('Subagent execution is still stopping; retry after it exits.');
+    if (!subagentExecutionEnded(task)) throw new Error('Cannot confirm that the subagent execution has exited.');
+    if (!this.restartHandler) throw new Error('Subagent restart is unavailable.');
+    if (this.restartAttempt) throw new Error('A subagent restart is already being scheduled.');
+    const claim = claimSubagentRestart(id);
+    const attempt: RestartAttempt = { committed: false, tasks: [] };
+    this.restartAttempt = attempt;
+    try {
+      const replacement = this.restartHandler(task, owner);
+      // start() defers execution to a microtask. Record the successful handoff
+      // before allowing any replacement created by this handler to run.
+      commitSubagentRestart(claim);
+      attempt.committed = true;
+      return replacement;
+    } catch (error) {
+      for (const managed of attempt.tasks) {
+        managed.controller.abort();
+        this.complete(managed, { status: 'killed', error: 'Subagent restart could not be scheduled.' }, false);
+      }
+      try { releaseSubagentRestart(claim); } catch (releaseError) { console.error('[subagent state] releasing restart claim:', releaseError); }
+      throw error;
+    } finally {
+      this.restartAttempt = undefined;
+    }
+  }
 
   constructor(options: SubagentTaskManagerOptions = {}) {
     this.maxConcurrentTasks = positiveInteger(options.maxConcurrentTasks, DEFAULT_MAX_CONCURRENT_TASKS);
     this.maxRetainedTasks = positiveInteger(options.maxRetainedTasks, DEFAULT_MAX_RETAINED_TASKS);
     this.onTaskFinished = options.onTaskFinished;
+    this.onChange = options.onChange;
+    this.readRestoredTasks = options.readRestoredTasks;
+  }
+
+  canSwitchSession(owner: AgentRuntime): boolean {
+    return ![...this.tasks.values()].some((task) => task.owner === owner && task.executionPending);
+  }
+
+  clearOwner(owner: AgentRuntime): void {
+    if (!this.canSwitchSession(owner)) throw new Error('Cannot switch sessions while subagent execution is active.');
+    for (const [id, task] of this.tasks) if (task.owner === owner) this.tasks.delete(id);
+  }
+
+  /** Restore records for display and restart; execution handles are never restored. */
+  restore(records: SubagentTaskRecord[], owner: AgentRuntime): void {
+    for (const input of records.slice(0, this.maxRetainedTasks)) {
+      const existing = this.tasks.get(input.id);
+      if (existing && !existing.restored) continue;
+      const record = cloneRecord(input.status === 'running' && subagentExecutionEnded(input)
+        ? { ...input, status: 'failed', error: 'Application restarted before this task completed.', activities: [] }
+        : { ...input, activities: [] });
+      let resolvePromise: () => void = () => undefined;
+      const promise = new Promise<void>((resolve) => { resolvePromise = resolve; });
+      this.tasks.set(record.id, { record, owner, controller: new AbortController(), promise, resolvePromise, executionPending: false, restored: true });
+    }
   }
 
   start(options: StartSubagentTaskOptions): SubagentTaskRecord {
+    const restartAttempt = this.restartAttempt;
     const managed = this.createTask(options);
     const { controller } = managed;
     const execution = Promise.resolve()
-      .then(() => options.run(controller.signal))
+      .then(() => {
+        if (restartAttempt && !restartAttempt.committed) throw new Error('Subagent restart could not be scheduled.');
+        return options.run(controller.signal);
+      })
       .then(
         ({ result, usage }) => this.complete(managed, { status: 'completed', result, usage }),
         (error: unknown) => {
@@ -166,11 +246,14 @@ export class SubagentTaskManager {
           });
         },
       );
-    this.attachExecution(execution);
+    this.attachExecution(managed, execution);
     return cloneRecord(managed.record);
   }
 
   track(options: TrackSubagentTaskOptions): TrackedSubagentTask {
+    // Tracked executions can start outside this manager, before the restart is
+    // committed. Restart handlers must use the deferred start() path instead.
+    if (this.restartAttempt) throw new Error('A subagent restart must use deferred execution.');
     const managed = this.createTask(options);
     const finish = (result: Parameters<SubagentTaskManager['complete']>[1]) => {
       this.complete(managed, result, false);
@@ -179,7 +262,7 @@ export class SubagentTaskManager {
       task: cloneRecord(managed.record),
       signal: managed.controller.signal,
       attachExecution: (promise) => {
-        this.attachExecution(promise);
+        this.attachExecution(managed, promise);
       },
       complete: (result, usage) => finish({ status: 'completed', result, usage }),
       fail: (error, result, usage) =>
@@ -224,8 +307,12 @@ export class SubagentTaskManager {
       ...(options.writeMode === undefined ? {} : { write_mode: options.writeMode }),
       ...(options.ownedPaths && options.ownedPaths.length > 0 ? { owned_paths: [...options.ownedPaths] } : {}),
       status: 'running',
+      execution_pid: process.pid,
+      execution_pending: true,
       ...(options.parentTaskId ? { parent_task_id: options.parentTaskId } : {}),
       ...(options.pluginId ? { pluginId: options.pluginId } : {}),
+      ...(options.providerId ? { provider_id: options.providerId } : {}),
+      ...(options.protocol ? { protocol: options.protocol } : {}),
       ...(options.activity ? { activity: options.activity } : {}),
       activities: [],
       started_at: new Date().toISOString(),
@@ -236,13 +323,16 @@ export class SubagentTaskManager {
       controller,
       promise,
       resolvePromise,
+      executionPending: true,
     };
     this.tasks.set(id, managed);
+    this.restartAttempt?.tasks.push(managed);
     this.emitTaskChanged(managed);
     return managed;
   }
 
   list(owner: AgentRuntime): SubagentTaskRecord[] {
+    this.refreshRestored(owner);
     return [...this.tasks.values()]
       .filter((task) => task.owner === owner)
       .sort((a, b) => Date.parse(b.record.started_at) - Date.parse(a.record.started_at))
@@ -250,8 +340,14 @@ export class SubagentTaskManager {
   }
 
   get(id: string, owner: AgentRuntime): SubagentTaskRecord | undefined {
+    this.refreshRestored(owner);
     const task = this.tasks.get(id);
     return task?.owner === owner ? cloneRecord(task.record) : undefined;
+  }
+
+  private refreshRestored(owner: AgentRuntime): void {
+    if (!this.readRestoredTasks || ![...this.tasks.values()].some((task) => task.owner === owner && task.restored)) return;
+    this.restore(this.readRestoredTasks(owner), owner);
   }
 
   setActivity(
@@ -297,10 +393,7 @@ export class SubagentTaskManager {
    * are merged into the same entry, so the caller can forward raw provider
    * deltas without buffering them itself.
    *
-   * Deliberately does not notify change listeners: the transcript is only read
-   * on demand by the desktop detail modal, and the periodic
-   * `mica/subagentTasks/updated` snapshot (driven by those listeners) must stay
-   * lean and change-driven.
+   * Persist transcript updates without publishing a task-list notification.
    */
   appendTimeline(
     id: string,
@@ -347,6 +440,7 @@ export class SubagentTaskManager {
       timeline: next,
       ...(dropped || task.record.timeline_truncated ? { timeline_truncated: true } : {}),
     };
+    try { this.onChange?.(cloneRecord(task.record), task.owner); } catch { /* best effort */ }
   }
 
   async awaitTasks(
@@ -401,7 +495,8 @@ export class SubagentTaskManager {
   kill(id: string, owner: AgentRuntime): SubagentTaskRecord | undefined {
     const task = this.tasks.get(id);
     if (!task || task.owner !== owner) return undefined;
-    if (task.record.status === 'running') {
+    if (task.record.status === 'running' && task.restored) return undefined;
+    if (task.record.status === 'running' && !task.restored) {
       task.controller.abort();
       this.complete(task, { status: 'killed', error: 'Stopped by parent agent.' }, false);
     }
@@ -412,7 +507,7 @@ export class SubagentTaskManager {
     let killed = 0;
     for (const task of this.tasks.values()) {
       if (task.owner !== owner) continue;
-      if (task.record.status === 'running') {
+      if (task.record.status === 'running' && !task.restored) {
         task.controller.abort();
         this.complete(task, { status: 'killed', error: reason }, false);
         killed++;
@@ -433,7 +528,7 @@ export class SubagentTaskManager {
   async stop(): Promise<void> {
     this.stopping = true;
     for (const task of this.tasks.values()) {
-      if (task.record.status !== 'running') continue;
+      if (task.record.status !== 'running' || task.restored) continue;
       task.controller.abort();
       this.complete(task, { status: 'killed', error: 'Application is stopping.' });
     }
@@ -443,13 +538,18 @@ export class SubagentTaskManager {
     this.pendingExecutions.clear();
   }
 
-  private attachExecution(promise: Promise<unknown>): void {
+  private attachExecution(task: ManagedSubagentTask, promise: Promise<unknown>): void {
     const execution = promise.then(
       () => undefined,
       () => undefined,
     );
     this.pendingExecutions.add(execution);
-    void execution.then(() => this.pendingExecutions.delete(execution));
+    void execution.then(() => {
+      task.executionPending = false;
+      task.record = { ...task.record, execution_pending: false };
+      try { this.onChange?.(cloneRecord(task.record), task.owner); } catch { /* best effort */ }
+      this.pendingExecutions.delete(execution);
+    });
   }
 
   private complete(
@@ -484,7 +584,7 @@ export class SubagentTaskManager {
 
   private pruneCompletedTasks(owner: AgentRuntime): void {
     const completed = [...this.tasks.values()]
-      .filter((task) => task.owner === owner && task.record.status !== 'running')
+      .filter((task) => task.owner === owner && task.record.status !== 'running' && !task.executionPending)
       .sort(
         (a, b) =>
           Date.parse(a.record.finished_at ?? a.record.started_at) -
@@ -504,8 +604,9 @@ export class SubagentTaskManager {
   }
 
   private emitTaskChanged(task: ManagedSubagentTask): void {
-    if (this.changeListeners.size === 0) return;
     const record = cloneRecord(task.record);
+    try { this.onChange?.(record, task.owner); } catch { /* best effort */ }
+    if (this.changeListeners.size === 0) return;
     for (const listener of this.changeListeners) {
       try {
         listener(record, task.owner);

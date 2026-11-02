@@ -88,6 +88,26 @@ export type PluginPanelView = {
   /** 标题右侧那一段状态（「轮询中」「已停止」）。 */
   status?: { label: string; tone?: PluginPanelTone };
   sections?: PluginPanelSection[];
+  /**
+   * 给快捷按钮用的悬浮菜单内容，按 key 取（`desktop.panel.shortcuts[].menu` 指向这里）。
+   *
+   * 菜单条目往往是**运行期才确定**的：这次的开发副本、这台机器上已配置的通道、当前打开
+   * 的工作区。清单是磁盘上的静态文件，写不出这些；所以清单只声明「这个按钮是个菜单、
+   * 取哪一块」，具体条目由插件在视图里给。宿主因此可以在按钮上悬停时取一次视图。
+   */
+  menus?: Record<string, PluginPanelMenuItem[]>;
+};
+
+/**
+ * 一个菜单条目：点了交给插件的哪个动作、带哪个 key。
+ *
+ * `detail` 是条目右侧的一行补充（基线分支、会话状态），纯展示，不参与匹配。
+ */
+export type PluginPanelMenuItem = {
+  label: string;
+  detail?: string;
+  action: string;
+  key?: string;
 };
 
 export type PluginPanelActionInput = {
@@ -129,6 +149,7 @@ export type PluginPanelActionResult = {
   newSession?: PluginNewSession;
   dialog?: PluginPanelDialog;
   openPath?: PluginPanelOpenPath;
+  openReview?: PluginPanelOpenReview;
 };
 
 /**
@@ -144,6 +165,28 @@ export type PluginPanelOpenPath = {
   path: string;
   line?: number;
   focus?: boolean;
+};
+
+/**
+ * 让宿主打开一次**分支评审**：`head` 相对 `base` 的改动，盖满整窗的评审视图，
+ * 左边文件、右边 diff。
+ *
+ * 和 `openPath` 的分工：`openPath` 打开一个文件给人改，`openReview` 打开一段改动的审阅
+ * 视图给人看。插件只知道「哪个仓库、哪条分支、比哪条基线」——怎么摆页签、缓存、渲染 diff
+ * 是宿主的事，插件不碰。
+ *
+ * 宿主只读提交、不切工作区：评审别人的分支不会把评审人自己的未提交改动混进来，也不会
+ * 改变当前会话的工作目录。`head` 缺省是那个目录当前检出的分支。
+ */
+export type PluginPanelOpenReview = {
+  /** 要评审的仓库目录（通常是一份开发副本）。 */
+  cwd: string;
+  /** 对比基线；不给就按仓库自己的主分支解析（origin/HEAD → main → master）。 */
+  base?: string;
+  /** 要评审的分支；不给就取那个目录当前检出的分支。 */
+  head?: string;
+  /** 界面上显示的名字（`项目 · 分支`），缺省用目录名。 */
+  label?: string;
 };
 
 /**
@@ -244,6 +287,11 @@ const MAX_SECTIONS = 8;
 const MAX_DIALOG_COLUMNS = 6;
 const MAX_DIALOG_ROWS = 50;
 const MAX_DIALOG_TEXT = 4000;
+const MAX_MENUS = 6;
+const MAX_MENU_ITEMS = 20;
+const MAX_MENU_DETAIL = 120;
+const MAX_MENU_KEY = 200;
+const MAX_ACTION_ID = 64;
 /** 弹窗里的一格：链接地址可以很长（带查询串的分享链接），但仍然有上限。 */
 const MAX_CELL_LINK = 2000;
 /** 提示词整段回传的上限：它是一段给模型看的正文，不是一行状态。 */
@@ -400,6 +448,7 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
     .slice(0, MAX_SECTIONS)
     .map((entry) => sectionOf(entry))
     .filter((entry): entry is PluginPanelSection => entry !== null);
+  const menus = menusOf(raw.menus);
   return {
     title,
     ...(subtitle ? { subtitle } : {}),
@@ -407,7 +456,35 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
       ? { status: { label: statusLabel, ...(tone(statusRaw.tone) ? { tone: tone(statusRaw.tone) } : {}) } }
       : {}),
     ...(sections.length > 0 ? { sections } : {}),
+    ...(menus ? { menus } : {}),
   };
+}
+
+/**
+ * 快捷按钮的悬浮菜单：`{ [menuKey]: 条目[] }`。
+ *
+ * 没有 `action` 的条目点了什么也不会发生，直接丢掉（与清单里的快捷按钮同一条规则：
+ * 界面上不留点不动的项）；整块为空就当插件没给，页面回落到「按钮暂无可用条目」。
+ */
+function menusOf(value: unknown): Record<string, PluginPanelMenuItem[]> | undefined {
+  const menus: Record<string, PluginPanelMenuItem[]> = {};
+  for (const [rawKey, rawItems] of Object.entries(record(value))) {
+    const key = text(rawKey, 40);
+    if (!key) continue;
+    const items: PluginPanelMenuItem[] = [];
+    for (const entry of list(rawItems).slice(0, MAX_MENU_ITEMS)) {
+      const item = record(entry);
+      const label = text(item.label, 60);
+      const action = text(item.action, MAX_ACTION_ID);
+      if (!label || !action) continue;
+      const detail = text(item.detail, MAX_MENU_DETAIL);
+      const itemKey = text(item.key, MAX_MENU_KEY);
+      items.push({ label, action, ...(detail ? { detail } : {}), ...(itemKey ? { key: itemKey } : {}) });
+    }
+    if (items.length > 0) menus[key] = items;
+    if (Object.keys(menus).length >= MAX_MENUS) break;
+  }
+  return Object.keys(menus).length > 0 ? menus : undefined;
 }
 
 /** 动作入参的归一化：插件拿到的一定是干净的 `{ action, key?, values? }`。 */
@@ -440,12 +517,31 @@ export function normalizePluginPanelActionResult(input: unknown): PluginPanelAct
   const newSession = normalizePluginNewSession(raw.newSession);
   const dialog = dialogOf(raw.dialog);
   const openPath = openPathOf(raw.openPath);
+  const openReview = openReviewOf(raw.openReview);
   return {
     ...(message ? { message } : {}),
     ...(compose ? { compose } : {}),
     ...(newSession ? { newSession } : {}),
     ...(dialog ? { dialog } : {}),
     ...(openPath ? { openPath } : {}),
+    ...(openReview ? { openReview } : {}),
+  };
+}
+
+function openReviewOf(value: unknown): PluginPanelOpenReview | undefined {
+  const raw = record(value);
+  const cwd = text(raw.cwd, MAX_PATH);
+  if (!cwd) return undefined;
+  // 不替插件补一个默认基线：仓库的默认分支可能是 `main`，编成 `master` 会让宿主落进
+  // 「无法解析基线」并退化成空 diff。缺省交给 Git 侧按远端默认分支解析。
+  const base = text(raw.base, 120);
+  const head = text(raw.head, 120);
+  const label = text(raw.label, 80);
+  return {
+    cwd,
+    ...(base ? { base } : {}),
+    ...(head ? { head } : {}),
+    ...(label ? { label } : {}),
   };
 }
 

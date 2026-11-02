@@ -26,6 +26,10 @@ import { dirname, join } from 'node:path';
  */
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(TEST_DIR, '..', '..', '..', '..');
+const RECOVERY_DESCRIPTION = 'Investigate the recovery fixture';
+const RECOVERY_PROMPT = 'Inspect the isolated workspace and report your progress.';
+const RECOVERY_ACTIVITY = 'Found a useful detail before the host stopped.';
+const RECOVERY_RESULT = 'Recovery task completed.';
 
 const bunAvailable = process.env.MICA_BIN || spawnSync('bun', ['--version'], { stdio: 'ignore' }).status === 0;
 const suite = bunAvailable ? describe : describe.skip;
@@ -35,7 +39,7 @@ const suite = bunAvailable ? describe : describe.skip;
  * before the text arrives (to keep a turn busy long enough to steer into it). */
 function createMockProvider() {
   const state = {
-    mode: 'ok' as 'ok' | 'error' | 'tool' | 'shell' | 'wait',
+    mode: 'ok' as 'ok' | 'error' | 'tool' | 'shell' | 'wait' | 'subagent-recovery',
     errorMessage: '',
     delayBeforeTextMs: 0,
     requests: [] as Array<{
@@ -303,6 +307,61 @@ function createMockProvider() {
           res.end();
           state.responsesFinished += 1;
         };
+        // The parent calls the real agent tool. Its child receives a text delta
+        // on request #2, then the stream stays open until the host is killed.
+        const emitSubagentCallEvents = () => {
+          const argumentsText = JSON.stringify({
+            operation: 'run',
+            description: RECOVERY_DESCRIPTION,
+            prompt: RECOVERY_PROMPT,
+            subagent_type: 'Explore',
+            context_mode: 'none',
+            effort: 'low',
+          });
+          const item = {
+            id: 'fc_agent',
+            type: 'function_call',
+            call_id: 'call_agent',
+            name: 'agent',
+          };
+          emit({ type: 'response.created', response: { id: 'resp_agent', object: 'response' } });
+          emit({ type: 'response.in_progress', response: { id: 'resp_agent', object: 'response' } });
+          emit({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: { ...item, status: 'in_progress', arguments: '' },
+          });
+          emit({
+            type: 'response.function_call_arguments.done',
+            output_index: 0,
+            item_id: item.id,
+            arguments: argumentsText,
+          });
+          emit({
+            type: 'response.output_item.done',
+            output_index: 0,
+            item: { ...item, status: 'completed', arguments: argumentsText },
+          });
+          emitCompleted();
+          res.end();
+          state.responsesFinished += 1;
+        };
+        const emitUnfinishedSubagentText = () => {
+          emit({ type: 'response.created', response: { id: 'resp_child', object: 'response' } });
+          emit({ type: 'response.in_progress', response: { id: 'resp_child', object: 'response' } });
+          emit({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: { id: 'msg_child', type: 'message', status: 'in_progress', role: 'assistant', content: [] },
+          });
+          emit({
+            type: 'response.output_text.delta',
+            item_id: 'msg_child',
+            output_index: 0,
+            content_index: 0,
+            delta: RECOVERY_ACTIVITY,
+          });
+        };
         const emitCompleted = () => {
           emit({
             type: 'response.completed',
@@ -345,6 +404,14 @@ function createMockProvider() {
           }
           if (state.mode === 'wait' && requestIndex === 1) {
             emitWaitCallEvents();
+            return;
+          }
+          if (state.mode === 'subagent-recovery' && requestIndex === 1) {
+            emitSubagentCallEvents();
+            return;
+          }
+          if (state.mode === 'subagent-recovery' && requestIndex === 2) {
+            emitUnfinishedSubagentText();
             return;
           }
           emitTextEvents();
@@ -2091,8 +2158,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
     mock!.state.requests = [];
     mock!.state.responsesFinished = 0;
     mock!.state.delayBeforeTextMs = 0;
-    // 远低于任何阈值：压不压完全由「人回到输入框」决定。
-    mock!.state.inputTokens = 10;
+    // 上下文高于配置的快速压缩阈值（1K）——「抢跑」的前提是这次压缩在请求里本来也会
+    // 发生；真正的决策点仍是「人回到输入框且这一轮还没压过」。
+    mock!.state.inputTokens = 50_000;
     mock!.state.toolFileContent = 'y'.repeat(20_000);
 
     const home = makeHome('input-focus');
@@ -2101,7 +2169,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
       join(home, 'plugin-settings', 'auto-compact.json'),
       JSON.stringify({
         enabled: 'true',
-        quickThresholdK: '10000',
+        quickThresholdK: '1',
         modelThresholdK: '10000',
         quickLimit: '999',
         modelLimit: '0',
@@ -2156,6 +2224,67 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await waitFor(host, (m) => m.id === 3, 'second mica/input/focus response');
     await sleep(1_000);
     expect(readFileSync(sessionPath(), 'utf8')).toContain('"quickRuns": 1');
+    expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);
+  });
+
+  // 真实反馈：一个 100K 上下的会话来回切焦点，对话里排出一列「已快速压缩」。低于快速压缩
+  // 阈值时这次压缩在请求里本来也不会发生，抢跑只是白扫一遍整份历史。
+  itE2E('mica/input/focus leaves a history below the quick threshold alone', async () => {
+    mock!.state.mode = 'tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+    mock!.state.inputTokens = 5_000;
+    mock!.state.toolFileContent = 'z'.repeat(20_000);
+
+    const home = makeHome('input-focus-small');
+    mkdirSync(join(home, 'plugin-settings'), { recursive: true });
+    writeFileSync(
+      join(home, 'plugin-settings', 'auto-compact.json'),
+      JSON.stringify({
+        enabled: 'true',
+        quickThresholdK: '100',
+        modelThresholdK: '100',
+        quickLimit: '999',
+        modelLimit: '0',
+        minIntervalMinutes: '0',
+        idleMinutes: '0',
+      }),
+    );
+
+    const host = spawnHost('input-focus-small', [], home);
+    hosts.push(host);
+    mock!.state.toolFilePath = join(host.cwd, 'focus-small-notes.txt');
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '写一个很大的文件' }],
+      model: 'mock/mock-chat',
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (small focus)');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+    await waitFor(host, turnCompleted(turnId), 'turn/completed (small focus)', 30_000);
+
+    const sessionPath = () =>
+      join(
+        host.home,
+        'sessions',
+        readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'))[0]!,
+      );
+    const before = readFileSync(sessionPath(), 'utf8');
+    expect(before).not.toContain('[Old tool result content cleared');
+
+    for (const id of [2, 3, 4]) {
+      await send(host, id, 'mica/input/focus', {});
+      await waitFor(host, (m) => m.id === id, `mica/input/focus response ${id}`);
+    }
+    await sleep(500);
+
+    const after = readFileSync(sessionPath(), 'utf8');
+    expect(after).not.toContain('[Old tool result content cleared');
+    expect(after).not.toContain('回到输入框');
+    expect(after).not.toContain('"quickRuns": 1');
     expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);
   });
 
@@ -2986,6 +3115,144 @@ suite('mica app-server real-user flows (mock provider)', () => {
       (m) => m.method === 'mica/waitTasks/updated' && (m.params?.tasks as unknown[]).length === 0,
       'empty wait snapshot after interrupt',
     );
+  });
+
+  itE2E('restores and restarts a streaming subagent after its host is killed', async () => {
+    mock.state.mode = 'subagent-recovery';
+    mock.state.longText = RECOVERY_RESULT;
+
+    const hostA = spawnHost('subagent-crash-recovery');
+    hosts.push(hostA);
+    await waitFor(hostA, hostReady, 'original host ready', 30_000);
+    await send(hostA, 1, 'turn/start', {
+      input: [{ type: 'text', text: 'Delegate the recovery fixture investigation.' }],
+      model: 'mock/mock-chat',
+      effort: 'medium',
+    });
+    const started = await waitFor(hostA, (m) => m.method === 'turn/started', 'parent turn started');
+    const turnId = (started.params?.turn as { id: string }).id;
+    const sessionId = started.params?.threadId as string;
+    expect(sessionId).toBeTruthy();
+
+    type TaskItem = { taskId: string; description?: string; status?: string };
+    type TaskDetail = {
+      taskId: string;
+      status: string;
+      prompt?: string;
+      timeline?: Array<{ id: string; kind: string; text: string; at: string }>;
+      [key: string]: unknown;
+    };
+    const taskFrom = (m: HostMessage, id?: string): TaskItem | undefined =>
+      (m.params?.tasks as TaskItem[] | undefined)?.find((task) =>
+        id ? task.taskId === id : task.description === RECOVERY_DESCRIPTION,
+      );
+    const running = await waitFor(
+      hostA,
+      (m) => m.method === 'mica/subagentTasks/updated' && taskFrom(m)?.status === 'running',
+      'running subagent',
+    );
+    const taskId = taskFrom(running)!.taskId;
+    expect(taskId).toMatch(/^agent-task-/);
+
+    let detailRequestId = 100;
+    const readDetail = async (host: Host, id: string): Promise<TaskDetail | undefined> => {
+      const requestId = detailRequestId++;
+      await send(host, requestId, 'mica/subagentTasks/detail', { taskId: id });
+      const response = await waitFor(host, (m) => m.id === requestId, `subagent detail ${id}`);
+      expect(response.error).toBeUndefined();
+      const result = response.result as { ok?: boolean; task?: TaskDetail };
+      expect(result.ok).toBe(true);
+      return result.task;
+    };
+    let liveDetail: TaskDetail | undefined;
+    await expect
+      .poll(
+        async () => {
+          liveDetail = await readDetail(hostA, taskId);
+          return liveDetail?.timeline;
+        },
+        { timeout: 10_000, interval: 100 },
+      )
+      .toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'text', text: RECOVERY_ACTIVITY })]));
+    expect(liveDetail).toMatchObject({
+      taskId,
+      status: 'running',
+      subagentType: 'Explore',
+      description: RECOVERY_DESCRIPTION,
+      prompt: RECOVERY_PROMPT,
+      model: 'mock-chat',
+      effort: 'low',
+      contextMode: 'none',
+      writeMode: 'none',
+    });
+    expect(hostA.lines.some(turnCompleted(turnId))).toBe(false);
+    expect(mock.state.requests).toHaveLength(2);
+    expect(existsSync(join(hostA.home, 'sessions', `${sessionId}.json`))).toBe(true);
+    const stored = JSON.parse(readFileSync(join(hostA.home, 'subagent-tasks', sessionId, `${taskId}.json`), 'utf8'));
+    expect(stored).toMatchObject({
+      id: taskId,
+      status: 'running',
+      execution_pid: hostA.child.pid,
+      execution_pending: true,
+      timeline: expect.arrayContaining([expect.objectContaining({ kind: 'text', text: RECOVERY_ACTIVITY })]),
+    });
+
+    // SIGKILL bypasses normal shutdown and forces recovery from the on-disk record.
+    expect(hostA.child.kill('SIGKILL')).toBe(true);
+    expect(await hostA.closePromise).toMatchObject({ signal: 'SIGKILL' });
+    const hostB = spawnHost('subagent-crash-recovery-resumed', [], hostA.home);
+    hosts.push(hostB);
+    await waitFor(hostB, hostReady, 'replacement host ready', 30_000);
+    await send(hostB, 1, 'thread/resume', { threadId: sessionId });
+    const resumed = await waitFor(hostB, (m) => m.id === 1, 'thread resumed');
+    expect(resumed.error).toBeUndefined();
+    expect(resumed.result).toMatchObject({ thread: { id: sessionId } });
+    await waitFor(
+      hostB,
+      (m) => m.method === 'mica/subagentTasks/updated' && taskFrom(m, taskId)?.status === 'failed',
+      'recovered failed subagent',
+    );
+    const recovered = await readDetail(hostB, taskId);
+    expect(recovered).toMatchObject({
+      ...liveDetail,
+      status: 'failed',
+      error: 'Application restarted before this task completed.',
+    });
+    expect(recovered?.timeline).toEqual(liveDetail?.timeline);
+
+    await send(hostB, 2, 'mica/subagentTasks/restart', { taskId });
+    const restarted = await waitFor(hostB, (m) => m.id === 2, 'subagent restart');
+    expect(restarted.error).toBeUndefined();
+    const restartResult = restarted.result as { ok?: boolean; taskId?: string; message?: string };
+    expect(restartResult, restartResult.message).toMatchObject({
+      ok: true,
+      taskId: expect.stringMatching(/^agent-task-/),
+    });
+    const newTaskId = restartResult.taskId!;
+    expect(newTaskId).not.toBe(taskId);
+    await waitFor(
+      hostB,
+      (m) => m.method === 'mica/subagentTasks/updated' && taskFrom(m, newTaskId)?.status === 'completed',
+      'restarted subagent completed',
+    );
+    const newDetail = await readDetail(hostB, newTaskId);
+    expect(newDetail).toMatchObject({
+      taskId: newTaskId,
+      status: 'completed',
+      description: RECOVERY_DESCRIPTION,
+      subagentType: 'Explore',
+      model: 'mock-chat',
+      effort: 'low',
+      contextMode: 'none',
+      writeMode: 'none',
+      result: RECOVERY_RESULT,
+    });
+    expect(newDetail?.prompt).toContain(RECOVERY_PROMPT);
+    expect(newDetail?.prompt).toContain(RECOVERY_ACTIVITY);
+    expect(mock.state.requests).toHaveLength(3);
+    expect(mock.state.requests.at(-1)).toMatchObject({ model: 'mock-chat', reasoning: { effort: 'low' } });
+    expect(JSON.stringify(mock.state.requests.at(-1)?.input)).toContain(RECOVERY_ACTIVITY);
+    expect(await readDetail(hostB, taskId)).toEqual(recovered);
   });
 
   itE2E('mica/subagentTasks/{detail,kill} answer for unknown ids without breaking the host', async () => {

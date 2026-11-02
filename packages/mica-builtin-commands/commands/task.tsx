@@ -97,9 +97,10 @@ function showTaskPanel(services: CommandRuntimeServices) {
     const state = micaUi.useScheduleState(stateAtom);
     const backgroundTasks = micaUi.useScheduleState(backgroundTasksAtom);
     const agents = micaUi.useScheduleState(micaUi.panels.agentStatusItems);
-    const subagentTasks = micaUi.useScheduleState(subagentTasksAtom);
+    const subagentTasks = micaUi.useScheduleState(subagentTasksAtom).filter((task) => task.status !== 'completed');
     const [nowMs, setNowMs] = useState(() => Date.now());
-    const activeBackgroundTasks = useMemo(() => filterActiveBackgroundTasks(backgroundTasks), [backgroundTasks]);
+    const visibleBackgroundTasks = useMemo(() => filterOwnedBackgroundTasks(backgroundTasks, agents), [backgroundTasks, agents]);
+    const activeBackgroundTasks = useMemo(() => filterActiveBackgroundTasks(visibleBackgroundTasks), [visibleBackgroundTasks]);
     const hasRunningTasks = useMemo(
       () =>
         activeBackgroundTasks.length > 0 ||
@@ -108,12 +109,12 @@ function showTaskPanel(services: CommandRuntimeServices) {
       [activeBackgroundTasks, agents, subagentTasks],
     );
     const items = useMemo(
-      () => filterTaskListItems(buildTaskListItems(activeBackgroundTasks, agents, subagentTasks), state.query),
-      [activeBackgroundTasks, agents, state.query, subagentTasks],
+      () => filterTaskListItems(buildTaskListItems(visibleBackgroundTasks, agents, subagentTasks), state.query),
+      [visibleBackgroundTasks, agents, state.query, subagentTasks],
     );
     const backgroundTaskById = useMemo(
-      () => new Map(activeBackgroundTasks.map((task) => [task.id, task])),
-      [activeBackgroundTasks],
+      () => new Map(visibleBackgroundTasks.map((task) => [task.id, task])),
+      [visibleBackgroundTasks],
     );
     const subagentTaskById = useMemo(() => new Map(subagentTasks.map((task) => [task.id, task])), [subagentTasks]);
     const selectedIdx = clampIndex(state.selectedIdx, items.length);
@@ -132,7 +133,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
     }, [hasRunningTasks]);
 
     if (state.detail?.kind === 'background') {
-      const detailTask = backgroundTasks.find((task) => task.id === state.detail?.taskId);
+      const detailTask = visibleBackgroundTasks.find((task) => task.id === state.detail?.taskId);
       return detailTask ? (
         <BackgroundTaskDetail task={detailTask} nowMs={nowMs} scroll={detailScroll} />
       ) : (
@@ -194,9 +195,9 @@ function showTaskPanel(services: CommandRuntimeServices) {
       const state = stateAtom.get();
       const backgroundTasks = backgroundTasksAtom.get();
       const agents = micaUi.panels.agentStatusItems.get();
-      const subagentTasks = subagentTasksAtom.get();
+      const subagentTasks = subagentTasksAtom.get().filter((task) => task.status !== 'completed');
       const items = filterTaskListItems(
-        buildTaskListItems(filterActiveBackgroundTasks(backgroundTasks), agents, subagentTasks),
+        buildTaskListItems(filterOwnedBackgroundTasks(backgroundTasks, agents), agents, subagentTasks),
         state.query,
       );
 
@@ -231,7 +232,7 @@ function showTaskPanel(services: CommandRuntimeServices) {
 
       if (_input.toLowerCase() === 'x') {
         const selected = items[clampIndex(state.selectedIdx, items.length)];
-        if (selected?.kind === 'background') {
+        if (selected?.kind === 'background' && backgroundTasks.some((task) => task.id === selected.taskId && isActiveBackgroundTaskStatus(task.status))) {
           void stopSelectedBackgroundTask(services, selected.taskId, backgroundTasksAtom, stateAtom);
           return true;
         }
@@ -755,6 +756,14 @@ function filterActiveBackgroundTasks(tasks: readonly MicaUiBackgroundTaskItem[])
   return tasks.filter((task) => isActiveBackgroundTaskStatus(task.status));
 }
 
+export function filterOwnedBackgroundTasks(
+  tasks: readonly MicaUiBackgroundTaskItem[],
+  agents: readonly MicaUiAgentStatusItem[],
+): readonly MicaUiBackgroundTaskItem[] {
+  const ownerIds = new Set(agents.map((agent) => agent.taskOwnerId).filter(Boolean));
+  return tasks.filter((task) => (task.status !== 'finished' || (task.exitCode != null && task.exitCode !== 0)) && (!task.agentOwnerId || ownerIds.has(task.agentOwnerId)));
+}
+
 function filterTaskListItems(items: TaskListItem[], query: string): TaskListItem[] {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return items;
@@ -784,6 +793,7 @@ function toUiBackgroundTask(task: BackgroundTaskMeta): MicaUiBackgroundTaskItem 
     pid: task.pid,
     outputPath: task.output_path,
     outputSize: getBackgroundTaskOutputSize(task),
+    exitCode: task.exit_code,
     status: task.status,
     startedAt: task.started_at,
     finishedAt: task.finished_at,

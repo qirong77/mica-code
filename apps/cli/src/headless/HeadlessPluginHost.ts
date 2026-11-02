@@ -315,6 +315,12 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     agentRegistry: {
       mode: options.oneShot ? 'one-shot' : 'session',
       onIterationRewrite: (pluginId, handler) => registerIterationRewrite(pluginId, handler),
+      lastUsage: () => {
+        const usage = agent.getSnapshot()?.lastUsage;
+        if (!usage || !Number.isFinite(usage.inputTokens)) return null;
+        return { inputTokens: usage.inputTokens, model: usage.model ?? '' };
+      },
+      contextWindowSize: () => agent.getSnapshot()?.contextWindowSize,
       // 轮次之外的压缩走同一条落盘路径：由宿主决定「现在能不能写」（lease + 对齐磁盘），
       // 插件只决定「什么时候值得压」。
       ...(options.runIdleTask

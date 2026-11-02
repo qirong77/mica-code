@@ -71,18 +71,18 @@ function exploreType(overrides: Partial<PluginSubagentType> = {}): PluginSubagen
   };
 }
 
-function createRuntimeStub(options: { query?: QueryImpl; messages?: unknown[]; taskOwnerId?: string } = {}) {
+function createRuntimeStub(options: { query?: QueryImpl; messages?: unknown[]; taskOwnerId?: string; provider?: { id: string; protocol: string } } = {}) {
   const query = options.query ?? (async () => 'subagent output');
   const usageHistory: unknown[] = [];
   const recordSubagentUsage = vi.fn();
-  const createSubAgent = vi.fn(() => ({ query, usageHistory }));
+  const createSubAgent = vi.fn((_options: unknown) => ({ query, usageHistory }));
   const runtime = {
     taskOwnerId: options.taskOwnerId ?? 'agent-runtime-under-test',
     createSubAgent,
     // Mirrors AgentRuntime.createClientOptions: undefined overrides are dropped, not spread in.
     createClientOptions: (overrides: Record<string, unknown> = {}) => {
       const merged: Record<string, unknown> = {
-        provider: { id: 'test-provider', protocol: 'chat', supportsEffort: true, contextWindowSize: 200_000 },
+        provider: { id: 'test-provider', protocol: 'chat', ...options.provider, supportsEffort: true, contextWindowSize: 200_000 },
         model: 'test-model',
         effort: 'medium',
       };
@@ -457,7 +457,7 @@ describe('PluginSubagentHost path leases', () => {
     expect(harness.taskManager.list(harness.runtime).map((task) => task.id)).toEqual([first.taskId]);
   });
 
-  it('rejects overlapping owned paths from one owner and allows disjoint ones', () => {
+  it('rejects overlapping owned paths from one owner and allows disjoint ones', async () => {
     const pending = createPendingQuery();
     const harness = createHarness({ query: pending.query });
     harness.api.registerType(exploreType({ writeMode: 'owned_paths' }));
@@ -482,10 +482,87 @@ describe('PluginSubagentHost path leases', () => {
         .sort(),
     ).toEqual([first.taskId, disjoint.taskId].sort());
 
-    // Killing a task releases its lease right away, so the same path can be claimed again.
+    // The lease is released once the aborted execution has actually exited.
     harness.api.tasks.kill(first.taskId);
+    await flushAsyncWork();
     expect(() =>
       harness.api.background({ description: 'retry', prompt: 'edit a', ownedPaths: [fakePath('a')] }),
     ).not.toThrow();
+  });
+});
+
+describe('desktop subagent restart', () => {
+  it('holds leases and blocks restart until delayed abort exits', async () => {
+    let rejectQuery: (error: Error) => void = () => undefined;
+    let aborted = false;
+    const harness = createHarness({ query: (_prompt, options) => new Promise((_resolve, reject) => {
+      rejectQuery = reject;
+      options?.signal?.addEventListener('abort', () => { aborted = true; }, { once: true });
+    }) });
+    harness.api.registerType(exploreType({ writeMode: 'owned_paths' }));
+    const first = harness.api.background({ description: 'work', prompt: 'work', ownedPaths: [fakePath('delayed')] });
+    await flushAsyncWork();
+    harness.api.tasks.kill(first.taskId);
+    expect(aborted).toBe(true);
+    expect(() => harness.taskManager.restart(first.taskId, harness.runtime)).toThrow(/still stopping/);
+    expect(() => harness.api.background({ description: 'other', prompt: 'work', ownedPaths: [fakePath('delayed')] })).toThrow(/conflict/);
+    rejectQuery(new Error('aborted after cleanup'));
+    await first.done;
+    await flushAsyncWork();
+    const restarted = harness.taskManager.restart(first.taskId, harness.runtime);
+    await flushAsyncWork();
+    harness.api.tasks.kill(restarted);
+    rejectQuery(new Error('aborted after cleanup'));
+    await flushAsyncWork();
+  });
+
+  it('restarts with the original model when the registered type changes', async () => {
+    const harness = createHarness();
+    const registration = harness.api.registerType(exploreType({ model: 'original-model' }));
+    const first = harness.api.background({ description: 'work', prompt: 'work' });
+    await first.done;
+    await flushAsyncWork();
+    registration.dispose();
+    harness.api.registerType(exploreType({ model: 'different-model' }));
+    const restarted = harness.taskManager.restart(first.taskId, harness.runtime);
+    await flushAsyncWork();
+    expect(harness.taskManager.get(restarted, harness.runtime)?.model).toBe('original-model');
+    expect(harness.createSubAgent.mock.calls.at(-1)?.[0]).toMatchObject({ model: 'original-model' });
+  });
+
+  it('rejects a restart after the provider protocol changes', async () => {
+    const provider = { id: 'provider-a', protocol: 'chat' };
+    const harness = createHarness({ provider });
+    harness.api.registerType(exploreType());
+    const first = harness.api.background({ description: 'work', prompt: 'work' });
+    await first.done;
+    await flushAsyncWork();
+    provider.protocol = 'responses';
+    expect(() => harness.taskManager.restart(first.taskId, harness.runtime)).toThrow(/provider or protocol/);
+    expect(harness.createSubAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a new task with retained context and enforces owner and path leases', async () => {
+    const pending = createPendingQuery();
+    const harness = createHarness({ query: pending.query });
+    harness.api.registerType(exploreType({ writeMode: 'owned_paths' }));
+    const first = harness.api.background({ description: 'work', prompt: 'original task', ownedPaths: [fakePath('a')] });
+    await flushAsyncWork();
+    harness.taskManager.appendTimeline(first.taskId, harness.runtime, { id: '1', kind: 'text', text: 'progress made' });
+    expect(() => harness.taskManager.restart(first.taskId, harness.runtime)).toThrow(/running/);
+    expect(() => harness.taskManager.restart(first.taskId, createRuntimeStub().runtime)).toThrow(/not found/);
+    harness.api.tasks.kill(first.taskId);
+    await flushAsyncWork();
+    const blocker = harness.api.background({ description: 'block', prompt: 'block', ownedPaths: [fakePath('a')] });
+    expect(() => harness.taskManager.restart(first.taskId, harness.runtime)).toThrow(/owned_paths conflict/);
+    harness.api.tasks.kill(blocker.taskId);
+    await flushAsyncWork();
+    const restarted = harness.taskManager.restart(first.taskId, harness.runtime);
+    await flushAsyncWork();
+    expect(restarted).not.toBe(first.taskId);
+    expect(pending.prompts.at(-1)).toContain('original task');
+    expect(pending.prompts.at(-1)).toContain('progress made');
+    expect(harness.taskManager.get(restarted, harness.runtime)?.owned_paths).toEqual([fakePath('a')]);
+    expect(harness.taskManager.get(first.taskId, harness.runtime)?.status).toBe('killed');
   });
 });

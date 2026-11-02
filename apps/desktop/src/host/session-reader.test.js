@@ -3,9 +3,44 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
+import { execFileSync } from 'node:child_process'
 import { createSessionReader } from './session-reader'
 
 describe('session reader', () => {
+  it('recovers only completed todo writes from the last turn across provider formats', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-reader-todo-'))
+    const file = join(dir, 'session.json')
+    const read = createSessionReader()
+    const plan = { todos: [{ content: 'Test', status: 'in_progress' }] }
+    const write = async (messages) => {
+      writeFileSync(file, JSON.stringify({ turnState: 'aborted', snapshot: { messages } }))
+      return (await read(file)).meta.todoInput
+    }
+    try {
+      const chat = [
+        { role: 'user', content: 'work' },
+        { role: 'assistant', tool_calls: [{ id: 'a', function: { name: 'todo_write', arguments: JSON.stringify(plan) } }] },
+        { role: 'tool', tool_call_id: 'a', content: 'ok' }
+      ]
+      expect(await write(chat)).toEqual(plan)
+      expect(await write([...chat, { role: 'user', content: 'new turn' }])).toBeNull()
+      expect(await write(chat.slice(0, 2))).toBeNull()
+      expect(await write([
+        { type: 'message', role: 'user', content: 'work' },
+        { type: 'function_call', call_id: 'b', name: 'todo_write', arguments: JSON.stringify(plan) },
+        { type: 'function_call_output', call_id: 'b', output: 'ok' }
+      ])).toEqual(plan)
+      const anthropic = [
+        { role: 'user', content: 'work' },
+        { role: 'assistant', content: [{ type: 'tool_use', id: 'c', name: 'todo_write', input: plan }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c' }] }
+      ]
+      expect(await write(anthropic)).toEqual(plan)
+      expect(await write([...anthropic.slice(0, 2), { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c', is_error: true }] }])).toBeNull()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
   it('projects history and metadata in a worker and reads fresh data on later requests', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'session-reader-'))
     const file = join(dir, 'session.json')
@@ -54,18 +89,40 @@ describe('session reader', () => {
   })
 
   it('shares concurrent work and recovers from worker failures', async () => {
-    let calls = 0
-    const read = createSessionReader({
-      startWorker: () => {
-        calls++
-        const worker = new EventEmitter()
-        queueMicrotask(() => worker.emit('error', new Error('failed')))
-        return worker
-      }
-    })
-    await Promise.all([read('a'), read('a')])
-    expect(calls).toBe(1)
-    expect(await read('a')).toEqual({ history: [], meta: null })
-    expect(calls).toBe(2)
+    const dir = mkdtempSync(join(tmpdir(), 'session-reader-fallback-'))
+    const file = join(dir, 'session.json')
+    writeFileSync(file, JSON.stringify({ snapshot: { conversationMessages: [{ role: 'user', content: 'saved' }] } }))
+    try {
+      let calls = 0
+      const read = createSessionReader({
+        startWorker: () => {
+          calls++
+          const worker = new EventEmitter()
+          queueMicrotask(() => worker.emit('error', new Error('failed')))
+          return worker
+        }
+      })
+      const [result] = await Promise.all([read(file), read(file)])
+      expect(result.history[0].text).toBe('saved')
+      expect(calls).toBe(1)
+      expect((await read(file)).history[0].text).toBe('saved')
+      expect(calls).toBe(2)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('reads sessions when the parent was started with module input mode', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-reader-argv-'))
+    const file = join(dir, 'session.json')
+    try {
+      writeFileSync(file, JSON.stringify({ snapshot: { conversationMessages: [{ role: 'user', content: 'saved' }] } }))
+      const moduleUrl = new URL('./session-reader.js', import.meta.url).href
+      const script = `import { createSessionReader } from ${JSON.stringify(moduleUrl)}; const result = await createSessionReader()(${JSON.stringify(file)}); console.log(JSON.stringify(result.history))`
+      const output = execFileSync('node', ['--input-type=module', '-e', script], { encoding: 'utf8' })
+      expect(JSON.parse(output)[0].text).toBe('saved')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

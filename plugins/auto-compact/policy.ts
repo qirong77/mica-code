@@ -209,28 +209,50 @@ export function effectiveThresholds(settings: AutoCompactSettings, contextWindow
 }
 
 /**
+ * 抢跑压缩的前提：上下文已经大到「这次请求本来就会压」。
+ *
+ * 低于快速压缩阈值时，压缩在请求里根本不会发生——那就不叫提前，只是把几十 MB 的历史
+ * 白扫一遍、再往对话里写一条 notice。用户点进点出输入框应该看到什么也没发生，而不是
+ * 一串「已快速压缩」。
+ *
+ * 没有用量记录（新会话、刚恢复还没跑过请求）时返回 false：既不知道多大，也还没有值得
+ * 压的东西。
+ */
+export function reachesQuickThreshold(input: {
+  settings: AutoCompactSettings;
+  ctxTokens: number | null;
+  contextWindowSize?: number;
+}): boolean {
+  const { ctxTokens } = input;
+  if (ctxTokens === null || !Number.isFinite(ctxTokens) || ctxTokens <= 0) return false;
+  return ctxTokens >= effectiveThresholds(input.settings, input.contextWindowSize).quick;
+}
+
+/**
  * 用户空闲很久之后重新敲字：要不要趁这个间隙先做一次快速压缩？
  *
- * 这里不看上下文大小——「这次请求马上就到」本身就是理由，小上下文压不动也无所谓
- * （宿主会返回「没有可清理内容」，不消耗次数）。真正拦住重复工作的是次数上限与
- * 本地清理的幂等性：没有新内容时宿主直接回「没压成」，不写盘也不计次。
+ * 要求上下文已经到快速压缩阈值（见 `reachesQuickThreshold`）：空闲本身不构成压缩的理由，
+ * 空闲之后那段历史**大到请求时会压**才是。小会话在这里直接跳过，收益抵不上噪声。
  *
- * 也**不**看「同一轮内的压缩间隔」：那个间隔是为同一段上下文被反复按阈值压准备的，
- * 而这里判断的是「人回来了」。刚压过一次就返回的人恰恰是最需要提前量的一批：他离开
- * 之后的历史又长大了，压一次才有意义；把间隔套在这里，最常见的场景（工作正密集、
- * 一会儿压一会儿走）就会静默失效。
+ * 不**看「同一轮内的压缩间隔」：那个间隔是为同一段上下文被反复按阈值压准备的，而这
+ * 里判断的是「人回来了」。刚压过一次就返回的人恰恰是最需要提前量的一批：他离开之后的
+ * 历史又长大了，压一次才有意义；把间隔套在这里，最常见的场景（工作正密集、一会儿压
+ * 一会儿走）就会静默失效。
  */
 export function shouldCompactOnReturn(input: {
   settings: AutoCompactSettings;
   counters: AutoCompactCounters;
   /** 距这条会话上一次活动过去了多久。 */
   idleMs: number;
+  ctxTokens: number | null;
+  contextWindowSize?: number;
 }): boolean {
   const { settings, counters, idleMs } = input;
   if (!settings.enabled) return false;
   if (!Number.isFinite(settings.idleMs) || settings.idleMs <= 0) return false;
   if (!Number.isFinite(idleMs) || idleMs < settings.idleMs) return false;
-  return counters.quickRuns < settings.quickLimit;
+  if (counters.quickRuns >= settings.quickLimit) return false;
+  return reachesQuickThreshold(input);
 }
 
 /**
@@ -251,12 +273,18 @@ function hasUncompactedHistory(counters: AutoCompactCounters): boolean {
  * 焦点回到输入框（这一轮没在跑）时要不要做一次快速压缩。
  *
  * 与「空闲回来」的区别是不看空闲时长：人已经坐在输入框前、随时可能按发送，这时候仍有
- * 一个完整的间隙可用。守住不白干的是 `hasUncompactedHistory`——上一次压缩之后没有新
- * 轮次，就没有可压的东西。
+ * 一个完整的间隙可用。守住不白干的是两条——上下文已到快速压缩阈值（`reachesQuickThreshold`），
+ * 且上一次压缩之后确实跑过新一轮（`hasUncompactedHistory`）。
  */
-export function shouldCompactOnFocus(input: { settings: AutoCompactSettings; counters: AutoCompactCounters }): boolean {
+export function shouldCompactOnFocus(input: {
+  settings: AutoCompactSettings;
+  counters: AutoCompactCounters;
+  ctxTokens: number | null;
+  contextWindowSize?: number;
+}): boolean {
   const { settings, counters } = input;
   if (!settings.enabled) return false;
   if (counters.quickRuns >= settings.quickLimit) return false;
+  if (!reachesQuickThreshold(input)) return false;
   return hasUncompactedHistory(counters);
 }

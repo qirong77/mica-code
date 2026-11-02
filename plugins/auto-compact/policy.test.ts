@@ -23,6 +23,9 @@ const counters = (patch: Partial<AutoCompactCounters> = {}): AutoCompactCounters
   ...patch,
 });
 
+/** 已经高过默认快速压缩阈值（300K）的上下文，两条提前量都以它为「值得抢跑」的前提。 */
+const BIG_CTX = 350_000;
+
 describe('settingsFromValues', () => {
   it('falls back to the declared defaults when the file is empty', () => {
     expect(settingsFromValues({})).toEqual(DEFAULT_SETTINGS);
@@ -208,35 +211,89 @@ describe('shouldEscalateToModel', () => {
 
 describe('shouldCompactOnFocus', () => {
   it('fires as soon as a new turn has run since the last quick pass', () => {
-    expect(shouldCompactOnFocus({ settings: settings(), counters: counters() })).toBe(false);
-    expect(shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 1 }) })).toBe(true);
+    expect(shouldCompactOnFocus({ settings: settings(), counters: counters(), ctxTokens: BIG_CTX })).toBe(false);
     expect(
-      shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 3, compactedTurnCount: 2 }) }),
+      shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 1 }), ctxTokens: BIG_CTX }),
+    ).toBe(true);
+    expect(
+      shouldCompactOnFocus({
+        settings: settings(),
+        counters: counters({ turnCount: 3, compactedTurnCount: 2 }),
+        ctxTokens: BIG_CTX,
+      }),
     ).toBe(true);
   });
 
   it('does nothing when the last pass already covered the latest turn', () => {
     // 点进点出输入框很常见：每次全量扫历史在大会话上不便宜。
     expect(
-      shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 3, compactedTurnCount: 3 }) }),
+      shouldCompactOnFocus({
+        settings: settings(),
+        counters: counters({ turnCount: 3, compactedTurnCount: 3 }),
+        ctxTokens: BIG_CTX,
+      }),
     ).toBe(false);
   });
 
   it('ignores how long the session has been idle', () => {
     // 与「空闲回来」的区别就在这里：人已经坐在输入框前，随时可能按发送。
-    expect(shouldCompactOnFocus({ settings: settings({ idleMs: 0 }), counters: counters({ turnCount: 1 }) })).toBe(
-      true,
+    expect(
+      shouldCompactOnFocus({
+        settings: settings({ idleMs: 0 }),
+        counters: counters({ turnCount: 1 }),
+        ctxTokens: BIG_CTX,
+      }),
+    ).toBe(true);
+  });
+
+  it('leaves small contexts alone', () => {
+    // 压缩在请求里本来也不会发生——点一下输入框就扫一遍整份历史、再写一条 notice，
+    // 对用户来说就是「没在对话却一路在压」。
+    expect(
+      shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 1 }), ctxTokens: 103_000 }),
+    ).toBe(false);
+    expect(
+      shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 1 }), ctxTokens: 11_000 }),
+    ).toBe(false);
+    // 还没有请求过：既不知道多大，也还没有值得压的东西。
+    expect(shouldCompactOnFocus({ settings: settings(), counters: counters({ turnCount: 1 }), ctxTokens: null })).toBe(
+      false,
     );
   });
 
+  it('scales the threshold with the model window', () => {
+    // 窗口比默认阈值小时按窗口算：100K 窗口的 55% 就是它的快速压缩阈值。
+    expect(
+      shouldCompactOnFocus({
+        settings: settings(),
+        counters: counters({ turnCount: 1 }),
+        ctxTokens: 60_000,
+        contextWindowSize: 100_000,
+      }),
+    ).toBe(true);
+    expect(
+      shouldCompactOnFocus({
+        settings: settings(),
+        counters: counters({ turnCount: 1 }),
+        ctxTokens: 50_000,
+        contextWindowSize: 100_000,
+      }),
+    ).toBe(false);
+  });
+
   it('is off when the plugin is disabled or the quick allowance is spent', () => {
-    expect(shouldCompactOnFocus({ settings: settings({ enabled: false }), counters: counters({ turnCount: 1 }) })).toBe(
-      false,
-    );
+    expect(
+      shouldCompactOnFocus({
+        settings: settings({ enabled: false }),
+        counters: counters({ turnCount: 1 }),
+        ctxTokens: BIG_CTX,
+      }),
+    ).toBe(false);
     expect(
       shouldCompactOnFocus({
         settings: settings({ quickLimit: 2 }),
         counters: counters({ turnCount: 1, quickRuns: 2 }),
+        ctxTokens: BIG_CTX,
       }),
     ).toBe(false);
   });
@@ -246,16 +303,46 @@ describe('shouldCompactOnReturn', () => {
   const idleSettings = (patch: Partial<AutoCompactSettings> = {}) => settings({ idleMs: 15 * 60_000, ...patch });
 
   it('fires only once the session has been idle long enough', () => {
-    expect(shouldCompactOnReturn({ settings: idleSettings(), counters: counters(), idleMs: 14 * 60_000 })).toBe(false);
-    expect(shouldCompactOnReturn({ settings: idleSettings(), counters: counters(), idleMs: 16 * 60_000 })).toBe(true);
+    expect(
+      shouldCompactOnReturn({
+        settings: idleSettings(),
+        counters: counters(),
+        idleMs: 14 * 60_000,
+        ctxTokens: BIG_CTX,
+      }),
+    ).toBe(false);
+    expect(
+      shouldCompactOnReturn({
+        settings: idleSettings(),
+        counters: counters(),
+        idleMs: 16 * 60_000,
+        ctxTokens: BIG_CTX,
+      }),
+    ).toBe(true);
+  });
+
+  it('leaves small contexts alone however long the user was away', () => {
+    expect(
+      shouldCompactOnReturn({ settings: idleSettings(), counters: counters(), idleMs: 60 * 60_000, ctxTokens: 40_000 }),
+    ).toBe(false);
   });
 
   it('is off when the threshold is 0 or the plugin is disabled', () => {
     expect(
-      shouldCompactOnReturn({ settings: idleSettings({ idleMs: 0 }), counters: counters(), idleMs: 600_000 }),
+      shouldCompactOnReturn({
+        settings: idleSettings({ idleMs: 0 }),
+        counters: counters(),
+        idleMs: 600_000,
+        ctxTokens: BIG_CTX,
+      }),
     ).toBe(false);
     expect(
-      shouldCompactOnReturn({ settings: idleSettings({ enabled: false }), counters: counters(), idleMs: 600_000 }),
+      shouldCompactOnReturn({
+        settings: idleSettings({ enabled: false }),
+        counters: counters(),
+        idleMs: 600_000,
+        ctxTokens: BIG_CTX,
+      }),
     ).toBe(false);
   });
 
@@ -265,6 +352,7 @@ describe('shouldCompactOnReturn', () => {
         settings: idleSettings({ quickLimit: 1 }),
         counters: counters({ quickRuns: 1 }),
         idleMs: 600_000,
+        ctxTokens: BIG_CTX,
       }),
     ).toBe(false);
     expect(
@@ -272,6 +360,7 @@ describe('shouldCompactOnReturn', () => {
         settings: idleSettings({ quickLimit: 1 }),
         counters: counters({ quickRuns: 0 }),
         idleMs: 16 * 60_000,
+        ctxTokens: BIG_CTX,
       }),
     ).toBe(true);
   });
@@ -284,6 +373,7 @@ describe('shouldCompactOnReturn', () => {
         settings: idleSettings({ minIntervalMs: 60 * 60_000 }),
         counters: counters({ quickRuns: 3, lastRunAt: new Date(Date.now() - 60_000).toISOString() }),
         idleMs: 20 * 60_000,
+        ctxTokens: BIG_CTX,
       }),
     ).toBe(true);
   });

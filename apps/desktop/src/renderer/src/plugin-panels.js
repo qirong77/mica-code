@@ -15,15 +15,42 @@ import { readPluginsDetails } from './plugins-details'
  * 用户可能刚在输入条切了角色还没发消息（新角色要到下一轮才落盘），所以调用方把「待生效
  * 的角色」一并传进来。
  */
+const PANEL_RETRY_DELAYS = [1500, 4000, 9000]
+
+/**
+ * 读到空结果就退避重试几次。
+ *
+ * 页面在窗口启动那一刻挂载时，`/api/invoke` 可能还没就绪，这一次读到的空清单会让快捷条
+ * 一直空着——ChatView 只在换角色时才会重新读，而用户不会为了一排按钮去切角色。重试是
+ * 有上限的（清单本身能缓存，重试几乎不花请求）；角色本来就没有面板的会话多问几次也无妨。
+ */
+export async function loadPluginPanels(role, options = {}) {
+  const {
+    read = readPluginsDetails,
+    delays = PANEL_RETRY_DELAYS,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    isAlive = () => true
+  } = options
+  let panels = []
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    if (attempt > 0) {
+      await sleep(delays[attempt - 1])
+      if (!isAlive()) return panels
+    }
+    panels = selectPluginPanels(await read(), role)
+    if (panels.length > 0 || !isAlive()) return panels
+  }
+  return panels
+}
+
 export function usePluginPanels(role) {
   const [panels, setPanels] = useState([])
 
   useEffect(() => {
     let alive = true
-    void (async () => {
-      const plugins = await readPluginsDetails()
-      if (alive) setPanels(selectPluginPanels(plugins, role))
-    })()
+    void loadPluginPanels(role, { isAlive: () => alive }).then((next) => {
+      if (alive) setPanels(next)
+    })
     return () => {
       alive = false
     }
@@ -57,15 +84,17 @@ export function selectPluginPanels(plugins, role) {
 }
 
 /**
- * 动作回包里「跨出面板一步」的三种效果。
+ * 动作回包里「跨出面板一步」的几种效果。
  *
  * 插件只声明意图（`compose` 放一段文本进输入框、`newSession` 开个会话跑提示词），
  * 真正动页面的是宿主：输入框、页签、角色、发送时机都属于页面，插件碰不到也不该碰。
  * `dialog` 也一样：表格内容由插件给，弹窗、排版、把链接交给系统浏览器是页面的事。
+ * `openReview` 是「看这条分支相对主分支改了什么」——宿主盖一层整窗的评审视图，
+ * 只读提交、不切工作区，所以评审别人的分支不会改动当前会话的目录。
  */
 export function applyPanelResult(
   result,
-  { onCompose, onLaunchSession, onDialog, onOpenPath } = {}
+  { onCompose, onLaunchSession, onDialog, onOpenPath, onOpenReview } = {}
 ) {
   if (!result || result.ok === false) return
   if (typeof result.compose === 'string' && result.compose.trim()) onCompose?.(result.compose)
@@ -80,6 +109,20 @@ export function applyPanelResult(
       focus: result.openPath.focus === true
     })
   }
+  if (result.openReview && typeof result.openReview.cwd === 'string' && result.openReview.cwd) {
+    onOpenReview?.(result.openReview)
+  }
+}
+
+/**
+ * 快捷按钮的菜单条目：静态分组（清单 `items`）直接用，动态分组（清单 `menu`）取面板视图
+ * 里同名的那一块。没有动作的条目点了什么也不会发生，一律丢掉。
+ */
+export function quickbarMenuItems(shortcut, view) {
+  const raw = shortcut?.items ?? (shortcut?.menu ? view?.menus?.[shortcut.menu] : null)
+  return (Array.isArray(raw) ? raw : []).filter(
+    (item) => typeof item?.label === 'string' && item.label.trim() && (item.action || item.section)
+  )
 }
 
 /**

@@ -343,12 +343,15 @@ export type {
   PluginPanelHandler,
   PluginPanelItem,
   PluginPanelItemAction,
+  PluginPanelMenuItem,
+  PluginPanelOpenReview,
   PluginPanelRegistration,
   PluginPanelRow,
   PluginPanelSection,
   PluginPanelTone,
   PluginPanelView,
   PluginPanelViewInput,
+  PluginPanelOpenPath,
 } from './PluginPanel.js';
 export type { PluginSettingIssue } from './PluginSettings.js';
 export { PLUGIN_REQUIREMENTS, isPluginRequirement } from './PluginManifest.js';

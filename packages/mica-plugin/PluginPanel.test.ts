@@ -250,3 +250,52 @@ describe('PluginPanelRegistry', () => {
     expect(registry.get('p')).not.toBeNull();
   });
 });
+
+describe('normalizePluginPanelView menus', () => {
+  it('keeps dynamic menu items with their action and key', () => {
+    const view = normalizePluginPanelView({
+      title: 'x',
+      menus: {
+        reviews: [
+          { label: 'sass · demand-a', detail: 'diff master', action: 'review.open', key: 'w1' },
+          { label: '没有动作' },
+        ],
+      },
+    });
+    expect(view.menus?.reviews).toEqual([
+      { label: 'sass · demand-a', detail: 'diff master', action: 'review.open', key: 'w1' },
+    ]);
+  });
+
+  it('drops menus that are not an object of arrays', () => {
+    expect(normalizePluginPanelView({ title: 'x', menus: 'nope' }).menus).toBeUndefined();
+    expect(normalizePluginPanelView({ title: 'x', menus: { a: 'nope' } }).menus).toBeUndefined();
+  });
+});
+
+describe('normalizePluginPanelActionResult openReview', () => {
+  it('keeps the repository, base, head and label', () => {
+    const result = normalizePluginPanelActionResult({
+      openReview: {
+        cwd: '/tmp/wt/mica-code',
+        base: 'main',
+        head: 'demand-1102',
+        label: 'mica · demand-1102',
+      },
+    });
+    expect(result.openReview).toEqual({
+      cwd: '/tmp/wt/mica-code',
+      base: 'main',
+      head: 'demand-1102',
+      label: 'mica · demand-1102',
+    });
+  });
+
+  it('leaves the base out when the plugin does not name one, and rejects a result without a path', () => {
+    // 不补 `master`：仓库的默认分支可能是 `main`，编一个会让宿主落进「无法解析基线」。
+    expect(normalizePluginPanelActionResult({ openReview: { cwd: '/tmp/a' } }).openReview).toEqual({
+      cwd: '/tmp/a',
+    });
+    expect(normalizePluginPanelActionResult({ openReview: { base: 'master' } }).openReview).toBeUndefined();
+  });
+});

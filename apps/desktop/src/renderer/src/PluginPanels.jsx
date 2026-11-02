@@ -4,7 +4,13 @@ import { Loader2, X } from 'lucide-react'
 // 输入框、标签，否则同一个应用里会出现三种按钮高度和两套状态色。
 import { Alert, Button, CollapsiblePanel, Empty, SettingRow, Tag } from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
-import { applyPanelResult, pluginPanelTabs, usePluginPanels } from './plugin-panels'
+import { FloatingMenu } from './FloatingMenu'
+import {
+  applyPanelResult,
+  pluginPanelTabs,
+  quickbarMenuItems,
+  usePluginPanels
+} from './plugin-panels'
 
 /**
  * 对话右侧的插件面板：仓库侧那一条按钮 + 点开的抽屉。
@@ -45,8 +51,10 @@ const buttonVariant = (tone) => BUTTON_VARIANTS[tone] || 'ghost'
  * 输入框上方那排快捷按钮（悬浮在输入框之上，左对齐）。
  *
  * 按钮来自清单 `desktop.panel.shortcuts`：`action` 点了直接把动作交给插件（例如「立刻
- * 检查」立刻投递一轮），`section` 点了打开面板并展开那一块（频道设置 / 复盘设置）。
- * 插件因此能把「马上要做的事」和「要改的配置」分开放，而宿主只管渲染。
+ * 检查」立刻投递一轮），`section` 点了打开面板并展开那一块（频道设置 / 复盘设置），
+ * `items` 是一组写死的子项（「频道」→ 同步频道 / 频道设置），`menu` 的子项由面板视图
+ * 现算（「Pull Request」→ 当前会话认领的每个副本）。插件因此能把「马上要做的事」
+ * 「要改的配置」「要评审的分支」分开放，而宿主只管渲染。
  */
 export function PluginQuickBar({
   nodeId,
@@ -59,17 +67,36 @@ export function PluginQuickBar({
   onCompose,
   onLaunchSession,
   onDialog,
-  onOpenPath
+  onOpenPath,
+  onOpenReview
 }) {
   const panels = usePluginPanels(role)
   const [pending, setPending] = useState('')
   // 动作可以回一句话（「先添加频道」这类）：显示在按钮旁边，几秒后自己消失。
   const [feedback, setFeedback] = useState('')
+  const [openMenu, setOpenMenu] = useState('')
+  // 子项菜单的落点按触发按钮的矩形现算（菜单本体是共享的 FloatingMenu，自己会收敛视口）。
+  const [menuPos, setMenuPos] = useState(null)
+  // 动态菜单要问插件要条目（副本列表是会话事实，清单里写不出来）。按按钮缓存，只在第
+  // 一次展开时取一次；没有菜单的插件不会多付这次请求。
+  const [menuViews, setMenuViews] = useState({})
+  const barRef = useRef(null)
   useEffect(() => {
     if (!feedback) return undefined
     const timer = setTimeout(() => setFeedback(''), 4000)
     return () => clearTimeout(timer)
   }, [feedback])
+  useEffect(() => {
+    if (!openMenu) return undefined
+    // FloatingMenu 自己处理点外部与 Esc；这里只补「滚动/缩放时落点就失效了」。
+    const onViewport = () => setOpenMenu('')
+    window.addEventListener('resize', onViewport)
+    window.addEventListener('scroll', onViewport, true)
+    return () => {
+      window.removeEventListener('resize', onViewport)
+      window.removeEventListener('scroll', onViewport, true)
+    }
+  }, [openMenu])
   const items = []
   for (const panel of panels) {
     for (const shortcut of panel.shortcuts) {
@@ -78,57 +105,173 @@ export function PluginQuickBar({
   }
   if (items.length === 0) return null
 
-  const runShortcut = async (panel, shortcut) => {
-    if (shortcut.section) {
-      const active = openPlugin === panel.id && focusSection === shortcut.section
-      onTogglePanel(active ? '' : panel.id, active ? '' : shortcut.section)
-      return
-    }
+  const openSection = (panel, section) => {
+    const active = openPlugin === panel.id && focusSection === section
+    onTogglePanel(active ? '' : panel.id, active ? '' : section)
+  }
+
+  const runAction = async (panel, action, key) => {
     if (pending) return
-    setPending(shortcut.action)
+    setPending(action)
     try {
       const result = await window.mica.chat.pluginPanels
-        .action(nodeId, {
-          pluginId: panel.id,
-          action: shortcut.action,
-          sessionId,
-          cwd
-        })
+        .action(nodeId, { pluginId: panel.id, action, key, sessionId, cwd })
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
-      applyPanelResult(result, { onCompose, onLaunchSession, onDialog, onOpenPath })
+      applyPanelResult(result, {
+        onCompose,
+        onLaunchSession,
+        onDialog,
+        onOpenPath,
+        onOpenReview
+      })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
     } finally {
       setPending('')
     }
   }
 
+  const runTarget = (panel, target) => {
+    if (target.section) openSection(panel, target.section)
+    else void runAction(panel, target.action, target.key)
+  }
+
+  const loadMenu = async (panel, shortcut, key) => {
+    // 只有「插件明确给过这一组」才缓存：第一次点开时常驻宿主可能刚起来、视图还没到位，
+    // 把那次空结果记成「没有可选项」会让菜单一直空着，而数据其实早就有了。
+    if (!shortcut.menu || menuViews[key]?.ready) return
+    const result = await window.mica.chat.pluginPanels
+      .view(nodeId, { pluginId: panel.id, sessionId, cwd })
+      .catch(() => null)
+    const view = result?.view || result || {}
+    // 请求本身失败（宿主没起来、插件报错）不算「这一组没有条目」：下次打开再问一次。
+    // 拿到了视图就一定有答案——插件没给这一组就是没有可选项，不能让菜单一直转圈。
+    const answered = Boolean(result)
+    const ready = answered || Object.prototype.hasOwnProperty.call(view?.menus || {}, shortcut.menu)
+    setMenuViews((current) => ({
+      ...current,
+      [key]: {
+        items: quickbarMenuItems(shortcut, view),
+        ready,
+        // 宿主明确报错时把原因写进菜单，比一句「暂时没有可选项」更能指向问题。
+        note: result?.ok === false ? result.error || '' : ''
+      }
+    }))
+  }
+
+  const showMenu = (event, panel, shortcut, key) => {
+    const rect = event?.currentTarget?.getBoundingClientRect?.()
+    // 菜单开在按钮正上方：这一排紧贴输入框，往下开就出屏了。FloatingMenu 会再按视口
+    // 收敛一次，所以这里给一个「大致在按钮上面」的落点就够。
+    if (rect)
+      setMenuPos({
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width)
+      })
+    setOpenMenu(key)
+    void loadMenu(panel, shortcut, key)
+  }
+
+  const runShortcut = async (event, panel, shortcut, key) => {
+    if (shortcut.items || shortcut.menu) {
+      if (openMenu === key) setOpenMenu('')
+      else showMenu(event, panel, shortcut, key)
+      return
+    }
+    if (shortcut.section) openSection(panel, shortcut.section)
+    else await runAction(panel, shortcut.action)
+  }
+
   return (
-    <div className="chat-plugin-quickbar" role="toolbar" aria-label="插件快捷操作">
+    <div className="chat-plugin-quickbar" role="toolbar" aria-label="插件快捷操作" ref={barRef}>
       {items.map(({ panel, shortcut, key }) => {
         const active =
           Boolean(shortcut.section) && openPlugin === panel.id && focusSection === shortcut.section
+        const group = Boolean(shortcut.items || shortcut.menu)
+        // 静态分组（清单直接给 items）不需要等面板视图；动态分组才读插件返回的那一块。
+        const menuItems = shortcut.items
+          ? quickbarMenuItems(shortcut)
+          : group
+            ? (menuViews[key]?.items ?? [])
+            : []
         return (
-          <button
+          <div
             key={key}
-            type="button"
-            title={
-              shortcut.section
-                ? `${active ? '收起' : '打开'}「${shortcut.label}」`
-                : `${panel.label} · ${shortcut.label}`
-            }
-            aria-pressed={active}
-            disabled={Boolean(pending)}
-            className={[
-              'chat-plugin-quickbar-button',
-              shortcut.action ? 'is-primary' : '',
-              active ? 'is-active' : ''
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            onClick={() => void runShortcut(panel, shortcut)}
+            className="chat-plugin-quickbar-group"
+            onMouseEnter={group ? (event) => showMenu(event, panel, shortcut, key) : undefined}
           >
-            {pending === shortcut.action ? '…' : shortcut.label}
-          </button>
+            <button
+              type="button"
+              title={
+                shortcut.section
+                  ? `${active ? '收起' : '打开'}「${shortcut.label}」`
+                  : `${panel.label} · ${shortcut.label}`
+              }
+              aria-pressed={active}
+              aria-haspopup={group ? 'menu' : undefined}
+              aria-expanded={group ? openMenu === key : undefined}
+              disabled={Boolean(pending)}
+              className={[
+                'chat-plugin-quickbar-button',
+                shortcut.action ? 'is-primary' : '',
+                active ? 'is-active' : '',
+                pending === shortcut.action ? 'is-busy' : ''
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onClick={(event) => void runShortcut(event, panel, shortcut, key)}
+            >
+              {pending === shortcut.action ? '…' : shortcut.label}
+              {group && (
+                <span className="chat-plugin-quickbar-caret" aria-hidden="true">
+                  ▾
+                </span>
+              )}
+            </button>
+            {group && openMenu === key && menuPos && (
+              <FloatingMenu
+                x={menuPos.x}
+                y={menuPos.y}
+                minWidth={Math.max(menuPos.width, 176)}
+                /* 这一排紧贴输入框，往下开会压住输入框：整组向上开。 */
+                placement="above"
+                /* 菜单本身也要豁免：否则 pointerdown 先关菜单，click 永远到不了菜单项。 */
+                ignoreSelector=".chat-plugin-quickbar-group, .chat-plugin-quickbar-menu"
+                onClose={() => setOpenMenu('')}
+              >
+                <div className="chat-plugin-quickbar-menu">
+                  {menuItems.length === 0 ? (
+                    shortcut.menu && !menuViews[key]?.ready ? (
+                      <span className="plugin-menu-loading">
+                        <span className="plugin-menu-spinner" aria-hidden="true" />
+                        正在读取这份列表…
+                      </span>
+                    ) : (
+                      <span className="plugin-menu-loading">
+                        {menuViews[key]?.note || '暂时没有可选项'}
+                      </span>
+                    )
+                  ) : (
+                    menuItems.map((item) => (
+                      <button
+                        key={`${item.label}:${item.action || item.section}`}
+                        type="button"
+                        role="menuitem"
+                        className="plugin-menu-item"
+                        onClick={() => {
+                          setOpenMenu('')
+                          runTarget(panel, item)
+                        }}
+                      >
+                        <span className="truncate">{item.label}</span>
+                        {item.detail && <span className="plugin-menu-hint">{item.detail}</span>}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </FloatingMenu>
+            )}
+          </div>
         )
       })}
       {feedback && (

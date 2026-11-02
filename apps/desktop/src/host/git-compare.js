@@ -59,7 +59,14 @@ async function autoBase(root) {
   let branches
   try {
     branches = new Map(
-      (await git(root, ['for-each-ref', '--format=%(refname:short)%00%(objectname)', 'refs/heads', 'refs/remotes']))
+      (
+        await git(root, [
+          'for-each-ref',
+          '--format=%(refname:short)%00%(objectname)',
+          'refs/heads',
+          'refs/remotes'
+        ])
+      )
         .split('\n')
         .filter(Boolean)
         .map((line) => {
@@ -232,6 +239,56 @@ export async function getBranchSummary(cwd, { base = null, direct = false } = {}
   }
 }
 
+/**
+ * 分支对分支：`head` 相对 `base` 引入的改动，两边都从提交里读。
+ *
+ * 与 `getBranchSummary` 的区别是它**不碰工作区**：未提交内容、未跟踪文件、那个目录还在不在
+ * 都不影响结果。评审一条别人的分支（或一个随时可能被系统清掉的临时副本）必须走这条——
+ * 用工作区比较会把评审人自己的改动混进别人的 diff，目录没了还会直接报错。
+ *
+ * 语义与 PR 视图一致：先求 `merge-base(base, head)`，再比较 `分叉点..head`，也就是
+ * 「这条分支相对主分支新增了什么」，而不是把主分支自己的提交算成删除。
+ */
+export async function getRefSummary(cwd, { head = null, base = null, direct = false } = {}) {
+  const { root, base: headHashDefault } = await cachedRepository(cwd)
+  const headRef = typeof head === 'string' && head.trim() ? head.trim() : null
+  const headHash = headRef ? await commitHash(root, headRef) : headHashDefault
+  const headName = headRef || (await currentBranchName(root)) || 'HEAD'
+  const selected = await comparison(root, headHash, base, direct)
+  const compare = selected.compareRef
+  const [names, numbers] = await Promise.all([
+    git(root, ['diff', '--name-status', '-z', '--no-renames', compare, headHash, '--']),
+    git(root, ['diff', '--numstat', '-z', '--no-renames', compare, headHash, '--'])
+  ])
+  const numstats = parseNumstatZ(numbers)
+  const files = [...parseNameStatus(names)]
+    .map(([filePath, status]) => {
+      const stat = numstats.get(filePath) || { additions: 0, deletions: 0, binary: false }
+      return {
+        path: filePath,
+        status,
+        additions: stat.additions,
+        deletions: stat.deletions,
+        binary: stat.binary,
+        // 两边都是提交里的对象：比较点 + 目标提交 + 路径唯一确定了内容。
+        fingerprint: createHash('sha256')
+          .update(JSON.stringify([compare, headHash, filePath, status]))
+          .digest('hex')
+      }
+    })
+    .sort((left, right) => compareChangePaths(left.path, right.path))
+  return {
+    root,
+    ...selected,
+    head: headName,
+    headHash,
+    headLabel: shortRefName(headName),
+    files,
+    additions: files.reduce((total, file) => total + file.additions, 0),
+    deletions: files.reduce((total, file) => total + file.deletions, 0)
+  }
+}
+
 function parseRefs(output, kind) {
   return output
     .split('\n')
@@ -328,6 +385,7 @@ export async function getFile(cwd, filePath, requested = null) {
     typeof requested === 'string' || !requested ? { mode: requested || 'head' } : requested
   const mode = options.mode || 'head'
   let compareRef = head
+  let modifiedRef = null
   let originalLabel = 'HEAD'
   const modifiedLabel = mode === 'staged' ? 'Index' : 'Working Tree'
   if (mode === 'snapshot') {
@@ -342,14 +400,21 @@ export async function getFile(cwd, filePath, requested = null) {
     )
     compareRef = selected.compareRef
     originalLabel = selected.baseLabel
+  } else if (mode === 'refs') {
+    // 评审一条分支：两边都在提交里，工作区不参与（也不会因为目录被清掉而失败）。
+    compareRef = await commitHash(root, options.ref)
+    modifiedRef = await commitHash(root, options.head)
+    originalLabel = options.label || shortRefName(options.ref)
   } else if (mode === 'worktree') {
     originalLabel = 'Index'
   }
   const [original, modified] = await Promise.all([
     mode === 'worktree' ? indexBlob(root, filePath) : blob(root, compareRef, filePath),
-    mode === 'staged'
-      ? indexBlob(root, filePath)
-      : worktreeFile(root, filePath).then((file) => file.content)
+    mode === 'refs'
+      ? blob(root, modifiedRef, filePath)
+      : mode === 'staged'
+        ? indexBlob(root, filePath)
+        : worktreeFile(root, filePath).then((file) => file.content)
   ])
   const binary = original.includes(0) || modified.includes(0)
   return {
@@ -357,6 +422,6 @@ export async function getFile(cwd, filePath, requested = null) {
     modified: binary ? '' : modified.toString('utf8'),
     binary,
     originalLabel,
-    modifiedLabel
+    modifiedLabel: mode === 'refs' ? options.headLabel || shortRefName(options.head) : modifiedLabel
   }
 }

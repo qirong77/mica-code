@@ -298,7 +298,7 @@ export class MicaUiRuntimeBridge {
   syncSubagentTaskItems(): void {
     micaUi.panels.setSubagentTaskItems(
       (this.subagentTasks?.list(this.agent) ?? [])
-        .filter((task) => task.status === 'running' && task.activity !== 'maintenance')
+        .filter((task) => task.status !== 'completed' && task.activity !== 'maintenance')
         .map(toUiSubagentTask),
     );
   }
@@ -499,6 +499,7 @@ function toUiBackgroundTask(task: BackgroundTaskMeta): MicaUiBackgroundTaskItem 
     pid: task.pid,
     outputPath: task.output_path,
     outputSize: getBackgroundTaskOutputSize(task),
+    exitCode: task.exit_code,
     status: task.status,
     startedAt: task.started_at,
     finishedAt: task.finished_at,

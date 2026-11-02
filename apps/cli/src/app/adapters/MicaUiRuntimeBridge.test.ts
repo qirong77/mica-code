@@ -153,7 +153,7 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     expect(uiMocks.setPendingInputs).toHaveBeenCalledWith(['first queued', 'second queued display'], 'after_iteration');
   });
 
-  it('syncs only active subagents owned by the current session', async () => {
+  it('syncs active and interrupted subagents owned by the current session', async () => {
     const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
     const agent = createAgent();
     const otherAgent = createAgent();
@@ -192,7 +192,9 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     ]);
 
     tasks.kill(ownTask.id, agent);
-    expect(uiMocks.setSubagentTaskItems).toHaveBeenLastCalledWith([]);
+    expect(uiMocks.setSubagentTaskItems).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: ownTask.id, status: 'killed' }),
+    ]);
     bridge.stop();
   });
 

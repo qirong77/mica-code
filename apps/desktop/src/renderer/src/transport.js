@@ -229,6 +229,7 @@ function createWebApi(env) {
       // 读取 / 停止一个 subagent 任务（Codex 协议扩展 mica/subagentTasks/*）
       subagentDetail: (id, taskId) => invoke('chat:subagent-detail', { id, taskId }),
       killSubagent: (id, taskId) => invoke('chat:kill-subagent', { id, taskId }),
+      restartSubagent: (id, taskId) => invoke('chat:restart-subagent', { id, taskId }),
       // By The Way（CLI 的 `/btw`，扩展 mica/btw/ask）：只收下问题，回答随后作为
       // `btw_thread` 快照事件到达（mica/btw/updated）。所以它可以在 turn 运行中调用。
       // sessionId/cwd 让 host 在没有常驻进程时按需起一个（resume 这条会话）。
@@ -474,6 +475,9 @@ function createWebApi(env) {
       // （origin/HEAD → master/main），`direct` 表示与基线直接比（默认取 merge-base）。
       branchSummary: (cwd, options = null) =>
         invoke('git:branch-summary', { cwd, ...(options || {}) }),
+      // 分支对分支（PR 视图）：head 相对主分支的分叉点改了什么。不读工作区，也不改目录，
+      // 所以评审别人的分支不会把评审人自己的未提交改动混进来。
+      refSummary: (cwd, options = null) => invoke('git:ref-summary', { cwd, ...(options || {}) }),
       // snapshot + summary.compareRef pins the original commit; staged is HEAD → index,
       // worktree is index → disk. Legacy head/branch/ref modes are also supported.
       file: (cwd, filePath, base = null) => invoke('git:file', { cwd, filePath, base }),

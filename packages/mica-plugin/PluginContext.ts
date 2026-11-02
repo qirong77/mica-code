@@ -6,7 +6,12 @@ import type { PluginToolDescriptor } from '@packages/mica-tools/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from './HookRegistry.js';
 import type { ServiceContainer } from './ServiceContainer.js';
-import type { PluginIdleCompactHook, PluginIdleCompactOutcome, PluginIterationRewriter } from './PluginAgent.js';
+import type {
+  PluginAgentUsage,
+  PluginIdleCompactHook,
+  PluginIdleCompactOutcome,
+  PluginIterationRewriter,
+} from './PluginAgent.js';
 import type { PluginBackgroundApi } from './PluginBackground.js';
 import type { PluginPromptSection } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
@@ -196,6 +201,10 @@ export type PluginContext = {
     /** 宿主形态，与 `PluginIterationRewriter.mode` 同义：`one-shot` 没有下一轮。 */
     readonly mode: 'session' | 'one-shot';
     onIterationRewrite(handler: PluginIterationRewriter): Disposable;
+    /** 这条会话上一次真实请求的用量；还没有请求过时为 null。 */
+    lastUsage?(): PluginAgentUsage | null;
+    /** 当前模型的上下文窗口；模型没声明时为 undefined。 */
+    readonly contextWindowSize?: number;
     /**
      * 在轮次之外把**已经落盘的**会话历史快速压缩一次（本地清理，不调用模型）。
      *

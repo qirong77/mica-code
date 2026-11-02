@@ -1,12 +1,9 @@
 import { Worker } from 'node:worker_threads'
+import { readFile } from 'node:fs/promises'
 
 // Inline worker source survives both Electron's packaged bundle and the web server
 // bundle without relying on a separately emitted worker file or an asar path.
-const WORKER_SOURCE = String.raw`
-const { parentPort, workerData } = require('node:worker_threads')
-const { readFileSync } = require('node:fs')
-try {
-  const raw = JSON.parse(readFileSync(workerData, 'utf8'))
+function projectSession(raw) {
   const snapshot = raw?.snapshot
   const messages = snapshot?.conversationMessages
   const text = (content) => typeof content === 'string' ? content : Array.isArray(content)
@@ -21,6 +18,35 @@ try {
   })) : [] } catch {}
   let meta = null
   try { if (snapshot && typeof snapshot === 'object') {
+    // Provider history contains the tool calls omitted from conversationMessages.
+    // Only recover a successful write in the last user turn, never an older plan.
+    const calls = new Map()
+    let todoInput = null
+    for (const message of Array.isArray(snapshot.messages) ? snapshot.messages : []) {
+      const blocks = Array.isArray(message?.content) ? message.content : []
+      if (message?.role === 'user' && !blocks.some((block) => block?.type === 'tool_result')) {
+        calls.clear()
+        todoInput = null
+      }
+      const remember = (id, name, input) => {
+        if (!id || name !== 'todo_write') return
+        try {
+          const value = typeof input === 'string' ? JSON.parse(input) : input
+          if (value && Array.isArray(value.todos)) calls.set(id, value)
+        } catch {}
+      }
+      for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls : []) {
+        remember(call.id, call.function?.name, call.function?.arguments)
+      }
+      if (message?.type === 'function_call') remember(message.call_id, message.name, message.arguments)
+      for (const block of blocks) {
+        if (block?.type === 'tool_use') remember(block.id, block.name, block.input)
+      }
+      const finish = (id, failed) => { if (!failed && calls.has(id)) todoInput = calls.get(id) }
+      if (message?.role === 'tool') finish(message.tool_call_id, message.is_error)
+      if (message?.type === 'function_call_output') finish(message.call_id, message.is_error)
+      for (const block of blocks) if (block?.type === 'tool_result') finish(block.tool_use_id, block.is_error)
+    }
     const usages = Array.isArray(snapshot.usageHistory) ? snapshot.usageHistory : []
     const input = usages.reduce((sum, usage) => sum + Math.max(0, Number(usage?.inputTokens) || 0), 0)
     const cached = usages.reduce((sum, usage) => sum + Math.max(0, Number(usage?.cachedInputTokens) || 0), 0)
@@ -33,11 +59,19 @@ try {
       lastUsage: display > 0 ? { totalTokens: display, inputTokens: display, outputTokens: 0, cachedInputTokens: 0 }
         : snapshot.lastUsage || usages.at(-1) || null,
       cachedRate: input > 0 ? cached / input : 0,
-      turnState: raw.turnState || 'completed', updatedAt: raw.updatedAt || null
+      turnState: raw.turnState || 'completed', updatedAt: raw.updatedAt || null, todoInput
     }
   }
   } catch {}
-  parentPort.postMessage({ history, meta })
+  return { history, meta }
+}
+
+const WORKER_SOURCE = String.raw`
+const { parentPort, workerData } = require('node:worker_threads')
+const { readFileSync } = require('node:fs')
+const projectSession = ${projectSession.toString()}
+try {
+  parentPort.postMessage(projectSession(JSON.parse(readFileSync(workerData, 'utf8'))))
 } catch {
   parentPort.postMessage({ history: [], meta: null })
 }
@@ -46,22 +80,30 @@ try {
 const empty = () => ({ history: [], meta: null })
 
 export function createSessionReader({
-  startWorker = (file) => new Worker(WORKER_SOURCE, { eval: true, workerData: file })
+  startWorker = (file) => new Worker(WORKER_SOURCE, { eval: true, workerData: file, execArgv: [] })
 } = {}) {
   const pending = new Map()
   return function readSession(file) {
     if (!file) return Promise.resolve(empty())
     if (pending.has(file)) return pending.get(file)
-    const task = new Promise((resolve) => {
+    const fallback = async (error) => {
+      console.warn('[session-reader] Worker failed; reading session in process:', error?.message || error)
+      try {
+        return projectSession(JSON.parse(await readFile(file, 'utf8')))
+      } catch {
+        return empty()
+      }
+    }
+    const task = new Promise((resolve, reject) => {
       try {
         const worker = startWorker(file)
         worker.once('message', resolve)
-        worker.once('error', () => resolve(empty()))
-        worker.once('exit', () => resolve(empty()))
-      } catch {
-        resolve(empty())
+        worker.once('error', reject)
+        worker.once('exit', (code) => reject(new Error(`Worker exited before returning a session (code ${code})`)))
+      } catch (error) {
+        reject(error)
       }
-    })
+    }).catch(fallback)
     pending.set(file, task)
     task.finally(() => {
       if (pending.get(file) === task) pending.delete(file)

@@ -228,7 +228,7 @@ describe('auto-compact plugin', () => {
   it('compacts the stored history when the user comes back after a long idle', async () => {
     // 上下文小（远低于阈值）也要压：这一条判断的是「人回来了」，不是「上下文大了」。
     const harness = createHarness({
-      inputTokens: 30_000,
+      inputTokens: 350_000,
       idleCompact: true,
       lastActivityAt: minutesAgo(30),
     });
@@ -247,7 +247,7 @@ describe('auto-compact plugin', () => {
 
   it('keeps idle compaction on the session that reported the activity', async () => {
     const harness = createHarness({
-      inputTokens: 30_000,
+      inputTokens: 350_000,
       idleCompact: true,
       lastActivityAt: minutesAgo(30),
     });
@@ -263,7 +263,7 @@ describe('auto-compact plugin', () => {
   // 大数字要换算：真实会话里省下的量动辄六位数，写成「806469 tokens」读不出量级。
   it('reads the gain in k and M for a large history', async () => {
     const harness = createHarness({
-      inputTokens: 30_000,
+      inputTokens: 350_000,
       idleCompact: true,
       lastActivityAt: minutesAgo(90),
       idleBeforeTokens: 1_200_000,
@@ -279,7 +279,7 @@ describe('auto-compact plugin', () => {
   // 计数必须在宿主落盘之前写好：压缩与记账是同一次写。晚一步写等于「压了但没记账」，
   // 用户一关页面就没了（真实事故：文件里压缩生效了，pluginState 还是旧的）。
   it('stamps the counters before the host writes the session', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, lastActivityAt: minutesAgo(30) });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true, lastActivityAt: minutesAgo(30) });
 
     await harness.typeInComposer();
 
@@ -290,7 +290,7 @@ describe('auto-compact plugin', () => {
     // 工作密集时刚按阈值压过一次、20 分钟后又回来：这一条不该被「最小间隔」拦住，
     // 否则最常见的场景（一会儿压、一会儿走）会静默失效。
     const harness = createHarness({
-      inputTokens: 30_000,
+      inputTokens: 350_000,
       idleCompact: true,
       settings: { ...configured, minIntervalMinutes: '30' },
       lastRunAt: minutesAgo(5),
@@ -304,7 +304,7 @@ describe('auto-compact plugin', () => {
 
   it('says why nothing happened when the host reports the session busy', async () => {
     const harness = createHarness({
-      inputTokens: 30_000,
+      inputTokens: 350_000,
       idleCompact: true,
       idleSkipped: 'busy',
       lastActivityAt: minutesAgo(30),
@@ -321,7 +321,7 @@ describe('auto-compact plugin', () => {
   });
 
   it('stays quiet while the user has been typing all along', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, lastActivityAt: minutesAgo(1) });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true, lastActivityAt: minutesAgo(1) });
 
     await harness.typeInComposer();
 
@@ -330,7 +330,7 @@ describe('auto-compact plugin', () => {
   });
 
   it('treats a turn as activity, so finishing a long one is not "coming back"', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, lastActivityAt: minutesAgo(60) });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true, lastActivityAt: minutesAgo(60) });
 
     harness.emitHook('turn:after');
     await harness.typeInComposer();
@@ -340,7 +340,7 @@ describe('auto-compact plugin', () => {
 
   it('does not spend a run when the host reports nothing to compact', async () => {
     const harness = createHarness({
-      inputTokens: 30_000,
+      inputTokens: 350_000,
       idleCompact: true,
       idleSavedTokens: null,
       lastActivityAt: minutesAgo(30),
@@ -354,7 +354,7 @@ describe('auto-compact plugin', () => {
 
   it('reports a failed idle compaction without spending a run', async () => {
     const harness = createHarness({
-      inputTokens: 30_000,
+      inputTokens: 350_000,
       idleCompact: true,
       idleFail: '会话正忙',
       lastActivityAt: minutesAgo(30),
@@ -378,7 +378,7 @@ describe('auto-compact plugin', () => {
   });
 
   it('never compacts idle history without a session state to count runs in', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, withoutSessionState: true });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true, withoutSessionState: true });
 
     await harness.typeInComposer();
 
@@ -388,7 +388,7 @@ describe('auto-compact plugin', () => {
 
 describe('auto-compact on composer focus', () => {
   it('compacts as soon as the composer gains focus, before the user types', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, settings: { quickLimit: '99' } });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true, settings: { quickLimit: '99' } });
     // 一轮跑完就是「有没过压缩的新历史」——焦点触发只看这个，不看空闲多久。
     harness.emitHook('turn:before', {});
     harness.emitHook('turn:after', {});
@@ -398,12 +398,14 @@ describe('auto-compact on composer focus', () => {
     expect(harness.idleCompactCalls).toHaveLength(1);
     expect(harness.state).toMatchObject({ quickRuns: 1, lastKind: 'quick' });
     expect(harness.notices.at(-1)).toContain('回到输入框，已快速压缩历史：52K → 40K');
+    // 带上 command，宿主才会把连着压的几条就地合并成一条，而不是在对话里排成一列。
+    expect(harness.noticeCommands.at(-1)).toBe('auto-compact');
     // 记账里记下这次压缩覆盖到哪一轮：下一次聚焦据此判断有没有新内容。
     expect(harness.state?.compactedTurnCount).toEqual(harness.state?.turnCount);
   });
 
   it('does not re-compact on the next focus when no turn ran in between', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, settings: { quickLimit: '99' } });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true, settings: { quickLimit: '99' } });
     harness.emitHook('turn:before', {});
     harness.emitHook('turn:after', {});
 
@@ -416,7 +418,7 @@ describe('auto-compact on composer focus', () => {
   });
 
   it('compacts again on focus once another turn has finished', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, settings: { quickLimit: '99' } });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true, settings: { quickLimit: '99' } });
     harness.emitHook('turn:before', {});
     await harness.focusComposer();
 
@@ -429,7 +431,7 @@ describe('auto-compact on composer focus', () => {
   });
 
   it('does not spend a run when the host is busy', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, idleSkipped: 'busy' });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true, idleSkipped: 'busy' });
     harness.emitHook('turn:before', {});
 
     await harness.focusComposer();
@@ -441,7 +443,7 @@ describe('auto-compact on composer focus', () => {
 
   it('stays off when the plugin is disabled', async () => {
     const harness = createHarness({
-      inputTokens: 30_000,
+      inputTokens: 350_000,
       idleCompact: true,
       settings: { enabled: 'false' },
     });
@@ -454,7 +456,7 @@ describe('auto-compact on composer focus', () => {
 
   it('stays off once the quick-run budget is spent', async () => {
     const harness = createHarness({
-      inputTokens: 30_000,
+      inputTokens: 350_000,
       idleCompact: true,
       settings: { quickLimit: '1' },
       lastRunAt: minutesAgo(60),
@@ -476,11 +478,34 @@ describe('auto-compact on composer focus', () => {
     expect(harness.idleCompactCalls).toEqual([]);
     expect(harness.healthReports.some((report) => report.level === 'warn')).toBe(false);
   });
+
+  // 真实反馈：一个 100K 上下的会话，来回切几次焦点就压了四五次、对话里排着一列
+  // 「已快速压缩」。低于快速压缩阈值时这次压缩在请求里本来也不会发生，不该抢跑。
+  it('leaves a small history alone however often the composer is refocused', async () => {
+    const harness = createHarness({ inputTokens: 103_000, idleCompact: true, settings: { quickLimit: '99' } });
+
+    for (let round = 0; round < 3; round += 1) {
+      harness.emitHook('turn:before', {});
+      harness.emitHook('turn:after', {});
+      await harness.focusComposer();
+    }
+
+    expect(harness.idleCompactCalls).toEqual([]);
+    expect(harness.notices).toEqual([]);
+  });
+
+  it('leaves a small history alone after a long idle as well', async () => {
+    const harness = createHarness({ inputTokens: 40_000, idleCompact: true, lastActivityAt: minutesAgo(120) });
+
+    await harness.typeInComposer();
+
+    expect(harness.idleCompactCalls).toEqual([]);
+  });
 });
 
 describe('auto-compact restored activity', () => {
   it('reads activity restored after plugin setup before checking for an idle return', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true });
     harness.restoreState({ lastActivityAt: minutesAgo(30) });
 
     await harness.typeInComposer();
@@ -490,7 +515,7 @@ describe('auto-compact restored activity', () => {
   });
 
   it('tracks typing in persisted session state even when no compaction is due', async () => {
-    const harness = createHarness({ inputTokens: 30_000, idleCompact: true, lastActivityAt: minutesAgo(1) });
+    const harness = createHarness({ inputTokens: 350_000, idleCompact: true, lastActivityAt: minutesAgo(1) });
     await harness.typeInComposer();
     expect(Date.parse(String(harness.state?.lastActivityAt))).toBeGreaterThan(Date.now() - 10_000);
 
@@ -551,6 +576,8 @@ function createHarness(options: {
   const healthReports: Array<{ level: string; message: string }> = [];
   const idleCompactCalls: number[] = [];
   const notices: string[] = [];
+  /** 每条 notice 带的 command：宿主靠它把「同一段历史被连压几次」合并成一条。 */
+  const noticeCommands: Array<string | undefined> = [];
   let stateSeenByHost: Record<string, unknown> | undefined;
   const stateOwners: unknown[] = [];
   const eventHandlers: Array<(event: { type: string; owner?: unknown }) => void> = [];
@@ -641,6 +668,8 @@ function createHarness(options: {
         rewriter = handler;
         return { dispose() {} };
       },
+      // 提前量要判断「现在多大」：宿主给的是最近一次真实请求的输入量。
+      lastUsage: () => ({ inputTokens: options.inputTokens, model: 'mock/mock-chat' }),
       ...(compactIdleHistory ? { compactIdleHistory } : {}),
     },
     ...(llmApi ? { llm: llmApi } : {}),
@@ -683,7 +712,12 @@ function createHarness(options: {
       clear() {},
     },
     // 压缩落地后在对话里留一行，让人不用翻日志也知道「刚才压过」。
-    ui: { notice: (content: string) => notices.push(content) },
+    ui: {
+      notice: (content: string, options?: { command?: string }) => {
+        notices.push(content);
+        noticeCommands.push(options?.command);
+      },
+    },
     logger,
     onDispose: (handler: () => void) => disposeHandlers.push(handler),
   } as unknown as PluginContext;
@@ -694,6 +728,7 @@ function createHarness(options: {
     logger,
     healthReports,
     notices,
+    noticeCommands,
     stateOwners,
     get stateSeenByHost() {
       return stateSeenByHost;

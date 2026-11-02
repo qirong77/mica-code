@@ -12,6 +12,7 @@ import {
   countLines,
   getBranchSummary,
   getFile,
+  getRefSummary,
   getRefs,
   resolveRef as resolveCompareRef
 } from './git-compare'
@@ -148,6 +149,15 @@ export function registerGitIpc() {
   ipcMain.handle('git:branch-summary', async (_event, { cwd, base, direct } = {}) => {
     try {
       return { repository: await getBranchSummary(cwd, { base, direct }), error: null }
+    } catch (error) {
+      return { repository: null, error: gitErrorMessage(error) }
+    }
+  })
+
+  // 分支对分支（PR 视图）：`head` 相对主分支的改动，不读工作区，也不改任何目录。
+  ipcMain.handle('git:ref-summary', async (_event, { cwd, head, base, direct } = {}) => {
+    try {
+      return { repository: await getRefSummary(cwd, { head, base, direct }), error: null }
     } catch (error) {
       return { repository: null, error: gitErrorMessage(error) }
     }

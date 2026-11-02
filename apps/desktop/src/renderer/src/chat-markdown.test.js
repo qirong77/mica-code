@@ -13,6 +13,7 @@ import {
   latestTodoItems,
   mergeReplayEvents,
   resolveChatPath,
+  restoredTodoInterrupted,
   todoSnapshotFromMessages,
   todoPanelForTurn
 } from './ChatView'
@@ -390,7 +391,7 @@ describe('structured activity state', () => {
     ])
   })
 
-  it('shows the plan only while its own turn runs', () => {
+  it('retains the latest plan paused after interruption and into the next turn', () => {
     const messages = [
       {
         kind: 'tool',
@@ -409,10 +410,44 @@ describe('structured activity state', () => {
       items: [{ id: 'Inspect', content: 'Inspect', activeForm: undefined, status: 'in_progress' }],
       visible: true
     })
-    // 回归点：轮次结束后不能继续把上一轮的计划挂在页面上。
+    const paused = {
+      items: [{ id: 'Inspect', content: 'Inspect', activeForm: undefined, status: 'pending' }],
+      visible: true
+    }
     expect(todoPanelForTurn(messages, 'turn-1', false)).toEqual({ items: [], visible: false })
-    // 回归点：新的一轮开始时，历史里上一轮的清单不得重新出现。
-    expect(todoPanelForTurn(messages, 'turn-2', true)).toEqual({ items: [], visible: false })
+    expect(todoPanelForTurn(messages, 'turn-1', false, false, true)).toEqual(paused)
+    expect(todoPanelForTurn(messages, 'turn-2', true, false, true)).toEqual(paused)
+    expect(todoPanelForTurn(messages, null, true, false, true)).toEqual(paused)
+    expect(latestTodoItems(messages)[0].status).toBe('in_progress')
+
+    const nextWrite = {
+      kind: 'tool',
+      turnId: 'turn-2',
+      tool: { tool: 'todo_write', status: 'completed', input: { todos: [{ content: 'Test', status: 'in_progress' }] } }
+    }
+    expect(todoPanelForTurn([...messages, nextWrite], 'turn-2', true)).toEqual({
+      items: [{ id: 'Test', content: 'Test', activeForm: undefined, status: 'in_progress' }],
+      visible: true
+    })
+    const cleared = { ...nextWrite, tool: { ...nextWrite.tool, input: { todos: [] } } }
+    expect(todoPanelForTurn([...messages, cleared], 'turn-2', true)).toEqual({ items: [], visible: false })
+  })
+
+  it('restores paused plans only for an inactive interrupted session', () => {
+    const input = { todos: [{ content: 'Resume', status: 'in_progress' }] }
+    for (const turnState of ['running', 'aborted', 'error']) {
+      const interrupted = restoredTodoInterrupted({ turnState }, { running: false, remoteRunning: false })
+      expect(interrupted).toBe(true)
+      expect(todoPanelForTurn([], null, false, false, interrupted, input)).toMatchObject({
+        visible: true, items: [{ content: 'Resume', status: 'pending' }]
+      })
+    }
+    expect(restoredTodoInterrupted({ turnState: 'running' }, { remoteRunning: true })).toBe(false)
+    expect(restoredTodoInterrupted({ turnState: 'running' }, { running: true })).toBe(false)
+    expect(restoredTodoInterrupted({ turnState: 'running' }, null)).toBe(false)
+    expect(restoredTodoInterrupted({ turnState: 'completed' }, {})).toBe(false)
+    expect(todoPanelForTurn([], null, false, false, false, input).visible).toBe(false)
+    expect(todoPanelForTurn([], null, false, true, true, input).visible).toBe(false)
   })
 
   it('keeps leftover items unfinished in the data while the turn runs', () => {
@@ -443,7 +478,7 @@ describe('structured activity state', () => {
     expect(todoSnapshotFromMessages([])).toEqual({ items: [], turnId: null })
   })
 
-  it('drops the dock when the todo list belongs to an older turn', () => {
+  it('respects an explicitly hidden dock while retaining history', () => {
     const messages = [
       {
         kind: 'tool',
@@ -456,8 +491,7 @@ describe('structured activity state', () => {
       }
     ]
 
-    // 空闲时没有活跃轮次：不能因为历史里还有一条 todo_write 就一直显示。
-    expect(todoPanelForTurn(messages, null, false)).toEqual({ items: [], visible: false })
+    expect(todoPanelForTurn(messages, null, false, false, true).visible).toBe(true)
     expect(todoPanelForTurn(messages, 'turn-1', true, true)).toEqual({ items: [], visible: false })
   })
 })

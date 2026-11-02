@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
-import { getBranchSummary, getFile, getRefs, resolveRef } from './git-compare'
+import { getBranchSummary, getFile, getRefs, getRefSummary, resolveRef } from './git-compare'
 import { EMPTY_TREE, git } from './git-ops'
 
 let root
@@ -319,5 +319,62 @@ describe('file comparison modes and refs', () => {
     })
     expect(refs.tags[0]).toMatchObject({ kind: 'tag', name: 'v1' })
     expect((await resolveRef(root, 'origin/main')).ref.hash).toBe(head)
+  })
+})
+
+describe('ref review', () => {
+  it('compares a branch against the default base without touching the worktree', async () => {
+    const ancestor = await hash()
+    await git(root, ['checkout', '-qb', 'feature'])
+    await write('feature.txt', 'feature\n')
+    const head = await commit('feature')
+    // 评审别人的分支时，评审人自己的工作区可能是脏的：它不属于这次比较。
+    await write('a.txt', 'dirty in reviewer worktree\n')
+    await write('untracked.txt', 'not committed\n')
+
+    const summary = await getRefSummary(root, { head: 'feature', base: 'main' })
+    expect(summary).toMatchObject({
+      base: 'main',
+      head: 'feature',
+      headLabel: 'feature',
+      headHash: head,
+      mergeBase: ancestor,
+      compareRef: ancestor,
+      additions: 1,
+      deletions: 0
+    })
+    expect(summary.files.map((item) => item.path)).toEqual(['feature.txt'])
+    // 工作区里的改动与未跟踪文件都不该出现在分支评审里。
+    expect(summary.files.some((item) => item.path === 'a.txt')).toBe(false)
+    expect(summary.files.some((item) => item.path === 'untracked.txt')).toBe(false)
+  })
+
+  it('reads both sides from commits, so a missing checkout cannot break the diff', async () => {
+    await git(root, ['checkout', '-qb', 'feature'])
+    await write('a.txt', 'feature version\n')
+    await commit('feature')
+    const summary = await getRefSummary(root, { head: 'feature', base: 'main' })
+    const content = await getFile(root, 'a.txt', {
+      mode: 'refs',
+      ref: summary.compareRef,
+      head: summary.headHash,
+      label: 'main',
+      headLabel: 'feature'
+    })
+    expect(content).toMatchObject({
+      original: 'original\n',
+      modified: 'feature version\n',
+      originalLabel: 'main',
+      modifiedLabel: 'feature'
+    })
+  })
+
+  it('falls back to the repository default branch when no base is requested', async () => {
+    await git(root, ['checkout', '-qb', 'feature'])
+    await write('feature.txt', 'feature\n')
+    await commit('feature')
+    const summary = await getRefSummary(root, { head: 'feature' })
+    expect(summary.baseLabel).toBe('main')
+    expect(summary.files.map((item) => item.path)).toEqual(['feature.txt'])
   })
 })

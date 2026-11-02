@@ -3,6 +3,7 @@ import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
 import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
 import type { RuntimeTurnAfterHookEvent, RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
+import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import {
   formatTodoSummary,
@@ -44,6 +45,7 @@ type TodoViewState = {
   hidden: boolean;
   live: boolean;
   pinned: boolean;
+  interrupted: boolean;
 };
 
 export class TodoPlugin implements MicaPlugin {
@@ -56,6 +58,7 @@ export class TodoPlugin implements MicaPlugin {
     const captureOwner = (context?: unknown): unknown => ctx.session?.captureOwner?.(context) ?? fallbackOwner;
     const eventOwner = (event: { owner?: unknown }): unknown => event.owner ?? captureOwner();
     const todos = atom(new Map<unknown, TodoViewState>());
+    const inputOwners = new WeakMap<object, unknown>();
     const patch = (owner: unknown, update: (current: TodoViewState) => TodoViewState) => {
       const views = todos.get();
       const current = views.get(owner) ?? createTodoViewState();
@@ -64,7 +67,7 @@ export class TodoPlugin implements MicaPlugin {
     };
 
     const tool = new TodoWriteTool((items, callbacks) => {
-      patch(captureOwner(callbacks?.context), (current) => ({ ...current, items, live: true }));
+      patch(captureOwner(callbacks?.context), (current) => ({ ...current, items, live: true, interrupted: false }));
     });
 
     function TodoStatusList(): React.ReactNode {
@@ -142,7 +145,7 @@ export class TodoPlugin implements MicaPlugin {
         const views = new Map(todos.get());
         if (views.delete(eventOwner(event))) todos.set(views);
       } else if (event.type === 'turn:aborted') {
-        patch(eventOwner(event), (current) => ({ ...current, live: false }));
+        patch(eventOwner(event), (current) => ({ ...current, live: false, pinned: current.items.length > 0, interrupted: true }));
       }
     });
     ctx.onDispose(() => eventSubscription.dispose());
@@ -151,8 +154,9 @@ export class TodoPlugin implements MicaPlugin {
     const turnBeforeSubscription = ctx.hooks.on<RuntimeTurnBeforeHookEvent>(
       'turn:before',
       (event) => {
+        inputOwners.set(event.input, eventOwner(event));
         patch(eventOwner(event), (current) =>
-          current.live || current.pinned || current.items.length > 0
+          !current.interrupted && (current.live || current.pinned || current.items.length > 0)
             ? { ...current, items: [], live: false, pinned: false }
             : current,
         );
@@ -161,11 +165,35 @@ export class TodoPlugin implements MicaPlugin {
     );
     ctx.onDispose(() => turnBeforeSubscription.dispose());
 
+    // 工具可能已经执行，但同批工具尚未提交到 provider 历史就被中断。
+    // 使用工具实际写入的快照，而不是仅依赖历史中的 tool result。
+    const promptSubscription = ctx.hooks.on<{ input: object; content: AgentQueryContent }>(
+      'prompt:build',
+      (event) => {
+        const state = todos.get().get(inputOwners.get(event.input) ?? captureOwner());
+        if (!state?.interrupted || state.items.length === 0) return event;
+        const progress = state.items.map((item) => `- [${item.status}] ${item.content}`).join('\n');
+        const note = `上次任务被中断，以下是中断前最后一次保存的 TODO 进度（进行中不代表已完成）；请结合当前请求判断如何继续：\n${progress}`;
+        return {
+          ...event,
+          content: typeof event.content === 'string'
+            ? `${event.content}\n\n${note}`
+            : [...event.content, { type: 'text' as const, text: note }],
+        };
+      },
+      { pluginId: ctx.pluginId },
+    );
+    ctx.onDispose(() => promptSubscription.dispose());
+
     const turnAfterSubscription = ctx.hooks.on<RuntimeTurnAfterHookEvent>(
       'turn:after',
       (event) => {
         // 只收面板，不改数据：`in_progress` 已经不再进行，但也不代表做完了。
-        patch(eventOwner(event), (current) => ({ ...current, live: false }));
+        patch(eventOwner(event), (current) => {
+          const interrupted = event.outcome !== 'completed';
+          const pending = current.items.some((item) => item.status !== 'completed');
+          return { ...current, live: false, interrupted, pinned: interrupted ? pending : current.interrupted ? false : current.pinned };
+        });
       },
       { pluginId: ctx.pluginId },
     );
@@ -218,7 +246,7 @@ export class TodoPlugin implements MicaPlugin {
 }
 
 function createTodoViewState(): TodoViewState {
-  return { items: [], hidden: false, live: false, pinned: false };
+  return { items: [], hidden: false, live: false, pinned: false, interrupted: false };
 }
 
 function TodoRow({ item }: { item: TodoItem }): React.ReactNode {

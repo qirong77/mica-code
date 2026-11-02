@@ -8,7 +8,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { VERSION_LABEL, resolveMicaHome } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
-import { SESSION_NOTES_PLUGIN_ID, normalizeSessionNotes, prepareImageForApi } from '@packages/mica-common/index.js';
+import { SESSION_NOTES_PLUGIN_ID, normalizeSessionNotes, prepareImageForApi, readStoredSubagentTasks, writeStoredSubagentTasks } from '@packages/mica-common/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import type { AgentContentBlockParam, AgentQueryContent } from '@packages/mica-agent/index.js';
 import {
@@ -93,10 +93,7 @@ export type AppServerOptions = {
 };
 
 /**
- * Project one background shell task. Shared by the running-only snapshot and
- * the on-demand output request: the latter must also carry the status of a task
- * that already finished (with its exit code), because the snapshot drops it the
- * moment it stops running.
+ * Project one background shell task for snapshots and output requests.
  */
 export function projectBackgroundTask(task: BackgroundTaskMeta): MicaBackgroundTaskItem {
   return {
@@ -112,21 +109,31 @@ export function projectBackgroundTask(task: BackgroundTaskMeta): MicaBackgroundT
   };
 }
 
-/** Project active background shell tasks for the `mica/backgroundTasks/updated`
- * snapshot. Only tasks still starting/running are surfaced (matches the CLI
- * TaskStatusBar, which hides finished rows). */
+/** Keep all active tasks and the 20 most recently finished tasks. */
 export function projectBackgroundTasks(tasks: BackgroundTaskMeta[]): MicaBackgroundTaskItem[] {
+  const recentFinished = tasks
+    .filter((task) => task.status !== 'starting' && task.status !== 'running')
+    .sort((a, b) => Date.parse(b.finished_at ?? b.started_at) - Date.parse(a.finished_at ?? a.started_at))
+    .slice(0, 20);
+  const retainedIds = new Set(recentFinished.map((task) => task.id));
   return tasks
-    .filter((task) => task.status === 'starting' || task.status === 'running')
+    .filter((task) => task.status === 'starting' || task.status === 'running' || retainedIds.has(task.id))
     .map((task) => projectBackgroundTask(task));
 }
 
-/** Project running subagents (foreground + background) for the
- * `mica/subagentTasks/updated` snapshot. Activities are included so the client
- * can render the same in-flight tool rows as the CLI. */
+export function isOwnedBackgroundTask(task: BackgroundTaskMeta, ownerId: string): boolean {
+  return Boolean(ownerId) && task.agent_owner_id === ownerId;
+}
+
+/** Include recent finished tasks so their transcripts remain accessible after a turn. */
 export function projectSubagentTasks(tasks: SubagentTaskRecord[]): MicaSubagentTaskItem[] {
+  const recentFinished = tasks
+    .filter((task) => task.status !== 'running' && task.activity !== 'maintenance')
+    .sort((a, b) => Date.parse(b.finished_at ?? b.started_at) - Date.parse(a.finished_at ?? a.started_at))
+    .slice(0, 20);
+  const retainedIds = new Set(recentFinished.map((task) => task.id));
   return tasks
-    .filter((task) => task.status === 'running' && task.activity !== 'maintenance')
+    .filter((task) => task.activity !== 'maintenance' && (task.status === 'running' || retainedIds.has(task.id)))
     .map((task) => ({
       taskId: task.id,
       ...(task.parent_task_id ? { parentTaskId: task.parent_task_id } : {}),
@@ -363,7 +370,12 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     if (!options.sessionId && options.parentSessionId) {
       sessionController.startNewSession({ parentSessionId: options.parentSessionId });
     }
-    subagentTasks = new SubagentTaskManager();
+    subagentTasks = new SubagentTaskManager({
+      readRestoredTasks: (owner) => sessionId && owner === agent ? readStoredSubagentTasks(sessionId) : [],
+      onChange: (task, owner) => {
+        if (sessionId && owner === agent) writeStoredSubagentTasks(sessionId, [task]);
+      },
+    });
 
     // By The Way（CLI 的 `/btw`）在桌面端的等价物：输入条上的一个抽屉，每个 tab 一条线程。
     // 线程状态（可复用的子代理 + 问答）只能活在 host 里，回答经通知推回。
@@ -454,6 +466,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     }
 
     sessionId = sessionController.getCurrentSessionId();
+    subagentTasks.restore(readStoredSubagentTasks(sessionId), agent);
     // 恢复这个会话上次留下的 By The Way 线程（问答 + 子代理消息），
     // 所以关掉 app 再打开，抽屉里的 tab 与上下文都还在。
     if (sessionId && btwController) btwController.restore(readStoredBtwThreads(sessionId));
@@ -587,7 +600,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     let lastWaitTasksKey = '';
     pushTaskSnapshots = () => {
       if (!agent || !subagentTasks) return;
-      const backgroundTasks = projectBackgroundTasks(listBackgroundTasks({ status: 'all' }));
+      const backgroundTasks = projectBackgroundTasks(
+        listBackgroundTasks({ status: 'all' }).filter((task) => isOwnedBackgroundTask(task, agent!.taskOwnerId)),
+      );
       const backgroundKey = JSON.stringify(backgroundTasks);
       if (backgroundKey !== lastBackgroundTasksKey) {
         lastBackgroundTasksKey = backgroundKey;
@@ -1007,7 +1022,12 @@ async function handleCodexRequest(
         !ctx.sessionController.getParentSessionId() &&
         !ctx.sessionController.load(currentSessionId)
       ) {
+        if (!ctx.subagentTasks.canSwitchSession(ctx.agent)) {
+          ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'cannot switch threads while subagent execution is active');
+          return;
+        }
         ctx.sessionController.startNewSession({ parentSessionId });
+        ctx.subagentTasks.clearOwner(ctx.agent);
         ctx.setSessionId(ctx.sessionController.getCurrentSessionId());
       }
       // A codex-family driver (e.g. Multica) conveys the agent's model via
@@ -1048,10 +1068,18 @@ async function handleCodexRequest(
         ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'threadId must not be empty');
         return;
       }
+      if (threadId !== ctx.sessionId && !ctx.subagentTasks.canSwitchSession(ctx.agent)) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'cannot switch threads while subagent execution is active');
+        return;
+      }
       const resumed = ctx.sessionController.resume(threadId);
       if (!resumed.ok) {
         ctx.writeError(CODEX_ERROR_INVALID_PARAMS, resumed.message);
         return;
+      }
+      if (threadId !== ctx.sessionId) {
+        ctx.subagentTasks.clearOwner(ctx.agent);
+        ctx.subagentTasks.restore(readStoredSubagentTasks(threadId), ctx.agent);
       }
       ctx.sessionId = threadId;
       ctx.setSessionId(threadId);
@@ -1370,6 +1398,11 @@ async function handleCodexRequest(
         ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'taskId must not be empty');
         return;
       }
+      const task = loadBackgroundTask(taskId);
+      if (!task || !isOwnedBackgroundTask(task, ctx.agent.taskOwnerId)) {
+        ctx.writeResponse({ ok: false, message: `未知后台任务: ${taskId}` });
+        return;
+      }
       const forceAfterParam = Number(params.forceAfterMs);
       const forceAfterMs = Number.isFinite(forceAfterParam) && forceAfterParam >= 0 ? forceAfterParam : 1500;
       const result = await killBackgroundTaskById(taskId, 'SIGTERM', forceAfterMs);
@@ -1382,15 +1415,14 @@ async function handleCodexRequest(
       return;
     }
     case MICA_METHODS.backgroundTaskOutput: {
-      // The periodic snapshot drops a task the moment it stops running, so the
-      // response carries its own task projection (status + exit code) too.
+      // Include current task metadata alongside the output.
       const taskId = paramString(params, 'taskId');
       if (!taskId) {
         ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'taskId must not be empty');
         return;
       }
       const meta = loadBackgroundTask(taskId);
-      if (!meta) {
+      if (!meta || !isOwnedBackgroundTask(meta, ctx.agent.taskOwnerId)) {
         ctx.writeResponse({
           ok: false,
           message: `未知后台任务: ${taskId}`,
@@ -1446,9 +1478,27 @@ async function handleCodexRequest(
         ctx.writeResponse({ ok: false, message: `subagent ${taskId} 当前状态为 ${record.status}，无需停止。` });
         return;
       }
-      ctx.subagentTasks.kill(taskId, ctx.agent);
+      if (!ctx.subagentTasks.kill(taskId, ctx.agent)) {
+        ctx.writeResponse({ ok: false, message: `无法停止由其他进程管理的 subagent ${taskId}。` });
+        return;
+      }
       ctx.refreshTaskSnapshots();
       ctx.writeResponse({ ok: true, message: `已请求停止 subagent ${taskId}。` });
+      return;
+    }
+    case MICA_METHODS.restartSubagentTask: {
+      const taskId = paramString(params, 'taskId');
+      if (!taskId) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'taskId must not be empty');
+        return;
+      }
+      try {
+        const newTaskId = ctx.subagentTasks.restart(taskId, ctx.agent);
+        ctx.refreshTaskSnapshots();
+        ctx.writeResponse({ ok: true, taskId: newTaskId });
+      } catch (error) {
+        ctx.writeResponse({ ok: false, message: error instanceof Error ? error.message : String(error) });
+      }
       return;
     }
     case MICA_METHODS.btwAsk: {

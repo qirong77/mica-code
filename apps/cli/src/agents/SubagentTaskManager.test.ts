@@ -3,6 +3,21 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { formatSubagentTaskNotification, SubagentTaskManager } from './SubagentTaskManager.js';
 
 describe('SubagentTaskManager', () => {
+  it('persists timeline updates without emitting task-list changes', () => {
+    const owner = {} as AgentRuntime;
+    const persist = vi.fn();
+    const listener = vi.fn();
+    const manager = new SubagentTaskManager({ onChange: persist });
+    manager.subscribe(listener);
+    const tracked = manager.track({ owner, description: 'task', subagentType: 'test', model: 'm', effort: 'low', providerId: 'p', protocol: 'protocol' });
+    persist.mockClear();
+    listener.mockClear();
+    manager.appendTimeline(tracked.task.id, owner, { id: 'text', kind: 'text', text: 'progress' });
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({ provider_id: 'p', protocol: 'protocol', timeline: [expect.objectContaining({ text: 'progress' })] }), owner);
+    expect(listener).not.toHaveBeenCalled();
+    expect(manager.canSwitchSession(owner)).toBe(false);
+  });
+
   it('isolates task access by parent owner', () => {
     const firstOwner = {} as AgentRuntime;
     const secondOwner = {} as AgentRuntime;
@@ -488,3 +503,49 @@ function createDeferred<T>() {
   });
   return { promise, resolve };
 }
+
+
+describe('cross-process recovery', () => {
+  it('refreshes restored records while waiting and refuses to kill another process task', async () => {
+    const owner = {} as AgentRuntime;
+    let record = { id: 'remote-task', description: 'work', subagent_type: 'test', model: 'm', effort: 'low', status: 'running' as 'running' | 'completed', started_at: new Date().toISOString(), execution_pid: process.pid, execution_pending: true };
+    const manager = new SubagentTaskManager({ readRestoredTasks: () => [record] });
+    manager.restore([record], owner);
+    expect(manager.kill(record.id, owner)).toBeUndefined();
+    const waiting = manager.awaitTasks(owner, [record.id], { timeoutMs: 1000 });
+    record = { ...record, status: 'completed', execution_pending: false };
+    expect((await waiting)[0]?.status).toBe('completed');
+    expect(manager.list(owner)[0]?.status).toBe('completed');
+  });
+
+  it('releases a restart claim when the handler rejects the request', () => {
+    const owner = {} as AgentRuntime;
+    const record = { id: `retry-${process.pid}-${Date.now()}`, description: 'work', subagent_type: 'test', model: 'm', effort: 'low', status: 'failed' as const, started_at: new Date().toISOString(), execution_pending: false };
+    const manager = new SubagentTaskManager();
+    manager.restore([record], owner);
+    manager.setRestartHandler(() => { throw new Error('temporary failure'); });
+    expect(() => manager.restart(record.id, owner)).toThrow('temporary failure');
+    manager.setRestartHandler(() => 'replacement');
+    expect(manager.restart(record.id, owner)).toBe('replacement');
+  });
+
+  it('preserves live and uncertain tasks and claims each restart only once', () => {
+    const owner = {} as import('../agent/AgentRuntime.js').AgentRuntime;
+    const record = { id: `recovery-${process.pid}-${Date.now()}`, description: 'work', subagent_type: 'test', model: 'm', effort: 'low' as const, status: 'running' as const, started_at: new Date().toISOString(), execution_pid: process.pid, execution_pending: true };
+    const first = new SubagentTaskManager();
+    const second = new SubagentTaskManager();
+    first.restore([record], owner);
+    expect(first.get(record.id, owner)?.status).toBe('running');
+    first.kill(record.id, owner);
+    expect(first.get(record.id, owner)?.status).toBe('running');
+    first.restore([{ ...record, status: 'killed' }], owner);
+    first.setRestartHandler(() => 'new-task');
+    expect(() => first.restart(record.id, owner)).toThrow('Cannot confirm');
+    const finished = { ...record, status: 'failed' as const, execution_pending: false };
+    first.restore([finished], owner);
+    second.restore([finished], owner);
+    second.setRestartHandler(() => 'duplicate');
+    expect(first.restart(record.id, owner)).toBe('new-task');
+    expect(() => second.restart(record.id, owner)).toThrow('claimed');
+  });
+});

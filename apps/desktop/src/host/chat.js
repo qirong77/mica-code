@@ -2007,6 +2007,13 @@ export function registerChatIpc() {
     return hostTaskRequest(run, 'mica/subagentTasks/kill', { taskId })
   })
 
+  ipcMain.handle('chat:restart-subagent', (event, { id, taskId } = {}) => {
+    if (!id || !taskId) return { ok: false, error: '参数缺失' }
+    const run = runs.get(id)
+    if (run?.child) run.sender = event.sender
+    return hostTaskRequest(run, 'mica/subagentTasks/restart', { taskId })
+  })
+
   // By The Way（CLI 的 `/btw`）：一个问题一次往返，但回答**不等**在这次往返里——
   // host 立刻回 `{ ok: true }`，答案随后经 `mica/btw/updated` 快照到达。所以这个
   // 请求不会被 turn 在跑挡掉，也不改 run.running/hostPending。

@@ -134,7 +134,7 @@ vi.mock('@packages/mica-ui/index.js', () => ({
   },
 }));
 
-const { buildTaskListAgentCells, createTaskCommand } = await import('../commands/task.js');
+const { buildTaskListAgentCells, createTaskCommand, filterOwnedBackgroundTasks } = await import('../commands/task.js');
 
 describe('task command', () => {
   beforeEach(() => {
@@ -164,6 +164,20 @@ describe('task command', () => {
     expect(services.listRunningAgents).toHaveBeenCalledTimes(1);
     expect(mocks.setAgentStatusItems).toHaveBeenCalledWith(agents);
     expect(mocks.upsertPluginUI).toHaveBeenCalledWith(expect.objectContaining({ id: 'task-panel' }));
+  });
+
+  it('hides successful background tasks while retaining failed and interrupted ones', () => {
+    const base = mocks.backgroundTaskItemsGet()[1];
+    const tasks = [
+      { ...base, status: 'finished' as const, id: 'success', exitCode: 0 },
+      { ...base, status: 'finished' as const, id: 'nonzero', exitCode: 2 },
+      { ...base, id: 'failed', status: 'failed' as const },
+      { ...base, id: 'killed', status: 'killed' as const },
+      { ...base, id: 'running', status: 'running' as const },
+    ];
+    expect(filterOwnedBackgroundTasks(tasks, []).map((task) => task.id)).toEqual([
+      'nonzero', 'failed', 'killed', 'running',
+    ]);
   });
 
   it('renders agent rows with a status marker and task title only', () => {

@@ -480,6 +480,7 @@ export const MICA_METHODS = {
   backgroundTaskOutput: 'mica/backgroundTasks/output',
   subagentTaskDetail: 'mica/subagentTasks/detail',
   killSubagentTask: 'mica/subagentTasks/kill',
+  restartSubagentTask: 'mica/subagentTasks/restart',
   btwAsk: 'mica/btw/ask',
   btwCompact: 'mica/btw/compact',
   /**
@@ -685,8 +686,8 @@ export type MicaSubagentUsageSummary = {
 
 /**
  * One subagent task as the desktop's detail modal needs it. The periodic
- * `mica/subagentTasks/updated` snapshot stays lean (running tasks only, no
- * transcript); this is fetched on demand while a detail modal is open.
+ * `mica/subagentTasks/updated` snapshot stays lean (no transcript); this is
+ * fetched on demand while a detail modal is open.
  */
 export type MicaSubagentTaskDetail = {
   taskId: string;

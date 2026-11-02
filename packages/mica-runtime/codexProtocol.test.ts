@@ -30,6 +30,7 @@ describe('codex protocol framing', () => {
       backgroundTaskOutput: 'mica/backgroundTasks/output',
       subagentTaskDetail: 'mica/subagentTasks/detail',
       killSubagentTask: 'mica/subagentTasks/kill',
+      restartSubagentTask: 'mica/subagentTasks/restart',
       btwAsk: 'mica/btw/ask',
       btwCompact: 'mica/btw/compact',
       btwInterrupt: 'mica/btw/interrupt',

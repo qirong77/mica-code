@@ -23,6 +23,7 @@ import {
   type PluginEntryPlacement,
   type PluginPanelDisplay,
   type PluginPanelShortcut,
+  type PluginPanelShortcutItem,
 } from './PluginDesktop.js';
 import type { PluginSessionMenuItem } from './PluginSessionMenu.js';
 
@@ -563,8 +564,8 @@ function readPanelDisplay(
 /**
  * `desktop.panel.shortcuts`：输入框上方那排按钮。
  *
- * 每个按钮要么是 `action`（直接交给插件的动作处理器），要么是 `section`（打开面板并展开
- * 那一块）。只给标签的按钮在页面上点不动，所以这种清单错误直接拒绝。
+ * 每个按钮是 `action` / `section` / `items`（静态菜单）/ `menu`（条目来自视图）之一。
+ * 只给标签的按钮在页面上点不动，所以这种清单错误直接拒绝。
  */
 function readPanelShortcuts(
   input: unknown,
@@ -578,15 +579,62 @@ function readPanelShortcuts(
     if (!label) return { ok: false, error: 'desktop.panel.shortcuts 项缺少 label' };
     const action = readString(entry.action)?.trim();
     const section = readString(entry.section)?.trim();
-    if (!action && !section) {
-      return { ok: false, error: `desktop.panel.shortcuts「${label}」需要 action 或 section` };
+    const menu = readString(entry.menu)?.trim();
+    const items = readShortcutItems(entry.items, label);
+    if (!items.ok) return items;
+    const kinds = [action, section, menu, items.value].filter(Boolean).length;
+    if (kinds === 0) {
+      return {
+        ok: false,
+        error: `desktop.panel.shortcuts「${label}」需要 action、section、items 或 menu`,
+      };
     }
-    if (action && section) {
-      return { ok: false, error: `desktop.panel.shortcuts「${label}」不能同时给 action 与 section` };
+    if (kinds > 1) {
+      return {
+        ok: false,
+        error: `desktop.panel.shortcuts「${label}」只能给 action、section、items、menu 中的一种`,
+      };
     }
-    shortcuts.push({ label, ...(action ? { action } : {}), ...(section ? { section } : {}) });
+    shortcuts.push({
+      label,
+      ...(action ? { action } : {}),
+      ...(section ? { section } : {}),
+      ...(menu ? { menu } : {}),
+      ...(items.value ? { items: items.value } : {}),
+    });
   }
   return { ok: true, value: shortcuts };
+}
+
+/** 静态菜单条目：每项都是 action 或 section，二者必居其一。 */
+function readShortcutItems(
+  input: unknown,
+  parent: string,
+): { ok: true; value?: PluginPanelShortcutItem[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true };
+  if (!Array.isArray(input) || input.length === 0) {
+    return { ok: false, error: `desktop.panel.shortcuts「${parent}」的 items 必须是非空数组` };
+  }
+  const items: PluginPanelShortcutItem[] = [];
+  for (const entry of input) {
+    if (!isRecord(entry)) {
+      return { ok: false, error: `desktop.panel.shortcuts「${parent}」的 items 项必须是对象` };
+    }
+    const label = readString(entry.label)?.trim();
+    if (!label) {
+      return { ok: false, error: `desktop.panel.shortcuts「${parent}」的 items 项缺少 label` };
+    }
+    const action = readString(entry.action)?.trim();
+    const section = readString(entry.section)?.trim();
+    if (!action === !section) {
+      return {
+        ok: false,
+        error: `desktop.panel.shortcuts「${parent}」的 items「${label}」需要且只能给 action 或 section`,
+      };
+    }
+    items.push({ label, ...(action ? { action } : {}), ...(section ? { section } : {}) });
+  }
+  return { ok: true, value: items };
 }
 
 /**

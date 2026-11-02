@@ -293,8 +293,9 @@ async function runQuickCompact(input: {
         next.lastSavedTokens = Math.round(savedTokens) || 0;
         next.lastActivityAt = new Date(nowMs).toISOString();
         persistState(ctx, next, owner);
-        // 界面上看得见的一次：否则「到底压没压」只能翻插件日志。
-        ctx.ui?.notice(describeGain(beforeTokens, afterTokens, savedTokens), { owner });
+        // 界面上看得见的一次：否则「到底压没压」只能翻插件日志。带 command 是为了让
+        // 「同一段历史被连压几次」就地合并成一条，而不是在对话里排成一列。
+        ctx.ui?.notice(describeGain(beforeTokens, afterTokens, savedTokens), { owner, command: 'auto-compact' });
       },
     });
     if (outcome.status === 'skipped') {
@@ -322,9 +323,27 @@ async function runQuickCompact(input: {
 }
 
 /**
- * 用户回来了：会话空闲够久就先做一次快速压缩，让接下来那一轮请求按压小的历史发出。
+ * 抢跑压缩要判断的「现在多大」：上一次真实请求的输入量 + 当前模型的窗口。
  *
- * 不看上下文大小——「这次请求马上就到」本身就是理由，小上下文压不动也无所谓。
+ * 用 lastUsage 而不是自己估一遍历史：它和界面上那个 ctx 徽标同源，插件与用户看到的是
+ * 同一个数；压缩保留它（Stats 对账口径），所以压缩之后再读也不会立刻变小。
+ */
+function contextUsage(agentApi: NonNullable<PluginContext['agent']>): {
+  ctxTokens: number | null;
+  contextWindowSize?: number;
+} {
+  const usage = agentApi.lastUsage?.() ?? null;
+  const window = agentApi.contextWindowSize;
+  return {
+    ctxTokens: usage && Number.isFinite(usage.inputTokens) ? usage.inputTokens : null,
+    ...(Number.isFinite(window) && window! > 0 ? { contextWindowSize: window } : {}),
+  };
+}
+
+/**
+ * 用户回来了：会话空闲够久、且上下文已经大到请求时会压，就先做一次快速压缩。
+ *
+ * 阈值是硬条件：空闲本身不是理由，空闲之后那段历史「大到本来就要压」才是。
  */
 async function compactOnReturn(
   ctx: PluginContext,
@@ -335,7 +354,7 @@ async function compactOnReturn(
 ): Promise<void> {
   const settings = readSettings(ctx, owner);
   const counters = normalizeCounters(ctx.sessionState?.get(owner));
-  if (!shouldCompactOnReturn({ settings, counters, idleMs })) return;
+  if (!shouldCompactOnReturn({ settings, counters, idleMs, ...contextUsage(agentApi) })) return;
   await runQuickCompact({
     ctx,
     agentApi,
@@ -350,8 +369,9 @@ async function compactOnReturn(
 /**
  * 焦点回到输入框时的快速压缩：比「敲了第一个字」早一步。
  *
- * 不看空闲时长——人已经坐在输入框前、随时可能按发送。守住不白干的只有「上一次压缩之后
- * 有没有新轮次」（`shouldCompactOnFocus`），以及宿主自己回的 `busy`。
+ * 不看空闲时长——人已经坐在输入框前、随时可能按发送。守住不白干的是三条：上下文已到
+ * 快速压缩阈值、上一次压缩之后确实跑过新一轮（`shouldCompactOnFocus`）、以及宿主自己
+ * 回的 `busy`。点进点出输入框是高频动作，三条缺一条就会变成「没在对话却一路在压」。
  */
 async function compactOnFocus(
   ctx: PluginContext,
@@ -361,7 +381,7 @@ async function compactOnFocus(
 ): Promise<void> {
   const settings = readSettings(ctx, owner);
   const counters = normalizeCounters(ctx.sessionState?.get(owner));
-  if (!shouldCompactOnFocus({ settings, counters })) return;
+  if (!shouldCompactOnFocus({ settings, counters, ...contextUsage(agentApi) })) return;
   await runQuickCompact({
     ctx,
     agentApi,

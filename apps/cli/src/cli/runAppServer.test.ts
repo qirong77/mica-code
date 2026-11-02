@@ -153,14 +153,15 @@ describe('task snapshot projection (mica task extension)', () => {
     ...partial,
   });
 
-  it('surfaces only starting/running background tasks with snapshot fields', () => {
+  it('surfaces active and recent finished background tasks with snapshot fields', () => {
     const result = projectBackgroundTasks([
       task({ status: 'starting' }),
       task({ id: 'running-1', status: 'running', exit_code: null }),
       task({ id: 'done', status: 'finished', finished_at: '2026-08-06T00:01:00.000Z' }),
       task({ id: 'failed', status: 'failed' }),
     ]);
-    expect(result.map((item) => item.id)).toEqual(['abc123', 'running-1']);
+    expect(result.map((item) => item.id)).toEqual(['abc123', 'running-1', 'done', 'failed']);
+    expect(result[2]).toMatchObject({ status: 'finished', finishedAt: '2026-08-06T00:01:00.000Z' });
     expect(result[0]).toEqual({
       id: 'abc123',
       command: 'npm run dev',
@@ -169,6 +170,19 @@ describe('task snapshot projection (mica task extension)', () => {
       status: 'starting',
       startedAt: '2026-08-06T00:00:00.000Z',
     });
+  });
+
+  it('retains all active background tasks and only the 20 most recent finished tasks', () => {
+    const finished = Array.from({ length: 21 }, (_, index) => task({
+      id: `finished-${index}`,
+      status: 'finished',
+      finished_at: new Date(Date.UTC(2026, 7, 6, 0, index)).toISOString(),
+    }));
+    const result = projectBackgroundTasks([...finished, task({ id: 'active' })]);
+    expect(result).toHaveLength(21);
+    expect(result.map((item) => item.id)).not.toContain('finished-0');
+    expect(result.map((item) => item.id)).toContain('finished-20');
+    expect(result.map((item) => item.id)).toContain('active');
   });
 
   it('carries finish metadata when present', () => {
@@ -190,8 +204,7 @@ describe('task snapshot projection (mica task extension)', () => {
   });
 
   it('projects a single finished task keeping finish metadata for the output view', () => {
-    // The snapshot filter drops finished rows; the on-demand output request uses
-    // this projector so the client can still show status + exit code.
+    // The on-demand output request uses the same projector as snapshots.
     const result = projectBackgroundTask(
       task({
         id: 'done',
@@ -212,7 +225,7 @@ describe('task snapshot projection (mica task extension)', () => {
     });
   });
 
-  it('projects only running subagents with nested activities', () => {
+  it('projects running and recent completed subagents with nested activities', () => {
     const record = (partial: Partial<SubagentTaskRecord>): SubagentTaskRecord => ({
       id: 'task-1',
       description: 'find usages',
@@ -246,7 +259,34 @@ describe('task snapshot projection (mica task extension)', () => {
           { id: 'a1', summary: 'searching', toolName: 'grep_search', startedAt: '2026-08-06T00:00:01.000Z' },
         ],
       },
+      {
+        taskId: 'task-2',
+        subagentType: 'Explore',
+        description: 'find usages',
+        status: 'completed',
+        startedAt: '2026-08-06T00:00:00.000Z',
+        finishedAt: '2026-08-06T00:01:00.000Z',
+        activities: [],
+      },
     ]);
+  });
+
+  it('retains all running subagents and only the 20 most recent completed subagents', () => {
+    const base: SubagentTaskRecord = {
+      id: 'running', description: 'find usages', subagent_type: 'Explore', model: 'gpt-5',
+      effort: 'medium', status: 'running', started_at: '2026-08-06T00:00:00.000Z',
+    };
+    const completed = Array.from({ length: 21 }, (_, index) => ({
+      ...base,
+      id: `completed-${index}`,
+      status: 'completed' as const,
+      finished_at: new Date(Date.UTC(2026, 7, 6, 0, index)).toISOString(),
+    }));
+    const result = projectSubagentTasks([...completed, base]);
+    expect(result).toHaveLength(21);
+    expect(result.map((item) => item.taskId)).not.toContain('completed-0');
+    expect(result.map((item) => item.taskId)).toContain('completed-20');
+    expect(result.map((item) => item.taskId)).toContain('running');
   });
 });
 

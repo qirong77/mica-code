@@ -213,13 +213,72 @@ describe('parsePluginManifest desktop panel', () => {
       base({ desktop: { panel: { shortcuts: [{ label: '立刻检查' }] } } }),
     );
     expect(noTarget.ok).toBe(false);
-    if (!noTarget.ok) expect(noTarget.error).toContain('action 或 section');
+    if (!noTarget.ok) expect(noTarget.error).toContain('action、section、items 或 menu');
 
     const both = parsePluginManifest(
       base({ desktop: { panel: { shortcuts: [{ label: '立刻检查', action: 'a', section: 'b' }] } } }),
     );
     expect(both.ok).toBe(false);
-    if (!both.ok) expect(both.error).toContain('不能同时');
+    if (!both.ok) expect(both.error).toContain('只能给');
+  });
+
+  it('accepts a grouped shortcut and a view-driven menu', () => {
+    const result = parsePluginManifest(
+      base({
+        desktop: {
+          panel: {
+            shortcuts: [
+              {
+                label: '频道',
+                items: [
+                  { label: '同步频道', action: 'check.now' },
+                  { label: '频道设置', section: '频道设置' },
+                ],
+              },
+              { label: 'Pull Request', menu: 'reviews' },
+            ],
+          },
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.desktopPanel?.shortcuts).toEqual([
+        {
+          label: '频道',
+          items: [
+            { label: '同步频道', action: 'check.now' },
+            { label: '频道设置', section: '频道设置' },
+          ],
+        },
+        { label: 'Pull Request', menu: 'reviews' },
+      ]);
+    }
+  });
+
+  it('rejects a menu entry that has both or neither target', () => {
+    const empty = parsePluginManifest(
+      base({ desktop: { panel: { shortcuts: [{ label: '频道', items: [] }] } } }),
+    );
+    expect(empty.ok).toBe(false);
+
+    const both = parsePluginManifest(
+      base({
+        desktop: {
+          panel: {
+            shortcuts: [{ label: '频道', items: [{ label: '同步', action: 'a', section: 'b' }] }],
+          },
+        },
+      }),
+    );
+    expect(both.ok).toBe(false);
+    if (!both.ok) expect(both.error).toContain('需要且只能给');
+
+    const mixed = parsePluginManifest(
+      base({ desktop: { panel: { shortcuts: [{ label: '频道', menu: 'm', action: 'a' }] } } }),
+    );
+    expect(mixed.ok).toBe(false);
+    if (!mixed.ok) expect(mixed.error).toContain('只能给');
   });
 });
 

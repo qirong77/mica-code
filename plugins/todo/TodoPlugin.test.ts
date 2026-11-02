@@ -162,6 +162,48 @@ describe('TodoPlugin', () => {
     expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list is empty.');
   });
 
+  it('keeps an interrupted tool-batch snapshot visible and supplies it to the next prompt', async () => {
+    vi.spyOn(micaUi, 'useScheduleState').mockImplementation((store) => store.get());
+    const harness = createTodoHarness(disposeCallbacks, true);
+    const owner = {};
+    harness.setOwner(owner);
+    await micaTools.execute('todo_write', { todos: [
+      { content: 'Finished', status: 'completed' },
+      { content: 'Continue', status: 'in_progress' },
+    ] });
+    await harness.hooks.emit('turn:after', {
+      owner, input: micaRuntime.createRuntimeInput('start', 'ui'), elapsedMs: 10,
+      hasError: false, outcome: 'aborted',
+    });
+    const render = harness.upsert.mock.calls[0]?.[0].component as () => unknown;
+    expect(render()).not.toBeNull();
+    const input = micaRuntime.createRuntimeInput('resume', 'ui');
+    await harness.hooks.emit('turn:before', { owner, runtime: {}, input });
+    const prompt = await harness.hooks.pipeline('prompt:build', { input, content: 'resume' });
+    expect(prompt.content).toContain('[completed] Finished');
+    expect(prompt.content).toContain('[in_progress] Continue');
+    const otherInput = micaRuntime.createRuntimeInput('other', 'ui');
+    await harness.hooks.emit('turn:before', { owner: {}, runtime: {}, input: otherInput });
+    const otherPrompt = await harness.hooks.pipeline('prompt:build', { input: otherInput, content: 'other' });
+    expect(otherPrompt.content).toBe('other');
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('TODO 清单已更新：1/2 完成，剩 1 项。\n- [ ] Continue');
+  });
+
+  it('retains unfinished todos after failure and closes them after a successful continuation', async () => {
+    vi.spyOn(micaUi, 'useScheduleState').mockImplementation((store) => store.get());
+    const harness = createTodoHarness(disposeCallbacks, true);
+    const owner = {};
+    harness.setOwner(owner);
+    await micaTools.execute('todo_write', { todos: [{ content: 'Continue', status: 'in_progress' }] });
+    const input = micaRuntime.createRuntimeInput('start', 'ui');
+    await harness.hooks.emit('turn:after', { owner, input, elapsedMs: 10, hasError: true, outcome: 'error' });
+    const render = harness.upsert.mock.calls[0]?.[0].component as () => unknown;
+    expect(render()).not.toBeNull();
+    await harness.hooks.emit('turn:after', { owner, input, elapsedMs: 10, hasError: false, outcome: 'completed' });
+    expect(render()).toBeNull();
+  });
+
   it('keeps the plan readable through /todo show after the turn ended', async () => {
     const harness = createTodoHarness(disposeCallbacks);
 

@@ -145,13 +145,28 @@ export const PLUGIN_PANEL_DISPLAYS = ['drawer', 'modal'] as const;
 export type PluginPanelDisplay = (typeof PLUGIN_PANEL_DISPLAYS)[number];
 
 /**
- * 一个快捷按钮。二选一：
+ * 一个快捷按钮，四种形态里选一种：
  * - `action`：点了直接把该动作交给插件的 `action` 处理器（不打开面板）；
- * - `section`：点了打开面板并展开指定标题的那一块（`PluginPanelSection.title`）。
+ * - `section`：点了打开面板并展开指定标题的那一块（`PluginPanelSection.title`）；
+ * - `items`：悬停/点击展开一层**静态**菜单，条目各自是 action 或 section；
+ * - `menu`：同样是一层菜单，但条目由插件在视图的 `menus[menu]` 里给（运行期才知道的
+ *   内容：认领的开发副本、本机已配的通道）。
  *
- * 两者都没有、或者同时给两个都算清单错误——宿主不知道该怎么表现，只能猜。
+ * 四种都给、或者一种都不给都算清单错误——宿主不知道该怎么表现，只能猜。
+ *
+ * 为什么需要分组：同一个能力面常常是「一个常用动作 + 它的配置」。两个按钮并排会一路
+ * 把输入框上方挤满，名字还都很长；收进一层菜单之后入口只剩一个词，悬停就看到两件事。
  */
 export type PluginPanelShortcut = {
+  label: string;
+  action?: string;
+  section?: string;
+  menu?: string;
+  items?: PluginPanelShortcutItem[];
+};
+
+/** 静态菜单里的一项，语义与顶层快捷按钮一致（二选一）。 */
+export type PluginPanelShortcutItem = {
   label: string;
   action?: string;
   section?: string;

@@ -15,19 +15,11 @@ import type { PluginSessionMenuHandler, PluginSessionMenuRegistry } from './Plug
 import type { PluginSkillRegistrationOptions } from './PluginDesktop.js';
 import type { RuntimeSkillRegistration } from '@packages/mica-skills/index.js';
 import type { Skill } from '@packages/mica-skills/types.js';
-import {
-  loadManifestSkills,
-  publishPluginSkills,
-  type PluginSkillPublishEntry,
-} from './PluginSkills.js';
+import { loadManifestSkills, publishPluginSkills, type PluginSkillPublishEntry } from './PluginSkills.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
-import {
-  PluginActionRegistry,
-  type PluginActionInput,
-  type PluginActionResult,
-} from './PluginActions.js';
+import { PluginActionRegistry, type PluginActionInput, type PluginActionResult } from './PluginActions.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 
 export type PluginSetupReport = {
@@ -111,8 +103,8 @@ export class PluginManager {
    * 能提供 `ctx.actions`；真正执行动作的是「配置页宿主」——它可以是常驻会话进程，也可以
    * 是一次性进程（`mica plugin-action`）。
    */
-  private readonly actions = new PluginActionRegistry(
-    (pluginId) => (this.plugins.get(pluginId)?.manifest?.actions ?? []).map((entry) => entry.key),
+  private readonly actions = new PluginActionRegistry((pluginId) =>
+    (this.plugins.get(pluginId)?.manifest?.actions ?? []).map((entry) => entry.key),
   );
 
   /** 执行某个插件声明的配置页动作。找不到处理器时报错由调用方翻译成用户能读懂的话。 */
@@ -206,9 +198,7 @@ export class PluginManager {
           logger.warn('plugin:skill-shadowed', { skipped: registration.skipped });
           health.report({
             level: 'warn',
-            message: `skill 未注册：${registration.skipped
-              .map((item) => `${item.name}（${item.reason}）`)
-              .join('；')}`,
+            message: `skill 未注册：${registration.skipped.map((item) => `${item.name}（${item.reason}）`).join('；')}`,
           });
         }
         const name = skill.name.trim();
@@ -267,6 +257,15 @@ export class PluginManager {
         ctx.agent = {
           mode: agentRegistry.mode,
           onIterationRewrite: (handler) => agentRegistry.onIterationRewrite(plugin.id, handler),
+          ...(agentRegistry.lastUsage ? { lastUsage: () => agentRegistry.lastUsage!() } : {}),
+          // getter 而不是快照：会话里切模型之后窗口会变，插件下一次读到的必须是新的那个。
+          ...(agentRegistry.contextWindowSize
+            ? {
+                get contextWindowSize() {
+                  return agentRegistry.contextWindowSize!();
+                },
+              }
+            : {}),
           ...(agentRegistry.compactIdleHistory
             ? {
                 compactIdleHistory: (hook) => agentRegistry.compactIdleHistory!(plugin.id, hook),
@@ -319,9 +318,7 @@ export class PluginManager {
 
       // 清单声明的能力必须都能兑现，否则插件一定会在运行期踩空。放在 setup 之前判断，
       // 装配出来的 ctx 就是事实，不需要插件自己再猜。
-      const missing = options.ignoreRequirements
-        ? []
-        : missingRequirements(plugin.manifest?.requires ?? [], ctx);
+      const missing = options.ignoreRequirements ? [] : missingRequirements(plugin.manifest?.requires ?? [], ctx);
       if (missing.length > 0) {
         // 缺宿主能力是**这一份宿主**的事实，不是插件「现在怎么样」：TUI、`mica exec`、
         // `mica commit` 本来就没有 `desktop` 这些面。写进所有宿主共享的 plugin-health 会

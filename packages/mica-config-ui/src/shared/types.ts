@@ -468,6 +468,16 @@ export type ConfigWebPluginPanelShortcut = {
   label: string;
   action?: string;
   section?: string;
+  /** 条目来自面板视图的 `menus[menu]`（运行期才知道的内容）。 */
+  menu?: string;
+  /** 静态菜单条目。 */
+  items?: ConfigWebPluginPanelShortcutItem[];
+};
+
+export type ConfigWebPluginPanelShortcutItem = {
+  label: string;
+  action?: string;
+  section?: string;
 };
 
 /** 一项运行条件的静态描述；此刻是否满足由 `readDesktopChecks()` 另取。 */

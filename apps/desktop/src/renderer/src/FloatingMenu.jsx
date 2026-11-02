@@ -4,7 +4,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
  * 悬浮菜单的壳与行。资源管理器、源代码管理、Git 变更树都用它，样式因此天然一致
  * （VS Code 的菜单：圆角 6px、1px 边框、面板底色、行高 28px）。
  */
-export function FloatingMenu({ x, y, minWidth, onClose, ignoreSelector, children }) {
+export function FloatingMenu({
+  x,
+  y,
+  minWidth,
+  onClose,
+  ignoreSelector,
+  placement = 'below',
+  children
+}) {
   const ref = useRef(null)
   const [pos, setPos] = useState({ x, y })
   useEffect(() => {
@@ -28,11 +36,14 @@ export function FloatingMenu({ x, y, minWidth, onClose, ignoreSelector, children
     const w = ref.current.offsetWidth
     const h = ref.current.offsetHeight
     let px = x
-    let py = y
+    // `above`：y 给的是触发按钮的上沿，菜单整体摆到它上面（留 6px）。输入框上方那排
+    // 快捷按钮往下开就会压住输入框，而菜单高度只有渲染完才知道，所以只能在这里算。
+    let py = placement === 'above' ? y - h - 6 : y
     if (px + w > window.innerWidth - 4) px = Math.max(4, window.innerWidth - w - 4)
+    if (py < 4) py = placement === 'above' ? y + 6 : 4
     if (py + h > window.innerHeight - 4) py = Math.max(4, window.innerHeight - h - 4)
     setPos({ x: px, y: py })
-  }, [x, y])
+  }, [x, y, placement])
   return (
     <div
       ref={ref}
@@ -62,8 +73,10 @@ export function MenuItem({ icon: Icon, label, hint, title, danger, disabled, onC
       }`}
       onClick={onClick}
     >
+      {/* 图标槽固定占位：插件给的条目没有图标名，少一个图标不该让行高或缩进变样，
+          更不该让整份菜单崩掉。 */}
       <span className="grid w-4 shrink-0 place-items-center">
-        <Icon size={14} className="shrink-0 opacity-75" />
+        {Icon ? <Icon size={14} className="shrink-0 opacity-75" /> : null}
       </span>
       <span className="flex-1 truncate">{label}</span>
       {hint && <span className="shrink-0 text-[11px] text-fg-dim">{hint}</span>}

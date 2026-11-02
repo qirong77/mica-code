@@ -12,10 +12,15 @@ export function TaskStatusBar(): React.ReactNode {
   const agents = useScheduleState(agentStatusItems);
   const pluginItems = useScheduleState(pluginStatusItems);
   const activeTasks = tasks.filter((task) => isActiveBackgroundTaskStatus(task.status));
+  const recentTasks = tasks.filter(
+    (task) => !isActiveBackgroundTaskStatus(task.status) &&
+      (task.status !== 'finished' || (task.exitCode != null && task.exitCode !== 0)),
+  );
   const activeSubagentTasks = subagentTasks.filter((task) => isActiveSubagentTaskStatus(task.status));
+  const visibleSubagentTasks = subagentTasks.filter((task) => task.status !== 'completed');
   const backgroundAgents = agents.filter((agent) => !agent.current);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const forest = useMemo(() => buildSubagentTaskForest(activeSubagentTasks), [activeSubagentTasks]);
+  const forest = useMemo(() => buildSubagentTaskForest(visibleSubagentTasks), [visibleSubagentTasks]);
 
   useEffect(() => {
     if (activeTasks.length === 0 && activeSubagentTasks.length === 0 && backgroundAgents.length === 0) return;
@@ -26,7 +31,8 @@ export function TaskStatusBar(): React.ReactNode {
   if (
     pluginItems.length === 0 &&
     activeTasks.length === 0 &&
-    activeSubagentTasks.length === 0 &&
+    recentTasks.length === 0 &&
+    visibleSubagentTasks.length === 0 &&
     backgroundAgents.length === 0
   ) {
     return null;
@@ -40,7 +46,7 @@ export function TaskStatusBar(): React.ReactNode {
       {forest.roots.map((task) => (
         <SubagentTaskRow key={task.id} task={task} childrenByParent={forest.childrenByParent} nowMs={nowMs} />
       ))}
-      {activeTasks.map((task) => (
+      {[...activeTasks, ...recentTasks].map((task) => (
         <BackgroundTaskRow key={task.id} task={task} compact nowMs={nowMs} />
       ))}
       {backgroundAgents.map((agent) => (

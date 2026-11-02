@@ -825,7 +825,8 @@ function textOf(value) {
 function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs, onOpen }) {
   const activities = (task.activities || []).filter((activity) => activity.toolName !== 'agent')
   const childTasks = childrenByParent.get(task.taskId) || []
-  const age = formatLogElapsed(Math.max(0, nowMs - (Date.parse(task.startedAt) || nowMs)))
+  const endMs = Date.parse(task.finishedAt) || nowMs
+  const age = formatLogElapsed(Math.max(0, endMs - (Date.parse(task.startedAt) || endMs)))
   const indent = Math.min(depth * 14, 42)
   // 与 CLI SubagentTaskRow 对齐：嵌套行（depth > 0）和活动行共用同一个
   // ` ⎿ ` 前缀（⎿ 列对齐），并随深度缩进；5 列 grid 放不下第 6 个前缀格，
@@ -834,7 +835,7 @@ function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs, onOpen 
     <>
       {depth > 0 && <span className="chat-task-child-prefix"> ⎿ </span>}
       <span className="chat-task-kind">🤖(subagent)</span>
-      <span className="chat-task-status chat-task-status-running">{task.status}</span>
+      <span className={`chat-task-status ${task.status === 'running' ? 'chat-task-status-running' : ''}`}>{task.status}</span>
       <span className="chat-task-runtime">{age}</span>
       <span className="chat-task-type">{task.subagentType}</span>
       <span className="chat-task-description">{compactLine(task.description, 180)}</span>
@@ -877,7 +878,7 @@ function SubagentStatusDock({ tasks, now = Date.now(), onOpen }) {
   const { roots, childrenByParent } = useMemo(() => buildTaskForest(tasks), [tasks])
   if (!roots.length) return null
   return (
-    <section className="chat-task-dock chat-subagent-dock" aria-label="运行中的 Subagent">
+    <section className="chat-task-dock chat-subagent-dock" aria-label="Subagent 任务">
       {roots.map((task) => (
         <SubagentTaskRowView
           key={task.taskId}
@@ -1254,7 +1255,7 @@ function subagentStatusClass(status) {
 
 // `runKey` 是持有这个 run 的节点 id（工作区只有一份，所以就是本节点的 id）：
 // 任务记录只活在 host 进程里，所以详情/停止必须打到那个 run 上。
-function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, onOpenInEditor }) {
+function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, onRestart, onOpenInEditor }) {
   const load = useCallback(
     () => window.mica.chat.subagentDetail(runKey, initialTask.taskId),
     [runKey, initialTask.taskId]
@@ -1266,6 +1267,7 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, o
     load
   })
   const [stopping, setStopping] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   // 点开的工具详情：就用主对话那一个弹窗，参数/输出/「在编辑器中打开」都在里面。
   const [openTool, setOpenTool] = useState(null)
   const task = detail?.task || initialTask
@@ -1320,7 +1322,15 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, o
           <button type="button" className="chat-modal-danger" disabled={stopping} onClick={stop}>
             停止
           </button>
-        ) : null
+        ) : (
+          <button type="button" disabled={restarting} title="创建新任务，并使用原任务和最近活动作为上下文" onClick={async () => {
+            if (restarting) return
+            setRestarting(true)
+            try { await onRestart?.(task.taskId) } finally { setRestarting(false) }
+          }}>
+            {restarting ? '正在重启…' : '重启'}
+          </button>
+        )
       }
     >
       {error && <div className="chat-modal-note is-warn">{error}</div>}
@@ -1670,20 +1680,26 @@ export function latestTodoItems(messages) {
 }
 
 /**
- * 本轮要显示的清单。
- *
- * `turnId` 必须传当前活跃的轮次：`messages` 是整段会话历史，最后一
- * 条 `todo_write` 很可能属于上一轮，直接渲染会让早先的计划一直挂在页面上。
- * 轮次结束（`running` false）时也会收起，规则与 TUI 面板同一份。
+ * 当前轮次的清单正常显示；中断或失败后保留未完成清单并投影为暂停。
  */
-export function todoPanelForTurn(messages, turnId, running, hidden = false) {
-  // desktop 没有「手动打开」的入口：面板就是实时指示器，轮次结束即收起。
-  return resolveTodoPanel(todoSnapshotFromMessages(messages), {
-    running,
-    open: running,
+export function todoPanelForTurn(messages, turnId, running, hidden = false, interrupted = false, persistedInput = null) {
+  let snapshot = todoSnapshotFromMessages(messages)
+  if (!messages.some((message) => message.kind === 'tool' && message.tool?.tool === 'todo_write' && message.tool.status === 'completed') && persistedInput) {
+    snapshot = projectTodoSnapshot([{ input: persistedInput }])
+  }
+  const live = running && turnId != null && snapshot.turnId === turnId
+  const pending = snapshot.items.some((item) => item.status !== 'completed')
+  return resolveTodoPanel(snapshot, {
+    running: live,
+    open: live || (interrupted && pending),
     turnId,
     hidden
   })
+}
+
+export function restoredTodoInterrupted(meta, state) {
+  if (!state || state.running || state.remoteRunning) return false
+  return ['running', 'aborted', 'error'].includes(meta?.turnState)
 }
 
 function TodoDock({ panel }) {
@@ -2639,6 +2655,7 @@ export function ChatView({
   onSessionBound,
   onOpenFile,
   onOpenDocument,
+  onOpenReview,
   onNewSession,
   onResumeSession,
   onOpenTerminal,
@@ -2651,6 +2668,7 @@ export function ChatView({
   const cwdRef = useLatest(cwd)
   const onSessionBoundRef = useLatest(onSessionBound)
   const onOpenFileRef = useLatest(onOpenFile)
+  const onOpenReviewRef = useLatest(onOpenReview)
   const onOpenDocumentRef = useLatest(onOpenDocument)
   const onNewSessionRef = useLatest(onNewSession)
   const onResumeSessionRef = useLatest(onResumeSession)
@@ -2686,6 +2704,7 @@ export function ChatView({
   // 会话时不该被上一条会话的节流窗口吞掉。
   const inputActivityRef = useRef({ nodeId: null, at: 0 })
   const todoHiddenRef = useRef(new Map())
+  const todoInterruptedRef = useRef(new Map())
   // 输入历史与 CLI 共享（~/.mica/storage.json 的 inputHistory），跨节点共用
   // 一份数组；挂载时从磁盘加载，发送时异步回写。
   const inputHistoryRef = useRef([])
@@ -2852,7 +2871,7 @@ export function ChatView({
   const phaseStartedAtRef = useRef(0)
   // 有活跃后台任务 / subagent / wait_for 等待时每秒刷新耗时，空闲时停表。
   const hasLiveTasks =
-    backgroundTasks.length > 0 || subagentTasks.length > 0 || waitTasks.length > 0
+    backgroundTasks.some((task) => task.status === 'starting' || task.status === 'running') || subagentTasks.some((task) => task.status === 'running') || waitTasks.length > 0
   useEffect(() => {
     if (!hasLiveTasks) return undefined
     const timer = window.setInterval(() => setTaskNow(Date.now()), 1000)
@@ -2866,6 +2885,7 @@ export function ChatView({
   const canPrevConversationRef = useRef(false)
   const [meta, setMeta] = useState(null)
   const [todoHidden, setTodoHidden] = useState(false)
+  const [todoInterrupted, setTodoInterrupted] = useState(false)
   // 会话右键菜单里的插件项（清单 `desktop.sessionMenu`），来自缓存的插件列表。
   const sessionMenuPlugins = useSessionMenuPlugins()
   const overridesRef = useRef(new Map()) // nodeId -> { model, variant, role }
@@ -3501,6 +3521,19 @@ export function ChatView({
     [appendNotice, runKey]
   )
 
+  const restartSubagent = useCallback(async (taskId) => {
+    try {
+      const res = await window.mica.chat.restartSubagent(runKey, taskId)
+      if (!res?.ok || res.result?.ok === false) {
+        appendNotice(res?.error || res?.result?.message || '重启 subagent 失败', 'error')
+        return
+      }
+      setTaskDetail(null)
+    } catch (error) {
+      appendNotice(`重启 subagent 失败：${error?.message || error}`, 'error')
+    }
+  }, [appendNotice, runKey])
+
   // 把文本插到光标处（粘贴图片与移动端「上传照片」共用）。以 textarea 当前的值为准，
   // 因为选照片/上传是异步的，回调执行时闭包里的 input 可能已经过期。
   const insertComposerText = useCallback(
@@ -4004,7 +4037,7 @@ export function ChatView({
           finishStream(timestamp)
           finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
           // 计划不在这里收口：turn 正常结束不代表残留项做完了。清单保持模型写下的
-          // 状态，`todoPanelForTurn` 只显示属于本轮的那份清单。
+          // 状态，中断或失败时只在展示中将进行中投影为暂停。
           // failed turn 的真实原因在 turn/completed 通知的 error 字段里透传，
           // 否则模型 400 / provider 配置错误等失败只会把 phase 置为 error，
           // 用户看到“运行了又马上停止”却没有任何提示。
@@ -4039,6 +4072,9 @@ export function ChatView({
             })
           }
           finishedRef.current = true
+          const interrupted = event.part?.reason !== 'completed'
+          todoInterruptedRef.current.set(nodeIdRef.current, interrupted)
+          setTodoInterrupted(interrupted)
           setRunning(false)
           setStopping(false)
           setRetryInfo(null)
@@ -4058,7 +4094,7 @@ export function ChatView({
           setBackgroundTasks(Array.isArray(event.tasks) ? event.tasks : [])
           break
         case 'subagent_tasks':
-          // Host 快照：整体替换运行中 subagent 列表（含后台 subagent）。
+          // Host 快照：整体替换运行中及最近结束的 subagent 列表。
           setSubagentTasks(Array.isArray(event.tasks) ? event.tasks : [])
           break
         case 'wait_tasks':
@@ -4121,6 +4157,10 @@ export function ChatView({
       }
       if (!finished && payload?.exitCode && !payload?.error) {
         appendNotice(`mica 进程已退出（code ${payload.exitCode}）`, 'error')
+      }
+      if (!finished) {
+        todoInterruptedRef.current.set(nodeIdRef.current, true)
+        setTodoInterrupted(true)
       }
       finishedRef.current = true
       setRunning(false)
@@ -4302,6 +4342,7 @@ export function ChatView({
     updateMessages([])
     setInput(nextInput)
     setTodoHidden(todoHiddenRef.current.get(nodeId) === true)
+    setTodoInterrupted(todoInterruptedRef.current.get(nodeId) === true)
     setPicker(null)
     setPickerIndex(0)
     queuedMessageIdsRef.current = []
@@ -4352,6 +4393,11 @@ export function ChatView({
             : finalMessages
       )
       if (finalMeta) setMeta(finalMeta)
+      if (finalMeta) {
+        const interrupted = restoredTodoInterrupted(finalMeta, { running: false, remoteRunning: false })
+        todoInterruptedRef.current.set(nodeId, interrupted)
+        setTodoInterrupted(interrupted)
+      }
       setHistoryLoaded(true)
       setRunning(false)
       setQueuedItems([])
@@ -4385,6 +4431,9 @@ export function ChatView({
         .catch(() => null)
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
       setRemoteRunning(Boolean(state?.remoteRunning))
+      const interrupted = restoredTodoInterrupted(sessionMeta, state)
+      todoInterruptedRef.current.set(nodeId, interrupted)
+      setTodoInterrupted(interrupted)
       setQueuedItems(Array.isArray(state?.queuedItems) ? state.queuedItems : [])
       // host 的任务快照（后台 shell 任务 / 运行中 subagent）刻意不进事件缓冲，而是随
       // is-running 单独回传：重放前先补上，中途附着上来的窗口才不会漏掉这一轮已经推过
@@ -4530,13 +4579,23 @@ export function ChatView({
       setRemoteRunning(false)
       const finalSessionId = state.sessionId || sessionIdRef.current
       if (!finalSessionId) return
-      const rows = await window.mica.chat.history(finalSessionId).catch(() => null)
+      const [rows, finalMeta] = await Promise.all([
+        window.mica.chat.history(finalSessionId).catch(() => null),
+        window.mica.chat.meta(finalSessionId).catch(() => null)
+      ])
+      if (nodeIdRef.current !== nodeId || sessionIdRef.current !== finalSessionId) return
       if (!Array.isArray(rows)) return
       updateMessages(historyMessages(rows, finalSessionId))
+      if (finalMeta) {
+        setMeta(finalMeta)
+        const interrupted = restoredTodoInterrupted(finalMeta, state)
+        todoInterruptedRef.current.set(nodeId, interrupted)
+        setTodoInterrupted(interrupted)
+      }
       refreshMetaSoon(finalSessionId)
     }, 3000)
     return () => window.clearInterval(timer)
-  }, [remoteRunning, nodeIdRef, refreshMetaSoon, updateMessages])
+  }, [remoteRunning, nodeId, nodeIdRef, refreshMetaSoon, updateMessages])
 
   useLayoutEffect(() => {
     const list = listRef.current
@@ -5799,8 +5858,8 @@ export function ChatView({
       : ''
   const activeStreamTokenEstimate = activeStreamText ? estimateTokens(activeStreamText) : 0
   const todoPanel = useMemo(() => {
-    return todoPanelForTurn(messages, activityTurnId, running, todoHidden)
-  }, [activityTurnId, messages, running, todoHidden])
+    return todoPanelForTurn(messages, activityTurnId, running, todoHidden, todoInterrupted, meta?.todoInput)
+  }, [activityTurnId, messages, running, todoHidden, todoInterrupted, meta?.todoInput])
   const activeModel = activeOverrides.model || meta?.model || ''
   const activeEffort = activeOverrides.variant || meta?.effort || null
   const activeEffortKey = activeOverrides.model || `${meta?.providerId || ''}/${meta?.model || ''}`
@@ -6435,12 +6494,12 @@ export function ChatView({
           )}
           <TodoDock panel={todoPanel} />
           <SubagentStatusDock
-            tasks={subagentTasks}
+            tasks={subagentTasks.filter((task) => task.status !== 'completed')}
             now={taskNow}
             onOpen={(task) => openTaskDetail('subagent', task)}
           />
           <BackgroundTasksDock
-            tasks={backgroundTasks}
+            tasks={backgroundTasks.filter((task) => task.status !== 'finished' || (task.exitCode != null && task.exitCode !== 0))}
             now={taskNow}
             onOpen={(task) => openTaskDetail('background', task)}
             onKill={killBackgroundTask}
@@ -6506,6 +6565,14 @@ export function ChatView({
             onCompose={composeFromPlugin}
             onLaunchSession={requestPluginSession}
             onDialog={setPluginDialog}
+            onOpenPath={(path, line, options) => {
+              closePluginPanel()
+              onOpenFileRef.current?.(path, line ? { line } : {}, options)
+            }}
+            onOpenReview={(review) => {
+              closePluginPanel()
+              onOpenReviewRef.current?.(review)
+            }}
           />
           <div
             className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''} ${loopTone}`}
@@ -6830,6 +6897,7 @@ export function ChatView({
             task={taskDetail.task}
             onClose={closeTaskDetail}
             onStop={stopSubagent}
+            onRestart={restartSubagent}
             onOpenInEditor={openToolDocument}
           />
         )}
@@ -6912,6 +6980,10 @@ export function ChatView({
           onOpenPath={(path, line, options) => {
             closePluginPanel()
             onOpenFileRef.current?.(path, line ? { line } : {}, options)
+          }}
+          onOpenReview={(review) => {
+            closePluginPanel()
+            onOpenReviewRef.current?.(review)
           }}
         />
         {pluginTask && (

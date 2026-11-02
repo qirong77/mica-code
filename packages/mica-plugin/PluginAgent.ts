@@ -125,6 +125,16 @@ export type PluginAgentRegistry = {
   mode: 'session' | 'one-shot';
   onIterationRewrite(pluginId: string, handler: PluginIterationRewriter): Disposable;
   /**
+   * 这条会话上一次真实请求的用量。
+   *
+   * 轮次之外也要能回答「现在上下文有多大」：决定要不要抢跑压缩、要不要提前降级，
+   * 都取决于这个数。压缩保留它（Stats 对账口径），所以它描述的是**最近一次请求**的
+   * 占用，而不是压缩后的估算值。
+   */
+  lastUsage?(): PluginAgentUsage | null;
+  /** 当前模型的上下文窗口；模型没声明时为 undefined。 */
+  contextWindowSize?(): number | undefined;
+  /**
    * 在轮次之外对当前会话**已经存下来的**历史做一次快速压缩（只做本地清理，不调用模型）。
    *
    * 与 `onIterationRewrite` 里的 `compact` 的区别是「改哪一份」：那里改的是一次请求

@@ -570,7 +570,7 @@ export const FilesView = forwardRef(function FilesView(
       }
       let failure = null
       for (const file of list) {
-        const result = await window.mica.git[kind](gitCwd, file.path)
+        const result = await window.mica.git[kind](gitRepository?.root || gitCwd, file.path)
         if (result?.error) {
           failure = result.error
           break
@@ -586,7 +586,7 @@ export const FilesView = forwardRef(function FilesView(
         setGitSelectedFile(null)
       await onRefreshGit?.()
     },
-    [gitCwd, gitSelectedFile, onRefreshGit, showMessage]
+    [gitRepository, gitCwd, gitSelectedFile, onRefreshGit, showMessage]
   )
 
   const switchPanel = useCallback((panel) => {
@@ -1652,7 +1652,7 @@ export const FilesView = forwardRef(function FilesView(
           <SearchPanel root={tree.root || root} onOpenFile={openFile} activePath={activePath} />
         ) : isGitTree ? (
           <GitComparePanel
-            cwd={gitCwd}
+            cwd={gitRepository?.root || gitCwd}
             repository={gitBranchChanges}
             loading={gitLoading}
             error={gitCompareError}

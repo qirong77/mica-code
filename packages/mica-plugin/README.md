@@ -39,9 +39,11 @@
   会话的输入框、不发送）、`newSession`（开一个新会话跑这段提示词，`confirm` 默认 `true`
   表示页面先弹窗让用户看见并编辑）、`dialog`（只读弹窗：`text` 是会换行的正文，
   `columns` + `rows` 是对齐的表格，格子带 `link`
-  就交给系统浏览器打开）与 `openPath`（让宿主在应用里打开这个文件；`focus: true` 只画编辑器、
-  收起活动栏与文件树 Git 面板，改一份长文件时用它）。建会话、发送时机、弹窗排版都属于页面，
-  插件只声明意图。
+  就交给系统浏览器打开）、`openPath`（让宿主在应用里打开这个文件；`focus: true` 只画编辑器、
+  收起活动栏与文件树 Git 面板，改一份长文件时用它）与 `openReview`（盖一层独立整窗评审层：
+  `head` 相对 `base` 在分叉点上比，左边文件列表、右边 diff，顶栏可换基线；不给 `base` 就按
+  仓库主分支（`origin/HEAD` → `main` → `master` → 当前分支）解析，不给 `head` 取该目录当前
+  检出的分支。两边都只从提交里读，不读工作区、不切分支、也不改会话目录）。建会话、发送时机、弹窗排版都属于页面，插件只声明意图。
 - 会话右键菜单：清单的 `desktop.sessionMenu` 声明菜单项（`label` + `action`），插件用
   `ctx.desktop.sessionMenu({ run })` 交出按 `action` 分派的处理器。菜单项走清单是因为右键要
   立刻画出菜单（不能为它冷启动一个 app-server），处理器留在插件所在进程里；`run()` 回
@@ -136,6 +138,10 @@ context.onDispose(() => registration.dispose());
 桌面端在敲字时节流发 `mica/input/activity`，宿主翻成这条运行期事件；TUI 与 `exec` 不发，
 插件不能把它当成一定会来。同一个能力面还有一个更早的信号 `input:focus`（焦点放回输入框、
 还没敲字，桌面端经 `mica/input/focus` 送出，只在会话没在跑时发）。
+
+决定「这次值不值得压」用 `context.agent.lastUsage()` 与 `context.agent.contextWindowSize`：
+前者是最近一次真实请求的输入量（与界面上的 ctx 徽标同源，压缩会保留它用来对账），后者随会话
+切模型变化。不要在插件里自己估一遍历史——估出来的数和用户看到的不一致，阈值判断就会偏。
 
 ## 设计约束
 
