@@ -425,7 +425,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 路径识别在 `chat-paths.js` / `PathToken`；单击弹「在 Finder 中打开 / 在 Mica 中打开」菜单（⌘ 点击直接走 Mica），图片单击预览、失败给 notice。
 - 行内代码（`inlineCode`）里的 URL 与路径同样可点：`remarkPathLinks` 把含它们的 `inlineCode` 换成 `<code>` 包着的管线节点（`data.hName`），样式仍是代码颜色。模型几乎总用反引号写 URL 和路径，这里不可点就等于「链接点不了」。围栏代码块不认 URL，路径交给 `CodeView`。
 - 「在 Mica 中打开」由 `files:stat` 判类型：文件进编辑器、目录把文件树临时切到那里（`FilesView` 的 `rootOverride`，换会话即作废，树头有「返回工作区」）。任何新入口按路径打开都走 `FilesView.openPath`（第三个参数 `{ focus: true }` 只开编辑器），不要各自 read。
-- 分支评审是**独立的一层**（`ReviewView`），不切到文件页：文件页是工作区界面，进去就要把根目录换成被评审的副本，等于让用户以为会话换了项目。它只读提交（`git:compare-summary` 的 `base`/`head` 两个 ref + `git:file` 的 `refs` 模式），左边文件列表、右边 `GitDiffEditor`；顶栏的基线下拉缺省「主分支（自动）」（`origin/HEAD` → `main` → `master` → 当前分支逐个降级），也可换成任意本地分支，切换只重取那份比较、不动仓库。Esc / 关闭按钮回到原来的对话，会话 `cwd`、当前检出的分支与未提交改动一概不参与。
+- 分支评审**复用编辑器**，不另写一套 diff：插件回 `openReview` 时宿主把 `cwd`/`base`/`head` 写进文件页地址（`/files?cwd=&base=&head=`，见 `app-url.js` 的 `detachedFilesUrl`），在**另一个窗口**（`FILES_REVIEW_WINDOW_NAME`，不覆盖用户正在改文件的编辑器）里打开编辑器，页面自己就停在 Git 面板的这份对比上。编辑器因此有个「提交对提交」模式：`useGitWorkspace` 的 `compare` 非空时改读 `git:ref-summary`、不抓 `status`、不轮询，`FilesView` 把它传给 `GitComparePanel`（标题写「目标分支 · 相对 基线」，不再出现「工作区」）与 `useGitReview`（差异按 `git:file` 的 `refs` 模式读两边提交）。页面里改基线只改地址。
 - 用户消息超过 10 行默认折叠，含 `[Image]` 的不折叠；折叠态悬停用 `chat-hover-tooltip.jsx`，不用原生 `title`。
 - 回合日志工具行单行省略，点行开 `ToolDetailDialog`；思考整段折行。
 - 详情弹窗统一 `chat-modal.jsx` 的 `ModalShell`；`--chat-*` 变量要能穿过 portal。

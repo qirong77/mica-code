@@ -67,6 +67,23 @@ describe('detachedFilesUrl', () => {
     expect(detachedFilesUrl('http://h:1/?session=a&layout=mobile#x', null)).toBe('http://h:1/files')
   })
 
+  it('carries the comparison, so the window opens on that diff', () => {
+    expect(
+      detachedFilesUrl('http://h:1/?session=a', '/work/proj', {
+        base: 'origin/master',
+        head: '2026_1021_weizhang'
+      })
+    ).toBe(
+      'http://h:1/files?cwd=%2Fwork%2Fproj&head=2026_1021_weizhang&base=origin%2Fmaster'
+    )
+  })
+
+  it('writes only the target branch when no baseline is known', () => {
+    expect(detachedFilesUrl('http://h:1/?session=a', '/w', { head: 'feat-x' })).toBe(
+      'http://h:1/files?cwd=%2Fw&head=feat-x'
+    )
+  })
+
   it('keeps a remote origin, so the window talks to the same runtime', () => {
     expect(detachedFilesUrl('http://192.168.1.23:8787/?session=a', '/w')).toStartWith(
       'http://192.168.1.23:8787/files?'
@@ -80,18 +97,37 @@ describe('detachedFilesUrl', () => {
 
 describe('readFilesUrl', () => {
   it('reads the directory to show', () => {
-    expect(readFilesUrl('?cwd=%2Fwork%2Fproj')).toEqual({ cwd: '/work/proj' })
+    expect(readFilesUrl('?cwd=%2Fwork%2Fproj')).toEqual({ cwd: '/work/proj', compare: null })
   })
 
   it('falls back to an empty directory', () => {
-    expect(readFilesUrl('')).toEqual({ cwd: null })
-    expect(readFilesUrl('?cwd=')).toEqual({ cwd: null })
-    expect(readFilesUrl('?cwd=%20')).toEqual({ cwd: null })
+    expect(readFilesUrl('')).toEqual({ cwd: null, compare: null })
+    expect(readFilesUrl('?cwd=')).toEqual({ cwd: null, compare: null })
+    expect(readFilesUrl('?cwd=%20')).toEqual({ cwd: null, compare: null })
+  })
+
+  it('reads the comparison a plugin asked for', () => {
+    expect(readFilesUrl('?cwd=%2Fw&base=master&head=feat-x')).toEqual({
+      cwd: '/w',
+      compare: { base: 'master', head: 'feat-x' }
+    })
+    // 只有目标分支：基线交给运行时按仓库默认分支解析
+    expect(readFilesUrl('?head=feat-x')).toEqual({ cwd: null, compare: { base: null, head: 'feat-x' } })
+    // 只有基线不算一份对比
+    expect(readFilesUrl('?base=master')).toEqual({ cwd: null, compare: null })
   })
 
   it('survives the round trip from detachedFilesUrl', () => {
     const url = detachedFilesUrl('http://h:1/?session=a', '/work/proj')
-    expect(readFilesUrl(new URL(url).search)).toEqual({ cwd: '/work/proj' })
+    expect(readFilesUrl(new URL(url).search)).toEqual({ cwd: '/work/proj', compare: null })
+    const review = detachedFilesUrl('http://h:1/?session=a', '/work/proj', {
+      base: 'master',
+      head: 'feat-x'
+    })
+    expect(readFilesUrl(new URL(review).search)).toEqual({
+      cwd: '/work/proj',
+      compare: { base: 'master', head: 'feat-x' }
+    })
   })
 })
 

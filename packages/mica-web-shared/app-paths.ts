@@ -9,7 +9,8 @@
  * - `/terminal-control` —— 终端控制窗口的页面（独立入口 `terminal.html`，窗口由 Electron
  *   主进程创建，页面通过同源 `/remote/terminal/*` 读写真实终端）
  * - `/files` —— 独立文件窗口的页面（独立入口 `files.html`）：只有文件树与编辑器，没有
- *   会话列表；由顶栏的文件夹按钮经 `window.open` 打开，外壳把同源的这个页面开成窗口
+ *   会话列表；由顶栏的文件夹按钮经 `window.open` 打开，外壳把同源的这个页面开成窗口。
+ *   `?cwd=` 选目录，`?base=&head=` 直接停在一份「提交对提交」的对比上（插件评审走这条）
  * - `/remote/control/*` —— 受控浏览器（主进程的窗口服务挂在 Unix socket 上，由运行时转发，
  *   见 apps/desktop/src/host/browser-control-proxy.js）
  * - `/mcp/browser`、`/mcp/terminal` —— 两个受控能力给 agent 的 MCP 端点（单 tool，见

@@ -45,7 +45,13 @@ export async function resolveRef(cwd, requested) {
   }
 }
 
-async function autoBase(root) {
+/**
+ * 自动基线：远端 HEAD → main → master → 当前分支。
+ *
+ * `headName` 是这次要比的那条分支：评审别人的分支时当前检出的可能正是主分支本身，
+ * 不能因为「基线 == 当前分支」就退回 HEAD——那样比出来永远是空 diff。
+ */
+async function autoBase(root, { headName = '', allowCurrent = false } = {}) {
   const current = await currentBranchName(root)
   let remoteHead
   try {
@@ -80,13 +86,14 @@ async function autoBase(root) {
   for (const name of [remoteHead, ...BASE_CANDIDATES].filter(Boolean)) {
     const hash = branches.get(name)
     if (!hash) continue
-    if (isBaseBranch(name, current)) return null
+    if (headName && shortRefName(name) === shortRefName(headName)) continue
+    if (!allowCurrent && isBaseBranch(name, current)) return null
     return { name, hash }
   }
   return null
 }
 
-async function comparison(root, head, requested, direct) {
+async function comparison(root, head, requested, direct, { headName = '', review = false } = {}) {
   let base
   let warning
   if (typeof requested === 'string' && requested.trim()) {
@@ -96,7 +103,9 @@ async function comparison(root, head, requested, direct) {
       warning = `无法解析比较基线“${requested.trim()}”，已退回自动基线或 HEAD。`
     }
   }
-  base ||= await autoBase(root)
+  // 评审模式（提交对提交）没点名基线就是「按仓库默认主分支比」：工作区正好停在主分支上
+  // 很常见，不能因此退回 HEAD，否则比出来永远是空 diff。
+  base ||= await autoBase(root, { headName, allowCurrent: review })
   if (!base) base = { name: 'HEAD', hash: head }
   let mergeBase = null
   if (head !== EMPTY_TREE) {
@@ -254,7 +263,7 @@ export async function getRefSummary(cwd, { head = null, base = null, direct = fa
   const headRef = typeof head === 'string' && head.trim() ? head.trim() : null
   const headHash = headRef ? await commitHash(root, headRef) : headHashDefault
   const headName = headRef || (await currentBranchName(root)) || 'HEAD'
-  const selected = await comparison(root, headHash, base, direct)
+  const selected = await comparison(root, headHash, base, direct, { headName, review: true })
   const compare = selected.compareRef
   const [names, numbers] = await Promise.all([
     git(root, ['diff', '--name-status', '-z', '--no-renames', compare, headHash, '--']),

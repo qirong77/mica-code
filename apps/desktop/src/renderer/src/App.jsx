@@ -23,7 +23,6 @@ import { CwdPicker as CwdModal } from './CwdPicker'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
 import { PluginPage } from './PluginPage'
-import { ReviewView } from './ReviewView'
 import { usePluginAttention } from './plugin-attention'
 import { queuePluginLaunch } from './plugin-launch'
 import { SessionTree } from './SessionTree'
@@ -315,6 +314,12 @@ const MAX_TERMINAL_HEIGHT_RATIO = 0.75
 // 文件窗口的 `window.open` 目标名：同名窗口由浏览器/外壳复用，重复点同一个按钮不会攒出
 // 一堆一模一样的窗口（外壳侧见 main/index.js 的 openAppPageWindow）。
 const FILES_WINDOW_NAME = 'mica-files'
+
+/**
+ * 评审用的是**另一个**窗口名：`window.open` 按名字复用窗口，两者共用一个名字时点一条
+ * PR 会把用户正在改文件的编辑器导航走（未保存的编辑跟着没）。
+ */
+const FILES_REVIEW_WINDOW_NAME = 'mica-files-review'
 // 侧栏切换按钮：展开时贴侧栏右端（折叠线旁），收起的侧栏宽度为 0，按钮回到左上角固定位
 // —— 86px 是 macOS 上让开交通灯后的位置。
 const SIDEBAR_TOGGLE_COLLAPSED_LEFT = 86
@@ -505,8 +510,6 @@ export default function App() {
   // 插件的整页视图（清单 `desktop.page`）：和配置页一样盖住整个窗口。存的是入口本身
   // （含已加载的模块），所以页面里不再重读插件列表。
   const [pluginPage, setPluginPage] = useState(null)
-  // 分支评审：整窗一层，关掉即回到原来的对话与目录（不碰会话 cwd）。
-  const [reviewRequest, setReviewRequest] = useState(null)
   const openPluginPage = useCallback((entry) => {
     setPluginPage(entry)
   }, [])
@@ -1951,11 +1954,24 @@ export default function App() {
   }, [])
   const openSearchFile = openFileInView
   const openChatFile = openFileInView
-  // 插件的「评审」入口：盖一层整窗的评审视图，只读提交。
-  // 刻意不切到文件视图：那会把页面根目录换成被评审的副本，用户会以为自己的会话换了项目。
+  // 插件的「评审」入口：在**编辑器窗口**里打开一份 base...head 的对比。
+  // 自己不画 diff：那条路编辑器早就有（文件树 + GIT 面板 + monaco 差异），这里只是把
+  // 对比写进地址的 `?base=&head=` —— 刷新、复制链接都还停在同一份对比上。
   const openReviewInView = useCallback((review) => {
     if (!review?.cwd) return
-    setReviewRequest(review)
+    const url = detachedFilesUrl(window.location.href, review.cwd, {
+      base: review.base || null,
+      head: review.head || null
+    })
+    if (!url) return
+    const opened = window.open(url, FILES_REVIEW_WINDOW_NAME, 'popup=yes,width=1200,height=860')
+    if (opened) {
+      try {
+        opened.opener = null
+      } catch {
+        // 某些浏览器不让写，忽略
+      }
+    }
   }, [])
   // 工具调用详情里的「在编辑器中打开」：内容来自内存（工具参数/输出），不是工作区文件。
   // 走同一个 FilesView 实例与 openFile 的迟挂载兜底，只是把文档本身排队带过去。
@@ -2854,10 +2870,6 @@ export default function App() {
       )}
       {/* 插件的整页视图：与配置页同一层，盖住整个窗口，左上角返回对话。 */}
       {pluginPage && <PluginPage entry={pluginPage} onClose={closePluginPage} />}
-      {/* 分支评审：同样盖住整窗，但只读提交——会话的目录与未提交改动一概不参与。 */}
-      {reviewRequest && (
-        <ReviewView request={reviewRequest} onClose={() => setReviewRequest(null)} />
-      )}
       {toast && (
         <div
           role="status"

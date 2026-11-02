@@ -15,6 +15,10 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     visible = true,
     askText,
     recentCwds = [],
+    // 「提交对提交」：给了 `head` 就只读提交，Git 面板变成 base...head 的对比。
+    // 由页面地址的 `?base=&head=` 带进来（插件点一条 `项目 · 分支` 时打开的那种页面）。
+    compare = null,
+    onCompareBaseChange,
     onCornerResizeStart,
     onCwdChange,
     onGitChanged
@@ -34,7 +38,8 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
   const [localRecent, setLocalRecent] = useState([])
   const mobile = useIsMobile()
   const { git, compareBase, refresh, setCompareBase } = useGitWorkspace(cwd, {
-    enabled: visible
+    enabled: visible,
+    compare
   })
 
   const setFilesRef = useCallback(
@@ -145,7 +150,8 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
         gitBranch={branch || null}
         gitCompareBase={compareBase}
         gitCompareError={git.compareError}
-        onGitCompareBaseChange={setCompareBase}
+        gitCompareHead={compare?.head || null}
+        onGitCompareBaseChange={compare?.head ? onCompareBaseChange : setCompareBase}
         onRefreshGit={() => refresh({ quiet: true })}
       />
       <footer className="safe-bottom no-drag flex h-7 shrink-0 items-center justify-between gap-4 border-t border-line-soft bg-shade px-3 text-xs text-fg-soft">

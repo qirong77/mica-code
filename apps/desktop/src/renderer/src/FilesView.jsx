@@ -436,6 +436,7 @@ export const FilesView = forwardRef(function FilesView(
     gitBranchChanges,
     gitCompareError,
     gitCompareBase,
+    gitCompareHead,
     onGitCompareBaseChange,
     gitLoading,
     gitBranch,
@@ -506,6 +507,21 @@ export const FilesView = forwardRef(function FilesView(
     repository: gitBranchChanges,
     compareBase: gitCompareBase
   })
+
+  // 带 `?head=` 打开时，页面一进来就是那份对比：切到 Git 比较面板，并把第一个改动文件
+  // 摊开——否则用户看到的是一棵文件树，还得自己找面板、找文件。
+  const autoCompareRef = useRef('')
+  useEffect(() => {
+    if (!gitCompareHead) return
+    setActivePanel('git-tree')
+    setGitPreview(true)
+    if (autoCompareRef.current === gitCompareHead) return
+    const first = gitBranchChanges?.files?.[0]
+    if (!first) return
+    autoCompareRef.current = gitCompareHead
+    review.open(first)
+    setDiffOpened(true)
+  }, [gitCompareHead, gitBranchChanges, review])
 
   const setTabs = useCallback((updater) => {
     const next = typeof updater === 'function' ? updater(tabsRef.current) : updater
@@ -1658,6 +1674,7 @@ export const FilesView = forwardRef(function FilesView(
             error={gitCompareError}
             branch={gitBranch}
             compareBase={gitCompareBase}
+            compareHead={gitCompareHead}
             onCompareBaseChange={onGitCompareBaseChange}
             onRefresh={onRefreshGit}
             selectedPath={review.current?.path}
@@ -1917,7 +1934,9 @@ export const FilesView = forwardRef(function FilesView(
                 file={showDiff ? selectedDiff : null}
                 comparisonLabel={
                   isGitTree
-                    ? `${gitBranch || 'HEAD'} · 相对 ${gitBranchChanges?.baseLabel || 'HEAD'}`
+                    ? gitCompareHead
+                      ? `${gitBranchChanges?.headLabel || gitCompareHead} · 相对 ${gitBranchChanges?.baseLabel || 'HEAD'}`
+                      : `${gitBranch || 'HEAD'} · 相对 ${gitBranchChanges?.baseLabel || 'HEAD'}`
                     : selectedDiff?.section === 'staged'
                       ? '暂存的更改'
                       : '工作区更改'

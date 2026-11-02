@@ -11,7 +11,13 @@ import { setUiStateEntries, uiStateKeys, useUiStateValue } from './ui-state'
 const EMPTY = {}
 const NO_FILES = []
 
-/** Comparison tabs and review state are independent of the source-control editor. */
+/**
+ * Comparison tabs and review state are independent of the source-control editor.
+ *
+ * 两种数据来源共用这一份状态：工作区对基线（`git:branch-summary`）与提交对提交
+ * （`git:ref-summary`，`repository.headHash` 存在时走它）。差别只在打开文件时给
+ * 编辑器哪一组 ref——前者比工作区，后者两边都是提交。
+ */
 export function useGitReview({ cwd, repository, compareBase }) {
   const root = repository?.root || cwd
   const scope = reviewScope(root, compareBase)
@@ -19,12 +25,28 @@ export function useGitReview({ cwd, repository, compareBase }) {
   const reviewed = reviews[scope] || EMPTY
   const [stored, setStored] = useState({ scope, tabs: [], active: null })
   const base = useMemo(
-    () => ({
-      mode: 'snapshot',
-      ref: repository?.compareRef,
-      label: repository?.baseLabel || 'HEAD'
-    }),
-    [repository?.compareRef, repository?.baseLabel]
+    () =>
+      repository?.headHash
+        ? {
+            // 提交对提交：比较点与目标提交都在仓库对象库里，工作区一个字节都不读。
+            mode: 'refs',
+            ref: repository.compareRef,
+            head: repository.headHash,
+            headLabel: repository.headLabel || repository.head,
+            label: repository.baseLabel || 'HEAD'
+          }
+        : {
+            mode: 'snapshot',
+            ref: repository?.compareRef,
+            label: repository?.baseLabel || 'HEAD'
+          },
+    [
+      repository?.compareRef,
+      repository?.baseLabel,
+      repository?.headHash,
+      repository?.headLabel,
+      repository?.head
+    ]
   )
   const files = repository?.files || NO_FILES
   const state = useMemo(() => {

@@ -220,6 +220,9 @@ export function GitComparePanel({
   error,
   branch,
   compareBase,
+  // 评审模式下要比较的目标分支（来自页面地址的 `?head=`）：给了它，这一面板读的是
+  // 「提交对提交」，右侧就没有「工作区」这一说了。
+  compareHead = null,
   onCompareBaseChange,
   onRefresh,
   selectedPath,
@@ -282,7 +285,11 @@ export function GitComparePanel({
         ? compareBase.name || compareBase.ref || repository?.baseLabel || '选择基线'
         : repository?.baseLabel || '自动基线'
   const failure = error || repository?.error
-  const headComparison = compareBase?.kind === 'head' || repository?.base === 'HEAD'
+  // 评审模式：目标分支不是当前工作区，`direct/合并` 那一组开关与「工作区」文案都不适用。
+  const reviewMode = Boolean(compareHead)
+  const headComparison =
+    !reviewMode && (compareBase?.kind === 'head' || repository?.base === 'HEAD')
+  const targetName = repository?.headLabel || compareHead || branchName
   const filtered = Boolean(query.trim() || preferences.unreviewedOnly)
   const unavailable = !cwd || !repository || Boolean(failure)
 
@@ -532,7 +539,7 @@ export function GitComparePanel({
         </button>
         <button
           type="button"
-          disabled={!cwd || !onCompareBaseChange || headComparison}
+          disabled={!cwd || !onCompareBaseChange || headComparison || reviewMode}
           aria-pressed={Boolean(compareBase?.direct)}
           title={
             headComparison
@@ -607,7 +614,7 @@ export function GitComparePanel({
       {!unavailable && (
         <button
           type="button"
-          title={`${root}\n当前分支：${branchName}`}
+          title={reviewMode ? `${root}\n比较 ${targetName}` : `${root}\n当前分支：${branchName}`}
           aria-expanded={!rootCollapsed}
           className="flex h-[22px] shrink-0 items-center gap-1 px-[5px] text-left hover:bg-list-hover"
           onClick={() => setRootCollapsed((value) => !value)}
@@ -618,7 +625,7 @@ export function GitComparePanel({
           />
           <IconGitBranch size={12} className="shrink-0 text-fg-dim" />
           <span className="min-w-0 flex-1 truncate text-[11px] text-fg-soft">
-            {branchName} · 工作区
+            {reviewMode ? `${targetName} · 相对 ${baseName}` : `${branchName} · 工作区`}
           </span>
           <span className="mr-1 text-[10px] tabular-nums text-fg-muted">
             {filtered ? `${visibleFiles.length}/` : ''}

@@ -16,13 +16,17 @@ const EMPTY_GIT = {
   branch: null,
   status: null,
   compareError: null,
+  // 这一份数据是不是「提交对提交」读出来的：为真时页面上不该出现「工作区」这类字样。
+  review: false,
   loading: false
 }
 
-export function useGitWorkspace(cwd, { enabled = true } = {}) {
+export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
   const compareBases = useUiStateValue('gitCompareBase', EMPTY_COMPARE_BASES)
   const cwdRef = useLatest(cwd)
   const enabledRef = useLatest(enabled)
+  // 评审模式：`head` 非空就只读提交（`ref-summary`），工作区一概不参与。
+  const compareRef = useLatest(compare)
   const requestRef = useRef(0)
   const inFlightRef = useRef(0)
   const [git, setGit] = useState(EMPTY_GIT)
@@ -56,13 +60,20 @@ export function useGitWorkspace(cwd, { enabled = true } = {}) {
         if (!isCurrent()) return
         const root = summary?.repository?.root || target
         const chosen = bases[root] || bases[target]
+        const review = compareRef.current?.head ? compareRef.current : null
         // Keep the polling guard until both reads finish, even if either one rejects.
+        // 评审模式不抓 status：两边都在提交里，未提交改动与「当前检出哪条分支」都不相关。
         const results = await Promise.allSettled([
-          window.mica.git.branchSummary(
-            target,
-            chosen ? { base: chosen.ref || null, direct: !!chosen.direct } : undefined
-          ),
-          window.mica.git.status(target)
+          review
+            ? window.mica.git.refSummary(target, {
+                ...(review.base ? { base: review.base } : {}),
+                head: review.head
+              })
+            : window.mica.git.branchSummary(
+                target,
+                chosen ? { base: chosen.ref || null, direct: !!chosen.direct } : undefined
+              ),
+          review ? Promise.resolve({ status: null }) : window.mica.git.status(target)
         ])
         if (!isCurrent()) return
         const failed = results.find((result) => result.status === 'rejected')
@@ -74,6 +85,7 @@ export function useGitWorkspace(cwd, { enabled = true } = {}) {
           branch: branch?.repository || null,
           compareError: branch?.error || null,
           status: status?.status || null,
+          review: !!review,
           loading: false
         })
       } catch (error) {
@@ -84,7 +96,7 @@ export function useGitWorkspace(cwd, { enabled = true } = {}) {
         inFlightRef.current -= 1
       }
     },
-    [cwdRef, enabledRef]
+    [cwdRef, enabledRef, compareRef]
   )
 
   const setCompareBase = useCallback(
@@ -128,11 +140,13 @@ export function useGitWorkspace(cwd, { enabled = true } = {}) {
     return () => {
       requestRef.current += 1
     }
-  }, [cwd, compareBases, enabled, refresh])
+  }, [cwd, compareBases, enabled, refresh, compare?.base, compare?.head])
 
   useEffect(() => {
     if (!enabled) return undefined
     const poll = async () => {
+      // 评审模式读的是提交：除非换基线，内容不会自己变，不必轮询。
+      if (compareRef.current?.head) return
       if (inFlightRef.current) return
       if (document.visibilityState !== 'visible' || !document.hasFocus()) return
       await refresh({ quiet: true })
@@ -149,7 +163,7 @@ export function useGitWorkspace(cwd, { enabled = true } = {}) {
       window.removeEventListener('focus', refreshNow)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [enabled, refresh])
+  }, [enabled, refresh, compareRef])
 
   return { git: activeGit, compareBase, refresh, setCompareBase }
 }

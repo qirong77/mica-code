@@ -23,6 +23,15 @@ export const FILES_PAGE_FILE = '/files.html'
 /** 独立窗口要显示哪个目录。 */
 export const CWD_PARAM = 'cwd'
 
+/**
+ * 编辑器直接停在「某个对比」上：`base` 是原分支（对比基线），`head` 是目标分支。
+ *
+ * 两者都在地址里，编辑器才知道要把 Git 面板读成「提交对提交」而不是「工作区对基线」——
+ * 这是插件点一条 `项目 · 分支` 时打开的那种页面，刷新、复制地址都能回到同一份对比。
+ */
+export const BASE_PARAM = 'base'
+export const HEAD_PARAM = 'head'
+
 /** 从 `window.location.search` 读出页面级状态；参数缺失或非法一律回落默认值。 */
 export function readAppUrl(search) {
   const params = new URLSearchParams(String(search || ''))
@@ -30,10 +39,18 @@ export function readAppUrl(search) {
   return { sessionId: sessionId || null }
 }
 
-/** 文件窗口的地址参数：要显示的工作目录（缺省为空，由页面自己提示选一个会话）。 */
+/**
+ * 文件窗口的地址参数：要显示的工作目录（缺省为空，由页面自己提示选一个会话），
+ * 以及可选的「对比」——`base` 原分支、`head` 目标分支，两者都给才是提交对提交。
+ */
 export function readFilesUrl(search) {
   const params = new URLSearchParams(String(search || ''))
-  return { cwd: (params.get(CWD_PARAM) || '').trim() || null }
+  const base = (params.get(BASE_PARAM) || '').trim()
+  const head = (params.get(HEAD_PARAM) || '').trim()
+  return {
+    cwd: (params.get(CWD_PARAM) || '').trim() || null,
+    compare: head ? { base: base || null, head } : null
+  }
 }
 
 function parseUrl(href) {
@@ -64,7 +81,7 @@ export function urlWithState(href, { sessionId = null } = {}) {
  *
  * 不能用 `location.href` 直接换参数：那是主应用页面，另开出来的窗口会连左栏一起带上。
  */
-export function detachedFilesUrl(href, cwd) {
+export function detachedFilesUrl(href, cwd, compare = null) {
   const url = parseUrl(href)
   if (!url) return null
   // dev 下主页面是 Vite 的 `/index.html`，独立页也得走 `/files.html`；运行时是 `/files`。
@@ -74,6 +91,12 @@ export function detachedFilesUrl(href, cwd) {
   url.hash = ''
   const dir = String(cwd || '').trim()
   if (dir) url.searchParams.set(CWD_PARAM, dir)
+  const head = String(compare?.head || '').trim()
+  if (head) {
+    url.searchParams.set(HEAD_PARAM, head)
+    const base = String(compare?.base || '').trim()
+    if (base) url.searchParams.set(BASE_PARAM, base)
+  }
   return url.toString()
 }
 

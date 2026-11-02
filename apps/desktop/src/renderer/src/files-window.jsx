@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { EditorWorkspace } from './EditorWorkspace'
 import { TextPrompt } from './text-prompt'
-import { readFilesUrl } from './app-url'
+import { BASE_PARAM, CWD_PARAM, HEAD_PARAM, readFilesUrl } from './app-url'
 
 /**
  * 独立文件窗口（`/files`，dev 下 `files.html`）。
@@ -12,20 +12,42 @@ import { readFilesUrl } from './app-url'
  *
  * 窗口由外壳创建（`main/index.js` 的 `openAppPageWindow`），macOS 上隐藏了标题栏、交通灯
  * 浮在页面左上，所以顶上留一条可拖动的窄条（否则窗口无法移动）。
+ *
+ * 地址里还能带一对 `?base=&head=`：那是「打开某个对比」——插件的 Pull Request 菜单就点
+ * 这个链接，编辑器一打开就停在 `head` 相对 `base` 的 Git 面板上（`<=` 形式的两边都是提交，
+ * 不读工作区）。在页面里改基线也只改地址，刷新与复制链接都回到同一份对比。
  */
 export function FilesWindow() {
-  const [{ cwd: initialCwd }] = useState(() => readFilesUrl(window.location.search))
+  const [{ cwd: initialCwd, compare: initialCompare }] = useState(() =>
+    readFilesUrl(window.location.search)
+  )
   const [cwd, setCwd] = useState(initialCwd)
+  const [compare, setCompare] = useState(initialCompare)
   const [prompt, setPrompt] = useState(null)
   const promptResolver = useRef(null)
 
   useEffect(() => {
-    document.title = cwd ? `${baseName(cwd)} — 编辑器` : '编辑器'
+    const title = cwd ? `${baseName(cwd)} — 编辑器` : '编辑器'
+    document.title = compare?.head ? `${title} · ${compare.head}` : title
     const url = new URL(window.location.href)
-    if (cwd) url.searchParams.set('cwd', cwd)
-    else url.searchParams.delete('cwd')
+    if (cwd) url.searchParams.set(CWD_PARAM, cwd)
+    else url.searchParams.delete(CWD_PARAM)
+    if (compare?.head) {
+      url.searchParams.set(HEAD_PARAM, compare.head)
+      if (compare.base) url.searchParams.set(BASE_PARAM, compare.base)
+      else url.searchParams.delete(BASE_PARAM)
+    } else {
+      url.searchParams.delete(HEAD_PARAM)
+      url.searchParams.delete(BASE_PARAM)
+    }
     window.history.replaceState(null, '', url)
-  }, [cwd])
+  }, [cwd, compare])
+
+  // 页面上改基线：`GitComparePicker` 给的是一份 `{ kind, ref, name, direct }`，
+  // 这里只取它解析出的 ref——地址里存 ref 而不是显示名。
+  const changeCompareBase = useCallback((value) => {
+    setCompare((current) => (current ? { ...current, base: value?.ref || null } : current))
+  }, [])
 
   const askText = useCallback(
     (title, initial = '', hint = '') =>
@@ -62,6 +84,8 @@ export function FilesWindow() {
         root={initialCwd}
         visible
         askText={askText}
+        compare={compare}
+        onCompareBaseChange={changeCompareBase}
         onCwdChange={setCwd}
         onCornerResizeStart={null}
       />

@@ -369,6 +369,17 @@ describe('ref review', () => {
     })
   })
 
+  it('评审别人的分支时，工作区正好停在主分支上也要按主分支比（不是 HEAD）', async () => {
+    await git(root, ['checkout', '-qb', 'feature'])
+    await write('feature.txt', 'feature\n')
+    await commit('feature')
+    // 评审人自己的目录检出在主分支上：这与「要看的那条分支」无关
+    await git(root, ['checkout', '-q', 'main'])
+    const summary = await getRefSummary(root, { head: 'feature' })
+    expect(summary.baseLabel).toBe('main')
+    expect(summary.files.map((item) => item.path)).toEqual(['feature.txt'])
+  });
+
   it('falls back to the repository default branch when no base is requested', async () => {
     await git(root, ['checkout', '-qb', 'feature'])
     await write('feature.txt', 'feature\n')

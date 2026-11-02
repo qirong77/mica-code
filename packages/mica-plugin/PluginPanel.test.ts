@@ -58,6 +58,14 @@ describe('normalizePluginPanelView', () => {
     expect(view.sections).toEqual([{ title: '只有标题' }]);
   });
 
+  it('最多 12 块 section，多出来的截掉（有插件要用满 9 块）', () => {
+    const view = normalizePluginPanelView({
+      sections: Array.from({ length: 13 }, (_, i) => ({ title: `第 ${i + 1} 块` })),
+    });
+    expect(view.sections?.length).toBe(12);
+    expect(view.sections?.at(-1)?.title).toBe('第 12 块');
+  });
+
   it('truncates long text and caps lists', () => {
     const longText = 'x'.repeat(1000);
     const view = normalizePluginPanelView({
