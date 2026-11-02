@@ -130,8 +130,8 @@ sleep 20 && curl -s https://<域名>/api/health
 
 ## 边界
 
-- 手机端**支持终端**（`terminal:create|write|resize|...`，PTY 开在本机运行时里），
-  但不做文件编辑与写工作区的 Git：`files:write*`、`git:stage`、`config-web:invoke` 一律拒绝
-  在桥的白名单里就是拒的。
+- 手机端**支持终端**（`terminal:create|write|resize|...`，PTY 开在本机运行时里），也支持配置页
+  （主题、provider、插件设置）与插件入口；写文件 / Git 写 / 提交 / 分享链接默认拒绝，需要在
+  插件设置的「允许手机端修改文件与 Git」里打开（只防手机误触，口令本来就能在终端里执行命令）。
 - 需要桌面端在运行，关掉就没有会话可看。
 - 用户插件（`$MICA_HOME/plugins`）的卡片在手机上渲染不出——页面是构建期打的包。

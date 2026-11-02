@@ -267,6 +267,13 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
 /** 一条状态行：插件自己判断语气，页面只负责上色。 */
 export type StatusLine = { text: string; tone: 'ok' | 'warn' | 'error' };
 
+/**
+ * 「有一件事等人点一下」：写进 `data.json` 的 `attention`，宿主动它在侧栏 Plugins 入口与
+ * 插件卡片上点一枚提示点。只在中转机上的页面**确实比本机旧**时上报——别的 warn
+ * （中转机不可达、本机没有产物）都没有「点一下就好」的动作，点一个点不动的东西比不点更糟。
+ */
+export type AttentionLine = { text: string; tone: 'warn' | 'error'; action: string };
+
 /** 卡片读的那份状态。字段少而直接，改结构要同步 `desktop.jsx`。 */
 export type BridgeStatus = {
   relayUrl: string;
@@ -288,6 +295,8 @@ export type BridgeStatus = {
   phone: StatusLine;
   /** 内置部署 skill 的源码位置（正文随包内嵌，这里只给可点开的地方）。 */
   skill: string;
+  /** 页面落后时的那条提示；没有要注意的事就是 null。 */
+  attention: AttentionLine | null;
 };
 
 /** 纯函数：把设置与中转机健康合成卡片要显示的那一份（便于单测，不碰网络）。 */
@@ -307,6 +316,9 @@ export function buildStatus(
   const phoneOnline = relay?.phoneOnline === true;
   const remotePage = typeof relay?.pageVersion === 'string' ? relay.pageVersion : '';
   const localPageVersion = localPage ?? '';
+  // 页面落后是唯一「点一下就能变好」的事：本机有新产物、中转机上还是旧的。
+  // 中转机不可达或本机找不到产物时不上报——那两个状态没有可执行的动作。
+  const pageStale = Boolean(remotePage && localPageVersion && remotePage !== localPageVersion);
   return {
     relayUrl,
     // 链接里带口令：手机扫一眼就能开，不用再去翻设置。
@@ -343,6 +355,13 @@ export function buildStatus(
           : { text: `手机端 ${remotePage} · 本机找不到页面产物`, tone: 'warn' },
     // 部署不在插件里做：给出内置 skill 的源码位置，用户对着 agent 说一句话就能装。
     skill: SKILL_URL,
+    attention: pageStale
+      ? {
+          text: `手机端页面落后（本机 ${localPageVersion}，中转机 ${remotePage}），点「更新中转机页面」同步`,
+          tone: 'warn',
+          action: 'sync-page',
+        }
+      : null,
     updatedAt: now,
   };
 }

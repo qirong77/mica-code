@@ -357,4 +357,25 @@ describe('buildStatus', () => {
   it('switched off reports the bridge as stopped instead of running', () => {
     expect(buildStatus({ enabled: 'false' }, null, 5, 1).bridge).toEqual({ text: '已停用', tone: 'warn' });
   });
+
+  // 只有「点一下就能变好」的事才上报 attention：页面落后且本机有产物。
+  // 其余 warn（中转机不可达、本机没产物）没有可执行的动作，点一个点不动的点比不点更糟。
+  it('raises attention only when the phone page is behind and can be republished', () => {
+    const stale = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'old123' }, 9, 1, 'new456');
+    expect(stale.attention).toEqual({
+      text: '手机端页面落后（本机 new456，中转机 old123），点「更新中转机页面」同步',
+      tone: 'warn',
+      action: 'sync-page',
+    });
+
+    expect(
+      buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, 'abc123').attention,
+    ).toBeNull();
+    // 本机找不到产物（打包版没有解包目录）：没有可上传的东西，不提示
+    expect(
+      buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, null).attention,
+    ).toBeNull();
+    // 中转机不可达：连对面是哪版都不知道
+    expect(buildStatus({ relayUrl: 'https://x.test', token: 'a' }, null, 9, 1, 'abc123').attention).toBeNull();
+  });
 });

@@ -12,8 +12,8 @@ import { useEffect, useState } from 'react'
 const CACHE_MS = 60_000
 let cache = { at: 0, promise: null }
 
-export function readPluginsDetails() {
-  const fresh = cache.promise && Date.now() - cache.at < CACHE_MS
+export function readPluginsDetails({ force = false } = {}) {
+  const fresh = !force && cache.promise && Date.now() - cache.at < CACHE_MS
   if (fresh) return cache.promise
   const promise = window.mica?.configWeb
     ?.invoke('readPluginsDetails')

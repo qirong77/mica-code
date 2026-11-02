@@ -4325,6 +4325,7 @@ html[data-theme='light'] .mica-config-ui {
 
   /* 图标格：方形圆角容器，和插件自己的图标形态一致（图片加载失败也不会跳形）。 */
   .plugin-card-icon {
+    position: relative;
     display: grid;
     place-items: center;
     width: 34px;
@@ -4388,6 +4389,72 @@ html[data-theme='light'] .mica-config-ui {
   .plugin-card-note {
     color: var(--text-faint);
     font-size: 11px;
+  }
+
+  /* 插件上报的「等人点一下」：卡片图标右上角一枚点，卡片里一句说明。
+     只点不换色块——卡片本身是按钮，再加一层底色会和悬停态打架。 */
+  .plugin-attention-dot {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    width: 8px;
+    height: 8px;
+    border: 2px solid var(--panel);
+    border-radius: 50%;
+    background: var(--amber);
+  }
+
+  .plugin-attention-dot.is-error {
+    background: var(--red);
+  }
+
+  .plugin-card-attention {
+    display: flex;
+    min-width: 0;
+  }
+
+  .plugin-card-attention-text {
+    overflow: hidden;
+    color: var(--amber);
+    font-size: var(--text-aux);
+    line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 详情页里那条提示：一行说明 + 一个就地执行的按钮。 */
+  .plugin-attention {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--amber) 40%, var(--line));
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--amber) 10%, var(--panel));
+  }
+
+  .plugin-attention.is-error {
+    border-color: color-mix(in srgb, var(--red) 40%, var(--line));
+    background: color-mix(in srgb, var(--red) 10%, var(--panel));
+  }
+
+  .plugin-attention-body {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .plugin-attention-text {
+    color: var(--text);
+    font-size: var(--text-body);
+    line-height: 1.5;
+  }
+
+  .plugin-attention-note {
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+    overflow-wrap: anywhere;
   }
 
   /* ---- 插件详情：整页 ---------------------------------------------------- */

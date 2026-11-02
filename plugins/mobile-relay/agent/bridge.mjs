@@ -54,6 +54,13 @@ function readSettings() {
     token: pick('token', 'RELAY_TOKEN'),
     // 默认严格校验证书：中转机给了真证书时，中间人拿不到那条 TLS 也伪造不了
     verifyTls: !(String(values?.verifyTls ?? 'true').toLowerCase() === 'false'),
+    /**
+     * 允许手机端改文件 / Git / 提交。
+     *
+     * 这不是安全边界：口令本来就能在对话与终端里执行命令。它防的是**误触**——手机上
+     * 一次手滑不该丢掉工作区的改动。默认关，设置里点开就生效（每轮重新读配置）。
+     */
+    allowWrites: String(values?.allowWrites ?? 'false').toLowerCase() === 'true',
     localUrl: String(process.env.LOCAL_URL || 'http://127.0.0.1:8787').replace(/\/+$/, ''),
     debug: Boolean(process.env.RELAY_DEBUG)
   }
@@ -150,7 +157,7 @@ async function relayPoll(body) {
 
 /* ---------------------------------------------------------------- 事件 */
 
-const ALLOWED = new Set([
+const BASE_CHANNELS = [
   // 对话本身
   'chat:start',
   'chat:abort',
@@ -170,18 +177,27 @@ const ALLOWED = new Set([
   'chat:recall-queued',
   'chat:input-history:read',
   'chat:input-history:append',
+  // 常驻宿主的预热与「有人在输入」：页面切会话时叫醒宿主，自动压缩据此判断用户回来了
+  'chat:warm',
+  'chat:input-activity',
   // 会话级设置：能力开关、笔记、插件设置
   'chat:capabilities',
   'chat:set-capabilities',
   'chat:notes',
   'chat:set-notes',
   'chat:plugin-settings',
+  'chat:set-plugin-settings',
+  // 插件自己的入口：输入框上方的按钮、面板、会话右键菜单
+  'chat:plugin-panel-view',
+  'chat:plugin-panel-action',
+  'chat:session-menu-run',
   // 后台任务与子代理：只看、只停
   'chat:background-task-output',
   'chat:kill-background-task',
   'chat:subagent-detail',
   'chat:kill-subagent',
   // 旁问
+  'chat:btw-ask',
   'chat:btw-threads',
   'chat:btw-compact',
   'chat:btw-interrupt',
@@ -205,10 +221,15 @@ const ALLOWED = new Set([
   'stats:delete-project-group',
   'stats:move-project-group',
   'stats:rename-project-group',
+  // 分享链接：只列，创建/撤销要显式的写权限
+  'share:list',
   // 共享 UI 状态：页签、工作区、布局、草稿
   'ui-state:get',
   'ui-state:patch',
-  // 只读文件视图：手机上不改文件，写操作刻意不放行
+  // 配置页：provider、模型、MCP、技能、角色、插件设置都在这里。手机端也是同一个人，
+  // 口令本来就能在对话与终端里执行命令，挡掉配置页只会让「改个主题」也做不到。
+  'config-web:invoke',
+  // 文件视图：读 + 在应用里打开。删除/覆盖要显式的写权限
   'files:list',
   'files:read',
   'files:stat',
@@ -216,6 +237,8 @@ const ALLOWED = new Set([
   'files:mention',
   'files:find',
   'files:order-get',
+  'files:open-path',
+  'files:copy-relative-path',
   // Git 只读
   'git:status',
   'git:summary',
@@ -223,6 +246,7 @@ const ALLOWED = new Set([
   'git:file',
   'git:refs',
   'git:resolve-ref',
+  'git:change-counts',
   // 技能索引、MCP 候选、通知、访问信息
   'skills:list',
   'mcp:candidates',
@@ -235,6 +259,8 @@ const ALLOWED = new Set([
   'plugin-host:write-data',
   'plugin-host:access-get',
   'plugin-host:access-set',
+  // 清单里声明过的插件动作（配置页那几个按钮）
+  'plugin-host:run-action',
   // 定时循环
   'loops:list',
   'loops:start',
@@ -253,21 +279,57 @@ const ALLOWED = new Set([
   'terminal:resolve-file-links',
   'terminal:dispose',
   'terminal:dispose-all'
-])
+]
+
+/**
+ * 会改这台机器上内容的通道，只有设置里打开「允许手机端修改文件与 Git」才放行。
+ * 这不是安全边界（口令已经等于完整机器权限），是防误触：手机上一次手滑不该把
+ * 工作区的改动丢掉。
+ */
+const WRITE_CHANNELS = [
+  'files:write',
+  'files:create',
+  'files:delete',
+  'files:rename',
+  'files:move',
+  'files:duplicate',
+  'files:order-set',
+  'git:stage',
+  'git:unstage',
+  'git:discard',
+  'git:checkout',
+  'git:create-branch',
+  'chat:commit',
+  'share:add',
+  'share:remove'
+]
+
+const BASE = new Set(BASE_CHANNELS)
+
+function allowedChannels() {
+  if (!settings.allowWrites) return BASE
+  return new Set([...BASE_CHANNELS, ...WRITE_CHANNELS])
+}
 
 /**
  * 刻意不放行的通道，写在这里是为了让「为什么没有它」有据可查：
  *
  * - `dialog:*` / `clipboard:*` / `browser-control:*`：依赖这台机器的 GUI 与会话，
  *   手机端做不了，放行也只是报错；
- * - `files:write|create|delete|move|rename|duplicate|copy-*`：手机上不改文件；
- * - `git:stage|unstage|discard|checkout|create-branch`：会改工作区；
- * - `config-web:invoke`：配置页能改 provider 与密钥，等于把整台机器交出去；
- * - `chat:save-pasted-image`：往磁盘写文件。
+ * - `files:reveal`：在**这台机器**上弹 Finder，手机上看不到；
+ * - `terminal-control:*`：受控终端窗口属于 Electron 主进程，运行时没有它。
+ *
+ * 会改工作区的那些（文件写、Git 写、提交、分享链接）见上面 WRITE_CHANNELS。
  */
 
 const MAX_EVENT_FRAMES = 4000
 const MAX_EVENT_BYTES = 1_500_000
+
+/** 只给测试用：打印当前策略就退出，免得为了断言白名单去按正则扒源码。 */
+if (process.env.MICA_RELAY_POLICY) {
+  console.log(JSON.stringify({ base: [...BASE].sort(), writes: [...WRITE_CHANNELS].sort() }))
+  process.exit(0)
+}
 
 let eventBuffer = []
 let eventBytes = 0
@@ -422,7 +484,12 @@ async function runCommand(command) {
       const result = await readImage(String(payload?.path || ''))
       return { id: command.id, ...result }
     }
-    if (!ALLOWED.has(channel)) return { id: command.id, ok: false, error: `远程不支持 ${channel}` }
+    if (!allowedChannels().has(channel)) {
+      const hint = WRITE_CHANNELS.includes(channel) && !settings.allowWrites
+        ? '，需要在设置里打开「允许手机端修改文件与 Git」'
+        : ''
+      return { id: command.id, ok: false, error: `远程不支持 ${channel}${hint}` }
+    }
 
     const result = await localInvoke(channel, payload)
     if (!result.ok) return { id: command.id, channel, payload, ok: false, error: result.error }

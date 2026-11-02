@@ -15,6 +15,7 @@ import { OFFICIAL_PLUGINS_DIR, officialPluginManifests } from '@packages/mica-of
 import { getConfigRootPath, getPluginsRootPath, getPluginStatePath, getPluginStatusPath } from './paths.js';
 import type {
   ConfigWebPlugin,
+  ConfigWebPluginAttention,
   ConfigWebPluginCheck,
   ConfigWebPluginLlm,
   ConfigWebPluginLlmTest,
@@ -44,6 +45,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
 
   const official: ConfigWebPlugin[] = officialPluginManifests.map((manifest) => {
     const status = statuses.get(manifest.id);
+    const data = readPluginData(manifest.id, configRoot);
     return withState(
       {
         id: manifest.id,
@@ -61,7 +63,8 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         desktopChecks: resolveDesktopChecks(manifest.desktopChecks),
         desktopEntry: manifest.desktopEntry,
         desktopPage: manifest.desktopPage,
-        status: readStatus(manifest.id, manifest.status, configRoot),
+        status: readStatus(manifest.status, data),
+        attention: readAttention(data, manifest.actions),
         actions: manifest.actions,
         desktopPanel: manifest.desktopPanel,
         desktopSessionMenu: manifest.desktopSessionMenu,
@@ -80,6 +83,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
 
   const user: ConfigWebPlugin[] = inspection.plugins.map((plugin) => {
     const status = statuses.get(plugin.id) ?? statuses.get(plugin.root);
+    const data = readPluginData(plugin.id, configRoot);
     return withState(
       {
         id: plugin.id,
@@ -97,7 +101,8 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         // 用户插件没有打包进页面的前端模块，声明了 `desktop.entry` 也渲染不出入口。
         desktopEntry: null,
         desktopPage: null,
-        status: readStatus(plugin.id, plugin.status ?? [], configRoot),
+        status: readStatus(plugin.status ?? [], data),
+        attention: readAttention(data, plugin.actions ?? []),
         actions: plugin.actions ?? [],
         // 面板反过来是数据驱动的，所以用户插件声明了就有。
         desktopPanel: plugin.desktopPanel,
@@ -211,32 +216,60 @@ function readSettings(id: string, fields: PluginSettingField[], configRoot: stri
 }
 
 /**
- * 运行状态：清单只声明「哪几行、叫什么、能不能点」，值由插件写进自己的数据文件。
+ * 插件自己写的那份状态文件（`plugin-data/<id>/data.json`）。
  *
- * 读不出来（没写过、JSON 坏了）就当作「还没上报」，页面显示占位——配置页不去猜插件的
- * 运行态，也不为了让页面好看而编一个值。
+ * 读不出来（没写过、JSON 坏了、正在写）就当空对象：配置页不去猜插件的运行态，也不为了
+ * 让页面好看而编一个值——下一次刷新再显示。
  */
-function readStatus(id: string, fields: PluginStatusField[], configRoot: string): ConfigWebPluginStatusField[] {
-  if (fields.length === 0) return [];
-  let data: Record<string, unknown> = {};
+function readPluginData(id: string, configRoot: string): Record<string, unknown> {
   try {
     const file = join(micaPlugin.pluginDataDir(configRoot, id), 'data.json');
-    if (existsSync(file)) {
-      const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        data = parsed as Record<string, unknown>;
-      }
+    if (!existsSync(file)) return {};
+    const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
     }
   } catch {
     // 插件正在写文件时可能读到半截，下一次刷新再显示。
   }
+  return {};
+}
 
+/**
+ * 运行状态：清单只声明「哪几行、叫什么、能不能点」，值由插件写进自己的数据文件。
+ */
+function readStatus(fields: PluginStatusField[], data: Record<string, unknown>): ConfigWebPluginStatusField[] {
+  if (fields.length === 0) return [];
   return fields.map((field) => {
     const raw = data[field.key];
     const text = typeof raw === 'string' ? raw : isToneValue(raw) ? raw.text : null;
     const tone = isToneValue(raw) ? (raw.tone ?? null) : null;
     return { key: field.key, label: field.label, type: field.type, value: text || null, tone };
   });
+}
+
+/**
+ * 「现在有一件事等人点一下」：插件把它写进同一个数据文件的 `attention`。
+ *
+ * 与 `status` 的分工是**是否打扰人**：状态行随时可读，attention 只在「点一下就能变好」时
+ * 上报——页面据此在侧栏 Plugins 入口与插件卡片上点一个提示点，`action` 指向清单里声明过的
+ * 动作，点一下就地执行。插件不写、写坏、或者写明 `tone: 'ok'`，都当作没有要注意的事。
+ */
+function readAttention(
+  data: Record<string, unknown>,
+  actions: readonly { key: string }[],
+): ConfigWebPluginAttention | null {
+  const raw = data.attention;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const text = typeof record.text === 'string' ? record.text.trim() : '';
+  if (!text) return null;
+  const tone = record.tone === 'error' ? 'error' : record.tone === 'ok' ? 'ok' : 'warn';
+  if (tone === 'ok') return null;
+  // 没声明过的动作不能画成按钮：点不动比不画更糟。
+  const action =
+    typeof record.action === 'string' && actions.some((item) => item.key === record.action) ? record.action : null;
+  return { text, tone, action };
 }
 
 /** 插件可以用 `{ text, tone }` 表达「通/不通」，页面只按语气上色。 */

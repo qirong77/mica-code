@@ -324,6 +324,16 @@ export type ConfigWebPlugin = {
    */
   status: ConfigWebPluginStatusField[];
   /**
+   * 插件自己上报的「有一件事等人点一下」（`data.json` 的 `attention`）。
+   *
+   * 与 `status` 的区别是**要不要打扰人**：状态行是随时可读的运行事实（通/不通、用了哪个
+   * 版本），attention 是「现在做一次动作就能变好」——页面据此在侧栏 Plugins 入口与卡片上
+   * 点一个提示点，`action` 指向清单里声明的动作，点一下就地执行。
+   *
+   * 插件不写这个键就是没有要注意的事；写 `tone: 'ok'` 等同于没有。
+   */
+  attention: ConfigWebPluginAttention | null;
+  /**
    * 清单声明的配置页动作（清单 `actions`）。页面只画按钮，点一下交给插件自己执行——
    * 注册、测试连接这类事不需要会话，所以不用跳去对话里。
    */
@@ -389,6 +399,23 @@ export type ConfigWebPluginActionResult = {
 export type ConfigWebPluginSessionMenuItem = {
   label: string;
   action: string;
+};
+
+/**
+ * 插件上报的一条「注意一下」：页面画提示点，`action` 给了就顺手给一个按钮。
+ *
+ * 只对**已启用**的插件展示：停用的插件不会运行，它的提示已经过时。
+ */
+export type ConfigWebPluginAttention = {
+  /** 一句话说清楚是什么事（「手机端页面落后，点一下同步」）。 */
+  text: string;
+  /** 语气：`warn` 是要人决定，`error` 是已经坏了。 */
+  tone: 'warn' | 'error';
+  /**
+   * 清单 `actions` 里声明的动作 key：页面把它渲染成一个就地执行的按钮。
+   * 插件没声明过的 key 在数据层就被丢掉——不能凭一个坏值给用户画一个点不动的按钮。
+   */
+  action: string | null;
 };
 
 /** 一条运行状态：清单声明标签与类型，插件提供值。 */

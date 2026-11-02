@@ -33,6 +33,7 @@ import { ChatView } from './ChatView'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
 import { PluginPage } from './PluginPage'
+import { usePluginAttention } from './plugin-attention'
 import { SessionTree } from './SessionTree'
 import { runSessionMenuPluginAction, useSessionMenuPlugins } from './session-menu-plugins'
 import { SessionNotesDialog } from './SessionNotesDialog'
@@ -1008,6 +1009,8 @@ export default function App() {
   // 转发一次动作。结果里的 `copyText` 在这里写剪贴板——写的是「用户眼前这台机器」的
   // 剪贴板，运行时可能跑在另一台机器上。
   const sessionMenuPlugins = useSessionMenuPlugins()
+  // 插件上报的「有件事等人点一下」：只影响侧栏 Plugins 入口上那枚点，点进去就是那个插件。
+  const pluginAttention = usePluginAttention()
   const runSessionMenuAction = useCallback(
     async (target, item) => {
       showToast('正在准备…')
@@ -2574,17 +2577,32 @@ export default function App() {
               {/* 插件入口排在最后：插件是「装进来的能力」，属于调整类入口，和 Server /
                   Settings 一起收在同一列末尾。点它进插件整页（目录 → 点一张卡进详情），
                   不做下拉面板。 */}
+              {/* 有插件上报了「等人点一下」的事（手机端页面落后之类）时，这一行右侧点一个
+                  提示点：那个动作藏在「Plugins → 某张卡 → 操作」里，不点开就永远看不见。
+                  点进去直接落在那个插件的详情上，不用自己再找。 */}
               <button
                 type="button"
-                title="插件（查看已装载的插件与它们的设置）"
+                title={
+                  pluginAttention
+                    ? `${pluginAttention.pluginName}：${pluginAttention.text}`
+                    : '插件（查看已装载的插件与它们的设置）'
+                }
                 className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={() => {
                   closeMobileDrawer()
-                  openConfigPage('plugins')
+                  openConfigPage('plugins', pluginAttention?.pluginId ?? null)
                 }}
               >
                 <IconBlocks size={14} className="shrink-0 opacity-75" />
                 <span>Plugins</span>
+                {pluginAttention ? (
+                  <span
+                    aria-hidden="true"
+                    className={`ml-auto size-1.5 shrink-0 rounded-full ${
+                      pluginAttention.tone === 'error' ? 'bg-danger' : 'bg-warn'
+                    }`}
+                  />
+                ) : null}
               </button>
             </nav>
             <SessionTree

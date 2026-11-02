@@ -226,7 +226,62 @@ describe('getPluginsDetails', () => {
       { key: 'relay', label: '中转机', type: 'text', value: null, tone: null },
     ]);
   });
+
+  /*
+   * attention 是「有一件事等人点一下」：侧栏 Plugins 入口与插件卡片上的那枚提示点，
+   * 由插件写在自己 data.json 里——只有它知道现在还剩什么要人动手。宿主只做归一化，
+   * 动作必须来自清单声明，否则一个插件就能让别处的按钮出现在自己的卡片上。
+   */
+  it('surfaces a pending attention with the action it names', () => {
+    writeUserPlugin({
+      actions: [{ key: 'sync-page', label: '更新页面' }],
+      status: [{ key: 'page', label: '页面版本', type: 'text' }],
+    });
+    writePluginData({ page: { text: '落后', tone: 'warn' }, attention: { text: '手机端页面落后', action: 'sync-page' } });
+
+    expect(getPluginsDetails().plugins.find((entry) => entry.id === 'user.hello')?.attention).toEqual({
+      text: '手机端页面落后',
+      tone: 'warn',
+      action: 'sync-page',
+    });
+  });
+
+  it('drops an action the manifest never declared but keeps the text', () => {
+    writeUserPlugin({ status: [{ key: 'page', label: '页面版本', type: 'text' }] });
+    writePluginData({ attention: { text: '手机端页面落后', action: 'rm-rf' } });
+
+    expect(getPluginsDetails().plugins.find((entry) => entry.id === 'user.hello')?.attention).toEqual({
+      text: '手机端页面落后',
+      tone: 'warn',
+      action: null,
+    });
+  });
+
+  it('treats a cleared / malformed attention as none', () => {
+    writeUserPlugin({ status: [{ key: 'page', label: '页面版本', type: 'text' }] });
+    writePluginData({ attention: { text: '', tone: 'warn' } });
+    expect(getPluginsDetails().plugins.find((entry) => entry.id === 'user.hello')?.attention).toBeNull();
+
+    writePluginData({ attention: { text: '已经好了', tone: 'ok' } });
+    expect(getPluginsDetails().plugins.find((entry) => entry.id === 'user.hello')?.attention).toBeNull();
+  });
 });
+
+function writeUserPlugin(manifest: Record<string, unknown>): void {
+  const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'hello');
+  mkdirSync(pluginDir, { recursive: true });
+  writeFileSync(join(pluginDir, 'index.js'), 'export default () => {};\n');
+  writeFileSync(
+    join(pluginDir, 'plugin.json'),
+    JSON.stringify({ id: 'hello', name: 'Hello', version: '1.0.0', main: 'index.js', ...manifest }),
+  );
+}
+
+function writePluginData(data: Record<string, unknown>): void {
+  const dataDir = join(process.env.MICA_HOME!, 'plugin-data', 'user.hello');
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, 'data.json'), JSON.stringify(data));
+}
 
 describe('setPluginEnabled', () => {
   it('persists the disabled list and reports it on the next read', () => {

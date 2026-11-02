@@ -141,4 +141,44 @@ describe('mobile-relay panel', () => {
       enrollKey: '',
     });
   });
+
+  /*
+   * 手机打开的那份页面正是中转机上托管的那份，所以「页面落后」在手机上最该被看见：
+   * 用户面对的就是旧界面，却没有别的入口能把它换掉。面板因此把监管写下的页面版本
+   * 与提示原样透出来，并在同一节给一个「更新」按钮。
+   */
+  it('shows the page version and an update button when the relay page is behind', () => {
+    writeFileSync(
+      join(dir, 'data.json'),
+      JSON.stringify({
+        page: { text: '落后（中转机 4d32，本机 bcc7）', tone: 'warn' },
+        attention: { text: '手机端页面落后', action: 'sync-page' },
+      }),
+      'utf8'
+    );
+    const section = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com' }), dir).sections?.find(
+      (item) => item.title === '页面版本'
+    );
+    expect(section?.collapsed).toBe(false);
+    expect(section?.rows?.[0]).toEqual({
+      label: '中转机页面',
+      value: '落后（中转机 4d32，本机 bcc7）',
+      tone: 'warn',
+    });
+    expect(section?.actions?.find((item) => item.id === 'sync-page')?.tone).toBe('primary');
+  });
+
+  it('collapses the page section once the two sides match', () => {
+    writeFileSync(join(dir, 'data.json'), JSON.stringify({ page: { text: '已同步 bcc7', tone: 'ok' } }), 'utf8');
+    const section = buildPanelView(fakeContext(), dir).sections?.find((item) => item.title === '页面版本');
+    expect(section?.collapsed).toBe(true);
+    const button = section?.actions?.find((item) => item.id === 'sync-page');
+    // 没配中转机时点它只会得到一句「还没连接中转机」
+    expect(button?.disabled).toBe(true);
+  });
+
+  it('refuses to sync when there is no relay yet, instead of silently doing nothing', async () => {
+    const handler = createPanelHandler(fakeContext(), dir);
+    await expect(handler.action({ action: 'sync-page', values: {} })).rejects.toThrow(/还没连接中转机/);
+  });
 });

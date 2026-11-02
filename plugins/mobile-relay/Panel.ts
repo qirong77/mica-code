@@ -10,6 +10,7 @@ import type {
 } from '@packages/mica-plugin/index.js';
 import { buildStatus, readBridgePid } from './BridgeSupervisor.js';
 import { findRendererDir, readDeployState, runSetup } from './DeployRunner.js';
+import { runPageSync } from './PageSyncAction.js';
 import { machineIdentity } from './Registrar.js';
 import { registerMachine } from './registerMachine.js';
 
@@ -95,6 +96,57 @@ function statusRows(ctx: PluginContext, dataDir: string | null): PluginPanelRow[
     rows.push({ label: '手机链接', value: status.phoneUrl, tone: 'accent' });
   }
   return rows;
+}
+
+type SupervisorStatus = {
+  page?: { text?: unknown; tone?: unknown };
+  attention?: { text?: unknown } | null;
+};
+
+/** 常驻监管写的那份状态：面板只读它，不自己去问中转机。 */
+function readSupervisorStatus(dataDir: string | null): SupervisorStatus {
+  if (!dataDir) return {};
+  try {
+    const raw = JSON.parse(readFileSync(join(dataDir, 'data.json'), 'utf8')) as SupervisorStatus;
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+const PAGE_TONES = new Set(['ok', 'warn', 'error', 'muted', 'accent']);
+
+/**
+ * 页面版本一节：本机这版和中转机上那版不一样时，这里直接给一个「更新」按钮。
+ *
+ * 手机打开的那份页面正是中转机上托管的那份，所以「页面落后」这件事在手机上最该被看见——
+ * 用户看到的就是旧界面，却没有别的入口能把它更新掉。
+ */
+function pageSection(ctx: PluginContext, dataDir: string | null): PluginPanelSection {
+  const status = readSupervisorStatus(dataDir);
+  const pageText = typeof status.page?.text === 'string' ? status.page.text : '';
+  const rawTone = typeof status.page?.tone === 'string' ? status.page.tone : '';
+  const pageTone = (PAGE_TONES.has(rawTone) ? rawTone : 'muted') as PluginPanelRow['tone'];
+  const attentionText = typeof status.attention?.text === 'string' ? status.attention.text : '';
+  const configured = Boolean(String(ctx.settings.get().relayUrl ?? '').trim());
+
+  return {
+    title: '页面版本',
+    collapsed: !attentionText,
+    rows: [
+      { label: '中转机页面', value: pageText || '还没探测', tone: pageText ? pageTone : 'muted' },
+      ...(attentionText ? [{ label: '要更新', value: attentionText, tone: 'warn' as const }] : []),
+    ],
+    actions: [
+      {
+        id: 'sync-page',
+        label: '更新中转机页面',
+        tone: attentionText ? 'primary' : 'ghost',
+        disabled: !configured,
+        hint: '把手机端页面换成这台机器当前的版本；一致时不上传。',
+      },
+    ],
+  };
 }
 
 function setupSection(ctx: PluginContext, dataDir: string | null, drafts: Drafts): PluginPanelSection {
@@ -243,6 +295,7 @@ export function buildPanelView(ctx: PluginContext, dataDir: string | null): Plug
 
   const sections: PluginPanelSection[] = [
     { title: '状态', rows: statusRows(ctx, dataDir) },
+    pageSection(ctx, dataDir),
     registrationSection(ctx, drafts),
     setupSection(ctx, dataDir, drafts),
     askAgentSection(rendererFound),
@@ -323,6 +376,12 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
           { relayUrl, enrollKey: drafts.enrollKey, label: drafts.label },
           dataDir
         );
+      }
+
+      if (action === 'sync-page') {
+        const result = await runPageSync(ctx, dataDir);
+        if (!result.ok) throw new Error(result.message);
+        return { message: result.message };
       }
 
       if (action === 'apply') {

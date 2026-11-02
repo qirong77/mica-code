@@ -264,15 +264,17 @@ function PluginSection({
 /** 一张插件卡片：图标是它的身份，卡片本身就是入口。 */
 function PluginCard({ plugin, onOpen }: { plugin: ConfigWebPlugin; onOpen(): void }) {
   const status = pluginStatus(plugin);
+  const attention = plugin.state === 'enabled' ? plugin.attention : null;
   return (
     <button
       type="button"
-      className={`plugin-card${plugin.state === 'enabled' ? '' : ' is-inactive'}`}
-      title={`${plugin.name} · ${plugin.location}`}
+      className={`plugin-card${plugin.state === 'enabled' ? '' : ' is-inactive'}${attention ? ' has-attention' : ''}`}
+      title={attention ? `${plugin.name} · ${attention.text}` : `${plugin.name} · ${plugin.location}`}
       onClick={onOpen}
     >
       <span className="plugin-card-icon">
         <PluginIcon name={plugin.icon} size={18} />
+        {attention ? <span className={`plugin-attention-dot is-${attention.tone}`} aria-hidden="true" /> : null}
       </span>
       <span className="plugin-card-body">
         <span className="plugin-card-head">
@@ -280,6 +282,11 @@ function PluginCard({ plugin, onOpen }: { plugin: ConfigWebPlugin; onOpen(): voi
           <span className="plugin-card-version">v{plugin.version}</span>
         </span>
         <span className="plugin-card-description">{plugin.description || '这个插件没有写描述'}</span>
+        {attention ? (
+          <span className="plugin-card-attention">
+            <span className="plugin-card-attention-text">{attention.text}</span>
+          </span>
+        ) : null}
         <span className="plugin-card-foot">
           <Tag tone={status.tone} dot>
             {status.label}
@@ -380,6 +387,10 @@ function PluginDetail({
         {error ? <Alert message={error} /> : null}
         {plugin.description ? <p className="plugin-description">{plugin.description}</p> : null}
         {plugin.error ? <Alert message={plugin.error} /> : null}
+        {/* 插件上报的「点一下就能变好」：提示点已经把人引到这里，这里给的是那个按钮。 */}
+        {plugin.state === 'enabled' && plugin.attention ? (
+          <PluginAttentionBar plugin={plugin} values={plugin.settings.values} onDone={onSaved} />
+        ) : null}
         {plugin.health && plugin.health.level !== 'ok' ? (
           <div className={`plugin-health is-${plugin.health.level}`}>
             <span className="plugin-health-title">
@@ -509,6 +520,70 @@ function PluginActionsGroup({
         );
       })}
     </SettingsGroup>
+  );
+}
+
+/**
+ * 「有一件事等人点一下」的那一条。
+ *
+ * 文案与动作都来自插件自己的数据（`attention`），页面只负责画与转交——不认识任何具体插件。
+ * 动作就地执行，结果写在这一条里，成功后重读一次详情：插件通常会顺手把自己上报的提示撤掉。
+ */
+function PluginAttentionBar({
+  plugin,
+  values,
+  onDone,
+}: {
+  plugin: ConfigWebPlugin;
+  values: Record<string, string>;
+  onDone: (next: ConfigWebPluginsDetails) => void;
+}) {
+  const attention = plugin.attention;
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<ConfigWebPluginActionResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (!attention) return null;
+  const action = attention.action ? (plugin.actions.find((item) => item.key === attention.action) ?? null) : null;
+
+  async function run() {
+    if (!action) return;
+    setRunning(true);
+    setError(null);
+    try {
+      setResult(await runPluginAction(plugin.id, action.key, values));
+      onDone(await readPluginsDetails());
+    } catch (runError) {
+      setError(formatError(runError));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className={`plugin-attention is-${attention.tone}`}>
+      <span className="plugin-attention-body">
+        <span className="plugin-attention-text">{attention.text}</span>
+        {error ? <span className="plugin-attention-note">{error}</span> : null}
+        {result ? (
+          <span className="plugin-attention-note">
+            {result.message}
+            {result.link ? (
+              <>
+                {' '}
+                <a href={result.link} target="_blank" rel="noreferrer">
+                  {result.link}
+                </a>
+              </>
+            ) : null}
+          </span>
+        ) : null}
+      </span>
+      {action ? (
+        <Button variant="primary" loading={running} onClick={() => void run()}>
+          {action.label}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 

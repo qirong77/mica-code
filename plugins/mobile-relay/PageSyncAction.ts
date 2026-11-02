@@ -9,8 +9,9 @@ import { pageVersionOf, resolveRendererDir, syncPage } from './PageSync.js';
  * 页面产物跟着 Mica 的版本走，而中转机托管的是上一次部署时的那一份。所以配置页给一个
  * 按钮：算出版本号、和 `/api/health` 比一次，不一致才打包上传。
  *
- * 刻意不做定时检查：上传是 3MB 级的出网流量，什么时候传该由人决定，而不是让后台
- * 每十分钟替他决定一次。
+ * 上传永远是手动的一步：一次 3MB 级的出网流量，什么时候传该由人决定。后台只做**版本的
+ * 只读比较**（`/api/health` 那一个请求），落后时把「有一件事等人点一下」上报成
+ * `data.json` 的 `attention`——侧栏 Plugins 入口、插件卡片与面板据此显示提示点与更新按钮。
  */
 
 const STATE_NAME = 'page-sync.json';

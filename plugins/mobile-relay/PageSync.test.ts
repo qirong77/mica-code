@@ -138,6 +138,10 @@ describe('publishing the page to a relay', () => {
     });
     expect(outcome).toMatchObject({ status: 'published', version });
     expect(readFileSync(join(relay.root, 'index.html'), 'utf8')).toContain('app-new111.js');
+    // 构建产物按内容哈希命名，浏览器会独立请求它们：换页之后它也得是新的
+    const asset = await fetch(`${relay.url}/assets/app-new111.js`);
+    expect(asset.status).toBe(200);
+    expect(await asset.text()).toContain('new111');
     const health = (await (await fetch(`${relay.url}/api/health`, { headers: { 'x-relay-token': TOKEN } })).json()) as {
       pageVersion: string;
     };
@@ -159,4 +163,13 @@ describe('publishing the page to a relay', () => {
     });
     expect(outcome.status).toBe('unsupported');
   });
+
+  // 口令不对时中转机回 401。这条路径最容易做成「静默当作已同步」——用户点了按钮，
+  // 页面没变、也没有任何提示。
+  it('口令不对时明确报错', async () => {
+    writePage(local, 'new111');
+    await expect(
+      syncPage({ relayUrl: relay.url, token: 'f'.repeat(48), rendererDir: local }),
+    ).rejects.toThrow(/中转机拒绝了这份页面（401）/);
+  }, 60_000);
 });
