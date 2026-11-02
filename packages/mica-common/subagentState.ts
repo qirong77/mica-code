@@ -26,8 +26,9 @@ export function subagentExecutionEnded(task: SubagentTaskRecord): boolean {
   }
 }
 
-type RestartClaimOwner = { version: 1; pid: number; token: string };
+type RestartClaimOwner = { version: 1 | 2; pid: number; token: string };
 export type SubagentRestartClaim = { readonly id: string; readonly parent: string; readonly owner: RestartClaimOwner };
+type RestartHandoff = { version: 2; original_id: string; token: string; task: SubagentTaskRecord };
 
 const RESTART_CLAIM_ERROR = 'Subagent restart is already claimed or cannot be safely claimed.';
 const RESTART_TOKEN_PATTERN = /^[0-9a-f-]{36}$/;
@@ -51,7 +52,7 @@ function readRestartOwner(path: string): RestartClaimOwner {
   const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
   if (!value || typeof value !== 'object') throw new Error(RESTART_CLAIM_ERROR);
   const owner = value as Partial<RestartClaimOwner>;
-  if (owner.version !== 1 || !Number.isSafeInteger(owner.pid) || !owner.pid || owner.pid <= 0 ||
+  if ((owner.version !== 1 && owner.version !== 2) || !Number.isSafeInteger(owner.pid) || !owner.pid || owner.pid <= 0 ||
       typeof owner.token !== 'string' || !RESTART_TOKEN_PATTERN.test(owner.token)) throw new Error(RESTART_CLAIM_ERROR);
   return owner as RestartClaimOwner;
 }
@@ -72,7 +73,7 @@ function restartOwnerExited(pid: number): boolean {
 export function claimSubagentRestart(id: string): SubagentRestartClaim {
   if (!ID_PATTERN.test(id)) throw new Error('Invalid subagent task id.');
   const parent = resolveMicaHomePath('subagent-restart-claims');
-  const owner: RestartClaimOwner = { version: 1, pid: process.pid, token: randomUUID() };
+  const owner: RestartClaimOwner = { version: 2, pid: process.pid, token: randomUUID() };
   const candidate = restartMarker(parent, id, owner.token, 'candidate');
   let candidateCreated = false;
   try {
@@ -92,10 +93,18 @@ export function claimSubagentRestart(id: string): SubagentRestartClaim {
       const current = readRestartOwner(path);
       if (visited.has(current.token)) throw new Error(RESTART_CLAIM_ERROR);
       visited.add(current.token);
+      // Version 1 could persist an unmarked replacement before committing. Even
+      // a dead or released owner may therefore have left a separately restartable
+      // task. Its relationship to this claim cannot be reconstructed safely.
+      if (current.version === 1) throw new Error(RESTART_CLAIM_ERROR);
       if (restartMarkerExists(restartMarker(parent, id, current.token, 'started'))) throw new Error(RESTART_CLAIM_ERROR);
       if (!restartMarkerExists(restartMarker(parent, id, current.token, 'released')) && !restartOwnerExited(current.pid)) {
         throw new Error(RESTART_CLAIM_ERROR);
       }
+      // The owner might have committed and then exited between the first
+      // marker check and the liveness probe. Once it is dead or released it
+      // cannot commit later, so this second check closes that race.
+      if (restartMarkerExists(restartMarker(parent, id, current.token, 'started'))) throw new Error(RESTART_CLAIM_ERROR);
       path = join(parent, `${id}.${current.token}`);
     }
   } catch {
@@ -105,20 +114,86 @@ export function claimSubagentRestart(id: string): SubagentRestartClaim {
   }
 }
 
-function writeRestartMarker(claim: SubagentRestartClaim, suffix: 'started' | 'released'): void {
+function writeRestartMarker(claim: SubagentRestartClaim, suffix: 'released'): void {
   const fd = openSync(restartMarker(claim.parent, claim.id, claim.owner.token, suffix), 'wx', 0o600);
   try { closeSync(fd); } catch { /* The empty marker was already created. */ }
 }
 
-/** Commit only after the replacement was scheduled and before it can execute. */
-export function commitSubagentRestart(claim: SubagentRestartClaim): void {
+/** Publish the complete replacement and the irreversible commit in one link. */
+export function commitSubagentRestart(claim: SubagentRestartClaim, task: SubagentTaskRecord): void {
+  if (claim.owner.version !== 2 || claim.owner.pid !== process.pid || !validTask(task) || task.id === claim.id ||
+      task.status !== 'running' || task.execution_pid !== process.pid || task.execution_pending !== true ||
+      task.restart_origin?.task_id !== claim.id || task.restart_origin.token !== claim.owner.token) {
+    throw new Error(RESTART_CLAIM_ERROR);
+  }
   if (restartMarkerExists(restartMarker(claim.parent, claim.id, claim.owner.token, 'released'))) throw new Error(RESTART_CLAIM_ERROR);
-  writeRestartMarker(claim, 'started');
+  const candidate = restartMarker(claim.parent, claim.id, claim.owner.token, 'handoff-candidate');
+  let created = false;
+  try {
+    const fd = openSync(candidate, 'wx', 0o600);
+    created = true;
+    const handoff: RestartHandoff = { version: 2, original_id: claim.id, token: claim.owner.token, task };
+    try { writeFileSync(fd, JSON.stringify(handoff)); } finally { closeSync(fd); }
+    // The marker becomes visible only after the entire record has been written.
+    // If linkSync succeeds, no subsequent cleanup failure may undo the commit.
+    linkSync(candidate, restartMarker(claim.parent, claim.id, claim.owner.token, 'started'));
+  } finally {
+    if (created) try { unlinkSync(candidate); } catch { /* A leftover candidate is never a commit. */ }
+  }
 }
 
 export function releaseSubagentRestart(claim: SubagentRestartClaim): void {
   if (restartMarkerExists(restartMarker(claim.parent, claim.id, claim.owner.token, 'started'))) throw new Error(RESTART_CLAIM_ERROR);
   writeRestartMarker(claim, 'released');
+}
+
+function readRestartHandoff(parent: string, id: string, token: string): SubagentTaskRecord | undefined {
+  const path = restartMarker(parent, id, token, 'started');
+  if (!restartMarkerExists(path)) return undefined;
+  const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  if (!value || typeof value !== 'object') throw new Error('Invalid subagent restart handoff.');
+  const handoff = value as Partial<RestartHandoff>;
+  const task = handoff.task;
+  if (handoff.version !== 2 || handoff.original_id !== id || handoff.token !== token || !validTask(task) ||
+      task.id === id || task.status !== 'running' || task.execution_pending !== true ||
+      !Number.isSafeInteger(task.execution_pid) || !task.execution_pid || task.execution_pid <= 0 ||
+      task.restart_origin?.task_id !== id || task.restart_origin.token !== token) {
+    throw new Error('Invalid subagent restart handoff.');
+  }
+  return task;
+}
+
+/** A provisional snapshot is usable only after its own handoff was published. */
+export function isCommittedSubagentRestart(task: SubagentTaskRecord): boolean {
+  const origin = task.restart_origin;
+  if (!origin || !ID_PATTERN.test(origin.task_id) || !RESTART_TOKEN_PATTERN.test(origin.token)) return false;
+  try {
+    return readRestartHandoff(resolveMicaHomePath('subagent-restart-claims'), origin.task_id, origin.token)?.id === task.id;
+  } catch (error) {
+    reportStorageError('reading restart handoff', error);
+    return false;
+  }
+}
+
+/** Follow immutable claim generations without ever reclaiming or modifying them. */
+function findRestartHandoff(id: string): SubagentTaskRecord | undefined {
+  const parent = resolveMicaHomePath('subagent-restart-claims');
+  let path = join(parent, id);
+  const visited = new Set<string>();
+  for (;;) {
+    if (!restartMarkerExists(path)) return undefined;
+    const owner = readRestartOwner(path);
+    if (visited.has(owner.token)) throw new Error(RESTART_CLAIM_ERROR);
+    visited.add(owner.token);
+    const started = restartMarker(parent, id, owner.token, 'started');
+    if (restartMarkerExists(started)) {
+      // Old started markers contain no replacement record and cannot establish
+      // which task, if any, ran. Keep their original claim permanently fenced.
+      return owner.version === 2 ? readRestartHandoff(parent, id, owner.token) : undefined;
+    }
+    if (owner.version === 1) return undefined;
+    path = join(parent, `${id}.${owner.token}`);
+  }
 }
 
 function reportStorageError(action: string, error: unknown): void {
@@ -141,6 +216,22 @@ export function readStoredSubagentTasks(id: string): SubagentTaskRecord[] {
       } catch (error) { reportStorageError(`reading task ${name}`, error); }
     }
   } catch (error) { reportStorageError('reading task directory', error); }
+  // Snapshots can be emitted before commit. Ignore an abandoned replacement,
+  // then recover committed replacements from the handoff even when their normal
+  // snapshot was never saved. Repeating this also recovers chains of restarts.
+  for (const [taskId, task] of records) {
+    if (task.restart_origin !== undefined && !isCommittedSubagentRestart(task)) records.delete(taskId);
+  }
+  const pending = [...records.keys()];
+  for (let index = 0; index < pending.length; index++) {
+    try {
+      const replacement = findRestartHandoff(pending[index]!);
+      if (replacement && !records.has(replacement.id)) {
+        records.set(replacement.id, replacement);
+        pending.push(replacement.id);
+      }
+    } catch (error) { reportStorageError('recovering restart handoff', error); }
+  }
   return [...records.values()].sort((a, b) => b.started_at.localeCompare(a.started_at)).map((task) => task.status === 'running' && subagentExecutionEnded(task)
     ? { ...task, status: 'failed' as const, error: 'Application restarted before this task completed.', activities: [] }
     : { ...task, activities: [] });

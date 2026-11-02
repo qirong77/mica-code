@@ -19,6 +19,7 @@ import { resolveMicaExecutable } from './mica-cli'
 import { logger } from './log'
 import { readTopLevelCwd } from './session-file-head'
 import { createSessionReader } from './session-reader'
+import { readTodoCheckpointInput } from './todo-checkpoint'
 import { isDirectory, resolveUsableCwd } from './cwd-utils'
 import {
   appendBufferedEvent,
@@ -2295,7 +2296,20 @@ export function registerChatIpc() {
     rememberChatSender(_event)
     if (!sessionId) return readDefaultMeta()
     return readSessionAsync(sessionFile(sessionId)).then(({ meta }) =>
-      meta ? { ...meta, protocol: protocolForProviderId(meta.providerId) } : null
+      meta
+        ? {
+            ...meta,
+            // A tool batch can write the plan and be interrupted before the call
+            // reaches the conversation; the plugin's checkpoint is then the only
+            // place the plan still exists.
+            todoInput:
+              meta.todoInput ||
+              (meta.turnState === 'completed'
+                ? null
+                : readTodoCheckpointInput(micaHomeDir(), sessionId)),
+            protocol: protocolForProviderId(meta.providerId)
+          }
+        : null
     )
   })
 

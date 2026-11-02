@@ -21,6 +21,7 @@ import {
 import { getActiveContext } from '../app/activeContext.js';
 import { micaContext } from '@packages/mica-context/index.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
+import { bindTodoSessionOwner } from '@packages/mica-common/todoState.js';
 import type { ApplicationContext } from '../app/ApplicationContext.js';
 
 export type ResumeSessionResult =
@@ -69,6 +70,7 @@ export class SessionController {
   /** 这条会话派生自哪条会话；resume 时从文件读回来，新会话由调用方给。 */
   private currentParentSessionId: string | null = null;
   private currentPersistedSignature: string | null = null;
+  private todoPersistenceEnabled = true;
   private readonly agent: SessionAgentAdapter;
   private readonly store: SessionStoreLike;
   private readonly config: SessionConfigAdapter;
@@ -80,6 +82,12 @@ export class SessionController {
     this.store = options.store ?? micaSession.createStore();
     this.config = options.config ?? defaultSessionConfigAdapter;
     this.ui = options.ui ?? defaultSessionUiAdapter;
+    bindTodoSessionOwner(this.agent, () => ({ id: this.currentSessionId, persistent: this.todoPersistenceEnabled }));
+  }
+
+  /** A no-save executor must not create or change the todo checkpoint either. */
+  setTodoPersistenceEnabled(enabled: boolean): void {
+    this.todoPersistenceEnabled = enabled;
   }
 
   list(limit = 20): SessionSummary[] {

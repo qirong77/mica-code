@@ -1,11 +1,12 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentMaxTurnsError } from '@packages/mica-agent/index.js';
 import type { PluginSubagentApi, PluginSubagentType } from '@packages/mica-plugin/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { createPluginSubagentHost } from './PluginSubagentHost.js';
-import { SubagentTaskManager } from './SubagentTaskManager.js';
+import { SubagentTaskManager, type SubagentTaskManagerOptions } from './SubagentTaskManager.js';
 
 type QueryOptions = {
   signal?: AbortSignal;
@@ -102,9 +103,10 @@ function fakePath(...segments: string[]): string {
 }
 
 const taskManagers: SubagentTaskManager[] = [];
+const temporaryHomes: Array<{ path: string; previous: string | undefined }> = [];
 
-function createHarness(stubOptions: Parameters<typeof createRuntimeStub>[0] = {}) {
-  const taskManager = new SubagentTaskManager();
+function createHarness(stubOptions: Parameters<typeof createRuntimeStub>[0] = {}, managerOptions: SubagentTaskManagerOptions = {}) {
+  const taskManager = new SubagentTaskManager(managerOptions);
   taskManagers.push(taskManager);
   const stub = createRuntimeStub(stubOptions);
   const host = createPluginSubagentHost({ defaultAgent: stub.runtime, taskManager });
@@ -125,6 +127,12 @@ async function flushAsyncWork(): Promise<void> {
 
 afterEach(async () => {
   while (taskManagers.length > 0) await taskManagers.pop()?.stop();
+  while (temporaryHomes.length > 0) {
+    const home = temporaryHomes.pop()!;
+    if (home.previous === undefined) delete process.env.MICA_HOME;
+    else process.env.MICA_HOME = home.previous;
+    rmSync(home.path, { recursive: true, force: true });
+  }
 });
 
 describe('PluginSubagentHost type registry', () => {

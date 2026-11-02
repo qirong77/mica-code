@@ -201,6 +201,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - `mica/input/focus` 是「焦点回到了输入框」（还没敲字）：同样只翻成运行期事件 `input:focus`。桌面端在 `TerminalComposer` 获得焦点时发，并且只在会话没在跑（本页或其他进程都没在跑）时发；轮次运行中漏过来的那一下由宿主的 turn lease 判定挡掉（插件拿到 `busy` 就跳过）。
 - `turn/start` / `mica/turn/editMessage` 可传 role，由 host 在启动 turn 前应用；edit 时必须在 `loadSnapshot()` 之后应用。角色缺失只 warning 并保留原角色，不为切角色重建 host。
 - `mica/notes/get|set` 读写会话笔记，落盘跟随本轮 checkpoint，不在 handler 里抢占 lease。
+- `mica/subagentTasks/list|detail|kill|restart` 管子代理任务：`list` 与每秒一次的 `mica/subagentTasks/updated` 快照只用于列表，`detail` 才带完整 timeline；`restart` 只在任务已停下、且能确认原执行进程已退出时接受（见第 8 节）。桌面端详情弹窗的「重启」按钮就发这一条。
 - `mica/pluginPanel/view|action` 读一块插件面板的视图、转发一次动作（`pluginId + action/key/values`）；面板处理器活在常驻会话宿主里（插件就在那个进程），没有宿主时桌面端按需起一个。
 - `mica/sessionMenu/run` 转发一次会话右键菜单动作（`pluginId + action`），插件回 `{ copyText?, message? }`；处理器与面板一样活在常驻会话宿主里，没有宿主时桌面端按需起一个。
 - 改名先找常驻 host 调 `SessionController.renameCurrent`；无 host 且无其他进程 lease 时才直接写盘。
@@ -284,7 +285,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 执行类工具按「启动 / 等待 / 查看」拆开：`run_shell` 只跑前台命令（≤120s）；`background_tasks_start` 启动并立即返回 id；`wait_for` 只观察条件。
 - `overlappable: true`（`wait_for` / `pty_wait`）或 `canOverlap(input)`（`agent` 仅 await/join）表示可与同消息其余调用重叠；加入前确认无写副作用。
 - PTY 由懒启动的 Node helper（`mica-pty/src/server.mjs`）承载；改 `server.mjs` 后跑 `bun run scripts/generate-pty-server-source.mjs` 同步 `ptyServerSource.ts`。
-- Todo（`plugins/todo/`）是「本轮计划」，不写 session。宿主只渲染、不改写模型给的状态：turn 结束既不把 `pending` 升成 `completed`，也不把 `in_progress` 退回写进数据。**显示边界也是轮次**：`resolveTodoPanel` 只在清单所属那一轮还在跑（或用户 `/todo show` 手动打开）时返回 `visible: true`，turn 结束即收起，新一轮开始时上一轮清单直接作废——desktop 从历史里的 `todo_write` 工具行投影，必须校验 `turnId` 才能避免旧计划一直挂在页面上。解析归一化、投影、显示规则唯一实现在 `mica-common/todoState.ts`，TUI 面板与 desktop dock 共用。执行期只做归一化（未知字段忽略、多个 `in_progress` 降级、超长截断），不拒绝整次调用。
+- Todo（`plugins/todo/`）是「本轮计划」，不写 session 快照。宿主只渲染、不改写模型给的状态：turn 结束既不把 `pending` 升成 `completed`，也不把 `in_progress` 退回写进数据。**显示边界也是轮次**：`resolveTodoPanel` 只在清单所属那一轮还在跑（或用户 `/todo show` 手动打开）时返回 `visible: true`；turn 正常完成即收起，中断 / 失败则保留最近清单并暂停显示进行中，下一轮开始前从 checkpoint 读回进度。desktop 从历史里的 `todo_write` 工具行投影，必须校验 `turnId` 才能避免旧计划一直挂在页面上。解析归一化、投影、显示规则唯一实现在 `mica-common/todoState.ts`，TUI 面板与 desktop dock 共用。执行期只做归一化（未知字段忽略、多个 `in_progress` 降级、超长截断），不拒绝整次调用。
+- 中断后的进度必须让模型也看得见，而不只是界面：工具批次里 `todo_write` 可能已经执行、其余调用尚未提交到 provider 历史就被打断。因此每次写入都原子落盘到 `$MICA_HOME/todo-checkpoints/<sessionId>.json`（`version` / `sessionId` / `turnId` / `items`，写路径不合法就拒绝），下一轮 `turn:before` 读回，`ctx.agent.onIterationRewrite` 以**一条 system 消息**（`<mica-todo-recovery>`，先删掉上一条再按需追加）附给模型——不写进用户消息、不改 `conversationMessages`。会话归属由 `bindTodoSessionOwner()` 解析（现场取 id，resume 换会话即失效），`mica exec` 这类不落盘的宿主关掉 checkpoint（`setTodoPersistenceEnabled(false)`）。标记本轮已正常完成的 `turnId` 存在会话 `pluginState['todo']`，所以重开应用后不会把已完成的一轮当成中断。
 - `session_notes` 工具只改内存（`snapshot.notes`），落盘交给本轮 checkpoint。
 
 ### MCP 与 Skills
@@ -305,6 +307,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 委派能力本身是插件 `plugins/subagent/`：`agent` 工具、7 种内置类型、委派 prompt 段落都在插件里；内核只留机制（`ctx.subagents`，实现在 `apps/cli/src/agents/PluginSubagentHost.ts` + `SubagentTaskManager.ts`）。停用该插件后既没有 `agent` 工具，也没有提示词里的委派指引。
 - 内置类型：general-purpose、Explore、Implementer、Reviewer、Tester、Planner、Proposal；`maxTurns` 唯一默认值在 `plugins/subagent/definitions.ts`（100）。
 - `SubagentTaskManager` 按 owner 隔离任务与 abort signal，任务记录带 `pluginId` 供 `ctx.subagents.tasks.*` 收窄；后台完成元数据回注 owner，结果显式 read/await。parent Ctrl+C 同步中止其运行中的子代理。
+- 常驻宿主持久化子代理记录到 `$MICA_HOME/subagent-tasks/<sessionId>.json`（`mica-common/subagentState.ts`；旧形态 `subagent-tasks/<sessionId>.json` 单文件读一次即迁移），每轮按 owner 只写变过的那条。resume 时 `restore()` 把记录读回来供详情与重启使用，`status: running` 只在该进程确实已退出（`ESRCH`）时才降级成 failed——PID 复用与权限错误一律当作仍在跑。恢复的只是记录，执行句柄、abort signal 与 timeline 现场不恢复。
+- 重启不是「继续上一次执行」，是**用原任务和最近活动作上下文新起一个任务**：`mica/subagentTasks/restart` → `SubagentTaskManager.restart()` → 插件的 restart handler 重新过工具白名单、写策略与路径租约，成功后才创建替代任务。跨进程只允许一个进程重启同一个任务：`claimSubagentRestart()` 用不可变世代文件 + 原子硬链接占位，`commitSubagentRestart()` 把完整替代任务记录与提交标记用一次 `link` 发布，`releaseSubagentRestart()` 只在确实失败时释放；持有进程崩溃的 claim 可被下一个进程接管，已提交或已释放的不能被再次占用。重启失败要释放已申请的租约并允许重试。
 - 前台委派默认阻塞，同消息多个调用可并行；需要主流程继续时用 `run_in_background: true`；每 owner 合计并发上限 4。
 - turn 结束即收尾它起的后台子代理（`killRunningForOwner(owner, 'Parent turn finished.')`）：这一轮已经交付，结果只能经 `agent operation=read` 取回，而下一轮的模型不会去读上个 turn 的 `task_id`。留着它们只会在状态栏挂一条永远 running 的条目并继续烧 token。收尾在 `turn:after` 之前（TUI 在 `LocalRuntimeController.runTurn` 的 finally，headless 在 `HeadlessTurnExecutor.emitTurnAfter`），且不发完成通知。
 - `context_mode` 为 none/brief/recent/files，默认 brief；Implementer / Tester / Proposal 必填 `owned_paths`，写工具与 shell cwd 校验租约（判定唯一实现在 `mica-tools/utils/pathOwnership.ts`）。

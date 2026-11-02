@@ -1,4 +1,4 @@
-import { claimSubagentRestart, commitSubagentRestart, releaseSubagentRestart, subagentExecutionEnded } from '@packages/mica-common/subagentState.js';
+import { claimSubagentRestart, commitSubagentRestart, isCommittedSubagentRestart, releaseSubagentRestart, subagentExecutionEnded, type SubagentRestartClaim } from '@packages/mica-common/subagentState.js';
 import {
   AgentMaxTurnsError,
   summarizeUsageHistory,
@@ -79,6 +79,8 @@ export type SubagentTaskRecord = {
   timeline_truncated?: boolean;
   execution_pid?: number;
   execution_pending?: boolean;
+  /** The replacement is provisional until this restart claim is committed. */
+  restart_origin?: { task_id: string; token: string };
   started_at: string;
   finished_at?: string;
   result?: string;
@@ -86,7 +88,7 @@ export type SubagentTaskRecord = {
   usage?: AgentUsageSummary;
 };
 
-type RestartAttempt = { committed: boolean; tasks: ManagedSubagentTask[] };
+type RestartAttempt = { claim: SubagentRestartClaim; committed: boolean; tasks: ManagedSubagentTask[] };
 
 type ManagedSubagentTask = {
   record: SubagentTaskRecord;
@@ -96,6 +98,7 @@ type ManagedSubagentTask = {
   resolvePromise: () => void;
   executionPending: boolean;
   restored?: boolean;
+  cancelBeforeStart?: () => void;
 };
 
 export type StartSubagentTaskOptions = {
@@ -117,6 +120,8 @@ export type StartSubagentTaskOptions = {
   activity?: 'delegation' | 'maintenance';
   run: (signal: AbortSignal) => Promise<{ result: string; usage?: AgentUsageSummary }>;
   getUsage?: () => AgentUsageSummary;
+  /** Release resources acquired while scheduling if deferred execution is cancelled. */
+  onStartCancelled?: () => void;
 };
 
 export type TrackSubagentTaskOptions = Omit<StartSubagentTaskOptions, 'run' | 'getUsage'>;
@@ -162,21 +167,32 @@ export class SubagentTaskManager {
     if (task.status === 'running') throw new Error('A running subagent cannot be restarted.');
     if (this.tasks.get(id)?.executionPending) throw new Error('Subagent execution is still stopping; retry after it exits.');
     if (!subagentExecutionEnded(task)) throw new Error('Cannot confirm that the subagent execution has exited.');
+    if (task.restart_origin && !isCommittedSubagentRestart(task)) throw new Error('This replacement was not committed and cannot be restarted.');
     if (!this.restartHandler) throw new Error('Subagent restart is unavailable.');
     if (this.restartAttempt) throw new Error('A subagent restart is already being scheduled.');
+    // A journal can be found in a session only if that session already contains
+    // the source record (or its own committed journal). Do not execute a restart
+    // when the configured session store cannot establish that association.
+    if (this.readRestoredTasks && !this.readRestoredTasks(owner).some((record) => record.id === id)) {
+      throw new Error('Cannot restart a subagent whose session record is not recoverable.');
+    }
     const claim = claimSubagentRestart(id);
-    const attempt: RestartAttempt = { committed: false, tasks: [] };
+    const attempt: RestartAttempt = { claim, committed: false, tasks: [] };
     this.restartAttempt = attempt;
     try {
       const replacement = this.restartHandler(task, owner);
+      if (attempt.tasks.length !== 1 || attempt.tasks[0]?.record.id !== replacement || attempt.tasks[0].owner !== owner) {
+        throw new Error('A subagent restart must schedule exactly one replacement for the same owner.');
+      }
       // start() defers execution to a microtask. Record the successful handoff
       // before allowing any replacement created by this handler to run.
-      commitSubagentRestart(claim);
+      commitSubagentRestart(claim, attempt.tasks[0].record);
       attempt.committed = true;
       return replacement;
     } catch (error) {
       for (const managed of attempt.tasks) {
         managed.controller.abort();
+        try { managed.cancelBeforeStart?.(); } catch (cleanupError) { console.error('[subagent state] cancelling restart:', cleanupError); }
         this.complete(managed, { status: 'killed', error: 'Subagent restart could not be scheduled.' }, false);
       }
       try { releaseSubagentRestart(claim); } catch (releaseError) { console.error('[subagent state] releasing restart claim:', releaseError); }
@@ -221,9 +237,18 @@ export class SubagentTaskManager {
     const restartAttempt = this.restartAttempt;
     const managed = this.createTask(options);
     const { controller } = managed;
+    let cancelled = false;
+    managed.cancelBeforeStart = () => {
+      if (cancelled) return;
+      cancelled = true;
+      options.onStartCancelled?.();
+    };
     const execution = Promise.resolve()
       .then(() => {
-        if (restartAttempt && !restartAttempt.committed) throw new Error('Subagent restart could not be scheduled.');
+        if (restartAttempt && !restartAttempt.committed) {
+          managed.cancelBeforeStart?.();
+          throw new Error('Subagent restart could not be scheduled.');
+        }
         return options.run(controller.signal);
       })
       .then(
@@ -309,6 +334,7 @@ export class SubagentTaskManager {
       status: 'running',
       execution_pid: process.pid,
       execution_pending: true,
+      ...(this.restartAttempt ? { restart_origin: { task_id: this.restartAttempt.claim.id, token: this.restartAttempt.claim.owner.token } } : {}),
       ...(options.parentTaskId ? { parent_task_id: options.parentTaskId } : {}),
       ...(options.pluginId ? { pluginId: options.pluginId } : {}),
       ...(options.providerId ? { provider_id: options.providerId } : {}),
@@ -654,6 +680,7 @@ function cloneRecord(record: SubagentTaskRecord): SubagentTaskRecord {
     ...(record.usage ? { usage: { ...record.usage } } : {}),
     ...(record.context_files ? { context_files: [...record.context_files] } : {}),
     ...(record.owned_paths ? { owned_paths: [...record.owned_paths] } : {}),
+    ...(record.restart_origin ? { restart_origin: { ...record.restart_origin } } : {}),
   };
 }
 

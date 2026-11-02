@@ -381,6 +381,15 @@ export function createPluginSubagentHost(
         const task = taskManager.start({
           ...taskOptionsOf(prepared),
           getUsage: () => summarizeSubagentUsage(prepared.child.usageHistory),
+          onStartCancelled: () => {
+            // A failed restart commit never enters run(), so its finally block
+            // cannot release the lease or settle the background handle.
+            if (taskId) {
+              pathLeases.release(taskId);
+              spawnMeta.delete(taskId);
+            }
+            settleOnce({ taskId, status: 'killed', output: '', error: 'Subagent task was not started.' });
+          },
           run: async (signal) => {
             const runTaskId = taskId || task.id;
             prepared.toolContext.taskId = runTaskId;

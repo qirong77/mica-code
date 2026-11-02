@@ -137,6 +137,7 @@ export class HeadlessTurnExecutor {
 
   constructor(options: HeadlessTurnExecutorOptions) {
     this.options = options;
+    options.sessionController.setTodoPersistenceEnabled?.(options.save !== false);
     this.queue = options.queue ?? new micaRuntime.MessageQueueService();
     this.parseImageRefs = options.parseImageRefs ?? parseImageRefs;
   }

@@ -18,13 +18,29 @@ function projectSession(raw) {
   })) : [] } catch {}
   let meta = null
   try { if (snapshot && typeof snapshot === 'object') {
-    // Provider history contains the tool calls omitted from conversationMessages.
-    // Only recover a successful write in the last user turn, never an older plan.
+    // Provider history contains tool calls omitted from conversationMessages.
+    // A text user message starts a new plan scope; a media message after a tool
+    // result is the rest of the same turn's tool output.
     const calls = new Map()
     let todoInput = null
+    const failed = (result, output) => {
+      if (result?.is_error === true || result?.isError === true) return true
+      const value = Array.isArray(output)
+        ? output.map((block) => block?.text || '').join('\n')
+        : output
+      if (typeof value !== 'string' || !value.trim()) return false
+      if (/^(?:工具执行失败[:：]|未知工具[:：]|工具\s+todo_write\s+(?:输入校验失败|不在当前 agent 的允许工具范围内))/i.test(value.trim())) return true
+      try {
+        const parsed = JSON.parse(value)
+        return parsed?.ok === false || parsed?.success === false || parsed?.is_error === true ||
+          ['error', 'failed', 'interrupted', 'aborted'].includes(parsed?.status)
+      } catch { return false }
+    }
     for (const message of Array.isArray(snapshot.messages) ? snapshot.messages : []) {
       const blocks = Array.isArray(message?.content) ? message.content : []
-      if (message?.role === 'user' && !blocks.some((block) => block?.type === 'tool_result')) {
+      const user = message?.role === 'user' && !blocks.some((block) => block?.type === 'tool_result')
+      const media = blocks.some((block) => block?.type && block.type !== 'text')
+      if (user && !media) {
         calls.clear()
         todoInput = null
       }
@@ -42,10 +58,10 @@ function projectSession(raw) {
       for (const block of blocks) {
         if (block?.type === 'tool_use') remember(block.id, block.name, block.input)
       }
-      const finish = (id, failed) => { if (!failed && calls.has(id)) todoInput = calls.get(id) }
-      if (message?.role === 'tool') finish(message.tool_call_id, message.is_error)
-      if (message?.type === 'function_call_output') finish(message.call_id, message.is_error)
-      for (const block of blocks) if (block?.type === 'tool_result') finish(block.tool_use_id, block.is_error)
+      const finish = (id, result, output) => { if (calls.has(id) && !failed(result, output)) todoInput = calls.get(id) }
+      if (message?.role === 'tool') finish(message.tool_call_id, message, message.content)
+      if (message?.type === 'function_call_output') finish(message.call_id, message, message.output)
+      for (const block of blocks) if (block?.type === 'tool_result') finish(block.tool_use_id, block, block.content)
     }
     const usages = Array.isArray(snapshot.usageHistory) ? snapshot.usageHistory : []
     const input = usages.reduce((sum, usage) => sum + Math.max(0, Number(usage?.inputTokens) || 0), 0)

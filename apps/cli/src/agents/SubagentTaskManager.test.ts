@@ -1,3 +1,5 @@
+import { mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { formatSubagentTaskNotification, SubagentTaskManager } from './SubagentTaskManager.js';
@@ -525,8 +527,57 @@ describe('cross-process recovery', () => {
     manager.restore([record], owner);
     manager.setRestartHandler(() => { throw new Error('temporary failure'); });
     expect(() => manager.restart(record.id, owner)).toThrow('temporary failure');
-    manager.setRestartHandler(() => 'replacement');
-    expect(manager.restart(record.id, owner)).toBe('replacement');
+    manager.setRestartHandler(() => manager.start({ owner, description: 'replacement', subagentType: 'test', model: 'm', effort: 'low', run: async () => ({ result: 'done' }) }).id);
+    const replacement = manager.restart(record.id, owner);
+    expect(manager.get(replacement, owner)?.description).toBe('replacement');
+  });
+
+  it('does not run a scheduled replacement when the restart handler fails, and permits retry', async () => {
+    const owner = {} as AgentRuntime;
+    const record = { id: `failed-handoff-${process.pid}-${Date.now()}`, description: 'work', subagent_type: 'test', model: 'm', effort: 'low' as const, status: 'failed' as const, started_at: new Date().toISOString(), execution_pending: false };
+    const manager = new SubagentTaskManager();
+    const run = vi.fn(async () => ({ result: 'done' }));
+    let abandonedId = '';
+    manager.restore([record], owner);
+    manager.setRestartHandler(() => {
+      abandonedId = manager.start({ owner, description: 'abandoned', subagentType: 'test', model: 'm', effort: 'low', run }).id;
+      throw new Error('startup failed');
+    });
+    expect(() => manager.restart(record.id, owner)).toThrow('startup failed');
+    await flushAsyncWork();
+    expect(run).not.toHaveBeenCalled();
+    expect(manager.get(abandonedId, owner)?.status).toBe('killed');
+
+    manager.setRestartHandler(() => manager.start({ owner, description: 'retry', subagentType: 'test', model: 'm', effort: 'low', run }).id);
+    const replacement = manager.restart(record.id, owner);
+    expect(run).not.toHaveBeenCalled();
+    await flushAsyncWork();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(manager.get(replacement, owner)?.status).toBe('completed');
+    expect(() => manager.restart(record.id, owner)).toThrow('claimed');
+  });
+
+  it('does not run a replacement if the successful handoff cannot be recorded', async () => {
+    const owner = {} as AgentRuntime;
+    const record = { id: `failed-commit-${process.pid}-${Date.now()}`, description: 'work', subagent_type: 'test', model: 'm', effort: 'low' as const, status: 'failed' as const, started_at: new Date().toISOString(), execution_pending: false };
+    const manager = new SubagentTaskManager();
+    const run = vi.fn(async () => ({ result: 'done' }));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    manager.restore([record], owner);
+    manager.setRestartHandler(() => {
+      const replacement = manager.start({ owner, description: 'pending', subagentType: 'test', model: 'm', effort: 'low', run });
+      const parent = join(process.env.MICA_HOME!, 'subagent-restart-claims');
+      const claim = JSON.parse(readFileSync(join(parent, record.id), 'utf8')) as { token: string };
+      mkdirSync(join(parent, `${record.id}.${claim.token}.started`));
+      return replacement.id;
+    });
+    try {
+      expect(() => manager.restart(record.id, owner)).toThrow();
+      await flushAsyncWork();
+      expect(run).not.toHaveBeenCalled();
+      expect(manager.list(owner).find((task) => task.id !== record.id)?.status).toBe('killed');
+      expect(() => manager.restart(record.id, owner)).toThrow('claimed');
+    } finally { log.mockRestore(); }
   });
 
   it('preserves live and uncertain tasks and claims each restart only once', () => {
@@ -544,8 +595,10 @@ describe('cross-process recovery', () => {
     const finished = { ...record, status: 'failed' as const, execution_pending: false };
     first.restore([finished], owner);
     second.restore([finished], owner);
-    second.setRestartHandler(() => 'duplicate');
-    expect(first.restart(record.id, owner)).toBe('new-task');
+    const schedule = (manager: SubagentTaskManager) => manager.start({ owner, description: 'duplicate', subagentType: 'test', model: 'm', effort: 'low', run: async () => ({ result: 'done' }) }).id;
+    first.setRestartHandler(() => schedule(first));
+    second.setRestartHandler(() => schedule(second));
+    expect(first.restart(record.id, owner)).toBeDefined();
     expect(() => second.restart(record.id, owner)).toThrow('claimed');
   });
 });

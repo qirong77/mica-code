@@ -1,19 +1,22 @@
 import React from 'react';
 import { Box, Text } from '@anthropic/ink';
 import { atom } from 'nanostores';
+import { randomUUID } from 'node:crypto';
 import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
 import type { RuntimeTurnAfterHookEvent, RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
-import type { AgentQueryContent } from '@packages/mica-agent/index.js';
+import { micaSession } from '@packages/mica-session/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import {
   formatTodoSummary,
   resolveTodoPanel,
   summarizeTodoProgress,
+  todoSessionForOwner,
   type TodoItem,
   type TodoStatus,
 } from '@packages/mica-common/todoState.js';
 import { TodoWriteTool } from './TodoTool.js';
 import { buildTodoGuidance } from './prompt.js';
+import { readTodoCheckpoint, writeTodoCheckpoint } from './todoPersistence.js';
 
 export { formatTodoSummary, parseTodoInput, resolveTodoPanel } from '@packages/mica-common/todoState.js';
 export { TODO_GUIDANCE, buildTodoGuidance } from './prompt.js';
@@ -46,7 +49,13 @@ type TodoViewState = {
   live: boolean;
   pinned: boolean;
   interrupted: boolean;
+  sessionId: string | null;
+  turnId: string | null;
 };
+
+type TodoTurn = { owner: unknown; sessionId: string | null; turnId: string };
+type TodoSessionMarker = { version: 1; turnId: string; completed: boolean };
+const RECOVERY_PREFIX = '<mica-todo-recovery>\n';
 
 export class TodoPlugin implements MicaPlugin {
   readonly id = PLUGIN_ID;
@@ -58,21 +67,42 @@ export class TodoPlugin implements MicaPlugin {
     const captureOwner = (context?: unknown): unknown => ctx.session?.captureOwner?.(context) ?? fallbackOwner;
     const eventOwner = (event: { owner?: unknown }): unknown => event.owner ?? captureOwner();
     const todos = atom(new Map<unknown, TodoViewState>());
-    const inputOwners = new WeakMap<object, unknown>();
+    const inputTurns = new WeakMap<object, TodoTurn>();
+    const identity = (owner: unknown) => todoSessionForOwner(owner);
+    const currentView = (owner: unknown): TodoViewState => {
+      const view = todos.get().get(owner);
+      const sessionId = identity(owner)?.id ?? null;
+      return view && view.sessionId === sessionId ? view : { ...createTodoViewState(), sessionId };
+    };
     const patch = (owner: unknown, update: (current: TodoViewState) => TodoViewState) => {
       const views = todos.get();
-      const current = views.get(owner) ?? createTodoViewState();
+      const current = currentView(owner);
       const next = update(current);
-      if (next !== current) todos.set(new Map(views).set(owner, next));
+      if (next !== current || views.get(owner) !== current) todos.set(new Map(views).set(owner, next));
+    };
+
+    const saveCheckpoint = (owner: unknown, state: TodoViewState, items: TodoItem[]) => {
+      const session = identity(owner);
+      if (!session || !session.persistent || !ctx.paths?.config) return;
+      if (state.sessionId !== session.id || !state.turnId) throw new Error('Todo turn no longer belongs to this session');
+      writeTodoCheckpoint(ctx.paths.config, { version: 1, sessionId: session.id, turnId: state.turnId, items });
     };
 
     const tool = new TodoWriteTool((items, callbacks) => {
-      patch(captureOwner(callbacks?.context), (current) => ({ ...current, items, live: true, interrupted: false }));
+      if (callbacks?.signal?.aborted) throw new Error('Todo turn was interrupted');
+      const owner = captureOwner(callbacks?.context);
+      const current = currentView(owner);
+      // The checkpoint is durable before the tool reports success, even if
+      // another tool in the same provider batch is still running.
+      saveCheckpoint(owner, current, items);
+      patch(owner, (state) => ({ ...state, items, live: true, interrupted: false }));
     });
 
     function TodoStatusList(): React.ReactNode {
       const views = micaUi.useScheduleState(todos);
-      const state = views.get(captureOwner()) ?? createTodoViewState();
+      const owner = captureOwner();
+      const view = views.get(owner);
+      const state = view?.sessionId === (identity(owner)?.id ?? null) ? view : createTodoViewState();
       // 清单只属于一轮：这一轮不在跑、用户也没手动打开时就什么都不显示。
       const panel = resolveTodoPanel(
         { items: state.items, turnId: null },
@@ -140,7 +170,8 @@ export class TodoPlugin implements MicaPlugin {
 
     const eventSubscription = ctx.events.on('event', (event) => {
       if (event.type === 'session:cleared' || event.type === 'session:invalidated') {
-        patch(eventOwner(event), () => createTodoViewState());
+        const owner = eventOwner(event);
+        patch(owner, (current) => ({ ...createTodoViewState(), sessionId: current.sessionId }));
       } else if (event.type === 'session:disposed') {
         const views = new Map(todos.get());
         if (views.delete(eventOwner(event))) todos.set(views);
@@ -150,46 +181,71 @@ export class TodoPlugin implements MicaPlugin {
     });
     ctx.onDispose(() => eventSubscription.dispose());
 
-    // 新一轮开始即作废上一轮的清单：否则「这一轮没写计划」时屏幕上还挂着上一轮的进度。
+    // Reread after the host refreshes its session under the turn lease: the
+    // owner may now refer to another session or another process's newer turn.
     const turnBeforeSubscription = ctx.hooks.on<RuntimeTurnBeforeHookEvent>(
       'turn:before',
       (event) => {
-        inputOwners.set(event.input, eventOwner(event));
-        patch(eventOwner(event), (current) =>
-          !current.interrupted && (current.live || current.pinned || current.items.length > 0)
-            ? { ...current, items: [], live: false, pinned: false }
-            : current,
-        );
+        const owner = eventOwner(event);
+        const session = identity(owner);
+        const current = currentView(owner);
+        let items = current.interrupted ? current.items : [];
+        if (session && ctx.paths?.config && ctx.sessionState) {
+          const checkpoint = readTodoCheckpoint(ctx.paths.config, session.id);
+          const marker = ctx.sessionState.get<TodoSessionMarker>(owner);
+          const completed = marker?.version === 1 && marker.completed === true && marker.turnId === checkpoint?.turnId;
+          items = checkpoint && !completed ? checkpoint.items : [];
+        }
+        const turn: TodoTurn = { owner, sessionId: session?.id ?? null, turnId: randomUUID() };
+        const next: TodoViewState = {
+          ...current, sessionId: turn.sessionId, turnId: turn.turnId, items,
+          live: false, pinned: items.length > 0, interrupted: items.length > 0,
+        };
+        saveCheckpoint(owner, next, items);
+        if (session && ctx.sessionState) {
+          ctx.sessionState.set({ version: 1, turnId: turn.turnId, completed: false } satisfies TodoSessionMarker, owner);
+        }
+        inputTurns.set(event.input, turn);
+        patch(owner, () => next);
       },
-      { pluginId: ctx.pluginId },
+      { pluginId: ctx.pluginId, failPolicy: 'stop' },
     );
     ctx.onDispose(() => turnBeforeSubscription.dispose());
 
-    // 工具可能已经执行，但同批工具尚未提交到 provider 历史就被中断。
-    // 使用工具实际写入的快照，而不是仅依赖历史中的 tool result。
-    const promptSubscription = ctx.hooks.on<{ input: object; content: AgentQueryContent }>(
-      'prompt:build',
-      (event) => {
-        const state = todos.get().get(inputOwners.get(event.input) ?? captureOwner());
-        if (!state?.interrupted || state.items.length === 0) return event;
-        const progress = state.items.map((item) => `- [${item.status}] ${item.content}`).join('\n');
-        const note = `上次任务被中断，以下是中断前最后一次保存的 TODO 进度（进行中不代表已完成）；请结合当前请求判断如何继续：\n${progress}`;
-        return {
-          ...event,
-          content: typeof event.content === 'string'
-            ? `${event.content}\n\n${note}`
-            : [...event.content, { type: 'text' as const, text: note }],
-        };
-      },
-      { pluginId: ctx.pluginId },
-    );
-    ctx.onDispose(() => promptSubscription.dispose());
+    // Use the actual request owner and a system message, never the user's
+    // content. Responses histories may retain system messages, so remove our
+    // previous injection before optionally adding the current one.
+    const rewrite = ctx.agent?.onIterationRewrite((messages, agent) => {
+      const filtered = messages.filter((message) => !isRecoveryMessage(message));
+      const state = currentView(agent.owner);
+      const session = identity(agent.owner);
+      if (!state.interrupted || state.items.length === 0 ||
+          (session && agent.sessionId !== session.id)) return filtered.length === messages.length ? null : filtered;
+      const progress = state.items.map((item) => `- [${item.status}] ${item.content}`).join('\n');
+      const content = `${RECOVERY_PREFIX}上次任务被中断，以下是中断前最后一次保存的 TODO 进度（进行中不代表已完成）；请结合当前请求判断如何继续：\n${progress}\n</mica-todo-recovery>`;
+      const responses = messages.some((message) => Boolean(message && typeof message === 'object' &&
+        (message as { type?: unknown }).type === 'message'));
+      return [...filtered, responses ? { type: 'message', role: 'system', content } : { role: 'system', content }];
+    });
+    if (rewrite) ctx.onDispose(() => rewrite.dispose());
+
+    // The marker and completed conversation are saved in the same session
+    // snapshot, closing the crash window before turn:after runs.
+    const beforePersist = ctx.hooks.on<{ input: object }>('turn:beforePersist', (event) => {
+      const turn = inputTurns.get(event.input);
+      if (!turn || !turn.sessionId || identity(turn.owner)?.id !== turn.sessionId) return;
+      ctx.sessionState?.set({ version: 1, turnId: turn.turnId, completed: true } satisfies TodoSessionMarker, turn.owner);
+    }, { pluginId: ctx.pluginId, failPolicy: 'stop' });
+    ctx.onDispose(() => beforePersist.dispose());
 
     const turnAfterSubscription = ctx.hooks.on<RuntimeTurnAfterHookEvent>(
       'turn:after',
       (event) => {
+        const turn = inputTurns.get(event.input);
+        if (turn && (identity(turn.owner)?.id ?? null) !== turn.sessionId) return;
         // 只收面板，不改数据：`in_progress` 已经不再进行，但也不代表做完了。
-        patch(eventOwner(event), (current) => {
+        patch(turn?.owner ?? eventOwner(event), (current) => {
+          if (turn && current.turnId !== turn.turnId) return current;
           const interrupted = event.outcome !== 'completed';
           const pending = current.items.some((item) => item.status !== 'completed');
           return { ...current, live: false, interrupted, pinned: interrupted ? pending : current.interrupted ? false : current.pinned };
@@ -213,7 +269,7 @@ export class TodoPlugin implements MicaPlugin {
       handler: (_commandCtx, args) => {
         const action = args.trim().toLowerCase();
         const owner = captureOwner();
-        const current = todos.get().get(owner) ?? createTodoViewState();
+        const current = currentView(owner);
 
         if (!action || action === 'show') {
           patch(owner, (state) => ({ ...state, hidden: false, pinned: true }));
@@ -232,6 +288,24 @@ export class TodoPlugin implements MicaPlugin {
           return { ok: true };
         }
         if (action === 'clear') {
+          const session = identity(owner);
+          if (session?.persistent && ctx.paths?.config) {
+            if (current.live && current.turnId) {
+              saveCheckpoint(owner, current, []);
+            } else {
+              const lease = micaSession.acquireTurnLease(session.id);
+              if (!lease) {
+                ctx.ui?.showMessage('Todo list is in use by another process.');
+                return { ok: false, error: 'Todo list is in use by another process.' };
+              }
+              try {
+                const stored = readTodoCheckpoint(ctx.paths.config, session.id);
+                if (stored) writeTodoCheckpoint(ctx.paths.config, { ...stored, items: [] });
+              } finally {
+                lease.release();
+              }
+            }
+          }
           patch(owner, (state) => ({ ...state, items: [] }));
           ctx.ui?.showMessage('Todo list cleared.');
           return { ok: true };
@@ -246,7 +320,13 @@ export class TodoPlugin implements MicaPlugin {
 }
 
 function createTodoViewState(): TodoViewState {
-  return { items: [], hidden: false, live: false, pinned: false, interrupted: false };
+  return { items: [], hidden: false, live: false, pinned: false, interrupted: false, sessionId: null, turnId: null };
+}
+
+function isRecoveryMessage(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const value = message as { role?: unknown; content?: unknown };
+  return value.role === 'system' && typeof value.content === 'string' && value.content.startsWith(RECOVERY_PREFIX);
 }
 
 function TodoRow({ item }: { item: TodoItem }): React.ReactNode {

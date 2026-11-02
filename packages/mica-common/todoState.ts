@@ -23,6 +23,21 @@ export const MAX_TODO_TEXT_LENGTH = 240;
 /** 写进工具描述的建议条目数，不参与校验。 */
 export const RECOMMENDED_TODO_ITEMS = 7;
 
+/**
+ * The UI owner is an agent, whose selected persisted session can change on
+ * resume. Keep a resolver rather than a cached id; the terminal's own tab id
+ * is deliberately not a session id. This registry contains no persisted data.
+ */
+const todoSessionOwners = new WeakMap<object, () => { id: string; persistent: boolean }>();
+
+export function bindTodoSessionOwner(owner: object, resolve: () => { id: string; persistent: boolean }): void {
+  todoSessionOwners.set(owner, resolve);
+}
+
+export function todoSessionForOwner(owner: unknown): { id: string; persistent: boolean } | null {
+  return owner && typeof owner === 'object' ? todoSessionOwners.get(owner)?.() ?? null : null;
+}
+
 export type TodoStatus = 'pending' | 'in_progress' | 'completed';
 
 export type TodoItem = {

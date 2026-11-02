@@ -179,13 +179,12 @@ describe('TodoPlugin', () => {
     expect(render()).not.toBeNull();
     const input = micaRuntime.createRuntimeInput('resume', 'ui');
     await harness.hooks.emit('turn:before', { owner, runtime: {}, input });
-    const prompt = await harness.hooks.pipeline('prompt:build', { input, content: 'resume' });
-    expect(prompt.content).toContain('[completed] Finished');
-    expect(prompt.content).toContain('[in_progress] Continue');
+    const prompt = harness.rewrite([{ role: 'user', content: 'resume' }], { owner, sessionId: null }) as unknown[];
+    expect(JSON.stringify(prompt)).toContain('[completed] Finished');
+    expect(JSON.stringify(prompt)).toContain('[in_progress] Continue');
     const otherInput = micaRuntime.createRuntimeInput('other', 'ui');
     await harness.hooks.emit('turn:before', { owner: {}, runtime: {}, input: otherInput });
-    const otherPrompt = await harness.hooks.pipeline('prompt:build', { input: otherInput, content: 'other' });
-    expect(otherPrompt.content).toBe('other');
+    expect(harness.rewrite([{ role: 'user', content: 'other' }], { owner: {}, sessionId: null })).toBeNull();
     await harness.commands.execute('/todo show');
     expect(harness.showMessage).toHaveBeenLastCalledWith('TODO 清单已更新：1/2 完成，剩 1 项。\n- [ ] Continue');
   });
@@ -352,11 +351,18 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>, 
   });
   let currentOwner: unknown;
   const contextOwners = new Map<unknown, unknown>();
+  const rewrites: Array<(messages: unknown[], agent: { owner: unknown; sessionId: string | null }) => unknown> = [];
   const ctx = {
     pluginId: 'todo',
     commands,
     hooks,
     events,
+    agent: {
+      onIterationRewrite: (handler: (messages: unknown[], agent: { owner: unknown; sessionId: string | null }) => unknown) => {
+        rewrites.push(handler);
+        return { dispose: () => { rewrites.splice(rewrites.indexOf(handler), 1); } };
+      },
+    },
     session: withOwners ? { captureOwner: (context?: unknown) => contextOwners.get(context) ?? currentOwner } : undefined,
     tools: { register: registerTool },
     prompt: { section: (section: PluginPromptSection) => promptSections.add('todo', section) },
@@ -376,6 +382,9 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>, 
     upsert,
     setOwner(owner: unknown) {
       currentOwner = owner;
+    },
+    rewrite(messages: unknown[], agent: { owner: unknown; sessionId: string | null }) {
+      return rewrites.at(-1)?.(messages, agent) ?? null;
     },
     contextFor(owner: unknown) {
       const context = {};

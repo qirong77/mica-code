@@ -2382,7 +2382,8 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const instructions = mock!.state.requests[0]?.instructions ?? '';
     expect(instructions).toContain('<session-notes>');
     expect(instructions).toContain('- 用 Bun 跑测试');
-    expect(instructions.trimEnd().endsWith('</session-notes>')).toBe(true);
+    // 插件段落由宿主包在 <injection> 里，段落正文之后紧跟的是这层边界。
+    expect(instructions.trimEnd().endsWith('</injection>')).toBe(true);
 
     // 落在会话快照里、不在 messages 里：所以 compact 改不到它。
     const sessionFile = readdirSync(join(host.home, 'sessions')).filter((f) => f.endsWith('.json'))[0]!;
