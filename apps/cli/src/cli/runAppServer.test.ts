@@ -153,15 +153,17 @@ describe('task snapshot projection (mica task extension)', () => {
     ...partial,
   });
 
-  it('surfaces active and recent finished background tasks with snapshot fields', () => {
+  it('surfaces active tasks and endings worth a look, dropping clean finishes and kills', () => {
     const result = projectBackgroundTasks([
       task({ status: 'starting' }),
       task({ id: 'running-1', status: 'running', exit_code: null }),
-      task({ id: 'done', status: 'finished', finished_at: '2026-08-06T00:01:00.000Z' }),
+      task({ id: 'done', status: 'finished', exit_code: 0, finished_at: '2026-08-06T00:01:00.000Z' }),
       task({ id: 'failed', status: 'failed' }),
+      task({ id: 'nonzero', status: 'finished', exit_code: 2, finished_at: '2026-08-06T00:02:00.000Z' }),
+      task({ id: 'killed', status: 'killed', signal: 'SIGTERM' }),
     ]);
-    expect(result.map((item) => item.id)).toEqual(['abc123', 'running-1', 'done', 'failed']);
-    expect(result[2]).toMatchObject({ status: 'finished', finishedAt: '2026-08-06T00:01:00.000Z' });
+    expect(result.map((item) => item.id)).toEqual(['abc123', 'running-1', 'failed', 'nonzero']);
+    expect(result[3]).toMatchObject({ status: 'finished', exitCode: 2, finishedAt: '2026-08-06T00:02:00.000Z' });
     expect(result[0]).toEqual({
       id: 'abc123',
       command: 'npm run dev',
@@ -172,10 +174,11 @@ describe('task snapshot projection (mica task extension)', () => {
     });
   });
 
-  it('retains all active background tasks and only the 20 most recent finished tasks', () => {
+  it('retains all active background tasks and only the 20 most recent finished tasks worth a look', () => {
     const finished = Array.from({ length: 21 }, (_, index) => task({
       id: `finished-${index}`,
       status: 'finished',
+      exit_code: 1,
       finished_at: new Date(Date.UTC(2026, 7, 6, 0, index)).toISOString(),
     }));
     const result = projectBackgroundTasks([...finished, task({ id: 'active' })]);

@@ -40,6 +40,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
 import { comparableText } from '@packages/mica-common/promptText.js'
+import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.js'
 import {
   projectTodoSnapshot,
   resolveTodoPanel,
@@ -6499,7 +6500,7 @@ export function ChatView({
             onOpen={(task) => openTaskDetail('subagent', task)}
           />
           <BackgroundTasksDock
-            tasks={backgroundTasks.filter((task) => task.status !== 'finished' || (task.exitCode != null && task.exitCode !== 0))}
+            tasks={backgroundTasks.filter(keepsBackgroundTaskRow)}
             now={taskNow}
             onOpen={(task) => openTaskDetail('background', task)}
             onKill={killBackgroundTask}

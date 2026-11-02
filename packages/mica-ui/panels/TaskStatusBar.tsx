@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box } from '@anthropic/ink';
+import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.js';
 import { useScheduleState } from '../hooks/index.js';
 import { agentStatusItems, backgroundTaskItems, pluginStatusItems, subagentTaskItems } from './state.js';
 import { BackgroundTaskRow, isActiveBackgroundTaskStatus } from './BackgroundTaskRow.js';
@@ -13,8 +14,7 @@ export function TaskStatusBar(): React.ReactNode {
   const pluginItems = useScheduleState(pluginStatusItems);
   const activeTasks = tasks.filter((task) => isActiveBackgroundTaskStatus(task.status));
   const recentTasks = tasks.filter(
-    (task) => !isActiveBackgroundTaskStatus(task.status) &&
-      (task.status !== 'finished' || (task.exitCode != null && task.exitCode !== 0)),
+    (task) => !isActiveBackgroundTaskStatus(task.status) && keepsBackgroundTaskRow(task),
   );
   const activeSubagentTasks = subagentTasks.filter((task) => isActiveSubagentTaskStatus(task.status));
   const visibleSubagentTasks = subagentTasks.filter((task) => task.status !== 'completed');

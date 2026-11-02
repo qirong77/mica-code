@@ -9,6 +9,7 @@ import { VERSION_LABEL, resolveMicaHome } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import { SESSION_NOTES_PLUGIN_ID, normalizeSessionNotes, prepareImageForApi, readStoredSubagentTasks, writeStoredSubagentTasks } from '@packages/mica-common/index.js';
+import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import type { AgentContentBlockParam, AgentQueryContent } from '@packages/mica-agent/index.js';
 import {
@@ -109,14 +110,15 @@ export function projectBackgroundTask(task: BackgroundTaskMeta): MicaBackgroundT
   };
 }
 
-/** Keep all active tasks and the 20 most recently finished tasks. */
+/** Keep active tasks and the 20 most recently finished ones worth a look (see keepsBackgroundTaskRow). */
 export function projectBackgroundTasks(tasks: BackgroundTaskMeta[]): MicaBackgroundTaskItem[] {
-  const recentFinished = tasks
+  const visible = tasks.filter((task) => keepsBackgroundTaskRow({ status: task.status, exitCode: task.exit_code }));
+  const recentFinished = visible
     .filter((task) => task.status !== 'starting' && task.status !== 'running')
     .sort((a, b) => Date.parse(b.finished_at ?? b.started_at) - Date.parse(a.finished_at ?? a.started_at))
     .slice(0, 20);
   const retainedIds = new Set(recentFinished.map((task) => task.id));
-  return tasks
+  return visible
     .filter((task) => task.status === 'starting' || task.status === 'running' || retainedIds.has(task.id))
     .map((task) => projectBackgroundTask(task));
 }
