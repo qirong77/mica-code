@@ -6,13 +6,59 @@
  * 输入列表自己的顺序（Recent 按时间、分组按手动顺序）。
  *
  * 三种降级都必须能正常渲染，否则一条坏数据就会让整个侧栏空掉：
- * - 父会话不在这次列表里（被删了、落在别的分区、被 Recent 分页截掉）→ 当顶层；
+ * - 父会话不在这次列表里（例如被删除）→ 当顶层；
  * - 父指向自己 → 当顶层；
- * - 成环（A 的父是 B，B 的父是 A，只有手工改文件才会出现）→ 环里的行按输入顺序当顶层。
+ * - 成环（A 的父是 B，B 的父是 A）→ 选环中最先出现的会话为根，保留其余行。
  */
 
 /** 最大嵌套深度：再深的派生链按同一层渲染，避免一串缩进把标题挤没。 */
 const MAX_DEPTH = 3
+
+/** Resolve each visible parent chain to one stable root, including malformed cycles. */
+export function sessionRoots(items) {
+  const byId = new Map(items.map((item) => [item.id, item]))
+  const index = new Map(items.map((item, i) => [item.id, i]))
+  const roots = new Map()
+  for (const item of items) {
+    if (roots.has(item.id)) continue
+    const path = []
+    const positions = new Map()
+    let current = item
+    let root
+    while (current) {
+      if (roots.has(current.id)) {
+        root = roots.get(current.id)
+        break
+      }
+      if (positions.has(current.id)) {
+        const cycle = path.slice(positions.get(current.id))
+        root = cycle.reduce((first, id) => index.get(id) < index.get(first) ? id : first)
+        break
+      }
+      positions.set(current.id, path.length)
+      path.push(current.id)
+      const parent = byId.get(current.parentSessionId)
+      if (!parent) {
+        root = current.id
+        break
+      }
+      current = parent
+    }
+    for (const id of path) roots.set(id, root)
+  }
+  return roots
+}
+
+/** Select whole trees by root count, retaining the input order. */
+export function paginateSessionTrees(items, roots, limit) {
+  const rootIds = items.filter((item) => roots.get(item.id) === item.id).map((item) => item.id)
+  const visible = new Set(rootIds.slice(0, limit))
+  return {
+    items: items.filter((item) => visible.has(roots.get(item.id))),
+    overflow: items.filter((item) => !visible.has(roots.get(item.id))),
+    remainingRoots: Math.max(0, rootIds.length - limit)
+  }
+}
 
 /**
  * @param {Array<{id: string, parentSessionId?: string|null}>} items 已按分区规则排好序的会话
@@ -28,10 +74,11 @@ const MAX_DEPTH = 3
 export function nestSessions(items, { collapsed } = {}) {
   const byId = new Map(items.map((session) => [session.id, session]))
   const childrenOf = new Map()
+  const roots = sessionRoots(items)
   const top = []
   for (const session of items) {
     const parentId = session.parentSessionId
-    if (parentId && parentId !== session.id && byId.has(parentId)) {
+    if (parentId && roots.get(session.id) !== session.id && byId.has(parentId)) {
       if (!childrenOf.has(parentId)) childrenOf.set(parentId, [])
       childrenOf.get(parentId).push(session)
     } else {
@@ -74,7 +121,7 @@ export function nestSessions(items, { collapsed } = {}) {
   }
 
   for (const session of top) walk(session, 0)
-  // 成环的行既不是顶层、也没被任何父行走到，按输入顺序补成顶层，绝不丢行。
+  // 兜底补齐尚未访问的行，避免异常数据导致漏行。
   for (const session of items) walk(session, 0)
   return rows
 }

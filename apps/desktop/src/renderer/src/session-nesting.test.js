@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { nestSessions } from './session-nesting'
+import { nestSessions, paginateSessionTrees, sessionRoots } from './session-nesting'
+import { inheritedSessionSection } from './session-projects'
 
 const session = (id, parentSessionId = null) => ({ id, parentSessionId })
 
@@ -65,5 +66,39 @@ describe('nestSessions', () => {
   it('does not collapse a session that has no derived sessions', () => {
     const rows = nestSessions([session('lonely')], { collapsed: new Set(['lonely']) })
     expect(rows[0].collapsed).toBe(false)
+  })
+})
+
+
+describe('session tree sections and pagination', () => {
+  it('inherits the visible root section and ignores stale child assignments', () => {
+    const items = [session('child', 'root'), session('grandchild', 'child'), session('root')]
+    const roots = sessionRoots(items)
+    const options = { pins: { child: 1 }, projects: { groups: [{ id: 'p' }], assignments: { root: 'p' } } }
+    expect(inheritedSessionSection('grandchild', roots, options)).toEqual({ section: 'project', groupId: 'p' })
+    options.pins.root = 1
+    expect(inheritedSessionSection('child', roots, options).section).toBe('pinned')
+    delete options.pins.root
+    delete options.projects.assignments.root
+    expect(inheritedSessionSection('child', roots, options).section).toBe('recent')
+  })
+
+  it('pages roots and retains every descendant, including newer children', () => {
+    const items = [session('child', 'old'), session('new'), session('grandchild', 'child'), session('old')]
+    const roots = sessionRoots(items)
+    const page = paginateSessionTrees(items, roots, 1)
+    expect(page.items.map((s) => s.id)).toEqual(['new'])
+    expect(page.overflow.map((s) => s.id)).toEqual(['child', 'grandchild', 'old'])
+    expect(page.remainingRoots).toBe(1)
+    expect(paginateSessionTrees(items, roots, 2).items).toEqual(items)
+  })
+
+  it('handles missing parents and cycles consistently, including descendants entering a cycle', () => {
+    const items = [session('leaf', 'b'), session('a', 'b'), session('b', 'a'), session('orphan', 'gone'), session('self', 'self')]
+    const roots = sessionRoots(items)
+    expect([...roots.values()]).toEqual(['a', 'a', 'a', 'orphan', 'self'])
+    const page = paginateSessionTrees(items, roots, 1)
+    expect(page.items.map((s) => s.id)).toEqual(['leaf', 'a', 'b'])
+    expect(nestSessions(page.items).map((row) => row.session.id)).toEqual(['a', 'b', 'leaf'])
   })
 })

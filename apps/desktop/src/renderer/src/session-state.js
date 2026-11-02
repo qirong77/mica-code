@@ -137,6 +137,7 @@ export function sameSessionSnapshot(previous, next) {
       a.id !== b.id ||
       a.title !== b.title ||
       a.cwd !== b.cwd ||
+      a.parentSessionId !== b.parentSessionId ||
       a.updatedAtMs !== b.updatedAtMs ||
       a.turnState !== b.turnState
     ) {

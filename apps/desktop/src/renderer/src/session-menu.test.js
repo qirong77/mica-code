@@ -105,3 +105,12 @@ describe('withExtraMenuItems', () => {
     expect(labels(items)).toEqual(['重命名', '---', '插件动作'])
   })
 })
+
+
+describe('derived session menu', () => {
+  it('keeps other actions but removes pinning and moving even for stale assignments', () => {
+    const actions = sessionMenuItems({ pinned: true, inProject: true, isChild: true })
+      .filter(Array.isArray).map((item) => item[0])
+    expect(actions).toEqual(['detail', 'share', 'rename', 'delete'])
+  })
+})

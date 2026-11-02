@@ -51,6 +51,11 @@ export function sessionSectionOf(sessionId, { pins, projects } = {}) {
   return { section: 'recent', groupId: null }
 }
 
+/** A visible ancestor owns the section for its whole session tree. */
+export function inheritedSessionSection(sessionId, roots, options) {
+  return sessionSectionOf(roots.get(sessionId) || sessionId, options)
+}
+
 /** groupId -> 直接归属该分组的会话 id（不含后代分组）。 */
 export function sessionsByGroup(projects) {
   const known = knownGroupIds(projects)

@@ -7,9 +7,9 @@
  * 「删除对话」始终给出，和标签页有没有打开无关——它删的是磁盘上的会话，不是界面上的
  * 那个页签（关页签在各页签自己的关闭按钮上）。`true` 是危险样式标记，由 ContextMenu 解读。
  */
-export function sessionMenuItems({ pinned, inProject }) {
-  const items = [[pinned ? 'unpin' : 'pin', pinned ? '取消置顶' : '置顶']]
-  if (inProject) items.push(['unassign', '移出项目分组'])
+export function sessionMenuItems({ pinned, inProject, isChild = false }) {
+  const items = isChild ? [] : [[pinned ? 'unpin' : 'pin', pinned ? '取消置顶' : '置顶']]
+  if (inProject && !isChild) items.push(['unassign', '移出项目分组'])
   items.push(['detail', '查看详情'], ['share', '分享链接'], ['rename', '重命名'], 'separator')
   items.push(['delete', '删除对话', true])
   return items

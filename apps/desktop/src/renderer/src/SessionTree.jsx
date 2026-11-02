@@ -28,7 +28,7 @@ import { relativeTimeShort } from './relative-time'
 import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './loop-command'
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
-import { nestSessions } from './session-nesting'
+import { nestSessions, paginateSessionTrees, sessionRoots } from './session-nesting'
 import {
   draftMenuItems,
   renameTargetOf,
@@ -44,7 +44,7 @@ import {
   toggleTarget,
   visibleBadges
 } from './session-annotations'
-import { childGroups, groupSubtreeIds, sessionSectionOf, sessionsByGroup } from './session-projects'
+import { childGroups, groupSubtreeIds, inheritedSessionSection, sessionSectionOf, sessionsByGroup } from './session-projects'
 import { longPressHandlers } from './hooks'
 import { useSharedState } from './ui-state'
 import {
@@ -424,29 +424,31 @@ export function SessionTree({
     [pins, projects]
   )
 
+  const roots = useMemo(() => sessionRoots(sessions), [sessions])
+  const effectiveSectionOf = useCallback(
+    (sessionId) => inheritedSessionSection(sessionId, roots, { pins, projects }),
+    [roots, pins, projects]
+  )
   const pinned = useMemo(
-    () =>
-      orderSessions(
-        sessions.filter((session) => sectionOf(session.id).section === 'pinned'),
-        sortOrder.pinned || [],
-        (a, b) => (pins[b.id] || 0) - (pins[a.id] || 0)
-      ),
-    [sessions, sectionOf, pins, sortOrder.pinned]
+    () => orderSessions(
+      sessions.filter((session) => effectiveSectionOf(session.id).section === 'pinned'),
+      sortOrder.pinned || [],
+      (a, b) => (pins[b.id] || 0) - (pins[a.id] || 0)
+    ),
+    [sessions, effectiveSectionOf, pins, sortOrder.pinned]
   )
   const recentCandidates = useMemo(
-    () =>
-      sessions.filter((session) => sectionOf(session.id).section === 'recent').sort(byUpdatedDesc),
-    [sessions, sectionOf]
+    () => sessions.filter((session) => effectiveSectionOf(session.id).section === 'recent').sort(byUpdatedDesc),
+    [sessions, effectiveSectionOf]
   )
-  const recentList = useMemo(
-    () => recentCandidates.slice(0, recentLimit),
-    [recentCandidates, recentLimit]
+  const recentPage = useMemo(
+    () => paginateSessionTrees(recentCandidates, roots, recentLimit),
+    [recentCandidates, roots, recentLimit]
   )
-  const recentOverflow = Math.max(0, recentCandidates.length - recentList.length)
+  const recentList = recentPage.items
+  const recentOverflow = recentPage.remainingRoots
   const recentPageSize = Math.min(RECENT_PAGE_SIZE, recentOverflow)
 
-  // 派生会话（子会话 / fork）挂在父会话下面：nestSessions 只重排渲染顺序，
-  // 分页与拖放仍然按平铺列表算，改的只是「谁紧跟谁显示」。
   const pinnedRows = useMemo(
     () => nestSessions(pinned, { collapsed: collapsedChildren }),
     [pinned, collapsedChildren]
@@ -456,23 +458,19 @@ export function SessionTree({
     [recentList, collapsedChildren]
   )
 
-  const sessionById = useMemo(
-    () => new Map(sessions.map((session) => [session.id, session])),
-    [sessions]
-  )
-  // groupId -> 直接归属该分组的会话（已按分组自己的手动顺序排好）。置顶的会话即便还留着
-  // 归属也只在 Pinned 出现，保证同一个会话在侧栏里只有一处。
   const groupSessions = useMemo(() => {
-    const byGroup = sessionsByGroup(projects)
     const map = new Map()
-    for (const [groupId, ids] of byGroup) {
-      const items = ids
-        .map((id) => sessionById.get(id))
-        .filter((session) => session && !pins[session.id])
+    for (const session of sessions) {
+      const { section, groupId } = effectiveSectionOf(session.id)
+      if (section !== 'project') continue
+      if (!map.has(groupId)) map.set(groupId, [])
+      map.get(groupId).push(session)
+    }
+    for (const [groupId, items] of map) {
       map.set(groupId, orderSessions(items, sortOrder[`project:${groupId}`] || [], byUpdatedDesc))
     }
     return map
-  }, [pins, projects, sessionById, sortOrder])
+  }, [sessions, effectiveSectionOf, sortOrder])
 
   /** 分组里的渲染顺序（带派生嵌套）。归属与折叠状态仍来自上面那份平铺列表。 */
   const groupRows = useMemo(() => {
@@ -541,7 +539,7 @@ export function SessionTree({
    */
   const hiddenStates = useMemo(() => {
     const hidden = (name) => !!collapsedSections[name]
-    const overflow = recentCandidates.slice(recentList.length)
+    const overflow = recentPage.overflow
     return {
       pinned: hidden('pinned') ? mergeRowStates(pinned.map(rowStateOfSession)) : null,
       project: hidden('project')
@@ -564,7 +562,7 @@ export function SessionTree({
     pinned,
     projects,
     recentCandidates,
-    recentList,
+    recentPage,
     rootDrafts,
     rowStateOfDraft,
     rowStateOfSession
@@ -731,6 +729,7 @@ export function SessionTree({
   }
 
   const runAction = (action, menuPayload) => {
+    if (menuPayload.session?.parentSessionId && ['pin', 'unpin', 'unassign'].includes(action)) return
     const annotation = parseAnnotationAction(action)
     const pluginMenu = parseSessionMenuAction(action)
     if (pluginMenu) {
@@ -765,7 +764,8 @@ export function SessionTree({
   const menuItemsFor = (session) => {
     const items = sessionMenuItems({
       pinned: !!pins[session.id],
-      inProject: sectionOf(session.id).section === 'project'
+      inProject: effectiveSectionOf(session.id).section === 'project',
+      isChild: !!session.parentSessionId
     })
     // 插件贡献的两类项都插在删除之前：会话标记（数据，画点/勾）与插件动作（跑一段
     // 插件代码，例如把会话导出成 markdown 放进剪贴板）。
@@ -928,7 +928,7 @@ export function SessionTree({
                 ? `${session.title || session.id} — ${session.cwd}`
                 : session.title || session.id
           }
-          draggable={!editingThis && childDepth === 0}
+          draggable={!editingThis && !session.parentSessionId}
           // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
           {...longPressHandlers((event) =>
             openMenu(event, {
@@ -936,7 +936,10 @@ export function SessionTree({
               items: menuItemsFor(session)
             })
           )}
-          onDragStart={(event) => startDrag(event, 'session', section, session.id, groupId)}
+          onDragStart={(event) => {
+            if (session.parentSessionId) event.preventDefault()
+            else startDrag(event, 'session', section, session.id, groupId)
+          }}
           onDragEnd={clearDrag}
           onDragOver={hoverRow(section, session.id, groupId)}
           onDrop={dropRow(section, session.id, groupId)}

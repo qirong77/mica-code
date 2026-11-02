@@ -222,6 +222,7 @@ describe('sameSessionSnapshot', () => {
     const cases = [
       { title: '新标题' },
       { cwd: '/other' },
+      { parentSessionId: 'parent' },
       { updatedAtMs: 2000 },
       { turnState: 'running' }
     ]

@@ -24,6 +24,7 @@ import { createStatsScanner } from './stats-scanner'
 import { deleteSessionFiles, isValidSessionId, stripSessionFromSort } from './session-delete'
 import { dropLoopsForSession } from './loops'
 import { listSessionAnnotations, setSessionAnnotation } from './session-annotations'
+import { createSessionMover } from './session-move'
 
 /**
  * mica 的对话 session 快照统计：直接扫描 ~/.mica/sessions/*.json（真实 AI 会话），
@@ -159,15 +160,7 @@ function writeProjects(projects) {
  *
  * 一次调用同时落盘 pins 与 projects，两个分区不会短暂地同时列着同一个会话。
  */
-function moveSession({ sessionId, section, groupId } = {}) {
-  if (typeof sessionId !== 'string' || !sessionId) {
-    return { pins: readPins(), projects: readProjects() }
-  }
-  const pinned = section === 'pinned'
-  const target = section === 'project' ? groupId : null
-  const projects = writeProjects(setAssignment(readProjects(), sessionId, target))
-  return { pins: setPin(sessionId, pinned), projects }
-}
+const moveSession = createSessionMover({ sessionFile, readProjects, writeProjects, setPin })
 
 /** 侧栏手动拖拽排序：userData/session-sort.json，{ [section]: [sessionId, ...] } */
 function sortFile() {
