@@ -73,6 +73,58 @@ describe('splitPromptSections', () => {
     expect(parts[0]!.chars).toBe(prompt.length);
   });
 
+  it('显示每次 injection 的插件和段落，保留发送内容与体积', () => {
+    const first = '<injection source="plugin" plugin="requirements" section="workflow">\nplan\n</injection>';
+    const second = "<injection section='notes' plugin='memory' source='plugin'>\nremember\n</injection>";
+    const parts = splitPromptSections(`${first}\n\n${second}`);
+    expect(parts.map((part) => part.label)).toEqual(['requirements / workflow', 'memory / notes']);
+    expect(parts.map((part) => part.tag)).toEqual(['injection', 'injection']);
+    expect(parts.map((part) => part.content)).toEqual([first, second]);
+    expect(parts[0]!.chars).toBe(first.length);
+    expect(parts[0]!.tokens).toBe(summarizePrompt(first).tokens);
+  });
+
+  it('展示时解码命名和数字 XML 实体，不递归解码或改写正文', () => {
+    const prompt =
+      '<injection source="plugin" plugin="A&amp;B&lt;C&gt;&quot;&apos;" section="&#65;&#x1F680; &amp;lt; &unknown; &#x110000; &#55296;">\nbody\n</injection>';
+    const [part] = splitPromptSections(prompt);
+    expect(part!.label).toBe('A&B<C>"\' / A🚀 &lt; &unknown; &#x110000; &#55296;');
+    expect(part!.content).toBe(prompt);
+  });
+
+  it('有属性的同名嵌套及代码围栏不会截断顶层 injection', () => {
+    const prompt = [
+      '<injection source="plugin" plugin="outer" section="a > b">',
+      '<injection plugin="inner">',
+      'inner',
+      '</injection>',
+      '````xml',
+      '</injection>',
+      '```',
+      '````',
+      '~~~xml',
+      '<injection plugin="example">',
+      '</injection>',
+      '~~~',
+      '</injection>',
+    ].join('\r\n');
+    const parts = splitPromptSections(prompt);
+    expect(parts).toHaveLength(1);
+    expect(parts[0]!.label).toBe('outer / a > b');
+    expect(parts[0]!.content).toBe(prompt);
+    expect(splitPromptSections(`~~~~xml\n${prompt}\n~~~~`)[0]!.tag).toBe('');
+  });
+
+  it('保留基础标签名称，缺少来源时回退，未闭合注入作为其它内容', () => {
+    expect(splitPromptSections('<system source="role">\nrole\n</system>')[0]!.label).toBe('角色提示词');
+    expect(splitPromptSections('<injection>\nbody\n</injection>')[0]!.label).toBe('injection');
+    expect(splitPromptSections('<injection source="hook" section="build">\nbody\n</injection>')[0]!.label).toBe(
+      'hook / build',
+    );
+    const incomplete = '<injection plugin="unfinished">\nbody';
+    expect(splitPromptSections(incomplete)[0]).toMatchObject({ tag: '', content: incomplete });
+  });
+
   it('未知标签用自己的名字，不编一个中文名', () => {
     expect(promptPartLabel('harness_review')).toBe('harness_review');
     expect(promptPartLabel('')).toBe('插件段落 / 其它注入');

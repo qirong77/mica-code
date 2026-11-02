@@ -161,8 +161,10 @@ export type PluginContext = {
   /**
    * 向 system prompt 贡献段落。每轮重新渲染，空串表示本轮不贡献。
    *
-   * 段落追加在 base prompt 与 `system-prompt:build` pipeline 之后——这里是最容易
-   * 随会话变化的内容，放在末尾才不会让前面稳定的前缀跟着 prompt cache 失效。
+   * system prompt 的唯一插件扩展入口；清单需声明 requires: ["prompt"]。
+   * 段落追加在 base prompt 之后，宿主统一包裹带 plugin / section 属性的 XML injection。
+   * 正文可包含 XML；injection 是宿主保留标签，会被转义。按 order、注册顺序排列，
+   * 变化内容放在末尾，避免前面稳定的前缀跟着 prompt cache 失效。
    */
   prompt?: {
     section(section: PluginPromptSection): Disposable;

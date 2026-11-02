@@ -1,3 +1,4 @@
+import { wrapPromptXml } from '@packages/mica-common/promptXml.js';
 import {
   buildSubagentUsageRecord,
   runModelTextRequest,
@@ -73,7 +74,11 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
         apiKey: resolved.apiKey,
         protocol: resolved.protocol,
         model,
-        system: request.system,
+        system: wrapPromptXml('injection', request.system, {
+          source: 'plugin',
+          plugin: pluginId,
+          section: 'model-system',
+        }),
         user: request.user,
         timeoutMs: request.timeoutMs,
         signal: request.signal,
@@ -147,7 +152,9 @@ function safelyRecord(record: PluginModelRecorder | undefined, entry: PluginMode
         purpose: entry.purpose,
         error: error instanceof Error ? error.message : String(error),
       });
-    } catch { /* A failing disk cannot alter the completed model result. */ }
+    } catch {
+      /* A failing disk cannot alter the completed model result. */
+    }
   }
 }
 

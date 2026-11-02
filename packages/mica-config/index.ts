@@ -12,9 +12,12 @@ import {
   ensureModelRule,
   getModelRule,
   getModelEffortOptions,
+  isEffortLevelRejected,
+  markEffortLevelRejected,
   normalizeModelEffort,
   registerModelRuleResolver,
   registerModelRules,
+  resetRejectedEffortLevels,
   resolveEffortParams,
   readCapabilityDefaults,
   updateCapabilityDefaults,
@@ -63,6 +66,12 @@ export const micaConfig = {
   registerModelRuleResolver,
   /** 把 effort 解析成指定协议、指定模型真正要发送的请求参数。 */
   resolveEffortParams,
+  /** 服务端拒绝过这个档位：之后不再发给这台服务商的这个模型。 */
+  isEffortLevelRejected,
+  /** 记下服务端拒绝过的档位（provider 用 400 明确拒绝推理参数时调用）。 */
+  markEffortLevelRejected,
+  /** 只给测试与配置重载用。 */
+  resetRejectedEffortLevels,
   /** 新会话默认能力（config.json 的 capabilityDefaults）。 */
   readCapabilityDefaults,
   /** 保存新会话默认能力；不改动已有会话。 */
@@ -85,15 +94,23 @@ export {
   ensureModelRule,
   getModelEffortOptions,
   getModelRule,
+  isEffortLevelRejected,
+  markEffortLevelRejected,
   normalizeModelEffort,
   providerSupportsModel,
   providerForModel,
   registerModelRuleResolver,
   registerModelRules,
+  resetRejectedEffortLevels,
   resolveEffortParams,
 } from './config.js';
 export type { EffortParamsRequest } from './config.js';
-export { prepareSessionModelDefaults, resetSessionModelDefaults, readCapabilityDefaults, updateCapabilityDefaults } from './config.js';
+export {
+  prepareSessionModelDefaults,
+  resetSessionModelDefaults,
+  readCapabilityDefaults,
+  updateCapabilityDefaults,
+} from './config.js';
 import { readActiveProviderConfig } from './activeProvider.js';
 export { readActiveProviderConfig } from './activeProvider.js';
 export type { ActiveProviderConfig } from './activeProvider.js';

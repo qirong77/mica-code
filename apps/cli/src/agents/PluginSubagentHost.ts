@@ -1,3 +1,4 @@
+import { wrapPromptXml } from '@packages/mica-common/promptXml.js';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import {
@@ -578,9 +579,15 @@ function buildSubagentSystemPrompt(definition: PluginSubagentType): string {
         : 'Prefer minimal, reversible changes.',
     '</write-policy>',
   ].join('\n');
-  return [micaAgent.buildSystemPrompt(), '', SUBAGENT_INSTRUCTIONS, '', writePolicy, '', definition.systemPrompt].join(
-    '\n',
-  );
+  return [
+    micaAgent.buildSystemPrompt(),
+    '',
+    wrapPromptXml('subagent-instructions', SUBAGENT_INSTRUCTIONS),
+    '',
+    writePolicy,
+    '',
+    wrapPromptXml('subagent-role', definition.systemPrompt),
+  ].join('\n');
 }
 
 function resolveContextMode(

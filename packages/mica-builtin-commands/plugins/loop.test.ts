@@ -17,6 +17,8 @@ import {
 import type { MicaTool } from '@packages/mica-tools/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import setupLoop from './loop.js';
+import setupCommandMemory from './command-memory.js';
+import setupSessionAutonomy from './session-autonomy/SessionAutonomyPlugin.js';
 
 describe('parseDuration', () => {
   it('parses unit durations', () => {
@@ -56,7 +58,12 @@ describe('parseLoopArgs', () => {
 
   it('parses interval and task', () => {
     const result = parseLoopArgs('60m 推送一个 BBC 的新闻');
-    expect(result).toMatchObject({ kind: 'start', intervalMs: 3_600_000, intervalLabel: '1 小时', task: '推送一个 BBC 的新闻' });
+    expect(result).toMatchObject({
+      kind: 'start',
+      intervalMs: 3_600_000,
+      intervalLabel: '1 小时',
+      task: '推送一个 BBC 的新闻',
+    });
   });
 
   it('rejects a missing task', () => {
@@ -176,8 +183,34 @@ describe('LoopController', () => {
 });
 
 describe('loop plugin', () => {
+  it('keeps memory, autonomy and loop before default sections regardless of registration order', async () => {
+    const { ctx, sections, registered } = createHarness();
+    sections.add('other', { id: 'dynamic', render: () => 'dynamic section' });
+    for (const [pluginId, setup] of [
+      ['autonomy', setupSessionAutonomy],
+      ['memory', setupCommandMemory],
+    ] as const) {
+      setup({
+        ...ctx,
+        pluginId,
+        prompt: {
+          section: (section: Parameters<NonNullable<PluginContext['prompt']>['section']>[0]) =>
+            sections.add(pluginId, section),
+        },
+      });
+    }
+    await registered.get('loop')!.action('60m 测试顺序');
+    const prompt = sections.render();
+    const positions = ['# 会话记忆', '# 会话自治', '定时循环任务', 'dynamic section'].map((text) =>
+      prompt.indexOf(text),
+    );
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    await registered.get('loop')!.action('stop');
+  });
+
   it('registers /loop and injects loop guidance into the system prompt while active', async () => {
-    const { hooks, registered, notices, submitted } = createHarness();
+    const { sections, registered, notices, submitted } = createHarness();
     const command = registered.get('loop')!;
     expect(command).toBeDefined();
 
@@ -187,22 +220,22 @@ describe('loop plugin', () => {
     expect(notices.some((n) => n.includes('loop 已启动'))).toBe(true);
     expect(submitted).toHaveLength(1); // 启动即执行第一次
 
-    const built = hooks.pipelineSync('system-prompt:build', { runtime: {}, prompt: 'BASE' });
+    const built = { prompt: sections.render() };
     expect(built.prompt).toContain('定时循环任务');
     expect(built.prompt).toContain('推送一个 BBC 的新闻');
-    expect(built.prompt.startsWith('BASE')).toBe(true);
+    expect(built.prompt).toContain('<injection source="plugin" plugin="builtin.command.loop" section="guidance">');
   });
 
   it('stops the loop and removes the guidance', async () => {
-    const { hooks, registered, notices } = createHarness();
+    const { sections, registered, notices } = createHarness();
     const command = registered.get('loop')!;
 
     await command.action('60m 推送新闻');
     await command.action('stop');
 
     expect(notices.some((n) => n.includes('loop 已停止'))).toBe(true);
-    const built = hooks.pipelineSync('system-prompt:build', { runtime: {}, prompt: 'BASE' });
-    expect(built.prompt).toBe('BASE');
+    const built = { prompt: sections.render() };
+    expect(built.prompt).toBe('');
   });
 
   it('shows status and error notices', async () => {
@@ -285,6 +318,7 @@ async function flush(): Promise<void> {
 
 function createHarness() {
   const hooks = new micaPlugin.HookRegistry();
+  const sections = new micaPlugin.PluginPromptSections();
   const published: unknown[] = [];
   const notices: string[] = [];
   const submitted: Array<{ text: string; options?: unknown }> = [];
@@ -303,6 +337,10 @@ function createHarness() {
   const ctx = {
     pluginId: 'builtin.command.loop',
     hooks,
+    prompt: {
+      section: (section: Parameters<NonNullable<PluginContext['prompt']>['section']>[0]) =>
+        sections.add('builtin.command.loop', section),
+    },
     services: {
       get: (token: unknown) =>
         token === commandHostToken
@@ -310,7 +348,8 @@ function createHarness() {
               agent: { config: { provider: { contextWindowSize: 128_000 } } },
               sessionController: {},
               services,
-              registerCommand: (_ctx: PluginContext, command: RegisteredCommand) => registered.set(command.name, command),
+              registerCommand: (_ctx: PluginContext, command: RegisteredCommand) =>
+                registered.set(command.name, command),
             }
           : undefined,
     },
@@ -325,7 +364,7 @@ function createHarness() {
   } as unknown as PluginContext;
 
   setupLoop(ctx);
-  return { hooks, registered, services, notices, submitted, published, registeredTools };
+  return { ctx, hooks, sections, registered, services, notices, submitted, published, registeredTools };
 }
 
 function makeDeps(overrides: { sessionId?: string } = {}) {

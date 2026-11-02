@@ -26,7 +26,9 @@ describe('createPluginThread', () => {
         tools?: boolean;
         toolFilter?: (name: string) => boolean;
       };
-      expect(options.systemPrompt).toBe('你是旁问');
+      expect(options.systemPrompt).toContain('你是旁问');
+      expect(options.systemPrompt).toMatch(/^<injection source="plugin"/);
+      expect(options.systemPrompt).toMatch(/<\/injection>$/);
       expect(options.tools).toBe(true);
       expect(options.toolFilter?.(tool.name)).toBe(false);
       expect(options.toolFilter?.('read_file')).toBe(true);

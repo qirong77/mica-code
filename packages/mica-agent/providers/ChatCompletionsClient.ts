@@ -18,6 +18,7 @@ import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
+import { sendWithEffortFallback } from './effortFallback.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
 import type { ModelClientOptions } from './types.js';
 
@@ -115,8 +116,7 @@ export class ChatCompletionsClient extends BaseAgent<
     // text at the tail. Appending in either case duplicates the turn.
     const lastMessage = this.messages.at(-1);
     const hasCurrentTurn =
-      this.turnCommitted ||
-      (lastMessage?.role === 'user' && isSameOpenAIUserContent(lastMessage.content, question));
+      this.turnCommitted || (lastMessage?.role === 'user' && isSameOpenAIUserContent(lastMessage.content, question));
     const answer = partialAnswer?.trim();
     if (hasCurrentTurn) {
       if (answer) this.messages.push({ role: 'assistant', content: answer });
@@ -205,24 +205,31 @@ export class ChatCompletionsClient extends BaseAgent<
       await withRetry(
         async () => {
           attemptHadOutput = false;
-          const stream = await getClient(this).chat.completions.create(
-            {
-              model: this.model,
-              messages: wireMessages,
-              ...(requestTools
-                ? {
-                    tools: requestTools,
-                    tool_choice: 'auto' as const,
-                  }
-                : {}),
-              ...this.reasoningParams,
-              stream: true,
-              stream_options: {
-                include_usage: true,
-              },
-            },
-            { signal: options?.signal },
-          );
+          const stream = await sendWithEffortFallback({
+            provider: this.provider,
+            model: this.model,
+            effort: this.effort,
+            params: this.reasoningParams,
+            send: (reasoning) =>
+              getClient(this).chat.completions.create(
+                {
+                  model: this.model,
+                  messages: wireMessages,
+                  ...(requestTools
+                    ? {
+                        tools: requestTools,
+                        tool_choice: 'auto' as const,
+                      }
+                    : {}),
+                  ...reasoning,
+                  stream: true,
+                  stream_options: {
+                    include_usage: true,
+                  },
+                },
+                { signal: options?.signal },
+              ),
+          });
 
           // 上游可能握手成功后长时间不吐事件；空闲超过 60s 按超时处理并重试。
           for await (const chunk of withIdleTimeout(stream)) {
@@ -353,10 +360,7 @@ export class ChatCompletionsClient extends BaseAgent<
             content: result,
           });
           if (images.length > 0) {
-            toolImageContent.push(
-              { type: 'text', text: `Image output from ${name} (tool call ${id}):` },
-              ...images,
-            );
+            toolImageContent.push({ type: 'text', text: `Image output from ${name} (tool call ${id}):` }, ...images);
           }
         }
         if (toolImageContent.length > 0) {

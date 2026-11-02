@@ -1,4 +1,5 @@
 import type { Disposable } from '@packages/mica-common/index.js';
+import { wrapPromptXml } from '@packages/mica-common/promptXml.js';
 
 /**
  * 插件向 system prompt 贡献的一段文字。
@@ -7,8 +8,8 @@ import type { Disposable } from '@packages/mica-common/index.js';
  * 注入进去，而不需要内核为每个插件写一段硬编码的拼接逻辑。渲染结果为空串表示本轮
  * 不贡献内容（例如笔记还没写）。
  *
- * 追加位置固定在 base prompt（system / AGENT.md / skills）与 `system-prompt:build`
- * pipeline 之后：这些段落是最容易随会话变化的部分，放在末尾才不会让前面稳定的
+ * 追加位置固定在 base prompt（system / AGENT.md / skills）之后。宿主统一添加带来源
+ * 属性的 XML injection 边界，正文可包含其他 XML 标签。这些段落放在末尾，避免稳定的
  * 前缀跟着 prompt cache 一起失效。
  */
 export type PluginPromptSection = {
@@ -58,7 +59,15 @@ export class PluginPromptSections {
     for (const item of ordered) {
       const text = item.section.render();
       const trimmed = typeof text === 'string' ? text.trim() : '';
-      if (trimmed) parts.push(trimmed);
+      if (trimmed) {
+        parts.push(
+          wrapPromptXml('injection', trimmed, {
+            source: 'plugin',
+            plugin: item.pluginId,
+            section: item.section.id,
+          }),
+        );
+      }
     }
     return parts.join('\n\n');
   }

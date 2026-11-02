@@ -43,6 +43,7 @@ export {
   registerModelRules,
 } from './getModelRule.js';
 export { resolveEffortParams } from './effort.js';
+export { isEffortLevelRejected, markEffortLevelRejected, resetRejectedEffortLevels } from './effortRejections.js';
 export type { EffortParamsRequest } from './effort.js';
 
 const configAtom = atom<IMicaConfig>(readConfig());

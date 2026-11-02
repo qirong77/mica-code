@@ -6,6 +6,7 @@ import {
   type ProviderDefinition,
   type ProviderProtocol,
 } from './types.js';
+import { isEffortLevelRejected } from './effortRejections.js';
 
 type RegisteredModelRule = Omit<ModelRule, 'name' | 'modelKeysIncludes'>;
 /**
@@ -150,12 +151,25 @@ export function getModelEffortOptions(
 ): EffortOption[] {
   const efforts = getModelRule(modelName, provider).efforts;
   if (Object.keys(efforts).length === 0) {
-    return orderEffortLevels(provider?.effortLevels ?? []);
+    return acceptedLevels(provider, modelName, provider?.effortLevels ?? []);
   }
   const levels = Object.entries(efforts)
     .filter(([, rule]) => !protocol || Boolean(rule?.[protocol]))
     .map(([level]) => level);
-  return orderEffortLevels(levels);
+  return acceptedLevels(provider, modelName, levels);
+}
+
+/**
+ * 服务端已经明确拒绝的档位不再列出来：列一个选不了、或者选了也不会发出去的值，
+ * 与状态行显示「一个不会发出去的值」是同一种错。
+ */
+function acceptedLevels(
+  provider: ProviderDefinition | undefined,
+  modelName: string,
+  levels: EffortOption[],
+): EffortOption[] {
+  const usable = provider ? levels.filter((level) => !isEffortLevelRejected(provider, modelName, level)) : levels;
+  return orderEffortLevels(usable);
 }
 
 /**

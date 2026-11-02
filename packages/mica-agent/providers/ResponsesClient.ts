@@ -28,6 +28,7 @@ import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
+import { sendWithEffortFallback } from './effortFallback.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
 import type { ModelClientOptions } from './types.js';
 
@@ -245,22 +246,29 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           toolCalls = new Map<number, PendingToolCall>();
           hasReasoningText = false;
           reasoningPartDone = false;
-          const stream = await getClient(this).responses.create(
-            {
-              model: this.model,
-              instructions: systemPrompt,
-              input: wireMessages,
-              ...(requestTools
-                ? {
-                    tools: requestTools,
-                    tool_choice: 'auto' as const,
-                  }
-                : {}),
-              ...this.reasoningParams,
-              stream: true,
-            },
-            { signal: options?.signal },
-          );
+          const stream = await sendWithEffortFallback({
+            provider: this.provider,
+            model: this.model,
+            effort: this.effort,
+            params: this.reasoningParams,
+            send: (reasoning) =>
+              getClient(this).responses.create(
+                {
+                  model: this.model,
+                  instructions: systemPrompt,
+                  input: wireMessages,
+                  ...(requestTools
+                    ? {
+                        tools: requestTools,
+                        tool_choice: 'auto' as const,
+                      }
+                    : {}),
+                  ...reasoning,
+                  stream: true,
+                },
+                { signal: options?.signal },
+              ),
+          });
 
           // 上游可能握手成功后长时间不吐事件；空闲超过 60s 按超时处理并重试。
           for await (const event of withIdleTimeout(stream)) {

@@ -654,3 +654,7 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 `@packages/*`（单二进制里没有那些路径）。要界面就用上面的 `desktop.panel`，要往右键菜单里加
 动作就用 `desktop.sessionMenu`；要定时逻辑就在
 `setup()` 里起定时器，并用 `ctx.onDispose()` 收尾。
+
+### 系统提示词段落
+
+通过 `ctx.prompt.section({ id, order, render })` 贡献提示词，并在清单 `requires` 声明 `prompt`。宿主为每个非空段落生成 `<injection source="plugin" plugin="插件 ID" section="段落 ID">`；插件正文可使用语义 XML 标签组织规则、状态与上下文，动态文本需转义。`injection` 为宿主保留标签。按 `order` 与注册顺序排列，不用随机 ID，空段落不输出。`system-prompt:build` 形态不再支持。

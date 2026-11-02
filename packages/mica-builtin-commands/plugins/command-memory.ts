@@ -2,28 +2,18 @@ import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 
-type SystemPromptBuildEvent = {
-  runtime: unknown;
-  prompt: string;
-};
-
 export default function setupCommandMemory(ctx: PluginContext): void {
   const configDir = ctx.paths?.config ?? resolveMicaHome();
   const sessionsDir = join(configDir, 'sessions');
   const guidance = buildMemoryGuidance(sessionsDir);
 
-  const disposable = ctx.hooks.on<SystemPromptBuildEvent, { event: SystemPromptBuildEvent }>(
-    'system-prompt:build',
-    (event) => {
-      return { event: { ...event, prompt: appendText(event.prompt, guidance) } };
-    },
-    { pluginId: ctx.pluginId, priority: 0, failPolicy: 'stop' },
-  );
+  if (!ctx.prompt) throw new Error('command-memory requires ctx.prompt');
+  const disposable = ctx.prompt.section({
+    id: 'guidance',
+    order: -300,
+    render: () => guidance,
+  });
   ctx.onDispose(() => disposable.dispose());
-}
-
-function appendText(content: string, text: string): string {
-  return `${content}\n\n${text}`;
 }
 
 function buildMemoryGuidance(sessionsDir: string): string {

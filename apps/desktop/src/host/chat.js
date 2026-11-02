@@ -33,6 +33,7 @@ import { stripControlSockets } from './control-env'
 import { resolveDefaultChatMeta } from './chat-meta'
 import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
+import { IDLE_MAX_KEEP, IDLE_REAP_MS, resolveIdleReap } from './chat-idle'
 import {
   createChatQueue,
   mergeQueuedItems,
@@ -110,8 +111,11 @@ function buildSpawnEnv(env = process.env, owner = null) {
 }
 
 // nodeId -> resident chat host. The key is the chat node that spawned it and never
-// changes. The run lives until its page is closed (chat:dispose) or the host exits.
+// changes. The run lives until its page is closed (chat:dispose), the idle reaper
+// collects it (chat-idle.js), or the host exits.
 const runs = new Map()
+let idleReaper = null
+const IDLE_SWEEP_MS = 60 * 1000
 const commitRuns = new Map() // commitId -> { child, buffer, stderr }
 // Explicit after_turn inputs are queued here and replayed as turn/start once
 // the current turn completes. Every busy Enter/Tab/Shift+Tab from the composer
@@ -598,6 +602,7 @@ function startRun(sender, id, payload) {
     //   busy + explicit after_turn -> queue locally; replayed as turn/start when
     //                                 the current turn completes
     existing.sender = sender
+    existing.lastActivityAt = Date.now()
     // 宿主正在轮次之外占着会话（自动压缩）：压缩是同步的，这几秒发过去的 turn/start
     // 只会静静排在它的 stdin 里，界面上看不出任何东西。先本地排队——排队行可见、
     // 可撤回——宿主报告压缩结束（`mica/host/maintenance` active:false）时自动补发。
@@ -1004,6 +1009,8 @@ function spawnChatHost(id, sender, payload) {
     events: [],
     prompt: '',
     startedAt: Date.now(),
+    // 闲置回收的判据（chat-idle.js）：任何来自宿主的输出都算活动。
+    lastActivityAt: Date.now(),
     running: false,
     // 宿主正在轮次之外占着会话（自动压缩）：这段时间的发送先本地排队。
     compacting: false,
@@ -1116,6 +1123,7 @@ function rejectUnansweredTurns(id, run, message, { silent = false } = {}) {
 }
 
 function handleHostOutput(id, run, chunk) {
+  run.lastActivityAt = Date.now()
   run.buffer += chunk.toString()
   let newline
   while ((newline = run.buffer.indexOf('\n')) >= 0) {
@@ -1517,6 +1525,42 @@ function disposeHost(id) {
 }
 
 /**
+ * 闲置宿主回收：每小时扫一次，把开着不用的页签的 app-server 收掉。
+ *
+ * 判定在 chat-idle.js（纯函数、有单测）：干活中的、还有排队输入的、以及最近活动的
+ * 那个宿主都不动。收掉之后用户再发消息，startRun 会按需重新 spawn，只多一次冷启动。
+ */
+function startIdleReaper() {
+  if (idleReaper) return
+  idleReaper = setInterval(() => {
+    const entries = []
+    for (const [id, run] of runs.entries()) {
+      entries.push({ id, run, queuedCount: allQueuedItems(id, run).length })
+    }
+    if (entries.length < 2) return
+    const idleMs = idleReapMs()
+    const reap = resolveIdleReap(entries, Date.now(), { idleMs, maxKeep: IDLE_MAX_KEEP })
+    for (const id of reap) {
+      const run = runs.get(id)
+      logger('chat').info('chat.idle-reap', {
+        id,
+        sessionId: runSessionId(run),
+        idleSeconds: Math.round((Date.now() - (run?.lastActivityAt || 0)) / 1000),
+        hostCount: entries.length
+      })
+      disposeHost(id)
+      completedRuns.delete(id)
+    }
+  }, IDLE_SWEEP_MS)
+  idleReaper.unref?.()
+}
+
+function idleReapMs() {
+  const raw = Number(process.env.MICA_CHAT_IDLE_REAP_MS)
+  return Number.isFinite(raw) && raw > 0 ? raw : IDLE_REAP_MS
+}
+
+/**
  * 点停止时把排队消息一起取回来。
  *
  * 「停下来」不等于「停下并把刚才排的那句话发出去」：用户按的是停止，排队消息应该回到
@@ -1837,6 +1881,7 @@ function runCompactSession(sessionId, mode = 'model') {
 }
 
 export function registerChatIpc() {
+  startIdleReaper()
   ipcMain.handle('chat:start', (event, payload = {}) => {
     rememberChatSender(event)
     const id = payload.id

@@ -92,11 +92,6 @@ export type AgentRuntimeSnapshot = {
   subagentUsageHistory?: SubagentUsageRecord[];
 };
 
-type SystemPromptBuildEvent = {
-  runtime: AgentRuntime;
-  prompt: string;
-};
-
 type AgentRunOptions = {
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
   /** provider 层重试（零输出安全重发）每次触发前回调，供调用方展示重试状态。 */
@@ -167,8 +162,6 @@ export class AgentRuntime {
    */
   private pluginState: PluginStateRecord = {};
   private pluginSessionSettings: PluginSessionSettingsRecord = {};
-  /** 插件向 system prompt 贡献的段落，每轮重新渲染。 */
-  readonly promptSections = new PluginPromptSections();
   /**
    * 最近一次真正发给模型的主请求 system prompt。
    *
@@ -185,6 +178,8 @@ export class AgentRuntime {
   constructor(
     configOverride: AgentRuntimeConfigOverride = {},
     private readonly hooks?: HookRegistry,
+    /** 同一宿主的会话共享插件登记，段落每轮从活动会话重新渲染。 */
+    readonly promptSections = new PluginPromptSections(),
   ) {
     this.currentConfig = readAgentRuntimeConfig(configOverride);
     this.recreateClient();
@@ -341,12 +336,10 @@ export class AgentRuntime {
       baseSystemPrompt: this.resolveCurrentRole().prompt,
       skills: this.availableSkills(),
     });
-    const event = this.hooks?.pipelineSync<SystemPromptBuildEvent>('system-prompt:build', { runtime: this, prompt });
-    const base = event?.prompt ?? prompt;
     // 插件段落固定追加在最末：它们才是「每轮可能变」的内容（会话笔记、循环说明），
     // 放在最后才不会让前面稳定的 system / AGENT.md / skills / context 跟着一起失效。
     const pluginSections = this.promptSections.render();
-    return pluginSections ? `${base}\n\n${pluginSections}` : base;
+    return pluginSections ? `${prompt}\n\n${pluginSections}` : prompt;
   }
 
   setRole(roleName: string): void {
@@ -443,7 +436,10 @@ export class AgentRuntime {
 
   /** The prompt and tool schemas share the provider's context budget. */
   estimateRequestOverheadTokens(): number {
-    return estimateTextTokens(this.systemPrompt ?? '') + estimateContextTokens(micaTools.getDefinitions(this.isToolEnabledByCapabilities));
+    return (
+      estimateTextTokens(this.systemPrompt ?? '') +
+      estimateContextTokens(micaTools.getDefinitions(this.isToolEnabledByCapabilities))
+    );
   }
 
   get systemPrompt(): string | undefined {

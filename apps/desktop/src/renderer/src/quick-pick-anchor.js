@@ -7,6 +7,7 @@ export const QUICK_PICK_GAP = 6
 /** 面板再窄也要留出的宽度 / 再矮也要留出的高度（px）。 */
 const MIN_WIDTH = 240
 const MIN_HEIGHT = 120
+const MAX_HEIGHT = 360
 
 /**
  * 把 quick pick 面板摆到触发按钮的**上方**，让「分支切换」「项目切换」这类
@@ -15,7 +16,7 @@ const MIN_HEIGHT = 120
  * - `align: 'start'`：面板左边缘与按钮左边缘对齐（左下角的分支按钮）。
  * - `align: 'end'`：面板右边缘与按钮右边缘对齐（右下角的目录按钮）。
  *
- * 宽高都不写死，而是从按钮到窗口边缘的可用空间倒推：面板始终完整落在视口内，
+ * 高度最多 360px，宽高同时受按钮到窗口边缘的可用空间约束，
  * 也不会盖住触发按钮。窗口太小、算不出可用空间时返回 null，调用方退回居中布局。
  */
 export function anchoredQuickPickStyle({ rect, viewportWidth, viewportHeight, align = 'start' }) {
@@ -24,7 +25,9 @@ export function anchoredQuickPickStyle({ rect, viewportWidth, viewportHeight, al
   if (!rect || width <= 0 || height <= 0) return null
   const style = {
     bottom: Math.round(Math.max(QUICK_PICK_MARGIN, height - rect.top + QUICK_PICK_GAP)),
-    maxHeight: Math.round(Math.max(MIN_HEIGHT, rect.top - QUICK_PICK_GAP - QUICK_PICK_MARGIN))
+    maxHeight: Math.round(
+      Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, rect.top - QUICK_PICK_GAP - QUICK_PICK_MARGIN))
+    )
   }
   if (align === 'end') {
     style.right = Math.round(Math.max(QUICK_PICK_MARGIN, width - rect.right))

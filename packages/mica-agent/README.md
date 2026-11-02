@@ -51,3 +51,5 @@ const agent = micaAgent.createModelClient({
 - `prompt/`：系统 prompt 构建、role 文件加载、系统提示词模板和测试。
 - `index.ts`：公共 API 聚合导出。
 - `assets.d.ts`：静态资源类型声明。
+
+系统提示词保留 `system`、`project-instructions`、`skills`、`context` 顶层边界；项目中的 `AGENT.md` / `AGENTS.md` 各自包装为带 `source` 的 `document`，文档正文作为 XML 文本转义。插件贡献由宿主的 `PluginPromptSections` 单独追加，不在本包中拼接插件业务规则。

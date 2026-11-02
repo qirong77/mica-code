@@ -7,18 +7,14 @@ describe('command-memory', () => {
   it('appends memory guidance to the system prompt', () => {
     const harness = createHarness();
 
-    const result = harness.hooks.pipelineSync('system-prompt:build', {
-      runtime: {},
-      prompt: 'base system prompt',
-    });
+    const result = { prompt: harness.sections.render() };
 
-    expect(result.prompt.startsWith('base system prompt')).toBe(true);
+    expect(result.prompt).toContain('<injection source="plugin" plugin="test.commandMemory" section="guidance">');
     expect(result.prompt).toContain('# 会话记忆（Memory）');
     expect(result.prompt).toContain('snapshot.conversationMessages');
     expect(result.prompt).toContain('offset');
     expect(result.prompt).toContain('## 怎么汇报');
     expect(result.prompt).toContain('参考了会话');
-    expect(result.prompt.indexOf('base system prompt')).toBeLessThan(result.prompt.indexOf('# 会话记忆'));
   });
 
   it('does not modify user prompt content', async () => {
@@ -35,18 +31,20 @@ describe('command-memory', () => {
 
   it('points at the configured sessions directory when paths are provided', () => {
     const hooks = new micaPlugin.HookRegistry();
+    const sections = new micaPlugin.PluginPromptSections();
     setupCommandMemory({
       pluginId: 'test.commandMemory',
       hooks,
+      prompt: {
+        section: (section: Parameters<NonNullable<PluginContext['prompt']>['section']>[0]) =>
+          sections.add('test.commandMemory', section),
+      },
       paths: { home: '/home/u', config: '/custom/mica-home', plugins: '/custom/mica-home/plugins' },
       onDispose: vi.fn(),
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     } as unknown as PluginContext);
 
-    const result = hooks.pipelineSync('system-prompt:build', {
-      runtime: {},
-      prompt: 'base',
-    });
+    const result = { prompt: sections.render() };
 
     expect(result.prompt).toContain('/custom/mica-home/sessions');
   });
@@ -54,11 +52,16 @@ describe('command-memory', () => {
 
 function createHarness() {
   const hooks = new micaPlugin.HookRegistry();
+  const sections = new micaPlugin.PluginPromptSections();
   setupCommandMemory({
     pluginId: 'test.commandMemory',
     hooks,
+    prompt: {
+      section: (section: Parameters<NonNullable<PluginContext['prompt']>['section']>[0]) =>
+        sections.add('test.commandMemory', section),
+    },
     onDispose: vi.fn(),
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   } as unknown as PluginContext);
-  return { hooks };
+  return { hooks, sections };
 }

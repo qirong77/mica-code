@@ -45,7 +45,7 @@ import {
   statusLabel,
   worktreeCode
 } from './git-decorations'
-import { longPressHandlers, useIsMobile, useLatest, usePaneWidth } from './hooks'
+import { longPressHandlers, useIsMobile, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, loadMonaco } from './monaco'
 import {
   editorOptionsForTab,
@@ -53,6 +53,15 @@ import {
   planDocumentOpen,
   uniqueDocumentTitle
 } from './files-document'
+import {
+  collapseNodes,
+  createTreeRequests,
+  findTreeNode,
+  mergeDirectoryListing,
+  parentDirectory as dirOf,
+  refreshDirectoryPaths,
+  updateTree
+} from './files-tree'
 // 品牌标志全仓库只有一份（apps/desktop/resources/icon.svg），空编辑器水印直接引用它。
 import brandMark from '../../../resources/icon.svg?url&no-inline'
 
@@ -65,45 +74,6 @@ const GitDiffEditor = lazyView(() => import('./GitDiffEditor'), 'GitDiffEditor')
 const TREE_INDENT = 8
 const TREE_LABEL_INSET = 57
 const TREE_LABEL_OFFSET = 37
-
-const makeNode = (entry) => ({
-  name: entry.name,
-  path: entry.path,
-  type: entry.type,
-  ignored: !!entry.ignored,
-  expanded: false,
-  loaded: false,
-  loading: false,
-  error: '',
-  children: []
-})
-
-function updateTree(nodes, path, update) {
-  return nodes.map((node) =>
-    node.path === path
-      ? update(node)
-      : node.children?.length
-        ? { ...node, children: updateTree(node.children, path, update) }
-        : node
-  )
-}
-
-function expandedPaths(nodes, output = new Set()) {
-  for (const node of nodes) {
-    if (node.expanded) output.add(node.path)
-    expandedPaths(node.children || [], output)
-  }
-  return output
-}
-
-// 折叠全部：丢掉已加载的子树，下次展开时重新读取，避免展开后看到过期内容
-function collapseNodes(nodes) {
-  return nodes.map((node) =>
-    node.expanded || node.loaded
-      ? { ...node, expanded: false, loaded: false, loading: false, error: '', children: [] }
-      : node
-  )
-}
 
 function relativeParts(rootPath, filePath) {
   const root = String(rootPath || '')
@@ -138,15 +108,6 @@ const isSameOrChildPath = (candidate, parent) => {
   return caseLeft === caseRight || caseLeft.startsWith(`${caseRight}/`)
 }
 
-/** 目录部分：/a/b/c -> /a/b */
-function dirOf(path) {
-  const normalized = String(path || '')
-    .replaceAll('\\', '/')
-    .replace(/\/$/, '')
-  const index = normalized.lastIndexOf('/')
-  return index > 0 ? normalized.slice(0, index) : normalized || '/'
-}
-
 const isSibling = (a, b) => dirOf(a) === dirOf(b)
 
 function findDirChildren(nodes, dirPath) {
@@ -161,13 +122,10 @@ function findDirChildren(nodes, dirPath) {
 }
 
 function updateDirChildren(nodes, dirPath, update) {
-  return nodes.map((node) =>
-    node.path === dirPath
-      ? { ...node, children: update(node.children) }
-      : node.children?.length
-        ? { ...node, children: updateDirChildren(node.children, dirPath, update) }
-        : node
-  )
+  return updateTree(nodes, dirPath, (node) => {
+    const children = update(node.children)
+    return children === node.children ? node : { ...node, children }
+  })
 }
 
 function applyOrder(children, directory, orderMap) {
@@ -471,6 +429,7 @@ export const FilesView = forwardRef(function FilesView(
     root,
     visible,
     askText,
+    onRootChange,
     onCornerResizeStart,
     gitCwd,
     gitRepository,
@@ -490,16 +449,20 @@ export const FilesView = forwardRef(function FilesView(
   /** ensureEditor() 的单调 promise：monaco 装载 + 编辑器创建只做一次 */
   const editorReadyRef = useRef(null)
   const tabListRef = useRef(null)
-  const requestRef = useRef(0)
+  const [treeRequests] = useState(createTreeRequests)
+  const rootTargetRef = useRef(undefined)
+  const rootSelectionRef = useRef(undefined)
   const reloadRef = useRef(0)
   const lifecycleRef = useRef(0)
+  const openRequestRef = useRef(0)
   const messageTimer = useRef(null)
   const saveActionRef = useRef(null)
-  const [tree, setTree] = useState({
+  const [tree, setTreeState] = useState({
     root: null,
     parent: null,
     children: [],
-    status: '选择一个终端会话以查看文件'
+    status: '选择一个终端会话以查看文件',
+    refreshing: false
   })
   // 文件树平时的根是会话 cwd（`root` 由 App 传进来）。从对话里点开一个目录时根要临时
   // 切到那个目录，所以记一个覆盖值。带上它所属的 cwd：换会话时 `root` 一变就对不上，
@@ -509,7 +472,15 @@ export const FilesView = forwardRef(function FilesView(
   // 「编辑」走这条（见 openPath 的 focus），标签条最左给一个「显示文件目录」把侧栏放回来。
   const [focusMode, setFocusMode] = useState(false)
   const overrideRoot = rootOverride && rootOverride.base === root ? rootOverride.path : null
-  const treeRef = useLatest(tree)
+  const treeRef = useRef(tree)
+  // 与页签一样同步更新 ref，让同一帧内的请求和用户操作始终合并到最新树上。
+  const setTree = useCallback((updater) => {
+    const current = treeRef.current
+    const next = typeof updater === 'function' ? updater(current) : updater
+    if (next === current) return
+    treeRef.current = next
+    setTreeState(next)
+  }, [])
   const [tabs, setTabsState] = useState([])
   const tabsRef = useRef([])
   const [activePath, setActivePathState] = useState(null)
@@ -525,6 +496,7 @@ export const FilesView = forwardRef(function FilesView(
   const [activePanel, setActivePanel] = useState('explorer')
   const [gitSelectedFile, setGitSelectedFile] = useState(null)
   const [gitPreview, setGitPreview] = useState(true)
+  const [diffOpened, setDiffOpened] = useState(false)
 
   // 目录树上的 Git 装饰：改动文件染成对应状态色并带状态字母，其所有上级文件夹继承最主要的状态
   const gitDecorations = useMemo(() => buildGitDecorations(gitRepository), [gitRepository])
@@ -541,6 +513,7 @@ export const FilesView = forwardRef(function FilesView(
     setTabsState(next)
   }, [])
   const setActivePath = useCallback((path) => {
+    openRequestRef.current += 1
     activeRef.current = path
     setActivePathState(path)
   }, [])
@@ -555,12 +528,14 @@ export const FilesView = forwardRef(function FilesView(
   const selectGitFile = useCallback(
     (file, section = 'changes') => {
       if (!file?.path) return
+      openRequestRef.current += 1
       setGitSelectedFile({
         ...file,
         cwd: gitCwd,
         section,
         base: { mode: section === 'staged' ? 'staged' : 'worktree' }
       })
+      setDiffOpened(true)
       setGitPreview(true)
     },
     [gitCwd]
@@ -615,14 +590,21 @@ export const FilesView = forwardRef(function FilesView(
   )
 
   const switchPanel = useCallback((panel) => {
+    openRequestRef.current += 1
     setActivePanel((current) => (current === panel ? 'explorer' : panel))
     setGitPreview(true)
   }, [])
 
   useEffect(() => {
+    openRequestRef.current += 1
+  }, [root])
+
+  useEffect(() => {
     return () => {
       lifecycleRef.current += 1
+      openRequestRef.current += 1
       reloadRef.current += 1
+      treeRequests.reset()
       clearTimeout(messageTimer.current)
       const currentTabs = tabsRef.current
       tabsRef.current = []
@@ -635,7 +617,7 @@ export const FilesView = forwardRef(function FilesView(
       editorRef.current = null
       editorReadyRef.current = null
     }
-  }, [])
+  }, [treeRequests])
 
   /**
    * 首次真正需要编辑器时才加载 monaco 并建实例（启动路径完全不碰它）。
@@ -662,12 +644,25 @@ export const FilesView = forwardRef(function FilesView(
     return editorReadyRef.current
   }, [])
 
+  const revealPosition = useCallback((position) => {
+    if (!position || !editorRef.current?.getModel()) return
+    const lineNumber = Math.max(1, Number(position.line) || 1)
+    const column = Math.max(1, Number(position.column) || 1)
+    editorRef.current.setPosition({ lineNumber, column })
+    editorRef.current.revealPositionInCenter({ lineNumber, column })
+    editorRef.current.focus()
+  }, [])
+
   const activateFile = useCallback(
     (path, focus = true) => {
       const tab = tabsRef.current.find((item) => item.path === path)
       if (!tab) return
       if (activeRef.current === path && editorRef.current?.getModel() === tab.model) {
-        if (tab.model) showMessage('')
+        openRequestRef.current += 1
+        if (tab.model) {
+          editorRef.current?.updateOptions(editorOptionsForTab(tab))
+          showMessage('')
+        }
         if (focus) editorRef.current?.focus()
         return
       }
@@ -689,19 +684,15 @@ export const FilesView = forwardRef(function FilesView(
         if (activeRef.current !== path || editorRef.current?.getModel() !== tab.model) return
         editorRef.current?.layout()
         if (focus) editorRef.current?.focus()
+        const current = tabsRef.current.find((item) => item.path === path)
+        if (current?.pendingPosition) {
+          revealPosition(current.pendingPosition)
+          current.pendingPosition = null
+        }
       })
     },
-    [setActivePath, showMessage]
+    [revealPosition, setActivePath, showMessage]
   )
-
-  const revealPosition = useCallback((position) => {
-    if (!position || !editorRef.current?.getModel()) return
-    const lineNumber = Math.max(1, Number(position.line) || 1)
-    const column = Math.max(1, Number(position.column) || 1)
-    editorRef.current.setPosition({ lineNumber, column })
-    editorRef.current.revealPositionInCenter({ lineNumber, column })
-    editorRef.current.focus()
-  }, [])
 
   /**
    * 打开一段内存文本（工具调用详情里的参数/输出）。
@@ -726,15 +717,18 @@ export const FilesView = forwardRef(function FilesView(
       const previous = tabsRef.current.find((tab) => tab.path === activeRef.current)
       if (previous?.model) previous.viewState = editorRef.current?.saveViewState()
       setActivePath(key)
+      const request = openRequestRef.current
+      const generation = lifecycleRef.current
       editorRef.current?.setModel(null)
       editorRef.current?.updateOptions({ readOnly: true })
       // 首屏这一步才真正装载 monaco（与打开文件同一个装载器）
       const monaco = await ensureEditor()
+      if (generation !== lifecycleRef.current) return
       // 装载是异步的：等它的时候同一个文档可能已经被另一次点击建好了
       const { reuse: stale } = planDocumentOpen(tabsRef.current, id || title)
       if (stale) {
         if (stale.model.getValue() !== content) stale.model.setValue(content ?? '')
-        activateFile(key)
+        if (request === openRequestRef.current && activeRef.current === key) activateFile(key)
         return
       }
       const model = monaco.editor.createModel(content ?? '', language, monaco.Uri.parse(key))
@@ -753,7 +747,7 @@ export const FilesView = forwardRef(function FilesView(
         virtual: true
       }
       setTabs((items) => [...items, tab])
-      activateFile(key)
+      if (request === openRequestRef.current && activeRef.current === key) activateFile(key)
     },
     [activateFile, ensureEditor, setActivePath, setTabs]
   )
@@ -761,15 +755,23 @@ export const FilesView = forwardRef(function FilesView(
   const openFile = useCallback(
     async (path, position = null) => {
       if (!path) return
+      openRequestRef.current += 1
       setGitPreview(false)
       // eslint-disable-next-line no-use-before-define -- 回调打开文件时才执行，setter 早已定义
       setMobileTreeVisible(false)
       const existing = tabsRef.current.find((tab) => tab.path === path)
       if (existing) {
+        existing.pendingPosition = position
         activateFile(path)
         requestAnimationFrame(() => {
-          if (activeRef.current === path && editorRef.current?.getModel() === existing.model) {
-            revealPosition(position)
+          const current = tabsRef.current.find((tab) => tab.path === path)
+          if (
+            current?.model &&
+            activeRef.current === path &&
+            editorRef.current?.getModel() === current.model
+          ) {
+            revealPosition(current.pendingPosition)
+            current.pendingPosition = null
           }
         })
         return
@@ -785,6 +787,7 @@ export const FilesView = forwardRef(function FilesView(
         savedVersion: null,
         diskVersion: null,
         dirty: false,
+        pendingPosition: position,
         loading: true,
         saving: false
       }
@@ -818,12 +821,15 @@ export const FilesView = forwardRef(function FilesView(
         setTabs((items) => items.map((item) => (item === tab ? { ...tab } : item)))
         if (activeRef.current === path) {
           editorRef.current?.setModel(model)
+          editorRef.current?.updateOptions(editorOptionsForTab(tab))
           showMessage('')
           requestAnimationFrame(() => {
             if (activeRef.current !== path || editorRef.current?.getModel() !== model) return
             editorRef.current?.layout()
             editorRef.current?.focus()
-            revealPosition(position)
+            const current = tabsRef.current.find((item) => item.path === path)
+            revealPosition(current?.pendingPosition)
+            if (current) current.pendingPosition = null
           })
         }
       } catch (error) {
@@ -858,6 +864,7 @@ export const FilesView = forwardRef(function FilesView(
   const openPath = useCallback(
     async (path, position = null, options = {}) => {
       if (!path) return
+      const request = ++openRequestRef.current
       // 「只开编辑器」是每次打开时定的：插件从面板里点「编辑」是要改这一份文件，
       // 不是来逛工作区的，进来就把活动栏、文件树、Git 面板收起来。任何一次不带
       // focus 的打开（对话里的路径链接、搜索、目录）都回到常规形态。
@@ -868,6 +875,7 @@ export const FilesView = forwardRef(function FilesView(
       } catch {
         info = null
       }
+      if (request !== openRequestRef.current) return
       if (info?.ok && info.kind === 'directory') {
         // eslint-disable-next-line no-use-before-define -- 回调执行时 setter 早已定义
         setMobileTreeVisible(false)
@@ -963,38 +971,109 @@ export const FilesView = forwardRef(function FilesView(
     }
   }, [visible])
 
-  const loadRoot = useCallback(async (path) => {
-    const target = typeof path === 'string' && path.trim() ? path : ''
-    const request = ++requestRef.current
-    setTree({
-      root: target || null,
-      parent: null,
-      children: [],
-      status: target ? '正在读取…' : '选择一个终端会话以查看文件'
-    })
-    if (!target) return
-    try {
-      const result = await window.mica.files.list(target)
-      if (request !== requestRef.current) return
+  const readDirectory = useCallback(
+    async (directory, { expand = false } = {}) => {
+      const current = treeRef.current
+      const rootPath = current.root
+      if (
+        !rootPath ||
+        (directory !== rootPath && findTreeNode(current.children, directory)?.type !== 'directory')
+      )
+        return
+      const token = treeRequests.start(directory)
+      const isCurrent = () =>
+        treeRef.current.root === rootPath && treeRequests.isCurrent(directory, token)
+      setTree((value) =>
+        directory === rootPath
+          ? {
+              ...value,
+              refreshing: true,
+              status: value.children.length ? '' : '正在读取…'
+            }
+          : {
+              ...value,
+              children: updateTree(value.children, directory, (node) => ({
+                ...node,
+                expanded: expand || node.expanded,
+                loading: true,
+                error: ''
+              }))
+            }
+      )
+      try {
+        const result = await window.mica.files.list(directory)
+        if (!isCurrent()) return
+        setTree((value) => mergeDirectoryListing(value, rootPath, directory, result))
+        // A removed directory must also invalidate any pending read of its old subtree.
+        treeRequests.prune(treeRef.current)
+      } catch (error) {
+        if (!isCurrent()) return
+        const text = error?.message || String(error)
+        if (directory === rootPath) {
+          setTree((value) => ({
+            ...value,
+            refreshing: false,
+            status: `无法读取文件夹：${text}`
+          }))
+        } else {
+          setTree((value) => ({
+            ...value,
+            children: updateTree(value.children, directory, (node) => ({
+              ...node,
+              loading: false,
+              error: node.loaded ? '' : text
+            }))
+          }))
+          showMessage(`无法读取文件夹：${text}`, true, true)
+        }
+      } finally {
+        treeRequests.finish(directory, token)
+      }
+    },
+    [setTree, showMessage, treeRequests]
+  )
+
+  const refresh = useCallback(async () => {
+    const current = treeRef.current
+    if (!current.root) return
+    await Promise.all(
+      [current.root, ...refreshDirectoryPaths(current.children)].map((directory) =>
+        readDirectory(directory)
+      )
+    )
+  }, [readDirectory])
+
+  const loadRoot = useCallback(
+    async (path) => {
+      const target = typeof path === 'string' && path.trim() ? path : ''
+      if (target && (treeRef.current.root === target || rootTargetRef.current === target))
+        return refresh()
+      openRequestRef.current += 1
+      rootTargetRef.current = target
+      if (target) onRootChange?.(target)
+      treeRequests.reset()
       setTree({
-        root: result.path,
-        parent: result.parentPath,
-        children: result.entries.map(makeNode),
-        status: result.entries.length ? '' : '这个文件夹是空的'
+        root: target || null,
+        parent: null,
+        children: [],
+        refreshing: false,
+        status: target ? '正在读取…' : '选择一个终端会话以查看文件'
       })
-    } catch (error) {
-      if (request === requestRef.current)
-        setTree((value) => ({
-          ...value,
-          children: [],
-          status: `无法读取文件夹：${error?.message || error}`
-        }))
-    }
-  }, [])
+      if (target) await readDirectory(target)
+    },
+    [onRootChange, readDirectory, refresh, setTree, treeRequests]
+  )
 
   useEffect(() => {
-    if (visible) loadRoot(overrideRoot || root)
-  }, [loadRoot, overrideRoot, root, visible])
+    if (!visible) return
+    const target = overrideRoot || root || ''
+    if (rootSelectionRef.current !== target) {
+      rootSelectionRef.current = target
+      void loadRoot(target)
+    } else {
+      void refresh()
+    }
+  }, [loadRoot, overrideRoot, refresh, root, visible])
 
   useEffect(() => {
     if (!visible) return undefined
@@ -1012,55 +1091,22 @@ export const FilesView = forwardRef(function FilesView(
     }
   }, [visible])
 
-  const restoreExpanded = useCallback(async (nodes, paths, request) => {
-    const restored = []
-    for (const node of nodes) {
-      if (request !== requestRef.current || node.type !== 'directory' || !paths.has(node.path)) {
-        restored.push(node)
-        continue
-      }
-      try {
-        const result = await window.mica.files.list(node.path)
-        const children = result.entries.map(makeNode)
-        restored.push({
-          ...node,
-          expanded: true,
-          loaded: true,
-          children: await restoreExpanded(children, paths, request)
-        })
-      } catch (error) {
-        restored.push({ ...node, expanded: true, error: error?.message || String(error) })
-      }
-    }
-    return restored
-  }, [])
-
-  const refresh = useCallback(async () => {
-    const current = treeRef.current
-    if (!current.root) return
-    const paths = expandedPaths(current.children)
-    const request = ++requestRef.current
-    setTree((value) => ({ ...value, status: '正在刷新…' }))
-    try {
-      const result = await window.mica.files.list(current.root)
-      let children = result.entries.map(makeNode)
-      children = await restoreExpanded(children, paths, request)
-      if (request !== requestRef.current) return
-      setTree({
-        root: result.path,
-        parent: result.parentPath,
-        children,
-        status: children.length ? '' : '这个文件夹是空的'
-      })
-    } catch (error) {
-      if (request === requestRef.current)
-        setTree((value) => ({ ...value, status: `无法刷新文件夹：${error?.message || error}` }))
-    }
-  }, [restoreExpanded, treeRef])
-
   const collapseAll = useCallback(() => {
+    treeRequests.collapse(treeRef.current.root)
     setTree((value) => ({ ...value, children: collapseNodes(value.children) }))
-  }, [])
+  }, [setTree, treeRequests])
+
+  const refreshAfterFileChange = useCallback(
+    async (directories, expand = null) => {
+      await Promise.all([
+        ...[...new Set(directories)].map((directory) =>
+          readDirectory(directory, { expand: directory === expand })
+        ),
+        onRefreshGit?.()
+      ])
+    },
+    [onRefreshGit, readDirectory]
+  )
 
   const closeTabsUnder = useCallback(
     (path) => {
@@ -1102,8 +1148,8 @@ export const FilesView = forwardRef(function FilesView(
             name,
             action === 'new-file' ? 'file' : 'directory'
           )
-          await refresh()
-          if (action === 'new-file') openFile(result.path)
+          if (action === 'new-file') void openFile(result.path)
+          await refreshAfterFileChange([node.path], node.path)
           showMessage(`${kind}已创建`, true)
           return
         }
@@ -1112,13 +1158,13 @@ export const FilesView = forwardRef(function FilesView(
           if (!name?.trim() || name.trim() === node.name) return
           if (!closeTabsUnder(node.path)) return
           await window.mica.files.rename(node.path, name)
-          await refresh()
+          await refreshAfterFileChange([dirOf(node.path)])
           showMessage('已重命名', true)
           return
         }
         if (action === 'duplicate') {
           await window.mica.files.duplicate(node.path)
-          await refresh()
+          await refreshAfterFileChange([dirOf(node.path)])
           showMessage('副本已创建', true)
           return
         }
@@ -1126,14 +1172,14 @@ export const FilesView = forwardRef(function FilesView(
           if (!window.confirm(`确定要将“${node.name}”移到回收站吗？`)) return
           if (!closeTabsUnder(node.path)) return
           await window.mica.files.delete(node.path)
-          await refresh()
+          await refreshAfterFileChange([dirOf(node.path)])
           showMessage('已删除', true)
         }
       } catch (error) {
         showMessage(`操作失败：${error?.message || error}`, true, true)
       }
     },
-    [askText, closeTabsUnder, openFile, refresh, showMessage, treeRef]
+    [askText, closeTabsUnder, openFile, refreshAfterFileChange, showMessage, treeRef]
   )
 
   const openContextMenu = useCallback((event, node) => {
@@ -1291,7 +1337,7 @@ export const FilesView = forwardRef(function FilesView(
         showMessage(`排序保存失败：${error?.message || error}`, true, true)
       }
     },
-    [dragPath, showMessage, treeRef]
+    [dragPath, setTree, showMessage, treeRef]
   )
 
   const handleFileDrop = useCallback(
@@ -1309,13 +1355,13 @@ export const FilesView = forwardRef(function FilesView(
       if (!closeTabsUnder(dragPath)) return
       try {
         await window.mica.files.move(dragPath, directory.path)
-        await refresh()
+        await refreshAfterFileChange([dirOf(dragPath), directory.path], directory.path)
         showMessage(`已移动到 ${directory.name}`, true)
       } catch (error) {
         showMessage(`移动失败：${error?.message || error}`, true, true)
       }
     },
-    [closeTabsUnder, dragPath, refresh, showMessage]
+    [closeTabsUnder, dragPath, refreshAfterFileChange, showMessage]
   )
 
   const reloadAfterGitChange = useCallback(
@@ -1332,6 +1378,7 @@ export const FilesView = forwardRef(function FilesView(
       const treeTask = loadRoot(nextRoot)
       const results = await Promise.all(
         snapshot.map(async (tab) => {
+          if (tab.virtual) return { path: tab.path, virtual: true }
           try {
             return { path: tab.path, value: await window.mica.files.read(tab.path) }
           } catch (error) {
@@ -1346,7 +1393,7 @@ export const FilesView = forwardRef(function FilesView(
       const nextTabs = []
       for (const tab of tabsRef.current) {
         const response = responses.get(tab.path)
-        if (!response || tab.dirty || tab.saving) {
+        if (!response || response.virtual || tab.dirty || tab.saving) {
           nextTabs.push(tab)
           continue
         }
@@ -1373,6 +1420,7 @@ export const FilesView = forwardRef(function FilesView(
       if (nextActive) {
         setActivePath(nextActive.path)
         editorRef.current?.setModel(nextActive.model)
+        editorRef.current?.updateOptions(editorOptionsForTab(nextActive))
         if (nextActive.viewState) editorRef.current?.restoreViewState(nextActive.viewState)
       } else {
         setActivePath(null)
@@ -1392,53 +1440,24 @@ export const FilesView = forwardRef(function FilesView(
     [loadRoot, setActivePath, setTabs, showMessage]
   )
 
-  const toggleDirectory = useCallback(async (node) => {
-    if (node.loading) return
-    if (node.expanded || node.loaded) {
-      setTree((value) => ({
-        ...value,
-        children: updateTree(value.children, node.path, (item) => ({
-          ...item,
-          expanded: !item.expanded
-        }))
-      }))
-      return
-    }
-    const request = requestRef.current
-    setTree((value) => ({
-      ...value,
-      children: updateTree(value.children, node.path, (item) => ({
-        ...item,
-        expanded: true,
-        loading: true,
-        error: ''
-      }))
-    }))
-    try {
-      const result = await window.mica.files.list(node.path)
-      if (request !== requestRef.current) return
-      setTree((value) => ({
-        ...value,
-        children: updateTree(value.children, node.path, (item) => ({
-          ...item,
-          loaded: true,
-          loading: false,
-          children: result.entries.map(makeNode)
-        }))
-      }))
-    } catch (error) {
-      if (request === requestRef.current)
+  const toggleDirectory = useCallback(
+    (node) => {
+      const current = findTreeNode(treeRef.current.children, node.path)
+      if (current?.type !== 'directory') return
+      if (current.expanded || current.loaded || current.loading) {
         setTree((value) => ({
           ...value,
           children: updateTree(value.children, node.path, (item) => ({
             ...item,
-            loaded: false,
-            loading: false,
-            error: error?.message || String(error)
+            expanded: !item.expanded
           }))
         }))
-    }
-  }, [])
+      } else {
+        void readDirectory(node.path, { expand: true })
+      }
+    },
+    [readDirectory, setTree]
+  )
 
   const layout = useCallback(() => editorRef.current?.layout(), [])
   const { width, separatorProps } = usePaneWidth({
@@ -1534,6 +1553,9 @@ export const FilesView = forwardRef(function FilesView(
       openPath,
       openFile,
       openDocument,
+      getRoot() {
+        return treeRef.current.root || root || null
+      },
       closeActive() {
         if (showDiff) {
           if (isGitTree) review.close(selectedDiff.path)
@@ -1557,6 +1579,7 @@ export const FilesView = forwardRef(function FilesView(
       openPath,
       openFile,
       openDocument,
+      root,
       reloadAfterGitChange,
       showDiff,
       isGitTree,
@@ -1626,7 +1649,7 @@ export const FilesView = forwardRef(function FilesView(
         aria-label="侧边面板"
       >
         {activePanel === 'search' ? (
-          <SearchPanel root={root} onOpenFile={openFile} activePath={activePath} />
+          <SearchPanel root={tree.root || root} onOpenFile={openFile} activePath={activePath} />
         ) : isGitTree ? (
           <GitComparePanel
             cwd={gitCwd}
@@ -1640,11 +1663,13 @@ export const FilesView = forwardRef(function FilesView(
             selectedPath={review.current?.path}
             onSelectFile={(file, pin = false) => {
               review.open(file, pin)
+              setDiffOpened(true)
               setGitPreview(true)
               setMobileTreeVisible(false)
             }}
             onOpenAll={(files) => {
               review.open(files)
+              setDiffOpened(true)
               setGitPreview(true)
               setMobileTreeVisible(false)
             }}
@@ -1731,7 +1756,7 @@ export const FilesView = forwardRef(function FilesView(
                 className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
                 onClick={refresh}
               >
-                <IconRefresh size={16} />
+                <IconRefresh size={16} className={tree.refreshing ? 'animate-spin' : undefined} />
               </button>
               <button
                 type="button"
@@ -1759,7 +1784,12 @@ export const FilesView = forwardRef(function FilesView(
               </button>
             </header>
             <div className="relative min-h-0 flex-1">
-              <div className="h-full overflow-auto select-none" role="tree" aria-label="文件目录">
+              <div
+                className="h-full overflow-auto select-none"
+                role="tree"
+                aria-label="文件目录"
+                aria-busy={tree.refreshing}
+              >
                 <FileTreeRows
                   nodes={applyOrder(tree.children, tree.root, orderMap)}
                   activePath={activePath}
@@ -1785,7 +1815,11 @@ export const FilesView = forwardRef(function FilesView(
               {tree.status && (
                 <div
                   role="status"
-                  className="absolute inset-0 grid place-items-center bg-panel px-4 text-center text-[11px] text-fg-dim"
+                  className={`absolute bg-panel px-4 text-center text-[11px] text-fg-dim ${
+                    tree.children.length
+                      ? 'pointer-events-none inset-x-0 bottom-0 py-2'
+                      : 'inset-0 grid place-items-center'
+                  }`}
                 >
                   {tree.status}
                 </div>
@@ -1842,8 +1876,9 @@ export const FilesView = forwardRef(function FilesView(
         className={`min-w-0 min-h-0 flex-1 flex-col ${editorOpen ? 'flex' : 'hidden'}`}
         aria-label={activeTab ? `${activeTab.name} 编辑器` : '文件编辑器'}
       >
-        {showDiff && (
-          <>
+        {/* 首次打开后保留差异编辑器，切回普通文件或面板时只隐藏。 */}
+        {diffOpened && (
+          <div className={`min-h-0 flex-1 flex-col ${showDiff ? 'flex' : 'hidden'}`}>
             {isGitTree && (
               <GitReviewTabs
                 tabs={review.tabs}
@@ -1879,23 +1914,27 @@ export const FilesView = forwardRef(function FilesView(
             >
               <GitDiffEditor
                 cwd={gitCwd || null}
-                file={selectedDiff}
+                file={showDiff ? selectedDiff : null}
                 comparisonLabel={
                   isGitTree
                     ? `${gitBranch || 'HEAD'} · 相对 ${gitBranchChanges?.baseLabel || 'HEAD'}`
-                    : selectedDiff.section === 'staged'
+                    : selectedDiff?.section === 'staged'
                       ? '暂存的更改'
                       : '工作区更改'
                 }
-                onClose={isGitTree ? () => review.close(selectedDiff.path) : closeGitDiff}
-                onOpenFile={() => openGitFile(selectedDiff)}
+                onClose={
+                  isGitTree ? () => selectedDiff && review.close(selectedDiff.path) : closeGitDiff
+                }
+                onOpenFile={() => selectedDiff && openGitFile(selectedDiff)}
                 hasPreviousFile={isGitTree && !!review.previous}
                 hasNextFile={isGitTree && !!review.next}
                 onPreviousFile={() => review.previous && review.open(review.previous)}
                 onNextFile={() => review.next && review.open(review.next)}
-                reviewed={isGitTree && isFileReviewed(selectedDiff, review.reviewed)}
+                reviewed={
+                  isGitTree && !!selectedDiff && isFileReviewed(selectedDiff, review.reviewed)
+                }
                 onToggleReviewed={
-                  isGitTree
+                  isGitTree && selectedDiff
                     ? () =>
                         review.toggleReviewed(
                           [selectedDiff],
@@ -1905,7 +1944,7 @@ export const FilesView = forwardRef(function FilesView(
                 }
               />
             </Suspense>
-          </>
+          </div>
         )}
         {isGitTree && gitPreview && !selectedDiff && (
           <GitCompareWelcome
@@ -1915,6 +1954,7 @@ export const FilesView = forwardRef(function FilesView(
             loading={gitLoading}
             onOpen={(file) => {
               review.open(file)
+              setDiffOpened(true)
               setMobileTreeVisible(false)
             }}
           />

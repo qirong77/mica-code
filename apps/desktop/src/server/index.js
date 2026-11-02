@@ -583,7 +583,9 @@ async function handleInvoke(req, res) {
   }
   // 所有功能都从这一个入口进入，所以只在这里计时就能覆盖 chat/files/git/stats/config…
   try {
-    const result = await invokeLog.timed(channel, () => invokeChannel(channel, body.payload))
+    // 大量通道把失败包在返回值里（`{ error }` / `{ ok:false }`）而不抛：记下原因，
+    // 否则日志只剩一条慢调用，分不清是超时、被取消还是真报错。
+    const result = await invokeLog.timedResult(channel, () => invokeChannel(channel, body.payload))
     sendJson(res, 200, { ok: true, result })
   } catch (error) {
     sendJson(res, 200, { ok: false, error: errorMessage(error) })

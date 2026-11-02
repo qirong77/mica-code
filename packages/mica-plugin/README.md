@@ -72,20 +72,26 @@ export default function setup(context: PluginContext) {
 
 ### System prompt 扩展
 
-`system-prompt:build` 是同步 pipeline hook，在 provider 每次解析 system prompt 时执行。handler 必须同步返回，事件结构为 `{ runtime, prompt }`：
+插件统一通过 `context.prompt.section()` 贡献段落，清单声明 `requires: ["prompt"]`。每次组装 system prompt 时同步渲染，空串不贡献内容；不再使用 `system-prompt:build` pipeline。
 
 ```ts
-const hook = context.hooks.on('system-prompt:build', (event: { runtime: unknown; prompt: string }) => ({
-  event: {
-    ...event,
-    prompt: `${event.prompt}\n\nPlugin system guidance.`,
-  },
-}));
-
-context.onDispose(() => hook.dispose());
+const registration = context.prompt!.section({
+  id: 'guidance',
+  order: 0,
+  render: () => '<guidance>Plugin system guidance.</guidance>',
+});
+context.onDispose(() => registration.dispose());
 ```
 
-这个 hook 只修改 system prompt，不会写入 user message 或 session provider history。显式传入自定义 system prompt 的 subagent 不经过该扩展点。
+宿主在 base prompt 之后，按 `order` 从小到大排列（默认 0，同值按注册顺序），并为每个非空段落统一添加边界：
+
+```xml
+<injection source="plugin" plugin="example.plugin" section="guidance">
+<guidance>Plugin system guidance.</guidance>
+</injection>
+```
+
+属性由宿主转义；正文保留插件自己的 XML 结构，但 `injection` 是宿主保留标签，其开闭标签会被转义，避免提前关闭或伪造外层边界。这些段落不会写入 user message 或 session provider history。会话记忆、会话自治、Loop 的顺序分别为 -300、-200、-100，位于默认顺序的动态段落之前。
 
 ### 模型请求之间的扩展
 

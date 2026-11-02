@@ -205,8 +205,39 @@ export function logger(scope) {
         record('error', scope, event, { ms, ...errorFields(error) })
         throw error
       }
+    },
+
+    /**
+     * 调用本身成功、但把失败包在返回值里（`{ ok: false, error }` / `{ error }`）的通道
+     * 用这个：否则日志里只有一条慢调用，看不出它到底是超时、被取消还是真的报错。
+     * 只抄回一条短消息，不记录 payload。
+     */
+    async timedResult(event, fn, threshold = SLOW_MS) {
+      const started = Date.now()
+      let result
+      try {
+        result = await fn()
+      } catch (error) {
+        const ms = Date.now() - started
+        noteSlow(scope, event, ms, threshold, false)
+        record('error', scope, event, { ms, ...errorFields(error) })
+        throw error
+      }
+      const ms = Date.now() - started
+      const failure = resultFailure(result)
+      noteSlow(scope, event, ms, threshold, !failure)
+      if (failure) record('warn', scope, event, { ms, kind: 'failed', error: failure })
+      return result
     }
   }
+}
+
+/** 从 `{ ok:false, error }` / `{ error }` 这类返回体里取出失败原因（没有就返回 null）。 */
+function resultFailure(result) {
+  if (!result || typeof result !== 'object') return null
+  if (result.ok !== false && !result.error) return null
+  const message = typeof result.error === 'string' ? result.error : result.error?.message
+  return String(message || 'unknown error').slice(0, 200)
 }
 
 function noteSlow(scope, event, ms, threshold, ok) {
@@ -374,7 +405,8 @@ export function readPerformanceSummary(options = {}) {
         bucket.slow += 1
         slowCalls += 1
       }
-      if (entry.level === 'error') bucket.fails += 1
+      // `kind:'failed'` 是「调用成功返回、但返回体里带着错误」的那些（见 timedResult）。
+      if (entry.level === 'error' || entry.kind === 'failed') bucket.fails += 1
       buckets.set(key, bucket)
     }
   }

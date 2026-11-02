@@ -151,6 +151,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - base prompt 只放「换宿主也不变」的东西：身份、指令层级、能力与插件的判断方式、工作方式、编辑约束、验证与交付。计划、委派、笔记、记忆这类策略由对应插件注册 `ctx.prompt.section()` 注入，随插件停用一起消失——不要为了「提示词完整」把工具用法抄回 base。
 - 工具用法（参数、超时、并发、等待语义）只写在工具 schema 描述里，base prompt 不重复：两处都写必然漂移，且每次改工具都在改 prompt cache 前缀。
 - skills 只以索引进入 system prompt。
+- 每次提示词注入都有 XML 边界：项目文件各用 `<document source="…">`，插件只通过 `ctx.prompt.section()` 注入，由宿主生成 `<injection source="plugin" plugin="…" section="…">`；`system-prompt:build` 不再支持。正文允许语义 XML，动态数据必须转义；外层标签由宿主保留。子代理规则、角色与插件独立模型请求也分别包装，来源属性保持稳定，不含轮次随机值。
 - `AgentRuntime.setCapabilities()` 保存会话开关；prompt、工具定义与执行校验读同一份状态。未定制的会话跟随 `config.capabilityDefaults`，`resetCapabilitiesToDefaults()` 回到跟随默认。
 - effort 的档位名就是模型在 models.dev 声明的真实取值：`minimal`/`max`/`xhigh` 各是各的，不归一化、不落别名；只有开关的模型是 `none`/`on`，只声明 budget 或没有 reasoning 的模型没有档位。没有任何档位的模型不发推理参数，也不在 `/effort`、desktop 选择器里凑五档；models.dev 没收录的模型由 provider 的 `effortLevels` 声明档位。切换模型时 clamp 到该模型自己的档位并同步 context window。metadata 优先级：磁盘缓存（24h）→ 内置 models.dev 种子 → 在线刷新。
 - 档位/上下文跟着「谁在服务这次请求」查：`getModelRule` / `ensureModelRule` 接受 provider 作用域（`{ id, api_base }`），缓存键带上 provider。同一个模型在网关（OpenRouter 的 `moonshotai/kimi-k3` 有 `none`）与厂商原生条目（没有 `none`）下的档位可以不同，只按模型名匹配会用错那一份。服务商在 models.dev 里收录了这个模型就以它为准（先认 `id`、再认 `api_base` 的主机名），否则仍按模型厂商的条目。
@@ -158,6 +159,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 档位解析分两条策略（`resolveRuntimeConfigOverride` 的 `effortPolicy`）：`mica exec --variant` 这类命令行显式参数走 `strict`，档位不合法就报错；客户端带上来的 model+effort（desktop 选择器、Codex 驱动的 thread/\* 字段）走 `clamp`，收敛到目标模型的档位或丢掉它没声明的档位，由 host 用 warning 说明实际发了什么。app-server 因此绝不能因为一个客户端档位起不来。
 - 解析档位之前必须先 `ensureModelRule(model)`：档位集合来自 models.dev，磁盘缓存异步读，先算会把「只在缓存里、随包种子里没有」的模型判成没有档位。
 - 档位的**字段名**跟着「谁在服务这次请求」走（`isGatewayEntry`）：厂商直连的条目（`deepseek-flash`）用 `thinking` / `reasoning_effort`，聚合网关的条目（`z-ai/glm-4.6` 这类带前缀的键）只能用 `reasoning.effort`——网关会静默忽略 `thinking`，推理照跑。两边一起发更糟，网关会先命中 `thinking` / `reasoning_effort` 而把 `none` 顶掉。
+- models.dev 的档位是社区数据，未必等于某台网关的真实枚举（`openai/gpt-6.1-terra` 在一处声明 `none`，某台 codex 网关只认 low…max）。provider 用 400/422 明确拒绝本次带上的推理参数时，客户端丢掉推理参数重发一次，并经 `markEffortLevelRejected` 记住「这台服务商的这个模型不收这一档」，`resolveEffortParams` 之后直接不发——压缩摘要、起标题、子代理这些每次新建客户端、effort 又不是用户选的路径因此不会反复撞同一个 400。
 - 只有 `get_model_url` 动态 provider 查询模型列表，结果不写回 config.json。
 
 ## 5. 配置、会话与存储
@@ -386,6 +388,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 - chat run 按 nodeId 存于 `host/chat.js`；请求级发送错误走 `chat:queue-error`，回滚乐观消息并恢复草稿。host 进程在应答 `turn/start` 之前就退出时走同一条路径（`chat-host-requests.js` 结算未应答请求）：那一轮从未跑过，气泡必须撤回，否则消息看起来已发送、会话里却不存在，双击编辑只会得到「找不到要编辑的消息」。
 - 常驻宿主预热：渲染层每换到一个节点调一次 `chat:warm`，宿主侧只保证「App 开着就至少有一个宿主」（`chat-warm.js` 的 `resolveWarmAction`，已有活着的宿主就跳过，切页签不会各自养一个进程）。插件只载在会话宿主里，而宿主是按需 spawn 的——没有预热时重启桌面端后不发消息就没有宿主，桥与定时循环停摆，手机端显示「暂时不可用」。
+- 闲置宿主回收（`chat-idle.js` 的 `resolveIdleReap`，每分钟扫一次）：开着不用的页签会一直占着 app-server（一个 50–270MB），一天下来能堆到几百 MB。判定只收「没在干活」的：有轮次 / 压缩 / 中止进行中、`hostPending` 或本地排队里有消息、btw 线程在跑的一律不动；按最近活动时间留最新的一个（插件只活在会话宿主里，收干净会让手机桥与定时循环停摆）；默认闲置 30 分钟才收，`MICA_CHAT_IDLE_REAP_MS` 可调。另有一条硬上限 `IDLE_MAX_KEEP = 3`：排在前 3 之外的宿主不看闲置时长、只要空着就收——进程数量本身就是代价，而插件只活在最近活动的那个里。收掉之后用户再发消息由 `startRun` 按需 spawn 并带原 sessionId 续跑，只多一次冷启动，历史不受影响。
 - 队列唯一投影 `chat-queue.js.mergeQueuedItems`：host after_iteration 在前，本地 after_turn 在后；宿主在轮次之外占着会话时（自动压缩）条目带 `waitingFor: 'compaction'`，排队行据此说「等自动压缩结束」而不是等迭代边界。
 - 宿主报告 `mica/host/maintenance active` 期间（自动压缩，宿主此刻读不到 stdin）新输入走 `startRun` 的 `compacting` 分支：第一条进本地队列并如实回 `queued`，已有排队就按单槽就地拒绝。渲染层拿到 `queued` 时若这一条本来没在排队，要把乐观的「正在运行」收回去——它确实还没跑。
 - `mica/queue/hold` 冻结待撤回条目，结果由 `chat-recall.js.resolveQueueRecall` 判定为回输入框 / 已发送 / 保留。
@@ -429,8 +432,9 @@ npm run start:web          # 运行已构建的 Web 运行时
 - Files / TerminalHost 按需挂载后保留实例；ref 未就绪的打开请求暂存，挂载后补开。
 - shell 由 `shell-path.js.resolveDefaultShell` 按平台与存在性解析。
 - 文件树尺寸沿用 VS Code：活动栏 48px、树行 22px、缩进 8px。
+- 文件操作只重读受影响的父目录；目录结果合并到最新树状态，保留未变节点、子树与展开状态。手动刷新/恢复可见时保留已有树，目录请求按根与目录校验，过期结果不能恢复已删除或折叠的分支（`renderer/src/files-tree.js`）。
 - Git 分暂存/工作区两段，写操作仅 stage/unstage/discard，discard 点名文件并确认；所有 Git 命令带 `GIT_OPTIONAL_LOCKS=0`。
-- Git 比较按仓库/基线/模式与 fingerprint 保存审阅状态；DiffEditor 统一只读，换文件先 `setModel(null)`。
+- Git 比较按仓库/基线/模式与 fingerprint 保存审阅状态；DiffEditor 统一只读，首次加载后保留实例。比较模型与滚动状态由 `renderer/src/git-diff-session.js` 按仓库/文件/基线缓存；换文件保留画面到新内容就绪，替换/释放模型前先解绑。无 fingerprint 的源代码管理轮询必须重读并比较全文，无变化保留模型，不能用增删行数判断内容未变。
 - Git 轮询只在可见且聚焦时进行（Files 3s / 其他 10s），不重叠；会话视图只取仓库根与分支（`git:status` 一次 `rev-parse`），`git:summary` 的全树 status + numstat 与分支对比只在文件视图跑。- 顶栏编辑器图标右边是工作区徽标（`+1.2k` 绿 / `−840` 红，精确行数与文件数在 tooltip）：取数走 `git:change-counts`，与 `git:summary` 共用 `sumLineChanges` 和同一份文件列表（含未跟踪），所以和 CHANGES 面板的合计永远一致；非文件视图按 20s TTL 取、文件视图复用 summary 的结果、一轮跑完立刻强制刷一次。千位以上缩写（向下取整）、为 0 的一侧不画、有文件但无行数变更退回落文件数、干净时不画，规则唯一实现在 `renderer/src/git-badge.js`。
 - Pinned / Projects / Recent 互斥，归属经 `stats:move-session`；拖放判定在 `session-dnd.js`。分组行上/下边缘用于排序，中间用于嵌套，顺序保存在 Projects 的 groups 数组中。
 - 会话行共用操作列/图标列/名称栅格；状态优先级沿用 `session-state.js`，error 红点由后续 completed 清除。
@@ -471,7 +475,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 ### 日志与性能
 
 - `host/log.js` 是运行时唯一日志写入器：JSONL 落 `resolveLogDir()`（macOS `~/Library/Logs/mica`，与插件日志同目录），2s 批量 flush，留 1000 条环形缓冲；保留 7 天、总容量 256 MB，超了从最旧的删。日志**不放系统 temp**：temp 每次登录被系统清空，重启后就只剩当次运行，跨天的问题无法回头查。`MICA_LOG_DIR` 覆盖目录（测试与隔离实例用）。
-- 通道耗时只在 `handleInvoke` 用 `logger('invoke').timed()` 量一次；超过 `SLOW_MS`（默认 300ms）记 warn。新增功能不要自己再包一层计时。
+- 通道耗时只在 `handleInvoke` 用 `logger('invoke').timedResult()` 量一次；超过 `SLOW_MS`（默认 300ms）记 warn。它还会把「调用成功、返回体里带 `error` / `ok:false`」的那些记成 `kind:'failed'` 并在聚合表计入 `fails`——大量通道（git/stats/plugin-host）把失败包在返回值里而不抛，不这么做日志里就只剩一条耗时，分不清是超时、被取消还是真报错。新增功能不要自己再包一层计时。
 - `chat:compact` 额外记一条 `compact.finished`（请求模式、子进程回报的 strategy、前后 token 估算）——只按通道计时分不出本地清理与模型摘要。
 - 只读会话顶层字段（cwd、标题等）用 `host/session-file-head.js` 读文件头，不要为单个字段整份 `JSON.parse`：最大的一份会话 52MB。
 - 渲染层 `perf-probe.js` 只采样、`log-probe.js` 只记错误，两者交给同一写入器。

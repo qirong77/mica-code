@@ -1,4 +1,5 @@
 import { getModelRule } from './getModelRule.js';
+import { isEffortLevelRejected } from './effortRejections.js';
 import type { EffortOption, ProviderDefinition, ProviderProtocol, ResolvedEffortParams } from './types.js';
 
 export type EffortParamsRequest = {
@@ -18,10 +19,13 @@ export type EffortParamsRequest = {
  * 规则里没有该档位（模型不支持这一档、该协议没有等价参数、模型未知）时返回空对象：
  * 宁可不发，也不发一个未必被接受的猜测值。唯一例外是 provider 自己用 `effortLevels`
  * 声明了这个档位——那是服务端所有者给出的真实取值，直接按名字发。
+ *
+ * 被这台服务商实际拒绝过的档位同样不发：元数据说支持、接口说只认另外几档时，以接口为准。
  */
 export function resolveEffortParams({ provider, model, effort, protocol }: EffortParamsRequest): ResolvedEffortParams {
   if (provider.supportsEffort === false) return {};
   const level = effort ?? 'none';
+  if (isEffortLevelRejected(provider, model, level)) return {};
   // 档位补丁必须按「实际服务这次请求的 provider」查：同一个模型挂在网关上时档位集合
   // 可能与厂商自己的条目不同（OpenRouter 的 kimi-k3 多一个 `none`）。
   const rule = getModelRule(model, provider);

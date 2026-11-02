@@ -288,7 +288,7 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
                         : 'text-fg-soft hover:text-fg-strong'
                     }`}
                     style={{ paddingLeft: 22 }}
-                    onClick={() => onOpenFile(match.path, match.line)}
+                    onClick={() => onOpenFile(match.path, { line: match.line })}
                   >
                     <span className="min-w-0 flex-1 truncate">
                       <Highlight text={match.preview} range={match.highlight} />

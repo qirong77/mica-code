@@ -54,3 +54,5 @@ import { prepareImageForApi } from '@packages/mica-common/index.js';
 - `image.ts`：图片格式和尺寸识别，保留原始图片字节供 provider 发送。
 - `sessionNotes.ts`：会话笔记的归一化、追加、长度上限与 prompt 片段，唯一实现在这里，工具与桌面面板都调它。
 - `index.ts`：公共 API 聚合导出。
+
+提示词 XML 共用 `escapePromptXml(text)` 和 `wrapPromptXml(tag, content, attributes?)`（公共入口导出；浏览器可从纯模块 `promptXml.js` 导入）。前者转义动态数据，后者保留正文的语义标签、转义属性并保护所指定的外层标签；它不解析或验证正文 XML。

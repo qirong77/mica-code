@@ -1,3 +1,4 @@
+import { escapePromptXml, wrapPromptXml } from '@packages/mica-common/promptXml.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
@@ -85,7 +86,7 @@ export function formatSkillsIndex(skills: Skill[] = micaSkills.getLoaded()): str
 }
 
 function wrapSection(section: PromptSection, content: string): string {
-  return `<${section}>\n${content}\n</${section}>`;
+  return wrapPromptXml(section, content);
 }
 
 function readOptionalText(path: string): string | undefined {
@@ -100,8 +101,9 @@ export function readProjectInstructions(cwd = process.cwd()): string | undefined
     return content ? [{ name, content }] : [];
   });
   if (found.length === 0) return undefined;
-  if (found.length === 1) return found[0]!.content;
-  return found.map(({ name, content }) => `# ${name}\n\n${content}`).join('\n\n');
+  return found
+    .map(({ name, content }) => wrapPromptXml('document', escapePromptXml(content), { source: name }))
+    .join('\n\n');
 }
 
 function buildContextBlock(options: BuildSystemPromptOptions = {}): string {

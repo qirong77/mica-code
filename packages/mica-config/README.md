@@ -84,6 +84,7 @@ micaConfig.update((current) => ({
 - 两种策略都要求先 `ensureModelRule(model)` 再解析档位：档位集合来自 models.dev，磁盘缓存是异步读的，先算会把「缓存里有、随包种子里没有」的模型误判成没有档位。
 - Provider 可通过设置 `supportsEffort: false` 禁用 effort：它在 `resolveEffortParams` 里最先判断，模型补丁不能绕过它。
 - 请求侧只有一个入口 `resolveEffortParams({ provider, model, effort, protocol })`，两个 provider client 都调它，不再各自拼参数。
+- 服务端可能拒绝 models.dev 声明的档位（同一模型名在不同网关上的真实枚举并不一致）：provider 用 400/422 明确拒绝时，客户端经 `markEffortLevelRejected` 记下这台服务商不收这一档，`resolveEffortParams` 之后不再发它。
 
 ## 目录说明
 

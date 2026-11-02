@@ -13,7 +13,7 @@ describe('anchoredQuickPickStyle', () => {
     expect(style.right).toBeUndefined()
     // 面板底边落在按钮上方 GAP 处
     expect(style.bottom).toBe(900 - 876 + QUICK_PICK_GAP)
-    expect(style.maxHeight).toBe(876 - QUICK_PICK_GAP - QUICK_PICK_MARGIN)
+    expect(style.maxHeight).toBe(360)
   })
 
   it('anchors an end-aligned panel above the button on the right', () => {
@@ -21,6 +21,16 @@ describe('anchoredQuickPickStyle', () => {
     expect(style.right).toBe(1440 - 1420)
     expect(style.left).toBeUndefined()
     expect(style.maxWidth).toBe(1420 - QUICK_PICK_MARGIN)
+    expect(style.maxHeight).toBe(360)
+  })
+
+  it('shrinks below the height cap when there is less space above the button', () => {
+    const style = anchoredQuickPickStyle({
+      rect: { left: 12, right: 160, top: 280, bottom: 304 },
+      viewportWidth: 1440,
+      viewportHeight: 304
+    })
+    expect(style.maxHeight).toBe(280 - QUICK_PICK_GAP - QUICK_PICK_MARGIN)
   })
 
   it('keeps the panel inside the viewport when the button hugs an edge', () => {

@@ -146,14 +146,16 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
     expect(agent.promptSections.render()).not.toContain('## 持久记忆');
   });
 
-  it('injects the session-autonomy guidance into the system prompt (system-prompt:build hook)', async () => {
-    const { hooks, host } = await mount();
-    const agent = host as unknown as { hooks: typeof hooks };
-    const result = agent.hooks.pipelineSync('system-prompt:build', { runtime: {}, prompt: 'BASE' });
-    expect(result.prompt).toContain('会话自治');
-    expect(result.prompt).toContain('session_peers');
-    expect(result.prompt).toContain('BASE');
+  it('injects the session-autonomy guidance through a host-wrapped prompt section', async () => {
+    const { agent, host } = await mount();
+    const prompt = agent.promptSections.render();
+    expect(prompt).toContain('会话自治');
+    expect(prompt).toContain('session_peers');
+    expect(prompt).toContain('section="guidance">');
+    expect(prompt.indexOf('# 会话记忆')).toBeGreaterThanOrEqual(0);
+    expect(prompt.indexOf('# 会话记忆')).toBeLessThan(prompt.indexOf('# 会话自治'));
     await host.dispose();
+    expect(agent.promptSections.render()).not.toContain('会话自治');
   });
 
   it('fires turn:before / prompt:build / turn:after in order around a turn', async () => {

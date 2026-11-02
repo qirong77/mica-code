@@ -62,3 +62,5 @@ packages/mica-builtin-commands/
 - `subagentUsage.ts`：helper 子代理（desktop 旁问抽屉 / compact 摘要）的用量记账入口（`recordHelperSubagentUsage`），写进当前会话的 `subagentUsageHistory`；`/btw` 命令的用量由插件线程的宿主记账（`origin: 'plugin'`）。
 - `commandHost.ts`：向单文件命令插件暴露 active agent、session controller、runtime services 和统一注册函数。
 - `index.ts`：稳定公共导出入口；应用层只应从这里引用。
+
+System prompt 指引统一注册到 `ctx.prompt.section()`，对应插件清单需声明 `requires: ["prompt"]`。会话记忆、会话自治、Loop 使用 -300、-200、-100 的 order 保持原有相对顺序；宿主统一生成带插件与 section 来源的 XML injection 边界。

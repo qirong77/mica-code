@@ -1,3 +1,4 @@
+import { wrapPromptXml } from '@packages/mica-common/promptXml.js';
 import { buildSubagentUsageRecord, type AgentUsageRecord } from '@packages/mica-agent/index.js';
 import type {
   PluginSubagentThread,
@@ -36,7 +37,11 @@ export type PluginSubagentThreadHostOptions = {
 export function createPluginThread(input: PluginSubagentThreadHostOptions): PluginSubagentThread {
   const { owner, pluginId, threadId, options } = input;
   const child = owner.createSubAgent({
-    systemPrompt: options.systemPrompt,
+    systemPrompt: wrapPromptXml('injection', options.systemPrompt, {
+      source: 'plugin',
+      plugin: pluginId,
+      section: 'thread-system',
+    }),
     tools: options.tools ?? true,
     toolFilter: buildSubagentToolFilter(options),
     ...(options.model ? { model: options.model } : {}),

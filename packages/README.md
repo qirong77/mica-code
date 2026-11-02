@@ -63,3 +63,5 @@
 ```bash
 bunx tsc --noEmit
 ```
+
+系统提示词按注入来源组织 XML：`mica-common` 导出 `escapePromptXml` / `wrapPromptXml`，`mica-agent` 包装基础段落与项目文档，`mica-plugin` 的 `ctx.prompt.section()` 为插件正文统一生成带 `plugin`、`section` 属性的 `injection`。`system-prompt:build` 形态不再支持。插件线程和独立模型请求由 CLI 宿主包装其系统提示词。

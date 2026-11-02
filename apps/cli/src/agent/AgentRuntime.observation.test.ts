@@ -148,11 +148,8 @@ describe('agent:observe', () => {
   });
 
   it('orders snapshots across async callbacks and records only actual rewrites', async () => {
-    const { runtime, client, hooks, events } = setup();
-    hooks.on('system-prompt:build', (event: { prompt: string }) => ({
-      ...event,
-      prompt: `${event.prompt}\nHook guidance.`,
-    }));
+    const { runtime, client, events } = setup();
+    runtime.promptSections.add('test', { id: 'guidance', render: () => 'Hook guidance.' });
     runtime.promptSections.add('test', { id: 'test', render: () => 'Final section.' });
     registerIterationRewrite('test', async (messages) => messages.slice(1));
     let sentPrompt = '';

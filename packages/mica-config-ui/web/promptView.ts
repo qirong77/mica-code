@@ -27,14 +27,34 @@ const SECTION_LABELS: Record<string, string> = {
 };
 
 const GAP_LABEL = '插件段落 / 其它注入';
-const TAG_LINE = /^<(\/?)([a-z][a-z0-9_-]*)>$/;
+// Quoted values may contain `>`; closing tags never carry attributes.
+const TAG_LINE =
+  /^<(?:\/([a-z][a-z0-9_-]*)|([a-z][a-z0-9_-]*)((?:\s+[a-zA-Z_:][\w:.-]*\s*=\s*(?:"[^"<]*"|'[^'<]*'))*)\s*)>$/;
+
+/** Decode labels only, preserving the sent prompt and its size. */
+function decodeXmlAttribute(value: string): string {
+  const entities: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+  return value.replace(/&(#x[\da-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (entity, name: string) => {
+    if (!name.startsWith('#')) return entities[name]!;
+    const code = name.startsWith('#x') ? parseInt(name.slice(2), 16) : Number(name.slice(1));
+    return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : entity;
+  });
+}
+
+function injectionLabel(attributes: string): string | undefined {
+  const values = new Map<string, string>();
+  for (const match of attributes.matchAll(/([a-zA-Z_:][\w:.-]*)\s*=\s*(?:"([^"<]*)"|'([^'<]*)')/g)) {
+    values.set(match[1]!, decodeXmlAttribute(match[2] ?? match[3]!).trim());
+  }
+  return [values.get('plugin') || values.get('source'), values.get('section')].filter(Boolean).join(' / ') || undefined;
+}
 
 /** 按顶层标签切段；纯空白的间隔丢弃，只统计真的有内容的部分。 */
 export function splitPromptSections(prompt: string): PromptPart[] {
   if (!prompt) return [];
   const parts: PromptPart[] = [];
   let cursor = 0;
-  let active: { tag: string; start: number; depth: number } | null = null;
+  let active: { tag: string; start: number; depth: number; label?: string } | null = null;
   let fence: { marker: string; length: number } | null = null;
   let offset = 0;
   for (const rawLine of prompt.split('\n')) {
@@ -49,14 +69,20 @@ export function splitPromptSections(prompt: string): PromptPart[] {
       const tag = TAG_LINE.exec(line);
       if (tag) {
         const closing = !!tag[1];
-        const name = tag[2]!;
-        if (!active && !closing) active = { tag: name, start: offset, depth: 1 };
+        const name = (tag[1] ?? tag[2])!;
+        if (!active && !closing)
+          active = {
+            tag: name,
+            start: offset,
+            depth: 1,
+            label: name === 'injection' ? injectionLabel(tag[3]!) : undefined,
+          };
         else if (active?.tag === name) {
           active.depth += closing ? -1 : 1;
           if (active.depth === 0) {
             if (active.start > cursor) pushPart(parts, '', prompt.slice(cursor, active.start));
             const end = offset + line.length;
-            pushPart(parts, name, prompt.slice(active.start, end));
+            pushPart(parts, name, prompt.slice(active.start, end), active.label);
             cursor = end;
             active = null;
           }
@@ -80,7 +106,13 @@ export function summarizePrompt(prompt: string): { chars: number; tokens: number
   return { chars, tokens: estimateTextTokens(prompt), lines: chars === 0 ? 0 : prompt.split('\n').length };
 }
 
-function pushPart(parts: PromptPart[], tag: string, raw: string): void {
+function pushPart(parts: PromptPart[], tag: string, raw: string, label?: string): void {
   if (!raw.trim()) return;
-  parts.push({ tag, label: promptPartLabel(tag), content: raw, chars: raw.length, tokens: estimateTextTokens(raw) });
+  parts.push({
+    tag,
+    label: label ?? promptPartLabel(tag),
+    content: raw,
+    chars: raw.length,
+    tokens: estimateTextTokens(raw),
+  });
 }

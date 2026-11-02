@@ -20,6 +20,7 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPart, setSelectedPart] = useState(0);
+  const [showParts, setShowParts] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -88,13 +89,30 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
         </div>
       </div>
 
-      <PromptParts parts={parts} selectedPart={selectedPart} onSelect={setSelectedPart} />
+      {showParts ? <PromptParts parts={parts} selectedPart={selectedPart} onSelect={setSelectedPart} /> : null}
       <div className="prompt-module-heading">
-        <strong>{selectedPart === -1 ? '完整提示词' : selected?.label}</strong>
+        <select
+          className="prompt-module-select"
+          aria-label="查看提示词模块"
+          value={selectedPart === -1 ? -1 : parts[selectedPart] ? selectedPart : 0}
+          onChange={(event) => setSelectedPart(Number(event.target.value))}
+        >
+          <option value={-1}>完整提示词</option>
+          {parts.map((part, index) => (
+            <option key={`${part.tag || 'gap'}:${index}`} value={index}>
+              {part.label}
+            </option>
+          ))}
+        </select>
         {selectedPart !== -1 ? <Tag tone="blue">{selected?.tag || '未标记'}</Tag> : null}
         <Button variant="ghost" onClick={() => setSelectedPart(selectedPart === -1 ? 0 : -1)}>
           {selectedPart === -1 ? '按模块查看' : '查看全文'}
         </Button>
+        <div className="prompt-module-actions">
+          <Button variant="ghost" pressed={showParts} onClick={() => setShowParts((value) => !value)}>
+            {showParts ? '收起模块统计' : '展开模块统计'}
+          </Button>
+        </div>
       </div>
 
       <div className="editor-host prompt-editor">

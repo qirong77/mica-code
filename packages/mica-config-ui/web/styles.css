@@ -1992,8 +1992,7 @@ html[data-theme='light'] .mica-config-ui {
     min-width: 0;
   }
 
-  /* 系统提示词：上方一行统计 + 一张构成表，下面只读编辑器吃掉剩余高度。
-     与原始文件页签同一套骨架，所以两个「大文本」页签看起来是一件事。 */
+  /* 默认只保留统计与模块选择两行，构成表按需展开，正文占满剩余高度。 */
   .prompt-pane {
     display: flex;
     flex: 1 1 auto;
@@ -2042,6 +2041,9 @@ html[data-theme='light'] .mica-config-ui {
 
   /* 构成表：一行一段，条与数字都在同一列上，长标签自己省略。 */
   .prompt-parts {
+    max-height: 30%;
+    min-height: 0;
+    grid-template-rows: auto auto minmax(0, 1fr);
     display: grid;
     flex: none;
     gap: 8px;
@@ -2122,6 +2124,27 @@ html[data-theme='light'] .mica-config-ui {
     white-space: nowrap;
   }
 
+  .prompt-module-select {
+    min-width: 0;
+    max-width: min(280px, 100%);
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel-muted);
+    color: var(--text);
+    font: inherit;
+    text-overflow: ellipsis;
+  }
+
+  .prompt-module-select:focus-visible {
+    outline: 1px solid var(--blue);
+  }
+
+  .prompt-module-actions {
+    margin-left: auto;
+  }
+
   /* 表头与数据行共用同一套列宽：两列数字在同一个位置对齐。 */
   .prompt-part-head {
     padding-bottom: 2px;
@@ -2168,7 +2191,7 @@ html[data-theme='light'] .mica-config-ui {
   /* 提示词编辑器吃满剩余高度：它自己滚，外层不再套一层滚动。 */
   .prompt-editor {
     flex: 1 1 auto;
-    min-height: 200px;
+    min-height: 0;
     border: 0;
     border-radius: 0;
   }

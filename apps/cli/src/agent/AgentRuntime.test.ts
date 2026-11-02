@@ -312,15 +312,13 @@ describe('AgentRuntime tool status', () => {
     expect(queryOptions?.maxTurns).toBe(4);
   });
 
-  it('builds the provider system prompt through synchronous plugin hooks', async () => {
+  it('builds the provider system prompt through wrapped plugin sections', async () => {
     const { micaPlugin } = await import('@packages/mica-plugin/index.js');
     const hooks = new micaPlugin.HookRegistry();
-    hooks.on('system-prompt:build', (event: { prompt: string }) => ({
-      event: { ...event, prompt: `${event.prompt}\n\nPlugin system guidance.` },
-    }));
 
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime({}, hooks);
+    agent.promptSections.add('test', { id: 'guidance', render: () => 'Plugin system guidance.' });
     const { micaAgent } = await import('@packages/mica-agent/index.js');
     const options = vi.mocked(micaAgent.createModelClient).mock.calls.at(-1)?.[0];
 
@@ -371,16 +369,16 @@ describe('AgentRuntime tool status', () => {
     },
   );
 
-  it('shares system prompt hooks with agents created for new terminal sessions', async () => {
+  it('shares prompt sections with agents created for new terminal sessions', async () => {
     const { micaPlugin } = await import('@packages/mica-plugin/index.js');
     const hooks = new micaPlugin.HookRegistry();
-    hooks.on('system-prompt:build', (event: { prompt: string }) => ({
-      event: { ...event, prompt: `${event.prompt}\n\nShared session guidance.` },
-    }));
 
     const { TerminalAgentSessionManager } = await import('../agents/terminalAgentSessions.js');
     const sessions = new TerminalAgentSessionManager(hooks);
     sessions.createSession();
+    sessions.current().agent.promptSections.add('test', { id: 'shared', render: () => 'Shared session guidance.' });
+    const next = sessions.createSession();
+    expect(sessions.findById(next.id)!.agent.buildSystemPrompt()).toContain('Shared session guidance.');
 
     expect(sessions.current().agent.buildSystemPrompt()).toContain('Shared session guidance.');
   });

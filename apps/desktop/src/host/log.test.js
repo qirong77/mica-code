@@ -92,4 +92,33 @@ describe('log writer', () => {
     expect(summary.totals.samples).toBe(0)
     expect(summary.totals.hiddenSamples).toBe(1)
   })
+
+  it('records why a call that failed in its return value failed', async () => {
+    // 通道把失败包在返回值里（`{ error }`）时，日志必须留下原因，
+    // 否则只剩一条慢调用，看不出是超时、被取消还是真报错。
+    const invoke = logger('invoke')
+    await invoke.timedResult('git:change-counts', async () => ({ counts: 3, error: null }))
+    await invoke.timedResult('git:change-counts', async () => ({ counts: null, error: 'boom' }))
+    flushLogs()
+
+    const summary = readPerformanceSummary({ maxBytes: 1024 * 1024 })
+    const bucket = summary.buckets.find((item) => item.event === 'git:change-counts')
+    expect(bucket.count).toBe(2)
+    expect(bucket.fails).toBe(1)
+    const failed = summary.events.find((entry) => entry.event === 'git:change-counts')
+    expect(failed.error).toBe('boom')
+  })
+
+  it('still counts a thrown call as a failure', async () => {
+    const invoke = logger('invoke')
+    await expect(
+      invoke.timedResult('git:status', async () => {
+        throw new Error('spawn failed')
+      })
+    ).rejects.toThrow('spawn failed')
+    flushLogs()
+
+    const summary = readPerformanceSummary({ maxBytes: 1024 * 1024 })
+    expect(summary.buckets.find((item) => item.event === 'git:status')?.fails).toBe(1)
+  })
 })

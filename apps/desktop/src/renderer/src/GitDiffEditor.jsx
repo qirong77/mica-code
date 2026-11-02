@@ -13,6 +13,7 @@ import {
 } from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
 import { statusColor, statusLabel } from './git-decorations'
+import { createGitDiffSession, gitDiffKey } from './git-diff-session'
 import { editorOptions, fileName, languageFor } from './monaco'
 import { monaco } from './monaco-runtime'
 import { useSharedState } from './ui-state'
@@ -26,13 +27,6 @@ function Action({ title, children, ...props }) {
       {children}
     </button>
   )
-}
-
-// Monaco must release its model listeners before the models themselves are disposed.
-function detachModels(editor, modelsRef) {
-  editor?.setModel(null)
-  for (const model of modelsRef.current) model.dispose()
-  modelsRef.current = []
 }
 
 /** Loaded only through FilesView's lazy boundary, including the Monaco runtime. */
@@ -51,18 +45,19 @@ export function GitDiffEditor({
 }) {
   const hostRef = useRef(null)
   const editorRef = useRef(null)
-  const modelsRef = useRef([])
-  const requestRef = useRef(0)
-  const activeKeyRef = useRef(null)
-  const viewStatesRef = useRef(new Map())
+  const sessionRef = useRef(null)
+  const retryRef = useRef(0)
   const [layout, setLayout] = useSharedState('gitDiffLayout', 'side')
   const [narrow, setNarrow] = useState(false)
   const [retry, setRetry] = useState(0)
   const [result, setResult] = useState(null)
   const [diffCount, setDiffCount] = useState(null)
+  const [loadingHint, setLoadingHint] = useState(false)
   const sideBySide = layout !== 'inline' && !narrow
-  const current = result?.file === file && result?.cwd === cwd && result?.retry === retry
+  const key = gitDiffKey(cwd, file)
+  const current = result?.key === key
   const phase = !file || !cwd ? 'empty' : current ? result.phase : 'loading'
+  const busy = phase === 'loading' || (current && result.refreshing)
   const ready = phase === 'ready'
   const base = file?.base
   const options = base && typeof base === 'object' ? base : {}
@@ -80,7 +75,6 @@ export function GitDiffEditor({
 
   useLayoutEffect(() => {
     const host = hostRef.current
-    const viewStates = viewStatesRef.current
     const editor = monaco.editor.createDiffEditor(host, {
       ...editorOptions,
       readOnly: true,
@@ -94,6 +88,16 @@ export function GitDiffEditor({
       renderGutterMenu: false
     })
     editorRef.current = editor
+    const session = createGitDiffSession({
+      editor,
+      readFile: (directory, path, base) => window.mica.git.file(directory, path, base),
+      createModel: (content, path) => monaco.editor.createModel(content, languageFor(path)),
+      onChange: (next) => {
+        setResult(next)
+        setDiffCount(next.phase === 'ready' ? (editor.getLineChanges()?.length ?? null) : null)
+      }
+    })
+    sessionRef.current = session
     const subscription = editor.onDidUpdateDiff(() => {
       if (editor.getModel()) setDiffCount(editor.getLineChanges()?.length ?? null)
     })
@@ -106,16 +110,12 @@ export function GitDiffEditor({
     observer.observe(host)
     resize()
     return () => {
-      requestRef.current += 1
-      if (activeKeyRef.current && editor.getModel()) {
-        viewStates.set(activeKeyRef.current, editor.saveViewState())
-      }
       observer.disconnect()
       subscription.dispose()
-      detachModels(editor, modelsRef)
+      session.dispose()
       editor.dispose()
       editorRef.current = null
-      activeKeyRef.current = null
+      sessionRef.current = null
     }
   }, [])
 
@@ -125,76 +125,18 @@ export function GitDiffEditor({
   }, [sideBySide])
 
   useLayoutEffect(() => {
-    const editor = editorRef.current
-    const viewStates = viewStatesRef.current
-    const request = ++requestRef.current
-    detachModels(editor, modelsRef)
-    activeKeyRef.current = null
-    setDiffCount(null)
-    setResult({ file, cwd, retry, phase: 'loading' })
-    if (!file || !cwd) return undefined
-
-    // Fingerprint changes reload content but retain the user's place in this comparison.
-    const key = JSON.stringify([cwd, file.path, file.base ?? null])
-    const savedView = viewStates.get(key)
-    activeKeyRef.current = key
-    let initialDiffSubscription = null
-    ;(async () => {
-      try {
-        // Preserve the exact resolved ref and staged mode supplied by the comparison tree.
-        const content = await window.mica.git.file(cwd, file.path, file.base ?? null)
-        if (request !== requestRef.current || editorRef.current !== editor) return
-        if (!content || content.error) throw new Error(content?.error || '未收到文件内容')
-        if (content.binary || file.binary) {
-          setResult({ file, cwd, retry, ...content, phase: 'binary' })
-          return
-        }
-        const language = languageFor(file.path)
-        const original = monaco.editor.createModel(content.original ?? '', language)
-        modelsRef.current.push(original)
-        const modified = monaco.editor.createModel(content.modified ?? '', language)
-        modelsRef.current.push(modified)
-        // Added/deleted files keep an empty side so the whole change is green/red.
-        initialDiffSubscription = editor.onDidUpdateDiff(() => {
-          initialDiffSubscription?.dispose()
-          initialDiffSubscription = null
-          if (request !== requestRef.current) return
-          if (savedView) editor.restoreViewState(savedView)
-          else editor.revealFirstDiff()
-        })
-        editor.setModel({ original, modified })
-        if (savedView) editor.restoreViewState(savedView)
-        setResult({
-          file,
-          cwd,
-          retry,
-          phase: 'ready',
-          originalLabel: content.originalLabel,
-          modifiedLabel: content.modifiedLabel
-        })
-        editor.layout()
-      } catch (error) {
-        if (request !== requestRef.current) return
-        initialDiffSubscription?.dispose()
-        initialDiffSubscription = null
-        detachModels(editor, modelsRef)
-        setResult({
-          file,
-          cwd,
-          retry,
-          phase: 'error',
-          error: error instanceof Error ? error.message : String(error)
-        })
-      }
-    })()
-    return () => {
-      requestRef.current += 1
-      initialDiffSubscription?.dispose()
-      if (editorRef.current === editor && editor.getModel()) {
-        viewStates.set(key, editor.saveViewState())
-      }
-    }
+    const force = retry !== retryRef.current
+    retryRef.current = retry
+    void sessionRef.current?.select(cwd, file, { force })
   }, [cwd, file, retry])
+
+  useEffect(() => {
+    if (!busy) return undefined
+    const timer = window.setTimeout(() => setLoadingHint(true), 150)
+    return () => window.clearTimeout(timer)
+  }, [busy, key, retry])
+
+  useLayoutEffect(() => setLoadingHint(false), [busy, key, retry])
 
   const openFile = () => onOpenFile?.(file)
   const navigateDiff = (direction) => {
@@ -267,10 +209,14 @@ export function GitDiffEditor({
             <span className="min-w-0 flex-1 truncate px-1 text-fg-muted" title={comparisonLabel}>
               {comparisonLabel}
             </span>
+            <Action title="刷新差异" disabled={busy} onClick={() => setRetry((value) => value + 1)}>
+              <IconRefresh size={14} />
+            </Action>
             {onToggleReviewed && (
               <Action
                 title={reviewed ? '标为未阅' : '标为已阅'}
                 aria-pressed={reviewed}
+                disabled={!ready || busy}
                 onClick={() => onToggleReviewed(file)}
               >
                 <IconCheck size={14} className={reviewed ? 'text-git-added' : ''} />
@@ -321,17 +267,26 @@ export function GitDiffEditor({
           </div>
         </>
       )}
-      <div className="relative min-h-0 flex-1" aria-busy={phase === 'loading'}>
-        <div ref={hostRef} className={`absolute inset-0 ${ready ? '' : 'invisible'}`} />
-        {phase !== 'ready' && (
+      <div className="relative min-h-0 flex-1" aria-busy={busy}>
+        <div
+          ref={hostRef}
+          className={`absolute inset-0 ${
+            ready || (phase === 'loading' && result?.hasModel) ? '' : 'invisible'
+          } ${phase === 'loading' ? 'pointer-events-none' : ''}`}
+          aria-hidden={!ready}
+        />
+        {busy && loadingHint && (
+          <div
+            className="absolute right-3 top-2 z-10 flex max-w-[calc(100%-24px)] items-center gap-2 rounded bg-panel px-2 py-1 text-[11px] text-fg-muted shadow"
+            role="status"
+          >
+            <IconRefresh size={14} className="shrink-0 animate-spin" />
+            <span className="truncate">正在加载 {fileName(file.path)} 的差异…</span>
+          </div>
+        )}
+        {!['ready', 'loading'].includes(phase) && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 overflow-auto bg-canvas p-6 text-center text-[12px] text-fg-muted">
             {phase === 'empty' && <p>选择一个文件以查看差异</p>}
-            {phase === 'loading' && (
-              <div className="flex items-center gap-2" role="status">
-                <IconRefresh size={16} className="animate-spin" />
-                正在加载差异…
-              </div>
-            )}
             {phase === 'binary' && (
               <>
                 <FileSystemIcon name={file.path} className="size-8" />

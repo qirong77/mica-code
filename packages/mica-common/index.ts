@@ -160,3 +160,5 @@ export {
 export type { CapabilityKind, CapabilitySelection } from './capabilities.js';
 export { LEGACY_TOOL_NAMES, normalizeToolName } from './toolNames.js';
 export { acquireProcessLock } from './processLock.js';
+
+export { escapePromptXml, wrapPromptXml } from './promptXml.js';

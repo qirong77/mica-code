@@ -87,7 +87,7 @@ export class TerminalAgentSessionManager {
 
   createSession(override?: AgentRuntimeConfigOverride): TerminalAgentSessionRecord {
     if (!override) micaConfig.resetSessionModelDefaults();
-    const agent = new AgentRuntime(override ?? {}, this.hooks);
+    const agent = new AgentRuntime(override ?? {}, this.hooks, this.sessions[0]?.agent.promptSections);
     const sessionController = new SessionController(agent);
     const session = this.addSession(agent, sessionController);
     return this.toRecord(session);
