@@ -6,6 +6,7 @@ import { tmpdir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
 import {
+  cachedRepository,
   discardFile,
   getWorkspaceStatus,
   git,
@@ -237,6 +238,41 @@ describe('getWorkspaceStatus', () => {
     try {
       const error = await getWorkspaceStatus(outside).catch((failure) => failure)
       expect(String(error)).toContain('not a git repository')
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('cachedRepository', () => {
+  let dir
+  beforeEach(async () => {
+    dir = await setup()
+  })
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('同一 HEAD 下不重跑 rev-parse，直接复用结果', async () => {
+    const first = await cachedRepository(dir)
+    const second = await cachedRepository(dir)
+    // 命中缓存拿到的是同一个对象；每次真的跑 rev-parse 会构造一个新的。
+    expect(second).toBe(first)
+  })
+
+  it('提交之后 base 跟着 HEAD 更新', async () => {
+    const before = await cachedRepository(dir)
+    await commit(dir, 'second', ['--allow-empty'])
+    const after = await cachedRepository(dir)
+    expect(after.root).toBe(before.root)
+    expect(after.base).not.toBe(before.base)
+    expect(after.base).toBe((await git(dir, ['rev-parse', 'HEAD'])).trim())
+  })
+
+  it('不在仓库里时照常抛出，不缓存失败结果', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'mica-git-nocache-'))
+    try {
+      await expect(cachedRepository(outside)).rejects.toThrow(/not a git repository/)
     } finally {
       await rm(outside, { recursive: true, force: true })
     }

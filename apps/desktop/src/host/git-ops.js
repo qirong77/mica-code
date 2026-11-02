@@ -42,6 +42,7 @@ const LOCK_RETRY_DELAYS_MS = [100, 250, 500]
  */
 const worktreeState = new Map()
 const WORKTREE_TTL_MS = 5000
+const repositoryState = new Map()
 
 /** 让某个仓库的缓存立刻失效（写操作、agent 改完文件之后调用）。 */
 export function noteWorktreeChange(root) {
@@ -173,6 +174,23 @@ export async function getRepository(cwd) {
     // 还没有第一个提交：和 git 的空树比较。
   }
   return { root, base }
+}
+
+/**
+ * `getRepository` 每次要跑两个 `rev-parse`（实测约 140ms，是整条链路里最贵的一段），
+ * 而它的结果只在 `HEAD` 变化时才会变：目录到仓库根的关系不会变，`base` 就是 HEAD
+ * 指向的那个提交。所以按 cwd 缓存，用与工作区缓存同一份 `headSignature` 判定失效
+ * ——切换分支、提交、rebase 会重跑，别的读取直接复用。
+ * 目录还在但已不是仓库（`.git` 被删）时 signature 为 null，当作不可缓存。
+ */
+export async function cachedRepository(cwd) {
+  const root = repositoryRootOf(cwd)
+  const signature = root ? headSignature(root) : null
+  const cached = repositoryState.get(cwd)
+  if (signature && cached && cached.signature === signature) return cached.value
+  const value = await getRepository(cwd)
+  if (signature) repositoryState.set(cwd, { value, signature })
+  return value
 }
 
 /**

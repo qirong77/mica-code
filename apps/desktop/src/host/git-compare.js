@@ -8,7 +8,7 @@ import {
   parseStatusCode,
   shortRefName
 } from './git-core'
-import { EMPTY_TREE, getRepository, git, gitErrorMessage, safeFilePath } from './git-ops'
+import { EMPTY_TREE, cachedRepository, git, gitErrorMessage, safeFilePath } from './git-ops'
 
 const BASE_CANDIDATES = ['origin/master', 'origin/main', 'master', 'main']
 
@@ -37,7 +37,7 @@ async function commitHash(root, ref) {
 /** User-entered refs are always resolved as commits before use in other Git commands. */
 export async function resolveRef(cwd, requested) {
   try {
-    const { root } = await getRepository(cwd)
+    const { root } = await cachedRepository(cwd)
     const hash = await commitHash(root, requested)
     return { ref: { hash, name: requested.trim() }, error: null }
   } catch (error) {
@@ -53,13 +53,26 @@ async function autoBase(root) {
   } catch {
     // A repository need not have a remote default branch.
   }
+  // 基线候选都是分支名，所以一次 `for-each-ref` 就把所有分支的提交号拿回来：
+  // 原来每个候选各跑一次 `rev-parse --verify`，四个候选都落空时要四趟进程，
+  // 而这台机器上一次 git 进程约 55ms（安全软件会拦每次 exec）。
+  let branches
+  try {
+    branches = new Map(
+      (await git(root, ['for-each-ref', '--format=%(refname:short)%00%(objectname)', 'refs/heads', 'refs/remotes']))
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => {
+          const [name, hash] = line.split('\0')
+          return [name, hash]
+        })
+    )
+  } catch {
+    branches = new Map()
+  }
   for (const name of [remoteHead, ...BASE_CANDIDATES].filter(Boolean)) {
-    let hash
-    try {
-      hash = await commitHash(root, name)
-    } catch {
-      continue
-    }
+    const hash = branches.get(name)
+    if (!hash) continue
     if (isBaseBranch(name, current)) return null
     return { name, hash }
   }
@@ -162,7 +175,7 @@ async function mapBounded(items, callback) {
 
 /** Committed branch changes plus index/worktree changes and untracked files. */
 export async function getBranchSummary(cwd, { base = null, direct = false } = {}) {
-  const { root, base: head } = await getRepository(cwd)
+  const { root, base: head } = await cachedRepository(cwd)
   const selected = await comparison(root, head, base, direct)
   const compare = selected.compareRef
   const [names, untracked, numbers, status, treeOutput] = await Promise.all([
@@ -248,7 +261,7 @@ function parseRefs(output, kind) {
 }
 
 export async function getRefs(cwd) {
-  const { root } = await getRepository(cwd)
+  const { root } = await cachedRepository(cwd)
   const format = [
     '%(refname)',
     '%(objectname:short)',
@@ -309,7 +322,7 @@ async function indexBlob(root, filePath) {
 
 /** Legacy head/branch/ref modes remain supported; snapshot uses the exact summary compareRef. */
 export async function getFile(cwd, filePath, requested = null) {
-  const { root, base: head } = await getRepository(cwd)
+  const { root, base: head } = await cachedRepository(cwd)
   safeFilePath(root, filePath)
   const options =
     typeof requested === 'string' || !requested ? { mode: requested || 'head' } : requested
