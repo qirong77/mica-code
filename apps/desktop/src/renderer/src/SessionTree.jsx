@@ -47,6 +47,7 @@ import {
 } from './session-annotations'
 import { childGroups, groupSubtreeIds, sessionSectionOf, sessionsByGroup } from './session-projects'
 import { longPressHandlers } from './hooks'
+import { useSharedState } from './ui-state'
 import {
   DEFAULT_SESSION_SEARCH_RANGE,
   SESSION_SEARCH_RANGES,
@@ -394,14 +395,18 @@ export function SessionTree({
   const [searchFocus, setSearchFocus] = useState(0)
   const searchInputRef = useRef(null)
   const searchListRef = useRef(null)
-  const [collapsedSections, setCollapsedSections] = useState({
+  const [collapsedSections, setCollapsedSections] = useSharedState('sessionTreeCollapsedSections', {
     pinned: false,
     recent: false,
     project: false
   })
-  const [collapsedGroups, setCollapsedGroups] = useState({})
+  const [collapsedGroups, setCollapsedGroups] = useSharedState('sessionTreeCollapsedGroups', {})
   // 派生会话（子会话 / fork）的折叠：只影响渲染，父子的存续关系由会话文件决定。
-  const [collapsedChildren, setCollapsedChildren] = useState(() => new Set())
+  const [collapsedChildIds, setCollapsedChildIds] = useSharedState(
+    'sessionTreeCollapsedChildren',
+    []
+  )
+  const collapsedChildren = useMemo(() => new Set(collapsedChildIds), [collapsedChildIds])
   const [recentLimit, setRecentLimit] = useState(RECENT_PREVIEW_LIMIT)
   const [drag, setDrag] = useState(null) // { kind: 'session'|'draft'|'group', id, section, groupId }
   const [over, setOver] = useState(null) // { section, id?, groupId?, position?, cross?, header? }
@@ -957,11 +962,11 @@ export function SessionTree({
                 onClick={(event) => {
                   // 这一列是行内动作：折叠不能顺带把会话打开。
                   event.stopPropagation()
-                  setCollapsedChildren((prev) => {
+                  setCollapsedChildIds((prev) => {
                     const next = new Set(prev)
                     if (next.has(session.id)) next.delete(session.id)
                     else next.add(session.id)
-                    return next
+                    return [...next]
                   })
                 }}
               >
