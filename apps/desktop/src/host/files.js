@@ -19,6 +19,7 @@ import {
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { ignoredEntries } from './git-ignore'
+import { noteWorktreeChange, repositoryRootOf } from './git-ops'
 import { compileQuery, parseGlobList, passesFileFilters } from './search-core'
 
 const IGNORED_DIRECTORIES = new Set([
@@ -520,6 +521,9 @@ export function registerFilesIpc() {
       await unlink(temporaryPath).catch(() => {})
       throw error
     }
+    // 编辑器里刚保存的内容，徽标和 Git 面板下一次轮询就该看到：不必等 mtime 探测
+    // （工作区里任何进程在写都会让探测失效，它挡不住这种「刚写完就该刷新」的场景）。
+    noteWorktreeChange(repositoryRootOf(path.dirname(filePath)))
     return { path: filePath, size: next.length, version: versionOf(next) }
   })
 }

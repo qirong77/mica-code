@@ -1,12 +1,9 @@
 import { lazyView } from './lazy-view'
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  IconArrowUp,
   IconBlocks,
   IconBrandVscode,
   IconChartBar,
-  IconFolder,
-  IconFolderOpen,
   IconGitBranch,
   IconLayoutSidebarLeftCollapse,
   IconMenu2,
@@ -22,6 +19,7 @@ import {
 } from '@tabler/icons-react'
 import { BranchPicker } from './BranchPicker'
 import { ChatView } from './ChatView'
+import { CwdPicker as CwdModal } from './CwdPicker'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
 import { PluginPage } from './PluginPage'
@@ -35,20 +33,19 @@ import { isElectronShell } from './shell-env'
 import { detachedFilesUrl, readAppUrl, sessionShareUrl, urlWithState } from './app-url'
 import { TextPrompt } from './text-prompt'
 import { copyText } from './transport'
-import { useQuickPickAnchor } from './quick-pick-anchor'
 
 // 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
 // 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
 // 按需加载才能让首屏不必先解析它们。
 const { FilesView, QuickSearch, SettingsView, StatsView, TerminalHost } = {
-  FilesView: lazyView(() => import('./FilesView'), 'FilesView'),
+  FilesView: lazyView(() => import('./EditorWorkspace'), 'EditorWorkspace'),
   QuickSearch: lazyView(() => import('./QuickSearch'), 'QuickSearch'),
   SettingsView: lazyView(() => import('./SettingsView'), 'SettingsView', { overlay: true }),
   StatsView: lazyView(() => import('./stats/StatsView'), 'StatsView'),
   TerminalHost: lazyView(() => import('./TerminalHost'), 'TerminalHost')
 }
 import { longPressHandlers, useIsMobile, useLatest, useVisualViewportHeight } from './hooks'
-import { collectRecentCwds, normalizeCwd, rankCwdMatches, splitCwd } from './cwd-recents'
+import { collectRecentCwds } from './cwd-recents'
 import { gitChangeBadge } from './git-badge'
 import { loopNodeIds } from './loop-command'
 import { resolveGroupCwd } from './session-projects'
@@ -114,282 +111,6 @@ function ptyIdForNode(nodeId) {
 function recentChatCwd() {
   const value = uiStateKeys().chatDefaultCwd
   return typeof value === 'string' ? value : ''
-}
-
-function CwdModal({ cwd, invalid, recent, onClose, onApply, anchorRef = null }) {
-  const [value, setValue] = useState(cwd || '')
-  const [query, setQuery] = useState('')
-  const [highlight, setHighlight] = useState(0)
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const inputRef = useRef(null)
-  // 面板贴在底栏的目录按钮上方展开（右下角），与左下角的分支切换一致。
-  const anchorStyle = useQuickPickAnchor(anchorRef, { align: 'end' })
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
-  // 没有任何会话记录时至少把当前目录列出来，面板不至于空着
-  const entries = useMemo(() => {
-    if (recent.length > 0) return recent
-    const current = normalizeCwd(cwd)
-    return current ? [{ path: current, usedAtMs: 0, sessionCount: 0 }] : []
-  }, [recent, cwd])
-  const matches = useMemo(() => rankCwdMatches(entries, query), [entries, query])
-  useEffect(() => setHighlight(0), [query])
-  const activeIndex = Math.min(highlight, Math.max(0, matches.length - 1))
-  const activeDir = matches[activeIndex]?.path || ''
-  const currentDir = normalizeCwd(cwd)
-  const submit = () => {
-    const next = value.trim()
-    if (next) onApply(next)
-  }
-  const moveHighlight = (step) => {
-    if (matches.length === 0) return
-    setHighlight((index) => Math.min(Math.max(index + step, 0), matches.length - 1))
-  }
-  const chooseFolder = () => {
-    // 浏览器里没有原生目录选择器，改用应用内浏览（浏览的是服务端目录）
-    if (window.mica?.isWeb) {
-      setPickerOpen(true)
-      return
-    }
-    void window.mica.workspace
-      .selectDirectory({ title: '选择工作目录', defaultPath: cwd })
-      .then((result) => {
-        if (result && !result.canceled && result.path) onApply(result.path)
-      })
-  }
-  // 与分支切换同一套 VS Code quick pick 外观：顶部窄面板、紧凑行、整行高亮
-  // （样式在 app.css 的「快速选择（quick pick）」一节）。
-  return (
-    <div
-      className={`quick-pick-overlay z-[11000]${anchorStyle ? ' is-anchored' : ''}`}
-      onClick={(event) => event.target === event.currentTarget && onClose()}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label="切换项目目录"
-        className="quick-pick-panel"
-        style={anchorStyle || undefined}
-      >
-        <div className="quick-pick-head">
-          {/* 目录可能上百个，光靠滚动找不动：这行搜索在列表内过滤 + 重排，
-              ↑↓ 选、Enter 直接应用，不必再点。 */}
-          <input
-            ref={inputRef}
-            value={query}
-            spellCheck={false}
-            aria-label="搜索项目目录"
-            placeholder="选择项目目录（输入以筛选）"
-            className="quick-pick-input"
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.nativeEvent.isComposing) return
-              if (event.key === 'ArrowDown') {
-                event.preventDefault()
-                moveHighlight(1)
-              } else if (event.key === 'ArrowUp') {
-                event.preventDefault()
-                moveHighlight(-1)
-              } else if (event.key === 'Enter' && activeDir) {
-                event.preventDefault()
-                onApply(activeDir)
-              }
-            }}
-          />
-        </div>
-        {invalid && (
-          <div className="quick-pick-notice">当前目录不存在或已被移动，请选择正确的项目目录。</div>
-        )}
-        <div role="listbox" aria-label="最近目录" className="quick-pick-list">
-          <button type="button" className="quick-pick-row" onClick={chooseFolder}>
-            <IconFolderOpen size={15} className="quick-pick-row-icon" />
-            <span className="quick-pick-row-title">选择文件夹…</span>
-          </button>
-          {entries.length > 0 && <div className="quick-pick-separator" />}
-          {matches.map((entry, index) => {
-            // 末段（项目名）永远完整显示，只把前面那截截断——路径的辨识度全在末段。
-            const { head, tail } = splitCwd(entry.path)
-            // 根目录没有末段，直接把它当名字显示；否则路径列会只剩一个 "/"
-            const name = tail || head || '/'
-            const active = index === activeIndex
-            const isCurrent = normalizeCwd(entry.path) === currentDir
-            return (
-              <button
-                key={entry.path}
-                type="button"
-                title={entry.path}
-                className={`quick-pick-row${active ? ' is-selected' : ''}`}
-                onMouseEnter={() => setHighlight(index)}
-                onClick={() => onApply(entry.path)}
-              >
-                <IconFolder size={15} className="quick-pick-row-icon" />
-                <span className="quick-pick-row-main">
-                  <span className="quick-pick-row-title">{name}</span>
-                  <span className="quick-pick-row-path">{tail ? head : ''}</span>
-                </span>
-                <span className="quick-pick-row-tail">
-                  {isCurrent ? '当前' : entry.sessionCount ? `${entry.sessionCount} 个会话` : ''}
-                </span>
-              </button>
-            )
-          })}
-          {matches.length === 0 && <p className="quick-pick-empty">没有匹配的目录</p>}
-        </div>
-        <footer className="quick-pick-foot">
-          <input
-            value={value}
-            spellCheck={false}
-            aria-label="工作目录完整路径"
-            placeholder="输入完整路径，如 /Users/name/project"
-            className="quick-pick-input"
-            onChange={(event) => setValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                event.preventDefault()
-                submit()
-              }
-            }}
-          />
-          <button
-            type="button"
-            disabled={!value.trim()}
-            className="shrink-0 rounded-sm px-2 py-0.5 text-[11px] text-fg-strong hover:bg-overlay-strong hover:text-fg-max disabled:text-fg-faint"
-            onClick={submit}
-          >
-            应用
-          </button>
-        </footer>
-      </section>
-      {pickerOpen && (
-        <DirectoryPicker
-          initialPath={value.trim() || cwd}
-          onClose={() => setPickerOpen(false)}
-          onPick={(dir) => {
-            setPickerOpen(false)
-            onApply(dir)
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-/** 浏览器端的工作目录选择器：在服务端目录树里逐级浏览，替代 Electron 的原生选择器 */
-function DirectoryPicker({ initialPath, onClose, onPick }) {
-  const [current, setCurrent] = useState('')
-  const [parent, setParent] = useState(null)
-  const [entries, setEntries] = useState([])
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const load = useCallback(async (target) => {
-    setLoading(true)
-    setError('')
-    try {
-      const result = await window.mica.files.list(target || window.mica.homeDir)
-      setCurrent(result?.path || target)
-      setParent(result?.parentPath || null)
-      setEntries((result?.entries || []).filter((entry) => entry.type === 'directory'))
-    } catch (err) {
-      setError(err?.message || String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void load(initialPath)
-  }, [initialPath, load])
-
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [onClose])
-
-  return (
-    <div
-      className="fixed inset-0 z-[12000] grid place-items-center bg-black/55 no-drag"
-      onClick={(event) => event.target === event.currentTarget && onClose()}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        className="flex h-[min(520px,80vh)] w-[min(520px,calc(100vw-24px))] flex-col overflow-hidden rounded-md border border-line bg-panel/98 shadow-2xl"
-      >
-        <h2 className="shrink-0 border-b border-line px-3.5 py-2.5 text-sm font-semibold text-fg-max">
-          选择文件夹
-        </h2>
-        <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-line px-3.5 py-2">
-          <button
-            type="button"
-            title="上级目录"
-            aria-label="上级目录"
-            disabled={!parent}
-            className="grid size-6 shrink-0 place-items-center rounded-md text-fg-soft hover:bg-overlay-strong hover:text-fg-max disabled:opacity-30"
-            onClick={() => void load(parent)}
-          >
-            <IconArrowUp size={14} />
-          </button>
-          <span className="min-w-0 flex-1 truncate text-xs text-fg-soft" title={current}>
-            {current || '…'}
-          </span>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
-          {error ? (
-            <p className="px-2 py-1.5 text-xs leading-5 text-danger">{error}</p>
-          ) : loading ? (
-            <p className="px-2 py-1.5 text-xs text-fg-muted">读取中…</p>
-          ) : entries.length === 0 ? (
-            <p className="px-2 py-1.5 text-xs text-fg-dim">没有子目录</p>
-          ) : (
-            entries.map((entry) => (
-              <button
-                key={entry.path}
-                type="button"
-                title={entry.path}
-                className="flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-xs text-fg-soft hover:bg-overlay hover:text-fg-max"
-                onClick={() => void load(entry.path)}
-              >
-                <IconFolder size={14} className="shrink-0 opacity-70" />
-                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-              </button>
-            ))
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2 border-t border-line px-3.5 py-2.5">
-          <button
-            type="button"
-            disabled={!current}
-            className="h-9 flex-1 rounded-sm bg-overlay-strong px-3.5 text-xs text-fg-strong hover:bg-overlay-heavy disabled:text-fg-faint"
-            onClick={() => current && onPick(current)}
-          >
-            选择此文件夹
-          </button>
-          <button
-            type="button"
-            className="h-9 rounded-sm border border-line px-3.5 text-xs text-fg-soft hover:bg-overlay hover:text-fg-max"
-            onClick={onClose}
-          >
-            取消
-          </button>
-        </div>
-      </section>
-    </div>
-  )
 }
 
 function useNotifications(activeId, onSessionId, canBindSessionId) {
@@ -584,8 +305,7 @@ const DEFAULT_SIDEBAR_WIDTH = 260
 const MIN_SIDEBAR_WIDTH = 180
 const MAX_SIDEBAR_WIDTH = 640
 
-/** useUiStateValue 的 fallback 必须是稳定的引用（见 compareBases 处的说明）。 */
-const EMPTY_COMPARE_BASES = {}
+/** useUiStateValue 的 fallback 必须是稳定的引用，避免无意义的订阅更新。 */
 const EMPTY_TERMINAL_OPEN = {}
 // 底部终端面板（VSCode 风格）：高度可拖，默认给对话留出大半屏，最高不超过视高的 3/4。
 const DEFAULT_TERMINAL_HEIGHT = 320
@@ -899,9 +619,6 @@ export default function App() {
   const gitPollBusy = useRef(false)
   // 上一次拿到 counts 的目录与时刻：非文件视图按 TTL 决定这一轮要不要再取。
   const gitCountsAt = useRef({ cwd: null, at: 0 })
-  // GIT 变更树的比较基线，按工作目录各记一份（界面状态键 gitCompareBase）：空对象必须是
-  // 模块级常量，否则每次渲染都换引用，依赖它的 refreshGit 会跟着重建、无限重拉 Git。
-  const compareBases = useUiStateValue('gitCompareBase', EMPTY_COMPARE_BASES)
   const [sessions, setSessions] = useState([])
   // 会话清单是否至少加载回来过一次：地址栏里的 session 要等它到位才换成带标题/工作目录的
   // 标签页（否则只能按 id 开一个无名页签）。列表为空也是「加载过了」。
@@ -1356,7 +1073,13 @@ export default function App() {
     document.addEventListener('visibilitychange', onVisibility)
     // 会话索引在运行时就绪（首次构建完成、别的进程写了新会话）时主动推一次，侧栏不必
     // 等到下一个 10s 轮询才出现内容。
-    const offStats = window.mica.stats.onChanged?.(() => refreshSessions())
+    // 索引补齐进度（`partial`，重启后第一次打开会持续几秒）不跟：这时候侧栏显示的
+    // 是上一轮的完整结果，跟着每一批重读只是反复序列化千人列表。真正有会话变化
+    // （`built`）仍然立刻刷新。
+    const offStats = window.mica.stats.onChanged?.((payload) => {
+      if (payload?.partial) return
+      refreshSessions()
+    })
     return () => {
       clearInterval(timer)
       window.removeEventListener('focus', onVisibility)
@@ -1410,25 +1133,8 @@ export default function App() {
             }
       )
       try {
-        // 会话视图只用仓库根与分支（`refreshGit` 下面的 status），而 `git:summary`
-        // 还要跑一遍 status -z + diff --numstat 全树扫描；10 秒一次的轮询没必要为
-        // 看不见的 Git 面板付这份钱，切到文件视图那一下会补上。
-        const summaryPromise =
-          viewRef.current === 'files' ? window.mica.git.summary(cwd) : Promise.resolve(null)
-        // 分支对比要多跑 merge-base + diff + ls-files（在 2700 文件的仓库上约 0.2s CPU），
-        // 只有停在文件视图里才值得 —— 切到文件视图那一下的刷新会把它补上。
-        const loadBranch = (target, resolvedRoot = null) => {
-          if (viewRef.current !== 'files') return Promise.resolve(null)
-          const knownRoot = gitRef.current.cwd === target ? gitRef.current.repository?.root : null
-          const chosen = compareBases[resolvedRoot || knownRoot] || compareBases[target]
-          return window.mica.git.branchSummary(
-            target,
-            chosen ? { base: chosen.ref || null, direct: !!chosen.direct } : undefined
-          )
-        }
-        const branchPromise = summaryPromise.then((summary) =>
-          loadBranch(cwd, summary?.repository?.root)
-        )
+        // 编辑器的 Git 数据由 EditorWorkspace 自己的 useGitWorkspace 维护；会话底栏
+        // 只需要分支/仓库根，所以这里不再跑 summary 与分支对比（省一次全树扫描）。
         let status = await window.mica.git.status(cwd)
         if (request === gitRequest.current && id === activeRef.current && status?.status) {
           setGit((current) =>
@@ -1437,69 +1143,42 @@ export default function App() {
               : current
           )
         }
-        // 顶栏徽标的变更量。文件视图那一下的 summary 已经把它算出来了，别处只有
-        // 过了 TTL 才单独取一次——全树 numstat 不该跟着 10s 的 Git 轮询跑。
-        const countsStale =
-          gitCountsAt.current.cwd !== cwd ||
-          Date.now() - gitCountsAt.current.at >= GIT_COUNTS_TTL_MS
-        const countsPromise =
-          status?.status && viewRef.current !== 'files' && (forceCounts || countsStale)
-            ? window.mica.git
-                .changeCounts(cwd)
-                .then((result) => (result?.counts ? { cwd, counts: result.counts } : null))
-                // 徽标是锦上添花：取不到（非仓库、目录被删）就不画，别打断整次刷新。
-                .catch(() => null)
-            : null
-        let summary = await summaryPromise
-        let branch = await branchPromise
         const fallbackRoot = gitRef.current.status?.root
         const cwdMissing = /\bENOENT\b|no such file or directory|cannot chdir/i.test(
-          `${summary?.error || ''}\n${status?.error || ''}`
+          status?.error || ''
         )
         if (
           !requestedCwd &&
-          !summary?.repository &&
           !status?.status &&
           fallbackRoot &&
           cwd !== fallbackRoot &&
           cwdMissing
         ) {
           cwd = fallbackRoot
-          const fallback = await Promise.all([
-            window.mica.git.summary(cwd),
-            loadBranch(cwd),
-            window.mica.git.status(cwd)
-          ])
-          summary = fallback[0]
-          branch = fallback[1]
-          status = fallback[2]
+          status = await window.mica.git.status(cwd)
         }
-        const fromSummary = summary?.repository
-          ? {
-              cwd,
-              counts: {
-                root: summary.repository.root,
-                files: summary.repository.files.length,
-                additions: summary.repository.additions,
-                deletions: summary.repository.deletions
-              }
-            }
-          : null
-        const fetchedCounts = countsPromise ? await countsPromise : null
-        const counts = fromSummary || fetchedCounts || null
+        // 顶栏徽标的变更量：全树 numstat，只有过了 TTL（或被明确要求）才取一次。
+        const countsStale =
+          gitCountsAt.current.cwd !== cwd ||
+          Date.now() - gitCountsAt.current.at >= GIT_COUNTS_TTL_MS
+        const counts =
+          status?.status && (forceCounts || countsStale)
+            ? await window.mica.git
+                .changeCounts(cwd)
+                .then((result) => (result?.counts ? { cwd, counts: result.counts } : null))
+                // 徽标是锦上添花：取不到（非仓库、目录被删）就不画，别打断整次刷新。
+                .catch(() => null)
+            : null
         if (counts) gitCountsAt.current = { cwd: counts.cwd, at: Date.now() }
         if (request === gitRequest.current && id === activeRef.current) {
-          // 会话视图不查 summary，就沿用同一个仓库上一次的结果，免得切回文件视图时
-          // 文件树的 Git 装饰先被清空再补回来（闪一下）。
           const previous = gitRef.current
           const sameDirectory = previous.terminalId === id && previous.cwd === cwd
-          const repository = summary?.repository || (sameDirectory ? previous.repository : null)
           setGit({
             terminalId: id,
             cwd,
-            repository,
-            branch: branch?.repository || null,
-            compareError: branch?.error || null,
+            repository: null,
+            branch: null,
+            compareError: null,
             status: status?.status || null,
             // 同一目录沿用上一次的数字（TTL 没到就没取），别让徽标每次都闪空。
             counts: counts?.counts || (sameDirectory ? previous.counts : null),
@@ -1521,34 +1200,13 @@ export default function App() {
         }
       }
     },
-    [activeRef, compareBases, gitRef, terminalCwd, viewRef]
-  )
-
-  /**
-   * GIT 变更树的比较基线（每个工作目录一份）。写进界面状态：第二个窗口、刷新、重启
-   * 之后都还在，切别的仓库各自记各自的。
-   */
-  const setGitCompareBase = useCallback(
-    (value) => {
-      const cwd =
-        gitRef.current.repository?.root || gitRef.current.cwd || terminalCwd(activeRef.current)
-      if (!cwd) return
-      setUiStateEntries('gitCompareBase', {
-        [cwd]: value
-          ? {
-              kind: value.kind,
-              ref: value.ref || null,
-              name: value.name || '',
-              direct: !!value.direct
-            }
-          : null
-      })
-      setGit((current) => ({ ...current, branch: null, compareError: null, loading: true }))
-    },
     [activeRef, gitRef, terminalCwd]
   )
 
-  useEffect(() => setBranchPickerOpen(false), [activeId])
+  useEffect(() => {
+    setBranchPickerOpen(false)
+    setCwdModalOpen(false)
+  }, [activeId, view])
   useEffect(() => {
     refreshGit({ cwd: terminalCwd(activeId) })
   }, [activeId, refreshGit, terminalCwd])
@@ -1566,7 +1224,8 @@ export default function App() {
           }
         }
       },
-      view === 'files' ? 3000 : 10000
+      // 编辑器的 Git 面板有自己的 3s 轮询；这里只服务会话底栏与顶栏徽标，10s 足够。
+      10000
     )
     // 定时器在后台页签会被浏览器节流，回到前台可能要等很久才轮到下一次；
     // 窗口重新可见/获得焦点时立刻补一次，否则 Files 里的 Git 区域一进来是旧的。
@@ -2262,14 +1921,17 @@ export default function App() {
       cancelled = true
     }
   }, [activeCwd])
-  const repository = gitIsCurrent ? git.repository : null
   // Cmd/Ctrl+P 的搜索根：优先用终端 shell 的实时目录；终端面板没开过（terminalRef 还是空）
   // 或该会话还没有终端时退回会话自己的 cwd —— 不能因为面板没打开就让文件搜索失灵。
   const getSearchRoot = useCallback(async () => {
+    // 停在编辑器视图时，搜索当前页自己的目录（用户可以在底栏换到别的项目，
+    // 那只影响这一页，不该把会话的 cwd 也带过去）。
+    const editorRoot = viewRef.current === 'files' ? filesRef.current?.getRoot?.() : null
+    if (editorRoot) return editorRoot
     const id = activeRef.current
     const fromTerminal = id ? await terminalRef.current?.getCwd(id) : null
     return fromTerminal || (id ? terminalCwd(id) : null) || gitRef.current?.cwd || null
-  }, [activeRef, gitRef, terminalCwd])
+  }, [activeRef, gitRef, terminalCwd, viewRef])
   // 对话里的路径链接、终端文件链接、Cmd/Ctrl+P 的结果都落到同一个入口：切到主区
   // 文件视图并打开那个目标——文件开编辑器，目录把文件树切过去（判断在 FilesView 里，
   // 它才知道文件系统）。FilesView 能立刻打开就直接开（它隐藏时也能接收），只有按需
@@ -2304,7 +1966,9 @@ export default function App() {
   // 外壳把同源的 `/files` 开成应用窗口（见 main/index.js 的 openAppPageWindow），浏览器里
   // 就是一个新窗口；`FILES_WINDOW_NAME` 让它复用同一个窗口，重复点只是把它端到前面。
   const openFilesWindow = useCallback(() => {
-    const url = detachedFilesUrl(window.location.href, activeCwd)
+    // 停在编辑器页时开它的当前目录：这一页可能已被用户换到别的项目，而会话目录没变。
+    const target = (view === 'files' ? filesRef.current?.getRoot?.() : null) || activeCwd
+    const url = detachedFilesUrl(window.location.href, target)
     if (!url) return
     const opened = window.open(url, FILES_WINDOW_NAME, 'popup=yes,width=1200,height=860')
     if (opened) {
@@ -2319,7 +1983,7 @@ export default function App() {
     if (isElectronShell(navigator.userAgent)) return
     setView('files')
     showToast('新窗口被浏览器拦截，已在当前窗口打开文件', true)
-  }, [activeCwd, showToast])
+  }, [activeCwd, showToast, view])
   // 网页端的终端文件链接由 transport 派发到应用内编辑器（Electron 走本机 VS Code）
   useEffect(() => {
     const handler = (event) => {
@@ -2900,23 +2564,15 @@ export default function App() {
               <Suspense fallback={null}>
                 <FilesView
                   ref={attachFilesRef}
-                  root={gitIsCurrent ? git.cwd : null}
+                  root={activeCwd || null}
+                  contextKey={activeId}
                   visible={view === 'files'}
                   askText={askText}
-                  gitCwd={gitIsCurrent ? git.cwd : null}
-                  gitRepository={repository}
-                  gitBranchChanges={gitIsCurrent ? git.branch : null}
-                  gitLoading={gitIsCurrent ? git.loading : true}
-                  gitBranch={gitIsCurrent ? git.status?.branch || null : null}
-                  gitCompareBase={
-                    gitIsCurrent
-                      ? compareBases[git.repository?.root] || compareBases[git.cwd] || null
-                      : null
+                  recentCwds={recentCwds}
+                  /* 编辑器里的分支切换只刷新会话顶栏的 Git 状态，不改会话目录。 */
+                  onGitChanged={() =>
+                    refreshGit({ cwd: terminalCwd(activeRef.current), quiet: true })
                   }
-                  gitCompareError={gitIsCurrent ? git.compareError || null : null}
-                  onGitCompareBaseChange={setGitCompareBase}
-                  /* 面板刷新使用活跃会话路径，未挂载终端时也能刷新。 */
-                  onRefreshGit={() => refreshGit({ cwd: terminalCwd(activeRef.current) })}
                   onCornerResizeStart={null}
                 />
               </Suspense>
@@ -3060,7 +2716,12 @@ export default function App() {
               </div>
             </section>
           )}
-          <footer className="safe-bottom flex h-7 shrink-0 items-center justify-between gap-4 border-t border-line-soft bg-shade px-3 text-xs text-fg-soft no-drag">
+          {/* 编辑器视图的底栏由 EditorWorkspace 自己画（它描述的是页面目录，不是会话目录）。 */}
+          <footer
+            className={`safe-bottom h-7 shrink-0 items-center justify-between gap-4 border-t border-line-soft bg-shade px-3 text-xs text-fg-soft no-drag ${
+              view === 'files' ? 'hidden' : 'flex'
+            }`}
+          >
             {gitIsCurrent && git.status?.root ? (
               <button
                 ref={branchButtonRef}

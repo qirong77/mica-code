@@ -170,6 +170,10 @@ export class LocalRuntimeController implements RuntimeController {
     return next;
   }
 
+  setResponseBufferFor(agent: AgentRuntime, text: string): void {
+    this.responseBuffers.set(agent, text);
+  }
+
   getResponseBufferFor(agent: AgentRuntime): string {
     return this.responseBuffers.get(agent) ?? '';
   }

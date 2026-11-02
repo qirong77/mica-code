@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FilesView } from './FilesView'
+import { EditorWorkspace } from './EditorWorkspace'
 import { TextPrompt } from './text-prompt'
 import { readFilesUrl } from './app-url'
-import { useGitWorkspace } from './useGitWorkspace'
 
 /**
  * 独立文件窗口（`/files`，dev 下 `files.html`）。
@@ -15,13 +14,17 @@ import { useGitWorkspace } from './useGitWorkspace'
  * 浮在页面左上，所以顶上留一条可拖动的窄条（否则窗口无法移动）。
  */
 export function FilesWindow() {
-  const [{ cwd }] = useState(() => readFilesUrl(window.location.search))
-  const { git, compareBase, refresh, setCompareBase } = useGitWorkspace(cwd)
+  const [{ cwd: initialCwd }] = useState(() => readFilesUrl(window.location.search))
+  const [cwd, setCwd] = useState(initialCwd)
   const [prompt, setPrompt] = useState(null)
   const promptResolver = useRef(null)
 
   useEffect(() => {
     document.title = cwd ? `${baseName(cwd)} — 编辑器` : '编辑器'
+    const url = new URL(window.location.href)
+    if (cwd) url.searchParams.set('cwd', cwd)
+    else url.searchParams.delete('cwd')
+    window.history.replaceState(null, '', url)
   }, [cwd])
 
   const askText = useCallback(
@@ -55,19 +58,11 @@ export function FilesWindow() {
           {cwd || '文件'}
         </span>
       </header>
-      <FilesView
-        root={cwd}
+      <EditorWorkspace
+        root={initialCwd}
         visible
         askText={askText}
-        gitCwd={git.cwd || cwd}
-        gitRepository={git.repository}
-        gitBranchChanges={git.branch}
-        gitLoading={git.loading}
-        gitBranch={git.status?.branch || null}
-        gitCompareBase={compareBase}
-        gitCompareError={git.compareError}
-        onGitCompareBaseChange={setCompareBase}
-        onRefreshGit={() => refresh({ quiet: true })}
+        onCwdChange={setCwd}
         onCornerResizeStart={null}
       />
       {prompt && <TextPrompt prompt={prompt} onClose={closePrompt} />}

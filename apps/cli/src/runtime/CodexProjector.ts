@@ -23,6 +23,8 @@ type ProjectorContext = {
   cwd: string;
   /** Emit reasoning deltas. Off by default to keep noise down on protocol-only clients. */
   thinking?: boolean;
+  textRollback?: boolean;
+  thinkingRollback?: boolean;
 };
 
 export type CodexProjector = {
@@ -41,7 +43,7 @@ function toolDisplayText(name: string, args: string): string {
 }
 
 type CodexHandlers = {
-  [K in keyof AgentRuntimeEvents]: (payload: AgentRuntimeEvents[K]) => void;
+  [K in Exclude<keyof AgentRuntimeEvents, 'textAttemptStart' | 'textRollback'>]: (payload: AgentRuntimeEvents[K]) => void;
 };
 
 function emptyTokenUsage(): CodexTokenUsageBreakdown {
@@ -109,6 +111,9 @@ export function attachCodexProjector(
   const pendingCommands = new Map<string, PendingCommandItem>();
   let agentMessageStarted = false;
   let agentMessageText = '';
+  let attemptTextLength = 0;
+  let textAttempt = 0;
+  const attemptId = () => `${turnId}:${textAttempt}`;
   let reasoningStarted = false;
   const totalUsage = emptyTokenUsage();
 
@@ -144,11 +149,13 @@ export function attachCodexProjector(
         });
       }
       agentMessageText += text;
+      attemptTextLength += text.length;
       emit(CODEX_NOTIFICATIONS.agentMessageDelta, {
         threadId,
         turnId,
         itemId: agentMessageItemId,
         delta: text,
+        ...(context.textRollback ? { micaAttemptId: attemptId() } : {}),
       });
     },
     thinking: (text) => {
@@ -162,12 +169,14 @@ export function attachCodexProjector(
           content: [],
         });
       }
+      attemptThinkingLength += text.length;
       emit(CODEX_NOTIFICATIONS.reasoningTextDelta, {
         threadId,
         turnId,
         itemId: reasoningItemId,
         delta: text,
         contentIndex: 0,
+        ...(context.thinkingRollback ? { micaAttemptId: attemptId() } : {}),
       });
     },
     toolCall: ({ name, args, id }) => {
@@ -232,6 +241,29 @@ export function attachCodexProjector(
   };
 
   agent.events.on('text', handlers.text);
+  let attemptThinkingLength = 0;
+  const onTextAttemptStart = () => { attemptTextLength = 0; attemptThinkingLength = 0; textAttempt++; };
+  const onTextRollback = () => {
+    if (attemptThinkingLength) {
+      emit('mica/reasoning/textRollback', { threadId, turnId, itemId: reasoningItemId, length: attemptThinkingLength, micaAttemptId: attemptId() });
+      attemptThinkingLength = 0;
+    }
+    if (!attemptTextLength) return;
+    agentMessageText = agentMessageText.slice(0, -attemptTextLength);
+    emit('mica/agentMessage/textRollback', { threadId, turnId, itemId: agentMessageItemId, length: attemptTextLength, micaAttemptId: attemptId() });
+    attemptTextLength = 0;
+  };
+  let unregisterTextRollbackConsumer: (() => void) | undefined;
+  if (context.textRollback) {
+    agent.events.on('textAttemptStart', onTextAttemptStart);
+    agent.events.on('textRollback', onTextRollback);
+    unregisterTextRollbackConsumer = agent.registerTextRollbackConsumer({
+      text: handlers.text,
+      ...(context.thinkingRollback || !thinking ? { thinking: handlers.thinking } : {}),
+      start: onTextAttemptStart,
+      rollback: onTextRollback,
+    });
+  }
   agent.events.on('thinking', handlers.thinking);
   agent.events.on('toolCall', handlers.toolCall);
   agent.events.on('toolResult', handlers.toolResult);
@@ -278,7 +310,11 @@ export function attachCodexProjector(
     },
     completeAgentMessage,
     dispose() {
+      unregisterTextRollbackConsumer?.();
+      unregisterTextRollbackConsumer = undefined;
       agent.events.off('text', handlers.text);
+      agent.events.off('textAttemptStart', onTextAttemptStart);
+      agent.events.off('textRollback', onTextRollback);
       agent.events.off('thinking', handlers.thinking);
       agent.events.off('toolCall', handlers.toolCall);
       agent.events.off('toolResult', handlers.toolResult);

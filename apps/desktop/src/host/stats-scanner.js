@@ -130,6 +130,9 @@ export function createStatsScanner({
   // 无会话用量账本（`mica commit` 这类一次性命令）：按文件签名只解析一次。
   const noLedgerRows = []
   let ledgerRows = noLedgerRows
+  // 上一次统计结果是用哪一份账本行装配出来的：账本换了新的一份才重算
+  // （`currentLedgerRows()` 按签名缓存，签名没变时返回同一个数组引用）。
+  let mergedLedger = null
   let ledgerSignature = null
   let ledgerLoaded = false
   const progress = { building: false, done: 0, total: 0 }
@@ -331,6 +334,10 @@ export function createStatsScanner({
 
     // 新文件按文件名倒序处理：文件名以创建时间戳开头，这样刚跑完的会话先出现在界面上。
     const pending = []
+    // 索引里没见过的文件是「新会话」，见过的但签名变了是「追加写入」。前者的最新一轮
+    // 应当立刻出现在列表里，后者也要刷新计数——但没变过的老文件频繁变化的只有 mtime，
+    // 它们不该反复触发页面重读（见下方 cleared 的说明）。
+    let added = 0
     for (const name of names) {
       const file = join(dir, name)
       const signature = signatureOf(file)
@@ -344,6 +351,7 @@ export function createStatsScanner({
       }
       const entry = entries.get(file)
       if (entry?.signature === signature) continue
+      if (!entry) added += 1
       pending.push({ file, signature })
     }
     pending.sort((a, b) => (a.file < b.file ? 1 : a.file > b.file ? -1 : 0))
@@ -392,6 +400,10 @@ export function createStatsScanner({
     const ownerMap = ensureOwners()
     applyParsed(parsed, ownerMap)
     progress.building = false
+    // 结束这一轮时带上「新增了几个会话」，页面据此判断要不要重读整份列表：并发调用
+    // 的 scanMeta 拿的是已解析的那部分，没有这两个数就分不清是真有会话变了还是只在补索引。
+    progress.parsedFiles = parsedFiles.size
+    progress.added = added
     onProgress?.(progress)
 
     // 归属变化（文件被删 / 老 fork 文件新增）会让未变化会话的去重结果失效：
@@ -457,6 +469,8 @@ export function createStatsScanner({
     const file = ledgerFile()
     if (!file) return noLedgerRows
     const signature = signatureOf(file)
+    // 签名按原值缓存（文件不存在时是 `null`，也照样记住）：账本没被创建、或者正在被
+    // 另一个进程重写时，每次轮询都重解析一遍，30s 一次的统计刷新就白烧了。
     if (ledgerLoaded && signature === ledgerSignature) return ledgerRows
     ledgerLoaded = true
     ledgerSignature = signature
@@ -472,8 +486,9 @@ export function createStatsScanner({
       rows = summarizeLedger(parseUsageLedger(text))
     }
     ledgerRows = rows
+    mergedLedger = null
     statsCache = null
-    return rows
+    return ledgerRows
   }
 
   return {
@@ -493,8 +508,15 @@ export function createStatsScanner({
     async scanStats() {
       if (progress.building) return sortStats(statsRows())
       await refresh()
+      // 账本换了一份新的（一次性命令又跑了几次）时，缓存下来的统计已经不是最新的，
+      // 必须重算；账本没变就原样返回上一次那个数组（热扫描不要重新装配一遍）。
+      // `currentLedgerRows()` 自己按签名缓存，签名没变时返回同一个数组引用。
       const ledger = currentLedgerRows()
-      if (!statsCache) statsCache = sortStats([...statsRows(), ...ledger])
+      if (statsCache && ledger !== mergedLedger) statsCache = null
+      if (!statsCache) {
+        statsCache = ledger.length ? sortStats([...statsRows(), ...ledger]) : sortStats(statsRows())
+        mergedLedger = ledger
+      }
       return statsCache
     },
 

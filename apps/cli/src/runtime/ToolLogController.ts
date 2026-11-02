@@ -44,7 +44,24 @@ export class ToolLogController {
     this.resetTurn();
   }
 
+  checkpointThinking() {
+    return { buffer: this.thinkingBuffer, id: this.activeThinkingId, lastUpdate: this.lastThinkingUiUpdateAt };
+  }
+
+  restoreThinking(checkpoint: ReturnType<ToolLogController['checkpointThinking']>) {
+    this.thinkingBuffer = checkpoint.buffer;
+    this.activeThinkingId = checkpoint.id;
+    this.lastThinkingUiUpdateAt = checkpoint.lastUpdate;
+    this.sink.setThinkingText(checkpoint.buffer);
+    if (checkpoint.id) {
+      this.sink.replaceAgentTurnLogItem(micaUi.createThinkingLogItem(checkpoint.id, checkpoint.buffer));
+    }
+  }
+
   endThinkingSegment() {
+    if (this.activeThinkingId) {
+      this.sink.replaceAgentTurnLogItem(micaUi.createThinkingLogItem(this.activeThinkingId, this.thinkingBuffer));
+    }
     this.thinkingBuffer = '';
     this.activeThinkingId = null;
     this.sink.setThinkingText('');

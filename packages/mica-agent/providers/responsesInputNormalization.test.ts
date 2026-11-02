@@ -149,6 +149,13 @@ describe('Responses input normalization', () => {
 
 async function* streamOf(...events: unknown[]): AsyncGenerator<unknown> {
   for (const event of events) yield event;
+  // Successful Responses fixtures include the protocol's terminal event.
+  if (events.some((event) => typeof event === 'object' && event !== null &&
+    'type' in event && typeof event.type === 'string' && event.type.startsWith('response.')) &&
+    !events.some((event) => typeof event === 'object' && event !== null &&
+      'type' in event && event.type === 'response.completed')) {
+    yield { type: 'response.completed', response: { model: 'test-model' } };
+  }
 }
 
 function options(protocol: ProviderProtocol): ModelClientOptions {

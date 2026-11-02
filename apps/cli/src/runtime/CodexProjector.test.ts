@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import { attachCodexProjector } from './CodexProjector.js';
 
 type RuntimeEventMap = {
+  textAttemptStart: [];
+  textRollback: [];
   text: [text: string];
   thinking: [text: string];
   toolCall: [call: { name: string; args: string; id: string }];
@@ -14,10 +16,15 @@ type RuntimeEventMap = {
 function fakeAgent(): {
   events: EventEmitter;
   emit: <K extends keyof RuntimeEventMap>(event: K, ...args: RuntimeEventMap[K]) => void;
+  registerTextRollbackConsumer: ReturnType<typeof vi.fn>;
+  unregisterTextRollbackConsumer: ReturnType<typeof vi.fn>;
 } {
   const events = new EventEmitter();
+  const unregisterTextRollbackConsumer = vi.fn();
   return {
     events,
+    registerTextRollbackConsumer: vi.fn(() => unregisterTextRollbackConsumer),
+    unregisterTextRollbackConsumer,
     emit: (event, ...args) => {
       events.emit(event, ...(args as unknown[]));
     },
@@ -34,6 +41,69 @@ function collect() {
 }
 
 describe('attachCodexProjector thinking', () => {
+  it('rolls back only the failed attempt and keeps completed tool events', () => {
+    const agent = fakeAgent();
+    const { notifications, writer } = collect();
+    const projector = attachCodexProjector(agent as unknown as AgentRuntime, writer, {
+      threadId: 't', turnId: 'turn-1', cwd: '/tmp', textRollback: true,
+    });
+    expect(agent.registerTextRollbackConsumer).toHaveBeenCalledOnce();
+    const consumer = agent.registerTextRollbackConsumer.mock.calls[0]![0] as {
+      text: (...args: unknown[]) => void; start: () => void; rollback: () => void;
+    };
+    expect(agent.events.listeners('text')).toContain(consumer.text);
+    expect(agent.events.listeners('textAttemptStart')).toContain(consumer.start);
+    expect(agent.events.listeners('textRollback')).toContain(consumer.rollback);
+    agent.emit('textAttemptStart');
+    agent.emit('text', 'kept');
+    agent.emit('toolCall', { name: 'read_file', args: '{}', id: 'c1' });
+    agent.emit('toolResult', { name: 'read_file', result: 'ok', id: 'c1' });
+    agent.emit('textAttemptStart');
+    agent.emit('text', 'failed');
+    agent.emit('textRollback');
+    agent.emit('textAttemptStart');
+    agent.emit('text', 'retry');
+    projector.completeAgentMessage();
+    expect(notifications.find((n) => n.method === 'mica/agentMessage/textRollback')?.params.length).toBe(6);
+    const deltas = notifications.filter((n) => n.method === 'item/agentMessage/delta');
+    expect(deltas.map((n) => n.params.micaAttemptId)).toEqual(['turn-1:1', 'turn-1:2', 'turn-1:3']);
+    expect(notifications.find((n) => n.method === 'mica/agentMessage/textRollback')?.params.micaAttemptId).toBe('turn-1:2');
+    expect(notifications.some((n) => n.method === 'item/completed' && (n.params.item as { type: string }).type === 'commandExecution')).toBe(true);
+    expect(notifications.findLast((n) => n.method === 'item/completed' && (n.params.item as { type: string }).type === 'agentMessage')?.params.item).toMatchObject({ text: 'keptretry' });
+    projector.dispose();
+    projector.dispose();
+    expect(agent.unregisterTextRollbackConsumer).toHaveBeenCalledOnce();
+    expect(agent.events.listeners('text')).not.toContain(consumer.text);
+    expect(agent.events.listeners('textAttemptStart')).not.toContain(consumer.start);
+    expect(agent.events.listeners('textRollback')).not.toContain(consumer.rollback);
+  });
+
+  it('rolls back reasoning with the matching attempt identifier', () => {
+    const agent = fakeAgent();
+    const { notifications, writer } = collect();
+    const projector = attachCodexProjector(agent as unknown as AgentRuntime, writer, {
+      threadId: 't', turnId: 'turn-1', cwd: '/tmp', textRollback: true, thinkingRollback: true, thinking: true,
+    });
+    agent.emit('textAttemptStart');
+    agent.emit('thinking', 'failed');
+    agent.emit('textRollback');
+    agent.emit('textAttemptStart');
+    agent.emit('thinking', 'kept');
+    expect(notifications.find((n) => n.method === 'mica/reasoning/textRollback')?.params).toMatchObject({ length: 6, micaAttemptId: 'turn-1:1' });
+    expect(notifications.filter((n) => n.method === 'item/reasoning/textDelta').map((n) => n.params.micaAttemptId)).toEqual(['turn-1:1', 'turn-1:2']);
+    projector.dispose();
+  });
+
+  it('does not subscribe to rollback events for older clients', () => {
+    const agent = fakeAgent();
+    const { writer } = collect();
+    const projector = attachCodexProjector(agent as unknown as AgentRuntime, writer, {
+      threadId: 't', turnId: 'turn-1', cwd: '/tmp',
+    });
+    expect(agent.events.listenerCount('textRollback')).toBe(0);
+    expect(agent.registerTextRollbackConsumer).not.toHaveBeenCalled();
+    projector.dispose();
+  });
   it('emits reasoning deltas when thinking is enabled', () => {
     const agent = fakeAgent();
     const { notifications, writer } = collect();

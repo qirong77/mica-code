@@ -41,6 +41,17 @@ afterEach(() => {
 
 async function* streamOf(...events: unknown[]) {
   yield* events;
+  // Successful chat fixtures include a terminal choice.
+  if (events.some((event) => typeof event === 'object' && event !== null && 'choices' in event)) {
+    yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+  }
+  // Successful Responses fixtures include the protocol's terminal event.
+  if (events.some((event) => typeof event === 'object' && event !== null &&
+    'type' in event && typeof event.type === 'string' && event.type.startsWith('response.')) &&
+    !events.some((event) => typeof event === 'object' && event !== null &&
+      'type' in event && event.type === 'response.completed')) {
+    yield { type: 'response.completed', response: { model: 'test-model' } };
+  }
 }
 const protocols = ['openai_chat_completions', 'openai_responses'] as const;
 type RequestInfo = Parameters<NonNullable<AgentQueryOptions['onRequestStart']>>[0];

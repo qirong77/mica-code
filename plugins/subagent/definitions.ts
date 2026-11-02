@@ -27,7 +27,7 @@ const READ_ONLY_TOOLS = [
  * 掐断，父代理只能拿到半成品再重开一个子代理、把已完成的工作重做一遍。所以这里给得
  * 比「一般够用」更宽：真正限制成本的是任务本身的形状，而不是这条上限。
  */
-export const DEFAULT_SUBAGENT_MAX_TURNS = 100;
+export const DEFAULT_SUBAGENT_MAX_TURNS = 999;
 
 export const BUILTIN_SUBAGENTS: PluginSubagentType[] = [
   {

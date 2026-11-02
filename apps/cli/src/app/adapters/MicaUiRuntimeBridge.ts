@@ -379,6 +379,22 @@ export class MicaUiRuntimeBridge {
     if (this.disposers.has(agent)) return;
     const onStatus = (status: AgentRuntimeStatus) => this.onStatus(agent, status);
     const onText = (text: string) => this.onText(agent, text);
+    let attemptText = '';
+    let thinkingCheckpoint = this.toolLogFor(agent).checkpointThinking();
+    let logCheckpoint = [...this.sessionFor(agent).uiState.agentTurnLogItems];
+    const onTextAttemptStart = () => {
+      attemptText = this.runtime.getResponseBufferFor(agent);
+      thinkingCheckpoint = this.toolLogFor(agent).checkpointThinking();
+      logCheckpoint = [...this.sessionFor(agent).uiState.agentTurnLogItems];
+    };
+    const onTextRollback = () => {
+      this.toolLogFor(agent).restoreThinking(thinkingCheckpoint);
+      this.sessionFor(agent).uiState.agentTurnLogItems = logCheckpoint;
+      if (this.isActiveAgent(agent)) micaUi.bottom.agentTurnLog.setItems(logCheckpoint);
+      this.runtime.setResponseBufferFor(agent, attemptText);
+      this.sessionFor(agent).uiState.responseText = attemptText;
+      if (this.isActiveAgent(agent)) micaUi.conversation.setResponseText(attemptText);
+    };
     const onThinking = (text: string) => this.onThinking(agent, text);
     const onToolCall = (toolCall: Parameters<ToolLogController['addToolCall']>[0]) => this.onToolCall(agent, toolCall);
     const onToolResult = (toolResult: Parameters<ToolLogController['completeToolCall']>[0]) =>
@@ -386,13 +402,19 @@ export class MicaUiRuntimeBridge {
     const onUsage = (usage: AgentUsageRecord) => this.onUsage(agent, usage);
     agent.events.on('status', onStatus);
     agent.events.on('text', onText);
+    agent.events.on('textAttemptStart', onTextAttemptStart);
+    agent.events.on('textRollback', onTextRollback);
+    const unregisterRollback = agent.registerTextRollbackConsumer({ text: onText, thinking: onThinking, start: onTextAttemptStart, rollback: onTextRollback });
     agent.events.on('thinking', onThinking);
     agent.events.on('toolCall', onToolCall);
     agent.events.on('toolResult', onToolResult);
     agent.events.on('usage', onUsage);
     this.disposers.set(agent, () => {
+      unregisterRollback();
       agent.events.off('status', onStatus);
       agent.events.off('text', onText);
+      agent.events.off('textAttemptStart', onTextAttemptStart);
+      agent.events.off('textRollback', onTextRollback);
       agent.events.off('thinking', onThinking);
       agent.events.off('toolCall', onToolCall);
       agent.events.off('toolResult', onToolResult);

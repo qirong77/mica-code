@@ -16,6 +16,7 @@ import {
   resolveRef as resolveCompareRef
 } from './git-compare'
 import {
+  cachedWorktreeRead,
   discardFile,
   getRepository,
   getWorkspaceStatus,
@@ -27,6 +28,13 @@ import {
 
 async function getSummary(cwd) {
   const { root, base } = await getRepository(cwd)
+  // 顶栏徽标（change-counts）与 Git 面板（summary）要的是同一份全树扫描，10s 的 Git
+  // 轮询 + 3s 的文件视图轮询又会各自来一次：同一仓库在几秒内复用结果，切换分支或
+  // 我们自己写过工作区（stage/unstage/discard）时缓存自动失效。
+  return cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base))
+}
+
+async function readSummary(root, base) {
   const [statusOutput, numstatOutput] = await Promise.all([
     git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']),
     git(root, ['diff', base, '--numstat', '--no-renames', '--'])
@@ -73,7 +81,10 @@ async function getSummary(cwd) {
  * 一遍——徽标和 GIT 面板显示的是同一个工作区，数字不一致比数字不准更糟。
  */
 async function getChangeCounts(cwd) {
-  const summary = await getSummary(cwd)
+  // 与 `getSummary` 共用同一份缓存（同一次全树扫描），但只把三个数字交出去：文件列表
+  // 在几千个改动时会占掉 IPC 的绝大部分体积，徽标并不需要它。
+  const { root, base } = await getRepository(cwd)
+  const summary = await cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base))
   return {
     root: summary.root,
     files: summary.files.length,

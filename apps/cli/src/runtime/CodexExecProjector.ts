@@ -3,7 +3,7 @@ import { emptyCodexExecUsage, type CodexExecEventWriter, type CodexExecUsage } f
 import type { AgentRuntime, AgentRuntimeEvents } from '../agent/AgentRuntime.js';
 
 type ProjectorHandlers = {
-  [K in keyof AgentRuntimeEvents]: (payload: AgentRuntimeEvents[K]) => void;
+  [K in Exclude<keyof AgentRuntimeEvents, 'textAttemptStart' | 'textRollback'>]: (payload: AgentRuntimeEvents[K]) => void;
 };
 
 export type CodexExecProjector = {

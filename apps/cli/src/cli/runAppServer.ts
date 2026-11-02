@@ -263,6 +263,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let sessionController: SessionController | null = null;
   let subagentTasks: SubagentTaskManager | null = null;
   let projector: CodexProjector | null = null;
+  let clientTextRollback = false;
+  let clientThinkingRollback = false;
   let executor: HeadlessTurnExecutor | null = null;
   let btwController: BtwThreads | null = null;
   let pluginHost: ReturnType<typeof createHeadlessPluginHost> | null = null;
@@ -496,7 +498,11 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         turnId,
         cwd: process.cwd(),
         thinking: options.thinking === true,
+        textRollback: clientTextRollback,
+        thinkingRollback: clientThinkingRollback,
       });
+      clientTextRollback = false;
+      clientThinkingRollback = false;
       writeNotification(CODEX_NOTIFICATIONS.turnStarted, {
         threadId: sessionId,
         turn: turnSnapshot(turnId, 'inProgress'),
@@ -706,6 +712,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         setCurrentTurnId: (turnId) => {
           currentTurnId = turnId;
         },
+        setClientTextRollback: (enabled) => { clientTextRollback = enabled; },
+        setClientThinkingRollback: (enabled) => { clientThinkingRollback = enabled; },
         writeNotification,
         writeResponse: (result) => process.stdout.write(encodeCodexResponse(id, result)),
         writeError: (code, errorMessage, data) => process.stdout.write(encodeCodexError(id, code, errorMessage, data)),
@@ -761,12 +769,29 @@ type HostContext = {
   setSessionId: (sessionId: string) => void;
   getCurrentTurnId: () => string | null;
   setCurrentTurnId: (turnId: string | null) => void;
+  setClientTextRollback: (enabled: boolean) => void;
+  setClientThinkingRollback: (enabled: boolean) => void;
   writeNotification: (method: string, params: unknown) => void;
   writeResponse: (result: unknown) => void;
   writeError: (code: number, message: string, data?: unknown) => void;
   /** 非致命降级提示（host 继续服务），渲染层显示成一条 warn notice。 */
   warn: (message: string) => void;
 };
+
+export async function withClientRollbackCapabilities<T>(
+  ctx: Pick<HostContext, 'setClientTextRollback' | 'setClientThinkingRollback'>,
+  params: Record<string, unknown>,
+  start: () => Promise<T>,
+): Promise<T> {
+  ctx.setClientTextRollback(params.micaTextRollback === true);
+  ctx.setClientThinkingRollback(params.micaThinkingRollback === true);
+  try {
+    return await start();
+  } finally {
+    ctx.setClientTextRollback(false);
+    ctx.setClientThinkingRollback(false);
+  }
+}
 
 /**
  * 桌面笔记面板读的正文。笔记本体由 `plugins/session-notes` 写进插件状态，这里只做
@@ -1113,11 +1138,13 @@ async function handleCodexRequest(
       // MCP init 与 host ready 解耦：首个 turn 在这里等后台 MCP 连接完成，
       // 用户打字间隔通常已覆盖初始化，首轮感知延迟接近零。
       await ctx.mcpReady;
-      const result = await ctx.executor.start(
-        micaRuntime.createRuntimeInput(input.text, 'ui', {
-          queueMode: 'after_iteration',
-          ...(input.content ? { content: input.content } : {}),
-        }),
+      const result = await withClientRollbackCapabilities(ctx, params, () =>
+        ctx.executor.start(
+          micaRuntime.createRuntimeInput(input.text, 'ui', {
+            queueMode: 'after_iteration',
+            ...(input.content ? { content: input.content } : {}),
+          }),
+        ),
       );
       if (result !== 'started') {
         // 'rejected': the single queue slot is occupied. 'queued': the plugin
@@ -1270,8 +1297,8 @@ async function handleCodexRequest(
         conversationMessages: [...ctx.agent.toConversationMessages(), { role: 'user', content: text }],
       });
       ctx.writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, { threadId: ctx.sessionId });
-      const result = await ctx.executor.start(
-        micaRuntime.createRuntimeInput(text, 'ui', { queueMode: 'after_iteration' }),
+      const result = await withClientRollbackCapabilities(ctx, params, () =>
+        ctx.executor.start(micaRuntime.createRuntimeInput(text, 'ui', { queueMode: 'after_iteration' })),
       );
       if (result !== 'started') {
         // 新 turn 没起来（单槽队列被占）：把历史恢复成编辑前的样子再通知重载，

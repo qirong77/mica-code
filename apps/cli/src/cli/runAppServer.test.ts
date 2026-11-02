@@ -10,6 +10,7 @@ import {
   projectSubagentTaskDetail,
   projectSubagentTasks,
   turnEventToQueueNotification,
+  withClientRollbackCapabilities,
 } from './runAppServer.js';
 import type { HeadlessTurnEvent } from '../runtime/HeadlessTurnExecutor.js';
 import type { BackgroundTaskMeta } from '@packages/mica-tools/index.js';
@@ -17,6 +18,32 @@ import type { SubagentTaskRecord } from '../agents/SubagentTaskManager.js';
 
 const ONE_PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+describe('per-turn rollback negotiation', () => {
+  it('negotiates independently and resets between turns, including failures', async () => {
+    const state = { text: false, thinking: false };
+    const ctx = {
+      setClientTextRollback: (enabled: boolean) => { state.text = enabled; },
+      setClientThinkingRollback: (enabled: boolean) => { state.thinking = enabled; },
+    };
+    for (const [params, expected] of [
+      [{ micaTextRollback: true, micaThinkingRollback: true }, { text: true, thinking: true }],
+      [{ micaTextRollback: true }, { text: true, thinking: false }],
+      [{ micaThinkingRollback: true }, { text: false, thinking: true }],
+      [{ micaTextRollback: 'true', micaThinkingRollback: 1 }, { text: false, thinking: false }],
+      [{}, { text: false, thinking: false }],
+    ] as const) {
+      await withClientRollbackCapabilities(ctx, params, async () => {
+        expect(state).toEqual(expected);
+      });
+      expect(state).toEqual({ text: false, thinking: false });
+    }
+    await expect(withClientRollbackCapabilities(ctx, { micaTextRollback: true, micaThinkingRollback: true }, async () => {
+      throw new Error('start failed');
+    })).rejects.toThrow('start failed');
+    expect(state).toEqual({ text: false, thinking: false });
+  });
+});
 
 describe('Codex multimodal input compatibility', () => {
   it('keeps text and converts data-url images into provider content blocks', async () => {

@@ -23,6 +23,7 @@ const uiMocks = (() => {
     modelNameSet: fn(),
     modelWindowSet: fn(),
     replaceAgentTurnLogItem: fn(),
+    setAgentTurnLogItems: fn(),
     setAgentStatusItems: fn(),
     setBackgroundTaskItems: fn(),
     setSubagentTaskItems: fn(),
@@ -44,6 +45,8 @@ const uiMocks = (() => {
 
 vi.mock('@packages/mica-ui/index.js', () => ({
   micaUi: {
+    createThinkingLogItem: (id: string, text: string) => ({ id, kind: 'thinking', text }),
+    bottom: { agentTurnLog: { setItems: uiMocks.setAgentTurnLogItems } },
     conversation: {
       clearPendingInput: uiMocks.clearPendingInput,
       clearResponseText: uiMocks.clearResponseText,
@@ -93,6 +96,36 @@ vi.mock('@packages/mica-ui/index.js', () => ({
 describe('MicaUiRuntimeBridge turn UI preservation', () => {
   beforeEach(() => {
     for (const value of Object.values(uiMocks)) value.mockClear();
+  });
+
+  it('restores the response buffer and UI to the start of a failed attempt', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    let buffer = 'earlier';
+    Object.assign(runtime, {
+      getResponseBufferFor: () => buffer,
+      setResponseBufferFor: (_agent: unknown, text: string) => { buffer = text; },
+      appendResponseTextFor: (_agent: unknown, text: string) => (buffer += text),
+    });
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = new Map<string, unknown>(vi.mocked(agent.events.on).mock.calls.map(([name, handler]) => [name, handler]));
+    const initialLog = [...session.uiState.agentTurnLogItems];
+    (handlers.get('textAttemptStart') as () => void)();
+    (handlers.get('thinking') as (text: string) => void)('failed thought');
+    expect(session.uiState.agentTurnLogItems).toHaveLength(initialLog.length + 1);
+    (handlers.get('text') as (text: string) => void)('failed');
+    expect(buffer).toBe('earlierfailed');
+    (handlers.get('textRollback') as () => void)();
+    expect(buffer).toBe('earlier');
+    expect(session.uiState.responseText).toBe('earlier');
+    expect(session.uiState.agentTurnLogItems).toEqual(initialLog);
+    expect(uiMocks.thinkingSet).toHaveBeenLastCalledWith('');
+    expect(uiMocks.setAgentTurnLogItems).toHaveBeenLastCalledWith(initialLog);
+    expect(uiMocks.setResponseText).toHaveBeenLastCalledWith('earlier');
+    bridge.stop();
   });
 
   it('preserves all queue inputs from runtime events', async () => {
@@ -268,6 +301,7 @@ function createAgent(): AgentRuntime {
       off: vi.fn(),
       on: vi.fn(),
     },
+    registerTextRollbackConsumer: vi.fn(() => vi.fn()),
     getSnapshot: vi.fn(() => ({ usageHistory: [] })),
     toConversationMessages: vi.fn(() => []),
   } as unknown as AgentRuntime;

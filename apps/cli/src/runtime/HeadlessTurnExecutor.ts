@@ -139,9 +139,6 @@ export class HeadlessTurnExecutor {
     this.options = options;
     this.queue = options.queue ?? new micaRuntime.MessageQueueService();
     this.parseImageRefs = options.parseImageRefs ?? parseImageRefs;
-    options.agent.events.on('text', (text) => {
-      this.responseBuffer += text;
-    });
   }
 
   get isBusy(): boolean {
@@ -436,6 +433,14 @@ export class HeadlessTurnExecutor {
       const markToolCall = (toolCall: { name: string }) => {
         if (!micaTools.isReadOnly(toolCall.name)) hadNonRetryableToolCall = true;
       };
+      let attemptStartBuffer = this.responseBuffer;
+      const text = (chunk: string) => { this.responseBuffer += chunk; };
+      const start = () => { attemptStartBuffer = this.responseBuffer; };
+      const rollback = () => { this.responseBuffer = attemptStartBuffer; };
+      agent.events.on('text', text);
+      agent.events.on('textAttemptStart', start);
+      agent.events.on('textRollback', rollback);
+      const unregisterRollback = agent.registerTextRollbackConsumer({ text, start, rollback });
       agent.events.on('toolCall', markToolCall);
       try {
         let runResult: { runId: number; text: string } | null = null;
@@ -519,6 +524,10 @@ export class HeadlessTurnExecutor {
         return 'completed';
       } finally {
         agent.events.off('toolCall', markToolCall);
+        unregisterRollback();
+        agent.events.off('text', text);
+        agent.events.off('textAttemptStart', start);
+        agent.events.off('textRollback', rollback);
       }
     } catch (error) {
       if (error instanceof AgentAbortError) {

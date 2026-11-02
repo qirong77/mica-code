@@ -309,7 +309,8 @@ npm run start:web          # 运行已构建的 Web 运行时
 - `context_mode` 为 none/brief/recent/files，默认 brief；Implementer / Tester / Proposal 必填 `owned_paths`，写工具与 shell cwd 校验租约（判定唯一实现在 `mica-tools/utils/pathOwnership.ts`）。
 - 委派倾向由插件设置 `delegationMode` 决定（`proactive` 默认 / `on-request`），prompt 段落每轮按设置重新渲染。
 - 失败重试分两层：单次请求由 provider 的 `withRetry` 处理；整轮子代理失败只有不落盘的类型（`write_mode` 为 `none` / `proposal`）且错误可重试时由插件自动重跑一次，可写类型不自动重跑。`run_many` 中单条任务启动失败（租约冲突、并发已满）只结算该任务，批次末尾给出 completed/partial/failed/skipped/running 统计。宿主报告的失败原因单独成段，不跟着 `Raw result` 一起被截断。
-- 任务状态四态之外还有 `partial`：跑满 `maxTurns` 的子代理有可用成果但没完成任务，任务记录、`tasks.get`、工具输出与 `join` 统计都用它，不要退化成一个 `failed`。`await` / `join` 省略 `timeout_ms` 时按 10 分钟上限等待，超时返回当前状态让模型自己决定继续等还是放弃——不设上限的等待只能靠用户中止。
+- 内置子代理达到默认 `maxTurns` 后复用原实例和工具历史续跑最多两次，保留任务、租约与累计用量；显式请求的 `maxTurns` 是硬上限，其他类型通过 `maxTurnContinuations` 选择续跑。续跑不重放工具调用，但模型仍可能自行重复调用。
+- 任务状态四态之外还有 `partial`：用完续跑预算或显式 `maxTurns` 的子代理有可用成果但没完成任务，任务记录、`tasks.get`、工具输出与 `join` 统计都用它，不要退化成一个 `failed`。`await` / `join` 省略 `timeout_ms` 时按 10 分钟上限等待，超时返回当前状态让模型自己决定继续等还是放弃——不设上限的等待只能靠用户中止。
 - 路径租约在 `prepareSpawn` 里判定（`owned_paths` 解析之后、建子代理实例之前）：冲突直接抛错，不会白建一个子代理，也不会在任务表里留一条从未跑过、0 用量的失败记录。
 - 非主请求都要记账：Agent 走 `recordSubagentUsage`；BTW、摘要等走 `recordSubagentTaskUsage` / `recordHelperSubagentUsage`；插件自己的模型请求走 `ctx.models.request`，宿主在发起时绑定会话 id，以 `origin: 'plugin'` + `pluginId` 记进原会话的 `subagentUsageHistory`（Stats 的 By source 卡片与会话详情可见）；`ctx.subagents.run/background` 起的后台子代理也写 `pluginId`，主对话经工具委派的那条写 `origin: 'delegation'`。等待期间切换会话不改变归属，旧会话已删除则不重建。插件里不出现自己拼的模型 HTTP 客户端——那笔开销没人记。
 - 插件异步回写先通过 `ctx.session.captureOwner?.(callbacks.context)` 捕获发起者（命令不传上下文则取当前会话），notice 显式传回 owner；`turn:before` / `turn:after` 与会话生命周期按 owner 隔离临时状态，`primaryAgentOnly` 不代表整个 TUI 只有一条主会话。
@@ -433,9 +434,11 @@ npm run start:web          # 运行已构建的 Web 运行时
 - shell 由 `shell-path.js.resolveDefaultShell` 按平台与存在性解析。
 - 文件树尺寸沿用 VS Code：活动栏 48px、树行 22px、缩进 8px。
 - 文件操作只重读受影响的父目录；目录结果合并到最新树状态，保留未变节点、子树与展开状态。手动刷新/恢复可见时保留已有树，目录请求按根与目录校验，过期结果不能恢复已删除或折叠的分支（`renderer/src/files-tree.js`）。
+- 编辑器工作区由 `EditorWorkspace.jsx` 持有自己的目录与 Git 状态，底栏目录选择只更新该页面，不写 session cwd、聊天默认目录或 workspace 节点；主窗口与独立编辑器窗口共用该入口。文件树向上导航、打开目录也通过 `onRootChange` 同步页面目录，文件搜索读取编辑器 `getRoot()`。
 - Git 分暂存/工作区两段，写操作仅 stage/unstage/discard，discard 点名文件并确认；所有 Git 命令带 `GIT_OPTIONAL_LOCKS=0`。
 - Git 比较按仓库/基线/模式与 fingerprint 保存审阅状态；DiffEditor 统一只读，首次加载后保留实例。比较模型与滚动状态由 `renderer/src/git-diff-session.js` 按仓库/文件/基线缓存；换文件保留画面到新内容就绪，替换/释放模型前先解绑。无 fingerprint 的源代码管理轮询必须重读并比较全文，无变化保留模型，不能用增删行数判断内容未变。
-- Git 轮询只在可见且聚焦时进行（Files 3s / 其他 10s），不重叠；会话视图只取仓库根与分支（`git:status` 一次 `rev-parse`），`git:summary` 的全树 status + numstat 与分支对比只在文件视图跑。- 顶栏编辑器图标右边是工作区徽标（`+1.2k` 绿 / `−840` 红，精确行数与文件数在 tooltip）：取数走 `git:change-counts`，与 `git:summary` 共用 `sumLineChanges` 和同一份文件列表（含未跟踪），所以和 CHANGES 面板的合计永远一致；非文件视图按 20s TTL 取、文件视图复用 summary 的结果、一轮跑完立刻强制刷一次。千位以上缩写（向下取整）、为 0 的一侧不画、有文件但无行数变更退回落文件数、干净时不画，规则唯一实现在 `renderer/src/git-badge.js`。
+- Git 轮询只在可见且聚焦时进行，不重叠：编辑器页自己的 `useGitWorkspace` 跑 `summary` + 分支对比 + `status`（3s），主窗口只为会话底栏与徽标取 `status`（10s）。编辑器页隐藏时停止轮询。- 顶栏编辑器图标右边是工作区徽标（`+1.2k` 绿 / `−840` 红，精确行数与文件数在 tooltip）：取数走 `git:change-counts`，与 `git:summary` 共用 `sumLineChanges` 和同一份文件列表（含未跟踪），所以和 CHANGES 面板的合计永远一致；按 20s TTL 取、一轮跑完立刻强制刷一次。千位以上缩写（向下取整）、为 0 的一侧不画、有文件但无行数变更退回落文件数、干净时不画，规则唯一实现在 `renderer/src/git-badge.js`。
+- 全树扫描（`status -z` + `diff --numstat`）在 host 侧按仓库缓存 5s：`git-ops.js` 的 `cachedWorktreeRead`，键是 `<root, summary:<base>>`，`git:summary` 与 `git:change-counts` 共用同一份结果（徽标不再单独算一遍）。失效只有两条——`.git/HEAD` 或其指向的 ref 变了（切换分支/提交/rebase），以及我们**自己**改过工作区（`stage/unstage/discard`、编辑器 `files:write` 都会 `noteWorktreeChange(root)`，`repositoryRootOf` 从目录往上找 `.git`）。**不要**改成看工作区 mtime：任何进程在写文件都会让整棵重算，等于不缓存。用户主动刷新的 `refresh: true` 跳过缓存。
 - Pinned / Projects / Recent 互斥，归属经 `stats:move-session`；拖放判定在 `session-dnd.js`。分组行上/下边缘用于排序，中间用于嵌套，顺序保存在 Projects 的 groups 数组中。
 - 会话行共用操作列/图标列/名称栅格；状态优先级沿用 `session-state.js`，error 红点由后续 completed 清除。
 - 会话右键菜单 = 固定项（Fork / 改名 / 标记 / 删除等；Fork 复用 `chat:fork`）+ 插件动作：插件项来自清单 `desktop.sessionMenu`，由 `renderer/src/session-menu-plugins.js` 收集（读 `readPluginsDetails`，用户插件也在里面），页面只转发 `pluginId + pluginAction` 到 `window.mica.chat.sessionMenuRun` → `chat:session-menu-run` → `mica/sessionMenu/run`；插件回的 `copyText` 由页面写剪贴板（`transport.js` 的 `copyText`），`message` 进 toast。没开过标签页的会话按需起一个 app-server 取快照，不需要页面先有 chat run。
@@ -482,6 +485,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 采样全量记录，不做「异常才写」；隐藏窗口的 `lag` 记 null。
 - 面板轮询跟可见性走（Stats 30s + 可见且聚焦；会话列表 10s，回到窗口立即补一次）；配置页 Performance 的聚合在 host 侧做完。
 - 会话列表整份返回，但内容没变时按字段指纹（`session-state.js` 的 `sameSessionSnapshot`）跳过 setState，空闲轮询不触发重渲染。
+- `stats:changed` 只在**真有变化**时让页面重读：收尾那一帧由扫描器带上 `parsedFiles` / `added`，两者都是 0（这一轮没读任何文件、没有新会话）就不广播；索引补齐过程中的进度帧带 `partial: true`，侧栏（`App.jsx`）直接忽略它，统计页只在可见时跟。之前每批进度都推、页面每批都重读千人列表，一天能攒出上千次多余的全量序列化。
 - 会话统计走磁盘索引：`host/stats-scanner.js` 按文件签名把每个会话的投影缓存在 `$MICA_HOME/desktop-stats-index.json`（与 `sessions/` 同级，不是会话文件），进程重启只解析变过的文件。首次构建（升级后第一次）分批让出事件循环，并经 `stats:changed` 推送进度，界面「逐渐填充」而不是空白几秒。
 - `stats:read` 的载荷是「会话 × 本地日」聚合行（上千会话约 1 MB），不是逐条 usage 事件；区间切换只是对日行做加法（`renderer/src/stats/scope.js`），不要再把事件级明细塞回载荷。跨会话的用量去重靠扫描器的「身份归属表」（最早创建的会话拥有），`stats:session-detail` 与列表共用同一份归属。
 - 每一次模型请求都要能在统计页上看到，所以来源只有一个口径（`mica-web-shared/usage-source` 的 `usageSourceOf`）：`main` 主对话、`delegation` 委派、`plugin`（+`pluginId`）插件、`helper` 内核后台。判定顺序是 `origin: 'delegation'` / `initiatedByCallId` → 委派、`origin: 'plugin'` / `pluginId` → 插件、其余 → 内核 helper；host 的日行聚合与会话详情都调这一份，不各算一套。插件起的子代理由宿主写 `pluginId`（`ctx.subagents.run/background` 记到插件名下，委派带 `initiatedByCallId` 记成 `delegation`）。

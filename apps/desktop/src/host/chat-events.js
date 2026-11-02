@@ -5,7 +5,8 @@ export function appendBufferedEvent(events, record, maxParts = 500) {
     previous &&
     (event.type === 'text' || event.type === 'reasoning') &&
     previous.event.type === event.type &&
-    previous.event.sessionID === event.sessionID
+    previous.event.sessionID === event.sessionID &&
+    previous.event.attemptId === event.attemptId
   ) {
     previous.sequence = record.sequence
     previous.event = {
@@ -40,7 +41,8 @@ function canMergeDelta(previous, next) {
     isPaceableDelta(previous?.event) &&
     isPaceableDelta(next?.event) &&
     previous.event.type === next.event.type &&
-    previous.event.sessionID === next.event.sessionID
+    previous.event.sessionID === next.event.sessionID &&
+    previous.event.attemptId === next.event.attemptId
   )
 }
 
@@ -165,7 +167,7 @@ export function buildTurnStartParams({
   role,
   clientMessageId
 }) {
-  const params = { threadId: threadId || '' }
+  const params = { threadId: threadId || '', micaTextRollback: true, micaThinkingRollback: true }
   params.input = [{ type: 'text', text: String(prompt || '') }]
   if (cwd) params.cwd = cwd
   if (model) params.model = model
@@ -214,13 +216,19 @@ export function codexNotificationToEvent(notification) {
         type: 'text',
         timestamp,
         sessionID,
+        ...(params.micaAttemptId ? { attemptId: params.micaAttemptId } : {}),
         part: { type: 'text', text: params.delta || '' }
       }
+    case 'mica/agentMessage/textRollback':
+      return { type: 'text_rollback', timestamp, sessionID, length: params.length, attemptId: params.micaAttemptId }
+    case 'mica/reasoning/textRollback':
+      return { type: 'reasoning_rollback', timestamp, sessionID, length: params.length, attemptId: params.micaAttemptId }
     case 'item/reasoning/textDelta':
       return {
         type: 'reasoning',
         timestamp,
         sessionID,
+        ...(params.micaAttemptId ? { attemptId: params.micaAttemptId } : {}),
         part: { type: 'reasoning', text: params.delta || '' }
       }
     case 'item/started':

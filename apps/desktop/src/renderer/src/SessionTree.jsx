@@ -157,6 +157,7 @@ function RenameInput({ value, onCommit, onCancel }) {
       spellCheck={false}
       className="h-5 min-w-0 flex-1 rounded-sm border border-line bg-overlay px-1.5 text-[13px] text-fg-max"
       onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
       onBlur={(event) => onCommit(event.currentTarget.value)}
       onKeyDown={(event) => {
         if (event.key === 'Enter') event.currentTarget.blur()
@@ -996,6 +997,7 @@ export function SessionTree({
           onDragOver={hoverRow(section, session.id, groupId)}
           onDrop={dropRow(section, session.id, groupId)}
           onClick={() => onOpenSession(session)}
+          onDoubleClick={() => setEditing({ kind: 'session', id: session.id })}
           onContextMenu={(event) =>
             openMenu(event, {
               session,
@@ -1008,6 +1010,7 @@ export function SessionTree({
               <button
                 type="button"
                 className="grid h-4 w-4 place-items-center rounded text-fg-muted hover:bg-overlay-strong hover:text-fg-strong"
+                onDoubleClick={(event) => event.stopPropagation()}
                 title={
                   childCollapsed
                     ? `展开 ${nesting.childCount} 个派生会话`
@@ -1103,6 +1106,7 @@ export function SessionTree({
           onDragOver={hoverRow(dropSection, node.id, groupId, false)}
           onDrop={dropRow(dropSection, node.id, groupId)}
           onClick={() => onSelectDraft(node)}
+          onDoubleClick={() => setEditing({ kind: 'draft', id: node.id })}
           onContextMenu={(event) => openMenu(event, { draft: node, items })}
         >
           <Slot />
@@ -1151,6 +1155,9 @@ export function SessionTree({
    */
   const renderSearchRow = (item, index) => {
     const session = item.session
+    const editingThis =
+      editing?.kind === (session ? 'session' : 'draft') &&
+      editing.id === (session?.id || item.draft.id)
     const tabId = session ? openBySession[session.id] : item.id
     const active = session ? !!tabId && activeSessionId === session.id : item.id === activeSessionId
     const state = session ? rowStateOfSession(session) : rowStateOfDraft(item.draft)
@@ -1184,6 +1191,9 @@ export function SessionTree({
             .join('\n')}
           onMouseEnter={() => setSearchFocus(index)}
           onClick={() => openSearchItem(item)}
+          onDoubleClick={() =>
+            setEditing({ kind: session ? 'session' : 'draft', id: session?.id || item.draft.id })
+          }
           onContextMenu={openMenuHere}
           {...longPressHandlers(openMenuHere)}
         >
@@ -1201,9 +1211,24 @@ export function SessionTree({
                   <IconClock size={12} stroke={2} />
                 </span>
               )}
-              <span className="min-w-0 truncate">
-                <Highlighted text={item.title} ranges={item.titleRanges} />
-              </span>
+              {editingThis ? (
+                <RenameInput
+                  value={session ? session.title || session.id : item.draft.text}
+                  onCommit={(value) => {
+                    const text = value.trim()
+                    if (text) {
+                      if (session) onRenameSession(session.id, text)
+                      else onRenameDraft(item.draft.id, text)
+                    }
+                    setEditing(null)
+                  }}
+                  onCancel={() => setEditing(null)}
+                />
+              ) : (
+                <span className="min-w-0 truncate">
+                  <Highlighted text={item.title} ranges={item.titleRanges} />
+                </span>
+              )}
             </span>
             {snippet && (
               <span className="min-w-0 truncate text-[11px] leading-4 text-fg-muted">

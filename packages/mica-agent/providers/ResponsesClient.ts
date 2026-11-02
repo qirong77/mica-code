@@ -230,17 +230,16 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       // krill 等上游在过载时返回 HTTP 200 + {"error":...,"type":"error"} JSON，
       // openai-node SDK 不会在 create() 抛错，而是把错误体反序列化成 APIError
       // 在流迭代首帧抛出（type=service_unavailable_error / code=server_is_overloaded）。
-      // 因此重试必须包住"建流 + 流消费"。只有"还没有文本/工具输出"时重发整个
-      // 请求才是安全的：一旦收到文本或 tool-call 增量，重放会重复 onText 输出、
-      // 污染 usageHistory，或重放已产生的 tool call 增量。thinking/reasoning 事件
-      // 不计入"有输出"——它是 turn 内暂存的过程数据，重试丢弃无害，而且工具迭代后
-      // 模型往往先输出 thinking 再被过载中断，计入会导致本可安全重试的请求被跳过。
-      let attemptHadOutput = false;
+      // Tool calls remain buffered until success. Text always streams immediately;
+      // retry after text only when the caller can restore its checkpoint.
+      const canRollbackText = !!this.onTextAttemptStart && !!this.onTextRollback;
+      let attemptHadToolOutput = false;
       await withRetry(
         async () => {
-          attemptHadOutput = false;
           emittedContentSeparator = false;
+          attemptHadToolOutput = false;
           content = '';
+          if (canRollbackText) this.onTextAttemptStart?.();
           completedResponse = undefined;
           outputItems = [];
           toolCalls = new Map<number, PendingToolCall>();
@@ -276,14 +275,10 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
             if (RESPONSE_TERMINAL_ERROR_TYPES.has(event.type)) throw responseEventError(event);
 
             if (event.type === 'response.output_text.delta') {
-              attemptHadOutput = true;
               const textDelta: string =
                 contentSeparator && !emittedContentSeparator ? `${contentSeparator}${event.delta}` : event.delta;
               emittedContentSeparator = true;
               content += textDelta;
-              totalContent += textDelta;
-              hasStreamedText = true;
-              streamTextEndsWithBlankLine = textDelta.endsWith('\n\n');
               this.onText?.(textDelta);
               continue;
             }
@@ -308,7 +303,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
             }
 
             if (event.type === 'response.output_item.added' && event.item.type === 'function_call') {
-              attemptHadOutput = true;
+              attemptHadToolOutput = true;
               toolCalls.set(event.output_index, {
                 id: event.item.id,
                 callId: event.item.call_id,
@@ -319,14 +314,14 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
             }
 
             if (event.type === 'response.function_call_arguments.delta') {
-              attemptHadOutput = true;
+              attemptHadToolOutput = true;
               const pending = toolCalls.get(event.output_index);
               if (pending) pending.arguments += event.delta;
               continue;
             }
 
             if (event.type === 'response.function_call_arguments.done') {
-              attemptHadOutput = true;
+              attemptHadToolOutput = true;
               const pending = toolCalls.get(event.output_index);
               if (pending) pending.arguments = event.arguments;
               continue;
@@ -338,15 +333,13 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
               if (event.item.type === 'message' && !content) {
                 const finalText = responseOutputMessageText(event.item);
                 if (finalText) {
-                  attemptHadOutput = true;
-                  content = finalText;
-                  totalContent += finalText;
-                  hasStreamedText = true;
-                  streamTextEndsWithBlankLine = finalText.endsWith('\n\n');
-                  this.onText?.(finalText);
+                  const text = contentSeparator && !emittedContentSeparator ? `${contentSeparator}${finalText}` : finalText;
+                  emittedContentSeparator = true;
+                  content = text;
+                  this.onText?.(text);
                 }
               } else if (event.item.type === 'function_call') {
-                attemptHadOutput = true;
+                attemptHadToolOutput = true;
                 toolCalls.set(event.output_index, {
                   id: event.item.id,
                   callId: event.item.call_id,
@@ -358,9 +351,15 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
             }
 
             if (event.type === 'response.completed') {
-              attemptHadOutput = true;
+              if (event.response?.status && event.response.status !== 'completed') {
+                throw new Error(`Response completed with status: ${event.response.status}`);
+              }
               completedResponse = event.response;
             }
+          }
+          throwIfQueryStopped(options);
+          if (!completedResponse) {
+            throw errorWithCode('Response stream ended before completion', 'ECONNRESET');
           }
         },
         {
@@ -369,8 +368,9 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           delayMs: 2000,
           backoffFactor: 2,
           maxDelayMs: 30000,
-          shouldRetry: (error) => !attemptHadOutput && isRetryableError(error),
+          shouldRetry: (error) => (!hasReasoningText || (canRollbackText && this.canRollbackThinking)) && (canRollbackText || (!content && !attemptHadToolOutput)) && isRetryableError(error),
           onRetry: ({ attempt, error, delayMs }) => {
+            if (canRollbackText && (content || hasReasoningText)) this.onTextRollback?.();
             console.error(
               `[mica] provider request retry ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
             );
@@ -383,6 +383,12 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       // when the request is aborted while waiting for the next event, so an
       // aborted turn must not be committed as a partial/empty response.
       throwIfQueryStopped(options);
+
+      if (content) {
+        totalContent += content;
+        hasStreamedText = true;
+        streamTextEndsWithBlankLine = totalContent.endsWith('\n\n');
+      }
 
       if (completedResponse?.usage) {
         this.recordUsage(completedResponse.usage, {

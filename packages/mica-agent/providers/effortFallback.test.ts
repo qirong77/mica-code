@@ -196,7 +196,7 @@ async function* responsesStream(text: string): AsyncGenerator<unknown> {
 async function* chatStream(text: string): AsyncGenerator<unknown> {
   yield {
     model: 'gpt-6.1-terra',
-    choices: [{ delta: { content: text } }],
+    choices: [{ delta: { content: text }, finish_reason: 'stop' }],
     usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
   };
 }

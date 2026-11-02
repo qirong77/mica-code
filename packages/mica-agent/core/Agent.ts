@@ -19,6 +19,11 @@ export type AgentUsageRecord = {
 
 export type AgentCallbacks = {
   onText?: (text: string) => void;
+  /** Checkpoint and restore visible text around a retried request. */
+  onTextAttemptStart?: () => void;
+  onTextRollback?: () => void;
+  /** The attempt rollback callback also restores every thinking consumer. */
+  canRollbackThinking?: boolean;
   onThinking?: (thinking: string) => void;
   onToolCall?: (name: string, args: string, id?: string) => void;
   onToolResult?: (name: string, result: string, id?: string) => void;
@@ -48,7 +53,7 @@ export type AgentQueryOptions = {
   ) => unknown[] | null | undefined | Promise<unknown[] | null | undefined>;
   /** Maximum number of model requests in one agentic query, including the initial request. */
   maxTurns?: number;
-  /** Provider-level retry progress (safe zero-output replay only). Used to surface
+  /** Provider-level retry progress. Used to surface
    *  retrying to the caller (e.g. a `retrying` working status in the UI). */
   onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
 };
@@ -116,6 +121,9 @@ export abstract class BaseAgent<
   abstract lastUsage: TUsage | undefined;
 
   onText: ((text: string) => void) | undefined;
+  onTextAttemptStart: (() => void) | undefined;
+  onTextRollback: (() => void) | undefined;
+  canRollbackThinking = false;
   onThinking: ((thinking: string) => void) | undefined;
   onToolCall: ((name: string, args: string, id?: string) => void) | undefined;
   onToolResult: ((name: string, result: string, id?: string) => void) | undefined;

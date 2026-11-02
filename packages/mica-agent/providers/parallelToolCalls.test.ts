@@ -456,6 +456,17 @@ function delay(ms: number): Promise<'timeout'> {
 
 async function* streamOf(...events: unknown[]): AsyncGenerator<unknown> {
   for (const event of events) yield event;
+  // Successful chat fixtures include a terminal choice.
+  if (events.some((event) => typeof event === 'object' && event !== null && 'choices' in event)) {
+    yield { choices: [{ delta: {}, finish_reason: 'stop' }] };
+  }
+  // Successful Responses fixtures include the protocol's terminal event.
+  if (events.some((event) => typeof event === 'object' && event !== null &&
+    'type' in event && typeof event.type === 'string' && event.type.startsWith('response.')) &&
+    !events.some((event) => typeof event === 'object' && event !== null &&
+      'type' in event && event.type === 'response.completed')) {
+    yield { type: 'response.completed', response: { model: 'test-model' } };
+  }
 }
 
 function options(protocol: ProviderProtocol): ModelClientOptions {

@@ -1,15 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import mitt from 'mitt';
 import { AgentAbortError } from '../agent/AgentRuntime.js';
 import { HeadlessTurnExecutor, type HeadlessTurnEvent } from './HeadlessTurnExecutor.js';
 import { TurnNoticeLog } from './turnNotices.js';
+import { attachCodexProjector } from './CodexProjector.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 
 class MockAgent {
   readonly events = mitt();
+  readonly consumers = new Set<{ text: (text: string) => void; start: () => void; rollback: () => void }>();
+  registerTextRollbackConsumer(consumer: { text: (text: string) => void; start: () => void; rollback: () => void }) {
+    this.consumers.add(consumer);
+    return () => { this.consumers.delete(consumer); };
+  }
   runId = 0;
   aborted = false;
   runCalls: Array<{ content: unknown; options: unknown }> = [];
@@ -165,6 +171,47 @@ function input(text: string, queueMode?: 'after_iteration' | 'after_turn') {
 }
 
 describe('HeadlessTurnExecutor', () => {
+  it('registers alongside the desktop projector and preserves text before a rolled back attempt', async () => {
+    const { agent, executor } = createHarness();
+    const notifications: Array<{ method: string; params: unknown }> = [];
+    const projector = attachCodexProjector(agent as never, (method, params) => notifications.push({ method, params }), {
+      threadId: 'thread', turnId: 'turn', cwd: '/', textRollback: true,
+    });
+    agent.run = async () => {
+      const handlers = agent.events.all.get('text') ?? [];
+      expect(agent.consumers.size).toBe(2);
+      expect(handlers.every((handler) => [...agent.consumers].some((consumer) => consumer.text === (handler as unknown)))).toBe(true);
+      agent.events.emit('text', 'earlier ');
+      agent.events.emit('textAttemptStart');
+      agent.events.emit('text', 'discarded');
+      agent.events.emit('textRollback');
+      agent.events.emit('textAttemptStart');
+      agent.events.emit('text', 'kept');
+      throw new AgentAbortError(agent.runId);
+    };
+    await executor.start(input('rollback'));
+    await vi.waitFor(() => expect(agent.abortedTurnCalls).toHaveLength(1));
+    expect(agent.abortedTurnCalls[0]?.partialAnswer).toBe('earlier kept');
+    expect(notifications.some(({ method }) => method === 'mica/agentMessage/textRollback')).toBe(true);
+    expect(agent.consumers.size).toBe(1);
+    projector.dispose();
+    expect(agent.consumers.size).toBe(0);
+  });
+  it('leaves the legacy projector unregistered so rollback remains disabled', async () => {
+    const { agent, executor } = createHarness();
+    const projector = attachCodexProjector(agent as never, () => {}, {
+      threadId: 'thread', turnId: 'turn', cwd: '/',
+    });
+    agent.run = async () => {
+      expect(agent.events.all.get('text')).toHaveLength(2);
+      expect(agent.consumers.size).toBe(1);
+      return { runId: agent.runId, text: '' };
+    };
+    await executor.start(input('legacy'));
+    await vi.waitFor(() => expect(agent.consumers.size).toBe(0));
+    projector.dispose();
+  });
+
   it('runs an idle maintenance task outside a turn and frees the lease afterwards', async () => {
     const { executor } = createHarness();
     let ran = 0;

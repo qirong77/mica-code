@@ -39,6 +39,50 @@ function record(sequence, type, text, sessionID = 's1') {
 }
 
 describe('chat event buffering', () => {
+  it('keeps attempt boundaries when buffering and pacing text', () => {
+    const events = []
+    const emitted = []
+    const timers = timerHarness()
+    const pacer = createChatEventPacer((value) => emitted.push(value), timers)
+    const first = { ...record(1, 'text', 'old'), event: { ...record(1, 'text', 'old').event, attemptId: 'a' } }
+    const second = { ...record(2, 'text', 'new'), event: { ...record(2, 'text', 'new').event, attemptId: 'b' } }
+    for (const value of [first, second]) {
+      appendBufferedEvent(events, value)
+      pacer.push(value)
+    }
+    pacer.push({ sequence: 3, event: { type: 'text_rollback', attemptId: 'b', length: 3 } })
+    expect(events).toEqual([first, second])
+    expect(emitted.map((value) => value.event.type)).toEqual(['text', 'text', 'text_rollback'])
+    expect(emitted[1].event.attemptId).toBe('b')
+  })
+
+  it('preserves attempt ids when projecting notifications', () => {
+    const delta = codexNotificationToEvent({ method: 'item/agentMessage/delta', params: { delta: 'x', micaAttemptId: 't:1' } })
+    const reasoning = codexNotificationToEvent({ method: 'item/reasoning/textDelta', params: { delta: 'think', micaAttemptId: 't:1' } })
+    const rollback = codexNotificationToEvent({ method: 'mica/agentMessage/textRollback', params: { length: 1, micaAttemptId: 't:1' } })
+    const thinkingRollback = codexNotificationToEvent({ method: 'mica/reasoning/textRollback', params: { threadId: 's', turnId: 't', itemId: 'i', length: 5, micaAttemptId: 't:1' } })
+    expect(delta.attemptId).toBe('t:1')
+    expect(reasoning.attemptId).toBe('t:1')
+    expect(rollback.attemptId).toBe('t:1')
+    expect(thinkingRollback).toMatchObject({ type: 'reasoning_rollback', sessionID: 's', length: 5, attemptId: 't:1' })
+  })
+  it('keeps reasoning attempts separate through buffering and pacing before rollback', () => {
+    const events = []
+    const emitted = []
+    const timers = timerHarness()
+    const pacer = createChatEventPacer((value) => emitted.push(value), timers)
+    for (const [sequence, attemptId] of [[1, 'a'], [2, 'b']]) {
+      const value = { sequence, event: { type: 'reasoning', sessionID: 's', attemptId, part: { text: attemptId } } }
+      appendBufferedEvent(events, value)
+      pacer.push(value)
+    }
+    const rollback = { sequence: 3, event: { type: 'reasoning_rollback', attemptId: 'b', length: 1 } }
+    appendBufferedEvent(events, rollback)
+    pacer.push(rollback)
+    timers.fire()
+    expect(events.map(({ event }) => event.attemptId)).toEqual(['a', 'b', 'b'])
+    expect(emitted.map(({ event }) => event.type)).toEqual(['reasoning', 'reasoning', 'reasoning_rollback'])
+  })
   it('coalesces long text and reasoning delta streams without crossing part boundaries', () => {
     const events = []
     for (let sequence = 1; sequence <= 1000; sequence++) {
@@ -204,6 +248,8 @@ describe('chat CLI arguments', () => {
       })
     ).toEqual({
       threadId: 's1',
+      micaTextRollback: true,
+      micaThinkingRollback: true,
       input: [{ type: 'text', text: 'hi' }],
       cwd: '/tmp/work',
       model: 'krill/gpt-5.6-terra',
@@ -215,7 +261,7 @@ describe('chat CLI arguments', () => {
 
   it('omits the Mica-only params when the composer has no override', () => {
     const params = buildTurnStartParams({ threadId: '', prompt: 'hi' })
-    expect(params).toEqual({ threadId: '', input: [{ type: 'text', text: 'hi' }] })
+    expect(params).toEqual({ threadId: '', micaTextRollback: true, micaThinkingRollback: true, input: [{ type: 'text', text: 'hi' }] })
     expect(params).not.toHaveProperty('role')
     expect(params).not.toHaveProperty('clientMessageId')
   })

@@ -1416,7 +1416,7 @@ export const FilesView = forwardRef(function FilesView(
       }
       setTabs(nextTabs)
 
-      const nextActive = nextTabs.find((tab) => tab.path === active) || nextTabs.at(-1)
+      const nextActive = nextTabs.find((tab) => tab.path === activeRef.current) || nextTabs.at(-1)
       if (nextActive) {
         setActivePath(nextActive.path)
         editorRef.current?.setModel(nextActive.model)

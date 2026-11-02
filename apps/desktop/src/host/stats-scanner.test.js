@@ -474,7 +474,9 @@ describe('incremental session scanner', () => {
 
     await scanner.scanStats()
     expect(seen.length).toBeGreaterThan(0)
-    expect(seen.at(-1)).toEqual({ building: false, done: 3, total: 3 })
+    // 收尾那一帧带上「这一轮读了几个文件、其中几个是新会话」：页面据此判断要不要重读
+    // 整份列表，只在补索引（没人新建会话）时不跟。
+    expect(seen.at(-1)).toEqual({ building: false, done: 3, total: 3, parsedFiles: 3, added: 3 })
   })
 
   test('adds session-less ledger usage as project rows and refreshes when it grows', async () => {

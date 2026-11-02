@@ -49,6 +49,7 @@ import {
 import { SessionDetailView } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
+import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
 import { findPresetForSearch } from './chat-find-preset'
 import {
   parsePathHref,
@@ -2517,6 +2518,8 @@ const ACCUMULATING_EVENT_TYPES = new Set([
   'step_start',
   'reasoning',
   'text',
+  'text_rollback',
+  'reasoning_rollback',
   'tool_use',
   'error',
   'notice',
@@ -3013,11 +3016,11 @@ export function ChatView({
   )
 
   const appendPart = useCallback(
-    (kind, text, timestamp = Date.now()) => {
+    (kind, text, timestamp = Date.now(), attemptId = undefined) => {
       if (!text) return
       updateMessages((previous) => {
         const active = streamRef.current
-        if (active.id && active.kind === kind) {
+        if (active.id && active.kind === kind && active.attemptId === attemptId) {
           return previous.map((message) =>
             message.id === active.id
               ? { ...message, text: `${message.text}${text}`, updatedAt: timestamp }
@@ -3031,7 +3034,7 @@ export function ChatView({
             )
           : previous
         const id = uid(kind === 'reasoning' ? 'thought' : 'msg')
-        streamRef.current = { id, kind, turnId: turnRef.current }
+        streamRef.current = { id, kind, turnId: turnRef.current, attemptId }
         return [
           ...finalized,
           {
@@ -3039,6 +3042,7 @@ export function ChatView({
             kind: kind === 'reasoning' ? 'reasoning' : 'message',
             role: 'assistant',
             text,
+            attemptId,
             done: false,
             turnId: turnRef.current,
             startedAt: timestamp,
@@ -3906,13 +3910,25 @@ export function ChatView({
         case 'reasoning':
           setPhase('thinking')
           setRetryInfo(null)
-          appendPart('reasoning', event.part?.text || '', timestamp)
+          appendPart('reasoning', event.part?.text || '', timestamp, event.attemptId)
           break
         case 'text':
           setPhase('streaming')
           setRetryInfo(null)
-          appendPart('text', event.part?.text || '', timestamp)
+          appendPart('text', event.part?.text || '', timestamp, event.attemptId)
           break
+        case 'text_rollback':
+        case 'reasoning_rollback': {
+          updateMessages((previous) => {
+            const rollback = event.type === 'text_rollback' ? rollbackAttemptText : rollbackAttemptReasoning
+            const next = rollback(previous, turnRef.current, event.attemptId, event.length)
+            if (streamRef.current.id && !next.some((message) => message.id === streamRef.current.id)) {
+              streamRef.current = { id: null, kind: null, turnId: streamRef.current.turnId }
+            }
+            return next
+          })
+          break
+        }
         case 'tool_use': {
           finishStream(timestamp)
           const part = event.part

@@ -75,7 +75,10 @@ const statsScanner = createStatsScanner({
     // 侧栏与统计页因此是「逐渐填充」而不是先空白再一次性出现。
     if (!progress.building) {
       lastBroadcastAt = 0
-      broadcastStats('stats:changed', { reason: 'built' })
+      // 没读到任何变化，或者只是索引在补齐（没人新建会话）时不必让页面重读整份列表：
+      // 每重读一次就是一次全量序列化 + 一次侧栏 diff。新增会话、会话追加写入都必须推。
+      const changed = (progress.parsedFiles || 0) > 0 || (progress.added || 0) > 0
+      if (changed) broadcastStats('stats:changed', { reason: 'built', added: progress.added || 0 })
       return
     }
     const now = Date.now()
@@ -84,7 +87,9 @@ const statsScanner = createStatsScanner({
     broadcastStats('stats:changed', {
       reason: 'progress',
       done: progress.done,
-      total: progress.total
+      total: progress.total,
+      // 索引还在补齐（重启后第一次打开）：侧栏此刻已经有上一次的结果，别跟着每一批重读。
+      partial: true
     })
   }
 })

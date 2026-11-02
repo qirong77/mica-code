@@ -112,6 +112,84 @@ describe('AgentRuntime tool status', () => {
     ]);
   });
 
+  it('requires all thinking listeners to register rollback and resets the capability each run', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const consumer = { text: vi.fn(), thinking: vi.fn(), start: vi.fn(), rollback: vi.fn() };
+    agent.events.on('text', consumer.text);
+    agent.events.on('thinking', consumer.thinking);
+    agent.events.on('textAttemptStart', consumer.start);
+    agent.events.on('textRollback', consumer.rollback);
+    agent.registerTextRollbackConsumer(consumer);
+    modelClient.queryImpl = async () => { expect(modelClient.canRollbackThinking).toBe(true); return 'ok'; };
+    await agent.run('one');
+    const legacy = vi.fn();
+    agent.events.on('thinking', legacy);
+    modelClient.queryImpl = async () => { expect(modelClient.canRollbackThinking).toBe(false); return 'ok'; };
+    await agent.run('two');
+  });
+
+  it('enables rollback only for explicitly registered text consumers', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    let text = 'earlier';
+    let checkpoint = '';
+    const consumer = {
+      text: (chunk: string) => { text += chunk; },
+      start: () => { checkpoint = text; },
+      rollback: () => { text = checkpoint; },
+    };
+    agent.events.on('text', consumer.text);
+    agent.events.on('textAttemptStart', consumer.start);
+    agent.events.on('textRollback', consumer.rollback);
+    const unregister = agent.registerTextRollbackConsumer(consumer);
+    modelClient.queryImpl = async () => {
+      modelClient.onTextAttemptStart?.();
+      modelClient.onText?.('failed');
+      modelClient.onTextRollback?.();
+      modelClient.onTextAttemptStart?.();
+      modelClient.onText?.('success');
+      return 'success';
+    };
+    await agent.run('hello');
+    expect(text).toBe('earliersuccess');
+
+    const legacy = vi.fn();
+    agent.events.on('text', legacy);
+    modelClient.queryImpl = async () => {
+      expect(modelClient.onTextAttemptStart).toBeUndefined();
+      expect(modelClient.onTextRollback).toBeUndefined();
+      return 'ok';
+    };
+    await agent.run('hello');
+    agent.events.off('text', legacy);
+    unregister();
+    await agent.run('hello');
+  });
+
+  it('blocks replay if an unregistered consumer receives text during an attempt', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const consumer = { text: vi.fn(), start: vi.fn(), rollback: vi.fn() };
+    agent.events.on('text', consumer.text);
+    agent.events.on('textAttemptStart', consumer.start);
+    agent.events.on('textRollback', consumer.rollback);
+    agent.registerTextRollbackConsumer(consumer);
+    const legacy = vi.fn();
+    modelClient.queryImpl = async () => {
+      modelClient.onTextAttemptStart?.();
+      agent.events.on('text', legacy);
+      modelClient.onText?.('partial');
+      agent.events.off('text', legacy);
+      modelClient.onTextRollback?.();
+      modelClient.onText?.('replayed');
+      return 'ok';
+    };
+    await expect(agent.run('hello')).rejects.toThrow('Text rollback consumers changed');
+    expect(legacy).toHaveBeenCalledTimes(1);
+    expect(consumer.rollback).not.toHaveBeenCalled();
+  });
+
   it('tracks each active module start time separately', async () => {
     vi.useFakeTimers();
     try {

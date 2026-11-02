@@ -2,6 +2,7 @@
 // 这里不 import electron，好处是单测能对着临时仓库跑真实 git。
 import { execFile } from 'child_process'
 import { rm } from 'fs/promises'
+import { readFileSync, statSync } from 'fs'
 import path from 'path'
 import { promisify } from 'util'
 
@@ -29,6 +30,96 @@ const LOCK_EXISTS_PATTERN = /File exists|文件已存在/
  * 几次重试都会失败，由 `gitErrorMessage` 给出可操作的说法。
  */
 const LOCK_RETRY_DELAYS_MS = [100, 250, 500]
+
+/**
+ * 工作区里「上一次已知的变更状态」什么时候失效。
+ *
+ * 顶栏徽标和 Git 面板要的是同一条 `git status` + `git diff --numstat`（大仓库上
+ * 各几十到上百毫秒），而轮询是每 10s / 3s 一轮、每个窗口各算一次。这里只记两件事：
+ * - `probe`：结果只取决于仓库自身，`.git/HEAD` 变了（切换分支、提交、rebase）就必须重算；
+ * - `hint`：agent 改了工作区文件时由调用方显式打点，不必等 mtime 探测。
+ * 工作区的 mtime 这条判据没有用：任何时刻只要有一个进程在写文件就整棵重算，等于不缓存。
+ */
+const worktreeState = new Map()
+const WORKTREE_TTL_MS = 5000
+
+/** 让某个仓库的缓存立刻失效（写操作、agent 改完文件之后调用）。 */
+export function noteWorktreeChange(root) {
+  if (typeof root === 'string' && root) worktreeState.delete(root)
+}
+
+/**
+ * 从一个目录往上找仓库根（只看 `.git` 是否存在，不跑 git 命令）：保存文件时用来
+ * 精确失效那一份缓存。找不到就返回 null，调用方当作「没有可失效的」。
+ */
+export function repositoryRootOf(directory) {
+  let current = typeof directory === 'string' ? directory : ''
+  if (!current) return null
+  for (;;) {
+    try {
+      statSync(path.join(current, '.git'))
+      return current
+    } catch {
+      const parent = path.dirname(current)
+      if (!parent || parent === current) return null
+      current = parent
+    }
+  }
+}
+
+/**
+ * 仓库「指向哪个提交」的签名：读几个字节比跑一条 git 命令便宜两个数量级。
+ *
+ * 注意 `.git/HEAD` 在分支上提交时是不变的（内容一直是 `ref: refs/heads/<branch>`），
+ * 所以还要读它指向的那个 ref 文件；游离 HEAD 时 HEAD 里就是提交号，一次就够。
+ */
+function headSignature(root) {
+  const gitDir = path.join(root, '.git')
+  try {
+    const head = readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim()
+    const parts = [`head:${head}`]
+    const ref = /^ref:\s*(.+)$/.exec(head)
+    if (ref) {
+      const info = statSync(path.join(gitDir, ref[1]))
+      parts.push(`${info.mtimeMs}:${info.size}`)
+    }
+    return parts.join('|')
+  } catch {
+    // 子模块 / worktree 的 `.git` 是文件，或者 ref 还没生成：当「不知道」——不缓存。
+    return null
+  }
+}
+
+/**
+ * 跑一次真正的读取，但同一仓库在 TTL 内复用结果（除非 HEAD 变了或被显式打点）。
+ * `refresh: true` 用于用户主动点刷新：跳过缓存。
+ */
+export async function cachedWorktreeRead(root, key, run, { refresh = false } = {}) {
+  const signature = headSignature(root)
+  const cached = worktreeState.get(root)
+  if (
+    !refresh &&
+    signature &&
+    cached &&
+    cached.signature === signature &&
+    Date.now() - cached.at < WORKTREE_TTL_MS
+  ) {
+    const hit = cached.values.get(key)
+    if (hit) return hit
+  }
+  const value = await run()
+  if (!signature) return value
+  // 并发读取共用一份缓存；`probe` 取这次的 HEAD 签名，切换分支后自然失配。
+  const entry =
+    cached && Date.now() - cached.at < WORKTREE_TTL_MS
+      ? cached
+      : { signature, at: Date.now(), values: new Map() }
+  entry.signature = signature
+  entry.at = Date.now()
+  entry.values.set(key, value)
+  worktreeState.set(root, entry)
+  return value
+}
 
 function errorText(error) {
   const stderr = typeof error?.stderr === 'string' ? error.stderr : ''
@@ -134,6 +225,7 @@ export async function stageFile(cwd, filePath) {
   const { root } = await getRepository(cwd)
   safeFilePath(root, filePath)
   await git(root, ['add', '--', filePath])
+  noteWorktreeChange(root)
 }
 
 /**
@@ -145,6 +237,7 @@ export async function unstageFile(cwd, filePath) {
   safeFilePath(root, filePath)
   if (base === EMPTY_TREE) await git(root, ['rm', '--cached', '-q', '--', filePath])
   else await git(root, ['restore', '--staged', '--', filePath])
+  noteWorktreeChange(root)
 }
 
 /**
@@ -156,7 +249,9 @@ export async function discardFile(cwd, filePath) {
   const absolutePath = safeFilePath(root, filePath)
   if (await isTracked(root, filePath)) {
     await git(root, ['restore', '--worktree', '--', filePath])
+    noteWorktreeChange(root)
     return
   }
   await rm(absolutePath, { force: true })
+  noteWorktreeChange(root)
 }

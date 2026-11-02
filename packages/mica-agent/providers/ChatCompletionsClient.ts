@@ -199,12 +199,23 @@ export class ChatCompletionsClient extends BaseAgent<
       // openai-node SDK 把它反序列化成 APIError 在流迭代首帧抛出。重试必须包住
       // "建流 + 流消费"，但只有"还没有文本/工具输出"时重发整个请求才安全：
       // 一旦收到文本或 tool-call 增量，重放会重复 onText 输出并污染 usageHistory。
-      // thinking/reasoning chunk 不计入"有输出"——它是 turn 内暂存的过程数据，
-      // 重试丢弃无害，而且工具迭代后模型往往先输出 thinking 再被过载中断。
       let attemptHadOutput = false;
+      let attemptHadThinking = false;
+      const canRollbackText = !!this.onTextAttemptStart && !!this.onTextRollback;
+      const totalCheckpoint = totalContent;
+      const streamedCheckpoint = hasStreamedText;
+      const blankLineCheckpoint = streamTextEndsWithBlankLine;
+      let pendingUsage: Array<{ usage: NonNullable<OpenAI.Chat.Completions.ChatCompletionChunk['usage']>; model: string }> = [];
       await withRetry(
         async () => {
           attemptHadOutput = false;
+          attemptHadThinking = false;
+          content = '';
+          emittedContentSeparator = false;
+          toolCallsMap.clear();
+          pendingUsage = [];
+          let finishReason: string | undefined;
+          if (canRollbackText) this.onTextAttemptStart?.();
           const stream = await sendWithEffortFallback({
             provider: this.provider,
             model: this.model,
@@ -236,15 +247,13 @@ export class ChatCompletionsClient extends BaseAgent<
             throwIfQueryStopped(options);
             if (chunk.usage) {
               attemptHadOutput = true;
-              this.recordUsage(chunk.usage, {
-                model: chunk.model,
-                turnId,
-                requestIndex,
-                messageCount: messages.length,
-              });
+              pendingUsage.push({ usage: chunk.usage, model: chunk.model });
             }
             const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
             for (const choice of choices) {
+              if (typeof choice?.finish_reason === 'string' && choice.finish_reason) {
+                finishReason = choice.finish_reason;
+              }
               const delta = choice?.delta;
               if (!delta) continue;
               if (typeof delta.content === 'string' && delta.content) {
@@ -261,7 +270,9 @@ export class ChatCompletionsClient extends BaseAgent<
               }
               const reasoning = readReasoningContent(delta);
               if (typeof reasoning === 'string' && reasoning) {
+                attemptHadOutput = true;
                 throwIfQueryStopped(options);
+                attemptHadThinking = true;
                 this.onThinking?.(reasoning);
               }
               if (delta.tool_calls) {
@@ -283,6 +294,13 @@ export class ChatCompletionsClient extends BaseAgent<
               }
             }
           }
+          // The SDK can end normally on abort or a broken connection. Only a
+          // terminal choice proves the response was complete; usage chunks can
+          // arrive after that choice and do not themselves signal completion.
+          throwIfQueryStopped(options);
+          if (!finishReason || (toolCallsMap.size > 0 && finishReason !== 'tool_calls' && finishReason !== 'function_call' && finishReason !== 'stop')) {
+            throw Object.assign(new Error('Chat Completions stream ended before completion'), { code: 'ECONNRESET' });
+          }
         },
         {
           signal: options?.signal,
@@ -290,8 +308,12 @@ export class ChatCompletionsClient extends BaseAgent<
           delayMs: 2000,
           backoffFactor: 2,
           maxDelayMs: 30000,
-          shouldRetry: (error) => !attemptHadOutput && isRetryableError(error),
+          shouldRetry: (error) => (canRollbackText ? (!attemptHadThinking || this.canRollbackThinking) : !attemptHadOutput) && isRetryableError(error),
           onRetry: ({ attempt, error, delayMs }) => {
+            if (canRollbackText && attemptHadOutput) this.onTextRollback?.();
+            totalContent = totalCheckpoint;
+            hasStreamedText = streamedCheckpoint;
+            streamTextEndsWithBlankLine = blankLineCheckpoint;
             console.error(
               `[mica] provider request retry ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
             );
@@ -305,6 +327,10 @@ export class ChatCompletionsClient extends BaseAgent<
       // request would be committed as an empty assistant message, which the
       // provider rejects on the next request with a 400.
       throwIfQueryStopped(options);
+
+      for (const { usage, model } of pendingUsage) {
+        this.recordUsage(usage, { model, turnId, requestIndex, messageCount: messages.length });
+      }
 
       const toolCalls =
         toolCallsMap.size > 0

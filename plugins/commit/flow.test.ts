@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPluginLlmApi, type PluginModelRequest } from '@packages/mica-plugin/index.js';
 import { runCommitFlow } from './flow.js';
 import { DEFAULT_PROMPT } from './message.js';
@@ -10,14 +10,20 @@ import * as gitHelpers from './git.js';
 
 const repos: string[] = [];
 let repo = '';
+let template = '';
 
 function git(args: string[], cwd = repo): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
 
-function makeRepo(): string {
+function makeTempDir(): string {
   const directory = mkdtempSync(join(tmpdir(), 'mica-commit-plugin-'));
   repos.push(directory);
+  return directory;
+}
+
+function makeTemplate(): string {
+  const directory = mkdtempSync(join(tmpdir(), 'mica-commit-template-'));
   git(['init', '-q'], directory);
   git(['config', 'user.name', 'Mica Commit Test'], directory);
   git(['config', 'user.email', 'commit-plugin@example.invalid'], directory);
@@ -46,8 +52,17 @@ function fakeLlm(reply: string | Error, beforeReply?: () => void) {
 
 const message = { prompt: DEFAULT_PROMPT };
 
+beforeAll(() => {
+  template = makeTemplate();
+});
+
+afterAll(() => {
+  if (template) rmSync(template, { recursive: true, force: true });
+});
+
 beforeEach(() => {
-  repo = makeRepo();
+  repo = makeTempDir();
+  cpSync(template, repo, { recursive: true });
 });
 
 afterEach(() => {
@@ -99,7 +114,7 @@ describe('commit flow', () => {
   });
 
   it('未跟踪符号链接只摘要链接本身，不读取链接指向的外部文件', async () => {
-    const target = join(makeRepo(), 'private.txt');
+    const target = join(makeTempDir(), 'private.txt');
     writeFileSync(target, 'external-file-content-canary\n');
     symlinkSync(target, join(repo, 'external-link'));
     const { llm, calls } = fakeLlm('chore: 增加链接 🔧');

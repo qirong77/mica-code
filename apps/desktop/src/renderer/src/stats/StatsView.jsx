@@ -945,8 +945,12 @@ export function StatsView({ visible }) {
     window.addEventListener('focus', onFocus)
     // 首次构建索引要遍历全部会话文件：运行时按进度推送，这里跟着刷新，页面因此是
     // 逐个填充而不是先空着等一次全量扫描。
-    const offChanged = window.mica.stats.onChanged?.(() => {
-      if (alive) read()
+    // 页签没显示时照样在跑（`visible` 为假）：这时只为「有数据变」刷新，索引补齐的
+    // 进度推送不跟，少一次几千行的全量装配。
+    const offChanged = window.mica.stats.onChanged?.((payload) => {
+      if (!alive) return
+      if (payload?.partial && !visible) return
+      read()
     })
     return () => {
       alive = false

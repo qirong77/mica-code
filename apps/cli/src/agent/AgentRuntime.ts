@@ -48,6 +48,8 @@ export type AgentRuntimeStatus =
 
 export type AgentRuntimeEvents = {
   text: string;
+  textAttemptStart: undefined;
+  textRollback: undefined;
   thinking: string;
   toolCall: { name: string; args: string; id?: string };
   toolResult: { name: string; result: string; id?: string };
@@ -137,6 +139,10 @@ function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[]
 
 export class AgentRuntime {
   readonly events = mitt<AgentRuntimeEvents>();
+  private readonly rollbackConsumers = new Set<{ text: (text: string) => void; start: () => void; rollback: () => void; thinking?: (text: string) => void }>();
+  private rollbackSafetyLost = false;
+  private rollbackTracking = false;
+  private rollbackCheck: (() => boolean) | undefined;
   readonly taskOwnerId = micaCommon.createId('agent-runtime');
   private client: IAgent<ModelClientOptions> | null = null;
   private runId = 0;
@@ -183,6 +189,32 @@ export class AgentRuntime {
   ) {
     this.currentConfig = readAgentRuntimeConfig(configOverride);
     this.recreateClient();
+  }
+
+  /** Register the three listeners belonging to one rollback-capable text consumer. */
+  registerTextRollbackConsumer(consumer: { text: (text: string) => void; start: () => void; rollback: () => void; thinking?: (text: string) => void }): () => void {
+    this.rollbackConsumers.add(consumer);
+    return () => { this.rollbackConsumers.delete(consumer); };
+  }
+
+  private canRollbackText(): boolean {
+    const text = this.events.all.get('text') ?? [];
+    const starts = this.events.all.get('textAttemptStart') ?? [];
+    const rollbacks = this.events.all.get('textRollback') ?? [];
+    if (!text.length || this.events.all.get('*')?.length) return false;
+    return text.every((handler) => {
+      const matches = [...this.rollbackConsumers].filter((consumer) => consumer.text === handler);
+      return matches.length === 1 && starts.includes(matches[0]!.start) && rollbacks.includes(matches[0]!.rollback)
+        && text.filter((candidate) => candidate === handler).length === 1;
+    });
+  }
+
+  private canRollbackThinking(): boolean {
+    const listeners = this.events.all.get('thinking') ?? [];
+    return listeners.every((handler) => {
+      const matches = [...this.rollbackConsumers].filter((consumer) => consumer.thinking === handler);
+      return matches.length === 1 && listeners.filter((candidate) => candidate === handler).length === 1;
+    });
   }
 
   get config() {
@@ -589,6 +621,32 @@ export class AgentRuntime {
       this.abortedRunCompleteUsageLength = null;
       this.emitStatus({ type: 'connecting', startedAt });
       const client = this.client;
+      const rollbackEnabled = this.canRollbackText();
+      const initialTextListeners = [...(this.events.all.get('text') ?? [])];
+      const initialThinkingListeners = [...(this.events.all.get('thinking') ?? [])];
+      const thinkingRollbackEnabled = rollbackEnabled && this.canRollbackThinking();
+      client.canRollbackThinking = thinkingRollbackEnabled;
+      const initialConsumers = [...this.rollbackConsumers];
+      this.rollbackCheck = () => this.canRollbackText()
+        && initialTextListeners.length === (this.events.all.get('text')?.length ?? 0)
+        && initialTextListeners.every((handler, index) => this.events.all.get('text')?.[index] === handler)
+        && (!thinkingRollbackEnabled || (this.canRollbackThinking()
+          && initialThinkingListeners.length === (this.events.all.get('thinking')?.length ?? 0)
+          && initialThinkingListeners.every((handler, index) => this.events.all.get('thinking')?.[index] === handler)))
+        && initialConsumers.length === this.rollbackConsumers.size
+        && initialConsumers.every((consumer) => this.rollbackConsumers.has(consumer));
+      this.rollbackTracking = rollbackEnabled;
+      this.rollbackSafetyLost = false;
+      client.onTextAttemptStart = rollbackEnabled ? () => {
+        if (!this.isCurrent(runId)) return;
+        if (!this.rollbackCheck?.()) throw new Error('Text rollback consumers changed during the run');
+        this.events.emit('textAttemptStart', undefined);
+      } : undefined;
+      client.onTextRollback = rollbackEnabled ? () => {
+        if (!this.isCurrent(runId)) return;
+        if (this.rollbackSafetyLost || !this.rollbackCheck?.()) throw new Error('Text rollback consumers changed during the run');
+        this.events.emit('textRollback', undefined);
+      } : undefined;
       const signal = abortController.signal;
       const text = await this.observationScope.run(observed, () =>
         client.query(question, {
@@ -655,6 +713,8 @@ export class AgentRuntime {
     } finally {
       if (abortController && this.activeAbortController === abortController) {
         this.activeAbortController = null;
+        this.rollbackTracking = false;
+        this.rollbackCheck = undefined;
       }
       if (abortController && this.activeAbortController === null) {
         this.activeRunStartedAt = null;
@@ -682,12 +742,16 @@ export class AgentRuntime {
     }
     this.client = micaAgent.createModelClient(this.clientOptions());
     this.client.onText = (text) => {
+      if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
       this.emitStatus({ type: 'streaming', startedAt: this.activeRunStartedAt ?? undefined });
       this.events.emit('text', text);
+      if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
     };
     this.client.onThinking = (thinking) => {
+      if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
       this.emitStatus({ type: 'thinking', startedAt: this.activeRunStartedAt ?? undefined });
       this.events.emit('thinking', thinking);
+      if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
     };
     this.client.onToolCall = (name, args, id) => {
       this.observeActive({ type: 'tool:call', name, args, id });

@@ -18,6 +18,7 @@ import { basename, join } from 'path'
 import { resolveMicaExecutable } from './mica-cli'
 import { logger } from './log'
 import { readTopLevelCwd } from './session-file-head'
+import { createSessionReader } from './session-reader'
 import { isDirectory, resolveUsableCwd } from './cwd-utils'
 import {
   appendBufferedEvent,
@@ -326,6 +327,8 @@ function sessionFile(sessionId) {
   if (typeof sessionId !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(sessionId)) return null
   return join(sessionsDir(), `${sessionId}.json`)
 }
+
+const readSessionAsync = createSessionReader()
 
 function messageText(content) {
   if (typeof content === 'string') return content
@@ -877,7 +880,11 @@ function editRunMessage(sender, id, payload = {}) {
     run = runs.get(id)
   }
 
-  const params = { threadId: run.sessionId || run.requestedSessionId || '' }
+  const params = {
+    threadId: run.sessionId || run.requestedSessionId || '',
+    micaTextRollback: true,
+    micaThinkingRollback: true
+  }
   params.prompt = prompt
   params.text = text
   if (Number.isInteger(payload.occurrenceFromEnd) && payload.occurrenceFromEnd > 0) {
@@ -2141,7 +2148,7 @@ export function registerChatIpc() {
   ipcMain.handle('chat:history', (_event, { sessionId } = {}) => {
     rememberChatSender(_event)
     if (!sessionId) return []
-    return readHistory(sessionId)
+    return readSessionAsync(sessionFile(sessionId)).then((result) => result.history)
   })
 
   /**
@@ -2280,7 +2287,9 @@ export function registerChatIpc() {
   ipcMain.handle('chat:meta', (_event, { sessionId } = {}) => {
     rememberChatSender(_event)
     if (!sessionId) return readDefaultMeta()
-    return readSessionMeta(sessionId)
+    return readSessionAsync(sessionFile(sessionId)).then(({ meta }) =>
+      meta ? { ...meta, protocol: protocolForProviderId(meta.providerId) } : null
+    )
   })
 
   /**
