@@ -47,9 +47,9 @@ function showResumeSelector(
   const query = atom('');
   const selectedIdx = atom(0);
 
-  function visibleSessions(): SessionSummary[] {
+  function visibleSessions(): ResumeRow[] {
     const normalizedQuery = query.get().trim().toLowerCase();
-    return sessions
+    const filtered = sessions
       .filter((session) => {
         if (filter.get() === 'cwd' && session.cwd !== process.cwd()) return false;
         if (!normalizedQuery) return true;
@@ -58,6 +58,7 @@ function showResumeSelector(
           .includes(normalizedQuery);
       })
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return arrangeResumeSessions(filtered);
   }
 
   function hide() {
@@ -66,7 +67,7 @@ function showResumeSelector(
   }
 
   function selectCurrent() {
-    const session = visibleSessions()[selectedIdx.get()];
+    const session = visibleSessions()[selectedIdx.get()]?.session;
     if (!session) return;
     hide();
     void resumeSession(agent, sessionController, services, session.id);
@@ -77,9 +78,9 @@ function showResumeSelector(
     const currentIdx = micaUi.useScheduleState(selectedIdx);
     micaUi.useScheduleState(query);
     const visible = visibleSessions();
-    const items = visible.map((session) => ({
+    const items = visible.map(({ session, depth }) => ({
       key: session.id,
-      label: formatResumeSessionTitle(session),
+      label: `${'  '.repeat(depth)}${depth ? '↳ ' : ''}${formatResumeSessionTitle(session)}`,
       description: formatSessionListTime(session.updatedAt),
     }));
     const title = element(
@@ -154,6 +155,62 @@ function showResumeSelector(
       return false;
     },
   });
+}
+
+type ResumeSession = SessionSummary & { parentSessionId?: string };
+type ResumeRow = { session: ResumeSession; depth: number };
+
+/** Input is already sorted; preserve that order among roots and siblings. */
+export function arrangeResumeSessions(sessions: ResumeSession[]): ResumeRow[] {
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const parentById = new Map<string, string>();
+  for (const session of sessions) {
+    const parent = session.parentSessionId;
+    if (parent && byId.has(parent)) parentById.set(session.id, parent);
+  }
+
+  // Break every edge in a cycle. Descendants can still follow their parent,
+  // while malformed records remain selectable as independent roots.
+  const checked = new Set<string>();
+  for (const session of sessions) {
+    const path: string[] = [];
+    const positions = new Map<string, number>();
+    let id: string | undefined = session.id;
+    while (id && !checked.has(id)) {
+      const cycleStart = positions.get(id);
+      if (cycleStart !== undefined) {
+        for (const cycleId of path.slice(cycleStart)) parentById.delete(cycleId);
+        break;
+      }
+      positions.set(id, path.length);
+      path.push(id);
+      id = parentById.get(id);
+    }
+    for (const visited of path) checked.add(visited);
+  }
+
+  const children = new Map<string, ResumeSession[]>();
+  const roots: ResumeSession[] = [];
+  for (const session of sessions) {
+    const parent = parentById.get(session.id);
+    if (!parent) roots.push(session);
+    else {
+      const siblings = children.get(parent) ?? [];
+      siblings.push(session);
+      children.set(parent, siblings);
+    }
+  }
+  const rows: ResumeRow[] = [];
+  const pending = roots.slice().reverse().map((session) => ({ session, depth: 0 }));
+  while (pending.length) {
+    const row = pending.pop()!;
+    rows.push(row);
+    const descendants = children.get(row.session.id) ?? [];
+    for (let i = descendants.length - 1; i >= 0; i--) {
+      pending.push({ session: descendants[i]!, depth: row.depth + 1 });
+    }
+  }
+  return rows;
 }
 
 export function formatResumeSessionTitle(session: Pick<SessionSummary, 'title' | 'uncompleted'>): string {
