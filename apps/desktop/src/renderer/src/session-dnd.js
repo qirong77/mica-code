@@ -28,12 +28,25 @@ function sameGroup(a, b) {
  * 分组换父级：落到分组行 = 挂进那个分组，落到 Projects 标题 = 回到根。
  * 自己、自己的子树、以及本来就在那个父级下的落点都返回 null（不产生变更）。
  */
-function resolveGroupDrop({ drag, section, groupId, groups }) {
+function resolveGroupDrop({ drag, section, groupId, groups, position }) {
   if (section !== 'project') return null
+  const source = groups.find((group) => group.id === drag.id)
+  if (!source) return null
+  if (position === 'before' || position === 'after') {
+    const target = groups.find((group) => group.id === groupId)
+    if (!target || groupSubtreeIds({ groups }, drag.id).has(target.id)) return null
+    return {
+      kind: 'move-group',
+      groupId: drag.id,
+      parentId: target.parentId ?? null,
+      placement: { targetId: target.id, position }
+    }
+  }
   const parentId = groupId ?? null
+  if (parentId && !groups.some((group) => group.id === parentId)) return null
   if (parentId === drag.id) return null
   if (parentId && groupSubtreeIds({ groups }, drag.id).has(parentId)) return null
-  if ((drag.groupId ?? null) === parentId) return null
+  if ((source.parentId ?? null) === parentId) return null
   return { kind: 'move-group', groupId: drag.id, parentId }
 }
 
@@ -61,7 +74,7 @@ export function resolveDrop({
   descendantIds = null
 }) {
   if (!drag) return null
-  if (drag.kind === 'group') return resolveGroupDrop({ drag, section, groupId, groups })
+  if (drag.kind === 'group') return resolveGroupDrop({ drag, section, groupId, groups, position })
   if (drag.id === targetId) return null
   // 落到会话行正中 = 拖进这个会话。草稿还没落盘，没有可以挂父级的会话文件。
   if (position === 'into') {

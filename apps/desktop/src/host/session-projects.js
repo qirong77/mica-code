@@ -117,7 +117,7 @@ export function renameGroup(projects, groupId, name) {
  * 分组换父级（拖拽嵌套）：`parentId` 为 null 即移回根。
  * 目标是分组自己、或落在自己的子树里（会成环）时原样返回。
  */
-export function moveGroup(projects, groupId, parentId = null) {
+export function moveGroup(projects, groupId, parentId = null, placement = null) {
   const current = normalizeProjects(projects)
   const group = current.groups.find((item) => item.id === groupId)
   if (!group) return current
@@ -126,7 +126,16 @@ export function moveGroup(projects, groupId, parentId = null) {
     if (!current.groups.some((item) => item.id === parent)) return current
     if (groupSubtreeIds(current, groupId).has(parent)) return current
   }
-  if ((group.parentId || null) === parent) return current
+  if (placement) {
+    const { targetId, position } = placement
+    const target = current.groups.find((item) => item.id === targetId)
+    if (!target || !['before', 'after'].includes(position)) return current
+    if ((target.parentId || null) !== parent) return current
+    if (groupSubtreeIds(current, groupId).has(targetId)) return current
+    current.groups = current.groups.filter((item) => item.id !== groupId)
+    const index = current.groups.findIndex((item) => item.id === targetId)
+    current.groups.splice(index + (position === 'after' ? 1 : 0), 0, group)
+  }
   group.parentId = parent
   return current
 }

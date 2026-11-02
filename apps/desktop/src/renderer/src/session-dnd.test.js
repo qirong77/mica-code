@@ -199,6 +199,44 @@ describe('resolveDrop', () => {
       groupId: parentId
     })
 
+    it('places groups before or after another group, including across parents', () => {
+      for (const position of ['before', 'after']) {
+        expect(
+          resolveDrop({
+            drag: dragGroup('g4'),
+            section: 'project',
+            groupId: 'g2',
+            groups,
+            position
+          })
+        ).toEqual({
+          kind: 'move-group',
+          groupId: 'g4',
+          parentId: 'g1',
+          placement: { targetId: 'g2', position }
+        })
+        expect(
+          resolveDrop({
+            drag: dragGroup('g1'),
+            section: 'project',
+            groupId: 'g4',
+            groups,
+            position
+          })
+        ).toEqual({
+          kind: 'move-group',
+          groupId: 'g1',
+          parentId: null,
+          placement: { targetId: 'g4', position }
+        })
+        for (const groupId of ['g1', 'g2', 'g3', 'missing']) {
+          expect(
+            resolveDrop({ drag: dragGroup('g1'), section: 'project', groupId, groups, position })
+          ).toBeNull()
+        }
+      }
+    })
+
     it('nests a group under the group row it was dropped on', () => {
       expect(
         resolveDrop({ drag: dragGroup('g4'), section: 'project', groupId: 'g1', groups })

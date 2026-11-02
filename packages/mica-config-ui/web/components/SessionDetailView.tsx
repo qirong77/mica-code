@@ -216,14 +216,15 @@ export function SessionDetailView({
         role="tabpanel"
         aria-label={tabs.find((item) => item.id === tab)?.label ?? 'Session 视图'}
       >
+        {/* 同一会话只刷新数据，不随快照版本重建页签：保留内容和展开状态，避免运行中闪烁。 */}
         {tab === 'conversation' ? (
-          <ConversationPane key={`conversation:${sessionId}:${version}`} sessionId={sessionId} refreshToken={version} />
+          <ConversationPane key={`conversation:${sessionId}`} sessionId={sessionId} refreshToken={version} />
         ) : null}
         {tab === 'context' ? (
-          <ContextPane key={`context:${sessionId}:${version}`} sessionId={sessionId} refreshToken={version} />
+          <ContextPane key={`context:${sessionId}`} sessionId={sessionId} refreshToken={version} />
         ) : null}
         {tab === 'prompt' ? (
-          <SystemPromptPane key={`prompt:${sessionId}:${version}`} sessionId={sessionId} refreshToken={version} />
+          <SystemPromptPane key={`prompt:${sessionId}`} sessionId={sessionId} refreshToken={version} />
         ) : null}
         {extraTabs.map((item) =>
           tab === item.id ? <div key={item.id}>{item.content}</div> : null,

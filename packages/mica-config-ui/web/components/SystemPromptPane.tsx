@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { readSessionSystemPrompt } from '../api.js';
 import { JsonEditor } from './JsonEditor.js';
-import { Button } from './Ui.js';
+import { Button, Tag } from './Ui.js';
 import { formatCharCount } from '../format.js';
 import { splitPromptSections, summarizePrompt } from '../promptView.js';
 import type { ConfigWebSessionPrompt } from '../../src/shared/types.js';
@@ -19,6 +19,7 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
   const [data, setData] = useState<ConfigWebSessionPrompt | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPart, setSelectedPart] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,6 +44,8 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
 
   const prompt = data?.prompt ?? '';
   const parts = useMemo(() => splitPromptSections(prompt), [prompt]);
+  const selected = parts[selectedPart] ?? parts[0];
+  const shownPrompt = selectedPart === -1 ? prompt : (selected?.content ?? prompt);
   const summary = useMemo(() => summarizePrompt(prompt), [prompt]);
 
   async function copyPrompt() {
@@ -85,27 +88,42 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
         </div>
       </div>
 
-      {parts.length > 1 ? <PromptParts parts={parts} /> : null}
+      <PromptParts parts={parts} selectedPart={selectedPart} onSelect={setSelectedPart} />
+      <div className="prompt-module-heading">
+        <strong>{selectedPart === -1 ? '完整提示词' : selected?.label}</strong>
+        {selectedPart !== -1 ? <Tag tone="blue">{selected?.tag || '未标记'}</Tag> : null}
+        <Button variant="ghost" onClick={() => setSelectedPart(selectedPart === -1 ? 0 : -1)}>
+          {selectedPart === -1 ? '按模块查看' : '查看全文'}
+        </Button>
+      </div>
 
       <div className="editor-host prompt-editor">
         {/* Markdown 高亮：提示词本身就是 markdown（标题、列表、围栏代码块），外加 <system>
             这类标签——用 plaintext 只能看到一整片同色文字。 */}
-        <JsonEditor value={prompt} language="markdown" readOnly onChange={() => undefined} />
+        <JsonEditor value={shownPrompt} language="markdown" readOnly onChange={() => undefined} />
       </div>
     </div>
   );
 }
 
 /** 构成一览：每段一条，条形按「最大的那一段」归一，只有长度是可比的。 */
-function PromptParts({ parts }: { parts: ReturnType<typeof splitPromptSections> }) {
+function PromptParts({
+  parts,
+  selectedPart,
+  onSelect,
+}: {
+  parts: ReturnType<typeof splitPromptSections>;
+  selectedPart: number;
+  onSelect: (index: number) => void;
+}) {
   const longest = Math.max(...parts.map((part) => part.chars), 1);
   const hasGap = parts.some((part) => !part.tag);
   return (
     <section className="prompt-parts">
       <div className="prompt-parts-head">
-        <h3>提示词构成</h3>
+        <h3>提示词模块</h3>
         <span className="muted-text">
-          {hasGap ? '按顶层标签切分，没有标签的插件段落归入「其它注入」' : '按顶层标签切分'}
+          {hasGap ? '选择模块查看内容；未标记内容归入「其它注入」' : '选择模块查看内容'}
         </span>
       </div>
       {/* 表头放在滚动区外面：翻到后面那几段时仍然知道两列数字是什么。 */}
@@ -117,7 +135,13 @@ function PromptParts({ parts }: { parts: ReturnType<typeof splitPromptSections> 
       </div>
       <div className="prompt-part-list">
         {parts.map((part, index) => (
-          <div className="prompt-part" key={`${part.tag || 'gap'}:${index}`}>
+          <button
+            type="button"
+            className={`prompt-part prompt-part-select${selectedPart === index ? ' is-selected' : ''}`}
+            key={`${part.tag || 'gap'}:${index}`}
+            aria-pressed={selectedPart === index}
+            onClick={() => onSelect(index)}
+          >
             <span className="prompt-part-label" title={part.label}>
               {part.label}
             </span>
@@ -126,7 +150,7 @@ function PromptParts({ parts }: { parts: ReturnType<typeof splitPromptSections> 
             </span>
             <span className="prompt-part-size">{formatCharCount(part.chars)}</span>
             <span className="prompt-part-size">{formatCharCount(part.tokens)}</span>
-          </div>
+          </button>
         ))}
       </div>
     </section>
@@ -145,8 +169,8 @@ function PromptMissing({ rolePrompt, error }: { rolePrompt: string; error: strin
       {error ? <div className="ui-alert">{error}</div> : null}
       <h3>这条会话没有记录系统提示词</h3>
       <p>
-        提示词在每次请求时现场拼装：角色提示词、项目说明（AGENT.md）、skills 索引、环境信息，
-        再加上插件贡献的段落。Mica 只保留最近一次请求发出去的那一份，这条会话早于这项记录。
+        提示词在每次请求时现场拼装：角色提示词、项目说明（AGENT.md）、skills 索引、环境信息， 再加上插件贡献的段落。Mica
+        只保留最近一次请求发出去的那一份，这条会话早于这项记录。
       </p>
       <p className="muted-text">在这个会话里发一条消息后再回来，这里就会显示完整内容。</p>
       {rolePrompt ? (

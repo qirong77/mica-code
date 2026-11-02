@@ -39,7 +39,24 @@ describe('splitPromptSections', () => {
       '插件段落 / 其它注入',
     ]);
     // 段内换行不少一行：`<project-instructions>` 里有一段空行。
-    expect(parts[1]!.chars).toBe('<project-instructions>\n# AGENT.md\n\nKeep it small.\n</project-instructions>'.length);
+    expect(parts[1]!.chars).toBe(
+      '<project-instructions>\n# AGENT.md\n\nKeep it small.\n</project-instructions>'.length,
+    );
+  });
+
+  it('保留每个模块正文、重复标签和无标签内容', () => {
+    const first = '<custom>\nfirst\n</custom>';
+    const second = '<custom>\nsecond\n</custom>';
+    const parts = splitPromptSections(`${first}\n\nplain\n\n${second}`);
+    expect(parts.map((part) => part.content)).toEqual([first, '\n\nplain\n\n', second]);
+    expect(parts.map((part) => part.tag)).toEqual(['custom', '', 'custom']);
+  });
+
+  it('同名多行嵌套与围栏里的标签保持在原模块中', () => {
+    const prompt = '<system>\nouter\n<system>\ninner\n</system>\n```xml\n</system>\n```\n</system>';
+    expect(splitPromptSections(prompt).map((part) => part.content)).toEqual([prompt]);
+    const fenced = '```xml\n<example>\ntext\n</example>\n```';
+    expect(splitPromptSections(fenced).map((part) => part.tag)).toEqual(['']);
   });
 
   it('空提示词与纯空白不产生段落', () => {

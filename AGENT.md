@@ -406,7 +406,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 插件入口是**输入框正上方那排胶囊按钮**（`PluginQuickBar`，来自清单 `desktop.panel.shortcuts`）：`action` 类按钮点一下直接调插件动作（立即返回，不在页面里跑外部命令或等模型），`section` 类按钮打开盖在对话区右侧的抽屉并展开那一块（`PluginPanels`，宽 340、不挤窄对话）；抽屉折叠状态与 ChatView 的 `pluginPanelOpen` / `pluginPanelSection` 共用。哪些插件有面板、`roles` 门槛、是否停用都从 `readPluginsDetails` 拿（用户插件也在里面），规则在 `renderer/src/plugin-panels.js`；RPC 走 `window.mica.chat.pluginPanels.view|action` → `chat:plugin-panel-view|action`。host 侧返回的载荷在 `hostTaskRequest` 的信封里，必须过 `unwrapHostResult`，否则页面只看到 `{ok:true}`、视图全 undefined。
 - 双击用户消息就地编辑，仅空闲且非空时提交，经 `chat:edit-message` 截断重跑；失败保留编辑文本。
 - **会话详情只有一个组件**：`mica-config-ui` 的 `SessionDetailView`（头部 + 对话记录 / Context 分析 / 系统提示词 / 原始文件，原始文件自动保存）。配置页 Sessions 页、Stats 的会话详情弹窗（额外带「用量」页签）与状态栏上下文弹窗都渲染它，桌面端只包一层 `.mica-config-ui.is-embed` 的外壳与 `chat-modal-session-detail` 尺寸；不要再写第二套会话详情或上下文分组，上下文分类 / 信封 / 差额的唯一计算在 `mica-config-ui/src/server/contextBreakdown.ts`。
-- 「系统提示词」页签读 `snapshot.systemPrompt`（按需 `readSessionSystemPrompt`，不跟着 2 秒轮询），用 `web/promptView.ts` 按顶层标签切成角色 / 项目说明 / skills / 环境信息 / 其它注入几段说明体积去向，全文进只读编辑器。对话记录与 Context 分析里那条 System 也用同一份记录（没有记录时才回落到角色提示词），三处口径一致。
+- 「系统提示词」页签读 `snapshot.systemPrompt`（按需 `readSessionSystemPrompt`，不跟着 2 秒轮询），用 `web/promptView.ts` 按顶层标签切成角色 / 项目说明 / skills / 环境信息 / 其它注入几段说明体积去向，默认按模块列出并显示所选模块正文与 tag，保留全文查看与复制；刷新通过 refreshToken 更新数据，页签 key 只按 sessionId 区分，避免运行中反复卸载。对话记录与 Context 分析里那条 System 也用同一份记录（没有记录时才回落到角色提示词），三处口径一致。
 
 ### 展示
 
@@ -432,9 +432,9 @@ npm run start:web          # 运行已构建的 Web 运行时
 - Git 分暂存/工作区两段，写操作仅 stage/unstage/discard，discard 点名文件并确认；所有 Git 命令带 `GIT_OPTIONAL_LOCKS=0`。
 - Git 比较按仓库/基线/模式与 fingerprint 保存审阅状态；DiffEditor 统一只读，换文件先 `setModel(null)`。
 - Git 轮询只在可见且聚焦时进行（Files 3s / 其他 10s），不重叠；会话视图只取仓库根与分支（`git:status` 一次 `rev-parse`），`git:summary` 的全树 status + numstat 与分支对比只在文件视图跑。- 顶栏编辑器图标右边是工作区徽标（`+1.2k` 绿 / `−840` 红，精确行数与文件数在 tooltip）：取数走 `git:change-counts`，与 `git:summary` 共用 `sumLineChanges` 和同一份文件列表（含未跟踪），所以和 CHANGES 面板的合计永远一致；非文件视图按 20s TTL 取、文件视图复用 summary 的结果、一轮跑完立刻强制刷一次。千位以上缩写（向下取整）、为 0 的一侧不画、有文件但无行数变更退回落文件数、干净时不画，规则唯一实现在 `renderer/src/git-badge.js`。
-- Pinned / Projects / Recent 互斥，归属经 `stats:move-session`；拖放判定在 `session-dnd.js`。
+- Pinned / Projects / Recent 互斥，归属经 `stats:move-session`；拖放判定在 `session-dnd.js`。分组行上/下边缘用于排序，中间用于嵌套，顺序保存在 Projects 的 groups 数组中。
 - 会话行共用操作列/图标列/名称栅格；状态优先级沿用 `session-state.js`，error 红点由后续 completed 清除。
-- 会话右键菜单 = 固定项（改名 / 标记 / 删除等）+ 插件动作：插件项来自清单 `desktop.sessionMenu`，由 `renderer/src/session-menu-plugins.js` 收集（读 `readPluginsDetails`，用户插件也在里面），页面只转发 `pluginId + pluginAction` 到 `window.mica.chat.sessionMenuRun` → `chat:session-menu-run` → `mica/sessionMenu/run`；插件回的 `copyText` 由页面写剪贴板（`transport.js` 的 `copyText`），`message` 进 toast。没开过标签页的会话按需起一个 app-server 取快照，不需要页面先有 chat run。
+- 会话右键菜单 = 固定项（Fork / 改名 / 标记 / 删除等；Fork 复用 `chat:fork`）+ 插件动作：插件项来自清单 `desktop.sessionMenu`，由 `renderer/src/session-menu-plugins.js` 收集（读 `readPluginsDetails`，用户插件也在里面），页面只转发 `pluginId + pluginAction` 到 `window.mica.chat.sessionMenuRun` → `chat:session-menu-run` → `mica/sessionMenu/run`；插件回的 `copyText` 由页面写剪贴板（`transport.js` 的 `copyText`），`message` 进 toast。没开过标签页的会话按需起一个 app-server 取快照，不需要页面先有 chat run。
 - 会话行右键与对话区右键（`ChatView` 的 `ChatContextMenu`）用的是同一份插件项和同一个执行器 `runSessionMenuPluginAction`：两处各写一遍会让同一个插件在两个入口表现不一样。对话区那一份插在「分享链接」之后、Clear 之前（危险项永远排最后），没有会话时禁用；结果在对话里落一条 notice，侧栏那处进 toast。
 - 父子关系（`parentSessionId`）是会话树的唯一事实来源，只改渲染顺序，**不区分来源**：sidecar
   子会话、fork 分支与手动拖出来的层级共用这一个字段，侧栏不给它们加标签或图标。父行在前、

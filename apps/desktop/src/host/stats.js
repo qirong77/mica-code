@@ -417,8 +417,8 @@ export function registerStatsIpc() {
   ipcMain.handle('stats:rename-project-group', (_event, { groupId, name } = {}) =>
     writeProjects(renameGroup(readProjects(), groupId, name))
   )
-  ipcMain.handle('stats:move-project-group', (_event, { groupId, parentId } = {}) =>
-    writeProjects(moveGroup(readProjects(), groupId, parentId))
+  ipcMain.handle('stats:move-project-group', (_event, { groupId, parentId, placement } = {}) =>
+    writeProjects(moveGroup(readProjects(), groupId, parentId, placement))
   )
   ipcMain.handle('stats:delete-project-group', (_event, { groupId } = {}) =>
     writeProjects(deleteGroup(readProjects(), groupId))

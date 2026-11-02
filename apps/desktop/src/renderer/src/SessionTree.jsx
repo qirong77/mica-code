@@ -51,7 +51,6 @@ import {
 } from './session-annotations'
 import {
   childGroups,
-  groupSubtreeIds,
   inheritedSessionSection,
   sessionSectionOf,
   sessionsByGroup
@@ -383,6 +382,7 @@ export function SessionTree({
   onDeleteSession,
   onDeleteDraft,
   onShareSession,
+  onForkSession,
   onReorderSessions,
   onCreateGroup,
   onRenameGroup,
@@ -761,6 +761,7 @@ export function SessionTree({
     } else if (action === 'pin' || action === 'unpin') onTogglePin(menuPayload.session.id)
     else if (action === 'unassign') onMoveSession(menuPayload.session.id, { section: 'recent' })
     else if (action === 'detail') setDetailSessionId(menuPayload.session.id)
+    else if (action === 'fork') onForkSession?.(menuPayload.session.id)
     else if (action === 'share') onShareSession?.(menuPayload.session.id)
     // 会话行带 session，草稿行（新对话）只有 draft：两者都要认，否则草稿的重命名抛错、
     // 编辑态进不去，表现成「点了没反应」。
@@ -825,12 +826,10 @@ export function SessionTree({
     [drag, sessions]
   )
 
-  /** 分组行的落点是否成立：不能落进自己或自己的子树，也不能是当前父级。 */
-  const canNestInto = (draggedId, targetGroupId) => {
-    if (!draggedId || !targetGroupId || draggedId === targetGroupId) return false
-    if (groupSubtreeIds(projects, draggedId).has(targetGroupId)) return false
-    const dragged = (projects?.groups || []).find((group) => group.id === draggedId)
-    return (dragged?.parentId ?? null) !== targetGroupId
+  const groupDropPosition = (event) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const ratio = (event.clientY - rect.top) / rect.height
+    return ratio < 0.25 ? 'before' : ratio > 0.75 ? 'after' : 'into'
   }
 
   // 一次 drop 的统一出口：分组落到分组行/Projects 标题 = 换父级，会话照旧搬分区或重排。
@@ -854,7 +853,7 @@ export function SessionTree({
     else if (plan.kind === 'unnest') onSetSessionParent?.(source.id, null)
     else if (plan.kind === 'move')
       moveDragged(source, plan.target, { clearParent: plan.clearParent })
-    else if (plan.kind === 'move-group') onMoveGroup?.(plan.groupId, plan.parentId)
+    else if (plan.kind === 'move-group') onMoveGroup?.(plan.groupId, plan.parentId, plan.placement)
     else onReorderSessions(sectionOrderKey(section, groupId), plan.ids)
   }
 
@@ -1259,7 +1258,16 @@ export function SessionTree({
       <li key={groupId}>
         <div
           className={`${groupRowClass} ${drag?.kind === 'group' && drag.id === groupId ? 'opacity-40' : ''}`}
-          style={{ paddingLeft: rowIndent(depth), boxShadow: isOver ? dropShadow : undefined }}
+          style={{
+            paddingLeft: rowIndent(depth),
+            boxShadow: isOver
+              ? over.position === 'before'
+                ? 'inset 0 2px 0 rgba(90,167,232,.9)'
+                : over.position === 'after'
+                  ? 'inset 0 -2px 0 rgba(90,167,232,.9)'
+                  : dropShadow
+              : undefined
+          }}
           title={group.name}
           draggable={!editingThis}
           // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
@@ -1272,13 +1280,22 @@ export function SessionTree({
           onContextMenu={(event) => openMenu(event, { group, items: groupMenuItems() })}
           onDragOver={(event) => {
             if (!drag) return
-            if (drag.kind === 'group') {
-              // 拖进自己的子树会成环；本来就挂在这个父级下也没什么可做的
-              if (!canNestInto(drag.id, groupId)) return
-            } else if (drag.section === 'project' && drag.groupId === groupId) return
+            const position = drag.kind === 'group' ? groupDropPosition(event) : null
+            if (
+              !resolveDrop({
+                drag,
+                section: 'project',
+                groupId,
+                groups: projects?.groups || [],
+                position
+              })
+            ) {
+              setOver(null)
+              return
+            }
             event.preventDefault()
             event.stopPropagation()
-            setOver({ section: 'project', groupId, onGroup: true })
+            setOver({ section: 'project', groupId, onGroup: true, position })
           }}
           onDrop={(event) => {
             event.preventDefault()
@@ -1287,7 +1304,11 @@ export function SessionTree({
             clearDrag()
             // 落到分组行本身就是「移入这个分组」/「挂到这个分组下」；
             // 已经在里面的会在决策里被判为无操作
-            applyDrop(source, { section: 'project', groupId })
+            applyDrop(source, {
+              section: 'project',
+              groupId,
+              position: source?.kind === 'group' ? groupDropPosition(event) : null
+            })
           }}
         >
           <Slot>

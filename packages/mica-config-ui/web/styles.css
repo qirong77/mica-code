@@ -2085,6 +2085,43 @@ html[data-theme='light'] .mica-config-ui {
     min-width: 0;
   }
 
+  .prompt-part-select {
+    width: 100%;
+    padding: 5px 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .prompt-part-select:hover,
+  .prompt-part-select.is-selected {
+    background: var(--panel-muted);
+    border-color: var(--line);
+  }
+
+  .prompt-part-select:focus-visible {
+    outline: 1px solid var(--blue);
+  }
+
+  .prompt-module-heading {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-soft);
+  }
+
+  .prompt-module-heading strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* 表头与数据行共用同一套列宽：两列数字在同一个位置对齐。 */
   .prompt-part-head {
     padding-bottom: 2px;

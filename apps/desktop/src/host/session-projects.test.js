@@ -112,3 +112,43 @@ describe('group tree edits', () => {
     expect(moveGroup(projects, 'c', 'b')).toEqual(projects)
   })
 })
+
+describe('group ordering', () => {
+  const projects = normalizeProjects({
+    groups: [
+      { id: 'a' },
+      { id: 'b' },
+      { id: 'child', parentId: 'a' },
+      { id: 'other', parentId: 'a' }
+    ],
+    assignments: { session: 'child' }
+  })
+  it('persists root and nested sibling order without changing assignments', () => {
+    const reordered = moveGroup(projects, 'b', null, { targetId: 'a', position: 'before' })
+    expect(
+      normalizeProjects(JSON.parse(JSON.stringify(reordered))).groups.map((g) => g.id)
+    ).toEqual(['b', 'a', 'child', 'other'])
+    const nested = moveGroup(projects, 'child', 'a', { targetId: 'other', position: 'after' })
+    expect(nested.groups.map((g) => g.id)).toEqual(['a', 'b', 'other', 'child'])
+    expect(nested.assignments).toEqual(projects.assignments)
+    expect(projects.groups.map((g) => g.id)).toEqual(['a', 'b', 'child', 'other'])
+  })
+  it('moves across parents at the requested position and preserves the subtree', () => {
+    const result = moveGroup(projects, 'a', 'b')
+    const moved = moveGroup(result, 'a', null, { targetId: 'b', position: 'after' })
+    expect(moved.groups.map((g) => g.id)).toEqual(['b', 'a', 'child', 'other'])
+    expect(moved.groups.find((g) => g.id === 'child').parentId).toBe('a')
+  })
+  it('rejects descendants, missing targets, and mismatched parents', () => {
+    for (const [parent, target] of [
+      ['a', 'child'],
+      [null, 'missing'],
+      [null, 'child'],
+      [null, 'a']
+    ]) {
+      expect(moveGroup(projects, 'a', parent, { targetId: target, position: 'before' })).toEqual(
+        projects
+      )
+    }
+  })
+})

@@ -13,6 +13,7 @@ describe('sessionMenuItems', () => {
     expect(items.map((item) => (item === 'separator' ? item : item[0]))).toEqual([
       'pin',
       'detail',
+      'fork',
       'share',
       'rename',
       'separator',
@@ -26,6 +27,7 @@ describe('sessionMenuItems', () => {
       'unpin',
       'unassign',
       'detail',
+      'fork',
       'share',
       'rename',
       'separator',
@@ -43,6 +45,22 @@ describe('sessionMenuItems', () => {
   it('offers 分享链接 for the real session', () => {
     const items = sessionMenuItems({ pinned: false, inProject: false })
     expect(items).toContainEqual(['share', '分享链接'])
+  })
+})
+
+describe('fork menu action', () => {
+  it('offers Fork for real sessions, including derived sessions, but not drafts', () => {
+    for (const isChild of [false, true]) {
+      expect(sessionMenuItems({ pinned: false, inProject: false, isChild })).toContainEqual([
+        'fork',
+        'Fork'
+      ])
+    }
+    expect(
+      draftMenuItems()
+        .filter(Array.isArray)
+        .map((item) => item[0])
+    ).not.toContain('fork')
   })
 })
 
@@ -86,6 +104,7 @@ describe('withExtraMenuItems', () => {
     expect(labels(items)).toEqual([
       '置顶',
       '查看详情',
+      'Fork',
       '分享链接',
       '重命名',
       '---',
@@ -106,11 +125,11 @@ describe('withExtraMenuItems', () => {
   })
 })
 
-
 describe('derived session menu', () => {
   it('keeps other actions but removes pinning and moving even for stale assignments', () => {
     const actions = sessionMenuItems({ pinned: true, inProject: true, isChild: true })
-      .filter(Array.isArray).map((item) => item[0])
-    expect(actions).toEqual(['detail', 'share', 'rename', 'delete'])
+      .filter(Array.isArray)
+      .map((item) => item[0])
+    expect(actions).toEqual(['detail', 'fork', 'share', 'rename', 'delete'])
   })
 })

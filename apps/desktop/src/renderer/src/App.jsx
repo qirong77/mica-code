@@ -1938,9 +1938,9 @@ export default function App() {
   }, [])
 
   /** 拖拽嵌套：分组换父级，parentId 为 null 即移回根。 */
-  const moveGroup = useCallback((groupId, parentId = null) => {
+  const moveGroup = useCallback((groupId, parentId = null, placement = null) => {
     window.mica.stats
-      .moveProjectGroup(groupId, parentId)
+      .moveProjectGroup(groupId, parentId, placement)
       .then(setProjects)
       .catch((error) => console.error('move project group failed', error))
   }, [])
@@ -2003,6 +2003,20 @@ export default function App() {
       return nodeId || null
     },
     [createTerminal, nodesRef, selectNode]
+  )
+
+  const forkSession = useCallback(
+    async (sessionId) => {
+      if (!sessionId) return
+      try {
+        const forked = await window.mica.chat.fork(sessionId)
+        refreshSessions()
+        openSession(forked)
+      } catch (error) {
+        showToast(`分叉会话失败：${error?.message || String(error)}`, true)
+      }
+    },
+    [openSession, refreshSessions, showToast]
   )
 
   /**
@@ -2697,6 +2711,7 @@ export default function App() {
               onDeleteSession={deleteSession}
               onDeleteDraft={deleteDraft}
               onShareSession={shareSession}
+              onForkSession={forkSession}
             />
           </aside>
         )}

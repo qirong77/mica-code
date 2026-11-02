@@ -12,6 +12,7 @@ export type PromptPart = {
   /** 顶层标签名；空串表示标签之外的附加内容。 */
   tag: string;
   label: string;
+  content: string;
   chars: number;
   tokens: number;
 };
@@ -26,19 +27,43 @@ const SECTION_LABELS: Record<string, string> = {
 };
 
 const GAP_LABEL = '插件段落 / 其它注入';
-const SECTION_PATTERN = /^<([a-z][a-z0-9_-]*)>\r?\n([\s\S]*?)\r?\n<\/\1>$/gm;
+const TAG_LINE = /^<(\/?)([a-z][a-z0-9_-]*)>$/;
 
 /** 按顶层标签切段；纯空白的间隔丢弃，只统计真的有内容的部分。 */
 export function splitPromptSections(prompt: string): PromptPart[] {
   if (!prompt) return [];
   const parts: PromptPart[] = [];
   let cursor = 0;
-  SECTION_PATTERN.lastIndex = 0;
-  for (let match = SECTION_PATTERN.exec(prompt); match; match = SECTION_PATTERN.exec(prompt)) {
-    const start = match.index;
-    if (start > cursor) pushPart(parts, '', prompt.slice(cursor, start));
-    pushPart(parts, match[1]!, match[0]);
-    cursor = start + match[0].length;
+  let active: { tag: string; start: number; depth: number } | null = null;
+  let fence: { marker: string; length: number } | null = null;
+  let offset = 0;
+  for (const rawLine of prompt.split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+    const boundary = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (boundary && boundary[1]![0] === fence.marker && boundary[1]!.length >= fence.length && !boundary[2]!.trim())
+        fence = null;
+    } else if (boundary) {
+      fence = { marker: boundary[1]![0]!, length: boundary[1]!.length };
+    } else {
+      const tag = TAG_LINE.exec(line);
+      if (tag) {
+        const closing = !!tag[1];
+        const name = tag[2]!;
+        if (!active && !closing) active = { tag: name, start: offset, depth: 1 };
+        else if (active?.tag === name) {
+          active.depth += closing ? -1 : 1;
+          if (active.depth === 0) {
+            if (active.start > cursor) pushPart(parts, '', prompt.slice(cursor, active.start));
+            const end = offset + line.length;
+            pushPart(parts, name, prompt.slice(active.start, end));
+            cursor = end;
+            active = null;
+          }
+        }
+      }
+    }
+    offset += rawLine.length + 1;
   }
   if (cursor < prompt.length) pushPart(parts, '', prompt.slice(cursor));
   return parts;
@@ -57,5 +82,5 @@ export function summarizePrompt(prompt: string): { chars: number; tokens: number
 
 function pushPart(parts: PromptPart[], tag: string, raw: string): void {
   if (!raw.trim()) return;
-  parts.push({ tag, label: promptPartLabel(tag), chars: raw.length, tokens: estimateTextTokens(raw) });
+  parts.push({ tag, label: promptPartLabel(tag), content: raw, chars: raw.length, tokens: estimateTextTokens(raw) });
 }

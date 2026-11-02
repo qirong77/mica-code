@@ -2,6 +2,7 @@
  * 会话列表右键 / 更多操作菜单的条目。
  *
  * 「查看详情」打开 Stats 页复用的 session 详情弹窗，只读、不碰磁盘。
+ * 「Fork」复用已有会话分叉能力；草稿没有可复制的会话，因此不提供此项。
  * 「分享链接」生成一条只带这个会话的地址（见 app-url.js 的 sessionShareUrl），打开它的人
  * 看不到左侧会话列表，所以草稿没有这一项——草稿还没绑定会话，没有可分享的对象。
  * 「删除对话」始终给出，和标签页有没有打开无关——它删的是磁盘上的会话，不是界面上的
@@ -10,7 +11,13 @@
 export function sessionMenuItems({ pinned, inProject, isChild = false }) {
   const items = isChild ? [] : [[pinned ? 'unpin' : 'pin', pinned ? '取消置顶' : '置顶']]
   if (inProject && !isChild) items.push(['unassign', '移出项目分组'])
-  items.push(['detail', '查看详情'], ['share', '分享链接'], ['rename', '重命名'], 'separator')
+  items.push(
+    ['detail', '查看详情'],
+    ['fork', 'Fork'],
+    ['share', '分享链接'],
+    ['rename', '重命名'],
+    'separator'
+  )
   items.push(['delete', '删除对话', true])
   return items
 }
