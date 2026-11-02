@@ -93,6 +93,28 @@ async function fixture() {
 }
 
 describe('connection card callbacks', () => {
+  it('persists deletion and closes the removed entry note editor', async () => {
+    const { api, render } = await fixture();
+    byName(render(), 'NoteEditButton').props.onClick();
+    byName(render(), 'NoteInput').props.onChange('Office');
+    byName(render(), 'DeletePeerButton').props.onClick();
+    await vi.waitFor(() => expect(byName(render(), 'DeletePeerButton')).toBeUndefined());
+    expect(byName(render(), 'NoteInput')).toBeUndefined();
+    expect(api.writeData.mock.calls.at(-1)?.[0].peers).toEqual([]);
+    expect(api.open).not.toHaveBeenCalled();
+  });
+
+  it('keeps the connection when deletion fails and allows retry', async () => {
+    const { api, render } = await fixture();
+    api.writeData.mockRejectedValueOnce(new Error('disk full'));
+    byName(render(), 'DeletePeerButton').props.onClick();
+    await vi.waitFor(() => expect(JSON.stringify(render())).toContain('disk full'));
+    expect(byName(render(), 'NoteEditButton')).toBeDefined();
+    byName(render(), 'DeletePeerButton').props.onClick();
+    await vi.waitFor(() => expect(byName(render(), 'DeletePeerButton')).toBeUndefined());
+    expect(JSON.stringify(render())).not.toContain('disk full');
+  });
+
   it('starts one probe when the same action fires twice before the next render', async () => {
     const { api, render } = await fixture();
     const probe = deferred<{ ok: boolean; error: string }>();

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Monitor, Pencil } from 'lucide-react';
+import { Monitor, Pencil, Trash2 } from 'lucide-react';
 import { DEFAULT_RUNTIME_URL, isLoopbackRuntime, relayTokenOf, runtimeLabel } from '@packages/mica-web-shared/index.js';
 import { MAX_PEER_NOTE_LENGTH, emptyPeerStore, findPeer, peerRows, rememberPeer, samePeer, setPeerNote } from './peers';
 import { createPeerPersistence } from './persistence';
@@ -81,6 +81,21 @@ export default function ConnectionsCard({ api, onClose }) {
     pendingNote.current = { url, note };
     setNoteTarget(url);
     setNoteDraft(note);
+  };
+  const removePeer = async (url) => {
+    try {
+      await update((previous) => ({
+        ...previous,
+        peers: previous.peers.filter((peer) => !samePeer(peer.url, url)),
+      }));
+      if (pendingNote.current && samePeer(pendingNote.current.url, url)) {
+        pendingNote.current = null;
+        setNoteTarget('');
+      }
+      setError('');
+    } catch (caught) {
+      setError(caught?.message || String(caught));
+    }
   };
   const saveNote = async () => {
     if (!noteTarget || savingNote.current || pendingNote.current?.url !== noteTarget) return;
@@ -195,7 +210,12 @@ export default function ConnectionsCard({ api, onClose }) {
             {currentEntry?.note && <span className="block truncate text-[11px] text-fg-soft">{currentEntry.note}</span>}
           </span>
           <span className="shrink-0 text-[10px] text-success-soft">当前</span>
-          {currentEntry && <NoteEditButton onClick={() => startNoteEdit(currentEntry.url)} />}
+          {currentEntry && (
+            <>
+              <NoteEditButton onClick={() => startNoteEdit(currentEntry.url)} />
+              <DeletePeerButton disabled={Boolean(busy)} onClick={() => void removePeer(currentEntry.url)} />
+            </>
+          )}
         </div>
         {noteTarget && samePeer(noteTarget, current) && noteInput}
       </div>
@@ -218,6 +238,7 @@ export default function ConnectionsCard({ api, onClose }) {
             </button>
             {busy === entry.url && <span className="shrink-0 text-[10px] text-fg-muted">连接中…</span>}
             <NoteEditButton onClick={() => startNoteEdit(entry.url)} />
+            <DeletePeerButton disabled={Boolean(busy)} onClick={() => void removePeer(entry.url)} />
           </div>
           {noteTarget === entry.url && noteInput}
         </div>
@@ -398,6 +419,21 @@ function RemoteAccess({ api }) {
         </p>
       )}
     </div>
+  );
+}
+
+function DeletePeerButton({ onClick, disabled }) {
+  return (
+    <button
+      type="button"
+      title="删除连接记录"
+      aria-label="删除连接记录"
+      disabled={disabled}
+      className="shrink-0 rounded-sm p-0.5 text-fg-dim opacity-0 transition-opacity hover:bg-overlay-strong hover:text-danger focus-visible:opacity-100 group-hover/peer:opacity-100 max-md:opacity-100 disabled:pointer-events-none disabled:opacity-40"
+      onClick={onClick}
+    >
+      <Trash2 size={12} />
+    </button>
   );
 }
 
