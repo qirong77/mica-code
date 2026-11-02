@@ -10,7 +10,7 @@ import type {
 } from '@packages/mica-plugin/index.js';
 import { buildStatus, readBridgePid } from './BridgeSupervisor.js';
 import { findRendererDir, readDeployState, runSetup } from './DeployRunner.js';
-import { runPageSync } from './PageSyncAction.js';
+import { guidePageSync } from './PageSyncAction.js';
 import { machineIdentity } from './Registrar.js';
 import { registerMachine } from './registerMachine.js';
 
@@ -143,7 +143,7 @@ function pageSection(ctx: PluginContext, dataDir: string | null): PluginPanelSec
         label: '更新中转机页面',
         tone: attentionText ? 'primary' : 'ghost',
         disabled: !configured,
-        hint: '把手机端页面换成这台机器当前的版本；一致时不上传。',
+        hint: '开一个新会话，提示词已备好：按回车让 agent 去更新页面。',
       },
     ],
   };
@@ -379,9 +379,8 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
       }
 
       if (action === 'sync-page') {
-        const result = await runPageSync(ctx, dataDir);
-        if (!result.ok) throw new Error(result.message);
-        return { message: result.message };
+        // 只把提示词交给宿主：新会话、输入框、按不按回车都由页面与用户决定。
+        return guidePageSync();
       }
 
       if (action === 'apply') {

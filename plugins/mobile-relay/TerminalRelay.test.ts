@@ -52,10 +52,11 @@ async function waitForPort(port: number, timeoutMs = 10_000): Promise<void> {
 type Harness = {
   localCalls: string[];
   invoke: (channel: string, payload?: unknown) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
+  relayPort: number;
   stop: () => Promise<void>;
 };
 
-async function startHarness(options: { allowWrites?: boolean } = {}): Promise<Harness> {
+async function startHarness(): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'mica-relay-terminal-'));
   const localCalls: string[] = [];
 
@@ -64,6 +65,22 @@ async function startHarness(options: { allowWrites?: boolean } = {}): Promise<Ha
     if (url.pathname === '/api/env') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ platform: 'darwin', homeDir: '/tmp' }));
+      return;
+    }
+    if (url.pathname === '/api/paste-image' && req.method === 'POST') {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(chunk as Buffer));
+      req.on('end', () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as { dataUrl?: string };
+        localCalls.push('__paste-image');
+        if (!String(body.dataUrl || '').startsWith('data:image/')) {
+          res.writeHead(400, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'bad data url' }));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ref: '/tmp/images/pasted-1.png' }));
+      });
       return;
     }
     if (url.pathname === '/api/events') {
@@ -81,6 +98,11 @@ async function startHarness(options: { allowWrites?: boolean } = {}): Promise<Ha
         };
         const channel = String(body.channel || '');
         localCalls.push(channel);
+        if (channel.startsWith('no-such:')) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: `No handler registered for '${channel}'` }));
+          return;
+        }
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: true, result: { channel, payload: body.payload } }));
       });
@@ -124,8 +146,7 @@ async function startHarness(options: { allowWrites?: boolean } = {}): Promise<Ha
         enabled: 'true',
         relayUrl: `http://127.0.0.1:${relayPort}`,
         localUrl: `http://127.0.0.1:${localPort}`,
-        token: TOKEN,
-        allowWrites: options.allowWrites ? 'true' : 'false'
+        token: TOKEN
       },
       null,
       2
@@ -162,6 +183,7 @@ async function startHarness(options: { allowWrites?: boolean } = {}): Promise<Ha
   return {
     localCalls,
     invoke,
+    relayPort,
     stop: async () => {
       bridge.kill('SIGKILL');
       relay.kill('SIGTERM');
@@ -203,14 +225,34 @@ describe('relay terminal access', () => {
     }
   });
 
-  // 写工作区的通道默认拒绝，理由写在错误里——用户看到的是「去设置里打开那一项」，
-  // 而不是一句「远程不支持」。
-  it('默认挡下会改工作区的通道，并说明怎么打开', async () => {
-    const rejected = await harness.invoke('files:write', { path: '/tmp/x', content: 'x' });
-    expect(rejected.ok).toBe(false);
-    expect(rejected.error).toContain('files:write');
-    expect(rejected.error).toContain('允许手机端修改文件与 Git');
-    expect(harness.localCalls).not.toContain('files:write');
+  // 页面能打开就等于坐在这台机器前：不再有「只读」的那一半。
+  // 这条曾经是 bug——`chat:commit` 因为不在白名单里而在手机上直接失败，
+  // 报错看起来还像权限问题。
+  it('写工作区的通道直通，不需要任何开关', async () => {
+    for (const channel of ['files:write', 'git:discard', 'chat:commit', 'share:add']) {
+      expect((await harness.invoke(channel, {})).ok).toBe(true);
+      expect(harness.localCalls).toContain(channel);
+    }
+  });
+
+  it('运行时没有的通道直说「运行时不提供」，不说成权限问题', async () => {
+    const result = await harness.invoke('no-such:channel', {});
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('no-such:channel');
+    expect(result.error).toContain('运行时不提供');
+    expect(result.error).not.toContain('允许手机端修改');
+  });
+
+  it('手机上贴的截图经中转机送进本机图片目录', async () => {
+    const response = await fetch(`http://127.0.0.1:${harness.relayPort}/api/paste-image?t=${TOKEN}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dataUrl: 'data:image/png;base64,iVBORw0KGgo=' })
+    });
+    const body = (await response.json()) as { ok: boolean; ref?: string; error?: string };
+    expect(body.ok).toBe(true);
+    expect(body.ref).toBe('/tmp/images/pasted-1.png');
+    expect(harness.localCalls).toContain('__paste-image');
   });
 
   it('命令不等下一轮轮询：发起后立刻到达本机', async () => {
@@ -218,24 +260,5 @@ describe('relay terminal access', () => {
     const result = await harness.invoke('terminal:get-cwd', { id: 'tab-1:terminal' });
     expect(result.ok).toBe(true);
     expect(Date.now() - started).toBeLessThan(1500);
-  });
-});
-
-describe('打开「允许手机端修改文件与 Git」之后', () => {
-  let harness: Harness;
-
-  beforeAll(async () => {
-    harness = await startHarness({ allowWrites: true });
-  }, 30_000);
-
-  afterAll(async () => {
-    await harness?.stop();
-  });
-
-  it('写文件与 Git 写操作随开关放行', async () => {
-    for (const channel of ['files:write', 'git:stage', 'chat:commit']) {
-      expect((await harness.invoke(channel, {})).ok).toBe(true);
-      expect(harness.localCalls).toContain(channel);
-    }
   });
 });

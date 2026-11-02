@@ -938,6 +938,31 @@ function handleAwake(req, res, state) {
   sendJson(res, 200, { ok: true, until: state.awakeUntil })
 }
 
+/**
+ * 手机里贴一张截图：页面把 data URL 交给中转机，中转机转成一条命令让桥送回本机运行时，
+ * 由运行时的 `/api/paste-image` 落盘并回 `{ ok, ref }`。
+ *
+ * 走这条而不是让页面自己直连本机：两端不在同一个网络，页面能到达的只有中转机；
+ * 图片怎么存也只有运行时说了算（手机上贴的图与桌面端贴的图该落在同一个目录、同一种引用）。
+ */
+async function handlePasteImage(req, res, state) {
+  let body
+  try {
+    body = await readJsonBody(req)
+  } catch {
+    return sendJson(res, 400, { ok: false, error: 'bad json' })
+  }
+  const dataUrl = typeof body?.dataUrl === 'string' ? body.dataUrl : ''
+  if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(dataUrl)) {
+    return sendJson(res, 400, { ok: false, error: '缺少图片数据' })
+  }
+
+  const result = await invokeForResponse(state, '__paste-image', { dataUrl }, res)
+  if (res.destroyed) return
+  if (!result.ok) return sendJson(res, result.status || 200, { ok: false, error: result.error })
+  return sendJson(res, 200, { ok: true, ref: result.result?.ref ?? '' })
+}
+
 function handleEnv(req, res, state) {
   const env = state.env || {}
   sendJson(res, 200, {
@@ -1155,6 +1180,7 @@ async function route(req, res) {
     if (path === '/api/events') return handleEvents(req, res, state)
     if (path === '/api/env') return handleEnv(req, res, state)
     if (path === '/api/image') return handleImage(req, res, state, url)
+    if (path === '/api/paste-image' && req.method === 'POST') return handlePasteImage(req, res, state)
     if (path === '/api/paste') return sendJson(res, 501, { ok: false, error: '手机上不支持粘贴文件' })
     return sendJson(res, 404, { ok: false, error: 'not found' })
   }

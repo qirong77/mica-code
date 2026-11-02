@@ -54,13 +54,6 @@ function readSettings() {
     token: pick('token', 'RELAY_TOKEN'),
     // 默认严格校验证书：中转机给了真证书时，中间人拿不到那条 TLS 也伪造不了
     verifyTls: !(String(values?.verifyTls ?? 'true').toLowerCase() === 'false'),
-    /**
-     * 允许手机端改文件 / Git / 提交。
-     *
-     * 这不是安全边界：口令本来就能在对话与终端里执行命令。它防的是**误触**——手机上
-     * 一次手滑不该丢掉工作区的改动。默认关，设置里点开就生效（每轮重新读配置）。
-     */
-    allowWrites: String(values?.allowWrites ?? 'false').toLowerCase() === 'true',
     localUrl: String(process.env.LOCAL_URL || 'http://127.0.0.1:8787').replace(/\/+$/, ''),
     debug: Boolean(process.env.RELAY_DEBUG)
   }
@@ -108,8 +101,10 @@ function open(buffer) {
 /**
  * 二进制 POST。自签证书时不做链校验——内容本身由 AES-GCM 保证完整性，
  * 证书只影响「连的是不是那台机器」，而口令派生密钥已经覆盖了这一点。
+ *
+ * `signal` 用来打断一次挂起中的轮询：本机有新事件时不能等它超时。
  */
-function postBinary(target, body) {
+function postBinary(target, body, signal) {
   const url = new URL(target)
   const send = url.protocol === 'https:' ? httpsRequest : httpRequest
   return new Promise((resolve, reject) => {
@@ -131,7 +126,7 @@ function postBinary(target, body) {
         let bytes = 0
         res.on('data', (chunk) => {
           bytes += chunk.length
-          if (bytes > 4 * 1024 * 1024) req.destroy(new Error('relay response too large'))
+          if (bytes > MAX_POLL_RESPONSE_BYTES) req.destroy(new Error('relay response too large'))
           else chunks.push(chunk)
         })
         res.on('error', reject)
@@ -143,193 +138,53 @@ function postBinary(target, body) {
     deadline.unref?.()
     req.once('close', () => clearTimeout(deadline))
     req.on('timeout', () => req.destroy(new Error('timeout')))
+    if (signal) {
+      if (signal.aborted) req.destroy(wokenError())
+      else signal.addEventListener('abort', () => req.destroy(wokenError()), { once: true })
+    }
     req.on('error', reject)
     req.end(body)
   })
 }
 
-async function relayPoll(body) {
-  const response = await postBinary(`${settings.relayUrl}/api/poll`, seal({ ...body, ts: Date.now() }))
+/** 被本机事件打断的轮询，与真正的失败区分开。 */
+function wokenError() {
+  const error = new Error('woken')
+  error.woken = true
+  return error
+}
+
+/**
+ * 一轮轮询的响应上限。默认按「一串命令」的量级给（4MB），手机上贴一张截图时那张图
+ * 会作为命令载荷经过这里，3x 屏的 PNG base64 后常有 5–8MB，因此留到 24MB。
+ */
+const MAX_POLL_RESPONSE_BYTES = 24 * 1024 * 1024
+
+async function relayPoll(body, signal) {
+  const response = await postBinary(
+    `${settings.relayUrl}/api/poll`,
+    seal({ ...body, ts: Date.now() }),
+    signal
+  )
   if (response.status === 401) throw new Error('口令不匹配，或被中间设备改写')
   if (response.status !== 200) throw new Error(`relay HTTP ${response.status}`)
   return open(response.body)
 }
 
-/* ---------------------------------------------------------------- 事件 */
-
-const BASE_CHANNELS = [
-  // 对话本身
-  'chat:start',
-  'chat:abort',
-  'chat:is-running',
-  'chat:history',
-  'chat:meta',
-  'chat:models',
-  'chat:roles',
-  'chat:edit-message',
-  'chat:fork',
-  'chat:compact',
-  'chat:rename-session',
-  'chat:check-cwd',
-  'chat:update-cwd',
-  'chat:dispose',
-  'chat:hold-queued',
-  'chat:recall-queued',
-  'chat:input-history:read',
-  'chat:input-history:append',
-  // 常驻宿主的预热与「有人在输入」：页面切会话时叫醒宿主，自动压缩据此判断用户回来了
-  'chat:warm',
-  'chat:input-activity',
-  // 会话级设置：能力开关、笔记、插件设置
-  'chat:capabilities',
-  'chat:set-capabilities',
-  'chat:notes',
-  'chat:set-notes',
-  'chat:plugin-settings',
-  'chat:set-plugin-settings',
-  // 插件自己的入口：输入框上方的按钮、面板、会话右键菜单
-  'chat:plugin-panel-view',
-  'chat:plugin-panel-action',
-  'chat:session-menu-run',
-  // 后台任务与子代理：只看、只停
-  'chat:background-task-output',
-  'chat:kill-background-task',
-  'chat:subagent-detail',
-  'chat:kill-subagent',
-  // 旁问
-  'chat:btw-ask',
-  'chat:btw-threads',
-  'chat:btw-compact',
-  'chat:btw-interrupt',
-  'chat:btw-recall',
-  'chat:btw-close',
-  // 会话清单 / 统计 / 搜索
-  'stats:list-sessions',
-  'stats:list-pins',
-  'stats:list-projects',
-  'stats:list-sort',
-  'stats:list-annotations',
-  'stats:read',
-  'stats:session-detail',
-  'stats:session-title',
-  'stats:search-sessions',
-  'stats:set-annotation',
-  'stats:set-sort',
-  'stats:move-session',
-  'stats:delete-session',
-  'stats:create-project-group',
-  'stats:delete-project-group',
-  'stats:move-project-group',
-  'stats:rename-project-group',
-  // 分享链接：只列，创建/撤销要显式的写权限
-  'share:list',
-  // 共享 UI 状态：页签、工作区、布局、草稿
-  'ui-state:get',
-  'ui-state:patch',
-  // 配置页：provider、模型、MCP、技能、角色、插件设置都在这里。手机端也是同一个人，
-  // 口令本来就能在对话与终端里执行命令，挡掉配置页只会让「改个主题」也做不到。
-  'config-web:invoke',
-  // 文件视图：读 + 在应用里打开。删除/覆盖要显式的写权限
-  'files:list',
-  'files:read',
-  'files:stat',
-  'files:search',
-  'files:mention',
-  'files:find',
-  'files:order-get',
-  'files:open-path',
-  'files:copy-relative-path',
-  // Git 只读
-  'git:status',
-  'git:summary',
-  'git:branch-summary',
-  'git:file',
-  'git:refs',
-  'git:resolve-ref',
-  'git:change-counts',
-  // 技能索引、MCP 候选、通知、访问信息
-  'skills:list',
-  'mcp:candidates',
-  'notify:list',
-  'notify:mark-read',
-  'access:info',
-  // 插件卡片的前端能力：探活、数据、访问策略
-  'plugin-host:probe',
-  'plugin-host:read-data',
-  'plugin-host:write-data',
-  'plugin-host:access-get',
-  'plugin-host:access-set',
-  // 清单里声明过的插件动作（配置页那几个按钮）
-  'plugin-host:run-action',
-  // 定时循环
-  'loops:list',
-  'loops:start',
-  'loops:stop',
-  'loops:set-interval',
-  'loops:set-task',
-  'loops:set-status',
-  'loops:fire-now',
-  // 终端：会话面板里的那个真实 PTY（跑在运行时进程里）。手机只负责读写屏幕，
-  // 所以不含 terminal-control:*（那是主进程的受控窗口，依赖桌面外壳）。
-  'terminal:create',
-  'terminal:write',
-  'terminal:resize',
-  'terminal:clear',
-  'terminal:get-cwd',
-  'terminal:resolve-file-links',
-  'terminal:dispose',
-  'terminal:dispose-all'
-]
+/* ---------------------------------------------------------------- 通道 */
 
 /**
- * 会改这台机器上内容的通道，只有设置里打开「允许手机端修改文件与 Git」才放行。
- * 这不是安全边界（口令已经等于完整机器权限），是防误触：手机上一次手滑不该把
- * 工作区的改动丢掉。
- */
-const WRITE_CHANNELS = [
-  'files:write',
-  'files:create',
-  'files:delete',
-  'files:rename',
-  'files:move',
-  'files:duplicate',
-  'files:order-set',
-  'git:stage',
-  'git:unstage',
-  'git:discard',
-  'git:checkout',
-  'git:create-branch',
-  'chat:commit',
-  'share:add',
-  'share:remove'
-]
-
-const BASE = new Set(BASE_CHANNELS)
-
-function allowedChannels() {
-  if (!settings.allowWrites) return BASE
-  return new Set([...BASE_CHANNELS, ...WRITE_CHANNELS])
-}
-
-/**
- * 刻意不放行的通道，写在这里是为了让「为什么没有它」有据可查：
+ * 手机端不做通道过滤：页面能打开（口令对得上）就等于有人坐在这台机器前，凡是运行时
+ * 支持的通道一律照送。
  *
- * - `dialog:*` / `clipboard:*` / `browser-control:*`：依赖这台机器的 GUI 与会话，
- *   手机端做不了，放行也只是报错；
- * - `files:reveal`：在**这台机器**上弹 Finder，手机上看不到；
- * - `terminal-control:*`：受控终端窗口属于 Electron 主进程，运行时没有它。
- *
- * 会改工作区的那些（文件写、Git 写、提交、分享链接）见上面 WRITE_CHANNELS。
+ * 这里曾经维护一份放行清单，代价是运行时每加一个通道都会在手机上静默消失
+ * （`chat:commit`、`chat:save-pasted-image`、`terminal:open-file` 都是这么丢的），
+ * 报错还长得像权限问题。能力归属本来就该由运行时回答——它才知道每条通道要什么，
+ * 桥只负责搬运。要限制就限制在运行时那边，别再维护第二份名单。
  */
 
 const MAX_EVENT_FRAMES = 4000
 const MAX_EVENT_BYTES = 1_500_000
-
-/** 只给测试用：打印当前策略就退出，免得为了断言白名单去按正则扒源码。 */
-if (process.env.MICA_RELAY_POLICY) {
-  console.log(JSON.stringify({ base: [...BASE].sort(), writes: [...WRITE_CHANNELS].sort() }))
-  process.exit(0)
-}
 
 let eventBuffer = []
 let eventBytes = 0
@@ -380,6 +235,22 @@ async function readImage(path) {
   const buffer = Buffer.from(await res.arrayBuffer())
   if (buffer.length > 16 * 1024 * 1024) return { ok: false, error: '图片太大' }
   return { ok: true, result: { type: res.headers.get('content-type') || 'image/png', data: buffer.toString('base64') } }
+}
+
+/**
+ * 手机贴上来的截图写进本机的图片目录：怎么存、引用长什么样都交给运行时的
+ * `/api/paste-image`，桥只把这段 base64 递过去。
+ */
+async function pasteImage(dataUrl) {
+  const res = await fetch(`${settings.localUrl}/api/paste-image`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ dataUrl }),
+    signal: AbortSignal.timeout(60_000)
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.ok !== true) return { ok: false, error: body?.error || `图片保存失败（HTTP ${res.status}）` }
+  return { ok: true, result: { ref: String(body.ref || '') } }
 }
 
 async function readLocalEnv() {
@@ -438,12 +309,22 @@ function pushEvent(frame) {
     if (!dropped) break
     eventBytes -= JSON.stringify(dropped).length
   }
-  if (frame.channel === 'chat:event') wakeUp()
+  // 任何上行事件都该尽快送到手机：终端回显、文件树、Git 状态都不是 chat:event，
+  // 只对对话唤醒会让它们的延迟完全取决于挂起中的那次轮询几时超时。
+  wakeUp()
 }
 
 let wakeTimer = null
 let wakeResolve = null
+/** 正在挂起的那次轮询；有它时唤醒就是打断这次请求，而不是等它超时。 */
+let pollAbort = null
 function wakeUp() {
+  if (pollAbort) {
+    const controller = pollAbort
+    pollAbort = null
+    controller.abort()
+    return
+  }
   if (!wakeResolve) return
   const resolve = wakeResolve
   wakeResolve = null
@@ -484,15 +365,14 @@ async function runCommand(command) {
       const result = await readImage(String(payload?.path || ''))
       return { id: command.id, ...result }
     }
-    if (!allowedChannels().has(channel)) {
-      const hint = WRITE_CHANNELS.includes(channel) && !settings.allowWrites
-        ? '，需要在设置里打开「允许手机端修改文件与 Git」'
-        : ''
-      return { id: command.id, ok: false, error: `远程不支持 ${channel}${hint}` }
+    if (channel === '__paste-image') {
+      const result = await pasteImage(String(payload?.dataUrl || ''))
+      return { id: command.id, ...result }
     }
-
     const result = await localInvoke(channel, payload)
-    if (!result.ok) return { id: command.id, channel, payload, ok: false, error: result.error }
+    if (!result.ok) {
+      return { id: command.id, channel, payload, ok: false, error: explainError(channel, result.error) }
+    }
 
     const json = JSON.stringify(result.result ?? null)
     const hash = createHashOf(json)
@@ -500,6 +380,16 @@ async function runCommand(command) {
   } catch (error) {
     return { id: command.id, ok: false, error: String(error?.message || error) }
   }
+}
+
+/**
+ * 运行时不认识某条通道时，它报的是 `No handler registered for 'x'`。手机端看到这句话
+ * 只会以为是权限问题（之前正是如此），所以说清楚：这台机器的运行时没有它。
+ */
+function explainError(channel, error) {
+  const text = String(error || '')
+  if (!/no handler|not registered|unknown channel/i.test(text)) return text
+  return `这台机器的运行时不提供 ${channel}（${text}）。它通常属于桌面外壳的窗口能力，手机端没有。`
 }
 
 /** 只为去重，不需要密码学强度。 */
@@ -577,7 +467,10 @@ async function tick() {
     if (labelPending) body.label = labelPending
     const started = Date.now()
     const rawBytes = Buffer.byteLength(JSON.stringify(body))
-    const response = await relayPoll(body)
+    const controller = new AbortController()
+    pollAbort = controller
+    const response = await relayPoll(body, controller.signal)
+    pollAbort = null
     pollFailures = 0
     if (envPayload === env) envPayload = null
     labelPending = ''
@@ -605,6 +498,12 @@ async function tick() {
       intervalMs = 0
     }
   } catch (error) {
+    pollAbort = null
+    // 被本机事件打断：这一轮什么都没送出去（结果、事件都还在手上），立刻重发一轮。
+    if (error?.woken) {
+      pendingResults.unshift(...results)
+      return
+    }
     // 结果按 id 结算，重复回传是幂等的；丢掉它们会让已经执行完的操作等到超时。
     pendingResults.unshift(...results)
     clearResultCache(resultHashes)

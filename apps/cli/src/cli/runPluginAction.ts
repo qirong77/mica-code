@@ -2,6 +2,7 @@ import { micaCommands } from '@packages/mica-commands/index.js';
 import { formatExecError } from '@packages/mica-common/index.js';
 import { officialPlugins } from '@packages/mica-official-plugins/index.js';
 import { loadUserPlugins, micaPlugin, readDisabledPluginIds } from '@packages/mica-plugin/index.js';
+import type { PluginNewSession } from '@packages/mica-plugin/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { readActiveProviderConfig } from '@packages/mica-config/index.js';
 import { createPluginModels } from '../plugins/pluginModels.js';
@@ -29,6 +30,12 @@ export type PluginActionRunResult = {
   ok: boolean;
   message?: string;
   link?: string;
+  /**
+   * 「交给一个新会话去做」的交接单（提示词 + 角色 / 目录 / 发不发）。
+   *
+   * 这个进程不建会话，所以只把它原样交回页面：跳页签、放进输入框、等用户按回车都是页面的事。
+   */
+  newSession?: PluginNewSession;
   code?: string;
   error?: string;
 };
@@ -114,10 +121,12 @@ export async function runPluginAction(options: PluginActionRunOptions): Promise<
       values: options.values ?? {}
     });
     if (!result) return { ok: true };
+    const newSession = micaPlugin.normalizePluginNewSession(result.newSession);
     return {
       ok: true,
       ...(result.message ? { message: result.message } : {}),
-      ...(result.link ? { link: result.link } : {})
+      ...(result.link ? { link: result.link } : {}),
+      ...(newSession ? { newSession } : {})
     };
   } catch (error) {
     return { ok: false, code: 'error', error: formatExecError(error) };

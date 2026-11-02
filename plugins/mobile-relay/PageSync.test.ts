@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pageVersionOf, resolveRendererDir, syncPage } from './PageSync';
+import { guidePageSync } from './PageSyncAction';
 
 const relayScript = join(import.meta.dirname, 'relay', 'relay.mjs');
 const TOKEN = 'b'.repeat(48);
@@ -112,6 +113,20 @@ describe('page fingerprint', () => {
     writePage(env, 'bbb222');
     expect(resolveRendererDir({ explicit, env })).toBe(explicit);
     expect(resolveRendererDir({ explicit: join(root, 'missing'), env })).toBe(env);
+  });
+});
+
+describe('the button hands the update to a session', () => {
+  it('准备一段自洽的提示词，并且不替用户按发送', () => {
+    const { newSession } = guidePageSync();
+    expect(newSession.send).toBe(false);
+    // 接手的是新会话：看不出用户刚才点了什么，提示词必须自己说清要跑哪个操作。
+    expect(newSession.prompt).toContain('mobile_relay');
+    expect(newSession.prompt).toContain('sync_page');
+    // 产物缺失这一支是这一步最常见的失败，别让它变成「报错了，然后呢」。
+    expect(newSession.prompt).toContain('electron-vite build');
+    // 页面更新走 HTTP 上传，不需要 SSH，提示词不能把人引去重新部署。
+    expect(newSession.prompt).toContain('不要为此重新部署中转机');
   });
 });
 

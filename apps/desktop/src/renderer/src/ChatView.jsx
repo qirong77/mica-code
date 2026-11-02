@@ -118,7 +118,7 @@ import {
 import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { BtwDrawer } from './BtwDrawer'
 import { PluginPanels, PluginQuickBar } from './PluginPanels'
-import { queuePluginLaunch, takePluginLaunch } from './plugin-launch'
+import { queuePluginLaunch, subscribePluginLaunch, takePluginLaunch } from './plugin-launch'
 import { LoopBadge } from './LoopBadge'
 import { SessionSettingsDialog } from './SessionSettingsDialog'
 import { Popover } from './Popover'
@@ -5444,6 +5444,7 @@ export function ChatView({
       const prompt = String(task?.prompt ?? '').trim()
       if (!prompt) return
       const role = typeof task?.role === 'string' ? task.role.trim() : ''
+      const stageOnly = task?.send === false
       const target = onNewSessionRef.current?.(task?.cwd || cwdRef.current || null)
       if (!target) {
         appendNotice('插件要新开一个会话，但当前没有可用的工作目录', 'error')
@@ -5452,28 +5453,46 @@ export function ChatView({
       if (target === nodeIdRef.current) {
         if (role)
           overridesRef.current.set(target, { ...(overridesRef.current.get(target) || {}), role })
-        sendRef.current(prompt)
+        if (stageOnly) composeFromPlugin(prompt)
+        else sendRef.current(prompt)
         return
       }
-      queuePluginLaunch(target, { prompt, role })
+      queuePluginLaunch(target, { prompt, role, send: !stageOnly })
     },
-    [appendNotice, cwdRef, nodeIdRef]
+    [appendNotice, composeFromPlugin, cwdRef, nodeIdRef]
   )
 
-  // 新会话挂载并读完历史后，把交接单里的那条提示词发出去。等 `historyLoaded` 而不是
-  // 挂载即可：草稿节点拿到 sessionId 之前发消息会另起一条会话，交接就丢在半路。
-  useEffect(() => {
-    if (!nodeId || !historyLoaded) return
-    const task = takePluginLaunch(nodeId)
+  /**
+   * 取走并执行交给这个节点的那次启动（`send: false` 时只填进输入框）。
+   *
+   * 只能在读完历史后执行：草稿节点拿到 sessionId 之前发消息会另起一条会话，交接就丢在半路。
+   */
+  const runPluginLaunch = useCallback(() => {
+    const target = nodeIdRef.current
+    const task = takePluginLaunch(target)
     if (!task) return
     if (task.role) {
-      overridesRef.current.set(nodeId, {
-        ...(overridesRef.current.get(nodeId) || {}),
+      overridesRef.current.set(target, {
+        ...(overridesRef.current.get(target) || {}),
         role: task.role
       })
     }
-    sendRef.current(task.prompt)
-  }, [historyLoaded, nodeId, sendRef])
+    if (task.send === false) composeFromPlugin(task.prompt)
+    else sendRef.current(task.prompt)
+  }, [composeFromPlugin, nodeIdRef, sendRef])
+
+  useEffect(() => {
+    if (!nodeId || !historyLoaded) return
+    runPluginLaunch()
+  }, [historyLoaded, nodeId, runPluginLaunch])
+
+  // 复用到的是已经挂着的空草稿时，它不会重新挂载，也就等不到上面那次 effect：
+  // 交接单加进来时通知一声，在场的实例立刻来取（见 `plugin-launch.js`）。
+  useEffect(() => {
+    return subscribePluginLaunch((target) => {
+      if (target === nodeIdRef.current) runPluginLaunch()
+    })
+  }, [nodeIdRef, runPluginLaunch])
 
   const closePluginTask = useCallback(() => setPluginTask(null), [])
   const closePluginDialog = useCallback(() => setPluginDialog(null), [])
@@ -5497,7 +5516,8 @@ export function ChatView({
   const requestPluginSession = useCallback(
     (task) => {
       if (!task?.prompt) return
-      if (task.confirm === false) {
+      // 只放进输入框的启动不弹确认：什么都不会发生，用户看到提示词再按回车就是确认。
+      if (task.confirm === false || task.send === false) {
         launchPluginSession(task)
         return
       }

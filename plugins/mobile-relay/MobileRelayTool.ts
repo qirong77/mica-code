@@ -4,6 +4,7 @@ import { MicaTool } from '@packages/mica-tools/MicaTool.js';
 import type { ToolExecuteCallbacks, ToolInput } from '@packages/mica-tools/MicaTool.js';
 import type { ToolResult } from '@packages/mica-tools/types.js';
 import { readBridgePid } from './BridgeSupervisor.js';
+import { runPageSync } from './PageSyncAction.js';
 
 const LOCAL_RUNTIME = 'http://127.0.0.1:8787';
 
@@ -11,25 +12,27 @@ export class MobileRelayTool extends MicaTool {
   constructor(private readonly ctx: PluginContext) {
     super(
       'mobile_relay',
-      '手机远程访问通道：中转机与本机是否接通、手机链接，以及一步步排查连不上的原因。',
+      '手机远程访问通道：中转机与本机是否接通、手机链接、逐项排查，以及把手机端页面更新到本机这版。',
       {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['status', 'link', 'doctor'],
-            description: 'status 概况 / link 手机链接 / doctor 逐项排查',
+            enum: ['status', 'link', 'doctor', 'sync_page'],
+            description:
+              'status 概况 / link 手机链接 / doctor 逐项排查 / sync_page 把中转机页面更新到本机这版（版本一致时不上传）',
           },
         },
         additionalProperties: false,
       },
-      { readOnly: true },
+      // sync_page 会打包上传页面并写状态文件，所以整件工具不算只读（其余操作确实是查询）。
+      { readOnly: false },
     );
   }
 
   onToolUseDisplayText(input: ToolInput): string {
     const action = String(input?.action ?? 'status');
-    return action === 'link' ? 'mobile_relay link' : `mobile_relay ${action}`;
+    return `mobile_relay ${action}`;
   }
 
   async execute(input: ToolInput, _callbacks?: ToolExecuteCallbacks): Promise<ToolResult> {
@@ -41,7 +44,19 @@ export class MobileRelayTool extends MicaTool {
     if (action === 'doctor') return this.doctor(relayUrl, token);
     if (!relayUrl || !token) return this.setupHint();
     if (action === 'link') return `${relayUrl}/?t=${token}`;
+    if (action === 'sync_page') return this.syncPage();
     return this.describe(relayUrl, token);
+  }
+
+  /**
+   * 把手机端页面换成这台机器当前的版本。
+   *
+   * 同一份实现也在插件的配置页按钮背后（`runPageSync`）：两条路径不该各写一套版本比较。
+   */
+  private async syncPage(): Promise<string> {
+    const result = await runPageSync(this.ctx, this.dataDir());
+    if (!result.ok) return `没更新成功：${result.message}`;
+    return result.link ? `${result.message}\n手机链接：${result.link}` : result.message;
   }
 
   private setupHint(): string {

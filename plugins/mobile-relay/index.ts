@@ -5,7 +5,7 @@ import { micaSkills } from '@packages/mica-skills/index.js';
 import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { registerBridgeSupervisor } from './BridgeSupervisor.js';
 import { createPanelHandler } from './Panel.js';
-import { runPageSync } from './PageSyncAction.js';
+import { guidePageSync } from './PageSyncAction.js';
 import { MobileRelayTool } from './MobileRelayTool.js';
 import { registerMachine } from './registerMachine.js';
 
@@ -84,12 +84,15 @@ export default function setup(ctx: PluginContext): void {
  *
  * 执行它的是一个一次性插件进程，因此这里不能假设有会话、有桥在跑——只读设置、
  * 发一次注册请求、把口令写回设置。
+ *
+ * 例外是页面更新：它只会把一段提示词交给宿主去开新会话（`guidePageSync`），真正动手
+ * 的是那一轮里的 agent。
  */
 function registerActions(ctx: PluginContext, dataDir: string | null): void {
   const actions = ctx.actions;
   if (!actions) return;
   actions.register('register', async ({ values }) => registerMachine(ctx, values, dataDir));
-  actions.register('sync-page', async () => runPageSync(ctx, dataDir));
+  actions.register('sync-page', async () => guidePageSync());
 }
 
 /**

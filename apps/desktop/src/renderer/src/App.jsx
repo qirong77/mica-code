@@ -34,6 +34,7 @@ import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
 import { PluginPage } from './PluginPage'
 import { usePluginAttention } from './plugin-attention'
+import { queuePluginLaunch } from './plugin-launch'
 import { SessionTree } from './SessionTree'
 import { runSessionMenuPluginAction, useSessionMenuPlugins } from './session-menu-plugins'
 import { SessionNotesDialog } from './SessionNotesDialog'
@@ -2334,6 +2335,25 @@ export default function App() {
     },
     [createTerminal]
   )
+  /**
+   * 配置页里的插件动作要「开一个新会话，把提示词摆进输入框」。
+   *
+   * 建页签、草稿复用都归这里；「要跑什么」交给那个即将挂载的 ChatView（`plugin-launch.js`），
+   * 它读完历史才执行，`send: false` 时只填字不发。关掉配置页是为了让人一眼看见摆好的提示词，
+   * 剩下按不按回车由用户决定。
+   */
+  const launchPluginFromConfig = useCallback(
+    (task) => {
+      const prompt = typeof task?.prompt === 'string' ? task.prompt.trim() : ''
+      if (!prompt) return false
+      const target = createChatSession(task.cwd || null)
+      if (!target) return false
+      queuePluginLaunch(target, { prompt, role: task.role, send: task.send })
+      closeConfigPage()
+      return true
+    },
+    [closeConfigPage, createChatSession]
+  )
   const changeChatCwd = useCallback(
     (cwd) => {
       const dir = typeof cwd === 'string' && cwd.trim() ? cwd.trim() : null
@@ -3148,6 +3168,7 @@ export default function App() {
                 section={configPage.section}
                 pluginId={configPage.pluginId}
                 onClose={closeConfigPage}
+                onNewSession={launchPluginFromConfig}
               />
             </Suspense>
           </div>

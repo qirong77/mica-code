@@ -2,7 +2,7 @@
   "id": "mobile-relay",
   "name": "Mobile Relay",
   "icon": "smartphone",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "手机经一台公网中转机打开这台机器上的 Mica：同一份会话、同样的流式输出。本机只做短轮询，不开监听端口、不转发端口；轮询体单独用 AES-256-GCM 加密。中转机通过内置 skill 交给 agent 现场部署，插件只管本机这座桥。",
   "author": "Mica Code",
   "main": "index.ts",
@@ -26,7 +26,7 @@
     {
       "key": "sync-page",
       "label": "更新中转机页面",
-      "description": "手动把手机端页面更新到这台机器的版本；一致时不上传，不会自己跑。"
+      "description": "打开一个新会话并把提示词放进输入框：你按回车后 agent 才去检查版本、必要时上传。"
     }
   ],
   "status": [
@@ -60,21 +60,13 @@
       "pattern": "^.{16,}$",
       "patternMessage": "至少 16 位。这个值由「注册到中转机」生成，手填的值中转机不认",
       "description": "点「注册到中转机」自动填好，不用手抄；手机链接里的 ?t= 就是它"
-    }
-    ,
+    },
     {
       "key": "rendererDir",
       "label": "页面产物目录",
       "type": "text",
       "placeholder": "留空自动查找",
       "description": "「更新中转机页面」打包上传的目录；留空时依次找 MICA_DESKTOP_RENDERER 与仓库里的 apps/desktop/out/renderer"
-    },
-    {
-      "key": "allowWrites",
-      "label": "允许手机端修改文件与 Git",
-      "type": "switch",
-      "default": "false",
-      "description": "打开后手机可以保存文件、暂存/丢弃改动、提交、创建分享链接。口令本来就能在对话与终端里执行命令，这一项只是防止手机上误触"
     }
   ]
 }

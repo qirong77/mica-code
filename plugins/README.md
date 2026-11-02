@@ -107,6 +107,12 @@ export default function setup(ctx: PluginContext) {
 处理器的入参 `values` 是页面当前的设置值（可能还没写盘），返回值是 `{ message?, link? }`。
 没在清单里声明的 key 注册会被拒绝——页面上没有那个按钮，静默接受只会让插件以为用户点得到。
 
+动作还可以把下一步交给**一个新会话**：`return { newSession: { prompt, send: false } }` 让页面
+开一个会话、把这段提示词放进输入框（`send: false` 时**不发**，等用户按回车）、顺手关掉配置页，
+和面板动作的 `newSession` 是同一份形状与同一套归一化。适合那些「需要一串判断与工具调用才做得完、
+按钮里写死几条 if 靠不住」的操作：插件只准备提示词，怎么跑交给那一轮里的 agent（它可以用插件
+自己注册的工具）。浏览器宿主没有会话可开，页面会如实说「在桌面端里点」。
+
 动作、桌面面板与会话菜单的登记会随插件自动回收，启动失败时也会撤销，无须再登记清理回调。
 
 执行它的是 `mica plugin-action --plugin <id> --action <key>`：**一个只装配目标插件的一次性进程**，
@@ -483,7 +489,8 @@ ctx.desktop.panel({
   - `return { newSession: { prompt, role?, cwd?, confirm? } }` 开一个**新会话**，把这段
     提示词作为它的第一条消息发出去。`confirm` 默认 `true`：页面先弹窗显示**完整提示词**
     （可编辑），用户点「开始」才真的建会话；只有按钮本身已经表示「就是要开」时才设
-    `confirm: false`。
+    `confirm: false`。再加 `send: false` 就只把提示词**放进新会话的输入框**并聚焦，不发送、
+    也不弹确认窗——「怎么做由人决定、agent 只是执行」的按钮用这一档，插件不该替用户按发送。
   - `return { dialog: { title, subtitle?, text?, columns, rows, note? } }` 弹一个**只读弹窗**：
     `text` 是会换行的正文（需求描述这类大段文字），表格可以没有；`columns` / `rows` 给的是
     对齐的表格（清单、对照表、链接一览这类；格子是单行省略的，别把一段话塞进格子）。

@@ -17,7 +17,9 @@ function bridgeHarness() {
       results: (items) => { pendingResults = items },
       env: (value) => { envPayload = value },
       settings: (fn) => { readSettings = fn },
-      key: () => CHANNEL_KEY
+      key: () => CHANNEL_KEY,
+      pushEvent: (frame) => pushEvent(frame),
+      wanted: (value) => { wanted = value }
     }`,
     );
   const schedule = vi.fn();
@@ -26,6 +28,7 @@ function bridgeHarness() {
   const context = {
     process: { env: { RELAY_URL: 'https://relay.test', RELAY_TOKEN: 'a'.repeat(32) }, on: vi.fn() },
     Buffer,
+    AbortController,
     AbortSignal,
     TextDecoder,
     createHash,
@@ -56,6 +59,8 @@ function bridgeHarness() {
       env(value: unknown): void;
       settings(fn: () => unknown): void;
       key(): Buffer;
+      pushEvent(frame: unknown): void;
+      wanted(value: boolean): void;
     },
   };
   runInNewContext(source, context);
@@ -194,6 +199,65 @@ describe('bridge transport', () => {
     expect(poll.mock.calls[2]?.[0]).toMatchObject({ results: [{ id: 'second', result: { value: 42 } }] });
   });
 
+  it('cuts a parked poll short as soon as a local event arrives', async () => {
+    const { bridge } = bridgeHarness();
+    bridge.wanted(true);
+    // 第一轮永远挂起（模拟中转机把轮询 park 住），之后几轮正常返回。
+    const poll = vi
+      .fn()
+      .mockImplementationOnce(
+        (_body: Record<string, unknown>, signal?: AbortSignal) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => {
+              const error = new Error('woken') as Error & { woken: boolean };
+              error.woken = true;
+              reject(error);
+            });
+          }),
+      )
+      .mockResolvedValue({ intervalMs: 0, wanted: true });
+    bridge.poll(poll);
+
+    const running = bridge.tick();
+    await vi.waitFor(() => expect(poll).toHaveBeenCalledTimes(1));
+    // 终端回显这类事件不是 chat:event，也必须立刻上行，而不是等挂起的那次轮询超时。
+    bridge.pushEvent({ channel: 'terminal:data', payload: { data: 'a' } });
+    await running;
+
+    await bridge.tick();
+    expect(poll.mock.calls[1]?.[0]).toMatchObject({
+      events: [{ channel: 'terminal:data', payload: { data: 'a' } }],
+    });
+  });
+
+  it('re-sends results that were in flight when a wake cut the poll short', async () => {
+    const { bridge } = bridgeHarness();
+    bridge.wanted(true);
+    const poll = vi.fn(
+      (_body: Record<string, unknown>, signal?: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            const error = new Error('woken') as Error & { woken: boolean };
+            error.woken = true;
+            reject(error);
+          });
+        }),
+    );
+    bridge.poll(poll);
+    bridge.results([{ id: 'in-flight', ok: true, result: 'done' }]);
+
+    const running = bridge.tick();
+    await vi.waitFor(() => expect(poll).toHaveBeenCalledTimes(1));
+    bridge.pushEvent({ channel: 'terminal:data', payload: { data: 'a' } });
+    await running;
+
+    poll.mockResolvedValueOnce({ intervalMs: 0, wanted: true });
+    await bridge.tick();
+    expect(poll.mock.calls[1]?.[0]).toMatchObject({
+      results: [{ id: 'in-flight', ok: true, result: 'done' }],
+    });
+  });
+
   it('reports a relay cache miss instead of successfully returning null', () => {
     const source = readFileSync(new URL('./relay/relay.mjs', import.meta.url), 'utf8');
     const start = source.indexOf('function resolveResult(');
@@ -267,6 +331,9 @@ describe('bridge and relay cache pressure', () => {
 
 afterEach(() => vi.useRealTimers());
 
+// 与 bridge.mjs 的 MAX_POLL_RESPONSE_BYTES 一致：手机贴的截图要能过，别的一律截断。
+const POLL_RESPONSE_LIMIT = 24 * 1024 * 1024;
+
 describe('bridge request deadlines', () => {
   function transportHarness() {
     const source = readFileSync(new URL('./agent/bridge.mjs', import.meta.url), 'utf8');
@@ -313,7 +380,7 @@ describe('bridge request deadlines', () => {
     vi.useFakeTimers();
     const { post, response, request } = transportHarness();
     const result = post('https://relay.test/poll', Buffer.from('body')).catch((error: Error) => error);
-    response.emit('data', Buffer.alloc(4 * 1024 * 1024 + 1));
+    response.emit('data', Buffer.alloc(POLL_RESPONSE_LIMIT + 1));
     expect(await result).toHaveProperty('message', expect.stringContaining('too large'));
     expect(request.destroy).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);

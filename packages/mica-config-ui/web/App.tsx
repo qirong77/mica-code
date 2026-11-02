@@ -13,6 +13,7 @@ import { SkillsPage } from './pages/SkillsPage.js';
 import { TerminalControlPage } from './pages/TerminalControlPage.js';
 import { PerformancePage } from './pages/PerformancePage.js';
 import { connectHeartbeat } from './api.js';
+import type { ConfigWebPluginNewSession } from '../src/shared/types.js';
 
 export type ConfigWebAppProps = {
   /**
@@ -25,9 +26,21 @@ export type ConfigWebAppProps = {
   /** 回到应用：由宿主提供时导航栏顶部出现「返回应用」，浏览器宿主不传。 */
   onClose?(): void;
   closeLabel?: string;
+  /**
+   * 插件动作要求「开一个新会话去做」时由宿主接手（桌面端会开页签、把提示词放进输入框）。
+   *
+   * 浏览器宿主没有会话可开，不传；页面据此如实提示「在桌面端里点」，不假装已经跳过去。
+   */
+  onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
 };
 
-export function App({ initialSection, initialPluginId = null, onClose, closeLabel }: ConfigWebAppProps = {}) {
+export function App({
+  initialSection,
+  initialPluginId = null,
+  onClose,
+  closeLabel,
+  onNewSession,
+}: ConfigWebAppProps = {}) {
   const [section, setSection] = useState<ConfigWebAppSection>(() => initialSection ?? readInitialSection());
   // 当前打开的插件详情：宿主（插件菜单）或地址栏（浏览器深链）指定，插件页只负责呈现。
   const [pluginId, setPluginId] = useState<string | null>(() => initialPluginId ?? readInitialPluginId());
@@ -74,7 +87,9 @@ export function App({ initialSection, initialPluginId = null, onClose, closeLabe
           {section === 'mcp' ? <McpPage /> : null}
           {section === 'skills' ? <SkillsPage /> : null}
           {section === 'capabilities' ? <CapabilitiesPage /> : null}
-          {section === 'plugins' ? <PluginsPage pluginId={pluginId} onSelectPlugin={selectPlugin} /> : null}
+          {section === 'plugins' ? (
+            <PluginsPage pluginId={pluginId} onSelectPlugin={selectPlugin} onNewSession={onNewSession} />
+          ) : null}
         </div>
       </main>
       <DialogHost />

@@ -177,8 +177,12 @@ describe('mobile-relay panel', () => {
     expect(button?.disabled).toBe(true);
   });
 
-  it('refuses to sync when there is no relay yet, instead of silently doing nothing', async () => {
+  it('hands the page update to a new session instead of uploading from the panel', async () => {
     const handler = createPanelHandler(fakeContext(), dir);
-    await expect(handler.action({ action: 'sync-page', values: {} })).rejects.toThrow(/还没连接中转机/);
+    const result = await handler.action({ action: 'sync-page', values: {} });
+    // 面板只准备提示词：真正上传由会话里的 agent 调 mobile_relay 工具完成。
+    const staged = result && 'newSession' in result ? result.newSession : undefined;
+    expect(staged?.send).toBe(false);
+    expect(staged?.prompt).toContain('sync_page');
   });
 });

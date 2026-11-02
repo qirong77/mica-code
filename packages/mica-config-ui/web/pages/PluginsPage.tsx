@@ -20,6 +20,7 @@ import type {
   ConfigWebPlugin,
   ConfigWebPluginAction,
   ConfigWebPluginActionResult,
+  ConfigWebPluginNewSession,
   ConfigWebPluginsDetails,
 } from '../../src/shared/types.js';
 import { appIcons } from '../icons.js';
@@ -52,9 +53,17 @@ const DESKTOP_CHECK_TONE = { granted: 'green', denied: 'red', unknown: 'default'
 export function PluginsPage({
   pluginId = null,
   onSelectPlugin = () => {},
+  onNewSession,
 }: {
   pluginId?: string | null;
   onSelectPlugin?(pluginId: string | null): void;
+  /**
+   * 动作要求「开一个新会话去做」时由宿主接手（桌面端会开页签、把提示词放进输入框）。
+   *
+   * 浏览器宿主没有会话可开，不传：页面那时只如实说「在桌面端里点」。返回值表示有没有真的
+   * 跳过去——没有就不能假装已经跳了。
+   */
+  onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
 } = {}) {
   const [details, setDetails] = useState<ConfigWebPluginsDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -113,6 +122,7 @@ export function PluginsPage({
         onRefresh={() => void load()}
         onToggleEnabled={(enabled) => void toggle(openPlugin, enabled)}
         onSaved={setDetails}
+        onNewSession={onNewSession}
       />
     );
   }
@@ -316,6 +326,7 @@ function PluginDetail({
   onRefresh,
   onToggleEnabled,
   onSaved,
+  onNewSession,
 }: {
   plugin: ConfigWebPlugin;
   busy: boolean;
@@ -328,6 +339,7 @@ function PluginDetail({
   onRefresh(): void;
   onToggleEnabled(enabled: boolean): void;
   onSaved(next: ConfigWebPluginsDetails): void;
+  onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
 }) {
   const BackIcon = appIcons.chevronLeft;
   const RefreshIcon = appIcons.refresh;
@@ -389,7 +401,12 @@ function PluginDetail({
         {plugin.error ? <Alert message={plugin.error} /> : null}
         {/* 插件上报的「点一下就能变好」：提示点已经把人引到这里，这里给的是那个按钮。 */}
         {plugin.state === 'enabled' && plugin.attention ? (
-          <PluginAttentionBar plugin={plugin} values={plugin.settings.values} onDone={onSaved} />
+          <PluginAttentionBar
+            plugin={plugin}
+            values={plugin.settings.values}
+            onDone={onSaved}
+            onNewSession={onNewSession}
+          />
         ) : null}
         {plugin.health && plugin.health.level !== 'ok' ? (
           <div className={`plugin-health is-${plugin.health.level}`}>
@@ -411,7 +428,12 @@ function PluginDetail({
                 <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
               ) : null}
               {plugin.actions.length > 0 && plugin.settings.fields.length === 0 ? (
-                <PluginActionsGroup plugin={plugin} values={plugin.settings.values} onDone={onSaved} />
+                <PluginActionsGroup
+                  plugin={plugin}
+                  values={plugin.settings.values}
+                  onDone={onSaved}
+                  onNewSession={onNewSession}
+                />
               ) : null}
             </div>
             <aside className="plugin-column">
@@ -424,7 +446,12 @@ function PluginDetail({
             <div className="plugin-solo">
               <PluginStatusGroup plugin={plugin} />
               {plugin.actions.length > 0 ? (
-                <PluginActionsGroup plugin={plugin} values={plugin.settings.values} onDone={onSaved} />
+                <PluginActionsGroup
+                  plugin={plugin}
+                  values={plugin.settings.values}
+                  onDone={onSaved}
+                  onNewSession={onNewSession}
+                />
               ) : null}
               <p className="plugin-note">这个插件没有可配置项。</p>
               <PluginInfoGroup plugin={plugin} />
@@ -434,6 +461,30 @@ function PluginDetail({
       </div>
     </div>
   );
+}
+
+/** 动作把下一步交给一个新会话之后，页面实际发生了什么。 */
+type NewSessionOutcome = 'launched' | 'unsupported' | 'refused' | null;
+
+/**
+ * 动作把下一步交给一个新会话时，先转给宿主：开页签、挂角色、把提示词放进输入框都是页面的事。
+ *
+ * 宿主接不了（浏览器宿主没有会话；桌面端此刻没有工作目录）必须能区分出来——按钮点下去
+ * 看起来什么都没发生，就是「失败被吞掉」的样子。
+ */
+function dispatchNewSession(
+  result: ConfigWebPluginActionResult,
+  onNewSession?: (task: ConfigWebPluginNewSession) => boolean | void,
+): NewSessionOutcome {
+  if (!result?.newSession) return null;
+  if (!onNewSession) return 'unsupported';
+  return onNewSession(result.newSession) === false ? 'refused' : 'launched';
+}
+
+function newSessionHint(outcome: NewSessionOutcome): string {
+  if (outcome === 'unsupported') return '这一步要开一个新会话：在桌面端里点它才会跳过去。';
+  if (outcome === 'refused') return '开不了新会话：先在桌面端里给对话选一个工作目录。';
+  return '';
 }
 
 /**
@@ -458,14 +509,17 @@ function PluginActionsGroup({
   plugin,
   values,
   onDone,
+  onNewSession,
 }: {
   plugin: ConfigWebPlugin;
   values: Record<string, string>;
   onDone: (next: ConfigWebPluginsDetails) => void;
+  onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
 }) {
   const [running, setRunning] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, ConfigWebPluginActionResult>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [hints, setHints] = useState<Record<string, string>>({});
 
   async function run(action: ConfigWebPluginAction) {
     setRunning(action.key);
@@ -473,6 +527,10 @@ function PluginActionsGroup({
     try {
       const result = await runPluginAction(plugin.id, action.key, values);
       setResults((prev) => ({ ...prev, [action.key]: result }));
+      const outcome = dispatchNewSession(result, onNewSession);
+      setHints((prev) => ({ ...prev, [action.key]: newSessionHint(outcome) }));
+      // 已经跳到新会话了：这个页面正在关掉，不再为它刷新一次详情。
+      if (outcome === 'launched') return;
       onDone(await readPluginsDetails());
     } catch (error) {
       setErrors((prev) => ({
@@ -489,6 +547,7 @@ function PluginActionsGroup({
       {plugin.actions.map((action) => {
         const result = results[action.key];
         const error = errors[action.key];
+        const hint = hints[action.key];
         return (
           <div className="plugin-action-row" key={action.key}>
             <div className="plugin-action-copy">
@@ -497,6 +556,7 @@ function PluginActionsGroup({
               {result ? (
                 <span className="plugin-action-result">
                   {result.message}
+                  {hint ? ` ${hint}` : ''}
                   {result.link ? (
                     <>
                       {' '}
@@ -533,14 +593,17 @@ function PluginAttentionBar({
   plugin,
   values,
   onDone,
+  onNewSession,
 }: {
   plugin: ConfigWebPlugin;
   values: Record<string, string>;
   onDone: (next: ConfigWebPluginsDetails) => void;
+  onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
 }) {
   const attention = plugin.attention;
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<ConfigWebPluginActionResult | null>(null);
+  const [hint, setHint] = useState('');
   const [error, setError] = useState<string | null>(null);
   if (!attention) return null;
   const action = attention.action ? (plugin.actions.find((item) => item.key === attention.action) ?? null) : null;
@@ -549,8 +612,14 @@ function PluginAttentionBar({
     if (!action) return;
     setRunning(true);
     setError(null);
+    setHint('');
     try {
-      setResult(await runPluginAction(plugin.id, action.key, values));
+      const next = await runPluginAction(plugin.id, action.key, values);
+      const outcome = dispatchNewSession(next, onNewSession);
+      // 已经跳到新会话了：这个页面正在关掉，不再为它刷新一次详情。
+      if (outcome === 'launched') return;
+      setResult(next);
+      setHint(newSessionHint(outcome));
       onDone(await readPluginsDetails());
     } catch (runError) {
       setError(formatError(runError));
@@ -567,6 +636,7 @@ function PluginAttentionBar({
         {result ? (
           <span className="plugin-attention-note">
             {result.message}
+            {hint ? ` ${hint}` : ''}
             {result.link ? (
               <>
                 {' '}

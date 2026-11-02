@@ -32,6 +32,7 @@ import {
   writePluginHealth,
 } from './PluginHealth.js';
 import { PluginPromptSections } from './PluginPrompt.js';
+import { normalizePluginNewSession } from './PluginNewSession.js';
 import {
   PluginPanelRegistry,
   normalizePluginPanelAction,
@@ -126,6 +127,7 @@ export const micaPlugin = {
   resolvePluginHealthPath,
   PluginPromptSections,
   PluginPanelRegistry,
+  normalizePluginNewSession,
   normalizePluginPanelAction,
   normalizePluginPanelActionResult,
   normalizePluginPanelView,
@@ -161,6 +163,8 @@ export {
   normalizePluginPanelView,
 } from './PluginPanel.js';
 export { PLUGIN_ACTION_TONES, PluginActionRegistry } from './PluginActions.js';
+export { MAX_NEW_SESSION_PROMPT, normalizePluginNewSession } from './PluginNewSession.js';
+export type { PluginNewSession } from './PluginNewSession.js';
 export type {
   PluginActionDeclaration,
   PluginActionHandler,

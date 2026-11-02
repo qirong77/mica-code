@@ -118,6 +118,16 @@ describe('normalizePluginPanelAction', () => {
     expect(normalizePluginPanelActionResult({ newSession: '复盘' })).toEqual({});
   });
 
+  it('carries "只放进输入框" only when it is explicitly false', () => {
+    expect(
+      normalizePluginPanelActionResult({ newSession: { prompt: '去更新页面', send: false } }),
+    ).toEqual({ newSession: { prompt: '去更新页面', send: false } });
+    // 认不出的值退回默认（发送）：插件笔误不该让一段话默默躺在输入框里没人发现。
+    expect(normalizePluginPanelActionResult({ newSession: { prompt: '复盘', send: 'no' } })).toEqual({
+      newSession: { prompt: '复盘' },
+    });
+  });
+
   it('keeps a dialog table with its columns, cells and links', () => {
     const result = normalizePluginPanelActionResult({
       dialog: {

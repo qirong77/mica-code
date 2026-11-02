@@ -9,6 +9,7 @@
  * 只画按钮、把结果（一句话 + 一条链接）显示出来。宿主不认任何具体插件。
  */
 import type { Disposable } from '@packages/mica-common/index.js';
+import type { PluginNewSession } from './PluginNewSession.js';
 import type { PluginSettingValues } from './PluginSettings.js';
 
 /** 按钮语气：主操作、普通操作、危险操作。页面只按它上色，不解释语义。 */
@@ -41,6 +42,14 @@ export type PluginActionResult = {
   message?: string;
   /** 一条可以点开的地址：注册拿到访问链接这类。 */
   link?: string;
+  /**
+   * 交给一个新会话去做（`send: false` 时只把提示词放进那个会话的输入框，等用户自己发）。
+   *
+   * 有些动作的下一步只能由 agent 完成：读一堆本机状态、看情况重建产物、失败了换条路再试。
+   * 插件不该把这些步骤硬编码成按钮逻辑，也不该在配置页里假装做完了——声明一段提示词，
+   * 由宿主开一个会话、把话递给用户，之后是人和 agent 的事。
+   */
+  newSession?: PluginNewSession;
 } | void;
 
 export type PluginActionHandler = (

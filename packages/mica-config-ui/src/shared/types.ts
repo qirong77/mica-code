@@ -393,6 +393,23 @@ export type ConfigWebPluginAction = {
 export type ConfigWebPluginActionResult = {
   message: string;
   link?: string;
+  /**
+   * 「这个动作要开一个新会话去做」：宿主开好会话、把提示词放进去（`send: false` 时只放进
+   * 输入框等用户自己发），插件自己不碰页面。
+   *
+   * 浏览器宿主没有会话可开，只把 `message` 显示出来——页面因此必须如实说「在桌面端里点」，
+   * 不能假装已经跳过去了。
+   */
+  newSession?: ConfigWebPluginNewSession;
+};
+
+/** 交给新会话的一段提示词（与 `mica-plugin` 的 `PluginNewSession` 同形）。 */
+export type ConfigWebPluginNewSession = {
+  prompt: string;
+  role?: string;
+  cwd?: string;
+  confirm?: boolean;
+  send?: boolean;
 };
 
 /** 会话右键菜单里的一项：菜单文案 + 交给插件分派的动作 id。 */

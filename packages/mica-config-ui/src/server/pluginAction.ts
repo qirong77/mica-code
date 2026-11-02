@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { normalizePluginNewSession, type PluginNewSession } from '@packages/mica-plugin/PluginNewSession.js';
 
 export type RunPluginActionInput = {
   id: string;
@@ -12,6 +13,7 @@ export type RunPluginActionInput = {
 export type RunPluginActionResult = {
   message: string;
   link?: string;
+  newSession?: PluginNewSession;
 };
 
 export type RunPluginActionOptions = {
@@ -73,9 +75,18 @@ export function runPluginAction(
       const parsed = readLastJsonLine(stdout);
       if (parsed && typeof parsed === 'object') {
         const record = parsed as Record<string, unknown>;
-        if (record.ok === true && typeof record.message === 'string') {
-          resolve({ message: record.message, link: typeof record.link === 'string' ? record.link : undefined });
-          return;
+        if (record.ok === true) {
+          // 动作可以只回一份「交给新会话」的交接单（没有一句话可显示）：两者都没有才算没结果。
+          const message = typeof record.message === 'string' ? record.message : '';
+          const newSession = normalizePluginNewSession(record.newSession);
+          if (message || newSession) {
+            resolve({
+              message,
+              link: typeof record.link === 'string' ? record.link : undefined,
+              ...(newSession ? { newSession } : {}),
+            });
+            return;
+          }
         }
         if (typeof record.error === 'string') {
           reject(new Error(record.error));

@@ -1,4 +1,5 @@
 import type { Disposable } from '@packages/mica-common/index.js';
+import { normalizePluginNewSession, type PluginNewSession } from './PluginNewSession.js';
 
 /**
  * 插件在桌面端对话右侧的**面板**（视图数据 + 动作回传）。
@@ -105,29 +106,6 @@ export type PluginPanelActionInput = {
  * 记录，用户点完按钮往往看不到任何反应；把原因放这里，页面会紧挨着按钮显示一次。
  */
 /**
- * 在**另一个会话**里跑一段提示词。
- *
- * 面板里点一个按钮就开一个会话（例如「复盘」不该污染当前这轮对话）有两种做法：插件自己
- * 起一个子会话进程，或者把「要跑什么」交给宿主。后者才是通用能力——建会话、绑角色、
- * 起进程、把新页签摆到用户眼前都是宿主的事，插件只声明意图。
- */
-export type PluginPanelNewSession = {
-  /** 新会话的第一条消息。 */
-  prompt: string;
-  /** 新会话的角色；缺省沿用当前会话的角色。 */
-  role?: string;
-  /** 新会话的工作目录；缺省沿用当前会话的。 */
-  cwd?: string;
-  /**
-   * 发送前是否先让用户看一眼提示词，默认 `true`。
-   *
-   * 开一个会话是有成本的动作（一次完整请求、一个新页签、侧栏多一条记录），默认让用户
-   * 先确认；只有按钮本身已经表示「就是要开」时才关掉它。
-   */
-  confirm?: boolean;
-};
-
-/**
  * 动作的回包：一句话 + 两种「跨出面板一步」的效果。
  *
  * - `compose` —— 把这段文本放进当前会话的输入框，**不发送**。用户还能改、能删，按回车才
@@ -141,7 +119,14 @@ export type PluginPanelNewSession = {
 export type PluginPanelActionResult = {
   message?: string;
   compose?: string;
-  newSession?: PluginPanelNewSession;
+  /**
+   * 在**另一个会话**里跑这段提示词（形状与配置页动作共用，见 `PluginNewSession`）。
+   *
+   * 面板里点一个按钮就开一个会话（例如「复盘」不该污染当前这轮对话）有两种做法：插件自己
+   * 起一个子会话进程，或者把「要跑什么」交给宿主。后者才是通用能力——建会话、绑角色、
+   * 起进程、把新页签摆到用户眼前都是宿主的事，插件只声明意图。
+   */
+  newSession?: PluginNewSession;
   dialog?: PluginPanelDialog;
   openPath?: PluginPanelOpenPath;
 };
@@ -452,7 +437,7 @@ export function normalizePluginPanelActionResult(input: unknown): PluginPanelAct
   const raw = record(input);
   const message = text(raw.message, 120);
   const compose = text(raw.compose, MAX_PROMPT);
-  const newSession = newSessionOf(raw.newSession);
+  const newSession = normalizePluginNewSession(raw.newSession);
   const dialog = dialogOf(raw.dialog);
   const openPath = openPathOf(raw.openPath);
   return {
@@ -531,20 +516,5 @@ function dialogOf(value: unknown): PluginPanelDialog | undefined {
     ...(body ? { text: body } : {}),
     ...(subtitle ? { subtitle } : {}),
     ...(note ? { note } : {}),
-  };
-}
-
-function newSessionOf(value: unknown): PluginPanelNewSession | undefined {
-  const raw = record(value);
-  const prompt = text(raw.prompt, MAX_PROMPT);
-  if (!prompt) return undefined;
-  const role = text(raw.role, 40);
-  const cwd = text(raw.cwd, 1000);
-  return {
-    prompt,
-    ...(role ? { role } : {}),
-    ...(cwd ? { cwd } : {}),
-    // 只有显式 `false` 才跳过确认：认不出的一律按「要确认」处理，那才是安全的一侧。
-    ...(raw.confirm === false ? { confirm: false } : {}),
   };
 }
