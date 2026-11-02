@@ -33,13 +33,13 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
   if (currentConfig.provider === providerId) {
     const model = currentConfig.model || models[0]!;
     const activeProvider = currentConfig.providers.find((item) => item.id === providerId);
-    void ensureModelRule(model, undefined, activeProvider).catch(() => undefined);
+    await ensureModelRule(model, undefined, activeProvider);
   }
 
   store.updateRuntimeConfig((config) => {
     const providers = config.providers.map((item) => {
       if (item.id !== providerId) return item;
-      const availableModels = config.provider === providerId && config.model ? [config.model, ...models] : models;
+      const availableModels = config.provider === providerId && config.model ? [...models, config.model] : models;
       return {
         ...item,
         models: [...new Set(availableModels)],
@@ -56,7 +56,9 @@ export async function loadProviderModelsFromStore(store: RuntimeConfigStore, pro
         current?.supportsEffort === false
           ? 'none'
           : current
-            ? normalizeModelEffort(model, config.effort, current)
+            ? config.model
+              ? normalizeModelEffort(model, config.effort, current)
+              : getModelRule(model, current).defaultEffort
             : config.effort,
     };
   });

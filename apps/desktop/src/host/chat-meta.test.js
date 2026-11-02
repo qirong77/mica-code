@@ -15,56 +15,101 @@ const providers = [
   }
 ]
 
-describe('resolveDefaultChatMeta', () => {
-  it('restores the model and effort last used in the new session directory', () => {
-    const cwd = '/tmp/mica-project'
-    const meta = resolveDefaultChatMeta(
-      { providers },
-      {
-        lastUsedByDirectory: {
-          [cwd]: {
-            provider: 'primary',
-            model: 'primary/default',
-            effort: 'low',
-            providerPreferences: {
-              primary: { model: 'primary/other', effort: 'high' }
-            }
-          }
-        }
-      },
-      cwd
-    )
+const legacyStorage = {
+  lastUsedByDirectory: {
+    '/tmp/mica-project': {
+      provider: 'plain',
+      model: 'plain/model',
+      effort: 'low',
+      providerPreferences: {
+        primary: { model: 'primary/other', effort: 'high' }
+      }
+    }
+  }
+}
 
-    expect(meta).toMatchObject({
+describe('resolveDefaultChatMeta', () => {
+  it('uses the configured default model and effort instead of directory or runtime state', () => {
+    expect(
+      resolveDefaultChatMeta(
+        {
+          providers,
+          defaultModel: { provider: 'primary', model: 'primary/other', effort: 'xhigh' },
+          provider: 'plain',
+          model: 'plain/model',
+          effort: 'low'
+        },
+        legacyStorage,
+        '/tmp/mica-project'
+      )
+    ).toMatchObject({
       providerId: 'primary',
       model: 'primary/other',
-      effort: 'high',
+      effort: 'xhigh',
       protocol: 'openai_responses'
     })
   })
 
-  it('falls back to the first configured provider and model', () => {
-    expect(resolveDefaultChatMeta({ providers }, { version: 1 }, '/tmp/new-project')).toMatchObject(
-      {
-        providerId: 'primary',
-        model: 'primary/default',
-        effort: 'medium'
-      }
-    )
+  it('uses the first provider and model, ignoring all legacy selection sources', () => {
+    expect(
+      resolveDefaultChatMeta(
+        { providers, provider: 'plain', model: 'plain/model', effort: 'high' },
+        legacyStorage,
+        '/tmp/mica-project'
+      )
+    ).toMatchObject({ providerId: 'primary', model: 'primary/default', effort: null })
   })
 
-  it('ignores stale selections and disables effort for unsupported providers', () => {
-    const cwd = '/tmp/plain-project'
-    const meta = resolveDefaultChatMeta(
-      { providers, provider: 'plain' },
-      {
-        lastUsedByDirectory: {
-          [cwd]: { provider: 'plain', model: 'missing/model', effort: 'xhigh' }
-        }
-      },
-      cwd
-    )
+  it('leaves omitted effort to the selected model default', () => {
+    expect(
+      resolveDefaultChatMeta({
+        providers,
+        defaultModel: { provider: 'primary', model: 'primary/other' }
+      })
+    ).toMatchObject({ providerId: 'primary', model: 'primary/other', effort: null })
+  })
 
-    expect(meta).toMatchObject({ providerId: 'plain', model: 'plain/model', effort: 'none' })
+  it('disables effort for unsupported providers', () => {
+    expect(
+      resolveDefaultChatMeta({
+        providers,
+        defaultModel: { provider: 'plain', model: 'plain/model', effort: 'xhigh' }
+      })
+    ).toMatchObject({ providerId: 'plain', model: 'plain/model', effort: 'none' })
+  })
+
+  it('does not invent a medium effort for malformed effort values', () => {
+    expect(
+      resolveDefaultChatMeta({
+        providers,
+        defaultModel: { provider: 'primary', model: 'primary/other', effort: 'BAD EFFORT' }
+      })
+    ).toMatchObject({ effort: null })
+  })
+
+  it('leaves dynamic first-model resolution to the CLI without choosing a later provider', () => {
+    expect(resolveDefaultChatMeta({ providers: [{ id: 'dynamic' }, ...providers] })).toBeNull()
+    expect(
+      resolveDefaultChatMeta({ providers: [{ id: 'dynamic', models: [] }, ...providers] })
+    ).toBeNull()
+  })
+
+  it('previews an explicit default for a provider with a dynamic model list', () => {
+    expect(
+      resolveDefaultChatMeta({
+        providers: [{ id: 'dynamic', protocol: 'openai_responses' }],
+        defaultModel: { provider: 'dynamic', model: 'dynamic-model', effort: 'max' }
+      })
+    ).toMatchObject({ providerId: 'dynamic', model: 'dynamic-model', effort: 'max' })
+  })
+
+  it('does not substitute another model for an invalid default configuration', () => {
+    expect(
+      resolveDefaultChatMeta({ providers, defaultModel: { provider: 'missing', model: 'model' } })
+    ).toBeNull()
+    expect(
+      resolveDefaultChatMeta({ providers, defaultModel: { provider: 'primary', model: '' } })
+    ).toBeNull()
+    expect(resolveDefaultChatMeta({ providers: [] })).toBeNull()
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { resolveModelSwitchProtocol } from './ChatView'
+import { resolveDisplayedEffort, resolveModelSwitchProtocol } from './ChatView'
 
 // protocolMap 与 ChatView 中 listModels 的构建一致：
 // { [modelId]: { protocol, efforts } }
@@ -10,6 +10,26 @@ function protocolMap(entries) {
   }
   return map
 }
+
+describe('new session effort preview', () => {
+  it('shows the model default when the default model configuration omits effort', () => {
+    expect(resolveDisplayedEffort(null, ['none', 'low', 'high'], 'high')).toBe('high')
+  })
+
+  it('preserves an explicitly configured or selected supported effort', () => {
+    expect(resolveDisplayedEffort('none', ['none', 'low', 'high'], 'high')).toBe('none')
+    expect(resolveDisplayedEffort('low', ['none', 'low', 'high'], 'high')).toBe('low')
+  })
+
+  it('waits for the model catalog without inventing an effort', () => {
+    expect(resolveDisplayedEffort(null, undefined, undefined)).toBe('—')
+    expect(resolveDisplayedEffort('max', undefined, undefined)).toBe('max')
+  })
+
+  it('uses the model default when a configured effort is unsupported', () => {
+    expect(resolveDisplayedEffort('medium', ['low', 'high'], 'high')).toBe('high')
+  })
+})
 
 describe('model switch protocol guard', () => {
   describe('new session (no history)', () => {

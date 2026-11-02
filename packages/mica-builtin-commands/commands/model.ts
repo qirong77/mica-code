@@ -1,6 +1,6 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from '../services.js';
-import { isEffortLevelName, micaConfig } from '@packages/mica-config/index.js';
+import { micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from '../shared/selectCommand.js';
 import type { CommandRuntimeServices, CommandSessionController } from '../services.js';
 import { applyConfigSwitchUpdate, reportConfigSwitchError, syncConfigFromAgent } from '../shared/configSwitch.js';
@@ -87,7 +87,6 @@ async function applyModelSelection(
     if (selection.providerId === agent.config.provider.id && selection.model === agent.config.model) {
       return true;
     }
-    const providerChanged = selection.providerId !== agent.config.provider.id;
     await applyConfigSwitchUpdate({
       agent,
       sessionController,
@@ -99,17 +98,12 @@ async function applyModelSelection(
         if (!provider.models?.includes(selection.model)) {
           throw new Error(`Model not found for provider ${selection.providerId}: ${selection.model}`);
         }
-        const storedEffort = providerChanged
-          ? micaConfig.storage.providerPreference.read(selection.providerId).effort
-          : undefined;
-        // 换到别的模型后档位集合会变（`xhigh` 和 `max` 是两个模型各自的真实档位名），
-        // 存下来的旧档位只能按新模型收敛，否则会带着一个发不出去的值。
-        const preferredEffort = isEffortLevelName(storedEffort) ? storedEffort : undefined;
+        // 显式切换模型时保留当前会话的档位，并按目标模型收敛。
         return {
           ...config,
           provider: selection.providerId,
           model: selection.model,
-          effort: micaConfig.normalizeModelEffort(selection.model, preferredEffort ?? config.effort, provider),
+          effort: micaConfig.normalizeModelEffort(selection.model, config.effort, provider),
         };
       },
       successMessage: (config) => {

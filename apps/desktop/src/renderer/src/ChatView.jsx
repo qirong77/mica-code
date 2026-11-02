@@ -4351,7 +4351,7 @@ export function ChatView({
         sessionId ? window.mica.chat.history(sessionId).catch(() => []) : [],
         sessionId
           ? window.mica.chat.meta(sessionId).catch(() => null)
-          : window.mica.chat.meta(null, cwd).catch(() => null)
+          : window.mica.chat.meta(null).catch(() => null)
       ])
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
       const restored = historyMessages(rows, sessionId || nodeId)
@@ -5762,7 +5762,7 @@ export function ChatView({
   }, [activityTurnId, messages, running, todoHidden])
   const activeOverrides = overridesRef.current.get(nodeId) || {}
   const activeModel = activeOverrides.model || meta?.model || ''
-  const activeEffort = activeOverrides.variant || meta?.effort || 'none'
+  const activeEffort = activeOverrides.variant || meta?.effort || null
   const activeEffortKey = activeOverrides.model || `${meta?.providerId || ''}/${meta?.model || ''}`
   const activeEffortLevels = modelEfforts?.[activeEffortKey]?.efforts
   // 状态行显示「这一轮真正会发出去的档位」，而不是上一次会话留下的值：
@@ -5812,7 +5812,7 @@ export function ChatView({
   const statusMetaTitle = modelSummaryTitle({
     ...meta,
     model: activeModel || null,
-    effort: activeEffort === 'none' ? null : activeEffort,
+    effort: activeEffortLabel === 'none' || activeEffortLabel === '—' ? null : activeEffortLabel,
     role: activeRole
   })
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
@@ -6374,7 +6374,7 @@ export function ChatView({
               selectedValue={
                 (overridesRef.current.get(nodeId) || {})[picker.kind] ||
                 (picker.kind === 'variant'
-                  ? meta?.effort || 'none'
+                  ? activeEffortLabel
                   : picker.kind === 'role'
                     ? meta?.role || 'default'
                     : meta?.model) ||
@@ -6927,7 +6927,7 @@ export function ChatView({
  * - 当前档位不属于这个模型：host 每轮会收敛到模型自己的默认档位，这里提前显示同一结果。
  */
 export function resolveDisplayedEffort(effort, levels, defaultEffort) {
-  if (!Array.isArray(levels)) return effort
+  if (!Array.isArray(levels)) return effort || '—'
   if (levels.length === 0) return '—'
   if (levels.includes(effort)) return effort
   return defaultEffort && levels.includes(defaultEffort) ? defaultEffort : '—'

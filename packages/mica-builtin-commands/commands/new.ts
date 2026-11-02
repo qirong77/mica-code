@@ -6,8 +6,8 @@ export function createNewCommand(services: CommandRuntimeServices): BuiltInComma
   return {
     name: 'new',
     description: '新开一个 agent；/new <text> 后台运行新 agent',
-    action(arg) {
-      const session = services.newAgentSession();
+    async action(arg) {
+      const session = await services.newAgentSession();
       const prompt = arg?.trim();
       if (prompt) {
         submitAgentPromptInBackground({

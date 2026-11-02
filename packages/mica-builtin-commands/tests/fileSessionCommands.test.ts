@@ -3,11 +3,11 @@ import { createForkCommand, createNewCommand, createRenameCommand } from '../ind
 import type { CommandRuntimeServices, CommandSessionController } from '../services.js';
 
 describe('single-file session commands', () => {
-  it('/new creates and switches to a foreground agent session', () => {
+  it('/new creates and switches to a foreground agent session', async () => {
     const session = { id: 'agent-2', index: 2 };
     const services = makeServices({ newSession: session });
 
-    createNewCommand(services).action();
+    await createNewCommand(services).action();
 
     expect(services.newAgentSession).toHaveBeenCalledOnce();
     expect(services.switchAgentSession).toHaveBeenCalledWith('agent-2');

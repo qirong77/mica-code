@@ -89,6 +89,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       }
     }
     await ensureHeadlessModelRule(initialModel, options.signal);
+    micaConfig.resetSessionModelDefaults();
     throwIfAborted(options.signal);
 
     const hooks = new micaPlugin.HookRegistry();
@@ -96,8 +97,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     sessionController = new SessionController({
       agent,
       // AgentRuntime.loadSnapshot restores the provider/model from the session
-      // itself. Avoid persisting a run-selected model into Mica's user-level
-      // last-used preferences while running headlessly.
+      // itself; headless sessions do not need to update the shared runtime config.
       config: { apply() {} },
       ui: {
         restore() {
@@ -165,6 +165,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
       },
     });
     host = createHeadlessPluginHost({
+      runtimeOverride,
       hooks,
       agent,
       sessionController,

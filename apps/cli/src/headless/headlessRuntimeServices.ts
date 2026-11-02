@@ -1,3 +1,5 @@
+import { micaConfig } from '@packages/mica-config/index.js';
+import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import type {
   CommandAgent,
   CommandRuntimeServices,
@@ -12,6 +14,7 @@ import { toCompactedConversationDisplay } from '../plugins/commands/compactConve
 import type { TurnNoticeLog } from '../runtime/turnNotices.js';
 
 export type HeadlessRuntimeServicesOptions = {
+  runtimeOverride?: AgentRuntimeConfigOverride;
   agent: AgentRuntime;
   sessionController: SessionController;
   subagentTasks: SubagentTaskManager;
@@ -37,9 +40,12 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
   };
 
   return {
-    clearUI(_agent, targetSessionController) {
+    async clearUI(_agent, targetSessionController) {
+      const defaults = await micaConfig.prepareSessionModelDefaults();
       (targetSessionController ?? sessionController).startNewSession();
       agent.clearSession();
+      agent.configureForRun({ providerId: defaults.provider, model: defaults.model, effort: defaults.effort }, false);
+      if (options.runtimeOverride) agent.configureForRun(options.runtimeOverride, false);
       noticeLog().clear();
       save({ allowEmpty: true });
     },

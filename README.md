@@ -54,6 +54,18 @@ mica
 
 模型服务支持 `openai_chat_completions` 与 `openai_responses`，按服务实际提供的接口选择。更多示例见 [快速开始](https://qirong77.github.io/mica-code/docs/getting-started/) 和 [模型与配置](https://qirong77.github.io/mica-code/docs/configuration/)。Windows 与需要直接运行源码的开发者见下方的源码入口。
 
+新会话默认使用 `providers` 中第一个服务商的第一个模型。可在设置的模型配置页指定默认模型和 effort，或在 `config.json` 顶层添加：
+
+```json
+"defaultModel": {
+  "provider": "openai",
+  "model": "gpt-5.4",
+  "effort": "high"
+}
+```
+
+`provider` 必须对应已配置的服务商，`model` 使用该服务商的模型 ID。`effort` 可省略，使用模型默认档位。新会话不再记忆上次使用的模型；已有会话及显式模型选择保持各自的设置。
+
 ## 围绕真实任务构建
 
 | 能力 | 在工作中怎么用 |

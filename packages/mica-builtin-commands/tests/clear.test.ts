@@ -3,14 +3,14 @@ import { createClearCommand } from '../index.js';
 import type { CommandAgent, CommandRuntimeServices, CommandSessionController } from '../services.js';
 
 describe('createClearCommand', () => {
-  it('starts a fresh persisted session in the current agent', () => {
+  it('starts a fresh persisted session in the current agent', async () => {
     const agent = makeAgent();
     const sessionController = makeSessionController();
     const services = makeServices();
     const onCleared = vi.fn();
     const command = createClearCommand(agent, sessionController, services, onCleared);
 
-    command.action();
+    await command.action();
 
     expect(services.clearUI).toHaveBeenCalledWith(agent, sessionController);
     expect(services.clearSubagentTasks).toHaveBeenCalledWith(agent);
@@ -23,12 +23,12 @@ describe('createClearCommand', () => {
     });
   });
 
-  it('does not create a new session while the current agent is busy', () => {
+  it('does not create a new session while the current agent is busy', async () => {
     const services = makeServices({ busy: true });
     const onCleared = vi.fn();
     const command = createClearCommand(makeAgent(), makeSessionController(), services, onCleared);
 
-    command.action();
+    await command.action();
 
     expect(services.clearUI).not.toHaveBeenCalled();
     expect(services.clearSubagentTasks).not.toHaveBeenCalled();

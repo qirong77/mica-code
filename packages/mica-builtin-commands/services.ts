@@ -183,7 +183,7 @@ export type CommandNoticeOptions = {
 };
 
 export type CommandRuntimeServices = {
-  clearUI(agent: CommandAgent, sessionController?: CommandSessionController): void;
+  clearUI(agent: CommandAgent, sessionController?: CommandSessionController): void | Promise<void>;
   clearSubagentTasks?(agent: CommandAgent): number;
   showMessage(text: string, ttl?: number, ownerSessionId?: string): void;
   showNotice(text: string, ownerSessionId?: string, options?: CommandNoticeOptions): void;
@@ -205,7 +205,7 @@ export type CommandRuntimeServices = {
   getSubagentTask(id: string): SubagentTaskDetail | undefined;
   clearIdleAgents(): ClearIdleAgentsResult;
   requestExit(exitCode?: number): Promise<void>;
-  newAgentSession(): RunningAgentRecord;
+  newAgentSession(): RunningAgentRecord | Promise<RunningAgentRecord>;
   submitAgentSessionInput(
     id: string,
     text: string,

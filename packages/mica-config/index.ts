@@ -5,7 +5,9 @@ import {
   readConfig,
   getConfig,
   updateConfig,
+  resetSessionModelDefaults,
   loadProviderModels,
+  prepareSessionModelDefaults,
   loadMissingProviderModels,
   ensureModelRule,
   getModelRule,
@@ -21,13 +23,9 @@ import { runtimeEnv } from './runtimeEnv.js';
 import {
   MICA_STORAGE_PATH,
   appendInputHistory,
-  readLastUsedConfig,
   readInputHistory,
   readMicaStorage,
-  readProviderPreference,
-  updateLastUsedConfig,
   updateMicaStorage,
-  updateProviderPreference,
 } from './micaStorage.js';
 
 export const micaConfig = {
@@ -39,6 +37,10 @@ export const micaConfig = {
   get: getConfig,
   /** 通过 updater 修改配置，同时同步写回磁盘。 */
   update: updateConfig,
+  /** 从最新磁盘配置重置新会话的模型和 effort，保留已加载的动态模型列表。 */
+  resetSessionModelDefaults,
+  /** 等待动态模型目录和服务商模型规则就绪，再重算新会话默认值。 */
+  prepareSessionModelDefaults,
   /** 拉取指定 provider 的模型列表并缓存到内存运行态配置，不写回 config.json。 */
   loadProviderModels,
   /** 为配置中尚未加载模型列表的动态 provider 批量拉取模型。 */
@@ -71,14 +73,6 @@ export const micaConfig = {
     path: MICA_STORAGE_PATH,
     read: readMicaStorage,
     update: updateMicaStorage,
-    lastUsed: {
-      read: readLastUsedConfig,
-      update: updateLastUsedConfig,
-    },
-    providerPreference: {
-      read: readProviderPreference,
-      update: updateProviderPreference,
-    },
   },
   inputHistory: {
     path: MICA_STORAGE_PATH,
@@ -99,7 +93,7 @@ export {
   resolveEffortParams,
 } from './config.js';
 export type { EffortParamsRequest } from './config.js';
-export { readCapabilityDefaults, updateCapabilityDefaults } from './config.js';
+export { prepareSessionModelDefaults, resetSessionModelDefaults, readCapabilityDefaults, updateCapabilityDefaults } from './config.js';
 import { readActiveProviderConfig } from './activeProvider.js';
 export { readActiveProviderConfig } from './activeProvider.js';
 export type { ActiveProviderConfig } from './activeProvider.js';
@@ -121,16 +115,11 @@ export { isEffortLevelName, isProviderProtocol } from './types.js';
 export {
   MICA_STORAGE_PATH,
   appendInputHistory,
-  getCurrentDirectory,
   readInputHistory,
-  readLastUsedConfig,
   readMicaStorage,
-  readProviderPreference,
-  updateLastUsedConfig,
   updateMicaStorage,
-  updateProviderPreference,
 } from './micaStorage.js';
-export type { LastUsedConfig, MicaStorageFile, ProviderPreference } from './micaStorage.js';
+export type { MicaStorageFile } from './micaStorage.js';
 export {
   APP_NAME,
   CONFIG_DIR_NAME,

@@ -343,6 +343,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       }
     }
     await ensureChatHostModelRule(initialModel, providerHintForModel(initialModel));
+    micaConfig.resetSessionModelDefaults();
 
     const hooks = new micaPlugin.HookRegistry();
     agent = new AgentRuntime(runtimeOverride, hooks);
@@ -523,6 +524,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       },
     });
     pluginHost = createHeadlessPluginHost({
+      runtimeOverride,
       hooks,
       agent,
       sessionController,

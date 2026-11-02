@@ -238,7 +238,7 @@ methods with `-32601`):
   Headless mode logs a missing metadata error to **stderr** and falls back to the
   generic rule — it never pollutes protocol stdout.
 - A headless-selected model/effort is a session-local override and does not change
-  Mica's persisted last-used preference (`SessionController` config `apply()`
+  Mica's configured new-session defaults (`SessionController` config `apply()`
   is a no-op in headless mode). `--model`/`--variant` are merged by
   `resolveRuntimeConfigOverride` and take priority over the session snapshot on
   resume.

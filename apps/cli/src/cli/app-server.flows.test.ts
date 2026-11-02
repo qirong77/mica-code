@@ -732,6 +732,49 @@ async function stopMockContext(context: MockContext): Promise<void> {
 const hostReady = (m: HostMessage) => m.method === 'mica/backgroundTasks/updated' || m.method === 'error';
 
 suite('mica app-server real-user flows (mock provider)', () => {
+  for (const configuredDefault of [false, true]) {
+    itE2E(
+      `new session uses ${configuredDefault ? 'defaultModel and effort' : 'first configured model'} despite old directory preferences`,
+      async () => {
+        const tag = `session-default-${configuredDefault}`;
+        const home = makeHome(tag);
+        const config = JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
+        config.providers[0].models = ['mock-first', 'mock-last-used'];
+        config.providers.push({ ...config.providers[0], id: 'preferred', models: ['mock-default'] });
+        if (configuredDefault) {
+          config.defaultModel = { provider: 'preferred', model: 'mock-default', effort: 'high' };
+        }
+        writeFileSync(join(home, 'config.json'), JSON.stringify(config));
+        writeFileSync(
+          join(home, 'storage.json'),
+          JSON.stringify({
+            version: 1,
+            lastUsedByDirectory: {
+              [join(home, 'work')]: {
+                provider: 'mock',
+                model: 'mock-last-used',
+                effort: 'low',
+                providerPreferences: { mock: { model: 'mock-last-used', effort: 'low' } },
+              },
+            },
+          }),
+        );
+        const host = spawnHost(tag, [], home);
+        hosts.push(host);
+        await waitFor(host, hostReady, 'host ready', 30_000);
+        await send(host, 1, 'turn/start', { input: [{ type: 'text', text: 'hello' }] });
+        const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+        const turnId = (started.params?.turn as { id: string }).id;
+        const completed = await waitFor(host, turnCompleted(turnId), 'turn/completed');
+        expect(completed.params?.turn).toMatchObject({ status: 'completed' });
+        expect(mock!.state.requests[0]).toMatchObject({
+          model: configuredDefault ? 'mock-default' : 'mock-first',
+          reasoning: { effort: configuredDefault ? 'high' : 'medium' },
+        });
+      },
+    );
+  }
+
   itE2E('new session + switched model (full provider/model id) + effort completes the turn', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];

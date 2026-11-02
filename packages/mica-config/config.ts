@@ -1,16 +1,7 @@
 import { atom } from 'nanostores';
 import {
-  readLastUsedConfig,
-  updateLastUsedConfig,
-  updateProviderPreference,
-  type LastUsedConfig,
-} from './micaStorage.js';
-import {
   CONFIG_PATH,
   firstProviderModel,
-  isEffortLevelName,
-  isNonEmptyString,
-  providerSupportsModel,
   type EffortOption,
   type IMicaConfig,
   type PersistedMicaConfig,
@@ -18,7 +9,7 @@ import {
 } from './types.js';
 import { readPersistedConfig, writePersistedConfig } from './persistence.js';
 import { loadMissingProviderModelsFromStore, loadProviderModelsFromStore } from './providerModels.js';
-import { getModelRule, normalizeModelEffort } from './getModelRule.js';
+import { ensureModelRule, getModelRule, normalizeModelEffort } from './getModelRule.js';
 import { isEnvOnlyProvider, synthesizeEnvProviders } from './envProvider.js';
 import { normalizeCapabilitySelection, type CapabilitySelection } from '@packages/mica-common/capabilities.js';
 
@@ -58,8 +49,7 @@ const configAtom = atom<IMicaConfig>(readConfig());
 
 export function readConfig(): IMicaConfig {
   const persisted = readPersistedConfig(CONFIG_PATH);
-  const storedLastUsed = readLastUsedConfig();
-  return mergeRuntimeConfig(persisted, storedLastUsed);
+  return mergeRuntimeConfig(persisted);
 }
 
 export function getConfig() {
@@ -74,12 +64,6 @@ export function updateConfig(updater: (config: IMicaConfig) => IMicaConfig): IMi
   if (!persistedConfigsEqual(currentPersisted, nextPersisted)) {
     writePersistedConfig(CONFIG_PATH, nextPersisted);
   }
-  updateLastUsedConfig({
-    provider: next.provider,
-    model: next.model,
-    effort: next.effort,
-  });
-  updateProviderPreference(next.provider, { model: next.model, effort: next.effort });
   return next;
 }
 
@@ -94,12 +78,6 @@ export async function loadMissingProviderModels() {
 function updateRuntimeConfig(updater: (config: IMicaConfig) => IMicaConfig): IMicaConfig {
   const next = updater(getConfig());
   configAtom.set(next);
-  updateLastUsedConfig({
-    provider: next.provider,
-    model: next.model,
-    effort: next.effort,
-  });
-  updateProviderPreference(next.provider, { model: next.model, effort: next.effort });
   return next;
 }
 
@@ -158,59 +136,82 @@ function sortJson(value: unknown): unknown {
   );
 }
 
-function mergeRuntimeConfig(config: PersistedMicaConfig, lastUsed: LastUsedConfig): IMicaConfig {
+/** Reload new-session defaults from disk while retaining fetched dynamic model catalogs. */
+export function resetSessionModelDefaults(): IMicaConfig {
+  const persisted = readPersistedConfig(CONFIG_PATH);
+  const cachedProviders = getConfig().providers;
+  const next = mergeRuntimeConfig(persisted, cachedProviders);
+  configAtom.set(next);
+  return next;
+}
+
+/** Resolve catalogs and provider-scoped metadata before creating a new session. */
+export async function prepareSessionModelDefaults(): Promise<IMicaConfig> {
+  let config = resetSessionModelDefaults();
+  const provider = config.providers.find((item) => item.id === config.provider);
+  if (!provider) {
+    throw new Error('Cannot prepare session model defaults: no default provider is configured.');
+  }
+  if (!config.model) {
+    try {
+      await loadProviderModels(provider.id);
+    } catch (error) {
+      throw new Error(
+        `Cannot prepare session model defaults for provider ${provider.id}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+    config = getConfig();
+  }
+  if (!config.model.trim()) {
+    throw new Error(`Cannot prepare session model defaults: provider ${provider.id} has no available model.`);
+  }
+  await ensureModelRule(config.model, undefined, provider);
+  // Recover the original configured effort after loading metadata: the first reset
+  // may have normalized it against incomplete rules.
+  const prepared = resetSessionModelDefaults();
+  if (!prepared.provider || !prepared.model.trim()) {
+    throw new Error('Cannot prepare session model defaults: the default provider or model is unavailable.');
+  }
+  return prepared;
+}
+
+function mergeRuntimeConfig(config: PersistedMicaConfig, cachedProviders: ProviderDefinition[] = []): IMicaConfig {
   const configured = Array.isArray(config.providers) ? config.providers : [];
-  const providers = synthesizeEnvProviders(configured);
-  const providerId = resolveLastUsedProvider(providers, lastUsed.provider);
-  const provider = providers.find((item) => item.id === providerId);
-  const model = resolveLastUsedModel(provider, lastUsed.model, lastUsed.providerPreferences?.[providerId]?.model);
-  const effort = resolveLastUsedEffort(
-    provider,
-    model,
-    lastUsed.effort,
-    lastUsed.providerPreferences?.[providerId]?.effort,
-  );
+  const providers = synthesizeEnvProviders(configured).map((provider) => {
+    const cached = cachedProviders.find(
+      (item) =>
+        item.id === provider.id &&
+        item.get_model_url === provider.get_model_url &&
+        item.api_base === provider.api_base &&
+        item.api_key === provider.api_key &&
+        item.protocol === provider.protocol,
+    );
+    return provider.get_model_url && cached?.models?.length ? { ...provider, models: cached.models } : provider;
+  });
+  const defaults = config.defaultModel;
+  const provider = defaults ? providers.find((item) => item.id === defaults.provider) : providers[0];
+  const configuredProvider = configured.find((item) => item.id === provider?.id);
+  const model =
+    defaults?.model ??
+    (configuredProvider ? firstProviderModel(configuredProvider) : undefined) ??
+    (provider ? firstProviderModel(provider) : undefined) ??
+    '';
+  const rule = getModelRule(model, provider);
+  const effort: EffortOption =
+    provider?.supportsEffort === false
+      ? 'none'
+      : defaults?.effort === undefined
+        ? rule.defaultEffort
+        : normalizeModelEffort(model, defaults.effort, provider);
   return {
     ...config,
     providers,
-    provider: providerId,
+    provider: provider?.id ?? '',
     model,
     effort,
-    contextWindowSize: getModelRule(model, provider).contextSize,
+    contextWindowSize: rule.contextSize,
   };
-}
-
-function resolveLastUsedProvider(providers: ProviderDefinition[], providerId: unknown): string {
-  if (isNonEmptyString(providerId) && providers.some((provider) => provider.id === providerId)) return providerId;
-  return providers[0]?.id ?? '';
-}
-
-function resolveLastUsedModel(
-  provider: ProviderDefinition | undefined,
-  model: unknown,
-  preferenceModel?: unknown,
-): string {
-  if (!provider) return isNonEmptyString(model) ? model : '';
-  if (isNonEmptyString(preferenceModel) && providerSupportsModel(provider, preferenceModel)) return preferenceModel;
-  if (isNonEmptyString(model) && providerSupportsModel(provider, model)) return model;
-  return firstProviderModel(provider) ?? '';
-}
-
-function resolveLastUsedEffort(
-  provider: ProviderDefinition | undefined,
-  model: string,
-  effort: unknown,
-  preferenceEffort?: unknown,
-): EffortOption {
-  if (provider?.supportsEffort === false) return 'none';
-  const selected = isEffortLevelName(preferenceEffort)
-    ? preferenceEffort
-    : isEffortLevelName(effort)
-      ? effort
-      : 'medium';
-  // 存下来的值可能来自别的模型（换过模型、档位被厂商改名）：统一按当前模型收敛，
-  // 配置里不会留下当前模型发不出去的档位名。
-  return normalizeModelEffort(model, selected);
 }
 
 /** 新会话默认能力：config.json 的 `capabilityDefaults`，缺失即全部启用。 */

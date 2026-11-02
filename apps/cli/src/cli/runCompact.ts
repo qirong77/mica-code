@@ -66,8 +66,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
     let sessionCwd: string | null = null;
     const sessionController = new SessionController({
       agent,
-      // Do not write the run-selected config into user-level last-used
-      // preferences while compacting; mirrors headless run.
+      // Restore the session directly without updating shared runtime config.
       config: { apply() {} },
       ui: {
         restore() {
