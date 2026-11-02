@@ -160,7 +160,6 @@ export function ConfigPage() {
   const providers = draft ? providerEntries(draft) : [];
   const defaultModel = readDefaultModelDraft(draft ?? {});
   const providerOptions = providers.map(readProviderDraft).filter((provider) => provider.id);
-  const defaultProvider = providerOptions.find((provider) => provider.id === defaultModel.provider);
   const providerSelectOptions = [
     { value: '', label: '跟随配置列表第一项' },
     ...providerOptions.map((provider) => ({ value: provider.id, label: provider.id })),
@@ -261,13 +260,12 @@ export function ConfigPage() {
               <SettingRow
                 label="模型"
                 htmlFor="default-model-name"
-                hint="可从建议中选择，也可以直接输入模型名称。"
+                hint="填写该服务商下的模型名称。"
                 error={errors.get('defaultModel.model')}
               >
                 <input
                   id="default-model-name"
                   className={`text-input${errors.has('defaultModel.model') ? ' text-input-invalid' : ''}`}
-                  list="default-model-suggestions"
                   value={defaultModel.model}
                   disabled={!defaultModel.provider}
                   spellCheck={false}
@@ -277,11 +275,6 @@ export function ConfigPage() {
                     applyDraft(writeDefaultModelDraft(draft, { ...defaultModel, model: event.target.value }))
                   }
                 />
-                <datalist id="default-model-suggestions">
-                  {defaultProvider?.models.map((model, index) => (
-                    <option key={index} value={model} />
-                  ))}
-                </datalist>
               </SettingRow>
               <SettingRow
                 label="Effort"
