@@ -128,7 +128,8 @@ context.onDispose(() => registration.dispose());
 
 触发它的事件是 `input:activity`（`context.events.on('event', …)`）：用户在输入框里敲了字。
 桌面端在敲字时节流发 `mica/input/activity`，宿主翻成这条运行期事件；TUI 与 `exec` 不发，
-插件不能把它当成一定会来。
+插件不能把它当成一定会来。同一个能力面还有一个更早的信号 `input:focus`（焦点放回输入框、
+还没敲字，桌面端经 `mica/input/focus` 送出，只在会话没在跑时发）。
 
 ## 设计约束
 

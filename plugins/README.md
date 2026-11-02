@@ -224,7 +224,8 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 `ctx.agent.compactIdleHistory()` 是同一个能力面的另一半：在轮次之外把**已经落盘的**历史快速压
 一次（本地清理，不调模型），只在能独占写会话文件的常驻宿主里提供——`mica exec` 不落盘、TUI 走
 `/compact`，两边都没有它，插件要当成可选能力。它的触发信号是运行期事件 `input:activity`
-（用户在输入框敲字，桌面端经 `mica/input/activity` 送进来）。
+（用户在输入框敲字，桌面端经 `mica/input/activity` 送进来）与 `input:focus`（焦点放回输入框、
+还没敲字，桌面端在会话没在跑时经 `mica/input/focus` 送进来）。
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。
 机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定有哪些类型、`agent` 工具长什么样。
 需要一条能反复追问的隔离上下文（旁问、连续修订）时用 `ctx.subagents.thread()`：一次建线程、多次

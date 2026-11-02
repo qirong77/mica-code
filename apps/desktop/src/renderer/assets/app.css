@@ -3362,6 +3362,199 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   color: var(--color-fg);
 }
 
+/* ------------------------------------------------ 耗时分析弹窗（最近一轮的时间去哪了）
+
+   三行固定顺序的类别 + 一条按时间铺开的占比条。展开某一类只是把明细插在它下面，
+   弹窗整体高度定死、内容自己滚：换类别、展开收起时窗口不能忽高忽低。 */
+.chat-modal-timing {
+  max-width: 620px;
+  height: min(70dvh, 560px);
+}
+
+.chat-timing-bar {
+  display: flex;
+  height: 6px;
+  flex: none;
+  gap: 1px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-fg-max) 7%, transparent);
+}
+
+.chat-timing-bar-seg {
+  height: 100%;
+  /* 占比很小的段也要看得见：0.5% 的一闪而过同样是发生过的时间 */
+  min-width: 1px;
+  flex: none;
+}
+
+.chat-timing-dot,
+.chat-timing-bar-seg {
+  background: var(--color-fg-faint);
+}
+
+.chat-timing-dot.is-wait,
+.chat-timing-bar-seg.is-wait {
+  background: var(--color-warn);
+}
+
+.chat-timing-dot.is-generate,
+.chat-timing-bar-seg.is-generate {
+  background: var(--color-teal);
+}
+
+.chat-timing-dot.is-tool,
+.chat-timing-bar-seg.is-tool {
+  background: var(--color-info);
+}
+
+.chat-timing-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-timing-row {
+  display: flex;
+  width: 100%;
+  height: 30px;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  padding: 0 8px;
+  color: var(--color-fg-soft);
+  font-size: 12px;
+  text-align: left;
+}
+
+.chat-timing-row:hover:not(:disabled) {
+  background: var(--color-list-hover);
+}
+
+/* 禁用态只掉颜色：尺寸、边框与位置不变（没有这一类时行仍在，只是不再有内容） */
+.chat-timing-row:disabled {
+  color: var(--color-fg-ghost);
+}
+
+.chat-timing-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.chat-timing-name {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.chat-timing-hint {
+  overflow: hidden;
+  color: var(--color-fg-ghost);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-timing-count,
+.chat-timing-ratio {
+  flex: none;
+  width: 48px;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.chat-timing-ratio {
+  width: 40px;
+}
+
+/* 同一列的时间给固定宽度：明细行与汇总行右边缘才能对齐 */
+.chat-timing-ms {
+  flex: none;
+  width: 64px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.chat-timing-chevron {
+  flex: none;
+  color: var(--color-fg-ghost);
+  transition: transform 0.15s;
+}
+
+.chat-timing-row.is-open .chat-timing-chevron {
+  transform: rotate(90deg);
+}
+
+/* 明细比汇总行多缩进一档（口径与 dot 列对齐），按发生顺序排列 */
+.chat-timing-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 6px;
+  padding: 0 8px 0 22px;
+  list-style: none;
+}
+
+.chat-timing-item {
+  display: flex;
+  height: 24px;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-fg-muted);
+  font-size: 11.5px;
+}
+
+.chat-timing-offset {
+  width: 64px;
+  flex: none;
+  color: var(--color-fg-ghost);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-timing-item-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-timing-badge {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-fg-max) 8%, transparent);
+  color: var(--color-fg-faint);
+  font-size: 10px;
+}
+
+.chat-timing-badge.is-error {
+  background: color-mix(in srgb, var(--color-danger) 16%, transparent);
+  color: var(--color-danger);
+}
+
+.chat-timing-badge.is-aborted {
+  background: color-mix(in srgb, var(--color-warn) 16%, transparent);
+  color: var(--color-warn);
+}
+
+.chat-timing-note {
+  margin-top: 12px;
+  color: var(--color-fg-ghost);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
 /* 参数 / 输出 / 命令：内容面（canvas）里的一块代码面，不再各自加一层边框阴影 */
 .chat-modal-pre,
 .chat-modal-step pre {
@@ -4767,6 +4960,16 @@ body.is-resizing-btw {
   .chat-composer-hint > :last-child {
     display: none;
   }
+
+  /* 耗时弹窗在窄屏上先让位给时间与名称：那行说明只是注解，挤掉名称就本末倒置 */
+  .chat-timing-hint {
+    display: none;
+  }
+
+  .chat-timing-count,
+  .chat-timing-ratio {
+    width: 36px;
+  }
 }
 
 /* ------------------------------------------------------ 快速选择（quick pick）
@@ -5190,6 +5393,11 @@ body.is-resizing-btw {
 /* 输入框右侧的“本会话能力”入口：面板打开时点亮。 */
 .chat-composer-capabilities.is-active {
   color: var(--color-warn);
+}
+
+/* 耗时分析入口：弹窗打开时点亮（同一份事件流还在增长，这盏灯是「它在记着」的提示）。 */
+.chat-composer-timing.is-active {
+  color: var(--color-teal);
 }
 
 /* 会话设置弹窗里的能力列表与压缩表单来自 packages/mica-config-ui（与设置页同一份组件），

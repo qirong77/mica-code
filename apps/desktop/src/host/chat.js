@@ -1910,6 +1910,23 @@ export function registerChatIpc() {
     return { ok: true, forwarded: true }
   })
 
+  /**
+   * 用户把焦点放回了输入框（`mica/input/focus`）。
+   *
+   * 比「敲了第一个字」早一步：插件可以在用户还没开始打字时就先把落盘的历史压小，
+   * 等这一轮请求发出时上下文已经是压过的。渲染层只在没在跑的时候发；轮次运行中
+   * 漏过来的那一下由宿主的 turn lease 判定挡掉（插件拿到 `busy` 就跳过）。
+   *
+   * 和 `chat:input-activity` 一样，没有常驻进程就吞掉——不能为一次聚焦去 spawn。
+   */
+  ipcMain.handle('chat:input-focus', (event, { id } = {}) => {
+    const run = runs.get(id)
+    if (!run?.child?.stdin?.writable) return { ok: true, forwarded: false }
+    run.sender = event.sender
+    void hostTaskRequest(run, 'mica/input/focus', {}).catch(() => {})
+    return { ok: true, forwarded: true }
+  })
+
   // Mica extensions (mica/backgroundTasks/*, mica/subagentTasks/*): the tasks
   // live in the resident host process, so these are plain request round-trips,
   // not turn starts. They never touch run.running/hostPending and stay usable
