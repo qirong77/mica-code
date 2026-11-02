@@ -5,7 +5,7 @@
  * `tool_use` / `step_finish`），不新增协议：一轮的时间按「在等什么」切成首尾相接的
  * 区间——请求发出后到第一个 token 是「等待模型」，流式输出期间是「模型输出」，
  * 工具从 item/started 到 item/completed 是「工具执行」。区间之间不留空隙，所以
- * 三类合计加上收尾就是整轮耗时；点击某一类再按时间顺序看每次的明细。
+ * 三类合计加上收尾就是整轮耗时；明细按发生顺序展示。
  *
  * 只保留最近一轮：`step_start` 直接丢弃上一轮。切会话 / 重启后没有事件可重放时
  * 就是空的，界面如实说「还没有可分析的轮次」，不落盘也不伪造。
@@ -197,6 +197,11 @@ export function summarizeTurnTiming(state, nowMs = Date.now()) {
     running: !state.endedAt,
     outcome: state.outcome,
     groups,
+    timeline: groups
+      .flatMap((group) =>
+        group.items.map((item) => ({ ...item, kind: group.id, label: group.label }))
+      )
+      .sort((a, b) => a.start - b.start),
     requests: groups[0].items.filter((item) => !item.tail && !item.live).length,
     toolCalls: groups[2].items.length
   }

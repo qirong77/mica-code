@@ -49,6 +49,8 @@ const REFRESH_MS = 15_000;
 const DRAG_THRESHOLD = 4;
 const MAJOR_HEADER_HEIGHT = 24;
 const MINOR_HEADER_HEIGHT = 22;
+/** 滚轮缩放的落盘延迟：一次手势会连发几十个事件，停手之后才写一次。 */
+const ZOOM_SAVE_MS = 400;
 
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
@@ -97,6 +99,9 @@ export default function SchedulePage({ api }) {
   const titleRef = useRef(title);
   const titleDirtyRef = useRef(false);
   const titleTimerRef = useRef(null);
+  const zoomTimerRef = useRef(null);
+  const pendingZoomRef = useRef(null);
+  const commitRef = useRef(() => {});
 
   dataRef.current = data;
   dialogRef.current = dialog;
@@ -143,6 +148,7 @@ export default function SchedulePage({ api }) {
         }
         dataRef.current = parsed;
         setData(parsed);
+        setZoom(parsed.zoom);
         if (!titleDirtyRef.current) {
           setTitle(parsed.title);
           titleRef.current = parsed.title;
@@ -173,6 +179,15 @@ export default function SchedulePage({ api }) {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
       if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
       if (titleTimerRef.current) window.clearTimeout(titleTimerRef.current);
+      if (zoomTimerRef.current) {
+        window.clearTimeout(zoomTimerRef.current);
+        zoomTimerRef.current = null;
+      }
+      const pendingZoom = pendingZoomRef.current;
+      pendingZoomRef.current = null;
+      if (pendingZoom != null && Math.abs(dataRef.current.zoom - pendingZoom) >= 0.0001) {
+        commitRef.current({ type: 'update-zoom', zoom: pendingZoom });
+      }
     };
   }, []);
 
@@ -243,6 +258,34 @@ export default function SchedulePage({ api }) {
       return true;
     },
     [writer, showToast, load],
+  );
+
+  commitRef.current = commit;
+
+  /**
+   * 缩放倍率和刻度一样存在 data.json 里：下次打开还是上次那个大小。
+   *
+   * 滚轮一次手势会连发几十个事件，每条都写一次盘既慢又吵（另开的窗口每 15 秒还会拉一次），
+   * 所以先只改本地、停手 400ms 再落一条操作；还没落盘就关掉页面时，卸载时补写。
+   */
+  const flushZoom = useCallback(() => {
+    const value = pendingZoomRef.current;
+    pendingZoomRef.current = null;
+    if (value == null) return;
+    if (Math.abs(dataRef.current.zoom - value) < 0.0001) return;
+    commitRef.current({ type: 'update-zoom', zoom: value });
+  }, []);
+
+  const persistZoom = useCallback(
+    (value) => {
+      pendingZoomRef.current = value;
+      if (zoomTimerRef.current) window.clearTimeout(zoomTimerRef.current);
+      zoomTimerRef.current = window.setTimeout(() => {
+        zoomTimerRef.current = null;
+        flushZoom();
+      }, ZOOM_SAVE_MS);
+    },
+    [flushZoom],
   );
 
   const retrySave = useCallback(async () => {
@@ -330,6 +373,7 @@ export default function SchedulePage({ api }) {
       const host = hostRef.current;
       if (!host) {
         setZoom(clamped);
+        persistZoom(clamped);
         return;
       }
       const rect = host.getBoundingClientRect();
@@ -344,11 +388,12 @@ export default function SchedulePage({ api }) {
         viewportWidth: host.clientWidth,
       }).scrollLeft;
       setZoom(clamped);
+      persistZoom(clamped);
       raf(() => {
         if (hostRef.current) hostRef.current.scrollLeft = nextScroll;
       });
     },
-    [zoom, layout.start, pxPerDay, scale],
+    [zoom, layout.start, pxPerDay, scale, persistZoom],
   );
 
   function onWheel(event) {

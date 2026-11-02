@@ -74,6 +74,13 @@ describe('turn timing', () => {
     expect(group(summary, 'tool').totalMs).toBe(400)
     const sums = summary.groups.reduce((total, entry) => total + entry.totalMs, 0)
     expect(sums).toBe(summary.totalMs)
+    expect(summary.timeline.map((item) => [item.kind, item.offsetMs, item.durationMs])).toEqual([
+      ['wait', 0, 2000],
+      ['generate', 2000, 1000],
+      ['tool', 3000, 400],
+      ['wait', 3400, 2000],
+      ['generate', 5400, 600]
+    ])
   })
 
   it('lists each tool call in order with its own duration', () => {

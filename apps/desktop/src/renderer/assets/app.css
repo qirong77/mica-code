@@ -3364,8 +3364,7 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
 
 /* ------------------------------------------------ 耗时分析弹窗（最近一轮的时间去哪了）
 
-   三行固定顺序的类别 + 一条按时间铺开的占比条。展开某一类只是把明细插在它下面，
-   弹窗整体高度定死、内容自己滚：换类别、展开收起时窗口不能忽高忽低。 */
+   按时间铺开的概览条与纵向执行过程，弹窗高度固定、内容滚动。 */
 .chat-modal-timing {
   max-width: 620px;
   height: min(70dvh, 560px);
@@ -3375,7 +3374,6 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   display: flex;
   height: 6px;
   flex: none;
-  gap: 1px;
   margin-bottom: 12px;
   overflow: hidden;
   border-radius: 3px;
@@ -3384,9 +3382,8 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
 
 .chat-timing-bar-seg {
   height: 100%;
-  /* 占比很小的段也要看得见：0.5% 的一闪而过同样是发生过的时间 */
-  min-width: 1px;
-  flex: none;
+  min-width: 0;
+  flex-basis: 0;
 }
 
 .chat-timing-dot,
@@ -3409,124 +3406,103 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   background: var(--color-info);
 }
 
-.chat-timing-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.chat-timing-row {
-  display: flex;
-  width: 100%;
-  height: 30px;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  padding: 0 8px;
-  color: var(--color-fg-soft);
-  font-size: 12px;
-  text-align: left;
-}
-
-.chat-timing-row:hover:not(:disabled) {
-  background: var(--color-list-hover);
-}
-
-/* 禁用态只掉颜色：尺寸、边框与位置不变（没有这一类时行仍在，只是不再有内容） */
-.chat-timing-row:disabled {
-  color: var(--color-fg-ghost);
-}
-
-.chat-timing-dot {
-  width: 6px;
-  height: 6px;
-  flex: none;
-  border-radius: 50%;
-}
-
-.chat-timing-name {
-  display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.chat-timing-hint {
-  overflow: hidden;
-  color: var(--color-fg-ghost);
-  font-size: 10.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-timing-count,
-.chat-timing-ratio {
-  flex: none;
-  width: 48px;
+.chat-timing-columns {
+  display: grid;
+  grid-template-columns: 72px 1fr 64px;
+  padding: 0 8px 6px;
   color: var(--color-fg-faint);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+  font-size: 10.5px;
+}
+
+.chat-timing-columns > :last-child {
   text-align: right;
 }
 
-.chat-timing-ratio {
-  width: 40px;
-}
-
-/* 同一列的时间给固定宽度：明细行与汇总行右边缘才能对齐 */
-.chat-timing-ms {
-  flex: none;
-  width: 64px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.chat-timing-chevron {
-  flex: none;
-  color: var(--color-fg-ghost);
-  transition: transform 0.15s;
-}
-
-.chat-timing-row.is-open .chat-timing-chevron {
-  transform: rotate(90deg);
-}
-
-/* 明细比汇总行多缩进一档（口径与 dot 列对齐），按发生顺序排列 */
-.chat-timing-items {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin: 2px 0 6px;
-  padding: 0 8px 0 22px;
+.chat-timing-list {
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
 .chat-timing-item {
   display: flex;
-  height: 24px;
+  min-height: 42px;
   align-items: center;
   gap: 8px;
+  padding: 0 8px;
   color: var(--color-fg-muted);
   font-size: 11.5px;
+}
+
+.chat-timing-item:hover {
+  background: var(--color-list-hover);
 }
 
 .chat-timing-offset {
   width: 64px;
   flex: none;
-  color: var(--color-fg-ghost);
+  color: var(--color-fg-faint);
   font-variant-numeric: tabular-nums;
 }
 
-.chat-timing-item-label {
+.chat-timing-marker {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  flex: none;
+}
+
+.chat-timing-marker::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--color-line);
+}
+
+.chat-timing-item:first-child .chat-timing-marker::before {
+  top: 50%;
+}
+.chat-timing-item:last-child .chat-timing-marker::before {
+  bottom: 50%;
+}
+
+.chat-timing-dot {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.chat-timing-content {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1;
+  padding: 6px 0;
+}
+
+.chat-timing-name {
+  color: var(--color-fg-soft);
+}
+
+.chat-timing-item-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--color-fg-faint);
+  font-size: 10.5px;
+}
+
+.chat-timing-ms {
+  flex: none;
+  width: 64px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .chat-timing-badge {
@@ -4959,16 +4935,6 @@ body.is-resizing-btw {
 @media (max-width: 720px) {
   .chat-composer-hint > :last-child {
     display: none;
-  }
-
-  /* 耗时弹窗在窄屏上先让位给时间与名称：那行说明只是注解，挤掉名称就本末倒置 */
-  .chat-timing-hint {
-    display: none;
-  }
-
-  .chat-timing-count,
-  .chat-timing-ratio {
-    width: 36px;
   }
 }
 

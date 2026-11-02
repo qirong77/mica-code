@@ -58,6 +58,15 @@ describe('normalizeData', () => {
     expect(data.tasks[2]).toMatchObject({ id: 'e', color: 'blue' });
   });
 
+  it('reads back the saved zoom factor, falling back to 1', () => {
+    expect(normalizeData({ ...emptyData(), zoom: 3 }).zoom).toBe(3);
+    expect(normalizeData({ tasks: [] }).zoom).toBe(1);
+    expect(normalizeData({ tasks: [], zoom: 'twice' }).zoom).toBe(1);
+    expect(normalizeData({ tasks: [], zoom: 100 }).zoom).toBe(6);
+    // 滚轮连乘出来的浮点尾巴收成三位小数
+    expect(normalizeData({ tasks: [], zoom: 2.5919999999999996 }).zoom).toBe(2.592);
+  });
+
   it('falls back to a default title / day scale and rebuilds the summary', () => {
     const data = normalizeData({ tasks: [task('a', 'A', '2026-10-01', '2026-10-01', { note: '  一句话  ' })] });
     expect(data.title).toBe(DEFAULT_TITLE);
@@ -181,6 +190,14 @@ describe('applyOperation', () => {
     expect(applyOperation(titled, { type: 'update-scale', scale: 'year' as never }).scale).toBe('day');
   });
 
+  it('keeps the zoom factor between 0.35 and 6', () => {
+    expect(emptyData().zoom).toBe(1);
+    expect(applyOperation(emptyData(), { type: 'update-zoom', zoom: 2.5 }).zoom).toBe(2.5);
+    expect(applyOperation(emptyData(), { type: 'update-zoom', zoom: 99 }).zoom).toBe(6);
+    expect(applyOperation(emptyData(), { type: 'update-zoom', zoom: 0.01 }).zoom).toBe(0.35);
+    expect(applyOperation(emptyData(), { type: 'update-zoom', zoom: Number.NaN }).zoom).toBe(1);
+  });
+
   it('replaces everything for import and clears only the tasks', () => {
     const data = dataWith([task('t1', 'A')]);
     const replaced = applyOperation(data, {
@@ -206,6 +223,8 @@ describe('import / export / sample', () => {
     const imported = parseImport(JSON.parse(JSON.stringify(exportDocument(data))));
     expect(imported).toMatchObject({ title: '我的项目', scale: 'week' });
     expect(imported.tasks[0]).toMatchObject({ id: 't1', color: 'rose', note: '备注' });
+    // 缩放是这台设备的视图偏好，不跟导出文件走
+    expect(exportDocument({ ...data, zoom: 2 })).not.toHaveProperty('zoom');
   });
 
   it('rejects an import with no valid tasks', () => {

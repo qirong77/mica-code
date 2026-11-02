@@ -400,7 +400,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 输入框获得焦点发一次 `chat:input-focus` → `mica/input/focus`（只在会话没在跑时发）：同样是提前量，自动压缩据此在用户还没敲第二个字之前就压完。两条都只在已有常驻 host 时转发，不为一次焦点去 spawn。
 - 粘贴共用 `composer-paste.js`：图片转 `[Image](路径)`，文件插绝对路径。
 - 角色入口在输入条箭头，随下一次发送/编辑的 role 参数持久化。
-- 输入条秒表图标打开「本轮耗时」（`TurnTimingDialog`）：最近一轮按「等模型 / 输出 / 跑工具」首尾相接切成区间，切分与聚合只在 `renderer/src/turn-timing.js`，数据来自本轮已收到的事件流（不新增协议、不落盘）。`step_start` 重置、只留最近一轮；页面重载后靠 host 对本轮事件的重放恢复，没有事件可重放时入口置灰。
+- 输入条秒表图标打开「本轮耗时」（`TurnTimingDialog`）：最近一轮按「等模型 / 输出 / 跑工具」首尾相接切成区间，界面以纵向时间线按发生顺序直接展示每段的开始偏移、阶段、内容与耗时；切分与聚合只在 `renderer/src/turn-timing.js`，数据来自本轮已收到的事件流（不新增协议、不落盘）。`step_start` 重置、只留最近一轮；页面重载后靠 host 对本轮事件的重放恢复，没有事件可重放时入口置灰。
 - 输入条齿轮与时钟打开 `SessionSettingsDialog`：会话能力（Tools / Skills / MCP 三页签）/ 定时任务 / 插件。声明了 `perSession` 的插件是左侧导航「插件」下面的子项，内容区只画选中的那一个；自动压缩的阈值这类按会话可调的项就在这里，默认值仍在配置页 Plugins。插件声明 `llm` 的字段由 `LlmSettingsSection` 按会话渲染（与配置页同一组件，摘要写会话当前模型、逐字段可「跟随默认」），不要在会话设置里另写一套模型表单。
 - 顶栏「会话笔记」图标打开 `SessionNotesDialog`（Monaco，700ms 防抖，无保存按钮）。
 - 插件入口是**输入框正上方那排胶囊按钮**（`PluginQuickBar`，来自清单 `desktop.panel.shortcuts`）：`action` 类按钮点一下直接调插件动作（立即返回，不在页面里跑外部命令或等模型），`section` 类按钮打开盖在对话区右侧的抽屉并展开那一块（`PluginPanels`，宽 340、不挤窄对话）；抽屉折叠状态与 ChatView 的 `pluginPanelOpen` / `pluginPanelSection` 共用。哪些插件有面板、`roles` 门槛、是否停用都从 `readPluginsDetails` 拿（用户插件也在里面），规则在 `renderer/src/plugin-panels.js`；RPC 走 `window.mica.chat.pluginPanels.view|action` → `chat:plugin-panel-view|action`。host 侧返回的载荷在 `hostTaskRequest` 的信封里，必须过 `unwrapHostResult`，否则页面只看到 `{ok:true}`、视图全 undefined。

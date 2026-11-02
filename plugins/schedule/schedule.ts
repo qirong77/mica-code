@@ -1,4 +1,5 @@
 import { addDays, daysBetween, formatStamp, isValidDate, isValidRange, startOfWeek, todayOf } from './dates.js';
+import { clampZoom } from './gantt.js';
 import { COLOR_KEYS, isScheduleColor, nextColor, normalizeColor, type ScheduleColor } from './palette.js';
 
 /**
@@ -48,6 +49,8 @@ export type ScheduleData = {
   title: string;
   /** 上次关掉页面时的刻度；打开时沿用它。 */
   scale: ScheduleScale;
+  /** 上次关掉页面时的缩放倍率（1 = 原始大小）；打开时沿用它。 */
+  zoom: number;
   tasks: ScheduleTask[];
 };
 
@@ -59,6 +62,7 @@ export function emptyData(): ScheduleData {
     summary: '',
     title: DEFAULT_TITLE,
     scale: 'day',
+    zoom: 1,
     tasks: [],
   };
 }
@@ -108,6 +112,12 @@ export function normalizeScale(value: unknown): ScheduleScale {
   return typeof value === 'string' && (SCALES as readonly string[]).includes(value) ? (value as ScheduleScale) : 'day';
 }
 
+export function normalizeZoom(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 1;
+  // 滚轮是连乘出来的（1.2 的 n 次方），不收一下就是 2.5919999999999996 这种数
+  return Math.round(clampZoom(value) * 1000) / 1000;
+}
+
 /**
  * 读回的数据一律过一遍这里。
  *
@@ -129,6 +139,7 @@ export function normalizeData(value: unknown): ScheduleData {
     summary: legacy || typeof record.summary !== 'string' ? summarize(tasks) : record.summary,
     title: normalizeTitle(record.title),
     scale: normalizeScale(record.scale),
+    zoom: normalizeZoom(record.zoom),
     tasks,
   };
 }
@@ -222,6 +233,7 @@ export type ScheduleOperation =
   | { type: 'delete-task'; taskId: string }
   | { type: 'update-title'; title: string }
   | { type: 'update-scale'; scale: ScheduleScale }
+  | { type: 'update-zoom'; zoom: number }
   | { type: 'replace'; title: string; scale: ScheduleScale; tasks: ScheduleTask[] }
   | { type: 'clear-tasks' };
 
@@ -308,6 +320,8 @@ export function applyOperation(data: ScheduleData, operation: ScheduleOperation)
       return { ...data, title: normalizeTitle(operation.title) };
     case 'update-scale':
       return { ...data, scale: normalizeScale(operation.scale) };
+    case 'update-zoom':
+      return { ...data, zoom: normalizeZoom(operation.zoom) };
     case 'replace':
       return {
         ...data,
