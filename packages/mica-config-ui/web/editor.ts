@@ -12,6 +12,13 @@ export type ConfigWebEditorProps = {
   value: string;
   language?: string;
   readOnly?: boolean;
+  /**
+   * 把某一行滚到视野中央（只读查看长文时用）。
+   *
+   * 带上 `nonce` 是因为「再看一遍同一行」也要重新定位：只盯着 `line` 的话，反复点同一节
+   * 不会回到那一行。宿主可以忽略它（朴素文本域就没有滚动定位能力）。
+   */
+  reveal?: { line: number; nonce: number } | null;
   onChange(value: string): void;
 };
 

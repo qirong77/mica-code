@@ -6,13 +6,21 @@ import { loadMonaco } from './monaco'
  * script-src 'self' 限制），主题与应用其它编辑器一致。配置页组件只认
  * `ConfigWebEditorProps`，浏览器端换成 CDN 版即可（apps/config-web）。
  */
-export function LocalJsonEditor({ value, language = 'json', readOnly = false, onChange }) {
+export function LocalJsonEditor({
+  value,
+  language = 'json',
+  readOnly = false,
+  reveal = null,
+  onChange
+}) {
   const hostRef = useRef(null)
   const editorRef = useRef(null)
   const onChangeRef = useRef(onChange)
   const valueRef = useRef(value)
+  const revealRef = useRef(reveal)
   onChangeRef.current = onChange
   valueRef.current = value
+  revealRef.current = reveal
 
   useEffect(() => {
     let disposed = false
@@ -39,6 +47,7 @@ export function LocalJsonEditor({ value, language = 'json', readOnly = false, on
       })
       editor.onDidChangeModelContent(() => onChangeRef.current?.(editor.getValue()))
       editorRef.current = editor
+      scrollToReveal(editor, revealRef.current)
     })()
     return () => {
       disposed = true
@@ -58,5 +67,20 @@ export function LocalJsonEditor({ value, language = 'json', readOnly = false, on
     editorRef.current?.updateOptions({ readOnly })
   }, [readOnly])
 
+  // 同一行反复点也要滚回去，所以取 nonce 一起作为依赖。
+  useEffect(() => {
+    const editor = editorRef.current
+    if (editor) scrollToReveal(editor, revealRef.current)
+  }, [reveal?.line, reveal?.nonce])
+
   return <div ref={hostRef} className="config-web-editor" style={{ height: '100%' }} />
+}
+
+/** 只读长文里「跳到某一节」：把目标行放到视野中间，不抢焦点、不改选区。 */
+function scrollToReveal(editor, reveal) {
+  if (!reveal?.line) return
+  const model = editor.getModel()
+  if (!model) return
+  const line = Math.min(Math.max(Math.round(reveal.line), 1), model.getLineCount())
+  editor.revealLineInCenter(line)
 }

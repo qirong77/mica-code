@@ -1,5 +1,12 @@
+import { useEffect, useRef } from 'react';
 import Editor, { loader, type BeforeMount, type Monaco, type OnMount } from '@monaco-editor/react';
 import type { ConfigWebEditorProps } from '@packages/mica-config-ui/web/index.js';
+
+/** 这里只用到两个方法，不为它们把 monaco-editor 的类型拖进浏览器宿主的构建。 */
+type RevealTarget = {
+  getModel(): { getLineCount(): number } | null;
+  revealLineInCenter(line: number): void;
+};
 
 /**
  * 浏览器端（apps/config-web）的编辑器实现：monaco 从 CDN 按需加载，所以浏览器的配置页
@@ -94,14 +101,39 @@ const onMount: OnMount = (_editor, monaco) => {
   bindDocumentTheme(monaco);
 };
 
-export function MonacoJsonEditor({ value, language = 'json', readOnly = false, onChange }: ConfigWebEditorProps) {
+export function MonacoJsonEditor({
+  value,
+  language = 'json',
+  readOnly = false,
+  reveal = null,
+  onChange,
+}: ConfigWebEditorProps) {
+  const editorRef = useRef<RevealTarget | null>(null);
+
+  // 同一行反复点也要滚回去，所以取 nonce 一起作为依赖。
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !reveal?.line) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const line = Math.min(Math.max(Math.round(reveal.line), 1), model.getLineCount());
+    editor.revealLineInCenter(line);
+  }, [reveal?.line, reveal?.nonce]);
+
   return (
     <Editor
       height="100%"
       language={language}
       theme={themeNameFromDocument()}
       beforeMount={beforeMount}
-      onMount={onMount}
+      onMount={(editor, monaco) => {
+        editorRef.current = editor;
+        onMount(editor, monaco);
+        if (reveal?.line) {
+          const model = editor.getModel();
+          if (model) editor.revealLineInCenter(Math.min(Math.max(Math.round(reveal.line), 1), model.getLineCount()));
+        }
+      }}
       value={value}
       options={{
         readOnly,

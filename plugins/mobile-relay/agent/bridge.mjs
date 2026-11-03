@@ -102,9 +102,10 @@ function open(buffer) {
  * 二进制 POST。自签证书时不做链校验——内容本身由 AES-GCM 保证完整性，
  * 证书只影响「连的是不是那台机器」，而口令派生密钥已经覆盖了这一点。
  *
- * `signal` 用来打断一次挂起中的轮询：本机有新事件时不能等它超时。
+ * 连接要能复用：这条链路的 RTT 常在 150ms 量级，每次重建 TLS 要再花两三个往返，
+ * 比任何调度优化都贵。所以不做「打断挂起中的请求」这种需要换连接的事。
  */
-function postBinary(target, body, signal) {
+function postBinary(target, body) {
   const url = new URL(target)
   const send = url.protocol === 'https:' ? httpsRequest : httpRequest
   return new Promise((resolve, reject) => {
@@ -138,20 +139,9 @@ function postBinary(target, body, signal) {
     deadline.unref?.()
     req.once('close', () => clearTimeout(deadline))
     req.on('timeout', () => req.destroy(new Error('timeout')))
-    if (signal) {
-      if (signal.aborted) req.destroy(wokenError())
-      else signal.addEventListener('abort', () => req.destroy(wokenError()), { once: true })
-    }
     req.on('error', reject)
     req.end(body)
   })
-}
-
-/** 被本机事件打断的轮询，与真正的失败区分开。 */
-function wokenError() {
-  const error = new Error('woken')
-  error.woken = true
-  return error
 }
 
 /**
@@ -160,15 +150,28 @@ function wokenError() {
  */
 const MAX_POLL_RESPONSE_BYTES = 24 * 1024 * 1024
 
-async function relayPoll(body, signal) {
-  const response = await postBinary(
-    `${settings.relayUrl}/api/poll`,
-    seal({ ...body, ts: Date.now() }),
-    signal
-  )
+async function relayPoll(body) {
+  const response = await postBinary(`${settings.relayUrl}/api/poll`, seal({ ...body, ts: Date.now() }))
   if (response.status === 401) throw new Error('口令不匹配，或被中间设备改写')
   if (response.status !== 200) throw new Error(`relay HTTP ${response.status}`)
   return open(response.body)
+}
+
+/**
+ * 事件的即时上行。
+ *
+ * 早先事件只能捎带在**下一次轮询的请求体**里，于是回显延迟等于「上一次挂起还剩多久」：
+ * 无人看时 15 秒一档，有人在看也是 1–3 秒一档，终端里每敲一个字都要等这么久才看到它。
+ * 想靠打断挂起中的轮询来催它，代价是那条连接被销毁、下一轮要重做 TLS 握手——实测单次
+ * 握手就要 290ms，比等一轮还贵，打字反而更卡。
+ *
+ * 所以改成单独一条上行：事件一有就发，轮询继续挂着等命令，两边互不干扰。
+ */
+async function relayPush(body) {
+  const response = await postBinary(`${settings.relayUrl}/api/push`, seal({ ...body, ts: Date.now() }))
+  if (response.status === 401) throw new Error('口令不匹配，或被中间设备改写')
+  if (response.status !== 200) throw new Error(`relay HTTP ${response.status}`)
+  return response
 }
 
 /* ---------------------------------------------------------------- 通道 */
@@ -310,32 +313,53 @@ function pushEvent(frame) {
     eventBytes -= JSON.stringify(dropped).length
   }
   // 任何上行事件都该尽快送到手机：终端回显、文件树、Git 状态都不是 chat:event，
-  // 只对对话唤醒会让它们的延迟完全取决于挂起中的那次轮询几时超时。
-  wakeUp()
+  // 让它们等下一轮轮询就是把延迟押在那次挂起超时上。
+  schedulePush()
 }
 
-let wakeTimer = null
-let wakeResolve = null
-/** 正在挂起的那次轮询；有它时唤醒就是打断这次请求，而不是等它超时。 */
-let pollAbort = null
-/** 这次轮询的 body 里带着事件（缓冲已清空）：不能打断，否则这些事件没人接手。 */
-let pollCarriesEvents = false
-function wakeUp() {
-  if (pollAbort) {
-    // 带着事件的请求本来就因为有事可送而立刻返回；打断它只会让这批事件
-    // 既没送到中转机、也没留在本地缓冲里。新事件下一轮必走。
-    if (pollCarriesEvents) return
-    const controller = pollAbort
-    pollAbort = null
-    controller.abort()
-    return
+/** 一批事件攒多久发一次：够把连续输出合成一个请求，又不至于让人看得出延迟。 */
+const PUSH_DEBOUNCE_MS = 15
+let pushTimer = null
+let pushRunning = false
+
+function schedulePush() {
+  if (pushTimer || pushRunning) return
+  pushTimer = setTimeout(() => {
+    pushTimer = null
+    void flushPush()
+  }, PUSH_DEBOUNCE_MS)
+  pushTimer.unref?.()
+}
+
+async function flushPush() {
+  if (pushRunning) return
+  const events = takeEvents()
+  if (!events.length) return
+  pushRunning = true
+  let failed = false
+  try {
+    await relayPush({ events })
+  } catch (error) {
+    // 送不出去就放回队首：下一轮轮询会捎带它们。事件重复到达只是重画一次，无害。
+    failed = true
+    requeueEvents(events)
+    log('[push] failed:', String(error?.message || error))
+  } finally {
+    pushRunning = false
+    // 失败后不立刻重排：那会变成没有退避的紧循环，交给下一轮轮询或下一条事件。
+    if (!failed && eventBuffer.length) schedulePush()
   }
-  if (!wakeResolve) return
-  const resolve = wakeResolve
-  wakeResolve = null
-  if (wakeTimer) clearTimeout(wakeTimer)
-  wakeTimer = null
-  resolve()
+}
+
+function requeueEvents(frames) {
+  if (!frames.length) return
+  eventBuffer.unshift(...frames)
+  for (const frame of frames) eventBytes += JSON.stringify(frame).length
+  while (eventBuffer.length > MAX_EVENT_FRAMES || eventBytes > MAX_EVENT_BYTES) {
+    const dropped = eventBuffer.pop()
+    if (!dropped) break
+    eventBytes -= JSON.stringify(dropped).length
+  }
 }
 
 function takeEvents() {
@@ -472,12 +496,7 @@ async function tick() {
     if (labelPending) body.label = labelPending
     const started = Date.now()
     const rawBytes = Buffer.byteLength(JSON.stringify(body))
-    const controller = new AbortController()
-    pollAbort = controller
-    pollCarriesEvents = events.length > 0
-    const response = await relayPoll(body, controller.signal)
-    pollAbort = null
-    pollCarriesEvents = false
+    const response = await relayPoll(body)
     pollFailures = 0
     if (envPayload === env) envPayload = null
     labelPending = ''
@@ -492,9 +511,6 @@ async function tick() {
       eventBuffer = []
       eventBytes = 0
     }
-    // 这次没被打断（见 wakeUp），轮询期间来的事件还躺在缓冲里：立刻再走一轮，
-    // 否则要白等一个间隔。
-    if (eventBuffer.length > 0) intervalMs = 0
 
     log(
       `[poll] ${Date.now() - started}ms raw=${rawBytes}B ` +
@@ -508,13 +524,6 @@ async function tick() {
       intervalMs = 0
     }
   } catch (error) {
-    pollAbort = null
-    pollCarriesEvents = false
-    // 被本机事件打断：这一轮什么都没送出去（结果、事件都还在手上），立刻重发一轮。
-    if (error?.woken) {
-      pendingResults.unshift(...results)
-      return
-    }
     // 结果按 id 结算，重复回传是幂等的；丢掉它们会让已经执行完的操作等到超时。
     pendingResults.unshift(...results)
     clearResultCache(resultHashes)
@@ -525,19 +534,7 @@ async function tick() {
   if (stopping) return
   // main() 已经负责下一轮；额外调 tick 会在每次执行命令后多出一条并行轮询。
   if (intervalMs <= 0) return
-  await new Promise((resolve) => {
-    let settled = false
-    const finish = () => {
-      if (settled) return
-      settled = true
-      wakeResolve = null
-      clearTimeout(timer)
-      resolve()
-    }
-    const timer = setTimeout(finish, intervalMs)
-    // 本机仍在流式输出时也遵守失败退避，避免 chat:event 把失败重试催成紧循环。
-    if (pollFailures === 0) wakeResolve = finish
-  })
+  await sleep(intervalMs)
 }
 
 async function main() {

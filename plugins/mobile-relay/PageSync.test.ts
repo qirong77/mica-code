@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pageVersionOf, resolveRendererDir, syncPage } from './PageSync';
-import { guidePageSync } from './PageSyncAction';
+import { guidePageSync, repoRootFor } from './PageSyncAction';
 
 const relayScript = join(import.meta.dirname, 'relay', 'relay.mjs');
 const TOKEN = 'b'.repeat(48);
@@ -127,6 +127,26 @@ describe('the button hands the update to a session', () => {
     expect(newSession.prompt).toContain('electron-vite build');
     // 页面更新走 HTTP 上传，不需要 SSH，提示词不能把人引去重新部署。
     expect(newSession.prompt).toContain('不要为此重新部署中转机');
+  });
+
+  it('带上 skill 的真实路径与新会话的工作目录', () => {
+    const rendererDir = '/Users/someone/mica-code/apps/desktop/out/renderer';
+    const skillPath = '/Users/someone/.mica/plugin-data/mobile-relay/skill/SKILL.md';
+    const { newSession } = guidePageSync({ skillPath, rendererDir });
+
+    // 新会话可能停在任何目录：skill 要给绝对路径，构建命令也要给全。
+    expect(newSession.prompt).toContain(`[skill:mobile-relay](${skillPath})`);
+    expect(newSession.prompt).toContain(rendererDir);
+    expect(newSession.prompt).toContain('cd /Users/someone/mica-code/apps/desktop');
+    // 工作目录跟着页面产物走，agent 去构建时就落在那个仓库里。
+    expect(newSession.cwd).toBe('/Users/someone/mica-code');
+  });
+
+  it('产物不在仓库里时不猜工作目录', () => {
+    const { newSession } = guidePageSync({ rendererDir: '/opt/mica/renderer' });
+    expect(repoRootFor('/opt/mica/renderer')).toBeNull();
+    expect(newSession.cwd).toBeUndefined();
+    expect(newSession.prompt).toContain('cd apps/desktop');
   });
 });
 

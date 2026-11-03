@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { readSessionContent, readSessionDetails, writeSession } from '../api.js';
 import { useAutoSave } from '../useAutoSave.js';
 import { ConversationPane } from './ConversationPane.js';
@@ -53,6 +53,7 @@ export function SessionDetailView({
   const [rawLoaded, setRawLoaded] = useState(false);
 
   const lastUpdatedAtRef = useRef<string | null>(null);
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const rawRef = useRef({ rawContent, rawSavedContent, rawLoaded });
   rawRef.current = { rawContent, rawSavedContent, rawLoaded };
 
@@ -183,6 +184,23 @@ export function SessionDetailView({
   // 提示词页签与原始文件页签自己就是滚动容器（编辑器内部滚动），外面这层不滚。
   const fillBody = tab === 'raw' || tab === 'prompt';
 
+  /** 标签条按 WAI-ARIA 的 tablist 走：方向键在页签之间移动，焦点跟着选中的那一个。 */
+  function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const index = tabs.findIndex((item) => item.id === tab);
+    if (index < 0) return;
+    let next = index;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    const target = tabs[next]!;
+    if (target.id === 'raw') void openRawTab();
+    else setTab(target.id);
+    tabRefs.current[target.id]?.focus();
+  }
+
   if (loading && !header) return <div className="page-loading">正在加载 Session…</div>;
   if (!header) {
     return <Empty description={error ?? '读不到这个会话：文件可能已被删除'} />;
@@ -191,13 +209,17 @@ export function SessionDetailView({
   return (
     <div className="session-detail">
       {showHead ? <SessionHead session={header} /> : null}
-      <div className="session-tabs" role="tablist" aria-label="Session 视图">
+      <div className="session-tabs" role="tablist" aria-label="Session 视图" onKeyDown={onTabKeyDown}>
         {tabs.map((item) => (
           <button
             key={item.id}
+            ref={(element) => {
+              tabRefs.current[item.id] = element;
+            }}
             type="button"
             role="tab"
             aria-selected={tab === item.id}
+            tabIndex={tab === item.id ? 0 : -1}
             className={`session-tab${tab === item.id ? ' session-tab-active' : ''}`}
             onClick={() => setTab(item.id)}
           >
@@ -235,7 +257,12 @@ export function SessionDetailView({
           <ContextPane key={`context:${sessionId}`} sessionId={sessionId} refreshToken={version} />
         ) : null}
         {tab === 'prompt' ? (
-          <SystemPromptPane key={`prompt:${sessionId}`} sessionId={sessionId} refreshToken={version} />
+          <SystemPromptPane
+            key={`prompt:${sessionId}`}
+            sessionId={sessionId}
+            refreshToken={version}
+            contextWindowSize={header.contextWindowSize}
+          />
         ) : null}
         {extraTabs.map((item) => (tab === item.id ? <div key={item.id}>{item.content}</div> : null))}
         {tab === 'raw' ? (

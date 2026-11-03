@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { promptPartLabel, splitPromptSections, summarizePrompt } from './promptView.js';
+import {
+  analyzePrompt,
+  promptNodePath,
+  promptPartLabel,
+  searchPrompt,
+  splitPromptSections,
+  summarizePrompt,
+} from './promptView.js';
 
 /** 真实的拼接结果：`buildSystemPrompt()` 用 `\n\n` 连接各个 `<tag>` 段，插件段落追加在最末。 */
 const SENT_PROMPT = [
@@ -139,5 +146,127 @@ describe('summarizePrompt', () => {
     expect(summary.lines).toBe(2);
     expect(summary.tokens).toBe(4); // 2 个 CJK 各 1，剩下 5 个 ASCII 折 2
     expect(summarizePrompt('')).toEqual({ chars: 0, tokens: 0, lines: 0 });
+  });
+});
+
+/** 段内既有 `#` 也有 `##`，还有一个围栏块里的假标题。 */
+const NESTED_PROMPT = [
+  '<system>',
+  'You are Mica.',
+  '</system>',
+  '',
+  '<project-instructions>',
+  '# 手册',
+  '前言一行。',
+  '',
+  '## 1. 工作约定',
+  '约定正文。',
+  '',
+  '### 1.1 细节',
+  '细节正文。',
+  '',
+  '## 2. 命令',
+  '```bash',
+  '# 这不是标题',
+  'bun run test',
+  '```',
+  '</project-instructions>',
+].join('\n');
+
+describe('analyzePrompt', () => {
+  it('顶层段按标签切，段内再按 markdown 标题切成树', () => {
+    const nodes = analyzePrompt(NESTED_PROMPT).nodes;
+
+    expect(nodes.map((node) => node.label)).toEqual(['角色提示词', '项目说明（AGENT.md）']);
+    const book = nodes[1]!;
+    expect(book.level).toBe(0);
+    // 段里唯一的 h1 被提到段本身：段名已经说了来源，不必再点一层。
+    expect(book.children.map((child) => child.label)).toEqual(['1. 工作约定', '2. 命令']);
+    expect(book.children[0]!.children.map((child) => child.label)).toEqual(['1.1 细节']);
+  });
+
+  it('行号按全文算，围栏块里的 # 不当标题', () => {
+    const nodes = analyzePrompt(NESTED_PROMPT).nodes;
+    const book = nodes[1]!;
+
+    expect(nodes[0]!.startLine).toBe(1);
+    expect(nodes[0]!.endLine).toBe(3);
+    expect(book.startLine).toBe(5);
+    expect(book.endLine).toBe(20);
+    const commands = book.children[1]!;
+    expect(commands.label).toBe('2. 命令');
+    // 围栏里的 `# 这不是标题` 留在「2. 命令」自己的正文里，没有变成子节。
+    expect(commands.children).toEqual([]);
+    expect(commands.content).toContain('# 这不是标题');
+  });
+
+  it('体积：节点含子节，ownChars 只算自己写的那部分', () => {
+    const nodes = analyzePrompt(NESTED_PROMPT).nodes;
+    const book = nodes[1]!;
+    const section = book.children[0]!;
+    const leaf = section.children[0]!;
+
+    expect(book.chars).toBe(book.content.length);
+    expect(book.chars).toBeGreaterThan(section.chars);
+    // 父节点 = ownChars + 每个子节；叶子节点没有子节，两者相等。
+    const childChars = book.children.reduce((sum, child) => sum + child.chars, 0);
+    expect(book.ownChars).toBe(book.chars - childChars);
+    expect(section.ownChars).toBe(section.chars - leaf.chars);
+    expect(leaf.ownChars).toBe(leaf.chars);
+  });
+
+  it('重复标签与标签之外的追加内容仍然各成一段', () => {
+    const prompt = '<custom>\nfirst\n</custom>\n\n插件写的一段\n\n<custom>\nsecond\n</custom>';
+    const nodes = analyzePrompt(prompt).nodes;
+
+    expect(nodes.map((node) => node.tag)).toEqual(['custom', '', 'custom']);
+    expect(nodes[1]!.label).toBe('插件段落 / 其它注入');
+  });
+
+  it('空提示词没有节点', () => {
+    expect(analyzePrompt('')).toEqual({ nodes: [], summary: { chars: 0, tokens: 0, lines: 0 } });
+  });
+
+  it('promptNodePath 给出从段到目标节点的链', () => {
+    const nodes = analyzePrompt(NESTED_PROMPT).nodes;
+    const target = nodes[1]!.children[0]!.children[0]!;
+
+    expect(promptNodePath(nodes, target.id).map((node) => node.label)).toEqual([
+      '项目说明（AGENT.md）',
+      '1. 工作约定',
+      '1.1 细节',
+    ]);
+  });
+});
+
+describe('searchPrompt', () => {
+  it('按标题与正文过滤，父链保留，命中数只算节点自己的正文', () => {
+    const nodes = analyzePrompt(NESTED_PROMPT).nodes;
+    const result = searchPrompt(nodes, '正文');
+
+    expect(result.total).toBe(2);
+    // 「角色提示词」里没有这个词，整段被过滤掉；「项目说明」因为子节命中而留在树上。
+    expect(result.nodes).toHaveLength(1);
+    const book = result.nodes[0]!;
+    expect(book.label).toBe('项目说明（AGENT.md）');
+    const section = book.children[0]!;
+    expect(section.label).toBe('1. 工作约定');
+    expect(result.hits.get(section.id)).toBe(1);
+    expect(result.hits.get(section.children[0]!.id)).toBe(1);
+    // 「2. 命令」没有命中，整节被裁掉，但父段仍保留。
+    expect(book.children).toHaveLength(1);
+  });
+
+  it('空查询原样返回，清空搜索不丢结构', () => {
+    const nodes = analyzePrompt(NESTED_PROMPT).nodes;
+
+    expect(searchPrompt(nodes, '   ').nodes).toBe(nodes);
+    expect(searchPrompt(nodes, '').total).toBe(0);
+  });
+
+  it('没有命中时返回空树而不是整棵大纲', () => {
+    const nodes = analyzePrompt(NESTED_PROMPT).nodes;
+
+    expect(searchPrompt(nodes, '不存在的词').nodes).toEqual([]);
   });
 });

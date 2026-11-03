@@ -14,6 +14,7 @@ function bridgeHarness() {
       tick, runCommand, resultsForPoll, rememberResult,
       cache: () => resultHashes,
       poll: (fn) => { relayPoll = fn },
+      push: (fn) => { relayPush = fn },
       results: (items) => { pendingResults = items },
       env: (value) => { envPayload = value },
       settings: (fn) => { readSettings = fn },
@@ -55,6 +56,7 @@ function bridgeHarness() {
       cache(): unknown;
       runCommand(command: unknown): Promise<Record<string, unknown>>;
       poll(fn: (body: Record<string, unknown>) => Promise<unknown>): void;
+      push(fn: (body: Record<string, unknown>) => Promise<unknown>): void;
       results(items: unknown[]): void;
       env(value: unknown): void;
       settings(fn: () => unknown): void;
@@ -199,62 +201,43 @@ describe('bridge transport', () => {
     expect(poll.mock.calls[2]?.[0]).toMatchObject({ results: [{ id: 'second', result: { value: 42 } }] });
   });
 
-  it('cuts a parked poll short as soon as a local event arrives', async () => {
+  it('pushes a local event immediately instead of waiting for the parked poll', async () => {
     const { bridge } = bridgeHarness();
     bridge.wanted(true);
-    // 第一轮永远挂起（模拟中转机把轮询 park 住），之后几轮正常返回。
-    const poll = vi
-      .fn()
-      .mockImplementationOnce(
-        (_body: Record<string, unknown>, signal?: AbortSignal) =>
-          new Promise((_resolve, reject) => {
-            signal?.addEventListener('abort', () => {
-              const error = new Error('woken') as Error & { woken: boolean };
-              error.woken = true;
-              reject(error);
-            });
-          }),
-      )
-      .mockResolvedValue({ intervalMs: 0, wanted: true });
+    // 轮询永远挂起：事件不能再指望它捎带，只能走独立的上行。
+    const poll = vi.fn(() => new Promise<never>(() => {}));
+    const push = vi.fn(async (_body: Record<string, unknown>) => ({ status: 200, body: Buffer.alloc(0) }));
     bridge.poll(poll);
+    bridge.push(push);
 
-    const running = bridge.tick();
+    void bridge.tick();
     await vi.waitFor(() => expect(poll).toHaveBeenCalledTimes(1));
-    // 终端回显这类事件不是 chat:event，也必须立刻上行，而不是等挂起的那次轮询超时。
     bridge.pushEvent({ channel: 'terminal:data', payload: { data: 'a' } });
-    await running;
 
-    await bridge.tick();
-    expect(poll.mock.calls[1]?.[0]).toMatchObject({
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+    expect(push.mock.calls[0]?.[0]).toMatchObject({
       events: [{ channel: 'terminal:data', payload: { data: 'a' } }],
     });
   });
 
-  it('re-sends results that were in flight when a wake cut the poll short', async () => {
+  it('falls back to the poll when the event push fails', async () => {
     const { bridge } = bridgeHarness();
     bridge.wanted(true);
-    const poll = vi.fn(
-      (_body: Record<string, unknown>, signal?: AbortSignal) =>
-        new Promise((_resolve, reject) => {
-          signal?.addEventListener('abort', () => {
-            const error = new Error('woken') as Error & { woken: boolean };
-            error.woken = true;
-            reject(error);
-          });
-        }),
-    );
+    const poll = vi.fn(async (_body: Record<string, unknown>) => ({ intervalMs: 0, wanted: true }));
+    const push = vi.fn(async (_body: Record<string, unknown>) => {
+      throw new Error('offline');
+    });
     bridge.poll(poll);
-    bridge.results([{ id: 'in-flight', ok: true, result: 'done' }]);
+    bridge.push(push);
 
-    const running = bridge.tick();
-    await vi.waitFor(() => expect(poll).toHaveBeenCalledTimes(1));
+    await bridge.tick();
     bridge.pushEvent({ channel: 'terminal:data', payload: { data: 'a' } });
-    await running;
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1));
 
-    poll.mockResolvedValueOnce({ intervalMs: 0, wanted: true });
+    // 推不出去的事件回到队列，下一轮轮询捎带，别让它就这么丢了。
     await bridge.tick();
     expect(poll.mock.calls[1]?.[0]).toMatchObject({
-      results: [{ id: 'in-flight', ok: true, result: 'done' }],
+      events: [{ channel: 'terminal:data', payload: { data: 'a' } }],
     });
   });
 

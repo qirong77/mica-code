@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { readSessionSystemPrompt } from '../api.js';
 import { JsonEditor } from './JsonEditor.js';
-import { Button } from './Ui.js';
+import { Button, Tag } from './Ui.js';
 import { formatCharCount } from '../format.js';
-import { splitPromptSections, summarizePrompt } from '../promptView.js';
+import {
+  analyzePrompt,
+  findPromptNode,
+  promptNodePath,
+  searchPrompt,
+  type PromptNode,
+} from '../promptView.js';
 import type { ConfigWebSessionPrompt } from '../../src/shared/types.js';
 
 const NOTICE_MS = 1800;
@@ -12,16 +18,33 @@ const NOTICE_MS = 1800;
  * 系统提示词：这条会话最近一次请求**真正发出去**的那一份。
  *
  * 它不是角色文件里那一段：`buildSystemPrompt()` 会把 AGENT.md、skills 索引、环境信息与
- * 插件段落一起拼进去，只有发出去的那份才算数。所以这里读会话快照里记下的全文，再按顶层
- * 标签切成几段说明「几十 KB 都花在哪」，全文放在只读编辑器里（可查找、可折叠）。
+ * 插件段落一起拼进去，只有发出去的那份才算数。所以这里读会话快照里记下的全文。
+ *
+ * 界面分两栏：左边是「段 → markdown 标题」的大纲，每行带着它占全文多少；右边是所选模块的
+ * 正文。几十 KB 的东西不能只切成四块丢进编辑器——那样只能通读，没法回答「哪一节在吃预算」
+ * 「这段说明写在哪」。搜索按节点正文过滤大纲，并在行尾给出命中次数。
  */
-export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: string; refreshToken: number }) {
+export function SystemPromptPane({
+  sessionId,
+  refreshToken,
+  contextWindowSize,
+}: {
+  sessionId: string;
+  refreshToken: number;
+  contextWindowSize?: number;
+}) {
   const [data, setData] = useState<ConfigWebSessionPrompt | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // -1 是「完整提示词」那一行，其余是 parts 的下标。默认全文：进来先看真正发出去的东西。
-  const [selectedPart, setSelectedPart] = useState(-1);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  const [sortBySize, setSortBySize] = useState(false);
+  const [fullView, setFullView] = useState(false);
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [revealNonce, setRevealNonce] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,29 +66,86 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
     };
   }, [sessionId, refreshToken]);
 
+  // 提示词变了（这一轮跑完 / 换了角色）就回到最新一份的大纲：旧的展开状态指的是另一份文本。
   const prompt = data?.prompt ?? '';
-  const parts = useMemo(() => splitPromptSections(prompt), [prompt]);
-  const selected = selectedPart >= 0 ? (parts[selectedPart] ?? parts[0]) : undefined;
-  const shownPrompt = selectedPart === -1 ? prompt : (selected?.content ?? prompt);
-  const summary = useMemo(() => summarizePrompt(prompt), [prompt]);
-  // 工具栏跟着「现在看的是哪一段」走：选了一段却显示全文的体积，读起来就是错的数字。
-  const shownStats = useMemo(
-    () => (selectedPart === -1 || !selected ? summary : summarizePrompt(selected.content)),
-    [selected, selectedPart, summary],
-  );
+  const promptRef = useRef(prompt);
+  useEffect(() => {
+    if (promptRef.current === prompt) return;
+    promptRef.current = prompt;
+    setSelectedId(null);
+    setToggled({});
+    setFullView(false);
+    setRevealNonce((value) => value + 1);
+  }, [prompt]);
 
-  async function copyPrompt() {
+  useEffect(() => {
+    return () => {
+      if (noticeTimer.current !== undefined) window.clearTimeout(noticeTimer.current);
+    };
+  }, []);
+
+  const outline = useMemo(() => analyzePrompt(prompt), [prompt]);
+  const searching = query.trim().length > 0;
+  const search = useMemo(
+    () => (searching ? searchPrompt(outline.nodes, query) : null),
+    [outline, query, searching],
+  );
+  const rows = useMemo(() => {
+    const base = search ? search.nodes : outline.nodes;
+    if (!sortBySize || searching) return base;
+    return sortBySizeTree(base);
+  }, [outline, search, sortBySize, searching]);
+  const selected = useMemo(
+    () => findPromptNode(outline.nodes, selectedId) ?? outline.nodes[0] ?? null,
+    [outline, selectedId],
+  );
+  const path = useMemo(() => promptNodePath(outline.nodes, selected?.id ?? null), [outline, selected]);
+
+  // 搜索时详情跟着跳到第一个命中：否则出现「命中的行在左栏亮着、右栏还是上一段」。
+  useEffect(() => {
+    if (!search || search.nodes.length === 0) return;
+    if ((search.hits.get(selectedId ?? '') ?? 0) > 0) return;
+    const first = firstHitNode(search.nodes, search.hits);
+    if (first) select(first);
+  }, [search, selectedId]);
+
+  // 搜索命中的就是「要看的那几节」：过滤后一律展开，不用再一个个点开找。
+  function isOpen(node: PromptNode) {
+    if (searching || sortBySize) return true;
+    const explicit = toggled[node.id];
+    if (explicit !== undefined) return explicit;
+    return node.level <= 1;
+  }
+
+  function select(node: PromptNode | null) {
+    if (!node) return;
+    setSelectedId(node.id);
+    if (fullView) setRevealNonce((value) => value + 1);
+  }
+
+  function toggle(node: PromptNode) {
+    const next = !isOpen(node);
+    setToggled((current) => ({ ...current, [node.id]: next }));
+  }
+
+  function flash(message: string) {
+    setNotice(message);
+    if (noticeTimer.current !== undefined) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), NOTICE_MS);
+  }
+
+  async function copyText(text: string, label: string) {
+    if (!text) return;
     if (!navigator.clipboard?.writeText) {
-      setNotice('当前环境不支持自动复制，请手动选择');
+      flash('当前环境不支持自动复制，请手动选择');
       return;
     }
     try {
-      await navigator.clipboard.writeText(shownPrompt);
-      setNotice(selectedPart === -1 ? '已复制全文' : '已复制这一段');
+      await navigator.clipboard.writeText(text);
+      flash(`已复制${label}`);
     } catch {
-      setNotice('复制失败，请手动选择');
+      flash('复制失败，请手动选择');
     }
-    window.setTimeout(() => setNotice(null), NOTICE_MS);
   }
 
   if (loading && !data) return <div className="session-loading">正在读取系统提示词…</div>;
@@ -73,97 +153,246 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
   if (!data) return null;
   if (!prompt) return <PromptMissing rolePrompt={data.rolePrompt} error={error} />;
 
+  const summary = outline.summary;
+  const totalChars = Math.max(summary.chars, 1);
+  const windowShare = contextWindowSize && contextWindowSize > 0 ? summary.tokens / contextWindowSize : null;
+  const shownText = fullView ? prompt : (selected?.content ?? prompt);
+  const revealLine = fullView ? (selected?.startLine ?? null) : null;
+
+  function renderRows(nodes: PromptNode[], depth: number): ReactNode {
+    return nodes.map((node) => {
+      const open = isOpen(node);
+      const hits = search?.hits.get(node.id) ?? 0;
+      const active = selected?.id === node.id;
+      return (
+        <div key={node.id} className="prompt-row-group" role="group">
+          <div
+            className={`prompt-row${active ? ' is-selected' : ''}`}
+            style={{ '--prompt-depth': depth } as CSSProperties}
+            role="treeitem"
+            aria-selected={active}
+            aria-expanded={node.children.length > 0 ? open : undefined}
+          >
+            <i
+              className="prompt-row-fill"
+              style={{ width: `${Math.min(100, Math.max((node.chars / totalChars) * 100, 0.8))}%` }}
+              aria-hidden="true"
+            />
+            {node.children.length > 0 ? (
+              <button
+                type="button"
+                className="prompt-row-toggle"
+                title={open ? '收起子节' : '展开子节'}
+                aria-label={open ? '收起子节' : '展开子节'}
+                onClick={() => toggle(node)}
+              >
+                <span className={`prompt-caret${open ? ' is-open' : ''}`} aria-hidden="true" />
+              </button>
+            ) : (
+              <span className="prompt-row-toggle" aria-hidden="true" />
+            )}
+            <button
+              type="button"
+              className="prompt-row-main"
+              aria-current={active ? 'true' : undefined}
+              onClick={() => select(node)}
+            >
+              <span className="prompt-row-label" title={node.label}>
+                {node.label}
+              </span>
+              {hits > 0 ? <span className="prompt-row-hit">{hits}</span> : null}
+              <span className="prompt-row-size">{formatCharCount(node.chars)}</span>
+              <span className="prompt-row-share">{formatShare(node.chars, totalChars)}</span>
+            </button>
+          </div>
+          {open && node.children.length > 0 ? renderRows(node.children, depth + 1) : null}
+        </div>
+      );
+    });
+  }
+
   return (
     <div className="prompt-pane">
       {error ? <div className="ui-alert">{error}</div> : null}
+
       <div className="session-pane-toolbar">
         <div className="session-pane-facts">
           <span>
-            <strong>{formatCharCount(shownStats.chars)}</strong> 字符
+            <strong>{formatCharCount(summary.chars)}</strong> 字符
           </span>
           <span>
-            ≈ <strong>{formatCharCount(shownStats.tokens)}</strong> tokens
+            ≈ <strong>{formatCharCount(summary.tokens)}</strong> tokens
           </span>
           <span>
-            <strong>{shownStats.lines}</strong> 行
+            <strong>{summary.lines}</strong> 行
           </span>
+          {windowShare !== null ? (
+            <span title={`最近一次记录的 context window：${contextWindowSize!.toLocaleString()} tokens`}>
+              占窗口 <strong>{formatPercent(windowShare)}</strong>
+            </span>
+          ) : null}
         </div>
         <div className="session-pane-actions">
           {notice ? <span className="session-pane-notice">{notice}</span> : null}
-          <Button onClick={() => void copyPrompt()}>{selectedPart === -1 ? '复制全文' : '复制这一段'}</Button>
+          <Button variant="ghost" pressed={scopeOpen} onClick={() => setScopeOpen((value) => !value)}>
+            口径
+          </Button>
+          <Button onClick={() => void copyText(prompt, '全文')}>复制全文</Button>
         </div>
       </div>
 
+      {scopeOpen ? (
+        <p className="prompt-scope">
+          这里只算 system prompt 本身：角色提示词、AGENT.md、skills 索引、环境信息与插件段落。
+          工具 schema、消息历史与思考内容不在其中（它们在「Context 分析」页计入未解释的开销）。 tokens
+          按字符粗估（CJK 按 1、其余按 1/4），与状态栏的 ctx 同一口径。
+        </p>
+      ) : null}
+
+      {outline.nodes.length > 0 ? (
+        <PromptShareBar
+          nodes={outline.nodes}
+          total={totalChars}
+          selectedId={selected?.id ?? null}
+          onSelect={select}
+        />
+      ) : null}
+
       <div className="prompt-body">
-        <PromptModules parts={parts} selectedPart={selectedPart} total={summary} onSelect={setSelectedPart} />
-        <div className="editor-host prompt-editor">
-          {/* Markdown 高亮：提示词本身就是 markdown（标题、列表、围栏代码块），外加 <system>
-              这类标签——用 plaintext 只能看到一整片同色文字。 */}
-          <JsonEditor value={shownPrompt} language="markdown" readOnly onChange={() => undefined} />
-        </div>
+        <aside className="prompt-rail" aria-label="提示词大纲">
+          <div className="prompt-rail-head">
+            <input
+              className="prompt-search"
+              type="search"
+              value={query}
+              placeholder="搜索标题与正文…"
+              aria-label="搜索系统提示词"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <Button
+              variant="ghost"
+              pressed={sortBySize}
+              title={sortBySize ? '回到文档顺序' : '同一层内按体积从大到小排列'}
+              onClick={() => setSortBySize((value) => !value)}
+            >
+              按体积
+            </Button>
+          </div>
+          <div className="prompt-rail-meta">
+            {searching ? (
+              <span>
+                命中 <strong>{search?.total ?? 0}</strong> 处
+              </span>
+            ) : (
+              <span>{outline.nodes.length} 个模块</span>
+            )}
+            {searching && (search?.total ?? 0) === 0 ? (
+              <span className="muted-text">没有匹配的内容</span>
+            ) : null}
+          </div>
+
+          <div className="prompt-tree" role="tree" aria-label="提示词模块">
+            {rows.length === 0 ? (
+              <p className="prompt-tree-empty">没有匹配的模块。换个关键词，或清空搜索查看全部。</p>
+            ) : (
+              renderRows(rows, 0)
+            )}
+          </div>
+        </aside>
+
+        <section className="prompt-detail">
+          <div className="prompt-detail-head">
+            <div className="prompt-crumbs" title={path.map((node) => node.label).join(' › ')}>
+              {path.map((node, index) => {
+                const current = index === path.length - 1;
+                return (
+                  <span key={node.id} className="prompt-crumb-item">
+                    {index > 0 ? (
+                      <span className="prompt-crumb-sep" aria-hidden="true">
+                        ›
+                      </span>
+                    ) : null}
+                    {current ? (
+                      <span className="prompt-crumb is-current">{node.label}</span>
+                    ) : (
+                      <button type="button" className="prompt-crumb" onClick={() => select(node)}>
+                        {node.label}
+                      </button>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+            <div className="prompt-detail-actions">
+              <Button variant="ghost" onClick={() => void copyText(shownText, fullView ? '全文' : '本节')}>
+                {fullView ? '复制全文' : '复制本节'}
+              </Button>
+              <Button variant="ghost" pressed={fullView} onClick={() => setFullView((value) => !value)}>
+                {fullView ? '只看本节' : '查看全文'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="prompt-detail-meta">
+            {selected ? (
+              <>
+                <span className="prompt-line-range">
+                  第 {selected.startLine}
+                  {selected.endLine > selected.startLine ? `–${selected.endLine}` : ''} 行
+                </span>
+                <span>{formatCharCount(selected.chars)} 字符</span>
+                <span>≈ {formatCharCount(selected.tokens)} tokens</span>
+                <span className="muted-text">占全文 {formatShare(selected.chars, totalChars)}</span>
+                {selected.children.length > 0 ? <Tag>{selected.children.length} 个子节</Tag> : null}
+              </>
+            ) : null}
+            {fullView ? <span className="muted-text">全文 {summary.lines} 行</span> : null}
+          </div>
+
+          <div className="editor-host prompt-editor">
+            {/* Markdown 高亮：提示词本身就是 markdown（标题、列表、围栏代码块），外加 <system>
+                这类标签——用 plaintext 只能看到一整片同色文字。 */}
+            <JsonEditor
+              value={shownText}
+              language="markdown"
+              readOnly
+              reveal={revealLine ? { line: revealLine, nonce: revealNonce } : null}
+              onChange={() => undefined}
+            />
+          </div>
+        </section>
       </div>
     </div>
   );
 }
 
-/**
- * 模块列表：既是目录也是构成表。
- *
- * 以前这里是「下拉选模块 + 一个按钮在全文/单段之间切换 + 另一个按钮展开构成表」三件控件，
- * 各自都能改变「现在看的是哪一段」，谁也不会把谁的状态带过去。现在只有这一列：首行是全文，
- * 下面每段一行，条形按最大的那一段归一（只有长度可比），点谁就换谁，一份状态。
- */
-function PromptModules({
-  parts,
-  selectedPart,
+/** 构成一览：一条堆叠条，按「占全文的比例」分配宽度，点一格就是选中那一段。 */
+function PromptShareBar({
+  nodes,
   total,
+  selectedId,
   onSelect,
 }: {
-  parts: ReturnType<typeof splitPromptSections>;
-  selectedPart: number;
-  total: { chars: number; tokens: number };
-  onSelect: (index: number) => void;
+  nodes: PromptNode[];
+  total: number;
+  selectedId: string | null;
+  onSelect: (node: PromptNode) => void;
 }) {
-  const longest = Math.max(...parts.map((part) => part.chars), 1);
+  if (nodes.length < 2) return null;
   return (
-    <aside className="prompt-modules" aria-label="提示词模块">
-      <div className="prompt-modules-head">
-        <span>提示词模块</span>
-        <span className="prompt-modules-legend">字符</span>
-      </div>
-      <div className="prompt-module-list">
+    <div className="prompt-share" role="group" aria-label="各模块占全文的比例">
+      {nodes.map((node, index) => (
         <button
+          key={node.id}
           type="button"
-          aria-pressed={selectedPart === -1}
-          className={`prompt-module prompt-module-full${selectedPart === -1 ? ' is-selected' : ''}`}
-          title={`全文 ${formatCharCount(total.chars)} 字符 ≈${formatCharCount(total.tokens)} tokens`}
-          onClick={() => onSelect(-1)}
-        >
-          <span className="prompt-module-top">
-            <span className="prompt-module-label">完整提示词</span>
-            <span className="prompt-module-size">{formatCharCount(total.chars)}</span>
-          </span>
-        </button>
-        {parts.map((part, index) => (
-          <button
-            type="button"
-            aria-pressed={selectedPart === index}
-            className={`prompt-module${selectedPart === index ? ' is-selected' : ''}`}
-            key={`${part.tag || 'gap'}:${index}`}
-            title={`${part.tag ? `<${part.tag}> ` : ''}${formatCharCount(part.chars)} 字符 ≈${formatCharCount(part.tokens)} tokens`}
-            onClick={() => onSelect(index)}
-          >
-            <span className="prompt-module-top">
-              <span className="prompt-module-label">{part.label}</span>
-              <span className="prompt-module-size">{formatCharCount(part.chars)}</span>
-            </span>
-            <span className="prompt-module-track" aria-hidden="true">
-              <i style={{ width: `${Math.max((part.chars / longest) * 100, 1.5)}%` }} />
-            </span>
-          </button>
-        ))}
-      </div>
-    </aside>
+          className={`prompt-share-seg prompt-share-${index % 5}${selectedId === node.id ? ' is-selected' : ''}`}
+          style={{ flexGrow: Math.max(node.chars, 1), flexBasis: 0 }}
+          title={`${node.label} · ${formatCharCount(node.chars)} 字符 · ${formatShare(node.chars, total)}`}
+          aria-label={`${node.label}，${formatShare(node.chars, total)}`}
+          onClick={() => onSelect(node)}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -191,6 +420,34 @@ function PromptMissing({ rolePrompt, error }: { rolePrompt: string; error: strin
       ) : null}
     </div>
   );
+}
+
+/** 搜索树上第一个自己命中的节点：输入关键词时详情落到它身上。 */
+function firstHitNode(nodes: PromptNode[], hits: Map<string, number>): PromptNode | null {
+  for (const node of nodes) {
+    if ((hits.get(node.id) ?? 0) > 0) return node;
+    const child = firstHitNode(node.children, hits);
+    if (child) return child;
+  }
+  return null;
+}
+
+function formatShare(chars: number, total: number): string {
+  return total ? formatPercent(chars / total) : '—';
+}
+
+function formatPercent(ratio: number): string {
+  const percent = ratio * 100;
+  if (percent > 0 && percent < 0.1) return '<0.1%';
+  if (percent < 10) return `${percent.toFixed(1)}%`;
+  return `${Math.round(percent)}%`;
+}
+
+/** 按体积重排时只在同一层内换位置：父节仍然包着自己的子节，大纲结构不变。 */
+function sortBySizeTree(nodes: PromptNode[]): PromptNode[] {
+  return [...nodes]
+    .sort((left, right) => right.chars - left.chars)
+    .map((node) => (node.children.length > 0 ? { ...node, children: sortBySizeTree(node.children) } : node));
 }
 
 function formatError(error: unknown): string {

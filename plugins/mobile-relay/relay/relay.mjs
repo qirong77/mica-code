@@ -783,7 +783,8 @@ async function handlePoll(req, res) {
   if (ts < hinted.lastPollTs - 5_000) {
     return sendJson(res, 401, { ok: false, error: 'replayed envelope' })
   }
-  hinted.lastPollTs = ts
+  // 推事件与轮询各带自己的时间戳，可能互相追超：只往前走，别让后到的那条把重放窗口推回去。
+  hinted.lastPollTs = Math.max(hinted.lastPollTs, ts)
 
   const servedFreshly = now - hinted.lastPollAt > AGENT_STALE_MS
   hinted.lastPollAt = now
@@ -876,6 +877,34 @@ function wakePoll(state) {
   state.parked.done(batch)
 }
 
+/**
+ * 桥的即时上行：事件一到就推，不等它下一轮轮询。
+ *
+ * 轮询仍然负责「送命令、收结果」，事件不再捎带在轮询请求上——捎带的代价是延迟完全取决于
+ * 那次挂起还剩多久（1–15 秒），而催它的唯一办法是打断轮询、重建 TLS，比等一轮还贵。
+ */
+async function handlePush(req, res) {
+  const opened = openAny(await readRaw(req))
+  if (!opened) return sendJson(res, 401, { ok: false, error: 'bad envelope' })
+  const state = opened.state
+  const body = opened.body
+  const now = Date.now()
+  const ts = Number(body?.ts || 0)
+  if (!ts || Math.abs(now - ts) > REPLAY_WINDOW_MS) {
+    return sendJson(res, 401, { ok: false, error: 'stale envelope' })
+  }
+  if (ts < state.lastPollTs - 5_000) {
+    return sendJson(res, 401, { ok: false, error: 'replayed envelope' })
+  }
+  state.lastPollTs = Math.max(state.lastPollTs, ts)
+  // 推事件也是一次存活证明，别让手机端因为「只有事件没有轮询」判机器离线。
+  state.lastPollAt = now
+
+  const events = Array.isArray(body.events) ? body.events : []
+  if (events.length) broadcastEvents(state, events)
+  return sendJson(res, 200, { ok: true })
+}
+
 function handleEvents(req, res, state) {
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
@@ -887,6 +916,9 @@ function handleEvents(req, res, state) {
   state.phones.add(res)
   // 刚连上就提速一轮，否则首屏要等一个退避周期
   state.awakeUntil = Date.now() + AWAKE_MS
+  // 顺便把挂起的那次轮询叫醒：桥要尽快知道「有手机在看」，否则它会继续把事件丢掉，
+  // 手机上就是打开了、却什么都没发生。
+  wakePoll(state)
 
   const heartbeat = setInterval(() => {
     try {
@@ -935,6 +967,8 @@ async function invokeForResponse(state, channel, payload, res) {
 
 function handleAwake(req, res, state) {
   state.awakeUntil = Date.now() + AWAKE_MS
+  // 页面在动：让桥马上按「有人在看」这一档重排轮询，而不是等上一档挂满。
+  wakePoll(state)
   sendJson(res, 200, { ok: true, until: state.awakeUntil })
 }
 
@@ -1158,6 +1192,8 @@ async function route(req, res) {
 
   // 轮询自带机器标识（不是凭据），因此排在口令鉴权之前。
   if (path === '/api/poll' && req.method === 'POST') return handlePoll(req, res)
+  // 桥的即时上行：和轮询一样凭信封自证，不走口令门闸（桥不带 token）。
+  if (path === '/api/push' && req.method === 'POST') return handlePush(req, res)
   // 注册也是无凭据入口：新机器还没有口令，凭的是 ECDH 封装的机器标识。
   if (path === '/api/register-key' && req.method === 'GET') return handleRegisterKey(req, res)
   if (path === '/api/register' && req.method === 'POST') return handleRegister(req, res)

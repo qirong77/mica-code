@@ -10,7 +10,7 @@ import type {
 } from '@packages/mica-plugin/index.js';
 import { buildStatus, readBridgePid } from './BridgeSupervisor.js';
 import { findRendererDir, readDeployState, runSetup } from './DeployRunner.js';
-import { guidePageSync } from './PageSyncAction.js';
+import { guidePageSync, rendererDirFor, skillPathFor } from './PageSyncAction.js';
 import { machineIdentity } from './Registrar.js';
 import { registerMachine } from './registerMachine.js';
 
@@ -380,7 +380,7 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
 
       if (action === 'sync-page') {
         // 只把提示词交给宿主：新会话、输入框、按不按回车都由页面与用户决定。
-        return guidePageSync();
+        return guidePageSync({ skillPath: skillPathFor(dataDir), rendererDir: rendererDirFor(ctx) });
       }
 
       if (action === 'apply') {

@@ -34,7 +34,7 @@ web/                     页面组件（React）
 
 ```ts
 setConfigWebClient(myClient)   // 见 web/api.ts 的 ConfigWebClient
-setConfigWebEditor(MyEditor)   // value/language/readOnly/onChange，见 web/editor.ts
+setConfigWebEditor(MyEditor)   // value/language/readOnly/reveal/onChange，见 web/editor.ts
 render(<ConfigWebApp />)
 ```
 
