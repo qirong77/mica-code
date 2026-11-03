@@ -591,7 +591,7 @@ export class HeadlessTurnExecutor {
     this.releaseTurnLease();
     // 放在 turn:after 之前：那个 hook 会启动排队的下一轮，下一轮开始时就该看不到
     // 这一轮的孤儿任务了。
-    this.settleSubagents();
+    this.settleSubagents(outcome === 'aborted');
     await this.options.hooks?.emit('turn:after', {
       input,
       elapsedMs,
@@ -609,8 +609,10 @@ export class HeadlessTurnExecutor {
    * 幂等（只处理仍在跑的任务），且不发完成通知，所以重试、中止与排队轮次都不会
    * 因此多出一条系统消息。
    */
-  private settleSubagents(): void {
-    this.options.subagentTasks?.killRunningForOwner(this.options.agent, 'Parent turn finished.');
+  private settleSubagents(interrupted = false): void {
+    this.options.subagentTasks?.killRunningForOwner(this.options.agent, interrupted ? 'Parent turn was aborted.' : 'Parent turn finished.', {
+      interrupted,
+    });
   }
 
   /**

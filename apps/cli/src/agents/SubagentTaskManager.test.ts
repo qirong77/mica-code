@@ -155,6 +155,8 @@ describe('SubagentTaskManager', () => {
 
     expect(onTaskFinished).not.toHaveBeenCalled();
     expect(manager.get(task.id, owner)?.status).toBe('killed');
+    // 模型自己停掉的任务不算中断：它不该继续占着任务列表。
+    expect(manager.get(task.id, owner)?.interrupted).toBeUndefined();
   });
 
   it('kills only running tasks for an aborted owner and retains their records', async () => {
@@ -195,13 +197,14 @@ describe('SubagentTaskManager', () => {
     });
     await flushAsyncWork();
 
-    expect(manager.killRunningForOwner(owner, 'Parent turn was aborted.')).toBe(1);
+    expect(manager.killRunningForOwner(owner, 'Parent turn was aborted.', { interrupted: true })).toBe(1);
 
     expect(ownSignal?.aborted).toBe(true);
     expect(otherSignal?.aborted).toBe(false);
     expect(manager.get(running.id, owner)).toMatchObject({
       status: 'killed',
       error: 'Parent turn was aborted.',
+      interrupted: true,
     });
     expect(manager.get(completed.id, owner)?.status).toBe('completed');
     expect(manager.get(other.id, otherOwner)?.status).toBe('running');

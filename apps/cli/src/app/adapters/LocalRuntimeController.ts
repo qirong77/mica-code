@@ -509,7 +509,8 @@ export class LocalRuntimeController implements RuntimeController {
 
   async abort(): Promise<AbortResult> {
     const isRunning = this.runningAgents.has(this.agent);
-    const killedSubagents = this.subagentTasks?.killRunningForOwner(this.agent, 'Parent turn was aborted.') ?? 0;
+    const killedSubagents =
+      this.subagentTasks?.killRunningForOwner(this.agent, 'Parent turn was aborted.', { interrupted: true }) ?? 0;
     if (!isRunning && killedSubagents === 0) return { ok: false, reason: 'not_running' };
     try {
       if (isRunning) this.agent.abort();

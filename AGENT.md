@@ -432,7 +432,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 代码块统一 `CodeView` + `code-highlight.js`，只读着色，不引编辑器运行时。
 - 「在编辑器中打开」把内容作为只读虚拟文档放进应用里唯一的 monaco 实例。
 - 轻量浮层统一用 `Popover`；会话级设置是弹窗而不是浮层。
-- 电脑隐藏发送/排队按钮，移动端保留；后台任务/子代理 dock 只列运行项与需要看一眼的结束（判定唯一实现在 `mica-common/backgroundTaskVisibility.ts`：`killed` 是模型 kill 或宿主退出时的统一收尾，不占位置；失败、非零退出码、进程失踪才留着）。
+- 电脑隐藏发送/排队按钮，移动端保留；后台任务/子代理 dock 只列运行项与需要看一眼的结束（判定唯一实现在 `mica-common/backgroundTaskVisibility.ts`：`killed` 是模型 kill 或宿主退出时的统一收尾，不占位置；失败、非零退出码、进程失踪才留着）。子代理同理走 `mica-common/subagentVisibility.ts`：`completed`、模型自己 kill 的、上一轮正常结束统一收尾的都不占位置；只有 `failed` / `partial` / **被中断**的留着——记录带 `interrupted`（点停止、宿主关闭、上一轮以中止收尾）的还能看最近活动、还能重启。
 
 ### 文件、Git 与侧栏
 

@@ -248,6 +248,14 @@ describe('task snapshot projection (mica task extension)', () => {
         ],
       }),
       record({ id: 'task-2', status: 'completed', finished_at: '2026-08-06T00:01:00.000Z' }),
+      record({ id: 'task-3', status: 'killed', error: 'Parent turn finished.', finished_at: '2026-08-06T00:02:00.000Z' }),
+      record({
+        id: 'task-4',
+        status: 'killed',
+        interrupted: true,
+        error: 'Parent turn was aborted.',
+        finished_at: '2026-08-06T00:03:00.000Z',
+      }),
       record({ id: 'maintenance', activity: 'maintenance', subagent_type: 'internal-memory' }),
     ]);
     expect(result).toEqual([
@@ -263,32 +271,33 @@ describe('task snapshot projection (mica task extension)', () => {
         ],
       },
       {
-        taskId: 'task-2',
+        taskId: 'task-4',
         subagentType: 'Explore',
         description: 'find usages',
-        status: 'completed',
+        status: 'killed',
+        interrupted: true,
         startedAt: '2026-08-06T00:00:00.000Z',
-        finishedAt: '2026-08-06T00:01:00.000Z',
+        finishedAt: '2026-08-06T00:03:00.000Z',
         activities: [],
       },
     ]);
   });
 
-  it('retains all running subagents and only the 20 most recent completed subagents', () => {
+  it('retains all running subagents and only the 20 most recent finished ones worth a look', () => {
     const base: SubagentTaskRecord = {
       id: 'running', description: 'find usages', subagent_type: 'Explore', model: 'gpt-5',
       effort: 'medium', status: 'running', started_at: '2026-08-06T00:00:00.000Z',
     };
-    const completed = Array.from({ length: 21 }, (_, index) => ({
+    const failed = Array.from({ length: 21 }, (_, index) => ({
       ...base,
-      id: `completed-${index}`,
-      status: 'completed' as const,
+      id: `failed-${index}`,
+      status: 'failed' as const,
       finished_at: new Date(Date.UTC(2026, 7, 6, 0, index)).toISOString(),
     }));
-    const result = projectSubagentTasks([...completed, base]);
+    const result = projectSubagentTasks([...failed, base]);
     expect(result).toHaveLength(21);
-    expect(result.map((item) => item.taskId)).not.toContain('completed-0');
-    expect(result.map((item) => item.taskId)).toContain('completed-20');
+    expect(result.map((item) => item.taskId)).not.toContain('failed-0');
+    expect(result.map((item) => item.taskId)).toContain('failed-20');
     expect(result.map((item) => item.taskId)).toContain('running');
   });
 });

@@ -67,6 +67,8 @@ export type SubagentTaskRecord = {
   write_mode?: PluginSubagentWriteMode;
   owned_paths?: string[];
   status: SubagentTaskStatus;
+  /** 被中断收尾（点停止、宿主关闭、上一轮以中止结束）：留着能看最近活动，也能重启。 */
+  interrupted?: boolean;
   parent_task_id?: string;
   /** 发起这次委派的插件 id（插件能力面），用于按插件收窄任务视图。 */
   pluginId?: string;
@@ -518,32 +520,32 @@ export class SubagentTaskManager {
     return () => this.changeListeners.delete(listener);
   }
 
-  kill(id: string, owner: AgentRuntime): SubagentTaskRecord | undefined {
+  kill(id: string, owner: AgentRuntime, options: { interrupted?: boolean } = {}): SubagentTaskRecord | undefined {
     const task = this.tasks.get(id);
     if (!task || task.owner !== owner) return undefined;
     if (task.record.status === 'running' && task.restored) return undefined;
     if (task.record.status === 'running' && !task.restored) {
       task.controller.abort();
-      this.complete(task, { status: 'killed', error: 'Stopped by parent agent.' }, false);
+      this.complete(task, { status: 'killed', error: 'Stopped by parent agent.', interrupted: options.interrupted }, false);
     }
     return cloneRecord(task.record);
   }
 
-  killRunningForOwner(owner: AgentRuntime, reason = 'Parent agent was aborted.'): number {
+  killRunningForOwner(owner: AgentRuntime, reason = 'Parent agent was aborted.', options: { interrupted?: boolean } = {}): number {
     let killed = 0;
     for (const task of this.tasks.values()) {
       if (task.owner !== owner) continue;
       if (task.record.status === 'running' && !task.restored) {
         task.controller.abort();
-        this.complete(task, { status: 'killed', error: reason }, false);
+        this.complete(task, { status: 'killed', error: reason, interrupted: options.interrupted }, false);
         killed++;
       }
     }
     return killed;
   }
 
-  killForOwner(owner: AgentRuntime, reason = 'Parent agent was disposed.'): number {
-    const killed = this.killRunningForOwner(owner, reason);
+  killForOwner(owner: AgentRuntime, reason = 'Parent agent was disposed.', options: { interrupted?: boolean } = { interrupted: true }): number {
+    const killed = this.killRunningForOwner(owner, reason, options);
     for (const [id, task] of this.tasks) {
       if (task.owner !== owner) continue;
       this.tasks.delete(id);
@@ -556,7 +558,7 @@ export class SubagentTaskManager {
     for (const task of this.tasks.values()) {
       if (task.record.status !== 'running' || task.restored) continue;
       task.controller.abort();
-      this.complete(task, { status: 'killed', error: 'Application is stopping.' });
+      this.complete(task, { status: 'killed', error: 'Application is stopping.', interrupted: true });
     }
     const activePromises = [...this.pendingExecutions];
     if (activePromises.length > 0) await waitForTasks(activePromises, 5_000);
@@ -585,6 +587,7 @@ export class SubagentTaskManager {
       result?: string;
       error?: string;
       usage?: AgentUsageSummary;
+      interrupted?: boolean;
     },
     notify = true,
   ): void {
@@ -594,6 +597,7 @@ export class SubagentTaskManager {
       status: result.status,
       activities: [],
       finished_at: new Date().toISOString(),
+      ...(result.interrupted ? { interrupted: true } : {}),
       ...(result.result === undefined ? {} : { result: tailText(result.result, MAX_RETAINED_RESULT_CHARS) }),
       ...(result.error === undefined ? {} : { error: result.error }),
       ...(result.usage === undefined ? {} : { usage: result.usage }),

@@ -10,6 +10,7 @@ import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import { SESSION_NOTES_PLUGIN_ID, normalizeSessionNotes, prepareImageForApi, readStoredSubagentTasks, writeStoredSubagentTasks } from '@packages/mica-common/index.js';
 import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.js';
+import { keepsSubagentTaskRow } from '@packages/mica-common/subagentVisibility.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import type { AgentContentBlockParam, AgentQueryContent } from '@packages/mica-agent/index.js';
 import {
@@ -130,12 +131,17 @@ export function isOwnedBackgroundTask(task: BackgroundTaskMeta, ownerId: string)
 /** Include recent finished tasks so their transcripts remain accessible after a turn. */
 export function projectSubagentTasks(tasks: SubagentTaskRecord[]): MicaSubagentTaskItem[] {
   const recentFinished = tasks
-    .filter((task) => task.status !== 'running' && task.activity !== 'maintenance')
+    .filter((task) => task.status !== 'running' && task.activity !== 'maintenance' && keepsSubagentTaskRow(task))
     .sort((a, b) => Date.parse(b.finished_at ?? b.started_at) - Date.parse(a.finished_at ?? a.started_at))
     .slice(0, 20);
   const retainedIds = new Set(recentFinished.map((task) => task.id));
   return tasks
-    .filter((task) => task.activity !== 'maintenance' && (task.status === 'running' || retainedIds.has(task.id)))
+    .filter(
+      (task) =>
+        task.activity !== 'maintenance' &&
+        keepsSubagentTaskRow(task) &&
+        (task.status === 'running' || retainedIds.has(task.id)),
+    )
     .map((task) => ({
       taskId: task.id,
       ...(task.parent_task_id ? { parentTaskId: task.parent_task_id } : {}),
@@ -144,6 +150,7 @@ export function projectSubagentTasks(tasks: SubagentTaskRecord[]): MicaSubagentT
       status: task.status,
       startedAt: task.started_at,
       ...(task.finished_at ? { finishedAt: task.finished_at } : {}),
+      ...(task.interrupted ? { interrupted: true } : {}),
       activities: (task.activities ?? []).map((activity) => ({
         id: activity.id,
         summary: activity.summary,
@@ -1480,7 +1487,7 @@ async function handleCodexRequest(
         ctx.writeResponse({ ok: false, message: `subagent ${taskId} 当前状态为 ${record.status}，无需停止。` });
         return;
       }
-      if (!ctx.subagentTasks.kill(taskId, ctx.agent)) {
+      if (!ctx.subagentTasks.kill(taskId, ctx.agent, { interrupted: true })) {
         ctx.writeResponse({ ok: false, message: `无法停止由其他进程管理的 subagent ${taskId}。` });
         return;
       }

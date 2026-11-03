@@ -599,6 +599,8 @@ export type MicaSubagentTaskItem = {
   subagentType: string;
   description: string;
   status: 'running' | 'completed' | 'partial' | 'failed' | 'killed';
+  /** 被中断收尾（点停止 / 宿主关闭 / 上一轮中止）：还留在列表里，可以重启。 */
+  interrupted?: boolean;
   startedAt: string;
   finishedAt?: string | null;
   activities?: { id: string; summary: string; toolName?: string; startedAt: string }[];
@@ -695,6 +697,8 @@ export type MicaSubagentTaskDetail = {
   subagentType: string;
   description: string;
   status: 'running' | 'completed' | 'partial' | 'failed' | 'killed';
+  /** 被中断收尾（点停止 / 宿主关闭 / 上一轮中止）：还留在列表里，可以重启。 */
+  interrupted?: boolean;
   startedAt: string;
   finishedAt?: string | null;
   model?: string;

@@ -41,6 +41,7 @@ import remarkGfm from 'remark-gfm'
 import { formatTokens as formatSharedTokens } from '@packages/mica-web-shared'
 import { comparableText } from '@packages/mica-common/promptText.js'
 import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.js'
+import { keepsSubagentTaskRow } from '@packages/mica-common/subagentVisibility.js'
 import {
   projectTodoSnapshot,
   resolveTodoPanel,
@@ -6495,7 +6496,7 @@ export function ChatView({
           )}
           <TodoDock panel={todoPanel} />
           <SubagentStatusDock
-            tasks={subagentTasks.filter((task) => task.status !== 'completed')}
+            tasks={subagentTasks.filter((task) => keepsSubagentTaskRow(task))}
             now={taskNow}
             onOpen={(task) => openTaskDetail('subagent', task)}
           />
