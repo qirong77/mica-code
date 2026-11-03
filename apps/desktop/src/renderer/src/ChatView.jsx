@@ -17,6 +17,8 @@ import {
   IconArrowUp,
   IconBolt,
   IconCheck,
+  IconChevronDown,
+  IconChevronRight,
   IconCommand,
   IconCopy,
   IconCornerDownRight,
@@ -69,7 +71,7 @@ import {
 import { protectEmphasisAutolinks, remarkAutolinkPunctuation } from './chat-autolink'
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
-import { formatLogElapsed } from './chat-tool-display'
+import { formatLogElapsed, turnLogHeadSummary } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
@@ -1904,27 +1906,32 @@ function TurnLogDock({ messages, now = Date.now(), onOpenActivity }) {
   const scrollRef = useRef(null)
   // 这块日志的高度也是界面状态：换个窗口打开时保持同一高度，重启后还在。
   const [storedHeight, setStoredHeight] = useSharedState('turnLogHeight', null)
+  // 收起是使用者的选择，也跨窗口保留。收起后那一行照旧报「刚才干了什么」，
+  // 所以收起来不等于看不见这一轮。
+  const [collapsed, setCollapsed] = useSharedState('turnLogCollapsed', false)
   const height =
     Number.isFinite(storedHeight) && storedHeight >= MIN_TURN_LOG_HEIGHT
       ? Math.min(storedHeight, window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO)
       : null
   const stickToBottomRef = useRef(true)
+  const head = useMemo(() => turnLogHeadSummary(messages, now), [messages, now])
 
   // 只有用户停留在底部时才跟随滚动，手动上翻后不打扰。
   useLayoutEffect(() => {
     const scroll = scrollRef.current
     if (scroll && stickToBottomRef.current) scroll.scrollTop = scroll.scrollHeight
-  }, [messages, height])
+  }, [messages, height, collapsed])
 
+  // 标题行整行就是把手：向上拖变高，夹取规则与沿用下来的高度状态一致。
+  // 不 preventDefault——那会连带吞掉 click / dblclick，双击复位就再也收不到。
   const startResize = useCallback(
-    (event, direction) => {
+    (event) => {
       if (event.button !== 0) return
-      event.preventDefault()
       document.body.classList.add('is-resizing-terminal')
       const startY = event.clientY
       const startHeight = scrollRef.current?.getBoundingClientRect().height || 0
       const onMove = (moveEvent) => {
-        const delta = direction === 'top' ? startY - moveEvent.clientY : moveEvent.clientY - startY
+        const delta = startY - moveEvent.clientY
         const next = Math.round(
           Math.min(
             window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO,
@@ -1946,35 +1953,63 @@ function TurnLogDock({ messages, now = Date.now(), onOpenActivity }) {
     [setStoredHeight]
   )
 
+  // 双击回到「跟着内容走」：默认高度由 CSS 的 max-height 决定，不拖过就不会有空白。
+  const resetHeight = useCallback(() => setStoredHeight(null), [setStoredHeight])
+  const toggleCollapsed = useCallback(() => setCollapsed((value) => !value), [setCollapsed])
+
   if (!messages.length) return null
 
+  const meta = [`${head.steps} 步`, head.elapsedMs == null ? '' : formatLogElapsed(head.elapsedMs)]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
-    <section className="chat-turn-log" aria-label="当前回合的思考与工具日志">
-      <div
-        className="chat-turn-log-resizer chat-turn-log-resizer-top"
-        onPointerDown={(event) => startResize(event, 'top')}
-        title="拖动调整日志高度"
-      />
-      <div
-        ref={scrollRef}
-        className="chat-turn-log-scroll"
-        style={height != null ? { height, maxHeight: 'none' } : undefined}
-        onScroll={(event) => {
-          const element = event.currentTarget
-          stickToBottomRef.current =
-            element.scrollHeight - element.scrollTop - element.clientHeight <
-            SCROLL_BOTTOM_THRESHOLD
-        }}
+    <section
+      className={`chat-turn-log${collapsed ? ' is-collapsed' : ''}`}
+      aria-label="当前回合的思考与工具日志"
+    >
+      <header
+        className="chat-turn-log-head"
+        onPointerDown={collapsed ? undefined : startResize}
+        onDoubleClick={collapsed ? undefined : resetHeight}
+        onClick={collapsed ? toggleCollapsed : undefined}
+        title={collapsed ? '点击展开这一轮的思考与工具日志' : '拖动调整日志高度，双击复位'}
       >
-        {messages.map((message) => (
-          <TurnLogItem key={message.id} message={message} now={now} onOpen={onOpenActivity} />
-        ))}
-      </div>
-      <div
-        className="chat-turn-log-resizer"
-        onPointerDown={(event) => startResize(event, 'bottom')}
-        title="拖动调整日志高度"
-      />
+        <button
+          type="button"
+          className="chat-turn-log-toggle"
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? '展开回合日志' : '收起回合日志'}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            toggleCollapsed()
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          {collapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
+        </button>
+        <span className="chat-turn-log-head-label">本轮</span>
+        {head.doing && <span className="chat-turn-log-head-doing">{head.doing}</span>}
+        <span className="chat-turn-log-head-meta">{meta}</span>
+      </header>
+      {!collapsed && (
+        <div
+          ref={scrollRef}
+          className="chat-turn-log-scroll"
+          style={height != null ? { height, maxHeight: 'none' } : undefined}
+          onScroll={(event) => {
+            const element = event.currentTarget
+            stickToBottomRef.current =
+              element.scrollHeight - element.scrollTop - element.clientHeight <
+              SCROLL_BOTTOM_THRESHOLD
+          }}
+        >
+          {messages.map((message) => (
+            <TurnLogItem key={message.id} message={message} now={now} onOpen={onOpenActivity} />
+          ))}
+        </div>
+      )}
     </section>
   )
 }
@@ -4989,14 +5024,18 @@ export function ChatView({
   useEffect(() => {
     const transcript = transcriptRef.current
     const composerDock = composerDockRef.current
+    const list = listRef.current
     if ((!transcript && !composerDock) || typeof ResizeObserver === 'undefined') return undefined
     const observer = new ResizeObserver(() => {
       if (!stickToBottomRef.current) return
-      const list = listRef.current
-      if (list) list.scrollTop = list.scrollHeight
+      const target = listRef.current
+      if (target) target.scrollTop = target.scrollHeight
     })
     if (transcript) observer.observe(transcript)
     if (composerDock) observer.observe(composerDock)
+    // 视野本身也会变：回合日志出现 / 收起 / 拖动都会挤压滚动区，那时读者的「还在底部」
+    // 必须跟着重新对齐，否则一开跑就被顶上去、跳转按钮莫名其妙地亮起来。
+    if (list) observer.observe(list)
     return () => observer.disconnect()
   }, [nodeId])
 
@@ -6831,13 +6870,16 @@ export function ChatView({
                 />
               )
             })}
-            <TurnLogDock
-              messages={visibleTurnLogMessages}
-              now={Date.now()}
-              onOpenActivity={openActivityDetail}
-            />
           </div>
         </div>
+
+        {/* 回合日志是停靠区，不是对话的一部分：放在滚动区外面，它才永远贴着输入条。
+            放在里面时内容一短就浮在顶上、下面留一大块空白，收起成一行尤其明显。 */}
+        <TurnLogDock
+          messages={visibleTurnLogMessages}
+          now={Date.now()}
+          onOpenActivity={openActivityDetail}
+        />
 
         <ChatFind
           open={findOpen}

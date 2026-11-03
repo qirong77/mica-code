@@ -1907,7 +1907,7 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
 
 .chat-turn-log {
   min-width: 0;
-  border-top: 1px solid var(--color-line);
+  flex: 0 0 auto;
   border-bottom: 1px solid var(--color-line);
   background: var(--chat-surface-log);
   color: var(--color-fg-dim);
@@ -1916,46 +1916,74 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   line-height: 1.45;
 }
 
+/*
+ * 标题行本身就是把手：整行可拖（比原来 10px 的细条好抓），下面不再有第二个把手，
+ * 所以这块日志与对话之间只有一条线。收起后这一行就是全部高度——内容决定，
+ * 不沿用拖出来的高度，因此底部不会有空白。
+ */
+.chat-turn-log-head {
+  display: flex;
+  height: 22px;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid var(--color-line);
+  padding: 0 14px 0 3px;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.chat-turn-log-head:hover {
+  background: color-mix(in srgb, var(--color-fg-max) 4%, transparent);
+}
+
+.chat-turn-log.is-collapsed .chat-turn-log-head {
+  cursor: pointer;
+}
+
+.chat-turn-log-toggle {
+  display: grid;
+  width: 16px;
+  height: 100%;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--color-fg-faint);
+  cursor: pointer;
+}
+
+.chat-turn-log-toggle:hover {
+  color: var(--color-fg-dim);
+}
+
+.chat-turn-log-head-label {
+  flex: 0 0 auto;
+  color: var(--color-fg-dim);
+}
+
+.chat-turn-log-head-doing {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--color-fg-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-turn-log-head-meta {
+  flex: 0 0 auto;
+  color: var(--color-fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .chat-turn-log-scroll {
   max-height: calc(1.45em * 10 + 14px);
   overflow-x: hidden;
   overflow-y: auto;
   padding: 8px 14px 9px 13px;
   overscroll-behavior: contain;
-}
-
-.chat-turn-log-resizer {
-  position: relative;
-  height: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: ns-resize;
-  touch-action: none;
-  user-select: none;
-  border-top: 1px solid var(--color-line);
-}
-
-.chat-turn-log-resizer-top {
-  border-top: none;
-  border-bottom: 1px solid var(--color-line);
-}
-
-.chat-turn-log-resizer::after {
-  content: '';
-  width: 32px;
-  height: 1px;
-  background: var(--color-active);
-}
-
-.chat-turn-log-resizer:hover::after,
-.chat-turn-log-resizer:active::after {
-  background: var(--color-fg-dim);
-}
-
-.chat-turn-log-resizer:hover,
-.chat-turn-log-resizer:active {
-  background: color-mix(in srgb, var(--color-fg-max) 4%, transparent);
 }
 
 /*

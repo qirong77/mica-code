@@ -164,3 +164,40 @@ export function toolDurationMs(tool, now = Date.now()) {
 export function formatLogElapsed(ms) {
   return formatElapsed(ms)
 }
+
+/** 一条活动行的起点：工具行的在 `tool` 上，思考行的在消息本身上。 */
+function activityStartedAt(message) {
+  const started = message?.startedAt ?? message?.tool?.startedAt
+  return Number.isFinite(started) ? started : null
+}
+
+/**
+ * 回合日志标题行（`TurnLogDock` 的 `<header>`）上那几个字。
+ *
+ * 全部是现成数据的重新排版，没有一处是新写的句子：模型不会自报「我正在做什么」，
+ * 所以摘要只能是最近一条活动自己的原文——工具行用它已有的单行文案，思考取首行。
+ * 步数是条目数，耗时从首条活动的 `startedAt` 算到现在。任何一段取不到就留空，
+ * 而不是拿一句话补上。
+ *
+ * 返回 null 表示没有可说的（条目为空），调用方据此不渲染标题行。
+ */
+export function turnLogHeadSummary(messages, now = Date.now()) {
+  const items = Array.isArray(messages) ? messages.filter(Boolean) : []
+  if (!items.length) return null
+
+  const last = items[items.length - 1]
+  const doing =
+    last.kind === 'tool'
+      ? compactLine(toolCallText(last.tool), 120)
+      : compactLine(
+          String(last.text ?? '')
+            .split('\n')
+            .find((line) => line.trim()),
+          120
+        )
+
+  const startedAt = items.map(activityStartedAt).find((value) => value != null) ?? null
+  const elapsedMs = startedAt == null ? null : Math.max(0, now - startedAt)
+
+  return { steps: items.length, doing, elapsedMs }
+}
