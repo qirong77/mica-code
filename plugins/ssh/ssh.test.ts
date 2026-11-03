@@ -78,6 +78,14 @@ describe('主机清单', () => {
     expect(() => upsertHost(data, hostDraft({ auth: 'key', keyPath: '' }))).toThrow();
   });
 
+  it('别名可以用中文，写盘后原样读回', () => {
+    const outcome = upsertHost(emptyData(), hostDraft({ id: '测试机' }));
+    expect(outcome.host.id).toBe('测试机');
+    const file = join(dir, 'data.json');
+    writeData(file, outcome.data);
+    expect(readData(file).hosts[0]?.id).toBe('测试机');
+  });
+
   it('新增同一别名是更新而不是重复', () => {
     const first = upsertHost(emptyData(), hostDraft({ label: '测试机' }));
     expect(first.created).toBe(true);
@@ -391,6 +399,35 @@ describe('配置面板', () => {
     expect(section?.items).toBeUndefined();
   });
 
+  it('「添加」表单默认填好 root，别名占位符给的是中文', async () => {
+    const dataFile = join(dir, 'data.json');
+    writeData(dataFile, emptyData());
+    const panel = createPanelHandler({
+      ctx,
+      dataFile,
+      scope: createNoopScope(),
+      closeSession: () => {},
+    });
+    const view = (await panel.view({ role: 'default' })) as PluginPanelView;
+    const form = view.sections?.find((entry) => entry.title === '添加');
+    const user = form?.fields?.find((field) => field.key === 'user');
+    expect(user?.value).toBe('root');
+    expect(form?.fields?.find((field) => field.key === 'id')?.placeholder).toBe('测试机');
+  });
+
+  it('输入停顿后的自动提交不消费表单，否则密码会在停顿 0.5 秒后自己消失', async () => {
+    const { panel } = setupPanel();
+    const result = await panel.action({
+      action: 'draft',
+      values: { id: '新机器', host: '10.0.0.9', port: '22', user: 'root', auth: 'password' },
+    });
+    expect(result).toMatchObject({ keepDrafts: true });
+    // 草稿本身照常存下来（切页签回来地址还在），只是不让页面按视图重置输入框。
+    const view = (await panel.view({ role: 'default' })) as PluginPanelView;
+    const form = view.sections?.find((entry) => entry.title === '添加');
+    expect(form?.fields?.find((field) => field.key === 'id')?.value).toBe('新机器');
+  });
+
   it('一台都没添加进会话时没有状态条，勾上才出现', async () => {
     const { panel } = setupPanel();
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
@@ -471,7 +508,8 @@ describe('配置面板', () => {
       action: 'connect',
       values: { id: 'test', host: '127.0.0.1', port: '1', user: 'root', auth: 'key', keyPath: '~/.ssh/nope' },
     });
-    expect(result).toMatchObject({ message: expect.stringContaining('连接失败') });
+    // 失败时保留表单：用户改一个字段再点一次，不该从空白重填（口令更是视图永不回填的那种）。
+    expect(result).toMatchObject({ message: expect.stringContaining('连接失败'), keepDrafts: true });
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
     expect(view.statusBar).toBeUndefined();
     expect(view.sections?.[0]?.table?.rows[0]?.cells.status).toMatchObject({ text: expect.stringContaining('连不上') });

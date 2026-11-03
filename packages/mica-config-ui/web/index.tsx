@@ -52,6 +52,17 @@ export { SecretInput } from './components/SecretInput.js';
 export { Alert, Button, Checkbox, CollapsiblePanel, Empty, Segmented, SplitView, Tag } from './components/Ui.js';
 
 /**
+ * 数据表：统计页的 By source / By session 与会话详情共用一份形态（表头可排序、按列宽
+ * 摊开、底部翻页、窄容器先让次要列退场）。单元格内容由调用方渲染，所以进度条、按钮与
+ * 纯文本都能进同一张表。
+ */
+export { DataTable } from './components/DataTable.js';
+export type { DataTableColumn, DataTableSort } from './components/DataTable.js';
+/** 二维码：插件弹窗里的手机链接这类「扫一下就走」的内容，编码与码样都只有这一份。 */
+export { QrCode } from './components/QrCode.js';
+export { pageRangeLabel, pageWindow } from './components/dataTableModel.js';
+
+/**
  * 日期字段：可打字 + 自绘月历。
  *
  * 原生 `type="date"` 的日历弹层由系统绘制（位置、配色、关闭方式都不受页面控制），

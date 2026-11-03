@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Segmented, SelectMenu } from '@mica-config-ui/web'
+import { Button, DataTable, Segmented, SelectMenu } from '@mica-config-ui/web'
 import { BarSeries, CalendarHeatmap } from './charts'
 import { SessionDetailModal } from './SessionDetailModal'
 import { bucketByDay, bucketByDaySource, isDayRange, rangeStart, scopeSession } from './scope'
@@ -9,7 +9,7 @@ import {
 } from './usage-series'
 import { USAGE_SOURCE_LABELS } from '@packages/mica-web-shared/usage-source.js'
 import { usePluginsDetails } from '../plugins-details'
-import { groupSourceRows } from './source-groups'
+import { flattenSourceRows } from './source-groups'
 import {
   addDays,
   calendarGrid,
@@ -30,7 +30,10 @@ const RANGE_OPTIONS = [
   ['all', 'All']
 ]
 const PROJECT_BATCH = 7
-const SESSION_BATCH = 11
+// 两张明细表一页放多少行。同一个页面上两个表用不同行数不是问题——它们回答的问题不同，
+// 来源表本来就短（十几条），会话表会长到几百条。
+const SOURCE_PAGE_SIZE = 8
+const SESSION_PAGE_SIZE = 10
 // 载荷是「会话 × 本地日」的聚合结果（上千个会话约 1MB，见 host/stats-core），面板只看
 // 总量，半分钟一次足够；首次构建索引期间运行时另行推送 stats:changed，不靠这个间隔。
 const STATS_REFRESH_MS = 30_000
@@ -596,16 +599,42 @@ function ByModelCard({ scoped }) {
 }
 
 /**
- * 按来源聚合：先把这笔用量按「谁花的」分组（主 APP / 插件 / 委派子代理），再在组里
- * 列出每一条来源。插件行用清单里的插件名，副标题保留原始 id——用户要找的是「哪个插件」，
- * 而不是一串 kind（分组与命名见 `./source-groups`）。
+ * 按来源列出每一条用量。**不分组**：同一个功能可能同时出现两条（自动压缩的模型摘要
+ * 既可以由插件经 `ctx.llm` 发，也可以由内核起摘要子代理），分组会把它拆到两张小表里，
+ * 看起来像记了两笔。摊平后按 token 排，每行的副标题写明是插件、内核还是委派。
  */
+const SOURCE_COLUMNS = [
+  { key: 'source', label: 'Source', width: '40%' },
+  { key: 'requests', label: 'Requests', width: '13%', align: 'right', sortable: true },
+  { key: 'input', label: 'Input', width: '14%', align: 'right', sortable: true },
+  {
+    key: 'output',
+    label: 'Output',
+    width: '14%',
+    align: 'right',
+    sortable: true,
+    // 这张表只有五列：先退 Output（用量的大头都在 Input 里，输出量小到可以点进会话看），
+    // 请求数一直留着——「这个来源被调了多少次」是判断它值不值的第一眼。
+    narrow: 'secondary'
+  },
+  { key: 'share', label: 'Share', width: '19%', align: 'right', sortable: true }
+]
+
+const SOURCE_SORT_VALUE = {
+  requests: (row) => row.requests,
+  input: (row) => row.inputTokens,
+  output: (row) => row.outputTokens,
+  share: (row) => row.totalTokens
+}
+
 function BySourceCard({ scoped }) {
   const plugins = usePluginsDetails()
   const pluginNames = useMemo(
     () => new Map(plugins.map((plugin) => [plugin.id, plugin.name])),
     [plugins]
   )
+  const [sort, setSort] = useState({ key: 'share', desc: true })
+
   const rows = useMemo(() => {
     const map = new Map()
     for (const s of scoped) {
@@ -634,138 +663,92 @@ function BySourceCard({ scoped }) {
         map.set(key, row)
       }
     }
-    return [...map.values()]
-      .map((row) => ({
-        ...row,
-        sessions: row.sessions.size,
-        tasks: row.tasks.size,
-        purposes: [...row.purposes]
-      }))
-      .sort(
-        (a, b) =>
-          b.totalTokens - a.totalTokens ||
-          SOURCE_ORDER.indexOf(a.kind) - SOURCE_ORDER.indexOf(b.kind) ||
-          a.id.localeCompare(b.id)
-      )
+    return [...map.values()].map((row) => ({
+      ...row,
+      sessions: row.sessions.size,
+      tasks: row.tasks.size,
+      purposes: [...row.purposes]
+    }))
   }, [scoped])
 
+  const flattened = useMemo(() => flattenSourceRows(rows, { pluginNames }), [rows, pluginNames])
+
+  const sorted = useMemo(() => {
+    const value = SOURCE_SORT_VALUE[sort.key] || SOURCE_SORT_VALUE.share
+    const list = flattened.rows.slice()
+    list.sort((a, b) => (sort.desc ? value(b) - value(a) : value(a) - value(b)))
+    return list
+  }, [flattened, sort])
+
   if (rows.length === 0) return null
-  const { total: totalTokens, groups } = groupSourceRows(rows, { pluginNames })
+  const maxShare = sorted.length > 0 ? sorted.reduce((m, r) => Math.max(m, r.share), 0) : 0
 
   return (
     <section className={`${CARD_CLASS} p-4`}>
-      <header className="mb-2 flex items-center justify-between">
+      <header className="mb-2 flex items-baseline justify-between gap-2">
         <h2 className={OVERLINE_CLASS}>By source</h2>
-        <span className="text-[11px] text-fg-faint">{rows.length} sources</span>
+        <span className="shrink-0 text-[11px] text-fg-faint tabular-nums">
+          {flattened.rows.length} sources · {tokensShort(flattened.total)} tokens
+        </span>
       </header>
-      <table className="w-full table-fixed text-[13px]">
-        <colgroup>
-          <col className="w-[40%]" />
-          <col className="w-[13%]" />
-          <col className="w-[14%]" />
-          <col className="w-[14%]" />
-          <col className="w-[19%]" />
-        </colgroup>
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
-            <th scope="col" className="whitespace-nowrap pb-1.5 text-left font-normal">
-              Source
-            </th>
-            <th scope="col" className="whitespace-nowrap pb-1.5 pr-3 text-right font-normal">
-              Requests
-            </th>
-            <th scope="col" className="whitespace-nowrap pb-1.5 pr-3 text-right font-normal">
-              Input
-            </th>
-            <th scope="col" className="whitespace-nowrap pb-1.5 pr-3 text-right font-normal">
-              Output
-            </th>
-            <th scope="col" className="whitespace-nowrap pb-1.5 pr-3 text-right font-normal">
-              Share
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {groups.map((group) => (
-            <Fragment key={group.key}>
-              <tr className="border-t border-line">
-                <td colSpan={4} className="pb-1 pt-2">
-                  <div className="flex min-w-0 items-baseline gap-2">
-                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-dim">
-                      {group.label}
-                    </span>
-                    <span className="min-w-0 truncate text-[11px] text-fg-faint tabular-nums">
-                      {group.rows.length} 项 · {tokensShort(group.tokens)} tokens
-                    </span>
-                  </div>
-                </td>
-                <td className="pb-1 pr-3 pt-2 text-right">
-                  <div className="flex items-center justify-end gap-2">
-                    <div className="h-[4px] min-w-0 flex-1 overflow-hidden rounded-full bg-panel-hi">
-                      <div
-                        className="h-full rounded-full bg-fg-dim"
-                        style={{ width: `${group.share * 100}%` }}
-                      />
-                    </div>
-                    <span className="w-10 shrink-0 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                      {(group.share * 100).toFixed(1)}%
-                    </span>
-                  </div>
-                </td>
-              </tr>
-              {group.rows.map((row) => (
-                <tr key={row.key} className="border-t border-line">
-                  <td className="py-1 pr-3">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span
-                        aria-hidden
-                        className="size-2 shrink-0 rounded-full"
-                        style={{ background: row.color }}
-                      />
-                      <span className="min-w-0 truncate text-xs text-fg-strong" title={row.title}>
-                        {row.title}
-                      </span>
-                    </div>
-                    <span
-                      className="mt-0.5 block truncate pl-3.5 text-[11px] text-fg-faint"
-                      title={row.detail}
-                    >
-                      {row.detail}
-                    </span>
-                  </td>
-                  <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                    {row.requests.toLocaleString()}
-                  </td>
-                  <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                    {tokensShort(row.inputTokens)}
-                  </td>
-                  <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                    {tokensShort(row.outputTokens)}
-                  </td>
-                  <td className="py-1 pr-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-panel-hi">
-                        <div
-                          className="h-full rounded-full"
-                          style={{
-                            width: `${totalTokens > 0 ? (row.totalTokens / totalTokens) * 100 : 0}%`,
-                            background: row.color
-                          }}
-                        />
-                      </div>
-                      <span className="w-10 shrink-0 text-right font-mono text-[11px] text-fg-faint tabular-nums">
-                        {totalTokens > 0
-                          ? `${((row.totalTokens / totalTokens) * 100).toFixed(1)}%`
-                          : '—'}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+      <div className="mica-config-ui is-embed">
+        <DataTable
+          ariaLabel="按来源用量"
+          columns={SOURCE_COLUMNS}
+          rows={sorted}
+          rowKey={(row) => row.key}
+          pageSize={SOURCE_PAGE_SIZE}
+          sort={sort}
+          onSortChange={(key) =>
+            setSort((current) =>
+              current.key === key ? { key, desc: !current.desc } : { key, desc: true }
+            )
+          }
+          renderCells={(row) => [
+            <div key="source" className="min-w-0">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ background: row.color }}
+                />
+                <span className="min-w-0 truncate text-xs text-fg-strong" title={row.title}>
+                  {row.title}
+                </span>
+              </div>
+              <span
+                className="mt-0.5 block truncate pl-3.5 text-[11px] text-fg-faint"
+                title={row.detail}
+              >
+                {row.detail}
+              </span>
+            </div>,
+            <span key="requests" className="font-mono text-[11px] text-fg-muted tabular-nums">
+              {row.requests.toLocaleString()}
+            </span>,
+            <span key="input" className="font-mono text-[11px] text-fg-muted tabular-nums">
+              {tokensShort(row.inputTokens)}
+            </span>,
+            <span key="output" className="font-mono text-[11px] text-fg-muted tabular-nums">
+              {tokensShort(row.outputTokens)}
+            </span>,
+            <div key="share" className="flex items-center justify-end gap-2">
+              <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-panel-hi">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${maxShare > 0 ? (row.share / maxShare) * 100 : 0}%`,
+                    background: row.color
+                  }}
+                />
+              </div>
+              <span className="w-10 shrink-0 text-right font-mono text-[11px] text-fg-faint tabular-nums">
+                {(row.share * 100).toFixed(1)}%
+              </span>
+            </div>
+          ]}
+        />
+      </div>
     </section>
   )
 }
@@ -886,207 +869,144 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
 }
 
 /**
- * 明细表的列。这张表与其他几张一样**不横向滚动**：宽度按百分比分给各列，窄容器下先让
- * 次要列退出（模型、缓存命中率），而不是让整张表左右滑——同一个页面上有的表能滑、
- * 有的不能，读起来像坏了。`stats-col-*` 的规则在 app.css，按卡片宽度判断，不看视口。
+ * 明细表的列。和其他表同一套：不横向滚动，卡片变窄时先让次要列退场（模型、缓存命中率、
+ * 请求数），剩下的列按比例摊开——判断的是卡片自己的宽度，不看视口。
  */
 const SESSION_COLUMNS = [
-  { key: 'session', label: 'Session', width: 'w-[32%]' },
-  { key: 'model', label: 'Model', width: 'w-[16%]', narrow: 'stats-col-secondary' },
+  { key: 'session', label: 'Session', width: '30%' },
+  { key: 'model', label: 'Model', width: '15%', narrow: 'secondary' },
   {
     key: 'lastActivity',
     label: 'Last activity',
-    // 窄卡片里模型列先退场，这一列只剩 79px：表头 nowrap 会压到 Requests 上，
-    // 所以窄容器换一个短标签（规则在 app.css）。
+    // 窄卡片里模型列先退场，这一列只剩一窄溜：表头 nowrap 会压到 Requests 上，
+    // 所以窄容器换一个短标签。
     narrowLabel: 'Activity',
-    narrow: 'stats-col-activity',
-    width: 'w-[12%]',
+    width: '13%',
     sortable: true
   },
   {
     key: 'requests',
     label: 'Requests',
-    narrow: 'stats-col-requests',
-    width: 'w-[9%]',
+    width: '9%',
     align: 'right',
-    sortable: true
+    sortable: true,
+    narrow: 'tertiary'
   },
-  {
-    key: 'tokens',
-    label: 'Tokens',
-    narrow: 'stats-col-tokens',
-    width: 'w-[12%]',
-    align: 'right',
-    sortable: true
-  },
+  { key: 'tokens', label: 'Tokens', width: '12%', align: 'right', sortable: true },
   {
     key: 'cacheRate',
     label: 'Cache hit',
-    width: 'w-[10%]',
+    width: '10%',
     align: 'right',
     sortable: true,
-    narrow: 'stats-col-tertiary'
+    narrow: 'tertiary'
   },
-  { key: 'detail', label: '详情', narrow: 'stats-col-detail', width: 'w-[9%]', align: 'right' }
+  { key: 'detail', label: '', width: '11%', align: 'right' }
 ]
 
-/** 按会话明细表（可排序、分批），每行可打开详情弹窗 */
-function BySessionCard({ scoped, onDetail }) {
-  const [sortKey, setSortKey] = useState('lastActivity')
-  const [desc, setDesc] = useState(true)
-  const [visible, setVisible] = useState(SESSION_BATCH)
+const SESSION_SORT_VALUE = {
+  lastActivity: (row) => row.updatedAtMs,
+  requests: (row) => row.requests,
+  tokens: (row) => row.totalTokens,
+  cacheRate: (row) => (row.inputTokens > 0 ? row.cachedInputTokens / row.inputTokens : 0)
+}
 
-  useEffect(() => {
-    setVisible(SESSION_BATCH)
-  }, [sortKey, desc])
+/** 按会话明细表（可排序、翻页），每行可打开详情弹窗 */
+function BySessionCard({ scoped, onDetail }) {
+  const [sort, setSort] = useState({ key: 'lastActivity', desc: true })
 
   const sorted = useMemo(() => {
+    const value = SESSION_SORT_VALUE[sort.key] || SESSION_SORT_VALUE.lastActivity
     const list = scoped.slice()
-    list.sort((a, b) => {
-      let diff = 0
-      if (sortKey === 'lastActivity') diff = a.updatedAtMs - b.updatedAtMs
-      else if (sortKey === 'requests') diff = a.requests - b.requests
-      else if (sortKey === 'tokens') diff = a.totalTokens - b.totalTokens
-      else {
-        const aRate = a.inputTokens > 0 ? a.cachedInputTokens / a.inputTokens : 0
-        const bRate = b.inputTokens > 0 ? b.cachedInputTokens / b.inputTokens : 0
-        diff = aRate - bRate
-      }
-      return desc ? -diff : diff
-    })
+    list.sort((a, b) => (sort.desc ? value(b) - value(a) : value(a) - value(b)))
     return list
-  }, [scoped, sortKey, desc])
+  }, [scoped, sort])
 
   if (sorted.length === 0) return null
-  const top = sorted.slice(0, visible)
-  const rest = sorted.length - top.length
   const now = Date.now()
   // Token 列的数字后面压一条等比例底纹，宽度相对排在最前的那条会话：扫一眼就知道
   // 贵的是哪几条，不必逐个读数字比较。
-  const maxTokens = Math.max(...top.map((s) => s.totalTokens), 0)
-
-  const toggle = (key) => {
-    if (key === sortKey) setDesc((d) => !d)
-    else {
-      setSortKey(key)
-      setDesc(true)
-    }
-  }
+  const maxTokens = Math.max(...sorted.map((s) => s.totalTokens), 0)
 
   return (
-    <section className={`${CARD_CLASS} stats-table-scope p-4`}>
-      <header className="mb-2 flex items-center justify-between">
+    <section className={`${CARD_CLASS} p-4`}>
+      <header className="mb-2 flex items-baseline justify-between gap-2">
         <h2 className={OVERLINE_CLASS}>By session</h2>
-        <span className="text-[11px] text-fg-faint">{sorted.length} sessions</span>
+        <span className="shrink-0 text-[11px] text-fg-faint">{sorted.length} sessions</span>
       </header>
-      <table className="w-full table-fixed text-[13px]">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
-            {SESSION_COLUMNS.map((column) => (
-              <th
-                key={column.key}
-                scope="col"
-                className={`whitespace-nowrap pb-1.5 font-normal ${column.width} ${
-                  column.align === 'right'
-                    ? `text-right${column.key === 'detail' ? '' : ' pr-3'}`
-                    : 'text-left'
-                } ${column.narrow || ''}`}
-              >
-                {column.sortable ? (
-                  <button
-                    type="button"
-                    onClick={() => toggle(column.key)}
-                    className={`inline-flex items-center gap-0.5 uppercase transition-colors hover:text-fg-strong ${
-                      sortKey === column.key ? 'text-fg' : ''
-                    }`}
-                  >
-                    {column.narrowLabel ? (
-                      <>
-                        <span className="stats-label-wide">{column.label}</span>
-                        <span className="stats-label-narrow">{column.narrowLabel}</span>
-                      </>
-                    ) : (
-                      column.label
-                    )}
-                    {sortKey === column.key && (
-                      <span className="text-[8px]">{desc ? '▼' : '▲'}</span>
-                    )}
-                  </button>
-                ) : (
-                  column.label
+      <div className="mica-config-ui is-embed">
+        <DataTable
+          ariaLabel="按会话用量"
+          columns={SESSION_COLUMNS}
+          rows={sorted}
+          rowKey={(s) => s.id}
+          pageSize={SESSION_PAGE_SIZE}
+          sort={sort}
+          onSortChange={(key) =>
+            setSort((current) =>
+              current.key === key ? { key, desc: !current.desc } : { key, desc: true }
+            )
+          }
+          renderCells={(s) => [
+            <div key="session" className="min-w-0">
+              <span className="block truncate text-xs text-fg-strong" title={s.cwd}>
+                {s.title || basename(s.cwd)}
+              </span>
+              <span className="mt-0.5 block truncate text-[11px] text-fg-faint">
+                {basename(s.cwd)} · {s.id ? s.id.slice(0, 8) : ''}
+                {Number(s.delegationTasks) > 0 && (
+                  <span className="text-warn-soft"> · {s.delegationTasks} delegated</span>
                 )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {top.map((s) => (
-            <tr key={s.id} className="border-t border-line">
-              <td className="py-1 pr-3">
-                <span className="block truncate text-xs text-fg-strong" title={s.cwd}>
-                  {s.title || basename(s.cwd)}
-                </span>
-                <span className="mt-0.5 block truncate text-[11px] text-fg-faint">
-                  {basename(s.cwd)} · {s.id ? s.id.slice(0, 8) : ''}
-                  {Number(s.delegationTasks) > 0 && (
-                    <span className="text-warn-soft"> · {s.delegationTasks} delegated</span>
-                  )}
-                  {Number(s.pluginRequests) > 0 && (
-                    <span className="text-fg-faint"> · {s.pluginRequests} plugin</span>
-                  )}
-                </span>
-              </td>
-              <td className="stats-col-secondary py-1 pr-3">
-                <span
-                  className="block truncate font-mono text-[11px] text-fg-muted"
-                  title={s.model}
-                >
-                  {s.model || '—'}
-                </span>
-              </td>
-              <td className="stats-col-activity whitespace-nowrap py-1 pr-3 text-[11px] text-fg-muted tabular-nums">
-                {agoShort(s.updatedAtMs, now)}
-              </td>
-              <td className="stats-col-requests py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                {s.requests.toLocaleString()}
-              </td>
-              <td className="stats-col-tokens py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                <span className="relative inline-block min-w-[3.5rem] text-right">
-                  <span
-                    aria-hidden
-                    className="absolute inset-y-0 right-0 rounded-[2px] bg-overlay"
-                    style={{ width: `${maxTokens > 0 ? (s.totalTokens / maxTokens) * 100 : 0}%` }}
-                  />
-                  <span className="relative">{tokensShort(s.totalTokens)}</span>
-                </span>
-              </td>
-              <td className="stats-col-tertiary py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                {s.inputTokens > 0
-                  ? `${((s.cachedInputTokens / s.inputTokens) * 100).toFixed(0)}%`
-                  : '—'}
-              </td>
-              <td className="stats-col-detail py-1 text-right">
-                <button
-                  type="button"
-                  onClick={() => onDetail(s.id)}
-                  className="whitespace-nowrap rounded-[4px] border border-line bg-panel-hi px-1.5 py-0.5 text-[11px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg-strong"
-                >
-                  详情
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rest > 0 && (
-        <button
-          type="button"
-          onClick={() => setVisible((v) => v + SESSION_BATCH)}
-          className="mt-2 text-[11px] text-fg-faint transition-colors hover:text-fg-muted"
-        >
-          Show {Math.min(SESSION_BATCH, rest)} more
-        </button>
-      )}
+                {Number(s.pluginRequests) > 0 && (
+                  <span className="text-fg-faint"> · {s.pluginRequests} plugin</span>
+                )}
+              </span>
+            </div>,
+            <span
+              key="model"
+              className="block truncate font-mono text-[11px] text-fg-muted"
+              title={s.model}
+            >
+              {s.model || '—'}
+            </span>,
+            <span
+              key="activity"
+              className="whitespace-nowrap text-[11px] text-fg-muted tabular-nums"
+            >
+              {agoShort(s.updatedAtMs, now)}
+            </span>,
+            <span key="requests" className="font-mono text-[11px] text-fg-muted tabular-nums">
+              {s.requests.toLocaleString()}
+            </span>,
+            <span
+              key="tokens"
+              className="relative inline-block min-w-[3.5rem] text-right font-mono text-[11px] text-fg-muted tabular-nums"
+            >
+              <span
+                aria-hidden
+                className="absolute inset-y-0 right-0 rounded-[2px] bg-overlay"
+                style={{ width: `${maxTokens > 0 ? (s.totalTokens / maxTokens) * 100 : 0}%` }}
+              />
+              <span className="relative">{tokensShort(s.totalTokens)}</span>
+            </span>,
+            <span key="cacheRate" className="font-mono text-[11px] text-fg-muted tabular-nums">
+              {s.inputTokens > 0
+                ? `${((s.cachedInputTokens / s.inputTokens) * 100).toFixed(0)}%`
+                : '—'}
+            </span>,
+            <span key="detail" className="inline-flex justify-end">
+              <Button
+                size="compact"
+                variant="ghost"
+                title="查看会话详情"
+                onClick={() => onDetail(s.id)}
+              >
+                详情
+              </Button>
+            </span>
+          ]}
+        />
+      </div>
     </section>
   )
 }
@@ -1179,6 +1099,14 @@ export function StatsView({ visible }) {
 
   const onSelectDay = (day) => setRange({ day })
 
+  const rangeText = isDayRange(range)
+    ? dayShort(range.day)
+    : range === 'all'
+      ? 'All time'
+      : range === 'today'
+        ? 'Today'
+        : `近 ${range}`
+
   return (
     <section
       className={`min-h-0 flex-1 flex-col overflow-hidden ${visible ? 'flex' : 'hidden'}`}
@@ -1186,14 +1114,22 @@ export function StatsView({ visible }) {
     >
       <div className="h-full min-h-0 overflow-y-auto">
         <div className="mx-auto flex max-w-[1100px] flex-col gap-4 px-6 py-6">
-          <div className="flex items-center justify-end gap-2">
+          {/* 页面头：一句「现在看的是哪一段、涉及多少条会话」，右侧是区间选择。没有这一行时
+              整页从一片 KPI 数字开始，看不出当前区间是什么。 */}
+          <header className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="text-[13px] font-semibold tracking-tight text-fg-strong">Usage</h1>
+              <p className="mt-0.5 truncate text-[11px] text-fg-faint">
+                {rangeText} · {activeScoped.length} sessions
+              </p>
+            </div>
             <div className="flex items-center gap-2">
               {isDayRange(range) && (
                 <button
                   type="button"
                   onClick={() => setRangePreset('30d')}
                   title="清除单日筛选"
-                  className="flex items-center gap-1 rounded-[4px] border border-line bg-panel px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
+                  className="flex items-center gap-1 rounded-[4px] border border-line bg-panel px-2 py-1 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
                 >
                   {dayShort(range.day)}
                   <span aria-hidden className="text-fg-faint">
@@ -1201,25 +1137,17 @@ export function StatsView({ visible }) {
                   </span>
                 </button>
               )}
-              <div className="flex items-center gap-0.5 rounded-[4px] border border-line bg-panel p-0.5 text-[11px]">
-                {RANGE_OPTIONS.map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={range === value}
-                    onClick={() => setRangePreset(value)}
-                    className={`rounded-sm px-2 py-0.5 transition-colors ${
-                      range === value
-                        ? 'bg-active text-fg-strong'
-                        : 'text-fg-faint hover:text-fg-muted'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+              <div className="mica-config-ui is-embed">
+                <Segmented
+                  size="compact"
+                  value={isDayRange(range) ? 'day' : range}
+                  options={RANGE_OPTIONS.map(([value, label]) => ({ value, label }))}
+                  ariaLabel="统计区间"
+                  onChange={setRangePreset}
+                />
               </div>
             </div>
-          </div>
+          </header>
           {!hasAny ? (
             <div className="grid place-items-center rounded-[5px] border border-dashed border-line py-16 text-xs text-fg-faint">
               {progress?.building

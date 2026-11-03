@@ -71,8 +71,14 @@ export type HostDraft = {
   autoAdd?: boolean;
 };
 
-/** 别名进 prompt、进工具参数、进 ssh 目标串，所以只允许「一眼能念出来」的字符。 */
-export const HOST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/;
+/**
+ * 别名进 prompt、进工具参数、进面板表格，所以只要「一眼能念出来、不会把参数弄坏」的字符：
+ * 任意文字（中文、日文、带重音的拉丁字母都算）与数字打头，后面可以带 `.`、`_`、`-`。
+ *
+ * 用 `\p{L}` 而不是白名单 ASCII：别名是给人起的（「测试机」「生产 API」），逼着用户写
+ * 英文只是把翻译负担推给用户。它不做文件名、不进 ssh 目标串，所以没有额外的字符限制。
+ */
+export const HOST_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._-]{0,31}$/u;
 /** 主机名或 IP；不收带空白的输入（那是把整条命令塞进目标串的第一步）。 */
 const HOST_ADDRESS_PATTERN = /^[a-zA-Z0-9._:[\]-]{1,255}$/;
 const USER_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
@@ -197,7 +203,7 @@ export type HostUpsertResult = { data: SshData; host: SshHost; created: boolean 
 export function upsertHost(data: SshData, draft: HostDraft): HostUpsertResult {
   const id = text(draft.id, 32);
   if (!HOST_ID_PATTERN.test(id)) {
-    throw new Error('别名只能用字母、数字、`.`、`_`、`-`（1–32 位），例如 `test` / `prod-api`');
+    throw new Error('别名不能用空白或符号打头（1–32 位），中文、字母、数字都可以，例如 `测试机` / `prod-api`');
   }
   const host = text(draft.host, 255);
   if (!HOST_ADDRESS_PATTERN.test(host)) throw new Error('主机地址只填域名或 IP，不要带用户名、端口或空格');

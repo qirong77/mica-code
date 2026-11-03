@@ -61,6 +61,17 @@ describe('selectPluginPanels', () => {
     expect(panels.map((panel) => panel.display)).toEqual(['modal', 'drawer'])
   })
 
+  test('carries the entry action of a panel that is opened by running it', () => {
+    const panels = selectPluginPanels(
+      [
+        plugin({ desktopPanel: { label: '手机访问', roles: [], open: 'show', shortcuts: [] } }),
+        plugin({ id: 'plain' })
+      ],
+      'default'
+    )
+    expect(panels.map((panel) => panel.openAction)).toEqual(['show', undefined])
+  })
+
   test('filters by the session role', () => {
     expect(selectPluginPanels([plugin()], '需求开发')).toHaveLength(1)
     expect(selectPluginPanels([plugin()], 'default')).toHaveLength(0)

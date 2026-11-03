@@ -285,6 +285,15 @@ export type PluginPanelActionResult = {
   message?: string;
   compose?: string;
   /**
+   * 这次动作没有消费掉表单里正在填的内容：刷新视图时保留用户已经敲进去的字段值。
+   *
+   * 默认行为是「动作完成 → 表单回到视图给的初值」，因为它多半是一次提交（连接、保存、新建）。
+   * 但有两类动作不该这样：输入停顿后的自动提交（`commit`，它只是把草稿同步给插件），以及
+   * 提交失败（用户要改一个字段再试一次）。没这个开关时失败会把口令这类**视图永不回填**的
+   * 输入直接抹掉——用户看到的是「刚输入的字自己没了」。
+   */
+  keepDrafts?: boolean;
+  /**
    * 在**另一个会话**里跑这段提示词（形状与配置页动作共用，见 `PluginNewSession`）。
    *
    * 面板里点一个按钮就开一个会话（例如「复盘」不该污染当前这轮对话）有两种做法：插件自己
@@ -347,6 +356,41 @@ export type PluginPanelDialogCell = {
 };
 
 /**
+ * 弹窗里的一段二维码。
+ *
+ * 插件只给**内容**（手机链接这种一段地址），编码、尺寸与留白都归宿主：插件不该为了画一个
+ * 码自带编码器，也不该把渲染结果（SVG / data URL）当数据传过来——那既跨不进这份类型的
+ * 语义，也让宿主管不了它在亮色/暗色下的对比度。
+ */
+export type PluginPanelDialogQr = {
+  /** 二维码承载的文本，通常是可以直接打开的链接。 */
+  value: string;
+  /** 码下面的一句说明（扫完会发生什么）。 */
+  caption?: string;
+};
+
+/**
+ * 弹窗底部的「去配置」按钮：点了打开这个插件自己的设置页。
+ *
+ * 「还没配好」这类弹窗不该只写一句「去插件页面配置」就把人撂在那儿——插件知道该去哪一页，
+ * 宿主知道怎么打开它，两边各出自己那一半，用户不用自己找。
+ */
+export type PluginPanelDialogConfigure = {
+  label?: string;
+};
+
+/**
+ * 弹窗底部的「打开面板」按钮：这个插件自己的抽屉 / 弹窗面板。
+ *
+ * 弹窗只回答最常问的那一件事（手机访问就是一张二维码），细节（首次部署、测试、
+ * 条目管理）仍在面板里。两者接上之后，插件不必在弹窗里重画一遍面板，用户也不用
+ * 去猜「那块面板从哪里打开」。
+ */
+export type PluginPanelDialogPanel = {
+  label?: string;
+};
+
+/**
  * 一张插件声明的只读表格弹窗。
  *
  * 为什么是表格而不是「更多行」：链接清单要的是对齐的列（类型 / 地址 / 备注），一行
@@ -363,11 +407,17 @@ export type PluginPanelDialog = {
    * 所以正文单独成一栏，表格可以没有：只有正文时它就是一个只读的文字弹窗。
    */
   text?: string;
-  /** 列标题；行里的单元格按顺序对齐到这里。 */
-  columns: string[];
-  rows: PluginPanelDialogCell[][];
+  /** 一段二维码（手机链接这类「扫一下就走」的内容）；表格与正文也都可以没有。 */
+  qr?: PluginPanelDialogQr;
+  /** 列标题；行里的单元格按顺序对齐到这里（没有表格时两者都可以省掉）。 */
+  columns?: string[];
+  rows?: PluginPanelDialogCell[][];
   /** 表格下面的一句说明（「还没填」时指向去哪里填）。 */
   note?: string;
+  /** 底部多一个「去配置」按钮，打开这个插件自己的设置页。 */
+  configure?: PluginPanelDialogConfigure;
+  /** 底部多一个「打开面板」按钮，打开这个插件自己的面板。 */
+  panel?: PluginPanelDialogPanel;
 };
 
 export type PluginPanelViewInput = {
@@ -826,6 +876,7 @@ export function normalizePluginPanelActionResult(input: unknown): PluginPanelAct
   return {
     ...(message ? { message } : {}),
     ...(compose ? { compose } : {}),
+    ...(raw.keepDrafts === true ? { keepDrafts: true } : {}),
     ...(newSession ? { newSession } : {}),
     ...(dialog ? { dialog } : {}),
     ...(openPath ? { openPath } : {}),
@@ -898,7 +949,8 @@ function dialogOf(value: unknown): PluginPanelDialog | undefined {
     .map((column) => text(column, 30))
     .filter(Boolean);
   const body = text(raw.text, MAX_DIALOG_TEXT);
-  if (columns.length === 0 && !body) return undefined;
+  const qr = dialogQrOf(raw.qr);
+  if (columns.length === 0 && !body && !qr) return undefined;
   const rows = list(raw.rows)
     .slice(0, MAX_DIALOG_ROWS)
     .map((row) => {
@@ -910,12 +962,39 @@ function dialogOf(value: unknown): PluginPanelDialog | undefined {
     .filter((row): row is PluginPanelDialogCell[] => row !== null);
   const subtitle = text(raw.subtitle, 200);
   const note = text(raw.note, 400);
+  const configure = dialogLabelButtonOf(raw.configure);
+  const panel = dialogLabelButtonOf(raw.panel);
   return {
     title,
     columns,
     rows,
     ...(body ? { text: body } : {}),
+    ...(qr ? { qr } : {}),
     ...(subtitle ? { subtitle } : {}),
     ...(note ? { note } : {}),
+    ...(configure ? { configure } : {}),
+    ...(panel ? { panel } : {}),
   };
+}
+
+/** 二维码：`value` 是唯一的硬条件，没内容就没有码可画。 */
+function dialogQrOf(value: unknown): PluginPanelDialogQr | undefined {
+  // 只有一段地址时直接写字符串也行：`qr: link` 比 `qr: { value: link }` 少一层括号。
+  if (typeof value === 'string') {
+    const content = text(value, MAX_CELL_LINK);
+    return content ? { value: content } : undefined;
+  }
+  const raw = record(value);
+  const content = text(raw.value, MAX_CELL_LINK);
+  if (!content) return undefined;
+  const caption = text(raw.caption, MAX_TEXT);
+  return { value: content, ...(caption ? { caption } : {}) };
+}
+
+/** 「去配置」/「打开面板」这类只带文案的按钮：`true` 与 `{}` 一样，只是没写自定义文案。 */
+function dialogLabelButtonOf(value: unknown): { label?: string } | undefined {
+  if (value === undefined || value === false) return undefined;
+  const raw = record(value);
+  const label = text(raw.label, 32);
+  return label ? { label } : {};
 }

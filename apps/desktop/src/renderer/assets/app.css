@@ -3114,6 +3114,11 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   max-width: var(--modal-w-wide);
 }
 
+/* 只有一张二维码（或一段话）的弹窗不铺开：内容居中，宽度收在单条信息那一档。 */
+.chat-modal-qr {
+  max-width: var(--modal-w-narrow);
+}
+
 .chat-plugin-table-wrap {
   overflow-x: auto;
 }
@@ -3130,6 +3135,20 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
 
 .chat-plugin-dialog-text + .chat-plugin-table-wrap {
   margin-top: 12px;
+}
+
+/* 二维码弹窗（手机访问）：码本身是黑码白底，不跟主题走——反色码不少手机扫不出来，
+   这一块唯一要做对的事就是「扫得动」，所以底色写死白、留出静区。 */
+.chat-plugin-dialog-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-plugin-dialog-qr .chat-plugin-table-note {
+  margin: 0;
+  text-align: center;
 }
 
 .chat-plugin-table {
@@ -6492,55 +6511,5 @@ body.is-resizing-btw {
   .chat-plugin-dock {
     width: 100%;
     border-left: 0;
-  }
-}
-
-/* 统计页明细表：这张表与同一页的其他表一样不横向滚动，宽度按百分比分给各列。
-   卡片变窄时先让次要列退出（会话明细的模型 / 缓存命中率），剩下的列按比例摊开——
-   判断的是卡片自己的宽度，不看视口，抽屉里外都适用。 */
-.stats-table-scope {
-  container-type: inline-size;
-}
-
-/* 明细表表头在窄卡片里换短标签：模型列退场后「Last activity」会压到 Requests 上。 */
-.stats-label-narrow {
-  display: none;
-}
-
-@container (max-width: 720px) {
-  .stats-col-secondary {
-    display: none;
-  }
-
-  .stats-label-wide {
-    display: none;
-  }
-
-  .stats-label-narrow {
-    display: inline;
-  }
-}
-
-@container (max-width: 540px) {
-  .stats-col-tertiary {
-    display: none;
-  }
-
-  /* 手机宽度上再退一列：剩下四列（会话 / 时间 / tokens / 详情）各自够宽，
-     表头不会互相压到一起，时间也不会折成两行。请求数点开详情看。 */
-  .stats-col-requests {
-    display: none;
-  }
-
-  .stats-col-activity {
-    width: 22%;
-  }
-
-  .stats-col-tokens {
-    width: 22%;
-  }
-
-  .stats-col-detail {
-    width: 12%;
   }
 }

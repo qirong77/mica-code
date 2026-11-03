@@ -13,7 +13,8 @@
   "desktop": {
     "panel": {
       "label": "手机访问",
-      "roles": []
+      "roles": [],
+      "open": "show"
     }
   },
   "actions": [

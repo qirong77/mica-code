@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import type {
   PluginPanelAction,
+  PluginPanelActionResult,
   PluginPanelHandler,
   PluginPanelRow,
   PluginPanelSection,
@@ -319,6 +320,39 @@ export function buildPanelView(ctx: PluginContext, dataDir: string | null): Plug
   };
 }
 
+/**
+ * 「手机访问」入口的弹窗：接好了就给一张二维码，没接好就把人送到插件页面。
+ *
+ * 链接由设置现算（`buildStatus` 是面板、状态行、状态文件的同一份规则），不读
+ * `data.json` 里上次落盘的值：刚注册完、桥还没轮询过一次时，缓存里那份还是旧口令。
+ * 二维码只放内容，编码与尺寸交给宿主——插件不该为了画一个码背一个编码器。
+ */
+function phoneDialog(ctx: PluginContext): PluginPanelActionResult {
+  const status = buildStatus(ctx.settings.get(), null, null, Date.now());
+  if (!status.phoneUrl) {
+    return {
+      dialog: {
+        title: '手机访问',
+        text: '还没接入。到插件页面填中转地址、点一次「注册这台机器」，这里就会出现可以扫的二维码。',
+        configure: { label: '去插件页面配置' },
+        // 首次部署（中转机上还什么都没有）只在面板里做：给一个次要入口，别把一个
+        // 一次性操作藏进没人知道怎么打开的地方。
+        panel: { label: '首次部署' },
+      },
+    };
+  }
+  return {
+    dialog: {
+      title: '手机访问',
+      subtitle: '手机扫码打开这台机器上的 Mica',
+      qr: {
+        value: status.phoneUrl,
+        caption: '同一份会话、同样的流式输出；本机只做出站轮询。',
+      },
+    },
+  };
+}
+
 export function createPanelHandler(ctx: PluginContext, dataDir: string | null): PluginPanelHandler {
   return {
     view() {
@@ -327,6 +361,12 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
 
     async action({ action, values }) {
       if (!dataDir) throw new Error('没有插件数据目录，检查 MICA_HOME 是否可写');
+
+      // 入口动作（清单 `desktop.panel.open`）：点了「手机访问」只要一个二维码，不打开抽屉。
+      // 它必须在 saveDrafts 之前返回——页面没有表单可提交，落一次草稿会把用户填了一半的
+      // 中转地址与 SSH 全部清空。
+      if (action === 'show') return phoneDialog(ctx);
+
       const drafts = saveDrafts(dataDir, values ?? {});
 
       if (action === 'ask-agent') {

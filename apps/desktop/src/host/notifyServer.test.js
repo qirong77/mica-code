@@ -97,4 +97,22 @@ describe('terminal process activity notifications', () => {
     await postEvent(server, terminalId, 'turn.completed')
     expect(server.get(terminalId)).toMatchObject({ running: false, unread: true })
   })
+
+  it('clears the unread of the exact PTY that produced it', async () => {
+    const server = await createNotifyServer()
+    servers.push(server)
+    // 终端面板里的终端：mica 跑在 `<条目 id>:terminal` 这条 PTY 上
+    const terminalId = 'rt-1:terminal'
+
+    await postEvent(server, terminalId, 'turn.completed')
+    expect(server.list()).toMatchObject([{ terminalId, unread: true }])
+
+    // 打到条目名下另一条不存在的 PTY 上（按条目拼 `<条目 id>:mica`）什么都清不掉，
+    // 未读会一直挂着——dock 徽标点不掉就是这么来的
+    expect(server.markRead('rt-1:mica')).toMatchObject({ unread: false, lastType: null })
+    expect(server.list()).toMatchObject([{ terminalId, unread: true }])
+
+    expect(server.markRead(terminalId)).toMatchObject({ terminalId, unread: false })
+    expect(server.list()).toMatchObject([{ terminalId, unread: false }])
+  })
 })

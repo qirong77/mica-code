@@ -56,8 +56,11 @@ type PanelState = {
   tests?: Record<string, HostTest>;
 };
 
+/** 新机器的默认用户名：绝大多数自建服务器就是 `root`，让人每次手敲一遍没有意义。 */
+export const DEFAULT_SSH_USER = 'root';
+
 function emptyDraft(): Draft {
-  return { id: '', host: '', port: '22', user: '', label: '', keyPath: '', auth: 'password' };
+  return { id: '', host: '', port: '22', user: DEFAULT_SSH_USER, label: '', keyPath: '', auth: 'password' };
 }
 
 function readState(dataDir: string): PanelState {
@@ -90,13 +93,14 @@ function clockOf(iso: string): string {
 
 function draftOf(host: SshHost | null, current: PanelState): Draft {
   const draft = current.draft;
-  if (draft && (!host || draft.id === host.id)) return draft;
+  // 老草稿里可能留着空用户名（默认值改成 root 之前存的），读回来时补上。
+  if (draft && (!host || draft.id === host.id)) return { ...draft, user: draft.user || DEFAULT_SSH_USER };
   if (!host) return emptyDraft();
   return {
     id: host.id,
     host: host.host,
     port: String(host.port),
-    user: host.user,
+    user: host.user || DEFAULT_SSH_USER,
     label: host.label ?? '',
     keyPath: host.keyPath ?? '',
     auth: host.auth,
@@ -151,12 +155,12 @@ function draftSection(draft: Draft, dataDir: string, editing: boolean): PluginPa
   const isPassword = draft.auth === 'password';
   return {
     title: editing ? `编辑 · ${draft.id || '未命名'}` : '添加',
-    subtitle: '填完点「连接」，连上了才保存',
+    subtitle: '填完点「连接」测一次：连上了会加进本次会话',
     fields: [
-      { key: 'id', label: '别名', value: draft.id, placeholder: 'test', hint: '模型用它指定机器，只用字母数字与 . _ -' },
+      { key: 'id', label: '别名', value: draft.id, placeholder: '测试机', hint: '模型用它指定机器，可用中文' },
       { key: 'host', label: '地址', value: draft.host, placeholder: '10.0.0.1 或 example.com' },
       { key: 'port', label: '端口', type: 'number', value: draft.port },
-      { key: 'user', label: '用户名', value: draft.user, placeholder: 'root' },
+      { key: 'user', label: '用户名', value: draft.user || DEFAULT_SSH_USER, placeholder: DEFAULT_SSH_USER },
       {
         key: 'auth',
         label: '认证方式',
@@ -365,7 +369,9 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
             auth: field(values, 'auth') === 'key' ? 'key' : 'password',
           },
         });
-        return {};
+        // 自动提交只是把草稿同步过来，不是一次提交：口令不在草稿里（面板永不回填），
+        // 若让页面按新视图重置表单，用户刚敲进去的密码会在停顿 0.5 秒后凭空消失。
+        return { keepDrafts: true };
       }
 
       if (action === 'cancel') {
@@ -399,7 +405,11 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
         try {
           return { message: await connect(values) };
         } catch (error) {
-          return { message: `连接失败：${error instanceof Error ? error.message : String(error)}` };
+          // 失败时保留表单：改个端口、修个拼写再点一次「连接」，不该从空白开始重填。
+          return {
+            message: `连接失败：${error instanceof Error ? error.message : String(error)}`,
+            keepDrafts: true,
+          };
         }
       }
 
@@ -440,7 +450,8 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
       const result = upsertHost(data, {
         id,
         host: field(values, 'host'),
-        user: field(values, 'user'),
+        // 留空就当 root：表单默认已经填好了，清空只能是手滑。
+        user: field(values, 'user') || DEFAULT_SSH_USER,
         port: field(values, 'port') || 22,
         auth,
         keyPath: field(values, 'keyPath'),

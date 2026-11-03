@@ -475,6 +475,13 @@ export type ConfigWebPluginDesktopPanel = {
   label: string;
   roles: string[];
   /**
+   * 点入口时执行哪个动作（清单 `desktop.panel.open`）。
+   *
+   * 声明了它的面板不需要抽屉：入口直接把动作交给插件，插件回一个弹窗（手机链接的二维码
+   * 就是这样）。页面这边只负责不打开抽屉、把动作发出去。
+   */
+  open?: string;
+  /**
    * 输入框上方那排快捷按钮。`action` 直接触发插件动作，`section` 打开面板并展开那一块。
    */
   shortcuts: ConfigWebPluginPanelShortcut[];

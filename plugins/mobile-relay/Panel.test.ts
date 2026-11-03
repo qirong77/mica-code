@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PluginContext } from '@packages/mica-plugin/index.js';
+import type { PluginContext, PluginPanelActionResult } from '@packages/mica-plugin/index.js';
 import { buildPanelView, createPanelHandler, readDrafts } from './Panel.js';
 import { materializeBundle, normalizeHost, readDeployState } from './DeployRunner.js';
 
@@ -101,6 +101,39 @@ describe('mobile-relay panel', () => {
     const view = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com', token: 'dd' }), dir);
     const row = view.sections?.[0]?.rows?.find((item) => item.label === '手机链接');
     expect(row).toBeUndefined();
+  });
+
+  /*
+   * 入口动作（清单 desktop.panel.open）：点「手机访问」只要一个二维码。
+   * 它不能走 saveDrafts——页面没有表单可提交，落一次空草稿会把用户填了一半的中转地址
+   * 与 SSH 清空。
+   */
+  it('answers the entry action with a QR code and leaves the draft alone', async () => {
+    writeFileSync(
+      join(dir, 'panel.json'),
+      JSON.stringify({ sshHost: 'root@1.2.3.4', relayUrl: 'https://draft.example' }),
+      'utf8'
+    );
+    const handler = createPanelHandler(
+      fakeContext({ relayUrl: 'https://mica.example.com', token: '0123456789abcdef' }),
+      dir
+    );
+    const outcome = (await handler.action({ action: 'show', values: {} })) as PluginPanelActionResult;
+    expect(outcome.dialog?.qr?.value).toBe('https://mica.example.com/?t=0123456789abcdef');
+    expect(outcome.dialog?.title).toBe('手机访问');
+    expect(readDrafts(dir)).toMatchObject({
+      sshHost: 'root@1.2.3.4',
+      relayUrl: 'https://draft.example',
+    });
+  });
+
+  it('points at the plugin page instead of drawing a QR code when nothing is set up', async () => {
+    const handler = createPanelHandler(fakeContext(), dir);
+    const outcome = (await handler.action({ action: 'show', values: {} })) as PluginPanelActionResult;
+    expect(outcome.dialog?.configure?.label).toBe('去插件页面配置');
+    expect(outcome.dialog?.panel?.label).toBe('首次部署');
+    expect(outcome.dialog?.qr).toBeUndefined();
+    expect(outcome.dialog?.text).toContain('还没接入');
   });
 
   it('turns a save action into an error instead of a silent no-op', async () => {

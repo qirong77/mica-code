@@ -49,6 +49,12 @@ import { longPressHandlers, useIsMobile, useLatest, useVisualViewportHeight } fr
 import { collectRecentCwds } from './cwd-recents'
 import { gitChangeBadge } from './git-badge'
 import { loopNodeIds } from './loop-command'
+import {
+  collapseTerminalStates,
+  normalizeTerminalState,
+  terminalNodeId,
+  unreadTerminalIds
+} from './notify-state'
 import { resolveGroupCwd } from './session-projects'
 import {
   TERMINAL_PANEL_SWEEP_MS,
@@ -103,108 +109,135 @@ const SESSION_POLL_MS = 10000
  */
 const GIT_COUNTS_TTL_MS = 20000
 
-/** notify 事件里的 terminalId 是 `<节点id>:<pane>`，转回树节点 id */
-function nodeIdFor(ptyId) {
-  if (typeof ptyId !== 'string') return ptyId
-  const index = ptyId.lastIndexOf(':')
-  return index > 0 ? ptyId.slice(0, index) : ptyId
-}
-
-function ptyIdForNode(nodeId) {
-  return `${nodeId}:mica`
-}
-
 function recentChatCwd() {
   const value = uiStateKeys().chatDefaultCwd
   return typeof value === 'string' ? value : ''
 }
 
-function useNotifications(activeId, onSessionId, canBindSessionId) {
-  const [states, setStates] = useState({})
-  const statesRef = useLatest(states)
+/**
+ * 终端里跑的 mica 一轮结束时，运行时会按 PTY 记一条未读：terminalId 是
+ * `<终端条目 id>:<pane>`。未读属于**那一条 PTY**，条目 id 只用来把状态挂到界面上
+ * （终端标签、侧栏行）；归并与「该清哪些 PTY」的规则在 notify-state.js。
+ *
+ * @param onScreenTargets 屏幕上正开着的终端（终端面板里当前那个标签）：焦点回到窗口时
+ *   连同它一起标记已读——未读只在终端里产生，看得见就不该继续挂着。
+ */
+function useNotifications(activeId, onSessionId, canBindSessionId, onScreenTargets = []) {
+  // PTY id → 状态，这是事实来源：标记已读必须用回这个 id。
+  const [terminalStates, setTerminalStates] = useState({})
+  const terminalStatesRef = useRef(terminalStates)
+  // 界面读的是按终端条目归并的那一份（多个 pane 取并集）。
+  const states = useMemo(() => collapseTerminalStates(terminalStates), [terminalStates])
   const activeRef = useLatest(activeId)
   const sessionRef = useLatest(onSessionId)
   const canBindRef = useLatest(canBindSessionId)
+  const onScreenRef = useLatest(onScreenTargets)
   const windowState = useRef({ focused: true, visible: true })
   const readTimer = useRef(null)
   const audio = useRef(null)
 
-  const setTerminalState = useCallback(
-    (id, state) => {
-      if (!id) return
-      setStates((current) => {
-        const next = { ...current }
-        if (!state || (!state.unread && !state.running)) delete next[id]
-        else
-          next[id] = {
-            unread: !!state.unread,
-            running: !!state.running,
-            // 会话树据此区分「终端前台进程在跑」与「Mica turn 在跑」
-            processRunning: !!state.processRunning,
-            lastType: state.lastType ?? null,
-            lastEventAt: state.lastEventAt ?? Date.now()
-          }
-        statesRef.current = next
-        return next
-      })
+  const commitTerminalStates = useCallback((next) => {
+    terminalStatesRef.current = next
+    setTerminalStates(next)
+  }, [])
+
+  const applyTerminalState = useCallback(
+    (terminalId, state) => {
+      if (!terminalId) return
+      const next = { ...terminalStatesRef.current }
+      if (!state || (!state.unread && !state.running)) {
+        if (!(terminalId in next)) return
+        delete next[terminalId]
+      } else next[terminalId] = normalizeTerminalState(state)
+      commitTerminalStates(next)
     },
-    [statesRef]
+    [commitTerminalStates]
   )
 
   const sync = useCallback(
     (list) => {
       const next = {}
       for (const item of list || []) {
-        const id = item?.terminalId ? nodeIdFor(item.terminalId) : null
-        if (id && (item.unread || item.running))
-          next[id] = {
-            unread: !!item.unread,
-            running: !!item.running,
-            processRunning: !!item.processRunning,
-            lastType: item.lastType ?? null,
-            lastEventAt: item.lastEventAt ?? null
-          }
+        const terminalId = typeof item?.terminalId === 'string' ? item.terminalId : ''
+        if (terminalId && (item.unread || item.running))
+          next[terminalId] = normalizeTerminalState(item)
       }
-      statesRef.current = next
-      setStates(next)
+      commitTerminalStates(next)
     },
-    [statesRef]
+    [commitTerminalStates]
   )
 
   const readable = () =>
     windowState.current.visible &&
     windowState.current.focused &&
     document.visibilityState === 'visible'
-  const markRead = useCallback(
-    (id = activeRef.current, reason = 'view') => {
-      if (!id || id !== activeRef.current || !readable() || !statesRef.current[id]?.unread) return
-      const eventAt = statesRef.current[id].lastEventAt
+
+  /**
+   * 「这些终端看过了」：把目标条目名下所有还没读过的 PTY 一起标记已读。
+   *
+   * 目标可以是 PTY id，也可以是终端条目 id——终端里手跑的 mica 结束一轮时只知道自己那条
+   * PTY，按条目拼一个 `<条目 id>:mica` 会打到不存在的终端上，未读永远是未读（dock 徽标
+   * 挂着不放）。前台可见才清：后台窗口不该替用户把提醒撤掉。
+   */
+  const readTargets = useCallback(
+    (targets, reason = 'view') => {
+      if (!readable()) return
+      const unreadIds = () => {
+        const ids = []
+        for (const target of targets || []) {
+          for (const terminalId of unreadTerminalIds(terminalStatesRef.current, target)) {
+            if (!ids.includes(terminalId)) ids.push(terminalId)
+          }
+        }
+        return ids
+      }
+      if (unreadIds().length === 0) return
       clearTimeout(readTimer.current)
       readTimer.current = window.setTimeout(() => {
-        if (id !== activeRef.current || !readable() || !statesRef.current[id]?.unread) return
-        window.mica.notify
-          .markRead(ptyIdForNode(id))
-          .then((state) => {
-            if (!state) return
-            setStates((current) => {
-              if (current[id]?.lastEventAt !== eventAt) return current
-              const next = { ...current }
-              if (!state.unread && !state.running) delete next[id]
-              else
-                next[id] = {
-                  unread: !!state.unread,
-                  running: !!state.running,
-                  lastType: state.lastType ?? null,
-                  lastEventAt: state.lastEventAt ?? eventAt
-                }
-              statesRef.current = next
-              return next
-            })
+        if (!readable()) return
+        const pending = unreadIds().map((terminalId) => ({
+          terminalId,
+          eventAt: terminalStatesRef.current[terminalId]?.lastEventAt ?? null
+        }))
+        if (pending.length === 0) return
+        Promise.all(
+          pending.map((entry) =>
+            window.mica.notify.markRead(entry.terminalId).then((state) => ({
+              eventAt: entry.eventAt,
+              state
+            }))
+          )
+        )
+          .then((results) => {
+            const next = { ...terminalStatesRef.current }
+            for (const { eventAt, state } of results) {
+              const terminalId = state?.terminalId
+              if (!terminalId) continue
+              // 这期间同一条 PTY 又来了新事件：别把新状态盖成旧的
+              if ((next[terminalId]?.lastEventAt ?? null) !== eventAt) continue
+              if (!state.unread && !state.running) delete next[terminalId]
+              else next[terminalId] = normalizeTerminalState(state)
+            }
+            commitTerminalStates(next)
           })
           .catch((error) => console.error('mark read failed', reason, error))
       }, 120)
     },
-    [activeRef, statesRef]
+    [commitTerminalStates]
+  )
+
+  /** 单个目标（终端面板的标签、编辑器终端传自己的条目或 PTY id） */
+  const markRead = useCallback(
+    (target = activeRef.current, reason = 'view') => {
+      if (target) readTargets([target], reason)
+    },
+    [activeRef, readTargets]
+  )
+
+  /** 窗口重新聚焦 / 通知列表回灌：当前节点，加上屏幕上开着的那个终端 */
+  const markActiveRead = useCallback(
+    (reason = 'view') => readTargets([activeRef.current, ...(onScreenRef.current || [])], reason),
+    [activeRef, onScreenRef, readTargets]
   )
 
   const audioContext = () => {
@@ -242,28 +275,35 @@ function useNotifications(activeId, onSessionId, canBindSessionId) {
   useEffect(() => {
     const offNotify = window.mica.notify.onChanged((payload) => {
       if (payload?.type === 'cleared' && payload.terminalId) {
-        setTerminalState(nodeIdFor(payload.terminalId), { unread: false })
+        applyTerminalState(payload.terminalId, null)
       } else if (payload?.state?.terminalId) {
         const state = payload.state
-        const nodeId = nodeIdFor(state.terminalId)
-        setTerminalState(nodeId, state)
+        applyTerminalState(state.terminalId, state)
         if (state.sessionId) {
           // session.active 是 mica 启动时自动恢复会话，不主动给未关联的节点绑定，
           // 避免没点过的会话也显示为已打开；turn.* 事件代表用户真实对话，正常跟随。
+          const nodeId = terminalNodeId(state.terminalId)
           if (state.lastType !== 'session.active' || canBindRef.current?.(nodeId))
             sessionRef.current(nodeId, state.sessionId)
         }
         if (payload.type === 'event' && state.lastType === 'turn.completed') {
           playCompleted().catch((error) => console.warn('play notification sound failed', error))
         }
+        // 这条 PTY 就在屏幕上（面板开着、就是当前标签）、窗口在前台：看得见的结果不再挂未读
+        if (
+          payload.type === 'event' &&
+          state.unread &&
+          (onScreenRef.current || []).includes(terminalNodeId(state.terminalId))
+        )
+          markRead(terminalNodeId(state.terminalId), 'on-screen')
       } else if (Array.isArray(payload?.states)) {
         sync(payload.states)
-        markRead(activeRef.current, 'notify-sync')
+        markActiveRead('notify-sync')
       }
     })
     const offWindow = window.mica.app.onWindowState((state) => {
       windowState.current = { focused: !!state?.focused, visible: !!state?.visible }
-      markRead(activeRef.current, 'window-state')
+      markActiveRead('window-state')
     })
     window.mica.notify
       .list()
@@ -276,10 +316,10 @@ function useNotifications(activeId, onSessionId, canBindSessionId) {
       })
       .catch(() => {})
 
-    const visibility = () => markRead(activeRef.current, 'visibility')
+    const visibility = () => markActiveRead('visibility')
     const focus = () => {
       windowState.current = { ...windowState.current, focused: true }
-      markRead(activeRef.current, 'window-focus')
+      markActiveRead('window-focus')
     }
     const unlock = () => {
       const context = audioContext()
@@ -298,7 +338,16 @@ function useNotifications(activeId, onSessionId, canBindSessionId) {
       window.removeEventListener('pointerdown', unlock, true)
       window.removeEventListener('keydown', unlock, true)
     }
-  }, [activeRef, canBindRef, markRead, playCompleted, sessionRef, setTerminalState, sync])
+  }, [
+    applyTerminalState,
+    canBindRef,
+    markActiveRead,
+    markRead,
+    onScreenRef,
+    playCompleted,
+    sessionRef,
+    sync
+  ])
 
   const activeState = states[activeId]
   useEffect(() => {
@@ -1061,7 +1110,13 @@ export default function App() {
     },
     [nodesRef]
   )
-  const notifications = useNotifications(activeId, setSessionId, canBindSessionId)
+  // 终端面板开着、这个标签又是当前标签时，它就在屏幕上：焦点回到窗口就该算看过
+  const notifications = useNotifications(
+    activeId,
+    setSessionId,
+    canBindSessionId,
+    terminalVisible && rightActiveTerm ? [rightActiveTerm] : []
+  )
   // 终端是否空闲只用于「重开之前先看一眼」，走 ref 读取：进 deps 会让前台进程一
   // 结束就立刻重开终端，把用户刚跑完的那条命令的输出吞掉。
   const notificationStatesRef = useLatest(notifications.states)
@@ -2727,6 +2782,7 @@ export default function App() {
                 onResumeSession={openSession}
                 onOpenTerminal={openChatTerminal}
                 onOpenSettings={() => openConfigPage('config')}
+                onOpenPluginSettings={(pluginId) => openConfigPage('plugins', pluginId)}
                 onSessionRenamed={refreshSessions}
                 onShareSession={shareSession}
               />
@@ -2764,6 +2820,9 @@ export default function App() {
                 <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
                   {rightTerms.map((node) => {
                     const active = node.id === rightActiveTerm
+                    // 终端里手跑的 mica 结束一轮时会留下未读（dock 徽标与这里同一份状态）。
+                    // 点这个标签、或者在这个终端里敲一下，就会把那条 PTY 标记已读。
+                    const unread = !!notifications.states[node.id]?.unread
                     return (
                       <div
                         key={node.id}
@@ -2777,12 +2836,20 @@ export default function App() {
                           type="button"
                           title={node.text}
                           className="flex min-w-0 items-center gap-1.5"
-                          onClick={() =>
+                          onClick={() => {
                             setRightActiveTermByChat((prev) => ({ ...prev, [activeId]: node.id }))
-                          }
+                            // 已经是当前标签时点它不会触发 activate，这里补一次「看过了」
+                            notifications.markRead(node.id, 'terminal-tab')
+                          }}
                         >
                           <IconTerminal2 size={12} className="shrink-0 opacity-75" />
                           <span className="max-w-36 truncate">{node.text}</span>
+                          {unread ? (
+                            <span
+                              title="有未读结果"
+                              className="size-1.5 shrink-0 rounded-full bg-info"
+                            />
+                          ) : null}
                         </button>
                         <button
                           type="button"

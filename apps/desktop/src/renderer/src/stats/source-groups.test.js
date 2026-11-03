@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { groupSourceRows, sourceDetail, sourceTitle } from './source-groups.js'
+import { flattenSourceRows, sourceDetail, sourceTitle } from './source-groups.js'
 
 function row(overrides = {}) {
   return {
@@ -43,9 +43,11 @@ describe('sourceTitle', () => {
 })
 
 describe('sourceDetail', () => {
-  test('名称是别名时带上原始 id 与会话数', () => {
+  test('名称是别名时带上来源类型、原始 id 与会话数', () => {
     const plugin = row({ kind: 'plugin', id: 'session-rename', sessions: 3, purposes: ['起标题'] })
-    expect(sourceDetail(plugin, 'Auto Session Rename')).toBe('session-rename · 3 sessions · 起标题')
+    expect(sourceDetail(plugin, 'Auto Session Rename')).toBe(
+      '插件 · session-rename · 3 sessions · 起标题'
+    )
   })
 
   test('主对话不重复报 id；委派只报任务数', () => {
@@ -55,18 +57,18 @@ describe('sourceDetail', () => {
         row({ kind: 'delegation', id: 'Implementer', sessions: 1, tasks: 4, purposes: ['a'] }),
         'Implementer'
       )
-    ).toBe('1 session · 4 tasks')
+    ).toBe('委派 · 1 session · 4 tasks')
   })
 
   test('用途超过两条时收尾成 +n', () => {
     const plugin = row({ kind: 'plugin', id: 'p', purposes: ['a', 'b', 'c'] })
-    expect(sourceDetail(plugin, 'p')).toBe('a / b +1')
+    expect(sourceDetail(plugin, 'p')).toBe('插件 · a / b +1')
   })
 })
 
-describe('groupSourceRows', () => {
-  test('按主 APP / 插件 / 委派分组，组内按 token 排、组占比相对全体', () => {
-    const { total, groups } = groupSourceRows(
+describe('flattenSourceRows', () => {
+  test('摊平成一张表，按 token 降序，占比相对全体', () => {
+    const { total, rows } = flattenSourceRows(
       [
         row({ kind: 'main', id: 'main', key: 'main:main', totalTokens: 600 }),
         row({ kind: 'helper', id: 'compact', key: 'helper:compact', totalTokens: 100 }),
@@ -89,24 +91,46 @@ describe('groupSourceRows', () => {
     )
 
     expect(total).toBe(1000)
-    expect(groups.map((group) => group.label)).toEqual(['主 APP', '插件', '委派子代理'])
-    expect(groups.map((group) => group.rows.length)).toEqual([2, 2, 1])
-    expect(groups.map((group) => group.tokens)).toEqual([700, 250, 50])
-    expect(groups[1].rows.map((r) => r.title)).toEqual(['Auto Session Rename', 'memory'])
-    expect(groups[0].rows.map((r) => r.title)).toEqual(['主对话', '上下文压缩'])
-    expect(groups[0].share).toBeCloseTo(0.7)
-    expect(groups[0].rows[1].color).toBeTruthy()
+    // 同额（50 tokens）时按 id 兜底排序，顺序稳定：Implementer 在 memory 之前。
+    expect(rows.map((r) => r.title)).toEqual([
+      '主对话',
+      'Auto Session Rename',
+      '上下文压缩',
+      'Implementer',
+      'memory'
+    ])
+    expect(rows[0].share).toBeCloseTo(0.6)
+    expect(rows[1].kindLabel).toBe('插件')
+    expect(rows[2].kindLabel).toBe('内核')
+    expect(rows[3].kindLabel).toBe('委派')
+    expect(rows[0].color).toBeTruthy()
   })
 
-  test('空组与未知来源', () => {
-    const { groups } = groupSourceRows([row({ kind: 'plugin', id: 'x', key: 'plugin:x' })])
-    expect(groups.map((group) => group.key)).toEqual(['plugin'])
-    const unknown = groupSourceRows([row({ kind: 'mystery', id: 'y', key: 'mystery:y' })])
-    expect(unknown.groups.map((group) => group.key)).toEqual(['other'])
-    expect(unknown.groups[0].rows[0].title).toBe('y')
+  test('同一个功能的插件与内核两条紧挨着，不会被分组拆开', () => {
+    const { rows } = flattenSourceRows(
+      [
+        row({ kind: 'main', id: 'main', key: 'main:main', totalTokens: 5000 }),
+        row({
+          kind: 'plugin',
+          id: 'auto-compact',
+          key: 'plugin:auto-compact',
+          totalTokens: 300
+        }),
+        row({ kind: 'helper', id: 'auto-compact', key: 'helper:auto-compact', totalTokens: 290 })
+      ],
+      { pluginNames: new Map([['auto-compact', 'Auto Compact']]) }
+    )
+    expect(rows.map((r) => r.title)).toEqual(['主对话', 'Auto Compact', '上下文压缩'])
+    expect(rows.map((r) => r.kindLabel)).toEqual(['主对话', '插件', '内核'])
+  })
+
+  test('未知来源原样显示，不会被丢掉', () => {
+    const { rows } = flattenSourceRows([row({ kind: 'mystery', id: 'y', key: 'mystery:y' })])
+    expect(rows[0].title).toBe('y')
+    expect(rows[0].kindLabel).toBe('mystery')
   })
 
   test('没有任何行时给出空结果', () => {
-    expect(groupSourceRows([])).toEqual({ total: 0, groups: [] })
+    expect(flattenSourceRows([])).toEqual({ total: 0, rows: [] })
   })
 })

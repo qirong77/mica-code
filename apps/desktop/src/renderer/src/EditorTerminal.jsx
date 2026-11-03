@@ -45,8 +45,6 @@ function nextNamespace() {
   return `editor-${random}-${namespaceSeq}`
 }
 
-function noop() {}
-
 export const EditorTerminal = forwardRef(function EditorTerminal({ cwd, hidden = false }, ref) {
   const stored = useUiStateValue(EDITOR_TERMINAL_KEY, null)
   const open = stored?.open === true
@@ -79,6 +77,42 @@ export const EditorTerminal = forwardRef(function EditorTerminal({ cwd, hidden =
     tabsRef.current = next
     setTabs(next)
   }, [])
+
+  /**
+   * 这个面板里的终端跑着 mica 时，一轮结束会在运行时那条 PTY 上留下未读（dock 徽标
+   * 一直挂着）。用户在这里敲字、滚动或点进来就该撤掉：标记的是 `<标签 id>:terminal`
+   * 这条 PTY，状态由运行时广播（`notify:changed`），窗口里那份 useNotifications 会跟着更新。
+   */
+  const markRead = useCallback((id) => {
+    if (!id) return
+    window.mica.notify
+      .markRead(ptyIdFor(id, PANE_TERMINAL))
+      .catch((error) => console.error('mark terminal read failed', error))
+  }, [])
+
+  // 面板开着、这就是当前标签、窗口在前台：焦点回到窗口或切回来就算看过了
+  // （与对话底部终端同一条规则，否则那条未读只能靠 dock 徽标一直挂着）。
+  useEffect(() => {
+    if (!shown || !activeId) return
+    const ptyId = ptyIdFor(activeId, PANE_TERMINAL)
+    const clear = () => {
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
+      markRead(activeId)
+    }
+    clear()
+    // 就在眼前跑完的一轮不必再挂未读：看得见的结果和「已经看过」是一回事
+    const offNotify = window.mica.notify.onChanged((payload) => {
+      if (payload?.state?.terminalId !== ptyId || !payload.state.unread) return
+      clear()
+    })
+    window.addEventListener('focus', clear)
+    document.addEventListener('visibilitychange', clear)
+    return () => {
+      offNotify?.()
+      window.removeEventListener('focus', clear)
+      document.removeEventListener('visibilitychange', clear)
+    }
+  }, [activeId, markRead, shown])
 
   const addTab = useCallback(
     (dir) => {
@@ -333,7 +367,7 @@ export const EditorTerminal = forwardRef(function EditorTerminal({ cwd, hidden =
           docked={false}
           sidebarCollapsed={false}
           resolveCwd={resolveCwd}
-          onRead={noop}
+          onRead={markRead}
         />
       </div>
     </section>

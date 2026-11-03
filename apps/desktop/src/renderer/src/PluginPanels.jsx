@@ -79,6 +79,16 @@ const TAG_TONES = {
 /** 动作的 `tone` → 共享 `Button` 的变体；没声明的一律是行内次要动作。 */
 const BUTTON_VARIANTS = { primary: 'primary', danger: 'danger', default: 'default' }
 
+/**
+ * 弹窗里「去配置」要知道是哪个插件。
+ *
+ * 插件只声明「这里该有个跳去配置的按钮」，具体打开哪一页由页面负责——而页面要的
+ * `pluginId` 不在弹窗数据里，所以由调动作的这一侧补上（它一定知道自己在操作谁）。
+ */
+function withPluginDialog(dialog, pluginId) {
+  return pluginId ? { ...dialog, pluginId } : dialog
+}
+
 const tagTone = (tone) => TAG_TONES[tone] || 'default'
 const buttonVariant = (tone) => BUTTON_VARIANTS[tone] || 'ghost'
 
@@ -327,7 +337,7 @@ export function PluginQuickBar({
       applyPanelResult(result, {
         onCompose,
         onLaunchSession,
-        onDialog,
+        onDialog: (dialog) => onDialog?.(withPluginDialog(dialog, panel.id)),
         onOpenPath,
         onOpenReview
       })
@@ -669,8 +679,15 @@ function PluginPanelDock({
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
       setBusy('')
       // 表格里的勾选是一次状态切换，不是提交表单：换视图时不能让用户正在填的表单归位。
-      applyView(result, { resetDrafts: options.keepDrafts !== true })
-      applyPanelResult(result, { onCompose, onLaunchSession, onDialog, onOpenPath, onOpenReview })
+      // 插件也可以用 `keepDrafts` 说同一件事（输入停顿后的自动提交、提交失败）。
+      applyView(result, { resetDrafts: options.keepDrafts !== true && result?.keepDrafts !== true })
+      applyPanelResult(result, {
+        onCompose,
+        onLaunchSession,
+        onDialog: (dialog) => onDialog?.(withPluginDialog(dialog, pluginId)),
+        onOpenPath,
+        onOpenReview
+      })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
       // 动作可能改了插件状态（开关、连接、增删机器）：快捷栏的状态行与菜单要跟着变。
       notifyPluginPanelStatusChanged()
@@ -861,6 +878,10 @@ function PluginPanelSection({
   // 直接用 onChange 那一刻的回调会把改动前的 drafts 提交上去。
   const commitRef = useRef(commit)
   commitRef.current = commit
+  // 动作还在跑（点「连接」之后那几秒）时不要再补一次草稿提交：那会把插件刚清掉的
+  // 草稿写回去，下一次取视图看到的就还是刚才那台机器。
+  const busyRef = useRef(busy)
+  busyRef.current = Boolean(busy)
 
   useEffect(() => () => clearTimeout(commitTimer.current), [])
 
@@ -868,7 +889,10 @@ function PluginPanelSection({
     setDrafts((previous) => ({ ...previous, [key]: value }))
     if (!commit) return
     clearTimeout(commitTimer.current)
-    commitTimer.current = setTimeout(() => void commitRef.current?.(), COMMIT_DELAY_MS)
+    commitTimer.current = setTimeout(() => {
+      if (busyRef.current) return
+      void commitRef.current?.()
+    }, COMMIT_DELAY_MS)
   }
 
   const body = (

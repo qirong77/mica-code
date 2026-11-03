@@ -98,6 +98,10 @@ export function selectPluginPanels(plugins, role) {
       id: plugin.id,
       label: plugin.desktopPanel.label || plugin.name || plugin.id,
       icon: plugin.icon || '',
+      // 清单 `open`：点入口时执行那个动作，而不是打开抽屉（见 PluginPanels 的入口动作）。
+      ...(typeof plugin.desktopPanel.open === 'string' && plugin.desktopPanel.open.trim()
+        ? { openAction: plugin.desktopPanel.open.trim() }
+        : {}),
       display: plugin.desktopPanel.display === 'modal' ? 'modal' : 'drawer',
       // 声明了 `status` 的面板即使没有任何快捷按钮也要问一次视图：输入框上方那行状态
       // （「这个能力现在生效没有」）就来自它，丢了这一位状态行永远不会出现。
@@ -124,7 +128,9 @@ export function applyPanelResult(
   if (result.newSession && typeof result.newSession.prompt === 'string') {
     onLaunchSession?.(result.newSession)
   }
-  if (result.dialog && Array.isArray(result.dialog.rows)) onDialog?.(result.dialog)
+  // 弹窗可以只有一张二维码、一段话，甚至只有一个「去配置」按钮：表格不是它的前提。
+  if (result.dialog && (Array.isArray(result.dialog.rows) || result.dialog.qr || result.dialog.text))
+    onDialog?.(result.dialog)
   // 面板只有 340px：超过一屏的正文（插件自己的规则文件、随包分发的 skill）在抽屉里既看
   // 不清也改不动。插件只声明「打开哪个文件」，落到宿主的编辑器由页面负责。
   if (result.openPath && typeof result.openPath.path === 'string' && result.openPath.path.trim()) {

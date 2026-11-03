@@ -54,7 +54,7 @@ import {
   summarizeTodoProgress,
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
-import { PluginIcon, SessionDetailView } from '@mica-config-ui/web'
+import { PluginIcon, QrCode, SessionDetailView } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
@@ -136,7 +136,7 @@ import {
 import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { BtwDrawer } from './BtwDrawer'
 import { PluginPanels, PluginQuickBar } from './PluginPanels'
-import { usePluginPanels } from './plugin-panels'
+import { applyPanelResult, usePluginPanels } from './plugin-panels'
 import { queuePluginLaunch, subscribePluginLaunch, takePluginLaunch } from './plugin-launch'
 import { LoopBadge } from './LoopBadge'
 import { SessionSettingsDialog } from './SessionSettingsDialog'
@@ -1151,22 +1151,63 @@ function PluginTaskDialog({ task, onChange, onConfirm, onClose }) {
  *
  * 插件只给列与格子，排版与点击行为都在这里：超长链接单行省略（完整地址留在 `title`），
  * 带 `link` 的格子点了交给系统浏览器——页面自己跳转会把整个应用导航走。
+ *
+ * 两种内容各管一件事：`qr` 是「扫一下就走」的一段地址（手机访问那种），`configure`
+ * 是「还没配好」时的下一步——弹窗把话说清楚，按钮负责把人送到插件自己的设置页。
  */
-function PluginTableDialog({ dialog, onClose }) {
+function PluginTableDialog({ dialog, onClose, onOpenPluginSettings, onOpenPluginPanel }) {
+  const configure = dialog.configure && dialog.pluginId ? dialog.configure : null
+  const panel = dialog.panel && dialog.pluginId ? dialog.panel : null
+  const hasTable = Boolean(dialog.columns && dialog.columns.length > 0)
   return (
     <ModalShell
       title={dialog.title}
       subtitle={dialog.subtitle || null}
       onClose={onClose}
-      className="chat-modal-table"
+      // 没有表格时收成窄弹窗：一张 208px 的二维码摆在 860px 的白板中央只是空。
+      className={hasTable ? 'chat-modal-table' : 'chat-modal-qr'}
       footer={
-        <button type="button" className="session-action" onClick={onClose}>
-          关闭
-        </button>
+        <>
+          {configure ? (
+            <button
+              type="button"
+              className="session-action session-action-primary"
+              onClick={() => {
+                onClose()
+                onOpenPluginSettings?.(dialog.pluginId)
+              }}
+            >
+              {configure.label || '去插件页面配置'}
+            </button>
+          ) : null}
+          {panel ? (
+            <button
+              type="button"
+              className="session-action"
+              onClick={() => {
+                onClose()
+                onOpenPluginPanel?.(dialog.pluginId)
+              }}
+            >
+              {panel.label || '打开面板'}
+            </button>
+          ) : null}
+          <button type="button" className="session-action" onClick={onClose}>
+            关闭
+          </button>
+        </>
       }
     >
+      {dialog.qr ? (
+        <div className="chat-plugin-dialog-qr">
+          <QrCode value={dialog.qr.value} label={dialog.title} size={208} />
+          {dialog.qr.caption ? (
+            <p className="chat-plugin-table-note">{dialog.qr.caption}</p>
+          ) : null}
+        </div>
+      ) : null}
       {dialog.text ? <p className="chat-plugin-dialog-text">{dialog.text}</p> : null}
-      {dialog.columns.length > 0 ? (
+      {hasTable ? (
         <div className="chat-plugin-table-wrap">
           <table className="chat-plugin-table">
             <thead>
@@ -1177,7 +1218,7 @@ function PluginTableDialog({ dialog, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {dialog.rows.map((row, rowIndex) => (
+              {(dialog.rows || []).map((row, rowIndex) => (
                 <tr key={rowIndex}>
                   {row.map((cell, cellIndex) => (
                     <td key={cellIndex} className={cell.tone ? `tone-${cell.tone}` : undefined}>
@@ -2843,6 +2884,7 @@ export function ChatView({
   onResumeSession,
   onOpenTerminal,
   onOpenSettings,
+  onOpenPluginSettings,
   onSessionRenamed,
   onShareSession
 }) {
@@ -5893,6 +5935,44 @@ export function ChatView({
     [launchPluginSession]
   )
 
+  /**
+   * 面板入口本身就是动作（清单 `desktop.panel.open`）。
+   *
+   * 「手机访问」这类面板要的只是一个二维码弹窗，为它打开一整块 340px 抽屉、再让插件在
+   * 抽屉里排版，两边都白费力气。声明了 `open` 的入口点了直接把那个动作交给插件，结果
+   * 与面板里的按钮走同一套落点（`applyPanelResult`）。
+   */
+  const runPanelEntryAction = useCallback(
+    async (panel) => {
+      const action = panel?.openAction
+      if (!action) return
+      let result
+      try {
+        result = await window.mica.chat.pluginPanels.action(nodeIdRef.current, {
+          pluginId: panel.id,
+          action,
+          sessionId: sessionIdRef.current || null,
+          cwd: cwdRef.current || null
+        })
+      } catch (cause) {
+        appendNotice(`${panel.label}：${String(cause?.message || cause)}`, 'error')
+        return
+      }
+      applyPanelResult(result, {
+        onCompose: composeFromPlugin,
+        onLaunchSession: requestPluginSession,
+        onDialog: (dialog) => setPluginDialog({ ...dialog, pluginId: panel.id }),
+        onOpenPath: (path, line, options) =>
+          onOpenFileRef.current?.(path, line ? { line } : {}, options),
+        onOpenReview: (review) => onOpenReviewRef.current?.(review)
+      })
+      if (result?.ok === false) {
+        appendNotice(`${panel.label}：${result.error || '插件没有响应'}`, 'error')
+      }
+    },
+    [appendNotice, composeFromPlugin, requestPluginSession]
+  )
+
   const startMessageEdit = useCallback((message) => {
     if (!message?.id || message.queued) return
     const text = String(message.text ?? '')
@@ -7171,6 +7251,11 @@ export function ChatView({
                         role="menuitem"
                         onClick={() => {
                           setMoreOpen(false)
+                          // 入口自己就是一个动作时不打开抽屉（「手机访问」只弹二维码）。
+                          if (panel.openAction) {
+                            void runPanelEntryAction(panel)
+                            return
+                          }
                           setPluginPanelOpen(panel.id)
                           setPluginPanelSection('')
                         }}
@@ -7381,7 +7466,17 @@ export function ChatView({
             onClose={closePluginTask}
           />
         )}
-        {pluginDialog && <PluginTableDialog dialog={pluginDialog} onClose={closePluginDialog} />}
+        {pluginDialog && (
+          <PluginTableDialog
+            dialog={pluginDialog}
+            onClose={closePluginDialog}
+            onOpenPluginSettings={onOpenPluginSettings}
+            onOpenPluginPanel={(pluginId) => {
+              setPluginPanelOpen(pluginId)
+              setPluginPanelSection('')
+            }}
+          />
+        )}
         {btwOpen && (
           <BtwDrawer
             thread={btwThread}

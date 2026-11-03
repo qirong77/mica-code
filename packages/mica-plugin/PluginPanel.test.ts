@@ -352,6 +352,45 @@ describe('normalizePluginPanelAction', () => {
     expect(normalizePluginPanelActionResult({ dialog: 'PRD' })).toEqual({});
   });
 
+  it('keeps a QR-only dialog and the "go configure" button', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: {
+        title: '手机访问',
+        qr: { value: 'https://mica.example.com/?t=0123456789abcdef', caption: '扫码打开' },
+        configure: { label: '去插件页面配置' },
+      },
+    });
+    expect(result.dialog).toEqual({
+      title: '手机访问',
+      columns: [],
+      rows: [],
+      qr: { value: 'https://mica.example.com/?t=0123456789abcdef', caption: '扫码打开' },
+      configure: { label: '去插件页面配置' },
+    });
+    // `configure: true` 与 `{}` 一样，只是没写自定义文案
+    expect(
+      normalizePluginPanelActionResult({ dialog: { title: '手机访问', text: '还没接入', configure: true } })
+        ?.dialog?.configure
+    ).toEqual({});
+  });
+
+  it('keeps the "open panel" button next to "go configure"', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: {
+        title: '手机访问',
+        text: '还没接入',
+        configure: { label: '去插件页面配置' },
+        panel: { label: '首次部署' },
+      },
+    });
+    expect(result.dialog?.configure).toEqual({ label: '去插件页面配置' });
+    expect(result.dialog?.panel).toEqual({ label: '首次部署' });
+  });
+
+  it('drops a QR block without content', () => {
+    expect(normalizePluginPanelActionResult({ dialog: { title: '手机访问', qr: { value: '  ' } } })).toEqual({});
+  });
+
   it('keeps a prose-only dialog without a table', () => {
     const result = normalizePluginPanelActionResult({
       dialog: { title: '需求描述', text: '这个需求是给客服加一个入口。\n改完之后新建单据更快。' },
@@ -406,6 +445,14 @@ describe('plugin panel openPath', () => {
     });
     expect(normalizePluginPanelActionResult({ openPath: { line: 3 } }).openPath).toBeUndefined();
     expect(normalizePluginPanelActionResult({ openPath: '   ' }).openPath).toBeUndefined();
+  });
+
+  it('keeps the form only when the plugin asks for it', () => {
+    expect(normalizePluginPanelActionResult({ keepDrafts: true }).keepDrafts).toBe(true);
+    // 只认字面 true：`"true"` / 1 这类真值不当成「保留表单」，否则一个手滑的结果会让
+    // 提交过的表单看起来没生效。
+    expect(normalizePluginPanelActionResult({ keepDrafts: 'true' }).keepDrafts).toBeUndefined();
+    expect(normalizePluginPanelActionResult({ message: 'ok' }).keepDrafts).toBeUndefined();
   });
 
   it('carries focus only when the plugin explicitly asks for it', () => {

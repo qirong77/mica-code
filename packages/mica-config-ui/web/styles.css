@@ -7036,3 +7036,133 @@ html[data-theme='light'] .mica-config-ui {
   font-size: var(--text-micro);
   line-height: 1.5;
 }
+
+  /* 数据表：统计页（By source / By session）与会话详情共用的那一份形态。
+     只提供骨架——表头、列宽、行分隔、翻页；单元格内容由调用方渲染，所以同一个组件
+     能画进度条、按钮或纯文本，而边框与行高在整页保持一致。
+     窄容器里不横向滚动：先把次要列退场（见下面的 @container），而不是让整张表左右滑。 */
+  .data-table-scope {
+    container-type: inline-size;
+  }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: var(--text-label);
+  }
+
+  .data-table th {
+    padding: 0 12px 6px 0;
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .data-table th:last-child,
+  .data-table td:last-child {
+    padding-right: 0;
+  }
+
+  .data-table th.is-num,
+  .data-table td.is-num {
+    text-align: right;
+  }
+
+  .data-table td {
+    padding: 7px 12px 7px 0;
+    border-top: 1px solid var(--line-soft);
+    color: var(--text);
+    vertical-align: middle;
+  }
+
+  /* 排序入口就是表头本身：只有声明显式 `sortable` 的列才可点，其余列不假装能点。 */
+  .data-table-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+    transition: color 120ms ease;
+  }
+
+  .data-table-sort:hover {
+    color: var(--text-soft);
+  }
+
+  .data-table-sort.is-active {
+    color: var(--text);
+  }
+
+  .data-table-arrow {
+    font-size: 8px;
+    line-height: 1;
+  }
+
+  .data-table-label-narrow {
+    display: none;
+  }
+
+  .data-table-empty {
+    padding: 14px 0 2px;
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+  }
+
+  .data-table-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line-soft);
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .data-table-pager {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .data-table-page {
+    min-width: 44px;
+    text-align: center;
+    color: var(--text-soft);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 列退场按**卡片自己的宽度**判断，不看视口：同一张表在弹窗里和整页里都成立。 */
+  @container (max-width: 720px) {
+    .data-table-cell.is-narrow-secondary {
+      display: none;
+    }
+
+    .data-table-label-wide {
+      display: none;
+    }
+
+    .data-table-label-narrow {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 540px) {
+    .data-table-cell.is-narrow-tertiary {
+      display: none;
+    }
+  }
