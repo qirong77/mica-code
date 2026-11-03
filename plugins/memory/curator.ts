@@ -1,29 +1,26 @@
-import {
-  MAX_OPERATIONS,
-  MEMORY_TARGETS,
-  type MemoryApplyResult,
-  type MemoryOperation,
-  type MemoryStoreSnapshot,
-  type MemoryTarget,
-} from './store.js';
-import { storeTitle } from './section.js';
+import { MAX_OPERATIONS, type MemoryApplyResult, type MemoryOperation, type MemoryStoreSnapshot } from './store.js';
+import type { MemoryScope } from './scope.js';
 
 /**
  * 记忆整理器：把一段对话收敛成几条操作。
  *
- * 为什么需要它：让主模型在干活的同时判断「这句话值不值得记」会干扰它完成任务，
- * 而只靠用户手动触发又几乎不会发生。所以整理发生在 turn 结束之后，输入只有
- * 对话 + 现有记忆，输出只有操作，不产生任何副作用——写不写、写多少由调用方决定。
+ * 它是「千奇百怪的记忆」的主要来源，所以判据比调用方式重要得多。旧判据只问
+ * 「长期有用、下次会话仍然成立吗」——于是「这次需求里花两小时挖出来的灰度字段」
+ * 自然被当成长期事实写进全局记忆，之后每个无关会话都要读它一遍。
  *
- * 它可以是宿主的子代理（复用当前模型配置），也可以是插件自己配置的独立 provider
- * （便宜、可换协议、可用自己的 key）。两种模式喂的是同一份 prompt。
+ * 新判据加了三道**可判定的**测试（时间跨度、独立性、事实/规则），并把作用域
+ * 写成操作的一部分，默认最窄。整理器**不允许写 profile**：那是用户本人的画像，
+ * 由用户在对话里明确要求时由主模型写，整理器只能提议。
  */
 
 export type CuratorOperation = {
-  target: MemoryTarget;
+  scope: 'profile' | 'project' | 'domain';
+  /** scope = domain 时必填。 */
+  domain?: string;
   action: 'add' | 'patch' | 'remove';
   old_text?: string;
   content?: string;
+  pin?: boolean;
 };
 
 export type CuratorConversationMessage = {
@@ -32,7 +29,10 @@ export type CuratorConversationMessage = {
 };
 
 export type CuratorInput = {
+  /** 当前会话适用的作用域与用量，模型据此选最窄的一层。 */
   snapshots: MemoryStoreSnapshot[];
+  /** 上下文描述：仓库名 / 命中的领域 / 不在仓库里。 */
+  context: string;
   messages: CuratorConversationMessage[];
 };
 
@@ -42,13 +42,17 @@ export type CuratorParseResult =
 
 /** 整理结果的落地入口；用接口而不是具体仓库，测试里可以给一个内存实现。 */
 export type MemoryApplier = {
-  apply(target: MemoryTarget, operations: MemoryOperation[]): MemoryApplyResult;
+  apply(scope: MemoryScope, operations: MemoryOperation[]): MemoryApplyResult;
 };
+
+export type CuratorScopeResolver = (
+  operation: CuratorOperation,
+) => { ok: true; scope: MemoryScope } | { ok: false; error: string };
 
 export type CuratorApplyOutcome = {
   /** 真正写进去的操作数。 */
   applied: number;
-  failures: { target: MemoryTarget; message: string }[];
+  failures: { scope: string; message: string }[];
 };
 
 /** 单条消息进入整理 prompt 的上限；再长的对话对「提取长期事实」没有额外帮助。 */
@@ -60,43 +64,73 @@ export const MAX_CONVERSATION_CHARS = 16_000;
 export const CURATOR_SYSTEM_PROMPT = [
   '你是一个记忆整理器。输入是一段刚结束的对话和已经保存的长期记忆；你的任务是判断其中有没有值得跨会话保留的事实，并输出对应的写操作。',
   '',
-  '只保存长期有用、下次会话仍然成立的事实：',
-  '- 用户的稳定偏好、习惯与明确纠正（例如「不要用 sudo」「回答尽量短」）；',
-  '- 环境事实：操作系统、shell、包管理器、工具版本、值得记住的坑；',
-  '- 项目约定：目录结构、运行命令、测试方式、代码风格、架构决策及其理由；',
-  '- 花费了较多工夫才发现的路径、命令、配置项；',
+  '## 三道测试（任何一条不过就不写）',
+  '',
+  '1. **时间跨度**：三个月后，在一个和这次任务完全无关的需求里，这条事实还有用吗？',
+  '   「这个需求里灰度字段叫 X」「这批订单为什么失败」「今天踩到的编译错误」——不过。',
+  '2. **独立性**：脱离本次对话能独立读懂吗？',
+  '   「这个字段」「上面那个接口」「刚才那个 bug」——不过，除非改写成不带指代的完整事实。',
+  '3. **事实还是规则**：这里只存**事实**。',
+  '   「必须复用 X 组件」「改完要跑 Y」「不要用 Z」「汇报时要说明分支」「一个会话只允许一条分支」',
+  '   ——这些是行动规则，属于角色文件 / AGENTS.md / 项目约定，**不写进记忆**，无论听起来多重要。',
+  '',
+  '## 什么值得写（事实类）',
+  '',
+  '- 用户本人的稳定属性：称呼、语言、对任何项目都成立的沟通偏好；',
+  '- 环境事实：操作系统、包管理器、某个工具在本机的非显然行为；',
+  '- 仓库事实：目录结构、运行命令、测试方式、架构决策**及其理由**；',
+  '- 花费较多工夫才确认的路径、配置项、外部系统的真实行为（哪个接口返回什么、哪个环境有什么限制）；',
   '- 做过的决定和为什么这样决定（避免下次重新讨论）。',
   '',
-  '不要保存：',
-  '- 一次性的调试细节、临时文件路径、本轮任务的中间状态；',
+  '## 作用域：默认最窄',
+  '',
+  '- `project`：只在这个仓库成立。**默认选它**——大多数技术发现都属于这里。',
+  '- `domain`：跨仓库、但只在一个主题内成立（同一套后端 / 同一组小程序 / 同一个内部系统）。',
+  '  只有在给定的领域列表里已经存在对应领域、且这条事实确实跨仓库成立时才用。',
+  '- `profile`：你**不允许**写。用户的画像由用户在对话里明确要求时由主模型维护。',
+  '  你判断某条属于用户画像时，把它写进 `notes` 字段，交给用户决定。',
+  '',
+  '## 不要保存',
+  '',
+  '- 本次需求的中间状态、待办、TODO、当前进度；',
+  '- 一次性的调试细节、临时文件路径、临时 worktree 路径；',
   '- 从代码、git 历史或配置文件一眼能看出的事实；',
   '- 对话里的寒暄、过程叙述、复述用户原话；',
   '- 任何凭据、密钥、token、密码（只记录「密钥放在哪」）。',
   '',
-  '规则：',
-  '- 已有条目能覆盖时优先 `patch`，不要新增重复条目；过时或错误的条目用 `remove`。',
-  '- 每条控制在 200 字符以内，一条只讲一件事；总预算很紧，注意下方各块的用量。',
+  '## 写法',
+  '',
+  '- 一条只讲一件事，控制在 200 字符以内；写成完整陈述句，主语明确。',
+  '- 已有条目能覆盖时优先 `patch`；过时或错误的条目用 `remove`。',
   '- `old_text` 必须是已有条目中出现且唯一的原文片段。',
   `- 一次最多 ${MAX_OPERATIONS} 个操作。`,
-  '- 没有值得保存的内容就返回空操作。',
+  '- **没有通过三道测试的内容就返回空操作**。这是最常见的正确结果，不要为了「有产出」硬写。',
   '- 只输出 JSON，不要解释、不要 markdown 代码块。',
   '',
   '输出格式：',
-  '{"operations":[{"target":"user|memory|project","action":"add|patch|remove","old_text":"仅 patch/remove 需要","content":"add/patch 的新内容"}]}',
+  '{"operations":[{"scope":"project|domain","domain":"仅 domain 需要","action":"add|patch|remove","old_text":"仅 patch/remove 需要","content":"add/patch 的新内容"}],"notes":"可选：不适合写进记忆、但值得告诉用户的一句话"}',
 ].join('\n');
 
 export function buildCuratorUserPrompt(input: CuratorInput): string {
   const memory = input.snapshots
     .map((snapshot) => {
-      const header = `### ${snapshot.target} · ${storeTitle(snapshot)} · ${snapshot.chars}/${snapshot.limit} 字符${
-        snapshot.projectDir ? ` · 目录 ${snapshot.projectDir}` : ''
-      }`;
+      const header = `### ${snapshot.scope.kind}${snapshot.scope.kind === 'domain' ? `:${snapshot.scope.domain.name}` : ''} · ${snapshot.title} · ${snapshot.chars}/${snapshot.budget} 字符`;
       const body = snapshot.entries.length > 0 ? snapshot.entries.map((entry) => `- ${entry}`).join('\n') : '（空）';
       return `${header}\n${body}`;
     })
     .join('\n\n');
 
+  const domains = input.snapshots
+    .filter((snapshot) => snapshot.scope.kind === 'domain')
+    .map((snapshot) => (snapshot.scope.kind === 'domain' ? snapshot.scope.domain.name : ''))
+    .filter(Boolean);
+
   return [
+    '<context>',
+    input.context,
+    domains.length > 0 ? `可用的领域：${domains.join(' / ')}` : '当前没有可用的领域（domain 类操作会被拒绝）',
+    '</context>',
+    '',
     '<memory>',
     memory || '（空）',
     '</memory>',
@@ -107,9 +141,9 @@ export function buildCuratorUserPrompt(input: CuratorInput): string {
     '',
     // schema 紧贴生成位置再写一遍：这些模型见过太多 patch / shell 风格的结构，
     // 只在 system prompt 里说一次，落到最后一步还是会走样。
-    '请严格按这个结构输出，不要用其它字段名（不要 op / path / value）：',
-    '{"operations":[{"target":"user|memory|project","action":"add","content":"..."},{"target":"...","action":"patch","old_text":"已有条目的唯一原文片段","content":"..."},{"target":"...","action":"remove","old_text":"..."}]}',
-    '没有值得保存的内容就输出 {"operations":[]}。',
+    '请严格按这个结构输出，不要用其它字段名（不要 op / path / value / target / store）：',
+    '{"operations":[{"scope":"project","action":"add","content":"..."},{"scope":"domain","domain":"<上面列出的领域名>","action":"add","content":"..."}],"notes":""}',
+    '没有通过三道测试的内容就输出 {"operations":[]}。',
   ].join('\n');
 }
 
@@ -185,81 +219,133 @@ export function parseCuratorOutput(text: string): CuratorParseResult {
   return { ok: true, operations: valid, skipped };
 }
 
+/** `notes` 是「没写进去但该让用户知道」的一句话，单独取，不进操作列表。 */
+export function parseCuratorNotes(text: string): string | null {
+  const json = extractJson(text.trim());
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as { notes?: unknown };
+    return typeof parsed.notes === 'string' && parsed.notes.trim() ? parsed.notes.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeOperation(input: unknown): CuratorOperation | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const record = input as Record<string, unknown>;
-  const target = record.target;
   // 字段别名：模型对同一件事的命名习惯不一样（`op` / `value` / `oldText`），
   // 认这些等价写法不花任何成本；认不出来才会多花一次模型调用去纠正。
+  const scope = normalizeScope(record.scope ?? record.target ?? record.store);
+  if (!scope) return null;
   const action = record.action ?? record.op ?? record.type;
-  if (typeof target !== 'string' || !MEMORY_TARGETS.includes(target as MemoryTarget)) return null;
   const content = readText(record.content ?? record.value ?? record.text);
   const oldText = readText(record.old_text ?? record.oldText ?? record.match);
+  const domain = readText(record.domain ?? record.area);
 
   if (action === 'add') {
     if (!content) return null;
-    return { target: target as MemoryTarget, action: 'add', content };
+    return domain && scope === 'domain' ? { scope, domain, action, content } : { scope, action, content };
   }
   if (action === 'patch') {
-    if (!oldText || !content) return null;
-    return { target: target as MemoryTarget, action: 'patch', old_text: oldText, content };
+    if (!content || !oldText) return null;
+    return domain && scope === 'domain'
+      ? { scope, domain, action, old_text: oldText, content }
+      : { scope, action, old_text: oldText, content };
   }
   if (action === 'remove') {
     if (!oldText) return null;
-    return { target: target as MemoryTarget, action: 'remove', old_text: oldText };
+    return domain && scope === 'domain'
+      ? { scope, domain, action, old_text: oldText }
+      : { scope, action, old_text: oldText };
   }
   return null;
 }
 
-function readText(value: unknown): string {
-  return typeof value === 'string' && value.trim() ? value : '';
+function normalizeScope(value: unknown): CuratorOperation['scope'] | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'profile' || normalized === 'user') return 'profile';
+  if (normalized === 'project' || normalized === 'repo' || normalized === 'repository') return 'project';
+  if (normalized === 'domain') return 'domain';
+  // 旧版本的 `memory` 是「跨项目的经验」——语义上最接近领域，但领域必须显式指定
+  // 才合法，这里不做猜测，交给调用方按「缺 domain」拒绝。
+  if (normalized === 'memory') return 'domain';
+  return null;
+}
+
+function readText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function extractJson(text: string): string | null {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
-  const body = fenced?.[1]?.trim() || text;
+  const body = fenced ? fenced[1]!.trim() : text;
   const start = body.indexOf('{');
   const end = body.lastIndexOf('}');
   if (start < 0 || end <= start) return null;
   return body.slice(start, end + 1);
 }
 
+function truncate(text: string, max: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, max - 1))}…`;
+}
+
 /**
- * 按记忆块分组落地。
+ * 落地：按作用域分组合并成批次，每层一次原子写入。
  *
- * 一块失败不影响其它块：整理器偶尔会给出一条对不上的 `old_text`，此时宁可只丢掉
- * 那一块的操作，也不该让整次整理白跑（其余块里可能有真正有价值的纠正）。
+ * 分开写而不是逐条写，是为了让「删两条、加一条」这种腾预算的组合仍然原子——
+ * 逐条写会在预算检查失败时留下删了一半的状态。
  */
-export function applyCuratorOperations(applier: MemoryApplier, operations: CuratorOperation[]): CuratorApplyOutcome {
-  const grouped = new Map<MemoryTarget, MemoryOperation[]>();
+export function applyCuratorOperations(
+  applier: MemoryApplier,
+  resolveScope: CuratorScopeResolver,
+  operations: CuratorOperation[],
+): CuratorApplyOutcome {
+  const failures: { scope: string; message: string }[] = [];
+  const batches = new Map<string, { scope: MemoryScope; operations: MemoryOperation[] }>();
+
   for (const operation of operations) {
-    const list = grouped.get(operation.target) ?? [];
-    if (operation.action === 'add') {
-      list.push({ action: 'add', content: operation.content ?? '' });
-    } else if (operation.action === 'patch') {
-      list.push({ action: 'patch', old_text: operation.old_text ?? '', content: operation.content ?? '' });
-    } else {
-      list.push({ action: 'remove', old_text: operation.old_text ?? '' });
+    if (operation.scope === 'profile') {
+      failures.push({
+        scope: 'profile',
+        message: '自动整理不写用户档案（profile 只由用户在对话里明确要求时写入）',
+      });
+      continue;
     }
-    grouped.set(operation.target, list);
+    const resolved = resolveScope(operation);
+    if (!resolved.ok) {
+      failures.push({ scope: operation.scope, message: resolved.error });
+      continue;
+    }
+    const key = `${resolved.scope.kind}:${
+      resolved.scope.kind === 'project'
+        ? resolved.scope.repo.slug
+        : resolved.scope.kind === 'domain'
+          ? resolved.scope.domain.name
+          : ''
+    }`;
+    const batch = batches.get(key) ?? { scope: resolved.scope, operations: [] };
+    batch.operations.push({
+      action: operation.action,
+      old_text: operation.old_text,
+      content: operation.content,
+      ...(operation.pin ? { pin: operation.pin } : {}),
+    } as MemoryOperation);
+    batches.set(key, batch);
   }
 
   let applied = 0;
-  const failures: CuratorApplyOutcome['failures'] = [];
-  for (const [target, batch] of grouped) {
-    try {
-      const result = applier.apply(target, batch);
-      if (result.ok) applied += result.applied.length;
-      else failures.push({ target, message: result.error.message });
-    } catch (error) {
-      failures.push({ target, message: error instanceof Error ? error.message : String(error) });
+  for (const batch of batches.values()) {
+    const result = applier.apply(batch.scope, batch.operations);
+    if (result.ok) {
+      applied += batch.operations.length;
+      continue;
     }
+    failures.push({ scope: batch.scope.kind, message: result.error.message });
   }
-  return { applied, failures };
-}
 
-function truncate(text: string, limit: number): string {
-  const normalized = text.trim();
-  if (!normalized) return '';
-  return normalized.length > limit ? `${normalized.slice(0, limit)}…` : normalized;
+  return { applied, failures };
 }

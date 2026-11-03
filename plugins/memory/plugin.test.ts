@@ -1,4 +1,13 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,18 +22,50 @@ import type {
 } from '@packages/mica-plugin/index.js';
 import setup from './index.js';
 import type { MemoryTool } from './MemoryTool.js';
-import { projectSlug } from './store.js';
+import { ensureDomain } from './domains.js';
+import { clearRepoIdentityCache, resolveRepoIdentity } from './repo.js';
+
+/**
+ * 记忆插件的集成测试。
+ *
+ * 记忆按适用范围分三层（profile / project / domain），所以每条用例都要交代「这段会话
+ * 在哪个仓库里」：仓库用只含 `.git/config` 的临时目录伪造（身份解析只读文件，不跑 git）。
+ * 注入断言要区分「当前会话适用的层」与「磁盘上存在的层」——在 A 仓库写下的项目记忆
+ * 不该出现在 B 仓库的提示词里。
+ */
 
 const tempDirs: string[] = [];
 
+/** realpath：macOS 的 /var 指向 /private/var，而领域匹配比较的是真实路径。 */
 function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'mica-memory-plugin-'));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'mica-memory-plugin-')));
   tempDirs.push(dir);
   return dir;
 }
 
+/** 最小仓库：只有 `.git/config`，识别身份够用，不需要真的 git 二进制。 */
+function makeRepo(name: string, remote?: string): string {
+  const root = join(tempDir(), name);
+  mkdirSync(join(root, '.git'), { recursive: true });
+  const config = ['[core]', '\trepositoryformatversion = 0'];
+  if (remote) config.push('[remote "origin"]', `\turl = ${remote}`);
+  writeFileSync(join(root, '.git', 'config'), `${config.join('\n')}\n`, 'utf-8');
+  return root;
+}
+
+/** 项目记忆文件：slug 由仓库身份（归一化后的远端地址 / common dir）算出。 */
+function memoryFile(home: string, cwd: string): string {
+  const repo = resolveRepoIdentity(cwd);
+  if (!repo) throw new Error(`not inside a repository: ${cwd}`);
+  return join(home, 'memory', 'projects', `${repo.slug}.md`);
+}
+
+function profileFile(home: string): string {
+  return join(home, 'memory', 'PROFILE.md');
+}
+
 afterEach(() => {
-  vi.unstubAllGlobals();
+  clearRepoIdentityCache();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -54,6 +95,7 @@ type HarnessOptions = {
   curatorOutputs?: string[];
   curatorStatus?: 'completed' | 'partial' | 'failed' | 'killed';
   withSubagents?: boolean;
+  /** 会话的工作目录；默认造一个新的最小仓库。 */
   cwd?: string;
   /** 可变的 cwd，用来模拟会话中途 `/cd`。 */
   cwdRef?: { current: string };
@@ -64,6 +106,8 @@ type HarnessOptions = {
 
 function createHarness(options: HarnessOptions = {}) {
   const home = options.home ?? tempDir();
+  const cwd = options.cwd ?? makeRepo('mica', 'git@git.example.com:team/mica.git');
+  const currentCwd = () => options.cwdRef?.current ?? cwd;
   const hooks = new HookRegistry();
   const commands = new micaCommands.CommandRegistry();
   const tools: MemoryTool[] = [];
@@ -100,11 +144,7 @@ function createHarness(options: HarnessOptions = {}) {
     agent: { mode: options.mode ?? 'session' },
     events: {},
     session: {
-      describe: () => ({
-        id: options.sessionIdRef?.current ?? 'session-1',
-        title: 'test',
-        cwd: options.cwdRef?.current ?? options.cwd ?? '/repo/mica',
-      }),
+      describe: () => ({ id: options.sessionIdRef?.current ?? 'session-1', title: 'test', cwd: currentCwd() }),
       messages: () => options.messages ?? [],
       rename: () => true,
     },
@@ -177,6 +217,8 @@ function createHarness(options: HarnessOptions = {}) {
 
   return {
     home,
+    cwd,
+    currentCwd,
     hooks,
     commands,
     tools,
@@ -216,12 +258,16 @@ describe('memory plugin setup', () => {
     expect(harness.healthReports.at(-1)).toMatchObject({ level: 'ok' });
   });
 
-  it('renders project memory for the session working directory', () => {
-    const harness = createHarness({ cwd: '/repo/mica' });
-    const section = harness.promptSections[0]!;
+  it('counts only the layers that apply to the session, not every file on disk', () => {
+    const harness = createHarness();
 
-    expect(section.render()).toContain('当前还没有保存任何记忆');
-    expect(harness.healthReports.at(-1)?.message).toContain('0 条');
+    const text = harness.promptSections[0]!.render();
+
+    // 没有任何适用内容时整段消失，避免每个新会话都为一句占位文案付 token。
+    expect(text).toBe('');
+    expect(text).not.toContain('### 用户档案');
+    // 仓库里的会话适用 profile + 当前仓库两层。
+    expect(harness.healthReports.at(-1)?.message).toContain('本会话注入 2 层 · 0 条');
   });
 
   it('leaves the prompt and tools off while retaining the command when memory is disabled', () => {
@@ -247,33 +293,56 @@ describe('memory plugin setup', () => {
 
 describe('memory prompt snapshot', () => {
   it('applies changes to enabled without restarting and refuses calls to an old tool', async () => {
-    const harness = createHarness({ settings: { enabled: 'false', autoCapture: 'true' } });
-    harness.settings.enabled = 'true';
-    expect(harness.promptSections[0]!.render()).toContain('持久记忆');
-    expect(harness.activeTools.size).toBe(1);
+    const harness = createHarness({ settings: { autoCapture: 'true' } });
+    const section = harness.promptSections[0]!;
+    await harness.tools[0]!.execute({ scope: 'profile', operations: [{ action: 'add', content: '偏好中文' }] });
+    expect(section.render()).toContain('已知事实（记忆）');
 
-    const tool = harness.tools[0]!;
+    const staleTool = harness.tools[0]!;
     harness.settings.enabled = 'false';
     await expect(
-      tool.execute({ target: 'user', operations: [{ action: 'add', content: '不该保存' }] }),
+      staleTool.execute({ scope: 'profile', operations: [{ action: 'add', content: '不该保存' }] }),
     ).rejects.toThrow(/disabled/);
-    expect(harness.promptSections[0]!.render()).toBe('');
+    expect(section.render()).toBe('');
     expect(harness.activeTools.size).toBe(0);
     await harness.emitTurnAfter();
     expect(harness.runs).toHaveLength(0);
-    expect(existsSync(join(harness.home, 'memory', 'USER.md'))).toBe(false);
+
+    harness.settings.enabled = 'true';
+    expect(section.render()).toContain('偏好中文');
+    expect(harness.activeTools.size).toBe(1);
+    expect(existsSync(profileFile(harness.home))).toBe(true);
   });
 
-  it('uses the current budget when rendering a frozen snapshot', async () => {
-    const harness = createHarness();
-    await harness.tools[0]!.execute({ target: 'memory', operations: [{ action: 'add', content: 'x'.repeat(400) }] });
+  it('clamps what is injected but keeps every entry in the file', async () => {
+    const harness = createHarness({ settings: { profileCharLimit: '200' } });
+    const tool = harness.tools[0]!;
+    const older = '甲'.repeat(150);
+    const newer = '乙'.repeat(150);
+
+    const result = await tool.execute({
+      scope: 'profile',
+      operations: [
+        { action: 'add', content: older },
+        { action: 'add', content: newer },
+      ],
+    });
+
+    // 预算是注入额度，不是写入限制：两条 150 字符的记忆照样落盘，注入时只挑得下一条。
+    expect(result).toContain('302/200 characters');
+    expect(result).toContain('over its injection budget');
+    const onDisk = readFileSync(profileFile(harness.home), 'utf-8');
+    expect(onDisk).toContain(older);
+    expect(onDisk).toContain(newer);
+
     const section = harness.promptSections[0]!;
-    expect(section.render()).toContain('x'.repeat(400));
+    expect(section.render()).toContain('### 用户档案（另有 1 条更早的未展示）');
+    expect(section.render()).toContain('- ' + older);
+    expect(section.render()).not.toContain(newer);
 
-    harness.settings.memoryCharLimit = '200';
-
-    expect(section.render()).not.toContain('x'.repeat(200));
-    expect(section.render()).toContain('400/200');
+    // 预算随快照一起冻结：会话中途调大不会改变这一轮已注入的内容。
+    harness.settings.profileCharLimit = '2000';
+    expect(section.render()).toContain('（另有 1 条更早的未展示）');
   });
 
   it('freezes the section until /memory refresh is run', async () => {
@@ -281,7 +350,7 @@ describe('memory prompt snapshot', () => {
     const section = harness.promptSections[0]!;
 
     expect(section.render()).not.toContain('项目用 bun');
-    await harness.tools[0]!.execute({ target: 'memory', operations: [{ action: 'add', content: '项目用 bun' }] });
+    await harness.tools[0]!.execute({ scope: 'project', operations: [{ action: 'add', content: '项目用 bun' }] });
     expect(section.render()).not.toContain('项目用 bun');
 
     await harness.commands.execute('/memory refresh');
@@ -293,12 +362,12 @@ describe('memory prompt snapshot', () => {
     const harness = createHarness({ sessionIdRef });
     const tool = harness.tools[0]!;
     const section = harness.promptSections[0]!;
-    await tool.execute({ target: 'user', operations: [{ action: 'add', content: '原有偏好' }] });
+    await tool.execute({ scope: 'profile', operations: [{ action: 'add', content: '原有偏好' }] });
     expect(section.render()).toContain('原有偏好');
     sessionIdRef.current = 'second';
     expect(section.render()).toContain('原有偏好');
     await tool.execute({
-      target: 'user',
+      scope: 'profile',
       operations: [{ action: 'patch', old_text: '原有偏好', content: '新的偏好' }],
     });
 
@@ -310,22 +379,109 @@ describe('memory prompt snapshot', () => {
     expect(section.render()).not.toContain('新的偏好');
   });
 
-  it('swaps only project memory when the session changes directory', async () => {
-    const cwdRef = { current: '/repo/alpha' };
-    const harness = createHarness({ cwdRef, cwd: '/repo/alpha' });
+  it('swaps only the project layer when the session moves to another repository', async () => {
+    const alpha = makeRepo('alpha', 'git@git.example.com:team/alpha.git');
+    const beta = makeRepo('beta', 'git@git.example.com:team/beta.git');
+    const cwdRef = { current: alpha };
+    const harness = createHarness({ cwdRef, cwd: alpha });
     const section = harness.promptSections[0]!;
 
-    await harness.tools[0]!.execute({ target: 'user', operations: [{ action: 'add', content: '偏好中文' }] });
-    await harness.tools[0]!.execute({ target: 'project', operations: [{ action: 'add', content: 'alpha 用 pnpm' }] });
+    await harness.tools[0]!.execute({ scope: 'profile', operations: [{ action: 'add', content: '偏好中文' }] });
+    await harness.tools[0]!.execute({ scope: 'project', operations: [{ action: 'add', content: 'alpha 用 pnpm' }] });
     await harness.commands.execute('/memory refresh');
     expect(section.render()).toContain('alpha 用 pnpm');
 
-    cwdRef.current = '/repo/beta';
+    cwdRef.current = beta;
     const afterSwitch = section.render();
 
-    // 项目记忆必须换；user / memory 仍按快照冻结，不因为 /cd 重读磁盘。
+    // 项目层换成 beta 的（空）；profile 不跟着 cwd 变。
     expect(afterSwitch).not.toContain('alpha 用 pnpm');
+    expect(afterSwitch).not.toContain('项目记忆 · alpha');
     expect(afterSwitch).toContain('偏好中文');
+  });
+});
+
+describe('memory scope layering', () => {
+  it('shares project memory across every directory of the same repository', async () => {
+    const home = tempDir();
+    const repo = makeRepo('mica-code', 'git@git.example.com:team/mica-code.git');
+    const nested = join(repo, 'apps', 'desktop');
+    mkdirSync(nested, { recursive: true });
+
+    const atRoot = createHarness({ home, cwd: repo });
+    await atRoot.tools[0]!.execute({ scope: 'project', operations: [{ action: 'add', content: '桌面端用 vite' }] });
+
+    const inSubdir = createHarness({ home, cwd: nested });
+
+    expect(inSubdir.promptSections[0]!.render()).toContain('桌面端用 vite');
+    expect(memoryFile(home, nested)).toBe(memoryFile(home, repo));
+  });
+
+  it('does not inject the project memory of another repository', async () => {
+    const home = tempDir();
+    const alpha = makeRepo('alpha', 'git@git.example.com:team/alpha.git');
+    const beta = makeRepo('beta', 'git@git.example.com:team/beta.git');
+
+    const alphaSession = createHarness({ home, cwd: alpha });
+    await alphaSession.tools[0]!.execute({
+      scope: 'project',
+      operations: [{ action: 'add', content: 'alpha 用 pnpm' }],
+    });
+    expect(alphaSession.promptSections[0]!.render()).toContain('alpha 用 pnpm');
+
+    const betaSession = createHarness({ home, cwd: beta });
+    const text = betaSession.promptSections[0]!.render();
+
+    expect(text).not.toContain('alpha 用 pnpm');
+    expect(text).toBe('');
+    expect(existsSync(memoryFile(home, alpha))).toBe(true);
+  });
+
+  it('injects only the profile layer outside any repository and refuses project writes', async () => {
+    const harness = createHarness({ cwd: tempDir() });
+    const tool = harness.tools[0]!;
+
+    await tool.execute({ scope: 'profile', operations: [{ action: 'add', content: '偏好中文' }] });
+
+    const text = harness.promptSections[0]!.render();
+    expect(text).toContain('### 用户档案');
+    expect(text).toContain('- 偏好中文');
+    expect(text).not.toContain('### 项目记忆');
+    expect(harness.healthReports.at(-1)?.message).toContain('本会话注入 1 层 · 0 条');
+
+    await expect(
+      tool.execute({ scope: 'project', operations: [{ action: 'add', content: '无处安放' }] }),
+    ).rejects.toThrow(/no repository/);
+  });
+
+  it('injects a domain layer only where the domain covers the working directory', async () => {
+    const home = tempDir();
+    const zuche = makeRepo('mis', 'git@git.example.com:zuche/mis.git');
+    const other = makeRepo('mica-code', 'git@git.example.com:team/mica-code.git');
+    ensureDomain(join(home, 'memory'), '租车', [zuche]);
+
+    const inside = createHarness({ home, cwd: zuche });
+    const written = await inside.tools[0]!.execute({
+      scope: 'domain',
+      domain: '租车',
+      operations: [{ action: 'add', content: '灰度字段在 mis 的 API 里' }],
+    });
+
+    expect(written).toContain('领域记忆 · 租车');
+    expect(inside.promptSections[0]!.render()).toContain('灰度字段在 mis 的 API 里');
+
+    const outside = createHarness({ home, cwd: other });
+    const text = outside.promptSections[0]!.render();
+    expect(text).not.toContain('灰度字段在 mis 的 API 里');
+    expect(text).not.toContain('领域记忆');
+
+    await expect(
+      outside.tools[0]!.execute({
+        scope: 'domain',
+        domain: '租车',
+        operations: [{ action: 'add', content: '不该写进去' }],
+      }),
+    ).rejects.toThrow(/does not cover/);
   });
 });
 
@@ -334,7 +490,10 @@ describe('memory auto capture', () => {
     let reads = 0;
     const messages = Array.from({ length: 20_000 }, (_, index) => ({
       role: index % 2 ? 'assistant' : 'user',
-      get content() { reads += 1; return `message ${index}`; },
+      get content() {
+        reads += 1;
+        return `message ${index}`;
+      },
     }));
     const harness = createHarness({ settings: { maxMessages: '2' }, messages });
     await harness.commands.execute('/memory review');
@@ -349,7 +508,10 @@ describe('memory auto capture', () => {
     const harness = createHarness({
       settings: { autoCapture: 'true' },
       messages: thread(['偏好中文', '好的']),
-      curatorCompletion: () => new Promise<string>((resolve) => { finish = resolve; }),
+      curatorCompletion: () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
     });
     await harness.emitTurnAfter();
     harness.settings.autoCapture = 'false';
@@ -357,7 +519,7 @@ describe('memory auto capture', () => {
     await vi.waitFor(() => expect(readdirSync(join(harness.home, 'memory', 'curator.lock.owners'))).toEqual([]));
     expect(harness.runs).toHaveLength(1);
     expect(harness.signals[0]?.aborted).toBe(true);
-    expect(existsSync(join(harness.home, 'memory', 'USER.md'))).toBe(false);
+    expect(existsSync(profileFile(harness.home))).toBe(false);
   });
 
   it('records a paid attempt before awaiting its response, so a cancelled review is still throttled', async () => {
@@ -365,7 +527,10 @@ describe('memory auto capture', () => {
     const harness = createHarness({
       settings: { autoCapture: 'true', minIntervalMinutes: '60' },
       messages: thread(['偏好中文', '好的']),
-      curatorCompletion: () => new Promise<string>((resolve) => { finish = resolve; }),
+      curatorCompletion: () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
     });
     await harness.emitTurnAfter();
     expect(existsSync(join(harness.home, 'memory', 'state.json'))).toBe(true);
@@ -378,11 +543,14 @@ describe('memory auto capture', () => {
     expect(harness.runs).toHaveLength(1);
   });
 
-  it('writes a delayed review to the project it reviewed after the session changes directory', async () => {
-    const cwdRef = { current: '/repo/alpha' };
+  it('writes a delayed review to the repository it reviewed after the session changes directory', async () => {
+    const alpha = makeRepo('alpha', 'git@git.example.com:team/alpha.git');
+    const beta = makeRepo('beta', 'git@git.example.com:team/beta.git');
+    const cwdRef = { current: alpha };
     let finish: (text: string) => void = () => {};
     const harness = createHarness({
       cwdRef,
+      cwd: alpha,
       messages: thread(['alpha 用 pnpm', '记住了']),
       curatorCompletion: () =>
         new Promise<string>((resolve) => {
@@ -392,19 +560,17 @@ describe('memory auto capture', () => {
 
     const review = harness.commands.execute('/memory review');
     await vi.waitFor(() => expect(harness.runs).toHaveLength(1));
-    cwdRef.current = '/repo/beta';
-    finish('{"operations":[{"target":"project","action":"add","content":"alpha 用 pnpm"}]}');
+    cwdRef.current = beta;
+    finish('{"operations":[{"scope":"project","action":"add","content":"alpha 用 pnpm"}]}');
     await review;
 
-    expect(
-      readFileSync(join(harness.home, 'memory', 'projects', projectSlug('/repo/alpha'), 'MEMORY.md'), 'utf-8'),
-    ).toBe('alpha 用 pnpm\n');
-    expect(existsSync(join(harness.home, 'memory', 'projects', projectSlug('/repo/beta'), 'MEMORY.md'))).toBe(false);
+    expect(readFileSync(memoryFile(harness.home, alpha), 'utf-8')).toBe('alpha 用 pnpm\n');
+    expect(existsSync(memoryFile(harness.home, beta))).toBe(false);
   });
 
   it('serializes curator requests across hosts sharing the memory directory', async () => {
     let finish: (text: string) => void = () => {};
-    const common = {
+    const common: HarnessOptions = {
       settings: { autoCapture: 'true', minIntervalMinutes: '60' },
       messages: thread(['偏好中文', '好的']),
     };
@@ -440,9 +606,9 @@ describe('memory auto capture', () => {
     const review = harness.commands.execute('/memory review');
     await vi.waitFor(() => expect(harness.runs).toHaveLength(1));
     for (const dispose of [...harness.disposers].reverse()) dispose();
-    finish('{"operations":[{"target":"user","action":"add","content":"偏好中文"}]}');
+    finish('{"operations":[{"scope":"project","action":"add","content":"偏好中文"}]}');
     await review;
-    expect(existsSync(join(harness.home, 'memory', 'USER.md'))).toBe(false);
+    expect(existsSync(memoryFile(harness.home, harness.cwd))).toBe(false);
     expect(readdirSync(join(harness.home, 'memory', 'curator.lock.owners'))).toEqual([]);
   });
 
@@ -454,13 +620,11 @@ describe('memory auto capture', () => {
         throw new Error('network disconnected');
       },
     });
+    const statePath = join(harness.home, 'memory', 'state.json');
     await harness.emitTurnAfter();
-    await vi.waitFor(() => expect(existsSync(join(harness.home, 'memory', 'state.json'))).toBe(true));
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(statePath, 'utf-8')).lastError).toBe('network disconnected'));
     await harness.emitTurnAfter();
     expect(harness.runs).toHaveLength(1);
-    expect(JSON.parse(readFileSync(join(harness.home, 'memory', 'state.json'), 'utf-8')).lastError).toBe(
-      'network disconnected',
-    );
   });
 
   it('does not run the curator when auto capture is off', async () => {
@@ -471,30 +635,60 @@ describe('memory auto capture', () => {
     expect(harness.runs).toHaveLength(0);
   });
 
-  it('runs the curator after a completed turn and applies the operations', async () => {
+  it('applies each operation to the scope the curator chose', async () => {
+    const home = tempDir();
+    const repo = makeRepo('mica-code', 'git@git.example.com:team/mica-code.git');
+    ensureDomain(join(home, 'memory'), '租车', [repo]);
     const harness = createHarness({
+      home,
+      cwd: repo,
       settings: { autoCapture: 'true' },
       messages: thread(['以后测试都用 bun run test', '记住了。']),
       curatorOutput: JSON.stringify({
         operations: [
-          { target: 'user', action: 'add', content: '用户要求测试用 bun run test' },
-          { target: 'project', action: 'add', content: '测试命令：bun run test' },
+          { scope: 'project', action: 'add', content: '测试命令：bun run test' },
+          { scope: 'domain', domain: '租车', action: 'add', content: '灰度字段在 mis 的 API 里' },
         ],
       }),
     });
 
     await harness.emitTurnAfter();
 
-    await vi.waitFor(() => expect(harness.runs).toHaveLength(1));
+    await vi.waitFor(() => expect(harness.healthReports.at(-1)?.message).toContain('应用 2 条'));
+    expect(harness.runs).toHaveLength(1);
     expect(harness.runs[0]?.type).toBe('memory-curator');
     expect(harness.runs[0]?.prompt).toContain('以后测试都用 bun run test');
+    expect(harness.runs[0]?.prompt).toContain('可用的领域：租车');
+    expect(readFileSync(memoryFile(home, repo), 'utf-8')).toBe('测试命令：bun run test\n');
+    const domainText = readFileSync(join(home, 'memory', 'domains', '租车.md'), 'utf-8');
+    // 领域文件头部的 `match` 不能被正文写入吃掉。
+    expect(domainText).toContain('match:');
+    expect(domainText).toContain(repo);
+    expect(domainText).toContain('灰度字段在 mis 的 API 里');
+  });
+
+  it('rejects profile operations from the curator instead of writing the user profile', async () => {
+    const harness = createHarness({
+      settings: { autoCapture: 'true' },
+      messages: thread(['偏好中文', '好']),
+      curatorOutput: JSON.stringify({
+        operations: [{ scope: 'profile', action: 'add', content: '用户偏好中文' }],
+      }),
+    });
+
+    await harness.emitTurnAfter();
+
     await vi.waitFor(() =>
-      expect(readFileSync(join(harness.home, 'memory', 'USER.md'), 'utf-8')).toBe('用户要求测试用 bun run test\n'),
+      expect(harness.healthReports.at(-1)).toMatchObject({
+        level: 'warn',
+        message: expect.stringContaining('1 项未能写入'),
+      }),
     );
-    expect(
-      readFileSync(join(harness.home, 'memory', 'projects', projectSlug('/repo/mica'), 'MEMORY.md'), 'utf-8'),
-    ).toBe('测试命令：bun run test\n');
-    expect(harness.healthReports.at(-1)?.message).toContain('应用 2 条');
+    expect(harness.healthReports.at(-1)?.hint).toContain('profile');
+    expect(existsSync(profileFile(harness.home))).toBe(false);
+    const state = JSON.parse(readFileSync(join(harness.home, 'memory', 'state.json'), 'utf-8'));
+    expect(state.lastApplied).toBe(0);
+    expect(state.lastError).toContain('profile');
   });
 
   it('skips aborted turns', async () => {
@@ -550,7 +744,6 @@ describe('memory auto capture', () => {
     const harness = createHarness({
       settings: { autoCapture: 'true', minIntervalMinutes: '60' },
       messages: thread(['偏好中文', '好的']),
-      curatorOutput: JSON.stringify({ operations: [{ target: 'user', action: 'add', content: '偏好中文' }] }),
     });
 
     await harness.emitTurnAfter();
@@ -582,15 +775,13 @@ describe('memory auto capture', () => {
       curatorOutputs: [
         // 真实模型（codex 系网关）会这样回。
         '{"operations":[{"op":"add","path":"/repo/demo","value":"偏好中文"}]}',
-        '{"operations":[{"target":"user","action":"add","content":"用户偏好中文"}]}',
+        '{"operations":[{"scope":"project","action":"add","content":"用户偏好中文"}]}',
       ],
     });
 
     await harness.emitTurnAfter();
 
-    await vi.waitFor(() =>
-      expect(readFileSync(join(harness.home, 'memory', 'USER.md'), 'utf-8')).toBe('用户偏好中文\n'),
-    );
+    await vi.waitFor(() => expect(readFileSync(memoryFile(harness.home, harness.cwd), 'utf-8')).toBe('用户偏好中文\n'));
     expect(harness.runs).toHaveLength(2);
     expect(harness.runs[1]?.prompt).toContain('unsupported shape');
   });
@@ -618,12 +809,12 @@ describe('memory auto capture', () => {
       settings: { autoCapture: 'true' },
       messages: thread(['偏好中文', '好']),
       curatorStatus: 'partial',
-      curatorOutput: JSON.stringify({ operations: [{ target: 'user', action: 'add', content: '偏好中文' }] }),
+      curatorOutput: JSON.stringify({ operations: [{ scope: 'project', action: 'add', content: '偏好中文' }] }),
     });
 
     await harness.emitTurnAfter();
 
-    await vi.waitFor(() => expect(readFileSync(join(harness.home, 'memory', 'USER.md'), 'utf-8')).toBe('偏好中文\n'));
+    await vi.waitFor(() => expect(readFileSync(memoryFile(harness.home, harness.cwd), 'utf-8')).toBe('偏好中文\n'));
   });
 
   it('uses the configured provider instead of a subagent in direct mode', async () => {
@@ -638,7 +829,7 @@ describe('memory auto capture', () => {
       },
       messages: thread(['记住这条', '好']),
       curatorOutput: JSON.stringify({
-        operations: [{ target: 'user', action: 'add', content: '独立接口写入的一条' }],
+        operations: [{ scope: 'project', action: 'add', content: '独立接口写入的一条' }],
       }),
     });
 
@@ -654,18 +845,20 @@ describe('memory auto capture', () => {
       protocol: 'openai_chat_completions',
     });
     await vi.waitFor(() =>
-      expect(readFileSync(join(harness.home, 'memory', 'USER.md'), 'utf-8')).toBe('独立接口写入的一条\n'),
+      expect(readFileSync(memoryFile(harness.home, harness.cwd), 'utf-8')).toBe('独立接口写入的一条\n'),
     );
   });
 });
 
 describe('memory command', () => {
-  it('reports usage and the curator mode', async () => {
+  it('reports the layers that apply to this session and the curator mode', async () => {
     const harness = createHarness();
 
     await harness.commands.execute('/memory status');
 
-    expect(harness.shown.at(-1)).toContain('用户档案（user）');
+    expect(harness.shown.at(-1)).toContain('用户档案：0 条');
+    expect(harness.shown.at(-1)).toContain('项目记忆 · mica：0 条');
+    expect(harness.shown.at(-1)).toContain('仓库：mica');
     expect(harness.shown.at(-1)).toContain('自动整理：关闭');
     expect(harness.shown.at(-1)).toContain(join(harness.home, 'memory'));
   });
@@ -673,7 +866,7 @@ describe('memory command', () => {
   it('runs a manual review even when auto capture is off', async () => {
     const harness = createHarness({
       messages: thread(['用 pnpm', '好']),
-      curatorOutput: JSON.stringify({ operations: [{ target: 'project', action: 'add', content: '用 pnpm' }] }),
+      curatorOutput: JSON.stringify({ operations: [{ scope: 'project', action: 'add', content: '用 pnpm' }] }),
     });
 
     await harness.commands.execute('/memory review');
@@ -682,14 +875,30 @@ describe('memory command', () => {
     expect(harness.shown.at(-1)).toContain('记忆整理完成');
   });
 
-  it('lists entries and rejects unknown stores', async () => {
+  it('lists entries per layer and rejects unknown layers', async () => {
     const harness = createHarness();
-    await harness.tools[0]!.execute({ target: 'user', operations: [{ action: 'add', content: '偏好中文' }] });
+    await harness.tools[0]!.execute({ scope: 'profile', operations: [{ action: 'add', content: '偏好中文' }] });
 
-    await harness.commands.execute('/memory list user');
+    await harness.commands.execute('/memory list profile');
     expect(harness.shown.at(-1)).toContain('1. 偏好中文');
 
+    await harness.commands.execute('/memory list project');
+    expect(harness.shown.at(-1)).toContain('项目记忆 · mica 还没有任何记忆。');
+
     await harness.commands.execute('/memory list nope');
-    expect(harness.shown.at(-1)).toContain('未知的记忆块');
+    expect(harness.shown.at(-1)).toContain('未知的记忆层');
+  });
+
+  it('creates a domain from the command and marks it as covering this session', async () => {
+    const harness = createHarness();
+
+    await harness.commands.execute('/memory domain new 租车');
+    expect(harness.shown.at(-1)).toContain('已创建领域「租车」');
+
+    await harness.commands.execute('/memory domain list');
+    expect(harness.shown.at(-1)).toContain('● 租车');
+
+    await harness.commands.execute('/memory list domain 租车');
+    expect(harness.shown.at(-1)).toContain('领域记忆 · 租车 还没有任何记忆。');
   });
 });

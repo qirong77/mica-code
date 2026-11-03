@@ -2,8 +2,8 @@
   "id": "memory",
   "name": "Memory",
   "icon": "brain",
-  "version": "1.0.0",
-  "description": "跨会话记忆：用户档案、环境经验与项目约定三块，注入系统提示并通过 memory 工具维护；可选用宿主子代理或独立接口在每轮结束后自动整理。",
+  "version": "2.0.0",
+  "description": "跨会话记忆：按适用范围分三层（用户档案 / 领域 / 项目），只把当前会话适用的部分注入系统提示；可选用宿主子代理或独立接口在每轮结束后整理。",
   "author": "Mica Code",
   "main": "index.ts",
   "assets": ["README.md"],
@@ -65,37 +65,37 @@
       "description": "每次整理最多回看最近多少条用户 / 助手消息。"
     },
     {
-      "key": "userCharLimit",
-      "label": "用户档案预算",
+      "key": "profileCharLimit",
+      "label": "用户档案注入预算",
       "type": "number",
-      "default": "1375",
+      "default": "1200",
       "min": 200,
       "max": 20000,
       "step": 25,
       "unit": "字符",
-      "description": "user 记忆的字符上限，约 500 tokens。"
-    },
-    {
-      "key": "memoryCharLimit",
-      "label": "记忆预算",
-      "type": "number",
-      "default": "2200",
-      "min": 200,
-      "max": 20000,
-      "step": 25,
-      "unit": "字符",
-      "description": "memory 记忆的字符上限，约 800 tokens。"
+      "description": "用户档案（profile）每次会话都会注入；超预算时保留「!」标记的条目与较新的条目。约 400 tokens。"
     },
     {
       "key": "projectCharLimit",
-      "label": "项目记忆预算",
+      "label": "项目记忆注入预算",
       "type": "number",
-      "default": "2200",
+      "default": "2500",
       "min": 200,
       "max": 20000,
       "step": 25,
       "unit": "字符",
-      "description": "当前工作区记忆的字符上限。"
+      "description": "当前仓库的记忆条数上限（按字符算）。只在这个仓库里开会话时注入。"
+    },
+    {
+      "key": "domainCharLimit",
+      "label": "领域记忆注入预算",
+      "type": "number",
+      "default": "3000",
+      "min": 200,
+      "max": 20000,
+      "step": 25,
+      "unit": "字符",
+      "description": "命中的领域记忆注入上限；领域覆盖一组同域仓库（如 sass / mis / zuche-*）。"
     }
   ],
   "mica": {
@@ -103,7 +103,7 @@
   },
   "llm": {
     "label": "整理模型",
-    "description": "「整理方式 = 独立接口」时用它把对话收敛成记忆操作；子代理方式复用主对话的模型。",
+    "description": "「整理方式 = 独立接口」时用它把对话收敛成记忆操作；子代理方式复用主对话的模型。整理不写用户档案。",
     "modelPlaceholder": "gpt-4.1-mini"
   }
 }

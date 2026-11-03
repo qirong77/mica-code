@@ -1,12 +1,13 @@
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { Disposable } from '@packages/mica-common/index.js';
-import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
+import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { pluginLogPath } from '@packages/mica-plugin/index.js';
 import {
   CURATOR_SYSTEM_PROMPT,
   applyCuratorOperations,
   buildCuratorUserPrompt,
+  parseCuratorNotes,
   parseCuratorOutput,
   type CuratorConversationMessage,
   type CuratorOperation,
@@ -16,22 +17,23 @@ import { requestCuratorCompletion } from './providers.js';
 import { MemorySnapshotCache, formatMemorySection } from './section.js';
 import { curatorReady, describeCurator, settingsFromValues, type MemorySettings } from './settings.js';
 import { MEMORY_DIR_NAME, MemoryRepository } from './store.js';
+import { contextScopes, resolveMemoryContext, scopeKey, type MemoryContext, type MemoryScope } from './scope.js';
 import { registerMemoryCommand, type MemoryReviewOutcome } from './commands.js';
 
 /**
  * 记忆插件。
  *
- * 三层记忆，按「谁的事实、活多久」切分，共用同一套存储与工具：
+ * 设计只有一句话：**先问「这条事实在哪些会话里还成立」，再决定存在哪、什么时候注入。**
  *
- * - `user`：用户是谁、偏好如何（跨项目、跨会话）；
- * - `memory`：环境事实、工具坑、经验（跨项目）；
- * - `project`：当前工作区的约定、命令、决策（按工作目录归档）。
+ * 三个作用域从宽到窄——`profile`（用户本人）、`domain`（一组同域仓库）、
+ * `project`（一个仓库）。注入只给当前会话适用的那些：在 mica-code 里改桌面端时，
+ * 租车领域的记忆一条都不出现；会话在 `~` 下打开时只有 profile。
  *
  * 注入、写入、整理各自独立：
  * - **注入**：`ctx.prompt.section()`，会话内冻结，避免记忆变化打掉 prompt cache；
- * - **写入**：`memory` 工具，模型在对话中主动保存，预算写死、超限必须先整理；
- * - **整理**：turn 结束后可选跑一次（宿主子代理或独立 provider），把一轮对话收敛成
- *   几条操作。默认开启，以全局间隔控制模型调用成本。
+ * - **写入**：`memory` 工具，默认最窄作用域，写成规则的东西进不来；
+ * - **整理**：turn 结束后可选跑一次（宿主子代理或独立 provider），用三道测试过滤，
+ *   并且不允许写 profile——全局画像只由用户在对话里明确要求时写入。
  */
 
 const PLUGIN_ID = 'memory';
@@ -40,269 +42,262 @@ const PROMPT_SECTION_ORDER = 900;
 /**
  * 整理的最小输入：少于这么多条用户 / 助手消息就直接跳过。
  *
- * 2 条（一问一答）也会触发一次模型请求，而「回复一句 ok」这种轮次没有任何值得沉淀的
- * 内容——纯浪费。真实使用里一次有信息量的会话至少有四五个来回，取 8 条（约 4 轮）
- * 作为门槛，短对话不花钱，长对话照常整理。
+ * 「回复一句 ok」这种轮次没有可沉淀的内容，不该为它发一次模型请求。真实使用里
+ * 一次有信息量的会话至少有四五个来回，取 8 条（约 4 轮）作为门槛。
  */
 const MIN_CONVERSATION_MESSAGES = 8;
 
-const plugin: MicaPlugin = {
-  id: PLUGIN_ID,
-  name: 'Memory',
-  version: '1.0.0',
-  priority: 150,
-  required: false,
+export default function setupMemory(ctx: PluginContext): void {
+  const tools = ctx.tools;
+  const prompt = ctx.prompt;
+  if (!tools || !prompt) throw new Error('memory 需要宿主提供 tools 与 prompt 能力');
 
-  setup(ctx: PluginContext) {
-    const tools = ctx.tools;
-    const prompt = ctx.prompt;
-    if (!tools || !prompt) throw new Error('memory 需要宿主提供 tools 与 prompt 能力');
+  const repository = new MemoryRepository({
+    rootDir: join(ctx.paths?.config ?? resolveMicaHome(), MEMORY_DIR_NAME),
+    resolveBudgets: () => readSettings(ctx).budgets,
+  });
 
-    const repository = new MemoryRepository({
-      rootDir: join(ctx.paths?.config ?? resolveMicaHome(), MEMORY_DIR_NAME),
-      resolveBudgets: () => readSettings(ctx).budgets,
-      // 会话可以 /cd：项目记忆跟着当前工作目录走，而不是进程启动时的目录。
-      resolveProjectDir: () => ctx.session?.describe()?.cwd,
-    });
+  /**
+   * 作用域每次现场求值：会话可以 `/cd`，项目与领域应该跟着走。
+   * 仓库身份在 `repo.ts` 里有进程内缓存，这里不做第二层。
+   */
+  const contextFor = (owner?: unknown): MemoryContext => {
+    const cwd = ctx.session?.describe(owner)?.cwd ?? null;
+    return resolveMemoryContext(repository.root, cwd);
+  };
 
-    const snapshots = new MemorySnapshotCache();
-    // 键只按会话：项目目录变化不能换键，否则整段缓存（含 user / memory）都会被重读，
-    // 冻结就失效了。`/cd` 的处理在缓存内部——只换掉 project 那一块。
-    const sessionKey = () => ctx.session?.describe()?.id ?? 'no-session';
+  const snapshots = new MemorySnapshotCache();
+  const sessionKey = () => ctx.session?.describe()?.id ?? 'no-session';
+  /**
+   * 缓存签名：作用域变了才重读。只按会话缓存会在 `/cd` 之后继续注入上一个仓库的记忆；
+   * 每轮都重读则会让记忆段落每轮抖动，打掉它前面所有内容的 prompt cache。
+   */
+  const signatureOf = (context: MemoryContext) =>
+    [context.repo?.slug ?? 'no-repo', ...context.domains.map((domain) => domain.name).sort()].join('|');
 
-    // primaryAgentOnly：记忆属于这条会话/用户，子代理写它会让归属变模糊
-    // （临时发现未必长期成立），与 session-notes 同一取舍。
-    let disposed = false;
-    let active: AbortController | null = null;
-    let tool: Disposable | undefined;
-    const syncEnabled = () => {
-      const enabled = !disposed && readSettings(ctx).enabled;
-      if (enabled && !tool) {
-        tool = tools.register(new MemoryTool(repository, () => !disposed && readSettings(ctx).enabled), {
-          icon: '🧠',
-          primaryAgentOnly: true,
-        });
-      } else if (!enabled) {
-        tool?.dispose();
-        tool = undefined;
-        active?.abort();
-      }
-      return enabled;
-    };
-    syncEnabled();
-    ctx.onDispose(() => {
-      disposed = true;
-      active?.abort();
+  // primaryAgentOnly：记忆属于这条会话/用户，子代理写它会让归属变模糊
+  // （临时发现未必长期成立），与 session-notes 同一取舍。
+  let disposed = false;
+  let active: AbortController | null = null;
+  let tool: Disposable | undefined;
+  const syncEnabled = () => {
+    const enabled = !disposed && readSettings(ctx).enabled;
+    if (enabled && !tool) {
+      tool = tools.register(new MemoryTool(repository, contextFor, () => !disposed && readSettings(ctx).enabled), {
+        icon: '🧠',
+        primaryAgentOnly: true,
+      });
+    } else if (!enabled) {
       tool?.dispose();
-    });
+      tool = undefined;
+      active?.abort();
+    }
+    return enabled;
+  };
+  syncEnabled();
+  ctx.onDispose(() => {
+    disposed = true;
+    active?.abort();
+    tool?.dispose();
+  });
 
-    // order 900：记忆内容在会话内是冻结的，但仍然排在会话笔记（1000）之前，让最容易
-    // 变化的那一段保持在最后。
-    const section = prompt.section({
-      id: 'memory',
-      order: PROMPT_SECTION_ORDER,
-      render: () => {
-        if (!syncEnabled()) return '';
-        return formatMemorySection(
-          snapshots
-            .get(sessionKey(), repository.projectDir(), {
-              loadAll: () => repository.snapshots(),
-              loadTarget: (target) => repository.snapshot(target),
-            })
-            .map((snapshot) => ({ ...snapshot, limit: repository.limitFor(snapshot.target) })),
-        );
-      },
-    });
-    ctx.onDispose(() => section.dispose());
+  // order 900：记忆内容在会话内是冻结的，但仍然排在会话笔记（1000）之前，让最容易
+  // 变化的那一段保持在最后。
+  const section = prompt.section({
+    id: 'memory',
+    order: PROMPT_SECTION_ORDER,
+    render: () => {
+      if (!syncEnabled()) return '';
+      const context = contextFor();
+      const scopes = contextScopes(context);
+      return formatMemorySection(
+        snapshots.get(sessionKey(), signatureOf(context), { load: (list) => repository.snapshots(list) }, scopes),
+      );
+    },
+  });
+  ctx.onDispose(() => section.dispose());
 
-    const curatorType = ctx.subagents?.registerType({
-      name: CURATOR_SUBAGENT_TYPE,
-      description:
-        'Consolidate a finished session into memory operations. Read-only, single turn, no context inheritance.',
-      systemPrompt: CURATOR_SYSTEM_PROMPT,
-      // 回答结束后的自动整理不是用户发起的委派：它照常记账，但不该让子代理 dock 闪一下。
-      activity: 'maintenance',
-      allowedTools: [],
-      writeMode: 'none',
-      contextModeDefault: 'none',
-      effort: false,
-      maxTurns: 1,
-    });
-    if (curatorType) ctx.onDispose(() => curatorType.dispose());
+  const curatorType = ctx.subagents?.registerType({
+    name: CURATOR_SUBAGENT_TYPE,
+    description:
+      'Extract durable cross-session facts from a finished session, choosing the narrowest memory scope. Read-only, single turn, no context inheritance.',
+    systemPrompt: CURATOR_SYSTEM_PROMPT,
+    // 回答结束后的自动整理不是用户发起的委派：它照常记账，但不该让子代理 dock 闪一下。
+    activity: 'maintenance',
+    allowedTools: [],
+    writeMode: 'none',
+    contextModeDefault: 'none',
+    effort: false,
+    maxTurns: 1,
+  });
+  if (curatorType) ctx.onDispose(() => curatorType.dispose());
 
-    let running = false;
+  let running = false;
 
-    const runCurator = async (options: { manual: boolean; owner?: unknown }): Promise<MemoryReviewOutcome> => {
-      if (running) return { ok: false, message: '记忆整理正在进行中，稍后再试。' };
-      running = true;
-      const controller = new AbortController();
-      active = controller;
-      let release: (() => void) | null = null;
-      let attempted: MemorySettings | null = null;
-      try {
-        const settings = readSettings(ctx, options.owner);
-        if (disposed || !settings.enabled) return { ok: false, message: '记忆已关闭。' };
-        // 一次性运行（`mica exec`）没有「下一次会话」：整理只会多花一次模型调用，
-        // 而且写下的记忆这次也用不上。
-        if (ctx.agent?.mode === 'one-shot') {
-          return { ok: true, message: '一次性运行不整理记忆。' };
-        }
-        if (!options.manual && !settings.autoCapture) {
-          return { ok: true, message: '自动整理未开启。' };
-        }
+  const runCurator = async (options: { manual: boolean; owner?: unknown }): Promise<MemoryReviewOutcome> => {
+    if (running) return { ok: false, message: '记忆整理正在进行中，稍后再试。' };
+    running = true;
+    const controller = new AbortController();
+    active = controller;
+    let release: (() => void) | null = null;
+    let attempted: MemorySettings | null = null;
+    try {
+      const settings = readSettings(ctx, options.owner);
+      if (disposed || !settings.enabled) return { ok: false, message: '记忆已关闭。' };
+      // 一次性运行（`mica exec`）没有「下一次会话」：整理只会多花一次模型调用，
+      // 而且写下的记忆这次也用不上。
+      if (ctx.agent?.mode === 'one-shot') {
+        return { ok: true, message: '一次性运行不整理记忆。' };
+      }
+      if (!options.manual && !settings.autoCapture) {
+        return { ok: true, message: '自动整理未开启。' };
+      }
 
-        release = repository.acquireCuratorLock();
-        if (!release) return { ok: false, message: '其他会话正在整理记忆，稍后再试。' };
-        const state = repository.readState();
-        if (!options.manual && withinInterval(state.lastRunAt, settings.minIntervalMinutes)) {
-          return { ok: true, message: '距上次整理还不到间隔，跳过。' };
-        }
+      release = repository.acquireCuratorLock();
+      if (!release) return { ok: false, message: '其他会话正在整理记忆，稍后再试。' };
+      const state = repository.readState();
+      if (!options.manual && withinInterval(state.lastRunAt, settings.minIntervalMinutes)) {
+        return { ok: true, message: '距上次整理还不到间隔，跳过。' };
+      }
 
-        const messages = collectConversation(
-          ctx,
-          options.owner,
-          Math.max(MIN_CONVERSATION_MESSAGES, settings.maxMessages),
-        );
-        if (messages.length < MIN_CONVERSATION_MESSAGES) {
-          return { ok: true, message: '对话太短，跳过整理。' };
-        }
+      const messages = collectConversation(
+        ctx,
+        options.owner,
+        Math.max(MIN_CONVERSATION_MESSAGES, settings.maxMessages),
+      );
+      if (messages.length < MIN_CONVERSATION_MESSAGES) {
+        return { ok: true, message: '对话太短，跳过整理。' };
+      }
 
-        const source = repository.forProject(
-          ctx.session?.describe(options.owner)?.cwd ?? null,
-          () => readSettings(ctx, options.owner).budgets,
-        );
-        const ensureActive = () => {
-          const current = readSettings(ctx, options.owner);
-          if (disposed || !current.enabled || (!options.manual && !current.autoCapture)) controller.abort();
-          controller.signal.throwIfAborted();
-        };
-        // 发起付费请求前保留节流基线；取消、进程退出也不能让下次自动整理立即重发。
+      // 绑定发起时的上下文：等待模型期间 `/cd` 不能把结果写到另一个仓库。
+      const source = contextFor(options.owner);
+      const scopes = contextScopes(source);
+      const ensureActive = () => {
+        const current = readSettings(ctx, options.owner);
+        if (disposed || !current.enabled || (!options.manual && !current.autoCapture)) controller.abort();
+        controller.signal.throwIfAborted();
+      };
+      // 发起付费请求前保留节流基线；取消、进程退出也不能让下次自动整理立即重发。
+      repository.writeState({
+        lastRunAt: new Date().toISOString(),
+        lastMode: settings.curatorMode,
+        lastApplied: 0,
+        lastError: null,
+      });
+      attempted = settings;
+      const requested = await requestOperations(
+        ctx,
+        settings,
+        source,
+        repository.snapshots(scopes),
+        messages.slice(-settings.maxMessages),
+        { owner: options.owner, signal: controller.signal, ensureActive },
+      );
+      ensureActive();
+      if (!requested.ok) {
         repository.writeState({
           lastRunAt: new Date().toISOString(),
           lastMode: settings.curatorMode,
           lastApplied: 0,
-          lastError: null,
+          lastError: requested.error,
         });
-        attempted = settings;
-        const requested = await requestOperations(
-          ctx,
-          settings,
-          source.snapshots(),
-          messages.slice(-settings.maxMessages),
-          {
-            owner: options.owner,
-            signal: controller.signal,
-            ensureActive,
-          },
-        );
-        ensureActive();
-        if (!requested.ok) {
-          repository.writeState({
-            lastRunAt: new Date().toISOString(),
-            lastMode: settings.curatorMode,
-            lastApplied: 0,
-            lastError: requested.error,
-          });
-          ctx.health.report({
-            level: 'warn',
-            message: `记忆整理失败：${requested.error}`,
-            hint:
-              settings.curatorMode === 'direct'
-                ? '检查插件设置里的整理接口地址 / Key / 模型是否可用。'
-                : '检查当前模型配置是否可用；也可以改用独立 provider。',
-          });
-          return { ok: false, message: `记忆整理失败：${requested.error}` };
-        }
-
-        const outcome = applyCuratorOperations(source, requested.operations);
-        const error = outcome.failures.map((failure) => `${failure.target}: ${failure.message}`).join('；');
-        repository.writeState({
-          lastRunAt: new Date().toISOString(),
-          lastMode: settings.curatorMode,
-          lastApplied: outcome.applied,
-          lastError: error || null,
-        });
-
-        if (error) {
-          ctx.health.report({
-            level: 'warn',
-            message: `记忆整理有 ${outcome.failures.length} 块未能写入`,
-            hint: `${error}（通常是记忆写满或 old_text 对不上；下次整理会重新尝试）`,
-          });
-        } else if (outcome.applied > 0) {
-          ctx.health.report({
-            level: 'ok',
-            message: `记忆已更新：应用 ${outcome.applied} 条操作`,
-          });
-        }
-
-        const summary =
-          outcome.applied > 0
-            ? `记忆整理完成：应用 ${outcome.applied} 条操作${requested.skipped > 0 ? `（忽略 ${requested.skipped} 条非法操作）` : ''}。`
-            : '记忆整理完成：这次没有需要保存的内容。';
-        const detail = error ? `\n未能写入：${error}` : '';
-        return { ok: !error, message: `${summary}${detail}` };
-      } catch (error) {
-        if (controller.signal.aborted) return { ok: true, message: '记忆整理已取消。' };
-        const message = error instanceof Error ? error.message : String(error);
-        if (attempted) {
-          try {
-            repository.writeState({
-              lastRunAt: new Date().toISOString(),
-              lastMode: attempted.curatorMode,
-              lastApplied: 0,
-              lastError: message,
-            });
-          } catch (stateError) {
-            ctx.logger.warn('memory:state-write-failed', { error: String(stateError) });
-          }
-        }
-        ctx.logger.warn('memory:curator-failed', { error: message });
         ctx.health.report({
           level: 'warn',
-          message: `记忆整理出错：${message}`,
-          hint: `查看插件日志（${pluginLogPath(ctx.pluginId)}）。`,
+          message: `记忆整理失败：${requested.error}`,
+          hint:
+            settings.curatorMode === 'direct'
+              ? '检查插件设置里的整理接口地址 / Key / 模型是否可用。'
+              : '检查当前模型配置是否可用；也可以改用独立 provider。',
         });
-        return { ok: false, message: `记忆整理出错：${message}` };
-      } finally {
-        release?.();
-        active = null;
-        running = false;
+        return { ok: false, message: `记忆整理失败：${requested.error}` };
       }
-    };
 
-    const hook = ctx.hooks.on(
-      'turn:after',
-      (event) => {
-        const payload = event as { outcome?: string; owner?: unknown } | null;
-        if (!payload || payload.outcome !== 'completed') return;
-        if (disposed) return;
-        const settings = readSettings(ctx, payload.owner);
-        if (!settings.enabled) return;
-        if (!settings.autoCapture) return;
-        // 不 await：整理要发一次模型请求，不能把 turn:after 后面的队列启动、
-        // 下一轮输入都拖住。`running` 标志保证同一时间只有一个整理在跑。
-        void runCurator({ manual: false, owner: payload.owner });
-      },
-      { pluginId: PLUGIN_ID },
-    );
-    ctx.onDispose(() => hook.dispose());
+      const outcome = applyCuratorOperations(repository, scopeResolver(source), requested.operations);
+      const error = outcome.failures.map((failure) => `${failure.scope}: ${failure.message}`).join('；');
+      repository.writeState({
+        lastRunAt: new Date().toISOString(),
+        lastMode: settings.curatorMode,
+        lastApplied: outcome.applied,
+        lastError: error || null,
+      });
 
-    const command = registerMemoryCommand(ctx, {
-      repository,
-      refreshPrompt: () => snapshots.invalidate(sessionKey()),
-      runReview: () => runCurator({ manual: true }),
-      describeRuntime: () => describeRuntime(ctx, repository),
-    });
-    ctx.onDispose(() => command.dispose());
+      if (error) {
+        ctx.health.report({
+          level: 'warn',
+          message: `记忆整理有 ${outcome.failures.length} 项未能写入`,
+          hint: `${error}（通常是 old_text 对不上或整层超出安全上限；下次整理会重新尝试）`,
+        });
+      } else if (outcome.applied > 0) {
+        ctx.health.report({ level: 'ok', message: `记忆已更新：应用 ${outcome.applied} 条操作` });
+      }
 
-    reportStartupHealth(ctx, repository);
-    ctx.logger.info('memory:ready', { root: repository.root });
-  },
-};
+      const summary =
+        outcome.applied > 0
+          ? `记忆整理完成：应用 ${outcome.applied} 条操作${requested.skipped > 0 ? `（忽略 ${requested.skipped} 条非法操作）` : ''}。`
+          : '记忆整理完成：这次没有值得保存的内容。';
+      const detail = error ? `\n未能写入：${error}` : '';
+      return { ok: !error, message: `${summary}${detail}` };
+    } catch (error) {
+      if (controller.signal.aborted) return { ok: true, message: '记忆整理已取消。' };
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempted) {
+        try {
+          repository.writeState({
+            lastRunAt: new Date().toISOString(),
+            lastMode: attempted.curatorMode,
+            lastApplied: 0,
+            lastError: message,
+          });
+        } catch (stateError) {
+          ctx.logger.warn('memory:state-write-failed', { error: String(stateError) });
+        }
+      }
+      ctx.logger.warn('memory:curator-failed', { error: message });
+      ctx.health.report({
+        level: 'warn',
+        message: `记忆整理出错：${message}`,
+        hint: `查看插件日志（${pluginLogPath(ctx.pluginId)}）。`,
+      });
+      return { ok: false, message: `记忆整理出错：${message}` };
+    } finally {
+      release?.();
+      active = null;
+      running = false;
+    }
+  };
+
+  const hook = ctx.hooks.on(
+    'turn:after',
+    (event) => {
+      const payload = event as { outcome?: string; owner?: unknown } | null;
+      if (!payload || payload.outcome !== 'completed') return;
+      if (disposed) return;
+      const settings = readSettings(ctx, payload.owner);
+      if (!settings.enabled) return;
+      if (!settings.autoCapture) return;
+      // 不 await：整理要发一次模型请求，不能把 turn:after 后面的队列启动、
+      // 下一轮输入都拖住。`running` 标志保证同一时间只有一个整理在跑。
+      void runCurator({ manual: false, owner: payload.owner });
+    },
+    { pluginId: PLUGIN_ID },
+  );
+  ctx.onDispose(() => hook.dispose());
+
+  const command = registerMemoryCommand(ctx, {
+    repository,
+    context: () => contextFor(),
+    refreshPrompt: () => snapshots.invalidate(sessionKey()),
+    runReview: () => runCurator({ manual: true }),
+    describeRuntime: () => describeRuntime(ctx, repository),
+  });
+  ctx.onDispose(() => command.dispose());
+
+  reportStartupHealth(ctx, repository, contextFor);
+  ctx.logger.info('memory:ready', { root: repository.root });
+}
 
 type CuratorRequestOutcome =
-  | { ok: true; operations: CuratorOperation[]; skipped: number }
+  | { ok: true; operations: CuratorOperation[]; skipped: number; notes: string | null }
   | { ok: false; error: string };
 
 /**
@@ -310,21 +305,22 @@ type CuratorRequestOutcome =
  *
  * 解析失败时再问一次，而不是直接放弃：真实模型偶尔会退回自己熟悉的另一套 schema
  * （Codex 的 `op` / `path` / `value`），而记忆整理本身没有第二次机会——下一次整理
- * 要等间隔到期。重试只带一句「上一条输出不可用」和严格的 schema，多花的这一次调用
- * 远小于丢掉一整轮纠正的代价。
+ * 要等间隔到期。重试只带一句「上一条输出不可用」和严格的 schema。
  */
 async function requestOperations(
   ctx: PluginContext,
   settings: MemorySettings,
+  context: MemoryContext,
   snapshotList: ReturnType<MemoryRepository['snapshots']>,
   messages: CuratorConversationMessage[],
   options: { owner?: unknown; signal: AbortSignal; ensureActive(): void },
 ): Promise<CuratorRequestOutcome> {
-  const user = buildCuratorUserPrompt({ snapshots: snapshotList, messages });
+  const user = buildCuratorUserPrompt({ snapshots: snapshotList, context: describeContext(context), messages });
   options.ensureActive();
   const first = await runCuratorPrompt(ctx, settings, user, options);
   options.ensureActive();
-  if (first.ok || !first.retryable) return first;
+  if (first.ok) return logNotes(ctx, first);
+  if (!first.retryable) return { ok: false, error: first.error };
 
   ctx.logger.warn('memory:curator-retry', { error: first.error });
   const correction = [
@@ -333,15 +329,24 @@ async function requestOperations(
     '<correction>',
     `上一条回复无法使用：${first.error}`,
     first.raw ? `收到的内容：${first.raw.slice(0, 500)}` : '',
-    '只输出一个 JSON 对象，字段名只能是 target / action / old_text / content。',
+    '只输出一个 JSON 对象，字段名只能是 scope / domain / action / old_text / content。scope 只能是 project 或 domain。',
     '</correction>',
   ].join('\n');
   const second = await runCuratorPrompt(ctx, settings, correction, options);
-  return second.ok ? second : { ok: false, error: second.error };
+  return second.ok ? logNotes(ctx, second) : { ok: false, error: second.error };
+}
+
+/** `notes` 是「没写进去、但该让用户知道」的一句话（多半是「这属于你的画像，要我记住吗」），落进插件日志，不进对话。 */
+function logNotes(
+  ctx: PluginContext,
+  outcome: { ok: true; operations: CuratorOperation[]; skipped: number; notes: string | null },
+): CuratorRequestOutcome {
+  if (outcome.notes) ctx.logger.info('memory:curator-notes', { notes: outcome.notes });
+  return outcome;
 }
 
 type CuratorAttempt =
-  | (CuratorRequestOutcome & { ok: true })
+  | { ok: true; operations: CuratorOperation[]; skipped: number; notes: string | null }
   | { ok: false; error: string; retryable: boolean; raw?: string };
 
 async function runCuratorPrompt(
@@ -352,7 +357,9 @@ async function runCuratorPrompt(
 ): Promise<CuratorAttempt> {
   const settle = (text: string): CuratorAttempt => {
     const parsed = parseCuratorOutput(text);
-    return parsed.ok ? parsed : { ok: false, error: parsed.error, retryable: true, raw: parsed.raw };
+    return parsed.ok
+      ? { ...parsed, notes: parseCuratorNotes(text) }
+      : { ok: false, error: parsed.error, retryable: true, raw: parsed.raw };
   };
 
   if (settings.curatorMode === 'direct') {
@@ -403,6 +410,59 @@ async function runCuratorPrompt(
     };
   }
   return settle(result.output);
+}
+
+/**
+ * 把整理器的 `project|domain` 落到具体作用域。
+ *
+ * 严格：领域必须已存在且覆盖当前目录。整理器不能凭空建领域，否则「领域」会退化成
+ * 换了名字的全局记忆——那正是这次重写要解决的问题。
+ */
+function scopeResolver(context: MemoryContext) {
+  return (operation: CuratorOperation): { ok: true; scope: MemoryScope } | { ok: false; error: string } => {
+    if (operation.scope === 'profile') {
+      return { ok: false, error: '自动整理不写用户档案（profile 只由用户在对话里明确要求时写入）' };
+    }
+    if (operation.scope === 'project') {
+      if (!context.project) return { ok: false, error: '当前目录不在任何仓库里，无法写项目记忆' };
+      return { ok: true, scope: context.project };
+    }
+    const name = operation.domain?.trim();
+    if (!name) {
+      return {
+        ok: false,
+        error: `domain 类操作缺少 domain 字段；可用：${context.domains.map((domain) => domain.name).join(', ') || '（无）'}`,
+      };
+    }
+    const domain = context.domains.find((candidate) => candidate.name === name);
+    if (!domain) {
+      return {
+        ok: false,
+        error: `领域「${name}」不存在或不覆盖当前目录；可用：${context.domains.map((candidate) => candidate.name).join(', ') || '（无）'}`,
+      };
+    }
+    return { ok: true, scope: { kind: 'domain', domain } };
+  };
+}
+
+function describeContext(context: MemoryContext): string {
+  const lines: string[] = [];
+  lines.push(
+    context.repo
+      ? `当前仓库：${context.repo.name}（${context.repo.remote ?? context.repo.root}）`
+      : '当前目录不在任何 git 仓库里：只能写入已定义的领域，或什么都不写',
+  );
+  lines.push(context.cwd ? `工作目录：${context.cwd}` : '工作目录：未知');
+  if (context.domains.length > 0) {
+    lines.push(`命中当前目录的领域：${context.domains.map((domain) => domain.name).join(', ')}`);
+  } else if (context.knownDomains.length > 0) {
+    lines.push(
+      `已定义但未命中当前目录的领域：${context.knownDomains.map((domain) => domain.name).join(', ')}（不要往里写）`,
+    );
+  } else {
+    lines.push('没有定义任何领域');
+  }
+  return lines.join('\n');
 }
 
 /** 取最近若干条用户 / 助手消息；工具、notice、图片都不进整理输入。 */
@@ -456,7 +516,7 @@ function describeRuntime(ctx: PluginContext, repository: MemoryRepository): stri
   return lines.join('\n');
 }
 
-function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository): void {
+function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository, contextFor: () => MemoryContext): void {
   if (!readSettings(ctx).enabled) {
     ctx.health.report({ level: 'ok', message: '记忆已关闭：插件设置里的「启用记忆」关掉了' });
     return;
@@ -472,9 +532,12 @@ function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository): 
   }
 
   const settings = readSettings(ctx);
-  const snapshots = repository.snapshots();
+  const context = contextFor();
+  const snapshots = repository.snapshots(contextScopes(context));
   const total = snapshots.reduce((sum, snapshot) => sum + snapshot.entries.length, 0);
-  const usage = snapshots.map((snapshot) => `${snapshot.target} ${snapshot.chars}/${snapshot.limit}`).join(' · ');
+  const usage = snapshots
+    .map((snapshot) => `${scopeKey(snapshot.scope)} ${snapshot.chars}/${snapshot.budget}`)
+    .join(' · ');
 
   if (settings.autoCapture && settings.curatorMode === 'direct' && !curatorReady(ctx.llm)) {
     ctx.health.report({
@@ -487,17 +550,16 @@ function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository): 
 
   ctx.health.report({
     level: 'ok',
-    message: `记忆已就绪：${total} 条（${usage}）`,
+    message: `记忆已就绪：本会话注入 ${snapshots.length} 层 · ${total} 条（${usage}）`,
     hint: describeCurator(settings, ctx.llm),
   });
 }
 
+/**
+ * 生效设置按 owner 取：轮次结束触发的整理属于**发起它的那条会话**，
+ * 期间用户切到别的会话不能改变这次整理用的模型或阈值。
+ */
 function readSettings(ctx: PluginContext, owner?: unknown): MemorySettings {
-  return settingsFromValues(ctx.sessionSettings?.get(owner) ?? ctx.settings.get());
+  const values = (ctx.sessionSettings?.get(owner) ?? ctx.settings.get()) as Record<string, string | undefined>;
+  return settingsFromValues(values);
 }
-
-export default function setup(ctx: PluginContext): void {
-  plugin.setup(ctx);
-}
-
-export const MEMORY_PLUGIN_ID = PLUGIN_ID;

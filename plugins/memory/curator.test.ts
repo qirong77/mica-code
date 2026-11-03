@@ -1,235 +1,309 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  CURATOR_SYSTEM_PROMPT,
   MAX_CONVERSATION_CHARS,
   applyCuratorOperations,
   buildCuratorUserPrompt,
   formatConversation,
+  parseCuratorNotes,
   parseCuratorOutput,
+  type CuratorOperation,
 } from './curator.js';
-import type { MemoryApplyResult, MemoryOperation, MemoryStoreSnapshot, MemoryTarget } from './store.js';
+import type { MemoryScope } from './scope.js';
+import type { RepoIdentity } from './repo.js';
+import type { DomainDefinition } from './domains.js';
+import type { MemoryApplyResult, MemoryOperation } from './store.js';
 
-function snapshot(overrides: Partial<MemoryStoreSnapshot> = {}): MemoryStoreSnapshot {
+const repo: RepoIdentity = {
+  slug: 'mica-code-abcdef12',
+  name: 'mica-code',
+  root: '/repo/mica-code',
+  key: 'git.example.com/team/mica-code',
+  remote: 'git.example.com/team/mica-code',
+  source: 'git',
+};
+const projectScope: MemoryScope = { kind: 'project', repo };
+const zuche: DomainDefinition = {
+  name: '租车',
+  path: '/memory/domains/租车.md',
+  match: ['/repo/sass'],
+  description: null,
+};
+const domainScope: MemoryScope = { kind: 'domain', domain: zuche };
+
+function snapshot(scope: MemoryScope, entries: string[] = []) {
   return {
-    target: 'memory',
-    path: '/home/.mica/memory/MEMORY.md',
-    label: 'memory/MEMORY.md',
-    entries: ['项目用 bun 跑测试'],
-    chars: 8,
-    limit: 2200,
-    projectDir: null,
-    ...overrides,
+    scope,
+    key: 'k',
+    title:
+      scope.kind === 'profile' ? '用户档案' : scope.kind === 'project' ? '项目记忆 · mica-code' : '领域记忆 · 租车',
+    path: '/tmp/x.md',
+    label: 'x.md',
+    entries,
+    chars: entries.join('\n\n').length,
+    budget: 1200,
   };
 }
 
+describe('CURATOR_SYSTEM_PROMPT', () => {
+  it('states the three tests that gate writing', () => {
+    expect(CURATOR_SYSTEM_PROMPT).toContain('三个月后');
+    expect(CURATOR_SYSTEM_PROMPT).toContain('脱离本次对话');
+    expect(CURATOR_SYSTEM_PROMPT).toContain('事实还是规则');
+  });
+
+  it('forbids profile writes', () => {
+    expect(CURATOR_SYSTEM_PROMPT).toContain('不允许');
+    expect(CURATOR_SYSTEM_PROMPT).toContain('profile');
+  });
+
+  it('names the rules that must not be stored as memory', () => {
+    for (const rule of ['必须复用', '改完要跑', '不要用']) {
+      expect(CURATOR_SYSTEM_PROMPT).toContain(rule);
+    }
+  });
+
+  it('says an empty result is the normal outcome', () => {
+    expect(CURATOR_SYSTEM_PROMPT).toContain('空操作');
+  });
+});
+
 describe('buildCuratorUserPrompt', () => {
-  it('includes every store with usage and the recent conversation', () => {
+  it('lists the applicable scopes with their usage', () => {
     const prompt = buildCuratorUserPrompt({
-      snapshots: [
-        snapshot({ target: 'user', entries: ['用户偏好中文'], chars: 6, limit: 1375 }),
-        snapshot({ target: 'project', entries: [], chars: 0, projectDir: '/repo/mica' }),
-      ],
-      messages: [
-        { role: 'user', content: '以后测试都用 bun run test' },
-        { role: 'assistant', content: '好的，已记住。' },
-      ],
+      snapshots: [snapshot({ kind: 'profile' }, ['用户常用中文']), snapshot(projectScope, ['测试用 bun run test'])],
+      context: '当前仓库：mica-code',
+      messages: [{ role: 'user', content: '跑一下测试' }],
     });
 
-    expect(prompt).toContain('### user · 用户档案 · 6/1375 字符');
-    expect(prompt).toContain('- 用户偏好中文');
-    expect(prompt).toContain('### project · 项目记忆 · 0/2200 字符 · 目录 /repo/mica');
-    expect(prompt).toContain('user: 以后测试都用 bun run test');
-    expect(prompt).toContain('assistant: 好的，已记住。');
-    expect(prompt).toContain('{"operations":[]}');
+    expect(prompt).toContain('<context>');
+    expect(prompt).toContain('当前仓库：mica-code');
+    expect(prompt).toContain('project · 项目记忆 · mica-code');
+    expect(prompt).toContain('- 测试用 bun run test');
+    expect(prompt).toContain('用户档案');
+    expect(prompt).toContain('- 用户常用中文');
+  });
+
+  it('tells the curator which domains are usable and that none is usable otherwise', () => {
+    const withDomain = buildCuratorUserPrompt({
+      snapshots: [snapshot(domainScope)],
+      context: 'x',
+      messages: [],
+    });
+    expect(withDomain).toContain('可用的领域：租车');
+
+    const withoutDomain = buildCuratorUserPrompt({
+      snapshots: [snapshot(projectScope)],
+      context: 'x',
+      messages: [],
+    });
+    expect(withoutDomain).toContain('当前没有可用的领域');
+    expect(withoutDomain).toContain('domain 类操作会被拒绝');
+  });
+
+  it('repeats the schema next to the generation point', () => {
+    const prompt = buildCuratorUserPrompt({ snapshots: [], context: 'x', messages: [] });
+    expect(prompt).toContain('不要 op / path / value / target / store');
+    expect(prompt).toContain('{"operations":[{"scope":"project","action":"add","content":"..."}');
   });
 });
 
 describe('formatConversation', () => {
-  it('keeps the most recent messages when the excerpt is too long', () => {
-    const messages = Array.from({ length: 10 }, (_value, index) => ({
-      role: (index % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
-      content: `${index}: ${'x'.repeat(3000)}`,
-    }));
+  it('keeps the most recent messages when the budget runs out', () => {
+    const messages = [
+      { role: 'user' as const, content: 'a'.repeat(MAX_CONVERSATION_CHARS) },
+      { role: 'assistant' as const, content: '最近这句' },
+    ];
 
     const text = formatConversation(messages);
 
-    expect(text.length).toBeLessThanOrEqual(MAX_CONVERSATION_CHARS + 100);
-    expect(text).toContain('9: ');
-    expect(text).not.toContain('0: ');
+    expect(text).toContain('最近这句');
+    expect(text.length).toBeLessThanOrEqual(MAX_CONVERSATION_CHARS + 40);
   });
 
-  it('returns a placeholder for an empty conversation', () => {
+  it('marks an empty conversation instead of returning an empty block', () => {
     expect(formatConversation([])).toBe('（空）');
+    expect(formatConversation([{ role: 'user', content: '   ' }])).toBe('（空）');
   });
 });
 
 describe('parseCuratorOutput', () => {
-  it('parses plain JSON and keeps every valid operation', () => {
-    const result = parseCuratorOutput(
-      JSON.stringify({
-        operations: [
-          { target: 'user', action: 'add', content: '用户偏好简短回答' },
-          { target: 'memory', action: 'patch', old_text: 'bun', content: 'bun run test' },
-          { target: 'project', action: 'remove', old_text: '过时的一条' },
-        ],
-      }),
-    );
-
-    expect(result).toEqual({
-      ok: true,
-      skipped: 0,
-      operations: [
-        { target: 'user', action: 'add', content: '用户偏好简短回答' },
-        { target: 'memory', action: 'patch', old_text: 'bun', content: 'bun run test' },
-        { target: 'project', action: 'remove', old_text: '过时的一条' },
-      ],
-    });
-  });
-
-  it('extracts JSON from a fenced block with surrounding prose', () => {
-    const result = parseCuratorOutput(
-      '以下是操作：\n```json\n{"operations":[{"target":"memory","action":"add","content":"记住这个"}]}\n```\n完成。',
-    );
+  it('accepts a bare JSON object', () => {
+    const result = parseCuratorOutput('{"operations":[{"scope":"project","action":"add","content":"用 bun"}]}');
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.operations).toHaveLength(1);
-  });
-
-  it('skips malformed operations instead of failing the whole batch', () => {
-    const result = parseCuratorOutput(
-      JSON.stringify({
-        operations: [
-          { target: 'nope', action: 'add', content: 'x' },
-          { target: 'memory', action: 'add' },
-          { target: 'memory', action: 'replace', content: 'x' },
-          { target: 'memory', action: 'add', content: '有效的' },
-        ],
-      }),
-    );
-
-    expect(result).toEqual({
-      ok: true,
-      skipped: 3,
-      operations: [{ target: 'memory', action: 'add', content: '有效的' }],
-    });
-  });
-
-  it('reports a clear error when the response cannot be used', () => {
-    expect(parseCuratorOutput('')).toMatchObject({ ok: false, error: expect.stringContaining('empty') });
-    expect(parseCuratorOutput('没有 JSON')).toMatchObject({ ok: false, error: expect.stringContaining('no JSON') });
-    expect(parseCuratorOutput('{"ops":[]}')).toMatchObject({
-      ok: false,
-      error: expect.stringContaining('operations array'),
-    });
-    expect(parseCuratorOutput('{not json}')).toMatchObject({ ok: false, error: expect.stringContaining('not valid') });
-  });
-
-  it('fails instead of reporting "nothing to save" when every operation was unusable', () => {
-    // 真实模型会退回 Codex 风格的 schema；静默当成空操作会让用户以为整理器工作了。
-    const result = parseCuratorOutput(
-      JSON.stringify({ operations: [{ op: 'add', path: '/repo/demo', value: '测试用 bun' }] }),
-    );
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('unsupported shape');
-      expect(result.raw).toContain('测试用 bun');
+    if (result.ok) {
+      expect(result.operations).toEqual([{ scope: 'project', action: 'add', content: '用 bun' }]);
     }
   });
 
-  it('accepts the field aliases models drift into', () => {
+  it('strips a markdown code fence and surrounding prose', () => {
+    const result = parseCuratorOutput('以下是操作：\n```json\n{"operations":[]}\n```\n希望有帮助');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.operations).toEqual([]);
+  });
+
+  it('carries the domain for domain operations', () => {
+    const result = parseCuratorOutput(
+      '{"operations":[{"scope":"domain","domain":"租车","action":"add","content":"灰度走 sass 发布台"}]}',
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.operations[0]?.domain).toBe('租车');
+  });
+
+  it('recognises aliases models fall back to', () => {
     const result = parseCuratorOutput(
       JSON.stringify({
         operations: [
-          { target: 'memory', op: 'add', value: '环境是 macOS' },
-          { target: 'user', op: 'patch', oldText: '偏好英文', value: '偏好中文' },
-          { target: 'project', op: 'remove', match: '过时的约定' },
+          { target: 'repo', op: 'add', value: '项目用 pnpm' },
+          { store: 'user', action: 'add', text: '用户偏好中文' },
         ],
       }),
     );
 
-    expect(result).toEqual({
-      ok: true,
-      skipped: 0,
-      operations: [
-        { target: 'memory', action: 'add', content: '环境是 macOS' },
-        { target: 'user', action: 'patch', old_text: '偏好英文', content: '偏好中文' },
-        { target: 'project', action: 'remove', old_text: '过时的约定' },
-      ],
-    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.operations.map((operation) => operation.scope)).toEqual(['project', 'profile']);
+      expect(result.operations[0]?.content).toBe('项目用 pnpm');
+    }
   });
 
-  it('still reports an empty operation list as a successful no-op', () => {
-    expect(parseCuratorOutput('{"operations":[]}')).toEqual({ ok: true, operations: [], skipped: 0 });
+  it('rejects an answer in an unsupported shape instead of silently doing nothing', () => {
+    const result = parseCuratorOutput('{"operations":[{"op":"create","path":"notes.md","value":"x"}]}');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('unsupported shape');
+  });
+
+  it('reports invalid JSON and missing arrays', () => {
+    expect(parseCuratorOutput('').ok).toBe(false);
+    expect(parseCuratorOutput('没有 JSON').ok).toBe(false);
+    const notJson = parseCuratorOutput('{"operations": [oops]}');
+    expect(notJson.ok).toBe(false);
+    if (!notJson.ok) expect(notJson.error).toContain('not valid JSON');
+    const missing = parseCuratorOutput('{"ops":[]}');
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error).toContain('operations array');
+  });
+
+  it('caps the number of operations per run', () => {
+    const operations = Array.from({ length: 30 }, (_, index) => ({
+      scope: 'project',
+      action: 'add',
+      content: `条目 ${index}`,
+    }));
+
+    const result = parseCuratorOutput(JSON.stringify({ operations }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.operations).toHaveLength(10);
+      expect(result.skipped).toBe(20);
+    }
+  });
+
+  it('requires old_text for patch and remove', () => {
+    const result = parseCuratorOutput(
+      JSON.stringify({
+        operations: [
+          { scope: 'project', action: 'patch', content: '新内容' },
+          { scope: 'project', action: 'remove' },
+          { scope: 'project', action: 'add', content: '有效的一条' },
+        ],
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.operations).toHaveLength(1);
+      expect(result.skipped).toBe(2);
+    }
+  });
+
+  it('reads the optional notes field', () => {
+    expect(parseCuratorNotes('{"operations":[],"notes":"用户似乎偏好中文"}')).toBe('用户似乎偏好中文');
+    expect(parseCuratorNotes('{"operations":[]}')).toBeNull();
+    expect(parseCuratorNotes('not json')).toBeNull();
   });
 });
 
 describe('applyCuratorOperations', () => {
-  function createApplier(failTargets: MemoryTarget[] = []) {
-    const applied: { target: MemoryTarget; operations: MemoryOperation[] }[] = [];
-    const applier = {
-      apply(target: MemoryTarget, operations: MemoryOperation[]): MemoryApplyResult {
-        applied.push({ target, operations });
-        if (failTargets.includes(target)) {
-          return {
-            ok: false,
-            error: { kind: 'budget', message: `${target} is full`, overflow: 10 },
-          };
-        }
-        return { ok: true, store: snapshot({ target }), applied: operations.map(() => 'ok') };
+  function createApplier() {
+    const calls: { scope: MemoryScope; operations: MemoryOperation[] }[] = [];
+    const result: MemoryApplyResult = { ok: true, store: {} as never, applied: [] };
+    return {
+      calls,
+      applier: {
+        apply: vi.fn((scope: MemoryScope, operations: MemoryOperation[]) => {
+          calls.push({ scope, operations });
+          return result;
+        }),
       },
     };
-    return { applier, applied };
   }
 
-  it('groups operations by store and counts what was written', () => {
-    const { applier, applied } = createApplier();
+  const resolver = (operation: CuratorOperation) => {
+    if (operation.scope === 'project') return { ok: true as const, scope: projectScope };
+    if (operation.scope === 'domain' && operation.domain === '租车') return { ok: true as const, scope: domainScope };
+    return { ok: false as const, error: `领域「${operation.domain ?? ''}」不存在` };
+  };
 
-    const outcome = applyCuratorOperations(applier, [
-      { target: 'user', action: 'add', content: 'a' },
-      { target: 'memory', action: 'add', content: 'b' },
-      { target: 'user', action: 'remove', old_text: 'c' },
+  it('writes one atomic batch per scope', () => {
+    const { applier, calls } = createApplier();
+
+    const outcome = applyCuratorOperations(applier, resolver, [
+      { scope: 'project', action: 'add', content: 'a' },
+      { scope: 'domain', domain: '租车', action: 'add', content: 'b' },
+      { scope: 'project', action: 'add', content: 'c' },
     ]);
 
-    expect(outcome).toEqual({ applied: 3, failures: [] });
-    expect(applied).toEqual([
-      {
-        target: 'user',
-        operations: [
-          { action: 'add', content: 'a' },
-          { action: 'remove', old_text: 'c' },
-        ],
-      },
-      { target: 'memory', operations: [{ action: 'add', content: 'b' }] },
-    ]);
+    expect(outcome.applied).toBe(3);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.operations).toHaveLength(2);
+    expect(calls[1]?.scope.kind).toBe('domain');
   });
 
-  it('keeps other stores working and counts successful writes when a store throws an IO error', () => {
+  it('never writes profile from the curator', () => {
     const { applier } = createApplier();
-    const outcome = applyCuratorOperations(
-      {
-        apply: (target, operations) => {
-          if (target === 'memory') throw new Error('permission denied');
-          return applier.apply(target, operations);
-        },
-      },
-      [
-        { target: 'user', action: 'add', content: 'a' },
-        { target: 'memory', action: 'add', content: 'b' },
-        { target: 'project', action: 'add', content: 'c' },
-      ],
-    );
-    expect(outcome).toEqual({ applied: 2, failures: [{ target: 'memory', message: 'permission denied' }] });
+
+    const outcome = applyCuratorOperations(applier, resolver, [
+      { scope: 'profile', action: 'add', content: '用户偏好中文' },
+    ]);
+
+    expect(outcome.applied).toBe(0);
+    expect(outcome.failures[0]?.scope).toBe('profile');
+    expect(outcome.failures[0]?.message).toContain('profile');
   });
 
-  it('keeps other stores working when one store rejects the batch', () => {
-    const { applier } = createApplier(['memory']);
+  it('reports an unknown domain without writing it', () => {
+    const { applier, calls } = createApplier();
 
-    const outcome = applyCuratorOperations(applier, [
-      { target: 'memory', action: 'add', content: 'b' },
-      { target: 'user', action: 'add', content: 'a' },
+    const outcome = applyCuratorOperations(applier, resolver, [
+      { scope: 'domain', domain: '不存在的领域', action: 'add', content: 'x' },
+    ]);
+
+    expect(calls).toHaveLength(0);
+    expect(outcome.failures[0]?.message).toContain('不存在');
+  });
+
+  it('keeps the successful scope when another scope fails', () => {
+    const applier = {
+      apply: vi.fn(
+        (scope: MemoryScope): MemoryApplyResult =>
+          scope.kind === 'domain'
+            ? { ok: false, error: { kind: 'unavailable', message: '锁住了' } }
+            : { ok: true, store: {} as never, applied: [] },
+      ),
+    };
+
+    const outcome = applyCuratorOperations(applier, resolver, [
+      { scope: 'project', action: 'add', content: 'a' },
+      { scope: 'domain', domain: '租车', action: 'add', content: 'b' },
     ]);
 
     expect(outcome.applied).toBe(1);
-    expect(outcome.failures).toEqual([{ target: 'memory', message: 'memory is full' }]);
+    expect(outcome.failures).toEqual([{ scope: 'domain', message: '锁住了' }]);
   });
 });
