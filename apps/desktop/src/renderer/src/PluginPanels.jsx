@@ -2,11 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 // 控件全部来自设置页那同一套（见 packages/mica-config-ui）：插件面板里不另写按钮、
 // 输入框、标签，否则同一个应用里会出现三种按钮高度和两套状态色。
-import { Alert, Button, CollapsiblePanel, Empty, SettingRow, Tag } from '@mica-config-ui/web'
+import {
+  Alert,
+  Button,
+  CollapsiblePanel,
+  Empty,
+  SettingRow,
+  SplitView,
+  Tag
+} from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
 import { FloatingMenu } from './FloatingMenu'
 import {
   applyPanelResult,
+  isOpenableLink,
   menuCacheKey,
   menuShortcutsOf,
   panelDrafts,
@@ -61,7 +70,7 @@ const TAG_TONES = {
 }
 
 /** 动作的 `tone` → 共享 `Button` 的变体；没声明的一律是行内次要动作。 */
-const BUTTON_VARIANTS = { primary: 'primary', danger: 'danger' }
+const BUTTON_VARIANTS = { primary: 'primary', danger: 'danger', default: 'default' }
 
 const tagTone = (tone) => TAG_TONES[tone] || 'default'
 const buttonVariant = (tone) => BUTTON_VARIANTS[tone] || 'ghost'
@@ -580,8 +589,11 @@ function PluginPanelDock({
   )
 
   // 呈现形态由清单决定（`desktop.panel.display`）：同一份视图数据，只换外壳。
+  //
   // 弹窗走共用 ModalShell，Esc / 点遮罩 / 关闭按钮的行为与其它弹窗一致；里面是
-  // **页签**而不是一列折叠卡片——内容一多，折叠列表要滚很久才能找到那一块。
+  // **左侧分区 + 右侧详情**（复用设置页的 SplitView）。以前是横排页签：分区一多就挤成
+  // 一行小字，而每块内容的长度差得很远（一行状态 vs 几千字的需求描述）——左栏固定宽度、
+  // 右栏自己滚，两种都稳。高度由 .chat-plugin-modal 定死，切分区时不伸不缩。
   if (display === 'modal') {
     const focused = tabs.findIndex((tab) => tab.key === activeTab)
     const tabIndex = focused >= 0 ? focused : initialTabIndex
@@ -603,30 +615,44 @@ function PluginPanelDock({
         }
         onClose={onClose}
       >
-        {/* 设置页那套控件与配色：页签是 .session-tab（全应用只有这一种页签形态），
-            行是 SettingRow，按钮 / 标签 / 空态 / 错误条都来自 @mica-config-ui/web。
-            高度由 .chat-plugin-modal 定死，切页签时弹窗不再一伸一缩。 */}
+        {/* 设置页那套控件与配色：左栏是 .split-item，行是 SettingRow，按钮 / 标签 /
+            空态 / 错误条都来自 @mica-config-ui/web，内容外面套 .mica-config-ui。 */}
         <div className="mica-config-ui is-embed chat-plugin-panel">
           {sections.length > 0 && (
-            <div className="session-tabs" role="tablist" aria-label="面板分区">
-              {tabs.map((tab, index) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={index === tabIndex}
-                  className={`session-tab${index === tabIndex ? ' session-tab-active' : ''}`}
-                  onClick={() => setActiveTab(tab.key)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+            <SplitView
+              rail={
+                <div className="split-rail-list" role="tablist" aria-label="面板分区">
+                  {tabs.map((tab, index) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={index === tabIndex}
+                      className={`split-item${index === tabIndex ? ' is-active' : ''}`}
+                      onClick={() => setActiveTab(tab.key)}
+                    >
+                      <span className="split-item-copy">
+                        <span className="split-item-title">{tab.label}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              }
+            >
+              <div className="chat-plugin-detail">
+                <header className="chat-plugin-detail-head">
+                  <h2>{activeSection?.title || view?.title || label}</h2>
+                  {activeSection?.subtitle ? <p>{activeSection.subtitle}</p> : null}
+                </header>
+                <div className="chat-plugin-detail-body">
+                  {placeholder}
+                  {activeSection &&
+                    renderSection(activeSection, sectionKeys[tabIndex], { tabbed: true })}
+                </div>
+              </div>
+            </SplitView>
           )}
-          <div className="chat-plugin-panel-body">
-            {placeholder}
-            {activeSection && renderSection(activeSection, sectionKeys[tabIndex], { tabbed: true })}
-          </div>
+          {sections.length === 0 && <div className="chat-plugin-panel-body">{placeholder}</div>}
         </div>
       </ModalShell>
     )
@@ -703,8 +729,8 @@ function PluginPanelSection({
     />
   )
 
-  // 弹窗形态：标题已经是页签本身，再套一层折叠卡片就是两遍同名标题。
-  if (tabbed) return <div className="chat-plugin-tab-pane">{body}</div>
+  // 弹窗形态：标题已经在左栏与详情头里，再套一层折叠卡片就是三遍同名标题。
+  if (tabbed) return <div className="chat-plugin-pane">{body}</div>
 
   // 抽屉形态沿用设置页的折叠卡片（details），折叠状态归它自己管。
   return (
@@ -723,17 +749,34 @@ function PluginPanelSection({
 
 /** 一块分区的内容：只读行、条目、输入框、动作，全部落在共享 `SettingRow` 上。 */
 function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
+  const hasBody = Boolean(section.text)
   const hasRows = (section.rows?.length || 0) + (section.items?.length || 0) > 0
-  const hasFields = (section.fields?.length || 0) > 0
   return (
     <div className="chat-plugin-rows">
-      {section.rows?.map((row) => (
-        <SettingRow key={row.label} label={row.label}>
+      {/* 正文：一整段话（需求描述、结论）。行是「标签 — 一个值」，这里没有标签也不省略。 */}
+      {hasBody && <p className="chat-plugin-text">{section.text}</p>}
+      {section.rows?.map((row, index) => (
+        // 行是位置数据，标签可能重复（一个仓库一行「位置」这类）：用序号做 key，
+        // 别让 React 因为同名把两行认成同一行。
+        <SettingRow key={`${row.label}-${index}`} label={row.label}>
           <span
-            className={`chat-plugin-value${row.tone ? ` tone-${row.tone}` : ''}`}
+            className={`chat-plugin-value${row.tone ? ` tone-${row.tone}` : ''}${
+              row.wrap === true ? ' is-wrap' : ''
+            }`}
             title={row.value || undefined}
           >
-            {row.value ?? '—'}
+            {row.link && isOpenableLink(row.link) ? (
+              <button
+                type="button"
+                className="chat-plugin-link"
+                title={row.value || row.link}
+                onClick={() => window.mica.terminal.openExternal(row.link).catch(() => {})}
+              >
+                {row.value || row.link}
+              </button>
+            ) : (
+              (row.value ?? '—')
+            )}
           </span>
         </SettingRow>
       ))}
@@ -764,8 +807,9 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
           </span>
         </SettingRow>
       ))}
-      {/* 整块都没内容时才画空态：只读行为空不代表没东西（可能还有输入框或动作）。 */}
-      {!hasRows && !hasFields && section.empty ? <Empty description={section.empty} /> : null}
+      {/* 没有正文也没有行/条目时才画空态：只有输入框的 section（加频道）也该先说明
+          「现在还没有」，表单本身不算内容。 */}
+      {!hasBody && !hasRows && section.empty ? <Empty description={section.empty} /> : null}
       {section.fields?.map((field) => (
         <SettingRow
           key={field.key}

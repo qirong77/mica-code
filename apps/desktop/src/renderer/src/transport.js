@@ -460,6 +460,11 @@ function createWebApi(env) {
       list: (cwd, role) => invoke('skills:list', { cwd, role })
     },
 
+    completions: {
+      // 同一个 `/` 浮层里插件清单声明的条目：只读清单，不启动插件进程
+      list: (role) => invoke('completions:list', { role })
+    },
+
     mcp: {
       // 同一个 `/` 浮层里的 MCP server 候选（只读 config.json，不发起连接）
       listCandidates: () => invoke('mcp:candidates')

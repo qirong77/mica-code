@@ -126,6 +126,16 @@ export function quickbarMenuItems(shortcut, view) {
 }
 
 /**
+ * 面板行里的值能不能当链接点。
+ *
+ * 只认能交给系统浏览器的地址：`javascript:` / `file:` 这类既不该成为链接，也不该被页面
+ * 拿去导航。点击由页面转给 `window.mica.terminal.openExternal`，页面自己不做跳转。
+ */
+export function isOpenableLink(href) {
+  return /^(https?:|mailto:)/i.test(String(href ?? '').trim())
+}
+
+/**
  * 动态菜单的条目在**页面**这一层缓存。
  *
  * 这些条目是本地事实（这个会话涉及哪些分支），不是网络数据；每换一次页签、每重挂载一次

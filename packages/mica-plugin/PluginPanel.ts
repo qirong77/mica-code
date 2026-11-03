@@ -21,13 +21,26 @@ import { normalizePluginNewSession, type PluginNewSession } from './PluginNewSes
 
 export type PluginPanelTone = 'muted' | 'ok' | 'warn' | 'error' | 'accent';
 
-export type PluginPanelButtonTone = 'primary' | 'ghost' | 'danger';
+export type PluginPanelButtonTone = 'primary' | 'default' | 'ghost' | 'danger';
 
 /** 只读的一行「标签 — 值」（上次检查时间、上次结论、运行状态…）。 */
 export type PluginPanelRow = {
   label: string;
   value?: string;
   tone?: PluginPanelTone;
+  /**
+   * 值是一段话或一个长路径：换行显示，不再单行省略。
+   *
+   * 行默认单行省略（一列状态看起来才齐），但「一句话讲清这次需求」「副本路径」这类
+   * 内容被省略就等于没写——需要读完整时声明它。
+   */
+  wrap?: boolean;
+  /**
+   * 值本身是一个地址：点了交给系统浏览器打开（页面自己跳转会把应用导航走）。
+   *
+   * 宿主只认 `http(s)` / `mailto`，其余当普通文本；`value` 仍是显示出来的那段文字。
+   */
+  link?: string;
 };
 
 /** 条目上的按钮：`key` 由宿主带上，插件据此知道点的是哪一条。 */
@@ -61,6 +74,18 @@ export type PluginPanelAction = PluginPanelItemAction & { hint?: string };
 
 export type PluginPanelSection = {
   title?: string;
+  /**
+   * 标题下面的一行说明（「评审只读提交」这类）。弹窗形态里在分区标题下方，抽屉形态里
+   * 是折叠卡片标题右侧的 meta。它不占正文，所以没有条目的空态照常画。
+   */
+  subtitle?: string;
+  /**
+   * 一块正文：会换行、保留段落（需求描述、结论这类「一段话」）。
+   *
+   * 与 `rows` 的分工：行是「标签 — 一个值」，正文字段没有标签、也不该被单行省略。
+   * 排在 `rows` 之上。
+   */
+  text?: string;
   /**
    * 默认收起。宿主把每个 section 画成一块可折叠的卡片（点标题展开/收起），
    * 这里只决定它**第一次**出现时是展开还是收起；之后跟随用户的操作。
@@ -279,6 +304,8 @@ export class PluginPanelRegistry {
 /* -------------------------------------------------------------- 视图归一化 */
 
 const MAX_TEXT = 400;
+/** 一块正文：需求描述这类「一段话」的上限，比一行的 400 字宽。 */
+const MAX_SECTION_TEXT = 4000;
 const MAX_ROWS = 40;
 const MAX_ITEMS = 40;
 const MAX_FIELDS = 12;
@@ -300,7 +327,7 @@ const MAX_PROMPT = 20_000;
 const MAX_PATH = 4096;
 
 const TONES: readonly PluginPanelTone[] = ['muted', 'ok', 'warn', 'error', 'accent'];
-const BUTTON_TONES: readonly PluginPanelButtonTone[] = ['primary', 'ghost', 'danger'];
+const BUTTON_TONES: readonly PluginPanelButtonTone[] = ['primary', 'default', 'ghost', 'danger'];
 
 function text(value: unknown, max = MAX_TEXT): string {
   if (typeof value !== 'string') return '';
@@ -396,11 +423,15 @@ function sectionOf(input: unknown): PluginPanelSection | null {
       if (!label) return null;
       const value = text(row.value, 240);
       const rowTone = tone(row.tone);
-      return {
+      const link = text(row.link, MAX_CELL_LINK);
+      const normalized: PluginPanelRow = {
         label,
         ...(value ? { value } : {}),
         ...(rowTone ? { tone: rowTone } : {}),
-      } satisfies PluginPanelRow;
+        ...(row.wrap === true ? { wrap: true } : {}),
+        ...(link ? { link } : {}),
+      };
+      return normalized;
     })
     .filter((entry): entry is PluginPanelRow => entry !== null);
   const items = list(raw.items)
@@ -415,13 +446,24 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     .slice(0, MAX_ACTIONS)
     .map((entry) => actionOf(entry))
     .filter((entry): entry is PluginPanelAction => entry !== null);
+  const subtitle = text(raw.subtitle, 200);
   const empty = text(raw.empty, 200);
+  const body = text(raw.text, MAX_SECTION_TEXT);
   // 只有真有输入框时，自动提交才有意义
   const commit = fields.length > 0 ? text(raw.commit, 60) : '';
-  if (!title && rows.length === 0 && items.length === 0 && fields.length === 0 && actions.length === 0)
+  if (
+    !title &&
+    !body &&
+    rows.length === 0 &&
+    items.length === 0 &&
+    fields.length === 0 &&
+    actions.length === 0
+  )
     return null;
   return {
     ...(title ? { title } : {}),
+    ...(subtitle ? { subtitle } : {}),
+    ...(body ? { text: body } : {}),
     ...(title && raw.collapsed === true ? { collapsed: true } : {}),
     ...(rows.length > 0 ? { rows } : {}),
     ...(items.length > 0 ? { items } : {}),

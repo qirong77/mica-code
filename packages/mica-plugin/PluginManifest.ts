@@ -22,6 +22,7 @@ import {
   type PluginPanelShortcutItem,
 } from './PluginDesktop.js';
 import type { PluginSessionMenuItem } from './PluginSessionMenu.js';
+import { readPluginCompletions, type PluginCompletion } from './PluginCompletions.js';
 
 /**
  * 插件包的清单（`plugin.json`）。
@@ -148,6 +149,14 @@ export type PluginManifest = {
    * 切换与 `/role` 都从 `$MICA_HOME/plugin-roles` 的索引里读到它。
    */
   roles: string[];
+  /**
+   * 输入框 `/` 列表里的条目（清单 `completions`）。
+   *
+   * 选中只往输入框插一段文本，不执行动作——`/` 本来就是补全，不是命令面板。宿主在**没有
+   * 会话宿主**的时候也要能列出来，所以它写在清单里、由扫描清单的一方直接读，不经过插件
+   * 运行期注册。
+   */
+  completions: PluginCompletion[];
 };
 
 export type PluginStatusField = {
@@ -284,6 +293,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const roles = readRolePaths(input.roles);
   if (!roles.ok) return roles;
 
+  const completions = readPluginCompletions(input.completions);
+  if (!completions.ok) return completions;
+
   return {
     ok: true,
     manifest: {
@@ -311,6 +323,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       desktopSessionMenu: desktop.value.sessionMenu,
       skills: skills.value,
       roles: roles.value,
+      completions: completions.value,
     },
   };
 }

@@ -139,10 +139,10 @@ command 只保留最新一条（见 `plugins/README.md` 的「notice 槽」）�
 写。等 `await` 返回之后再写就晚了——那时文件已经写过，状态要等下一轮才带下去，而用户可能
 已经关掉页面了。
 
-触发它的事件是 `input:activity`（`context.events.on('event', …)`）：用户在输入框里敲了字。
-桌面端在敲字时节流发 `mica/input/activity`，宿主翻成这条运行期事件；TUI 与 `exec` 不发，
-插件不能把它当成一定会来。同一个能力面还有一个更早的信号 `input:focus`（焦点放回输入框、
-还没敲字，桌面端经 `mica/input/focus` 送出，只在会话没在跑时发）。
+要不要在轮次之外动手由插件自己决定。可订阅的客户端信号是 `input:activity`（用户在输入框
+里敲了字，桌面端节流发 `mica/input/activity`）与 `input:focus`（焦点放回输入框、还没敲字，
+桌面端经 `mica/input/focus` 送出、只在会话没在跑时发）；两者都不保证一定来，TUI 与 `exec`
+也不发。**当前官方插件都不订阅它们**：自动压缩只在请求边界动手，抢跑那套已撤掉。
 
 决定「这次值不值得压」用 `context.agent.lastUsage()` 与 `context.agent.contextWindowSize`：
 前者是最近一次真实请求的输入量（与界面上的 ctx 徽标同源，压缩会保留它用来对账），后者随会话

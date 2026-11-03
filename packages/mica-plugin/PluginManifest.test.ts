@@ -6,6 +6,19 @@ function base(extra: Record<string, unknown> = {}) {
 }
 
 describe('parsePluginManifest desktop checks', () => {
+  it('清单里的 completions 进 ` / ` 补全候选，坏条目让整份清单不通过', () => {
+    const ok = parsePluginManifest(
+      base({
+        completions: [{ name: 'role', description: '记一条经验', insert: '用 demand_role 写回：' }],
+      }),
+    );
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.manifest.completions).toHaveLength(1);
+
+    const broken = parsePluginManifest(base({ completions: [{ name: 'role' }] }));
+    expect(broken.ok).toBe(false);
+    if (!broken.ok) expect(broken.error).toContain('insert 不能为空');
+  });
   it('reads the declared run requirements in declaration order', () => {
     const result = parsePluginManifest(base({ desktop: { checks: ['screen-recording', 'accessibility'] } }));
 

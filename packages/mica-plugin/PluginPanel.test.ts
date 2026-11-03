@@ -41,6 +41,41 @@ describe('normalizePluginPanelView', () => {
     expect(view.sections?.[1].commit).toBeUndefined();
   });
 
+  it('keeps a prose body and row-level wrap / link', () => {
+    const view = normalizePluginPanelView({
+      title: '需求开发',
+      sections: [
+        {
+          title: '需求描述',
+          subtitle: '评审只读提交，不动工作区',
+          text: '一句话讲清这次要做什么。\n\n以及这次明确不做什么。',
+          rows: [
+            { label: '一句话', value: '一段很长的说明', wrap: true },
+            { label: '测试环境', value: 'https://example.com/x', link: 'https://example.com/x' },
+            { label: '状态', value: '就绪' },
+          ],
+        },
+      ],
+    });
+    const section = view.sections?.[0];
+    expect(section?.subtitle).toBe('评审只读提交，不动工作区');
+    expect(section?.text).toContain('明确不做什么');
+    expect(section?.rows?.[0].wrap).toBe(true);
+    expect(section?.rows?.[1].link).toBe('https://example.com/x');
+    // 没声明的一律不带：默认单行省略、默认不是链接。
+    expect(section?.rows?.[2].wrap).toBeUndefined();
+    expect(section?.rows?.[2].link).toBeUndefined();
+  });
+
+  it('一块只有正文的 section 也算有内容', () => {
+    const view = normalizePluginPanelView({
+      title: 'x',
+      sections: [{ title: '结论', text: '这次改动只动了插件面板。' }, { text: '' }],
+    });
+    expect(view.sections).toHaveLength(1);
+    expect(view.sections?.[0].text).toBe('这次改动只动了插件面板。');
+  });
+
   it('falls back to the plugin name and drops malformed entries', () => {
     const view = normalizePluginPanelView(
       {

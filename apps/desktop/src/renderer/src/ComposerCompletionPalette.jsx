@@ -86,10 +86,10 @@ export default function ComposerCompletionPalette({
 /**
  * 候选的类型标记。
  *
- * 只认 `/` 浮层里的两类：skill 与 MCP server。`@` 文件补全的 `file` 不画标记——那里
- * 一整屏都是文件，标一排「file」只是噪声。
+ * 只认 `/` 浮层里的三类：skill、MCP server 与插件声明的条目（`prompt`）。`@` 文件补全的
+ * `file` 不画标记——那里一整屏都是文件，标一排「file」只是噪声。
  */
-const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP' }
+const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP', prompt: '指令' }
 
 function CompletionKindTag({ kind }) {
   const label = COMPLETION_KIND_LABELS[kind]

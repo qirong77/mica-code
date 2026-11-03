@@ -360,6 +360,75 @@ describe('composer completions', () => {
     expect(completionInsertText({ kind: 'mcp', name: 'big', tools })).toBe('[mcp:big] ')
   })
 
+  it('插件声明的条目插进去的是它自己的正文，不是链接', () => {
+    const insert = '用 demand_role 把这条经验写回角色文件（先 action=list 看小节）：'
+    const options = slashCompletionOptions(
+      {
+        completions: [
+          {
+            name: 'role',
+            description: '记一条经验',
+            insert,
+            pluginId: 'user.demand-dev',
+            source: { kind: 'plugin', label: '插件 demand-dev', detail: 'user.demand-dev' }
+          }
+        ]
+      },
+      'ro'
+    )
+    expect(options).toHaveLength(1)
+    expect(options[0]).toMatchObject({
+      kind: 'prompt',
+      label: '/role',
+      description: '记一条经验',
+      insert
+    })
+    // 类型标记是「指令」，来源仍是插件
+    expect(options[0].source).toEqual({
+      kind: 'plugin',
+      label: '插件 demand-dev',
+      detail: 'user.demand-dev'
+    })
+    expect(completionInsertText(options[0])).toBe(insert)
+  })
+
+  it('插件条目与 skill、MCP 一起按同一套评分排序', () => {
+    const options = slashCompletionOptions(
+      {
+        skills: [{ name: 'role-check', description: '' }],
+        mcpServers: [{ name: 'ro', tools: ['x'] }],
+        completions: [
+          {
+            name: 'role',
+            description: '',
+            insert: 'x',
+            pluginId: 'user.demo',
+            source: { kind: 'plugin', label: '插件 demo' }
+          }
+        ]
+      },
+      'ro'
+    )
+    // 完全匹配的 MCP 第一；同档（前缀匹配）按来源顺序：skill 在前、插件条目在后
+    expect(options.map((option) => option.kind)).toEqual(['mcp', 'skill', 'prompt'])
+  })
+
+  // 用户记不住那 7 个入口叫什么，只会敲插件名（`/dema`）——来源标记必须参与匹配，
+  // 否则这个入口只能靠逐字背下 `/claim`、`/desc` 才用得上。
+  it('按插件名也能搜到它声明的条目', () => {
+    const entries = ['claim', 'desc', 'role'].map((name) => ({
+      name,
+      description: '',
+      insert: name,
+      pluginId: 'user.demand-dev',
+      source: { kind: 'plugin', label: '插件 demand-dev', detail: 'user.demand-dev' }
+    }))
+    const options = slashCompletionOptions({ completions: entries }, 'dema')
+    expect(options.map((option) => option.name)).toEqual(['claim', 'desc', 'role'])
+    // 只在来源里命中，匹配到的那条来源标记照常显示
+    expect(options[0].sourceLabel).toBe('插件 demand-dev')
+  })
+
   it('matchIndexes finds every occurrence, ignoring case', () => {
     expect(matchIndexes('Aa-aa-AA', 'aa')).toEqual([0, 1, 3, 4, 6, 7])
     expect(matchIndexes('abc', '')).toEqual([])

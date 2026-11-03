@@ -13,12 +13,6 @@ export type AutoCompactSettings = {
   modelThresholdK: number;
   modelLimit: number;
   minIntervalMs: number;
-  /**
-   * 会话空闲多久之后、用户在输入框里重新敲字，就先做一次快速压缩。0 表示关掉这个触发。
-   *
-   * 它与阈值无关：阈值判断的是「上下文是不是已经很大」，这里判断的是「人是不是刚回来」。
-   */
-  idleMs: number;
 };
 
 export type AutoCompactCounters = {
@@ -26,15 +20,6 @@ export type AutoCompactCounters = {
   modelRuns: number;
   /** 上一次压缩成功的时间（ISO）。 */
   lastRunAt: string | null;
-  /** 这条会话一共跑过几轮（`turn:before` 自增）。 */
-  turnCount: number;
-  /**
-   * 上一次轮次之外压缩时，`turnCount` 的值。
-   *
-   * 用来回答「这次压缩之后有没有跑过新一轮」：相等就说明那段历史已经压过了，再点一次
-   * 输入框没有可压的东西。用序号而不是时间戳——同一毫秒里开始的轮次不会被误判成旧的。
-   */
-  compactedTurnCount: number;
   /**
    * 本轮开始的 ISO 时间。
    *
@@ -45,13 +30,6 @@ export type AutoCompactCounters = {
   turnStartedAt: string | null;
   lastKind: 'quick' | 'model' | null;
   lastSavedTokens: number;
-  /**
-   * 这条会话最后一次活动的时间（ISO）：一轮开始/结束、或者用户在输入框里敲字。
-   *
-   * 存进会话状态是为了冷启动后还能算「这次回来隔了多久」——只在内存里的话，
-   * 每次打开应用都会把用户当成刚说过话。
-   */
-  lastActivityAt: string | null;
   /** Unsuccessful/no-op attempts back off without consuming successful runs. */
   lastAttemptAt: string | null;
   lastAttemptTokens: number;
@@ -66,19 +44,15 @@ export const DEFAULT_SETTINGS: AutoCompactSettings = {
   modelThresholdK: 200,
   modelLimit: 999,
   minIntervalMs: 30 * 60 * 1000,
-  idleMs: 15 * 60 * 1000,
 };
 
 export const EMPTY_COUNTERS: AutoCompactCounters = {
   quickRuns: 0,
   modelRuns: 0,
   lastRunAt: null,
-  turnCount: 0,
-  compactedTurnCount: 0,
   turnStartedAt: null,
   lastKind: null,
   lastSavedTokens: 0,
-  lastActivityAt: null,
   lastAttemptAt: null,
   lastAttemptTokens: 0,
 };
@@ -102,7 +76,6 @@ export function settingsFromValues(values: Record<string, string | undefined>): 
       0,
       Math.round(readNumber(values.minIntervalMinutes, DEFAULT_SETTINGS.minIntervalMs / 60_000) * 60_000),
     ),
-    idleMs: Math.max(0, Math.round(readNumber(values.idleMinutes, DEFAULT_SETTINGS.idleMs / 60_000) * 60_000)),
   };
 }
 
@@ -121,12 +94,9 @@ export function normalizeCounters(input: unknown): AutoCompactCounters {
     quickRuns: count(source.quickRuns),
     modelRuns: count(source.modelRuns),
     lastRunAt: typeof source.lastRunAt === 'string' && source.lastRunAt ? source.lastRunAt : null,
-    turnCount: count(source.turnCount),
-    compactedTurnCount: count(source.compactedTurnCount),
     turnStartedAt: typeof source.turnStartedAt === 'string' && source.turnStartedAt ? source.turnStartedAt : null,
     lastKind: source.lastKind === 'quick' || source.lastKind === 'model' ? source.lastKind : null,
     lastSavedTokens: count(source.lastSavedTokens),
-    lastActivityAt: typeof source.lastActivityAt === 'string' && source.lastActivityAt ? source.lastActivityAt : null,
     lastAttemptAt: typeof source.lastAttemptAt === 'string' && source.lastAttemptAt ? source.lastAttemptAt : null,
     lastAttemptTokens: Math.max(0, readNumber(source.lastAttemptTokens, 0)),
   };
@@ -206,85 +176,4 @@ export function effectiveThresholds(settings: AutoCompactSettings, contextWindow
     quick: Math.min(settings.quickThresholdK * 1000, window ? window * 0.55 : Infinity),
     model: Math.min(settings.modelThresholdK * 1000, window ? window * 0.75 : Infinity),
   };
-}
-
-/**
- * 抢跑压缩的前提：上下文已经大到「这次请求本来就会压」。
- *
- * 低于快速压缩阈值时，压缩在请求里根本不会发生——那就不叫提前，只是把几十 MB 的历史
- * 白扫一遍、再往对话里写一条 notice。用户点进点出输入框应该看到什么也没发生，而不是
- * 一串「已快速压缩」。
- *
- * 没有用量记录（新会话、刚恢复还没跑过请求）时返回 false：既不知道多大，也还没有值得
- * 压的东西。
- */
-export function reachesQuickThreshold(input: {
-  settings: AutoCompactSettings;
-  ctxTokens: number | null;
-  contextWindowSize?: number;
-}): boolean {
-  const { ctxTokens } = input;
-  if (ctxTokens === null || !Number.isFinite(ctxTokens) || ctxTokens <= 0) return false;
-  return ctxTokens >= effectiveThresholds(input.settings, input.contextWindowSize).quick;
-}
-
-/**
- * 用户空闲很久之后重新敲字：要不要趁这个间隙先做一次快速压缩？
- *
- * 要求上下文已经到快速压缩阈值（见 `reachesQuickThreshold`）：空闲本身不构成压缩的理由，
- * 空闲之后那段历史**大到请求时会压**才是。小会话在这里直接跳过，收益抵不上噪声。
- *
- * 不**看「同一轮内的压缩间隔」：那个间隔是为同一段上下文被反复按阈值压准备的，而这
- * 里判断的是「人回来了」。刚压过一次就返回的人恰恰是最需要提前量的一批：他离开之后的
- * 历史又长大了，压一次才有意义；把间隔套在这里，最常见的场景（工作正密集、一会儿压
- * 一会儿走）就会静默失效。
- */
-export function shouldCompactOnReturn(input: {
-  settings: AutoCompactSettings;
-  counters: AutoCompactCounters;
-  /** 距这条会话上一次活动过去了多久。 */
-  idleMs: number;
-  ctxTokens: number | null;
-  contextWindowSize?: number;
-}): boolean {
-  const { settings, counters, idleMs } = input;
-  if (!settings.enabled) return false;
-  if (!Number.isFinite(settings.idleMs) || settings.idleMs <= 0) return false;
-  if (!Number.isFinite(idleMs) || idleMs < settings.idleMs) return false;
-  if (counters.quickRuns >= settings.quickLimit) return false;
-  return reachesQuickThreshold(input);
-}
-
-/**
- * 上一次轮次之外压缩之后有没有跑过新一轮。
- *
- * 没有它，用户点进点出输入框就会反复让宿主把整份历史扫一遍——压不出东西、不写盘也
- * 不计次，但一次全量扫描在大会话上要解析几十 MB 的文件。判据是「这一轮的起点是不是
- * 已经压过了」，不比较时间戳：同一毫秒里开始的轮次不会被误判成旧的。
- *
- * 只用在聚焦这条路上：点进点出输入框是高频动作，而「空闲回来」本身已经由空闲时长
- * 兜底，返回一次最多多扫一遍。
- */
-function hasUncompactedHistory(counters: AutoCompactCounters): boolean {
-  return counters.turnCount !== counters.compactedTurnCount;
-}
-
-/**
- * 焦点回到输入框（这一轮没在跑）时要不要做一次快速压缩。
- *
- * 与「空闲回来」的区别是不看空闲时长：人已经坐在输入框前、随时可能按发送，这时候仍有
- * 一个完整的间隙可用。守住不白干的是两条——上下文已到快速压缩阈值（`reachesQuickThreshold`），
- * 且上一次压缩之后确实跑过新一轮（`hasUncompactedHistory`）。
- */
-export function shouldCompactOnFocus(input: {
-  settings: AutoCompactSettings;
-  counters: AutoCompactCounters;
-  ctxTokens: number | null;
-  contextWindowSize?: number;
-}): boolean {
-  const { settings, counters } = input;
-  if (!settings.enabled) return false;
-  if (counters.quickRuns >= settings.quickLimit) return false;
-  if (!reachesQuickThreshold(input)) return false;
-  return hasUncompactedHistory(counters);
 }

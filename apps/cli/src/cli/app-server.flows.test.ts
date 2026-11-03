@@ -417,10 +417,28 @@ function createMockProvider() {
           if (state.mode === 'thinking-interrupt') {
             emit({ type: 'response.created', response: { id: 'resp_thinking', object: 'response' } });
             for (const [index, text] of ['first thought', 'second thought'].entries()) {
-              emit({ type: 'response.reasoning_summary_text.delta', item_id: 'reasoning_1', output_index: 0, summary_index: index, delta: text });
-              emit({ type: 'response.reasoning_summary_text.done', item_id: 'reasoning_1', output_index: 0, summary_index: index, text });
+              emit({
+                type: 'response.reasoning_summary_text.delta',
+                item_id: 'reasoning_1',
+                output_index: 0,
+                summary_index: index,
+                delta: text,
+              });
+              emit({
+                type: 'response.reasoning_summary_text.done',
+                item_id: 'reasoning_1',
+                output_index: 0,
+                summary_index: index,
+                text,
+              });
             }
-            emit({ type: 'response.reasoning_summary_text.delta', item_id: 'reasoning_1', output_index: 0, summary_index: 2, delta: 'unfinished thought' });
+            emit({
+              type: 'response.reasoning_summary_text.delta',
+              item_id: 'reasoning_1',
+              output_index: 0,
+              summary_index: 2,
+              delta: 'unfinished thought',
+            });
             return;
           }
           emitTextEvents();
@@ -1260,16 +1278,25 @@ suite('mica app-server real-user flows (mock provider)', () => {
     hosts.push(host);
     await waitFor(host, hostReady, 'host ready or error', 30_000);
     await send(host, 1, 'turn/start', {
-      threadId: '', model: 'mock/mock-chat', micaTextRollback: true, micaThinkingRollback: true,
+      threadId: '',
+      model: 'mock/mock-chat',
+      micaTextRollback: true,
+      micaThinkingRollback: true,
       input: [{ type: 'text', text: 'think before answering' }],
     });
     const started = await waitFor(host, (message) => message.method === 'turn/started', 'turn started');
     const turnId = (started.params?.turn as { id: string }).id;
-    await waitFor(host, (message) => message.method === 'item/reasoning/textDelta' && message.params?.delta === 'unfinished thought', 'unfinished thought');
+    await waitFor(
+      host,
+      (message) => message.method === 'item/reasoning/textDelta' && message.params?.delta === 'unfinished thought',
+      'unfinished thought',
+    );
     await send(host, 2, 'turn/interrupt', { threadId: '', turnId });
     await waitFor(host, turnCompleted(turnId), 'interrupted turn');
     const rollbacks = host.lines.filter((message) => message.method === 'mica/reasoning/textRollback');
-    expect(rollbacks.reduce((count, message) => count + Number(message.params?.length || 0), 0)).toBe('\n\nunfinished thought'.length);
+    expect(rollbacks.reduce((count, message) => count + Number(message.params?.length || 0), 0)).toBe(
+      '\n\nunfinished thought'.length,
+    );
     const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
     expect(sessionFiles).toHaveLength(1);
     const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
@@ -1281,7 +1308,10 @@ suite('mica app-server real-user flows (mock provider)', () => {
 
     mock.state.mode = 'ok';
     await send(host, 3, 'turn/start', {
-      threadId: '', model: 'mock/mock-chat', micaTextRollback: true, micaThinkingRollback: true,
+      threadId: '',
+      model: 'mock/mock-chat',
+      micaTextRollback: true,
+      micaThinkingRollback: true,
       input: [{ type: 'text', text: 'continue' }],
     });
     const next = await waitFor(host, (message) => message.id === 3 && message.result !== undefined, 'resumed turn');
@@ -1300,13 +1330,19 @@ suite('mica app-server real-user flows (mock provider)', () => {
     hosts.push(first);
     await waitFor(first, hostReady, 'first host ready', 30_000);
     await send(first, 1, 'turn/start', {
-      model: 'mock/mock-chat', micaTextRollback: true, micaThinkingRollback: true,
+      model: 'mock/mock-chat',
+      micaTextRollback: true,
+      micaThinkingRollback: true,
       input: [{ type: 'text', text: 'create an old-model checkpoint' }],
     });
     const started = await waitFor(first, (message) => message.method === 'turn/started', 'first turn started');
     const turnId = (started.params?.turn as { id: string }).id;
     const sessionId = started.params?.threadId as string;
-    await waitFor(first, (message) => message.method === 'item/reasoning/textDelta' && message.params?.delta === 'unfinished thought', 'old thinking');
+    await waitFor(
+      first,
+      (message) => message.method === 'item/reasoning/textDelta' && message.params?.delta === 'unfinished thought',
+      'old thinking',
+    );
     await send(first, 2, 'turn/interrupt', { threadId: sessionId, turnId });
     await waitFor(first, turnCompleted(turnId), 'old turn interrupted');
 
@@ -1334,8 +1370,11 @@ suite('mica app-server real-user flows (mock provider)', () => {
     mock.state.delayBeforeTextMs = 1500;
     mock.state.requests = [];
     await send(resumed, 1, 'turn/start', {
-      threadId: sessionId, model: 'mock/mock-chat-new', effort: 'high',
-      micaTextRollback: true, micaThinkingRollback: true,
+      threadId: sessionId,
+      model: 'mock/mock-chat-new',
+      effort: 'high',
+      micaTextRollback: true,
+      micaThinkingRollback: true,
       input: [{ type: 'text', text: 'switch after refresh' }],
     });
     const response = await waitFor(resumed, (message) => message.id === 1, 'new-model turn response');
@@ -1359,7 +1398,8 @@ suite('mica app-server real-user flows (mock provider)', () => {
     external.snapshot.effort = 'low';
     writeFileSync(sessionPath, JSON.stringify(external));
     await send(resumed, 2, 'turn/start', {
-      threadId: sessionId, input: [{ type: 'text', text: 'follow external settings' }],
+      threadId: sessionId,
+      input: [{ type: 'text', text: 'follow external settings' }],
     });
     const follow = await waitFor(resumed, (message) => message.id === 2, 'follow external response');
     expect(follow.error).toBeUndefined();
@@ -1374,7 +1414,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
     externalAgain.snapshot.effort = 'low';
     writeFileSync(sessionPath, JSON.stringify(externalAgain));
     await send(resumed, 3, 'turn/start', {
-      threadId: sessionId, effort: 'high', input: [{ type: 'text', text: 'change effort only' }],
+      threadId: sessionId,
+      effort: 'high',
+      input: [{ type: 'text', text: 'change effort only' }],
     });
     const effortResponse = await waitFor(resumed, (message) => message.id === 3, 'effort-only response');
     expect(effortResponse.error).toBeUndefined();
@@ -1388,7 +1430,10 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const configPath = join(home, 'config.json');
     const config = JSON.parse(readFileSync(configPath, 'utf8')) as { providers: Array<Record<string, unknown>> };
     config.providers.push({
-      ...config.providers[0], id: 'other', protocol: 'openai_chat_completions', models: ['other-model'],
+      ...config.providers[0],
+      id: 'other',
+      protocol: 'openai_chat_completions',
+      models: ['other-model'],
     });
     writeFileSync(configPath, JSON.stringify(config));
     const host = spawnHost('turn-override-invalid', [], home);
@@ -1396,13 +1441,17 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await waitFor(host, hostReady, 'host ready', 30_000);
 
     await send(host, 1, 'turn/start', {
-      model: 'other/other-model', input: [{ type: 'text', text: 'incompatible protocol' }],
+      model: 'other/other-model',
+      input: [{ type: 'text', text: 'incompatible protocol' }],
     });
     const incompatible = await waitFor(host, (message) => message.id === 1, 'protocol error');
     expect(incompatible.error).toMatchObject({ code: -32602 });
-    expect(JSON.stringify(incompatible.error)).toContain('Cannot resume a openai_responses session with openai_chat_completions');
+    expect(JSON.stringify(incompatible.error)).toContain(
+      'Cannot resume a openai_responses session with openai_chat_completions',
+    );
     await send(host, 2, 'turn/start', {
-      model: 'mock/', input: [{ type: 'text', text: 'missing model name' }],
+      model: 'mock/',
+      input: [{ type: 'text', text: 'missing model name' }],
     });
     const missing = await waitFor(host, (message) => message.id === 2, 'missing model error');
     expect(missing.error).toMatchObject({ code: -32602 });
@@ -1421,10 +1470,19 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const home = makeHome('turn-override-guard-race');
     const pluginDir = join(home, 'plugins', 'guard-race');
     mkdirSync(pluginDir, { recursive: true });
-    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
-      id: 'guard-race', name: 'Guard race', version: '1.0.0', main: 'index.js', requires: ['runtime'],
-    }));
-    writeFileSync(join(pluginDir, 'index.js'), `
+    writeFileSync(
+      join(pluginDir, 'plugin.json'),
+      JSON.stringify({
+        id: 'guard-race',
+        name: 'Guard race',
+        version: '1.0.0',
+        main: 'index.js',
+        requires: ['runtime'],
+      }),
+    );
+    writeFileSync(
+      join(pluginDir, 'index.js'),
+      `
       export default function setup(ctx) {
         let triggered = false;
         ctx.hooks.on('input:received', async (event) => {
@@ -1433,13 +1491,15 @@ suite('mica app-server real-user flows (mock provider)', () => {
           await ctx.runtime.submit('automatic plugin turn');
         });
       }
-    `);
+    `,
+    );
     mock.state.delayBeforeTextMs = 500;
     const host = spawnHost('turn-override-guard-race', [], home);
     hosts.push(host);
     await waitFor(host, hostReady, 'guard-race host ready', 30_000);
     await send(host, 1, 'turn/start', {
-      model: 'mock/mock-chat-client', input: [{ type: 'text', text: 'explicit client input' }],
+      model: 'mock/mock-chat-client',
+      input: [{ type: 'text', text: 'explicit client input' }],
     });
     const automatic = await waitFor(host, (message) => message.method === 'turn/started', 'automatic turn started');
     const automaticTurnId = (automatic.params?.turn as { id: string }).id;
@@ -1454,7 +1514,8 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(mock.state.requests[0]?.model).toBe('mock-chat');
 
     await send(host, 3, 'turn/start', {
-      model: 'mock/mock-chat-client', input: [{ type: 'text', text: 'client retries' }],
+      model: 'mock/mock-chat-client',
+      input: [{ type: 'text', text: 'client retries' }],
     });
     const accepted = await waitFor(host, (message) => message.id === 3, 'client retry accepted');
     expect(accepted.error).toBeUndefined();
@@ -2274,179 +2335,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
     );
   });
 
-  itE2E('mica/input/activity compacts the stored history after the session sat idle', async () => {
-    mock!.state.mode = 'tool';
-    mock!.state.requests = [];
-    mock!.state.responsesFinished = 0;
-    mock!.state.delayBeforeTextMs = 0;
-    // 上下文占用远低于任何阈值：这一条压不压完全由「人回来了」决定。
-    mock!.state.inputTokens = 10;
-    mock!.state.toolFileContent = 'y'.repeat(20_000);
-
-    const home = makeHome('input-activity');
-    mkdirSync(join(home, 'plugin-settings'), { recursive: true });
-    writeFileSync(
-      join(home, 'plugin-settings', 'auto-compact.json'),
-      JSON.stringify({
-        enabled: 'true',
-        // 阈值抬到用不到的高度：能压下来只能是空闲触发那条路。
-        quickThresholdK: '10000',
-        modelThresholdK: '10000',
-        quickLimit: '999',
-        modelLimit: '0',
-        minIntervalMinutes: '0',
-        // 0.02 分钟 = 1.2s：等得起，同时证明「要空闲够久」。
-        idleMinutes: '0.02',
-      }),
-    );
-
-    const host = spawnHost('input-activity', [], home);
-    hosts.push(host);
-    mock!.state.toolFilePath = join(host.cwd, 'idle-compact-notes.txt');
-    await waitFor(host, hostReady, 'host ready or error', 30_000);
-
-    await send(host, 1, 'turn/start', {
-      threadId: '',
-      input: [{ type: 'text', text: '写一个很大的文件' }],
-      model: 'mock/mock-chat',
-    });
-    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (input activity)');
-    const turnId = (started.params?.turn as { id?: string }).id!;
-    await waitFor(host, turnCompleted(turnId), 'turn/completed (input activity)', 30_000);
-
-    const sessionPath = () =>
-      join(
-        host.home,
-        'sessions',
-        readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'))[0]!,
-      );
-    // turn 结束时历史是完整的（阈值没到、也没有空闲触发）。
-    expect(readFileSync(sessionPath(), 'utf8')).not.toContain('[Old tool result content cleared');
-    const requestsBeforeActivity = mock!.state.requests.length;
-
-    // 会话空闲够久之后用户回到输入框：宿主把这一下敲字翻成运行期事件，插件据此
-    // 在轮次之外把已经落盘的历史压小——下一轮请求不必再为这段工具结果付费。
-    await sleep(1_500);
-    await send(host, 2, 'mica/input/activity', {});
-    await waitFor(host, (m) => m.id === 2, 'mica/input/activity response');
-
-    // 压缩不等回包（用户还在打字），轮询落盘结果。
-    let persisted = '';
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline) {
-      persisted = readFileSync(sessionPath(), 'utf8');
-      if (persisted.includes('[Old tool result content cleared during compact]')) break;
-      await sleep(100);
-    }
-    expect(persisted).toContain('[Old tool result content cleared during compact]');
-    // 记账与压缩是同一次写：文件里必须已经有计数与那次 notice。分开写会出现
-    // 「历史压了、pluginState 还是旧的」——用户关掉页面后就再也对不上账。
-    expect(persisted).toContain('"quickRuns": 1');
-    expect(persisted).toContain('已快速压缩历史');
-    // 效果写成「压缩前 → 压缩后（省 N%）」：只报省下多少读不出量级。
-    expect(persisted).toMatch(/已快速压缩历史：[\d.]+M?K? → [\d.]+M?K?（省 \d+%）/);
-    // 输入框左下角的 ctx 徽标读 displayUsage：压缩后它必须降到压缩后的占用，
-    // 否则界面还写着压缩前的数字，看着像没生效（lastUsage 保持不变是 Stats 的口径）。
-    const idleSnapshot = JSON.parse(persisted).snapshot as {
-      displayUsage?: { totalTokens?: number; compactedAt?: string };
-    };
-    expect(idleSnapshot.displayUsage?.totalTokens).toBeGreaterThan(0);
-    expect(idleSnapshot.displayUsage?.compactedAt).toEqual(expect.any(String));
-    // 轮次之外改掉的历史要通知客户端重载，否则页面一直显示压缩前的记录。
-    await waitFor(host, (m) => m.method === 'mica/sessionHistory/replaced', 'history replaced notification', 10_000);
-    // 压缩是同步的，它跑着的时候宿主连 stdin 都读不到：动手之前先告诉客户端
-    // （`mica/host/maintenance`），客户端据此把这几秒里的发送排进队列、压完再补发。
-    // 顺序必须是「开始 → 换历史 → 结束」，页面才能先换上新记录再发排队那条。
-    const maintenance = host.lines.filter((m) => m.method === 'mica/host/maintenance');
-    expect(maintenance.map((m) => m.params?.active)).toEqual([true, false]);
-    expect(maintenance.every((m) => m.params?.reason === 'compaction')).toBe(true);
-    const beganAt = host.lines.indexOf(maintenance[0]!);
-    const endedAt = host.lines.indexOf(maintenance[1]!);
-    const replacedAt = host.lines.findIndex((m) => m.method === 'mica/sessionHistory/replaced');
-    expect(beganAt).toBeLessThan(replacedAt);
-    expect(replacedAt).toBeLessThan(endedAt);
-    // 请求数没变：这次压缩全在本地，没有偷偷发起一次模型请求。
-    expect(mock!.state.requests).toHaveLength(requestsBeforeActivity);
-    expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);
-  });
-
-  itE2E('mica/input/focus compacts right after a turn, and only once per turn', async () => {
-    mock!.state.mode = 'tool';
-    mock!.state.requests = [];
-    mock!.state.responsesFinished = 0;
-    mock!.state.delayBeforeTextMs = 0;
-    // 上下文高于配置的快速压缩阈值（1K）——「抢跑」的前提是这次压缩在请求里本来也会
-    // 发生；真正的决策点仍是「人回到输入框且这一轮还没压过」。
-    mock!.state.inputTokens = 50_000;
-    mock!.state.toolFileContent = 'y'.repeat(20_000);
-
-    const home = makeHome('input-focus');
-    mkdirSync(join(home, 'plugin-settings'), { recursive: true });
-    writeFileSync(
-      join(home, 'plugin-settings', 'auto-compact.json'),
-      JSON.stringify({
-        enabled: 'true',
-        quickThresholdK: '1',
-        modelThresholdK: '10000',
-        quickLimit: '999',
-        modelLimit: '0',
-        minIntervalMinutes: '0',
-        idleMinutes: '0',
-      }),
-    );
-
-    const host = spawnHost('input-focus', [], home);
-    hosts.push(host);
-    mock!.state.toolFilePath = join(host.cwd, 'focus-compact-notes.txt');
-    await waitFor(host, hostReady, 'host ready or error', 30_000);
-
-    await send(host, 1, 'turn/start', {
-      threadId: '',
-      input: [{ type: 'text', text: '写一个很大的文件' }],
-      model: 'mock/mock-chat',
-    });
-    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (input focus)');
-    const turnId = (started.params?.turn as { id?: string }).id!;
-    await waitFor(host, turnCompleted(turnId), 'turn/completed (input focus)', 30_000);
-
-    const sessionPath = () =>
-      join(
-        host.home,
-        'sessions',
-        readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'))[0]!,
-      );
-    expect(readFileSync(sessionPath(), 'utf8')).not.toContain('[Old tool result content cleared');
-    const requestsBeforeFocus = mock!.state.requests.length;
-
-    // 会话还热着（远没到空闲阈值），焦点一回到输入框就压：用户正在输入框前，
-    // 下一步就是按发送，这是最后一个能白捡的间隙。
-    await send(host, 2, 'mica/input/focus', {});
-    await waitFor(host, (m) => m.id === 2, 'mica/input/focus response');
-
-    let persisted = '';
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline) {
-      persisted = readFileSync(sessionPath(), 'utf8');
-      if (persisted.includes('[Old tool result content cleared during compact]')) break;
-      await sleep(100);
-    }
-    expect(persisted).toContain('[Old tool result content cleared during compact]');
-    expect(persisted).toContain('"quickRuns": 1');
-    expect(persisted).toContain('回到输入框，已快速压缩历史');
-    // 请求数没变：焦点触发的压缩全在本地，没有多问一次模型。
-    expect(mock!.state.requests).toHaveLength(requestsBeforeFocus);
-
-    // 再聚焦一次不该重复扫：这一轮的历史已经压过了，没有新内容。
-    await send(host, 3, 'mica/input/focus', {});
-    await waitFor(host, (m) => m.id === 3, 'second mica/input/focus response');
-    await sleep(1_000);
-    expect(readFileSync(sessionPath(), 'utf8')).toContain('"quickRuns": 1');
-    expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);
-  });
-
-  // 真实反馈：一个 100K 上下的会话来回切焦点，对话里排出一列「已快速压缩」。低于快速压缩
-  // 阈值时这次压缩在请求里本来也不会发生，抢跑只是白扫一遍整份历史。
-  itE2E('mica/input/focus leaves a history below the quick threshold alone', async () => {
+  // 真实反馈：来回切焦点、敲几下字，对话里就排出一列「已快速压缩」。轮次之外的压缩已经
+  // 取消，阈值再低也不该压——这两条客户端信号现在只是「人在不在」的提示。
+  itE2E('mica/input/focus and mica/input/activity never compact outside a request', async () => {
     mock!.state.mode = 'tool';
     mock!.state.requests = [];
     mock!.state.responsesFinished = 0;
@@ -2454,22 +2345,22 @@ suite('mica app-server real-user flows (mock provider)', () => {
     mock!.state.inputTokens = 5_000;
     mock!.state.toolFileContent = 'z'.repeat(20_000);
 
-    const home = makeHome('input-focus-small');
+    const home = makeHome('input-focus');
     mkdirSync(join(home, 'plugin-settings'), { recursive: true });
+    // 阈值调到最低：任何一次「会压」的判定都立刻生效，压缩只可能来自轮次之外那两条信号。
     writeFileSync(
       join(home, 'plugin-settings', 'auto-compact.json'),
       JSON.stringify({
         enabled: 'true',
-        quickThresholdK: '100',
-        modelThresholdK: '100',
+        quickThresholdK: '1',
+        modelThresholdK: '1',
         quickLimit: '999',
         modelLimit: '0',
         minIntervalMinutes: '0',
-        idleMinutes: '0',
       }),
     );
 
-    const host = spawnHost('input-focus-small', [], home);
+    const host = spawnHost('input-focus', [], home);
     hosts.push(host);
     mock!.state.toolFilePath = join(host.cwd, 'focus-small-notes.txt');
     await waitFor(host, hostReady, 'host ready or error', 30_000);
@@ -2495,13 +2386,21 @@ suite('mica app-server real-user flows (mock provider)', () => {
     for (const id of [2, 3, 4]) {
       await send(host, id, 'mica/input/focus', {});
       await waitFor(host, (m) => m.id === id, `mica/input/focus response ${id}`);
+      await send(host, id + 10, 'mica/input/activity', {});
+      await waitFor(host, (m) => m.id === id + 10, `mica/input/activity response ${id}`);
     }
     await sleep(500);
 
     const after = readFileSync(sessionPath(), 'utf8');
+    // 阈值是 1K，这一轮里的自动压缩照常发生；这里要证明的是「发送轮次之外的信号之后
+    // 一次都没多压」。
+    const quickRunsOf = (raw: string) =>
+      (JSON.parse(raw) as { snapshot?: { pluginState?: Record<string, { quickRuns?: number }> } }).snapshot
+        ?.pluginState?.['auto-compact']?.quickRuns ?? 0;
     expect(after).not.toContain('[Old tool result content cleared');
     expect(after).not.toContain('回到输入框');
-    expect(after).not.toContain('"quickRuns": 1');
+    expect(after).not.toContain('已快速压缩历史');
+    expect(quickRunsOf(after)).toBe(quickRunsOf(before));
     expect(host.lines.filter((m) => m.method === 'error')).toEqual([]);
   });
 

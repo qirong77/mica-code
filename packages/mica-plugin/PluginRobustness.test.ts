@@ -84,6 +84,7 @@ function manifest(requires: string[]) {
     desktopSessionMenu: [],
     skills: [],
     roles: [],
+    completions: [],
   };
 }
 

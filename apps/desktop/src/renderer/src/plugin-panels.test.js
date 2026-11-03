@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   applyPanelResult,
   clearMenuCache,
+  isOpenableLink,
   loadPluginPanels,
   menuCacheKey,
   menuShortcutsOf,
@@ -229,6 +230,20 @@ describe('pluginPanelTabs', () => {
     expect(pluginPanelTabs(view, '技能文件').activeIndex).toBe(1)
     expect(pluginPanelTabs(view, '已经删掉的分区').activeIndex).toBe(0)
     expect(pluginPanelTabs([], '技能文件').activeIndex).toBe(0)
+  })
+})
+
+describe('isOpenableLink', () => {
+  test('只认能交给系统浏览器的地址', () => {
+    expect(isOpenableLink('https://prd.example/42')).toBe(true)
+    expect(isOpenableLink('http://127.0.0.1:8080/x?a=1')).toBe(true)
+    expect(isOpenableLink('mailto:a@b.com')).toBe(true)
+    // 这些既不点、也不该被页面拿去导航
+    expect(isOpenableLink('javascript:alert(1)')).toBe(false)
+    expect(isOpenableLink('file:///etc/passwd')).toBe(false)
+    expect(isOpenableLink('zhusu/pay')).toBe(false)
+    expect(isOpenableLink('')).toBe(false)
+    expect(isOpenableLink(undefined)).toBe(false)
   })
 })
 

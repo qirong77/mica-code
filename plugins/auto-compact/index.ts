@@ -1,14 +1,12 @@
 import type { MicaPlugin, PluginAgentHandle, PluginContext } from '@packages/mica-plugin/index.js';
 import { formatTokenCount } from '@packages/mica-common/format.js';
 import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
-import type { RuntimeTurnBeforeHookEvent, RuntimeTurnAfterHookEvent } from '@packages/mica-runtime/index.js';
+import type { RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
 import {
   EMPTY_COUNTERS,
   decideAutoCompactStep,
   normalizeCounters,
   settingsFromValues,
-  shouldCompactOnFocus,
-  shouldCompactOnReturn,
   shouldEscalateToModel,
   type AutoCompactCounters,
   type AutoCompactStep,
@@ -20,15 +18,17 @@ const PLUGIN_ID = 'auto-compact';
  * 自动压缩：每次模型请求前按即将发送的历史检查，包括恢复会话后的首个请求。
  * 自动清理保留最近的消息和完整工具批次；摘要保留当前用户轮次，最终回答后不再额外压缩。
  *
- * 四条规则：
+ * 三条规则：
  * - 快速压缩：ctx ≥ quickThresholdK 且次数没用完，本地把工具结果 / 工具参数正文 /
  *   媒体块换成占位符（不调用模型、不丢轮次）。
  * - 模型压缩：本地清理后仍 ≥ modelThresholdK 且次数没用完，调用模型生成 checkpoint 摘要。
  * - 节流：**同一轮运行中**两次压缩至少间隔 minIntervalMinutes，免得同一段上下文被模型
- *   反复请求时来回压。跨轮不沿用这个冷却：上一轮压过、这一轮又超阈值就该马上压；空闲
- *   触发也不看它。唯一的例外是同一次触发里「快速 →（清不掉）模型」的升级算一次。
- * - 空闲回来：会话空闲超过 idleMinutes、用户又在输入框里重新敲字时，先压一次快速压缩。
- *   这一条不看阈值——它抢的是「下一轮请求马上就到」的提前量，把压缩从请求里挪到间隙里。
+ *   反复请求时来回压。跨轮不沿用这个冷却：上一轮压过、这一轮又超阈值就该马上压。唯一
+ *   的例外是同一次触发里「快速 →（清不掉）模型」的升级算一次。
+ *
+ * 只在请求边界动手：轮次之外（空闲、焦点回到输入框）一律不压。那两条抢跑看起来能白捡
+ * 一个间隙，实际要么在上下文远未到阈值时白扫几十 MB 历史，要么趁用户还没按发送就把工具
+ * 结果换成占位符。压不压交给用户手动触发：命令面板的「快速压缩（本地）」或 /compact。
  *
  * 计数存在**会话快照的插件状态**里（`ctx.sessionState`），不是宿主的一张全局表：
  * 一条会话压过几次，是这条会话自己的事实，resume / fork 都该跟着走。设置的默认值在
@@ -140,61 +140,12 @@ const plugin: MicaPlugin = {
     // 记录本轮起点：最小间隔只约束同一轮里的重复压缩。没有会话级状态时写不进去，
     // 压缩本身也就没有计数可用；一次性运行整条自动压缩都不生效。
     if (agentApi.mode !== 'one-shot' && ctx.sessionState) {
-      const canCompactIdle = Boolean(agentApi.compactIdleHistory);
-      const markTurnStart = (owner?: unknown) => {
-        const now = Date.now();
-        const counters = normalizeCounters(ctx.sessionState!.get(owner));
-        counters.turnStartedAt = new Date(now).toISOString();
-        counters.turnCount += 1;
-        // 活动时间只服务空闲触发；宿主没有这条通路时不必每轮多写一次。
-        if (canCompactIdle) counters.lastActivityAt = new Date(now).toISOString();
-        persistState(ctx, counters, owner);
-      };
-      const turnBefore = ctx.hooks.on<RuntimeTurnBeforeHookEvent>('turn:before', (event) =>
-        markTurnStart(event?.owner),
-      );
-      const disposers: Array<() => void> = [() => turnBefore.dispose()];
-
-      // 空闲后重新输入。只有「宿主能独占写会话文件」时才成立：`mica exec` 不落盘，
-      // TUI 的压缩走 `/compact`。缺这条通路时连订阅都不建，免得每敲一次字都白算。
-      if (canCompactIdle) {
-        const markActivity = (at: number, owner?: unknown) => {
-          persistState(
-            ctx,
-            {
-              ...normalizeCounters(ctx.sessionState!.get(owner)),
-              lastActivityAt: new Date(at).toISOString(),
-            },
-            owner,
-          );
-        };
-        const events = ctx.events.on('event', (event) => {
-          // 焦点回到输入框：用户随时可能按下发送，这是最后一个能白捡的间隙。比「敲了
-          // 第一个字」早一步——等按键时，压缩与这次请求已经撞在一起了。
-          if (event.type === 'input:focus') {
-            // 不动 `lastActivityAt`：它量的是「多久没说话」，点进输入框不算说话。改了它
-            // 会让紧接着的打字看到 idle≈0，空闲触发那条规则就再也不会生效。
-            void compactOnFocus(ctx, agentApi, Date.now(), event.owner);
-            return;
-          }
-          if (event.type !== 'input:activity') return;
-          const now = Date.now();
-          // setup 之后宿主才可能恢复会话，rewind 也会换掉状态；每次从当前快照读取。
-          const idleMs = now - seedLastActivity(ctx, event.owner);
-          markActivity(now, event.owner);
-          void compactOnReturn(ctx, agentApi, idleMs, now, event.owner);
-        });
-        const turnAfter = ctx.hooks.on<RuntimeTurnAfterHookEvent>('turn:after', (event) =>
-          markActivity(Date.now(), event?.owner),
-        );
-        disposers.push(
-          () => events.dispose(),
-          () => turnAfter.dispose(),
-        );
-      }
-      ctx.onDispose(() => {
-        for (const dispose of disposers) dispose();
+      const turnBefore = ctx.hooks.on<RuntimeTurnBeforeHookEvent>('turn:before', (event) => {
+        const counters = normalizeCounters(ctx.sessionState!.get(event?.owner));
+        counters.turnStartedAt = new Date(Date.now()).toISOString();
+        persistState(ctx, counters, event?.owner);
       });
+      ctx.onDispose(() => turnBefore.dispose());
     }
 
     if (ctx.settings.validate().length === 0) {
@@ -227,26 +178,8 @@ function readSettings(ctx: PluginContext, owner?: unknown) {
   return settings;
 }
 
-/**
- * 会话状态里没有活动时间（第一次跑这条会话、或者从更早的版本升上来）时当成「刚刚
- * 活动过」：少压一次无害，把一条刚打开的会话当成空闲三天反而会平白多写一次盘。
- */
-function seedLastActivity(ctx: PluginContext, owner?: unknown): number {
-  const parsed = Date.parse(normalizeCounters(ctx.sessionState?.get(owner)).lastActivityAt ?? '');
-  return Number.isFinite(parsed) ? parsed : Date.now();
-}
-
 function persistState(ctx: PluginContext, value: AutoCompactCounters, owner?: unknown): void {
   ctx.sessionState?.set(value, owner);
-}
-
-/** 空闲时长的说法：「22 分钟」「3.5 小时」比「1320 分钟」好读。 */
-function formatIdle(idleMs: number): string {
-  const minutes = idleMs / 60_000;
-  if (minutes < 1) return '不到 1 分钟';
-  if (minutes < 60) return `${Math.round(minutes)} 分钟`;
-  const hours = minutes / 60;
-  return `${hours < 10 ? hours.toFixed(1) : Math.round(hours)} 小时`;
 }
 
 /**
@@ -260,150 +193,6 @@ function formatCompactGain(beforeTokens: number, afterTokens: number, savedToken
   if (beforeTokens <= 0) return drop;
   const ratio = Math.round((savedTokens / beforeTokens) * 100);
   return ratio > 0 && ratio <= 100 ? `${drop}（省 ${ratio}%）` : drop;
-}
-
-/**
- * 两条提前量共用的一次快速压缩：空闲回来（`idle`）与焦点回到输入框（`focus`）。
- *
- * 记账与提示必须在落盘**之前**写（`afterApply`）：宿主压缩完就把会话文件写死了，之后
- * 写的状态只能等下一轮才带上——用户可能直接关掉页面，那次压缩就变成「压了但没记账」。
- *
- * 宿主回 `skipped` 表示这次没压成（`busy` 会话正忙 / 别的进程持锁，`empty` 没有可清理
- * 的内容），那也不消耗次数——下一次请求仍按阈值判断。
- */
-async function runQuickCompact(input: {
-  ctx: PluginContext;
-  agentApi: NonNullable<PluginContext['agent']>;
-  /** 日志里区分是哪条提前量触发的。 */
-  trigger: 'idle' | 'focus';
-  nowMs: number;
-  owner?: unknown;
-  /** 压缩前后的量只有落盘那一刻才知道，文案因此是个回调。 */
-  describe: (gain: string) => string;
-  /** 额外进日志的上下文（空闲多久回来的之类），只用于排查。 */
-  logContext?: Record<string, unknown>;
-}): Promise<void> {
-  const { ctx, agentApi, trigger, nowMs, owner, describe, logContext } = input;
-  const compact = agentApi.compactIdleHistory;
-  if (!compact) return;
-
-  const describeGain = (beforeTokens: number, afterTokens: number, savedTokens: number) =>
-    describe(formatCompactGain(beforeTokens, afterTokens, savedTokens));
-
-  try {
-    const outcome = await compact({
-      afterApply: ({ savedTokens, beforeTokens, afterTokens }) => {
-        const next = normalizeCounters(ctx.sessionState?.get(owner));
-        next.quickRuns += 1;
-        next.lastKind = 'quick';
-        next.lastRunAt = new Date(nowMs).toISOString();
-        // 记下这次压缩覆盖到哪一轮：下一次聚焦据此判断「有没有新内容」，不必再扫一遍。
-        next.compactedTurnCount = next.turnCount;
-        next.lastSavedTokens = Math.round(savedTokens) || 0;
-        next.lastActivityAt = new Date(nowMs).toISOString();
-        persistState(ctx, next, owner);
-        // 界面上看得见的一次：否则「到底压没压」只能翻插件日志。带 command 是为了让
-        // 「同一段历史被连压几次」就地合并成一条，而不是在对话里排成一列；`replace` 让
-        // 上一次的旧结论也被顶掉——这两条提前量几小时里会各跑一次，用户要看的是最近一次。
-        ctx.ui?.notice(describeGain(beforeTokens, afterTokens, savedTokens), {
-          owner,
-          command: 'auto-compact',
-          replace: true,
-        });
-      },
-    });
-    if (outcome.status === 'skipped') {
-      ctx.logger.info(`auto-compact:${trigger}-skipped`, { ...logContext, reason: outcome.reason });
-      return;
-    }
-    const gain = describeGain(outcome.beforeTokens, outcome.afterTokens, outcome.savedTokens);
-    ctx.logger.info(`auto-compact:${trigger}-applied`, {
-      ...logContext,
-      savedTokens: outcome.savedTokens,
-      beforeTokens: outcome.beforeTokens,
-      afterTokens: outcome.afterTokens,
-    });
-    ctx.health.report({ level: 'ok', message: gain });
-  } catch (error) {
-    // 提前量失败不该影响用户说话：记日志 + 一条可见但不打断的状态。
-    const message = error instanceof Error ? error.message : String(error);
-    ctx.logger.warn(`auto-compact:${trigger}-failed`, { error: message });
-    ctx.health.report({
-      level: 'warn',
-      message: `快速压缩未能生效：${message}`,
-      hint: '会话下次请求时仍会按阈值自动压缩；持续出现请查看插件日志。',
-    });
-  }
-}
-
-/**
- * 抢跑压缩要判断的「现在多大」：上一次真实请求的输入量 + 当前模型的窗口。
- *
- * 用 lastUsage 而不是自己估一遍历史：它和界面上那个 ctx 徽标同源，插件与用户看到的是
- * 同一个数；压缩保留它（Stats 对账口径），所以压缩之后再读也不会立刻变小。
- */
-function contextUsage(agentApi: NonNullable<PluginContext['agent']>): {
-  ctxTokens: number | null;
-  contextWindowSize?: number;
-} {
-  const usage = agentApi.lastUsage?.() ?? null;
-  const window = agentApi.contextWindowSize;
-  return {
-    ctxTokens: usage && Number.isFinite(usage.inputTokens) ? usage.inputTokens : null,
-    ...(Number.isFinite(window) && window! > 0 ? { contextWindowSize: window } : {}),
-  };
-}
-
-/**
- * 用户回来了：会话空闲够久、且上下文已经大到请求时会压，就先做一次快速压缩。
- *
- * 阈值是硬条件：空闲本身不是理由，空闲之后那段历史「大到本来就要压」才是。
- */
-async function compactOnReturn(
-  ctx: PluginContext,
-  agentApi: NonNullable<PluginContext['agent']>,
-  idleMs: number,
-  nowMs: number,
-  owner?: unknown,
-): Promise<void> {
-  const settings = readSettings(ctx, owner);
-  const counters = normalizeCounters(ctx.sessionState?.get(owner));
-  if (!shouldCompactOnReturn({ settings, counters, idleMs, ...contextUsage(agentApi) })) return;
-  await runQuickCompact({
-    ctx,
-    agentApi,
-    trigger: 'idle',
-    nowMs,
-    owner,
-    describe: (gain) => `空闲 ${formatIdle(idleMs)}后重新输入，已快速压缩历史：${gain}`,
-    logContext: { idleMs },
-  });
-}
-
-/**
- * 焦点回到输入框时的快速压缩：比「敲了第一个字」早一步。
- *
- * 不看空闲时长——人已经坐在输入框前、随时可能按发送。守住不白干的是三条：上下文已到
- * 快速压缩阈值、上一次压缩之后确实跑过新一轮（`shouldCompactOnFocus`）、以及宿主自己
- * 回的 `busy`。点进点出输入框是高频动作，三条缺一条就会变成「没在对话却一路在压」。
- */
-async function compactOnFocus(
-  ctx: PluginContext,
-  agentApi: NonNullable<PluginContext['agent']>,
-  nowMs: number,
-  owner?: unknown,
-): Promise<void> {
-  const settings = readSettings(ctx, owner);
-  const counters = normalizeCounters(ctx.sessionState?.get(owner));
-  if (!shouldCompactOnFocus({ settings, counters, ...contextUsage(agentApi) })) return;
-  await runQuickCompact({
-    ctx,
-    agentApi,
-    trigger: 'focus',
-    nowMs,
-    owner,
-    describe: (gain) => `回到输入框，已快速压缩历史：${gain}`,
-  });
 }
 
 /**

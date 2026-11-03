@@ -5955,15 +5955,14 @@ body.is-resizing-btw {
   }
 }
 
-/* 面板弹窗定高：切页签时内容长短不一，不定高就会一伸一缩。内容在 .chat-plugin-panel-body
-   里自己滚，页签行留在顶上。 */
+/* 面板弹窗定高：切分区时内容长短不一，不定高就会一伸一缩。左栏固定、右栏自己滚。 */
 .chat-plugin-modal {
-  width: min(920px, 100%);
-  max-width: min(920px, 100%);
+  width: min(1080px, 100%);
+  max-width: min(1080px, 100%);
   height: min(84vh, 760px);
 }
 
-/* 内容区交给面板自己排版：ModalShell 默认的 16px 内边距会让页签行与行内容错开一条。 */
+/* 内容区交给面板自己排版：ModalShell 默认的 16px 内边距会让分栏与标题错开一条。 */
 .chat-plugin-modal .chat-modal-body {
   display: flex;
   min-height: 0;
@@ -5972,13 +5971,68 @@ body.is-resizing-btw {
   padding: 0;
 }
 
-/* 设置页那套控件的外壳：页签 + 可滚动内容。 */
+/* 设置页那套控件的外壳：左栏 + 右栏。 */
 .chat-plugin-panel {
   display: flex;
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* 左栏没有搜索框，只有一列分区：让列表占满整栏（SplitView 默认给头部留了一行 auto）。 */
+.chat-plugin-panel .split-rail {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.chat-plugin-panel .split-view {
+  flex: 1 1 auto;
+  height: auto;
+  grid-template-columns: 208px minmax(0, 1fr);
+  border: 0;
+  border-radius: 0;
+}
+
+/* 右栏：标题条固定，内容自己滚。 */
+.chat-plugin-detail {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.chat-plugin-detail-head {
+  display: grid;
+  flex: none;
+  gap: 3px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.chat-plugin-detail-head h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-subhead);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.chat-plugin-detail-head p {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--text-aux);
+  line-height: 1.5;
+}
+
+.chat-plugin-detail-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 6px 0 16px;
+  overscroll-behavior: contain;
 }
 
 .chat-plugin-panel-body {
@@ -5992,15 +6046,12 @@ body.is-resizing-btw {
   overscroll-behavior: contain;
 }
 
-/* 页签下的那一块：行本身就带分隔线，外面不再套卡片（弹窗已经是那个「面」）。 */
-.chat-plugin-tab-pane {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
+/* 分区内容：行本身就带分隔线，外面不再套卡片（右栏已经是那个「面」）。 */
+.chat-plugin-pane {
+  display: grid;
 }
 
-.chat-plugin-tab-pane > .chat-plugin-rows > .setting-row:first-child {
+.chat-plugin-pane > .chat-plugin-rows > .setting-row:first-child {
   border-top: 0;
 }
 
@@ -6012,6 +6063,42 @@ body.is-resizing-btw {
   font-size: var(--text-body);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 声明了 wrap 的值（一句话讲清需求、副本路径）：换行显示，省略就等于没写。 */
+.chat-plugin-value.is-wrap {
+  overflow: visible;
+  line-height: 1.6;
+  text-overflow: clip;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 一块正文：整段话（需求描述、结论），保留段落与换行。 */
+.chat-plugin-text {
+  max-width: 78ch;
+  margin: 0;
+  padding: 10px 16px 4px;
+  color: var(--text);
+  font-size: var(--text-body);
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 行里的值是一个地址：可点，交给系统浏览器。 */
+.chat-plugin-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-plugin-link:hover {
+  text-decoration: underline;
 }
 
 .chat-plugin-value.tone-ok {
@@ -6066,7 +6153,7 @@ body.is-resizing-btw {
 }
 
 /* 空态放在已经在「一块面」里的地方：外框由分区块提供，这里不再套第二层描边。 */
-.chat-plugin-tab-pane .ui-empty-wrap,
+.chat-plugin-pane .ui-empty-wrap,
 .collapsible-body .ui-empty-wrap {
   border: 0;
   border-radius: 0;

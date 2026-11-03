@@ -51,6 +51,8 @@ export function activeCompletion(value, caret) {
 
 export function completionInsertText(item) {
   if (!item) return ''
+  // 插件声明的条目自带插入正文（一段提示词），不是链接
+  if (item.kind === 'prompt') return String(item.insert ?? '')
   if (item.kind === 'skill' || item.kind === 'mcp') {
     // `path` 是浮层选项上的统一字段；host 的原始候选里 MCP 叫 `url`。
     return completionLink(item.kind, item.name, item.path || item.url)
@@ -160,7 +162,7 @@ export function skillCompletionOptions(items, query, limit = SKILL_COMPLETION_LI
  * 所以不分组、按同一套评分（完全匹配 → 前缀 → 包含 → 只在说明里命中）排。
  */
 export function slashCompletionOptions(
-  { skills, mcpServers } = {},
+  { skills, mcpServers, completions } = {},
   query,
   limit = SKILL_COMPLETION_LIMIT
 ) {
@@ -178,12 +180,21 @@ export function slashCompletionOptions(
       name: String(server?.name ?? ''),
       description: mcpDescription(server),
       sourceLabel: sourceOf(server)?.label ?? ''
+    })),
+    ...(Array.isArray(completions) ? completions : []).map((completion) => ({
+      kind: 'prompt',
+      item: completion,
+      name: String(completion?.name ?? ''),
+      description: String(completion?.description ?? ''),
+      sourceLabel: sourceOf(completion)?.label ?? ''
     }))
   ]
   const ranked = rankCompletions(entries, query, limit)
-  return ranked.map((entry) =>
-    entry.kind === 'mcp' ? mcpOption(entry.item, query) : skillOption(entry.item, query)
-  )
+  return ranked.map((entry) => {
+    if (entry.kind === 'mcp') return mcpOption(entry.item, query)
+    if (entry.kind === 'prompt') return promptOption(entry.item, query)
+    return skillOption(entry.item, query)
+  })
 }
 
 /**
@@ -258,6 +269,29 @@ function mcpOption(server, query) {
     ...(source ? { source, sourceLabel: source.label } : {}),
     // label 前面多了 `mcp:` 四个字符，名称里的下标整体右移
     highlights: matchIndexes(name, query).map((index) => index + 'mcp:'.length),
+    descriptionHighlights: matchIndexes(description, query)
+  }
+}
+
+/**
+ * 插件清单声明的条目：选中后插进输入框的是插件写好的那段正文。
+ *
+ * `path` 留空——它没有可点开的位置，插入的就是提示词本身，悬停只显示来源（插件 id）。
+ */
+function promptOption(completion, query) {
+  const name = String(completion?.name ?? '')
+  const description = String(completion?.description ?? '')
+  const source = sourceOf(completion)
+  return {
+    key: `prompt:${completion?.pluginId ?? ''}:${name}`,
+    kind: 'prompt',
+    name,
+    insert: String(completion?.insert ?? ''),
+    label: `/${name}`,
+    description,
+    ...(source ? { source, sourceLabel: source.label } : {}),
+    // label 前面多了 `/`，名称里的下标整体右移一位
+    highlights: matchIndexes(name, query).map((index) => index + 1),
     descriptionHighlights: matchIndexes(description, query)
   }
 }
