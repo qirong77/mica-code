@@ -6,7 +6,7 @@
   "icon": "server",
   "main": "index.ts",
   "priority": 40,
-  "requires": ["tools", "prompt", "settings", "desktop"],
+  "requires": ["tools", "prompt", "sessionState", "settings", "desktop"],
   "mica": {
     "apiVersion": 1
   },

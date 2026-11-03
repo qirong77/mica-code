@@ -61,6 +61,58 @@ export type PluginPanelItem = {
   actions?: PluginPanelItemAction[];
 };
 
+/**
+ * 表格的一列。
+ *
+ * `grow` 给「会长的那一列」（名称、地址）：其余列按内容宽度，它吃掉剩下的空间。没有
+ * 列宽像素值——面板只有 340px 的抽屉和半个窗口两种宽度，写死的像素在另一种上必然错。
+ */
+export type PluginPanelTableColumn = {
+  key: string;
+  label: string;
+  grow?: boolean;
+  /**
+   * 这一列画行尾的操作按钮（`row.actions`）。
+   *
+   * 按钮落在第几列由插件决定：机器清单里「操作」排在两列勾选之前，别处可能放在最后。
+   * 不声明任何一列时宿主补一列到最右——只有编辑/删除而没有勾选的表不必写这一项。
+   */
+  actions?: boolean;
+};
+
+/**
+ * 表格里的一格。
+ *
+ * 三种形态：纯文本（可带语气色）、可点的链接、勾选框。勾选框不是「一个动作」而是**一格的
+ * 状态**，所以它带自己的 `action`：切换时宿主用这个动作提交，带上行的 `key`、`values.check`
+ * 与 `values.column`。这样同一张表里两列勾选框不需要插件自己猜点的是哪一列。
+ */
+export type PluginPanelTableCell = {
+  text?: string;
+  tone?: PluginPanelTone;
+  link?: string;
+  check?: { checked: boolean; action: string; disabled?: boolean };
+};
+
+export type PluginPanelTableRow = {
+  key: string;
+  /** 按列 key 给格子；没给的列画空。 */
+  cells: Record<string, PluginPanelTableCell>;
+  /** 行尾的操作按钮（编辑、删除…），与条目上的 `actions` 同形。 */
+  actions?: PluginPanelItemAction[];
+};
+
+/**
+ * 一张表格：清单类内容（机器清单、频道清单）的唯一形状。
+ *
+ * 为什么不是「更多条目」：条目是「标签 — 一个值 + 一排按钮」，几列并列的事实（名称 / 地址 /
+ * 状态 / 勾选）塞进去只能靠拼字符串对齐，窄容器里一换行就全散。表格由宿主排版，列是对齐的。
+ */
+export type PluginPanelTable = {
+  columns: PluginPanelTableColumn[];
+  rows: PluginPanelTableRow[];
+};
+
 /** 输入框：值随同一次动作一起回传，插件负责把它落到自己的状态里。 */
 export type PluginPanelField = {
   key: string;
@@ -131,6 +183,8 @@ export type PluginPanelSection = {
   rows?: PluginPanelRow[];
   /** 条目列表；为空时显示 `empty`。 */
   items?: PluginPanelItem[];
+  /** 表格；排在条目下面（两者一般只用一种）。 */
+  table?: PluginPanelTable;
   empty?: string;
   /** 输入框；当前值由插件给，动作之后重新取视图。 */
   fields?: PluginPanelField[];
@@ -174,6 +228,13 @@ export type PluginPanelStatusBar = {
   tone?: PluginPanelTone;
   /** 右侧的一行补充（主机、模式）。 */
   detail?: string;
+  /**
+   * 点这颗状态时打开哪一块分区（分区 `title`）。不给就打开面板的第一块。
+   *
+   * 状态行回答「现在是哪台机器」，接下来自然会有人想看「还能切到哪台」——那就该进面板，
+   * 而不是让插件在状态行里再摊开一份清单。
+   */
+  section?: string;
 };
 
 export type PluginPanelShortcutState = {
@@ -367,6 +428,10 @@ const MAX_TEXT = 400;
 const MAX_SECTION_TEXT = 4000;
 const MAX_ROWS = 40;
 const MAX_ITEMS = 40;
+const MAX_TABLE_COLUMNS = 8;
+const MAX_TABLE_ROWS = 40;
+const MAX_TABLE_CELL = 120;
+const MAX_ROW_ACTIONS = 4;
 const MAX_FIELDS = 12;
 const MAX_FIELD_OPTIONS = 8;
 const MAX_ACTIONS = 8;
@@ -491,6 +556,85 @@ function fieldOf(input: unknown): PluginPanelField | null {
   };
 }
 
+function tableCellOf(input: unknown): PluginPanelTableCell | null {
+  const raw = record(input);
+  const checkRaw = record(raw.check);
+  const checkAction = text(checkRaw.action, 60);
+  if (checkAction) {
+    return {
+      check: {
+        checked: checkRaw.checked === true,
+        action: checkAction,
+        ...(checkRaw.disabled === true ? { disabled: true } : {}),
+      },
+    };
+  }
+  const body = text(raw.text, MAX_TABLE_CELL);
+  const link = text(raw.link, MAX_CELL_LINK);
+  if (!body && !link) return null;
+  const cellTone = tone(raw.tone);
+  return {
+    ...(body ? { text: body } : {}),
+    ...(cellTone ? { tone: cellTone } : {}),
+    ...(link ? { link } : {}),
+  };
+}
+
+function tableOf(input: unknown): PluginPanelTable | null {
+  const raw = record(input);
+  const columns = list(raw.columns)
+    .slice(0, MAX_TABLE_COLUMNS)
+    .map((entry) => {
+      const column = record(entry);
+      const key = text(column.key, 40);
+      const label = text(column.label, 40);
+      if (!key || !label) return null;
+      const normalized: PluginPanelTableColumn = {
+        key,
+        label,
+        ...(column.grow === true ? { grow: true } : {}),
+        ...(column.actions === true ? { actions: true } : {}),
+      };
+      return normalized;
+    })
+    .filter((entry): entry is PluginPanelTableColumn => entry !== null);
+  if (columns.length === 0) return null;
+  const rows = list(raw.rows)
+    .slice(0, MAX_TABLE_ROWS)
+    .map((entry) => {
+      const row = record(entry);
+      const key = text(row.key, 200);
+      if (!key) return null;
+      const rawCells = record(row.cells);
+      const cells: Record<string, PluginPanelTableCell> = {};
+      for (const column of columns) {
+        const cell = tableCellOf(rawCells[column.key]);
+        if (cell) cells[column.key] = cell;
+      }
+      const actions = list(row.actions)
+        .slice(0, MAX_ROW_ACTIONS)
+        .map((entryAction) => actionOf(entryAction))
+        .filter((entryAction): entryAction is PluginPanelAction => entryAction !== null)
+        .map(({ id, label: actionLabel, tone: actionTone, disabled }) => ({
+          id,
+          label: actionLabel,
+          ...(actionTone ? { tone: actionTone } : {}),
+          ...(disabled ? { disabled } : {}),
+        }));
+      if (Object.keys(cells).length === 0 && actions.length === 0) return null;
+      const normalized: PluginPanelTableRow = {
+        key,
+        cells,
+        ...(actions.length > 0 ? { actions } : {}),
+      };
+      return normalized;
+    })
+    .filter((entry): entry is PluginPanelTableRow => entry !== null);
+  // 只有列没有行不画表：空表头比一句「还没有」占地方，插件该用 `empty` 说话。
+  if (rows.length === 0) return null;
+  return { columns, rows };
+}
+
 function sectionOf(input: unknown): PluginPanelSection | null {
   const raw = record(input);
   const title = text(raw.title, 60);
@@ -517,6 +661,7 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     .slice(0, MAX_ITEMS)
     .map((entry) => itemOf(entry))
     .filter((entry): entry is PluginPanelItem => entry !== null);
+  const table = tableOf(raw.table);
   const fields = list(raw.fields)
     .slice(0, MAX_FIELDS)
     .map((entry) => fieldOf(entry))
@@ -535,6 +680,7 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     !body &&
     rows.length === 0 &&
     items.length === 0 &&
+    !table &&
     fields.length === 0 &&
     actions.length === 0
   )
@@ -546,6 +692,7 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     ...(title && raw.collapsed === true ? { collapsed: true } : {}),
     ...(rows.length > 0 ? { rows } : {}),
     ...(items.length > 0 ? { items } : {}),
+    ...(table ? { table } : {}),
     ...(empty ? { empty } : {}),
     ...(fields.length > 0 ? { fields } : {}),
     ...(commit ? { commit } : {}),
@@ -575,6 +722,7 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
   const statusBarLabel = text(statusBarRaw.label, 40);
   const statusBarDetail = text(statusBarRaw.detail, 120);
   const statusBarTone = tone(statusBarRaw.tone);
+  const statusBarSection = text(statusBarRaw.section, 60);
   return {
     title,
     ...(subtitle ? { subtitle } : {}),
@@ -587,6 +735,7 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
             label: statusBarLabel,
             ...(statusBarTone ? { tone: statusBarTone } : {}),
             ...(statusBarDetail ? { detail: statusBarDetail } : {}),
+            ...(statusBarSection ? { section: statusBarSection } : {}),
           },
         }
       : {}),

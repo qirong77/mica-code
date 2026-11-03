@@ -19,6 +19,7 @@ import {
   IconCheck,
   IconCommand,
   IconCopy,
+  IconCornerDownRight,
   IconCornerUpLeft,
   IconDots,
   IconExternalLink,
@@ -6507,7 +6508,9 @@ export function ChatView({
     <>
       {activeRole !== 'default' && <span className="chat-prompt-role">{activeRole}</span>}
       <span className="chat-prompt-caret" aria-hidden="true">
-        {queueReady ? '↳' : activeLoop ? '⏰' : '›'}
+        {/* 排队态用图标而不是 ↳ 字形：行首字号是 18px 粗体，那个字形比旁边的正文
+            大一截，看起来像挂了个箭头。图标跟着 .chat-prompt-caret 走自己的尺寸。 */}
+        {queueReady ? <IconCornerDownRight size={13} stroke={1.8} /> : activeLoop ? '⏰' : '›'}
       </span>
     </>
   )

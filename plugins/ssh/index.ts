@@ -3,6 +3,7 @@ import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { resolveMicaHome } from '@packages/mica-config/index.js';
 import { createPanelHandler } from './Panel.js';
 import { closeAllControlMasters, createRemoteContext } from './Remote.js';
+import { createNoopScope, createScope, type SshScope } from './Scope.js';
 import { SessionManager } from './Session.js';
 import { createTools } from './Tools.js';
 import { createPromptSection } from './Prompt.js';
@@ -16,12 +17,13 @@ import { readData } from './Hosts.js';
  * 私钥、ssh-agent、ProxyJump、2FA、known_hosts。自己写一套只会在「跳板机连不上」「key 要
  * 不要 passphrase」这些地方反复出问题。
  *
- * 数据都在 `$MICA_HOME/plugin-data/ssh/`：`data.json` 主机清单与开关、`known_hosts` 固定的
- * 主机指纹、`audit.jsonl` 调用记录、`panel.json` 面板草稿、`secrets.json` 口令（0600 明文，
- * 只有插件自己读——模型只看到别名，见 `Secrets.ts`）。
+ * 数据都在 `$MICA_HOME/plugin-data/ssh/`：`data.json` 主机清单、`known_hosts` 固定的
+ * 主机指纹、`audit.jsonl` 调用记录、`panel.json` 面板草稿与上次连接结果、`secrets.json`
+ * 密码（0600 明文，只有插件自己读——模型只看到别名，见 `Secrets.ts`）。
  *
- * 开关（`data.json.enabled`）决定这个插件**是否对模型存在**：关着就不注册工具、不注入
- * prompt、输入框上方也不显示状态栏。面板里那个开关改完立刻生效，不需要重开会话。
+ * 「模型能用哪几台」跟着会话走：面板里「添加到会话」那一列是本次会话的集合（存会话快照，
+ * 见 `Scope.ts`），「自动添加到会话」是新会话的初值。所以没有全局开关；工具只在清单里
+ * 有机器时注册，具体能碰哪台由每次调用现读的会话范围决定。
  */
 
 const PLUGIN_ID = 'ssh';
@@ -41,22 +43,25 @@ export default function setup(ctx: PluginContext): void {
   const tools = ctx.tools;
   if (!tools) throw new Error('ssh 需要宿主提供 tools 能力');
 
+  const scope: SshScope = ctx.sessionState ? createScope(ctx.sessionState) : createNoopScope();
+
   const toolDeps = {
     ctx: remote,
     dataFile,
     sessions,
+    scope,
     dataDir,
     register: (tool: Parameters<typeof tools.register>[0], options?: Parameters<typeof tools.register>[1]) =>
       tools.register(tool, options),
   };
   let toolDisposables: { dispose(): void }[] = [];
   const syncTools = (): void => {
-    const enabled = readData(dataFile).enabled;
-    if (enabled && toolDisposables.length === 0) {
+    const hasHosts = readData(dataFile).hosts.length > 0;
+    if (hasHosts && toolDisposables.length === 0) {
       toolDisposables = createTools(toolDeps);
       return;
     }
-    if (!enabled && toolDisposables.length > 0) {
+    if (!hasHosts && toolDisposables.length > 0) {
       for (const disposable of toolDisposables) disposable.dispose();
       toolDisposables = [];
     }
@@ -67,15 +72,16 @@ export default function setup(ctx: PluginContext): void {
     id: 'ssh',
     // 排在项目说明之后：主机清单是会变的内容，前面稳定的前缀不跟着它失效。
     order: 60,
-    render: createPromptSection(dataFile),
+    render: createPromptSection(dataFile, scope),
   });
 
   const panel = ctx.desktop?.panel?.(
     createPanelHandler({
       ctx: remote,
       dataFile,
+      scope,
       closeSession: (hostId) => sessions.close(hostId),
-      onEnabledChange: () => syncTools(),
+      onHostsChange: () => syncTools(),
     }),
   );
   if (panel) ctx.onDispose(() => panel.dispose());

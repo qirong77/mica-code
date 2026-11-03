@@ -16,6 +16,7 @@ import { createTools, findMutatingHint, formatResult, formatSessionResult, type 
 import type { PluginToolDescriptor } from '@packages/mica-tools/PluginTool.js';
 import { createPanelHandler } from './Panel.js';
 import { PANEL_STATE_FILE } from './Panel.js';
+import { createNoopScope, normalizeScopeState, scopedHosts, type SshScope } from './Scope.js';
 import type { PluginPanelView } from '@packages/mica-plugin/index.js';
 
 let dir = '';
@@ -231,7 +232,8 @@ describe('给模型的结果', () => {
 });
 
 describe('工具对只读机器的约束', () => {
-  function toolsFor(host: SshHost) {
+  /** 默认把这台机器放进本次会话：工具的行为由会话范围决定，与只读约束是两件事。 */
+  function toolsFor(host: SshHost, inSession = true) {
     const dataFile = join(dir, 'data.json');
     const data = emptyData();
     data.hosts.push(host);
@@ -240,6 +242,10 @@ describe('工具对只读机器的约束', () => {
     const deps: ToolDeps = {
       ctx,
       dataFile,
+      scope: {
+        explicit: () => (inSession ? [host.id] : []),
+        set: () => {},
+      } as SshScope,
       sessions: new (class {
         list() {
           return [];
@@ -285,6 +291,14 @@ describe('工具对只读机器的约束', () => {
     expect(String(result)).toContain('找不到服务器');
     expect(String(result)).toContain('test');
   });
+
+  it('没添加到本次会话的机器：拒绝执行，并指向面板里的勾选框', async () => {
+    const tools = toolsFor(makeHost(), false);
+    const result = await tools.get('ssh_run')!.execute({ host: 'test', script: 'echo hi' });
+    expect(String(result)).toContain('没有添加到本次会话');
+    expect(String(result)).toContain('添加到会话');
+    expect(String(result)).not.toContain('[test] exit');
+  });
 });
 
 describe('只读工具的命令护栏', () => {
@@ -304,8 +318,15 @@ describe('只读工具的命令护栏', () => {
 describe('prompt 段落', () => {
   it('没配置机器时指向面板，不让模型自己 ssh', () => {
     const text = renderPromptSection([]);
-    expect(text).toContain('SSH 服务器');
+    expect(text).toContain('「SSH」');
     expect(text).not.toContain('ssh_run');
+  });
+
+  it('配了机器但一台都没进本次会话时，让模型请用户去勾', () => {
+    const text = renderPromptSection([], 3);
+    expect(text).toContain('3 台服务器');
+    expect(text).toContain('添加到会话');
+    expect(text).not.toContain('`test` —');
   });
 
   it('列机器时只说别名、账号与认证方式，不带口令', () => {
@@ -323,57 +344,147 @@ describe('prompt 段落', () => {
 });
 
 describe('配置面板', () => {
-  function setupPanel() {
+  function setupPanel(options: { autoAdd?: boolean; explicit?: string[] | null } = {}) {
     const dataFile = join(dir, 'data.json');
     const data = emptyData();
-    data.hosts.push(makeHost());
+    data.hosts.push(makeHost(options.autoAdd ? { autoAdd: true } : {}));
     writeData(dataFile, data);
     const closed: string[] = [];
-    const toggles: boolean[] = [];
+    const changes: number[] = [];
+    let explicit: string[] | null = options.explicit ?? null;
+    const scope: SshScope = {
+      explicit: () => explicit,
+      set: (ids) => {
+        explicit = [...ids];
+      },
+    };
     const panel = createPanelHandler({
       ctx,
       dataFile,
+      scope,
       closeSession: (id) => closed.push(id),
-      onEnabledChange: (enabled) => toggles.push(enabled),
+      onHostsChange: () => changes.push(Date.now()),
     });
-    return { panel, dataFile, closed, toggles };
+    return { panel, dataFile, closed, changes, scope: () => explicit };
   }
 
-  it('视图里一台机器一行，带编辑/删除', async () => {
+  it('服务器是一张表：名称 / 地址 / 状态 / 操作 / 两列勾选', async () => {
     const { panel } = setupPanel();
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
     const section = view.sections?.find((entry) => entry.title === '服务器');
-    expect(section?.items?.[0]).toMatchObject({ key: 'test', label: 'test — root@10.0.0.1:22' });
-    expect(section?.items?.[0]?.actions?.map((action) => action.id)).toEqual(['edit', 'delete']);
+    expect(section?.table?.columns.map((column) => column.key)).toEqual([
+      'name',
+      'address',
+      'status',
+      'actions',
+      'session',
+      'auto',
+    ]);
+    const row = section?.table?.rows[0];
+    expect(row?.key).toBe('test');
+    expect(row?.cells.name?.text).toBe('test');
+    expect(row?.cells.address?.text).toBe('root@10.0.0.1:22');
+    expect(row?.cells.status).toMatchObject({ text: '未测试', tone: 'muted' });
+    expect(row?.actions?.map((action) => action.id)).toEqual(['edit', 'delete']);
+    // 没有全局开关，也不再摊一份条目列表。
+    expect(section?.fields).toBeUndefined();
+    expect(section?.items).toBeUndefined();
   });
 
-  it('默认关闭：没有状态栏，开关是一个 switch 字段', async () => {
+  it('一台都没添加进会话时没有状态条，勾上才出现', async () => {
     const { panel } = setupPanel();
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
     expect(view.statusBar).toBeUndefined();
-    // 开关跟着「服务器」走：清单与「这些机器对模型可不可见」是同一个问题。
-    const section = view.sections?.find((entry) => entry.title === '服务器');
-    expect(section?.fields?.[0]).toMatchObject({ key: 'enabled', type: 'switch', value: 'false' });
-    expect(section?.commit).toBe('toggle');
+    expect(view.sections?.[0]?.subtitle).toContain('模型看不到');
+
+    await panel.action({ action: 'toggle-session', key: 'test', values: { column: 'session', check: 'true' } });
+    const after = (await panel.view({ role: 'default' })) as PluginPanelView;
+    expect(after.statusBar).toMatchObject({ label: 'test', detail: '未测试', section: '服务器' });
+    expect(after.sections?.[0]?.subtitle).toContain('模型可以用');
   });
 
-  it('打开开关写盘、通知宿主，并给出状态栏', async () => {
-    const { panel, dataFile, toggles } = setupPanel();
-    const result = await panel.action({ action: 'toggle', values: { enabled: 'true' } });
-    expect(result).toMatchObject({ message: expect.stringContaining('已开启') });
-    expect(readData(dataFile).enabled).toBe(true);
-    expect(toggles).toEqual([true]);
+  it('「添加到会话」只改本次会话，不动主机清单', async () => {
+    const { panel, dataFile, scope } = setupPanel();
+    const result = await panel.action({
+      action: 'toggle-session',
+      key: 'test',
+      values: { column: 'session', check: 'true' },
+    });
+    expect(result).toMatchObject({ message: expect.stringContaining('添加到本次会话') });
+    expect(scope()).toEqual(['test']);
+    expect(readData(dataFile).hosts[0]?.autoAdd).toBeUndefined();
+
+    await panel.action({ action: 'toggle-session', key: 'test', values: { check: 'false' } });
+    expect(scope()).toEqual([]);
+  });
+
+  it('「自动添加到会话」写进主机清单，新会话因此默认带上它', async () => {
+    const { panel, dataFile } = setupPanel();
+    await panel.action({ action: 'toggle-auto', key: 'test', values: { check: 'true' } });
+    expect(readData(dataFile).hosts[0]?.autoAdd).toBe(true);
+
+    // 另一条会话（显式清单还是 null）读到的就是自动勾上的那台。
+    const fresh = (await panel.view({ role: 'default' })) as PluginPanelView;
+    expect(fresh.statusBar).toMatchObject({ label: 'test' });
+    expect(fresh.sections?.[0]?.table?.rows[0]?.cells.session?.check?.checked).toBe(true);
+  });
+
+  it('第一次勾选会保留「自动添加」那些机器', async () => {
+    const dataFile = join(dir, 'data.json');
+    const data = emptyData();
+    data.hosts.push(makeHost({ autoAdd: true }));
+    data.hosts.push(makeHost({ id: 'prod', host: '10.0.0.2', autoAdd: false }));
+    writeData(dataFile, data);
+    let explicit: string[] | null = null;
+    const panel = createPanelHandler({
+      ctx,
+      dataFile,
+      scope: {
+        explicit: () => explicit,
+        set: (ids) => {
+          explicit = [...ids];
+        },
+      },
+      closeSession: () => {},
+    });
+    await panel.action({ action: 'toggle-session', key: 'prod', values: { check: 'true' } });
+    expect(explicit).toEqual(['test', 'prod']);
+  });
+
+  it('连接成功后把这台机器加进本次会话，并记下状态', async () => {
+    const dataFile = join(dir, 'data.json');
+    writeData(dataFile, emptyData());
+    let explicit: string[] | null = null;
+    const panel = createPanelHandler({
+      ctx,
+      dataFile,
+      scope: {
+        explicit: () => explicit,
+        set: (ids) => {
+          explicit = [...ids];
+        },
+      },
+      closeSession: () => {},
+    });
+    // 连不上（地址不可达）时不该加进会话，也不该留下「已连接」。
+    const result = await panel.action({
+      action: 'connect',
+      values: { id: 'test', host: '127.0.0.1', port: '1', user: 'root', auth: 'key', keyPath: '~/.ssh/nope' },
+    });
+    expect(result).toMatchObject({ message: expect.stringContaining('连接失败') });
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
-    expect(view.statusBar).toMatchObject({ label: 'SSH 已启用', detail: 'test' });
+    expect(view.statusBar).toBeUndefined();
+    expect(view.sections?.[0]?.table?.rows[0]?.cells.status).toMatchObject({ text: expect.stringContaining('连不上') });
+    expect(view.sections?.[0]?.rows?.[0]?.label).toContain('连不上（test）');
   });
 
-  it('一台机器都没有时不允许开启', async () => {
+  it('一台机器都没有时表格不画，只留一句空态', async () => {
     const dataFile = join(dir, 'empty.json');
     writeData(dataFile, emptyData());
-    const panel = createPanelHandler({ ctx, dataFile, closeSession: () => {} });
-    const result = await panel.action({ action: 'toggle', values: { enabled: 'true' } });
-    expect(result).toMatchObject({ message: expect.stringContaining('先加一台服务器') });
-    expect(readData(dataFile).enabled).toBe(false);
+    const panel = createPanelHandler({ ctx, dataFile, scope: createNoopScope(), closeSession: () => {} });
+    const view = (await panel.view({ role: 'default' })) as PluginPanelView;
+    expect(view.sections?.[0]?.table).toBeUndefined();
+    expect(view.sections?.[0]?.empty).toContain('「添加」');
   });
 
   it('删除要两步：先记下、再确认', async () => {
@@ -391,7 +502,7 @@ describe('配置面板', () => {
     const { panel } = setupPanel();
     await panel.action({ action: 'edit', key: 'test' });
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
-    const draft = view.sections?.find((entry) => entry.title === '连接设置 · test');
+    const draft = view.sections?.find((entry) => entry.title === '编辑 · test');
     expect(draft?.fields?.find((field) => field.key === 'host')?.value).toBe('10.0.0.1');
     expect(draft?.fields?.find((field) => field.key === 'keyPath')?.value).toBe('~/.ssh/id_ed25519');
     expect(draft?.fields?.find((field) => field.key === 'password')).toBeUndefined();
@@ -404,7 +515,7 @@ describe('配置面板', () => {
     await panel.action({ action: 'edit', key: 'test' });
     await panel.action({ action: 'draft', values: { id: 'test', host: '10.0.0.1', user: 'root', auth: 'password' } });
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
-    const draft = view.sections?.find((entry) => entry.title === '连接设置 · test');
+    const draft = view.sections?.find((entry) => entry.title === '编辑 · test');
     expect(draft?.fields?.find((field) => field.key === 'password')).toMatchObject({
       type: 'password',
       value: '',
@@ -420,10 +531,11 @@ describe('配置面板', () => {
   });
 });
 
-describe('开关决定模型能看到什么', () => {
+describe('会话范围决定模型能看到什么', () => {
   function fakeContext(home: string) {
     const registered: string[] = [];
     let panelHandler: { view: unknown; action: unknown } | null = null;
+    let sessionState: unknown;
     const ctx = {
       pluginId: 'ssh',
       paths: { config: home },
@@ -435,6 +547,12 @@ describe('开关决定模型能看到什么', () => {
         },
       },
       prompt: { section: () => ({ dispose: () => {} }) },
+      sessionState: {
+        get: () => sessionState,
+        set: (value: unknown) => {
+          sessionState = value;
+        },
+      },
       desktop: {
         panel: (handler: unknown) => {
           panelHandler = handler as { view: unknown; action: unknown };
@@ -448,10 +566,10 @@ describe('开关决定模型能看到什么', () => {
     return { ctx, registered, panel: () => panelHandler };
   }
 
-  it('关闭时不注册任何工具，开启后注册四个，再关掉全部注销', async () => {
+  it('没有机器时不注册工具，加了一台就注册四个，删掉又全部注销', async () => {
     const home = mkdtempSync(join(tmpdir(), 'mica-ssh-home-'));
     const dataFile = join(home, 'plugin-data', 'ssh', 'data.json');
-    writeData(dataFile, { ...emptyData(), enabled: false, hosts: [makeHost()] });
+    writeData(dataFile, emptyData());
     const fake = fakeContext(home);
     const setup = (await import('./index.js')).default;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -461,13 +579,47 @@ describe('开关决定模型能看到什么', () => {
     const panel = fake.panel();
     expect(panel).not.toBeNull();
     const handler = panel as unknown as {
-      action: (input: { action: string; values?: Record<string, string> }) => Promise<unknown>;
+      action: (input: { action: string; key?: string; values?: Record<string, string> }) => Promise<unknown>;
     };
-    await handler.action({ action: 'toggle', values: { enabled: 'true' } });
-    expect(fake.registered.sort()).toEqual(['ssh_hosts', 'ssh_read', 'ssh_run', 'ssh_session']);
-
-    await handler.action({ action: 'toggle', values: { enabled: 'false' } });
+    writeData(dataFile, { ...emptyData(), hosts: [makeHost()] });
+    // 加机器走的是面板的「连接」（会连一次网）；这里直接确认同步入口认清单。
+    await handler.action({ action: 'toggle-auto', key: 'test', values: { check: 'true' } });
     expect(fake.registered).toEqual([]);
+
+    // 再起一个宿主，清单里已经有机器 → 工具在 setup 时就注册好了。
+    const second = fakeContext(home);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setup(second.ctx as any);
+    expect(second.registered.sort()).toEqual(['ssh_hosts', 'ssh_read', 'ssh_run', 'ssh_session']);
+
+    const secondHandler = second.panel() as unknown as {
+      action: (input: { action: string; key?: string; values?: Record<string, string> }) => Promise<unknown>;
+    };
+    await secondHandler.action({ action: 'delete', key: 'test' });
+    await secondHandler.action({ action: 'confirm-delete' });
+    expect(second.registered).toEqual([]);
     rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe('会话范围', () => {
+  it('没改过会话清单时跟随「自动添加」，改过就以显式清单为准', () => {
+    const data = emptyData();
+    data.hosts.push(makeHost({ autoAdd: true }));
+    data.hosts.push(makeHost({ id: 'prod', host: '10.0.0.2', autoAdd: false }));
+    expect(scopedHosts(data, null).map((host) => host.id)).toEqual(['test']);
+    expect(scopedHosts(data, ['prod']).map((host) => host.id)).toEqual(['prod']);
+  });
+
+  it('显式清单里已经删掉的机器不再生效', () => {
+    const data = emptyData();
+    data.hosts.push(makeHost());
+    expect(scopedHosts(data, ['test', 'gone']).map((host) => host.id)).toEqual(['test']);
+  });
+
+  it('会话状态的形状不对时当「没改过」，不让脏数据挡住默认值', () => {
+    expect(normalizeScopeState(undefined)).toBeNull();
+    expect(normalizeScopeState({ added: 'test' })).toBeNull();
+    expect(normalizeScopeState({ added: ['test', 3, '  ', 'prod'] })).toEqual(['test', 'prod']);
   });
 });

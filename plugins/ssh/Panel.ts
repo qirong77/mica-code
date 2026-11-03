@@ -3,33 +3,39 @@ import { join } from 'node:path';
 import type {
   PluginPanelActionResult,
   PluginPanelHandler,
-  PluginPanelItem,
-  PluginPanelRow,
   PluginPanelSection,
+  PluginPanelTable,
+  PluginPanelTableCell,
+  PluginPanelTableRow,
   PluginPanelView,
 } from '@packages/mica-plugin/index.js';
 import { mutateData, readData, upsertHost, type SshAuth, type SshHost } from './Hosts.js';
 import { readHostFingerprint, testConnection, type RemoteContext } from './Remote.js';
+import { scopedHosts, type SshScope } from './Scope.js';
 import { deletePassword, hasStoredPassword, storePassword } from './Secrets.js';
 
 /**
  * 配置面板：插件给数据、宿主画出来（`display: 'modal'`）。
  *
- * 两块：**服务器**（机器清单 + 这个插件现在是否对模型生效，逐台增删改）与
- * **连接设置**（表单 + 一个「连接」按钮）。最近调用记录不在这里——那是 `audit.jsonl`
- * 的事，面板上摊一份既占地方又没人会用它的逐行脚本。
+ * 两块：**服务器**（一张表：名称 / 地址 / 状态 / 操作 / 两列勾选）与**添加**（表单 + 一个
+ * 「连接」按钮）。最近调用记录不在这里——那是 `audit.jsonl` 的事，面板上摊一份既占地方
+ * 又没人会用它的逐行脚本。
+ *
+ * 「这台机器对模型可不可见」由表里的两列回答，没有另外的全局开关：
+ * - 添加到会话：本次会话，存在会话快照（见 `Scope.ts`）；
+ * - 自动添加到会话：以后的新会话默认带上它，存在主机清单里。
  *
  * 口令是这个面板独有的输入，也是唯一**不回填**的字段：`view()` 里它永远是空串（提示写
  * 「已保存」），动作提交后再写进 `Secrets.ts` 的 0600 文件。所以页面、截图、分享出去的
  * 界面里都不会出现口令，模型更是从头到尾只看到主机别名。
  *
  * 面板会被反复调用（每次动作后宿主重新取视图），所以 `view()` 只读文件、不跑外部命令；
- * 唯一会连服务器的是「连接」与逐台的「测试」。
+ * 唯一会连服务器的是「连接」。
  */
 
 export const PANEL_STATE_FILE = 'panel.json';
 
-type LastTest = { hostId: string; at: string; ok: boolean; message: string; fingerprint?: string };
+type HostTest = { at: string; ok: boolean; message: string; fingerprint?: string };
 
 /** 正在填的那台机器：切认证方式、切页签都不该把已经敲进去的地址丢掉。 */
 type Draft = {
@@ -46,7 +52,8 @@ type PanelState = {
   editingId?: string;
   draft?: Draft;
   pendingDelete?: string;
-  lastTest?: LastTest;
+  /** 每台机器最近一次连接的结果：状态列就是它（按 hostId 记，删掉机器时一起清）。 */
+  tests?: Record<string, HostTest>;
 };
 
 function emptyDraft(): Draft {
@@ -96,36 +103,54 @@ function draftOf(host: SshHost | null, current: PanelState): Draft {
   };
 }
 
-function hostSummary(host: SshHost, dataDir: string): string {
-  const bits = [host.label || host.host];
-  if (host.auth === 'password') {
-    bits.push(hasStoredPassword(host.id, dataDir) ? '密码认证' : '密码未填');
-  } else {
-    bits.push(host.keyPath ? '私钥' : '私钥 / ssh config');
-  }
-  if (host.readOnly) bits.push('只读');
-  if (host.fingerprint) bits.push('已固定指纹');
-  return bits.join(' · ');
+/**
+ * 状态列：这台机器上次连上了没有。
+ *
+ * 「连上了」只说明那次握手成功过——它不代表连接池里现在就有一条活着的连接（那由
+ * `Remote.ts` 的 ControlMaster 管，面板读不到也不该去问）。所以文案写「上次连接」而不是
+ * 「当前状态」，别让它看起来像一个实时指示灯。
+ */
+function statusCell(test: HostTest | undefined): PluginPanelTableCell {
+  if (!test) return { text: '未测试', tone: 'muted' };
+  return {
+    text: `${test.ok ? '已连接' : '连不上'} ${clockOf(test.at)}`,
+    tone: test.ok ? 'ok' : 'error',
+  };
 }
 
-function hostItems(dataDir: string, hosts: SshHost[], lastTest?: LastTest): PluginPanelItem[] {
-  return hosts.map((host) => ({
-    key: host.id,
-    label: `${host.id} — ${host.user}@${host.host}:${host.port}`,
-    value: `${hostSummary(host, dataDir)}${lastTest?.hostId === host.id ? ` · 上次测试${lastTest.ok ? '通过' : '失败'}` : ''}`,
-    ...(lastTest?.hostId === host.id ? { tone: lastTest.ok ? ('ok' as const) : ('error' as const) } : {}),
-    actions: [
-      { id: 'edit', label: '编辑' },
-      { id: 'delete', label: '删除', tone: 'danger' as const },
-    ],
-  }));
+function hostRow(
+  host: SshHost,
+  ctx: { inSession: boolean; pendingDelete?: string; test?: HostTest },
+): PluginPanelTableRow {
+  const cells: Record<string, PluginPanelTableCell> = {
+    name: { text: host.id, tone: 'accent' },
+    address: { text: `${host.user}@${host.host}:${host.port}` },
+    status: statusCell(ctx.test),
+    session: {
+      check: { checked: ctx.inSession, action: 'toggle-session' },
+    },
+    auto: {
+      check: { checked: host.autoAdd === true, action: 'toggle-auto' },
+    },
+  };
+  const actions =
+    ctx.pendingDelete === host.id
+      ? [
+          { id: 'confirm-delete', label: '确认删除', tone: 'danger' as const },
+          { id: 'cancel-delete', label: '取消', tone: 'ghost' as const },
+        ]
+      : [
+          { id: 'edit', label: '编辑' },
+          { id: 'delete', label: '删除', tone: 'danger' as const },
+        ];
+  return { key: host.id, cells, actions };
 }
 
 function draftSection(draft: Draft, dataDir: string, editing: boolean): PluginPanelSection {
   const hasPassword = editing && draft.id ? hasStoredPassword(draft.id, dataDir) : false;
   const isPassword = draft.auth === 'password';
   return {
-    title: editing ? `连接设置 · ${draft.id || '未命名'}` : '连接设置 · 新服务器',
+    title: editing ? `编辑 · ${draft.id || '未命名'}` : '添加',
     subtitle: '填完点「连接」，连上了才保存',
     fields: [
       { key: 'id', label: '别名', value: draft.id, placeholder: 'test', hint: '模型用它指定机器，只用字母数字与 . _ -' },
@@ -163,7 +188,7 @@ function draftSection(draft: Draft, dataDir: string, editing: boolean): PluginPa
             },
           ]),
     ],
-    // 认证方式一改，字段集合就跟着换（口令 ↔ 私钥路径），所以这里也要在停顿后提交并
+    // 认证方式一改，字段集合就跟着换（密码 ↔ 私钥路径），所以这里也要在停顿后提交并
     // 重新取一次视图；顺带把已经填的地址存进草稿，切走再回来不会丢。
     commit: 'draft',
     // 底部只有一个按钮：填完就连接，不存在「先保存再测试」两步。
@@ -177,87 +202,126 @@ function draftSection(draft: Draft, dataDir: string, editing: boolean): PluginPa
 export type PanelDeps = {
   ctx: RemoteContext;
   dataFile: string;
+  /** 本次会话允许模型碰的机器。 */
+  scope: SshScope;
   closeSession: (hostId: string) => void;
-  /** 开关变了：宿主据此注册/注销工具。不传就只有面板自己的状态变。 */
-  onEnabledChange?: (enabled: boolean) => void;
+  /** 清单变了（加/删机器、改自动添加）：宿主据此重新注册工具。 */
+  onHostsChange?: () => void;
 };
 
 export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
-  const { ctx, dataFile } = deps;
+  const { ctx, dataFile, scope } = deps;
   const state = (): PanelState => readState(ctx.dataDir);
   const saveState = (next: PanelState): void => writeState(ctx.dataDir, { ...state(), ...next });
+
+  const toggleSessionHost = (hostId: string, wanted: boolean): string => {
+    const data = readData(dataFile);
+    if (!data.hosts.some((host) => host.id === hostId)) return '这台服务器已经不在清单里了';
+    // 第一次勾选时先按「自动添加」的默认值铺开，再加/减这一台：否则只勾一台会把别的
+    // 自动机器全丢掉（那份默认值本来就该算进本次会话）。
+    const base = scope.explicit() ?? scopedHosts(data, null).map((host) => host.id);
+    const next = new Set(base);
+    if (wanted) next.add(hostId);
+    else next.delete(hostId);
+    scope.set([...next]);
+    return wanted
+      ? `已把 ${hostId} 添加到本次会话：下一轮起模型能看到它`
+      : `已从本次会话移除 ${hostId}：模型看不到它，也连不上`;
+  };
+
+  const toggleAutoHost = async (hostId: string, wanted: boolean): Promise<string> => {
+    await mutateData(dataFile, (data) => {
+      const hosts = data.hosts.map((entry) =>
+        entry.id === hostId
+          ? { ...entry, autoAdd: wanted, updatedAt: new Date().toISOString() }
+          : entry,
+      );
+      if (!hosts.some((entry) => entry.id === hostId)) throw new Error(`没有叫 ${hostId} 的服务器`);
+      return { data: { ...data, hosts }, result: undefined };
+    });
+    return wanted
+      ? `${hostId}：以后新开的会话会自动带上它（当前会话不受影响）`
+      : `${hostId}：新会话不再自动带上它`;
+  };
 
   return {
     view(): PluginPanelView {
       const data = readData(dataFile);
       const current = state();
+      const tests = current.tests ?? {};
+      const inSession = new Set(scopedHosts(data, scope.explicit()).map((host) => host.id));
       const editingHost = current.editingId
         ? data.hosts.find((host) => host.id === current.editingId) ?? null
         : null;
       const draft = draftOf(editingHost, current);
       const editing = editingHost !== null;
 
-      // 删除确认与上一次连接结果都跟着「服务器」走：它们是这堆机器此刻的状态，不该另占一页。
-      const rows: PluginPanelRow[] = [];
-      if (current.pendingDelete) {
-        rows.push({
-          label: '待确认删除',
-          value: `${current.pendingDelete} —— 点下面的「确认删除」才会真的删`,
-          tone: 'warn',
-        });
-      }
-      if (current.lastTest) {
-        rows.push({
-          label: `上次连接（${current.lastTest.hostId}）`,
-          value: `${clockOf(current.lastTest.at)} · ${current.lastTest.ok ? '通过' : '失败'}：${current.lastTest.message}`,
-          tone: current.lastTest.ok ? 'ok' : 'error',
-          wrap: true,
-        });
-      }
+      // 最近一次失败的原因留在服务器页：状态列只放一个词，读不出为什么连不上。
+      const failed = data.hosts
+        .map((host) => ({ host, test: tests[host.id] }))
+        .filter((entry) => entry.test && !entry.test.ok)
+        .sort((a, b) => (a.test?.at ?? '').localeCompare(b.test?.at ?? ''))
+        .pop();
+
+      const table: PluginPanelTable = {
+        columns: [
+          { key: 'name', label: '名称' },
+          { key: 'address', label: '地址', grow: true },
+          { key: 'status', label: '状态' },
+          { key: 'actions', label: '操作', actions: true },
+          { key: 'session', label: '添加到会话' },
+          { key: 'auto', label: '自动添加' },
+        ],
+        rows: data.hosts.map((host) =>
+          hostRow(host, {
+            inSession: inSession.has(host.id),
+            ...(current.pendingDelete ? { pendingDelete: current.pendingDelete } : {}),
+            ...(tests[host.id] ? { test: tests[host.id] } : {}),
+          }),
+        ),
+      };
 
       const sections: PluginPanelSection[] = [
         {
           title: '服务器',
-          subtitle: `${data.hosts.length} 台 · ${data.enabled ? '模型可以使用' : '模型看不到'}`,
-          rows,
-          items: hostItems(ctx.dataDir, data.hosts, current.lastTest),
-          empty: '还没有服务器：在「连接设置」里填一台并点「连接」',
-          // 开关跟着清单走：它回答的就是「这些机器现在对模型可不可见」。
-          fields: [
-            {
-              key: 'enabled',
-              label: '让模型使用这些服务器',
-              type: 'switch',
-              value: data.enabled ? 'true' : 'false',
-              hint: data.enabled
-                ? '开启中：ssh 工具已注册、主机清单已注入，输入框上方有状态栏'
-                : '关闭中：会话里没有 ssh 工具，模型只知道「这个能力没开」',
-            },
-          ],
-          // 开关就地生效：改完半秒内写盘并同步工具注册，不需要再点按钮。
-          commit: 'toggle',
-          actions: current.pendingDelete
-            ? [
-                { id: 'confirm-delete', label: `确认删除 ${current.pendingDelete}`, tone: 'danger' },
-                { id: 'cancel-delete', label: '取消', tone: 'ghost' },
-              ]
-            : [],
+          subtitle: `${data.hosts.length} 台 · 本次会话 ${inSession.size} 台 · 模型${
+            inSession.size > 0 ? '可以用' : '看不到'
+          }`,
+          ...(failed?.test
+            ? {
+                rows: [
+                  {
+                    label: `连不上（${failed.host.id}）`,
+                    value: failed.test.message,
+                    tone: 'error' as const,
+                    wrap: true,
+                  },
+                ],
+              }
+            : {}),
+          ...(table.rows.length > 0 ? { table } : {}),
+          empty: '还没有服务器：在「添加」里填一台并点「连接」',
         },
         draftSection(draft, ctx.dataDir, editing),
       ];
+
+      const labels = data.hosts.filter((host) => inSession.has(host.id)).map((host) => host.id);
+      const latest = labels
+        .map((id) => tests[id])
+        .filter((entry): entry is HostTest => Boolean(entry))
+        .sort((a, b) => a.at.localeCompare(b.at))
+        .pop();
       return {
         title: 'SSH',
         subtitle: '远程服务器',
-        // 状态栏只在生效时出现：关着的时候输入框上方不该多一行「有个功能关着」。
-        ...(data.enabled
+        // 状态条只在真的有一台能用时出现：一台都没添加时它只会多占一行「什么都没有」。
+        ...(labels.length > 0
           ? {
               statusBar: {
-                label: 'SSH 已启用',
-                tone: 'ok' as const,
-                detail:
-                  data.hosts.length > 0
-                    ? data.hosts.map((host) => host.id).join('、')
-                    : '还没有服务器',
+                label: labels.length === 1 ? labels[0] : `${labels[0]} +${labels.length - 1}`,
+                tone: latest ? (latest.ok ? ('ok' as const) : ('error' as const)) : ('muted' as const),
+                detail: latest ? (latest.ok ? '已连接' : '连不上') : '未测试',
+                section: '服务器',
               },
             }
           : {}),
@@ -269,9 +333,22 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
       const current = state();
       const action = input.action;
       const values = input.values ?? {};
+      const hostId = input.key ?? '';
+
+      // 表格里的两列勾选：`values.check` 是勾完的状态，`values.column` 是点的那一列。
+      if (action === 'toggle-session' || action === 'toggle-auto') {
+        if (!hostId) return { message: '没有指明是哪台服务器' };
+        const wanted = field(values, 'check') === 'true';
+        if (action === 'toggle-session') return { message: toggleSessionHost(hostId, wanted) };
+        try {
+          return { message: await toggleAutoHost(hostId, wanted) };
+        } catch (error) {
+          return { message: error instanceof Error ? error.message : String(error) };
+        }
+      }
 
       // 表单输入先落进草稿：切认证方式、切别处再回来都不该丢已经敲进去的地址。
-      // 口令**不**进草稿（`panel.json` 是普通文件），切走就没了——这是有意为之。
+      // 密码**不**进草稿（`panel.json` 是普通文件），切走就没了——这是有意为之。
       if (action === 'draft') {
         // 面板不再收「用途」：编辑已有机器时保留它原来那个，别因为重开一次表单就清掉。
         const existing = current.editingId
@@ -291,22 +368,6 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
         return {};
       }
 
-      if (action === 'toggle') {
-        const enabled = field(values, 'enabled') === 'true';
-        const currentData = readData(dataFile);
-        if (currentData.enabled === enabled) return { message: enabled ? '已经是开启状态' : '已经是关闭状态' };
-        if (enabled && currentData.hosts.length === 0) {
-          return { message: '先加一台服务器并连上，再打开开关' };
-        }
-        await mutateData(dataFile, (data) => ({ data: { ...data, enabled }, result: undefined }));
-        deps.onEnabledChange?.(enabled);
-        return {
-          message: enabled
-            ? '已开启：下一轮起模型能用 ssh_run / ssh_read / ssh_session'
-            : '已关闭：会话里不再注册 ssh 工具，主机清单也不再注入',
-        };
-      }
-
       if (action === 'cancel') {
         saveState({ editingId: undefined, draft: undefined });
         return { message: '已取消编辑' };
@@ -321,14 +382,17 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
         await mutateData(dataFile, (data) => {
           const next = data.hosts.filter((entry) => entry.id !== target);
           if (next.length === data.hosts.length) throw new Error(`没有叫 ${target} 的服务器`);
-          const stillHasHosts = next.length > 0;
-          // 删掉最后一台就没有可用的机器了：开关跟着关，否则状态栏写着「已启用」却什么都没配。
-          return { data: { ...data, hosts: next, enabled: stillHasHosts ? data.enabled : false }, result: target };
+          return { data: { ...data, hosts: next }, result: target };
         });
         deletePassword(target, ctx.dataDir);
         deps.closeSession(target);
-        saveState({ pendingDelete: undefined, editingId: undefined, draft: undefined });
-        if (readData(dataFile).hosts.length === 0) deps.onEnabledChange?.(false);
+        // 删掉的机器也要从本次会话里去掉，否则那份清单会留着一个指向不存在机器的 id。
+        const explicit = scope.explicit();
+        if (explicit?.includes(target)) scope.set(explicit.filter((id) => id !== target));
+        const tests = { ...(current.tests ?? {}) };
+        delete tests[target];
+        saveState({ pendingDelete: undefined, editingId: undefined, draft: undefined, tests });
+        deps.onHostsChange?.();
         return { message: `已删除 ${target}` };
       }
       if (action === 'connect') {
@@ -339,7 +403,6 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
         }
       }
 
-      const hostId = input.key ?? '';
       const host = readData(dataFile).hosts.find((entry) => entry.id === hostId);
       if (!host) return { message: '这台服务器已经不在清单里了' };
 
@@ -361,7 +424,7 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
       }
       if (action === 'delete') {
         saveState({ pendingDelete: host.id });
-        return { message: `再点一次「确认删除 ${host.id}」才会删除（口令也一起清掉）` };
+        return { message: `再点一次「确认删除」才会删掉 ${host.id}（密码也一起清掉）` };
       }
       return { message: `不认识的动作：${action}` };
     },
@@ -391,19 +454,15 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
     if (auth === 'password') {
       if (password) storePassword(outcome.host.id, password, ctx.dataDir);
       else if (!hasStoredPassword(outcome.host.id, ctx.dataDir)) {
-        throw new Error('密码认证要先填一次口令（只存本机 0600 文件，不会给模型看）');
+        throw new Error('密码认证要先填一次密码（只存本机 0600 文件，不会给模型看）');
       }
     } else {
-      // 换成私钥就删掉旧口令：留着只会让下次误以为密码认证还能用。
+      // 换成私钥就删掉旧密码：留着只会让下次误以为密码认证还能用。
       deletePassword(outcome.host.id, ctx.dataDir);
     }
 
     deps.closeSession(outcome.host.id);
-    saveState({
-      editingId: undefined,
-      draft: undefined,
-      lastTest: undefined,
-    });
+    saveState({ editingId: undefined, draft: undefined });
 
     const result = await testConnection(ctx, outcome.host);
     const fingerprint = result.fingerprint ?? readHostFingerprint(ctx, outcome.host);
@@ -416,19 +475,30 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
       });
     }
     saveState({
-      lastTest: {
-        hostId: outcome.host.id,
-        at: new Date().toISOString(),
-        ok: result.ok,
-        message: result.ok ? `连接成功 · ${result.message}` : result.message,
-        ...(fingerprint ? { fingerprint } : {}),
+      tests: {
+        ...(readState(ctx.dataDir).tests ?? {}),
+        [outcome.host.id]: {
+          at: new Date().toISOString(),
+          ok: result.ok,
+          message: result.ok ? `连接成功 · ${result.message}` : result.message,
+          ...(fingerprint ? { fingerprint } : {}),
+        },
       },
     });
+    deps.onHostsChange?.();
     if (!result.ok) throw new Error(result.message);
 
-    const enabled = readData(dataFile).enabled;
-    return `已连接 ${outcome.host.id}：${result.message}${fingerprint ? ` · 指纹 ${fingerprint}` : ''}${
-      enabled ? '' : '（打开「服务器」里的开关后模型才能使用）'
-    }`;
+    // 新机器第一次连上就顺手加进本次会话：用户刚填完地址、点了连接，意图很清楚。
+    const explicit = currentInSession(outcome.host.id);
+    return `已连接 ${outcome.host.id}：${result.message}${fingerprint ? ` · 指纹 ${fingerprint}` : ''}${explicit}`;
+  }
+
+  function currentInSession(hostId: string): string {
+    const data = readData(dataFile);
+    const set = new Set(scopedHosts(data, scope.explicit()).map((host) => host.id));
+    if (set.has(hostId)) return '';
+    set.add(hostId);
+    scope.set([...set]);
+    return '（已加入本次会话）';
   }
 }
