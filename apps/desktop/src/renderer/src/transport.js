@@ -330,7 +330,9 @@ function createWebApi(env) {
       onNotesUpdated: (callback) => subscribe('chat:notes-updated', callback),
       compact: (sessionId, mode = 'model') => invoke('chat:compact', { sessionId, mode }),
       checkCwd: (cwd) => invoke('chat:check-cwd', { cwd }),
-      updateCwd: (sessionId, cwd) => invoke('chat:update-cwd', { sessionId, cwd }),
+      // 换工作目录：有宿主的会话由宿主 chdir + 落盘（下一轮就生效），没宿主的
+      // 直接改会话文件。结果必须看——失败时界面不能先装作切过去了。
+      setCwd: (payload) => invoke('chat:set-cwd', payload),
       fork: (sessionId) => invoke('chat:fork', { sessionId }),
       // 浏览器里图片来自粘贴事件（服务端读不到用户的剪贴板），bytes 由页面自己读
       savePastedImage: async ({ file, dataUrl } = {}) => {
@@ -433,6 +435,8 @@ function createWebApi(env) {
       find: (root, query) => invoke('files:find', { root, query }),
       // options：{ matchCase, wholeWord, regex, include, exclude }，对应搜索面板上的开关
       search: (root, query, options = {}) => invoke('files:search', { root, query, ...options }),
+      // 面板关掉 / 查询清空时让 host 停掉那次全量扫描：结果已经没人要了
+      cancelSearch: (root, requestId) => invoke('files:search-cancel', { root, requestId }),
       create: (directory, name, type) => invoke('files:create', { directory, name, type }),
       rename: (path, name) => invoke('files:rename', { path, name }),
       move: (path, directory) => invoke('files:move', { path, directory }),
@@ -489,6 +493,12 @@ function createWebApi(env) {
       // snapshot + summary.compareRef pins the original commit; staged is HEAD → index,
       // worktree is index → disk. Legacy head/branch/ref modes are also supported.
       file: (cwd, filePath, base = null) => invoke('git:file', { cwd, filePath, base }),
+      // 行悬停的 blame：`{ ref, index, line }` 决定读哪一份内容（提交 / 索引 / 工作区）。
+      blame: (cwd, filePath, options = null) =>
+        invoke('git:blame', { cwd, filePath, ...(options || {}) }),
+      // 图谱页面：提交历史与单条提交的详情（含该提交改了哪些文件）。
+      log: (cwd, options = null) => invoke('git:log', { cwd, ...(options || {}) }),
+      commit: (cwd, hash) => invoke('git:commit', { cwd, hash }),
       refs: (cwd) => invoke('git:refs', { cwd }),
       resolveRef: (cwd, ref) => invoke('git:resolve-ref', { cwd, ref }),
       checkout: (cwd, ref) => invoke('git:checkout', { cwd, ref }),
@@ -496,7 +506,9 @@ function createWebApi(env) {
       // 源代码管理面板行内悬浮出来的三个操作；discard 不可逆，调用方要先确认。
       stage: (cwd, filePath) => invoke('git:stage', { cwd, filePath }),
       unstage: (cwd, filePath) => invoke('git:unstage', { cwd, filePath }),
-      discard: (cwd, filePath) => invoke('git:discard', { cwd, filePath })
+      discard: (cwd, filePath) => invoke('git:discard', { cwd, filePath }),
+      // 文件夹级回退：目录下所有已跟踪文件回到索引里那份，未跟踪文件删掉。
+      discardDir: (cwd, dirPath) => invoke('git:discard-dir', { cwd, dirPath })
     },
 
     stats: {

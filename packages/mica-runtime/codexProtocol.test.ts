@@ -38,6 +38,7 @@ describe('codex protocol framing', () => {
       btwThreads: 'mica/btw/threads',
       btwClose: 'mica/btw/close',
       renameSession: 'mica/session/rename',
+      sessionCwd: 'mica/session/cwd',
       capabilitiesGet: 'mica/capabilities/get',
       capabilitiesSet: 'mica/capabilities/set',
       notesGet: 'mica/notes/get',

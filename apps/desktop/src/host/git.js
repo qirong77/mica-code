@@ -19,6 +19,7 @@ import {
 import {
   cachedWorktreeRead,
   discardFile,
+  discardDirectory,
   cachedRepository,
   getRepository,
   getWorkspaceStatus,
@@ -27,6 +28,8 @@ import {
   stageFile,
   unstageFile
 } from './git-ops'
+import { blameLine } from './git-blame'
+import { getCommit, getLog } from './git-log'
 
 async function getSummary(cwd, { refresh = false } = {}) {
   const { root, base } = await cachedRepository(cwd)
@@ -207,6 +210,29 @@ export function registerGitIpc() {
     getFile(cwd, filePath, options || base)
   )
 
+  // 行悬停用：`{ ref, index, line }` 三种取值口径见 `git-blame.js`；读失败（文件不在
+  // 那个提交里、还没提交过）回 `{ error }` 而不是抛错——悬停不该把界面变成红字。
+  ipcMain.handle('git:blame', (_event, { cwd, filePath, ref = null, index = false, line } = {}) =>
+    blameLine(cwd, filePath, { ref, index: index === true, line })
+  )
+
+  // 图谱页面：提交历史（只读）与单条提交的详情。
+  ipcMain.handle('git:log', async (_event, { cwd, ref = null, max, skip } = {}) => {
+    try {
+      return { history: await getLog(cwd, { ref, max, skip }), error: null }
+    } catch (error) {
+      return { history: null, error: gitErrorMessage(error) }
+    }
+  })
+
+  ipcMain.handle('git:commit', async (_event, { cwd, hash } = {}) => {
+    try {
+      return { detail: await getCommit(cwd, hash), error: null }
+    } catch (error) {
+      return { detail: null, error: gitErrorMessage(error) }
+    }
+  })
+
   // 以下三个是写操作（对应 VS Code 源代码管理里行内悬浮出来的按钮）。
   // 路径一律经 `safeFilePath` 校验，越出仓库直接报错。
   ipcMain.handle('git:stage', async (_event, { cwd, filePath } = {}) => {
@@ -234,6 +260,15 @@ export function registerGitIpc() {
       return { error: null }
     } catch (error) {
       return { error: gitErrorMessage(error) }
+    }
+  })
+
+  // 文件夹级回退：目录下所有已跟踪的文件回到索引里那份，未跟踪文件删掉。同样不可逆。
+  ipcMain.handle('git:discard-dir', async (_event, { cwd, dirPath } = {}) => {
+    try {
+      return { result: await discardDirectory(cwd, dirPath), error: null }
+    } catch (error) {
+      return { result: null, error: gitErrorMessage(error) }
     }
   })
 }

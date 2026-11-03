@@ -1,5 +1,6 @@
 import type { Disposable } from '@packages/mica-common/index.js';
 import { normalizePluginNewSession, type PluginNewSession } from './PluginNewSession.js';
+import { isValidPluginPanelShortcutId } from './PluginDesktop.js';
 
 /**
  * 插件在桌面端对话右侧的**面板**（视图数据 + 动作回传）。
@@ -64,11 +65,27 @@ export type PluginPanelItem = {
 export type PluginPanelField = {
   key: string;
   label: string;
-  type?: 'text' | 'number';
+  /**
+   * 输入框类型。
+   *
+   * `password` 是密文输入（带眼睛按钮切明文）：口令、Token 这类值不该以明文出现在
+   * 面板上——它会被截图、被旁人看到，也不该因为「面板只有 text / number 两种」就让
+   * 插件自己发明一个 `type: 'secret'` 的私有约定。
+   */
+  type?: PluginPanelFieldType;
   value?: string;
   placeholder?: string;
   hint?: string;
 };
+
+/** `PluginPanelField.type` 的取值（单一事实来源，归一化与界面共用）。 */
+export const PLUGIN_PANEL_FIELD_TYPES = ['text', 'number', 'password'] as const;
+
+export type PluginPanelFieldType = (typeof PLUGIN_PANEL_FIELD_TYPES)[number];
+
+export function isPluginPanelFieldType(value: unknown): value is PluginPanelFieldType {
+  return typeof value === 'string' && (PLUGIN_PANEL_FIELD_TYPES as readonly string[]).includes(value);
+}
 
 export type PluginPanelAction = PluginPanelItemAction & { hint?: string };
 
@@ -121,6 +138,14 @@ export type PluginPanelView = {
    * 取哪一块」，具体条目由插件在视图里给。宿主因此可以在按钮上悬停时取一次视图。
    */
   menus?: Record<string, PluginPanelMenuItem[]>;
+  /** 按清单中快捷按钮的 id 提供当前状态。 */
+  shortcutStates?: Record<string, PluginPanelShortcutState>;
+};
+
+export type PluginPanelShortcutState = {
+  badge?: string;
+  disabled?: boolean;
+  disabledReason?: string;
 };
 
 /**
@@ -319,6 +344,9 @@ const MAX_MENU_ITEMS = 20;
 const MAX_MENU_DETAIL = 120;
 const MAX_MENU_KEY = 200;
 const MAX_ACTION_ID = 64;
+const MAX_SHORTCUT_STATES = 40;
+const MAX_SHORTCUT_BADGE = 12;
+const MAX_SHORTCUT_DISABLED_REASON = 200;
 /** 弹窗里的一格：链接地址可以很长（带查询串的分享链接），但仍然有上限。 */
 const MAX_CELL_LINK = 2000;
 /** 提示词整段回传的上限：它是一段给模型看的正文，不是一行状态。 */
@@ -405,7 +433,7 @@ function fieldOf(input: unknown): PluginPanelField | null {
   return {
     key,
     label,
-    type: raw.type === 'number' ? 'number' : 'text',
+    type: isPluginPanelFieldType(raw.type) ? raw.type : 'text',
     ...(raw.value === undefined || raw.value === null ? {} : { value: text(String(raw.value), 200) }),
     ...(placeholder ? { placeholder } : {}),
     ...(hint ? { hint } : {}),
@@ -491,6 +519,7 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
     .map((entry) => sectionOf(entry))
     .filter((entry): entry is PluginPanelSection => entry !== null);
   const menus = menusOf(raw.menus);
+  const shortcutStates = shortcutStatesOf(raw.shortcutStates);
   return {
     title,
     ...(subtitle ? { subtitle } : {}),
@@ -499,7 +528,28 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
       : {}),
     ...(sections.length > 0 ? { sections } : {}),
     ...(menus ? { menus } : {}),
+    ...(shortcutStates ? { shortcutStates } : {}),
   };
+}
+
+function shortcutStatesOf(value: unknown): Record<string, PluginPanelShortcutState> | undefined {
+  const states: Record<string, PluginPanelShortcutState> = {};
+  let count = 0;
+  for (const [id, input] of Object.entries(record(value))) {
+    if (!isValidPluginPanelShortcutId(id) || !input || typeof input !== 'object' || Array.isArray(input)) continue;
+    const raw = record(input);
+    const badge = text(raw.badge, MAX_SHORTCUT_BADGE);
+    const disabledReason = text(raw.disabledReason, MAX_SHORTCUT_DISABLED_REASON);
+    const state: PluginPanelShortcutState = {
+      ...(badge ? { badge } : {}),
+      ...(typeof raw.disabled === 'boolean' ? { disabled: raw.disabled } : {}),
+      ...(disabledReason ? { disabledReason } : {}),
+    };
+    if (Object.keys(state).length === 0) continue;
+    Object.defineProperty(states, id, { value: state, enumerable: true, configurable: true, writable: true });
+    if (++count >= MAX_SHORTCUT_STATES) break;
+  }
+  return count ? states : undefined;
 }
 
 /**

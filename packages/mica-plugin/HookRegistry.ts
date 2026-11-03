@@ -5,6 +5,14 @@ type HookRegistration = {
   handler: HookHandler;
   options: Required<Pick<HookOptions, 'priority' | 'failPolicy'>> & Omit<HookOptions, 'priority' | 'failPolicy'>;
   order: number;
+  /**
+   * 已 dispose 的登记不再执行。
+   *
+   * 插件生命周期会在轮次开始时卸载插件，而那一刻代码正处在某次 `emit` 里：只把登记从
+   * 数组里 splice 掉会让 for..of 跳过后一个 handler。emit / pipeline 因此按快照遍历，
+   * 再用这个标记判断「它是否还算数」。
+   */
+  active: boolean;
 };
 
 export class HookRegistry {
@@ -37,6 +45,7 @@ export class HookRegistry {
         failPolicy: options.failPolicy ?? 'continue',
       },
       order: this.order++,
+      active: true,
     };
 
     registrations.push(registration);
@@ -45,6 +54,7 @@ export class HookRegistry {
 
     return {
       dispose: () => {
+        registration.active = false;
         const current = this.hooks.get(name);
         if (!current) return;
         const index = current.indexOf(registration);
@@ -54,7 +64,8 @@ export class HookRegistry {
   }
 
   async emit<TEvent>(name: string, event: TEvent): Promise<void> {
-    for (const registration of this.hooks.get(name) ?? []) {
+    for (const registration of [...(this.hooks.get(name) ?? [])]) {
+      if (!registration.active) continue;
       await this.runHandler(name, registration, event);
     }
   }
@@ -77,7 +88,8 @@ export class HookRegistry {
 
   async pipeline<TEvent>(name: string, event: TEvent): Promise<TEvent> {
     let current = event;
-    for (const registration of this.hooks.get(name) ?? []) {
+    for (const registration of [...(this.hooks.get(name) ?? [])]) {
+      if (!registration.active) continue;
       const result = await this.runHandler<TEvent, TEvent | { event?: TEvent }>(name, registration, current);
       if (result && typeof result === 'object' && 'event' in result && result.event) {
         current = result.event;
@@ -90,7 +102,8 @@ export class HookRegistry {
 
   pipelineSync<TEvent>(name: string, event: TEvent): TEvent {
     let current = event;
-    for (const registration of this.hooks.get(name) ?? []) {
+    for (const registration of [...(this.hooks.get(name) ?? [])]) {
+      if (!registration.active) continue;
       const result = this.runHandlerSync<TEvent, TEvent | { event?: TEvent }>(name, registration, current);
       if (result && typeof result === 'object' && 'event' in result && result.event) {
         current = result.event;
@@ -106,7 +119,8 @@ export class HookRegistry {
     event: TEvent,
   ): Promise<{ event: TEvent; handled: boolean; blocked: boolean; reason?: string }> {
     let current = event;
-    for (const registration of this.hooks.get(name) ?? []) {
+    for (const registration of [...(this.hooks.get(name) ?? [])]) {
+      if (!registration.active) continue;
       const result = await this.runHandler<TEvent, GuardHookResult<TEvent>>(name, registration, current);
       if (!result) continue;
       if (result.action === 'continue') {

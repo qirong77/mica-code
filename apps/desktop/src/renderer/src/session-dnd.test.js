@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { byUpdatedDesc, orderSessions, resolveDrop } from './session-dnd'
+import { byUpdatedDesc, orderSessions, resolveDrop, rowDropPosition } from './session-dnd'
 
 const sessions = [
   { id: 'a', cwd: '/w/one', updatedAtMs: 3 },
@@ -267,5 +267,32 @@ describe('resolveDrop', () => {
       // 分区标题只接会话
       expect(resolveDrop({ drag: dragGroup('g1'), section: 'recent', groups })).toBeNull()
     })
+  })
+})
+
+describe('rowDropPosition', () => {
+  it('不按 ⌥ 时只有前后两档，中间也算排序', () => {
+    expect(rowDropPosition({ ratio: 0.1 })).toBe('before')
+    expect(rowDropPosition({ ratio: 0.49 })).toBe('before')
+    expect(rowDropPosition({ ratio: 0.5 })).toBe('after')
+    expect(rowDropPosition({ ratio: 0.9 })).toBe('after')
+  })
+
+  it('按住 ⌥ 时中间那条带子才是嵌套', () => {
+    expect(rowDropPosition({ ratio: 0.5, altKey: true })).toBe('into')
+    expect(rowDropPosition({ ratio: 0.3, altKey: true })).toBe('into')
+    // 上下两端的四分之一仍然排序，方便「按住 ⌥ 拖还顺带挪位置」
+    expect(rowDropPosition({ ratio: 0.1, altKey: true })).toBe('before')
+    expect(rowDropPosition({ ratio: 0.9, altKey: true })).toBe('after')
+  })
+
+  it('canNest 为 false 时 ⌥ 也不进入嵌套', () => {
+    expect(rowDropPosition({ ratio: 0.5, altKey: true, canNest: false })).toBe('after')
+    expect(rowDropPosition({ ratio: 0.2, altKey: true, canNest: false })).toBe('before')
+  })
+
+  it('拿不到行高时按中间处理，不误判成嵌套', () => {
+    expect(rowDropPosition({ ratio: Number.NaN })).toBe('after')
+    expect(rowDropPosition({ ratio: Number.NaN, altKey: true })).toBe('into')
   })
 })

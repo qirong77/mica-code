@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -1018,6 +1018,39 @@ describe('SessionController', () => {
 
     controller.saveCurrent({ turnState: 'completed' });
     expect(saves.at(-1)?.turnState).toBe('completed');
+  });
+
+  it('moves the current session to a new cwd and keeps it across later saves', async () => {
+    // 换项目目录：进程真的 chdir（下一轮的工具与 prompt 读的是 live cwd），盘上那份
+    // 立刻跟上，而且之后的保存不会把它写回旧目录。
+    const originalCwd = process.cwd();
+    const nextDir = mkdtempSync(join(tmpdir(), 'mica-session-cwd-'));
+    try {
+      const saved: PersistedSession[] = [];
+      const controller = await sessionController({
+        load: (id) => saved.findLast((session) => session.id === id) ?? null,
+        save: (session) => {
+          saved.push(session);
+        },
+      });
+      controller.saveCurrent();
+      const before = saved.at(-1)!;
+
+      expect(controller.setCurrentCwd(nextDir)).toBe(true);
+      const moved = saved.at(-1)!;
+      expect(moved.cwd).toBe(realpathSync(nextDir));
+      expect(moved.revision).toBe((before.revision ?? 0) + 1);
+      // 换目录不是会话活动：动 updatedAt 会把它顶到 Recent 最前面。
+      expect(moved.updatedAt).toBe(before.updatedAt);
+      expect(moved.snapshot.conversationMessages).toEqual(before.snapshot.conversationMessages);
+
+      // 之后的保存（每一轮都写）必须继续用新目录。
+      controller.saveCurrent();
+      expect(saved.at(-1)!.cwd).toBe(realpathSync(nextDir));
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(nextDir, { recursive: true, force: true });
+    }
   });
 
   it('does not rewrite a resumed session when nothing changed', async () => {

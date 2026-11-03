@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import mitt from 'mitt';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
+import { writePluginState } from '@packages/mica-plugin/PluginState.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
@@ -65,7 +67,7 @@ function mockSessionController(saveSpy: ReturnType<typeof vi.fn>): SessionContro
 async function mount(
   saveSpy = vi.fn(() => true),
   agentOverrides: Record<string, unknown> = {},
-  hostOptions: { desktopHost?: boolean } = {},
+  hostOptions: { desktopHost?: boolean; loadUserPlugins?: boolean } = {},
 ) {
   const hooks = new micaPlugin.HookRegistry();
   const agent = mockAgent(agentOverrides);
@@ -218,6 +220,47 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
     const notices = (host.getConversationMessages() ?? []).filter((message) => message.role === 'notice');
     expect(notices.map((message) => message.content)).toEqual(['自动压缩：680K → 145K']);
     await host.dispose();
+  });
+
+  // 启停是配置，而工具与 prompt 段落活在进程里：只改文件不动进程，配置页写着「已停用」、
+  // 对话里它的工具还在。这条用例走的是真实装配路径（常驻宿主 + 真轮次）。
+  it('applies a plugin toggle at the next turn, without restarting the host', async () => {
+    // 这个用例真的写 `plugins-state.json`：给自己的 MICA_HOME，免得落到别的用例头上。
+    const home = mkdtempSync(join(tmpdir(), 'mica-plugin-toggle-'));
+    vi.stubEnv('MICA_HOME', home);
+    try {
+      const { executor, host } = await mount(
+        vi.fn(() => true),
+        {},
+        { loadUserPlugins: true },
+      );
+      const statePath = join(home, 'plugins-state.json');
+      const runTurn = async () => {
+        await executor.start(micaRuntime.createRuntimeInput('hello', 'ui'));
+        await waitFor(() => !executor.isBusy);
+      };
+      const loadedIds = () =>
+        (
+          JSON.parse(readFileSync(join(home, 'plugin-status.json'), 'utf8')) as { plugins: { id: string }[] }
+        ).plugins.map((entry) => entry.id);
+
+      expect(toolNames()).toContain('todo_write');
+      expect(loadedIds()).toContain('todo');
+
+      writePluginState({ disabled: ['todo'] }, { path: statePath });
+      await runTurn();
+      expect(toolNames()).not.toContain('todo_write');
+      expect(loadedIds()).not.toContain('todo');
+
+      writePluginState({ disabled: [] }, { path: statePath });
+      await runTurn();
+      expect(toolNames()).toContain('todo_write');
+      expect(loadedIds()).toContain('todo');
+      await host.dispose();
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

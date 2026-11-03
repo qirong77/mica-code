@@ -8,7 +8,6 @@ import {
   lstat,
   mkdir,
   open,
-  opendir,
   readFile,
   readdir,
   rename,
@@ -20,27 +19,24 @@ import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { ignoredEntries } from './git-ignore'
 import { noteWorktreeChange, repositoryRootOf } from './git-ops'
-import { compileQuery, parseGlobList, passesFileFilters } from './search-core'
+import { listSearchFiles } from './search-files'
+import {
+  asciiNeedle,
+  collectSearchMatches,
+  compileQuery,
+  parseGlobList,
+  passesFileFilters
+} from './search-core'
 
-const IGNORED_DIRECTORIES = new Set([
-  '.git',
-  '.next',
-  '.turbo',
-  'build',
-  'coverage',
-  'dist',
-  'node_modules',
-  'out'
-])
-const MAX_WALK_ENTRIES = 100_000
-const MAX_WALK_FILES = 50_000
 const MAX_SEARCH_RESULTS = 200
 const MAX_SEARCH_FILE_SIZE = 2 * 1024 * 1024
 const MAX_SEARCH_BYTES = 128 * 1024 * 1024
 const MAX_QUERY_LENGTH = 1_000
-const MAX_PREVIEW_LENGTH = 300
 // 「快速打开」一次给的行数：比 `@` 补全的 20 条多，但它复用同一份扫描与缓存。
 const MAX_QUICK_OPEN_RESULTS = 100
+
+/** 正在跑的搜索：同一个 root 只保留最后一次，新的查询会取消旧的（见 files:search）。 */
+const activeSearches = new Map()
 
 function normalizeDirectory(value) {
   if (typeof value !== 'string' || !value.trim()) throw new Error('directory is required')
@@ -125,67 +121,6 @@ async function availableCopyPath(source) {
   throw new Error('无法生成副本名称')
 }
 
-async function walkFiles(root, visitor) {
-  try {
-    const rootInfo = await lstat(root)
-    if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) return
-  } catch {
-    return
-  }
-
-  const directories = [root]
-  let entryCount = 0
-  let fileCount = 0
-
-  while (directories.length > 0 && entryCount < MAX_WALK_ENTRIES) {
-    const directoryPath = directories.pop()
-    let directory
-    try {
-      directory = await opendir(directoryPath)
-    } catch {
-      continue
-    }
-
-    const iterator = directory[Symbol.asyncIterator]()
-    try {
-      while (entryCount < MAX_WALK_ENTRIES) {
-        let next
-        try {
-          next = await iterator.next()
-        } catch {
-          break
-        }
-        if (next.done) break
-
-        entryCount += 1
-        const entry = next.value
-        if (entry.isSymbolicLink()) continue
-
-        const entryPath = path.join(directoryPath, entry.name)
-        if (entry.isDirectory()) {
-          if (!IGNORED_DIRECTORIES.has(entry.name)) directories.push(entryPath)
-          continue
-        }
-        if (!entry.isFile()) continue
-
-        fileCount += 1
-        if (
-          (await visitor({
-            path: entryPath,
-            relativePath: path.relative(root, entryPath),
-            name: entry.name
-          })) === false
-        ) {
-          return
-        }
-        if (fileCount >= MAX_WALK_FILES) return
-      }
-    } finally {
-      await directory.close().catch(() => {})
-    }
-  }
-}
-
 /**
  * 我们自己刚改过工作区：让那份 Git 缓存立刻失效，否则顶栏徽标与 GIT 面板要等 5s
  * TTL 才看到新建 / 改名 / 移动 / 复制 / 删除的文件。目录可能不在仓库里。
@@ -208,58 +143,27 @@ function isProbablyBinary(buffer) {
   return sampleSize > 0 && controlCharacters / sampleSize > 0.1
 }
 
-async function readUtf8File(filePath, remainingBytes) {
+/**
+ * 读一个文件给搜索用。**不解码**：ASCII 查询先在字节上预筛，不命中的文件根本不用
+ * 解成字符串（见 search-core 的 bufferMayContain）。这里只负责大小、二进制与读取。
+ */
+async function readSearchFile(filePath, remainingBytes) {
   let handle
   try {
-    const fileInfo = await lstat(filePath)
-    if (
-      fileInfo.isSymbolicLink() ||
-      !fileInfo.isFile() ||
-      fileInfo.size > MAX_SEARCH_FILE_SIZE ||
-      fileInfo.size > remainingBytes
-    ) {
-      return null
-    }
-
     handle = await open(filePath, 'r')
     const openedInfo = await handle.stat()
-    if (!openedInfo.isFile() || openedInfo.size > MAX_SEARCH_FILE_SIZE) return null
+    if (!openedInfo.isFile()) return null
+    if (openedInfo.size > MAX_SEARCH_FILE_SIZE || openedInfo.size > remainingBytes) return null
 
     const buffer = Buffer.allocUnsafe(openedInfo.size)
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
     const contentBuffer = buffer.subarray(0, bytesRead)
     if (isProbablyBinary(contentBuffer)) return null
-
-    return {
-      content: new TextDecoder('utf-8', { fatal: true }).decode(contentBuffer),
-      bytesRead
-    }
+    return { buffer: contentBuffer, bytes: bytesRead }
   } catch {
     return null
   } finally {
     await handle?.close().catch(() => {})
-  }
-}
-
-/**
- * 预览行 + 高亮区间。高亮偏移由 host 算好（而不是让渲染层拿查询串去 preview 里再找一遍）：
- * 长行会被截断成 `…` 前缀，正则/大小写敏感模式下渲染层也未必能复现同一处命中。
- */
-function buildPreview(line, matchIndex, matchLength) {
-  if (line.length <= MAX_PREVIEW_LENGTH) {
-    return { preview: line, highlight: [matchIndex, matchIndex + matchLength] }
-  }
-  const contextLength = Math.max(0, Math.floor((MAX_PREVIEW_LENGTH - matchLength) / 2))
-  const start = Math.max(0, Math.min(matchIndex - contextLength, line.length - MAX_PREVIEW_LENGTH))
-  const end = Math.min(line.length, start + MAX_PREVIEW_LENGTH)
-  const prefix = start > 0 ? '…' : ''
-  const suffix = end < line.length ? '…' : ''
-  return {
-    preview: `${prefix}${line.slice(start, end)}${suffix}`,
-    highlight: [
-      prefix.length + (matchIndex - start),
-      prefix.length + Math.min(matchIndex - start + matchLength, end - start)
-    ]
   }
 }
 
@@ -324,40 +228,50 @@ export function registerFilesIpc() {
     // 正则还没写完（如 `([`）时把它当成一条提示，而不是整块面板变成错误页
     if (!compiled.ok) return { items: [], truncated: false, error: compiled.error }
 
-    const items = []
-    let scannedBytes = 0
-    let truncated = false
+    // 同一个 root 上只跑最后一次查询：输入框每敲一个字都会发起一次，上一次的全量扫描
+    // 如果还活着，只会跟新查询抢磁盘与 CPU，把最新结果也拖慢。
+    activeSearches.get(root)?.controller.abort()
+    const controller = new AbortController()
+    const requestId = payload.requestId ?? null
+    activeSearches.set(root, { controller, requestId })
 
-    await walkFiles(root, async (file) => {
-      if (!passesFileFilters(file.relativePath, options)) return true
-      const loaded = await readUtf8File(file.path, MAX_SEARCH_BYTES - scannedBytes)
-      if (!loaded) return scannedBytes < MAX_SEARCH_BYTES
-      scannedBytes += loaded.bytesRead
+    // 纯 ASCII 查询可以先在字节上判断「这个文件不可能命中」，跳过解码；
+    // 正则与含中文的查询没有这种捷径，照常解码后逐行匹配。
+    const needle = options.regex ? null : asciiNeedle(payload.query)
+    const prefilter = needle ? { needle, matchCase: options.matchCase } : null
 
-      const lines = loaded.content.split('\n')
-      for (let index = 0; index < lines.length; index += 1) {
-        const line = lines[index].endsWith('\r') ? lines[index].slice(0, -1) : lines[index]
-        const found = compiled.match(line)
-        if (!found) continue
-
-        const { preview, highlight } = buildPreview(line, found.column, found.length)
-        items.push({
-          path: file.path,
-          relativePath: file.relativePath,
-          line: index + 1,
-          column: found.column + 1,
-          preview,
-          highlight
-        })
-        if (items.length >= MAX_SEARCH_RESULTS) {
-          truncated = true
-          return false
-        }
+    try {
+      const result = await collectSearchMatches({
+        files: listSearchFiles(root),
+        compiled,
+        shouldScan: (file) => passesFileFilters(file.relativePath, options),
+        readFile: (file, remaining) => readSearchFile(file.path, remaining),
+        prefilter,
+        limits: { maxResults: MAX_SEARCH_RESULTS, maxBytes: MAX_SEARCH_BYTES },
+        signal: controller.signal
+      })
+      return {
+        items: result.items,
+        truncated: result.truncated,
+        error: null,
+        cancelled: result.cancelled
       }
-      return scannedBytes < MAX_SEARCH_BYTES
-    })
+    } finally {
+      if (activeSearches.get(root)?.controller === controller) activeSearches.delete(root)
+    }
+  })
 
-    return { items, truncated, error: null }
+  // 面板关闭 / 查询清空时让正在跑的搜索停下来（结果没人要，没必要扫完）。requestId 让
+  // 这个取消只作用于它自己那一次：调用方与被取消的请求之间隔着一次异步往返，早到的
+  // 取消不该杀掉随后发起的新查询。
+  ipcMain.handle('files:search-cancel', (_event, payload = {}) => {
+    const root = normalizeRoot(payload.root)
+    const active = activeSearches.get(root)
+    if (!active) return false
+    if (payload.requestId != null && active.requestId !== payload.requestId) return false
+    active.controller.abort()
+    activeSearches.delete(root)
+    return true
   })
 
   ipcMain.handle('files:list', async (_event, payload = {}) => {

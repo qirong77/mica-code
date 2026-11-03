@@ -6,8 +6,9 @@ import { resolveMicaHomePath } from '@packages/mica-config/brand.js';
  * 插件的启停状态。
  *
  * 它刻意不写进 `config.json`：那是「用户配置」，而这是「这台机器上这个运行时的插件账本」，
- * 和 `plugin-status.json` 一样属于本地状态。停用的插件在启动阶段就不会被注册，所以改完需要
- * 重启会话才生效——配置页会如实说明这一点。
+ * 和 `plugin-status.json` 一样属于本地状态。停用的插件不会被装配：启动时按这份名单跳过，
+ * 常驻宿主则在每轮开始时按它对齐一次（`PluginManager.syncPluginState`），所以改完不必
+ * 重开会话，下一轮起生效。
  */
 
 export const PLUGIN_STATE_FILE = 'plugins-state.json';

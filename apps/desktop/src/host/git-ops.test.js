@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { execFile } from 'child_process'
 import { existsSync } from 'fs'
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
 import {
   cachedRepository,
+  discardDirectory,
   discardFile,
   getWorkspaceStatus,
   git,
@@ -120,11 +121,76 @@ describe('discardFile', () => {
   })
 })
 
+describe('discardDirectory', () => {
+  let dir
+  beforeEach(async () => {
+    dir = await setup()
+    await mkdir(path.join(dir, 'src'), { recursive: true })
+    await writeFile(path.join(dir, 'src/a.txt'), 'one\n')
+    await writeFile(path.join(dir, 'src/b.txt'), 'two\n')
+    await writeFile(path.join(dir, 'other.txt'), 'keep\n')
+    await git(dir, ['add', '.'])
+    await commit(dir, 'add')
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+
+  it('目录下已跟踪文件恢复，未跟踪文件与空目录被删掉，目录外不受影响', async () => {
+    await writeFile(path.join(dir, 'src/a.txt'), 'changed\n')
+    await rm(path.join(dir, 'src/b.txt'))
+    await writeFile(path.join(dir, 'src/new.txt'), 'new\n')
+    await mkdir(path.join(dir, 'src/nested'), { recursive: true })
+    await writeFile(path.join(dir, 'src/nested/deep.txt'), 'deep\n')
+    expect(await status(dir)).toBe(' M src/a.txt\n D src/b.txt\n?? src/nested/deep.txt\n?? src/new.txt\n')
+
+    const result = await discardDirectory(dir, 'src')
+
+    expect(result.removed).toBe(2)
+    expect(await status(dir)).toBe('')
+    expect(await readFile(path.join(dir, 'src/a.txt'), 'utf8')).toBe('one\n')
+    expect(existsSync(path.join(dir, 'src/b.txt'))).toBe(true)
+    expect(existsSync(path.join(dir, 'src/new.txt'))).toBe(false)
+    expect(existsSync(path.join(dir, 'src/nested'))).toBe(false)
+    expect(await readFile(path.join(dir, 'other.txt'), 'utf8')).toBe('keep\n')
+  })
+
+  it('保留已暂存的改动（与单文件版同语义）', async () => {
+    await writeFile(path.join(dir, 'src/a.txt'), 'staged\n')
+    await stageFile(dir, 'src/a.txt')
+    await writeFile(path.join(dir, 'src/a.txt'), 'staged\nworktree\n')
+    await discardDirectory(dir, 'src')
+    expect(await readFile(path.join(dir, 'src/a.txt'), 'utf8')).toBe('staged\n')
+    expect(await status(dir)).toBe('M  src/a.txt\n')
+  })
+
+  it('整个仓库不能当文件夹回退，越界路径一律拒绝', async () => {
+    await expect(discardDirectory(dir, '')).rejects.toThrow('缺少要回退的文件夹')
+    await expect(discardDirectory(dir, '.')).rejects.toThrow('不能回退整个仓库')
+    await expect(discardDirectory(dir, '../outside')).rejects.toThrow('Invalid repository path')
+  })
+})
+
 describe('safeFilePath', () => {
   it('拒绝越出仓库的路径', () => {
     expect(() => safeFilePath('/repo', '../etc/passwd')).toThrow('Invalid repository path')
     expect(() => safeFilePath('/repo', '/etc/passwd')).toThrow('Invalid repository path')
     expect(safeFilePath('/repo', 'src/a.ts')).toBe('/repo/src/a.ts')
+  })
+
+  it('仓库根是符号链接时按真实路径认，不把同一目录判成越界', async () => {
+    // macOS 上临时目录本身就是符号链接（`/var/...` → `/private/var/...`），
+    // 用户从地址栏 / `?cwd=` 拿到的常常是链接那条写法，而 git 给的是真实路径。
+    const dir = await setup()
+    const link = path.join(tmpdir(), `mica-git-link-${Date.now()}`)
+    await symlink(dir, link, 'dir')
+    try {
+      const { root } = await cachedRepository(link)
+      expect(root).not.toBe(link)
+      expect(safeFilePath(root, path.join(link, 'a.txt'))).toBe(path.join(root, 'a.txt'))
+      expect(safeFilePath(link, path.join(root, 'a.txt'))).toBe(path.join(root, 'a.txt'))
+    } finally {
+      await rm(link, { force: true })
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 
   it('写操作也会挡住越界路径', async () => {

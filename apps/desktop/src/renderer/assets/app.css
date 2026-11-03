@@ -5814,11 +5814,16 @@ body.is-resizing-btw {
   /* 左边不留内边距：这一排要和输入框里的角色标记同一条起始线。 */
   padding: 6px 12px 6px 0;
   overflow-x: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
 }
 
 .chat-plugin-quickbar::-webkit-scrollbar {
-  display: none;
+  height: 3px;
+}
+
+.chat-plugin-quickbar::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 3px;
 }
 
 .chat-plugin-quickbar-button {
@@ -5881,6 +5886,23 @@ body.is-resizing-btw {
   position: relative;
   display: flex;
   flex: none;
+}
+
+.chat-plugin-quickbar-group.is-plugin-start:not(:first-child) {
+  margin-left: 5px;
+  padding-left: 11px;
+  border-left: 1px solid var(--color-line-strong);
+}
+
+.chat-plugin-quickbar-badge {
+  min-width: 16px;
+  padding: 1px 4px;
+  border-radius: 8px;
+  background: var(--color-overlay-strong);
+  color: var(--color-fg-strong);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
 }
 
 .chat-plugin-quickbar-caret {

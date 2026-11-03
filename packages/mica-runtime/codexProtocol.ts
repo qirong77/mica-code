@@ -496,6 +496,14 @@ export const MICA_METHODS = {
   /** Close one By The Way thread (the drawer's tab ✕). Refused while it is answering. */
   btwClose: 'mica/btw/close',
   renameSession: 'mica/session/rename',
+  /**
+   * 切换本会话的工作目录（页面右下角那个项目路径）。宿主自己 `process.chdir` 并按新
+   * 目录落盘，所以下一轮起的工具、prompt 里的 cwd 与磁盘上那份一起变。
+   *
+   * 不能由页面直接改会话文件：保存时 cwd 取自 `process.cwd()`，下一轮会把它覆盖回去。
+   * 运行中（这一轮已经在旧目录里跑）拒绝，客户端如实告诉用户等这一轮结束。
+   */
+  sessionCwd: 'mica/session/cwd',
   /** Read the session's capability selection plus the full skill/tool/MCP catalog. */
   capabilitiesGet: 'mica/capabilities/get',
   /**

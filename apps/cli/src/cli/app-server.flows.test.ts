@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -1244,6 +1244,87 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await send(host, 3, 'mica/session/rename', { title: '   ' });
     const invalid = await waitFor(host, (m) => m.id === 3 && m.error !== undefined, 'empty title');
     expect(invalid.error).toMatchObject({ code: -32602, message: 'title must not be empty' });
+  });
+
+  itE2E('mica/session/cwd moves the host and the session file, and the next turn keeps it', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('session-cwd');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    // 先跑一轮让会话落盘（cwd 取的就是宿主进程的 cwd）。
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '第一轮' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+    await waitFor(host, turnCompleted((started.params?.turn as { id?: string }).id!), 'turn/completed', 30_000);
+
+    const nextDir = join(host.home, 'work-next');
+    mkdirSync(nextDir, { recursive: true });
+    // macOS 的临时目录是符号链接：宿主回报的是 chdir 之后解析过的真实路径。
+    const realNextDir = realpathSync(nextDir);
+    await send(host, 2, 'mica/session/cwd', { cwd: nextDir });
+    const switched = await waitFor(host, (m) => m.id === 2, 'cwd response', 10_000);
+    expect(switched.error).toBeUndefined();
+    expect(switched.result).toMatchObject({ ok: true, cwd: realNextDir, persisted: true });
+
+    // 下一轮用新目录：会话文件里的 cwd 是下一轮保存写下的，所以它既「立刻生效」又
+    // 「不会被下次保存覆盖回旧值」——两条在这里一起验。
+    await send(host, 3, 'turn/start', { threadId: '', input: [{ type: 'text', text: '第二轮' }] });
+    const secondStarted = await waitFor(
+      host,
+      (m) => m.method === 'turn/started' && Boolean(m.params?.turn),
+      'second turn/started',
+    );
+    await waitFor(
+      host,
+      turnCompleted((secondStarted.params?.turn as { id?: string }).id!),
+      'second turn/completed',
+      30_000,
+    );
+
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    expect(sessionFiles).toHaveLength(1);
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      cwd?: string;
+    };
+    expect(session.cwd).toBe(realNextDir);
+
+    // 不存在的目录与空参数都是协议层错误，不能静默成功。
+    await send(host, 4, 'mica/session/cwd', { cwd: join(host.home, 'nope-missing') });
+    const missing = await waitFor(host, (m) => m.id === 4 && m.error !== undefined, 'missing dir');
+    expect(missing.error).toMatchObject({ code: -32602 });
+    await send(host, 5, 'mica/session/cwd', { cwd: '  ' });
+    const blank = await waitFor(host, (m) => m.id === 5 && m.error !== undefined, 'blank cwd');
+    expect(blank.error).toMatchObject({ code: -32602 });
+  });
+
+  itE2E('mica/session/cwd refuses while a turn is running', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    // 停在「等模型第一个字」上，好让切换请求落在这一轮还没结束的窗口里。
+    mock!.state.delayBeforeTextMs = 3_000;
+
+    const host = spawnHost('session-cwd-busy');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '长活' }] });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+
+    const nextDir = join(host.home, 'work-busy');
+    mkdirSync(nextDir, { recursive: true });
+    await send(host, 2, 'mica/session/cwd', { cwd: nextDir });
+    const refused = await waitFor(host, (m) => m.id === 2 && m.error !== undefined, 'busy refusal', 10_000);
+    // 这一轮已经按旧目录起了工具与 prompt：换 cwd 会让同一轮的后半段落在另一个仓库里，
+    // 所以这里如实拒绝（页面据此提示「本轮结束后再切换」），而不是假装成功。
+    expect(refused.error).toMatchObject({ code: -32602 });
+
+    await waitFor(host, turnCompleted(turnId), 'turn/completed', 30_000);
   });
 
   itE2E('--thinking forwards reasoning events through the app-server CLI entrypoint', async () => {

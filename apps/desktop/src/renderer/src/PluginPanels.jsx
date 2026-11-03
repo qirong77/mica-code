@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
 // 控件全部来自设置页那同一套（见 packages/mica-config-ui）：插件面板里不另写按钮、
 // 输入框、标签，否则同一个应用里会出现三种按钮高度和两套状态色。
 import {
@@ -7,6 +8,7 @@ import {
   Button,
   CollapsiblePanel,
   Empty,
+  SecretInput,
   SettingRow,
   SplitView,
   Tag
@@ -17,10 +19,8 @@ import {
   applyPanelResult,
   isOpenableLink,
   menuCacheKey,
-  menuShortcutsOf,
   panelDrafts,
   pluginPanelTabs,
-  prunePluginPanelCache,
   quickbarMenuItems,
   readMenuCache,
   readPanelView,
@@ -108,7 +108,11 @@ export function PluginQuickBar({
   // 动态菜单要问插件要条目（分支是会话事实，清单里写不出来）。条目在页面层按会话缓存
   // （`plugin-panels.js` 的 menuCache），换页签、重挂载都直接命中。
   const [menuViews, setMenuViews] = useState({})
-  const inflight = useRef(new Set())
+  const inflight = useRef(new Map())
+  const [shortcutViews, setShortcutViews] = useState({})
+  const context = JSON.stringify([nodeId, sessionId, cwd, role])
+  const contextRef = useRef(context)
+  contextRef.current = context
   const hoverTimer = useRef(0)
   const barRef = useRef(null)
   useEffect(() => {
@@ -130,8 +134,13 @@ export function PluginQuickBar({
   const items = useMemo(() => {
     const list = []
     for (const panel of panels) {
-      for (const shortcut of panel.shortcuts) {
-        list.push({ panel, shortcut, key: `${panel.id}:${shortcut.label}` })
+      for (const [index, shortcut] of panel.shortcuts.entries()) {
+        list.push({
+          panel,
+          shortcut,
+          key: `${panel.id}:${shortcut.id || `legacy-${index}`}`,
+          first: index === 0
+        })
       }
     }
     return list
@@ -144,17 +153,42 @@ export function PluginQuickBar({
   }, [])
   useEffect(() => clearHover, [clearHover])
 
-  /**
-   * 取一组菜单条目。
-   *
-   * 先画缓存（过期也照画）再后台刷新：这些是本地事实，让用户为它等一次请求没有道理。
-   * 请求失败（宿主没起来、超时）时重试一次再放弃——第一次打开历史会话时进程可能正在
-   * 冷启动，把那次失败记成「没有可选项」会让菜单一直空着。
-   */
+  // 同一插件的菜单和状态共用一次视图请求。上下文包含会话与目录，旧请求不能回填新会话。
+  const loadView = useCallback(
+    async (panel) => {
+      const requestKey = `${context}\u0000${panel.id}`
+      if (inflight.current.has(requestKey)) return inflight.current.get(requestKey)
+      const request = (async () => {
+        let result = null
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          result = await window.mica.chat.pluginPanels
+            .view(nodeId, { pluginId: panel.id, sessionId, cwd })
+            .catch(() => null)
+          if (result && result.ok !== false) break
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 350))
+        }
+        if (contextRef.current !== context) return null
+        if (result?.ok !== false && result) {
+          const view = result.view || result
+          setShortcutViews((current) => ({ ...current, [requestKey]: view.shortcutStates || {} }))
+          return { view }
+        }
+        return { error: result?.error || '读取失败，请重试' }
+      })()
+      inflight.current.set(requestKey, request)
+      try {
+        return await request
+      } finally {
+        inflight.current.delete(requestKey)
+      }
+    },
+    [context, cwd, nodeId, sessionId]
+  )
+
   const loadMenu = useCallback(
     async (panel, shortcut, key, { force = false } = {}) => {
       if (!shortcut?.menu) return
-      const cacheKey = menuCacheKey(nodeId, panel.id, shortcut.menu)
+      const cacheKey = menuCacheKey(context, panel.id, shortcut.menu)
       if (!force) {
         const cached = readMenuCache(cacheKey)
         if (cached) {
@@ -162,60 +196,54 @@ export function PluginQuickBar({
           if (!cached.stale) return
         }
       }
-      if (inflight.current.has(cacheKey)) return
-      inflight.current.add(cacheKey)
-      try {
-        let result = null
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          result = await window.mica.chat.pluginPanels
-            .view(nodeId, { pluginId: panel.id, sessionId, cwd })
-            .catch(() => null)
-          if (result) break
-          await new Promise((resolve) => setTimeout(resolve, 350))
-        }
-        const view = result?.view || result || {}
-        const entry = {
-          items: quickbarMenuItems(shortcut, view),
-          // 拿到了视图就一定有答案——插件没给这一组就是没有可选项，不能让菜单一直转圈。
-          ready: Boolean(result),
-          // 宿主明确报错时把原因写进菜单，比一句「暂时没有可选项」更能指向问题。
-          note: result?.ok === false ? result.error || '' : ''
-        }
-        if (entry.ready && result?.ok !== false) writeMenuCache(cacheKey, entry)
-        // 顺手存下整份视图：紧接着点开抽屉时不用再等一次同样的请求。
-        if (result?.ok && result.view) writePanelView(nodeId, panel.id, result.view)
-        setMenuViews((current) => ({ ...current, [key]: entry }))
-      } finally {
-        inflight.current.delete(cacheKey)
-      }
+      const result = await loadView(panel)
+      if (!result || contextRef.current !== context) return
+      const entry = result.error
+        ? { items: [], ready: true, note: result.error, failed: true }
+        : { items: quickbarMenuItems(shortcut, result.view), ready: true, note: '' }
+      if (!result.error) writeMenuCache(cacheKey, entry)
+      setMenuViews((current) => ({ ...current, [key]: entry }))
     },
-    [cwd, nodeId, sessionId]
+    [context, loadView]
   )
 
-  // 换会话：上一个会话的缓存条目不能拿来用（分支属于那条会话）。
   useEffect(() => {
-    if (!nodeId) return
-    prunePluginPanelCache(nodeId)
     setMenuViews({})
-  }, [nodeId])
+    setOpenMenu('')
+    setShortcutViews({})
+  }, [context])
 
-  // 预热：页面空下来之后问一次，之后悬停直接命中缓存。
   useEffect(() => {
-    const wanted = menuShortcutsOf(panels)
-    if (wanted.length === 0) return undefined
-    let alive = true
-    const timer = setTimeout(() => {
-      if (!alive) return
-      if (typeof document !== 'undefined' && document.hidden) return
-      for (const { panel, shortcut } of wanted) {
-        void loadMenu(panel, shortcut, `${panel.id}:${shortcut.label}`)
+    const wanted = items.filter(({ shortcut }) => shortcut.menu || shortcut.id)
+    if (!wanted.length) return undefined
+    const refresh = () => {
+      if (document.hidden) return
+      const statusPanels = new Set()
+      for (const { panel, shortcut, key } of wanted) {
+        if (shortcut.menu) void loadMenu(panel, shortcut, key)
+        if (shortcut.id && !statusPanels.has(panel.id)) {
+          statusPanels.add(panel.id)
+          void loadView(panel)
+        }
       }
-    }, PREFETCH_DELAY_MS)
-    return () => {
-      alive = false
-      clearTimeout(timer)
     }
-  }, [loadMenu, panels])
+    const timer = setTimeout(refresh, PREFETCH_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [items, loadMenu, loadView])
+
+  useEffect(() => {
+    const dynamicPanels = panels.filter((panel) => panel.shortcuts.some((shortcut) => shortcut.id))
+    if (!dynamicPanels.length) return undefined
+    const refresh = () => {
+      if (!document.hidden) for (const panel of dynamicPanels) void loadView(panel)
+    }
+    const timer = setInterval(refresh, 30_000)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [panels, loadView])
 
   if (items.length === 0) return null
 
@@ -224,9 +252,9 @@ export function PluginQuickBar({
     onTogglePanel(active ? '' : panel.id, active ? '' : section)
   }
 
-  const runAction = async (panel, action, key) => {
+  const runAction = async (panel, action, key, buttonKey) => {
     if (pending) return
-    setPending(action)
+    setPending(buttonKey || `${panel.id}:${action}`)
     try {
       const result = await window.mica.chat.pluginPanels
         .action(nodeId, { pluginId: panel.id, action, key, sessionId, cwd })
@@ -239,6 +267,12 @@ export function PluginQuickBar({
         onOpenReview
       })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
+      if (panel.shortcuts.some((shortcut) => shortcut.id)) void loadView(panel)
+      for (const entry of items.filter(
+        (item) => item.panel.id === panel.id && item.shortcut.menu
+      )) {
+        void loadMenu(panel, entry.shortcut, entry.key, { force: true })
+      }
     } finally {
       setPending('')
     }
@@ -279,12 +313,16 @@ export function PluginQuickBar({
       return
     }
     if (shortcut.section) openSection(panel, shortcut.section)
-    else await runAction(panel, shortcut.action)
+    else await runAction(panel, shortcut.action, undefined, key)
   }
 
   return (
     <div className="chat-plugin-quickbar" role="toolbar" aria-label="插件快捷操作" ref={barRef}>
-      {items.map(({ panel, shortcut, key }) => {
+      {items.map(({ panel, shortcut, key, first }) => {
+        const state = shortcut.id
+          ? shortcutViews[`${context}\u0000${panel.id}`]?.[shortcut.id]
+          : null
+        const disabled = state?.disabled === true
         const active =
           Boolean(shortcut.section) && openPlugin === panel.id && focusSection === shortcut.section
         const group = Boolean(shortcut.items || shortcut.menu)
@@ -297,81 +335,100 @@ export function PluginQuickBar({
         return (
           <div
             key={key}
-            className="chat-plugin-quickbar-group"
-            onMouseEnter={group ? (event) => hoverMenu(event, panel, shortcut, key) : undefined}
+            className={`chat-plugin-quickbar-group${first && panels.length > 1 ? ' is-plugin-start' : ''}`}
+            onMouseEnter={
+              group && !disabled ? (event) => hoverMenu(event, panel, shortcut, key) : undefined
+            }
             onMouseLeave={group ? clearHover : undefined}
           >
             <button
               type="button"
               title={
-                shortcut.section
+                state?.disabledReason ||
+                (shortcut.section
                   ? `${active ? '收起' : '打开'}「${shortcut.label}」`
-                  : `${panel.label} · ${shortcut.label}`
+                  : `${panel.label} · ${shortcut.label}`)
               }
-              aria-pressed={active}
+              aria-pressed={shortcut.section ? active : undefined}
               aria-haspopup={group ? 'menu' : undefined}
               aria-expanded={group ? openMenu === key : undefined}
-              disabled={Boolean(pending)}
+              disabled={Boolean(pending) || disabled}
               className={[
                 'chat-plugin-quickbar-button',
                 shortcut.action ? 'is-primary' : '',
                 active ? 'is-active' : '',
-                pending === shortcut.action ? 'is-busy' : ''
+                pending === key ? 'is-busy' : ''
               ]
                 .filter(Boolean)
                 .join(' ')}
               onClick={(event) => void runShortcut(event, panel, shortcut, key)}
             >
-              {pending === shortcut.action ? '…' : shortcut.label}
+              {shortcut.label}
+              {pending === key && <span aria-label="执行中">…</span>}
+              {state?.badge && <span className="chat-plugin-quickbar-badge">{state.badge}</span>}
               {group && (
                 <span className="chat-plugin-quickbar-caret" aria-hidden="true">
                   ▾
                 </span>
               )}
             </button>
-            {group && openMenu === key && menuPos && (
-              <FloatingMenu
-                x={menuPos.x}
-                y={menuPos.y}
-                minWidth={Math.max(menuPos.width, 176)}
-                /* 这一排紧贴输入框，往下开会压住输入框：整组向上开。 */
-                placement="above"
-                /* 菜单本身也要豁免：否则 pointerdown 先关菜单，click 永远到不了菜单项。 */
-                ignoreSelector=".chat-plugin-quickbar-group, .chat-plugin-quickbar-menu"
-                onClose={() => setOpenMenu('')}
-              >
-                <div className="chat-plugin-quickbar-menu">
-                  {menuItems.length === 0 ? (
-                    shortcut.menu && !menuViews[key]?.ready ? (
-                      <span className="plugin-menu-skeleton" aria-hidden="true">
-                        <span className="plugin-menu-skeleton-row" />
-                        <span className="plugin-menu-skeleton-row is-short" />
-                      </span>
+            {group &&
+              !disabled &&
+              openMenu === key &&
+              menuPos &&
+              createPortal(
+                <FloatingMenu
+                  key={`${key}:${menuItems.length}:${menuViews[key]?.ready || false}`}
+                  x={menuPos.x}
+                  y={menuPos.y}
+                  minWidth={Math.max(menuPos.width, 176)}
+                  /* 这一排紧贴输入框，往下开会压住输入框：整组向上开。 */
+                  placement="above"
+                  /* 菜单本身也要豁免：否则 pointerdown 先关菜单，click 永远到不了菜单项。 */
+                  ignoreSelector=".chat-plugin-quickbar-group, .chat-plugin-quickbar-menu"
+                  onClose={() => setOpenMenu('')}
+                >
+                  <div className="chat-plugin-quickbar-menu">
+                    {menuItems.length === 0 ? (
+                      shortcut.menu && !menuViews[key]?.ready ? (
+                        <span className="plugin-menu-skeleton" aria-hidden="true">
+                          <span className="plugin-menu-skeleton-row" />
+                          <span className="plugin-menu-skeleton-row is-short" />
+                        </span>
+                      ) : (
+                        <span className="plugin-menu-loading">
+                          {menuViews[key]?.note || '暂时没有可选项'}
+                          {menuViews[key]?.failed && (
+                            <button
+                              type="button"
+                              onClick={() => void loadMenu(panel, shortcut, key, { force: true })}
+                            >
+                              重试
+                            </button>
+                          )}
+                        </span>
+                      )
                     ) : (
-                      <span className="plugin-menu-loading">
-                        {menuViews[key]?.note || '暂时没有可选项'}
-                      </span>
-                    )
-                  ) : (
-                    menuItems.map((item) => (
-                      <button
-                        key={`${item.label}:${item.action || item.section}`}
-                        type="button"
-                        role="menuitem"
-                        className="plugin-menu-item"
-                        onClick={() => {
-                          setOpenMenu('')
-                          runTarget(panel, item)
-                        }}
-                      >
-                        <span className="truncate">{item.label}</span>
-                        {item.detail && <span className="plugin-menu-hint">{item.detail}</span>}
-                      </button>
-                    ))
-                  )}
-                </div>
-              </FloatingMenu>
-            )}
+                      menuItems.map((item) => (
+                        <button
+                          key={`${item.label}:${item.action || item.section}`}
+                          type="button"
+                          role="menuitem"
+                          className="plugin-menu-item"
+                          onClick={() => {
+                            setOpenMenu('')
+                            runTarget(panel, item)
+                          }}
+                        >
+                          <span className="truncate">{item.label}</span>
+                          {item.detail && <span className="plugin-menu-hint">{item.detail}</span>}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </FloatingMenu>,
+                document.body
+              )}
           </div>
         )
       })}
@@ -817,15 +874,25 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
           hint={field.hint}
           htmlFor={`chat-plugin-field-${field.key}`}
         >
-          <input
-            id={`chat-plugin-field-${field.key}`}
-            className="text-input"
-            type="text"
-            inputMode={field.type === 'number' ? 'numeric' : undefined}
-            value={drafts[field.key] ?? ''}
-            placeholder={field.placeholder || ''}
-            onChange={(event) => changeDraft(field.key, event.target.value)}
-          />
+          {field.type === 'password' ? (
+            <SecretInput
+              id={`chat-plugin-field-${field.key}`}
+              value={drafts[field.key] ?? ''}
+              placeholder={field.placeholder || ''}
+              ariaLabel={field.label}
+              onChange={(next) => changeDraft(field.key, next)}
+            />
+          ) : (
+            <input
+              id={`chat-plugin-field-${field.key}`}
+              className="text-input"
+              type="text"
+              inputMode={field.type === 'number' ? 'numeric' : undefined}
+              value={drafts[field.key] ?? ''}
+              placeholder={field.placeholder || ''}
+              onChange={(event) => changeDraft(field.key, event.target.value)}
+            />
+          )}
         </SettingRow>
       ))}
       {section.actions?.length > 0 && (

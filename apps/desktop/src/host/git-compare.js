@@ -431,7 +431,8 @@ export async function getFile(cwd, filePath, requested = null) {
     originalLabel = selected.baseLabel
   } else if (mode === 'refs') {
     // 评审一条分支：两边都在提交里，工作区不参与（也不会因为目录被清掉而失败）。
-    compareRef = await commitHash(root, options.ref)
+    // 图谱里翻到根提交时基线是空树——它不是提交，不能过 `commitHash`。
+    compareRef = options.ref === EMPTY_TREE ? EMPTY_TREE : await commitHash(root, options.ref)
     modifiedRef = await commitHash(root, options.head)
     originalLabel = options.label || shortRefName(options.ref)
   } else if (mode === 'worktree') {
@@ -446,11 +447,30 @@ export async function getFile(cwd, filePath, requested = null) {
         : worktreeFile(root, filePath).then((file) => file.content)
   ])
   const binary = original.includes(0) || modified.includes(0)
+  // 行悬停的 blame 必须按「这一侧到底是哪份内容」取：original 是某个提交或索引，
+  // modified 是工作区、索引或另一个提交。渲染层照这份说明去 `git:blame`，
+  // 不再自己按 mode 猜一遍（猜错就会显示别处的作者与提交）。
+  const blame = {
+    original:
+      mode === 'worktree'
+        ? { kind: 'index' }
+        : compareRef === EMPTY_TREE
+          ? { kind: 'none' }
+          : { kind: 'commit', ref: compareRef },
+    modified:
+      mode === 'refs'
+        ? { kind: 'commit', ref: modifiedRef }
+        : mode === 'staged'
+          ? { kind: 'index' }
+          : { kind: 'worktree' }
+  }
   return {
     original: binary ? '' : original.toString('utf8'),
     modified: binary ? '' : modified.toString('utf8'),
     binary,
     originalLabel,
-    modifiedLabel: mode === 'refs' ? options.headLabel || shortRefName(options.head) : modifiedLabel
+    modifiedLabel:
+      mode === 'refs' ? options.headLabel || shortRefName(options.head) : modifiedLabel,
+    blame
   }
 }

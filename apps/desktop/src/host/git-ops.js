@@ -1,8 +1,8 @@
 // Git 写操作：暂存 / 取消暂存 / 放弃更改。读操作留在 `git.js`（那里注册 IPC）。
 // 这里不 import electron，好处是单测能对着临时仓库跑真实 git。
 import { execFile } from 'child_process'
-import { rm } from 'fs/promises'
-import { readFileSync, statSync } from 'fs'
+import { rm, rmdir } from 'fs/promises'
+import { readFileSync, realpathSync, statSync } from 'fs'
 import path from 'path'
 import { promisify } from 'util'
 
@@ -220,12 +220,38 @@ export async function getWorkspaceStatus(cwd) {
 }
 
 /** 把仓库内的相对路径解析成绝对路径，越界（`../`）就报错。 */
+/** 真实路径；路径本身还不存在时（刚删掉的文件）解析最近的存在祖先，再拼回尾巴。 */
+function realish(target) {
+  let current = target
+  const tail = []
+  for (;;) {
+    try {
+      return path.join(realpathSync.native(current), ...tail)
+    } catch {
+      const parent = path.dirname(current)
+      if (parent === current) return target
+      tail.unshift(path.basename(current))
+      current = parent
+    }
+  }
+}
+
+/**
+ * 仓库内路径校验：越出仓库直接拒绝。
+ *
+ * 比较必须按真实路径做——`git rev-parse --show-toplevel` 给的是真实路径（macOS 上
+ * `/tmp/...` 实际是 `/private/tmp/...`），而用户从地址栏、`?cwd=`、目录选择器拿到的
+ * 常常是符号链接那条写法。只比字符串会把同一个目录判成「仓库外」，于是暂存、放弃
+ * 更改、文件夹回退、打开文件一律报 `Invalid repository path`。返回真实路径，调用方
+ * 再按 `path.relative(root, …)` 换算相对路径才不会错位。
+ */
 export function safeFilePath(root, relativePath) {
-  const absolutePath = path.resolve(root, relativePath)
-  const relative = path.relative(root, absolutePath)
+  const realRoot = realish(root)
+  const realTarget = realish(path.resolve(root, relativePath))
+  const relative = path.relative(realRoot, realTarget)
   if (relative.startsWith('..') || path.isAbsolute(relative))
     throw new Error('Invalid repository path')
-  return absolutePath
+  return realTarget
 }
 
 /** 路径是否已经在索引里（未跟踪文件不在）。 */
@@ -272,4 +298,62 @@ export async function discardFile(cwd, filePath) {
   }
   await rm(absolutePath, { force: true })
   noteWorktreeChange(root)
+}
+
+/**
+ * 文件夹级回退：目录下**所有**已跟踪的文件恢复成索引里那份，未跟踪的文件删掉。
+ *
+ * 与单文件版的分工：单文件版靠面板给出的那一行（它只知道列出来的文件），文件夹版让
+ * git 自己枚举目录下的条目，因此被筛选隐藏的、还没进面板的改动也一并回退——「回退这个
+ * 文件夹」就该是这个语义，否则用户得先关掉筛选才敢点。
+ *
+ * 恢复的来源是索引而不是 HEAD：与单文件版一致，已经暂存的内容不会被顺手丢掉；要连
+ * 暂存区一起回退，先「取消暂存」再回退。已跟踪文件一个都没有的目录只能删未跟踪文件。
+ *
+ * 不可逆，调用方必须先让用户确认。返回删掉的未跟踪文件数，用于给用户一句结果。
+ */
+export async function discardDirectory(cwd, directoryPath) {
+  const { root } = await getRepository(cwd)
+  const requested = String(directoryPath || '').replace(/\/+$/, '')
+  if (!requested) throw new Error('缺少要回退的文件夹')
+  const absolute = safeFilePath(root, requested)
+  if (absolute === root) throw new Error('不能回退整个仓库，请选择仓库里的文件夹')
+  // git 的 pathspec 是相对仓库根的：把绝对路径换算回去，避免用户传了绝对路径时静默无效。
+  const relative = path.relative(root, absolute).split(path.sep).join('/')
+  if (!relative) throw new Error('不能回退整个仓库，请选择仓库里的文件夹')
+  await git(root, ['restore', '--worktree', '--', relative])
+  const untracked = (
+    await git(root, ['ls-files', '--others', '--exclude-standard', '-z', '--', relative])
+  )
+    .split('\0')
+    .filter(Boolean)
+  for (const filePath of untracked) {
+    await rm(path.join(root, filePath), { force: true })
+  }
+  await pruneEmptyDirectories(root, untracked)
+  noteWorktreeChange(root)
+  return { removed: untracked.length, restored: relative }
+}
+
+/**
+ * 删完未跟踪文件后顺手收掉空目录（git 不跟踪空目录，`git clean -fd` 同样会删）。
+ * 只从刚删掉的文件往上走到仓库根，遇到还有内容的目录就停——已跟踪文件因此不会被误删。
+ */
+async function pruneEmptyDirectories(root, removedPaths) {
+  const directories = new Set()
+  for (const filePath of removedPaths) {
+    let current = path.dirname(path.join(root, filePath))
+    while (current.startsWith(root) && current !== root) {
+      directories.add(current)
+      current = path.dirname(current)
+    }
+  }
+  // 深的先删，父目录才有机会跟着空出来。
+  for (const directory of [...directories].sort((left, right) => right.length - left.length)) {
+    try {
+      await rmdir(directory)
+    } catch {
+      // ENOTEMPTY / ENOENT：还有别的文件，或已经被上一次删除带走。
+    }
+  }
 }

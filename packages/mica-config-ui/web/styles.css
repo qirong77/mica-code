@@ -1387,7 +1387,6 @@ html[data-theme='light'] .mica-config-ui {
     container-name: session-detail;
   }
 
-
   /* 详情头部：标题 + 状态、目录、一行事实。压成 3 行，把篇幅留给对话。
      底色比正文浅一档：头部是「这条会话是什么」，正文是「里面有什么」，一眼就能分开。 */
   .session-detail-head {
@@ -1658,7 +1657,8 @@ html[data-theme='light'] .mica-config-ui {
   .conversation-item {
     position: relative;
     display: grid;
-    grid-template-columns: 28px minmax(0, 1fr);
+    /* 序号到三位数就撑破 28px 的圆：给一个最小宽度让它长成胶囊，别把数字挤变形。 */
+    grid-template-columns: minmax(28px, auto) minmax(0, 1fr);
     gap: 10px;
     align-items: start;
   }
@@ -1667,8 +1667,9 @@ html[data-theme='light'] .mica-config-ui {
     z-index: 1;
     display: grid;
     place-items: center;
-    width: 28px;
+    min-width: 28px;
     height: 28px;
+    padding: 0 5px;
     border: 1px solid var(--line);
     border-radius: 999px;
     background: var(--panel);
@@ -1782,6 +1783,9 @@ html[data-theme='light'] .mica-config-ui {
 
   /* 行尾的体积：大工具结果一眼可见，不用展开就知道是哪条把 context 撑大了。 */
   .conversation-card-size {
+    /* 定宽右对齐：每条体积数字宽度不同，不定宽的话这一列参差，预览文字的右边界也跟着乱。 */
+    min-width: 72px;
+    text-align: right;
     color: var(--text-faint);
     font-family: var(--font-mono);
     font-size: 11px;
@@ -2635,9 +2639,23 @@ html[data-theme='light'] .mica-config-ui {
 
   /* Conversation pane (paged) */
 
+  /* 对话记录：工具栏固定，只有正文这块滚。以前整块跟着 .session-tab-body 一起滚，
+     「合计 / 回到最新」会随内容滚出视野，长对话里正好在最需要它的时候消失。 */
   .conversation-pane {
-    display: grid;
-    gap: 12px;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    gap: 10px;
+  }
+
+  .conversation-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* 时间轴左侧那条竖线贴着序号列，右边留一点给滚动条，卡片不被压窄。 */
+    padding-right: 4px;
   }
 
   .ui-link-button {
@@ -4557,23 +4575,17 @@ html[data-theme='light'] .mica-config-ui {
     gap: 10px;
   }
 
+  /* 卡片 = 外壳 + 「打开详情」按钮 + 右上角的启停开关。
+     开关必须是兄弟节点：按钮里再套一个按钮是非法嵌套，键盘与点击都不可靠。 */
   .plugin-card {
-    display: grid;
-    grid-template-columns: 34px minmax(0, 1fr);
-    align-items: start;
-    gap: 11px;
+    position: relative;
     width: 100%;
-    padding: 12px;
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
     background: var(--panel);
-    color: var(--text-soft);
-    text-align: left;
-    cursor: pointer;
     transition:
       border-color 110ms ease,
-      background 110ms ease,
-      transform 110ms ease;
+      background 110ms ease;
   }
 
   .plugin-card:hover {
@@ -4581,9 +4593,35 @@ html[data-theme='light'] .mica-config-ui {
     background: var(--panel-hover);
   }
 
-  .plugin-card:focus-visible {
+  .plugin-card:focus-within {
     border-color: var(--line-strong);
+  }
+
+  .plugin-card-open {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: start;
+    gap: 11px;
+    width: 100%;
+    /* 右边那 44px 是开关的位置：长名字与描述不该钻到它底下。 */
+    padding: 12px 44px 12px 12px;
+    border: 0;
+    border-radius: inherit;
+    background: none;
+    color: var(--text-soft);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .plugin-card-open:focus-visible {
     outline: none;
+  }
+
+  .plugin-card-toggle {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
   }
 
   /* 停用的插件整张压暗：不是变成灰色按钮，而是不再抢注意力。 */

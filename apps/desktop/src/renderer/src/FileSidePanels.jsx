@@ -101,6 +101,8 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
   // 「刷新」按钮靠它重新跑一次同样的查询（查询串本身没变，没法当依赖用）
   const [nonce, setNonce] = useState(0)
   const requestRef = useRef(0)
+  // host 侧的取消要能对上「是哪一次查询」：留到下一次输入后才到达的取消不能杀掉新查询
+  const searchIdRef = useRef(0)
 
   useEffect(() => {
     if (!root || !query.trim()) {
@@ -110,6 +112,7 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
       return undefined
     }
     const request = ++requestRef.current
+    const searchId = ++searchIdRef.current
     const timer = window.setTimeout(async () => {
       try {
         setBusy(true)
@@ -118,7 +121,8 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
           wholeWord,
           regex,
           include,
-          exclude
+          exclude,
+          requestId: searchId
         })
         if (request !== requestRef.current) return
         setResult(response || { items: [], truncated: false, error: null })
@@ -132,6 +136,8 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
     return () => {
       clearTimeout(timer)
       requestRef.current += 1
+      // 这次查询已经作废：让 host 停掉可能还在跑的全量扫描，别让旧请求拖慢下一次输入
+      window.mica.files.cancelSearch?.(root, searchId)
     }
   }, [query, root, matchCase, wholeWord, regex, include, exclude, nonce])
 

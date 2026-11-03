@@ -1,0 +1,52 @@
+{
+  "id": "ssh",
+  "name": "SSH",
+  "description": "操作远端服务器：主机清单、指纹固定、批量只读查询与持久 shell 会话",
+  "version": "0.1.0",
+  "icon": "terminal",
+  "main": "index.ts",
+  "priority": 40,
+  "requires": ["tools", "prompt", "settings", "desktop"],
+  "mica": {
+    "apiVersion": 1
+  },
+  "settings": [
+    {
+      "key": "defaultTimeoutSec",
+      "label": "命令默认超时（秒）",
+      "type": "number",
+      "step": 10,
+      "unit": "秒",
+      "default": "120",
+      "hint": "一次性脚本的上限；构建、安装这类更久的活交给 ssh_session"
+    },
+    {
+      "key": "tailLines",
+      "label": "默认回传行数",
+      "type": "number",
+      "step": 50,
+      "unit": "行",
+      "default": "300",
+      "hint": "超出部分留在远端 /tmp 的日志里，模型可以再去 grep"
+    },
+    {
+      "key": "controlPersistSec",
+      "label": "连接复用保持（秒）",
+      "type": "number",
+      "step": 60,
+      "unit": "秒",
+      "default": "600",
+      "hint": "同一台机器的连续命令复用一条连接；调小会在空闲后断开重连"
+    }
+  ],
+  "status": [
+    { "key": "hostsSummary", "label": "服务器", "type": "text" }
+  ],
+  "desktop": {
+    "panel": {
+      "label": "SSH",
+      "display": "modal",
+      "shortcuts": [{ "label": "SSH 服务器", "section": "服务器" }]
+    }
+  }
+}

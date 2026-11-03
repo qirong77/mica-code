@@ -540,8 +540,18 @@ ctx.desktop.panel({
   （例如「频道设置」）；`items` 是一组写死的子项（悬停或点击展开一层，例如「频道」→
   同步频道 / 频道设置）；`menu` 的子项由视图的 `menus[menu]` 现算（例如「Pull Request」→
   当前会话认领的每个副本，条目随状态变）。没有常用动作插件就别声明，一条空按钮比没有更糟。
+- 快捷按钮可声明稳定的 `id`，在面板视图中用 `shortcutStates` 按 id 提供动态状态：例如清单
+  `{ "id": "check", "label": "检查", "action": "check" }` 对应视图
+  `{ shortcutStates: { check: { badge: '运行中', disabled: true, disabledReason: '请等待检查完成' } } }`。
+  `id` 在同一插件内唯一，长度 1–64，只能含小写字母、数字、`.`、`_`、`-`，并以字母或数字开头；
+  旧清单可以不写。状态字段均可选：`badge` 是短文本，`disabled` 是布尔值，`disabledReason` 是
+  禁用原因。宿主最多保留 40 条状态，徽标和原因分别裁到 12 和 200 字符，无效字段会被忽略。
 - 面板只表达「几行只读状态 + 一列条目 + 几个输入框 + 几个按钮」。宿主会裁剪长度、条目数与
   字段类型，畸形视图不会让页面崩掉；它拿到的动作只有 `{ action, key?, values? }`。
+  输入框是 `fields: [{ key, label, type?, value?, placeholder?, hint? }]`，`type` 取
+  `text`（默认）/ `number` / `password`。口令、Token 这类值只能用 `password`（密文，带眼睛
+  切明文，宿主渲染成共享的 `SecretInput`），而且**视图不要把存下来的值回填**——留空表示
+  「不改」，否则它会被截图、也会留在页面状态里。
   按钮的 `tone` 取 `primary`（这一块的主动作）/ `default`（普通描边按钮）/ `ghost`（行内的
   次要动作，如「删除」）/ `danger`；不声明等于 `ghost`，一个 section 里最多一个 `primary`。
 - section 有输入框时用 `commit` 声明「改完自动生效」的动作 id：宿主在输入停顿约 0.5s 后
@@ -715,7 +725,9 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 { "disabled": ["todo"] }
 ```
 
-停用的插件在启动阶段就不会被注册（工具、命令、钩子一起消失），改完需要重开会话才生效。
+停用的插件照常注册、在装配阶段被跳过（工具、命令、钩子一起消失）。TUI 与桌面端的会话宿主
+在每轮开始时按这份名单对齐一次，所以改完不必重开会话、下一轮对话起生效；正在跑的那一轮
+不会被打断。`mica exec` 与插件命令这类一次性运行只在启动时读一次名单。
 
 ## 装在自己机器上的插件
 

@@ -49,6 +49,7 @@ import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
 import { isValidSessionId } from './session-delete'
 import { renameSessionFile } from './session-rename'
+import { updateSessionCwdFile } from './session-cwd'
 import { createTurnLeaseProbe } from './session-lease'
 import { bindLoopSessionId } from './loops'
 import { browserOwnerEnv } from './browser-control'
@@ -2529,22 +2530,45 @@ export function registerChatIpc() {
     return { ok: true, exists: isDirectory(cwd) }
   })
 
-  ipcMain.handle('chat:update-cwd', (_event, { sessionId, cwd } = {}) => {
-    const dir = typeof cwd === 'string' && cwd.trim() ? cwd.trim() : null
-    if (!sessionId || typeof sessionId !== 'string' || !dir) {
-      return { ok: false, error: 'sessionId 或 cwd 缺失' }
-    }
+  // Mica extension: 换工作目录。和改名同一个道理——会话文件由它的所有者（常驻宿主、
+  // 终端里的 TUI）按内存快照回写，而快照里的 cwd 是 `process.cwd()`：从这里直接改盘，
+  // 下一轮保存会原样覆盖它，而且那一轮本身还在旧目录里跑。所以有宿主的走
+  // `mica/session/cwd`（宿主自己 chdir + 落盘，下一轮立刻生效），只有没人写这个文件时
+  // 才直接写盘。
+  ipcMain.handle('chat:set-cwd', async (event, { id, sessionId, cwd } = {}) => {
+    const dir = typeof cwd === 'string' ? cwd.trim() : ''
+    if (!dir) return { ok: false, error: '请选择要切换的项目目录' }
     if (!isDirectory(dir)) return { ok: false, error: '目录不存在，请选择有效目录' }
-    const file = sessionFile(sessionId)
-    if (!file || !existsSync(file)) return { ok: false, error: '会话不存在' }
+    const target = typeof sessionId === 'string' ? sessionId.trim() : ''
+    const nodeId = typeof id === 'string' ? id.trim() : ''
+    if (!target && !nodeId) return { ok: false, error: '会话缺失，无法切换目录' }
+    if (target && !isValidSessionId(target)) return { ok: false, error: '会话 id 无效' }
+
+    // 这条会话开在某个页签里：它的宿主同时持有快照与进程 cwd，交给它去做。
+    let run = nodeId && runs.has(nodeId) ? runs.get(nodeId) : null
+    if (!run && target) {
+      for (const candidate of runs.values()) {
+        if (candidate.sessionId !== target && candidate.requestedSessionId !== target) continue
+        if (!candidate.child?.stdin?.writable) continue
+        run = candidate
+        break
+      }
+    }
+    if (run?.child?.stdin?.writable) {
+      run.sender = event.sender
+      return unwrapHostResult(await hostTaskRequest(run, 'mica/session/cwd', { cwd: dir }))
+    }
+
+    // 还没落盘的草稿（新对话、没发过消息）：没有会话文件可改，下一轮 spawn 会按页面
+    // 传来的 cwd 起进程。这里如实回报「不用落盘」，不是失败。
+    if (!target) return { ok: true, cwd: dir, persisted: false }
+    // 另一个进程（终端里的 TUI / 另一个运行时）持着 turn lease：它随后会用自己的快照
+    // 落盘，写一个马上被覆盖的 cwd 只会让人以为切换成功了。
+    if (hasLiveTurnLease(target))
+      return { ok: false, error: '该会话正在另一个终端或窗口里运行，请等这一轮结束后再切换目录' }
     try {
-      const raw = JSON.parse(readFileSync(file, 'utf8'))
-      if (!raw || typeof raw !== 'object') return { ok: false, error: '会话文件已损坏' }
-      if (raw.cwd === dir) return { ok: true, unchanged: true }
-      raw.cwd = dir
-      raw.updatedAt = new Date().toISOString()
-      writeFileSync(file, JSON.stringify(raw, null, 2))
-      return { ok: true, unchanged: false }
+      const result = updateSessionCwdFile(sessionsDir(), target, dir)
+      return { ok: true, cwd: result.cwd, persisted: result.changed }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }

@@ -236,7 +236,13 @@ export {
   setPluginDisabled,
   writePluginState,
 } from './PluginState.js';
-export type { PluginBaseContext, PluginManager, PluginSetupReport } from './PluginManager.js';
+export type {
+  PluginBaseContext,
+  PluginManager,
+  PluginSetupReport,
+  PluginStateChange,
+  PluginStateSyncOptions,
+} from './PluginManager.js';
 export {
   PLUGIN_SKILLS_DIR,
   publishPluginSkills,
@@ -358,6 +364,7 @@ export type { PluginHealthLevel, PluginHealthReport, PluginHealthStore } from '.
 export type {
   PluginPanelAction,
   PluginPanelActionInput,
+  PluginPanelActionResult,
   PluginPanelButtonTone,
   PluginPanelField,
   PluginPanelHandler,

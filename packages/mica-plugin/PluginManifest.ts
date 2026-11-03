@@ -12,6 +12,7 @@ import {
   PLUGIN_ENTRY_PLACEMENTS,
   isDesktopCheckId,
   isPluginEntryPlacement,
+  isValidPluginPanelShortcutId,
   type DesktopCheckId,
   type PluginDesktopEntry,
   type PluginDesktopPage,
@@ -603,10 +604,19 @@ function readPanelShortcuts(input: unknown): { ok: true; value: PluginPanelShort
   if (input === undefined) return { ok: true, value: [] };
   if (!Array.isArray(input)) return { ok: false, error: 'desktop.panel.shortcuts 必须是数组' };
   const shortcuts: PluginPanelShortcut[] = [];
+  const ids = new Set<string>();
   for (const entry of input) {
     if (!isRecord(entry)) return { ok: false, error: 'desktop.panel.shortcuts 的每一项必须是对象' };
     const label = readString(entry.label)?.trim();
     if (!label) return { ok: false, error: 'desktop.panel.shortcuts 项缺少 label' };
+    const id = entry.id;
+    if (id !== undefined && !isValidPluginPanelShortcutId(id)) {
+      return { ok: false, error: `desktop.panel.shortcuts「${label}」的 id 必须为 1–64 位小写字母、数字、点、下划线或短横线，且以字母或数字开头` };
+    }
+    if (typeof id === 'string') {
+      if (ids.has(id)) return { ok: false, error: `desktop.panel.shortcuts 的 id 重复：${id}` };
+      ids.add(id);
+    }
     const action = readString(entry.action)?.trim();
     const section = readString(entry.section)?.trim();
     const menu = readString(entry.menu)?.trim();
@@ -627,6 +637,7 @@ function readPanelShortcuts(input: unknown): { ok: true; value: PluginPanelShort
     }
     shortcuts.push({
       label,
+      ...(typeof id === 'string' ? { id } : {}),
       ...(action ? { action } : {}),
       ...(section ? { section } : {}),
       ...(menu ? { menu } : {}),

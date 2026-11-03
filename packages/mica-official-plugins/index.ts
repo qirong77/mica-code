@@ -13,6 +13,7 @@ import sessionNotesSetup from '../../plugins/session-notes/index.js';
 import sessionCopySetup from '../../plugins/session-copy/index.js';
 import sessionTagsSetup from '../../plugins/session-tags/index.js';
 import sidecarSetup from '../../plugins/sidecar/index.js';
+import sshSetup from '../../plugins/ssh/index.js';
 import subagentSetup from '../../plugins/subagent/index.js';
 import todoSetup from '../../plugins/todo/index.js';
 import webSearchSetup from '../../plugins/web-search/index.js';
@@ -39,6 +40,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   'session-rename': sessionRenameSetup,
   'session-tags': sessionTagsSetup,
   sidecar: sidecarSetup,
+  ssh: sshSetup,
   subagent: subagentSetup,
   'computer-use': computerUseSetup,
   connections: connectionsSetup,

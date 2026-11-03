@@ -53,6 +53,12 @@ export function SessionDetailView({
   const [rawLoaded, setRawLoaded] = useState(false);
 
   const lastUpdatedAtRef = useRef<string | null>(null);
+  const headerRef = useRef<ConfigWebSessionDetails | null>(null);
+  headerRef.current = header;
+  // 一轮读盘还没回来就不要再来一轮：大会话（几十 MB）的 readSessionDetails 比 2 秒轮询
+  // 还慢，请求会一层层叠起来，每次回来都 bump 一次 version，页签内容跟着反复重载——
+  // 打开详情后的头几秒正好是最明显的时候。
+  const refreshingRef = useRef(false);
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const rawRef = useRef({ rawContent, rawSavedContent, rawLoaded });
   rawRef.current = { rawContent, rawSavedContent, rawLoaded };
@@ -106,19 +112,26 @@ export function SessionDetailView({
     let cancelled = false;
     let timer: number | undefined;
     async function refresh(showLoading: boolean) {
+      if (refreshingRef.current) return;
+      refreshingRef.current = true;
       if (showLoading) setLoading(true);
       try {
         const next = await readSessionDetails(sessionId);
         if (cancelled) return;
+        const previous = headerRef.current;
+        const changed = !previous || !sameSessionHeader(previous, next);
+        // 什么都没变就不要 setHeader：每 2 秒换一个新对象会让整棵详情重渲染一遍。
+        if (changed) setHeader(next);
         if (lastUpdatedAtRef.current !== null && lastUpdatedAtRef.current !== next.updatedAt) {
           setVersion((value) => value + 1);
         }
         lastUpdatedAtRef.current = next.updatedAt;
-        setHeader(next);
-        setError(null);
+        // 读成功就清掉上一次的错误；null → null 不触发重渲染。
+        setError((current) => (current ? null : current));
       } catch (loadError) {
         if (!cancelled) setError(formatError(loadError));
       } finally {
+        refreshingRef.current = false;
         if (!cancelled && showLoading) setLoading(false);
       }
     }
@@ -181,8 +194,9 @@ export function SessionDetailView({
     PROMPT_TAB,
     ...extraTabs.map((item) => ({ id: item.id, label: item.label })),
   ];
-  // 提示词页签与原始文件页签自己就是滚动容器（编辑器内部滚动），外面这层不滚。
-  const fillBody = tab === 'raw' || tab === 'prompt';
+  // 提示词 / 原始文件（编辑器内部滚动）与对话记录（工具栏固定、只滚正文）都自己就是
+  // 滚动容器，外面这层不滚；只有 Context 分析整块跟页签一起滚。
+  const fillBody = tab === 'raw' || tab === 'prompt' || tab === 'conversation';
 
   /** 标签条按 WAI-ARIA 的 tablist 走：方向键在页签之间移动，焦点跟着选中的那一个。 */
   function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -357,6 +371,27 @@ function formatBytes(value: number): string {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * 两次读盘的头部是否等价。
+ *
+ * 轮询每 2 秒一次，绝大多数时候文件根本没变：拿 updatedAt 之外的几个展示字段逐项比，
+ * 一致就不 setHeader。cwd 也要比——换项目目录是按会话改的，它不会动 updatedAt。
+ */
+function sameSessionHeader(previous: ConfigWebSessionDetails, next: ConfigWebSessionDetails): boolean {
+  return (
+    previous.updatedAt === next.updatedAt &&
+    previous.title === next.title &&
+    previous.cwd === next.cwd &&
+    previous.turnState === next.turnState &&
+    previous.messageCount === next.messageCount &&
+    previous.usageCount === next.usageCount &&
+    previous.fileSizeBytes === next.fileSizeBytes &&
+    previous.role === next.role &&
+    previous.model === next.model &&
+    previous.contextWindowSize === next.contextWindowSize
+  );
 }
 
 function presentStatus(turnState: string): { tone: 'default' | 'green' | 'red' | 'blue'; label: string } {

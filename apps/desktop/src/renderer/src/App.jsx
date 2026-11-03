@@ -594,6 +594,9 @@ export default function App() {
   const [branchPickerOpen, setBranchPickerOpen] = useState(false)
   const [cwdModalOpen, setCwdModalOpen] = useState(false)
   const [cwdValid, setCwdValid] = useState(true)
+  // 切目录的进行中/失败状态只服务于选择框：失败时窗口不关，就地显示原因。
+  const [cwdSwitching, setCwdSwitching] = useState(false)
+  const [cwdSwitchError, setCwdSwitchError] = useState('')
   // 轻提示：侧栏 / 对话菜单这类没有对话流的地方（分享链接已在剪贴板、复制失败…）
   // 用底部居中一行提示，不弹窗、不挡内容（见 showToast）。
   const [toast, setToast] = useState(null)
@@ -2064,28 +2067,62 @@ export default function App() {
     },
     [closeConfigPage, createChatSession]
   )
+  /**
+   * 换当前会话的项目目录。
+   *
+   * 顺序是有意的：**先**校验、**再**由会话的所有者落盘、**最后**才改界面。
+   * 以前是先 `setNodes` 再异步调持久化并且吞掉结果：路径打错、目录被删、宿主正忙
+   * 这几种情况下界面已经切过去了，磁盘上还是旧目录（甚至被下一轮保存覆盖回去），
+   * 用户看到的是「切了但没生效」，没有任何提示。
+   *
+   * 返回 `true` 表示真的切了（调用方据此关掉选择框），`false` 时保持窗口开着、
+   * 错误显示在选择框里，用户可以改路径重试。
+   */
   const changeChatCwd = useCallback(
-    (cwd) => {
+    async (cwd) => {
       const dir = typeof cwd === 'string' && cwd.trim() ? cwd.trim() : null
       const id = activeRef.current
-      if (!dir || !id) return
-      setUiState('chatDefaultCwd', dir)
+      if (!dir || !id) return false
       const node = nodesRef.current.find((item) => item.id === id)
-      setNodes((items) =>
-        items.map((node) =>
-          node.id === id && node.type === 'terminal' && node.cwd !== dir
-            ? { ...node, cwd: dir, sessionId: node.sessionId }
-            : node
+      setCwdSwitching(true)
+      setCwdSwitchError('')
+      try {
+        const check = await window.mica.chat.checkCwd(dir)
+        if (!check?.exists) {
+          setCwdSwitchError('目录不存在，请重新选择')
+          return false
+        }
+        // 运行中的宿主自己改 cwd 并落盘（页面直接写文件会被它下一次保存覆盖），
+        // 所以这一步的结果必须看，不能吞。
+        const result = await window.mica.chat.setCwd({
+          id,
+          sessionId: node?.sessionId || null,
+          cwd: dir
+        })
+        if (!result?.ok) {
+          setCwdSwitchError(result?.error || '切换项目目录失败')
+          return false
+        }
+        setUiState('chatDefaultCwd', dir)
+        setNodes((items) =>
+          items.map((item) =>
+            item.id === id && item.type === 'terminal' && item.cwd !== dir
+              ? { ...item, cwd: dir, sessionId: item.sessionId }
+              : item
+          )
         )
-      )
-      setCwdValid(true)
-      // 把新 cwd 持久化到会话文件，压缩/续聊等后续流程才能读到正确目录
-      if (node?.sessionId) {
-        window.mica.chat.updateCwd(node.sessionId, dir).catch(() => {})
+        setCwdValid(true)
+        refreshGit({ cwd: dir })
+        showToast(`已切换到 ${dir}`)
+        return true
+      } catch (error) {
+        setCwdSwitchError(error instanceof Error ? error.message : String(error))
+        return false
+      } finally {
+        setCwdSwitching(false)
       }
-      refreshGit({ cwd: dir })
     },
-    [activeRef, refreshGit]
+    [activeRef, refreshGit, showToast]
   )
   const closeSearchFile = useCallback(
     () => view === 'files' && !!filesRef.current?.closeActive(),
@@ -2797,7 +2834,10 @@ export default function App() {
                     ? 'text-fg-dim hover:text-fg-strong'
                     : 'text-danger hover:bg-danger/10 hover:text-danger'
                 }`}
-                onClick={() => setCwdModalOpen(true)}
+                onClick={() => {
+                  setCwdSwitchError('')
+                  setCwdModalOpen(true)
+                }}
               >
                 {activeCwd}
               </button>
@@ -2847,12 +2887,15 @@ export default function App() {
         <CwdModal
           cwd={terminalCwd(activeId) || git.cwd || ''}
           invalid={!cwdValid}
+          busy={cwdSwitching}
+          error={cwdSwitchError}
           recent={recentCwds}
           anchorRef={isMobile ? null : cwdButtonRef}
           onClose={() => setCwdModalOpen(false)}
-          onApply={(dir) => {
-            setCwdModalOpen(false)
-            changeChatCwd(dir)
+          onApply={async (dir) => {
+            // 成功才收起：失败时用户就在这个面板里看到原因并直接改路径，
+            // 否则「点了应用、面板关掉、目录没变」没有任何线索。
+            if (await changeChatCwd(dir)) setCwdModalOpen(false)
           }}
         />
       )}

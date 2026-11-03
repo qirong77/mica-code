@@ -79,3 +79,26 @@ describe('HookRegistry.pipelineSync', () => {
     await Promise.resolve();
   });
 });
+it('does not run a handler that was disposed during the same emit', async () => {
+  const hooks = new HookRegistry();
+  const ran: string[] = [];
+  const second = hooks.on('turn:before', () => {
+    ran.push('second');
+  });
+  hooks.on('turn:before', () => {
+    ran.push('third');
+  });
+  // 优先级低 = 先跑：插件生命周期会在这一轮开始卸载别的插件，被卸掉的不该再处理这一轮，
+  // 排在它后面的也不能因为数组被 splice 而被跳过。
+  hooks.on(
+    'turn:before',
+    () => {
+      ran.push('first');
+      second.dispose();
+    },
+    { priority: -10000 },
+  );
+
+  await hooks.emit('turn:before', {});
+  expect(ran).toEqual(['first', 'third']);
+});

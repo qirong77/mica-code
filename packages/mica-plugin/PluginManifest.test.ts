@@ -5,6 +5,28 @@ function base(extra: Record<string, unknown> = {}) {
   return { id: 'demo', name: 'Demo', version: '1.0.0', ...extra };
 }
 
+describe('shortcut ids', () => {
+  const parse = (shortcuts: unknown[]) => parsePluginManifest(base({ desktop: { panel: { shortcuts } } }));
+
+  it('preserves optional ids and accepts legacy shortcuts', () => {
+    const result = parse([{ id: 'check-1', label: '检查', action: 'check' }, { label: '设置', section: '设置' }]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPanel?.shortcuts).toEqual([
+      { id: 'check-1', label: '检查', action: 'check' }, { label: '设置', section: '设置' },
+    ]);
+    expect(parse([{ id: 'a'.repeat(64), label: '检查', action: 'check' }]).ok).toBe(true);
+  });
+
+  it('rejects invalid, overlong and duplicate ids', () => {
+    for (const id of ['', ' ', 'UPPER', 'has space', '_start', 'a'.repeat(65), null, 1]) {
+      expect(parse([{ id, label: '检查', action: 'check' }]).ok).toBe(false);
+    }
+    const duplicate = parse([{ id: 'same', label: '一', action: 'a' }, { id: 'same', label: '二', menu: 'b' }]);
+    expect(duplicate.ok).toBe(false);
+    if (!duplicate.ok) expect(duplicate.error).toContain('重复');
+  });
+});
+
 describe('parsePluginManifest desktop checks', () => {
   it('清单里的 completions 进 ` / ` 补全候选，坏条目让整份清单不通过', () => {
     const ok = parsePluginManifest(

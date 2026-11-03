@@ -157,15 +157,20 @@ export class Application {
       setActiveContext(this.context);
 
       useBuiltinPlugins(this, agent, sessionController);
-      const filePlugins = await setupFilePlugins({
+      await plugins.setupAll({
         paths: pluginPaths,
-        plugins,
-        loadFilePlugins: micaPlugin.loadFilePlugins,
-        logger: pluginLogger,
-      });
-
-      const setupReport = await plugins.setupAll({
-        paths: pluginPaths,
+        // 启停跟着 `plugins-state.json` 走：每轮开始前对齐一次，改完不必重开 TUI。
+        pluginStateSync: {
+          host: 'tui',
+          loadUserPlugins: ({ disabled }) =>
+            setupFilePlugins({
+              paths: pluginPaths,
+              plugins,
+              loadFilePlugins: micaPlugin.loadFilePlugins,
+              logger: pluginLogger,
+              disabled,
+            }),
+        },
         services,
         hooks,
         commands,
@@ -303,14 +308,10 @@ export class Application {
         },
         logger: pluginLogger,
       });
-      micaPlugin.writePluginStatus({
-        pluginsDir: pluginPaths.plugins,
-        configDir: pluginPaths.config,
-        host: 'tui',
-        filePlugins,
-        setupReport,
-      });
-      syncCommandDropdown(commands, runtime);
+      // 启停会在每轮开始前对齐一次名单（manager 的 `turn:before`，优先级 -10000）：刚停用
+      // 的插件命令已经被摘掉，输入框的 `/` 列表不能还挂着它——点下去只会得到「未知命令」。
+      const syncCommands = trackCommandDropdown(commands, runtime);
+      hooks.on('turn:before', () => syncCommands(), { priority: -9000 });
 
       const resumed = startupSession ? sessionController.resumeLoaded(startupSession) : null;
       if (resumed?.ok) {
@@ -446,6 +447,25 @@ function switchToSessionCwd(cwd: string | undefined): string | null {
     const message = error instanceof Error ? error.message : String(error);
     return `无法切换到会话工作目录 ${cwd}：${message}`;
   }
+}
+
+/**
+ * 把命令注册表同步到输入框的 `/` 列表，并返回一个「只在真的变了才重画」的同步入口。
+ *
+ * 插件启停会改动注册表（停用的插件命令随资源一起摘掉），而这一步发生在每轮开始前；
+ * 每轮重建一遍整个列表没必要，名字没变就直接返回。
+ */
+function trackCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeController): () => void {
+  let signature = '';
+  return () => {
+    const next = commands
+      .list()
+      .map((command) => command.name)
+      .join('\n');
+    if (next === signature) return;
+    signature = next;
+    syncCommandDropdown(commands, runtime);
+  };
 }
 
 function syncCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeController): void {

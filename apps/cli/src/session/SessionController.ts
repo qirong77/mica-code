@@ -324,6 +324,33 @@ export class SessionController {
     return this.currentTitleOverride;
   }
 
+  /**
+   * 切换当前会话的工作目录。
+   *
+   * 会话文件里的 cwd 取自 `process.cwd()`——每一次保存都会重新写它。所以切目录不能只
+   * 改盘上那个字段：宿主进程还站在旧目录里，下一轮保存会把旧值写回去，而那一轮的工具
+   * 和 prompt 里的 cwd 也还是旧的。这里真的 chdir，再按新目录把已落盘的那份改过来，
+   * 于是「下一轮生效」和「保存一致」是同一件事。
+   *
+   * `updatedAt` 与 `turnState` 都不动：换项目目录不是会话活动，动 updatedAt 会把会话
+   * 顶到 Recent 最前面。返回 false 表示这条会话还没落过盘（新对话），没有文件可改。
+   */
+  setCurrentCwd(dir: string): boolean {
+    process.chdir(dir);
+    const existing = this.store.load(this.currentSessionId);
+    if (!existing) return false;
+    const cwd = process.cwd();
+    if (existing.cwd === cwd) return true;
+    const saved: PersistedSession = {
+      ...existing,
+      cwd,
+      revision: (existing.revision ?? 0) + 1,
+    };
+    this.store.save(saved);
+    this.currentPersistedSignature = sessionSignature(saved);
+    return true;
+  }
+
   getCurrentTitleSource(): 'derived' | 'auto' | 'manual' {
     return this.currentTitleSource;
   }

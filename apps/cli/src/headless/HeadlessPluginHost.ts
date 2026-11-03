@@ -40,7 +40,6 @@ import {
   setupSessionAutonomy,
 } from '@packages/mica-builtin-commands/index.js';
 import { officialPlugins } from '@packages/mica-official-plugins/index.js';
-import { readDisabledPluginIds } from '@packages/mica-plugin/index.js';
 import { createHeadlessRuntimeServices } from './headlessRuntimeServices.js';
 import { TurnNoticeLog } from '../runtime/turnNotices.js';
 import type { HeadlessTurnStartResult } from '../runtime/HeadlessTurnExecutor.js';
@@ -243,9 +242,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       setup: plugin.setup,
     });
   }
-  const disabledPlugins = readDisabledPluginIds();
   for (const plugin of officialPlugins) {
-    if (disabledPlugins.has(plugin.id)) continue;
     plugins.register(plugin);
   }
 
@@ -263,6 +260,17 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
 
   const baseContext: PluginBaseContext = {
     paths,
+    // 启停是运行期的事：官方插件照单注册（停用的在装配阶段被跳过），用户插件目录也由
+    // manager 按当前名单重新扫描——下一轮开始前对齐一次，所以改完不必重开这个进程。
+    ...(options.loadUserPlugins
+      ? {
+          pluginStateSync: {
+            host: 'app-server' as const,
+            loadUserPlugins: ({ disabled }: { disabled: string[] }) =>
+              micaPlugin.loadUserPlugins(plugins, { pluginsDir: paths.plugins, disabled }),
+          },
+        }
+      : {}),
     ...(options.desktopHost ? { desktop: { host: 'desktop' as const } } : {}),
     // 面板是「插件给数据、宿主画出来」的界面，只有桌面宿主有位置渲染它；CLI / exec 里
     // 传了登记表也没人读，所以跟着 desktopHost 一起开关。
@@ -420,22 +428,9 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
 
   // `mica app-server`（桌面端的常驻宿主）也要装用户插件：桌面入口、对话右侧面板都要靠
   // 它。`mica exec` 是一次性运行，不装——那边任何定时器/外部命令都会污染一次基准运行。
-  const setupPromise = (async () => {
-    const userPlugins = options.loadUserPlugins
-      ? await micaPlugin.loadUserPlugins(plugins, { pluginsDir: paths.plugins })
-      : null;
-    const report = await plugins.setupAll(baseContext);
-    if (userPlugins) {
-      micaPlugin.writePluginStatus({
-        pluginsDir: paths.plugins,
-        configDir: paths.config,
-        host: 'app-server',
-        filePlugins: userPlugins,
-        setupReport: report,
-      });
-    }
-    return report;
-  })();
+  // 那一步（含 `plugin-status.json` 的写入）由 manager 按 `pluginStateSync` 一并完成：
+  // 启停要在运行期重新走同一条路，写盘不能只发生在启动那一次。
+  const setupPromise = plugins.setupAll(baseContext);
 
   const host: HeadlessPluginHost = {
     hooks,

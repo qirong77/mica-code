@@ -1,6 +1,6 @@
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
-import { readDisabledPluginIds, type MicaPlugin } from '@packages/mica-plugin/index.js';
+import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import { officialPlugins } from '@packages/mica-official-plugins/index.js';
 import { APP_NAME } from '@packages/mica-config/brand.js';
 import { BuiltInCommandsPlugin } from '../plugins/commands/index.js';
@@ -40,7 +40,7 @@ export function useBuiltinPlugins(
     .use(createBuiltinFilePlugin('command-memory', 'Command Memory', setupCommandMemory))
     .use(createBuiltinFilePlugin('session-autonomy', 'Session Autonomy', setupSessionAutonomy))
     .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
-  for (const plugin of enabledOfficialPlugins()) app.use(plugin);
+  for (const plugin of officialPlugins) app.use(plugin);
   app.use({
     id: 'builtin.mica-code-app-notify',
     name: `Built-in ${APP_NAME} App Notify`,
@@ -48,15 +48,6 @@ export function useBuiltinPlugins(
     setup: setupMicaCodeAppNotify,
   });
   return app;
-}
-
-/**
- * 官方插件是随产品分发的，但可以在配置页里停用（`$MICA_HOME/plugins-state.json`）。
- * 停用发生在注册阶段，所以它们的工具、命令、钩子完全不会被创建。
- */
-function enabledOfficialPlugins(): MicaPlugin[] {
-  const disabled = readDisabledPluginIds();
-  return officialPlugins.filter((plugin) => !disabled.has(plugin.id));
 }
 
 function builtinCommandFilePlugins(): MicaPlugin[] {

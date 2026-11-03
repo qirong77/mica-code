@@ -43,8 +43,9 @@ const DESKTOP_CHECK_TONE = { granted: 'green', denied: 'red', unknown: 'default'
  * - 官方插件随产品分发（源码在仓库 `plugins/`），永远「已安装」，只能启用 / 停用；
  * - 用户插件是 `$MICA_HOME/plugins` 下的插件目录，装没装、能不能加载由磁盘决定。
  *
- * 启停只写本地状态文件，插件在启动阶段才注册，因此改完要重开会话才生效——页面提示这一点，
- * 而不是假装立刻生效。设置则不同：写盘后插件的下一次读取就拿到新值，不需要重开会话。
+ * 启停只写本地状态文件（`plugins-state.json`），由会话宿主在每轮开始时对齐一次：运行中的
+ * 会话不用重开，但正在跑的那一轮也不会被打断，所以提示写「下一轮对话起生效」。设置则不同：
+ * 写盘后插件的下一次读取就拿到新值，连下一轮都不用等。
  *
  * 当前打开哪个插件由宿主（`pluginId`）决定：桌面端插件菜单直接落在某个插件的详情上，
  * 侧栏再点一次 Plugins 回到目录。返回按钮同样只回到目录，不回到上一个设置页——插件页是
@@ -100,7 +101,7 @@ export function PluginsPage({
     setNotice(null);
     try {
       setDetails(await setPluginEnabled(plugin.id, enabled));
-      setNotice(`${plugin.name} 已${enabled ? '启用' : '停用'}，重开会话后生效`);
+      setNotice(`${plugin.name} 已${enabled ? '启用' : '停用'} · 下一轮对话起生效`);
     } catch (toggleError) {
       setError(formatError(toggleError));
     } finally {
@@ -135,9 +136,12 @@ export function PluginsPage({
       error={error}
       notice={notice}
       filter={filter}
+      canToggle={canToggle}
+      busyId={pendingId}
       onFilterChange={setFilter}
       onOpen={onSelectPlugin}
       onRefresh={() => void load()}
+      onToggle={(plugin, enabled) => void toggle(plugin, enabled)}
     />
   );
 }
@@ -150,9 +154,12 @@ function PluginCatalog({
   error,
   notice,
   filter,
+  canToggle,
+  busyId,
   onFilterChange,
   onOpen,
   onRefresh,
+  onToggle,
 }: {
   details: ConfigWebPluginsDetails | null;
   plugins: ConfigWebPlugin[];
@@ -160,9 +167,12 @@ function PluginCatalog({
   error: string | null;
   notice: string | null;
   filter: string;
+  canToggle: boolean;
+  busyId: string | null;
   onFilterChange(value: string): void;
   onOpen(id: string): void;
   onRefresh(): void;
+  onToggle(plugin: ConfigWebPlugin, enabled: boolean): void;
 }) {
   const RefreshIcon = appIcons.refresh;
   const SearchIcon = appIcons.search;
@@ -210,7 +220,10 @@ function PluginCatalog({
             plugins={visibleOfficial}
             total={official.length}
             emptyText="没有匹配的官方插件"
+            canToggle={canToggle}
+            busyId={busyId}
             onOpen={onOpen}
+            onToggle={onToggle}
           />
           <PluginSection
             title="用户插件"
@@ -219,7 +232,10 @@ function PluginCatalog({
             total={user.length}
             emptyText={filter ? '没有匹配的用户插件' : '还没有安装用户插件'}
             hint={filter ? undefined : '把插件目录放进去后点右上角重新加载'}
+            canToggle={canToggle}
+            busyId={busyId}
             onOpen={onOpen}
+            onToggle={onToggle}
           />
         </div>
       )}
@@ -234,7 +250,10 @@ function PluginSection({
   total,
   emptyText,
   hint,
+  canToggle,
+  busyId,
   onOpen,
+  onToggle,
 }: {
   title: string;
   description: string;
@@ -242,7 +261,10 @@ function PluginSection({
   total: number;
   emptyText: string;
   hint?: string;
+  canToggle: boolean;
+  busyId: string | null;
   onOpen(id: string): void;
+  onToggle(plugin: ConfigWebPlugin, enabled: boolean): void;
 }) {
   return (
     <section className="plugin-section">
@@ -263,7 +285,14 @@ function PluginSection({
       ) : (
         <div className="plugin-grid">
           {plugins.map((plugin) => (
-            <PluginCard key={plugin.id} plugin={plugin} onOpen={() => onOpen(plugin.id)} />
+            <PluginCard
+              key={plugin.id}
+              plugin={plugin}
+              canToggle={canToggle}
+              busy={busyId === plugin.id}
+              onOpen={() => onOpen(plugin.id)}
+              onToggle={(enabled) => onToggle(plugin, enabled)}
+            />
           ))}
         </div>
       )}
@@ -271,45 +300,85 @@ function PluginSection({
   );
 }
 
-/** 一张插件卡片：图标是它的身份，卡片本身就是入口。 */
-function PluginCard({ plugin, onOpen }: { plugin: ConfigWebPlugin; onOpen(): void }) {
+/**
+ * 一张插件卡片：图标是它的身份，卡片本身就是入口。
+ *
+ * 启停开关是卡片的兄弟节点而不是子节点：按钮里不能再套一个按钮（`<label>` + `<input>`），
+ * 浏览器会把它当成非法嵌套，键盘与点击行为都不再可靠。所以外壳自己画边框，里面是
+ * 「打开详情」的按钮 + 右上角那枚开关。
+ */
+export function PluginCard({
+  plugin,
+  canToggle,
+  busy,
+  onOpen,
+  onToggle,
+}: {
+  plugin: ConfigWebPlugin;
+  canToggle: boolean;
+  busy: boolean;
+  onOpen(): void;
+  onToggle(enabled: boolean): void;
+}) {
   const status = pluginStatus(plugin);
   const attention = plugin.state === 'enabled' ? plugin.attention : null;
+  const enabled = plugin.state !== 'disabled';
   return (
-    <button
-      type="button"
+    <div
       className={`plugin-card${plugin.state === 'enabled' ? '' : ' is-inactive'}${attention ? ' has-attention' : ''}`}
-      title={attention ? `${plugin.name} · ${attention.text}` : `${plugin.name} · ${plugin.location}`}
-      onClick={onOpen}
     >
-      <span className="plugin-card-icon">
-        <PluginIcon name={plugin.icon} size={18} />
-        {attention ? <span className={`plugin-attention-dot is-${attention.tone}`} aria-hidden="true" /> : null}
-      </span>
-      <span className="plugin-card-body">
-        <span className="plugin-card-head">
-          <span className="plugin-card-name">{plugin.name}</span>
-          <span className="plugin-card-version">v{plugin.version}</span>
+      <button
+        type="button"
+        className="plugin-card-open"
+        title={attention ? `${plugin.name} · ${attention.text}` : `${plugin.name} · ${plugin.location}`}
+        onClick={onOpen}
+      >
+        <span className="plugin-card-icon">
+          <PluginIcon name={plugin.icon} size={18} />
+          {attention ? <span className={`plugin-attention-dot is-${attention.tone}`} aria-hidden="true" /> : null}
         </span>
-        <span className="plugin-card-description">{plugin.description || '这个插件没有写描述'}</span>
-        {attention ? (
-          <span className="plugin-card-attention">
-            <span className="plugin-card-attention-text">{attention.text}</span>
+        <span className="plugin-card-body">
+          <span className="plugin-card-head">
+            <span className="plugin-card-name">{plugin.name}</span>
+            <span className="plugin-card-version">v{plugin.version}</span>
           </span>
-        ) : null}
-        <span className="plugin-card-foot">
-          <Tag tone={status.tone} dot>
-            {status.label}
-          </Tag>
-          {plugin.settings.fields.length > 0 ? (
-            <span className="plugin-card-note">{plugin.settings.fields.length} 项设置</span>
+          <span className="plugin-card-description">{plugin.description || '这个插件没有写描述'}</span>
+          {attention ? (
+            <span className="plugin-card-attention">
+              <span className="plugin-card-attention-text">{attention.text}</span>
+            </span>
           ) : null}
-          {plugin.desktopChecks.length > 0 ? (
-            <span className="plugin-card-note">{plugin.desktopChecks.length} 项运行条件</span>
-          ) : null}
+          <span className="plugin-card-foot">
+            <Tag tone={status.tone} dot>
+              {status.label}
+            </Tag>
+            {plugin.settings.fields.length > 0 ? (
+              <span className="plugin-card-note">{plugin.settings.fields.length} 项设置</span>
+            ) : null}
+            {plugin.desktopChecks.length > 0 ? (
+              <span className="plugin-card-note">{plugin.desktopChecks.length} 项运行条件</span>
+            ) : null}
+          </span>
         </span>
-      </span>
-    </button>
+      </button>
+      {canToggle ? (
+        <label
+          className="plugin-card-toggle"
+          title={
+            enabled
+              ? '停用后它的工具、命令与钩子都不再注册 · 下一轮对话起生效'
+              : '启用后它的工具、命令与钩子重新注册 · 下一轮对话起生效'
+          }
+        >
+          <Switch
+            checked={enabled}
+            disabled={busy}
+            label={`${enabled ? '停用' : '启用'}插件 ${plugin.name}`}
+            onChange={onToggle}
+          />
+        </label>
+      ) : null}
+    </div>
   );
 }
 
@@ -388,7 +457,7 @@ function PluginDetail({
             <Tag tone={status.tone} dot>
               {status.label}
             </Tag>
-            <label className="plugin-toggle" title="停用后它的工具、命令与钩子都不会注册；重开会话生效">
+            <label className="plugin-toggle" title="停用后它的工具、命令与钩子都不再注册；下一轮对话起生效">
               <Switch
                 checked={enabled}
                 disabled={!canToggle || busy}

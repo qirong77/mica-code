@@ -152,9 +152,23 @@ export function createGitDiffSession({
         } else {
           let models = null
           if (!binary) {
-            const originalModel = createModel(original, file.path)
+            // 两侧各自带上「这一侧是哪份内容」的说明，行悬停的 blame 才知道该读
+            // 提交、索引还是工作区（见 host/git-compare.js 的 `blame`）。
+            const info = { cwd, blame: content.blame || null }
+            const originalModel = createModel(original, file.path, {
+              ...info,
+              side: 'original',
+              blame: content.blame?.original || null
+            })
             try {
-              models = { original: originalModel, modified: createModel(modified, file.path) }
+              models = {
+                original: originalModel,
+                modified: createModel(modified, file.path, {
+                  ...info,
+                  side: 'modified',
+                  blame: content.blame?.modified || null
+                })
+              }
             } catch (error) {
               originalModel.dispose()
               throw error

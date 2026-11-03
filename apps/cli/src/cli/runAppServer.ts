@@ -1,5 +1,5 @@
 import { createInterface } from 'node:readline';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -1698,6 +1698,43 @@ async function handleCodexRequest(
         title: ctx.sessionController.getCurrentTitle() ?? title,
         sessionId: ctx.sessionId,
       });
+      return;
+    }
+    case MICA_METHODS.sessionCwd: {
+      // Mica extension: 换本会话的工作目录（页面右下角的项目路径）。
+      //
+      // 宿主是这条会话文件的写者，而且 cwd 在盘上是 `process.cwd()` 的快照：页面自己
+      // 改文件会被下一轮保存覆盖回去，那一轮也还在旧目录里跑。所以这里真的 chdir，
+      // 再按新目录落盘——「下一轮生效」与「保存一致」因此是同一件事。
+      //
+      // 运行中拒绝：这一轮已经按旧目录起了工具与 prompt，中途换 cwd 会让同一轮的后半段
+      // 落在另一个仓库里。
+      if (ctx.executor.isBusy) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, '本轮正在运行，结束后再切换项目目录');
+        return;
+      }
+      const requested = (paramString(params, 'cwd') ?? '').trim();
+      if (!requested) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, 'cwd must not be empty');
+        return;
+      }
+      const dir = resolve(requested);
+      const stats = await stat(dir).catch(() => null);
+      if (!stats?.isDirectory()) {
+        ctx.writeError(CODEX_ERROR_INVALID_PARAMS, `目录不存在：${dir}`);
+        return;
+      }
+      try {
+        // 没有落过盘的草稿没有文件可改，但宿主进程同样要站到新目录里，下一轮的工具
+        // 才不会还跑在旧仓库。
+        const persisted = ctx.sessionController.setCurrentCwd(dir);
+        ctx.writeResponse({ ok: true, cwd: process.cwd(), persisted });
+      } catch (error) {
+        ctx.writeError(
+          CODEX_ERROR_INVALID_PARAMS,
+          `切换目录失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       return;
     }
     case MICA_METHODS.capabilitiesGet: {

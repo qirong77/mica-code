@@ -106,3 +106,19 @@ export function resolveDrop({
   ids.splice(position === 'before' ? at : at + 1, 0, drag.id)
   return { kind: 'reorder', ids }
 }
+
+/**
+ * 拖到一行上时，光标在纵向的哪个位置、算哪种落点。
+ *
+ * 行高只有 24px，以前「中间 50%」直接等于嵌套/进入子级：一次手抖就把分组改成了别人的
+ * 子分组、把会话挂到另一条会话下面。现在嵌套必须按住 ⌥（macOS 上是 Option，Windows/Linux
+ * 上是 Alt），不按就只按上下半区排到前面或后面。
+ *
+ * `canNest` 由调用方判断（草稿没有会话文件、拖进自己的子树会成环、已经在里面了……），
+ * 这里只管「纵向位置 + 修饰键」这一层，两种行共用同一套规则。
+ */
+export function rowDropPosition({ ratio, altKey = false, canNest = true } = {}) {
+  const value = Number.isFinite(ratio) ? ratio : 0.5
+  if (altKey && canNest && value > 0.25 && value < 0.75) return 'into'
+  return value < 0.5 ? 'before' : 'after'
+}

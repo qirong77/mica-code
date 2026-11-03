@@ -14,9 +14,13 @@ import {
 import { FileSystemIcon } from './FileIcon'
 import { statusColor, statusLabel } from './git-decorations'
 import { createGitDiffSession, gitDiffKey } from './git-diff-session'
+import { bindBlameModel, configureBlame } from './git-blame-hover'
 import { editorOptions, fileName, languageFor } from './monaco'
 import { monaco } from './monaco-runtime'
 import { useSharedState } from './ui-state'
+
+// 悬停的 blame 只在这一层绑定读取实现：别的页面不需要知道 `git:blame` 的调用形状。
+configureBlame((meta, options) => window.mica.git.blame(meta.cwd, meta.path, options))
 
 const ACTION =
   'inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-sm px-1.5 text-fg-muted hover:bg-panel-hi hover:text-fg-strong disabled:pointer-events-none disabled:opacity-40 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent'
@@ -47,6 +51,8 @@ export function GitDiffEditor({
   const editorRef = useRef(null)
   const sessionRef = useRef(null)
   const retryRef = useRef(0)
+  // 已经登记过 blame 的模型元信息：标签（原始 / 修改后）随选择变化，悬停里要跟着更新。
+  const blameMetasRef = useRef([])
   const [layout, setLayout] = useSharedState('gitDiffLayout', 'side')
   const [narrow, setNarrow] = useState(false)
   const [retry, setRetry] = useState(0)
@@ -73,6 +79,16 @@ export function GitDiffEditor({
     options.modifiedLabel ||
     ((options.mode || base) === 'staged' ? '暂存区（Index）' : '工作区（Working Tree）')
 
+  // 悬停里的「这一侧是哪份内容」跟着这次比较走：同一个模型在换基线后仍然存在，
+  // 标签必须重写，否则会拿上一次比较的标题。
+  useEffect(() => {
+    for (const meta of blameMetasRef.current) {
+      if (file?.path && meta.path !== file.path) continue
+      meta.sourceLabel =
+        meta.side === 'original' ? `原始 · ${originalLabel}` : `修改后 · ${modifiedLabel}`
+    }
+  }, [file?.path, modifiedLabel, originalLabel])
+
   useLayoutEffect(() => {
     const host = hostRef.current
     const editor = monaco.editor.createDiffEditor(host, {
@@ -91,7 +107,16 @@ export function GitDiffEditor({
     const session = createGitDiffSession({
       editor,
       readFile: (directory, path, base) => window.mica.git.file(directory, path, base),
-      createModel: (content, path) => monaco.editor.createModel(content, languageFor(path)),
+      createModel: (content, path, info = {}) => {
+        const model = monaco.editor.createModel(content, languageFor(path))
+        if (info.blame) {
+          const meta = { ...info, path, sourceLabel: '' }
+          if (blameMetasRef.current.length > 64) blameMetasRef.current = []
+          blameMetasRef.current.push(meta)
+          bindBlameModel(monaco, model, meta)
+        }
+        return model
+      },
       onChange: (next) => {
         setResult(next)
         setDiffCount(next.phase === 'ready' ? (editor.getLineChanges()?.length ?? null) : null)
@@ -206,7 +231,14 @@ export function GitDiffEditor({
                     : '无文本差异'
                 : ''}
             </span>
-            <span className="min-w-0 flex-1 truncate px-1 text-fg-muted" title={comparisonLabel}>
+            <span
+              className="min-w-0 flex-1 truncate px-1 text-fg-muted"
+              title={
+                comparisonLabel
+                  ? `${comparisonLabel}\n悬停代码可查看该行的作者、提交与时间`
+                  : ''
+              }
+            >
               {comparisonLabel}
             </span>
             <Action title="刷新差异" disabled={busy} onClick={() => setRetry((value) => value + 1)}>

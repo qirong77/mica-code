@@ -129,8 +129,9 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
 /**
  * 启用 / 停用插件。
  *
- * 只写状态文件，不动插件代码：插件在启动阶段才注册，因此已运行的会话不受影响，
- * 改动在下一次启动（新会话）生效——页面会提示这一点。
+ * 只写状态文件，不在这里装卸插件：真正的装卸发生在插件所在的进程里（常驻会话在每轮开始
+ * 对齐一次名单，见 `PluginManager.syncPluginState`），所以正在跑的那一轮不受影响，
+ * 下一轮起生效——不需要重开会话。
  */
 export function setPluginEnabled(id: string, enabled: boolean): ConfigWebPluginsDetails {
   micaPlugin.setPluginDisabled(id, !enabled);

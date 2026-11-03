@@ -6,6 +6,11 @@ type FilePluginsContext = {
   plugins?: { has(id: string): boolean; register(plugin: unknown): void };
   loadFilePlugins?: (options?: FilePluginLoaderOptions) => Promise<FilePluginLoadResult>;
   logger?: FilePluginLoaderOptions['logger'];
+  /**
+   * 停用名单。宿主每次重新扫描时把当前那份传进来（启停要在运行期跟着文件走）；
+   * 省略时读 `$MICA_HOME/plugins-state.json`。
+   */
+  disabled?: string[];
 };
 
 /**
@@ -30,7 +35,7 @@ export default async function setupFilePlugins(ctx: FilePluginsContext): Promise
   const loaded = await loadFilePlugins({
     pluginsDir,
     // 停用发生在加载之前：连插件的 import 都不做，避免它在 setup 之外产生副作用。
-    disabled: readDisabledPluginIds(),
+    disabled: ctx.disabled ?? readDisabledPluginIds(),
     logger: ctx.logger,
   });
 

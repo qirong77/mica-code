@@ -158,12 +158,19 @@ export type PluginPanelDisplay = (typeof PLUGIN_PANEL_DISPLAYS)[number];
  * 把输入框上方挤满，名字还都很长；收进一层菜单之后入口只剩一个词，悬停就看到两件事。
  */
 export type PluginPanelShortcut = {
+  /** 可选的稳定标识，供视图的 shortcutStates 引用；同一插件内唯一。 */
+  id?: string;
   label: string;
   action?: string;
   section?: string;
   menu?: string;
   items?: PluginPanelShortcutItem[];
 };
+
+/** 快捷按钮标识同时用作视图字典的键。 */
+export function isValidPluginPanelShortcutId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 64 && /^[a-z0-9][a-z0-9._-]*$/.test(value);
+}
 
 /** 静态菜单里的一项，语义与顶层快捷按钮一致（二选一）。 */
 export type PluginPanelShortcutItem = {

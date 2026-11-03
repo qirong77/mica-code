@@ -33,6 +33,8 @@ export { applyGroupEnabled, buildCapabilitySections } from './capabilityGroups.j
 export type { CapabilityGroupRef, CapabilitySection } from './capabilityGroups.js';
 export { Switch as ConfigSwitch } from './components/Ui.js';
 export { SettingRow, SettingsGroup } from './components/Ui.js';
+/** 密钥输入（默认密文 + 眼睛切明文）：服务商 Key、插件设置与插件面板共用一份。 */
+export { SecretInput } from './components/SecretInput.js';
 /**
  * 基础控件：桌面端的插件面板等宿主界面与设置页共用这一套，同一个应用里不会出现
  * 三种按钮高度、两套状态色。用它们时必须包在 `.mica-config-ui` 容器里（样式都限定

@@ -23,6 +23,7 @@ import {
   IconFolderPlus,
   IconGitBranch,
   IconGitCompare,
+  IconGitMerge,
   IconPencil,
   IconRefresh,
   IconSearch,
@@ -67,6 +68,8 @@ import brandMark from '../../../resources/icon.svg?url&no-inline'
 
 // diff 视图静态依赖 monaco 本体，拆成独立模块后只在挑选 diff 时才下载。
 const GitDiffEditor = lazyView(() => import('./GitDiffEditor'), 'GitDiffEditor')
+// 图谱页自带提交详情与内嵌 diff（同样依赖 monaco），同样按需下载。
+const GitGraphView = lazyView(() => import('./GitGraphView'), 'GitGraphView')
 
 // 资源管理器的横向栅格，取自 VS Code 实测值：每层只缩进 8px，行内是
 // 「16px 箭头格 + 16px 图标格 + 5px 间隙」——所以文件名的左边距就是 57 + 8 * depth，
@@ -167,13 +170,24 @@ function EmptyEditorWatermark() {
   )
 }
 
-function FileContextMenu({ menu, onAction, onClose }) {
+function FileContextMenu({ menu, onAction, onClose, gitRoot }) {
   const directory = menu.node.type === 'directory'
+  // 只有一个仓库时才有「回退到已提交状态」这件事可说。这里不按路径前缀判断「这个目录在
+  // 仓库里」：仓库根是 host 给的 realpath（macOS 上是 `/private/tmp/...`），而树里的路径
+  // 是用户输入的目录（`/tmp/...`），前缀比较会把整项静默吞掉；目录到底属于哪个仓库由
+  // `git:discard-dir` 自己往上找，仓库外点了会如实报「不是 Git 仓库」。
+  const insideRepo = !!gitRoot
   const items = [
     ...(directory
       ? [
           { id: 'new-file', label: '新建文件', icon: IconFilePlus },
           { id: 'new-directory', label: '新建文件夹', icon: IconFolderPlus },
+          ...(insideRepo
+            ? [
+                { separator: true },
+                { id: 'git-revert-folder', label: 'Git：回退此文件夹的更改', icon: IconArrowBackUp }
+              ]
+            : []),
           { separator: true }
         ]
       : []),
@@ -1135,6 +1149,42 @@ export const FilesView = forwardRef(function FilesView(
     [onRefreshGit, readDirectory]
   )
 
+  /**
+   * 文件夹级回退。
+   *
+   * 与单文件 discard 的分工：单文件只处理面板上那一行，文件夹回退让 git 自己枚举目录里的
+   * 条目，所以被筛选隐藏的改动、以及还没出现在列表里的未跟踪文件也会被一起处理——「回退
+   * 这个文件夹」就该是这个语义。恢复来源是索引（与单文件版一致），要连暂存区一起回退，
+   * 先取消暂存再点它。
+   */
+  const revertGitFolder = useCallback(
+    async (folder) => {
+      const root = gitRepository?.root || gitCwd
+      const target = typeof folder === 'string' ? folder : folder?.path
+      if (!root || !target) return
+      const relative = target.startsWith(root) ? target.slice(root.length) || '.' : target
+      const ok = window.confirm(
+        `确定回退“${relative}”吗？\n文件夹里已跟踪的文件会恢复成已暂存（或上次提交）的版本，未跟踪的文件会被删除，且无法撤销。`
+      )
+      if (!ok) return
+      const result = await window.mica.git.discardDir(root, target)
+      if (result?.error) {
+        showMessage(`Git 操作失败：${result.error}`, true, true)
+        return
+      }
+      // 选中项与刚打开的 diff 可能指向被回退掉的内容，先收起来再刷新列表。
+      setGitSelectedFile(null)
+      setGitPreview(false)
+      await onRefreshGit?.()
+      const removed = result?.result?.removed || 0
+      showMessage(
+        removed ? `已回退 ${relative}，删除了 ${removed} 个未跟踪文件` : `已回退 ${relative}`,
+        true
+      )
+    },
+    [gitCwd, gitRepository, onRefreshGit, showMessage]
+  )
+
   const closeTabsUnder = useCallback(
     (path) => {
       const affected = tabsRef.current.filter((tab) => isSameOrChildPath(tab.path, path))
@@ -1152,6 +1202,11 @@ export const FilesView = forwardRef(function FilesView(
     async (action, node) => {
       setContextMenu(null)
       try {
+        if (action === 'git-revert-folder') {
+          await revertGitFolder(node)
+          await refreshAfterFileChange([node.path], node.path)
+          return
+        }
         if (action === 'copy-path') {
           await window.mica.files.copyPath(node.path)
           showMessage('路径已复制', true)
@@ -1206,7 +1261,15 @@ export const FilesView = forwardRef(function FilesView(
         showMessage(`操作失败：${error?.message || error}`, true, true)
       }
     },
-    [askText, closeTabsUnder, openFile, refreshAfterFileChange, showMessage, treeRef]
+    [
+      askText,
+      closeTabsUnder,
+      openFile,
+      refreshAfterFileChange,
+      revertGitFolder,
+      showMessage,
+      treeRef
+    ]
   )
 
   const openContextMenu = useCallback((event, node) => {
@@ -1543,6 +1606,9 @@ export const FilesView = forwardRef(function FilesView(
       : relativeParts(tree.root, activeTab.path)
   const isGitPanel = activePanel === 'git' || activePanel === 'git-tree'
   const isGitTree = activePanel === 'git-tree'
+  // 图谱是一整页：提交图要横向空间，挤在 260px 的侧栏里没有意义，所以它占满
+  // 侧栏 + 编辑器两块，活动栏单独切换。
+  const isGraph = activePanel === 'git-graph'
   const sourceControlDiff = useMemo(() => {
     if (gitSelectedFile?.cwd !== gitCwd || !gitSelectedFile) return null
     const latest = gitRepository?.files?.find((file) => file.path === gitSelectedFile.path)
@@ -1631,7 +1697,8 @@ export const FilesView = forwardRef(function FilesView(
           ['explorer', IconFiles, '资源管理器'],
           ['search', IconSearch, '搜索'],
           ['git', IconGitBranch, '源代码管理'],
-          ['git-tree', IconGitCompare, 'Git 比较']
+          ['git-tree', IconGitCompare, 'Git 比较'],
+          ['git-graph', IconGitMerge, 'Git 图谱']
         ].map(([id, Icon, label]) => {
           const active = activePanel === id
           return (
@@ -1668,7 +1735,7 @@ export const FilesView = forwardRef(function FilesView(
       </nav>
       <aside
         className={`min-h-0 flex-col bg-panel ${
-          focusMode || (isMobile && editorOpen)
+          focusMode || isGraph || (isMobile && editorOpen)
             ? 'hidden'
             : `flex ${editorOpen ? 'shrink-0' : 'min-w-0 flex-1'}`
         }`}
@@ -1707,6 +1774,7 @@ export const FilesView = forwardRef(function FilesView(
             onRevealFile={revealGitFile}
             onCopyPath={copyGitPath}
             onDiscard={(files) => gitFileAction('discard', files)}
+            onDiscardFolder={revertGitFolder}
           />
         ) : activePanel === 'git' ? (
           <GitPanel
@@ -1861,6 +1929,9 @@ export const FilesView = forwardRef(function FilesView(
           menu={contextMenu}
           onAction={runFileAction}
           onClose={() => setContextMenu(null)}
+          /* 回退只需要「这个目录属于哪个仓库」：仓库根优先，拿不到就用页面目录，
+             `git:discard-dir` 自己会往上找到仓库（与比较面板的 `cwd` 同一口径）。 */
+          gitRoot={gitRepository?.root || gitCwd || null}
         />
       )}
       {explorerMenu && (
@@ -1873,7 +1944,7 @@ export const FilesView = forwardRef(function FilesView(
       <div
         {...separatorProps}
         className={`pane-resizer z-10 w-1.25 shrink-0 ${
-          editorOpen && !isMobile && !focusMode ? '' : 'hidden'
+          editorOpen && !isMobile && !focusMode && !isGraph ? '' : 'hidden'
         }`}
         role="separator"
         aria-label="调整文件目录宽度"
@@ -1882,7 +1953,7 @@ export const FilesView = forwardRef(function FilesView(
         aria-valuenow={width}
         tabIndex={0}
       />
-      {onCornerResizeStart && !focusMode && (
+      {onCornerResizeStart && !focusMode && !isGraph && (
         <div
           className="pane-corner-resizer absolute z-30"
           style={{ left: width + 2.5, top: '100%' }}
@@ -1901,7 +1972,7 @@ export const FilesView = forwardRef(function FilesView(
       <section
         id="file-editor-panel"
         role="tabpanel"
-        className={`min-w-0 min-h-0 flex-1 flex-col ${editorOpen ? 'flex' : 'hidden'}`}
+        className={`min-w-0 min-h-0 flex-1 flex-col ${isGraph ? 'hidden' : editorOpen ? 'flex' : 'hidden'}`}
         aria-label={activeTab ? `${activeTab.name} 编辑器` : '文件编辑器'}
       >
         {/* 首次打开后保留差异编辑器，切回普通文件或面板时只隐藏。 */}
@@ -2139,6 +2210,26 @@ export const FilesView = forwardRef(function FilesView(
           </div>
         </div>
       </section>
+      {isGraph && (
+        <section
+          className="flex min-h-0 min-w-0 flex-1 flex-col border-l border-line"
+          aria-label="Git 图谱"
+        >
+          <Suspense
+            fallback={
+              <div className="grid flex-1 place-items-center text-[12px] text-fg-muted">
+                正在加载 Git 图谱…
+              </div>
+            }
+          >
+            <GitGraphView
+              cwd={gitCwd || null}
+              mobile={isMobile}
+              onClose={() => switchPanel('explorer')}
+            />
+          </Suspense>
+        </section>
+      )}
       {message?.transient && (
         <div
           role="status"

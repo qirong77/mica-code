@@ -29,6 +29,23 @@ describe('normalizePluginPanelView', () => {
     expect(view.sections?.[0].actions?.[0].tone).toBe('primary');
   });
 
+  it('accepts a password field and drops unknown field types', () => {
+    const view = normalizePluginPanelView({
+      title: 'ssh',
+      sections: [
+        {
+          title: '添加服务器',
+          fields: [
+            { key: 'password', label: '口令', type: 'password', value: '' },
+            { key: 'alias', label: '别名', type: 'text', value: 'test' },
+            { key: 'weird', label: '未知', type: 'secret', value: 'x' },
+          ],
+        },
+      ],
+    });
+    expect(view.sections?.[0].fields?.map((field) => field.type ?? 'text')).toEqual(['password', 'text', 'text']);
+  });
+
   it('keeps the auto-commit action only when the section has fields', () => {
     const view = normalizePluginPanelView({
       title: 'x',
@@ -291,6 +308,34 @@ describe('PluginPanelRegistry', () => {
     registry.add('p', { view: () => ({ title: 'b' }), action: () => {} });
     first.dispose();
     expect(registry.get('p')).not.toBeNull();
+  });
+});
+
+describe('normalizePluginPanelView shortcut states', () => {
+  it('normalizes optional fields and rejects malformed entries', () => {
+    const view = normalizePluginPanelView({ shortcutStates: {
+      check: { badge: ' 运行中 ', disabled: true, disabledReason: ' 等待完成 ', extra: 1 },
+      enabled: { disabled: false },
+      invalid: { badge: 3, disabled: 'true', disabledReason: false },
+      'bad key': { badge: 'x' },
+      array: [],
+    } });
+    expect(view.shortcutStates).toEqual({
+      check: { badge: '运行中', disabled: true, disabledReason: '等待完成' },
+      enabled: { disabled: false },
+    });
+    expect(normalizePluginPanelView({ shortcutStates: [] }).shortcutStates).toBeUndefined();
+  });
+
+  it('limits state count and text length and handles special object keys', () => {
+    const entries = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`id${i}`, { badge: 'x'.repeat(20), disabledReason: 'y'.repeat(210) }]));
+    const states = normalizePluginPanelView({ shortcutStates: entries }).shortcutStates!;
+    expect(Object.keys(states)).toHaveLength(40);
+    expect(states.id0.badge).toBe(`${'x'.repeat(11)}…`);
+    expect(states.id0.disabledReason).toBe(`${'y'.repeat(199)}…`);
+    const special = normalizePluginPanelView({ shortcutStates: JSON.parse('{"__proto__":{"badge":"x"},"constructor":{"disabled":true}}') }).shortcutStates!;
+    expect(Object.keys(special)).toEqual(['constructor']);
+    expect(special.constructor).toEqual({ disabled: true });
   });
 });
 

@@ -121,6 +121,7 @@ function normalize(item, root, mode) {
 export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = false }) {
   const inputRef = useRef(null)
   const requestRef = useRef(0)
+  const searchIdRef = useRef(0)
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState('files')
   const [query, setQuery] = useState('')
@@ -193,10 +194,13 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
       return undefined
     }
     const request = ++requestRef.current
+    const searchId = ++searchIdRef.current
+    let activeRoot = ''
     const timer = window.setTimeout(
       async () => {
         try {
           const root = await getRoot()
+          activeRoot = root || ''
           if (request !== requestRef.current) return
           if (!root) {
             setResults([])
@@ -217,7 +221,7 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
           setSelected(-1)
           setMessage(mode === 'files' ? '正在搜索文件…' : '正在搜索工作区…')
           setSummary('')
-          const response = await method(root, query.trim())
+          const response = await method(root, query.trim(), { requestId: searchId })
           if (request !== requestRef.current) return
           const raw = responseItems(response)
           const items = mode === 'text' ? flattenTextItems(raw) : raw
@@ -248,7 +252,11 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
       },
       mode === 'files' && !query ? 0 : 160
     )
-    return () => clearTimeout(timer)
+    return () => {
+      clearTimeout(timer)
+      // 全文搜索是整棵工作区的扫盘：关掉浮层或改了查询就该停下，别让它继续抢 IO
+      if (activeRoot && mode === 'text') window.mica.files.cancelSearch?.(activeRoot, searchId)
+    }
   }, [config.limit, config.method, getRoot, mode, open, query])
 
   useEffect(() => {

@@ -77,6 +77,7 @@ function CompareRow({
   onToggleReviewed,
   onOpenFile,
   onDiscard,
+  onDiscardFolder,
   elementRef
 }) {
   const directory = row.type === 'directory'
@@ -179,6 +180,26 @@ function CompareRow({
           )}
         </span>
       )}
+      {/* 目录行也给一个「回退整个文件夹」的入口：右键菜单里已经有，但面板上最常见的
+          动作不该只藏在右键里。 */}
+      {directory && onDiscardFolder && (
+        <span className="ml-1 hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
+          <button
+            type="button"
+            tabIndex={-1}
+            title="回退此文件夹的更改"
+            aria-label={`回退此文件夹的更改：${row.path}`}
+            className="grid size-[18px] shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
+            onClick={(event) => {
+              event.stopPropagation()
+              onDiscardFolder(row.path, row.files)
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <IconArrowBackUp size={13} />
+          </button>
+        </span>
+      )}
       {preferences.showStats && !row.binary && Boolean(row.additions || row.deletions) && (
         <span
           className="ml-1.5 flex shrink-0 gap-1 font-mono text-[10px] tabular-nums"
@@ -229,6 +250,7 @@ export function GitComparePanel({
   onSelectFile,
   onOpenFile,
   onDiscard,
+  onDiscardFolder,
   onRevealFile,
   onCopyPath,
   onOpenAll,
@@ -731,6 +753,7 @@ export function GitComparePanel({
                   onToggleReviewed={onToggleReviewed}
                   onOpenFile={onOpenFile}
                   onDiscard={onDiscard}
+                  onDiscardFolder={onDiscardFolder}
                 />
               ))}
             </div>
@@ -816,17 +839,17 @@ export function GitComparePanel({
                   label={
                     context.type === 'file'
                       ? '放弃更改'
-                      : `放弃目录中的更改 (${discardable.length})`
+                      : `回退此文件夹的更改 (${discardable.length})`
                   }
                   hint={context.type === 'file' && !context.uncommitted ? '无未提交改动' : ''}
                   disabled={
-                    !onDiscard ||
-                    (context.type === 'file' ? !context.uncommitted : !discardable.length)
+                    context.type === 'file' ? !onDiscard || !context.uncommitted : !onDiscardFolder
                   }
                   onClick={() =>
-                    menuAction(() =>
-                      onDiscard?.(context.type === 'file' ? context.files : discardable)
-                    )
+                    menuAction(() => {
+                      if (context.type === 'file') onDiscard?.(context.files)
+                      else onDiscardFolder?.(context.path, discardable)
+                    })
                   }
                 />
                 <MenuItem
