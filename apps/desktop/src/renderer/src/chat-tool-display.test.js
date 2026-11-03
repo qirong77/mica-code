@@ -7,7 +7,8 @@ import {
   toolDurationMs,
   toolOutput,
   toolStepSummary,
-  toolSummary
+  toolSummary,
+  turnLogHeadSummary
 } from './chat-tool-display'
 
 describe('parseToolArgs', () => {
@@ -97,5 +98,49 @@ describe('toolDurationMs', () => {
   it('uses now for the running call', () => {
     const tool = { status: 'running', startedAt: 1_000 }
     expect(toolDurationMs(tool, 4_000)).toBe(3_000)
+  })
+})
+
+describe('turnLogHeadSummary', () => {
+  it('returns null when there is nothing to summarize', () => {
+    expect(turnLogHeadSummary([])).toBeNull()
+    expect(turnLogHeadSummary(null)).toBeNull()
+  })
+
+  it('quotes the latest tool row verbatim and counts the items', () => {
+    const summary = turnLogHeadSummary(
+      [
+        { kind: 'reasoning', text: '先看看这两条 resizer', startedAt: 1_000 },
+        {
+          kind: 'tool',
+          tool: { tool: 'read_file', input: { file_path: 'src/a.css' }, startedAt: 5_000 }
+        }
+      ],
+      13_000
+    )
+    expect(summary).toEqual({ steps: 2, doing: 'Read file src/a.css', elapsedMs: 12_000 })
+  })
+
+  it('falls back to the first line of the latest thinking', () => {
+    const summary = turnLogHeadSummary(
+      [{ kind: 'reasoning', text: '\n  用户问的是空白\n第二行', startedAt: 1_000 }],
+      2_500
+    )
+    expect(summary.doing).toBe('用户问的是空白')
+    expect(summary.elapsedMs).toBe(1_500)
+  })
+
+  it('leaves the elapsed time out when no row carries a timestamp', () => {
+    const summary = turnLogHeadSummary([{ kind: 'reasoning', text: 'no clock' }], 9_000)
+    expect(summary.elapsedMs).toBeNull()
+  })
+
+  it('caps a very long line', () => {
+    const summary = turnLogHeadSummary(
+      [{ kind: 'reasoning', text: 'x'.repeat(400), startedAt: 0 }],
+      1
+    )
+    expect(summary.doing.length).toBe(120)
+    expect(summary.doing.endsWith('…')).toBe(true)
   })
 })
