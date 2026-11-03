@@ -14,6 +14,7 @@ import { basename, resolve } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { deleteBtwState } from '@packages/mica-common/btwState.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
+import { readHeadString, readSessionFileHead } from './sessionFileHead.js';
 import { normalizeTurnTimings, type TurnTimingRecord } from '@packages/mica-common/turnTiming.js';
 import type { CapabilitySelection } from '@packages/mica-common/capabilities.js';
 import type { AgentQueryContent, AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
@@ -397,6 +398,18 @@ export class SessionStore implements SessionStoreLike {
     for (const file of readdirSync(SESSION_DIR)) {
       if (!file.endsWith('.json') || file === 'index.json' || file === 'session-index.json') continue;
       const path = resolve(SESSION_DIR, file);
+      // 索引只需要摘要字段，它们全在文件头里；整份 JSON.parse 会把几十 MB
+      // 的图片与工具历史一起读进来（实测 474 条会话 1.3s，正是 /resume 的卡顿）。
+      // 大会话（必然有对话与用量）只读头，小文件才整份解析——垃圾占位的判定
+      // 需要知道 conversationMessages / usageHistory 是否为空。
+      const large = (safeStat(path)?.size ?? 0) > HEAD_ONLY_SUMMARY_BYTES;
+      if (large) {
+        const summary = readHeadSummary(path);
+        if (summary) {
+          summaries.push(summary);
+          continue;
+        }
+      }
       const session = this.read(path);
       if (!session) {
         // 旧格式（没有 version/snapshot）：记进 rejects，让 id 集合能对上磁盘。
@@ -564,6 +577,59 @@ export function createSessionId(date = new Date()): string {
     .replace(/\.\d{3}Z$/, 'Z');
   const suffix = Math.random().toString(36).slice(2, 8);
   return `${stamp}-${suffix}`;
+}
+
+/**
+ * 超过这个体量的会话一定有对话或用量，索引不再整份解析它。
+ * 垃圾占位（allowEmpty 起始保存的残留）永远是几百字节到几 KB，落在这条线以下。
+ */
+const HEAD_ONLY_SUMMARY_BYTES = 64 * 1024;
+
+const HEAD_SUMMARY_BYTES = 8192;
+
+/**
+ * 只读文件头拼出索引摘要。会话文件把顶层字段与 `snapshot` 的前几个键写在最前面，
+ * 所以摘要、模型与角色都在前 8 KB 里，不必为 474 条会话各 parse 一份几十 MB 的正文。
+ * 任何一个必需字段没读到就返回 null，调用方回落到整份解析。
+ */
+function readHeadSummary(path: string): SessionSummary | null {
+  const stat = safeStat(path);
+  if (!stat) return null;
+  const head = readSessionFileHead(path, HEAD_SUMMARY_BYTES);
+  if (!head) return null;
+  const id = readHeadString(head, 'id');
+  const updatedAt = readHeadString(head, 'updatedAt');
+  const cwd = readHeadString(head, 'cwd');
+  const providerId = readHeadString(head, 'providerId');
+  const model = readHeadString(head, 'model');
+  if (!id || !updatedAt || !cwd || !providerId || !model) return null;
+  const turnState = readHeadString(head, 'turnState');
+  const role = readHeadString(head, 'role');
+  const effort = readHeadString(head, 'effort');
+  const parentSessionId = readHeadString(head, 'parentSessionId');
+  const createdAt = readHeadString(head, 'createdAt');
+  const title = readHeadString(head, 'title');
+  return {
+    id,
+    title: displayTitle(title ?? id),
+    ...(createdAt ? { createdAt } : {}),
+    updatedAt,
+    cwd,
+    ...(parentSessionId ? { parentSessionId } : {}),
+    providerId,
+    model,
+    uncompleted: turnState !== 'completed',
+    ...(isTurnState(turnState) ? { turnState } : {}),
+    ...(effort ? { effort } : {}),
+    ...(role ? { role } : {}),
+    // 大会话按定义就有内容：垃圾占位不可能长到这么大。
+    hasConversation: true,
+    hasUsage: true,
+  };
+}
+
+function isTurnState(value: string | undefined): value is PersistedSessionTurnState {
+  return value === 'running' || value === 'completed' || value === 'aborted' || value === 'error';
 }
 
 function toSessionSummary(session: PersistedSession): SessionSummary {
@@ -812,11 +878,22 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
       capabilitiesCustomized: session.snapshot.capabilitiesCustomized === true ? true : undefined,
       displayUsage: normalizeDisplayUsage(session.snapshot.displayUsage),
       systemPrompt,
-      interruptedThinking: normalizeInterruptedThinking(session.snapshot.interruptedThinking, session.snapshot.providerId, protocol, session.snapshot.model),
-      activeThinking: normalizeInterruptedThinking(session.snapshot.activeThinking, session.snapshot.providerId, protocol, session.snapshot.model),
-      activeTurn: turnState === 'running' && protocol === 'openai_responses'
-        ? normalizeActiveTurn(session.snapshot.activeTurn)
-        : undefined,
+      interruptedThinking: normalizeInterruptedThinking(
+        session.snapshot.interruptedThinking,
+        session.snapshot.providerId,
+        protocol,
+        session.snapshot.model,
+      ),
+      activeThinking: normalizeInterruptedThinking(
+        session.snapshot.activeThinking,
+        session.snapshot.providerId,
+        protocol,
+        session.snapshot.model,
+      ),
+      activeTurn:
+        turnState === 'running' && protocol === 'openai_responses'
+          ? normalizeActiveTurn(session.snapshot.activeTurn)
+          : undefined,
     },
   } as PersistedSession;
 }
@@ -830,10 +907,16 @@ function normalizeActiveTurn(value: unknown): PersistedRuntimeSnapshot['activeTu
     if (!isPlainRecord(part)) return undefined;
     if (part.type === 'text' && typeof part.text === 'string') {
       input.push({ type: 'text', text: part.text });
-    } else if (part.type === 'image' && isPlainRecord(part.source)
-      && part.source.type === 'base64' && typeof part.source.data === 'string'
-      && (part.source.media_type === 'image/jpeg' || part.source.media_type === 'image/png'
-        || part.source.media_type === 'image/gif' || part.source.media_type === 'image/webp')) {
+    } else if (
+      part.type === 'image' &&
+      isPlainRecord(part.source) &&
+      part.source.type === 'base64' &&
+      typeof part.source.data === 'string' &&
+      (part.source.media_type === 'image/jpeg' ||
+        part.source.media_type === 'image/png' ||
+        part.source.media_type === 'image/gif' ||
+        part.source.media_type === 'image/webp')
+    ) {
       input.push({
         type: 'image',
         source: { type: 'base64', media_type: part.source.media_type, data: part.source.data },
@@ -845,12 +928,24 @@ function normalizeActiveTurn(value: unknown): PersistedRuntimeSnapshot['activeTu
   return { input, committed: value.committed };
 }
 
-function normalizeInterruptedThinking(value: unknown, providerId: string, protocol: ProviderProtocol, model: string): PersistedRuntimeSnapshot['interruptedThinking'] {
+function normalizeInterruptedThinking(
+  value: unknown,
+  providerId: string,
+  protocol: ProviderProtocol,
+  model: string,
+): PersistedRuntimeSnapshot['interruptedThinking'] {
   if (!value || typeof value !== 'object') return undefined;
   const thinking = value as Partial<NonNullable<PersistedRuntimeSnapshot['interruptedThinking']>>;
-  if (protocol !== 'openai_responses' || thinking.protocol !== protocol || thinking.providerId !== providerId
-    || thinking.model !== model || typeof thinking.apiBase !== 'string'
-    || typeof thinking.text !== 'string' || !thinking.text) return undefined;
+  if (
+    protocol !== 'openai_responses' ||
+    thinking.protocol !== protocol ||
+    thinking.providerId !== providerId ||
+    thinking.model !== model ||
+    typeof thinking.apiBase !== 'string' ||
+    typeof thinking.text !== 'string' ||
+    !thinking.text
+  )
+    return undefined;
   return { providerId, protocol, model, apiBase: thinking.apiBase, text: thinking.text };
 }
 

@@ -1,6 +1,7 @@
-import { closeSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { SESSION_DIR } from './sessionStore.js';
+import { readHeadString, readSessionFileHead } from './sessionFileHead.js';
 
 /**
  * A turn lease (`sessions/.turn-locks/<id>.lock`) is the only cross-process
@@ -37,7 +38,7 @@ export type ListSessionTurnLocksOptions = {
   readHead?: (path: string) => string;
 };
 
-const HEAD_BYTES = 4096;
+export const readFileHead = readSessionFileHead;
 const LOCK_FILE = /^([A-Za-z0-9_.-]+)\.lock$/;
 const SESSION_FILE = /^([A-Za-z0-9_.-]+)\.json$/;
 
@@ -111,11 +112,11 @@ export function listSessionTurnLocks(options: ListSessionTurnLocksOptions = {}):
       alive: isAlive(owner.pid),
       lockPath,
       sessionPath,
-      title: readHeadField(head, 'title'),
-      cwd: readHeadField(head, 'cwd'),
-      updatedAt: readHeadField(head, 'updatedAt'),
-      turnState: readHeadField(head, 'turnState'),
-      model: readHeadField(head, 'model'),
+      title: readHeadString(head, 'title'),
+      cwd: readHeadString(head, 'cwd'),
+      updatedAt: readHeadString(head, 'updatedAt'),
+      turnState: readHeadString(head, 'turnState'),
+      model: readHeadString(head, 'model'),
     });
   }
   return locks.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
@@ -158,7 +159,7 @@ export function listRecentSessionFiles(options: ListRecentSessionsOptions): Rece
     if (!Number.isFinite(modifiedMs) || modifiedMs < sinceMs) continue;
 
     const head = safeReadHead(readHead, sessionPath);
-    const updatedAt = readHeadField(head, 'updatedAt');
+    const updatedAt = readHeadString(head, 'updatedAt');
     const updatedMs = updatedAt ? Date.parse(updatedAt) : Number.NaN;
     // The head is the authority when it parses: a file touched by something
     // else is not proof that the session itself was active inside the window.
@@ -166,11 +167,11 @@ export function listRecentSessionFiles(options: ListRecentSessionsOptions): Rece
     sessions.push({
       sessionId,
       sessionPath,
-      title: readHeadField(head, 'title'),
-      cwd: readHeadField(head, 'cwd'),
+      title: readHeadString(head, 'title'),
+      cwd: readHeadString(head, 'cwd'),
       updatedAt,
-      turnState: readHeadField(head, 'turnState'),
-      model: readHeadField(head, 'model'),
+      turnState: readHeadString(head, 'turnState'),
+      model: readHeadString(head, 'model'),
       modifiedAt: new Date(modifiedMs).toISOString(),
     });
   }
@@ -211,42 +212,8 @@ function safeMtimeIso(path: string): string | undefined {
   }
 }
 
-export function readFileHead(path: string, bytes = HEAD_BYTES): string {
-  let fd: number | undefined;
-  try {
-    fd = openSync(path, 'r');
-    const buffer = Buffer.alloc(bytes);
-    const read = readSync(fd, buffer, 0, bytes, 0);
-    return buffer.subarray(0, read).toString('utf8');
-  } catch {
-    return '';
-  } finally {
-    if (fd !== undefined) {
-      try {
-        closeSync(fd);
-      } catch {
-        // ignore: closing a read handle is best-effort
-      }
-    }
-  }
-}
-
 /**
  * Session files are written with the top-level keys before `snapshot`, so the
  * head is enough to describe a session without parsing a file that may be tens
  * of megabytes (images, full tool history).
  */
-function readHeadField(head: string, key: string): string | undefined {
-  if (!head) return undefined;
-  const pattern = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`);
-  const match = pattern.exec(head);
-  if (!match) return undefined;
-  const raw = match[1]!;
-  if (!raw.includes('\\')) return raw;
-  try {
-    const parsed = JSON.parse(`"${raw}"`) as unknown;
-    return typeof parsed === 'string' ? parsed : raw;
-  } catch {
-    return raw;
-  }
-}
