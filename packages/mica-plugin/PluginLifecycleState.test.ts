@@ -191,10 +191,14 @@ describe('plugin enable/disable lifecycle', () => {
     const hooks = new HookRegistry();
     const manager = new PluginManager();
     for (const id of ['alpha', 'beta', 'gamma']) {
-      manager.register(plugin(id, (ctx) => {
-        const hook = ctx.hooks.on('turn:before', () => { seen.push(id); });
-        ctx.onDispose(() => hook.dispose());
-      }));
+      manager.register(
+        plugin(id, (ctx) => {
+          const hook = ctx.hooks.on('turn:before', () => {
+            seen.push(id);
+          });
+          ctx.onDispose(() => hook.dispose());
+        }),
+      );
     }
     await manager.setupAll(stateContext(hooks));
     writePluginState({ disabled: ['alpha'] }, { path });

@@ -3553,16 +3553,18 @@ suite('mica app-server real-user flows (mock provider)', () => {
       expect(result.ok).toBe(true);
       return result.task;
     };
+    // 不用 expect.poll：它要求 vitest 的"当前用例"上下文，而这里每个用例都跑在
+    // it.concurrent + AsyncLocalStorage 里，整份套件一起跑时会丢上下文直接报错。
     let liveDetail: TaskDetail | undefined;
-    await expect
-      .poll(
-        async () => {
-          liveDetail = await readDetail(hostA, taskId);
-          return liveDetail?.timeline;
-        },
-        { timeout: 10_000, interval: 100 },
-      )
-      .toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'text', text: RECOVERY_ACTIVITY })]));
+    const activityDeadline = Date.now() + 10_000;
+    while (Date.now() < activityDeadline) {
+      liveDetail = await readDetail(hostA, taskId);
+      if (liveDetail?.timeline?.some((entry) => entry.text === RECOVERY_ACTIVITY)) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(liveDetail?.timeline).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'text', text: RECOVERY_ACTIVITY })]),
+    );
     expect(liveDetail).toMatchObject({
       taskId,
       status: 'running',
@@ -3619,11 +3621,19 @@ suite('mica app-server real-user flows (mock provider)', () => {
     });
     const newTaskId = restartResult.taskId!;
     expect(newTaskId).not.toBe(taskId);
-    await waitFor(
-      hostB,
-      (m) => m.method === 'mica/subagentTasks/updated' && taskFrom(m, newTaskId)?.status === 'completed',
-      'restarted subagent completed',
-    );
+    // 完成的子代理按设计不进状态栏（keepsSubagentTaskRow），宿主也就不会再推
+    // `mica/subagentTasks/updated` 列出它——那条通知等不到。直接轮询 detail。
+    const pollDetail = async (id: string, status: string): Promise<TaskDetail | undefined> => {
+      const deadline = Date.now() + 30_000;
+      let detail = await readDetail(hostB, id);
+      while (detail?.status !== status && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        detail = await readDetail(hostB, id);
+      }
+      return detail;
+    };
+    const completed = await pollDetail(newTaskId, 'completed');
+    expect(completed?.status).toBe('completed');
     const newDetail = await readDetail(hostB, newTaskId);
     expect(newDetail).toMatchObject({
       taskId: newTaskId,

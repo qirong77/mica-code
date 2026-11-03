@@ -199,7 +199,9 @@ suite('/btw PTY end-to-end (mock provider)', () => {
     writeFileSync(
       join(home, 'config.json'),
       JSON.stringify({
-        providers: [{ id: 'mock', models: ['mock-chat'], api_base: baseUrl, protocol: 'openai_responses', api_key: 'test' }],
+        providers: [
+          { id: 'mock', models: ['mock-chat'], api_base: baseUrl, protocol: 'openai_responses', api_key: 'test' },
+        ],
         searxngUrl: '',
         mcpServers: {},
       }),
@@ -219,6 +221,24 @@ suite('/btw PTY end-to-end (mock provider)', () => {
       );
     };
 
+    /**
+     * 斜杠补全浮层每按一个键就重渲染一次，连着敲容易吞字符（`/btw 这个方案`
+     * 变成 `/btw这个方案`，被当成未知命令）。分段输入、以"命令跑出来的结果"
+     * 判断是否成功——不能靠屏幕文本核对输入框：Ink 只重画变化的单元格，
+     * 去掉 ANSI 后没被重画的字符根本不在文本里。失败就重敲一遍。
+     */
+    const runCommand = async (parts: string[], expected: RegExp): Promise<boolean> => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        for (const part of parts) {
+          await driver.typeText(part, 25);
+          await driver.waitIdle(250, 5_000);
+        }
+        driver.enter();
+        if (await driver.waitFor(expected, { timeoutMs: 20_000 })) return true;
+      }
+      return false;
+    };
+
     try {
       const booted = await driver.waitFor(/Type something|start a conversation/, { timeoutMs: 90_000 });
       if (!booted) fail('TUI 未启动');
@@ -230,37 +250,16 @@ suite('/btw PTY end-to-end (mock provider)', () => {
       if (t1 !== 'completed') fail(`turn1 未完成: ${String(t1)}`);
 
       // /btw -h：用法与子命令能直接查（-continue / -stop 都写在这一段里）
-      await driver.typeText('/btw', 15);
-      await driver.waitIdle(300, 10_000);
-      await driver.typeText(' -h', 15);
-      driver.enter();
-      const gotHelp = await driver.waitFor(/\/btw -stop/, { timeoutMs: 30_000 });
-      if (!gotHelp) fail('未看到 /btw 帮助');
+      if (!(await runCommand(['/btw', ' -h'], /\/btw -stop/))) fail('未看到 /btw 帮助');
 
       // /btw：一条 By The Way 问题，主流程不等待
-      // The slash dropdown re-renders on every keystroke; typing the space in the
-      // same burst occasionally loses it and turns the line into `/btw这个方案...`,
-      // which the CLI then rejects as an unknown command. Let the popup settle.
-      await driver.typeText('/btw', 15);
-      await driver.waitIdle(300, 10_000);
-      await driver.typeText(' 这个方案可行吗', 15);
-      driver.enter();
-
-      // 等待 By The Way notice 出现
-      const gotBtw = await driver.waitFor(/这个方案可行吗/, { timeoutMs: 90_000 });
-      if (!gotBtw) fail('未看到 btw 问题');
-      const gotAnswer = await driver.waitFor(/可行，但需注意边界/, { timeoutMs: 90_000 });
-      if (!gotAnswer) fail('未看到 btw 回答');
+      // 等待 By The Way notice 出现（问题与回答一起进同一条 notice）
+      if (!(await runCommand(['/btw', ' 这个方案可行吗'], /可行，但需注意边界/))) fail('未看到 btw 回答');
       const gotContinue = await driver.waitFor(/\/btw -continue/, { timeoutMs: 30_000 });
       if (!gotContinue) fail('未看到 /btw -continue 提示');
 
       // /btw -continue：复用同一个子代理，主流程不受影响
-      await driver.typeText('/btw -continue', 15);
-      await driver.waitIdle(300, 10_000);
-      await driver.typeText(' 那缓存怎么办', 15);
-      driver.enter();
-      const gotFollowUp = await driver.waitFor(/这里要注意缓存失效/, { timeoutMs: 90_000 });
-      if (!gotFollowUp) fail('未看到 btw 跟进回答');
+      if (!(await runCommand(['/btw -continue', ' 那缓存怎么办'], /这里要注意缓存失效/))) fail('未看到 btw 跟进回答');
 
       // 主流程仍在，且 btw 子代理发出了一个请求
       if (mock.state.requests.length < 3) {
