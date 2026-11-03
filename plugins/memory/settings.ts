@@ -7,9 +7,9 @@ import type { PluginLlmApi } from '@packages/mica-plugin/index.js';
  * 设置文件里的值全是字符串（配置页就是一个表单），所以解析、兜底、范围收敛都在
  * 这一处，运行期不再回头读原始值。
  *
- * `autoCapture` 默认开启，与 `auto-compact` 同一取向：记忆全靠模型自觉调用工具写入
- * 的话，真机上几乎不会增长（实测 12 个会话只有 1 次），插件就等于没装。成本靠节流
- * 兜住——默认 30 分钟最多一次（全局），比 `auto-compact` 的阈值触发更保守。
+ * `autoCapture` 默认开启：只靠模型自觉调用 `memory` 工具时，真机上几乎不会增长
+ * （实测 12 个会话只有 1 次），插件就等于没装。判据收紧之后，它的主要作用不再是
+ * 「多记」，而是「在会话结束时判断一次该不该记」——答案是「不该」也很常见。
  */
 
 export type CuratorMode = 'subagent' | 'direct';
@@ -36,9 +36,9 @@ export function settingsFromValues(values: Record<string, string | undefined>): 
   return {
     enabled: readSwitch(values.enabled, DEFAULT_SETTINGS.enabled),
     budgets: {
-      user: readNumber(values.userCharLimit, DEFAULT_MEMORY_BUDGETS.user, 200, 20_000),
-      memory: readNumber(values.memoryCharLimit, DEFAULT_MEMORY_BUDGETS.memory, 200, 20_000),
+      profile: readNumber(values.profileCharLimit, DEFAULT_MEMORY_BUDGETS.profile, 200, 20_000),
       project: readNumber(values.projectCharLimit, DEFAULT_MEMORY_BUDGETS.project, 200, 20_000),
+      domain: readNumber(values.domainCharLimit, DEFAULT_MEMORY_BUDGETS.domain, 200, 20_000),
     },
     autoCapture: readSwitch(values.autoCapture, DEFAULT_SETTINGS.autoCapture),
     minIntervalMinutes: readNumber(values.minIntervalMinutes, DEFAULT_SETTINGS.minIntervalMinutes, 0, 1440),
@@ -73,7 +73,7 @@ function readSwitch(value: string | undefined, fallback: boolean): boolean {
 function readNumber(value: string | undefined, fallback: number, min: number, max: number): number {
   const text = (value ?? '').trim();
   // `Number('')` 是 0 而不是 NaN：不先挡掉空串，没填过的设置会被压到下限
-  // （预算默认值会被读成 200，而不是 1375）。
+  // （预算默认值会被读成 200，而不是 1200）。
   if (!text) return fallback;
   const parsed = Number(text);
   if (!Number.isFinite(parsed)) return fallback;

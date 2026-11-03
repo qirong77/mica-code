@@ -19,7 +19,7 @@ import {
   staleReferenceNote,
 } from '../contextView.js';
 import { Modal } from './Modal.js';
-import { Tag } from './Ui.js';
+import { Button, Tag } from './Ui.js';
 import type {
   ConfigWebContextAnalysis,
   ConfigWebContextItem,
@@ -75,14 +75,8 @@ export function ContextPane({ sessionId, refreshToken }: { sessionId: string; re
       <ContextCategoryTable analysis={analysis} total={total} />
       <ContextEstimateNote analysis={analysis} />
       <ContextItemList items={analysis.items} total={total} />
-      <ContextTurnList
-        analysis={analysis}
-        activeTurn={activeTurn}
-        onOpenTurn={setActiveTurn}
-      />
-      {activeTurn ? (
-        <TurnModal sessionId={sessionId} turn={activeTurn} onClose={() => setActiveTurn(null)} />
-      ) : null}
+      <ContextTurnList analysis={analysis} activeTurn={activeTurn} onOpenTurn={setActiveTurn} />
+      {activeTurn ? <TurnModal sessionId={sessionId} turn={activeTurn} onClose={() => setActiveTurn(null)} /> : null}
     </div>
   );
 }
@@ -129,9 +123,7 @@ function ContextOverview({ analysis, total }: { analysis: ConfigWebContextAnalys
         {analysis.staleInput?.compactedTokens ? (
           <span>压缩后估算 ~{formatTokens(analysis.staleInput.compactedTokens)}</span>
         ) : null}
-        {analysis.contextWindowSize ? (
-          <span>窗口 {formatTokens(analysis.contextWindowSize)}</span>
-        ) : null}
+        {analysis.contextWindowSize ? <span>窗口 {formatTokens(analysis.contextWindowSize)}</span> : null}
       </div>
 
       {staleNote ? <p className="context-note context-note-warn">{staleNote}</p> : null}
@@ -170,19 +162,14 @@ function ContextCategoryTable({ analysis, total }: { analysis: ConfigWebContextA
           {rows.map((row) => (
             <tr key={row.kind}>
               <td>
-                <span className={`context-badge ${contextKindClass(row.kind)}`}>
-                  {CONTEXT_KIND_LABELS[row.kind]}
-                </span>
+                <span className={`context-badge ${contextKindClass(row.kind)}`}>{CONTEXT_KIND_LABELS[row.kind]}</span>
               </td>
               <td className="is-num muted-text">{row.count}</td>
               <td className="is-num">{row.tokens.toLocaleString()}</td>
               <td>
                 <span className="context-share">
                   <span className="context-share-track">
-                    <i
-                      className={contextKindClass(row.kind)}
-                      style={{ width: `${(row.tokens / maxTokens) * 100}%` }}
-                    />
+                    <i className={contextKindClass(row.kind)} style={{ width: `${(row.tokens / maxTokens) * 100}%` }} />
                   </span>
                   <em>{formatShare(row.tokens, total)}</em>
                 </span>
@@ -199,10 +186,7 @@ function ContextCategoryTable({ analysis, total }: { analysis: ConfigWebContextA
               <td>
                 <span className="context-share">
                   <span className="context-share-track">
-                    <i
-                      className="context-kind-overhead"
-                      style={{ width: `${(overhead / maxTokens) * 100}%` }}
-                    />
+                    <i className="context-kind-overhead" style={{ width: `${(overhead / maxTokens) * 100}%` }} />
                   </span>
                   <em>{formatShare(overhead, total)}</em>
                 </span>
@@ -226,16 +210,16 @@ function ContextEstimateNote({ analysis }: { analysis: ConfigWebContextAnalysis 
       </summary>
       <div className="context-estimate-body">
         <p>
-          所有数字都是「持久化消息体」的估算：`chars / 4`，与 CLI 状态栏的 ctx 同口径。
-          「{OVERHEAD_LABEL}」= 最近一次请求的 input 减去持久化消息体估算，包含 system prompt、
-          AGENT.md、skills 索引、全部工具 schema、不落盘的思考内容（Responses
-          的加密推理链），以及 chars/4 与真实 tokenize 的差（JSON 结构、id、中文都会让实际更贵）。
+          所有数字都是「持久化消息体」的估算：`chars / 4`，与 CLI 状态栏的 ctx 同口径。 「{OVERHEAD_LABEL}」=
+          最近一次请求的 input 减去持久化消息体估算，包含 system prompt、 AGENT.md、skills 索引、全部工具
+          schema、不落盘的思考内容（Responses 的加密推理链），以及 chars/4 与真实 tokenize 的差（JSON
+          结构、id、中文都会让实际更贵）。
         </p>
         <p>
           「消息结构（信封）」是每条消息的 role / type / call_id / name
           等结构字段，线上请求同样会带上（压缩与状态栏的估算按带缩进的整份历史 JSON
-          口径，与这里的逐条口径会差一成左右）。媒体块（图片 / 文档）只记张数、不计字符
-          （base64 长度与 vision token 无关）。
+          口径，与这里的逐条口径会差一成左右）。媒体块（图片 / 文档）只记张数、不计字符 （base64 长度与 vision token
+          无关）。
         </p>
         <p>
           {analysis.clearedResults > 0
@@ -315,9 +299,7 @@ function ContextItemList({ items, total }: { items: ConfigWebContextItem[]; tota
                 onClick={() => setExpanded(open ? null : item.sequence)}
               >
                 <span className="context-item-seq">#{item.sequence}</span>
-                <span className={`context-badge ${contextKindClass(item.kind)}`}>
-                  {CONTEXT_KIND_LABELS[item.kind]}
-                </span>
+                <span className={`context-badge ${contextKindClass(item.kind)}`}>{CONTEXT_KIND_LABELS[item.kind]}</span>
                 <span className="context-item-title" title={contextItemTitle(item)}>
                   {contextItemTitle(item)}
                 </span>
@@ -339,9 +321,7 @@ function ContextItemList({ items, total }: { items: ConfigWebContextItem[]; tota
                     <span>{item.chars.toLocaleString()} chars</span>
                     {item.name ? <span>{item.name}</span> : null}
                     {item.toolCallId ? <span>{item.toolCallId}</span> : null}
-                    {item.encryptedChars ? (
-                      <span>加密推理链 {formatTokens(item.encryptedChars)} chars</span>
-                    ) : null}
+                    {item.encryptedChars ? <span>加密推理链 {formatTokens(item.encryptedChars)} chars</span> : null}
                   </div>
                   {item.content ? (
                     <pre className="context-item-content">{item.content}</pre>
@@ -368,13 +348,11 @@ function ContextItemList({ items, total }: { items: ConfigWebContextItem[]; tota
       </div>
 
       {rows.length > visible ? (
-        <button
-          type="button"
-          className="ui-button context-load-more"
-          onClick={() => setVisible((value) => value + RENDER_STEP)}
-        >
-          显示更多（{rows.length - visible} 条）
-        </button>
+        <div className="context-load-more">
+          <Button fullWidth onClick={() => setVisible((value) => value + RENDER_STEP)}>
+            显示更多（{rows.length - visible} 条）
+          </Button>
+        </div>
       ) : null}
     </section>
   );
@@ -399,7 +377,9 @@ function ContextTurnList({
         <span>按轮次的走势</span>
         <span className="muted-text">
           {analysis.turnCount} 轮
-          {pct !== null ? ` · 峰值 ${formatTokens(peak)}（${Math.round(pct * 100)}% / ${formatTokens(window ?? 0)}）` : ''}
+          {pct !== null
+            ? ` · 峰值 ${formatTokens(peak)}（${Math.round(pct * 100)}% / ${formatTokens(window ?? 0)}）`
+            : ''}
         </span>
       </summary>
       <div className="context-turn-list">
@@ -416,15 +396,7 @@ function ContextTurnList({
   );
 }
 
-function TurnRow({
-  turn,
-  active,
-  onClick,
-}: {
-  turn: ConfigWebContextTurn;
-  active: boolean;
-  onClick(): void;
-}) {
+function TurnRow({ turn, active, onClick }: { turn: ConfigWebContextTurn; active: boolean; onClick(): void }) {
   const largest = Math.max(1, turn.totalTokens);
   const segments = [
     { type: 'conversation' as const, value: turn.conversationTokens },
@@ -462,15 +434,7 @@ function TurnRow({
   );
 }
 
-function TurnModal({
-  sessionId,
-  turn,
-  onClose,
-}: {
-  sessionId: string;
-  turn: ConfigWebContextTurn;
-  onClose(): void;
-}) {
+function TurnModal({ sessionId, turn, onClose }: { sessionId: string; turn: ConfigWebContextTurn; onClose(): void }) {
   return (
     <Modal
       wide
@@ -488,20 +452,13 @@ function TurnModal({
           <Tag tone="blue">对话 {formatTokens(turn.conversationTokens)}</Tag>
           <Tag tone="green">工具 {formatTokens(turn.toolTokens)}</Tag>
           <Tag>思考 {formatTokens(turn.thinkingTokens)}</Tag>
-          {turn.contextTokens !== undefined ? (
-            <Tag tone="red">实际输入 {formatTokens(turn.contextTokens)}</Tag>
-          ) : null}
+          {turn.contextTokens !== undefined ? <Tag tone="red">实际输入 {formatTokens(turn.contextTokens)}</Tag> : null}
           {turn.usageRequests > 0 ? <span className="muted-text">{turn.usageRequests} 次请求</span> : null}
         </div>
       </div>
       <div className="context-entry-list">
         {turn.entries.map((entry) => (
-          <ContextEntryRow
-            key={entry.sequence}
-            sessionId={sessionId}
-            entry={entry}
-            maxTokens={turn.totalTokens}
-          />
+          <ContextEntryRow key={entry.sequence} sessionId={sessionId} entry={entry} maxTokens={turn.totalTokens} />
         ))}
       </div>
     </Modal>

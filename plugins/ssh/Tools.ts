@@ -3,7 +3,7 @@ import type { PluginToolRegistrationOptions } from '@packages/mica-plugin/index.
 import type { PluginToolDescriptor } from '@packages/mica-tools/PluginTool.js';
 import type { MicaTool, ToolExecuteCallbacks } from '@packages/mica-tools/index.js';
 import { appendAudit } from './Audit.js';
-import { findHost, mutateData, readData, upsertHost, type SshData, type SshHost } from './Hosts.js';
+import { findHost, mutateData, readData, upsertHost, type SshHost } from './Hosts.js';
 import {
   runRemote,
   runRemoteMany,
@@ -13,6 +13,7 @@ import {
 } from './Remote.js';
 import { SessionManager, type SessionWaitResult } from './Session.js';
 import { deletePassword } from './Secrets.js';
+import { scopedHosts, type SshScope } from './Scope.js';
 
 /**
  * 模型能操作服务器的唯一入口：四个工具。
@@ -29,6 +30,8 @@ export type ToolDeps = {
   ctx: RemoteContext;
   dataFile: string;
   sessions: SessionManager;
+  /** 本次会话允许模型碰的机器（见 `Scope.ts`）。 */
+  scope: SshScope;
   register(tool: MicaTool | PluginToolDescriptor, options?: PluginToolRegistrationOptions): Disposable;
 };
 
@@ -107,10 +110,19 @@ export function findMutatingHint(script: string): string | null {
 
 function asHost(deps: ToolDeps, name: string): { host: SshHost | null; error: string } {
   const data = readData(deps.dataFile);
-  const host = findHost(data, name);
+  const allowed = scopedHosts(data, deps.scope.explicit());
+  const host = findHost({ ...data, hosts: allowed }, name);
   if (host) return { host, error: '' };
-  const known = data.hosts.map((entry) => entry.id).join('、') || '（还没有配置任何服务器）';
-  return { host: null, error: `找不到服务器 \`${name}\`。已配置：${known}。到桌面端 SSH 面板添加。` };
+  // 配过但没进本次会话：这是用户的一个勾选动作，模型只能请他去勾，不能自己去改。
+  const configured = findHost(data, name);
+  if (configured) {
+    return {
+      host: null,
+      error: `\`${configured.id}\` 没有添加到本次会话，模型看不到它：请用户在「SSH」面板的服务器表里勾上这台的「添加到会话」。`,
+    };
+  }
+  const known = allowed.map((entry) => entry.id).join('、') || '（本次会话没有可用的服务器）';
+  return { host: null, error: `找不到服务器 \`${name}\`。本次会话可用：${known}。` };
 }
 
 function timeoutOf(value: unknown, fallback: number): number {
@@ -235,15 +247,14 @@ export function createTools(deps: ToolDeps): Disposable[] {
           ? [String(input.host)]
           : [];
       if (names.length === 0) return '至少给一个 host 或 hosts';
-      const data: SshData = readData(dataFile);
       const resolved: SshHost[] = [];
-      const missing: string[] = [];
+      const problems: string[] = [];
       for (const name of names) {
-        const host = findHost(data, name);
-        if (host) resolved.push(host);
-        else missing.push(name);
+        const found = asHost(deps, name);
+        if (found.host) resolved.push(found.host);
+        else problems.push(found.error);
       }
-      if (resolved.length === 0) return asHost(deps, names[0]).error;
+      if (resolved.length === 0) return problems[0] ?? '没有可用的服务器';
       const timeoutMs = timeoutOf(input.timeout_ms, ctx.defaultTimeoutMs);
       const tailLines = linesOf(input.tail_lines, ctx.tailLines);
       const started = Date.now();
@@ -271,7 +282,8 @@ export function createTools(deps: ToolDeps): Disposable[] {
         });
         parts.push(formatResult(host, result));
       }
-      if (missing.length > 0) parts.push(`未配置的别名：${missing.join('、')}`);
+      // 部分成功时也要把没跑的那几台说清楚：不然看起来像是「全都查过了」。
+      if (problems.length > 0) parts.push(problems.join('\n'));
       return parts.join('\n\n');
     },
   };
@@ -410,6 +422,7 @@ export function createTools(deps: ToolDeps): Disposable[] {
       if (op === 'list') {
         const data = readData(dataFile);
         if (data.hosts.length === 0) return '还没有配置服务器';
+        const inSession = new Set(scopedHosts(data, deps.scope.explicit()).map((host) => host.id));
         return data.hosts
           .map((host) => {
             const bits = [
@@ -417,6 +430,7 @@ export function createTools(deps: ToolDeps): Disposable[] {
               host.auth === 'key' ? `密钥 ${host.keyPath}` : host.auth === 'password' ? '密码认证' : '使用 ssh agent/config',
               host.label ?? '',
               host.readOnly ? '只读' : '',
+              inSession.has(host.id) ? '本次会话可用' : '未添加到本次会话',
               host.fingerprint ? `指纹 ${host.fingerprint}` : '未信任(首次连接会记录指纹)',
             ].filter(Boolean);
             return `- ${bits.join(' · ')}`;

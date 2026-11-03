@@ -12,6 +12,8 @@ import { join } from 'node:path';
  * - 插件**在状态变化时**上报（成功一次、配置缺失、请求失败），不必每轮都写；
  * - 文件很小、可随时重建，因此损坏时当作「没有上报过」，不影响启动；
  * - 只存最近一条：健康状态回答的是「现在怎么样」，不是历史审计。
+ * - 每条都带写它的插件版本：换了版本之后这一条就不作数了。上一版留下的「连不上 X」
+ *   会让用户去修一个这一版可能早就不存在的问题——宁可不显示，也不显示错的那条。
  */
 export const PLUGIN_HEALTH_DIR = 'plugin-health';
 
@@ -26,6 +28,8 @@ export type PluginHealthReport = {
   hint?: string;
   /** ISO 时间，由写入方填。 */
   at: string;
+  /** 写这条记录的插件版本；读的一方按它判断这条还算不算数。 */
+  version?: string;
 };
 
 export type PluginHealthStore = {
@@ -40,12 +44,19 @@ export function resolvePluginHealthPath(pluginId: string, configDir: string): st
   return join(configDir, PLUGIN_HEALTH_DIR, `${pluginId.replace(/[\\/]/g, '_')}.json`);
 }
 
-export function readPluginHealth(pluginId: string, options: { configDir?: string } = {}): PluginHealthReport | null {
+export function readPluginHealth(
+  pluginId: string,
+  options: { configDir?: string; version?: string } = {},
+): PluginHealthReport | null {
   if (!options.configDir) return null;
   const file = resolvePluginHealthPath(pluginId, options.configDir);
   if (!existsSync(file)) return null;
   try {
-    return normalizeHealthReport(JSON.parse(readFileSync(file, 'utf-8')));
+    const report = normalizeHealthReport(JSON.parse(readFileSync(file, 'utf-8')));
+    if (!report) return null;
+    // 传了版本就以它为准：版本对不上（含早期没写版本的那些）等于「这一版还没上报过」。
+    if (options.version && report.version !== options.version) return null;
+    return report;
   } catch {
     return null;
   }
@@ -54,7 +65,7 @@ export function readPluginHealth(pluginId: string, options: { configDir?: string
 export function writePluginHealth(
   pluginId: string,
   report: { level: PluginHealthLevel; message: string; hint?: string },
-  options: { configDir?: string } = {},
+  options: { configDir?: string; version?: string } = {},
 ): PluginHealthReport | null {
   if (!options.configDir) return null;
   const normalized: PluginHealthReport = {
@@ -63,6 +74,7 @@ export function writePluginHealth(
     at: new Date().toISOString(),
   };
   if (report.hint) normalized.hint = truncate(report.hint);
+  if (options.version) normalized.version = options.version;
   const file = resolvePluginHealthPath(pluginId, options.configDir);
   mkdirSync(join(options.configDir, PLUGIN_HEALTH_DIR), { recursive: true });
   writeFileSync(file, `${JSON.stringify(normalized, null, 2)}\n`, 'utf-8');
@@ -81,7 +93,10 @@ export function clearPluginHealth(pluginId: string, options: { configDir?: strin
 }
 
 /** 运行期用的上报句柄：带插件 id 与配置目录，插件只传 level/message。 */
-export function createPluginHealthStore(pluginId: string, options: { configDir?: string } = {}): PluginHealthStore {
+export function createPluginHealthStore(
+  pluginId: string,
+  options: { configDir?: string; version?: string } = {},
+): PluginHealthStore {
   const path = options.configDir ? resolvePluginHealthPath(pluginId, options.configDir) : null;
   return {
     path,
@@ -105,6 +120,7 @@ function normalizeHealthReport(input: unknown): PluginHealthReport | null {
     at: typeof record.at === 'string' ? record.at : '',
   };
   if (typeof record.hint === 'string' && record.hint) report.hint = record.hint;
+  if (typeof record.version === 'string' && record.version) report.version = record.version;
   return report;
 }
 

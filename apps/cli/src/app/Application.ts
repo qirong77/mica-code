@@ -139,6 +139,8 @@ export class Application {
           agentSessions.findByAgent(target)?.sessionController.getCurrentSessionId() ?? null,
         onError: reportPluginIterationError,
       });
+      // TUI 不提供维护窗口（`configureAgentMaintenance` 留空）：终端里用户按回车本来就
+      // 落进队列、界面实时显示排队行，没有「客户端以为发出去了」这个缺口要补。
 
       this.context = {
         agent,

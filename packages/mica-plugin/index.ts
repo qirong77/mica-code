@@ -321,6 +321,7 @@ export type {
   PluginIdleCompactHook,
   PluginIdleCompactOutcome,
   PluginIterationRewriter,
+  PluginMaintenanceWindow,
 } from './PluginAgent.js';
 export type {
   PluginModelProtocol,
@@ -378,6 +379,10 @@ export type {
   PluginPanelRow,
   PluginPanelSection,
   PluginPanelStatusBar,
+  PluginPanelTable,
+  PluginPanelTableCell,
+  PluginPanelTableColumn,
+  PluginPanelTableRow,
   PluginPanelTone,
   PluginPanelView,
   PluginPanelViewInput,

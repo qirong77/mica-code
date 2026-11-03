@@ -577,6 +577,13 @@ function readDesktopPanel(
   const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
   const display = readPanelDisplay(input.display);
   if (!display.ok) return display;
+  const open = input.open;
+  if (open !== undefined && !isValidPluginPanelShortcutId(open)) {
+    return {
+      ok: false,
+      error: 'desktop.panel.open 必须是动作 id（1–64 位小写字母、数字、点、下划线或短横线，且以字母或数字开头）',
+    };
+  }
   if (input.status !== undefined && typeof input.status !== 'boolean') {
     return { ok: false, error: 'desktop.panel.status 必须是布尔值' };
   }
@@ -587,6 +594,7 @@ function readDesktopPanel(
     value: {
       label,
       roles,
+      ...(typeof open === 'string' ? { open } : {}),
       display: display.value,
       status: input.status === true,
       shortcuts: shortcuts.value,

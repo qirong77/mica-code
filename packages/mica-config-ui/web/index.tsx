@@ -52,6 +52,17 @@ export { SecretInput } from './components/SecretInput.js';
 export { Alert, Button, Checkbox, CollapsiblePanel, Empty, Segmented, SplitView, Tag } from './components/Ui.js';
 
 /**
+ * 数据表：统计页的 By source / By session 与会话详情共用一份形态（表头可排序、按列宽
+ * 摊开、底部翻页、窄容器先让次要列退场）。单元格内容由调用方渲染，所以进度条、按钮与
+ * 纯文本都能进同一张表。
+ */
+export { DataTable } from './components/DataTable.js';
+export type { DataTableColumn, DataTableSort } from './components/DataTable.js';
+/** 二维码：插件弹窗里的手机链接这类「扫一下就走」的内容，编码与码样都只有这一份。 */
+export { QrCode } from './components/QrCode.js';
+export { pageRangeLabel, pageWindow } from './components/dataTableModel.js';
+
+/**
  * 日期字段：可打字 + 自绘月历。
  *
  * 原生 `type="date"` 的日历弹层由系统绘制（位置、配色、关闭方式都不受页面控制），
@@ -61,6 +72,14 @@ export { DateField } from './components/DateField.js';
 
 /** 单个插件设置字段的控件：插件详情与会话设置共用，保证两处控件一致。 */
 export { PluginSettingInput } from './components/PluginSettingInput.js';
+
+/**
+ * 文件路径链接：点开选「在 Finder 中打开 / 在 Mica 中打开」，⌘ 点击直接进编辑器。
+ *
+ * 两个动作都由宿主注册（`ConfigWebClient.revealPath` / `openPathInEditor`）；
+ * 浏览器宿主没有窗口可开，路径退回纯文本。
+ */
+export { PathLink } from './components/PathLink.js';
 
 /**
  * 下拉的唯一实现：设置页与桌面端工具栏共用。

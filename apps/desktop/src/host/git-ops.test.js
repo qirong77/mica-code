@@ -288,7 +288,8 @@ describe('索引锁', () => {
     expect(await readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('one\n')
   })
 
-  it('锁一直不放时报出可操作的中文提示', async () => {
+  // 这条要等满重试预算（真的在等 index.lock），比 bun test 默认的 5s 长。
+  it('锁一直不放时报出可操作的中文提示', { timeout: 20000 }, async () => {
     await writeFile(path.join(dir, 'a.txt'), 'two\n')
     await writeFile(lockFile(), '')
     try {

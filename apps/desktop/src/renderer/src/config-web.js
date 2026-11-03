@@ -2,10 +2,34 @@
  * 配置页在桌面端的数据源：动作名 + 参数交给运行时（src/host/configWeb.js），由它落到
  * `packages/mica-config-ui` 的动作表。浏览器端有另一份实现走 HTTP，页面组件相同。
  */
+
+/**
+ * 「在 Mica 中打开」落在主区的文件视图里（编辑器归 App 管），配置页自己拿不到那个入口，
+ * 所以由 App 挂载时注册一次。没注册时如实回失败，不假装打开过。
+ */
+let openPathInEditor = null
+
+export function setConfigWebFileOpener(opener) {
+  openPathInEditor = typeof opener === 'function' ? opener : null
+}
+
 export function createDesktopConfigWebClient() {
   const invoke = (action, input) => window.mica.configWeb.invoke(action, input)
 
   return {
+    // 路径动作：与对话区路径链接同一个入口（`files:open-path` 会按类型区分文件 / 目录，
+    // 路径不存在时带回 error）；「在 Mica 中打开」由 App 注册。
+    revealPath: (path) => window.mica.files.openPath(path),
+    openPathInEditor: async (path) => {
+      if (!openPathInEditor) return { ok: false, error: '编辑器还没准备好' }
+      // 先问一次文件在不在：不存在时留在设置页、把原因写在菜单里（例如插件今天还没写过
+      // 日志），而不是收起设置、在主区开一个空编辑器。
+      const info = await window.mica.files.stat(path)
+      if (!info?.ok) return { ok: false, error: info?.error || `路径不存在：${path}` }
+      await openPathInEditor(info.path)
+      return { ok: true, kind: info.kind, path: info.path }
+    },
+
     readConfigFile: () => invoke('readConfigFile'),
     writeConfigFile: (content) => invoke('writeConfigFile', { content }),
 

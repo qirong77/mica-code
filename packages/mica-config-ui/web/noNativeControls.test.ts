@@ -67,9 +67,7 @@ describe('界面控件统一', () => {
           if (ALLOWED.has(inner)) return [];
         }
         const text = codeText(readFileSync(file, 'utf8'));
-        return NATIVE.filter(({ pattern }) => pattern.test(text)).map(
-          ({ hint }) => `${relative} → ${hint}`,
-        );
+        return NATIVE.filter(({ pattern }) => pattern.test(text)).map(({ hint }) => `${relative} → ${hint}`);
       }),
     );
     expect(offenders).toEqual([]);

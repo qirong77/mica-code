@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PluginContext } from '@packages/mica-plugin/index.js';
+import type { PluginContext, PluginPanelActionResult } from '@packages/mica-plugin/index.js';
 import { buildPanelView, createPanelHandler, readDrafts } from './Panel.js';
 import { materializeBundle, normalizeHost, readDeployState } from './DeployRunner.js';
 
@@ -68,9 +68,9 @@ describe('mobile-relay panel', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('offers the setup section with the ssh field and an apply button', () => {
+  it('offers the first-deploy section with the ssh field and an apply button', () => {
     const view = buildPanelView(fakeContext(), dir);
-    const section = view.sections?.find((item) => item.title === '接中转机');
+    const section = view.sections?.find((item) => item.title === '首次部署');
     expect(section).toBeTruthy();
     expect(section?.fields?.map((field) => field.key)).toContain('sshHost');
     const apply = section?.actions?.find((action) => action.id === 'apply');
@@ -103,6 +103,39 @@ describe('mobile-relay panel', () => {
     expect(row).toBeUndefined();
   });
 
+  /*
+   * 入口动作（清单 desktop.panel.open）：点「手机访问」只要一个二维码。
+   * 它不能走 saveDrafts——页面没有表单可提交，落一次空草稿会把用户填了一半的中转地址
+   * 与 SSH 清空。
+   */
+  it('answers the entry action with a QR code and leaves the draft alone', async () => {
+    writeFileSync(
+      join(dir, 'panel.json'),
+      JSON.stringify({ sshHost: 'root@1.2.3.4', relayUrl: 'https://draft.example' }),
+      'utf8'
+    );
+    const handler = createPanelHandler(
+      fakeContext({ relayUrl: 'https://mica.example.com', token: '0123456789abcdef' }),
+      dir
+    );
+    const outcome = (await handler.action({ action: 'show', values: {} })) as PluginPanelActionResult;
+    expect(outcome.dialog?.qr?.value).toBe('https://mica.example.com/?t=0123456789abcdef');
+    expect(outcome.dialog?.title).toBe('手机访问');
+    expect(readDrafts(dir)).toMatchObject({
+      sshHost: 'root@1.2.3.4',
+      relayUrl: 'https://draft.example',
+    });
+  });
+
+  it('points at the plugin page instead of drawing a QR code when nothing is set up', async () => {
+    const handler = createPanelHandler(fakeContext(), dir);
+    const outcome = (await handler.action({ action: 'show', values: {} })) as PluginPanelActionResult;
+    expect(outcome.dialog?.configure?.label).toBe('去插件页面配置');
+    expect(outcome.dialog?.panel?.label).toBe('首次部署');
+    expect(outcome.dialog?.qr).toBeUndefined();
+    expect(outcome.dialog?.text).toContain('还没接入');
+  });
+
   it('turns a save action into an error instead of a silent no-op', async () => {
     const handler = createPanelHandler(fakeContext(), dir);
     // 没有中转地址时「测试连接」应当明确报错，而不是什么都不发生
@@ -111,7 +144,7 @@ describe('mobile-relay panel', () => {
 
   it('offers a register button that needs only the relay address', () => {
     const empty = buildPanelView(fakeContext(), dir);
-    const section = empty.sections?.find((item) => item.title === '注册这台机器');
+    const section = empty.sections?.find((item) => item.title === '接入');
     expect(section).toBeTruthy();
     const button = section?.actions?.find((item) => item.id === 'register');
     expect(button?.disabled).toBe(true);
@@ -119,7 +152,7 @@ describe('mobile-relay panel', () => {
 
     const withAddress = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com' }), dir);
     const ready = withAddress.sections
-      ?.find((item) => item.title === '注册这台机器')
+      ?.find((item) => item.title === '接入')
       ?.actions?.find((item) => item.id === 'register');
     expect(ready?.disabled).toBe(false);
     expect(ready?.label).toBe('注册这台机器');
@@ -144,42 +177,41 @@ describe('mobile-relay panel', () => {
 
   /*
    * 手机打开的那份页面正是中转机上托管的那份，所以「页面落后」在手机上最该被看见：
-   * 用户面对的就是旧界面，却没有别的入口能把它换掉。面板因此把监管写下的页面版本
-   * 与提示原样透出来，并在同一节给一个「更新」按钮。
+   * 用户面对的就是旧界面，却没有别的入口能把它换掉。概览因此把监管写下的页面版本
+   * 原样透出来，并在同一块里把「更新」按钮升成主按钮。
    */
   it('shows the page version and an update button when the relay page is behind', () => {
     writeFileSync(
       join(dir, 'data.json'),
       JSON.stringify({
         page: { text: '落后（中转机 4d32，本机 bcc7）', tone: 'warn' },
-        attention: { text: '手机端页面落后', action: 'sync-page' },
+        pageKey: 'bcc7->4d32',
       }),
       'utf8'
     );
     const section = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com' }), dir).sections?.find(
-      (item) => item.title === '页面版本'
+      (item) => item.title === '概览'
     );
-    expect(section?.collapsed).toBe(false);
-    expect(section?.rows?.[0]).toEqual({
-      label: '中转机页面',
+    expect(section?.rows?.find((item) => item.label === '页面版本')).toEqual({
+      label: '页面版本',
       value: '落后（中转机 4d32，本机 bcc7）',
       tone: 'warn',
     });
     expect(section?.actions?.find((item) => item.id === 'sync-page')?.tone).toBe('primary');
   });
 
-  it('collapses the page section once the two sides match', () => {
+  it('keeps the update button quiet once the two sides match', () => {
     writeFileSync(join(dir, 'data.json'), JSON.stringify({ page: { text: '已同步 bcc7', tone: 'ok' } }), 'utf8');
-    const section = buildPanelView(fakeContext(), dir).sections?.find((item) => item.title === '页面版本');
-    expect(section?.collapsed).toBe(true);
+    const section = buildPanelView(fakeContext(), dir).sections?.find((item) => item.title === '概览');
     const button = section?.actions?.find((item) => item.id === 'sync-page');
+    expect(button?.tone).toBe('ghost');
     // 没配中转机时点它只会得到一句「还没连接中转机」
     expect(button?.disabled).toBe(true);
   });
 
-  // 提示点只亮一次（`page-notice.json`），落后本身不会因此消失：面板里仍要有「落后 + 按钮」，
-  // 否则用户想手动再传一次时，这一节已经收起、什么也找不到。
-  it('keeps the stale row and the button after the notice was dismissed', () => {
+  // 提示点只亮一次（`page-notice.json`），落后本身不会因此消失：概览里仍要有
+  // 「页面版本 · 落后」与主按钮，否则用户想手动再传一次时找不到入口。
+  it('keeps the stale row and the primary button after the notice was dismissed', () => {
     writeFileSync(
       join(dir, 'data.json'),
       JSON.stringify({
@@ -190,10 +222,9 @@ describe('mobile-relay panel', () => {
       'utf8'
     );
     const section = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com' }), dir).sections?.find(
-      (item) => item.title === '页面版本'
+      (item) => item.title === '概览'
     );
-    expect(section?.collapsed).toBe(false);
-    expect(section?.rows?.[1]).toEqual({ label: '要更新', value: '版本与中转机不一致', tone: 'warn' });
+    expect(section?.rows?.find((item) => item.label === '页面版本')?.tone).toBe('warn');
     expect(section?.actions?.find((item) => item.id === 'sync-page')?.tone).toBe('primary');
   });
 

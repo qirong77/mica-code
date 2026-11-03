@@ -38,6 +38,13 @@ export type SshHost = {
   label?: string;
   /** 只读：拒绝任何可能改状态的脚本前的软约束，模型与人都看得见。 */
   readOnly?: boolean;
+  /**
+   * 新会话默认带上这台机器（面板里的「自动添加到会话」列）。
+   *
+   * 「添加到会话」是**每次会话**的决定，存在会话快照里；这一列是它的初值。一台生产机器
+   * 通常不该每开一个对话就自动出现在模型眼前，所以默认不加。
+   */
+  autoAdd?: boolean;
   /** 首次连接后钉住的主机密钥指纹（`SHA256:…`）。 */
   fingerprint?: string;
   createdAt: string;
@@ -47,14 +54,6 @@ export type SshHost = {
 export type SshData = {
   version: 1;
   updatedAt: string;
-  /**
-   * 这个插件是否对模型生效。
-   *
-   * 关闭时：工具**不注册**（工具表里根本没有 `ssh_*`）、prompt 段落不注入、输入框上方
-   * 不显示状态栏。默认关：配好的机器是「用户填好了资料」，不是「模型现在可以动别人的
-   * 服务器」——后者必须是一次明确的动作。
-   */
-  enabled: boolean;
   /** 配置页插件详情里的「运行状态」那一行（清单 `status` 声明的 key）。 */
   hostsSummary?: string;
   hosts: SshHost[];
@@ -69,16 +68,23 @@ export type HostDraft = {
   keyPath?: string;
   label?: string;
   readOnly?: boolean;
+  autoAdd?: boolean;
 };
 
-/** 别名进 prompt、进工具参数、进 ssh 目标串，所以只允许「一眼能念出来」的字符。 */
-export const HOST_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,31}$/;
+/**
+ * 别名进 prompt、进工具参数、进面板表格，所以只要「一眼能念出来、不会把参数弄坏」的字符：
+ * 任意文字（中文、日文、带重音的拉丁字母都算）与数字打头，后面可以带 `.`、`_`、`-`。
+ *
+ * 用 `\p{L}` 而不是白名单 ASCII：别名是给人起的（「测试机」「生产 API」），逼着用户写
+ * 英文只是把翻译负担推给用户。它不做文件名、不进 ssh 目标串，所以没有额外的字符限制。
+ */
+export const HOST_ID_PATTERN = /^[\p{L}\p{N}][\p{L}\p{N}._-]{0,31}$/u;
 /** 主机名或 IP；不收带空白的输入（那是把整条命令塞进目标串的第一步）。 */
 const HOST_ADDRESS_PATTERN = /^[a-zA-Z0-9._:[\]-]{1,255}$/;
 const USER_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 
 export function emptyData(): SshData {
-  return { version: 1, updatedAt: new Date().toISOString(), enabled: false, hosts: [] };
+  return { version: 1, updatedAt: new Date().toISOString(), hosts: [] };
 }
 
 function text(value: unknown, limit: number): string {
@@ -112,6 +118,7 @@ function normalizeHost(input: unknown): SshHost | null {
     ...(text(raw.label, 60) ? { label: text(raw.label, 60) } : {}),
     // 手改过清单的人写 `"readOnly": true` 或 `"yes"` 都算数，写别的当没有。
     ...(flag(raw.readOnly) ? { readOnly: true } : {}),
+    ...(flag(raw.autoAdd) ? { autoAdd: true } : {}),
     ...(fingerprint ? { fingerprint } : {}),
     createdAt: text(raw.createdAt, 40) || now,
     updatedAt: text(raw.updatedAt, 40) || now,
@@ -121,11 +128,11 @@ function normalizeHost(input: unknown): SshHost | null {
 /** 读不出来就当没有：清单坏了应该去面板重配，而不是让插件起不来。 */
 export function readData(file: string): SshData {
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { hosts?: unknown; enabled?: unknown };
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { hosts?: unknown };
     const hosts = Array.isArray(parsed.hosts)
       ? parsed.hosts.map((entry) => normalizeHost(entry)).filter((entry): entry is SshHost => entry !== null)
       : [];
-    return { version: 1, updatedAt: new Date().toISOString(), enabled: flag(parsed.enabled), hosts };
+    return { version: 1, updatedAt: new Date().toISOString(), hosts };
   } catch {
     return emptyData();
   }
@@ -196,7 +203,7 @@ export type HostUpsertResult = { data: SshData; host: SshHost; created: boolean 
 export function upsertHost(data: SshData, draft: HostDraft): HostUpsertResult {
   const id = text(draft.id, 32);
   if (!HOST_ID_PATTERN.test(id)) {
-    throw new Error('别名只能用字母、数字、`.`、`_`、`-`（1–32 位），例如 `test` / `prod-api`');
+    throw new Error('别名不能用空白或符号打头（1–32 位），中文、字母、数字都可以，例如 `测试机` / `prod-api`');
   }
   const host = text(draft.host, 255);
   if (!HOST_ADDRESS_PATTERN.test(host)) throw new Error('主机地址只填域名或 IP，不要带用户名、端口或空格');
@@ -221,6 +228,14 @@ export function upsertHost(data: SshData, draft: HostDraft): HostUpsertResult {
     ...(auth === 'key' ? { keyPath } : {}),
     ...(text(draft.label, 60) ? { label: text(draft.label, 60) } : {}),
     ...(flag(draft.readOnly) ? { readOnly: true } : {}),
+    // 「自动添加到会话」不是表单字段：编辑时没传就沿用原值，别把用户勾过的清掉。
+    ...(draft.autoAdd === undefined
+      ? existing?.autoAdd
+        ? { autoAdd: true }
+        : {}
+      : flag(draft.autoAdd)
+        ? { autoAdd: true }
+        : {}),
     // 换了地址或端口就是另一台机器：旧指纹必须作废，否则连上去必然报「密钥已变更」。
     ...(existing?.host === host && existing.port === port && existing.fingerprint
       ? { fingerprint: existing.fingerprint }

@@ -11,6 +11,7 @@ import type {
   ConfigWebPluginLlmTest,
   ConfigWebPluginActionResult,
   ConfigWebPluginsDetails,
+  ConfigWebPathAction,
   ConfigWebRolesDetails,
   ConfigWebSessionDetails,
   ConfigWebSessionPrompt,
@@ -75,6 +76,17 @@ export type ConfigWebClient = {
   readDesktopChecks?(): Promise<ConfigWebDesktopChecks>;
   /** 打开某一项对应的系统设置面板。 */
   openDesktopSettings?(pane: string): Promise<{ ok: boolean; error?: string }>;
+
+  /**
+   * 页面上显示的一个路径（插件日志、以后别处也用它）怎么打开。
+   *
+   * 两件事分开问：`revealPath` 交给系统文件管理器（macOS 是 Finder），
+   * `openPathInEditor` 交给宿主自己的编辑器。前者是运行时的能力（这台机器上真的有个
+   * 窗口），后者是页面所在应用的能力——浏览器宿主两样都没有（打开的是一台机器的文件，
+   * 却没有任何界面能显示它），所以两个方法都是可选的，缺了那段路径就只是文字。
+   */
+  revealPath?(path: string): Promise<ConfigWebPathAction>;
+  openPathInEditor?(path: string): Promise<ConfigWebPathAction>;
 
   /**
    * 自动压缩（输入框上方那个齿轮曾经管的东西）现在只在这台机器的运行时里：设置与按会话
@@ -289,6 +301,39 @@ export async function openDesktopSettings(pane: string): Promise<{ ok: boolean; 
     return { ok: false, error: '当前宿主不支持打开系统设置' };
   }
   return current.openDesktopSettings(pane);
+}
+
+/** 宿主能不能在系统文件管理器里显示一个路径。 */
+export function supportsPathReveal(): boolean {
+  return typeof client?.revealPath === 'function';
+}
+
+/** 宿主能不能在自己的编辑器里打开一个路径。 */
+export function supportsPathEditor(): boolean {
+  return typeof client?.openPathInEditor === 'function';
+}
+
+/**
+ * 在系统文件管理器里显示这个路径（文件会选中它本身）。
+ *
+ * 目标是文件还是目录由宿主判定：页面看得见的只有一行文本，`/a/b` 到底是不是目录
+ * 只有那台机器答得上来。
+ */
+export async function revealPath(path: string): Promise<ConfigWebPathAction> {
+  const current = client;
+  if (typeof current?.revealPath !== 'function') {
+    return { ok: false, path, error: '当前宿主不能打开系统文件管理器' };
+  }
+  return current.revealPath(path);
+}
+
+/** 在宿主的编辑器里打开这个路径（桌面端会收起设置页、把它放到主区）。 */
+export async function openPathInEditor(path: string): Promise<ConfigWebPathAction> {
+  const current = client;
+  if (typeof current?.openPathInEditor !== 'function') {
+    return { ok: false, path, error: '当前宿主没有可以打开文件的编辑器' };
+  }
+  return current.openPathInEditor(path);
 }
 
 /**

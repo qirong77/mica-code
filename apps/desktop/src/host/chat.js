@@ -147,20 +147,29 @@ function liveRunIdForSession(sessionId) {
   return ''
 }
 
-function queuedItems(id) {
-  return queuedRuns.values(id).map((item, index) => ({
-    id: item.payload?.clientMessageId || `queued:${id}:${index}`,
-    text: item.payload?.prompt || '',
-    position: index + 1,
-    queueMode: 'after_turn',
-    ...(item.payload?.waitingFor ? { waitingFor: item.payload.waitingFor } : {})
-  }))
+function queuedItems(id, run) {
+  // 维护窗口（宿主占着会话做一段耗时工作，例如自动压缩）开着时，这条等的是窗口
+  // 收尾而不是迭代边界；窗口关上之后（宿主报 active:false）就不再挂这个标记，
+  // 排队行的时机芯片要跟着回落到正常文案，否则会一直说「等压缩结束」。
+  const hold = run?.maintenance || null
+  return queuedRuns.values(id).map((item, index) => {
+    const waitingFor = hold && item.payload?.waitingFor === 'maintenance' ? 'maintenance' : ''
+    const waitingLabel = hold?.label || item.payload?.waitingLabel || ''
+    return {
+      id: item.payload?.clientMessageId || `queued:${id}:${index}`,
+      text: item.payload?.prompt || '',
+      position: index + 1,
+      queueMode: 'after_turn',
+      ...(waitingFor ? { waitingFor } : {}),
+      ...(waitingFor && waitingLabel ? { waitingLabel } : {})
+    }
+  })
 }
 
 // Merge the local after_turn queue with the host-side after_iteration queue.
 // The single-slot rule means at most one of the two is ever non-empty.
 function allQueuedItems(id, run) {
-  return mergeQueuedItems(id, run?.hostPending, queuedItems(id))
+  return mergeQueuedItems(id, run?.hostPending, queuedItems(id, run))
 }
 
 /**
@@ -609,12 +618,12 @@ function startRun(sender, id, payload) {
     //                                 the current turn completes
     existing.sender = sender
     existing.lastActivityAt = Date.now()
-    // 宿主正在轮次之外占着会话（自动压缩）：压缩是同步的，这几秒发过去的 turn/start
-    // 只会静静排在它的 stdin 里，界面上看不出任何东西。先本地排队——排队行可见、
-    // 可撤回——宿主报告压缩结束（`mica/host/maintenance` active:false）时自动补发。
+    // 宿主正占着会话做一段耗时工作（自动压缩：轮次之外的空闲压缩，或轮内的模型
+    // 摘要）：这段时间它读不到 stdin，发过去的 turn/start 只会干等。先本地排队——
+    // 排队行可见、可撤回——窗口关闭（`mica/host/maintenance` active:false）时补发。
     const queuedBefore = allQueuedItems(id, existing)
     const maintenance = resolveMaintenanceDispatch({
-      compacting: existing.compacting === true,
+      maintenance: existing.maintenance,
       queuedCount: queuedBefore.length
     })
     if (maintenance.action === 'reject') {
@@ -626,9 +635,15 @@ function startRun(sender, id, payload) {
       }
     }
     if (maintenance.action === 'enqueue') {
+      const waitingLabel = existing.maintenance?.label || ''
       const enqueued = queuedRuns.enqueue(id, {
         sender,
-        payload: { ...payload, prompt, waitingFor: 'compaction' }
+        payload: {
+          ...payload,
+          prompt,
+          waitingFor: 'maintenance',
+          ...(waitingLabel ? { waitingLabel } : {})
+        }
       })
       if (!enqueued.ok) {
         return {
@@ -1022,8 +1037,9 @@ function spawnChatHost(id, sender, payload) {
     // 闲置回收的判据（chat-idle.js）：任何来自宿主的输出都算活动。
     lastActivityAt: Date.now(),
     running: false,
-    // 宿主正在轮次之外占着会话（自动压缩）：这段时间的发送先本地排队。
-    compacting: false,
+    // 宿主占着会话做耗时工作的窗口（自动压缩）：`{ reason, label }` 或 null。
+    // 窗口打开期间的发送先本地排队，见 `mica/host/maintenance` 分支。
+    maintenance: null,
     aborting: false,
     exitSent: false,
     sequence: 0,
@@ -1326,11 +1342,22 @@ function handleHostNotification(id, run, notification) {
     pushQueueState(id, run)
     return
   } else if (method === 'mica/host/maintenance') {
-    // 宿主在轮次之外占着会话（自动压缩）：压缩跑着的时候它读不到 stdin，这一段
-    // 发过去的 turn/start 只会排在管道里。压完（active:false）立刻补发排队的那一条。
-    run.compacting = params.active === true
-    if (run.compacting) return
-    replayCompactionQueue(id, run)
+    // 宿主占着会话做一段耗时工作（自动压缩：轮次之外的空闲压缩，或轮内的模型摘要）。
+    // 这段时间它不读 stdin，发过去的 turn/start 只会干等，所以客户端把发送收进本地
+    // 队列。窗口一开就刷一次排队行，让芯片从兜底文案换成宿主说的那句（「自动压缩
+    // 结束后发送」）；收尾（active:false）再补发那条。
+    run.maintenance =
+      params.active === true
+        ? {
+            reason: typeof params.reason === 'string' ? params.reason : '',
+            label: typeof params.label === 'string' ? params.label : ''
+          }
+        : null
+    if (run.maintenance) {
+      pushQueueState(id, run)
+      return
+    }
+    replayMaintenanceQueue(id, run)
     return
   } else if (
     method === 'mica/backgroundTasks/updated' ||
@@ -1466,18 +1493,43 @@ function replayQueuedTurn(id, run) {
 }
 
 /**
- * 宿主报告压缩结束：只补发因为压缩排队的那一条。
+ * 宿主报告维护窗口结束：只补发因为这段工作排队的那一条。
  *
  * 别的排队条目（显式 after_turn、中止后留给用户撤回的）各有自己的时机，不能顺手
  * 发出去——尤其中止后那条，用户可能正按着 Shift+←。
+ *
+ * 补发按宿主此刻的状态分流：轮内的压缩（模型摘要）期间这一轮并没有结束，所以走
+ * turn/steer——与 `startRun` 的 steer 分支同一动作、同一份 hostPending 镜像——排队行
+ * 原地从「等整理结束」变成「等迭代边界」，而不是闪一下消失再冒出来；轮次之间才是
+ * 新的一轮。
  */
-function replayCompactionQueue(id, run) {
+function replayMaintenanceQueue(id, run) {
   const [first] = queuedRuns.values(id)
-  if (first?.payload?.waitingFor !== 'compaction') {
+  // 中止后的那条留给用户撤回，不替用户发出去（与「中止/失败把排队消息留在队列」同一规则）。
+  if (first?.payload?.waitingFor !== 'maintenance' || run.aborting) {
     pushQueueState(id, run)
     return
   }
-  replayQueuedTurn(id, run)
+  if (!run.running) {
+    replayQueuedTurn(id, run)
+    return
+  }
+  if (!sendSteer(run, first.payload)) {
+    // 发不出去就把条目留在队列里（用户还能撤回），而不是悄悄吞掉。
+    pushQueueState(id, run)
+    return
+  }
+  queuedRuns.remove(id, (item) => item === first)
+  if (first.payload.clientMessageId) {
+    run.hostPending = [
+      {
+        id: first.payload.clientMessageId,
+        text: first.payload.prompt || '',
+        queueMode: 'after_iteration'
+      }
+    ]
+  }
+  pushQueueState(id, run)
 }
 
 function sendChatExit(id, run, payload) {

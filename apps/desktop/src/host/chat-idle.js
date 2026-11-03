@@ -52,7 +52,9 @@ function activityAt(run) {
 function isBusy(entry) {
   const run = entry?.run
   if (!run) return true
-  if (run.running || run.compacting || run.aborting) return true
+  // 维护窗口（轮内的模型摘要、轮次之外的空闲压缩）同样算「在干活」：这段时间宿主
+  // 正在改写即将发送的历史，收掉它等于把用户排队的那条消息一起丢掉。
+  if (run.running || run.maintenance || run.aborting) return true
   if (run.currentTurnId) return true
   if (run.hostPending?.length) return true
   if (run.btwBusyThreads?.size) return true

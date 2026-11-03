@@ -35,6 +35,12 @@ type SelectMenuProps = {
   menuMinWidth?: number;
   /** `compact` 是密集工具栏里的尺寸（24px 高、11px 字），与旁边的输入框对齐。 */
   size?: 'default' | 'compact';
+  /**
+   * 根节点（`.ui-select`）上的附加类。它默认按内容宽度收缩，放进一条固定宽度的
+   * 容器里时不会自己撑满，容器剩下的地方就变成一段空白（调用方看到的是「控件
+   * 离旁边那个很远」）。要它跟着容器走，这里传 `flex-1 min-w-0`。
+   */
+  className?: string;
   onChange(value: string): void;
 };
 
@@ -60,6 +66,7 @@ export function SelectMenu({
   emptyLabel = '无匹配项',
   menuMinWidth,
   size = 'default',
+  className,
   onChange,
 }: SelectMenuProps) {
   const [open, setOpen] = useState(false);
@@ -201,7 +208,7 @@ export function SelectMenu({
     <span
       className={`ui-select${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}${
         size === 'compact' ? ' is-compact' : ''
-      }`}
+      }${className ? ` ${className}` : ''}`}
       ref={rootRef}
     >
       <button

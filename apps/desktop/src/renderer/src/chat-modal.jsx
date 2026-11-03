@@ -91,10 +91,13 @@ export function ModalShell({
           </button>
         ) : (
           <header className="chat-modal-header">
-            {/* 没有图标也占住标记位：标题的左边缘在所有弹窗里保持一致（表单弹窗除外，见 .chat-modal-prompt） */}
-            <span className={`chat-modal-mark${icon ? '' : ' is-empty'}`} aria-hidden="true">
-              {icon}
-            </span>
+            {/* 没有图标就整块不占位：标题与正文的左边缘对齐（留一条 22px 空位会让标题凭空缩进
+                一截，插件面板这类正文从 0 内边距铺开的弹窗里尤其明显） */}
+            {icon ? (
+              <span className="chat-modal-mark" aria-hidden="true">
+                {icon}
+              </span>
+            ) : null}
             <div className="chat-modal-heading">
               <span className="chat-modal-title">{title}</span>
               {subtitle ? (

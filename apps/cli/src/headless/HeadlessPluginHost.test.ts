@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import mitt from 'mitt';
@@ -145,12 +145,24 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
   });
 
   it('loads the memory plugin: `memory` tool plus a session-scoped prompt section', async () => {
-    const { agent, host } = await mount();
-    expect(toolNames()).toContain('memory');
-    // 段落按会话读盘并冻结；headless 宿主与 TUI 共用同一份能力面。
-    expect(agent.promptSections.render()).toContain('## 持久记忆');
-    await host.dispose();
-    expect(agent.promptSections.render()).not.toContain('## 持久记忆');
+    // 自带的 MICA_HOME：不读用户真实的 ~/.mica/memory，内容也由这条用例决定。
+    const home = mkdtempSync(join(tmpdir(), 'mica-memory-host-'));
+    vi.stubEnv('MICA_HOME', home);
+    mkdirSync(join(home, 'memory'), { recursive: true });
+    writeFileSync(join(home, 'memory', 'PROFILE.md'), '用户偏好中文\n', 'utf-8');
+    try {
+      const { agent, host } = await mount();
+      expect(toolNames()).toContain('memory');
+      // 段落按会话读盘并冻结；headless 宿主与 TUI 共用同一份能力面。
+      const prompt = agent.promptSections.render();
+      expect(prompt).toContain('### 用户档案');
+      expect(prompt).toContain('用户偏好中文');
+      await host.dispose();
+      expect(agent.promptSections.render()).not.toContain('### 用户档案');
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('injects the session-autonomy guidance through a host-wrapped prompt section', async () => {

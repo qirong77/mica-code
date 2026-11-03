@@ -1,5 +1,6 @@
 import type { SshHost } from './Hosts.js';
 import { readData } from './Hosts.js';
+import { scopedHosts, type SshScope } from './Scope.js';
 
 /**
  * 注入 system prompt 的那一段：**有哪几台机器**，以及怎么用起来才不慢。
@@ -20,11 +21,17 @@ function describe(host: SshHost): string {
   return bits.join(' · ');
 }
 
-export function renderPromptSection(hosts: SshHost[], enabled = true): string {
-  // 关着就一个字都不注入：这个插件对模型等于不存在，它不需要知道「有台机器配过但没开」。
-  if (!enabled) return '';
+/** `total` 是配置好的总数：本次会话一台都没勾时，模型需要知道「去面板里勾」。 */
+export function renderPromptSection(hosts: SshHost[], total = hosts.length): string {
   if (hosts.length === 0) {
-    return 'SSH 已开启，但还没有配置任何服务器：需要远程操作时请用户打开输入框上方的「SSH 服务器」，填地址、账号与认证方式后点「连接」。';
+    if (total === 0) {
+      return '还没有配置任何服务器：需要远程操作时请用户打开输入框上方的「SSH」，填地址、账号与认证方式后点「连接」。';
+    }
+    // 配了但没进本次会话：说清下一步做什么，而不是让模型以为这台机器不存在。
+    return [
+      `已经配置了 ${total} 台服务器，但都没有添加到本次会话，所以 \`ssh_*\` 工具用不了。`,
+      '需要时请用户在「SSH」面板的服务器表里，勾上要用那台的「添加到会话」。',
+    ].join('\n');
   }
   return [
     '可用的远程服务器（`ssh_run` / `ssh_read` / `ssh_session` 的 `host` 参数）：',
@@ -37,9 +44,9 @@ export function renderPromptSection(hosts: SshHost[], enabled = true): string {
   ].join('\n');
 }
 
-export function createPromptSection(dataFile: string): () => string {
+export function createPromptSection(dataFile: string, scope: SshScope): () => string {
   return () => {
     const data = readData(dataFile);
-    return renderPromptSection(data.hosts, data.enabled);
+    return renderPromptSection(scopedHosts(data, scope.explicit()), data.hosts.length);
   };
 }

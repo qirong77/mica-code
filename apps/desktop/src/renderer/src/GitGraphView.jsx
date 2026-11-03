@@ -303,13 +303,16 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
       {/* 工具栏自己开一层：下拉弹层要盖住下面的提交列表，不能被后面的兄弟节点压住。 */}
       <div className="relative z-10 flex shrink-0 flex-wrap items-center gap-1 border-b border-line bg-panel px-2 py-1">
         {/* 分支选择器与设置页同一个下拉（见 @mica-config-ui/web）：原生 select 的弹层
-            由系统绘制，几百个分支时会铺满整屏、点不动也关不掉。 */}
+            由系统绘制，几百个分支时会铺满整屏、点不动也关不掉。
+            下拉自己按内容收缩，容器却是固定宽度的：不传 flex-1 的话它只画到
+            「全部分支」四个字那么宽，右边剩下的 100 多像素看着就像搜索框被推远了。 */}
         <span
           className="flex min-w-0 items-center gap-1"
           style={{ width: 'clamp(120px, 22vw, 220px)' }}
         >
           <IconGitBranch size={13} className="shrink-0 text-fg-muted" />
           <SelectMenu
+            className="min-w-0 flex-1"
             size="compact"
             filterable
             filterPlaceholder="筛选分支"
@@ -320,15 +323,21 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
             onChange={setBranch}
           />
         </span>
-        <span className="relative inline-flex items-center">
-          <IconSearch size={13} className="pointer-events-none absolute left-1.5 text-fg-muted" />
+        {/* 宽度与内边距都写在 .text-input 那一侧（见 @mica-config-ui/web 的 styles.css）：
+            它的规则不在 @layer 里，这边的 Tailwind w-56 / pl-6 会被压掉——宽度退回
+            浏览器给搜索框的默认值，图标正好压在占位文字上。 */}
+        <span className="relative inline-flex w-56 items-center">
+          <IconSearch
+            size={13}
+            className="pointer-events-none absolute top-1/2 left-[7px] -translate-y-1/2 text-fg-muted"
+          />
           <input
             type="search"
             value={query}
             placeholder="搜索说明、作者或提交号"
             spellCheck={false}
             onChange={(event) => setQuery(event.target.value)}
-            className="text-input is-compact w-56 pl-6"
+            className="text-input is-compact text-input-with-icon"
           />
         </span>
         <span className="text-[11px] text-fg-dim">

@@ -1,5 +1,9 @@
 import type { Disposable } from '@packages/mica-common/index.js';
-import type { PluginCompactOptions, PluginIterationRewriter } from '@packages/mica-plugin/index.js';
+import type {
+  PluginCompactOptions,
+  PluginIterationRewriter,
+  PluginMaintenanceWindow,
+} from '@packages/mica-plugin/index.js';
 import { estimateContextTokens, estimateTextTokens } from '@packages/mica-context/index.js';
 import { compactAgentMessages } from './agentCompaction.js';
 import type { AgentRuntime } from './AgentRuntime.js';
@@ -29,6 +33,7 @@ const registrations: Registration[] = [];
 let hostMode: IterationHostMode = 'session';
 let resolveSessionId: (agent: AgentRuntime) => string | null = () => null;
 let errorReporter: ((error: unknown, pluginId: string) => void) | null = null;
+let maintenanceHandler: (<T>(window: PluginMaintenanceWindow, task: () => Promise<T>) => Promise<T>) | null = null;
 
 export function configureIterationRewrite(options: {
   mode?: IterationHostMode;
@@ -38,6 +43,19 @@ export function configureIterationRewrite(options: {
   if (options.mode) hostMode = options.mode;
   if (options.resolveSessionId) resolveSessionId = options.resolveSessionId;
   if (options.onError) errorReporter = options.onError;
+}
+
+/**
+ * 谁能在维护窗口里执行一段耗时工作（目前只有能跟客户端说话的常驻会话宿主）。
+ *
+ * 和重写表分开配：重写表三个宿主都有（TUI / app-server / exec），而「占住会话、让
+ * 客户端别急着发」只有 app-server 兑现得了——它才有通知客户端的通路。传 null 表示
+ * 这个宿主不提供，插件拿到的 `agent.withMaintenance` 因此是 undefined。
+ */
+export function configureAgentMaintenance(
+  handler: (<T>(window: PluginMaintenanceWindow, task: () => Promise<T>) => Promise<T>) | null,
+): void {
+  maintenanceHandler = handler;
 }
 
 export function registerIterationRewrite(pluginId: string, handler: PluginIterationRewriter): Disposable {
@@ -117,5 +135,11 @@ function createAgentHandle(agent: AgentRuntime, pluginId: string, signal?: Abort
     setState: (value: unknown) => { if (!signal?.aborted) agent.setPluginState(pluginId, value); },
     compact: (messages: unknown[], options: PluginCompactOptions) =>
       compactAgentMessages(agent, messages, { ...options, signal }),
+    ...(maintenanceHandler
+      ? {
+          withMaintenance: <T>(window: PluginMaintenanceWindow, task: () => Promise<T>) =>
+            maintenanceHandler!<T>(window, task),
+        }
+      : {}),
   };
 }

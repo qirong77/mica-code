@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -6,7 +6,7 @@ import { micaCommands } from '@packages/mica-commands/index.js';
 import { HookRegistry } from '@packages/mica-plugin/HookRegistry.js';
 import { createPluginLlmApi, type PluginContext, type PluginModelRequest } from '@packages/mica-plugin/index.js';
 import setupMemory from '../memory/index.js';
-import { projectSlug } from '../memory/store.js';
+import { resolveRepoIdentity } from '../memory/repo.js';
 import setupRename from './index.js';
 
 const directories: string[] = [];
@@ -17,6 +17,17 @@ afterEach(() => {
 function harness() {
   const home = mkdtempSync(join(tmpdir(), 'mica-plugin-owner-'));
   directories.push(home);
+  // 记忆按仓库归档，所以两个会话要落在两个真实存在的仓库目录里——
+  // 只是字符串 cwd 解析不出仓库身份，也就没有项目作用域可写。
+  const originDir = join(home, 'repos', 'origin');
+  const selectedDir = join(home, 'repos', 'selected');
+  for (const [dir, remote] of [
+    [originDir, 'git@example.test:team/origin.git'],
+    [selectedDir, 'git@example.test:team/selected.git'],
+  ] as const) {
+    mkdirSync(join(dir, '.git'), { recursive: true });
+    writeFileSync(join(dir, '.git', 'config'), `[remote "origin"]\n\turl = ${remote}\n`, 'utf-8');
+  }
   const owner = {};
   const hooks = new HookRegistry();
   const originSettings = {
@@ -56,8 +67,8 @@ function harness() {
     session: {
       describe: (value?: unknown) =>
         value === owner
-          ? { id: 'origin', title: '旧标题', cwd: '/repo/origin', titleSource: 'derived' }
-          : { id: 'selected', title: '当前会话', cwd: '/repo/selected', titleSource: 'manual' },
+          ? { id: 'origin', title: '旧标题', cwd: originDir, titleSource: 'derived' }
+          : { id: 'selected', title: '当前会话', cwd: selectedDir, titleSource: 'manual' },
       messages: (value?: unknown) =>
         value === owner
           ? Array.from({ length: 10 }, (_, index) => ({
@@ -89,6 +100,8 @@ function harness() {
   } as unknown as PluginContext;
   return {
     home,
+    originSlug: resolveRepoIdentity(originDir)?.slug,
+    selectedSlug: resolveRepoIdentity(selectedDir)?.slug,
     owner,
     hooks,
     originSettings,
@@ -105,12 +118,10 @@ describe('background plugin session ownership', () => {
     const fixture = harness();
     setupMemory(fixture.context);
     await fixture.hooks.emit('turn:after', { outcome: 'completed', owner: fixture.owner });
-    const project = join(fixture.home, 'memory', 'projects', projectSlug('/repo/origin'), 'MEMORY.md');
+    const project = join(fixture.home, 'memory', 'projects', `${fixture.originSlug}.md`);
     await vi.waitFor(() => expect(existsSync(project)).toBe(true));
     expect(fixture.requests[0]).toMatchObject({ owner: fixture.owner, model: 'origin-model' });
-    expect(existsSync(join(fixture.home, 'memory', 'projects', projectSlug('/repo/selected'), 'MEMORY.md'))).toBe(
-      false,
-    );
+    expect(existsSync(join(fixture.home, 'memory', 'projects', `${fixture.selectedSlug}.md`))).toBe(false);
     fixture.dispose();
   });
 

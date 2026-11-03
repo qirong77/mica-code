@@ -185,12 +185,14 @@ export const MICA_CAPABILITY_NOTIFICATIONS = {
 } as const;
 
 /**
- * Mica extension notification: the host is about to occupy the session outside a
- * turn (idle history compaction). Compaction is synchronous, so while it runs the
- * host cannot read the next `turn/start` off stdin — a send in that window would
- * just sit in the pipe with no feedback at all. The host therefore announces it
- * first: the client queues those sends locally (visible, recallable) and replays
- * them once the host reports `active: false`.
+ * Mica extension notification: the host is occupying the session for a maintenance
+ * window — idle history compaction, or the model compaction a plugin runs at an
+ * iteration boundary inside a turn. Either way the history the user is typing
+ * against is being rewritten, so a send during that window would land in the
+ * request that is being replaced (or, when compaction is synchronous, just sit in
+ * the pipe with no feedback at all). The host therefore announces the window
+ * first: the client holds those sends in its own queue (visible, recallable) and
+ * replays them once the host reports `active: false`.
  */
 export const MICA_HOST_NOTIFICATIONS = {
   maintenance: 'mica/host/maintenance',
@@ -200,8 +202,10 @@ export const MICA_HOST_NOTIFICATIONS = {
 export type MicaHostMaintenance = {
   threadId: string | null;
   active: boolean;
-  /** 宿主在轮次之外做什么：目前只有空闲压缩。 */
-  reason: 'compaction';
+  /** 宿主占着会话做什么：目前只有压缩（空闲压缩与轮内模型压缩同一个原因）。 */
+  reason: string;
+  /** 给人看的短名词（`active: true` 时才带），客户端拼成「<label>结束后发送」。 */
+  label?: string;
 };
 
 /**

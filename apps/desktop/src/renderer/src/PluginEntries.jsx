@@ -98,7 +98,7 @@ function PluginHeaderEntry({ entry, onOpenPage, session }) {
       data-plugin-entry-card
       // 卡片的控件与设置页是同一批（`@mica-config-ui/web`），样式限定在这个作用域里；
       // 由宿主统一套上，插件不必各自再包一层。
-      className="mica-config-ui is-embed rounded-md border border-line p-3.5 shadow-2xl"
+      className="mica-config-ui is-embed rounded-md border border-line p-3.5"
       style={{ width: entry.cardWidth ?? CARD_WIDTH, maxWidth: 'calc(100vw - 24px)' }}
     >
       <Card api={api} onClose={() => setOpen(false)} />
@@ -172,7 +172,7 @@ function PluginEntryRow({ entry, onOpenPage, session }) {
   const card = Card ? (
     <section
       data-plugin-entry-card
-      className="mica-config-ui is-embed rounded-md border border-line p-3.5 shadow-2xl"
+      className="mica-config-ui is-embed rounded-md border border-line p-3.5"
       style={{ width: entry.cardWidth ?? CARD_WIDTH, maxWidth: 'calc(100vw - 24px)' }}
     >
       <Card api={api} onClose={closeRow} />

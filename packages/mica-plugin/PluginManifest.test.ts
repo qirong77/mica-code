@@ -200,6 +200,20 @@ describe('parsePluginManifest desktop panel', () => {
     if (!bad.ok) expect(bad.error).toContain('display');
   });
 
+  it('reads the entry action so a click runs it instead of opening the drawer', () => {
+    const result = parsePluginManifest(base({ desktop: { panel: { label: '手机访问', open: 'show' } } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPanel?.open).toBe('show');
+
+    const noAction = parsePluginManifest(base({ desktop: { panel: { label: '手机访问' } } }));
+    expect(noAction.ok).toBe(true);
+    if (noAction.ok) expect(noAction.manifest.desktopPanel?.open).toBeUndefined();
+
+    const bad = parsePluginManifest(base({ desktop: { panel: { open: 'Show It' } } }));
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain('desktop.panel.open');
+  });
+
   it('dedupes roles so the same role cannot render twice', () => {
     const result = parsePluginManifest(base({ desktop: { panel: { roles: ['需求开发', '需求开发'] } } }));
     expect(result.ok).toBe(true);

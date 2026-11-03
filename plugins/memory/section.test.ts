@@ -1,209 +1,195 @@
 import { describe, expect, it } from 'vitest';
-import { MemorySnapshotCache, formatMemorySection, formatMemoryStatus, type MemorySnapshotLoader } from './section.js';
-import type { MemoryStoreSnapshot, MemoryTarget } from './store.js';
+import { MemorySnapshotCache, clampEntries, formatMemorySection, formatMemoryStatus } from './section.js';
+import type { MemoryStoreSnapshot } from './store.js';
+import type { MemoryScope } from './scope.js';
+
+const PROFILE: MemoryScope = { kind: 'profile' };
 
 function snapshot(overrides: Partial<MemoryStoreSnapshot> = {}): MemoryStoreSnapshot {
+  const entries = overrides.entries ?? ['一条记忆'];
   return {
-    target: 'memory',
-    path: '/home/.mica/memory/MEMORY.md',
-    label: 'memory/MEMORY.md',
-    entries: ['项目用 bun 跑测试'],
-    chars: 8,
-    limit: 2200,
-    projectDir: null,
+    scope: PROFILE,
+    key: 'profile',
+    title: '用户档案',
+    path: '/tmp/profile.md',
+    label: 'PROFILE.md',
+    entries,
+    chars: entries.join('\n\n').length,
+    budget: 1200,
     ...overrides,
   };
 }
 
-function loaderFor(load: (target: MemoryTarget) => MemoryStoreSnapshot): MemorySnapshotLoader {
-  return {
-    loadAll: () => [load('user'), load('memory'), load('project')],
-    loadTarget: (target) => load(target),
-  };
-}
-
 describe('formatMemorySection', () => {
-  it('explains that memory is data, not instructions, and names the tool', () => {
-    const text = formatMemorySection([snapshot()]);
-
-    expect(text).toContain('## 持久记忆');
-    expect(text).toContain('不是指令');
-    expect(text).toContain('`memory` 工具');
-    expect(text).toContain('- 项目用 bun 跑测试');
+  it('renders nothing at all when no applicable layer has entries', () => {
+    // 「当前没有记忆」这种占位句会在每个一次性会话里白烧 token。
+    expect(formatMemorySection([])).toBe('');
+    expect(formatMemorySection([snapshot({ entries: [], chars: 0 })])).toBe('');
   });
 
-  it('still renders guidance when every store is empty', () => {
-    const text = formatMemorySection([
-      snapshot({ target: 'user', entries: [], chars: 0 }),
-      snapshot({ entries: [], chars: 0 }),
+  it('renders the layers that apply and nothing else', () => {
+    const section = formatMemorySection([
+      snapshot({ title: '用户档案', entries: ['用户常用中文'] }),
+      snapshot({ title: '项目记忆 · mica-code', key: 'project:mica', entries: ['测试用 bun run test'] }),
     ]);
 
-    expect(text).toContain('当前还没有保存任何记忆');
-    expect(text).toContain('`memory` 工具');
-    expect(text).not.toContain('###');
+    expect(section).toContain('用户档案');
+    expect(section).toContain('用户常用中文');
+    expect(section).toContain('项目记忆 · mica-code');
+    expect(section).toContain('测试用 bun run test');
+    expect(section).not.toContain('领域记忆');
   });
 
-  it('shows usage and the project directory for project memory', () => {
-    const text = formatMemorySection([
-      snapshot({ target: 'user', entries: ['用户偏好中文'], chars: 6, limit: 1375 }),
-      snapshot({ target: 'project', entries: ['monorepo 用 bun workspace'], chars: 12, projectDir: '/repo/mica' }),
+  it('skips a layer whose store is empty instead of printing an empty heading', () => {
+    const section = formatMemorySection([
+      snapshot({ title: '用户档案', entries: ['用户常用中文'] }),
+      snapshot({ title: '领域记忆 · 租车', key: 'domain:zuche', entries: [] }),
     ]);
 
-    expect(text).toContain('### 用户档案 · 0% · 6/1375 字符');
-    expect(text).toContain('### 项目记忆（/repo/mica） · 1% · 12/2200 字符');
-    expect(text).toContain('- monorepo 用 bun workspace');
+    expect(section).toContain('用户档案');
+    expect(section).not.toContain('领域记忆');
   });
 
-  it('indents multi-line entries so the markdown list stays intact', () => {
-    const text = formatMemorySection([snapshot({ entries: ['第一行\n第二行'] })]);
+  it('keeps pinned entries ahead of unpinned ones', () => {
+    const section = formatMemorySection([snapshot({ entries: ['普通一', '! 置顶这条', '普通二'] })]);
 
-    expect(text).toContain('- 第一行\n  第二行');
+    const lines = section.split('\n');
+    const pinned = lines.findIndex((line) => line.includes('置顶这条'));
+    const plain = lines.findIndex((line) => line.includes('普通一'));
+    expect(pinned).toBeGreaterThan(-1);
+    expect(pinned).toBeLessThan(plain);
   });
 
-  it('clamps a hand-edited store to its budget and says how much was omitted', () => {
-    // 工具写入有预算校验，但用户可以直接编辑 markdown：超出部分不能每个请求都付一次。
-    const entries = ['甲'.repeat(30), '乙'.repeat(30), '丙'.repeat(30)];
-    const text = formatMemorySection([snapshot({ entries, chars: 96, limit: 40, label: 'memory/MEMORY.md' })]);
+  it('hides the pin marker from the rendered text', () => {
+    const section = formatMemorySection([snapshot({ entries: ['! 置顶这条'] })]);
 
-    expect(text).toContain('超出预算，已省略');
-    expect(text).toContain('甲'.repeat(30));
-    expect(text).not.toContain('丙'.repeat(30));
+    expect(section).toContain('- 置顶这条');
+    expect(section).not.toContain('- ! 置顶这条');
   });
 
-  it('clips a single oversized entry instead of dropping the whole store', () => {
-    const text = formatMemorySection([snapshot({ entries: ['长'.repeat(100)], chars: 100, limit: 20 })]);
+  it('never mentions the write workflow', () => {
+    // 写法属于工具描述；注入段落只放事实，否则每个会话都要为一段说明书付 token。
+    const section = formatMemorySection([snapshot()]);
 
-    expect(text).toContain('- 长');
-    expect(text).toContain('…');
-    expect(text).toContain('超出预算，已截断条目');
-    expect(text).not.toContain('长'.repeat(21));
+    expect(section).not.toContain('memory 工具');
+    expect(section).not.toContain('三个月后');
+  });
+
+  it('indents continuation lines so multi-line entries stay one list item', () => {
+    const section = formatMemorySection([snapshot({ entries: ['第一行\n第二行'] })]);
+
+    expect(section).toContain('- 第一行\n  第二行');
+  });
+
+  it('reports how many earlier entries were left out', () => {
+    const entries = ['a'.repeat(60), 'b'.repeat(60), 'c'.repeat(60)];
+    const section = formatMemorySection([snapshot({ entries, budget: 70 })]);
+
+    expect(section).toContain('另有 2 条更早的未展示');
+    expect(section).not.toContain('b'.repeat(60));
+  });
+});
+
+describe('clampEntries', () => {
+  it('keeps everything when the budget is large enough', () => {
+    expect(clampEntries(snapshot({ entries: ['a', 'b'], budget: 100 }))).toEqual({
+      entries: ['a', 'b'],
+      dropped: 0,
+      clipped: false,
+    });
+  });
+
+  it('clips a single entry that alone exceeds the budget', () => {
+    const result = clampEntries(snapshot({ entries: ['x'.repeat(200)], budget: 50 }));
+
+    expect(result.clipped).toBe(true);
+    expect(result.entries[0]).toHaveLength(50);
+    expect(result.entries[0]?.endsWith('…')).toBe(true);
+  });
+
+  it('counts the separator cost between entries', () => {
+    // 两条各 30 字符、预算 61：加上分隔的 2 字符刚好放不下第二条。
+    const result = clampEntries(snapshot({ entries: ['a'.repeat(30), 'b'.repeat(30)], budget: 61 }));
+    expect(result.entries).toHaveLength(1);
+    expect(result.dropped).toBe(1);
+  });
+
+  it('does not depend on the pin flag for ordering stability', () => {
+    const entries = ['! pinned', 'one', 'two', 'three'];
+    const result = clampEntries(snapshot({ entries, budget: 1_000 }));
+    expect(result.entries).toEqual(['! pinned', 'one', 'two', 'three']);
   });
 });
 
 describe('MemorySnapshotCache', () => {
-  it('retains the frozen user and memory snapshot when loading a different project fails', () => {
+  it('returns the cached snapshot while the signature is unchanged', () => {
     const cache = new MemorySnapshotCache();
-    const initial = cache.get(
-      'session-a',
-      '/repo/old',
-      loaderFor((target) => snapshot({ target, entries: ['frozen'] })),
-    );
-    expect(() =>
-      cache.get('session-a', '/repo/new', {
-        loadAll: () => [],
-        loadTarget: () => {
-          throw new Error('temporary read failure');
-        },
-      }),
-    ).toThrow('temporary read failure');
-    expect(
-      cache.get(
-        'session-a',
-        '/repo/old',
-        loaderFor(() => snapshot({ entries: ['changed'] })),
-      ),
-    ).toBe(initial);
-  });
-
-  it('keeps active snapshots frozen through frequent rendering and session eviction', () => {
-    const cache = new MemorySnapshotCache();
-    let reads = 0;
-    const loader = loaderFor((target) => {
-      reads += 1;
-      return snapshot({ target });
-    });
-    const frozen = cache.get('active', '/repo', loader);
-    for (let index = 0; index < 2_000; index += 1) {
-      cache.get(`other-${index}`, '/repo', loader);
-      expect(cache.get('active', '/repo', loader)).toBe(frozen);
-    }
-    expect(cache.size).toBe(32);
-    expect(reads).toBe(6_003);
-  });
-
-  it('freezes the snapshot per key until it is invalidated', () => {
-    const cache = new MemorySnapshotCache();
-    let version = 1;
-
-    const first = cache.get(
-      'session-a',
-      null,
-      loaderFor(() => snapshot({ entries: [`v${version}`] })),
-    );
-    version = 2;
-    const second = cache.get(
-      'session-a',
-      null,
-      loaderFor(() => snapshot({ entries: [`v${version}`] })),
-    );
-
-    expect(first).toBe(second);
-    expect(second[0]?.entries).toEqual(['v1']);
-
-    cache.invalidate('session-a');
-    const third = cache.get(
-      'session-a',
-      null,
-      loaderFor(() => snapshot({ entries: [`v${version}`] })),
-    );
-    expect(third[0]?.entries).toEqual(['v2']);
-  });
-
-  it('keeps separate snapshots per session and evicts the oldest', () => {
-    const cache = new MemorySnapshotCache();
-    const loader = loaderFor(() => snapshot());
-    cache.get('a', null, loader);
-    cache.get('b', null, loader);
-    expect(cache.size).toBe(2);
-
-    for (let index = 0; index < 40; index += 1) cache.get(`key-${index}`, null, loader);
-    expect(cache.size).toBe(32);
-  });
-
-  it('reloads only project memory when the working directory changes', () => {
-    const cache = new MemorySnapshotCache();
-    let project = '旧仓库约定';
-
-    const loader: MemorySnapshotLoader = {
-      loadAll: () => [
-        snapshot({ target: 'user', entries: ['用户偏好中文'] }),
-        snapshot({ target: 'memory', entries: ['环境：macOS'] }),
-        snapshot({ target: 'project', entries: [project], projectDir: '/repo/old' }),
-      ],
-      loadTarget: (target) =>
-        target === 'project' ? snapshot({ target, entries: [project], projectDir: '/repo/new' }) : snapshot({ target }),
+    let loads = 0;
+    const loader = {
+      load: () => {
+        loads += 1;
+        return [snapshot()];
+      },
     };
 
-    const before = cache.get('session-a', '/repo/old', loader);
-    project = '新仓库约定';
-    const after = cache.get('session-a', '/repo/new', loader);
+    cache.get('session-1', 'mica-code', loader, [PROFILE]);
+    cache.get('session-1', 'mica-code', loader, [PROFILE]);
 
-    expect(before.find((item) => item.target === 'project')?.entries).toEqual(['旧仓库约定']);
-    expect(after.find((item) => item.target === 'project')?.entries).toEqual(['新仓库约定']);
-    // 其余两块保持冻结：中途写进去的记忆本轮不出现。
-    expect(after.find((item) => item.target === 'user')?.entries).toEqual(['用户偏好中文']);
-    expect(after.map((item) => item.target)).toEqual(['user', 'memory', 'project']);
+    expect(loads).toBe(1);
   });
 
-  it('drops project memory when the session leaves every working directory', () => {
+  it('reloads when the scope signature changes', () => {
+    // `/cd` 到另一个仓库之后，注入的项目记忆必须跟着换。
     const cache = new MemorySnapshotCache();
-    const loader = loaderFor((target) =>
-      target === 'project'
-        ? snapshot({ target, entries: ['仓库约定'], projectDir: '/repo/mica' })
-        : snapshot({ target, entries: [], chars: 0 }),
-    );
+    let loads = 0;
+    const loader = {
+      load: () => {
+        loads += 1;
+        return [snapshot({ entries: [`load-${loads}`] })];
+      },
+    };
 
-    cache.get('session-a', '/repo/mica', loader);
-    const after = cache.get('session-a', null, loader);
+    expect(cache.get('session-1', 'mica-code', loader, [PROFILE])[0]?.entries).toEqual(['load-1']);
+    expect(cache.get('session-1', 'mica-code', loader, [PROFILE])[0]?.entries).toEqual(['load-1']);
+    expect(cache.get('session-1', 'other-repo', loader, [PROFILE])[0]?.entries).toEqual(['load-2']);
+  });
 
-    expect(after.map((item) => item.target)).toEqual(['user', 'memory']);
+  it('keeps sessions apart', () => {
+    const cache = new MemorySnapshotCache();
+    const first = { load: () => [snapshot({ entries: ['a'] })] };
+    const second = { load: () => [snapshot({ entries: ['b'] })] };
+
+    cache.get('session-1', 'sig', first, [PROFILE]);
+    expect(cache.get('session-2', 'sig', second, [PROFILE])[0]?.entries).toEqual(['b']);
+  });
+
+  it('drops a single session on invalidate and everything without a key', () => {
+    const cache = new MemorySnapshotCache();
+    const loader = { load: () => [snapshot()] };
+    cache.get('a', 'sig', loader, [PROFILE]);
+    cache.get('b', 'sig', loader, [PROFILE]);
+
+    cache.invalidate('a');
+    expect(cache.size).toBe(1);
+    cache.invalidate();
+    expect(cache.size).toBe(0);
+  });
+
+  it('evicts the oldest session past the cap', () => {
+    const cache = new MemorySnapshotCache();
+    const loader = { load: () => [snapshot()] };
+    for (let index = 0; index < 40; index += 1) cache.get(`session-${index}`, 'sig', loader, [PROFILE]);
+
+    expect(cache.size).toBe(32);
   });
 });
 
 describe('formatMemoryStatus', () => {
-  it('prints one line per store with usage and path', () => {
-    const text = formatMemoryStatus([snapshot({ target: 'user', entries: [], chars: 0, label: 'memory/USER.md' })]);
+  it('reports count, pin count and usage per layer', () => {
+    const status = formatMemoryStatus([snapshot({ entries: ['! a', 'b'], chars: 10, budget: 100 })]);
 
-    expect(text).toBe('用户档案（user）：0 条 · 0/2200 字符（0%）· memory/USER.md');
+    expect(status).toContain('用户档案：2 条（1 条 pin）');
+    expect(status).toContain('10/100 字符（10%）');
+    expect(status).toContain('PROFILE.md');
   });
 });

@@ -15,7 +15,7 @@ import {
   matchesConversationQuery,
   splitConversationRuns,
 } from '../conversationView.js';
-import { Segmented } from './Ui.js';
+import { Button, Segmented } from './Ui.js';
 import { appIcons } from '../icons.js';
 import { formatCharCount } from '../format.js';
 import type { ConfigWebConversationItem } from '../../src/shared/types.js';
@@ -249,9 +249,9 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
               {loadingMore ? (
                 <span>正在加载更早的记录…</span>
               ) : (
-                <button type="button" className="ui-button" onClick={() => void loadEarlier()}>
+                <Button fullWidth onClick={() => void loadEarlier()}>
                   加载更早（已显示 {items.length} / {total}）
-                </button>
+                </Button>
               )}
             </div>
           ) : null}

@@ -15,13 +15,13 @@ describe('settingsFromValues', () => {
       minIntervalMinutes: DEFAULT_SETTINGS.minIntervalMinutes,
       maxMessages: 30,
     });
-    expect(settingsFromValues({ memoryCharLimit: 'abc', minIntervalMinutes: '-5' }).budgets.memory).toBe(2200);
+    expect(settingsFromValues({ domainCharLimit: 'abc', minIntervalMinutes: '-5' }).budgets.domain).toBe(2400);
     expect(settingsFromValues({ minIntervalMinutes: '-5' }).minIntervalMinutes).toBe(0);
   });
 
   it('clamps budgets to the range the settings page can express', () => {
-    expect(settingsFromValues({ userCharLimit: '1' }).budgets.user).toBe(200);
-    expect(settingsFromValues({ userCharLimit: '999999' }).budgets.user).toBe(20_000);
+    expect(settingsFromValues({ profileCharLimit: '1' }).budgets.profile).toBe(200);
+    expect(settingsFromValues({ profileCharLimit: '999999' }).budgets.profile).toBe(20_000);
   });
 
   it('expands ${VAR} in the curator key so the secret can live in the environment', () => {

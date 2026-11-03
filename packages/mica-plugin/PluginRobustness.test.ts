@@ -48,6 +48,16 @@ describe('plugin health', () => {
     expect(() => writePluginHealth('demo', { level: 'ok', message: 'x' })).not.toThrow();
     expect(readPluginHealth('demo')).toBeNull();
   });
+
+  it('drops a report written by another plugin version', () => {
+    // 上一版留下的「连不上 X」会让用户去修一个这一版可能早就不存在的问题。
+    writePluginHealth('demo', { level: 'error', message: '连不上中转机' }, { configDir, version: '1.0.0' });
+    expect(readPluginHealth('demo', { configDir, version: '1.0.0' })?.message).toBe('连不上中转机');
+    expect(readPluginHealth('demo', { configDir, version: '2.0.0' })).toBeNull();
+    // 早期报告没有版本号，同样不算这一版说的话。
+    writePluginHealth('demo', { level: 'error', message: '旧的' }, { configDir });
+    expect(readPluginHealth('demo', { configDir, version: '1.0.0' })).toBeNull();
+  });
 });
 
 function plugin(id: string, setup: MicaPlugin['setup'], requires?: MicaPlugin['manifest']): MicaPlugin {

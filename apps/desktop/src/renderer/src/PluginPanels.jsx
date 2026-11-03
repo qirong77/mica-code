@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import {
   Alert,
   Button,
+  Checkbox,
   CollapsiblePanel,
   ConfigSwitch,
   Empty,
@@ -77,6 +78,16 @@ const TAG_TONES = {
 
 /** 动作的 `tone` → 共享 `Button` 的变体；没声明的一律是行内次要动作。 */
 const BUTTON_VARIANTS = { primary: 'primary', danger: 'danger', default: 'default' }
+
+/**
+ * 弹窗里「去配置」要知道是哪个插件。
+ *
+ * 插件只声明「这里该有个跳去配置的按钮」，具体打开哪一页由页面负责——而页面要的
+ * `pluginId` 不在弹窗数据里，所以由调动作的这一侧补上（它一定知道自己在操作谁）。
+ */
+function withPluginDialog(dialog, pluginId) {
+  return pluginId ? { ...dialog, pluginId } : dialog
+}
 
 const tagTone = (tone) => TAG_TONES[tone] || 'default'
 const buttonVariant = (tone) => BUTTON_VARIANTS[tone] || 'ghost'
@@ -305,9 +316,9 @@ export function PluginQuickBar({
     }
   }, [context, items, loadMenu, loadView, nodeId])
 
-  const statusBar = panels
-    .map((panel) => statusBars[panel.id])
-    .find((entry) => entry && entry.label)
+  // 状态贴在哪一块面板上也要知道：点它进的是那块面板。
+  const statusOwner = panels.find((panel) => statusBars[panel.id]?.label) || null
+  const statusBar = statusOwner ? statusBars[statusOwner.id] : null
   // 只有状态栏没有按钮时也要画：那正是「功能开着、但不需要一个动作按钮」的形态。
   if (items.length === 0 && !statusBar) return null
 
@@ -326,7 +337,7 @@ export function PluginQuickBar({
       applyPanelResult(result, {
         onCompose,
         onLaunchSession,
-        onDialog,
+        onDialog: (dialog) => onDialog?.(withPluginDialog(dialog, panel.id)),
         onOpenPath,
         onOpenReview
       })
@@ -382,16 +393,23 @@ export function PluginQuickBar({
 
   return (
     <div className="chat-plugin-quickbar-stack">
-      {statusBar && (
-        <div className={`chat-plugin-statusbar tone-${statusBar.tone || 'muted'}`} role="status">
-          <span className="chat-plugin-statusbar-dot" aria-hidden="true" />
-          <span className="chat-plugin-statusbar-label">{statusBar.label}</span>
-          {statusBar.detail && (
-            <span className="chat-plugin-statusbar-detail">{statusBar.detail}</span>
-          )}
-        </div>
-      )}
       <div className="chat-plugin-quickbar" role="toolbar" aria-label="插件快捷操作" ref={barRef}>
+        {/* 状态与快捷键同排：输入框上方已经有附件缩略图、引用条，再为一行状态单开一层，
+            三行叠起来就把对话挤没了。它是一颗按钮——点开面板看详情。 */}
+        {statusBar && (
+          <button
+            type="button"
+            className={`chat-plugin-statusbar tone-${statusBar.tone || 'muted'}`}
+            title={`${statusBar.label}${statusBar.detail ? ` · ${statusBar.detail}` : ''} · 点开面板`}
+            onClick={() => onTogglePanel(statusOwner.id, statusBar.section || '')}
+          >
+            <span className="chat-plugin-statusbar-dot" aria-hidden="true" />
+            <span className="chat-plugin-statusbar-label">{statusBar.label}</span>
+            {statusBar.detail && (
+              <span className="chat-plugin-statusbar-detail">{statusBar.detail}</span>
+            )}
+          </button>
+        )}
         {items.map(({ panel, shortcut, key, first }) => {
           const state = shortcut.id
             ? shortcutViews[`${context}\u0000${panel.id}`]?.[shortcut.id]
@@ -647,14 +665,29 @@ function PluginPanelDock({
   }, [applyView, cwd, load, nodeId, pluginId, sessionId])
 
   const runAction = useCallback(
-    async (action, key) => {
+    async (action, key, extraValues, options = {}) => {
       setBusy(key ? `${action}:${key}` : action)
       const result = await window.mica.chat.pluginPanels
-        .action(nodeId, { pluginId, action, key, values: drafts, sessionId, cwd })
+        .action(nodeId, {
+          pluginId,
+          action,
+          key,
+          values: { ...drafts, ...extraValues },
+          sessionId,
+          cwd
+        })
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
       setBusy('')
-      applyView(result, { resetDrafts: true })
-      applyPanelResult(result, { onCompose, onLaunchSession, onDialog, onOpenPath, onOpenReview })
+      // 表格里的勾选是一次状态切换，不是提交表单：换视图时不能让用户正在填的表单归位。
+      // 插件也可以用 `keepDrafts` 说同一件事（输入停顿后的自动提交、提交失败）。
+      applyView(result, { resetDrafts: options.keepDrafts !== true && result?.keepDrafts !== true })
+      applyPanelResult(result, {
+        onCompose,
+        onLaunchSession,
+        onDialog: (dialog) => onDialog?.(withPluginDialog(dialog, pluginId)),
+        onOpenPath,
+        onOpenReview
+      })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
       // 动作可能改了插件状态（开关、连接、增删机器）：快捷栏的状态行与菜单要跟着变。
       notifyPluginPanelStatusChanged()
@@ -845,6 +878,10 @@ function PluginPanelSection({
   // 直接用 onChange 那一刻的回调会把改动前的 drafts 提交上去。
   const commitRef = useRef(commit)
   commitRef.current = commit
+  // 动作还在跑（点「连接」之后那几秒）时不要再补一次草稿提交：那会把插件刚清掉的
+  // 草稿写回去，下一次取视图看到的就还是刚才那台机器。
+  const busyRef = useRef(busy)
+  busyRef.current = Boolean(busy)
 
   useEffect(() => () => clearTimeout(commitTimer.current), [])
 
@@ -852,7 +889,10 @@ function PluginPanelSection({
     setDrafts((previous) => ({ ...previous, [key]: value }))
     if (!commit) return
     clearTimeout(commitTimer.current)
-    commitTimer.current = setTimeout(() => void commitRef.current?.(), COMMIT_DELAY_MS)
+    commitTimer.current = setTimeout(() => {
+      if (busyRef.current) return
+      void commitRef.current?.()
+    }, COMMIT_DELAY_MS)
   }
 
   const body = (
@@ -886,7 +926,8 @@ function PluginPanelSection({
 /** 一块分区的内容：只读行、条目、输入框、动作，全部落在共享 `SettingRow` 上。 */
 function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
   const hasBody = Boolean(section.text)
-  const hasRows = (section.rows?.length || 0) + (section.items?.length || 0) > 0
+  const tableRows = section.table?.rows || []
+  const hasRows = (section.rows?.length || 0) + (section.items?.length || 0) + tableRows.length > 0
   return (
     <div className="chat-plugin-rows">
       {/* 正文：一整段话（需求描述、结论）。行是「标签 — 一个值」，这里没有标签也不省略。 */}
@@ -946,6 +987,9 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
       {/* 没有正文也没有行/条目时才画空态：只有输入框的 section（加频道）也该先说明
           「现在还没有」，表单本身不算内容。 */}
       {!hasBody && !hasRows && section.empty ? <Empty description={section.empty} /> : null}
+      {tableRows.length > 0 && (
+        <PluginPanelTable table={section.table} busy={busy} runAction={runAction} />
+      )}
       {section.fields?.map((field) => (
         <SettingRow
           key={field.key}
@@ -1008,5 +1052,131 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * 一张表格：列由插件声明，行是纯数据。
+ *
+ * 动作与条目共用一条路径 —— 行按钮发 `action + key`（`key` 是行 key），勾选框发
+ * `action + key + values.check/column`。插件因此不需要知道「这次点的是第几列」。
+ */
+function PluginPanelTable({ table, busy, runAction }) {
+  const columns = table?.columns || []
+  const rows = table?.rows || []
+  const hasActions = rows.some((row) => (row.actions?.length || 0) > 0)
+  const actionsColumn = columns.find((column) => column.actions)
+  // 插件没指定按钮列时补在最右：只有编辑/删除、没有勾选框的表不必为此写一列。
+  const trailingActions = hasActions && !actionsColumn
+  return (
+    <div className="chat-plugin-table-wrap">
+      <table className="chat-plugin-table">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th
+                key={column.key}
+                className={`${column.grow ? 'is-grow' : ''}${column.actions ? ' is-actions' : ''}`.trim()}
+                scope="col"
+              >
+                {column.label}
+              </th>
+            ))}
+            {trailingActions && <th className="is-actions" scope="col" aria-label="操作" />}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              {columns.map((column) => {
+                if (column.actions) {
+                  return (
+                    <td key={column.key} className="is-actions">
+                      <PluginPanelRowActions row={row} busy={busy} runAction={runAction} />
+                    </td>
+                  )
+                }
+                const cell = row.cells?.[column.key]
+                return (
+                  <td key={column.key} className={column.grow ? 'is-grow' : ''}>
+                    <PluginPanelTableCell
+                      cell={cell}
+                      rowKey={row.key}
+                      columnKey={column.key}
+                      label={column.label}
+                      busy={busy}
+                      runAction={runAction}
+                    />
+                  </td>
+                )
+              })}
+              {trailingActions && (
+                <td className="is-actions">
+                  <PluginPanelRowActions row={row} busy={busy} runAction={runAction} />
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function PluginPanelRowActions({ row, busy, runAction }) {
+  return (row.actions || []).map((action) => (
+    <Button
+      key={action.id}
+      variant={buttonVariant(action.tone)}
+      size="compact"
+      disabled={action.disabled || Boolean(busy)}
+      loading={busy === `${action.id}:${row.key}`}
+      onClick={() => void runAction(action.id, row.key)}
+    >
+      {action.label}
+    </Button>
+  ))
+}
+
+function PluginPanelTableCell({ cell, rowKey, columnKey, label, busy, runAction }) {
+  if (!cell) return null
+  if (cell.check) {
+    return (
+      <Checkbox
+        checked={cell.check.checked}
+        label={`${label}：${rowKey}`}
+        size="compact"
+        disabled={cell.check.disabled || Boolean(busy)}
+        onChange={(next) =>
+          void runAction(
+            cell.check.action,
+            rowKey,
+            { column: columnKey, check: next ? 'true' : 'false' },
+            { keepDrafts: true }
+          )
+        }
+      />
+    )
+  }
+  const body = cell.text || cell.link || '—'
+  if (cell.link && isOpenableLink(cell.link)) {
+    return (
+      <button
+        type="button"
+        className={`chat-plugin-link${cell.tone ? ` tone-${cell.tone}` : ''}`}
+        title={body}
+        onClick={() => window.mica.terminal.openExternal(cell.link).catch(() => {})}
+      >
+        {body}
+      </button>
+    )
+  }
+  return (
+    <span
+      className={`chat-plugin-cell${cell.tone ? ` tone-${cell.tone}` : ''}`}
+      title={cell.text || undefined}
+    >
+      {cell.text || ''}
+    </span>
   )
 }

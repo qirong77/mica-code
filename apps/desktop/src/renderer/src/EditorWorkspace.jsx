@@ -20,6 +20,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     // 由页面地址的 `?base=&head=` 带进来（插件点一条 `项目 · 分支` 时打开的那种页面）。
     compare = null,
     onCompareBaseChange,
+    onCompareHeadChange,
     onCornerResizeStart,
     onCwdChange,
     onGitChanged
@@ -39,10 +40,11 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
   const [pathBusy, setPathBusy] = useState(false)
   const [localRecent, setLocalRecent] = useState([])
   const mobile = useIsMobile()
-  const { git, compareBase, refresh, setCompareBase } = useGitWorkspace(cwd, {
-    enabled: visible,
-    compare
-  })
+  const { git, compareBase, compareHead, refresh, setCompareBase, setCompareHead } =
+    useGitWorkspace(cwd, {
+      enabled: visible,
+      compare
+    })
 
   const setFilesRef = useCallback(
     (node) => {
@@ -157,8 +159,9 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
         gitBranch={branch || null}
         gitCompareBase={compareBase}
         gitCompareError={git.compareError}
-        gitCompareHead={compare?.head || null}
+        gitCompareHead={compareHead}
         onGitCompareBaseChange={compare?.head ? onCompareBaseChange : setCompareBase}
+        onGitCompareHeadChange={compare?.head ? onCompareHeadChange : setCompareHead}
         onRefreshGit={() => refresh({ quiet: true, refresh: true })}
         onOpenTerminal={openTerminalAt}
       />

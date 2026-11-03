@@ -16,7 +16,7 @@
 - 维护启停状态（`$MICA_HOME/plugins-state.json`）：停用的插件照常注册、装配阶段跳过；常驻宿主经 `pluginStateSync` 在每轮开始时对齐名单，卸载 / 重新装配单个插件而不必重开会话。
 - 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。字段标 `perSession: true` 表示「这条会话可以不一样」：会话覆盖存在快照的 `pluginSessionSettings`（只存改过的键），插件改用 `ctx.sessionSettings.get()` 读合并后的生效值，`overrides()` / `set()` / `clear()` 改本会话，需要 `requires` 里有 `sessionSettings`。
 - 插件日志：`ctx.logger` 自带文件输出，落在 `resolveLogDir()`（与运行时日志同目录），按天分片、按大小轮转。
-- 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 出错」。只有插件自己的状态写这里；缺宿主能力由 manager 记 `plugin-status.json` 的 `skipped`（见 `PluginManager.setupAll`），不进健康文件。
+- 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 运行出错」。只有插件自己的状态写这里；缺宿主能力由 manager 记 `plugin-status.json` 的 `skipped`（见 `PluginManager.setupAll`），不进健康文件。记录带插件版本，读的一方传 `version` 就只认这一版写的（升级后旧结论自动失效）。
 - 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
 - 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。

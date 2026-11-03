@@ -63,7 +63,7 @@ describe('resolveIdleReap', () => {
     const entries = [
       entry('keep', host(NOW)),
       entry('turning', host(stale, { running: true })),
-      entry('compacting', host(stale, { compacting: true })),
+      entry('maintaining', host(stale, { maintenance: { reason: 'compaction', label: '自动压缩' } })),
       entry('aborting', host(stale, { aborting: true })),
       entry('turn-id', host(stale, { currentTurnId: 't-1' }))
     ]

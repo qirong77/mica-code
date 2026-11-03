@@ -626,6 +626,13 @@ html[data-theme='light'] .mica-config-ui {
     font-size: var(--text-aux);
   }
 
+  /* 左侧叠一枚图标（放大镜）：给图标让出位置。
+     这条规则必须在 .text-input 里写——它不在 @layer 中，插件 / 渲染层套的
+     Tailwind pl-* 打不过它，写在调用处会被这里的 padding 覆盖掉，图标就压在占位文字上。 */
+  .text-input.text-input-with-icon {
+    padding-left: 24px;
+  }
+
   /* 密集工具栏 / 插件页面顶栏里的尺寸：与 24px 的下拉、日期字段等高。 */
   .ui-button.ui-button-compact {
     min-width: 24px;
@@ -653,6 +660,7 @@ html[data-theme='light'] .mica-config-ui {
 
   /* 勾选框：外观跟主题走，键盘与可访问性仍用原生 input。 */
   .ui-checkbox {
+    position: relative;
     width: 14px;
     height: 14px;
     margin: 0;
@@ -677,27 +685,31 @@ html[data-theme='light'] .mica-config-ui {
     background: var(--accent);
   }
 
-  /* 勾与横线自绘：不再依赖各平台的系统字形（macOS 是系统蓝，深色界面上很扎眼）。 */
+  /* 勾与横线自绘：不再依赖各平台的系统字形（macOS 是系统蓝，深色界面上很扎眼）。
+     勾是旋转过的图形，必须绝对定位居中：按块级流式布局（margin auto）排会整体偏高，
+     旋转后的墨迹又偏下，所以再补一点向上的光学校正。 */
   .ui-checkbox:checked::after {
     content: '';
-    display: block;
-    box-sizing: border-box;
+    position: absolute;
+    top: 50%;
+    left: 50%;
     width: 4px;
     height: 8px;
-    margin: -1px auto 0;
     border: solid #fff;
     border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
+    transform: translate(-50%, calc(-50% - 1.5px)) rotate(45deg);
   }
 
   .ui-checkbox:indeterminate::after {
     content: '';
-    display: block;
+    position: absolute;
+    top: 50%;
+    left: 50%;
     width: 8px;
     height: 2px;
-    margin: 5px auto 0;
     border-radius: 1px;
     background: #fff;
+    transform: translate(-50%, -50%);
   }
 
   .ui-checkbox:disabled {
@@ -715,14 +727,13 @@ html[data-theme='light'] .mica-config-ui {
   .ui-checkbox.is-compact:checked::after {
     width: 3px;
     height: 6px;
-    margin-top: -1px;
     border-width: 0 1.5px 1.5px 0;
+    transform: translate(-50%, calc(-50% - 1px)) rotate(45deg);
   }
 
   .ui-checkbox.is-compact:indeterminate::after {
     width: 6px;
     height: 2px;
-    margin-top: 4px;
   }
 
   .save-status {
@@ -2322,7 +2333,8 @@ html[data-theme='light'] .mica-config-ui {
   }
 
   /* 三个 pane（对话记录 / 系统提示词 / 原始文件）共用一条工具栏：左边事实、右边动作。
-     字号与行高对齐，切页签时这一行不会上下跳。 */
+     字号与行高对齐，切页签时这一行不会上下跳；底边一条分隔线把它和下面的正文分开，
+     否则控件与正文挤在同一层，看不出「这行管什么」。 */
   .session-pane-toolbar {
     display: flex;
     flex: none;
@@ -2331,6 +2343,8 @@ html[data-theme='light'] .mica-config-ui {
     justify-content: space-between;
     gap: 8px 12px;
     min-width: 0;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--line);
     color: var(--text-faint);
     font-size: 12px;
   }
@@ -2385,34 +2399,49 @@ html[data-theme='light'] .mica-config-ui {
     line-height: 1.65;
   }
 
-  /* 占比条：一条堆叠条，宽度按体积分配，点一格就是选中那一段。 */
+  /* 占比条：一条堆叠条，宽度按体积分配，点一格就是选中那一段。
+     高度、最小宽度、以及选中态的留白都是为了「点得到、看得准」：
+     按占比算下来一段可能只有两三个像素，鼠标根本落不上去。 */
   .prompt-share {
     display: flex;
     flex: none;
-    height: 10px;
+    box-sizing: border-box;
+    height: 18px;
+    /* 左右各留 2px：选中态的内缩留白贴着条形两端也不能被 overflow 吃掉。 */
+    padding: 2px;
     gap: 2px;
     overflow: hidden;
   }
 
   .prompt-share-seg {
-    min-width: 3px;
+    box-sizing: border-box;
+    min-width: 18px;
     padding: 0;
     border: 0;
     border-radius: 999px;
     background: var(--text-faint);
     cursor: pointer;
-    opacity: 0.55;
+    opacity: 0.6;
     transition: opacity 100ms ease;
   }
 
-  .prompt-share-seg:hover,
+  .prompt-share-seg:hover {
+    opacity: 1;
+  }
+
+  /* 选中态靠「左右各让 2px」把自己从相邻色块里摘出来，不套对比色描边：
+     描边用的中性色随主题反色（亮色近黑、暗色近白），压在这种十几个像素的色块上
+     就是一块脏色叠在数据色上——而这条条形本身表达的就是颜色。让位用的是透明
+     边框 + 裁切，所以颜色不变、高度不变（不缩成一颗更小的药丸），也在 overflow
+     之外不吃亏。 */
   .prompt-share-seg.is-selected {
+    border-inline: 2px solid transparent;
+    background-clip: padding-box;
     opacity: 1;
   }
 
   .prompt-share-seg:focus-visible {
-    outline: 1px solid var(--blue);
-    outline-offset: 1px;
+    outline: 1.5px solid var(--accent);
   }
 
   .prompt-share-0 {
@@ -2994,6 +3023,13 @@ html[data-theme='light'] .mica-config-ui {
     gap: 10px;
   }
 
+  /* 右侧动作与左边 24px 的筛选、搜索同高：贴着同一行中线，不靠字号自己撑。 */
+  .conversation-toolbar-tail .ui-link-button {
+    height: 24px;
+    padding: 0 4px;
+    font-size: var(--text-aux);
+  }
+
   .conversation-search {
     position: relative;
     display: flex;
@@ -3017,7 +3053,8 @@ html[data-theme='light'] .mica-config-ui {
     border-radius: var(--radius-md);
     background: var(--bg);
     color: var(--text);
-    font-size: 11.5px;
+    /* 与筛选条的字号一致：一行里两种字号，光标和基线都会看起来是歪的。 */
+    font-size: var(--text-aux);
   }
 
   .conversation-search input::placeholder {
@@ -4715,7 +4752,9 @@ html[data-theme='light'] .mica-config-ui {
   }
 
   .config-segment {
-    height: calc(var(--control-h) - 6px);
+    /* 填满外框的内容区，而不是按 --control-h 反推：compact 外框只有 24px，
+       减完边框与内边距只剩 20px，写死 24px 的选项会从框里冒出来 4px。 */
+    height: 100%;
     padding: 0 12px;
     border: 0;
     border-radius: var(--radius-sm);
@@ -5328,7 +5367,8 @@ html[data-theme='light'] .mica-config-ui {
     -webkit-line-clamp: 2;
   }
 
-  /* 脚注一行：左边是运行结论，右边是「几项设置 / 几项运行条件」。
+  /* 脚注一行：左边是「不是已加载」的运行结论（正常加载时这一段整行不出现），右边是
+      「几项设置 / 几项运行条件」。
      不换行——换行会让各卡片脚注高低不一，网格看起来就像没对齐。 */
   .plugin-card-foot {
     display: flex;
@@ -5899,6 +5939,91 @@ html[data-theme='light'] .mica-config-ui {
 
   .plugin-meta-row dd a:hover {
     text-decoration: underline;
+  }
+
+  /*
+   * 信息表里的路径（插件日志）：看起来是普通文字，悬停才显出可点——这一列本来就窄，
+   * 常驻下划线会把每一条路径变成噪声。
+   *
+   * 按钮清成行内文字（浏览器默认的边框 / 底色 / 内边距都不能留），浮层用视口坐标
+   * 绝对定位：所在那一行是单行省略号（`overflow: hidden`），相对定位的弹层会被裁掉。
+   */
+  .path-link-wrap {
+    display: inline-flex;
+    max-width: 100%;
+    vertical-align: bottom;
+  }
+
+  .path-link {
+    max-width: 100%;
+    overflow: hidden;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .path-link:hover {
+    text-decoration: underline;
+  }
+
+  .path-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  .path-menu {
+    position: fixed;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    box-sizing: border-box;
+    padding: 4px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+    box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+  }
+
+  .path-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 26px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text);
+    font-size: var(--text-body);
+    font-family: inherit;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .path-menu-item:hover:not(:disabled) {
+    background: var(--panel-hover);
+  }
+
+  .path-menu-item:disabled {
+    color: var(--text-faint);
+    cursor: default;
+  }
+
+  .path-menu-error {
+    padding: 4px 8px;
+    color: var(--red);
+    font-size: var(--text-aux);
+    line-height: 1.4;
+    white-space: normal;
   }
 
   /*
@@ -6911,3 +7036,133 @@ html[data-theme='light'] .mica-config-ui {
   font-size: var(--text-micro);
   line-height: 1.5;
 }
+
+  /* 数据表：统计页（By source / By session）与会话详情共用的那一份形态。
+     只提供骨架——表头、列宽、行分隔、翻页；单元格内容由调用方渲染，所以同一个组件
+     能画进度条、按钮或纯文本，而边框与行高在整页保持一致。
+     窄容器里不横向滚动：先把次要列退场（见下面的 @container），而不是让整张表左右滑。 */
+  .data-table-scope {
+    container-type: inline-size;
+  }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: var(--text-label);
+  }
+
+  .data-table th {
+    padding: 0 12px 6px 0;
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-align: left;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .data-table th:last-child,
+  .data-table td:last-child {
+    padding-right: 0;
+  }
+
+  .data-table th.is-num,
+  .data-table td.is-num {
+    text-align: right;
+  }
+
+  .data-table td {
+    padding: 7px 12px 7px 0;
+    border-top: 1px solid var(--line-soft);
+    color: var(--text);
+    vertical-align: middle;
+  }
+
+  /* 排序入口就是表头本身：只有声明显式 `sortable` 的列才可点，其余列不假装能点。 */
+  .data-table-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+    transition: color 120ms ease;
+  }
+
+  .data-table-sort:hover {
+    color: var(--text-soft);
+  }
+
+  .data-table-sort.is-active {
+    color: var(--text);
+  }
+
+  .data-table-arrow {
+    font-size: 8px;
+    line-height: 1;
+  }
+
+  .data-table-label-narrow {
+    display: none;
+  }
+
+  .data-table-empty {
+    padding: 14px 0 2px;
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+  }
+
+  .data-table-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line-soft);
+    color: var(--text-faint);
+    font-size: var(--text-micro);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .data-table-pager {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .data-table-page {
+    min-width: 44px;
+    text-align: center;
+    color: var(--text-soft);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 列退场按**卡片自己的宽度**判断，不看视口：同一张表在弹窗里和整页里都成立。 */
+  @container (max-width: 720px) {
+    .data-table-cell.is-narrow-secondary {
+      display: none;
+    }
+
+    .data-table-label-wide {
+      display: none;
+    }
+
+    .data-table-label-narrow {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 540px) {
+    .data-table-cell.is-narrow-tertiary {
+      display: none;
+    }
+  }

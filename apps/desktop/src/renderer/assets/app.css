@@ -749,17 +749,6 @@ html[data-theme='light'] .chat-modal-overlay {
   font-size: 11.5px;
 }
 
-.chat-message-queued {
-  background: color-mix(in srgb, var(--color-warn) 8%, transparent);
-  box-shadow:
-    4px 0 0 color-mix(in srgb, var(--color-warn) 8%, transparent),
-    -4px 0 0 color-mix(in srgb, var(--color-warn) 8%, transparent);
-}
-
-.chat-message-queued .chat-message-marker {
-  color: var(--color-warn);
-}
-
 .chat-message-assistant.chat-message-active .chat-message-marker {
   color: var(--chat-accent);
   animation: chat-assistant-pulse 1.5s ease-in-out infinite;
@@ -2064,80 +2053,116 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   color: var(--color-danger);
 }
 
+/* 排队消息唯一的显现位置（对话里不再重复画一条）：每条一张卡，卡片竖排、内部滚动。 */
 .chat-queue-dock {
+  display: flex;
   max-height: 148px;
-  overflow: hidden;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
   border-top: 1px solid color-mix(in srgb, var(--color-warn) 18%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--color-warn) 12%, transparent);
   background: color-mix(in srgb, var(--color-warn) 10%, var(--color-canvas));
+  padding: 6px 9px;
   font-family: var(--chat-font);
   font-size: var(--chat-text-size);
   line-height: 1.35;
 }
 
-.chat-queue-dock-header {
-  display: grid;
-  height: 28px;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px;
-  padding: 0 9px;
-  color: var(--color-warn);
-  font-weight: 600;
-}
-
-.chat-queue-dock-header > span:last-child {
-  min-width: 18px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-warn) 12%, transparent);
-  padding: 1px 6px;
-  text-align: center;
-}
-
-.chat-queue-dock-items {
-  max-height: 120px;
-  overflow-y: auto;
-  padding: 0 9px 6px;
-}
-
 .chat-queue-dock-item {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 22px;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 0;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--color-warn) 24%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-warn) 6%, transparent);
+  padding: 5px 8px 6px;
   color: var(--color-fg);
 }
 
-.chat-queue-dock-item > span:first-child {
-  color: var(--color-warn);
-  user-select: none;
+/* 头部一行到底、动作组钉在右侧：窄窗口里先压芯片（省略号），正文另起一行换行。 */
+.chat-queue-dock-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
 }
 
-.chat-queue-dock-item > span:nth-child(2) {
-  display: -webkit-box;
-  overflow: hidden;
-  white-space: pre-wrap;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.chat-queue-dock-item > button {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
+.chat-queue-dock-index {
+  flex: none;
   border-radius: 3px;
-  color: color-mix(in srgb, var(--color-warn) 62%, transparent);
+  background: color-mix(in srgb, var(--color-warn) 16%, transparent);
+  padding: 0 4px;
+  color: var(--color-warn);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 
-.chat-queue-dock-item > button:hover:not(:disabled) {
+.chat-queue-dock-state {
+  flex: none;
+  color: var(--color-warn);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chat-queue-dock-when {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-warn) 22%, transparent);
+  border-radius: 3px;
+  padding: 0 5px;
+  color: var(--color-fg-soft);
+  font-size: 10.5px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-queue-dock-spacer {
+  min-width: 4px;
+  flex: 1 1 auto;
+}
+
+.chat-queue-dock-recall {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: color-mix(in srgb, var(--color-warn) 62%, transparent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chat-queue-dock-recall:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-warn) 14%, transparent);
   color: var(--color-warn-soft);
 }
 
-.chat-queue-dock-item > button:disabled {
+.chat-queue-dock-recall:disabled {
   color: color-mix(in srgb, var(--color-fg-max) 16%, transparent);
+}
+
+.chat-queue-dock-keys {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 3px;
+  padding: 0 3px;
+  color: var(--color-fg-dim);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 13px;
+}
+
+.chat-queue-dock-body {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 3px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .chat-composer-images {
@@ -3028,11 +3053,6 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   font-size: 12px;
 }
 
-/* 没有图标时只留位置，不画底色：标题左边缘在所有弹窗里对齐 */
-.chat-modal-mark.is-empty {
-  background: transparent;
-}
-
 /* 表单类弹窗的底部动作区：与正文同一个内边距，按钮靠右 */
 .chat-modal-footer {
   display: flex;
@@ -3094,6 +3114,11 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   max-width: var(--modal-w-wide);
 }
 
+/* 只有一张二维码（或一段话）的弹窗不铺开：内容居中，宽度收在单条信息那一档。 */
+.chat-modal-qr {
+  max-width: var(--modal-w-narrow);
+}
+
 .chat-plugin-table-wrap {
   overflow-x: auto;
 }
@@ -3110,6 +3135,20 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
 
 .chat-plugin-dialog-text + .chat-plugin-table-wrap {
   margin-top: 12px;
+}
+
+/* 二维码弹窗（手机访问）：码本身是黑码白底，不跟主题走——反色码不少手机扫不出来，
+   这一块唯一要做对的事就是「扫得动」，所以底色写死白、留出静区。 */
+.chat-plugin-dialog-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-plugin-dialog-qr .chat-plugin-table-note {
+  margin: 0;
+  text-align: center;
 }
 
 .chat-plugin-table {
@@ -3159,11 +3198,6 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   color: var(--color-fg-muted);
   font-size: 12px;
   line-height: 1.6;
-}
-
-/* 表单弹窗（新建文件、重命名、新建分组）没有图标：不占图标位，标题的左边缘与下面的输入框对齐 */
-.chat-modal-prompt .chat-modal-mark.is-empty {
-  display: none;
 }
 
 /* 套在另一个弹窗里：不再压暗一次背景，靠阴影与描边区分层级 */
@@ -3863,6 +3897,8 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-prompt-caret {
+  display: flex;
+  align-items: center;
   flex: 0 0 auto;
 }
 
@@ -3952,6 +3988,19 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   border-radius: 8px;
   background: var(--color-panel);
   box-shadow: 0 8px 24px var(--color-overlay-heavy);
+}
+
+/* 菜单与「+」之间那 6px 是空的：指针从按钮移向菜单时会掉回输入框，容器的
+   mouseleave 把菜单收掉——看起来就是「一靠近就消失」。用一块透明热区把缝补上，
+   它属于菜单，指针落在缝里时仍在这个容器内。 */
+.chat-composer-more-menu::before {
+  content: '';
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  /* 正好等于上面那条 `bottom: calc(100% + 6px)` 的缝，多一像素就会压住「+」的顶边 */
+  height: 6px;
 }
 
 .chat-composer-more-menu button {
@@ -5748,16 +5797,29 @@ body.is-resizing-btw {
 }
 
 /* 插件在输入框上方那条常驻状态：关着面板也要看得见「现在是否生效、连着谁」。
-   用一条小圆点 + 一行字，不描边框——它要能被扫一眼就当背景信息略过。 */
+   它和快捷按钮同排、同一颗胶囊的高度——输入框上方已经有附件缩略图与引用条，
+   再为一行状态单开一层，三层叠起来就把对话挤没了。 */
 .chat-plugin-statusbar {
-  display: flex;
-  min-width: 0;
+  display: inline-flex;
+  height: 25px;
+  flex: none;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px 0 0;
+  max-width: 60%;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--color-overlay-subtle);
   color: var(--color-fg-soft);
+  font: inherit;
   font-size: 11px;
   line-height: 1.3;
+  cursor: pointer;
+}
+
+.chat-plugin-statusbar:hover {
+  background: var(--color-overlay-strong);
+  color: var(--color-fg-max);
 }
 
 .chat-plugin-statusbar-dot {
@@ -6133,6 +6195,11 @@ body.is-resizing-btw {
 
 /* 行里的值是一个地址：可点，交给系统浏览器。 */
 .chat-plugin-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0;
   border: 0;
   background: none;
@@ -6192,9 +6259,121 @@ body.is-resizing-btw {
 .chat-plugin-section-actions {
   display: flex;
   flex-wrap: wrap;
+  /* 贴着字段的左边缘排：这一排是「填完上面这张表，点这里」，右对齐会跟输入框的左边
+     对不上，看起来像两个不相干的区块。 */
+  justify-content: flex-start;
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--line-soft);
+}
+
+/* 「连接」这类主按钮比旁边的次要按钮宽一档：只加高度会破坏一行里控件等高的规则，
+   宽度足够就让它在视觉上先被看到。 */
+.chat-plugin-section-actions > .ui-button {
+  min-width: 88px;
+}
+
+.chat-plugin-section-actions > .ui-button.ui-button-primary {
+  min-width: 112px;
+}
+
+/* 一张清单表：列由插件声明，宿主只负责对齐与边界。
+   - 表头是「列名」，不是另一行数据：字号小一档、颜色退一档，不参与行悬停；
+   - 只有声明 `grow` 的那一列吃剩余宽度，其余按内容宽，地址/名称才不会把状态列挤成两字换行；
+   - 操作列贴右：按钮的字数不一样（编辑 / 确认删除），右对齐时它们的右边缘才是齐的。 */
+.chat-plugin-table-wrap {
+  min-width: 0;
+  padding: 4px 16px 12px;
+  overflow-x: auto;
+}
+
+.chat-plugin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+  table-layout: auto;
+}
+
+.chat-plugin-table th {
+  padding: 6px 8px;
+  color: var(--color-fg-faint);
+  font-weight: 500;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chat-plugin-table td {
+  padding: 7px 8px;
+  border-top: 1px solid var(--line-soft);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.chat-plugin-table th:first-child,
+.chat-plugin-table td:first-child {
+  padding-left: 0;
+}
+
+.chat-plugin-table th:last-child,
+.chat-plugin-table td:last-child {
+  padding-right: 0;
+}
+
+.chat-plugin-table .is-grow {
+  width: 100%;
+  max-width: 0;
+}
+
+.chat-plugin-table td.is-grow .chat-plugin-cell,
+.chat-plugin-table td.is-grow .chat-plugin-link {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-plugin-table .is-actions {
+  padding-left: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.chat-plugin-table td.is-actions > .ui-button + .ui-button {
+  margin-left: 4px;
+}
+
+.chat-plugin-table tbody tr:hover td {
+  background: var(--color-overlay-subtle);
+}
+
+/* 格子里的一行字：与「标签 — 值」用同一套语气色，不再发明第三种。 */
+.chat-plugin-cell {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-fg);
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.chat-plugin-cell.tone-muted {
+  color: var(--color-fg-faint);
+}
+
+.chat-plugin-cell.tone-ok {
+  color: var(--color-success, #3fb950);
+}
+
+.chat-plugin-cell.tone-warn {
+  color: var(--color-warn, #d29922);
+}
+
+.chat-plugin-cell.tone-error {
+  color: var(--color-danger, #f85149);
+}
+
+.chat-plugin-cell.tone-accent {
+  color: var(--accent);
 }
 
 /* 空态放在已经在「一块面」里的地方：外框由分区块提供，这里不再套第二层描边。 */
@@ -6310,6 +6489,12 @@ body.is-resizing-btw {
      输入框挤成一条缝。名字与配置页一致，共享样式里的 @container 直接命中。 */
   container-type: inline-size;
   container-name: page;
+}
+
+/* 分区保持自身高度、整列滚动。没有这条时每块都是可压缩的 flex item，内容一多就被
+   压扁（各自的 overflow:hidden 让它们能缩到几十像素），抽屉里根本滚不到下面几块。 */
+.chat-plugin-dock-body > * {
+  flex: none;
 }
 
 .chat-plugin-spin {

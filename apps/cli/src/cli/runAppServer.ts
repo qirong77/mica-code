@@ -8,6 +8,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { VERSION_LABEL, resolveMicaHome } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
+import type { PluginMaintenanceWindow } from '@packages/mica-plugin/index.js';
 import { prepareImageForApi, readStoredSubagentTasks, storedSubagentTasksStamp, writeStoredSubagentTasks } from '@packages/mica-common/index.js';
 import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.js';
 import { keepsSubagentTaskRow } from '@packages/mica-common/subagentVisibility.js';
@@ -238,13 +239,37 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   const writeNotification = (method: string, params: unknown) => {
     process.stdout.write(encodeCodexNotification(method, params));
   };
-  /** 轮次之外占着会话（空闲压缩）的开始 / 收尾，客户端据此排队这几秒里的发送。 */
-  const announceMaintenance = (active: boolean) => {
+  /**
+   * 宿主占着会话（空闲压缩、轮内模型压缩）的开始 / 收尾，客户端据此排队这几秒里的发送。
+   *
+   * `active: false` 时只有原因：窗口的名字（`label`）属于「正在等的那件事」，收尾时
+   * 再带一遍反而让客户端以为又开了一个窗口。
+   */
+  const announceMaintenance = (active: boolean, window?: PluginMaintenanceWindow) => {
     writeNotification(MICA_HOST_NOTIFICATIONS.maintenance, {
       threadId: sessionController?.getCurrentSessionId() ?? null,
       active,
-      reason: 'compaction',
+      reason: window?.reason ?? 'compaction',
+      ...(active && window?.label ? { label: window.label } : {}),
     } satisfies MicaHostMaintenance);
+  };
+  /**
+   * 维护窗口的嵌套计数：只有第一层发 `active: true`、最后一层退出才发 `active: false`。
+   *
+   * 轮内模型压缩可能嵌在轮次之外的一次空闲维护里（也可能反过来），各自发一遍会让客户端
+   * 在第一层退出时就补发排队消息，而内层其实还在压——那正是这个能力面要拦的事。
+   * task 抛错也照常收尾：窗口不能因为压缩失败就一直开着。
+   */
+  let maintenanceDepth = 0;
+  const runMaintenance = async <T>(window: PluginMaintenanceWindow, task: () => Promise<T>): Promise<T> => {
+    if (maintenanceDepth === 0) announceMaintenance(true, window);
+    maintenanceDepth += 1;
+    try {
+      return await task();
+    } finally {
+      maintenanceDepth -= 1;
+      if (maintenanceDepth === 0) announceMaintenance(false, window);
+    }
   };
   /**
    * Non-fatal degradation (stale --dir, failed MCP init, stray rejection).
@@ -579,8 +604,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
           // 压缩是同步的：它跑着的时候宿主读不到 stdin 上的下一条 turn/start，用户这几秒
           // 发的消息只会静静排在管道里，界面上什么也看不出来。动手之前先说一声，客户端
           // 据此把这段时间的发送放进队列（可见、可撤回），压完收到 active:false 再补发。
-          announceMaintenance(true);
-          try {
+          return runMaintenance({ reason: 'compaction', label: '压缩' }, async () => {
             const outcome = await task();
 
             // 轮次之外改掉的历史没有对应的 Codex 事件，客户端会一直显示旧记录（压缩后的
@@ -593,10 +617,12 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
             }
 
             return outcome;
-          } finally {
-            announceMaintenance(false);
-          }
+          });
         }, busy),
+      // 轮内的模型压缩（插件在迭代边界动手）同样要占住会话：它是异步的，宿主这段时间
+      // 读得到 stdin，用户的发送会直接 steer 进正在跑的这一轮——正好被塞进正在重写的
+      // 历史里。开窗口让客户端把这几秒的发送留在排队行，压完再补发。
+      runMaintenance,
       submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
     });
     executor.attachPluginLayer({

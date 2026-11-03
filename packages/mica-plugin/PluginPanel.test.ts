@@ -29,6 +29,91 @@ describe('normalizePluginPanelView', () => {
     expect(view.sections?.[0].actions?.[0].tone).toBe('primary');
   });
 
+  it('keeps a table: columns, text cells, check cells and row actions', () => {
+    const view = normalizePluginPanelView({
+      title: 'ssh',
+      sections: [
+        {
+          title: '服务器',
+          table: {
+            columns: [
+              { key: 'name', label: '名称' },
+              { key: 'address', label: '地址', grow: true },
+              { key: 'actions', label: '操作', actions: true },
+              { key: 'session', label: '添加到会话' },
+            ],
+            rows: [
+              {
+                key: 'test',
+                cells: {
+                  name: { text: 'test', tone: 'accent' },
+                  address: { text: 'root@10.0.0.1:22' },
+                  session: { check: { checked: true, action: 'toggle-session' } },
+                },
+                actions: [{ id: 'edit', label: '编辑' }],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const table = view.sections?.[0].table;
+    expect(table?.columns.map((column) => column.key)).toEqual(['name', 'address', 'actions', 'session']);
+    expect(table?.columns[1].grow).toBe(true);
+    expect(table?.columns[2].actions).toBe(true);
+    expect(table?.rows[0].cells.session?.check).toEqual({ checked: true, action: 'toggle-session' });
+    expect(table?.rows[0].actions?.[0].id).toBe('edit');
+  });
+
+  it('drops a table that cannot be rendered, and unknown columns', () => {
+    // 只有列没有行：画出来是个空表头，插件该用 empty 说话。
+    const empty = normalizePluginPanelView({
+      title: 'x',
+      sections: [{ title: 't', empty: '还没有', table: { columns: [{ key: 'a', label: 'A' }], rows: [] } }],
+    });
+    expect(empty.sections?.[0].table).toBeUndefined();
+    expect(empty.sections?.[0].empty).toBe('还没有');
+
+    // 没声明的列不认；一个格子都没有的行整行丢掉。
+    const partial = normalizePluginPanelView({
+      title: 'x',
+      sections: [
+        {
+          title: 't',
+          table: {
+            columns: [{ key: 'a', label: 'A' }],
+            rows: [
+              { key: 'r1', cells: { a: { text: 'hello' }, ghost: { text: '看不见' } } },
+              { key: 'r2', cells: { ghost: { text: '整行都看不见' } } },
+            ],
+          },
+        },
+      ],
+    });
+    expect(partial.sections?.[0].table?.rows.map((row) => row.key)).toEqual(['r1']);
+    expect(partial.sections?.[0].table?.rows[0].cells).toEqual({ a: { text: 'hello' } });
+
+    // 勾选框没有动作 = 点不动的复选框，当成空格子。
+    const noAction = normalizePluginPanelView({
+      title: 'x',
+      sections: [
+        {
+          title: 't',
+          table: { columns: [{ key: 'c', label: 'C' }], rows: [{ key: 'r', cells: { c: { check: { checked: true } } } }] },
+        },
+      ],
+    });
+    expect(noAction.sections?.[0].table).toBeUndefined();
+  });
+
+  it('keeps the section a status bar points at', () => {
+    const view = normalizePluginPanelView({
+      title: 'ssh',
+      statusBar: { label: 'prod', tone: 'ok', detail: '已连接', section: '服务器' },
+    });
+    expect(view.statusBar).toEqual({ label: 'prod', tone: 'ok', detail: '已连接', section: '服务器' });
+  });
+
   it('accepts a password field and drops unknown field types', () => {
     const view = normalizePluginPanelView({
       title: 'ssh',
@@ -267,6 +352,45 @@ describe('normalizePluginPanelAction', () => {
     expect(normalizePluginPanelActionResult({ dialog: 'PRD' })).toEqual({});
   });
 
+  it('keeps a QR-only dialog and the "go configure" button', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: {
+        title: '手机访问',
+        qr: { value: 'https://mica.example.com/?t=0123456789abcdef', caption: '扫码打开' },
+        configure: { label: '去插件页面配置' },
+      },
+    });
+    expect(result.dialog).toEqual({
+      title: '手机访问',
+      columns: [],
+      rows: [],
+      qr: { value: 'https://mica.example.com/?t=0123456789abcdef', caption: '扫码打开' },
+      configure: { label: '去插件页面配置' },
+    });
+    // `configure: true` 与 `{}` 一样，只是没写自定义文案
+    expect(
+      normalizePluginPanelActionResult({ dialog: { title: '手机访问', text: '还没接入', configure: true } })
+        ?.dialog?.configure
+    ).toEqual({});
+  });
+
+  it('keeps the "open panel" button next to "go configure"', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: {
+        title: '手机访问',
+        text: '还没接入',
+        configure: { label: '去插件页面配置' },
+        panel: { label: '首次部署' },
+      },
+    });
+    expect(result.dialog?.configure).toEqual({ label: '去插件页面配置' });
+    expect(result.dialog?.panel).toEqual({ label: '首次部署' });
+  });
+
+  it('drops a QR block without content', () => {
+    expect(normalizePluginPanelActionResult({ dialog: { title: '手机访问', qr: { value: '  ' } } })).toEqual({});
+  });
+
   it('keeps a prose-only dialog without a table', () => {
     const result = normalizePluginPanelActionResult({
       dialog: { title: '需求描述', text: '这个需求是给客服加一个入口。\n改完之后新建单据更快。' },
@@ -321,6 +445,14 @@ describe('plugin panel openPath', () => {
     });
     expect(normalizePluginPanelActionResult({ openPath: { line: 3 } }).openPath).toBeUndefined();
     expect(normalizePluginPanelActionResult({ openPath: '   ' }).openPath).toBeUndefined();
+  });
+
+  it('keeps the form only when the plugin asks for it', () => {
+    expect(normalizePluginPanelActionResult({ keepDrafts: true }).keepDrafts).toBe(true);
+    // 只认字面 true：`"true"` / 1 这类真值不当成「保留表单」，否则一个手滑的结果会让
+    // 提交过的表单看起来没生效。
+    expect(normalizePluginPanelActionResult({ keepDrafts: 'true' }).keepDrafts).toBeUndefined();
+    expect(normalizePluginPanelActionResult({ message: 'ok' }).keepDrafts).toBeUndefined();
   });
 
   it('carries focus only when the plugin explicitly asks for it', () => {

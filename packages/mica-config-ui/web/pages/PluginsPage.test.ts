@@ -2,6 +2,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { ConfigWebPlugin } from '../../src/shared/types.js';
+import { setConfigWebClient } from '../api.js';
+import type { ConfigWebClient } from '../api.js';
 import { PluginActionsGroup, PluginCard, PluginDetail, pluginRunningStatus } from './PluginsPage.js';
 
 function plugin(overrides: Partial<ConfigWebPlugin> = {}): ConfigWebPlugin {
@@ -37,6 +39,24 @@ function render(node: React.ReactElement): string {
 
 describe('插件目录卡片', () => {
   const noop = () => {};
+
+  it('运行出错时悬停就能看到插件自己上报的那条', () => {
+    const html = render(
+      createElement(PluginCard, {
+        plugin: plugin({
+          loadStatus: 'loaded',
+          health: { level: 'error', message: '连不上中转机', hint: '检查中转机地址', at: '2026-11-01T00:00:00.000Z' },
+        }),
+        canToggle: true,
+        busy: false,
+        onOpen: noop,
+        onToggle: noop,
+      }),
+    );
+    expect(html).toContain('运行出错');
+    expect(html).toContain('连不上中转机');
+    expect(html).toContain('检查中转机地址');
+  });
 
   it('启停开关是卡片里那个按钮的兄弟节点，不是它的子节点', () => {
     const html = render(
@@ -78,7 +98,7 @@ describe('插件目录卡片', () => {
     expect(html).toContain('plugin-card-open');
   });
 
-  it('卡片脚注只说运行结论，不再重复开关的「已启用」', () => {
+  it('装配成功的卡片不再说一遍「已加载」：那是右上角开关在说的话', () => {
     const html = render(
       createElement(PluginCard, {
         plugin: plugin({ loadStatus: 'loaded', loadHost: 'tui' }),
@@ -90,9 +110,44 @@ describe('插件目录卡片', () => {
     );
     // 启停是开关的语义：卡片上再说一遍，就是两个控件说同一件事
     expect(html).not.toContain('已启用');
+    expect(html).not.toContain('已加载');
+    // 既没有异常结论、也没有设置项与运行条件时，脚注整行都不画
+    expect(html).not.toContain('plugin-card-status');
+    expect(html).not.toContain('plugin-card-foot');
+  });
+
+  it('正常加载的卡片仍会显示设置项数量', () => {
+    const html = render(
+      createElement(PluginCard, {
+        plugin: plugin({
+          loadStatus: 'loaded',
+          settings: { fields: [{}, {}] as never, values: {}, issues: [] },
+        }),
+        canToggle: true,
+        busy: false,
+        onOpen: noop,
+        onToggle: noop,
+      }),
+    );
+    expect(html).toContain('plugin-card-foot');
+    expect(html).toContain('2 项设置');
+    expect(html).not.toContain('已加载');
+    expect(html).not.toContain('plugin-card-status');
+  });
+
+  it('装配结论不是「已加载」时，脚注连宿主一起说', () => {
+    const html = render(
+      createElement(PluginCard, {
+        plugin: plugin({ loadStatus: 'skipped', loadHost: 'tui' }),
+        canToggle: true,
+        busy: false,
+        onOpen: noop,
+        onToggle: noop,
+      }),
+    );
     expect(html).toContain('plugin-card-status');
-    // 装配结论连宿主一起说，否则跨宿主的跳过会被读成故障
-    expect(html).toContain('已加载');
+    // 跨宿主的跳过不是故障：结论要连写它的宿主一起读
+    expect(html).toContain('已跳过');
     expect(html).toContain('TUI');
   });
 
@@ -135,6 +190,40 @@ describe('插件详情页', () => {
     expect(html).not.toContain('已启用');
     expect(html).toContain('已加载');
   });
+
+  it('日志这一行是可点的路径链接，目录那行保持纯文本', () => {
+    // 只声明要验的两个动作：其余数据操作这一页不会碰
+    setConfigWebClient({
+      revealPath: async () => ({ ok: true }),
+      openPathInEditor: async () => ({ ok: true }),
+    } as unknown as ConfigWebClient);
+    try {
+      const html = render(
+        createElement(PluginDetail, {
+          plugin: plugin({
+            location: 'plugins/todo',
+            logFile: '/Users/me/Library/Logs/mica/plugin-todo-20261103.jsonl',
+          }),
+          busy: false,
+          canToggle: true,
+          canSettings: true,
+          loading: false,
+          error: null,
+          notice: null,
+          onBack: noop,
+          onRefresh: noop,
+          onToggleEnabled: noop,
+          onSaved: noop,
+        }),
+      );
+      expect(html).toContain('class="path-link"');
+      expect(html).toContain('/Users/me/Library/Logs/mica/plugin-todo-20261103.jsonl');
+      // 只有日志那一行：官方插件的目录是仓库里的相对路径，装好的应用里不存在
+      expect(html.match(/class="path-link"/g)).toHaveLength(1);
+    } finally {
+      setConfigWebClient(null);
+    }
+  });
 });
 
 describe('运行结论', () => {
@@ -160,11 +249,16 @@ describe('运行结论', () => {
     expect(pluginRunningStatus(plugin())).toEqual({ label: '尚未加载', tone: 'default' });
   });
 
-  it('插件上报出错', () => {
+  it('插件上报出错：装配是成功的，说的是运行故障', () => {
     const status = pluginRunningStatus(
       plugin({ health: { level: 'error', message: '连不上中转机', at: '2026-11-01T00:00:00.000Z' } }),
     );
-    expect(status).toEqual({ label: '加载失败', tone: 'red' });
+    // 开关亮着、脚注写「加载失败」会让人以为插件没装上：装配与运行是两件事。
+    expect(status).toEqual({ label: '运行出错', tone: 'red' });
+  });
+
+  it('装配失败才是「加载失败」', () => {
+    expect(pluginRunningStatus(plugin({ loadStatus: 'failed' }))).toEqual({ label: '加载失败', tone: 'red' });
   });
 
   it('插件上报待配置', () => {

@@ -255,6 +255,11 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 判断「现在要不要压」时用 `ctx.agent.lastUsage()` 与 `ctx.agent.contextWindowSize`：前者是最近一次
 真实请求的输入量（与界面 ctx 徽标同源，压缩保留它），后者随会话切模型变化。插件不要自己估历史——
 估出来会和用户看到的数不一致。
+要占住会话几秒的耗时工作（模型摘要）用 `ctx.agent.withMaintenance({ reason, label }, task)`：窗口开着时
+宿主通知客户端「别急着发」，用户这段时间的发送留在客户端的排队行里（可见、可撤回），窗口结束后由客户端
+补发——不会被塞进正在重写的历史，也不会混进正在写的摘要。只有能跟客户端说话的常驻宿主（`mica app-server`）
+提供它，TUI 的输入队列本来就拦着、`mica exec` 没有第二轮，插件写 `agent.withMaintenance ? … : await task()`。
+官方用法是自动压缩的模型摘要那一步（`reason: 'compaction'`、`label: '自动压缩'`）；本地快速压缩很快，不开窗口。
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。类型可用 `maxTurnContinuations` 指定达到默认 `maxTurns` 后的同上下文续跑次数（最多 2）；请求显式指定 `maxTurns` 时始终是硬上限。
 机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定有哪些类型、`agent` 工具长什么样。
 需要一条能反复追问的隔离上下文（旁问、连续修订）时用 `ctx.subagents.thread()`：一次建线程、多次
@@ -531,6 +536,10 @@ ctx.desktop.panel({
 
 - `roles` 是显示条件（会话角色名，`$MICA_HOME/role/<name>.md`）；空数组表示任何角色都显示。
   宿主按当前会话角色过滤，插件在页面里判断不了这件事。
+- `open` 声明「点了入口直接执行这个动作」，而不是打开抽屉：`"panel": { "label": "手机访问",
+  "open": "show" }` 对应的 `action` 处理器回一个 `dialog` 就直接弹窗。只回答一件事的面板
+  （一条链接、一次检查结果）用它——为一张二维码打开一整块 340px 抽屉、再让插件在抽屉里
+  排版，两边都白费力气。
 - 一个插件只有一块面板（`ctx.desktop.panel()` 再调用会替换上一块）：对话右侧只有一条位置，
   多块就变成插件之间的版面竞争。
 - 面板的呈现形态由清单 `display` 决定：`drawer`（默认，右侧 340px、section 是可折叠卡片）
@@ -588,12 +597,20 @@ ctx.desktop.panel({
     （可编辑），用户点「开始」才真的建会话；只有按钮本身已经表示「就是要开」时才设
     `confirm: false`。再加 `send: false` 就只把提示词**放进新会话的输入框**并聚焦，不发送、
     也不弹确认窗——「怎么做由人决定、agent 只是执行」的按钮用这一档，插件不该替用户按发送。
-  - `return { dialog: { title, subtitle?, text?, columns, rows, note? } }` 弹一个**只读弹窗**：
-    `text` 是会换行的正文（需求描述这类大段文字），表格可以没有；`columns` / `rows` 给的是
-    对齐的表格（清单、对照表、链接一览这类；格子是单行省略的，别把一段话塞进格子）。
-    `columns` 是列标题，`rows` 的每个格子是字符串或
-    `{ text, link?, tone? }`：带 `link` 的格子由页面交给系统浏览器打开。纯展示，不放输入
-    框与按钮——要编辑就回到面板的 section 里改，那里有 `commit` 自动保存。
+  - `return { dialog: { title, subtitle?, text?, qr?, columns?, rows?, note?, configure? } }`
+    弹一个**只读弹窗**，三种内容可以单用也可以叠：
+    - `qr` 是一段二维码（手机链接这类「扫一下就走」的地址：`{ value, caption? }`，只给地址时
+      直接写字符串也行）。编码、尺寸、静区都归宿主——插件不该为了画一个码背一个编码器。
+    - `text` 是会换行的正文（需求描述这类大段文字）。
+    - `columns` / `rows` 给的是对齐的表格（清单、对照表、链接一览这类；格子是单行省略的，
+      别把一段话塞进格子）。`columns` 是列标题，`rows` 的每个格子是字符串或
+      `{ text, link?, tone? }`：带 `link` 的格子由页面交给系统浏览器打开。
+
+    底部两个可选按钮指向插件自己的界面，两者都只带文案：
+    `configure: { label? }` 打开**设置页**（「还没配好」的弹窗用它把人送过去，不要只写
+    一句「去插件页面配置」就撒手）；`panel: { label? }` 打开**面板**（弹窗只回答最常问的
+    那一件事，首次部署这类细节仍在面板里，别把它藏进没人知道怎么打开的地方）。除此之外
+    纯展示，不放输入框与按钮——要编辑就回到面板的 section 里改，那里有 `commit` 自动保存。
 
   - `return { openPath: { path, line?, focus? } }` 让宿主把这个文件在应用里**打开编辑**。
   - `return { openReview: { cwd, base?, head?, label? } }` 让宿主**在编辑器里打开一份对比**：
@@ -659,7 +676,11 @@ ctx.desktop.sessionMenu({
 插件自身的故障要能被用户看见，而不是只落在日志里：
 
 - `ctx.health.report({ level: 'warn' | 'error', message, hint })` 写
-  `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「待配置 / 出错」以及原因。
+  `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「待配置 / 运行出错」以及原因。
+  记录带上是哪一版插件写的，版本一变它就不作数：上一版留下的「连不上 X」不能继续挂在
+  页面上让人去修一个已经不存在的问题（`readPluginHealth(..., { version })`）。
+- 装配失败（setup 抛错、入口加载不了）不是健康状态：那条走 `plugin-status.json`，
+  卡片上写「加载失败」。两者混成一句话会出现「开关亮着、脚注却写着加载失败」。
 - 只上报插件自己的状态：缺宿主能力由宿主记进 `plugin-status.json` 的 `skipped`，
   不要为了让页面「显示点什么」替宿主写一条健康状态。
 - 缺配置、外部服务拒绝、上一次请求失败，都属于必须上报的情况。

@@ -19,6 +19,7 @@ import {
   IconCheck,
   IconCommand,
   IconCopy,
+  IconCornerDownRight,
   IconCornerUpLeft,
   IconDots,
   IconExternalLink,
@@ -32,7 +33,6 @@ import {
   IconPaperclip,
   IconPlus,
   IconPuzzle,
-  IconPlug,
   IconQuote,
   IconSend,
   IconShare,
@@ -54,7 +54,7 @@ import {
   summarizeTodoProgress,
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
-import { SessionDetailView } from '@mica-config-ui/web'
+import { PluginIcon, QrCode, SessionDetailView } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
@@ -137,7 +137,7 @@ import {
 import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { BtwDrawer } from './BtwDrawer'
 import { PluginPanels, PluginQuickBar } from './PluginPanels'
-import { usePluginPanels } from './plugin-panels'
+import { applyPanelResult, usePluginPanels } from './plugin-panels'
 import { queuePluginLaunch, subscribePluginLaunch, takePluginLaunch } from './plugin-launch'
 import { LoopBadge } from './LoopBadge'
 import { SessionSettingsDialog } from './SessionSettingsDialog'
@@ -522,43 +522,41 @@ function UserMessageBody({ text }) {
   )
 }
 
+// 「这条什么时候会发出去」。忙时的 Enter/Tab/Shift+Tab 都走 host 的 after_iteration
+// 单槽（mica/queue/queued 扩展通知，注入活跃 turn），after_turn 只留给显式请求；
+// 轮次已经结束（点了停止 / 这一轮失败）时排队条目仍留在单槽里等撤回，此刻已经
+// 没有「正在跑的迭代」可注入，不能说还在等迭代边界。宿主占着会话做耗时工作
+// （自动压缩的模型摘要）时等的是那段工作收尾，宿主会带 label 说明是哪一段。
+export function queueSendTiming(items, running) {
+  const first = items[0] || {}
+  if (first.waitingFor === 'maintenance') return `${first.waitingLabel || '整理'}结束后发送`
+  if (!running) return '下一轮开始时发送'
+  if (first.queueMode === 'after_iteration') return '工具调用结束后发送'
+  return '本轮结束后发送'
+}
+
+// 排队消息只在这里出现（不进对话历史，见 transcriptMessages 的过滤）：每条一张卡，
+// 头部是编号 / 状态 / 时机芯片 / 撤回动作，正文两行截断、悬停看全文。整卡双击与
+// 按钮同为一次撤回（shift + ←）。
 function QueueDock({ items, onRecall, recallingId, running }) {
   if (!items.length) return null
-  // 文案与 CLI 的 waiting queue 提示完全一致（含 shift + ← 撤回提示，app 也
-  // 支持这个快捷键，另外每条还提供按钮）。忙时的 Enter/Tab/Shift+Tab 都走
-  // host 的 after_iteration 单槽（mica/queue/queued 扩展通知，注入活跃
-  // turn），after_turn 只留给显式请求，标题按投递时机区分。
-  const queueMode = items[0]?.queueMode
-  // 轮次已经结束（用户点了停止 / 这一轮失败）时排队条目仍留在单槽里等撤回，
-  // 此刻已经没有「正在跑的迭代」可注入，标题不能说还在等迭代边界。
-  // 自动压缩在轮次之外占着会话时同理：等的是压缩收尾，不是迭代边界。
-  const headerText =
-    items[0]?.waitingFor === 'compaction'
-      ? 'waiting for auto-compaction to finish'
-      : !running
-        ? 'waiting for the next turn'
-        : queueMode === 'after_iteration'
-          ? 'waiting to send after a complete tool-call iteration'
-          : 'waiting to send after current turn'
+  const timing = queueSendTiming(items, running)
   return (
     <section className="chat-queue-dock" aria-label="等待发送的消息">
-      <div className="chat-queue-dock-header">
-        <span aria-hidden="true">↳</span>
-        <span>{`${headerText} · shift + ← or double click to re-edit`}</span>
-        <span>{items.length}</span>
-      </div>
-      <div className="chat-queue-dock-items">
-        {items.map((item, index) => (
-          <div
-            key={item.id || `${index}:${item.text}`}
-            className="chat-queue-dock-item"
-            title="双击撤回并重新编辑"
-            onDoubleClick={() => onRecall(item.id)}
-          >
-            <span>▌</span>
-            <span>{item.text}</span>
+      {items.map((item, index) => (
+        <div
+          key={item.id || `${index}:${item.text}`}
+          className="chat-queue-dock-item"
+          onDoubleClick={() => onRecall(item.id)}
+        >
+          <div className="chat-queue-dock-head">
+            <span className="chat-queue-dock-index">{index + 1}</span>
+            <span className="chat-queue-dock-state">排队中</span>
+            <span className="chat-queue-dock-when">{timing}</span>
+            <span className="chat-queue-dock-spacer" aria-hidden="true" />
             <button
               type="button"
+              className="chat-queue-dock-recall"
               // pending 只是「确认通知还没回来」的乐观行，同样要能撤回：否则
               // 确认一旦丢失，这一行就永远停在排队态（既发不出去也撤不回）。
               title="撤回到输入框（shift + ←）"
@@ -571,10 +569,15 @@ function QueueDock({ items, onRecall, recallingId, running }) {
               ) : (
                 <IconCornerUpLeft size={11} />
               )}
+              <span>撤回并编辑</span>
+              <kbd className="chat-queue-dock-keys">⇧←</kbd>
             </button>
           </div>
-        ))}
-      </div>
+          <div className="chat-queue-dock-body" title={item.text}>
+            {item.text}
+          </div>
+        </div>
+      ))}
     </section>
   )
 }
@@ -1166,22 +1169,63 @@ function PluginTaskDialog({ task, onChange, onConfirm, onClose }) {
  *
  * 插件只给列与格子，排版与点击行为都在这里：超长链接单行省略（完整地址留在 `title`），
  * 带 `link` 的格子点了交给系统浏览器——页面自己跳转会把整个应用导航走。
+ *
+ * 两种内容各管一件事：`qr` 是「扫一下就走」的一段地址（手机访问那种），`configure`
+ * 是「还没配好」时的下一步——弹窗把话说清楚，按钮负责把人送到插件自己的设置页。
  */
-function PluginTableDialog({ dialog, onClose }) {
+function PluginTableDialog({ dialog, onClose, onOpenPluginSettings, onOpenPluginPanel }) {
+  const configure = dialog.configure && dialog.pluginId ? dialog.configure : null
+  const panel = dialog.panel && dialog.pluginId ? dialog.panel : null
+  const hasTable = Boolean(dialog.columns && dialog.columns.length > 0)
   return (
     <ModalShell
       title={dialog.title}
       subtitle={dialog.subtitle || null}
       onClose={onClose}
-      className="chat-modal-table"
+      // 没有表格时收成窄弹窗：一张 208px 的二维码摆在 860px 的白板中央只是空。
+      className={hasTable ? 'chat-modal-table' : 'chat-modal-qr'}
       footer={
-        <button type="button" className="session-action" onClick={onClose}>
-          关闭
-        </button>
+        <>
+          {configure ? (
+            <button
+              type="button"
+              className="session-action session-action-primary"
+              onClick={() => {
+                onClose()
+                onOpenPluginSettings?.(dialog.pluginId)
+              }}
+            >
+              {configure.label || '去插件页面配置'}
+            </button>
+          ) : null}
+          {panel ? (
+            <button
+              type="button"
+              className="session-action"
+              onClick={() => {
+                onClose()
+                onOpenPluginPanel?.(dialog.pluginId)
+              }}
+            >
+              {panel.label || '打开面板'}
+            </button>
+          ) : null}
+          <button type="button" className="session-action" onClick={onClose}>
+            关闭
+          </button>
+        </>
       }
     >
+      {dialog.qr ? (
+        <div className="chat-plugin-dialog-qr">
+          <QrCode value={dialog.qr.value} label={dialog.title} size={208} />
+          {dialog.qr.caption ? (
+            <p className="chat-plugin-table-note">{dialog.qr.caption}</p>
+          ) : null}
+        </div>
+      ) : null}
       {dialog.text ? <p className="chat-plugin-dialog-text">{dialog.text}</p> : null}
-      {dialog.columns.length > 0 ? (
+      {hasTable ? (
         <div className="chat-plugin-table-wrap">
           <table className="chat-plugin-table">
             <thead>
@@ -1192,7 +1236,7 @@ function PluginTableDialog({ dialog, onClose }) {
               </tr>
             </thead>
             <tbody>
-              {dialog.rows.map((row, rowIndex) => (
+              {(dialog.rows || []).map((row, rowIndex) => (
                 <tr key={rowIndex}>
                   {row.map((cell, cellIndex) => (
                     <td key={cellIndex} className={cell.tone ? `tone-${cell.tone}` : undefined}>
@@ -2087,6 +2131,13 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
       icon: IconInfoCircle,
       disabled: !menu.hasSession
     },
+    {
+      id: 'timing',
+      label: '耗时分析',
+      title: '这一轮的时间去哪了：等模型 / 模型输出 / 工具执行（含还在跑的这一轮）',
+      icon: IconStopwatch,
+      disabled: !menu.hasSession
+    },
     ...pluginActions,
     { separator: true },
     { id: 'clear', label: 'Clear', icon: IconTrash, disabled: menu.running, danger: true }
@@ -2299,14 +2350,14 @@ function MessageRowView({
     }
     return (
       <div
-        className={`chat-message chat-message-user ${message.queued ? 'chat-message-queued' : ''}`}
+        className="chat-message chat-message-user"
         data-chat-user-message=""
         onDoubleClick={(event) => {
           if (event.target.closest('button')) return
           onEditStart?.(message)
         }}
       >
-        <div className="chat-message-marker">{message.queued ? '↳' : '▌'}</div>
+        <div className="chat-message-marker">▌</div>
         <div className="chat-message-body whitespace-pre-wrap break-words">
           {/* 用户自己贴进来的路径同样可点：会话里读到的路径常常是用户先粘过来的；
               图片引用只保留链接文本，点击弹预览（见 ImageLink） */}
@@ -2851,6 +2902,7 @@ export function ChatView({
   onResumeSession,
   onOpenTerminal,
   onOpenSettings,
+  onOpenPluginSettings,
   onSessionRenamed,
   onShareSession
 }) {
@@ -4371,6 +4423,10 @@ export function ChatView({
             event.sessionID || nodeIdRef.current
           )
           updateMessages((previous) => {
+            // 排队中的乐观行跟着换过来的历史一起丢，但它们在 `messages` 里还要留着：
+            // 输入框上方的 dock 靠这些行补出「确认通知还没回来」的待发送项
+            // （queuedDisplayItems 的 pending）。它们不画进对话（transcriptMessages
+            // 过滤 queued），所以这里只是保留数据、不是重复渲染。
             const queued = previous.filter((message) => message.queued)
             return queued.length > 0 ? [...rows, ...queued] : rows
           })
@@ -5897,6 +5953,44 @@ export function ChatView({
     [launchPluginSession]
   )
 
+  /**
+   * 面板入口本身就是动作（清单 `desktop.panel.open`）。
+   *
+   * 「手机访问」这类面板要的只是一个二维码弹窗，为它打开一整块 340px 抽屉、再让插件在
+   * 抽屉里排版，两边都白费力气。声明了 `open` 的入口点了直接把那个动作交给插件，结果
+   * 与面板里的按钮走同一套落点（`applyPanelResult`）。
+   */
+  const runPanelEntryAction = useCallback(
+    async (panel) => {
+      const action = panel?.openAction
+      if (!action) return
+      let result
+      try {
+        result = await window.mica.chat.pluginPanels.action(nodeIdRef.current, {
+          pluginId: panel.id,
+          action,
+          sessionId: sessionIdRef.current || null,
+          cwd: cwdRef.current || null
+        })
+      } catch (cause) {
+        appendNotice(`${panel.label}：${String(cause?.message || cause)}`, 'error')
+        return
+      }
+      applyPanelResult(result, {
+        onCompose: composeFromPlugin,
+        onLaunchSession: requestPluginSession,
+        onDialog: (dialog) => setPluginDialog({ ...dialog, pluginId: panel.id }),
+        onOpenPath: (path, line, options) =>
+          onOpenFileRef.current?.(path, line ? { line } : {}, options),
+        onOpenReview: (review) => onOpenReviewRef.current?.(review)
+      })
+      if (result?.ok === false) {
+        appendNotice(`${panel.label}：${result.error || '插件没有响应'}`, 'error')
+      }
+    },
+    [appendNotice, composeFromPlugin, requestPluginSession]
+  )
+
   const startMessageEdit = useCallback((message) => {
     if (!message?.id || message.queued) return
     const text = String(message.text ?? '')
@@ -5990,6 +6084,9 @@ export function ChatView({
     [messages]
   )
   const queuedDisplayItems = useMemo(() => {
+    // 排队消息只在输入框上方的 dock 里出现（对话历史过滤掉它们）。host 确认之前
+    // 那条乐观行只在 `messages` 里带 queued，这里补成一条待发送项，免得确认通知
+    // 还没回来时 dock 是空的、用户看着像没排上。
     const items = [...queuedItems]
     for (const message of messages) {
       if (!message.queued || items.some((item) => item.id === message.id)) continue
@@ -6360,6 +6457,15 @@ export function ChatView({
         setSessionDetailOpen(true)
         return
       }
+      if (action === 'timing') {
+        if (!sessionIdRef.current) {
+          appendNotice('发送第一条消息后才有耗时记录', 'error')
+          return
+        }
+        setTurnTimingNow(Date.now())
+        setTurnTimingOpen(true)
+        return
+      }
       if (action !== 'fork') return
       const sessionId = sessionIdRef.current
       if (!sessionId) {
@@ -6500,7 +6606,9 @@ export function ChatView({
     <>
       {activeRole !== 'default' && <span className="chat-prompt-role">{activeRole}</span>}
       <span className="chat-prompt-caret" aria-hidden="true">
-        {queueReady ? '↳' : activeLoop ? '⏰' : '›'}
+        {/* 排队态用图标而不是 ↳ 字形：行首字号是 18px 粗体，那个字形比旁边的正文
+            大一截，看起来像挂了个箭头。图标跟着 .chat-prompt-caret 走自己的尺寸。 */}
+        {queueReady ? <IconCornerDownRight size={13} stroke={1.8} /> : activeLoop ? '⏰' : '›'}
       </span>
     </>
   )
@@ -7070,14 +7178,19 @@ export function ChatView({
                 className="chat-composer-more"
                 onMouseEnter={() => {
                   if (moreHoverTimer.current) clearTimeout(moreHoverTimer.current)
-                  moreHoverTimer.current = setTimeout(() => setMoreOpen(true), 140)
+                  moreHoverTimer.current = setTimeout(() => {
+                    moreHoverTimer.current = null
+                    setMoreOpen(true)
+                  }, 140)
                 }}
                 onMouseLeave={() => {
-                  if (moreHoverTimer.current) {
-                    clearTimeout(moreHoverTimer.current)
+                  if (moreHoverTimer.current) clearTimeout(moreHoverTimer.current)
+                  // 收菜单留一点宽限：容器只有按钮那么大，指针斜着从「+」移向菜单时会
+                  // 短暂离开容器，立刻收会让人看着菜单凭空消失。
+                  moreHoverTimer.current = setTimeout(() => {
                     moreHoverTimer.current = null
-                  }
-                  setMoreOpen(false)
+                    setMoreOpen(false)
+                  }, 180)
                 }}
               >
                 <button
@@ -7156,26 +7269,21 @@ export function ChatView({
                         role="menuitem"
                         onClick={() => {
                           setMoreOpen(false)
+                          // 入口自己就是一个动作时不打开抽屉（「手机访问」只弹二维码）。
+                          if (panel.openAction) {
+                            void runPanelEntryAction(panel)
+                            return
+                          }
                           setPluginPanelOpen(panel.id)
                           setPluginPanelSection('')
                         }}
                       >
-                        <IconPlug size={13} />
+                        {/* 图标来自插件清单：所有面板都画同一个插头时，「手机访问」和
+                            「SSH」在菜单里就只剩文字能区分。 */}
+                        <PluginIcon name={panel.icon} size={13} />
                         <span>{panel.label}</span>
                       </button>
                     ))}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setMoreOpen(false)
-                        setTurnTimingNow(Date.now())
-                        setTurnTimingOpen(true)
-                      }}
-                    >
-                      <IconStopwatch size={13} />
-                      <span>耗时分析</span>
-                    </button>
                   </div>
                 ) : null}
               </div>
@@ -7376,7 +7484,17 @@ export function ChatView({
             onClose={closePluginTask}
           />
         )}
-        {pluginDialog && <PluginTableDialog dialog={pluginDialog} onClose={closePluginDialog} />}
+        {pluginDialog && (
+          <PluginTableDialog
+            dialog={pluginDialog}
+            onClose={closePluginDialog}
+            onOpenPluginSettings={onOpenPluginSettings}
+            onOpenPluginPanel={(pluginId) => {
+              setPluginPanelOpen(pluginId)
+              setPluginPanelSection('')
+            }}
+          />
+        )}
         {btwOpen && (
           <BtwDrawer
             thread={btwThread}

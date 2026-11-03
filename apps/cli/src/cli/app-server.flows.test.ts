@@ -458,6 +458,9 @@ function createMockProvider() {
 
 type MockProvider = ReturnType<typeof createMockProvider>;
 
+/** 一条 mock provider 收到的请求（`state.requests` 的元素）。 */
+type MockRequest = MockProvider['state']['requests'][number];
+
 /** Everything one test owns: its own mock provider (its own port, its own
  * programmable state), its own hosts, and the `MICA_HOME` dirs to clean up.
  * Tests run concurrently (`it.concurrent`), so none of this may be shared. */
@@ -706,6 +709,44 @@ function waitFor(
 
 const turnCompleted = (turnId: string) => (m: HostMessage) =>
   m.method === 'turn/completed' && (m.params?.turn as { id?: string } | undefined)?.id === turnId;
+
+/** 等 `from` 之后**新到**的那一条消息。
+ *
+ * `host.lines` 只增不减，`waitFor` 会先命中历史行。维护窗口在轮次里可能开好几次
+ * （历史太短那几次插件立刻放弃、没有请求在飞），要认的是当前这一次，就得从下标往后看。 */
+function waitForNew(
+  host: Host,
+  from: number,
+  predicate: (m: HostMessage) => boolean,
+  label: string,
+  timeoutMs = 20_000,
+): Promise<HostMessage> {
+  return waitFor(host, (m) => host.lines.indexOf(m) >= from && predicate(m), label, timeoutMs);
+}
+
+/** 等 mock provider 收到一条满足条件的请求，返回它在 `state.requests` 里的下标。
+ *
+ * 判断依据只能是「请求真的上网了」这类事实（不能拿固定 sleep 猜压缩什么时候开始）：
+ * 有界轮询，到点就带着收到的请求清单报错。 */
+async function waitForMockRequest(
+  predicate: (request: MockRequest) => boolean,
+  label: string,
+  timeoutMs = 30_000,
+): Promise<number> {
+  const requests = currentMock().mock.state.requests;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const index = requests.findIndex(predicate);
+    if (index >= 0) return index;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `timeout waiting for ${label}; provider saw ${requests.length} requests:\n  ` +
+          requests.map((request) => request.model).join('\n  '),
+      );
+    }
+    await sleep(50);
+  }
+}
 
 async function send(host: Host, id: number, method: string, params: Record<string, unknown>): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -2414,6 +2455,109 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(JSON.stringify(session.snapshot?.messages ?? [])).toContain(
       '[Old tool result content cleared during compact]',
     );
+  });
+
+  // 轮内的模型摘要要几秒到几十秒，用户多半正好在这时候按发送。宿主因此开一个维护窗口
+  // （`mica/host/maintenance`）：客户端把这段时间的发送留在排队行里，压完再补发，那条
+  // 消息不会被塞进正在重写的历史、也不会混进正在写的摘要。这条用例钉住三件事——
+  // 窗口盖住整段摘要请求、期间的 steer 仍在队列里、窗口关闭后才被送出去。
+  itE2E('auto compact model compaction holds a steer until the maintenance window closes', async () => {
+    mock!.state.mode = 'tool';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.inputTokens = 10;
+    // 摘要要真的有内容可压：`preserveRecentMessages: 8` 之外还得有历史，所以先跑几轮
+    // 工具调用把消息攒够（一轮两条）。
+    mock!.state.toolRounds = 4;
+    mock!.state.toolFileContent = 'y'.repeat(20_000);
+    mock!.state.toolFileContent2 = 'y'.repeat(20_000);
+    // 摘要请求在飞的那 1.5s 就是窗口：有它才有地方塞一条 steer。
+    mock!.state.delayBeforeTextMs = 1_500;
+
+    const home = makeHome('auto-compact-window');
+    mkdirSync(join(home, 'plugin-settings'), { recursive: true });
+    writeFileSync(
+      join(home, 'plugin-settings', 'auto-compact.json'),
+      JSON.stringify({
+        enabled: 'true',
+        quickThresholdK: '1',
+        // 不做本地清理，直接走模型摘要：这条用例测的是模型压缩那一段。
+        quickLimit: '0',
+        modelThresholdK: '1',
+        modelLimit: '3',
+        minIntervalMinutes: '0',
+      }),
+    );
+
+    const host = spawnHost('auto-compact-window', [], home);
+    hosts.push(host);
+    mock!.state.toolFilePath = join(host.cwd, 'window-notes.txt');
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      threadId: '',
+      input: [{ type: 'text', text: '写几个很大的文件' }],
+      model: 'mock/mock-chat',
+    });
+    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started (maintenance)');
+    const turnId = (started.params?.turn as { id?: string }).id!;
+
+    // 历史攒够之前的那些边界上，插件会立刻放弃摘要（没有请求在飞、窗口一闪而过），
+    // 所以等摘要请求真的上网，再往里塞 steer。
+    const summaryIndex = await waitForMockRequest(
+      (request) => (request.instructions ?? '').includes('compact checkpoint'),
+      'model summary request',
+      30_000,
+    );
+    const openedBeforeSteer = host.lines.filter(
+      (m) => m.method === 'mica/host/maintenance' && m.params?.active === true,
+    );
+    expect(openedBeforeSteer.length).toBeGreaterThan(0);
+    expect(openedBeforeSteer.at(-1)?.params).toMatchObject({
+      active: true,
+      reason: 'compaction',
+      label: '自动压缩',
+    });
+    const mark = host.lines.length;
+    const steerText = '压缩期间的这句话';
+
+    await send(host, 2, 'turn/steer', {
+      threadId: '',
+      expectedTurnId: turnId,
+      input: [{ type: 'text', text: steerText }],
+      clientMessageId: 'optimistic-maintenance',
+    });
+    const queued = await waitForNew(host, mark, (m) => m.method === 'mica/queue/queued', 'queued (maintenance)');
+    expect((queued.params?.input as { id?: string; text?: string }).text).toBe(steerText);
+    expect((queued.params?.input as { id?: string }).id).toBe('optimistic-maintenance');
+    // 队列里的那一格就是它，没有被当成新的一轮（那会立刻发出 turn/started）。
+    expect(
+      host.lines
+        .slice(mark)
+        .some((m) => m.method === 'turn/started' && (m.params?.turn as { id?: string })?.id !== turnId),
+    ).toBe(false);
+
+    // 窗口直到摘要请求收尾才关：`active: false` 到达时那条摘要已经写回来了。
+    const closed = await waitForNew(
+      host,
+      mark,
+      (m) => m.method === 'mica/host/maintenance' && m.params?.active === false,
+      'maintenance closed',
+    );
+    expect(mock!.state.responsesFinished).toBeGreaterThanOrEqual(summaryIndex + 1);
+    // 而且在关窗之前，排队那条一步都没动过。
+    const closedAt = host.lines.indexOf(closed);
+    expect(host.lines.slice(0, closedAt).some((m) => m.method === 'mica/queue/dequeue')).toBe(false);
+
+    await waitFor(host, turnCompleted(turnId), 'turn/completed (maintenance)', 30_000);
+
+    // 最后它还是发出去了——在压缩之后的那次请求里，不是被塞进正在写的摘要。
+    const steerRequestIndex = await waitForMockRequest(
+      (request) => JSON.stringify(request.input ?? []).includes(steerText),
+      'steer delivered after compaction',
+      30_000,
+    );
+    expect(steerRequestIndex).toBeGreaterThan(summaryIndex);
   });
 
   // 真实反馈：来回切焦点、敲几下字，对话里就排出一列「已快速压缩」。轮次之外的压缩已经
