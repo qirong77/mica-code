@@ -448,7 +448,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 「在 Mica 中打开」由 `files:stat` 判类型：文件进编辑器、目录把文件树临时切到那里（`FilesView` 的 `rootOverride`，换会话即作废，树头有「返回工作区」）。任何新入口按路径打开都走 `FilesView.openPath`（第三个参数 `{ focus: true }` 只开编辑器），不要各自 read。
 - 分支评审**复用编辑器**，不另写一套 diff：插件回 `openReview` 时宿主把 `cwd`/`base`/`head` 写进文件页地址（`/files?cwd=&base=&head=`，见 `app-url.js` 的 `detachedFilesUrl`），在**另一个窗口**（`REVIEW_WINDOW_NAME = 'mica-files-review'`，与顶栏那个文件窗口分开：不覆盖用户正在改文件的编辑器）里打开编辑器，页面自己就停在 Git 面板的这份对比上。外壳拦 `window.open` 按 `frameName` 开窗（`openAppPageWindow`），浏览器里就是新窗口，被拦截时才退回当前窗口。编辑器因此有个「提交对提交」模式：`useGitWorkspace` 的 `compare` 非空时改读 `git:ref-summary`、不抓 `status`、不轮询，`FilesView` 把它传给 `GitComparePanel`（标题写「目标分支 · 相对 基线」，不再出现「工作区」）与 `useGitReview`（差异按 `git:file` 的 `refs` 模式读两边提交）。页面里改基线只改地址。Git 面板顶部是**两格选择框**：**原分支**（旧的一侧，`gitCompareBase`）与**目标分支**（右侧，`gitCompareHead`，缺省「工作区」＝以前唯一的那种比较）。两格随时可换，只属于这一页——按仓库记在 ui-state 里，不写会话；目标分支选回「工作区」就退回工作区对比，选成某条分支 / 标签 / 提交时这一页就是「提交对提交」。`direct/合并` 只在工作区侧可用（提交对提交恒定按合并基点算）。`head` 允许只写在远端（`origin/<分支>`）：`git-compare.js` 的 `commitHash` 原名解析不到时会再试一次 `origin/<名字>`，标题里仍显示短名——评审别人的需求时本地没 checkout 过那条分支是最常见的情形。
 - 用户消息超过 10 行默认折叠，含 `[Image]` 的不折叠；折叠态悬停用 `chat-hover-tooltip.jsx`，不用原生 `title`。
-- 回合日志工具行单行省略，点行开 `ToolDetailDialog`；思考整段折行。
+- 回合日志（`TurnLogDock`）是停靠区：挂在滚动区外面、永远贴着输入条。边界只有它自己那一行标题——整行可拖、双击回到跟内容走、箭头收起成一行（收起时高度由内容决定，不沿用拖出来的高度）。工具行单行省略，点行开 `ToolDetailDialog`；思考整段折行。
 - 详情弹窗统一 `chat-modal.jsx` 的 `ModalShell`；`--chat-*` 变量要能穿过 portal。
 - 代码块统一 `CodeView` + `code-highlight.js`，只读着色，不引编辑器运行时。
 - 「在编辑器中打开」把内容作为只读虚拟文档放进应用里唯一的 monaco 实例。
