@@ -4833,27 +4833,20 @@ body.is-resizing-btw {
   align-items: center;
 }
 
-.chat-loop-unit select {
+/* 数字 + 单位是同一个控件：单位下拉跟着外面这条边框走，自己不再画一层。
+   选择器写到 .is-compact 一层，压过配置页里的紧凑尺寸定义。 */
+.chat-loop-unit.is-embed .ui-select.is-compact .ui-select-trigger {
   height: 26px;
-  padding: 0 16px 0 2px;
+  padding: 0 2px;
   border: 0;
+  border-radius: 0;
   background: transparent;
   color: color-mix(in srgb, var(--color-fg-max) 62%, transparent);
-  font-family: var(--chat-font);
   font-size: 11.5px;
-  appearance: none;
-  cursor: pointer;
 }
 
-.chat-loop-unit select:focus {
-  outline: none;
-}
-
-.chat-loop-unit > svg {
-  position: absolute;
-  right: 3px;
-  color: color-mix(in srgb, var(--color-fg-max) 35%, transparent);
-  pointer-events: none;
+.chat-loop-unit.is-embed .ui-select.is-compact .ui-select-trigger:hover {
+  background: transparent;
 }
 
 .chat-loop-every {

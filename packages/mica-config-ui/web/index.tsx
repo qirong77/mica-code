@@ -46,6 +46,15 @@ export { Alert, Button, CollapsiblePanel, Empty, Segmented, SplitView, Tag } fro
 export { PluginSettingInput } from './components/PluginSettingInput.js';
 
 /**
+ * 下拉的唯一实现：设置页与桌面端工具栏共用。
+ *
+ * 原生 `<select>` 的弹层由系统绘制，位置与样式不受页面控制，几百个分支时还会铺满
+ * 整屏；这里一律用这一份（需要时打开过滤框、分组、紧凑尺寸）。
+ */
+export { SelectMenu } from './components/SelectMenu.js';
+export type { SelectMenuOption } from './components/SelectMenu.js';
+
+/**
  * 插件模型接口的配置面板：配置页与会话设置共用。
  *
  * 插件只声明清单里的 `llm`，两个宿主都渲染这一份——「复用当前会话模型」开关、

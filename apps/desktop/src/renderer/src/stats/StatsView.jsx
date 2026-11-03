@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { IconChevronDown } from '@tabler/icons-react'
+import { SelectMenu } from '@mica-config-ui/web'
 import { BarSeries, CalendarHeatmap } from './charts'
 import { SessionDetailModal } from './SessionDetailModal'
 import { bucketByDay, isDayRange, rangeStart, scopeSession } from './scope'
@@ -323,26 +323,17 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
       <div className="p-4">
         <header className="mb-4 flex items-center justify-between gap-2">
           <h2 className={OVERLINE_CLASS}>Contributions</h2>
-          <span className="relative inline-flex items-center">
-            <select
-              value={calendar.year ?? 'trailing'}
-              onChange={(e) =>
-                calendar.onYear(e.target.value === 'trailing' ? null : Number(e.target.value))
-              }
-              className="appearance-none rounded-[4px] border border-line bg-panel-hi py-1.5 pl-3 pr-7 text-xs text-fg-muted focus:outline-none"
-              aria-label="Contributions year"
-            >
-              <option value="trailing">Last 12 months</option>
-              {calendar.years.map((y) => (
-                <option key={y} value={y}>
-                  {y}
-                </option>
-              ))}
-            </select>
-            <IconChevronDown
-              size={12}
-              aria-hidden="true"
-              className="pointer-events-none absolute right-2.5 text-fg-muted"
+          <span className="mica-config-ui is-embed">
+            {/* 年选择是同一份自绘下拉：原生 select 的弹层不受页面控制。 */}
+            <SelectMenu
+              size="compact"
+              value={calendar.year === null ? 'trailing' : String(calendar.year)}
+              options={[
+                { value: 'trailing', label: 'Last 12 months' },
+                ...calendar.years.map((y) => ({ value: String(y), label: String(y) }))
+              ]}
+              ariaLabel="Contributions year"
+              onChange={(next) => calendar.onYear(next === 'trailing' ? null : Number(next))}
             />
           </span>
         </header>

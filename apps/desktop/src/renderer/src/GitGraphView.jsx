@@ -1,16 +1,22 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   IconArrowLeft,
-  IconChevronDown,
   IconCopy,
   IconGitBranch,
   IconGitCommit,
   IconRefresh,
   IconSearch
 } from '@tabler/icons-react'
+import { SelectMenu } from '@mica-config-ui/web'
 import { absoluteTime, relativeTime } from './git-blame'
 import { statusColor, statusLabel } from './git-decorations'
-import { filterCommits, formatChangeCounts, layoutGraph, mergeHistory } from './git-graph'
+import {
+  branchOptions,
+  filterCommits,
+  formatChangeCounts,
+  layoutGraph,
+  mergeHistory
+} from './git-graph'
 import { GitDiffEditor } from './GitDiffEditor'
 
 const ROW_HEIGHT = 26
@@ -118,7 +124,6 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
   const [open, setOpen] = useState(null)
   const [refs, setRefs] = useState({ branches: [], tags: [] })
   const listRef = useRef(null)
-  const selectId = useId()
   const historyKey = JSON.stringify([cwd, branch, retry])
   const skip = page.key === historyKey ? page.skip : 0
 
@@ -294,31 +299,24 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
           <IconRefresh size={14} className={loading ? 'animate-spin' : ''} />
         </Action>
       </header>
-      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line bg-panel px-2 py-1">
-        <label className="sr-only" htmlFor={selectId}>
-          分支
-        </label>
-        <span className="relative inline-flex items-center">
-          <IconGitBranch
-            size={13}
-            className="pointer-events-none absolute left-1.5 text-fg-muted"
-          />
-          <select
-            id={selectId}
+      {/* 工具栏自己开一层：下拉弹层要盖住下面的提交列表，不能被后面的兄弟节点压住。 */}
+      <div className="relative z-10 flex shrink-0 flex-wrap items-center gap-1 border-b border-line bg-panel px-2 py-1">
+        {/* 分支选择器与设置页同一个下拉（见 @mica-config-ui/web）：原生 select 的弹层
+            由系统绘制，几百个分支时会铺满整屏、点不动也关不掉。 */}
+        <span
+          className="mica-config-ui is-embed flex min-w-0 items-center gap-1"
+          style={{ width: 'clamp(120px, 22vw, 220px)' }}
+        >
+          <IconGitBranch size={13} className="shrink-0 text-fg-muted" />
+          <SelectMenu
+            size="compact"
+            filterable
+            filterPlaceholder="筛选分支"
+            menuMinWidth={340}
             value={branch}
-            onChange={(event) => setBranch(event.target.value)}
-            className="h-6 max-w-52 appearance-none truncate rounded-sm border border-line bg-panel-hi pl-6 pr-5 text-[11px] text-fg-soft focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
-          >
-            <option value="">全部分支</option>
-            {refs.branches.map((item) => (
-              <option key={item.ref || item.name} value={item.ref || item.name}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <IconChevronDown
-            size={12}
-            className="pointer-events-none absolute right-1 text-fg-muted"
+            options={branchOptions(refs)}
+            ariaLabel="分支"
+            onChange={setBranch}
           />
         </span>
         <span className="relative inline-flex items-center">

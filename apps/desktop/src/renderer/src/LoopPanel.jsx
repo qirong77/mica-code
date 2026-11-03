@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { IconAlertCircle, IconChevronDown } from '@tabler/icons-react'
+import { IconAlertCircle } from '@tabler/icons-react'
+import { SelectMenu } from '@mica-config-ui/web'
 import {
   DEFAULT_LOOP_MINUTES,
   LOOP_INTERVAL_UNITS,
@@ -100,19 +101,19 @@ export function LoopPanel({
                   setError('')
                 }}
               />
-              <span className="chat-loop-unit">
-                <select
+              <span className="chat-loop-unit mica-config-ui is-embed">
+                {/* 下拉只有 @mica-config-ui/web 那一份：原生 select 的弹层由系统绘制，
+                    在这块浮层里会飘到面板外。 */}
+                <SelectMenu
+                  size="compact"
                   value={unit}
-                  aria-label="间隔单位"
-                  onChange={(event) => setUnit(event.target.value)}
-                >
-                  {LOOP_INTERVAL_UNITS.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                <IconChevronDown size={11} aria-hidden="true" />
+                  options={LOOP_INTERVAL_UNITS.map((item) => ({
+                    value: item.id,
+                    label: item.label
+                  }))}
+                  ariaLabel="间隔单位"
+                  onChange={setUnit}
+                />
               </span>
             </div>
             <span className="chat-loop-every">

@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, mock } from 'bun:test'
+import { spawn } from 'node:child_process'
 
 // Bun module mocks affect the entire test process. Keep these IPC dependency
 // mocks in a separate process so they cannot change other host test files.
@@ -7,7 +8,9 @@ if (process.env.MICA_FILES_TEST_CHILD === '1') {
   const searches = []
 
   mock.module('electron', () => ({
-    app: {}, clipboard: {}, shell: {},
+    app: {},
+    clipboard: {},
+    shell: {},
     ipcMain: { handle: (name, handler) => handlers.set(name, handler) }
   }))
   mock.module('@packages/mica-file-mentions/index.js', () => ({ findFileMentions: mock() }))
@@ -16,7 +19,9 @@ if (process.env.MICA_FILES_TEST_CHILD === '1') {
   mock.module('./search-files', () => ({ listSearchFiles: mock(() => []) }))
   mock.module('./search-core', () => ({
     asciiNeedle: mock(() => null),
-    collectSearchMatches: mock(({ signal }) => new Promise((resolve) => searches.push({ signal, resolve }))),
+    collectSearchMatches: mock(
+      ({ signal }) => new Promise((resolve) => searches.push({ signal, resolve }))
+    ),
     compileQuery: mock(() => ({ ok: true })),
     parseGlobList: mock(() => []),
     passesFileFilters: mock(() => true)
@@ -56,16 +61,22 @@ if (process.env.MICA_FILES_TEST_CHILD === '1') {
   })
 } else {
   it('runs search cancellation tests without leaking module mocks', async () => {
-    const child = Bun.spawn([process.execPath, 'test', import.meta.path], {
+    // bun 的测试运行器在进程内没有全局 `Bun`：走 node:child_process 拉起同一条命令，
+    // 让真正需要 mock 的那一组在独立进程里跑，避免 mock.module 污染同目录其他测试。
+    const child = spawn(process.execPath, ['test', import.meta.path], {
       env: { ...process.env, MICA_FILES_TEST_CHILD: '1' },
-      stdout: 'pipe',
-      stderr: 'pipe'
+      stdio: ['ignore', 'pipe', 'pipe']
     })
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited
-    ])
+    const collect = (stream) =>
+      new Promise((resolve) => {
+        let text = ''
+        stream.on('data', (chunk) => {
+          text += chunk
+        })
+        stream.on('end', () => resolve(text))
+      })
+    const [stdout, stderr] = await Promise.all([collect(child.stdout), collect(child.stderr)])
+    const exitCode = await new Promise((resolve) => child.on('close', resolve))
     expect({ exitCode, stdout, stderr }).toMatchObject({ exitCode: 0 })
   }, 30_000)
 }

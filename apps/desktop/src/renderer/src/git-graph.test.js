@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { filterCommits, formatChangeCounts, layoutGraph, mergeHistory } from './git-graph'
+import {
+  branchOptions,
+  filterCommits,
+  formatChangeCounts,
+  layoutGraph,
+  mergeHistory
+} from './git-graph'
 
 const commit = (hash, parents) => ({ hash, parents })
 
@@ -7,11 +13,17 @@ describe('mergeHistory', () => {
   it('保留已加载的 2000 条并追加下一页，切换历史时替换旧内容', () => {
     const first = Array.from({ length: 2000 }, (_, i) => commit(String(i), []))
     const previous = { commits: first, head: 'old', branch: 'old', more: true }
-    const next = mergeHistory(previous, { commits: [commit('2000', [])], head: 'new', more: false }, 2000)
+    const next = mergeHistory(
+      previous,
+      { commits: [commit('2000', [])], head: 'new', more: false },
+      2000
+    )
     expect(next.commits).toHaveLength(2001)
     expect(next.commits[2000].hash).toBe('2000')
     expect(next.more).toBe(false)
-    expect(mergeHistory(next, { commits: [commit('other', [])] }, 0).commits.map((entry) => entry.hash)).toEqual(['other'])
+    expect(
+      mergeHistory(next, { commits: [commit('other', [])] }, 0).commits.map((entry) => entry.hash)
+    ).toEqual(['other'])
   })
 })
 
@@ -102,5 +114,40 @@ describe('formatChangeCounts', () => {
     expect(formatChangeCounts({ additions: 0, deletions: 0 })).toBe('—')
     expect(formatChangeCounts({ binary: true })).toBe('—')
     expect(formatChangeCounts(null)).toBe('—')
+  })
+})
+
+describe('branchOptions', () => {
+  const refs = {
+    branches: [
+      { name: 'main', ref: 'refs/heads/main', kind: 'branch', current: true },
+      { name: 'origin/main', ref: 'refs/remotes/origin/main', kind: 'remote' },
+      {
+        name: 'origin/feat/ai/a/multi-turn',
+        ref: 'refs/remotes/origin/feat/ai/a/multi-turn',
+        kind: 'remote'
+      }
+    ]
+  }
+
+  it('「全部分支」在最前，本地与远端分组排列', () => {
+    expect(branchOptions(refs).map((item) => [item.value, item.group])).toEqual([
+      ['', undefined],
+      ['refs/heads/main', '本地分支'],
+      ['refs/remotes/origin/main', '远端分支'],
+      ['refs/remotes/origin/feat/ai/a/multi-turn', '远端分支']
+    ])
+  })
+
+  it('当前分支在标签上标出来，值仍是 git 认得的全名', () => {
+    expect(branchOptions(refs)[1]).toEqual({
+      value: 'refs/heads/main',
+      label: 'main（当前）',
+      group: '本地分支'
+    })
+  })
+
+  it('没有 refs 时只剩「全部分支」', () => {
+    expect(branchOptions(null)).toEqual([{ value: '', label: '全部分支' }])
   })
 })

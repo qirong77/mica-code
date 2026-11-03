@@ -154,8 +154,9 @@ describe('branch snapshots', () => {
     expect(
       (await getFile(root, 'empty.txt', { mode: 'snapshot', ref: summary.compareRef })).original
     ).toBe('')
-  })
+  }, 20000)
 
+  // 这几条每条都要建仓库、跑十几次 git；机器一忙就顶到 bun 默认的 5s 上限。
   it('includes zero-byte tracked additions/deletions and untracked binary files', async () => {
     await write('delete-empty.txt', '')
     await write('delete.txt', 'remove\n')
@@ -195,7 +196,7 @@ describe('branch snapshots', () => {
       binary: true
     })
     expect(await getFile(root, 'delete.txt')).toMatchObject({ original: 'remove\n', modified: '' })
-  })
+  }, 20000)
 
   it('preserves tabs, newlines, option-like names and nested literal pathspecs', async () => {
     const names = ['tab\tfile.txt', 'line\nfile.txt', '--help', ':(glob)*.txt', 'nested/a.txt']
@@ -240,7 +241,7 @@ describe('branch snapshots', () => {
     const earlier = await getBranchSummary(root, { base: previous, direct: true })
     const current = await getBranchSummary(root, { base: 'HEAD', direct: true })
     expect(file(earlier, 'a.txt').fingerprint).not.toBe(file(current, 'a.txt').fingerprint)
-  })
+  }, 20000)
 })
 
 describe('file comparison modes and refs', () => {

@@ -125,3 +125,23 @@ export function mergeHistory(previous, page, skip) {
     more: Boolean(page.more)
   }
 }
+
+/**
+ * 分支下拉的选项：本地与远端分组，当前分支带标记。
+ *
+ * 大仓库里远端分支动辄几百条（`origin/feat/ai/<人名>/<特性>`），平铺一列既找不到，
+ * 原生弹层还会铺满整屏；分组 + 可筛选是这块界面能用的前提。
+ */
+export function branchOptions(refs) {
+  const branches = Array.isArray(refs?.branches) ? refs.branches : []
+  const option = (item, group) => ({
+    value: item.ref || item.name,
+    label: item.current ? `${item.name}（当前）` : item.name,
+    group
+  })
+  return [
+    { value: '', label: '全部分支' },
+    ...branches.filter((item) => item.kind !== 'remote').map((item) => option(item, '本地分支')),
+    ...branches.filter((item) => item.kind === 'remote').map((item) => option(item, '远端分支'))
+  ]
+}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { SessionDetailView } from '@mica-config-ui/web'
+import { SelectMenu, SessionDetailView } from '@mica-config-ui/web'
 import { USAGE_SOURCE_LABELS, usageSourceOf } from '@packages/mica-web-shared/usage-source.js'
 import { ModalShell } from '../chat-modal'
 
@@ -164,25 +164,25 @@ function UsageTable({
         </table>
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-1.5">
-        <label className="flex items-center gap-1 text-[10px] text-fg-faint">
+        <div className="flex items-center gap-1 text-[10px] text-fg-faint">
           每页
-          <select
-            value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value))
-              setPage(0)
-            }}
-            className="rounded-[4px] border border-line bg-panel-hi px-1.5 py-0.5 font-mono text-[10px] text-fg-muted"
-            aria-label="每页条数"
-          >
-            {pageSizeOptions.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
+          <span className="mica-config-ui is-embed">
+            <SelectMenu
+              size="compact"
+              value={String(pageSize)}
+              options={pageSizeOptions.map((size) => ({
+                value: String(size),
+                label: String(size)
+              }))}
+              ariaLabel="每页条数"
+              onChange={(next) => {
+                setPageSize(Number(next))
+                setPage(0)
+              }}
+            />
+          </span>
           条
-        </label>
+        </div>
         {totalPages > 1 && (
           <div className="flex items-center gap-1.5">
             <button

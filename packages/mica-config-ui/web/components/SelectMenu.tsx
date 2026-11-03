@@ -1,11 +1,14 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { appIcons } from '../icons.js';
+import {
+  buildSelectMenuRows,
+  filterSelectOptions,
+  nextSelectMenuIndex,
+  selectMenuStartIndex,
+} from './selectMenuModel.js';
+import type { SelectMenuOption } from './selectMenuModel.js';
 
-export type SelectMenuOption = {
-  value: string;
-  label?: string;
-  disabled?: boolean;
-};
+export type { SelectMenuOption };
 
 type SelectMenuProps = {
   id?: string;
@@ -18,15 +21,30 @@ type SelectMenuProps = {
   disabled?: boolean;
   invalid?: boolean;
   ariaLabel?: string;
+  /**
+   * 选项多到滚不完时打开过滤框（分支名、模型名）。打开即聚焦，输入按空白拆词全命中。
+   */
+  filterable?: boolean;
+  filterPlaceholder?: string;
+  /** 过滤后没有匹配项时的文案。 */
+  emptyLabel?: string;
+  /**
+   * 弹层最小宽度（px）。触发器常常被压得很窄，长标签在弹层里要能看全，
+   * 不给就与触发器同宽。
+   */
+  menuMinWidth?: number;
+  /** `compact` 是密集工具栏里的尺寸（24px 高、11px 字），与旁边的输入框对齐。 */
+  size?: 'default' | 'compact';
   onChange(value: string): void;
 };
 
 /**
  * 自绘下拉。
  *
- * 原生 select 的弹层由 macOS 窗口系统绘制：位置、圆角、勾选标记都不受页面控制，在桌面端
- * 内嵌视图里会飘到控件外、和页面风格对不上。这里用一个按钮 + 绝对定位的列表替掉它，
- * 外观与 .text-input 对齐，键盘也按 listbox 的习惯走（↑↓ 移动、Enter/Space 选中、Esc 关闭）。
+ * 原生 select 的弹层由系统窗口绘制：位置、圆角、勾选标记都不受页面控制，在桌面端
+ * 内嵌视图里会飘到控件外、和页面风格对不上；几百个分支时还会铺满整屏。这里用一个
+ * 按钮 + 绝对定位的列表替掉它，外观与 .text-input 对齐，键盘按 listbox 的习惯走
+ * （↑↓ 移动、Enter/Space 选中、Esc 关闭），选项过多时打开过滤框并限高滚动。
  */
 export function SelectMenu({
   id,
@@ -37,23 +55,47 @@ export function SelectMenu({
   disabled = false,
   invalid = false,
   ariaLabel,
+  filterable = false,
+  filterPlaceholder = '搜索',
+  emptyLabel = '无匹配项',
+  menuMinWidth,
+  size = 'default',
   onChange,
 }: SelectMenuProps) {
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
   const rootRef = useRef<HTMLSpanElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const filterRef = useRef<HTMLInputElement | null>(null);
   const listId = useId();
   const ChevronIcon = appIcons.chevronDown;
 
+  const shown = useMemo(
+    () => (filterable ? filterSelectOptions(options, filter) : [...options]),
+    [filterable, filter, options],
+  );
+  const rows = useMemo(() => buildSelectMenuRows(shown), [shown]);
   const selectedIndex = options.findIndex((option) => option.value === value);
   const current = selectedIndex >= 0 ? (options[selectedIndex].label ?? options[selectedIndex].value) : undefined;
   const text = current ?? fallbackLabel ?? placeholder;
 
-  // 收起时不需要记住高亮位置：每次展开都从当前值那一项开始。
+  // 收起时把过滤与高亮都清掉：每次展开都是「按当前值开始」的一屏。
   useEffect(() => {
-    if (!open) setActiveIndex(-1);
+    if (open) return;
+    setActiveIndex(-1);
+    setFilter('');
   }, [open]);
+
+  // 打开过滤框时立即聚焦，用户可以直接打字。
+  useEffect(() => {
+    if (!open) return;
+    if (filterable) {
+      filterRef.current?.focus();
+      return;
+    }
+    setActiveIndex(selectMenuStartIndex(shown, value));
+  }, [open, filterable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open) return;
@@ -70,35 +112,59 @@ export function SelectMenu({
     if (!open || activeIndex < 0) return;
     const item = listRef.current?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`);
     item?.scrollIntoView({ block: 'nearest' });
-  }, [open, activeIndex]);
+  }, [open, activeIndex, rows]);
 
   function commit(index: number) {
-    const option = options[index];
+    const option = shown[index];
     if (!option || option.disabled) return;
     setOpen(false);
+    setFilter('');
     if (option.value !== value) onChange(option.value);
   }
 
   function move(step: number) {
-    if (options.length === 0) return;
-    const from = activeIndex < 0 ? (selectedIndex >= 0 ? selectedIndex : 0) : activeIndex + step;
-    let next = from;
-    for (let tries = 0; tries < options.length; tries += 1) {
-      next = (next + options.length) % options.length;
-      if (!options[next].disabled) break;
-      next += step >= 0 ? 1 : -1;
-      next = (next + options.length) % options.length;
-    }
-    setActiveIndex(next);
+    const start = activeIndex < 0 ? (filter ? -1 : selectMenuStartIndex(shown, value)) : activeIndex;
+    const next = nextSelectMenuIndex(shown, start, step);
+    if (next >= 0) setActiveIndex(next);
   }
 
-  function onKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+  function onMenuKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        move(1);
+        return;
+      case 'ArrowUp':
+        event.preventDefault();
+        move(-1);
+        return;
+      case 'Enter':
+        event.preventDefault();
+        if (activeIndex >= 0) commit(activeIndex);
+        else if (filter) {
+          // 输入过筛选项时直接回车＝选第一条匹配，不用先按方向键。
+          const first = shown.findIndex((option) => !option.disabled);
+          if (first >= 0) commit(first);
+        }
+        return;
+      case 'Escape':
+        event.preventDefault();
+        setOpen(false);
+        return;
+      default:
+    }
+  }
+
+  function onTriggerKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
     if (disabled) return;
     switch (event.key) {
       case 'ArrowDown':
       case 'ArrowUp':
         event.preventDefault();
-        if (!open) setOpen(true);
+        if (!open) {
+          setOpen(true);
+          return;
+        }
         move(event.key === 'ArrowDown' ? 1 : -1);
         return;
       case 'Enter':
@@ -108,7 +174,7 @@ export function SelectMenu({
           setOpen(true);
           return;
         }
-        commit(activeIndex >= 0 ? activeIndex : selectedIndex);
+        if (activeIndex >= 0) commit(activeIndex);
         return;
       case 'Escape':
         if (open) {
@@ -119,12 +185,12 @@ export function SelectMenu({
       case 'Home':
         if (!open) return;
         event.preventDefault();
-        setActiveIndex(0);
+        setActiveIndex(nextSelectMenuIndex(shown, -1, 1));
         return;
       case 'End':
         if (!open) return;
         event.preventDefault();
-        setActiveIndex(options.length - 1);
+        setActiveIndex(nextSelectMenuIndex(shown, 0, -1));
         return;
       default:
         return;
@@ -132,7 +198,12 @@ export function SelectMenu({
   }
 
   return (
-    <span className={`ui-select${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}`} ref={rootRef}>
+    <span
+      className={`ui-select${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}${
+        size === 'compact' ? ' is-compact' : ''
+      }`}
+      ref={rootRef}
+    >
       <button
         id={id}
         type="button"
@@ -145,37 +216,66 @@ export function SelectMenu({
         aria-invalid={invalid || undefined}
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
-        onKeyDown={onKeyDown}
+        onKeyDown={onTriggerKeyDown}
       >
         <span className={`ui-select-value${current ? '' : ' is-placeholder'}`}>{text}</span>
-        <ChevronIcon className="ui-select-chevron" size={14} aria-hidden="true" />
+        <ChevronIcon className="ui-select-chevron" size={size === 'compact' ? 12 : 14} aria-hidden="true" />
       </button>
       {open ? (
-        <div className="ui-select-menu" role="listbox" id={listId} aria-label={ariaLabel} ref={listRef}>
-          {options.map((option, index) => {
-            const selected = option.value === value;
-            return (
-              <div
-                key={`${option.value}-${index}`}
-                data-index={index}
-                role="option"
-                aria-selected={selected}
-                className={`ui-select-option${selected ? ' is-selected' : ''}${
-                  index === activeIndex ? ' is-active' : ''
-                }${option.disabled ? ' is-disabled' : ''}`}
-                onMouseEnter={() => setActiveIndex(index)}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => commit(index)}
-              >
-                <span className="ui-select-option-text">{option.label ?? option.value}</span>
-                {selected ? (
-                  <span className="ui-select-check" aria-hidden="true">
-                    ✓
-                  </span>
-                ) : null}
-              </div>
-            );
-          })}
+        <div className="ui-select-menu" style={menuMinWidth ? { minWidth: menuMinWidth } : undefined}>
+          {filterable ? (
+            <div className="ui-select-filter">
+              <input
+                ref={filterRef}
+                type="text"
+                className="ui-select-filter-input"
+                value={filter}
+                placeholder={filterPlaceholder}
+                aria-label={filterPlaceholder}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(event) => {
+                  setFilter(event.target.value);
+                  setActiveIndex(-1);
+                }}
+                onKeyDown={onMenuKeyDown}
+              />
+            </div>
+          ) : null}
+          <div className="ui-select-list" role="listbox" id={listId} aria-label={ariaLabel} ref={listRef}>
+            {rows.length === 0 ? (
+              <div className="ui-select-empty">{emptyLabel}</div>
+            ) : (
+              rows.map((row) =>
+                row.kind === 'group' ? (
+                  <div key={`group-${row.label}`} className="ui-select-group" role="presentation">
+                    {row.label}
+                  </div>
+                ) : (
+                  <div
+                    key={`${row.option.value}-${row.index}`}
+                    data-index={row.index}
+                    role="option"
+                    aria-selected={row.option.value === value}
+                    className={`ui-select-option${
+                      row.option.value === value ? ' is-selected' : ''
+                    }${row.index === activeIndex ? ' is-active' : ''}${row.option.disabled ? ' is-disabled' : ''}`}
+                    title={row.option.label ?? row.option.value}
+                    onMouseEnter={() => setActiveIndex(row.index)}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => commit(row.index)}
+                  >
+                    <span className="ui-select-option-text">{row.option.label ?? row.option.value}</span>
+                    {row.option.value === value ? (
+                      <span className="ui-select-check" aria-hidden="true">
+                        ✓
+                      </span>
+                    ) : null}
+                  </div>
+                ),
+              )
+            )}
+          </div>
         </div>
       ) : null}
     </span>
