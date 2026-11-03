@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { appIcons } from '../icons.js';
 
@@ -9,8 +10,14 @@ type ButtonProps = {
   pressed?: boolean;
   autoFocus?: boolean;
   variant?: 'primary' | 'danger' | 'default' | 'ghost';
+  /** `compact` 是密集工具栏里的尺寸（24px 高、11px 字），与 `SelectMenu` / `DateField` 对齐。 */
+  size?: 'default' | 'compact';
+  /** 撑满一行：列表里的「加载更早」这类整行按钮。 */
+  fullWidth?: boolean;
   title?: string;
   ariaLabel?: string;
+  /** 富文本工具栏：`mousedown` 里 `preventDefault()` 保住编辑器选区，命令仍走 `onClick`。 */
+  onMouseDown?(event: { preventDefault(): void }): void;
   onClick(): void;
 };
 
@@ -22,14 +29,19 @@ export function Button({
   pressed,
   autoFocus = false,
   variant = 'default',
+  size = 'default',
+  fullWidth = false,
   title,
   ariaLabel,
+  onMouseDown,
   onClick,
 }: ButtonProps) {
   const variantClass = BUTTON_VARIANTS[variant];
   return (
     <button
-      className={`ui-button ${variantClass}${children ? '' : ' ui-button-icon-only'}${loading ? ' ui-button-loading' : ''}`}
+      className={`ui-button ${variantClass}${children ? '' : ' ui-button-icon-only'}${
+        loading ? ' ui-button-loading' : ''
+      }${size === 'compact' ? ' ui-button-compact' : ''}${fullWidth ? ' ui-button-full' : ''}`}
       type="button"
       title={title}
       aria-label={ariaLabel ?? (!children ? title : undefined)}
@@ -37,6 +49,7 @@ export function Button({
       disabled={loading || disabled}
       aria-pressed={pressed}
       autoFocus={autoFocus}
+      onMouseDown={onMouseDown}
       onClick={onClick}
     >
       {/* 没有图标时不渲染占位：空的 14px 图标格加 gap 会把文字挤偏中心 10px，
@@ -72,6 +85,7 @@ export function Segmented({
   ariaLabel,
   id,
   disabled = false,
+  size = 'default',
 }: {
   value: string;
   options: { value: string; label: string }[];
@@ -79,9 +93,16 @@ export function Segmented({
   ariaLabel?: string;
   id?: string;
   disabled?: boolean;
+  /** `compact` 与 `Button` / `SelectMenu` / `DateField` 的紧凑尺寸等高（24px）。 */
+  size?: 'default' | 'compact';
 }) {
   return (
-    <div className="config-segmented" role="group" aria-label={ariaLabel} id={id}>
+    <div
+      className={`config-segmented${size === 'compact' ? ' is-compact' : ''}`}
+      role="group"
+      aria-label={ariaLabel}
+      id={id}
+    >
       {options.map((option) => (
         <button
           key={option.value}
@@ -136,11 +157,70 @@ export function Switch({ checked, id, label, onChange, disabled = false }: Switc
   );
 }
 
-export function Empty({ description }: { description: string }) {
+type EmptyProps = {
+  /** 一句话说明「这里什么都没有」。 */
+  title?: string;
+  description: string;
+  /** 补充说明（操作提示这类第二段）：比正文小一档。 */
+  hint?: string;
+  /** 空态下的动作，通常是 1～2 个 `Button`。 */
+  children?: ReactNode;
+};
+
+export function Empty({ title, description, hint, children }: EmptyProps) {
   return (
     <div className="ui-empty-wrap">
-      <div className="ui-empty">{description}</div>
+      <div className="ui-empty">
+        {title ? <p className="ui-empty-title">{title}</p> : null}
+        <p className="ui-empty-description">{description}</p>
+        {hint ? <p className="ui-empty-hint">{hint}</p> : null}
+        {children ? <div className="ui-empty-actions">{children}</div> : null}
+      </div>
     </div>
+  );
+}
+
+type CheckboxProps = {
+  checked: boolean;
+  /** 部分选中（父级目录里只有一部分文件勾上）。 */
+  mixed?: boolean;
+  label: string;
+  title?: string;
+  disabled?: boolean;
+  size?: 'default' | 'compact';
+  onChange(next: boolean): void;
+};
+
+/**
+ * 勾选框：清单里逐条「标记 / 选中」用它，`Switch` 只用于「开 / 关某个能力」。
+ *
+ * 原生 checkbox 各平台的勾与底色都不一样（macOS 是系统蓝），在深色界面上格格不入；
+ * 这里保留原生 input 的可访问性与键盘行为，只把外观换成主题色。
+ */
+export function Checkbox({
+  checked,
+  mixed = false,
+  label,
+  title,
+  disabled = false,
+  size = 'default',
+  onChange,
+}: CheckboxProps) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = mixed;
+  }, [mixed]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      className={`ui-checkbox${size === 'compact' ? ' is-compact' : ''}`}
+      checked={checked}
+      disabled={disabled}
+      aria-label={label}
+      title={title ?? label}
+      onChange={(event) => onChange(event.target.checked)}
+    />
   );
 }
 

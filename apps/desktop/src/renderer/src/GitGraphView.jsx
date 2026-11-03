@@ -7,7 +7,7 @@ import {
   IconRefresh,
   IconSearch
 } from '@tabler/icons-react'
-import { SelectMenu } from '@mica-config-ui/web'
+import { Button, SelectMenu } from '@mica-config-ui/web'
 import { absoluteTime, relativeTime } from './git-blame'
 import { statusColor, statusLabel } from './git-decorations'
 import {
@@ -22,17 +22,6 @@ import { GitDiffEditor } from './GitDiffEditor'
 const ROW_HEIGHT = 26
 const LANE_WIDTH = 14
 const LANE_PAD = 8
-
-const ACTION =
-  'inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-sm px-1.5 text-fg-muted hover:bg-panel-hi hover:text-fg-strong disabled:pointer-events-none disabled:opacity-40 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent'
-
-function Action({ title, children, ...props }) {
-  return (
-    <button type="button" title={title} aria-label={title} className={ACTION} {...props}>
-      {children}
-    </button>
-  )
-}
 
 const BADGE = 'shrink-0 rounded-sm border px-1 text-[10px] leading-4'
 
@@ -252,14 +241,17 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
 
   if (open) {
     return (
-      <div className="flex h-full min-h-0 flex-col">
-        <button
-          type="button"
-          className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-2 text-[12px] text-fg-muted hover:text-fg-strong"
-          onClick={() => setOpen(null)}
-        >
-          <IconArrowLeft size={14} /> 返回图谱
-        </button>
+      <div className="mica-config-ui is-embed is-fill flex h-full min-h-0 flex-col">
+        <div className="flex h-8 shrink-0 items-center border-b border-line px-2">
+          <Button
+            variant="ghost"
+            size="compact"
+            icon={<IconArrowLeft size={14} />}
+            onClick={() => setOpen(null)}
+          >
+            返回图谱
+          </Button>
+        </div>
         <div className="min-h-0 flex-1">
           <GitDiffEditor
             cwd={cwd}
@@ -282,12 +274,16 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col text-[12px]">
+    <div className="mica-config-ui is-embed is-fill flex h-full min-h-0 flex-col text-[12px]">
       <header className="flex h-[35px] shrink-0 items-center gap-2 border-b border-line px-3">
         {mobile && (
-          <Action title="返回文件列表" onClick={onClose}>
-            <IconArrowLeft size={14} />
-          </Action>
+          <Button
+            variant="ghost"
+            size="compact"
+            icon={<IconArrowLeft size={14} />}
+            title="返回文件列表"
+            onClick={onClose}
+          />
         )}
         <IconGitCommit size={16} className="shrink-0 text-fg-muted" />
         <span className="shrink-0 font-semibold text-fg-strong">Git 图谱</span>
@@ -295,16 +291,21 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
           {history.branch ? `当前分支 ${history.branch} · ` : ''}
           {history.commits.length} 个提交
         </span>
-        <Action title="刷新" disabled={loading} onClick={() => setRetry((value) => value + 1)}>
-          <IconRefresh size={14} className={loading ? 'animate-spin' : ''} />
-        </Action>
+        <Button
+          variant="ghost"
+          size="compact"
+          icon={<IconRefresh size={14} className={loading ? 'animate-spin' : ''} />}
+          title="刷新"
+          disabled={loading}
+          onClick={() => setRetry((value) => value + 1)}
+        />
       </header>
       {/* 工具栏自己开一层：下拉弹层要盖住下面的提交列表，不能被后面的兄弟节点压住。 */}
       <div className="relative z-10 flex shrink-0 flex-wrap items-center gap-1 border-b border-line bg-panel px-2 py-1">
         {/* 分支选择器与设置页同一个下拉（见 @mica-config-ui/web）：原生 select 的弹层
             由系统绘制，几百个分支时会铺满整屏、点不动也关不掉。 */}
         <span
-          className="mica-config-ui is-embed flex min-w-0 items-center gap-1"
+          className="flex min-w-0 items-center gap-1"
           style={{ width: 'clamp(120px, 22vw, 220px)' }}
         >
           <IconGitBranch size={13} className="shrink-0 text-fg-muted" />
@@ -327,7 +328,7 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
             placeholder="搜索说明、作者或提交号"
             spellCheck={false}
             onChange={(event) => setQuery(event.target.value)}
-            className="h-6 w-56 rounded-sm border border-line bg-panel-hi pl-6 pr-1.5 text-[11px] text-fg-soft placeholder:text-fg-faint focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+            className="text-input is-compact w-56 pl-6"
           />
         </span>
         <span className="text-[11px] text-fg-dim">
@@ -402,14 +403,17 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
             )
           })}
           {history.more && !query && (
-            <button
-              type="button"
-              className="w-full border-t border-line py-1.5 text-[11px] text-fg-muted hover:bg-overlay"
-              disabled={loading}
-              onClick={() => setPage({ key: historyKey, skip: history.commits.length })}
-            >
-              加载更早的提交
-            </button>
+            <div className="border-t border-line py-1.5">
+              <Button
+                variant="ghost"
+                size="compact"
+                fullWidth
+                disabled={loading}
+                onClick={() => setPage({ key: historyKey, skip: history.commits.length })}
+              >
+                加载更早的提交
+              </Button>
+            </div>
           )}
         </div>
         <aside className="flex min-h-0 w-full shrink-0 flex-col overflow-auto border-t border-line bg-panel md:w-[320px] md:border-l md:border-t-0">
@@ -435,9 +439,13 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
                     <dt className="w-12 shrink-0">提交</dt>
                     <dd className="flex min-w-0 items-center gap-1">
                       <span className="truncate font-mono text-fg-soft">{detail.commit.hash}</span>
-                      <Action title="复制提交号" onClick={() => copyHash(detail.commit.hash)}>
-                        <IconCopy size={12} />
-                      </Action>
+                      <Button
+                        variant="ghost"
+                        size="compact"
+                        icon={<IconCopy size={12} />}
+                        title="复制提交号"
+                        onClick={() => copyHash(detail.commit.hash)}
+                      />
                     </dd>
                   </div>
                   <div className="flex gap-2">

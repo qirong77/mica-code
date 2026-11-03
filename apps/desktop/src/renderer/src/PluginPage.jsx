@@ -43,7 +43,10 @@ export function PluginPage({ entry, onClose }) {
             {entry.page.title || entry.label}
           </span>
         </header>
-        <div className="min-h-0 flex-1 overflow-hidden">
+        {/* 插件页面与设置页共用同一套控件（`@mica-config-ui/web`），那些样式限定在
+            `.mica-config-ui` 作用域内，所以整页内容外面必须套这一层。`is-fill` 让它
+            占满剩下的高度，时间轴这类要整块空间的界面才铺得开。 */}
+        <div className="mica-config-ui is-embed is-fill min-h-0 flex-1 overflow-hidden">
           <Suspense
             fallback={
               <div className="grid h-full place-items-center text-xs text-fg-muted">正在加载…</div>

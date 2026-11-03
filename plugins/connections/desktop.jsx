@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Pencil, Trash2 } from 'lucide-react';
+import { Alert, Button, ConfigSwitch as Switch, Tag } from '@mica-config-ui/web';
 import { DEFAULT_RUNTIME_URL, isLoopbackRuntime, relayTokenOf, runtimeLabel } from '@packages/mica-web-shared/index.js';
 import { MAX_PEER_NOTE_LENGTH, emptyPeerStore, findPeer, peerRows, rememberPeer, samePeer, setPeerNote } from './peers';
 import { createPeerPersistence } from './persistence';
@@ -196,7 +197,9 @@ export default function ConnectionsCard({ api, onClose }) {
   );
 
   return (
-    <>
+    // 共享控件与共享样式都限定在 `.mica-config-ui` 作用域内：宿主给插件整页套了这一层，
+    // 但入口卡片是浮层里的独立容器、没有它，所以这里自己套一层（宿主也套时嵌套无副作用）。
+    <div className="mica-config-ui is-embed">
       <h2 className="mb-1 text-sm font-semibold text-fg-max">Connections</h2>
       <p className="mb-2.5 text-[11px] leading-4 text-fg-muted">
         连接到另一台机器上的 Mica 运行时，文件、终端、会话都来自那台机器（在当前窗口之外打开）。
@@ -209,7 +212,7 @@ export default function ConnectionsCard({ api, onClose }) {
             <span className="block truncate text-[11px] text-fg-dim">{displayAddress(current)}</span>
             {currentEntry?.note && <span className="block truncate text-[11px] text-fg-soft">{currentEntry.note}</span>}
           </span>
-          <span className="shrink-0 text-[10px] text-success-soft">当前</span>
+          <Tag tone="green">当前</Tag>
           {currentEntry && (
             <>
               <NoteEditButton onClick={() => startNoteEdit(currentEntry.url)} />
@@ -236,7 +239,7 @@ export default function ConnectionsCard({ api, onClose }) {
               <span className="block truncate text-[11px] text-fg-dim">{displayAddress(entry.url)}</span>
               {entry.note && <span className="block truncate text-[11px] text-fg-soft">{entry.note}</span>}
             </button>
-            {busy === entry.url && <span className="shrink-0 text-[10px] text-fg-muted">连接中…</span>}
+            {busy === entry.url && <Tag tone="blue">连接中…</Tag>}
             <NoteEditButton onClick={() => startNoteEdit(entry.url)} />
             <DeletePeerButton disabled={Boolean(busy)} onClick={() => void removePeer(entry.url)} />
           </div>
@@ -254,22 +257,18 @@ export default function ConnectionsCard({ api, onClose }) {
           <Monitor size={13} className="shrink-0" />
           <span className="shrink-0">本机</span>
           <span className="min-w-0 flex-1 truncate text-[10px] text-fg-dim">{DEFAULT_RUNTIME_URL}</span>
-          {busy === DEFAULT_RUNTIME_URL && <span className="text-[10px]">连接中…</span>}
+          {busy === DEFAULT_RUNTIME_URL && <Tag tone="blue">连接中…</Tag>}
         </button>
       )}
 
-      {error && (
-        <div className="mb-2 rounded-sm border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-xs leading-relaxed text-danger">
-          {error}
-        </div>
-      )}
+      {error && <Alert message={error} />}
 
       <div className="flex gap-2">
         <input
           value={value}
           spellCheck={false}
           placeholder="192.168.1.5:8787 或 https://…/?t=…"
-          className="h-8 min-w-0 flex-1 rounded-sm border border-line bg-overlay-subtle px-2.5 text-xs text-fg-strong focus:border-line-strong"
+          className="text-input min-w-0 flex-1"
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
@@ -278,17 +277,12 @@ export default function ConnectionsCard({ api, onClose }) {
             }
           }}
         />
-        <button
-          type="button"
-          disabled={!value.trim() || Boolean(busy)}
-          className="h-8 shrink-0 rounded-sm bg-overlay-strong px-3.5 text-xs text-fg-strong hover:bg-overlay-heavy disabled:text-fg-ghost"
-          onClick={() => void connect(value)}
-        >
+        <Button variant="primary" disabled={!value.trim() || Boolean(busy)} onClick={() => void connect(value)}>
           连接
-        </button>
+        </Button>
       </div>
       <RemoteAccess api={api} />
-    </>
+    </div>
   );
 }
 
@@ -364,24 +358,13 @@ function RemoteAccess({ api }) {
     <div className="mt-3 border-t border-line pt-2.5">
       <div className="mb-1 flex items-center gap-2">
         <span className="min-w-0 flex-1 text-[11px] text-fg-soft">局域网/公网可访问</span>
-        {saved && <span className="shrink-0 text-[10px] text-success-soft">已保存</span>}
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          aria-label="局域网/公网可访问"
+        {saved && <Tag tone="green">已保存</Tag>}
+        <Switch
+          checked={enabled}
+          label="局域网/公网可访问"
           disabled={!state || busy}
-          className={`relative h-4 w-7 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-            enabled ? 'bg-success/70' : 'bg-overlay-heavy'
-          }`}
-          onClick={() => void patch({ enabled: !enabled })}
-        >
-          <span
-            className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${
-              enabled ? 'left-3.5' : 'left-0.5'
-            }`}
-          />
-        </button>
+          onChange={(next) => void patch({ enabled: next })}
+        />
       </div>
       {enabled && (
         <div className="mt-1.5 flex items-center gap-2">
@@ -391,7 +374,7 @@ function RemoteAccess({ api }) {
             maxLength={64}
             aria-label="访问口令"
             placeholder="访问口令"
-            className="h-7 min-w-0 flex-1 rounded-sm border border-line bg-overlay-subtle px-2 font-mono text-[11px] tracking-wider text-fg-strong placeholder:text-fg-faint focus:border-line-strong"
+            className="text-input min-w-0 flex-1"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
@@ -413,42 +396,40 @@ function RemoteAccess({ api }) {
       )}
 
       {!state && !error && <p className="text-[10px] text-fg-faint">读取中…</p>}
-      {error && (
-        <p className="mt-1 rounded-sm border border-danger/30 bg-danger/10 px-2 py-1 text-[10px] leading-4 text-danger">
-          {error}
-        </p>
-      )}
+      {error && <Alert message={error} />}
     </div>
   );
 }
 
 function DeletePeerButton({ onClick, disabled }) {
   return (
-    <button
-      type="button"
-      title="删除连接记录"
-      aria-label="删除连接记录"
-      disabled={disabled}
-      className="shrink-0 rounded-sm p-0.5 text-fg-dim opacity-0 transition-opacity hover:bg-overlay-strong hover:text-danger focus-visible:opacity-100 group-hover/peer:opacity-100 max-md:opacity-100 disabled:pointer-events-none disabled:opacity-40"
-      onClick={onClick}
-    >
-      <Trash2 size={12} />
-    </button>
+    <span className="shrink-0 opacity-0 transition-opacity group-hover/peer:opacity-100 focus-within:opacity-100 max-md:opacity-100">
+      <Button
+        variant="danger"
+        size="compact"
+        icon={<Trash2 size={12} />}
+        title="删除连接记录"
+        ariaLabel="删除连接记录"
+        disabled={disabled}
+        onClick={onClick}
+      />
+    </span>
   );
 }
 
 /** 行尾的铅笔：鼠标移到这一行才浮出来（触屏没有悬停，常显） */
 function NoteEditButton({ onClick }) {
   return (
-    <button
-      type="button"
-      title="备注"
-      aria-label="备注"
-      className="shrink-0 rounded-sm p-0.5 text-fg-dim opacity-0 transition-opacity hover:bg-overlay-strong hover:text-fg-max group-hover/peer:opacity-100 max-md:opacity-100"
-      onClick={onClick}
-    >
-      <Pencil size={12} />
-    </button>
+    <span className="shrink-0 opacity-0 transition-opacity group-hover/peer:opacity-100 focus-within:opacity-100 max-md:opacity-100">
+      <Button
+        variant="ghost"
+        size="compact"
+        icon={<Pencil size={12} />}
+        title="备注"
+        ariaLabel="备注"
+        onClick={onClick}
+      />
+    </span>
   );
 }
 
@@ -485,7 +466,7 @@ function NoteInput({ value, onChange, onSave, onCancel }) {
         maxLength={MAX_PEER_NOTE_LENGTH}
         spellCheck={false}
         placeholder="备注，如「办公室的 Mac」"
-        className="h-7 min-w-0 flex-1 rounded-sm border border-line bg-overlay-subtle px-2 text-[11px] text-fg-strong placeholder:text-fg-faint focus:border-line-strong"
+        className="text-input min-w-0 flex-1"
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={onKeyDown}
         onBlur={onBlur}

@@ -126,6 +126,14 @@ html[data-theme='light'] .mica-config-ui {
   background: transparent;
 }
 
+/* 内嵌但**占满整块**（插件整页）：高度跟着宿主走，其余同 `is-embed`。
+   写在 `is-embed` 之后，同优先级下这条覆盖掉它的 `height: auto`。 */
+.mica-config-ui.is-embed.is-fill {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
 /* 页面级的根高度链（html/body/#root）不在这里：桌面端把这份样式当视图加载，那条链会以
    「无层级、同优先级、后加载」的身份把应用自己的 `#root` 高度顶掉（移动端的键盘避让就
    靠它，见 apps/desktop/README.md）；谁整页托管这份页面，谁在自己那边写（浏览器宿主见
@@ -609,6 +617,112 @@ html[data-theme='light'] .mica-config-ui {
     border-right-color: transparent;
     border-radius: 999px;
     animation: ui-spin 900ms linear infinite;
+  }
+
+  /* 密集工具栏里的输入框：与 24px 的下拉、日期字段、compact 按钮等高。 */
+  .text-input.is-compact {
+    height: 24px;
+    padding: 0 7px;
+    font-size: var(--text-aux);
+  }
+
+  /* 密集工具栏 / 插件页面顶栏里的尺寸：与 24px 的下拉、日期字段等高。 */
+  .ui-button.ui-button-compact {
+    min-width: 24px;
+    height: 24px;
+    gap: 4px;
+    padding: 0 8px;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-aux);
+  }
+
+  .ui-button.ui-button-compact.ui-button-icon-only {
+    width: 24px;
+    padding: 0;
+  }
+
+  .ui-button.ui-button-compact .ui-button-icon {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* 整行按钮：列表里「加载更早」这类动作撑满一行，仍用同一套外观。 */
+  .ui-button.ui-button-full {
+    width: 100%;
+  }
+
+  /* 勾选框：外观跟主题走，键盘与可访问性仍用原生 input。 */
+  .ui-checkbox {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    flex: none;
+    appearance: none;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    background: var(--bg);
+    cursor: pointer;
+    transition:
+      background 100ms ease,
+      border-color 100ms ease;
+  }
+
+  .ui-checkbox:hover:not(:disabled) {
+    border-color: var(--accent-line);
+  }
+
+  .ui-checkbox:checked,
+  .ui-checkbox:indeterminate {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+
+  /* 勾与横线自绘：不再依赖各平台的系统字形（macOS 是系统蓝，深色界面上很扎眼）。 */
+  .ui-checkbox:checked::after {
+    content: '';
+    display: block;
+    box-sizing: border-box;
+    width: 4px;
+    height: 8px;
+    margin: -1px auto 0;
+    border: solid #fff;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  .ui-checkbox:indeterminate::after {
+    content: '';
+    display: block;
+    width: 8px;
+    height: 2px;
+    margin: 5px auto 0;
+    border-radius: 1px;
+    background: #fff;
+  }
+
+  .ui-checkbox:disabled {
+    /* 禁用态只掉颜色，尺寸与位置不变 */
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .ui-checkbox.is-compact {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+  }
+
+  .ui-checkbox.is-compact:checked::after {
+    width: 3px;
+    height: 6px;
+    margin-top: -1px;
+    border-width: 0 1.5px 1.5px 0;
+  }
+
+  .ui-checkbox.is-compact:indeterminate::after {
+    width: 6px;
+    height: 2px;
+    margin-top: 4px;
   }
 
   .save-status {
@@ -1645,11 +1759,36 @@ html[data-theme='light'] .mica-config-ui {
   }
 
   .ui-empty {
-    max-width: 320px;
+    max-width: 420px;
     text-align: center;
     color: var(--text-soft);
     font-size: var(--text-body);
     line-height: 1.6;
+  }
+
+  .ui-empty-title {
+    margin: 0 0 6px;
+    color: var(--text);
+    font-size: var(--text-subhead);
+    font-weight: 600;
+  }
+
+  .ui-empty-description,
+  .ui-empty-hint {
+    margin: 0;
+  }
+
+  .ui-empty-hint {
+    margin-top: 4px;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+  }
+
+  .ui-empty-actions {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 16px;
   }
 
   .conversation-timeline {
@@ -4055,6 +4194,178 @@ html[data-theme='light'] .mica-config-ui {
     font-size: var(--text-aux);
   }
 
+  /* 日期字段：文本输入 + 自绘月历。原生 `type="date"` 的弹层由系统绘制，
+     位置与配色都不受页面控制，内嵌视图里会飘到控件外。 */
+  .ui-date {
+    position: relative;
+    display: inline-flex;
+    box-sizing: border-box;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ui-date-input {
+    /* 右侧让出一条给日历按钮，文字不会压在图标下面。 */
+    padding-right: 30px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ui-date-trigger {
+    position: absolute;
+    right: 1px;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: calc(var(--control-h) - 4px);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-soft);
+    cursor: pointer;
+  }
+
+  .ui-date-trigger:hover:not(:disabled) {
+    background: var(--panel-muted);
+    color: var(--text);
+  }
+
+  .ui-date-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 40;
+    width: 232px;
+    padding: 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--panel);
+    box-shadow: 0 12px 30px rgb(0 0 0 / 32%);
+  }
+
+  .ui-date-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+
+  .ui-date-title {
+    color: var(--text);
+    font-size: var(--text-body);
+    font-weight: 600;
+  }
+
+  .ui-date-nav {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-soft);
+    cursor: pointer;
+  }
+
+  .ui-date-nav:hover {
+    background: var(--panel-hover);
+    color: var(--text);
+  }
+
+  .ui-date-weekdays,
+  .ui-date-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
+  }
+
+  .ui-date-weekdays {
+    margin-bottom: 2px;
+    color: var(--text-faint);
+    font-size: calc(var(--text-aux) - 1px);
+    text-align: center;
+  }
+
+  .ui-date-day {
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: var(--text-aux);
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+
+  .ui-date-day.is-outside {
+    color: var(--text-faint);
+  }
+
+  .ui-date-day.is-active {
+    background: var(--panel-hover);
+  }
+
+  .ui-date-day.is-today {
+    box-shadow: inset 0 0 0 1px var(--line-strong);
+  }
+
+  .ui-date-day.is-selected {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .ui-date-day:disabled {
+    /* 禁用态只掉颜色，尺寸与位置不动 */
+    color: var(--text-faint);
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .ui-date-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--line);
+  }
+
+  .ui-date-foot-button {
+    height: 22px;
+    padding: 0 7px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-soft);
+    font-family: inherit;
+    font-size: var(--text-aux);
+    cursor: pointer;
+  }
+
+  .ui-date-foot-button:hover {
+    border-color: var(--line);
+    background: var(--panel-hover);
+    color: var(--text);
+  }
+
+  .ui-date.is-compact .ui-date-input {
+    height: 24px;
+    padding: 0 24px 0 6px;
+    font-size: var(--text-aux);
+  }
+
+  .ui-date.is-compact .ui-date-trigger {
+    width: 22px;
+    height: 20px;
+  }
+
   /* 协议二选一：原生 select 的字体与内边距跟旁边的输入框对不齐，所以自绘一组按钮 */
   .config-segmented {
     display: inline-flex;
@@ -4067,6 +4378,13 @@ html[data-theme='light'] .mica-config-ui {
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
     background: var(--bg);
+  }
+
+  /* 密集工具栏：与 24px 的下拉、日期字段、compact 按钮等高。 */
+  .config-segmented.is-compact {
+    height: 24px;
+    padding: 1px;
+    border-radius: var(--radius-sm);
   }
 
   /* 数字项：− / 输入 / + 落在同一条边框里，单位跟在后面。

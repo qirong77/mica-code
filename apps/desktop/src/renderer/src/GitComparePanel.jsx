@@ -18,6 +18,7 @@ import {
   IconX
 } from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
+import { Checkbox } from '@mica-config-ui/web'
 import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
 import { GitComparePicker } from './GitComparePicker'
 import { statusColor, statusLabel } from './git-decorations'
@@ -40,26 +41,26 @@ const ACTION =
   'grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-30'
 
 function ReviewCheckbox({ row, onToggle }) {
-  const ref = useRef(null)
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = row.mixed
-  }, [row.mixed])
   return (
-    <input
-      ref={ref}
-      type="checkbox"
-      checked={row.checked}
-      disabled={!onToggle}
-      tabIndex={-1}
-      aria-label={`${row.checked ? '标记为未审阅' : '标记为已审阅'}：${row.path}`}
-      title={row.mixed ? '部分文件已审阅' : row.checked ? '已审阅 · 点击取消' : '标记为已审阅'}
-      className="mx-1 size-3 shrink-0 cursor-pointer accent-accent opacity-65 hover:opacity-100"
+    // 勾选框只有共享那一份（配置页的清单与这里同一套外观）；样式挂在 `.mica-config-ui`
+    // 作用域下，所以就地包一层内嵌容器。
+    <span
+      className="mica-config-ui is-embed mx-1 flex shrink-0 items-center"
       onClick={(event) => {
         event.stopPropagation()
         event.currentTarget.closest('[role="treeitem"]')?.focus()
       }}
-      onChange={(event) => onToggle?.(row.files, event.target.checked)}
-    />
+    >
+      <Checkbox
+        checked={row.checked}
+        mixed={row.mixed}
+        size="compact"
+        disabled={!onToggle}
+        label={`${row.checked ? '标记为未审阅' : '标记为已审阅'}：${row.path}`}
+        title={row.mixed ? '部分文件已审阅' : row.checked ? '已审阅 · 点击取消' : '标记为已审阅'}
+        onChange={(next) => onToggle?.(row.files, next)}
+      />
+    </span>
   )
 }
 

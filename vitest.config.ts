@@ -63,6 +63,11 @@ export default defineConfig({
       '@packages': fileURLToPath(new URL('./packages', import.meta.url)),
       '@apps': fileURLToPath(new URL('./apps', import.meta.url)),
       '@plugins': fileURLToPath(new URL('./plugins', import.meta.url)),
+      // 插件前端模块（plugins/*/desktop.jsx）与渲染层共用设置页的控件。
+      // 这里必须指到 `index.tsx`：`.js` 不会回退到 `.tsx`（与 electron.vite.config.mjs 一致）。
+      '@mica-config-ui/web': fileURLToPath(
+        new URL('./packages/mica-config-ui/web/index.tsx', import.meta.url),
+      ),
     },
   },
   test: {

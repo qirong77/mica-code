@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Download, Plus, Sparkles, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react';
+import { Alert, Button, Empty, Segmented } from '@mica-config-ui/web';
 import { addDays, daysBetween, todayOf } from './dates.js';
 import {
   BAR_HEIGHT,
@@ -51,6 +52,9 @@ const MAJOR_HEADER_HEIGHT = 24;
 const MINOR_HEADER_HEIGHT = 22;
 /** 滚轮缩放的落盘延迟：一次手势会连发几十个事件，停手之后才写一次。 */
 const ZOOM_SAVE_MS = 400;
+
+/** 日 / 周 / 月：`SCALES` 是时间轴的刻度，工具栏上的分段选择读同一份。 */
+const SCALE_OPTIONS = SCALES.map((item) => ({ value: item.key, label: item.label }));
 
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
@@ -640,130 +644,108 @@ export default function SchedulePage({ api }) {
           <span className="grid size-7 shrink-0 place-items-center rounded-md bg-overlay text-fg-soft">
             <CalendarDays size={15} />
           </span>
-          <input
-            aria-label="排期名称"
-            value={title}
-            onChange={(event) => changeTitle(event.target.value)}
-            onBlur={commitTitleNow}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') event.currentTarget.blur();
-              if (event.key === 'Escape') {
-                setTitle(dataRef.current.title);
-                titleRef.current = dataRef.current.title;
-                titleDirtyRef.current = false;
-                event.currentTarget.blur();
-              }
-            }}
-            maxLength={MAX_TITLE_LENGTH}
-            className="h-6 w-[9rem] rounded-sm border border-transparent bg-transparent px-1 text-[13px] font-semibold text-fg-max outline-none transition-colors hover:border-line focus:border-line-strong focus:bg-canvas sm:w-[14rem]"
-          />
+          <span className="w-[9rem] shrink-0 sm:w-[14rem]">
+            <input
+              aria-label="排期名称"
+              value={title}
+              onChange={(event) => changeTitle(event.target.value)}
+              onBlur={commitTitleNow}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.currentTarget.blur();
+                if (event.key === 'Escape') {
+                  setTitle(dataRef.current.title);
+                  titleRef.current = dataRef.current.title;
+                  titleDirtyRef.current = false;
+                  event.currentTarget.blur();
+                }
+              }}
+              maxLength={MAX_TITLE_LENGTH}
+              className="text-input is-compact font-semibold"
+            />
+          </span>
           {saveState === 'error' ? (
-            <button
-              type="button"
-              title={saveError}
-              onClick={() => void retrySave()}
-              className="hidden shrink-0 text-[10px] text-danger underline-offset-2 hover:underline sm:inline"
-            >
-              {saveStatus}
-            </button>
+            <span className="hidden shrink-0 sm:inline-flex">
+              <Button variant="danger" title={saveError} onClick={() => void retrySave()}>
+                {saveStatus}
+              </Button>
+            </span>
           ) : (
             <span className="hidden shrink-0 text-[10px] text-fg-dim sm:inline">{saveStatus}</span>
           )}
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <div className="flex items-center rounded-md border border-line bg-canvas p-0.5">
-            {SCALES.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                title={`${item.label}视角`}
-                aria-pressed={scale === item.key}
-                onClick={() => changeScale(item.key)}
-                className={`h-6 rounded-sm px-2 text-[11px] transition-colors ${
-                  scale === item.key ? 'bg-overlay text-fg-max shadow-sm' : 'text-fg-muted hover:text-fg-max'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            size="compact"
+            value={scale}
+            options={SCALE_OPTIONS}
+            ariaLabel="时间轴视角"
+            onChange={changeScale}
+          />
 
           <div className="flex items-center gap-0.5">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="compact"
+              icon={<ZoomOut size={14} />}
               title="缩小时间轴（滚轮向下也行）"
               disabled={zoom <= ZOOM_MIN}
               onClick={() => applyZoom(zoom / ZOOM_STEP, null)}
-              className="grid size-6 place-items-center rounded-sm text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max disabled:opacity-40"
-            >
-              <ZoomOut size={13} />
-            </button>
-            <button
-              type="button"
+            />
+            <Button
+              variant="ghost"
+              size="compact"
               title="恢复默认缩放"
               onClick={() => applyZoom(1, null)}
-              className="h-6 min-w-[40px] rounded-sm text-[10px] tabular-nums text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max"
             >
               {Math.round(zoom * 100)}%
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="compact"
+              icon={<ZoomIn size={14} />}
               title="放大时间轴（滚轮向上也行）"
               disabled={zoom >= ZOOM_MAX}
               onClick={() => applyZoom(zoom * ZOOM_STEP, null)}
-              className="grid size-6 place-items-center rounded-sm text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max disabled:opacity-40"
-            >
-              <ZoomIn size={13} />
-            </button>
+            />
           </div>
 
-          <button
-            type="button"
-            title="回到今天"
-            onClick={() => scrollToTodayRef.current()}
-            className="flex h-7 items-center rounded-md border border-line px-2.5 text-[11px] text-fg-soft transition-colors hover:border-line-strong hover:text-fg-max"
-          >
+          <Button size="compact" title="回到今天" onClick={() => scrollToTodayRef.current()}>
             今天
-          </button>
+          </Button>
 
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="compact"
+            icon={<Plus size={14} />}
             title="新建任务"
             onClick={() => openCreateDialog(today, addDays(today, 4))}
-            className="flex h-7 items-center gap-1 rounded-md border border-line-strong bg-overlay-subtle px-2.5 text-[11px] font-medium text-fg-max transition-colors hover:bg-overlay"
           >
-            <Plus size={12} />
             新增任务
-          </button>
+          </Button>
 
           <div className="flex items-center">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="compact"
+              icon={<Download size={14} />}
               title="导出 JSON"
               onClick={exportJson}
-              className="grid size-7 place-items-center rounded-sm text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max"
-            >
-              <Download size={13} />
-            </button>
-            <button
-              type="button"
+            />
+            <Button
+              variant="ghost"
+              size="compact"
+              icon={<Upload size={14} />}
               title="导入 JSON"
               onClick={() => fileRef.current?.click()}
-              className="grid size-7 place-items-center rounded-sm text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max"
-            >
-              <Upload size={13} />
-            </button>
-            <button
-              type="button"
+            />
+            <Button
+              variant={armedClear ? 'danger' : 'ghost'}
+              size="compact"
+              icon={<Trash2 size={14} />}
               title={armedClear ? '确认清空全部任务' : '清空全部任务'}
               onClick={clearAll}
-              className={`grid size-7 place-items-center rounded-sm transition-colors ${
-                armedClear ? 'bg-danger/10 text-danger' : 'text-fg-muted hover:bg-overlay hover:text-danger'
-              }`}
-            >
-              <Trash2 size={13} />
-            </button>
+            />
           </div>
         </div>
       </header>
@@ -773,52 +755,36 @@ export default function SchedulePage({ api }) {
       ) : status === 'error' ? (
         <div className="grid min-h-0 flex-1 place-items-center px-6">
           <div className="max-w-sm text-center">
-            <p className="text-[13px] text-fg-strong">读取排期失败</p>
-            <p className="mt-1 break-words text-[11px] leading-5 text-danger">{loadError}</p>
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="mt-3 inline-flex h-7 items-center rounded-md border border-line-strong px-3 text-[11px] text-fg-strong hover:text-fg-max"
+            <Empty
+              title="读取排期失败"
+              description={loadError}
+              hint="数据文件是 plugin-data/schedule/data.json：修好读写权限后重试。"
             >
-              重试
-            </button>
+              <Button variant="primary" onClick={() => void load()}>
+                重试
+              </Button>
+            </Empty>
           </div>
         </div>
       ) : tasks.length === 0 ? (
         <div className="grid min-h-0 flex-1 place-items-center overflow-auto px-4 py-8">
-          <div className="w-full max-w-lg rounded-lg border border-dashed border-line-strong bg-panel/40 p-6 text-center">
-            <p className="text-[13px] font-medium text-fg-max">还没有任务</p>
-            <p className="mt-1.5 text-xs leading-5 text-fg-muted">
-              {
-                '点「新增任务」开始排期（默认从今天起共 5 天）；也可以在时间轴空白处点一下按那天新建、横向拖一段按选中区间新建。拖住任务条中间可以整体平移，拖两端改起止日期。'
-              }
-            </p>
-            <p className="mt-1 text-[11px] leading-5 text-fg-dim">
-              {
-                '滚轮缩放时间轴（Shift + 滚轮横向平移）；点任务条编辑名称、颜色与 Markdown 备注。同色的任务自动排在同一行，时间不重叠的上下共享一行。'
-              }
-            </p>
-            <div className="mt-4 flex items-center justify-center gap-2">
-              <button
-                type="button"
-                title="新建任务"
-                onClick={() => openCreateDialog(today, addDays(today, 4))}
-                className="flex h-7 items-center gap-1 rounded-md border border-line-strong bg-overlay-subtle px-3 text-[11px] font-medium text-fg-max hover:bg-overlay"
-              >
-                <Plus size={12} />
-                新增任务
-              </button>
-              <button
-                type="button"
-                title="载入示例"
-                onClick={loadSample}
-                className="flex h-7 items-center gap-1 rounded-md border border-line px-3 text-[11px] text-fg-soft hover:border-line-strong hover:text-fg-max"
-              >
-                <Sparkles size={12} />
-                载入示例
-              </button>
-            </div>
-          </div>
+          <Empty
+            title="还没有任务"
+            description="点「新增任务」开始排期（默认从今天起共 5 天）；也可以在时间轴空白处点一下按那天新建、横向拖一段按选中区间新建。拖住任务条中间可以整体平移，拖两端改起止日期。"
+            hint="滚轮缩放时间轴（Shift + 滚轮横向平移）；点任务条编辑名称、颜色与 Markdown 备注。同色的任务自动排在同一行，时间不重叠的上下共享一行。"
+          >
+            <Button
+              variant="primary"
+              icon={<Plus size={14} />}
+              title="新建任务"
+              onClick={() => openCreateDialog(today, addDays(today, 4))}
+            >
+              新增任务
+            </Button>
+            <Button icon={<Sparkles size={14} />} title="载入示例" onClick={loadSample}>
+              载入示例
+            </Button>
+          </Empty>
         </div>
       ) : (
         <div ref={hostRef} className="relative min-h-0 flex-1 overflow-auto" onWheel={onWheel}>
@@ -1033,6 +999,8 @@ function Bar({ bar, pxPerDay, preview, onPointerDown, onPointerMove, onPointerUp
   const start = preview?.start ?? bar.start;
   const end = preview?.end ?? bar.end;
   const range = start === end ? shortDate(start) : `${shortDate(start)}–${shortDate(end)}`;
+  // 任务条是时间轴上的几何体，不是工具栏按钮：绝对定位、宽度按天数算、还要接 pointer
+  // 事件做拖拽，共享 Button 只暴露 onClick，所以这里保留原生 button。
   return (
     <button
       type="button"

@@ -31,7 +31,7 @@ export { CapabilityList, CapabilityParameters } from './components/CapabilityLis
 export type { CapabilityGroupDef, CapabilityItem, CapabilityParameter } from './components/CapabilityList.js';
 export { applyGroupEnabled, buildCapabilitySections } from './capabilityGroups.js';
 export type { CapabilityGroupRef, CapabilitySection } from './capabilityGroups.js';
-export { Switch as ConfigSwitch } from './components/Ui.js';
+export { Switch, Switch as ConfigSwitch } from './components/Ui.js';
 export { SettingRow, SettingsGroup } from './components/Ui.js';
 /** 密钥输入（默认密文 + 眼睛切明文）：服务商 Key、插件设置与插件面板共用一份。 */
 export { SecretInput } from './components/SecretInput.js';
@@ -40,7 +40,15 @@ export { SecretInput } from './components/SecretInput.js';
  * 三种按钮高度、两套状态色。用它们时必须包在 `.mica-config-ui` 容器里（样式都限定
  * 在该作用域内）。
  */
-export { Alert, Button, CollapsiblePanel, Empty, Segmented, SplitView, Tag } from './components/Ui.js';
+export { Alert, Button, Checkbox, CollapsiblePanel, Empty, Segmented, SplitView, Tag } from './components/Ui.js';
+
+/**
+ * 日期字段：可打字 + 自绘月历。
+ *
+ * 原生 `type="date"` 的日历弹层由系统绘制（位置、配色、关闭方式都不受页面控制），
+ * 内嵌视图里会飘到控件外；排期这类大量日期输入的页面一律用这一份。
+ */
+export { DateField } from './components/DateField.js';
 
 /** 单个插件设置字段的控件：插件详情与会话设置共用，保证两处控件一致。 */
 export { PluginSettingInput } from './components/PluginSettingInput.js';

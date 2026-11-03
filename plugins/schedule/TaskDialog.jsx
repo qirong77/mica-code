@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
+import { Alert, Button, DateField, Tag } from '@mica-config-ui/web';
 import { addDays, daysBetween } from './dates.js';
 import { COLOR_KEYS, COLOR_META } from './palette.js';
 import { NoteEditor } from './NoteEditor.jsx';
@@ -21,6 +22,7 @@ export function TaskDialog({ task, draft, onSave, onDelete, onClose }) {
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const nameRef = useRef(null);
+  const formRef = useRef(null);
   const confirmTimer = useRef(null);
 
   useEffect(() => {
@@ -62,6 +64,11 @@ export function TaskDialog({ task, draft, onSave, onDelete, onClose }) {
     });
   }
 
+  /** 共享 `Button` 只产出 `type="button"`：保存仍走表单提交，回车提交与校验都留在 `submit` 里。 */
+  function submitForm() {
+    formRef.current?.requestSubmit();
+  }
+
   function armDelete() {
     if (!task) return;
     if (confirmDelete) {
@@ -82,20 +89,13 @@ export function TaskDialog({ task, draft, onSave, onDelete, onClose }) {
       }}
     >
       <form
+        ref={formRef}
         onSubmit={submit}
         className="flex max-h-[min(86vh,640px)] w-full max-w-[520px] flex-col overflow-hidden rounded-lg border border-line bg-panel shadow-2xl"
       >
         <div className="flex h-10 shrink-0 items-center justify-between border-b border-line px-4">
           <h2 className="text-[13px] font-semibold text-fg-max">{task ? '编辑任务' : '新建任务'}</h2>
-          <button
-            type="button"
-            title="关闭"
-            aria-label="关闭"
-            onClick={onClose}
-            className="grid size-6 place-items-center rounded-sm text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max"
-          >
-            <X size={14} />
-          </button>
+          <Button variant="ghost" icon={<X size={14} />} title="关闭" onClick={onClose} />
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
@@ -110,43 +110,45 @@ export function TaskDialog({ task, draft, onSave, onDelete, onClose }) {
                 setName(event.target.value);
                 if (error) setError('');
               }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  submitForm();
+                }
+              }}
               placeholder="比如：钱包改版 / 联调 / 上线"
               maxLength={60}
-              className="h-8 w-full rounded-md border border-line bg-canvas px-2.5 text-[13px] text-fg-strong outline-none placeholder:text-fg-dim focus:border-line-strong"
+              className="text-input"
             />
           </label>
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="block">
+            <div className="block">
               <span className="mb-1 block text-[11px] text-fg-soft">开始</span>
-              <input
-                type="date"
+              <DateField
                 value={startDate}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  if (!next) return;
+                ariaLabel="开始"
+                onChange={(next) => {
                   setStartDate(next);
-                  if (endDate < next) setEndDate(next);
+                  if (next && endDate < next) setEndDate(next);
                 }}
-                className="h-8 w-full rounded-md border border-line bg-canvas px-2 text-[12px] tabular-nums text-fg-strong outline-none focus:border-line-strong"
               />
-            </label>
-            <label className="block">
+            </div>
+            <div className="block">
               <span className="mb-1 block text-[11px] text-fg-soft">结束</span>
-              <input
-                type="date"
+              <DateField
                 value={endDate}
                 min={startDate}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  if (!next) return;
-                  setEndDate(next < startDate ? startDate : next);
+                ariaLabel="结束"
+                onChange={(next) => {
+                  setEndDate(next && next >= startDate ? next : startDate);
                 }}
-                className="h-8 w-full rounded-md border border-line bg-canvas px-2 text-[12px] tabular-nums text-fg-strong outline-none focus:border-line-strong"
               />
-            </label>
+            </div>
           </div>
-          <div className="-mt-1.5 text-[10px] text-fg-dim">{days > 0 ? `共 ${days} 天（含首尾）` : '选好起止日期'}</div>
+          <div className="-mt-1.5 flex items-center gap-2 text-[10px] text-fg-dim">
+            {days > 0 ? <Tag tone="blue">{`共 ${days} 天（含首尾）`}</Tag> : '选好起止日期'}
+          </div>
 
           <div>
             <div className="mb-1 flex items-center justify-between">
@@ -155,6 +157,8 @@ export function TaskDialog({ task, draft, onSave, onDelete, onClose }) {
                 {COLOR_META[hoverColor ?? color].label} · 同色的任务排在同一行
               </span>
             </div>
+            {/* 色块是数据（任务的颜色本身），按钮还要接 hover 换标签与逐色圆点样式，
+                共享 Button 只暴露 onClick，所以这一排保留原生按钮。 */}
             <div className="flex items-center gap-2">
               {COLOR_KEYS.map((key) => (
                 <button
@@ -181,38 +185,20 @@ export function TaskDialog({ task, draft, onSave, onDelete, onClose }) {
             <NoteEditor value={note} onChange={setNote} placeholder="写点背景、依赖或验收标准…" ariaLabel="任务备注" />
           </div>
 
-          {error && <div className="text-[11px] text-danger">{error}</div>}
+          {error && <Alert message={error} />}
         </div>
 
         <div className="flex shrink-0 items-center gap-2 border-t border-line px-4 py-2.5">
           {task && (
-            <button
-              type="button"
-              onClick={armDelete}
-              className={`flex h-7 items-center gap-1 rounded-md border px-2.5 text-[11px] transition-colors ${
-                confirmDelete
-                  ? 'border-danger/60 bg-danger/10 text-danger'
-                  : 'border-line text-fg-muted hover:border-line-strong hover:text-danger'
-              }`}
-            >
-              <Trash2 size={12} />
+            <Button variant={confirmDelete ? 'danger' : 'ghost'} icon={<Trash2 size={13} />} onClick={armDelete}>
               {confirmDelete ? '确认删除' : '删除'}
-            </button>
+            </Button>
           )}
           <span className="flex-1" />
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-7 items-center rounded-md border border-line px-3 text-[11px] text-fg-soft hover:border-line-strong hover:text-fg-max"
-          >
-            取消
-          </button>
-          <button
-            type="submit"
-            className="flex h-7 items-center rounded-md border border-line-strong bg-overlay-subtle px-3 text-[11px] font-medium text-fg-max hover:bg-overlay"
-          >
+          <Button onClick={onClose}>取消</Button>
+          <Button variant="primary" onClick={submitForm}>
             {task ? '保存' : '添加'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>

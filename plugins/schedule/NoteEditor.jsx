@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bold, Code, Heading2, Italic, Link2, List, Quote, Strikethrough } from 'lucide-react';
+import { Button } from '@mica-config-ui/web';
 import { htmlToMarkdown, renderMarkdown } from './markdown.js';
 
 /**
@@ -340,19 +341,17 @@ export function NoteEditor({ value, onChange, placeholder = '可选', ariaLabel 
     >
       <div className="flex flex-wrap items-center gap-0.5 border-b border-line-soft px-1 py-1">
         {buttons.map(({ label, icon: Icon, run: exec }) => (
-          <button
+          <Button
             key={label}
-            type="button"
+            variant="ghost"
+            size="compact"
+            icon={<Icon size={13} />}
             title={label}
-            aria-label={label}
             // mousedown 只负责挡住「点击按钮会让编辑器失焦」，命令留给 click —— 这样
             // 键盘 / 辅助技术触发的 click（没有 mousedown）同样有效，且选区已被保住
             onMouseDown={(event) => event.preventDefault()}
             onClick={exec}
-            className="flex size-6 items-center justify-center rounded-sm text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max"
-          >
-            <Icon size={13} />
-          </button>
+          />
         ))}
       </div>
 

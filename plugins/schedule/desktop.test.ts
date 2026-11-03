@@ -61,7 +61,13 @@ function textOf(node: unknown): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (!node || typeof node !== 'object') return '';
   if (Array.isArray(node)) return node.map(textOf).join('');
-  return textOf((node as Element).props?.children);
+  const props = (node as Element).props ?? {};
+  // 共享空态 / 错误条把文案放在 props 里（Empty 的 title / description / hint、
+  // Alert 的 message），只看 children 会把它们当成没渲染。
+  const own = ['title', 'description', 'hint', 'message', 'placeholder', 'label']
+    .map((key) => (typeof props[key] === 'string' ? props[key] : ''))
+    .join('');
+  return own + textOf(props.children);
 }
 
 function typeName(element: Element): string {

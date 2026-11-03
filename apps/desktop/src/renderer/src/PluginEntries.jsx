@@ -77,7 +77,9 @@ function PluginHeaderEntry({ entry, onOpenPage }) {
   const card = Card ? (
     <section
       data-plugin-entry-card
-      className="rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl backdrop-blur"
+      // 卡片的控件与设置页是同一批（`@mica-config-ui/web`），样式限定在这个作用域里；
+      // 由宿主统一套上，插件不必各自再包一层。
+      className="mica-config-ui is-embed rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl backdrop-blur"
       style={{ width: CARD_WIDTH }}
     >
       <Card api={api} onClose={() => setOpen(false)} />
@@ -151,7 +153,7 @@ function PluginEntryRow({ entry, onOpenPage }) {
   const card = Card ? (
     <section
       data-plugin-entry-card
-      className="rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl backdrop-blur"
+      className="mica-config-ui is-embed rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl backdrop-blur"
       style={{ width: CARD_WIDTH }}
     >
       <Card api={api} onClose={closeRow} />
