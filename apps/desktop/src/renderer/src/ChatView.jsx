@@ -521,43 +521,41 @@ function UserMessageBody({ text }) {
   )
 }
 
+// 「这条什么时候会发出去」。忙时的 Enter/Tab/Shift+Tab 都走 host 的 after_iteration
+// 单槽（mica/queue/queued 扩展通知，注入活跃 turn），after_turn 只留给显式请求；
+// 轮次已经结束（点了停止 / 这一轮失败）时排队条目仍留在单槽里等撤回，此刻已经
+// 没有「正在跑的迭代」可注入，不能说还在等迭代边界。宿主占着会话做耗时工作
+// （自动压缩的模型摘要）时等的是那段工作收尾，宿主会带 label 说明是哪一段。
+export function queueSendTiming(items, running) {
+  const first = items[0] || {}
+  if (first.waitingFor === 'maintenance') return `${first.waitingLabel || '整理'}结束后发送`
+  if (!running) return '下一轮开始时发送'
+  if (first.queueMode === 'after_iteration') return '工具调用结束后发送'
+  return '本轮结束后发送'
+}
+
+// 排队消息只在这里出现（不进对话历史，见 transcriptMessages 的过滤）：每条一张卡，
+// 头部是编号 / 状态 / 时机芯片 / 撤回动作，正文两行截断、悬停看全文。整卡双击与
+// 按钮同为一次撤回（shift + ←）。
 function QueueDock({ items, onRecall, recallingId, running }) {
   if (!items.length) return null
-  // 文案与 CLI 的 waiting queue 提示完全一致（含 shift + ← 撤回提示，app 也
-  // 支持这个快捷键，另外每条还提供按钮）。忙时的 Enter/Tab/Shift+Tab 都走
-  // host 的 after_iteration 单槽（mica/queue/queued 扩展通知，注入活跃
-  // turn），after_turn 只留给显式请求，标题按投递时机区分。
-  const queueMode = items[0]?.queueMode
-  // 轮次已经结束（用户点了停止 / 这一轮失败）时排队条目仍留在单槽里等撤回，
-  // 此刻已经没有「正在跑的迭代」可注入，标题不能说还在等迭代边界。
-  // 自动压缩在轮次之外占着会话时同理：等的是压缩收尾，不是迭代边界。
-  const headerText =
-    items[0]?.waitingFor === 'compaction'
-      ? 'waiting for auto-compaction to finish'
-      : !running
-        ? 'waiting for the next turn'
-        : queueMode === 'after_iteration'
-          ? 'waiting to send after a complete tool-call iteration'
-          : 'waiting to send after current turn'
+  const timing = queueSendTiming(items, running)
   return (
     <section className="chat-queue-dock" aria-label="等待发送的消息">
-      <div className="chat-queue-dock-header">
-        <span aria-hidden="true">↳</span>
-        <span>{`${headerText} · shift + ← or double click to re-edit`}</span>
-        <span>{items.length}</span>
-      </div>
-      <div className="chat-queue-dock-items">
-        {items.map((item, index) => (
-          <div
-            key={item.id || `${index}:${item.text}`}
-            className="chat-queue-dock-item"
-            title="双击撤回并重新编辑"
-            onDoubleClick={() => onRecall(item.id)}
-          >
-            <span>▌</span>
-            <span>{item.text}</span>
+      {items.map((item, index) => (
+        <div
+          key={item.id || `${index}:${item.text}`}
+          className="chat-queue-dock-item"
+          onDoubleClick={() => onRecall(item.id)}
+        >
+          <div className="chat-queue-dock-head">
+            <span className="chat-queue-dock-index">{index + 1}</span>
+            <span className="chat-queue-dock-state">排队中</span>
+            <span className="chat-queue-dock-when">{timing}</span>
+            <span className="chat-queue-dock-spacer" aria-hidden="true" />
             <button
               type="button"
+              className="chat-queue-dock-recall"
               // pending 只是「确认通知还没回来」的乐观行，同样要能撤回：否则
               // 确认一旦丢失，这一行就永远停在排队态（既发不出去也撤不回）。
               title="撤回到输入框（shift + ←）"
@@ -570,10 +568,15 @@ function QueueDock({ items, onRecall, recallingId, running }) {
               ) : (
                 <IconCornerUpLeft size={11} />
               )}
+              <span>撤回并编辑</span>
+              <kbd className="chat-queue-dock-keys">⇧←</kbd>
             </button>
           </div>
-        ))}
-      </div>
+          <div className="chat-queue-dock-body" title={item.text}>
+            {item.text}
+          </div>
+        </div>
+      ))}
     </section>
   )
 }
@@ -2281,14 +2284,14 @@ function MessageRowView({
     }
     return (
       <div
-        className={`chat-message chat-message-user ${message.queued ? 'chat-message-queued' : ''}`}
+        className="chat-message chat-message-user"
         data-chat-user-message=""
         onDoubleClick={(event) => {
           if (event.target.closest('button')) return
           onEditStart?.(message)
         }}
       >
-        <div className="chat-message-marker">{message.queued ? '↳' : '▌'}</div>
+        <div className="chat-message-marker">▌</div>
         <div className="chat-message-body whitespace-pre-wrap break-words">
           {/* 用户自己贴进来的路径同样可点：会话里读到的路径常常是用户先粘过来的；
               图片引用只保留链接文本，点击弹预览（见 ImageLink） */}
@@ -4353,6 +4356,10 @@ export function ChatView({
             event.sessionID || nodeIdRef.current
           )
           updateMessages((previous) => {
+            // 排队中的乐观行跟着换过来的历史一起丢，但它们在 `messages` 里还要留着：
+            // 输入框上方的 dock 靠这些行补出「确认通知还没回来」的待发送项
+            // （queuedDisplayItems 的 pending）。它们不画进对话（transcriptMessages
+            // 过滤 queued），所以这里只是保留数据、不是重复渲染。
             const queued = previous.filter((message) => message.queued)
             return queued.length > 0 ? [...rows, ...queued] : rows
           })
@@ -5972,6 +5979,9 @@ export function ChatView({
     [messages]
   )
   const queuedDisplayItems = useMemo(() => {
+    // 排队消息只在输入框上方的 dock 里出现（对话历史过滤掉它们）。host 确认之前
+    // 那条乐观行只在 `messages` 里带 queued，这里补成一条待发送项，免得确认通知
+    // 还没回来时 dock 是空的、用户看着像没排上。
     const items = [...queuedItems]
     for (const message of messages) {
       if (!message.queued || items.some((item) => item.id === message.id)) continue

@@ -77,18 +77,39 @@ describe('chat run queue', () => {
         })
       }
     })
+  })
 
-    // 自动压缩在轮次之外占着会话：压缩跑着的时候宿主连 stdin 都读不到，
-    // 所以这一条只能先进本地队列，压完再补发（`mica/host/maintenance`）。
-    it('queues the send while the host compacts instead of sending it', () => {
-      expect(resolveMaintenanceDispatch({ compacting: true, queuedCount: 0 })).toEqual({
-        action: 'enqueue'
-      })
-      expect(resolveMaintenanceDispatch({ compacting: true, queuedCount: 1 })).toEqual({
+  // 宿主占着会话做维护工作（自动压缩：轮次之外的空闲压缩，或轮内的模型摘要）：
+  // 那段时间宿主读不到 stdin，所以这一条只能先进本地队列，窗口收尾后再补发。
+  describe('resolveMaintenanceDispatch (host occupies the session)', () => {
+    it('queues the send while the maintenance window is open', () => {
+      expect(
+        resolveMaintenanceDispatch({
+          maintenance: { reason: 'compaction', label: '自动压缩' },
+          queuedCount: 0
+        })
+      ).toEqual({ action: 'enqueue' })
+      // 宿主没给 label 时同样是排队：文案由页面兜底（「整理结束后发送」）。
+      expect(
+        resolveMaintenanceDispatch({ maintenance: { reason: 'compaction' }, queuedCount: 0 })
+      ).toEqual({ action: 'enqueue' })
+    })
+
+    it('rejects a second message while the window already holds one (single slot)', () => {
+      expect(
+        resolveMaintenanceDispatch({ maintenance: { reason: 'compaction' }, queuedCount: 1 })
+      ).toEqual({
         action: 'reject',
         message: '已有一条排队消息，等待发送或重新编辑'
       })
-      expect(resolveMaintenanceDispatch({ compacting: false, queuedCount: 0 })).toEqual({
+    })
+
+    it('starts a fresh turn once the window is closed', () => {
+      expect(resolveMaintenanceDispatch({ maintenance: null, queuedCount: 0 })).toEqual({
+        action: 'start'
+      })
+      // 窗口关闭时队列里还留着的那条（中止后等撤回）不能挡住新的发送。
+      expect(resolveMaintenanceDispatch({ maintenance: null, queuedCount: 1 })).toEqual({
         action: 'start'
       })
     })
@@ -128,22 +149,55 @@ describe('chat run queue', () => {
       ])
     })
 
-    // 自动压缩在轮次之外占着会话：这条排队消息等的是压缩收尾，不是迭代边界，
-    // 排队行的标题要能说清区别。
-    it('carries the compaction hold so the dock can label it', () => {
+    // 宿主占着会话做维护工作时，这条排队消息等的是那段工作收尾，不是迭代边界：
+    // 排队行要能说清区别，并带上宿主给它的名字（「自动压缩结束后发送」）。
+    it('carries the maintenance hold and its label so the dock can name it', () => {
       expect(
         mergeQueuedItems(
           'node-a',
-          [{ id: 'msg-1', text: 'after compaction', queueMode: 'after_iteration', waitingFor: 'compaction' }],
+          [
+            {
+              id: 'msg-1',
+              text: 'after maintenance',
+              queueMode: 'after_iteration',
+              waitingFor: 'maintenance',
+              waitingLabel: '自动压缩'
+            }
+          ],
           []
         )
       ).toEqual([
         {
           id: 'msg-1',
-          text: 'after compaction',
+          text: 'after maintenance',
           position: 1,
           queueMode: 'after_iteration',
-          waitingFor: 'compaction'
+          waitingFor: 'maintenance',
+          waitingLabel: '自动压缩'
+        }
+      ])
+    })
+
+    it('keeps local maintenance entries shaped like host ones', () => {
+      expect(
+        mergeQueuedItems('node-a', [], [
+          {
+            id: 'msg-2',
+            text: 'queued',
+            position: 1,
+            queueMode: 'after_turn',
+            waitingFor: 'maintenance',
+            waitingLabel: '自动压缩'
+          }
+        ])
+      ).toEqual([
+        {
+          id: 'msg-2',
+          text: 'queued',
+          position: 1,
+          queueMode: 'after_turn',
+          waitingFor: 'maintenance',
+          waitingLabel: '自动压缩'
         }
       ])
     })

@@ -8,6 +8,7 @@ import type {
   HookRegistry,
   MicaPlugin,
   PluginIdleCompactOutcome,
+  PluginMaintenanceWindow,
   PluginPanelRegistry,
   PluginManager,
   PluginBaseContext,
@@ -25,7 +26,11 @@ import type {
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
-import { configureIterationRewrite, registerIterationRewrite } from '../agent/iterationRewrite.js';
+import {
+  configureAgentMaintenance,
+  configureIterationRewrite,
+  registerIterationRewrite,
+} from '../agent/iterationRewrite.js';
 import { compactIdleSessionHistory } from '../agent/agentCompaction.js';
 import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
 import { capturePluginModelUsageRecorder, createPluginModels } from '../plugins/pluginModels.js';
@@ -80,6 +85,14 @@ export type HeadlessPluginHostOptions = {
    * 拿不到 `compactIdleHistory`。
    */
   runIdleTask?: <T>(task: () => Promise<T>, busy: T) => Promise<T>;
+  /**
+   * 在维护窗口里执行一段耗时工作（`ctx.agent.withMaintenance`）。
+   *
+   * 窗口意味着「这几秒宿主占着会话」：客户端据此把用户这段时间的发送放进自己的排队行，
+   * 等窗口结束后再补发。由常驻会话宿主提供（它才有通知客户端的通路）；不传时插件拿不到
+   * 这个能力，只能自己照常执行 task。
+   */
+  runMaintenance?: <T>(window: PluginMaintenanceWindow, task: () => Promise<T>) => Promise<T>;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -152,6 +165,8 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       micaPlugin.writePluginHealth(pluginId, { level: 'error', message: `模型请求重写失败：${message}` });
     },
   });
+  // 谁的宿主能兑现维护窗口由调用方回答：app-server 有通知客户端的通路，`mica exec` 没有。
+  configureAgentMaintenance(options.runMaintenance ?? null);
   const services = new micaPlugin.ServiceContainer();
   const commands = new micaCommands.CommandRegistry();
   const events = new micaRuntime.RuntimeEventBus();
@@ -359,6 +374,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
               ),
           }
         : {}),
+      ...(options.runMaintenance ? { withMaintenance: options.runMaintenance } : {}),
     },
     subagentsFor: (pluginId) => pluginSubagents.forPlugin(pluginId),
     // 插件自己的模型请求同样要记账：app-server 就是常驻会话，漏了这一笔 Stats 会少算。

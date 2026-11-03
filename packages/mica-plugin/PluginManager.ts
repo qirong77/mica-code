@@ -381,6 +381,11 @@ export class PluginManager {
               compactIdleHistory: (hook) => agentRegistry.compactIdleHistory!(plugin.id, hook),
             }
           : {}),
+        ...(agentRegistry.withMaintenance
+          ? {
+              withMaintenance: (window, task) => agentRegistry.withMaintenance!(window, task),
+            }
+          : {}),
       };
     }
     if (subagentsFor) ctx.subagents = subagentsFor(plugin.id);

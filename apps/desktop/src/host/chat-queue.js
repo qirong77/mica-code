@@ -71,14 +71,16 @@ export function resolveBusyDispatch({ running, queueMode, queuedCount }) {
 }
 
 /**
- * Dispatch for a message sent while the host occupies the session outside a turn
- * (`mica/host/maintenance`, i.e. idle history compaction). Compaction is
- * synchronous, so the host cannot even read the next `turn/start` while it runs:
- * such a message has to wait in the local queue — visibly and recallable — and is
- * replayed once the host reports idle. Single slot, like every other queue path.
+ * Dispatch for a message sent while the host occupies the session for a stretch
+ * of slow work (`mica/host/maintenance`: idle history compaction, or an in-turn
+ * model summary). The host is not reading its stdin for that stretch, so a
+ * `turn/start` sent now would only sit in the pipe with no feedback at all: the
+ * message waits in the local queue — visibly and recallable — and is replayed
+ * once the host reports the window closed. Single slot, like every other queue
+ * path.
  */
-export function resolveMaintenanceDispatch({ compacting, queuedCount }) {
-  if (!compacting) return { action: 'start' }
+export function resolveMaintenanceDispatch({ maintenance, queuedCount }) {
+  if (!maintenance) return { action: 'start' }
   if (queuedCount > 0) {
     return { action: 'reject', message: '已有一条排队消息，等待发送或重新编辑' }
   }
@@ -99,9 +101,10 @@ export function mergeQueuedItems(id, hostPending, localItems) {
     text: item.text || '',
     position: index + 1,
     queueMode: item.queueMode || 'after_iteration',
-    // 宿主在轮次之外占着会话（自动压缩）时，排队行要说清「等的是压缩收尾」，
+    // 宿主占着会话做维护工作（自动压缩）时，排队行要说清「等的是这段工作收尾」，
     // 而不是等一个根本不存在的迭代边界。
-    ...(item.waitingFor ? { waitingFor: item.waitingFor } : {})
+    ...(item.waitingFor ? { waitingFor: item.waitingFor } : {}),
+    ...(item.waitingFor && item.waitingLabel ? { waitingLabel: item.waitingLabel } : {})
   }))
   return [...host, ...(localItems || [])]
 }

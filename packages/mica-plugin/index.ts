@@ -321,6 +321,7 @@ export type {
   PluginIdleCompactHook,
   PluginIdleCompactOutcome,
   PluginIterationRewriter,
+  PluginMaintenanceWindow,
 } from './PluginAgent.js';
 export type {
   PluginModelProtocol,

@@ -91,7 +91,14 @@ const plugin: MicaPlugin = {
           surface: 'command_panel',
           variant: 'compact',
         });
-        const model = await tryCompact(ctx, agent, next, 'model', counters, signal);
+        // 模型摘要要几秒到几十秒，用户多半正好在这时候按发送。开一个维护窗口，宿主
+        // 因此告诉客户端「这几秒别急着发」，那条消息留在排队行里（可见、可撤回），
+        // 压完再补发——不会被塞进这次请求的历史，也不会混进正在写的摘要。
+        // 本地快速压缩不开窗口：它很快，一轮里还可能跑几十次。
+        const runModelCompact = () => tryCompact(ctx, agent, next, 'model', counters, signal);
+        const model = agent.withMaintenance
+          ? await agent.withMaintenance({ reason: 'compaction', label: '自动压缩' }, runModelCompact)
+          : await runModelCompact();
         if (model) {
           next = model.messages;
           modelApplied = true;

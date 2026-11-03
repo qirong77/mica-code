@@ -11,6 +11,7 @@ import type {
   PluginIdleCompactHook,
   PluginIdleCompactOutcome,
   PluginIterationRewriter,
+  PluginMaintenanceWindow,
 } from './PluginAgent.js';
 import type { PluginBackgroundApi } from './PluginBackground.js';
 import type { PluginPromptSection } from './PluginPrompt.js';
@@ -227,6 +228,20 @@ export type PluginContext = {
      * 会在**落盘之前**调用它，然后一次写下去；等 `await` 返回后再写就晚了。
      */
     compactIdleHistory?(options?: PluginIdleCompactHook): Promise<PluginIdleCompactOutcome>;
+    /**
+     * 在这段时间里**占住会话**：宿主通知客户端「别急着发」。
+     *
+     * 用户这几秒的发送留在客户端的输入框队列里（可见、可撤回），窗口结束后由客户端
+     * 补发——既不会插进这次请求的历史，也不会混进正在写的摘要。窗口的 `reason` 是机器
+     * 可读原因，`label` 是给人看的短名词（客户端拼成「<label>结束后发送」）。
+     *
+     * 官方用法是自动压缩：轮内的模型摘要要几秒到几十秒，这段时间经它开一次窗口
+     * （`reason: 'compaction'`）；本地快速压缩很快，不开窗口。
+     *
+     * 宿主不提供（TUI 的输入队列本来就拦着、`mica exec` 没有第二轮）时省略，插件照常
+     * 自己执行 task，不能因为读不到就报错。
+     */
+    withMaintenance?<T>(window: PluginMaintenanceWindow, task: () => Promise<T>): Promise<T>;
   };
   /**
    * 委派子代理：注册子代理类型、前台/后台跑一个、管后台任务。

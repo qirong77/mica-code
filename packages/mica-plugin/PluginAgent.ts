@@ -43,6 +43,20 @@ export type PluginCompactOptions = {
 };
 
 /**
+ * 一段「宿主（插件）正占着会话」的维护窗口。
+ *
+ * 开着的那几秒里客户端不该把用户的发送直接交给会话：它会被客户端收进输入框上方的
+ * 排队行（可见、可撤回），窗口结束后再补发。所以窗口要有名字——客户端把 `label`
+ * 拼成「自动压缩结束后发送」给用户看。
+ */
+export type PluginMaintenanceWindow = {
+  /** 机器可读的原因；客户端按它区分同一类窗口。 */
+  reason: string;
+  /** 给人看的短名词，客户端拼成「<label>结束后发送」。 */
+  label: string;
+};
+
+/**
  * 一次「轮次之外的压缩」的结果。
  *
  * `skipped` 不是错误，也不消耗次数：`busy` 是「现在不能写」（这一轮正在跑、另一个
@@ -106,6 +120,17 @@ export type PluginAgentHandle = {
    * 决定，内核不替它吞掉。
    */
   compact(messages: unknown[], options: PluginCompactOptions): Promise<PluginCompactResult>;
+  /**
+   * 在维护窗口里执行一段耗时的、不能被用户发送插进来的工作。
+   *
+   * 窗口开着时宿主通知客户端「别急着发」：用户这几秒的发送留在客户端的排队行里
+   * （可见、可撤回），窗口结束后由客户端补发——不会被塞进这次请求的历史，也不会
+   * 混进正在写的摘要。
+   *
+   * 宿主不提供这一段（TUI / `mica exec`）时省略；此时插件照常自己执行 task：
+   * `agent.withMaintenance ? await agent.withMaintenance(window, task) : await task()`。
+   */
+  withMaintenance?<T>(window: PluginMaintenanceWindow, task: () => Promise<T>): Promise<T>;
 };
 
 /**
@@ -145,4 +170,11 @@ export type PluginAgentRegistry = {
    * 把它当成可选能力，不能因为读不到就报错。
    */
   compactIdleHistory?(pluginId: string, options?: PluginIdleCompactHook): Promise<PluginIdleCompactOutcome>;
+  /**
+   * 同一段维护窗口，插件 id 由 manager 绑定。
+   *
+   * 宿主给不出时省略（TUI 的输入队列本来就拦着发送，没必要再通知一次）；插件必须把
+   * 它当成可选能力。
+   */
+  withMaintenance?<T>(window: PluginMaintenanceWindow, task: () => Promise<T>): Promise<T>;
 };

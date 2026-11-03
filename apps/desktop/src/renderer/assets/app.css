@@ -749,17 +749,6 @@ html[data-theme='light'] .chat-modal-overlay {
   font-size: 11.5px;
 }
 
-.chat-message-queued {
-  background: color-mix(in srgb, var(--color-warn) 8%, transparent);
-  box-shadow:
-    4px 0 0 color-mix(in srgb, var(--color-warn) 8%, transparent),
-    -4px 0 0 color-mix(in srgb, var(--color-warn) 8%, transparent);
-}
-
-.chat-message-queued .chat-message-marker {
-  color: var(--color-warn);
-}
-
 .chat-message-assistant.chat-message-active .chat-message-marker {
   color: var(--chat-accent);
   animation: chat-assistant-pulse 1.5s ease-in-out infinite;
@@ -2064,80 +2053,116 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   color: var(--color-danger);
 }
 
+/* 排队消息唯一的显现位置（对话里不再重复画一条）：每条一张卡，卡片竖排、内部滚动。 */
 .chat-queue-dock {
+  display: flex;
   max-height: 148px;
-  overflow: hidden;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
   border-top: 1px solid color-mix(in srgb, var(--color-warn) 18%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--color-warn) 12%, transparent);
   background: color-mix(in srgb, var(--color-warn) 10%, var(--color-canvas));
+  padding: 6px 9px;
   font-family: var(--chat-font);
   font-size: var(--chat-text-size);
   line-height: 1.35;
 }
 
-.chat-queue-dock-header {
-  display: grid;
-  height: 28px;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px;
-  padding: 0 9px;
-  color: var(--color-warn);
-  font-weight: 600;
-}
-
-.chat-queue-dock-header > span:last-child {
-  min-width: 18px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-warn) 12%, transparent);
-  padding: 1px 6px;
-  text-align: center;
-}
-
-.chat-queue-dock-items {
-  max-height: 120px;
-  overflow-y: auto;
-  padding: 0 9px 6px;
-}
-
 .chat-queue-dock-item {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) 22px;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 0;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--color-warn) 24%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-warn) 6%, transparent);
+  padding: 5px 8px 6px;
   color: var(--color-fg);
 }
 
-.chat-queue-dock-item > span:first-child {
-  color: var(--color-warn);
-  user-select: none;
+/* 头部一行到底、动作组钉在右侧：窄窗口里先压芯片（省略号），正文另起一行换行。 */
+.chat-queue-dock-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
 }
 
-.chat-queue-dock-item > span:nth-child(2) {
-  display: -webkit-box;
-  overflow: hidden;
-  white-space: pre-wrap;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.chat-queue-dock-item > button {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
+.chat-queue-dock-index {
+  flex: none;
   border-radius: 3px;
-  color: color-mix(in srgb, var(--color-warn) 62%, transparent);
+  background: color-mix(in srgb, var(--color-warn) 16%, transparent);
+  padding: 0 4px;
+  color: var(--color-warn);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
 }
 
-.chat-queue-dock-item > button:hover:not(:disabled) {
+.chat-queue-dock-state {
+  flex: none;
+  color: var(--color-warn);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chat-queue-dock-when {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--color-warn) 22%, transparent);
+  border-radius: 3px;
+  padding: 0 5px;
+  color: var(--color-fg-soft);
+  font-size: 10.5px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-queue-dock-spacer {
+  min-width: 4px;
+  flex: 1 1 auto;
+}
+
+.chat-queue-dock-recall {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: color-mix(in srgb, var(--color-warn) 62%, transparent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chat-queue-dock-recall:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-warn) 14%, transparent);
   color: var(--color-warn-soft);
 }
 
-.chat-queue-dock-item > button:disabled {
+.chat-queue-dock-recall:disabled {
   color: color-mix(in srgb, var(--color-fg-max) 16%, transparent);
+}
+
+.chat-queue-dock-keys {
+  border: 1px solid var(--color-line-strong);
+  border-radius: 3px;
+  padding: 0 3px;
+  color: var(--color-fg-dim);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 13px;
+}
+
+.chat-queue-dock-body {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 3px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .chat-composer-images {
