@@ -28,12 +28,12 @@ import {
   unstageFile
 } from './git-ops'
 
-async function getSummary(cwd) {
+async function getSummary(cwd, { refresh = false } = {}) {
   const { root, base } = await cachedRepository(cwd)
   // 顶栏徽标（change-counts）与 Git 面板（summary）要的是同一份全树扫描，10s 的 Git
   // 轮询 + 3s 的文件视图轮询又会各自来一次：同一仓库在几秒内复用结果，切换分支或
   // 我们自己写过工作区（stage/unstage/discard）时缓存自动失效。
-  return cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base))
+  return cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base), { refresh })
 }
 
 async function readSummary(root, base) {
@@ -82,11 +82,13 @@ async function readSummary(root, base) {
  * 顶栏徽标只要「多少变更」：文件数与加/删行合计。故意复用 `getSummary` 而不是另算
  * 一遍——徽标和 GIT 面板显示的是同一个工作区，数字不一致比数字不准更糟。
  */
-async function getChangeCounts(cwd) {
+async function getChangeCounts(cwd, { refresh = false } = {}) {
   // 与 `getSummary` 共用同一份缓存（同一次全树扫描），但只把三个数字交出去：文件列表
   // 在几千个改动时会占掉 IPC 的绝大部分体积，徽标并不需要它。
   const { root, base } = await cachedRepository(cwd)
-  const summary = await cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base))
+  const summary = await cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base), {
+    refresh
+  })
   return {
     root: summary.root,
     files: summary.files.length,
@@ -121,28 +123,40 @@ async function checkoutBranch(cwd, ref) {
   return getStatus(root)
 }
 
+// 目录不是仓库是常态（主目录、临时目录、还没 init 的项目），不是失败：回 `error: null`
+// 让调用方当成「这里没有仓库」。否则每 10s 的 `git:status` 都会在日志与 Performance
+// 面板里记成一次失败，真正要看的错误被埋掉。
+const NOT_A_REPOSITORY = /not a git repository/i
+function workspaceError(error) {
+  const message = gitErrorMessage(error)
+  return NOT_A_REPOSITORY.test(message) ? null : message
+}
+
 export function registerGitIpc() {
   ipcMain.handle('git:status', async (_event, { cwd } = {}) => {
     try {
       return { status: await getStatus(cwd), error: null }
     } catch (error) {
-      return { status: null, error: gitErrorMessage(error) }
+      return { status: null, error: workspaceError(error) }
     }
   })
 
-  ipcMain.handle('git:summary', async (_event, { cwd } = {}) => {
+  ipcMain.handle('git:summary', async (_event, { cwd, refresh } = {}) => {
     try {
-      return { repository: await getSummary(cwd), error: null }
+      return { repository: await getSummary(cwd, { refresh: refresh === true }), error: null }
     } catch (error) {
-      return { repository: null, error: gitErrorMessage(error) }
+      return { repository: null, error: workspaceError(error) }
     }
   })
 
-  ipcMain.handle('git:change-counts', async (_event, { cwd } = {}) => {
+  ipcMain.handle('git:change-counts', async (_event, { cwd, refresh } = {}) => {
     try {
-      return { counts: await getChangeCounts(cwd), error: null }
+      return {
+        counts: await getChangeCounts(cwd, { refresh: refresh === true }),
+        error: null
+      }
     } catch (error) {
-      return { counts: null, error: gitErrorMessage(error) }
+      return { counts: null, error: workspaceError(error) }
     }
   })
 

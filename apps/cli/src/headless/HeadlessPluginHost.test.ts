@@ -70,7 +70,12 @@ async function mount(
   const hooks = new micaPlugin.HookRegistry();
   const agent = mockAgent(agentOverrides);
   const sessionController = mockSessionController(saveSpy);
-  const subagentTasks = { killForOwner: () => 0, list: () => [], stop: async () => {} };
+  const subagentTasks = {
+    killForOwner: () => 0,
+    list: () => [],
+    stop: async () => {},
+    setRestartHandler: () => {},
+  };
   const executor = new HeadlessTurnExecutor({
     agent,
     sessionController,
@@ -190,6 +195,28 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
     const saved = lastCall?.[0] as unknown as { conversationMessages?: Array<{ role: string; content: string }> };
     expect(saved.conversationMessages?.some((message) => message.role === 'notice')).toBe(true);
     expect(host.getConversationMessages()?.some((message) => message.role === 'notice')).toBe(true);
+    await host.dispose();
+  });
+
+  // 状态型 notice（压缩到多大、同步到第几页）只该占一行：连着写几次如果在对话里排成一列，
+  // 用户看到的是一堵「又一次自动压缩」的墙，而不是「现在多大」。
+  it('keeps a single row for notices that ask to replace', async () => {
+    const saveSpy = vi.fn(() => true);
+    const { host } = await mount(saveSpy);
+    const commandHost = host.services.get(
+      (await import('@packages/mica-builtin-commands/commandHost.js')).commandHostToken,
+    );
+    for (const text of ['自动压缩：500K → 90K', '自动压缩：680K → 145K']) {
+      commandHost.services.showNotice(text, 'sess-headless', {
+        variant: 'compact',
+        command: 'auto-compact',
+        status: 'success',
+        replace: true,
+      });
+    }
+
+    const notices = (host.getConversationMessages() ?? []).filter((message) => message.role === 'notice');
+    expect(notices.map((message) => message.content)).toEqual(['自动压缩：680K → 145K']);
     await host.dispose();
   });
 });

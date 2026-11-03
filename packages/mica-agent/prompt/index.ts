@@ -8,12 +8,17 @@ import { applyBrandTemplate } from './brandTemplate.js';
 export { DEFAULT_ROLE_NAME, getAgentRole, getRolesDirectory, listAgentRoles } from './roles.js';
 export type { AgentRole } from './roles.js';
 
-type PromptSection = 'system' | 'project-instructions' | 'context' | 'skills';
+type PromptSection = 'system' | 'role' | 'project-instructions' | 'context' | 'skills';
 
 const PROJECT_INSTRUCTION_FILES = ['AGENT.md', 'AGENTS.md'] as const;
 
 export type BuildSystemPromptOptions = {
   baseSystemPrompt?: string;
+  /**
+   * 追加在 `<system>` 后面的角色正文。插件角色（`AgentRole.append`）走这里：
+   * 通用规则仍是 base，角色只说自己额外要遵守什么。
+   */
+  rolePrompt?: string;
   cwd?: string;
   now?: Date;
   platform?: NodeJS.Platform;
@@ -27,6 +32,9 @@ class SystemPromptBuilder {
 
   constructor(options: BuildSystemPromptOptions = {}) {
     this.prompt = wrapSection('system', applyBrandTemplate(options.baseSystemPrompt ?? DEFAULT_SYSTEM_PROMPT));
+    if (options.rolePrompt?.trim()) {
+      this.append('role', options.rolePrompt);
+    }
 
     const projectInstructions =
       options.projectInstructions === undefined

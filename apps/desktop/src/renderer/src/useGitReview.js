@@ -20,7 +20,9 @@ const NO_FILES = []
  */
 export function useGitReview({ cwd, repository, compareBase }) {
   const root = repository?.root || cwd
-  const scope = reviewScope(root, compareBase)
+  // 提交对提交时 `compareBase` 只有基线，目标提交在仓库对象的 `headHash` 上：
+  // 已评审标记按「仓库 + 基线 + 目标」归属，两份对比不能共用一份。
+  const scope = reviewScope(root, { ...compareBase, head: repository?.headHash })
   const reviews = useUiStateValue('gitCompareReviewed', EMPTY)
   const reviewed = reviews[scope] || EMPTY
   const [stored, setStored] = useState({ scope, tabs: [], active: null })

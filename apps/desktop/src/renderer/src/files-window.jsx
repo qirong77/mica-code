@@ -28,7 +28,9 @@ export function FilesWindow() {
 
   useEffect(() => {
     const title = cwd ? `${baseName(cwd)} — 编辑器` : '编辑器'
-    document.title = compare?.head ? `${title} · ${compare.head}` : title
+    // 标题只说人话：`origin/feature-x` 里的前缀只是 git 的写法，地址里仍然带着它。
+    const headLabel = String(compare?.head || '').replace(/^origin\//, '')
+    document.title = headLabel ? `${title} · ${headLabel}` : title
     const url = new URL(window.location.href)
     if (cwd) url.searchParams.set(CWD_PARAM, cwd)
     else url.searchParams.delete(CWD_PARAM)

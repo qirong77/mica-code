@@ -71,6 +71,7 @@ const plugin: MicaPlugin = {
 
       let next = messages;
       let modelAttempted = false;
+      let modelApplied = false;
       if (step === 'quick') {
         const quick = await tryCompact(ctx, agent, messages, 'quick', counters, signal);
         if (quick) {
@@ -91,7 +92,10 @@ const plugin: MicaPlugin = {
           variant: 'compact',
         });
         const model = await tryCompact(ctx, agent, next, 'model', counters, signal);
-        if (model) next = model.messages;
+        if (model) {
+          next = model.messages;
+          modelApplied = true;
+        }
       }
 
       if (signal.aborted) {
@@ -101,11 +105,14 @@ const plugin: MicaPlugin = {
             command: 'auto-compact',
             status: 'info',
             variant: 'compact',
+            replace: true,
           });
         return null;
       }
-      if (next !== messages) {
-        agent.setState({ ...counters });
+      if (next !== messages) agent.setState({ ...counters });
+      // 只有模型摘要真的改写了历史才提示：本地清理（把工具结果换成占位符）是一轮里可能
+      // 发生几十次的例行整理，它不改用户看到的对话，逐次提示只会在对话里排出一列卡片。
+      if (modelApplied) {
         const afterTokens = agent.estimateTokens(next);
         ctx.ui?.notice(
           `自动压缩：${formatCompactGain(beforeTokens, afterTokens, beforeTokens - afterTokens)}，已保留最近上下文`,
@@ -114,6 +121,7 @@ const plugin: MicaPlugin = {
             command: 'auto-compact',
             status: 'success',
             variant: 'compact',
+            replace: true,
           },
         );
       }
@@ -123,6 +131,7 @@ const plugin: MicaPlugin = {
           command: 'auto-compact',
           status: 'warning',
           variant: 'compact',
+          replace: true,
         });
       return next === messages ? null : next;
     });
@@ -294,8 +303,13 @@ async function runQuickCompact(input: {
         next.lastActivityAt = new Date(nowMs).toISOString();
         persistState(ctx, next, owner);
         // 界面上看得见的一次：否则「到底压没压」只能翻插件日志。带 command 是为了让
-        // 「同一段历史被连压几次」就地合并成一条，而不是在对话里排成一列。
-        ctx.ui?.notice(describeGain(beforeTokens, afterTokens, savedTokens), { owner, command: 'auto-compact' });
+        // 「同一段历史被连压几次」就地合并成一条，而不是在对话里排成一列；`replace` 让
+        // 上一次的旧结论也被顶掉——这两条提前量几小时里会各跑一次，用户要看的是最近一次。
+        ctx.ui?.notice(describeGain(beforeTokens, afterTokens, savedTokens), {
+          owner,
+          command: 'auto-compact',
+          replace: true,
+        });
       },
     });
     if (outcome.status === 'skipped') {

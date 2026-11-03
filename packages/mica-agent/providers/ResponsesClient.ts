@@ -57,6 +57,172 @@ function hasVisibleTextSuffix(text: string): boolean {
   return text.length > 0 && !text.endsWith('\n\n');
 }
 
+type ReasoningTextEvent = {
+  type:
+    | 'response.reasoning_summary_text.delta'
+    | 'response.reasoning_summary_text.done'
+    | 'response.reasoning_text.delta'
+    | 'response.reasoning_text.done';
+  item_id?: string;
+  output_index?: number;
+  summary_index?: number;
+  content_index?: number;
+  delta?: string;
+  text?: string;
+};
+
+type ReasoningPart = {
+  itemId: string | undefined;
+  outputIndex: number | undefined;
+  index: number | undefined;
+  indexKind: 'summary' | 'content';
+  text: string;
+  emittedLength: number;
+  done: boolean;
+  ambiguousDone: boolean;
+};
+
+/** Orders display-only reasoning without changing the Responses input. */
+class ResponsesReasoningParts {
+  private readonly parts: ReasoningPart[] = [];
+  private next = 0;
+  private hasVisiblePart = false;
+  private safe = true;
+
+  get canCheckpointRequest(): boolean {
+    return this.safe && !this.parts.some((part) => part.ambiguousDone && !part.done);
+  }
+
+  constructor(
+    private readonly emit: (text: string) => void,
+    private readonly checkpoint: () => void,
+    private readonly checkStopped: () => void,
+  ) {}
+
+  accept(event: ReasoningTextEvent): void {
+    if (!this.safe) return;
+    const indexKind = event.type.startsWith('response.reasoning_summary_text.') ? 'summary' : 'content';
+    const rawIndex = indexKind === 'summary' ? event.summary_index : event.content_index;
+    const index = typeof rawIndex === 'number' && Number.isInteger(rawIndex) && rawIndex >= 0 ? rawIndex : undefined;
+    const itemId = typeof event.item_id === 'string' && event.item_id ? event.item_id : undefined;
+    const outputIndex = typeof event.output_index === 'number' && Number.isInteger(event.output_index) && event.output_index >= 0
+      ? event.output_index
+      : undefined;
+    const isDone = event.type.endsWith('.done');
+    const isCompatible = (part: ReasoningPart) => {
+      const sameItem = part.itemId !== undefined && itemId !== undefined
+        ? part.itemId === itemId
+        : part.outputIndex === undefined || outputIndex === undefined || part.outputIndex === outputIndex;
+      return sameItem &&
+        (part.index === undefined || index === undefined || (part.index === index && part.indexKind === indexKind));
+    };
+
+    // A fully identified part remains identifiable after it finishes, so late
+    // duplicate done events cannot accidentally start another part.
+    let part = (itemId !== undefined || outputIndex !== undefined) && index !== undefined
+      ? this.parts.find((candidate) =>
+          isCompatible(candidate) && candidate.index === index && candidate.indexKind === indexKind &&
+          ((itemId !== undefined && candidate.itemId === itemId) ||
+            (outputIndex !== undefined && candidate.outputIndex === outputIndex)))
+      : undefined;
+    if (!part) {
+      // Omitted identities can only be associated when there is one compatible
+      // live part. Interleaved parts with no distinguishing fields cannot be
+      // reliably separated by any consumer of these events.
+      const candidates = this.parts.filter((candidate) => !candidate.done && isCompatible(candidate));
+      if (candidates.length > 1) {
+        // An event with omitted identity cannot safely select among live parts.
+        this.safe = false;
+        return;
+      }
+      part = candidates[0];
+      if (part && isDone) {
+        const previousDuplicate = this.parts.findLast((candidate) =>
+          candidate.done && isCompatible(candidate) &&
+          (typeof event.text !== 'string' || candidate.text === event.text));
+        if (previousDuplicate) {
+          // Without a full identity, this could also be the new part's done.
+          // Wait for an unambiguous done before checkpointing the new part.
+          part.ambiguousDone = true;
+          return;
+        }
+      }
+      if (part) {
+        if (part.index === undefined && index !== undefined) {
+          part.index = index;
+          part.indexKind = indexKind;
+        }
+      } else if (isDone) {
+        const previous = this.parts.findLast((candidate) => candidate.done && isCompatible(candidate));
+        if (previous) {
+          // Missing identities cannot distinguish a second done-only part from
+          // a conflicting duplicate. Keep the prior checkpoint, but never
+          // manufacture another one from an ambiguous event.
+          if (typeof event.text !== 'string' || event.text === previous.text) return;
+          this.safe = false;
+          return;
+        }
+      }
+    }
+
+    if (!part) {
+      part = { itemId, outputIndex, index, indexKind, text: '', emittedLength: 0, done: false, ambiguousDone: false };
+      this.parts.push(part);
+    }
+    part.itemId ??= itemId;
+    part.outputIndex ??= outputIndex;
+    if (part.done) {
+      if (!isDone || (typeof event.text === 'string' && event.text !== part.text)) {
+        // A completed, identified part is immutable. Its old checkpoint may
+        // already have been delivered, but no later checkpoint is safe.
+        this.safe = false;
+      }
+      return;
+    }
+
+    if (!isDone) {
+      if (typeof event.delta === 'string') part.text += event.delta;
+    } else {
+      if (typeof event.text === 'string') {
+        if (event.text.startsWith(part.text) || part.emittedLength === 0) {
+          // The done event contains the complete part, including any omitted
+          // suffix; an undisplayed buffer can also be replaced authoritatively.
+          part.text = event.text;
+        } else {
+          // Once inconsistent deltas were displayed there is no callback to
+          // replace just this part. Do not checkpoint it or anything after it.
+          this.safe = false;
+          return;
+        }
+      }
+      part.done = true;
+      part.ambiguousDone = false;
+    }
+    this.flush();
+  }
+
+  private flush(): void {
+    while (this.next < this.parts.length) {
+      const part = this.parts[this.next]!;
+      const pending = part.text.slice(part.emittedLength);
+      if (pending) {
+        if (part.emittedLength === 0 && this.hasVisiblePart) {
+          this.checkStopped();
+          this.emit('\n\n');
+        }
+        this.checkStopped();
+        this.emit(pending);
+        part.emittedLength = part.text.length;
+        this.hasVisiblePart = true;
+      }
+      if (!part.done) return;
+      this.checkStopped();
+      this.checkpoint();
+      this.next++;
+    }
+  }
+}
+
 export function withResponsesReasoningSummary(patch: Record<string, unknown>): Record<string, unknown> {
   const reasoning = patch.reasoning;
   if (!reasoning || typeof reasoning !== 'object' || Array.isArray(reasoning) || 'summary' in reasoning) return patch;
@@ -213,7 +379,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       let outputItems: ResponseInputItem[] = [];
       let toolCalls = new Map<number, PendingToolCall>();
       let hasReasoningText = false;
-      let reasoningPartDone = false;
+      let reasoningParts: ResponsesReasoningParts | undefined;
       const wireMessages = stripImagesForVision(
         dropReplayedReasoningItems(toWireResponsesInput(messages)),
         this.supportsVision,
@@ -244,7 +410,14 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           outputItems = [];
           toolCalls = new Map<number, PendingToolCall>();
           hasReasoningText = false;
-          reasoningPartDone = false;
+          reasoningParts = new ResponsesReasoningParts(
+            (text) => {
+              hasReasoningText = true;
+              this.onThinking?.(text);
+            },
+            () => this.onThinkingCheckpoint?.('part'),
+            () => throwIfQueryStopped(options),
+          );
           const stream = await sendWithEffortFallback({
             provider: this.provider,
             model: this.model,
@@ -285,20 +458,11 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
             if (
               event.type === 'response.reasoning_summary_text.delta' ||
-              event.type === 'response.reasoning_text.delta'
-            ) {
-              if (reasoningPartDone && hasReasoningText) this.onThinking?.('\n\n');
-              this.onThinking?.(event.delta);
-              hasReasoningText = true;
-              reasoningPartDone = false;
-              continue;
-            }
-
-            if (
+              event.type === 'response.reasoning_text.delta' ||
               event.type === 'response.reasoning_summary_text.done' ||
               event.type === 'response.reasoning_text.done'
             ) {
-              reasoningPartDone = true;
+              reasoningParts.accept(event);
               continue;
             }
 
@@ -383,6 +547,9 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       // when the request is aborted while waiting for the next event, so an
       // aborted turn must not be committed as a partial/empty response.
       throwIfQueryStopped(options);
+      // A terminal event alone is not enough: the stream must also end cleanly.
+      // This is a display boundary only; it does not change the request history.
+      if (reasoningParts?.canCheckpointRequest) this.onThinkingCheckpoint?.('request');
 
       if (content) {
         totalContent += content;

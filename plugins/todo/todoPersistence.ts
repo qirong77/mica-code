@@ -25,8 +25,14 @@ export function readTodoCheckpoint(configDir: string, sessionId: string): Stored
   if (text.length > 64 * 1024) return null;
   try {
     const value = JSON.parse(text) as Partial<StoredTodo> | null;
-    if (!value || value.version !== 1 || value.sessionId !== sessionId ||
-        typeof value.turnId !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/.test(value.turnId)) return null;
+    if (
+      !value ||
+      value.version !== 1 ||
+      value.sessionId !== sessionId ||
+      typeof value.turnId !== 'string' ||
+      !/^[a-zA-Z0-9-]{1,80}$/.test(value.turnId)
+    )
+      return null;
     const parsed = parseTodoInput({ todos: value.items });
     return parsed.ok ? { version: 1, sessionId, turnId: value.turnId, items: parsed.items } : null;
   } catch {
@@ -45,5 +51,21 @@ export function writeTodoCheckpoint(configDir: string, checkpoint: StoredTodo): 
     renameSync(temp, path);
   } finally {
     rmSync(temp, { force: true });
+  }
+}
+
+/**
+ * Drop the checkpoint a rewind just undid: the session state rolled back, and
+ * this file did not, so the next turn would read the undone plan as "interrupted
+ * progress" and inject it again. Returns false when the file is still there.
+ */
+export function removeTodoCheckpoint(configDir: string, sessionId: string): boolean {
+  const path = todoCheckpointPath(configDir, sessionId);
+  if (!path) return true;
+  try {
+    rmSync(path, { force: true });
+    return true;
+  } catch {
+    return false;
   }
 }

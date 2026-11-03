@@ -5918,8 +5918,7 @@ body.is-resizing-btw {
   font-size: 11px;
 }
 
-/* 动态菜单第一次展开要问插件要条目：一行骨架 + 一个转圈，尺寸与普通条目一致，
-   数据回来时菜单不会跳高。 */
+/* 菜单里的提示行（暂时没有可选项 / 插件报错）：与普通条目同高，不撑开菜单。 */
 .plugin-menu-loading {
   display: flex;
   height: 28px;
@@ -5930,19 +5929,29 @@ body.is-resizing-btw {
   font-size: 12px;
 }
 
-.plugin-menu-spinner {
-  width: 11px;
-  height: 11px;
-  flex: none;
-  border: 1.5px solid var(--color-line-strong);
-  border-top-color: var(--color-fg-soft);
-  border-radius: 999px;
-  animation: plugin-menu-spin 700ms linear infinite;
+/* 条目还没到位时画两行骨架，不说「正在读取」：这些是本地数据，写一句加载中的话只会
+   让人以为它在等网络。尺寸与两行条目一致，数据回来时菜单不会跳高。 */
+.plugin-menu-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 8px;
 }
 
-@keyframes plugin-menu-spin {
-  to {
-    transform: rotate(360deg);
+.plugin-menu-skeleton-row {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--color-overlay-strong);
+  animation: plugin-menu-skeleton 1.1s ease-in-out infinite;
+}
+
+.plugin-menu-skeleton-row.is-short {
+  width: 62%;
+}
+
+@keyframes plugin-menu-skeleton {
+  50% {
+    opacity: 0.45;
   }
 }
 

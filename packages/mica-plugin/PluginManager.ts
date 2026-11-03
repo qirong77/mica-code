@@ -16,6 +16,7 @@ import type { PluginSkillRegistrationOptions } from './PluginDesktop.js';
 import type { RuntimeSkillRegistration } from '@packages/mica-skills/index.js';
 import type { Skill } from '@packages/mica-skills/types.js';
 import { loadManifestSkills, publishPluginSkills, type PluginSkillPublishEntry } from './PluginSkills.js';
+import { loadManifestRoles, publishPluginRoles } from './PluginRoles.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
@@ -356,6 +357,26 @@ export class PluginManager {
             health.report({ level: 'warn', message: `skill 目录：${problem}` });
           }
           for (const skill of skills) registerSkill(skill);
+        }
+      }
+
+      // 清单声明的角色：正文留在插件目录里，索引写到 `$MICA_HOME/plugin-roles`，输入框的
+      // 角色切换与 CLI 的 `/role` 只扫索引，不必为此 setup 插件。
+      const rolePaths = plugin.manifest?.roles ?? [];
+      if (rolePaths.length > 0) {
+        if (!plugin.root) {
+          logger.warn('plugin:role-dir', { error: 'no plugin root' });
+          health.report({
+            level: 'warn',
+            message: '清单声明了 roles，但插件不是从目录加载的，读不到角色正文',
+          });
+        } else {
+          const { roles: manifestRoles, problems } = loadManifestRoles(plugin.root, rolePaths);
+          for (const problem of problems) {
+            logger.warn('plugin:role-dir', { problem });
+            health.report({ level: 'warn', message: `角色目录：${problem}` });
+          }
+          publishPluginRoles(plugin.id, manifestRoles, { configDir });
         }
       }
 

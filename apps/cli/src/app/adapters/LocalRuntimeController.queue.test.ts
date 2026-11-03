@@ -52,7 +52,7 @@ describe('LocalRuntimeController queue drain', () => {
     };
     let runId = 0;
     const agent = {
-      events: { on: vi.fn(), off: vi.fn() },
+      events: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
       reserveRunId: () => ++runId,
       isCurrent: () => true,
       captureClientSnapshot: () => undefined,
@@ -101,7 +101,7 @@ describe('LocalRuntimeController queue drain', () => {
     });
 
     const agent = {
-      events: { on: vi.fn(), off: vi.fn() },
+      events: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
       reserveRunId: () => ++runId,
       isCurrent: () => true,
       captureClientSnapshot: () => undefined,
@@ -193,7 +193,7 @@ describe('LocalRuntimeController queue drain', () => {
     });
 
     const agent = {
-      events: { on: vi.fn(), off: vi.fn() },
+      events: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
       reserveRunId: () => ++runId,
       isCurrent: () => true,
       captureClientSnapshot: () => undefined,
@@ -287,7 +287,7 @@ describe('LocalRuntimeController queue drain', () => {
     try {
       let runId = 0;
       const agent = {
-        events: { on: vi.fn(), off: vi.fn() },
+        events: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
         reserveRunId: () => ++runId,
         isCurrent: () => true,
         captureClientSnapshot: () => undefined,

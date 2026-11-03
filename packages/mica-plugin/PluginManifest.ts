@@ -6,11 +6,7 @@ import {
   type PluginSettingType,
 } from './PluginSettings.js';
 import { pluginLlmSettingFields, type PluginLlmSpec } from './PluginLlm.js';
-import {
-  PLUGIN_ACTION_TONES,
-  type PluginActionDeclaration,
-  type PluginActionTone,
-} from './PluginActions.js';
+import { PLUGIN_ACTION_TONES, type PluginActionDeclaration, type PluginActionTone } from './PluginActions.js';
 import {
   PLUGIN_PANEL_DISPLAYS,
   PLUGIN_ENTRY_PLACEMENTS,
@@ -144,6 +140,14 @@ export type PluginManifest = {
    * 同名 skill 仍然优先（用户覆盖内置那一份的规则不变）。
    */
   skills: string[];
+  /**
+   * 随插件分发的「角色」（清单 `roles`），每条是相对插件目录的路径（目录或单个 `.md`）。
+   *
+   * 与 `skills` 同一套读法，区别在注入方式：插件角色是**追加**在通用系统提示词后面
+   * （`<role>` 段），不替换 `<system>`。用户改角色就改插件目录里的文件；输入框的角色
+   * 切换与 `/role` 都从 `$MICA_HOME/plugin-roles` 的索引里读到它。
+   */
+  roles: string[];
 };
 
 export type PluginStatusField = {
@@ -277,6 +281,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const skills = readSkillDirs(input.skills);
   if (!skills.ok) return skills;
 
+  const roles = readRolePaths(input.roles);
+  if (!roles.ok) return roles;
+
   return {
     ok: true,
     manifest: {
@@ -303,30 +310,45 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       desktopPanel: desktop.value.panel,
       desktopSessionMenu: desktop.value.sessionMenu,
       skills: skills.value,
+      roles: roles.value,
     },
   };
 }
 
+function readRolePaths(input: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
+  return readBundlePaths(input, 'roles');
+}
+
+function readSkillDirs(input: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
+  return readBundlePaths(input, 'skills');
+}
+
 /**
- * `skills`：随插件分发的 skill 目录。
+ * `skills` / `roles`：随插件分发的正文目录。
  *
  * 只收相对路径：绝对路径能让一份插件指向机器上任意目录，`..` 则能爬出插件目录——两者都
  * 让「这个插件带了什么」变得不可读，而 `plugin.json` 存在的意义正是这一点。
  */
-function readSkillDirs(input: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
+function readBundlePaths(
+  input: unknown,
+  field: 'skills' | 'roles',
+): { ok: true; value: string[] } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: [] };
-  if (!Array.isArray(input)) return { ok: false, error: 'skills 必须是数组' };
+  if (!Array.isArray(input)) return { ok: false, error: `${field} 必须是数组` };
   const dirs: string[] = [];
   for (const entry of input) {
     if (typeof entry !== 'string' || !entry.trim()) {
-      return { ok: false, error: 'skills 里的每一项都必须是非空字符串' };
+      return { ok: false, error: `${field} 里的每一项都必须是非空字符串` };
     }
     const value = entry.trim();
-    if (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)) {
-      return { ok: false, error: `skills 只能用相对插件目录的路径：${value}` };
-    }
-    if (value.split(/[\\/]/).includes('..')) {
-      return { ok: false, error: `skills 不能指向插件目录之外：${value}` };
+    // 与 `main` / `assets` 共用同一份越界判定：绝对路径、UNC（`\\host\share`）、`..`
+    // 都在解析阶段挡掉，而不是等到读目录时才在磁盘上乱走。
+    if (!isSafePluginRelativePath(value)) {
+      // 两种越界给各自的说法：写成一句话，用户分不清是写成了绝对路径，还是爬出了目录。
+      const error = value.split(/[\\/]/).includes('..')
+        ? `${field} 不能指向插件目录之外：${value}`
+        : `${field} 只能是插件目录内的相对路径：${value}`;
+      return { ok: false, error };
     }
     if (!dirs.includes(value)) dirs.push(value);
   }
@@ -359,7 +381,8 @@ function readLlm(input: unknown): { ok: true; value: PluginLlmSpec | null } | { 
     ok: true,
     value: {
       label: typeof input.label === 'string' && input.label.trim() ? input.label.trim() : undefined,
-      description: typeof input.description === 'string' && input.description.trim() ? input.description.trim() : undefined,
+      description:
+        typeof input.description === 'string' && input.description.trim() ? input.description.trim() : undefined,
       // 三态：没写 = 跟随内核默认（复用会话模型），写 false 才是「先用自己的接口」。
       // 归一成布尔会把「没表态」变成「明确关」，默认值就此失效。
       reuseByDefault: typeof input.reuseByDefault === 'boolean' ? input.reuseByDefault : undefined,
@@ -385,16 +408,18 @@ function readLlm(input: unknown): { ok: true; value: PluginLlmSpec | null } | { 
 function readDesktop(
   input: unknown,
   pluginName: string,
-): {
-  ok: true;
-  value: {
-    checks: DesktopCheckId[];
-    entry: PluginDesktopEntry | null;
-    page: PluginDesktopPage | null;
-    panel: PluginDesktopPanel | null;
-    sessionMenu: PluginSessionMenuItem[];
-  };
-} | { ok: false; error: string } {
+):
+  | {
+      ok: true;
+      value: {
+        checks: DesktopCheckId[];
+        entry: PluginDesktopEntry | null;
+        page: PluginDesktopPage | null;
+        panel: PluginDesktopPanel | null;
+        sessionMenu: PluginSessionMenuItem[];
+      };
+    }
+  | { ok: false; error: string } {
   if (input === undefined) {
     return { ok: true, value: { checks: [], entry: null, page: null, panel: null, sessionMenu: [] } };
   }
@@ -440,9 +465,7 @@ function readDesktop(
       error: `desktop.entry.placement 只能是 ${PLUGIN_ENTRY_PLACEMENTS.join(' / ')}`,
     };
   }
-  const placement: PluginEntryPlacement = isPluginEntryPlacement(rawPlacement)
-    ? rawPlacement
-    : 'sidebar';
+  const placement: PluginEntryPlacement = isPluginEntryPlacement(rawPlacement) ? rawPlacement : 'sidebar';
   const page = readDesktopPage(input.page, label);
   if (!page.ok) return page;
   return {
@@ -486,9 +509,7 @@ function readDesktopPage(
  * 每项必须有文案与动作 id——只给文案的菜单项点了没反应，只给 id 的在菜单上看不出来，
  * 两种都是清单错误。动作 id 在同一插件里必须唯一，否则两个菜单项会跑到同一个分支。
  */
-function readSessionMenu(
-  input: unknown,
-): { ok: true; value: PluginSessionMenuItem[] } | { ok: false; error: string } {
+function readSessionMenu(input: unknown): { ok: true; value: PluginSessionMenuItem[] } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: [] };
   if (!Array.isArray(input)) return { ok: false, error: 'desktop.sessionMenu 必须是数组' };
   const items: PluginSessionMenuItem[] = [];
@@ -548,9 +569,7 @@ function readDesktopPanel(
 }
 
 /** `desktop.panel.display`：不写默认抽屉，写错直接拒绝（猜一个会画成另一种形态）。 */
-function readPanelDisplay(
-  input: unknown,
-): { ok: true; value: PluginPanelDisplay } | { ok: false; error: string } {
+function readPanelDisplay(input: unknown): { ok: true; value: PluginPanelDisplay } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: 'drawer' };
   if (typeof input !== 'string' || !PLUGIN_PANEL_DISPLAYS.includes(input as PluginPanelDisplay)) {
     return {
@@ -567,9 +586,7 @@ function readPanelDisplay(
  * 每个按钮是 `action` / `section` / `items`（静态菜单）/ `menu`（条目来自视图）之一。
  * 只给标签的按钮在页面上点不动，所以这种清单错误直接拒绝。
  */
-function readPanelShortcuts(
-  input: unknown,
-): { ok: true; value: PluginPanelShortcut[] } | { ok: false; error: string } {
+function readPanelShortcuts(input: unknown): { ok: true; value: PluginPanelShortcut[] } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: [] };
   if (!Array.isArray(input)) return { ok: false, error: 'desktop.panel.shortcuts 必须是数组' };
   const shortcuts: PluginPanelShortcut[] = [];
@@ -673,9 +690,7 @@ function readStatus(input: unknown): { ok: true; value: PluginStatusField[] } | 
  * 只声明按钮长什么样：实现由插件在 `setup` 里经 `ctx.actions.register(key, handler)` 提供。
  * key 必须唯一——页面按 key 找处理器，重复的 key 会让一个按钮永远没反应。
  */
-function readActions(
-  input: unknown,
-): { ok: true; value: PluginActionDeclaration[] } | { ok: false; error: string } {
+function readActions(input: unknown): { ok: true; value: PluginActionDeclaration[] } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: [] };
   if (!Array.isArray(input)) return { ok: false, error: 'actions 必须是数组' };
 

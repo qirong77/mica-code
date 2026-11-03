@@ -61,10 +61,12 @@ describe('chat event buffering', () => {
     const reasoning = codexNotificationToEvent({ method: 'item/reasoning/textDelta', params: { delta: 'think', micaAttemptId: 't:1' } })
     const rollback = codexNotificationToEvent({ method: 'mica/agentMessage/textRollback', params: { length: 1, micaAttemptId: 't:1' } })
     const thinkingRollback = codexNotificationToEvent({ method: 'mica/reasoning/textRollback', params: { threadId: 's', turnId: 't', itemId: 'i', length: 5, micaAttemptId: 't:1' } })
+    const thinkingReset = codexNotificationToEvent({ method: 'mica/reasoning/reset', params: { threadId: 's', turnId: 't' } })
     expect(delta.attemptId).toBe('t:1')
     expect(reasoning.attemptId).toBe('t:1')
     expect(rollback.attemptId).toBe('t:1')
     expect(thinkingRollback).toMatchObject({ type: 'reasoning_rollback', sessionID: 's', length: 5, attemptId: 't:1' })
+    expect(thinkingReset).toMatchObject({ type: 'reasoning_reset', sessionID: 's' })
   })
   it('keeps reasoning attempts separate through buffering and pacing before rollback', () => {
     const events = []

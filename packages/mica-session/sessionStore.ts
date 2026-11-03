@@ -15,7 +15,7 @@ import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { deleteBtwState } from '@packages/mica-common/btwState.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
 import type { CapabilitySelection } from '@packages/mica-common/capabilities.js';
-import type { AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
+import type { AgentQueryContent, AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
 import {
   isEffortLevelName,
   isProviderProtocol,
@@ -74,10 +74,24 @@ export type PersistedRuntimeSnapshot = {
   systemPrompt?: string;
   messages: unknown[];
   conversationMessages: unknown[];
+  /** Completed display text from an interrupted Responses turn; never sent to the model. */
+  interruptedThinking?: PersistedThinking;
+  /** Completed display text in a running Responses turn. */
+  activeThinking?: PersistedThinking;
+  /** The input and its commit state relative to the saved provider messages. */
+  activeTurn?: { input: AgentQueryContent; committed: boolean };
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
   /** Subagent task usage appended by the Agent tool; optional for older snapshots. */
   subagentUsageHistory?: SubagentUsageRecord[];
+};
+
+type PersistedThinking = {
+  providerId: string;
+  protocol: ProviderProtocol;
+  model: string;
+  apiBase: string;
+  text: string;
 };
 
 export type PersistedSnapshotDisplayUsage = {
@@ -775,8 +789,46 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
       capabilitiesCustomized: session.snapshot.capabilitiesCustomized === true ? true : undefined,
       displayUsage: normalizeDisplayUsage(session.snapshot.displayUsage),
       systemPrompt,
+      interruptedThinking: normalizeInterruptedThinking(session.snapshot.interruptedThinking, session.snapshot.providerId, protocol, session.snapshot.model),
+      activeThinking: normalizeInterruptedThinking(session.snapshot.activeThinking, session.snapshot.providerId, protocol, session.snapshot.model),
+      activeTurn: turnState === 'running' && protocol === 'openai_responses'
+        ? normalizeActiveTurn(session.snapshot.activeTurn)
+        : undefined,
     },
   } as PersistedSession;
+}
+
+function normalizeActiveTurn(value: unknown): PersistedRuntimeSnapshot['activeTurn'] {
+  if (!isPlainRecord(value) || typeof value.committed !== 'boolean') return undefined;
+  if (typeof value.input === 'string') return { input: value.input, committed: value.committed };
+  if (!Array.isArray(value.input)) return undefined;
+  const input: Exclude<AgentQueryContent, string> = [];
+  for (const part of value.input) {
+    if (!isPlainRecord(part)) return undefined;
+    if (part.type === 'text' && typeof part.text === 'string') {
+      input.push({ type: 'text', text: part.text });
+    } else if (part.type === 'image' && isPlainRecord(part.source)
+      && part.source.type === 'base64' && typeof part.source.data === 'string'
+      && (part.source.media_type === 'image/jpeg' || part.source.media_type === 'image/png'
+        || part.source.media_type === 'image/gif' || part.source.media_type === 'image/webp')) {
+      input.push({
+        type: 'image',
+        source: { type: 'base64', media_type: part.source.media_type, data: part.source.data },
+      });
+    } else {
+      return undefined;
+    }
+  }
+  return { input, committed: value.committed };
+}
+
+function normalizeInterruptedThinking(value: unknown, providerId: string, protocol: ProviderProtocol, model: string): PersistedRuntimeSnapshot['interruptedThinking'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const thinking = value as Partial<NonNullable<PersistedRuntimeSnapshot['interruptedThinking']>>;
+  if (protocol !== 'openai_responses' || thinking.protocol !== protocol || thinking.providerId !== providerId
+    || thinking.model !== model || typeof thinking.apiBase !== 'string'
+    || typeof thinking.text !== 'string' || !thinking.text) return undefined;
+  return { providerId, protocol, model, apiBase: thinking.apiBase, text: thinking.text };
 }
 
 /** 父会话 id 必须是能落到磁盘的会话 id，且不能是自己（自指会让侧栏嵌套成环）。 */

@@ -15,7 +15,26 @@ function projectSession(raw) {
     variant: message.variant ?? null, command: message.command ?? null,
     status: message.status ?? null, usage: message.usage ?? null,
     stop_reason: message.stop_reason ?? null
-  })) : [] } catch {}
+  })) : [] } catch {
+    // 历史里混进读不动的形状时不要连整条会话一起读坏：留空历史，元信息照常取。
+  }
+  for (const [thinking, active] of [
+    [snapshot?.interruptedThinking, false],
+    [snapshot?.activeThinking, true]
+  ]) {
+    if (
+      thinking?.protocol === 'openai_responses' && thinking.protocol === snapshot?.protocol &&
+      thinking.providerId === snapshot?.providerId && thinking.model === snapshot?.model &&
+      typeof thinking.text === 'string' && thinking.text
+    ) {
+      history.push({
+        role: 'assistant', kind: 'reasoning', text: thinking.text,
+        providerId: thinking.providerId, protocol: thinking.protocol,
+        model: thinking.model, apiBase: thinking.apiBase,
+        ...(active ? { activeCheckpoint: true } : {})
+      })
+    }
+  }
   let meta = null
   try { if (snapshot && typeof snapshot === 'object') {
     // Provider history contains tool calls omitted from conversationMessages.
@@ -49,7 +68,9 @@ function projectSession(raw) {
         try {
           const value = typeof input === 'string' ? JSON.parse(input) : input
           if (value && Array.isArray(value.todos)) calls.set(id, value)
-        } catch {}
+        } catch {
+          // 参数不是合法 JSON 就当这次 todo_write 没发生。
+        }
       }
       for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls : []) {
         remember(call.id, call.function?.name, call.function?.arguments)
@@ -78,7 +99,9 @@ function projectSession(raw) {
       turnState: raw.turnState || 'completed', updatedAt: raw.updatedAt || null, todoInput
     }
   }
-  } catch {}
+  } catch {
+    // 快照读不出来就只交历史，元信息留空让页面按默认值渲染。
+  }
   return { history, meta }
 }
 
@@ -94,6 +117,15 @@ try {
 `
 
 const empty = () => ({ history: [], meta: null })
+
+/** Drop display checkpoints tied to an older endpoint or protocol. */
+export function filterCurrentThinking(history, provider) {
+  if (!provider) return history
+  return history.filter((row) => row.kind !== 'reasoning' || (
+    row.providerId === provider.id && row.protocol === provider.protocol &&
+    row.apiBase === (provider.api_base ?? '')
+  ))
+}
 
 export function createSessionReader({
   startWorker = (file) => new Worker(WORKER_SOURCE, { eval: true, workerData: file, execArgv: [] })

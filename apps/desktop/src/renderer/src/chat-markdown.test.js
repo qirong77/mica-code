@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   Markdown,
+  activityTurnIdForDisplay,
   canReuseVisualTranscript,
   chatUrlTransform,
   currentTurnActivityMessages,
@@ -12,6 +13,12 @@ import {
   isPersistedRunComplete,
   latestTodoItems,
   mergeReplayEvents,
+  reconcileActiveThinking,
+  reconcileInterruptedThinking,
+  sameSelectedModel,
+  thinkingBeforeReplay,
+  thinkingForSelectedModel,
+  thinkingAfterUnexpectedExit,
   resolveChatPath,
   restoredTodoInterrupted,
   todoSnapshotFromMessages,
@@ -237,6 +244,28 @@ describe('visual transcript cache', () => {
   })
 })
 
+describe('visual transcript identity', () => {
+  it('does not reuse visual thinking after model or endpoint identity changes', () => {
+    const messages = [{ kind: 'message', role: 'user', text: 'inspect' }]
+    const identity = { providerId: 'p', protocol: 'openai_responses', model: 'm', apiBase: 'https://one' }
+    expect(canReuseVisualTranscript(messages, messages, identity, { ...identity })).toBe(true)
+    expect(canReuseVisualTranscript(messages, messages, identity, { ...identity, model: 'other' })).toBe(false)
+    expect(canReuseVisualTranscript(messages, messages, identity, { ...identity, providerId: 'other' })).toBe(false)
+    expect(canReuseVisualTranscript(messages, messages, identity, { ...identity, apiBase: 'https://two' })).toBe(false)
+  })
+})
+
+describe('interrupted reasoning reconciliation', () => {
+  it('removes stale thinking when no checkpoint survives validation', () => {
+    const messages = [
+      { kind: 'message', role: 'user', text: 'prompt' },
+      { kind: 'reasoning', role: 'assistant', text: 'old checkpoint', resumableThinking: true },
+      { kind: 'reasoning', role: 'assistant', text: 'partial', turnId: 'turn' }
+    ]
+    expect(reconcileInterruptedThinking(messages, [], 'turn', true)).toEqual([messages[0]])
+  })
+})
+
 describe('structured activity state', () => {
   it('uses the latest todo_write replacement list', () => {
     const first = {
@@ -320,6 +349,66 @@ describe('structured activity state', () => {
     ]
 
     expect(historyBeforeRunReplay(messages, 'active prompt')).toEqual([messages[0], messages[2]])
+  })
+
+  it('keeps interrupted reasoning across replay and reconciles it without duplicates', () => {
+    const old = { id: 'old', kind: 'reasoning', role: 'assistant', text: 'first', resumableThinking: true, turnId: 'old' }
+    const prompt = { kind: 'message', role: 'user', text: 'continue' }
+    const saved = { ...old, id: 'saved', text: 'first\n\nsecond' }
+    const partial = { id: 'partial', kind: 'reasoning', role: 'assistant', text: 'second', turnId: 'new' }
+    const tool = { id: 'tool', kind: 'tool', turnId: 'new' }
+    expect(historyBeforeRunReplay([prompt, old], 'continue')).toEqual([prompt, old])
+    expect(hasPersistedTurn([prompt, old], 'continue')).toBe(false)
+    const result = reconcileInterruptedThinking([prompt, old, tool, partial], [prompt, saved], 'new')
+    expect(result.map((message) => message.id)).toEqual([undefined, 'saved', 'tool'])
+    expect(result[1]).toMatchObject({ text: 'first\n\nsecond', turnId: 'new' })
+  })
+
+  it('restores durable thinking after an unexpected host exit and removes an unfinished tail', () => {
+    const messages = [
+      { kind: 'message', role: 'user', text: 'question' },
+      { kind: 'reasoning', text: 'old checkpoint', resumableThinking: true, turnId: 'old' },
+      { kind: 'tool', text: 'tool call', turnId: 'turn-1' },
+      { kind: 'reasoning', text: 'completed and unfinished', turnId: 'turn-1' }
+    ]
+    const persisted = [
+      { kind: 'reasoning', text: 'old checkpoint', resumableThinking: true, turnId: 'old' },
+      { kind: 'reasoning', text: 'old checkpoint\n\ncompleted', resumableThinking: true, activeCheckpoint: true, turnId: 'saved' }
+    ]
+    const restored = thinkingAfterUnexpectedExit(messages, persisted, 'turn-1')
+    expect(restored.map((message) => message.text)).toEqual(['question', 'old checkpoint\n\ncompleted', 'tool call'])
+    expect(currentTurnActivityMessages(restored, 'turn-1')[0].text).toBe('old checkpoint\n\ncompleted')
+    expect(thinkingAfterUnexpectedExit(messages, [], 'turn-1').map((message) => message.text)).toEqual(['question', 'tool call'])
+  })
+
+  it('does not restore thinking from the previous model while a different model is selected', () => {
+    const rows = [{ kind: 'message', text: 'question' }, { kind: 'reasoning', text: 'old thinking' }]
+    expect(thinkingForSelectedModel(rows, 'new', 'old')).toEqual([rows[0]])
+    expect(thinkingForSelectedModel(rows, 'old', 'old')).toEqual(rows)
+    expect(thinkingForSelectedModel(rows, undefined, 'old')).toEqual(rows)
+    expect(thinkingForSelectedModel(rows, 'provider/family/model', 'family/model', 'provider')).toEqual(rows)
+    expect(thinkingForSelectedModel(rows, 'other/family/model', 'family/model', 'provider')).toEqual([rows[0]])
+    expect(sameSelectedModel('family/model', 'provider/family/model', 'family/model', 'provider')).toBe(true)
+    expect(sameSelectedModel('family/model', 'other/family/model', 'family/model', 'provider')).toBe(false)
+  })
+
+  it('merges a running checkpoint when old events have fallen out of the replay buffer', () => {
+    const saved = { id: 'saved', kind: 'reasoning', text: 'first complete\n\nsecond complete', activeCheckpoint: true, resumableThinking: true, turnId: 'saved-turn' }
+    const old = { id: 'old', kind: 'reasoning', text: 'first complete', resumableThinking: true, turnId: 'saved-turn' }
+    const replayed = { id: 'new', kind: 'reasoning', text: 'second complete\n\ncurrent partial', turnId: null }
+    const initial = thinkingBeforeReplay([old, saved], [], true)
+    const result = reconcileActiveThinking([...initial, replayed], [old, saved], { running: true })
+    expect(result.map((message) => message.text)).toEqual(['first complete', 'second complete', '\n\ncurrent partial'])
+    expect(activityTurnIdForDisplay(result, null, true)).toBeNull()
+    expect(currentTurnActivityMessages(result, null)).toEqual(result)
+    expect(thinkingBeforeReplay([old, saved], [{ type: 'step_start' }], true)).toEqual([old])
+  })
+
+  it('shows the last active checkpoint after the host exits unexpectedly', () => {
+    const old = { kind: 'reasoning', text: 'first', resumableThinking: true, turnId: 'saved' }
+    const active = { ...old, text: 'first\n\nsecond', activeCheckpoint: true }
+    const result = reconcileActiveThinking(thinkingBeforeReplay([old, active], [], false), [old, active])
+    expect(result.map((message) => message.text)).toEqual(['first', 'second'])
   })
 
   it('matches the active prompt across the persisted image placeholder', () => {

@@ -2,6 +2,7 @@
 import { createHash } from 'crypto'
 import { lstat, readFile, readlink } from 'fs/promises'
 import {
+  baseBranchLabel,
   compareChangePaths,
   isBaseBranch,
   parseNameStatus,
@@ -27,11 +28,28 @@ export async function currentBranchName(root) {
   }
 }
 
+/**
+ * 把用户（或插件）给的名字解析成提交号。
+ *
+ * 分支常常只有远端那一份：评审别人的需求时本地没 checkout、刚 fetch 下来还没建跟踪分支，
+ * `rev-parse --verify <名字>` 会直接失败，界面只剩一句 `fatal: Needed a single revision`。
+ * 所以原名解析不到时再试一次 `origin/<名字>`——它同样是一个**提交**引用，不读工作区。
+ */
 async function commitHash(root, ref) {
   if (typeof ref !== 'string' || !ref.trim()) throw new Error('请输入 Git 分支、标签或提交号')
-  return (
-    await git(root, ['rev-parse', '--verify', '--end-of-options', `${ref.trim()}^{commit}`])
-  ).trim()
+  const name = ref.trim()
+  const candidates = name.startsWith('origin/') ? [name] : [name, `origin/${name}`]
+  let lastError
+  for (const candidate of candidates) {
+    try {
+      return (
+        await git(root, ['rev-parse', '--verify', '--end-of-options', `${candidate}^{commit}`])
+      ).trim()
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError
 }
 
 /** User-entered refs are always resolved as commits before use in other Git commands. */
@@ -118,7 +136,9 @@ async function comparison(root, head, requested, direct, { headName = '', review
   const useDirect = Boolean(direct || base.name === 'HEAD' || !mergeBase)
   return {
     base: base.name,
-    baseLabel: shortRefName(base.name),
+    // 显示名去掉 `origin/`：评审别人的分支时基线常常只写成远端 ref，界面上
+    // 「origin/master · 相对 origin/master」既长又难读，而这两处只是标题。
+    baseLabel: baseBranchLabel(shortRefName(base.name)),
     mergeBase,
     direct: useDirect,
     compareRef: useDirect ? base.hash : mergeBase,
@@ -291,7 +311,7 @@ export async function getRefSummary(cwd, { head = null, base = null, direct = fa
     ...selected,
     head: headName,
     headHash,
-    headLabel: shortRefName(headName),
+    headLabel: baseBranchLabel(shortRefName(headName)),
     files,
     additions: files.reduce((total, file) => total + file.additions, 0),
     deletions: files.reduce((total, file) => total + file.deletions, 0)

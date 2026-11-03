@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createSessionParentWriter } from './session-parent'
 import { readTopLevelParentId } from './session-file-head'
+import { createTurnLeaseRunner } from './session-lease'
 
 let root
 let directory
@@ -90,6 +91,23 @@ describe('session parent writer', () => {
     busy.clear()
     busy.add('parent')
     expect(setParent({ sessionId: 'child', parentId: 'parent' }).parentSessionId).toBe('parent')
+  })
+
+  it('握着 turn lease 写盘，别人持有时报同一句话', () => {
+    const lockDir = join(root, 'sessions', '.turn-locks')
+    const leased = createSessionParentWriter({
+      sessionsDir: () => directory,
+      withTurnLease: createTurnLeaseRunner({ lockDir: () => lockDir })
+    })
+    expect(leased({ sessionId: 'child', parentId: 'parent' }).parentSessionId).toBe('parent')
+    expect(existsSync(join(lockDir, 'child.lock'))).toBe(false)
+
+    mkdirSync(lockDir, { recursive: true })
+    writeFileSync(join(lockDir, 'grandchild.lock'), JSON.stringify({ pid: process.pid, token: 'other' }))
+    expect(() => leased({ sessionId: 'grandchild', parentId: 'parent' })).toThrow(
+      '该会话正在运行，请等这一轮结束再调整会话层级'
+    )
+    expect(readSession('grandchild').parentSessionId).toBe('child')
   })
 
   it('拒绝非法 id、缺失与损坏的会话文件', () => {

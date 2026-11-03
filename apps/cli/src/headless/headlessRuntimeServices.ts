@@ -56,13 +56,16 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
       // No message bar in headless mode; notices are surfaced as conversation messages.
     },
     showNotice(text, _ownerSessionId, noticeOptions = {}) {
-      noticeLog().upsert({
-        role: 'notice',
-        content: text,
-        variant: noticeOptions.variant,
-        command: noticeOptions.command,
-        status: noticeOptions.status,
-      });
+      noticeLog().upsert(
+        {
+          role: 'notice',
+          content: text,
+          variant: noticeOptions.variant,
+          command: noticeOptions.command,
+          status: noticeOptions.status,
+        },
+        { replace: noticeOptions.replace },
+      );
       save({ allowEmpty: true });
     },
     showCommitNotice(text) {
@@ -194,6 +197,7 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
           'History replacement removed all usable conversation content; the original session was restored',
         );
       }
+      concreteAgent.clearInterruptedThinking();
       // Rewriting the history drops the notices with it (same as the CLI).
       noticeLog().clear();
       concreteSessionController.saveCurrent({

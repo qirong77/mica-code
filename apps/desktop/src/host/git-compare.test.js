@@ -320,6 +320,42 @@ describe('file comparison modes and refs', () => {
     expect(refs.tags[0]).toMatchObject({ kind: 'tag', name: 'v1' })
     expect((await resolveRef(root, 'origin/main')).ref.hash).toBe(head)
   })
+
+  it('resolves a branch that only exists on origin', async () => {
+    // 评审别人的需求时最常见的情形：本地没 checkout 过那条分支，只有 fetch 下来的远端 ref。
+    const ancestor = await hash()
+    await git(root, ['checkout', '-qb', 'remote-only'])
+    await write('remote.txt', 'remote\n')
+    const head = await commit('remote work')
+    await git(root, ['update-ref', 'refs/remotes/origin/remote-only', head])
+    await git(root, ['checkout', '-q', 'main'])
+    await git(root, ['branch', '-D', 'remote-only'])
+
+    expect(await resolveRef(root, 'remote-only')).toEqual({
+      ref: { hash: head, name: 'remote-only' },
+      error: null
+    })
+    const summary = await getRefSummary(root, { head: 'remote-only', base: 'main' })
+    expect(summary).toMatchObject({ head: 'remote-only', headHash: head, base: 'main' })
+    expect(file(summary, 'remote.txt').status).toBe('added')
+    expect(summary.files.some((item) => item.path === 'a.txt')).toBe(false)
+    // 显式写成 origin/<名字> 也一样能解析。
+    expect((await resolveRef(root, 'origin/remote-only')).ref.hash).toBe(head)
+    void ancestor
+  })
+
+  it('labels a remote-only head without the origin/ prefix', async () => {
+    // 标题只说人话：`2026_x · 相对 master`，别把 `origin/` 也带上（那只是 git 里的写法）。
+    await git(root, ['checkout', '-qb', 'remote-label'])
+    await write('remote.txt', 'remote\n')
+    const head = await commit('remote label')
+    await git(root, ['update-ref', 'refs/remotes/origin/remote-label', head])
+    await git(root, ['checkout', '-q', 'main'])
+    await git(root, ['branch', '-D', 'remote-label'])
+    const summary = await getRefSummary(root, { head: 'remote-label', base: 'main' })
+    expect(summary.headLabel).toBe('remote-label')
+    expect(summary.baseLabel).toBe('main')
+  })
 })
 
 describe('ref review', () => {

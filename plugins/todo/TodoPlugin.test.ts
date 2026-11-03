@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import {
@@ -9,7 +12,9 @@ import {
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, type MicaTool, type ToolExecuteCallbacks } from '@packages/mica-tools/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
+import { bindTodoSessionOwner } from '@packages/mica-common/todoState.js';
 import { TodoPlugin } from './TodoPlugin.js';
+import { writeTodoCheckpoint } from './todoPersistence.js';
 
 describe('TodoPlugin', () => {
   const disposeCallbacks: Array<() => void | Promise<void>> = [];
@@ -105,6 +110,62 @@ describe('TodoPlugin', () => {
       await harness.commands.execute('/todo show');
       expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list is empty.');
     }
+  });
+
+  it('drops the checkpoint a rewind undid instead of injecting it next turn', async () => {
+    const configDir = temporaryDir();
+    const harness = createTodoHarness(disposeCallbacks, true, { configDir });
+    const owner = {};
+    harness.setOwner(owner);
+    bindTodoSessionOwner(owner, () => ({ id: 'session-a', persistent: true }));
+
+    const first = micaRuntime.createRuntimeInput('first', 'ui');
+    await harness.hooks.emit('turn:before', { owner, runtime: {}, input: first });
+    await micaTools.execute('todo_write', { todos: [{ content: 'Undone work', status: 'pending' }] });
+    const second = micaRuntime.createRuntimeInput('second', 'ui');
+    await harness.hooks.emit('turn:before', { owner, runtime: {}, input: second });
+    await micaTools.execute('todo_write', { todos: [{ content: 'Later work', status: 'in_progress' }] });
+
+    harness.events.publish({ type: 'session:invalidated', reason: 'rewind', owner });
+
+    const third = micaRuntime.createRuntimeInput('third', 'ui');
+    await harness.hooks.emit('turn:before', { owner, runtime: {}, input: third });
+    expect(harness.rewrite([{ role: 'user', content: 'third' }], { owner, sessionId: 'session-a' })).toBeNull();
+  });
+
+  it('does not read a checkpoint in a host that never persists sessions', async () => {
+    const configDir = temporaryDir();
+    writeTodoCheckpoint(configDir, {
+      version: 1,
+      sessionId: 'session-a',
+      turnId: 'turn-from-another-host',
+      items: [{ id: 'stale', content: 'Stale work', status: 'pending' }],
+    });
+    const harness = createTodoHarness(disposeCallbacks, true, { configDir });
+    const owner = {};
+    harness.setOwner(owner);
+    bindTodoSessionOwner(owner, () => ({ id: 'session-a', persistent: false }));
+
+    const input = micaRuntime.createRuntimeInput('one-shot', 'ui');
+    await harness.hooks.emit('turn:before', { owner, runtime: {}, input });
+    expect(harness.rewrite([{ role: 'user', content: 'one-shot' }], { owner, sessionId: 'session-a' })).toBeNull();
+  });
+
+  it('keeps the turn alive when the checkpoint cannot be written, and reports it once', async () => {
+    const configDir = temporaryDir();
+    // 让 `todo-checkpoints` 这一级建不出来：插件只能当它没写成，不能把整轮打挂。
+    writeFileSync(join(configDir, 'todo-checkpoints'), 'not a directory');
+    const harness = createTodoHarness(disposeCallbacks, true, { configDir });
+    const owner = {};
+    harness.setOwner(owner);
+    bindTodoSessionOwner(owner, () => ({ id: 'session-a', persistent: true }));
+
+    for (const prompt of ['first', 'second']) {
+      const input = micaRuntime.createRuntimeInput(prompt, 'ui');
+      await expect(harness.hooks.emit('turn:before', { owner, runtime: {}, input })).resolves.not.toThrow();
+    }
+    expect(harness.reportHealth).toHaveBeenCalledTimes(1);
+    expect(harness.warn).toHaveBeenCalled();
   });
 
   it('never marks leftover items completed when the turn finishes', async () => {
@@ -337,7 +398,22 @@ describe('TodoPlugin', () => {
   });
 });
 
-function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>, withOwners = false) {
+const temporaryDirs: string[] = [];
+afterEach(() => {
+  for (const dir of temporaryDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function temporaryDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mica-todo-'));
+  temporaryDirs.push(dir);
+  return dir;
+}
+
+function createTodoHarness(
+  disposeCallbacks: Array<() => void | Promise<void>>,
+  withOwners = false,
+  options: { configDir?: string } = {},
+) {
   const commands = new micaCommands.CommandRegistry();
   const hooks = new micaPlugin.HookRegistry();
   const events = new micaRuntime.RuntimeEventBus();
@@ -345,6 +421,9 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>, 
   const showMessage = vi.fn();
   const upsert = vi.fn<(item: PluginStatusItem) => void>();
   const remove = vi.fn<(id: string) => boolean>(() => true);
+  const reportHealth = vi.fn();
+  const warn = vi.fn();
+  const sessionStateValues = new Map<unknown, unknown>();
   const registerTool = vi.fn((tool: MicaTool) => {
     micaTools.registerRuntime(tool);
     return { dispose: () => micaTools.unregisterRuntime(tool) };
@@ -364,6 +443,16 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>, 
       },
     },
     session: withOwners ? { captureOwner: (context?: unknown) => contextOwners.get(context) ?? currentOwner } : undefined,
+    sessionState: options.configDir
+      ? {
+          get: (owner?: unknown) => sessionStateValues.get(owner) as never,
+          set: (value: unknown, owner?: unknown) => sessionStateValues.set(owner, value),
+          clear: (owner?: unknown) => sessionStateValues.delete(owner),
+        }
+      : undefined,
+    paths: options.configDir ? { config: options.configDir } : undefined,
+    health: { path: null, read: () => null, report: reportHealth, clear: () => {} },
+    logger: { info: vi.fn(), warn, error: vi.fn() },
     tools: { register: registerTool },
     prompt: { section: (section: PluginPromptSection) => promptSections.add('todo', section) },
     ui: { submit: vi.fn(), showMessage, status: { upsert, remove } },
@@ -378,8 +467,10 @@ function createTodoHarness(disposeCallbacks: Array<() => void | Promise<void>>, 
     promptSections,
     registerTool,
     remove,
+    reportHealth,
     showMessage,
     upsert,
+    warn,
     setOwner(owner: unknown) {
       currentOwner = owner;
     },

@@ -180,6 +180,8 @@ export type CommandNoticeOptions = {
   command?: string;
   surface?: 'conversation' | 'command_panel';
   status?: 'running' | 'success' | 'warning' | 'error' | 'info';
+  /** 同一个 `command` 只留最新这一条（状态型 notice）。 */
+  replace?: boolean;
 };
 
 export type CommandRuntimeServices = {

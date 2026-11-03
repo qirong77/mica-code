@@ -1,9 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 import {
   applyPanelResult,
+  clearMenuCache,
   loadPluginPanels,
+  menuCacheKey,
+  menuShortcutsOf,
+  panelDrafts,
   pluginPanelTabs,
+  prunePluginPanelCache,
   quickbarMenuItems,
+  readMenuCache,
+  readPanelView,
+  writePanelView,
+  writeMenuCache,
   selectPluginPanels
 } from './plugin-panels'
 
@@ -259,6 +268,78 @@ describe('quickbarMenuItems', () => {
       []
     )
     expect(quickbarMenuItems({ label: '频道', items: 'nope' }, {})).toEqual([])
+  })
+})
+
+describe('菜单缓存', () => {
+  const key = menuCacheKey('node-1', 'user.demand-dev', 'reviews')
+
+  test('TTL 内是新鲜的，过期只标 stale 不清空', () => {
+    clearMenuCache()
+    expect(readMenuCache(key)).toBeNull()
+    writeMenuCache(key, { items: [{ label: 'mis · a' }], ready: true }, 1000)
+    expect(readMenuCache(key, 2000)).toEqual({
+      entry: { items: [{ label: 'mis · a' }], ready: true },
+      stale: false
+    })
+    // 过期也照样给：先画出来再后台刷新，比让用户对着空菜单等一次请求好。
+    expect(readMenuCache(key, 1000 + 60_000)).toEqual({
+      entry: { items: [{ label: 'mis · a' }], ready: true },
+      stale: true
+    })
+  })
+
+  test('按会话隔离：换会话不拿上一个会话的分支', () => {
+    clearMenuCache()
+    const other = menuCacheKey('node-2', 'user.demand-dev', 'reviews')
+    writeMenuCache(key, { items: [{ label: 'mis · a' }], ready: true })
+    writeMenuCache(other, { items: [{ label: 'sass · b' }], ready: true })
+    prunePluginPanelCache('node-2')
+    expect(readMenuCache(key)).toBeNull()
+    expect(readMenuCache(other)?.entry.items[0].label).toBe('sass · b')
+  })
+})
+
+describe('面板视图缓存', () => {
+  test('抽屉打开时先画缓存的那一份，过期的也照画', () => {
+    // prune 的参数是「留在页面上的那个会话」，其余会话的缓存都丢掉。
+    prunePluginPanelCache('node-9')
+    expect(readPanelView('node-9', 'user.demand-dev')).toBeNull()
+    writePanelView('node-9', 'user.demand-dev', { title: '需求开发', sections: [] }, 1000)
+    expect(readPanelView('node-9', 'user.demand-dev', 2000)).toEqual({
+      view: { title: '需求开发', sections: [] },
+      stale: false
+    })
+    expect(readPanelView('node-9', 'user.demand-dev', 1000 + 60_000)?.stale).toBe(true)
+    prunePluginPanelCache('node-other')
+    expect(readPanelView('node-9', 'user.demand-dev')).toBeNull()
+  })
+
+  test('草稿取每个输入框的初值，缺省为空串', () => {
+    const drafts = panelDrafts({
+      sections: [
+        { fields: [{ key: 'url', value: 'http://x' }, { key: 'target' }] },
+        { rows: [{ label: 'a', value: 'b' }] }
+      ]
+    })
+    expect(drafts).toEqual({ url: 'http://x', target: '' })
+    expect(panelDrafts(null)).toEqual({})
+  })
+})
+
+describe('menuShortcutsOf', () => {
+  test('只挑清单里声明了 menu 的按钮：静态分组不需要问插件', () => {
+    const panel = {
+      id: 'user.demand-dev',
+      shortcuts: [
+        { label: '需求描述', section: '需求描述' },
+        { label: 'Pull Request', menu: 'reviews' },
+        { label: '频道', items: [{ label: '同步频道', action: 'check.now' }] }
+      ]
+    }
+    expect(menuShortcutsOf([panel]).map((item) => item.shortcut.label)).toEqual(['Pull Request'])
+    expect(menuShortcutsOf([panel, null]).length).toBe(1)
+    expect(menuShortcutsOf(undefined)).toEqual([])
   })
 })
 

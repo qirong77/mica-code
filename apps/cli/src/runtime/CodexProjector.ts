@@ -43,7 +43,11 @@ function toolDisplayText(name: string, args: string): string {
 }
 
 type CodexHandlers = {
-  [K in Exclude<keyof AgentRuntimeEvents, 'textAttemptStart' | 'textRollback'>]: (payload: AgentRuntimeEvents[K]) => void;
+  [K in Exclude<
+    keyof AgentRuntimeEvents,
+    'textAttemptStart' | 'textRollback' | 'thinkingCheckpoint' | 'thinkingRollback' | 'thinkingReset'
+      | 'thinkingTurnAttemptStart' | 'thinkingTurnAttemptRollback'
+  >]: (payload: AgentRuntimeEvents[K]) => void;
 };
 
 function emptyTokenUsage(): CodexTokenUsageBreakdown {
@@ -112,6 +116,11 @@ export function attachCodexProjector(
   let agentMessageStarted = false;
   let agentMessageText = '';
   let attemptTextLength = 0;
+  let attemptThinkingLength = 0;
+  let uncheckpointedThinking: Array<{ attempt: string; length: number }> = [];
+  let uncheckpointedAtAttemptStart: typeof uncheckpointedThinking = [];
+  let turnAttemptThinking: typeof uncheckpointedThinking = [];
+  let turnAttemptText: typeof uncheckpointedThinking = [];
   let textAttempt = 0;
   const attemptId = () => `${turnId}:${textAttempt}`;
   let reasoningStarted = false;
@@ -150,6 +159,11 @@ export function attachCodexProjector(
       }
       agentMessageText += text;
       attemptTextLength += text.length;
+      if (context.textRollback) {
+        const last = turnAttemptText.at(-1);
+        if (last?.attempt === attemptId()) last.length += text.length;
+        else turnAttemptText.push({ attempt: attemptId(), length: text.length });
+      }
       emit(CODEX_NOTIFICATIONS.agentMessageDelta, {
         threadId,
         turnId,
@@ -170,6 +184,13 @@ export function attachCodexProjector(
         });
       }
       attemptThinkingLength += text.length;
+      const currentAttempt = attemptId();
+      const last = uncheckpointedThinking.at(-1);
+      if (last?.attempt === currentAttempt) last.length += text.length;
+      else uncheckpointedThinking.push({ attempt: currentAttempt, length: text.length });
+      const lastTurnPart = turnAttemptThinking.at(-1);
+      if (lastTurnPart?.attempt === currentAttempt) lastTurnPart.length += text.length;
+      else turnAttemptThinking.push({ attempt: currentAttempt, length: text.length });
       emit(CODEX_NOTIFICATIONS.reasoningTextDelta, {
         threadId,
         turnId,
@@ -241,21 +262,99 @@ export function attachCodexProjector(
   };
 
   agent.events.on('text', handlers.text);
-  let attemptThinkingLength = 0;
-  const onTextAttemptStart = () => { attemptTextLength = 0; attemptThinkingLength = 0; textAttempt++; };
-  const onTextRollback = () => {
-    if (attemptThinkingLength) {
-      emit('mica/reasoning/textRollback', { threadId, turnId, itemId: reasoningItemId, length: attemptThinkingLength, micaAttemptId: attemptId() });
-      attemptThinkingLength = 0;
+  const forgetTurnParts = (parts: typeof turnAttemptThinking, attempt: string, length: number) => {
+    for (let index = parts.length - 1; index >= 0 && length > 0; index--) {
+      const part = parts[index]!;
+      if (part.attempt !== attempt) continue;
+      const removed = Math.min(part.length, length);
+      part.length -= removed;
+      length -= removed;
+      if (!part.length) parts.splice(index, 1);
     }
+  };
+  const onTextAttemptStart = () => {
+    attemptTextLength = 0;
+    attemptThinkingLength = 0;
+    uncheckpointedAtAttemptStart = uncheckpointedThinking.map((part) => ({ ...part }));
+    textAttempt++;
+  };
+  const onTextRollback = () => {
+    if (attemptThinkingLength && context.thinkingRollback) {
+      emit('mica/reasoning/textRollback', {
+        threadId, turnId, itemId: reasoningItemId, length: attemptThinkingLength, micaAttemptId: attemptId(),
+      });
+      forgetTurnParts(turnAttemptThinking, attemptId(), attemptThinkingLength);
+    }
+    attemptThinkingLength = 0;
+    uncheckpointedThinking = uncheckpointedAtAttemptStart.map((part) => ({ ...part }));
     if (!attemptTextLength) return;
     agentMessageText = agentMessageText.slice(0, -attemptTextLength);
-    emit('mica/agentMessage/textRollback', { threadId, turnId, itemId: agentMessageItemId, length: attemptTextLength, micaAttemptId: attemptId() });
+    forgetTurnParts(turnAttemptText, attemptId(), attemptTextLength);
+    emit('mica/agentMessage/textRollback', {
+      threadId, turnId, itemId: agentMessageItemId, length: attemptTextLength, micaAttemptId: attemptId(),
+    });
+    attemptTextLength = 0;
+  };
+  const onThinkingCheckpoint = () => {
+    uncheckpointedThinking = [];
+  };
+  const onThinkingRollback = () => {
+    // Usually all pending reasoning belongs to the current attempt. If it
+    // spans requests, undo each part using the ID attached to its deltas.
+    for (const part of uncheckpointedThinking.slice().reverse()) {
+      emit('mica/reasoning/textRollback', {
+        threadId, turnId, itemId: reasoningItemId, length: part.length, micaAttemptId: part.attempt,
+      });
+      forgetTurnParts(turnAttemptThinking, part.attempt, part.length);
+      if (part.attempt === attemptId()) {
+        attemptThinkingLength -= part.length;
+      } else {
+        uncheckpointedAtAttemptStart = uncheckpointedAtAttemptStart.flatMap((previous) => {
+          if (previous.attempt !== part.attempt) return [previous];
+          const length = previous.length - part.length;
+          return length > 0 ? [{ ...previous, length }] : [];
+        });
+      }
+    }
+    uncheckpointedThinking = [];
+  };
+  const onThinkingReset = () => {
+    emit('mica/reasoning/reset', { threadId, turnId });
+  };
+  const onThinkingTurnAttemptStart = () => {
+    turnAttemptThinking = [];
+    turnAttemptText = [];
+  };
+  const onThinkingTurnAttemptRollback = () => {
+    // Completed requests belong to the discarded client snapshot too. Undo
+    // each remaining part exactly once, using the ID attached to its delta.
+    if (thinking && context.thinkingRollback) {
+      for (const part of turnAttemptThinking.slice().reverse()) {
+        emit('mica/reasoning/textRollback', {
+          threadId, turnId, itemId: reasoningItemId, length: part.length, micaAttemptId: part.attempt,
+        });
+      }
+    }
+    if (context.textRollback) {
+      for (const part of turnAttemptText.slice().reverse()) {
+        agentMessageText = agentMessageText.slice(0, -part.length);
+        emit('mica/agentMessage/textRollback', {
+          threadId, turnId, itemId: agentMessageItemId, length: part.length, micaAttemptId: part.attempt,
+        });
+      }
+    }
+    turnAttemptThinking = [];
+    turnAttemptText = [];
+    uncheckpointedThinking = [];
+    uncheckpointedAtAttemptStart = [];
+    attemptThinkingLength = 0;
     attemptTextLength = 0;
   };
   let unregisterTextRollbackConsumer: (() => void) | undefined;
-  if (context.textRollback) {
+  if (context.textRollback || (thinking && context.thinkingRollback)) {
     agent.events.on('textAttemptStart', onTextAttemptStart);
+  }
+  if (context.textRollback) {
     agent.events.on('textRollback', onTextRollback);
     unregisterTextRollbackConsumer = agent.registerTextRollbackConsumer({
       text: handlers.text,
@@ -265,6 +364,15 @@ export function attachCodexProjector(
     });
   }
   agent.events.on('thinking', handlers.thinking);
+  if (context.textRollback || (thinking && context.thinkingRollback)) {
+    agent.events.on('thinkingTurnAttemptStart', onThinkingTurnAttemptStart);
+    agent.events.on('thinkingTurnAttemptRollback', onThinkingTurnAttemptRollback);
+  }
+  if (thinking && context.thinkingRollback) {
+    agent.events.on('thinkingCheckpoint', onThinkingCheckpoint);
+    agent.events.on('thinkingRollback', onThinkingRollback);
+    agent.events.on('thinkingReset', onThinkingReset);
+  }
   agent.events.on('toolCall', handlers.toolCall);
   agent.events.on('toolResult', handlers.toolResult);
   agent.events.on('usage', handlers.usage);
@@ -316,6 +424,11 @@ export function attachCodexProjector(
       agent.events.off('textAttemptStart', onTextAttemptStart);
       agent.events.off('textRollback', onTextRollback);
       agent.events.off('thinking', handlers.thinking);
+      agent.events.off('thinkingTurnAttemptStart', onThinkingTurnAttemptStart);
+      agent.events.off('thinkingTurnAttemptRollback', onThinkingTurnAttemptRollback);
+      agent.events.off('thinkingCheckpoint', onThinkingCheckpoint);
+      agent.events.off('thinkingRollback', onThinkingRollback);
+      agent.events.off('thinkingReset', onThinkingReset);
       agent.events.off('toolCall', handlers.toolCall);
       agent.events.off('toolResult', handlers.toolResult);
       agent.events.off('usage', handlers.usage);

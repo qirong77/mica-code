@@ -4,9 +4,58 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { execFileSync } from 'node:child_process'
-import { createSessionReader } from './session-reader'
+import { createSessionReader, filterCurrentThinking } from './session-reader'
 
 describe('session reader', () => {
+  it('filters checkpoints from a previous endpoint or protocol', () => {
+    const history = [
+      { role: 'user', text: 'question' },
+      { role: 'assistant', kind: 'reasoning', text: 'old', providerId: 'p', protocol: 'openai_responses', model: 'm', apiBase: 'https://old' }
+    ]
+    expect(filterCurrentThinking(history, { id: 'p', protocol: 'openai_responses', api_base: 'https://old' })).toEqual(history)
+    expect(filterCurrentThinking(history, { id: 'p', protocol: 'openai_responses', api_base: 'https://new' })).toEqual([history[0]])
+    expect(filterCurrentThinking(history, { id: 'p', protocol: 'openai_chat_completions', api_base: 'https://old' })).toEqual([history[0]])
+  })
+  it('restores interrupted thinking only for the matching Responses model', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-reader-thinking-'))
+    const file = join(dir, 'session.json')
+    const read = createSessionReader()
+    const snapshot = {
+      providerId: 'p', protocol: 'openai_responses', model: 'm',
+      messages: [], conversationMessages: [{ role: 'user', content: 'question' }],
+      interruptedThinking: { providerId: 'p', protocol: 'openai_responses', model: 'm', apiBase: 'https://test', text: 'first\n\nsecond' }
+    }
+    try {
+      writeFileSync(file, JSON.stringify({ turnState: 'aborted', snapshot }))
+      expect((await read(file)).history.at(-1)).toMatchObject({ role: 'assistant', kind: 'reasoning', text: 'first\n\nsecond' })
+      snapshot.model = 'another-model'
+      writeFileSync(file, JSON.stringify({ turnState: 'aborted', snapshot }))
+      expect((await read(file)).history.map((row) => row.kind)).not.toContain('reasoning')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('exposes an active checkpoint when restoring a running session', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-reader-active-thinking-'))
+    const file = join(dir, 'session.json')
+    const read = createSessionReader()
+    const snapshot = {
+      providerId: 'p', protocol: 'openai_responses', model: 'm', messages: [],
+      conversationMessages: [{ role: 'user', content: 'question' }],
+      activeThinking: { providerId: 'p', protocol: 'openai_responses', model: 'm', apiBase: '', text: 'completed' }
+    }
+    try {
+      writeFileSync(file, JSON.stringify({ turnState: 'running', snapshot }))
+      expect((await read(file)).history.at(-1)).toMatchObject({ role: 'assistant', kind: 'reasoning', text: 'completed', activeCheckpoint: true })
+      snapshot.model = 'different'
+      writeFileSync(file, JSON.stringify({ turnState: 'running', snapshot }))
+      expect((await read(file)).history.some((row) => row.kind === 'reasoning')).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('recovers only completed todo writes from the last turn across provider formats', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'session-reader-todo-'))
     const file = join(dir, 'session.json')

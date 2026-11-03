@@ -39,7 +39,7 @@ const suite = bunAvailable ? describe : describe.skip;
  * before the text arrives (to keep a turn busy long enough to steer into it). */
 function createMockProvider() {
   const state = {
-    mode: 'ok' as 'ok' | 'error' | 'tool' | 'shell' | 'wait' | 'subagent-recovery',
+    mode: 'ok' as 'ok' | 'error' | 'tool' | 'shell' | 'wait' | 'subagent-recovery' | 'thinking-interrupt',
     errorMessage: '',
     delayBeforeTextMs: 0,
     requests: [] as Array<{
@@ -412,6 +412,15 @@ function createMockProvider() {
           }
           if (state.mode === 'subagent-recovery' && requestIndex === 2) {
             emitUnfinishedSubagentText();
+            return;
+          }
+          if (state.mode === 'thinking-interrupt') {
+            emit({ type: 'response.created', response: { id: 'resp_thinking', object: 'response' } });
+            for (const [index, text] of ['first thought', 'second thought'].entries()) {
+              emit({ type: 'response.reasoning_summary_text.delta', item_id: 'reasoning_1', output_index: 0, summary_index: index, delta: text });
+              emit({ type: 'response.reasoning_summary_text.done', item_id: 'reasoning_1', output_index: 0, summary_index: index, text });
+            }
+            emit({ type: 'response.reasoning_summary_text.delta', item_id: 'reasoning_1', output_index: 0, summary_index: 2, delta: 'unfinished thought' });
             return;
           }
           emitTextEvents();
@@ -1243,6 +1252,214 @@ suite('mica app-server real-user flows (mock provider)', () => {
         (message) => message.method === 'item/reasoning/textDelta' && message.params?.delta === 'thinking...',
       ),
     ).toBe(true);
+  });
+
+  itE2E('interrupt retains complete reasoning parts and resumes without changing provider input', async () => {
+    mock.state.mode = 'thinking-interrupt';
+    const host = spawnHost('thinking-checkpoint', ['--thinking']);
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+    await send(host, 1, 'turn/start', {
+      threadId: '', model: 'mock/mock-chat', micaTextRollback: true, micaThinkingRollback: true,
+      input: [{ type: 'text', text: 'think before answering' }],
+    });
+    const started = await waitFor(host, (message) => message.method === 'turn/started', 'turn started');
+    const turnId = (started.params?.turn as { id: string }).id;
+    await waitFor(host, (message) => message.method === 'item/reasoning/textDelta' && message.params?.delta === 'unfinished thought', 'unfinished thought');
+    await send(host, 2, 'turn/interrupt', { threadId: '', turnId });
+    await waitFor(host, turnCompleted(turnId), 'interrupted turn');
+    const rollbacks = host.lines.filter((message) => message.method === 'mica/reasoning/textRollback');
+    expect(rollbacks.reduce((count, message) => count + Number(message.params?.length || 0), 0)).toBe('\n\nunfinished thought'.length);
+    const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
+    expect(sessionFiles).toHaveLength(1);
+    const session = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFiles[0]!), 'utf8')) as {
+      turnState: string;
+      snapshot: { interruptedThinking?: { text: string } };
+    };
+    expect(session.turnState).toBe('aborted');
+    expect(session.snapshot.interruptedThinking?.text).toBe('first thought\n\nsecond thought');
+
+    mock.state.mode = 'ok';
+    await send(host, 3, 'turn/start', {
+      threadId: '', model: 'mock/mock-chat', micaTextRollback: true, micaThinkingRollback: true,
+      input: [{ type: 'text', text: 'continue' }],
+    });
+    const next = await waitFor(host, (message) => message.id === 3 && message.result !== undefined, 'resumed turn');
+    const nextTurnId = (next.result as { turn: { id: string } }).turn.id;
+    await waitFor(host, turnCompleted(nextTurnId), 'resumed turn complete');
+    const nextInput = mock.state.requests.at(-1)?.input ?? [];
+    expect(JSON.stringify(nextInput)).not.toContain('first thought');
+    expect(JSON.stringify(nextInput)).not.toContain('second thought');
+    expect(JSON.stringify(nextInput)).toContain('continue');
+  });
+
+  itE2E('turn overrides survive a leased refresh, while unspecified settings follow external snapshots', async () => {
+    mock.state.mode = 'thinking-interrupt';
+    const home = makeHome('turn-override-refresh');
+    const first = spawnHost('turn-override-refresh-first', ['--thinking'], home);
+    hosts.push(first);
+    await waitFor(first, hostReady, 'first host ready', 30_000);
+    await send(first, 1, 'turn/start', {
+      model: 'mock/mock-chat', micaTextRollback: true, micaThinkingRollback: true,
+      input: [{ type: 'text', text: 'create an old-model checkpoint' }],
+    });
+    const started = await waitFor(first, (message) => message.method === 'turn/started', 'first turn started');
+    const turnId = (started.params?.turn as { id: string }).id;
+    const sessionId = started.params?.threadId as string;
+    await waitFor(first, (message) => message.method === 'item/reasoning/textDelta' && message.params?.delta === 'unfinished thought', 'old thinking');
+    await send(first, 2, 'turn/interrupt', { threadId: sessionId, turnId });
+    await waitFor(first, turnCompleted(turnId), 'old turn interrupted');
+
+    const sessionPath = join(home, 'sessions', `${sessionId}.json`);
+    type StoredSession = {
+      title: string;
+      turnState: string;
+      snapshot: { model: string; effort: string; interruptedThinking?: { text: string } };
+    };
+    const readSession = () => JSON.parse(readFileSync(sessionPath, 'utf8')) as StoredSession;
+    expect(readSession().snapshot.interruptedThinking?.text).toBe('first thought\n\nsecond thought');
+    killHost(first);
+    await first.closePromise;
+
+    const resumed = spawnHost('turn-override-refresh-resumed', ['--session', sessionId, '--thinking'], home);
+    hosts.push(resumed);
+    await waitFor(resumed, hostReady, 'resumed host ready', 30_000);
+
+    // An external writer changes the saved session after this process resumed.
+    // The old model and interrupted thinking must be loaded again under the lease.
+    const oldSnapshot = readSession();
+    oldSnapshot.title = 'external checkpoint';
+    writeFileSync(sessionPath, JSON.stringify(oldSnapshot));
+    mock.state.mode = 'ok';
+    mock.state.delayBeforeTextMs = 1500;
+    mock.state.requests = [];
+    await send(resumed, 1, 'turn/start', {
+      threadId: sessionId, model: 'mock/mock-chat-new', effort: 'high',
+      micaTextRollback: true, micaThinkingRollback: true,
+      input: [{ type: 'text', text: 'switch after refresh' }],
+    });
+    const response = await waitFor(resumed, (message) => message.id === 1, 'new-model turn response');
+    expect(response.error).toBeUndefined();
+    const newTurnId = (response.result as { turn: { id: string } }).turn.id;
+    await waitFor(resumed, (message) => message.method === 'mica/reasoning/reset', 'old-model thinking reset');
+    const deadline = Date.now() + 10_000;
+    while (mock.state.requests.length < 1 && Date.now() < deadline) await sleep(10);
+    expect(mock.state.requests[0]).toMatchObject({ model: 'mock-chat-new', reasoning: { effort: 'high' } });
+    const running = readSession();
+    expect(running.turnState).toBe('running');
+    expect(running.snapshot.model).toBe('mock-chat-new');
+    expect(running.snapshot.interruptedThinking).toBeUndefined();
+    await waitFor(resumed, turnCompleted(newTurnId), 'new-model turn completed');
+    expect(readSession().snapshot.interruptedThinking).toBeUndefined();
+
+    // No turn override: an externally changed model and effort must both win.
+    const external = readSession();
+    external.title = 'external model';
+    external.snapshot.model = 'mock-chat-external';
+    external.snapshot.effort = 'low';
+    writeFileSync(sessionPath, JSON.stringify(external));
+    await send(resumed, 2, 'turn/start', {
+      threadId: sessionId, input: [{ type: 'text', text: 'follow external settings' }],
+    });
+    const follow = await waitFor(resumed, (message) => message.id === 2, 'follow external response');
+    expect(follow.error).toBeUndefined();
+    const followTurnId = (follow.result as { turn: { id: string } }).turn.id;
+    await waitFor(resumed, turnCompleted(followTurnId), 'follow external completed');
+    expect(mock.state.requests[1]).toMatchObject({ model: 'mock-chat-external', reasoning: { effort: 'low' } });
+
+    // An effort-only request should not restore the model last seen by this host.
+    const externalAgain = readSession();
+    externalAgain.title = 'another external model';
+    externalAgain.snapshot.model = 'mock-chat-latest';
+    externalAgain.snapshot.effort = 'low';
+    writeFileSync(sessionPath, JSON.stringify(externalAgain));
+    await send(resumed, 3, 'turn/start', {
+      threadId: sessionId, effort: 'high', input: [{ type: 'text', text: 'change effort only' }],
+    });
+    const effortResponse = await waitFor(resumed, (message) => message.id === 3, 'effort-only response');
+    expect(effortResponse.error).toBeUndefined();
+    const effortTurnId = (effortResponse.result as { turn: { id: string } }).turn.id;
+    await waitFor(resumed, turnCompleted(effortTurnId), 'effort-only completed');
+    expect(mock.state.requests[2]).toMatchObject({ model: 'mock-chat-latest', reasoning: { effort: 'high' } });
+  });
+
+  itE2E('invalid model overrides fail the request synchronously without changing the session model', async () => {
+    const home = makeHome('turn-override-invalid');
+    const configPath = join(home, 'config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as { providers: Array<Record<string, unknown>> };
+    config.providers.push({
+      ...config.providers[0], id: 'other', protocol: 'openai_chat_completions', models: ['other-model'],
+    });
+    writeFileSync(configPath, JSON.stringify(config));
+    const host = spawnHost('turn-override-invalid', [], home);
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready', 30_000);
+
+    await send(host, 1, 'turn/start', {
+      model: 'other/other-model', input: [{ type: 'text', text: 'incompatible protocol' }],
+    });
+    const incompatible = await waitFor(host, (message) => message.id === 1, 'protocol error');
+    expect(incompatible.error).toMatchObject({ code: -32602 });
+    expect(JSON.stringify(incompatible.error)).toContain('Cannot resume a openai_responses session with openai_chat_completions');
+    await send(host, 2, 'turn/start', {
+      model: 'mock/', input: [{ type: 'text', text: 'missing model name' }],
+    });
+    const missing = await waitFor(host, (message) => message.id === 2, 'missing model error');
+    expect(missing.error).toMatchObject({ code: -32602 });
+    expect(JSON.stringify(missing.error)).toContain('Missing model name');
+    expect(host.lines.some((message) => message.method === 'turn/started')).toBe(false);
+    expect(mock.state.requests).toHaveLength(0);
+
+    await send(host, 3, 'turn/start', { input: [{ type: 'text', text: 'valid follow-up' }] });
+    const response = await waitFor(host, (message) => message.id === 3, 'valid response');
+    expect(response.error).toBeUndefined();
+    await waitFor(host, turnCompleted((response.result as { turn: { id: string } }).turn.id), 'valid turn completed');
+    expect(mock.state.requests[0]?.model).toBe('mock-chat');
+  });
+
+  itE2E('a plugin turn starting during a client guard never inherits the client model', async () => {
+    const home = makeHome('turn-override-guard-race');
+    const pluginDir = join(home, 'plugins', 'guard-race');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
+      id: 'guard-race', name: 'Guard race', version: '1.0.0', main: 'index.js', requires: ['runtime'],
+    }));
+    writeFileSync(join(pluginDir, 'index.js'), `
+      export default function setup(ctx) {
+        let triggered = false;
+        ctx.hooks.on('input:received', async (event) => {
+          if (event.input.source !== 'ui' || triggered) return;
+          triggered = true;
+          await ctx.runtime.submit('automatic plugin turn');
+        });
+      }
+    `);
+    mock.state.delayBeforeTextMs = 500;
+    const host = spawnHost('turn-override-guard-race', [], home);
+    hosts.push(host);
+    await waitFor(host, hostReady, 'guard-race host ready', 30_000);
+    await send(host, 1, 'turn/start', {
+      model: 'mock/mock-chat-client', input: [{ type: 'text', text: 'explicit client input' }],
+    });
+    const automatic = await waitFor(host, (message) => message.method === 'turn/started', 'automatic turn started');
+    const automaticTurnId = (automatic.params?.turn as { id: string }).id;
+    const rejected = await waitFor(host, (message) => message.id === 1, 'queued client request rejected');
+    expect(rejected.error).toBeTruthy();
+    await waitFor(host, (message) => message.method === 'mica/queue/queued', 'client input queued');
+    await send(host, 2, 'mica/queue/recall', {});
+    const recalled = await waitFor(host, (message) => message.id === 2, 'queued client input recalled');
+    expect(recalled.result).toMatchObject({ input: { text: 'explicit client input' } });
+    await waitFor(host, turnCompleted(automaticTurnId), 'automatic turn completed');
+    expect(mock.state.requests).toHaveLength(1);
+    expect(mock.state.requests[0]?.model).toBe('mock-chat');
+
+    await send(host, 3, 'turn/start', {
+      model: 'mock/mock-chat-client', input: [{ type: 'text', text: 'client retries' }],
+    });
+    const accepted = await waitFor(host, (message) => message.id === 3, 'client retry accepted');
+    expect(accepted.error).toBeUndefined();
+    await waitFor(host, turnCompleted((accepted.result as { turn: { id: string } }).turn.id), 'client retry completed');
+    expect(mock.state.requests[1]?.model).toBe('mock-chat-client');
   });
 
   itE2E('unknown protocol methods return -32601 and keep the resident host usable', async () => {
@@ -2497,6 +2714,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
 
     await send(host, 2, 'turn/start', {
       threadId: sessionId,
+      model: 'mock/mock-rejected',
       input: [{ type: 'text', text: '别处正在跑时发的这条' }],
     });
     const rejected = await waitFor(host, (m) => m.id === 2, 'turn/start reject response', 10_000);
@@ -2526,6 +2744,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     );
     expect((completed2.params?.turn as { status?: string }).status).toBe('completed');
     expect(mock!.state.requests.length).toBe(2);
+    expect(mock!.state.requests[1]?.model).toBe('mock-chat');
   });
 
   itE2E('abort keeps the queued input pending instead of starting it', async () => {

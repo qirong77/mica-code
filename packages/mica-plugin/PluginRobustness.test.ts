@@ -83,6 +83,7 @@ function manifest(requires: string[]) {
     desktopPanel: null,
     desktopSessionMenu: [],
     skills: [],
+    roles: [],
   };
 }
 

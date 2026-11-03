@@ -523,6 +523,32 @@ describe('cross-process recovery', () => {
     expect(manager.list(owner)[0]?.status).toBe('completed');
   });
 
+  it('re-reads restored records only when the on-disk stamp changes', () => {
+    const owner = {} as AgentRuntime;
+    const record = { id: 'stamped-task', description: 'work', subagent_type: 'test', model: 'm', effort: 'low' as const, status: 'completed' as const, started_at: new Date().toISOString(), execution_pending: false };
+    let stamp = 'v1';
+    let reads = 0;
+    const manager = new SubagentTaskManager({
+      readRestoredTasks: () => {
+        reads += 1;
+        return [record];
+      },
+      readRestoredStamp: () => stamp,
+    });
+    manager.restore([record], owner);
+    manager.list(owner);
+    // 第一次 list 记下当前指纹（那次读盘是为了把 restore 之后的变化对齐），之后没变就不再读。
+    expect(reads).toBe(1);
+    manager.list(owner);
+    manager.get(record.id, owner);
+    expect(reads).toBe(1);
+    stamp = 'v2';
+    expect(manager.list(owner)[0]?.id).toBe('stamped-task');
+    expect(reads).toBe(2);
+    manager.list(owner);
+    expect(reads).toBe(2);
+  });
+
   it('releases a restart claim when the handler rejects the request', () => {
     const owner = {} as AgentRuntime;
     const record = { id: `retry-${process.pid}-${Date.now()}`, description: 'work', subagent_type: 'test', model: 'm', effort: 'low', status: 'failed' as const, started_at: new Date().toISOString(), execution_pending: false };

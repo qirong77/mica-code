@@ -21,9 +21,9 @@
     "start:web": "node out/server/index.mjs",
     "serve:web": "npm run build && node out/server/index.mjs",
     "postinstall": "electron-builder install-app-deps && electron-rebuild -f -w node-pty",
-    "build:unpack": "npm run build && electron-builder --dir",
+    "build:unpack": "npm run build && electron-builder --dir --config electron-builder.config.cjs",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "npm run build && electron-builder --mac",
+    "build:mac": "npm run build && electron-builder --mac --config electron-builder.config.cjs",
     "build:linux": "npm run build && electron-builder --linux"
   },
   "//dependencies": "只放主进程 / 运行时真正会 require 的包：electron-builder 会把 dependencies 整份装进 app.asar，而 renderer 的依赖已经由 Vite 打进 out/renderer，留在 dependencies 里等于让安装包多背 200MB。新增 src/main 直接 require 的包时必须加在这里。",

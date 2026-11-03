@@ -467,10 +467,13 @@ function createWebApi(env) {
 
     git: {
       status: (cwd) => invoke('git:status', { cwd }),
-      summary: (cwd) => invoke('git:summary', { cwd }),
+      // `refresh` 是用户主动刷新：跳过运行时那 5s 的工作区缓存，立刻重算。
+      summary: (cwd, options = null) =>
+        invoke('git:summary', { cwd, refresh: options?.refresh === true }),
       // 顶栏徽标用的变更量（文件数 + 加/删行）：与 summary 同口径但只回数字，
       // 会话视图轮询它而不必带回每个文件的明细。
-      changeCounts: (cwd) => invoke('git:change-counts', { cwd }),
+      changeCounts: (cwd, options = null) =>
+        invoke('git:change-counts', { cwd, refresh: options?.refresh === true }),
       // 当前工作区相对比较基线的变更：GIT TREE 面板用它。不传 base 时自动挑基线
       // （origin/HEAD → master/main），`direct` 表示与基线直接比（默认取 merge-base）。
       branchSummary: (cwd, options = null) =>

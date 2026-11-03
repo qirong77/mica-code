@@ -3,9 +3,13 @@ productName: mica-code-app
 directories:
   buildResources: build
 files:
+  # The output folder can be configured outside the project. Exclude the
+  # default output explicitly so previous packages are never embedded in asar.
+  - '!dist{,/**}'
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!electron-builder.config.cjs'
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
 # 注意：app.asar 里只会出现 package.json 的 dependencies。renderer 的依赖全部归在
@@ -35,6 +39,9 @@ mac:
     NSDesktopFolderUsageDescription: Mica Code needs Desktop access to open terminal sessions in your Desktop project folders.
   notarize: false
 dmg:
+  # Electron 39 requires macOS 12+, which supports LZFSE-compressed images.
+  # ULFO is faster to create than the default UDZO while keeping a similar size.
+  format: ULFO
   artifactName: ${name}-${version}.${ext}
 linux:
   icon: build/icon.png

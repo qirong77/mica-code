@@ -52,6 +52,27 @@ describe('auto-compact plugin', () => {
     expect(harness.compactCalls.map((call) => call.mode)).toEqual(['quick', 'model']);
   });
 
+  // 只有模型摘要真的改写了历史才提示。本地清理一轮里会跑好几次（每批工具结果都能清），
+  // 它不改用户看到的对话，逐次提示只会在会话里排出一列「自动压缩：xx → yy」的卡片。
+  it('stays quiet when the local pass alone already brought the context down', async () => {
+    const harness = createHarness({ inputTokens: 250_000, savedTokens: [200_000] });
+
+    await harness.rewrite();
+
+    expect(harness.compactCalls.map((call) => call.mode)).toEqual(['quick']);
+    expect(harness.notices).toEqual([]);
+  });
+
+  it('reports a model compaction and takes over the previous status row', async () => {
+    const harness = createHarness({ inputTokens: 250_000, savedTokens: [1_000, 12_000] });
+
+    await harness.rewrite();
+
+    // 运行中的进度条之后只剩一条结论，且它声明「同一 command 只留最新一条」。
+    expect(harness.notices.at(-1)).toContain('自动压缩：250K → 237K');
+    expect(harness.noticeReplaceFlags.at(-1)).toBe(true);
+  });
+
   it('writes the checkpoint with the model from the llm component', async () => {
     // 模型接口走清单的 `llm` 声明：默认复用当前会话模型，也能在插件设置里换一个便宜接口。
     const requests: PluginModelRequest[] = [];
@@ -226,7 +247,7 @@ describe('auto-compact plugin', () => {
   });
 
   it('compacts the stored history when the user comes back after a long idle', async () => {
-    // 上下文小（远低于阈值）也要压：这一条判断的是「人回来了」，不是「上下文大了」。
+    // 空闲只是前提，仍要求上下文已到快速压缩阈值：压一段本来就不会被压的历史只是白扫。
     const harness = createHarness({
       inputTokens: 350_000,
       idleCompact: true,
@@ -578,6 +599,7 @@ function createHarness(options: {
   const notices: string[] = [];
   /** 每条 notice 带的 command：宿主靠它把「同一段历史被连压几次」合并成一条。 */
   const noticeCommands: Array<string | undefined> = [];
+  const noticeReplaceFlags: boolean[] = [];
   let stateSeenByHost: Record<string, unknown> | undefined;
   const stateOwners: unknown[] = [];
   const eventHandlers: Array<(event: { type: string; owner?: unknown }) => void> = [];
@@ -713,9 +735,10 @@ function createHarness(options: {
     },
     // 压缩落地后在对话里留一行，让人不用翻日志也知道「刚才压过」。
     ui: {
-      notice: (content: string, options?: { command?: string }) => {
+      notice: (content: string, options?: { command?: string; replace?: boolean }) => {
         notices.push(content);
         noticeCommands.push(options?.command);
+        noticeReplaceFlags.push(options?.replace === true);
       },
     },
     logger,
@@ -729,6 +752,7 @@ function createHarness(options: {
     healthReports,
     notices,
     noticeCommands,
+    noticeReplaceFlags,
     stateOwners,
     get stateSeenByHost() {
       return stateSeenByHost;

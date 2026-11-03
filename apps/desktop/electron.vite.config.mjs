@@ -3,6 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { RUNTIME_PORT_ENV, parseRuntimePort } from '../../packages/mica-web-shared/runtime-port.js'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import { fileIconAssets } from './scripts/file-icon-assets.mjs'
 
 /**
  * 应用的运行时是 Web 页面（由 vite.server.config.mjs 构建的 out/server 托管），
@@ -72,7 +73,7 @@ export default defineConfig({
     }
   },
   renderer: {
-    plugins: [tablerIconDeepImports(), react(), tailwindcss()],
+    plugins: [tablerIconDeepImports(), fileIconAssets(), react(), tailwindcss()],
     resolve: {
       // packages/mica-config-ui 的源码从仓库根 node_modules 解析 react，页面脚本则从
       // apps/desktop/node_modules 解析，两份物理路径不同的 react 会被当成两个实例打进包：
@@ -90,7 +91,7 @@ export default defineConfig({
         '@mica-config-ui/web': resolve('../../packages/mica-config-ui/web/index.tsx'),
         // 插件入口行的图标要在侧栏首屏就画出来，而整个配置页是懒加载的独立 chunk：
         // 深路径直接指向图标表，别为了一个图标把配置页拖进主包
-        '@mica-config-ui/plugin-icons': resolve('../../packages/mica-config-ui/web/pluginIcons.tsx'),
+        '@mica-config-ui/plugin-icons': resolve('../../packages/mica-config-ui/web/pluginIcons.tsx')
       }
     },
     server: {

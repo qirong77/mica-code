@@ -56,14 +56,25 @@ export class TurnNoticeLog {
     this.entries.push({ after: this.base().length, message });
   }
 
-  /** Updates the last notice in place when it belongs to the same turn and slot. */
-  upsert(message: TurnNotice): void {
+  /**
+   * Updates the last notice in place when it belongs to the same turn and slot.
+   *
+   * `replace` 把「同一个 command 只留最新一条」的范围扩大到整份记录：状态型 notice
+   * （压缩到多大、同步到第几页）描述的是「现在怎样」，留着几小时前的旧结论只会把对话
+   * 顶掉，而事件型 notice（命令输出）必须逐条留痕，所以这件事由调用方声明。
+   */
+  upsert(message: TurnNotice, options: { replace?: boolean } = {}): void {
     // A progress notice (status=running) is updated wherever it sits: /commit
     // and /compact walk from running to success and must not leave two rows.
     const runningIndex = message.command ? findLastRunningIndex(this.entries, message.command) : -1;
     if (runningIndex >= 0) {
       this.entries[runningIndex] = { ...this.entries[runningIndex], message };
       return;
+    }
+    if (options.replace && message.command) {
+      // 撤掉旧的、把新的放回当前位置：状态是「现在怎样」，留旧位置等于把最新结论埋进
+      // 用户已经滚过去的那段对话里。
+      this.entries = this.entries.filter((entry) => entry.message.command !== message.command);
     }
     const after = this.base().length;
     const last = this.entries.at(-1);

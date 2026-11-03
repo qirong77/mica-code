@@ -29,7 +29,7 @@ export class MicaUiRuntimeBridge {
   private readonly disposers = new Map<AgentRuntime, () => void>();
   private readonly messageTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly messageTimerOwners = new Map<string, AgentRuntime>();
-  private readonly preserveTurnUiOnConnecting = new Set<AgentRuntime>();
+  private readonly startedTurns = new Set<AgentRuntime>();
   private readonly bridgeDisposers: Array<Disposable | (() => void) | undefined> = [];
   private backgroundTaskSyncTimer: ReturnType<typeof setInterval> | null = null;
   private readonly bashTaskSessions = new Map<string, string>();
@@ -91,11 +91,7 @@ export class MicaUiRuntimeBridge {
           const session = this.agentSessions.findByAgent(owner) ?? this.agentSessions.current();
           const toolLogs = this.toolLogFor(session.agent);
           const preservePreviousTurnUi = event.preservePreviousTurnUi === true;
-          if (preservePreviousTurnUi) {
-            this.preserveTurnUiOnConnecting.add(session.agent);
-          } else {
-            this.preserveTurnUiOnConnecting.delete(session.agent);
-          }
+          this.startedTurns.add(session.agent);
           toolLogs.resetTurn({ clearThinkingText: !preservePreviousTurnUi });
           session.uiState = normalizeUiState({
             ...session.uiState,
@@ -108,7 +104,9 @@ export class MicaUiRuntimeBridge {
           }
         }
         if (event.type === 'turn:finished') {
-          this.toolLogFor(eventOwnerAgent(event.owner, this.agent)).endThinkingSegment();
+          const owner = eventOwnerAgent(event.owner, this.agent);
+          this.toolLogFor(owner).endThinkingSegment();
+          this.startedTurns.delete(owner);
         }
         if (event.type === 'turn:aborted') {
           const owner = eventOwnerAgent(event.owner, this.agent);
@@ -324,14 +322,14 @@ export class MicaUiRuntimeBridge {
     this.toolLogs.clear();
     this.messageTimers.clear();
     this.messageTimerOwners.clear();
-    this.preserveTurnUiOnConnecting.clear();
+    this.startedTurns.clear();
   }
 
   disposeAgent(agent: AgentRuntime): void {
     this.disposers.get(agent)?.();
     this.disposers.delete(agent);
     this.toolLogs.delete(agent);
-    this.preserveTurnUiOnConnecting.delete(agent);
+    this.startedTurns.delete(agent);
     for (const [id, owner] of this.messageTimerOwners) {
       if (owner !== agent) continue;
       const timer = this.messageTimers.get(id);
@@ -380,22 +378,114 @@ export class MicaUiRuntimeBridge {
     const onStatus = (status: AgentRuntimeStatus) => this.onStatus(agent, status);
     const onText = (text: string) => this.onText(agent, text);
     let attemptText = '';
-    let thinkingCheckpoint = this.toolLogFor(agent).checkpointThinking();
+    let attemptThinkingCheckpoint = this.toolLogFor(agent).checkpointThinking();
+    let attemptThinkingText = this.sessionFor(agent).uiState.thinkingText;
+    let thinkingRollbackText = attemptThinkingText;
+    let attemptRollbackThinkingText = thinkingRollbackText;
     let logCheckpoint = [...this.sessionFor(agent).uiState.agentTurnLogItems];
+    let turnAttemptThinkingText = '';
+    const applyThinkingChanges = (
+      items: typeof logCheckpoint,
+      changes: ReturnType<ToolLogController['rollbackUncheckpointedThinking']>,
+    ) => {
+      const changedRows = new Map(changes.map(({ id, text }) => [id, text] as const));
+      return items.flatMap((item) => {
+        if (!changedRows.has(item.id)) return [item];
+        const text = changedRows.get(item.id);
+        return text == null ? [] : [micaUi.createThinkingLogItem(item.id, text)];
+      });
+    };
     const onTextAttemptStart = () => {
       attemptText = this.runtime.getResponseBufferFor(agent);
-      thinkingCheckpoint = this.toolLogFor(agent).checkpointThinking();
+      // The preceding segment may contain a throttled update. Include it in
+      // the retry snapshot as well as in the controller's in-memory buffer.
+      this.toolLogFor(agent).flushThinking();
+      attemptThinkingCheckpoint = this.toolLogFor(agent).checkpointThinking();
+      attemptThinkingText = this.sessionFor(agent).uiState.thinkingText;
+      attemptRollbackThinkingText = thinkingRollbackText;
       logCheckpoint = [...this.sessionFor(agent).uiState.agentTurnLogItems];
     };
     const onTextRollback = () => {
-      this.toolLogFor(agent).restoreThinking(thinkingCheckpoint);
+      this.toolLogFor(agent).restoreThinking(attemptThinkingCheckpoint);
+      thinkingRollbackText = attemptRollbackThinkingText;
       this.sessionFor(agent).uiState.agentTurnLogItems = logCheckpoint;
-      if (this.isActiveAgent(agent)) micaUi.bottom.agentTurnLog.setItems(logCheckpoint);
+      this.sessionFor(agent).uiState.thinkingText = attemptThinkingText;
+      if (this.isActiveAgent(agent)) {
+        micaUi.bottom.agentTurnLog.setItems(logCheckpoint);
+        micaUi.panels.thinkingText.set(attemptThinkingText);
+      }
       this.runtime.setResponseBufferFor(agent, attemptText);
       this.sessionFor(agent).uiState.responseText = attemptText;
       if (this.isActiveAgent(agent)) micaUi.conversation.setResponseText(attemptText);
     };
-    const onThinking = (text: string) => this.onThinking(agent, text);
+    const onThinking = (text: string) => {
+      // The visible checkpoint can belong to a previously interrupted turn,
+      // even when there is no active ToolLogController segment for it.
+      if (text && !this.toolLogFor(agent).hasUncheckpointedThinking()) {
+        thinkingRollbackText = this.sessionFor(agent).uiState.thinkingText;
+      }
+      this.onThinking(agent, text);
+    };
+    const onThinkingTurnAttemptStart = () => {
+      this.toolLogFor(agent).beginTurnAttempt();
+      turnAttemptThinkingText = this.sessionFor(agent).uiState.thinkingText;
+    };
+    const onThinkingTurnAttemptRollback = () => {
+      const session = this.sessionFor(agent);
+      const changes = this.toolLogFor(agent).rollbackTurnAttemptThinking();
+      session.uiState.agentTurnLogItems = applyThinkingChanges(session.uiState.agentTurnLogItems, changes);
+      // An earlier interrupted turn can have display text even when the
+      // controller has no active segment for it.
+      session.uiState.thinkingText = turnAttemptThinkingText;
+      if (this.isActiveAgent(agent)) {
+        micaUi.panels.thinkingText.set(turnAttemptThinkingText);
+        micaUi.bottom.agentTurnLog.setItems(session.uiState.agentTurnLogItems);
+      }
+      attemptThinkingCheckpoint = this.toolLogFor(agent).checkpointThinking();
+      attemptThinkingText = turnAttemptThinkingText;
+      thinkingRollbackText = turnAttemptThinkingText;
+      attemptRollbackThinkingText = thinkingRollbackText;
+      logCheckpoint = [...session.uiState.agentTurnLogItems];
+    };
+    const onThinkingCheckpoint = () => this.toolLogFor(agent).markThinkingCheckpoint();
+    const onThinkingRollback = () => {
+      const changes = this.toolLogFor(agent).rollbackUncheckpointedThinking();
+      if (!changes.length) return;
+      // If interruption precedes retry rollback, do not resurrect reasoning
+      // that was already pending at the start of the failed attempt.
+      const earlierChanges = changes.filter(({ id, text }) =>
+        attemptThinkingCheckpoint.uncheckpointed.has(id) && attemptThinkingCheckpoint.uncheckpointed.get(id) === text,
+      );
+      if (earlierChanges.length) {
+        logCheckpoint = applyThinkingChanges(logCheckpoint, earlierChanges);
+        attemptRollbackThinkingText = thinkingRollbackText;
+        for (const { id, text } of earlierChanges) {
+          attemptThinkingCheckpoint.uncheckpointed.delete(id);
+          if (attemptThinkingCheckpoint.id === id) {
+            attemptThinkingCheckpoint.buffer = text ?? '';
+            attemptThinkingText = text ?? '';
+            if (text === null) attemptThinkingCheckpoint.id = null;
+            attemptThinkingCheckpoint.lastUpdate = 0;
+          }
+        }
+      }
+      const session = this.sessionFor(agent);
+      session.uiState.agentTurnLogItems = applyThinkingChanges(session.uiState.agentTurnLogItems, changes);
+      session.uiState.thinkingText = thinkingRollbackText;
+      if (this.isActiveAgent(agent)) {
+        micaUi.bottom.agentTurnLog.setItems(session.uiState.agentTurnLogItems);
+        micaUi.panels.thinkingText.set(thinkingRollbackText);
+      }
+    };
+    const onThinkingReset = () => {
+      const session = this.sessionFor(agent);
+      this.toolLogFor(agent).resetTurn();
+      session.uiState.thinkingText = '';
+      session.uiState.agentTurnLogItems = session.uiState.agentTurnLogItems.filter(
+        (item) => !item.id.startsWith('thinking-') && item.id !== 'restored-thinking',
+      );
+      if (this.isActiveAgent(agent)) micaUi.bottom.agentTurnLog.setItems(session.uiState.agentTurnLogItems);
+    };
     const onToolCall = (toolCall: Parameters<ToolLogController['addToolCall']>[0]) => this.onToolCall(agent, toolCall);
     const onToolResult = (toolResult: Parameters<ToolLogController['completeToolCall']>[0]) =>
       this.onToolResult(agent, toolResult);
@@ -406,6 +496,11 @@ export class MicaUiRuntimeBridge {
     agent.events.on('textRollback', onTextRollback);
     const unregisterRollback = agent.registerTextRollbackConsumer({ text: onText, thinking: onThinking, start: onTextAttemptStart, rollback: onTextRollback });
     agent.events.on('thinking', onThinking);
+    agent.events.on('thinkingTurnAttemptStart', onThinkingTurnAttemptStart);
+    agent.events.on('thinkingTurnAttemptRollback', onThinkingTurnAttemptRollback);
+    agent.events.on('thinkingCheckpoint', onThinkingCheckpoint);
+    agent.events.on('thinkingRollback', onThinkingRollback);
+    agent.events.on('thinkingReset', onThinkingReset);
     agent.events.on('toolCall', onToolCall);
     agent.events.on('toolResult', onToolResult);
     agent.events.on('usage', onUsage);
@@ -416,6 +511,11 @@ export class MicaUiRuntimeBridge {
       agent.events.off('textAttemptStart', onTextAttemptStart);
       agent.events.off('textRollback', onTextRollback);
       agent.events.off('thinking', onThinking);
+      agent.events.off('thinkingTurnAttemptStart', onThinkingTurnAttemptStart);
+      agent.events.off('thinkingTurnAttemptRollback', onThinkingTurnAttemptRollback);
+      agent.events.off('thinkingCheckpoint', onThinkingCheckpoint);
+      agent.events.off('thinkingRollback', onThinkingRollback);
+      agent.events.off('thinkingReset', onThinkingReset);
       agent.events.off('toolCall', onToolCall);
       agent.events.off('toolResult', onToolResult);
       agent.events.off('usage', onUsage);
@@ -424,10 +524,10 @@ export class MicaUiRuntimeBridge {
 
   private onStatus(agent: AgentRuntime, status: AgentRuntimeStatus): void {
     const session = this.sessionFor(agent);
-    if (status.type === 'connecting') {
-      const preservePreviousTurnUi = this.preserveTurnUiOnConnecting.has(agent);
-      this.toolLogFor(agent).resetTurn({ clearThinkingText: !preservePreviousTurnUi });
-      this.preserveTurnUiOnConnecting.delete(agent);
+    if (status.type === 'connecting' && !this.startedTurns.has(agent)) {
+      // A managed turn has already reset its log on turn:started. Connecting
+      // can recur on a whole-turn retry, after its rollback snapshot is taken.
+      this.toolLogFor(agent).resetTurn();
     }
     if (status.type === 'completed' || status.type === 'error' || status.type === 'idle') {
       this.toolLogFor(agent).endThinkingSegment();

@@ -314,12 +314,10 @@ const MAX_TERMINAL_HEIGHT_RATIO = 0.75
 // 文件窗口的 `window.open` 目标名：同名窗口由浏览器/外壳复用，重复点同一个按钮不会攒出
 // 一堆一模一样的窗口（外壳侧见 main/index.js 的 openAppPageWindow）。
 const FILES_WINDOW_NAME = 'mica-files'
+// 插件发起的分支评审单独一个窗口名：它带的是「head 相对 base」这份对比，复用文件窗口会把
+// 用户正在改的那个目录和它自己的缓冲一起换掉。同一次评审重复点只是端到前。
+const REVIEW_WINDOW_NAME = 'mica-files-review'
 
-/**
- * 评审用的是**另一个**窗口名：`window.open` 按名字复用窗口，两者共用一个名字时点一条
- * PR 会把用户正在改文件的编辑器导航走（未保存的编辑跟着没）。
- */
-const FILES_REVIEW_WINDOW_NAME = 'mica-files-review'
 // 侧栏切换按钮：展开时贴侧栏右端（折叠线旁），收起的侧栏宽度为 0，按钮回到左上角固定位
 // —— 86px 是 macOS 上让开交通灯后的位置。
 const SIDEBAR_TOGGLE_COLLAPSED_LEFT = 86
@@ -517,6 +515,12 @@ export default function App() {
   // 文件视图按需挂载：打开过一次后保持挂载（切回对话再切回来不丢已打开/未保存的文件），
   // 但没被打开过时它的 chunk（文件树、图标清单）不进启动路径。
   const [filesMounted, setFilesMounted] = useState(view === 'files')
+  // 插件点开的一条 PR：主区整块切到编辑器并停在这份 `base...head` 对比上。
+  const [reviewTarget, setReviewTarget] = useState(null)
+  // 换会话就把评审放下：编辑器回到新会话自己的目录，别让上一条 PR 的仓库留在页面上。
+  useEffect(() => {
+    setReviewTarget(null)
+  }, [activeId])
   useEffect(() => {
     if (view === 'files') setFilesMounted(true)
   }, [view])
@@ -1170,7 +1174,8 @@ export default function App() {
         const counts =
           status?.status && (forceCounts || countsStale)
             ? await window.mica.git
-                .changeCounts(cwd)
+                // 一轮刚跑完（或用户主动刷新）时不能拿运行时那 5s 缓存里的旧数字。
+                .changeCounts(cwd, { refresh: forceCounts })
                 .then((result) => (result?.counts ? { cwd, counts: result.counts } : null))
                 // 徽标是锦上添花：取不到（非仓库、目录被删）就不画，别打断整次刷新。
                 .catch(() => null)
@@ -1954,24 +1959,34 @@ export default function App() {
   }, [])
   const openSearchFile = openFileInView
   const openChatFile = openFileInView
-  // 插件的「评审」入口：在**编辑器窗口**里打开一份 base...head 的对比。
-  // 自己不画 diff：那条路编辑器早就有（文件树 + GIT 面板 + monaco 差异），这里只是把
-  // 对比写进地址的 `?base=&head=` —— 刷新、复制链接都还停在同一份对比上。
+  // 插件的「评审」入口：把主区整块让给编辑器，直接停在 base...head 的对比上。
+  // 自己不画 diff：文件树 + GIT 面板 + monaco 差异都在编辑器里，这里只是把对比交给它。
+  // 开成应用内的一层而不是新窗口——点一条 PR 就该像打开一个弹窗那样立刻看见，
+  // 而不是等一个新窗口起来（外壳里 window.open 恒为 null，失败了也没有任何反馈）。
   const openReviewInView = useCallback((review) => {
     if (!review?.cwd) return
-    const url = detachedFilesUrl(window.location.href, review.cwd, {
-      base: review.base || null,
-      head: review.head || null
-    })
-    if (!url) return
-    const opened = window.open(url, FILES_REVIEW_WINDOW_NAME, 'popup=yes,width=1200,height=860')
-    if (opened) {
-      try {
-        opened.opener = null
-      } catch {
-        // 某些浏览器不让写，忽略
+    const compare = { base: review.base || null, head: review.head || null }
+    // 评审要在**另一个窗口**里打开：复用编辑器那份界面（文件树、对比面板、只读 diff 都是
+    // 现成的），但主窗口留在对话里，评审别人的分支不会把用户手里的编辑器换掉。地址带着
+    // cwd/base/head，窗口刷新或复制给别人打开都还停在同一份对比上。
+    const url = detachedFilesUrl(window.location.href, review.cwd, compare)
+    if (url) {
+      const opened = window.open(url, REVIEW_WINDOW_NAME, 'popup=yes,width=1200,height=860')
+      if (opened) {
+        try {
+          opened.opener = null
+        } catch {
+          // 某些浏览器不让写，忽略
+        }
+        return
       }
+      // 外壳里 window.open 恒返回 null（窗口由主进程按 frameName 开），那不是被拦截。
+      if (isElectronShell(navigator.userAgent)) return
     }
+    // 浏览器拦了新窗口：退回当前窗口，至少让人看到这份对比（顶栏能再开窗口）。
+    setReviewTarget({ cwd: review.cwd, ...compare })
+    setFilesMounted(true)
+    setView('files')
   }, [])
   // 工具调用详情里的「在编辑器中打开」：内容来自内存（工具参数/输出），不是工作区文件。
   // 走同一个 FilesView 实例与 openFile 的迟挂载兜底，只是把文档本身排队带过去。
@@ -2589,11 +2604,14 @@ export default function App() {
               <Suspense fallback={null}>
                 <FilesView
                   ref={attachFilesRef}
-                  root={activeCwd || null}
+                  /* 评审一条 PR 时编辑器停在那个仓库上：它只是页面目录，会话 cwd 不变。 */
+                  root={reviewTarget?.cwd || activeCwd || null}
                   contextKey={activeId}
                   visible={view === 'files'}
                   askText={askText}
                   recentCwds={recentCwds}
+                  /* 打开一条 PR：编辑器直接落在 `head 相对 base` 的对比上（只读提交）。 */
+                  compare={reviewTarget}
                   /* 编辑器里的分支切换只刷新会话顶栏的 Git 状态，不改会话目录。 */
                   onGitChanged={() =>
                     refreshGit({ cwd: terminalCwd(activeRef.current), quiet: true })

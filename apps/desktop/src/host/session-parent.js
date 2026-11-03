@@ -13,7 +13,7 @@ import { readTopLevelParentId } from './session-file-head'
  * 文件，那是唯一会把这一行改掉的写者。`updatedAt` 故意不动——侧栏按它排 Recent，
  * 调整层级不是「有新消息」，不该把会话顶到最前面。
  */
-export function createSessionParentWriter({ sessionsDir, hasLiveTurnLease }) {
+export function createSessionParentWriter({ sessionsDir, hasLiveTurnLease, withTurnLease }) {
   const fileOf = (sessionId) =>
     isValidSessionId(sessionId) ? join(sessionsDir(), `${sessionId}.json`) : null
 
@@ -29,16 +29,26 @@ export function createSessionParentWriter({ sessionsDir, hasLiveTurnLease }) {
         throw new Error('Cannot nest a session into its own descendant')
     }
 
-    const session = readSession(file)
-    if (!session) throw new Error('Session not found')
-    if (typeof hasLiveTurnLease === 'function' && hasLiveTurnLease(sessionId))
-      throw new Error('该会话正在运行，请等这一轮结束再调整会话层级')
-
-    const updated = withParent(session, next)
-    const temporary = `${file}.${process.pid}.tmp`
-    writeFileSync(temporary, `${JSON.stringify(updated, null, 2)}\n`, 'utf8')
-    renameSync(temporary, file)
-    return { parentSessionId: next }
+    const write = () => {
+      const session = readSession(file)
+      if (!session) throw new Error('Session not found')
+      const updated = withParent(session, next)
+      const temporary = `${file}.${process.pid}.tmp`
+      writeFileSync(temporary, `${JSON.stringify(updated, null, 2)}\n`, 'utf8')
+      renameSync(temporary, file)
+      return { parentSessionId: next }
+    }
+    // 能拿到 lease 就拿着写：检查与写盘之间起的一轮否则会把这次的层级改回旧值。
+    if (typeof withTurnLease === 'function') {
+      try {
+        return withTurnLease(sessionId, write)
+      } catch (error) {
+        if (error?.code === 'TURN_LEASE_BUSY') throw busyError()
+        throw error
+      }
+    }
+    if (typeof hasLiveTurnLease === 'function' && hasLiveTurnLease(sessionId)) throw busyError()
+    return write()
   }
 
   /** 读一个会话文件顶层的父会话 id；读不到（不存在 / 坏文件）当作没有父会话。 */
@@ -46,6 +56,10 @@ export function createSessionParentWriter({ sessionsDir, hasLiveTurnLease }) {
     const file = fileOf(sessionId)
     return file ? readTopLevelParentId(file) : null
   }
+}
+
+function busyError() {
+  return new Error('该会话正在运行，请等这一轮结束再调整会话层级')
 }
 
 function normalizeParentId(parentId) {

@@ -16,7 +16,7 @@ import {
 } from '@packages/mica-common/todoState.js';
 import { TodoWriteTool } from './TodoTool.js';
 import { buildTodoGuidance } from './prompt.js';
-import { readTodoCheckpoint, writeTodoCheckpoint } from './todoPersistence.js';
+import { readTodoCheckpoint, removeTodoCheckpoint, writeTodoCheckpoint } from './todoPersistence.js';
 
 export { formatTodoSummary, parseTodoInput, resolveTodoPanel } from '@packages/mica-common/todoState.js';
 export { TODO_GUIDANCE, buildTodoGuidance } from './prompt.js';
@@ -81,11 +81,42 @@ export class TodoPlugin implements MicaPlugin {
       if (next !== current || views.get(owner) !== current) todos.set(new Map(views).set(owner, next));
     };
 
+    // 这份 checkpoint 只是「中断后怎么接着做」的缓存：写不进去不该让整轮失败，
+    // 更不该把一轮已经答完的对话记成错误。报一次健康状态，然后当它没写过。
+    let checkpointFailureReported = false;
+    const reportCheckpointFailure = (action: string, error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.logger?.warn(`todo checkpoint ${action} failed: ${message}`);
+      if (checkpointFailureReported) return;
+      checkpointFailureReported = true;
+      ctx.health?.report({
+        level: 'warn',
+        message: `无法写入 TODO 检查点（${action}）：${message}`,
+        hint: '计划面板仍可用，但中断后不会再带上上次的进度：请检查 $MICA_HOME 是否可写、磁盘是否已满。',
+      });
+    };
+
     const saveCheckpoint = (owner: unknown, state: TodoViewState, items: TodoItem[]) => {
       const session = identity(owner);
       if (!session || !session.persistent || !ctx.paths?.config) return;
-      if (state.sessionId !== session.id || !state.turnId) throw new Error('Todo turn no longer belongs to this session');
-      writeTodoCheckpoint(ctx.paths.config, { version: 1, sessionId: session.id, turnId: state.turnId, items });
+      if (state.sessionId !== session.id || !state.turnId)
+        throw new Error('Todo turn no longer belongs to this session');
+      try {
+        writeTodoCheckpoint(ctx.paths.config, { version: 1, sessionId: session.id, turnId: state.turnId, items });
+      } catch (error) {
+        reportCheckpointFailure('write', error);
+      }
+    };
+
+    /** 读不到（没有、坏了、读不动）一律当成「没有中断进度」。 */
+    const loadCheckpoint = (session: { id: string; persistent: boolean }) => {
+      if (!ctx.paths?.config) return null;
+      try {
+        return readTodoCheckpoint(ctx.paths.config, session.id);
+      } catch (error) {
+        reportCheckpointFailure('read', error);
+        return null;
+      }
     };
 
     const tool = new TodoWriteTool((items, callbacks) => {
@@ -171,12 +202,27 @@ export class TodoPlugin implements MicaPlugin {
     const eventSubscription = ctx.events.on('event', (event) => {
       if (event.type === 'session:cleared' || event.type === 'session:invalidated') {
         const owner = eventOwner(event);
+        // rewind 把会话状态一起滚回去了，磁盘上这份 checkpoint 不会：不清掉它，
+        // 下一轮就会把用户刚撤销的计划当成「上次被中断的进度」再注入一遍。
+        // resume 不能清，那正是要接着上次进度的场景。
+        if (event.type === 'session:invalidated' && event.reason === 'rewind') {
+          const session = identity(owner);
+          if (session?.persistent && ctx.paths?.config) {
+            if (!removeTodoCheckpoint(ctx.paths.config, session.id))
+              reportCheckpointFailure('remove', new Error('checkpoint file is still there'));
+          }
+        }
         patch(owner, (current) => ({ ...createTodoViewState(), sessionId: current.sessionId }));
       } else if (event.type === 'session:disposed') {
         const views = new Map(todos.get());
         if (views.delete(eventOwner(event))) todos.set(views);
       } else if (event.type === 'turn:aborted') {
-        patch(eventOwner(event), (current) => ({ ...current, live: false, pinned: current.items.length > 0, interrupted: true }));
+        patch(eventOwner(event), (current) => ({
+          ...current,
+          live: false,
+          pinned: current.items.length > 0,
+          interrupted: true,
+        }));
       }
     });
     ctx.onDispose(() => eventSubscription.dispose());
@@ -190,20 +236,30 @@ export class TodoPlugin implements MicaPlugin {
         const session = identity(owner);
         const current = currentView(owner);
         let items = current.interrupted ? current.items : [];
-        if (session && ctx.paths?.config && ctx.sessionState) {
-          const checkpoint = readTodoCheckpoint(ctx.paths.config, session.id);
+        // 一次性宿主（`mica exec`）不落盘，也不该读别的宿主留下的 checkpoint：
+        // 读和写用同一道门，否则 --resume 的第一条请求会凭空多出一段恢复注入。
+        if (session?.persistent && ctx.paths?.config && ctx.sessionState) {
+          const checkpoint = loadCheckpoint(session);
           const marker = ctx.sessionState.get<TodoSessionMarker>(owner);
           const completed = marker?.version === 1 && marker.completed === true && marker.turnId === checkpoint?.turnId;
           items = checkpoint && !completed ? checkpoint.items : [];
         }
         const turn: TodoTurn = { owner, sessionId: session?.id ?? null, turnId: randomUUID() };
         const next: TodoViewState = {
-          ...current, sessionId: turn.sessionId, turnId: turn.turnId, items,
-          live: false, pinned: items.length > 0, interrupted: items.length > 0,
+          ...current,
+          sessionId: turn.sessionId,
+          turnId: turn.turnId,
+          items,
+          live: false,
+          pinned: items.length > 0,
+          interrupted: items.length > 0,
         };
         saveCheckpoint(owner, next, items);
         if (session && ctx.sessionState) {
-          ctx.sessionState.set({ version: 1, turnId: turn.turnId, completed: false } satisfies TodoSessionMarker, owner);
+          ctx.sessionState.set(
+            { version: 1, turnId: turn.turnId, completed: false } satisfies TodoSessionMarker,
+            owner,
+          );
         }
         inputTurns.set(event.input, turn);
         patch(owner, () => next);
@@ -219,23 +275,31 @@ export class TodoPlugin implements MicaPlugin {
       const filtered = messages.filter((message) => !isRecoveryMessage(message));
       const state = currentView(agent.owner);
       const session = identity(agent.owner);
-      if (!state.interrupted || state.items.length === 0 ||
-          (session && agent.sessionId !== session.id)) return filtered.length === messages.length ? null : filtered;
+      if (!state.interrupted || state.items.length === 0 || (session && agent.sessionId !== session.id))
+        return filtered.length === messages.length ? null : filtered;
       const progress = state.items.map((item) => `- [${item.status}] ${item.content}`).join('\n');
       const content = `${RECOVERY_PREFIX}上次任务被中断，以下是中断前最后一次保存的 TODO 进度（进行中不代表已完成）；请结合当前请求判断如何继续：\n${progress}\n</mica-todo-recovery>`;
-      const responses = messages.some((message) => Boolean(message && typeof message === 'object' &&
-        (message as { type?: unknown }).type === 'message'));
+      const responses = messages.some((message) =>
+        Boolean(message && typeof message === 'object' && (message as { type?: unknown }).type === 'message'),
+      );
       return [...filtered, responses ? { type: 'message', role: 'system', content } : { role: 'system', content }];
     });
     if (rewrite) ctx.onDispose(() => rewrite.dispose());
 
     // The marker and completed conversation are saved in the same session
     // snapshot, closing the crash window before turn:after runs.
-    const beforePersist = ctx.hooks.on<{ input: object }>('turn:beforePersist', (event) => {
-      const turn = inputTurns.get(event.input);
-      if (!turn || !turn.sessionId || identity(turn.owner)?.id !== turn.sessionId) return;
-      ctx.sessionState?.set({ version: 1, turnId: turn.turnId, completed: true } satisfies TodoSessionMarker, turn.owner);
-    }, { pluginId: ctx.pluginId, failPolicy: 'stop' });
+    const beforePersist = ctx.hooks.on<{ input: object }>(
+      'turn:beforePersist',
+      (event) => {
+        const turn = inputTurns.get(event.input);
+        if (!turn || !turn.sessionId || identity(turn.owner)?.id !== turn.sessionId) return;
+        ctx.sessionState?.set(
+          { version: 1, turnId: turn.turnId, completed: true } satisfies TodoSessionMarker,
+          turn.owner,
+        );
+      },
+      { pluginId: ctx.pluginId, failPolicy: 'stop' },
+    );
     ctx.onDispose(() => beforePersist.dispose());
 
     const turnAfterSubscription = ctx.hooks.on<RuntimeTurnAfterHookEvent>(
@@ -248,7 +312,12 @@ export class TodoPlugin implements MicaPlugin {
           if (turn && current.turnId !== turn.turnId) return current;
           const interrupted = event.outcome !== 'completed';
           const pending = current.items.some((item) => item.status !== 'completed');
-          return { ...current, live: false, interrupted, pinned: interrupted ? pending : current.interrupted ? false : current.pinned };
+          return {
+            ...current,
+            live: false,
+            interrupted,
+            pinned: interrupted ? pending : current.interrupted ? false : current.pinned,
+          };
         });
       },
       { pluginId: ctx.pluginId },

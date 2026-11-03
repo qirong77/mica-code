@@ -1,4 +1,12 @@
-import { readFileSync } from 'node:fs'
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -50,6 +58,90 @@ export function readTurnLeaseOwner(
   } catch {
     // 没有锁文件 / 内容损坏都按「无人持有」处理，与回收逻辑一致。
     return null
+  }
+}
+
+/** A lease we could not take because someone else holds it. */
+export function turnLeaseBusyError() {
+  const error = new Error('turn lease is held by another process')
+  error.code = 'TURN_LEASE_BUSY'
+  return error
+}
+
+/**
+ * 短时持有 turn lease 去做一次直接改盘。
+ *
+ * 「先看有没有人持有、再写盘」之间有窗口：刚起的一轮会把内存快照整份覆盖回去，
+ * 用户拖出来的层级就白拖了。这里与 `mica-session` 的 turn lease 用同一份格式与
+ * 抢占方式（`wx` 创建、只有持有者 pid 已死才算孤儿），所以跑着的宿主与这次写
+ * 之间必然分出一个胜负，而不是两边都以为自己赢。
+ *
+ * 自己的 lease 按 token 释放：绝不删别人的锁。
+ */
+export function createTurnLeaseRunner({ lockDir, isAlive = isPidAlive }) {
+  if (typeof lockDir !== 'function') throw new TypeError('lockDir must be a function')
+
+  return function withTurnLease(sessionId, run) {
+    const directory = lockDir()
+    mkdirSync(directory, { recursive: true })
+    const lockPath = join(directory, `${sessionId}.lock`)
+    const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let fd
+      try {
+        fd = openSync(lockPath, 'wx')
+      } catch (error) {
+        if (error?.code !== 'EEXIST' || attempt > 0 || !removeStaleLease(lockPath, isAlive)) {
+          throw turnLeaseBusyError()
+        }
+        continue
+      }
+      try {
+        writeFileSync(
+          fd,
+          JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() }),
+          'utf8'
+        )
+      } finally {
+        closeSync(fd)
+      }
+      try {
+        return run()
+      } finally {
+        releaseOwnLease(lockPath, token)
+      }
+    }
+    throw turnLeaseBusyError()
+  }
+}
+
+/** 与 `mica-session` 的孤儿回收同一条判定：只有持有者 pid 已死才回收。 */
+function removeStaleLease(lockPath, isAlive) {
+  try {
+    const owner = JSON.parse(readFileSync(lockPath, 'utf8'))
+    if (!owner || typeof owner.pid !== 'number' || !Number.isInteger(owner.pid) || owner.pid <= 0)
+      return false
+    if (isAlive(owner.pid)) return false
+    rmSync(lockPath, { force: true })
+    return true
+  } catch {
+    // 内容损坏可能正好撞上别人写入的那一刻：按 mtime 判定，别抢新锁。
+    try {
+      if (Date.now() - statSync(lockPath).mtimeMs < 30_000) return false
+      rmSync(lockPath, { force: true })
+      return true
+    } catch {
+      return false
+    }
+  }
+}
+
+function releaseOwnLease(lockPath, token) {
+  try {
+    const owner = JSON.parse(readFileSync(lockPath, 'utf8'))
+    if (owner?.token === token) rmSync(lockPath, { force: true })
+  } catch {
+    // Never remove a lock unless its token proves that we own it.
   }
 }
 

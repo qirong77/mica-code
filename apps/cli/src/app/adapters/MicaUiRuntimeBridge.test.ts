@@ -46,6 +46,7 @@ const uiMocks = (() => {
 vi.mock('@packages/mica-ui/index.js', () => ({
   micaUi: {
     createThinkingLogItem: (id: string, text: string) => ({ id, kind: 'thinking', text }),
+    createToolCallLogItem: (item: object) => ({ ...item, kind: 'tool' }),
     bottom: { agentTurnLog: { setItems: uiMocks.setAgentTurnLogItems } },
     conversation: {
       clearPendingInput: uiMocks.clearPendingInput,
@@ -122,9 +123,327 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     expect(buffer).toBe('earlier');
     expect(session.uiState.responseText).toBe('earlier');
     expect(session.uiState.agentTurnLogItems).toEqual(initialLog);
-    expect(uiMocks.thinkingSet).toHaveBeenLastCalledWith('');
+    expect(uiMocks.thinkingSet).toHaveBeenLastCalledWith('previous thinking');
     expect(uiMocks.setAgentTurnLogItems).toHaveBeenLastCalledWith(initialLog);
     expect(uiMocks.setResponseText).toHaveBeenLastCalledWith('earlier');
+    bridge.stop();
+  });
+
+  it('removes only unfinished thinking after idle has flushed several segments', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({ type: 'turn:started', input: micaRuntime.createRuntimeInput('test'), owner: agent });
+
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('first');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('thinking')!(' second');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('toolCall')!({ name: 'read_file', args: '{}', id: 'call-1' });
+    handlers.get('toolResult')!({ name: 'read_file', result: 'ok', id: 'call-1' });
+    handlers.get('text')!('answer');
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('unfinished one');
+    handlers.get('toolCall')!({ name: 'read_file', args: '{}', id: 'call-2' });
+    handlers.get('toolResult')!({ name: 'read_file', result: 'ok', id: 'call-2' });
+    handlers.get('text')!(' kept text');
+    handlers.get('thinking')!('unfinished two');
+    handlers.get('status')!({ type: 'idle' });
+    expect(session.uiState.agentTurnLogItems).toEqual([
+      expect.objectContaining({ id: 'thinking-1', text: 'first second' }),
+      expect.objectContaining({ id: 'tool-1', completed: true }),
+      expect.objectContaining({ id: 'thinking-2', text: 'unfinished one' }),
+      expect.objectContaining({ id: 'tool-2', completed: true }),
+      expect.objectContaining({ id: 'thinking-3', text: 'unfinished two' }),
+    ]);
+
+    handlers.get('thinkingRollback')!();
+    expect(session.uiState.agentTurnLogItems).toEqual([
+      expect.objectContaining({ id: 'thinking-1', text: 'first second' }),
+      expect.objectContaining({ id: 'tool-1', completed: true }),
+      expect.objectContaining({ id: 'tool-2', completed: true }),
+    ]);
+    expect(uiMocks.setAgentTurnLogItems).toHaveBeenLastCalledWith(session.uiState.agentTurnLogItems);
+    expect(runtime.getResponseBufferFor()).toBe('answer kept text');
+    expect(session.uiState.responseText).toBe('answer kept text');
+    runtime.events.publish({ type: 'turn:aborted', owner: agent, input: { id: 'input', text: 'test', source: 'ui', createdAt: 0 } });
+    expect(session.uiState.agentTurnLogItems).toHaveLength(3);
+    handlers.get('thinkingReset')!();
+    expect(session.uiState.agentTurnLogItems.map((item) => item.id)).toEqual(['tool-1', 'tool-2']);
+    bridge.stop();
+  });
+
+  it('restores the completed part of an active thinking row', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({ type: 'turn:started', input: micaRuntime.createRuntimeInput('test'), owner: agent });
+
+    handlers.get('thinking')!('completed');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('thinking')!(' discarded');
+    handlers.get('thinkingRollback')!();
+    expect(session.uiState.thinkingText).toBe('completed');
+    expect(session.uiState.agentTurnLogItems).toEqual([expect.objectContaining({ id: 'thinking-1', text: 'completed' })]);
+    handlers.get('status')!({ type: 'idle' });
+    expect(session.uiState.agentTurnLogItems).toEqual([expect.objectContaining({ id: 'thinking-1', text: 'completed' })]);
+    bridge.stop();
+  });
+
+  it('undoes a failed attempt with a checkpoint, then preserves a completed retry', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({ type: 'turn:started', input: micaRuntime.createRuntimeInput('test'), owner: agent });
+
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('previous');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('toolCall')!({ name: 'read_file', args: '{}', id: 'call-1' });
+    handlers.get('toolResult')!({ name: 'read_file', result: 'ok', id: 'call-1' });
+    handlers.get('text')!('earlier');
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('failed checkpoint');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('thinking')!(' failed tail');
+    handlers.get('text')!(' failed text');
+    handlers.get('textRollback')!();
+    expect(runtime.getResponseBufferFor()).toBe('earlier');
+    expect(session.uiState.agentTurnLogItems).toEqual([
+      expect.objectContaining({ id: 'thinking-1', text: 'previous' }),
+      expect.objectContaining({ id: 'tool-1', completed: true }),
+    ]);
+
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('retry completed');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('thinking')!(' interrupted');
+    handlers.get('status')!({ type: 'idle' });
+    handlers.get('thinkingRollback')!();
+    expect(session.uiState.agentTurnLogItems).toEqual([
+      expect.objectContaining({ id: 'thinking-1', text: 'previous' }),
+      expect.objectContaining({ id: 'tool-1', completed: true }),
+      expect.objectContaining({ id: 'thinking-3', text: 'retry completed' }),
+    ]);
+    expect(runtime.getResponseBufferFor()).toBe('earlier');
+    bridge.stop();
+  });
+
+  it('captures buffered thinking in a retry snapshot and restores its pending state', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({ type: 'turn:started', input: micaRuntime.createRuntimeInput('test'), owner: agent });
+
+    handlers.get('thinking')!('buffered');
+    handlers.get('thinking')!(' tail');
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!(' failed');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('textRollback')!();
+    expect(session.uiState.agentTurnLogItems).toEqual([expect.objectContaining({ id: 'thinking-1', text: 'buffered tail' })]);
+    handlers.get('status')!({ type: 'idle' });
+    handlers.get('thinkingRollback')!();
+    expect(session.uiState.agentTurnLogItems).toEqual([]);
+    bridge.stop();
+  });
+
+  it('does not restore interrupted thinking when retry rollback follows interruption', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({ type: 'turn:started', input: micaRuntime.createRuntimeInput('test'), owner: agent });
+
+    handlers.get('thinking')!('earlier unfinished');
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!(' later unfinished');
+    handlers.get('status')!({ type: 'idle' });
+    handlers.get('thinkingRollback')!();
+    handlers.get('textRollback')!();
+    expect(session.uiState.agentTurnLogItems).toEqual([]);
+    expect(session.uiState.thinkingText).toBe('');
+    bridge.stop();
+  });
+
+  it('keeps earlier pending thinking when only a later checkpoint was interrupted', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({ type: 'turn:started', input: micaRuntime.createRuntimeInput('test'), owner: agent });
+
+    handlers.get('thinking')!('earlier');
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('thinking')!(' unfinished');
+    handlers.get('thinkingRollback')!();
+    handlers.get('textRollback')!();
+    expect(session.uiState.agentTurnLogItems).toEqual([expect.objectContaining({ id: 'thinking-1', text: 'earlier' })]);
+    handlers.get('status')!({ type: 'idle' });
+    handlers.get('thinkingRollback')!();
+    expect(session.uiState.agentTurnLogItems).toEqual([]);
+    bridge.stop();
+  });
+
+  it('rolls back every response in a failed run while preserving earlier interrupted thinking', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({
+      type: 'turn:started', input: micaRuntime.createRuntimeInput('continue'), owner: agent,
+      preservePreviousTurnUi: true,
+    });
+
+    handlers.get('thinkingTurnAttemptStart')!();
+    handlers.get('status')!({ type: 'connecting' });
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('first completed response');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('text')!('response text');
+    handlers.get('toolCall')!({ name: 'read_file', args: '{}', id: 'call-1' });
+    handlers.get('toolResult')!({ name: 'read_file', result: 'ok', id: 'call-1' });
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('second completed thought');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('thinking')!(' unfinished');
+    handlers.get('status')!({ type: 'error', message: 'busy' });
+    handlers.get('thinkingTurnAttemptRollback')!();
+
+    expect(session.uiState.agentTurnLogItems).toEqual([
+      expect.objectContaining({ id: 'previous-error' }),
+      expect.objectContaining({ id: 'tool-1', completed: true }),
+    ]);
+    expect(session.uiState.thinkingText).toBe('previous thinking');
+
+    // No new request starts if the user aborts during the delay.
+    handlers.get('status')!({ type: 'idle' });
+    runtime.events.publish({ type: 'turn:finished', input: micaRuntime.createRuntimeInput('continue'), owner: agent, elapsedMs: 1 });
+    expect(session.uiState.thinkingText).toBe('previous thinking');
+    expect(uiMocks.thinkingSet).toHaveBeenLastCalledWith('previous thinking');
+    bridge.stop();
+  });
+
+  it('keeps earlier interrupted thinking through a provider request retry', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({
+      type: 'turn:started', input: micaRuntime.createRuntimeInput('continue'), owner: agent,
+      preservePreviousTurnUi: true,
+    });
+    handlers.get('thinkingTurnAttemptStart')!();
+    handlers.get('status')!({ type: 'connecting' });
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('discarded');
+    handlers.get('text')!('discarded text');
+    handlers.get('textRollback')!();
+    expect(session.uiState.thinkingText).toBe('previous thinking');
+    expect(session.uiState.agentTurnLogItems).toEqual([expect.objectContaining({ id: 'previous-error' })]);
+    expect(runtime.getResponseBufferFor()).toBe('');
+    handlers.get('status')!({ type: 'idle' });
+    expect(session.uiState.thinkingText).toBe('previous thinking');
+    bridge.stop();
+  });
+
+  it('restores earlier interrupted thinking when the next response is interrupted before its checkpoint', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({
+      type: 'turn:started', input: micaRuntime.createRuntimeInput('continue'), owner: agent,
+      preservePreviousTurnUi: true,
+    });
+    handlers.get('thinkingTurnAttemptStart')!();
+    handlers.get('status')!({ type: 'connecting' });
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('first unfinished segment');
+    handlers.get('text')!('kept text');
+    handlers.get('thinking')!('second unfinished segment');
+    handlers.get('thinkingRollback')!();
+    handlers.get('status')!({ type: 'idle' });
+    expect(session.uiState.agentTurnLogItems).toEqual([expect.objectContaining({ id: 'previous-error' })]);
+    expect(session.uiState.thinkingText).toBe('previous thinking');
+    expect(runtime.getResponseBufferFor()).toBe('kept text');
+    bridge.stop();
+  });
+
+  it('keeps the restored display through reconnect and interleaves new thinking with text and tools', async () => {
+    const { MicaUiRuntimeBridge } = await import('./MicaUiRuntimeBridge.js');
+    const agent = createAgent();
+    const session = createSession(agent);
+    const runtime = createRuntime();
+    const bridge = new MicaUiRuntimeBridge(agent, runtime as never, createSessionManager(session));
+    bridge.start();
+    const handlers = agentHandlers(agent);
+    runtime.events.publish({
+      type: 'turn:started', input: micaRuntime.createRuntimeInput('continue'), owner: agent,
+      preservePreviousTurnUi: true,
+    });
+
+    handlers.get('thinkingTurnAttemptStart')!();
+    handlers.get('status')!({ type: 'connecting' });
+    handlers.get('thinking')!('discarded');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('status')!({ type: 'error', message: 'busy' });
+    handlers.get('thinkingTurnAttemptRollback')!();
+    handlers.get('thinkingTurnAttemptStart')!();
+    handlers.get('status')!({ type: 'connecting' });
+    expect(session.uiState.thinkingText).toBe('previous thinking');
+
+    handlers.get('textAttemptStart')!();
+    handlers.get('thinking')!('first');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('text')!('normal text');
+    handlers.get('thinking')!('second');
+    handlers.get('thinkingCheckpoint')!();
+    handlers.get('toolCall')!({ name: 'read_file', args: '{}', id: 'call-1' });
+    handlers.get('toolResult')!({ name: 'read_file', result: 'ok', id: 'call-1' });
+    handlers.get('thinking')!('unfinished');
+    handlers.get('thinkingRollback')!();
+    handlers.get('status')!({ type: 'idle' });
+    expect(session.uiState.agentTurnLogItems).toEqual([
+      expect.objectContaining({ id: 'previous-error' }),
+      expect.objectContaining({ id: 'thinking-2', text: 'first' }),
+      expect.objectContaining({ id: 'thinking-3', text: 'second' }),
+      expect.objectContaining({ id: 'tool-1', completed: true }),
+    ]);
+    expect(runtime.getResponseBufferFor()).toBe('normal text');
     bridge.stop();
   });
 
@@ -254,6 +573,8 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
     expect(agent.events.off).toHaveBeenCalledWith('status', expect.any(Function));
     expect(agent.events.off).toHaveBeenCalledWith('text', expect.any(Function));
     expect(agent.events.off).toHaveBeenCalledWith('thinking', expect.any(Function));
+    expect(agent.events.off).toHaveBeenCalledWith('thinkingCheckpoint', expect.any(Function));
+    expect(agent.events.off).toHaveBeenCalledWith('thinkingRollback', expect.any(Function));
     expect(agent.events.off).toHaveBeenCalledWith('toolCall', expect.any(Function));
     expect(agent.events.off).toHaveBeenCalledWith('toolResult', expect.any(Function));
     expect(agent.events.off).toHaveBeenCalledWith('usage', expect.any(Function));
@@ -279,12 +600,22 @@ describe('MicaUiRuntimeBridge turn UI preservation', () => {
 });
 
 function createRuntime() {
+  let responseBuffer = '';
   return {
     abort: vi.fn(),
+    appendResponseTextFor: vi.fn((_agent: unknown, text: string) => (responseBuffer += text)),
     editLastPendingInput: vi.fn(),
     events: new micaRuntime.RuntimeEventBus(),
+    getResponseBufferFor: vi.fn(() => responseBuffer),
+    setResponseBufferFor: vi.fn((_agent: unknown, text: string) => { responseBuffer = text; }),
     submit: vi.fn(),
   };
+}
+
+function agentHandlers(agent: AgentRuntime) {
+  return new Map<string, (...args: unknown[]) => void>(
+    vi.mocked(agent.events.on).mock.calls.map(([name, handler]) => [name, handler as (...args: unknown[]) => void]),
+  );
 }
 
 function createAgent(): AgentRuntime {

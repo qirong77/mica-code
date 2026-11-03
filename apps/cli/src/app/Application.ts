@@ -318,6 +318,8 @@ export class Application {
         currentSession.uiState = normalizeUiState({
           ...currentSession.uiState,
           conversationMessages: micaUi.conversation.messages.get(),
+          agentTurnLogItems: micaUi.bottom.agentTurnLog.items.get(),
+          lastTurnOutcome: agent.getSnapshot().interruptedThinking ? 'aborted' : currentSession.uiState.lastTurnOutcome,
         });
       }
       uiBridge.start();

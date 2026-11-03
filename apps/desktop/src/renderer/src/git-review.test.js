@@ -29,6 +29,11 @@ describe('comparison review state', () => {
     expect(a).not.toBe(reviewScope('/b', { ref: 'main' }))
     expect(a).not.toBe(reviewScope('/a', { ref: 'other' }))
     expect(a).not.toBe(reviewScope('/a', { ref: 'main', direct: true }))
+    // 同一仓库、同一条基线，但目标提交不同：两份对比的已评审标记不能互相顶掉。
+    expect(a).not.toBe(reviewScope('/a', { ref: 'main', head: 'head-a' }))
+    expect(reviewScope('/a', { ref: 'main', head: 'head-a' })).not.toBe(
+      reviewScope('/a', { ref: 'main', head: 'head-b' })
+    )
   })
   test('content changes invalidate reviewed state even if line counts stay the same', () => {
     const file = { path: 'a.js', fingerprint: 'before' }

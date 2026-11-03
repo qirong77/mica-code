@@ -130,6 +130,10 @@ context.onDispose(() => registration.dispose());
 清理的内容回 `reason: 'empty'`。两者都不是错误、不消耗次数。`mica exec` 不落盘、TUI 由
 `/compact` 负责，两边都不提供——插件应当把它当可选能力。
 
+这种「每轮都会做一次」的例行整理不要逐次写对话 notice：它不改用户看到的对话，攒几小时就是
+一列卡片。需要汇报状态时用 `ctx.ui.notice(content, { command, replace: true })`——同一个
+command 只保留最新一条（见 `plugins/README.md` 的「notice 槽」）。
+
 要在压缩结果旁边一并落盘的东西（计数、`context.ui.notice` 留的那行提示）写在
 `compactIdleHistory({ afterApply })` 里：宿主在**落盘之前**调它，所以压缩、状态与提示是同一次
 写。等 `await` 返回之后再写就晚了——那时文件已经写过，状态要等下一轮才带下去，而用户可能

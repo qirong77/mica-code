@@ -30,7 +30,8 @@ export type ResumeSessionResult =
 
 export type SessionAgentAdapter = {
   getSnapshot(): AgentRuntimeSnapshot;
-  loadSnapshot(snapshot: AgentRuntimeSnapshot): void;
+  loadSnapshot(snapshot: AgentRuntimeSnapshot, options?: { recoverActiveThinking?: boolean }): void;
+  readonly events?: Pick<AgentRuntime['events'], 'on'>;
   reloadConfig(resetSession?: boolean): void;
   /** 可选：用户显式改能力（`/capabilities`）。标记为会话定制，之后不再跟随默认值。 */
   setCapabilities?(selection: NonNullable<AgentRuntimeSnapshot['capabilitySelection']>): unknown;
@@ -69,7 +70,16 @@ export class SessionController {
   private currentTurnState: PersistedSessionTurnState = 'completed';
   /** 这条会话派生自哪条会话；resume 时从文件读回来，新会话由调用方给。 */
   private currentParentSessionId: string | null = null;
+  /**
+   * 这个进程刚刚给当前会话指定了父会话、还没写进盘。
+   *
+   * 会话树在桌面端是直接改盘的（拖拽写 `parentSessionId`），而常驻宿主内存里那份
+   * 是加载时的旧值：一直用它回写，用户刚拖出来的层级会被下一次保存悄悄撤销。
+   * 所以只有「本进程新建、还没落盘」的那一次以内存为准，之后一律跟随盘上的值。
+   */
+  private parentSessionOwned = false;
   private currentPersistedSignature: string | null = null;
+  private recoveredActiveThinkingSignature: string | null = null;
   private todoPersistenceEnabled = true;
   private readonly agent: SessionAgentAdapter;
   private readonly store: SessionStoreLike;
@@ -83,6 +93,8 @@ export class SessionController {
     this.config = options.config ?? defaultSessionConfigAdapter;
     this.ui = options.ui ?? defaultSessionUiAdapter;
     bindTodoSessionOwner(this.agent, () => ({ id: this.currentSessionId, persistent: this.todoPersistenceEnabled }));
+    this.agent.events?.on('thinkingCheckpoint', () => this.saveThinkingProgress());
+    this.agent.events?.on('textRollback', () => this.saveThinkingProgress());
   }
 
   /** A no-save executor must not create or change the todo checkpoint either. */
@@ -146,6 +158,7 @@ export class SessionController {
     this.discardCurrentIfEmpty();
     this.currentSessionId = micaSession.createId();
     this.currentParentSessionId = normalizeParentSessionId(options.parentSessionId);
+    this.parentSessionOwned = this.currentParentSessionId !== null;
     // 能力开关属于会话，不属于 agent：新会话重新跟随 config 里的默认值（不继承
     // 上一条会话关掉的工具，也不继承它的「已定制」状态）。
     this.agent.resetCapabilitiesToDefaults?.();
@@ -155,11 +168,24 @@ export class SessionController {
     this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
     this.currentPersistedSignature = null;
+    this.recoveredActiveThinkingSignature = null;
   }
 
   /** 当前会话的父会话 id（没有则为 null）。 */
   getParentSessionId(): string | null {
     return this.currentParentSessionId;
+  }
+
+  /**
+   * 这条会话该写进盘里的父会话字段。
+   *
+   * 本进程新建的那一次以内存为准（盘上还没有）；其余情况跟随盘上的值，包括盘上
+   * 明确没有父会话——那是用户在侧栏里改过的结果，不能被内存里的旧值顶回去。
+   * 父会话被删掉之后仍保留这条线索（指向不存在的 id 只是让侧栏把它当顶层）。
+   */
+  private parentFieldFor(existing: PersistedSession | null | undefined): { parentSessionId?: string } {
+    if (this.parentSessionOwned) return resolveParentField(this.currentParentSessionId);
+    return resolveParentField(existing ? existing.parentSessionId : this.currentParentSessionId);
   }
 
   saveCurrent(
@@ -229,12 +255,11 @@ export class SessionController {
       createdAt: existing?.createdAt ?? now,
       updatedAt: existing?.updatedAt ?? now,
       cwd: process.cwd(),
-      // 父会话写在第一次保存时，之后由已有的值续写：父会话被删掉了也保留这条线索
-      // （指向一个不存在的 id 只是让侧栏把它当顶层，不该悄悄改写成"没有父会话"）。
-      ...resolveParentField(this.currentParentSessionId ?? existing?.parentSessionId),
+      ...this.parentFieldFor(existing),
       turnState: this.currentTurnState,
       snapshot: {
         ...toPersistedSnapshot(snapshot, conversationMessages),
+        ...(this.currentTurnState === 'running' ? {} : { activeThinking: undefined, activeTurn: undefined }),
         displayUsage: resolveDisplayUsage(options.displayUsage, existing?.snapshot.displayUsage, snapshot.lastUsage),
       },
     };
@@ -250,6 +275,8 @@ export class SessionController {
     session.revision = (existing?.revision ?? 0) + 1;
     session.updatedAt = now;
     this.store.save(session);
+    this.parentSessionOwned = false;
+    this.currentParentSessionId = session.parentSessionId ?? null;
     this.currentPersistedSignature = sessionSignature(session);
     return true;
   }
@@ -282,11 +309,13 @@ export class SessionController {
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
       cwd: process.cwd(),
-      ...resolveParentField(this.currentParentSessionId ?? existing?.parentSessionId),
+      ...this.parentFieldFor(existing),
       turnState: existing?.turnState ?? this.currentTurnState,
       snapshot: existing?.snapshot ?? toPersistedSnapshot(snapshot, conversationMessages),
     };
     this.store.save(session);
+    this.parentSessionOwned = false;
+    this.currentParentSessionId = session.parentSessionId ?? null;
     this.currentPersistedSignature = sessionSignature(session);
     return true;
   }
@@ -343,16 +372,47 @@ export class SessionController {
   }
 
   resumeLoaded(session: PersistedSession): ResumeSessionResult {
+    return this.restoreLoaded(session, false);
+  }
+
+  private restoreLoaded(session: PersistedSession, leaseHeld: boolean): ResumeSessionResult {
+    if (this.agent.isRunning) return { ok: false, message: 'Cannot resume a session while the agent is running' };
+    // A running snapshot may belong to a live writer. Take the same lease as
+    // turns do, then re-read under the lease before recovering its checkpoint.
+    // refreshFromStore is called by a turn that already holds that lease.
+    const lease =
+      !leaseHeld && session.turnState === 'running' && (session.snapshot.activeThinking || session.snapshot.activeTurn)
+        ? micaSession.acquireTurnLease(session.id)
+        : null;
+    try {
+      if (lease) {
+        const current = this.store.load(session.id);
+        if (!current) return { ok: false, message: `Session not found: ${session.id}` };
+        session = current;
+      }
+      return this.applyLoadedSession(session, leaseHeld || Boolean(lease));
+    } finally {
+      lease?.release();
+    }
+  }
+
+  private applyLoadedSession(session: PersistedSession, leaseHeld: boolean): ResumeSessionResult {
     if (session.id !== this.currentSessionId) this.discardCurrentIfEmpty();
     const requestedRole = session.snapshot.role ?? DEFAULT_ROLE_NAME;
     const restoredRole = resolveSnapshotRole(requestedRole);
     const resolvedSnapshot = this.config.apply(session.snapshot) ?? session.snapshot;
     this.agent.reloadConfig(false);
-    this.agent.loadSnapshot(fromPersistedSnapshot(resolvedSnapshot, restoredRole));
+    const recoverActiveThinking =
+      leaseHeld && session.turnState === 'running' && Boolean(resolvedSnapshot.activeThinking || resolvedSnapshot.activeTurn);
+    const runtimeSnapshot = fromPersistedSnapshot(resolvedSnapshot, restoredRole);
+    if (recoverActiveThinking) this.agent.loadSnapshot(runtimeSnapshot, { recoverActiveThinking: true });
+    else this.agent.loadSnapshot(runtimeSnapshot);
     this.currentSessionId = session.id;
     this.currentTurnState = session.turnState ?? 'completed';
     this.currentParentSessionId = session.parentSessionId ?? null;
+    this.parentSessionOwned = false;
     this.currentPersistedSignature = sessionSignature(session);
+    this.recoveredActiveThinkingSignature = recoverActiveThinking ? this.currentPersistedSignature : null;
     const conversationMessages = getPersistedConversationMessages(session.snapshot);
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
     const restoredTitle = isInternalCompactText(session.title) ? derivedTitle : session.title;
@@ -367,11 +427,55 @@ export class SessionController {
     };
   }
 
-  /** Reloads the active session when another process has changed its file. */
+  /**
+   * Reloads external changes before a turn. A persistent turn must already hold
+   * its session lease; read-only executors probe the lease themselves.
+   */
   refreshFromStore(): ResumeSessionResult | null {
+    if (this.agent.isRunning) return null;
     const session = this.store.load(this.currentSessionId);
-    if (!session || sessionSignature(session) === this.currentPersistedSignature) return null;
-    return this.resumeLoaded(session);
+    if (!session) return null;
+    const signature = sessionSignature(session);
+    if (
+      signature === this.currentPersistedSignature &&
+      (session.turnState !== 'running' ||
+        (!session.snapshot.activeThinking && !session.snapshot.activeTurn) ||
+        signature === this.recoveredActiveThinkingSignature)
+    )
+      return null;
+    if (this.todoPersistenceEnabled || session.turnState !== 'running') {
+      return this.restoreLoaded(session, this.todoPersistenceEnabled);
+    }
+    // No-save executors do not hold a lease. Avoid refreshing a live writer's
+    // snapshot, and read it again after taking the lease if it has stopped.
+    const lease = micaSession.acquireTurnLease(session.id);
+    if (!lease) return null;
+    try {
+      const current = this.store.load(session.id);
+      return current ? this.restoreLoaded(current, true) : null;
+    } finally {
+      lease.release();
+    }
+  }
+
+  /** Save the display checkpoint and the matching provider history for recovery. */
+  private saveThinkingProgress(): void {
+    if (!this.todoPersistenceEnabled || !this.agent.isRunning || this.currentTurnState !== 'running') return;
+    const existing = this.store.load(this.currentSessionId);
+    if (!existing || existing.turnState !== 'running') return;
+    const current = this.agent.getSnapshot();
+    const { activeThinking, activeTurn, messages } = current;
+    if (JSON.stringify([activeThinking, activeTurn, messages]) ===
+      JSON.stringify([existing.snapshot.activeThinking, existing.snapshot.activeTurn, existing.snapshot.messages])) return;
+    const { activeThinking: _oldThinking, activeTurn: _oldTurn, ...snapshot } = existing.snapshot;
+    const session: PersistedSession = {
+      ...existing,
+      revision: (existing.revision ?? 0) + 1,
+      updatedAt: new Date().toISOString(),
+      snapshot: { ...snapshot, messages, ...(activeThinking ? { activeThinking } : {}), ...(activeTurn ? { activeTurn } : {}) },
+    };
+    this.store.save(session);
+    this.currentPersistedSignature = sessionSignature(session);
   }
 
   /**
@@ -452,6 +556,10 @@ const defaultSessionUiAdapter: SessionUiAdapter = {
     micaUi.conversation.clearPendingInput();
     micaUi.panels.thinkingText.set('');
     micaUi.panels.clearAgentTurnLogItems();
+    const interruptedThinking = agent.getSnapshot().interruptedThinking?.text;
+    if (interruptedThinking) {
+      micaUi.bottom.agentTurnLog.appendItem(micaUi.createThinkingLogItem('restored-thinking', interruptedThinking));
+    }
     micaUi.panels.clearPluginUIs();
     micaUi.messageBar.clearMessages();
     micaUi.panels.status.idle();
@@ -514,6 +622,9 @@ function toPersistedSnapshot(
     ...(snapshot.systemPrompt ? { systemPrompt: snapshot.systemPrompt } : {}),
     messages: snapshot.messages,
     conversationMessages,
+    ...(snapshot.interruptedThinking ? { interruptedThinking: snapshot.interruptedThinking } : {}),
+    ...(snapshot.activeThinking ? { activeThinking: snapshot.activeThinking } : {}),
+    ...(snapshot.activeTurn ? { activeTurn: snapshot.activeTurn } : {}),
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
     subagentUsageHistory: snapshot.subagentUsageHistory,
@@ -538,6 +649,9 @@ function fromPersistedSnapshot(
     messages: snapshot.messages,
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
+    interruptedThinking: snapshot.interruptedThinking,
+    activeThinking: snapshot.activeThinking,
+    activeTurn: snapshot.activeTurn,
     subagentUsageHistory: snapshot.subagentUsageHistory,
   };
 }

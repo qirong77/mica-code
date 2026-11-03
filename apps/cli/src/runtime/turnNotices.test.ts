@@ -72,6 +72,34 @@ describe('TurnNoticeLog', () => {
     expect(log.compose().map((message) => message.content)).toEqual(['one', 'compacted', 'answer']);
   });
 
+  it('keeps a single row for status notices that ask to replace', () => {
+    const base: MicaUiConversationMessage[] = [{ role: 'user', content: 'one' }];
+    const log = new TurnNoticeLog(() => base);
+    log.upsert(notice('自动压缩：500K → 90K', 'auto-compact'), { replace: true });
+    base.push({ role: 'assistant', content: 'answer 1' });
+    base.push({ role: 'user', content: 'two' });
+    log.upsert(notice('自动压缩：680K → 145K', 'auto-compact'), { replace: true });
+
+    expect(log.size).toBe(1);
+    // 旧条目撤掉、新条目落在当前位置：否则最新结论会被埋在用户已经滚过去的那段对话里。
+    expect(log.compose().map((message) => message.content)).toEqual([
+      'one',
+      'answer 1',
+      'two',
+      '自动压缩：680K → 145K',
+    ]);
+  });
+
+  it('still appends event notices that do not ask to replace', () => {
+    const base: MicaUiConversationMessage[] = [{ role: 'user', content: 'one' }];
+    const log = new TurnNoticeLog(() => base);
+    log.upsert({ role: 'notice', content: '提交成功 1', command: '/commit', status: 'success' });
+    base.push({ role: 'assistant', content: 'answer' });
+    log.upsert({ role: 'notice', content: '提交成功 2', command: '/commit', status: 'success' });
+
+    expect(log.size).toBe(2);
+  });
+
   it('clamps notices when the history shrank', () => {
     const base: MicaUiConversationMessage[] = [{ role: 'user', content: 'one' }];
     const log = new TurnNoticeLog(() => base);
@@ -172,10 +200,10 @@ describe('notice message builders', () => {
         { type: 'text', text: '[image omitted during compact]' },
       ],
     };
-    const merged = mergeInFlightUserMessage(
-      [compacted, { role: 'assistant', content: '两个 bug 我先分别定性' }, raw],
-      { message: raw, rawContent: raw.content },
-    );
+    const merged = mergeInFlightUserMessage([compacted, { role: 'assistant', content: '两个 bug 我先分别定性' }, raw], {
+      message: raw,
+      rawContent: raw.content,
+    });
     expect(merged).toEqual([compacted, { role: 'assistant', content: '两个 bug 我先分别定性' }]);
   });
 

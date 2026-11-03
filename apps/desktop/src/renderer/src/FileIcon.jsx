@@ -4,26 +4,10 @@ import {
   resolveFileIconName,
   resolveFolderIconName
 } from './fileIconResolver'
+import iconAssets from 'virtual:file-icon-assets'
 
-// `?no-inline` 必须保留：内联阈值以下的图标会被 Vite 塞成 data URI，1567 个图标
-// 里有 1429 个能整块进主 bundle（约 2.1MB），而这些图标只在对应行渲染时才需要。
-// 产出成独立文件后，映射表只留短 URL，图标由浏览器按需取（Electron 走 file://、
-// 网页走运行时静态服务，两种方式都命中）。
-const iconModules = import.meta.glob('../assets/file-icons/*.svg', {
-  eager: true,
-  query: '?url&no-inline',
-  import: 'default'
-})
-
-const iconUrls = new Map(
-  Object.entries(iconModules).map(([path, url]) => [
-    path
-      .split('/')
-      .pop()
-      .replace(/\.svg$/, ''),
-    url
-  ])
-)
+// 虚拟模块只列出清单能命中的图标，并始终给出独立文件 URL；浏览器按需加载。
+const iconUrls = new Map(Object.entries(iconAssets))
 
 const defaultFileIcon = iconUrls.get(`default_${defaultFileIconName}`)
 const defaultFolderIcon = iconUrls.get(`default_${defaultFolderIconName}`)

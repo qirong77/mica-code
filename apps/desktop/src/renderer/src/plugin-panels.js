@@ -126,6 +126,100 @@ export function quickbarMenuItems(shortcut, view) {
 }
 
 /**
+ * 动态菜单的条目在**页面**这一层缓存。
+ *
+ * 这些条目是本地事实（这个会话涉及哪些分支），不是网络数据；每换一次页签、每重挂载一次
+ * 就回去问一遍，用户看到的就是一句「正在读取」。缓存跨挂载共用，并且是
+ * **先给旧的、再后台刷新**：超过 TTL 也不清空，界面立刻有内容，新结果回来再替换。
+ */
+const MENU_CACHE_MS = 60_000
+const menuCache = new Map()
+
+export function menuCacheKey(nodeId, pluginId, menu) {
+  return `${nodeId || ''}\u0000${pluginId || ''}\u0000${menu || ''}`
+}
+
+/** 命中的缓存条目；`stale` 表示过了 TTL，可以先画出来再问一次。 */
+export function readMenuCache(key, now = Date.now(), ttl = MENU_CACHE_MS) {
+  const hit = menuCache.get(key)
+  if (!hit) return null
+  return { entry: hit.entry, stale: now - hit.at >= ttl }
+}
+
+export function writeMenuCache(key, entry, now = Date.now()) {
+  menuCache.set(key, { at: now, entry })
+  if (menuCache.size > 24) {
+    const [oldest] = menuCache.keys()
+    menuCache.delete(oldest)
+  }
+  return entry
+}
+
+export function clearMenuCache() {
+  menuCache.clear()
+}
+
+/**
+ * 整块视图也缓存一份：菜单只为了两行分支去问视图，问回来的东西正是抽屉里要画的内容。
+ * 抽屉打开时先用这一份画出来（否则点开就是一句「正在读取」），再后台刷新。
+ */
+const VIEW_CACHE_MS = 30_000
+const viewCache = new Map()
+
+const viewKey = (nodeId, pluginId) => `${nodeId || ''}\u0000${pluginId || ''}`
+
+export function readPanelView(nodeId, pluginId, now = Date.now(), ttl = VIEW_CACHE_MS) {
+  const hit = viewCache.get(viewKey(nodeId, pluginId))
+  if (!hit) return null
+  return { view: hit.view, stale: now - hit.at >= ttl }
+}
+
+export function writePanelView(nodeId, pluginId, view, now = Date.now()) {
+  if (!view) return null
+  viewCache.set(viewKey(nodeId, pluginId), { at: now, view })
+  if (viewCache.size > 16) {
+    const [oldest] = viewCache.keys()
+    viewCache.delete(oldest)
+  }
+  return view
+}
+
+/** 视图里每个输入框的初值：首次打开与动作之后对齐草稿用（定时刷新不能碰，会清掉正在输的字）。 */
+export function panelDrafts(view) {
+  const drafts = {}
+  for (const section of Array.isArray(view?.sections) ? view.sections : []) {
+    for (const field of section?.fields || []) drafts[field.key] = field.value ?? ''
+  }
+  return drafts
+}
+
+/** 换会话时丢掉上一个会话的菜单与视图：分支属于这个会话，串过去就是别人的分支。 */
+export function prunePluginPanelCache(keepNodeId) {
+  const prefix = `${keepNodeId || ''}\u0000`
+  for (const key of [...menuCache.keys()]) {
+    if (!key.startsWith(prefix)) menuCache.delete(key)
+  }
+  for (const key of [...viewCache.keys()]) {
+    if (!key.startsWith(prefix)) viewCache.delete(key)
+  }
+}
+
+/**
+ * 一次面板视图请求里哪些菜单需要条目：清单声明了 `menu` 的那些。
+ *
+ * 面板挂在哪个按钮上由页面决定，这里只回答「为了这组按钮要问几次视图」。
+ */
+export function menuShortcutsOf(panels) {
+  const wanted = []
+  for (const panel of Array.isArray(panels) ? panels : []) {
+    for (const shortcut of panel?.shortcuts || []) {
+      if (shortcut?.menu) wanted.push({ panel, shortcut })
+    }
+  }
+  return wanted
+}
+
+/**
  * 弹窗形态的页签：一块分区一个页签，标题就是页签名。
  *
  * 没有标题的分区（插件可以不给）也得有个能点的名字，按位置叫「第 N 项」；

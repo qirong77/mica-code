@@ -8,6 +8,7 @@ import { TurnNoticeLog } from './turnNotices.js';
 import { attachCodexProjector } from './CodexProjector.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
+import type { RuntimeInput } from '@packages/mica-runtime/index.js';
 
 class MockAgent {
   readonly events = mitt();
@@ -96,7 +97,11 @@ class MockAgent {
 
 let harnessSeq = 0;
 
-function createHarness(options: { withPluginLayer?: boolean } = {}) {
+function createHarness(options: {
+  withPluginLayer?: boolean;
+  retryDelayMs?: number;
+  applyInputSettings?: (input: RuntimeInput) => void;
+} = {}) {
   const agent = new MockAgent();
   const events: HeadlessTurnEvent[] = [];
   const savedStates: string[] = [];
@@ -122,8 +127,9 @@ function createHarness(options: { withPluginLayer?: boolean } = {}) {
     agent: agent as unknown as never,
     sessionController: sessionController as never,
     onEvent: (event) => events.push(event),
+    applyInputSettings: options.applyInputSettings,
     maxTurnRetries: 2,
-    retryDelayMs: 5,
+    retryDelayMs: options.retryDelayMs ?? 5,
     subagentTasks: {
       killRunningForOwner: (owner: unknown, reason: string) => {
         subagentSettleCalls.push({ owner, reason });
@@ -152,6 +158,7 @@ function createHarness(options: { withPluginLayer?: boolean } = {}) {
     events,
     executor,
     sessionId,
+    sessionController,
     noticeLog,
     savedStates,
     savedConversations,
@@ -171,6 +178,53 @@ function input(text: string, queueMode?: 'after_iteration' | 'after_turn') {
 }
 
 describe('HeadlessTurnExecutor', () => {
+  it('rolls back completed responses before a turn retry and aborts the wait without saving their text', async () => {
+    const { agent, executor, events } = createHarness({ retryDelayMs: 5000 });
+    const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const projector = attachCodexProjector(agent as never, (method, params) => {
+      notifications.push({ method, params: params as Record<string, unknown> });
+    }, { threadId: 'thread', turnId: 'turn', cwd: '/', textRollback: true, thinkingRollback: true, thinking: true });
+    let rollbackBeforeRestore = false;
+    agent.events.on('thinkingTurnAttemptRollback', () => { rollbackBeforeRestore = agent.restoreCalls === 0; });
+    agent.run = async (_content, options = {}) => {
+      agent.events.emit('textAttemptStart');
+      agent.events.emit('thinking', 'first thought');
+      agent.events.emit('thinkingCheckpoint');
+      agent.events.emit('text', 'first response');
+      agent.events.emit('toolCall', { name: 'read_file', args: '{}', id: 'c1' });
+      agent.events.emit('toolResult', { name: 'read_file', result: 'ok', id: 'c1' });
+      await options.onIterationComplete?.();
+      agent.events.emit('textAttemptStart');
+      agent.events.emit('thinking', 'second thought');
+      agent.events.emit('thinkingCheckpoint');
+      agent.events.emit('text', 'second response');
+      throw Object.assign(new Error('busy'), { status: 503 });
+    };
+
+    await executor.start(input('retry and abort'));
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'turn:retrying' })));
+    expect(rollbackBeforeRestore).toBe(true);
+    expect(agent.restoreCalls).toBe(1);
+    expect(notifications.filter(({ method }) => method === 'mica/reasoning/textRollback').map(({ params }) => params))
+      .toEqual([
+        expect.objectContaining({ length: 14, micaAttemptId: 'turn:2' }),
+        expect.objectContaining({ length: 13, micaAttemptId: 'turn:1' }),
+      ]);
+    expect(notifications.filter(({ method }) => method === 'mica/agentMessage/textRollback').map(({ params }) => params))
+      .toEqual([
+        expect.objectContaining({ length: 15, micaAttemptId: 'turn:2' }),
+        expect.objectContaining({ length: 14, micaAttemptId: 'turn:1' }),
+      ]);
+
+    executor.abort();
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'turn:finish', status: 'aborted' })));
+    expect(agent.abortedTurnCalls).toEqual([{ content: 'retry and abort', partialAnswer: undefined }]);
+    projector.completeTurn('interrupted');
+    expect(notifications.findLast(({ method, params }) => method === 'item/completed' && (params.item as { type: string }).type === 'agentMessage')?.params.item)
+      .toMatchObject({ text: '' });
+    projector.dispose();
+  });
+
   it('registers alongside the desktop projector and preserves text before a rolled back attempt', async () => {
     const { agent, executor } = createHarness();
     const notifications: Array<{ method: string; params: unknown }> = [];
@@ -252,6 +306,60 @@ describe('HeadlessTurnExecutor', () => {
     expect(result).toBe('started');
     expect(agent.runCalls).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'turn:start' });
+  });
+
+  it('applies settings to the matching input after each leased refresh and before the first save', async () => {
+    const steps: string[] = [];
+    const automatic = { ...input('same text'), source: 'system' as const };
+    const explicit = input('same text', 'after_turn');
+    const overrides = new WeakMap<RuntimeInput, string>([[explicit, 'new-model']]);
+    const harness = createHarness({
+      applyInputSettings: (current) => {
+        const lock = join(process.env.MICA_HOME!, 'sessions', '.turn-locks', `${harness.sessionId}.lock`);
+        steps.push(`apply:${current.source}:${overrides.get(current) ?? 'none'}:${existsSync(lock)}`);
+        overrides.delete(current);
+      },
+    });
+    vi.spyOn(harness.sessionController, 'refreshFromStore').mockImplementation(() => {
+      steps.push('refresh');
+      return null;
+    });
+    vi.spyOn(harness.agent, 'reserveRunId').mockImplementation(() => {
+      steps.push('reserve');
+      return ++harness.agent.runId;
+    });
+    vi.spyOn(harness.sessionController, 'saveCurrent').mockImplementation(() => {
+      steps.push('save');
+      return true;
+    });
+
+    await expect(harness.executor.start(automatic)).resolves.toBe('started');
+    await expect(harness.executor.start(explicit)).resolves.toBe('queued');
+    await vi.waitFor(() => expect(harness.getIdleCount()).toBe(1));
+
+    expect(steps.slice(0, 4)).toEqual(['refresh', 'apply:system:none:true', 'reserve', 'save']);
+    const secondRefresh = steps.indexOf('refresh', 1);
+    expect(steps.slice(secondRefresh, secondRefresh + 4)).toEqual([
+      'refresh', 'apply:ui:new-model:true', 'reserve', 'save',
+    ]);
+    expect(overrides.has(explicit)).toBe(false);
+  });
+
+  it('does not apply queued settings when the input is recalled or the active turn aborts', async () => {
+    const applyInputSettings = vi.fn();
+    const { executor, getIdleCount } = createHarness({ applyInputSettings });
+    const first = input('first');
+    const recalled = input('recalled', 'after_turn');
+    const pending = input('pending', 'after_turn');
+    await executor.start(first);
+    await expect(executor.start(recalled)).resolves.toBe('queued');
+    expect(executor.recall(recalled.id)).toBe(recalled);
+    await expect(executor.start(pending)).resolves.toBe('queued');
+    executor.abort();
+    await vi.waitFor(() => expect(getIdleCount()).toBe(1));
+    expect(applyInputSettings).toHaveBeenCalledTimes(1);
+    expect(applyInputSettings).toHaveBeenCalledWith(first);
+    expect(executor.pendingInputs).toEqual([pending]);
   });
 
   it('stops the background subagents a finished turn left running', async () => {

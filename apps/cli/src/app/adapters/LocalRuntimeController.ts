@@ -489,6 +489,7 @@ export class LocalRuntimeController implements RuntimeController {
       terminalSession.uiState = normalizeUiState({
         ...terminalSession.uiState,
         conversationMessages: micaUi.conversation.messages.get(),
+        agentTurnLogItems: micaUi.bottom.agentTurnLog.items.get(),
         responseText: '',
         thinkingText: '',
         workingStatus: { type: 'idle' },
@@ -581,8 +582,8 @@ export class LocalRuntimeController implements RuntimeController {
       });
       activeContext?.uiBridge?.syncAgentStatusItems();
     }
+    this.events.publish({ type: 'turn:started', input, owner: agent, preservePreviousTurnUi: !clearPreviousTurnUi });
     if (this.isActiveAgent(agent)) {
-      this.events.publish({ type: 'turn:started', input, owner: agent, preservePreviousTurnUi: !clearPreviousTurnUi });
       if (input.source !== 'system') micaUi.terminalInput.clearText();
       if (session) {
         micaUi.conversation.setMessages(session.uiState.conversationMessages);
@@ -608,44 +609,11 @@ export class LocalRuntimeController implements RuntimeController {
       let providerRetryNoticeIndex = -1;
       for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
         const attemptSystemInputs: RuntimeInput[] = [];
-        if (attempt > 0) {
-          // Restore client state to before the turn, clearing any partial tool results.
-          if (preTurnSnapshot) {
-            agent.restoreClientSnapshot(preTurnSnapshot);
-          }
-          this.responseBuffers.set(agent, '');
-          this.committedResponseBuffers.set(agent, '');
-          sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
-
-          if (this.isActiveAgent(agent)) {
-            micaUi.conversation.clearResponseText();
-            micaUi.panels.thinkingText.set('');
-            micaUi.panels.status.connecting();
-          }
-
-          await waitForRetryDelay(agent, TURN_RETRY_DELAY_MS, (remainingMs) => {
-            if (!pendingRetryNotice) return;
-            updateRetryNoticeMessage(
-              session,
-              pendingRetryNotice.index,
-              createRetryNoticeMessage(pendingRetryNotice.error, pendingRetryNotice.retryAttempt, remainingMs),
-              this.isActiveAgent(agent),
-            );
-          });
-          if (pendingRetryNotice) {
-            updateRetryNoticeMessage(
-              session,
-              pendingRetryNotice.index,
-              createRetryNoticeMessage(pendingRetryNotice.error, pendingRetryNotice.retryAttempt, null),
-              this.isActiveAgent(agent),
-            );
-            pendingRetryNotice = null;
-          }
-        }
-
+        const attemptRunId = attempt === 0 ? reservedRunId : agent.reserveRunId();
         try {
+          agent.events.emit('thinkingTurnAttemptStart', undefined);
           const result = await agent.run(runContent, {
-            reservedRunId: attempt === 0 ? reservedRunId : undefined,
+            reservedRunId: attemptRunId,
             onIterationComplete: () => {
               this.saveIterationCheckpoint(agent, sessionController);
               return this.takeQueuedIterationInput(agent, attemptSystemInputs);
@@ -720,9 +688,23 @@ export class LocalRuntimeController implements RuntimeController {
           if (error instanceof AgentAbortError) {
             throw error;
           }
+          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
           if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= MAX_TURN_RETRIES) {
             throw error;
           }
+          // The client snapshot covers the entire run, not just its last
+          // request. Restore its matching thinking before restoring history.
+          agent.events.emit('thinkingTurnAttemptRollback', undefined);
+          if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot);
+          this.responseBuffers.set(agent, '');
+          this.committedResponseBuffers.set(agent, '');
+          if (session) session.uiState.responseText = '';
+          if (this.isActiveAgent(agent)) {
+            micaUi.conversation.clearResponseText();
+            micaUi.panels.status.connecting();
+          }
+          sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
+          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
           const retryNotice = createRetryNoticeMessage(error, attempt + 1, TURN_RETRY_DELAY_MS);
           let retryNoticeIndex = -1;
           if (session) {
@@ -746,6 +728,27 @@ export class LocalRuntimeController implements RuntimeController {
             pendingRetryNotice = { error, index: retryNoticeIndex, retryAttempt: attempt + 1 };
           }
           await this.hooks.emit('turn:error', { runtime: this, input, content, error });
+          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
+          await waitForRetryDelay(agent, TURN_RETRY_DELAY_MS, attemptRunId, (remainingMs) => {
+            if (!pendingRetryNotice) return;
+            updateRetryNoticeMessage(
+              session,
+              pendingRetryNotice.index,
+              createRetryNoticeMessage(pendingRetryNotice.error, pendingRetryNotice.retryAttempt, remainingMs),
+              this.isActiveAgent(agent),
+            );
+          });
+          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
+          if (pendingRetryNotice) {
+            updateRetryNoticeMessage(
+              session,
+              pendingRetryNotice.index,
+              createRetryNoticeMessage(pendingRetryNotice.error, pendingRetryNotice.retryAttempt, null),
+              this.isActiveAgent(agent),
+            );
+            pendingRetryNotice = null;
+          }
+          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
         }
       }
     } catch (error) {
@@ -838,7 +841,7 @@ export class LocalRuntimeController implements RuntimeController {
         this.rewindCheckpoints.finalize(agent, rewindCheckpointId, displayConversationMessages(session, agent));
       }
       const elapsedMs = Date.now() - startedAt;
-      if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
+      this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
       // 这一轮已经收尾：它起的后台子代理不会再有消费者。结果只能经 `agent
       // operation=read` 取回，而下一轮的模型不会去读上一个 turn 的 task_id——
       // 留着它们只会在状态栏挂一条永远 running 的条目，并继续烧 token。
@@ -1075,12 +1078,16 @@ function updateRetryNoticeMessage(
 function waitForRetryDelay(
   agent: AgentRuntime,
   delayMs: number,
+  delayRunId: number,
   onRemainingMs?: (remainingMs: number) => void,
 ): Promise<void> {
-  const delayRunId = agent.activeRunId;
   const startedAt = Date.now();
   let lastRemainingSeconds = Math.ceil(delayMs / 1000);
   return new Promise<void>((resolve, reject) => {
+    if (!agent.isCurrent(delayRunId)) {
+      reject(new AgentAbortError(delayRunId));
+      return;
+    }
     let settled = false;
     const finish = (fn: () => void) => {
       if (settled) return;
@@ -1096,10 +1103,13 @@ function waitForRetryDelay(
       lastRemainingSeconds = remainingSeconds;
       onRemainingMs?.(remainingMs);
     };
-    const timer = setTimeout(() => finish(resolve), delayMs);
+    const timer = setTimeout(() => finish(() => {
+      if (!agent.isCurrent(delayRunId)) reject(new AgentAbortError(delayRunId));
+      else resolve();
+    }), delayMs);
     const poll = setInterval(() => {
-      if (agent.activeRunId !== delayRunId) {
-        finish(() => reject(new AgentAbortError(agent.activeRunId)));
+      if (!agent.isCurrent(delayRunId)) {
+        finish(() => reject(new AgentAbortError(delayRunId)));
         return;
       }
       updateCountdown();

@@ -595,8 +595,8 @@ async function readRaw(req, limit = 8 * 1024 * 1024) {
   return Buffer.concat(chunks)
 }
 
-async function readJsonBody(req) {
-  const raw = await readRaw(req)
+async function readJsonBody(req, limit) {
+  const raw = await readRaw(req, limit)
   if (!raw.length) return {}
   return JSON.parse(raw.toString('utf8'))
 }
@@ -945,12 +945,19 @@ function handleAwake(req, res, state) {
  * 走这条而不是让页面自己直连本机：两端不在同一个网络，页面能到达的只有中转机；
  * 图片怎么存也只有运行时说了算（手机上贴的图与桌面端贴的图该落在同一个目录、同一种引用）。
  */
+const MAX_PASTE_IMAGE_BYTES = 24 * 1024 * 1024
 async function handlePasteImage(req, res, state) {
   let body
   try {
-    body = await readJsonBody(req)
-  } catch {
-    return sendJson(res, 400, { ok: false, error: 'bad json' })
+    // 与桥那一侧的 24MB 回包上限对齐：3x 屏截图的 data URL 常有 5–8MB，
+    // 而 8MB 的默认值是给普通 JSON 请求的，会把同一张图在手机上判成坏请求。
+    body = await readJsonBody(req, MAX_PASTE_IMAGE_BYTES)
+  } catch (error) {
+    const tooLarge = String(error?.message || error).includes('payload too large')
+    return sendJson(res, tooLarge ? 413 : 400, {
+      ok: false,
+      error: tooLarge ? '图片太大（超过 24MB），请压缩后再发' : 'bad json',
+    })
   }
   const dataUrl = typeof body?.dataUrl === 'string' ? body.dataUrl : ''
   if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(dataUrl)) {

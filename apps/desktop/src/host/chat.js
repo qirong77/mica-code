@@ -18,7 +18,7 @@ import { basename, join } from 'path'
 import { resolveMicaExecutable } from './mica-cli'
 import { logger } from './log'
 import { readTopLevelCwd } from './session-file-head'
-import { createSessionReader } from './session-reader'
+import { createSessionReader, filterCurrentThinking } from './session-reader'
 import { readTodoCheckpointInput } from './todo-checkpoint'
 import { isDirectory, resolveUsableCwd } from './cwd-utils'
 import {
@@ -1760,17 +1760,37 @@ async function loadModels() {
 }
 
 function listRoles() {
-  const directory = join(micaHomeDir(), 'role')
+  const names = new Set()
   try {
-    const roles = readdirSync(directory)
-      .filter((name) => name.endsWith('.md'))
-      .map((name) => basename(name, '.md'))
-      .filter(Boolean)
-      .sort()
-    return { ok: true, roles }
+    for (const name of readdirSync(join(micaHomeDir(), 'role'))) {
+      if (!name.endsWith('.md')) continue
+      const role = basename(name, '.md')
+      if (role) names.add(role)
+    }
   } catch {
-    return { ok: true, roles: [] }
+    // 没有 `role/` 目录是正常的：角色也可以完全由插件提供。
   }
+  // 插件自带的角色（`$MICA_HOME/plugin-roles/<pluginId>.json`）：输入框的箭头要能切到它们，
+  // 而读索引不需要为了一个名字去启动会话进程。同名时磁盘角色优先（与 `listAgentRoles` 一致）。
+  try {
+    for (const file of readdirSync(join(micaHomeDir(), 'plugin-roles'))) {
+      if (!file.endsWith('.json') || file.startsWith('.')) continue
+      let parsed = null
+      try {
+        parsed = JSON.parse(readFileSync(join(micaHomeDir(), 'plugin-roles', file), 'utf-8'))
+      } catch {
+        continue
+      }
+      if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.roles)) continue
+      for (const entry of parsed.roles) {
+        const name = typeof entry?.name === 'string' ? entry.name.trim() : ''
+        if (name) names.add(name)
+      }
+    }
+  } catch {
+    // 没有插件角色就是没有
+  }
+  return { ok: true, roles: [...names].sort() }
 }
 
 function runCompactSession(sessionId, mode = 'model') {
@@ -2156,7 +2176,10 @@ export function registerChatIpc() {
   ipcMain.handle('chat:history', (_event, { sessionId } = {}) => {
     rememberChatSender(_event)
     if (!sessionId) return []
-    return readSessionAsync(sessionFile(sessionId)).then((result) => result.history)
+    return readSessionAsync(sessionFile(sessionId)).then((result) => {
+      const provider = readMicaConfig().providers.find((item) => item.id === result.meta?.providerId)
+      return filterCurrentThinking(result.history, provider)
+    })
   })
 
   /**
@@ -2307,7 +2330,8 @@ export function registerChatIpc() {
               (meta.turnState === 'completed'
                 ? null
                 : readTodoCheckpointInput(micaHomeDir(), sessionId)),
-            protocol: protocolForProviderId(meta.providerId)
+            protocol: protocolForProviderId(meta.providerId),
+            apiBase: readMicaConfig().providers.find((provider) => provider.id === meta.providerId)?.api_base || ''
           }
         : null
     )

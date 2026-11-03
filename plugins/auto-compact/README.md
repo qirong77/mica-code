@@ -60,8 +60,12 @@ turn lease；`empty`：没有可清理的内容）——这两件事在日志里
 （`reachesQuickThreshold`：`ctx.agent.lastUsage().inputTokens` 对比 `effectiveThresholds().quick`）。
 低于阈值时，这次压缩在请求里本来也不会发生——那就不是「提前」，只是把几十 MB 的历史白扫一遍、
 再往对话里写一条 notice。真实反馈是：一个 100K 上下的会话来回切几次焦点，对话里排出一列
-「已快速压缩」，而用户全程没说话。两条 notice 都带 `command: 'auto-compact'`，同一锚点连着
-写时由 `TurnNoticeLog.upsert` 就地合并成一条，不会排成一列。
+「已快速压缩」，而用户全程没说话。
+
+**对话里只留一行状态**：自动压缩的 notice 全部带 `command: 'auto-compact'` 与 `replace: true`
+（见 `plugins/README.md` 的「notice 槽」），同一个 command 只保留最新一条——几小时里各跑一次的
+空闲 / 焦点压缩不会在对话里堆成一列。轮次边界的**本地清理不写 notice**：它一轮里可能发生几十次，
+不改用户看到的对话（工具结果本来显示的就是一行摘要），提示只留给真正改写历史的模型摘要。
 
 压缩是同步的：它跑着的时候宿主读不到 stdin 上的下一条 `turn/start`，用户这几秒发的消息只会
 静静排在管道里，界面上一点反馈都没有。所以宿主动手之前先发一条

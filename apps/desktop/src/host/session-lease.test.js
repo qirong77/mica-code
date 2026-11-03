@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import {
   createTurnLeaseProbe,
+  createTurnLeaseRunner,
   isInterruptedSession,
   isPidAlive,
   readTurnLeaseOwner
@@ -40,6 +41,51 @@ describe('createTurnLeaseProbe', () => {
     expect(probe(broken)('s2')).toBe(false)
     expect(probe(noPid)('s3')).toBe(false)
     expect(probe(empty)('')).toBe(false)
+  })
+})
+
+describe('createTurnLeaseRunner', () => {
+  let root
+  let lockDir
+  let withTurnLease
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'mica-turn-lease-'))
+    lockDir = join(root, 'sessions', '.turn-locks')
+    withTurnLease = createTurnLeaseRunner({ lockDir: () => lockDir })
+  })
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  it('holds the lease only for the duration of the write', () => {
+    const result = withTurnLease('session', () => {
+      expect(JSON.parse(readFileSync(join(lockDir, 'session.lock'), 'utf8')).pid).toBe(process.pid)
+      return 'written'
+    })
+    expect(result).toBe('written')
+    expect(existsSync(join(lockDir, 'session.lock'))).toBe(false)
+  })
+
+  it('refuses to write while another live process holds the lease', () => {
+    mkdirSync(lockDir, { recursive: true })
+    writeFileSync(join(lockDir, 'session.lock'), JSON.stringify({ pid: process.pid, token: 'other' }))
+    let ran = false
+    expect(() => withTurnLease('session', () => { ran = true })).toThrow()
+    expect(ran).toBe(false)
+    // 别人的锁原样留着
+    expect(JSON.parse(readFileSync(join(lockDir, 'session.lock'), 'utf8')).token).toBe('other')
+  })
+
+  it('reclaims the lease of a process that no longer exists', () => {
+    mkdirSync(lockDir, { recursive: true })
+    writeFileSync(join(lockDir, 'session.lock'), JSON.stringify({ pid: 2 ** 22 + 12345, token: 'dead' }))
+    expect(withTurnLease('session', () => 'written')).toBe('written')
+    expect(existsSync(join(lockDir, 'session.lock'))).toBe(false)
+  })
+
+  it('releases the lease when the write throws', () => {
+    expect(() => withTurnLease('session', () => { throw new Error('boom') })).toThrow('boom')
+    expect(existsSync(join(lockDir, 'session.lock'))).toBe(false)
   })
 })
 

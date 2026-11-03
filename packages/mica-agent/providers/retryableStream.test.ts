@@ -3,6 +3,7 @@ import type { ProviderProtocol } from '@packages/mica-config/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { ChatCompletionsClient } from './ChatCompletionsClient.js';
 import { ResponsesClient } from './ResponsesClient.js';
+import { resetFinishReasonSupport } from './finishReasonSupport.js';
 import type { ModelClientOptions } from './types.js';
 
 const openaiMocks = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ vi.mock('openai', () => ({
 afterEach(() => {
   openaiMocks.chatCreate.mockReset();
   openaiMocks.responsesCreate.mockReset();
+  resetFinishReasonSupport();
   vi.useRealTimers();
 });
 
@@ -170,6 +172,29 @@ describe('retryable provider streams', () => {
     expect(client.messages).toEqual([]);
     expect(client.usageHistory).toEqual([]);
     expect(openaiMocks.chatCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a chat provider that never reports a finish reason after one retry', async () => {
+    vi.useFakeTimers();
+    resetFinishReasonSupport();
+    // 每次请求都是一条新的流：生成器只能迭代一次
+    openaiMocks.chatCreate.mockImplementation(async () =>
+      (async function* () {
+        yield { choices: [{ delta: { content: 'answer' }, finish_reason: null }] };
+      })(),
+    );
+    const client = new ChatCompletionsClient(options('openai_chat_completions'));
+    client.onTextAttemptStart = () => {};
+    client.onTextRollback = () => {};
+    const promise = client.query('hello');
+    await vi.advanceTimersByTimeAsync(2100);
+    await expect(promise).resolves.toBe('answer');
+    // 第一次当截断重发，第二次仍然没有就认定这台服务商不发它
+    expect(openaiMocks.chatCreate).toHaveBeenCalledTimes(2);
+
+    // 记住了之后，同一服务商的后续请求不再白白重发
+    await expect(client.query('again')).resolves.toBe('answer');
+    expect(openaiMocks.chatCreate).toHaveBeenCalledTimes(3);
   });
 
   it('rolls back truncated chat text and retries through a terminal choice without delta', async () => {

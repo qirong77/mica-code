@@ -55,4 +55,69 @@ describe('ToolLogController thinking segments', () => {
     controller.endThinkingSegment();
     expect(sink.replaceAgentTurnLogItem).toHaveBeenLastCalledWith({ id: 'thinking-1', text: 'kept' });
   });
+
+  it('flushes a throttled checkpoint and tracks changes across ended segments', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const sink = {
+      setThinkingText: vi.fn(),
+      appendAgentTurnLogItem: vi.fn(),
+      replaceAgentTurnLogItem: vi.fn(),
+    };
+    const controller = new ToolLogController(sink);
+
+    controller.appendThinking('first');
+    controller.appendThinking(' completed');
+    expect(sink.replaceAgentTurnLogItem).toHaveBeenCalledTimes(1);
+    controller.markThinkingCheckpoint();
+    expect(sink.replaceAgentTurnLogItem).toHaveBeenLastCalledWith({ id: 'thinking-1', text: 'first completed' });
+    controller.appendThinking(' discarded');
+    controller.endThinkingSegment();
+    controller.appendThinking('another discarded segment');
+    controller.endThinkingSegment();
+
+    expect(controller.rollbackUncheckpointedThinking()).toEqual([
+      { id: 'thinking-1', text: 'first completed' },
+      { id: 'thinking-2', text: null },
+    ]);
+    expect(controller.rollbackUncheckpointedThinking()).toEqual([]);
+    expect(sink.setThinkingText).toHaveBeenLastCalledWith('');
+  });
+
+  it('restores the checkpointed text when an active buffer has been truncated', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1000);
+    const sink = {
+      setThinkingText: vi.fn(),
+      appendAgentTurnLogItem: vi.fn(),
+      replaceAgentTurnLogItem: vi.fn(),
+    };
+    const controller = new ToolLogController(sink);
+    const completed = 'a'.repeat(950);
+    controller.appendThinking(completed);
+    controller.markThinkingCheckpoint();
+    controller.appendThinking('b'.repeat(100));
+
+    expect(controller.rollbackUncheckpointedThinking()).toEqual([{ id: 'thinking-1', text: completed }]);
+    expect(sink.setThinkingText).toHaveBeenLastCalledWith(completed);
+    controller.endThinkingSegment();
+    expect(sink.replaceAgentTurnLogItem).toHaveBeenLastCalledWith({ id: 'thinking-1', text: completed });
+  });
+
+  it('restores pending checkpoint tracking along with a retry snapshot', () => {
+    const sink = {
+      setThinkingText: vi.fn(),
+      appendAgentTurnLogItem: vi.fn(),
+      replaceAgentTurnLogItem: vi.fn(),
+    };
+    const controller = new ToolLogController(sink);
+    controller.appendThinking('before retry');
+    const attempt = controller.checkpointThinking();
+    controller.appendThinking(' failed');
+    controller.markThinkingCheckpoint();
+    controller.restoreThinking(attempt);
+
+    expect(controller.rollbackUncheckpointedThinking()).toEqual([{ id: 'thinking-1', text: null }]);
+    expect(sink.setThinkingText).toHaveBeenLastCalledWith('');
+  });
 });

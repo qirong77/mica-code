@@ -17,6 +17,7 @@ import { isRetryableError, withRetry } from '../core/retry.js';
 import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
+import { markProviderOmitsFinishReason, providerOmitsFinishReason } from './finishReasonSupport.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import { sendWithEffortFallback } from './effortFallback.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
@@ -201,11 +202,15 @@ export class ChatCompletionsClient extends BaseAgent<
       // 一旦收到文本或 tool-call 增量，重放会重复 onText 输出并污染 usageHistory。
       let attemptHadOutput = false;
       let attemptHadThinking = false;
+      let missingFinishReasons = 0;
       const canRollbackText = !!this.onTextAttemptStart && !!this.onTextRollback;
       const totalCheckpoint = totalContent;
       const streamedCheckpoint = hasStreamedText;
       const blankLineCheckpoint = streamTextEndsWithBlankLine;
-      let pendingUsage: Array<{ usage: NonNullable<OpenAI.Chat.Completions.ChatCompletionChunk['usage']>; model: string }> = [];
+      let pendingUsage: Array<{
+        usage: NonNullable<OpenAI.Chat.Completions.ChatCompletionChunk['usage']>;
+        model: string;
+      }> = [];
       await withRetry(
         async () => {
           attemptHadOutput = false;
@@ -298,7 +303,19 @@ export class ChatCompletionsClient extends BaseAgent<
           // terminal choice proves the response was complete; usage chunks can
           // arrive after that choice and do not themselves signal completion.
           throwIfQueryStopped(options);
-          if (!finishReason || (toolCallsMap.size > 0 && finishReason !== 'tool_calls' && finishReason !== 'function_call' && finishReason !== 'stop')) {
+          const truncated =
+            toolCallsMap.size > 0 &&
+            finishReason !== 'tool_calls' &&
+            finishReason !== 'function_call' &&
+            finishReason !== 'stop';
+          // 重发一次仍然没有 finish_reason，就说明这台服务商不发这个字段（见
+          // finishReasonSupport.ts）：再重发只会让它的每一条请求都失败。
+          const silentWithoutReason = !finishReason && missingFinishReasons++ > 0;
+          if (silentWithoutReason) markProviderOmitsFinishReason(this.provider, this.model);
+          if (
+            truncated ||
+            (!finishReason && !silentWithoutReason && !providerOmitsFinishReason(this.provider, this.model))
+          ) {
             throw Object.assign(new Error('Chat Completions stream ended before completion'), { code: 'ECONNRESET' });
           }
         },
@@ -308,7 +325,9 @@ export class ChatCompletionsClient extends BaseAgent<
           delayMs: 2000,
           backoffFactor: 2,
           maxDelayMs: 30000,
-          shouldRetry: (error) => (canRollbackText ? (!attemptHadThinking || this.canRollbackThinking) : !attemptHadOutput) && isRetryableError(error),
+          shouldRetry: (error) =>
+            (canRollbackText ? !attemptHadThinking || this.canRollbackThinking : !attemptHadOutput) &&
+            isRetryableError(error),
           onRetry: ({ attempt, error, delayMs }) => {
             if (canRollbackText && attemptHadOutput) this.onTextRollback?.();
             totalContent = totalCheckpoint;

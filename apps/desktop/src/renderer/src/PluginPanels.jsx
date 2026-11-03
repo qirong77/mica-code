@@ -7,10 +7,29 @@ import { ModalShell } from './chat-modal'
 import { FloatingMenu } from './FloatingMenu'
 import {
   applyPanelResult,
+  menuCacheKey,
+  menuShortcutsOf,
+  panelDrafts,
   pluginPanelTabs,
+  prunePluginPanelCache,
   quickbarMenuItems,
+  readMenuCache,
+  readPanelView,
+  writePanelView,
+  writeMenuCache,
   usePluginPanels
 } from './plugin-panels'
+
+/** 鼠标从按钮上滑过不算「要看这一组」：停一下才展开，划过整排不会连开好几个菜单。 */
+const HOVER_DELAY_MS = 140
+/**
+ * 挂载后台预热一次视图。
+ *
+ * 动态菜单的条目要问插件（分支属于会话事实，清单里写不出来）。等用户真的把鼠标移上去
+ * 才开始问，问的又偏偏是本地已有的数据，只会得到一句「正在读取」。所以在页面空下来之后
+ * 先问一次，真正的悬停就总是命中缓存。
+ */
+const PREFETCH_DELAY_MS = 900
 
 /**
  * 对话右侧的插件面板：仓库侧那一条按钮 + 点开的抽屉。
@@ -77,9 +96,11 @@ export function PluginQuickBar({
   const [openMenu, setOpenMenu] = useState('')
   // 子项菜单的落点按触发按钮的矩形现算（菜单本体是共享的 FloatingMenu，自己会收敛视口）。
   const [menuPos, setMenuPos] = useState(null)
-  // 动态菜单要问插件要条目（副本列表是会话事实，清单里写不出来）。按按钮缓存，只在第
-  // 一次展开时取一次；没有菜单的插件不会多付这次请求。
+  // 动态菜单要问插件要条目（分支是会话事实，清单里写不出来）。条目在页面层按会话缓存
+  // （`plugin-panels.js` 的 menuCache），换页签、重挂载都直接命中。
   const [menuViews, setMenuViews] = useState({})
+  const inflight = useRef(new Set())
+  const hoverTimer = useRef(0)
   const barRef = useRef(null)
   useEffect(() => {
     if (!feedback) return undefined
@@ -97,12 +118,96 @@ export function PluginQuickBar({
       window.removeEventListener('scroll', onViewport, true)
     }
   }, [openMenu])
-  const items = []
-  for (const panel of panels) {
-    for (const shortcut of panel.shortcuts) {
-      items.push({ panel, shortcut, key: `${panel.id}:${shortcut.label}` })
+  const items = useMemo(() => {
+    const list = []
+    for (const panel of panels) {
+      for (const shortcut of panel.shortcuts) {
+        list.push({ panel, shortcut, key: `${panel.id}:${shortcut.label}` })
+      }
     }
-  }
+    return list
+  }, [panels])
+
+  const clearHover = useCallback(() => {
+    if (!hoverTimer.current) return
+    clearTimeout(hoverTimer.current)
+    hoverTimer.current = 0
+  }, [])
+  useEffect(() => clearHover, [clearHover])
+
+  /**
+   * 取一组菜单条目。
+   *
+   * 先画缓存（过期也照画）再后台刷新：这些是本地事实，让用户为它等一次请求没有道理。
+   * 请求失败（宿主没起来、超时）时重试一次再放弃——第一次打开历史会话时进程可能正在
+   * 冷启动，把那次失败记成「没有可选项」会让菜单一直空着。
+   */
+  const loadMenu = useCallback(
+    async (panel, shortcut, key, { force = false } = {}) => {
+      if (!shortcut?.menu) return
+      const cacheKey = menuCacheKey(nodeId, panel.id, shortcut.menu)
+      if (!force) {
+        const cached = readMenuCache(cacheKey)
+        if (cached) {
+          setMenuViews((current) => ({ ...current, [key]: cached.entry }))
+          if (!cached.stale) return
+        }
+      }
+      if (inflight.current.has(cacheKey)) return
+      inflight.current.add(cacheKey)
+      try {
+        let result = null
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          result = await window.mica.chat.pluginPanels
+            .view(nodeId, { pluginId: panel.id, sessionId, cwd })
+            .catch(() => null)
+          if (result) break
+          await new Promise((resolve) => setTimeout(resolve, 350))
+        }
+        const view = result?.view || result || {}
+        const entry = {
+          items: quickbarMenuItems(shortcut, view),
+          // 拿到了视图就一定有答案——插件没给这一组就是没有可选项，不能让菜单一直转圈。
+          ready: Boolean(result),
+          // 宿主明确报错时把原因写进菜单，比一句「暂时没有可选项」更能指向问题。
+          note: result?.ok === false ? result.error || '' : ''
+        }
+        if (entry.ready && result?.ok !== false) writeMenuCache(cacheKey, entry)
+        // 顺手存下整份视图：紧接着点开抽屉时不用再等一次同样的请求。
+        if (result?.ok && result.view) writePanelView(nodeId, panel.id, result.view)
+        setMenuViews((current) => ({ ...current, [key]: entry }))
+      } finally {
+        inflight.current.delete(cacheKey)
+      }
+    },
+    [cwd, nodeId, sessionId]
+  )
+
+  // 换会话：上一个会话的缓存条目不能拿来用（分支属于那条会话）。
+  useEffect(() => {
+    if (!nodeId) return
+    prunePluginPanelCache(nodeId)
+    setMenuViews({})
+  }, [nodeId])
+
+  // 预热：页面空下来之后问一次，之后悬停直接命中缓存。
+  useEffect(() => {
+    const wanted = menuShortcutsOf(panels)
+    if (wanted.length === 0) return undefined
+    let alive = true
+    const timer = setTimeout(() => {
+      if (!alive) return
+      if (typeof document !== 'undefined' && document.hidden) return
+      for (const { panel, shortcut } of wanted) {
+        void loadMenu(panel, shortcut, `${panel.id}:${shortcut.label}`)
+      }
+    }, PREFETCH_DELAY_MS)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [loadMenu, panels])
+
   if (items.length === 0) return null
 
   const openSection = (panel, section) => {
@@ -135,31 +240,7 @@ export function PluginQuickBar({
     else void runAction(panel, target.action, target.key)
   }
 
-  const loadMenu = async (panel, shortcut, key) => {
-    // 只有「插件明确给过这一组」才缓存：第一次点开时常驻宿主可能刚起来、视图还没到位，
-    // 把那次空结果记成「没有可选项」会让菜单一直空着，而数据其实早就有了。
-    if (!shortcut.menu || menuViews[key]?.ready) return
-    const result = await window.mica.chat.pluginPanels
-      .view(nodeId, { pluginId: panel.id, sessionId, cwd })
-      .catch(() => null)
-    const view = result?.view || result || {}
-    // 请求本身失败（宿主没起来、插件报错）不算「这一组没有条目」：下次打开再问一次。
-    // 拿到了视图就一定有答案——插件没给这一组就是没有可选项，不能让菜单一直转圈。
-    const answered = Boolean(result)
-    const ready = answered || Object.prototype.hasOwnProperty.call(view?.menus || {}, shortcut.menu)
-    setMenuViews((current) => ({
-      ...current,
-      [key]: {
-        items: quickbarMenuItems(shortcut, view),
-        ready,
-        // 宿主明确报错时把原因写进菜单，比一句「暂时没有可选项」更能指向问题。
-        note: result?.ok === false ? result.error || '' : ''
-      }
-    }))
-  }
-
-  const showMenu = (event, panel, shortcut, key) => {
-    const rect = event?.currentTarget?.getBoundingClientRect?.()
+  const showMenu = (rect, panel, shortcut, key) => {
     // 菜单开在按钮正上方：这一排紧贴输入框，往下开就出屏了。FloatingMenu 会再按视口
     // 收敛一次，所以这里给一个「大致在按钮上面」的落点就够。
     if (rect)
@@ -172,10 +253,20 @@ export function PluginQuickBar({
     void loadMenu(panel, shortcut, key)
   }
 
+  const hoverMenu = (event, panel, shortcut, key) => {
+    const rect = event?.currentTarget?.getBoundingClientRect?.() || null
+    clearHover()
+    hoverTimer.current = window.setTimeout(() => {
+      hoverTimer.current = 0
+      showMenu(rect, panel, shortcut, key)
+    }, HOVER_DELAY_MS)
+  }
+
   const runShortcut = async (event, panel, shortcut, key) => {
     if (shortcut.items || shortcut.menu) {
+      clearHover()
       if (openMenu === key) setOpenMenu('')
-      else showMenu(event, panel, shortcut, key)
+      else showMenu(event?.currentTarget?.getBoundingClientRect?.() || null, panel, shortcut, key)
       return
     }
     if (shortcut.section) openSection(panel, shortcut.section)
@@ -198,7 +289,8 @@ export function PluginQuickBar({
           <div
             key={key}
             className="chat-plugin-quickbar-group"
-            onMouseEnter={group ? (event) => showMenu(event, panel, shortcut, key) : undefined}
+            onMouseEnter={group ? (event) => hoverMenu(event, panel, shortcut, key) : undefined}
+            onMouseLeave={group ? clearHover : undefined}
           >
             <button
               type="button"
@@ -242,9 +334,9 @@ export function PluginQuickBar({
                 <div className="chat-plugin-quickbar-menu">
                   {menuItems.length === 0 ? (
                     shortcut.menu && !menuViews[key]?.ready ? (
-                      <span className="plugin-menu-loading">
-                        <span className="plugin-menu-spinner" aria-hidden="true" />
-                        正在读取这份列表…
+                      <span className="plugin-menu-skeleton" aria-hidden="true">
+                        <span className="plugin-menu-skeleton-row" />
+                        <span className="plugin-menu-skeleton-row is-short" />
                       </span>
                     ) : (
                       <span className="plugin-menu-loading">
@@ -295,7 +387,8 @@ export function PluginPanels({
   onCompose,
   onLaunchSession,
   onDialog,
-  onOpenPath
+  onOpenPath,
+  onOpenReview
 }) {
   const panels = usePluginPanels(role)
   const open = panels.find((panel) => panel.id === openPlugin) || null
@@ -321,6 +414,7 @@ export function PluginPanels({
       onLaunchSession={onLaunchSession}
       onDialog={onDialog}
       onOpenPath={onOpenPath}
+      onOpenReview={onOpenReview}
     />
   )
 }
@@ -337,12 +431,16 @@ function PluginPanelDock({
   onCompose,
   onLaunchSession,
   onDialog,
-  onOpenPath
+  onOpenPath,
+  onOpenReview
 }) {
-  const [view, setView] = useState(null)
+  // 菜单那边刚问过同一份视图时直接拿它开局：点开抽屉不该先看到一句「正在读取」。
+  const seeded = useRef(readPanelView(nodeId, pluginId))
+  const [view, setView] = useState(() => seeded.current?.view || null)
+  const viewRef = useRef(seeded.current?.view || null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
-  const [drafts, setDrafts] = useState({})
+  const [drafts, setDrafts] = useState(() => panelDrafts(seeded.current?.view))
   // 弹窗形态下的当前页签（存 section 标题）。抽屉形态不用它。
   const [activeTab, setActiveTab] = useState('')
   const aliveRef = useRef(true)
@@ -362,22 +460,25 @@ function PluginPanelDock({
     }
   }, [])
 
-  const applyView = useCallback((result, { resetDrafts = false } = {}) => {
-    if (!aliveRef.current) return
-    if (result?.ok && result.view) {
-      setView(result.view)
-      setError('')
-      if (!resetDrafts) return
-      // 只在动作之后把草稿对齐到视图：定时刷新若也重置，用户正在输入的字会被清掉
-      const next = {}
-      for (const section of result.view.sections || []) {
-        for (const field of section.fields || []) next[field.key] = field.value ?? ''
+  const applyView = useCallback(
+    (result, { resetDrafts = false } = {}) => {
+      if (!aliveRef.current) return
+      if (result?.ok && result.view) {
+        // 每 4 秒拉一次视图：没有变化就别换引用，否则整块面板连同滚动位置一起白重渲染。
+        const same =
+          viewRef.current && JSON.stringify(viewRef.current) === JSON.stringify(result.view)
+        viewRef.current = result.view
+        if (!same) setView(result.view)
+        setError('')
+        writePanelView(nodeId, pluginId, result.view)
+        // 只在动作之后把草稿对齐到视图：定时刷新若也重置，用户正在输入的字会被清掉
+        if (resetDrafts) setDrafts(panelDrafts(result.view))
+      } else {
+        setError(result?.error || '插件面板不可用')
       }
-      setDrafts(next)
-    } else {
-      setError(result?.error || '插件面板不可用')
-    }
-  }, [])
+    },
+    [nodeId, pluginId]
+  )
 
   const load = useCallback(async () => {
     const result = await window.mica.chat.pluginPanels
@@ -387,11 +488,13 @@ function PluginPanelDock({
   }, [applyView, cwd, nodeId, pluginId, sessionId])
 
   useEffect(() => {
-    // 首次打开要带一次字段初值，之后的刷新只更新状态行/条目
+    // 首次打开要带一次字段初值，之后的刷新只更新状态行/条目。已经有缓存视图时不清草稿
+    // （用户可能已经在里面打字了），只把新结果换上去。
+    const hadSeed = Boolean(seeded.current?.view)
     void window.mica.chat.pluginPanels
       .view(nodeId, { pluginId, sessionId, cwd })
       .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
-      .then((result) => applyView(result, { resetDrafts: true }))
+      .then((result) => applyView(result, { resetDrafts: !hadSeed }))
     const timer = setInterval(() => {
       // 抽屉开着才刷新：关掉之后没有任何人看它，不该每 4 秒叫醒一次会话 host
       if (typeof document !== 'undefined' && document.hidden) return
@@ -408,7 +511,7 @@ function PluginPanelDock({
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
       setBusy('')
       applyView(result, { resetDrafts: true })
-      applyPanelResult(result, { onCompose, onLaunchSession, onDialog, onOpenPath })
+      applyPanelResult(result, { onCompose, onLaunchSession, onDialog, onOpenPath, onOpenReview })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
     },
     [
@@ -420,6 +523,7 @@ function PluginPanelDock({
       onDialog,
       onLaunchSession,
       onOpenPath,
+      onOpenReview,
       pluginId,
       sessionId
     ]

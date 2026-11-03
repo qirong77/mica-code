@@ -10,7 +10,7 @@ import {
   projectSubagentTaskDetail,
   projectSubagentTasks,
   turnEventToQueueNotification,
-  withClientRollbackCapabilities,
+  ClientRollbackNegotiation,
 } from './runAppServer.js';
 import type { HeadlessTurnEvent } from '../runtime/HeadlessTurnExecutor.js';
 import type { BackgroundTaskMeta } from '@packages/mica-tools/index.js';
@@ -20,28 +20,32 @@ const ONE_PIXEL_PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 describe('per-turn rollback negotiation', () => {
-  it('negotiates independently and resets between turns, including failures', async () => {
-    const state = { text: false, thinking: false };
-    const ctx = {
-      setClientTextRollback: (enabled: boolean) => { state.text = enabled; },
-      setClientThinkingRollback: (enabled: boolean) => { state.thinking = enabled; },
-    };
-    for (const [params, expected] of [
-      [{ micaTextRollback: true, micaThinkingRollback: true }, { text: true, thinking: true }],
-      [{ micaTextRollback: true }, { text: true, thinking: false }],
-      [{ micaThinkingRollback: true }, { text: false, thinking: true }],
-      [{ micaTextRollback: 'true', micaThinkingRollback: 1 }, { text: false, thinking: false }],
-      [{}, { text: false, thinking: false }],
-    ] as const) {
-      await withClientRollbackCapabilities(ctx, params, async () => {
-        expect(state).toEqual(expected);
-      });
-      expect(state).toEqual({ text: false, thinking: false });
-    }
-    await expect(withClientRollbackCapabilities(ctx, { micaTextRollback: true, micaThinkingRollback: true }, async () => {
+  it('inherits capabilities for automatic turns and replaces them for a new explicit request', async () => {
+    const negotiation = new ClientRollbackNegotiation();
+    const initial = { id: 'a', text: 'a', source: 'ui' as const, createdAt: 1 };
+    const automatic = { id: 'b', text: 'b', source: 'plugin' as const, createdAt: 2 };
+    const otherClient = { id: 'c', text: 'c', source: 'ui' as const, createdAt: 3 };
+    await negotiation.withRequest(initial, { micaTextRollback: true, micaThinkingRollback: true }, async () => {
+      expect(negotiation.forTurn(initial)).toEqual({ textRollback: true, thinkingRollback: true });
+    });
+    expect(negotiation.forTurn(automatic)).toEqual({ textRollback: true, thinkingRollback: true });
+    await negotiation.withRequest(otherClient, { micaTextRollback: 'true', micaThinkingRollback: 1 }, async () => {
+      expect(negotiation.forTurn(otherClient)).toEqual({ textRollback: false, thinkingRollback: false });
+    });
+    expect(negotiation.forTurn(automatic)).toEqual({ textRollback: false, thinkingRollback: false });
+    negotiation.reset();
+    expect(negotiation.forTurn(automatic)).toEqual({ textRollback: false, thinkingRollback: false });
+  });
+
+  it('does not apply an unstarted or rejected request to an unrelated turn', async () => {
+    const negotiation = new ClientRollbackNegotiation();
+    const requested = { id: 'a', text: 'a', source: 'ui' as const, createdAt: 1 };
+    const automatic = { id: 'b', text: 'b', source: 'plugin' as const, createdAt: 2 };
+    await expect(negotiation.withRequest(requested, { micaThinkingRollback: true }, async () => {
+      expect(negotiation.forTurn(automatic)).toEqual({ textRollback: false, thinkingRollback: false });
       throw new Error('start failed');
     })).rejects.toThrow('start failed');
-    expect(state).toEqual({ text: false, thinking: false });
+    expect(negotiation.forTurn(automatic)).toEqual({ textRollback: false, thinkingRollback: false });
   });
 });
 

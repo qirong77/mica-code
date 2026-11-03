@@ -318,8 +318,13 @@ let wakeTimer = null
 let wakeResolve = null
 /** 正在挂起的那次轮询；有它时唤醒就是打断这次请求，而不是等它超时。 */
 let pollAbort = null
+/** 这次轮询的 body 里带着事件（缓冲已清空）：不能打断，否则这些事件没人接手。 */
+let pollCarriesEvents = false
 function wakeUp() {
   if (pollAbort) {
+    // 带着事件的请求本来就因为有事可送而立刻返回；打断它只会让这批事件
+    // 既没送到中转机、也没留在本地缓冲里。新事件下一轮必走。
+    if (pollCarriesEvents) return
     const controller = pollAbort
     pollAbort = null
     controller.abort()
@@ -469,8 +474,10 @@ async function tick() {
     const rawBytes = Buffer.byteLength(JSON.stringify(body))
     const controller = new AbortController()
     pollAbort = controller
+    pollCarriesEvents = events.length > 0
     const response = await relayPoll(body, controller.signal)
     pollAbort = null
+    pollCarriesEvents = false
     pollFailures = 0
     if (envPayload === env) envPayload = null
     labelPending = ''
@@ -485,6 +492,9 @@ async function tick() {
       eventBuffer = []
       eventBytes = 0
     }
+    // 这次没被打断（见 wakeUp），轮询期间来的事件还躺在缓冲里：立刻再走一轮，
+    // 否则要白等一个间隔。
+    if (eventBuffer.length > 0) intervalMs = 0
 
     log(
       `[poll] ${Date.now() - started}ms raw=${rawBytes}B ` +
@@ -499,6 +509,7 @@ async function tick() {
     }
   } catch (error) {
     pollAbort = null
+    pollCarriesEvents = false
     // 被本机事件打断：这一轮什么都没送出去（结果、事件都还在手上），立刻重发一轮。
     if (error?.woken) {
       pendingResults.unshift(...results)

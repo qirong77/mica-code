@@ -389,6 +389,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
           ...(noticeOptions.command ? { command: noticeOptions.command } : {}),
           ...(noticeOptions.surface ? { surface: noticeOptions.surface } : {}),
           ...(noticeOptions.status ? { status: noticeOptions.status } : {}),
+          ...(noticeOptions.replace ? { replace: true } : {}),
         });
       },
       status: {

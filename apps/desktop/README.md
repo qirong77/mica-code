@@ -118,9 +118,10 @@ server's manifest deliberately starts home-screen launches with recording enable
 $ npm run build          # = build:app (shell + renderer) + build:server (runtime)
 ```
 
-`build:app` runs `build:cli` (`cd ../.. && bun run build`) first, so the repo-root CLI binary and
-the `~/.local/bin/mica` launcher are rebuilt before the shell is bundled. The app resolves the CLI
-through `resolveMicaExecutable()`, so skipping this step leaves the window talking to a stale binary.
+`build:app` runs `build:cli` (`cd ../.. && bun run build`) alongside the shell build, so the
+repo-root CLI binary and the `~/.local/bin/mica` launcher are rebuilt before packaging. The app
+resolves the CLI through `resolveMicaExecutable()`, so skipping this step leaves the window talking
+to a stale binary.
 Run `npm run build:server` alone when only the runtime changed and the CLI is already current.
 
 Use `npm run build:unpack` for local verification: it runs the same build but packages with
@@ -130,7 +131,7 @@ Build cost is split roughly as: CLI + shell + runtime in parallel (~6s), electro
 packaging (~11s), zip + dmg compression (~14s). The last part compresses a 255 MB Electron
 Framework and does not shrink; that is why `--dir` exists for local checks.
 
-Build speed comes from three things, all of which are load-bearing:
+Build speed comes from these steps, all of which are load-bearing:
 
 - Vite 8 (Rolldown) via `electron-vite` 6. The renderer segment went from 26–29s to 4–5s.
   `electron-vite` 5 peers on vite ≤7, so the two versions must move together.
@@ -139,6 +140,12 @@ Build speed comes from three things, all of which are load-bearing:
 - `tablerIconDeepImports()` in `electron.vite.config.mjs` rewrites `@tabler/icons-react` named
   imports to per-icon deep imports at build time. The upstream barrel re-exports 6197 icon
   modules, which the renderer used to parse in full; the rewrite drops 10870 modules to 4744.
+- `scripts/file-icon-assets.mjs` emits only file and folder icons reachable from the manifest,
+  without transforming every SVG as a module. Icons remain separate assets loaded on demand.
+- The macOS builder reuses the installed Electron distribution when its version and architecture
+  match, falling back to the usual download otherwise. DMGs use LZFSE compression (ULFO), which is
+  compatible with Electron 39's macOS 12 minimum; pass `--config.dmg.format=UDZO` to electron-builder
+  if a consumer requires the older format.
 
 Package size is decided by dependency classification, not by a file-exclusion list. electron-builder
 packs every entry of `dependencies` into `app.asar`, so renderer packages live in `devDependencies`

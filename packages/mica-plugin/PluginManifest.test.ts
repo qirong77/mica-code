@@ -517,7 +517,7 @@ describe('parsePluginManifest skills', () => {
     // 「这个插件带了什么」变得不可读，而这正是 plugin.json 存在的意义。
     const absolute = parsePluginManifest(base({ skills: ['/Users/me/skills'] }));
     expect(absolute.ok).toBe(false);
-    if (!absolute.ok) expect(absolute.error).toContain('相对插件目录');
+    if (!absolute.ok) expect(absolute.error).toContain('插件目录内的相对路径');
 
     const escaping = parsePluginManifest(base({ skills: ['../elsewhere'] }));
     expect(escaping.ok).toBe(false);

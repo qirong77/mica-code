@@ -78,6 +78,13 @@ import {
   readPublishedPluginSkills,
   resolvePluginSkillsDir,
 } from './PluginSkills.js';
+import {
+  PLUGIN_ROLES_DIR,
+  loadManifestRoles,
+  publishPluginRoles,
+  readPublishedPluginRoles,
+  resolvePluginRolesDir,
+} from './PluginRoles.js';
 
 export const micaPlugin = {
   Plugin,
@@ -152,6 +159,11 @@ export const micaPlugin = {
   publishPluginSkills,
   readPublishedPluginSkills,
   resolvePluginSkillsDir,
+  PLUGIN_ROLES_DIR,
+  loadManifestRoles,
+  publishPluginRoles,
+  readPublishedPluginRoles,
+  resolvePluginRolesDir,
 };
 
 export type { Plugin } from './Plugin.js';
@@ -232,6 +244,14 @@ export {
   resolvePluginSkillsDir,
 } from './PluginSkills.js';
 export type { PublishedPluginSkill } from './PluginSkills.js';
+export {
+  PLUGIN_ROLES_DIR,
+  loadManifestRoles,
+  publishPluginRoles,
+  readPublishedPluginRoles,
+  resolvePluginRolesDir,
+} from './PluginRoles.js';
+export type { PublishedPluginRole } from './PluginRoles.js';
 export type { PluginContext } from './PluginContext.js';
 export type {
   PluginFileMentionItem,

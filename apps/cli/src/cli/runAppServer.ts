@@ -8,7 +8,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { VERSION_LABEL, resolveMicaHome } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
-import { SESSION_NOTES_PLUGIN_ID, normalizeSessionNotes, prepareImageForApi, readStoredSubagentTasks, writeStoredSubagentTasks } from '@packages/mica-common/index.js';
+import { SESSION_NOTES_PLUGIN_ID, normalizeSessionNotes, prepareImageForApi, readStoredSubagentTasks, storedSubagentTasksStamp, writeStoredSubagentTasks } from '@packages/mica-common/index.js';
 import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.js';
 import { keepsSubagentTaskRow } from '@packages/mica-common/subagentVisibility.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
@@ -62,7 +62,7 @@ import {
 } from '@packages/mica-tools/index.js';
 import type { WaitRecord } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
-import type { AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
+import { readAgentRuntimeConfig, type AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager, type SubagentTaskRecord } from '../agents/SubagentTaskManager.js';
 import {
   HeadlessTurnExecutor,
@@ -279,8 +279,10 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let sessionController: SessionController | null = null;
   let subagentTasks: SubagentTaskManager | null = null;
   let projector: CodexProjector | null = null;
-  let clientTextRollback = false;
-  let clientThinkingRollback = false;
+  const clientRollbackCapabilities = new ClientRollbackNegotiation();
+  // Only a particular accepted turn/start input may carry its model settings.
+  // Weak keys also release requests that never reach a turn (recall/parse failure).
+  const turnOverrides = new WeakMap<RuntimeInput, AgentRuntimeConfigOverride>();
   let executor: HeadlessTurnExecutor | null = null;
   let btwController: BtwThreads | null = null;
   let pluginHost: ReturnType<typeof createHeadlessPluginHost> | null = null;
@@ -381,6 +383,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     }
     subagentTasks = new SubagentTaskManager({
       readRestoredTasks: (owner) => sessionId && owner === agent ? readStoredSubagentTasks(sessionId) : [],
+      // 快照每秒推一次：任务记录没变就别重新解析一遍（每份最多 200k 字符）。
+      readRestoredStamp: (owner) => sessionId && owner === agent ? storedSubagentTasksStamp(sessionId) : '',
       onChange: (task, owner) => {
         if (sessionId && owner === agent) writeStoredSubagentTasks(sessionId, [task]);
       },
@@ -511,20 +515,16 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
      * inputs, leftovers of an aborted turn) get the same lifecycle instead of
      * running invisibly while the client still believes it is idle.
      */
-    const beginTurn = (): string => {
+    const beginTurn = (input: RuntimeInput): string => {
       const turnId = randomUUID();
       currentTurnId = turnId;
       projector?.dispose();
-      projector = attachCodexProjector(agent!, writeNotification, {
+      projector = attachTurnProjector(agent!, writeNotification, {
         threadId: sessionId,
         turnId,
         cwd: process.cwd(),
         thinking: options.thinking === true,
-        textRollback: clientTextRollback,
-        thinkingRollback: clientThinkingRollback,
-      });
-      clientTextRollback = false;
-      clientThinkingRollback = false;
+      }, clientRollbackCapabilities, input);
       writeNotification(CODEX_NOTIFICATIONS.turnStarted, {
         threadId: sessionId,
         turn: turnSnapshot(turnId, 'inProgress'),
@@ -542,7 +542,16 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       sessionController,
       subagentTasks,
       maxTurns: options.maxTurns,
+      applyInputSettings: (input) => {
+        const override = turnOverrides.get(input);
+        if (!override) return;
+        turnOverrides.delete(input);
+        agent!.configureForRun(override, true);
+      },
       onEvent: (event) => {
+        // turn/start reports queued inputs as an error. Discard the association
+        // as soon as queueing is observed, before an active turn can drain it.
+        if (event.type === 'queued') turnOverrides.delete(event.input);
         if (event.type === 'turn:finish') projector?.completeAgentMessage();
         handleTurnEvent(writeNotification, event, sessionId, {
           beginTurn,
@@ -730,14 +739,12 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         ...(options.mcpConfigPath ? { mcpConfigPath: resolve(options.mcpConfigPath) } : {}),
         sessionId,
         setSessionId: (nextSessionId) => {
+          if (sessionId !== nextSessionId) clientRollbackCapabilities.reset();
           sessionId = nextSessionId;
         },
         getCurrentTurnId: () => currentTurnId,
-        setCurrentTurnId: (turnId) => {
-          currentTurnId = turnId;
-        },
-        setClientTextRollback: (enabled) => { clientTextRollback = enabled; },
-        setClientThinkingRollback: (enabled) => { clientThinkingRollback = enabled; },
+        clientRollbackCapabilities,
+        turnOverrides,
         writeNotification,
         writeResponse: (result) => process.stdout.write(encodeCodexResponse(id, result)),
         writeError: (code, errorMessage, data) => process.stdout.write(encodeCodexError(id, code, errorMessage, data)),
@@ -792,9 +799,8 @@ type HostContext = {
   sessionId: string;
   setSessionId: (sessionId: string) => void;
   getCurrentTurnId: () => string | null;
-  setCurrentTurnId: (turnId: string | null) => void;
-  setClientTextRollback: (enabled: boolean) => void;
-  setClientThinkingRollback: (enabled: boolean) => void;
+  clientRollbackCapabilities: ClientRollbackNegotiation;
+  turnOverrides: WeakMap<RuntimeInput, AgentRuntimeConfigOverride>;
   writeNotification: (method: string, params: unknown) => void;
   writeResponse: (result: unknown) => void;
   writeError: (code: number, message: string, data?: unknown) => void;
@@ -802,19 +808,53 @@ type HostContext = {
   warn: (message: string) => void;
 };
 
-export async function withClientRollbackCapabilities<T>(
-  ctx: Pick<HostContext, 'setClientTextRollback' | 'setClientThinkingRollback'>,
-  params: Record<string, unknown>,
-  start: () => Promise<T>,
-): Promise<T> {
-  ctx.setClientTextRollback(params.micaTextRollback === true);
-  ctx.setClientThinkingRollback(params.micaThinkingRollback === true);
-  try {
-    return await start();
-  } finally {
-    ctx.setClientTextRollback(false);
-    ctx.setClientThinkingRollback(false);
+type RollbackCapabilities = { textRollback: boolean; thinkingRollback: boolean };
+
+/**
+ * An explicit turn supplies capabilities for that turn and later host-initiated
+ * turns. Associate them with its input until turn:start: a plugin can start a
+ * different turn while the request is awaiting an input guard or idle task.
+ * Rejected requests must not change the capabilities inherited by that turn.
+ */
+export class ClientRollbackNegotiation {
+  private inherited: RollbackCapabilities = { textRollback: false, thinkingRollback: false };
+  private readonly pending = new Map<RuntimeInput, RollbackCapabilities>();
+
+  async withRequest<T>(input: RuntimeInput, params: Record<string, unknown>, start: () => Promise<T>): Promise<T> {
+    this.pending.set(input, {
+      textRollback: params.micaTextRollback === true,
+      thinkingRollback: params.micaThinkingRollback === true,
+    });
+    try {
+      return await start();
+    } finally {
+      this.pending.delete(input);
+    }
   }
+
+  forTurn(input: RuntimeInput): RollbackCapabilities {
+    const declared = this.pending.get(input);
+    if (declared) {
+      this.inherited = declared;
+      this.pending.delete(input);
+    }
+    return this.inherited;
+  }
+
+  reset(): void {
+    this.inherited = { textRollback: false, thinkingRollback: false };
+    this.pending.clear();
+  }
+}
+
+export function attachTurnProjector(
+  agent: AgentRuntime,
+  writeNotification: (method: string, params: unknown) => void,
+  context: Omit<Parameters<typeof attachCodexProjector>[2], 'textRollback' | 'thinkingRollback'>,
+  capabilities: ClientRollbackNegotiation,
+  input: RuntimeInput,
+): CodexProjector {
+  return attachCodexProjector(agent, writeNotification, { ...context, ...capabilities.forTurn(input) });
 }
 
 /**
@@ -1149,6 +1189,7 @@ async function handleCodexRequest(
       applyRoleOverride(ctx, params);
       const model = paramString(params, 'model');
       const effort = paramString(params, 'effort');
+      let turnOverride: AgentRuntimeConfigOverride | undefined;
       if (model || effort) {
         try {
           // params.model carries the app's full id (`krill/gpt-5.6-luna`), not
@@ -1156,14 +1197,11 @@ async function handleCodexRequest(
           // otherwise the current provider receives an unknown model name and
           // the turn fails immediately with a 400.
           const override = await resolveClientOverride(ctx, model, effort);
-          ctx.agent.configureForRun(
-            {
-              providerId: override.providerId,
-              model: override.model,
-              effort: override.effort,
-            },
-            true,
-          );
+          turnOverride = {
+            ...(model ? { providerId: override.providerId, model: override.model } : {}),
+            effort: override.effort,
+          };
+          validateTurnOverride(ctx.agent, turnOverride);
           warnIfEffortAdjusted(ctx, override);
         } catch (error) {
           ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
@@ -1175,20 +1213,28 @@ async function handleCodexRequest(
       // MCP init 与 host ready 解耦：首个 turn 在这里等后台 MCP 连接完成，
       // 用户打字间隔通常已覆盖初始化，首轮感知延迟接近零。
       await ctx.mcpReady;
-      const result = await withClientRollbackCapabilities(ctx, params, () =>
-        ctx.executor.start(
-          micaRuntime.createRuntimeInput(input.text, 'ui', {
-            queueMode: 'after_iteration',
-            ...(input.content ? { content: input.content } : {}),
-          }),
-        ),
-      );
+      const runtimeInput = micaRuntime.createRuntimeInput(input.text, 'ui', {
+        queueMode: 'after_iteration',
+        ...(input.content ? { content: input.content } : {}),
+      });
+      if (turnOverride) ctx.turnOverrides.set(runtimeInput, turnOverride);
+      let result: HeadlessTurnStartResult;
+      try {
+        result = await ctx.clientRollbackCapabilities.withRequest(runtimeInput, params, () =>
+          ctx.executor.start(runtimeInput),
+        );
+      } catch (error) {
+        ctx.turnOverrides.delete(runtimeInput);
+        throw error;
+      }
       if (result !== 'started') {
+        // A queued turn/start is reported as an error; it must not later apply
+        // settings from a request the client was told did not start.
+        ctx.turnOverrides.delete(runtimeInput);
         // 'rejected': the single queue slot is occupied. 'queued': the plugin
         // layer took the input instead of starting a turn. Either way no turn
         // exists, so no turn/started was emitted — report it instead of
         // answering with a turn the client would wait on forever.
-        ctx.setCurrentTurnId(null);
         ctx.writeError(CODEX_ERROR_INTERNAL, turnStartFailureMessage(result));
         return;
       }
@@ -1321,7 +1367,7 @@ async function handleCodexRequest(
       // 截断只动 provider history：UI conversationMessages 由 client 从 provider
       // messages 派生（ChatCompletionsClient/ResponsesClient.toConversationMessages），
       // loadSnapshot 会一并重建，所以这里不能单独截 UI 层，否则两边错位。
-      ctx.agent.loadSnapshot({ ...previous, ...truncated.snapshot });
+      ctx.agent.loadSnapshot({ ...previous, ...truncated.snapshot, interruptedThinking: undefined });
       // 必须在 loadSnapshot 之后：loadSnapshot 会按快照里的 role 重置 currentRole，
       // 先应用角色会被上面这份「截断前快照」覆盖回旧角色。
       applyRoleOverride(ctx, params);
@@ -1334,8 +1380,9 @@ async function handleCodexRequest(
         conversationMessages: [...ctx.agent.toConversationMessages(), { role: 'user', content: text }],
       });
       ctx.writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, { threadId: ctx.sessionId });
-      const result = await withClientRollbackCapabilities(ctx, params, () =>
-        ctx.executor.start(micaRuntime.createRuntimeInput(text, 'ui', { queueMode: 'after_iteration' })),
+      const runtimeInput = micaRuntime.createRuntimeInput(text, 'ui', { queueMode: 'after_iteration' });
+      const result = await ctx.clientRollbackCapabilities.withRequest(runtimeInput, params, () =>
+        ctx.executor.start(runtimeInput),
       );
       if (result !== 'started') {
         // 新 turn 没起来（单槽队列被占）：把历史恢复成编辑前的样子再通知重载，
@@ -1878,7 +1925,7 @@ function turnStartFailureMessage(result: HeadlessTurnStartResult): string {
 /** Per-turn protocol lifecycle owned by the executor's event stream. */
 type TurnLifecycle = {
   /** Allocate a turn id, attach a fresh projector and emit turn/started. */
-  beginTurn: () => string;
+  beginTurn: (input: RuntimeInput) => string;
   getTurnId: () => string | null;
   /** Clear the active turn id and detach the projector. */
   endTurn: () => void;
@@ -1916,7 +1963,7 @@ function handleTurnEvent(
       // the id: a drained turn used to run with no turn/started and no
       // turn/completed, leaving the client idle while the host rejected its
       // next turn/start with "A turn is already active".
-      lifecycle.beginTurn();
+      lifecycle.beginTurn(event.input);
       break;
     case 'turn:retrying':
       // The host retries transient provider errors (same policy as the CLI).
@@ -2050,6 +2097,23 @@ async function cleanupTask(label: string, action: () => unknown | Promise<unknow
 
 function hasRuntimeOverride(override: AgentRuntimeConfigOverride): boolean {
   return override.providerId !== undefined || override.model !== undefined || override.effort !== undefined;
+}
+
+/** Match configureForRun's request-time checks without changing the shared agent. */
+function validateTurnOverride(agent: AgentRuntime, override: AgentRuntimeConfigOverride): void {
+  if (agent.isRunning) throw new Error('Cannot configure agent while it is running');
+  const current = agent.config;
+  const providerId = override.providerId ?? current.provider.id;
+  const next = readAgentRuntimeConfig({
+    providerId,
+    model: override.model ?? (providerId === current.provider.id ? current.model : undefined),
+    effort: override.effort ?? current.effort,
+  });
+  if (current.provider.protocol !== next.provider.protocol && agent.captureClientSnapshot()) {
+    throw new Error(
+      `Cannot resume a ${current.provider.protocol} session with ${next.provider.protocol}; start a fresh session instead.`,
+    );
+  }
 }
 
 /**

@@ -100,6 +100,14 @@ export type PluginNoticeOptions = {
   variant?: 'commit' | 'config' | 'compact' | 'error';
   /** 写进哪条会话；不传就是当前会话。句柄来自 `ctx.session` 的 owner。 */
   owner?: unknown;
+  /**
+   * 同一个 `command` 只留最新这一条：写上它，之前那条会自动消失。
+   *
+   * 用于**状态**类 notice（「压缩到了多大」「同步到第几页」）——它描述的是「现在怎样」，
+   * 不是「发生了什么」，留着一串旧结论只会把对话顶掉。记录事件、每次都要留痕的结果
+   * （命令输出、提交结果）不要用它。
+   */
+  replace?: boolean;
 };
 
 export type PluginSessionRenameOptions = {

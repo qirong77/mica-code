@@ -142,6 +142,12 @@ export type SubagentTaskManagerOptions = {
   onTaskFinished?: (task: SubagentTaskRecord, owner: AgentRuntime) => void | Promise<void>;
   onChange?: (task: SubagentTaskRecord, owner: AgentRuntime) => void;
   readRestoredTasks?: (owner: AgentRuntime) => SubagentTaskRecord[];
+  /**
+   * 磁盘上那份任务记录的轻量指纹（mtime/size）。给了它，`list()` / `get()` 只在
+   * 记录真的变过时才重新读盘：常驻宿主每秒推一次任务快照，每次全量解析所有任务
+   * 文件会把事件循环按在同步 IO 上（单条 result 上限 200k 字符）。
+   */
+  readRestoredStamp?: (owner: AgentRuntime) => string;
 };
 
 export type SubagentTaskChangeListener = (task: SubagentTaskRecord, owner: AgentRuntime) => void;
@@ -155,6 +161,8 @@ export class SubagentTaskManager {
   private readonly onTaskFinished: SubagentTaskManagerOptions['onTaskFinished'];
   private readonly onChange: SubagentTaskManagerOptions['onChange'];
   private readonly readRestoredTasks: SubagentTaskManagerOptions['readRestoredTasks'];
+  private readonly readRestoredStamp: SubagentTaskManagerOptions['readRestoredStamp'];
+  private readonly restoredStamps = new WeakMap<AgentRuntime, string>();
   private stopping = false;
   private restartHandler?: (task: SubagentTaskRecord, owner: AgentRuntime) => string;
   private restartAttempt?: RestartAttempt;
@@ -210,6 +218,7 @@ export class SubagentTaskManager {
     this.onTaskFinished = options.onTaskFinished;
     this.onChange = options.onChange;
     this.readRestoredTasks = options.readRestoredTasks;
+    this.readRestoredStamp = options.readRestoredStamp;
   }
 
   canSwitchSession(owner: AgentRuntime): boolean {
@@ -375,6 +384,11 @@ export class SubagentTaskManager {
 
   private refreshRestored(owner: AgentRuntime): void {
     if (!this.readRestoredTasks || ![...this.tasks.values()].some((task) => task.owner === owner && task.restored)) return;
+    if (this.readRestoredStamp) {
+      const stamp = this.readRestoredStamp(owner);
+      if (stamp && this.restoredStamps.get(owner) === stamp) return;
+      this.restoredStamps.set(owner, stamp);
+    }
     this.restore(this.readRestoredTasks(owner), owner);
   }
 

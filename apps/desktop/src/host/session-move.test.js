@@ -51,6 +51,27 @@ describe('session moves', () => {
     } finally { rmSync(h.root, { recursive: true, force: true }) }
   })
 
+  it('reads the top-level parent of a session larger than the head buffer', () => {
+    const h = harness()
+    try {
+      const padding = 'x'.repeat(200_000)
+      writeFileSync(join(h.directory, 'big-root.json'), JSON.stringify({ id: 'big-root', snapshot: { messages: [{ content: padding }] } }))
+      writeFileSync(join(h.directory, 'big-child.json'), JSON.stringify({ id: 'big-child', parentSessionId: 'big-root', snapshot: { messages: [{ content: padding }] } }))
+      expect(h.move({ sessionId: 'big-root', section: 'project', groupId: 'group' }).projects.assignments['big-root']).toBe('group')
+      expect(() => h.move({ sessionId: 'big-child', section: 'recent' })).toThrow('Cannot move a child session')
+    } finally { rmSync(h.root, { recursive: true, force: true }) }
+  })
+
+  it('rejects a truncated large session without parsing it', () => {
+    const h = harness()
+    try {
+      const truncated = `{"id":"truncated","snapshot":{"messages":[{"content":"${'x'.repeat(200_000)}`
+      writeFileSync(join(h.directory, 'truncated.json'), truncated)
+      expect(() => h.move({ sessionId: 'truncated', section: 'recent' })).toThrow('Cannot read session file')
+      expect(h.writes()).toBe(0)
+    } finally { rmSync(h.root, { recursive: true, force: true }) }
+  })
+
   it('rejects malformed and unsafe files before any writes', () => {
     const h = harness()
     try {

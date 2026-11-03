@@ -225,6 +225,79 @@ describe('SessionStore.replaceValidated', () => {
     }
   });
 
+  it('keeps a display checkpoint only when its model and protocol match the snapshot', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const session = makeSession('thinking', '/tmp', '2026-01-01T00:00:00.000Z');
+    session.snapshot.protocol = 'openai_responses';
+    session.snapshot.interruptedThinking = {
+      providerId: session.snapshot.providerId, protocol: 'openai_responses', model: session.snapshot.model,
+      apiBase: 'https://example.com', text: 'complete thinking',
+    };
+    expect(parsePersistedSession(session)?.snapshot.interruptedThinking?.text).toBe('complete thinking');
+    expect(parsePersistedSession({ ...session, snapshot: { ...session.snapshot, model: 'other' } })?.snapshot.interruptedThinking).toBeUndefined();
+    expect(parsePersistedSession({ ...session, snapshot: { ...session.snapshot, protocol: 'openai_chat_completions' } })?.snapshot.interruptedThinking).toBeUndefined();
+  });
+
+  it('round-trips and sanitizes active thinking using the same rules as interrupted thinking', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-active-thinking-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, parsePersistedSession } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      const session = makeSession('active-thinking', '/tmp', '2026-01-01T00:00:00.000Z');
+      session.turnState = 'running';
+      session.snapshot.protocol = 'openai_responses';
+      const thinking = {
+        providerId: session.snapshot.providerId, protocol: 'openai_responses' as const,
+        model: session.snapshot.model, apiBase: 'https://example.com', text: 'completed part',
+      };
+      session.snapshot.activeThinking = thinking;
+      session.snapshot.interruptedThinking = { ...thinking, text: 'earlier part' };
+      store.save(session);
+      expect(store.load(session.id)?.snapshot).toMatchObject({
+        activeThinking: thinking, interruptedThinking: { ...thinking, text: 'earlier part' },
+      });
+      for (const invalid of [
+        { providerId: 'other' }, { model: 'other' }, { protocol: 'openai_chat_completions' },
+        { apiBase: 12 }, { text: '' },
+      ]) {
+        const parsed = parsePersistedSession({
+          ...session, snapshot: { ...session.snapshot, activeThinking: { ...thinking, ...invalid } },
+        });
+        expect(parsed?.snapshot.activeThinking).toBeUndefined();
+        expect(parsed?.snapshot.interruptedThinking?.text).toBe('earlier part');
+      }
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves valid running inputs and drops malformed or stale recovery data', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const session = makeSession('active-input', '/tmp', '2026-01-01T00:00:00.000Z');
+    session.turnState = 'running';
+    session.snapshot.protocol = 'openai_responses';
+    const input = [
+      { type: 'text' as const, text: 'inspect this' },
+      { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'YWJj' } },
+    ];
+    session.snapshot.activeTurn = { input, committed: false };
+    expect(parsePersistedSession(JSON.parse(JSON.stringify(session)))?.snapshot.activeTurn).toEqual({ input, committed: false });
+    expect(parsePersistedSession({ ...session, turnState: 'completed' })?.snapshot.activeTurn).toBeUndefined();
+    expect(parsePersistedSession({ ...session, snapshot: { ...session.snapshot, protocol: 'openai_chat_completions' } })?.snapshot.activeTurn).toBeUndefined();
+    for (const invalid of [
+      { input, committed: 'false' }, { input: [{ type: 'unknown' }], committed: false },
+      { input: [{ type: 'image', source: { type: 'base64', media_type: 'image/svg+xml', data: 'x' } }], committed: false },
+    ]) {
+      const parsed = parsePersistedSession({ ...session, snapshot: { ...session.snapshot, activeTurn: invalid } });
+      expect(parsed?.snapshot.activeTurn).toBeUndefined();
+      expect(parsed?.snapshot.messages).toEqual(session.snapshot.messages);
+    }
+    // A model change invalidates thinking, but never discards the user's input.
+    expect(parsePersistedSession({ ...session, snapshot: { ...session.snapshot, model: 'other' } })?.snapshot.activeTurn).toEqual({ input, committed: false });
+  });
+
   it('parses legacy defaults without mutating the caller value', async () => {
     const { parsePersistedSession } = await import('./sessionStore.js');
     const raw = {

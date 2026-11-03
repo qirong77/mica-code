@@ -1797,6 +1797,13 @@ export function currentTurnActivityMessages(messages, turnId) {
   })
 }
 
+export function activityTurnIdForDisplay(messages, turnId, running) {
+  if (turnId) return turnId
+  // 没有 step_start 的运行中重放使用 null；旧检查点的合成 id 不能遮住实时行。
+  if (running && messages.some((message) => isActivityMessage(message) && !message.turnId)) return null
+  return messages.findLast((message) => isActivityMessage(message) && message.turnId)?.turnId || null
+}
+
 function TurnLogItemView({ message, now, onOpen }) {
   if (message.kind === 'reasoning') {
     return <ReasoningRow text={message.text} />
@@ -2408,18 +2415,36 @@ export function mergeReplayEvents(buffered = [], pending = []) {
   return events
 }
 
-function historyMessages(rows, key) {
+export function historyMessages(rows, key) {
   return (Array.isArray(rows) ? rows : []).map((row, index) => ({
     id: `history-${key}-${index}`,
-    kind: row.role === 'notice' ? 'notice' : 'message',
+    kind: row.kind === 'reasoning' ? 'reasoning' : row.role === 'notice' ? 'notice' : 'message',
     role: row.role,
     text: row.text || '',
+    ...(row.kind === 'reasoning' ? {
+      turnId: `interrupted-${key}`, resumableThinking: true,
+      ...(row.activeCheckpoint ? { activeCheckpoint: true } : {})
+    } : {}),
     variant: row.variant ?? (row.role === 'notice' ? 'info' : undefined),
     command: row.command ?? undefined,
     status: row.status ?? undefined,
     usage: row.usage ?? null,
     done: true
   }))
+}
+
+// 模型名本身可以包含斜杠，不能通过任意后缀匹配推断 provider。
+export function sameSelectedModel(first, second, sessionModel, providerId) {
+  if (first === second) return true
+  if (!first || !second || !sessionModel) return false
+  const isSessionModel = (value) =>
+    value === sessionModel || Boolean(providerId && value === `${providerId}/${sessionModel}`)
+  return isSessionModel(first) && isSessionModel(second)
+}
+
+export function thinkingForSelectedModel(messages, selectedModel, sessionModel, providerId) {
+  if (!selectedModel || !sessionModel || sameSelectedModel(selectedModel, sessionModel, sessionModel, providerId)) return messages
+  return messages?.filter((message) => message.kind !== 'reasoning') ?? messages
 }
 
 // 会话里的用户文本把图片块渲染成 [图片] 占位符，输入框原文是 [Image](路径)，
@@ -2437,7 +2462,9 @@ export function hasPersistedTurn(messages, prompt) {
   )
   return (
     userIndex >= 0 &&
-    messages.slice(userIndex + 1).some((message) => message.role === 'assistant' && message.text)
+    messages.slice(userIndex + 1).some(
+      (message) => message.kind !== 'reasoning' && message.role === 'assistant' && message.text
+    )
   )
 }
 
@@ -2452,8 +2479,120 @@ export function historyBeforeRunReplay(messages, prompt) {
   // （shift+tab 注入的排队输入夹在回答之间）必须保留，否则重开后消失。
   return [
     ...messages.slice(0, userIndex + 1),
-    ...messages.slice(userIndex + 1).filter((message) => message.role === 'user')
+    ...messages.slice(userIndex + 1).filter((message) => message.role === 'user' || message.resumableThinking)
   ]
+}
+
+/** The active checkpoint is merged after replay, so rollback events cannot alter it. */
+export function thinkingBeforeReplay(messages, events, running) {
+  const hasStart = events.some((event) => event?.type === 'step_start')
+  return messages.filter((message) => !message.activeCheckpoint).map((message) =>
+    running && !hasStart && message.kind === 'reasoning' && message.resumableThinking
+      ? { ...message, turnId: null }
+      : message
+  )
+}
+
+// Longest suffix of saved matching a prefix of replayed, in linear time.
+function thinkingOverlap(saved, replayed) {
+  if (!saved || !replayed) return 0
+  const prefix = new Array(replayed.length).fill(0)
+  for (let i = 1, length = 0; i < replayed.length; i++) {
+    while (length && replayed[i] !== replayed[length]) length = prefix[length - 1]
+    if (replayed[i] === replayed[length]) length++
+    prefix[i] = length
+  }
+  let length = 0
+  for (let i = 0; i < saved.length; i++) {
+    while (length && (length === replayed.length || saved[i] !== replayed[length])) length = prefix[length - 1]
+    if (saved[i] === replayed[length]) length++
+  }
+  // A single coincidental character is not enough evidence to discard live text.
+  if (length >= 8 || (length >= 3 && (length === replayed.length || replayed.slice(length, length + 2) === '\n\n')) ||
+      (length === saved.length && length === replayed.length)) return length
+  return 0
+}
+
+// A host can disappear without sending a rollback. Restore the last durable
+// checkpoint before showing that interrupted turn again.
+export function thinkingAfterUnexpectedExit(messages, persisted, turnId) {
+  const checkpoints = (Array.isArray(persisted) ? persisted : []).filter((message) =>
+    message.kind === 'reasoning' && message.resumableThinking
+  )
+  const checkpoint = checkpoints.find((message) => message.activeCheckpoint) || checkpoints.at(-1)
+  const result = []
+  let insertion = -1
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const current = message.kind === 'reasoning' &&
+      (message.resumableThinking || message.turnId === turnId)
+    if (current) {
+      if (insertion < 0) insertion = result.length
+    } else {
+      result.push(message)
+    }
+  }
+  if (checkpoint) result.splice(insertion < 0 ? result.length : insertion, 0, {
+    ...checkpoint, turnId, activeCheckpoint: false
+  })
+  return result
+}
+
+/** Merge a completed active checkpoint with a truncated event replay or crash recovery. */
+export function reconcileActiveThinking(messages, restored, { running = false, hasStart = false } = {}) {
+  if (hasStart) return messages
+  const checkpoint = restored.findLast((message) => message.kind === 'reasoning' && message.activeCheckpoint)
+  if (!checkpoint?.text) return messages
+  let next = messages.filter((message) => !message.activeCheckpoint)
+  const interrupted = next.findLast((message) => message.kind === 'reasoning' && message.resumableThinking)
+  let displayText = checkpoint.text
+  if (interrupted?.text === displayText) {
+    next = next.filter((message) => message !== interrupted)
+  } else if (interrupted?.text && displayText.startsWith(`${interrupted.text}\n\n`)) {
+    displayText = displayText.slice(interrupted.text.length + 2)
+  }
+  const replayRows = running
+    ? next.filter((message) => message.kind === 'reasoning' && !message.resumableThinking && !message.turnId)
+    : []
+  const replayed = replayRows.map((message) => message.text || '').join('\n\n')
+  let remaining = thinkingOverlap(checkpoint.text, replayed)
+  const edits = new Map()
+  for (let i = 0; i < replayRows.length && remaining > 0; i++) {
+    if (i > 0) remaining = Math.max(0, remaining - 2) // separator between reasoning rows
+    if (!remaining) break
+    const row = replayRows[i]
+    const text = row.text || ''
+    const consumed = Math.min(remaining, text.length)
+    edits.set(row, text.slice(consumed))
+    remaining -= consumed
+  }
+  if (edits.size) {
+    next = next.flatMap((message) => {
+      if (!edits.has(message)) return [message]
+      const text = edits.get(message)
+      return text ? [{ ...message, text }] : []
+    })
+  }
+  const active = { ...checkpoint, text: displayText, turnId: running ? null : checkpoint.turnId }
+  const insertAt = running
+    ? next.findIndex((message) => isActivityMessage(message) && !message.resumableThinking && !message.turnId)
+    : -1
+  next.splice(insertAt < 0 ? next.length : insertAt, 0, active)
+  return next
+}
+
+/** Replace replayed reasoning with the completed display checkpoint from disk. */
+export function reconcileInterruptedThinking(messages, restored, turnId, clearWhenMissing = false) {
+  const checkpoint = restored.findLast(
+    (message) => message.kind === 'reasoning' && message.resumableThinking && !message.activeCheckpoint
+  )
+  const belongsToTurn = (message) =>
+    message.kind === 'reasoning' &&
+    (message.resumableThinking || (turnId && message.turnId === turnId))
+  if (!checkpoint) return clearWhenMissing ? messages.filter((message) => !belongsToTurn(message)) : messages
+  const index = messages.findIndex(belongsToTurn)
+  const next = messages.filter((message) => !belongsToTurn(message))
+  next.splice(index < 0 ? next.length : index, 0, { ...checkpoint, turnId: turnId || checkpoint.turnId })
+  return next
 }
 
 /**
@@ -2474,7 +2613,10 @@ export function appendRunStartedMessage(messages, run) {
   // （文本相同）时，本轮的用户行已经在列表里了；如果是 assistant 回答，则是新一轮。
   const lastTurnMessage = [...messages]
     .reverse()
-    .find((message) => message?.role === 'user' || message?.role === 'assistant')
+    .find(
+      (message) =>
+        message?.kind !== 'reasoning' && (message?.role === 'user' || message?.role === 'assistant')
+    )
   if (lastTurnMessage?.role === 'user' && promptKey(lastTurnMessage.text) === promptKey(text)) {
     return messages
   }
@@ -2501,7 +2643,11 @@ function persistedTranscript(messages) {
   return result
 }
 
-export function canReuseVisualTranscript(cached, persisted) {
+export function canReuseVisualTranscript(cached, persisted, cachedMeta, persistedMeta) {
+  if (cachedMeta !== undefined || persistedMeta !== undefined) {
+    const key = (meta) => [meta?.providerId || '', meta?.protocol || '', meta?.model || '', meta?.apiBase || '']
+    if (JSON.stringify(key(cachedMeta)) !== JSON.stringify(key(persistedMeta))) return false
+  }
   return (
     JSON.stringify(persistedTranscript(cached)) === JSON.stringify(persistedTranscript(persisted))
   )
@@ -2538,6 +2684,7 @@ const ACCUMULATING_EVENT_TYPES = new Set([
   'text',
   'text_rollback',
   'reasoning_rollback',
+  'reasoning_reset',
   'tool_use',
   'error',
   'notice',
@@ -2555,10 +2702,10 @@ function readCachedTranscript(nodeId) {
   return cached
 }
 
-function writeCachedTranscript(nodeId, messages) {
+function writeCachedTranscript(nodeId, messages, meta) {
   if (!nodeId || !Array.isArray(messages) || messages.length === 0) return
   transcriptCache.delete(nodeId)
-  transcriptCache.set(nodeId, messages)
+  transcriptCache.set(nodeId, { messages, meta })
   while (transcriptCache.size > TRANSCRIPT_CACHE_LIMIT) {
     const oldest = transcriptCache.keys().next().value
     if (oldest === undefined) break
@@ -2886,6 +3033,7 @@ export function ChatView({
   const [canPrevConversation, setCanPrevConversation] = useState(false)
   const canPrevConversationRef = useRef(false)
   const [meta, setMeta] = useState(null)
+  const metaRef = useLatest(meta)
   const [todoHidden, setTodoHidden] = useState(false)
   const [todoInterrupted, setTodoInterrupted] = useState(false)
   // 会话右键菜单里的插件项（清单 `desktop.sessionMenu`），来自缓存的插件列表。
@@ -3931,6 +4079,14 @@ export function ChatView({
             onSessionBoundRef.current?.(nodeIdRef.current, event.sessionID)
           }
           turnRef.current = `${event.sessionID || nodeIdRef.current}:${timestamp}`
+          const nextTurnId = turnRef.current
+          updateMessages((previous) =>
+            previous.map((message) =>
+              message.kind === 'reasoning' && message.resumableThinking
+                ? { ...message, turnId: nextTurnId }
+                : message
+            )
+          )
           streamRef.current = { id: null, kind: null, turnId: turnRef.current }
           finishedRef.current = false
           turnStartedAtRef.current = timestamp
@@ -3964,6 +4120,11 @@ export function ChatView({
           })
           break
         }
+        case 'reasoning_reset':
+          updateMessages((previous) => previous.filter((message) =>
+            message.kind !== 'reasoning' || !message.resumableThinking
+          ))
+          break
         case 'tool_use': {
           finishStream(timestamp)
           const part = event.part
@@ -4038,6 +4199,14 @@ export function ChatView({
         case 'step_finish': {
           finishStream(timestamp)
           finishPendingTools(event.part?.reason === 'aborted' ? 'aborted' : 'error', timestamp)
+          const finishedTurnId = turnRef.current
+          updateMessages((previous) =>
+            previous.map((message) =>
+              message.kind === 'reasoning' && message.turnId === finishedTurnId
+                ? { ...message, resumableThinking: event.part?.reason !== 'completed' }
+                : message
+            )
+          )
           // 计划不在这里收口：turn 正常结束不代表残留项做完了。清单保持模型写下的
           // 状态，中断或失败时只在展示中将进行中投影为暂停。
           // failed turn 的真实原因在 turn/completed 通知的 error 字段里透传，
@@ -4163,6 +4332,15 @@ export function ChatView({
       if (!finished) {
         todoInterruptedRef.current.set(nodeIdRef.current, true)
         setTodoInterrupted(true)
+        if (metaRef.current?.protocol === 'openai_responses') {
+          const exitNodeId = nodeIdRef.current
+          const exitTurnId = turnRef.current
+          void window.mica.chat.history(exitNodeId).then((rows) => {
+            if (nodeIdRef.current !== exitNodeId || turnRef.current !== exitTurnId || !finishedRef.current) return
+            const persisted = historyMessages(rows, exitNodeId)
+            updateMessages((previous) => thinkingAfterUnexpectedExit(previous, persisted, exitTurnId))
+          }).catch(() => {})
+        }
       }
       finishedRef.current = true
       setRunning(false)
@@ -4176,7 +4354,7 @@ export function ChatView({
         refreshMetaSoon(payload.sessionId)
       }
     },
-    [appendNotice, finishPendingTools, finishStream, refreshMetaSoon]
+    [appendNotice, finishPendingTools, finishStream, metaRef, nodeIdRef, refreshMetaSoon, updateMessages]
   )
   const processExitRef = useLatest(processExit)
 
@@ -4260,7 +4438,7 @@ export function ChatView({
   useEffect(() => {
     if (!nodeId) return undefined
     return () => {
-      writeCachedTranscript(nodeId, messagesRef.current)
+      writeCachedTranscript(nodeId, messagesRef.current, metaRef.current)
     }
   }, [nodeId])
 
@@ -4320,7 +4498,7 @@ export function ChatView({
     const previousNodeId = loadedNodeRef.current
     if (previousNodeId && previousNodeId !== nodeId && messagesRef.current.length > 0) {
       // 这一份渲染结果（含只存在于事件流里的思考/工具/TODO）留给下次回到这个会话时用
-      writeCachedTranscript(previousNodeId, messagesRef.current)
+      writeCachedTranscript(previousNodeId, messagesRef.current, metaRef.current)
     }
     if (previousNodeId && previousNodeId !== nodeId) {
       // 旧节点此刻已经隐藏，scrollTop 读出来是 0，只能用滚动时记下的那份
@@ -4329,7 +4507,8 @@ export function ChatView({
     const nextInput = switchChatDraft(draftsRef.current, previousNodeId, nodeId, inputRef.current)
     draftReportRef.current = { nodeId, text: nextInput || '' }
     loadedNodeRef.current = nodeId
-    const cachedTranscript = readCachedTranscript(nodeId)
+    const cachedEntry = readCachedTranscript(nodeId)
+    let cachedTranscript = cachedEntry?.messages ?? null
     const generation = ++restoreGenerationRef.current
     restoringRef.current = true
     pendingEventsRef.current = []
@@ -4385,14 +4564,21 @@ export function ChatView({
         window.mica.chat.meta(finalSessionId).catch(() => null)
       ])
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return false
-      const finalMessages = historyMessages(finalRows, finalSessionId)
-      const liveTranscript = messagesRef.current
+      const selectedModel = overridesRef.current.get(nodeId)?.model
+      const finalMessages = thinkingForSelectedModel(
+        historyMessages(finalRows, finalSessionId), selectedModel, finalMeta?.model, finalMeta?.providerId
+      )
+      const liveTranscript = thinkingForSelectedModel(messagesRef.current, selectedModel, finalMeta?.model, finalMeta?.providerId)
+      cachedTranscript = thinkingForSelectedModel(cachedTranscript, selectedModel, finalMeta?.model, finalMeta?.providerId)
+      const visualTranscript = canReuseVisualTranscript(liveTranscript, finalMessages)
+        ? liveTranscript
+        : cachedTranscript && canReuseVisualTranscript(cachedTranscript, finalMessages, cachedEntry?.meta, finalMeta)
+          ? cachedTranscript
+          : finalMessages
       updateMessages(
-        canReuseVisualTranscript(liveTranscript, finalMessages)
-          ? liveTranscript
-          : cachedTranscript && canReuseVisualTranscript(cachedTranscript, finalMessages)
-            ? cachedTranscript
-            : finalMessages
+        ['aborted', 'error'].includes(finalMeta?.turnState)
+          ? reconcileInterruptedThinking(visualTranscript, finalMessages, turnRef.current, true)
+          : visualTranscript
       )
       if (finalMeta) setMeta(finalMeta)
       if (finalMeta) {
@@ -4423,7 +4609,11 @@ export function ChatView({
           : window.mica.chat.meta(null).catch(() => null)
       ])
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
-      const restored = historyMessages(rows, sessionId || nodeId)
+      const selectedModel = overridesRef.current.get(nodeId)?.model
+      const restored = thinkingForSelectedModel(
+        historyMessages(rows, sessionId || nodeId), selectedModel, sessionMeta?.model, sessionMeta?.providerId
+      )
+      cachedTranscript = thinkingForSelectedModel(cachedTranscript, selectedModel, sessionMeta?.model, sessionMeta?.providerId)
       updateMessages(restored)
       setMeta(sessionMeta)
       setHistoryLoaded(true)
@@ -4499,6 +4689,8 @@ export function ChatView({
         return
       }
       const replayEvents = replayEventsOf(state?.events, pendingEventsRef.current)
+      const replayHasStart = replayEvents.some((event) => event?.type === 'step_start')
+      let usingCachedTranscript = false
       // 磁盘上的中间 checkpoint（每个工具迭代边界保存）与完成保存已经把本轮
       // 已生成的回答写进 conversationMessages，host 的事件缓冲又会重建同一段
       // 内容：重放前必须先裁掉本轮已持久化的 assistant 输出，否则切换节点
@@ -4516,8 +4708,10 @@ export function ChatView({
         // TODO，比从 conversationMessages 重建完整。有累积型事件（文本/工具）时
         // 必须从磁盘重建，否则那段内容会被追加第二遍。
         const needsRebuild = replayEvents.some((event) => ACCUMULATING_EVENT_TYPES.has(event?.type))
-        const reusable = !needsRebuild && canReuseVisualTranscript(cachedTranscript, restored)
-        updateMessages(reusable ? cachedTranscript : trimActiveTurn(restored))
+        const reusable = !needsRebuild && !restored.some((message) => message.activeCheckpoint) &&
+          canReuseVisualTranscript(cachedTranscript, restored, cachedEntry?.meta, sessionMeta)
+        usingCachedTranscript = reusable
+        updateMessages(thinkingBeforeReplay(reusable ? cachedTranscript : trimActiveTurn(restored), replayEvents, true))
         // 裁剪后本轮用户消息仍在列表里；只有匹配不到边界（例如带图片的输入
         // 文本与会话展示文本不一致）时才补一条，避免重复渲染同一条用户消息。
         if (state.prompt) {
@@ -4535,14 +4729,22 @@ export function ChatView({
         setRunStartedAt(state.startedAt || Date.now())
         setRunning(true)
         finishedRef.current = false
-      } else if (cachedTranscript && canReuseVisualTranscript(cachedTranscript, restored)) {
-        updateMessages(trimActiveTurn(cachedTranscript))
+      } else if (cachedTranscript && !restored.some((message) => message.activeCheckpoint) &&
+                 canReuseVisualTranscript(cachedTranscript, restored, cachedEntry?.meta, sessionMeta)) {
+        usingCachedTranscript = true
+        updateMessages(thinkingBeforeReplay(trimActiveTurn(cachedTranscript), replayEvents, false))
       } else {
-        updateMessages(trimActiveTurn(restored))
+        updateMessages(thinkingBeforeReplay(trimActiveTurn(restored), replayEvents, false))
       }
 
       for (const event of replayEvents) {
         applyEventRef.current(event)
+      }
+      if (!usingCachedTranscript) {
+        updateMessages((previous) => reconcileActiveThinking(previous, restored, {
+          running: Boolean(state?.running),
+          hasStart: replayHasStart
+        }))
       }
       pendingEventsRef.current = []
       restoringRef.current = false
@@ -4587,7 +4789,11 @@ export function ChatView({
       ])
       if (nodeIdRef.current !== nodeId || sessionIdRef.current !== finalSessionId) return
       if (!Array.isArray(rows)) return
-      updateMessages(historyMessages(rows, finalSessionId))
+      updateMessages(
+        thinkingForSelectedModel(
+          historyMessages(rows, finalSessionId), overridesRef.current.get(nodeId)?.model, finalMeta?.model, finalMeta?.providerId
+        )
+      )
       if (finalMeta) {
         setMeta(finalMeta)
         const interrupted = restoredTodoInterrupted(finalMeta, state)
@@ -4732,13 +4938,17 @@ export function ChatView({
     (kind, value) => {
       const current = overridesRef.current.get(nodeId) || {}
       const next = { ...current }
-      if (kind === 'model') next.model = value || undefined
-      else if (kind === 'variant') next.variant = value || undefined
+      if (kind === 'model') {
+        next.model = value || undefined
+        if (!sameSelectedModel(current.model || meta?.model || '', next.model || meta?.model || '', meta?.model, meta?.providerId)) {
+          updateMessages((previous) => previous.filter((message) => message.kind !== 'reasoning'))
+        }
+      } else if (kind === 'variant') next.variant = value || undefined
       else if (kind === 'role') next.role = value || undefined
       overridesRef.current.set(nodeId, next)
       forceRender()
     },
-    [forceRender, nodeId]
+    [forceRender, meta?.model, meta?.providerId, nodeId, updateMessages]
   )
 
   const canSwitchModelProtocol = useCallback(
@@ -5800,15 +6010,12 @@ export function ChatView({
     },
     [appendNotice, nodeId, nodeIdRef, queuedDisplayItems, runKey, updateMessages]
   )
-  const activityTurnId =
-    turnRef.current ||
-    messages.findLast((message) => isActivityMessage(message) && message.turnId)?.turnId ||
-    null
+  const activityTurnId = activityTurnIdForDisplay(messages, turnRef.current, running)
   const turnActivityMessages = useMemo(
     () => currentTurnActivityMessages(messages, activityTurnId),
     [activityTurnId, messages]
   )
-  const visibleTurnLogMessages = running || phase === 'error' ? turnActivityMessages : []
+  const visibleTurnLogMessages = running || phase === 'error' || todoInterrupted ? turnActivityMessages : []
   // 点开详情时按 id 取当下的那条消息：工具还在跑的时候，输出是流式长出来的。
   const activityDetailMessage = activityDetailId
     ? messages.find((message) => message.id === activityDetailId) || null

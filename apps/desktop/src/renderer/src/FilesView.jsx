@@ -511,17 +511,25 @@ export const FilesView = forwardRef(function FilesView(
   // 带 `?head=` 打开时，页面一进来就是那份对比：切到 Git 比较面板，并把第一个改动文件
   // 摊开——否则用户看到的是一棵文件树，还得自己找面板、找文件。
   const autoCompareRef = useRef('')
+  // 面板只在进入这份对比时切一次。`review` 每次渲染都是新对象，把它放进依赖里会让
+  // 这个 effect 每渲染都跑一遍，用户点活动栏切走又立刻被改回 Git 面板。
+  const reviewOpenRef = useRef(review.open)
+  reviewOpenRef.current = review.open
+  const reviewPanelRef = useRef('')
   useEffect(() => {
     if (!gitCompareHead) return
-    setActivePanel('git-tree')
-    setGitPreview(true)
+    if (reviewPanelRef.current !== gitCompareHead) {
+      reviewPanelRef.current = gitCompareHead
+      setActivePanel('git-tree')
+      setGitPreview(true)
+    }
     if (autoCompareRef.current === gitCompareHead) return
     const first = gitBranchChanges?.files?.[0]
     if (!first) return
     autoCompareRef.current = gitCompareHead
-    review.open(first)
+    reviewOpenRef.current(first)
     setDiffOpened(true)
-  }, [gitCompareHead, gitBranchChanges, review])
+  }, [gitCompareHead, gitBranchChanges])
 
   const setTabs = useCallback((updater) => {
     const next = typeof updater === 'function' ? updater(tabsRef.current) : updater
@@ -893,6 +901,9 @@ export const FilesView = forwardRef(function FilesView(
       }
       if (request !== openRequestRef.current) return
       if (info?.ok && info.kind === 'directory') {
+        // 目录没有「只开编辑器」这回事：切完文件树要回到常规形态，否则侧栏收起、
+        // 编辑器区空着，看起来就像什么都没打开。
+        setFocusMode(false)
         // eslint-disable-next-line no-use-before-define -- 回调执行时 setter 早已定义
         setMobileTreeVisible(false)
         // 设完覆盖值就会触发下面那个 loadRoot effect（它自己接管「正在读取…」状态）

@@ -152,7 +152,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
         gitCompareError={git.compareError}
         gitCompareHead={compare?.head || null}
         onGitCompareBaseChange={compare?.head ? onCompareBaseChange : setCompareBase}
-        onRefreshGit={() => refresh({ quiet: true })}
+        onRefreshGit={() => refresh({ quiet: true, refresh: true })}
       />
       <footer className="safe-bottom no-drag flex h-7 shrink-0 items-center justify-between gap-4 border-t border-line-soft bg-shade px-3 text-xs text-fg-soft">
         {branchLabel && (

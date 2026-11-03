@@ -1,6 +1,8 @@
 /** A review belongs to a comparison and to the exact content that was read. */
 export function reviewScope(root, base) {
-  return JSON.stringify([root || '', base?.ref || 'auto', !!base?.direct])
+  // 同一个仓库对同一条基线可以有多个目标提交：不把 head 算进作用域，先把 A 分支
+  // 标成已评审，再去看 B 分支时 A 的标记会被顶掉。
+  return JSON.stringify([root || '', base?.ref || 'auto', base?.head || '', !!base?.direct])
 }
 
 export function isFileReviewed(file, reviewed) {

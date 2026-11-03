@@ -345,6 +345,9 @@ function PluginDetail({
   const RefreshIcon = appIcons.refresh;
   const enabled = plugin.state !== 'disabled';
   const status = pluginStatus(plugin);
+  // 设置草稿提到详情这一层：动作按钮（包括 attention 上那一个）发出去的值必须是
+  // 用户刚在下面那半页里改的，不能是磁盘上那份旧的。
+  const draft = usePluginSettingsDraft(plugin, onSaved);
   // 没有任何「要动的东西」时不摆两列：右边信息栏贴着一条空的左栏，读起来像内容没加载出来。
   const hasConfigurable = plugin.desktopChecks.length > 0 || plugin.settings.fields.length > 0;
   return (
@@ -399,14 +402,10 @@ function PluginDetail({
         {error ? <Alert message={error} /> : null}
         {plugin.description ? <p className="plugin-description">{plugin.description}</p> : null}
         {plugin.error ? <Alert message={plugin.error} /> : null}
-        {/* 插件上报的「点一下就能变好」：提示点已经把人引到这里，这里给的是那个按钮。 */}
-        {plugin.state === 'enabled' && plugin.attention ? (
-          <PluginAttentionBar
-            plugin={plugin}
-            values={plugin.settings.values}
-            onDone={onSaved}
-            onNewSession={onNewSession}
-          />
+        {/* 插件上报的「点一下就能变好」：提示点已经把人引到这里，这里给的是那个按钮。
+            一直挂着不卸载：动作成功后插件往往会撤掉 attention，结果那句话还得留在原地。 */}
+        {plugin.state === 'enabled' && (plugin.attention || plugin.actions.length > 0) ? (
+          <PluginAttentionBar plugin={plugin} values={draft.values} onDone={onSaved} onNewSession={onNewSession} />
         ) : null}
         {plugin.health && plugin.health.level !== 'ok' ? (
           <div className={`plugin-health is-${plugin.health.level}`}>
@@ -425,12 +424,12 @@ function PluginDetail({
               <PluginStatusGroup plugin={plugin} />
               {plugin.desktopChecks.length > 0 ? <PluginChecksGroup plugin={plugin} /> : null}
               {plugin.settings.fields.length > 0 ? (
-                <PluginSettingsForm plugin={plugin} canSave={canSettings} onSaved={onSaved} />
+                <PluginSettingsForm plugin={plugin} draft={draft} canSave={canSettings} />
               ) : null}
-              {plugin.actions.length > 0 && plugin.settings.fields.length === 0 ? (
+              {plugin.actions.length > 0 ? (
                 <PluginActionsGroup
                   plugin={plugin}
-                  values={plugin.settings.values}
+                  values={draft.values}
                   onDone={onSaved}
                   onNewSession={onNewSession}
                 />
@@ -448,7 +447,7 @@ function PluginDetail({
               {plugin.actions.length > 0 ? (
                 <PluginActionsGroup
                   plugin={plugin}
-                  values={plugin.settings.values}
+                  values={draft.values}
                   onDone={onSaved}
                   onNewSession={onNewSession}
                 />
@@ -605,8 +604,10 @@ function PluginAttentionBar({
   const [result, setResult] = useState<ConfigWebPluginActionResult | null>(null);
   const [hint, setHint] = useState('');
   const [error, setError] = useState<string | null>(null);
-  if (!attention) return null;
-  const action = attention.action ? (plugin.actions.find((item) => item.key === attention.action) ?? null) : null;
+  // 动作成功后插件通常会撤掉自己上报的 attention：那正是结果最该被看见的时刻，
+  // 不能让整块提示连同结果一起消失。
+  if (!attention && !result && !error) return null;
+  const action = attention?.action ? (plugin.actions.find((item) => item.key === attention.action) ?? null) : null;
 
   async function run() {
     if (!action) return;
@@ -629,9 +630,9 @@ function PluginAttentionBar({
   }
 
   return (
-    <div className={`plugin-attention is-${attention.tone}`}>
+    <div className={`plugin-attention is-${attention?.tone ?? 'ok'}`}>
       <span className="plugin-attention-body">
-        <span className="plugin-attention-text">{attention.text}</span>
+        {attention ? <span className="plugin-attention-text">{attention.text}</span> : null}
         {error ? <span className="plugin-attention-note">{error}</span> : null}
         {result ? (
           <span className="plugin-attention-note">
@@ -840,6 +841,13 @@ function PluginChecksGroup({ plugin }: { plugin: ConfigWebPlugin }) {
   );
 }
 
+/** 两份设置值是否完全一致（键集合与每个值）。 */
+function sameValues(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => a[key] === b[key]);
+}
+
 /**
  * 插件设置表单。
  *
@@ -847,21 +855,32 @@ function PluginChecksGroup({ plugin }: { plugin: ConfigWebPlugin }) {
  * 没有保存按钮：改动停下就写盘（与其他配置页同一套 `useAutoSave`），插件的下一次读取就会
  * 拿到新值，所以不需要「重开会话」。
  */
-function PluginSettingsForm({
-  plugin,
-  canSave,
-  onSaved,
-}: {
-  plugin: ConfigWebPlugin;
-  canSave: boolean;
-  onSaved(next: ConfigWebPluginsDetails): void;
-}) {
+type PluginSettingsDraft = {
+  values: Record<string, string>;
+  fieldErrors: Record<string, string>;
+  autosave: ReturnType<typeof useAutoSave<Record<string, string>, ConfigWebPluginsDetails>>;
+  update(key: string, value: string): void;
+};
+
+/**
+ * 插件设置草稿：改动停下就写盘，返回值既给设置表单，也给同一页里的动作按钮。
+ */
+function usePluginSettingsDraft(
+  plugin: ConfigWebPlugin,
+  onSaved: (next: ConfigWebPluginsDetails) => void,
+): PluginSettingsDraft {
   const [values, setValues] = useState<Record<string, string>>(plugin.settings.values);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // 换插件、或者外部保存把值改回来时重新对齐：表单不能拿着上一个插件的草稿。
+  // 上一次从清单同步进来的那份值。草稿与它一样，说明用户没在下手，可以整份跟随刷新；
+  // 不一样就是正在打（或刚打完、还在 400ms 防抖窗口里）的字——拿磁盘值顶掉它，
+  // 之后每次输入都会基于重置后的旧值重建，前面那几个字符就静默丢了。
+  const syncedRef = useRef(plugin.settings.values);
+
   useEffect(() => {
-    setValues(plugin.settings.values);
+    const previous = syncedRef.current;
+    syncedRef.current = plugin.settings.values;
+    setValues((current) => (sameValues(current, previous) ? plugin.settings.values : current));
   }, [plugin.id, plugin.settings.values]);
 
   const autosave = useAutoSave<Record<string, string>, ConfigWebPluginsDetails>({
@@ -879,6 +898,20 @@ function PluginSettingsForm({
     setValues(next);
     autosave.schedule(next);
   }
+
+  return { values, fieldErrors, autosave, update };
+}
+
+function PluginSettingsForm({
+  plugin,
+  draft,
+  canSave,
+}: {
+  plugin: ConfigWebPlugin;
+  draft: PluginSettingsDraft;
+  canSave: boolean;
+}) {
+  const { values, fieldErrors, autosave, update } = draft;
 
   return (
     <>
@@ -939,7 +972,6 @@ function PluginSettingsForm({
         onTest={(next) => testPluginLlm(plugin.id, next)}
         disabled={!canSave}
       />
-      {plugin.actions.length > 0 ? <PluginActionsGroup plugin={plugin} values={values} onDone={onSaved} /> : null}
     </>
   );
 }

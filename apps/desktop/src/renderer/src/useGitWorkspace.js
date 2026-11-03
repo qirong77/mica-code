@@ -33,7 +33,7 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
   const gitRef = useLatest(git)
 
   const refresh = useCallback(
-    async ({ quiet = false, cwd: requested = null } = {}) => {
+    async ({ quiet = false, cwd: requested = null, refresh: force = false } = {}) => {
       const target = requested || cwdRef.current || null
       if (!enabledRef.current || target !== (cwdRef.current || null)) return
       const request = ++requestRef.current
@@ -56,7 +56,7 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
       )
       inFlightRef.current += 1
       try {
-        const summary = await window.mica.git.summary(target)
+        const summary = await window.mica.git.summary(target, { refresh: force })
         if (!isCurrent()) return
         const root = summary?.repository?.root || target
         const chosen = bases[root] || bases[target]

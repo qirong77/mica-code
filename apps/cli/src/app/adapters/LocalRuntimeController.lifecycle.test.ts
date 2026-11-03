@@ -19,7 +19,9 @@ describe('LocalRuntimeController lifecycle', () => {
     );
 
     await expect(runtime.abort()).resolves.toEqual({ ok: true });
-    expect(subagentTasks.killRunningForOwner).toHaveBeenCalledWith(agent, 'Parent turn was aborted.');
+    expect(subagentTasks.killRunningForOwner).toHaveBeenCalledWith(agent, 'Parent turn was aborted.', {
+      interrupted: true,
+    });
     expect(agent.abort).not.toHaveBeenCalled();
   });
 });

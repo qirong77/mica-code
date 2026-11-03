@@ -19,7 +19,7 @@ import {
   projectUsage
 } from './stats-core'
 import { extractSnippet, tokenizeSearchQuery } from '@packages/mica-web-shared/session-search.js'
-import { createTurnLeaseProbe, isInterruptedSession } from './session-lease'
+import { createTurnLeaseProbe, createTurnLeaseRunner, isInterruptedSession } from './session-lease'
 import { createStatsScanner } from './stats-scanner'
 import { deleteSessionFiles, isValidSessionId, stripSessionFromSort } from './session-delete'
 import { dropLoopsForSession } from './loops'
@@ -94,9 +94,12 @@ const statsScanner = createStatsScanner({
   }
 })
 
-const hasLiveTurnLease = createTurnLeaseProbe({
-  lockDir: () => join(sessionsDir(), '.turn-locks')
-})
+const lockDir = () => join(sessionsDir(), '.turn-locks')
+
+const hasLiveTurnLease = createTurnLeaseProbe({ lockDir })
+
+/** 直接改盘时握着 turn lease：检查与写之间起的一轮不会把这次改动覆盖回去。 */
+const withTurnLease = createTurnLeaseRunner({ lockDir })
 
 let metaInterrupted = { rows: null, key: '', value: null }
 
@@ -172,7 +175,7 @@ const moveSession = createSessionMover({ sessionFile, readProjects, writeProject
  * 侧栏的父子关系：拖一个会话到另一个会话上就写这里。只改会话树的形状，
  * 与 Pinned / 分组归属互不影响（子会话的分区跟着父会话走）。
  */
-const setSessionParent = createSessionParentWriter({ sessionsDir, hasLiveTurnLease })
+const setSessionParent = createSessionParentWriter({ sessionsDir, hasLiveTurnLease, withTurnLease })
 
 /** 侧栏手动拖拽排序：userData/session-sort.json，{ [section]: [sessionId, ...] } */
 function sortFile() {

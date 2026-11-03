@@ -25,6 +25,8 @@ export type AgentCallbacks = {
   /** The attempt rollback callback also restores every thinking consumer. */
   canRollbackThinking?: boolean;
   onThinking?: (thinking: string) => void;
+  /** Save a complete Responses thinking part or completed request for display. */
+  onThinkingCheckpoint?: (boundary: 'part' | 'request') => void;
   onToolCall?: (name: string, args: string, id?: string) => void;
   onToolResult?: (name: string, result: string, id?: string) => void;
   onUsage?: (usage: AgentUsageRecord) => void;
@@ -125,6 +127,7 @@ export abstract class BaseAgent<
   onTextRollback: (() => void) | undefined;
   canRollbackThinking = false;
   onThinking: ((thinking: string) => void) | undefined;
+  onThinkingCheckpoint: ((boundary: 'part' | 'request') => void) | undefined;
   onToolCall: ((name: string, args: string, id?: string) => void) | undefined;
   onToolResult: ((name: string, result: string, id?: string) => void) | undefined;
   onUsage: ((usage: AgentUsageRecord) => void) | undefined;

@@ -191,8 +191,10 @@ function showNoticeForSession(
   if (options.command) {
     removeCommandPanelItemForSession(context, ownerSessionId, commandPanelId(options.command));
   }
-  const { surface: _surface, status: _status, ...noticeOptions } = options;
-  upsertNoticeForSession(context, ownerSessionId, text, { ...noticeOptions, status: options.status }, true);
+  const { surface: _surface, replace, ...noticeOptions } = options;
+  upsertNoticeForSession(context, ownerSessionId, text, { ...noticeOptions, status: options.status }, true, {
+    replace,
+  });
 }
 
 /**
@@ -212,6 +214,7 @@ export function showPluginNotice(content: string, options: PluginNoticeOptions =
     ...(options.command ? { command: options.command } : {}),
     ...(options.surface ? { surface: options.surface } : {}),
     ...(options.status ? { status: options.status } : {}),
+    ...(options.replace ? { replace: true } : {}),
   });
 }
 
@@ -221,14 +224,15 @@ function upsertNoticeForSession(
   text: string,
   options: Pick<MicaUiConversationMessage & { role: 'notice' }, 'variant' | 'command' | 'status'>,
   save = false,
+  extra: { replace?: boolean } = {},
 ): void {
   const session = ownerSessionId ? context?.agentSessions.findById(ownerSessionId) : context?.agentSessions.current();
   const message = { role: 'notice' as const, content: text, ...options };
   if (!context || !session) {
-    micaUi.conversation.setMessages(upsertCommandNotice(micaUi.conversation.messages.get(), message));
+    micaUi.conversation.setMessages(upsertCommandNotice(micaUi.conversation.messages.get(), message, extra));
     return;
   }
-  const nextMessages = upsertCommandNotice(session.uiState.conversationMessages, message);
+  const nextMessages = upsertCommandNotice(session.uiState.conversationMessages, message, extra);
   session.uiState = normalizeUiState({ ...session.uiState, conversationMessages: nextMessages });
   if (context.agentSessions.current().id === session.id) {
     micaUi.conversation.setMessages(session.uiState.conversationMessages);
@@ -239,9 +243,16 @@ function upsertNoticeForSession(
 export function upsertCommandNotice(
   messages: MicaUiConversationMessage[],
   message: Extract<MicaUiConversationMessage, { role: 'notice' }>,
+  options: { replace?: boolean } = {},
 ): MicaUiConversationMessage[] {
-  if (!message.command || !message.status) return [...messages, message];
-  const existingIndex = findLastRunningNoticeIndex(messages, message.command);
+  if (!message.command) return [...messages, message];
+  // `replace` 是状态型 notice：同一个 command 只留最新一条，旧的（无论什么状态、在哪个
+  // 位置）都撤掉，新的放到当前位置——留旧位置等于把最新结论埋进已经滚过去的那段对话。
+  // 没有它时只替换「还挂在 running」的那条进度，历史结论留痕。
+  if (options.replace) {
+    return [...messages.filter((entry) => !(entry.role === 'notice' && entry.command === message.command)), message];
+  }
+  const existingIndex = message.status ? findLastRunningNoticeIndex(messages, message.command) : -1;
   if (existingIndex < 0) return [...messages, message];
   return [...messages.slice(0, existingIndex), message, ...messages.slice(existingIndex + 1)];
 }
@@ -542,7 +553,10 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
       if (!context) return;
       const session = context.agentSessions.current();
       session.titleOverride = session.sessionController.getCurrentTitle();
-      session.uiState = normalizeUiState(captureSessionUi());
+      session.uiState = normalizeUiState({
+        ...captureSessionUi(),
+        lastTurnOutcome: session.agent.getSnapshot().interruptedThinking ? 'aborted' : 'idle',
+      });
       context.events.publish({ type: 'session:invalidated', reason: 'resume', owner: session.agent });
       context.uiBridge.syncAgentStatusItems();
     },
@@ -719,6 +733,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
         concreteAgent.loadSnapshot(snapshot);
         throw new Error('Compact removed all usable conversation content; the original session was restored');
       }
+      concreteAgent.clearInterruptedThinking();
 
       const previousUiState = ownerSession?.uiState ?? captureSessionUi();
       const nextUiState = normalizeUiState({
@@ -776,6 +791,7 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
           'History replacement removed all usable conversation content; the original session was restored',
         );
       }
+      concreteAgent.clearInterruptedThinking();
 
       const previousUiState = ownerSession?.uiState ?? captureSessionUi();
       const nextUiState = normalizeUiState({

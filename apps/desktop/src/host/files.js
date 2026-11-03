@@ -186,6 +186,16 @@ async function walkFiles(root, visitor) {
   }
 }
 
+/**
+ * 我们自己刚改过工作区：让那份 Git 缓存立刻失效，否则顶栏徽标与 GIT 面板要等 5s
+ * TTL 才看到新建 / 改名 / 移动 / 复制 / 删除的文件。目录可能不在仓库里。
+ */
+function noteWorktreeMutations(...directories) {
+  for (const directory of new Set(directories.filter(Boolean))) {
+    noteWorktreeChange(repositoryRootOf(directory))
+  }
+}
+
 function isProbablyBinary(buffer) {
   const sampleSize = Math.min(buffer.length, 8 * 1024)
   let controlCharacters = 0
@@ -385,6 +395,7 @@ export function registerFilesIpc() {
     if (payload.type === 'directory') await mkdir(target)
     else if (payload.type === 'file') await writeFile(target, '', { flag: 'wx' })
     else throw new Error('type must be file or directory')
+    noteWorktreeMutations(directory)
     return { path: target }
   })
 
@@ -392,6 +403,7 @@ export function registerFilesIpc() {
     const source = normalizeDirectory(payload.path)
     const target = path.join(path.dirname(source), normalizeName(payload.name))
     if (source !== target) await rename(source, target)
+    if (source !== target) noteWorktreeMutations(path.dirname(source))
     return { path: target }
   })
 
@@ -405,6 +417,7 @@ export function registerFilesIpc() {
       throw new Error('不能将文件夹移动到自身内部')
     }
     await rename(source, target)
+    noteWorktreeMutations(path.dirname(source), directory)
     return { path: target }
   })
 
@@ -415,12 +428,14 @@ export function registerFilesIpc() {
     if (info.isDirectory()) await cp(source, target, { recursive: true, errorOnExist: true })
     else if (info.isFile()) await copyFile(source, target)
     else throw new Error('不支持复制此类型的项目')
+    noteWorktreeMutations(path.dirname(target))
     return { path: target }
   })
 
   ipcMain.handle('files:delete', async (_event, payload = {}) => {
     const target = normalizeDirectory(payload.path)
     await shell.trashItem(target)
+    noteWorktreeMutations(path.dirname(target))
     return { path: target }
   })
 

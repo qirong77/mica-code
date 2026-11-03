@@ -223,6 +223,8 @@ export function codexNotificationToEvent(notification) {
       return { type: 'text_rollback', timestamp, sessionID, length: params.length, attemptId: params.micaAttemptId }
     case 'mica/reasoning/textRollback':
       return { type: 'reasoning_rollback', timestamp, sessionID, length: params.length, attemptId: params.micaAttemptId }
+    case 'mica/reasoning/reset':
+      return { type: 'reasoning_reset', timestamp, sessionID }
     case 'item/reasoning/textDelta':
       return {
         type: 'reasoning',

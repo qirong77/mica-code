@@ -42,6 +42,8 @@ export type HeadlessTurnExecutorOptions = {
   agent: AgentRuntime;
   sessionController: SessionController;
   onEvent: (event: HeadlessTurnEvent) => void;
+  /** Apply settings belonging to this input after the leased session is refreshed. */
+  applyInputSettings?: (input: RuntimeInput) => void;
   /** Fired once the drain loop empties (all queued turns finished). */
   onIdle?: () => void;
   maxTurns?: number;
@@ -417,6 +419,7 @@ export class HeadlessTurnExecutor {
       // Must run before reserveRunId(): loadSnapshot inside the refresh bumps
       // the run id, and reserving first would make this turn look aborted.
       this.options.sessionController.refreshFromStore();
+      this.options.applyInputSettings?.(input);
       const reservedRunId = agent.reserveRunId();
       this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
       let runContent = content;
@@ -453,17 +456,11 @@ export class HeadlessTurnExecutor {
         const retryDelayMs = this.options.retryDelayMs ?? TURN_RETRY_DELAY_MS;
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
           const attemptInputs: AgentQueryContent[] = [];
-          if (attempt > 0) {
-            // Restore client state to before the turn, clearing partial output.
-            if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot);
-            this.responseBuffer = '';
-            this.committedResponseBuffer = '';
-            this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
-            await waitForRetryDelay(agent, retryDelayMs);
-          }
+          const attemptRunId = attempt === 0 ? reservedRunId : agent.reserveRunId();
           try {
+            agent.events.emit('thinkingTurnAttemptStart', undefined);
             runResult = await agent.run(runContent, {
-              reservedRunId: attempt === 0 ? reservedRunId : undefined,
+              reservedRunId: attemptRunId,
               maxTurns: this.options.maxTurns,
               onIterationComplete: () => {
                 this.saveCurrent({ allowEmpty: true, turnState: 'running' });
@@ -486,12 +483,23 @@ export class HeadlessTurnExecutor {
             // An abort that lands between reserveRunId() and the agent.run()
             // check is surfaced as an AgentAbortError here; never retry it.
             if (error instanceof AgentAbortError) throw error;
+            if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
             if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= maxRetries) {
               throw error;
             }
+            // A safe turn retry discards the entire client run, including
+            // reasoning from responses that completed before the failed one.
+            // Do this before restoring/saving history or announcing the delay.
+            agent.events.emit('thinkingTurnAttemptRollback', undefined);
+            if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot);
+            this.responseBuffer = '';
+            this.committedResponseBuffer = '';
+            this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
+            if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
             if (this.options.hooks) {
               await this.options.hooks.emit('turn:error', { runtime: this.options.host, input, content, error });
             }
+            if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
             // Persist the hint before announcing the wait: the desktop app shows
             // it inside the conversation, so a client that reconnects during the
             // delay finds it in the session file instead of a frozen run.
@@ -504,6 +512,8 @@ export class HeadlessTurnExecutor {
               delayMs: retryDelayMs,
               error: error instanceof Error ? error.message : String(error),
             });
+            await waitForRetryDelay(agent, retryDelayMs, attemptRunId);
+            if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
           }
         }
         // An abort that lands between reserveRunId() and the first agent.run()
@@ -682,9 +692,12 @@ export function displayUserContent(
 /** Fixed-delay wait that aborts early (throws AgentAbortError) when the agent
  * run id changes, so an interrupt during a retry delay stops the turn instead
  * of silently waiting out the full 10s. */
-function waitForRetryDelay(agent: AgentRuntime, delayMs: number): Promise<void> {
-  const delayRunId = agent.activeRunId;
+function waitForRetryDelay(agent: AgentRuntime, delayMs: number, delayRunId: number): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    if (!agent.isCurrent(delayRunId)) {
+      reject(new AgentAbortError(delayRunId));
+      return;
+    }
     let settled = false;
     const finish = (fn: () => void) => {
       if (settled) return;
@@ -693,10 +706,13 @@ function waitForRetryDelay(agent: AgentRuntime, delayMs: number): Promise<void> 
       clearInterval(poll);
       fn();
     };
-    const timer = setTimeout(() => finish(resolve), delayMs);
+    const timer = setTimeout(() => finish(() => {
+      if (!agent.isCurrent(delayRunId)) reject(new AgentAbortError(delayRunId));
+      else resolve();
+    }), delayMs);
     const poll = setInterval(() => {
-      if (agent.activeRunId !== delayRunId) {
-        finish(() => reject(new AgentAbortError(agent.activeRunId)));
+      if (!agent.isCurrent(delayRunId)) {
+        finish(() => reject(new AgentAbortError(delayRunId)));
         return;
       }
     }, 250);

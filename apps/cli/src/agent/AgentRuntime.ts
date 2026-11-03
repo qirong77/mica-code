@@ -51,6 +51,12 @@ export type AgentRuntimeEvents = {
   textAttemptStart: undefined;
   textRollback: undefined;
   thinking: string;
+  thinkingCheckpoint: undefined;
+  thinkingRollback: undefined;
+  thinkingReset: undefined;
+  /** Display state at the start of, and after discarding, a whole turn attempt. */
+  thinkingTurnAttemptStart?: undefined;
+  thinkingTurnAttemptRollback?: undefined;
   toolCall: { name: string; args: string; id?: string };
   toolResult: { name: string; result: string; id?: string };
   usage: AgentUsageRecord;
@@ -90,8 +96,22 @@ export type AgentRuntimeSnapshot = {
   messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
+  /** Display-only checkpoint. It is never included in a model request. */
+  interruptedThinking?: InterruptedThinking;
+  /** Completed Responses thinking while the current turn is still running. */
+  activeThinking?: InterruptedThinking;
+  /** Input associated with the running Responses history, for crash recovery. */
+  activeTurn?: { input: AgentQueryContent; committed: boolean };
   /** Usage of subagent tasks spawned by this agent, appended at task end. */
   subagentUsageHistory?: SubagentUsageRecord[];
+};
+
+export type InterruptedThinking = {
+  providerId: string;
+  protocol: ProviderProtocol;
+  model: string;
+  apiBase: string;
+  text: string;
 };
 
 type AgentRunOptions = {
@@ -180,6 +200,15 @@ export class AgentRuntime {
   private activeStatusModuleStartedAt: number | null = null;
   private activeStatusModuleKey = '';
   private subagentUsageHistory: SubagentUsageRecord[] = [];
+  private interruptedThinking: InterruptedThinking | undefined;
+  private pendingThinking = '';
+  private completedThinking = '';
+  private thinkingAttemptStart = '';
+  private completedThinkingAttemptStart = '';
+  private thinkingNeedsSeparator = false;
+  private thinkingAttemptNeedsSeparator = false;
+  private turnAttemptThinking: InterruptedThinking | undefined;
+  private activeTurn: { runId: number; input: AgentQueryContent; committed: boolean } | undefined;
 
   constructor(
     configOverride: AgentRuntimeConfigOverride = {},
@@ -189,6 +218,20 @@ export class AgentRuntime {
   ) {
     this.currentConfig = readAgentRuntimeConfig(configOverride);
     this.recreateClient();
+    // The hosts emit these around each whole-turn attempt. The UI and the
+    // runtime must restore the same pre-turn checkpoint when a retry is safe.
+    this.events.on('thinkingTurnAttemptStart', () => {
+      this.turnAttemptThinking = this.interruptedThinking && { ...this.interruptedThinking };
+    });
+    this.events.on('thinkingTurnAttemptRollback', () => {
+      this.interruptedThinking = this.turnAttemptThinking && { ...this.turnAttemptThinking };
+      this.pendingThinking = this.interruptedThinking?.text ?? '';
+      this.completedThinking = this.pendingThinking;
+      this.thinkingNeedsSeparator = Boolean(this.pendingThinking);
+      this.thinkingAttemptStart = this.pendingThinking;
+      this.completedThinkingAttemptStart = this.completedThinking;
+      this.thinkingAttemptNeedsSeparator = this.thinkingNeedsSeparator;
+    });
   }
 
   /** Register the three listeners belonging to one rollback-capable text consumer. */
@@ -222,7 +265,9 @@ export class AgentRuntime {
   }
 
   get role() {
-    return this.resolveCurrentRole().name;
+    // 报**配置里的名字**，不是解析出来的那份：插件角色还没发布时解析会落到默认角色，
+    // 用它覆盖名字会把「暂时查不到」变成「这个会话是默认角色」，保存一次就真丢了。
+    return this.currentRole;
   }
 
   get capabilitySelection(): CapabilitySelection {
@@ -364,8 +409,11 @@ export class AgentRuntime {
   }
 
   buildSystemPrompt(): string {
+    const role = this.resolveCurrentRole();
     const prompt = micaAgent.buildSystemPrompt({
-      baseSystemPrompt: this.resolveCurrentRole().prompt,
+      // 插件角色只追加：通用规则仍是默认 base，别让插件把整段系统提示词顶掉。
+      baseSystemPrompt: role.append ? undefined : role.prompt,
+      ...(role.append ? { rolePrompt: role.prompt } : {}),
       skills: this.availableSkills(),
     });
     // 插件段落固定追加在最末：它们才是「每轮可能变」的内容（会话笔记、循环说明），
@@ -400,6 +448,11 @@ export class AgentRuntime {
       this.runId++;
     }
     this.currentConfig = readAgentRuntimeConfig();
+    const thinkingModelChanged = this.interruptedThinking && !this.matchesThinkingModel(this.interruptedThinking);
+    if (resetSession || thinkingModelChanged) {
+      this.interruptedThinking = undefined;
+      if (thinkingModelChanged) this.events.emit('thinkingReset', undefined);
+    }
     this.recreateClient();
     if (!resetSession && previousProtocol === this.currentConfig.provider.protocol && previousSnapshot && this.client) {
       this.client.loadSnapshot({
@@ -431,6 +484,10 @@ export class AgentRuntime {
       );
     }
     this.currentConfig = next;
+    if (this.interruptedThinking && (!preserveSession || !this.matchesThinkingModel(this.interruptedThinking))) {
+      this.interruptedThinking = undefined;
+      this.events.emit('thinkingReset', undefined);
+    }
     this.recreateClient();
     if (previousSnapshot && this.client) {
       this.client.loadSnapshot({ ...previousSnapshot, model: next.model });
@@ -438,10 +495,29 @@ export class AgentRuntime {
   }
 
   abort() {
+    // Invalidate runId only after the UI has rolled back the unfinished request.
+    if (this.activeAbortController && this.currentConfig.provider.protocol === 'openai_responses') {
+      this.rollbackIncompleteThinking();
+    }
     this.runId++;
     this.activeAbortController?.abort();
     this.activeAbortController = null;
     this.emitStatus({ type: 'idle' });
+  }
+
+  private rollbackIncompleteThinking(): void {
+    this.interruptedThinking = this.completedThinking
+      ? this.makeInterruptedThinking(this.completedThinking)
+      : undefined;
+    this.pendingThinking = this.completedThinking;
+    this.events.emit('thinkingRollback', undefined);
+  }
+
+  /** Drop a display checkpoint after the conversation it describes is rewritten. */
+  clearInterruptedThinking(): void {
+    if (!this.interruptedThinking) return;
+    this.interruptedThinking = undefined;
+    this.events.emit('thinkingReset', undefined);
   }
 
   reserveRunId(): number {
@@ -453,6 +529,10 @@ export class AgentRuntime {
     this.activeAbortController?.abort();
     this.activeAbortController = null;
     this.client?.reset();
+    this.interruptedThinking = undefined;
+    this.pendingThinking = '';
+    this.completedThinking = '';
+    this.activeTurn = undefined;
     // /clear 与新建会话都是「这条会话从这里重来」：插件状态属于会话，跟着一起清掉，
     // 否则新会话会莫名其妙继承上一轮的结论。
     this.pluginState = {};
@@ -495,6 +575,13 @@ export class AgentRuntime {
       messages: snapshot?.messages ?? [],
       usageHistory: snapshot?.usageHistory ?? [],
       lastUsage: snapshot?.lastUsage,
+      ...(this.interruptedThinking ? { interruptedThinking: { ...this.interruptedThinking } } : {}),
+      ...(this.isRunning && this.currentConfig.provider.protocol === 'openai_responses' && this.completedThinking
+        ? { activeThinking: this.makeInterruptedThinking(this.completedThinking) }
+        : {}),
+      ...(this.isRunning && this.activeTurn
+        ? { activeTurn: { input: cloneJson(this.activeTurn.input), committed: this.activeTurn.committed } }
+        : {}),
       subagentUsageHistory: this.subagentUsageHistory,
     };
   }
@@ -523,6 +610,11 @@ export class AgentRuntime {
       messages: options.dropLastUserMessageAndAfter
         ? dropLastUserMessageAndAfter(snapshot.messages)
         : snapshot.messages,
+      interruptedThinking: options.dropLastUserMessageAndAfter ? undefined : snapshot.interruptedThinking,
+      // The fork is not running the source turn. In particular, a fork that
+      // removes that turn must never retain its active display checkpoint.
+      activeThinking: undefined,
+      activeTurn: undefined,
       usageHistory: [],
       lastUsage: snapshot.lastUsage,
       subagentUsageHistory: [],
@@ -552,13 +644,27 @@ export class AgentRuntime {
     this.client?.loadSnapshot(snapshot);
   }
 
-  loadSnapshot(snapshot: AgentRuntimeSnapshot) {
+  loadSnapshot(snapshot: AgentRuntimeSnapshot, options: { recoverActiveThinking?: boolean } = {}) {
     if (this.isRunning) {
       throw new Error('Cannot load snapshot while agent is running');
     }
     this.runId++;
     this.currentConfig = agentRuntimeConfigFromSnapshot(snapshot);
-    this.currentRole = micaAgent.roles.get(snapshot.role)?.name ?? DEFAULT_ROLE_NAME;
+    const recovered = options.recoverActiveThinking ? snapshot.activeThinking : undefined;
+    const thinking = recovered && this.matchesThinkingModel(recovered) ? recovered : snapshot.interruptedThinking;
+    this.interruptedThinking = thinking && this.matchesThinkingModel(thinking)
+      ? { ...thinking }
+      : undefined;
+    this.pendingThinking = '';
+    this.completedThinking = '';
+    this.activeTurn = undefined;
+    // 名字照抄，**不**在解析不到时改写成默认角色：插件角色由插件发布索引（`plugin-roles/`），
+    // 而插件是在这个快照加载之后才 setup 的，那一刻查不到很正常。在这里改成 default 会
+    // 把「还没来得及发布」变成「这个会话从此是默认角色」——下一次保存就真的写进会话了。
+    this.currentRole =
+      typeof snapshot.role === 'string' && snapshot.role.trim()
+        ? snapshot.role.trim()
+        : DEFAULT_ROLE_NAME;
     // 旧快照没有 `capabilitiesCustomized`：以前的实现把当时的默认值复制进了快照，
     // 这份副本几乎总是等于默认值，按「未定制」处理（跟随当前 config 默认值）比把
     // 它当成用户的显式选择更符合意图；用户在面板里再点一下就会重新变成定制，
@@ -577,7 +683,26 @@ export class AgentRuntime {
       lastUsage: snapshot.lastUsage,
       conversationMessages: [],
     });
+    if (options.recoverActiveThinking && snapshot.activeTurn && !snapshot.activeTurn.committed && this.client) {
+      // loadSnapshot resets the provider's per-turn committed flag. The saved
+      // flag describes these exact messages, including after tool iterations.
+      const alreadyAtTail = this.client.preserveAbortedTurn(snapshot.activeTurn.input);
+      if (alreadyAtTail) {
+        // A matching unanswered previous message is still a separate turn: the
+        // saved input is known not to have been committed to these messages.
+        const current = this.client.getSnapshot();
+        const last = current.messages.at(-1);
+        if (last !== undefined) this.client.loadSnapshot({ ...current, messages: [...current.messages, cloneJson(last)] });
+      }
+    }
     this.subagentUsageHistory = snapshot.subagentUsageHistory ?? [];
+  }
+
+  /** Recover a crashed turn without reloading unrelated in-memory settings. */
+  recoverActiveThinking(thinking: InterruptedThinking): boolean {
+    if (this.isRunning || !this.matchesThinkingModel(thinking)) return false;
+    this.interruptedThinking = { ...thinking };
+    return true;
   }
 
   toConversationMessages(): MicaUiConversationMessage[] {
@@ -614,11 +739,20 @@ export class AgentRuntime {
       }
       abortController = new AbortController();
       this.activeAbortController = abortController;
+      this.activeTurn = this.currentConfig.provider.protocol === 'openai_responses'
+        ? { runId, input: cloneJson(question), committed: false }
+        : undefined;
       this.activeRunStartedAt = startedAt;
       this.activeRunUsageStartIndex = this.client.usageHistory.length;
       this.activeRunCompleteUsageLength = this.client.usageHistory.length;
       this.abortedRunUsageStartIndex = null;
       this.abortedRunCompleteUsageLength = null;
+      this.pendingThinking = this.interruptedThinking?.text ?? '';
+      this.completedThinking = this.pendingThinking;
+      this.thinkingAttemptStart = this.pendingThinking;
+      this.completedThinkingAttemptStart = this.completedThinking;
+      this.thinkingNeedsSeparator = Boolean(this.pendingThinking);
+      this.thinkingAttemptNeedsSeparator = this.thinkingNeedsSeparator;
       this.emitStatus({ type: 'connecting', startedAt });
       const client = this.client;
       const rollbackEnabled = this.canRollbackText();
@@ -640,14 +774,29 @@ export class AgentRuntime {
       client.onTextAttemptStart = rollbackEnabled ? () => {
         if (!this.isCurrent(runId)) return;
         if (!this.rollbackCheck?.()) throw new Error('Text rollback consumers changed during the run');
+        this.thinkingAttemptStart = this.pendingThinking;
+        this.completedThinkingAttemptStart = this.completedThinking;
+        this.thinkingAttemptNeedsSeparator = this.thinkingNeedsSeparator;
         this.events.emit('textAttemptStart', undefined);
       } : undefined;
       client.onTextRollback = rollbackEnabled ? () => {
         if (!this.isCurrent(runId)) return;
         if (this.rollbackSafetyLost || !this.rollbackCheck?.()) throw new Error('Text rollback consumers changed during the run');
+        this.pendingThinking = this.thinkingAttemptStart;
+        this.completedThinking = this.completedThinkingAttemptStart;
+        this.thinkingNeedsSeparator = this.thinkingAttemptNeedsSeparator;
         this.events.emit('textRollback', undefined);
       } : undefined;
+      client.onThinkingCheckpoint = (boundary) => {
+        if (!this.isCurrent(runId)) return;
+        this.completedThinking = this.pendingThinking;
+        // The Responses client supplies separators between parts in one stream.
+        // Only a new request needs a separator supplied by the runtime.
+        if (boundary === 'request') this.thinkingNeedsSeparator = Boolean(this.pendingThinking);
+        this.events.emit('thinkingCheckpoint', undefined);
+      };
       const signal = abortController.signal;
+      let rewrittenInputWillCommit = false;
       const text = await this.observationScope.run(observed, () =>
         client.query(question, {
           signal,
@@ -655,6 +804,10 @@ export class AgentRuntime {
           maxTurns: options.maxTurns,
           onRequestStart: (info) => {
             if (!this.isCurrent(runId)) return;
+            if (rewrittenInputWillCommit && this.activeTurn?.runId === runId) {
+              this.activeTurn.committed = true;
+              rewrittenInputWillCommit = false;
+            }
             this.observeActive({
               type: 'request:start',
               messageCount: info.messageCount,
@@ -676,6 +829,9 @@ export class AgentRuntime {
             const beforeCount = messages.length;
             const rewritten = await applyIterationRewrites(messages, this, signal);
             if (rewritten && this.isCurrent(runId)) {
+              // The provider installs these messages after this callback. Mark
+              // them committed only when it reports the next request start.
+              rewrittenInputWillCommit = true;
               this.observeActive({ type: 'history:rewritten', beforeCount, afterCount: rewritten.length });
             }
             return rewritten;
@@ -683,12 +839,22 @@ export class AgentRuntime {
           onIterationComplete: async () => {
             if (!this.isCurrent(runId)) return null;
             this.activeRunCompleteUsageLength = this.client?.usageHistory.length ?? this.activeRunCompleteUsageLength;
-            return options.onIterationComplete?.() ?? null;
+            if (this.activeTurn?.runId === runId) this.activeTurn.committed = true;
+            const nextInput = await (options.onIterationComplete?.() ?? null);
+            if (nextInput != null && this.isCurrent(runId) && this.activeTurn?.runId === runId) {
+              this.activeTurn = { runId, input: cloneJson(nextInput), committed: false };
+            }
+            return nextInput;
           },
         }),
       );
       if (!this.isCurrent(runId) || signal.aborted) outcome = 'aborted';
       if (this.isCurrent(runId)) {
+        this.interruptedThinking = undefined;
+        // Completed status listeners can synchronously request a snapshot before
+        // the finally block clears the active controller.
+        this.completedThinking = '';
+        this.activeTurn = undefined;
         this.emitStatus({
           type: 'completed',
           startedAt,
@@ -708,9 +874,13 @@ export class AgentRuntime {
       const message = error instanceof Error ? error.message : String(error);
       outcome = 'error';
       observationError = message;
+      if (abortController && this.currentConfig.provider.protocol === 'openai_responses') {
+        this.rollbackIncompleteThinking();
+      }
       if (this.isCurrent(runId)) this.emitStatus({ type: 'error', message });
       throw error;
     } finally {
+      if (this.activeTurn?.runId === runId) this.activeTurn = undefined;
       if (abortController && this.activeAbortController === abortController) {
         this.activeAbortController = null;
         this.rollbackTracking = false;
@@ -735,6 +905,25 @@ export class AgentRuntime {
     return runId === this.runId;
   }
 
+  private makeInterruptedThinking(text: string): InterruptedThinking {
+    return {
+      providerId: this.currentConfig.provider.id,
+      protocol: this.currentConfig.provider.protocol,
+      model: this.currentConfig.model,
+      apiBase: this.currentConfig.provider.api_base,
+      text,
+    };
+  }
+
+  private matchesThinkingModel(thinking: InterruptedThinking): boolean {
+    return typeof thinking.text === 'string' && thinking.text.length > 0
+      && thinking.providerId === this.currentConfig.provider.id
+      && thinking.protocol === 'openai_responses'
+      && thinking.protocol === this.currentConfig.provider.protocol
+      && thinking.model === this.currentConfig.model
+      && thinking.apiBase === this.currentConfig.provider.api_base;
+  }
+
   private recreateClient() {
     if (!this.currentConfig.provider.api_key) {
       this.client = null;
@@ -749,6 +938,11 @@ export class AgentRuntime {
     };
     this.client.onThinking = (thinking) => {
       if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
+      if (this.currentConfig.provider.protocol === 'openai_responses' && thinking) {
+        if (this.thinkingNeedsSeparator) this.pendingThinking += '\n\n';
+        this.pendingThinking += thinking;
+        this.thinkingNeedsSeparator = false;
+      }
       this.emitStatus({ type: 'thinking', startedAt: this.activeRunStartedAt ?? undefined });
       this.events.emit('thinking', thinking);
       if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
@@ -815,7 +1009,8 @@ export class AgentRuntime {
   private resolveCurrentRole() {
     const role = micaAgent.roles.get(this.currentRole) ?? micaAgent.roles.get(DEFAULT_ROLE_NAME);
     if (!role) throw new Error('Built-in default role is unavailable');
-    this.currentRole = role.name;
+    // 解析不到就把名字留着（插件角色稍后才发布）：提示词用默认的那份，但会话角色不变，
+    // 插件按角色做的门控也因此仍然成立。名字被**改写**才是真的丢配置。
     return role;
   }
 

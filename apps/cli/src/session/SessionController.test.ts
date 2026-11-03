@@ -4,9 +4,16 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PersistedSession, SessionStoreLike } from '@packages/mica-session/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
-import type { AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
+import type { AgentRuntimeEvents, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import type { SessionAgentAdapter } from './SessionController.js';
 import { buildSubagentUsageRecord } from '@packages/mica-agent/index.js';
+
+const responseMocks = vi.hoisted(() => ({ create: vi.fn() }));
+vi.mock('openai', () => ({
+  OpenAI: class MockOpenAI {
+    responses = { create: responseMocks.create };
+  },
+}));
 
 const previousHome = process.env.HOME;
 const previousMicaHome = process.env.MICA_HOME;
@@ -31,7 +38,481 @@ afterAll(() => {
   rmSync(tempHome, { recursive: true, force: true });
 });
 
+const baseSnapshot: AgentRuntimeSnapshot = {
+  providerId: 'test',
+  protocol: 'openai_responses',
+  model: 'm',
+  effort: 'none',
+  role: 'default',
+  messages: [{ role: 'user', content: 'work' }],
+  usageHistory: [],
+  lastUsage: undefined,
+};
+
+function persistedSession(id: string, extra: Partial<PersistedSession> = {}): PersistedSession {
+  return {
+    version: 1,
+    revision: 1,
+    id,
+    title: 'work',
+    titleSource: 'derived',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    cwd: tempHome,
+    turnState: 'completed',
+    snapshot: { ...baseSnapshot, conversationMessages: [{ role: 'user', content: 'work' }] },
+    ...extra,
+  };
+}
+
+async function sessionController(store: Pick<SessionStoreLike, 'load' | 'save'>) {
+  const { SessionController } = await import('./SessionController.js');
+  const agent: SessionAgentAdapter = {
+    getSnapshot: () => baseSnapshot,
+    loadSnapshot: vi.fn(),
+    reloadConfig: vi.fn(),
+    toConversationMessages: () => [{ role: 'user', content: 'work' }],
+  };
+  return new SessionController({
+    agent,
+    store: { list: () => [], listRecent: () => [], delete: () => false, ...store },
+    config: { apply: () => undefined },
+    ui: { restore: vi.fn() },
+  });
+}
+
 describe('SessionController', () => {
+  it('round-trips an interrupted thinking display checkpoint without adding it to model messages', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const thinking = {
+      providerId: 'test',
+      protocol: 'openai_responses' as const,
+      model: 'm',
+      apiBase: 'https://test',
+      text: 'complete',
+    };
+    const snapshot: AgentRuntimeSnapshot = {
+      providerId: 'test',
+      protocol: 'openai_responses',
+      model: 'm',
+      effort: 'none',
+      role: 'default',
+      messages: [{ role: 'user', content: 'work' }],
+      usageHistory: [],
+      lastUsage: undefined,
+      interruptedThinking: thinking,
+    };
+    const loadSnapshot = vi.fn();
+    const agent: SessionAgentAdapter = {
+      getSnapshot: () => snapshot,
+      loadSnapshot,
+      reloadConfig: vi.fn(),
+      toConversationMessages: () => [{ role: 'user', content: 'work' }],
+    };
+    let saved: PersistedSession | null = null;
+    const store: SessionStoreLike = {
+      list: () => [],
+      listRecent: () => [],
+      load: () => saved,
+      save: (session) => {
+        saved = session;
+      },
+      delete: () => false,
+    };
+    const controller = new SessionController({
+      agent,
+      store,
+      config: { apply: () => undefined },
+      ui: { restore: vi.fn() },
+    });
+    expect(controller.saveCurrent({ turnState: 'aborted' })).toBe(true);
+    expect(saved!.snapshot.interruptedThinking).toEqual(thinking);
+    expect(saved!.snapshot.messages).toEqual(snapshot.messages);
+    expect(controller.resumeLoaded(saved!).ok).toBe(true);
+    expect(loadSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ interruptedThinking: thinking, messages: snapshot.messages }),
+    );
+  });
+
+  it('saves completed progress and retry rollbacks without replacing the conversation', async () => {
+    const { default: mitt } = await import('mitt');
+    const { SessionController } = await import('./SessionController.js');
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    const events = mitt<AgentRuntimeEvents>();
+    const thinking = {
+      providerId: 'test',
+      protocol: 'openai_responses' as const,
+      model: 'm',
+      apiBase: 'https://test',
+      text: 'complete',
+    };
+    let snapshot: AgentRuntimeSnapshot = {
+      providerId: 'test',
+      protocol: 'openai_responses',
+      model: 'm',
+      effort: 'none',
+      role: 'default',
+      messages: [{ role: 'user', content: 'work' }],
+      usageHistory: [],
+      lastUsage: undefined,
+    };
+    let running = false;
+    const agent: SessionAgentAdapter = {
+      events,
+      get isRunning() {
+        return running;
+      },
+      getSnapshot: () => snapshot,
+      loadSnapshot: vi.fn(),
+      reloadConfig: vi.fn(),
+      toConversationMessages: () => [{ role: 'user', content: 'work' }],
+    };
+    let saved: PersistedSession | null = null;
+    const store: SessionStoreLike = {
+      list: () => [],
+      listRecent: () => [],
+      load: () => saved,
+      save: (session) => {
+        saved = session;
+      },
+      delete: () => false,
+    };
+    const controller = new SessionController({
+      agent,
+      store,
+      config: { apply: () => undefined },
+      ui: { restore: vi.fn() },
+    });
+    const lease = micaSession.acquireTurnLease(controller.getCurrentSessionId());
+    expect(lease).not.toBeNull();
+    try {
+      expect(controller.saveCurrent({ turnState: 'running' })).toBe(true);
+      const messages = saved!.snapshot.conversationMessages;
+      running = true;
+      snapshot = { ...snapshot, activeThinking: thinking };
+      events.emit('thinkingCheckpoint', undefined);
+      expect(saved!.snapshot.activeThinking).toEqual(thinking);
+      expect(saved!.snapshot.conversationMessages).toEqual(messages);
+      snapshot = { ...snapshot, activeThinking: undefined };
+      events.emit('textRollback', undefined);
+      expect(saved!.snapshot.activeThinking).toBeUndefined();
+      snapshot = { ...snapshot, activeThinking: thinking };
+      events.emit('thinkingCheckpoint', undefined);
+      running = false;
+    } finally {
+      lease?.release();
+    }
+    expect(controller.resumeLoaded(saved!).ok).toBe(true);
+    expect(agent.loadSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ activeThinking: thinking }), {
+      recoverActiveThinking: true,
+    });
+  });
+
+  it.each([
+    { name: 'first request', iterations: 0, queued: false, mismatch: false, repeated: false, rewrite: false },
+    { name: 'two committed tool iterations', iterations: 2, queued: false, mismatch: false, repeated: false, rewrite: false },
+    { name: 'queued input after a tool iteration', iterations: 1, queued: true, mismatch: false, repeated: false, rewrite: false },
+    { name: 'different restored model', iterations: 0, queued: false, mismatch: true, repeated: false, rewrite: false },
+    { name: 'identical preceding user input', iterations: 0, queued: false, mismatch: false, repeated: true, rewrite: false },
+    { name: 'history rewritten before the first response', iterations: 0, queued: false, mismatch: false, repeated: false, rewrite: true },
+  ])('recovers the exact provider history after a crash: $name', async ({ iterations, queued, mismatch, repeated, rewrite }) => {
+    const { AgentRuntime } = await import('../agent/AgentRuntime.js');
+    const { SessionController } = await import('./SessionController.js');
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    const { micaConfig } = await import('@packages/mica-config/index.js');
+    const { registerIterationRewrite } = await import('../agent/iterationRewrite.js');
+    const provider = {
+      id: 'recovery-test', api_base: 'https://example.com/v1', api_key: 'test-key',
+      protocol: 'openai_responses' as const, models: ['test-model', 'other-model'], supportsEffort: false,
+    };
+    const configSpy = vi.spyOn(micaConfig, 'get').mockReturnValue({
+      provider: provider.id, model: 'test-model', effort: 'none', contextWindowSize: 1000, providers: [provider],
+    });
+    const ruleSpy = vi.spyOn(micaConfig, 'getModelRule').mockReturnValue({ contextSize: 1000, supportsVision: true } as ReturnType<typeof micaConfig.getModelRule>);
+    const rewriter = rewrite ? registerIterationRewrite('recovery-test', (messages) => [...messages]) : undefined;
+    responseMocks.create.mockReset();
+    const input = [
+      { type: 'text' as const, text: 'What is in this picture?' },
+      { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'YWJj' } },
+    ];
+    const expectedContent = [
+      { type: 'input_text', text: 'What is in this picture?' },
+      { type: 'input_image', detail: 'auto', image_url: 'data:image/png;base64,YWJj' },
+    ];
+    const completed = { type: 'response.completed', response: { model: 'test-model', status: 'completed' } };
+    const store = micaSession.createStore();
+    const agent = new AgentRuntime();
+    if (repeated) {
+      agent.loadSnapshot({
+        ...agent.getSnapshot(), messages: [{ type: 'message', role: 'user', content: expectedContent }],
+      });
+    }
+    const controller = new SessionController({ agent, store, config: { apply: () => undefined }, ui: { restore: vi.fn() } });
+    const lease = micaSession.acquireTurnLease(controller.getCurrentSessionId());
+    expect(lease).not.toBeNull();
+    let unblock!: () => void;
+    const blocked = new Promise<void>((resolve) => { unblock = resolve; });
+    let checkpoint!: () => void;
+    const checkpointReached = new Promise<void>((resolve) => { checkpoint = resolve; });
+    let running: Promise<unknown> | undefined;
+    try {
+      controller.saveCurrent({ allowEmpty: true, turnState: 'running', conversationMessages: [{ role: 'user', content: 'display' }] });
+      for (let index = 0; index < iterations; index++) {
+        responseMocks.create.mockResolvedValueOnce((async function* () {
+          yield { type: 'response.output_item.done', output_index: 0, item: {
+            type: 'function_call', id: `fc_${index}`, call_id: `call_${index}`,
+            name: 'missing_test_tool', arguments: '{}', status: 'completed',
+          } };
+          yield completed;
+        })());
+      }
+      responseMocks.create.mockResolvedValueOnce((async function* () {
+        yield { type: 'response.reasoning_summary_text.delta', item_id: 'rs_1', summary_index: 0, delta: 'complete' };
+        yield { type: 'response.reasoning_summary_text.done', item_id: 'rs_1', summary_index: 0, text: 'complete' };
+        await blocked;
+      })());
+      agent.events.on('thinkingCheckpoint', () => {
+        if (agent.getSnapshot().activeThinking?.text === 'complete') checkpoint();
+      });
+      let completedIterations = 0;
+      running = agent.run(input, { onIterationComplete: () => {
+        completedIterations++;
+        controller.saveCurrent({ allowEmpty: true, turnState: 'running' });
+        return queued && completedIterations === 1 ? 'queued follow-up' : null;
+      } }).catch((error) => error);
+      await checkpointReached;
+      const saved = store.load(controller.getCurrentSessionId())!;
+      expect(saved.snapshot.activeThinking?.text).toBe('complete');
+      expect(saved.snapshot.activeTurn).toEqual({
+        input: queued ? 'queued follow-up' : input,
+        committed: (iterations > 0 && !queued) || rewrite,
+      });
+      expect(saved.snapshot.messages).toEqual(agent.getSnapshot().messages);
+      const preCrashInput = structuredClone(
+        (responseMocks.create.mock.calls.at(-1)![0] as { input: Array<Record<string, unknown>> }).input,
+      );
+
+      // The persisted running state remains as if the process had disappeared.
+      agent.abort();
+      unblock();
+      await running;
+      lease?.release();
+      const restored = new AgentRuntime();
+      const next = new SessionController({
+        agent: restored, store,
+        config: { apply: (snapshot) => mismatch ? { ...snapshot, model: 'other-model' } : snapshot },
+        ui: { restore: vi.fn() },
+      });
+      expect(next.resume(saved.id).ok).toBe(true);
+      expect(restored.getSnapshot().interruptedThinking?.text).toBe(mismatch ? undefined : 'complete');
+      responseMocks.create.mockResolvedValueOnce((async function* () { yield completed; })());
+      await restored.run('continue');
+      const request = responseMocks.create.mock.calls.at(-1)![0] as { input: Array<Record<string, unknown>> };
+      expect(request.input.slice(0, -1)).toEqual(preCrashInput);
+      const users = request.input.filter((item) => item.type === 'message' && item.role === 'user');
+      expect(users.filter((item) => JSON.stringify(item.content) === JSON.stringify(expectedContent))).toHaveLength(repeated ? 2 : 1);
+      expect(users.at(-1)?.content).toEqual([{ type: 'input_text', text: 'continue' }]);
+      expect(users.some((item) => JSON.stringify(item.content) === JSON.stringify([{ type: 'input_text', text: 'queued follow-up' }]))).toBe(queued);
+      expect(request.input.filter((item) => item.type === 'function_call_output')).toHaveLength(iterations);
+      expect(request.input).not.toContainEqual(expect.objectContaining({ content: 'complete' }));
+    } finally {
+      agent.abort();
+      unblock();
+      if (running) await running;
+      lease?.release();
+      responseMocks.create.mockReset();
+      rewriter?.dispose();
+      configSpy.mockRestore();
+      ruleSpy.mockRestore();
+    }
+  });
+
+  it('does not recover a live writer and recovers its unchanged checkpoint after acquiring the turn lease', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    const thinking = {
+      providerId: 'test',
+      protocol: 'openai_responses' as const,
+      model: 'm',
+      apiBase: 'https://test',
+      text: 'complete',
+    };
+    const runtimeSnapshot: AgentRuntimeSnapshot = {
+      providerId: 'test',
+      protocol: 'openai_responses',
+      model: 'm',
+      effort: 'none',
+      role: 'default',
+      messages: [{ role: 'user', content: 'work' }],
+      usageHistory: [],
+      lastUsage: undefined,
+    };
+    const loadSnapshot = vi.fn();
+    const agent: SessionAgentAdapter = {
+      getSnapshot: () => runtimeSnapshot,
+      loadSnapshot,
+      reloadConfig: vi.fn(),
+      toConversationMessages: () => [{ role: 'user', content: 'work' }],
+    };
+    const session: PersistedSession = {
+      version: 1,
+      id: 'live-thinking',
+      title: 'work',
+      cwd: '/tmp',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      turnState: 'running',
+      snapshot: {
+        ...runtimeSnapshot,
+        activeThinking: thinking,
+        conversationMessages: [{ role: 'user', content: 'work' }],
+      },
+    };
+    const store: SessionStoreLike = {
+      list: () => [],
+      listRecent: () => [],
+      load: (id) => (id === session.id ? session : null),
+      save: vi.fn(),
+      delete: () => false,
+    };
+    const controller = new SessionController({
+      agent,
+      store,
+      config: { apply: () => undefined },
+      ui: { restore: vi.fn() },
+    });
+    const liveLease = micaSession.acquireTurnLease(session.id);
+    expect(liveLease).not.toBeNull();
+    try {
+      expect(controller.resumeLoaded(session).ok).toBe(true);
+      expect(loadSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ activeThinking: thinking }));
+    } finally {
+      liveLease?.release();
+    }
+    const nextLease = micaSession.acquireTurnLease(session.id);
+    expect(nextLease).not.toBeNull();
+    try {
+      expect(controller.refreshFromStore()?.ok).toBe(true);
+      expect(loadSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ activeThinking: thinking }), {
+        recoverActiveThinking: true,
+      });
+      expect(controller.refreshFromStore()).toBeNull();
+    } finally {
+      nextLease?.release();
+    }
+  });
+
+  it('re-reads a stale running snapshot under the lease before deciding whether to recover', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const thinking = {
+      providerId: 'test',
+      protocol: 'openai_responses' as const,
+      model: 'm',
+      apiBase: 'https://test',
+      text: 'old progress',
+    };
+    const stale = persistedSession('finished-during-resume', {
+      turnState: 'running',
+      snapshot: { ...baseSnapshot, activeThinking: thinking, conversationMessages: [] },
+    });
+    const current = persistedSession(stale.id, { revision: 2, turnState: 'completed' });
+    const loadSnapshot = vi.fn();
+    const agent: SessionAgentAdapter = {
+      getSnapshot: () => baseSnapshot,
+      loadSnapshot,
+      reloadConfig: vi.fn(),
+      toConversationMessages: () => [{ role: 'user', content: 'work' }],
+    };
+    const store: SessionStoreLike = {
+      list: () => [],
+      listRecent: () => [],
+      load: (id) => (id === stale.id ? current : null),
+      save: vi.fn(),
+      delete: () => false,
+    };
+    const controller = new SessionController({
+      agent,
+      store,
+      config: { apply: () => undefined },
+      ui: { restore: vi.fn() },
+    });
+    expect(controller.resumeLoaded(stale)).toMatchObject({
+      ok: true,
+      session: { revision: 2, turnState: 'completed' },
+    });
+    expect(loadSnapshot).toHaveBeenCalledWith(expect.objectContaining({ activeThinking: undefined }));
+  });
+
+  it('lets a no-save refresh recover only after the live lease is released', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    const thinking = {
+      providerId: 'test',
+      protocol: 'openai_responses' as const,
+      model: 'm',
+      apiBase: 'https://test',
+      text: 'complete',
+    };
+    const runtimeSnapshot: AgentRuntimeSnapshot = {
+      providerId: 'test',
+      protocol: 'openai_responses',
+      model: 'm',
+      effort: 'none',
+      role: 'default',
+      messages: [{ role: 'user', content: 'work' }],
+      usageHistory: [],
+      lastUsage: undefined,
+    };
+    const loadSnapshot = vi.fn();
+    const agent: SessionAgentAdapter = {
+      getSnapshot: () => runtimeSnapshot,
+      loadSnapshot,
+      reloadConfig: vi.fn(),
+      toConversationMessages: () => [{ role: 'user', content: 'work' }],
+    };
+    const session: PersistedSession = {
+      version: 1,
+      id: 'no-save-live-thinking',
+      title: 'work',
+      cwd: '/tmp',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      turnState: 'running',
+      snapshot: {
+        ...runtimeSnapshot,
+        activeThinking: thinking,
+        conversationMessages: [{ role: 'user', content: 'work' }],
+      },
+    };
+    const store: SessionStoreLike = {
+      list: () => [],
+      listRecent: () => [],
+      load: (id) => (id === session.id ? session : null),
+      save: vi.fn(),
+      delete: () => false,
+    };
+    const controller = new SessionController({
+      agent,
+      store,
+      config: { apply: () => undefined },
+      ui: { restore: vi.fn() },
+    });
+    controller.setTodoPersistenceEnabled(false);
+    const lease = micaSession.acquireTurnLease(session.id);
+    expect(lease).not.toBeNull();
+    try {
+      expect(controller.resumeLoaded(session).ok).toBe(true);
+      expect(controller.refreshFromStore()).toBeNull();
+      expect(loadSnapshot).toHaveBeenCalledTimes(1);
+    } finally {
+      lease?.release();
+    }
+    expect(controller.refreshFromStore()?.ok).toBe(true);
+    expect(loadSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ activeThinking: thinking }), {
+      recoverActiveThinking: true,
+    });
+  });
+
   it.each([false, true])(
     'records late plugin usage in the original persisted session (deleted: %s)',
     async (deleted) => {
@@ -111,6 +592,49 @@ describe('SessionController', () => {
       else expect(save).toHaveBeenCalledWith({ allowEmpty: true });
     },
   );
+
+  it('keeps the parent another process wrote instead of the value loaded into memory', async () => {
+    let saved = persistedSession('session', { parentSessionId: 'loaded-parent' });
+    const controller = await sessionController({
+      load: () => saved,
+      save: (session) => {
+        saved = session;
+      },
+    });
+    expect(controller.resumeLoaded(saved).ok).toBe(true);
+
+    // 用户在侧栏把这条会话拖到另一个父会话下：桌面端直接改盘，宿主内存里仍是旧值
+    saved = { ...saved, parentSessionId: 'dragged-parent', revision: (saved.revision ?? 0) + 1 };
+    controller.saveCurrent({ turnState: 'aborted' });
+    expect(saved.parentSessionId).toBe('dragged-parent');
+
+    // 解除父子关系同样以盘上为准，不能被内存里的旧值顶回去
+    const { parentSessionId: dropped, ...root } = saved;
+    expect(dropped).toBe('dragged-parent');
+    saved = root as PersistedSession;
+    controller.saveCurrent({ turnState: 'error' });
+    expect('parentSessionId' in saved).toBe(false);
+  });
+
+  it('writes the parent given to a brand-new session and then follows the file', async () => {
+    let saved: PersistedSession | null = null;
+    const controller = await sessionController({
+      load: () => saved,
+      save: (session) => {
+        saved = session;
+      },
+    });
+    controller.startNewSession({ parentSessionId: 'spawned-by' });
+    expect(controller.saveCurrent()).toBe(true);
+    expect(saved!.parentSessionId).toBe('spawned-by');
+
+    // 落盘之后改成跟随文件：另一条进程把父子关系拆掉，宿主不该再写回去
+    const { parentSessionId: dropped, ...root } = saved!;
+    expect(dropped).toBe('spawned-by');
+    saved = root as PersistedSession;
+    controller.saveCurrent({ turnState: 'aborted' });
+    expect('parentSessionId' in saved!).toBe(false);
+  });
 
   it('falls back to the active provider and model when a resumed session references removed config', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');

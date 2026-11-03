@@ -129,6 +129,219 @@ describe('AgentRuntime tool status', () => {
     await agent.run('two');
   });
 
+  it('persists only completed Responses thinking on interrupt and clears it on model switch', async () => {
+    configState = {
+      ...testConfig,
+      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses', models: ['test-model', 'other-model'] }],
+    };
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const events: string[] = [];
+    agent.events.on('thinkingCheckpoint', () => events.push('checkpoint'));
+    agent.events.on('thinkingRollback', () => events.push('rollback'));
+    agent.events.on('status', (status) => { if (status.type === 'idle') events.push('idle'); });
+    let ready!: () => void;
+    const started = new Promise<void>((resolve) => { ready = resolve; });
+    modelClient.queryImpl = async (_question, options) => {
+      modelClient.onThinking?.('first');
+      modelClient.onThinkingCheckpoint?.('part');
+      modelClient.onThinking?.('\n\n'); // ResponsesClient separates parts in one response.
+      modelClient.onThinking?.('second');
+      modelClient.onThinkingCheckpoint?.('part');
+      modelClient.onThinkingCheckpoint?.('request');
+      modelClient.onThinking?.('third');
+      modelClient.onThinkingCheckpoint?.('request');
+      modelClient.onThinking?.('unfinished');
+      ready();
+      await new Promise<void>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+      return '';
+    };
+    const run = agent.run('hello');
+    await started;
+    expect(agent.getSnapshot().activeThinking?.text).toBe('first\n\nsecond\n\nthird');
+    agent.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AgentAbortError' });
+    expect(events).toEqual(['checkpoint', 'checkpoint', 'checkpoint', 'checkpoint', 'rollback', 'idle']);
+    const snapshot = agent.getSnapshot();
+    expect(snapshot.interruptedThinking).toEqual({
+      providerId: 'test-provider', protocol: 'openai_responses', model: 'test-model',
+      apiBase: 'https://example.com/v1', text: 'first\n\nsecond\n\nthird',
+    });
+    const restored = new AgentRuntime();
+    restored.loadSnapshot(snapshot);
+    expect(restored.getSnapshot().interruptedThinking?.text).toBe('first\n\nsecond\n\nthird');
+    const resumedStarted = new Promise<void>((resolve) => { ready = resolve; });
+    modelClient.queryImpl = async (_question, options) => {
+      modelClient.onThinking?.('fourth');
+      modelClient.onThinkingCheckpoint?.('request');
+      modelClient.onThinking?.('unfinished again');
+      ready();
+      await new Promise<void>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+      return '';
+    };
+    const resumedRun = restored.run('continue');
+    await resumedStarted;
+    restored.abort();
+    await expect(resumedRun).rejects.toMatchObject({ name: 'AgentAbortError' });
+    expect(restored.getSnapshot().interruptedThinking?.text).toBe('first\n\nsecond\n\nthird\n\nfourth');
+    const reset = vi.fn();
+    restored.events.on('thinkingReset', reset);
+    restored.configureForRun({ model: 'other-model' });
+    expect(restored.getSnapshot().interruptedThinking).toBeUndefined();
+    expect(reset).toHaveBeenCalledTimes(1);
+    restored.configureForRun({ model: 'test-model' });
+    expect(restored.getSnapshot().interruptedThinking).toBeUndefined();
+    restored.loadSnapshot(snapshot);
+    restored.configureForRun({}, false);
+    expect(restored.getSnapshot().interruptedThinking).toBeUndefined();
+  });
+
+  it('clears the active input before notifying completed listeners', async () => {
+    configState = {
+      ...testConfig,
+      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses' }],
+    };
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    let completedSnapshot: ReturnType<typeof agent.getSnapshot> | undefined;
+    agent.events.on('status', (status) => {
+      if (status.type === 'completed') completedSnapshot = agent.getSnapshot();
+    });
+    modelClient.queryImpl = async () => {
+      expect(agent.getSnapshot().activeTurn).toEqual({ input: 'work', committed: false });
+      expect(agent.getForkSnapshot().activeTurn).toBeUndefined();
+      return 'done';
+    };
+    await agent.run('work');
+    expect(completedSnapshot?.activeTurn).toBeUndefined();
+    expect(agent.getForkSnapshot().activeTurn).toBeUndefined();
+  });
+
+  it('rolls back completed thinking from a failed provider attempt before interruption', async () => {
+    configState = {
+      ...testConfig,
+      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses' }],
+    };
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    let visible = '';
+    let attemptVisible = '';
+    const consumer = {
+      text: vi.fn(),
+      thinking: (chunk: string) => { visible += chunk; },
+      start: () => { attemptVisible = visible; },
+      rollback: () => { visible = attemptVisible; },
+    };
+    agent.events.on('text', consumer.text);
+    agent.events.on('thinking', consumer.thinking);
+    agent.events.on('textAttemptStart', consumer.start);
+    agent.events.on('textRollback', consumer.rollback);
+    agent.registerTextRollbackConsumer(consumer);
+    let ready!: () => void;
+    const started = new Promise<void>((resolve) => { ready = resolve; });
+    modelClient.queryImpl = async (_question, options) => {
+      modelClient.onTextAttemptStart?.();
+      modelClient.onThinking?.('first');
+      modelClient.onThinkingCheckpoint?.('request');
+      modelClient.onTextAttemptStart?.();
+      modelClient.onThinking?.('failed complete');
+      modelClient.onThinkingCheckpoint?.('part');
+      expect(agent.getSnapshot().activeThinking?.text).toBe('first\n\nfailed complete');
+      modelClient.onTextRollback?.();
+      expect(agent.getSnapshot().activeThinking?.text).toBe('first');
+      expect(visible).toBe('first');
+      modelClient.onTextAttemptStart?.();
+      modelClient.onThinking?.('unfinished retry');
+      ready();
+      await new Promise<void>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+      return '';
+    };
+    const run = agent.run('hello');
+    await started;
+    agent.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AgentAbortError' });
+    expect(agent.getSnapshot().interruptedThinking?.text).toBe('first');
+  });
+
+  it.each([true, false])('keeps only completed Responses thinking after a terminal error (checkpoint: %s)', async (hasCheckpoint) => {
+    configState = {
+      ...testConfig,
+      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses' }],
+    };
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    let visible = '';
+    let checkpoint = '';
+    const events: string[] = [];
+    agent.events.on('thinking', (chunk) => { visible += chunk; });
+    agent.events.on('thinkingCheckpoint', () => { checkpoint = visible; });
+    agent.events.on('thinkingRollback', () => { visible = checkpoint; events.push('rollback'); });
+    agent.events.on('status', (status) => { if (status.type === 'error') events.push('error'); });
+    modelClient.queryImpl = async () => {
+      if (hasCheckpoint) {
+        modelClient.onThinking?.('completed');
+        modelClient.onThinkingCheckpoint?.('part');
+        modelClient.onThinking?.('\n\n');
+      }
+      modelClient.onThinking?.('unfinished');
+      throw new Error('terminal failure');
+    };
+    await expect(agent.run('work')).rejects.toThrow('terminal failure');
+    expect(events).toEqual(['rollback', 'error']);
+    expect(visible).toBe(hasCheckpoint ? 'completed' : '');
+    expect(agent.getSnapshot().interruptedThinking?.text).toBe(hasCheckpoint ? 'completed' : undefined);
+    expect(agent.getSnapshot().activeThinking).toBeUndefined();
+  });
+
+  it('restores the original interrupted thinking when aborting during a whole-turn retry delay', async () => {
+    configState = {
+      ...testConfig,
+      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses' }],
+    };
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const original = {
+      providerId: 'test-provider', protocol: 'openai_responses' as const, model: 'test-model',
+      apiBase: 'https://example.com/v1', text: 'earlier interruption',
+    };
+    agent.loadSnapshot({ ...agent.getSnapshot(), interruptedThinking: original });
+    agent.events.emit('thinkingTurnAttemptStart', undefined);
+    modelClient.queryImpl = async () => {
+      modelClient.onThinking?.('failed attempt');
+      modelClient.onThinkingCheckpoint?.('request');
+      throw new Error('retryable failure');
+    };
+    await expect(agent.run('continue')).rejects.toThrow('retryable failure');
+    agent.events.emit('thinkingTurnAttemptRollback', undefined);
+    agent.abort();
+    expect(agent.getSnapshot().interruptedThinking).toEqual(original);
+  });
+
+  it('recovers active snapshots only for the matching Responses model and endpoint', async () => {
+    configState = {
+      ...testConfig,
+      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses' }],
+    };
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const active = {
+      providerId: 'test-provider', protocol: 'openai_responses' as const, model: 'test-model',
+      apiBase: 'https://example.com/v1', text: 'completed progress',
+    };
+    const snapshot = { ...agent.getSnapshot(), activeThinking: active };
+    agent.loadSnapshot(snapshot);
+    expect(agent.getSnapshot().interruptedThinking).toBeUndefined();
+    agent.loadSnapshot(snapshot, { recoverActiveThinking: true });
+    expect(agent.getSnapshot().interruptedThinking).toEqual(active);
+    for (const mismatch of [
+      { providerId: 'other' }, { model: 'other' }, { apiBase: 'https://other' },
+      { protocol: 'openai_chat_completions' as const }, { text: '' },
+    ]) {
+      agent.loadSnapshot({ ...snapshot, activeThinking: { ...active, ...mismatch } }, { recoverActiveThinking: true });
+      expect(agent.getSnapshot().interruptedThinking).toBeUndefined();
+    }
+  });
+
   it('enables rollback only for explicitly registered text consumers', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();
@@ -257,6 +470,34 @@ describe('AgentRuntime tool status', () => {
     const options = createModelClient.mock.calls.at(-1)?.[0];
     expect(typeof options?.systemPrompt).toBe('function');
     expect((options?.systemPrompt as () => string)()).toContain('<system>\nReview carefully.\n</system>');
+  });
+
+  it('keeps a role name that is not resolvable yet instead of resetting it to default', async () => {
+    const { micaAgent } = await import('@packages/mica-agent/index.js');
+    // 插件角色在插件 setup 之后才出现在索引里，而快照是在那之前加载的：那一刻查不到
+    // 角色并不代表这个会话不是它。改写名字等于把配置删掉，下一次保存就真的落盘了。
+    vi.spyOn(micaAgent.roles, 'get').mockImplementation((name: string) =>
+      name === 'default' ? { name: 'default', prompt: 'Default prompt.', builtIn: true } : undefined,
+    );
+
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    agent.loadSnapshot({
+      providerId: 'test-provider',
+      protocol: 'openai_chat_completions',
+      model: 'test-model',
+      effort: 'none',
+      role: '需求开发',
+      messages: [],
+      usageHistory: [],
+      lastUsage: undefined,
+    });
+    expect(agent.role).toBe('需求开发');
+    expect(agent.getSnapshot().role).toBe('需求开发');
+
+    // 拼系统提示词时用默认角色那份正文（角色还没发布），但会话角色本身不变。
+    expect(agent.buildSystemPrompt()).toContain('<system>');
+    expect(agent.getSnapshot().role).toBe('需求开发');
   });
 
   it('records the system prompt actually sent into the snapshot', async () => {

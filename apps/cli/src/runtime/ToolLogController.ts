@@ -26,6 +26,12 @@ export class ToolLogController {
   private thinkingBuffer = '';
   private activeThinkingId: string | null = null;
   private lastThinkingUiUpdateAt = 0;
+  // The value is the text at the last completed reasoning checkpoint, or null
+  // for a row created since then. Keep it even after a segment is flushed.
+  private uncheckpointedThinking = new Map<string, string | null>();
+  // Unlike a request checkpoint, a turn attempt spans every completed response.
+  private turnAttemptThinking: Map<string, string | null> | null = null;
+  private turnAttemptCheckpoint: ReturnType<ToolLogController['checkpointThinking']> | null = null;
   private activeToolCalls = new Map<string, ActiveToolCall>();
 
   constructor(private readonly sink: ToolLogSink = defaultSink) {}
@@ -34,6 +40,9 @@ export class ToolLogController {
     this.thinkingBuffer = '';
     this.activeThinkingId = null;
     this.lastThinkingUiUpdateAt = 0;
+    this.uncheckpointedThinking.clear();
+    this.turnAttemptThinking = null;
+    this.turnAttemptCheckpoint = null;
     this.activeToolCalls.clear();
     if (options.clearThinkingText !== false) this.sink.setThinkingText('');
   }
@@ -45,32 +54,103 @@ export class ToolLogController {
   }
 
   checkpointThinking() {
-    return { buffer: this.thinkingBuffer, id: this.activeThinkingId, lastUpdate: this.lastThinkingUiUpdateAt };
+    return {
+      buffer: this.thinkingBuffer,
+      id: this.activeThinkingId,
+      lastUpdate: this.lastThinkingUiUpdateAt,
+      uncheckpointed: new Map(this.uncheckpointedThinking),
+    };
+  }
+
+  hasUncheckpointedThinking(): boolean {
+    return this.uncheckpointedThinking.size > 0;
   }
 
   restoreThinking(checkpoint: ReturnType<ToolLogController['checkpointThinking']>) {
     this.thinkingBuffer = checkpoint.buffer;
     this.activeThinkingId = checkpoint.id;
     this.lastThinkingUiUpdateAt = checkpoint.lastUpdate;
+    this.uncheckpointedThinking = new Map(checkpoint.uncheckpointed);
     this.sink.setThinkingText(checkpoint.buffer);
     if (checkpoint.id) {
       this.sink.replaceAgentTurnLogItem(micaUi.createThinkingLogItem(checkpoint.id, checkpoint.buffer));
     }
   }
 
-  endThinkingSegment() {
-    if (this.activeThinkingId) {
-      this.sink.replaceAgentTurnLogItem(micaUi.createThinkingLogItem(this.activeThinkingId, this.thinkingBuffer));
+  beginTurnAttempt() {
+    this.flushThinking();
+    this.turnAttemptCheckpoint = this.checkpointThinking();
+    this.turnAttemptThinking = new Map();
+  }
+
+  /** Revert only thinking touched by this run, preserving tool and text rows. */
+  rollbackTurnAttemptThinking(): Array<{ id: string; text: string | null }> {
+    if (!this.turnAttemptThinking || !this.turnAttemptCheckpoint) return [];
+    const checkpoint = this.turnAttemptCheckpoint;
+    // 交回的是「尝试开始时那一行长什么样」，不是它现在的文本：本次尝试新开的那几行
+    // 要整行撤掉（`null`），否则重试前的回滚会把失败尝试的思考又原样贴回去。
+    const changes = Array.from(this.turnAttemptThinking.keys(), (id) => ({
+      id,
+      text: id === checkpoint.id ? checkpoint.buffer : (checkpoint.uncheckpointed.get(id) ?? null),
+    }));
+    this.restoreThinking(checkpoint);
+    this.turnAttemptThinking = null;
+    this.turnAttemptCheckpoint = null;
+    return changes;
+  }
+
+  /** Record completed reasoning independently of the retry-attempt snapshot. */
+  markThinkingCheckpoint() {
+    this.flushThinking();
+    this.uncheckpointedThinking.clear();
+  }
+
+  /** Return the thinking rows to restore/remove, without touching other log rows. */
+  rollbackUncheckpointedThinking(): Array<{ id: string; text: string | null }> {
+    const changes = Array.from(this.uncheckpointedThinking, ([id, text]) => ({ id, text }));
+    if (!changes.length) return changes;
+
+    if (this.activeThinkingId && this.uncheckpointedThinking.has(this.activeThinkingId)) {
+      const text = this.uncheckpointedThinking.get(this.activeThinkingId)!;
+      this.thinkingBuffer = text ?? '';
+      if (text === null) this.activeThinkingId = null;
+      this.lastThinkingUiUpdateAt = 0;
+      this.sink.setThinkingText(this.thinkingBuffer);
     }
+    this.uncheckpointedThinking.clear();
+    return changes;
+  }
+
+  flushThinking() {
+    if (!this.activeThinkingId) return;
+    this.sink.setThinkingText(this.thinkingBuffer);
+    this.sink.replaceAgentTurnLogItem(micaUi.createThinkingLogItem(this.activeThinkingId, this.thinkingBuffer));
+  }
+
+  endThinkingSegment() {
+    // The display can contain an earlier interrupted turn even when this
+    // controller has no active segment. An idle status during retry must not
+    // clear that restored text.
+    if (!this.activeThinkingId) return;
+    this.sink.replaceAgentTurnLogItem(micaUi.createThinkingLogItem(this.activeThinkingId, this.thinkingBuffer));
     this.thinkingBuffer = '';
     this.activeThinkingId = null;
+    this.lastThinkingUiUpdateAt = 0;
     this.sink.setThinkingText('');
   }
 
   appendThinking(text: string) {
+    if (!text) return;
     if (!this.activeThinkingId) {
       this.activeThinkingId = `thinking-${++this.thinkingId}`;
       this.thinkingBuffer = '';
+      this.uncheckpointedThinking.set(this.activeThinkingId, null);
+      this.turnAttemptThinking?.set(this.activeThinkingId, null);
+    } else if (!this.uncheckpointedThinking.has(this.activeThinkingId)) {
+      this.uncheckpointedThinking.set(this.activeThinkingId, this.thinkingBuffer);
+    }
+    if (this.turnAttemptThinking && !this.turnAttemptThinking.has(this.activeThinkingId)) {
+      this.turnAttemptThinking.set(this.activeThinkingId, this.thinkingBuffer);
     }
     this.thinkingBuffer = appendBoundedText(
       this.thinkingBuffer,

@@ -5,8 +5,15 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { transformWithOxc } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { claimSubagentRestart, commitSubagentRestart, readStoredSubagentTasks, releaseSubagentRestart, writeStoredSubagentTasks, type SubagentRestartClaim } from './subagentState.js';
-import type { SubagentTaskRecord } from '../../apps/cli/src/agents/SubagentTaskManager.js';
+import {
+  claimSubagentRestart,
+  commitSubagentRestart,
+  readStoredSubagentTasks,
+  releaseSubagentRestart,
+  writeStoredSubagentTasks,
+  type StoredSubagentTask,
+  type SubagentRestartClaim,
+} from './subagentState.js';
 
 const previousHome = process.env.MICA_HOME;
 const homes: string[] = [];
@@ -21,11 +28,27 @@ function home(): string {
   process.env.MICA_HOME = value;
   return value;
 }
-function task(id: string): SubagentTaskRecord {
-  return { id, description: id, subagent_type: 'test', model: 'm', effort: 'low', status: 'running', started_at: '2025-01-01T00:00:00Z', provider_id: 'p', protocol: 'test', timeline: [{ id: 'text', kind: 'text', text: 'progress', at: '2025-01-01T00:00:00Z' }] };
+function task(id: string): StoredSubagentTask {
+  return {
+    id,
+    description: id,
+    subagent_type: 'test',
+    model: 'm',
+    effort: 'low',
+    status: 'running',
+    started_at: '2025-01-01T00:00:00Z',
+    provider_id: 'p',
+    protocol: 'test',
+    timeline: [{ id: 'text', kind: 'text', text: 'progress', at: '2025-01-01T00:00:00Z' }],
+  };
 }
-function replacement(claim: SubagentRestartClaim, id = `${claim.id}-replacement`): SubagentTaskRecord {
-  return { ...task(id), execution_pid: process.pid, execution_pending: true, restart_origin: { task_id: claim.id, token: claim.owner.token } };
+function replacement(claim: SubagentRestartClaim, id = `${claim.id}-replacement`): StoredSubagentTask {
+  return {
+    ...task(id),
+    execution_pid: process.pid,
+    execution_pending: true,
+    restart_origin: { task_id: claim.id, token: claim.owner.token },
+  };
 }
 const childReplacement = `(claim, id) => ({
   id, description: id, subagent_type: 'test', model: 'm', effort: 'low', status: 'running',
@@ -44,17 +67,27 @@ describe('subagent state', () => {
       writeFileSync(join(dir, 'subagent-tasks', 'blocked'), 'not a directory');
       writeStoredSubagentTasks('blocked', [task('one')]);
       expect(log).toHaveBeenCalledWith(expect.stringContaining('writing task one'), expect.anything());
-    } finally { log.mockRestore(); }
+    } finally {
+      log.mockRestore();
+    }
   });
   it('keeps independent task updates and restores restart metadata and timeline', () => {
     home();
     writeStoredSubagentTasks('session', [task('one')]);
     writeStoredSubagentTasks('session', [task('two')]);
     writeStoredSubagentTasks('session', [{ ...task('one'), status: 'completed' }]);
-    expect(readStoredSubagentTasks('session')).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'one', status: 'completed', provider_id: 'p', protocol: 'test', timeline: expect.arrayContaining([expect.objectContaining({ text: 'progress' })]) }),
-      expect.objectContaining({ id: 'two', status: 'running' }),
-    ]));
+    expect(readStoredSubagentTasks('session')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'one',
+          status: 'completed',
+          provider_id: 'p',
+          protocol: 'test',
+          timeline: expect.arrayContaining([expect.objectContaining({ text: 'progress' })]),
+        }),
+        expect.objectContaining({ id: 'two', status: 'running' }),
+      ]),
+    );
     expect(readStoredSubagentTasks('another')).toEqual([]);
   });
   it('preserves live and unknown executions and only fails a confirmed dead process', () => {
@@ -73,7 +106,11 @@ describe('subagent state', () => {
     const dir = home();
     const parent = join(dir, 'subagent-restart-claims');
     mkdirSync(parent);
-    const child = spawnSync(process.execPath, ['-e', 'require("fs").mkdirSync(process.argv[1])', join(parent, 'claimed')]);
+    const child = spawnSync(process.execPath, [
+      '-e',
+      'require("fs").mkdirSync(process.argv[1])',
+      join(parent, 'claimed'),
+    ]);
     expect(child.status).toBe(0);
     expect(() => claimSubagentRestart('claimed')).toThrow('claimed');
   });
@@ -107,7 +144,10 @@ async function childModule(): Promise<string> {
 async function crashAfterClaim(id: string): Promise<void> {
   const script = `import { claimSubagentRestart } from ${JSON.stringify(await childModule())};
     claimSubagentRestart(${JSON.stringify(id)}); process.kill(process.pid, 'SIGKILL');`;
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: process.env, encoding: 'utf8' });
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    env: process.env,
+    encoding: 'utf8',
+  });
   expect({ signal: child.signal, stderr: child.stderr }).toEqual({ signal: 'SIGKILL', stderr: '' });
 }
 
@@ -138,7 +178,10 @@ describe('restart claim leases', () => {
     const script = `import { claimSubagentRestart, commitSubagentRestart } from ${JSON.stringify(await childModule())};
       const claim = claimSubagentRestart('started');
       commitSubagentRestart(claim, (${childReplacement})(claim, 'replacement'));`;
-    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: process.env, encoding: 'utf8' });
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: process.env,
+      encoding: 'utf8',
+    });
     expect({ status: child.status, stderr: child.stderr }).toEqual({ status: 0, stderr: '' });
     expect(() => claimSubagentRestart('started')).toThrow('claimed');
   });
@@ -152,7 +195,9 @@ describe('restart claim leases', () => {
     });
     try {
       expect(() => claimSubagentRestart('commit-race')).toThrow('claimed');
-    } finally { kill.mockRestore(); }
+    } finally {
+      kill.mockRestore();
+    }
     expect(() => claimSubagentRestart('commit-race')).toThrow('claimed');
   });
 
@@ -197,7 +242,11 @@ describe('restart claim leases', () => {
 
     const retry = claimSubagentRestart(original.id);
     commitSubagentRestart(retry, replacement(retry, 'retry'));
-    expect(readStoredSubagentTasks('session').map((record) => record.id).sort()).toEqual(['retry', original.id].sort());
+    expect(
+      readStoredSubagentTasks('session')
+        .map((record) => record.id)
+        .sort(),
+    ).toEqual(['retry', original.id].sort());
   });
 
   it('rejects handoffs that are not the claimed deferred execution', () => {
@@ -217,12 +266,19 @@ describe('restart claim leases', () => {
       const claim = claimSubagentRestart('before-commit');
       writeStoredSubagentTasks('session', [(${childReplacement})(claim, 'orphan')]);
       process.kill(process.pid, 'SIGKILL');`;
-    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: process.env, encoding: 'utf8' });
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: process.env,
+      encoding: 'utf8',
+    });
     expect({ signal: child.signal, stderr: child.stderr }).toEqual({ signal: 'SIGKILL', stderr: '' });
     expect(readStoredSubagentTasks('session').map((record) => record.id)).toEqual(['before-commit']);
     const retry = claimSubagentRestart('before-commit');
     commitSubagentRestart(retry, replacement(retry, 'safe-retry'));
-    expect(readStoredSubagentTasks('session').map((record) => record.id).sort()).toEqual(['before-commit', 'safe-retry']);
+    expect(
+      readStoredSubagentTasks('session')
+        .map((record) => record.id)
+        .sort(),
+    ).toEqual(['before-commit', 'safe-retry']);
   });
 
   it('recovers a committed replacement after SIGKILL even without its snapshot', async () => {
@@ -232,17 +288,26 @@ describe('restart claim leases', () => {
       const claim = claimSubagentRestart('after-commit');
       commitSubagentRestart(claim, (${childReplacement})(claim, 'durable-replacement'));
       process.kill(process.pid, 'SIGKILL');`;
-    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { env: process.env, encoding: 'utf8' });
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+      env: process.env,
+      encoding: 'utf8',
+    });
     expect({ signal: child.signal, stderr: child.stderr }).toEqual({ signal: 'SIGKILL', stderr: '' });
     const records = readStoredSubagentTasks('session');
     expect(records.find((record) => record.id === 'durable-replacement')).toMatchObject({
-      status: 'failed', error: 'Application restarted before this task completed.', restart_origin: { task_id: 'after-commit' },
+      status: 'failed',
+      error: 'Application restarted before this task completed.',
+      restart_origin: { task_id: 'after-commit' },
     });
     expect(readStoredSubagentTasks('other-session')).toEqual([]);
     expect(() => claimSubagentRestart('after-commit')).toThrow('claimed');
     const continuation = claimSubagentRestart('durable-replacement');
     commitSubagentRestart(continuation, replacement(continuation, 'continued'));
-    expect(readStoredSubagentTasks('session').map((record) => record.id).sort()).toEqual(['after-commit', 'continued', 'durable-replacement']);
+    expect(
+      readStoredSubagentTasks('session')
+        .map((record) => record.id)
+        .sort(),
+    ).toEqual(['after-commit', 'continued', 'durable-replacement']);
   });
 
   it('lets exactly one process recover the same abandoned claim', async () => {
@@ -255,9 +320,12 @@ describe('restart claim leases', () => {
         catch { console.log('rejected'); }
       });
       process.stdin.resume(); setInterval(() => {}, 1000);`;
-    const children = Array.from({ length: 6 }, () => spawn(process.execPath, ['--input-type=module', '-e', script], {
-      env: process.env, stdio: ['pipe', 'pipe', 'pipe'],
-    }));
+    const children = Array.from({ length: 6 }, () =>
+      spawn(process.execPath, ['--input-type=module', '-e', script], {
+        env: process.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }),
+    );
     const exits = children.map((child) => new Promise<void>((resolve) => child.once('exit', () => resolve())));
     const readers = children.map((child) => createInterface({ input: child.stdout }));
     const lines = readers.map((reader) => reader[Symbol.asyncIterator]());

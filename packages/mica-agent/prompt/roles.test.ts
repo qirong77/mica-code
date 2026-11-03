@@ -6,6 +6,22 @@ import DEFAULT_SYSTEM_PROMPT from './system.md' with { type: 'text' };
 import { applyBrandTemplate } from './brandTemplate.js';
 import { getAgentRole, getRolesDirectory, listAgentRoles } from './roles.js';
 
+/** 插件装配时写下的那份索引（`$MICA_HOME/plugin-roles/<pluginId>.json`）。 */
+function writePluginRole(home: string, pluginId: string, name: string, body: string): string {
+  const source = join(home, 'plugin-source');
+  mkdirSync(source, { recursive: true });
+  const path = join(source, `${name}.md`);
+  writeFileSync(path, body, 'utf-8');
+  const indexDir = join(home, 'plugin-roles');
+  mkdirSync(indexDir, { recursive: true });
+  writeFileSync(
+    join(indexDir, `${pluginId}.json`),
+    JSON.stringify({ version: 1, pluginId, roles: [{ name, path }] }),
+    'utf-8',
+  );
+  return path;
+}
+
 const previousMicaHome = process.env.MICA_HOME;
 const tempHomes: string[] = [];
 
@@ -44,7 +60,40 @@ describe('agent roles', () => {
       builtIn: false,
       path: join(roleDir, 'reviewer.md'),
     });
-    expect(getAgentRole('reviewer.md')?.name).toBe('reviewer');
+  });
+
+  it('lists plugin roles as appended prompt segments', () => {
+    const home = createTempHome();
+    const path = writePluginRole(home, 'user.demand-dev', '需求开发', '只改 B 端。');
+
+    expect(listAgentRoles().map((role) => role.name)).toEqual(['default', '需求开发']);
+    expect(getAgentRole('需求开发')).toMatchObject({
+      name: '需求开发',
+      prompt: '只改 B 端。',
+      builtIn: false,
+      append: true,
+      pluginId: 'user.demand-dev',
+      path,
+    });
+  });
+
+  it('lets a disk role shadow a plugin role of the same name', () => {
+    const home = createTempHome();
+    writePluginRole(home, 'user.demand-dev', '需求开发', '插件版');
+    const roleDir = join(home, 'role');
+    mkdirSync(roleDir, { recursive: true });
+    writeFileSync(join(roleDir, '需求开发.md'), '磁盘版', 'utf-8');
+
+    const role = getAgentRole('需求开发');
+    expect(role?.prompt).toBe('磁盘版');
+    expect(role?.append).toBeUndefined();
+  });
+
+  it('skips plugin index entries whose file is gone', () => {
+    const home = createTempHome();
+    writePluginRole(home, 'user.demand-dev', '需求开发', 'x');
+    rmSync(join(home, 'plugin-source'), { recursive: true, force: true });
+    expect(listAgentRoles().map((role) => role.name)).toEqual(['default']);
   });
 });
 

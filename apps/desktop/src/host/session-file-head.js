@@ -23,7 +23,7 @@ function readHead(file, bytes) {
  * 只认 `snapshot` 之前出现的那一个 —— `snapshot` 内部也可能带同名字段
  * （例如 cwd），那是嵌套值，不能当成会话自身的元信息。
  */
-function readTopLevelString(head, key) {
+export function readTopLevelString(head, key) {
   const keyAt = head.indexOf(`"${key}"`)
   if (keyAt < 0) return null
   const snapshotAt = head.indexOf('"snapshot"')
