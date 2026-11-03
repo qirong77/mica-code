@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
+  closeSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readdirSync,
+  readSync,
   rmSync,
   statSync,
   unlinkSync,
@@ -66,6 +69,10 @@ function createHarness(options = {}) {
   const fileSystem = {
     readdirSync: options.readdirSync ?? readdirSync,
     statSync,
+    // 大会话走「只读文件头」的快路径，真实宿主同样有这三个同步方法。
+    openSync,
+    readSync,
+    closeSync,
     readFileSync(file, encoding) {
       reads.push(file)
       return readFileSync(file, encoding)
@@ -391,6 +398,24 @@ describe('incremental session scanner', () => {
 
     expect(rows.map((row) => row.id)).toEqual(['one', 'two'])
     expect(harness.reads).toHaveLength(readsBefore)
+  })
+
+  test('updates a huge session from its head instead of re-parsing the whole file', async () => {
+    const harness = createHarness()
+    // 超过 LARGE_FILE_BYTES（4MB）：真实库里这样的会话一份就要 parse 1s。
+    const padding = 'x'.repeat(4 * 1024 * 1024)
+    harness.files.write('big', fixture('big', { padding }))
+    const first = await harness.scanner.scanMeta()
+    expect(first.find((row) => row.id === 'big')?.title).toBe('Session big')
+    const readsAfterFirst = harness.reads.length
+
+    // 跑完一轮：文件被整份重写，标题也换了。
+    harness.files.write('big', fixture('big', { padding, title: 'Renamed big' }))
+    const second = await harness.scanner.scanMeta()
+
+    // 标题立刻跟上（读文件头即可），但没有再整份读一遍文件。
+    expect(second.find((row) => row.id === 'big')?.title).toBe('Renamed big')
+    expect(harness.reads).toHaveLength(readsAfterFirst)
   })
 
   test('rebuilds the index when its format version is unknown', async () => {

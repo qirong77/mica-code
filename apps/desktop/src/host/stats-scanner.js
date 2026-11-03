@@ -22,6 +22,12 @@ const BATCH_BUDGET_MS = 12
  */
 const LARGE_FILE_BYTES = 4 * 1024 * 1024
 const LARGE_RUNNING_REPARSE_MS = 30_000
+/**
+ * 大会话（>4MB，实测 115MB 一份）每回合结束签名都会变，整份 JSON.parse 约 1.1s。
+ * 侧栏每 10s 轮询一次，跑一轮就卡一次。文件头里有侧栏要的全部字段，所以先只更新
+ * 元信息（标题 / 时间 / turnState），用量统计隔一段时间再整份算一次。
+ */
+const LARGE_STATS_REPARSE_MS = 30_000
 const HEAD_BYTES = 4096
 
 function timestampPart(stat, name) {
@@ -87,6 +93,60 @@ function parseSessionMeta(raw) {
 
 function yieldToEventLoop() {
   return new Promise((resolve) => setImmediate(resolve))
+}
+
+function metaChanged(prev, next) {
+  if (!prev) return true
+  return (
+    prev.id !== next.id ||
+    prev.title !== next.title ||
+    prev.cwd !== next.cwd ||
+    prev.parentSessionId !== next.parentSessionId ||
+    prev.updatedAtMs !== next.updatedAtMs ||
+    prev.createdAtMs !== next.createdAtMs ||
+    prev.turnState !== next.turnState
+  )
+}
+
+/**
+ * 只读文件头拼出侧栏用的元信息。会话文件把顶层键与 `snapshot` 的开头几个字段
+ * 写在最前面，所以不必为一个上百 MB 的文件整份 parse。缺字段就返回 null，
+ * 调用方回落到完整解析——宁可贵一次，也不要显示错的标题。
+ */
+function readHeadMeta(fileSystem, file) {
+  const head = readHeadText(fileSystem, file)
+  if (!head) return null
+  const field = (key) => {
+    const match = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(head)
+    if (!match) return null
+    const raw = match[1]
+    if (!raw.includes('\\')) return raw
+    try {
+      const parsed = JSON.parse(`"${raw}"`)
+      return typeof parsed === 'string' ? parsed : raw
+    } catch {
+      return raw
+    }
+  }
+  if (!/"version"\s*:\s*1\b/.test(head)) return null
+  const id = field('id')
+  const updatedAt = field('updatedAt')
+  if (!id || !updatedAt) return null
+  const updatedAtMs = Date.parse(updatedAt)
+  if (!Number.isFinite(updatedAtMs)) return null
+  const createdAt = field('createdAt')
+  const createdAtMs = Date.parse(createdAt)
+  const parentSessionId = field('parentSessionId')
+  const turnState = field('turnState')
+  return {
+    id,
+    title: field('title'),
+    cwd: field('cwd'),
+    ...(parentSessionId ? { parentSessionId } : {}),
+    updatedAtMs,
+    createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
+    turnState: turnState || 'completed'
+  }
 }
 
 /** 只读文件头几 KB：`turnState` 是顶层字段，出现在快照之前，不必整份解析。 */
@@ -222,7 +282,10 @@ export function createStatsScanner({
         meta: entry.meta || null,
         stats: entry.stats || null,
         identities: entry.identities,
-        owned: typeof entry.owned === 'number' ? entry.owned : 0
+        owned: typeof entry.owned === 'number' ? entry.owned : 0,
+        // 上次整份解析的时间：跨进程保留，否则每次重启都会把刚跑过的大会话
+        // 重新 parse 一遍（上百 MB 就是 1s）。
+        parsedAt: typeof entry.parsedAt === 'number' ? entry.parsedAt : 0
       })
     }
     ownersDirty = true
@@ -244,7 +307,8 @@ export function createStatsScanner({
           meta: entry.meta,
           stats: entry.stats,
           identities: entry.identities,
-          owned: entry.owned
+          owned: entry.owned,
+          parsedAt: entry.parsedAt || 0
         }
       }
       Promise.resolve(store.write(JSON.stringify({ version: INDEX_VERSION, files }))).catch(
@@ -398,6 +462,25 @@ export function createStatsScanner({
         isRunningSession(fileSystem, file)
       ) {
         continue
+      }
+      // 大会话跑完一轮后签名就变了。整份重算要 1s 以上，而侧栏要的
+      // 标题 / 时间 / turnState 都在文件头里：先用文件头更新元信息，
+      // 用量统计等 LARGE_STATS_REPARSE_MS 之后再整份算。
+      if (
+        entry?.stats &&
+        Number(signature.split(':')[2]) > LARGE_FILE_BYTES &&
+        Date.now() - (entry.parsedAt || 0) < LARGE_STATS_REPARSE_MS
+      ) {
+        const headMeta = readHeadMeta(fileSystem, file)
+        if (headMeta) {
+          // 头信息没变就不要动缓存：否则每次轮询都会让侧栏重算并重写索引。
+          if (metaChanged(entry.meta, headMeta)) {
+            entries.set(file, { ...entry, meta: headMeta })
+            invalidateRows()
+            indexDirty = true
+          }
+          continue
+        }
       }
       pending.push({ file, signature })
     }
