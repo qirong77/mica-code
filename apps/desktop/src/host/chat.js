@@ -1,6 +1,7 @@
 import { clipboard, ipcMain } from 'electron'
 import { prewarmFileMentions } from '@packages/mica-file-mentions/index.js'
 import { readBtwState } from '@packages/mica-common/btwState.js'
+import { readDisabledPluginIds } from '@packages/mica-plugin/PluginState.js'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { spawn } from 'child_process'
 import { randomUUID } from 'crypto'
@@ -1356,13 +1357,15 @@ function handleHostNotification(id, run, notification) {
       })
     }
     return
-  } else if (method === 'mica/notes/updated') {
-    // 面板保存了会话笔记：同一会话的其他窗口刷新编辑器。与能力开关同理，不占 turn。
+  } else if (method === 'mica/sessionState/updated') {
+    // 插件的会话级状态被改写（面板保存、插件自己写）：同一会话的其他窗口据此刷新。
+    // 与能力开关同理，不占 turn。
     if (run.sender && !run.sender.isDestroyed()) {
-      run.sender.send('chat:notes-updated', {
+      run.sender.send('chat:session-state-updated', {
         id,
         sessionId: runSessionId(run),
-        content: typeof params.content === 'string' ? params.content : ''
+        pluginId: typeof params.pluginId === 'string' ? params.pluginId : '',
+        value: params.value ?? null
       })
     }
     return
@@ -1773,6 +1776,9 @@ function listRoles() {
   }
   // 插件自带的角色（`$MICA_HOME/plugin-roles/<pluginId>.json`）：输入框的箭头要能切到它们，
   // 而读索引不需要为了一个名字去启动会话进程。同名时磁盘角色优先（与 `listAgentRoles` 一致）。
+  // 停用的插件按 `plugins-state.json` 过滤：索引要等某个宿主对齐时才清，而角色箭头是
+  // 「插件已经关掉了却还能切到它」的最后一条残留。
+  const disabledPlugins = readDisabledPluginIds({ path: join(micaHomeDir(), 'plugins-state.json') })
   try {
     for (const file of readdirSync(join(micaHomeDir(), 'plugin-roles'))) {
       if (!file.endsWith('.json') || file.startsWith('.')) continue
@@ -1783,6 +1789,7 @@ function listRoles() {
         continue
       }
       if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.roles)) continue
+      if (typeof parsed.pluginId === 'string' && disabledPlugins.has(parsed.pluginId)) continue
       for (const entry of parsed.roles) {
         const name = typeof entry?.name === 'string' ? entry.name.trim() : ''
         if (name) names.add(name)
@@ -2461,26 +2468,34 @@ export function registerChatIpc() {
     )
   })
 
-  // 会话笔记：用户与模型共同维护的 markdown，存在会话快照里（不在对话历史里），
-  // 所以压缩不会动它。读写都走常驻 host —— 它手里的快照才是唯一事实来源，
-  // 直接改 session 文件会被下一次保存覆盖。
-  ipcMain.handle('chat:notes', async (event, { id, sessionId, cwd } = {}) => {
+  // 插件的会话级状态：存在会话快照里（不在对话历史里），所以压缩不会动它。读写都走
+  // 常驻 host —— 它手里的快照才是唯一事实来源，直接改 session 文件会被下一次保存覆盖。
+  // 内核不解析这份 JSON：插件声明它是什么形状，插件的桌面卡片自己读写。
+  ipcMain.handle('chat:session-state', async (event, { id, sessionId, cwd, pluginId } = {}) => {
     if (!id) return { ok: false, error: 'chat id 缺失' }
-    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return unwrapHostResult(await hostTaskRequest(ensured.run, 'mica/notes/get', {}))
-  })
-
-  ipcMain.handle('chat:set-notes', async (event, { id, sessionId, cwd, content } = {}) => {
-    if (!id) return { ok: false, error: 'chat id 缺失' }
+    if (typeof pluginId !== 'string' || !pluginId) return { ok: false, error: 'pluginId 缺失' }
     const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
     if (!ensured.run) return { ok: false, error: ensured.error }
     return unwrapHostResult(
-      await hostTaskRequest(ensured.run, 'mica/notes/set', {
-        content: typeof content === 'string' ? content : ''
-      })
+      await hostTaskRequest(ensured.run, 'mica/sessionState/get', { pluginId })
     )
   })
+
+  ipcMain.handle(
+    'chat:set-session-state',
+    async (event, { id, sessionId, cwd, pluginId, value } = {}) => {
+      if (!id) return { ok: false, error: 'chat id 缺失' }
+      if (typeof pluginId !== 'string' || !pluginId) return { ok: false, error: 'pluginId 缺失' }
+      const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+      if (!ensured.run) return { ok: false, error: ensured.error }
+      return unwrapHostResult(
+        await hostTaskRequest(ensured.run, 'mica/sessionState/set', {
+          pluginId,
+          value: value ?? null
+        })
+      )
+    }
+  )
 
   // 插件的会话级设置：清单里标了 perSession 的字段才出现。默认值在插件设置里
   // （配置页写），这里读写的是本会话的覆盖，跟会话快照一起落盘。

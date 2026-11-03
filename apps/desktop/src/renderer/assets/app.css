@@ -3362,173 +3362,19 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   color: var(--color-fg);
 }
 
-/* ------------------------------------------------ 耗时分析弹窗（最近一轮的时间去哪了）
+/* ------------------------------------------------ 耗时分析弹窗
 
-   按时间铺开的概览条与纵向执行过程，弹窗高度固定、内容滚动。 */
+   内容（合计条 / 图例 / 工具排行 / 顺序明细）由 `@mica-config-ui/web` 的
+   `TurnTimingView` 渲染，与会话详情的「耗时」页签共用一份样式；这里只管弹窗尺寸。 */
 .chat-modal-timing {
   max-width: 620px;
   height: min(70dvh, 560px);
 }
 
-.chat-timing-bar {
-  display: flex;
-  height: 6px;
-  flex: none;
-  margin-bottom: 12px;
-  overflow: hidden;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--color-fg-max) 7%, transparent);
-}
-
-.chat-timing-bar-seg {
-  height: 100%;
-  min-width: 0;
-  flex-basis: 0;
-}
-
-.chat-timing-dot,
-.chat-timing-bar-seg {
-  background: var(--color-fg-faint);
-}
-
-.chat-timing-dot.is-wait,
-.chat-timing-bar-seg.is-wait {
-  background: var(--color-warn);
-}
-
-.chat-timing-dot.is-generate,
-.chat-timing-bar-seg.is-generate {
-  background: var(--color-teal);
-}
-
-.chat-timing-dot.is-tool,
-.chat-timing-bar-seg.is-tool {
-  background: var(--color-info);
-}
-
-.chat-timing-columns {
-  display: grid;
-  grid-template-columns: 72px 1fr 64px;
-  padding: 0 8px 6px;
-  color: var(--color-fg-faint);
-  font-size: 10.5px;
-}
-
-.chat-timing-columns > :last-child {
-  text-align: right;
-}
-
-.chat-timing-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.chat-timing-item {
-  display: flex;
-  min-height: 42px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  color: var(--color-fg-muted);
-  font-size: 11.5px;
-}
-
-.chat-timing-item:hover {
-  background: var(--color-list-hover);
-}
-
-.chat-timing-offset {
-  width: 64px;
-  flex: none;
-  color: var(--color-fg-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-.chat-timing-marker {
-  position: relative;
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 10px;
-  flex: none;
-}
-
-.chat-timing-marker::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--color-line);
-}
-
-.chat-timing-item:first-child .chat-timing-marker::before {
-  top: 50%;
-}
-.chat-timing-item:last-child .chat-timing-marker::before {
-  bottom: 50%;
-}
-
-.chat-timing-dot {
-  position: relative;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.chat-timing-content {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-  padding: 6px 0;
-}
-
-.chat-timing-name {
-  color: var(--color-fg-soft);
-}
-
-.chat-timing-item-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-fg-faint);
-  font-size: 10.5px;
-}
-
-.chat-timing-ms {
-  flex: none;
-  width: 64px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.chat-timing-badge {
-  flex: none;
-  padding: 0 5px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--color-fg-max) 8%, transparent);
-  color: var(--color-fg-faint);
-  font-size: 10px;
-}
-
-.chat-timing-badge.is-error {
-  background: color-mix(in srgb, var(--color-danger) 16%, transparent);
+.chat-timing-error {
+  margin-bottom: 10px;
   color: var(--color-danger);
-}
-
-.chat-timing-badge.is-aborted {
-  background: color-mix(in srgb, var(--color-warn) 16%, transparent);
-  color: var(--color-warn);
-}
-
-.chat-timing-note {
-  margin-top: 12px;
-  color: var(--color-fg-ghost);
-  font-size: 10.5px;
-  line-height: 1.5;
+  font-size: 11.5px;
 }
 
 /* 参数 / 输出 / 命令：内容面（canvas）里的一块代码面，不再各自加一层边框阴影 */
@@ -4071,7 +3917,9 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: inherit;
+  /* 与动作区其余图标同色：它不再是 `.chat-composer-actions > button`，
+     拿不到那条规则的 38%，所以在自己身上写明，免得「+」比旁边几个淡一档。 */
+  color: color-mix(in srgb, var(--color-fg-max) 38%, transparent);
   cursor: pointer;
 }
 
@@ -4132,7 +3980,9 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   cursor: default;
 }
 
-.chat-composer-actions button {
+/* 只管动作区直接的按钮。`.chat-composer-more` 里的展开菜单也是 button，
+   被这条压成 25×25 的 grid 后图标和文字会叠在同一个格子里。 */
+.chat-composer-actions > button {
   display: grid;
   width: 25px;
   height: 25px;
@@ -4142,12 +3992,12 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   color: color-mix(in srgb, var(--color-fg-max) 38%, transparent);
 }
 
-.chat-composer-actions button:hover:not(:disabled) {
+.chat-composer-actions > button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-fg-max) 7%, transparent);
   color: color-mix(in srgb, var(--color-fg-max) 70%, transparent);
 }
 
-.chat-composer-actions button:disabled {
+.chat-composer-actions > button:disabled {
   background: color-mix(in srgb, var(--color-fg-max) 3%, transparent);
   color: color-mix(in srgb, var(--color-fg-max) 15%, transparent);
 }
@@ -5333,7 +5183,9 @@ body.is-resizing-btw {
     gap: 6px;
   }
 
-  .chat-composer-actions button {
+  /* 「+」在自己的容器里（要挂菜单），同样要跟着放大 */
+  .chat-composer-actions > button,
+  .chat-composer-more-trigger {
     width: 32px;
     height: 32px;
   }
@@ -6133,6 +5985,15 @@ body.is-resizing-btw {
   50% {
     opacity: 0.45;
   }
+}
+
+/* 插件入口卡片（侧栏一行 / 顶栏图标的浮层）。
+   卡片本身带 `mica-config-ui is-embed`，那条 reset 会把底色让给宿主（`background:
+   transparent`），而 Tailwind 的 `bg-panel` 在 `@layer utilities` 里——无层级的 reset
+   无论特异性都赢它，于是卡片一直是一层透明的毛玻璃，背后的对话全糊在下面。
+   底色写在这里：不透明，且不要 backdrop-filter。 */
+[data-plugin-entry-card].mica-config-ui.is-embed {
+  background: var(--color-panel);
 }
 
 /* 面板弹窗定高：切分区时内容长短不一，不定高就会一伸一缩。左栏固定、右栏自己滚。 */

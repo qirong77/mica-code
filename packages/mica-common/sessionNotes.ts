@@ -6,8 +6,8 @@
  * `AgentRuntime.buildSystemPrompt()` 追加到 system prompt 末尾，所以只有长度上限
  * 这一条硬约束——太长会挤占上下文，也会在每次编辑后让 prompt cache 前缀失效。
  *
- * 读写三个入口共用这里的规则：模型（`session_notes` 工具）、桌面端笔记面板
- * （`mica/notes/set`）、CLI 与 app-server 的快照读写。
+ * 读写三个入口共用这里的规则：模型（`session_notes` 工具）、桌面端笔记卡片
+ * （`mica/sessionState/set`）、CLI 与 app-server 的快照读写。
  */
 
 export const SESSION_NOTES_TAG = 'session-notes';
@@ -15,9 +15,9 @@ export const SESSION_NOTES_TAG = 'session-notes';
 /**
  * 会话笔记插件在 `pluginState` 里的键。
  *
- * 笔记的**行为**（工具、prompt 段落）属于 `plugins/session-notes`，但桌面面板的
- * `mica/notes/*` 协议由 app-server 直接读写同一份数据，所以键与归一化规则留在共享层：
- * 两边必须认同一个存储位置，否则面板看到的和模型写进去的会是两份内容。
+ * 笔记的**行为与界面**（工具、prompt 段落、顶栏卡片）都属于 `plugins/session-notes`；
+ * 卡片的读写走通用的 `mica/sessionState/*`，键由插件决定，归一化规则放在共享层给
+ * 插件的两半（工具与卡片）共用。
  */
 export const SESSION_NOTES_PLUGIN_ID = 'session-notes';
 

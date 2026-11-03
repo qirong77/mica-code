@@ -28,6 +28,7 @@ import {
   IconRefresh,
   IconSearch,
   IconSquareMinus,
+  IconTerminal2,
   IconTrash,
   IconX
 } from '@tabler/icons-react'
@@ -197,6 +198,11 @@ function FileContextMenu({ menu, onAction, onClose, gitRoot }) {
     { id: 'copy-path', label: '复制路径', icon: IconClipboard },
     { id: 'copy-relative-path', label: '复制相对路径', icon: IconClipboard },
     { id: 'reveal', label: '在文件管理器中显示', icon: IconFolderOpen },
+    {
+      id: 'open-terminal',
+      label: directory ? '在终端中打开' : '在终端中打开所在文件夹',
+      icon: IconTerminal2
+    },
     { separator: true },
     { id: 'delete', label: '删除', icon: IconTrash, danger: true }
   ]
@@ -228,6 +234,7 @@ function ExplorerMenu({ menu, onAction, onClose }) {
     { id: 'collapse-all', label: '折叠所有文件夹', icon: IconSquareMinus, disabled: !menu.root },
     { separator: true },
     { id: 'open-parent', label: '返回上级目录', icon: IconArrowUp, disabled: !menu.parent },
+    { id: 'open-terminal', label: '在终端中打开', icon: IconTerminal2, disabled: !menu.root },
     { id: 'reveal', label: '在文件管理器中显示', icon: IconFolderOpen, disabled: !menu.root },
     { id: 'copy-path', label: '复制路径', icon: IconClipboard, disabled: !menu.root }
   ]
@@ -454,7 +461,8 @@ export const FilesView = forwardRef(function FilesView(
     onGitCompareBaseChange,
     gitLoading,
     gitBranch,
-    onRefreshGit
+    onRefreshGit,
+    onOpenTerminal
   },
   ref
 ) {
@@ -1221,6 +1229,11 @@ export const FilesView = forwardRef(function FilesView(
           await window.mica.files.reveal(node.path)
           return
         }
+        // 在编辑器底部终端里开一个 shell：目录直接进去，文件落到它所在的文件夹。
+        if (action === 'open-terminal') {
+          onOpenTerminal?.(node.type === 'directory' ? node.path : dirOf(node.path))
+          return
+        }
         if (action === 'new-file' || action === 'new-directory') {
           const kind = action === 'new-file' ? '文件' : '文件夹'
           const name = await askText(`新建${kind}`, '', `请输入${kind}名称`)
@@ -1265,6 +1278,7 @@ export const FilesView = forwardRef(function FilesView(
       askText,
       closeTabsUnder,
       openFile,
+      onOpenTerminal,
       refreshAfterFileChange,
       revertGitFolder,
       showMessage,

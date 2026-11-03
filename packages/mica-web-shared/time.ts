@@ -1,3 +1,11 @@
+/** 一段耗时：`850ms` / `1.2s` / `1m 20s`。状态行、工具行与耗时分析的明细都用它。 */
+export function formatElapsed(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '0ms';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+  return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
+}
+
 /** Compact relative time for tight rows (desktop session list): `3m`, `2h`, `5d`. */
 export function relativeTimeShort(timestamp: number | string, now = Date.now()): string {
   const time =

@@ -1,8 +1,12 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { SelectMenu } from '@mica-config-ui/web'
+import { Segmented, SelectMenu } from '@mica-config-ui/web'
 import { BarSeries, CalendarHeatmap } from './charts'
 import { SessionDetailModal } from './SessionDetailModal'
-import { bucketByDay, isDayRange, rangeStart, scopeSession } from './scope'
+import { bucketByDay, bucketByDaySource, isDayRange, rangeStart, scopeSession } from './scope'
+import {
+  USAGE_KIND_COLORS as SOURCE_COLORS,
+  USAGE_KIND_ORDER as SOURCE_ORDER
+} from './usage-series'
 import { USAGE_SOURCE_LABELS } from '@packages/mica-web-shared/usage-source.js'
 import {
   addDays,
@@ -49,16 +53,6 @@ const CALENDAR_RAMP = [
   'var(--color-fg-muted)',
   'var(--color-fg-strong)'
 ]
-
-// 每一次模型请求都归到四类来源之一（判定在 `mica-web-shared/usage-source`）：
-// 主对话、委派子代理、插件、内核后台。顺序固定，颜色只用来区分种类。
-const SOURCE_ORDER = ['main', 'delegation', 'plugin', 'helper']
-const SOURCE_COLORS = {
-  main: 'var(--color-fg-strong)',
-  delegation: 'var(--color-info)',
-  plugin: 'var(--color-accent)',
-  helper: 'var(--color-fg-ghost)'
-}
 
 const CARD_CLASS = 'rounded-[5px] border border-line bg-panel'
 const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
@@ -388,9 +382,22 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
   )
 }
 
-/** 每日 token 柱状图（按每次请求的 occurredAtMs 聚合） */
+const DAILY_MODES = [
+  { value: 'tokens', label: 'Tokens' },
+  { value: 'requests', label: '请求数' },
+  { value: 'source', label: '按来源' }
+]
+
+/**
+ * 每日柱状图（按日行的 `at` 聚合）。
+ *
+ * 三个视角共用一根时间轴：总量（tokens）看波动，请求数看「跑了多少轮」，按来源看
+ * 「这段花费里有多少是委派和插件带来的」——只给一个总量时，后者永远要靠 By source 的表格去对。
+ */
 function DailyCard({ sessions, range }) {
+  const [mode, setMode] = useState('tokens')
   const byDay = useMemo(() => bucketByDay(sessions), [sessions])
+  const bySource = useMemo(() => bucketByDaySource(sessions), [sessions])
   const now = Date.now()
   const today = localDayKey(now)
   const since = rangeStart(range)
@@ -410,11 +417,16 @@ function DailyCard({ sessions, range }) {
     let day = startDay
     for (let i = 0; i < Math.min(totalDays, 90) && day <= endDay; i++) {
       const row = byDay.get(day)
-      out.push({ day, requests: row?.requests || 0, tokens: row?.tokens || 0 })
+      out.push({
+        day,
+        requests: row?.requests || 0,
+        tokens: row?.tokens || 0,
+        sources: bySource.get(day) || null
+      })
       day = addDays(day, 1)
     }
     return out
-  }, [startDay, endDay, byDay, totalDays])
+  }, [startDay, endDay, byDay, bySource, totalDays])
 
   const stride = Math.max(1, Math.ceil(days.length / 8))
   const lastPhase = (days.length - 1) % stride
@@ -426,24 +438,47 @@ function DailyCard({ sessions, range }) {
     .filter(({ index }) => index % stride === lastPhase)
 
   if (days.length === 0) return null
+  const usedKinds = SOURCE_ORDER.filter((kind) => days.some((d) => (d.sources?.[kind] || 0) > 0))
 
   return (
     <section className={`${CARD_CLASS} p-4`}>
-      <header className="mb-4 flex items-center justify-between">
-        <h2 className={OVERLINE_CLASS}>Tokens per day</h2>
-        <span className="text-[11px] text-fg-faint">
-          {isDayRange(range)
-            ? dayShort(range.day)
-            : range === 'all'
-              ? '最多展示 90 天'
-              : range === 'today'
-                ? '今天'
-                : `近 ${range}`}
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-baseline gap-2">
+          <h2 className={OVERLINE_CLASS}>Per day</h2>
+          <span className="text-[11px] text-fg-faint">
+            {isDayRange(range)
+              ? dayShort(range.day)
+              : range === 'all'
+                ? '最多展示 90 天'
+                : range === 'today'
+                  ? '今天'
+                  : `近 ${range}`}
+          </span>
+        </div>
+        <span className="mica-config-ui is-embed">
+          <Segmented
+            size="compact"
+            value={mode}
+            options={DAILY_MODES}
+            ariaLabel="每日指标"
+            onChange={setMode}
+          />
         </span>
       </header>
       <BarSeries
-        columns={days.map((d) => ({ key: d.day, value: d.tokens }))}
-        formatTick={tokensShort}
+        columns={days.map((d) =>
+          mode === 'source'
+            ? {
+                key: d.day,
+                segments: usedKinds.map((kind) => ({
+                  key: kind,
+                  value: d.sources?.[kind] || 0,
+                  color: SOURCE_COLORS[kind]
+                }))
+              }
+            : { key: d.day, value: mode === 'requests' ? d.requests : d.tokens }
+        )}
+        formatTick={mode === 'requests' ? (value) => String(value) : tokensShort}
         xLabels={xLabels}
         renderTooltip={(i) => {
           const d = days[i]
@@ -453,10 +488,37 @@ function DailyCard({ sessions, range }) {
               <div className="text-fg-muted">
                 {d.requests} requests · {tokensShort(d.tokens)} tokens
               </div>
+              {mode === 'source' && usedKinds.length > 1
+                ? usedKinds.map((kind) => (
+                    <div key={kind} className="flex items-center gap-1.5 text-[11px] text-fg-muted">
+                      <span
+                        aria-hidden
+                        className="size-1.5 rounded-[1px]"
+                        style={{ background: SOURCE_COLORS[kind] }}
+                      />
+                      {USAGE_SOURCE_LABELS[kind]}
+                      <span className="tabular-nums">{tokensShort(d.sources?.[kind] || 0)}</span>
+                    </div>
+                  ))
+                : null}
             </div>
           )
         }}
       />
+      {mode === 'source' && usedKinds.length > 1 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fg-faint">
+          {usedKinds.map((kind) => (
+            <span key={kind} className="inline-flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className="size-2 shrink-0 rounded-[2px]"
+                style={{ background: SOURCE_COLORS[kind] }}
+              />
+              {USAGE_SOURCE_LABELS[kind]}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </section>
   )
 }
@@ -486,29 +548,46 @@ function ByModelCard({ scoped }) {
 
   if (rows.length === 0) return null
   const totalTokens = rows.reduce((sum, r) => sum + r.tokens, 0)
+  // 条的宽度按份额而不是按最大值：这张卡回答的是「谁占了多少」，占 3% 就该是一条短条。
+  const maxTokens = rows[0].tokens
 
   return (
     <section className={`${CARD_CLASS} p-4`}>
       <header className="mb-3 flex items-center justify-between">
         <h2 className={OVERLINE_CLASS}>By model</h2>
+        <span className="text-[11px] text-fg-faint">
+          {rows.length} models · {tokensShort(totalTokens)} tokens
+        </span>
       </header>
       <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-        {rows.map((r) => (
-          <div key={r.model} className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="size-2 shrink-0 rounded-full bg-fg" />
-              <span className="truncate font-mono text-xs text-fg-strong" title={r.model}>
-                {r.model}
-              </span>
-              <span className="ml-auto shrink-0 font-mono text-[11px] text-fg-faint tabular-nums">
-                {totalTokens > 0 ? `${((r.tokens / totalTokens) * 100).toFixed(1)}%` : '—'}
-              </span>
+        {rows.map((r) => {
+          const share = totalTokens > 0 ? r.tokens / totalTokens : 0
+          return (
+            <div key={r.model} className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="size-2 shrink-0 rounded-full bg-fg" />
+                <span className="truncate font-mono text-xs text-fg-strong" title={r.model}>
+                  {r.model}
+                </span>
+                <span className="ml-auto shrink-0 font-mono text-[11px] text-fg-faint tabular-nums">
+                  {(share * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div
+                className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-panel-hi"
+                title={`${tokensShort(r.tokens)} / ${tokensShort(maxTokens)}（最大值）`}
+              >
+                <div
+                  className="h-full rounded-full bg-fg"
+                  style={{ width: `${maxTokens > 0 ? (r.tokens / maxTokens) * 100 : 0}%` }}
+                />
+              </div>
+              <div className="mt-1 font-mono text-[11px] text-fg-faint tabular-nums">
+                {r.sessions} sessions · {r.requests} requests · {tokensShort(r.tokens)} tokens
+              </div>
             </div>
-            <div className="mt-0.5 pl-4 font-mono text-[11px] text-fg-faint tabular-nums">
-              {r.sessions} sessions · {r.requests} requests · {tokensShort(r.tokens)} tokens
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </section>
   )
@@ -675,32 +754,72 @@ function BySourceCard({ scoped }) {
   )
 }
 
-/** 按项目（cwd basename）聚合，分批展示 */
+/**
+ * 按项目（cwd basename）聚合，分批展示。
+ *
+ * 每行一条按来源拆开的堆叠条：同一个项目里「自己跑」和「派出去跑」的比例差得很多，
+ * 单色条只能比大小，看不出这一点。
+ */
 function ByProjectCard({ scoped, visibleRows, onShowMore }) {
   const rows = useMemo(() => {
     const map = new Map()
     for (const s of scoped) {
       const cwd = s.cwd || '~'
-      const row = map.get(cwd) || { cwd, project: basename(cwd), sessions: 0, turns: 0, tokens: 0 }
+      const row = map.get(cwd) || {
+        cwd,
+        project: basename(cwd),
+        sessions: 0,
+        turns: 0,
+        tokens: 0,
+        sources: { main: 0, delegation: 0, plugin: 0, helper: 0 }
+      }
       // 无会话的账本用量（一次性命令）只加 token，不算一条会话。
       if (!s.ledger) row.sessions++
       row.turns += s.turns
       row.tokens += s.totalTokens
+      for (const usage of s.sourceUsage || []) {
+        if (!(usage.kind in row.sources)) continue
+        row.sources[usage.kind] += Number(usage.totalTokens) || 0
+      }
       map.set(cwd, row)
     }
-    return [...map.values()].sort((a, b) => b.tokens - a.tokens || a.cwd.localeCompare(b.cwd))
+    // 来源合计（主对话 + 委派 + 插件 + 内核）多数时候就是总量；`totalTokens` 里还有不带
+    // 来源归属的历史记录，差额补进主对话，免得堆叠条比总量短一截。这里按行算一次，
+    // 放进上面的循环会每加一条会话就再补一次。
+    return [...map.values()]
+      .map((row) => {
+        const classified = SOURCE_ORDER.reduce((sum, kind) => sum + row.sources[kind], 0)
+        return {
+          ...row,
+          sources: { ...row.sources, main: row.sources.main + Math.max(0, row.tokens - classified) }
+        }
+      })
+      .sort((a, b) => b.tokens - a.tokens || a.cwd.localeCompare(b.cwd))
   }, [scoped])
 
   if (rows.length === 0) return null
   const shown = rows.slice(0, visibleRows)
   const max = Math.max(...shown.map((r) => r.tokens), 0)
   const rest = rows.length - shown.length
+  const usedKinds = SOURCE_ORDER.filter((kind) => rows.some((r) => r.sources[kind] > 0))
 
   return (
     <section className={`${CARD_CLASS} p-4`}>
       <header className="mb-3 flex items-center justify-between">
         <h2 className={OVERLINE_CLASS}>By project</h2>
-        <span className="text-[11px] text-fg-faint">{rows.length} projects</span>
+        <div className="flex items-center gap-x-3 gap-y-1 text-[11px] text-fg-faint">
+          {usedKinds.map((kind) => (
+            <span key={kind} className="inline-flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className="size-2 shrink-0 rounded-[2px]"
+                style={{ background: SOURCE_COLORS[kind] }}
+              />
+              {USAGE_SOURCE_LABELS[kind]}
+            </span>
+          ))}
+          <span>{rows.length} projects</span>
+        </div>
       </header>
       <div>
         {shown.map((row, index) => (
@@ -716,9 +835,22 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
               </div>
               <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-panel-hi">
                 <div
-                  className="h-full rounded-full bg-fg"
+                  className="flex h-full overflow-hidden rounded-full"
                   style={{ width: `${max > 0 ? (row.tokens / max) * 100 : 0}%` }}
-                />
+                >
+                  {usedKinds.map((kind) =>
+                    row.sources[kind] > 0 ? (
+                      <span
+                        key={kind}
+                        className="h-full"
+                        style={{
+                          width: `${row.tokens > 0 ? (row.sources[kind] / row.tokens) * 100 : 0}%`,
+                          background: SOURCE_COLORS[kind]
+                        }}
+                      />
+                    ) : null
+                  )}
+                </div>
               </div>
             </div>
           </Fragment>
@@ -781,6 +913,9 @@ function BySessionCard({ scoped, onDetail }) {
   const top = sorted.slice(0, visible)
   const rest = sorted.length - top.length
   const now = Date.now()
+  // Token 列的数字后面压一条等比例底纹，宽度相对排在最前的那条会话：扫一眼就知道
+  // 贵的是哪几条，不必逐个读数字比较。
+  const maxTokens = Math.max(...top.map((s) => s.totalTokens), 0)
 
   const toggle = (key) => {
     if (key === sortKey) setDesc((d) => !d)
@@ -872,7 +1007,14 @@ function BySessionCard({ scoped, onDetail }) {
                   {s.requests.toLocaleString()}
                 </td>
                 <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {tokensShort(s.totalTokens)}
+                  <span className="relative inline-block min-w-[3.5rem] text-right">
+                    <span
+                      aria-hidden
+                      className="absolute inset-y-0 right-0 rounded-[2px] bg-overlay"
+                      style={{ width: `${maxTokens > 0 ? (s.totalTokens / maxTokens) * 100 : 0}%` }}
+                    />
+                    <span className="relative">{tokensShort(s.totalTokens)}</span>
+                  </span>
                 </td>
                 <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
                   {s.inputTokens > 0

@@ -183,6 +183,8 @@ function createWebApi(env) {
       resize: (id, cols, rows) => invoke('terminal:resize', { id, cols, rows }),
       clear: (id) => invoke('terminal:clear', { id }),
       getCwd: (id) => invoke('terminal:get-cwd', { id }),
+      // 前台正在跑什么：关窗前确认「还有程序在跑」用它，返回 { id, running, command }
+      foreground: (id) => invoke('terminal:foreground', { id }),
       resolveFileLinks: (id, paths) => invoke('terminal:resolve-file-links', { id, paths }),
       // 浏览器自己打开链接；服务端只负责把文件交给它所在机器上的 VS Code
       openExternal: async (url) => {
@@ -317,17 +319,23 @@ function createWebApi(env) {
           cwd: cwd || null
         }),
       onCapabilitiesUpdated: (callback) => subscribe('chat:capabilities-updated', callback),
-      // 会话笔记（用户与模型共同维护的 markdown）。存在会话快照里，压缩不动它。
-      notes: (id, { sessionId, cwd } = {}) =>
-        invoke('chat:notes', { id, sessionId: sessionId || null, cwd: cwd || null }),
-      setNotes: (id, content, { sessionId, cwd } = {}) =>
-        invoke('chat:set-notes', {
+      // 插件的会话级状态（存在会话快照里，压缩不动它）。内核不解析值，插件自己定义形状。
+      sessionState: (id, pluginId, { sessionId, cwd } = {}) =>
+        invoke('chat:session-state', {
           id,
-          content,
+          pluginId,
           sessionId: sessionId || null,
           cwd: cwd || null
         }),
-      onNotesUpdated: (callback) => subscribe('chat:notes-updated', callback),
+      setSessionState: (id, pluginId, value, { sessionId, cwd } = {}) =>
+        invoke('chat:set-session-state', {
+          id,
+          pluginId,
+          value,
+          sessionId: sessionId || null,
+          cwd: cwd || null
+        }),
+      onSessionStateUpdated: (callback) => subscribe('chat:session-state-updated', callback),
       compact: (sessionId, mode = 'model') => invoke('chat:compact', { sessionId, mode }),
       checkCwd: (cwd) => invoke('chat:check-cwd', { cwd }),
       // 换工作目录：有宿主的会话由宿主 chdir + 落盘（下一轮就生效），没宿主的

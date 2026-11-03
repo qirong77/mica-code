@@ -65,11 +65,7 @@ export type ConfigWebClient = {
    * 与设置、启停不同，这一步会真的去跑插件代码——注册、探测这类事因此不用跳去对话里，
    * 也不需要会话宿主在线。两个宿主都支持。
    */
-  runPluginAction?(
-    id: string,
-    action: string,
-    values?: Record<string, string>,
-  ): Promise<ConfigWebPluginActionResult>;
+  runPluginAction?(id: string, action: string, values?: Record<string, string>): Promise<ConfigWebPluginActionResult>;
   /**
    * 插件声明的运行条件（辅助功能、屏幕录制等）此刻是否满足。
    *
@@ -211,7 +207,13 @@ export function readPluginsDetails(): Promise<ConfigWebPluginsDetails> {
 export function setPluginEnabled(id: string, enabled: boolean): Promise<ConfigWebPluginsDetails> {
   const current = requireClient();
   if (typeof current.setPluginEnabled !== 'function') throw new Error('当前宿主不支持启停插件');
-  return current.setPluginEnabled(id, enabled);
+  return current.setPluginEnabled(id, enabled).then((details) => {
+    // 启停是运行期的事：对话页的入口、快捷条、面板都读同一份清单，写盘后让它们立刻重读。
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('mica:plugins-changed', { detail: { id, enabled } }));
+    }
+    return details;
+  });
 }
 
 export function supportsPluginToggle(): boolean {
@@ -242,10 +244,7 @@ export function runPluginAction(
  * 不传 `values` 时测磁盘上已保存的配置；传了就测页面当前填的这一份——用户改完
  * 不用先保存再测。
  */
-export function testPluginLlm(
-  id: string,
-  values?: Record<string, string>,
-): Promise<ConfigWebPluginLlmTest> {
+export function testPluginLlm(id: string, values?: Record<string, string>): Promise<ConfigWebPluginLlmTest> {
   const current = requireClient();
   if (typeof current.testPluginLlm !== 'function') throw new Error('当前宿主不支持测试模型接口');
   return current.testPluginLlm(id, values);

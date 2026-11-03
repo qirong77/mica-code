@@ -11,8 +11,17 @@ export { App as ConfigWebApp } from './App.js';
 export type { ConfigWebAppProps } from './App.js';
 export { setConfigWebClient } from './api.js';
 export type { ConfigWebClient } from './api.js';
+/** 会话快照的宿主数据读取：桌面端的耗时弹窗按需自己取一次落盘记录。 */
+export { readSessionDetails } from './api.js';
 export { setConfigWebEditor } from './editor.js';
 export type { ConfigWebEditor, ConfigWebEditorProps } from './editor.js';
+/**
+ * 可替换的文本编辑器（桌面端是本地 monaco，浏览器退回朴素文本域）。
+ *
+ * 插件卡片要一段能编辑 markdown / JSON 的正文时用它：宿主注册的那份实现与设置页
+ * 是同一个，主题、字体与光标行为都一致。
+ */
+export { JsonEditor } from './components/JsonEditor.js';
 export type { ConfigWebSection } from '../src/shared/types.js';
 
 /**
@@ -61,6 +70,8 @@ export { PluginSettingInput } from './components/PluginSettingInput.js';
  */
 export { SelectMenu } from './components/SelectMenu.js';
 export type { SelectMenuOption } from './components/SelectMenu.js';
+export { TurnTimingView } from './components/TurnTimingView.js';
+export type { TurnTimingRound } from './components/TurnTimingView.js';
 
 /**
  * 插件模型接口的配置面板：配置页与会话设置共用。

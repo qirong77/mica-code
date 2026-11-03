@@ -13,8 +13,8 @@ import { formatSessionNotesSection } from './notesSection.js';
  * - **工具**：`session_notes`，读写上面那份状态；
  * - **prompt**：`ctx.prompt.section()`，每轮重新渲染，排在所有插件段落最后。
  *
- * 桌面笔记面板走 app-server 的 `mica/notes/*`，与这里读写同一份数据（键由
- * `SESSION_NOTES_PLUGIN_ID` 统一）。
+ * 桌面入口（plugin.json 的 `desktop.entry` 与同目录的 `desktop.jsx`）也归这个插件：
+ * 卡片经通用的 `mica/sessionState/*` 读写上面同一份状态，停用插件后图标与工具一起消失。
  */
 export default function setupSessionNotes(ctx: PluginContext): void {
   if (!ctx.sessionState) throw new Error('session notes requires session state');

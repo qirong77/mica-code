@@ -363,19 +363,67 @@ describe('buildStatus', () => {
   it('raises attention only when the phone page is behind and can be republished', () => {
     const stale = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'old123' }, 9, 1, 'new456');
     expect(stale.attention).toEqual({
-      text: '手机端页面落后（本机 new456，中转机 old123），点「更新中转机页面」同步',
+      text: '手机端页面落后：本机 new456 · 中转机 old123',
       tone: 'warn',
       action: 'sync-page',
     });
+    expect(stale.pageKey).toBe('new456->old123');
 
     expect(
       buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, 'abc123').attention,
     ).toBeNull();
+    expect(buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, 'abc123').pageKey).toBe('');
     // 本机找不到产物（打包版没有解包目录）：没有可上传的东西，不提示
     expect(
       buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, null).attention,
     ).toBeNull();
     // 中转机不可达：连对面是哪版都不知道
     expect(buildStatus({ relayUrl: 'https://x.test', token: 'a' }, null, 9, 1, 'abc123').attention).toBeNull();
+  });
+
+  // 页面落后能持续几天，状态却每 3 秒重算一次：同一对版本只该提示一次，
+  // 否则那枚提示点就是个永远关不掉的角标。状态行照旧显示落后（那是状态，不是通知）。
+  it('raises the same comparison only once', () => {
+    const args: [
+      Record<string, string | undefined>,
+      Record<string, unknown> | null,
+      number | null,
+      number,
+      string | null,
+    ] = [
+      { relayUrl: 'https://x.test', token: 'a' },
+      { pageVersion: 'old123' },
+      9,
+      1,
+      'new456',
+    ];
+    const first = buildStatus(...args, ['other->pair']);
+    expect(first.attention).not.toBeNull();
+
+    const seen = buildStatus(...args, ['new456->old123']);
+    expect(seen.attention).toBeNull();
+    expect(seen.pageKey).toBe('new456->old123');
+    expect(seen.page).toEqual({ text: '落后 · 手机端 old123，本机 new456', tone: 'warn' });
+
+    // 本机重新构建：对比变了，是另一条提示
+    const rebuilt = buildStatus(
+      { relayUrl: 'https://x.test', token: 'a' },
+      { pageVersion: 'old123' },
+      9,
+      1,
+      'new789',
+      ['new456->old123'],
+    );
+    expect(rebuilt.attention?.text).toContain('new789');
+    // 中转机换成另一份也一样
+    const republished = buildStatus(
+      { relayUrl: 'https://x.test', token: 'a' },
+      { pageVersion: 'release9' },
+      9,
+      1,
+      'new456',
+      ['new456->old123'],
+    );
+    expect(republished.attention?.text).toContain('release9');
   });
 });

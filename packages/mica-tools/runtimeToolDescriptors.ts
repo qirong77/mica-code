@@ -15,6 +15,13 @@ import type { ToolParameterEntry } from './registry.js';
 
 export type RuntimeToolDescriptor = {
   name: string;
+  /**
+   * 注册它的插件 id（不写就是内核自己的工具）。
+   *
+   * 这份描述是给「不加载插件的宿主」（配置页、桌面设置页）兜底用的，所以它必须知道
+   * 这个工具属于谁：插件被停用之后，目录里不该还留着一个已经不会注册的工具。
+   */
+  pluginId?: string;
   description: string;
   readOnly: boolean;
   parameters: ToolParameterEntry[];
@@ -23,6 +30,7 @@ export type RuntimeToolDescriptor = {
 export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
   {
     name: 'harness_review',
+    pluginId: 'harness-review',
     description:
       '按用户要求查看当前工作区的 agent 运行复盘。list 返回运行指标与有证据的问题候选；report 导出 Markdown 报告；assess 记录用户的 review 或外部评估结论（需要 id、status、note）。accepted 仅代表认可建议；validated/regressed 需要在 note 写明实际验证证据。记录和聚合自动完成，无需任务结束后调用。不会修改 system prompt、工具、记忆或执行任何评测。',
     readOnly: false,
@@ -36,6 +44,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
   },
   {
     name: 'agent',
+    pluginId: 'subagent',
     description:
       '启动和管理 subagent。operation 默认为 run；支持 list/read/kill/await/run_many/join。 subagent 默认注入 brief 任务上下文；可用 context_mode=none|brief|recent|files 控制。 可写 subagent 使用 owned_paths 路径租约；Implementer/Tester/Proposal 必填。 Proposal 模式不落盘，只返回 patch 提案；run_many 支持 depends_on 与 max_parallel。 前台 run 会阻塞当前 turn 直到子代理返回；同一条消息里的多个前台调用会并行执行。需要主流程继续推进时用 run_in_background: true，完成后经 operation=read/join 取结果。 await/join 等待已有子任务，可与同一条消息里的其他工具重叠执行，全部结果一起返回；仍有独立工作时先继续做，或把等待和工作放在同一条消息，别单独等待。shell 后台任务用 wait_for(kind=task)。 可用 subagent_type: general-purpose (General-purpose subagent for multi-step research, code investigation, and focused implementation help.); Explore (Read-only code exploration subagent for searching, reading, and summarizing relevant project context.); Implementer (Writable implementation subagent for scoped code changes. Requires owned_paths and only writes inside that lease.); Reviewer (Read-only code review subagent for diffs, risks, and missing tests.); Tester (Verification subagent that can run tests/typecheck within owned_paths and report outcomes.); Planner (Planning subagent that returns a task graph and ownership plan without modifying files.); Proposal (Proposal-mode implementation subagent. Requires owned_paths, cannot write files, and must return patch proposals for parent apply.)。 effort 取子代理模型自己声明的档位名（模型不同档位集合也不同），省略时继承主 agent 当前 effort。 只读与提案类子代理（write_mode none/proposal）遇到可重试的 provider 错误会自动整轮重试一次；可写子代理失败后不会自动重跑，需要重新提交。',
     readOnly: false,
@@ -131,6 +140,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
   },
   {
     name: 'session_peers',
+    pluginId: 'builtin.session-autonomy',
     description:
       '列出当前正在运行的 Mica 实例（其他窗口/终端里的 TUI、mica exec、desktop 的 app-server 进程），返回各自 session 缓存文件路径与读取方法。 当怀疑工作区被另一个 Mica 会话改动、文件内容与预期不符、或想确认是否有别的会话在同一个项目/仓库工作时使用。 只读，不修改任何东西。注意：只列出正在执行 turn 的实例，空闲实例不会改动文件，因此不在列表中。 默认只列正在运行的实例；传 hours 后额外列出最近 N 小时内结束的会话（已释放 turn 锁，仍可能刚改过工作区），0 表示不列。',
     readOnly: true,
@@ -145,6 +155,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
   },
   {
     name: 'todo_write',
+    pluginId: 'todo',
     description:
       'Create or update the plan for the current turn. The user sees it as your working plan. Use it when the task needs 3+ meaningful milestones; skip it for trivial or single-step work. Keep 7 items or fewer. Describe outcomes, not keystrokes: no "open file X" or "run command Y" items. Send the complete list on every call; it replaces the previous one. Only call it when the list actually changes. Mark an item in_progress when you start it, and completed only when it is really done.',
     readOnly: false,
@@ -159,6 +170,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
   },
   {
     name: 'session_notes',
+    pluginId: 'session-notes',
     description:
       "Read or update this session's notes: a markdown scratchpad shared with the user and shown in the desktop notes panel. The notes live outside the conversation history, so they are never lost to context compaction and are re-attached to the system prompt at the start of every turn. Keep there what must survive a compact: decisions and their reasons, user constraints and preferences, paths/commands that took effort to find, and open questions. Read before a large rewrite, append instead of replacing when you are only adding, and keep it deduplicated and organized under headings rather than a chronological dump. The user edits the same document in the UI, so their edits are authoritative — do not copy the notes back into the chat, the user can already see them.",
     readOnly: false,

@@ -55,8 +55,10 @@ export function openRuntimeTarget(url, { userAgent, open, assign } = {}) {
  * 交给插件 `desktop.jsx` 的那份 api。`pluginId` 由宿主注入，插件不必自己拼——它也
  * 拼不对：数据文件按插件 id 落在 `$MICA_HOME/plugin-data/<id>/data.json`。
  */
-export function createPluginHostApi(pluginId) {
+export function createPluginHostApi(pluginId, session = null) {
   const host = window.mica?.pluginHost
+  const chat = window.mica?.chat
+  const target = session ? { sessionId: session.sessionId || null, cwd: session.cwd || null } : null
   return {
     pluginId,
     currentHost: () => currentRuntimeAddress(),
@@ -82,6 +84,56 @@ export function createPluginHostApi(pluginId) {
      * 结果是 `{ ok, message?, link?, error? }`：失败不抛异常，卡片上一行红字比一个没人接
      * 的 rejected promise 有用。没声明的 key 会被拒绝——页面上本来就没有那个按钮。
      */
-    action: (key) => host.runAction(pluginId, String(key ?? ''))
+    action: (key) => host.runAction(pluginId, String(key ?? '')),
+    /**
+     * 页面正在看的那条会话。内核不知道插件拿它做什么——这里只提供「会话级」的三件事：
+     * 身份、插件自己的会话状态、以及这一轮什么时候跑完。
+     */
+    session:
+      session && target && chat?.sessionState
+        ? {
+            id: () => session.id,
+            sessionId: () => target.sessionId,
+            cwd: () => target.cwd,
+            /** 插件自己的会话状态（会话快照的 `pluginState[pluginId]`）。 */
+            state: {
+              read: () => chat.sessionState(session.id, pluginId, target),
+              write: (value) => chat.setSessionState(session.id, pluginId, value ?? null, target),
+              /** 别的窗口 / 面板改写了这份状态。 */
+              subscribe: (callback) =>
+                chat.onSessionStateUpdated((payload) => {
+                  if (!payload || payload.id !== session.id) return
+                  if (payload.pluginId && payload.pluginId !== pluginId) return
+                  callback(payload.value)
+                })
+            },
+            /** 这一轮跑完了：模型在轮次里写的东西该重读了。 */
+            onIdle: (callback) => subscribeSessionIdle(callback)
+          }
+        : null
+  }
+}
+
+const idleListeners = new Set()
+let lastIdleAt = 0
+
+/** 宿主在「当前会话一轮跑完」时通知卡片（模型刚写完的会话状态需要重读）。 */
+export function notifySessionIdle() {
+  // 侧栏与顶栏两处入口都会看到 running → idle，同一次收尾只该触发一轮重读。
+  if (Date.now() - lastIdleAt < 500) return
+  lastIdleAt = Date.now()
+  for (const listener of [...idleListeners]) {
+    try {
+      listener()
+    } catch {
+      // 一个卡片的回调炸了不该影响别的卡片
+    }
+  }
+}
+
+function subscribeSessionIdle(listener) {
+  idleListeners.add(listener)
+  return () => {
+    idleListeners.delete(listener)
   }
 }

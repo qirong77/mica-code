@@ -56,6 +56,48 @@ applyBrowserRenderSwitch(app.commandLine, process.env)
 
 let runtime = null
 let quitting = false
+
+/**
+ * 关窗前的二次确认：页面可以挂 `window.__micaConfirmClose`，返回 `false`（或 resolve 成
+ * `false`）表示「先别关」。外壳不知道页面里有什么，也不该知道——编辑器窗口里的终端就是
+ * 靠它问一句「还有程序在跑，确定关闭吗」。
+ *
+ * 页面没挂这个函数（`true`）、抛错、或者 10 秒都没答上来，一律放行：问不出来就把窗口
+ * 关不上，比少问一句糟得多。
+ */
+const CLOSE_GUARD_PROBE = `(() => {
+  const guard = window.__micaConfirmClose
+  if (typeof guard !== 'function') return true
+  try {
+    return Promise.resolve(guard()).then(
+      (answer) => answer !== false,
+      () => true
+    )
+  } catch (error) {
+    return true
+  }
+})()`
+
+async function confirmWindowClose(state) {
+  const contents = state.win.webContents
+  if (state.win.isDestroyed() || contents.isDestroyed()) return true
+  let timer = null
+  try {
+    const answer = await Promise.race([
+      contents.executeJavaScript(CLOSE_GUARD_PROBE),
+      new Promise((resolvePromise) => {
+        timer = setTimeout(() => resolvePromise(true), 10000)
+      })
+    ])
+    return answer !== false
+  } catch {
+    // 页面还没加载完 / 已经崩了：没有可问的东西
+    return true
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 /**
  * 受控浏览器宿主（窗口 + Unix socket 上的 HTTP 服务）。它必须由外壳启动：只有主进程能
  * 创建 Chromium 窗口，而运行时是纯 Node（ELECTRON_RUN_AS_NODE）。它**不占端口**：
@@ -630,6 +672,9 @@ function createWindow(url, { primary = false, frameName = '' } = {}) {
     local: false,
     apiUrl: '',
     unread: 0,
+    // 关窗前问过页面、并且页面同意关闭（见 close 事件）
+    closeApproved: false,
+    closeAsking: false,
     stopBadgeWatcher: null,
     title: 'Mica Code',
     suffix: ''
@@ -649,7 +694,21 @@ function createWindow(url, { primary = false, frameName = '' } = {}) {
     if (!quitting && primary) {
       event.preventDefault()
       win.hide()
+      return
     }
+    // 页面里可能有东西不想被一声不响地关掉（编辑器窗口的终端还在跑命令）。外壳不知道
+    // 那是终端，也不该知道：它只问一句页面的 `window.__micaConfirmClose`。退出应用时
+    // 不问——问一句就可能把 ⌘Q 卡在「有一个窗口不肯关」上。
+    if (quitting || state.closeApproved) return
+    event.preventDefault()
+    if (state.closeAsking) return
+    state.closeAsking = true
+    confirmWindowClose(state).then((approved) => {
+      state.closeAsking = false
+      if (!approved || win.isDestroyed()) return
+      state.closeApproved = true
+      win.close()
+    })
   })
 
   win.on('closed', () => {

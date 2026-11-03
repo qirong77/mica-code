@@ -8,6 +8,7 @@ import {
   IconDots,
   IconFolder,
   IconFolderOpen,
+  IconFolders,
   IconListTree,
   IconPencil,
   IconPin,
@@ -21,6 +22,7 @@ import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop, rowDropPosition } from './session-dnd'
 import { groupRecentRows } from './recent-buckets'
+import { orderRecentDrafts } from './recent-drafts'
 import {
   nestSessions,
   paginateSessionTrees,
@@ -44,6 +46,7 @@ import {
 } from './session-annotations'
 import {
   childGroups,
+  collectGroupDigests,
   inheritedSessionSection,
   sessionSectionOf,
   sessionsByGroup
@@ -79,13 +82,22 @@ const rowClass = `${rowClassBase} items-center`
 const rowClassTall = `${rowClassBase} items-start py-1`
 
 const groupRowClass =
-  'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-1.5 text-[12.5px] font-medium leading-5 tracking-wide text-fg-strong transition-colors hover:bg-overlay hover:text-fg-max'
+  'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-2 text-[12.5px] font-medium leading-5 tracking-wide text-fg-strong transition-colors hover:bg-overlay hover:text-fg-max'
 
 const dropShadow = 'inset 0 0 0 1px rgba(90,167,232,.9)'
 
 const RECENT_PREVIEW_LIMIT = 6
 
 const RECENT_PAGE_SIZE = 10
+
+/** 收起的分组露出几条预览：够看出「里面是什么」，又不至于把折叠变成一个假展开。 */
+const GROUP_PREVIEW_ROWS = 2
+
+// 收起的分组露出的预览行：与真实会话行同一套列栅格，只是暗一档、不带拖拽——
+// 它只是「里面有什么」的取样，真正的列表在展开之后。颜色必须整份重写，
+// 不能拼在 rowClass 后面（Tailwind 的胜负按生成顺序，不认源码顺序）。
+const previewRowClass =
+  'group relative flex min-h-5 cursor-pointer items-center gap-2 rounded-md pr-2 text-[12.5px] leading-5 text-fg-muted transition-colors hover:bg-overlay hover:text-fg-strong'
 
 /** 正文搜索的防抖：每次按键都往运行时发一趟请求太吵，慢响应还会互相覆盖。 */
 const SESSION_SEARCH_DEBOUNCE_MS = 220
@@ -149,6 +161,13 @@ function baseName(cwd) {
   const trimmed = String(cwd || '').replace(/\/+$/, '')
   const index = trimmed.lastIndexOf('/')
   return index >= 0 ? trimmed.slice(index + 1) : trimmed
+}
+
+/** 一组会话里最近的一次活动时间；空列表返回 0（relativeTimeShort 会给出空串）。 */
+function latestUpdatedAt(sessions) {
+  let latest = 0
+  for (const session of sessions) latest = Math.max(latest, Number(session.updatedAtMs) || 0)
+  return latest
 }
 
 function RenameInput({ value, onCommit, onCancel }) {
@@ -520,19 +539,45 @@ export function SessionTree({
     return { rootDrafts: root, draftsByGroup: byGroup }
   }, [draftGroups, draftTabs, groupIds])
 
-  // 当前选中的草稿留在 Recent 顶部（那是「我正在用的这条」），其余草稿排到列表末尾；
-  // 连点 New Session 攒下来的空会话不该把真实会话挤到看不见的地方。
-  const activeDrafts = useMemo(
-    () => rootDrafts.filter((node) => node.id === selectedId),
-    [rootDrafts, selectedId]
+  // 每个分组子树的摘要（条数 / 最近活动时间 / 按时间倒序的会话）。收起的分组靠它
+  // 在一行分组头 + 两条预览里说清「里面有什么」，不必展开才知道。
+  const groupDigests = useMemo(
+    () => collectGroupDigests({ projects, sessionsByGroup: groupSessions, draftsByGroup }),
+    [draftsByGroup, groupSessions, projects]
   )
-  const pinnedDrafts = useMemo(
-    () => rootDrafts.filter((node) => node.id !== selectedId),
+
+  // 分区标题右侧的「条数 · 最近活动」：分区收起时那是唯一的信息，展开时也回答
+  // 「这一堆里最新的是什么时候」。
+  const sectionMeta = useMemo(() => {
+    let projectCount = 0
+    let projectLatest = 0
+    for (const group of childGroups(projects, null)) {
+      const digest = groupDigests.get(group.id)
+      if (!digest) continue
+      projectCount += digest.count
+      projectLatest = Math.max(projectLatest, digest.latestAt)
+    }
+    return {
+      pinned: { count: pinned.length, latestAt: latestUpdatedAt(pinned) },
+      project: { count: projectCount, latestAt: projectLatest },
+      recent: {
+        count: recentCandidates.length + rootDrafts.length,
+        latestAt: latestUpdatedAt(recentCandidates)
+      }
+    }
+  }, [groupDigests, pinned, projects, recentCandidates, rootDrafts])
+
+  // 草稿一律排在 Recent 顶部：新建但还没落盘的会话就是这个分区里最新的一条，沉到
+  // updatedAt 排出来的列表末尾等同于「新对话丢了」。当前选中的那条仍在最前。
+  const recentDrafts = useMemo(
+    () => orderRecentDrafts(rootDrafts, selectedId),
     [rootDrafts, selectedId]
   )
 
   const sectionOpen = (name) => !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))
+  const toggleGroupOpen = (groupId) =>
+    setCollapsedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }))
 
   // 侧栏看不见的会话——分组折叠、分区折叠、Recent 的 Show more 分页——由第一个可见的
   // 祖先代为显示状态。行的状态判定与 renderSessionRow/renderDraftRow 共用同一份回调，
@@ -974,7 +1019,9 @@ export function SessionTree({
     const editingThis = editing?.kind === 'session' && editing.id === session.id
     const isOver = rowOverState(section, session.id, groupId)
     const draggingThis = drag?.id === session.id && drag?.kind === 'session'
-    const relativeTime = section === 'recent' ? relativeTimeShort(session.updatedAtMs) : ''
+    // 行尾统一是「最近结束时间」：Pinned 与 Projects 之前是空的，同一个侧栏里
+    // 一半行有时间一半没有，反而看不出哪些是刚聊过的。
+    const relativeTime = relativeTimeShort(session.updatedAtMs)
     // Recent 行尾显示工作目录名，方便区分同名会话。
     const cwdLabel = section === 'recent' ? baseName(session.cwd) : ''
     // 定时循环按会话认领，侧栏没有单独的「定时任务」分区，所以行**在任何分区**都带时钟标记
@@ -1294,6 +1341,93 @@ export function SessionTree({
     )
   }
 
+  /**
+   * 收起的分组不再递归渲染子行，但也不能只剩一行文件夹名：直接露出最近两条
+   * （草稿也算在内）再补一句「还有 n 条」。预览行与真实会话行同一套列栅格，
+   * 只是暗一档、不参与拖拽——真正的列表在展开之后。
+   */
+  const renderGroupPreview = (group, depth) => {
+    const digest = groupDigests.get(group.id)
+    if (!digest?.count) return null
+    const items = [
+      ...digest.drafts.map((node) => ({ key: node.id, draft: node })),
+      ...digest.sessions.map((session) => ({ key: session.id, session }))
+    ]
+    const preview = items.slice(0, GROUP_PREVIEW_ROWS)
+    const rest = items.length - preview.length
+    return (
+      <ul className="flex flex-col gap-px">
+        {preview.map((item) =>
+          item.draft ? (
+            <li key={`preview-${item.key}`}>
+              <div
+                className={previewRowClass}
+                style={{ paddingLeft: rowIndent(depth) }}
+                title="尚未关联真实会话的新对话"
+                onClick={() => onSelectDraft(item.draft)}
+                onContextMenu={(event) =>
+                  openMenu(event, { draft: item.draft, items: draftMenuItems() })
+                }
+                {...longPressHandlers((event) =>
+                  openMenu(event, { draft: item.draft, items: draftMenuItems() })
+                )}
+              >
+                <Slot />
+                <RowLeading
+                  state={rowStateOfDraft(item.draft)}
+                  draft={!!draftNodes?.has(item.draft.id)}
+                />
+                <span className="min-w-0 flex-1 truncate">{item.draft.text}</span>
+                <span className="shrink-0 text-[11px] text-fg-dim">草稿</span>
+              </div>
+            </li>
+          ) : (
+            <li key={`preview-${item.key}`}>
+              <div
+                className={previewRowClass}
+                style={{ paddingLeft: rowIndent(depth) }}
+                title={
+                  item.session.cwd
+                    ? `${item.session.title || item.session.id} — ${item.session.cwd}`
+                    : item.session.title || item.session.id
+                }
+                onClick={() => onOpenSession(item.session)}
+                onContextMenu={(event) =>
+                  openMenu(event, { session: item.session, items: menuItemsFor(item.session) })
+                }
+                {...longPressHandlers((event) =>
+                  openMenu(event, { session: item.session, items: menuItemsFor(item.session) })
+                )}
+              >
+                <Slot />
+                <RowLeading
+                  state={rowStateOfSession(item.session)}
+                  terminal={!!terminalSessions?.has(item.session.id)}
+                />
+                <span className="min-w-0 flex-1 truncate">
+                  {item.session.title || item.session.id}
+                </span>
+                <RowTail relativeTime={relativeTimeShort(item.session.updatedAtMs)} />
+              </div>
+            </li>
+          )
+        )}
+        {rest > 0 && (
+          <li>
+            <button
+              type="button"
+              className="flex h-5 w-full items-center rounded-md text-left text-[11px] text-fg-dim transition-colors hover:bg-overlay hover:text-fg-soft"
+              style={{ paddingLeft: NAME_OFFSET + depth * TREE_STEP }}
+              onClick={() => toggleGroupOpen(group.id)}
+            >
+              还有 {rest} 条
+            </button>
+          </li>
+        )}
+      </ul>
+    )
+  }
+
   const renderGroup = (group, depth = 0) => {
     const nesting = childGroups(projects, group.id)
     const groupId = group.id
@@ -1301,6 +1435,7 @@ export function SessionTree({
     const draftsHere = draftsByGroup.get(groupId) || []
     const collapsed = !!collapsedGroups[groupId]
     const open = !collapsed
+    const digest = groupDigests.get(groupId)
     const editingThis = editing?.kind === 'group' && editing.id === groupId
     const isOver = over?.section === 'project' && over?.groupId === groupId && over?.onGroup
     // 只有子分组右移一层；分组里的会话/草稿与分组名同列（和 Recent 的会话对齐）。
@@ -1309,7 +1444,7 @@ export function SessionTree({
       ...draftsHere.map((node) => renderDraftRow(node, depth, groupId)),
       ...sessionsHere.map((row) => renderSessionRow(row.session, depth, 'project', groupId, row))
     ]
-    const toggleOpen = () => setCollapsedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }))
+    const toggleOpen = () => toggleGroupOpen(groupId)
     return (
       <li key={groupId}>
         <div
@@ -1324,7 +1459,11 @@ export function SessionTree({
                   : dropShadow
               : undefined
           }}
-          title={group.name}
+          title={
+            digest?.latestAt
+              ? `${group.name} · ${digest.count} 条 · 最近 ${relativeTimeShort(digest.latestAt)}`
+              : group.name
+          }
           draggable={!editingThis}
           // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
           {...longPressHandlers((event) => openMenu(event, { group, items: groupMenuItems() }))}
@@ -1404,7 +1543,9 @@ export function SessionTree({
           ) : (
             <span className="min-w-0 flex-1 truncate">{group.name}</span>
           )}
-          <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/grow:opacity-100 focus-within:opacity-100 max-md:opacity-100">
+          {/* 分组操作浮在行尾：它要是占位，右侧的「条数 · 时间」就会被挤得比下面
+              会话行的时间靠左；悬浮时让摘要淡出、按钮出现在同一块地方。 */}
+          <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-md px-0.5 opacity-0 transition-opacity group-hover/grow:pointer-events-auto group-hover/grow:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100 max-md:static max-md:pointer-events-auto max-md:opacity-100">
             <button
               type="button"
               title="在此分组新建会话"
@@ -1427,22 +1568,30 @@ export function SessionTree({
               <IconDots size={13} />
             </button>
           </span>
+          {digest?.count ? (
+            <span className="shrink-0 text-[11px] tabular-nums text-fg-dim transition-opacity group-hover/grow:opacity-0">
+              {digest.count}
+              {digest.latestAt ? ` · ${relativeTimeShort(digest.latestAt)}` : ''}
+            </span>
+          ) : null}
         </div>
-        {open && childRows.length > 0 && <ul className="flex flex-col gap-px">{childRows}</ul>}
+        {open
+          ? childRows.length > 0 && <ul className="flex flex-col gap-px">{childRows}</ul>
+          : renderGroupPreview(group, depth)}
       </li>
     )
   }
 
   const menuNode = menu
   const renderSectionHeader = (name, label, Icon, options = {}) => {
-    const { onAdd, addTitle, dropSection, accepts, hiddenState } = options
+    const { onAdd, addTitle, dropSection, accepts, hiddenState, meta } = options
     const isOverHeader = !!dropSection && over?.header === dropSection
     // 默认只接会话/草稿：分组换父级是 Projects 标题与分组行的事，落到别处不做任何反应
     const acceptsDrag = (source) =>
       !!source && (accepts ? accepts(source) : source.kind !== 'group')
     return (
       <div
-        className="group/header mt-1 flex h-6 items-center rounded-md"
+        className="group/header relative mt-1 flex h-6 items-center rounded-md pr-2"
         style={{ paddingLeft: rowIndent(0), boxShadow: isOverHeader ? dropShadow : undefined }}
         onDragOver={
           dropSection
@@ -1484,12 +1633,25 @@ export function SessionTree({
           </Slot>
           <span className="flex-1 truncate text-fg-dim">{label}</span>
         </button>
+        {meta?.count ? (
+          <span
+            className="shrink-0 text-[11px] tabular-nums text-fg-dim transition-opacity group-hover/header:opacity-0"
+            title={
+              meta.latestAt
+                ? `${label} 共 ${meta.count} 条，最近 ${relativeTimeShort(meta.latestAt)}`
+                : `${label} 共 ${meta.count} 条`
+            }
+          >
+            {meta.count}
+            {meta.latestAt ? ` · ${relativeTimeShort(meta.latestAt)}` : ''}
+          </span>
+        ) : null}
         {onAdd && (
           <button
             type="button"
             title={addTitle}
             aria-label={addTitle}
-            className="mr-1 grid size-5 shrink-0 place-items-center rounded text-fg-muted opacity-0 transition-opacity group-hover/header:opacity-100 hover:bg-overlay-strong hover:text-fg-max focus-visible:opacity-100 max-md:opacity-100"
+            className="absolute top-0 right-1 grid h-6 w-5 place-items-center rounded text-fg-muted opacity-0 transition-opacity group-hover/header:opacity-100 hover:bg-overlay-strong hover:text-fg-max focus-visible:opacity-100 max-md:opacity-100"
             onClick={onAdd}
           >
             <IconPlus size={14} />
@@ -1614,7 +1776,8 @@ export function SessionTree({
             <section>
               {renderSectionHeader('pinned', 'Pinned', IconPin, {
                 dropSection: 'pinned',
-                hiddenState: hiddenStates.pinned
+                hiddenState: hiddenStates.pinned,
+                meta: sectionMeta.pinned
               })}
               {sectionOpen('pinned') &&
                 (pinned.length ? (
@@ -1629,13 +1792,14 @@ export function SessionTree({
             </section>
 
             <section>
-              {renderSectionHeader('project', 'Projects', IconFolder, {
+              {renderSectionHeader('project', 'Projects', IconFolders, {
                 onAdd: () => onCreateGroup(null),
                 addTitle: '新建分组',
                 // 会话没有「Projects 根」这一级（取消归属是拖到 Recent），这里只接分组
                 dropSection: 'project',
                 accepts: (source) => source.kind === 'group',
-                hiddenState: hiddenStates.project
+                hiddenState: hiddenStates.project,
+                meta: sectionMeta.project
               })}
               {sectionOpen('project') &&
                 (projects?.groups?.length ? (
@@ -1652,17 +1816,17 @@ export function SessionTree({
             <section>
               {renderSectionHeader('recent', 'Recent', IconListTree, {
                 dropSection: 'recent',
-                hiddenState: hiddenStates.recent
+                hiddenState: hiddenStates.recent,
+                meta: sectionMeta.recent
               })}
               {sectionOpen('recent') &&
                 (recentList.length || rootDrafts.length ? (
                   <>
                     <ul role="tree" className="flex flex-col gap-px">
-                      {/* 正在用的那个草稿留在顶部（它通常就是「我现在在跟它说话」的那条），
-                          其余草稿沉到列表末尾：连点 New Session 攒下来的空会话会把真实会话
-                          挤到看不见的地方。挂着循环的草稿同样留在 Recent，只靠行首时钟与
-                          行尾进度区分。 */}
-                      {activeDrafts.map((node) =>
+                      {/* 草稿全部排在最近会话之前（正在用的那条最前）：新建会话还没落盘时
+                          它只存在于这里，排在列表末尾等于让用户找不到刚开的对话。挂着循环的
+                          草稿同样留在 Recent，只靠行首时钟与行尾进度区分。 */}
+                      {recentDrafts.map((node) =>
                         renderDraftRow(node, 0, null, loopForNode(loops, node.id))
                       )}
                       {recentBlocks.map((block) =>
@@ -1677,9 +1841,6 @@ export function SessionTree({
                         ) : (
                           renderSessionRow(block.row.session, 0, 'recent', null, block.row)
                         )
-                      )}
-                      {pinnedDrafts.map((node) =>
-                        renderDraftRow(node, 0, null, loopForNode(loops, node.id))
                       )}
                     </ul>
                     {recentOverflow > 0 && (

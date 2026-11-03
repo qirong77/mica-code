@@ -1,9 +1,10 @@
 import { createRoot } from 'react-dom/client'
-import { setConfigWebClient, setConfigWebThemeHost } from '@mica-config-ui/web'
+import { setConfigWebClient, setConfigWebEditor, setConfigWebThemeHost } from '@mica-config-ui/web'
 import App from './App'
 import { ErrorBoundary } from './ErrorBoundary'
 import ShareIndex from './ShareIndex'
 import '../assets/app.css'
+import { LocalJsonEditor } from './config-web-editor'
 import { ensureMicaApi } from './transport'
 import { ensureUiState, subscribeUiState, uiStateKeys } from './ui-state'
 import {
@@ -13,6 +14,10 @@ import {
 } from '@packages/mica-web-shared/index.js'
 import { readAppUrl } from './app-url'
 import { createDesktopConfigWebClient } from './config-web'
+
+// 编辑器在这里注册一次：设置页、会话详情和插件卡片（笔记）都读这一份。跟着设置页懒加载
+// 会让「还没打开过设置就点开笔记」拿到朴素文本域，再也不会切回 monaco。
+setConfigWebEditor(LocalJsonEditor)
 import {
   currentThemePreference,
   initThemeFromCache,

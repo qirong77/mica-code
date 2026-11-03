@@ -673,6 +673,7 @@ function toPersistedSnapshot(
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,
     subagentUsageHistory: snapshot.subagentUsageHistory,
+    ...(snapshot.turnTimings?.length ? { turnTimings: snapshot.turnTimings } : {}),
   };
 }
 
@@ -698,6 +699,7 @@ function fromPersistedSnapshot(
     activeThinking: snapshot.activeThinking,
     activeTurn: snapshot.activeTurn,
     subagentUsageHistory: snapshot.subagentUsageHistory,
+    turnTimings: snapshot.turnTimings,
   };
 }
 

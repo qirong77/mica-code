@@ -25,6 +25,9 @@ import { ToolPtyRead } from './pty/ToolPtyRead.js';
 import { ToolPtyWait } from './pty/ToolPtyWait.js';
 import { ToolPtyKill } from './pty/ToolPtyKill.js';
 import { RUNTIME_TOOL_DESCRIPTORS } from './runtimeToolDescriptors.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
 
 export type ToolFilter = (name: string) => boolean;
 
@@ -69,6 +72,23 @@ const TOOL_FAMILY_LABELS: Record<string, string> = {
   background_tasks: '后台任务',
 };
 
+/**
+ * 配置页 / 桌面设置页兜底用的那份「停用插件」名单。
+ *
+ * 只为了不给已经关掉的插件补目录行；读不到（没有状态文件、坏文件）当作「一个都没停用」。
+ */
+function readDisabledPlugins(): Set<string> {
+  try {
+    const parsed = JSON.parse(readFileSync(join(resolveMicaHome(), 'plugins-state.json'), 'utf-8')) as {
+      disabled?: unknown;
+    };
+    const disabled = Array.isArray(parsed?.disabled) ? parsed.disabled : [];
+    return new Set(disabled.filter((id) => typeof id === 'string' && id.trim() !== '') as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
 export type ToolExecutionEvent = {
   name: string;
   input: ToolInput;
@@ -105,6 +125,14 @@ const builtinTools: MicaTool[] = [
 
 let mcpTools: MicaTool[] = [];
 let runtimeTools: MicaTool[] = [];
+/**
+ * 是否给「只在会话里注册」的工具补目录行（`RUNTIME_TOOL_DESCRIPTORS`）。
+ *
+ * 这是给不加载插件的宿主（配置页、桌面设置页）用的兜底。真正跑插件的进程（TUI、
+ * `mica app-server`）在装配之后把它关掉：那里注册表就是事实来源，停用一个插件之后
+ * 它的工具必须从目录里消失，而不是被一份静态描述重新补回来。
+ */
+let runtimeToolFallback = true;
 const runtimeToolOptions = new WeakMap<MicaTool, RuntimeToolRegistrationOptions>();
 const executionObservers = new Set<ToolExecutionObserver>();
 
@@ -151,6 +179,11 @@ export function unregisterRuntimeTool(nameOrTool: string | MicaTool): void {
 
 export function unregisterRuntimeTools(): void {
   runtimeTools = [];
+}
+
+/** 装配过插件的宿主关掉静态兜底（见 `runtimeToolFallback`）。 */
+export function setRuntimeToolFallback(enabled: boolean): void {
+  runtimeToolFallback = enabled;
 }
 
 function getAllTools(): MicaTool[] {
@@ -215,8 +248,11 @@ export function getToolCatalog(): ToolCatalogEntry[] {
   }));
   // 运行期工具只存在于跑 agent 的进程里：配置页 / 桌面设置页不加载插件，目录会缺
   // todo_write 这类工具，「新会话默认值」里就关不掉它们。未注册时用描述补一行。
-  for (const descriptor of RUNTIME_TOOL_DESCRIPTORS) {
+  // 停用的插件不补：那等于把一个「已经不会注册的工具」留在界面上。
+  const disabledPlugins = readDisabledPlugins();
+  for (const descriptor of runtimeToolFallback ? RUNTIME_TOOL_DESCRIPTORS : []) {
     if (registered.has(descriptor.name)) continue;
+    if (descriptor.pluginId && disabledPlugins.has(descriptor.pluginId)) continue;
     entries.push({
       ...descriptor,
       source: 'builtin',

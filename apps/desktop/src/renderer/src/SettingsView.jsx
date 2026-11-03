@@ -1,9 +1,6 @@
-import { ConfigWebApp, setConfigWebEditor } from '@mica-config-ui/web'
-import { LocalJsonEditor } from './config-web-editor'
-
-// 数据源在渲染层入口（main.jsx）已经接过一次——会话详情也会在设置页之外打开。
-// 这里只补编辑器：应用自带的 monaco 是懒加载进来的，跟着设置页一起注册。
-setConfigWebEditor(LocalJsonEditor)
+// 编辑器（应用自带的 monaco）与数据源都在渲染层入口（main.jsx）注册过一次：会话详情、
+// 插件卡片也会在设置页之外打开，跟着设置页懒加载会晚一拍。
+import { ConfigWebApp } from '@mica-config-ui/web'
 
 /**
  * 设置 / 插件页：整页打开的配置页。

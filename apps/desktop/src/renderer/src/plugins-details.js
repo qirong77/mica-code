@@ -14,8 +14,15 @@ import { useEffect, useState } from 'react'
  * 右键菜单）会整页空着直到重载页面。
  */
 const CACHE_MS = 60_000
+/**
+ * 窗口重新获得焦点时，缓存超过这个间隔就重读一次：插件可能在另一个窗口 / 手机端被
+ * 启停，而那份状态不必等 60 秒的自然过期。
+ */
+const FOCUS_REFRESH_MS = 5000
 const READ_RETRY_DELAYS = [300, 1200]
 let cache = { at: 0, promise: null }
+const listeners = new Set()
+let lastInvalidatedAt = 0
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -78,16 +85,54 @@ export function readPluginsDetails({ force = false } = {}) {
   return entry.promise
 }
 
-/** 组件读插件列表：只取一次，卸载后不再写状态。 */
+/**
+ * 丢掉缓存并让所有已挂载的界面重读。
+ *
+ * 配置页写启停成功后会派发 `mica:plugins-changed`；侧栏入口、快捷条、面板这些「插件
+ * 声明了什么界面」的消费方因此不必等页面重载，也不必等 60 秒过期——用户点完开关，
+ * 对话页上的按钮就该跟着出现 / 消失。
+ */
+export function invalidatePluginsDetails() {
+  cache = { at: 0, promise: null }
+  lastInvalidatedAt = Date.now()
+  for (const listener of [...listeners]) listener()
+}
+
+/** 订阅清单变化（启停、窗口重新聚焦）。返回取消订阅。 */
+export function subscribePluginsDetails(listener) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('mica:plugins-changed', () => {
+    // 一次写盘可能连发几次事件（保存 + 状态对齐），没必要重复拉。
+    if (Date.now() - lastInvalidatedAt < 500) return
+    invalidatePluginsDetails()
+  })
+  window.addEventListener('focus', () => {
+    if (Date.now() - cache.at < FOCUS_REFRESH_MS) return
+    invalidatePluginsDetails()
+  })
+}
+
+/** 组件读插件列表：挂载时取一次，之后跟着清单变化重读。 */
 export function usePluginsDetails() {
   const [plugins, setPlugins] = useState([])
   useEffect(() => {
     let alive = true
-    void readPluginsDetails().then((list) => {
-      if (alive) setPlugins(list)
-    })
+    const load = () => {
+      void readPluginsDetails().then((list) => {
+        if (alive) setPlugins(list)
+      })
+    }
+    const unsubscribe = subscribePluginsDetails(load)
+    load()
     return () => {
       alive = false
+      unsubscribe()
     }
   }, [])
   return plugins

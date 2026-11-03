@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { readPluginsDetails } from './plugins-details'
+import { usePluginsDetails } from './plugins-details'
 
 /**
  * 插件在桌面端的入口（侧栏一行，或者顶栏的一枚图标按钮）。
@@ -37,13 +37,12 @@ export function pluginEntryLoader(pluginId) {
  */
 export function usePluginEntries() {
   const [entries, setEntries] = useState([])
+  // 启停变化会让这份清单重读：停用的插件入口立刻从侧栏 / 顶栏撤下。
+  const plugins = usePluginsDetails()
 
   useEffect(() => {
     let alive = true
     void (async () => {
-      // 读不到插件状态就不画入口：画出来也点不开，反而让人以为功能坏了
-      const plugins = await readPluginsDetails()
-
       const loaded = await Promise.all(
         plugins.map(async (plugin) => {
           if (plugin?.state !== 'enabled' || !plugin?.desktopEntry) return null
@@ -61,6 +60,9 @@ export function usePluginEntries() {
               // 位置是清单说了算的呈现选择：`header` 走顶栏，其余一律按侧栏一行画
               placement: plugin.desktopEntry.placement === 'header' ? 'header' : 'sidebar',
               icon: plugin.icon,
+              // 卡片宽度可以由插件模块声明（`export const card = { width }`）：笔记、
+              // 表格这类内容在 320px 里放不下，宿主只负责把数值夹到合理范围。
+              cardWidth: clampCardWidth(module?.card?.width),
               module,
               page
             }
@@ -74,7 +76,16 @@ export function usePluginEntries() {
     return () => {
       alive = false
     }
-  }, [])
+  }, [plugins])
 
   return entries
+}
+
+const CARD_MIN_WIDTH = 240
+const CARD_MAX_WIDTH = 960
+
+function clampCardWidth(width) {
+  const value = Number(width)
+  if (!Number.isFinite(value) || value <= 0) return null
+  return Math.min(CARD_MAX_WIDTH, Math.max(CARD_MIN_WIDTH, Math.round(value)))
 }

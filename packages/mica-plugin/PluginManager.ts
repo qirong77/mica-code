@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { statSync, unwatchFile, watchFile } from 'node:fs';
 import { join } from 'node:path';
 import type { Disposable } from '@packages/mica-common/index.js';
 import type { MicaPlugin } from './Plugin.js';
@@ -69,6 +69,14 @@ export type PluginStateSyncOptions = {
    * 回答（TUI 走启动扩展、常驻宿主走 `loadUserPlugins`）。省略表示这个宿主不装用户插件。
    */
   loadUserPlugins?: (options: { disabled: string[] }) => Promise<Pick<FilePluginLoadResult, 'loaded' | 'failed'>>;
+  /**
+   * 此刻能不能卸载 / 装配插件。
+   *
+   * 名单一变就立即对齐，但正在跑的那一轮里不能把它的工具、钩子从脚底抽走——宿主在这
+   * 件事上比 manager 清楚（headless 看 executor，TUI 看 runtime）。返回 false 时变化
+   * 被记下来，等这一轮结束（`turn:after`）再对齐。
+   */
+  canSyncNow?: () => boolean;
 };
 
 /**
@@ -155,6 +163,11 @@ export class PluginManager {
   /** 常驻宿主传的装配选项（`backgroundTasks` 等）：重新启用时沿用它。 */
   private residentOptions: { ignoreRequirements?: boolean; backgroundTasks?: boolean } = {};
   private stateSyncHook: Disposable | null = null;
+  /** 轮次结束时兜底对齐一次（名单在轮次中途变过、或 watcher 漏了事件）。 */
+  private stateSettledHook: Disposable | null = null;
+  /** 名单变化后等一小段再对齐：一次写盘会连发几个 mtime 事件。 */
+  private stateSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  private watchedStatePath: string | null = null;
   /** `plugins-state.json` 的 mtime+size：没变就不必读、更不必重装。 */
   private stateSignature: string | null = null;
   /** 用户插件的磁盘加载结果：`plugin-status.json` 要按它补上入口文件与加载失败。 */
@@ -588,6 +601,12 @@ export class PluginManager {
     }
     this.stateSyncHook?.dispose();
     this.stateSyncHook = null;
+    this.stateSettledHook?.dispose();
+    this.stateSettledHook = null;
+    if (this.stateSyncTimer) clearTimeout(this.stateSyncTimer);
+    this.stateSyncTimer = null;
+    if (this.watchedStatePath) unwatchFile(this.watchedStatePath);
+    this.watchedStatePath = null;
     if (errors.length > 0) throw new AggregateError(errors, 'Failed to dispose plugin resources');
   }
 
@@ -623,17 +642,67 @@ export class PluginManager {
   private installStateSync(baseContext: PluginBaseContext): void {
     this.stateSignature = stateSignature(resolveStatePath(baseContext));
     this.stateSyncHook?.dispose();
-    this.stateSyncHook = baseContext.hooks.beforeEmit(
-      'turn:before',
-      async () => {
-        try {
-          await this.syncPluginState();
-        } catch (error) {
-          // 同步失败不该打断这一轮：插件保持现状，插件日志里说明发生了什么。
-          baseContext.logger?.warn?.('plugin:state-sync-failed', { error: errorMessage(error) });
-        }
-      },
-    );
+    this.stateSyncHook = baseContext.hooks.beforeEmit('turn:before', async () => {
+      // 轮次边界本来就不安全，名单必须先对齐：到这里时 executor 可能已经标了 busy，
+      // 但这一轮还没开始跑，工具与钩子换掉不影响任何在途调用。
+      await this.runStateSync(baseContext, { force: true });
+    });
+    this.stateSettledHook?.dispose();
+    this.stateSettledHook = baseContext.hooks.beforeEmit('turn:after', async () => {
+      // 轮次结束就对齐一次：watcher 漏事件（网络盘、容器）时这里兜底，名单没变时
+      // 只有一次 stat。忙时攒下的变化也在这里落地。
+      await this.runStateSync(baseContext);
+    });
+    this.watchStateFile(baseContext);
+  }
+
+  private async runStateSync(baseContext: PluginBaseContext, options: { force?: boolean } = {}): Promise<void> {
+    const canSyncNow = baseContext.pluginStateSync?.canSyncNow;
+    if (!options.force && canSyncNow && !canSyncNow()) {
+      // 正在跑的一轮里不能把工具与钩子从脚底抽走：`turn:after` 会再对齐一次。
+      return;
+    }
+    try {
+      await this.syncPluginState();
+    } catch (error) {
+      // 同步失败不该打断这一轮：插件保持现状，插件日志里说明发生了什么。
+      baseContext.logger?.warn?.('plugin:state-sync-failed', { error: errorMessage(error) });
+    }
+  }
+
+  /**
+   * 盯着 `plugins-state.json`：用户在配置页点开关之后，插件应当立刻装上 / 撤下，
+   * 而不是等到下一轮对话。
+   *
+   * 用 `watchFile`（stat 轮询）而不是 `watch` 目录：这份文件可能还不存在，目录也可能
+   * 在第一次写盘前才被创建；300ms 轮询的代价只有一次 stat。
+   */
+  private watchStateFile(baseContext: PluginBaseContext): void {
+    const path = resolveStatePath(baseContext);
+    if (this.watchedStatePath === path) return;
+    if (this.watchedStatePath) unwatchFile(this.watchedStatePath);
+    this.watchedStatePath = path;
+    try {
+      watchFile(path, { interval: 300 }, (curr, prev) => {
+        if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) return;
+        this.scheduleStateSync(path);
+      });
+    } catch (error) {
+      baseContext.logger?.warn?.('plugin:state-watch-failed', { error: errorMessage(error) });
+    }
+  }
+
+  private scheduleStateSync(path: string): void {
+    if (this.stateSyncTimer) clearTimeout(this.stateSyncTimer);
+    const timer = setTimeout(() => {
+      this.stateSyncTimer = null;
+      const baseContext = this.baseContext;
+      // 路径换过一次（宿主换 config 目录）就别再按旧文件对齐。
+      if (!baseContext || resolveStatePath(baseContext) !== path) return;
+      void this.runStateSync(baseContext);
+    }, 120);
+    timer.unref?.();
+    this.stateSyncTimer = timer;
   }
 
   /** 重新扫描用户插件目录并合并加载结果。返回加载失败的原因（成功时为 null）。 */

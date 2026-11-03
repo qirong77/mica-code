@@ -205,20 +205,22 @@ export type MicaHostMaintenance = {
 };
 
 /**
- * 会话笔记被**面板**改写（`mica/notes/set`）。同一会话的其他窗口据此刷新，
- * 免得一边改完另一边还显示旧内容。
+ * 某个插件的**会话级状态**被面板改写（`mica/sessionState/set`）。
  *
- * 模型用 session_notes 工具写的那条不发通知：工具跑在 turn 里，客户端本来就会在
- * 本轮结束（`turn/completed`）后重读一次，多一条通知反而和 turn 增量撞车。
+ * 状态存在会话快照的 `pluginState` 里，不进对话历史，压缩不会动它；同一会话的其他
+ * 窗口据此刷新，免得一边改完另一边还显示旧内容。
+ *
+ * 模型在 turn 里写状态不发通知：客户端在本轮结束（`turn/completed`）后本来就会重读。
  */
-export const MICA_NOTES_NOTIFICATIONS = {
-  updated: 'mica/notes/updated',
+export const MICA_SESSION_STATE_NOTIFICATIONS = {
+  updated: 'mica/sessionState/updated',
 } as const;
 
-/** `MICA_NOTES_NOTIFICATIONS.updated` payload. */
-export type MicaNotesSnapshot = {
+/** `MICA_SESSION_STATE_NOTIFICATIONS.updated` payload. */
+export type MicaSessionStateSnapshot = {
   threadId: string | null;
-  content: string;
+  pluginId: string;
+  value: unknown;
 };
 
 export const MICA_PLUGIN_SETTINGS_NOTIFICATIONS = {
@@ -513,15 +515,17 @@ export const MICA_METHODS = {
    */
   capabilitiesSet: 'mica/capabilities/set',
   /**
-   * 读本会话的笔记（用户与模型共同维护的 markdown）。笔记存在会话快照里，
-   * 不进对话历史，所以压缩不会动它。
+   * 读某个插件在本会话里的状态（会话快照的 `pluginState[pluginId]`）。
+   *
+   * 通用入口：内核不理解具体插件，也不知道那份 JSON 的形状；插件的桌面卡片读写它，
+   * 与插件自己的 `ctx.sessionState` 是同一份。
    */
-  notesGet: 'mica/notes/get',
+  sessionStateGet: 'mica/sessionState/get',
   /**
-   * 覆盖本会话的笔记。运行中也可以写：它不影响在途请求，下一轮才生效。
-   * 落盘后其他窗口经 `mica/notes/updated` 同步。
+   * 改写某个插件在本会话里的状态。运行中也可以写：它不影响在途请求。
+   * 落盘后其他窗口经 `mica/sessionState/updated` 同步。
    */
-  notesSet: 'mica/notes/set',
+  sessionStateSet: 'mica/sessionState/set',
   /**
    * 读本会话的插件设置：哪些插件声明了可按会话覆盖的项、每项的字段描述、
    * 全局默认值、本会话已覆盖的值。

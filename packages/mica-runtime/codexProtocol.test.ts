@@ -5,7 +5,7 @@ import {
   MICA_BTW_NOTIFICATIONS,
   MICA_CAPABILITY_NOTIFICATIONS,
   MICA_METHODS,
-  MICA_NOTES_NOTIFICATIONS,
+  MICA_SESSION_STATE_NOTIFICATIONS,
   encodeCodexError,
   encodeCodexNotification,
   encodeCodexResponse,
@@ -41,20 +41,20 @@ describe('codex protocol framing', () => {
       sessionCwd: 'mica/session/cwd',
       capabilitiesGet: 'mica/capabilities/get',
       capabilitiesSet: 'mica/capabilities/set',
-      notesGet: 'mica/notes/get',
+      sessionStateGet: 'mica/sessionState/get',
       pluginSettingsGet: 'mica/pluginSettings/get',
       pluginSettingsSet: 'mica/pluginSettings/set',
-      notesSet: 'mica/notes/set',
+      sessionStateSet: 'mica/sessionState/set',
       pluginPanelView: 'mica/pluginPanel/view',
       pluginPanelAction: 'mica/pluginPanel/action',
       pluginSessionMenuRun: 'mica/sessionMenu/run',
     });
   });
 
-  // 会话能力开关与笔记面板都靠这几条通知刷新：改名等于面板静默不更新。
-  it('pins the Mica capability and notes notification names', () => {
+  // 会话能力开关与插件的会话级状态都靠这几条通知刷新：改名等于面板静默不更新。
+  it('pins the Mica capability and session-state notification names', () => {
     expect(MICA_CAPABILITY_NOTIFICATIONS).toEqual({ updated: 'mica/capabilities/updated' });
-    expect(MICA_NOTES_NOTIFICATIONS).toEqual({ updated: 'mica/notes/updated' });
+    expect(MICA_SESSION_STATE_NOTIFICATIONS).toEqual({ updated: 'mica/sessionState/updated' });
   });
 
   // Same reason: the desktop host matches this literal string to route a By The Way

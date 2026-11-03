@@ -153,14 +153,29 @@ export function CalendarHeatmap({
 
 const PLOT_VH = 100
 
+/** 一根柱的总高度：有 segments 时按段累加，否则就是 value。 */
+function columnTotal(column) {
+  if (!column?.segments?.length) return Math.max(0, column?.value || 0)
+  return column.segments.reduce((sum, seg) => sum + Math.max(0, seg.value || 0), 0)
+}
+
+function columnSegments(column) {
+  if (!column?.segments?.length) {
+    const value = Math.max(0, column?.value || 0)
+    return value > 0 ? [{ key: column.key, value, color: 'var(--color-fg)' }] : []
+  }
+  return column.segments.filter((seg) => (seg.value || 0) > 0)
+}
+
 /**
  * 每日柱状图：每天一根柱，Y 轴取“漂亮”上限 + 等距刻度，悬停显示 tooltip。
- * 柱高按窗口内最大值的绝对比例，空天显示为 0。
+ * 柱高按窗口内最大值的绝对比例，空天显示为 0。柱子可以是单值（`value`），也可以
+ * 由 `segments` 自下而上堆叠（同一根柱里看构成与总量，例如缓存 / 未缓存 / 输出）。
  */
 export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
   const [hovered, setHovered] = useState(null)
   const n = columns.length
-  const dataMax = Math.max(0, ...columns.map((c) => Math.max(0, c.value)))
+  const dataMax = Math.max(0, ...columns.map(columnTotal))
   const axisMax = niceAxisMax(dataMax)
   const ticks = axisTicks(axisMax)
 
@@ -204,18 +219,28 @@ export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
               />
             ))}
             {columns.map((col, i) => {
-              const h = col.value > 0 ? (col.value / axisMax) * PLOT_VH : 0
-              return h > 0 ? (
-                <rect
-                  key={col.key}
-                  x={i + 0.1}
-                  width={0.8}
-                  y={PLOT_VH - h}
-                  height={h}
-                  fill="var(--color-fg)"
-                  className="pointer-events-none"
-                />
-              ) : null
+              const segments = columnSegments(col)
+              if (segments.length === 0) return null
+              let bottom = 0
+              return (
+                <g key={col.key} className="pointer-events-none">
+                  {segments.map((seg) => {
+                    const h = (seg.value / axisMax) * PLOT_VH
+                    const rect = (
+                      <rect
+                        key={seg.key}
+                        x={i + 0.1}
+                        width={0.8}
+                        y={PLOT_VH - bottom - h}
+                        height={h}
+                        fill={seg.color || 'var(--color-fg)'}
+                      />
+                    )
+                    bottom += h
+                    return rect
+                  })}
+                </g>
+              )
             })}
           </svg>
           {hovered != null && (
@@ -239,6 +264,34 @@ export function BarSeries({ columns, formatTick, xLabels, renderTooltip }) {
           ))}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * 横向堆叠占比条：一条 100% 宽的圆头条，按各段占比切分（图例由调用方画，段内不写字）。
+ * 总和为 0 时画一条空轨道，避免整块区域塌掉。
+ */
+export function StackedShareBar({ segments, height = 10, ariaLabel }) {
+  const total = segments.reduce((sum, seg) => sum + Math.max(0, seg.value || 0), 0)
+  const visible = segments.filter((seg) => (seg.value || 0) > 0)
+  return (
+    <div
+      role="img"
+      aria-label={ariaLabel}
+      className="flex w-full overflow-hidden rounded-full bg-panel-hi"
+      style={{ height }}
+    >
+      {total > 0
+        ? visible.map((seg) => (
+            <span
+              key={seg.key}
+              title={seg.title}
+              style={{ width: `${(seg.value / total) * 100}%`, background: seg.color }}
+              className="h-full"
+            />
+          ))
+        : null}
     </div>
   )
 }

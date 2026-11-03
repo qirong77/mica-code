@@ -6,7 +6,7 @@
 // 的来源。这里保留完整形态：回合日志的行自己用 CSS 裁成一行省略号，完整文案与
 // 完整输出都在点开的详情弹窗里（`chat-tool-detail.jsx`）。
 
-import { toolLabel } from '@packages/mica-web-shared'
+import { formatElapsed, toolLabel } from '@packages/mica-web-shared'
 import { normalizeToolName } from '@packages/mica-common/toolNames.js'
 
 /** 详情弹窗最多渲染多少行 / 多少字符，避免一条 256KB 的命令输出拖垮 DOM。 */
@@ -162,7 +162,5 @@ export function toolDurationMs(tool, now = Date.now()) {
 
 /** 回合日志/状态行里一行的耗时（不到一秒显示毫秒）。 */
 export function formatLogElapsed(ms) {
-  if (!Number.isFinite(ms) || ms < 0) return '0ms'
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return formatDuration(ms)
+  return formatElapsed(ms)
 }

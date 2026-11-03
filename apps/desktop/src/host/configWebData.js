@@ -392,6 +392,8 @@ function readSessionDetails(id) {
     // 同一个口径：主对话 + 委派 + 插件 + 内核后台的请求数（见 usage-source）。
     usageCount: countUsageRequests(session.snapshot),
     contextWindowSize: session.snapshot.contextWindowSize,
+    // 「耗时」页签与「耗时分析」弹窗都读这一份（会话详情 = 唯一入口）。
+    turnTimings: session.snapshot.turnTimings,
     lastUsage: lastUsage
       ? {
           inputTokens: lastUsage.inputTokens,

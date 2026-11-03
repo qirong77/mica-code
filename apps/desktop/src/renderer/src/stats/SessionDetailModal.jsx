@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { SelectMenu, SessionDetailView } from '@mica-config-ui/web'
-import { USAGE_SOURCE_LABELS, usageSourceOf } from '@packages/mica-web-shared/usage-source.js'
+import { Segmented, SelectMenu, SessionDetailView } from '@mica-config-ui/web'
+import { usageSourceOf } from '@packages/mica-web-shared/usage-source.js'
+import { BarSeries, StackedShareBar } from './charts'
+import {
+  USAGE_KIND_COLORS,
+  USAGE_KIND_LABELS,
+  USAGE_TOKEN_PARTS,
+  buildUsageSeries,
+  projectRequest
+} from './usage-series'
 import { ModalShell } from '../chat-modal'
 
 const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
+const CARD_CLASS = 'rounded-[5px] border border-line bg-panel px-4 py-3'
 
 function fmtTime(iso) {
   if (!iso) return '—'
@@ -13,6 +22,15 @@ function fmtTime(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+/** 图表横轴用的短时间：一次会话通常在同一天内，带日期是为了跨天时也认得出。 */
+function stampShort(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const p = (x) => String(x).padStart(2, '0')
+  return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 function fmtTokens(value) {
   const n = Number(value) || 0
   if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`
@@ -20,14 +38,14 @@ function fmtTokens(value) {
   return String(Math.round(n))
 }
 
-function rate(u) {
-  const input = u.inputTokens || 0
-  return input > 0 ? `${(((u.cachedInputTokens || 0) / input) * 100).toFixed(0)}%` : '—'
+function pct(ratio, digits = 1) {
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) return '—'
+  return `${(ratio * 100).toFixed(digits)}%`
 }
 
-function StatCard({ label, primary, secondary }) {
+function StatCard({ label, primary, secondary, title }) {
   return (
-    <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2">
+    <div className="rounded-[4px] border border-line bg-panel-hi px-2.5 py-2" title={title}>
       <div className="text-[10px] uppercase tracking-wide text-fg-faint">{label}</div>
       <div className="mt-0.5 font-mono text-xs text-fg-strong tabular-nums">{primary}</div>
       <div className="mt-0.5 font-mono text-[10px] text-fg-dim tabular-nums">{secondary}</div>
@@ -35,19 +53,175 @@ function StatCard({ label, primary, secondary }) {
   )
 }
 
-/** 某一类来源（委派 / 插件 / 内核后台）的请求数与 token 合计。 */
-function sumRecords(groups, kind) {
-  const totals = { requests: 0, input: 0, cached: 0, output: 0, total: 0 }
-  const group = groups.find((item) => item.kind === kind)
-  if (!group) return totals
-  for (const { record } of group.items) {
-    totals.requests += (record.requests || []).length
-    totals.input += record.summary?.inputTokens || 0
-    totals.cached += record.summary?.cachedInputTokens || 0
-    totals.output += record.summary?.outputTokens || 0
-    totals.total += record.summary?.totalTokens || 0
+const PART_COLORS = Object.fromEntries(USAGE_TOKEN_PARTS.map((part) => [part.key, part.color]))
+const CHART_MODES = [
+  { value: 'total', label: '总量' },
+  { value: 'input', label: '输入' },
+  { value: 'output', label: '输出' }
+]
+
+/** 一次请求在三种指标下的堆叠段：总量看构成，输入只看上下文，输出只看生成。 */
+function barSegments(request, mode) {
+  if (mode === 'output') {
+    return [{ key: 'output', value: request.output, color: PART_COLORS.output }]
   }
-  return totals
+  const segments = [
+    { key: 'cached', value: request.cached, color: PART_COLORS.cached },
+    { key: 'uncached', value: request.input - request.cached, color: PART_COLORS.uncached }
+  ]
+  return mode === 'input'
+    ? segments
+    : [...segments, { key: 'output', value: request.output, color: PART_COLORS.output }]
+}
+
+/**
+ * 逐次请求的柱状图：每次模型请求一根柱，按时间从左到右。
+ *
+ * 这张图回答的是表格回答不了的问题——「钱花在哪几次请求上」「上下文是怎么涨起来的」。
+ * 输入逐条上涨是回放上一轮的输出（reasoning 的思考同样计入下一次 input），趋势一眼可见，
+ * 不必只靠一句脚注解释。
+ */
+function RequestChartCard({ series }) {
+  const [mode, setMode] = useState('total')
+  const requests = series.requests
+  if (requests.length === 0) return null
+
+  const stride = Math.max(1, Math.ceil(requests.length / 6))
+  const lastPhase = (requests.length - 1) % stride
+  const xLabels = requests
+    .map((request, index) => ({ index, label: stampShort(request.at) }))
+    .filter(({ index }) => index % stride === lastPhase)
+
+  const legendKeys =
+    mode === 'output'
+      ? ['output']
+      : mode === 'input'
+        ? ['cached', 'uncached']
+        : ['cached', 'uncached', 'output']
+  const legendValues = {
+    cached: series.totals.cached,
+    uncached: series.composition.uncached,
+    output: series.totals.output
+  }
+
+  return (
+    <section className={CARD_CLASS}>
+      <header className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <h3 className={OVERLINE_CLASS}>逐次请求</h3>
+        <span className="mica-config-ui is-embed">
+          <Segmented
+            size="compact"
+            value={mode}
+            options={CHART_MODES}
+            ariaLabel="图表指标"
+            onChange={setMode}
+          />
+        </span>
+      </header>
+      <BarSeries
+        columns={requests.map((request) => ({
+          key: request.key || `req-${request.index}`,
+          segments: barSegments(request, mode)
+        }))}
+        formatTick={fmtTokens}
+        xLabels={xLabels}
+        renderTooltip={(index) => {
+          const request = requests[index]
+          return (
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5 font-medium text-fg-strong">
+                <span
+                  aria-hidden
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ background: USAGE_KIND_COLORS[request.kind] }}
+                />
+                <span>
+                  {request.sourceLabel} · 第 {index + 1} 次
+                </span>
+              </div>
+              <div className="font-mono text-[11px] text-fg-muted">
+                {fmtTime(request.at)} · {request.model || '—'}
+              </div>
+              <div className="font-mono text-[11px] text-fg-muted">
+                输入 {request.input.toLocaleString()}（缓存 {request.cached.toLocaleString()}）·
+                输出 {request.output.toLocaleString()}
+              </div>
+              <div className="font-mono text-[11px] text-fg-faint">
+                本次 {fmtTokens(request.total)} · 累计 {fmtTokens(request.cumulative)}
+              </div>
+            </div>
+          )
+        }}
+      />
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+        {legendKeys.map((key) => {
+          const part = USAGE_TOKEN_PARTS.find((item) => item.key === key)
+          return (
+            <span key={key} className="flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className="size-2 rounded-[2px]"
+                style={{ background: part.color }}
+              />
+              <span className="text-fg-dim">{part.label}</span>
+              <span className="font-mono text-fg-muted tabular-nums">
+                {fmtTokens(legendValues[key])}
+              </span>
+            </span>
+          )
+        })}
+        <span className="ml-auto text-fg-ghost">悬停看单次请求 · 共 {requests.length} 次</span>
+      </div>
+      <p className="mt-1.5 text-[10px] leading-relaxed text-fg-ghost">
+        输入逐条上涨多为上一轮的输出被回放：思考型模型（reasoning）的思考内容同样计入下一次
+        input，所以「输出」和「输入增长」会一起变大。
+      </p>
+    </section>
+  )
+}
+
+/** 四类来源的占比：一条堆叠条 + 每类的请求数、输入输出与份额。 */
+function SourceShareCard({ series }) {
+  if (series.byKind.length < 2) return null
+  const total = series.totals.total
+  return (
+    <section className={CARD_CLASS}>
+      <header className="mb-2 flex items-center justify-between">
+        <h3 className={OVERLINE_CLASS}>用量来源</h3>
+        <span className="font-mono text-[11px] text-fg-faint tabular-nums">
+          {fmtTokens(total)} tokens
+        </span>
+      </header>
+      <StackedShareBar
+        ariaLabel="用量来源占比"
+        segments={series.byKind.map((row) => ({
+          key: row.kind,
+          value: row.total,
+          color: row.color,
+          title: `${row.label} ${fmtTokens(row.total)}`
+        }))}
+      />
+      <div className="mt-2 flex flex-col gap-1">
+        {series.byKind.map((row) => (
+          <div key={row.kind} className="flex items-center gap-2 text-[11px]">
+            <span
+              aria-hidden
+              className="size-2 shrink-0 rounded-[2px]"
+              style={{ background: row.color }}
+            />
+            <span className="w-24 shrink-0 truncate text-fg-strong">{row.label}</span>
+            <span className="font-mono text-fg-dim tabular-nums">{row.requests} req</span>
+            <span className="ml-auto font-mono text-fg-muted tabular-nums">
+              {fmtTokens(row.input)} in · {fmtTokens(row.output)} out
+            </span>
+            <span className="w-12 shrink-0 text-right font-mono text-fg-faint tabular-nums">
+              {total > 0 ? `${((row.total / total) * 100).toFixed(1)}%` : '—'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
 }
 
 function UsageTable({
@@ -65,10 +239,10 @@ function UsageTable({
   const shown = rows.slice(current * pageSize, (current + 1) * pageSize)
   const total = rows.reduce(
     (acc, u) => {
-      acc.input += u.inputTokens || 0
-      acc.cached += u.cachedInputTokens || 0
-      acc.output += u.outputTokens || 0
-      acc.total += u.totalTokens || 0
+      acc.input += u.input || 0
+      acc.cached += u.cached || 0
+      acc.output += u.output || 0
+      acc.total += u.total || 0
       return acc
     },
     { input: 0, cached: 0, output: 0, total: 0 }
@@ -128,9 +302,9 @@ function UsageTable({
           </thead>
           <tbody>
             {shown.map((u, i) => (
-              <tr key={u.usageId || `${title}-${i}`} className="border-t border-line">
+              <tr key={u.key || `${title}-${i}`} className="border-t border-line">
                 <td className="py-1 pr-2 whitespace-nowrap font-mono text-[10px] text-fg-dim tabular-nums">
-                  {fmtTime(u.occurredAt)}
+                  {fmtTime(u.at)}
                 </td>
                 {showSource && (
                   <td className="truncate py-1 pr-2 text-[10px] text-fg-dim">
@@ -144,19 +318,19 @@ function UsageTable({
                   {u.model || '—'}
                 </td>
                 <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-muted tabular-nums">
-                  {(u.inputTokens || 0).toLocaleString()}
+                  {(u.input || 0).toLocaleString()}
                 </td>
                 <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-dim tabular-nums">
-                  {(u.cachedInputTokens || 0).toLocaleString()}
+                  {(u.cached || 0).toLocaleString()}
                 </td>
                 <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-muted tabular-nums">
-                  {((u.inputTokens || 0) - (u.cachedInputTokens || 0)).toLocaleString()}
+                  {((u.input || 0) - (u.cached || 0)).toLocaleString()}
                 </td>
                 <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-muted tabular-nums">
-                  {(u.outputTokens || 0).toLocaleString()}
+                  {(u.output || 0).toLocaleString()}
                 </td>
                 <td className="py-1 pr-2 text-right font-mono text-[10px] text-fg-dim tabular-nums">
-                  {rate(u)}
+                  {u.input > 0 ? pct(u.cached / u.input, 0) : '—'}
                 </td>
               </tr>
             ))}
@@ -212,7 +386,10 @@ function UsageTable({
 }
 
 function UsageRecordCard({ record, source }) {
-  const requests = record.requests || []
+  const requests = useMemo(
+    () => (record.requests || []).map((usage) => projectRequest(usage, source.kind, source.id)),
+    [record, source]
+  )
   const summary = record.summary || {}
   const title =
     source.kind === 'plugin' ? source.pluginId || record.subagentType : record.subagentType
@@ -223,7 +400,7 @@ function UsageRecordCard({ record, source }) {
           {title || 'request'}
         </span>
         <span className="rounded-[3px] bg-panel px-1.5 py-0.5 text-[10px] text-fg-dim">
-          {USAGE_SOURCE_LABELS[source.kind]}
+          {USAGE_KIND_LABELS[source.kind]}
         </span>
         <span
           className={`rounded-[3px] px-1.5 py-0.5 text-[10px] font-medium uppercase ${
@@ -286,6 +463,9 @@ const SOURCE_SECTION_HINTS = {
 /**
  * 会话详情：与上下文弹窗、配置页的 Sessions 页共用 `SessionDetailView`（系统提示词 /
  * 对话记录 / Context 分析 / 原始文件），这里只多一个统计页专属的「用量」页签。
+ *
+ * 用量页签讲三件事，顺序就是从「总量」到「明细」：多少 token、花在谁身上、哪几次请求
+ * 最贵。前两件靠数字和占比条，第三件靠逐次请求的柱状图——三个表格并排放着谁也不想读。
  */
 export function SessionDetailModal({ sessionId, onClose }) {
   const [detail, setDetail] = useState(null)
@@ -314,15 +494,13 @@ export function SessionDetailModal({ sessionId, onClose }) {
   // 内核后台助手。归到哪一类由 `usageSourceOf` 统一判定，和统计页的总表同源。
   const groups = useMemo(() => {
     const byKind = new Map()
-    let allRecords = 0
     for (const record of records) {
       const source = usageSourceOf(record)
       const list = byKind.get(source.kind) || []
       list.push({ record, source })
       byKind.set(source.kind, list)
-      allRecords += (record.requests || []).length
     }
-    const ordered = ['delegation', 'plugin', 'helper']
+    return ['delegation', 'plugin', 'helper']
       .filter((kind) => byKind.has(kind))
       .map((kind) => ({
         kind,
@@ -334,58 +512,21 @@ export function SessionDetailModal({ sessionId, onClose }) {
               String(a.source.id).localeCompare(String(b.source.id))
           )
       }))
-    const totals = { requests: 0, input: 0, cached: 0, output: 0, total: 0 }
-    for (const { record } of ordered.flatMap((group) => group.items)) {
-      totals.requests += (record.requests || []).length
-      totals.input += record.summary?.inputTokens || 0
-      totals.cached += record.summary?.cachedInputTokens || 0
-      totals.output += record.summary?.outputTokens || 0
-      totals.total += record.summary?.totalTokens || 0
-    }
-    return { ordered, totals, allRecords }
   }, [records])
 
-  const delegatedTotals = useMemo(() => sumRecords(groups.ordered, 'delegation'), [groups])
-  const pluginTotals = useMemo(() => sumRecords(groups.ordered, 'plugin'), [groups])
-  const helperTotals = useMemo(() => sumRecords(groups.ordered, 'helper'), [groups])
+  const series = useMemo(() => buildUsageSeries(usageHistory, records), [usageHistory, records])
+  const mainRequests = useMemo(
+    () => series.byKind.find((row) => row.kind === 'main')?.requests || 0,
+    [series]
+  )
 
-  const allUsage = useMemo(() => {
-    const rows = [
-      ...usageHistory.map((u) => ({ ...u, sourceLabel: USAGE_SOURCE_LABELS.main })),
-      ...records.flatMap((record) => {
-        const source = usageSourceOf(record)
-        return (record.requests || []).map((u) => ({
-          ...u,
-          sourceLabel: USAGE_SOURCE_LABELS[source.kind]
-        }))
-      })
-    ]
-    return rows.sort((a, b) => (a.occurredAt || '').localeCompare(b.occurredAt || ''))
-  }, [usageHistory, records])
-
-  const totals = useMemo(() => {
-    const sum = (list) =>
-      list.reduce(
-        (acc, u) => {
-          acc.input += u.inputTokens || 0
-          acc.cached += u.cachedInputTokens || 0
-          acc.output += u.outputTokens || 0
-          acc.total += u.totalTokens || 0
-          return acc
-        },
-        { input: 0, cached: 0, output: 0, total: 0 }
-      )
-    const main = sum(usageHistory)
-    return {
-      main,
-      all: {
-        input: main.input + groups.totals.input,
-        cached: main.cached + groups.totals.cached,
-        output: main.output + groups.totals.output,
-        total: main.total + groups.totals.total
-      }
-    }
-  }, [groups, usageHistory])
+  // 最后一次请求的输入 / 会话上下文窗口：打开详情最常问的一句是「这会话还塞得下吗」。
+  const occupancy = useMemo(() => {
+    const windowSize = Number(detail?.contextWindowSize) || 0
+    const used = Number(detail?.lastUsage?.inputTokens) || 0
+    if (!windowSize || !used) return null
+    return { used, windowSize, ratio: Math.min(1, used / windowSize) }
+  }, [detail])
 
   const usageTab = useMemo(
     () => ({
@@ -395,51 +536,50 @@ export function SessionDetailModal({ sessionId, onClose }) {
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
             <StatCard
-              label="主对话"
-              primary={`${usageHistory.length} req`}
-              secondary={`${fmtTokens(totals.main.input)} in · ${fmtTokens(totals.main.output)} out`}
+              label="请求"
+              primary={`${series.totals.requests} req`}
+              secondary={`主对话 ${mainRequests} · 其它 ${series.totals.requests - mainRequests}`}
             />
             <StatCard
-              label="委派子代理"
-              primary={`${delegatedTotals.requests} req`}
-              secondary={`${fmtTokens(delegatedTotals.input)} in · ${fmtTokens(delegatedTotals.output)} out`}
+              label="输入"
+              primary={fmtTokens(series.totals.input)}
+              secondary={`缓存 ${fmtTokens(series.totals.cached)}`}
             />
             <StatCard
-              label="插件"
-              primary={`${pluginTotals.requests} req`}
-              secondary={`${fmtTokens(pluginTotals.input)} in · ${fmtTokens(pluginTotals.output)} out`}
-            />
-            <StatCard
-              label="内核后台"
-              primary={`${helperTotals.requests} req`}
-              secondary={`${fmtTokens(helperTotals.input)} in · ${fmtTokens(helperTotals.output)} out`}
+              label="输出"
+              primary={fmtTokens(series.totals.output)}
+              secondary={`每次 ${fmtTokens(series.totals.requests > 0 ? series.totals.output / series.totals.requests : 0)}`}
             />
             <StatCard
               label="合计"
-              primary={fmtTokens(totals.all.total)}
-              secondary={`${totals.all.input.toLocaleString()} in · ${totals.all.output.toLocaleString()} out`}
+              primary={fmtTokens(series.totals.total)}
+              secondary={`${series.totals.input.toLocaleString()} in · ${series.totals.output.toLocaleString()} out`}
             />
             <StatCard
               label="缓存率"
-              primary={
-                totals.all.input > 0
-                  ? `${((totals.all.cached / totals.all.input) * 100).toFixed(1)}%`
-                  : '—'
+              primary={pct(series.totals.cacheRate)}
+              secondary={`${series.totals.cached.toLocaleString()} cached`}
+            />
+            <StatCard
+              label="上下文占用"
+              title="最后一次请求的输入量 / 这个会话的上下文窗口"
+              primary={occupancy ? pct(occupancy.ratio, 0) : '—'}
+              secondary={
+                occupancy
+                  ? `${fmtTokens(occupancy.used)} / ${fmtTokens(occupancy.windowSize)}`
+                  : '没有记录'
               }
-              secondary={`${totals.all.cached.toLocaleString()} cached`}
             />
           </div>
+          <SourceShareCard series={series} />
+          <RequestChartCard series={series} />
           <UsageTable
-            rows={allUsage}
+            rows={series.requests}
             title="逐条请求（主对话 + 委派 + 插件 + 内核后台，按时间排序）"
             showSource
           />
-          <p className="text-[10px] leading-relaxed text-fg-ghost">
-            输入逐条上涨多为上一轮的输出被回放：思考型模型（reasoning）的思考内容同样计入下一次
-            input，所以「输出」和「输入增长」会一起变大。
-          </p>
 
-          {groups.ordered.map((group) => (
+          {groups.map((group) => (
             <section key={group.kind}>
               <h3 className={OVERLINE_CLASS}>{SOURCE_SECTION_TITLES[group.kind]}</h3>
               <p className="mt-1 text-[10px] text-fg-ghost">{SOURCE_SECTION_HINTS[group.kind]}</p>
@@ -457,7 +597,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
         </div>
       )
     }),
-    [allUsage, delegatedTotals, groups, helperTotals, pluginTotals, totals, usageHistory.length]
+    [groups, mainRequests, occupancy, series]
   )
 
   return (

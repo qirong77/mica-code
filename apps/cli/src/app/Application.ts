@@ -157,11 +157,15 @@ export class Application {
       setActiveContext(this.context);
 
       useBuiltinPlugins(this, agent, sessionController);
+      // TUI 也装配插件：工具目录以注册表为准，关掉配置页那套静态兜底。
+      micaTools.setRuntimeToolFallback(false);
       await plugins.setupAll({
         paths: pluginPaths,
         // 启停跟着 `plugins-state.json` 走：每轮开始前对齐一次，改完不必重开 TUI。
         pluginStateSync: {
           host: 'tui',
+          // 关掉 / 打开插件后立刻对齐；一轮正在跑时等它结束再动。
+          canSyncNow: () => !runtime.isAgentBusy(agent),
           loadUserPlugins: ({ disabled }) =>
             setupFilePlugins({
               paths: pluginPaths,

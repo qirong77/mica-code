@@ -195,6 +195,7 @@ export function getSessionDetails(id: string): ConfigWebSessionDetails {
           totalTokens: lastUsage.totalTokens,
         }
       : undefined,
+    turnTimings: session.snapshot.turnTimings,
   };
 }
 

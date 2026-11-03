@@ -177,6 +177,26 @@ describe('mobile-relay panel', () => {
     expect(button?.disabled).toBe(true);
   });
 
+  // 提示点只亮一次（`page-notice.json`），落后本身不会因此消失：面板里仍要有「落后 + 按钮」，
+  // 否则用户想手动再传一次时，这一节已经收起、什么也找不到。
+  it('keeps the stale row and the button after the notice was dismissed', () => {
+    writeFileSync(
+      join(dir, 'data.json'),
+      JSON.stringify({
+        page: { text: '落后 · 手机端 4d32，本机 bcc7', tone: 'warn' },
+        pageKey: 'bcc7->4d32',
+        attention: null,
+      }),
+      'utf8'
+    );
+    const section = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com' }), dir).sections?.find(
+      (item) => item.title === '页面版本'
+    );
+    expect(section?.collapsed).toBe(false);
+    expect(section?.rows?.[1]).toEqual({ label: '要更新', value: '版本与中转机不一致', tone: 'warn' });
+    expect(section?.actions?.find((item) => item.id === 'sync-page')?.tone).toBe('primary');
+  });
+
   it('hands the page update to a new session instead of uploading from the panel', async () => {
     const handler = createPanelHandler(fakeContext(), dir);
     const result = await handler.action({ action: 'sync-page', values: {} });

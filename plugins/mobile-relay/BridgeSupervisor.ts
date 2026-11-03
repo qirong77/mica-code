@@ -6,6 +6,7 @@ import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
 import { BRIDGE_SOURCE } from './bridgeSource.js';
 import { pageVersionOf } from './PageSync';
 import { rendererDirFor } from './PageSyncAction';
+import { pageNoticeKey, readPageNotice } from './PageNotice.js';
 
 /**
  * 常驻桥进程的监管。
@@ -295,7 +296,14 @@ export type BridgeStatus = {
   phone: StatusLine;
   /** 内置部署 skill 的源码位置（正文随包内嵌，这里只给可点开的地方）。 */
   skill: string;
-  /** 页面落后时的那条提示；没有要注意的事就是 null。 */
+  /**
+   * 本机这版与中转机那版的对比键（`<本机>-><中转机>`）；两版一致或少了任一边时为空。
+   *
+   * 它同时是两件事的判断依据：「页面是不是落后」（有键就是落后），以及提示点看过没有
+   * ——`page-notice.json` 按这个键记账，同一对版本只提示一次。
+   */
+  pageKey: string;
+  /** 页面落后时的那条提示；两版一致、或这一对已经提示过，就是 null。 */
   attention: AttentionLine | null;
 };
 
@@ -306,6 +314,7 @@ export function buildStatus(
   pid: number | null,
   now: number,
   localPage: string | null = null,
+  noticedKeys: readonly string[] = [],
 ): BridgeStatus {
   const relayUrl = String(values.relayUrl ?? '')
     .trim()
@@ -318,7 +327,10 @@ export function buildStatus(
   const localPageVersion = localPage ?? '';
   // 页面落后是唯一「点一下就能变好」的事：本机有新产物、中转机上还是旧的。
   // 中转机不可达或本机找不到产物时不上报——那两个状态没有可执行的动作。
-  const pageStale = Boolean(remotePage && localPageVersion && remotePage !== localPageVersion);
+  const pageKey = pageNoticeKey(localPageVersion, remotePage);
+  const pageStale = Boolean(pageKey) && remotePage !== localPageVersion;
+  // 同一对版本只提示一次：提示点是为了把人叫过去点一下，不是常驻角标。
+  const pageUnnoticed = pageStale && !noticedKeys.includes(pageKey);
   return {
     relayUrl,
     // 链接里带口令：手机扫一眼就能开，不用再去翻设置。
@@ -355,9 +367,10 @@ export function buildStatus(
           : { text: `手机端 ${remotePage} · 本机找不到页面产物`, tone: 'warn' },
     // 部署不在插件里做：给出内置 skill 的源码位置，用户对着 agent 说一句话就能装。
     skill: SKILL_URL,
-    attention: pageStale
+    pageKey: pageStale ? pageKey : '',
+    attention: pageUnnoticed
       ? {
-          text: `手机端页面落后（本机 ${localPageVersion}，中转机 ${remotePage}），点「更新中转机页面」同步`,
+          text: `手机端页面落后：本机 ${localPageVersion} · 中转机 ${remotePage}`,
           tone: 'warn',
           action: 'sync-page',
         }
@@ -407,7 +420,7 @@ function publishStatus(
   if (!dir) return previous;
   const values = ctx.settings.get();
   const localPage = pageVersionOf(rendererDirFor(ctx));
-  const status = buildStatus(values, relay, pid, Date.now(), localPage);
+  const status = buildStatus(values, relay, pid, Date.now(), localPage, readPageNotice(dir).seen);
   const body = `${JSON.stringify(status, null, 2)}\n`;
   const fingerprint = JSON.stringify({ ...status, updatedAt: 0 });
   if (fingerprint === previous) return previous;

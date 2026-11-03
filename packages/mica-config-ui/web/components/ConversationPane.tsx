@@ -1,12 +1,29 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { readSessionConversationPage } from '../api.js';
 import { mergeConversationPage } from '../conversationMerge.js';
-import { Tag } from './Ui.js';
+import {
+  CONVERSATION_FILTERS,
+  buildTurnBlocks,
+  conversationFilterOf,
+  conversationItemLabel,
+  conversationItemSize,
+  conversationKindClass,
+  conversationPreview,
+  conversationRunLabel,
+  describeConversationRun,
+  formatTurnStats,
+  matchesConversationQuery,
+  splitConversationRuns,
+} from '../conversationView.js';
+import { Segmented } from './Ui.js';
 import { appIcons } from '../icons.js';
 import { formatCharCount } from '../format.js';
-import type { ConfigWebConversationItem, ConfigWebConversationItemType } from '../../src/shared/types.js';
+import type { ConfigWebConversationItem } from '../../src/shared/types.js';
+import type { ConversationFilter, TurnBlock, TurnStats } from '../conversationView.js';
 
 const PAGE_SIZE = 80;
+
+const SearchIcon = appIcons.search;
 
 export function ConversationPane({ sessionId, refreshToken }: { sessionId: string; refreshToken: number }) {
   const [items, setItems] = useState<ConfigWebConversationItem[]>([]);
@@ -14,6 +31,8 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<ConversationFilter>('all');
+  const [query, setQuery] = useState('');
   const inFlight = useRef(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -71,14 +90,31 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
     }
   }, [sessionId, loading, items, total]);
 
-  // 首次落地：打开详情先看最近的活动。不滚到底的话，顶部那条「加载更早」的哨兵
-  // 一直在视口里，会一口气把整条会话翻完（几百条），画面还停在最早那几条上。
+  /** 把最近一轮的段头对到视口顶部；没有段头（这一页全是上一轮的动作）时才滚到底。 */
+  const scrollToLatestTurn = useCallback(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    const heads = scroll.querySelectorAll<HTMLElement>('.conversation-turn-head');
+    const head = heads[heads.length - 1];
+    if (!head) {
+      scroll.scrollTop = scroll.scrollHeight;
+      return;
+    }
+    scroll.scrollTop += head.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+  }, []);
+
+  /**
+   * 滚到最近一轮的段头，而不是滚到底。
+   *
+   * 按用户消息分轮之后，最新一页的开头常常是上一轮的工具尾巴；滚到底会让最近这句话
+   * 正好被顶出视口，只剩半截工具行——打开详情最想看的恰恰是「我最后问的那句 + 它干了什么」。
+   * 顺带保留原来的作用：顶部那条「加载更早」的哨兵不能留在视口里，否则会一口气翻完几百条。
+   */
   useEffect(() => {
     if (scrolledToNewestRef.current || items.length === 0) return;
     scrolledToNewestRef.current = true;
-    const scroll = scrollRef.current;
-    if (scroll) scroll.scrollTop = scroll.scrollHeight;
-  }, [items.length]);
+    scrollToLatestTurn();
+  }, [items.length, scrollToLatestTurn]);
 
   // 补回因为「前面插入」而跳掉的滚动位置（在浏览器绘制前完成，看不到跳动）。
   useLayoutEffect(() => {
@@ -108,14 +144,47 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
     return () => observer.disconnect();
   }, [loadEarlier, items.length, total, loading]);
 
+  const blocks = useMemo(() => buildTurnBlocks(items), [items]);
+
+  // 搜索先于类型筛选：筛选项上的数字是「在这个搜索词下各类型还有多少条」，
+  // 点进去之前就知道有没有结果。
+  const searched = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return items;
+    return items.filter((item) => matchesConversationQuery(item, keyword));
+  }, [items, query]);
+
+  const counts = useMemo(() => {
+    const next: Record<ConversationFilter, number> = { all: searched.length, talk: 0, tools: 0, thinking: 0 };
+    for (const item of searched) next[conversationFilterOf(item)] += 1;
+    return next;
+  }, [searched]);
+
+  const visible = useMemo(() => {
+    const matched = new Set(searched.map((item) => item.sequence));
+    const narrowed: TurnBlock[] = [];
+    for (const block of blocks) {
+      const records =
+        filter === 'all'
+          ? block.records.filter((item) => matched.has(item.sequence))
+          : block.records.filter((item) => matched.has(item.sequence) && conversationFilterOf(item) === filter);
+      const turn = block.turn && matched.has(block.turn.sequence) ? block.turn : null;
+      if (!turn && records.length === 0) continue;
+      narrowed.push({ ...block, turn, records });
+    }
+    return narrowed;
+  }, [blocks, filter, searched]);
+
   const hasMore = items.length < total;
+  /** 主动要看细节时（筛到工具 / 思考，或搜了关键词）不用再点开每一段。 */
+  const expandRuns = filter !== 'all' || query.trim().length > 0;
 
   if (loading && items.length === 0) {
     // 首帧就把结构画出来（工具栏 + 滚动区），只是正文还没到：等第一条记录到达时
     // 只有内容出现，没有「小块居中文字 → 一整列卡片」这次几何跳变，看起来不闪。
     return (
       <div className="conversation-pane">
-        <div className="session-pane-toolbar">
+        <div className="session-pane-toolbar conversation-toolbar">
           <div className="session-pane-facts">
             <span className="muted-text">正在读取对话记录…</span>
           </div>
@@ -132,30 +201,49 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
 
   return (
     <div className="conversation-pane">
-      <div className="session-pane-toolbar">
-        <div className="session-pane-facts">
-          共 <strong>{total}</strong> 条记录 · 已显示 {items.length} 条
+      <div className="session-pane-toolbar conversation-toolbar">
+        <div className="conversation-toolbar-main">
+          <Segmented
+            size="compact"
+            value={filter}
+            ariaLabel="按类型筛选对话记录"
+            options={CONVERSATION_FILTERS.map((entry) => ({
+              value: entry.value,
+              label: `${entry.label} ${counts[entry.value]}`,
+            }))}
+            onChange={(next) => setFilter(next as ConversationFilter)}
+          />
+          <label className="conversation-search">
+            <SearchIcon size={13} aria-hidden="true" />
+            <input
+              type="search"
+              value={query}
+              aria-label="筛选对话记录内容"
+              placeholder="筛选内容…"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
         </div>
-        <div className="session-pane-actions">
-          {hasMore ? (
-            <button
-              type="button"
-              className="ui-link-button"
-              onClick={() => {
-                const scroll = scrollRef.current;
-                if (scroll) scroll.scrollTop = scroll.scrollHeight;
-              }}
-            >
-              回到最新
-            </button>
-          ) : null}
+        <div className="session-pane-actions conversation-toolbar-tail">
+          {/* 不筛选时不重复报总数：筛选条上已经写着载入多少，「加载更早」按钮写着 80 / 148。
+              两处都写会在窄一点的窗口里把工具栏挤成两行。 */}
+          <button
+            type="button"
+            className="ui-link-button"
+            onClick={() => {
+              const scroll = scrollRef.current;
+              if (scroll) scroll.scrollTop = scroll.scrollHeight;
+            }}
+          >
+            回到最新
+          </button>
         </div>
       </div>
 
-      {/* 工具栏固定在顶部（合计 / 回到最新），只有记录本身滚动：滚到很上面时那一行
+      {/* 工具栏固定在顶部（筛选 / 回到最新），只有记录本身滚动：滚到很上面时那一行
           「加载更早」正需要，跟着内容一起滚走就等于没有。 */}
       <div className="conversation-scroll" ref={scrollRef}>
-        <div className="conversation-timeline conversation-timeline-paged">
+        <div className="conversation-timeline">
           {hasMore ? (
             <div className="conversation-page-more" ref={sentinelRef}>
               {loadingMore ? (
@@ -167,9 +255,40 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
               )}
             </div>
           ) : null}
-          {items.map((item) => (
-            <ConversationItemCard key={`${item.sequence}-${item.type}-${item.callId ?? ''}`} item={item} />
+
+          {visible.length === 0 ? (
+            <div className="conversation-empty">
+              <p>没有匹配的记录</p>
+              <button
+                type="button"
+                className="ui-link-button"
+                onClick={() => {
+                  setFilter('all');
+                  setQuery('');
+                }}
+              >
+                清除筛选
+              </button>
+            </div>
+          ) : null}
+
+          {visible.map((block) => (
+            <section
+              key={block.key}
+              className={`conversation-turn${block.turn ? '' : ' is-continuation'}`}
+              aria-label={block.turn ? '一轮对话' : '上一轮未完的记录'}
+            >
+              {block.turn ? <TurnHead item={block.turn} stats={block.stats} /> : null}
+              {splitConversationRuns(block.records).map((run) =>
+                run.kind === 'group' ? (
+                  <RunRow key={run.key} records={run.records} expanded={expandRuns} />
+                ) : (
+                  <RecordRow key={run.key} item={run.record} />
+                ),
+              )}
+            </section>
           ))}
+
           {hasMore ? null : <div className="conversation-pane-end">— 已到最早记录 —</div>}
         </div>
       </div>
@@ -177,67 +296,114 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
   );
 }
 
-function ConversationItemCard({ item }: { item: ConfigWebConversationItem }) {
-  const metadata = [item.toolName, item.callId].filter(Boolean).join(' · ');
-  const preview = contentPreview(item.content);
+/** 一轮的开头：用户那句话本身就是这一段的小标题，下面一行是这轮的体积与动作量。 */
+function TurnHead({ item, stats }: { item: ConfigWebConversationItem; stats: TurnStats }) {
   const [expanded, setExpanded] = useState(false);
   const ChevronIcon = appIcons.chevronRight;
+  const text = conversationPreview(item.content, 4000) || '(空)';
 
   return (
-    <article className={`conversation-item conversation-item-${item.type}`}>
-      <div className="conversation-sequence" aria-label={`第 ${item.sequence} 项`}>
-        {item.sequence}
-      </div>
-      <details className="conversation-card simple-card" onToggle={(event) => setExpanded(event.currentTarget.open)}>
-        <summary className="conversation-card-header">
-          <div className="conversation-card-title">
-            <Tag tone={itemTone(item.type)}>{itemLabel(item)}</Tag>
-            <div className="conversation-card-summary">
-              {metadata ? (
-                <span className="conversation-card-meta" title={metadata}>
-                  {metadata}
-                </span>
-              ) : null}
-              <span className="conversation-card-preview" title={preview}>
-                {preview}
-              </span>
-            </div>
-          </div>
-          <span className="conversation-card-trailing">
-            {/* 体积写在行尾：工具结果动辄几万字符，扫一眼就知道哪条把 context 吃掉了。 */}
-            <span className="conversation-card-size" title={`${item.content.length.toLocaleString()} 字符`}>
-              {formatCharCount(item.content.length)} 字符
-            </span>
-            <ChevronIcon className="conversation-chevron" size={15} aria-hidden="true" />
-          </span>
-        </summary>
-        {expanded ? <pre className="conversation-content">{item.content || '(empty)'}</pre> : null}
-      </details>
-    </article>
+    <details
+      className="conversation-turn-head"
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary className="conversation-row-head">
+        <span className="conversation-seq">{item.sequence}</span>
+        <span className="conversation-kind conversation-kind-user">你</span>
+        <span className="conversation-turn-main">
+          <span className="conversation-turn-text">{text}</span>
+          <span className="conversation-turn-stats">{formatTurnStats(stats)}</span>
+        </span>
+        <span className="conversation-size" />
+        <ChevronIcon className="conversation-chevron" size={14} aria-hidden="true" />
+      </summary>
+      {expanded ? (
+        <div className="conversation-detail">
+          <pre className="conversation-content">{item.content || '(空)'}</pre>
+        </div>
+      ) : null}
+    </details>
   );
 }
 
-function itemLabel(item: ConfigWebConversationItem): string {
-  if (item.type === 'assistant') return 'LLM';
-  if (item.type === 'tool_call') return 'Tool call';
-  if (item.type === 'tool_result') return 'Tool result';
-  if (item.type === 'reasoning') return '思考';
-  if (item.type === 'unknown') return item.role || 'Other';
-  return item.type.charAt(0).toUpperCase() + item.type.slice(1);
+function RecordRow({ item }: { item: ConfigWebConversationItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const ChevronIcon = appIcons.chevronRight;
+  const prose = item.type === 'assistant' || item.type === 'reasoning';
+  const preview = conversationPreview(item.content, prose ? 400 : 600);
+  const chars = conversationItemSize(item);
+
+  return (
+    <details
+      className={`conversation-row conversation-row-${item.type}`}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary className="conversation-row-head">
+        <span className="conversation-seq">{item.sequence}</span>
+        <span className={`conversation-kind conversation-kind-${conversationKindClass(item.type)}`}>{conversationItemLabel(item)}</span>
+        <span className="conversation-main">
+          {item.toolName ? <span className="conversation-tool">{item.toolName}</span> : null}
+          <span className={`conversation-preview${prose ? ' is-prose' : ' is-code'}`}>{preview}</span>
+        </span>
+        <span className="conversation-size" title={`${chars.toLocaleString()} 字符`}>
+          {formatCharCount(chars)}
+          <span className="conversation-size-unit"> 字符</span>
+        </span>
+        <ChevronIcon className="conversation-chevron" size={14} aria-hidden="true" />
+      </summary>
+      {expanded ? (
+        <div className="conversation-detail">
+          {item.callId ? (
+            <div className="conversation-detail-meta" title={item.callId}>
+              调用 <code>{item.callId}</code>
+            </div>
+          ) : null}
+          <pre className="conversation-content">{item.content || '(空)'}</pre>
+        </div>
+      ) : null}
+    </details>
+  );
 }
 
-function itemTone(type: ConfigWebConversationItemType): 'default' | 'green' | 'red' | 'blue' {
-  if (type === 'user') return 'blue';
-  if (type === 'assistant') return 'green';
-  return 'default';
+
+
+/** 折叠的连续动作段。展开后是原来那些逐条记录，样式与作用完全一样。 */
+function RunRow({ records, expanded }: { records: ConfigWebConversationItem[]; expanded: boolean }) {
+  const ChevronIcon = appIcons.chevronRight;
+  const first = records[0]!;
+  const last = records[records.length - 1]!;
+  const chars = records.reduce((sum, record) => sum + (record.sizeHint ?? record.content.length), 0);
+
+  return (
+    <details className="conversation-row conversation-run" open={expanded}>
+      <summary className="conversation-row-head">
+        <span className="conversation-seq">
+          {first.sequence}–{last.sequence}
+        </span>
+        <span className="conversation-kind conversation-kind-run">{conversationRunLabel(records)}</span>
+        <span className="conversation-main">
+          <span className="conversation-preview is-summary">{describeConversationRun(records)}</span>
+        </span>
+        <span className="conversation-size" title={`${chars.toLocaleString()} 字符`}>
+          {formatCharCount(chars)}
+          <span className="conversation-size-unit"> 字符</span>
+        </span>
+        <ChevronIcon className="conversation-chevron" size={14} aria-hidden="true" />
+      </summary>
+      <div className="conversation-run-body">
+        {records.map((record) => (
+          <RecordRow key={`${record.sequence}-${record.callId ?? ''}`} item={record} />
+        ))}
+      </div>
+    </details>
+  );
 }
 
-function contentPreview(content: string): string {
-  const sample = content.slice(0, 2_000);
-  const normalized = sample.replace(/\s+/g, ' ').trim();
-  if (!normalized) return '(empty)';
-  return normalized.length > 240 || sample.length < content.length ? `${normalized.slice(0, 240)}…` : normalized;
-}
+
+
+
+
+
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

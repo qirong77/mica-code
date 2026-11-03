@@ -5,6 +5,7 @@ import {
   registerRuntimeTool,
   unregisterRuntimeTool,
   unregisterRuntimeTools,
+  setRuntimeToolFallback,
   getToolDefinitions,
   getToolCounts,
   getToolCatalog,
@@ -28,6 +29,8 @@ export const micaTools = {
   unregisterRuntime: unregisterRuntimeTool,
   /** 移除所有运行时工具。 */
   unregisterAllRuntime: unregisterRuntimeTools,
+  /** 装配过插件的宿主关掉静态兜底目录（配置页那套描述）。 */
+  setRuntimeToolFallback,
   /** 获取当前可提供给模型的工具定义列表。 */
   getDefinitions: getToolDefinitions,
   /** 获取当前工具数量统计。 */

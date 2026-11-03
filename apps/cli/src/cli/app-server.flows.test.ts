@@ -2562,15 +2562,18 @@ suite('mica app-server real-user flows (mock provider)', () => {
     );
 
     // 草稿会话（还没有 session id）就能读写：面板不必等第一条消息才可用。
-    await send(host, 1, 'mica/notes/get', {});
-    const empty = await waitFor(host, (m) => m.id === 1, 'notes/get (empty)');
-    expect(empty.result).toMatchObject({ content: '' });
+    // 协议是通用的会话级状态，内核不认识「笔记」——归一化与形状由插件与它的卡片负责。
+    await send(host, 1, 'mica/sessionState/get', { pluginId: 'session-notes' });
+    const empty = await waitFor(host, (m) => m.id === 1, 'sessionState/get (empty)');
+    expect(empty.result).toMatchObject({ ok: true, value: null });
 
-    await send(host, 2, 'mica/notes/set', { content: '# 决策\n\n- 用 Bun 跑测试  \n\n' });
-    const saved = await waitFor(host, (m) => m.id === 2, 'notes/set');
-    // 归一化：行尾空白和末尾空行不落盘，否则每次打开都像「被改过」。
-    expect(saved.result).toMatchObject({ content: '# 决策\n\n- 用 Bun 跑测试' });
-    await waitFor(host, (m) => m.method === 'mica/notes/updated', 'notes/updated');
+    await send(host, 2, 'mica/sessionState/set', {
+      pluginId: 'session-notes',
+      value: '# 决策\n\n- 用 Bun 跑测试',
+    });
+    const saved = await waitFor(host, (m) => m.id === 2, 'sessionState/set');
+    expect(saved.result).toMatchObject({ ok: true, pluginId: 'session-notes' });
+    await waitFor(host, (m) => m.method === 'mica/sessionState/updated', 'sessionState/updated');
 
     // 下一轮请求的 system prompt 末尾必须带上它 —— 这是「压缩不掉」的落点。
     await send(host, 3, 'turn/start', { threadId: '', input: [{ type: 'text', text: '开始干活' }] });
@@ -2599,9 +2602,39 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await send(reopened, 1, 'thread/resume', { threadId: sessionId });
     const resumed = await waitFor(reopened, (m) => m.id === 1, 'thread/resume (notes)');
     expect(resumed.error, JSON.stringify(resumed.error)).toBeUndefined();
-    await send(reopened, 2, 'mica/notes/get', {});
-    const restored = await waitFor(reopened, (m) => m.id === 2, 'notes/get (reopened)');
-    expect(restored.result).toMatchObject({ content: '# 决策\n\n- 用 Bun 跑测试' });
+    await send(reopened, 2, 'mica/sessionState/get', { pluginId: 'session-notes' });
+    const restored = await waitFor(reopened, (m) => m.id === 2, 'sessionState/get (reopened)');
+    expect(restored.result).toMatchObject({ ok: true, value: '# 决策\n\n- 用 Bun 跑测试' });
+  });
+
+  itE2E('disabling a plugin takes its tools away without waiting for a turn', async () => {
+    mock!.state.mode = 'ok';
+    mock!.state.requests = [];
+    mock!.state.responsesFinished = 0;
+    mock!.state.delayBeforeTextMs = 0;
+
+    const host = spawnHost('plugin-toggle');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready or error', 30_000);
+
+    const tools = async (id: number): Promise<string[]> => {
+      await send(host, id, 'mica/capabilities/get', {});
+      const response = await waitFor(host, (m) => m.id === id, 'capabilities/get');
+      return ((response.result as { tools?: { name: string }[] }).tools ?? []).map((tool) => tool.name);
+    };
+    expect(await tools(1)).toContain('session_notes');
+
+    // 用户在配置页点了开关：只写名单文件，不重开进程、也不发消息。
+    writeFileSync(join(host.home, 'plugins-state.json'), JSON.stringify({ disabled: ['session-notes'] }));
+
+    // 宿主的状态文件监听（400ms 轮询 + 120ms 去抖）应当很快把它卸下来。
+    let remaining: string[] = [];
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      remaining = await tools(10 + attempt);
+      if (!remaining.includes('session_notes')) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    expect(remaining).not.toContain('session_notes');
   });
 
   itE2E('rapid second send while busy is rejected with an error, host stays usable', async () => {

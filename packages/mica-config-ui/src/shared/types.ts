@@ -1,3 +1,5 @@
+import type { TurnTimingRecord } from '@packages/mica-common/turnTiming.js';
+
 export type ConfigWebSection =
   | 'config'
   | 'appearance'
@@ -548,6 +550,11 @@ export type ConfigWebSessionDetails = ConfigWebSession & {
   usageCount: number;
   contextWindowSize?: number;
   lastUsage?: ConfigWebSessionUsage;
+  /**
+   * 最近若干轮的时间去向（新的在后）。就几十 KB 上限，跟着详情一起给，界面不必为
+   * 「耗时」页签再单独发一次请求；没有记录表示这条会话还没跑过（或早于本字段）。
+   */
+  turnTimings?: TurnTimingRecord[];
 };
 
 export type ConfigWebContextEntry = {

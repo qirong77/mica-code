@@ -6,6 +6,7 @@ import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { registerBridgeSupervisor } from './BridgeSupervisor.js';
 import { createPanelHandler } from './Panel.js';
 import { guidePageSync, rendererDirFor, skillPathFor } from './PageSyncAction.js';
+import { acknowledgePageNotice } from './PageNotice.js';
 import { MobileRelayTool } from './MobileRelayTool.js';
 import { registerMachine } from './registerMachine.js';
 
@@ -92,12 +93,15 @@ function registerActions(ctx: PluginContext, dataDir: string | null): void {
   const actions = ctx.actions;
   if (!actions) return;
   actions.register('register', async ({ values }) => registerMachine(ctx, values, dataDir));
-  actions.register('sync-page', async () =>
-    guidePageSync({
+  actions.register('sync-page', async () => {
+    // 用户点了这一下就算看过那条提示：同一对「本机版 vs 中转机版」不再让侧栏挂红点。
+    // 落后本身仍写在「运行状态 → 页面」里，需要时面板里还能再点一次更新。
+    acknowledgePageNotice(dataDir);
+    return guidePageSync({
       skillPath: skillPathFor(dataDir),
       rendererDir: rendererDirFor(ctx),
-    }),
-  );
+    });
+  });
 }
 
 /**

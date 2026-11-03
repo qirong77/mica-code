@@ -51,6 +51,17 @@ function readStatus(): PluginStatusFile {
   return JSON.parse(readFileSync(join(configDir, 'plugin-status.json'), 'utf8')) as PluginStatusFile;
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitFor(check: () => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await sleep(50);
+  }
+  throw new Error('condition not met in time');
+}
+
 describe('plugin enable/disable lifecycle', () => {
   it('does not set up a plugin listed as disabled, and sets it up once enabled', async () => {
     writePluginState({ disabled: ['beta'] }, { path: join(configDir, 'plugins-state.json') });
@@ -131,6 +142,44 @@ describe('plugin enable/disable lifecycle', () => {
     writePluginState({ disabled: [] }, { path: join(configDir, 'plugins-state.json') });
     await hooks.emit('turn:before', {});
     expect(log).toEqual(['setup:alpha', 'setup:beta', 'dispose:alpha', 'setup:alpha']);
+  });
+
+  it('applies a state-file change immediately, without waiting for a turn', async () => {
+    const log: string[] = [];
+    const manager = new PluginManager();
+    manager.register(countingPlugin('alpha', log));
+    await manager.setupAll(stateContext());
+    expect(log).toEqual(['setup:alpha']);
+
+    writePluginState({ disabled: ['alpha'] }, { path: join(configDir, 'plugins-state.json') });
+    // watchFile 是 400ms 的 stat 轮询 + 120ms 去抖：不必等下一轮对话。
+    await waitFor(() => log.includes('dispose:alpha'), 8000);
+    expect(log).toEqual(['setup:alpha', 'dispose:alpha']);
+    await manager.disposeAll();
+  });
+
+  it('defers an unload until the running turn ends', async () => {
+    let busy = true;
+    const log: string[] = [];
+    const hooks = new HookRegistry();
+    const context = {
+      ...stateContext(hooks),
+      pluginStateSync: { host: 'tui' as const, canSyncNow: () => !busy },
+    };
+    const manager = new PluginManager();
+    manager.register(countingPlugin('alpha', log));
+    await manager.setupAll(context);
+
+    writePluginState({ disabled: ['alpha'] }, { path: join(configDir, 'plugins-state.json') });
+    await sleep(1500);
+    // 一轮正在跑：工具与钩子不能从脚底抽走
+    expect(log).toEqual(['setup:alpha']);
+
+    busy = false;
+    await hooks.emit('turn:after', {});
+    await waitFor(() => log.includes('dispose:alpha'), 8000);
+    expect(log).toEqual(['setup:alpha', 'dispose:alpha']);
+    await manager.disposeAll();
   });
 
   it('runs newly enabled turn hooks immediately and excludes disabled hooks', async () => {

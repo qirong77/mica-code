@@ -1523,8 +1523,8 @@ html[data-theme='light'] .mica-config-ui {
   .session-detail-head {
     display: grid;
     flex: none;
-    gap: 5px;
-    padding: 13px 18px 12px;
+    gap: 7px;
+    padding: 14px 18px 13px;
     border-bottom: 1px solid var(--line-soft);
     background: color-mix(in srgb, var(--panel-muted) 45%, transparent);
   }
@@ -1541,9 +1541,11 @@ html[data-theme='light'] .mica-config-ui {
     overflow: hidden;
     margin: 0;
     color: var(--text);
-    font-size: var(--text-subhead);
+    /* 标题就该是这块最重的一行：14px 与下面的正文同高度，读起来像「一行元信息」。 */
+    font-size: var(--text-title);
     font-weight: 600;
     line-height: 1.4;
+    letter-spacing: -0.01em;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -1574,8 +1576,8 @@ html[data-theme='light'] .mica-config-ui {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 3px 20px;
-    margin: 2px 0 0;
+    gap: 3px 18px;
+    margin: 1px 0 0;
   }
 
   .session-detail-fact {
@@ -1596,12 +1598,27 @@ html[data-theme='light'] .mica-config-ui {
   .session-detail-fact dd {
     margin: 0;
     overflow: hidden;
-    color: var(--text-soft);
+    /* 值是这一行的内容，用它把「模型 / 消息 / 用量」从一片灰字里拎出来。 */
+    color: var(--text);
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
     font-size: var(--text-aux);
     line-height: 1.4;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* 模型的提供方是补充说明：压暗一档，跟在模型名后面，不抢前面那个名字。 */
+  .session-detail-fact-suffix {
+    display: inline-flex;
+    gap: 3px;
+    align-items: baseline;
+    margin-left: 4px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
   }
 
   /* 列表行的状态点：一行只留一个颜色信号，文字说明留给详情头部。 */
@@ -1791,161 +1808,200 @@ html[data-theme='light'] .mica-config-ui {
     margin-top: 16px;
   }
 
-  .conversation-timeline {
-    display: grid;
-    gap: 8px;
-  }
+  /* ── 对话记录 ────────────────────────────────────────────────────────────
+     一条会话的 provider 历史是扁平的：用户问一句，后面跟着几十条工具调用与思考。
+     所以这里按「轮」分段（每条用户消息开头），段内再按类型决定长相：
+     人与模型的正文排成正文，工具与思考压成一行等宽文本。
+     序号留在最左的窄列里——它是排查时的坐标，不该抢正文的视线。 */
 
   .conversation-timeline {
-    position: relative;
-  }
-
-  .conversation-timeline::before {
-    position: absolute;
-    top: 16px;
-    bottom: 16px;
-    left: 13px;
-    width: 1px;
-    background: var(--line);
-    content: '';
-  }
-
-  .conversation-item {
-    position: relative;
-    display: grid;
-    /* 序号到三位数就撑破 28px 的圆：给一个最小宽度让它长成胶囊，别把数字挤变形。 */
-    grid-template-columns: minmax(28px, auto) minmax(0, 1fr);
-    gap: 10px;
-    align-items: start;
-  }
-
-  .conversation-sequence {
-    z-index: 1;
-    display: grid;
-    place-items: center;
-    min-width: 28px;
-    height: 28px;
-    padding: 0 5px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: var(--panel);
-    color: var(--text-faint);
-    font-family: var(--font-mono);
-    font-size: var(--text-micro);
-    font-weight: 600;
-  }
-
-  .conversation-item-user .conversation-sequence {
-    border-color: color-mix(in srgb, var(--blue) 40%, transparent);
-    color: var(--blue);
-  }
-
-  .conversation-item-assistant .conversation-sequence {
-    border-color: color-mix(in srgb, var(--green) 40%, transparent);
-    color: var(--green);
-  }
-
-  .conversation-card {
-    min-width: 0;
-    overflow: hidden;
-    border-radius: var(--radius-md);
-  }
-
-  .conversation-card-header {
     display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* 一轮 = 段头（用户消息）+ 它引发的记录。段与段之间一条留白加一道细线：
+     滚动时能看出「这句话到这儿讲完了」，而不是一百多行一样的记录连成一片。 */
+  .conversation-turn {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding-top: 16px;
+    margin-top: 14px;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .conversation-turn:first-of-type {
+    padding-top: 0;
+    margin-top: 0;
+    border-top: 0;
+  }
+
+  /* 这一轮的用户消息还在没加载的那一页里：只有记录，不留段头也不画分隔线。 */
+  .conversation-turn.is-continuation {
+    padding-top: 0;
+    margin-top: 0;
+    border-top: 0;
+  }
+
+  .conversation-row {
+    min-width: 0;
+  }
+
+  /* 每行共用一张五列栅格：序号 / 类型 / 正文 / 体积 / 箭头。
+     整列对齐之后，扫一眼就知道哪几条是同一种东西、最大的是哪条。 */
+  .conversation-row-head {
+    display: grid;
+    grid-template-columns: 40px 58px minmax(0, 1fr) 74px 14px;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-height: 28px;
-    padding: 3px 10px;
-    background: transparent;
+    gap: 10px;
+    min-height: 26px;
+    padding: 3px 10px 3px 0;
+    border-radius: var(--radius-md);
     cursor: pointer;
     list-style: none;
     user-select: none;
   }
 
-  .conversation-card-header::-webkit-details-marker {
+  .conversation-row-head::-webkit-details-marker {
     display: none;
   }
 
-  .conversation-card[open] > .conversation-card-header {
-    border-bottom: 1px solid var(--line);
+  .conversation-row-head:hover {
+    background: var(--overlay-subtle);
   }
 
-  .conversation-card-header:hover {
-    background: var(--panel-muted);
+  .conversation-row[open] > .conversation-row-head {
+    background: var(--overlay-subtle);
   }
 
-  .conversation-card-header:focus-visible {
-    outline: 2px solid var(--blue);
-    outline-offset: -2px;
-  }
-
-  .conversation-card-title {
-    display: grid;
-    grid-template-columns: 68px minmax(0, 1fr);
-    flex: 1 1 auto;
-    min-width: 0;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .conversation-card-title > .ui-tag {
-    width: 68px;
-    min-height: 20px;
-    justify-content: flex-start;
-    padding: 0 6px;
-    border-color: transparent;
-    background: transparent;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--text-micro);
-  }
-
-  .conversation-card-summary {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .conversation-card-meta {
-    flex: 0 1 auto;
-    max-width: 40%;
-    overflow: hidden;
+  .conversation-seq {
     color: var(--text-faint);
     font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    /* 折叠段的序号是「31–40」这种区间，换行会把两位数拆成上下两截。 */
+    white-space: nowrap;
+    text-align: right;
+    opacity: 0.65;
+  }
+
+  /* 类型不是一枚等宽标签，而是一个带颜色的词：类型本身就是这行最重要的信息。 */
+  .conversation-kind {
+    overflow: hidden;
     font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .conversation-card-preview {
+  .conversation-kind-user {
+    color: var(--blue);
+  }
+
+  .conversation-kind-assistant {
+    color: var(--green);
+  }
+
+  .conversation-kind-tool {
+    /* 工具调用一屏几十条，上色的结果是「整页橙色」。颜色只留给人和模型的正文，
+       机器动作统一走灰阶，真正的对话才会拦住视线。 */
+    color: var(--text-soft);
+  }
+
+  .conversation-kind-reasoning {
+    color: var(--violet);
+  }
+
+  .conversation-kind-run {
+    color: var(--text-soft);
+  }
+
+  /* 折叠的动作段本身不该有视觉重量：一层极淡底 + 灰字，展开后的逐条恢复原样。 */
+  .conversation-run > .conversation-row-head {
+    background: color-mix(in srgb, var(--text-faint) 6%, transparent);
+    border-radius: var(--radius-md);
+  }
+
+  .conversation-run[open] > .conversation-row-head {
+    background: color-mix(in srgb, var(--text-faint) 10%, transparent);
+  }
+
+  .conversation-run-body {
+    display: grid;
+    gap: 1px;
+    padding: 2px 0 4px 16px;
+  }
+
+  .conversation-kind-result,
+  .conversation-kind-system,
+  .conversation-kind-unknown {
+    color: var(--text-faint);
+  }
+
+  .conversation-main {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
     min-width: 0;
+  }
+
+  .conversation-tool {
+    flex: 0 0 auto;
+    max-width: 48%;
     overflow: hidden;
     color: var(--text-soft);
-    font-size: 12px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .conversation-card-trailing {
-    display: inline-flex;
-    flex: 0 0 auto;
-    align-items: center;
-    gap: 8px;
+  .conversation-preview {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  /* 行尾的体积：大工具结果一眼可见，不用展开就知道是哪条把 context 撑大了。 */
-  .conversation-card-size {
-    /* 定宽右对齐：每条体积数字宽度不同，不定宽的话这一列参差，预览文字的右边界也跟着乱。 */
-    min-width: 72px;
-    text-align: right;
+  /* 工具参数与结果是 JSON / 命令，等宽字比人话字体好读得多。 */
+  .conversation-preview.is-code {
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+  }
+
+  /* 工具结果是这条流水线上最多、最不重要的一类：压暗一档，让人话与工具调用先跳出来。 */
+  .conversation-row-tool_result .conversation-preview.is-code {
+    color: var(--text-faint);
+  }
+
+  .conversation-preview.is-prose {
+    color: var(--text-soft);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+
+  /* 折叠段的摘要是一句话，不是代码：等宽字会让「run_shell ×3、apply_patch ×2」更像日志。 */
+  .conversation-preview.is-summary {
+    color: var(--text-soft);
+    font-size: 12px;
+  }
+
+  .conversation-size {
     color: var(--text-faint);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 10.5px;
     font-variant-numeric: tabular-nums;
+    text-align: right;
+    opacity: 0.8;
+    white-space: nowrap;
+  }
+
+  /* 单位只是让这列数字有含义，不该和数字一样显眼。 */
+  .conversation-size-unit {
+    opacity: 0.6;
   }
 
   .conversation-chevron {
@@ -1953,22 +2009,138 @@ html[data-theme='light'] .mica-config-ui {
     transition: transform 160ms ease;
   }
 
-  .conversation-card[open] .conversation-chevron {
+  .conversation-row[open] .conversation-chevron,
+  .conversation-turn-head[open] .conversation-chevron {
     transform: rotate(90deg);
+  }
+
+  /* 用户消息是整条会话的骨架：淡蓝底 + 正文 13px，最多三行，点开看原文。 */
+  .conversation-turn-head > .conversation-row-head {
+    align-items: start;
+    padding: 8px 10px 8px 0;
+    background: color-mix(in srgb, var(--blue) 7%, transparent);
+  }
+
+  .conversation-turn-head > .conversation-row-head:hover {
+    background: color-mix(in srgb, var(--blue) 11%, transparent);
+  }
+
+  .conversation-turn-main {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .conversation-turn-text {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  /* 这一轮引发的动作量：几个工具、想了多久、吃掉多少字符。 */
+  .conversation-turn-stats {
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 模型的回答同样是正文（以前只给一行省略预览，等于让人去猜它说了什么）。 */
+  .conversation-row-assistant > .conversation-row-head {
+    align-items: start;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    background: color-mix(in srgb, var(--green) 6%, transparent);
+  }
+
+  .conversation-row-assistant > .conversation-row-head:hover {
+    background: color-mix(in srgb, var(--green) 10%, transparent);
+  }
+
+  .conversation-row-assistant .conversation-preview.is-prose {
+    display: -webkit-box;
+    overflow: hidden;
+    color: var(--text);
+    overflow-wrap: anywhere;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+  }
+
+  .conversation-row-reasoning .conversation-preview.is-prose {
+    color: var(--text-faint);
+    font-size: 12px;
+  }
+
+  /* 展开后的正文缩到「正文列」下面，和上面那行的预览同一竖线。 */
+  .conversation-detail {
+    padding: 2px 10px 12px 102px;
+  }
+
+  .conversation-detail-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 6px;
+    color: var(--text-faint);
+    font-size: 10.5px;
+  }
+
+  .conversation-detail-meta code {
+    color: var(--text-soft);
+    font-size: 10.5px;
+    overflow-wrap: anywhere;
   }
 
   .conversation-content {
     max-height: 640px;
     margin: 0;
-    padding: 14px;
+    padding: 10px 12px;
     overflow: auto;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius-md);
+    background: var(--panel-inset);
     color: var(--text-soft);
-    font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.65;
     tab-size: 2;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  .conversation-empty {
+    display: grid;
+    justify-items: center;
+    gap: 4px;
+    padding: 56px 0;
+    color: var(--text-faint);
+    font-size: 12.5px;
+  }
+
+  .conversation-empty p {
+    margin: 0;
+  }
+
+  /* 窄容器（桌面弹窗 / 分屏）：撤掉体积列、收起展开缩进，把宽度还给正文。 */
+  @container session-detail (max-width: 720px) {
+    .conversation-row-head {
+      grid-template-columns: 28px 52px minmax(0, 1fr) 14px;
+      gap: 8px;
+    }
+
+    .conversation-size {
+      display: none;
+    }
+
+    .conversation-detail {
+      padding-left: 44px;
+    }
   }
 
   @keyframes ui-spin {
@@ -2796,7 +2968,7 @@ html[data-theme='light'] .mica-config-ui {
   /* Conversation pane (paged) */
 
   /* 对话记录：工具栏固定，只有正文这块滚。以前整块跟着 .session-tab-body 一起滚，
-     「合计 / 回到最新」会随内容滚出视野，长对话里正好在最需要它的时候消失。 */
+     筛选与「回到最新」会随内容滚出视野，长对话里正好在最需要它的时候消失。 */
   .conversation-pane {
     display: flex;
     flex: 1 1 auto;
@@ -2805,12 +2977,64 @@ html[data-theme='light'] .mica-config-ui {
     gap: 10px;
   }
 
+  /* 工具栏：左边筛选与搜索，右边条数与「回到最新」。窄了就换行，不缩到看不清。 */
+  .conversation-toolbar {
+    align-items: center;
+  }
+
+  .conversation-toolbar-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .conversation-toolbar-tail {
+    gap: 10px;
+  }
+
+  .conversation-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 176px;
+    min-width: 132px;
+  }
+
+  .conversation-search > svg {
+    position: absolute;
+    left: 8px;
+    color: var(--text-faint);
+    pointer-events: none;
+  }
+
+  .conversation-search input {
+    width: 100%;
+    height: 24px;
+    padding: 0 8px 0 25px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 11.5px;
+  }
+
+  .conversation-search input::placeholder {
+    color: var(--text-faint);
+  }
+
+  .conversation-search input:focus-visible {
+    border-color: var(--line-strong);
+    outline: none;
+  }
+
   .conversation-scroll {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    /* 时间轴左侧那条竖线贴着序号列，右边留一点给滚动条，卡片不被压窄。 */
+    /* 右边留一点给滚动条，正文列不被压窄。 */
     padding-right: 4px;
   }
 
@@ -2827,10 +3051,6 @@ html[data-theme='light'] .mica-config-ui {
     text-decoration: underline;
   }
 
-  .conversation-timeline-paged {
-    gap: 10px;
-  }
-
   .conversation-page-more {
     display: flex;
     justify-content: center;
@@ -2845,7 +3065,7 @@ html[data-theme='light'] .mica-config-ui {
   }
 
   .conversation-pane-end {
-    padding: 10px 0 2px;
+    padding: 14px 0 2px;
     color: var(--text-faint);
     font-size: 12px;
     text-align: center;
@@ -3850,6 +4070,26 @@ html[data-theme='light'] .mica-config-ui {
     padding-bottom: 8px;
   }
 
+  /* 整份 JSON 模式：表单整块换成编辑器，编辑器吃掉面板剩下的高度。
+     以前它是页底一块折叠面板，字段一多就要先滚到底才找得到。 */
+  .config-page.is-json {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-width: 0;
+  }
+
+  .config-page.is-json .config-page-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .config-page-body-json .config-json-host {
+    height: 100%;
+    min-height: 200px;
+  }
+
   .settings-empty {
     margin: 0;
     padding: 16px;
@@ -4609,11 +4849,6 @@ html[data-theme='light'] .mica-config-ui {
     background: color-mix(in srgb, var(--red) 8%, var(--panel-muted));
   }
 
-  .config-json-host {
-    height: 340px;
-    min-height: 200px;
-  }
-
   /* Browser Control / Terminal Control：服务状态 · 技能文档 · 接口文档（实例活在应用里，agent 经 HTTP 操控） */
   .control-stack {
     display: grid;
@@ -5093,17 +5328,56 @@ html[data-theme='light'] .mica-config-ui {
     -webkit-line-clamp: 2;
   }
 
+  /* 脚注一行：左边是运行结论，右边是「几项设置 / 几项运行条件」。
+     不换行——换行会让各卡片脚注高低不一，网格看起来就像没对齐。 */
   .plugin-card-foot {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+    min-width: 0;
     margin-top: 1px;
+    overflow: hidden;
+  }
+
+  /* 运行结论：前置一枚圆点按语气上色，多余时单行省略（完整内容在 title 里）。 */
+  .plugin-card-status {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-size: 11px;
+    line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plugin-card-status::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 5px;
+    border-radius: 50%;
+    vertical-align: middle;
+    background: currentcolor;
+  }
+
+  .plugin-card-status.is-green {
+    color: var(--green);
+  }
+
+  .plugin-card-status.is-red {
+    color: var(--red);
+  }
+
+  .plugin-card-status.is-blue {
+    color: var(--blue);
   }
 
   .plugin-card-note {
+    flex: none;
     color: var(--text-faint);
     font-size: 11px;
+    white-space: nowrap;
   }
 
   /* 插件上报的「等人点一下」：卡片图标右上角一枚点，卡片里一句说明。
@@ -5299,7 +5573,6 @@ html[data-theme='light'] .mica-config-ui {
     display: flex;
     flex: none;
     align-items: center;
-    gap: 10px;
   }
 
   /* 两列：左边是「要动的东西」（运行条件、设置），右边是「查的东西」（信息）。
@@ -5335,12 +5608,10 @@ html[data-theme='light'] .mica-config-ui {
     }
   }
 
+  /* 详情页头右侧只剩一枚开关：容器只负责对齐，不再为「标签 + 开关」留间隙。 */
   .plugin-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
-    color: var(--text-soft);
-    font-size: var(--text-aux);
     cursor: pointer;
   }
 
@@ -5631,32 +5902,36 @@ html[data-theme='light'] .mica-config-ui {
   }
 
   /*
-   * 配置页动作：说明在左、按钮在右，结果就写在说明下面。
-   * 按钮与说明同一行对齐，结果换行铺满整行——一条链接经常比半页还长。
+   * 配置页动作：一行一件事——左边一句话说清它做什么（放不下进 tooltip），右边按钮。
+   * 结果与错误另起一行铺满整行：一条链接经常比半页还长，挤在左半边会把它自己折断。
    */
   .plugin-action-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    align-items: start;
+    align-items: center;
     gap: 12px;
-    padding: 12px 16px;
+    padding: 10px 16px;
   }
 
   .plugin-action-row + .plugin-action-row {
     border-top: 1px solid var(--line-soft);
   }
 
-  .plugin-action-copy {
-    display: flex;
+  .plugin-action-note {
     min-width: 0;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .plugin-action-hint {
     color: var(--text-soft);
     font-size: var(--text-aux);
     line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .plugin-action-outcome {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 4px;
+    min-width: 0;
   }
 
   .plugin-action-result {
@@ -6303,4 +6578,336 @@ html[data-theme='light'] .mica-config-ui {
   padding: 22px 16px;
   color: var(--text-faint);
   font-size: var(--text-aux);
+}
+
+/* ---------------------------------------------------------------- 耗时分析
+
+   一轮的时间去向：三类合计条 + 图例 + 按发生顺序的明细。桌面端的耗时弹窗与
+   会话详情的「耗时」页签是同一个组件（`TurnTimingView`），样式因此只有这一份。 */
+.timing-view {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.timing-pane {
+  padding: 12px 16px 16px;
+  overflow: auto;
+}
+
+.timing-empty {
+  padding: 22px 16px;
+  color: var(--text-faint);
+  font-size: var(--text-aux);
+}
+
+.timing-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.timing-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.timing-picker-label {
+  color: var(--text-faint);
+  font-size: var(--text-label);
+  white-space: nowrap;
+}
+
+.timing-facts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-soft);
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.timing-status {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--overlay-strong);
+  color: var(--text-soft);
+}
+
+.timing-status.is-running {
+  background: color-mix(in srgb, var(--blue) 18%, transparent);
+  color: var(--blue);
+}
+
+.timing-status.is-error {
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+  color: var(--red);
+}
+
+.timing-status.is-partial {
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  color: var(--amber);
+}
+
+.timing-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+/* 结论先行：一句话说清时间花在哪，下面的条与列表都是它的细节。 */
+.timing-verdict {
+  color: var(--text);
+  font-size: var(--text-aux);
+  line-height: 1.5;
+}
+
+.timing-bar {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--overlay-strong);
+}
+
+.timing-bar-seg {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  flex-basis: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.timing-bar-pct {
+  color: var(--accent-contrast);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.timing-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.timing-bar-seg.is-wait,
+.timing-dot.is-wait {
+  background: var(--amber);
+}
+
+.timing-bar-seg.is-generate,
+.timing-dot.is-generate {
+  background: var(--green);
+}
+
+.timing-bar-seg.is-tool,
+.timing-dot.is-tool {
+  background: var(--blue);
+}
+
+.timing-legend {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.timing-legend-item {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  background: var(--overlay-subtle);
+}
+
+.timing-legend-item.is-empty {
+  opacity: 0.55;
+}
+
+.timing-legend-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timing-legend-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timing-legend-pct {
+  color: var(--text);
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.timing-legend-meta {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+.timing-tools {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: var(--text-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timing-columns {
+  display: grid;
+  grid-template-columns: 76px 1fr 68px;
+  padding: 0 8px 4px;
+  color: var(--text-faint);
+  font-size: var(--text-micro);
+  letter-spacing: 0.04em;
+}
+
+.timing-columns > :last-child {
+  text-align: right;
+}
+
+.timing-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timing-item {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  /* 行底色就是这一段占整轮的份额，与顶部合计条同一刻度：一眼看出哪行最重。 */
+  background: linear-gradient(
+    to right,
+    var(--overlay) 0,
+    var(--overlay) var(--timing-share, 0%),
+    transparent var(--timing-share, 0%)
+  );
+  color: var(--text-soft);
+  font-size: var(--text-aux);
+}
+
+.timing-item:hover {
+  background: var(--panel-hover);
+}
+
+/* 最长的一段只标数字与徽标：行底色留给「占整轮的份额」，两件事叠在同一个背景上就看不出比例了。 */
+.timing-item.is-slowest .timing-ms {
+  color: var(--amber);
+}
+.timing-offset {
+  width: 68px;
+  flex: none;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.timing-marker {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  width: 10px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.timing-marker::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+
+.timing-item:first-child .timing-marker::before {
+  top: 50%;
+}
+
+.timing-item:last-child .timing-marker::before {
+  bottom: 50%;
+}
+
+.timing-content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  padding: 6px 0;
+}
+
+.timing-name {
+  color: var(--text);
+  font-size: var(--text-label);
+}
+
+.timing-item-label {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--text-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timing-ms {
+  width: 68px;
+  flex: none;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.timing-badge {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: var(--overlay-strong);
+  color: var(--text-faint);
+  font-size: var(--text-micro);
+}
+
+.timing-badge.is-slowest {
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  color: var(--amber);
+}
+
+.timing-badge.is-error {
+  background: color-mix(in srgb, var(--red) 18%, transparent);
+  color: var(--red);
+}
+
+.timing-badge.is-aborted,
+.timing-badge.is-pending {
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  color: var(--amber);
+}
+
+.timing-note {
+  color: var(--text-faint);
+  font-size: var(--text-micro);
+  line-height: 1.5;
 }

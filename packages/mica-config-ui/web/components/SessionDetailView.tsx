@@ -5,10 +5,11 @@ import { ConversationPane } from './ConversationPane.js';
 import { ContextPane } from './ContextPane.js';
 import { JsonEditor } from './JsonEditor.js';
 import { SystemPromptPane } from './SystemPromptPane.js';
+import { TurnTimingPane } from './TurnTimingPane.js';
 import { Button, Empty, SaveStatus, Tag } from './Ui.js';
 import type { ConfigWebSessionDetails } from '../../src/shared/types.js';
 
-export type SessionDetailTab = 'conversation' | 'context' | 'prompt' | 'raw';
+export type SessionDetailTab = 'conversation' | 'context' | 'timing' | 'prompt' | 'raw';
 
 /** 宿主自带的页签（桌面端的用量 / 子代理）：内容由宿主渲染，这里只负责接入标签条。 */
 export type SessionDetailExtraTab = {
@@ -19,6 +20,7 @@ export type SessionDetailExtraTab = {
 
 const CONVERSATION_TAB = { id: 'conversation' as string, label: '对话记录' };
 const CONTEXT_TAB = { id: 'context' as string, label: 'Context 分析' };
+const TIMING_TAB = { id: 'timing' as string, label: '耗时' };
 const PROMPT_TAB = { id: 'prompt' as string, label: '系统提示词' };
 
 /**
@@ -191,12 +193,13 @@ export function SessionDetailView({
   const tabs = [
     CONVERSATION_TAB,
     CONTEXT_TAB,
+    TIMING_TAB,
     PROMPT_TAB,
     ...extraTabs.map((item) => ({ id: item.id, label: item.label })),
   ];
-  // 提示词 / 原始文件（编辑器内部滚动）与对话记录（工具栏固定、只滚正文）都自己就是
-  // 滚动容器，外面这层不滚；只有 Context 分析整块跟页签一起滚。
-  const fillBody = tab === 'raw' || tab === 'prompt' || tab === 'conversation';
+  // 提示词 / 原始文件（编辑器内部滚动）、对话记录（工具栏固定、只滚正文）与耗时（明细
+  // 自带滚动）都自己就是滚动容器，外面这层不滚；Context 分析整块跟页签一起滚。
+  const fillBody = tab === 'raw' || tab === 'prompt' || tab === 'conversation' || tab === 'timing';
 
   /** 标签条按 WAI-ARIA 的 tablist 走：方向键在页签之间移动，焦点跟着选中的那一个。 */
   function onTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -270,6 +273,8 @@ export function SessionDetailView({
         {tab === 'context' ? (
           <ContextPane key={`context:${sessionId}`} sessionId={sessionId} refreshToken={version} />
         ) : null}
+        {/* 耗时用已经取到的详情头：一份记录只有几千字节，不必为它再开一条通道。 */}
+        {tab === 'timing' ? <TurnTimingPane timings={header.turnTimings} /> : null}
         {tab === 'prompt' ? (
           <SystemPromptPane
             key={`prompt:${sessionId}`}
@@ -307,7 +312,8 @@ export function SessionDetailView({
  * 详情头部：三行——标题（状态、更新时间靠右）、目录、一行事实。
  *
  * 事实用「标签 + 值」横排而不是小号大写标签压在上面：中文标签大写没有变化，反而多占一倍
- * 行高；横排之后同一行塞得下 5 项，正文就能多留一条消息的高度。
+ * 行高；横排之后同一行塞得下 5 项，正文就能多留一条消息的高度。标签压暗、值用正文色，
+ * 一眼看到的是一列数值而不是一片灰字。
  */
 function SessionHead({ session }: { session: ConfigWebSessionDetails }) {
   const status = presentStatus(session.turnState);
@@ -326,23 +332,46 @@ function SessionHead({ session }: { session: ConfigWebSessionDetails }) {
         {shortenDir(session.cwd)}
       </p>
       <dl className="session-detail-facts">
-        <MetaFact label="模型" value={`${session.providerId} · ${session.model}`} />
+        <MetaFact
+          label="模型"
+          value={session.model}
+          suffix={session.providerId}
+          title={`${session.providerId} · ${session.model}`}
+        />
         <MetaFact label="角色" value={session.role} />
         <MetaFact label="消息" value={`${session.messageCount} 条`} />
-        <MetaFact label="用量" value={`${session.usageCount} 次请求`} />
+        <MetaFact label="请求" value={`${session.usageCount} 次`} />
+        {(session.contextWindowSize ?? 0) > 0 ? (
+          <MetaFact label="上下文" value={formatTokenCount(session.contextWindowSize ?? 0)} />
+        ) : null}
         <MetaFact label="文件" value={formatBytes(session.fileSizeBytes)} />
       </dl>
     </header>
   );
 }
 
-function MetaFact({ label, value }: { label: string; value: string }) {
+function MetaFact({ label, value, suffix, title }: { label: string; value: string; suffix?: string; title?: string }) {
   return (
     <div className="session-detail-fact">
       <dt>{label}</dt>
-      <dd title={value}>{value}</dd>
+      <dd title={title ?? value}>
+        {value}
+        {suffix ? (
+          <span className="session-detail-fact-suffix">
+            <span aria-hidden="true">·</span>
+            {suffix}
+          </span>
+        ) : null}
+      </dd>
     </div>
   );
+}
+
+/** 上下文窗口这类「整数 + 万」的量：1M / 200k，比 1048576 好读。 */
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+  return String(tokens);
 }
 
 function shortenDir(cwd: string): string {

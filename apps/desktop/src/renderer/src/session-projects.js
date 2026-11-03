@@ -69,6 +69,35 @@ export function sessionsByGroup(projects) {
 }
 
 /**
+ * groupId -> 分组子树摘要：`{ count, latestAt, sessions, drafts }`。
+ *
+ * 收起的分组不再递归渲染子行，所以它得自己说清「里面有多少条、最近什么时候动过、
+ * 最近两条是什么」——这三样都来自同一趟递归，各算一遍会在大分组上多走几次子树。
+ * `sessions` 按最近更新排序（与分组自己的手动顺序无关：摘要是「最近发生了什么」）。
+ */
+export function collectGroupDigests({ projects, sessionsByGroup: sessionsOf, draftsByGroup }) {
+  const digests = new Map()
+  const walk = (group) => {
+    const sessions = [...(sessionsOf?.get(group.id) || [])]
+    const drafts = [...(draftsByGroup?.get(group.id) || [])]
+    let latestAt = 0
+    for (const session of sessions) latestAt = Math.max(latestAt, Number(session.updatedAtMs) || 0)
+    for (const child of childGroups(projects, group.id)) {
+      const nested = walk(child)
+      sessions.push(...nested.sessions)
+      drafts.push(...nested.drafts)
+      latestAt = Math.max(latestAt, nested.latestAt)
+    }
+    sessions.sort((a, b) => (b.updatedAtMs || 0) - (a.updatedAtMs || 0))
+    const digest = { count: sessions.length + drafts.length, latestAt, sessions, drafts }
+    digests.set(group.id, digest)
+    return digest
+  }
+  for (const group of childGroups(projects, null)) walk(group)
+  return digests
+}
+
+/**
  * 在某个分组里新建会话时用的默认工作目录：先看该分组子树里最近一条带 cwd 的会话，
  * 没有再往上找父分组，最后交给调用方兜底。
  */

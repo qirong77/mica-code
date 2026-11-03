@@ -8,7 +8,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { VERSION_LABEL, resolveMicaHome } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
-import { SESSION_NOTES_PLUGIN_ID, normalizeSessionNotes, prepareImageForApi, readStoredSubagentTasks, storedSubagentTasksStamp, writeStoredSubagentTasks } from '@packages/mica-common/index.js';
+import { prepareImageForApi, readStoredSubagentTasks, storedSubagentTasksStamp, writeStoredSubagentTasks } from '@packages/mica-common/index.js';
 import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.js';
 import { keepsSubagentTaskRow } from '@packages/mica-common/subagentVisibility.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
@@ -20,7 +20,7 @@ import {
   CODEX_ERROR_METHOD_NOT_FOUND,
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
-  MICA_NOTES_NOTIFICATIONS,
+  MICA_SESSION_STATE_NOTIFICATIONS,
   MICA_BTW_NOTIFICATIONS,
   MICA_HOST_NOTIFICATIONS,
   MICA_METHODS,
@@ -855,14 +855,6 @@ export function attachTurnProjector(
   input: RuntimeInput,
 ): CodexProjector {
   return attachCodexProjector(agent, writeNotification, { ...context, ...capabilities.forTurn(input) });
-}
-
-/**
- * 桌面笔记面板读的正文。笔记本体由 `plugins/session-notes` 写进插件状态，这里只做
- * 「键 + 归一化」的投影，保持面板与模型看到同一份内容。
- */
-function readSessionNotes(agent: AgentRuntime): string {
-  return normalizeSessionNotes(agent.getPluginState(SESSION_NOTES_PLUGIN_ID));
 }
 
 function threadSnapshot(ctx: HostContext, model: string): CodexThread {
@@ -1812,8 +1804,13 @@ async function handleCodexRequest(
       ctx.writeResponse({ ok: true, selection });
       return;
     }
-    case MICA_METHODS.notesGet: {
-      ctx.writeResponse({ ok: true, content: readSessionNotes(ctx.agent) });
+    case MICA_METHODS.sessionStateGet: {
+      const pluginId = paramString(params, 'pluginId');
+      if (!pluginId) {
+        ctx.writeResponse({ ok: false, error: 'pluginId 缺失' });
+        return;
+      }
+      ctx.writeResponse({ ok: true, value: ctx.agent.getPluginState(pluginId) ?? null });
       return;
     }
     case MICA_METHODS.pluginSettingsGet: {
@@ -1830,17 +1827,23 @@ async function handleCodexRequest(
       ctx.writeResponse({ ok: true, plugins: listPluginSessionSettings(ctx) });
       return;
     }
-    case MICA_METHODS.notesSet: {
-      // 笔记不进对话历史，写到内存不会打断在途请求，也不会让本轮换上下文——
-      // 下一个请求自然带上新内容。这里只多一步落盘，好让这个能力在重启后还在。
-      const content = normalizeSessionNotes(params.content);
-      ctx.agent.setPluginState(SESSION_NOTES_PLUGIN_ID, content || undefined);
+    case MICA_METHODS.sessionStateSet: {
+      // 会话级状态不进对话历史：写到内存不会打断在途请求，也不会让本轮换上下文——
+      // 下一个请求自然带上新内容。这里只多一步落盘，好让它在重启后还在。
+      const pluginId = paramString(params, 'pluginId');
+      if (!pluginId) {
+        ctx.writeResponse({ ok: false, error: 'pluginId 缺失' });
+        return;
+      }
+      const value = params.value ?? null;
+      ctx.agent.setPluginState(pluginId, value === null ? undefined : value);
       if (ctx.sessionId) ctx.sessionController.saveCurrent({ allowEmpty: true });
-      ctx.writeNotification(MICA_NOTES_NOTIFICATIONS.updated, {
+      ctx.writeNotification(MICA_SESSION_STATE_NOTIFICATIONS.updated, {
         threadId: ctx.sessionId,
-        content,
+        pluginId,
+        value,
       });
-      ctx.writeResponse({ ok: true, content });
+      ctx.writeResponse({ ok: true, pluginId });
       return;
     }
     case MICA_METHODS.pluginPanelView: {

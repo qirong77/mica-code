@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { readPluginsDetails } from './plugins-details'
+import { readPluginsDetails, subscribePluginsDetails } from './plugins-details'
 
 /**
  * 对话右侧能出现的插件面板（清单 `desktop.panel`）。
@@ -62,8 +62,16 @@ export function usePluginPanels(role) {
       }
     }
     void run()
+    // 启停之后立刻重算：停用插件的按钮与状态行跟着消失，不必等重挂载。
+    const unsubscribe = subscribePluginsDetails(() => {
+      tries = 0
+      if (timer) clearTimeout(timer)
+      timer = 0
+      void run()
+    })
     return () => {
       alive = false
+      unsubscribe()
       if (timer) clearTimeout(timer)
     }
   }, [role])

@@ -100,6 +100,7 @@ function statusRows(ctx: PluginContext, dataDir: string | null): PluginPanelRow[
 
 type SupervisorStatus = {
   page?: { text?: unknown; tone?: unknown };
+  pageKey?: unknown;
   attention?: { text?: unknown } | null;
 };
 
@@ -128,22 +129,28 @@ function pageSection(ctx: PluginContext, dataDir: string | null): PluginPanelSec
   const rawTone = typeof status.page?.tone === 'string' ? status.page.tone : '';
   const pageTone = (PAGE_TONES.has(rawTone) ? rawTone : 'muted') as PluginPanelRow['tone'];
   const attentionText = typeof status.attention?.text === 'string' ? status.attention.text : '';
+  // 落后是一个持续状态，提示点只亮一次。点过之后这里仍要留着「落后 + 更新按钮」——
+  // 否则用户想手动再传一次时，面板里就什么也找不到了。
+  const stale = typeof status.pageKey === 'string' && status.pageKey.length > 0;
   const configured = Boolean(String(ctx.settings.get().relayUrl ?? '').trim());
 
   return {
     title: '页面版本',
-    collapsed: !attentionText,
+    collapsed: !attentionText && !stale,
     rows: [
       { label: '中转机页面', value: pageText || '还没探测', tone: pageText ? pageTone : 'muted' },
       ...(attentionText ? [{ label: '要更新', value: attentionText, tone: 'warn' as const }] : []),
+      ...(!attentionText && stale
+        ? [{ label: '要更新', value: '版本与中转机不一致', tone: 'warn' as const }]
+        : []),
     ],
     actions: [
       {
         id: 'sync-page',
         label: '更新中转机页面',
-        tone: attentionText ? 'primary' : 'ghost',
+        tone: attentionText || stale ? 'primary' : 'ghost',
         disabled: !configured,
-        hint: '开一个新会话，提示词已备好：按回车让 agent 去更新页面。',
+        hint: '在新会话里准备好提示词，按回车后执行',
       },
     ],
   };
@@ -161,7 +168,7 @@ function setupSection(ctx: PluginContext, dataDir: string | null, drafts: Drafts
       label: configured ? '接入这台机器' : '接入 / 部署',
       tone: 'primary',
       disabled: running || !drafts.sshHost.trim(),
-      hint: '已经装过中转机时只登记这台机器；没装过会走完整部署（需要页面产物）。',
+      hint: '装过中转机就只登记本机，否则走完整部署',
     },
     { id: 'test', label: '测试连接', disabled: !configured, hint: '只请求一次 /api/health' },
   ];

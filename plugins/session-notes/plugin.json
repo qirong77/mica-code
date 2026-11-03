@@ -10,6 +10,9 @@
   "required": true,
   "priority": 0,
   "requires": ["hooks", "prompt", "sessionState", "tools"],
+  "desktop": {
+    "entry": { "label": "Notes", "placement": "header" }
+  },
   "mica": {
     "apiVersion": 1
   }

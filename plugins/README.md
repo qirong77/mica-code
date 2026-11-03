@@ -149,6 +149,9 @@ export default function setup(ctx: PluginContext) {
 - 插件详情页把这条渲染成一条提示，`action` 若在清单 `actions` 里声明过，旁边直接给那个按钮，
   结果就地显示（与设置下方的动作按钮走同一次 `mica plugin-action`）；
 - `tone` 取 `warn` / `error`，`ok` 等于「撤销这条提示」。**没有 text 或 tone 为 ok 就不显示**；
+- **一条提示只点一次**：页面按「插件 id + 文案」记住点开过的那条，之后不再点亮侧栏（文案
+  通常带着版本号，所以本机换了一版、或对面换了另一版时是另一条）。所以插件在动作里要顺手把
+  这件事记上账、并把 `attention` 抹掉，否则同一件持续状态会在每次重算时把点重新点亮；
 - **只有插件自己知道什么才算「点一下就好」**：中转机不可达、本机缺产物这类没有可执行动作的
   warn 不该写成 attention——一枚点不动的提示点比没有提示更糟。所以这条由插件决定写与撤，
   页面不按 `status` 的语气自己去猜。
@@ -444,12 +447,20 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   （`apps/desktop/src/renderer/src/PluginEntries.jsx`）负责。
 - 宿主按插件 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里
   登记**——加一个桌面入口只改插件目录。
-- 模块拿到的 `api` 只有六件事：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
+- 模块拿到的 `api` 有两组：**插件自己的数据**与**当前会话**。
+- 插件数据：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
   （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value, options?)`
   （插件自己的 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构）、`open(url)`
   （外壳里开新窗口、浏览器里开新标签页）、`access`（`get()` / `set({ enabled, password })`
   读写这台机器的远程访问策略——请求分派只存在于运行时进程，页面自己改不了）、
   `action(key)`（执行清单 `actions` 里声明过的一个动作，结果是 `{ ok, message?, link?, error? }`）。
+- 当前会话：`session`（没有打开会话时为 `null`）——`id()` / `sessionId()` / `cwd()`、
+  `state.read()` / `state.write(value)` / `state.subscribe(callback)` 读写插件自己的**会话级**
+  状态（落在会话快照的 `pluginState[<插件 id>]`，与 setup 里的 `ctx.sessionState` 是同一份，
+  所以压缩、fork、resume 的行为与插件其余部分一致），以及 `onIdle(callback)`：
+  这一轮跑完时回调，模型在轮次里写下的状态只能在这一刻重读。
+- 卡片默认 320px 宽（长文在里面放不下），模块可以用 `export const card = { width }` 声明更宽的
+  （宿主夹在 240–960）。定宽以外的排版仍由卡片自己负责。
 - 数据读取返回 `{ value, version }`（缺文件时两者为 null）；IO 失败应显式报错。读改写时将版本作为
   `writeData(value, { expectedVersion })` 传回；宿主在跨进程互斥下比较版本并原子替换，冲突返回
   `{ ok: false, conflict: true }`，插件重读后只重放本次修改。未传版本仍可整份写入。
@@ -733,9 +744,11 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 { "disabled": ["todo"] }
 ```
 
-停用的插件照常注册、在装配阶段被跳过（工具、命令、钩子一起消失）。TUI 与桌面端的会话宿主
-在每轮开始时按这份名单对齐一次，所以改完不必重开会话、下一轮对话起生效；正在跑的那一轮
-不会被打断。`mica exec` 与插件命令这类一次性运行只在启动时读一次名单。
+停用的插件照常注册、在装配阶段被跳过（工具、命令、钩子、桌面入口一起消失）。TUI 与桌面端
+的会话宿主盯着这份文件：**名单一变立刻对齐**（`watchFile` 轮询 400ms），所以点完开关不必
+重开会话、也不用等下一轮；正在跑的那一轮不被打断，变化放到 `turn:after` 补做。桌面页面的
+入口、快捷条与面板也读同一份名单，写完就重读。`mica exec` 与插件命令这类一次性运行只在
+启动时读一次名单。
 
 ## 装在自己机器上的插件
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { localDayKey } from '@packages/mica-web-shared/stats-day.js'
-import { bucketByDay, scopeSession } from './scope.js'
+import { bucketByDay, bucketByDaySource, scopeSession } from './scope.js'
 
 const at = (y, m, d, h = 12) => new Date(y, m - 1, d, h).getTime()
 const day = (y, m, d) => localDayKey(at(y, m, d))
@@ -189,5 +189,33 @@ describe('Stats day buckets', () => {
     expect(first.requests).toBe(5)
     expect(first.turns).toBe(3)
     expect(first.tokens).toBe(140)
+  })
+
+  test('splits tokens per day by usage source', () => {
+    const source = (kind, totalTokens) => ({
+      kind,
+      id: kind,
+      tasks: [],
+      purposes: [],
+      requests: 1,
+      inputTokens: totalTokens,
+      cachedInputTokens: 0,
+      uncachedInputTokens: totalTokens,
+      outputTokens: 0,
+      totalTokens
+    })
+    const buckets = bucketByDaySource([
+      session({ days: [dayRow({ sources: [source('delegation', 30), source('plugin', 10)] })] }),
+      session({
+        id: 's2',
+        days: [dayRow({ sources: [source('delegation', 5), source('helper', 1)] })]
+      })
+    ])
+    expect(buckets.get(day(2026, 8, 2))).toEqual({
+      main: 0,
+      delegation: 35,
+      plugin: 10,
+      helper: 1
+    })
   })
 })

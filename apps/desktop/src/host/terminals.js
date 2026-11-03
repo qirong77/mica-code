@@ -407,6 +407,20 @@ export function registerTerminalIpc() {
     return readSessionCwd(session)
   })
 
+  // 这个终端此刻在前台跑什么。关窗前要问一句「还有程序在跑，确定关掉吗」，靠的就是它：
+  // `processRunning` 是轮询出来的滞后标记，实时再问一次 `ps` 才够准（刚起的 `npm run dev`
+  // 一秒内就该被拦下来）。Windows 上两者都没有，只回 `running: false`。
+  ipcMain.handle('terminal:foreground', async (_event, { id } = {}) => {
+    const session = sessions.get(id)
+    if (!session) return null
+    const foreground = await readForegroundProcess(session.term.pid)
+    return {
+      id,
+      running: !!foreground || !!session.processRunning,
+      command: foreground?.command || ''
+    }
+  })
+
   ipcMain.handle('terminal:resolve-file-links', async (event, { id, paths } = {}) => {
     const session = sessions.get(id)
     if (!session || !Array.isArray(paths)) return []

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { createPortal } from 'react-dom'
 import { PluginIcon } from '@mica-config-ui/plugin-icons'
 import { useIsMobile } from './hooks'
-import { createPluginHostApi } from './plugin-host'
+import { createPluginHostApi, notifySessionIdle } from './plugin-host'
 import { usePluginEntries } from './plugin-entries'
 
 /**
@@ -44,11 +44,14 @@ function useDismissOnOutside(open, setOpen, anchorRef) {
   }, [open, setOpen, anchorRef])
 }
 
-export function PluginEntries({ onOpenPage }) {
+export function PluginEntries({ onOpenPage, session = null }) {
+  useSessionIdleSignal(session)
   const entries = usePluginEntries()
   return entries
     .filter((entry) => entry.placement !== 'header')
-    .map((entry) => <PluginEntryRow key={entry.id} entry={entry} onOpenPage={onOpenPage} />)
+    .map((entry) => (
+      <PluginEntryRow key={entry.id} entry={entry} onOpenPage={onOpenPage} session={session} />
+    ))
 }
 
 /**
@@ -58,17 +61,33 @@ export function PluginEntries({ onOpenPage }) {
  * 声明了 `desktop.page` 的开整页，否则在按钮下面浮出卡片。位置由 App 决定（放在顶栏右侧
  * 那一簇的最左边，窗口类图标仍然贴在最右），这里只管画按钮和卡片。
  */
-export function PluginHeaderEntries({ onOpenPage }) {
+export function PluginHeaderEntries({ onOpenPage, session = null }) {
+  useSessionIdleSignal(session)
   const entries = usePluginEntries()
   return entries
     .filter((entry) => entry.placement === 'header')
-    .map((entry) => <PluginHeaderEntry key={entry.id} entry={entry} onOpenPage={onOpenPage} />)
+    .map((entry) => (
+      <PluginHeaderEntry key={entry.id} entry={entry} onOpenPage={onOpenPage} session={session} />
+    ))
 }
 
-function PluginHeaderEntry({ entry, onOpenPage }) {
+/**
+ * 一轮跑完的信号：页面对「模型刚写完的会话状态」只能在这一刻知道。
+ * 卡片订阅的是 `api.session.onIdle`，宿主在这里统一广播。
+ */
+function useSessionIdleSignal(session) {
+  const running = Boolean(session?.running)
+  const previous = useRef(running)
+  useEffect(() => {
+    if (previous.current && !running) notifySessionIdle()
+    previous.current = running
+  }, [running])
+}
+
+function PluginHeaderEntry({ entry, onOpenPage, session }) {
   const [open, setOpen] = useState(false)
   const anchorRef = useRef(null)
-  const api = useMemo(() => createPluginHostApi(entry.id), [entry.id])
+  const api = useMemo(() => createPluginHostApi(entry.id, session), [entry.id, session])
   const isPage = Boolean(entry.page) && typeof onOpenPage === 'function'
 
   useDismissOnOutside(open, setOpen, anchorRef)
@@ -79,8 +98,8 @@ function PluginHeaderEntry({ entry, onOpenPage }) {
       data-plugin-entry-card
       // 卡片的控件与设置页是同一批（`@mica-config-ui/web`），样式限定在这个作用域里；
       // 由宿主统一套上，插件不必各自再包一层。
-      className="mica-config-ui is-embed rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl backdrop-blur"
-      style={{ width: CARD_WIDTH }}
+      className="mica-config-ui is-embed rounded-md border border-line p-3.5 shadow-2xl"
+      style={{ width: entry.cardWidth ?? CARD_WIDTH, maxWidth: 'calc(100vw - 24px)' }}
     >
       <Card api={api} onClose={() => setOpen(false)} />
     </section>
@@ -113,12 +132,12 @@ function PluginHeaderEntry({ entry, onOpenPage }) {
   )
 }
 
-function PluginEntryRow({ entry, onOpenPage }) {
+function PluginEntryRow({ entry, onOpenPage, session }) {
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const rowRef = useRef(null)
   const closeTimer = useRef(null)
-  const api = useMemo(() => createPluginHostApi(entry.id), [entry.id])
+  const api = useMemo(() => createPluginHostApi(entry.id, session), [entry.id, session])
   // 声明了 `desktop.page` 的入口点开的是整页（时间轴、表格这类要宽要高的东西），
   // 悬停卡片那条路对它没有意义：整页由 App 盖住整个窗口渲染。
   const isPage = Boolean(entry.page) && typeof onOpenPage === 'function'
@@ -153,8 +172,8 @@ function PluginEntryRow({ entry, onOpenPage }) {
   const card = Card ? (
     <section
       data-plugin-entry-card
-      className="mica-config-ui is-embed rounded-md border border-line bg-panel/98 p-3.5 shadow-2xl backdrop-blur"
-      style={{ width: CARD_WIDTH }}
+      className="mica-config-ui is-embed rounded-md border border-line p-3.5 shadow-2xl"
+      style={{ width: entry.cardWidth ?? CARD_WIDTH, maxWidth: 'calc(100vw - 24px)' }}
     >
       <Card api={api} onClose={closeRow} />
     </section>

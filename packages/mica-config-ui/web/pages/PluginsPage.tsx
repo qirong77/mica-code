@@ -43,9 +43,8 @@ const DESKTOP_CHECK_TONE = { granted: 'green', denied: 'red', unknown: 'default'
  * - 官方插件随产品分发（源码在仓库 `plugins/`），永远「已安装」，只能启用 / 停用；
  * - 用户插件是 `$MICA_HOME/plugins` 下的插件目录，装没装、能不能加载由磁盘决定。
  *
- * 启停只写本地状态文件（`plugins-state.json`），由会话宿主在每轮开始时对齐一次：运行中的
- * 会话不用重开，但正在跑的那一轮也不会被打断，所以提示写「下一轮对话起生效」。设置则不同：
- * 写盘后插件的下一次读取就拿到新值，连下一轮都不用等。
+ * 页面只说两件不同的事：开关表达「此刻是启用还是停用」，卡片脚注表达「上一次装配的结论」
+ * （已加载 / 已跳过 / 尚未加载）。两者互补，不重复。设置则写盘就被插件读到，连装配都不用等。
  *
  * 当前打开哪个插件由宿主（`pluginId`）决定：桌面端插件菜单直接落在某个插件的详情上，
  * 侧栏再点一次 Plugins 回到目录。返回按钮同样只回到目录，不回到上一个设置页——插件页是
@@ -101,7 +100,7 @@ export function PluginsPage({
     setNotice(null);
     try {
       setDetails(await setPluginEnabled(plugin.id, enabled));
-      setNotice(`${plugin.name} 已${enabled ? '启用' : '停用'} · 下一轮对话起生效`);
+      setNotice(`${plugin.name} 已${enabled ? '启用' : '停用'}`);
     } catch (toggleError) {
       setError(formatError(toggleError));
     } finally {
@@ -320,7 +319,7 @@ export function PluginCard({
   onOpen(): void;
   onToggle(enabled: boolean): void;
 }) {
-  const status = pluginStatus(plugin);
+  const status = pluginRunningStatus(plugin);
   const attention = plugin.state === 'enabled' ? plugin.attention : null;
   const enabled = plugin.state !== 'disabled';
   return (
@@ -349,9 +348,9 @@ export function PluginCard({
             </span>
           ) : null}
           <span className="plugin-card-foot">
-            <Tag tone={status.tone} dot>
+            <span className={`plugin-card-status is-${status.tone}`} title={status.label}>
               {status.label}
-            </Tag>
+            </span>
             {plugin.settings.fields.length > 0 ? (
               <span className="plugin-card-note">{plugin.settings.fields.length} 项设置</span>
             ) : null}
@@ -364,11 +363,7 @@ export function PluginCard({
       {canToggle ? (
         <label
           className="plugin-card-toggle"
-          title={
-            enabled
-              ? '停用后它的工具、命令与钩子都不再注册 · 下一轮对话起生效'
-              : '启用后它的工具、命令与钩子重新注册 · 下一轮对话起生效'
-          }
+          title={enabled ? '停用后它的工具、命令与入口立刻撤下' : '启用后它的工具、命令与入口立刻恢复'}
         >
           <Switch
             checked={enabled}
@@ -383,7 +378,7 @@ export function PluginCard({
 }
 
 /** 详情页：自己的页头（图标 + 名字 + 启停），下面是设置 / 运行条件 / 信息三块。 */
-function PluginDetail({
+export function PluginDetail({
   plugin,
   busy,
   canToggle,
@@ -413,7 +408,6 @@ function PluginDetail({
   const BackIcon = appIcons.chevronLeft;
   const RefreshIcon = appIcons.refresh;
   const enabled = plugin.state !== 'disabled';
-  const status = pluginStatus(plugin);
   // 设置草稿提到详情这一层：动作按钮（包括 attention 上那一个）发出去的值必须是
   // 用户刚在下面那半页里改的，不能是磁盘上那份旧的。
   const draft = usePluginSettingsDraft(plugin, onSaved);
@@ -454,10 +448,16 @@ function PluginDetail({
             </p>
           </div>
           <div className="plugin-hero-actions">
-            <Tag tone={status.tone} dot>
-              {status.label}
-            </Tag>
-            <label className="plugin-toggle" title="停用后它的工具、命令与钩子都不再注册；下一轮对话起生效">
+            <label
+              className="plugin-toggle"
+              title={
+                !canToggle
+                  ? '这个宿主不能启停插件'
+                  : enabled
+                    ? '停用后它的工具、命令与入口立刻撤下'
+                    : '启用后它的工具、命令与入口立刻恢复'
+              }
+            >
               <Switch
                 checked={enabled}
                 disabled={!canToggle || busy}
@@ -573,7 +573,7 @@ function newSessionHint(outcome: NewSessionOutcome): string {
  * 结果就写在这块里——注册这类动作的产出是一条链接，让它出现在插件配置里，
  * 比跳到对话再回来更自然。动作通常会顺手改设置或状态，所以成功后重读一次详情。
  */
-function PluginActionsGroup({
+export function PluginActionsGroup({
   plugin,
   values,
   onDone,
@@ -611,39 +611,47 @@ function PluginActionsGroup({
   }
 
   return (
-    <SettingsGroup title="操作" description="点一下就地执行，不需要打开会话">
+    <SettingsGroup title="操作">
       {plugin.actions.map((action) => {
         const result = results[action.key];
         const error = errors[action.key];
         const hint = hints[action.key];
+        // 一行一件事：左边一句话说清它做什么，右边按钮执行。说明只留一行、放不下的进 tooltip，
+        // 结果与错误另起一行铺满（链接经常比半页还长）——不要把一个按钮讲成一整段话。
+        const note = action.description ?? '';
         return (
           <div className="plugin-action-row" key={action.key}>
-            <div className="plugin-action-copy">
-              {action.description ? <span className="plugin-action-hint">{action.description}</span> : null}
-              {error ? <span className="plugin-action-error">{error}</span> : null}
-              {result ? (
-                <span className="plugin-action-result">
-                  {result.message}
-                  {hint ? ` ${hint}` : ''}
-                  {result.link ? (
-                    <>
-                      {' '}
-                      <a href={result.link} target="_blank" rel="noreferrer">
-                        {result.link}
-                      </a>
-                    </>
-                  ) : null}
-                </span>
-              ) : null}
-            </div>
+            <span className="plugin-action-note" title={note || undefined}>
+              {note}
+            </span>
             <Button
               variant={action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : 'default'}
               loading={running === action.key}
               disabled={running !== null && running !== action.key}
+              title={note || undefined}
               onClick={() => void run(action)}
             >
               {action.label}
             </Button>
+            {error || result ? (
+              <div className="plugin-action-outcome">
+                {error ? <span className="plugin-action-error">{error}</span> : null}
+                {result ? (
+                  <span className="plugin-action-result">
+                    {result.message}
+                    {hint ? ` ${hint}` : ''}
+                    {result.link ? (
+                      <>
+                        {' '}
+                        <a href={result.link} target="_blank" rel="noreferrer">
+                          {result.link}
+                        </a>
+                      </>
+                    ) : null}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         );
       })}
@@ -763,9 +771,8 @@ function PluginInfoGroup({ plugin }: { plugin: ConfigWebPlugin }) {
     { label: '标识', value: plugin.id, mono: true },
     {
       label: '加载',
-      // 没有记录就如实说「尚未加载」：官方插件确实随包分发，但「装上了」不等于「这个宿主
-      // 把它装配成功了」，替它编一个「已加载」正是这条提示曾经误导人的地方。
-      value: loadStatusText(plugin),
+      // 与卡片脚注同一份结论：停用时不能还显示上一次装配留下的「已加载」。
+      value: pluginRunningStatus(plugin).label,
       title: plugin.skipReason ?? plugin.loadStatus,
     },
     ...(plugin.skipReason ? [{ label: '跳过原因', value: plugin.skipReason, title: plugin.skipReason }] : []),
@@ -1053,12 +1060,26 @@ function filterPlugins(plugins: ConfigWebPlugin[], filter: string): ConfigWebPlu
   );
 }
 
-/** 卡片与详情共用的状态投影：异常优先于启停，因为「启用了但坏了」才是最需要看见的。 */
-function pluginStatus(plugin: ConfigWebPlugin): { label: string; tone: 'default' | 'green' | 'red' | 'blue' } {
-  if (plugin.state === 'failed' || plugin.health?.level === 'error') return { label: '出错', tone: 'red' };
+/** 脚注与信息表共用的结论文案色。 */
+export type PluginRunningTone = 'default' | 'green' | 'red' | 'blue';
+
+/**
+ * 运行结论：上一次宿主把它装配成了什么样。
+ *
+ * 与开关是两件事——开关说「启用还是停用」，这里说「装配成功没有」。没被任何宿主装配过就
+ * 如实说「尚未加载」：官方插件确实随包分发，但「装上了」不等于「这个宿主把它装配成功了」。
+ */
+export function pluginRunningStatus(plugin: ConfigWebPlugin): { label: string; tone: PluginRunningTone } {
+  if (plugin.state !== 'enabled') {
+    return { label: pluginStateLabel(plugin.state), tone: plugin.state === 'failed' ? 'red' : 'default' };
+  }
+  if (plugin.loadStatus === 'failed' || plugin.health?.level === 'error') return { label: '加载失败', tone: 'red' };
   if (plugin.health?.level === 'warn') return { label: '待配置', tone: 'blue' };
-  if (plugin.state === 'enabled') return { label: '已启用', tone: 'green' };
-  return { label: pluginStateLabel(plugin.state), tone: 'default' };
+  // 装配结论连宿主一起读：同一个插件在 TUI 里被跳过、在会话宿主里正常运行都很正常。
+  if (plugin.loadStatus === 'loaded' || plugin.loadStatus === 'skipped') {
+    return { label: loadStatusText(plugin), tone: plugin.loadStatus === 'loaded' ? 'green' : 'default' };
+  }
+  return { label: pluginLoadStatusLabel(plugin.loadStatus), tone: 'default' };
 }
 
 function pluginHealthLabel(plugin: ConfigWebPlugin): string {

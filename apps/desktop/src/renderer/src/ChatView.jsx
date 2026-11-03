@@ -1,4 +1,5 @@
 import {
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -9,6 +10,7 @@ import {
   useState,
   useSyncExternalStore
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   IconAdjustments,
   IconArrowDown,
@@ -22,6 +24,7 @@ import {
   IconExternalLink,
   IconGitCommit,
   IconGitFork,
+  IconInfoCircle,
   IconLoader2,
   IconClock,
   IconMessageChatbot,
@@ -70,6 +73,15 @@ import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
 import { TurnTimingDialog } from './TurnTimingDialog'
+import { lazyView } from './lazy-view'
+
+// 会话详情弹窗与侧栏会话行的「查看详情」是同一个组件（含用量页签），按需加载——
+// stats 目录的代码不进对话框的启动路径。
+const SessionDetailModal = lazyView(
+  () => import('./stats/SessionDetailModal'),
+  'SessionDetailModal',
+  { overlay: true }
+)
 import { applyTurnTimingEvent, createTurnTimingState, summarizeTurnTiming } from './turn-timing'
 import { CodeView } from './CodeView'
 import { newlyAnsweredBtwEntries } from './btw-thread'
@@ -2050,6 +2062,13 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
       icon: IconShare,
       disabled: !menu.hasSession
     },
+    {
+      id: 'detail',
+      label: '查看详情',
+      title: '这条会话的详情：对话记录 / Context 分析 / 耗时 / 系统提示词 / 用量',
+      icon: IconInfoCircle,
+      disabled: !menu.hasSession
+    },
     ...pluginActions,
     { separator: true },
     { id: 'clear', label: 'Clear', icon: IconTrash, disabled: menu.running, danger: true }
@@ -3004,14 +3023,22 @@ export function ChatView({
   // 最近一次 turn 的结束结果：{ state: 'completed' | 'error', durationMs }。
   // 运行结束后状态行左侧展示它（对齐 CLI：completed 绿色带耗时、error 红色、aborted 不展示）。
   const [lastRun, setLastRun] = useState(null)
-  // 最近一轮的耗时分解（输入框「耗时分析」入口）。事件流按「等模型 / 输出 / 跑工具」
-  // 首尾相接切分，step_start 时重置——只留最近一轮。ref 保存最新值供每个 delta 延长
-  // 当前段，state 只在段结构变化（新工具、新一轮、结束）时更新，流式期间不重渲染。
+  // 正在跑的这一轮的耗时分解（输入框「耗时分析」入口）。事件流按「等模型 / 输出 /
+  // 跑工具」首尾相接切分，step_start 时重置；历史上已结束的轮次读会话里的记录（宿主在
+  // 轮末落盘），所以这里只留现场这一轮。ref 保存最新值供每个 delta 延长当前段，state
+  // 只在段结构变化（新工具、新一轮、结束）时更新，流式期间不重渲染。
   const turnTimingRef = useRef(createTurnTimingState())
   const [turnTimingState, setTurnTimingState] = useState(createTurnTimingState)
   const [turnTimingOpen, setTurnTimingOpen] = useState(false)
+  const [sessionDetailOpen, setSessionDetailOpen] = useState(false)
   const [turnTimingNow, setTurnTimingNow] = useState(() => Date.now())
   const turnTiming = summarizeTurnTiming(turnTimingState, turnTimingNow)
+  // 运行中的这一轮还没落盘（宿主在轮末才写），所以由界面现场传给弹窗；已结束的轮次
+  // 一律读会话里的记录，两边不会重复出现同一轮。
+  const liveTimingRound = useMemo(
+    () => (turnTiming?.running ? { id: String(turnTimingState.startedAt), state: turnTimingState, live: true } : null),
+    [turnTiming?.running, turnTimingState]
+  )
   // 运行中打开时才每秒走表：这一轮还在跑，总耗时与仍打开的那一段要跟着长。
   const turnTimingRunning = Boolean(turnTiming?.running)
   useEffect(() => {
@@ -6307,6 +6334,14 @@ export function ChatView({
         onShareSessionRef.current?.(sessionId)
         return
       }
+      if (action === 'detail') {
+        if (!sessionIdRef.current) {
+          appendNotice('发送第一条消息后才有会话详情', 'error')
+          return
+        }
+        setSessionDetailOpen(true)
+        return
+      }
       if (action !== 'fork') return
       const sessionId = sessionIdRef.current
       if (!sessionId) {
@@ -7114,7 +7149,6 @@ export function ChatView({
                     <button
                       type="button"
                       role="menuitem"
-                      disabled={!turnTiming}
                       onClick={() => {
                         setMoreOpen(false)
                         setTurnTimingNow(Date.now())
@@ -7122,7 +7156,7 @@ export function ChatView({
                       }}
                     >
                       <IconStopwatch size={13} />
-                      <span>本轮耗时</span>
+                      <span>耗时分析</span>
                     </button>
                   </div>
                 ) : null}
@@ -7202,9 +7236,25 @@ export function ChatView({
             onClose={() => setContextDetail(false)}
           />
         )}
-        {turnTimingOpen && turnTiming ? (
-          <TurnTimingDialog timing={turnTiming} onClose={() => setTurnTimingOpen(false)} />
+        {turnTimingOpen ? (
+          <TurnTimingDialog
+            sessionId={sessionIdRef.current}
+            liveRound={liveTimingRound}
+            now={turnTimingNow}
+            onClose={() => setTurnTimingOpen(false)}
+          />
         ) : null}
+        {sessionDetailOpen && sessionIdRef.current
+          ? createPortal(
+              <Suspense fallback={null}>
+                <SessionDetailModal
+                  sessionId={sessionIdRef.current}
+                  onClose={() => setSessionDetailOpen(false)}
+                />
+              </Suspense>,
+              document.body
+            )
+          : null}
         {taskDetail?.kind === 'subagent' && (
           <SubagentDetailModal
             runKey={runKey}

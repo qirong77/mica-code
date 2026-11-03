@@ -15,6 +15,16 @@ import type { EffortOption, ProviderProtocol } from '@packages/mica-config/index
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaCommon, cloneCapabilitySelection, normalizeCapabilitySelection } from '@packages/mica-common/index.js';
 import type { CapabilitySelection } from '@packages/mica-common/index.js';
+import {
+  applyTurnTimingTick,
+  appendTurnTiming,
+  createTurnTimingState,
+  normalizeTurnTimings,
+  turnTimingRecord,
+  type TurnTimingRecord,
+  type TurnTimingState,
+  type TurnTimingTick,
+} from '@packages/mica-common/turnTiming.js';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import { mcpToolNamePrefix, micaTools } from '@packages/mica-tools/index.js';
 import { estimateContextTokens, estimateTextTokens } from '@packages/mica-context/tokenEstimate.js';
@@ -104,6 +114,13 @@ export type AgentRuntimeSnapshot = {
   activeTurn?: { input: AgentQueryContent; committed: boolean };
   /** Usage of subagent tasks spawned by this agent, appended at task end. */
   subagentUsageHistory?: SubagentUsageRecord[];
+  /**
+   * 最近若干轮的时间去向（新的在后）。
+   *
+   * 记在会话里的理由：界面要能回看「上一轮慢在哪」，而桌面端打开会话详情时
+   * 手里只有磁盘上的会话——只留在页面内存里，重开应用就什么都没了。
+   */
+  turnTimings?: TurnTimingRecord[];
 };
 
 export type InterruptedThinking = {
@@ -200,6 +217,9 @@ export class AgentRuntime {
   private activeStatusModuleStartedAt: number | null = null;
   private activeStatusModuleKey = '';
   private subagentUsageHistory: SubagentUsageRecord[] = [];
+  private turnTimings: TurnTimingRecord[] = [];
+  private activeTurnTiming: TurnTimingState | null = null;
+  private activeTurnTimingRunId: number | null = null;
   private interruptedThinking: InterruptedThinking | undefined;
   private pendingThinking = '';
   private completedThinking = '';
@@ -537,6 +557,10 @@ export class AgentRuntime {
     // 否则新会话会莫名其妙继承上一轮的结论。
     this.pluginState = {};
     this.pluginSessionSettings = {};
+    // 耗时记录属于这条会话发生过的轮次，新会话从空开始。
+    this.turnTimings = [];
+    this.activeTurnTiming = null;
+    this.activeTurnTimingRunId = null;
     // 记下来的提示词也属于这条会话：新会话的第一轮请求会重新记录。
     this.lastSystemPrompt = undefined;
     this.emitStatus({ type: 'idle' });
@@ -583,6 +607,7 @@ export class AgentRuntime {
         ? { activeTurn: { input: cloneJson(this.activeTurn.input), committed: this.activeTurn.committed } }
         : {}),
       subagentUsageHistory: this.subagentUsageHistory,
+      turnTimings: this.turnTimings,
     };
   }
 
@@ -618,6 +643,8 @@ export class AgentRuntime {
       usageHistory: [],
       lastUsage: snapshot.lastUsage,
       subagentUsageHistory: [],
+      // 耗时记录描述的是源会话跑过的轮次；fork 出来的新会话从自己的第一轮重新记。
+      turnTimings: [],
     };
   }
 
@@ -696,6 +723,8 @@ export class AgentRuntime {
       }
     }
     this.subagentUsageHistory = snapshot.subagentUsageHistory ?? [];
+    this.turnTimings = normalizeTurnTimings(snapshot.turnTimings);
+    this.activeTurnTiming = null;
   }
 
   /** Recover a crashed turn without reloading unrelated in-memory settings. */
@@ -712,6 +741,8 @@ export class AgentRuntime {
   async run(question: AgentQueryContent, options: AgentRunOptions = {}): Promise<{ runId: number; text: string }> {
     const runId = options.reservedRunId ?? ++this.runId;
     const startedAt = Date.now();
+    this.activeTurnTiming = applyTurnTimingTick(createTurnTimingState(), { type: 'turn-start', at: startedAt });
+    this.activeTurnTimingRunId = runId;
     const observed: ObservedRun = { runId, closed: false };
     let outcome: 'completed' | 'aborted' | 'error' = 'completed';
     let observationError: string | undefined;
@@ -898,11 +929,49 @@ export class AgentRuntime {
         elapsedMs: Date.now() - startedAt,
         ...(observationError === undefined ? {} : { error: observationError }),
       });
+      this.finishTurnTiming(outcome, runId);
     }
   }
 
   isCurrent(runId: number) {
     return runId === this.runId;
+  }
+
+  /** 记一段耗时；没有在跑的轮次（例如已清空会话）就丢掉。 */
+  private noteTurnTiming(tick: TurnTimingTick): void {
+    if (!this.activeTurnTiming) return;
+    this.activeTurnTiming = applyTurnTimingTick(this.activeTurnTiming, tick);
+  }
+
+  /** 工具行上那句说明（`run_shell` 显示的就是它跑的那条命令）。 */
+  private toolDisplayText(name: string, args: unknown): string {
+    try {
+      const input = typeof args === 'string' ? (args.trim() ? JSON.parse(args) : {}) : (args ?? {});
+      return micaTools.getDisplayText(name, input as Record<string, unknown>);
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * 收尾本轮并归档。
+   *
+   * 只在 `runId` 还是当初记这条记录的那个轮次时才归档：`clearSession()` 会自增
+   * `runId` 并中断，被中断那一轮的 finally 随后才跑到这里，不能把上一轮的耗时记进
+   * 新会话。
+   */
+  private finishTurnTiming(outcome: 'completed' | 'aborted' | 'error', runId: number): void {
+    const state = this.activeTurnTiming;
+    // 记录不属于这一轮就不要碰它：`clearSession()` 已经换上（或清掉）新的记录，被中断
+    // 那一轮的 finally 是后到的，把上一轮的耗时归档进新会话就成了无主数据。
+    if (this.activeTurnTimingRunId !== runId) return;
+    this.activeTurnTiming = null;
+    this.activeTurnTimingRunId = null;
+    if (!state) return;
+    const record = turnTimingRecord(applyTurnTimingTick(state, { type: 'turn-end', at: Date.now(), outcome }));
+    // 一个区间都没跑出来的轮次（起步就失败、配置缺失）没有「时间去哪了」可看。
+    if (!record || !record.segments.length) return;
+    this.turnTimings = appendTurnTiming(this.turnTimings, record);
   }
 
   private makeInterruptedThinking(text: string): InterruptedThinking {
@@ -932,12 +1001,14 @@ export class AgentRuntime {
     this.client = micaAgent.createModelClient(this.clientOptions());
     this.client.onText = (text) => {
       if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
+      this.noteTurnTiming({ type: 'output', at: Date.now(), chars: typeof text === 'string' ? text.length : 0 });
       this.emitStatus({ type: 'streaming', startedAt: this.activeRunStartedAt ?? undefined });
       this.events.emit('text', text);
       if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
     };
     this.client.onThinking = (thinking) => {
       if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
+      this.noteTurnTiming({ type: 'output', at: Date.now(), chars: typeof thinking === 'string' ? thinking.length : 0 });
       if (this.currentConfig.provider.protocol === 'openai_responses' && thinking) {
         if (this.thinkingNeedsSeparator) this.pendingThinking += '\n\n';
         this.pendingThinking += thinking;
@@ -948,11 +1019,13 @@ export class AgentRuntime {
       if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
     };
     this.client.onToolCall = (name, args, id) => {
+      this.noteTurnTiming({ type: 'tool-start', at: Date.now(), tool: name, callID: id, displayText: this.toolDisplayText(name, args) });
       this.observeActive({ type: 'tool:call', name, args, id });
       this.emitStatus({ type: 'calling_tool', startedAt: this.activeRunStartedAt ?? undefined, toolNames: [name] });
       this.events.emit('toolCall', { name, args, id });
     };
     this.client.onToolResult = (name, result, id) => {
+      this.noteTurnTiming({ type: 'tool-end', at: Date.now(), callID: id, status: 'completed' });
       this.observeActive({ type: 'tool:result', name, result, id });
       this.events.emit('toolResult', { name, result, id });
       this.emitStatus({ type: 'connecting', startedAt: this.activeRunStartedAt ?? undefined });

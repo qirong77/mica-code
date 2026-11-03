@@ -130,3 +130,22 @@ export function bucketByDay(sessions) {
   }
   return new Map([...map].map(([day, row]) => [day, { ...row, sessions: row.sessionIds.size }]))
 }
+
+/**
+ * 同一批日行，但按「日 × 来源」摊开：每天的柱要能拆成主对话 / 委派 / 插件 / 内核后台。
+ * 只累 token，其它 kind 直接忽略（来源判定收窄在 `usage-source.ts`）。
+ */
+export function bucketByDaySource(sessions) {
+  const map = new Map()
+  for (const s of sessions) {
+    for (const day of s.days || []) {
+      const row = map.get(day.day) || { main: 0, delegation: 0, plugin: 0, helper: 0 }
+      for (const source of day.sources || []) {
+        if (!(source.kind in row)) continue
+        row[source.kind] += Number(source.totalTokens) || 0
+      }
+      map.set(day.day, row)
+    }
+  }
+  return map
+}

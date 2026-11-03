@@ -298,6 +298,36 @@ describe('SessionStore.replaceValidated', () => {
     expect(parsePersistedSession({ ...session, snapshot: { ...session.snapshot, model: 'other' } })?.snapshot.activeTurn).toEqual({ input, committed: false });
   });
 
+  it('drops broken turn timings instead of rejecting the whole session', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const raw = {
+      version: 1,
+      id: 'timed',
+      title: 'Timed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      cwd: '/tmp/project',
+      snapshot: {
+        providerId: 'test',
+        model: 'test-model',
+        effort: 'none',
+        messages: [],
+        conversationMessages: [],
+        usageHistory: [],
+        turnTimings: [
+          null,
+          { startedAt: 2000, endedAt: 2500, outcome: 'completed', segments: [] },
+          { startedAt: 1000, endedAt: 1500, outcome: 'aborted', segments: [{ kind: 'wait', start: 1000, end: 1200 }] },
+          { startedAt: 'x', endedAt: 1 },
+        ],
+      },
+    };
+    const parsed = parsePersistedSession(raw);
+    expect(parsed?.snapshot.turnTimings?.map((record) => record.startedAt)).toEqual([1000, 2000]);
+    // 坏条目只影响「耗时」页签，不该让会话本身读不出来。
+    expect(parsed?.title).toBe('Timed');
+  });
+
   it('parses legacy defaults without mutating the caller value', async () => {
     const { parsePersistedSession } = await import('./sessionStore.js');
     const raw = {

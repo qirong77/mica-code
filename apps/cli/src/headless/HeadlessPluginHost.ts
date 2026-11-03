@@ -266,6 +266,8 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       ? {
           pluginStateSync: {
             host: 'app-server' as const,
+            // 名单一变就对齐；正在跑的一轮里先记下来，等 `turn:after` 再动。
+            canSyncNow: () => !options.isBusy(),
             loadUserPlugins: ({ disabled }: { disabled: string[] }) =>
               micaPlugin.loadUserPlugins(plugins, { pluginsDir: paths.plugins, disabled }),
           },
@@ -430,6 +432,9 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   // 它。`mica exec` 是一次性运行，不装——那边任何定时器/外部命令都会污染一次基准运行。
   // 那一步（含 `plugin-status.json` 的写入）由 manager 按 `pluginStateSync` 一并完成：
   // 启停要在运行期重新走同一条路，写盘不能只发生在启动那一次。
+  // 这个进程装配插件，注册表就是能力的唯一事实来源：关掉配置页那套静态兜底，
+  // 否则停用一个插件之后它的工具仍会从描述里补回来。
+  micaTools.setRuntimeToolFallback(false);
   const setupPromise = plugins.setupAll(baseContext);
 
   const host: HeadlessPluginHost = {

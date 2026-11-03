@@ -3,6 +3,7 @@ import { IconGitBranch } from '@tabler/icons-react'
 import { FilesView } from './FilesView'
 import { BranchPicker } from './BranchPicker'
 import { CwdPicker } from './CwdPicker'
+import { EditorTerminal } from './EditorTerminal'
 import { normalizeCwd } from './cwd-recents'
 import { useIsMobile, useLatest } from './hooks'
 import { useGitWorkspace } from './useGitWorkspace'
@@ -29,6 +30,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
   const cwd = selection?.contextKey === contextKey ? selection.path : root
   const current = useLatest({ contextKey, cwd, visible })
   const filesRef = useRef(null)
+  const terminalRef = useRef(null)
   const branchAnchorRef = useRef(null)
   const cwdAnchorRef = useRef(null)
   const selectionRequest = useRef(0)
@@ -127,6 +129,11 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     await onGitChanged?.()
   }, [current, onGitChanged, refresh])
 
+  // 右键「在终端中打开」：面板归 EditorTerminal 自己管，这里只把目录递过去。
+  const openTerminalAt = useCallback((path) => {
+    terminalRef.current?.openAt(path || null)
+  }, [])
+
   const branch = git.status?.branch
   const branchLabel = branch || (git.status?.root ? 'detached' : null)
   const openPathPicker = () => {
@@ -153,7 +160,10 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
         gitCompareHead={compare?.head || null}
         onGitCompareBaseChange={compare?.head ? onCompareBaseChange : setCompareBase}
         onRefreshGit={() => refresh({ quiet: true, refresh: true })}
+        onOpenTerminal={openTerminalAt}
       />
+      {/* 编辑器终端：Ctrl+` 呼出，右键文件树也能直接落到某个目录。手机上没它的位置。 */}
+      <EditorTerminal ref={terminalRef} cwd={cwd} hidden={!visible || mobile} />
       <footer className="safe-bottom no-drag flex h-7 shrink-0 items-center justify-between gap-4 border-t border-line-soft bg-shade px-3 text-xs text-fg-soft">
         {branchLabel && (
           <button

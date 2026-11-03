@@ -14,6 +14,7 @@ import { basename, resolve } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { deleteBtwState } from '@packages/mica-common/btwState.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
+import { normalizeTurnTimings, type TurnTimingRecord } from '@packages/mica-common/turnTiming.js';
 import type { CapabilitySelection } from '@packages/mica-common/capabilities.js';
 import type { AgentQueryContent, AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
 import {
@@ -84,6 +85,13 @@ export type PersistedRuntimeSnapshot = {
   lastUsage: AgentUsageRecord | undefined;
   /** Subagent task usage appended by the Agent tool; optional for older snapshots. */
   subagentUsageHistory?: SubagentUsageRecord[];
+  /**
+   * 最近若干轮的时间去向（新的在后）。
+   *
+   * 属于会话事实：桌面端与会话详情页读的是它，而不是自己再算一遍。缺少表示这条
+   * 会话还没有记录（早于本字段出现），界面如实说「没有记录」。
+   */
+  turnTimings?: TurnTimingRecord[];
 };
 
 type PersistedThinking = {
@@ -748,6 +756,10 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   if (!Array.isArray(session.snapshot.usageHistory)) return null;
   if (session.snapshot.subagentUsageHistory !== undefined && !Array.isArray(session.snapshot.subagentUsageHistory)) {
     return null;
+  }
+  // 耗时记录是纯展示数据：坏掉的条目丢掉就好，不值得为它拒掉整份会话。
+  if (session.snapshot.turnTimings !== undefined) {
+    session.snapshot.turnTimings = normalizeTurnTimings(session.snapshot.turnTimings);
   }
   // 插件状态缺失允许（没有任何插件写过），存在就必须是普通对象——它是「插件 id →
   // JSON」的映射，别的形状进不了读写路径，只会让每次保存都原样写回脏数据。

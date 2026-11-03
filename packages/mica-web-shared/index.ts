@@ -2,7 +2,7 @@
 // functions only: no React, no runtime deps, so the electron-vite renderer and
 // the runtime bundle can both consume it.
 
-export { relativeTimeShort } from './time.js';
+export { formatElapsed, relativeTimeShort } from './time.js';
 export {
   CONFIG_WEB_PORT_ENV,
   DEFAULT_CONFIG_WEB_PORT,

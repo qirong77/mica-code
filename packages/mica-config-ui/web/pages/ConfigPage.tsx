@@ -3,7 +3,7 @@ import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { ProviderEditor } from '../components/ProviderEditor.js';
 import { SelectMenu } from '../components/SelectMenu.js';
-import { Alert, Button, CollapsiblePanel, SaveStatus, SettingRow, SettingsGroup, Tag } from '../components/Ui.js';
+import { Alert, Button, SaveStatus, SettingRow, SettingsGroup } from '../components/Ui.js';
 import { readConfigFile, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
 import {
@@ -28,7 +28,7 @@ import { useAutoSave } from '../useAutoSave.js';
  *
  * 以前这里是个裸 JSON 编辑器：字段全靠记，写错一个逗号就保存不了。现在按字段编辑——
  * 表单只覆盖有结构的部分（providers、defaultModel），其余内容（mcpServers、
- * capabilityDefaults、未来新增的键）在「直接编辑 JSON」里原样可见可改，写盘时不会丢。
+ * capabilityDefaults、未来新增的键）在右上角的「编辑 JSON」里原样可见可改，写盘时不会丢。
  *
  * 没有保存按钮：改动停下就自动写盘。本地校验不过（必填项没填、JSON 还没写完）时先不写，
  * 页面上照旧提示哪里要修——自动保存的前提是别把一份会让 CLI 起不来的配置落盘。
@@ -38,12 +38,15 @@ export function ConfigPage() {
   const [savedJson, setSavedJson] = useState('');
   const [jsonText, setJsonText] = useState('');
   const [jsonError, setJsonError] = useState<string | null>(null);
+  /** 整份 JSON 编辑：表单与编辑器是同一页的两种形态，切换不丢内容。 */
+  const [jsonMode, setJsonMode] = useState(false);
   const [path, setPath] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(() => new Set());
   const RefreshIcon = appIcons.refresh;
   const AddIcon = appIcons.add;
+  const JsonIcon = appIcons.config;
   const draftRef = useRef<ConfigDraft | null>(null);
 
   const issues = useMemo(() => (draft ? validateConfigDraft(draft) : []), [draft]);
@@ -114,6 +117,8 @@ export function ConfigPage() {
     setJsonText(content);
     setJsonError(result.error);
     setSavedJson(result.draft ? serializeConfigDraft(result.draft) : content);
+    // 磁盘上那份已经解析不了：直接摊开编辑器让人当场改，而不是留一张改不动的表单。
+    if (result.error) setJsonMode(true);
   }
 
   /**
@@ -173,19 +178,28 @@ export function ConfigPage() {
       actions={
         <div className="toolbar">
           <SaveStatus saving={autoSave.saving} saved={autoSave.status === 'saved'} />
+          <Button icon={<JsonIcon size={15} />} onClick={() => setJsonMode((prev) => !prev)}>
+            {jsonMode ? '返回表单' : '编辑 JSON'}
+          </Button>
           <Button icon={<RefreshIcon size={15} />} onClick={() => void load()} loading={loading}>
             重新加载
           </Button>
         </div>
       }
     >
-      <div className="config-page">
+      <div className={`config-page${jsonMode ? ' is-json' : ''}`}>
         {error ? <Alert message={error} /> : null}
         {autoSave.error ? <Alert message={autoSave.error} /> : null}
         {jsonError ? <Alert message={`JSON 无法解析，改好之前不会写盘：${jsonError}`} /> : null}
         {issues.length > 0 ? <Alert message={`还有 ${issues.length} 处需要修正：${issues[0].message}`} /> : null}
         {loading && !draft ? (
           <div className="page-loading">正在加载配置…</div>
+        ) : jsonMode ? (
+          <div className="config-page-body config-page-body-json">
+            <div className="editor-host config-json-host">
+              <JsonEditor value={jsonText} language="json" onChange={applyJsonText} />
+            </div>
+          </div>
         ) : !draft ? null : (
           <div className="config-page-body">
             <SettingsGroup
@@ -296,17 +310,6 @@ export function ConfigPage() {
                 />
               </SettingRow>
             </SettingsGroup>
-
-            <CollapsiblePanel
-              title="直接编辑 JSON"
-              subtitle="整份 config.json，解析通过后表单会同步"
-              defaultOpen={Boolean(jsonError)}
-              meta={jsonError ? <Tag tone="red">解析失败</Tag> : <Tag>可整份替换</Tag>}
-            >
-              <div className="editor-host config-json-host">
-                <JsonEditor value={jsonText} language="json" onChange={applyJsonText} />
-              </div>
-            </CollapsiblePanel>
           </div>
         )}
       </div>

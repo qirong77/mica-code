@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  collectGroupDigests,
   groupSubtreeIds,
   resolveGroupCwd,
   sessionSectionOf,
@@ -66,6 +67,44 @@ describe('groupSubtreeIds', () => {
     expect(groupSubtreeIds(projects, 'root')).toEqual(new Set(['root', 'child']))
     expect(groupSubtreeIds(projects, 'other')).toEqual(new Set(['other']))
     expect(groupSubtreeIds(projects, 'missing')).toEqual(new Set())
+  })
+})
+
+describe('collectGroupDigests', () => {
+  const sessionsOf = new Map([
+    ['root', [{ id: 's1', updatedAtMs: 10 }]],
+    ['child', [{ id: 's2', updatedAtMs: 99 }]]
+  ])
+  const draftsOf = new Map([['child', [{ id: 'd1', text: '还没发出去的话' }]]])
+
+  it('aggregates the whole subtree, most recent first', () => {
+    const digests = collectGroupDigests({
+      projects,
+      sessionsByGroup: sessionsOf,
+      draftsByGroup: draftsOf
+    })
+    expect(digests.get('root')).toEqual({
+      count: 3,
+      latestAt: 99,
+      sessions: [
+        { id: 's2', updatedAtMs: 99 },
+        { id: 's1', updatedAtMs: 10 }
+      ],
+      drafts: [{ id: 'd1', text: '还没发出去的话' }]
+    })
+    // 叶子分组只算自己那一层
+    expect(digests.get('child').count).toBe(2)
+    // 空分组也在表里，只是什么都没有——分组头据此决定画不画摘要
+    expect(digests.get('other').count).toBe(0)
+  })
+
+  it('reports an empty subtree as zero instead of a bogus timestamp', () => {
+    const digests = collectGroupDigests({
+      projects,
+      sessionsByGroup: new Map(),
+      draftsByGroup: new Map()
+    })
+    expect(digests.get('root')).toEqual({ count: 0, latestAt: 0, sessions: [], drafts: [] })
   })
 })
 

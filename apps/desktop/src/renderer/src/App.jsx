@@ -8,7 +8,6 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconMenu2,
   IconMessage,
-  IconNotebook,
   IconPlus,
   IconRocket,
   IconSettings,
@@ -24,11 +23,11 @@ import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
 import { PluginPage } from './PluginPage'
 import { usePluginAttention } from './plugin-attention'
+import { invalidatePluginsDetails } from './plugins-details'
 import { queuePluginLaunch } from './plugin-launch'
 import { SessionTree } from './SessionTree'
 import { SessionQuickOpen } from './SessionQuickOpen'
 import { runSessionMenuPluginAction, useSessionMenuPlugins } from './session-menu-plugins'
-import { SessionNotesDialog } from './SessionNotesDialog'
 import TerminalKeyBar from './TerminalKeyBar'
 import { isElectronShell } from './shell-env'
 import { detachedFilesUrl, readAppUrl, sessionShareUrl, urlWithState } from './app-url'
@@ -81,6 +80,11 @@ import {
   uiStateKeys,
   useUiStateValue
 } from './ui-state'
+import {
+  EDITOR_TERMINAL_KEY,
+  isTerminalToggleShortcut,
+  toggleEditorTerminalOpen
+} from './editor-terminal'
 
 /**
  * 会话列表的轮询间隔。一次返回的全部会话（上千条）要序列化过来，所以只在可见且
@@ -580,8 +584,6 @@ export default function App() {
   // 软键盘弹起时让根容器跟着可见区缩，否则底部输入条/终端键栏会被键盘盖住
   useVisualViewportHeight()
   const [sessionsOpen, setSessionsOpen] = useState(false)
-  // 会话笔记弹窗：按当前会话打开，内容存会话快照（不进对话历史）
-  const [notesOpen, setNotesOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => storedLayout().sidebarCollapsed === true
   )
@@ -589,7 +591,14 @@ export default function App() {
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const sidebarWidthRef = useRef(sidebarWidth)
   const sidebarHidden = sidebarCollapsed
-  const terminalVisible = terminalOpen
+  // 两个视图各有一套底部终端：对话的是会话终端，编辑器的是编辑器终端。同一格里只显示
+  // 当前视图那一个——在编辑器里按下 Ctrl+` 却弹出会话的终端，用户分不清自己在操作谁。
+  // 编辑器那套见 EditorTerminal（开关与它在同一份界面状态里）。
+  const editorTerminal = useUiStateValue(EDITOR_TERMINAL_KEY, null)
+  const editorTerminalOpen = editorTerminal?.open === true
+  const terminalVisible = terminalOpen && view !== 'files'
+  /** 顶栏终端图标与 Ctrl+` 此刻管的是哪一个：编辑器视图里是编辑器终端。 */
+  const activeTerminalOpen = view === 'files' ? editorTerminalOpen : terminalVisible
   // 宽度状态变化时同步到根节点的变量（拖动分隔条期间由拖拽处理直接改写同一变量）
   useLayoutEffect(() => {
     setLayoutVar(SIDEBAR_WIDTH_VAR, `${sidebarHidden ? 0 : sidebarWidth}px`)
@@ -737,7 +746,7 @@ export default function App() {
   // 剪贴板，运行时可能跑在另一台机器上。
   const sessionMenuPlugins = useSessionMenuPlugins()
   // 插件上报的「有件事等人点一下」：只影响侧栏 Plugins 入口上那枚点，点进去就是那个插件。
-  const pluginAttention = usePluginAttention()
+  const { attention: pluginAttention, dismiss: dismissPluginAttention } = usePluginAttention()
   const runSessionMenuAction = useCallback(
     async (target, item) => {
       showToast('正在准备…')
@@ -1454,6 +1463,11 @@ export default function App() {
     if (terminalOpen) setTerminalOpen(false)
     else openTerminalPanel()
   }, [openTerminalPanel, setTerminalOpen, terminalOpen])
+  // 编辑器视图里这一组（顶栏图标、Ctrl+`）管的是编辑器终端，见 EditorTerminal。
+  const toggleActiveTerminal = useCallback(() => {
+    if (view === 'files') toggleEditorTerminalOpen()
+    else toggleTerminalPanel()
+  }, [toggleTerminalPanel, view])
 
   // 终端面板是会话的附属视图：切到还没有终端的会话时补一个，路径即该会话的 cwd，
   // 否则切过去只能看到一片空白。只在面板真正可见时才补，免得用户点过的每个
@@ -1891,6 +1905,20 @@ export default function App() {
     const node = nodes.find((item) => item.id === activeId)
     return node?.sessionId || null
   }, [activeId, nodes])
+  // 插件卡片看到的「当前会话」：身份 + 是不是在跑。内核不知道插件拿它做什么——
+  // 只交出会话级的事实（这一轮什么时候跑完，决定了模型刚写下的状态何时重读）。
+  const pluginSession = useMemo(
+    () =>
+      activeNode
+        ? {
+            id: activeNode.id,
+            sessionId: activeNode.sessionId || activeSessionId || null,
+            cwd: activeNode.cwd || null,
+            running: Boolean(notifications.states?.[activeNode.id]?.running)
+          }
+        : null,
+    [activeNode, activeSessionId, notifications.states]
+  )
   // 打开的会话写进地址栏：刷新、复制地址、换台设备打开都会回到同一个会话，分享链接
   // （`?session=<id>`）也靠它把别人送到同一个会话。只 replaceState（不留历史），其余
   // 参数（`?layout=` 之类）原样保留。
@@ -2067,6 +2095,9 @@ export default function App() {
       if (!target) return false
       queuePluginLaunch(target, { prompt, role: task.role, send: task.send })
       closeConfigPage()
+      // 插件动作常常顺手撤掉自己上报的提示（例如「更新中转机页面」点过就不再挂红点）：
+      // 丢掉缓存让侧栏立刻重算，别等 30 秒轮询。
+      invalidatePluginsDetails()
       return true
     },
     [closeConfigPage, createChatSession]
@@ -2228,18 +2259,19 @@ export default function App() {
     return () => window.removeEventListener('resize', clamp)
   }, [])
   // Ctrl+` 显示/隐藏底部终端面板（顶栏终端图标是同一个入口）。
-  // 只用 Ctrl：macOS 上 Cmd+` 是系统的「切换窗口」快捷键，会被先吞掉。
+  // 编辑器视图里同一条快捷键归编辑器自己的终端，所以那个视图里这里不装监听——
+  // 两个面板各自管各自的显隐，不用在一个地方判断「现在该切谁」。
   useEffect(() => {
+    if (view === 'files') return undefined
     const onKey = (event) => {
-      if (event.repeat || !event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
-      if (event.code !== 'Backquote') return
+      if (!isTerminalToggleShortcut(event)) return
       event.preventDefault()
       event.stopPropagation()
       toggleTerminalPanel()
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [toggleTerminalPanel])
+  }, [toggleTerminalPanel, view])
   // ⌘/Ctrl+P 快速打开会话。编辑器视图里这个组合归文件快速搜索（QuickSearch 在那里
   // 才启用），盖住的弹窗 / 分支选择器打开时也不抢——那时用户面对的是另一个上下文。
   useEffect(() => {
@@ -2359,7 +2391,7 @@ export default function App() {
               </button>
               {/* 插件声明的桌面入口（清单 `desktop.entry` + 插件目录里的 desktop.jsx）：
                   宿主只画一行和一张卡片 / 一层整页，里面是什么由插件决定。 */}
-              <PluginEntries onOpenPage={openPluginPage} />
+              <PluginEntries onOpenPage={openPluginPage} session={pluginSession} />
               {/* 插件入口排在最后：插件是「装进来的能力」，属于调整类入口，和 Server /
                   Settings 一起收在同一列末尾。点它进插件整页（目录 → 点一张卡进详情），
                   不做下拉面板。 */}
@@ -2376,6 +2408,8 @@ export default function App() {
                 className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max"
                 onClick={() => {
                   closeMobileDrawer()
+                  // 点开就算看过了：同一对「本机版 vs 中转机版」只点一次（插件那边点动作也会撤）。
+                  void dismissPluginAttention()
                   openConfigPage('plugins', pluginAttention?.pluginId ?? null)
                 }}
               >
@@ -2510,25 +2544,8 @@ export default function App() {
               {/* 声明了 `desktop.entry.placement: "header"` 的插件入口：与侧栏那一行是
                   同一份数据，这里只画图标，落在这一簇的最左边（窗口类图标仍贴最右）。
                   分享视图不出现在这里——那页本来就没有侧栏，插件入口也跟着一起没有。 */}
-              {!shareView && <PluginHeaderEntries onOpenPage={openPluginPage} />}
-              {/* 会话笔记：本会话的用户/模型共同维护的 markdown，存在会话快照里，
-                  所以压缩不会把它冲掉。窗口类图标按窗口出现，这个是按会话出现。 */}
-              {!shareView && activeNode && (
-                <button
-                  type="button"
-                  title="会话笔记（不会被上下文压缩）"
-                  aria-label="会话笔记"
-                  aria-haspopup="dialog"
-                  aria-expanded={notesOpen}
-                  className={`grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
-                    notesOpen
-                      ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
-                      : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
-                  }`}
-                  onClick={() => setNotesOpen((open) => !open)}
-                >
-                  <IconNotebook size={14} />
-                </button>
+              {!shareView && (
+                <PluginHeaderEntries onOpenPage={openPluginPage} session={pluginSession} />
               )}
               {activeTerminals.map((terminal) => {
                 const owned = isTerminalOwnedByNode(terminal, activeNode)
@@ -2603,15 +2620,15 @@ export default function App() {
               })}
               <button
                 type="button"
-                title={terminalVisible ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
-                aria-label={terminalVisible ? '收起终端' : '展开终端'}
-                aria-pressed={terminalVisible}
+                title={activeTerminalOpen ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
+                aria-label={activeTerminalOpen ? '收起终端' : '展开终端'}
+                aria-pressed={activeTerminalOpen}
                 className={`grid size-6 place-items-center rounded-md transition-colors ${
-                  terminalVisible
+                  activeTerminalOpen
                     ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
                     : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
                 }`}
-                onClick={toggleTerminalPanel}
+                onClick={toggleActiveTerminal}
               >
                 <IconTerminal2 size={14} />
               </button>
@@ -2641,17 +2658,6 @@ export default function App() {
               </button>
             </div>
           </header>
-          {/* 笔记弹窗挂在 App 层：入口在顶栏，弹窗本身按当前会话读写，
-              与对话区的滚动/挂载状态无关（切到 Files / Stats 也能开着）。 */}
-          {notesOpen && activeNode && (
-            <SessionNotesDialog
-              nodeId={activeNode.id}
-              sessionId={activeNode.sessionId || activeSessionId || null}
-              cwd={activeNode.cwd}
-              running={!!notifications.states?.[activeNode.id]?.running}
-              onClose={() => setNotesOpen(false)}
-            />
-          )}
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             {/* ⌘P 快速打开会话：主区顶部的一层浮层，盖住对话区但不盖侧栏。 */}
             {sessionQuickOpen && (

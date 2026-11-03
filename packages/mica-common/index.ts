@@ -161,5 +161,30 @@ export {
 export type { CapabilityKind, CapabilitySelection } from './capabilities.js';
 export { LEGACY_TOOL_NAMES, normalizeToolName } from './toolNames.js';
 export { acquireProcessLock } from './processLock.js';
+export {
+  MAX_TURN_TIMINGS,
+  appendTurnTiming,
+  applyTurnTimingTick,
+  createTurnTimingState,
+  groupPercents,
+  normalizeTurnTimings,
+  summarizeTurnTiming,
+  turnTimingRecord,
+  turnTimingStateFromRecord,
+} from './turnTiming.js';
+export type {
+  TurnTimingGroup,
+  TurnTimingItem,
+  TurnTimingKind,
+  TurnTimingOutcome,
+  TurnTimingRecord,
+  TurnTimingSegment,
+  TurnTimingState,
+  TurnTimingSummary,
+  TurnTimingTick,
+  TurnTimingTimelineItem,
+  TurnTimingToolStatus,
+  TurnTimingToolTotal,
+} from './turnTiming.js';
 
 export { escapePromptXml, wrapPromptXml } from './promptXml.js';
