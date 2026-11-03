@@ -1065,6 +1065,28 @@ const AWAKE_SCRIPT = `(() => {
 `
 
 /**
+ * 删掉 macOS 打包带进来的 `._*` 资源分叉。
+ *
+ * `COPYFILE_DISABLE` 已经在客户端挡了一层，但别的机器（老版本插件、手工打的包）
+ * 仍可能带进来：163 字节一个，跟着资源目录一路铺开，还会被当成静态文件对外提供。
+ */
+function stripAppleDouble(dir) {
+  let removed = 0
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      removed += stripAppleDouble(full)
+      continue
+    }
+    if (entry.name.startsWith('._')) {
+      rmSync(full, { force: true })
+      removed += 1
+    }
+  }
+  return removed
+}
+
+/**
  * 收下一份新的页面产物（gzip 过的 tar），整体替换 `public/`。
  *
  * 只认已登记机器的口令：这条路径会在中转机上落文件，不能给未注册的请求开口子。
@@ -1095,6 +1117,8 @@ async function handlePublish(req, res) {
     rmSync(next, { recursive: true, force: true })
     return sendJson(res, 400, { ok: false, error: '包里没有 index.html' })
   }
+  const junk = stripAppleDouble(next)
+  if (junk) console.log(`[relay] 丢弃 ${junk} 个 ._ 资源分叉`)
 
   precompress(next)
   try {

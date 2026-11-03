@@ -237,6 +237,25 @@ TLS 握手（这台机器到中转机单次握手 290ms），实测反而与旧�
 - 每台机器的结果缓存同时限制为 200 条及 4 MiB（按键与结果的 UTF-8 JSON 字节计）；桥与中转机按同一顺序淘汰，淘汰后的查询重新传完整结果。超过字节预算的单条结果仍返回给调用者，但不保留作去重缓存。
 - 中转机每台机器最多保留 128 个待处理调用；页面断开或调用超时会释放定时器并移除尚未下发的命令。机器清单热重载保留正在挂起的轮询状态，避免一次响应完成后吞掉紧接着到达的命令。
 
+### 小内存中转机的运维底线
+
+中转机跑在一台 464 MB 内存的 VPS 上，`/` 只有 4.8 GB。这类机器的典型故障不是 relay 崩、
+而是**整机假死**：内核还能回 SYN，但所有用户态进程都不再被调度（SSH 连上却不吐 banner，
+HTTPS 握手超时）。查 `dmesg | grep oom-kill` 就能看到真凶。
+
+2026-11 那次是 `unattended-upgrades` 撞上无 swap、journald 又占了 469 MB 磁盘，触发**全局 OOM**。
+现在的中转机上写着这几条，重新部署到小机器时要照抄：
+
+- **swap 必须先补**。512 MB swapfile + `vm.swappiness=40`，写进 `/etc/fstab` 与
+  `/etc/sysctl.d/99-swap.conf`。没有 swap 时一次 `apt` 升级就能把内核逼到全局 OOM。
+- **journald 封顶**：`/etc/systemd/journald.conf.d/99-size.conf` 里 `SystemMaxUse=80M`。默认可以长到
+  几百 MB，在小盘上等于把发布空间吃掉。
+- **apt 关进自己的笼子**：`apt-daily.service` / `apt-daily-upgrade.service` 的 drop-in 里
+  `MemoryMax=200M` + `OOMScoreAdjust=800` + `Nice=19`。超限只杀它自己，不会再拖垮整机。
+- **要活的进程往前提**：`mobile-relay` 用 `MemoryHigh=128M` / `MemoryMax=192M`（实测常驻 77 MB）
+  加 `OOMScoreAdjust=-800`；`ssh.service` 加 `OOMScoreAdjust=-900`，进得去才救得回来。
+- relay 的 `MemoryMax` 别写成比物理内存还大——那不叫限制，只是写了行没作用。
+
 ## 改桥脚本
 
 `agent/bridge.mjs` 是唯一源码；改完跑 `bun scripts/generate-mobile-relay-sources.mjs`

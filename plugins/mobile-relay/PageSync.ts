@@ -86,12 +86,32 @@ async function readRelayPageVersion(relayUrl: string, token: string): Promise<st
   }
 }
 
-/** 打包成 gzip tar；`.br`/`.gz` 是服务端产物，不该跟着上传。 */
+/**
+ * 打包成 gzip tar；`.br`/`.gz` 是服务端产物，不该跟着上传。
+ * `COPYFILE_DISABLE` 挡住 macOS 的 `._*` 资源分叉：不设的话 bsdtar 会把它们
+ * 打进包，中转到 Linux 上就变成一堆 163 字节的垃圾文件跟在资源目录里。
+ */
 async function packRenderer(dir: string): Promise<Buffer> {
   const { stdout } = await execFileAsync(
     'tar',
-    ['-czf', '-', '--exclude=*.br', '--exclude=*.gz', '-C', dir, '.'],
-    { encoding: 'buffer', maxBuffer: MAX_BUNDLE_BYTES, timeout: 180_000 },
+    [
+      '-czf',
+      '-',
+      '--no-mac-metadata',
+      '--no-xattrs',
+      '--exclude=*.br',
+      '--exclude=*.gz',
+      '--exclude=._*',
+      '-C',
+      dir,
+      '.',
+    ],
+    {
+      encoding: 'buffer',
+      maxBuffer: MAX_BUNDLE_BYTES,
+      timeout: 180_000,
+      env: { ...process.env, COPYFILE_DISABLE: '1' },
+    },
   );
   return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout as unknown as string);
 }
