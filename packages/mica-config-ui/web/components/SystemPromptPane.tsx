@@ -7,6 +7,7 @@ import {
   analyzePrompt,
   findPromptNode,
   promptNodePath,
+  promptShareWeights,
   searchPrompt,
   type PromptNode,
 } from '../promptView.js';
@@ -379,6 +380,10 @@ function PromptShareBar({
   onSelect: (node: PromptNode) => void;
 }) {
   if (nodes.length < 2) return null;
+  const weights = promptShareWeights(
+    nodes.map((node) => node.chars),
+    total,
+  );
   return (
     <div className="prompt-share" role="group" aria-label="各模块占全文的比例">
       {nodes.map((node, index) => (
@@ -386,8 +391,8 @@ function PromptShareBar({
           key={node.id}
           type="button"
           className={`prompt-share-seg prompt-share-${index % 5}${selectedId === node.id ? ' is-selected' : ''}`}
-          style={{ flexGrow: Math.max(node.chars, 1), flexBasis: 0 }}
-          title={`${node.label} · ${formatCharCount(node.chars)} 字符 · ${formatShare(node.chars, total)}`}
+          style={{ flexGrow: weights[index] ?? 1, flexBasis: 0 }}
+          title={`${node.label} · ${formatCharCount(node.chars)} 字符 · ${formatShare(node.chars, total)} · 点击查看这一节`}
           aria-label={`${node.label}，${formatShare(node.chars, total)}`}
           onClick={() => onSelect(node)}
         />

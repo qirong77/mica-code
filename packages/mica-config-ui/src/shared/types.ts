@@ -391,6 +391,20 @@ export type ConfigWebPluginAction = {
   tone: 'primary' | 'neutral' | 'danger';
 };
 
+/**
+ * 页面上一个路径的打开结果。
+ *
+ * 失败要能说清原因（日志文件今天还没写、路径被删了、宿主没有窗口可开），所以不用
+ * 布尔值：调用方把 `error` 原样显示给用户，而不是「点了没反应」。
+ */
+export type ConfigWebPathAction = {
+  ok: boolean;
+  /** 打开的目标类型，由宿主按文件系统判定（页面从文本上看不出来）。 */
+  kind?: 'file' | 'directory';
+  path?: string;
+  error?: string;
+};
+
 /** 插件动作的返回：一句给人看的结果，外加一条可以直接点开/复制的地址。 */
 export type ConfigWebPluginActionResult = {
   message: string;

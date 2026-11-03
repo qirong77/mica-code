@@ -218,4 +218,24 @@ describe('base picker choices', () => {
     expect(comparePickerItems(refs, null, 'refs/heads').map((item) => item.name)).toEqual(['main'])
     expect(comparePickerItems(null, null)[0].current).toBe(true)
   })
+
+  test('the target side offers the working tree and keeps the checked-out branch', () => {
+    const refs = {
+      branches: [
+        { ref: 'refs/heads/feature', name: 'feature', current: true },
+        { ref: 'refs/heads/main', name: 'main' }
+      ],
+      tags: [{ ref: 'refs/tags/v1', name: 'v1' }]
+    }
+    const items = comparePickerItems(refs, null, '', { mode: 'head' })
+    expect(items.map((item) => item.name)).toEqual(['工作区', 'feature', 'main', 'v1'])
+    expect(items[0]).toMatchObject({ kind: 'worktree', ref: null, current: true })
+    expect(items[1].hint).toBe('当前检出')
+
+    const picked = comparePickerItems(refs, { kind: 'tag', ref: 'refs/tags/v1' }, '', {
+      mode: 'head'
+    })
+    expect(picked.find((item) => item.current)?.name).toBe('v1')
+    expect(picked[0].current).toBe(false)
+  })
 })

@@ -459,6 +459,7 @@ export const FilesView = forwardRef(function FilesView(
     gitCompareBase,
     gitCompareHead,
     onGitCompareBaseChange,
+    onGitCompareHeadChange,
     gitLoading,
     gitBranch,
     onRefreshGit,
@@ -530,8 +531,10 @@ export const FilesView = forwardRef(function FilesView(
     compareBase: gitCompareBase
   })
 
-  // 带 `?head=` 打开时，页面一进来就是那份对比：切到 Git 比较面板，并把第一个改动文件
-  // 摊开——否则用户看到的是一棵文件树，还得自己找面板、找文件。
+  // 目标分支不是工作区时，这一页就是一份「提交对提交」的对比：切到 Git 比较面板，并把第一个
+  // 改动文件摊开——否则用户看到的是一棵文件树，还得自己找面板、找文件。目标分支来自页面地址
+  // 的 `?head=`，或面板上方那个选择框（按仓库记住）。
+  const compareHeadKey = gitCompareHead?.ref || gitCompareHead?.name || ''
   const autoCompareRef = useRef('')
   // 面板只在进入这份对比时切一次。`review` 每次渲染都是新对象，把它放进依赖里会让
   // 这个 effect 每渲染都跑一遍，用户点活动栏切走又立刻被改回 Git 面板。
@@ -539,19 +542,19 @@ export const FilesView = forwardRef(function FilesView(
   reviewOpenRef.current = review.open
   const reviewPanelRef = useRef('')
   useEffect(() => {
-    if (!gitCompareHead) return
-    if (reviewPanelRef.current !== gitCompareHead) {
-      reviewPanelRef.current = gitCompareHead
+    if (!compareHeadKey) return
+    if (reviewPanelRef.current !== compareHeadKey) {
+      reviewPanelRef.current = compareHeadKey
       setActivePanel('git-tree')
       setGitPreview(true)
     }
-    if (autoCompareRef.current === gitCompareHead) return
+    if (autoCompareRef.current === compareHeadKey) return
     const first = gitBranchChanges?.files?.[0]
     if (!first) return
-    autoCompareRef.current = gitCompareHead
+    autoCompareRef.current = compareHeadKey
     reviewOpenRef.current(first)
     setDiffOpened(true)
-  }, [gitCompareHead, gitBranchChanges])
+  }, [compareHeadKey, gitBranchChanges])
 
   const setTabs = useCallback((updater) => {
     const next = typeof updater === 'function' ? updater(tabsRef.current) : updater
@@ -1768,6 +1771,7 @@ export const FilesView = forwardRef(function FilesView(
             compareBase={gitCompareBase}
             compareHead={gitCompareHead}
             onCompareBaseChange={onGitCompareBaseChange}
+            onCompareHeadChange={onGitCompareHeadChange}
             onRefresh={onRefreshGit}
             selectedPath={review.current?.path}
             onSelectFile={(file, pin = false) => {
@@ -2031,7 +2035,7 @@ export const FilesView = forwardRef(function FilesView(
                 comparisonLabel={
                   isGitTree
                     ? gitCompareHead
-                      ? `${gitBranchChanges?.headLabel || gitCompareHead} · 相对 ${gitBranchChanges?.baseLabel || 'HEAD'}`
+                      ? `${gitBranchChanges?.headLabel || gitCompareHead.name} · 相对 ${gitBranchChanges?.baseLabel || 'HEAD'}`
                       : `${gitBranch || 'HEAD'} · 相对 ${gitBranchChanges?.baseLabel || 'HEAD'}`
                     : selectedDiff?.section === 'staged'
                       ? '暂存的更改'

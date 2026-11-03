@@ -3,6 +3,7 @@ import { PageFrame } from '../components/PageFrame.js';
 import { PluginSettingInput } from '../components/PluginSettingInput.js';
 import { Alert, Button, SaveStatus, SettingRow, SettingsGroup, Switch, Tag } from '../components/Ui.js';
 import { LlmSettingsSection } from '../components/LlmSettingsSection.js';
+import { PathLink } from '../components/PathLink.js';
 import { PluginIcon } from '../pluginIcons.js';
 import {
   openDesktopSettings,
@@ -322,6 +323,15 @@ export function PluginCard({
   const status = pluginRunningStatus(plugin);
   const attention = plugin.state === 'enabled' ? plugin.attention : null;
   const enabled = plugin.state !== 'disabled';
+  // 「运行出错」这种一句话说明不了问题的结论，悬停就能看到插件自己上报的那条。
+  const statusTitle =
+    plugin.health && plugin.health.level !== 'ok'
+      ? [status.label, plugin.health.message, plugin.health.hint].filter(Boolean).join(' · ')
+      : status.label;
+  // 装配成功不写在卡片上：右上角那枚开关已经在说「它在用」，绿色一行只在确实有事要说
+  // （停用、被跳过、加载失败、待配置、尚未加载）时才出现。
+  const showStatus = status.tone !== 'green';
+  const hasFooter = showStatus || plugin.settings.fields.length > 0 || plugin.desktopChecks.length > 0;
   return (
     <div
       className={`plugin-card${plugin.state === 'enabled' ? '' : ' is-inactive'}${attention ? ' has-attention' : ''}`}
@@ -347,17 +357,21 @@ export function PluginCard({
               <span className="plugin-card-attention-text">{attention.text}</span>
             </span>
           ) : null}
-          <span className="plugin-card-foot">
-            <span className={`plugin-card-status is-${status.tone}`} title={status.label}>
-              {status.label}
+          {hasFooter ? (
+            <span className="plugin-card-foot">
+              {showStatus ? (
+                <span className={`plugin-card-status is-${status.tone}`} title={statusTitle}>
+                  {status.label}
+                </span>
+              ) : null}
+              {plugin.settings.fields.length > 0 ? (
+                <span className="plugin-card-note">{plugin.settings.fields.length} 项设置</span>
+              ) : null}
+              {plugin.desktopChecks.length > 0 ? (
+                <span className="plugin-card-note">{plugin.desktopChecks.length} 项运行条件</span>
+              ) : null}
             </span>
-            {plugin.settings.fields.length > 0 ? (
-              <span className="plugin-card-note">{plugin.settings.fields.length} 项设置</span>
-            ) : null}
-            {plugin.desktopChecks.length > 0 ? (
-              <span className="plugin-card-note">{plugin.desktopChecks.length} 项运行条件</span>
-            ) : null}
-          </span>
+          ) : null}
         </span>
       </button>
       {canToggle ? (
@@ -767,7 +781,7 @@ function PluginStatusGroup({ plugin }: { plugin: ConfigWebPlugin }) {
 }
 
 function PluginInfoGroup({ plugin }: { plugin: ConfigWebPlugin }) {
-  const rows: { label: string; value: string; mono?: boolean; title?: string }[] = [
+  const rows: { label: string; value: string; mono?: boolean; title?: string; pathLink?: boolean }[] = [
     { label: '标识', value: plugin.id, mono: true },
     {
       label: '加载',
@@ -777,7 +791,9 @@ function PluginInfoGroup({ plugin }: { plugin: ConfigWebPlugin }) {
     },
     ...(plugin.skipReason ? [{ label: '跳过原因', value: plugin.skipReason, title: plugin.skipReason }] : []),
     { label: '目录', value: plugin.location, mono: true },
-    { label: '日志', value: plugin.logFile, mono: true },
+    // 日志是可以直接看的文件：点开选「在 Finder 中打开」或「在 Mica 中打开」。
+    // 目录这一行不是——官方插件的目录是仓库里的相对路径，装好的应用里根本没有。
+    { label: '日志', value: plugin.logFile, mono: true, pathLink: true },
   ];
   return (
     <SettingsGroup title="信息">
@@ -786,7 +802,7 @@ function PluginInfoGroup({ plugin }: { plugin: ConfigWebPlugin }) {
           <div className="plugin-meta-row" key={row.label}>
             <dt>{row.label}</dt>
             <dd className={row.mono ? 'is-mono' : undefined} title={row.title ?? row.value}>
-              {row.value}
+              {row.pathLink && row.value ? <PathLink path={row.value} /> : row.value}
             </dd>
           </div>
         ))}
@@ -1068,12 +1084,19 @@ export type PluginRunningTone = 'default' | 'green' | 'red' | 'blue';
  *
  * 与开关是两件事——开关说「启用还是停用」，这里说「装配成功没有」。没被任何宿主装配过就
  * 如实说「尚未加载」：官方插件确实随包分发，但「装上了」不等于「这个宿主把它装配成功了」。
+ *
+ * 卡片只在结论不是「已加载」时上屏（详情页信息表照常显示）：正常加载时它与开关说的是
+ * 同一件事，重复一遍只是噪声。
+ *
+ * 「加载失败」只属于装配这一步；插件自己上报的 `error` 是**装配成功之后的运行故障**
+ * （接口连不上、脚本缺失），两者混成一句话会让开关亮着、脚注却写着「加载失败」。
  */
 export function pluginRunningStatus(plugin: ConfigWebPlugin): { label: string; tone: PluginRunningTone } {
   if (plugin.state !== 'enabled') {
     return { label: pluginStateLabel(plugin.state), tone: plugin.state === 'failed' ? 'red' : 'default' };
   }
-  if (plugin.loadStatus === 'failed' || plugin.health?.level === 'error') return { label: '加载失败', tone: 'red' };
+  if (plugin.loadStatus === 'failed') return { label: '加载失败', tone: 'red' };
+  if (plugin.health?.level === 'error') return { label: '运行出错', tone: 'red' };
   if (plugin.health?.level === 'warn') return { label: '待配置', tone: 'blue' };
   // 装配结论连宿主一起读：同一个插件在 TUI 里被跳过、在会话宿主里正常运行都很正常。
   if (plugin.loadStatus === 'loaded' || plugin.loadStatus === 'skipped') {
@@ -1084,7 +1107,7 @@ export function pluginRunningStatus(plugin: ConfigWebPlugin): { label: string; t
 
 function pluginHealthLabel(plugin: ConfigWebPlugin): string {
   if (plugin.state === 'failed') return '加载失败';
-  if (plugin.health?.level === 'error') return '出错';
+  if (plugin.health?.level === 'error') return '运行出错';
   if (plugin.health?.level === 'warn') return '待配置';
   return plugin.state === 'enabled' ? '正常' : '已停用';
 }

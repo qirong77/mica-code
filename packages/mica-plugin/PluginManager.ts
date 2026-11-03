@@ -290,7 +290,8 @@ export class PluginManager {
       ...shared
     } = baseContext;
     const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
-    const health = createPluginHealthStore(plugin.id, { configDir });
+    // 健康状态带上是哪一版写的：升级之后上一版留下的结论不该继续挂在页面上。
+    const health = createPluginHealthStore(plugin.id, { configDir, version: plugin.version });
     /**
      * 注册一条 skill 并把归属记在这个插件名下。
      *

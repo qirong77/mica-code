@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   IconCheck,
+  IconFileDiff,
   IconGitBranch,
   IconGitCompare,
   IconSearch,
@@ -10,8 +11,12 @@ import {
 } from '@tabler/icons-react'
 import { comparePickerItems } from './git-compare-model'
 
-/** A read-only quick pick. The panel owns comparison mode; choosing a ref preserves it. */
-export function GitComparePicker({ cwd, current, onPick, onClose }) {
+/**
+ * A read-only quick pick for one side of the comparison. The panel owns comparison mode; choosing a
+ * ref preserves it. `mode: 'head'` picks the target side, so it offers the working tree on top.
+ */
+export function GitComparePicker({ cwd, current, mode = 'base', onPick, onClose }) {
+  const target = mode === 'head'
   const [refs, setRefs] = useState(null)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
@@ -25,7 +30,10 @@ export function GitComparePicker({ cwd, current, onPick, onClose }) {
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
   const id = useId()
-  const items = useMemo(() => comparePickerItems(refs, current, query), [refs, current, query])
+  const items = useMemo(
+    () => comparePickerItems(refs, current, query, { mode }),
+    [refs, current, query, mode]
+  )
   const commitQuery = query.trim()
   const optionCount = items.length + Number(Boolean(commitQuery))
   const activeIndex = Math.min(active, Math.max(0, optionCount - 1))
@@ -138,6 +146,7 @@ export function GitComparePicker({ cwd, current, onPick, onClose }) {
     }
   }
 
+  const title = target ? '选择目标分支' : '选择比较基线'
   return createPortal(
     <div
       className="fixed inset-0 z-[11000] bg-black/25"
@@ -154,14 +163,18 @@ export function GitComparePicker({ cwd, current, onPick, onClose }) {
         onKeyDown={handleKey}
       >
         <div className="flex h-9 shrink-0 items-center gap-2 px-3">
-          <IconGitCompare size={16} className="text-fg-soft" />
+          {target ? (
+            <IconFileDiff size={16} className="text-fg-soft" />
+          ) : (
+            <IconGitCompare size={16} className="text-fg-soft" />
+          )}
           <span id={`${id}-title`} className="flex-1 text-[12px] font-semibold">
-            选择比较基线
+            {title}
           </span>
           <button
             type="button"
             title="关闭"
-            aria-label="关闭基线选择器"
+            aria-label={target ? '关闭目标分支选择器' : '关闭基线选择器'}
             onClick={onClose}
             className="grid size-6 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
           >
@@ -218,12 +231,18 @@ export function GitComparePicker({ cwd, current, onPick, onClose }) {
         <div
           id={`${id}-options`}
           role="listbox"
-          aria-label="比较基线"
+          aria-label={title}
           className="min-h-0 overflow-y-auto px-1 pb-1"
         >
           {items.map((item, index) => {
             const Icon =
-              item.kind === 'tag' ? IconTag : item.kind === 'auto' ? IconGitCompare : IconGitBranch
+              item.kind === 'tag'
+                ? IconTag
+                : item.kind === 'auto'
+                  ? IconGitCompare
+                  : item.kind === 'worktree'
+                    ? IconFileDiff
+                    : IconGitBranch
             return (
               <div key={item.id} role="presentation">
                 {item.group !== items[index - 1]?.group && (

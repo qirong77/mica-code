@@ -193,33 +193,51 @@ export function compareTreeKey(rows, focusedId, key, collapsed = new Set()) {
   return {}
 }
 
-/** Remote refs are ordinary comparison bases; their labels retain the remote prefix. */
-export function comparePickerItems(refs, current, query = '') {
-  const items = [
-    {
-      id: '__auto__',
-      kind: 'auto',
-      ref: null,
-      name: '自动基线',
-      hint: '自动选择默认分支',
-      group: '比较方式'
-    },
-    {
-      id: '__head__',
-      kind: 'head',
-      ref: 'HEAD',
-      name: 'HEAD',
-      hint: '仅查看未提交的更改',
-      group: '比较方式'
-    }
-  ]
+/**
+ * 比较两头各有一个选择框：`mode: 'base'` 是原分支（左侧），`mode: 'head'` 是目标分支（右侧）。
+ *
+ * 原分支可以选择「自动基线 / HEAD」这类比较方式；目标分支那边「工作区」就是比较方式本身——
+ * 它代表当前检出的文件（也就是以前唯一的那种比较），再往下才是可以挑的分支与标签。
+ * 目标分支会把当前检出的分支也列出来：拿它跟别的分支对比正是这一格最常见的用法。
+ */
+export function comparePickerItems(refs, current, query = '', { mode = 'base' } = {}) {
+  const target = mode === 'head'
+  const items = target
+    ? [
+        {
+          id: '__worktree__',
+          kind: 'worktree',
+          ref: null,
+          name: '工作区',
+          hint: '当前检出的文件（含未提交）',
+          group: '比较方式'
+        }
+      ]
+    : [
+        {
+          id: '__auto__',
+          kind: 'auto',
+          ref: null,
+          name: '自动基线',
+          hint: '自动选择默认分支',
+          group: '比较方式'
+        },
+        {
+          id: '__head__',
+          kind: 'head',
+          ref: 'HEAD',
+          name: 'HEAD',
+          hint: '仅查看未提交的更改',
+          group: '比较方式'
+        }
+      ]
   const seen = new Set()
   for (const [collection, fallback] of [
     [refs?.branches, 'branch'],
     [refs?.tags, 'tag']
   ]) {
     for (const entry of collection || []) {
-      if (entry.current || !entry.ref || seen.has(entry.ref)) continue
+      if ((entry.current && !target) || !entry.ref || seen.has(entry.ref)) continue
       seen.add(entry.ref)
       const remote = entry.kind === 'remote' || entry.ref.startsWith('refs/remotes/')
       items.push({
@@ -227,7 +245,7 @@ export function comparePickerItems(refs, current, query = '') {
         kind: fallback,
         ref: entry.ref,
         name: entry.name || entry.ref,
-        hint: entry.subject || '',
+        hint: entry.current ? '当前检出' : entry.subject || '',
         group: fallback === 'tag' ? '标签' : remote ? '远程分支' : '本地分支'
       })
     }
@@ -241,6 +259,8 @@ export function comparePickerItems(refs, current, query = '') {
     )
     .map((item) => ({
       ...item,
-      current: (current?.kind || 'auto') === item.kind && (current?.ref || null) === item.ref
+      current:
+        (current?.kind || (target ? 'worktree' : 'auto')) === item.kind &&
+        (current?.ref || null) === item.ref
     }))
 }

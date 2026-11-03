@@ -664,7 +664,11 @@ ctx.desktop.sessionMenu({
 插件自身的故障要能被用户看见，而不是只落在日志里：
 
 - `ctx.health.report({ level: 'warn' | 'error', message, hint })` 写
-  `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「待配置 / 出错」以及原因。
+  `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「待配置 / 运行出错」以及原因。
+  记录带上是哪一版插件写的，版本一变它就不作数：上一版留下的「连不上 X」不能继续挂在
+  页面上让人去修一个已经不存在的问题（`readPluginHealth(..., { version })`）。
+- 装配失败（setup 抛错、入口加载不了）不是健康状态：那条走 `plugin-status.json`，
+  卡片上写「加载失败」。两者混成一句话会出现「开关亮着、脚注却写着加载失败」。
 - 只上报插件自己的状态：缺宿主能力由宿主记进 `plugin-status.json` 的 `skipped`，
   不要为了让页面「显示点什么」替宿主写一条健康状态。
 - 缺配置、外部服务拒绝、上一次请求失败，都属于必须上报的情况。

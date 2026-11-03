@@ -567,12 +567,9 @@ export function SessionTree({
     }
   }, [groupDigests, pinned, projects, recentCandidates, rootDrafts])
 
-  // 草稿一律排在 Recent 顶部：新建但还没落盘的会话就是这个分区里最新的一条，沉到
-  // updatedAt 排出来的列表末尾等同于「新对话丢了」。当前选中的那条仍在最前。
-  const recentDrafts = useMemo(
-    () => orderRecentDrafts(rootDrafts, selectedId),
-    [rootDrafts, selectedId]
-  )
+  // 草稿一律排在 Recent 顶部（新建但还没落盘的会话沉到 updatedAt 排出来的列表末尾
+  // 等同于「新对话丢了」），彼此之间的顺序固定为页签创建顺序：点哪一条都不重排。
+  const recentDrafts = useMemo(() => orderRecentDrafts(rootDrafts), [rootDrafts])
 
   const sectionOpen = (name) => !collapsedSections[name]
   const toggleSection = (name) => setCollapsedSections((prev) => ({ ...prev, [name]: !prev[name] }))

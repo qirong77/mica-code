@@ -8,6 +8,8 @@ import {
   USAGE_KIND_ORDER as SOURCE_ORDER
 } from './usage-series'
 import { USAGE_SOURCE_LABELS } from '@packages/mica-web-shared/usage-source.js'
+import { usePluginsDetails } from '../plugins-details'
+import { groupSourceRows } from './source-groups'
 import {
   addDays,
   calendarGrid,
@@ -594,26 +596,16 @@ function ByModelCard({ scoped }) {
 }
 
 /**
- * 按来源聚合。每一类用量都在这张表里：主对话、委派出去的子代理、插件自己的请求
- * （含插件起的后台任务）与内核自带的后台请求。分成两张卡（By subagent / By plugin）
- * 曾经贴切，但委派本身就是插件提供的，界线不再成立——用户要的是「一共花了多少、
- * 花在谁身上」。
+ * 按来源聚合：先把这笔用量按「谁花的」分组（主 APP / 插件 / 委派子代理），再在组里
+ * 列出每一条来源。插件行用清单里的插件名，副标题保留原始 id——用户要找的是「哪个插件」，
+ * 而不是一串 kind（分组与命名见 `./source-groups`）。
  */
-// 一行来源的副标题：会话数 + 委派任务数 + 用途。委派行的用途是每个任务的 prompt 摘要
-// （十几个任务拼起来就是一大段），所以委派只报任务数，插件/内核才列用途。
-function sourceRowDetail(row) {
-  const parts = []
-  if (row.sessions > 0) parts.push(`${row.sessions} sessions`)
-  if (row.kind === 'delegation') {
-    if (row.tasks > 0) parts.push(`${row.tasks} tasks`)
-  } else if (row.purposes.length > 0) {
-    const shown = row.purposes.slice(0, 2).join(' / ')
-    parts.push(row.purposes.length > 2 ? `${shown} +${row.purposes.length - 2}` : shown)
-  }
-  return parts.join(' · ')
-}
-
 function BySourceCard({ scoped }) {
+  const plugins = usePluginsDetails()
+  const pluginNames = useMemo(
+    () => new Map(plugins.map((plugin) => [plugin.id, plugin.name])),
+    [plugins]
+  )
   const rows = useMemo(() => {
     const map = new Map()
     for (const s of scoped) {
@@ -658,7 +650,7 @@ function BySourceCard({ scoped }) {
   }, [scoped])
 
   if (rows.length === 0) return null
-  const totalTokens = rows.reduce((sum, row) => sum + row.totalTokens, 0)
+  const { total: totalTokens, groups } = groupSourceRows(rows, { pluginNames })
 
   return (
     <section className={`${CARD_CLASS} p-4`}>
@@ -666,90 +658,114 @@ function BySourceCard({ scoped }) {
         <h2 className={OVERLINE_CLASS}>By source</h2>
         <span className="text-[11px] text-fg-faint">{rows.length} sources</span>
       </header>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] table-fixed text-[13px]">
-          <colgroup>
-            <col className="w-[40%]" />
-            <col className="w-[14%]" />
-            <col className="w-[15%]" />
-            <col className="w-[15%]" />
-            <col className="w-[16%]" />
-          </colgroup>
-          <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-left font-normal">
-                Source
-              </th>
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
-                Requests
-              </th>
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
-                Input
-              </th>
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
-                Output
-              </th>
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
-                Share
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.key} className="border-t border-line">
-                <td className="py-1 pr-3">
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <span
-                      aria-hidden
-                      className="size-2 shrink-0 rounded-full"
-                      style={{ background: SOURCE_COLORS[row.kind] }}
-                    />
-                    <span
-                      className="min-w-0 truncate text-xs text-fg-strong"
-                      title={row.kind === 'main' ? 'Main conversation' : row.id}
-                    >
-                      {row.kind === 'main' ? 'Main conversation' : row.id}
+      <table className="w-full table-fixed text-[13px]">
+        <colgroup>
+          <col className="w-[40%]" />
+          <col className="w-[13%]" />
+          <col className="w-[14%]" />
+          <col className="w-[14%]" />
+          <col className="w-[19%]" />
+        </colgroup>
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
+            <th scope="col" className="whitespace-nowrap pb-1.5 text-left font-normal">
+              Source
+            </th>
+            <th scope="col" className="whitespace-nowrap pb-1.5 pr-3 text-right font-normal">
+              Requests
+            </th>
+            <th scope="col" className="whitespace-nowrap pb-1.5 pr-3 text-right font-normal">
+              Input
+            </th>
+            <th scope="col" className="whitespace-nowrap pb-1.5 pr-3 text-right font-normal">
+              Output
+            </th>
+            <th scope="col" className="whitespace-nowrap pb-1.5 pr-3 text-right font-normal">
+              Share
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((group) => (
+            <Fragment key={group.key}>
+              <tr className="border-t border-line">
+                <td colSpan={4} className="pb-1 pt-2">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.1em] text-fg-dim">
+                      {group.label}
                     </span>
-                    <span className="shrink-0 rounded-[3px] bg-panel-hi px-1.5 py-0.5 text-[10px] text-fg-dim">
-                      {USAGE_SOURCE_LABELS[row.kind]}
+                    <span className="min-w-0 truncate text-[11px] text-fg-faint tabular-nums">
+                      {group.rows.length} 项 · {tokensShort(group.tokens)} tokens
                     </span>
                   </div>
-                  <span className="mt-0.5 block truncate pl-3.5 text-[11px] text-fg-faint">
-                    {sourceRowDetail(row)}
-                  </span>
                 </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {row.requests.toLocaleString()}
-                </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {tokensShort(row.inputTokens)}
-                </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {tokensShort(row.outputTokens)}
-                </td>
-                <td className="py-1 pr-3 text-right">
+                <td className="pb-1 pr-3 pt-2 text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <div className="h-[5px] w-16 overflow-hidden rounded-full bg-panel-hi">
+                    <div className="h-[4px] min-w-0 flex-1 overflow-hidden rounded-full bg-panel-hi">
                       <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${totalTokens > 0 ? (row.totalTokens / totalTokens) * 100 : 0}%`,
-                          background: SOURCE_COLORS[row.kind]
-                        }}
+                        className="h-full rounded-full bg-fg-dim"
+                        style={{ width: `${group.share * 100}%` }}
                       />
                     </div>
-                    <span className="w-10 shrink-0 text-right font-mono text-[11px] text-fg-faint tabular-nums">
-                      {totalTokens > 0
-                        ? `${((row.totalTokens / totalTokens) * 100).toFixed(1)}%`
-                        : '—'}
+                    <span className="w-10 shrink-0 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                      {(group.share * 100).toFixed(1)}%
                     </span>
                   </div>
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              {group.rows.map((row) => (
+                <tr key={row.key} className="border-t border-line">
+                  <td className="py-1 pr-3">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <span
+                        aria-hidden
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ background: row.color }}
+                      />
+                      <span className="min-w-0 truncate text-xs text-fg-strong" title={row.title}>
+                        {row.title}
+                      </span>
+                    </div>
+                    <span
+                      className="mt-0.5 block truncate pl-3.5 text-[11px] text-fg-faint"
+                      title={row.detail}
+                    >
+                      {row.detail}
+                    </span>
+                  </td>
+                  <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                    {row.requests.toLocaleString()}
+                  </td>
+                  <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                    {tokensShort(row.inputTokens)}
+                  </td>
+                  <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                    {tokensShort(row.outputTokens)}
+                  </td>
+                  <td className="py-1 pr-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-panel-hi">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${totalTokens > 0 ? (row.totalTokens / totalTokens) * 100 : 0}%`,
+                            background: row.color
+                          }}
+                        />
+                      </div>
+                      <span className="w-10 shrink-0 text-right font-mono text-[11px] text-fg-faint tabular-nums">
+                        {totalTokens > 0
+                          ? `${((row.totalTokens / totalTokens) * 100).toFixed(1)}%`
+                          : '—'}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
     </section>
   )
 }
@@ -869,17 +885,49 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
   )
 }
 
-const SORT_KEYS = [
-  ['lastActivity', 'Last activity'],
-  ['requests', 'Requests'],
-  ['tokens', 'Tokens'],
-  ['cacheRate', 'Cache hit']
-]
-
+/**
+ * 明细表的列。这张表与其他几张一样**不横向滚动**：宽度按百分比分给各列，窄容器下先让
+ * 次要列退出（模型、缓存命中率），而不是让整张表左右滑——同一个页面上有的表能滑、
+ * 有的不能，读起来像坏了。`stats-col-*` 的规则在 app.css，按卡片宽度判断，不看视口。
+ */
 const SESSION_COLUMNS = [
-  ['session', 'Session', false],
-  ['model', 'Model', false],
-  ...SORT_KEYS.map(([key, label]) => [key, label, true])
+  { key: 'session', label: 'Session', width: 'w-[32%]' },
+  { key: 'model', label: 'Model', width: 'w-[16%]', narrow: 'stats-col-secondary' },
+  {
+    key: 'lastActivity',
+    label: 'Last activity',
+    // 窄卡片里模型列先退场，这一列只剩 79px：表头 nowrap 会压到 Requests 上，
+    // 所以窄容器换一个短标签（规则在 app.css）。
+    narrowLabel: 'Activity',
+    narrow: 'stats-col-activity',
+    width: 'w-[12%]',
+    sortable: true
+  },
+  {
+    key: 'requests',
+    label: 'Requests',
+    narrow: 'stats-col-requests',
+    width: 'w-[9%]',
+    align: 'right',
+    sortable: true
+  },
+  {
+    key: 'tokens',
+    label: 'Tokens',
+    narrow: 'stats-col-tokens',
+    width: 'w-[12%]',
+    align: 'right',
+    sortable: true
+  },
+  {
+    key: 'cacheRate',
+    label: 'Cache hit',
+    width: 'w-[10%]',
+    align: 'right',
+    sortable: true,
+    narrow: 'stats-col-tertiary'
+  },
+  { key: 'detail', label: '详情', narrow: 'stats-col-detail', width: 'w-[9%]', align: 'right' }
 ]
 
 /** 按会话明细表（可排序、分批），每行可打开详情弹窗 */
@@ -926,115 +974,110 @@ function BySessionCard({ scoped, onDetail }) {
   }
 
   return (
-    <section className={`${CARD_CLASS} p-4`}>
+    <section className={`${CARD_CLASS} stats-table-scope p-4`}>
       <header className="mb-2 flex items-center justify-between">
         <h2 className={OVERLINE_CLASS}>By session</h2>
         <span className="text-[11px] text-fg-faint">{sorted.length} sessions</span>
       </header>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[940px] table-fixed text-[13px]">
-          <colgroup>
-            <col className="w-[31%]" />
-            <col className="w-[15%]" />
-            <col className="w-[13%]" />
-            <col className="w-[9%]" />
-            <col className="w-[12%]" />
-            <col className="w-[12%]" />
-            <col className="w-[8%]" />
-          </colgroup>
-          <thead>
-            <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
-              {SESSION_COLUMNS.map(([key, label, sortable]) => (
-                <th
-                  key={key}
-                  scope="col"
-                  className={`whitespace-nowrap pb-1.5 font-normal ${
-                    key === 'requests' || key === 'tokens' || key === 'cacheRate'
-                      ? 'text-right'
-                      : 'text-left'
-                  }`}
-                >
-                  {sortable ? (
-                    <button
-                      type="button"
-                      onClick={() => toggle(key)}
-                      className={`inline-flex items-center gap-0.5 uppercase transition-colors hover:text-fg-strong ${
-                        sortKey === key ? 'text-fg' : ''
-                      }`}
-                    >
-                      {label}
-                      {sortKey === key && <span className="text-[8px]">{desc ? '▼' : '▲'}</span>}
-                    </button>
-                  ) : (
-                    label
-                  )}
-                </th>
-              ))}
-              <th scope="col" className="whitespace-nowrap pb-1.5 text-right font-normal">
-                详情
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {top.map((s) => (
-              <tr key={s.id} className="border-t border-line">
-                <td className="py-1 pr-3">
-                  <span className="block truncate text-xs text-fg-strong" title={s.cwd}>
-                    {s.title || basename(s.cwd)}
-                  </span>
-                  <span className="mt-0.5 block truncate text-[11px] text-fg-faint">
-                    {basename(s.cwd)} · {s.id ? s.id.slice(0, 8) : ''}
-                    {Number(s.delegationTasks) > 0 && (
-                      <span className="text-warn-soft"> · {s.delegationTasks} delegated</span>
-                    )}
-                    {Number(s.pluginRequests) > 0 && (
-                      <span className="text-fg-faint"> · {s.pluginRequests} plugin</span>
-                    )}
-                  </span>
-                </td>
-                <td className="py-1 pr-3">
-                  <span
-                    className="block truncate font-mono text-[11px] text-fg-muted"
-                    title={s.model}
-                  >
-                    {s.model || '—'}
-                  </span>
-                </td>
-                <td className="py-1 pr-3 text-[11px] text-fg-muted tabular-nums">
-                  {agoShort(s.updatedAtMs, now)}
-                </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {s.requests.toLocaleString()}
-                </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  <span className="relative inline-block min-w-[3.5rem] text-right">
-                    <span
-                      aria-hidden
-                      className="absolute inset-y-0 right-0 rounded-[2px] bg-overlay"
-                      style={{ width: `${maxTokens > 0 ? (s.totalTokens / maxTokens) * 100 : 0}%` }}
-                    />
-                    <span className="relative">{tokensShort(s.totalTokens)}</span>
-                  </span>
-                </td>
-                <td className="py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
-                  {s.inputTokens > 0
-                    ? `${((s.cachedInputTokens / s.inputTokens) * 100).toFixed(0)}%`
-                    : '—'}
-                </td>
-                <td className="py-1 pr-3 text-right">
+      <table className="w-full table-fixed text-[13px]">
+        <thead>
+          <tr className="text-[10px] uppercase tracking-wide text-fg-faint">
+            {SESSION_COLUMNS.map((column) => (
+              <th
+                key={column.key}
+                scope="col"
+                className={`whitespace-nowrap pb-1.5 font-normal ${column.width} ${
+                  column.align === 'right'
+                    ? `text-right${column.key === 'detail' ? '' : ' pr-3'}`
+                    : 'text-left'
+                } ${column.narrow || ''}`}
+              >
+                {column.sortable ? (
                   <button
                     type="button"
-                    onClick={() => onDetail(s.id)}
-                    className="rounded-[4px] border border-line bg-panel-hi px-2 py-0.5 text-[11px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg-strong"
+                    onClick={() => toggle(column.key)}
+                    className={`inline-flex items-center gap-0.5 uppercase transition-colors hover:text-fg-strong ${
+                      sortKey === column.key ? 'text-fg' : ''
+                    }`}
                   >
-                    查看详情
+                    {column.narrowLabel ? (
+                      <>
+                        <span className="stats-label-wide">{column.label}</span>
+                        <span className="stats-label-narrow">{column.narrowLabel}</span>
+                      </>
+                    ) : (
+                      column.label
+                    )}
+                    {sortKey === column.key && (
+                      <span className="text-[8px]">{desc ? '▼' : '▲'}</span>
+                    )}
                   </button>
-                </td>
-              </tr>
+                ) : (
+                  column.label
+                )}
+              </th>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </tr>
+        </thead>
+        <tbody>
+          {top.map((s) => (
+            <tr key={s.id} className="border-t border-line">
+              <td className="py-1 pr-3">
+                <span className="block truncate text-xs text-fg-strong" title={s.cwd}>
+                  {s.title || basename(s.cwd)}
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] text-fg-faint">
+                  {basename(s.cwd)} · {s.id ? s.id.slice(0, 8) : ''}
+                  {Number(s.delegationTasks) > 0 && (
+                    <span className="text-warn-soft"> · {s.delegationTasks} delegated</span>
+                  )}
+                  {Number(s.pluginRequests) > 0 && (
+                    <span className="text-fg-faint"> · {s.pluginRequests} plugin</span>
+                  )}
+                </span>
+              </td>
+              <td className="stats-col-secondary py-1 pr-3">
+                <span
+                  className="block truncate font-mono text-[11px] text-fg-muted"
+                  title={s.model}
+                >
+                  {s.model || '—'}
+                </span>
+              </td>
+              <td className="stats-col-activity whitespace-nowrap py-1 pr-3 text-[11px] text-fg-muted tabular-nums">
+                {agoShort(s.updatedAtMs, now)}
+              </td>
+              <td className="stats-col-requests py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                {s.requests.toLocaleString()}
+              </td>
+              <td className="stats-col-tokens py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                <span className="relative inline-block min-w-[3.5rem] text-right">
+                  <span
+                    aria-hidden
+                    className="absolute inset-y-0 right-0 rounded-[2px] bg-overlay"
+                    style={{ width: `${maxTokens > 0 ? (s.totalTokens / maxTokens) * 100 : 0}%` }}
+                  />
+                  <span className="relative">{tokensShort(s.totalTokens)}</span>
+                </span>
+              </td>
+              <td className="stats-col-tertiary py-1 pr-3 text-right font-mono text-[11px] text-fg-muted tabular-nums">
+                {s.inputTokens > 0
+                  ? `${((s.cachedInputTokens / s.inputTokens) * 100).toFixed(0)}%`
+                  : '—'}
+              </td>
+              <td className="stats-col-detail py-1 text-right">
+                <button
+                  type="button"
+                  onClick={() => onDetail(s.id)}
+                  className="whitespace-nowrap rounded-[4px] border border-line bg-panel-hi px-1.5 py-0.5 text-[11px] text-fg-muted transition-colors hover:border-line-strong hover:text-fg-strong"
+                >
+                  详情
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       {rest > 0 && (
         <button
           type="button"

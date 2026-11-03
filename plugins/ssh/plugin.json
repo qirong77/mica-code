@@ -3,7 +3,7 @@
   "name": "SSH",
   "description": "操作远端服务器：主机清单、指纹固定、批量只读查询与持久 shell 会话",
   "version": "0.1.0",
-  "icon": "terminal",
+  "icon": "server",
   "main": "index.ts",
   "priority": 40,
   "requires": ["tools", "prompt", "settings", "desktop"],

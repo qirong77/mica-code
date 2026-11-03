@@ -68,7 +68,8 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         actions: manifest.actions,
         desktopPanel: manifest.desktopPanel,
         desktopSessionMenu: manifest.desktopSessionMenu,
-        health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot }),
+        // 带上这一版的版本号：上一版插件上报的结论不算数（见 plugin-health 的约定）。
+        health: micaPlugin.readPluginHealth(manifest.id, { configDir: configRoot, version: manifest.version }),
         logFile: micaPlugin.pluginLogPath(manifest.id),
         loadStatus: status?.status,
         loadHost: status ? lastRun.host : undefined,
@@ -107,7 +108,11 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         // 面板反过来是数据驱动的，所以用户插件声明了就有。
         desktopPanel: plugin.desktopPanel,
         desktopSessionMenu: plugin.desktopSessionMenu ?? [],
-        health: micaPlugin.readPluginHealth(plugin.id, { configDir: configRoot }),
+        health: micaPlugin.readPluginHealth(plugin.id, {
+          configDir: configRoot,
+          // 与上面一行的 version 字段同一份值：页面上写的是哪一版，就要哪一版上报的结论。
+          version: plugin.version ?? '0.0.0',
+        }),
         logFile: micaPlugin.pluginLogPath(plugin.id),
         loadStatus: status?.status,
         loadHost: status ? lastRun.host : undefined,

@@ -63,6 +63,14 @@ export { DateField } from './components/DateField.js';
 export { PluginSettingInput } from './components/PluginSettingInput.js';
 
 /**
+ * 文件路径链接：点开选「在 Finder 中打开 / 在 Mica 中打开」，⌘ 点击直接进编辑器。
+ *
+ * 两个动作都由宿主注册（`ConfigWebClient.revealPath` / `openPathInEditor`）；
+ * 浏览器宿主没有窗口可开，路径退回纯文本。
+ */
+export { PathLink } from './components/PathLink.js';
+
+/**
  * 下拉的唯一实现：设置页与桌面端工具栏共用。
  *
  * 原生 `<select>` 的弹层由系统绘制，位置与样式不受页面控制，几百个分支时还会铺满

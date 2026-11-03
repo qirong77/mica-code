@@ -1,13 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { setUiStateEntries, uiStateKeys, useUiStateValue } from './ui-state'
 import { useLatest } from './hooks'
 
 /**
  * Git data for an editor page's own directory. Comparison preferences are shared by repository,
  * while the directory and request lifecycle belong to this page, independently of its session.
+ *
+ * 比较的两头都按仓库记住：`gitCompareBase` 是原分支（旧的一侧），`gitCompareHead` 是目标分支
+ * （右侧），后者缺省为工作区。换掉目标分支只是把这一页切成「提交对提交」，不碰会话。
  */
 const EMPTY_COMPARE_BASES = {}
 const readCompareBases = () => uiStateKeys().gitCompareBase || EMPTY_COMPARE_BASES
+const readCompareHeads = () => uiStateKeys().gitCompareHead || EMPTY_COMPARE_BASES
 const POLL_MS = 3000
 
 const EMPTY_GIT = {
@@ -23,6 +27,7 @@ const EMPTY_GIT = {
 
 export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
   const compareBases = useUiStateValue('gitCompareBase', EMPTY_COMPARE_BASES)
+  const compareHeads = useUiStateValue('gitCompareHead', EMPTY_COMPARE_BASES)
   const cwdRef = useLatest(cwd)
   const enabledRef = useLatest(enabled)
   // 评审模式：`head` 非空就只读提交（`ref-summary`），工作区一概不参与。
@@ -38,11 +43,13 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
       if (!enabledRef.current || target !== (cwdRef.current || null)) return
       const request = ++requestRef.current
       const bases = readCompareBases()
+      const heads = readCompareHeads()
       const isCurrent = () =>
         enabledRef.current &&
         request === requestRef.current &&
         target === (cwdRef.current || null) &&
-        bases === readCompareBases()
+        bases === readCompareBases() &&
+        heads === readCompareHeads()
       if (!target) {
         setGit(EMPTY_GIT)
         return
@@ -60,9 +67,17 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
         if (!isCurrent()) return
         const root = summary?.repository?.root || target
         const chosen = bases[root] || bases[target]
-        const review = compareRef.current?.head ? compareRef.current : null
+        const chosenHead = heads[root] || heads[target]
+        // 页面地址带来的那份对比优先：这一页打开时就是它（插件的评审入口）。
+        const review = compareRef.current?.head
+          ? { base: compareRef.current.base || null, head: compareRef.current.head }
+          : chosenHead?.ref
+            ? { base: chosen?.ref || null, head: chosenHead.ref }
+            : null
         // Keep the polling guard until both reads finish, even if either one rejects.
         // 评审模式不抓 status：两边都在提交里，未提交改动与「当前检出哪条分支」都不相关。
+        // 只有页面地址带来的评审窗口才省掉它——那一页的目录可能是别处的副本，甚至已经不在了；
+        // 本页自己选的目标分支仍要读 status，否则底部那条「当前分支」会凭空消失。
         const results = await Promise.allSettled([
           review
             ? window.mica.git.refSummary(target, {
@@ -73,7 +88,9 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
                 target,
                 chosen ? { base: chosen.ref || null, direct: !!chosen.direct } : undefined
               ),
-          review ? Promise.resolve({ status: null }) : window.mica.git.status(target)
+          compareRef.current?.head
+            ? Promise.resolve({ status: null })
+            : window.mica.git.status(target)
         ])
         if (!isCurrent()) return
         const failed = results.find((result) => result.status === 'rejected')
@@ -130,23 +147,63 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
     [cwdRef, gitRef]
   )
 
+  // 目标分支：`null`（或选择器里的「工作区」）就是把右侧放回工作区。
+  const setCompareHead = useCallback(
+    (value) => {
+      const target = cwdRef.current || null
+      if (!target) return
+      const current = gitRef.current
+      const root = (current.cwd === target && current.repository?.root) || target
+      const before = readCompareHeads()
+      setUiStateEntries('gitCompareHead', {
+        [root]:
+          value && value.kind !== 'worktree' && (value.ref || value.name)
+            ? { kind: value.kind, ref: value.ref || null, name: value.name || '' }
+            : null,
+        ...(root !== target ? { [target]: null } : {})
+      })
+      if (before === readCompareHeads()) return
+      setGit((previous) => ({
+        ...(previous.cwd === target ? previous : EMPTY_GIT),
+        cwd: target,
+        branch: null,
+        compareError: null,
+        loading: true
+      }))
+    },
+    [cwdRef, gitRef]
+  )
+
   const activeGit =
     git.cwd === (cwd || null) ? git : { ...EMPTY_GIT, cwd: cwd || null, loading: !!cwd }
   const root = activeGit.repository?.root
   const compareBase = cwd ? (root && compareBases[root]) || compareBases[cwd] || null : null
+  // 目标分支固定成同一个对象：`FilesView` 靠它的身份认「这是不是另一份对比」。
+  const urlCompareHead = useMemo(
+    () => (compare?.head ? { kind: 'branch', ref: compare.head, name: compare.head } : null),
+    [compare?.head]
+  )
+  const compareHead = useMemo(
+    () =>
+      cwd ? urlCompareHead || (root && compareHeads[root]) || compareHeads[cwd] || null : null,
+    [cwd, urlCompareHead, root, compareHeads]
+  )
 
   useEffect(() => {
     if (enabled) void refresh({ cwd: cwd || null })
     return () => {
       requestRef.current += 1
     }
-  }, [cwd, compareBases, enabled, refresh, compare?.base, compare?.head])
+  }, [cwd, compareBases, compareHeads, enabled, refresh, compare?.base, compare?.head])
 
   useEffect(() => {
     if (!enabled) return undefined
     const poll = async () => {
-      // 评审模式读的是提交：除非换基线，内容不会自己变，不必轮询。
+      // 评审模式读的是提交：除非换分支，内容不会自己变，不必轮询。
       if (compareRef.current?.head) return
+      const heads = readCompareHeads()
+      const active = gitRef.current
+      if (heads[active.repository?.root] || heads[active.cwd] || heads[cwdRef.current]) return
       if (inFlightRef.current) return
       if (document.visibilityState !== 'visible' || !document.hasFocus()) return
       await refresh({ quiet: true })
@@ -163,7 +220,7 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
       window.removeEventListener('focus', refreshNow)
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [enabled, refresh, compareRef])
+  }, [enabled, refresh, compareRef, cwdRef, gitRef])
 
-  return { git: activeGit, compareBase, refresh, setCompareBase }
+  return { git: activeGit, compareBase, compareHead, refresh, setCompareBase, setCompareHead }
 }

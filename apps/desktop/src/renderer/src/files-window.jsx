@@ -51,6 +51,11 @@ export function FilesWindow() {
     setCompare((current) => (current ? { ...current, base: value?.ref || null } : current))
   }, [])
 
+  // 改目标分支同理；切回「工作区」等于这份对比结束了，窗口回落到普通编辑器。
+  const changeCompareHead = useCallback((value) => {
+    setCompare((current) => (value?.ref ? { ...(current || {}), head: value.ref } : null))
+  }, [])
+
   const askText = useCallback(
     (title, initial = '', hint = '') =>
       new Promise((resolve) => {
@@ -88,6 +93,7 @@ export function FilesWindow() {
         askText={askText}
         compare={compare}
         onCompareBaseChange={changeCompareBase}
+        onCompareHeadChange={changeCompareHead}
         onCwdChange={setCwd}
         onCornerResizeStart={null}
       />

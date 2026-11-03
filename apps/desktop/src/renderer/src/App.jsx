@@ -20,6 +20,7 @@ import { BranchPicker } from './BranchPicker'
 import { ChatView } from './ChatView'
 import { CwdPicker as CwdModal } from './CwdPicker'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
+import { setConfigWebFileOpener } from './config-web'
 import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
 import { PluginPage } from './PluginPage'
 import { usePluginAttention } from './plugin-attention'
@@ -1994,6 +1995,15 @@ export default function App() {
   }, [])
   const openSearchFile = openFileInView
   const openChatFile = openFileInView
+  // 配置页里的路径（插件日志等）点「在 Mica 中打开」时落到这里：先收起设置那一层，
+  // 再把文件交给主区编辑器——不收起的话文件在设置背后被打开，看着像没反应。
+  useEffect(() => {
+    setConfigWebFileOpener((path) => {
+      closeConfigPage()
+      openFileInView(path)
+    })
+    return () => setConfigWebFileOpener(null)
+  }, [closeConfigPage, openFileInView])
   // 插件的「评审」入口：把主区整块让给编辑器，直接停在 base...head 的对比上。
   // 自己不画 diff：文件树 + GIT 面板 + monaco 差异都在编辑器里，这里只是把对比交给它。
   // 开成应用内的一层而不是新窗口——点一条 PR 就该像打开一个弹窗那样立刻看见，

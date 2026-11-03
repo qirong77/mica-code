@@ -351,7 +351,8 @@ describe('配置面板', () => {
     const { panel } = setupPanel();
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
     expect(view.statusBar).toBeUndefined();
-    const section = view.sections?.find((entry) => entry.title === '状态');
+    // 开关跟着「服务器」走：清单与「这些机器对模型可不可见」是同一个问题。
+    const section = view.sections?.find((entry) => entry.title === '服务器');
     expect(section?.fields?.[0]).toMatchObject({ key: 'enabled', type: 'switch', value: 'false' });
     expect(section?.commit).toBe('toggle');
   });
@@ -386,7 +387,7 @@ describe('配置面板', () => {
     expect(JSON.parse(readFileSync(join(dir, PANEL_STATE_FILE), 'utf8')).pendingDelete).toBeUndefined();
   });
 
-  it('编辑时把当前值填回输入框，私钥模式不出现口令字段', async () => {
+  it('编辑时把当前值填回输入框，私钥模式不出现密码字段', async () => {
     const { panel } = setupPanel();
     await panel.action({ action: 'edit', key: 'test' });
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
@@ -394,6 +395,8 @@ describe('配置面板', () => {
     expect(draft?.fields?.find((field) => field.key === 'host')?.value).toBe('10.0.0.1');
     expect(draft?.fields?.find((field) => field.key === 'keyPath')?.value).toBe('~/.ssh/id_ed25519');
     expect(draft?.fields?.find((field) => field.key === 'password')).toBeUndefined();
+    // 面板不再收「用途」，编辑时也不能把它从已有机器上抹掉。
+    expect(draft?.fields?.find((field) => field.key === 'label')).toBeUndefined();
   });
 
   it('切到密码认证才出现口令字段，且口令永远不回填', async () => {

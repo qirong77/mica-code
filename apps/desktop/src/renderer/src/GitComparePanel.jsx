@@ -242,10 +242,11 @@ export function GitComparePanel({
   error,
   branch,
   compareBase,
-  // 评审模式下要比较的目标分支（来自页面地址的 `?head=`）：给了它，这一面板读的是
-  // 「提交对提交」，右侧就没有「工作区」这一说了。
+  // 比较的右侧（目标分支）：给了它就是「提交对提交」的评审，没给就是当前工作区。
+  // 它来自页面地址的 `?head=`，或面板上方第二个选择框（按仓库记住，不碰会话）。
   compareHead = null,
   onCompareBaseChange,
+  onCompareHeadChange,
   onRefresh,
   selectedPath,
   onSelectFile,
@@ -268,7 +269,8 @@ export function GitComparePanel({
   const [rootCollapsed, setRootCollapsed] = useState(false)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
+  // `null` | 'base'（原分支）| 'head'（目标分支）
+  const [pickerOpen, setPickerOpen] = useState(null)
   const [menu, setMenu] = useState(null)
   const [focusedId, setFocusedId] = useState(null)
   const treeRef = useRef(null)
@@ -312,7 +314,10 @@ export function GitComparePanel({
   const reviewMode = Boolean(compareHead)
   const headComparison =
     !reviewMode && (compareBase?.kind === 'head' || repository?.base === 'HEAD')
-  const targetName = repository?.headLabel || compareHead || branchName
+  const headName = reviewMode
+    ? repository?.headLabel || compareHead?.name || compareHead?.ref || '选择分支'
+    : '工作区'
+  const targetName = reviewMode ? headName : branchName
   const filtered = Boolean(query.trim() || preferences.unreviewedOnly)
   const unavailable = !cwd || !repository || Boolean(failure)
 
@@ -331,7 +336,7 @@ export function GitComparePanel({
     setRootCollapsed(false)
     setQuery('')
     setMenu(null)
-    setPickerOpen(false)
+    setPickerOpen(null)
     setFocusedId(null)
     revealedRef.current = ''
   }, [root])
@@ -546,40 +551,62 @@ export function GitComparePanel({
         </button>
       </header>
 
-      <div className="mx-2 mb-1 flex min-h-8 shrink-0 items-center rounded-sm border border-line-soft bg-overlay-subtle">
+      {/* 比较的两头各一格：上「原分支」（旧的一侧），下「目标分支」（右侧，缺省工作区）。
+          两格随时可换，改的只是这一页的对比，不碰会话。 */}
+      <div className="mx-2 mb-1 shrink-0 overflow-hidden rounded-sm border border-line-soft bg-overlay-subtle">
+        <div className="flex h-8 min-w-0 items-center">
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2 self-stretch px-2 text-left hover:bg-overlay focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
+            disabled={!cwd || !onCompareBaseChange}
+            title={`原分支：${baseName} · 点击选择分支、标签或提交`}
+            aria-label={`原分支：${baseName}`}
+            aria-haspopup="dialog"
+            aria-expanded={pickerOpen === 'base'}
+            onClick={() => setPickerOpen('base')}
+          >
+            <IconGitCompare size={15} className="shrink-0 text-info-soft" />
+            <span className="shrink-0 text-[11px] text-fg-muted">原分支</span>
+            <span className="min-w-0 flex-1 truncate text-[12px] text-fg-strong">{baseName}</span>
+            <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
+          </button>
+          <button
+            type="button"
+            disabled={!cwd || !onCompareBaseChange || headComparison || reviewMode}
+            aria-pressed={Boolean(compareBase?.direct)}
+            title={
+              headComparison
+                ? 'HEAD 比较只包含未提交更改'
+                : compareBase?.direct
+                  ? '完整比较：直接与基线比较，点击切换到合并基点'
+                  : '合并比较：从共同祖先计算更改，点击切换到完整比较'
+            }
+            className="mr-1 shrink-0 rounded-sm border-l border-line-soft px-1.5 py-0.5 text-[10px] text-fg-muted hover:bg-overlay-strong hover:text-fg-max disabled:opacity-35"
+            onClick={() =>
+              onCompareBaseChange?.({
+                ...(compareBase || { kind: 'auto', ref: null, name: '自动基线' }),
+                direct: !compareBase?.direct
+              })
+            }
+          >
+            {headComparison ? '工作区' : compareBase?.direct ? '完整' : '合并'}
+          </button>
+        </div>
+        <div className="h-px bg-line-soft" />
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 self-stretch px-2 text-left hover:bg-overlay focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
-          disabled={!cwd || !onCompareBaseChange}
-          title={`比较基线：${baseName} · 点击选择分支、标签或提交`}
+          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 text-left hover:bg-overlay focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
+          disabled={!cwd || !onCompareHeadChange}
+          title={`目标分支：${headName} · 点击选择分支、标签或提交`}
+          aria-label={`目标分支：${headName}`}
           aria-haspopup="dialog"
-          aria-expanded={pickerOpen}
-          onClick={() => setPickerOpen(true)}
+          aria-expanded={pickerOpen === 'head'}
+          onClick={() => setPickerOpen('head')}
         >
-          <IconGitCompare size={16} className="shrink-0 text-info-soft" />
-          <span className="min-w-0 flex-1 truncate text-[12px] text-fg-strong">{baseName}</span>
+          <IconFileDiff size={15} className="shrink-0 text-fg-soft" />
+          <span className="shrink-0 text-[11px] text-fg-muted">目标分支</span>
+          <span className="min-w-0 flex-1 truncate text-[12px] text-fg-strong">{headName}</span>
           <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
-        </button>
-        <button
-          type="button"
-          disabled={!cwd || !onCompareBaseChange || headComparison || reviewMode}
-          aria-pressed={Boolean(compareBase?.direct)}
-          title={
-            headComparison
-              ? 'HEAD 比较只包含未提交更改'
-              : compareBase?.direct
-                ? '完整比较：直接与基线比较，点击切换到合并基点'
-                : '合并比较：从共同祖先计算更改，点击切换到完整比较'
-          }
-          className="mr-1 shrink-0 rounded-sm border-l border-line-soft px-1.5 py-0.5 text-[10px] text-fg-muted hover:bg-overlay-strong hover:text-fg-max disabled:opacity-35"
-          onClick={() =>
-            onCompareBaseChange?.({
-              ...(compareBase || { kind: 'auto', ref: null, name: '自动基线' }),
-              direct: !compareBase?.direct
-            })
-          }
-        >
-          {headComparison ? '工作区' : compareBase?.direct ? '完整' : '合并'}
         </button>
       </div>
 
@@ -690,14 +717,14 @@ export function GitComparePanel({
             <p>
               {loading
                 ? '正在比较…'
-                : compareBase?.kind === 'head'
+                : headComparison
                   ? '工作区没有未提交的更改。'
                   : `相对 ${baseName} 没有更改。`}
             </p>
             <button
               type="button"
               className="mt-2 text-info-soft hover:underline"
-              onClick={() => setPickerOpen(true)}
+              onClick={() => setPickerOpen('base')}
             >
               选择其他比较基线
             </button>
@@ -790,15 +817,28 @@ export function GitComparePanel({
         )}
       </footer>
 
-      {pickerOpen && (
+      {pickerOpen === 'base' && (
         <GitComparePicker
           key={root}
           cwd={cwd}
           current={compareBase}
-          onClose={() => setPickerOpen(false)}
+          onClose={() => setPickerOpen(null)}
           onPick={(value) => {
-            setPickerOpen(false)
+            setPickerOpen(null)
             onCompareBaseChange?.(value)
+          }}
+        />
+      )}
+      {pickerOpen === 'head' && (
+        <GitComparePicker
+          key={`${root}:head`}
+          cwd={cwd}
+          current={compareHead || { kind: 'worktree', ref: null }}
+          mode="head"
+          onClose={() => setPickerOpen(null)}
+          onPick={(value) => {
+            setPickerOpen(null)
+            onCompareHeadChange?.(value)
           }}
         />
       )}

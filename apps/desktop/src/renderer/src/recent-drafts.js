@@ -1,17 +1,9 @@
 // Recent 分区里草稿（新建但还没落盘的会话）的呈现顺序。
 //
-// 草稿永远排在真实会话之前：用户刚点开的那条会话就是这个分区里「最新」的东西，把它排在
-// 几十条按 updatedAt 排下来的会话末尾等同于「新建的对话找不到了」。当前选中那条仍然第
-// 一（那是「我正在用的这条」），其余按最近活动时间倒序跟在后面。
-export function orderRecentDrafts(drafts = [], selectedId = null) {
-  const active = []
-  const rest = []
-  for (const node of Array.isArray(drafts) ? drafts : []) {
-    if (!node?.id) continue
-    if (node.id === selectedId) active.push(node)
-    else rest.push(node)
-  }
-  // 稳定排序：没有活动时间（或相同）时保持工作区里的原有顺序。
-  rest.sort((a, b) => (Number(b.lastActiveAt) || 0) - (Number(a.lastActiveAt) || 0))
-  return [...active, ...rest]
+// 顺序就是工作区里页签的创建顺序，不跟选中、也不跟最近活动时间变。草稿之间没有
+// updatedAt 可排，而「当前那条浮到最前」的规则会让用户每点一次侧栏、这一块就换一次
+// 位置——看上去像是自己点错了行。新建的草稿追加在末尾，落盘变成真实会话之后才由
+// updatedAt 排进下面的时间桶。
+export function orderRecentDrafts(drafts = []) {
+  return (Array.isArray(drafts) ? drafts : []).filter((node) => node?.id)
 }

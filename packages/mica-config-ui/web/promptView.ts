@@ -125,6 +125,18 @@ export function splitPromptSections(prompt: string): PromptPart[] {
 }
 
 /**
+ * 占比条的宽度权重。
+ *
+ * 严格按占比分配时，0.1% 的一段只有两三个像素——看得见、点不中。所以每段先拿一个下限份额，
+ * 剩下的才按真实占比分；下限还随段数收窄，一排小段全抬到 2% 会把真实占比冲淡。
+ * 返回的是相对权重，由 flex 归一化，几条加起来不必等于 1。
+ */
+export function promptShareWeights(sizes: number[], total: number): number[] {
+  const floor = Math.min(0.02, 0.35 / Math.max(sizes.length, 1));
+  return sizes.map((chars) => (total > 0 ? Math.max(chars / total, floor) : floor));
+}
+
+/**
  * 把提示词读成「段 → 标题」两级大纲。
  *
  * 只认顶层标签与 markdown 标题这两种边界：它们都是作者写下的结构，不是猜出来的语义。

@@ -8,16 +8,16 @@ import type {
   PluginPanelSection,
   PluginPanelView,
 } from '@packages/mica-plugin/index.js';
-import { readAudit } from './Audit.js';
 import { mutateData, readData, upsertHost, type SshAuth, type SshHost } from './Hosts.js';
 import { readHostFingerprint, testConnection, type RemoteContext } from './Remote.js';
-import { deletePassword, hasStoredPassword, secretsLocation, storePassword } from './Secrets.js';
+import { deletePassword, hasStoredPassword, storePassword } from './Secrets.js';
 
 /**
  * 配置面板：插件给数据、宿主画出来（`display: 'modal'`）。
  *
- * 三种东西各占一块：**开关**（这个插件现在是否对模型生效）、**机器清单**（逐台增删改）、
- * **连接设置**（表单 + 一个「连接」按钮）。
+ * 两块：**服务器**（机器清单 + 这个插件现在是否对模型生效，逐台增删改）与
+ * **连接设置**（表单 + 一个「连接」按钮）。最近调用记录不在这里——那是 `audit.jsonl`
+ * 的事，面板上摊一份既占地方又没人会用它的逐行脚本。
  *
  * 口令是这个面板独有的输入，也是唯一**不回填**的字段：`view()` 里它永远是空串（提示写
  * 「已保存」），动作提交后再写进 `Secrets.ts` 的 0600 文件。所以页面、截图、分享出去的
@@ -132,7 +132,6 @@ function draftSection(draft: Draft, dataDir: string, editing: boolean): PluginPa
       { key: 'host', label: '地址', value: draft.host, placeholder: '10.0.0.1 或 example.com' },
       { key: 'port', label: '端口', type: 'number', value: draft.port },
       { key: 'user', label: '用户名', value: draft.user, placeholder: 'root' },
-      { key: 'label', label: '用途', value: draft.label, placeholder: '测试机 / 生产 API' },
       {
         key: 'auth',
         label: '认证方式',
@@ -147,10 +146,10 @@ function draftSection(draft: Draft, dataDir: string, editing: boolean): PluginPa
         ? [
             {
               key: 'password',
-              label: '口令',
+              label: '密码',
               type: 'password' as const,
               value: '',
-              placeholder: hasPassword ? '已保存（留空表示不改）' : '这台机器的登录口令',
+              placeholder: hasPassword ? '已保存（留空表示不改）' : '这台机器的登录密码',
               hint: '存进本插件数据目录的 0600 文件（明文），不进钥匙串、不进对话',
             },
           ]
@@ -198,13 +197,10 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
       const draft = draftOf(editingHost, current);
       const editing = editingHost !== null;
 
-      const rows: PluginPanelRow[] = [
-        { label: '口令存放', value: secretsLocation(ctx.dataDir), wrap: true },
-        { label: '连接复用', value: `同一台机器的连续命令复用一条连接（${ctx.persistSeconds}s 空闲后断开）` },
-        { label: '输出', value: `默认只回最后 ${ctx.tailLines} 行，全文留在远端 /tmp` },
-      ];
+      // 删除确认与上一次连接结果都跟着「服务器」走：它们是这堆机器此刻的状态，不该另占一页。
+      const rows: PluginPanelRow[] = [];
       if (current.pendingDelete) {
-        rows.unshift({
+        rows.push({
           label: '待确认删除',
           value: `${current.pendingDelete} —— 点下面的「确认删除」才会真的删`,
           tone: 'warn',
@@ -219,11 +215,14 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
         });
       }
 
-      const audit = readAudit(ctx.dataDir, 12);
       const sections: PluginPanelSection[] = [
         {
-          title: '状态',
-          subtitle: data.enabled ? '模型可以使用' : '模型看不到',
+          title: '服务器',
+          subtitle: `${data.hosts.length} 台 · ${data.enabled ? '模型可以使用' : '模型看不到'}`,
+          rows,
+          items: hostItems(ctx.dataDir, data.hosts, current.lastTest),
+          empty: '还没有服务器：在「连接设置」里填一台并点「连接」',
+          // 开关跟着清单走：它回答的就是「这些机器现在对模型可不可见」。
           fields: [
             {
               key: 'enabled',
@@ -237,12 +236,6 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
           ],
           // 开关就地生效：改完半秒内写盘并同步工具注册，不需要再点按钮。
           commit: 'toggle',
-        },
-        {
-          title: '服务器',
-          subtitle: `${data.hosts.length} 台`,
-          items: hostItems(ctx.dataDir, data.hosts, current.lastTest),
-          empty: '还没有服务器：在下面「连接设置」里填一台并点「连接」',
           actions: current.pendingDelete
             ? [
                 { id: 'confirm-delete', label: `确认删除 ${current.pendingDelete}`, tone: 'danger' },
@@ -251,18 +244,6 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
             : [],
         },
         draftSection(draft, ctx.dataDir, editing),
-        {
-          title: '最近操作',
-          subtitle: '最近的脚本',
-          items: audit.map((entry, index) => ({
-            key: `${entry.at}-${index}`,
-            label: `${clockOf(entry.at)} · ${entry.hostId} · ${entry.ok ? 'exit 0' : `exit ${entry.exitCode ?? '—'}`}`,
-            value: entry.script,
-            tone: entry.ok ? ('muted' as const) : ('warn' as const),
-          })),
-          empty: '还没有远程调用',
-        },
-        { title: '说明', rows, collapsed: true },
       ];
       return {
         title: 'SSH',
@@ -292,13 +273,17 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
       // 表单输入先落进草稿：切认证方式、切别处再回来都不该丢已经敲进去的地址。
       // 口令**不**进草稿（`panel.json` 是普通文件），切走就没了——这是有意为之。
       if (action === 'draft') {
+        // 面板不再收「用途」：编辑已有机器时保留它原来那个，别因为重开一次表单就清掉。
+        const existing = current.editingId
+          ? readData(dataFile).hosts.find((host) => host.id === current.editingId)
+          : null;
         saveState({
           draft: {
             id: field(values, 'id'),
             host: field(values, 'host'),
             port: field(values, 'port') || '22',
             user: field(values, 'user'),
-            label: field(values, 'label'),
+            label: field(values, 'label') || existing?.label || '',
             keyPath: field(values, 'keyPath'),
             auth: field(values, 'auth') === 'key' ? 'key' : 'password',
           },
@@ -396,7 +381,8 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
         port: field(values, 'port') || 22,
         auth,
         keyPath: field(values, 'keyPath'),
-        label: field(values, 'label'),
+        // 「用途」已经从表单里去掉：编辑已有机器时沿用原值，新机器就是空。
+        label: data.hosts.find((entry) => entry.id === id)?.label ?? '',
         readOnly: data.hosts.find((entry) => entry.id === id)?.readOnly === true,
       });
       return { data: result.data, result };
@@ -442,7 +428,7 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
 
     const enabled = readData(dataFile).enabled;
     return `已连接 ${outcome.host.id}：${result.message}${fingerprint ? ` · 指纹 ${fingerprint}` : ''}${
-      enabled ? '' : '（打开上面的开关后模型才能使用）'
+      enabled ? '' : '（打开「服务器」里的开关后模型才能使用）'
     }`;
   }
 }

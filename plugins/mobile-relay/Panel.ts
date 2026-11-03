@@ -8,14 +8,18 @@ import type {
   PluginPanelSection,
   PluginPanelView,
 } from '@packages/mica-plugin/index.js';
-import { buildStatus, readBridgePid } from './BridgeSupervisor.js';
+import { buildStatus, readBridgePid, type BridgeStatus } from './BridgeSupervisor.js';
 import { findRendererDir, readDeployState, runSetup } from './DeployRunner.js';
 import { guidePageSync, rendererDirFor, skillPathFor } from './PageSyncAction.js';
 import { machineIdentity } from './Registrar.js';
 import { registerMachine } from './registerMachine.js';
 
 /**
- * 对话右侧那块面板：接中转机、看状态、开关桥，全部点按钮完成。
+ * 对话右侧那块面板：看现在通没通、接中转机、首次部署，全部点按钮完成。
+ *
+ * 三块的分工要立住：**概览**只回答「手机现在能不能用、链接是什么」；**接入**是日常那一步
+ * （填中转地址、注册、试连）；**首次部署**是「中转机上还什么都没有」时才用的一次性操作。
+ * 早先它们和平铺的页面版本、注册、部署、说明挤成六块，点开第一眼看到的是部署细节。
  *
  * 插件只给数据，宿主负责画；动作回来时插件自己分派，做完宿主自动重新取一次视图。
  * `view()` 会被页面反复调用，所以这里只读文件，不跑外部命令。
@@ -83,26 +87,7 @@ function saveDrafts(dataDir: string | null, values: Record<string, string>): Dra
   return next;
 }
 
-function statusRows(ctx: PluginContext, dataDir: string | null): PluginPanelRow[] {
-  const values = ctx.settings.get();
-  const relayUrl = String(values.relayUrl ?? '').trim();
-  const pid = readBridgePid(dataDir);
-  const status = buildStatus(values, null, pid, Date.now());
-  const rows: PluginPanelRow[] = [
-    { label: '中转地址', value: relayUrl || '未配置', tone: relayUrl ? 'ok' : 'muted' },
-    { label: '本机桥', value: status.bridge.text, tone: status.bridge.tone },
-  ];
-  if (relayUrl && status.phoneUrl) {
-    rows.push({ label: '手机链接', value: status.phoneUrl, tone: 'accent' });
-  }
-  return rows;
-}
-
-type SupervisorStatus = {
-  page?: { text?: unknown; tone?: unknown };
-  pageKey?: unknown;
-  attention?: { text?: unknown } | null;
-};
+type SupervisorStatus = Partial<BridgeStatus>;
 
 /** 常驻监管写的那份状态：面板只读它，不自己去问中转机。 */
 function readSupervisorStatus(dataDir: string | null): SupervisorStatus {
@@ -115,48 +100,78 @@ function readSupervisorStatus(dataDir: string | null): SupervisorStatus {
   }
 }
 
-const PAGE_TONES = new Set(['ok', 'warn', 'error', 'muted', 'accent']);
+/**
+ * 现在这一刻的状态。
+ *
+ * 优先读监管写下的那份（它探过中转机、知道手机在不在线）；文件还没生成时按设置现算一份
+ * ——刚装好插件、桥还没跑起来时也该看到「未配置 / 未运行」，而不是一张空面板。
+ */
+function liveStatus(ctx: PluginContext, dataDir: string | null): BridgeStatus {
+  const values = ctx.settings.get();
+  const fallback = buildStatus(values, null, readBridgePid(dataDir), Date.now());
+  const stored = readSupervisorStatus(dataDir);
+  // 逐字段取：data.json 可能只写过其中几行（旧版本、或测试里手写的状态），缺的那几行
+  // 用现算值补上，而不是整份退回——否则「页面落后」会因为桥那行缺席一起消失。
+  const pick = (key: 'bridge' | 'relay' | 'phone' | 'page') => {
+    const line = stored[key];
+    return line && typeof line.text === 'string' ? line : fallback[key];
+  };
+  return {
+    ...fallback,
+    ...stored,
+    bridge: pick('bridge'),
+    relay: pick('relay'),
+    phone: pick('phone'),
+    page: pick('page'),
+  };
+}
 
 /**
- * 页面版本一节：本机这版和中转机上那版不一样时，这里直接给一个「更新」按钮。
+ * 概览：手机现在能不能用、链接是什么、哪儿不对。
  *
- * 手机打开的那份页面正是中转机上托管的那份，所以「页面落后」这件事在手机上最该被看见——
- * 用户看到的就是旧界面，却没有别的入口能把它更新掉。
+ * 链接放第一行并且带 `link`：这是整个面板唯一「拿到就能用」的东西，不该埋在状态表里。
+ * 页面落后仍留一个「更新」按钮——手机打开的就是中转机上那份，用户没有别的入口能换掉它。
  */
-function pageSection(ctx: PluginContext, dataDir: string | null): PluginPanelSection {
-  const status = readSupervisorStatus(dataDir);
-  const pageText = typeof status.page?.text === 'string' ? status.page.text : '';
-  const rawTone = typeof status.page?.tone === 'string' ? status.page.tone : '';
-  const pageTone = (PAGE_TONES.has(rawTone) ? rawTone : 'muted') as PluginPanelRow['tone'];
-  const attentionText = typeof status.attention?.text === 'string' ? status.attention.text : '';
-  // 落后是一个持续状态，提示点只亮一次。点过之后这里仍要留着「落后 + 更新按钮」——
-  // 否则用户想手动再传一次时，面板里就什么也找不到了。
-  const stale = typeof status.pageKey === 'string' && status.pageKey.length > 0;
+function overviewSection(ctx: PluginContext, dataDir: string | null): PluginPanelSection {
+  const status = liveStatus(ctx, dataDir);
   const configured = Boolean(String(ctx.settings.get().relayUrl ?? '').trim());
-
+  const stale = typeof status.pageKey === 'string' && status.pageKey.length > 0;
+  const rows: PluginPanelRow[] = [
+    { label: '本机桥', value: status.bridge.text, tone: status.bridge.tone },
+    { label: '中转机', value: status.relay.text, tone: status.relay.tone },
+    { label: '手机', value: status.phone.text, tone: status.phone.tone },
+    { label: '页面版本', value: status.page.text, tone: status.page.tone },
+  ];
+  if (status.phoneUrl) {
+    rows.unshift({ label: '手机链接', value: status.phoneUrl, tone: 'accent', link: status.phoneUrl });
+  }
   return {
-    title: '页面版本',
-    collapsed: !attentionText && !stale,
-    rows: [
-      { label: '中转机页面', value: pageText || '还没探测', tone: pageText ? pageTone : 'muted' },
-      ...(attentionText ? [{ label: '要更新', value: attentionText, tone: 'warn' as const }] : []),
-      ...(!attentionText && stale
-        ? [{ label: '要更新', value: '版本与中转机不一致', tone: 'warn' as const }]
-        : []),
-    ],
+    title: '概览',
+    text: status.phoneUrl
+      ? '在手机上打开这个链接：同一份会话、同样的流式输出。这台机器退出 Mica 时手机打不开。'
+      : configured
+        ? '中转地址已经填好，还差一个口令：到「接入」里点一次「注册这台机器」，手机链接就会出现。'
+        : '还没接入：到「接入」里填中转地址并注册。中转机上还什么都没装的话，看「首次部署」。',
+    rows,
     actions: [
       {
         id: 'sync-page',
         label: '更新中转机页面',
-        tone: attentionText || stale ? 'primary' : 'ghost',
+        tone: stale ? 'primary' : 'ghost',
         disabled: !configured,
-        hint: '在新会话里准备好提示词，按回车后执行',
+        hint: '手机打开的是中转机上那份页面；本机升级后版本会落后',
       },
     ],
   };
 }
 
-function setupSection(ctx: PluginContext, dataDir: string | null, drafts: Drafts): PluginPanelSection {
+/**
+ * 首次部署：中转机上还没有这份运行时的时候走一次。
+ *
+ * 日常「已经装过、只想把这台机器接上」不经过这里——那一步在「接入」里，不需要 SSH。
+ * 部署输出放在这块正文里：运行中它是最该看的东西，而失败时原因就在最后几行。
+ */
+function deploySection(ctx: PluginContext, dataDir: string | null, drafts: Drafts): PluginPanelSection {
   const deploy = readDeployState(dataDir);
   const renderer = findRendererDir(drafts.renderer);
   const running = deploy.phase === 'running';
@@ -165,26 +180,32 @@ function setupSection(ctx: PluginContext, dataDir: string | null, drafts: Drafts
   const actions: PluginPanelAction[] = [
     {
       id: 'apply',
-      label: configured ? '接入这台机器' : '接入 / 部署',
+      label: configured ? '接入这台机器' : '部署中转机',
       tone: 'primary',
       disabled: running || !drafts.sshHost.trim(),
       hint: '装过中转机就只登记本机，否则走完整部署',
     },
-    { id: 'test', label: '测试连接', disabled: !configured, hint: '只请求一次 /api/health' },
   ];
+  // 找不到页面产物就没法在本机打包上传：把这一轮整个交给 agent，它自己取仓库、构建、部署。
+  if (!renderer) {
+    actions.push({
+      id: 'ask-agent',
+      label: '让 agent 构建并部署',
+      tone: 'ghost',
+      hint: '开一轮去取仓库、构建页面产物、部署中转机并回填设置',
+    });
+  }
 
   return {
-    title: '接中转机',
-    collapsed: configured,
+    title: '首次部署',
+    subtitle: '在中转机上装好 Mica 运行时；装过就不用再来这里',
+    text: deploy.lines.length > 0 ? deploy.lines.slice(-12).join('\n') : undefined,
     rows: [
       {
         label: '页面产物',
-        value: renderer ? renderer : '没找到（首次部署才需要）',
+        value: renderer ? renderer : '没找到（部署需要它）',
         tone: renderer ? 'ok' : 'warn',
       },
-      ...(deploy.lines.length > 0
-        ? [{ label: '最近输出', value: deploy.lines[deploy.lines.length - 1] ?? '', tone: 'muted' as const }]
-        : []),
     ],
     fields: [
       {
@@ -214,40 +235,13 @@ function setupSection(ctx: PluginContext, dataDir: string | null, drafts: Drafts
   };
 }
 
-function askAgentSection(rendererFound: boolean): PluginPanelSection {
-  return {
-    title: '首次部署',
-    collapsed: rendererFound,
-    rows: [
-      {
-        label: rendererFound ? '可以直接部署' : '缺页面产物',
-        value: rendererFound
-          ? '点上面的「接入 / 部署」即可'
-          : '页面产物是一份会随桌面端升级而过期的副本，所以不随插件分发。',
-        tone: rendererFound ? 'ok' : 'warn',
-      },
-    ],
-    items: rendererFound
-      ? []
-      : [
-          {
-            key: 'ask-agent',
-            label: '交给 agent',
-            value: '在这个会话里发起一轮：取仓库、构建页面产物、部署中转机、回填设置。',
-            tone: 'accent',
-            actions: [{ id: 'ask-agent', label: '让 agent 构建并部署', tone: 'primary' }],
-          },
-        ],
-  };
-}
-
 /**
  * 注册：只需一个中转地址，口令由插件自己拿到并写回设置。
  *
  * 同一台机器重复点拿到的是同一个口令（中转机按机器标识认领），所以这个按钮
  * 点了也没有副作用——重装插件、换会话都不用重新理解什么。
  */
-function registrationSection(ctx: PluginContext, drafts: Drafts): PluginPanelSection {
+function accessSection(ctx: PluginContext, drafts: Drafts): PluginPanelSection {
   const values = ctx.settings.get();
   const settingsUrl = String(values.relayUrl ?? '').trim();
   const token = String(values.token ?? '').trim();
@@ -256,16 +250,8 @@ function registrationSection(ctx: PluginContext, drafts: Drafts): PluginPanelSec
   const relayUrl = drafts.relayUrl || settingsUrl;
 
   return {
-    title: '注册这台机器',
-    collapsed: registered,
-    rows: [
-      { label: '这台机器', value: `${machine.label} · ${machine.platform}`, tone: 'muted' },
-      {
-        label: '注册状态',
-        value: registered ? '已注册 · 再注册一次仍是这个口令' : '还没注册',
-        tone: registered ? 'ok' : 'warn',
-      },
-    ],
+    title: '接入',
+    subtitle: `${machine.label} · ${machine.platform}`,
     fields: [
       {
         key: FIELD_RELAY,
@@ -290,6 +276,7 @@ function registrationSection(ctx: PluginContext, drafts: Drafts): PluginPanelSec
         disabled: !relayUrl,
         hint: '把本机标识加密发给中转机，换回一个口令并自动写入设置。',
       },
+      { id: 'test', label: '测试连接', disabled: !relayUrl, hint: '只请求一次 /api/health' },
     ],
   };
 }
@@ -297,24 +284,13 @@ function registrationSection(ctx: PluginContext, drafts: Drafts): PluginPanelSec
 export function buildPanelView(ctx: PluginContext, dataDir: string | null): PluginPanelView {
   const drafts = readDrafts(dataDir);
   const deploy = readDeployState(dataDir);
-  const rendererFound = Boolean(findRendererDir(drafts.renderer));
   const configured = Boolean(String(ctx.settings.get().relayUrl ?? '').trim());
 
   const sections: PluginPanelSection[] = [
-    { title: '状态', rows: statusRows(ctx, dataDir) },
-    pageSection(ctx, dataDir),
-    registrationSection(ctx, drafts),
-    setupSection(ctx, dataDir, drafts),
-    askAgentSection(rendererFound),
+    overviewSection(ctx, dataDir),
+    accessSection(ctx, drafts),
+    deploySection(ctx, dataDir, drafts),
   ];
-
-  if (deploy.lines.length > 0) {
-    sections.push({
-      title: '过程',
-      collapsed: deploy.phase === 'ok',
-      rows: deploy.lines.slice(-8).map((line) => ({ label: '', value: line })),
-    });
-  }
 
   const tone =
     deploy.phase === 'running'
@@ -327,11 +303,11 @@ export function buildPanelView(ctx: PluginContext, dataDir: string | null): Plug
 
   return {
     title: '手机访问',
-    subtitle: '用手机打开这台机器上的 Mica：接入中转机、看状态、开关桥。',
+    subtitle: '手机打开这台机器上的 Mica：同一份会话，本机只做出站轮询。',
     status: {
       label:
         deploy.phase === 'running'
-          ? '正在处理'
+          ? '正在部署'
           : deploy.phase === 'failed'
             ? '上次失败'
             : configured

@@ -3,6 +3,7 @@ import {
   analyzePrompt,
   promptNodePath,
   promptPartLabel,
+  promptShareWeights,
   searchPrompt,
   splitPromptSections,
   summarizePrompt,
@@ -268,5 +269,34 @@ describe('searchPrompt', () => {
     const nodes = analyzePrompt(NESTED_PROMPT).nodes;
 
     expect(searchPrompt(nodes, '不存在的词').nodes).toEqual([]);
+  });
+});
+
+describe('promptShareWeights', () => {
+  it('按真实占比分配，大段不会被小段拖平', () => {
+    const weights = promptShareWeights([870, 13, 117], 1000);
+
+    expect(weights[0]).toBeCloseTo(0.87);
+    expect(weights[0]! / weights[2]!).toBeCloseTo(0.87 / 0.117, 1);
+  });
+
+  it('极小的段抬到下限，否则那一段只有两三个像素、点不中', () => {
+    const weights = promptShareWeights([999, 1], 1000);
+
+    expect(weights[1]).toBeCloseTo(0.02);
+  });
+
+  it('段数很多时下限自动收窄，不把真实占比冲淡', () => {
+    const sizes = Array.from({ length: 40 }, (_item, index) => (index === 0 ? 900 : 2.5));
+    const weights = promptShareWeights(sizes, 1000);
+
+    expect(weights[1]).toBeCloseTo(0.35 / 40);
+    expect(weights[1]!).toBeLessThan(0.02);
+  });
+
+  it('总字符为 0 时各段等权，不会除以 0', () => {
+    const weights = promptShareWeights([0, 0], 0);
+
+    expect(weights).toEqual([0.02, 0.02]);
   });
 });

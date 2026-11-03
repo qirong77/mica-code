@@ -32,7 +32,6 @@ import {
   IconPaperclip,
   IconPlus,
   IconPuzzle,
-  IconPlug,
   IconQuote,
   IconSend,
   IconShare,
@@ -54,7 +53,7 @@ import {
   summarizeTodoProgress,
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
-import { SessionDetailView } from '@mica-config-ui/web'
+import { PluginIcon, SessionDetailView } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
@@ -2070,6 +2069,13 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
       label: '查看详情',
       title: '这条会话的详情：对话记录 / Context 分析 / 耗时 / 系统提示词 / 用量',
       icon: IconInfoCircle,
+      disabled: !menu.hasSession
+    },
+    {
+      id: 'timing',
+      label: '耗时分析',
+      title: '这一轮的时间去哪了：等模型 / 模型输出 / 工具执行（含还在跑的这一轮）',
+      icon: IconStopwatch,
       disabled: !menu.hasSession
     },
     ...pluginActions,
@@ -6352,6 +6358,15 @@ export function ChatView({
         setSessionDetailOpen(true)
         return
       }
+      if (action === 'timing') {
+        if (!sessionIdRef.current) {
+          appendNotice('发送第一条消息后才有耗时记录', 'error')
+          return
+        }
+        setTurnTimingNow(Date.now())
+        setTurnTimingOpen(true)
+        return
+      }
       if (action !== 'fork') return
       const sessionId = sessionIdRef.current
       if (!sessionId) {
@@ -7062,14 +7077,19 @@ export function ChatView({
                 className="chat-composer-more"
                 onMouseEnter={() => {
                   if (moreHoverTimer.current) clearTimeout(moreHoverTimer.current)
-                  moreHoverTimer.current = setTimeout(() => setMoreOpen(true), 140)
+                  moreHoverTimer.current = setTimeout(() => {
+                    moreHoverTimer.current = null
+                    setMoreOpen(true)
+                  }, 140)
                 }}
                 onMouseLeave={() => {
-                  if (moreHoverTimer.current) {
-                    clearTimeout(moreHoverTimer.current)
+                  if (moreHoverTimer.current) clearTimeout(moreHoverTimer.current)
+                  // 收菜单留一点宽限：容器只有按钮那么大，指针斜着从「+」移向菜单时会
+                  // 短暂离开容器，立刻收会让人看着菜单凭空消失。
+                  moreHoverTimer.current = setTimeout(() => {
                     moreHoverTimer.current = null
-                  }
-                  setMoreOpen(false)
+                    setMoreOpen(false)
+                  }, 180)
                 }}
               >
                 <button
@@ -7152,22 +7172,12 @@ export function ChatView({
                           setPluginPanelSection('')
                         }}
                       >
-                        <IconPlug size={13} />
+                        {/* 图标来自插件清单：所有面板都画同一个插头时，「手机访问」和
+                            「SSH」在菜单里就只剩文字能区分。 */}
+                        <PluginIcon name={panel.icon} size={13} />
                         <span>{panel.label}</span>
                       </button>
                     ))}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        setMoreOpen(false)
-                        setTurnTimingNow(Date.now())
-                        setTurnTimingOpen(true)
-                      }}
-                    >
-                      <IconStopwatch size={13} />
-                      <span>耗时分析</span>
-                    </button>
                   </div>
                 ) : null}
               </div>
