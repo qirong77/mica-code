@@ -563,7 +563,7 @@ export class LocalRuntimeController implements RuntimeController {
     const clearPreviousTurnUi = shouldClearPreviousTurnUi(session?.uiState.lastTurnOutcome);
     const previousConversationMessages = displayConversationMessages(session, agent);
     if (input.source !== 'system') {
-      rewindCheckpointId = this.rewindCheckpoints.capture(agent, input, previousConversationMessages);
+      rewindCheckpointId = await this.rewindCheckpoints.capture(agent, input, previousConversationMessages);
     }
     if (session) {
       session.uiState = normalizeUiState({
@@ -838,7 +838,7 @@ export class LocalRuntimeController implements RuntimeController {
         }
       }
       if (rewindCheckpointId) {
-        this.rewindCheckpoints.finalize(agent, rewindCheckpointId, displayConversationMessages(session, agent));
+        await this.rewindCheckpoints.finalize(agent, rewindCheckpointId, displayConversationMessages(session, agent));
       }
       const elapsedMs = Date.now() - startedAt;
       this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });
@@ -1103,10 +1103,14 @@ function waitForRetryDelay(
       lastRemainingSeconds = remainingSeconds;
       onRemainingMs?.(remainingMs);
     };
-    const timer = setTimeout(() => finish(() => {
-      if (!agent.isCurrent(delayRunId)) reject(new AgentAbortError(delayRunId));
-      else resolve();
-    }), delayMs);
+    const timer = setTimeout(
+      () =>
+        finish(() => {
+          if (!agent.isCurrent(delayRunId)) reject(new AgentAbortError(delayRunId));
+          else resolve();
+        }),
+      delayMs,
+    );
     const poll = setInterval(() => {
       if (!agent.isCurrent(delayRunId)) {
         finish(() => reject(new AgentAbortError(delayRunId)));

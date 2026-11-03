@@ -94,7 +94,7 @@ describe('RewindCheckpointManager conversation fallback', () => {
     expect(manager.list(agent).map((checkpoint) => checkpoint.conversationLabel)).toEqual(['first request']);
   });
 
-  it('restores old history before capturing the first new turn after resume', () => {
+  it('restores old history before capturing the first new turn after resume', async () => {
     const manager = makeManager();
     let currentSnapshot = makeSnapshot([
       { role: 'user', content: 'resumed request' },
@@ -107,7 +107,7 @@ describe('RewindCheckpointManager conversation fallback', () => {
       },
     );
 
-    manager.capture(agent, makeInput('new request'), [
+    await manager.capture(agent, makeInput('new request'), [
       { role: 'user', content: 'resumed request' },
       { role: 'assistant', content: 'resumed answer' },
     ]);
@@ -164,7 +164,7 @@ describe('RewindCheckpointManager conversation fallback', () => {
     expect(manager.list(agent).map((checkpoint) => checkpoint.conversationLabel)).toEqual(['recoverable request']);
   });
 
-  it('keeps a live checkpoint at the state after its selected turn', () => {
+  it('keeps a live checkpoint at the state after its selected turn', async () => {
     const manager = makeManager();
     let currentSnapshot = makeSnapshot([]);
     const agent = makeAgent(
@@ -173,7 +173,7 @@ describe('RewindCheckpointManager conversation fallback', () => {
         currentSnapshot = snapshot;
       },
     );
-    const checkpointId = manager.capture(agent, makeInput('call a tool'))!;
+    const checkpointId = (await manager.capture(agent, makeInput('call a tool')))!;
     currentSnapshot = makeSnapshot([
       { role: 'user', content: 'call a tool' },
       {
@@ -184,7 +184,7 @@ describe('RewindCheckpointManager conversation fallback', () => {
       { role: 'tool', tool_call_id: 'call-1', content: 'tool result' },
       { role: 'assistant', content: 'done' },
     ]);
-    manager.finalize(agent, checkpointId, [
+    await manager.finalize(agent, checkpointId, [
       { role: 'user', content: 'call a tool' },
       { role: 'assistant', content: 'done' },
     ]);

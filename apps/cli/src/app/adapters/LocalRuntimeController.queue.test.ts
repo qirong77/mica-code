@@ -191,6 +191,9 @@ describe('LocalRuntimeController queue drain', () => {
     const firstRun = new Promise<{ runId: number; text: string }>((_resolve, reject) => {
       rejectFirstRun = reject;
     });
+    // The turn attaches its handler only once it reaches the provider call, so keep a
+    // no-op handler to stop Node flagging the intentional failure as unhandled.
+    firstRun.catch(() => {});
 
     const agent = {
       events: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },

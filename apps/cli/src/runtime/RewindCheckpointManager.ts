@@ -12,8 +12,10 @@ import {
   type Stats,
   writeFileSync,
 } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { RewindFileAction, RewindFileChange, RuntimeInput } from '@packages/mica-runtime/index.js';
 import type {
@@ -22,7 +24,7 @@ import type {
   RewindCheckpointSummary,
   RewindPreviewResult,
 } from '@packages/mica-runtime/Rewind.js';
-import { gitBuffer, gitText } from '@packages/mica-common/index.js';
+import { gitBuffer } from '@packages/mica-common/index.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import {
   comparableMessageText,
@@ -148,7 +150,9 @@ function serializeCheckpoint(checkpoint: RewindCheckpoint): SerializedCheckpoint
       error: checkpoint.fileState.available ? undefined : checkpoint.fileState.error,
       entries: [...checkpoint.fileState.entries.entries()].map(([path, entry]) => [
         path,
-        entry.kind === 'file' ? { kind: 'file' as const, data: entry.data.toString('base64'), mode: entry.mode } : entry,
+        entry.kind === 'file'
+          ? { kind: 'file' as const, data: entry.data.toString('base64'), mode: entry.mode }
+          : entry,
       ]),
     },
   };
@@ -197,7 +201,11 @@ export class RewindCheckpointManager {
 
   constructor(private readonly dir: string = REWIND_DIR) {}
 
-  capture(agent: AgentRuntime, input: RuntimeInput, conversationMessages: unknown[] = []): string | null {
+  async capture(
+    agent: AgentRuntime,
+    input: RuntimeInput,
+    conversationMessages: unknown[] = [],
+  ): Promise<string | null> {
     if (this.listCheckpoints(agent).length === 0) {
       try {
         this.restoreConversationHistory(agent, conversationMessages);
@@ -225,7 +233,7 @@ export class RewindCheckpointManager {
         inputText: input.text,
         conversationMessages: cloneJson(conversationMessages),
         snapshot: cloneSnapshot(snapshot),
-        fileState: captureFileState(),
+        fileState: await captureFileState(),
       };
       this.writeCheckpoint(checkpoint);
       this.previewPlans.delete(agent);
@@ -236,7 +244,7 @@ export class RewindCheckpointManager {
     }
   }
 
-  finalize(agent: AgentRuntime, id: string, conversationMessages: unknown[] = []): void {
+  async finalize(agent: AgentRuntime, id: string, conversationMessages: unknown[] = []): Promise<void> {
     const checkpoint = this.readCheckpoint(agentIdOf(agent), id);
     if (!checkpoint) return;
     try {
@@ -252,7 +260,7 @@ export class RewindCheckpointManager {
         ...checkpoint,
         snapshot: cloneSnapshot(snapshot),
         conversationMessages: cloneJson(conversationMessages),
-        fileState: captureFileState(),
+        fileState: await captureFileState(),
       };
       this.writeCheckpoint(updated);
       this.previewPlans.delete(agent);
@@ -729,18 +737,14 @@ function hashField(hash: ReturnType<typeof createHash>, name: string, value: Buf
   hash.update(value);
 }
 
-function captureFileState(): FileStateSnapshot {
+async function captureFileState(): Promise<FileStateSnapshot> {
   try {
-    const root = gitText(['rev-parse', '--show-toplevel'], { cwd: process.cwd(), maxBuffer: GIT_MAX_BUFFER }).trim();
-    const headOid = gitText(['rev-parse', '--verify', 'HEAD'], { cwd: root, maxBuffer: GIT_MAX_BUFFER }).trim();
-    const staged = gitBuffer(['diff', '--cached', '--name-only', '-z', 'HEAD', '--'], {
-      cwd: root,
-      maxBuffer: GIT_MAX_BUFFER,
-    });
-    if (staged.length > 0) {
+    const root = await resolveRepoRoot(process.cwd());
+    const status = await readWorktreeStatus(root);
+    if (status.staged.length > 0) {
       throw new Error('staged or partially-staged changes cannot be restored safely');
     }
-    const paths = collectDirtyPaths(root);
+    const paths = status.dirty;
     if (paths.length > MAX_DIRTY_FILES) {
       throw new Error(`too many dirty files for rewind snapshot: ${paths.length} > ${MAX_DIRTY_FILES}`);
     }
@@ -750,7 +754,7 @@ function captureFileState(): FileStateSnapshot {
       const entry = snapshotPath(root, path, budget);
       entries.set(path, entry);
     }
-    return { available: true, root, headOid, entries };
+    return { available: true, root, headOid: status.headOid, entries };
   } catch (error) {
     return {
       available: false,
@@ -759,6 +763,84 @@ function captureFileState(): FileStateSnapshot {
       entries: new Map(),
     };
   }
+}
+
+async function statOrNull(path: string): Promise<Stats | null> {
+  try {
+    return await stat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function execGit(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    execFile(
+      'git',
+      args,
+      { cwd, maxBuffer: GIT_MAX_BUFFER, env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } },
+      (error, stdout) => {
+        if (error) rejectPromise(error);
+        else resolvePromise(stdout);
+      },
+    );
+  });
+}
+
+async function resolveRepoRoot(cwd: string): Promise<string> {
+  // A repository root always has .git (a directory, or a file for worktrees), so
+  // only a nested cwd has to ask git to walk up.
+  const direct = await statOrNull(join(cwd, '.git'));
+  if (direct) return cwd;
+  const root = (await execGit(['rev-parse', '--show-toplevel'], cwd)).trim();
+  if (!root) throw new Error('not inside a git repository');
+  return root;
+}
+
+// One `git status` yields HEAD, index (staged) and worktree state, replacing five
+// separate revisions that each walked the index again.
+async function readWorktreeStatus(root: string): Promise<{ headOid: string; staged: string[]; dirty: string[] }> {
+  const raw = await execGit(
+    ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all', '--no-renames'],
+    root,
+  );
+  let headOid = '';
+  const staged: string[] = [];
+  const dirty = new Set<string>();
+  for (const record of raw.split('\0')) {
+    if (!record) continue;
+    if (record.startsWith('# branch.oid ')) {
+      headOid = record.slice('# branch.oid '.length).trim();
+      continue;
+    }
+    if (record.startsWith('# ')) continue;
+    const kind = record[0];
+    if (kind === '?') {
+      dirty.add(record.slice(2));
+      continue;
+    }
+    if (kind === 'u' || kind === '2') {
+      const path = statusRecordPath(record, kind === '2' ? 9 : 10);
+      if (path) staged.push(path);
+      continue;
+    }
+    if (kind !== '1') continue;
+    const fields = record.split(' ');
+    const xy = fields[1] ?? '..';
+    const path = fields.slice(8).join(' ');
+    if (!path) continue;
+    if (xy[0] !== '.') staged.push(path);
+    if (xy[0] !== '.' || xy[1] !== '.') dirty.add(path);
+  }
+  if (!headOid || headOid === '(initial)') {
+    throw new Error('HEAD has no commit to rewind from');
+  }
+  return { headOid, staged, dirty: [...dirty].sort((a, b) => a.localeCompare(b)) };
+}
+
+function statusRecordPath(record: string, startField: number): string {
+  return record.split(' ').slice(startField).join(' ');
 }
 
 function unavailableFileState(error: string): FileStateSnapshot {
@@ -822,19 +904,6 @@ function describeFileChanges(
         entry?.kind === 'absent' || (!entry && !headPaths.has(path)) ? 'delete' : 'restore';
       return { path, action };
     });
-}
-
-function collectDirtyPaths(root: string): string[] {
-  const tracked = splitNul(
-    gitBuffer(['diff', '--no-renames', '--name-only', '-z', 'HEAD', '--'], {
-      cwd: root,
-      maxBuffer: GIT_MAX_BUFFER,
-    }),
-  );
-  const untracked = splitNul(
-    gitBuffer(['ls-files', '--others', '--exclude-standard', '-z'], { cwd: root, maxBuffer: GIT_MAX_BUFFER }),
-  );
-  return [...new Set([...tracked, ...untracked])].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
 
 function snapshotPath(root: string, path: string, budget: { totalBytes: number }): FileSnapshotEntry {
