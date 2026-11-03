@@ -97,6 +97,7 @@ import { registerSharedSessionIpc } from '../host/shared-sessions.js'
 import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop-process-env.js'
 import { warmShellEnv } from '../host/shell-env.js'
 import { saveImageDataUrl } from '../host/chat-images.js'
+import { decodeDataUrl, saveAttachmentBytes } from '../host/attachments.js'
 
 // host 通道统一计时：一次调用超过阈值就记 slow，并累计到 slowReport。
 const invokeLog = logger('invoke')
@@ -602,6 +603,20 @@ async function handlePasteImage(req, res) {
   }
 }
 
+async function handleAttachment(req, res) {
+  try {
+    const body = JSON.parse((await readBody(req)) || '{}')
+    const bytes = decodeDataUrl(body?.dataUrl)
+    if (!bytes) {
+      sendJson(res, 200, { ok: false, error: '缺少文件数据' })
+      return
+    }
+    sendJson(res, 200, saveAttachmentBytes(bytes, body?.name))
+  } catch (error) {
+    sendJson(res, 200, { ok: false, error: errorMessage(error) })
+  }
+}
+
 async function handleImage(res, url) {
   const file = url.searchParams.get('path')
   if (!file) {
@@ -1007,6 +1022,8 @@ function createRequestHandler({
             return await handleInvoke(req, res)
           if (req.method === 'POST' && url.pathname === '/api/paste-image')
             return await handlePasteImage(req, res)
+          if (req.method === 'POST' && url.pathname === '/api/attachment')
+            return await handleAttachment(req, res)
           if (req.method === 'GET' && url.pathname === '/api/events') return handleEvents(req, res)
           if (req.method === 'GET' && url.pathname === '/api/image')
             return await handleImage(res, url)

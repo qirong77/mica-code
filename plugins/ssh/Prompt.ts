@@ -20,12 +20,11 @@ function describe(host: SshHost): string {
   return bits.join(' · ');
 }
 
-export function renderPromptSection(hosts: SshHost[]): string {
+export function renderPromptSection(hosts: SshHost[], enabled = true): string {
+  // 关着就一个字都不注入：这个插件对模型等于不存在，它不需要知道「有台机器配过但没开」。
+  if (!enabled) return '';
   if (hosts.length === 0) {
-    return [
-      '这台机器还没有配置可用的远程服务器。用户要求操作服务器时，请他们打开桌面端输入框上方的「SSH 服务器」添加（需要地址、用户名、端口与认证方式）。',
-      '不要假设 `ssh` 命令能直接连——本机 shell 里的 `ssh` 是用户的私事，远程操作一律经 `ssh_*` 工具。',
-    ].join('\n');
+    return 'SSH 已开启，但还没有配置任何服务器：需要远程操作时请用户打开输入框上方的「SSH 服务器」，填地址、账号与认证方式后点「连接」。';
   }
   return [
     '可用的远程服务器（`ssh_run` / `ssh_read` / `ssh_session` 的 `host` 参数）：',
@@ -39,5 +38,8 @@ export function renderPromptSection(hosts: SshHost[]): string {
 }
 
 export function createPromptSection(dataFile: string): () => string {
-  return () => renderPromptSection(readData(dataFile).hosts);
+  return () => {
+    const data = readData(dataFile);
+    return renderPromptSection(data.hosts, data.enabled);
+  };
 }

@@ -22,6 +22,7 @@ import {
   discardDirectory,
   cachedRepository,
   getRepository,
+  repositoryRootOf,
   getWorkspaceStatus,
   git,
   gitErrorMessage,
@@ -100,7 +101,21 @@ async function getChangeCounts(cwd, { refresh = false } = {}) {
   }
 }
 
-const getStatus = getWorkspaceStatus
+/**
+ * 仓库身份（根目录 / 分支 / 项目名）的读取。
+ *
+ * 每次都要 spawn 一次 `git rev-parse`，而每个窗口都在轮询它：编辑器页 3s、主窗口 10s，
+ * 开着 8 个窗口时实测每 4s 一次、一天两千多次。机器被别的东西拖慢到一次 spawn 要几秒
+ * 时，这些调用会互相叠上来（实测同时 4 个），越叠越慢。
+ *
+ * 与全树扫描共用 `cachedWorktreeRead`：`headSignature` 已经把「切分支 / 提交」算作失效，
+ * 所以检出之后立刻读到的就是新分支名，不需要额外打点。
+ */
+async function getStatus(cwd) {
+  const root = repositoryRootOf(cwd)
+  if (!root) return getWorkspaceStatus(cwd)
+  return cachedWorktreeRead(root, 'workspace-status', () => getWorkspaceStatus(root))
+}
 async function resolveRef(cwd, ref, kinds = ['branch', 'tag']) {
   const refs = await getRefs(cwd)
   const values = [...refs.branches, ...refs.tags]

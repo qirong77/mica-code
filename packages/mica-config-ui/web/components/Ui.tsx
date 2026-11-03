@@ -58,6 +58,46 @@ const BUTTON_VARIANTS: Record<NonNullable<ButtonProps['variant']>, string> = {
   ghost: 'ui-button-ghost',
 };
 
+/**
+ * 分段选择：一组互斥选项（认证方式、协议这类），视觉上就是一条 TAB。
+ *
+ * 为什么不用原生 `<select>`：它的字体与内边距跟旁边的输入框对不齐，一行里会矮一截；
+ * 选项少（2–4 个）时把所有取值摆在明面上点一次就到，比展开再选少一次交互。
+ * 样式沿用配置页的 `.config-segmented`，插件面板与设置页因此长得一样。
+ */
+export function Segmented({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  id,
+  disabled = false,
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange(next: string): void;
+  ariaLabel?: string;
+  id?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="config-segmented" role="group" aria-label={ariaLabel} id={id}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          className={`config-segment${value === option.value ? ' is-active' : ''}`}
+          aria-pressed={value === option.value}
+          disabled={disabled}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Alert({ message }: { message: string }) {
   return <div className="ui-alert">{message}</div>;
 }

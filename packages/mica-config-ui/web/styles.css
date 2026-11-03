@@ -764,6 +764,9 @@ html[data-theme='light'] .mica-config-ui {
 
   .table-panel-title {
     display: grid;
+    /* flex 子项的自动最小尺寸是 min-content，中文一行一个字时为 1 个字宽：副标题一长，
+       标题就会被压成竖排。这里显式放开，让它按剩余宽度正常换行。 */
+    min-width: 0;
     gap: 4px;
   }
 
@@ -831,6 +834,20 @@ html[data-theme='light'] .mica-config-ui {
     align-items: start;
     gap: 8px 18px;
     padding: 10px 16px;
+  }
+
+  /* 窄容器（抽屉里的嵌入面板、手机）改单列：150px 的标签列会把控件挤成一条缝，
+     口令框这种连自己填了什么字都看不见。按容器宽度折，不按视口——同一页既可能在
+     整窗里，也可能在 340px 的抽屉里。 */
+  @container page (max-width: 460px) {
+    .setting-row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+    }
+
+    .setting-row-label {
+      padding-top: 0;
+    }
   }
 
   .setting-row + .setting-row {

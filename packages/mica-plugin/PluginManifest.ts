@@ -555,7 +555,7 @@ function readDesktopPanel(
   if (typeof input === 'boolean') {
     // `"panel": true` 是最常见的写法，语义就是「一块面板，任何角色都显示」。
     return input
-      ? { ok: true, value: { label: pluginName, roles: [], display: 'drawer', shortcuts: [] } }
+      ? { ok: true, value: { label: pluginName, roles: [], display: 'drawer', status: false, shortcuts: [] } }
       : { ok: true, value: null };
   }
   if (!isRecord(input)) return { ok: false, error: 'desktop.panel 必须是对象或 true' };
@@ -577,9 +577,21 @@ function readDesktopPanel(
   const label = typeof rawLabel === 'string' && rawLabel.trim() ? rawLabel.trim() : pluginName;
   const display = readPanelDisplay(input.display);
   if (!display.ok) return display;
+  if (input.status !== undefined && typeof input.status !== 'boolean') {
+    return { ok: false, error: 'desktop.panel.status 必须是布尔值' };
+  }
   const shortcuts = readPanelShortcuts(input.shortcuts);
   if (!shortcuts.ok) return shortcuts;
-  return { ok: true, value: { label, roles, display: display.value, shortcuts: shortcuts.value } };
+  return {
+    ok: true,
+    value: {
+      label,
+      roles,
+      display: display.value,
+      status: input.status === true,
+      shortcuts: shortcuts.value,
+    },
+  };
 }
 
 /** `desktop.panel.display`：不写默认抽屉，写错直接拒绝（猜一个会画成另一种形态）。 */

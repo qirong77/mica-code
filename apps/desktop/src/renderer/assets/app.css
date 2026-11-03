@@ -4054,6 +4054,84 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   font-size: 9px;
 }
 
+/* 合并后的动作入口：一个「+」，悬停向上展开菜单 */
+.chat-composer-more {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.chat-composer-more-trigger {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.chat-composer-more-trigger:hover:not(:disabled),
+.chat-composer-more-trigger.is-active {
+  background: color-mix(in srgb, var(--color-fg-max) 7%, transparent);
+  color: color-mix(in srgb, var(--color-fg-max) 70%, transparent);
+}
+
+.chat-composer-more-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
+.chat-composer-more-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 40;
+  display: flex;
+  min-width: 168px;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 8px;
+  background: var(--color-panel);
+  box-shadow: 0 8px 24px var(--color-overlay-heavy);
+}
+
+.chat-composer-more-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-fg-soft);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-composer-more-menu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-fg-max) 7%, transparent);
+  color: var(--color-fg-max);
+}
+
+.chat-composer-more-menu button:disabled {
+  color: var(--color-fg-faint);
+  cursor: default;
+}
+
 .chat-composer-actions button {
   display: grid;
   width: 25px;
@@ -5817,6 +5895,63 @@ body.is-resizing-btw {
   scrollbar-width: thin;
 }
 
+/* 状态栏 + 快捷按钮：状态栏在上（一条常驻事实），按钮行在下。 */
+.chat-plugin-quickbar-stack {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+/* 插件在输入框上方那条常驻状态：关着面板也要看得见「现在是否生效、连着谁」。
+   用一条小圆点 + 一行字，不描边框——它要能被扫一眼就当背景信息略过。 */
+.chat-plugin-statusbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 0 0;
+  color: var(--color-fg-soft);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.chat-plugin-statusbar-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-fg-faint);
+}
+
+.chat-plugin-statusbar.tone-ok .chat-plugin-statusbar-dot {
+  background: var(--color-success, #3fb950);
+}
+
+.chat-plugin-statusbar.tone-warn .chat-plugin-statusbar-dot {
+  background: var(--color-warn, #d29922);
+}
+
+.chat-plugin-statusbar.tone-error .chat-plugin-statusbar-dot {
+  background: var(--color-danger, #f85149);
+}
+
+.chat-plugin-statusbar.tone-accent .chat-plugin-statusbar-dot {
+  background: var(--accent);
+}
+
+.chat-plugin-statusbar-label {
+  flex: none;
+  font-weight: 500;
+}
+
+.chat-plugin-statusbar-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-fg-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-plugin-quickbar::-webkit-scrollbar {
   height: 3px;
 }
@@ -6030,6 +6165,10 @@ body.is-resizing-btw {
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
+  /* 面板是「宿主里的一个容器」：设置行的标签列、分栏都要按这里的宽度折，而不是按视口
+     （配置页的等价物是 .page-panel）。`page` 这个名字是共享样式里 @container 的名字。 */
+  container-type: inline-size;
+  container-name: page;
 }
 
 /* 左栏没有搜索框，只有一列分区：让列表占满整栏（SplitView 默认给头部留了一行 auto）。 */
@@ -6313,6 +6452,10 @@ body.is-resizing-btw {
   gap: 10px;
   overflow-y: auto;
   padding: 8px 10px 14px;
+  /* 抽屉只有 340px：里面的共享控件（设置行、分栏）必须按这个宽度折，否则标签列会把
+     输入框挤成一条缝。名字与配置页一致，共享样式里的 @container 直接命中。 */
+  container-type: inline-size;
+  container-name: page;
 }
 
 .chat-plugin-spin {

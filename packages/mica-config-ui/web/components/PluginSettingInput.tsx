@@ -1,4 +1,4 @@
-import { Switch } from './Ui.js';
+import { Segmented, Switch } from './Ui.js';
 import { SecretInput } from './SecretInput.js';
 import type { ConfigWebPluginSetting } from '../../src/shared/types.js';
 
@@ -69,19 +69,14 @@ export function PluginSettingInput({
   // 枚举项自绘成按钮组：原生 select 的字号与内边距跟旁边的输入框对不齐。
   if (field.type === 'select') {
     return (
-      <div className="config-segmented" role="group" aria-label={field.label} id={inputId}>
-        {(field.options ?? []).map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            className={`config-segment${value === option.value ? ' is-active' : ''}`}
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        id={inputId}
+        value={value}
+        options={field.options ?? []}
+        ariaLabel={field.label}
+        disabled={disabled}
+        onChange={onChange}
+      />
     );
   }
 

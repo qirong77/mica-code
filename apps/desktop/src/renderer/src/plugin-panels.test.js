@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   applyPanelResult,
   clearMenuCache,
+  isCompletedToolEvent,
   isOpenableLink,
   loadPluginPanels,
   menuCacheKey,
@@ -24,6 +25,13 @@ const plugin = (overrides = {}) => ({
   state: 'enabled',
   desktopPanel: { label: '需求开发', roles: ['需求开发'], shortcuts: [] },
   ...overrides
+})
+
+test('只在本会话的工具完成时刷新插件视图', () => {
+  const payload = { id: 'one', event: { type: 'tool_use', part: { state: { status: 'completed' } } } }
+  expect(isCompletedToolEvent(payload, 'one')).toBe(true)
+  expect(isCompletedToolEvent(payload, 'two')).toBe(false)
+  expect(isCompletedToolEvent({ ...payload, event: { ...payload.event, part: { state: { status: 'pending' } } } }, 'one')).toBe(false)
 })
 
 describe('selectPluginPanels', () => {
@@ -70,6 +78,7 @@ describe('selectPluginPanels', () => {
         label: '巡检',
         icon: 'messages-square',
         display: 'drawer',
+        status: false,
         shortcuts: []
       }
     ])

@@ -9,14 +9,21 @@ import { acquireProcessLock } from '@packages/mica-common/processLock.js';
  * 工具会同时开着，所以照 schedule 的规矩来：**同一把跨进程锁 + 先写临时文件再 rename**。
  * 现读、改一条、原子写，不把内存里那份整份盖回去。
  *
- * 口令不进这个文件：它属于 `Secrets.ts`（macOS Keychain / 0600 文件）。
+ * 口令不进这个文件：它属于 `Secrets.ts`（本机 0600 明文文件，见那里的说明）。
  */
 
 export const SSH_DATA_FILE = 'data.json';
 
-export type SshAuth = 'password' | 'key' | 'agent';
+/**
+ * 只有两种认证：密码、私钥。
+ *
+ * 「用 ssh config / agent」不是第三种：私钥模式把路径留空就是它（系统 ssh 自己去找
+ * `~/.ssh/config` 里的别名、agent 里的 key）。多一个选项只会让人在两个都像是「不填
+ * 东西」的选项之间犹豫。
+ */
+export type SshAuth = 'password' | 'key';
 
-export const SSH_AUTH_TYPES: readonly SshAuth[] = ['password', 'key', 'agent'];
+export const SSH_AUTH_TYPES: readonly SshAuth[] = ['password', 'key'];
 
 export type SshHost = {
   /** 别名，模型在工具调用里就是用它指定机器；同时也是口令的 key。 */
@@ -40,6 +47,14 @@ export type SshHost = {
 export type SshData = {
   version: 1;
   updatedAt: string;
+  /**
+   * 这个插件是否对模型生效。
+   *
+   * 关闭时：工具**不注册**（工具表里根本没有 `ssh_*`）、prompt 段落不注入、输入框上方
+   * 不显示状态栏。默认关：配好的机器是「用户填好了资料」，不是「模型现在可以动别人的
+   * 服务器」——后者必须是一次明确的动作。
+   */
+  enabled: boolean;
   /** 配置页插件详情里的「运行状态」那一行（清单 `status` 声明的 key）。 */
   hostsSummary?: string;
   hosts: SshHost[];
@@ -63,7 +78,7 @@ const HOST_ADDRESS_PATTERN = /^[a-zA-Z0-9._:[\]-]{1,255}$/;
 const USER_PATTERN = /^[a-zA-Z0-9._-]{1,64}$/;
 
 export function emptyData(): SshData {
-  return { version: 1, updatedAt: new Date().toISOString(), hosts: [] };
+  return { version: 1, updatedAt: new Date().toISOString(), enabled: false, hosts: [] };
 }
 
 function text(value: unknown, limit: number): string {
@@ -83,7 +98,7 @@ function normalizeHost(input: unknown): SshHost | null {
   const user = text(raw.user, 64);
   if (!HOST_ID_PATTERN.test(id) || !HOST_ADDRESS_PATTERN.test(host) || !USER_PATTERN.test(user)) return null;
   const port = Number(raw.port);
-  const auth = SSH_AUTH_TYPES.includes(raw.auth as SshAuth) ? (raw.auth as SshAuth) : 'agent';
+  const auth = SSH_AUTH_TYPES.includes(raw.auth as SshAuth) ? (raw.auth as SshAuth) : 'key';
   const keyPath = text(raw.keyPath, 512);
   const fingerprint = text(raw.fingerprint, 200);
   const now = new Date().toISOString();
@@ -106,11 +121,11 @@ function normalizeHost(input: unknown): SshHost | null {
 /** 读不出来就当没有：清单坏了应该去面板重配，而不是让插件起不来。 */
 export function readData(file: string): SshData {
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { hosts?: unknown };
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { hosts?: unknown; enabled?: unknown };
     const hosts = Array.isArray(parsed.hosts)
       ? parsed.hosts.map((entry) => normalizeHost(entry)).filter((entry): entry is SshHost => entry !== null)
       : [];
-    return { version: 1, updatedAt: new Date().toISOString(), hosts };
+    return { version: 1, updatedAt: new Date().toISOString(), enabled: flag(parsed.enabled), hosts };
   } catch {
     return emptyData();
   }
@@ -190,7 +205,7 @@ export function upsertHost(data: SshData, draft: HostDraft): HostUpsertResult {
   const portText = typeof draft.port === 'string' ? draft.port.trim() : draft.port;
   const port = portText === undefined || portText === '' ? 22 : Number(portText);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error('端口必须是 1–65535 之间的整数');
-  const auth = SSH_AUTH_TYPES.includes(draft.auth as SshAuth) ? (draft.auth as SshAuth) : 'agent';
+  const auth = SSH_AUTH_TYPES.includes(draft.auth as SshAuth) ? (draft.auth as SshAuth) : 'key';
   const keyPath = text(draft.keyPath, 512);
   if (auth === 'key' && !keyPath) throw new Error('用密钥认证时要填私钥路径（例如 ~/.ssh/id_ed25519）');
 

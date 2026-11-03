@@ -46,6 +46,54 @@ describe('normalizePluginPanelView', () => {
     expect(view.sections?.[0].fields?.map((field) => field.type ?? 'text')).toEqual(['password', 'text', 'text']);
   });
 
+  it('keeps select options and switch fields, trimming what it cannot render', () => {
+    const view = normalizePluginPanelView({
+      title: 'ssh',
+      sections: [
+        {
+          title: '连接设置',
+          fields: [
+            {
+              key: 'auth',
+              label: '认证方式',
+              type: 'select',
+              value: 'password',
+              options: [
+                { value: 'password', label: '密码连接' },
+                { value: 'key', label: 'SSH 私钥连接' },
+                { value: '', label: '空值会被丢掉' },
+                { value: 'extra', label: 'x'.repeat(200) },
+              ],
+            },
+            { key: 'enabled', label: '让模型使用', type: 'switch', value: 'true' },
+            { key: 'broken', label: '没有选项的 select', type: 'select' },
+          ],
+        },
+      ],
+    });
+    const fields = view.sections?.[0].fields ?? [];
+    expect(fields[0]).toMatchObject({ type: 'select', value: 'password' });
+    expect(fields[0].options?.map((option) => option.value)).toEqual(['password', 'key', 'extra']);
+    expect(fields[0].options?.[2].label.length).toBeLessThanOrEqual(60);
+    expect(fields[1]).toMatchObject({ type: 'switch', value: 'true' });
+    // 没有选项的 select 渲染出来是个点不动的下拉，退回普通文本框。
+    expect(fields[2].type).toBe('text');
+  });
+
+  it('keeps a status line with a bounded label and tone', () => {
+    const view = normalizePluginPanelView({
+      title: 'ssh',
+      statusBar: { label: 'SSH 已启用', detail: 'test, prod', tone: 'ok' },
+    });
+    expect(view.statusBar).toEqual({ label: 'SSH 已启用', detail: 'test, prod', tone: 'ok' });
+
+    const noLabel = normalizePluginPanelView({ title: 'x', statusBar: { detail: 'only detail' } });
+    expect(noLabel.statusBar).toBeUndefined();
+
+    const badTone = normalizePluginPanelView({ title: 'x', statusBar: { label: 'ok', tone: 'purple' } });
+    expect(badTone.statusBar?.tone).toBeUndefined();
+  });
+
   it('keeps the auto-commit action only when the section has fields', () => {
     const view = normalizePluginPanelView({
       title: 'x',

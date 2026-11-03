@@ -7,11 +7,13 @@ import path from 'path'
 import { promisify } from 'util'
 import {
   cachedRepository,
+  cachedWorktreeRead,
   discardDirectory,
   discardFile,
   getWorkspaceStatus,
   git,
   gitErrorMessage,
+  noteWorktreeChange,
   safeFilePath,
   stageFile,
   unstageFile
@@ -140,7 +142,9 @@ describe('discardDirectory', () => {
     await writeFile(path.join(dir, 'src/new.txt'), 'new\n')
     await mkdir(path.join(dir, 'src/nested'), { recursive: true })
     await writeFile(path.join(dir, 'src/nested/deep.txt'), 'deep\n')
-    expect(await status(dir)).toBe(' M src/a.txt\n D src/b.txt\n?? src/nested/deep.txt\n?? src/new.txt\n')
+    expect(await status(dir)).toBe(
+      ' M src/a.txt\n D src/b.txt\n?? src/nested/deep.txt\n?? src/new.txt\n'
+    )
 
     const result = await discardDirectory(dir, 'src')
 
@@ -314,9 +318,7 @@ describe('getWorkspaceStatus', () => {
 
   it('普通仓库给出根目录、分支名与项目名', async () => {
     const statusInfo = await getWorkspaceStatus(dir)
-    expect(statusInfo.branch).toBe(
-      (await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
-    )
+    expect(statusInfo.branch).toBe((await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim())
     expect(statusInfo.projectName).toBe(path.basename(dir))
     expect(statusInfo.root).toBe((await git(dir, ['rev-parse', '--show-toplevel'])).trim())
   })
@@ -383,5 +385,74 @@ describe('cachedRepository', () => {
     } finally {
       await rm(outside, { recursive: true, force: true })
     }
+  })
+})
+
+describe('cachedWorktreeRead', () => {
+  let dir
+  beforeEach(async () => {
+    dir = await setup()
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+
+  /** 一个能被计数的「读取」：慢一点，确保同时发起的调用真的重叠。 */
+  function counter(delay = 30) {
+    const state = { runs: 0 }
+    state.run = async () => {
+      state.runs += 1
+      const mine = state.runs
+      await new Promise((resolve) => setTimeout(resolve, delay))
+      return `value-${mine}`
+    }
+    return state
+  }
+
+  it('同时发起的同一 key 只真正跑一次', async () => {
+    const probe = counter()
+    const results = await Promise.all([
+      cachedWorktreeRead(dir, 'status', probe.run),
+      cachedWorktreeRead(dir, 'status', probe.run),
+      cachedWorktreeRead(dir, 'status', probe.run)
+    ])
+    expect(probe.runs).toBe(1)
+    expect(results).toEqual(['value-1', 'value-1', 'value-1'])
+  })
+
+  it('跑完之后仍按 TTL 复用缓存', async () => {
+    const probe = counter(0)
+    await cachedWorktreeRead(dir, 'status', probe.run)
+    await cachedWorktreeRead(dir, 'status', probe.run)
+    expect(probe.runs).toBe(1)
+  })
+
+  it('不同 key 并发时各自的结果都留在缓存里', async () => {
+    const probe = counter()
+    const [a, b] = await Promise.all([
+      cachedWorktreeRead(dir, 'status', probe.run),
+      cachedWorktreeRead(dir, 'counts', probe.run)
+    ])
+    expect(probe.runs).toBe(2)
+    expect(new Set([a, b]).size).toBe(2)
+    // 两个 key 都能命中缓存：再读一次不会重新跑。
+    expect(await cachedWorktreeRead(dir, 'status', probe.run)).toBe(a)
+    expect(await cachedWorktreeRead(dir, 'counts', probe.run)).toBe(b)
+    expect(probe.runs).toBe(2)
+  })
+
+  it('refresh 跳过缓存与在跑的读取', async () => {
+    const probe = counter(80)
+    const first = cachedWorktreeRead(dir, 'status', probe.run)
+    const forced = await cachedWorktreeRead(dir, 'status', probe.run, { refresh: true })
+    await first
+    expect(probe.runs).toBe(2)
+    expect(forced).toBe('value-2')
+  })
+
+  it('打点失效后重新跑', async () => {
+    const probe = counter(0)
+    await cachedWorktreeRead(dir, 'status', probe.run)
+    noteWorktreeChange(dir)
+    await cachedWorktreeRead(dir, 'status', probe.run)
+    expect(probe.runs).toBe(2)
   })
 })

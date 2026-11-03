@@ -1,5 +1,13 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SshHost } from './Hosts.js';
@@ -15,8 +23,8 @@ import { readPassword, hasStoredPassword } from './Secrets.js';
  * 2. **输出预算**。远程 shell 的输出经常上万行（`make`、`docker logs`），一次塞进上下文
  *    会让**之后每一轮**都重发它。所以只保留尾部 N 行，全文留在远端 `/tmp` 并告诉模型
  *    路径——要看细节让它自己 `tail`/`grep`，别一次性搬进对话。
- * 3. **凭证不出本进程**。口令从 Keychain 取，经 0700 的 askpass 脚本喂给 ssh，调用结束
- *    立刻删掉；不进命令行参数（`ps` 看得到）、不进日志、不进模型上下文。
+ * 3. **凭证不出本进程**。口令从插件数据目录的 0600 文件取，经 0700 的 askpass 脚本喂给
+ *    ssh，调用结束立刻删掉；不进命令行参数（`ps` 看得到）、不进日志、不进模型上下文。
  */
 
 export type RemoteContext = {
@@ -559,6 +567,13 @@ export function closeAllControlMasters(ctx: RemoteContext, hosts: SshHost[]): vo
 export function readHostFingerprint(ctx: RemoteContext, host: SshHost): string | null {
   const file = knownHostsPath(ctx.dataDir);
   const entry = host.port === 22 ? host.host : `[${host.host}]:${host.port}`;
+  try {
+    // 空文件（还没信任过任何机器）与不存在一样：ssh-keygen 会对它抱怨
+    // 「is not a public key file」，那条 stderr 会混进调用日志里当故障看。
+    if (!statSync(file).size) return null;
+  } catch {
+    return null;
+  }
   try {
     const output = execFileSync(ctx.sshKeygenBinary, ['-lf', file], {
       encoding: 'utf8',

@@ -345,6 +345,17 @@ function createWebApi(env) {
         })
         return response.json()
       },
+      // 附件与图片走两条路：图片要落成 `[Image](...)` 引用，其它文件插的是路径。
+      saveAttachment: async ({ file } = {}) => {
+        const payload = file ? await readFileAsDataUrl(file) : ''
+        if (!payload) return { ok: false, error: '缺少文件数据' }
+        const response = await fetch('/api/attachment', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ dataUrl: payload, name: file?.name || 'file' })
+        })
+        return response.json()
+      },
       dispose: (id) => invoke('chat:dispose', { id }),
       isRunning: (id, sessionId) => invoke('chat:is-running', { id, sessionId }),
       onEvent: (callback) => subscribe('chat:event', callback),

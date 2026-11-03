@@ -32,10 +32,11 @@ describe('cachedWorktreeRead', () => {
   it('reuses the result for the same repository key', async () => {
     const dir = repo()
     let runs = 0
-    const read = () => cachedWorktreeRead(dir, 'summary:HEAD', async () => {
-      runs += 1
-      return { files: runs }
-    })
+    const read = () =>
+      cachedWorktreeRead(dir, 'summary:HEAD', async () => {
+        runs += 1
+        return { files: runs }
+      })
     expect(await read()).toEqual({ files: 1 })
     expect(await read()).toEqual({ files: 1 })
     expect(runs).toBe(1)
@@ -74,10 +75,15 @@ describe('cachedWorktreeRead', () => {
     const dir = repo()
     let runs = 0
     const read = (options) =>
-      cachedWorktreeRead(dir, 'summary', async () => {
-        runs += 1
-        return runs
-      }, options)
+      cachedWorktreeRead(
+        dir,
+        'summary',
+        async () => {
+          runs += 1
+          return runs
+        },
+        options
+      )
     await read()
     expect(await read({ refresh: true })).toBe(2)
   })
@@ -93,6 +99,28 @@ describe('cachedWorktreeRead', () => {
       })
     await read()
     await read()
+    expect(runs).toBe(2)
+  })
+
+  it('recomputes the workspace status after switching branch', async () => {
+    const dir = repo()
+    const initial = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir })
+      .toString()
+      .trim()
+    let runs = 0
+    // `git:status` 也走这条缓存：分支名是它的一部分，切分支后必须立刻读到新名字。
+    const read = () =>
+      cachedWorktreeRead(dir, 'workspace-status', async () => {
+        runs += 1
+        return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: dir })
+          .toString()
+          .trim()
+      })
+    expect(await read()).toBe(initial)
+    expect(await read()).toBe(initial)
+    expect(runs).toBe(1)
+    execFileSync('git', ['checkout', '-qb', 'feature'], { cwd: dir })
+    expect(await read()).toBe('feature')
     expect(runs).toBe(2)
   })
 })

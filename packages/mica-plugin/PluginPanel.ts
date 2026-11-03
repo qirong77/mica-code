@@ -71,15 +71,34 @@ export type PluginPanelField = {
    * `password` 是密文输入（带眼睛按钮切明文）：口令、Token 这类值不该以明文出现在
    * 面板上——它会被截图、被旁人看到，也不该因为「面板只有 text / number 两种」就让
    * 插件自己发明一个 `type: 'secret'` 的私有约定。
+   *
+   * `select` 是一组互斥取值（认证方式、协议这类），渲染成一条 TAB：选项少、全部摆在
+   * 明面上点一次就到，也不像原生下拉那样和旁边的输入框差一截高度。
+   *
+   * `switch` 是一个开关，取值只能是字符串 `'true'` / `'false'`（与插件设置里 switch
+   * 的约定一致，宿主只翻转这两个值）。
    */
   type?: PluginPanelFieldType;
   value?: string;
   placeholder?: string;
   hint?: string;
+  /** `type: 'select'` 的候选值；其它类型忽略。 */
+  options?: PluginPanelFieldOption[];
+};
+
+export type PluginPanelFieldOption = {
+  value: string;
+  label: string;
 };
 
 /** `PluginPanelField.type` 的取值（单一事实来源，归一化与界面共用）。 */
-export const PLUGIN_PANEL_FIELD_TYPES = ['text', 'number', 'password'] as const;
+export const PLUGIN_PANEL_FIELD_TYPES = [
+  'text',
+  'number',
+  'password',
+  'select',
+  'switch',
+] as const;
 
 export type PluginPanelFieldType = (typeof PLUGIN_PANEL_FIELD_TYPES)[number];
 
@@ -129,6 +148,14 @@ export type PluginPanelView = {
   subtitle?: string;
   /** 标题右侧那一段状态（「轮询中」「已停止」）。 */
   status?: { label: string; tone?: PluginPanelTone };
+  /**
+   * 输入框上方那条常驻状态（「SSH · 已启用 · prod」）。
+   *
+   * 与 `status` 的分工：那个画在面板自己的标题栏里，只在面板打开时看得到；这一条是
+   * **关着面板也要看见**的事实（某个能力现在是否生效、连着哪台机器）。宿主把它画在
+   * 快捷按钮那一行，所以插件停用或功能关闭时应当不返回它，而不是返回一条空字符串。
+   */
+  statusBar?: PluginPanelStatusBar;
   sections?: PluginPanelSection[];
   /**
    * 给快捷按钮用的悬浮菜单内容，按 key 取（`desktop.panel.shortcuts[].menu` 指向这里）。
@@ -140,6 +167,13 @@ export type PluginPanelView = {
   menus?: Record<string, PluginPanelMenuItem[]>;
   /** 按清单中快捷按钮的 id 提供当前状态。 */
   shortcutStates?: Record<string, PluginPanelShortcutState>;
+};
+
+export type PluginPanelStatusBar = {
+  label: string;
+  tone?: PluginPanelTone;
+  /** 右侧的一行补充（主机、模式）。 */
+  detail?: string;
 };
 
 export type PluginPanelShortcutState = {
@@ -334,6 +368,7 @@ const MAX_SECTION_TEXT = 4000;
 const MAX_ROWS = 40;
 const MAX_ITEMS = 40;
 const MAX_FIELDS = 12;
+const MAX_FIELD_OPTIONS = 8;
 const MAX_ACTIONS = 8;
 const MAX_SECTIONS = 12;
 const MAX_DIALOG_COLUMNS = 6;
@@ -430,13 +465,29 @@ function fieldOf(input: unknown): PluginPanelField | null {
   if (!key || !label) return null;
   const hint = text(raw.hint, 200);
   const placeholder = text(raw.placeholder, 120);
+  const declared = isPluginPanelFieldType(raw.type) ? raw.type : 'text';
+  // 选项只在 select 上有意义：别的类型带着一份 options 只会让调用方以为它们会被渲染。
+  const options =
+    declared === 'select'
+      ? list(raw.options)
+          .slice(0, MAX_FIELD_OPTIONS)
+          .map((entry) => {
+            const option = record(entry);
+            const value = text(option.value, 64);
+            return value ? { value, label: text(option.label, 40) || value } : null;
+          })
+          .filter((entry): entry is PluginPanelFieldOption => entry !== null)
+      : [];
+  // 一个没有选项的 select 在页面上是个点不动的下拉：退回普通文本框，至少还能输。
+  const type = declared === 'select' && options.length === 0 ? 'text' : declared;
   return {
     key,
     label,
-    type: isPluginPanelFieldType(raw.type) ? raw.type : 'text',
+    type,
     ...(raw.value === undefined || raw.value === null ? {} : { value: text(String(raw.value), 200) }),
     ...(placeholder ? { placeholder } : {}),
     ...(hint ? { hint } : {}),
+    ...(options.length > 0 ? { options } : {}),
   };
 }
 
@@ -520,11 +571,24 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
     .filter((entry): entry is PluginPanelSection => entry !== null);
   const menus = menusOf(raw.menus);
   const shortcutStates = shortcutStatesOf(raw.shortcutStates);
+  const statusBarRaw = record(raw.statusBar);
+  const statusBarLabel = text(statusBarRaw.label, 40);
+  const statusBarDetail = text(statusBarRaw.detail, 120);
+  const statusBarTone = tone(statusBarRaw.tone);
   return {
     title,
     ...(subtitle ? { subtitle } : {}),
     ...(statusLabel
       ? { status: { label: statusLabel, ...(tone(statusRaw.tone) ? { tone: tone(statusRaw.tone) } : {}) } }
+      : {}),
+    ...(statusBarLabel
+      ? {
+          statusBar: {
+            label: statusBarLabel,
+            ...(statusBarTone ? { tone: statusBarTone } : {}),
+            ...(statusBarDetail ? { detail: statusBarDetail } : {}),
+          },
+        }
       : {}),
     ...(sections.length > 0 ? { sections } : {}),
     ...(menus ? { menus } : {}),

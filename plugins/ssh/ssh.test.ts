@@ -326,19 +326,53 @@ describe('配置面板', () => {
   function setupPanel() {
     const dataFile = join(dir, 'data.json');
     const data = emptyData();
-    data.hosts.push(makeHost({ auth: 'agent', keyPath: '' }));
+    data.hosts.push(makeHost());
     writeData(dataFile, data);
     const closed: string[] = [];
-    const panel = createPanelHandler({ ctx, dataFile, closeSession: (id) => closed.push(id) });
-    return { panel, dataFile, closed };
+    const toggles: boolean[] = [];
+    const panel = createPanelHandler({
+      ctx,
+      dataFile,
+      closeSession: (id) => closed.push(id),
+      onEnabledChange: (enabled) => toggles.push(enabled),
+    });
+    return { panel, dataFile, closed, toggles };
   }
 
-  it('视图里一台机器一行，带测试/编辑/删除', async () => {
+  it('视图里一台机器一行，带编辑/删除', async () => {
     const { panel } = setupPanel();
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
     const section = view.sections?.find((entry) => entry.title === '服务器');
     expect(section?.items?.[0]).toMatchObject({ key: 'test', label: 'test — root@10.0.0.1:22' });
-    expect(section?.items?.[0]?.actions?.map((action) => action.id)).toEqual(['test', 'edit', 'delete']);
+    expect(section?.items?.[0]?.actions?.map((action) => action.id)).toEqual(['edit', 'delete']);
+  });
+
+  it('默认关闭：没有状态栏，开关是一个 switch 字段', async () => {
+    const { panel } = setupPanel();
+    const view = (await panel.view({ role: 'default' })) as PluginPanelView;
+    expect(view.statusBar).toBeUndefined();
+    const section = view.sections?.find((entry) => entry.title === '状态');
+    expect(section?.fields?.[0]).toMatchObject({ key: 'enabled', type: 'switch', value: 'false' });
+    expect(section?.commit).toBe('toggle');
+  });
+
+  it('打开开关写盘、通知宿主，并给出状态栏', async () => {
+    const { panel, dataFile, toggles } = setupPanel();
+    const result = await panel.action({ action: 'toggle', values: { enabled: 'true' } });
+    expect(result).toMatchObject({ message: expect.stringContaining('已开启') });
+    expect(readData(dataFile).enabled).toBe(true);
+    expect(toggles).toEqual([true]);
+    const view = (await panel.view({ role: 'default' })) as PluginPanelView;
+    expect(view.statusBar).toMatchObject({ label: 'SSH 已启用', detail: 'test' });
+  });
+
+  it('一台机器都没有时不允许开启', async () => {
+    const dataFile = join(dir, 'empty.json');
+    writeData(dataFile, emptyData());
+    const panel = createPanelHandler({ ctx, dataFile, closeSession: () => {} });
+    const result = await panel.action({ action: 'toggle', values: { enabled: 'true' } });
+    expect(result).toMatchObject({ message: expect.stringContaining('先加一台服务器') });
+    expect(readData(dataFile).enabled).toBe(false);
   });
 
   it('删除要两步：先记下、再确认', async () => {
@@ -352,28 +386,85 @@ describe('配置面板', () => {
     expect(JSON.parse(readFileSync(join(dir, PANEL_STATE_FILE), 'utf8')).pendingDelete).toBeUndefined();
   });
 
-  it('编辑时把当前值填回输入框，口令永远不回显', async () => {
+  it('编辑时把当前值填回输入框，私钥模式不出现口令字段', async () => {
     const { panel } = setupPanel();
     await panel.action({ action: 'edit', key: 'test' });
-    const draft = ((await panel.view({ role: 'default' })) as PluginPanelView).sections?.find((entry) => entry.title === '编辑 test');
-    const password = draft?.fields?.find((field) => field.key === 'password');
+    const view = (await panel.view({ role: 'default' })) as PluginPanelView;
+    const draft = view.sections?.find((entry) => entry.title === '连接设置 · test');
     expect(draft?.fields?.find((field) => field.key === 'host')?.value).toBe('10.0.0.1');
-    expect(password).toMatchObject({ type: 'password', value: '' });
+    expect(draft?.fields?.find((field) => field.key === 'keyPath')?.value).toBe('~/.ssh/id_ed25519');
+    expect(draft?.fields?.find((field) => field.key === 'password')).toBeUndefined();
   });
 
-  it('保存时校验不过就把原因回给用户，而不是抛错', async () => {
+  it('切到密码认证才出现口令字段，且口令永远不回填', async () => {
     const { panel } = setupPanel();
-    const result = await panel.action({ action: 'save-key', values: { id: 'bad id', host: 'x', user: 'root' } });
-    expect(result).toMatchObject({ message: expect.stringContaining('保存失败') });
+    await panel.action({ action: 'edit', key: 'test' });
+    await panel.action({ action: 'draft', values: { id: 'test', host: '10.0.0.1', user: 'root', auth: 'password' } });
+    const view = (await panel.view({ role: 'default' })) as PluginPanelView;
+    const draft = view.sections?.find((entry) => entry.title === '连接设置 · test');
+    expect(draft?.fields?.find((field) => field.key === 'password')).toMatchObject({
+      type: 'password',
+      value: '',
+    });
+    expect(draft?.fields?.find((field) => field.key === 'keyPath')).toBeUndefined();
+    expect(draft?.actions?.map((action) => action.id)).toEqual(['connect', 'cancel']);
   });
 
-  it('用 ssh config 保存会清掉不再适用的私钥路径要求', async () => {
-    const { panel, dataFile } = setupPanel();
-    const result = await panel.action({
-      action: 'save-agent',
-      values: { id: 'second', host: '10.0.0.2', user: 'deploy', port: '22' },
-    });
-    expect(result).toMatchObject({ message: expect.stringContaining('已添加') });
-    expect(readData(dataFile).hosts.map((host) => host.id)).toEqual(['test', 'second']);
+  it('连接时校验不过就把原因回给用户，而不是抛错', async () => {
+    const { panel } = setupPanel();
+    const result = await panel.action({ action: 'connect', values: { id: 'bad id', host: 'x', user: 'root' } });
+    expect(result).toMatchObject({ message: expect.stringContaining('连接失败') });
+  });
+});
+
+describe('开关决定模型能看到什么', () => {
+  function fakeContext(home: string) {
+    const registered: string[] = [];
+    let panelHandler: { view: unknown; action: unknown } | null = null;
+    const ctx = {
+      pluginId: 'ssh',
+      paths: { config: home },
+      settings: { get: () => ({}) },
+      tools: {
+        register: (tool: { name: string }) => {
+          registered.push(tool.name);
+          return { dispose: () => registered.splice(registered.indexOf(tool.name), 1) };
+        },
+      },
+      prompt: { section: () => ({ dispose: () => {} }) },
+      desktop: {
+        panel: (handler: unknown) => {
+          panelHandler = handler as { view: unknown; action: unknown };
+          return { dispose: () => {} };
+        },
+      },
+      onDispose: () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+      health: { report: () => {} },
+    };
+    return { ctx, registered, panel: () => panelHandler };
+  }
+
+  it('关闭时不注册任何工具，开启后注册四个，再关掉全部注销', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mica-ssh-home-'));
+    const dataFile = join(home, 'plugin-data', 'ssh', 'data.json');
+    writeData(dataFile, { ...emptyData(), enabled: false, hosts: [makeHost()] });
+    const fake = fakeContext(home);
+    const setup = (await import('./index.js')).default;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    setup(fake.ctx as any);
+    expect(fake.registered).toEqual([]);
+
+    const panel = fake.panel();
+    expect(panel).not.toBeNull();
+    const handler = panel as unknown as {
+      action: (input: { action: string; values?: Record<string, string> }) => Promise<unknown>;
+    };
+    await handler.action({ action: 'toggle', values: { enabled: 'true' } });
+    expect(fake.registered.sort()).toEqual(['ssh_hosts', 'ssh_read', 'ssh_run', 'ssh_session']);
+
+    await handler.action({ action: 'toggle', values: { enabled: 'false' } });
+    expect(fake.registered).toEqual([]);
+    rmSync(home, { recursive: true, force: true });
   });
 });

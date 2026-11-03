@@ -171,6 +171,7 @@ describe('parsePluginManifest desktop panel', () => {
         label: '需求开发',
         roles: ['需求开发', '辅助'],
         display: 'drawer',
+        status: false,
         shortcuts: [],
       });
     }
@@ -184,6 +185,7 @@ describe('parsePluginManifest desktop panel', () => {
         label: 'Demo',
         roles: [],
         display: 'drawer',
+        status: false,
         shortcuts: [],
       });
   });

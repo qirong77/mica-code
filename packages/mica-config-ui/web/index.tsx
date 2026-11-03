@@ -40,7 +40,7 @@ export { SecretInput } from './components/SecretInput.js';
  * 三种按钮高度、两套状态色。用它们时必须包在 `.mica-config-ui` 容器里（样式都限定
  * 在该作用域内）。
  */
-export { Alert, Button, CollapsiblePanel, Empty, SplitView, Tag } from './components/Ui.js';
+export { Alert, Button, CollapsiblePanel, Empty, Segmented, SplitView, Tag } from './components/Ui.js';
 
 /** 单个插件设置字段的控件：插件详情与会话设置共用，保证两处控件一致。 */
 export { PluginSettingInput } from './components/PluginSettingInput.js';

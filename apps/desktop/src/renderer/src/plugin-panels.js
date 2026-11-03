@@ -15,7 +15,7 @@ import { readPluginsDetails } from './plugins-details'
  * 用户可能刚在输入条切了角色还没发消息（新角色要到下一轮才落盘），所以调用方把「待生效
  * 的角色」一并传进来。
  */
-const PANEL_RETRY_DELAYS = [1500, 4000, 9000]
+export const PANEL_RETRY_DELAYS = [1500, 4000, 9000]
 
 /**
  * 读到空结果就退避重试几次。
@@ -48,11 +48,23 @@ export function usePluginPanels(role) {
 
   useEffect(() => {
     let alive = true
-    void loadPluginPanels(role, { isAlive: () => alive }).then((next) => {
-      if (alive) setPanels(next)
-    })
+    let timer = 0
+    let tries = 0
+    const run = async () => {
+      const next = await loadPluginPanels(role, { isAlive: () => alive })
+      if (!alive) return
+      setPanels(next)
+      // 空结果有两种：这个会话没有面板，或者运行时还没起来 / 刚重启过。后者不该让这排按钮
+      // 与状态行整页空着等到用户切角色，所以隔一会儿再读几次（有上限，不会一直轮询）。
+      if (next.length === 0 && tries < 5) {
+        tries += 1
+        timer = setTimeout(run, 15_000)
+      }
+    }
+    void run()
     return () => {
       alive = false
+      if (timer) clearTimeout(timer)
     }
   }, [role])
 
@@ -79,6 +91,9 @@ export function selectPluginPanels(plugins, role) {
       label: plugin.desktopPanel.label || plugin.name || plugin.id,
       icon: plugin.icon || '',
       display: plugin.desktopPanel.display === 'modal' ? 'modal' : 'drawer',
+      // 声明了 `status` 的面板即使没有任何快捷按钮也要问一次视图：输入框上方那行状态
+      // （「这个能力现在生效没有」）就来自它，丢了这一位状态行永远不会出现。
+      status: plugin.desktopPanel.status === true,
       shortcuts: Array.isArray(plugin.desktopPanel.shortcuts) ? plugin.desktopPanel.shortcuts : []
     }))
 }
@@ -243,4 +258,39 @@ export function pluginPanelTabs(sections, focusSection) {
   }))
   const focused = tabs.findIndex((tab) => tab.key === focusSection)
   return { tabs, activeIndex: focused >= 0 ? focused : 0 }
+}
+
+/**
+ * 「某个插件的面板状态变了」的广播。
+ *
+ * 抽屉里的动作（开关、连接、删机器）会改变输入框上方那排按钮的状态行，但两者是两个组件、
+ * 各存一份视图：抽屉自己刷新看不到对方，对方要等 30 秒轮询才更新。开关这种「点完就要看到
+ * 结果」的东西不能等，所以动作成功后广播一次，快捷栏那一侧立刻重取视图。
+ */
+const panelStatusListeners = new Set()
+
+export function isCompletedToolEvent(payload, nodeId) {
+  return Boolean(
+    nodeId &&
+    payload?.id === nodeId &&
+    payload.event?.type === 'tool_use' &&
+    payload.event.part?.state?.status === 'completed'
+  )
+}
+
+export function notifyPluginPanelStatusChanged() {
+  for (const listener of [...panelStatusListeners]) {
+    try {
+      listener()
+    } catch {
+      // 监听方是页面组件，出错只影响它自己，不能连带把动作结果吞掉。
+    }
+  }
+}
+
+export function subscribePluginPanelStatus(listener) {
+  panelStatusListeners.add(listener)
+  return () => {
+    panelStatusListeners.delete(listener)
+  }
 }

@@ -549,9 +549,17 @@ ctx.desktop.panel({
 - 面板只表达「几行只读状态 + 一列条目 + 几个输入框 + 几个按钮」。宿主会裁剪长度、条目数与
   字段类型，畸形视图不会让页面崩掉；它拿到的动作只有 `{ action, key?, values? }`。
   输入框是 `fields: [{ key, label, type?, value?, placeholder?, hint? }]`，`type` 取
-  `text`（默认）/ `number` / `password`。口令、Token 这类值只能用 `password`（密文，带眼睛
+  `text`（默认）/ `number` / `password` / `select`（配 `options: [{ value, label }]`，值由
+  `commit` 动作回传，宿主渲染成共享的分段选择器——两种互斥形态二选一用它，别塞两个开关）。
+  口令、Token 这类值只能用 `password`（密文，带眼睛
   切明文，宿主渲染成共享的 `SecretInput`），而且**视图不要把存下来的值回填**——留空表示
   「不改」，否则它会被截图、也会留在页面状态里。
+- 清单里 `desktop.panel.status: true` 表示这个插件的视图带一行**常驻状态**：视图返回
+  `statusBar: { label, detail?, tone?: ok|warn|error|muted }`，宿主把它画在输入框正上方
+  （面板关着也看得见），`null` 表示此刻不该有状态行。它只该说「这个能力现在生效没有」
+  这类用户需要在打字之前就知道的事实，不要拿它广播进度。
+- 没有快捷按钮的面板也会出现在输入框旁边那个「+」菜单里（按清单顺序），标签取
+  `desktop.panel.label`；所以「配置类」入口不必为了能被打开而声明一个常驻胶囊按钮。
   按钮的 `tone` 取 `primary`（这一块的主动作）/ `default`（普通描边按钮）/ `ghost`（行内的
   次要动作，如「删除」）/ `danger`；不声明等于 `ghost`，一个 section 里最多一个 `primary`。
 - section 有输入框时用 `commit` 声明「改完自动生效」的动作 id：宿主在输入停顿约 0.5s 后

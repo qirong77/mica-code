@@ -367,6 +367,8 @@ export type {
   PluginPanelActionResult,
   PluginPanelButtonTone,
   PluginPanelField,
+  PluginPanelFieldOption,
+  PluginPanelFieldType,
   PluginPanelHandler,
   PluginPanelItem,
   PluginPanelItemAction,
@@ -375,11 +377,13 @@ export type {
   PluginPanelRegistration,
   PluginPanelRow,
   PluginPanelSection,
+  PluginPanelStatusBar,
   PluginPanelTone,
   PluginPanelView,
   PluginPanelViewInput,
   PluginPanelOpenPath,
 } from './PluginPanel.js';
+export { PLUGIN_PANEL_FIELD_TYPES } from './PluginPanel.js';
 export type { PluginSettingIssue } from './PluginSettings.js';
 export { PLUGIN_REQUIREMENTS, isPluginRequirement } from './PluginManifest.js';
 export type { PluginRequirement } from './PluginManifest.js';

@@ -46,7 +46,7 @@
     "panel": {
       "label": "SSH",
       "display": "modal",
-      "shortcuts": [{ "label": "SSH 服务器", "section": "服务器" }]
+      "status": true
     }
   }
 }

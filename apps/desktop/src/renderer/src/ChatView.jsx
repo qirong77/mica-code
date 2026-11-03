@@ -23,10 +23,13 @@ import {
   IconGitCommit,
   IconGitFork,
   IconLoader2,
+  IconClock,
   IconMessageChatbot,
   IconMinimize,
-  IconPhoto,
+  IconPaperclip,
+  IconPlus,
   IconPuzzle,
+  IconPlug,
   IconQuote,
   IconSend,
   IconShare,
@@ -121,6 +124,7 @@ import {
 import ComposerCompletionPalette from './ComposerCompletionPalette'
 import { BtwDrawer } from './BtwDrawer'
 import { PluginPanels, PluginQuickBar } from './PluginPanels'
+import { usePluginPanels } from './plugin-panels'
 import { queuePluginLaunch, subscribePluginLaunch, takePluginLaunch } from './plugin-launch'
 import { LoopBadge } from './LoopBadge'
 import { SessionSettingsDialog } from './SessionSettingsDialog'
@@ -3045,6 +3049,8 @@ export function ChatView({
   // 插件面板）跟着更新，所以这里每次渲染现算。
   const activeOverrides = overridesRef.current.get(nodeId) || {}
   const activeRole = activeOverrides.role || meta?.role || 'default'
+  // 「+」菜单里也要能打开插件面板（配置类入口不一定要一个常驻胶囊按钮）。
+  const pluginPanels = usePluginPanels(activeRole)
   const [picker, setPicker] = useState(null) // { kind, title, options, loading, error }
   const [pickerIndex, setPickerIndex] = useState(0)
   // 输入框补全（`@` 文件 / `/` skill）：选中后只往输入框插入文本，不执行任何动作
@@ -3082,7 +3088,18 @@ export function ChatView({
   const transcriptRef = useRef(null)
   const composerDockRef = useRef(null)
   const textareaRef = useRef(null)
-  const imageInputRef = useRef(null)
+  const attachInputRef = useRef(null)
+  // 动作区合并成一个「+」：悬停展开、点击也能开（触屏没有 hover）。
+  const [moreOpen, setMoreOpen] = useState(false)
+  // 悬停开菜单要等一会儿：立刻开会和原生点击打架——「先移入、再 click」会先被
+  // mouseenter 打开，紧接着 click 的 toggle 又关掉，点一下等于什么都没发生。
+  const moreHoverTimer = useRef(null)
+  useEffect(
+    () => () => {
+      if (moreHoverTimer.current) clearTimeout(moreHoverTimer.current)
+    },
+    []
+  )
 
   // 主对话区的查找条（Cmd/Ctrl+F）。`findFocusSignal` 只为「已经开着时再按一次」服务：
   // 变化一次就重新聚焦并全选查询，和 VS Code 的 find widget 一样。
@@ -3881,21 +3898,35 @@ export function ChatView({
 
   // 相册/拍照选到的图片与粘贴一样：先落到 mica 的 images 目录，再把 [Image](...) 引用
   // 插进输入框（引用格式由 CLI 解析，见 host/chat-images.js）。
-  const attachImages = useCallback(
+  /**
+   * 「添加附件」：图片仍落成 `[Image](...)` 引用（模型要按图片读），其它文件上传到
+   * `$MICA_HOME/attachments/` 后插入**绝对路径**——页面没有 preload，从 `File` 上
+   * 拿不到原始路径，副本路径是模型唯一能读到的入口。
+   */
+  const attachFiles = useCallback(
     async (files) => {
       const list = Array.from(files || [])
       if (!list.length) return
-      const refs = []
+      const images = []
+      const paths = []
       for (const file of list) {
+        const isImage = /^image\/(png|jpeg|webp|gif)$/i.test(file.type || '')
         try {
-          const result = await window.mica.chat.savePastedImage({ file })
-          if (result?.ok && result.ref) refs.push(result.ref)
-          else appendNotice(result?.error || `上传 ${file.name || '图片'} 失败`, 'error')
+          if (isImage) {
+            const result = await window.mica.chat.savePastedImage({ file })
+            if (result?.ok && result.ref) images.push(`[Image](${result.ref})`)
+            else appendNotice(result?.error || `上传 ${file.name || '图片'} 失败`, 'error')
+          } else {
+            const result = await window.mica.chat.saveAttachment({ file })
+            if (result?.ok && result.path) paths.push(result.path)
+            else appendNotice(result?.error || `上传 ${file.name || '文件'} 失败`, 'error')
+          }
         } catch (error) {
-          appendNotice(`上传 ${file.name || '图片'} 失败：${error?.message || error}`, 'error')
+          appendNotice(`上传 ${file.name || '文件'} 失败：${error?.message || error}`, 'error')
         }
       }
-      if (refs.length) insertComposerText(refs.map((ref) => `[Image](${ref})`).join(' '))
+      const parts = [...images, ...paths]
+      if (parts.length) insertComposerText(parts.join(' '))
     },
     [appendNotice, insertComposerText]
   )
@@ -6833,9 +6864,8 @@ export function ChatView({
             {/* 相册/拍照：手机上没有系统剪贴板粘贴，只能靠文件选择器（accept 限定成
               CLI 认识的格式，iOS 会据此把 HEIC 转成 JPEG）。 */}
             <input
-              ref={imageInputRef}
+              ref={attachInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
               multiple
               className="sr-only"
               aria-hidden="true"
@@ -6844,7 +6874,7 @@ export function ChatView({
                 const files = Array.from(event.target.files || [])
                 // 先取走 FileList 再清空，否则同一个文件不会二次触发 change
                 event.target.value = ''
-                void attachImages(files)
+                void attachFiles(files)
               }}
             />
             <TerminalComposer
@@ -6980,42 +7010,126 @@ export function ChatView({
               }}
             />
             <div className="chat-composer-actions">
-              <button
-                type="button"
-                title="上传图片"
-                aria-label="上传图片"
-                onClick={() => imageInputRef.current?.click()}
+              {/* 附件、By The Way、定时任务、SSH、耗时以前是五个常驻图标，把输入框右侧
+                  挤满；现在收进一个「+」：悬停展开（触屏点击也能开），菜单项写全名字，
+                  比五个只有 tooltip 的图标好认。 */}
+              <div
+                className="chat-composer-more"
+                onMouseEnter={() => {
+                  if (moreHoverTimer.current) clearTimeout(moreHoverTimer.current)
+                  moreHoverTimer.current = setTimeout(() => setMoreOpen(true), 140)
+                }}
+                onMouseLeave={() => {
+                  if (moreHoverTimer.current) {
+                    clearTimeout(moreHoverTimer.current)
+                    moreHoverTimer.current = null
+                  }
+                  setMoreOpen(false)
+                }}
               >
-                <IconPhoto size={13} />
-              </button>
-              {/* 超长输入才显示字数。空 span 也会占一个 gap，留着会把上传按钮和时钟拉开
-                  两倍的行距（动作区靠 gap 排布，没有 margin 可以抵消）。 */}
-              {input.length > 4000 && <span>{input.length.toLocaleString()}</span>}
-              {/* By The Way（CLI 的 /btw）：主流程运行中也照常可点——它正是为
-                  「顺手问一句、不影响当前任务」而存在的。没有会话时没有 host，
-                  也就没有主流程记录可当背景，所以那时禁用。 */}
-              <button
-                type="button"
-                className={`chat-composer-btw ${btwRunning ? 'is-active' : ''}${btwUnread && !btwOpen ? ' has-unread' : ''}`}
-                title={btwEntryTitle}
-                aria-label="By The Way"
-                // 抽屉不是浮层：没有「点外面就关」需要它自己认领这次点击，所以不带
-                // data-popover-trigger，改用 aria-expanded 描述它控制着一个可展开区域。
-                aria-expanded={btwOpen}
-                disabled={!hasSession || remoteRunning}
-                onClick={() => (btwOpen ? setBtwOpen(false) : openBtw())}
-              >
-                {btwRunning ? (
-                  <IconLoader2 size={13} className="animate-spin" />
-                ) : (
-                  <IconMessageChatbot size={13} />
-                )}
-                {/* 回答在抽屉关着时落地：入口上留一个点，否则用户只能靠对话里那条
-                    会滚走的 notice 才知道有结果。 */}
-                {btwUnread && !btwOpen ? (
-                  <span className="chat-composer-btw-dot" aria-hidden="true" />
+                <button
+                  type="button"
+                  className={`chat-composer-more-trigger${moreOpen ? ' is-active' : ''}${
+                    btwUnread && !btwOpen ? ' has-unread' : ''
+                  }`}
+                  title={
+                    btwRunning ? 'By The Way 正在回答' : '更多：附件、By The Way、定时任务、SSH'
+                  }
+                  aria-label="更多"
+                  aria-haspopup="menu"
+                  aria-expanded={moreOpen}
+                  onClick={() => {
+                    if (moreHoverTimer.current) {
+                      clearTimeout(moreHoverTimer.current)
+                      moreHoverTimer.current = null
+                    }
+                    setMoreOpen((value) => !value)
+                  }}
+                >
+                  {btwRunning ? (
+                    <IconLoader2 size={13} className="animate-spin" />
+                  ) : (
+                    <IconPlus size={13} />
+                  )}
+                  {btwUnread && !btwOpen ? (
+                    <span className="chat-composer-more-dot" aria-hidden="true" />
+                  ) : null}
+                </button>
+                {moreOpen ? (
+                  <div className="chat-composer-more-menu" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        attachInputRef.current?.click()
+                      }}
+                    >
+                      <IconPaperclip size={13} />
+                      <span>添加附件</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      title={btwEntryTitle}
+                      disabled={!hasSession || remoteRunning}
+                      onClick={() => {
+                        setMoreOpen(false)
+                        if (btwOpen) setBtwOpen(false)
+                        else openBtw()
+                      }}
+                    >
+                      <IconMessageChatbot size={13} />
+                      <span>By The Way</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreOpen(false)
+                        setSettingsSection('loop')
+                      }}
+                    >
+                      <IconClock size={13} />
+                      <span>定时任务</span>
+                    </button>
+                    {/* 插件面板的入口在这里也要有：输入框上方那排胶囊只在插件给了快捷按钮
+                        时才出现，而「配置」这类常见用途不一定需要一个常驻按钮。入口来自清单
+                        （`desktop.panel`），宿主不认识任何具体插件。 */}
+                    {pluginPanels.map((panel) => (
+                      <button
+                        key={`panel-${panel.id}`}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMoreOpen(false)
+                          setPluginPanelOpen(panel.id)
+                          setPluginPanelSection('')
+                        }}
+                      >
+                        <IconPlug size={13} />
+                        <span>{panel.label}</span>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={!turnTiming}
+                      onClick={() => {
+                        setMoreOpen(false)
+                        setTurnTimingNow(Date.now())
+                        setTurnTimingOpen(true)
+                      }}
+                    >
+                      <IconStopwatch size={13} />
+                      <span>本轮耗时</span>
+                    </button>
+                  </div>
                 ) : null}
-              </button>
+              </div>
+              {/* 超长输入才显示字数。空 span 也会占一个 gap，留着会把动作入口和右边
+                  拉开两倍的行距（动作区靠 gap 排布，没有 margin 可以抵消）。 */}
+              {input.length > 4000 && <span>{input.length.toLocaleString()}</span>}
               {/* 电脑上用 Enter 发送，发送/排队按钮只在移动端保留（触屏没有回车键）。
                   「停止生成」与运行态无关，两端都要有。 */}
               {running ? (
@@ -7056,23 +7170,6 @@ export function ChatView({
                   <IconSend size={13} />
                 </button>
               ) : null}
-              {/* 最近一轮的时间花在哪：等待模型 / 模型输出 / 工具调用。数据只来自
-                  本轮的事件流，没有跑过就没有可点的东西（不造假数据也不留空入口）。 */}
-              <button
-                type="button"
-                className={`chat-composer-timing${turnTimingOpen ? ' is-active' : ''}`}
-                title={turnTiming ? '耗时分析：本轮时间花在哪' : '本轮还没有耗时数据'}
-                aria-label="耗时分析"
-                aria-haspopup="dialog"
-                aria-expanded={turnTimingOpen}
-                disabled={!turnTiming}
-                onClick={() => {
-                  setTurnTimingNow(Date.now())
-                  setTurnTimingOpen((value) => !value)
-                }}
-              >
-                <IconStopwatch size={13} />
-              </button>
               {/* 会话设置固定排在动作区最右：它是常驻入口，不该跟着运行态（停止/发送）
                   在两端浮动。 */}
               <button

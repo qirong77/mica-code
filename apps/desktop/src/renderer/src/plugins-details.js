@@ -19,12 +19,38 @@ let cache = { at: 0, promise: null }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * 这次读取必须**一定会结束**。
+ *
+ * `/api/invoke` 在页面刚起来时可能连上了却迟迟不回（运行时还在装配插件目录），而这份清单
+ * 的 promise 会被 60 秒内的所有调用方共享——一个永不 settle 的请求会让「输入框上方的插件
+ * 状态行」「侧栏插件入口」整页空着，且没有任何报错可查。超时当作一次失败，交给上面的重试
+ * 逻辑再来一次。
+ */
+const READ_TIMEOUT_MS = 4000
+
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('readPluginsDetails timeout')), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}
+
 /** 读一次清单；读不到（没有 transport / 请求失败 / 形状不对）返回 null，与「确实没有插件」区分开。 */
 async function fetchPluginsDetails() {
   const configWeb = window.mica?.configWeb
   if (!configWeb) return null
   try {
-    const details = await configWeb.invoke('readPluginsDetails')
+    const details = await withTimeout(configWeb.invoke('readPluginsDetails'), READ_TIMEOUT_MS)
     return Array.isArray(details?.plugins) ? details.plugins : null
   } catch {
     return null

@@ -43,6 +43,16 @@ const LOCK_RETRY_DELAYS_MS = [100, 250, 500]
 const worktreeState = new Map()
 const WORKTREE_TTL_MS = 5000
 const repositoryState = new Map()
+/**
+ * 正在跑的那一次读取，键是 `<root>|<key>`。
+ *
+ * 只缓存「跑完的结果」不够：轮询间隔（3s / 10s）比一次读取慢时不打紧，一旦机器被别的东西
+ * 拖慢、一次全树扫描变成几秒，下一个 tick 会再发一次、再下一个再发一次，几个窗口叠起来
+ * 就是七次全树扫描同时在跑，彼此抢 CPU 又让每一次都更慢（实测 09:23 十分钟内峰值并发 4、
+ * 全天峰值 7，其中 8.8% 的调用超过 1s）。共用同一个 promise 之后，同一仓库同一份数据在
+ * 任一时刻只有一次真正在跑。
+ */
+const worktreeInFlight = new Map()
 
 /** 让某个仓库的缓存立刻失效（写操作、agent 改完文件之后调用）。 */
 export function noteWorktreeChange(root) {
@@ -108,18 +118,36 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false } = {
     const hit = cached.values.get(key)
     if (hit) return hit
   }
-  const value = await run()
-  if (!signature) return value
-  // 并发读取共用一份缓存；`probe` 取这次的 HEAD 签名，切换分支后自然失配。
-  const entry =
-    cached && Date.now() - cached.at < WORKTREE_TTL_MS
-      ? cached
-      : { signature, at: Date.now(), values: new Map() }
-  entry.signature = signature
-  entry.at = Date.now()
-  entry.values.set(key, value)
-  worktreeState.set(root, entry)
-  return value
+  // `refresh: true` 是用户主动点刷新：既不读缓存，也不搭别人那次还没跑完的顺风车。
+  const inFlightKey = `${root}|${key}`
+  if (!refresh) {
+    const pending = worktreeInFlight.get(inFlightKey)
+    if (pending) return pending
+  }
+  const promise = (async () => {
+    const value = await run()
+    if (!signature) return value
+    // 并发读取共用一份缓存；`probe` 取这次的 HEAD 签名，切换分支后自然失配。
+    // 这里必须重新取一次：等 `run()` 的这段时间里，另一个不同 key 的读取可能刚写过 entries，
+    // 沿用上面捕获的 `cached` 会把它的结果覆盖掉。
+    const current = worktreeState.get(root)
+    const entry =
+      current && Date.now() - current.at < WORKTREE_TTL_MS
+        ? current
+        : { signature, at: Date.now(), values: new Map() }
+    entry.signature = signature
+    entry.at = Date.now()
+    entry.values.set(key, value)
+    worktreeState.set(root, entry)
+    return value
+  })()
+  if (refresh) return promise
+  worktreeInFlight.set(inFlightKey, promise)
+  try {
+    return await promise
+  } finally {
+    worktreeInFlight.delete(inFlightKey)
+  }
 }
 
 function errorText(error) {
@@ -210,7 +238,9 @@ export async function getWorkspaceStatus(cwd) {
     // 还没有第一个提交时 `--abbrev-ref HEAD` 以 128 退出；仓库根照样取得到，
     // 分支名改从 HEAD 引用读（symbolic-ref 不依赖提交存在）。
     root = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
-    branch = (await git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim()
+    branch = (
+      await git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')
+    ).trim()
     if (!branch) throw error
   }
   const projectName = path.basename(root)

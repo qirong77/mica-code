@@ -16,8 +16,12 @@ import { readData } from './Hosts.js';
  * 私钥、ssh-agent、ProxyJump、2FA、known_hosts。自己写一套只会在「跳板机连不上」「key 要
  * 不要 passphrase」这些地方反复出问题。
  *
- * 数据都在 `$MICA_HOME/plugin-data/ssh/`：`data.json` 主机清单、`known_hosts` 固定的主机
- * 指纹、`audit.jsonl` 调用记录、`panel.json` 面板草稿。口令不在这里——macOS 上它在钥匙串。
+ * 数据都在 `$MICA_HOME/plugin-data/ssh/`：`data.json` 主机清单与开关、`known_hosts` 固定的
+ * 主机指纹、`audit.jsonl` 调用记录、`panel.json` 面板草稿、`secrets.json` 口令（0600 明文，
+ * 只有插件自己读——模型只看到别名，见 `Secrets.ts`）。
+ *
+ * 开关（`data.json.enabled`）决定这个插件**是否对模型存在**：关着就不注册工具、不注入
+ * prompt、输入框上方也不显示状态栏。面板里那个开关改完立刻生效，不需要重开会话。
  */
 
 const PLUGIN_ID = 'ssh';
@@ -45,9 +49,19 @@ export default function setup(ctx: PluginContext): void {
     register: (tool: Parameters<typeof tools.register>[0], options?: Parameters<typeof tools.register>[1]) =>
       tools.register(tool, options),
   };
-  for (const disposable of createTools(toolDeps)) {
-    ctx.onDispose(() => disposable.dispose());
-  }
+  let toolDisposables: { dispose(): void }[] = [];
+  const syncTools = (): void => {
+    const enabled = readData(dataFile).enabled;
+    if (enabled && toolDisposables.length === 0) {
+      toolDisposables = createTools(toolDeps);
+      return;
+    }
+    if (!enabled && toolDisposables.length > 0) {
+      for (const disposable of toolDisposables) disposable.dispose();
+      toolDisposables = [];
+    }
+  };
+  syncTools();
 
   ctx.prompt?.section({
     id: 'ssh',
@@ -61,11 +75,14 @@ export default function setup(ctx: PluginContext): void {
       ctx: remote,
       dataFile,
       closeSession: (hostId) => sessions.close(hostId),
+      onEnabledChange: () => syncTools(),
     }),
   );
   if (panel) ctx.onDispose(() => panel.dispose());
 
   ctx.onDispose(() => {
+    for (const disposable of toolDisposables) disposable.dispose();
+    toolDisposables = [];
     sessions.closeAll();
     closeAllControlMasters(remote, readData(dataFile).hosts);
   });
