@@ -2562,14 +2562,13 @@ export function registerChatIpc() {
     // 还没落盘的草稿（新对话、没发过消息）：没有会话文件可改，下一轮 spawn 会按页面
     // 传来的 cwd 起进程。这里如实回报「不用落盘」，不是失败。
     if (!target) return { ok: true, cwd: dir, persisted: false }
-    // 另一个进程（终端里的 TUI / 另一个运行时）持着 turn lease：它随后会用自己的快照
-    // 落盘，写一个马上被覆盖的 cwd 只会让人以为切换成功了。
-    if (hasLiveTurnLease(target))
-      return { ok: false, error: '该会话正在另一个终端或窗口里运行，请等这一轮结束后再切换目录' }
+    // 直接改盘时持有 turn lease，避免检查后、写入前另一进程开始新一轮。
     try {
       const result = updateSessionCwdFile(sessionsDir(), target, dir)
       return { ok: true, cwd: result.cwd, persisted: result.changed }
     } catch (error) {
+      if (error?.code === 'TURN_LEASE_BUSY')
+        return { ok: false, error: '该会话正在另一个终端或窗口里运行，请等这一轮结束后再切换目录' }
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   })

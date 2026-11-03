@@ -506,7 +506,7 @@ export class PluginManager {
   /**
    * 按 `plugins-state.json` 对齐一次：名单变了就卸载停用的、装配重新启用的。
    *
-   * 每轮开始调用（`turn:before`，优先级很低）。名单没变时只做一次 stat，不读文件、也不碰
+   * 每轮开始调用（`turn:before` 分发之前）。名单没变时只做一次 stat，不读文件、也不碰
    * 任何插件；正在跑的那一轮不受影响，变化从下一轮开始生效。
    */
   async syncPluginState(): Promise<PluginStateChange | null> {
@@ -617,13 +617,13 @@ export class PluginManager {
   }
 
   /**
-   * 装上名单同步：每轮开始时比别人先跑（优先级很低）。被停用的插件不该再处理这一轮，
+   * 装上名单同步：每轮的 hook 快照生成前运行。被停用的插件不该再处理这一轮，
    * 被启用的插件则要赶上这一轮的 prompt 段落与工具定义。
    */
   private installStateSync(baseContext: PluginBaseContext): void {
     this.stateSignature = stateSignature(resolveStatePath(baseContext));
     this.stateSyncHook?.dispose();
-    this.stateSyncHook = baseContext.hooks.on(
+    this.stateSyncHook = baseContext.hooks.beforeEmit(
       'turn:before',
       async () => {
         try {
@@ -633,7 +633,6 @@ export class PluginManager {
           baseContext.logger?.warn?.('plugin:state-sync-failed', { error: errorMessage(error) });
         }
       },
-      { priority: -10000, failPolicy: 'continue' },
     );
   }
 

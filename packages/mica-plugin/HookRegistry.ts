@@ -18,6 +18,7 @@ type HookRegistration = {
 export class HookRegistry {
   private order = 0;
   private readonly hooks = new Map<string, HookRegistration[]>();
+  private readonly beforeEmitHooks = new Map<string, Set<{ active: boolean; run: () => Promise<void> | void }>>();
   private handlerErrorReporter: ((error: unknown, hook: string, pluginId?: string) => void) | null = null;
 
   /**
@@ -63,7 +64,23 @@ export class HookRegistry {
     };
   }
 
+  /** Run host lifecycle work before taking the ordinary emit handler snapshot. */
+  beforeEmit(name: string, run: () => Promise<void> | void): Disposable {
+    const registrations = this.beforeEmitHooks.get(name) ?? new Set();
+    const registration = { active: true, run };
+    registrations.add(registration);
+    this.beforeEmitHooks.set(name, registrations);
+    return { dispose: () => {
+      registration.active = false;
+      registrations.delete(registration);
+      if (registrations.size === 0 && this.beforeEmitHooks.get(name) === registrations) this.beforeEmitHooks.delete(name);
+    } };
+  }
+
   async emit<TEvent>(name: string, event: TEvent): Promise<void> {
+    for (const registration of [...(this.beforeEmitHooks.get(name) ?? [])]) {
+      if (registration.active) await registration.run();
+    }
     for (const registration of [...(this.hooks.get(name) ?? [])]) {
       if (!registration.active) continue;
       await this.runHandler(name, registration, event);

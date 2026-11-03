@@ -82,6 +82,43 @@ async function sessionController(store: Pick<SessionStoreLike, 'load' | 'save'>)
 }
 
 describe('SessionController', () => {
+  it('rolls back the process directory when persisting a cwd change fails', async () => {
+    const original = process.cwd();
+    const next = mkdtempSync(join(tmpdir(), 'mica-cwd-fail-'));
+    const controller = await sessionController({
+      load: () => persistedSession('test'),
+      save: () => { throw new Error('save failed'); },
+    });
+    try {
+      expect(() => controller.setCurrentCwd(next)).toThrow('save failed');
+      expect(process.cwd()).toBe(original);
+    } finally {
+      process.chdir(original);
+      rmSync(next, { recursive: true, force: true });
+    }
+  });
+
+  it('applies an externally changed cwd when refreshing an idle session', async () => {
+    const original = process.cwd();
+    const next = mkdtempSync(join(tmpdir(), 'mica-cwd-refresh-'));
+    let disk = persistedSession('test', { cwd: original });
+    const controller = await sessionController({ load: () => disk, save: (value) => { disk = value; } });
+    try {
+      expect(controller.resume('test').ok).toBe(true);
+      disk = { ...disk, cwd: next, revision: 2 };
+      expect(controller.refreshFromStore()?.ok).toBe(true);
+      expect(process.cwd()).toBe(realpathSync(next));
+      controller.saveCurrent();
+      expect(disk.cwd).toBe(realpathSync(next));
+      disk = { ...disk, cwd: original, revision: (disk.revision ?? 0) + 1 };
+      expect(controller.resumeLoaded(disk).ok).toBe(true);
+      expect(process.cwd()).toBe(original);
+    } finally {
+      process.chdir(original);
+      rmSync(next, { recursive: true, force: true });
+    }
+  });
+
   it('round-trips an interrupted thinking display checkpoint without adding it to model messages', async () => {
     const { SessionController } = await import('./SessionController.js');
     const thinking = {

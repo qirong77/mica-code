@@ -84,7 +84,7 @@ describe('createBlameResolver', () => {
       reads += 1
       return ENTRY
     })
-    const meta = { cwd: '/repo', path: 'a.txt', blame: { kind: 'worktree' } }
+    const meta = { cwd: '/repo', path: 'a.txt', blame: { kind: 'commit', ref: ENTRY.hash } }
     const first = await resolver.lookup(meta, 12)
     const second = await resolver.lookup(meta, 12)
     expect(first).toBe(second)
@@ -99,9 +99,82 @@ describe('createBlameResolver', () => {
       reads += 1
       return ENTRY
     })
-    const meta = { cwd: '/repo', path: 'a.txt', blame: { kind: 'commit', ref: 'HEAD' } }
+    const meta = { cwd: '/repo', path: 'a.txt', blame: { kind: 'commit', ref: ENTRY.hash } }
     await Promise.all([resolver.lookup(meta, 4), resolver.lookup(meta, 4)])
     expect(reads).toBe(1)
+  })
+
+  it('工作区、暂存区和可变 ref 的变化在下次悬停时可见', async () => {
+    for (const blame of [
+      { kind: 'worktree' },
+      { kind: 'index' },
+      { kind: 'commit', ref: 'HEAD' },
+      { kind: 'commit', ref: 'main' },
+      { kind: 'commit', ref: 'abcdef12' }
+    ]) {
+      let entry = ENTRY
+      const resolver = createBlameResolver(async () => entry)
+      const meta = { cwd: '/repo', path: 'a.txt', blame }
+      expect(await resolver.lookup(meta, 12)).toContain('**Ann**')
+      entry = { ...ENTRY, author: 'Bob' }
+      expect(await resolver.lookup(meta, 12)).toContain('**Bob**')
+    }
+  })
+
+  it('可变来源在旧请求尚未完成时也发起新查询', async () => {
+    let finishFirst
+    let reads = 0
+    const resolver = createBlameResolver(() => {
+      reads += 1
+      if (reads === 1)
+        return new Promise((resolve) => {
+          finishFirst = resolve
+        })
+      return { ...ENTRY, author: 'Bob' }
+    })
+    const meta = { cwd: '/repo', path: 'a.txt', blame: { kind: 'index' } }
+    const first = resolver.lookup(meta, 12)
+    await Promise.resolve()
+    expect(await resolver.lookup(meta, 12)).toContain('**Bob**')
+    finishFirst(ENTRY)
+    expect(await first).toContain('**Ann**')
+    expect(reads).toBe(2)
+  })
+
+  it('清除缓存后旧请求不能覆盖新结果或删除新的在途请求', async () => {
+    const finish = []
+    let reads = 0
+    const resolver = createBlameResolver(() => {
+      reads += 1
+      return new Promise((resolve) => finish.push(resolve))
+    })
+    const meta = { cwd: '/repo', path: 'a.txt', blame: { kind: 'commit', ref: ENTRY.hash } }
+    const first = resolver.lookup(meta, 12)
+    await Promise.resolve()
+    resolver.clear()
+    const second = resolver.lookup(meta, 12)
+    await Promise.resolve()
+    finish[0](ENTRY)
+    await first
+    const third = resolver.lookup(meta, 12)
+    finish[1]({ ...ENTRY, author: 'Bob' })
+    expect(await second).toContain('**Bob**')
+    expect(await third).toContain('**Bob**')
+    expect(await resolver.lookup(meta, 12)).toContain('**Bob**')
+    expect(reads).toBe(2)
+  })
+
+  it('缓存提交数据而非格式化文本，标签变化后立即生效', async () => {
+    const resolver = createBlameResolver(async () => ENTRY)
+    const meta = {
+      cwd: '/repo',
+      path: 'a.txt',
+      blame: { kind: 'commit', ref: ENTRY.hash },
+      sourceLabel: '旧标签'
+    }
+    expect(await resolver.lookup(meta, 12)).toContain('旧标签')
+    meta.sourceLabel = '新标签'
+    expect(await resolver.lookup(meta, 12)).toContain('新标签')
   })
 
   it('没有可 blame 的一侧、读失败的都不显示', async () => {

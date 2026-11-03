@@ -10,7 +10,7 @@ import {
 } from '@tabler/icons-react'
 import { absoluteTime, relativeTime } from './git-blame'
 import { statusColor, statusLabel } from './git-decorations'
-import { filterCommits, formatChangeCounts, layoutGraph } from './git-graph'
+import { filterCommits, formatChangeCounts, layoutGraph, mergeHistory } from './git-graph'
 import { GitDiffEditor } from './GitDiffEditor'
 
 const ROW_HEIGHT = 26
@@ -106,7 +106,7 @@ function GraphCell({ row }) {
 
 export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
   const [branch, setBranch] = useState('')
-  const [max, setMax] = useState(200)
+  const [page, setPage] = useState({ key: '', skip: 0 })
   const [query, setQuery] = useState('')
   const [retry, setRetry] = useState(0)
   const [history, setHistory] = useState({ commits: [], head: '', branch: '', more: false })
@@ -119,6 +119,12 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
   const [refs, setRefs] = useState({ branches: [], tags: [] })
   const listRef = useRef(null)
   const selectId = useId()
+  const historyKey = JSON.stringify([cwd, branch, retry])
+  const skip = page.key === historyKey ? page.skip : 0
+
+  useEffect(() => {
+    if (page.key !== historyKey) setPage({ key: historyKey, skip: 0 })
+  }, [historyKey, page.key])
 
   useEffect(() => {
     if (!cwd) return undefined
@@ -126,17 +132,12 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
     setLoading(true)
     setError('')
     Promise.resolve()
-      .then(() => window.mica.git.log(cwd, { ref: branch || undefined, max }))
+      .then(() => window.mica.git.log(cwd, { ref: branch || undefined, max: 200, skip }))
       .then((response) => {
         if (cancelled) return
         if (response?.error) throw new Error(response.error)
         const history = response?.history || {}
-        setHistory({
-          commits: history.commits || [],
-          head: history.head || '',
-          branch: history.branch || '',
-          more: Boolean(history.more)
-        })
+        setHistory((previous) => mergeHistory(previous, history, skip))
       })
       .catch((failure) => {
         if (!cancelled) setError(failure?.message || String(failure))
@@ -147,7 +148,7 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
     return () => {
       cancelled = true
     }
-  }, [branch, cwd, max, retry])
+  }, [branch, cwd, retry, skip])
 
   useEffect(() => {
     if (!cwd) return undefined
@@ -407,7 +408,7 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
               type="button"
               className="w-full border-t border-line py-1.5 text-[11px] text-fg-muted hover:bg-overlay"
               disabled={loading}
-              onClick={() => setMax((value) => value + 200)}
+              onClick={() => setPage({ key: historyKey, skip: history.commits.length })}
             >
               加载更早的提交
             </button>

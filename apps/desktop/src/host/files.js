@@ -35,7 +35,7 @@ const MAX_QUERY_LENGTH = 1_000
 // 「快速打开」一次给的行数：比 `@` 补全的 20 条多，但它复用同一份扫描与缓存。
 const MAX_QUICK_OPEN_RESULTS = 100
 
-/** 正在跑的搜索：同一个 root 只保留最后一次，新的查询会取消旧的（见 files:search）。 */
+/** 正在跑的搜索按请求标识隔离，同一目录可以同时被多个窗口或面板搜索。 */
 const activeSearches = new Map()
 
 function normalizeDirectory(value) {
@@ -228,12 +228,10 @@ export function registerFilesIpc() {
     // 正则还没写完（如 `([`）时把它当成一条提示，而不是整块面板变成错误页
     if (!compiled.ok) return { items: [], truncated: false, error: compiled.error }
 
-    // 同一个 root 上只跑最后一次查询：输入框每敲一个字都会发起一次，上一次的全量扫描
-    // 如果还活着，只会跟新查询抢磁盘与 CPU，把最新结果也拖慢。
-    activeSearches.get(root)?.controller.abort()
     const controller = new AbortController()
-    const requestId = payload.requestId ?? null
-    activeSearches.set(root, { controller, requestId })
+    // 没有标识的旧调用也可以搜索，但不能被无标识的取消误伤。
+    const requestId = payload.requestId ?? Symbol('search')
+    activeSearches.set(requestId, { controller, root })
 
     // 纯 ASCII 查询可以先在字节上判断「这个文件不可能命中」，跳过解码；
     // 正则与含中文的查询没有这种捷径，照常解码后逐行匹配。
@@ -257,7 +255,7 @@ export function registerFilesIpc() {
         cancelled: result.cancelled
       }
     } finally {
-      if (activeSearches.get(root)?.controller === controller) activeSearches.delete(root)
+      if (activeSearches.get(requestId)?.controller === controller) activeSearches.delete(requestId)
     }
   })
 
@@ -266,11 +264,11 @@ export function registerFilesIpc() {
   // 取消不该杀掉随后发起的新查询。
   ipcMain.handle('files:search-cancel', (_event, payload = {}) => {
     const root = normalizeRoot(payload.root)
-    const active = activeSearches.get(root)
-    if (!active) return false
-    if (payload.requestId != null && active.requestId !== payload.requestId) return false
+    if (payload.requestId == null) return false
+    const active = activeSearches.get(payload.requestId)
+    if (!active || active.root !== root) return false
     active.controller.abort()
-    activeSearches.delete(root)
+    activeSearches.delete(payload.requestId)
     return true
   })
 

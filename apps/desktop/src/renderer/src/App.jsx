@@ -26,6 +26,7 @@ import { PluginPage } from './PluginPage'
 import { usePluginAttention } from './plugin-attention'
 import { queuePluginLaunch } from './plugin-launch'
 import { SessionTree } from './SessionTree'
+import { SessionQuickOpen } from './SessionQuickOpen'
 import { runSessionMenuPluginAction, useSessionMenuPlugins } from './session-menu-plugins'
 import { SessionNotesDialog } from './SessionNotesDialog'
 import TerminalKeyBar from './TerminalKeyBar'
@@ -491,6 +492,9 @@ export default function App() {
    * 与「我在对话里」这件事分开——盖住整个窗口配一个「返回对话」，它才是一层页面。
    */
   const [configPage, setConfigPage] = useState(null)
+  // ⌘P 快速打开会话（见 SessionQuickOpen）。不写进 layout：它只是一层临时浮层，
+  // 下次启动没有「上次开着」这回事。
+  const [sessionQuickOpen, setSessionQuickOpen] = useState(false)
   const openConfigPage = useCallback((section = 'config', pluginId = null) => {
     setConfigPage({ section, pluginId })
   }, [])
@@ -2236,6 +2240,21 @@ export default function App() {
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [toggleTerminalPanel])
+  // ⌘/Ctrl+P 快速打开会话。编辑器视图里这个组合归文件快速搜索（QuickSearch 在那里
+  // 才启用），盖住的弹窗 / 分支选择器打开时也不抢——那时用户面对的是另一个上下文。
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.repeat || event.altKey || event.shiftKey) return
+      if (!(event.metaKey || event.ctrlKey)) return
+      if (String(event.key || '').toLowerCase() !== 'p') return
+      if (view === 'files' || configPage || branchPickerOpen || prompt) return
+      event.preventDefault()
+      event.stopPropagation()
+      setSessionQuickOpen((open) => !open)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [view, configPage, branchPickerOpen, prompt])
 
   return (
     <>
@@ -2634,6 +2653,21 @@ export default function App() {
             />
           )}
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            {/* ⌘P 快速打开会话：主区顶部的一层浮层，盖住对话区但不盖侧栏。 */}
+            {sessionQuickOpen && (
+              <SessionQuickOpen
+                sessions={sessions}
+                projects={projects}
+                openBySession={openBySession}
+                unread={notifications.states}
+                onClose={() => setSessionQuickOpen(false)}
+                onOpenSession={(session) => {
+                  setSessionQuickOpen(false)
+                  closeMobileDrawer()
+                  openSession(session)
+                }}
+              />
+            )}
             <Suspense fallback={null}>
               <StatsView visible={view === 'stats'} />
             </Suspense>
@@ -2868,7 +2902,9 @@ export default function App() {
           getRoot={getSearchRoot}
           openFile={openSearchFile}
           closeActiveFile={closeSearchFile}
-          disabled={branchPickerOpen || !!prompt}
+          /* ⌘P 在文件视图里是「搜索文件」；别的视图留给快速打开会话（见上面的
+             sessionQuickOpen），所以这里按视图收窄。 */
+          disabled={branchPickerOpen || !!prompt || view !== 'files'}
         />
       </Suspense>
       {branchPickerOpen && git.cwd && (

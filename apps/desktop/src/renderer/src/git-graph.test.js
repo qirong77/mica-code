@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'bun:test'
-import { filterCommits, formatChangeCounts, layoutGraph } from './git-graph'
+import { filterCommits, formatChangeCounts, layoutGraph, mergeHistory } from './git-graph'
 
 const commit = (hash, parents) => ({ hash, parents })
+
+describe('mergeHistory', () => {
+  it('保留已加载的 2000 条并追加下一页，切换历史时替换旧内容', () => {
+    const first = Array.from({ length: 2000 }, (_, i) => commit(String(i), []))
+    const previous = { commits: first, head: 'old', branch: 'old', more: true }
+    const next = mergeHistory(previous, { commits: [commit('2000', [])], head: 'new', more: false }, 2000)
+    expect(next.commits).toHaveLength(2001)
+    expect(next.commits[2000].hash).toBe('2000')
+    expect(next.more).toBe(false)
+    expect(mergeHistory(next, { commits: [commit('other', [])] }, 0).commits.map((entry) => entry.hash)).toEqual(['other'])
+  })
+})
 
 function edgePairs(row) {
   return row.edges.map((edge) => `${edge.from.join(',')}→${edge.to.join(',')}`)

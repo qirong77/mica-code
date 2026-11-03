@@ -1727,7 +1727,14 @@ async function handleCodexRequest(
       try {
         // 没有落过盘的草稿没有文件可改，但宿主进程同样要站到新目录里，下一轮的工具
         // 才不会还跑在旧仓库。
-        const persisted = ctx.sessionController.setCurrentCwd(dir);
+        const persisted = await ctx.executor.runIdleMaintenance<boolean | null>(
+          async () => ctx.sessionController.setCurrentCwd(dir),
+          null,
+        );
+        if (persisted === null) {
+          ctx.writeError(CODEX_ERROR_INVALID_PARAMS, '该会话正在运行，请等待完成后再切换项目目录');
+          return;
+        }
         ctx.writeResponse({ ok: true, cwd: process.cwd(), persisted });
       } catch (error) {
         ctx.writeError(

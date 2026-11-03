@@ -73,13 +73,19 @@ export async function getLog(cwd, { ref = null, max = 400, skip = 0 } = {}) {
   const { root } = await cachedRepository(cwd)
   const count = Math.min(2000, Math.max(1, Math.floor(Number(max) || 400)))
   const offset = Math.max(0, Math.floor(Number(skip) || 0))
+  let head = null
+  try {
+    head = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim() || null
+  } catch {
+    head = null
+  }
   const args = ['log', `--max-count=${count}`, '--date-order', `--format=${LOG_FORMAT}`]
   if (offset) args.push(`--skip=${offset}`)
   if (typeof ref === 'string' && ref.trim()) args.push(ref.trim(), '--')
   // `--all` 也包含 `refs/notes/*` 与 `refs/stash`：笔记是仓库的元数据，stash 是没提交
   // 的临时快照，两者混进历史会让图谱里多出一串空的「笔记提交」。`--exclude` 必须写在
   // `--all` 之前才生效。
-  else args.push('--exclude=refs/notes/*', '--exclude=refs/stash', '--all', '--')
+  else args.push('--exclude=refs/notes/*', '--exclude=refs/stash', '--all', ...(head ? ['HEAD'] : []), '--')
   let output
   try {
     output = await git(root, args)
@@ -90,13 +96,7 @@ export async function getLog(cwd, { ref = null, max = 400, skip = 0 } = {}) {
     throw new Error(text)
   }
   const commits = parseLog(output)
-  let head = null
   let branch = null
-  try {
-    head = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim() || null
-  } catch {
-    head = null
-  }
   try {
     branch = shortRefName((await git(root, ['symbolic-ref', '--quiet', 'HEAD'])).trim()) || null
   } catch {

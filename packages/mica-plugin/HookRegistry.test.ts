@@ -79,6 +79,20 @@ describe('HookRegistry.pipelineSync', () => {
     await Promise.resolve();
   });
 });
+it('runs pre-emit work before taking the handler snapshot and disposes it', async () => {
+  const hooks = new HookRegistry();
+  const seen: string[] = [];
+  const old = hooks.on('event', () => { seen.push('old'); });
+  const before = hooks.beforeEmit('event', () => {
+    old.dispose();
+    hooks.on('event', () => { seen.push('new'); });
+    before.dispose();
+  });
+  await hooks.emit('event', {});
+  await hooks.emit('event', {});
+  expect(seen).toEqual(['new', 'new']);
+});
+
 it('does not run a handler that was disposed during the same emit', async () => {
   const hooks = new HookRegistry();
   const ran: string[] = [];

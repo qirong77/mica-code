@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FileIcon } from './FileIcon'
+import { createSearchRequestId } from './search-request'
 
 const modes = {
   files: { label: '快速打开', placeholder: '按名称搜索工作区文件', method: 'find', limit: 100 },
@@ -121,7 +122,6 @@ function normalize(item, root, mode) {
 export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = false }) {
   const inputRef = useRef(null)
   const requestRef = useRef(0)
-  const searchIdRef = useRef(0)
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState('files')
   const [query, setQuery] = useState('')
@@ -194,7 +194,7 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
       return undefined
     }
     const request = ++requestRef.current
-    const searchId = ++searchIdRef.current
+    const searchId = createSearchRequestId()
     let activeRoot = ''
     const timer = window.setTimeout(
       async () => {

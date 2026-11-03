@@ -94,12 +94,14 @@ export function blameKey(meta, line) {
 }
 
 /**
- * 悬停用的 blame 查询器：内存缓存 + 同键去重，命中上限后按插入顺序淘汰最早的条目。
+ * 只有完整提交哈希可缓存；工作区、索引和符号 ref 随时可能变化。
+ * 提交缓存命中上限后按插入顺序淘汰最早的条目。
  * `read(meta, options)` 由调用方注入（真实实现走 `window.mica.git.blame`）。
  */
 export function createBlameResolver(read, { max = 400, sourceLabel } = {}) {
   const cache = new Map()
   const pending = new Map()
+  let generation = 0
   const remember = (key, value) => {
     if (cache.size >= max) cache.delete(cache.keys().next().value)
     cache.set(key, value)
@@ -109,26 +111,33 @@ export function createBlameResolver(read, { max = 400, sourceLabel } = {}) {
     async lookup(meta, line) {
       const options = blameRequest(meta?.blame, line)
       if (!meta?.cwd || !meta?.path || !options) return null
+      const immutable =
+        meta.blame.kind === 'commit' && /^(?:[a-f\d]{40}|[a-f\d]{64})$/i.test(meta.blame.ref)
       const key = blameKey(meta, line)
-      if (cache.has(key)) return cache.get(key)
-      if (pending.has(key)) return pending.get(key)
+      const render = (entry) =>
+        buildBlameHover(entry, {
+          path: meta.path,
+          sourceLabel: sourceLabel || meta.sourceLabel || ''
+        })
+      if (immutable && cache.has(key)) return render(cache.get(key))
+      if (immutable && pending.has(key)) return render(await pending.get(key))
+      const requestGeneration = generation
       const promise = Promise.resolve()
         .then(() => read(meta, options))
-        .then((entry) =>
-          remember(
-            key,
-            buildBlameHover(entry, {
-              path: meta.path,
-              sourceLabel: sourceLabel || meta.sourceLabel || ''
-            })
-          )
-        )
+        .then((entry) => {
+          if (immutable && entry && !entry.error && generation === requestGeneration)
+            remember(key, entry)
+          return entry
+        })
         .catch(() => null)
-        .finally(() => pending.delete(key))
-      pending.set(key, promise)
-      return promise
+        .finally(() => {
+          if (pending.get(key) === promise) pending.delete(key)
+        })
+      if (immutable) pending.set(key, promise)
+      return render(await promise)
     },
     clear() {
+      generation += 1
       cache.clear()
       pending.clear()
     }

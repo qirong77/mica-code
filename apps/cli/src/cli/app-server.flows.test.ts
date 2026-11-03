@@ -2692,6 +2692,15 @@ suite('mica app-server real-user flows (mock provider)', () => {
       'utf8',
     );
 
+    const nextDir = join(home, 'remote-lease-cwd');
+    mkdirSync(nextDir, { recursive: true });
+    const sessionPath = join(home, 'sessions', `${sessionId}.json`);
+    const beforeCwdRequest = readFileSync(sessionPath, 'utf8');
+    await send(host, 20, 'mica/session/cwd', { cwd: nextDir });
+    const cwdRefused = await waitFor(host, (m) => m.id === 20, 'cwd lease refusal', 10_000);
+    expect(cwdRefused.error).toBeTruthy();
+    expect(readFileSync(sessionPath, 'utf8')).toBe(beforeCwdRequest);
+
     await send(host, 2, 'turn/start', {
       threadId: sessionId,
       model: 'mock/mock-rejected',
@@ -2706,6 +2715,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
 
     // Once the other process releases the lease the same host works again.
     rmSync(lockPath, { force: true });
+    await send(host, 21, 'mica/session/cwd', { cwd: nextDir });
+    const cwdSwitched = await waitFor(host, (m) => m.id === 21, 'cwd after lease release', 10_000);
+    expect(cwdSwitched.result).toMatchObject({ ok: true, cwd: realpathSync(nextDir), persisted: true });
     await send(host, 3, 'turn/start', {
       threadId: sessionId,
       input: [{ type: 'text', text: '锁释放后的这条' }],

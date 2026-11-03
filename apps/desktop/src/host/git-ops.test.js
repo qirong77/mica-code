@@ -162,6 +162,47 @@ describe('discardDirectory', () => {
     expect(await status(dir)).toBe('M  src/a.txt\n')
   })
 
+  it('目录名中的 pathspec 通配符按字面匹配，不影响其他目录', async () => {
+    for (const name of ['group[1]', 'group1']) {
+      await mkdir(path.join(dir, name))
+      await writeFile(path.join(dir, name, 'tracked.txt'), 'original\n')
+    }
+    await git(dir, ['add', '.'])
+    await commit(dir, 'add groups')
+    for (const name of ['group[1]', 'group1']) {
+      await writeFile(path.join(dir, name, 'tracked.txt'), 'changed\n')
+      await writeFile(path.join(dir, name, 'new.txt'), 'untracked\n')
+    }
+
+    expect((await discardDirectory(dir, 'group[1]')).removed).toBe(1)
+    expect(await readFile(path.join(dir, 'group[1]', 'tracked.txt'), 'utf8')).toBe('original\n')
+    expect(existsSync(path.join(dir, 'group[1]', 'new.txt'))).toBe(false)
+    expect(await readFile(path.join(dir, 'group1', 'tracked.txt'), 'utf8')).toBe('changed\n')
+    expect(await readFile(path.join(dir, 'group1', 'new.txt'), 'utf8')).toBe('untracked\n')
+  })
+
+  it('纯未跟踪目录只删除其中未忽略的文件，保留忽略文件和目录外文件', async () => {
+    await writeFile(path.join(dir, '.gitignore'), '*.ignored\n')
+    await mkdir(path.join(dir, 'parent/new/nested'), { recursive: true })
+    await writeFile(path.join(dir, 'parent/new/nested/file.txt'), 'remove\n')
+    await writeFile(path.join(dir, 'parent/new/keep.ignored'), 'keep\n')
+    await writeFile(path.join(dir, 'parent/outside.txt'), 'keep\n')
+
+    expect((await discardDirectory(dir, 'parent/new')).removed).toBe(1)
+    expect(existsSync(path.join(dir, 'parent/new/nested'))).toBe(false)
+    expect(await readFile(path.join(dir, 'parent/new/keep.ignored'), 'utf8')).toBe('keep\n')
+    expect(await readFile(path.join(dir, 'parent/outside.txt'), 'utf8')).toBe('keep\n')
+  })
+
+  it('清理纯未跟踪目录时保留所选目录外的空父目录', async () => {
+    await mkdir(path.join(dir, 'parent/new'), { recursive: true })
+    await writeFile(path.join(dir, 'parent/new/file.txt'), 'remove\n')
+
+    expect((await discardDirectory(dir, 'parent/new')).removed).toBe(1)
+    expect(existsSync(path.join(dir, 'parent/new'))).toBe(false)
+    expect(existsSync(path.join(dir, 'parent'))).toBe(true)
+  })
+
   it('整个仓库不能当文件夹回退，越界路径一律拒绝', async () => {
     await expect(discardDirectory(dir, '')).rejects.toThrow('缺少要回退的文件夹')
     await expect(discardDirectory(dir, '.')).rejects.toThrow('不能回退整个仓库')

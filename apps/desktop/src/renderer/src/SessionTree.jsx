@@ -124,7 +124,8 @@ function Slot({ children }) {
  * 把命中片段渲染成高亮。区间由共享的匹配逻辑给出（已排序、已合并、互不重叠），
  * 组件只负责切分——自己去 indexOf 会与运行时的匹配规则分叉。
  */
-function Highlighted({ text, ranges }) {
+/** 命中词的标记样式：侧栏搜索与 ⌘P 快速打开共用同一份，两处高亮否则会不一致。 */
+export function Highlighted({ text, ranges }) {
   if (!ranges?.length) return text
   const parts = []
   let at = 0

@@ -9,6 +9,7 @@ import {
   IconX
 } from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
+import { createSearchRequestId } from './search-request'
 import {
   codeColor,
   codeLabel,
@@ -101,8 +102,6 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
   // 「刷新」按钮靠它重新跑一次同样的查询（查询串本身没变，没法当依赖用）
   const [nonce, setNonce] = useState(0)
   const requestRef = useRef(0)
-  // host 侧的取消要能对上「是哪一次查询」：留到下一次输入后才到达的取消不能杀掉新查询
-  const searchIdRef = useRef(0)
 
   useEffect(() => {
     if (!root || !query.trim()) {
@@ -112,7 +111,7 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
       return undefined
     }
     const request = ++requestRef.current
-    const searchId = ++searchIdRef.current
+    const searchId = createSearchRequestId()
     const timer = window.setTimeout(async () => {
       try {
         setBusy(true)

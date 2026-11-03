@@ -1,6 +1,7 @@
 import { readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { isValidSessionId } from './session-delete'
+import { createTurnLeaseRunner } from './session-lease'
 
 /**
  * Direct read-modify-write of a session's `cwd` on disk.
@@ -9,8 +10,8 @@ import { isValidSessionId } from './session-delete'
  * file from its in-memory snapshot on every save and its snapshot writes
  * `process.cwd()` (the directory it was spawned in), so a direct write here is
  * silently reverted by the next turn. Both callers route the owned case through
- * the resident host (`mica/session/cwd`) and only fall back here when nothing is
- * writing the file.
+ * the resident host (`mica/session/cwd`). The direct fallback holds the turn
+ * lease throughout the read-modify-write so a turn cannot start concurrently.
  *
  * `updatedAt` is deliberately left alone: switching the project directory is a
  * metadata edit, not session activity, and bumping it would jump the session to
@@ -19,6 +20,11 @@ import { isValidSessionId } from './session-delete'
 export function updateSessionCwdFile(directory, sessionId, cwd) {
   const nextCwd = typeof cwd === 'string' ? cwd.trim() : ''
   if (!directory || !isValidSessionId(sessionId) || !nextCwd) throw new Error('Invalid session cwd')
+  const withTurnLease = createTurnLeaseRunner({ lockDir: () => join(directory, '.turn-locks') })
+  return withTurnLease(sessionId, () => writeSessionCwd(directory, sessionId, nextCwd))
+}
+
+function writeSessionCwd(directory, sessionId, nextCwd) {
   const file = join(directory, `${sessionId}.json`)
 
   let session

@@ -133,6 +133,29 @@ describe('plugin enable/disable lifecycle', () => {
     expect(log).toEqual(['setup:alpha', 'setup:beta', 'dispose:alpha', 'setup:alpha']);
   });
 
+  it('runs newly enabled turn hooks immediately and excludes disabled hooks', async () => {
+    const path = join(configDir, 'plugins-state.json');
+    writePluginState({ disabled: ['beta'] }, { path });
+    const seen: string[] = [];
+    const hooks = new HookRegistry();
+    const manager = new PluginManager();
+    for (const id of ['alpha', 'beta', 'gamma']) {
+      manager.register(plugin(id, (ctx) => {
+        const hook = ctx.hooks.on('turn:before', () => { seen.push(id); });
+        ctx.onDispose(() => hook.dispose());
+      }));
+    }
+    await manager.setupAll(stateContext(hooks));
+    writePluginState({ disabled: ['alpha'] }, { path });
+    await hooks.emit('turn:before', {});
+    expect(seen).toEqual(['gamma', 'beta']);
+    await manager.disposeAll();
+    seen.length = 0;
+    writePluginState({ disabled: [] }, { path });
+    await hooks.emit('turn:before', {});
+    expect(seen).toEqual([]);
+  });
+
   it('does not retry a plugin that failed setup when the list changes elsewhere', async () => {
     const log: string[] = [];
     let attempts = 0;

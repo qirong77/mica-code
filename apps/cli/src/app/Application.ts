@@ -308,7 +308,7 @@ export class Application {
         },
         logger: pluginLogger,
       });
-      // 启停会在每轮开始前对齐一次名单（manager 的 `turn:before`，优先级 -10000）：刚停用
+      // 启停会在每轮 `turn:before` 分发前对齐名单：刚停用
       // 的插件命令已经被摘掉，输入框的 `/` 列表不能还挂着它——点下去只会得到「未知命令」。
       const syncCommands = trackCommandDropdown(commands, runtime);
       hooks.on('turn:before', () => syncCommands(), { priority: -9000 });
@@ -455,9 +455,9 @@ function switchToSessionCwd(cwd: string | undefined): string | null {
  * 插件启停会改动注册表（停用的插件命令随资源一起摘掉），而这一步发生在每轮开始前；
  * 每轮重建一遍整个列表没必要，名字没变就直接返回。
  */
-function trackCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeController): () => void {
-  let signature = '';
-  return () => {
+export function trackCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeController): () => void {
+  let signature: string | undefined;
+  const sync = () => {
     const next = commands
       .list()
       .map((command) => command.name)
@@ -466,6 +466,8 @@ function trackCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeCo
     signature = next;
     syncCommandDropdown(commands, runtime);
   };
+  sync();
+  return sync;
 }
 
 function syncCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeController): void {

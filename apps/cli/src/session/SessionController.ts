@@ -336,19 +336,25 @@ export class SessionController {
    * 顶到 Recent 最前面。返回 false 表示这条会话还没落过盘（新对话），没有文件可改。
    */
   setCurrentCwd(dir: string): boolean {
+    const previousCwd = process.cwd();
     process.chdir(dir);
-    const existing = this.store.load(this.currentSessionId);
-    if (!existing) return false;
-    const cwd = process.cwd();
-    if (existing.cwd === cwd) return true;
-    const saved: PersistedSession = {
-      ...existing,
-      cwd,
-      revision: (existing.revision ?? 0) + 1,
-    };
-    this.store.save(saved);
-    this.currentPersistedSignature = sessionSignature(saved);
-    return true;
+    try {
+      const existing = this.store.load(this.currentSessionId);
+      if (!existing) return false;
+      const cwd = process.cwd();
+      if (existing.cwd === cwd) return true;
+      const saved: PersistedSession = {
+        ...existing,
+        cwd,
+        revision: (existing.revision ?? 0) + 1,
+      };
+      this.store.save(saved);
+      this.currentPersistedSignature = sessionSignature(saved);
+      return true;
+    } catch (error) {
+      process.chdir(previousCwd);
+      throw error;
+    }
   }
 
   getCurrentTitleSource(): 'derived' | 'auto' | 'manual' {
@@ -424,6 +430,18 @@ export class SessionController {
   }
 
   private applyLoadedSession(session: PersistedSession, leaseHeld: boolean): ResumeSessionResult {
+    // Follow a cwd changed by another writer when reloading the current
+    // session. A first resume may deliberately use an explicit startup cwd.
+    const previousCwd = this.currentPersistedSignature
+      ? (JSON.parse(this.currentPersistedSignature) as PersistedSession).cwd
+      : undefined;
+    if (session.id === this.currentSessionId && previousCwd !== undefined && session.cwd !== previousCwd && session.cwd) {
+      try {
+        process.chdir(session.cwd);
+      } catch {
+        // The project may have been removed; still restore its conversation.
+      }
+    }
     if (session.id !== this.currentSessionId) this.discardCurrentIfEmpty();
     const requestedRole = session.snapshot.role ?? DEFAULT_ROLE_NAME;
     const restoredRole = resolveSnapshotRole(requestedRole);

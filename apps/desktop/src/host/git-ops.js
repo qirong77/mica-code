@@ -321,29 +321,31 @@ export async function discardDirectory(cwd, directoryPath) {
   // git 的 pathspec 是相对仓库根的：把绝对路径换算回去，避免用户传了绝对路径时静默无效。
   const relative = path.relative(root, absolute).split(path.sep).join('/')
   if (!relative) throw new Error('不能回退整个仓库，请选择仓库里的文件夹')
-  await git(root, ['restore', '--worktree', '--', relative])
+  const pathspec = `:(top,literal)${relative}`
+  const tracked = await git(root, ['ls-files', '--cached', '-z', '--', pathspec])
+  if (tracked) await git(root, ['restore', '--worktree', '--', pathspec])
   const untracked = (
-    await git(root, ['ls-files', '--others', '--exclude-standard', '-z', '--', relative])
+    await git(root, ['ls-files', '--others', '--exclude-standard', '-z', '--', pathspec])
   )
     .split('\0')
     .filter(Boolean)
   for (const filePath of untracked) {
     await rm(path.join(root, filePath), { force: true })
   }
-  await pruneEmptyDirectories(root, untracked)
+  await pruneEmptyDirectories(root, absolute, untracked)
   noteWorktreeChange(root)
   return { removed: untracked.length, restored: relative }
 }
 
 /**
  * 删完未跟踪文件后顺手收掉空目录（git 不跟踪空目录，`git clean -fd` 同样会删）。
- * 只从刚删掉的文件往上走到仓库根，遇到还有内容的目录就停——已跟踪文件因此不会被误删。
+ * 只从刚删掉的文件往上走到所选目录，不清理所选目录以外的父目录。
  */
-async function pruneEmptyDirectories(root, removedPaths) {
+async function pruneEmptyDirectories(root, selectedDirectory, removedPaths) {
   const directories = new Set()
   for (const filePath of removedPaths) {
     let current = path.dirname(path.join(root, filePath))
-    while (current.startsWith(root) && current !== root) {
+    while (current === selectedDirectory || current.startsWith(selectedDirectory + path.sep)) {
       directories.add(current)
       current = path.dirname(current)
     }

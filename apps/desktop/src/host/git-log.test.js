@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
@@ -64,6 +64,37 @@ describe('getLog / getCommit', () => {
     expect(side.commits[0].subject).toBe('side-only')
     const all = await getLog(dir)
     expect(all.commits.some((entry) => entry.subject === 'side-only')).toBe(true)
+  })
+
+  it('默认历史包含游离 HEAD 独有的提交，指定分支仍仅包含该分支', async () => {
+    await run(dir, ['checkout', '-q', '--detach'])
+    await run(dir, ['-c', 'user.email=t@e.com', '-c', 'user.name=T', 'commit', '-q', '--allow-empty', '-m', 'detached'])
+    const all = await getLog(dir)
+    expect(all.commits.map((entry) => entry.subject)).toEqual(['detached', 'second', 'first'])
+    expect(all.commits[0].refs).toContainEqual({ kind: 'head', name: 'HEAD' })
+    expect((await getLog(dir, { ref: 'main' })).commits.map((entry) => entry.subject)).toEqual(['second', 'first'])
+  })
+
+  it('按偏移读取超过 2000 条的历史，分页没有重叠或遗漏', async () => {
+    const records = Array.from({ length: 2001 }, (_, i) => {
+      const message = `generated-${i}`
+      return `commit refs/heads/generated\nmark :${i + 1}\ncommitter T <t@e.com> ${1700000000 + i} +0000\ndata ${message.length}\n${message}\n${i ? `from :${i}\n` : ''}\n`
+    }).join('')
+    await new Promise((resolve, reject) => {
+      const child = spawn('git', ['fast-import', '--quiet'], { cwd: dir })
+      let error = ''
+      child.stderr.on('data', (chunk) => { error += chunk })
+      child.on('error', reject)
+      child.on('close', (code) => code === 0 ? resolve() : reject(new Error(error)))
+      child.stdin.end(records)
+    })
+    const first = await getLog(dir, { ref: 'generated', max: 2000 })
+    const second = await getLog(dir, { ref: 'generated', max: 200, skip: 2000 })
+    expect(first.commits).toHaveLength(2000)
+    expect(first.more).toBe(true)
+    expect(second.commits.map((entry) => entry.subject)).toEqual(['generated-0'])
+    expect(second.more).toBe(false)
+    expect(new Set([...first.commits, ...second.commits].map((entry) => entry.hash)).size).toBe(2001)
   })
 
   it('笔记与 stash 不算历史', async () => {

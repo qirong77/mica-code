@@ -116,3 +116,12 @@ export function formatChangeCounts(file) {
   if (!additions && !deletions) return '—'
   return `+${additions} −${deletions}`
 }
+/** 合并一页历史；首页替换旧结果，后续页保留已加载的提交。 */
+export function mergeHistory(previous, page, skip) {
+  return {
+    commits: skip ? [...previous.commits, ...(page.commits || [])] : page.commits || [],
+    head: page.head || '',
+    branch: page.branch || '',
+    more: Boolean(page.more)
+  }
+}
