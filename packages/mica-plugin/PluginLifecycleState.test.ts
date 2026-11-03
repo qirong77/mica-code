@@ -153,7 +153,9 @@ describe('plugin enable/disable lifecycle', () => {
 
     writePluginState({ disabled: ['alpha'] }, { path: join(configDir, 'plugins-state.json') });
     // watchFile 是 400ms 的 stat 轮询 + 120ms 去抖：不必等下一轮对话。
-    await waitFor(() => log.includes('dispose:alpha'), 8000);
+    // 机器被别的进程压满时（4 个 unit worker + 真实 git / 子进程），这个 stat 轮询
+    // 实测会饿到 8s 之外——预算留到 15s，比让整套测试因为一次轮询迟到而整轮重跑便宜。
+    await waitFor(() => log.includes('dispose:alpha'), 15_000);
     expect(log).toEqual(['setup:alpha', 'dispose:alpha']);
     await manager.disposeAll();
   });

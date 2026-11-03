@@ -195,6 +195,17 @@ const MALFORMED_LEASE_STALE_MS = 60_000;
 // deriveTitle falls back to this placeholder; we treat it as garbage and hide
 // it from /resume (and delete the file on rebuild, except for running ones).
 const UNTITLED_SESSION_TITLE = 'Untitled session';
+/**
+ * 会话跑久了几十上百 MB，每次迭代 checkpoint 都要整份 `JSON.stringify` + 落盘。缩进
+ * 会让这份字符串多出三成字节，也就要多分配、多写三成——这个体量已经没人会手读。
+ * 小会话仍写缩进格式（配置页 / 手工排查都好读），超过阈值改写成紧凑 JSON。
+ */
+const PRETTY_SESSION_MAX_BYTES = 2 * 1024 * 1024;
+
+function serializeSession(session: PersistedSession): string {
+  const compact = JSON.stringify(session);
+  return compact.length <= PRETTY_SESSION_MAX_BYTES ? JSON.stringify(session, null, 2) : compact;
+}
 
 export class SessionStore implements SessionStoreLike {
   /** In-memory metadata summaries sorted by updatedAt descending. Lazily built. */
@@ -240,7 +251,7 @@ export class SessionStore implements SessionStoreLike {
     if (!safeId || safeId !== session.id) throw new Error(`Invalid session id: ${session.id}`);
     const path = sessionPath(safeId);
     const tmpPath = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmpPath, `${JSON.stringify(session, null, 2)}\n`, 'utf-8');
+    writeFileSync(tmpPath, `${serializeSession(session)}\n`, 'utf-8');
     renameSync(tmpPath, path);
     try {
       this.updateIndexForSave(session);
