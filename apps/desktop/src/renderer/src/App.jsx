@@ -654,6 +654,15 @@ export default function App() {
   // 插件给会话挂的标记（侧栏圆点 + 右键菜单项）。宿主只认「选项 = id + 名字 + 颜色」，
   // 具体是什么含义由插件自己定义，见 renderer/src/session-annotations.js。
   const [annotations, setAnnotations] = useState([])
+  // 轮询每 10s 重发一份同样内容的对象数组；不比较就 setState，整棵会话树跟着重渲染。
+  const applyAnnotations = useCallback((providers) => {
+    const next = Array.isArray(providers) ? providers : []
+    setAnnotations((previous) =>
+      previous.length === next.length && JSON.stringify(previous) === JSON.stringify(next)
+        ? previous
+        : next
+    )
+  }, [])
   const [projects, setProjects] = useState({ version: 1, groups: [], assignments: {} })
   const projectsRef = useLatest(projects)
   const sessionsRef = useLatest(sessions)
@@ -721,9 +730,9 @@ export default function App() {
     // 插件标记由插件自己写盘（CLI 里的 /tags、模型调用工具都会改），所以每次顺带重读。
     window.mica.stats
       .listAnnotations()
-      .then((result) => setAnnotations(Array.isArray(result?.providers) ? result.providers : []))
+      .then((result) => applyAnnotations(result?.providers))
       .catch((error) => console.error('load session annotations failed', error))
-  }, [applySessions])
+  }, [applySessions, applyAnnotations])
 
   // 点菜单里的标记项：写盘的是插件目录下的数据文件（host 代写，见 host/session-annotations.js），
   // 返回的整份标记表直接替换本地状态，省一次重读。
@@ -731,11 +740,11 @@ export default function App() {
     window.mica.stats
       .setAnnotation({ pluginId, sessionId, optionId, on })
       .then((result) => {
-        if (Array.isArray(result?.providers)) setAnnotations(result.providers)
+        if (Array.isArray(result?.providers)) applyAnnotations(result.providers)
         else if (result?.error) console.error('set session annotation rejected', result.error)
       })
       .catch((error) => console.error('set session annotation failed', error))
-  }, [])
+  }, [applyAnnotations])
 
   const applyLoops = useCallback((loops) => {
     setLoops(Array.isArray(loops) ? loops : [])

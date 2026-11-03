@@ -147,9 +147,17 @@ export function setUiStateEntries(key, entries) {
   setUiState(key, next)
 }
 
+/**
+ * 订阅一个键：别的键变化时快照引用不变，React 就不会重渲染。
+ *
+ * 之前整个表订阅，任何一次输入（`drafts` 每敲一个字都写一次）都会让所有读者
+ * 重渲染——App、最多 5 个挂载中的 ChatView、整棵会话树都跟着跑一遍。快照取
+ * `keys[key]` 而不是 `keys` 之后，只有真正改了这个键的组件更新。
+ */
 export function useUiStateValue(key, fallback) {
-  const table = useSyncExternalStore(subscribeUiState, uiStateKeys, uiStateKeys)
-  return table[key] === undefined ? fallback : table[key]
+  const read = useCallback(() => keys[key], [key])
+  const value = useSyncExternalStore(subscribeUiState, read, read)
+  return value === undefined ? fallback : value
 }
 
 /** 挂载前先把运行时的界面状态取回来，页面第一帧就是正确的值（避免闪一下再对齐）。 */

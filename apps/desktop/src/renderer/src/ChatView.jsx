@@ -59,6 +59,7 @@ import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
 import { findPresetForSearch } from './chat-find-preset'
+import { splitMarkdownChunks } from './chat-markdown-chunks'
 import {
   parsePathHref,
   remarkPathLinks,
@@ -756,7 +757,22 @@ function MarkdownLink({ href, children, onOpenFile }) {
 // 插件数组必须是稳定引用，否则每次渲染都会让 react-markdown 重新解析整篇文档
 const CHAT_REMARK_PLUGINS = [remarkAutolinkPunctuation, remarkGfm, remarkPathLinks]
 
-function MarkdownView({ text, muted = false, onOpenFile }) {
+// 流式输出时把正文切成「已定型前缀 + 增长尾部」：前面的块按内容 memo，父组件每帧
+// 重渲染时不会重解析，只有最后一块（通常是一个段落）重新解析。见 chat-markdown-chunks。
+const MarkdownChunk = memo(function MarkdownChunk({ source, components }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={CHAT_REMARK_PLUGINS}
+      components={components}
+      urlTransform={chatUrlTransform}
+      skipHtml
+    >
+      {source}
+    </ReactMarkdown>
+  )
+})
+
+function MarkdownView({ text, muted = false, onOpenFile, streaming = false }) {
   const source = useMemo(() => protectEmphasisAutolinks(text || ''), [text])
   const components = useMemo(
     () => ({
@@ -778,16 +794,18 @@ function MarkdownView({ text, muted = false, onOpenFile }) {
     [onOpenFile]
   )
 
+  // 引用式链接 / 脚注的定义可能在文末，切开会让前面的引用失效；这类正文不切块。
+  const chunks = useMemo(() => {
+    if (!streaming || source.length < 800) return [source]
+    if (/^ {0,3}\[[^\]]+\]:/m.test(source)) return [source]
+    return splitMarkdownChunks(source)
+  }, [source, streaming])
+
   return (
     <div className={`chat-markdown ${muted ? 'chat-markdown-muted' : ''}`}>
-      <ReactMarkdown
-        remarkPlugins={CHAT_REMARK_PLUGINS}
-        components={components}
-        urlTransform={chatUrlTransform}
-        skipHtml
-      >
-        {source}
-      </ReactMarkdown>
+      {chunks.map((chunk, index) => (
+        <MarkdownChunk key={index} source={chunk} components={components} />
+      ))}
     </div>
   )
 }
@@ -2304,7 +2322,7 @@ function MessageRowView({
     >
       <div className="chat-message-marker">●</div>
       <div className="chat-message-body">
-        <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
+        <Markdown text={message.text || ''} onOpenFile={onOpenFile} streaming={!message.done} />
         <UsageLine usage={message.usage} />
       </div>
       {message.done && <MessageActions text={message.text} role="assistant" onQuote={onQuote} />}
