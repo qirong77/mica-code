@@ -175,25 +175,37 @@ function parseTree(output) {
   return entries
 }
 
-async function worktreeFile(root, filePath) {
+async function inspectWorktreeFile(root, filePath) {
   const absolute = safeFilePath(root, filePath)
   try {
     const stat = await lstat(absolute)
     if (stat.isSymbolicLink()) {
-      return { content: Buffer.from(await readlink(absolute)), mode: '120000', exists: true }
+      return { kind: 'link', absolute, mode: '120000', exists: true, stat }
     }
     // Gitlinks have no ordinary file bytes; their mode still participates in the fingerprint.
-    if (stat.isDirectory()) return { content: Buffer.alloc(0), mode: '160000', exists: true }
-    return {
-      content: await readFile(absolute),
-      mode: stat.mode & 0o111 ? '100755' : '100644',
-      exists: true
-    }
+    if (stat.isDirectory()) return { kind: 'gitlink', absolute, mode: '160000', exists: true, stat }
+    return { kind: 'file', absolute, mode: stat.mode & 0o111 ? '100755' : '100644', exists: true, stat }
   } catch (error) {
     if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error
-    return { content: Buffer.alloc(0), mode: null, exists: false }
+    return { kind: 'missing', mode: null, exists: false }
   }
 }
+
+async function readWorktreeContent(current) {
+  if (!current.exists) return Buffer.alloc(0)
+  if (current.kind === 'link') return Buffer.from(await readlink(current.absolute))
+  if (current.kind === 'gitlink') return Buffer.alloc(0)
+  return readFile(current.absolute)
+}
+
+/**
+ * 编辑器打开时 `git:branch-summary` 每 3s 跑一次，每次都要读一遍所有改动过的文件再算
+ * SHA-256（几百个文件时 p50 140ms）。按「路径 + stat 指纹」缓存算好的指纹：文件没动过
+ * 就只花一次 lstat，内容、权限、符号链接目标任一变化都会换 key，与原来逐字节重算的结果
+ * 一致（`git:branch-summary` 的测试就钉着这一点）。
+ */
+const fingerprintCache = new Map()
+const FINGERPRINT_CACHE_LIMIT = 4096
 
 async function mapBounded(items, callback) {
   let cursor = 0
@@ -231,18 +243,42 @@ export async function getBranchSummary(cwd, { base = null, direct = false } = {}
   const numstats = parseNumstatZ(numbers)
   const dirty = parseStatusCode(status)
   const files = await mapBounded([...changes], async ([filePath, fileStatus]) => {
-    const current = await worktreeFile(root, filePath)
+    const current = await inspectWorktreeFile(root, filePath)
     const original = tree.get(filePath)
     if (!original && !current.exists) return null
-    // Blob IDs represent all original bytes without spawning git-show once per file.
-    const fingerprint = createHash('sha256')
-      .update(JSON.stringify([compare, original?.hash, original?.mode, current.mode, fileStatus]))
-      .update('\0')
-      .update(current.content)
-      .digest('hex')
-    const binary = current.content.includes(0)
+    const cacheKey = current.exists
+      ? [
+          root,
+          filePath,
+          current.stat.mtimeMs,
+          current.stat.ctimeMs,
+          current.stat.size,
+          current.mode,
+          compare,
+          original?.hash || '',
+          original?.mode || '',
+          fileStatus
+        ].join('\0')
+      : null
+    let derived = cacheKey ? fingerprintCache.get(cacheKey) : null
+    if (!derived) {
+      const content = await readWorktreeContent(current)
+      // Blob IDs represent all original bytes without spawning git-show once per file.
+      const fingerprint = createHash('sha256')
+        .update(JSON.stringify([compare, original?.hash, original?.mode, current.mode, fileStatus]))
+        .update('\0')
+        .update(content)
+        .digest('hex')
+      const binary = content.includes(0)
+      derived = { fingerprint, binary, lines: binary ? 0 : countLines(content) }
+      if (cacheKey) {
+        if (fingerprintCache.size >= FINGERPRINT_CACHE_LIMIT) fingerprintCache.clear()
+        fingerprintCache.set(cacheKey, derived)
+      }
+    }
+    const binary = derived.binary
     const stat = numstats.get(filePath) || {
-      additions: binary ? 0 : countLines(current.content),
+      additions: derived.lines,
       deletions: 0,
       binary
     }
@@ -254,7 +290,7 @@ export async function getBranchSummary(cwd, { base = null, direct = false } = {}
       binary: stat.binary || binary,
       uncommitted: dirty.has(filePath),
       untracked: dirty.get(filePath) === '??',
-      fingerprint
+      fingerprint: derived.fingerprint
     }
   })
   files.sort((left, right) => compareChangePaths(left.path, right.path))
@@ -444,7 +480,7 @@ export async function getFile(cwd, filePath, requested = null) {
       ? blob(root, modifiedRef, filePath)
       : mode === 'staged'
         ? indexBlob(root, filePath)
-        : worktreeFile(root, filePath).then((file) => file.content)
+        : inspectWorktreeFile(root, filePath).then(readWorktreeContent)
   ])
   const binary = original.includes(0) || modified.includes(0)
   // 行悬停的 blame 必须按「这一侧到底是哪份内容」取：original 是某个提交或索引，

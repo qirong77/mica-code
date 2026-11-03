@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads'
 import { readFile } from 'node:fs/promises'
+import { statSync } from 'node:fs'
 
 // Inline worker source survives both Electron's packaged bundle and the web server
 // bundle without relying on a separately emitted worker file or an asar path.
@@ -131,10 +132,58 @@ export function createSessionReader({
   startWorker = (file) => new Worker(WORKER_SOURCE, { eval: true, workerData: file, execArgv: [] })
 } = {}) {
   const pending = new Map()
+  // 打开一条正在跑的会话会连着读两三次同一个文件（history / meta / 恢复后再读一次）。
+  // 每次都是一整份 JSON.parse，几百 MB 的会话上就是秒级空转；按文件签名缓存几秒，
+  // 文件一变（本轮 checkpoint）签名就失配，读到的仍是新鲜数据。
+  const cached = new Map()
+  const CACHE_TTL_MS = 3000
+  const CACHE_MAX_ENTRIES = 3
+  const CACHE_MAX_BYTES = 48 * 1024 * 1024
+  let cachedBytes = 0
+
+  function fileSignature(file) {
+    try {
+      const stat = statSync(file)
+      return { key: `${stat.mtimeMs}:${stat.size}:${stat.ino}`, size: stat.size }
+    } catch {
+      return null
+    }
+  }
+
+  function remember(file, signature, value) {
+    if (!signature || signature.size > CACHE_MAX_BYTES) return
+    const previous = cached.get(file)
+    if (previous) {
+      cached.delete(file)
+      cachedBytes -= previous.size
+    }
+    cached.set(file, { ...signature, value, at: Date.now() })
+    cachedBytes += signature.size
+    while (cached.size > CACHE_MAX_ENTRIES || cachedBytes > CACHE_MAX_BYTES) {
+      const oldest = cached.keys().next().value
+      if (oldest === undefined) break
+      cachedBytes -= cached.get(oldest).size
+      cached.delete(oldest)
+    }
+  }
+
   return function readSession(file) {
     if (!file) return Promise.resolve(empty())
     if (pending.has(file)) return pending.get(file)
+    const signature = fileSignature(file)
+    const hit = cached.get(file)
+    if (hit && Date.now() - hit.at >= CACHE_TTL_MS) {
+      cachedBytes -= hit.size
+      cached.delete(file)
+    } else if (hit && signature && hit.key === signature.key) {
+      return Promise.resolve(hit.value)
+    } else if (hit && signature) {
+      cachedBytes -= hit.size
+      cached.delete(file)
+    }
+    let usedFallback = false
     const fallback = async (error) => {
+      usedFallback = true
       console.warn('[session-reader] Worker failed; reading session in process:', error?.message || error)
       try {
         return projectSession(JSON.parse(await readFile(file, 'utf8')))
@@ -151,7 +200,14 @@ export function createSessionReader({
       } catch (error) {
         reject(error)
       }
-    }).catch(fallback)
+    })
+      .catch(fallback)
+      .then((value) => {
+        // 走降级路径说明 Worker 这次坏了，不把它当成「这个文件已经读好」缓存起来：
+        // 下一次调用应该重新试一次 Worker（缓存的是失败现场，不是文件内容）。
+        if (!usedFallback) remember(file, signature, value)
+        return value
+      })
     pending.set(file, task)
     task.finally(() => {
       if (pending.get(file) === task) pending.delete(file)

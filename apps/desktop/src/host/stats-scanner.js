@@ -14,6 +14,15 @@ const INDEX_VERSION = 3
 const BATCH_FILES = 16
 /** 单批最多占用主线程多久（毫秒）；大会话文件会超过这个预算，靠批次之间让出恢复响应。 */
 const BATCH_BUDGET_MS = 12
+/**
+ * 大会话文件（会话跑久了会到几百 MB）每轮 checkpoint 都会变。侧栏 10s 轮询一次，
+ * 每次都整份 JSON.parse 就是每 10s 按住主线程近一秒。运行中的大会话最多每 30s 重读一次；
+ * 一旦跑完（turnState 不再是 running）立刻读最终结果。用的量界面本来就来自实时事件，
+ * 侧栏这一行慢半分钟不影响。
+ */
+const LARGE_FILE_BYTES = 4 * 1024 * 1024
+const LARGE_RUNNING_REPARSE_MS = 30_000
+const HEAD_BYTES = 4096
 
 function timestampPart(stat, name) {
   const nanoseconds = stat[`${name}Ns`]
@@ -78,6 +87,36 @@ function parseSessionMeta(raw) {
 
 function yieldToEventLoop() {
   return new Promise((resolve) => setImmediate(resolve))
+}
+
+/** 只读文件头几 KB：`turnState` 是顶层字段，出现在快照之前，不必整份解析。 */
+function readHeadText(fileSystem, file) {
+  if (typeof fileSystem.openSync !== 'function' || typeof fileSystem.readSync !== 'function') {
+    return null
+  }
+  let fd = null
+  try {
+    fd = fileSystem.openSync(file, 'r')
+    const buffer = Buffer.alloc(HEAD_BYTES)
+    const bytes = fileSystem.readSync(fd, buffer, 0, HEAD_BYTES, 0)
+    return buffer.subarray(0, bytes).toString('utf8')
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) {
+      try {
+        fileSystem.closeSync(fd)
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+function isRunningSession(fileSystem, file) {
+  const head = readHeadText(fileSystem, file)
+  if (head === null) return false
+  return /"turnState"\s*:\s*"running"/.test(head)
 }
 
 /**
@@ -352,6 +391,14 @@ export function createStatsScanner({
       const entry = entries.get(file)
       if (entry?.signature === signature) continue
       if (!entry) added += 1
+      if (
+        entry &&
+        Number(signature.split(':')[2]) > LARGE_FILE_BYTES &&
+        Date.now() - (entry.parsedAt || 0) < LARGE_RUNNING_REPARSE_MS &&
+        isRunningSession(fileSystem, file)
+      ) {
+        continue
+      }
       pending.push({ file, signature })
     }
     pending.sort((a, b) => (a.file < b.file ? 1 : a.file > b.file ? -1 : 0))
@@ -385,6 +432,7 @@ export function createStatsScanner({
         parsedFiles.add(file)
         entries.set(file, {
           signature,
+          parsedAt: Date.now(),
           meta: result.meta,
           stats: null,
           identities: result.identities,

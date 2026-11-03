@@ -13,7 +13,12 @@ import { terminalOwnerEnv } from './terminal-control'
 
 const sessions = new Map()
 const VSCODE_APP_PATH = '/Applications/Visual Studio Code.app'
-const PROCESS_POLL_INTERVAL_MS = 500
+// 每条开着的终端每 500ms 跑两次 `ps`：三个标签页就是每秒 12 个进程，全天不停。
+// 有输出时按 1s 跟，闲置 8s 后降到 4s——「运行中」只是关闭前的提示点，真正关窗/关标签
+// 时还会用 `terminal:foreground` 现场查一次，慢一点不会漏掉确认。
+const PROCESS_POLL_INTERVAL_MS = 1000
+const PROCESS_POLL_IDLE_MS = 4000
+const PROCESS_OUTPUT_WINDOW_MS = 8000
 const PROCESS_RUNNING_DELAY_MS = 1200
 let notifyServer = null
 
@@ -226,12 +231,20 @@ function startProcessActivityMonitor(session) {
     }
   }
 
-  session.activityTimer = setInterval(() => void poll(), PROCESS_POLL_INTERVAL_MS)
-  session.activityTimer.unref?.()
+  const schedule = () => {
+    const active =
+      session.processRunning || Date.now() - (session.lastOutputAt || 0) < PROCESS_OUTPUT_WINDOW_MS
+    session.activityTimer = setTimeout(async () => {
+      await poll()
+      if (sessions.get(session.id) === session) schedule()
+    }, active ? PROCESS_POLL_INTERVAL_MS : PROCESS_POLL_IDLE_MS)
+    session.activityTimer.unref?.()
+  }
+  schedule()
 }
 
 function stopProcessActivityMonitor(session) {
-  if (session.activityTimer) clearInterval(session.activityTimer)
+  if (session.activityTimer) clearTimeout(session.activityTimer)
   session.activityTimer = null
   if (session.processRunning) notifyServer?.setProcessRunning(session.id, false)
   session.processRunning = false
@@ -338,6 +351,7 @@ function createPty(id, sender, options = {}) {
   startProcessActivityMonitor(session)
 
   term.onData((data) => {
+    session.lastOutputAt = Date.now()
     updateSessionCwdFromOutput(session, data)
     session.tail = appendReplayTail(session.tail, data)
     if (!sender.isDestroyed()) {
@@ -383,6 +397,7 @@ export function registerTerminalIpc() {
   ipcMain.handle('terminal:write', (_event, { id, data }) => {
     const session = sessions.get(id)
     if (!session) return false
+    session.lastOutputAt = Date.now()
     session.term.write(data)
     return true
   })
