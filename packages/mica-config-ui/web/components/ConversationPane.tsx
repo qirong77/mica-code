@@ -83,15 +83,17 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
 
   return (
     <div className="conversation-pane">
-      <div className="conversation-pane-toolbar">
-        <span>
+      <div className="session-pane-toolbar">
+        <div className="session-pane-facts">
           共 <strong>{total}</strong> 条记录 · 已显示 {items.length} 条
-        </span>
-        {hasMore ? (
-          <button type="button" className="ui-link-button" onClick={() => void loadLatest()}>
-            回到最新
-          </button>
-        ) : null}
+        </div>
+        <div className="session-pane-actions">
+          {hasMore ? (
+            <button type="button" className="ui-link-button" onClick={() => void loadLatest()}>
+              回到最新
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="conversation-timeline conversation-timeline-paged">

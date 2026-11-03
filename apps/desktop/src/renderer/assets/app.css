@@ -5744,6 +5744,8 @@ body.is-resizing-btw {
 .chat-modal-session-detail {
   --modal-w: min(1180px, 96vw);
   height: min(86vh, 940px);
+  /* 自带标题块的弹窗（bare）要把关闭按钮浮在右上角。 */
+  position: relative;
 }
 
 .chat-modal-session-detail .chat-modal-body {
@@ -5765,6 +5767,34 @@ body.is-resizing-btw {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+}
+
+/* 详情头部自己就是标题块：右边给关闭按钮留出位置，否则「更新」会被压在按钮下面。 */
+.chat-modal-session-detail .session-detail-head {
+  padding-right: 56px;
+}
+
+/* bare 弹窗没有标题行，关闭按钮直接浮在右上角（与头部同一片底色，不额外占一行）。 */
+.chat-modal-close-float {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  padding: 0;
+  color: var(--color-fg-faint);
+  cursor: pointer;
+}
+
+.chat-modal-close-float:hover {
+  background: color-mix(in srgb, var(--color-fg-max) 8%, transparent);
+  color: var(--color-fg-max);
 }
 
 /* -------------------------------------------------- 插件面板（对话右侧）

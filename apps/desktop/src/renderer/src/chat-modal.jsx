@@ -38,6 +38,12 @@ export function ModalShell({
   onBodyScroll,
   /** 套在另一个弹窗里时置 true：不叠第二层遮罩，只压暗一点点区分层级。 */
   nested = false,
+  /**
+   * 内容自带标题块（会话详情就是这种：它自己画标题、状态与事实行）时置 true：
+   * 不再画外壳标题行与 meta 行，只留一个浮在右上角的关闭按钮——否则同一个标题、
+   * 同一行模型与目录会在窗口边框和正文里各出现一次，正文凭空少掉三行。
+   */
+  bare = false,
   className = '',
   children
 }) {
@@ -73,36 +79,48 @@ export function ModalShell({
         className={`chat-modal ${className}`.trim()}
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="chat-modal-header">
-          {/* 没有图标也占住标记位：标题的左边缘在所有弹窗里保持一致（表单弹窗除外，见 .chat-modal-prompt） */}
-          <span className={`chat-modal-mark${icon ? '' : ' is-empty'}`} aria-hidden="true">
-            {icon}
-          </span>
-          <div className="chat-modal-heading">
-            <span className="chat-modal-title">{title}</span>
-            {subtitle ? (
-              <span
-                className="chat-modal-subtitle"
-                title={typeof subtitle === 'string' ? subtitle : undefined}
+        {bare ? (
+          <button
+            type="button"
+            className="chat-modal-close chat-modal-close-float"
+            aria-label="关闭"
+            title="关闭（Esc）"
+            onClick={onClose}
+          >
+            <IconX size={14} />
+          </button>
+        ) : (
+          <header className="chat-modal-header">
+            {/* 没有图标也占住标记位：标题的左边缘在所有弹窗里保持一致（表单弹窗除外，见 .chat-modal-prompt） */}
+            <span className={`chat-modal-mark${icon ? '' : ' is-empty'}`} aria-hidden="true">
+              {icon}
+            </span>
+            <div className="chat-modal-heading">
+              <span className="chat-modal-title">{title}</span>
+              {subtitle ? (
+                <span
+                  className="chat-modal-subtitle"
+                  title={typeof subtitle === 'string' ? subtitle : undefined}
+                >
+                  {subtitle}
+                </span>
+              ) : null}
+            </div>
+            <div className="chat-modal-actions">
+              {actions}
+              <button
+                type="button"
+                className="chat-modal-close"
+                aria-label="关闭"
+                title="关闭（Esc）"
+                onClick={onClose}
               >
-                {subtitle}
-              </span>
-            ) : null}
-          </div>
-          <div className="chat-modal-actions">
-            {actions}
-            <button
-              type="button"
-              className="chat-modal-close"
-              aria-label="关闭"
-              title="关闭（Esc）"
-              onClick={onClose}
-            >
-              <IconX size={14} />
-            </button>
-          </div>
-        </header>
-        {meta ? <div className="chat-modal-meta">{meta}</div> : null}
+                <IconX size={14} />
+              </button>
+            </div>
+          </header>
+        )}
+        {meta && !bare ? <div className="chat-modal-meta">{meta}</div> : null}
         <div ref={bodyRef} className="chat-modal-body" onScroll={onBodyScroll}>
           {children}
         </div>

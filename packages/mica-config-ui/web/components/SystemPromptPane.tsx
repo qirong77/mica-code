@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { readSessionSystemPrompt } from '../api.js';
 import { JsonEditor } from './JsonEditor.js';
-import { Button, Tag } from './Ui.js';
+import { Button } from './Ui.js';
 import { formatCharCount } from '../format.js';
 import { splitPromptSections, summarizePrompt } from '../promptView.js';
 import type { ConfigWebSessionPrompt } from '../../src/shared/types.js';
@@ -19,8 +19,8 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
   const [data, setData] = useState<ConfigWebSessionPrompt | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPart, setSelectedPart] = useState(0);
-  const [showParts, setShowParts] = useState(false);
+  // -1 是「完整提示词」那一行，其余是 parts 的下标。默认全文：进来先看真正发出去的东西。
+  const [selectedPart, setSelectedPart] = useState(-1);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,9 +45,14 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
 
   const prompt = data?.prompt ?? '';
   const parts = useMemo(() => splitPromptSections(prompt), [prompt]);
-  const selected = parts[selectedPart] ?? parts[0];
+  const selected = selectedPart >= 0 ? (parts[selectedPart] ?? parts[0]) : undefined;
   const shownPrompt = selectedPart === -1 ? prompt : (selected?.content ?? prompt);
   const summary = useMemo(() => summarizePrompt(prompt), [prompt]);
+  // 工具栏跟着「现在看的是哪一段」走：选了一段却显示全文的体积，读起来就是错的数字。
+  const shownStats = useMemo(
+    () => (selectedPart === -1 || !selected ? summary : summarizePrompt(selected.content)),
+    [selected, selectedPart, summary],
+  );
 
   async function copyPrompt() {
     if (!navigator.clipboard?.writeText) {
@@ -55,8 +60,8 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
       return;
     }
     try {
-      await navigator.clipboard.writeText(prompt);
-      setNotice('已复制全文');
+      await navigator.clipboard.writeText(shownPrompt);
+      setNotice(selectedPart === -1 ? '已复制全文' : '已复制这一段');
     } catch {
       setNotice('复制失败，请手动选择');
     }
@@ -71,107 +76,94 @@ export function SystemPromptPane({ sessionId, refreshToken }: { sessionId: strin
   return (
     <div className="prompt-pane">
       {error ? <div className="ui-alert">{error}</div> : null}
-      <div className="prompt-toolbar">
-        <div className="prompt-facts">
+      <div className="session-pane-toolbar">
+        <div className="session-pane-facts">
           <span>
-            <strong>{formatCharCount(summary.chars)}</strong> 字符
+            <strong>{formatCharCount(shownStats.chars)}</strong> 字符
           </span>
           <span>
-            ≈ <strong>{formatCharCount(summary.tokens)}</strong> tokens
+            ≈ <strong>{formatCharCount(shownStats.tokens)}</strong> tokens
           </span>
           <span>
-            <strong>{summary.lines}</strong> 行
+            <strong>{shownStats.lines}</strong> 行
           </span>
         </div>
-        <div className="prompt-toolbar-actions">
-          {notice ? <span className="prompt-notice">{notice}</span> : null}
-          <Button onClick={() => void copyPrompt()}>复制全文</Button>
-        </div>
-      </div>
-
-      {showParts ? <PromptParts parts={parts} selectedPart={selectedPart} onSelect={setSelectedPart} /> : null}
-      <div className="prompt-module-heading">
-        <select
-          className="prompt-module-select"
-          aria-label="查看提示词模块"
-          value={selectedPart === -1 ? -1 : parts[selectedPart] ? selectedPart : 0}
-          onChange={(event) => setSelectedPart(Number(event.target.value))}
-        >
-          <option value={-1}>完整提示词</option>
-          {parts.map((part, index) => (
-            <option key={`${part.tag || 'gap'}:${index}`} value={index}>
-              {part.label}
-            </option>
-          ))}
-        </select>
-        {selectedPart !== -1 ? <Tag tone="blue">{selected?.tag || '未标记'}</Tag> : null}
-        <Button variant="ghost" onClick={() => setSelectedPart(selectedPart === -1 ? 0 : -1)}>
-          {selectedPart === -1 ? '按模块查看' : '查看全文'}
-        </Button>
-        <div className="prompt-module-actions">
-          <Button variant="ghost" pressed={showParts} onClick={() => setShowParts((value) => !value)}>
-            {showParts ? '收起模块统计' : '展开模块统计'}
-          </Button>
+        <div className="session-pane-actions">
+          {notice ? <span className="session-pane-notice">{notice}</span> : null}
+          <Button onClick={() => void copyPrompt()}>{selectedPart === -1 ? '复制全文' : '复制这一段'}</Button>
         </div>
       </div>
 
-      <div className="editor-host prompt-editor">
-        {/* Markdown 高亮：提示词本身就是 markdown（标题、列表、围栏代码块），外加 <system>
-            这类标签——用 plaintext 只能看到一整片同色文字。 */}
-        <JsonEditor value={shownPrompt} language="markdown" readOnly onChange={() => undefined} />
+      <div className="prompt-body">
+        <PromptModules parts={parts} selectedPart={selectedPart} total={summary} onSelect={setSelectedPart} />
+        <div className="editor-host prompt-editor">
+          {/* Markdown 高亮：提示词本身就是 markdown（标题、列表、围栏代码块），外加 <system>
+              这类标签——用 plaintext 只能看到一整片同色文字。 */}
+          <JsonEditor value={shownPrompt} language="markdown" readOnly onChange={() => undefined} />
+        </div>
       </div>
     </div>
   );
 }
 
-/** 构成一览：每段一条，条形按「最大的那一段」归一，只有长度是可比的。 */
-function PromptParts({
+/**
+ * 模块列表：既是目录也是构成表。
+ *
+ * 以前这里是「下拉选模块 + 一个按钮在全文/单段之间切换 + 另一个按钮展开构成表」三件控件，
+ * 各自都能改变「现在看的是哪一段」，谁也不会把谁的状态带过去。现在只有这一列：首行是全文，
+ * 下面每段一行，条形按最大的那一段归一（只有长度可比），点谁就换谁，一份状态。
+ */
+function PromptModules({
   parts,
   selectedPart,
+  total,
   onSelect,
 }: {
   parts: ReturnType<typeof splitPromptSections>;
   selectedPart: number;
+  total: { chars: number; tokens: number };
   onSelect: (index: number) => void;
 }) {
   const longest = Math.max(...parts.map((part) => part.chars), 1);
-  const hasGap = parts.some((part) => !part.tag);
   return (
-    <section className="prompt-parts">
-      <div className="prompt-parts-head">
-        <h3>提示词模块</h3>
-        <span className="muted-text">
-          {hasGap ? '选择模块查看内容；未标记内容归入「其它注入」' : '选择模块查看内容'}
-        </span>
+    <aside className="prompt-modules" aria-label="提示词模块">
+      <div className="prompt-modules-head">
+        <span>提示词模块</span>
+        <span className="prompt-modules-legend">字符</span>
       </div>
-      {/* 表头放在滚动区外面：翻到后面那几段时仍然知道两列数字是什么。 */}
-      <div className="prompt-part prompt-part-head" aria-hidden="true">
-        <span>段落</span>
-        <span />
-        <span className="prompt-part-size">字符</span>
-        <span className="prompt-part-size">≈tokens</span>
-      </div>
-      <div className="prompt-part-list">
+      <div className="prompt-module-list">
+        <button
+          type="button"
+          aria-pressed={selectedPart === -1}
+          className={`prompt-module prompt-module-full${selectedPart === -1 ? ' is-selected' : ''}`}
+          title={`全文 ${formatCharCount(total.chars)} 字符 ≈${formatCharCount(total.tokens)} tokens`}
+          onClick={() => onSelect(-1)}
+        >
+          <span className="prompt-module-top">
+            <span className="prompt-module-label">完整提示词</span>
+            <span className="prompt-module-size">{formatCharCount(total.chars)}</span>
+          </span>
+        </button>
         {parts.map((part, index) => (
           <button
             type="button"
-            className={`prompt-part prompt-part-select${selectedPart === index ? ' is-selected' : ''}`}
-            key={`${part.tag || 'gap'}:${index}`}
             aria-pressed={selectedPart === index}
+            className={`prompt-module${selectedPart === index ? ' is-selected' : ''}`}
+            key={`${part.tag || 'gap'}:${index}`}
+            title={`${part.tag ? `<${part.tag}> ` : ''}${formatCharCount(part.chars)} 字符 ≈${formatCharCount(part.tokens)} tokens`}
             onClick={() => onSelect(index)}
           >
-            <span className="prompt-part-label" title={part.label}>
-              {part.label}
+            <span className="prompt-module-top">
+              <span className="prompt-module-label">{part.label}</span>
+              <span className="prompt-module-size">{formatCharCount(part.chars)}</span>
             </span>
-            <span className="prompt-part-track" aria-hidden="true">
+            <span className="prompt-module-track" aria-hidden="true">
               <i style={{ width: `${Math.max((part.chars / longest) * 100, 1.5)}%` }} />
             </span>
-            <span className="prompt-part-size">{formatCharCount(part.chars)}</span>
-            <span className="prompt-part-size">{formatCharCount(part.tokens)}</span>
           </button>
         ))}
       </div>
-    </section>
+    </aside>
   );
 }
 

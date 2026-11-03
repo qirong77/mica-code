@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { SessionDetailView } from '@mica-config-ui/web'
 import { USAGE_SOURCE_LABELS, usageSourceOf } from '@packages/mica-web-shared/usage-source.js'
-import { ModalMeta, ModalShell } from '../chat-modal'
+import { ModalShell } from '../chat-modal'
 
 const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
 
@@ -461,24 +461,7 @@ export function SessionDetailModal({ sessionId, onClose }) {
   )
 
   return (
-    <ModalShell
-      title={detail?.title || '会话详情'}
-      subtitle={detail?.id ? detail.id.slice(0, 12) : null}
-      onClose={onClose}
-      className="chat-modal-session-detail"
-      meta={
-        <ModalMeta
-          items={[
-            detail?.model,
-            detail?.effort ? `effort ${detail.effort}` : null,
-            detail?.role ? `role ${detail.role}` : null,
-            detail?.turnState || null,
-            `${fmtTime(detail?.createdAt)} → ${fmtTime(detail?.updatedAt)}`,
-            detail?.cwd
-          ]}
-        />
-      }
-    >
+    <ModalShell bare onClose={onClose} className="chat-modal-session-detail">
       {error ? (
         <div className="rounded-[4px] border border-danger/30 bg-danger/8 px-3 py-2 text-xs text-danger-soft">
           {error}

@@ -17,28 +17,28 @@ export type SessionDetailExtraTab = {
   content: ReactNode;
 };
 
-const PROMPT_TAB = { id: 'prompt' as string, label: '系统提示词' };
 const CONVERSATION_TAB = { id: 'conversation' as string, label: '对话记录' };
 const CONTEXT_TAB = { id: 'context' as string, label: 'Context 分析' };
-const RAW_TAB = { id: 'raw' as string, label: '原始文件' };
+const PROMPT_TAB = { id: 'prompt' as string, label: '系统提示词' };
 
 /**
- * 会话详情：一份快照的三个观察角度。
+ * 会话详情：一份快照的几个观察角度。
  *
- * 「系统提示词」看每轮请求开头真正发出去的那几十 KB（角色 + AGENT.md + skills + 插件段落），
  * 「对话记录」看模型实际收到/产出了什么，「Context 分析」看这些内容各自占了多大体积，
- * 「原始文件」看落盘的 JSON 本身。几个页签读同一个 sessionId 的不同投影，所以放在同一个
+ * 「系统提示词」看每轮请求开头真正发出去的那几十 KB（角色 + AGENT.md + skills + 插件段落）。
+ * 落盘的 JSON 本身不是观察角度而是工具，所以从页签里拿出去，放在标签条右端当开关。
+ * 几个视图读同一个 sessionId 的不同投影，所以放在同一个
  * 组件里：桌面端的会话详情、上下文弹窗与配置页的 Sessions 页都用它，同一个会话在任何入口
  * 都不会长得不一样。
  */
 export function SessionDetailView({
   sessionId,
-  defaultTab = 'prompt',
+  defaultTab = 'conversation',
   extraTabs = [],
   showHead = true,
 }: {
   sessionId: string;
-  /** 默认落在哪个页签。缺省是第一个（系统提示词）：标签条的首项与打开时看到的一致。 */
+  /** 默认落在哪个页签。缺省是第一个（对话记录）：打开详情先看这条会话发生了什么。 */
   defaultTab?: SessionDetailTab;
   extraTabs?: SessionDetailExtraTab[];
   showHead?: boolean;
@@ -59,6 +59,11 @@ export function SessionDetailView({
   const dirty = rawContent !== rawSavedContent;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
+  // 原始文件开关关掉时回到的那个视图（不一定是进来时的默认页签）。
+  const lastViewRef = useRef<string>(defaultTab);
+  useEffect(() => {
+    if (tab !== 'raw') lastViewRef.current = tab;
+  }, [tab]);
   const running = header?.turnState === 'running';
 
   // 半句 JSON 不写盘：本地先解析一遍，解析不过就只显示提示，等内容合法再落盘。
@@ -147,6 +152,15 @@ export function SessionDetailView({
     await reloadRaw();
   }
 
+  /** 原始文件不是页签而是开关：再点一次回到刚才那个视图。 */
+  function toggleRawTab() {
+    if (tab === 'raw') {
+      setTab(lastViewRef.current);
+      return;
+    }
+    void openRawTab();
+  }
+
   async function reloadRaw() {
     try {
       const next = await readSessionContent(sessionId);
@@ -158,23 +172,20 @@ export function SessionDetailView({
     }
   }
 
-  // 系统提示词排在最前：它是每轮请求的输入起点，其余页签都是它的结果。宿主自带的页签
-  // （桌面端的用量 / 子代理）跟在三个内置页签之后，原始文件放最后——那是落盘的样子。
+  // 页签只放「看同一份快照的不同角度」：对话记录在前（打开详情就是为了读它），宿主自带的
+  // 页签（桌面端用量 / 子代理）跟在后面。原始文件是工具而不是角度，见标签条右端那个开关。
   const tabs = [
-    PROMPT_TAB,
     CONVERSATION_TAB,
     CONTEXT_TAB,
+    PROMPT_TAB,
     ...extraTabs.map((item) => ({ id: item.id, label: item.label })),
-    RAW_TAB,
   ];
   // 提示词页签与原始文件页签自己就是滚动容器（编辑器内部滚动），外面这层不滚。
   const fillBody = tab === 'raw' || tab === 'prompt';
 
   if (loading && !header) return <div className="page-loading">正在加载 Session…</div>;
   if (!header) {
-    return (
-      <Empty description={error ?? '读不到这个会话：文件可能已被删除'} />
-    );
+    return <Empty description={error ?? '读不到这个会话：文件可能已被删除'} />;
   }
 
   return (
@@ -188,13 +199,9 @@ export function SessionDetailView({
             role="tab"
             aria-selected={tab === item.id}
             className={`session-tab${tab === item.id ? ' session-tab-active' : ''}`}
-            onClick={() => {
-              if (item.id === 'raw') void openRawTab();
-              else setTab(item.id);
-            }}
+            onClick={() => setTab(item.id)}
           >
             {item.label}
-            {item.id === 'raw' && dirty ? <span className="session-tab-dirty">●</span> : null}
           </button>
         ))}
         <span className="session-tabs-tail">
@@ -206,6 +213,10 @@ export function SessionDetailView({
               {dirty && !jsonError && !running ? <Tag tone="blue">待写入</Tag> : null}
             </>
           ) : null}
+          <Button variant="ghost" pressed={tab === 'raw'} title="直接查看、编辑落盘的会话 JSON" onClick={toggleRawTab}>
+            原始 JSON
+            {dirty && tab !== 'raw' ? <span className="session-tab-dirty">●</span> : null}
+          </Button>
         </span>
       </div>
 
@@ -214,7 +225,7 @@ export function SessionDetailView({
       <div
         className={`session-tab-body${fillBody ? ' session-tab-body-fill' : ''}`}
         role="tabpanel"
-        aria-label={tabs.find((item) => item.id === tab)?.label ?? 'Session 视图'}
+        aria-label={tab === 'raw' ? '原始文件' : (tabs.find((item) => item.id === tab)?.label ?? 'Session 视图')}
       >
         {/* 同一会话只刷新数据，不随快照版本重建页签：保留内容和展开状态，避免运行中闪烁。 */}
         {tab === 'conversation' ? (
@@ -226,13 +237,13 @@ export function SessionDetailView({
         {tab === 'prompt' ? (
           <SystemPromptPane key={`prompt:${sessionId}`} sessionId={sessionId} refreshToken={version} />
         ) : null}
-        {extraTabs.map((item) =>
-          tab === item.id ? <div key={item.id}>{item.content}</div> : null,
-        )}
+        {extraTabs.map((item) => (tab === item.id ? <div key={item.id}>{item.content}</div> : null))}
         {tab === 'raw' ? (
           <div className="session-raw">
-            <div className="session-raw-toolbar">
-              <span className="muted-text">会话快照 JSON · 改动会写回磁盘</span>
+            <div className="session-pane-toolbar">
+              <span className="session-pane-facts">
+                <span className="muted-text">会话快照 JSON · 改动会写回磁盘</span>
+              </span>
               <Button
                 title={dirty ? '先撤回改动再重新读取' : '重新从磁盘读取'}
                 disabled={dirty || running}
@@ -242,12 +253,7 @@ export function SessionDetailView({
               </Button>
             </div>
             <div className="editor-host session-raw-editor">
-              <JsonEditor
-                value={rawContent}
-                language="json"
-                readOnly={running}
-                onChange={editRawContent}
-              />
+              <JsonEditor value={rawContent} language="json" readOnly={running} onChange={editRawContent} />
             </div>
           </div>
         ) : null}

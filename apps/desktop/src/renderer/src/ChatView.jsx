@@ -614,13 +614,14 @@ function ImagePreviewModal({ source, alt, onClose, onReveal, onOpenFile }) {
  * 上下文弹窗：与统计页的会话详情、配置页的 Sessions 页是同一个组件，只是落在
  * 「Context 分析」页签上。以前这里单独实现了一套占用分解，同一个会话在两处会给出
  * 两个口径的数字。
+ * 弹窗壳不画标题栏：会话身份（标题、路径、事实）由详情自己的头部给出，两处各画一遍只会重复。
  */
 function ContextDetailPopover({ sessionId, onClose }) {
   return (
-    <ModalShell title="上下文占用" onClose={onClose} className="chat-modal-session-detail">
+    <ModalShell bare onClose={onClose} className="chat-modal-session-detail">
       {sessionId ? (
         <div className="mica-config-ui is-embed session-detail-embed">
-          <SessionDetailView sessionId={sessionId} defaultTab="context" showHead={false} />
+          <SessionDetailView sessionId={sessionId} defaultTab="context" />
         </div>
       ) : (
         <div className="chat-modal-empty">No active session</div>
