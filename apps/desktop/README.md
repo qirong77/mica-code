@@ -124,12 +124,14 @@ resolves the CLI through `resolveMicaExecutable()`, so skipping this step leaves
 to a stale binary.
 Run `npm run build:server` alone when only the runtime changed and the CLI is already current.
 
-Use `npm run build:unpack` for local verification: it runs the same build but packages with
-`electron-builder --dir`, skipping the DMG/ZIP compression that dominates a release build.
+`npm run build:app` is the local path: it runs the same build but packages with
+`electron-builder --dir`, skipping the DMG/ZIP compression that dominates a release build. The
+result is a runnable `dist/mac-*/mica-code-app.app` in roughly 6s. `npm run build:mac` adds the
+DMG + ZIP artifacts and takes ~27s.
 
-Build cost is split roughly as: CLI + shell + runtime in parallel (~6s), electron-builder
-packaging (~11s), zip + dmg compression (~14s). The last part compresses a 255 MB Electron
-Framework and does not shrink; that is why `--dir` exists for local checks.
+Build cost is split roughly as: CLI + shell + runtime in parallel (~4s), electron-builder `--dir`
+packaging (~2s), then zip + dmg compression (~20s). The last part compresses a 277 MB Electron
+Framework and does not shrink (`hdiutil` alone needs ~9s); that is why `--dir` is the local path.
 
 Build speed comes from these steps, all of which are load-bearing:
 

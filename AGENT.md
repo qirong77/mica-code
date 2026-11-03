@@ -43,7 +43,8 @@ npm run dev                # 构建运行时后启动 Electron + Vite
 npm test                   # bun test，覆盖 host / renderer / main
 npx eslint src/
 npm run build              # 先构建根 CLI（bun run build），再外壳 + Web 运行时
-npm run build:unpack       # 同上但 electron-builder --dir，本地验证用
+npm run build:app          # 同上 + electron-builder --dir，产出可直接运行的 .app（约 6s）
+npm run build:mac          # 再打 DMG + zip（发布用；打包与压缩占 20s 以上；根目录 `bun run build:release` 同效）
 npm run start:web          # 运行已构建的 Web 运行时
 ```
 
@@ -587,7 +588,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 发布链路 `build-binaries.yml`：checks / desktop-checks 任一失败，build 与 publish 整段跳过。
 - 打包按平台取 node-pty 原生产物（`scripts/stage-node-pty.mjs`）；`spawn-helper` 只属于 macOS。
 - desktop 用 `scripts/run-parallel.mjs` 并行跑三份构建；Vite 8 需搭配 electron-vite 6。
-- 只验证功能时用 `npm run build:unpack`。
+- `npm run build:app` = 三份构建 + `electron-builder --dir`，只产出可运行的 `.app`；DMG + zip 是发布产物，走 `npm run build:mac`。后者省不掉：`hdiutil` 单压 277MB 的 app 就要 9s，zip 与 blockmap 再加 6s，两者串行约 20s，占整个 `build:mac` 的四分之三。
 - 品牌 SVG 唯一源 `apps/desktop/resources/icon.svg`，位图由 `npm run icons:generate` 生成。
 - 官网架构图只改 `apps/website/architecture/*.architecture.json`，再由 Archify 生成。
 
