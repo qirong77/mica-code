@@ -111,6 +111,43 @@ describe('CompactionService', () => {
     expect(transcript).toContain('- run_shell ×1:\n  - tests passed');
   });
 
+  it('keeps signal lines short and skips the ones the head already shows', async () => {
+    const service = new CompactionService();
+    const transcripts: string[] = [];
+    const oneLine = '{"error":"boom","path":"src/a.ts:12"}' + 'y'.repeat(3_000);
+    const filler = Array.from({ length: 40 }, (_, index) => `line ${index} of the log`).join('\n');
+    const buried = `error${'z'.repeat(600)} at src/b.ts:99`;
+    await service.compact({
+      messages: [
+        { role: 'user', content: 'check the logs' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'c1', type: 'function', function: { name: 'run_shell', arguments: '{"command":"cat log"}' } },
+            { id: 'c2', type: 'function', function: { name: 'run_shell', arguments: '{"command":"cat other"}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'c1', content: oneLine },
+        { role: 'tool', tool_call_id: 'c2', content: `${filler}\n${buried}\n${filler}` },
+        { role: 'user', content: 'and then?' },
+        { role: 'assistant', content: 'done' },
+      ],
+      options: { keepRecentRounds: 0, aggressive: true, force: true },
+      summarize: async (transcript) => {
+        transcripts.push(transcript);
+        return FULL_SUMMARY;
+      },
+    });
+
+    const transcript = transcripts.at(-1) ?? '';
+    // 一行的 JSON 结果整行就是 head，信号行再抄一遍纯属浪费。
+    expect(transcript).toContain('--- signals ---\n    (none)');
+    // 埋在中间的信号行保留定位信息，但按行截断，不整行搬进来。
+    expect(transcript).toContain(`error${'z'.repeat(195)}…`);
+    expect(transcript).not.toContain('z'.repeat(300));
+  });
+
   it('merges a previous compact summary instead of dropping it on repeated compact', async () => {
     const service = new CompactionService();
     const first = await service.compact({

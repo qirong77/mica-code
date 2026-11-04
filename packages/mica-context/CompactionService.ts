@@ -30,6 +30,8 @@ const TRANSCRIPT_RESULT_PATHS = 12;
 // 调用参数里的路径是「这次动了哪些文件」的唯一线索，一个路径二三十字符，
 // 比截断后的参数正文便宜得多，所以上限给得比结果侧宽。
 const TRANSCRIPT_TOOL_CALL_FILES = 60;
+/** 信号行按整行抽，但压缩成一行的 JSON 结果会整行进来，等于把 head 又抄一遍。 */
+const TRANSCRIPT_SIGNAL_LINE_CHARS = 200;
 /** 依赖目录与构建产物里的路径对摘要没有意义，它们会把真有信息的那几个挤掉。 */
 const TRANSCRIPT_PATH_NOISE = /(^|\/)(node_modules|\.git|dist|out|temp|\.backups)\//;
 /** 参数里能说明「这次调用做了什么」的字段，按优先级取第一个。 */
@@ -2030,7 +2032,17 @@ function headSignalsTail(text: string, maxChars: number): string {
   );
   const head = folded.slice(0, Math.floor(maxChars * 0.45));
   const tail = folded.slice(-Math.floor(maxChars * 0.35));
-  const signals = signalLines.slice(0, 80).join('\n');
+  // 信号行只留 head/tail 里看不到的：压缩成一行的结果整行都以 head 为开头，
+  // 逐字符判断包含关系永远为假，取开头一段做探针才认得出「已经看过了」。
+  const alreadyShown = (line: string) => {
+    const probe = line.trim().slice(0, 60);
+    return !probe || head.includes(probe) || tail.includes(probe);
+  };
+  const signals = signalLines
+    .slice(0, 80)
+    .filter((line) => !alreadyShown(line))
+    .map((line) => clipTranscriptLine(line, TRANSCRIPT_SIGNAL_LINE_CHARS))
+    .join('\n');
   return [
     `[truncated: original ${folded.length} chars, kept about ${maxChars} chars]`,
     '--- head ---',
