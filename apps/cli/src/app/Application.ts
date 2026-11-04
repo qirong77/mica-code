@@ -137,6 +137,9 @@ export class Application {
         taskManager: subagentTasks,
         // 旁问线程没有工具调用可以带 owner：它绑在用户当前看着的那条会话上。
         resolveCurrentAgent: () => resolvePluginSession(agentSessions, undefined)?.agent ?? agent,
+        // 委派运行要在观察流里挂回派生它的那条会话；agent 自己不持有会话身份。
+        resolveSessionId: (owner) =>
+          agentSessions.findByAgent(owner)?.sessionController.getCurrentSessionId() ?? null,
         persistUsage: (owner) => {
           if (owner.isRunning) return;
           resolvePluginSession(agentSessions, owner)?.sessionController.saveCurrent({ allowEmpty: true });

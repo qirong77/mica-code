@@ -1,16 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRuntime } from './AgentRuntime.js';
-import { applyIterationRewrites, clearIterationRewrites, configureIterationRewrite, registerIterationRewrite } from './iterationRewrite.js';
+import {
+  applyIterationRewrites,
+  clearIterationRewrites,
+  configureIterationRewrite,
+  registerIterationRewrite,
+} from './iterationRewrite.js';
 import { estimateContextTokens } from '@packages/mica-context/tokenEstimate.js';
 
 function runtime() {
-  const getSnapshot = vi.fn(() => { throw new Error('A budget check must not copy the entire snapshot'); });
+  const getSnapshot = vi.fn(() => {
+    throw new Error('A budget check must not copy the entire snapshot');
+  });
   const setPluginState = vi.fn();
   const estimateRequestOverheadTokens = vi.fn(() => 1400);
   const agent = {
     config: { model: 'test', provider: { contextWindowSize: 32000 } },
-    getSnapshot, setPluginState, estimateRequestOverheadTokens,
-    getPluginState: () => undefined, getLastUsage: () => undefined,
+    getSnapshot,
+    setPluginState,
+    estimateRequestOverheadTokens,
+    getPluginState: () => undefined,
+    getLastUsage: () => undefined,
   } as unknown as AgentRuntime;
   return { agent, getSnapshot, setPluginState, estimateRequestOverheadTokens };
 }
@@ -21,6 +31,26 @@ afterEach(() => {
 });
 
 describe('request history rewrite hosting', () => {
+  it('routes a plugin compact through the owner so the run can observe it', async () => {
+    const host = runtime();
+    const compactIterationMessages = vi.fn(async () => ({ messages: [], summary: null }));
+    (host.agent as unknown as { compactIterationMessages: unknown }).compactIterationMessages =
+      compactIterationMessages;
+    const controller = new AbortController();
+    const messages = [{ role: 'user', content: 'hello' }];
+    registerIterationRewrite('auto-compact', async (history, handle) => {
+      await handle.compact(history, { mode: 'quick' });
+      return null;
+    });
+    await applyIterationRewrites(messages, host.agent, controller.signal);
+    // 压缩必须走 owner 上带观察的那条路：直接调 CompressionService 会漏掉 compaction 事件。
+    expect(compactIterationMessages).toHaveBeenCalledWith(messages, {
+      mode: 'quick',
+      pluginId: 'auto-compact',
+      signal: controller.signal,
+    });
+  });
+
   it('binds the originating owner and reuses request overhead without materializing a snapshot', async () => {
     const host = runtime();
     const controller = new AbortController();
@@ -45,7 +75,9 @@ describe('request history rewrite hosting', () => {
     const controller = new AbortController();
     let finish!: () => void;
     registerIterationRewrite('slow', async (messages, handle) => {
-      await new Promise<void>(resolve => { finish = resolve; });
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
       handle.setState({ late: true });
       return [...messages, { role: 'user', content: 'late result' }];
     });
@@ -59,16 +91,27 @@ describe('request history rewrite hosting', () => {
 
   it('isolates a failed error reporter and keeps later extensions running', async () => {
     const host = runtime();
-    configureIterationRewrite({ onError: () => { throw new Error('disk full'); } });
-    registerIterationRewrite('bad', () => { throw new Error('broken extension'); });
-    registerIterationRewrite('good', messages => [...messages, { role: 'user', content: 'kept' }]);
+    configureIterationRewrite({
+      onError: () => {
+        throw new Error('disk full');
+      },
+    });
+    registerIterationRewrite('bad', () => {
+      throw new Error('broken extension');
+    });
+    registerIterationRewrite('good', (messages) => [...messages, { role: 'user', content: 'kept' }]);
     await expect(applyIterationRewrites([], host.agent)).resolves.toEqual([{ role: 'user', content: 'kept' }]);
   });
 
   it('does not invoke an extension disposed while an earlier extension is waiting', async () => {
     const host = runtime();
     let finish!: () => void;
-    registerIterationRewrite('slow', async () => { await new Promise<void>(resolve => { finish = resolve; }); return null; });
+    registerIterationRewrite('slow', async () => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return null;
+    });
     const disposedHandler = vi.fn(() => null);
     const registration = registerIterationRewrite('disposed', disposedHandler);
     const result = applyIterationRewrites([], host.agent);

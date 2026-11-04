@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { appendFile, chmod, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
 import type { AgentObservationEvent } from '@packages/mica-plugin/index.js';
@@ -20,7 +20,7 @@ export type PromptSection = { label: string; sha256: string; chars: number };
 export type RunInput = { sha256: string; chars: number; excerpt?: string };
 export type ReviewFinding = {
   id: string;
-  kind: 'tool-error' | 'repeated-call' | 'run-error' | 'retry' | 'user-retry';
+  kind: 'tool-error' | 'repeated-call' | 'run-error' | 'retry' | 'user-retry' | 'user-correction';
   title: string;
   module: string;
   suggestion: string;
@@ -34,6 +34,34 @@ export type ReviewFinding = {
    *  rows are indistinguishable. */
   cwd?: string;
   evidence: Evidence[];
+};
+/** 一次运行里的压缩次数，按动手的那一类机制分组：压缩是正常机制，只计数、不生成问题条目。 */
+export type CompactionCounts = { local: number; llm: number; idle: number };
+export type CompactionStrategy = keyof CompactionCounts;
+/** 最近一次真正改了历史的压缩：用来解释「压完之后那一轮为什么变差」。 */
+export type RecordedCompaction = {
+  strategy: CompactionStrategy;
+  reason: string;
+  beforeMessages: number;
+  afterMessages: number;
+};
+/** 用户纠正的三种形态，与 `RuntimeEvent` 的 `input:corrected` 一致。 */
+export type CorrectionKind = 'edit' | 'recall' | 'retry';
+export type CorrectionCounts = Record<CorrectionKind, number>;
+/** 这条运行由委派产生时记下的来源：哪一类子代理、被哪个会话派生。 */
+export type RunDelegation = { type: string; parentSessionId?: string };
+/**
+ * 采集那一刻的插件装配结论（`$MICA_HOME/plugin-status.json`）。
+ *
+ * `hash` 只覆盖这份内容：两次运行之间 hash 变了就说明插件集合变了，排查「这一轮变差
+ * 是不是插件没装上」不用再翻日志。
+ */
+export type RunPlugins = {
+  host?: string;
+  loaded: number;
+  failed: string[];
+  skipped: string[];
+  hash: string;
 };
 export type RunSummary = {
   version: 1;
@@ -61,6 +89,16 @@ export type RunSummary = {
   /** Nonzero exits that the command itself documents as normal (`rg` no match, …). */
   expectedExits: number;
   retries: number;
+  /** 压缩次数（本地清理 / 模型摘要 / 空闲维护）。老摘要没有它，读时按 0。 */
+  compactions: CompactionCounts;
+  /** 最近一次真正改了历史的压缩。 */
+  lastCompaction?: RecordedCompaction;
+  /** 本轮运行开始前攒下的用户纠正：用户推翻上一轮输入的唯一确凿记录。 */
+  corrections?: CorrectionCounts;
+  /** 委派来源。有它才能按父会话拼出委派树。 */
+  delegation?: RunDelegation;
+  /** 采集这一刻的插件装配结论。缺文件或损坏时整块省略。 */
+  plugins?: RunPlugins;
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
@@ -83,6 +121,26 @@ export type RunSummary = {
   reclaimedAt?: string;
   findings: ReviewFinding[];
 };
+/**
+ * 一种子代理类型的委派结果。平均请求数 / 平均输出 token 在该类型全部运行都缺这个
+ * 字段时**不出现**——写 0 会被读成「一次请求都没花」。
+ */
+export type DelegationTypeSummary = {
+  type: string;
+  runs: number;
+  completed: number;
+  failed: number;
+  aborted: number;
+  avgRequests?: number;
+  avgOutputTokens?: number;
+};
+/** 一个父会话下面的委派结果。`parentSessionId` 为 null 表示事件里没记父会话。 */
+export type DelegationParentSummary = {
+  parentSessionId: string | null;
+  runs: number;
+  types: DelegationTypeSummary[];
+};
+export type DelegationSummary = { parents: DelegationParentSummary[] };
 export type ReviewReport = {
   version: 1;
   generatedAt: string;
@@ -90,6 +148,8 @@ export type ReviewReport = {
   cwd?: string;
   runs: RunSummary[];
   findings: ReviewFinding[];
+  /** 委派树：按父会话归拢后、再按子代理类型聚合成败与成本。 */
+  delegation: DelegationSummary;
   warnings: string[];
   scannedRuns: number;
   limits: { runs: number; findingsPerRun: number; evidencePerFinding: number };
@@ -109,6 +169,8 @@ type CallRecord = {
 };
 type WriteMark = { seq: number; key: string };
 type InputMemory = Map<string, { runSummaryId: string; sha256: string; text: string; outcome: Outcome }>;
+/** 已收到、还没归属到某次运行的用户纠正（纠正通常发生在两轮之间）。 */
+type PendingCorrection = { sessionId: string; kind: CorrectionKind; chars?: number };
 type RunState = {
   summary: RunSummary;
   options: CaptureOptions;
@@ -132,8 +194,16 @@ const MAX_RESULT_HASHES = 4;
 const MAX_PROMPT_SECTIONS = 60;
 const MAX_INPUT_MEMORY = 500;
 const MAX_PENDING_TRACE_BYTES = 4 * 1024 * 1024;
+/** 已收到、还没归属到某次运行的用户纠正。纠正落在两轮之间，先按会话暂存在内存里。 */
+const MAX_PENDING_CORRECTIONS = 200;
+const MAX_PLUGIN_IDS = 50;
+const PLUGIN_HASH_CHARS = 12;
+const MAX_DELEGATION_PARENTS = 50;
 const STATUSES = new Set<FindingStatus>(['open', 'accepted', 'dismissed', 'validated', 'regressed']);
 const OUTCOMES = new Set<Outcome>(['running', 'completed', 'aborted', 'error', 'interrupted']);
+const COMPACTION_STRATEGIES = new Set<CompactionStrategy>(['local', 'llm', 'idle']);
+const CORRECTION_ORDER: CorrectionKind[] = ['edit', 'recall', 'retry'];
+const CORRECTION_KINDS = new Set<CorrectionKind>(CORRECTION_ORDER);
 const SENSITIVE_KEY = /api.?key|access.?key|token|password|passwd|authorization|cookie|secret|credential|private.?key/i;
 const POLLING =
   /(?:^|[._:/-])(?:wait_for|background_tasks_read|background_tasks_list|pty_read|read_terminal|terminal_read|wait|sleep|poll)(?:$|[._:/-])/i;
@@ -785,6 +855,158 @@ function finiteCount(value: number): number {
 function copy<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
+function isCount(value: unknown): boolean {
+  return Number.isInteger(value) && Number(value) >= 0;
+}
+function isPluginIdList(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > MAX_PLUGIN_IDS) return false;
+  return value.every((id) => typeof id === 'string' && !!id);
+}
+/** 缺失 / 损坏的压缩计数按 0 读：老摘要里没有这块，不能因此判成损坏。 */
+function compactionCounts(value: Partial<CompactionCounts> | undefined): CompactionCounts {
+  const pick = (count: unknown): number => (isCount(count) ? Number(count) : 0);
+  return { local: pick(value?.local), llm: pick(value?.llm), idle: pick(value?.idle) };
+}
+function messageCount(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+}
+
+/**
+ * 用户纠正 → 复盘条目的文案。
+ *
+ * 这三种都是「这次回答没被接受」的确凿信号，比模型自评可靠；所以条目的落点不是
+ * 「哪里报错了」，而是「回去看哪一轮、改哪一层」。
+ */
+const CORRECTION_GUIDANCE: Record<CorrectionKind, { title: string; suggestion: string; evaluation: string }> = {
+  edit: {
+    title: '用户改写了上一轮的输入并重跑',
+    suggestion:
+      '回看被改写的那一轮：对比原始输入与改写后的输入，确认是指令没被理解（改 prompt 段落 / 工具描述 / 记忆条目）还是结果不对（改实现或验证方式），再改对应的那一处。',
+    evaluation: '用改写后的说法重跑同类任务，确认同一处不再被用户改写。',
+  },
+  recall: {
+    title: '用户撤回了还没发出的排队输入',
+    suggestion:
+      '回看被撤回的那一句：它是在上一轮还没跑完时写的。确认是这一轮拖太久、还是队列把话带到了错误的状态，再决定改 prompt 里的等待约定、工具耗时还是队列时机。',
+    evaluation: '在同一时机（上一轮还在跑）再发一句，确认它被正确排队并在预期时机发出。',
+  },
+  retry: {
+    title: '用户原样重发了同一句话',
+    suggestion:
+      '回看被重发的那一轮：同一句输入没有换说法却被重发，通常说明回答没被接受或那一轮没跑完。确认是指令没被理解（改 prompt 段落 / 工具描述 / 记忆条目）还是结果不对（改实现或验证方式）。',
+    evaluation: '重跑同一句话，确认一次就得到用户接受的结果、无需再发。',
+  },
+};
+
+/**
+ * `plugin-status.json` → 这次运行看到的插件装配结论。
+ *
+ * 文件缺失或损坏一律返回 undefined（整块省略），不抛错、不生成问题条目：插件没装上
+ * 有很多正常原因，采集侧不该把它变成一条待复盘的问题。
+ */
+function readPluginSnapshot(path: string | undefined): RunPlugins | undefined {
+  if (!path) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const file = parsed as { host?: unknown; plugins?: unknown };
+    if (!Array.isArray(file.plugins)) return undefined;
+    const statuses = new Map<string, 'loaded' | 'failed' | 'skipped'>();
+    for (const item of file.plugins) {
+      if (!item || typeof item !== 'object') continue;
+      const entry = item as { id?: unknown; status?: unknown };
+      if (typeof entry.id !== 'string' || !entry.id) continue;
+      if (entry.status !== 'loaded' && entry.status !== 'failed' && entry.status !== 'skipped') continue;
+      statuses.set(boundedText(entry.id, 200), entry.status);
+    }
+    const ids = (status: 'failed' | 'skipped'): string[] =>
+      [...statuses]
+        .filter(([, value]) => value === status)
+        .map(([id]) => id)
+        .sort()
+        .slice(0, MAX_PLUGIN_IDS);
+    const snapshot: RunPlugins = {
+      ...(typeof file.host === 'string' && file.host ? { host: boundedText(file.host, 40) } : {}),
+      loaded: [...statuses.values()].filter((value) => value === 'loaded').length,
+      failed: ids('failed'),
+      skipped: ids('skipped'),
+      hash: '',
+    };
+    // 同一份状态必须得到同一个 hash：只喂排好序的数组与该文件自己的字段。
+    snapshot.hash = digest(
+      JSON.stringify([snapshot.host ?? null, snapshot.loaded, snapshot.failed, snapshot.skipped]),
+    ).slice(0, PLUGIN_HASH_CHARS);
+    return snapshot;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 一种子代理的成败与成本；缺字段的指标不出现在返回值里。 */
+function delegationTypeSummary(type: string, runs: RunSummary[]): DelegationTypeSummary {
+  const mean = (pick: (run: RunSummary) => number | undefined): number | undefined => {
+    let total = 0;
+    let count = 0;
+    for (const run of runs) {
+      const value = pick(run);
+      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+        total += value;
+        count++;
+      }
+    }
+    return count > 0 ? Math.round((total / count) * 10) / 10 : undefined;
+  };
+  const row: DelegationTypeSummary = {
+    type,
+    runs: runs.length,
+    completed: runs.filter((run) => run.outcome === 'completed').length,
+    // 宿主被杀（interrupted）同样是一次没跑成的委派，归到 failed 里。
+    failed: runs.filter((run) => run.outcome === 'error' || run.outcome === 'interrupted').length,
+    aborted: runs.filter((run) => run.outcome === 'aborted').length,
+  };
+  const requests = mean((run) => run.requestCount);
+  if (requests !== undefined) row.avgRequests = requests;
+  const output = mean((run) => run.outputTokens);
+  if (output !== undefined) row.avgOutputTokens = output;
+  return row;
+}
+
+/**
+ * 把委派产生的运行按「父会话 × 子代理类型」聚合。
+ *
+ * 只认 `delegation.type` 齐全的运行：没有类型的委派事件拼不出「哪种类型最差」，
+ * 补一行 0 只会把结论冲淡。
+ */
+export function summarizeDelegation(runs: RunSummary[], warnings: string[] = []): DelegationSummary {
+  const parents = new Map<string | null, Map<string, RunSummary[]>>();
+  for (const run of runs) {
+    const type = typeof run.delegation?.type === 'string' ? run.delegation.type.trim() : '';
+    if (!type) continue;
+    const parent = typeof run.delegation?.parentSessionId === 'string' ? run.delegation.parentSessionId : null;
+    const types = parents.get(parent) ?? new Map<string, RunSummary[]>();
+    const list = types.get(type) ?? [];
+    list.push(run);
+    types.set(type, list);
+    parents.set(parent, types);
+  }
+  const groups = [...parents]
+    .map(([parentSessionId, types]) => ({
+      parentSessionId,
+      runs: [...types.values()].reduce((total, list) => total + list.length, 0),
+      types: [...types]
+        .map(([type, list]) => delegationTypeSummary(type, list))
+        .sort((a, b) => b.runs - a.runs || a.type.localeCompare(b.type)),
+    }))
+    .sort((a, b) => b.runs - a.runs || (a.parentSessionId ?? '').localeCompare(b.parentSessionId ?? ''));
+  if (groups.length > MAX_DELEGATION_PARENTS) {
+    warnings.push(
+      `Delegation summary limited to the ${MAX_DELEGATION_PARENTS} parent sessions with the most delegated runs.`,
+    );
+    return { parents: groups.slice(0, MAX_DELEGATION_PARENTS) };
+  }
+  return { parents: groups };
+}
 
 export class HarnessRecorder {
   private readonly root: string;
@@ -801,11 +1023,15 @@ export class HarnessRecorder {
   private drainScheduled = false;
   /** Last input per session, so a retry after a failed run can be recognised. */
   private readonly lastInputs: InputMemory = new Map();
+  /** 已经收到、还没归属到某次运行的用户纠正；下一次同会话 run:start 取走即清空。 */
+  private readonly corrections: PendingCorrection[] = [];
+  /** 归属不明被丢弃的纠正次数，进 review 的 warnings。 */
+  private droppedCorrections = 0;
 
   constructor(
     root: string,
     private readonly onError: (error: unknown) => void = () => {},
-    private readonly context: { mode?: string; host?: string } = {},
+    private readonly context: { mode?: string; host?: string; pluginStatusPath?: string } = {},
   ) {
     this.root = resolve(root);
   }
@@ -1076,6 +1302,129 @@ export class HarnessRecorder {
     );
   }
 
+  /**
+   * 记一次用户纠正：就地改写重跑 / 撤回还没发出的排队输入 / 原样重发。
+   *
+   * 纠正发生在两轮之间，那时通常没有正在跑的 run 可以挂，所以**收到时不落盘**——
+   * 每条纠正都造一个 run 目录只会把「运行记录」变成噪声。先按会话暂存在内存里
+   * （上限 `MAX_PENDING_CORRECTIONS`，先进先出），下一次该会话的 `run:start` 取走
+   * （取走即清空）并写进那次运行。
+   *
+   * 归属不明的纠正直接丢弃并计数：把别人的纠正挂到这条运行上，比不记更糟。
+   */
+  noteCorrection(correction: { sessionId?: string; kind: CorrectionKind; chars?: number }): void {
+    if (this.disposed) return;
+    try {
+      if (!correction || !CORRECTION_KINDS.has(correction.kind)) return;
+      const sessionId = this.correctionSession(correction.sessionId);
+      if (!sessionId) {
+        this.droppedCorrections++;
+        return;
+      }
+      if (this.corrections.length >= MAX_PENDING_CORRECTIONS) this.corrections.shift();
+      this.corrections.push({
+        sessionId,
+        kind: correction.kind,
+        ...(typeof correction.chars === 'number' && Number.isFinite(correction.chars) && correction.chars >= 0
+          ? { chars: Math.floor(correction.chars) }
+          : {}),
+      });
+    } catch (error) {
+      try {
+        this.onError(error);
+      } catch {
+        /* reporting must not break the host task */
+      }
+    }
+  }
+
+  /** 显式 sessionId 优先；否则只有「恰好一条会话在跑」时才敢归属。 */
+  private correctionSession(sessionId: string | undefined): string | null {
+    const explicit = typeof sessionId === 'string' ? boundedText(sessionId, 300).trim() : '';
+    if (explicit) return explicit;
+    const active = new Set<string>();
+    for (const state of this.active) if (state.summary.sessionId) active.add(state.summary.sessionId);
+    return active.size === 1 ? [...active][0]! : null;
+  }
+
+  /**
+   * 把攒下的纠正挂到这次运行上：计数进 `summary.corrections`，并生成 `user-correction`
+   * 问题条目（同会话同 kind 合并成一条，`occurrences` 就是纠正次数）。
+   */
+  private takeCorrections(state: RunState, seq: number): void {
+    const sessionId = state.summary.sessionId;
+    if (!sessionId || this.corrections.length === 0) return;
+    const taken: PendingCorrection[] = [];
+    for (let index = 0; index < this.corrections.length; ) {
+      const item = this.corrections[index]!;
+      if (item.sessionId === sessionId) {
+        taken.push(item);
+        this.corrections.splice(index, 1);
+        continue;
+      }
+      index++;
+    }
+    if (taken.length === 0) return;
+    const counts: CorrectionCounts = { edit: 0, recall: 0, retry: 0 };
+    const chars: CorrectionCounts = { edit: 0, recall: 0, retry: 0 };
+    for (const item of taken) {
+      counts[item.kind]++;
+      chars[item.kind] += item.chars ?? 0;
+    }
+    state.summary.corrections = counts;
+    for (const kind of CORRECTION_ORDER) {
+      const count = counts[kind];
+      if (count === 0) continue;
+      const guidance = CORRECTION_GUIDANCE[kind];
+      const charsPart = chars[kind] ? `; ${chars[kind]} chars` : '';
+      const detail = `kind: ${kind}; ${count} correction(s) before this run${charsPart}; session ${sessionId}.`;
+      for (let index = 0; index < count; index++)
+        this.addFinding(
+          state,
+          'user-correction',
+          `${sessionId}\n${kind}`,
+          seq,
+          guidance.title,
+          'session',
+          guidance.suggestion,
+          guidance.evaluation,
+          detail,
+        );
+    }
+  }
+
+  /**
+   * 压缩计数。实时写入与 `rebuild` 共用这一份，所以两边的次数与「最后一次」完全一致。
+   *
+   * `applied: false` 表示这次检查后决定不压（历史一个字没改），那不是一次压缩：算进去
+   * 会让「反复压缩后出错」的排查指向根本没发生的动作。
+   */
+  private noteCompaction(
+    state: RunState,
+    event: {
+      strategy: unknown;
+      reason: unknown;
+      beforeMessages: unknown;
+      afterMessages: unknown;
+      applied: unknown;
+    },
+  ): void {
+    if (event.applied === false) return;
+    const strategy = COMPACTION_STRATEGIES.has(event.strategy as CompactionStrategy)
+      ? (event.strategy as CompactionStrategy)
+      : undefined;
+    if (!strategy) return;
+    const counts = compactionCounts(state.summary.compactions as Partial<CompactionCounts> | undefined);
+    counts[strategy]++;
+    state.summary.compactions = counts;
+    state.summary.lastCompaction = {
+      strategy,
+      reason: boundedText(event.reason ?? '', 120),
+      beforeMessages: messageCount(event.beforeMessages),
+      afterMessages: messageCount(event.afterMessages),
+    };
+  }
+
   private addFinding(
     state: RunState,
     kind: ReviewFinding['kind'],
@@ -1170,6 +1519,7 @@ export class HarnessRecorder {
           toolErrors: 0,
           expectedExits: 0,
           retries: 0,
+          compactions: { local: 0, llm: 0, idle: 0 },
           inputTokens: 0,
           outputTokens: 0,
           cachedInputTokens: 0,
@@ -1210,6 +1560,22 @@ export class HarnessRecorder {
           ...(state.options.captureContent ? { excerpt: inputText.slice(0, 300) } : {}),
         };
         this.noteRunInput(state, seq, inputText, this.lastInputs);
+        // 委派来源：有了它才能把子代理的运行挂回父会话，并按类型比成败。
+        if (event.delegation) {
+          const type = boundedText(event.delegation.type, 80).trim();
+          const parent =
+            typeof event.delegation.parentSessionId === 'string'
+              ? boundedText(event.delegation.parentSessionId, 300).trim()
+              : '';
+          if (type) {
+            state.summary.delegation = { type, ...(parent ? { parentSessionId: parent } : {}) };
+            stored.delegation = state.summary.delegation;
+          }
+        }
+        // 插件装配结论只在 run:start 读一次：文件缺失或损坏就整块省略。
+        const plugins = readPluginSnapshot(this.context.pluginStatusPath);
+        if (plugins) state.summary.plugins = plugins;
+        this.takeCorrections(state, seq);
         break;
       }
       case 'request:start': {
@@ -1301,6 +1667,24 @@ export class HarnessRecorder {
         const category = classifyError(event.error);
         stored.errorCategory = category;
         this.noteRuntimeError(state, seq, 'retry', category, event.attempt);
+        break;
+      }
+      case 'compaction': {
+        // 压缩是正常机制：只计数 + 记最后一次，绝不生成问题条目。字段一并落进轨迹，
+        // 这样 rebuild 重放能得出同样的次数。
+        const strategy = typeof event.strategy === 'string' ? event.strategy : '';
+        const reason = boundedText(event.reason, 120);
+        const beforeMessages = messageCount(event.beforeMessages);
+        const afterMessages = messageCount(event.afterMessages);
+        const applied = event.applied !== false;
+        stored.strategy = strategy;
+        stored.reason = reason;
+        stored.beforeMessages = beforeMessages;
+        stored.afterMessages = afterMessages;
+        stored.applied = applied;
+        if (event.beforeChars !== undefined) stored.beforeChars = messageCount(event.beforeChars);
+        if (event.afterChars !== undefined) stored.afterChars = messageCount(event.afterChars);
+        this.noteCompaction(state, { strategy, reason, beforeMessages, afterMessages, applied });
         break;
       }
       case 'run:finish': {
@@ -1415,6 +1799,9 @@ export class HarnessRecorder {
     const filter = cwd ? canonicalCwd(cwd) : undefined;
     const warnings = [...this.writeWarnings];
     if (reclaimed > 0) warnings.push(`已回收 ${reclaimed} 个宿主已退出的未完成运行，标记为 interrupted。`);
+    // 归属不明的纠正没有落点：如实说出来，而不是悄悄丢掉。
+    if (this.droppedCorrections > 0)
+      warnings.push(`丢弃了 ${this.droppedCorrections} 次无法确定会话的用户纠正，未记入任何运行。`);
     const runs: RunSummary[] = [];
     let entries: { id: string; modified: number }[] = [];
     try {
@@ -1451,6 +1838,8 @@ export class HarnessRecorder {
         if (summary.cwd) summary.cwd = canonicalCwd(summary.cwd);
         // Summaries written before this counter existed report it as absent.
         if (!Number.isFinite(summary.expectedExits)) summary.expectedExits = 0;
+        // 压缩计数同样是后加的：老摘要按 0 报，不要凭空补一次压缩。
+        summary.compactions = compactionCounts(summary.compactions as Partial<CompactionCounts> | undefined);
         if (filter && summary.cwd !== filter) continue;
         if (runs.length >= MAX_RUNS) {
           warnings.push(`Review limited to the ${MAX_RUNS} most recently updated runs in the selected scope.`);
@@ -1475,6 +1864,7 @@ export class HarnessRecorder {
     }
     for (const summary of runs) await inspectTrace(summary, warnings);
     runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    const delegation = summarizeDelegation(runs, warnings);
     const merged = new Map<string, ReviewFinding>();
     for (const run of runs)
       for (const candidate of run.findings) {
@@ -1520,6 +1910,7 @@ export class HarnessRecorder {
       ...(filter ? { cwd: filter } : {}),
       runs,
       findings: [...merged.values()].sort((a, b) => b.occurrences - a.occurrences || a.id.localeCompare(b.id)),
+      delegation,
       warnings,
       scannedRuns,
       limits: { runs: MAX_RUNS, findingsPerRun: MAX_FINDINGS, evidencePerFinding: MAX_EVIDENCE },
@@ -1654,6 +2045,10 @@ export class HarnessRecorder {
    * Counters, timings and outcome are left untouched: traces may have dropped
    * events at the capture limit, so recomputing them would undercount. Only
    * `findings` is replaced.
+   *
+   * 用户纠正（`input:corrected`）不在轨迹里——它发生在两轮之间，采集时直接写进
+   * `summary.corrections`。所以重算必须**保留**已有 corrections 与由它产生的条目，
+   * 否则每次 rebuild 都会把这条最确凿的信号抹掉。
    */
   async rebuild(options: { cwd?: string } = {}): Promise<{
     rebuilt: number;
@@ -1771,7 +2166,15 @@ export class HarnessRecorder {
       // Every replayed event exists on disk, so re-derived evidence is traceable.
       for (const finding of state.candidates.values())
         for (const evidence of finding.evidence) evidence.available = true;
-      const replaced = [...state.candidates.values()];
+      // 用户纠正重算不出来，已有的条目与计数原样留下，不能跟着重算一起消失。
+      const preserved = summary.findings.filter((finding) => finding.kind === 'user-correction');
+      const replaced = [...state.candidates.values(), ...preserved];
+      // 压缩次数是采集时记下的事实（和 requestCount 一样）：摘要有就照原样留下，只在
+      // 老摘要没有这一块时，用同一条推导重放出来的结果补上。
+      const recordedCompactions = (summary.compactions as Partial<CompactionCounts> | undefined)
+        ? compactionCounts(summary.compactions as Partial<CompactionCounts>)
+        : state.summary.compactions;
+      const recordedLastCompaction = summary.lastCompaction ?? state.summary.lastCompaction;
       try {
         // Another mica process (desktop app-server, CLI) may be writing this run
         // right now. Re-read before replacing so a run that went back to
@@ -1785,7 +2188,17 @@ export class HarnessRecorder {
         // 重算出来的「预期非零退出」才是准的，沿用旧值会把它算成 0。
         await this.atomic(
           join(directory, 'summary.json'),
-          JSON.stringify({ ...summary, expectedExits: state.summary.expectedExits, findings: replaced }, null, 2),
+          JSON.stringify(
+            {
+              ...summary,
+              expectedExits: state.summary.expectedExits,
+              compactions: recordedCompactions,
+              ...(recordedLastCompaction ? { lastCompaction: recordedLastCompaction } : {}),
+              findings: replaced,
+            },
+            null,
+            2,
+          ),
         );
         rebuilt++;
         findings += replaced.length;
@@ -1829,6 +2242,15 @@ export class HarnessRecorder {
         category,
         event.expectedExit === true ? true : undefined,
       );
+    } else if (event.type === 'compaction') {
+      // 与实时写入同一条推导：轨迹里有 strategy 的老事件才算得上一次压缩。
+      this.noteCompaction(state, {
+        strategy: typeof event.strategy === 'string' ? event.strategy : undefined,
+        reason: typeof event.reason === 'string' ? event.reason : '',
+        beforeMessages: event.beforeMessages,
+        afterMessages: event.afterMessages,
+        applied: event.applied !== false,
+      });
     } else if (event.type === 'retry' || (event.type === 'run:finish' && event.outcome === 'error')) {
       const category =
         !hasCompleteContent(event.error) && typeof event.errorCategory === 'string'
@@ -1947,6 +2369,47 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
   // Added after the first runs were recorded: absent means zero, anything else must be a count.
   if (value.expectedExits !== undefined && (!Number.isInteger(value.expectedExits) || value.expectedExits < 0))
     return false;
+  // 压缩计数、纠正、委派与插件快照都是后加的：缺失按「没有」处理，有就必须是合法形状。
+  const compactions = value.compactions as Partial<CompactionCounts> | undefined;
+  if (
+    compactions !== undefined &&
+    (!compactions || !['local', 'llm', 'idle'].every((key) => isCount(compactions[key as CompactionStrategy])))
+  )
+    return false;
+  const lastCompaction = value.lastCompaction as Partial<RecordedCompaction> | undefined;
+  if (
+    lastCompaction !== undefined &&
+    (!lastCompaction ||
+      !COMPACTION_STRATEGIES.has(lastCompaction.strategy as CompactionStrategy) ||
+      typeof lastCompaction.reason !== 'string' ||
+      !isCount(lastCompaction.beforeMessages) ||
+      !isCount(lastCompaction.afterMessages))
+  )
+    return false;
+  const corrections = value.corrections as Partial<CorrectionCounts> | undefined;
+  if (corrections !== undefined && (!corrections || !CORRECTION_ORDER.every((key) => isCount(corrections[key]))))
+    return false;
+  const delegation = value.delegation as Partial<RunDelegation> | undefined;
+  if (
+    delegation !== undefined &&
+    (!delegation ||
+      typeof delegation.type !== 'string' ||
+      !delegation.type.trim() ||
+      (delegation.parentSessionId !== undefined && typeof delegation.parentSessionId !== 'string'))
+  )
+    return false;
+  const plugins = value.plugins as Partial<RunPlugins> | undefined;
+  if (
+    plugins !== undefined &&
+    (!plugins ||
+      (plugins.host !== undefined && typeof plugins.host !== 'string') ||
+      !isCount(plugins.loaded) ||
+      typeof plugins.hash !== 'string' ||
+      !/^[a-f0-9]{8,64}$/.test(plugins.hash) ||
+      !isPluginIdList(plugins.failed) ||
+      !isPluginIdList(plugins.skipped))
+  )
+    return false;
   // 请求级耗时是后加的：老摘要没有它，有就必须是有限的非负数。
   for (const key of ['requestMsTotal', 'requestMsMax', 'firstTokenMsTotal', 'firstTokenMsCount'] as const) {
     const metric = value[key];
@@ -1969,7 +2432,7 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
     (finding) =>
       finding &&
       /^[a-f0-9]{64}$/.test(finding.id) &&
-      ['tool-error', 'repeated-call', 'run-error', 'retry', 'user-retry'].includes(finding.kind) &&
+      ['tool-error', 'repeated-call', 'run-error', 'retry', 'user-retry', 'user-correction'].includes(finding.kind) &&
       ['title', 'module', 'suggestion', 'evaluation'].every(
         (key) => typeof finding[key as keyof ReviewFinding] === 'string',
       ) &&
@@ -2061,6 +2524,13 @@ function requestWaitSummary(run: RunSummary): string {
   return `${seconds(run.requestMsTotal)} / ${seconds(run.requestMsMax ?? 0)}${firstToken}`;
 }
 
+/** 压缩次数按 local / llm / idle 三个数写出来；一次都没压就画 `—`。 */
+function compactionSummary(run: RunSummary): string {
+  const counts = compactionCounts(run.compactions as Partial<CompactionCounts> | undefined);
+  if (counts.local + counts.llm + counts.idle === 0) return '—';
+  return `${counts.local} / ${counts.llm} / ${counts.idle}`;
+}
+
 function markdownReport(report: ReviewReport, directory: string): string {
   const link = (file: string): string =>
     encodeURI(relative(directory, file).split('\\').join('/')).replace(/</g, '%3C').replace(/>/g, '%3E');
@@ -2077,14 +2547,28 @@ function markdownReport(report: ReviewReport, directory: string): string {
     '',
     '## Runs',
     '',
-    '| Run | Outcome | Model | Requests | Tools / errors | Retries | Waiting / first token | Tokens in / out / cached | Dropped events |',
-    '| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+    '| Run | Outcome | Model | Requests | Tools / errors | Retries | Compactions (local / llm / idle) | Waiting / first token | Tokens in / out / cached | Dropped events |',
+    '| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
   ];
   for (const run of report.runs)
     lines.push(
-      `| [${run.id}](<${link(run.traceFile)}>) | ${run.outcome} | ${markdownText(run.config.model)} | ${run.requestCount} | ${run.toolCalls} / ${run.toolErrors} | ${run.retries} | ${requestWaitSummary(run)} | ${run.inputTokens} / ${run.outputTokens} / ${run.cachedInputTokens} | ${run.droppedEvents} |`,
+      `| [${run.id}](<${link(run.traceFile)}>) | ${run.outcome} | ${markdownText(run.config.model)}${run.delegation ? ` · subagent ${markdownText(run.delegation.type)}` : ''} | ${run.requestCount} | ${run.toolCalls} / ${run.toolErrors} | ${run.retries} | ${compactionSummary(run)} | ${requestWaitSummary(run)} | ${run.inputTokens} / ${run.outputTokens} / ${run.cachedInputTokens} | ${run.droppedEvents} |`,
     );
   if (!report.runs.length) lines.push('', 'No runs in this scope.');
+  lines.push('', '## Delegation', '');
+  if (!report.delegation.parents.length) lines.push('No delegated runs in this scope.', '');
+  else {
+    lines.push(
+      '| Parent session | Type | Runs | Completed | Failed | Aborted | Avg requests | Avg output tokens |',
+      '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+    );
+    for (const parent of report.delegation.parents)
+      for (const row of parent.types)
+        lines.push(
+          `| ${markdownText(parent.parentSessionId ?? '(unknown parent)')} | ${markdownText(row.type)} | ${row.runs} | ${row.completed} | ${row.failed} | ${row.aborted} | ${row.avgRequests ?? '—'} | ${row.avgOutputTokens ?? '—'} |`,
+        );
+    lines.push('');
+  }
   lines.push('', '## Findings', '');
   if (!report.findings.length) lines.push('No findings recorded.', '');
   for (const finding of report.findings) {

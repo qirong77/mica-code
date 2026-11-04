@@ -16,7 +16,8 @@ type PluginState = { classifierVersion?: number; lastRebuildAt?: string; lastSta
 
 /** Recording is driven by runtime hooks; it never asks the task model to remember to reflect. */
 export default function setup(ctx: PluginContext): void {
-  const root = join(ctx.paths?.config ?? resolveMicaHome(), 'plugin-data', ctx.pluginId);
+  const configHome = ctx.paths?.config ?? resolveMicaHome();
+  const root = join(configHome, 'plugin-data', ctx.pluginId);
   const state = readState(root);
   const mode = ctx.agent?.mode === 'one-shot' ? 'one-shot' : 'session';
   const recorder = new HarnessRecorder(
@@ -27,7 +28,8 @@ export default function setup(ctx: PluginContext): void {
       ctx.health.report({ level: 'error', message: '运行记录读写失败', hint: `检查目录权限和磁盘空间：${root}` });
     },
     // 运行来自哪个宿主：桌面端 spawn 的 app-server 才有 desktop 能力。
-    { mode, host: ctx.desktop ? 'desktop' : 'cli' },
+    // `plugin-status.json` 是这次运行看到的插件装配快照，与其所处的宿主同一份目录。
+    { mode, host: ctx.desktop ? 'desktop' : 'cli', pluginStatusPath: join(configHome, 'plugin-status.json') },
   );
   const currentCwd = () => ctx.session?.describe()?.cwd ?? process.cwd();
 
@@ -94,6 +96,35 @@ export default function setup(ctx: PluginContext): void {
   );
   ctx.onDispose(() => hook.dispose());
   ctx.onDispose(() => recorder.dispose());
+
+  // 用户纠正（改写重跑 / 撤回排队 / 原样重发）是「这次回答没被接受」唯一确凿的信号。
+  // 它出现在两轮之间，所以只交给 recorder 按会话暂存，下一次该会话的 run:start 才落盘。
+  const events: PluginContext['events'] | undefined = ctx.events;
+  if (events) {
+    try {
+      const corrections = events.on('event', (event) => {
+        if (event.type !== 'input:corrected') return;
+        let sessionId: string | undefined;
+        try {
+          sessionId = ctx.session?.describe(event.owner)?.id;
+        } catch {
+          // 会话已关掉 / 拿不到 owner：交给 recorder 判断能不能归属。
+          sessionId = undefined;
+        }
+        recorder.noteCorrection({
+          ...(sessionId ? { sessionId } : {}),
+          kind: event.kind,
+          ...(event.chars === undefined ? {} : { chars: event.chars }),
+        });
+      });
+      ctx.onDispose(() => corrections.dispose());
+    } catch (error) {
+      // 少一路信号不影响采集与复盘：其余能力照常工作。
+      ctx.logger.warn('harness-review:correction-subscription-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   // 复盘一直没人打开过：`decisions/` 空着就是证据。把状态写进 data.json，
   // 有重复出现又没人处理的问题时在侧栏 Plugins 上点一枚提示点。

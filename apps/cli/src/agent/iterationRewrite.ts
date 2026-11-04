@@ -5,7 +5,6 @@ import type {
   PluginMaintenanceWindow,
 } from '@packages/mica-plugin/index.js';
 import { estimateContextTokens, estimateTextTokens } from '@packages/mica-context/index.js';
-import { compactAgentMessages } from './agentCompaction.js';
 import type { AgentRuntime } from './AgentRuntime.js';
 
 /**
@@ -81,7 +80,11 @@ export function iterationRewriteCount(): number {
  * 依次应用所有插件重写。单个插件失败只影响它自己那一步：重写历史是「顺手做的事」，
  * 一个插件的策略算错不该让正在跑的 turn 挂掉（错误交给宿主记进插件日志与健康状态）。
  */
-export async function applyIterationRewrites(messages: unknown[], agent: AgentRuntime, signal?: AbortSignal): Promise<unknown[] | null> {
+export async function applyIterationRewrites(
+  messages: unknown[],
+  agent: AgentRuntime,
+  signal?: AbortSignal,
+): Promise<unknown[] | null> {
   if (registrations.length === 0) return null;
   let current = messages;
   for (const registration of [...registrations]) {
@@ -93,7 +96,11 @@ export async function applyIterationRewrites(messages: unknown[], agent: AgentRu
       if (Array.isArray(next)) current = next;
     } catch (error) {
       if (!signal?.aborted) {
-        try { errorReporter?.(error, registration.pluginId); } catch { /* Reporting must not interrupt the request. */ }
+        try {
+          errorReporter?.(error, registration.pluginId);
+        } catch {
+          /* Reporting must not interrupt the request. */
+        }
       }
     }
   }
@@ -108,8 +115,14 @@ async function stopWaitingOnAbort<T>(pending: T | Promise<T>, signal?: AbortSign
     if (signal.aborted) resolve(null);
     else signal.addEventListener('abort', onAbort, { once: true });
     Promise.resolve(pending).then(
-      value => { signal.removeEventListener('abort', onAbort); resolve(value); },
-      error => { signal.removeEventListener('abort', onAbort); reject(error); },
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
     );
   });
 }
@@ -132,9 +145,11 @@ function createAgentHandle(agent: AgentRuntime, pluginId: string, signal?: Abort
       return { inputTokens: Number(usage.inputTokens) || 0, model: usage.model ?? agent.config.model };
     },
     getState: <T = unknown>() => agent.getPluginState(pluginId) as T | undefined,
-    setState: (value: unknown) => { if (!signal?.aborted) agent.setPluginState(pluginId, value); },
+    setState: (value: unknown) => {
+      if (!signal?.aborted) agent.setPluginState(pluginId, value);
+    },
     compact: (messages: unknown[], options: PluginCompactOptions) =>
-      compactAgentMessages(agent, messages, { ...options, signal }),
+      agent.compactIterationMessages(messages, { ...options, pluginId, signal }),
     ...(maintenanceHandler
       ? {
           withMaintenance: <T>(window: PluginMaintenanceWindow, task: () => Promise<T>) =>

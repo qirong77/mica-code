@@ -9,7 +9,7 @@
   "assets": ["README.md"],
   "priority": 30,
   "mica": { "apiVersion": 1 },
-  "requires": ["hooks", "session", "commands", "tools", "settings", "ui", "actions"],
+  "requires": ["hooks", "session", "commands", "tools", "settings", "ui", "actions", "events"],
   "actions": [
     {
       "key": "open-review",

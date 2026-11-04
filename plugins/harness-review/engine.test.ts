@@ -12,6 +12,7 @@ import {
   expectedExit,
   similarity,
   splitPromptSections,
+  summarizeDelegation,
   terminalProgram,
   type CaptureOptions,
   type RunSummary,
@@ -1518,4 +1519,302 @@ test('summaries record the host shape, capturing pid and update time', async (t)
   const bareSummary = (await plain.recorder.review()).runs[0];
   assert.equal('mode' in bareSummary, false);
   assert.equal('host' in bareSummary, false);
+});
+
+test('compactions are counted per strategy with the last one kept, and never become a finding', async (t) => {
+  const { recorder, errors } = await fixture(t);
+  const cwd = resolve('workspace-compaction');
+  const run = runner(recorder, { cwd });
+  run.start('compact fixture');
+  run.emit({
+    type: 'compaction',
+    strategy: 'local',
+    reason: 'auto-compact',
+    beforeMessages: 80,
+    afterMessages: 60,
+    beforeChars: 240_000,
+    afterChars: 180_000,
+    applied: true,
+  });
+  run.emit({
+    type: 'compaction',
+    strategy: 'llm',
+    reason: 'auto-compact',
+    beforeMessages: 60,
+    afterMessages: 12,
+    applied: true,
+  });
+  // 检查之后决定不压的那一次没有改动历史：它不是一次压缩。
+  run.emit({
+    type: 'compaction',
+    strategy: 'idle',
+    reason: 'idle',
+    beforeMessages: 12,
+    afterMessages: 12,
+    applied: false,
+  });
+  run.finish();
+
+  const summary = (await recorder.review(cwd)).runs[0];
+  assert.deepEqual(summary.compactions, { local: 1, llm: 1, idle: 0 });
+  assert.deepEqual(summary.lastCompaction, {
+    strategy: 'llm',
+    reason: 'auto-compact',
+    beforeMessages: 60,
+    afterMessages: 12,
+  });
+  // 压缩是正常机制，计数之外不产生任何问题条目。
+  assert.deepEqual((await recorder.review(cwd)).findings, []);
+
+  // 轨迹里带着重放需要的字段，rebuild 才数得出同样的次数。
+  const events = await trace(summary);
+  assert.equal(events.filter((event) => event.type === 'compaction').length, 3);
+  assert.equal(events.find((event) => event.type === 'compaction')?.applied, true);
+  const markdown = await readFile(await recorder.exportReport(cwd), 'utf8');
+  assert.match(markdown, /\| 1 \/ 1 \/ 0 \|/);
+
+  assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+  const rebuilt = (await recorder.review(cwd)).runs[0];
+  assert.deepEqual(rebuilt.compactions, { local: 1, llm: 1, idle: 0 });
+  assert.deepEqual(rebuilt.lastCompaction, summary.lastCompaction);
+  assert.deepEqual(errors, []);
+});
+
+test('delegated runs are aggregated by type under their parent session', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-delegation');
+  const child = (
+    runId: number,
+    delegation: { type: string; parentSessionId?: string },
+    outcome: 'completed' | 'aborted' | 'error',
+    requests: number,
+    outputTokens: number,
+  ): void => {
+    const run = runner(recorder, { runId, cwd });
+    run.emit({ type: 'run:start', config, input: `subagent ${runId}`, delegation });
+    for (let index = 0; index < requests; index++) run.emit({ type: 'request:start', messageCount: index });
+    run.emit({ type: 'usage', usage: { inputTokens: 10, outputTokens } });
+    run.finish(outcome);
+  };
+  child(1, { type: 'Explore', parentSessionId: 'parent-session' }, 'completed', 2, 100);
+  child(2, { type: 'Explore', parentSessionId: 'parent-session' }, 'error', 4, 40);
+  child(3, { type: 'Implementer', parentSessionId: 'parent-session' }, 'aborted', 1, 10);
+  child(4, { type: 'Explore', parentSessionId: 'other-parent' }, 'completed', 3, 20);
+  // 没有委派来源的运行不进委派树。
+  const main = runner(recorder, { runId: 5, cwd });
+  main.start('主会话');
+  main.finish();
+
+  const report = await recorder.review(cwd);
+  assert.equal(report.delegation.parents.length, 2);
+  assert.deepEqual(report.runs.find((run) => run.sourceRunId === 1)?.delegation, {
+    type: 'Explore',
+    parentSessionId: 'parent-session',
+  });
+  assert.equal(report.runs.find((run) => run.sourceRunId === 5)?.delegation, undefined);
+  const parent = report.delegation.parents.find((item) => item.parentSessionId === 'parent-session')!;
+  assert.equal(parent.runs, 3);
+  assert.deepEqual(parent.types, [
+    { type: 'Explore', runs: 2, completed: 1, failed: 1, aborted: 0, avgRequests: 3, avgOutputTokens: 70 },
+    { type: 'Implementer', runs: 1, completed: 0, failed: 0, aborted: 1, avgRequests: 1, avgOutputTokens: 10 },
+  ]);
+  assert.equal(report.delegation.parents.find((item) => item.parentSessionId === 'other-parent')?.runs, 1);
+  // 委派只是统计，不是问题条目。
+  assert.deepEqual(
+    report.findings.filter((finding) => finding.kind === 'user-correction'),
+    [],
+  );
+  const markdown = await readFile(await recorder.exportReport(cwd), 'utf8');
+  assert.match(markdown, /## Delegation/);
+  assert.match(markdown, /\| parent-session \| Explore \| 2 \| 1 \| 1 \| 0 \| 3 \| 70 \|/);
+});
+
+test('a delegation row omits an average it cannot compute instead of writing zero', () => {
+  const base = {
+    version: 1 as const,
+    id: 'run',
+    sourceRunId: 1,
+    sessionId: 'parent-session',
+    sessionTitle: null,
+    config,
+    outcome: 'completed' as const,
+    startedAt: at,
+    requestCount: 0,
+    toolCalls: 0,
+    toolErrors: 0,
+    expectedExits: 0,
+    retries: 0,
+    compactions: { local: 0, llm: 0, idle: 0 },
+    inputTokens: 0,
+    outputTokens: 7,
+    cachedInputTokens: 0,
+    droppedEvents: 0,
+    eventCount: 0,
+    traceFile: 'events.jsonl',
+    promptHashes: [],
+    findings: [],
+    delegation: { type: 'Reviewer', parentSessionId: 'parent-session' },
+  };
+  // 老摘要可能没有这些计量字段：算不出来就整项不写，0 会被读成「一次请求都没花」。
+  const incomplete = { ...base, requestCount: undefined, outputTokens: undefined } as unknown as RunSummary;
+  assert.deepEqual(summarizeDelegation([incomplete]).parents[0]!.types[0], {
+    type: 'Reviewer',
+    runs: 1,
+    completed: 1,
+    failed: 0,
+    aborted: 0,
+  });
+  // 有字段的运行照常参与平均：0 次请求是真的 0，就写 0。
+  const complete = { ...base } as unknown as RunSummary;
+  assert.deepEqual(summarizeDelegation([incomplete, complete]).parents[0]!.types[0], {
+    type: 'Reviewer',
+    runs: 2,
+    completed: 2,
+    failed: 0,
+    aborted: 0,
+    avgRequests: 0,
+    avgOutputTokens: 7,
+  });
+});
+
+test('a user correction is attached to the next run of its session and merges into one finding', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-correction');
+  recorder.noteCorrection({ sessionId: 'session', kind: 'edit', chars: 40 });
+  recorder.noteCorrection({ sessionId: 'session', kind: 'edit', chars: 60 });
+  recorder.noteCorrection({ sessionId: 'session', kind: 'recall' });
+
+  const run = runner(recorder, { cwd });
+  run.start('after corrections');
+  run.finish();
+  const report = await recorder.review(cwd);
+  assert.deepEqual(report.runs[0].corrections, { edit: 2, recall: 1, retry: 0 });
+  const findings = report.findings.filter((finding) => finding.kind === 'user-correction');
+  assert.equal(findings.length, 2);
+  const edit = findings.find((finding) => finding.title === '用户改写了上一轮的输入并重跑')!;
+  assert.equal(edit.module, 'session');
+  // 同会话同 kind 只有一条，出现次数就是纠正次数。
+  assert.equal(edit.occurrences, 2);
+  assert.match(edit.suggestion, /prompt 段落/);
+  assert.match(edit.evidence[0]!.detail ?? '', /kind: edit; 2 correction\(s\)/);
+  assert.match(edit.evidence[0]!.detail ?? '', /100 chars/);
+  assert.equal(findings.find((finding) => finding.title === '用户撤回了还没发出的排队输入')?.occurrences, 1);
+
+  // 取走即清空：下一次同一会话的运行不再重复带上这几条。
+  const second = runner(recorder, { runId: 2, cwd });
+  second.start('next run');
+  second.finish();
+  const next = await recorder.review(cwd);
+  assert.equal(next.runs.find((item) => item.sourceRunId === 2)?.corrections, undefined);
+  assert.equal(next.findings.filter((finding) => finding.kind === 'user-correction').length, 2);
+  assert.equal(next.findings.find((finding) => finding.id === edit.id)?.occurrences, 2);
+});
+
+test('a correction without a session is dropped and reported, and attributed when one run is active', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-correction-owner');
+  // 没有任何运行在跑、也没给 sessionId：不猜归属，只计数。
+  recorder.noteCorrection({ kind: 'edit' });
+  const live = runner(recorder, { runId: 1, cwd });
+  live.start('first run');
+  // 此刻恰好一条会话在跑，这条纠正认得出属于谁。
+  recorder.noteCorrection({ kind: 'retry' });
+  live.finish();
+  const second = runner(recorder, { runId: 2, cwd });
+  second.start('second run');
+  second.finish();
+
+  const report = await recorder.review(cwd);
+  const byRun = (id: number) => report.runs.find((run) => run.sourceRunId === id)!;
+  assert.equal(byRun(1).corrections, undefined);
+  assert.deepEqual(byRun(2).corrections, { edit: 0, recall: 0, retry: 1 });
+  assert.equal(report.findings.filter((finding) => finding.kind === 'user-correction').length, 1);
+  assert.ok(report.warnings.some((warning) => warning.includes('丢弃了 1 次无法确定会话的用户纠正')));
+});
+
+test('rebuild keeps recorded corrections and the findings derived from them', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const cwd = resolve('workspace-correction-rebuild');
+  recorder.noteCorrection({ sessionId: 'session', kind: 'edit' });
+  recorder.noteCorrection({ sessionId: 'session', kind: 'retry' });
+  const run = runner(recorder, { cwd });
+  run.start('after corrections');
+  run.finish();
+  const before = await recorder.review(cwd);
+  const corrections = before.findings.filter((finding) => finding.kind === 'user-correction');
+  assert.equal(corrections.length, 2);
+  assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+
+  const after = await recorder.review(cwd);
+  assert.deepEqual(after.runs[0].corrections, { edit: 1, recall: 0, retry: 1 });
+  assert.deepEqual(
+    after.findings
+      .filter((finding) => finding.kind === 'user-correction')
+      .map((finding) => [finding.id, finding.occurrences])
+      .sort(),
+    corrections.map((finding) => [finding.id, finding.occurrences]).sort(),
+  );
+  const stored = JSON.parse(await readFile(join(root, 'runs', after.runs[0].id, 'summary.json'), 'utf8'));
+  assert.deepEqual(stored.corrections, { edit: 1, recall: 0, retry: 1 });
+});
+
+test('plugin install state is captured with a stable hash and dropped when unreadable', async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), 'mica-harness-plugins-'));
+  const root = join(temporary, 'capture');
+  const statusFile = join(temporary, 'plugin-status.json');
+  const errors: unknown[] = [];
+  const recorder = new HarnessRecorder(
+    root,
+    (error) => {
+      errors.push(error);
+    },
+    { pluginStatusPath: statusFile },
+  );
+  t.onTestFinished(async () => {
+    await recorder.dispose();
+    await rm(temporary, { recursive: true, force: true });
+  });
+  const entries = [
+    { id: 'zz-skipped', status: 'skipped', error: '缺少宿主能力：desktop' },
+    { id: 'a-loaded', status: 'loaded' },
+    { id: 'm-failed', status: 'failed', error: 'boom' },
+    { id: 'a-skipped', status: 'skipped' },
+    { id: 'b-loaded', status: 'loaded' },
+  ];
+  const write = async (plugins: unknown[]): Promise<void> => {
+    const file = { host: 'app-server', root: join(temporary, 'plugins'), updatedAt: at, plugins, loadFailed: [] };
+    await writeFile(statusFile, JSON.stringify(file));
+  };
+  const emitRun = (runId: number): void => {
+    const run = runner(recorder, { runId, cwd: resolve(`workspace-plugins-${runId}`) });
+    run.start(`plugin snapshot ${runId}`);
+    run.finish();
+  };
+
+  await write(entries);
+  emitRun(1);
+  const summary = (await recorder.review()).runs.find((run) => run.sourceRunId === 1)!;
+  assert.equal(summary.plugins?.host, 'app-server');
+  assert.equal(summary.plugins?.loaded, 2);
+  assert.deepEqual(summary.plugins?.failed, ['m-failed']);
+  assert.deepEqual(summary.plugins?.skipped, ['a-skipped', 'zz-skipped']);
+  assert.match(summary.plugins!.hash, /^[a-f0-9]{12}$/);
+
+  // 同一份状态换个顺序写盘：hash 必须不变，否则「插件集合变了」会被顺序噪声淹没。
+  await write([...entries].reverse());
+  emitRun(2);
+  const reordered = (await recorder.review()).runs.find((run) => run.sourceRunId === 2)!;
+  assert.equal(reordered.plugins?.hash, summary.plugins!.hash);
+  assert.deepEqual(reordered.plugins?.skipped, summary.plugins!.skipped);
+
+  // 文件缺失或损坏都只是「这一轮没有快照」：不报错、不生成问题条目。
+  await rm(statusFile);
+  emitRun(3);
+  await writeFile(statusFile, '{not json');
+  emitRun(4);
+  const report = await recorder.review();
+  for (const runId of [3, 4])
+    assert.equal('plugins' in report.runs.find((run) => run.sourceRunId === runId)!, false, `run ${runId}`);
+  assert.deepEqual(errors, []);
+  assert.ok(!report.warnings.some((warning) => warning.includes('plugin-status')));
 });

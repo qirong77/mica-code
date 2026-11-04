@@ -61,11 +61,17 @@ vi.mock('@packages/mica-agent/index.js', async (importOriginal) => {
         clients.push(client);
         return client;
       }),
+      createSubAgent: vi.fn((options: ModelClientOptions) => {
+        const client = makeClient(options);
+        clients.push(client);
+        return client;
+      }),
     },
   };
 });
 
 import { micaPlugin } from '@packages/mica-plugin/index.js';
+import { CompactionNotNeededError } from '@packages/mica-context/index.js';
 import { AgentAbortError, AgentRuntime } from './AgentRuntime.js';
 import { clearIterationRewrites, registerIterationRewrite } from './iterationRewrite.js';
 
@@ -120,6 +126,30 @@ function deferred<T>() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+/** 一条带长工具结果的历史：`quick` 压缩会把它换成占位符（条数不变、字符数变少）。 */
+function compactableToolHistory(): unknown[] {
+  return [
+    { role: 'user', content: 'Requirement: keep this exact text.' },
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        { id: 'call-1', type: 'function', function: { name: 'probe', arguments: '{"command":"echo test"}' } },
+      ],
+    },
+    { role: 'tool', tool_call_id: 'call-1', content: 'READ_RESULT ' + 'result '.repeat(9000) },
+    { role: 'assistant', content: 'done' },
+  ];
+}
+
+/** 多轮对话：模型摘要会把较早的若干轮换成一条 checkpoint（条数变少）。 */
+function summarizableHistory(): unknown[] {
+  return Array.from({ length: 12 }, (_, index) => [
+    { role: 'user', content: `Requirement ${index}: keep this exact text. ` + 'context '.repeat(40) },
+    { role: 'assistant', content: `Answer ${index}: ` + 'detail '.repeat(40) },
+  ]).flat();
 }
 
 beforeEach(() => {
@@ -404,5 +434,129 @@ describe('agent:observe', () => {
       { runId: 1, outcome: 'aborted' },
       { runId: 3, outcome: 'completed' },
     ]);
+  });
+
+  it('reports local iteration compaction with counts, characters and applied', async () => {
+    const { runtime, client, events } = setup();
+    client.queryImpl = async (_question, options) => {
+      options?.onRequestStart?.({ messageCount: 1 });
+      const result = await runtime.compactIterationMessages(compactableToolHistory(), {
+        pluginId: 'auto-compact',
+        mode: 'quick',
+        preserveRecentMessages: 1,
+      });
+      expect(JSON.stringify(result.messages)).not.toContain('result result result');
+      return 'answer';
+    };
+    await runtime.run('hello');
+    const compaction = events.find((event) => event.type === 'compaction');
+    if (compaction?.type !== 'compaction') throw new Error('compaction event was not observed');
+    expect(compaction).toMatchObject({
+      strategy: 'local',
+      reason: 'iteration:auto-compact',
+      beforeMessages: 4,
+      afterMessages: 4,
+      applied: true,
+    });
+    // 工具结果换成占位符时条数不变，真正变小的是字符数。
+    expect(compaction.afterChars!).toBeLessThan(compaction.beforeChars!);
+    expect(events.at(-1)).toMatchObject({ outcome: 'completed' });
+  });
+
+  it('reports compaction that found nothing to clean as not applied', async () => {
+    const { runtime, client, events } = setup();
+    const history = [
+      { role: 'user', content: 'short' },
+      { role: 'assistant', content: 'ok' },
+    ];
+    client.queryImpl = async () => {
+      await expect(
+        runtime.compactIterationMessages(history, { pluginId: 'auto-compact', mode: 'quick' }),
+      ).rejects.toBeInstanceOf(CompactionNotNeededError);
+      return 'answer';
+    };
+    await runtime.run('hello');
+    const compaction = events.find((event) => event.type === 'compaction');
+    if (compaction?.type !== 'compaction') throw new Error('compaction event was not observed');
+    expect(compaction).toMatchObject({ strategy: 'local', applied: false, beforeMessages: 2, afterMessages: 2 });
+    expect(compaction.afterChars).toBe(compaction.beforeChars);
+  });
+
+  it('reports model summarization as the llm strategy', async () => {
+    const { runtime, client, events } = setup();
+    client.queryImpl = async () => {
+      const result = await runtime.compactIterationMessages(summarizableHistory(), {
+        pluginId: 'auto-compact',
+        mode: 'model',
+        summarize: async () => '<summary>Earlier work is complete; continue the latest request.</summary>',
+        preserveRecentMessages: 8,
+        preserveLatestUserMessage: true,
+      });
+      expect(result.messages.length).toBeLessThan(24);
+      return 'answer';
+    };
+    await runtime.run('hello');
+    const compaction = events.find((event) => event.type === 'compaction');
+    if (compaction?.type !== 'compaction') throw new Error('compaction event was not observed');
+    expect(compaction).toMatchObject({ strategy: 'llm', reason: 'iteration:auto-compact', applied: true });
+    expect(compaction.beforeMessages).toBe(24);
+    expect(compaction.afterMessages).toBeLessThan(24);
+    expect(compaction.afterChars!).toBeLessThan(compaction.beforeChars!);
+  });
+
+  it('never lets a throwing or hanging observer break compaction', async () => {
+    const { runtime, client, hooks, events } = setup();
+    const reported: unknown[] = [];
+    hooks.setHandlerErrorReporter((error) => reported.push(error));
+    const throwing = () => {
+      throw new Error('observer threw');
+    };
+    hooks.on('agent:observe', throwing, { failPolicy: 'stop' });
+    hooks.on('agent:observe', () => new Promise(() => {}), { priority: -10, failPolicy: 'stop' });
+    client.queryImpl = async () => {
+      const result = await runtime.compactIterationMessages(compactableToolHistory(), {
+        pluginId: 'auto-compact',
+        mode: 'quick',
+        preserveRecentMessages: 1,
+      });
+      return result.messages.length === 4 ? 'answer' : 'unexpected';
+    };
+    expect(await runtime.run('hello')).toEqual({ runId: 1, text: 'answer' });
+    expect(reported.length).toBeGreaterThan(0);
+    expect(events.filter((event) => event.type === 'compaction')).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({ outcome: 'completed' });
+  });
+
+  it('tags a delegated subagent run with delegation and leaves the main run untagged', async () => {
+    const { runtime, client, events } = setup();
+    const explore = runtime.createSubAgent(
+      { model: 'sub-model' },
+      { type: 'Explore', parentSessionId: 'session-7' },
+    ) as TestClient;
+    const implementer = runtime.createSubAgent({ model: 'sub-model' }, { type: 'Implementer' }) as TestClient;
+    explore.queryImpl = async () => 'explored';
+    implementer.queryImpl = async () => 'implemented';
+    client.queryImpl = async () => 'answer';
+    expect(await runtime.run('hello')).toEqual({ runId: 1, text: 'answer' });
+    expect(await explore.query('look around')).toBe('explored');
+    expect(await implementer.query('write it')).toBe('implemented');
+
+    const starts = events.filter((event) => event.type === 'run:start');
+    expect(starts).toHaveLength(3);
+    expect(starts[0]).not.toHaveProperty('delegation');
+    expect(starts[1]).toMatchObject({
+      delegation: { type: 'Explore', parentSessionId: 'session-7' },
+      config: { model: 'sub-model', providerId: 'test-provider' },
+    });
+    // 缺失的 parentSessionId 整个键都不写，而不是留一个 undefined。
+    const implementerStart = starts[2];
+    if (implementerStart.type !== 'run:start') throw new Error('expected a run:start event');
+    expect(implementerStart.delegation).toEqual({ type: 'Implementer' });
+    const delegatedStarts = starts.filter((event) => event.type === 'run:start' && event.delegation);
+    expect(delegatedStarts.map((event) => event.runId)).toEqual([-1, -2]);
+
+    const finishes = events.filter((event) => event.type === 'run:finish');
+    expect(finishes.map((event) => event.runId)).toEqual([1, -1, -2]);
+    expect(finishes.slice(1)).toMatchObject([{ outcome: 'completed' }, { outcome: 'completed' }]);
   });
 });

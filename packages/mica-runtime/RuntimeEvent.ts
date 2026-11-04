@@ -23,6 +23,13 @@ export type RuntimeEvent =
    * 才发，插件不能当成一定会来。
    */
   | { type: 'input:focus'; owner?: unknown }
+  /**
+   * 用户推翻了刚才的输入或回答：就地改写重跑、撤回还没发出去的排队消息、原样重发。
+   *
+   * 这是「这次回答没被接受」唯一确凿的信号——比模型自评可靠得多，自进化按它挑样本
+   * 才不会挑到「模型以为自己做对了」的那些。只有能观察到输入框的宿主才发。
+   */
+  | { type: 'input:corrected'; kind: 'edit' | 'recall' | 'retry'; chars?: number; owner?: unknown }
   | { type: 'notification'; level: 'info' | 'warn' | 'error'; message: string; owner?: unknown; ttl?: number }
   | { type: 'turn:started'; input: RuntimeInput; owner?: unknown; preservePreviousTurnUi?: boolean }
   | { type: 'turn:finished'; input: RuntimeInput; elapsedMs: number; owner?: unknown }

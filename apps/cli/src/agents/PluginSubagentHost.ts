@@ -46,6 +46,12 @@ export type PluginSubagentHostOptions = {
    */
   resolveCurrentAgent?: () => AgentRuntime | null;
   /**
+   * 回答「这个 agent 属于哪条会话」。委派运行靠它在观察事件里写上 `parentSessionId`，
+   * 复盘才能把子代理挂回派生它的会话；agent 自己不持有会话身份（一条会话可以被
+   * fork、可以有多个 agent），所以必须由宿主这一层回答。
+   */
+  resolveSessionId?: (owner: AgentRuntime) => string | null;
+  /**
    * 插件线程记完一次用量后调用。turn 内不要插一次保存（本轮 checkpoint 会带上），
    * 空闲时立刻落盘——旁问不属于任何 turn，没有别的保存时机。
    */
@@ -154,7 +160,9 @@ export function createPluginSubagentHost(
       if (!description) throw new Error('错误：Agent run 操作需要非空 description。');
 
       const owner = resolveOwner(request.caller);
-      const model = (request as PluginSubagentSpawnRequest & { [restartModel]?: string })[restartModel] ?? definition.model;
+      const sessionId = options.resolveSessionId?.(owner) ?? null;
+      const model =
+        (request as PluginSubagentSpawnRequest & { [restartModel]?: string })[restartModel] ?? definition.model;
       const createClientOptions = owner.createClientOptions.bind(owner);
       const inheritedClientOptions = createClientOptions();
       const effort = resolveSubagentEffort(
@@ -215,7 +223,12 @@ export function createPluginSubagentHost(
         ...(caller?.taskId ? { parentTaskId: caller.taskId } : {}),
         ...(caller?.toolCallId ? { initiatedByCallId: caller.toolCallId } : {}),
         toolContext,
-        child: owner.createSubAgent(clientOptions),
+        // 委派运行也要进观察流：观察方按 `delegation.type` 才能把「哪种类型的子代理
+        // 回报最差」算出来，按 `parentSessionId` 才能把子代理挂回派生它的那条会话。
+        child: owner.createSubAgent(clientOptions, {
+          type: definition.name,
+          ...(sessionId ? { parentSessionId: sessionId } : {}),
+        }),
       };
     };
 
@@ -880,7 +893,6 @@ class SubagentPathLeaseManager {
   release(taskId: string): void {
     this.leases.delete(taskId);
   }
-
 }
 
 function attachSubagentActivityTracking(options: {

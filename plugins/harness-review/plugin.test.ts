@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { micaPlugin, type AgentObservationEvent, type PluginContext } from '@packages/mica-plugin/index.js';
+import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { toolResultToText, type MicaTool } from '@packages/mica-tools/index.js';
 import setup from './index.js';
 
@@ -23,6 +24,7 @@ function harness() {
   const reports: unknown[] = [];
   const actions = new Map<string, () => unknown>();
   const owner = {};
+  const events = new micaRuntime.RuntimeEventBus();
   const readSettings = vi.fn(() => settings);
   const describeSession = vi.fn(() => ({ id: 'session-test', title: 'Task', cwd: '/workspace/test' }));
   const ctx = {
@@ -30,6 +32,7 @@ function harness() {
     paths: { config: home, home, plugins: join(home, 'plugins') },
     hooks,
     commands,
+    events,
     session: { describe: describeSession },
     settings: { get: readSettings, validate: () => [], path: null },
     tools: {
@@ -78,6 +81,7 @@ function harness() {
     settings,
     reports,
     actions,
+    events,
     emit,
     start,
     finish,
@@ -160,6 +164,18 @@ describe('harness-review plugin', () => {
     const [run] = (await h.review()).runs;
     expect(run.mode).toBe('session');
     expect(run.host).toBe('cli');
+  });
+
+  // 用户纠正由宿主经运行期事件发出：插件收到后暂存，下一次该会话的运行才带上它。
+  it('carries a correction from the runtime event into the next run of that session', async () => {
+    const h = harness();
+    h.events.publish({ type: 'input:corrected', kind: 'edit', chars: 120 });
+    await h.start();
+    await h.finish();
+    const report = await h.review();
+    expect(report.runs[0].corrections).toEqual({ edit: 1, recall: 0, retry: 0 });
+    expect(report.findings.filter((finding: { kind: string }) => finding.kind === 'user-correction')).toHaveLength(1);
+    expect(h.reports).toEqual([]);
   });
 
   // 复盘页面没人打开过：把「重复出现又没人处理」浮到侧栏上，否则 record 只是堆积。

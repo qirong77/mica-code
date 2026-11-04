@@ -204,6 +204,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     defaultAgent: agent,
     taskManager: subagentTasks,
     resolveCurrentAgent: () => agent,
+    resolveSessionId: () => sessionController.getCurrentSessionId(),
     // 旁问不属于任何 turn：记完立刻落盘，否则重启后这次开销就没了。
     persistUsage: (owner) => {
       if (owner.isRunning) return;

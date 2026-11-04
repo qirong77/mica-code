@@ -28,7 +28,13 @@ import {
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import { mcpToolNamePrefix, micaTools } from '@packages/mica-tools/index.js';
 import { estimateContextTokens, estimateTextTokens } from '@packages/mica-context/tokenEstimate.js';
-import type { AgentObservationEvent, HookRegistry } from '@packages/mica-plugin/index.js';
+import type {
+  AgentObservationEvent,
+  HookRegistry,
+  PluginCompactOptions,
+  PluginCompactResult,
+} from '@packages/mica-plugin/index.js';
+import { compactAgentMessages, isNothingToCompact } from './agentCompaction.js';
 import { applyIterationRewrites } from './iterationRewrite.js';
 import {
   PluginPromptSections,
@@ -147,6 +153,15 @@ type ObservationPayload = AgentObservationEvent extends infer Event
 
 type ObservedRun = { runId: number; closed: boolean };
 
+type RunStartObservation = Extract<AgentObservationEvent, { type: 'run:start' }>;
+
+/**
+ * `run:start.delegation` 的形状：委派子代理的类型名与被派生的会话。
+ *
+ * 从观察契约里取，而不是在这里再写一份——加字段时只需要改那一处。
+ */
+export type AgentDelegationObservation = NonNullable<RunStartObservation['delegation']>;
+
 export class AgentAbortError extends Error {
   constructor(readonly runId = -1) {
     super('Agent run aborted');
@@ -174,15 +189,54 @@ function dropLastUserMessageAndAfter<TMessage>(messages: TMessage[]): TMessage[]
   return messages;
 }
 
+/**
+ * 压缩事件里的「大小」口径：条数 + 字符数。
+ *
+ * 字符数按字符串叶子累加而不是 `JSON.stringify` 整条消息：多模态结果里带着整张图的
+ * base64，序列化一遍既撑内存，也不是「提示词里到底有多少文字」。
+ */
+function measureMessages(messages: unknown[]): { count: number; chars: number } {
+  let chars = 0;
+  const seen = new Set<unknown>();
+  const walk = (value: unknown): void => {
+    if (typeof value === 'string') {
+      chars += value.length;
+      return;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+    for (const item of Object.values(value as Record<string, unknown>)) walk(item);
+  };
+  walk(messages);
+  return { count: messages.length, chars };
+}
+
 export class AgentRuntime {
   readonly events = mitt<AgentRuntimeEvents>();
-  private readonly rollbackConsumers = new Set<{ text: (text: string) => void; start: () => void; rollback: () => void; thinking?: (text: string) => void }>();
+  private readonly rollbackConsumers = new Set<{
+    text: (text: string) => void;
+    start: () => void;
+    rollback: () => void;
+    thinking?: (text: string) => void;
+  }>();
   private rollbackSafetyLost = false;
   private rollbackTracking = false;
   private rollbackCheck: (() => boolean) | undefined;
   readonly taskOwnerId = micaCommon.createId('agent-runtime');
   private client: IAgent<ModelClientOptions> | null = null;
   private runId = 0;
+  /**
+   * 委派子运行的负数序号。
+   *
+   * 子代理不在这个 runtime 的 turn loop 里跑，却又必须被 `agent:observe` 看见（否则
+   * 委派树只能靠父侧那一次工具调用反推）。负数让它们与主运行的轮次 id 永不相撞，
+   * `isCurrent` 也照旧只认正数的那一轮。
+   */
+  private delegatedRunSeq = 0;
   // Async scope prevents UI prompt previews and callbacks left by an older run
   // from being attributed to whichever run happens to be active now.
   private readonly observationScope = new AsyncLocalStorage<ObservedRun>();
@@ -255,9 +309,16 @@ export class AgentRuntime {
   }
 
   /** Register the three listeners belonging to one rollback-capable text consumer. */
-  registerTextRollbackConsumer(consumer: { text: (text: string) => void; start: () => void; rollback: () => void; thinking?: (text: string) => void }): () => void {
+  registerTextRollbackConsumer(consumer: {
+    text: (text: string) => void;
+    start: () => void;
+    rollback: () => void;
+    thinking?: (text: string) => void;
+  }): () => void {
     this.rollbackConsumers.add(consumer);
-    return () => { this.rollbackConsumers.delete(consumer); };
+    return () => {
+      this.rollbackConsumers.delete(consumer);
+    };
   }
 
   private canRollbackText(): boolean {
@@ -267,8 +328,12 @@ export class AgentRuntime {
     if (!text.length || this.events.all.get('*')?.length) return false;
     return text.every((handler) => {
       const matches = [...this.rollbackConsumers].filter((consumer) => consumer.text === handler);
-      return matches.length === 1 && starts.includes(matches[0]!.start) && rollbacks.includes(matches[0]!.rollback)
-        && text.filter((candidate) => candidate === handler).length === 1;
+      return (
+        matches.length === 1 &&
+        starts.includes(matches[0]!.start) &&
+        rollbacks.includes(matches[0]!.rollback) &&
+        text.filter((candidate) => candidate === handler).length === 1
+      );
     });
   }
 
@@ -398,15 +463,120 @@ export class AgentRuntime {
     return this.runId;
   }
 
-  createSubAgent(options: Partial<ModelClientOptions> = {}) {
+  /**
+   * 建一个子代理客户端。
+   *
+   * `delegation` 由宿主在**派发**时给出（子代理类型名 + 派生它的会话）：委派运行跑在
+   * 自己的客户端里，不经过这个 runtime 的 turn loop，不给它补一对 run 事件，观察方就
+   * 只剩父侧那一次 `agent` 工具调用，拼不出委派树、也答不了「哪种类型的子代理回报最差」。
+   */
+  createSubAgent(options: Partial<ModelClientOptions> = {}, delegation?: AgentDelegationObservation) {
     if (!this.isConfigured) {
       const message = `${this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
       throw new Error(message);
     }
-    return micaAgent.createSubAgent({
+    const child = micaAgent.createSubAgent({
       ...this.createClientOptions(options),
       effort: options.effort ?? 'none',
     });
+    return delegation ? this.observeDelegatedRun(child, delegation, options) : child;
+  }
+
+  /**
+   * 让一次委派运行也能被 `agent:observe` 看见：在子客户端 `query` 两侧补一对
+   * `run:start` / `run:finish`，并带上 `delegation`。
+   *
+   * 只包裹传了 `delegation` 的子代理（BTW 线程、摘要助手都不传），语义没变的其他调用
+   * 拿到的是原样的客户端。子运行用负数 runId，且整段包在自己的 AsyncLocalStorage
+   * 作用域里：子代理内部触发的观察不会落到父运行头上，父运行的 request 计数也不会
+   * 被子代理的请求污染。
+   */
+  private observeDelegatedRun(
+    child: IAgent<ModelClientOptions>,
+    delegation: AgentDelegationObservation,
+    options: Partial<ModelClientOptions>,
+  ): IAgent<ModelClientOptions> {
+    if (!this.hooks) return child;
+    const query = child.query.bind(child);
+    const observedDelegation = Object.freeze({
+      type: delegation.type,
+      ...(delegation.parentSessionId ? { parentSessionId: delegation.parentSessionId } : {}),
+    });
+    child.query = async (question, queryOptions) => {
+      const observed: ObservedRun = { runId: -++this.delegatedRunSeq, closed: false };
+      const startedAt = Date.now();
+      let outcome: 'completed' | 'aborted' | 'error' = 'completed';
+      let observationError: string | undefined;
+      this.observe(observed, {
+        type: 'run:start',
+        input: cloneJson(question),
+        config: Object.freeze({
+          providerId: options.provider?.id ?? this.currentConfig.provider.id,
+          protocol: options.provider?.protocol ?? this.currentConfig.provider.protocol,
+          model: child.model,
+          effort: options.effort ?? 'none',
+          role: this.currentRole,
+        }),
+        delegation: observedDelegation,
+      });
+      try {
+        return await this.observationScope.run(observed, () => query(question, queryOptions));
+      } catch (error) {
+        outcome = isAbortError(error) || queryOptions?.signal?.aborted ? 'aborted' : 'error';
+        observationError = error instanceof Error ? error.message : String(error);
+        throw error;
+      } finally {
+        observed.closed = true;
+        this.observe(observed, {
+          type: 'run:finish',
+          outcome,
+          elapsedMs: Date.now() - startedAt,
+          ...(observationError === undefined ? {} : { error: observationError }),
+        });
+      }
+    };
+    return child;
+  }
+
+  /**
+   * 一次「迭代边界上的压缩」，即插件经 `ctx.agent.compact` 调用的那条路。
+   *
+   * `history:rewritten` 只说明历史被改过，答不出是本地清理、模型摘要还是插件重写；
+   * 压缩事件在**压缩之后**发，带上前后的条数与字符数，观察方才能按策略与原因归并成本。
+   * 「没有可清理内容」也发一条 `applied: false`（这次检查后决定不压），但异常照旧抛回
+   * 插件——它据此决定要不要升级到模型摘要。
+   *
+   * 观察失败不影响压缩：`observe` 走 hook 通知，抛错与永不完成的 Promise 都被隔离。
+   */
+  async compactIterationMessages(
+    messages: unknown[],
+    options: PluginCompactOptions & { pluginId?: string; signal?: AbortSignal },
+  ): Promise<PluginCompactResult> {
+    const before = measureMessages(messages);
+    const { pluginId, ...compactOptions } = options;
+    const report = (next: unknown[], applied: boolean): void => {
+      const after = measureMessages(next);
+      this.observeActive({
+        type: 'compaction',
+        // 传了 `summarize`（或直接要模型摘要）就是模型写的摘要；其余一律按本地清理。
+        strategy: compactOptions.mode === 'model' || compactOptions.summarize ? 'llm' : 'local',
+        reason: pluginId ? `iteration:${pluginId}` : 'iteration',
+        beforeMessages: before.count,
+        afterMessages: after.count,
+        beforeChars: before.chars,
+        afterChars: after.chars,
+        applied: applied && (after.count !== before.count || after.chars !== before.chars),
+      });
+    };
+    let result: PluginCompactResult;
+    try {
+      result = await compactAgentMessages(this, messages, compactOptions);
+    } catch (error) {
+      if (isNothingToCompact(error)) report(messages, false);
+      throw error;
+    }
+    report(result.messages, true);
+    return result;
   }
 
   createClientOptions(overrides: Partial<ModelClientOptions> = {}): ModelClientOptions {
@@ -679,9 +849,7 @@ export class AgentRuntime {
     this.currentConfig = agentRuntimeConfigFromSnapshot(snapshot);
     const recovered = options.recoverActiveThinking ? snapshot.activeThinking : undefined;
     const thinking = recovered && this.matchesThinkingModel(recovered) ? recovered : snapshot.interruptedThinking;
-    this.interruptedThinking = thinking && this.matchesThinkingModel(thinking)
-      ? { ...thinking }
-      : undefined;
+    this.interruptedThinking = thinking && this.matchesThinkingModel(thinking) ? { ...thinking } : undefined;
     this.pendingThinking = '';
     this.completedThinking = '';
     this.activeTurn = undefined;
@@ -689,9 +857,7 @@ export class AgentRuntime {
     // 而插件是在这个快照加载之后才 setup 的，那一刻查不到很正常。在这里改成 default 会
     // 把「还没来得及发布」变成「这个会话从此是默认角色」——下一次保存就真的写进会话了。
     this.currentRole =
-      typeof snapshot.role === 'string' && snapshot.role.trim()
-        ? snapshot.role.trim()
-        : DEFAULT_ROLE_NAME;
+      typeof snapshot.role === 'string' && snapshot.role.trim() ? snapshot.role.trim() : DEFAULT_ROLE_NAME;
     // 旧快照没有 `capabilitiesCustomized`：以前的实现把当时的默认值复制进了快照，
     // 这份副本几乎总是等于默认值，按「未定制」处理（跟随当前 config 默认值）比把
     // 它当成用户的显式选择更符合意图；用户在面板里再点一下就会重新变成定制，
@@ -719,7 +885,8 @@ export class AgentRuntime {
         // saved input is known not to have been committed to these messages.
         const current = this.client.getSnapshot();
         const last = current.messages.at(-1);
-        if (last !== undefined) this.client.loadSnapshot({ ...current, messages: [...current.messages, cloneJson(last)] });
+        if (last !== undefined)
+          this.client.loadSnapshot({ ...current, messages: [...current.messages, cloneJson(last)] });
       }
     }
     this.subagentUsageHistory = snapshot.subagentUsageHistory ?? [];
@@ -770,9 +937,10 @@ export class AgentRuntime {
       }
       abortController = new AbortController();
       this.activeAbortController = abortController;
-      this.activeTurn = this.currentConfig.provider.protocol === 'openai_responses'
-        ? { runId, input: cloneJson(question), committed: false }
-        : undefined;
+      this.activeTurn =
+        this.currentConfig.provider.protocol === 'openai_responses'
+          ? { runId, input: cloneJson(question), committed: false }
+          : undefined;
       this.activeRunStartedAt = startedAt;
       this.activeRunUsageStartIndex = this.client.usageHistory.length;
       this.activeRunCompleteUsageLength = this.client.usageHistory.length;
@@ -792,32 +960,41 @@ export class AgentRuntime {
       const thinkingRollbackEnabled = rollbackEnabled && this.canRollbackThinking();
       client.canRollbackThinking = thinkingRollbackEnabled;
       const initialConsumers = [...this.rollbackConsumers];
-      this.rollbackCheck = () => this.canRollbackText()
-        && initialTextListeners.length === (this.events.all.get('text')?.length ?? 0)
-        && initialTextListeners.every((handler, index) => this.events.all.get('text')?.[index] === handler)
-        && (!thinkingRollbackEnabled || (this.canRollbackThinking()
-          && initialThinkingListeners.length === (this.events.all.get('thinking')?.length ?? 0)
-          && initialThinkingListeners.every((handler, index) => this.events.all.get('thinking')?.[index] === handler)))
-        && initialConsumers.length === this.rollbackConsumers.size
-        && initialConsumers.every((consumer) => this.rollbackConsumers.has(consumer));
+      this.rollbackCheck = () =>
+        this.canRollbackText() &&
+        initialTextListeners.length === (this.events.all.get('text')?.length ?? 0) &&
+        initialTextListeners.every((handler, index) => this.events.all.get('text')?.[index] === handler) &&
+        (!thinkingRollbackEnabled ||
+          (this.canRollbackThinking() &&
+            initialThinkingListeners.length === (this.events.all.get('thinking')?.length ?? 0) &&
+            initialThinkingListeners.every(
+              (handler, index) => this.events.all.get('thinking')?.[index] === handler,
+            ))) &&
+        initialConsumers.length === this.rollbackConsumers.size &&
+        initialConsumers.every((consumer) => this.rollbackConsumers.has(consumer));
       this.rollbackTracking = rollbackEnabled;
       this.rollbackSafetyLost = false;
-      client.onTextAttemptStart = rollbackEnabled ? () => {
-        if (!this.isCurrent(runId)) return;
-        if (!this.rollbackCheck?.()) throw new Error('Text rollback consumers changed during the run');
-        this.thinkingAttemptStart = this.pendingThinking;
-        this.completedThinkingAttemptStart = this.completedThinking;
-        this.thinkingAttemptNeedsSeparator = this.thinkingNeedsSeparator;
-        this.events.emit('textAttemptStart', undefined);
-      } : undefined;
-      client.onTextRollback = rollbackEnabled ? () => {
-        if (!this.isCurrent(runId)) return;
-        if (this.rollbackSafetyLost || !this.rollbackCheck?.()) throw new Error('Text rollback consumers changed during the run');
-        this.pendingThinking = this.thinkingAttemptStart;
-        this.completedThinking = this.completedThinkingAttemptStart;
-        this.thinkingNeedsSeparator = this.thinkingAttemptNeedsSeparator;
-        this.events.emit('textRollback', undefined);
-      } : undefined;
+      client.onTextAttemptStart = rollbackEnabled
+        ? () => {
+            if (!this.isCurrent(runId)) return;
+            if (!this.rollbackCheck?.()) throw new Error('Text rollback consumers changed during the run');
+            this.thinkingAttemptStart = this.pendingThinking;
+            this.completedThinkingAttemptStart = this.completedThinking;
+            this.thinkingAttemptNeedsSeparator = this.thinkingNeedsSeparator;
+            this.events.emit('textAttemptStart', undefined);
+          }
+        : undefined;
+      client.onTextRollback = rollbackEnabled
+        ? () => {
+            if (!this.isCurrent(runId)) return;
+            if (this.rollbackSafetyLost || !this.rollbackCheck?.())
+              throw new Error('Text rollback consumers changed during the run');
+            this.pendingThinking = this.thinkingAttemptStart;
+            this.completedThinking = this.completedThinkingAttemptStart;
+            this.thinkingNeedsSeparator = this.thinkingAttemptNeedsSeparator;
+            this.events.emit('textRollback', undefined);
+          }
+        : undefined;
       client.onThinkingCheckpoint = (boundary) => {
         if (!this.isCurrent(runId)) return;
         this.completedThinking = this.pendingThinking;
@@ -991,12 +1168,15 @@ export class AgentRuntime {
   }
 
   private matchesThinkingModel(thinking: InterruptedThinking): boolean {
-    return typeof thinking.text === 'string' && thinking.text.length > 0
-      && thinking.providerId === this.currentConfig.provider.id
-      && thinking.protocol === 'openai_responses'
-      && thinking.protocol === this.currentConfig.provider.protocol
-      && thinking.model === this.currentConfig.model
-      && thinking.apiBase === this.currentConfig.provider.api_base;
+    return (
+      typeof thinking.text === 'string' &&
+      thinking.text.length > 0 &&
+      thinking.providerId === this.currentConfig.provider.id &&
+      thinking.protocol === 'openai_responses' &&
+      thinking.protocol === this.currentConfig.provider.protocol &&
+      thinking.model === this.currentConfig.model &&
+      thinking.apiBase === this.currentConfig.provider.api_base
+    );
   }
 
   private recreateClient() {
@@ -1014,7 +1194,11 @@ export class AgentRuntime {
     };
     this.client.onThinking = (thinking) => {
       if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
-      this.noteTurnTiming({ type: 'output', at: Date.now(), chars: typeof thinking === 'string' ? thinking.length : 0 });
+      this.noteTurnTiming({
+        type: 'output',
+        at: Date.now(),
+        chars: typeof thinking === 'string' ? thinking.length : 0,
+      });
       if (this.currentConfig.provider.protocol === 'openai_responses' && thinking) {
         if (this.thinkingNeedsSeparator) this.pendingThinking += '\n\n';
         this.pendingThinking += thinking;
@@ -1025,7 +1209,13 @@ export class AgentRuntime {
       if (this.rollbackTracking && !this.rollbackCheck?.()) this.rollbackSafetyLost = true;
     };
     this.client.onToolCall = (name, args, id) => {
-      this.noteTurnTiming({ type: 'tool-start', at: Date.now(), tool: name, callID: id, displayText: this.toolDisplayText(name, args) });
+      this.noteTurnTiming({
+        type: 'tool-start',
+        at: Date.now(),
+        tool: name,
+        callID: id,
+        displayText: this.toolDisplayText(name, args),
+      });
       this.observeActive({ type: 'tool:call', name, args, id });
       this.emitStatus({ type: 'calling_tool', startedAt: this.activeRunStartedAt ?? undefined, toolNames: [name] });
       this.events.emit('toolCall', { name, args, id });

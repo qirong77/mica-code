@@ -1012,6 +1012,26 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const rerunInput = JSON.stringify(mock!.state.requests.at(-1)!.input);
     expect(rerunInput).toContain('第一条（改）');
     expect(rerunInput).not.toContain('第二条');
+
+    // 改写重跑必须作为一次「用户纠正」被记下来（harness-review 消费 input:corrected）：
+    // 这是唯一确凿的「上一轮没被接受」信号，漏了就只能靠模型自评。
+    const corrections = () => {
+      const runs = join(host.home, 'plugin-data', 'harness-review', 'runs');
+      if (!existsSync(runs)) return 0;
+      return readdirSync(runs).reduce((total, id) => {
+        try {
+          const summary = JSON.parse(readFileSync(join(runs, id, 'summary.json'), 'utf8')) as {
+            corrections?: { edit?: number };
+          };
+          return total + (summary.corrections?.edit ?? 0);
+        } catch {
+          return total;
+        }
+      }, 0);
+    };
+    const deadline = Date.now() + 30_000;
+    while (corrections() === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(corrections()).toBeGreaterThan(0);
   });
 
   itE2E('mica/btw/ask answers out-of-band without touching the main conversation', async () => {

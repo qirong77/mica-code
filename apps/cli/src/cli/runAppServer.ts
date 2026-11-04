@@ -9,7 +9,12 @@ import { VERSION_LABEL, resolveMicaHome } from '@packages/mica-config/brand.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import type { PluginMaintenanceWindow } from '@packages/mica-plugin/index.js';
-import { prepareImageForApi, readStoredSubagentTasks, storedSubagentTasksStamp, writeStoredSubagentTasks } from '@packages/mica-common/index.js';
+import {
+  prepareImageForApi,
+  readStoredSubagentTasks,
+  storedSubagentTasksStamp,
+  writeStoredSubagentTasks,
+} from '@packages/mica-common/index.js';
 import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.js';
 import { keepsSubagentTaskRow } from '@packages/mica-common/subagentVisibility.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
@@ -417,9 +422,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       sessionController.startNewSession({ parentSessionId: options.parentSessionId });
     }
     subagentTasks = new SubagentTaskManager({
-      readRestoredTasks: (owner) => sessionId && owner === agent ? readStoredSubagentTasks(sessionId) : [],
+      readRestoredTasks: (owner) => (sessionId && owner === agent ? readStoredSubagentTasks(sessionId) : []),
       // 快照每秒推一次：任务记录没变就别重新解析一遍（每份最多 200k 字符）。
-      readRestoredStamp: (owner) => sessionId && owner === agent ? storedSubagentTasksStamp(sessionId) : '',
+      readRestoredStamp: (owner) => (sessionId && owner === agent ? storedSubagentTasksStamp(sessionId) : ''),
       onChange: (task, owner) => {
         if (sessionId && owner === agent) writeStoredSubagentTasks(sessionId, [task]);
       },
@@ -554,12 +559,18 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       const turnId = randomUUID();
       currentTurnId = turnId;
       projector?.dispose();
-      projector = attachTurnProjector(agent!, writeNotification, {
-        threadId: sessionId,
-        turnId,
-        cwd: process.cwd(),
-        thinking: options.thinking === true,
-      }, clientRollbackCapabilities, input);
+      projector = attachTurnProjector(
+        agent!,
+        writeNotification,
+        {
+          threadId: sessionId,
+          turnId,
+          cwd: process.cwd(),
+          thinking: options.thinking === true,
+        },
+        clientRollbackCapabilities,
+        input,
+      );
       writeNotification(CODEX_NOTIFICATIONS.turnStarted, {
         threadId: sessionId,
         turn: turnSnapshot(turnId, 'inProgress'),
@@ -1055,6 +1066,20 @@ function warnIfCodexPolicyCannotBeEnforced(ctx: HostContext, params: Record<stri
   });
 }
 
+/**
+ * 用户推翻了刚才那句话：改写重跑、撤回排队、或原样重发。
+ *
+ * 只翻译成一次运行期事件，由插件决定怎么用——宿主不认识任何具体策略。订阅方抛错
+ * 不能打断编辑或撤回本身：`publish` 是同步派发，一个坏订阅者会让整个请求失败。
+ */
+function publishInputCorrected(ctx: HostContext, kind: 'edit' | 'recall' | 'retry', chars: number): void {
+  try {
+    ctx.events?.publish({ type: 'input:corrected', kind, chars, owner: ctx.agent });
+  } catch (error) {
+    console.error('[mica] input:corrected dispatch failed', error);
+  }
+}
+
 function threadResponse(ctx: HostContext): Record<string, unknown> {
   const model = ctx.agent.config.model;
   return {
@@ -1413,6 +1438,8 @@ async function handleCodexRequest(
         conversationMessages: [...ctx.agent.toConversationMessages(), { role: 'user', content: text }],
       });
       ctx.writeNotification(MICA_SESSION_NOTIFICATIONS.historyReplaced, { threadId: ctx.sessionId });
+      // 截断已经成功、重跑还没开始：此刻这一句才算「用户改写了上一轮的输入」。
+      publishInputCorrected(ctx, 'edit', text.length);
       const runtimeInput = micaRuntime.createRuntimeInput(text, 'ui', { queueMode: 'after_iteration' });
       const result = await ctx.clientRollbackCapabilities.withRequest(runtimeInput, params, () =>
         ctx.executor.start(runtimeInput),
@@ -1457,6 +1484,8 @@ async function handleCodexRequest(
       // which is exactly when a queue entry exists.
       const clientMessageId = paramString(params, 'clientMessageId');
       const removed = ctx.executor.recall(clientMessageId);
+      // 真取回了才算撤回：已开始发送或 id 对不上的那次什么都没发生。
+      if (removed) publishInputCorrected(ctx, 'recall', removed.text.length);
       ctx.writeResponse({
         ok: Boolean(removed),
         input: removed ? inputToQueueItem(removed) : null,
