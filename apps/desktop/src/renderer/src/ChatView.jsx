@@ -77,6 +77,7 @@ import {
   groupActivityRounds,
   isActivityMessage,
   mergeTurnThinking,
+  roundSwitchLabel,
   turnActivitySettledAt
 } from './chat-turn-activity'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
@@ -2155,6 +2156,10 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
   const stickToBottomRef = useRef(true)
   // 展开的历史轮次：默认都收着，点了才摊开（最新那一轮不需要点）。
   const [expandedRounds, setExpandedRounds] = useState(() => new Set())
+  // 历史轮次整块默认隐藏：停靠区的主体只留正在跑的这一轮，前面几轮由右上角的
+  // 开关按需摊开。这是看日志时的临时选择，所以不跨窗口保留。
+  const [showRounds, setShowRounds] = useState(false)
+  const toggleRounds = useCallback(() => setShowRounds((value) => !value), [])
   const toggleRound = useCallback((key) => {
     setExpandedRounds((previous) => {
       const next = new Set(previous)
@@ -2165,6 +2170,7 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
   }, [])
   const liveRound = rounds[rounds.length - 1] ?? null
   const historyRounds = rounds.length > 1 ? rounds.slice(0, -1) : []
+  const roundsVisible = showRounds && historyRounds.length > 0
   const head = useMemo(() => turnLogHeadSummary(liveRound?.messages ?? [], now), [liveRound, now])
   // 每次开跑都摊开：上一次收起的只是那一次的选择，不该带到新一轮。
   const wasRunningRef = useRef(null)
@@ -2178,7 +2184,7 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
   useLayoutEffect(() => {
     const scroll = scrollRef.current
     if (scroll && stickToBottomRef.current) scroll.scrollTop = scroll.scrollHeight
-  }, [rounds, height, collapsed])
+  }, [rounds, height, collapsed, roundsVisible])
 
   // 标题行整行就是把手：向上拖变高，夹取规则与沿用下来的高度状态一致。
   // 不 preventDefault——那会连带吞掉 click / dblclick，双击复位就再也收不到。
@@ -2226,7 +2232,7 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
   return (
     <section
       className={`chat-turn-log${collapsed ? ' is-collapsed' : ''}${
-        historyRounds.length > 0 ? ' has-rounds' : ''
+        roundsVisible ? ' has-rounds' : ''
       }`}
       aria-label="当前回合的思考与工具日志"
     >
@@ -2252,15 +2258,32 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
           {collapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
         </button>
         <span className="chat-turn-log-head-label">{running ? '模型思考中' : '本轮'}</span>
-        {/* 摘要是收起时的替代品：展开后下面每一行都在，标题行只留把手与标签。 */}
-        {collapsed && (
+        {collapsed ? (
+          // 摘要是收起时的替代品：展开后下面每一行都在，标题行只留把手与标签。
+          // 收起时也没有列表可切，所以这个位置不放假开关。
           <>
             {head.doing && <span className="chat-turn-log-head-doing">{head.doing}</span>}
             <span className="chat-turn-log-head-meta">{meta}</span>
           </>
-        )}
+        ) : historyRounds.length > 0 ? (
+          <button
+            type="button"
+            className={`chat-turn-log-rounds-toggle${roundsVisible ? ' is-open' : ''}`}
+            aria-expanded={roundsVisible}
+            title={roundsVisible ? '收起前面的轮次' : '展开前面的轮次'}
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              toggleRounds()
+            }}
+          >
+            <span>{roundSwitchLabel(rounds.length, running)}</span>
+            <IconChevronDown size={12} />
+          </button>
+        ) : null}
       </header>
-      {!collapsed && historyRounds.length > 0 && (
+      {!collapsed && roundsVisible && (
         // 历史轮次是**固定的目录**：它不跟正文一起滚。正文一长就把它顶出视野，
         // 看上去就只剩正在跑的这一轮，等于没留下历史。
         <div className="chat-turn-log-rounds">
@@ -2295,7 +2318,7 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
             <TurnLogRound
               round={liveRound}
               live
-              framed={historyRounds.length > 0}
+              framed={roundsVisible}
               expanded
               now={now}
               onOpenActivity={onOpenActivity}

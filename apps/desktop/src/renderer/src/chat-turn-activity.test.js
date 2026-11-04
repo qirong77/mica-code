@@ -3,6 +3,7 @@ import {
   groupActivityRounds,
   mergeTurnThinking,
   roundLabel,
+  roundSwitchLabel,
   turnActivitySettledAt
 } from './chat-turn-activity'
 
@@ -50,6 +51,15 @@ describe('turn log rounds', () => {
   it('labels rounds by their position in the dock', () => {
     expect(roundLabel(1)).toBe('轮次一')
     expect(roundLabel(12)).toBe('轮次12')
+  })
+
+  it('names the round the switch stands for', () => {
+    // 开关上的位置与「轮次N」同一套数字：都只说停靠区里的第几轮。
+    expect(roundSwitchLabel(1, true)).toBe('正在进行第一轮思考')
+    expect(roundSwitchLabel(5, true)).toBe('正在进行第五轮思考')
+    expect(roundSwitchLabel(12, true)).toBe('正在进行第12轮思考')
+    // 回合收尾后停靠区还留着上一轮，这时候不能仍说「正在进行」。
+    expect(roundSwitchLabel(1, false)).toBe('共一轮思考')
   })
 
   it('reports when a round settled so elapsed time stops growing', () => {

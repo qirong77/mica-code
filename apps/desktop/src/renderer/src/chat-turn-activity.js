@@ -103,3 +103,15 @@ export function turnActivitySettledAt(messages) {
   }
   return settled
 }
+
+/**
+ * 停靠区右上角那个开关的文案：这一轮在停靠区里的位置。
+ *
+ * 位置只在停靠区里成立（只留最近 `MAX_TURN_LOG_ROUNDS` 轮），所以与 `roundLabel`
+ * 用同一套数字，不假装是整场会话的第几轮。停靠区在回合结束后仍留着上一轮，
+ * 那时候说「正在进行」就是假的，所以按运行状态换说法。
+ */
+export function roundSwitchLabel(index, running) {
+  const numeral = ROUND_NUMERALS[index - 1] ?? index
+  return running ? `正在进行第${numeral}轮思考` : `共${numeral}轮思考`
+}
