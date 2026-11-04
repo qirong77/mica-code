@@ -6798,42 +6798,79 @@ export function ChatView({
     role: activeRole
   })
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
-  // 选中对话里的文字时浮出「引用 / 复制」条；选区清空、滚动或点到别处就收起
+  // 选中对话里的文字时浮出「引用 / 问 btw / 复制」条。这条浮层的状态**只跟选区走**：
+  // 选区还在就显示（滚动、改窗口大小都重算位置，跟着选区跑），选区没了才收起。
+  // 别写成「按下 / 滚动就 hide」——那两件事都发生在指针事件里，之后不一定有新的
+  // selectionchange（例如按住又松开同一段字、或流式输出时的自动贴底滚动），
+  // 结果就是选区还高亮着、工具栏却再也不回来。
   useEffect(() => {
     let timer = null
+    // 点到对话区外面（侧栏、输入框）时收起，且这次选区没清空的话也不再浮出来。
+    let dismissed = false
+    let lastKey = ''
     const update = () => {
       const selection = readTranscriptSelection()
-      if (!selection) {
-        setSelectionBar(null)
-        return
-      }
-      const range = window.getSelection?.()?.getRangeAt?.(0)
+      const range = selection ? window.getSelection?.()?.getRangeAt?.(0) : null
       const rect = range?.getBoundingClientRect?.()
-      if (!rect || (!rect.width && !rect.height)) {
+      // 选区整段滚出视口时没有可依附的位置，收起；还露出一部分就贴着选区走。
+      const onScreen =
+        Boolean(rect && (rect.width || rect.height)) &&
+        rect.bottom > 0 &&
+        rect.top < window.innerHeight
+      const key = selection ? `${selection.role || ''}\u0000${selection.text}` : ''
+      // 换了一段新文字就等于重新选择：之前点到外面去的那次不算数了。
+      if (key && key !== lastKey) dismissed = false
+      if (!selection || !onScreen || dismissed) {
         setSelectionBar(null)
         return
       }
-      setSelectionCopied(false)
-      setSelectionBar({ ...selection, x: rect.left + rect.width / 2, y: rect.top })
+      if (key !== lastKey) {
+        lastKey = key
+        setSelectionCopied(false)
+      }
+      const x = rect.left + rect.width / 2
+      const y = rect.top
+      setSelectionBar((prev) => {
+        // 滚动期间这里会被连续调用：位置没变就交回同一个对象，别让这个巨型组件重渲染。
+        if (
+          prev &&
+          prev.text === selection.text &&
+          prev.role === selection.role &&
+          Math.abs(prev.x - x) < 1 &&
+          Math.abs(prev.y - y) < 1
+        ) {
+          return prev
+        }
+        return { ...selection, x, y }
+      })
     }
     const scheduleUpdate = () => {
       if (timer) window.clearTimeout(timer)
       timer = window.setTimeout(update, 60)
     }
-    const hide = (event) => {
-      if (event?.target?.closest?.('.chat-selection-bar')) return
+    const onPointerDown = (event) => {
+      const target = event?.target
+      if (target?.closest?.('.chat-selection-bar')) return
+      dismissed = !target?.closest?.('.chat-scroll, .chat-turn-log')
       setSelectionBar(null)
     }
+    // 在对话区里按下之后松手再补一次：这一段里选区可能压根没变（还是刚才那段字），
+    // selectionchange 不会触发，不补就只剩高亮、没有工具栏。
+    const onPointerUp = () => {
+      if (!dismissed) scheduleUpdate()
+    }
     document.addEventListener('selectionchange', scheduleUpdate)
-    document.addEventListener('pointerdown', hide, true)
-    window.addEventListener('scroll', hide, true)
-    window.addEventListener('resize', hide)
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('pointerup', onPointerUp, true)
+    window.addEventListener('scroll', scheduleUpdate, true)
+    window.addEventListener('resize', scheduleUpdate)
     return () => {
       if (timer) window.clearTimeout(timer)
       document.removeEventListener('selectionchange', scheduleUpdate)
-      document.removeEventListener('pointerdown', hide, true)
-      window.removeEventListener('scroll', hide, true)
-      window.removeEventListener('resize', hide)
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('pointerup', onPointerUp, true)
+      window.removeEventListener('scroll', scheduleUpdate, true)
+      window.removeEventListener('resize', scheduleUpdate)
     }
   }, [])
   const openChatContextMenu = useCallback(
