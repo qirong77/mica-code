@@ -6380,22 +6380,54 @@ body.is-resizing-btw {
 }
 
 /* 动态菜单是一张表（项目 / 端 / 分支这类几列并列的事实）：直接用面板那份 chat-plugin-table，
-   这里只收敛掉浮层里放不下的尺寸——表格在菜单里不抢焦点、行整条可点（就是「评审这一条」）。 */
+   这里只收敛浮层里放不下的尺寸。左右内边距与下面的 .plugin-menu-item 对齐到同一根竖线——
+   一个菜单里出现两种缩进，看起来就像两张不同的组件拼起来的。 */
 .chat-plugin-quickbar-table {
   min-width: 0;
-  max-width: 420px;
-  margin: 0 -4px;
+  max-width: 460px;
+  /* 浮层里不滚：横向滚动条在三行高的菜单里比截断更难用 */
+  overflow: hidden;
+}
+
+.chat-plugin-table.is-compact th,
+.chat-plugin-table.is-compact td {
+  padding-right: 8px;
+  padding-left: 8px;
 }
 
 .chat-plugin-table.is-compact th {
-  padding: 4px 8px;
+  padding-top: 4px;
+  padding-bottom: 5px;
+  color: var(--color-fg-dim);
   font-size: 11px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
 }
 
 .chat-plugin-table.is-compact td {
-  max-width: 220px;
-  padding: 5px 8px;
+  max-width: 240px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  vertical-align: middle;
+}
+
+/* 第一列是名字（mis / sass），给它一个上限，剩下的宽度让给分支这类长文本 */
+.chat-plugin-table.is-compact td:first-child {
+  max-width: 140px;
+}
+
+/* 悬停预览：一段只读正文，滚起来像在看一条消息，而不是挤在菜单项之间 */
+.chat-plugin-quickbar-preview {
+  max-height: 220px;
+  margin: 0;
+  padding: 2px 8px 4px;
+  overflow-y: auto;
+  color: var(--color-fg-strong);
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .chat-plugin-table tbody tr[role='menuitem'] {

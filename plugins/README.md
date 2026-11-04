@@ -555,7 +555,7 @@ ctx.desktop.panel({
     `wrap: true` 换成换行显示（长路径、长句），`link` 让这个值可点（`http(s)` / `mailto`
     交给系统浏览器，其余当普通文本）。
   - `items`：`{ key, label, value?, tone?, actions? }`，一列可逐项操作的条目。
-- `shortcuts` 是**输入框正上方那排按钮**，每个四选一：`action` 点了直接把该动作交给
+- `shortcuts` 是**输入框正上方那排按钮**，每个是以下形态之一：`action` 点了直接把该动作交给
   `action` 处理器（不打开面板，例如「立刻检查」）；`section` 点了打开面板并展开同名的那一块
   （例如「频道设置」）；`items` 是一组写死的子项（悬停或点击展开一层，例如「频道」→
   同步频道 / 频道设置）；`menu` 的**表格**由视图的 `menus[menu]` 现算（例如「PR」→
@@ -565,6 +565,11 @@ ctx.desktop.panel({
   动态菜单是一张表：`menus[menu] = { columns: [{ key, label, grow? }], rows: [{ key?, action, cells }] }`，
   `cells` 与面板里的表同一份格子（`{ text, tone? }`），整行可点、点了执行 `action`（`key` 原样回给
   插件）。缺 `action` 或缺格子的行会被丢掉；最多 6 个菜单、20 行、5 列。
+
+   想让人**悬停先看一眼正文**（而不是挑一条）时给 `menus[menu] = { text }`：宿主画一段只读文本，
+   不画表。两者互斥，同时给以 `text` 为准；正文裁到 1200 字符，超一屏的部分去面板看。
+   这时按钮可以同时声明 `section`：**点击**进面板改配置，**悬停**看现在的值——
+   清单写 `{ "label": "设置", "section": "需求描述", "menu": "description" }`。
   没有常用动作插件就别声明，一条空按钮比没有更糟。
 
 - 快捷按钮可声明稳定的 `id`，在面板视图中用 `shortcutStates` 按 id 提供动态状态：例如清单

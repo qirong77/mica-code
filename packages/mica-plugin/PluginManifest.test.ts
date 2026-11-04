@@ -331,6 +331,24 @@ describe('parsePluginManifest desktop panel', () => {
     expect(mixed.ok).toBe(false);
     if (!mixed.ok) expect(mixed.error).toContain('只能给');
   });
+
+  it('lets a shortcut open a section on click and preview a menu on hover', () => {
+    const result = parsePluginManifest(
+      base({ desktop: { panel: { shortcuts: [{ label: '设置', section: '需求描述', menu: 'description' }] } } }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPanel?.shortcuts).toEqual([
+      { label: '设置', section: '需求描述', menu: 'description' },
+    ]);
+
+    // 只有 section + menu 这一种组合说得通；再带 action 或 items 就回到「猜意思」。
+    const withAction = parsePluginManifest(
+      base({
+        desktop: { panel: { shortcuts: [{ label: '设置', section: 's', menu: 'm', action: 'a' }] } },
+      }),
+    );
+    expect(withAction.ok).toBe(false);
+  });
 });
 
 describe('parsePluginManifest requirements', () => {

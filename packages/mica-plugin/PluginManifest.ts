@@ -642,6 +642,8 @@ function readPanelShortcuts(input: unknown): { ok: true; value: PluginPanelShort
     const menu = readString(entry.menu)?.trim();
     const items = readShortcutItems(entry.items, label);
     if (!items.ok) return items;
+    // `menu` 只决定悬停看到什么，`section` / `action` 决定点击做什么，所以这两个可以并存：
+    // 「设置」这类按钮点开面板改配置，悬停时想先看一眼现在写了什么。其余组合仍然是错的。
     const kinds = [action, section, menu, items.value].filter(Boolean).length;
     if (kinds === 0) {
       return {
@@ -649,10 +651,11 @@ function readPanelShortcuts(input: unknown): { ok: true; value: PluginPanelShort
         error: `desktop.panel.shortcuts「${label}」需要 action、section、items 或 menu`,
       };
     }
-    if (kinds > 1) {
+    const coexists = Boolean(menu && section && !action && !items.value);
+    if (kinds > 1 && !coexists) {
       return {
         ok: false,
-        error: `desktop.panel.shortcuts「${label}」只能给 action、section、items、menu 中的一种`,
+        error: `desktop.panel.shortcuts「${label}」只能给 action、section、items、menu 中的一种（menu 可额外配 section）`,
       };
     }
     shortcuts.push({

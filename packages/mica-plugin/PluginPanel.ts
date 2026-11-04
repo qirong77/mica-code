@@ -263,6 +263,13 @@ export type PluginPanelShortcutState = {
  * `detail` 是条目右侧的一行补充（基线分支、会话状态），纯展示，不参与匹配。
  */
 export type PluginPanelMenu = {
+  /**
+   * 一段只读文本：悬停只想「看一眼」的正文（需求描述这类），有它就不画表。
+   *
+   * 表格回答「有哪些条」，这个问题回答「写了什么」。两者互斥——同时给会让人分不清
+   * 悬停出来的是清单还是正文，所以归一化时文本优先。
+   */
+  text?: string;
   columns: PluginPanelTableColumn[];
   rows: PluginPanelMenuRow[];
 };
@@ -512,6 +519,13 @@ const MAX_MENUS = 6;
 const MAX_MENU_ITEMS = 20;
 const MAX_MENU_KEY = 200;
 const MAX_MENU_COLUMNS = 5;
+/**
+ * 悬停预览正文的上限。
+ *
+ * 它在输入框上方的一块浮层里，超过一屏就没人读了——要读全的去面板。这里截断而不是
+ * 拒绝：半段正文仍然比「什么都没有」有用。
+ */
+const MAX_MENU_TEXT = 1200;
 const MAX_ACTION_ID = 64;
 const MAX_SHORTCUT_STATES = 40;
 const MAX_SHORTCUT_BADGE = 12;
@@ -867,6 +881,9 @@ function menusOf(value: unknown): Record<string, PluginPanelMenu> | undefined {
  */
 function menuOf(input: unknown): PluginPanelMenu | null {
   const raw = record(input);
+  // 文本预览优先：一块只读正文和一张表回答的是两个不同的问题，不能同一条目里混着给。
+  const preview = text(raw.text, MAX_MENU_TEXT);
+  if (preview) return { text: preview, columns: [], rows: [] };
   const columns = list(raw.columns)
     .slice(0, MAX_MENU_COLUMNS)
     .map((entry) => {

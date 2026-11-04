@@ -586,6 +586,24 @@ describe('normalizePluginPanelView menus', () => {
       }).menus,
     ).toBeUndefined();
   });
+
+  it('keeps a text preview menu, and text wins over a half-built table', () => {
+    const view = normalizePluginPanelView({
+      title: 'x',
+      menus: {
+        description: { text: '  需求：违章处置线上化\n目标：…  ' },
+        both: { text: '只看正文', columns: [{ key: 'c', label: '列' }], rows: [] },
+        blank: { text: '   ' },
+      },
+    });
+    expect(view.menus?.description).toEqual({
+      text: '需求：违章处置线上化\n目标：…',
+      columns: [],
+      rows: [],
+    });
+    expect(view.menus?.both.text).toBe('只看正文');
+    expect(view.menus?.blank).toBeUndefined();
+  });
 });
 
 describe('normalizePluginPanelActionResult openReview', () => {
