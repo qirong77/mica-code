@@ -1,5 +1,4 @@
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
-import autoCompactSetup from '../../plugins/auto-compact/index.js';
 import askSetup from '../../plugins/ask/index.js';
 import btwSetup from '../../plugins/btw/index.js';
 import commitSetup from '../../plugins/commit/index.js';
@@ -10,6 +9,7 @@ import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
 import scheduleSetup from '../../plugins/schedule/index.js';
+import sessionCompactSetup from '../../plugins/session-compact/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
 import sessionNotesSetup from '../../plugins/session-notes/index.js';
 import sessionCopySetup from '../../plugins/session-copy/index.js';
@@ -31,7 +31,7 @@ export { OFFICIAL_PLUGINS_DIR, officialPluginIds, officialPluginManifests } from
  * 进来。只想列清单的地方用 `./manifests.js`。
  */
 const officialSetups: Record<string, MicaPlugin['setup']> = {
-  'auto-compact': autoCompactSetup,
+  'session-compact': sessionCompactSetup,
   ask: askSetup,
   btw: btwSetup,
   commit: commitSetup,

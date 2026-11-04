@@ -15,7 +15,6 @@ import {
   IconAdjustments,
   IconArrowDown,
   IconArrowUp,
-  IconBolt,
   IconCheck,
   IconChevronDown,
   IconChevronRight,
@@ -31,7 +30,6 @@ import {
   IconLoader2,
   IconClock,
   IconMessageChatbot,
-  IconMinimize,
   IconPaperclip,
   IconPlus,
   IconPuzzle,
@@ -2444,21 +2442,6 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
     disabled: !menu.hasSession
   }))
   const allItems = [
-    {
-      id: 'compact-local',
-      label: '快速压缩（本地）',
-      title:
-        '本地压缩：把工具结果与工具参数的正文换成占位符/摘要（保留路径、命令等关键信息），不改动对话文本、不丢弃轮次；不调用模型',
-      icon: IconBolt,
-      disabled: !menu.hasSession || menu.running
-    },
-    {
-      id: 'compact-model',
-      label: '模型压缩',
-      title: '调用模型生成会话摘要',
-      icon: IconMinimize,
-      disabled: !menu.hasSession || menu.running
-    },
     {
       id: 'commit',
       label: 'Commit',
@@ -5930,13 +5913,9 @@ export function ChatView({
           return
         }
         compactBusyRef.current = true
-        const compactNoticeId = appendNotice(
-          parsed.compactMode === 'local' ? '正在快速压缩上下文…' : '正在进行模型压缩…',
-          'compact'
-        )
+        const compactNoticeId = appendNotice('正在进行模型压缩…', 'compact')
         try {
-          const compactMode = parsed.compactMode === 'local' ? 'local' : 'model'
-          const result = await window.mica.chat.compact(targetSessionId, compactMode)
+          const result = await window.mica.chat.compact(targetSessionId, 'model')
           if (!isCurrentNode()) return
           if (result?.ok) {
             const beforeTokens = Number(result.beforeTokenEstimate) || 0
@@ -5950,7 +5929,7 @@ export function ChatView({
             const strategy = rawStrategy.replaceAll('_', ' ')
             // 与交互式 /compact 同源：只替换工具结果与媒体，消息条数不变。
             const toolResultsOnly = rawStrategy === 'tool_results_only'
-            const mode = `${result.mode || (compactMode === 'local' ? 'pruned' : 'summarized')}${strategy ? ` (${strategy})` : ''}`
+            const mode = `${result.mode || 'summarized'}${strategy ? ` (${strategy})` : ''}`
             const contextAfter =
               result.contextUsageRatio != null
                 ? `${Math.round(Number(result.contextUsageRatio) * 100)}%`
@@ -6003,12 +5982,9 @@ export function ChatView({
               ])
             }
           } else if (result?.code === 'not_needed') {
-            const localHint = String(result?.error || '').includes('可清理')
-              ? '\n提示：工具结果、图片与工具参数都已清理过，剩下的主要是对话文本与轮次，本地压缩无法缩减；如需摘要压缩请使用「模型压缩」。'
-              : ''
             updateNotice(
               compactNoticeId,
-              `${compactMode === 'local' ? '暂无可快速清理内容' : '暂不需要模型压缩'}：${result.error || '当前会话内容较少。'}${localHint}`,
+              `暂不需要模型压缩：${result.error || '当前会话内容较少。'}`,
               'compact',
               'skipped'
             )
@@ -6953,17 +6929,11 @@ export function ChatView({
         appendNotice(message, ok ? 'info' : 'error')
         return
       }
-      if (action === 'compact-local' || action === 'compact-model' || action === 'clear') {
+      if (action === 'clear') {
         await runSlashCommand({
-          name: action === 'clear' ? 'clear' : 'compact',
+          name: 'clear',
           args: '',
-          raw:
-            action === 'compact-local'
-              ? '快速压缩（本地）'
-              : action === 'compact-model'
-                ? '模型压缩'
-                : 'Clear',
-          compactMode: action === 'compact-local' ? 'local' : 'model',
+          raw: 'Clear',
           preserveDraft: true
         })
         return

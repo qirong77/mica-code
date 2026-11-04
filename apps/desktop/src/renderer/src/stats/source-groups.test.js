@@ -28,7 +28,7 @@ function row(overrides = {}) {
 const pluginNames = new Map([['session-rename', 'Auto Session Rename']])
 const pluginDescriptions = new Map([
   ['session-rename', '每轮开始前把最近的对话交给另一个模型起标题。'],
-  ['auto-compact', '历史超过阈值时先本地清理、再模型摘要。']
+  ['session-compact', '右键会话手动压缩：工具结果换占位符，或把对话交给模型写摘要。']
 ])
 
 describe('sourceTitle', () => {
@@ -54,9 +54,9 @@ describe('sourceTitle', () => {
     expect(sourceTitle(row({ kind: 'plugin', id: 'gone', key: 'plugin:gone' }), pluginNames)).toBe(
       'gone'
     )
-    expect(
-      sourceTitle(row({ kind: 'helper', id: 'auto-compact', key: 'helper:auto-compact' }))
-    ).toBe('上下文压缩（内核兜底）')
+    expect(sourceTitle(row({ kind: 'helper', id: 'compact', key: 'helper:compact' }))).toBe(
+      '上下文压缩（内核兜底）'
+    )
     expect(sourceTitle(row({ kind: 'helper', id: 'memory-curator' }))).toBe('记忆整理（内核兜底）')
     expect(sourceTitle(row({ kind: 'helper', id: 'unknown-helper' }))).toBe('unknown-helper')
   })
@@ -107,18 +107,17 @@ describe('sourceDetail', () => {
 })
 
 describe('sourceRowKey', () => {
-  test('内核压缩的两种历史写法归到同一功能键', () => {
+  test('内核功能归到功能键', () => {
     expect(sourceRowKey({ kind: 'helper', id: 'compact' })).toBe('helper:compaction')
-    expect(sourceRowKey({ kind: 'helper', id: 'auto-compact' })).toBe('helper:compaction')
     expect(sourceRowKey({ kind: 'helper', id: 'memory-curator' })).toBe('helper:memory')
-    expect(normalizeSourceId('helper', 'auto-compact')).toBe('compaction')
+    expect(normalizeSourceId('helper', 'compact')).toBe('compaction')
   })
 
   test('其它来源按自己的 id 分行，不同子代理类型不合并', () => {
-    expect(sourceRowKey({ kind: 'plugin', id: 'auto-compact' })).toBe('plugin:auto-compact')
+    expect(sourceRowKey({ kind: 'plugin', id: 'session-compact' })).toBe('plugin:session-compact')
     expect(sourceRowKey({ kind: 'delegation', id: 'Explore' })).toBe('delegation:Explore')
     expect(sourceRowKey({ kind: 'delegation', id: 'Implementer' })).toBe('delegation:Implementer')
-    expect(normalizeSourceId('plugin', 'auto-compact')).toBe('auto-compact')
+    expect(normalizeSourceId('plugin', 'session-compact')).toBe('session-compact')
   })
 })
 
@@ -169,18 +168,18 @@ describe('flattenSourceRows', () => {
         row({ kind: 'main', id: 'main', key: 'main:main', totalTokens: 5000 }),
         row({
           kind: 'plugin',
-          id: 'auto-compact',
-          key: 'plugin:auto-compact',
+          id: 'session-compact',
+          key: 'plugin:session-compact',
           totalTokens: 300
         }),
-        row({ kind: 'helper', id: 'auto-compact', key: 'helper:auto-compact', totalTokens: 290 })
+        row({ kind: 'helper', id: 'compact', key: 'helper:compact', totalTokens: 290 })
       ],
       {
-        pluginNames: new Map([['auto-compact', 'Auto Compact']]),
+        pluginNames: new Map([['session-compact', '会话压缩']]),
         pluginDescriptions
       }
     )
-    expect(rows.map((r) => r.title)).toEqual(['主对话', 'Auto Compact', '上下文压缩（内核兜底）'])
+    expect(rows.map((r) => r.title)).toEqual(['主对话', '会话压缩', '上下文压缩（内核兜底）'])
     expect(rows.map((r) => r.kindLabel)).toEqual(['主对话', '插件', '内核后台'])
   })
 

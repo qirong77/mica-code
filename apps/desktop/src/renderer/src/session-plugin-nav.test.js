@@ -4,15 +4,15 @@ import { countPluginOverrides, pickActivePlugin } from './sessionPluginNav'
 const plugin = (id, overrides = {}) => ({ id, name: id, overrides })
 
 describe('pickActivePlugin', () => {
-  const plugins = [plugin('auto-compact'), plugin('memory')]
+  const plugins = [plugin('session-compact'), plugin('memory')]
 
   test('选中的插件还在就继续用', () => {
     expect(pickActivePlugin(plugins, 'memory').id).toBe('memory')
   })
 
   test('选中的插件不在了回到第一个，不留在空页签上', () => {
-    expect(pickActivePlugin(plugins, 'removed').id).toBe('auto-compact')
-    expect(pickActivePlugin(plugins, '').id).toBe('auto-compact')
+    expect(pickActivePlugin(plugins, 'removed').id).toBe('session-compact')
+    expect(pickActivePlugin(plugins, '').id).toBe('session-compact')
   })
 
   test('还没加载时什么都不选', () => {

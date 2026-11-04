@@ -60,7 +60,7 @@ export type HeadlessPluginHostOptions = {
   /**
    * 这次运行是一次性任务（`mica exec`）还是常驻会话（app-server）。
    *
-   * 会改变成本或输出的插件（自动压缩）只在常驻会话里生效：一次性运行没有第二轮，
+   * 会改变成本或输出的插件（会话压缩）只在常驻会话里生效：一次性运行没有第二轮，
    * 压缩历史只会改变这一次的开销与结果，基准测试不能被它悄悄影响。
    */
   oneShot?: boolean;
@@ -80,7 +80,7 @@ export type HeadlessPluginHostOptions = {
    */
   loadUserPlugins?: boolean;
   /**
-   * 轮次之外独占会话做一次改写（自动压缩拿它把历史提前压小）。
+   * 轮次之外独占会话做一次改写（会话压缩拿它把历史提前压小）。
    *
    * 由常驻会话宿主提供（它持有 turn lease 与落盘时机）；`mica exec` 不传，插件因此
    * 拿不到 `compactIdleHistory`。
@@ -370,10 +370,12 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
                     agent,
                     sessionController,
                     conversationMessages: () => getConversationMessages(),
+                    ...(hook?.mode ? { mode: hook.mode } : {}),
+                    ...(hook?.summarize ? { summarize: hook.summarize } : {}),
                     ...(hook?.afterApply ? { afterApply: hook.afterApply } : {}),
                   });
-                  // 没有可清理的内容是常态（干净的会话每次敲字都会走到这里），
-                  // 与「压不上」分开报，日志才读得懂。
+                  // 没有可压的内容是常态（干净的会话每次都会走到这里），与「压不上」
+                  // 分开报，日志才读得懂。
                   return applied
                     ? {
                         status: 'applied',

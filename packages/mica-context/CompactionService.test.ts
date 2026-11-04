@@ -908,7 +908,10 @@ describe('CompactionService', () => {
     // `[Image](路径)` 那行引用文本仍在，需要时可以再次内联
     expect(JSON.stringify(first.messages)).toContain('[Image](~/.mica/images/shot.png)');
     expect(JSON.stringify(first.messages)).toContain('[image omitted during compact]');
-    expect(first.savedTokenEstimate).toBeGreaterThan(IMAGE_BASE64.length / 5);
+    // 清掉一张图省的是它按像素算的成本（几百到几千），不是 base64 的字符数：
+    // 估算按图片块计价之后，媒体本来就不占几十万 token。
+    expect(first.savedTokenEstimate).toBeGreaterThan(0);
+    expect(first.savedTokenEstimate).toBeLessThan(IMAGE_BASE64.length / 5);
 
     // 第二次没有可清理的媒体，报 not needed 而不是把对话文本也削掉
     await expect(
@@ -1176,6 +1179,87 @@ describe('CompactionService', () => {
 
     expect(result.toolArgumentsTrimmed).toBe(0);
     expect(JSON.stringify(result.messages)).toContain(content);
+  });
+
+  // 会话压缩的「快速压缩」只换工具结果：参数、图片、reasoning 与轮次结构都不动，
+  // 所以压完这条历史还能原样重放，条数也不变。
+  it('replaces only tool results when every other pass is turned off', async () => {
+    const service = new CompactionService();
+    const content = 'z'.repeat(600);
+    const messages: unknown[] = [
+      {
+        type: 'function_call',
+        call_id: 'c1',
+        name: 'write_file',
+        arguments: JSON.stringify({ file_path: 'a.ts', content }),
+      },
+      { type: 'function_call_output', call_id: 'c1', output: `RAW: ${'y'.repeat(600)}` },
+      { type: 'reasoning', summary: [], encrypted_content: null, id: 'r1' },
+      { role: 'user', content: 'keep me' },
+      { role: 'assistant', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: {
+        toolResultsOnly: true,
+        trimToolArguments: false,
+        foldToolRounds: false,
+        replaceMedia: false,
+        dropStaleReasoning: false,
+        contextWindowSize: 100_000,
+      },
+    });
+
+    expect(result.messages).toHaveLength(messages.length);
+    expect(JSON.stringify(result.messages)).not.toContain('RAW: yyyy');
+    expect(JSON.stringify(result.messages)).toContain(content);
+    expect(JSON.stringify(result.messages)).toContain('keep me');
+    expect(JSON.stringify(result.messages)).toContain('data:image/png;base64,AAAA');
+    expect(result.messages[2]).toMatchObject({ type: 'reasoning', id: 'r1' });
+    expect(result.toolArgumentsTrimmed).toBe(0);
+    expect(result.mediaItemsReplaced).toBe(0);
+    expect(result.reasoningItemsDropped).toBe(0);
+  });
+
+  // 手动「模型压缩」把对话交给模型，工具过程不进摘要输入：它占九成篇幅却不进结论。
+  it('sends only the user and assistant dialogue when summaryInput is dialogue', async () => {
+    const service = new CompactionService();
+    const messages: unknown[] = [
+      { role: 'user', content: 'user request 1' },
+      {
+        role: 'assistant',
+        content: 'assistant answer 1',
+        tool_calls: [
+          {
+            id: 'call-1',
+            type: 'function',
+            function: { name: 'read_file', arguments: '{"path":"vite.config.ts"}' },
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call-1', content: 'TOOL_OUTPUT_SHOULD_NOT_APPEAR' },
+      { role: 'assistant', content: '', reasoning_content: 'THINKING_SHOULD_NOT_APPEAR' },
+      ...makeMessages(9, 1),
+    ];
+    let transcript = '';
+
+    await service.compact({
+      messages,
+      options: { summaryInput: 'dialogue', keepRecentRounds: 2 },
+      summarize: async (text) => {
+        transcript = text;
+        return FULL_SUMMARY;
+      },
+    });
+
+    expect(transcript).toContain('用户：user request 1');
+    expect(transcript).toContain('模型：\nassistant answer 1');
+    expect(transcript).not.toContain('TOOL_OUTPUT_SHOULD_NOT_APPEAR');
+    expect(transcript).not.toContain('THINKING_SHOULD_NOT_APPEAR');
+    expect(transcript).not.toContain('read_file');
+    expect(transcript).not.toContain('工具调用');
+    expect(transcript).not.toContain('工具结果');
   });
 });
 

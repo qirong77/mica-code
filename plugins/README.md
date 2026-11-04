@@ -247,11 +247,12 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 这条跳过**不写插件的健康状态**：缺哪一面取决于当前宿主（TUI / `mica exec` 没有 `desktop`），
 写进所有宿主共享的 `plugin-health` 会让桌面端显示一条别的宿主留下的「待配置」。
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
-`ctx.agent.compactIdleHistory()` 是同一个能力面的另一半：在轮次之外把**已经落盘的**历史快速压
-一次（本地清理，不调模型），只在能独占写会话文件的常驻宿主里提供——`mica exec` 不落盘、TUI 走
-`/compact`，两边都没有它，插件要当成可选能力。要不要在轮次之外动手由插件自己决定；可订阅的
-客户端信号是 `input:activity`（用户在输入框敲字）与 `input:focus`（焦点放回输入框），**当前官方
-插件都不订阅**——自动压缩只在请求边界压。
+`ctx.agent.compactIdleHistory()` 是同一个能力面的另一半：在轮次之外把**已经落盘的**历史压一次，
+`mode: 'quick'` **只**把工具结果换成占位符（不调模型；参数、图片、reasoning 与轮次结构都不动），`mode: 'model'` 把用户与助手的对话交给模型写
+checkpoint 摘要（工具过程不进摘要输入）。它只在能独占写会话文件的常驻宿主里提供——`mica exec`
+不落盘、TUI 走 `/compact`，两边都没有它，插件要当成可选能力。要不要在轮次之外动手由插件自己决定，
+会话压缩插件把它挂在会话右键菜单上；可订阅的客户端信号是 `input:activity`（用户在输入框敲字）与
+`input:focus`（焦点放回输入框），**当前官方插件都不订阅**——没有哪个插件会在你没有动作时改历史。
 判断「现在要不要压」时用 `ctx.agent.lastUsage()` 与 `ctx.agent.contextWindowSize`：前者是最近一次
 真实请求的输入量（与界面 ctx 徽标同源，压缩保留它），后者随会话切模型变化。插件不要自己估历史——
 估出来会和用户看到的数不一致。
@@ -259,7 +260,7 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 宿主通知客户端「别急着发」，用户这段时间的发送留在客户端的排队行里（可见、可撤回），窗口结束后由客户端
 补发——不会被塞进正在重写的历史，也不会混进正在写的摘要。只有能跟客户端说话的常驻宿主（`mica app-server`）
 提供它，TUI 的输入队列本来就拦着、`mica exec` 没有第二轮，插件写 `agent.withMaintenance ? … : await task()`。
-官方用法是自动压缩的模型摘要那一步（`reason: 'compaction'`、`label: '自动压缩'`）；本地快速压缩很快，不开窗口。
+`compactIdleHistory` 那条通路已经由宿主开好窗口（`reason: 'compaction'`、`label: '压缩'`），插件自己的耗时任务才需要显式用它。
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。类型可用 `maxTurnContinuations` 指定达到默认 `maxTurns` 后的同上下文续跑次数（最多 2）；请求显式指定 `maxTurns` 时始终是硬上限。
 机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定有哪些类型、`agent` 工具长什么样。
 需要一条能反复追问的隔离上下文（旁问、连续修订）时用 `ctx.subagents.thread()`：一次建线程、多次

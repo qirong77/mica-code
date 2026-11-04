@@ -5,6 +5,7 @@ import { micaConfig } from '@packages/mica-config/index.js';
 import { micaContext } from '@packages/mica-context/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
+import { requestOverheadTokens } from '../agent/agentCompaction.js';
 import { SessionController } from '../session/SessionController.js';
 import { toCompactedConversationDisplay } from '../plugins/commands/compactConversation.js';
 
@@ -219,10 +220,20 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       turnState: 'completed',
       conversationMessages: conversationMessages as MicaUiConversationMessage[],
       // 压缩后的上下文占用：磁盘上的 lastUsage 仍是压缩前那次真实请求
-      // （Stats 对账口径），界面上的 ctx 需要这个值才不会回退。
+      // （Stats 对账口径），界面上的 ctx 需要这个值才不会回退。估算只覆盖消息，
+      // 加上系统提示词与工具定义这块固定开销，才和下一次请求同一个口径。
       displayUsage:
         result.afterTokenEstimate > 0
-          ? { totalTokens: result.afterTokenEstimate, compactedAt: new Date().toISOString() }
+          ? {
+              totalTokens:
+                result.afterTokenEstimate +
+                requestOverheadTokens(agent, {
+                  beforeTokenEstimate: result.beforeTokenEstimate,
+                  beforeCount: result.beforeCount,
+                  lastUsage: snapshot.lastUsage,
+                }),
+              compactedAt: new Date().toISOString(),
+            }
           : undefined,
     });
     return {

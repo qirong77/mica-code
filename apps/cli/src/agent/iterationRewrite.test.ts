@@ -38,7 +38,7 @@ describe('request history rewrite hosting', () => {
       compactIterationMessages;
     const controller = new AbortController();
     const messages = [{ role: 'user', content: 'hello' }];
-    registerIterationRewrite('auto-compact', async (history, handle) => {
+    registerIterationRewrite('session-compact', async (history, handle) => {
       await handle.compact(history, { mode: 'quick' });
       return null;
     });
@@ -46,7 +46,7 @@ describe('request history rewrite hosting', () => {
     // 压缩必须走 owner 上带观察的那条路：直接调 CompressionService 会漏掉 compaction 事件。
     expect(compactIterationMessages).toHaveBeenCalledWith(messages, {
       mode: 'quick',
-      pluginId: 'auto-compact',
+      pluginId: 'session-compact',
       signal: controller.signal,
     });
   });

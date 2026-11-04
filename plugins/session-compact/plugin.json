@@ -1,0 +1,23 @@
+{
+  "id": "session-compact",
+  "name": "会话压缩",
+  "icon": "archive",
+  "version": "3.0.0",
+  "description": "右键会话手动压缩：快速压缩只把历史里的工具结果换成占位符，模型压缩把用户与助手的对话交给模型写摘要。",
+  "main": "index.js",
+  "priority": 100,
+  "required": false,
+  "requires": ["agent", "desktop", "llm"],
+  "desktop": {
+    "sessionMenu": [
+      { "label": "快速压缩", "action": "quick" },
+      { "label": "模型压缩", "action": "model" }
+    ]
+  },
+  "llm": {
+    "label": "压缩摘要模型",
+    "description": "模型压缩用它把对话写成 checkpoint 摘要；快速压缩不调用模型。",
+    "required": true,
+    "modelPlaceholder": "gpt-4.1-mini"
+  }
+}

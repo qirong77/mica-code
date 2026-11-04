@@ -72,7 +72,7 @@ export type AgentObservationEvent = Readonly<{
         type: 'compaction';
         /** 动手的那一类机制：本地清理 / 模型摘要 / 宿主空闲维护。 */
         strategy: 'local' | 'llm' | 'idle';
-        /** 触发来源的稳定短名（`auto-compact`、`compact`、`idle`）。 */
+        /** 触发来源的稳定短名（`session-compact`、`compact`、`idle`）。 */
         reason: string;
         beforeMessages: number;
         afterMessages: number;

@@ -946,6 +946,9 @@ const HOST_TASK_REQUEST_TIMEOUT_MS = 15_000
 // 插件面板的动作可能要落盘、跑一次外部命令（导出聊天记录）再回视图，所以给它的往返
 // 留更长一点的预算；超时只影响这一次点击，面板本身照旧可用。
 const HOST_PANEL_REQUEST_TIMEOUT_MS = 60_000
+// 会话右键里的插件动作可能是「模型压缩」：一次摘要请求几秒到几十秒，插件自己的请求
+// 超时是 120s，这里不能比它短——短了界面会先报「请求超时」，而压缩其实已经成功。
+const HOST_SESSION_MENU_TIMEOUT_MS = 180_000
 /**
  * 同一个面板视图在这么短时间内的重复请求合并成一次。
  *
@@ -2542,7 +2545,7 @@ export function registerChatIpc() {
       ensured.run,
       'mica/sessionMenu/run',
       { pluginId, action },
-      { timeoutMs: HOST_PANEL_REQUEST_TIMEOUT_MS }
+      { timeoutMs: HOST_SESSION_MENU_TIMEOUT_MS }
     ).then(unwrapHostResult)
     return result
   })

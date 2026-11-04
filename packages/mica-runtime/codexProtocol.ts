@@ -116,7 +116,7 @@ export type MicaQueueItem = {
   queueMode?: 'after_iteration' | 'after_turn' | null;
   /**
    * 这条输入在等什么。缺省是「等当前这一轮的迭代边界」/「等本轮结束」；
-   * `compaction` 表示宿主在轮次之外占着会话（自动压缩），压完就自动发出去。
+   * `compaction` 表示宿主在轮次之外占着会话（插件发起的压缩），压完就自动发出去。
    */
   waitingFor?: 'compaction' | null;
 };

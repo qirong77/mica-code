@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { upsertCommandNotice } from './commandRuntimeServices.js';
 
-function notice(content: string, command = 'auto-compact', status?: 'running' | 'success' | 'info') {
+function notice(content: string, command = 'session-compact', status?: 'running' | 'success' | 'info') {
   return { role: 'notice' as const, content, command, status };
 }
 
@@ -13,16 +13,16 @@ describe('upsertCommandNotice', () => {
   it('keeps a single row for status notices that ask to replace', () => {
     const messages: MicaUiConversationMessage[] = [
       user,
-      notice('自动压缩：500K → 90K', 'auto-compact', 'success'),
+      notice('会话压缩：500K → 90K', 'session-compact', 'success'),
       answer,
     ];
 
-    const next = upsertCommandNotice(messages, notice('自动压缩：680K → 145K', 'auto-compact', 'success'), {
+    const next = upsertCommandNotice(messages, notice('会话压缩：680K → 145K', 'session-compact', 'success'), {
       replace: true,
     });
 
     // 旧结论撤掉、新的落在当前位置：留在旧位置等于把最新结论埋进已经滚过去的那段对话。
-    expect(next.map((entry) => entry.content)).toEqual(['one', 'answer', '自动压缩：680K → 145K']);
+    expect(next.map((entry) => entry.content)).toEqual(['one', 'answer', '会话压缩：680K → 145K']);
   });
 
   it('still appends every event notice so command output stays a record', () => {

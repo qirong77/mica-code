@@ -98,11 +98,11 @@ describe('normalizePluginSessionSettingsRecord', () => {
   it('丢弃非字符串值与非对象条目', () => {
     expect(
       normalizePluginSessionSettingsRecord({
-        'auto-compact': { enabled: 'false', threshold: 300 as unknown as string },
+        'session-compact': { enabled: 'false', threshold: 300 as unknown as string },
         broken: [],
         '': { enabled: 'true' },
       }),
-    ).toEqual({ 'auto-compact': { enabled: 'false' } });
+    ).toEqual({ 'session-compact': { enabled: 'false' } });
   });
 
   it('坏输入整体当空，不让插件拿到半份配置', () => {
@@ -112,7 +112,7 @@ describe('normalizePluginSessionSettingsRecord', () => {
 
   it('超配额的条目丢弃', () => {
     const huge = { threshold: '9'.repeat(9000) };
-    expect(normalizePluginSessionSettingsRecord({ 'auto-compact': huge })).toEqual({});
+    expect(normalizePluginSessionSettingsRecord({ 'session-compact': huge })).toEqual({});
   });
 });
 

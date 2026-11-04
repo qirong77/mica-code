@@ -83,9 +83,9 @@ async function summarizeWithSubAgent(agent: AgentRuntime, transcript: string, pr
     // 摘要请求不进主 usageHistory（那会污染 ctx 与 lastUsage），但要记进
     // subagentUsageHistory，否则这次开销在 Stats 里不可见。
     recordSubagentTaskUsage(agent, subAgent, {
-      taskId: 'auto-compact-summary',
-      subagentType: 'auto-compact',
-      description: '自动模型压缩摘要',
+      taskId: 'compact-summary',
+      subagentType: 'compact',
+      description: '模型压缩摘要',
       model: agent.config.model,
       effort: 'none',
       status: signal?.aborted ? 'killed' : status,
@@ -101,20 +101,46 @@ export function isNothingToCompact(error: unknown): boolean {
 }
 
 /**
- * 把当前会话**已经存下来的**历史快速压一次，并落盘。
+ * 一条请求里消息之外的开销（系统提示词 + 工具定义）。
+ *
+ * 确定性估算来自运行时（`estimateRequestOverheadTokens`，插件那边 `estimateTokens()`
+ * 用的也是它）；上一次真实请求与当时估算的差额更贴近实际，但只有在它确实对应这份历史
+ * 时才算数——条数对不上说明中间又聊过或已经压过一次，宁可用确定性估算。
+ */
+export function requestOverheadTokens(
+  agent: AgentRuntime,
+  input: { beforeTokenEstimate: number; beforeCount: number; lastUsage?: unknown },
+): number {
+  const usage = input.lastUsage as { inputTokens?: number; messageCount?: number } | undefined;
+  const inputTokens = Number(usage?.inputTokens) || 0;
+  const messageCount = Number(usage?.messageCount) || 0;
+  const matchesHistory = inputTokens > 0 && (messageCount <= 0 || Math.abs(messageCount - input.beforeCount) <= 2);
+  return micaContext.resolveRequestOverhead({
+    estimated: agent.estimateRequestOverheadTokens?.() ?? 0,
+    measured: matchesHistory ? inputTokens - input.beforeTokenEstimate : 0,
+  });
+}
+
+/**
+ * 把当前会话**已经存下来的**历史压缩一次，并落盘。
  *
  * 与 `compactAgentMessages('quick')` 的区别是改哪一份：那个改的是一次请求即将发送的
  * 历史（不落盘、随请求结束消失），这个改的是会话文件本身——所以它能在用户还没按下
  * 发送时就把上下文降下来，下一轮请求不必再为膨胀的历史付费。
  *
- * 只做本地清理（工具结果 / 工具参数正文 / 媒体块换成占位符），不调用模型、不丢轮次、
- * 不改对话文本，所以随时可做，失败也不会损坏会话。
+ * `quick` 只做本地清理（工具结果换成占位符），不调用模型、不丢轮次、不改对话文本；
+ * `model` 把用户与助手的对话交给模型写成一段 checkpoint 摘要，工具调用与结果不进摘要
+ * 输入（它们只让摘要请求变长，不进结论）。
  *
  * 调用方必须已经独占这条会话（持有 turn lease）：这里会直接覆盖会话文件。
  */
 export async function compactIdleSessionHistory(input: {
   agent: AgentRuntime;
   sessionController: SessionController;
+  /** 压哪一种；缺省 `quick`。 */
+  mode?: CompactMessagesMode;
+  /** `mode: 'model'` 的摘要请求；不给就用宿主的摘要子代理（会话模型）。 */
+  summarize?: (transcript: string, prompt: string) => Promise<string>;
   /** 落盘时要写回的对话记录（含 notice）；不给就退回 agent 自己的投影。 */
   conversationMessages?: () => MicaUiConversationMessage[] | undefined;
   /**
@@ -126,17 +152,38 @@ export async function compactIdleSessionHistory(input: {
   afterApply?: (result: { savedTokens: number; beforeTokens: number; afterTokens: number }) => void;
 }): Promise<{ savedTokens: number; beforeTokens: number; afterTokens: number } | null> {
   const { agent, sessionController } = input;
+  const mode = input.mode ?? 'quick';
   const snapshot = agent.getSnapshot();
   if (snapshot.messages.length < 2) return null;
 
+  const service = new micaContext.CompactionService();
   let result: CompactResult;
   try {
-    result = await new micaContext.CompactionService().compact({
-      messages: snapshot.messages,
-      options: { toolResultsOnly: true, contextWindowSize: snapshot.contextWindowSize },
-    });
+    result =
+      mode === 'model'
+        ? await service.compact({
+            messages: snapshot.messages,
+            // 插件给了自己的摘要请求就用它（换模型是插件的策略），否则走会话模型的摘要子代理。
+            summarize:
+              input.summarize ??
+              ((transcript, prompt) => summarizeWithSubAgent(agent, transcript, prompt)),
+            options: { summaryInput: 'dialogue', contextWindowSize: snapshot.contextWindowSize },
+          })
+        : await service.compact({
+            messages: snapshot.messages,
+            // 快速压缩只换工具结果：工具参数、媒体块、失效 reasoning 与轮次折叠都不动，
+            // 历史条数因此保持不变，压完还能原样重放这次对话。
+            options: {
+              toolResultsOnly: true,
+              trimToolArguments: false,
+              foldToolRounds: false,
+              replaceMedia: false,
+              dropStaleReasoning: false,
+              contextWindowSize: snapshot.contextWindowSize,
+            },
+          });
   } catch (error) {
-    // 「没有可清理内容」是常态（干净的会话每次敲字都会走到这里），不是故障。
+    // 「没有可压的内容」是常态（干净的会话每次都会走到这里），不是故障。
     if (isNothingToCompact(error)) return null;
     throw error;
   }
@@ -157,9 +204,16 @@ export async function compactIdleSessionHistory(input: {
     throw error;
   }
 
+  // 估算只覆盖消息；真实请求还带系统提示词与工具定义。加回这块固定开销之后，notice 与
+  // ctx 徽标才和 provider 的 inputTokens 同一口径（压缩不改它，所以节省量不变）。
+  const overhead = requestOverheadTokens(agent, {
+    beforeTokenEstimate: result.beforeTokenEstimate,
+    beforeCount: result.beforeCount,
+    lastUsage: snapshot.lastUsage,
+  });
   const savedTokens = Math.max(0, result.savedTokenEstimate);
-  const beforeTokens = Math.max(0, result.beforeTokenEstimate);
-  const afterTokens = Math.max(0, result.afterTokenEstimate);
+  const beforeTokens = Math.max(0, result.beforeTokenEstimate + overhead);
+  const afterTokens = Math.max(0, result.afterTokenEstimate + overhead);
   const summary = { savedTokens, beforeTokens, afterTokens };
   try {
     input.afterApply?.(summary);
@@ -179,7 +233,7 @@ export async function compactIdleSessionHistory(input: {
     // 输入框左下角还写着压缩前的数字，看着像「没生效」。与 `mica compact` 同一种写法：
     // 下一次真实请求会把它替换掉。
     ...(result.afterTokenEstimate > 0
-      ? { displayUsage: { totalTokens: result.afterTokenEstimate, compactedAt: new Date().toISOString() } }
+      ? { displayUsage: { totalTokens: afterTokens, compactedAt: new Date().toISOString() } }
       : {}),
   });
   return summary;

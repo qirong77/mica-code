@@ -1118,7 +1118,7 @@ export function summarizeDelegation(runs: RunSummary[], warnings: string[] = [])
 /**
  * 把 helper 运行按「来源」聚合：`kind`，插件发起的再按 `pluginId` 分开。
  *
- * 分开的理由和委派一样：自动压缩每轮摘要 40 秒，与某个插件的起标题请求变慢，
+ * 分开的理由和委派一样：压缩摘要一次几十秒，与某个插件的起标题请求变慢，
  * 混成一行就只能看到「helper 平均 40 秒」，改哪一处全靠猜。
  *
  * `interrupted`（宿主半路退出）不计入 failed：它说明的是宿主怎么了，不是这条机制怎么了。

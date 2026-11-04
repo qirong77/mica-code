@@ -661,8 +661,8 @@ function BySourceCard({ scoped }) {
     const map = new Map()
     for (const s of scoped) {
       for (const usage of s.sourceUsage || []) {
-        // 同一个功能只占一行：内核压缩的两种历史写法（`compact` / `auto-compact`）先归一，
-        // 否则它们看起来像两个功能各记了一笔。会话 id 仍按 Set 去重，合并不虚增会话数。
+        // 同一个功能只占一行：内核 helper 的写法先归一到功能键（记忆整理等），否则它们看起来
+        // 像两个功能各记了一笔。会话 id 仍按 Set 去重，合并不虚增会话数。
         const key = sourceRowKey(usage)
         const row = map.get(key) || {
           key,

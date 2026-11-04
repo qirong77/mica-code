@@ -126,6 +126,14 @@ export type CompactOptions = {
    */
   toolResultsOnly?: boolean;
   /**
+   * 摘要请求里放什么：`full`（默认）连工具调用、工具结果与思考一起放进去，`dialogue`
+   * 只放用户与助手的对话正文。
+   *
+   * 手动「模型压缩」用 `dialogue`：用户要的是「把这段对话总结一下」，工具过程几十万
+   * token 只会把摘要输入撑满、把对话本身挤掉。
+   */
+  summaryInput?: 'full' | 'dialogue';
+  /**
    * 快速压缩时顺带把工具调用参数的正文型字段换成指向性摘要（默认开启）。
    * 设为 false 可退回「只清工具结果、参数一字不动」的旧行为。
    */
@@ -135,6 +143,10 @@ export type CompactOptions = {
    * 指向性参数收进一行，需要保留原始 tool_calls 结构的调用方可以关掉。
    */
   foldToolRounds?: boolean;
+  /** 快速压缩时把图片 / 文档块换成占位符（默认开启）；只要工具结果时关掉。 */
+  replaceMedia?: boolean;
+  /** 快速压缩时丢掉已经失效的 Responses reasoning 条目（默认开启）。 */
+  dropStaleReasoning?: boolean;
   maxPromptTooLongRetries?: number;
   lightweightPrune?: boolean;
   forceSummary?: boolean;
@@ -354,7 +366,11 @@ export class CompactionService {
       keptMessages = [activeMessages[latestUserIndex], ...keptMessages];
     }
     let summarizedMessageCount = messagesToSummarize.length;
-    messagesToSummarize = fitMessagesToSummaryBudget(messagesToSummarize, getSummaryInputTokenBudget(options));
+    messagesToSummarize = fitMessagesToSummaryBudget(
+      messagesToSummarize,
+      getSummaryInputTokenBudget(options),
+      options,
+    );
     if (messagesToSummarize.length === 0) {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
@@ -370,6 +386,7 @@ export class CompactionService {
       const nextMessages = fitMessagesToSummaryBudget(
         truncateHeadForPromptTooLongRetry(messagesToSummarize),
         getSummaryInputTokenBudget(options),
+        options,
       );
       const nextPayload = stringifyValue(stripPromptTooLongRetryMarker(nextMessages));
       if (nextPayload === previousPayload) throw new CompactionPromptTooLongError();
@@ -383,7 +400,9 @@ export class CompactionService {
       }
       for (;;) {
         input.signal?.throwIfAborted();
-        const transcript = buildTranscript(messagesToSummarize);
+        const transcript = buildTranscript(messagesToSummarize, {
+          dialogueOnly: options.summaryInput === 'dialogue',
+        });
         summaryInputTokenEstimate = estimateTokens(transcript);
         try {
           summary = cleanSummary(await summarize(transcript, prompt));
@@ -445,6 +464,7 @@ export class CompactionService {
       messagesToSummarize = fitMessagesToSummaryBudget(
         [createCompactSummaryMessage(summary, true, userMessageTemplate), ...movedToSummary],
         getSummaryInputTokenBudget(options),
+        options,
       );
       finalKeptMessages = options.preserveRecentRounds || options.preserveRecentMessages
         ? nextKeptMessages
@@ -612,9 +632,12 @@ function getSummaryInputTokenBudget(options: CompactOptions): number {
   return Math.max(MIN_SUMMARY_INPUT_TOKENS, Math.floor(contextWindowSize * DEFAULT_SUMMARY_INPUT_CONTEXT_RATIO));
 }
 
-function fitMessagesToSummaryBudget(messages: unknown[], tokenBudget: number): unknown[] {
+function fitMessagesToSummaryBudget(messages: unknown[], tokenBudget: number, options: CompactOptions): unknown[] {
   let next = messages;
-  while (next.length > 1 && estimateTokens(buildTranscript(next)) > tokenBudget) {
+  // 预算按「摘要请求实际会发出去的那份正文」量：`summaryInput: 'dialogue'` 时工具过程
+  // 不进摘要，用全文估计会白白截掉真正要发的对话。
+  const transcriptOptions = { dialogueOnly: options.summaryInput === 'dialogue' };
+  while (next.length > 1 && estimateTokens(buildTranscript(next, transcriptOptions)) > tokenBudget) {
     const before = stringifyValue(next);
     const truncated = truncateHeadForPromptTooLongRetry(next);
     next = truncated;
@@ -839,6 +862,8 @@ function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptio
 function compactToolResultsOnly(messages: unknown[], options: CompactOptions): CompactResult {
   const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
   const trimArguments = options.trimToolArguments !== false;
+  const replaceMedia = options.replaceMedia !== false;
+  const dropStaleReasoning = options.dropStaleReasoning !== false;
   let replacedMessages = 0;
   let droppedReasoningItems = 0;
   let trimmedArguments = 0;
@@ -856,15 +881,17 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     // 发送请求与恢复快照时都会丢弃没有 encrypted_content 的 reasoning item
     // （stripUnusableResponseInputItems），所以留着它既不会被发送也不会被落盘，
     // 只会让 afterTokenEstimate（以及界面上的 ctx）虚高。
-    if (isStaleReasoningItem(message)) {
+    if (dropStaleReasoning && isStaleReasoningItem(message)) {
       droppedReasoningItems++;
       continue;
     }
     const counter = { replaced: 0 };
     let next = pruneToolResultPayload(message, placeholder, counter);
-    const mediaCounter = { replaced: 0 };
-    next = replaceMediaWithPlaceholder(next, mediaCounter);
-    replacedMediaItems += mediaCounter.replaced;
+    if (replaceMedia) {
+      const mediaCounter = { replaced: 0 };
+      next = replaceMediaWithPlaceholder(next, mediaCounter);
+      replacedMediaItems += mediaCounter.replaced;
+    }
     if (trimArguments) {
       const argumentCounter = { trimmed: 0 };
       next = trimToolArguments(next, argumentCounter);
@@ -874,7 +901,7 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     compactedMessages.push(next);
   }
   if (replacedMessages === 0 && droppedReasoningItems === 0 && trimmedArguments === 0 && replacedMediaItems === 0) {
-    throw new CompactionNotNeededError('当前会话没有可清理的工具结果、工具参数或图片，暂不需要快速压缩');
+    throw new CompactionNotNeededError('当前会话没有可清理的内容，暂不需要快速压缩');
   }
 
   const beforeTokenEstimate = estimateMessagesTokens(messages);
@@ -1595,8 +1622,15 @@ type TranscriptTurn = {
   results: TranscriptToolResult[];
 };
 
-/** 导出给测试与压缩前后对比使用；生产路径只用 `compact()`。 */
-export function buildTranscript(messages: unknown[]): string {
+/**
+ * 把一段 provider 历史摊成摘要请求要用的正文。导出给测试与压缩前后对比使用；生产路径
+ * 只用 `compact()`。
+ *
+ * `dialogueOnly` 只留用户与助手的对话（外加之前的 checkpoint 摘要），工具调用、工具结果
+ * 与思考一概不进——手动「模型压缩」要的是对话本身，过程占了九成篇幅却几乎不进摘要结论。
+ */
+export function buildTranscript(messages: unknown[], options: { dialogueOnly?: boolean } = {}): string {
+  const dialogueOnly = options.dialogueOnly === true;
   const summaries: string[] = [];
   const turns: TranscriptTurn[] = [];
   // 工具结果只带 call id，名字要从对应的调用消息里找回来。
@@ -1627,12 +1661,13 @@ export function buildTranscript(messages: unknown[]): string {
       continue;
     }
     const record = message as Record<string, unknown>;
-    const calls = transcriptToolCalls(record);
+    const calls = dialogueOnly ? [] : transcriptToolCalls(record);
     for (const call of calls) {
       if (call.id) callNames.set(call.id, call.name);
     }
 
     if (getToolResultIds(message).length > 0) {
+      if (dialogueOnly) continue;
       const blocks = contentBlocks(record).filter((block) => block.type === 'tool_result');
       if (blocks.length > 0) {
         for (const block of blocks) {
@@ -1648,7 +1683,7 @@ export function buildTranscript(messages: unknown[]): string {
       continue;
     }
 
-    const thinking = transcriptThinking(record);
+    const thinking = dialogueOnly ? '' : transcriptThinking(record);
     const text = transcriptText(record);
     if (isConversationUserMessage(message)) {
       turn = openTurn();

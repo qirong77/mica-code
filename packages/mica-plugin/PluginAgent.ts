@@ -59,10 +59,9 @@ export type PluginMaintenanceWindow = {
 /**
  * 一次「轮次之外的压缩」的结果。
  *
- * `skipped` 不是错误，也不消耗次数：`busy` 是「现在不能写」（这一轮正在跑、另一个
- * 进程持有 turn lease、用户刚好按下发送），`empty` 是「历史里没有可清理的内容」——
- * 干净的会话每次敲字都会走到后者。分开两种原因是为了让插件能记一条能读的日志，
- * 而不是把「本来就没得压」和「压不上」混成一句。
+ * `skipped` 不是错误：`busy` 是「现在不能写」（这一轮正在跑、另一个进程持有 turn
+ * lease、用户刚好按下发送），`empty` 是「历史里没有可压的内容」。分开两种原因是为了
+ * 让插件能给出能读的一句话，而不是把「本来就没得压」和「压不上」混成一句。
  */
 export type PluginIdleCompactOutcome =
   | {
@@ -76,13 +75,25 @@ export type PluginIdleCompactOutcome =
   | { status: 'skipped'; reason: 'busy' | 'empty' };
 
 /**
- * 压缩真正应用之后、落盘之前的那一刻。
- *
- * 插件在这里写会话状态、发 notice：宿主随后会把压缩结果与这些写入**一起**存下来。
- * 压缩结束之后再写就晚了——那时宿主已经落过盘（或租约已经放掉），下一轮才可能被
- * 带下去，而用户可能直接关掉页面。回调抛错会让宿主回滚这次压缩并不落盘。
+ * 压缩哪一种：`quick` 只把工具结果换成占位符（本地、不调模型），`model` 把用户与
+ * 助手的对话交给模型写一段 checkpoint 摘要。
  */
-export type PluginIdleCompactHook = {
+export type PluginCompactKind = 'quick' | 'model';
+
+/**
+ * `compactIdleHistory` 的选项。
+ *
+ * `afterApply` 是压缩真正应用之后、落盘之前的那一刻：插件在这里写会话状态、发 notice，
+ * 宿主随后会把压缩结果与这些写入**一起**存下来。回调抛错会让宿主回滚这次压缩并不落盘。
+ */
+export type PluginIdleCompactOptions = {
+  /** 压哪一种；缺省 `quick`。 */
+  mode?: PluginCompactKind;
+  /**
+   * `mode: 'model'` 的摘要请求。插件自己发（`ctx.llm`）就能选模型；不给则由宿主用
+   * 会话模型起一个摘要子代理。
+   */
+  summarize?: (transcript: string, prompt: string) => Promise<string>;
   /** 字段含义与最终结果一致，压缩结果随这条回调一起落盘。 */
   afterApply?: (result: { savedTokens: number; beforeTokens: number; afterTokens: number }) => void;
 };
@@ -160,16 +171,19 @@ export type PluginAgentRegistry = {
   /** 当前模型的上下文窗口；模型没声明时为 undefined。 */
   contextWindowSize?(): number | undefined;
   /**
-   * 在轮次之外对当前会话**已经存下来的**历史做一次快速压缩（只做本地清理，不调用模型）。
+   * 在轮次之外对当前会话**已经存下来的**历史做一次压缩，并落盘。
    *
    * 与 `onIterationRewrite` 里的 `compact` 的区别是「改哪一份」：那里改的是一次请求
-   * 即将发送的历史（不落盘），这里改的是会话文件本身，所以它能真正省掉下一轮请求的
-   * 上下文——用户空闲很久之后重新敲字时，压缩因此可以提前发生，而不是等请求已经在路上。
+   * 即将发送的历史（不落盘），这里改的是会话文件本身——所以手动入口（会话右键的
+   * 「快速压缩」/「模型压缩」）改的是用户看得见的那份历史，重开会话看到的已经是压缩后的。
    *
    * 宿主给不出这条通路时省略（`mica exec` 不落盘，TUI 由 `/compact` 负责）；插件必须
    * 把它当成可选能力，不能因为读不到就报错。
    */
-  compactIdleHistory?(pluginId: string, options?: PluginIdleCompactHook): Promise<PluginIdleCompactOutcome>;
+  compactIdleHistory?(
+    pluginId: string,
+    options?: PluginIdleCompactOptions,
+  ): Promise<PluginIdleCompactOutcome>;
   /**
    * 同一段维护窗口，插件 id 由 manager 绑定。
    *

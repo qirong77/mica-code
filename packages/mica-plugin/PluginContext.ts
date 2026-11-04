@@ -8,7 +8,7 @@ import type { HookRegistry } from './HookRegistry.js';
 import type { ServiceContainer } from './ServiceContainer.js';
 import type {
   PluginAgentUsage,
-  PluginIdleCompactHook,
+  PluginIdleCompactOptions,
   PluginIdleCompactOutcome,
   PluginIterationRewriter,
   PluginMaintenanceWindow,
@@ -228,19 +228,20 @@ export type PluginContext = {
     /** 当前模型的上下文窗口；模型没声明时为 undefined。 */
     readonly contextWindowSize?: number;
     /**
-     * 在轮次之外把**已经落盘的**会话历史快速压缩一次（本地清理，不调用模型）。
+     * 在轮次之外把**已经落盘的**会话历史压缩一次：`mode: 'quick'` 只把工具结果换成
+     * 占位符（不调模型），`mode: 'model'` 把用户与助手的对话交给模型写摘要。
      *
-     * 何时调用由插件自己决定；它改的是会话文件本身，所以调用之后紧接着发出的一轮请求
-     * 会直接按压小的历史发送。官方插件当前不用它（自动压缩只在请求边界动手）。
+     * 何时调用由插件自己决定（官方插件是会话右键菜单）；它改的是会话文件本身，所以
+     * 调用之后紧接着发出的一轮请求会直接按压小的历史发送。
      *
      * 只在能独占写会话文件的常驻宿主里提供（`mica app-server`）。`skipped` 表示这一次
-     * 没压成（`busy`：会话正忙或另一个进程持有 turn lease；`empty`：历史里没有可清理的
-     * 内容），不是错误，也不消耗次数。
+     * 没压成（`busy`：会话正忙或另一个进程持有 turn lease；`empty`：历史里没有可压的
+     * 内容），不是错误。
      *
-     * 要在压缩结果旁边一并落盘的东西（计数、notice）写在 `options.afterApply` 里：宿主
-     * 会在**落盘之前**调用它，然后一次写下去；等 `await` 返回后再写就晚了。
+     * 要在压缩结果旁边一并落盘的东西（notice）写在 `options.afterApply` 里：宿主会在
+     * **落盘之前**调用它，然后一次写下去；等 `await` 返回后再写就晚了。
      */
-    compactIdleHistory?(options?: PluginIdleCompactHook): Promise<PluginIdleCompactOutcome>;
+    compactIdleHistory?(options?: PluginIdleCompactOptions): Promise<PluginIdleCompactOutcome>;
     /**
      * 在这段时间里**占住会话**：宿主通知客户端「别急着发」。
      *

@@ -75,10 +75,10 @@ describe('TurnNoticeLog', () => {
   it('keeps a single row for status notices that ask to replace', () => {
     const base: MicaUiConversationMessage[] = [{ role: 'user', content: 'one' }];
     const log = new TurnNoticeLog(() => base);
-    log.upsert(notice('自动压缩：500K → 90K', 'auto-compact'), { replace: true });
+    log.upsert(notice('会话压缩：500K → 90K', 'session-compact'), { replace: true });
     base.push({ role: 'assistant', content: 'answer 1' });
     base.push({ role: 'user', content: 'two' });
-    log.upsert(notice('自动压缩：680K → 145K', 'auto-compact'), { replace: true });
+    log.upsert(notice('会话压缩：680K → 145K', 'session-compact'), { replace: true });
 
     expect(log.size).toBe(1);
     // 旧条目撤掉、新条目落在当前位置：否则最新结论会被埋在用户已经滚过去的那段对话里。
@@ -86,7 +86,7 @@ describe('TurnNoticeLog', () => {
       'one',
       'answer 1',
       'two',
-      '自动压缩：680K → 145K',
+      '会话压缩：680K → 145K',
     ]);
   });
 

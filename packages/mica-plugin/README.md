@@ -123,28 +123,28 @@ context.onDispose(() => registration.dispose());
 
 ### 轮次之外的压缩
 
-`context.agent.compactIdleHistory()` 把**已经落盘的**会话历史快速压一次（本地清理，不调用
-模型）。与上面那个句柄里的 `compact()` 的区别是改哪一份：那里改的是一次请求即将发送的历史，
-这里改的是会话文件本身，所以它能在用户还没按下发送时就把上下文降下来。
+`context.agent.compactIdleHistory()` 把**已经落盘的**会话历史压一次，`mode: 'quick'` 只把工具
+结果换成占位符（不调用模型），`mode: 'model'` 把用户与助手的对话（工具调用与结果不进摘要输入）
+交给模型写 checkpoint 摘要。与上面那个句柄里的 `compact()` 的区别是改哪一份：那里改的是一次
+请求即将发送的历史，这里改的是会话文件本身——所以重开这条会话看到的也是压缩后的样子。
 
 它只在能独占写会话文件的常驻宿主里提供（`mica app-server`）：没有 turn 在跑、没有别的进程
 持有 turn lease 时才会执行，否则回 `{ status: 'skipped', reason: 'busy' }`；历史里没有可
 清理的内容回 `reason: 'empty'`。两者都不是错误、不消耗次数。`mica exec` 不落盘、TUI 由
 `/compact` 负责，两边都不提供——插件应当把它当可选能力。
 
-这种「每轮都会做一次」的例行整理不要逐次写对话 notice：它不改用户看到的对话，攒几小时就是
-一列卡片。需要汇报状态时用 `ctx.ui.notice(content, { command, replace: true })`——同一个
-command 只保留最新一条（见 `plugins/README.md` 的「notice 槽」）。
+会话右键菜单这类**一次点击**的入口，插件回一句 `message` 就够了；要留一条对话里的记录就用
+`ctx.ui.notice(content, { command, replace: true })`——同一个 command 只保留最新一条（见
+`plugins/README.md` 的「notice 槽」）。
 
-要在压缩结果旁边一并落盘的东西（计数、`context.ui.notice` 留的那行提示）写在
-`compactIdleHistory({ afterApply })` 里：宿主在**落盘之前**调它，所以压缩、状态与提示是同一次
-写。等 `await` 返回之后再写就晚了——那时文件已经写过，状态要等下一轮才带下去，而用户可能
-已经关掉页面了。
+要在压缩结果旁边一并落盘的写入（`context.ui.notice`）放在 `compactIdleHistory({ afterApply })`
+里：宿主在**落盘之前**调它，所以压缩与提示是同一次写。等 `await` 返回之后再写就晚了——那时文件
+已经写过，提示要等下一轮才带下去，而用户可能已经关掉页面了。
 
 要不要在轮次之外动手由插件自己决定。可订阅的客户端信号是 `input:activity`（用户在输入框
 里敲了字，桌面端节流发 `mica/input/activity`）与 `input:focus`（焦点放回输入框、还没敲字，
 桌面端经 `mica/input/focus` 送出、只在会话没在跑时发）；两者都不保证一定来，TUI 与 `exec`
-也不发。**当前官方插件都不订阅它们**：自动压缩只在请求边界动手，抢跑那套已撤掉。
+也不发。**当前官方插件都不订阅它们**：没有哪个插件会在你没有动作时改写历史。
 
 决定「这次值不值得压」用 `context.agent.lastUsage()` 与 `context.agent.contextWindowSize`：
 前者是最近一次真实请求的输入量（与界面上的 ctx 徽标同源，压缩会保留它用来对账），后者随会话

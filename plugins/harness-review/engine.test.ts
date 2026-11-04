@@ -1579,7 +1579,7 @@ test('compactions are counted per strategy with the last one kept, and never bec
   run.emit({
     type: 'compaction',
     strategy: 'local',
-    reason: 'auto-compact',
+    reason: 'session-compact',
     beforeMessages: 80,
     afterMessages: 60,
     beforeChars: 240_000,
@@ -1589,7 +1589,7 @@ test('compactions are counted per strategy with the last one kept, and never bec
   run.emit({
     type: 'compaction',
     strategy: 'llm',
-    reason: 'auto-compact',
+    reason: 'session-compact',
     beforeMessages: 60,
     afterMessages: 12,
     applied: true,
@@ -1609,7 +1609,7 @@ test('compactions are counted per strategy with the last one kept, and never bec
   assert.deepEqual(summary.compactions, { local: 1, llm: 1, idle: 0 });
   assert.deepEqual(summary.lastCompaction, {
     strategy: 'llm',
-    reason: 'auto-compact',
+    reason: 'session-compact',
     beforeMessages: 60,
     afterMessages: 12,
   });
@@ -1687,11 +1687,11 @@ test('a helper run records its source and keeps it through a rebuild', async (t)
     type: 'run:start',
     config,
     input: 'compact this transcript',
-    helper: { kind: ' compaction ', pluginId: 'auto-compact', purpose: 'summary' },
+    helper: { kind: ' compaction ', pluginId: 'session-compact', purpose: 'summary' },
   });
   run.finish();
   const before = (await recorder.review(cwd)).runs[0]!;
-  assert.deepEqual(before.helper, { kind: 'compaction', pluginId: 'auto-compact', purpose: 'summary' });
+  assert.deepEqual(before.helper, { kind: 'compaction', pluginId: 'session-compact', purpose: 'summary' });
   // 轨迹里也带着它：重放不能把「压缩摘要」重新读成「用户的一轮」。
   assert.deepEqual((await trace(before)).find((event) => event.type === 'run:start')?.helper, before.helper);
   assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
@@ -1699,7 +1699,7 @@ test('a helper run records its source and keeps it through a rebuild', async (t)
   const markdown = await readFile(await recorder.exportReport(cwd), 'utf8');
   // 只有 helper 运行时，Runs 表就是「没有用户的一轮」——它只出现在 Helpers 里。
   assert.match(markdown, /No runs in this scope/);
-  assert.match(markdown, /\| auto-compact · compaction \| 1 \| 1 \| 0 \| 0 \| 0 \| — \| 0 \|/);
+  assert.match(markdown, /\| session-compact · compaction \| 1 \| 1 \| 0 \| 0 \| 0 \| — \| 0 \|/);
   assert.match(markdown, /## Plugin health/);
   assert.match(markdown, /No plugin background failures recorded/);
 });
@@ -1822,7 +1822,7 @@ test('a failing helper run names its source and stays apart from ordinary run fa
     type: 'run:start',
     config,
     input: 'summary',
-    helper: { kind: 'compaction', pluginId: 'auto-compact' },
+    helper: { kind: 'compaction', pluginId: 'session-compact' },
   });
   compact.finish('error', 'request timed out');
   const bare = runner(recorder, { runId: 2, cwd });
@@ -1834,9 +1834,9 @@ test('a failing helper run names its source and stays apart from ordinary run fa
 
   const findings = (await recorder.review(cwd)).findings.filter((finding) => finding.kind === 'run-error');
   // 三种来源各自一条：合并成一条就分不清该改压缩、旁问还是主流程。
-  assert.deepEqual(findings.map((finding) => finding.module).sort(), ['helper:btw', 'plugin:auto-compact', 'runtime']);
-  const helper = findings.find((finding) => finding.module === 'plugin:auto-compact')!;
-  assert.equal(helper.title, 'Helper run failed: auto-compact · compaction (timeout)');
+  assert.deepEqual(findings.map((finding) => finding.module).sort(), ['helper:btw', 'plugin:session-compact', 'runtime']);
+  const helper = findings.find((finding) => finding.module === 'plugin:session-compact')!;
+  assert.equal(helper.title, 'Helper run failed: session-compact · compaction (timeout)');
   assert.equal(findings.find((finding) => finding.module === 'runtime')!.title, 'Run ended with an error: timeout');
 });
 

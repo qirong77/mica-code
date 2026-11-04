@@ -151,8 +151,8 @@ describe('Stats usage aggregation', () => {
         usageHistory: [],
         subagentUsageHistory: [
           {
-            taskId: 'auto-compact-summary',
-            subagentType: 'auto-compact',
+            taskId: 'compact-summary',
+            subagentType: 'compact',
             description: '压缩摘要',
             startedAt: '2026-08-01T01:10:00.000Z',
             requests: [{ usageId: 'helper-1', inputTokens: 5 }]
@@ -160,7 +160,7 @@ describe('Stats usage aggregation', () => {
         ]
       }
     })
-    expect(helper.events[0].source).toEqual({ kind: 'helper', id: 'auto-compact', pluginId: null })
+    expect(helper.events[0].source).toEqual({ kind: 'helper', id: 'compact', pluginId: null })
   })
 
   test('gives raw records and projected events the same identity', () => {

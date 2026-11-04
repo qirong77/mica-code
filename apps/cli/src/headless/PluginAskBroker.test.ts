@@ -95,7 +95,7 @@ describe('createPluginAskBroker', () => {
   it('posts without holding the caller, and settles later when answered', async () => {
     const { host, notifications, marks } = createHarness();
     // 关键点：post() 是同步返回的——调用方（比如定时检查）不会因为没人点而卡住。
-    const handle = host.forPlugin('auto-compact').post(question);
+    const handle = host.forPlugin('session-compact').post(question);
     expect(handle.id).toBe(host.pending()!.id);
     expect(host.pending()!.passive).toBe(true);
     // 侧栏那行用 summary（短的），没有才退回 title
@@ -109,7 +109,7 @@ describe('createPluginAskBroker', () => {
 
   it('drops a posted question when the plugin changes its mind', async () => {
     const { host } = createHarness();
-    const handle = host.forPlugin('auto-compact').post(question);
+    const handle = host.forPlugin('session-compact').post(question);
     handle.dismiss();
     await expect(handle.answered).resolves.toMatchObject({ cancelled: true, reason: 'cancelled' });
     expect(host.pending()).toBeNull();
@@ -117,7 +117,7 @@ describe('createPluginAskBroker', () => {
 
   it('lets a blocking question take the slot from a posted one', () => {
     const { host } = createHarness();
-    const posted = host.forPlugin('auto-compact').post(question);
+    const posted = host.forPlugin('session-compact').post(question);
     // 被动那条没人等，被顶掉不损失任何东西；真在等的那条优先。
     const blocking = host.forPlugin('ask').request({ ...question, title: '工具要问的' });
     expect(host.pending()?.title).toBe('工具要问的');

@@ -38,11 +38,11 @@ const SUBAGENT_TYPE_LABELS = {
 }
 
 /**
- * 内核自己写下的 helper 记录没有 pluginId，用中文名呈现：`compact` / `auto-compact` 是
- * 压缩摘要请求（`auto-compact` 是更早的写法），`memory-curator` 是记忆整理，`btw` 是旁问。
+ * 内核自己写下的 helper 记录没有 pluginId，用中文名呈现：`compact` 是压缩摘要请求，
+ * `memory-curator` 是记忆整理，`btw` 是旁问。
  *
- * 名字后面带「内核兜底」是为了让同一功能的另一条能对上：插件自己发请求时叫 `Auto Compact`
- * （标签「插件」），宿主没给插件模型接口、或老版本走内核摘要子代理时就是这行。
+ * 名字后面带「内核兜底」是为了让同一功能的另一条能对上：插件自己发请求时叫「会话压缩」
+ * （标签「插件」），宿主没给插件模型接口、或插件没配自己的摘要模型时就是这行。
  */
 const HELPER_LABELS = {
   compaction: '上下文压缩（内核兜底）',
@@ -51,24 +51,22 @@ const HELPER_LABELS = {
 }
 
 /**
- * 内核功能的归一键：`compact` 与更早的 `auto-compact` 是同一件事（压缩摘要），
- * `memory-curator` 是记忆整理。两种写法各占一行只会让人以为记了两笔，所以先归一。
+ * 内核功能的归一键：`memory-curator` 是记忆整理（压缩摘要的记录直接叫 `compact`）。
  */
 const HELPER_FUNCTION_KEYS = {
   compact: 'compaction',
-  'auto-compact': 'compaction',
   'memory-curator': 'memory'
 }
 
 /**
- * 一行的聚合键：同一个功能只占一行。内核压缩的两种历史写法合并，其它来源按自己的 id 分开
- * （不同子代理类型、不同插件互不相干）。
+ * 一行的聚合键：同一个功能只占一行，其它来源按自己的 id 分开（不同子代理类型、不同插件
+ * 互不相干）。
  */
 export function sourceRowKey(row) {
   return `${row?.kind}:${normalizeSourceId(row?.kind, row?.id)}`
 }
 
-/** 把历史写法归一到功能键：`compact` / `auto-compact` 都指压缩摘要。 */
+/** 把内核功能的写法归一到功能键：`compact` 指压缩摘要，`memory-curator` 指记忆整理。 */
 export function normalizeSourceId(kind, id) {
   if (kind === 'helper') return HELPER_FUNCTION_KEYS[id] || id
   return id

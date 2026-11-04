@@ -71,5 +71,35 @@ export const usageOccurredAt: Migration = {
   },
 };
 
-/** 当前全部迁移，按顺序执行。新增形态变化就往这里加一条。 */
-export const MIGRATIONS: Migration[] = [usageOccurredAt];
+/**
+ * 压缩插件从 `auto-compact` 改名成 `session-compact`。
+ *
+ * 改名把两处旧写法一起收掉：会话快照里旧插件留下的计数与时间戳（`quickRuns` /
+ * `modelRuns` / `lastRunAt` / `lastReminderAt` …，改成纯手动后没有人再读），以及内核在
+ * 更早版本里给摘要子代理写下的 `subagentType: 'auto-compact'`（现在写作 `compact`）。
+ * 留着这两处，后来的人会以为还有自动触发的逻辑。
+ */
+export const sessionCompactRename: Migration = {
+  id: 'session-compact-rename',
+  description: '清掉旧压缩插件（auto-compact）留下的会话状态，并把摘要子代理的旧写法归一为 compact',
+  apply(document) {
+    let changed = 0;
+    const pluginState = document.pluginState;
+    if (isRecord(pluginState) && 'auto-compact' in pluginState) {
+      delete pluginState['auto-compact'];
+      changed += 1;
+    }
+    const snapshot = document.snapshot;
+    const records = isRecord(snapshot) ? snapshot.subagentUsageHistory : undefined;
+    if (Array.isArray(records)) {
+      for (const record of records) {
+        if (!isRecord(record) || record.subagentType !== 'auto-compact') continue;
+        record.subagentType = 'compact';
+        changed += 1;
+      }
+    }
+    return changed;
+  },
+};
+
+export const MIGRATIONS: Migration[] = [usageOccurredAt, sessionCompactRename];

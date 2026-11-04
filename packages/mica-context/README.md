@@ -24,10 +24,12 @@ const service = new micaContext.CompactionService(options);
 
 - 本包只处理上下文相关算法和服务，不直接依赖终端 UI。
 - 不修改 provider adapter；压缩结果应通过 runtime/session 层接入对话。
-- 什么时候压缩由调用方决定：运行时在手动入口触发，自动压缩由 `auto-compact` 插件经 `ctx.agent.onIterationRewrite` 触发。
+- 什么时候压缩由调用方决定：运行时在手动入口（`/compact`、`mica compact`）触发，`session-compact` 插件在会话右键菜单里经 `ctx.agent.compactIdleHistory` 触发。手动模型压缩用 `summaryInput: 'dialogue'`：摘要请求只带用户与助手的对话，工具调用、工具结果与思考都不进摘要输入。
+- token 估算（`tokenEstimate.ts`）只覆盖消息：文本按字节折算（ASCII 约 4 字符/token，CJK 约 1.5 token/字），**图片块按张计价**（`input_image` / `image_url` 走像素口径，几百到几千），工具输出里以 `data:` 开头的文本仍按文本算——provider 也是这么计费的。真实请求还带系统提示词与工具定义，那部分由调用方补：`resolveRequestOverhead()` 在确定性估算（`AgentRuntime.estimateRequestOverheadTokens`）与上次真实请求的差额之间取其一，差额超过确定性估算两倍时视为估算对正文的偏差、不予采信。
 
 ## 目录说明
 
 - `CompactionService.ts`：上下文压缩服务。
 - `CompactionService.test.ts`：上下文压缩服务测试。
+- `tokenEstimate.ts`：本地 token 估算（压缩阈值、notice 与 ctx 徽标共用）。
 - `index.ts`：公共 API 聚合导出。

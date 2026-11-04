@@ -175,7 +175,7 @@ export function prepareDemo(args = process.argv.slice(2)) {
   });
   // Fresh local metadata avoids online models.dev discovery during screenshots.
   json(join(paths.home, 'cache', 'models-dev.json'), { version: 1, fetchedAt: Date.now(), payload: { demo: { api: `http://127.0.0.1:${port}/v1`, models: { 'mica-demo': { id: 'mica-demo', limit: { context: 65536 }, reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'medium', 'high'] }], modalities: { input: ['text'] } } } } } });
-  json(join(paths.home, 'plugins-state.json'), { disabled: ['session-rename', 'memory', 'auto-compact', 'mobile-relay'] });
+  json(join(paths.home, 'plugins-state.json'), { disabled: ['session-rename', 'memory', 'session-compact', 'mobile-relay'] });
   json(join(paths.workspace, 'package.json'), { name: 'task-queue-demo', version: '1.0.0', private: true, type: 'module', scripts: { test: 'node --test' }, engines: { node: '>=22' } });
   writeFileSync(join(paths.workspace, 'src', 'task-queue.mjs'), BASE_QUEUE);
   writeFileSync(join(paths.workspace, 'test', 'task-queue.test.mjs'), BASE_TESTS);

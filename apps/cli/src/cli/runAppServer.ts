@@ -628,7 +628,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       // 桌面端常驻宿主：装上 `$MICA_HOME/plugins` 里的用户插件（面板、桌面入口都靠它）。
       loadUserPlugins: true,
       isBusy: () => executor!.isBusy,
-      // 用户在输入框敲字时插件可能要提前改一次会话（自动压缩）。Executor 负责
+      // 用户在输入框敲字时插件可能要提前改一次会话（例如压缩）。Executor 负责
       // 「现在能不能写」：轮次中、别的进程持锁、或者刚好有人按了发送都返回 busy。
       runIdleTask: (task, busy) =>
         executor!.runIdleMaintenance(async () => {
@@ -650,9 +650,9 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
             return outcome;
           });
         }, busy),
-      // 轮内的模型压缩（插件在迭代边界动手）同样要占住会话：它是异步的，宿主这段时间
-      // 读得到 stdin，用户的发送会直接 steer 进正在跑的这一轮——正好被塞进正在重写的
-      // 历史里。开窗口让客户端把这几秒的发送留在排队行，压完再补发。
+      // 插件自己的耗时任务（`ctx.agent.withMaintenance`）同样占住会话：它是异步的，
+      // 宿主这段时间读得到 stdin，用户的发送会直接 steer 进正在跑的这一轮——正好被塞进
+      // 正在重写的历史里。开窗口让客户端把这几秒的发送留在排队行，做完再补发。
       runMaintenance,
       submit: (inputText, submitOptions) => startAsSubmit((input) => executor!.start(input), inputText, submitOptions),
     });
@@ -1067,13 +1067,6 @@ function applyRoleOverride(ctx: HostContext, params: Record<string, unknown>): v
   }
 }
 
-/**
- * Mica extension: `turn/start` and `mica/turn/editMessage` carry the desktop's
- * 自动压缩 settings (thresholds + run limits) together with this session's run
- * counters. The resident host is spawned once and the panel can change the
- * numbers between turns, so per-turn delivery is the only path that reaches it.
- * Unknown/missing field types degrade to the defaults inside the controller.
- */
 function warnIfCodexPolicyCannotBeEnforced(ctx: HostContext, params: Record<string, unknown>): void {
   const approval = params.approvalPolicy;
   const sandbox = params.sandboxPolicy ?? params.sandbox;

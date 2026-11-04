@@ -1,0 +1,83 @@
+import type { PluginContext } from '@packages/mica-plugin/index.js';
+import { formatTokenCount } from '@packages/mica-common/format.js';
+
+type CompactHistory = NonNullable<NonNullable<PluginContext['agent']>['compactIdleHistory']>;
+
+/**
+ * 会话压缩：会话右键菜单里的两条手动入口，没有别的触发方式。
+ *
+ * - 快速压缩：把历史里的工具结果换成占位符。不调模型、不丢轮次、不改对话文本，
+ *   所以随手就能点一次。
+ * - 模型压缩：把用户与助手的对话（不带工具调用与结果）交给模型写一段 checkpoint
+ *   摘要，旧历史折成这段摘要加最近几轮。
+ *
+ * 两条改的都是会话**已经落盘的那份历史**（`agent.compactIdleHistory`），所以压完重开
+ * 这条会话看到的也是压缩后的样子。没有阈值、次数与自动触发：不点就什么都不发生。
+ *
+ * 摘要走清单里的 `llm`（默认可复用当前会话模型）：换模型是插件的事，分段、预算与
+ * 截断仍归内核的 `CompactionService`。
+ */
+export default function setup(ctx: PluginContext): void {
+  const compact = ctx.agent?.compactIdleHistory;
+  const menu = ctx.desktop?.sessionMenu;
+  if (!compact || !menu) {
+    ctx.health.report({
+      level: 'warn',
+      message: '宿主没有提供会话历史压缩能力，会话压缩不可用',
+      hint: '需要桌面端（mica app-server）启动的会话宿主',
+    });
+    return;
+  }
+  ctx.health.report({ level: 'ok', message: '会话压缩已就绪：右键会话可快速压缩或模型压缩' });
+
+  menu({
+    run({ action }) {
+      if (action === 'quick') return quick(compact);
+      if (action === 'model') return model(ctx, compact);
+      return { message: `未知动作：${action}` };
+    },
+  });
+}
+
+function quick(compact: CompactHistory) {
+  return report(() => compact({ mode: 'quick' }), '快速压缩', '没有可清理的工具结果');
+}
+
+async function model(ctx: PluginContext, compact: CompactHistory) {
+  const llm = ctx.llm;
+  if (!llm) return { message: '当前宿主没有模型接口，模型压缩不可用' };
+  if (!llm.configured())
+    return { message: '压缩摘要模型未配置：在插件设置里复用当前会话模型，或填写接口地址与模型' };
+  const summarize = async (transcript: string, prompt: string): Promise<string> => {
+    const result = await llm.request({
+      purpose: '会话压缩摘要',
+      system: prompt,
+      user: transcript,
+      timeoutMs: 120_000,
+    });
+    if (!result.text.trim()) throw new Error('摘要请求返回了空内容');
+    return result.text;
+  };
+  return report(() => compact({ mode: 'model', summarize }), '模型压缩', '对话内容太少，不用压缩');
+}
+
+/** 菜单动作没有别的地方可以说结果，这里的一句话就是全部反馈。 */
+async function report(
+  run: () => ReturnType<CompactHistory>,
+  label: string,
+  emptyMessage: string,
+): Promise<{ message: string }> {
+  let outcome;
+  try {
+    outcome = await run();
+  } catch (error) {
+    return { message: `${label}失败：${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (outcome.status === 'skipped')
+    return { message: outcome.reason === 'busy' ? '这条会话正忙，等这一轮结束再压' : emptyMessage };
+  const show = (tokens: number) => formatTokenCount(tokens, { roundedThousands: true });
+  const ratio =
+    outcome.beforeTokens > 0 ? Math.round((outcome.savedTokens / outcome.beforeTokens) * 100) : 0;
+  const saved = ratio > 0 && ratio <= 100 ? `（省 ${ratio}%）` : '';
+  return { message: `${label}完成：${show(outcome.beforeTokens)} → ${show(outcome.afterTokens)}${saved}` };
+}

@@ -441,7 +441,7 @@ describe('agent:observe', () => {
     client.queryImpl = async (_question, options) => {
       options?.onRequestStart?.({ messageCount: 1 });
       const result = await runtime.compactIterationMessages(compactableToolHistory(), {
-        pluginId: 'auto-compact',
+        pluginId: 'session-compact',
         mode: 'quick',
         preserveRecentMessages: 1,
       });
@@ -453,7 +453,7 @@ describe('agent:observe', () => {
     if (compaction?.type !== 'compaction') throw new Error('compaction event was not observed');
     expect(compaction).toMatchObject({
       strategy: 'local',
-      reason: 'iteration:auto-compact',
+      reason: 'iteration:session-compact',
       beforeMessages: 4,
       afterMessages: 4,
       applied: true,
@@ -471,7 +471,7 @@ describe('agent:observe', () => {
     ];
     client.queryImpl = async () => {
       await expect(
-        runtime.compactIterationMessages(history, { pluginId: 'auto-compact', mode: 'quick' }),
+        runtime.compactIterationMessages(history, { pluginId: 'session-compact', mode: 'quick' }),
       ).rejects.toBeInstanceOf(CompactionNotNeededError);
       return 'answer';
     };
@@ -486,7 +486,7 @@ describe('agent:observe', () => {
     const { runtime, client, events } = setup();
     client.queryImpl = async () => {
       const result = await runtime.compactIterationMessages(summarizableHistory(), {
-        pluginId: 'auto-compact',
+        pluginId: 'session-compact',
         mode: 'model',
         summarize: async () => '<summary>Earlier work is complete; continue the latest request.</summary>',
         preserveRecentMessages: 8,
@@ -498,7 +498,7 @@ describe('agent:observe', () => {
     await runtime.run('hello');
     const compaction = events.find((event) => event.type === 'compaction');
     if (compaction?.type !== 'compaction') throw new Error('compaction event was not observed');
-    expect(compaction).toMatchObject({ strategy: 'llm', reason: 'iteration:auto-compact', applied: true });
+    expect(compaction).toMatchObject({ strategy: 'llm', reason: 'iteration:session-compact', applied: true });
     expect(compaction.beforeMessages).toBe(24);
     expect(compaction.afterMessages).toBeLessThan(24);
     expect(compaction.afterChars!).toBeLessThan(compaction.beforeChars!);
@@ -515,7 +515,7 @@ describe('agent:observe', () => {
     hooks.on('agent:observe', () => new Promise(() => {}), { priority: -10, failPolicy: 'stop' });
     client.queryImpl = async () => {
       const result = await runtime.compactIterationMessages(compactableToolHistory(), {
-        pluginId: 'auto-compact',
+        pluginId: 'session-compact',
         mode: 'quick',
         preserveRecentMessages: 1,
       });
