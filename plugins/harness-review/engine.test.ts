@@ -1834,10 +1834,77 @@ test('a failing helper run names its source and stays apart from ordinary run fa
 
   const findings = (await recorder.review(cwd)).findings.filter((finding) => finding.kind === 'run-error');
   // 三种来源各自一条：合并成一条就分不清该改压缩、旁问还是主流程。
-  assert.deepEqual(findings.map((finding) => finding.module).sort(), ['helper:btw', 'plugin:session-compact', 'runtime']);
+  assert.deepEqual(findings.map((finding) => finding.module).sort(), [
+    'helper:btw',
+    'plugin:session-compact',
+    'runtime',
+  ]);
   const helper = findings.find((finding) => finding.module === 'plugin:session-compact')!;
   assert.equal(helper.title, 'Helper run failed: session-compact · compaction (timeout)');
   assert.equal(findings.find((finding) => finding.module === 'runtime')!.title, 'Run ended with an error: timeout');
+});
+
+test('two purposes of the same plugin fail as two review items', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-helper-purpose');
+  // 同一个插件既起标题又写提交说明：合并成一条就看不出是哪条链路在超时。
+  for (const [runId, purpose] of [
+    [1, 'title'],
+    [2, 'commit-message'],
+  ] as const) {
+    const run = runner(recorder, { runId, cwd });
+    run.emit({
+      type: 'run:start',
+      config,
+      input: 'prompt',
+      helper: { kind: 'plugin-llm', pluginId: 'commit', purpose },
+    });
+    run.finish('error', 'request timed out');
+  }
+  const findings = (await recorder.review(cwd)).findings.filter((finding) => finding.kind === 'run-error');
+  assert.deepEqual(findings.map((finding) => finding.title).sort(), [
+    'Helper run failed: commit · plugin-llm · commit-message (timeout)',
+    'Helper run failed: commit · plugin-llm · title (timeout)',
+  ]);
+  // 模块仍然按插件归并：一个插件的失败不该因为来源不同就散成好几处。
+  assert.deepEqual([...new Set(findings.map((finding) => finding.module))], ['plugin:commit']);
+});
+
+test('tool health ranks by failure rate, not by absolute error count', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-tool-health');
+  const run = runner(recorder, { cwd });
+  run.start();
+  // shell 跑了很多次、错 1 次；apply_patch 只跑 2 次、全错。后者才是要修的那个，
+  // 但按「错误次数」排序会把 shell 排前面。
+  for (let index = 0; index < 10; index++) {
+    run.call('{}', 'run_shell', `shell-${index}`);
+    run.result(
+      `[command]\ncommand: "true"\nexit_code: ${index === 0 ? 7 : 0}\ntimed_out: false\nsignal: null`,
+      'run_shell',
+      `shell-${index}`,
+    );
+  }
+  for (const id of ['patch-1', 'patch-2']) {
+    run.call('{}', 'apply_patch', id);
+    run.result('{"isError":true,"message":"hunk 没有任何增删内容"}', 'apply_patch', id);
+  }
+  run.finish();
+
+  const toolHealth = (await recorder.review(cwd)).toolHealth;
+  assert.deepEqual(
+    toolHealth.map((row) => [row.name, row.calls, row.errors, row.errorRate]),
+    [
+      ['apply_patch', 2, 2, 1],
+      ['run_shell', 10, 1, 0.1],
+    ],
+  );
+  // 类别也跟着走：不写出来就不知道失败到底是超时还是补丁写错。
+  assert.deepEqual(toolHealth[0]!.categories, [{ category: 'empty-hunk', count: 2 }]);
+  const markdown = await readFile(await recorder.exportReport(cwd), 'utf8');
+  assert.match(markdown, /## Tool health/);
+  // 下划线在 Markdown 表格里必须转义，否则会被读成斜体。
+  assert.match(markdown, /\| apply\\_patch \| 2 \| 2 \| 100\.0% \| empty-hunk ×2 \|/);
 });
 
 test('plugin background failures are throttled, aggregated and exposed as a review item', async (t) => {

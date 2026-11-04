@@ -28,11 +28,15 @@ export function sessionMenuPluginItems(plugins) {
       const label = typeof entry?.label === 'string' ? entry.label.trim() : ''
       const action = typeof entry?.action === 'string' ? entry.action.trim() : ''
       if (!label || !action) continue
+      // 清单里声明的摆位要一路带到菜单构建那一层：`top` 进菜单最上方（会话压缩这类
+      // 和当前会话直接相关的动作），省略就是宿主自己的项之后。
+      const position = entry?.position === 'top' ? 'top' : entry?.position === 'bottom' ? 'bottom' : ''
       items.push({
         action: `${PREFIX}${plugin.id}:${action}`,
         label,
         pluginId: plugin.id,
-        pluginAction: action
+        pluginAction: action,
+        ...(position ? { position } : {})
       })
     }
   }

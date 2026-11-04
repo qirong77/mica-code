@@ -123,6 +123,46 @@ describe('withExtraMenuItems', () => {
     const items = withExtraMenuItems([['rename', '重命名'], 'separator'], [['x', '插件动作']])
     expect(labels(items)).toEqual(['重命名', '---', '插件动作'])
   })
+
+  // 会话压缩这类动作是对这条会话本身的操作，比置顶/改名更常点
+  it('puts top-positioned plugin items above the built-in ones', () => {
+    const items = withExtraMenuItems(sessionMenuItems({ pinned: false, inProject: false }), [
+      { action: 'session-menu:session-compact:quick', label: '快速压缩', position: 'top' },
+      { action: 'session-menu:session-compact:model', label: '模型压缩', position: 'top' },
+      { action: 'session-menu:session-copy:copy', label: '复制会话 Markdown' }
+    ])
+    expect(labels(items)).toEqual([
+      '快速压缩',
+      '模型压缩',
+      '---',
+      '置顶',
+      '查看详情',
+      'Fork',
+      '分享链接',
+      '重命名',
+      '---',
+      '复制会话 Markdown',
+      '---',
+      '删除对话'
+    ])
+  })
+
+  it('moves only the top items when no other plugin item exists', () => {
+    const items = withExtraMenuItems(sessionMenuItems({ pinned: false, inProject: false }), [
+      { action: 'session-menu:session-compact:quick', label: '快速压缩', position: 'top' }
+    ])
+    expect(labels(items)).toEqual([
+      '快速压缩',
+      '---',
+      '置顶',
+      '查看详情',
+      'Fork',
+      '分享链接',
+      '重命名',
+      '---',
+      '删除对话'
+    ])
+  })
 })
 
 describe('derived session menu', () => {

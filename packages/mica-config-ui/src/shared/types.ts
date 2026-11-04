@@ -80,6 +80,8 @@ export type ConfigWebPerfMemoryProcess = {
   pid: number;
   session?: string;
   samples: number;
+  /** 最后一次采样的时刻：退出后的进程仍留在表里，靠它区分「还活着」与「已经没了」。 */
+  lastAt: number;
   lastRssMB: number;
   peakRssMB: number;
   lastHeapMB: number;
@@ -472,6 +474,8 @@ export type ConfigWebPluginNewSession = {
 export type ConfigWebPluginSessionMenuItem = {
   label: string;
   action: string;
+  /** `top` 摆在菜单最上面；省略或 `bottom` 排在宿主自己的项之后、删除之前。 */
+  position?: 'top' | 'bottom';
 };
 
 /**

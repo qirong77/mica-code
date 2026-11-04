@@ -674,6 +674,10 @@ ctx.desktop.panel({
 }
 ```
 
+每一项默认排在宿主自己的菜单项之后、删除之前；写 `"position": "top"` 就摆到菜单最上面
+（会话压缩的「快速压缩 / 模型压缩」就是这么放的——它们是对这条会话本身的操作，比置顶、
+改名更常点）。只认 `top` 与 `bottom`，别的值算清单错误。
+
 ```ts
 ctx.desktop.sessionMenu({
   run({ action }) {

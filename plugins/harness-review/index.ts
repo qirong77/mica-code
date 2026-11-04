@@ -172,11 +172,16 @@ export default function setup(ctx: PluginContext): void {
       const report = await recorder.review(cwd);
       // Keep an accumulated review usable inside a model context. The full
       // evidence and all selected runs remain available in the exported report.
+      // helper 运行（起标题、压缩摘要）跟着每一轮都发生：混进「最近 20 次」会把真正的一轮
+      // 挤出去，它们已经由 report.helpers 按来源汇总。
+      const userRuns = report.runs.filter((run) => !run.helper);
       return {
         ...report,
-        totalRuns: report.runs.length,
+        totalRuns: userRuns.length,
         totalFindings: report.findings.length,
-        runs: report.runs.slice(0, 20).map(({ findings: _findings, ...summary }) => summary),
+        runs: userRuns.slice(0, 20).map(({ findings: _findings, ...summary }) => summary),
+        // 52 个工具一次全塞进上下文没有意义：按失败率排过序，前 15 个就是要看的那些。
+        toolHealth: report.toolHealth.slice(0, 15),
         findings: report.findings.slice(0, 20).map((finding) => ({
           ...finding,
           evidence: finding.evidence.slice(0, 5),

@@ -18,12 +18,6 @@
 - 运行时启动即 `stripContainerEnv()`；受控浏览器与终端 socket 只在 `will-quit` 关闭。
 - 同一时刻只起一个 Electron 实例；验证时串行。
 
-### 构建后自我重载
-
-`build:app` 收尾由 `scripts/build-stamp.mjs` 往 `$MICA_HOME/dev-build-stamp.json` 写产物指纹，运行中的实例据此自我重载（`host/build-stamp.js` 判层、`host/dev-reload.js` 管节奏、`renderer/src/DevReloadNotifier.jsx` 把状态翻成一条顶部通知（`renderer/src/notify.js` + `NotificationHost.jsx` 是通用通知队列与宿主））。分层规则是「哪份产物变了就换掉加载它的那个东西」：`renderer` 只刷页面（不碰任何会话宿主）；`cli`（插件与工具在里面）换掉会话宿主后再刷；`runtime`/`shell` 在 asar 里换不掉，运行时腾空宿主后落 `.restart` 交接文件，由外壳 `app.relaunch()`。
-
-**正在跑的一轮走「软停 + 自动续跑」，不是硬杀**：宿主收 `mica/host/drain` 后置一个标志，`ChatCompletionsClient`/`ResponsesClient` 的循环在「上一批工具已落定、下一次请求还没发」处 `throwIfTurnPaused`，此刻历史尾部完整，会话文件写 `turnState: 'aborted'` + `resumeAfter: 'build-reload'`。预算 15s：到期仍未停下（模型正在吐字 / 工具正在跑）才中断，那时这一批工具被记成 `interrupted`，续跑时模型会重跑它。新宿主起来按 `ui-state.workspace` 的节点扫会话头部找 `resumeAfter`，用 `turn/start { resume: true }` 接着跑。细节见 `headless.md` 的「drain 与续跑」。
-
 ## 共享状态与路由
 
 - 运行时只有一份 workspace / drafts / layout / rightTerms / terminalOpenByChat / cwd / Git 偏好，落盘 `userData/ui-state.json`；语义在 `mica-web-shared/ui-state.ts`。老版本单独存的 `workspace.json` 只在 ui-state 还不存在时导入一次、落盘后删除；ui-state 已存在就不再读它（否则用户清空过的工作区会被搬回来）。
@@ -38,6 +32,7 @@
 - 切换服务器：页面 origin 即当前服务器；由 host 探活后开新窗口/标签页，不做代理或跨源 API 层。探活与打开都用**完整入口**（`@packages/mica-web-shared` 的 `probeRuntime`）：中转机链接丢了 `?t=` 只是台没人认识的域名，外壳会把它当外链丢给系统浏览器；中转机窗口的身份是「origin + t」，所以同一台中转机后面的两台机器各开一个窗口。
 - 运行时里的用户终端面板与主进程终端控制是两套，不复用会话。
 - 终端里手跑的 `mica` 一轮结束时按**那条 PTY** 记未读（`host/notifyServer.js`，terminalId 是 `<终端条目 id>:<pane>`），main 的 dock 徽标数的是它的总数。标记已读必须用回这个 terminalId：按条目拼一个 `<条目 id>:mica` 会打到不存在的终端上，未读永远清不掉（徽标点不掉的来源）。PTY 级状态归并成条目视图只给界面用（`renderer/src/notify-state.js`），清未读只能对未读的那条 PTY 发；对话底部终端（点标签、在面板里敲字/滚动、焦点回到窗口时它就在屏幕上）与编辑器终端都要发出这条「看过了」的信号，否则那条会话的提醒除了重开终极端口没有别的出路。
+- 两处**提示音**都在 `renderer/src/notification-sound.js`（WebAudio 现场合成，不带音频文件，`unlockAudio()` 在第一次手势时唤醒）：一轮结束是两声上行（`completed`），插件抛出选择题是下行再重复一遍（`ask`，与前者刻意反着，听一耳朵能区分）。结束音挂在 PTY 的 `turn.completed` 上（`App.jsx` 的 `useNotifications`），问句音挂在 `chat:ask` 上（`useAskChime`，按 `ask.id` 去重，宿主重推同一道题不再响）。两者都不看窗口是否在前台——提醒的意义就在于用户可能正在别处。
 
 ## 对话与输入
 
@@ -72,7 +67,7 @@
 - **会话详情只有一个组件**：`mica-config-ui` 的 `SessionDetailView`（头部 + 对话记录 / Context 分析 / 耗时 / 系统提示词，原始文件自动保存；「耗时」页签读会话快照里的 `turnTimings`，与「耗时分析」弹窗共用 `@mica-config-ui/web` 的 `TurnTimingView`）。配置页 Sessions 页、Stats 的会话详情弹窗（额外带「用量」页签）与状态栏上下文弹窗都渲染它，桌面端只包一层 `.mica-config-ui.is-embed` 的外壳与 `chat-modal-session-detail` 尺寸；**弹窗壳传 `bare`**，不画自己的标题 / meta——会话身份（标题、路径、事实）只由详情头部给出，两处各画一遍就是四行表头压在一屏内容上。原始 JSON 不是页签而是标签条右端那个开关（再点一次回到刚才那个视图）；对话记录 / 系统提示词 / 原始 JSON 三个 pane 共用 `.session-pane-toolbar`。不要再写第二套会话详情或上下文分组，上下文分类 / 信封 / 差额的唯一计算在 `mica-config-ui/src/server/contextBreakdown.ts`。
 - 「系统提示词」页签读 `snapshot.systemPrompt`（按需 `readSessionSystemPrompt`，不跟着 2 秒轮询），用 `web/promptView.ts` 的 `analyzePrompt()` 切成「段 → markdown 标题」的大纲（顶层是角色 / 项目说明 / skills / 环境信息 / 其它注入，段内再按 `#` 递归；代码围栏里的 `#` 与 `<tag>` 不算结构，插件注入了哪个角色 / 段落由 `<injection>` 的属性标出来）。**导航只有一份**：左栏是这棵树（每行一条占全文的占比条，可按体积排序、可按节点正文搜索并标出命中次数），选中任一行即换右侧编辑器内容，工具栏显示所选模块的字符 / ≈tokens / 行数并提供复制，点行尾的定位把该节滚到编辑器对应行；不要退回「下拉 + 按模块查看 + 展开模块统计」那三件套（下拉还必须用 `SelectMenu`，原生 `<select>` 一律不写）。窄容器用 `@container session-detail` 改成上下排（同一个组件既在整页也在几百像素宽的弹窗里，不能按视口折）。刷新通过 refreshToken 更新数据，页签 key 只按 sessionId 区分，避免运行中反复卸载。对话记录与 Context 分析里那条 System 也用同一份记录（没有记录时才回落到角色提示词），三处口径一致。
 - 会话详情的「用量」页签（桌面端 `stats/SessionDetailModal.jsx`）是 KPI + 来源堆叠条 + 逐次请求堆叠柱 + 逐条表格四段：柱子按「缓存输入 / 未缓存输入 / 输出」三段堆叠（颜色与图例同源 `stats/usage-series.js` 的 `USAGE_TOKEN_PARTS`，缓存用中性灰、未缓存用 info 蓝、输出用 accent，别把占比 98% 的缓存段调成最淡的 ghost，那会让柱子看起来是空的），可在「总量 / 输入 / 输出」之间切视图；请求投影、按来源归并与「每次 482」这类派生数字全部在 `stats/usage-series.js`（纯函数，有单测），组件只画。
-- 工具抛出的选择题（`ctx.ask`，官方插件 `ask`）默认画在输入框上方的 dock 里（`AskDock`，与排队行同一位置）：标题带问号徽标与「3 个方案 · 单选」这行元信息，选项是扁平卡片（选中只改边色 + 浅底），底部一条独立的「已选 A · ↵ · 确定」——单选且不允许自由输入时点一下即提交，多选或可自由输入时留「确定」。`presentation: 'modal'` 换成浮层（同一份组件，只换容器）给「不决定就没法继续」的场景；`display` 逐项开关元素，不传按数据推导，元素少了高度就矮。答案是给还在 await 的那个工具用的，**不开新一轮**；成功后卡片靠宿主推来的 `mica/ask/updated`（`ask: null`）关掉，本地不抢先关——宿主没收到时界面会显示「已选」而工具一直卡着。`chat:is-running` 一并回带 `ask`，中途附着上来的页签据此补上未答的卡片；`chat:exit` 一到就清掉（宿主崩掉时来不及推 null）。等待期间会话文件顶部带 `awaitingInput`，侧栏那一行显示强调色圆点（`session-state.js` 的 `awaiting` 排在 running 之前）——判定要同时满足「文件里有标记 + 这一轮还在跑 + 真有进程持租约」，崩溃残留的 running 不会一直喊「等你选」；大会话按 30 秒的重读节奏，提醒最多晚半分钟亮。
+- 工具抛出的选择题（`ctx.ask`，官方插件 `ask`）默认画在输入框上方的 dock 里（`AskDock`，与排队行同一位置）：标题带问号徽标与「3 个方案 · 单选」这行元信息，选项是扁平卡片（选中只改边色 + 浅底），下面一个「或者直接说你的想法…」输入框，底部一条独立的「已选 A · ↵ · 确定」——输入框默认就在，单选点一下即提交（自己写的按回车，打了字之后底部会多出「确定」），多选才需要先攒齐再点确定。`presentation: 'modal'` 换成浮层（同一份组件，只换容器）给「不决定就没法继续」的场景；`display` 逐项开关元素，不传按数据推导，元素少了高度就矮。答案是给还在 await 的那个工具用的，**不开新一轮**；成功后卡片靠宿主推来的 `mica/ask/updated`（`ask: null`）关掉，本地不抢先关——宿主没收到时界面会显示「已选」而工具一直卡着。`chat:is-running` 一并回带 `ask`，中途附着上来的页签据此补上未答的卡片；`chat:exit` 一到就清掉（宿主崩掉时来不及推 null）。等待期间会话文件顶部带 `awaitingInput`，侧栏那一行显示强调色圆点（`session-state.js` 的 `awaiting` 排在 running 之前）——判定要同时满足「文件里有标记 + 这一轮还在跑 + 真有进程持租约」，崩溃残留的 running 不会一直喊「等你选」；大会话按 30 秒的重读节奏，提醒最多晚半分钟亮。
 
 ## 统计页
 
@@ -118,9 +113,9 @@
 - Pinned / Projects / Recent 互斥，归属经 `stats:move-session`；拖放判定在 `session-dnd.js`（`rowDropPosition` 的分档唯一实现：中间一半 = 嵌套 / 进入，上下各四分之一 = 插到前后，不认修饰键；分组行不许嵌套时（拖到自己的父分组、或自己的子树）中间一半退回插到前后，任何一行都不做无反应的死区）。分组行与会话行同一套落点规则：拖到分组中间变成它的子分组、拖到会话中间成为它的子会话、分组拖到会话行等于挪进会话所在的分组，拖到上下边缘排序——分组顺序在 Projects 的 groups 数组里，会话的手动顺序在 `userData/session-sort.json`（`pinned` / `project:<groupId>` 各自一份，跨工作目录也能排）。Recent 按时间排、不参与手动排序，只接嵌套与「拖去别的分区 / 分组」。落点提示不用描边或单边高亮：进入用整行浅底（`bg-info/20!`，必须带 `!`——行自己的 `hover:bg-overlay` 优先级更高，不加就整行看不出变化），插到前后用行间一条圆角细条（`DropBar`）。
 - 会话行共用操作列/图标列/名称栅格；状态优先级沿用 `session-state.js`，error 红点由后续 completed 清除。
 - 每个会话行右端都显示最近结束时间，只有 Recent 额外带目录名；Recent 之外的 Pinned / Projects 只在 24 小时内活跃过时给时间（`relative-time.js` 的 `activeTimeLabel`），否则整列都是 15d / 4d 的噪声。分组行只有**折叠时**才在右端留这个 24 小时内的相对时间（展开时下面每个子行各有自己的时间），从不画条数；分区标题右端两样都不画（条数与精确时刻只进 tooltip，`collectGroupDigests` 汇总子树）。
-- 会话右键菜单 = 固定项（Fork / 改名 / 标记 / 删除等；Fork 复用 `chat:fork`）+ 插件动作：插件项来自清单 `desktop.sessionMenu`，由 `renderer/src/session-menu-plugins.js` 收集（读 `readPluginsDetails`，用户插件也在里面），页面只转发 `pluginId + pluginAction` 到 `window.mica.chat.sessionMenuRun` → `chat:session-menu-run` → `mica/sessionMenu/run`；插件回的 `copyText` 由页面写剪贴板（`transport.js` 的 `copyText`），`message` 进 toast。没开过标签页的会话按需起一个 app-server 取快照，不需要页面先有 chat run。
-- 会话行右键与对话区右键（`ChatView` 的 `ChatContextMenu`）用的是同一份插件项和同一个执行器 `runSessionMenuPluginAction`：两处各写一遍会让同一个插件在两个入口表现不一样。对话区那一份插在「分享链接」之后、Clear 之前（危险项永远排最后），没有会话时禁用；结果在对话里落一条 notice，侧栏那处进 toast。固定项里还有一个「查看详情」，和侧栏会话行的「查看详情」是同一个弹窗（按需加载的 `stats/SessionDetailModal`，含用量页签）；两个入口渲染同一个组件，不要为其中一处另写一份详情。
-- 父子关系（`parentSessionId`）是会话树的唯一事实来源，只改渲染顺序，**不区分来源**：sidecar 子会话、fork 分支与手动拖出来的层级共用这一个字段，侧栏不给它们加标签或图标。父行在前、紧跟它的子树（`session-nesting.js` 的 `nestSessions`），父会话不在当前分区时子会话当顶层，环与自指都退化成顶层。折叠状态是页面内 Set，父行折叠时用 `mergeRowStates` 代显子行状态；子行继承父行的分区与搜索命中，也不参与手动排序——拖到会话行正中＝成为它的子会话（拖进自己的子树会被拒），拖到别处＝先解除父子关系再换分区。写盘走 `stats:set-session-parent`（`host/session-parent.js`）：只在没有 turn lease 时直接改文件，`parentSessionId` 固定写在 `snapshot` 之前（头部读取靠这个位置判成环），`updatedAt` 不动，否则调整层级会把会话顶到 Recent 最前面。
+- 会话右键菜单 = 固定项（Fork / 改名 / 标记 / 删除等；Fork 复用 `chat:fork`）+ 插件动作：插件项来自清单 `desktop.sessionMenu`，由 `renderer/src/session-menu-plugins.js` 收集（读 `readPluginsDetails`，用户插件也在里面），页面只转发 `pluginId + pluginAction` 到 `window.mica.chat.sessionMenuRun` → `chat:session-menu-run` → `mica/sessionMenu/run`；插件回的 `copyText` 由页面写剪贴板（`transport.js` 的 `copyText`），`message` 进顶部通知。没开过标签页的会话按需起一个 app-server 取快照，不需要页面先有 chat run。
+- 会话行右键与对话区右键（`ChatView` 的 `ChatContextMenu`）用的是同一份插件项和同一个执行器 `runSessionMenuPluginAction`：两处各写一遍会让同一个插件在两个入口表现不一样。插件项默认插在「分享链接」之后、Clear 之前（危险项永远排最后），清单写了 `position: "top"` 的（会话压缩的快速压缩 / 模型压缩）反过来摆在菜单最上面、与其余项之间隔一条分隔线；没有会话时禁用。结果在对话里落一条 notice，侧栏那处进顶部通知。固定项里还有一个「查看详情」，和侧栏会话行的「查看详情」是同一个弹窗（按需加载的 `stats/SessionDetailModal`，含用量页签）；两个入口渲染同一个组件，不要为其中一处另写一份详情。
+- 父子关系（`parentSessionId`）是会话树的唯一事实来源，只改渲染顺序，**不区分来源**：sidecar 子会话、fork 分支与手动拖出来的层级共用这一个字段，侧栏不给它们加标签或图标。父行在前、紧跟它的子树（`session-nesting.js` 的 `nestSessions`），父会话不在当前分区时子会话当顶层，环与自指都退化成顶层。折叠状态是页面内 Set，父行折叠时用 `mergeRowStates` 代显子行状态；子行继承父行的分区与搜索命中，也不参与手动排序——拖到会话行正中＝成为它的子会话（拖进自己的子树会被拒），拖到别处＝先解除父子关系再换分区。写盘走 `stats:set-session-parent`（`host/session-parent.js`）：空闲时独占 turn lease 改文件；这一轮正在跑（lease 被别人持有）也照改——活着的宿主每次保存都从盘上读回这个字段，不会用内存旧值顶回去，此时改成读前读后比一次文件身份（inode / size / mtime）、写完回读校验，撞上宿主的一次保存就重来。`parentSessionId` 固定写在 `snapshot` 之前（头部读取靠这个位置判成环），`updatedAt` 不动，否则调整层级会把会话顶到 Recent 最前面。
 - 会话搜索共用 `mica-web-shared/session-search.ts`；正文搜索每会话最多 20k 字符，默认最近 3 日、最多 600 个候选，截断须告知。
 - 上下文统计按整条消息 JSON 估算并排除媒体 payload；compact / rewind 后用 staleInput 说明。
 

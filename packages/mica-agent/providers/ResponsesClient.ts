@@ -20,12 +20,10 @@ import {
   type AgentConversationMessage,
   type AgentQueryContent,
   type AgentQueryOptions,
-  throwIfTurnPaused,
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent.js';
 import { isRetryableError, withRetry } from '../core/retry.js';
-import { compactRawUsage } from '@packages/mica-common/rawUsage.js';
 import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
@@ -36,8 +34,6 @@ import type { ModelClientOptions } from './types.js';
 
 export type ResponsesUsageRecord = AgentUsageRecord & {
   provider: 'openai_responses';
-  /** 压缩后的原始 usage（只留标量与一层明细），见 `mica-common/rawUsage.ts`。 */
-  rawUsage?: Record<string, unknown>;
 };
 
 type PendingToolCall = {
@@ -341,9 +337,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     const systemPrompt = resolveSystemPrompt(this.systemPrompt);
     let messages: ResponseInputItem[] = [
       ...prepareHistoricalResponsesInput(this.messages),
-      ...(options?.resume === true
-        ? []
-        : [{ type: 'message' as const, role: 'user' as const, content: micaContentToResponsesContent(question) }]),
+      { type: 'message' as const, role: 'user' as const, content: micaContentToResponsesContent(question) },
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
       this.messages = takeNextInput
@@ -364,7 +358,6 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
     while (true) {
       throwIfQueryStopped(options);
-      throwIfTurnPaused(options);
       throwIfAgentMaxTurnsReached(options, requestIndex, totalContent);
       if (options?.rewriteIterationMessages) {
         const rewritten = await options.rewriteIterationMessages(messages);
@@ -701,9 +694,6 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       outputTokens,
       totalTokens,
       paidTokenRate,
-      // 只留标量与一层明细：网关的逐条归因（attribution.items）没有消费方，
-      // 却能让单条会话从 1.5MB 涨到 30MB（见 mica-common/rawUsage.ts）。
-      rawUsage: compactRawUsage(usage),
     };
 
     this.lastUsage = record;

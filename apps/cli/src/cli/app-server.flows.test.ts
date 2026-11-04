@@ -458,9 +458,6 @@ function createMockProvider() {
 
 type MockProvider = ReturnType<typeof createMockProvider>;
 
-/** 一条 mock provider 收到的请求（`state.requests` 的元素）。 */
-type MockRequest = MockProvider['state']['requests'][number];
-
 /** Everything one test owns: its own mock provider (its own port, its own
  * programmable state), its own hosts, and the `MICA_HOME` dirs to clean up.
  * Tests run concurrently (`it.concurrent`), so none of this may be shared. */
@@ -710,30 +707,6 @@ function waitFor(
 const turnCompleted = (turnId: string) => (m: HostMessage) =>
   m.method === 'turn/completed' && (m.params?.turn as { id?: string } | undefined)?.id === turnId;
 
-/** 等 mock provider 收到一条满足条件的请求，返回它在 `state.requests` 里的下标。
- *
- * 判断依据只能是「请求真的上网了」这类事实（不能拿固定 sleep 猜压缩什么时候开始）：
- * 有界轮询，到点就带着收到的请求清单报错。 */
-async function waitForMockRequest(
-  predicate: (request: MockRequest) => boolean,
-  label: string,
-  timeoutMs = 30_000,
-): Promise<number> {
-  const requests = currentMock().mock.state.requests;
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const index = requests.findIndex(predicate);
-    if (index >= 0) return index;
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `timeout waiting for ${label}; provider saw ${requests.length} requests:\n  ` +
-          requests.map((request) => request.model).join('\n  '),
-      );
-    }
-    await sleep(50);
-  }
-}
-
 async function send(host: Host, id: number, method: string, params: Record<string, unknown>): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     host.child.stdin!.write(`${JSON.stringify({ id, method, params })}\n`, (error) =>
@@ -940,93 +913,6 @@ suite('mica app-server real-user flows (mock provider)', () => {
       turnState?: string;
     };
     expect(session.turnState).toBe('completed');
-  });
-
-  itE2E('mica/host/drain pauses at the iteration boundary, and the next host resumes it', async () => {
-    mock!.state.mode = 'tool';
-    mock!.state.toolRounds = 2;
-    mock!.state.requests = [];
-    mock!.state.responsesFinished = 0;
-    // 让每次工具响应在 function_call 之后挂一会儿：drain 才有机会落在「这一批工具
-    // 跑完、下一次请求还没发」的边界上，而不是已经冲进下一轮请求里。
-    mock!.state.delayBeforeTextMs = 150;
-
-    const tag = 'drain-resume';
-    const home = makeHome(tag);
-    mock!.state.toolFilePath = join(home, 'work', 'drained.txt');
-    const host = spawnHost(tag, [], home);
-    hosts.push(host);
-    await waitFor(host, hostReady, 'host ready or error', 30_000);
-
-    await send(host, 1, 'turn/start', { threadId: '', input: [{ type: 'text', text: '写两个文件' }] });
-    const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
-    const turnId = (started.params?.turn as { id: string }).id;
-
-    // 第一个工具批次已经提交（provider 收到了第二次请求），此刻请求软停：它会在这一批
-    // 之后的迭代边界停下，而不是掐断正在跑的工具。
-    await waitForMockRequest(() => true, 'first provider request');
-    await send(host, 2, 'mica/host/drain', {});
-    const drain = await waitFor(host, (m) => m.id === 2, 'drain reply');
-    expect(drain.result).toMatchObject({ ok: true });
-
-    const paused = await waitFor(host, turnCompleted(turnId), 'paused turn/completed');
-    // Codex 投影把 aborted 记成 interrupted（见 runAppServer 的 turn:finish 映射）：
-    // 对客户端来说这就是「这一轮没跑完」。
-    expect((paused.params?.turn as { status?: string }).status).toBe('interrupted');
-    const requestsWhenPaused = mock!.state.requests.length;
-
-    const sessionId = readdirSync(join(home, 'sessions'))
-      .filter((file) => file.endsWith('.json'))
-      .map((file) => file.replace(/\.json$/, ''))[0];
-    expect(sessionId).toBeTruthy();
-    const pausedSession = JSON.parse(readFileSync(join(home, 'sessions', `${sessionId}.json`), 'utf8')) as {
-      turnState?: string;
-      resumeAfter?: string;
-      snapshot: { messages: Array<{ role?: string; type?: string }> };
-    };
-    expect(pausedSession.turnState).toBe('aborted');
-    expect(pausedSession.resumeAfter).toBe('build-reload');
-    // 只数用户消息（Responses 历史里是 `{ type: 'message', role: 'user' }`）。
-    const userMessagesWhenPaused = pausedSession.snapshot.messages.filter(
-      (item) => (item as { role?: string }).role === 'user',
-    ).length;
-    expect(userMessagesWhenPaused).toBeGreaterThan(0);
-
-    // 换掉宿主（模拟构建重载），同一个 MICA_HOME 起新的，用 resume 接上。
-    killHost(host);
-    await host.closePromise;
-    mock!.state.delayBeforeTextMs = 0;
-    // 桌面端就是按会话 id 起宿主的（`app-server --session <id>`），历史在这一步装回来。
-    const next = spawnHost(tag, ['--session', sessionId], home);
-    hosts.push(next);
-    await waitFor(next, hostReady, 'resumed host ready', 30_000);
-
-    await send(next, 3, 'turn/start', {
-      threadId: sessionId,
-      // 续跑不带用户输入：只对已有历史再发一次请求。
-      input: [{ type: 'text', text: '' }],
-      resume: true,
-    });
-    const resumedStart = await waitFor(next, (m) => m.method === 'turn/started', 'resumed turn/started');
-    const resumedTurnId = (resumedStart.params?.turn as { id: string }).id;
-    const resumedDone = await waitFor(next, turnCompleted(resumedTurnId), 'resumed turn/completed', 30_000);
-    expect((resumedDone.params?.turn as { status?: string }).status).toBe('completed');
-
-    // 续跑真的发出了请求，而且没有追加用户消息：历史还是被暂停时那一份。
-    expect(mock!.state.requests.length).toBeGreaterThan(requestsWhenPaused);
-    const resumedRequest = mock!.state.requests.at(-1)!;
-    const userMessagesInResume = resumedRequest.input.filter(
-      (item) => (item as { role?: string }).role === 'user',
-    ).length;
-    expect(userMessagesInResume).toBe(userMessagesWhenPaused);
-
-    const finished = JSON.parse(readFileSync(join(home, 'sessions', `${sessionId}.json`), 'utf8')) as {
-      turnState?: string;
-      resumeAfter?: string;
-    };
-    // 跑完了就该把待续跑标记清掉，否则下次启动会再跑一遍。
-    expect(finished.turnState).toBe('completed');
-    expect(finished.resumeAfter).toBeUndefined();
   });
 
   itE2E('mica/turn/editMessage rewrites a sent message, drops what followed it and reruns', async () => {

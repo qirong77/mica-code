@@ -18,7 +18,6 @@ import {
 // 与运行时、插件同一份探活逻辑（含「中转机链接要带 ?t=」的判定），这里只是为了与
 // 上面那个「端口上是不是我们自己的运行时」的 probeRuntime 区分而改名
 import { probeRuntime as probeRemoteRuntime } from '../host/runtime-probe-core.js'
-import { consumeRestartMarker, resolveStampPath } from '../host/build-stamp.js'
 import { flushLogs, logger, startMemorySampler } from '@packages/mica-diagnostics/index.js'
 
 /**
@@ -806,9 +805,21 @@ function startMainDiagnostics() {
     }
   })
 
+  // 页面 URL 里带着 `?session=` 与 cwd，而下面的 `slice(0, 200)` 正好可能把会话参数
+  // 切掉。单独解一次，崩溃现场才归得到会话。
+  const sessionOf = (raw) => {
+    try {
+      return new URL(raw).searchParams.get('session') || undefined
+    } catch {
+      return undefined
+    }
+  }
   app.on('render-process-gone', (_event, contents, details) => {
+    const raw = contents && contents.getURL ? contents.getURL() : ''
     log.error('render-process-gone', {
-      url: (contents && contents.getURL ? contents.getURL() : '').slice(0, 200),
+      url: raw.slice(0, 200),
+      session: sessionOf(raw),
+      webContentsId: contents && contents.id,
       reason: details && details.reason,
       exitCode: details && details.exitCode
     })
@@ -817,6 +828,9 @@ function startMainDiagnostics() {
   app.on('child-process-gone', (_event, details) => {
     log.error('child-process-gone', {
       type: details && details.type,
+      // utility 崩了要能分清是 network 还是 audio，光看 type 分不出来。
+      serviceName: details && details.serviceName,
+      name: details && details.name,
       reason: details && details.reason,
       exitCode: details && details.exitCode
     })
@@ -831,30 +845,6 @@ function startMainDiagnostics() {
     })
     contents.on('responsive', () => log.info('responsive', { url: url() }))
   })
-}
-
-/**
- * 看交接文件：运行时空出会话宿主后写一个，这里负责真的重启应用。
- *
- * 启动时先清一次——上一次留下的（主进程被强杀、或重启失败）不该在新实例刚起来时
- * 又触发一次重启，那样会变成起不来的循环。
- */
-function startDevRestartWatch() {
-  const stampPath = resolveStampPath()
-  consumeRestartMarker(stampPath)
-  const timer = setInterval(() => {
-    const marker = consumeRestartMarker(stampPath)
-    if (!marker) return
-    console.log('[mica-code-app] 构建完成，重启应用', marker)
-    // 先让页面把「正在重启应用」画出来再退出；这里不走 app.quit()：关窗确认
-    // （终端里还跑着命令时的二次确认）会拦住自动重启，而那正是我们要跳过的那一步。
-    setTimeout(() => {
-      app.relaunch()
-      app.exit(0)
-    }, 500)
-    clearInterval(timer)
-  }, 1000)
-  timer.unref?.()
 }
 
 app.whenReady().then(async () => {
@@ -934,11 +924,6 @@ app.whenReady().then(async () => {
   localPageUrl = devPageUrl || runtime.url
   // 只开本机窗口：另一台机器上的服务器各占一个新窗口，由页面里「切换 Mica 服务器」当场开
   createWindow(localPageUrl, { primary: true })
-
-  // 构建后自动重载的最后一环：`out/main`、`out/server` 在 asar 里，进程换不掉自己，
-  // 只有外壳能 `app.relaunch()`。运行时腾空会话宿主后落一个交接文件，看到才重启——
-  // 「现在有没有一轮在跑」只有运行时知道，所以判定权不在外壳这里。
-  startDevRestartWatch()
 
   app.on('activate', () => {
     // 回到用户最后用的那个窗口（关掉的窗口还在 windows 里时就轮到本机窗口）

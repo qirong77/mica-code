@@ -26,6 +26,8 @@ import { PluginPage } from './PluginPage'
 import { usePluginAttention } from './plugin-attention'
 import { invalidatePluginsDetails } from './plugins-details'
 import { queuePluginLaunch } from './plugin-launch'
+import { notify } from './notify'
+import { playNotification, unlockAudio } from './notification-sound'
 import { SessionTree } from './SessionTree'
 import { SessionQuickOpen } from './SessionQuickOpen'
 import { runSessionMenuPluginAction, useSessionMenuPlugins } from './session-menu-plugins'
@@ -136,7 +138,6 @@ function useNotifications(activeId, onSessionId, canBindSessionId, onScreenTarge
   const onScreenRef = useLatest(onScreenTargets)
   const windowState = useRef({ focused: true, visible: true })
   const readTimer = useRef(null)
-  const audio = useRef(null)
 
   const commitTerminalStates = useCallback((next) => {
     terminalStatesRef.current = next
@@ -242,38 +243,6 @@ function useNotifications(activeId, onSessionId, canBindSessionId, onScreenTarge
     [activeRef, onScreenRef, readTargets]
   )
 
-  const audioContext = () => {
-    if (audio.current) return audio.current
-    const AudioContext = window.AudioContext || window.webkitAudioContext
-    if (AudioContext) audio.current = new AudioContext()
-    return audio.current
-  }
-  const playCompleted = useCallback(async () => {
-    const context = audioContext()
-    if (!context) return
-    if (context.state === 'suspended') await context.resume()
-    if (context.state !== 'running') return
-    const start = context.currentTime + 0.015
-    for (const tone of [
-      { frequency: 659.25, offset: 0, duration: 0.11, volume: 0.055 },
-      { frequency: 880, offset: 0.1, duration: 0.16, volume: 0.06 }
-    ]) {
-      const from = start + tone.offset
-      const to = from + tone.duration
-      const oscillator = context.createOscillator()
-      const gain = context.createGain()
-      oscillator.type = 'sine'
-      oscillator.frequency.setValueAtTime(tone.frequency, from)
-      gain.gain.setValueAtTime(0.0001, from)
-      gain.gain.exponentialRampToValueAtTime(tone.volume, from + 0.018)
-      gain.gain.exponentialRampToValueAtTime(0.0001, to)
-      oscillator.connect(gain)
-      gain.connect(context.destination)
-      oscillator.start(from)
-      oscillator.stop(to + 0.01)
-    }
-  }, [])
-
   useEffect(() => {
     const offNotify = window.mica.notify.onChanged((payload) => {
       if (payload?.type === 'cleared' && payload.terminalId) {
@@ -289,7 +258,9 @@ function useNotifications(activeId, onSessionId, canBindSessionId, onScreenTarge
             sessionRef.current(nodeId, state.sessionId)
         }
         if (payload.type === 'event' && state.lastType === 'turn.completed') {
-          playCompleted().catch((error) => console.warn('play notification sound failed', error))
+          playNotification('completed').catch((error) =>
+            console.warn('play notification sound failed', error)
+          )
         }
         // 这条 PTY 就在屏幕上（面板开着、就是当前标签）、窗口在前台：看得见的结果不再挂未读
         if (
@@ -324,8 +295,7 @@ function useNotifications(activeId, onSessionId, canBindSessionId, onScreenTarge
       markActiveRead('window-focus')
     }
     const unlock = () => {
-      const context = audioContext()
-      if (context?.state === 'suspended') context.resume().catch(() => {})
+      unlockAudio()
     }
     document.addEventListener('visibilitychange', visibility)
     window.addEventListener('focus', focus)
@@ -346,7 +316,6 @@ function useNotifications(activeId, onSessionId, canBindSessionId, onScreenTarge
     markActiveRead,
     markRead,
     onScreenRef,
-    playCompleted,
     sessionRef,
     sync
   ])
@@ -356,6 +325,29 @@ function useNotifications(activeId, onSessionId, canBindSessionId, onScreenTarge
     if (activeState?.unread) markRead(activeId, 'activate')
   }, [activeId, activeState?.lastEventAt, activeState?.unread, markRead])
   return { states, markRead }
+}
+
+/**
+ * 有道题在等用户选的时候响一声。
+ *
+ * 卡片只画在持有这条 run 的会话页里，而用户可能正待在别的会话、或整个窗口已经在后台：
+ * 没有声音就只能靠侧栏那枚圆点，一坐半小时没人答很常见。按 `ask.id` 去重——宿主重推
+ * 同一道题（换页签、重新附着）不该再响一次。
+ */
+function useAskChime() {
+  const lastId = useRef('')
+  useEffect(() => {
+    return window.mica.chat?.onAsk?.((payload) => {
+      const ask = payload?.ask
+      if (!ask?.id) {
+        lastId.current = ''
+        return
+      }
+      if (ask.id === lastId.current) return
+      lastId.current = ask.id
+      playNotification('ask').catch((error) => console.warn('play ask sound failed', error))
+    })
+  }, [])
 }
 
 const DEFAULT_SIDEBAR_WIDTH = 260
@@ -676,21 +668,19 @@ export default function App() {
   // 切目录的进行中/失败状态只服务于选择框：失败时窗口不关，就地显示原因。
   const [cwdSwitching, setCwdSwitching] = useState(false)
   const [cwdSwitchError, setCwdSwitchError] = useState('')
-  // 轻提示：侧栏 / 对话菜单这类没有对话流的地方（分享链接已在剪贴板、复制失败…）
-  // 用底部居中一行提示，不弹窗、不挡内容（见 showToast）。
-  const [toast, setToast] = useState(null)
-  const toastTimer = useRef(null)
   useEffect(() => {
     if (!isMobile) setSessionsOpen(false)
   }, [isMobile])
   const closeMobileDrawer = useCallback(() => setSessionsOpen(false), [])
 
-  /** 底部居中的一行轻提示，自动消失；错误留久一点。 */
+  /**
+   * 侧栏 / 对话菜单这类没有对话流的地方（分享链接已在剪贴板、复制失败…）的轻提示：
+   * 和插件、重载提示共用窗口顶部那条通知队列（见 `notify.js`），同一个 key 原地替换，
+   * 不在窗口底部另写一条浮层。
+   */
   const showToast = useCallback((text, error = false) => {
     if (!text) return
-    clearTimeout(toastTimer.current)
-    setToast({ text, error })
-    toastTimer.current = setTimeout(() => setToast(null), error ? 4000 : 1800)
+    notify({ key: 'app-toast', text, level: error ? 'error' : 'info', timeout: error ? 4000 : 1800 })
   }, [])
 
   const promptResolver = useRef(null)
@@ -1145,6 +1135,7 @@ export default function App() {
     canBindSessionId,
     terminalVisible && rightActiveTerm ? [rightActiveTerm] : []
   )
+  useAskChime()
   // 终端是否空闲只用于「重开之前先看一眼」，走 ref 读取：进 deps 会让前台进程一
   // 结束就立刻重开终端，把用户刚跑完的那条命令的输出吞掉。
   const notificationStatesRef = useLatest(notifications.states)
@@ -3178,18 +3169,6 @@ export default function App() {
       )}
       {/* 插件的整页视图：与配置页同一层，盖住整个窗口，左上角返回对话。 */}
       {pluginPage && <PluginPage entry={pluginPage} onClose={closePluginPage} />}
-      {toast && (
-        <div
-          role="status"
-          className={`no-drag pointer-events-none fixed bottom-12 left-1/2 z-[12000] max-w-[min(560px,calc(100vw-32px))] -translate-x-1/2 truncate rounded-sm border px-3 py-1.5 text-xs shadow-2xl ${
-            toast.error
-              ? 'border-danger/40 bg-panel text-danger'
-              : 'border-line bg-panel text-fg-strong'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
     </>
   )
 }

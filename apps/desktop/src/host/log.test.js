@@ -21,6 +21,9 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  // 队列里可能还压着没落盘的条目。先按当前的临时目录写下去：否则 2s 后的定时器会在
+  // 环境变量恢复之后把它们写进真实日志目录，每跑一次测试就污染一份诊断数据。
+  flushLogs()
   if (originalLogDir === undefined) delete process.env.MICA_LOG_DIR
   else process.env.MICA_LOG_DIR = originalLogDir
   rmSync(dir, { recursive: true, force: true })

@@ -523,6 +523,10 @@ function readDesktopPage(
  *
  * 每项必须有文案与动作 id——只给文案的菜单项点了没反应，只给 id 的在菜单上看不出来，
  * 两种都是清单错误。动作 id 在同一插件里必须唯一，否则两个菜单项会跑到同一个分支。
+ *
+ * `position` 决定这一行摆在哪：`top` 是菜单最上方，省略（或 `bottom`）排在宿主自己的项
+ * 之后、删除之前。只认这两个值，写别的一律当清单错误——静默落到默认位置会让插件作者
+ * 以为它生效了。
  */
 function readSessionMenu(input: unknown): { ok: true; value: PluginSessionMenuItem[] } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: [] };
@@ -537,7 +541,15 @@ function readSessionMenu(input: unknown): { ok: true; value: PluginSessionMenuIt
     if (items.some((item) => item.action === action)) {
       return { ok: false, error: `desktop.sessionMenu 有重复的 action：${action}` };
     }
-    items.push({ label, action });
+    let position: 'top' | 'bottom' | undefined;
+    if (entry.position !== undefined) {
+      const value = readString(entry.position)?.trim();
+      if (value !== 'top' && value !== 'bottom') {
+        return { ok: false, error: `desktop.sessionMenu「${label}」的 position 只能是 top 或 bottom` };
+      }
+      position = value;
+    }
+    items.push(position ? { label, action, position } : { label, action });
   }
   return { ok: true, value: items };
 }

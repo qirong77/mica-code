@@ -18,7 +18,7 @@ import { homedir } from 'os'
 import { basename, join } from 'path'
 import { resolveMicaExecutable } from './mica-cli'
 import { logger } from './log'
-import { readTopLevelCwd, readTopLevelResumeAfter } from './session-file-head'
+import { readTopLevelCwd } from './session-file-head'
 import { createSessionReader, filterCurrentThinking } from './session-reader'
 import { readTodoCheckpointInput } from './todo-checkpoint'
 import { isDirectory, resolveUsableCwd } from './cwd-utils'
@@ -835,8 +835,7 @@ function sendTurnStart(run, payload) {
     model: payload.model,
     variant: payload.variant,
     role: payload.role,
-    clientMessageId: payload.clientMessageId,
-    resume: payload.resume === true
+    clientMessageId: payload.clientMessageId
   })
   return sendCodexRequest(run, 'turn/start', params)
 }
@@ -1120,26 +1119,30 @@ function spawnChatHost(id, sender, payload) {
     if (runs.get(id) !== run) return
     runs.delete(id)
     queuedRuns.clear(id)
+    // 主动中止（用户点停 / 回收进程）不是异常，日志与通知共用这一个口径。
+    const aborted = run.aborting || signal === 'SIGTERM' || signal === 'SIGINT'
+    // 异常退出的现场只留在内存里的 run.stderr 上，进程一走（崩溃、被 OOM 杀、宿主
+    // 自己 exit）就彻底没了。这里补一条落盘记录，事后能回答「它为什么死的」。
+    //
+    // 这条不能跟着下面的 `exitSent` 走：一轮跑完后 `exitSent` 就置 true 了，而宿主
+    // 空闲时 RSS 正处在峰值，被 OOM 杀掉恰恰发生在这一段。
+    if (!aborted) {
+      logger('host').warn('host.exit', {
+        nodeId: id,
+        sessionId: run.sessionId || run.requestedSessionId || undefined,
+        exitCode,
+        signal,
+        running: run.running === true,
+        stderr: run.stderr.trim().slice(-2000) || undefined
+      })
+    }
     if (!run.exitSent) {
       const extra =
         run.sessionId || run.requestedSessionId
           ? { sessionId: run.sessionId || run.requestedSessionId }
           : {}
-      const aborted = run.aborting || signal === 'SIGTERM' || signal === 'SIGINT'
       // stderr 常常在 close 之后才到，退而求其次用退出码，别让错误只剩一句「已退出」。
       const failure = run.stderr.trim() || `mica 进程已退出（code ${exitCode ?? 'null'}）`
-      // 异常退出的现场只留在内存里的 run.stderr 上，进程一走（崩溃、被 OOM 杀、宿主
-      // 自己 exit）就彻底没了。这里补一条落盘记录，事后能回答「它为什么死的」。
-      if (!aborted) {
-        logger('host').warn('host.exit', {
-          nodeId: id,
-          sessionId: run.sessionId || run.requestedSessionId || undefined,
-          exitCode,
-          signal,
-          running: run.running === true,
-          stderr: run.stderr.trim().slice(-2000) || undefined
-        })
-      }
       // host 在应答 turn/start 之前就退出（启动参数被拒绝、进程崩了）：这一轮从未跑过，
       // 撤回乐观气泡，别让用户以为消息已发送、历史里却查不到。
       let rejected = false
@@ -1681,18 +1684,13 @@ function idleReapMs() {
  * 每个宿主自己会上报一条（`--session` 就是它的会话 id），这里补上父进程视角的分布。
  */
 export function describeChatHosts() {
-  let busy = 0
-  for (const run of runs.values()) {
-    if (run.running) busy += 1
-  }
-  return { hosts: runs.size, busy }
+  // 与 `countBusyChatHosts` 同一口径：压缩 / 中止中的宿主也在占内存，只数 `running`
+  // 会让采样里的 busy 偏低，而那样本恰恰最需要解释。
+  return { hosts: runs.size, busy: countBusyChatHosts() }
 }
 
 /**
  * 有没有宿主正在干活（跑一轮 / 压缩 / 中止中）。
- *
- * 构建后重载要靠它决定「现在能不能动」：跑到一半的那一轮换掉进程，模型会重跑已经
- * 执行过的工具，`git push`、删文件这类是不可逆的。
  */
 export function countBusyChatHosts() {
   let busy = 0
@@ -1700,146 +1698,6 @@ export function countBusyChatHosts() {
     if (run.running || run.maintenance || run.aborting) busy += 1
   }
   return busy
-}
-
-/**
- * 换掉会话宿主进程，让下一次发送用上新编出来的 CLI（插件、工具都在那个二进制里）。
- *
- * 只回收闲着的那几个：等不到空闲就把实际情况交回调用方，由它决定是继续等还是让人
- * 手动确认，绝不在这里硬杀——中断一轮的代价是不可逆的工具重跑。
- */
-export async function recycleChatHosts({ timeoutMs = 0, pollMs = 200 } = {}) {
-  const deadline = Date.now() + timeoutMs
-  while (countBusyChatHosts() > 0 && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, pollMs))
-  }
-  const recycled = []
-  for (const [id, run] of [...runs.entries()]) {
-    if (run.running || run.maintenance || run.aborting) continue
-    disposeHost(id)
-    completedRuns.delete(id)
-    recycled.push(id)
-  }
-  return { recycled, busy: countBusyChatHosts() }
-}
-
-/**
- * 开发构建重载前的软停：先请每一轮在下一次模型请求之前停下，等不到就在预算用尽后
- * 中断，最后把所有宿主收掉。
- *
- * 两步的分工是有意的：
- * - 软停落在「上一批工具已经落定、下一次请求还没发」的边界上，历史是完整的，新宿主
- *   直接接着跑，不会重做任何工具调用；
- * - 到期仍未停下（模型还在吐字 / 工具还在跑）就中断。此时这一批工具会被记成
- *   interrupted，续跑时模型会重跑它们——所以只在预算真的用尽时才走到这一步。
- *
- * 两条路都会在会话文件里留下 `resumeAfter: 'build-reload'`，回收之后 `resumeChatHosts`
- * 据此把没跑完的会话接着跑起来。
- */
-export async function drainChatHosts({ deadlineMs = 15_000, pollMs = 100 } = {}) {
-  const targets = []
-  for (const [id, run] of runs.entries()) {
-    if (!run.child) continue
-    if (!run.running && !run.maintenance && !run.aborting) continue
-    targets.push({ id, run })
-  }
-  const softStopIds = []
-  for (const { run } of targets) {
-    // 只置标志、立刻回包：它在请求循环里不能等，否则预算用尽时连中断都发不进去。
-    const response = await hostTaskRequest(run, 'mica/host/drain', {}, { timeoutMs: 3_000 })
-    if (response?.ok) softStopIds.push(run.sessionId || run.requestedSessionId || '')
-  }
-  const deadline = Date.now() + deadlineMs
-  while (Date.now() < deadline) {
-    if (!targets.some(({ run }) => run.running || run.maintenance || run.aborting)) break
-    await new Promise((resolve) => setTimeout(resolve, pollMs))
-  }
-  const forced = []
-  for (const { id, run } of targets) {
-    if (!run.running && !run.maintenance && !run.aborting) continue
-    forced.push(id)
-    await abortRun(id)
-  }
-  // 中断是异步收尾的：等到 turn 真的结束再杀进程，否则最后那次 checkpoint 写不完。
-  const killDeadline = Date.now() + 3_000
-  while (Date.now() < killDeadline) {
-    if (!targets.some(({ run }) => run.running || run.aborting)) break
-    await new Promise((resolve) => setTimeout(resolve, pollMs))
-  }
-  const recycled = []
-  for (const [id, run] of [...runs.entries()]) {
-    if (!run.child) continue
-    disposeHost(id)
-    completedRuns.delete(id)
-    recycled.push(id)
-  }
-  return { recycled, forced, softStopIds }
-}
-
-/**
- * 把被上一步停下来的会话接着跑起来。
- *
- * 只续跑盘上明确写着 `resumeAfter: 'build-reload'` 的会话——用户自己按停止的那些没
- * 有这一行，重启后不会自己跑起来。续跑的那一轮不追加用户消息（`resume: true`），
- * 模型看到的还是它自己上一次请求的上下文。
- */
-export function resumeChatHosts(entries = []) {
-  const resumed = []
-  for (const entry of entries) {
-    const sessionId = typeof entry?.sessionId === 'string' ? entry.sessionId : ''
-    const nodeId = typeof entry?.nodeId === 'string' && entry.nodeId ? entry.nodeId : ''
-    if (!sessionId || !nodeId) continue
-    if (sessionBusyElsewhere(sessionId)) continue
-    const existing = runs.get(nodeId)
-    if (existing?.child) {
-      // 同一个节点已经有活着的宿主（用户刚发过消息）：它在跑就不再起第二个。
-      if (existing.running) continue
-      existing.running = true
-      if (
-        sendTurnStart(existing, { sessionId, cwd: entry.cwd || null, prompt: '', resume: true })
-      ) {
-        resumed.push({ nodeId, sessionId })
-      } else {
-        existing.running = false
-      }
-      continue
-    }
-    const sender = fallbackChatSender()
-    const spawned = spawnChatHost(nodeId, sender, { sessionId, cwd: entry.cwd || null, prompt: '' })
-    if (!spawned.ok) continue
-    const run = runs.get(nodeId)
-    if (!run) continue
-    run.running = true
-    if (!sendTurnStart(run, { sessionId, cwd: entry.cwd || null, prompt: '', resume: true })) {
-      disposeHost(nodeId)
-      continue
-    }
-    resumed.push({ nodeId, sessionId })
-  }
-  return resumed
-}
-
-/**
- * 从工作区节点里挑出「上一轮被宿主换进程停下、还没跑完」的会话。
- *
- * 只读会话文件的头部：`resumeAfter` 写在顶层（`snapshot` 之前），不需要为几个会话
- * 整份解析一个 50MB 的 JSON。
- */
-export function collectPendingResumes(nodes = []) {
-  const pending = []
-  for (const node of nodes) {
-    const sessionId = typeof node?.sessionId === 'string' ? node.sessionId.trim() : ''
-    if (!sessionId) continue
-    const file = sessionFile(sessionId)
-    if (!file) continue
-    if (readTopLevelResumeAfter(file) !== 'build-reload') continue
-    pending.push({
-      nodeId: typeof node.id === 'string' ? node.id : '',
-      sessionId,
-      cwd: typeof node.cwd === 'string' && node.cwd ? node.cwd : null
-    })
-  }
-  return pending
 }
 
 /**
@@ -2485,7 +2343,21 @@ export function registerChatIpc() {
       if (cached && Date.now() - cached.at < PANEL_VIEW_REUSE_MS) return cached.promise
       const promise = requestPanelView(event, payload, id, pluginId)
       prunePanelViewCache()
-      panelViewCache.set(key, { at: Date.now(), promise })
+      const entry = { at: Date.now(), promise }
+      panelViewCache.set(key, entry)
+      // 失败不进缓存，否则一次超时会被放大成 3 秒内所有消费者一起失败；有效期改从结果
+      // 返回起算，慢请求完成时本来也该让下一个消费者自己再问一次。
+      // `requestPanelView` 有一条同步返回的失败路径（没起成宿主），所以统一包一层。
+      void Promise.resolve(promise).then(
+        (result) => {
+          if (panelViewCache.get(key) !== entry) return
+          if (result?.ok === false) panelViewCache.delete(key)
+          else entry.at = Date.now()
+        },
+        () => {
+          if (panelViewCache.get(key) === entry) panelViewCache.delete(key)
+        }
+      )
       return promise
     }
     panelViewCache.clear()
@@ -2939,7 +2811,7 @@ function normalizeAsk(raw) {
     meta: rawDisplay.meta !== false,
     detail: rawDisplay.detail !== false,
     options: rawDisplay.options !== false,
-    input: rawDisplay.input === true,
+    input: rawDisplay.input !== false,
     confirm: rawDisplay.confirm === true,
     hint: rawDisplay.hint !== false,
     dismiss: rawDisplay.dismiss !== false
@@ -2951,7 +2823,7 @@ function normalizeAsk(raw) {
     ...(typeof raw.detail === 'string' ? { detail: raw.detail } : {}),
     options,
     multiple: raw.multiple === true,
-    allowCustom: raw.allowCustom === true,
+    allowCustom: raw.allowCustom !== false,
     presentation: raw.presentation === 'modal' ? 'modal' : 'dock',
     display,
     passive: raw.passive === true

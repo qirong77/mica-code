@@ -25,6 +25,11 @@ export type PluginSessionMenuItem = {
    * 同一个插件里必须唯一——重复的 id 会让两个菜单项做同一件事。
    */
   action: string;
+  /**
+   * 放在菜单的哪一头。`top` 是菜单最上面（与这个会话本身最相关的动作），
+   * 省略或 `bottom` 是宿主自己的项之后、删除之前——默认位置。
+   */
+  position?: 'top' | 'bottom';
 };
 
 /** 动作入参。 */

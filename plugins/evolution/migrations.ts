@@ -102,4 +102,47 @@ export const sessionCompactRename: Migration = {
   },
 };
 
-export const MIGRATIONS: Migration[] = [usageOccurredAt, sessionCompactRename];
+/**
+ * 删掉会话里存着的 provider 原始 usage（`rawUsage`）。
+ *
+ * 有些聚合网关会在 `usage` 里回传**逐条消息**的 token 归因（`attribution.items`，实测
+ * 一份 1085 条、单条 200KB）。早先的版本把它原样写进会话，于是会话文件里 22% 是这份
+ * 没有人读的数据：界面与统计读的是记录自身的 `inputTokens` / `outputTokens` /
+ * `cachedInputTokens` / `totalTokens`，全仓没有任何代码读 `rawUsage`。
+ *
+ * 代价不只是磁盘：每次打开会话要整份 `JSON.parse`、每个 checkpoint 要整份
+ * `JSON.stringify`、`chat:history` 要过一遍 IPC——那个 153MB 的会话，每次都扛着 74MB
+ * 无人读取的账单。provider 侧已经不再写入，这里把存量一次清干净。
+ *
+ * 三处形状：主对话与「上一条用量」直接挂在记录上；子代理是「一个任务一条」，逐次请求在
+ * `requests[]` 里。
+ */
+export const dropRawUsage: Migration = {
+  id: 'drop-raw-usage',
+  description: '删掉会话里无人读取的 provider 原始 usage（逐条 token 归因，单条可达 200KB）',
+  apply(document) {
+    const snapshot = document.snapshot;
+    if (!isRecord(snapshot)) return 0;
+    let changed = 0;
+    const strip = (record: unknown) => {
+      if (!isRecord(record)) return;
+      if (!('rawUsage' in record)) return;
+      delete record.rawUsage;
+      changed += 1;
+    };
+    if (Array.isArray(snapshot.usageHistory)) {
+      for (const record of snapshot.usageHistory) strip(record);
+    }
+    if (Array.isArray(snapshot.subagentUsageHistory)) {
+      for (const record of snapshot.subagentUsageHistory) {
+        if (isRecord(record) && Array.isArray(record.requests)) {
+          for (const request of record.requests) strip(request);
+        }
+      }
+    }
+    strip(snapshot.lastUsage);
+    return changed;
+  },
+};
+
+export const MIGRATIONS: Migration[] = [usageOccurredAt, sessionCompactRename, dropRawUsage];

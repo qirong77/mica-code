@@ -33,7 +33,14 @@ const PATCH_SHAPE_HINT = [
 type PatchOperation =
   | { type: 'add'; path: string; lines: string[] }
   | { type: 'delete'; path: string }
-  | { type: 'update'; path: string; moveTo?: string; hunks: PatchHunk[] };
+  | {
+      type: 'update';
+      path: string;
+      moveTo?: string;
+      hunks: PatchHunk[];
+      /** 只有上下文、没有 +/- 的 hunk 的行号：被跳过，但要在结果里说明。 */
+      skippedHunks?: number[];
+    };
 
 type PatchHunk = {
   header: string;
@@ -90,7 +97,7 @@ export class ToolApplyPatch extends MicaTool {
       await rm(filePath, { force: true });
     }
 
-    return formatSummary(changes);
+    return formatSummary(changes, operations);
   }
 
   onToolUseDisplayText(input: Record<string, unknown>): string {
@@ -289,6 +296,7 @@ function parsePatch(patch: string): PatchOperation[] {
       index++;
       let moveTo: string | undefined;
       const hunks: PatchHunk[] = [];
+      const skippedHunks: number[] = [];
 
       while (index < lines.length && !isOperationBoundary(lines[index]!)) {
         const updateLine = lines[index]!;
@@ -300,7 +308,10 @@ function parsePatch(patch: string): PatchOperation[] {
 
         if (updateLine.startsWith('@@')) {
           const parsed = parseHunk(lines, index);
-          hunks.push(parsed.hunk);
+          // 纯上下文的 hunk 是 no-op，不是错误。模型常把它当锚点写在真正改动的前后，
+          // 整份拒绝会让本来正确的改动白丢一次往返（真实数据里这类失败 300+ 次）。
+          if (parsed.hunk) hunks.push(parsed.hunk);
+          else skippedHunks.push(index + 1);
           index = parsed.nextIndex;
           continue;
         }
@@ -309,9 +320,24 @@ function parsePatch(patch: string): PatchOperation[] {
       }
 
       if (!moveTo && hunks.length === 0) {
+        // 整份 patch 都是上下文：这是真的没改任何东西，必须报错而不是静默成功。
+        if (skippedHunks.length > 0)
+          throw new Error(
+            [
+              `Update File ${path}：第 ${skippedHunks.join('、')} 行的 hunk 只有上下文行，没有任何 + / - 改动。`,
+              PATCH_SHAPE_HINT,
+              '这份 patch 里没有一处真正的增删，所以什么都没写；把要改的那几行写成 -/+ 对再提交。',
+            ].join('\n'),
+          );
         throw new Error(`Update File ${path} 缺少 hunk 或 Move to`);
       }
-      operations.push({ type: 'update', path, moveTo, hunks });
+      operations.push({
+        type: 'update',
+        path,
+        moveTo,
+        hunks,
+        ...(skippedHunks.length > 0 ? { skippedHunks } : {}),
+      });
       continue;
     }
 
@@ -332,7 +358,11 @@ function parsePath(line: string, prefix: string, index: number): string {
   return path;
 }
 
-function parseHunk(lines: string[], startIndex: number): { hunk: PatchHunk; nextIndex: number } {
+/**
+ * 解析一个 hunk。只有上下文行的 hunk 返回 `hunk: null`——它是 no-op，由调用方决定跳过，
+ * 而不是在这里直接判整份 patch 失败。
+ */
+function parseHunk(lines: string[], startIndex: number): { hunk: PatchHunk | null; nextIndex: number } {
   const header = lines[startIndex]!;
   const hunkLines: HunkLine[] = [];
   let hasEdit = false;
@@ -371,16 +401,7 @@ function parseHunk(lines: string[], startIndex: number): { hunk: PatchHunk; next
       ].join('\n'),
     );
   }
-  if (!hasEdit) {
-    throw new Error(
-      [
-        `第 ${startIndex + 1} 行的 hunk 没有任何增删内容：以空格开头的纯上下文行不算修改。`,
-        PATCH_SHAPE_HINT,
-        '每个 hunk 至少要有一行以 - 或 + 开头；整段重写时写一行 - 旧内容 和一行 + 新内容。',
-        '下一步：先用 read_file 读原文，确认要删的那几行（- 后面照抄原文）和要换上的新内容（+ 后面写新内容）。',
-      ].join('\n'),
-    );
-  }
+  if (!hasEdit) return { hunk: null, nextIndex: index };
   return { hunk: { header, lines: hunkLines }, nextIndex: index };
 }
 
@@ -590,7 +611,7 @@ function findLineIncludes(lines: string[], text: string, startIndex: number): nu
   return matches;
 }
 
-function formatSummary(changes: AppliedChange[]): string {
+function formatSummary(changes: AppliedChange[], operations: PatchOperation[] = []): string {
   const counts = changes.reduce(
     (acc, change) => {
       acc[change.type]++;
@@ -615,7 +636,14 @@ function formatSummary(changes: AppliedChange[]): string {
   });
   if (changes.length > MAX_SUMMARY_CHANGES) details.push(`- ... 另有 ${changes.length - MAX_SUMMARY_CHANGES} 项`);
 
-  return [header, ...details].join('\n');
+  // 被跳过的 no-op hunk 必须说出来：模型以为那几行改了，实际没改。
+  const skipped = operations.flatMap((operation) =>
+    operation.type === 'update' && operation.skippedHunks
+      ? operation.skippedHunks.map((line) => `- ${operation.path} 第 ${line} 行的 hunk 只有上下文、没有 +/-，已跳过`)
+      : [],
+  );
+
+  return [header, ...details, ...skipped].join('\n');
 }
 
 function isNotFoundError(error: unknown): boolean {

@@ -1,5 +1,5 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
-import { AgentPausedError, micaAgent } from '@packages/mica-agent/index.js';
+import { micaAgent } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import { micaRuntime, type MessageQueueService, type RuntimeInput } from '@packages/mica-runtime/index.js';
@@ -136,17 +136,6 @@ export class HeadlessTurnExecutor {
    */
   private idleTask: Promise<unknown> | null = null;
   private starting = false;
-  /**
-   * 宿主请求在迭代边界停下来（`mica/host/drain`）。只在两次请求之间生效：
-   * 正在等模型或正在跑工具时它只是挂在那里，由发起方在预算用尽后 abort。
-   */
-  private pauseRequested = false;
-  /**
-   * 这次停是宿主（开发构建重载）要换进程，不是用户按停止。决定中断后要不要在
-   * 会话文件里留下「下次宿主接着跑」。
-   */
-  private draining = false;
-
   constructor(options: HeadlessTurnExecutorOptions) {
     this.options = options;
     options.sessionController.setTodoPersistenceEnabled?.(options.save !== false);
@@ -160,18 +149,6 @@ export class HeadlessTurnExecutor {
 
   get pendingInputs(): RuntimeInput[] {
     return this.queue.list();
-  }
-
-  /**
-   * 请这一轮在下一个迭代边界停下来（两次模型请求之间）。
-   *
-   * 返回后并不代表已经停了：正在等模型或正在跑工具时，停下来要等手上这批结束。
-   * 调用方按自己的预算等 `isBusy` 变 false，等不到就 `abort()` —— 那时工具结果
-   * 由历史修补补成 `interrupted`，重启后模型会重跑那一批。
-   */
-  requestPause(): void {
-    this.draining = true;
-    this.pauseRequested = true;
   }
 
   /**
@@ -412,8 +389,6 @@ export class HeadlessTurnExecutor {
     const startedAt = Date.now();
     this.responseBuffer = '';
     this.committedResponseBuffer = '';
-    this.pauseRequested = false;
-    this.draining = false;
     let content: AgentQueryContent;
     try {
       content =
@@ -431,7 +406,7 @@ export class HeadlessTurnExecutor {
     // 会话记录里看不到「这一轮是为什么跑起来的」。`displayText` 优先——插件可以给一句
     // 短标题，而真正发给模型的提示词可能很长。
     const inFlightUser: InFlightUserMessage | undefined =
-      input.source === 'system' || input.resume === true
+      input.source === 'system'
         ? undefined
         : { message: { role: 'user', content: displayUserContent(input, content) }, rawContent: content };
     try {
@@ -492,8 +467,6 @@ export class HeadlessTurnExecutor {
             runResult = await agent.run(runContent, {
               reservedRunId: attemptRunId,
               maxTurns: this.options.maxTurns,
-              shouldPause: () => this.pauseRequested,
-              resume: input.resume === true,
               onIterationComplete: () => {
                 this.saveCurrent({ allowEmpty: true, turnState: 'running' });
                 // The iteration that just completed pushed its text (and tool
@@ -515,8 +488,6 @@ export class HeadlessTurnExecutor {
             // An abort that lands between reserveRunId() and the agent.run()
             // check is surfaced as an AgentAbortError here; never retry it.
             if (error instanceof AgentAbortError) throw error;
-            // 迭代边界上的软停不是失败，重试一次只会又停在同一处。
-            if (error instanceof AgentPausedError) throw error;
             if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
             if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= maxRetries) {
               throw error;
@@ -575,15 +546,6 @@ export class HeadlessTurnExecutor {
         agent.events.off('textRollback', rollback);
       }
     } catch (error) {
-      if (error instanceof AgentPausedError) {
-        // 迭代边界上的软停：历史尾部是完整的（工具结果已提交），因此不走
-        // preserveAbortedTurn——那会把这一轮的提问再追加一遍。留下 resumeAfter，
-        // 新宿主起来后不带用户消息地续跑。
-        this.saveCurrent({ turnState: 'aborted', resumeAfter: 'build-reload' }, inFlightUser);
-        if (this.options.hooks) await this.emitTurnAfter(input, 'aborted', Date.now() - startedAt, false);
-        onEvent({ type: 'turn:finish', input, status: 'aborted', elapsedMs: Date.now() - startedAt });
-        return 'aborted';
-      }
       if (error instanceof AgentAbortError) {
         if (this.options.hooks) {
           await this.options.hooks.emit('turn:abort', { runtime: this.options.host, input, content, error });
@@ -592,9 +554,7 @@ export class HeadlessTurnExecutor {
           runContentOr(input),
           uncommittedResponseText(this.responseBuffer, this.committedResponseBuffer) || undefined,
         );
-        // 用户自己按下停止时不写 resumeAfter，下次宿主要是自动续跑就成了「停了还自己
-        // 跑起来」；而宿主为换进程（构建重载）中断的必须写，否则那一轮就断在半路。
-        this.saveCurrent({ turnState: 'aborted', resumeAfter: this.draining ? 'build-reload' : null }, inFlightUser);
+        this.saveCurrent({ turnState: 'aborted' }, inFlightUser);
         if (this.options.hooks) await this.emitTurnAfter(input, 'aborted', Date.now() - startedAt, false);
         onEvent({ type: 'turn:finish', input, status: 'aborted', elapsedMs: Date.now() - startedAt });
         return 'aborted';
@@ -686,7 +646,6 @@ export class HeadlessTurnExecutor {
     options: {
       allowEmpty?: boolean;
       turnState: 'running' | 'completed' | 'aborted' | 'error';
-      resumeAfter?: 'build-reload' | null;
     },
     inFlightUser?: InFlightUserMessage,
   ): void {

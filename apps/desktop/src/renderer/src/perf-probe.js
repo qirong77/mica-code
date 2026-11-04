@@ -34,10 +34,11 @@ function domStats(doc) {
     if (node.closest('.hidden') || node.closest('[hidden]')) continue
     visibleRows += node.children.length
   }
-  const rows = transcripts.length === 1 ? transcripts[0].children.length : visibleRows
   return {
     dom: doc.getElementsByTagName('*').length,
-    rows
+    // 只剩一个实例时也要走同一判断：切到设置 / Performance 页时那个对话是隐藏的，
+    // 按实例数走快捷分支会把它的行数当成「当前会话多长」。
+    rows: visibleRows
   }
 }
 
@@ -112,10 +113,16 @@ export function startPerfProbe(win, doc) {
     // 均值被拉负、分位数失真。提前触发就是「没有延迟」，下限取 0。
     const lag = visible ? Math.max(0, now - lastAt - SAMPLE_MS) : null
     lastAt = now
+    // sid 每秒都读：一次 querySelector，比每 5 秒一次的 getElementsByTagName('*') 便宜。
+    // 切会话时立刻重量 DOM，否则切换后的几个采样会把上一条会话的规模记到新会话名下。
+    const currentSid = activeSessionId(doc)
+    if (currentSid !== sid) {
+      sid = currentSid
+      domTick = DOM_STATS_EVERY
+    }
     // 只在需要时量 DOM，其余采样复用上次结果
     if (domTick >= DOM_STATS_EVERY) {
       domStatsCache = domStats(doc)
-      sid = activeSessionId(doc)
       domTick = 0
     }
     domTick += 1

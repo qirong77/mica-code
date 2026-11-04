@@ -14,7 +14,6 @@ import {
   type PersistedRuntimeSnapshot,
   type PersistedSession,
   type PersistedSnapshotDisplayUsage,
-  type PersistedSessionResumeAfter,
   type PersistedSessionTurnState,
   type SessionStoreLike,
   type SessionSummary,
@@ -69,8 +68,6 @@ export class SessionController {
   private currentTitleOverride: string | null = null;
   private currentTitleSource: 'derived' | 'auto' | 'manual' = 'derived';
   private currentTurnState: PersistedSessionTurnState = 'completed';
-  /** 下次宿主要不要接续这一轮，见 `PersistedSessionResumeAfter`。 */
-  private currentResumeAfter: PersistedSessionResumeAfter | null = null;
   /** 这条会话正在等用户做一个选择（插件的 `ctx.ask`）；答案回来即清。 */
   private currentAwaitingInput: string | null = null;
   /** 这条会话派生自哪条会话；resume 时从文件读回来，新会话由调用方给。 */
@@ -172,7 +169,6 @@ export class SessionController {
     this.currentTitleOverride = null;
     this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
-    this.currentResumeAfter = null;
     this.currentAwaitingInput = null;
     this.currentPersistedSignature = null;
     this.recoveredActiveThinkingSignature = null;
@@ -199,8 +195,6 @@ export class SessionController {
     options: {
       allowEmpty?: boolean;
       turnState?: PersistedSessionTurnState;
-      /** 见 `PersistedSessionResumeAfter`；只有被宿主主动暂停的那个分支会传。 */
-      resumeAfter?: PersistedSessionResumeAfter | null;
       /** 「在等你选」那句话；不传就沿用内存里那份（清理由 `setAwaitingInput(null)` 负责）。 */
       awaitingInput?: string | null;
       preserveTitle?: boolean;
@@ -212,10 +206,6 @@ export class SessionController {
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = options.conversationMessages ?? getPersistableConversationMessages(this.agent);
     this.currentTurnState = options.turnState ?? this.currentTurnState;
-    // 「下次宿主要不要接着跑」只在两个地方判定：宿主主动暂停时写、这一轮真正结束时清。
-    // 别的保存路径不碰它，否则一次中途 checkpoint 就能把待续跑标记抹掉。
-    if (options.resumeAfter !== undefined) this.currentResumeAfter = options.resumeAfter ?? null;
-    else if (this.currentTurnState === 'completed' || this.currentTurnState === 'error') this.currentResumeAfter = null;
     if (options.awaitingInput !== undefined) this.currentAwaitingInput = options.awaitingInput;
     // 轮次真的结束了就不该还挂着「等你选」：它是那一轮停在中途的标记，进程也可能
     // 是在别处收尾的（这一轮被中断、下一轮由另一个宿主接上）。
@@ -286,7 +276,6 @@ export class SessionController {
       ...this.parentFieldFor(existing),
       turnState: this.currentTurnState,
       ...(this.currentAwaitingInput ? { awaitingInput: this.currentAwaitingInput } : {}),
-      ...(this.currentResumeAfter ? { resumeAfter: this.currentResumeAfter } : {}),
       snapshot: {
         ...toPersistedSnapshot(snapshot, conversationMessages),
         ...(this.currentTurnState === 'running' ? {} : { activeThinking: undefined, activeTurn: undefined }),
@@ -512,7 +501,6 @@ export class SessionController {
     else this.agent.loadSnapshot(runtimeSnapshot);
     this.currentSessionId = session.id;
     this.currentTurnState = session.turnState ?? 'completed';
-    if (session.resumeAfter !== undefined) this.currentResumeAfter = session.resumeAfter;
     // 恢复时照原样带着：真问题可能还在等（宿主刚刚崩过），下一个 `saveCurrent` 会
     // 按 `turnState` 决定要不要留下它。
     this.currentAwaitingInput = session.awaitingInput ?? null;

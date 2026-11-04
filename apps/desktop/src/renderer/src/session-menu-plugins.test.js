@@ -46,6 +46,19 @@ describe('sessionMenuPluginItems', () => {
     ])
   })
 
+  // 摆位随清单一路带到菜单构建处：宿主不认识「谁该在最上面」，只看这个字段
+  test('carries the declared position through', () => {
+    const items = sessionMenuPluginItems([
+      plugin({
+        desktopSessionMenu: [
+          { label: '快速压缩', action: 'quick', position: 'top' },
+          { label: '复制', action: 'copy' }
+        ]
+      })
+    ])
+    expect(items.map((item) => item.position)).toEqual(['top', undefined])
+  })
+
   test('skips malformed entries instead of rendering a dead menu row', () => {
     const items = sessionMenuPluginItems([
       plugin({ desktopSessionMenu: [{ label: '复制' }, { action: 'copy' }, null] })

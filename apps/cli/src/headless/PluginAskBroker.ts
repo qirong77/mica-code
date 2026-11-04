@@ -120,7 +120,7 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
         ...(option.description ? { description: option.description } : {}),
       })),
       ...(normalized.multiple ? { multiple: true } : {}),
-      ...(normalized.allowCustom ? { allowCustom: true } : {}),
+      ...(typeof normalized.allowCustom === 'boolean' ? { allowCustom: normalized.allowCustom } : {}),
       presentation: normalized.presentation === 'modal' ? 'modal' : 'dock',
       display,
       ...(passive ? { passive: true } : {}),

@@ -46,7 +46,12 @@ export type PluginAskQuestion = {
   options: PluginAskOption[];
   /** 允许多选。多选时用户点「确定」才提交。 */
   multiple?: boolean;
-  /** 除了给定选项，还允许用户自己写一句。 */
+  /**
+   * 除了给定选项，还允许用户自己写一句。默认开。
+   *
+   * 关掉它（`allowCustom: false` 或 `ui.input: false`）只留给「答案就在这几个选项里」的
+   * 确认弹窗：输入框在的时候用户可以随时改口说别的，那多数场景正是想要的。
+   */
   allowCustom?: boolean;
   /**
    * 画在哪里。默认 `dock`（输入框上方一条）；`modal` 是居中弹窗。
@@ -85,8 +90,8 @@ export type PluginAskPresentation = 'dock' | 'modal';
  * - `icon` / `hint` / `dismiss` 默认画；
  * - `meta` 只在有两个以上选项时画（「3 个方案 · 单选」）；
  * - `detail` 看有没有 `detail`；
- * - `input` 看 `allowCustom`；
- * - `confirm` 看是否需要二次确认（多选、能自由输入）；
+ * - `input` 默认画（`allowCustom: false` 才关）；
+ * - `confirm` 看是否需要二次确认（多选）；
  * - `options` 只要有选项就画。
  */
 export type PluginAskUi = {
@@ -200,7 +205,7 @@ export function normalizePluginAskQuestion(input: PluginAskQuestion): PluginAskQ
     ...(detail ? { detail } : {}),
     options,
     ...(input?.multiple === true ? { multiple: true } : {}),
-    ...(input?.allowCustom === true ? { allowCustom: true } : {}),
+    ...(typeof input?.allowCustom === 'boolean' ? { allowCustom: input.allowCustom } : {}),
     ...(input?.presentation === 'modal' ? { presentation: 'modal' as const } : {}),
     ...(input?.ui ? { ui: { ...input.ui } } : {}),
     timeoutMs,
@@ -219,15 +224,16 @@ export function resolvePluginAskDisplay(question: PluginAskQuestion): Required<P
   const ui = question.ui ?? {};
   const pick = (value: boolean | undefined, fallback: boolean): boolean =>
     typeof value === 'boolean' ? value : fallback;
-  const allowCustom = question.allowCustom === true;
+  const allowCustom = question.allowCustom !== false;
   return {
     icon: pick(ui.icon, true),
     meta: pick(ui.meta, question.options.length > 1),
     detail: pick(ui.detail, true) && Boolean(question.detail),
     options: pick(ui.options, question.options.length > 0),
     input: pick(ui.input, allowCustom),
-    // 单选且点一下就提交时不需要「确定」；能自由输入或多选才需要二次确认。
-    confirm: pick(ui.confirm, Boolean(question.multiple) || allowCustom),
+    // 单选时点一下就交；多选要攒几个再提交，才需要「确定」。
+    // 自由输入不需要额外的确认按钮：打了字之后界面自己会出现一个。
+    confirm: pick(ui.confirm, Boolean(question.multiple)),
     hint: pick(ui.hint, true),
     dismiss: pick(ui.dismiss, true),
   };

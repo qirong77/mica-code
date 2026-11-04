@@ -125,7 +125,34 @@ describe('buildActionRequest', () => {
 
   it('refuses a missing required path param instead of hitting the literal :id', () => {
     expect(() => buildActionRequest(navigate, { url: 'https://example.com' })).toThrow(
-      /缺少必填参数 id/
+      /缺路径参数 id/
+    )
+    // 报错里要直接给可照抄的形状，模型一次往返就能改对
+    expect(() => buildActionRequest(navigate, { url: 'https://example.com' })).toThrow(/"id":"tab-1"/)
+  })
+
+  // 文档里的路径参数叫 id，模型更常写 tabId / browserId：真实轨迹里这类不匹配 60+ 次
+  it('accepts the natural names for the tab id', () => {
+    for (const params of [{ tabId: 'tab-1' }, { tab: 'tab-1' }, { browserId: 'tab-1' }]) {
+      expect(buildActionRequest(navigate, params).path).toBe('/browser/tabs/tab-1/navigate')
+      expect(unknownParams(navigate, params)).toEqual([])
+    }
+    // 显式给 id 时不会被别名覆盖
+    expect(buildActionRequest(navigate, { id: 'tab-1', tabId: 'tab-2' }).path).toBe(
+      '/browser/tabs/tab-1/navigate'
+    )
+  })
+
+  it('keeps a real browserId param when the endpoint declares one', () => {
+    // createTab 的 browserId 是 body 里的目标窗口，不是路径 id
+    const createTab = { id: 'createTab', method: 'POST', path: '/browser/tabs', params: [{ name: 'browserId', in: 'body' }] }
+    expect(buildActionRequest(createTab, { browserId: 'brw-1' }).body).toEqual({ browserId: 'brw-1' })
+  })
+
+  it('lists the path param in the action docs so the model knows it is required', () => {
+    const docs = buildControlDocs({ server: 's', title: 't', endpoints: [navigate] })
+    expect(docs.actions[0].params).toContainEqual(
+      expect.objectContaining({ name: 'id', in: 'path', required: true })
     )
   })
 

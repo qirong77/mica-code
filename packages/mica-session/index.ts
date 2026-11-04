@@ -18,7 +18,6 @@ export type {
   PersistedSnapshotDisplayUsage,
   PersistedSession,
   PersistedSessionTurnState,
-  PersistedSessionResumeAfter,
   SessionStoreLike,
   SessionSummary,
   SessionTurnLease,

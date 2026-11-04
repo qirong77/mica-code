@@ -9,7 +9,7 @@ export type CaptureOptions = { captureContent: boolean; maxEventChars: number; m
  * 问题推导规则的版本。改了 classify / 退出码白名单 / 重复调用判定就加一：
  * 宿主据此决定要不要把历史记录的 findings 重算一次（计数与结论不动）。
  */
-export const CLASSIFIER_VERSION = 4;
+export const CLASSIFIER_VERSION = 5;
 export type FindingStatus = 'open' | 'accepted' | 'dismissed' | 'validated' | 'regressed';
 type Config = { providerId: string; protocol: string; model: string; effort: string; role: string };
 /**
@@ -186,6 +186,19 @@ export type PluginFailureSummary = {
   lastAt: string;
   lastError: string;
 };
+/**
+ * 一个工具在这个范围里的调用量、失败率与主要错误类别。
+ *
+ * 单看「某个工具报错 300 次」没法判断该不该修：`run_shell` 两万次里错 400 次是 2%，
+ * `memory` 一百多次里错 80 次是 50%——后者才是缺陷。失败率把两边拉到同一个刻度上。
+ */
+export type ToolHealthRow = {
+  name: string;
+  calls: number;
+  errors: number;
+  errorRate: number;
+  categories: { category: string; count: number }[];
+};
 export type ReviewReport = {
   version: 1;
   generatedAt: string;
@@ -199,6 +212,8 @@ export type ReviewReport = {
   helpers: HelperSummary;
   /** 插件常驻任务失败；机器级事实，不受工作区过滤。 */
   pluginFailures: PluginFailureSummary[];
+  /** 每个工具的调用量与失败率：这张表才看得出「哪个工具的失败率高到该修」。 */
+  toolHealth: ToolHealthRow[];
   warnings: string[];
   scannedRuns: number;
   limits: { runs: number; findingsPerRun: number; evidencePerFinding: number };
@@ -249,6 +264,8 @@ const MAX_PLUGIN_IDS = 50;
 const PLUGIN_HASH_CHARS = 12;
 const MAX_DELEGATION_PARENTS = 50;
 const MAX_HELPER_KINDS = 50;
+/** 报告里最多列这么多个工具：真实用到的工具 30 个上下，留一倍余量。 */
+const MAX_TOOL_HEALTH_ROWS = 60;
 const MAX_PLUGIN_FAILURES = 100;
 /** 同一任务失败到第三次才值得看一眼：前两次多半是外部服务抖了一下。 */
 const PLUGIN_FAILURE_FINDING_COUNT = 3;
@@ -957,7 +974,8 @@ function helperSource(helper: RunHelper): string {
 }
 
 /**
- * 插件失败条目的 id：既看得出是哪个插件的哪个任务，又能直接当 `decisions/<id>.json` 的文件名。
+ * 插件失败条目的 id：既看得出是哪个插件的哪个任务，又足够稳定（文件名由
+ * `decisionFile()` 决定：带 `:` 的 id 会先哈希，Windows 上 `:` 不是合法文件名字符）。
  *
  * 任务名由插件自己定，可能带 `/`、`:` 这类路径或协议字符——原样拼进文件名会写进别的目录。
  */
@@ -975,6 +993,15 @@ function pluginFailureId(pluginId: string, taskId: string): string {
   const rewritten = safePlugin !== pluginId || safeTask !== taskId;
   const task = rewritten ? `${safe(taskId, 111)}-${digest(`${pluginId}\n${taskId}`).slice(0, 8)}` : safeTask;
   return `plugin-background:${safePlugin}:${task}`;
+}
+
+/**
+ * 判断记录的文件名。运行派生条目的 id 本身就是 64 位十六进制，直接用；
+ * 插件失败条目带 `:`，Windows 上不是合法文件名字符，创建会直接失败。这里哈希成稳定短名
+ * 而不是替换字符：`a:b` 与 `a_b` 换完会撞在一起，判断就挂到别人的条目上了。
+ */
+function decisionFile(id: string): string {
+  return /^[a-f0-9]{64}$/.test(id) ? id : `h-${digest(id).slice(0, 32)}`;
 }
 
 /**
@@ -1457,15 +1484,18 @@ export class HarnessRecorder {
     // 合并成一条只会让人觉得是那轮任务本身的问题。
     const helper = state.summary.helper;
     const source = helper ? helperSource(helper) : '';
+    // purpose 也进 key 与标题：同一个插件可能既起标题又写提交说明，合并成一条就看不出
+    // 是哪条链路在超时，而修法完全不同。
+    const purpose = helper?.purpose ? ` · ${helper.purpose}` : '';
     this.addFinding(
       state,
       kind,
       helper
-        ? `helper\n${helper.kind}\n${helper.pluginId ?? ''}\n${category}`
+        ? `helper\n${helper.kind}\n${helper.pluginId ?? ''}\n${helper.purpose ?? ''}\n${category}`
         : `${state.summary.config.providerId}\n${state.summary.config.model}\n${category}`,
       seq,
       helper
-        ? `${retry ? 'Helper request retry' : 'Helper run failed'}: ${source} (${category})`
+        ? `${retry ? 'Helper request retry' : 'Helper run failed'}: ${source}${purpose} (${category})`
         : retry
           ? `Request retry: ${category}`
           : `Run ended with an error: ${category}`,
@@ -2195,7 +2225,10 @@ export class HarnessRecorder {
         );
       }
     }
-    for (const summary of runs) await inspectTrace(summary, warnings);
+    // 工具健康顺带在同一次轨迹扫描里数出来：review 本来就要逐行解析每条轨迹，
+    // 再单独读一遍 300MB 只为了统计调用量不值得。
+    const toolTally: ToolTally = new Map();
+    for (const summary of runs) await inspectTrace(summary, warnings, toolTally);
     runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
     const delegation = summarizeDelegation(runs, warnings);
     const helpers = summarizeHelpers(runs, warnings);
@@ -2232,7 +2265,7 @@ export class HarnessRecorder {
     }
     for (const finding of merged.values()) {
       try {
-        const file = join(this.root, 'decisions', `${finding.id}.json`);
+        const file = join(this.root, 'decisions', `${decisionFile(finding.id)}.json`);
         if ((await stat(file)).size > 20_000) throw new Error('decision exceeds size limit');
         const decision = JSON.parse(await readFile(file, 'utf8')) as {
           id: string;
@@ -2267,6 +2300,7 @@ export class HarnessRecorder {
       delegation,
       helpers,
       pluginFailures,
+      toolHealth: toolHealthRows(toolTally),
       warnings,
       scannedRuns,
       limits: { runs: MAX_RUNS, findingsPerRun: MAX_FINDINGS, evidencePerFinding: MAX_EVIDENCE },
@@ -2292,7 +2326,7 @@ export class HarnessRecorder {
       try {
         await this.directory(this.root);
         await this.directory(join(this.root, 'decisions'));
-        await this.atomic(join(this.root, 'decisions', `${id}.json`), data);
+        await this.atomic(join(this.root, 'decisions', `${decisionFile(id)}.json`), data);
       } catch (error) {
         failure = error;
         throw error;
@@ -2823,7 +2857,10 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
   );
 }
 
-async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<void> {
+/** 一次轨迹巡检的副产品：按工具统计的调用量、失败数与错误类别。 */
+type ToolTally = Map<string, { calls: number; errors: Map<string, number> }>;
+
+async function inspectTrace(summary: RunSummary, warnings: string[], tally?: ToolTally): Promise<void> {
   const evidence = summary.findings.flatMap((finding) => finding.evidence);
   const bySeq = new Map<number, Evidence[]>();
   for (const item of evidence) {
@@ -2857,6 +2894,7 @@ async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<vo
           throw new Error('invalid event');
         previous = event.seq;
         for (const item of bySeq.get(event.seq) ?? []) item.available = true;
+        if (tally) countToolEvent(tally, event);
       } catch {
         warnings.push(`Run ${summary.id} has a corrupt trace at line ${index + 1}.`);
         return;
@@ -2869,6 +2907,43 @@ async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<vo
   } catch {
     warnings.push(`Run ${summary.id} has a missing or unreadable trace: ${summary.traceFile}`);
   }
+}
+
+/**
+ * 工具健康计数。只认 `tool:call` 的调用量与 `tool:result` 的错误类别：
+ * 结果条目本身不保证有对应的调用（轨迹被截断时只剩一半），所以两边分开数。
+ */
+function countToolEvent(tally: ToolTally, event: StoredEvent): void {
+  const name = typeof event.name === 'string' ? event.name.trim() : '';
+  if (!name) return;
+  const entry = tally.get(name) ?? { calls: 0, errors: new Map<string, number>() };
+  if (event.type === 'tool:call') entry.calls++;
+  else if (event.type === 'tool:result' && typeof event.errorCategory === 'string' && event.errorCategory) {
+    entry.errors.set(event.errorCategory, (entry.errors.get(event.errorCategory) ?? 0) + 1);
+  } else if (event.type !== 'tool:result') return;
+  tally.set(name, entry);
+}
+
+/** 把按工具累计的原始计数整理成报告行：失败率降序，没有调用的结果条目不计。 */
+function toolHealthRows(tally: ToolTally): ToolHealthRow[] {
+  const rows: ToolHealthRow[] = [];
+  for (const [name, entry] of tally) {
+    const errors = [...entry.errors.values()].reduce((sum, count) => sum + count, 0);
+    if (entry.calls === 0) continue;
+    rows.push({
+      name,
+      calls: entry.calls,
+      errors,
+      errorRate: Math.round((errors / entry.calls) * 1000) / 1000,
+      categories: [...entry.errors.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([category, count]) => ({ category, count })),
+    });
+  }
+  return rows
+    .sort((a, b) => b.errorRate - a.errorRate || b.errors - a.errors || a.name.localeCompare(b.name))
+    .slice(0, MAX_TOOL_HEALTH_ROWS);
 }
 
 function markdownText(value: string): string {
@@ -2949,6 +3024,21 @@ function markdownReport(report: ReviewReport, directory: string): string {
     for (const row of report.helpers.kinds)
       lines.push(
         `| ${markdownText(helperSource(row))} | ${row.runs} | ${row.completed} | ${row.failed} | ${row.aborted} | ${row.requests} | ${row.avgRequestMs ?? '—'} | ${row.avgOutputTokens ?? '—'} |`,
+      );
+    lines.push('');
+  }
+  lines.push('', '## Tool health', '');
+  if (!report.toolHealth.length) lines.push('No tool calls in this scope.', '');
+  else {
+    lines.push(
+      'Error rate is what says whether a tool needs fixing: 400 failures out of 20,000 calls is noise, 80 out of 160 is a defect.',
+      '',
+      '| Tool | Calls | Errors | Error rate | Top categories |',
+      '| --- | ---: | ---: | ---: | --- |',
+    );
+    for (const row of report.toolHealth)
+      lines.push(
+        `| ${markdownText(row.name)} | ${row.calls} | ${row.errors} | ${(row.errorRate * 100).toFixed(1)}% | ${row.categories.map((item) => `${markdownText(item.category)} ×${item.count}`).join(' · ') || '—'} |`,
       );
     lines.push('');
   }

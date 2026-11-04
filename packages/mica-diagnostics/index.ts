@@ -89,6 +89,8 @@ export interface PerfMemoryProcess {
   pid: number;
   session?: string;
   samples: number;
+  /** 最后一次采样的时刻。退出后的进程仍留在表里（那正是最该被看见的），靠它区分。 */
+  lastAt: number;
   lastRssMB: number;
   peakRssMB: number;
   firstRssMB: number;
@@ -622,6 +624,7 @@ export function readPerformanceSummary(options: Record<string, unknown> = {}): P
           pid,
           session,
           samples: 1,
+          lastAt: at,
           lastRssMB: rssMB,
           peakRssMB: rssMB,
           firstRssMB: rssMB,
@@ -631,6 +634,7 @@ export function readPerformanceSummary(options: Record<string, unknown> = {}): P
         });
       } else {
         known.samples += 1;
+        known.lastAt = at;
         known.lastRssMB = rssMB;
         known.peakRssMB = Math.max(known.peakRssMB, rssMB);
         known.lastHeapMB = Number(entry.heap) || 0;

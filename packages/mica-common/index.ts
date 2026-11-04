@@ -111,7 +111,6 @@ export type { ProcessedImage, SupportedImageMediaType } from './image.js';
 export { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';
 export { findAutolinks, splitAutolinkPunctuation } from './autolink.js';
 export type { AutolinkMatch, AutolinkPunctuationSplit } from './autolink.js';
-export { compactRawUsage } from './rawUsage.js';
 export {
   MAX_SESSION_NOTES_LENGTH,
   SESSION_NOTES_PLUGIN_ID,

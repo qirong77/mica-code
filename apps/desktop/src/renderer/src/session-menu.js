@@ -45,17 +45,25 @@ export function renameTargetOf(menuPayload) {
  *
  * `extra` 里既有会话标记（打勾项）也有插件动作（`session-menu:<pluginId>:<action>`），
  * 两者都由插件提供，宿主只负责摆放位置。
+ *
+ * 声明了 `position: 'top'` 的项反过来摆到菜单最上面（例如会话压缩：它是对这条会话本身
+ * 的操作，比置顶/改名更常点）；其余项仍是默认位置。
  */
 export function withExtraMenuItems(items, extra) {
   const additions = Array.isArray(extra) ? extra.filter(Boolean) : []
   if (!additions.length) return items
+  const top = additions.filter((item) => item?.position === 'top')
+  const rest = additions.filter((item) => item?.position !== 'top')
   const dangerIndex = items.findIndex((item) => Array.isArray(item) && item[2])
-  if (dangerIndex < 0) {
-    const head = [...items]
-    while (head.at(-1) === 'separator') head.pop()
-    return [...head, 'separator', ...additions]
+  const head = [...(dangerIndex < 0 ? items : items.slice(0, dangerIndex))]
+  while (head.at(-1) === 'separator') head.pop()
+  const tail = dangerIndex < 0 ? [] : items.slice(dangerIndex)
+  // 三段用分隔线隔开，空段跳过：顶部项 → 宿主自己的项 → 其余插件项 → 危险项。
+  const merged = []
+  for (const chunk of [top, head, rest]) {
+    if (!chunk.length) continue
+    if (merged.length) merged.push('separator')
+    merged.push(...chunk)
   }
-  const head = items.slice(0, dangerIndex)
-  while (head[head.length - 1] === 'separator') head.pop()
-  return [...head, 'separator', ...additions, 'separator', ...items.slice(dangerIndex)]
+  return tail.length ? [...merged, 'separator', ...tail] : merged
 }

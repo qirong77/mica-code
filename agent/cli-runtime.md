@@ -36,8 +36,6 @@
 - 重试与失败写成 notice 存进 `conversationMessages`（`runtime/turnNotices.ts`），不进 provider history。
 - `AgentRuntime.abort()` 递增 runId 并中止 controller；补写只传 `uncommittedResponseText`。
 - 流迭代结束后仍须 `throwIfQueryStopped`，防止 SDK 吞掉 AbortError 后提交空 assistant 消息。
-- 换进程的软停走另一个错误（`AgentPausedError`）：`throwIfTurnPaused` 与 `throwIfQueryStopped` 相邻，只在迭代边界触发，理由见 `headless.md` 的「drain 与续跑」。
-
 ## Provider 与 Prompt
 
 - `createModelClient` 按 `provider.protocol` 显式选择客户端，不按 `api_base` 猜协议。

@@ -422,7 +422,7 @@ export function registerStatsIpc() {
   ipcMain.handle('stats:move-session', (_event, payload = {}) => moveSession(payload))
   // 会话树的父子关系（拖进 / 拖出另一个会话）：写盘后通知页面重读，索引按文件签名重扫。
   ipcMain.handle('stats:set-session-parent', (_event, payload = {}) => {
-    // 校验失败（会话在跑、会成环、目标不存在）要如实回给页面提示，不能静默什么都不发生。
+    // 校验失败（会成环、目标不存在、文件被反复改写）要如实回给页面提示，不能静默什么都不发生。
     try {
       const result = setSessionParent(payload)
       broadcastStats('stats:changed', { reason: 'parent' })

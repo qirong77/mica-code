@@ -47,7 +47,8 @@
   它自己的文件列表与 monaco 差异视图；不给 `base` 就按仓库主分支（`origin/HEAD` → `main` →
   `master` → 当前分支）解析，不给 `head` 取该目录当前检出的分支。两边都只从提交里读，
   不读工作区、不切分支、也不改会话目录）。建会话、发送时机、弹窗排版都属于页面，插件只声明意图。
-- 会话右键菜单：清单的 `desktop.sessionMenu` 声明菜单项（`label` + `action`），插件用
+- 会话右键菜单：清单的 `desktop.sessionMenu` 声明菜单项（`label` + `action`，可选
+  `position: "top"` 摆到菜单最上面，省略则排在宿主自己的项之后、删除之前），插件用
   `ctx.desktop.sessionMenu({ run })` 交出按 `action` 分派的处理器。菜单项走清单是因为右键要
   立刻画出菜单（不能为它冷启动一个 app-server），处理器留在插件所在进程里；`run()` 回
   `{ copyText?, message? }`，剪贴板由页面写。`PluginSessionMenu.ts` 里是类型、进程内登记表

@@ -13,8 +13,7 @@ import {
   dismissNotification,
   getNotifications,
   notify,
-  subscribeNotifications,
-  takeAfterReload
+  subscribeNotifications
 } from './notify'
 
 const LEVEL_DOTS = {
@@ -28,12 +27,6 @@ export function NotificationHost() {
   const [items, setItems] = useState(getNotifications)
 
   useEffect(() => subscribeNotifications(setItems), [])
-
-  // 重载前存下的那条（「界面已更新」）：新页面起来之后再补上，用户才知道刷完了。
-  useEffect(() => {
-    const pending = takeAfterReload()
-    if (pending) notify(pending)
-  }, [])
 
   if (items.length === 0) return null
 

@@ -41,8 +41,9 @@ describe('ToolApplyPatch 报错里的自引用指引', () => {
       ['*** Begin Patch', `*** Update File: ${filePath}`, '@@', ' alpha', ' beta', '*** End Patch', ''].join('\n'),
     );
 
-    expect(message).toContain('hunk 没有任何增删内容');
-    expect(message).toContain('纯上下文行不算修改');
+    // 整份 patch 都是上下文：确实没改任何东西，必须报错而不是静默成功。
+    expect(message).toContain('只有上下文行，没有任何 + / - 改动');
+    expect(message).toContain('什么都没写');
     // 可直接照抄的最小形态：首尾标记 + Update File + @@ + 一行 - 和一行 +
     expect(message).toContain('*** Begin Patch');
     expect(message).toContain('*** Update File: 路径');
@@ -50,8 +51,34 @@ describe('ToolApplyPatch 报错里的自引用指引', () => {
     expect(message).toContain('-旧内容');
     expect(message).toContain('+新内容');
     expect(message).toContain('*** End Patch');
-    expect(message).toContain('read_file');
     expect(readFileSync(filePath, 'utf-8')).toBe('alpha\nbeta\n');
+  });
+
+  // 真实数据里最常见的失败形态：模型把上下文 hunk 当锚点写在真正改动旁边，
+  // 旧实现因为那一块把整份 patch 拒了，本来正确的改动白丢一次往返。
+  it('skips a context-only hunk when the patch has a real change and says so', async () => {
+    const filePath = pathInTemp('mixed-hunks.txt');
+    writeFileSync(filePath, 'one\ntwo\nthree\nfour\n');
+
+    const result = await new ToolApplyPatch().execute({
+      patch: [
+        '*** Begin Patch',
+        `*** Update File: ${filePath}`,
+        '@@',
+        ' two',
+        '-three',
+        '+THREE',
+        '@@',
+        ' one',
+        '*** End Patch',
+        '',
+      ].join('\n'),
+    });
+
+    expect(readFileSync(filePath, 'utf-8')).toBe('one\ntwo\nTHREE\nfour\n');
+    // 跳过不等于没发生：模型必须知道那一块没生效。
+    expect(result).toContain('已跳过');
+    expect(result).toContain('第 7 行');
   });
 
   it('helps with a patch missing the begin marker', async () => {

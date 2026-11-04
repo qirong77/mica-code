@@ -88,20 +88,27 @@ describe('resolvePluginAskDisplay', () => {
     normalizePluginAskQuestion(input);
 
   it('derives a confirm bar only when the click is not final', () => {
-    // 单选：点一下就交，不需要「确定」这条
+    // 单选：点一下就交，不需要「确定」这条（能自由输入也一样，输入框按回车即可）
     expect(resolvePluginAskDisplay(normalized(base())).confirm).toBe(false);
-    // 能自由输入：必须留一次确认
-    expect(resolvePluginAskDisplay(normalized({ ...base(), allowCustom: true })).confirm).toBe(true);
+    expect(
+      resolvePluginAskDisplay(normalized({ ...base(), allowCustom: false })).confirm,
+    ).toBe(false);
     expect(
       resolvePluginAskDisplay(normalized({ ...base(), multiple: true })).confirm,
     ).toBe(true);
+    // 插件显式要也可以：单选时留一次确认
+    expect(
+      resolvePluginAskDisplay(normalized({ ...base(), ui: { confirm: true } })).confirm,
+    ).toBe(true);
   });
 
-  it('shows the input box only when the question accepts free text', () => {
-    expect(resolvePluginAskDisplay(normalized(base())).input).toBe(false);
-    expect(
-      resolvePluginAskDisplay(normalized({ ...base(), allowCustom: true })).input,
-    ).toBe(true);
+  it('shows the input box by default and only drops it when told to', () => {
+    expect(resolvePluginAskDisplay(normalized(base())).input).toBe(true);
+    expect(resolvePluginAskDisplay(normalized({ ...base(), allowCustom: true })).input).toBe(true);
+    expect(resolvePluginAskDisplay(normalized({ ...base(), allowCustom: false })).input).toBe(false);
+    expect(resolvePluginAskDisplay(normalized({ ...base(), ui: { input: false } })).input).toBe(
+      false,
+    );
   });
 
   it('drops the detail row when there is no detail, even if ui asks for it', () => {

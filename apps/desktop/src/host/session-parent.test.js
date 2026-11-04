@@ -81,19 +81,22 @@ describe('session parent writer', () => {
     expect(readSession('child').parentSessionId).toBeUndefined()
   })
 
-  it('会话正在跑（持有 turn lease）时拒绝写盘', () => {
+  it('会话正在跑（持有 turn lease）时照样能调整层级，其余内容不动', () => {
     busy.add('child')
-    expect(() => setParent({ sessionId: 'child', parentId: 'parent' })).toThrow(
-      '该会话正在运行，请等这一轮结束再调整会话层级'
-    )
-    expect(readSession('child').parentSessionId).toBeUndefined()
-    // 父会话在跑不影响挂到它下面
+    expect(setParent({ sessionId: 'child', parentId: 'parent' })).toEqual({
+      parentSessionId: 'parent'
+    })
+    const stored = readSession('child')
+    expect(stored.parentSessionId).toBe('parent')
+    expect(stored.title).toBe('子会话')
+    expect(stored.snapshot).toEqual({ history: [] })
+    // 父会话在跑同样不影响挂到它下面
     busy.clear()
     busy.add('parent')
     expect(setParent({ sessionId: 'child', parentId: 'parent' }).parentSessionId).toBe('parent')
   })
 
-  it('握着 turn lease 写盘，别人持有时报同一句话', () => {
+  it('自己的 lease 用完即释放，别人持有时直接写文件', () => {
     const lockDir = join(root, 'sessions', '.turn-locks')
     const leased = createSessionParentWriter({
       sessionsDir: () => directory,
@@ -104,10 +107,10 @@ describe('session parent writer', () => {
 
     mkdirSync(lockDir, { recursive: true })
     writeFileSync(join(lockDir, 'grandchild.lock'), JSON.stringify({ pid: process.pid, token: 'other' }))
-    expect(() => leased({ sessionId: 'grandchild', parentId: 'parent' })).toThrow(
-      '该会话正在运行，请等这一轮结束再调整会话层级'
-    )
-    expect(readSession('grandchild').parentSessionId).toBe('child')
+    expect(leased({ sessionId: 'grandchild', parentId: 'parent' }).parentSessionId).toBe('parent')
+    expect(readSession('grandchild').parentSessionId).toBe('parent')
+    // 别人的锁绝不能被这次写删掉
+    expect(existsSync(join(lockDir, 'grandchild.lock'))).toBe(true)
   })
 
   it('拒绝非法 id、缺失与损坏的会话文件', () => {

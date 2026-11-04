@@ -30,7 +30,6 @@ const EVENT_CHANNELS = [
   'terminal:changed',
   'browser:activity',
   'terminal:activity',
-  'dev:reload',
   'app:window-state'
 ]
 
@@ -429,13 +428,6 @@ function createWebApi(env) {
       setTask: (nodeId, task) => invoke('loops:set-task', { nodeId, task }),
       fireNow: (nodeId) => invoke('loops:fire-now', { nodeId }),
       onChanged: (callback) => subscribe('loops:changed', callback)
-    },
-
-    // 开发期构建重载：状态由运行时算（它知道有没有一轮在跑），页面只负责画和转发动作。
-    devReload: {
-      getState: () => invoke('dev-reload:state'),
-      act: (action) => invoke('dev-reload:act', { action }),
-      onState: (callback) => subscribe('dev:reload', callback)
     },
 
     app: {

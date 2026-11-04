@@ -44,14 +44,14 @@
 
 不自动修改指令、工具、loop 或记忆，不生成或执行修改 patch。第一版交付观察、聚合和人工 review 流程。
 
-Markdown 报告的 `## Runs` 只列用户的一轮：一次 turn 配一条摘要，表会翻倍而没人看。helper 运行汇在 `## Helpers`（Runs / Completed / Failed / Aborted / Requests / 平均请求耗时 / 平均输出 token，按来源一行），插件自身的失败在 `## Plugin health`（插件 / 任务 / 失败次数 / 最近一次时间 / 最近错误，失败次数是下界）。`## Plugin health` 是机器级事实：常驻任务与钩子都没有工作目录，所以这一段不受 `review(cwd)` 的范围过滤。这两节都只统计；`## Findings` 里由它们派生的条目（`plugin-background`）与运行派生的条目一样可以 `assess`。
+Markdown 报告的 `## Runs` 只列用户的一轮（`harness_review list` 的最近运行列表同理，helper 只由 `helpers` 汇总给出）：一次 turn 配一条摘要，表会翻倍而没人看。`## Tool health` 按**失败率**列出每个工具：两万次调用错四百次是 2%，一百多次错八十次是 50%，只按错误次数排序会把真正该修的那个埋掉。这张表与 Runs 用同一个范围（同一批运行、同一个 cwd 过滤），轨迹超限或损坏的那几条不计入。helper 运行汇在 `## Helpers`（Runs / Completed / Failed / Aborted / Requests / 平均请求耗时 / 平均输出 token，按来源一行；宿主半路退出的那几次只计入 Runs，所以三列加起来不等于 Runs），插件自身的失败在 `## Plugin health`（插件 / 任务 / 失败次数 / 最近一次时间 / 最近错误，失败次数是下界）。`## Plugin health` 是机器级事实：常驻任务与钩子都没有工作目录，所以这一段不受 `review(cwd)` 的范围过滤。这两节都只统计；`## Findings` 里由它们派生的条目（`plugin-background`）与运行派生的条目一样可以 `assess`。
 
 ## 存储与设置
 
 默认位置：`$MICA_HOME/plugin-data/harness-review/`。
 
 - `runs/<uuid>/`：每次运行独立的 `events.jsonl` 与 `summary.json`。
-- `decisions/`：每个问题条目独立的人工判断记录。
+- `decisions/`：每个问题条目独立的人工判断记录。文件名取条目 id；插件失败条目的 id 带 `:`（Windows 上非法），所以统一哈希成 `h-<32 位>`，用 id 哈希而不是替换字符，避免两条不同判断挤进同一个文件。
 - `plugin-events.jsonl`：插件自身（常驻任务与钩子）的失败记录（超过 4 MB 滚成 `plugin-events.1.jsonl`，旧的覆盖）。
 - 报告由 `report` 按需导出，命令和工具返回实际文件路径。
 

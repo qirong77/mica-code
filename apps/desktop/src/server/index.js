@@ -34,20 +34,14 @@ import { readRemoteAccessPolicy, setRemoteAccessPort } from '../host/remote-acce
 import { createNotifyServer } from '../host/notifyServer.js'
 import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from '../host/terminals.js'
 import {
-  countBusyChatHosts,
   describeChatHosts,
   disposeAllChatRuns,
-  drainChatHosts,
-  collectPendingResumes,
-  resumeChatHosts,
   registerChatIpc,
   runLoopTurn,
   sessionExists,
   setChatNotifyServer
 } from '../host/chat.js'
 import { disposeLoops, registerLoopIpc, setLoopBroadcaster, setLoopRunner } from '../host/loops.js'
-import { createDevReload } from '../host/dev-reload.js'
-import { resolveStampPath, writeRestartMarker } from '../host/build-stamp.js'
 import {
   registerBrowserControlIpc,
   setBrowserControlBroadcaster,
@@ -101,7 +95,6 @@ import { registerPluginHostIpc } from '../host/plugin-host.js'
 import { registerConfigWebIpc } from '../host/configWeb.js'
 import {
   flushUiState,
-  getUiStateKey,
   registerUiStateIpc,
   setUiStateSender
 } from '../host/ui-state.js'
@@ -772,43 +765,6 @@ export async function startDesktopServer(options = {}) {
   // 与 Electron 版 index.js 的 notify 桥一致：PTY 里的插件上报状态后推给所有页面
   const stopNotifyBridge = notifyServer.onChange((payload) => broadcast('notify:changed', payload))
 
-  // 开发期「构建完自动重载」：只在存在构建 stamp（dev 构建脚本写的）时才有动作，
-  // 用户机器上没有这个文件，因此打包版本无论怎么跑都不会自我重载。
-  const stampPath = resolveStampPath()
-  const devReload = createDevReload({
-    stampPath,
-    broadcast,
-    hasBusyHosts: countBusyChatHosts,
-    drainHosts: drainChatHosts,
-    // 运行时与外壳的代码在 asar 里，进程自己换不掉——只能让外壳重启整个应用。
-    // 运行时与外壳的代码在 asar 里，进程自己换不掉——只能让外壳重启整个应用。
-    // 被停下那几轮的去处写在会话文件里（`resumeAfter`），新实例起来会自己接上。
-    onReadyToRestart: (level) => writeRestartMarker(stampPath, { level }),
-    logger: (message, data) => runtimeLog.info(message, data)
-  })
-  devReload.start()
-  ipcMain.handle('dev-reload:state', () => devReload.state())
-  ipcMain.handle('dev-reload:act', (_event, payload) => devReload.act(payload?.action))
-
-  // 上一轮被换进程（开发构建重载）停下的会话：现在就接着跑。
-  //
-  // 判定只看会话文件里的 `resumeAfter`——用户自己按停止的会话没有这一行，不会在
-  // 重启后自己跑起来。节点来自 ui-state 里打开的工作区，所以不会给早已关掉的会话
-  // 起一个后台进程。
-  try {
-    const workspace = getUiStateKey('workspace')
-    const nodes = Array.isArray(workspace?.nodes) ? workspace.nodes : []
-    const pending = collectPendingResumes(nodes)
-    if (pending.length) {
-      runtimeLog.info('dev-reload:resume-pending', { count: pending.length })
-      resumeChatHosts(pending)
-    }
-  } catch (error) {
-    runtimeLog.warn('dev-reload:resume-failed', {
-      error: error instanceof Error ? error.message : String(error)
-    })
-  }
-
   registerTerminalIpc()
   registerChatIpc()
   registerLoopIpc()
@@ -895,7 +851,6 @@ export async function startDesktopServer(options = {}) {
     sseClients.clear()
     disposeAllTerminals()
     disposeAllChatRuns()
-    devReload.stop()
     disposeLoops()
     disposeGitWatchers()
     stopBrowserControl()

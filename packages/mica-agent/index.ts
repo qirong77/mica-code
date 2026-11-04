@@ -39,7 +39,7 @@ export type {
   AgentUsageRecord,
   IAgent,
 } from './core/Agent.js';
-export { AgentMaxTurnsError, AgentPausedError, throwIfAgentMaxTurnsReached, throwIfTurnPaused } from './core/Agent.js';
+export { AgentMaxTurnsError, throwIfAgentMaxTurnsReached } from './core/Agent.js';
 export type { AgentContentPartMapper } from './core/Content.js';
 export type {
   AgentUsageSummary,

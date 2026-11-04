@@ -165,14 +165,10 @@ export function buildTurnStartParams({
   model,
   variant,
   role,
-  clientMessageId,
-  resume
+  clientMessageId
 }) {
   const params = { threadId: threadId || '', micaTextRollback: true, micaThinkingRollback: true }
   params.input = [{ type: 'text', text: String(prompt || '') }]
-  // 接续一条被宿主暂停、还没跑完的会话：不追加用户消息，直接对已有历史再发一次
-  // 请求（见 `mica-runtime` 的 `RuntimeInput.resume`）。
-  if (resume) params.resume = true
   if (cwd) params.cwd = cwd
   if (model) params.model = model
   if (variant) params.effort = variant

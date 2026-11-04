@@ -564,6 +564,38 @@ describe('parsePluginManifest desktop session menu', () => {
     expect(result.manifest.desktopPanel?.label).toBe('面板');
     expect(result.manifest.desktopSessionMenu).toHaveLength(1);
   });
+
+  // 摆位是声明数据，宿主不认识具体插件：谁想放最上面就写 position
+  it('keeps the declared position and leaves the default out of the item', () => {
+    const result = parsePluginManifest(
+      base({
+        desktop: {
+          sessionMenu: [
+            { label: '快速压缩', action: 'quick', position: 'top' },
+            { label: '复制', action: 'copy', position: 'bottom' },
+            { label: '导出', action: 'export' },
+          ],
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.desktopSessionMenu).toEqual([
+      { label: '快速压缩', action: 'quick', position: 'top' },
+      { label: '复制', action: 'copy', position: 'bottom' },
+      { label: '导出', action: 'export' },
+    ]);
+  });
+
+  // 写错的值静默落到默认位置，等于作者以为生效了其实没有
+  it('rejects an unknown position', () => {
+    expect(
+      parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', position: 'first' }] } })).ok,
+    ).toBe(false);
+    expect(
+      parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', position: 1 }] } })).ok,
+    ).toBe(false);
+  });
 });
 
 describe('parsePluginManifest skills', () => {

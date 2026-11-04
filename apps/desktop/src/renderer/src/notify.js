@@ -1,16 +1,14 @@
 /**
  * 顶部通知队列：全局一份，任何地方 `notify()` 一次就在窗口顶部弹一条。
  *
- * 用 key 去重而不是每次新增：同一条持续更新的提示（例如「插件与工具有更新 · 3s 后重载」
- * 这种每秒刷新的倒计时）反复 push 只会原地改那一条，不会叠出一列。没有 key 的通知
- * 各自独立，按顺序排队，最多同时留 `MAX_ITEMS` 条。
+ * 用 key 去重而不是每次新增：同一条持续更新的提示反复 push 只会原地改那一条，不会
+ * 叠出一列。没有 key 的通知各自独立，按顺序排队，最多同时留 `MAX_ITEMS` 条。
  *
  * 队列本身不设定时器：自动消失由 `NotificationHost` 按 `timeout` 排，这样这个模块
  * 是纯数据、能在单测里直接断言。
  */
 
 const MAX_ITEMS = 3
-const AFTER_RELOAD_KEY = 'mica.notice.after-reload'
 
 let items = []
 const listeners = new Set()
@@ -95,27 +93,3 @@ export function clearNotifications() {
   if (items.length > 0) publish([])
 }
 
-/**
- * 记一条「下一次页面加载后弹出来」的通知：界面重载会把 DOM 连同队列一起清掉，
- * 想让用户看到「界面已更新」就得先存到 sessionStorage 里。
- */
-export function queueAfterReload(notice) {
-  try {
-    window.sessionStorage.setItem(AFTER_RELOAD_KEY, JSON.stringify(notice || {}))
-  } catch {
-    // 存不了就算了：少一条提示，不影响重载本身。
-  }
-}
-
-/** 取走并清掉那条跨重载的通知（`NotificationHost` 挂载时调一次）。 */
-export function takeAfterReload() {
-  try {
-    const raw = window.sessionStorage.getItem(AFTER_RELOAD_KEY)
-    if (!raw) return null
-    window.sessionStorage.removeItem(AFTER_RELOAD_KEY)
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : null
-  } catch {
-    return null
-  }
-}

@@ -52,6 +52,14 @@ describe('AskUserTool', () => {
     expect(text).toContain('用户的补充：都不做，先补文档');
   });
 
+  it('leaves the free-text field on by default and can be turned off', async () => {
+    const { api, seen } = stubAsk({ optionIds: ['a'], cancelled: false, reason: 'answered' });
+    await new AskUserTool(api).execute(question);
+    expect(seen[0].allowCustom).toBeUndefined();
+    await new AskUserTool(api).execute({ ...question, allowCustom: false });
+    expect(seen[1].allowCustom).toBe(false);
+  });
+
   it('tells the model not to re-ask after a cancellation', async () => {
     const { api } = stubAsk({ optionIds: [], cancelled: true, reason: 'timeout' });
     const text = await new AskUserTool(api).execute(question);

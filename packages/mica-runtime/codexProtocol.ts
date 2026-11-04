@@ -573,15 +573,6 @@ export const MICA_METHODS = {
    * `held: false` releases the hold (`params: { clientMessageId, held }`).
    */
   queueHold: 'mica/queue/hold',
-  /**
-   * 请宿主在下一个迭代边界停下来（开发构建重载前的软停）。
-   *
-   * 只置标志、立即回包：正在等模型或正在跑工具时它停不下来，调用方按自己的
-   * 预算等 `turn/completed`，等不到就发 `turn/interrupt`（那时这一批工具会被
-   * 记成 interrupted，重启后模型重跑它）。停下后会话文件里记着
-   * `resumeAfter: 'build-reload'`，新宿主用 `turn/start { resume: true }` 接着跑。
-   */
-  hostDrain: 'mica/host/drain',
   killBackgroundTask: 'mica/backgroundTasks/kill',
   backgroundTaskOutput: 'mica/backgroundTasks/output',
   subagentTaskDetail: 'mica/subagentTasks/detail',

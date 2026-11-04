@@ -72,7 +72,7 @@
 
 ### ask（问用户一个问题，等一个回答）
 
-- `ctx.ask.request(question, { signal })` 把一道选择题交给客户端：`title` 一句话问题、`detail` 补充说明、`options`（`id` / `label` / `description`，最多 8 个）、可选的 `multiple` / `allowCustom` / `timeoutMs` / `summary`。答案 `{ optionIds, custom?, cancelled, reason }`，`reason` 取 `answered` / `cancelled` / `timeout` / `aborted`。
+- `ctx.ask.request(question, { signal })` 把一道选择题交给客户端：`title` 一句话问题、`detail` 补充说明、`options`（`id` / `label` / `description`，最多 8 个）、可选的 `multiple` / `allowCustom`（默认开，`false` 才收掉自由输入框）/ `timeoutMs` / `summary`。答案 `{ optionIds, custom?, cancelled, reason }`，`reason` 取 `answered` / `cancelled` / `timeout` / `aborted`。
 - **它在工具里 await 到用户点选为止，然后回到同一次迭代**——不追加消息、不开新一轮，所以「选完之后直接继续」不需要任何投递机制。改写/中止由传进去的 `AbortSignal` 结束（工具拿到的 `callbacks.signal`），宿主会同时撤掉那张卡片。
 - 选项上的 `prompt` / `command` 不进客户端，只回到插件手里：前者是「选中后要做什么」的一段指令，后者是要当场执行的命令。真正执行命令的是插件（`ask` 只负责问答），所以「用户点一下就跑脚本」这条路径由插件自己实现并负责把它写进用户看得见的地方。
 - 超时不是错误：拿到的仍是 `cancelled` + `reason: 'timeout'`，插件自己决定退化成什么。
@@ -129,7 +129,7 @@
 
 动作的返回形态（页面负责建会话、摆页签、控制发送时机、弹窗排版，插件只声明意图）：`{ message }` 回一句话（显示在按钮旁边；常驻宿主里 `ctx.ui.notice` 用户看不到）、`{ compose }` 把文本放进当前会话输入框（不发送）、`{ newSession: { prompt, role?, cwd?, confirm?, send? } }` 开一个新会话跑这段提示词（默认先弹窗让用户看见并编辑，点开始才发；`send: false` 只把提示词放进输入框、等用户按回车，指令类动作不该由插件替人按发送）、`{ dialog: { title, subtitle?, text?, qr?, columns?, rows?, note?, configure? } }` 弹一个只读弹窗（`qr` 是一段二维码，插件只给 `{ value, caption? }`、编码与静区归宿主；`text` 是会换行的正文；`columns` + `rows` 给对齐的表格，格子 `{ text, link? }`，带 `link` 的交给系统浏览器打开；三者可以单用也可以叠；`configure: { label? }` 在底部多一个打开**这个插件自己的设置页**的按钮，「还没配好」的弹窗用它把人送过去，`panel: { label? }` 同样是个按钮但打开**面板**——弹窗只回答最常问的那件事，首次部署这类细节仍留在面板里；两者之外纯展示、编辑仍回面板 section）、`{ openPath: { path, line?, focus? } }` 让宿主把这个文件在应用里打开、`{ openReview: { cwd, base?, head?, label? } }` 让宿主盖一层**整窗评审视图**：`head`（缺省取那个目录当前检出的分支）相对 `base`（缺省按仓库主分支解析：`origin/HEAD` → `main` → `master`）在分叉点上比，左边文件、右边 diff。两边都只从提交里读（`git:ref-summary` + `git:file` 的 `refs` 模式），**不读工作区、也不改会话目录**——评审别人的分支不会把评审人自己的未提交改动混进来，那个目录被清掉也不影响，关掉就回到原来的对话。`cwd` 只提供仓库位置、不是会话工作区：评审层不加载那里的文件树；面板只有 340px，插件自己的配置、随包分发的 skill 这种超过一屏的正文在那里既看不清也改不动，编辑交给宿主已有的能力。动作改到的 `ctx.sessionState` 由宿主在动作返回后补一次会话落盘，插件不用自己触发保存。
 
-**会话右键菜单**由清单 `desktop.sessionMenu`（`[{ "label": "复制会话 Markdown", "action": "copy" }]`）+ `ctx.desktop.sessionMenu({ run })` 组成：**菜单项来自清单、处理器来自插件注册**——右键是同步交互，不能为「有没有菜单项」去冷启动 app-server；处理器只活在插件所在进程里，页面只转发 `pluginId + action`。`run()` 只认 `copyText`（页面写系统剪贴板：插件进程里没有剪贴板，也不该为三个平台各调一次系统命令）与 `message`（回给用户的一句话）。动作要立刻返回，不要在里面等模型请求。声明它就要写 `requires: ["desktop"]`；用户插件同样有。
+**会话右键菜单**由清单 `desktop.sessionMenu`（`[{ "label": "复制会话 Markdown", "action": "copy" }]`，可选 `position: "top"` 摆到菜单最上面、省略则排在宿主自己的项之后与删除之前）+ `ctx.desktop.sessionMenu({ run })` 组成：**菜单项来自清单、处理器来自插件注册**——右键是同步交互，不能为「有没有菜单项」去冷启动 app-server；处理器只活在插件所在进程里，页面只转发 `pluginId + action`。`run()` 只认 `copyText`（页面写系统剪贴板：插件进程里没有剪贴板，也不该为三个平台各调一次系统命令）与 `message`（回给用户的一句话）。动作要立刻返回，不要在里面等模型请求。声明它就要写 `requires: ["desktop"]`；用户插件同样有。
 
 ### 前端模块的 api
 

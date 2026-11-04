@@ -15,7 +15,7 @@
 
 export type TurnTimingKind = 'wait' | 'generate' | 'tool';
 
-export type TurnTimingOutcome = 'completed' | 'aborted' | 'error' | 'paused';
+export type TurnTimingOutcome = 'completed' | 'aborted' | 'error';
 
 export type TurnTimingToolStatus = 'pending' | 'completed' | 'aborted' | 'error';
 
@@ -172,9 +172,8 @@ export function applyTurnTimingTick(state: TurnTimingState, tick: TurnTimingTick
     if (state.openIndex >= 0) {
       const open = segments[state.openIndex];
       if (open?.kind === 'tool' && open.status === 'pending') {
-        // 工具本身只有跑完 / 被中止两种结局：宿主在边界停下时，手上那个还没回来的
-        // 工具就是被打断了（下一轮会重跑它）。
-        segments[state.openIndex] = { ...open, status: tick.outcome === 'paused' ? 'aborted' : tick.outcome };
+        // 工具本身只有跑完 / 被中止两种结局：这一轮结束时还没回来的那个，就是被打断了。
+        segments[state.openIndex] = { ...open, status: tick.outcome };
       }
     }
     const idleFrom = lastEnd(segments, state.lastAt);

@@ -6550,6 +6550,12 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     font-size: var(--text-aux);
   }
 
+  /* 已经退出、只在日志里留下最后一条采样的进程：仍列出（它可能正是那个占 1.2GB 的），
+     但要和还在跑的区分开。 */
+  .perf-memory-row-exited {
+    opacity: 0.55;
+  }
+
   .perf-memory-meta {
     color: var(--text-faint);
     font-family: var(--font-mono);

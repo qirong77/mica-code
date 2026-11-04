@@ -133,40 +133,6 @@ Build cost is split roughly as: CLI + shell + runtime in parallel (~4s), electro
 packaging (~2s), then zip + dmg compression (~20s). The last part compresses a 277 MB Electron
 Framework and does not shrink (`hdiutil` alone needs ~9s); that is why `--dir` is the local path.
 
-#### Auto reload after a build
-
-`npm run build:app` ends by writing a product fingerprint to `$MICA_HOME/dev-build-stamp.json`
-(`scripts/build-stamp.mjs`). A running instance watches that file and reloads itself, so a rebuilt
-app does not need to be quit and reopened by hand. The file lives in `$MICA_HOME` on purpose: it
-only exists on machines where someone develops mica, and an installed copy therefore never reloads
-itself.
-
-The action depends on what actually changed (`src/host/build-stamp.js` keeps the classification
-pure, `src/host/dev-reload.js` owns the pacing):
-
-| Changed artifact | What happens | Running turns |
-| --- | --- | --- |
-| `out/renderer` | page reload only | untouched |
-| `~/.local/lib/mica/mica` (CLI: plugins + tools) | hosts are drained and recycled, then the page reloads | parked at the next request boundary, then resumed |
-| `out/server` (runtime) / `out/main` (shell) | the runtime asks the shell to `app.relaunch()` through a `.restart` handoff file | same drain, then resumed |
-
-A bar appears at the top of the window with a countdown and two actions (reload now / later).
-Everything except a renderer-only rebuild drains the session hosts first: `mica/host/drain` asks a
-running turn to stop at its **next iteration boundary** — after the tool batch it just ran was
-committed, before the following model request. That point has a complete history tail, so the turn
-is not lost, and the model does not re-run any tool. The budget is 15s; a turn that cannot reach a
-boundary in time (it is streaming an answer, or a tool is still running) is interrupted, and that
-batch is recorded as `interrupted`, so the model re-runs it on resume — the reason the budget is
-spent on the soft stop first.
-
-The session file carries `resumeAfter: 'build-reload'` for a drained turn (top-level field,
-cleared as soon as the turn completes). A new host scans the open workspace's sessions for that
-marker and continues each one with `turn/start { resume: true }`, which sends another request
-against the existing history **without appending a user message**. A turn the user stopped by hand
-has no marker, so a reload never restarts work the user deliberately cancelled.
-`MICA_DEV_RELOAD=0` disables the whole thing; `MICA_DEV_BUILD_STAMP` points the watcher at a
-different file.
-
 Build speed comes from these steps, all of which are load-bearing:
 
 - Vite 8 (Rolldown) via `electron-vite` 6. The renderer segment went from 26–29s to 4–5s.

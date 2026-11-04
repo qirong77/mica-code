@@ -143,6 +143,9 @@ async function getChangeCounts(cwd, { refresh = false } = {}) {
     cached.refreshing = true
     void read()
       .then((value) => {
+        // 读的过程中可能有一轮 `refresh` 已经写入更新的数字（一轮对话刚结束、用户主动
+        // 刷新）：那份比这次后台重算新，用它顶掉会重新计时 20 秒，徽标反而停在过去。
+        if (changeCountsState.get(key) !== cached) return
         // 存读之前那份签名（与前台路径一致）：读的过程中切了分支的话，这份数字属于旧
         // HEAD，配上新签名会被当成 fresh，之后再 20s 都不重算。
         changeCountsState.set(key, {

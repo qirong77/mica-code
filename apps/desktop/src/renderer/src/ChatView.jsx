@@ -615,7 +615,7 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
     meta: false,
     detail: true,
     options: true,
-    input: false,
+    input: true,
     confirm: false,
     hint: true,
     dismiss: true,
@@ -624,6 +624,8 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
   const multiple = Boolean(ask.multiple)
   const modal = ask.presentation === 'modal'
   const canSubmit = selected.length > 0 || custom.trim().length > 0
+  // 打了字之后要有看得见的提交入口：选项点了就交，自己写的那句靠回车或这个「确定」。
+  const showConfirm = display.confirm || custom.trim().length > 0
   const submit = (optionIds = selected, text = custom) => {
     if (submitting) return
     onSubmit({ optionIds, custom: String(text || '').trim() })
@@ -728,15 +730,19 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
           />
         </div>
       ) : null}
-      {display.confirm || display.hint ? (
+      {showConfirm || display.hint ? (
         <div className="chat-ask-bar">
           {display.hint ? (
             <span className="chat-ask-hint" title={summaryText}>
-              {summaryText ? `已选 ${summaryText}` : '选一个继续'}
+              {summaryText
+                ? `已选 ${summaryText}`
+                : display.input
+                  ? '选一个继续，或直接写下来'
+                  : '选一个继续'}
             </span>
           ) : null}
           <span className="chat-ask-spacer" aria-hidden="true" />
-          {display.confirm ? (
+          {showConfirm ? (
             <>
               <kbd className="chat-ask-keycap">↵</kbd>
               <button
@@ -2435,13 +2441,23 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
   }, [menu.x, menu.y])
   // 插件贡献的项（清单 `desktop.sessionMenu`）：和侧栏会话行是同一份清单，宿主不认识
   // 任何具体插件。动作要读会话内容，没有会话时给不出东西，所以跟着「分享链接」的门槛走。
-  const pluginActions = (Array.isArray(pluginItems) ? pluginItems : []).map((item) => ({
+  const pluginAction = (item) => ({
     id: item.action,
     label: item.label,
     icon: IconPuzzle,
     disabled: !menu.hasSession
-  }))
+  })
+  const declaredPlugins = Array.isArray(pluginItems) ? pluginItems : []
+  // 清单声明 `position: top` 的插件项（会话压缩）摆在菜单最上面，其余仍跟在宿主项之后。
+  const topPluginActions = declaredPlugins
+    .filter((item) => item.position === 'top')
+    .map(pluginAction)
+  const otherPluginActions = declaredPlugins
+    .filter((item) => item.position !== 'top')
+    .map(pluginAction)
   const allItems = [
+    ...topPluginActions,
+    ...(topPluginActions.length ? [{ separator: true }] : []),
     {
       id: 'commit',
       label: 'Commit',
@@ -2473,7 +2489,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
       icon: IconStopwatch,
       disabled: !menu.hasSession
     },
-    ...pluginActions,
+    ...otherPluginActions,
     { separator: true },
     { id: 'clear', label: 'Clear', icon: IconTrash, disabled: menu.running, danger: true }
   ].filter(Boolean)

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { MIGRATIONS, usageOccurredAt } from './migrations.js';
+import { MIGRATIONS, dropRawUsage, usageOccurredAt } from './migrations.js';
 import { runEvolution } from './run.js';
 
 const homes: string[] = [];
@@ -80,6 +80,47 @@ describe('usage-occurred-at 迁移', () => {
   it('形状不对的文档不算改动', () => {
     expect(usageOccurredAt.apply({ createdAt: '2026-01-02T03:04:05.000Z' })).toBe(0);
     expect(usageOccurredAt.apply({ snapshot: { usageHistory: 'nope' } })).toBe(0);
+  });
+});
+
+describe('drop-raw-usage 迁移', () => {
+  /** 生产里的三处形状：主对话、子代理的逐次请求、上一条用量。 */
+  function withRawUsage() {
+    const raw = {
+      prompt_tokens: 10,
+      attribution: { items: { msg_1: { input_tokens: 10 } } },
+    };
+    return {
+      createdAt: '2026-01-02T03:04:05.000Z',
+      snapshot: {
+        usageHistory: [{ inputTokens: 10, rawUsage: raw }],
+        subagentUsageHistory: [
+          { taskId: 'task-1', requests: [{ inputTokens: 3, rawUsage: raw }], summary: { records: 1 } },
+        ],
+        lastUsage: { inputTokens: 10, rawUsage: raw },
+      },
+    } as Record<string, any>;
+  }
+
+  it('三处原始 usage 都删掉，token 数字原样保留', () => {
+    const document = withRawUsage();
+    expect(dropRawUsage.apply(document)).toBe(3);
+    expect(document.snapshot.usageHistory[0]).toEqual({ inputTokens: 10 });
+    expect(document.snapshot.subagentUsageHistory[0].requests[0]).toEqual({ inputTokens: 3 });
+    expect(document.snapshot.subagentUsageHistory[0].summary).toEqual({ records: 1 });
+    expect(document.snapshot.lastUsage).toEqual({ inputTokens: 10 });
+  });
+
+  it('重复执行没有改动', () => {
+    const document = withRawUsage();
+    dropRawUsage.apply(document);
+    expect(dropRawUsage.apply(document)).toBe(0);
+  });
+
+  it('形状不对的文档不算改动', () => {
+    expect(dropRawUsage.apply({})).toBe(0);
+    expect(dropRawUsage.apply({ snapshot: { usageHistory: 'nope' } })).toBe(0);
+    expect(dropRawUsage.apply({ snapshot: { usageHistory: [null, 3] } })).toBe(0);
   });
 });
 

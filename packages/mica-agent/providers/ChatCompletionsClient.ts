@@ -9,7 +9,6 @@ import {
   type AgentConversationMessage,
   type AgentQueryContent,
   type AgentQueryOptions,
-  throwIfTurnPaused,
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent.js';
@@ -17,7 +16,6 @@ import { providerContentToAgentContent } from '../core/Content.js';
 import { isRetryableError, withRetry } from '../core/retry.js';
 import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
-import { compactRawUsage } from '@packages/mica-common/rawUsage.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
 import { markProviderOmitsFinishReason, providerOmitsFinishReason } from './finishReasonSupport.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
@@ -27,8 +25,6 @@ import type { ModelClientOptions } from './types.js';
 
 export type ChatCompletionsUsageRecord = AgentUsageRecord & {
   provider: 'openai_chat_completions';
-  /** 压缩后的原始 usage（只留标量与一层明细），见 `mica-common/rawUsage.ts`。 */
-  rawUsage?: Record<string, unknown>;
   promptTokens: number;
 };
 
@@ -151,11 +147,10 @@ export class ChatCompletionsClient extends BaseAgent<
       role: 'system',
       content: resolveSystemPrompt(this.systemPrompt),
     };
-    const reseedHistory = options?.resume === true;
     let messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       systemMessage,
       ...prepareHistoricalChatMessages(this.messages),
-      ...(reseedHistory ? [] : [{ role: 'user' as const, content: micaContentToOpenAIContent(question) }]),
+      { role: 'user' as const, content: micaContentToOpenAIContent(question) },
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
       const sessionMessages = messages.filter((message) => message.role !== 'system');
@@ -175,7 +170,6 @@ export class ChatCompletionsClient extends BaseAgent<
 
     while (true) {
       throwIfQueryStopped(options);
-      throwIfTurnPaused(options);
       throwIfAgentMaxTurnsReached(options, requestIndex, totalContent);
       if (options?.rewriteIterationMessages) {
         const rewritten = await options.rewriteIterationMessages(messages.slice(1));
@@ -520,7 +514,6 @@ export class ChatCompletionsClient extends BaseAgent<
       outputTokens,
       totalTokens,
       paidTokenRate,
-      rawUsage: compactRawUsage(usage),
       promptTokens,
     };
 

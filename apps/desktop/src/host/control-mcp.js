@@ -52,17 +52,46 @@ export function buildControlDocs({ server, title, guide = '', endpoints = [], us
       action: endpoint.id,
       method: endpoint.method,
       summary: endpoint.summary,
-      params: (endpoint.params || [])
-        .filter((param) => param.in !== 'header')
-        .map((param) => ({
-          name: param.name,
-          in: param.in,
-          required: param.required === true,
-          description: param.description
-        })),
+      params: describeParams(endpoint),
       returns: endpoint.returns || ''
     }))
   }
+}
+
+/**
+ * 一个 action 对 agent 可见的参数列表。
+ *
+ * 路径占位符（`/browser/tabs/:id/click` 里的 `id`）必须列进来：以前它只存在于 path 里，
+ * 调用时缺了又会直接报错，agent 只能靠猜——真实轨迹里 98 次「缺少必填参数 id」都是这么来的。
+ */
+function describeParams(endpoint) {
+  const fromPath = pathParams(endpoint)
+  return [
+    ...fromPath.map((name) => ({
+      name,
+      in: 'path',
+      required: true,
+      description: name === 'id' ? '目标 id（标签页或浏览器，看这个操作的路径）' : undefined
+    })),
+    // 已经由路径声明过的名字不重复列（老目录里偶尔会重复声明一次）。
+    ...(endpoint.params || [])
+      .filter((param) => param.in !== 'header' && !fromPath.includes(param.name))
+      .map((param) => ({
+        name: param.name,
+        in: param.in,
+        required: param.required === true,
+        description: param.description
+      }))
+  ]
+}
+
+/** `/browser/tabs/:id/click` → ['id']：路径里出现几次就要求几次。 */
+export function pathParams(endpoint) {
+  const names = []
+  for (const match of String(endpoint?.path || '').matchAll(/:([A-Za-z0-9_]+)/g)) {
+    if (!names.includes(match[1])) names.push(match[1])
+  }
+  return names
 }
 
 /**
@@ -73,8 +102,42 @@ export function buildControlDocs({ server, title, guide = '', endpoints = [], us
  */
 export function unknownParams(endpoint, params = {}) {
   if (!params || typeof params !== 'object') return []
-  const known = new Set((endpoint.params || []).map((param) => param.name))
-  return Object.keys(params).filter((key) => !known.has(key))
+  const known = new Set([...(endpoint.params || []).map((param) => param.name), ...pathParams(endpoint)])
+  // `id` 的别名在下面会被折进去，不该再报「不认识这个参数」。
+  const aliases = new Set(Object.keys(PATH_ID_ALIASES))
+  return Object.keys(params).filter((key) => !known.has(key) && !aliases.has(key))
+}
+
+/**
+ * agent 对「标签页 id」的自然写法。
+ *
+ * 文档里的路径参数叫 `id`，但模型更常写 `tabId` / `browserId` / `tab`——真实轨迹里
+ * 这类不匹配有 60+ 次。别名是稳定的同义关系，不该让模型为命名差异多花一次往返。
+ */
+const PATH_ID_ALIASES = {
+  tabId: 'id',
+  tab: 'id',
+  tabid: 'id',
+  browserId: 'id',
+  browser: 'id',
+  targetId: 'id'
+}
+
+/** 把 `id` 的别名折回路径参数名；显式给了 `id` 就优先用它。 */
+function withPathId(endpoint, params) {
+  if (!params || typeof params !== 'object' || params.id !== undefined) return params
+  if (!pathParams(endpoint).includes('id')) return params
+  // 端点自己声明了同名参数（`createTab` 的 `browserId` 是 body 里的目标窗口）时不能折叠，
+  // 否则会把一个真实参数改写成路径 id。
+  const declared = new Set((endpoint.params || []).map((param) => param.name))
+  for (const [alias, target] of Object.entries(PATH_ID_ALIASES)) {
+    if (declared.has(alias)) continue
+    if (params[alias] === undefined || params[alias] === null || params[alias] === '') continue
+    const folded = { ...params, [target]: params[alias] }
+    delete folded[alias]
+    return folded
+  }
+  return params
 }
 
 /**
@@ -85,9 +148,10 @@ export function unknownParams(endpoint, params = {}) {
  */
 export function buildActionRequest(endpoint, params = {}, { owner = '' } = {}) {
   if (!endpoint) throw new Error('未知操作')
-  const unknown = unknownParams(endpoint, params)
+  const folded = withPathId(endpoint, params)
+  const unknown = unknownParams(endpoint, folded)
   if (unknown.length > 0) {
-    const known = (endpoint.params || []).map((param) => param.name)
+    const known = [...pathParams(endpoint), ...(endpoint.params || []).map((param) => param.name)]
     throw new Error(
       `操作 ${endpoint.id} 不认识这些参数：${unknown.join('、')}；可用参数：${known.join('、') || '（无）'}`
     )
@@ -100,7 +164,7 @@ export function buildActionRequest(endpoint, params = {}, { owner = '' } = {}) {
   let hasBody = false
 
   for (const param of endpoint.params || []) {
-    const value = params[param.name]
+    const value = folded[param.name]
     if (value === undefined || value === null || value === '') continue
     if (param.in === 'path') {
       path = path.split(`:${param.name}`).join(encodeURIComponent(String(value)))
@@ -114,11 +178,17 @@ export function buildActionRequest(endpoint, params = {}, { owner = '' } = {}) {
     }
   }
 
-  for (const param of endpoint.params || []) {
-    if (param.required !== true || param.in !== 'path') continue
-    if (path.includes(`:${param.name}`)) {
-      throw new Error(`操作 ${endpoint.id} 缺少必填参数 ${param.name}`)
+  // 路径占位符都在 path 里，不在 params 里：按 path 本身判断，顺带给出它还需要哪些参数，
+  // 这样一次往返就能改对。
+  for (const name of pathParams(endpoint)) {
+    const value = folded[name]
+    if (value === undefined || value === null || value === '') {
+      const known = (endpoint.params || []).map((param) => param.name)
+      throw new Error(
+        `操作 ${endpoint.id} 缺路径参数 ${name}（例如 {"${name}":"tab-1"${known.length ? `,"${known[0]}":…` : ''}}）；这个操作其余可用参数：${known.join('、') || '（无）'}`
+      )
     }
+    path = path.split(`:${name}`).join(encodeURIComponent(String(value)))
   }
 
   if (owner) headers[OWNER_HEADER] = String(owner)

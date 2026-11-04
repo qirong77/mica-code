@@ -280,7 +280,14 @@ function MemorySection({
   processes: ConfigWebPerfMemoryProcess[];
   samples: number;
 }) {
-  const max = Math.max(1, ...processes.map((item) => item.lastRssMB));
+  // 基准取「本轮最后一条采样」，不用 now：这里读的是历史日志，昨天那份里的进程不该
+  // 全被判成已退出。采样间隔 30 秒，落后 4 个周期说明这个进程已经不在了。
+  const latest = processes.reduce((newest, item) => Math.max(newest, item.lastAt || 0), 0);
+  // 还没重建的运行时不会带 `lastAt`：那时不做这个判断，否则活进程会全被标成已退出。
+  const staleBefore = latest > 0 ? latest - 120_000 : Number.NEGATIVE_INFINITY;
+  const alive = processes.filter((item) => (item.lastAt || 0) >= staleBefore);
+  // 条宽按活进程归一：一个已经退出的 1.2GB 宿主会把还在跑的进程全压成一条线。
+  const max = Math.max(1, ...alive.map((item) => item.lastRssMB));
   return (
     <section className="perf-section">
       <header className="perf-section-head">
@@ -293,32 +300,35 @@ function MemorySection({
         <Empty description="还没有内存采样。跑起一条会话后，几十秒内会陆续出现。" />
       ) : (
         <ul className="perf-memory">
-          {processes.map((item) => (
-            <li key={item.key} className="perf-memory-row">
-              <span className="perf-memory-host">
-                {item.host}
-                <span className="perf-memory-meta">
-                  {item.pid}
-                  {item.session ? ` · ${truncate(item.session, 28)}` : ''}
+          {processes.map((item) => {
+            const exited = (item.lastAt || 0) < staleBefore;
+            return (
+              <li key={item.key} className={`perf-memory-row${exited ? ' perf-memory-row-exited' : ''}`}>
+                <span className="perf-memory-host">
+                  {item.host}
+                  <span className="perf-memory-meta">
+                    {item.pid}
+                    {item.session ? ` · ${truncate(item.session, 28)}` : ''}
+                  </span>
                 </span>
-              </span>
-              <span className="perf-memory-bar">
-                <span
-                  className={`perf-memory-fill${item.lastRssMB >= 800 ? ' perf-memory-fill-bad' : ''}`}
-                  style={{ width: `${Math.max(2, Math.round((item.lastRssMB / max) * 100))}%` }}
-                />
-              </span>
-              <span className="perf-memory-value">
-                {Math.round(item.lastRssMB)}MB
-                <span className="perf-memory-meta">
-                  峰值 {Math.round(item.peakRssMB)}MB
-                  {item.growthMB
-                    ? ` · ${item.growthMB > 0 ? '↑' : '↓'}${Math.abs(Math.round(item.growthMB))}MB`
-                    : ''}
+                <span className="perf-memory-bar">
+                  <span
+                    className={`perf-memory-fill${item.lastRssMB >= 800 ? ' perf-memory-fill-bad' : ''}`}
+                    style={{ width: `${Math.max(2, Math.round((item.lastRssMB / max) * 100))}%` }}
+                  />
                 </span>
-              </span>
-            </li>
-          ))}
+                <span className="perf-memory-value">
+                  {Math.round(item.lastRssMB)}MB
+                  <span className="perf-memory-meta">
+                    {exited ? '已退出 · ' : ''}峰值 {Math.round(item.peakRssMB)}MB
+                    {item.growthMB
+                      ? ` · ${item.growthMB > 0 ? '↑' : '↓'}${Math.abs(Math.round(item.growthMB))}MB`
+                      : ''}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

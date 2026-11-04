@@ -4,27 +4,11 @@ import {
   dismissNotification,
   getNotifications,
   notify,
-  queueAfterReload,
-  subscribeNotifications,
-  takeAfterReload
+  subscribeNotifications
 } from './notify'
-
-/** sessionStorage 在 bun test 里不存在，按需补一个最小的。 */
-function installSessionStorage() {
-  const store = new Map()
-  globalThis.window = {
-    sessionStorage: {
-      getItem: (key) => (store.has(key) ? store.get(key) : null),
-      setItem: (key, value) => store.set(key, String(value)),
-      removeItem: (key) => store.delete(key)
-    }
-  }
-  return store
-}
 
 beforeEach(() => {
   clearNotifications()
-  installSessionStorage()
 })
 
 describe('notify', () => {
@@ -85,9 +69,4 @@ describe('notify', () => {
     expect(seen).toEqual([['一']])
   })
 
-  test('跨重载的通知只取一次', () => {
-    queueAfterReload({ level: 'success', text: '界面已更新' })
-    expect(takeAfterReload()).toMatchObject({ text: '界面已更新' })
-    expect(takeAfterReload()).toBeNull()
-  })
 })
