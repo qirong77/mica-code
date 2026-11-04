@@ -2,14 +2,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { appendFile, chmod, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
-import type { AgentObservationEvent } from '@packages/mica-plugin/index.js';
+import type { AgentObservationEvent, PluginObservationEvent } from '@packages/mica-plugin/index.js';
 
 export type CaptureOptions = { captureContent: boolean; maxEventChars: number; maxEventsPerRun: number };
 /**
  * 问题推导规则的版本。改了 classify / 退出码白名单 / 重复调用判定就加一：
  * 宿主据此决定要不要把历史记录的 findings 重算一次（计数与结论不动）。
  */
-export const CLASSIFIER_VERSION = 3;
+export const CLASSIFIER_VERSION = 4;
 export type FindingStatus = 'open' | 'accepted' | 'dismissed' | 'validated' | 'regressed';
 type Config = { providerId: string; protocol: string; model: string; effort: string; role: string };
 type Outcome = 'running' | 'completed' | 'aborted' | 'error' | 'interrupted';
@@ -20,7 +20,7 @@ export type PromptSection = { label: string; sha256: string; chars: number };
 export type RunInput = { sha256: string; chars: number; excerpt?: string };
 export type ReviewFinding = {
   id: string;
-  kind: 'tool-error' | 'repeated-call' | 'run-error' | 'retry' | 'user-retry' | 'user-correction';
+  kind: 'tool-error' | 'repeated-call' | 'run-error' | 'retry' | 'user-retry' | 'user-correction' | 'plugin-background';
   title: string;
   module: string;
   suggestion: string;
@@ -50,6 +50,13 @@ export type CorrectionKind = 'edit' | 'recall' | 'retry';
 export type CorrectionCounts = Record<CorrectionKind, number>;
 /** 这条运行由委派产生时记下的来源：哪一类子代理、被哪个会话派生。 */
 export type RunDelegation = { type: string; parentSessionId?: string };
+/**
+ * 这条运行不是会话里的一轮，而是宿主内部工作：压缩摘要、旁问线程、插件自己问模型。
+ *
+ * 它们同样花钱、同样会失败，但按「用户的一轮」统计会把一次 turn 的成本与成败算错——
+ * 一次 turn 配一条标题生成，运行数直接翻倍。
+ */
+export type RunHelper = { kind: string; pluginId?: string; purpose?: string };
 /**
  * 采集那一刻的插件装配结论（`$MICA_HOME/plugin-status.json`）。
  *
@@ -97,6 +104,8 @@ export type RunSummary = {
   corrections?: CorrectionCounts;
   /** 委派来源。有它才能按父会话拼出委派树。 */
   delegation?: RunDelegation;
+  /** 有它说明这条运行是宿主内部工作，不是用户的一轮。 */
+  helper?: RunHelper;
   /** 采集这一刻的插件装配结论。缺文件或损坏时整块省略。 */
   plugins?: RunPlugins;
   inputTokens: number;
@@ -141,6 +150,36 @@ export type DelegationParentSummary = {
   types: DelegationTypeSummary[];
 };
 export type DelegationSummary = { parents: DelegationParentSummary[] };
+/**
+ * 一类 helper 运行的结果与开销，按 `kind`（插件发起的再按 `pluginId`）归并。
+ *
+ * 平均请求耗时 / 输出 token 算不出来时**不出现**——写 0 会被读成「零耗时」。
+ */
+export type HelperKindSummary = {
+  kind: string;
+  pluginId?: string;
+  runs: number;
+  completed: number;
+  failed: number;
+  aborted: number;
+  requests: number;
+  avgRequestMs?: number;
+  avgOutputTokens?: number;
+};
+export type HelperSummary = { total: number; kinds: HelperKindSummary[] };
+/**
+ * 某个插件的某个常驻任务失败过多少次。
+ *
+ * 这些失败发生在任何一轮之外，所以没有 `cwd`、也没有 `runId`：它们属于这台机器，
+ * 不受 `review(cwd)` 的范围过滤。
+ */
+export type PluginFailureSummary = {
+  pluginId: string;
+  taskId: string;
+  count: number;
+  lastAt: string;
+  lastError: string;
+};
 export type ReviewReport = {
   version: 1;
   generatedAt: string;
@@ -150,6 +189,10 @@ export type ReviewReport = {
   findings: ReviewFinding[];
   /** 委派树：按父会话归拢后、再按子代理类型聚合成败与成本。 */
   delegation: DelegationSummary;
+  /** helper 运行（压缩摘要、旁问、插件问模型）按来源归并的结果。 */
+  helpers: HelperSummary;
+  /** 插件常驻任务失败；机器级事实，不受工作区过滤。 */
+  pluginFailures: PluginFailureSummary[];
   warnings: string[];
   scannedRuns: number;
   limits: { runs: number; findingsPerRun: number; evidencePerFinding: number };
@@ -199,6 +242,21 @@ const MAX_PENDING_CORRECTIONS = 200;
 const MAX_PLUGIN_IDS = 50;
 const PLUGIN_HASH_CHARS = 12;
 const MAX_DELEGATION_PARENTS = 50;
+const MAX_HELPER_KINDS = 50;
+const MAX_PLUGIN_FAILURES = 100;
+/** 同一任务失败到第三次才值得看一眼：前两次多半是外部服务抖了一下。 */
+const PLUGIN_FAILURE_FINDING_COUNT = 3;
+/** 同一个常驻任务在本进程内最多每 5 分钟落一条失败记录（每个任务的第一条一定落盘）。 */
+const PLUGIN_EVENT_INTERVAL_MS = 5 * 60 * 1000;
+const MAX_PLUGIN_EVENT_KEYS = 500;
+/** 单个事件文件的上限：滚成 `.1` 之后重新写，坏掉的任务写不满磁盘。 */
+const MAX_PLUGIN_EVENTS_BYTES = 4 * 1024 * 1024;
+/**
+ * 读的上限比滚动的阈值大：滚出来的 `.1` 一定比阈值多一行，同用一个数会让它永远被跳过。
+ */
+const MAX_PLUGIN_EVENTS_READ_BYTES = 8 * 1024 * 1024;
+const PLUGIN_EVENTS_FILE = 'plugin-events.jsonl';
+const PLUGIN_EVENTS_ROTATED = 'plugin-events.1.jsonl';
 const STATUSES = new Set<FindingStatus>(['open', 'accepted', 'dismissed', 'validated', 'regressed']);
 const OUTCOMES = new Set<Outcome>(['running', 'completed', 'aborted', 'error', 'interrupted']);
 const COMPACTION_STRATEGIES = new Set<CompactionStrategy>(['local', 'llm', 'idle']);
@@ -871,6 +929,40 @@ function messageCount(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
 }
+/**
+ * `run:start.helper` → 摘要里那一块。
+ *
+ * 格式不对时整块丢掉而不是判整份摘要损坏：这一块是后加的，缺省就是「不是 helper」，
+ * 一条脏字段不该让一整次运行的历史作废。
+ */
+function helperOf(value: unknown): RunHelper | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const item = value as { kind?: unknown; pluginId?: unknown; purpose?: unknown };
+  const kind = typeof item.kind === 'string' ? boundedText(item.kind, 80).trim() : '';
+  if (!kind) return undefined;
+  const pluginId = typeof item.pluginId === 'string' ? boundedText(item.pluginId, 200).trim() : '';
+  const purpose = typeof item.purpose === 'string' ? boundedText(item.purpose, 200).trim() : '';
+  return { kind, ...(pluginId ? { pluginId } : {}), ...(purpose ? { purpose } : {}) };
+}
+
+/** helper 来源的短名：标题、模块与报告用同一份写法，两处不一致就认不出是同一件事。 */
+function helperSource(helper: RunHelper): string {
+  return helper.pluginId ? `${helper.pluginId} · ${helper.kind}` : helper.kind;
+}
+
+/**
+ * 插件失败条目的 id：既看得出是哪个插件的哪个任务，又能直接当 `decisions/<id>.json` 的文件名。
+ *
+ * 任务名由插件自己定，可能带 `/`、`:` 这类路径或协议字符——原样拼进文件名会写进别的目录。
+ */
+function pluginFailureId(pluginId: string, taskId: string): string {
+  const safe = (value: string, max: number): string =>
+    value
+      .replace(/[^A-Za-z0-9._-]/g, '_')
+      .replace(/^[_.-]+|[_.-]+$/g, '')
+      .slice(0, max) || 'unnamed';
+  return `plugin-background:${safe(pluginId, 80)}:${safe(taskId, 120)}`;
+}
 
 /**
  * 用户纠正 → 复盘条目的文案。
@@ -943,20 +1035,22 @@ function readPluginSnapshot(path: string | undefined): RunPlugins | undefined {
   }
 }
 
+/** 某一项指标的均值；缺字段或非法值的运行不参与，全都缺时不出现（0 会被读成真实值）。 */
+function meanOf(runs: RunSummary[], pick: (run: RunSummary) => number | undefined): number | undefined {
+  let total = 0;
+  let count = 0;
+  for (const run of runs) {
+    const value = pick(run);
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      total += value;
+      count++;
+    }
+  }
+  return count > 0 ? Math.round((total / count) * 10) / 10 : undefined;
+}
+
 /** 一种子代理的成败与成本；缺字段的指标不出现在返回值里。 */
 function delegationTypeSummary(type: string, runs: RunSummary[]): DelegationTypeSummary {
-  const mean = (pick: (run: RunSummary) => number | undefined): number | undefined => {
-    let total = 0;
-    let count = 0;
-    for (const run of runs) {
-      const value = pick(run);
-      if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
-        total += value;
-        count++;
-      }
-    }
-    return count > 0 ? Math.round((total / count) * 10) / 10 : undefined;
-  };
   const row: DelegationTypeSummary = {
     type,
     runs: runs.length,
@@ -965,9 +1059,9 @@ function delegationTypeSummary(type: string, runs: RunSummary[]): DelegationType
     failed: runs.filter((run) => run.outcome === 'error' || run.outcome === 'interrupted').length,
     aborted: runs.filter((run) => run.outcome === 'aborted').length,
   };
-  const requests = mean((run) => run.requestCount);
+  const requests = meanOf(runs, (run) => run.requestCount);
   if (requests !== undefined) row.avgRequests = requests;
-  const output = mean((run) => run.outputTokens);
+  const output = meanOf(runs, (run) => run.outputTokens);
   if (output !== undefined) row.avgOutputTokens = output;
   return row;
 }
@@ -1008,6 +1102,59 @@ export function summarizeDelegation(runs: RunSummary[], warnings: string[] = [])
   return { parents: groups };
 }
 
+/**
+ * 把 helper 运行按「来源」聚合：`kind`，插件发起的再按 `pluginId` 分开。
+ *
+ * 分开的理由和委派一样：自动压缩每轮摘要 40 秒，与某个插件的起标题请求变慢，
+ * 混成一行就只能看到「helper 平均 40 秒」，改哪一处全靠猜。
+ *
+ * `interrupted`（宿主半路退出）不计入 failed：它说明的是宿主怎么了，不是这条机制怎么了。
+ */
+export function summarizeHelpers(runs: RunSummary[], warnings: string[] = []): HelperSummary {
+  const groups = new Map<string, { kind: string; pluginId?: string; runs: RunSummary[] }>();
+  let total = 0;
+  for (const run of runs) {
+    const helper = run.helper;
+    if (!helper) continue;
+    total++;
+    const key = `${helper.kind}\n${helper.pluginId ?? ''}`;
+    const group = groups.get(key) ?? {
+      kind: helper.kind,
+      ...(helper.pluginId ? { pluginId: helper.pluginId } : {}),
+      runs: [],
+    };
+    group.runs.push(run);
+    groups.set(key, group);
+  }
+  const kinds = [...groups.values()]
+    .map((group) => {
+      const requests = group.runs.reduce((sum, run) => sum + finiteCount(run.requestCount), 0);
+      const row: HelperKindSummary = {
+        kind: group.kind,
+        ...(group.pluginId ? { pluginId: group.pluginId } : {}),
+        runs: group.runs.length,
+        completed: group.runs.filter((run) => run.outcome === 'completed').length,
+        failed: group.runs.filter((run) => run.outcome === 'error').length,
+        aborted: group.runs.filter((run) => run.outcome === 'aborted').length,
+        requests,
+      };
+      // 平均请求耗时按「一次请求」算：一轮里发了几次请求，整轮耗时平摊到每次才有意义。
+      const requestMs = group.runs.reduce((sum, run) => sum + finiteCount(run.requestMsTotal ?? 0), 0);
+      if (requests > 0) row.avgRequestMs = Math.round((requestMs / requests) * 10) / 10;
+      const output = meanOf(group.runs, (run) => run.outputTokens);
+      if (output !== undefined) row.avgOutputTokens = output;
+      return row;
+    })
+    .sort(
+      (a, b) => b.runs - a.runs || a.kind.localeCompare(b.kind) || (a.pluginId ?? '').localeCompare(b.pluginId ?? ''),
+    );
+  if (kinds.length > MAX_HELPER_KINDS) {
+    warnings.push(`Helper summary limited to the ${MAX_HELPER_KINDS} sources with the most runs.`);
+    return { total, kinds: kinds.slice(0, MAX_HELPER_KINDS) };
+  }
+  return { total, kinds };
+}
+
 export class HarnessRecorder {
   private readonly root: string;
   private readonly owners = new WeakMap<object, Map<number, RunState>>();
@@ -1027,6 +1174,8 @@ export class HarnessRecorder {
   private readonly corrections: PendingCorrection[] = [];
   /** 归属不明被丢弃的纠正次数，进 review 的 warnings。 */
   private droppedCorrections = 0;
+  /** `pluginId/taskId` → 上次写插件失败记录的时间，只用于限流。 */
+  private readonly pluginEventWrites = new Map<string, number>();
 
   constructor(
     root: string,
@@ -1247,6 +1396,10 @@ export class HarnessRecorder {
    * answer was rejected. Only the fingerprint is stored, never the prompt text.
    */
   private noteRunInput(state: RunState, seq: number, text: string, memory: InputMemory): void {
+    // helper 运行与委派子代理都不是用户的一轮：压缩摘要每轮喂的是同一段 transcript，
+    // 子代理的输入是父代理派给它的任务。拿它们跟上一轮用户输入比相似度，既会误报
+    // 「用户重试」，也会把「上一轮用户说了什么」这个槽位挤掉。
+    if (state.summary.helper || state.summary.delegation) return;
     const session = state.summary.sessionId;
     if (!session) return;
     const bounded = text.slice(0, 2000);
@@ -1271,6 +1424,8 @@ export class HarnessRecorder {
   }
 
   private noteRunOutcome(summary: RunSummary, outcome: Outcome, memory: InputMemory): void {
+    // 与 noteRunInput 成对：不写记忆的运行也不该改写它的终态。
+    if (summary.helper || summary.delegation) return;
     const session = summary.sessionId;
     if (!session) return;
     const entry = memory.get(session);
@@ -1285,13 +1440,23 @@ export class HarnessRecorder {
     attempt?: number,
   ): void {
     const retry = kind === 'retry';
+    // helper 的失败按来源分开记：压缩摘要一直失败与「某一轮失败」是两件事，
+    // 合并成一条只会让人觉得是那轮任务本身的问题。
+    const helper = state.summary.helper;
+    const source = helper ? helperSource(helper) : '';
     this.addFinding(
       state,
       kind,
-      `${state.summary.config.providerId}\n${state.summary.config.model}\n${category}`,
+      helper
+        ? `helper\n${helper.kind}\n${helper.pluginId ?? ''}\n${category}`
+        : `${state.summary.config.providerId}\n${state.summary.config.model}\n${category}`,
       seq,
-      retry ? `Request retry: ${category}` : `Run ended with an error: ${category}`,
-      'runtime',
+      helper
+        ? `${retry ? 'Helper request retry' : 'Helper run failed'}: ${source} (${category})`
+        : retry
+          ? `Request retry: ${category}`
+          : `Run ended with an error: ${category}`,
+      helper ? (helper.pluginId ? `plugin:${helper.pluginId}` : `helper:${helper.kind}`) : 'runtime',
       retry
         ? 'Inspect provider availability, limits, and retry configuration before proposing a runtime change.'
         : 'Inspect the final error and preceding trace before identifying a runtime or guidance change.',
@@ -1391,6 +1556,132 @@ export class HarnessRecorder {
           detail,
         );
     }
+  }
+
+  /**
+   * 记一条插件常驻任务的失败。
+   *
+   * 它不挂在任何一条 run 上（常驻任务不在轮次里），所以单独落 `plugin-events.jsonl`：
+   * 硬塞进某次运行的轨迹，会让那条运行的失败原因与耗时都变成假的。
+   *
+   * 限流只影响写盘频率、不丢「曾经失败」这个事实：每个任务在本进程内的第一条一定写
+   * （一次失败立刻可见），之后同一任务每 5 分钟最多一条，`tick` / `failures` 随事件
+   * 一起写进去，聚合时仍能看出「它一直在坏」。
+   */
+  notePluginEvent(event: PluginObservationEvent): void {
+    if (this.disposed) return;
+    try {
+      if (!event || event.type !== 'background:failed') return;
+      const pluginId = boundedText(event.pluginId, 200).trim();
+      const taskId = boundedText(event.taskId, 200).trim();
+      if (!pluginId || !taskId) return;
+      const key = `${pluginId}\n${taskId}`;
+      const now = Date.now();
+      const last = this.pluginEventWrites.get(key);
+      if (last !== undefined && now - last < PLUGIN_EVENT_INTERVAL_MS) return;
+      if (!this.pluginEventWrites.has(key) && this.pluginEventWrites.size >= MAX_PLUGIN_EVENT_KEYS)
+        this.pluginEventWrites.delete(this.pluginEventWrites.keys().next().value!);
+      this.pluginEventWrites.set(key, now);
+      const record = {
+        at: timestamp(event.timestamp),
+        pluginId,
+        taskId,
+        tick: finiteCount(event.tick),
+        failures: finiteCount(event.failures),
+        error: boundedText(event.error, 500),
+      };
+      const line = `${JSON.stringify(record)}\n`;
+      this.enqueue(async () => {
+        await this.directory(this.root);
+        await this.rotatePluginEvents();
+        await appendFile(join(this.root, PLUGIN_EVENTS_FILE), line, { mode: 0o600 });
+      });
+    } catch (error) {
+      try {
+        this.onError(error);
+      } catch {
+        /* reporting must not break the plugin task */
+      }
+    }
+  }
+
+  /** 单个事件文件有上限：超了就滚成 `.1`（覆盖旧的），一个坏掉的任务写不满磁盘。 */
+  private async rotatePluginEvents(): Promise<void> {
+    try {
+      const info = await stat(join(this.root, PLUGIN_EVENTS_FILE));
+      if (info.size <= MAX_PLUGIN_EVENTS_BYTES) return;
+      await rename(join(this.root, PLUGIN_EVENTS_FILE), join(this.root, PLUGIN_EVENTS_ROTATED));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+
+  /**
+   * 读当前与轮转后的插件事件文件，按 `pluginId + taskId` 聚合。
+   *
+   * 坏行、缺文件、超限都是「读不到那一部分」，记 warning 后继续：一份写坏的日志
+   * 不该让整次复盘失败。
+   */
+  private async readPluginFailures(warnings: string[]): Promise<PluginFailureSummary[]> {
+    const groups = new Map<string, PluginFailureSummary>();
+    for (const name of [PLUGIN_EVENTS_FILE, PLUGIN_EVENTS_ROTATED]) {
+      let text: string;
+      try {
+        const info = await stat(join(this.root, name));
+        if (info.size > MAX_PLUGIN_EVENTS_READ_BYTES) {
+          warnings.push(`${name} exceeds the plugin event size limit; its failures were not counted.`);
+          continue;
+        }
+        text = await readFile(join(this.root, name), 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+          warnings.push(`Unreadable ${name}: ${boundedText(String(error))}`);
+        continue;
+      }
+      let corrupt = 0;
+      for (const line of text.split('\n')) {
+        if (!line.trim()) continue;
+        let item: { at?: unknown; pluginId?: unknown; taskId?: unknown; error?: unknown };
+        try {
+          item = JSON.parse(line) as typeof item;
+        } catch {
+          corrupt++;
+          continue;
+        }
+        const pluginId = typeof item?.pluginId === 'string' ? boundedText(item.pluginId, 200).trim() : '';
+        const taskId = typeof item?.taskId === 'string' ? boundedText(item.taskId, 200).trim() : '';
+        const at = typeof item?.at === 'string' && Number.isFinite(Date.parse(item.at)) ? item.at : '';
+        if (!pluginId || !taskId || !at) {
+          corrupt++;
+          continue;
+        }
+        const error = typeof item.error === 'string' ? boundedText(item.error, 500) : '';
+        const key = `${pluginId}\n${taskId}`;
+        const existing = groups.get(key);
+        if (!existing) {
+          groups.set(key, { pluginId, taskId, count: 1, lastAt: at, lastError: error });
+          continue;
+        }
+        existing.count++;
+        if (at >= existing.lastAt) {
+          existing.lastAt = at;
+          existing.lastError = error;
+        }
+      }
+      if (corrupt > 0) warnings.push(`${name} has ${corrupt} unreadable line(s); they were ignored.`);
+    }
+    const rows = [...groups.values()].sort(
+      (a, b) =>
+        b.count - a.count ||
+        b.lastAt.localeCompare(a.lastAt) ||
+        a.pluginId.localeCompare(b.pluginId) ||
+        a.taskId.localeCompare(b.taskId),
+    );
+    if (rows.length > MAX_PLUGIN_FAILURES) {
+      warnings.push(`Plugin failures limited to the ${MAX_PLUGIN_FAILURES} tasks with the most recorded failures.`);
+      return rows.slice(0, MAX_PLUGIN_FAILURES);
+    }
+    return rows;
   }
 
   /**
@@ -1559,6 +1850,13 @@ export class HarnessRecorder {
           chars: inputText.length,
           ...(state.options.captureContent ? { excerpt: inputText.slice(0, 300) } : {}),
         };
+        // 先认 helper 再记输入指纹：压缩摘要每轮喂的是同一段 transcript，当成「用户重试
+        // 同一任务」只是把正常机制读成用户的否定。
+        const helper = helperOf(event.helper);
+        if (helper) {
+          state.summary.helper = helper;
+          stored.helper = helper;
+        }
         this.noteRunInput(state, seq, inputText, this.lastInputs);
         // 委派来源：有了它才能把子代理的运行挂回父会话，并按类型比成败。
         if (event.delegation) {
@@ -1840,6 +2138,10 @@ export class HarnessRecorder {
         if (!Number.isFinite(summary.expectedExits)) summary.expectedExits = 0;
         // 压缩计数同样是后加的：老摘要按 0 报，不要凭空补一次压缩。
         summary.compactions = compactionCounts(summary.compactions as Partial<CompactionCounts> | undefined);
+        // helper 分类也是后加的：归一化一次，格式不对就整块丢掉（不判整份摘要损坏）。
+        const helper = helperOf(summary.helper);
+        if (helper) summary.helper = helper;
+        else delete summary.helper;
         if (filter && summary.cwd !== filter) continue;
         if (runs.length >= MAX_RUNS) {
           warnings.push(`Review limited to the ${MAX_RUNS} most recently updated runs in the selected scope.`);
@@ -1865,6 +2167,8 @@ export class HarnessRecorder {
     for (const summary of runs) await inspectTrace(summary, warnings);
     runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
     const delegation = summarizeDelegation(runs, warnings);
+    const helpers = summarizeHelpers(runs, warnings);
+    const pluginFailures = await this.readPluginFailures(warnings);
     const merged = new Map<string, ReviewFinding>();
     for (const run of runs)
       for (const candidate of run.findings) {
@@ -1876,6 +2180,25 @@ export class HarnessRecorder {
         existing.occurrences += candidate.occurrences;
         existing.evidence.push(...candidate.evidence.slice(0, Math.max(0, MAX_EVIDENCE - existing.evidence.length)));
       }
+    // 插件常驻任务的失败不属于任何一条 run（没有 runId、也没有 cwd），但同样要进
+    // `merged`：人工判断按 id 落在 decisions/ 里，不经过合并的条目就永远点不动。
+    for (const failure of pluginFailures) {
+      if (failure.count < PLUGIN_FAILURE_FINDING_COUNT) continue;
+      const id = pluginFailureId(failure.pluginId, failure.taskId);
+      merged.set(id, {
+        id,
+        kind: 'plugin-background',
+        title: `插件常驻任务反复失败：${failure.pluginId}/${failure.taskId}`,
+        module: `plugin:${failure.pluginId}`,
+        suggestion:
+          '先看这个插件的设置与凭据（缺 Key、地址填错、权限不足都会让每次周期都失败），再看它依赖的外部服务是否可达；两者都正常仍然失败，说明是插件或宿主的缺陷，按最近一次错误去改代码。',
+        evaluation: `最近一次记录（${failure.lastAt}）：${failure.lastError || '(没有错误文本)'}。等下一个周期（或手动触发一次）确认日志里不再出现同一个错误，并且插件的「运行状态」恢复上报。`,
+        status: 'open',
+        occurrences: failure.count,
+        // 插件事件不属于任何一条 run：伪造一个 runId 只会让人点进去看不到东西。
+        evidence: [],
+      });
+    }
     for (const finding of merged.values()) {
       try {
         const file = join(this.root, 'decisions', `${finding.id}.json`);
@@ -1911,6 +2234,8 @@ export class HarnessRecorder {
       runs,
       findings: [...merged.values()].sort((a, b) => b.occurrences - a.occurrences || a.id.localeCompare(b.id)),
       delegation,
+      helpers,
+      pluginFailures,
       warnings,
       scannedRuns,
       limits: { runs: MAX_RUNS, findingsPerRun: MAX_FINDINGS, evidencePerFinding: MAX_EVIDENCE },
@@ -1920,7 +2245,10 @@ export class HarnessRecorder {
   }
 
   async decide(id: string, status: FindingStatus, note: string): Promise<void> {
-    if (!/^[a-f0-9]{64}$/.test(id)) throw new Error('Invalid finding ID');
+    // 运行派生条目的 id 是内容摘要；插件失败条目的 id 是可读的 `plugin-background:<plugin>:<task>`。
+    // 两者都必须能直接当文件名，所以只放行这一份白名单字符。
+    if (!/^[a-f0-9]{64}$/.test(id) && !/^plugin-background:[A-Za-z0-9._-]{1,80}:[A-Za-z0-9._-]{1,120}$/.test(id))
+      throw new Error('Invalid finding ID');
     if (!STATUSES.has(status)) throw new Error('Invalid finding status');
     const data = JSON.stringify(
       { id, status, note: boundedText(note, 8000), updatedAt: new Date().toISOString() },
@@ -2280,7 +2608,9 @@ function tracesOwnRun(traceFile: string, id: string): boolean {
 function validSummary(value: RunSummary, directoryId: string): boolean {
   if (!value || value.version !== 1 || value.id !== directoryId || !OUTCOMES.has(value.outcome)) return false;
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value.id)) return false;
-  if (!Number.isInteger(value.sourceRunId) || value.sourceRunId < 0) return false;
+  // 负数 runId 属于不在 turn loop 里的子运行（委派子代理与 helper）：它们是合法的
+  // 运行记录，早期版本按「必须非负」判会把它们整份丢掉。
+  if (!Number.isSafeInteger(value.sourceRunId)) return false;
   if (
     !(value.sessionId === null || typeof value.sessionId === 'string') ||
     !(value.sessionTitle === null || typeof value.sessionTitle === 'string')
@@ -2410,6 +2740,13 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
       !isPluginIdList(plugins.skipped))
   )
     return false;
+  // helper 分类是后加的：缺省合法，形状不对只丢掉这一块——它只影响报告怎么分组，
+  // 判整份摘要损坏会把那次运行的计数与证据一起丢掉。
+  if (value.helper !== undefined) {
+    const helper = helperOf(value.helper);
+    if (helper) value.helper = helper;
+    else delete value.helper;
+  }
   // 请求级耗时是后加的：老摘要没有它，有就必须是有限的非负数。
   for (const key of ['requestMsTotal', 'requestMsMax', 'firstTokenMsTotal', 'firstTokenMsCount'] as const) {
     const metric = value[key];
@@ -2482,7 +2819,6 @@ async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<vo
           !Number.isInteger(event.seq) ||
           event.seq <= previous ||
           (summary.droppedEvents === 0 && event.seq !== previous + 1) ||
-          event.seq > summary.eventCount ||
           typeof event.type !== 'string' ||
           typeof event.timestamp !== 'string' ||
           !Number.isFinite(Date.parse(event.timestamp))
@@ -2495,9 +2831,11 @@ async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<vo
         return;
       }
     }
-    if (lines.length !== summary.eventCount - summary.droppedEvents)
+    // 摘要每 25 条事件才落一次盘：宿主被杀掉的那次运行，轨迹会比摘要多出几条。
+    // 多出来是正常的（摘要滞后），少掉才是真的缺事件。
+    if (lines.length < summary.eventCount - summary.droppedEvents)
       warnings.push(
-        `Run ${summary.id} trace count differs from its summary; events may be missing or the run may still be active.`,
+        `Run ${summary.id} trace has fewer events than its summary counts; the trace may be truncated.`,
       );
   } catch {
     warnings.push(`Run ${summary.id} has a missing or unreadable trace: ${summary.traceFile}`);
@@ -2550,11 +2888,14 @@ function markdownReport(report: ReviewReport, directory: string): string {
     '| Run | Outcome | Model | Requests | Tools / errors | Retries | Compactions (local / llm / idle) | Waiting / first token | Tokens in / out / cached | Dropped events |',
     '| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
   ];
-  for (const run of report.runs)
+  // helper 运行不进 Runs 表：一次 turn 配一条标题生成，表会翻倍而没人看；它们仍在
+  // JSON 的 runs 里，由下面的 Helpers 小节按来源汇总。
+  const userRuns = report.runs.filter((run) => !run.helper);
+  for (const run of userRuns)
     lines.push(
       `| [${run.id}](<${link(run.traceFile)}>) | ${run.outcome} | ${markdownText(run.config.model)}${run.delegation ? ` · subagent ${markdownText(run.delegation.type)}` : ''} | ${run.requestCount} | ${run.toolCalls} / ${run.toolErrors} | ${run.retries} | ${compactionSummary(run)} | ${requestWaitSummary(run)} | ${run.inputTokens} / ${run.outputTokens} / ${run.cachedInputTokens} | ${run.droppedEvents} |`,
     );
-  if (!report.runs.length) lines.push('', 'No runs in this scope.');
+  if (!userRuns.length) lines.push('', 'No runs in this scope.');
   lines.push('', '## Delegation', '');
   if (!report.delegation.parents.length) lines.push('No delegated runs in this scope.', '');
   else {
@@ -2567,6 +2908,34 @@ function markdownReport(report: ReviewReport, directory: string): string {
         lines.push(
           `| ${markdownText(parent.parentSessionId ?? '(unknown parent)')} | ${markdownText(row.type)} | ${row.runs} | ${row.completed} | ${row.failed} | ${row.aborted} | ${row.avgRequests ?? '—'} | ${row.avgOutputTokens ?? '—'} |`,
         );
+    lines.push('');
+  }
+  lines.push('', '## Helpers', '');
+  if (!report.helpers.kinds.length) lines.push('No helper runs in this scope.', '');
+  else {
+    lines.push(
+      '| Source | Runs | Completed | Failed | Aborted | Requests | Avg request ms | Output tokens |',
+      '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |',
+    );
+    for (const row of report.helpers.kinds)
+      lines.push(
+        `| ${markdownText(helperSource(row))} | ${row.runs} | ${row.completed} | ${row.failed} | ${row.aborted} | ${row.requests} | ${row.avgRequestMs ?? '—'} | ${row.avgOutputTokens ?? '—'} |`,
+      );
+    lines.push('');
+  }
+  lines.push('', '## Plugin health', '');
+  // 常驻任务失败是机器级事实：插件不在任何一轮里跑，也就没有 cwd 可过滤。
+  lines.push(
+    'Plugin background tasks fail per machine, not per workspace: these counts ignore the reviewed working directory.',
+    '',
+  );
+  if (!report.pluginFailures.length) lines.push('No plugin background failures recorded.', '');
+  else {
+    lines.push('| Plugin | Task | Failures | Last failure | Last error |', '| --- | --- | ---: | --- | --- |');
+    for (const failure of report.pluginFailures)
+      lines.push(
+        `| ${markdownText(failure.pluginId)} | ${markdownText(failure.taskId)} | ${failure.count} | ${markdownText(failure.lastAt)} | ${markdownText(failure.lastError)} |`,
+      );
     lines.push('');
   }
   lines.push('', '## Findings', '');

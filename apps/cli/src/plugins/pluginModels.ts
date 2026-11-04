@@ -39,6 +39,27 @@ export type PluginModelUsageEntry = {
 
 export type PluginModelRecorder = (entry: PluginModelUsageEntry) => void;
 
+/**
+ * 一次插件模型请求在**运行轨迹**里的落点。
+ *
+ * 记账（上面的 recorder）回答「花了多少 token」，轨迹回答「什么时候花的、等了多久、
+ * 失败在哪一步」——两者不能互相替代：Stats 只有金额，复盘要的是金额背后的那一次请求。
+ * 三个请求回调原样交给 `runModelTextRequest`，`finish` 在成功与失败时都要调一次。
+ */
+export type PluginModelTrace = {
+  onRequestStart: (info: { messageCount: number; tools?: unknown }) => void;
+  onRequestEnd: (info: {
+    durationMs: number;
+    firstTokenMs?: number;
+    attempts: number;
+    outcome: 'completed' | 'error' | 'aborted';
+    toolCalls?: number;
+    error?: string;
+  }) => void;
+  onRetry: (info: { attempt: number; delayMs: number; error: unknown }) => void;
+  finish(outcome: 'completed' | 'error' | 'aborted', error?: unknown, usage?: readonly AgentUsageRecord[]): void;
+};
+
 /** 主配置的接口信息：插件声明「跟随主配置」时由宿主解析出来。 */
 export type MainProviderConfig = {
   baseUrl: string;
@@ -60,6 +81,17 @@ export type CreatePluginModelsOptions = {
   resolveMainProvider?: (model?: string, owner?: unknown) => MainProviderConfig;
   /** 测试注入点。 */
   createClient?: (options: ModelClientOptions) => ModelTextClient;
+  /**
+   * 把这次请求记进运行轨迹（harness 复盘用）。没有会话可归属（`mica commit` 这类
+   * 一次性命令）时返回 undefined，请求照常发、只是不进轨迹。
+   */
+  trace?: (info: {
+    pluginId: string;
+    purpose: string;
+    model: string;
+    input: string;
+    owner?: unknown;
+  }) => PluginModelTrace | undefined;
 };
 
 export function createPluginModels(options: CreatePluginModelsOptions = {}): PluginModelsHandler {
@@ -68,6 +100,13 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
     const model = resolved.model.trim();
     const startedAt = new Date().toISOString();
     const record = options.captureRecorder?.(request.owner) ?? options.record;
+    const trace = openTrace(options.trace, {
+      pluginId,
+      purpose: request.purpose,
+      model,
+      input: request.user,
+      owner: request.owner,
+    });
     try {
       const result = await runModelTextRequest({
         baseUrl: resolved.baseUrl,
@@ -83,7 +122,17 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
         timeoutMs: request.timeoutMs,
         signal: request.signal,
         createClient: options.createClient,
+        ...(trace
+          ? {
+              observer: {
+                onRequestStart: trace.onRequestStart,
+                onRequestEnd: trace.onRequestEnd,
+                onRetry: trace.onRetry,
+              },
+            }
+          : {}),
       });
+      finishTrace(trace, 'completed', undefined, result.usageHistory);
       safelyRecord(record, {
         pluginId,
         purpose: request.purpose,
@@ -98,6 +147,7 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
       // 失败的请求也可能已经产生了 provider 用量（例如超时的长回复）：有就记，
       // 没有就不写空记录。
       const requests = usageHistoryOf(error);
+      finishTrace(trace, isPluginAbort(error) ? 'aborted' : 'error', error, requests);
       if (requests.length > 0) {
         safelyRecord(record, {
           pluginId,
@@ -112,6 +162,52 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
       throw error;
     }
   };
+}
+
+/**
+ * 打开这次请求的运行轨迹。轨迹是观察面，失败只写日志：一个观测方的问题不该让插件
+ * 的模型请求发不出去，也不该替换请求本身的错误。
+ */
+function openTrace(
+  trace: CreatePluginModelsOptions['trace'],
+  info: { pluginId: string; purpose: string; model: string; input: string; owner?: unknown },
+): PluginModelTrace | undefined {
+  if (!trace) return undefined;
+  try {
+    return trace(info);
+  } catch (error) {
+    logTraceFailure(info.pluginId, info.purpose, error);
+    return undefined;
+  }
+}
+
+function finishTrace(
+  trace: PluginModelTrace | undefined,
+  outcome: 'completed' | 'error' | 'aborted',
+  error: unknown,
+  usage: readonly AgentUsageRecord[],
+): void {
+  if (!trace) return;
+  try {
+    trace.finish(outcome, error, usage);
+  } catch (failure) {
+    logTraceFailure('plugin', outcome, failure);
+  }
+}
+
+function logTraceFailure(pluginId: string, purpose: string, error: unknown): void {
+  try {
+    createPluginLogger(pluginId).warn('plugin:model-trace-failed', {
+      purpose,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } catch {
+    /* A failing disk cannot alter the completed model result. */
+  }
+}
+
+function isPluginAbort(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 /**

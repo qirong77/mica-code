@@ -110,6 +110,44 @@ function baseContext(configDir: string, hooks = new HookRegistry()) {
 }
 
 describe('PluginManager robustness', () => {
+  it('reports a failing background task through plugin:observe with its attempt count', async () => {
+    const hooks = new HookRegistry();
+    const events: unknown[] = [];
+    hooks.on('plugin:observe', (event) => {
+      events.push(event);
+    });
+    const manager = new PluginManager();
+    manager.register({
+      id: 'poller',
+      name: 'poller',
+      setup: (ctx) => {
+        ctx.background?.register({
+          id: 'sync',
+          every: 60_000,
+          immediate: true,
+          run: () => {
+            throw new Error('upstream 502');
+          },
+        });
+      },
+    });
+
+    await manager.setupAll(baseContext(configDir, hooks));
+    try {
+      await vi.waitFor(() => expect(events.length).toBeGreaterThan(0));
+      expect(events[0]).toMatchObject({
+        pluginId: 'poller',
+        type: 'background:failed',
+        taskId: 'sync',
+        tick: 1,
+        failures: 1,
+        error: 'upstream 502',
+      });
+    } finally {
+      await manager.disposeAll();
+    }
+  });
+
   it('disposes plugins and their resources in reverse registration order', async () => {
     const manager = new PluginManager();
     const disposed: string[] = [];
@@ -246,6 +284,10 @@ describe('PluginManager robustness', () => {
 
   it('surfaces hook handler errors through the plugin health channel', async () => {
     const hooks = new HookRegistry();
+    const observed: unknown[] = [];
+    hooks.on('plugin:observe', (event) => {
+      observed.push(event);
+    });
     const manager = new PluginManager();
     manager.register({
       id: 'boom',
@@ -267,6 +309,10 @@ describe('PluginManager robustness', () => {
     const report = readPluginHealth('boom', { configDir });
     expect(report?.level).toBe('error');
     expect(report?.message).toContain('hook exploded');
+    // 健康状态只留最后一句话；「每轮都在炸」要靠事件流才看得出来。
+    expect(observed).toMatchObject([
+      { pluginId: 'boom', type: 'hook:failed', hook: 'turn:after', error: 'hook exploded' },
+    ]);
   });
 
   it('publishes the skills that actually took effect so other hosts can scan them', async () => {

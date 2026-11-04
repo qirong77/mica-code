@@ -226,8 +226,10 @@ export function createPluginSubagentHost(
         // 委派运行也要进观察流：观察方按 `delegation.type` 才能把「哪种类型的子代理
         // 回报最差」算出来，按 `parentSessionId` 才能把子代理挂回派生它的那条会话。
         child: owner.createSubAgent(clientOptions, {
-          type: definition.name,
-          ...(sessionId ? { parentSessionId: sessionId } : {}),
+          delegation: {
+            type: definition.name,
+            ...(sessionId ? { parentSessionId: sessionId } : {}),
+          },
         }),
       };
     };

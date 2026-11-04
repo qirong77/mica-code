@@ -131,7 +131,10 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       summarize: async (transcript, prompt) => {
         const owner = agent;
         if (!owner) throw new Error('Agent is not available for summarization');
-        const subAgent = owner.createSubAgent({ systemPrompt: prompt });
+        const subAgent = owner.createSubAgent(
+          { systemPrompt: prompt },
+          { helper: { kind: 'compaction', purpose: 'summarize' } },
+        );
         const startedAt = new Date().toISOString();
         try {
           return await subAgent.query([SUMMARIZE_INSTRUCTIONS, '', transcript].join('\n'));

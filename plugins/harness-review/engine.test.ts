@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test, type TestContext } from 'vitest';
@@ -80,6 +80,33 @@ async function trace(run: RunSummary): Promise<Record<string, unknown>[]> {
         .map((line) => JSON.parse(line) as Record<string, unknown>)
     : [];
 }
+
+// 子运行（委派 / helper）的 runId 是负数：早先版本按「必须非负」校验，会把它们整份
+// 当成损坏记录丢掉，报告里既没有委派树也没有 helper 汇总。
+test('keeps child runs that use negative run IDs', async (t) => {
+  const { recorder, errors } = await fixture(t);
+  const cwd = resolve('workspace-a');
+  const main = runner(recorder, { runId: 1, cwd });
+  main.start('主会话');
+  main.finish();
+  const helper = runner(recorder, { runId: -1, cwd });
+  helper.emit({ type: 'run:start', config, input: 'summarize', helper: { kind: 'compaction' } });
+  helper.emit({ type: 'request:start', messageCount: 2 });
+  helper.finish();
+
+  const report = await recorder.review(cwd);
+  assert.deepEqual(
+    report.runs.map((run) => run.sourceRunId).sort((a, b) => a - b),
+    [-1, 1],
+  );
+  assert.equal(report.helpers.total, 1);
+  assert.equal(report.helpers.kinds[0].kind, 'compaction');
+  assert.deepEqual(
+    report.warnings.filter((warning) => warning.includes('corrupt')),
+    [],
+  );
+  assert.deepEqual(errors, []);
+});
 
 test('parallel owners with the same source run ID and overlapping tool IDs remain isolated', async (t) => {
   const { recorder, root, errors } = await fixture(t);
@@ -480,12 +507,35 @@ test('invalid summary schemas and missing trace lines are reported', async (t) =
   run.finish();
   const summary = (await recorder.review()).runs[0];
   await writeFile(summary.traceFile, '');
-  assert.ok((await recorder.review()).warnings.some((warning) => warning.includes('trace count differs')));
+  assert.ok(
+    (await recorder.review()).warnings.some((warning) =>
+      warning.includes('trace has fewer events than its summary counts'),
+    ),
+  );
   const bad = { ...summary, toolCalls: -1 };
   await writeFile(join(root, 'runs', summary.id, 'summary.json'), JSON.stringify(bad));
   const report = await recorder.review();
   assert.equal(report.runs.length, 0);
   assert.ok(report.warnings.some((warning) => warning.includes('invalid summary schema')));
+});
+
+// 摘要每 25 条事件才落一次盘：宿主被杀掉的运行，轨迹会比摘要多几行。
+// 那是摘要滞后，不是轨迹损坏——按损坏处理会让这些运行的证据永远不可用。
+test('a trace that outran its summary checkpoint is not corrupt', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder);
+  run.start();
+  run.finish();
+  const summary = (await recorder.review()).runs[0];
+  await appendFile(
+    summary.traceFile,
+    `${JSON.stringify({ seq: summary.eventCount + 1, type: 'usage', timestamp: at })}\n`,
+  );
+  const report = await recorder.review();
+  assert.deepEqual(
+    report.warnings.filter((warning) => warning.includes('corrupt trace') || warning.includes('fewer events')),
+    [],
+  );
 });
 
 test('all recorder directories and files have private permissions', async (t) => {
@@ -1627,6 +1677,239 @@ test('delegated runs are aggregated by type under their parent session', async (
   const markdown = await readFile(await recorder.exportReport(cwd), 'utf8');
   assert.match(markdown, /## Delegation/);
   assert.match(markdown, /\| parent-session \| Explore \| 2 \| 1 \| 1 \| 0 \| 3 \| 70 \|/);
+});
+
+test('a helper run records its source and keeps it through a rebuild', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-helper');
+  const run = runner(recorder, { cwd });
+  run.emit({
+    type: 'run:start',
+    config,
+    input: 'compact this transcript',
+    helper: { kind: ' compaction ', pluginId: 'auto-compact', purpose: 'summary' },
+  });
+  run.finish();
+  const before = (await recorder.review(cwd)).runs[0]!;
+  assert.deepEqual(before.helper, { kind: 'compaction', pluginId: 'auto-compact', purpose: 'summary' });
+  // 轨迹里也带着它：重放不能把「压缩摘要」重新读成「用户的一轮」。
+  assert.deepEqual((await trace(before)).find((event) => event.type === 'run:start')?.helper, before.helper);
+  assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+  assert.deepEqual((await recorder.review(cwd)).runs[0]!.helper, before.helper);
+  const markdown = await readFile(await recorder.exportReport(cwd), 'utf8');
+  // 只有 helper 运行时，Runs 表就是「没有用户的一轮」——它只出现在 Helpers 里。
+  assert.match(markdown, /No runs in this scope/);
+  assert.match(markdown, /\| auto-compact · compaction \| 1 \| 1 \| 0 \| 0 \| 0 \| — \| 0 \|/);
+  assert.match(markdown, /## Plugin health/);
+  assert.match(markdown, /No plugin background failures recorded/);
+});
+
+test('helper runs are aggregated by source and stay out of the Runs table', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-helpers');
+  const helper = (
+    runId: number,
+    source: { kind: string; pluginId?: string },
+    outcome: 'completed' | 'error' | 'aborted',
+    requestMs: number,
+    outputTokens: number,
+  ): void => {
+    const run = runner(recorder, { runId, cwd });
+    run.emit({ type: 'run:start', config, input: `helper ${runId}`, helper: source });
+    run.emit({ type: 'request:start', messageCount: 1 });
+    run.emit({ type: 'request:end', durationMs: requestMs, attempts: 1, outcome: 'completed' });
+    run.emit({ type: 'usage', usage: { inputTokens: 10, outputTokens } });
+    run.finish(outcome);
+  };
+  helper(1, { kind: 'compaction' }, 'completed', 400, 100);
+  helper(2, { kind: 'compaction' }, 'error', 600, 20);
+  helper(3, { kind: 'plugin-llm', pluginId: 'session-rename' }, 'completed', 200, 10);
+  const main = runner(recorder, { runId: 4, cwd });
+  main.start('主会话');
+  main.finish();
+
+  const report = await recorder.review(cwd);
+  assert.equal(report.helpers.total, 3);
+  assert.deepEqual(report.helpers.kinds, [
+    {
+      kind: 'compaction',
+      runs: 2,
+      completed: 1,
+      failed: 1,
+      aborted: 0,
+      requests: 2,
+      avgRequestMs: 500,
+      avgOutputTokens: 60,
+    },
+    {
+      kind: 'plugin-llm',
+      pluginId: 'session-rename',
+      runs: 1,
+      completed: 1,
+      failed: 0,
+      aborted: 0,
+      requests: 1,
+      avgRequestMs: 200,
+      avgOutputTokens: 10,
+    },
+  ]);
+
+  const markdown = await readFile(await recorder.exportReport(cwd), 'utf8');
+  assert.match(markdown, /## Helpers/);
+  assert.match(markdown, /\| compaction \| 2 \| 1 \| 1 \| 0 \| 2 \| 500 \| 60 \|/);
+  assert.match(markdown, /\| session-rename · plugin-llm \| 1 \| 1 \| 0 \| 0 \| 1 \| 200 \| 10 \|/);
+  // 一次 turn 配一条摘要：helper 进了 Runs 表，表就会翻倍而没人看。
+  const runsTable = markdown.split('## Runs')[1]!.split('## Delegation')[0]!;
+  assert.equal(runsTable.match(/\| \[/g)?.length, 1);
+  for (const run of report.runs.filter((item) => item.helper)) assert.ok(!runsTable.includes(run.id));
+});
+
+test('helper runs never read as the user retrying the previous task', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-helper-retry');
+  // 压缩摘要每轮喂的都是同一段 transcript：按「失败后重试同一任务」推导，它每次都是重试。
+  const transcript = 'The same conversation transcript is summarized again at every turn of this session.';
+  for (const runId of [1, 2]) {
+    const run = runner(recorder, { runId, cwd });
+    run.emit({ type: 'run:start', config, input: transcript, helper: { kind: 'compaction' } });
+    run.finish('error', 'request timed out');
+  }
+  const report = await recorder.review(cwd);
+  assert.deepEqual(
+    report.findings.filter((finding) => finding.kind === 'user-retry'),
+    [],
+  );
+  // 它确实失败了两次：失败条目还在，只是来源写在标题里，而不是伪装成用户的重试。
+  const failures = report.findings.filter((finding) => finding.kind === 'run-error');
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0]!.occurrences, 2);
+  assert.equal(failures[0]!.title, 'Helper run failed: compaction (timeout)');
+
+  // 反向也成立：helper 不能把「上一轮用户说了什么」挤掉，紧随其后的真实重试仍要被认出来。
+  const task = 'Refactor the compaction service so idle history collapses without touching the turn lease.';
+  const first = runner(recorder, { runId: 3, cwd });
+  first.start(task);
+  first.finish('aborted');
+  const retry = runner(recorder, { runId: 4, cwd });
+  retry.start(task);
+  retry.finish();
+  const retries = (await recorder.review(cwd)).findings.filter((finding) => finding.kind === 'user-retry');
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0]!.occurrences, 1);
+
+  // 委派子代理同理：它的输入是父代理派给它的任务，失败了重开一次不是「用户重试」。
+  const delegatedTask = 'Walk every caller of the compaction service and report the ones that skip the lease.';
+  for (const runId of [5, 6]) {
+    const child = runner(recorder, { runId, cwd });
+    child.emit({
+      type: 'run:start',
+      config,
+      input: delegatedTask,
+      delegation: { type: 'Explore' },
+    });
+    child.finish('error', 'max turns');
+  }
+  const delegatedRetries = (await recorder.review(cwd)).findings.filter(
+    (finding) => finding.kind === 'user-retry',
+  );
+  assert.equal(delegatedRetries.length, 1);
+  assert.equal(delegatedRetries[0]!.occurrences, 1);
+});
+
+test('a failing helper run names its source and stays apart from ordinary run failures', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-helper-error');
+  const compact = runner(recorder, { cwd });
+  compact.emit({
+    type: 'run:start',
+    config,
+    input: 'summary',
+    helper: { kind: 'compaction', pluginId: 'auto-compact' },
+  });
+  compact.finish('error', 'request timed out');
+  const bare = runner(recorder, { runId: 2, cwd });
+  bare.emit({ type: 'run:start', config, input: 'summary', helper: { kind: 'btw' } });
+  bare.finish('error', 'request timed out');
+  const main = runner(recorder, { runId: 3, cwd });
+  main.start('a normal turn');
+  main.finish('error', 'request timed out');
+
+  const findings = (await recorder.review(cwd)).findings.filter((finding) => finding.kind === 'run-error');
+  // 三种来源各自一条：合并成一条就分不清该改压缩、旁问还是主流程。
+  assert.deepEqual(findings.map((finding) => finding.module).sort(), ['helper:btw', 'plugin:auto-compact', 'runtime']);
+  const helper = findings.find((finding) => finding.module === 'plugin:auto-compact')!;
+  assert.equal(helper.title, 'Helper run failed: auto-compact · compaction (timeout)');
+  assert.equal(findings.find((finding) => finding.module === 'runtime')!.title, 'Run ended with an error: timeout');
+});
+
+test('plugin background failures are throttled, aggregated and exposed as a review item', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const failure = (tick: number, timestamp: string) => ({
+    pluginId: 'mobile-relay',
+    timestamp,
+    type: 'background:failed' as const,
+    taskId: 'poll',
+    tick,
+    failures: tick,
+    error: `connect ${tick} refused`,
+  });
+  // 每个任务的第一条一定落盘：一次失败立刻可见。
+  recorder.notePluginEvent(failure(1, at));
+  // 5 分钟内第二次不落盘：常驻任务每 30 秒坏一次，一天就是几千行同一个结论。
+  recorder.notePluginEvent(failure(2, at));
+  await recorder.flush();
+  const file = join(root, 'plugin-events.jsonl');
+  const lines = (await readFile(file, 'utf8')).trim().split('\n');
+  assert.equal(lines.length, 1);
+  assert.deepEqual(JSON.parse(lines[0]!), {
+    at,
+    pluginId: 'mobile-relay',
+    taskId: 'poll',
+    tick: 1,
+    failures: 1,
+    error: 'connect 1 refused',
+  });
+  // 只失败一次只是噪声：记录在案，但不生成条目。
+  assert.deepEqual((await recorder.review()).findings, []);
+
+  // 之前进程留下的记录与一条坏行：坏行不该让整次复盘失败。
+  await appendFile(
+    file,
+    `${JSON.stringify({ at: '2026-06-01T10:05:00.000Z', pluginId: 'mobile-relay', taskId: 'poll', tick: 2, failures: 2, error: 'connect 2 refused' })}\n`,
+  );
+  await appendFile(file, 'not-json\n');
+  await appendFile(
+    file,
+    `${JSON.stringify({ at: '2026-06-01T10:09:00.000Z', pluginId: 'mobile-relay', taskId: 'poll', tick: 3, failures: 3, error: 'connect 3 refused' })}\n`,
+  );
+
+  const report = await recorder.review();
+  assert.deepEqual(report.pluginFailures, [
+    {
+      pluginId: 'mobile-relay',
+      taskId: 'poll',
+      count: 3,
+      lastAt: '2026-06-01T10:09:00.000Z',
+      lastError: 'connect 3 refused',
+    },
+  ]);
+  assert.ok(report.warnings.some((warning) => warning.includes('unreadable line')));
+  const finding = report.findings.find((item) => item.kind === 'plugin-background')!;
+  assert.equal(finding.id, 'plugin-background:mobile-relay:poll');
+  assert.equal(finding.module, 'plugin:mobile-relay');
+  assert.equal(finding.occurrences, 3);
+  assert.match(finding.title, /mobile-relay\/poll/);
+  assert.match(finding.evaluation, /connect 3 refused/);
+  // 插件事件不属于任何一条 run：不伪造 runId。
+  assert.deepEqual(finding.evidence, []);
+
+  // 人工判断对这些条目同样生效（id 直接当 decisions/<id>.json）。
+  await recorder.decide(finding.id, 'accepted', '已修好轮询');
+  assert.equal((await recorder.review()).findings.find((item) => item.id === finding.id)?.status, 'accepted');
+
+  const markdown = await readFile(await recorder.exportReport(), 'utf8');
+  assert.match(markdown, /## Plugin health/);
+  assert.match(markdown, /\| mobile-relay \| poll \| 3 \|/);
 });
 
 test('a delegation row omits an average it cannot compute instead of writing zero', () => {

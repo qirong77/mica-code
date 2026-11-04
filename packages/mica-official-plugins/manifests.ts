@@ -17,6 +17,7 @@ import sidecarManifest from '../../plugins/sidecar/plugin.json';
 import sshManifest from '../../plugins/ssh/plugin.json';
 import subagentManifest from '../../plugins/subagent/plugin.json';
 import todoManifest from '../../plugins/todo/plugin.json';
+import videoManifest from '../../plugins/video/plugin.json';
 import webSearchManifest from '../../plugins/web-search/plugin.json';
 
 /**
@@ -48,6 +49,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(evolutionManifest),
   readManifest(mobileRelayManifest),
   readManifest(scheduleManifest),
+  readManifest(videoManifest),
 ];
 
 export const officialPluginIds = new Set(officialPluginManifests.map((manifest) => manifest.id));

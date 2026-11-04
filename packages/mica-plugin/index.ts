@@ -412,6 +412,7 @@ export type {
 } from './PluginSessionSettings.js';
 export type { HookRegistry } from './HookRegistry.js';
 export type { AgentObservationEvent } from './AgentObservation.js';
+export type { PluginObservationEvent } from './PluginObservation.js';
 export type { GuardHookResult, HookExecutionContext, HookHandler, HookKind, HookOptions } from './HookTypes.js';
 export type { ServiceContainer } from './ServiceContainer.js';
 export type { ServiceToken } from './ServiceToken.js';

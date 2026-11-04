@@ -41,8 +41,11 @@ export function createActiveAgentProxy(fallback: AgentRuntime): CommandAgent {
     buildSystemPrompt() {
       return current().buildSystemPrompt();
     },
-    createSubAgent(options?: { systemPrompt?: string | (() => string); [key: string]: unknown }) {
-      return current().createSubAgent(options);
+    createSubAgent(
+      options?: { systemPrompt?: string | (() => string); [key: string]: unknown },
+      observation?: { helper?: { kind: string; pluginId?: string; purpose?: string } },
+    ) {
+      return current().createSubAgent(options, observation);
     },
     recordSubagentUsage(record) {
       current().recordSubagentUsage(record);

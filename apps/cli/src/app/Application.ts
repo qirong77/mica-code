@@ -275,6 +275,14 @@ export class Application {
               snapshot ? { providerId: snapshot.providerId, model: snapshot.model } : {},
             );
           },
+          // 插件自己问模型也是一次真实的请求：进运行轨迹，复盘时才看得到
+          // 「起标题/写提交说明等了多久、失败在哪一步」，而不只是 Stats 里的一笔 token。
+          trace: ({ pluginId, purpose, model, input, owner }) => {
+            const session = resolvePluginSession(agentSessions, owner);
+            if (!session) return undefined;
+            const run = session.agent.startHelperRun({ kind: 'plugin-llm', pluginId, purpose, model, input });
+            return { ...run.callbacks, finish: run.finish };
+          },
         }),
         runtime: {
           submit: (text, options) => runtime.submit(text, options),

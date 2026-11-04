@@ -42,7 +42,14 @@ export type CommandAgent = {
   setRole(roleName: string): void;
   setCapabilities?(selection: CapabilitySelection): CapabilitySelection;
   buildSystemPrompt(): string;
-  createSubAgent(options?: { systemPrompt?: string | (() => string); [key: string]: unknown }): {
+  createSubAgent(
+    options?: { systemPrompt?: string | (() => string); [key: string]: unknown },
+    /**
+     * 这次 helper 在运行轨迹里的来源（`btw` / `compaction` …）。宿主按它归类，
+     * 命令层不传也没关系：缺省归类成通用的 helper，开销照样记。
+     */
+    observation?: { helper?: { kind: string; pluginId?: string; purpose?: string } },
+  ): {
     /**
      * 问题可以是纯文本，也可以是文本 + 图片的多模态内容块（桌面端 By The Way 的粘贴
      * 图片走后者：`[Image](路径)` 由调用方解析成 content block 再传进来）。

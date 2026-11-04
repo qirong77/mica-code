@@ -54,7 +54,7 @@ describe('resolveDrop', () => {
     ).toEqual({ kind: 'move', target: { section: 'recent', groupId: null } })
   })
 
-  it('reorders inside the same section when the working directory matches', () => {
+  it('reorders inside the same section', () => {
     expect(
       resolveDrop({
         drag: dragFrom('pinned', 'a'),
@@ -67,7 +67,8 @@ describe('resolveDrop', () => {
     ).toEqual({ kind: 'reorder', ids: ['b', 'a', 'c'] })
   })
 
-  it('refuses to reorder across working directories or within recent', () => {
+  it('reorders across working directories but never inside recent', () => {
+    // 侧栏是用户自己的清单：不同工作目录的会话照样能前后挪
     expect(
       resolveDrop({
         drag: dragFrom('pinned', 'a'),
@@ -76,7 +77,8 @@ describe('resolveDrop', () => {
         items: sessions,
         position: 'before'
       })
-    ).toBeNull()
+    ).toEqual({ kind: 'reorder', ids: ['b', 'a', 'c'] })
+    // Recent 按时间排，不参与手动排序
     expect(
       resolveDrop({
         drag: dragFrom('recent', 'a'),
@@ -271,28 +273,21 @@ describe('resolveDrop', () => {
 })
 
 describe('rowDropPosition', () => {
-  it('不按 ⌥ 时只有前后两档，中间也算排序', () => {
+  it('中间一半是嵌套，上下两头是排到前后', () => {
     expect(rowDropPosition({ ratio: 0.1 })).toBe('before')
-    expect(rowDropPosition({ ratio: 0.49 })).toBe('before')
-    expect(rowDropPosition({ ratio: 0.5 })).toBe('after')
+    expect(rowDropPosition({ ratio: 0.3 })).toBe('into')
+    expect(rowDropPosition({ ratio: 0.5 })).toBe('into')
+    expect(rowDropPosition({ ratio: 0.7 })).toBe('into')
     expect(rowDropPosition({ ratio: 0.9 })).toBe('after')
   })
 
-  it('按住 ⌥ 时中间那条带子才是嵌套', () => {
-    expect(rowDropPosition({ ratio: 0.5, altKey: true })).toBe('into')
-    expect(rowDropPosition({ ratio: 0.3, altKey: true })).toBe('into')
-    // 上下两端的四分之一仍然排序，方便「按住 ⌥ 拖还顺带挪位置」
-    expect(rowDropPosition({ ratio: 0.1, altKey: true })).toBe('before')
-    expect(rowDropPosition({ ratio: 0.9, altKey: true })).toBe('after')
+  it('canNest 为 false 时中间也退回排序', () => {
+    expect(rowDropPosition({ ratio: 0.5, canNest: false })).toBe('after')
+    expect(rowDropPosition({ ratio: 0.2, canNest: false })).toBe('before')
   })
 
-  it('canNest 为 false 时 ⌥ 也不进入嵌套', () => {
-    expect(rowDropPosition({ ratio: 0.5, altKey: true, canNest: false })).toBe('after')
-    expect(rowDropPosition({ ratio: 0.2, altKey: true, canNest: false })).toBe('before')
-  })
-
-  it('拿不到行高时按中间处理，不误判成嵌套', () => {
-    expect(rowDropPosition({ ratio: Number.NaN })).toBe('after')
-    expect(rowDropPosition({ ratio: Number.NaN, altKey: true })).toBe('into')
+  it('拿不到行高时按中间处理', () => {
+    expect(rowDropPosition({ ratio: Number.NaN })).toBe('into')
+    expect(rowDropPosition({ ratio: Number.NaN, canNest: false })).toBe('after')
   })
 })

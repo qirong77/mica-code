@@ -167,11 +167,16 @@ export function btwToolFilter(toolName: string): boolean {
 function createBtwSubagent(agent: CommandAgent, transcript: string): BtwSubagent {
   // 运行时返回的是 `IAgent`（带 getSnapshot/loadSnapshot/lastUsage），而
   // `CommandAgent.createSubAgent` 的声明只承诺 query + 用量 + 流式回调。
-  return agent.createSubAgent({
-    systemPrompt: buildBtwSystemPrompt(transcript, { role: btwRoleContext(agent) }),
-    tools: true,
-    toolFilter: btwToolFilter,
-  }) as unknown as BtwSubagent;
+  return agent.createSubAgent(
+    {
+      systemPrompt: buildBtwSystemPrompt(transcript, { role: btwRoleContext(agent) }),
+      tools: true,
+      toolFilter: btwToolFilter,
+    },
+    // 旁问不进主对话，但它是真实的模型开销：轨迹里给它一个来源，复盘才分得清
+    // 「这一轮很慢」和「抽屉里那条 btw 跑了很久」。
+    { helper: { kind: 'btw' } },
+  ) as unknown as BtwSubagent;
 }
 
 /**

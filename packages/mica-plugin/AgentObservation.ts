@@ -21,6 +21,16 @@ export type AgentObservationEvent = Readonly<{
          * 会话。两者一起才能把委派树拼回来，并回答「哪种类型的子代理回报最差」。
          */
         delegation?: Readonly<{ type: string; parentSessionId?: string }>;
+        /**
+         * 这条运行不是会话里的一轮：压缩摘要、旁问线程、插件自己问模型这类宿主内部
+         * 工作也在花钱、也会失败，却不属于任何一次用户请求。
+         *
+         * `kind` 是稳定的来源短名（`compaction` / `btw` / `thread` / `plugin-llm` /
+         * `subagent`），`pluginId` + `purpose` 只在插件发起时出现。观察方按这三项
+         * 归并：「自动压缩每次摘要要 40 秒」与「某一轮慢」是两件不同的事，混在
+         * 一起就只能看到总时长。
+         */
+        helper?: Readonly<{ kind: string; pluginId?: string; purpose?: string }>;
       }>
     | Readonly<{
         type: 'request:start';

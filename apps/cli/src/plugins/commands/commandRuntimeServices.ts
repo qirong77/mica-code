@@ -664,13 +664,16 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
             command: '/compact',
             variant: 'compact',
           });
-          const subAgent = concreteAgent.createSubAgent({
-            systemPrompt: prompt,
-            // The summary subagent must not run any tools: it shares the
-            // parent's tool registry and session tools would mutate the very
-            // session being compacted. Disable tools entirely.
-            tools: false,
-          });
+          const subAgent = concreteAgent.createSubAgent(
+            {
+              systemPrompt: prompt,
+              // The summary subagent must not run any tools: it shares the
+              // parent's tool registry and session tools would mutate the very
+              // session being compacted. Disable tools entirely.
+              tools: false,
+            },
+            { helper: { kind: 'compaction', purpose: 'summarize' } },
+          );
           const startedAt = new Date().toISOString();
           try {
             return await subAgent.query(

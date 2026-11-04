@@ -387,6 +387,12 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
         const snapshot = agent?.getSnapshot?.();
         return readActiveProviderConfig(snapshot ? { providerId: snapshot.providerId, model: snapshot.model } : {});
       },
+      // 插件自己的模型请求同样要进轨迹：app-server 是常驻会话，漏了这一笔，
+      // 「起标题为什么慢」「哪个插件在反复失败」在复盘里就永远没有出处。
+      trace: ({ pluginId, purpose, model, input }) => {
+        const run = agent.startHelperRun({ kind: 'plugin-llm', pluginId, purpose, model, input });
+        return { ...run.callbacks, finish: run.finish };
+      },
     }),
     runtime: {
       submit: options.submit,

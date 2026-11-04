@@ -209,6 +209,29 @@ describe('harness-review plugin', () => {
     expect(result.newSession.cwd).toBe('/workspace/test');
     expect(result.newSession.send).toBe(false);
   });
+
+  // 常驻任务不在任何一轮里：它的失败走 plugin:observe，由 recorder 单独落盘与聚合。
+  it('records a plugin background failure forwarded through plugin:observe', async () => {
+    const h = harness();
+    h.hooks.notify('plugin:observe', {
+      pluginId: 'mobile-relay',
+      timestamp: new Date().toISOString(),
+      type: 'background:failed',
+      taskId: 'poll',
+      tick: 1,
+      failures: 1,
+      error: 'ECONNREFUSED 127.0.0.1:8787',
+    });
+    expect((await h.review()).pluginFailures).toEqual([
+      {
+        pluginId: 'mobile-relay',
+        taskId: 'poll',
+        count: 1,
+        lastAt: expect.any(String),
+        lastError: 'ECONNREFUSED 127.0.0.1:8787',
+      },
+    ]);
+  });
 });
 
 async function waitForStatus(

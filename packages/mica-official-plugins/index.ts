@@ -17,6 +17,7 @@ import sidecarSetup from '../../plugins/sidecar/index.js';
 import sshSetup from '../../plugins/ssh/index.js';
 import subagentSetup from '../../plugins/subagent/index.js';
 import todoSetup from '../../plugins/todo/index.js';
+import videoSetup from '../../plugins/video/index.js';
 import webSearchSetup from '../../plugins/web-search/index.js';
 import { officialPluginManifests } from './manifests.js';
 
@@ -48,6 +49,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   evolution: evolutionSetup,
   'mobile-relay': mobileRelaySetup,
   schedule: scheduleSetup,
+  video: videoSetup,
 };
 
 export const officialPlugins: MicaPlugin[] = officialPluginManifests.map((manifest) => {

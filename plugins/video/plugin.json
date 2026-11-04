@@ -1,0 +1,49 @@
+{
+  "id": "video",
+  "name": "Video",
+  "icon": "video",
+  "version": "1.0.0",
+  "description": "给模型一个 video_frames 工具：把视频按时间点抽成图片，模型先看概览再点名要看的那几秒。依赖本机的 ffmpeg。",
+  "author": "Mica",
+  "main": "index.ts",
+  "priority": 205,
+  "required": false,
+  "mica": { "apiVersion": 1 },
+  "requires": ["tools", "settings", "prompt", "actions"],
+  "settings": [
+    {
+      "key": "ffmpegPath",
+      "label": "ffmpeg 路径",
+      "type": "text",
+      "placeholder": "/opt/homebrew/bin/ffmpeg",
+      "description": "留空则依次查找 PATH、/opt/homebrew/bin、/usr/local/bin、/usr/bin。ffprobe 默认取同目录下的那个。"
+    },
+    {
+      "key": "maxEdge",
+      "label": "图片长边",
+      "type": "number",
+      "default": "1024",
+      "min": 512,
+      "max": 1568,
+      "step": 8,
+      "unit": "px",
+      "description": "每一帧缩到这个尺寸再发。调大能看清小字，但每一帧的 token 会成倍上涨，而且会一直留在对话历史里。"
+    },
+    {
+      "key": "cacheLimitMb",
+      "label": "帧缓存上限",
+      "type": "number",
+      "default": "512",
+      "min": 64,
+      "max": 4096,
+      "step": 64,
+      "unit": "MB",
+      "description": "抽出来的帧按视频缓存在本机，同一个视频追问第二次不再重新解码。超过上限时从最旧的开始删。"
+    }
+  ],
+  "actions": [{ "key": "check", "label": "检查 ffmpeg", "description": "重新探测本机的 ffmpeg 与 ffprobe" }],
+  "status": [
+    { "key": "ffmpeg", "label": "ffmpeg", "type": "text" },
+    { "key": "cache", "label": "帧缓存", "type": "text" }
+  ]
+}

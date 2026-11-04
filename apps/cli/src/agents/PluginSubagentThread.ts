@@ -36,16 +36,21 @@ export type PluginSubagentThreadHostOptions = {
 
 export function createPluginThread(input: PluginSubagentThreadHostOptions): PluginSubagentThread {
   const { owner, pluginId, threadId, options } = input;
-  const child = owner.createSubAgent({
-    systemPrompt: wrapPromptXml('injection', options.systemPrompt, {
-      source: 'plugin',
-      plugin: pluginId,
-      section: 'thread-system',
-    }),
-    tools: options.tools ?? true,
-    toolFilter: buildSubagentToolFilter(options),
-    ...(options.model ? { model: options.model } : {}),
-  });
+  const child = owner.createSubAgent(
+    {
+      systemPrompt: wrapPromptXml('injection', options.systemPrompt, {
+        source: 'plugin',
+        plugin: pluginId,
+        section: 'thread-system',
+      }),
+      tools: options.tools ?? true,
+      toolFilter: buildSubagentToolFilter(options),
+      ...(options.model ? { model: options.model } : {}),
+    },
+    // 旁问线程（BTW 等）是插件发起的 helper 运行：每次 ask 都该在轨迹里留一条，
+    // 否则抽屉里那几次问答的花费与耗时谁也说不清。
+    { helper: { kind: 'thread', pluginId } },
+  );
   const taskId = `plugin:${pluginId}:thread:${threadId}`;
   let recordedRequests = 0;
   let disposed = false;

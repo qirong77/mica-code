@@ -78,7 +78,7 @@ describe('plugin background scheduler', () => {
     scheduler.register({ id: 'poll', every: 1_000, run, immediate: true });
 
     await vi.advanceTimersByTimeAsync(0);
-    expect(onError).toHaveBeenCalledWith('poll', expect.any(Error));
+    expect(onError).toHaveBeenCalledWith('poll', expect.any(Error), { tick: 1, failures: 1 });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(run).toHaveBeenCalledTimes(2);
     expect(scheduler.list()[0]).toMatchObject({ failures: 1, ticks: 1 });

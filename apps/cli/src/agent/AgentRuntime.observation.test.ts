@@ -531,9 +531,12 @@ describe('agent:observe', () => {
     const { runtime, client, events } = setup();
     const explore = runtime.createSubAgent(
       { model: 'sub-model' },
-      { type: 'Explore', parentSessionId: 'session-7' },
+      { delegation: { type: 'Explore', parentSessionId: 'session-7' } },
     ) as TestClient;
-    const implementer = runtime.createSubAgent({ model: 'sub-model' }, { type: 'Implementer' }) as TestClient;
+    const implementer = runtime.createSubAgent(
+      { model: 'sub-model' },
+      { delegation: { type: 'Implementer' } },
+    ) as TestClient;
     explore.queryImpl = async () => 'explored';
     implementer.queryImpl = async () => 'implemented';
     client.queryImpl = async () => 'answer';
@@ -558,5 +561,98 @@ describe('agent:observe', () => {
     const finishes = events.filter((event) => event.type === 'run:finish');
     expect(finishes.map((event) => event.runId)).toEqual([1, -1, -2]);
     expect(finishes.slice(1)).toMatchObject([{ outcome: 'completed' }, { outcome: 'completed' }]);
+  });
+
+  it('tags a helper subagent and forwards its request events and usage', async () => {
+    const { runtime, events } = setup();
+    const child = runtime.createSubAgent(
+      { model: 'sub-model' },
+      { helper: { kind: 'compaction', purpose: 'summarize' } },
+    ) as TestClient;
+    child.queryImpl = async (_question, options) => {
+      options?.onRequestStart?.({ messageCount: 3 });
+      options?.onRequestEnd?.({ durationMs: 12, firstTokenMs: 5, attempts: 1, outcome: 'completed' });
+      (child.usageHistory as AgentUsageRecord[]).push(usage);
+      return 'summary';
+    };
+    expect(await child.query('summarize this')).toBe('summary');
+
+    const start = events.find((event) => event.type === 'run:start');
+    expect(start).toMatchObject({
+      runId: -1,
+      helper: { kind: 'compaction', purpose: 'summarize' },
+      config: { model: 'sub-model' },
+    });
+    expect(start && 'delegation' in start).toBe(false);
+    // 子代理内部的每次请求也要有自己的边界：否则「摘要为什么慢」永远没有出处。
+    expect(events.filter((event) => event.type === 'request:start')).toMatchObject([{ messageCount: 3 }]);
+    expect(events.filter((event) => event.type === 'request:end')).toMatchObject([
+      { durationMs: 12, firstTokenMs: 5, attempts: 1 },
+    ]);
+    expect(events.filter((event) => event.type === 'usage')).toMatchObject([
+      { usage: { inputTokens: 12, outputTokens: 3, cachedInputTokens: 4 } },
+    ]);
+    expect(events.at(-1)).toMatchObject({ type: 'run:finish', runId: -1, outcome: 'completed' });
+  });
+
+  it('classifies an unannotated subagent as a generic helper next to a delegated one', async () => {
+    const { runtime, events } = setup();
+    const helper = runtime.createSubAgent({ model: 'sub-model' }) as TestClient;
+    const delegated = runtime.createSubAgent(
+      { model: 'sub-model' },
+      { delegation: { type: 'Explore' } },
+    ) as TestClient;
+    helper.queryImpl = async () => 'helper';
+    delegated.queryImpl = async () => 'delegated';
+    await helper.query('a');
+    await delegated.query('b');
+    const starts = events.filter((event) => event.type === 'run:start');
+    expect(starts).toMatchObject([{ helper: { kind: 'subagent' } }, { delegation: { type: 'Explore' } }]);
+  });
+
+  it('records a plugin model request as a helper run with its own outcome', async () => {
+    const { runtime, events } = setup();
+    const run = runtime.startHelperRun({
+      kind: 'plugin-llm',
+      pluginId: 'session-rename',
+      purpose: 'title',
+      model: 'plugin-model',
+      input: 'give me a title',
+    });
+    run.callbacks.onRequestStart({ messageCount: 2 });
+    run.callbacks.onRequestEnd({ durationMs: 40, attempts: 1, outcome: 'error', error: 'boom' });
+    run.finish('error', new Error('boom'), [usage]);
+    // 重复 finish 不能写出第二条 run:finish。
+    run.finish('completed');
+    // 观察走的是 fire-and-forget 的 notify：让测试的 observer 把微任务跑完。
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const start = events.find((event) => event.type === 'run:start');
+    expect(start).toMatchObject({
+      helper: { kind: 'plugin-llm', pluginId: 'session-rename', purpose: 'title' },
+      config: { model: 'plugin-model', effort: 'none' },
+      input: 'give me a title',
+    });
+    expect(events.filter((event) => event.type === 'request:start')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'request:end')).toMatchObject([
+      { durationMs: 40, outcome: 'error' },
+    ]);
+    expect(events.filter((event) => event.type === 'usage')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'run:finish')).toMatchObject([
+      { outcome: 'error', error: 'boom' },
+    ]);
+  });
+
+  it('marks a helper run aborted when its client throws an abort', async () => {
+    const { runtime, events } = setup();
+    const child = runtime.createSubAgent({ model: 'sub-model' }, { helper: { kind: 'btw' } }) as TestClient;
+    const abort = new Error('aborted');
+    abort.name = 'AbortError';
+    child.queryImpl = async () => {
+      throw abort;
+    };
+    await expect(child.query('ask')).rejects.toThrow('aborted');
+    expect(events.filter((event) => event.type === 'run:finish')).toMatchObject([{ outcome: 'aborted' }]);
   });
 });

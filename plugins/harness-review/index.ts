@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
-import type { AgentObservationEvent, PluginContext } from '@packages/mica-plugin/index.js';
+import type { AgentObservationEvent, PluginContext, PluginObservationEvent } from '@packages/mica-plugin/index.js';
 import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
 import { CLASSIFIER_VERSION, HarnessRecorder, type CaptureOptions, type ReviewReport } from './engine.js';
 
@@ -95,6 +95,15 @@ export default function setup(ctx: PluginContext): void {
     { pluginId: ctx.pluginId },
   );
   ctx.onDispose(() => hook.dispose());
+
+  // 插件自己的常驻任务失败不挂在任何一条 run 上（它不在轮次里），但正是最容易「静默坏掉」
+  // 的一类：健康状态只留最后一句话，看不出它已经坏了三百次。单独记一条事件流。
+  const pluginHook = ctx.hooks.on<PluginObservationEvent>(
+    'plugin:observe',
+    (event) => recorder.notePluginEvent(event),
+    { pluginId: ctx.pluginId },
+  );
+  ctx.onDispose(() => pluginHook.dispose());
   ctx.onDispose(() => recorder.dispose());
 
   // 用户纠正（改写重跑 / 撤回排队 / 原样重发）是「这次回答没被接受」唯一确凿的信号。
@@ -318,12 +327,15 @@ function writeStatus(root: string, report: ReviewReport, state: PluginState): vo
   const recurring = open.filter(
     (finding) => finding.occurrences >= 2 || new Set(finding.evidence.map((item) => item.runId)).size >= 2,
   );
-  const lastRun = report.runs.reduce<string | null>(
+  // 「已记录运行」与「最近运行」只数用户的一轮：helper（起标题、压缩摘要）跟着每一轮
+  // 都会发生、委派子代理也是同一次请求派出去的，算进去会把「跑了 100 次」说成 200 次。
+  const userRuns = report.runs.filter((run) => !run.helper && !run.delegation);
+  const lastRun = userRuns.reduce<string | null>(
     (latest, run) => (latest === null || run.startedAt > latest ? run.startedAt : latest),
     null,
   );
   const data: Record<string, unknown> = {
-    runs: `${report.runs.length} 次`,
+    runs: `${userRuns.length} 次`,
     openFindings: open.length === 0 ? '没有待复盘的问题' : `${open.length} 项`,
     lastRun: lastRun ? `${lastRun} 起` : '尚未记录',
     rebuilt: state.lastRebuildAt ? state.lastRebuildAt : '尚未重算',

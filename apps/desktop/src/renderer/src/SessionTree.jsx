@@ -85,7 +85,26 @@ const rowClassTall = `${rowClassBase} items-start py-1`
 const groupRowClass =
   'group/grow relative flex min-h-6 cursor-pointer items-center gap-2 rounded-md pr-2 text-[12.5px] font-medium leading-5 tracking-wide text-fg-strong transition-colors hover:bg-overlay hover:text-fg-max'
 
-const dropShadow = 'inset 0 0 0 1px rgba(90,167,232,.9)'
+/**
+ * 落点提示不用描边：整行浅底表示「进到这里」（换分区 / 嵌套），行间一条圆角细条表示
+ * 「插到这一行前后」。边框式的单边高亮会被读成「这一行被选中了」，说的是另一件事。
+ */
+const dropIntoClass = 'bg-info/15 text-fg-max'
+
+function DropBar({ position }) {
+  if (position !== 'before' && position !== 'after') return null
+  return (
+    <span
+      aria-hidden="true"
+      className={`pointer-events-none absolute inset-x-1 z-10 h-0.5 rounded-full bg-info ${
+        position === 'before' ? 'top-0' : 'bottom-0'
+      }`}
+    />
+  )
+}
+
+/** 这次落点是「进到这里」（换分区 / 嵌套），而不是插到某一行前后 */
+const isIntoDrop = (over) => !!over && over.position !== 'before' && over.position !== 'after'
 
 const RECENT_PREVIEW_LIMIT = 6
 
@@ -1005,10 +1024,10 @@ export function SessionTree({
 
   const groupDropPosition = (event) => {
     const rect = event.currentTarget.getBoundingClientRect()
-    const ratio = (event.clientY - rect.top) / rect.height
-    // 中间那条带子默认是「排到前 / 后」，只有按住 ⌥ 才是「变成子分组」：行高 24px，
-    // 中间那 12px 太容易误踩，一次手抖就把分组改成了另一个分组的子级。
-    return rowDropPosition({ ratio, altKey: event.altKey })
+    const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
+    // 中间一半 = 变成这个分组的子分组，上下两头 = 排到它前面 / 后面。
+    // 不合法的落点（自己、自己的子树、已经在那个父级下）由 resolveDrop 判掉。
+    return rowDropPosition({ ratio })
   }
 
   // 一次 drop 的统一出口：分组落到分组行/Projects 标题 = 换父级，会话照旧搬分区或重排。
@@ -1042,30 +1061,28 @@ export function SessionTree({
       if (!drag || drag.id === id) return
       // 分组只落在分组行与 Projects 标题上，落到会话行不做任何反应
       if (drag.kind === 'group') return
-      // 按住 ⌥ 拖到会话行中间那条带子 = 成为它的子会话；不按 ⌥ 时整行都是换分区 / 排序。
-      // 行高只有 24px，中间带子占一半高度，默认就生效等于「拖一下就可能被嵌套」。
-      // 草稿还没落盘、拖进自己的子树会成环，两种都不亮。
+      // 拖到会话行中间那条带子 = 成为它的子会话，上下两头 = 换分区 / 手动重排。
+      // 草稿还没落盘、拖进自己的子树会成环，两种都不算嵌套。
       const nestAllowed =
         canNestInto &&
         drag.kind === 'session' &&
         (drag.parentSessionId ?? null) !== id &&
         !dragSubtree.has(id)
-      if (nestAllowed) {
-        const rect = event.currentTarget.getBoundingClientRect()
-        const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
-        if (rowDropPosition({ ratio, altKey: event.altKey, canNest: nestAllowed }) === 'into') {
-          event.preventDefault()
-          event.stopPropagation()
-          setOver((current) =>
-            current?.section === section &&
-            current?.id === id &&
-            current?.groupId === groupId &&
-            current?.into
-              ? current
-              : { section, id, groupId, into: true }
-          )
-          return
-        }
+      const rect = event.currentTarget.getBoundingClientRect()
+      const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
+      const position = rowDropPosition({ ratio, canNest: nestAllowed })
+      if (position === 'into') {
+        event.preventDefault()
+        event.stopPropagation()
+        setOver((current) =>
+          current?.section === section &&
+          current?.id === id &&
+          current?.groupId === groupId &&
+          current?.into
+            ? current
+            : { section, id, groupId, into: true }
+        )
+        return
       }
       event.preventDefault()
       event.stopPropagation()
@@ -1074,15 +1091,13 @@ export function SessionTree({
         setOver({ section, id, groupId, cross: true })
         return
       }
-      // 子会话的位置由父会话决定，Recent 按时间排：两种都不画「插到这一行前后」的线。
+      // 子会话的位置由父会话决定，Recent 按时间排：两种都不画「插到这一行前后」的条。
       // 但刚才是从中间那条带子移出来的话，得把「拖进来」的高亮撤掉——否则光标已经离开
-      // 中间，框还亮着，看起来像还会嵌套进去。
+      // 中间，底色还亮着，看起来像还会嵌套进去。
       if (drag.parentSessionId || section === 'recent') {
         setOver((current) => (current?.into && current?.id === id ? null : current))
         return
       }
-      const rect = event.currentTarget.getBoundingClientRect()
-      const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
       setOver((current) =>
         current?.section === section &&
         current?.id === id &&
@@ -1154,17 +1169,14 @@ export function SessionTree({
       <li key={session.id}>
         <div
           data-reveal-key={`s:${session.id}`}
-          className={`${rowClass} relative ${active ? 'bg-active text-fg-max' : 'text-nav-fg'} ${draggingThis ? 'opacity-40' : ''} ${flashing ? 'session-row-flash' : ''}`}
-          style={{
-            paddingLeft: rowIndent(indent) + childDepth * NEST_STEP,
-            boxShadow: isOver
-              ? over.cross || over.into
-                ? dropShadow
-                : over.position === 'before'
-                  ? 'inset 0 2px 0 rgba(90,167,232,.9)'
-                  : 'inset 0 -2px 0 rgba(90,167,232,.9)'
-              : undefined
-          }}
+          className={`${rowClass} relative ${
+            isOver && isIntoDrop(over)
+              ? dropIntoClass
+              : active
+                ? 'bg-active text-fg-max'
+                : 'text-nav-fg'
+          } ${draggingThis ? 'opacity-40' : ''} ${flashing ? 'session-row-flash' : ''}`}
+          style={{ paddingLeft: rowIndent(indent) + childDepth * NEST_STEP }}
           title={
             loop
               ? `${session.title || session.id}\n${loopTooltip(loop, Date.now(), loopRunning)}`
@@ -1202,6 +1214,7 @@ export function SessionTree({
             })
           }
         >
+          {isOver && <DropBar position={over.position} />}
           {childDepth > 0 && (
             // 派生关系的引导线：从父行缩进处垂下来，把「这是谁的子会话」画在缩进之外，
             // 缩进档位因此可以留给分组层级。
@@ -1297,11 +1310,14 @@ export function SessionTree({
       <li key={node.id}>
         <div
           data-reveal-key={`d:${node.id}`}
-          className={`${rowClass} ${active ? 'bg-active text-fg-max' : 'text-nav-fg'} ${drag?.kind === 'draft' && drag.id === node.id ? 'opacity-40' : ''} ${flashing ? 'session-row-flash' : ''}`}
-          style={{
-            paddingLeft: rowIndent(indent),
-            boxShadow: isOver ? dropShadow : undefined
-          }}
+          className={`${rowClass} ${
+            isOver && isIntoDrop(over)
+              ? dropIntoClass
+              : active
+                ? 'bg-active text-fg-max'
+                : 'text-nav-fg'
+          } ${drag?.kind === 'draft' && drag.id === node.id ? 'opacity-40' : ''} ${flashing ? 'session-row-flash' : ''}`}
+          style={{ paddingLeft: rowIndent(indent) }}
           title={
             loop
               ? `尚未关联真实会话的新对话\n${loopTooltip(loop, Date.now(), loopRunning)}`
@@ -1317,6 +1333,7 @@ export function SessionTree({
           onDoubleClick={() => setEditing({ kind: 'draft', id: node.id })}
           onContextMenu={(event) => openMenu(event, { draft: node, items })}
         >
+          {isOver && <DropBar position={over.position} />}
           <Slot />
           <RowLeading
             state={state}
@@ -1488,17 +1505,10 @@ export function SessionTree({
     return (
       <li key={groupId}>
         <div
-          className={`${groupRowClass} ${drag?.kind === 'group' && drag.id === groupId ? 'opacity-40' : ''}`}
-          style={{
-            paddingLeft: rowIndent(depth),
-            boxShadow: isOver
-              ? over.position === 'before'
-                ? 'inset 0 2px 0 rgba(90,167,232,.9)'
-                : over.position === 'after'
-                  ? 'inset 0 -2px 0 rgba(90,167,232,.9)'
-                  : dropShadow
-              : undefined
-          }}
+          className={`${groupRowClass} ${isOver && isIntoDrop(over) ? dropIntoClass : ''} ${
+            drag?.kind === 'group' && drag.id === groupId ? 'opacity-40' : ''
+          }`}
+          style={{ paddingLeft: rowIndent(depth) }}
           title={
             digest?.latestAt
               ? `${group.name} · ${digest.count} 条 · 最近 ${relativeTimeShort(digest.latestAt)}`
@@ -1546,6 +1556,7 @@ export function SessionTree({
             })
           }}
         >
+          {isOver && <DropBar position={over.position} />}
           <Slot>
             <button
               type="button"
@@ -1634,8 +1645,10 @@ export function SessionTree({
       !!source && (accepts ? accepts(source) : source.kind !== 'group')
     return (
       <div
-        className="group/header relative mt-1 flex h-6 items-center rounded-md pr-2"
-        style={{ paddingLeft: rowIndent(0), boxShadow: isOverHeader ? dropShadow : undefined }}
+        className={`group/header relative mt-1 flex h-6 items-center rounded-md pr-2 ${
+          isOverHeader ? dropIntoClass : ''
+        }`}
+        style={{ paddingLeft: rowIndent(0) }}
         onDragOver={
           dropSection
             ? (event) => {
@@ -1771,13 +1784,13 @@ export function SessionTree({
               </span>
             </div>
           )}
-          {/* 拖到会嵌套之前，先告诉用户「嵌套要按 ⌥」：默认不再嵌套之后，这条提示是
-              唯一的发现路径。放在钉住的头部里，拖动时滚到多远都看得见。 */}
+          {/* 拖动时把落点规则说清楚：中间是嵌套 / 进入，上下两头是排序。放在钉住的头部里，
+              拖到列表深处也看得见。 */}
           {drag && !searching && (
             <p className="mt-1 rounded-md bg-overlay px-2 py-1 text-[11px] leading-4 text-fg-dim">
               {drag.kind === 'group'
-                ? '拖动可调整顺序；按住 ⌥ 拖到分组中间可变成它的子分组'
-                : '拖动可换分区或调顺序；按住 ⌥ 拖到会话中间可成为它的子会话'}
+                ? '拖到上下边缘调整顺序；拖到分组中间可成为它的子分组'
+                : '拖到上下边缘换分区或调整顺序；拖到会话中间可成为它的子会话'}
             </p>
           )}
         </div>

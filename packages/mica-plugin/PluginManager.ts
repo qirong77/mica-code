@@ -11,6 +11,7 @@ import type { PluginSessionStateApi } from './PluginSessionState.js';
 import { createPluginSessionSettingsApi, type PluginSessionSettingsHostApi } from './PluginSessionSettings.js';
 import { createPluginLlmApi } from './PluginLlm.js';
 import { createPluginBackgroundScheduler } from './PluginBackground.js';
+import type { PluginObservationEvent } from './PluginObservation.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginPanelHandler, PluginPanelRegistry } from './PluginPanel.js';
 import type { PluginSessionMenuHandler, PluginSessionMenuRegistry } from './PluginSessionMenu.js';
@@ -351,10 +352,21 @@ export class PluginManager {
     const background = createPluginBackgroundScheduler({
       pluginId: plugin.id,
       enabled: options.backgroundTasks !== false,
-      onError: (taskId, error) => {
+      onError: (taskId, error, info) => {
         const message = errorMessage(error);
-        logger.warn('plugin:background-failed', { taskId, error: message });
+        logger.warn('plugin:background-failed', { taskId, error: message, failures: info.failures });
         health.report({ level: 'warn', message: `常驻任务 ${taskId} 失败：${message}` });
+        // 健康状态只留最后一句话，谁也看不到「它失败了 300 次」。事件进观察流，
+        // 复盘才能回答「哪个插件的常驻任务一直在坏」。
+        baseContext.hooks.notify<PluginObservationEvent>('plugin:observe', {
+          pluginId: plugin.id,
+          timestamp: new Date().toISOString(),
+          type: 'background:failed',
+          taskId,
+          tick: info.tick,
+          failures: info.failures,
+          error: message,
+        });
       },
     });
     ctx.background = background;
@@ -779,6 +791,15 @@ export class PluginManager {
       logger.error('plugin:hook-failed', { hook, error: message });
       if (pluginId)
         writePluginHealth(pluginId, { level: 'error', message: `钩子 ${hook} 执行失败：${message}` }, { configDir });
+      // 观察通道自己的 handler 失败不再回灌：那会让 notify 递归调用自己。
+      if (pluginId && hook !== 'plugin:observe')
+        baseContext.hooks.notify<PluginObservationEvent>('plugin:observe', {
+          pluginId,
+          timestamp: new Date().toISOString(),
+          type: 'hook:failed',
+          hook,
+          error: message,
+        });
     });
   }
 }

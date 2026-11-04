@@ -57,6 +57,69 @@ const entry = {
 };
 
 describe('createPluginModels', () => {
+  it('reports the request in the helper trace and forwards its observer callbacks', async () => {
+    const finished: { outcome: string; usage?: readonly AgentUsageRecord[] }[] = [];
+    const infos: unknown[] = [];
+    let queryOptions: { onRequestStart?: unknown; onRequestEnd?: unknown } | undefined;
+    const models = createPluginModels({
+      createClient: (() => ({
+        query: async (_input: unknown, options: { onRequestStart?: unknown; onRequestEnd?: unknown }) => {
+          queryOptions = options;
+          return 'ok';
+        },
+        usageHistory: [usage],
+      })) as never,
+      trace: (info) => {
+        infos.push(info);
+        return {
+          onRequestStart: () => {},
+          onRequestEnd: () => {},
+          onRetry: () => {},
+          finish: (outcome, _error, requests) => finished.push({ outcome, usage: requests }),
+        };
+      },
+    });
+
+    await models('session-rename', baseRequest);
+
+    expect(infos).toMatchObject([
+      { pluginId: 'session-rename', purpose: '自动起标题', model: 'mini', input: 'user' },
+    ]);
+    // 宿主给的三个回调必须真的递给模型客户端：否则轨迹里只有起止、没有请求边界。
+    expect(typeof queryOptions?.onRequestStart).toBe('function');
+    expect(typeof queryOptions?.onRequestEnd).toBe('function');
+    expect(finished).toMatchObject([{ outcome: 'completed' }]);
+    expect(finished[0].usage).toHaveLength(1);
+  });
+
+  it('finishes the trace with an error and never lets a broken tracer fail the request', async () => {
+    const finished: string[] = [];
+    const models = createPluginModels({
+      createClient: (() => ({
+        query: async () => {
+          throw Object.assign(new Error('provider down'), { usageHistory: [usage] });
+        },
+        usageHistory: [],
+      })) as never,
+      trace: () => ({
+        onRequestStart: () => {},
+        onRequestEnd: () => {},
+        onRetry: () => {},
+        finish: (outcome) => finished.push(outcome),
+      }),
+    });
+    await expect(models('commit', baseRequest)).rejects.toThrow('provider down');
+    expect(finished).toEqual(['error']);
+
+    const broken = createPluginModels({
+      createClient: ((options: ModelClientOptions) => fakeClient(options, { text: 'fine' })) as never,
+      trace: () => {
+        throw new Error('trace exploded');
+      },
+    });
+    await expect(broken('commit', baseRequest)).resolves.toMatchObject({ text: 'fine' });
+  });
+
   it('returns the text and reports the usage back to the plugin', async () => {
     const models = createPluginModels({
       createClient: (options) => fakeClient(options, { text: '修复登录超时', usage }),

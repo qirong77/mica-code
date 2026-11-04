@@ -162,6 +162,43 @@ type RunStartObservation = Extract<AgentObservationEvent, { type: 'run:start' }>
  */
 export type AgentDelegationObservation = NonNullable<RunStartObservation['delegation']>;
 
+/**
+ * `run:start.helper` 的形状：不属于任何一轮的宿主内部工作（压缩摘要、旁问线程、
+ * 插件自己问模型）。`kind` 是稳定的来源短名，观察方据此归并成本。
+ */
+export type AgentHelperObservation = { kind: string; pluginId?: string; purpose?: string };
+
+/** `createSubAgent` 的观察分类：要么是委派（有类型），要么是 helper（有来源）。 */
+export type AgentSubagentObservation = {
+  delegation?: AgentDelegationObservation;
+  helper?: AgentHelperObservation;
+};
+
+/** 交给子运行包装层的分类标记，二选一。 */
+type RunMarker = { delegation?: AgentDelegationObservation; helper?: AgentHelperObservation };
+
+/**
+ * 一次 helper 运行的句柄（`startHelperRun`）。
+ *
+ * `callbacks` 原样交给模型客户端；`finish` 必须在 `finally` 里调一次，成功与失败都要，
+ * 否则这次运行会一直停在 `running`。
+ */
+export type HelperRunHandle = {
+  callbacks: {
+    onRequestStart: (info: { messageCount: number; tools?: unknown }) => void;
+    onRequestEnd: (info: {
+      durationMs: number;
+      firstTokenMs?: number;
+      attempts: number;
+      outcome: 'completed' | 'error' | 'aborted';
+      toolCalls?: number;
+      error?: string;
+    }) => void;
+    onRetry: (info: { attempt: number; delayMs: number; error: unknown }) => void;
+  };
+  finish(outcome: 'completed' | 'error' | 'aborted', error?: unknown, usage?: readonly AgentUsageRecord[]): void;
+};
+
 export class AgentAbortError extends Error {
   constructor(readonly runId = -1) {
     super('Agent run aborted');
@@ -171,6 +208,30 @@ export class AgentAbortError extends Error {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && (error.name === 'AbortError' || error.name === 'AgentAbortError');
+}
+
+function errorMessageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** 固定的观察形状：kind 不能是空白（观察方按它归并），其余两项缺省就不写。 */
+function freezeHelper(info: AgentHelperObservation): NonNullable<RunStartObservation['helper']> {
+  const kind = info.kind.trim() || 'helper';
+  return Object.freeze({
+    kind,
+    ...(info.pluginId ? { pluginId: info.pluginId } : {}),
+    ...(info.purpose ? { purpose: info.purpose } : {}),
+  });
+}
+
+function usageObservation(record: AgentUsageRecord) {
+  return Object.freeze({
+    inputTokens: record.inputTokens ?? 0,
+    outputTokens: record.outputTokens ?? 0,
+    ...(record.cachedInputTokens === undefined ? {} : { cachedInputTokens: record.cachedInputTokens }),
+    ...(record.totalTokens === undefined ? {} : { totalTokens: record.totalTokens }),
+    ...(record.model ? { model: record.model } : {}),
+  });
 }
 
 /**
@@ -230,13 +291,13 @@ export class AgentRuntime {
   private client: IAgent<ModelClientOptions> | null = null;
   private runId = 0;
   /**
-   * 委派子运行的负数序号。
+   * 子运行（委派子代理 + helper）的负数序号。
    *
-   * 子代理不在这个 runtime 的 turn loop 里跑，却又必须被 `agent:observe` 看见（否则
-   * 委派树只能靠父侧那一次工具调用反推）。负数让它们与主运行的轮次 id 永不相撞，
-   * `isCurrent` 也照旧只认正数的那一轮。
+   * 这些运行不在这个 runtime 的 turn loop 里，却又必须被 `agent:observe` 看见（否则
+   * 委派树只能靠父侧那一次工具调用反推，插件自己的模型请求则完全没有出处）。负数让
+   * 它们与主运行的轮次 id 永不相撞，`isCurrent` 也照旧只认正数的那一轮。
    */
-  private delegatedRunSeq = 0;
+  private childRunSeq = 0;
   // Async scope prevents UI prompt previews and callbacks left by an older run
   // from being attributed to whichever run happens to be active now.
   private readonly observationScope = new AsyncLocalStorage<ObservedRun>();
@@ -466,11 +527,12 @@ export class AgentRuntime {
   /**
    * 建一个子代理客户端。
    *
-   * `delegation` 由宿主在**派发**时给出（子代理类型名 + 派生它的会话）：委派运行跑在
-   * 自己的客户端里，不经过这个 runtime 的 turn loop，不给它补一对 run 事件，观察方就
-   * 只剩父侧那一次 `agent` 工具调用，拼不出委派树、也答不了「哪种类型的子代理回报最差」。
+   * `observation` 由宿主在**派发**时给出：委派子代理带类型名与派生它的会话，helper
+   * （压缩摘要、旁问线程）带一个稳定的来源短名。子代理跑在自己的客户端里、不经过这个
+   * runtime 的 turn loop，不给它补一对 run 事件，观察方就只剩父侧那一次工具调用——
+   * 拼不出委派树，也答不了「哪种类型的子代理回报最差」「摘要助手花了多少」。
    */
-  createSubAgent(options: Partial<ModelClientOptions> = {}, delegation?: AgentDelegationObservation) {
+  createSubAgent(options: Partial<ModelClientOptions> = {}, observation: AgentSubagentObservation = {}) {
     if (!this.isConfigured) {
       const message = `${this.currentConfig.provider.id} 未配置 api_key，运行 /config 命令配置后再尝试`;
       throw new Error(message);
@@ -479,32 +541,98 @@ export class AgentRuntime {
       ...this.createClientOptions(options),
       effort: options.effort ?? 'none',
     });
-    return delegation ? this.observeDelegatedRun(child, delegation, options) : child;
+    // 没说是哪一种也算 helper：宁可分类粗一点，也不要让一次真实的模型开销从轨迹里消失。
+    const marker: RunMarker = observation.delegation
+      ? { delegation: observation.delegation }
+      : { helper: observation.helper ?? { kind: 'subagent' } };
+    return this.observeChildRun(child, marker, options);
   }
 
   /**
-   * 让一次委派运行也能被 `agent:observe` 看见：在子客户端 `query` 两侧补一对
-   * `run:start` / `run:finish`，并带上 `delegation`。
+   * 让一次「不经过 turn loop」的宿主工作也进观察流：插件经 `ctx.llm` 问模型（起标题、
+   * 写提交说明、整理记忆）走的就是这条。
    *
-   * 只包裹传了 `delegation` 的子代理（BTW 线程、摘要助手都不传），语义没变的其他调用
-   * 拿到的是原样的客户端。子运行用负数 runId，且整段包在自己的 AsyncLocalStorage
-   * 作用域里：子代理内部触发的观察不会落到父运行头上，父运行的 request 计数也不会
-   * 被子代理的请求污染。
+   * 调用方把 `callbacks` 交给模型客户端（`runModelTextRequest` 的 `onRequestStart` /
+   * `onRequestEnd`），并在 `finally` 里调一次 `finish()`：没有 finish 的运行会一直挂在
+   * `running`，只能等宿主退出后才被回收。
    */
-  private observeDelegatedRun(
+  startHelperRun(
+    info: AgentHelperObservation & { model?: string; providerId?: string; protocol?: string; input?: unknown },
+  ): HelperRunHandle {
+    const observed: ObservedRun = { runId: -++this.childRunSeq, closed: false };
+    const startedAt = Date.now();
+    if (this.hooks) {
+      this.observe(observed, {
+        type: 'run:start',
+        input: cloneJson(info.input),
+        config: Object.freeze({
+          providerId: info.providerId ?? this.currentConfig.provider.id,
+          protocol: info.protocol ?? this.currentConfig.provider.protocol,
+          model: info.model ?? this.currentConfig.model,
+          effort: 'none',
+          role: this.currentRole,
+        }),
+        helper: freezeHelper(info),
+      });
+    }
+    return {
+      callbacks: {
+        onRequestStart: (request) => {
+          this.observe(observed, {
+            type: 'request:start',
+            messageCount: request.messageCount,
+            ...(request.tools === undefined ? {} : { tools: cloneJson(request.tools) }),
+          });
+        },
+        onRequestEnd: (request) => this.observe(observed, { type: 'request:end', ...request }),
+        onRetry: (request) =>
+          this.observe(observed, {
+            type: 'retry',
+            attempt: request.attempt,
+            delayMs: request.delayMs,
+            error: errorMessageOf(request.error),
+          }),
+      },
+      finish: (outcome, error, usage) => {
+        if (observed.closed) return;
+        for (const record of usage ?? []) this.observe(observed, { type: 'usage', usage: usageObservation(record) });
+        observed.closed = true;
+        this.observe(observed, {
+          type: 'run:finish',
+          outcome,
+          elapsedMs: Date.now() - startedAt,
+          ...(error === undefined ? {} : { error: errorMessageOf(error) }),
+        });
+      },
+    };
+  }
+
+  /**
+   * 在子客户端 `query` 两侧补一对 `run:start` / `run:finish`，并带上 `delegation` 或
+   * `helper` 分类；请求级事件（`request:start` / `request:end` / `retry`）也从这里转发，
+   * 否则子代理内部请求的耗时与首字延迟完全没有出处。
+   *
+   * 子运行用负数 runId，且整段包在自己的 AsyncLocalStorage 作用域里：子代理内部触发
+   * 的观察不会落到父运行头上，父运行的 request 计数也不会被子代理的请求污染。
+   */
+  private observeChildRun(
     child: IAgent<ModelClientOptions>,
-    delegation: AgentDelegationObservation,
+    marker: RunMarker,
     options: Partial<ModelClientOptions>,
   ): IAgent<ModelClientOptions> {
     if (!this.hooks) return child;
     const query = child.query.bind(child);
-    const observedDelegation = Object.freeze({
-      type: delegation.type,
-      ...(delegation.parentSessionId ? { parentSessionId: delegation.parentSessionId } : {}),
-    });
+    const delegation = marker.delegation
+      ? Object.freeze({
+          type: marker.delegation.type,
+          ...(marker.delegation.parentSessionId ? { parentSessionId: marker.delegation.parentSessionId } : {}),
+        })
+      : undefined;
+    const helper = marker.helper ? freezeHelper(marker.helper) : undefined;
     child.query = async (question, queryOptions) => {
-      const observed: ObservedRun = { runId: -++this.delegatedRunSeq, closed: false };
+      const observed: ObservedRun = { runId: -++this.childRunSeq, closed: false };
       const startedAt = Date.now();
+      const usageStart = child.usageHistory?.length ?? 0;
       let outcome: 'completed' | 'aborted' | 'error' = 'completed';
       let observationError: string | undefined;
       this.observe(observed, {
@@ -517,15 +645,46 @@ export class AgentRuntime {
           effort: options.effort ?? 'none',
           role: this.currentRole,
         }),
-        delegation: observedDelegation,
+        ...(delegation ? { delegation } : {}),
+        ...(helper ? { helper } : {}),
       });
       try {
-        return await this.observationScope.run(observed, () => query(question, queryOptions));
+        return await this.observationScope.run(observed, () =>
+          query(question, {
+            ...queryOptions,
+            onRequestStart: (info) => {
+              this.observe(observed, {
+                type: 'request:start',
+                messageCount: info.messageCount,
+                ...(info.tools === undefined ? {} : { tools: cloneJson(info.tools) }),
+              });
+              queryOptions?.onRequestStart?.(info);
+            },
+            onRequestEnd: (info) => {
+              this.observe(observed, { type: 'request:end', ...info });
+              queryOptions?.onRequestEnd?.(info);
+            },
+            onRetry: (info) => {
+              this.observe(observed, {
+                type: 'retry',
+                attempt: info.attempt,
+                delayMs: info.delayMs,
+                error: errorMessageOf(info.error),
+              });
+              queryOptions?.onRetry?.(info);
+            },
+          }),
+        );
       } catch (error) {
         outcome = isAbortError(error) || queryOptions?.signal?.aborted ? 'aborted' : 'error';
-        observationError = error instanceof Error ? error.message : String(error);
+        observationError = errorMessageOf(error);
         throw error;
       } finally {
+        // `loadSnapshot` 会整份替换 usageHistory：长度比开始时还短说明记录被换过，
+        // 这时宁可不报用量，也不要把前一次查询的账重复算一遍。
+        const history = child.usageHistory ?? [];
+        for (const record of history.length >= usageStart ? history.slice(usageStart) : [])
+          this.observe(observed, { type: 'usage', usage: usageObservation(record) });
         observed.closed = true;
         this.observe(observed, {
           type: 'run:finish',
@@ -1258,7 +1417,10 @@ export class AgentRuntime {
 
   private observeActive(payload: ObservationPayload): void {
     const observed = this.observationScope.getStore();
-    if (!observed || observed.closed || !this.isCurrent(observed.runId)) return;
+    // 子运行（负数 runId）不在主轮次的 runId 序列里，但它自己那段 scope 里发出的
+    // 事件同样属于它：只按 `closed` 判定，否则子运行永远观察不到自己的 request。
+    if (!observed || observed.closed) return;
+    if (observed.runId > 0 && !this.isCurrent(observed.runId)) return;
     this.observe(observed, payload);
   }
 

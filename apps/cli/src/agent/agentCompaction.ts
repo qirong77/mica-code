@@ -61,7 +61,9 @@ export async function compactAgentMessages(
 async function summarizeWithSubAgent(agent: AgentRuntime, transcript: string, prompt: string, signal?: AbortSignal): Promise<string> {
   // 摘要必须走子代理、禁用工具：它共享父代理的工具注册表，session_* 之类的
   // 工具会去改正在被压缩的会话本身（与 /compact llm 同一条路径）。
-  const subAgent = agent.createSubAgent({ systemPrompt: prompt, tools: false });
+  const subAgent = agent.createSubAgent({ systemPrompt: prompt, tools: false }, {
+    helper: { kind: 'compaction', purpose: 'summarize' },
+  });
   const startedAt = new Date().toISOString();
   let status: 'completed' | 'failed' | 'aborted' = 'failed';
   try {

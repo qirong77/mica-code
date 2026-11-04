@@ -18,12 +18,6 @@ export function orderSessions(items, order, fallback) {
   return [...known, ...rest]
 }
 
-/** 只有同一工作目录下才允许手动重排，否则 Recent 里会串成一片 */
-function sameGroup(a, b) {
-  if (!a || !b) return false
-  return (a.cwd || '~') === (b.cwd || '~')
-}
-
 /**
  * 分组换父级：落到分组行 = 挂进那个分组，落到 Projects 标题 = 回到根。
  * 自己、自己的子树、以及本来就在那个父级下的落点都返回 null（不产生变更）。
@@ -54,7 +48,7 @@ function resolveGroupDrop({ drag, section, groupId, groups, position }) {
  * 一次 drop 该做什么：
  * - 跨分区（或跨分组）= 移动，目标分区由落点决定（Pinned / 某个分组 / Recent 三选一）；
  * - 拖的是分组 = 换父级（嵌套），见 resolveGroupDrop；
- * - 落到会话行正中 = 成为它的子会话（`parentSessionId`）；拖的是子会话时，
+ * - 落到会话行中间那条带子 = 成为它的子会话（`parentSessionId`）；拖的是子会话时，
  *   落到别处 = 解除父子关系，见下面的 `kind: 'unnest'`；
  * - 同分区 = 手动重排（Recent 按时间排序，不参与）；
  * - 其余情况返回 null，表示这次 drop 不产生任何变更。
@@ -92,10 +86,9 @@ export function resolveDrop({
     return isChild ? { ...plan, clearParent: true } : plan
   }
   if (isChild) return { kind: 'unnest' }
+  // Recent 按时间排，没有手动顺序可言；Pinned 与分组内则不看工作目录——
+  // 侧栏是「我自己的清单」，跨目录的两个会话照样要能前后挪。
   if (drag.kind !== 'session' || section === 'recent') return null
-
-  const byId = new Map(items.map((session) => [session.id, session]))
-  if (!sameGroup(byId.get(drag.id), byId.get(targetId))) return null
 
   const ids = orderSessions(items, order, byUpdatedDesc).map((session) => session.id)
   const from = ids.indexOf(drag.id)
@@ -110,15 +103,14 @@ export function resolveDrop({
 /**
  * 拖到一行上时，光标在纵向的哪个位置、算哪种落点。
  *
- * 行高只有 24px，以前「中间 50%」直接等于嵌套/进入子级：一次手抖就把分组改成了别人的
- * 子分组、把会话挂到另一条会话下面。现在嵌套必须按住 ⌥（macOS 上是 Option，Windows/Linux
- * 上是 Alt），不按就只按上下半区排到前面或后面。
+ * 中间一半 = 嵌套 / 进入这一级，上下各四分之一 = 排到前面或后面。行高只有 24px，
+ * 所以上下两条带子留得不宽：想把会话挂到另一条下面时，往行的中间放就行，不用按修饰键。
  *
  * `canNest` 由调用方判断（草稿没有会话文件、拖进自己的子树会成环、已经在里面了……），
- * 这里只管「纵向位置 + 修饰键」这一层，两种行共用同一套规则。
+ * 这里只管纵向位置这一层，分组行与会话行共用同一套规则。
  */
-export function rowDropPosition({ ratio, altKey = false, canNest = true } = {}) {
+export function rowDropPosition({ ratio, canNest = true } = {}) {
   const value = Number.isFinite(ratio) ? ratio : 0.5
-  if (altKey && canNest && value > 0.25 && value < 0.75) return 'into'
+  if (canNest && value > 0.25 && value < 0.75) return 'into'
   return value < 0.5 ? 'before' : 'after'
 }

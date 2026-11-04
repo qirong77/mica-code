@@ -1,5 +1,6 @@
 import { createSubAgent } from './providers/createModelClient.js';
 import type { AgentUsageRecord, IAgent, ModelClientOptions } from './index.js';
+import type { AgentQueryOptions } from './core/Agent.js';
 
 /**
  * 「发一次 system + user，拿回一段文本」的唯一实现。
@@ -27,6 +28,13 @@ export type ModelTextRequest = {
   user: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * 请求级观察（`onRequestStart` / `onRequestEnd` / `onRetry`）。
+   *
+   * 插件自己问模型也是一次真实的请求，该有耗时与首字延迟：宿主把
+   * `AgentRuntime.startHelperRun()` 的三个回调从这里递进来，与主流程的观察口径一致。
+   */
+  observer?: Pick<AgentQueryOptions, 'onRequestStart' | 'onRequestEnd' | 'onRetry'>;
   /** 测试注入点；默认用 `micaAgent.createSubAgent`。 */
   createClient?: (options: ModelClientOptions) => ModelTextClient;
 };
@@ -65,7 +73,11 @@ export async function runModelTextRequest(request: ModelTextRequest): Promise<Mo
   else request.signal?.addEventListener('abort', forwardAbort, { once: true });
 
   try {
-    const text = await withTimeout(client.query(request.user, { signal: controller.signal }), timeoutMs, controller);
+    const text = await withTimeout(
+      client.query(request.user, { ...request.observer, signal: controller.signal }),
+      timeoutMs,
+      controller,
+    );
     return { text, usage: client.lastUsage, usageHistory: client.usageHistory.slice() };
   } catch (error) {
     // 失败的那一次也可能已经烧掉 token（超时的长回复、被中断的流）：把已产生的用量

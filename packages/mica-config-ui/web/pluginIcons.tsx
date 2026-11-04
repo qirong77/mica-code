@@ -32,6 +32,7 @@ import {
   Tags,
   Terminal,
   TextCursorInput,
+  Video,
   Wrench,
   Zap,
 } from 'lucide-react';
@@ -76,6 +77,7 @@ export const PLUGIN_ICONS = {
   tags: Tags,
   terminal: Terminal,
   'text-cursor-input': TextCursorInput,
+  video: Video,
   wrench: Wrench,
   zap: Zap,
 } satisfies Record<string, LucideIcon>;

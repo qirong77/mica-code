@@ -60,7 +60,8 @@ const MAX_INTERVAL_MS = 2 ** 31 - 1;
  */
 export function createPluginBackgroundScheduler(options: {
   pluginId: string;
-  onError: (taskId: string, error: unknown) => void;
+  /** 一轮失败：`tick` 是这次尝试的序号，`failures` 是该任务累计失败次数。 */
+  onError: (taskId: string, error: unknown, info: { tick: number; failures: number }) => void;
   now?: () => number;
   /**
    * `false` 表示这个宿主不跑常驻任务（配置页动作那种一次性进程）：注册照收，但不排期。
@@ -85,7 +86,11 @@ export function createPluginBackgroundScheduler(options: {
   const reportFailure = (entry: RegisteredTask, error: unknown) => {
     if (entry.stopped) return;
     entry.state.failures++;
-    try { options.onError(entry.task.id, error); } catch { /* Observers cannot stop scheduling. */ }
+    try {
+      options.onError(entry.task.id, error, { tick: entry.attempts, failures: entry.state.failures });
+    } catch {
+      /* Observers cannot stop scheduling. */
+    }
   };
 
   const intervalOf = (entry: RegisteredTask): number => {
