@@ -1,7 +1,8 @@
 import { createRoot } from 'react-dom/client'
 import { setConfigWebClient, setConfigWebEditor, setConfigWebThemeHost } from '@mica-config-ui/web'
 import App from './App'
-import { DevReloadBanner } from './DevReloadBanner'
+import { DevReloadNotifier } from './DevReloadNotifier'
+import { NotificationHost } from './NotificationHost'
 import { ErrorBoundary } from './ErrorBoundary'
 import ShareIndex from './ShareIndex'
 import '../assets/app.css'
@@ -92,16 +93,39 @@ ensureMicaApi()
               <ShareIndex />
             </ErrorBoundary>
           )
+          dismissBootPlaceholder()
           return
         }
         createRoot(document.getElementById('root')).render(
           <ErrorBoundary>
-            <DevReloadBanner />
+            <NotificationHost />
+            <DevReloadNotifier />
             <App />
           </ErrorBoundary>
         )
+        dismissBootPlaceholder()
       })
   })
+
+/**
+ * 摘掉 index.html 里的启动占位（首帧底色 + 「正在载入…」）。React 18 的首次提交是
+ * 异步的，render() 返回时 DOM 还可能是空的，所以按 #root 的子节点变化来摘。
+ */
+function dismissBootPlaceholder() {
+  const boot = document.getElementById('boot')
+  if (!boot) return
+  const root = document.getElementById('root')
+  if (!root || root.childElementCount > 0) {
+    boot.remove()
+    return
+  }
+  const observer = new MutationObserver(() => {
+    if (root.childElementCount === 0) return
+    observer.disconnect()
+    boot.remove()
+  })
+  observer.observe(root, { childList: true })
+}
 
 function renderBootError(error) {
   const root = document.getElementById('root')
@@ -131,4 +155,5 @@ function renderBootError(error) {
     box.append(home)
   }
   root.replaceChildren(box)
+  dismissBootPlaceholder()
 }

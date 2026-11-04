@@ -31,8 +31,53 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Mica" />
     <title>Mica Code</title>
+    <!-- 首帧底色与启动占位。样式表（app.css 要等模块脚本执行）与界面都还没到时，
+         默认白底会整页空白：界面重载那一下看起来就像白屏。这里的颜色与 app.css 的
+         --color-canvas 一致（深 #2b2b2b / 浅 #ffffff），占位文字延迟淡入——启动很快时
+         它不会闪出来，只有真的等了一段才出现。 -->
+    <style>
+      html {
+        background: #2b2b2b;
+      }
+      html[data-theme='light'] {
+        background: #ffffff;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        font:
+          12px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          'SF Pro Text',
+          system-ui,
+          sans-serif;
+        color: #888888;
+      }
+      html[data-theme='light'] #boot {
+        color: #6b7280;
+      }
+      #boot span {
+        opacity: 0;
+        animation: boot-hint-in 180ms ease-out 260ms forwards;
+      }
+      @keyframes boot-hint-in {
+        to {
+          opacity: 1;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot"><span>正在载入…</span></div>
     <div id="root"></div>
     <script type="module" src="./src/main.jsx"></script>
   </body>

@@ -20,7 +20,7 @@
 
 ### 构建后自我重载
 
-`build:app` 收尾由 `scripts/build-stamp.mjs` 往 `$MICA_HOME/dev-build-stamp.json` 写产物指纹，运行中的实例据此自我重载（`host/build-stamp.js` 判层、`host/dev-reload.js` 管节奏、`renderer/src/DevReloadBanner.jsx` 是顶部倒计时条）。分层规则是「哪份产物变了就换掉加载它的那个东西」：`renderer` 只刷页面（不碰任何会话宿主）；`cli`（插件与工具在里面）换掉会话宿主后再刷；`runtime`/`shell` 在 asar 里换不掉，运行时腾空宿主后落 `.restart` 交接文件，由外壳 `app.relaunch()`。
+`build:app` 收尾由 `scripts/build-stamp.mjs` 往 `$MICA_HOME/dev-build-stamp.json` 写产物指纹，运行中的实例据此自我重载（`host/build-stamp.js` 判层、`host/dev-reload.js` 管节奏、`renderer/src/DevReloadNotifier.jsx` 把状态翻成一条顶部通知（`renderer/src/notify.js` + `NotificationHost.jsx` 是通用通知队列与宿主））。分层规则是「哪份产物变了就换掉加载它的那个东西」：`renderer` 只刷页面（不碰任何会话宿主）；`cli`（插件与工具在里面）换掉会话宿主后再刷；`runtime`/`shell` 在 asar 里换不掉，运行时腾空宿主后落 `.restart` 交接文件，由外壳 `app.relaunch()`。
 
 **正在跑的一轮走「软停 + 自动续跑」，不是硬杀**：宿主收 `mica/host/drain` 后置一个标志，`ChatCompletionsClient`/`ResponsesClient` 的循环在「上一批工具已落定、下一次请求还没发」处 `throwIfTurnPaused`，此刻历史尾部完整，会话文件写 `turnState: 'aborted'` + `resumeAfter: 'build-reload'`。预算 15s：到期仍未停下（模型正在吐字 / 工具正在跑）才中断，那时这一批工具被记成 `interrupted`，续跑时模型会重跑它。新宿主起来按 `ui-state.workspace` 的节点扫会话头部找 `resumeAfter`，用 `turn/start { resume: true }` 接着跑。细节见 `headless.md` 的「drain 与续跑」。
 

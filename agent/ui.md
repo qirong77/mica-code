@@ -38,6 +38,8 @@
 
 ## 界面审查清单（新增页面、面板、弹窗必查）
 
+- 顶部临时提示走 `renderer/src/notify.js` + `NotificationHost.jsx`：`notify({ key, text, detail, level, timeout, actions })`，同 key 原地更新，最多三条，`sticky` 置顶；需要「页面刷完再提示」用 `queueAfterReload`。不要另外写浮层。
+
 - 控件只用 `@mica-config-ui/web` 那一套（`Button` / `Tag` / `Alert` / `Empty` / `Switch` / `Checkbox` / `SelectMenu` / `DateField` / `Segmented` / `text-input`），原生 `<select>`、`type="date"`、`type="checkbox"` 一律不用——`web/noNativeControls.test.ts` 按源码挡住，插件页面同样在范围内。
 - 选中态不要用 `border-left` 或 `inset ... 0 0` 造竖直亮条，用背景、圆角边框与字重区分。
 - 一行里的控件必须等高：原生 select / checkbox 要么 `appearance: none` 自绘，要么用共享组件。

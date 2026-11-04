@@ -615,12 +615,13 @@ function applyBadge(count) {
  */
 /**
  * 窗口底色：页面加载出第一帧之前、以及窗口缩放露出的边，看到的是这个颜色。
- * 深色沿用原来的 #0e0e0e；浅色用画布白。偏好存在渲染层界面状态（ui-state.json，
+ * 取值与 app.css 的 --color-canvas 对齐（深 #2b2b2b / 浅白），界面重载时从旧页面
+ * 到新页面第一帧之间不会先闪一块更黑的底色。偏好存在渲染层界面状态（ui-state.json，
  * 与渲染层同一份），auto 跟系统主题——和页面自己的解析规则保持一致，避免
  * 浅色主题下先闪一块深色。读不到文件（首次启动）就按系统主题。
  */
 function windowBackgroundColor() {
-  const dark = '#0e0e0e'
+  const dark = '#2b2b2b'
   const light = '#ffffff'
   const systemLight = !nativeTheme.shouldUseDarkColors
   try {
