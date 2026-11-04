@@ -40,12 +40,12 @@ export type CompactCliResult = {
   contextWindowSize?: number;
   contextUsageRatio?: number;
   summary?: string;
-  /** tool-results-only 模式：被替换掉工具结果的消息数。 */
+  /** tool-results-only 模式：被聚合成一条占位调用的工具调用数。 */
+  toolCallsAggregated?: number;
+  /** tool-results-only 模式：被聚合成占位调用的工具结果消息数。 */
   toolResultsReplaced?: number;
-  /** tool-results-only 模式：被丢弃的失效 Responses reasoning 条目数。 */
+  /** tool-results-only 模式：被丢弃的思考条目数。 */
   reasoningItemsDropped?: number;
-  /** tool-results-only 模式：被裁剪掉正文的工具调用数。 */
-  toolArgumentsTrimmed?: number;
   /** tool-results-only 模式：被替换为占位符的媒体块数（图片/文档）。 */
   mediaItemsReplaced?: number;
 };
@@ -173,9 +173,9 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
         contextWindowSize: result.contextWindowSize,
         contextUsageRatio: result.contextUsageRatio,
         summary: result.summary,
+        toolCallsAggregated: result.toolCallsAggregated,
         toolResultsReplaced: result.toolResultsReplaced,
         reasoningItemsDropped: result.reasoningItemsDropped,
-        toolArgumentsTrimmed: result.toolArgumentsTrimmed,
         mediaItemsReplaced: result.mediaItemsReplaced,
       };
     }
@@ -252,9 +252,9 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       contextWindowSize: result.contextWindowSize,
       contextUsageRatio: result.contextUsageRatio,
       summary: result.summary,
+      toolCallsAggregated: result.toolCallsAggregated,
       toolResultsReplaced: result.toolResultsReplaced,
       reasoningItemsDropped: result.reasoningItemsDropped,
-      toolArgumentsTrimmed: result.toolArgumentsTrimmed,
       mediaItemsReplaced: result.mediaItemsReplaced,
     };
   } catch (error) {

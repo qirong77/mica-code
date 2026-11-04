@@ -5,7 +5,7 @@
 ## 主要能力
 
 - 提供 `CompactionService`，封装上下文压缩流程。
-- `toolResultsOnly` 快速压缩：把工具结果与媒体块（图片/文档）替换为占位符（`[image omitted during compact]`，只认能识别的块类型）、把工具调用参数的正文型字段（写文件正文 / patch / 内联脚本）换成指向性摘要（保留路径、改了哪些文件、命令首行，其余参数原样保留），并丢弃随之失效的 Responses `reasoning` 条目，不生成 checkpoint、不丢轮次、不调用模型（可重复执行，没有可清理内容时报 not needed）。
+- `toolResultsOnly` 快速压缩：把压缩区里的全部工具调用与结果聚合成「一条调用 + 一条结果」的占位消息（`call_id` 固定为 `mica_compact`、参数 `{}`，说明文本列出每种工具的调用次数，形如 `[Mica compact] Placeholder for 42 collapsed tool calls (not a real result): read_file × 18, bash × 12, …`），丢弃这一区的思考（Responses `reasoning` 条目、Chat `reasoning_content`），并把媒体块替换为占位符（`[image omitted during compact]`，只认能识别的块类型）。用户与助手正文原样保留、顺序不变；不生成 checkpoint、不丢轮次、不调用模型（可重复执行——重复压缩把新计数并入同一条说明，id 与文本保持稳定；没有可清理内容时报 not needed）。
 - 将长对话整理为摘要消息，降低后续 prompt 的上下文压力。
 - 先裁剪媒体、base64 和旧工具结果，再按上下文预算决定 prune-only 或 summary + recent checkpoint。
 - 保留完整 recent round，并避免把 tool call / tool result 切成不合法的 provider 历史。

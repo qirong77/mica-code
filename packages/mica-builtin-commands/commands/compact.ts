@@ -106,20 +106,18 @@ function formatCompactNotice(result: CompactResult) {
   const strategy = result.strategy.replace(/_/g, ' ');
   const lines = [`**${prefix} complete**`, '', `- Mode: ${mode} (${strategy})`];
   if (result.strategy === 'tool_results_only') {
+    // 工具过程整段聚合成一条占位调用：调用数、结果数与思考条数都在说明里消失，
+    // 所以逐项报出来，用户才知道这次到底压掉了什么。
+    lines.push(`- Tool calls aggregated: ${result.toolCallsAggregated ?? 0}`);
     lines.push(`- Tool results replaced: ${result.toolResultsReplaced ?? 0}`);
     // 粘贴的截图/文档以 base64 常驻历史，被换成占位符后 base64 才算真的从上下文里消失。
     if (result.mediaItemsReplaced) {
       lines.push(`- Media items replaced: ${result.mediaItemsReplaced}`);
     }
-    // 工具参数里的正文型字段（写文件正文 / patch / 内联脚本）会换成指向性摘要，
-    // 这是压缩后剩下的最大一块，条数变化不影响对话文本，所以单独报一行。
-    if (result.toolArgumentsTrimmed) {
-      lines.push(`- Tool arguments trimmed: ${result.toolArgumentsTrimmed}`);
-    }
-    // 失效的 Responses reasoning 条目会被一并丢弃（不再发送也不再落盘），
-    // 它们本来就不算对话内容，所以条数变化时不用 "unchanged" 误导用户。
+    // 思考内容（Responses reasoning 条目 / Chat reasoning_content）在压缩区里一并丢弃，
+    // 它本来就不算对话内容，所以条数变化时不用 "unchanged" 误导用户。
     if (result.reasoningItemsDropped) {
-      lines.push(`- Stale reasoning items dropped: ${result.reasoningItemsDropped}`);
+      lines.push(`- Thinking dropped: ${result.reasoningItemsDropped}`);
     }
     lines.push(
       result.afterCount === result.beforeCount

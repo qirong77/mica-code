@@ -2170,7 +2170,7 @@ function runCompactSession(sessionId, mode = 'model') {
             contextUsageRatio: result.contextUsageRatio,
             toolResultsReplaced: result.toolResultsReplaced,
             mediaItemsReplaced: result.mediaItemsReplaced,
-            toolArgumentsTrimmed: result.toolArgumentsTrimmed,
+            toolCallsAggregated: result.toolCallsAggregated,
             reasoningItemsDropped: result.reasoningItemsDropped
           })
           return

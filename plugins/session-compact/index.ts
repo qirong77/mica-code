@@ -76,8 +76,10 @@ async function report(
   if (outcome.status === 'skipped')
     return { message: outcome.reason === 'busy' ? '这条会话正忙，等这一轮结束再压' : emptyMessage };
   const show = (tokens: number) => formatTokenCount(tokens, { roundedThousands: true });
-  const ratio =
-    outcome.beforeTokens > 0 ? Math.round((outcome.savedTokens / outcome.beforeTokens) * 100) : 0;
-  const saved = ratio > 0 && ratio <= 100 ? `（省 ${ratio}%）` : '';
-  return { message: `${label}完成：${show(outcome.beforeTokens)} → ${show(outcome.afterTokens)}${saved}` };
+  // 压缩前的数字锚在会话上一次真实请求上，误差不到 1%；压缩后的余量只能从「清掉多少」反推，
+  // 一次压掉七八成时它同时含固定开销（提示词 + 工具定义，每条会话 16k~40k）的估算偏差，
+  // 所以标成「约」，把实测更稳的清掉量单独写出来。
+  return {
+    message: `${label}完成：${show(outcome.beforeTokens)} → 约 ${show(outcome.afterTokens)}（清掉 ${show(outcome.savedTokens)}）`,
+  };
 }

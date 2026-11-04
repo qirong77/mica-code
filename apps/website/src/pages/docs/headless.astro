@@ -303,7 +303,8 @@ const steerRequest = `{"id":4,"method":"turn/steer","params":{"expectedTurnId":"
   </p>
   <ul>
     <li>
-      <code>--tool-results-only</code>：本地清理工具结果、媒体和过长工具参数，保留对话与轮次，不调用模型。
+      <code>--tool-results-only</code>：本地清理，把工具调用与结果聚合成一条占位调用（只留工具名与次数）、
+      丢弃思考、替换媒体，保留对话正文与轮次，不调用模型。
     </li>
     <li>
       不带模式参数：使用摘要压缩策略，必要时调用模型；<code>--force</code> 可在历史较短时强制摘要。

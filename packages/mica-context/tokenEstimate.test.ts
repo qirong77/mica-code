@@ -4,10 +4,23 @@ import { estimateContextTokens, estimateTextTokens, resolveRequestOverhead } fro
 describe('local token estimation', () => {
   it('handles empty, ASCII and CJK without serializing the history', () => {
     expect(estimateTextTokens('')).toBe(0);
-    expect(estimateTextTokens('a'.repeat(4000))).toBe(1000);
-    expect(estimateTextTokens('中文'.repeat(1000))).toBe(3000);
+    // 每类字符的折算都用 10 万字符的真实语料标定过（词与空白 0.255、中文 0.65 token/字）。
+    expect(estimateTextTokens('a '.repeat(2000))).toBe(1020);
+    expect(estimateTextTokens('中文对话'.repeat(1000))).toBe(2600);
     const payload = { role: 'tool', content: 'value'.repeat(100_000), toJSON() { throw new Error('must not serialize'); } };
     expect(estimateContextTokens([payload])).toBeGreaterThan(100_000);
+  });
+
+  // 分词器对中文按字切、对不带分隔符的 base64/哈希切得更碎。旧口径「ASCII 四字符一
+  // token、CJK 每字 1.5 token」实测把中文高估 2.3 倍、把 base64 低估 2.8 倍。
+  it('weights CJK and unbroken payloads by measurement, not by a single ASCII ratio', () => {
+    const chinese = estimateTextTokens('我们的会话压缩把工具结果换成占位符'.repeat(100));
+    expect(chinese / ('我们的会话压缩把工具结果换成占位符'.length * 100)).toBeGreaterThan(0.5);
+    expect(chinese / ('我们的会话压缩把工具结果换成占位符'.length * 100)).toBeLessThan(0.85);
+    const payload = 'iVBORw0KGgoAAAANSUhEUg'.repeat(2000);
+    const base64 = estimateTextTokens(payload);
+    expect(base64 / payload.length).toBeGreaterThan(0.6);
+    expect(base64 / payload.length).toBeLessThan(0.8);
   });
 
   it('grows with nested text, handles cycles defensively, and does not change inputs', () => {
@@ -21,17 +34,20 @@ describe('local token estimation', () => {
     expect(Number.isFinite(estimateContextTokens([cyclic]))).toBe(true);
   });
 
-  // 内联图片按文本算会高估两个数量级：1MB 的 base64 会被算成 25 万 token，
-  // 而 provider 按张按像素算，一张 1024² 约 1–1.6K。
+  // 内联图片按文本算会高估两个数量级：1MB 的 base64 会被算成 25 万 token。实测四张真实
+  // 截图（18KB/93KB/406KB/975KB）是 966/975/1751/1759——成本只随分辨率档位跳变，与
+  // base64 长度几乎无关，所以小图也要按约 1,000 算。
   it('counts image blocks by picture, not by base64 characters', () => {
-    const base64 = `data:image/png;base64,${'A'.repeat(600_000)}`;
-    const responses = [{ type: 'input_image', detail: 'auto', image_url: base64 }];
-    const chat = [{ type: 'image_url', image_url: { url: base64 } }];
-    expect(estimateContextTokens(responses)).toBeLessThan(2_000);
+    const small = `data:image/png;base64,${'A'.repeat(20_000)}`;
+    const large = `data:image/png;base64,${'A'.repeat(600_000)}`;
+    const responses = [{ type: 'input_image', detail: 'auto', image_url: small }];
+    const chat = [{ type: 'image_url', image_url: { url: large } }];
+    expect(estimateContextTokens(responses)).toBeGreaterThan(900);
+    expect(estimateContextTokens(responses)).toBeLessThan(1_100);
     expect(estimateContextTokens(chat)).toBeLessThan(2_000);
-    expect(estimateContextTokens(responses)).toBeGreaterThan(500);
+    expect(estimateContextTokens(chat)).toBeGreaterThan(1_600);
     // 工具输出里以 data: 开头的**文本**仍按文本算：provider 也是按文本计费的。
-    const asText = [{ role: 'tool', content: base64 }];
+    const asText = [{ role: 'tool', content: large }];
     expect(estimateContextTokens(asText)).toBeGreaterThan(100_000);
   });
 

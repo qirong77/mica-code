@@ -63,6 +63,7 @@ describe('createCompactCommand', () => {
         beforeCount: 20,
         afterCount: 18,
         keptCount: 18,
+        toolCallsAggregated: 3,
         toolResultsReplaced: 5,
         reasoningItemsDropped: 2,
         savedRatio: 0.4,
@@ -73,7 +74,8 @@ describe('createCompactCommand', () => {
     await command.action();
 
     const notice = String((services.showNotice as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]);
-    expect(notice).toContain('- Stale reasoning items dropped: 2');
+    expect(notice).toContain('- Tool calls aggregated: 3');
+    expect(notice).toContain('- Thinking dropped: 2');
     expect(notice).toContain('- Messages: 20 -> 18');
     expect(notice).not.toContain('(unchanged)');
   });

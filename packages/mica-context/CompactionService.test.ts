@@ -811,7 +811,7 @@ describe('CompactionService', () => {
     expect(summarize).not.toHaveBeenCalled();
   });
 
-  it('tool-results-only compact replaces tool results and media and folds cleared rounds', async () => {
+  it('tool-results-only compact aggregates every tool round into one placeholder pair', async () => {
     const service = new CompactionService();
     const summarize = vi.fn(async () => FULL_SUMMARY);
     const messages = [
@@ -835,6 +835,7 @@ describe('CompactionService', () => {
       },
       { type: 'function_call', call_id: 'rc-1', name: 'run_shell', arguments: '{"cmd":"ls packages"}' },
       { type: 'function_call_output', call_id: 'rc-1', output: `RAW_RESPONSES_OUTPUT: ${'y'.repeat(4_000)}` },
+      { role: 'assistant', content: 'keep second assistant text' },
       {
         role: 'user',
         content: [
@@ -853,118 +854,69 @@ describe('CompactionService', () => {
     expect(summarize).not.toHaveBeenCalled();
     expect(result.mode).toBe('pruned');
     expect(result.strategy).toBe('tool_results_only');
+    // 4 条工具消息（两个调用 + 两个结果）压成一对占位调用
+    expect(result.toolCallsAggregated).toBe(2);
     expect(result.toolResultsReplaced).toBe(2);
-    // 两轮工具调用的结果都被清空，于是各自折成一条说明：6 条消息 → 4 条
-    expect(result.toolRoundsFolded).toBe(2);
     expect(result.beforeCount).toBe(messages.length);
-    expect(result.afterCount).toBe(4);
-    expect(result.messages[0]).toEqual(messages[0]);
-    expect(contentOf(result.messages[1])).toContain('keep assistant text');
-    expect(contentOf(result.messages[1])).toContain('read_file(packages/example.ts)');
-    expect(JSON.stringify(result.messages[1])).not.toContain('RAW_TOOL_RESULT');
-    expect(contentOf(result.messages[2])).toContain('run_shell(ls packages)');
-    expect(JSON.stringify(result.messages)).not.toContain('RAW_RESPONSES_OUTPUT');
-    // 只有媒体块被换掉，同一条消息里的文本块原样保留
-    const mediaMessageContent = (result.messages[3] as { content: unknown[] }).content;
-    expect(mediaMessageContent[0]).toEqual((messages[5] as { content: unknown[] }).content[0]);
-    // 粘贴的图片以 base64 常驻历史，快速压缩把它换成占位符后 base64 才真的离开上下文
-    expect(result.mediaItemsReplaced).toBe(1);
-    // 没有任何 checkpoint 消息被插入，用户与助手文本原样保留
+    expect(result.afterCount).toBe(6);
+    // 对话正文原样保留、顺序不变，工具过程只剩末尾那一对
+    expect(contentOf(result.messages[0])).toBe('keep user text');
+    expect(contentOf(result.messages[1])).toBe('keep assistant text');
+    expect(contentOf(result.messages[2])).toBe('keep second assistant text');
+    expect(result.messages[4]).toMatchObject({ type: 'function_call', call_id: 'mica_compact', arguments: '{}' });
+    const note = String((result.messages[5] as { output: string }).output);
+    expect(note.startsWith('[Mica compact]')).toBe(true);
+    expect(note).toContain('Placeholder for 2 collapsed tool calls');
+    // 说明里留下「跑过哪些工具、各几次」，否则模型会重跑一遍
+    expect(note).toContain('read_file × 1');
+    expect(note).toContain('run_shell × 1');
     const serialized = JSON.stringify(result.messages);
+    expect(serialized).not.toContain('RAW_TOOL_RESULT');
+    expect(serialized).not.toContain('RAW_RESPONSES_OUTPUT');
+    // 没插入 checkpoint，媒体照旧被占位符顶掉
     expect(serialized).not.toContain(COMPACT_BOUNDARY_PREFIX);
     expect(serialized).not.toContain(COMPACT_SUMMARY_PREFIX);
     expect(serialized).not.toContain(IMAGE_BASE64);
-    expect(serialized).toContain('keep user text');
-    expect(serialized).toContain('keep assistant text');
     expect(serialized).toContain('keep this image');
-    expect(JSON.stringify(result.messages[3])).toContain('[image omitted during compact]');
+    expect(result.mediaItemsReplaced).toBe(1);
   });
 
-  it('tool-results-only compact clears pasted media without touching text or message count', async () => {
+  it('names the placeholder call after the most used tool and counts repeats', async () => {
     const service = new CompactionService();
-    const options = { toolResultsOnly: true, contextWindowSize: 100_000 };
-    const messages: unknown[] = [
-      {
-        type: 'message',
-        role: 'user',
-        content: [
-          { type: 'input_text', text: '[Image](~/.mica/images/shot.png) 这个报错怎么修' },
-          {
-            type: 'input_image',
-            detail: 'auto',
-            image_url: `data:image/png;base64,${IMAGE_BASE64}`,
-          },
-        ],
-      },
-      { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '先看堆栈', annotations: [] }] },
+    const call = (callId: string, name: string, args: Record<string, unknown>) => [
+      { type: 'function_call', call_id: callId, name, arguments: JSON.stringify(args) },
+      { type: 'function_call_output', call_id: callId, output: `RAW ${'y'.repeat(600)}` },
     ];
-
-    const first = await service.compact({ messages, options, summarize: async () => FULL_SUMMARY });
-
-    expect(first.mediaItemsReplaced).toBe(1);
-    expect(first.beforeCount).toBe(messages.length);
-    expect(first.afterCount).toBe(messages.length);
-    expect(JSON.stringify(first.messages)).not.toContain(IMAGE_BASE64);
-    // `[Image](路径)` 那行引用文本仍在，需要时可以再次内联
-    expect(JSON.stringify(first.messages)).toContain('[Image](~/.mica/images/shot.png)');
-    expect(JSON.stringify(first.messages)).toContain('[image omitted during compact]');
-    // 清掉一张图省的是它按像素算的成本（几百到几千），不是 base64 的字符数：
-    // 估算按图片块计价之后，媒体本来就不占几十万 token。
-    expect(first.savedTokenEstimate).toBeGreaterThan(0);
-    expect(first.savedTokenEstimate).toBeLessThan(IMAGE_BASE64.length / 5);
-
-    // 第二次没有可清理的媒体，报 not needed 而不是把对话文本也削掉
-    await expect(
-      service.compact({ messages: first.messages, options, summarize: async () => FULL_SUMMARY }),
-    ).rejects.toBeInstanceOf(CompactionNotNeededError);
-  });
-
-  it('tool-results-only compact also clears Chat Completions image_url parts', async () => {
-    const service = new CompactionService();
     const messages: unknown[] = [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: '看这张图' },
-          { type: 'image_url', image_url: { url: `data:image/png;base64,${IMAGE_BASE64}` } },
-        ],
-      },
-      { role: 'assistant', content: '收到' },
+      { type: 'function_call', call_id: 'c1', name: 'read_file', arguments: '{"path":"a.ts"}' },
+      { type: 'function_call_output', call_id: 'c1', output: `RAW ${'y'.repeat(600)}` },
+      ...call('c2', 'read_file', { path: 'b.ts' }),
+      ...call('c3', 'read_file', { path: 'c.ts' }),
+      ...call('c4', 'bash', { command: 'bun test' }),
     ];
 
     const result = await service.compact({
       messages,
       options: { toolResultsOnly: true, contextWindowSize: 100_000 },
-      summarize: async () => FULL_SUMMARY,
     });
 
-    expect(result.mediaItemsReplaced).toBe(1);
-    expect(JSON.stringify(result.messages)).not.toContain(IMAGE_BASE64);
-    expect(JSON.stringify(result.messages)).toContain('[image omitted during compact]');
+    expect(result.messages).toHaveLength(2);
+    // 次数最多的工具当占位调用的名字：模型看到的是自己真的有的工具
+    expect(result.messages[0]).toMatchObject({ type: 'function_call', name: 'read_file', arguments: '{}' });
+    const note = String((result.messages[1] as { output: string }).output);
+    expect(note).toContain('Placeholder for 4 collapsed tool calls');
+    expect(note).toContain('read_file × 3, bash × 1');
+    // 参数不再进历史：写文件正文之类的负载随工具消息一起消失
+    expect(JSON.stringify(result.messages)).not.toContain('b.ts');
   });
 
-  it('tool-results-only compact is repeatable and stops when nothing is left to replace', async () => {
-    const service = new CompactionService();
-    const summarize = vi.fn(async () => FULL_SUMMARY);
-    const messages = makeToolMessages(2);
-    const options = { toolResultsOnly: true, contextWindowSize: 100_000 };
-
-    const first = await service.compact({ messages, options, summarize });
-    expect(first.toolResultsReplaced).toBeGreaterThan(0);
-
-    await expect(service.compact({ messages: first.messages, options, summarize })).rejects.toBeInstanceOf(
-      CompactionNotNeededError,
-    );
-    expect(summarize).not.toHaveBeenCalled();
-  });
-
-  it('folds a cleared round into one line that still says which tools ran', async () => {
+  it('collapses Chat Completions tool rounds without losing the assistant text', async () => {
     const service = new CompactionService();
     const messages: unknown[] = [
       { role: 'user', content: '把这两个文件读一下' },
       {
         role: 'assistant',
-        content: '',
+        content: '我先读一下。',
         tool_calls: [
           { id: 'call-a', type: 'function', function: { name: 'read_file', arguments: '{"path":"packages/a.ts"}' } },
           { id: 'call-b', type: 'function', function: { name: 'read_file', arguments: '{"path":"packages/b.ts"}' } },
@@ -972,33 +924,94 @@ describe('CompactionService', () => {
       },
       { role: 'tool', tool_call_id: 'call-a', content: `RAW_A: ${'x'.repeat(2_000)}` },
       { role: 'tool', tool_call_id: 'call-b', content: `RAW_B: ${'y'.repeat(2_000)}` },
-      {
-        role: 'assistant',
-        content: '再看一下测试',
-        tool_calls: [
-          { id: 'call-c', type: 'function', function: { name: 'run_shell', arguments: '{"command":"bun test"}' } },
-        ],
-      },
-      { role: 'tool', tool_call_id: 'call-c', content: `RAW_C: ${'z'.repeat(2_000)}` },
+      { role: 'assistant', content: '再看一下测试' },
     ];
 
     const result = await service.compact({
       messages,
-      options: { toolResultsOnly: true, preserveRecentMessages: 2, contextWindowSize: 100_000 },
-      summarize: async () => FULL_SUMMARY,
+      options: { toolResultsOnly: true, contextWindowSize: 100_000 },
     });
 
-    // 只折保护线以外的轮次：两条并行调用合成一条，最近一轮原样留着
-    expect(result.toolRoundsFolded).toBe(1);
-    expect(result.afterCount).toBe(4);
-    const note = contentOf(result.messages[1]);
-    expect(note).toContain('tool calls cleared during compact');
-    // 折完仍看得出「读过哪两个文件」，否则模型会重新读一遍
-    expect(note).toContain('read_file(packages/a.ts)');
-    expect(note).toContain('read_file(packages/b.ts)');
+    expect(result.toolCallsAggregated).toBe(2);
+    expect(result.afterCount).toBe(5);
+    // 正文从带 tool_calls 的那条里抽出来留在原位，占位调用补在压缩区末尾
+    expect(result.messages[1]).toEqual({ role: 'assistant', content: '我先读一下。' });
+    expect(result.messages[2]).toEqual({ role: 'assistant', content: '再看一下测试' });
+    expect(result.messages[3]).toMatchObject({
+      role: 'assistant',
+      tool_calls: [{ id: 'mica_compact', function: { name: 'read_file', arguments: '{}' } }],
+    });
+    expect(result.messages[4]).toMatchObject({ role: 'tool', tool_call_id: 'mica_compact' });
+    expect(String((result.messages[4] as { content: string }).content)).toContain('read_file × 2');
     expect(JSON.stringify(result.messages)).not.toContain('RAW_A');
     expect(JSON.stringify(result.messages)).not.toContain('RAW_B');
-    expect((result.messages[2] as { tool_calls: unknown[] }).tool_calls).toHaveLength(1);
+  });
+
+  it('drops an empty assistant message left behind by a collapsed Chat round', async () => {
+    const service = new CompactionService();
+    const messages: unknown[] = [
+      { role: 'user', content: '跑一下测试' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call-a', type: 'function', function: { name: 'bash', arguments: '{"command":"bun test"}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call-a', content: `RAW: ${'x'.repeat(2_000)}` },
+      { role: 'assistant', content: '测试通过' },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, contextWindowSize: 100_000 },
+    });
+
+    expect(result.afterCount).toBe(4);
+    // 正文抽出来留在原位，占位调用落在压缩区末尾
+    expect(result.messages.map((message) => (message as { role?: string }).role)).toEqual([
+      'user',
+      'assistant',
+      'assistant',
+      'tool',
+    ]);
+    expect(result.messages[1]).toEqual({ role: 'assistant', content: '测试通过' });
+    expect(result.messages[2]).toMatchObject({ role: 'assistant', tool_calls: [{ id: 'mica_compact' }] });
+  });
+
+  it('places the aggregate before the protected latest user message', async () => {
+    const service = new CompactionService();
+    const messages: unknown[] = [
+      { role: 'user', content: '修一下 login 的报错' },
+      { role: 'assistant', content: '我先看相关文件。' },
+      {
+        type: 'function_call',
+        call_id: 'c1',
+        name: 'read_file',
+        arguments: '{"path":"packages/auth/login.ts"}',
+      },
+      { type: 'function_call_output', call_id: 'c1', output: `RAW: ${'y'.repeat(2_000)}` },
+      { role: 'assistant', content: '问题在 session 过期分支。' },
+      { role: 'user', content: '顺便跑一下测试' },
+      { role: 'assistant', content: '好的' },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, preserveLatestUserMessage: true, contextWindowSize: 100_000 },
+    });
+
+    expect(result.messages.map((message) => (message as { role?: string }).role ?? (message as { type?: string }).type)).toEqual([
+      'user',
+      'assistant',
+      'assistant',
+      'function_call',
+      'function_call_output',
+      'user',
+      'assistant',
+    ]);
+    // 当前轮（最新用户消息之后）一条都不动
+    expect(result.messages.slice(-2)).toEqual(messages.slice(-2));
+    expect(result.messages[1]).toEqual(messages[1]);
+    expect(result.messages[2]).toEqual(messages[4]);
   });
 
   it('tool-results-only compact preview keeps the original messages', async () => {
@@ -1013,10 +1026,10 @@ describe('CompactionService', () => {
 
     expect(result.preview).toBe(true);
     expect(result.messages).toEqual(messages);
-    expect(result.toolResultsReplaced).toBeGreaterThan(0);
+    expect(result.toolCallsAggregated).toBeGreaterThan(0);
   });
 
-  it('tool-results-only compact drops stale Responses reasoning items', async () => {
+  it('tool-results-only compact drops every thinking item inside the compressed zone', async () => {
     const service = new CompactionService();
     const reasoningText = 'r'.repeat(4_000);
     const messages: unknown[] = [
@@ -1037,189 +1050,80 @@ describe('CompactionService', () => {
       summarize: async () => FULL_SUMMARY,
     });
 
-    // 剥掉 encrypted_content 后这条 reasoning 既不会被发送也不会被落盘，
-    // 所以整条丢弃，估算里不能再把它算进去。
+    // 调用被聚合成一条后 call_id 全变了，reasoning 条目再留着就是无效引用，整条丢弃。
     expect(result.reasoningItemsDropped).toBe(1);
     expect(result.messages.some((message) => (message as { type?: string }).type === 'reasoning')).toBe(false);
     expect(result.beforeCount).toBe(4);
-    // reasoning 删掉后剩下的 function_call / function_call_output 也折成了一条
-    expect(result.afterCount).toBe(2);
+    // 用户消息 + 一对占位调用
+    expect(result.afterCount).toBe(3);
     expect(result.savedTokenEstimate).toBeGreaterThan(Math.ceil(reasoningText.length / 4));
   });
 
-  it('tool-results-only compact cleans stale reasoning even when no tool result is left', async () => {
+  it('strips Chat reasoning_content inside the compressed zone', async () => {
     const service = new CompactionService();
     const messages: unknown[] = [
-      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
-      { type: 'function_call_output', call_id: 'rc-1', output: '[Old tool result content cleared during compact]' },
-      { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'encrypted-chain' },
+      { role: 'user', content: '看看这个报错' },
+      { role: 'assistant', content: '我先想一下', reasoning_content: 'THINKING_SHOULD_NOT_SURVIVE' },
     ];
 
     const result = await service.compact({
       messages,
       options: { toolResultsOnly: true, contextWindowSize: 100_000 },
-      summarize: async () => FULL_SUMMARY,
     });
 
-    expect(result.toolResultsReplaced).toBe(0);
     expect(result.reasoningItemsDropped).toBe(1);
-    expect(result.afterCount).toBe(2);
+    expect(JSON.stringify(result.messages)).not.toContain('THINKING_SHOULD_NOT_SURVIVE');
+    expect(result.messages[1]).toEqual({ role: 'assistant', content: '我先想一下' });
   });
 
-  it('trims tool arguments to pointing summaries instead of raw payloads', async () => {
+  it('is idempotent: a second pass over an aggregated history changes nothing', async () => {
     const service = new CompactionService();
-    const content = `export const value = 1;\n${'// filler line\n'.repeat(60)}`;
-    const patch = [
-      '*** Begin Patch',
-      '*** Update File: packages/mica-context/CompactionService.ts',
-      '@@',
-      `+${'x'.repeat(400)}`,
-      '*** Add File: packages/mica-context/trimmed.ts',
-      '@@',
-      `+${'y'.repeat(400)}`,
-      '*** End Patch',
-    ].join('\n');
-    const command = `cat > /tmp/probe.mjs <<'EOF'\n${'console.log(1)\n'.repeat(40)}EOF`;
-    const call = (callId: string, name: string, args: Record<string, unknown>) => [
-      { type: 'function_call', call_id: callId, name, arguments: JSON.stringify(args) },
-      { type: 'function_call_output', call_id: callId, output: `RAW OUTPUT ${'y'.repeat(600)}` },
-    ];
     const messages: unknown[] = [
-      ...call('c1', 'write_file', { file_path: 'packages/example.ts', content }),
-      ...call('c2', 'apply_patch', { patch }),
-      ...call('c3', 'run_shell', { command, cwd: 'packages' }),
-      ...call('c4', 'read_file', { file_path: 'packages/example.ts', offset: 1, limit: 40 }),
-      // 320 字符的完整命令：命令是「做了什么」本身，不到摘要线就原样留着。
-      ...call('c5', 'run_shell', { command: `cd packages && ${'echo padding; '.repeat(22)}` }),
-      ...call('c6', 'run_shell', { command: `node -e '${'x'.repeat(500)}'` }),
+      { type: 'function_call', call_id: 'c1', name: 'read_file', arguments: '{"path":"a.ts"}' },
+      { type: 'function_call_output', call_id: 'c1', output: `RAW ${'y'.repeat(600)}` },
+      { type: 'function_call', call_id: 'c2', name: 'bash', arguments: '{"command":"bun test"}' },
+      { type: 'function_call_output', call_id: 'c2', output: `RAW ${'y'.repeat(600)}` },
     ];
 
-    const result = await service.compact({
-      messages,
-      // 这组用例盯的是参数裁剪本身，关掉折叠才能逐条看到 arguments
-      options: { toolResultsOnly: true, foldToolRounds: false, contextWindowSize: 100_000 },
-      summarize: async () => FULL_SUMMARY,
-    });
+    const first = await service.compact({ messages, options: { toolResultsOnly: true, contextWindowSize: 100_000 } });
+    expect(first.messages).toHaveLength(2);
 
-    const argsOf = (index: number) =>
-      JSON.parse(String((result.messages[index] as { arguments: string }).arguments)) as Record<string, unknown>;
-
-    expect(result.toolArgumentsTrimmed).toBe(4);
-    // 指向性字段（路径）留住，正文换成尺寸；patch 还原成「改了哪些文件」，
-    // 命令还原成首行 + 行数——历史里值得留的是「做过什么」，不是正文本身。
-    expect(argsOf(0)).toEqual({ file_path: 'packages/example.ts', content: `[omitted ${content.length} chars]` });
-    expect(argsOf(2)).toEqual({
-      patch: '[omitted 2 files: packages/mica-context/CompactionService.ts, packages/mica-context/trimmed.ts]',
-    });
-    expect(argsOf(4).command).toContain('cat > /tmp/probe.mjs');
-    expect(argsOf(4).command).toContain(`/ ${command.split('\n').length} lines`);
-    expect(argsOf(4).cwd).toBe('packages');
-    // 短参数本身就是这次调用的指向性信息，原样保留。
-    expect(argsOf(6)).toEqual({ file_path: 'packages/example.ts', offset: 1, limit: 40 });
-    expect(argsOf(8).command).toBe(`cd packages && ${'echo padding; '.repeat(22)}`);
-    expect(argsOf(10).command).toContain('node -e');
-    expect(String(argsOf(10).command).startsWith('[omitted ')).toBe(true);
-
-    // 裁剪后仍然是合法 JSON 字符串（provider 硬约束），且正文没被留在历史里。
-    for (const index of [0, 2, 4, 6, 8, 10]) {
-      expect(() => JSON.parse(String((result.messages[index] as { arguments: string }).arguments))).not.toThrow();
-    }
-    expect(JSON.stringify(result.messages)).not.toContain('export const value = 1;');
-    expect(JSON.stringify(result.messages)).not.toContain('console.log(1)');
-  });
-
-  it('tool argument trimming is repeatable and leaves non-JSON arguments alone', async () => {
-    const service = new CompactionService();
-    const options = { toolResultsOnly: true, foldToolRounds: false, contextWindowSize: 100_000 };
-    const content = 'z'.repeat(600);
-    const rawArguments = 'not-json '.repeat(60);
-    const messages: unknown[] = [
-      {
-        type: 'function_call',
-        call_id: 'c1',
-        name: 'write_file',
-        arguments: JSON.stringify({ file_path: 'a.ts', content }),
-      },
-      { type: 'function_call_output', call_id: 'c1', output: 'written' },
-      { type: 'function_call', call_id: 'c2', name: 'read_file', arguments: JSON.stringify({ file_path: 'a.ts' }) },
-      { type: 'function_call_output', call_id: 'c2', output: 'content' },
-      { type: 'function_call', call_id: 'c3', name: 'odd_tool', arguments: rawArguments },
-      { type: 'function_call_output', call_id: 'c3', output: 'odd' },
-    ];
-
-    const first = await service.compact({ messages, options, summarize: async () => FULL_SUMMARY });
-    expect(first.toolArgumentsTrimmed).toBe(1);
-    // 解析不出 JSON 的参数原样保留：宁可占点空间，也不把内容整体抹掉。
-    expect((first.messages[4] as { arguments: string }).arguments).toBe(rawArguments);
-
-    // 再跑一次：工具结果与参数都已归档，不该再有可清理内容。
     await expect(
-      service.compact({ messages: first.messages, options, summarize: async () => FULL_SUMMARY }),
+      service.compact({ messages: first.messages, options: { toolResultsOnly: true, contextWindowSize: 100_000 } }),
     ).rejects.toBeInstanceOf(CompactionNotNeededError);
+    // 占位调用的 call_id 与说明文本稳定：重复压缩不会让 prompt cache 前缀漂移
+    expect(first.messages[0]).toMatchObject({ call_id: 'mica_compact' });
+    expect(String((first.messages[1] as { output: string }).output)).toContain('bash × 1, read_file × 1');
   });
 
-  it('keeps tool arguments untouched when argument trimming is disabled', async () => {
+  it('merges newly collapsed calls into an aggregate left by an earlier pass', async () => {
     const service = new CompactionService();
-    const content = 'z'.repeat(600);
-    const messages: unknown[] = [
+    const aggregated: unknown[] = [
+      { type: 'function_call', call_id: 'mica_compact', name: 'read_file', arguments: '{}' },
       {
-        type: 'function_call',
-        call_id: 'c1',
-        name: 'write_file',
-        arguments: JSON.stringify({ file_path: 'a.ts', content }),
+        type: 'function_call_output',
+        call_id: 'mica_compact',
+        output:
+          '[Mica compact] Placeholder for 2 collapsed tool calls (not a real result): read_file × 2. Outputs cleared; re-run or re-read if needed.',
       },
-      { type: 'function_call_output', call_id: 'c1', output: `RAW: ${'y'.repeat(600)}` },
+    ];
+    const messages: unknown[] = [
+      ...aggregated,
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: '接着来' }] },
+      { type: 'function_call', call_id: 'c9', name: 'bash', arguments: '{"command":"bun test"}' },
+      { type: 'function_call_output', call_id: 'c9', output: `RAW ${'y'.repeat(600)}` },
     ];
 
     const result = await service.compact({
       messages,
-      options: { toolResultsOnly: true, trimToolArguments: false, contextWindowSize: 100_000 },
-      summarize: async () => FULL_SUMMARY,
+      options: { toolResultsOnly: true, contextWindowSize: 100_000 },
     });
 
-    expect(result.toolArgumentsTrimmed).toBe(0);
-    expect(JSON.stringify(result.messages)).toContain(content);
-  });
-
-  // 会话压缩的「快速压缩」只换工具结果：参数、图片、reasoning 与轮次结构都不动，
-  // 所以压完这条历史还能原样重放，条数也不变。
-  it('replaces only tool results when every other pass is turned off', async () => {
-    const service = new CompactionService();
-    const content = 'z'.repeat(600);
-    const messages: unknown[] = [
-      {
-        type: 'function_call',
-        call_id: 'c1',
-        name: 'write_file',
-        arguments: JSON.stringify({ file_path: 'a.ts', content }),
-      },
-      { type: 'function_call_output', call_id: 'c1', output: `RAW: ${'y'.repeat(600)}` },
-      { type: 'reasoning', summary: [], encrypted_content: null, id: 'r1' },
-      { role: 'user', content: 'keep me' },
-      { role: 'assistant', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] },
-    ];
-
-    const result = await service.compact({
-      messages,
-      options: {
-        toolResultsOnly: true,
-        trimToolArguments: false,
-        foldToolRounds: false,
-        replaceMedia: false,
-        dropStaleReasoning: false,
-        contextWindowSize: 100_000,
-      },
-    });
-
-    expect(result.messages).toHaveLength(messages.length);
-    expect(JSON.stringify(result.messages)).not.toContain('RAW: yyyy');
-    expect(JSON.stringify(result.messages)).toContain(content);
-    expect(JSON.stringify(result.messages)).toContain('keep me');
-    expect(JSON.stringify(result.messages)).toContain('data:image/png;base64,AAAA');
-    expect(result.messages[2]).toMatchObject({ type: 'reasoning', id: 'r1' });
-    expect(result.toolArgumentsTrimmed).toBe(0);
-    expect(result.mediaItemsReplaced).toBe(0);
-    expect(result.reasoningItemsDropped).toBe(0);
+    expect(result.toolCallsAggregated).toBe(1);
+    expect(result.afterCount).toBe(3);
+    const note = String((result.messages[2] as { output: string }).output);
+    expect(note).toContain('Placeholder for 3 collapsed tool calls');
+    expect(note).toContain('read_file × 2, bash × 1');
   });
 
   // 手动「模型压缩」把对话交给模型，工具过程不进摘要输入：它占九成篇幅却不进结论。
@@ -1240,7 +1144,9 @@ describe('CompactionService', () => {
       },
       { role: 'tool', tool_call_id: 'call-1', content: 'TOOL_OUTPUT_SHOULD_NOT_APPEAR' },
       { role: 'assistant', content: '', reasoning_content: 'THINKING_SHOULD_NOT_APPEAR' },
-      ...makeMessages(9, 1),
+      // 历史要明显大于摘要本身，否则「压完不省」的守卫会先拦下来——这条用例测的是
+      // 摘要输入只含对话，不是节省量。
+      ...makeMessages(40, 1),
     ];
     let transcript = '';
 

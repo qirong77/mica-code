@@ -5927,7 +5927,7 @@ export function ChatView({
             const savedPercent = Math.round((Number(result.savedRatio) || 0) * 100)
             const rawStrategy = String(result.strategy || '')
             const strategy = rawStrategy.replaceAll('_', ' ')
-            // 与交互式 /compact 同源：只替换工具结果与媒体，消息条数不变。
+            // 与交互式 /compact 同源：工具过程聚合成一条占位调用、思考与媒体清掉。
             const toolResultsOnly = rawStrategy === 'tool_results_only'
             const mode = `${result.mode || 'summarized'}${strategy ? ` (${strategy})` : ''}`
             const contextAfter =
@@ -5942,15 +5942,13 @@ export function ChatView({
               `- Mode: ${mode}`,
               ...(toolResultsOnly
                 ? [
+                    `- Tool calls aggregated: ${Number(result.toolCallsAggregated) || 0}`,
                     `- Tool results replaced: ${Number(result.toolResultsReplaced) || 0}`,
                     ...(Number(result.mediaItemsReplaced) > 0
                       ? [`- Media items replaced: ${Number(result.mediaItemsReplaced)}`]
                       : []),
-                    ...(Number(result.toolArgumentsTrimmed) > 0
-                      ? [`- Tool arguments trimmed: ${Number(result.toolArgumentsTrimmed)}`]
-                      : []),
                     ...(Number(result.reasoningItemsDropped) > 0
-                      ? [`- Stale reasoning items dropped: ${Number(result.reasoningItemsDropped)}`]
+                      ? [`- Thinking dropped: ${Number(result.reasoningItemsDropped)}`]
                       : []),
                     Number(result.afterCount) === Number(result.beforeCount)
                       ? `- Messages: ${Number(result.beforeCount) || 0} (unchanged)`

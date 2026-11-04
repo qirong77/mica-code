@@ -59,7 +59,7 @@ describe('session compaction menu', () => {
     // 快速压缩就是本地清理：既不传摘要请求，也不惊动模型。
     expect(harness.calls).toEqual([{ mode: 'quick' }]);
     expect(harness.requests).toEqual([]);
-    expect(result?.message).toBe('快速压缩完成：806K → 46K（省 94%）');
+    expect(result?.message).toBe('快速压缩完成：806K → 约 46K（清掉 760K）');
   });
 
   it('model compaction sends the dialogue through the plugin llm', async () => {
@@ -75,7 +75,7 @@ describe('session compaction menu', () => {
       system: '写一段摘要',
       user: '用户：看看构建为什么慢',
     });
-    expect(result?.message).toBe('模型压缩完成：806K → 46K（省 94%）');
+    expect(result?.message).toBe('模型压缩完成：806K → 约 46K（清掉 760K）');
   });
 
   it('reports why nothing happened instead of failing silently', async () => {

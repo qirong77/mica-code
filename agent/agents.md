@@ -21,14 +21,13 @@
 
 | 入口                                                         | 行为                                       |
 | ------------------------------------------------------------ | ------------------------------------------ |
-| `/compact`、桌面快速压缩、`mica compact --tool-results-only` | 本地清理，不调用模型，可重复执行；结果已清空的轮次折成一行说明（工具名 + 指向性参数），不再逐条保留信封 |
+| `/compact`、桌面快速压缩、`mica compact --tool-results-only` | 本地清理，不调用模型，可重复执行；压缩区里全部工具调用与结果聚合成「一条调用 + 一条结果」的占位说明（工具名 × 次数），思考一并丢弃 |
 | `/compact llm`、`mica compact --session`                     | 模型摘要 checkpoint，会重写历史            |
 | `--prune-only`、loop 轮前压缩                                | 本地清理，无可清理内容时可丢最早轮次       |
 
-- 本地清理替换工具结果、可识别媒体与工具参数正文；tool-call arguments 必须仍是合法 JSON，只裁正文/长命令，保留路径、pattern、name、offset。
-- 裁剪规则集中在 `mica-context/CompactionService.ts`（正文/命令阈值 200/400），幂等标记 `[omitted `。
+- 快速压缩（`toolResultsOnly`）只动「压缩区」（受保护区之前的历史）：工具调用与结果聚合成一对 `call_id: mica_compact` 的占位消息，参数为 `{}`，说明文本形如 `[Mica compact] Placeholder for 42 collapsed tool calls (not a real result): read_file × 18, bash × 12, …; re-run or re-read if needed.`；压缩区的思考（Responses `reasoning` 条目、Chat `reasoning_content`）一律丢弃——call_id 全变了，留着就是无效引用。
 - 会话压缩是官方插件 `plugins/session-compact/`，**只有两个手动入口**（会话右键菜单），没有阈值、次数与自动触发：
-  - 快速压缩 → `agent.compactIdleHistory({ mode: 'quick' })`，**只**把历史里的工具结果换成占位符（`[Old tool result content cleared during compact]`）：工具参数、图片、reasoning 条目与轮次结构都不动（`trimToolArguments` / `replaceMedia` / `dropStaleReasoning` / `foldToolRounds` 全关），所以条数不变、压完还能原样重放这次对话。不调模型。
+  - 快速压缩 → `agent.compactIdleHistory({ mode: 'quick' })`，与 `/compact` 同一条实现（`toolResultsOnly`）：工具过程聚合成一条占位调用、思考与媒体清掉，用户与助手的正文原样保留、顺序不变。不调模型；压完这一区的工具过程不再能原样重放（只剩工具名与次数），要细节就重新读文件、重跑命令。
   - 模型压缩 → `agent.compactIdleHistory({ mode: 'model', summarize })`，历史折成 checkpoint 摘要 + 最近几轮。摘要请求只带用户与助手的对话（`summaryInput: 'dialogue'`：工具调用、工具结果、思考都不进摘要输入，它们占九成篇幅却不进结论），走清单 `llm`（「压缩摘要模型」面板）：默认复用当前会话模型，也能换成更便宜的独立接口，失败自动降级；插件只决定「谁写这段摘要」，分段、预算与截断仍归内核的 `CompactionService`。
 - 轮次之外的压缩改的是**已经落盘的那份历史**（`compactIdleSessionHistory`：拿到 turn lease → 压内存里的快照 → 连同 `historyReplaced` 一起落盘），所以压完重开这条会话看到的也是压缩后的样子。会话正忙（这一轮在跑、另一个进程持有 lease）时宿主回 `busy`，插件只提示「等这一轮结束再压」，不排队、不插进正在跑的请求。
 - 这条通路整段跑在宿主的**维护窗口**里（`runAppServer` 的 `runIdleTask` → `runMaintenance({ reason: 'compaction', label: '压缩' })`）：客户端把这几秒的发送留在排队行里（`waitingFor: 'maintenance'`），压完再补发；窗口在 `active: false` **之前**补一条 `historyReplaced`，页面先换上压缩后的记录再收排队那条，顺序不能反。

@@ -59,40 +59,20 @@ const DEFAULT_SUMMARY_INPUT_CONTEXT_RATIO = 0.5;
 const MIN_SUMMARY_INPUT_TOKENS = 8_000;
 const TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared during compact]';
 const TOOL_ARGUMENTS_PLACEHOLDER = '{"_truncated":true,"note":"tool arguments cleared during compact"}';
-// ── 工具调用参数的语义化裁剪（快速压缩） ────────────────────────────────
-// 工具结果被换成占位符后，「这次调用到底做了什么」就只剩参数在承载。
-// 参数里真正吃上下文的是「正文型」字段（写文件的正文、patch、内联脚本），
-// 而「指向性」字段（路径 / pattern / name）极小却决定了这次调用的意义。
-// 所以按字段语义保留指向性摘要、丢掉正文，而不是按长度一刀切。
-/** 正文型字段名：值是内容本身，历史里没有复用价值。 */
-const TOOL_ARGUMENT_CONTENT_FIELDS = new Set([
-  'content',
-  'body',
-  'patch',
-  'code',
-  'text',
-  'file_content',
-  'file_text',
-  'source_code',
-  'new_string',
-  'old_string',
-  'new_str',
-  'old_str',
-  'new_text',
-  'old_text',
-]);
-/** 命令型字段：本身就是「这次调用做了什么」，只有长到像内联脚本时才摘要。 */
-const TOOL_ARGUMENT_COMMAND_FIELDS = new Set(['command', 'cmd', 'script']);
-/**
- * 参数值不超过该长度时原样保留。正文与命令分两档：命令 p90 只有约 300 字符，
- * 按 200 会把「cd x && node script」这种完整命令也摘要掉，反而丢掉关键信息。
- */
-const TOOL_ARGUMENT_KEEP_CHARS = 200;
-const TOOL_ARGUMENT_COMMAND_KEEP_CHARS = 400;
-/** 摘要前缀；同时是幂等标记，第二次快速压缩不会再动已裁剪过的值。 */
-const TOOL_ARGUMENT_OMIT_PREFIX = '[omitted ';
-/** apply_patch 正文里的文件声明行（用于把 patch 还原成「改了哪些文件」）。 */
-const PATCH_FILE_LINE = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/;
+// ── 快速压缩的聚合形态 ──────────────────────────────────────────────────
+// 压缩区（受保护区之前的历史）里的全部工具调用与结果合并成「一条调用 + 一条结果」：
+// 协议要求两者必须配对（Responses 的 function_call 对 function_call_output，Chat 的
+// tool_calls 对 tool 消息），而结果清空后留下的只是信封。说明文本里写明「不是真实
+// 结果」，模型据此知道要重读 / 重跑，而不是以为自己真的看过这些文件。
+const AGGREGATE_CALL_ID = 'mica_compact';
+const AGGREGATE_NOTE_PREFIX = '[Mica compact]';
+/** 说明里最多列几种工具，其余折成 `+N more kinds`。 */
+const AGGREGATE_NOTE_MAX_KINDS = 8;
+/** 说明里「哪种工具调了几次」的分段标记；重复压缩据此还原计数。 */
+const AGGREGATE_NOTE_KINDS_MARKER = '(not a real result): ';
+const AGGREGATE_NOTE_KINDS_END = '. Outputs cleared';
+const AGGREGATE_NOTE_KIND = /^(.*) × (\d+)$/;
+const AGGREGATE_NOTE_EXTRA = /^\+(\d+) more kinds$/;
 // 快速压缩（prune-only）找不到单条消息内可清理内容时，允许本地丢弃最早轮次。
 // 只有节省量达到这两个下限之一才丢弃，避免把内容本来就不多的小会话也删掉。
 const MIN_LOCAL_ROUND_DROP_SAVED_TOKENS = 8_000;
@@ -133,20 +113,6 @@ export type CompactOptions = {
    * token 只会把摘要输入撑满、把对话本身挤掉。
    */
   summaryInput?: 'full' | 'dialogue';
-  /**
-   * 快速压缩时顺带把工具调用参数的正文型字段换成指向性摘要（默认开启）。
-   * 设为 false 可退回「只清工具结果、参数一字不动」的旧行为。
-   */
-  trimToolArguments?: boolean;
-  /**
-   * 快速压缩时把结果已全部清空的轮次折成一条说明（默认开启）。折叠会把工具名与
-   * 指向性参数收进一行，需要保留原始 tool_calls 结构的调用方可以关掉。
-   */
-  foldToolRounds?: boolean;
-  /** 快速压缩时把图片 / 文档块换成占位符（默认开启）；只要工具结果时关掉。 */
-  replaceMedia?: boolean;
-  /** 快速压缩时丢掉已经失效的 Responses reasoning 条目（默认开启）。 */
-  dropStaleReasoning?: boolean;
   maxPromptTooLongRetries?: number;
   lightweightPrune?: boolean;
   forceSummary?: boolean;
@@ -192,14 +158,12 @@ export type CompactResult = {
   recentTokenEstimate?: number;
   summaryInputTokenEstimate?: number;
   reducedRecentRounds?: number;
-  /** toolResultsOnly：被替换掉工具结果的消息数。 */
+  /** toolResultsOnly：被聚合成占位调用的工具结果消息数。 */
   toolResultsReplaced?: number;
-  /** toolResultsOnly：被丢弃的失效 Responses reasoning 条目数。 */
+  /** toolResultsOnly：被丢弃的思考条目（Responses reasoning / Chat reasoning_content）数。 */
   reasoningItemsDropped?: number;
-  /** toolResultsOnly：被折成一条消息的「整轮工具调用」轮数。 */
-  toolRoundsFolded?: number;
-  /** toolResultsOnly：被裁剪掉正文的工具调用数（其 arguments 换成了指向性摘要）。 */
-  toolArgumentsTrimmed?: number;
+  /** toolResultsOnly：被聚合成一条占位调用的工具调用数。 */
+  toolCallsAggregated?: number;
   /** toolResultsOnly：被替换为占位符的媒体块数（图片/文档）。 */
   mediaItemsReplaced?: number;
 };
@@ -228,9 +192,9 @@ export class CompactionService {
     const originalMessages = input.messages;
     const beforeCount = originalMessages.length;
     const options = input.options ?? {};
-    // 快速压缩（/compact）：把工具结果与媒体块替换为占位符，再把结果已全部清空的
-    // 轮次折成一条说明。用户与助手正文原样保留，不生成 boundary/summary、不调用模型，
-    // 所以连续执行不会丢失对话信息（没有可替换内容时报 not needed）。
+    // 快速压缩（/compact）：把整段工具过程聚合成一条占位调用、丢掉思考、替换媒体块。
+    // 用户与助手正文原样保留，不生成 boundary/summary、不调用模型，所以连续执行不会
+    // 丢失对话信息（没有可清理内容时报 not needed）。
     if (options.toolResultsOnly) return compactToolResultsOnly(originalMessages, options);
     const minMessages = options.force ? 2 : DEFAULT_MIN_MESSAGES;
     if (beforeCount < minMessages) {
@@ -850,80 +814,50 @@ function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptio
   );
 }
 
-// 快速压缩（/compact）的动作有三类：把工具结果替换为占位符、把媒体块（图片/
-// 文档）替换为占位符、把工具调用参数的正文型字段换成指向性摘要；之后再把结果
-// 已全部清空的轮次折成一条说明（见 foldClearedToolRounds）。用户与助手文本一律
-// 原样保留，也不插入 boundary/summary 消息，因此它不重写对话内容，只是把不再
-// 需要的大块内容腾出来。工具参数一并裁剪的理由：工具结果都被清掉后，保留写入
-// 正文既没有复用价值又是压缩后剩下的最大一块。媒体一并替换的理由：粘贴的截图/
-// 文档以 base64 常驻历史，是本路径下唯一能占到几十万 token 估算量级的单块内容。
-// 替换媒体不算丢信息——`[Image](路径)` 那行引用文本仍在、原文件也仍在磁盘，
-// 需要重新看图时再次内联即可。
+// 快速压缩（/compact 与请求前的本地清理）只做本地清理，不调用模型。
+//
+// 它处理「压缩区」——受保护区（最近若干条消息）之前的历史——里的三件事：
+//   1. 把全部工具调用与工具结果聚合成一条调用 + 一条结果（见 AGGREGATE_*）；
+//   2. 丢掉这一区的思考内容（Responses 的 reasoning 条目、Chat 的 reasoning_content）；
+//   3. 把图片 / 文档块替换为占位符。
+// 用户与助手的正文一律原样保留、顺序不变，也不插入 boundary/summary 消息，所以它
+// 改写的是「工具过程」而不是对话本身。
+//
+// 为什么整块聚合：工具结果换成占位符后，一轮工具调用剩下的只有信封（role / call_id /
+// name）与已经失去价值的参数正文，几百轮下来信封本身就有几千 token。代价是这一区不再
+// 逐条重放（工具时序只剩计数），需要细节时模型重新读文件、重跑命令即可。
 function compactToolResultsOnly(messages: unknown[], options: CompactOptions): CompactResult {
-  const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
-  const trimArguments = options.trimToolArguments !== false;
-  const replaceMedia = options.replaceMedia !== false;
-  const dropStaleReasoning = options.dropStaleReasoning !== false;
-  let replacedMessages = 0;
-  let droppedReasoningItems = 0;
-  let trimmedArguments = 0;
-  let replacedMediaItems = 0;
-  const compactedMessages: unknown[] = [];
-  const protectedStart = protectedRecentStart(messages, options);
-  const latestUserIndex = options.preserveLatestUserMessage ? findLatestUserIndex(messages) : -1;
-  for (let index = 0; index < messages.length; index++) {
-    const message = messages[index];
-    if (index >= protectedStart || index === latestUserIndex) {
-      compactedMessages.push(message);
-      continue;
-    }
-    // 这条路径会剥掉 encrypted_content，reasoning 条目随之永久失效：ResponsesClient
-    // 发送请求与恢复快照时都会丢弃没有 encrypted_content 的 reasoning item
-    // （stripUnusableResponseInputItems），所以留着它既不会被发送也不会被落盘，
-    // 只会让 afterTokenEstimate（以及界面上的 ctx）虚高。
-    if (dropStaleReasoning && isStaleReasoningItem(message)) {
-      droppedReasoningItems++;
-      continue;
-    }
-    const counter = { replaced: 0 };
-    let next = pruneToolResultPayload(message, placeholder, counter);
-    if (replaceMedia) {
-      const mediaCounter = { replaced: 0 };
-      next = replaceMediaWithPlaceholder(next, mediaCounter);
-      replacedMediaItems += mediaCounter.replaced;
-    }
-    if (trimArguments) {
-      const argumentCounter = { trimmed: 0 };
-      next = trimToolArguments(next, argumentCounter);
-      trimmedArguments += argumentCounter.trimmed;
-    }
-    if (counter.replaced > 0) replacedMessages++;
-    compactedMessages.push(next);
-  }
-  if (replacedMessages === 0 && droppedReasoningItems === 0 && trimmedArguments === 0 && replacedMediaItems === 0) {
+  const zone = quickCompactZone(messages, options);
+  const scan = scanCompressedZone(messages, zone);
+  const aggregate =
+    scan.counts.size > 0 ? aggregatePair(scan.counts, scan.totalCalls, scan.extraKinds, scan.protocol) : [];
+  const compactedMessages = [...scan.kept, ...aggregate, ...messages.slice(zone.boundary)];
+
+  if (
+    scan.newToolCalls === 0 &&
+    scan.toolResultsReplaced === 0 &&
+    scan.reasoningItemsDropped === 0 &&
+    scan.mediaItemsReplaced === 0
+  ) {
     throw new CompactionNotNeededError('当前会话没有可清理的内容，暂不需要快速压缩');
   }
 
-  const beforeTokenEstimate = estimateMessagesTokens(messages);
-  const foldCounter = { folded: 0 };
-  // 折叠会把工具名与参数一并收进一行说明，等于丢掉调用细节；要求保留原始参数的
-  // 调用方（trimToolArguments: false）显然也不要这种折叠。
-  const foldedMessages = trimArguments && options.foldToolRounds !== false
-    ? foldClearedToolRounds(compactedMessages, placeholder, foldCounter)
-    : compactedMessages;
-  const afterTokenEstimate = estimateMessagesTokens(foldedMessages);
+  // 「压缩前」要按 provider 真正收到的内容算：reasoning 条目发送前就被剥掉，把它们算进
+  // 基准会让通知里的压缩前数字偏高，节省量看着比实际更大。
+  const beforeTokenEstimate = Math.max(0, estimateMessagesTokens(messages) - scan.droppedReasoningTokens);
+  const afterTokenEstimate = estimateMessagesTokens(compactedMessages);
   const savedTokenEstimate = Math.max(0, beforeTokenEstimate - afterTokenEstimate);
   const contextWindowSize = positiveNumber(options.contextWindowSize);
   return {
-    messages: options.preview ? cloneJson(messages) : foldedMessages,
+    messages: options.preview ? cloneJson(messages) : compactedMessages,
     summary:
-      'Tool results and media replaced, fully cleared tool rounds folded, stale Responses reasoning items dropped; no message was summarized.',
+      'Tool calls and results aggregated into one placeholder pair, thinking dropped, media replaced; no message was summarized.',
     mode: 'pruned',
     strategy: 'tool_results_only',
     beforeCount: messages.length,
-    afterCount: foldedMessages.length,
+    afterCount: compactedMessages.length,
     summarizedCount: 0,
-    keptCount: foldedMessages.length,
+    keptCount: compactedMessages.length,
     beforeTokenEstimate,
     afterTokenEstimate,
     savedTokenEstimate,
@@ -938,167 +872,285 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     recentTokenEstimate: afterTokenEstimate,
     summaryInputTokenEstimate: 0,
     reducedRecentRounds: 0,
-    toolResultsReplaced: replacedMessages,
-    reasoningItemsDropped: droppedReasoningItems,
-    toolArgumentsTrimmed: trimmedArguments,
-    mediaItemsReplaced: replacedMediaItems,
-    toolRoundsFolded: foldCounter.folded,
+    toolResultsReplaced: scan.toolResultsReplaced,
+    reasoningItemsDropped: scan.reasoningItemsDropped,
+    toolCallsAggregated: scan.newToolCalls,
+    mediaItemsReplaced: scan.mediaItemsReplaced,
   };
 }
 
-/** 折叠整轮工具调用后插入的那条说明的前缀；重复压缩不会再折一次。 */
-const TOOL_ROUND_FOLD_PREFIX = '[tool calls cleared during compact:';
-/** 一条说明里最多列几次调用，剩下的折成 `+N`。 */
-const FOLD_NOTE_MAX_CALLS = 6;
-/** 指向性参数在说明里的长度上限。 */
-const FOLD_NOTE_POINTER_CHARS = 48;
-/** 「这次调用指向哪里」的参数：留着它们，模型才不会重复读同一个文件。 */
-const POINTER_ARGUMENT_KEYS = ['path', 'file_path', 'filePath', 'pattern', 'query', 'url', 'command', 'cmd'];
+type ToolProtocol = 'responses' | 'chat';
+
+type CompressedZoneScan = {
+  /** 压缩区里原样保留的消息（正文留下，思考与媒体已清理）。 */
+  kept: unknown[];
+  /** 工具名 → 调用次数；上一次压缩留下的聚合说明里的计数已并入。 */
+  counts: Map<string, number>;
+  /** 说明里列不全的种类数（沿用上一次压缩的 `+N more kinds`）。 */
+  extraKinds: number;
+  totalCalls: number;
+  /** 本次新聚合掉的调用数，用来判断「这次到底压出了什么」。 */
+  newToolCalls: number;
+  protocol: ToolProtocol;
+  toolResultsReplaced: number;
+  reasoningItemsDropped: number;
+  droppedReasoningTokens: number;
+  mediaItemsReplaced: number;
+};
+
+type QuickCompactZone = {
+  /** 它之前的历史被聚合，它之后的原样保留。 */
+  boundary: number;
+  /** 落在压缩区内但要原样留下的那条消息（最新用户消息），-1 表示没有。 */
+  verbatimIndex: number;
+};
 
 /**
- * 快速压缩的第二阶段：把「整轮工具调用」折成一条消息。
- *
- * 协议上一条 tool 消息必须紧跟发起它的 assistant `tool_calls`（Responses 是
- * `function_call` / `function_call_output` 配对），既不能单删也不能把两条 tool 拼在
- * 一起，只能整轮原子替换。占位符替换完成后这一轮已无任何可复用内容，留着只剩每条
- * 消息的信封（role / tool_call_id / name / call_id）继续占上下文——几百条消息下来
- * 信封本身就有几千 token。
- *
- * 折叠保留「调用过什么」：工具名 + 一个指向性参数，正是 `trimToolArguments` 认为
- * 必须原样留下的那部分信息。只折结果已全部清空的轮次，被保护的区域（最近若干条）
- * 与只清了一部分的轮次原样保留。
+ * 压缩区。`preserveLatestUserMessage` 保护最新那条用户消息时，连同它之后的当前轮
+ * 一起留下：把这一轮的工具调用并进聚合，聚合就会出现在它自己的提问之前，时序反了。
+ * 用户消息本身就在开头时没有更早的对话可留，退化成「只保这一条、其余照压」。
  */
-function foldClearedToolRounds(
-  messages: unknown[],
-  placeholder: string,
-  counter: { folded: number },
-): unknown[] {
-  const folded: unknown[] = [];
-  let index = 0;
-  while (index < messages.length) {
-    const round = clearedToolRoundAt(messages, index, placeholder);
-    if (!round) {
-      folded.push(messages[index]);
-      index += 1;
-      continue;
-    }
-    folded.push(round.message);
-    counter.folded += 1;
-    index = round.end;
-  }
-  return folded;
+function quickCompactZone(messages: unknown[], options: CompactOptions): QuickCompactZone {
+  const protectedStart = protectedRecentStart(messages, options);
+  if (!options.preserveLatestUserMessage) return { boundary: protectedStart, verbatimIndex: -1 };
+  const latestUserIndex = findLatestUserIndex(messages);
+  if (latestUserIndex < 0) return { boundary: protectedStart, verbatimIndex: -1 };
+  if (latestUserIndex === 0) return { boundary: protectedStart, verbatimIndex: 0 };
+  return { boundary: Math.min(protectedStart, adjustStartForToolPairs(messages, latestUserIndex)), verbatimIndex: -1 };
 }
 
-/** 从 index 起识别一整轮已清空的工具调用；识别不了返回 null（原样保留）。 */
-function clearedToolRoundAt(
-  messages: unknown[],
-  index: number,
-  placeholder: string,
-): { end: number; message: unknown } | null {
-  const head = asRecord(messages[index]);
-  if (!head) return null;
-
-  // Chat Completions：一条 assistant.tool_calls 紧跟同数量的 tool 消息。
-  if (head.role === 'assistant' && Array.isArray(head.tool_calls) && head.tool_calls.length > 0) {
-    const calls = head.tool_calls.map(asRecord);
-    if (calls.some((call) => !call)) return null;
-    const ids = calls.map((call) => (typeof call!.id === 'string' ? call!.id : ''));
-    if (ids.some((id) => !id)) return null;
-    const end = index + 1 + ids.length;
-    if (end > messages.length) return null;
-    for (let offset = 0; offset < ids.length; offset += 1) {
-      const result = asRecord(messages[index + 1 + offset]);
-      if (!result || result.role !== 'tool' || result.tool_call_id !== ids[offset]) return null;
-      if (!clearedToolResult(result, placeholder)) return null;
+function scanCompressedZone(messages: unknown[], zone: QuickCompactZone): CompressedZoneScan {
+  const scan: CompressedZoneScan = {
+    kept: [],
+    counts: new Map(),
+    extraKinds: 0,
+    totalCalls: 0,
+    newToolCalls: 0,
+    protocol: 'responses',
+    toolResultsReplaced: 0,
+    reasoningItemsDropped: 0,
+    droppedReasoningTokens: 0,
+    mediaItemsReplaced: 0,
+  };
+  for (let index = 0; index < zone.boundary; index++) {
+    const message = messages[index];
+    if (index === zone.verbatimIndex) {
+      scan.kept.push(message);
+      continue;
     }
+    const record = asRecord(message);
+    if (!record) {
+      scan.kept.push(message);
+      continue;
+    }
+
+    // 上一次压缩留下的聚合对：并入计数后统一重建，call_id 与说明文本因此保持不变。
+    if (isAggregateRecord(record)) {
+      const previous = aggregateNoteOf(record);
+      if (previous) {
+        for (const [name, count] of previous.counts) scan.counts.set(name, (scan.counts.get(name) ?? 0) + count);
+        scan.extraKinds = Math.max(scan.extraKinds, previous.extraKinds);
+        scan.totalCalls += previous.total;
+        scan.protocol = previous.protocol;
+      }
+      continue;
+    }
+
+    // 思考：调用聚合成一条后 call_id 全变了，reasoning 条目留着就是无效引用
+    // （Responses 会报 reasoning item 缺少它之后的条目），所以压缩区的思考一律
+    // 丢弃，而不是只丢已经失效的那些。
+    if (record.type === 'reasoning') {
+      scan.reasoningItemsDropped++;
+      scan.droppedReasoningTokens += estimateMessagesTokens([message]);
+      continue;
+    }
+
+    const calls = recordToolCalls(record);
+    if (calls) {
+      scan.protocol = calls.protocol;
+      for (const name of calls.names) {
+        scan.counts.set(name, (scan.counts.get(name) ?? 0) + 1);
+        scan.newToolCalls++;
+        scan.totalCalls++;
+      }
+      // Chat 的一条 assistant 里既有正文又有 tool_calls：抽走调用后正文单独留下，
+      // 正文为空就整条丢掉（空 assistant 消息对 provider 没有意义）。
+      const stripped = withoutToolCalls(record, calls.protocol);
+      if (stripped) scan.kept.push(cleanZoneMessage(stripped, scan));
+      continue;
+    }
+
+    if (isToolResultRecord(record)) {
+      scan.toolResultsReplaced++;
+      continue;
+    }
+
+    scan.kept.push(cleanZoneMessage(record, scan));
+  }
+  return scan;
+}
+
+function isAggregateRecord(record: Record<string, unknown>): boolean {
+  if (record.type === 'function_call' || record.type === 'function_call_output') {
+    return record.call_id === AGGREGATE_CALL_ID;
+  }
+  if (record.tool_call_id === AGGREGATE_CALL_ID) return true;
+  return (
+    Array.isArray(record.tool_calls) &&
+    record.tool_calls.some((entry) => asRecord(entry)?.id === AGGREGATE_CALL_ID)
+  );
+}
+
+/** 从既有的聚合说明里还原计数；调用侧没有文本，返回 null。 */
+function aggregateNoteOf(
+  record: Record<string, unknown>,
+): { counts: Map<string, number>; total: number; extraKinds: number; protocol: ToolProtocol } | null {
+  const text = typeof record.output === 'string' ? record.output : typeof record.content === 'string' ? record.content : '';
+  if (!text.startsWith(AGGREGATE_NOTE_PREFIX)) return null;
+  const markerAt = text.indexOf(AGGREGATE_NOTE_KINDS_MARKER);
+  if (markerAt < 0) return null;
+  const totalMatch = /Placeholder for (\d+) collapsed tool/.exec(text);
+  const endAt = text.indexOf(AGGREGATE_NOTE_KINDS_END, markerAt);
+  const kindsText = text.slice(markerAt + AGGREGATE_NOTE_KINDS_MARKER.length, endAt >= 0 ? endAt : undefined);
+  const counts = new Map<string, number>();
+  let extraKinds = 0;
+  for (const part of kindsText.split(', ')) {
+    const extra = AGGREGATE_NOTE_EXTRA.exec(part);
+    if (extra) {
+      extraKinds += Number(extra[1]);
+      continue;
+    }
+    const match = AGGREGATE_NOTE_KIND.exec(part);
+    if (!match) continue;
+    counts.set(match[1], (counts.get(match[1]) ?? 0) + Number(match[2]));
+  }
+  const total = totalMatch
+    ? Number(totalMatch[1])
+    : [...counts.values()].reduce((sum, count) => sum + count, 0);
+  return {
+    counts,
+    total,
+    extraKinds,
+    protocol: record.type === 'function_call' || record.type === 'function_call_output' ? 'responses' : 'chat',
+  };
+}
+
+function recordToolCalls(record: Record<string, unknown>): { protocol: ToolProtocol; names: string[] } | null {
+  if (record.type === 'function_call') {
+    return { protocol: 'responses', names: [toolNameOf(record)] };
+  }
+  if (Array.isArray(record.tool_calls) && record.tool_calls.length > 0) {
     return {
-      end,
-      message: foldedRoundMessage(
-        calls.map((call) => callDescription(asRecord(call!.function) ?? call!)),
-        head.content,
-        'chat',
-      ),
+      protocol: 'chat',
+      names: record.tool_calls.map((entry) => {
+        const call = asRecord(entry);
+        const fn = call ? asRecord(call.function) : null;
+        return toolNameOf(fn ?? {});
+      }),
     };
   }
-
-  // Responses：连续的 function_call 紧跟同数量的 function_call_output。
-  if (head.type === 'function_call') {
-    const calls: Record<string, unknown>[] = [];
-    let cursor = index;
-    while (cursor < messages.length) {
-      const call = asRecord(messages[cursor]);
-      if (!call || call.type !== 'function_call') break;
-      calls.push(call);
-      cursor += 1;
-    }
-    const ids = calls.map((call) => (typeof call.call_id === 'string' ? call.call_id : ''));
-    if (ids.some((id) => !id)) return null;
-    const end = cursor + ids.length;
-    if (end > messages.length) return null;
-    for (let offset = 0; offset < ids.length; offset += 1) {
-      const output = asRecord(messages[cursor + offset]);
-      if (!output || output.type !== 'function_call_output' || output.call_id !== ids[offset]) return null;
-      if (!clearedToolResult(output, placeholder)) return null;
-    }
-    return { end, message: foldedRoundMessage(calls.map(callDescription), undefined, 'responses') };
-  }
-
   return null;
 }
 
-/** 工具结果是否已经处于「已清空」状态（就是那个占位符）。 */
-function clearedToolResult(record: Record<string, unknown>, placeholder: string): boolean {
-  const value = record.content ?? record.output;
-  return typeof value === 'string' && value === placeholder;
+function toolNameOf(record: Record<string, unknown>): string {
+  return typeof record.name === 'string' && record.name.trim() ? record.name : 'unknown_tool';
 }
 
-/** 折叠后的那一条消息：保留原有正文，把调用清单补在后面。 */
-function foldedRoundMessage(descriptions: string[], baseContent: unknown, protocol: 'chat' | 'responses'): unknown {
-  const listed = descriptions.slice(0, FOLD_NOTE_MAX_CALLS).join(', ');
-  const rest = descriptions.length - FOLD_NOTE_MAX_CALLS;
-  const note = `${TOOL_ROUND_FOLD_PREFIX} ${listed}${rest > 0 ? `, +${rest}` : ''}]`;
-  if (protocol === 'responses') return { type: 'message', role: 'assistant', content: note };
-  if (typeof baseContent === 'string' && baseContent.trim()) {
-    return { role: 'assistant', content: `${baseContent}\n\n${note}` };
-  }
-  if (Array.isArray(baseContent) && baseContent.length > 0) {
-    return { role: 'assistant', content: [...baseContent, { type: 'text', text: note }] };
-  }
-  return { role: 'assistant', content: note };
+/** 抽掉调用后还能留下正文的消息；Responses 的 function_call 条目没有正文，整条丢掉。 */
+function withoutToolCalls(
+  record: Record<string, unknown>,
+  protocol: ToolProtocol,
+): Record<string, unknown> | null {
+  if (protocol !== 'chat') return null;
+  const rest = { ...record };
+  delete rest.tool_calls;
+  return hasVisibleContent(rest.content) ? rest : null;
 }
 
-/** `read_file(packages/a.ts)`：工具名 + 一个指向性参数。 */
-function callDescription(call: Record<string, unknown>): string {
-  const name = typeof call.name === 'string' ? call.name : '';
-  const pointer = pointerArgumentText(call.arguments);
-  if (!name) return pointer || 'unknown';
-  return pointer ? `${name}(${pointer})` : name;
+function hasVisibleContent(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return false;
 }
 
-function pointerArgumentText(rawArguments: unknown): string {
-  if (typeof rawArguments !== 'string' || !rawArguments.trim()) return '';
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(rawArguments);
-  } catch {
-    return '';
+/** 留下的正文消息也要清理：思考与媒体是这一路径要腾出去的两大块。 */
+function cleanZoneMessage(message: unknown, scan: CompressedZoneScan): unknown {
+  let next = message;
+  const record = asRecord(next);
+  if (record && typeof record.reasoning_content === 'string') {
+    const stripped = { ...record };
+    delete stripped.reasoning_content;
+    next = stripped;
+    scan.reasoningItemsDropped++;
   }
-  const args = asRecord(parsed);
-  if (!args) return '';
-  for (const key of POINTER_ARGUMENT_KEYS) {
-    const value = args[key];
-    if (typeof value === 'string' && value.trim()) {
-      const text = value.trim().replace(/\s+/g, ' ');
-      return text.length > FOLD_NOTE_POINTER_CHARS ? `${text.slice(0, FOLD_NOTE_POINTER_CHARS)}...` : text;
+  const mediaCounter = { replaced: 0 };
+  const replaced = replaceMediaWithPlaceholder(next, mediaCounter);
+  scan.mediaItemsReplaced += mediaCounter.replaced;
+  return replaced;
+}
+
+/** 聚合后的那「一条调用 + 一条结果」；两种协议的配对形状不同，但表达的是同一件事。 */
+function aggregatePair(
+  counts: Map<string, number>,
+  total: number,
+  extraKinds: number,
+  protocol: ToolProtocol,
+): unknown[] {
+  const name = primaryToolName(counts);
+  const note = aggregateNote(counts, total, extraKinds);
+  if (protocol === 'chat') {
+    return [
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [{ id: AGGREGATE_CALL_ID, type: 'function', function: { name, arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: AGGREGATE_CALL_ID, content: note },
+    ];
+  }
+  return [
+    { type: 'function_call', call_id: AGGREGATE_CALL_ID, name, arguments: '{}' },
+    { type: 'function_call_output', call_id: AGGREGATE_CALL_ID, output: note },
+  ];
+}
+
+/** 聚合调用用哪个名字：调用次数最多的那个（同数按字母序），保证每次压缩结果稳定。 */
+function primaryToolName(counts: Map<string, number>): string {
+  let best = '';
+  let bestCount = -1;
+  for (const [name, count] of [...counts.entries()].sort((left, right) => left[0].localeCompare(right[0]))) {
+    if (count > bestCount) {
+      best = name;
+      bestCount = count;
     }
   }
-  return '';
+  return best || 'unknown_tool';
+}
+
+/**
+ * 聚合说明。`(not a real result)` 不是客套：不说清楚的话，模型会以为自己真的读过
+ * 那些文件、跑过那些命令，不再复查。
+ */
+function aggregateNote(counts: Map<string, number>, total: number, extraKinds: number): string {
+  const sorted = [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+  const shown = sorted.slice(0, AGGREGATE_NOTE_MAX_KINDS).map(([name, count]) => `${name} × ${count}`);
+  const hidden = sorted.length - shown.length + extraKinds;
+  if (hidden > 0) shown.push(`+${hidden} more kinds`);
+  const calls = total === 1 ? 'call' : 'calls';
+  return `${AGGREGATE_NOTE_PREFIX} Placeholder for ${total} collapsed tool ${calls} ${AGGREGATE_NOTE_KINDS_MARKER}${shown.join(', ')}${AGGREGATE_NOTE_KINDS_END}; re-run or re-read if needed.`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function findLatestUserIndex(messages: unknown[]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (isConversationUserMessage(messages[index])) return index;
+  }
+  return -1;
 }
 
 function protectedRecentStart(messages: unknown[], options: CompactOptions): number {
@@ -1113,174 +1165,6 @@ function protectedRecentStart(messages: unknown[], options: CompactOptions): num
   return adjustStartForToolPairs(messages, start);
 }
 
-// 找出消息里所有工具调用的 arguments 并做语义化裁剪。Responses 的
-// function_call 是 `{ name, arguments }`，Chat Completions 的 tool_calls 条目是
-// `{ function: { name, arguments } }`——两条路径的 arguments 都与 name 同级，
-// 所以这里按 `arguments` 键递归即可，不需要额外定位工具名。
-function findLatestUserIndex(messages: unknown[]): number {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    if (isConversationUserMessage(messages[index])) return index;
-  }
-  return -1;
-}
-
-function trimToolArguments(value: unknown, counter: { trimmed: number }): unknown {
-  if (Array.isArray(value)) {
-    let changed = false;
-    const next = value.map((item) => {
-      const trimmed = trimToolArguments(item, counter);
-      if (trimmed !== item) changed = true;
-      return trimmed;
-    });
-    return changed ? next : value;
-  }
-  if (!value || typeof value !== 'object') return value;
-
-  const record = value as Record<string, unknown>;
-  let changed = false;
-  const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(record)) {
-    if (key === 'arguments' && typeof child === 'string') {
-      const trimmed = trimArgumentJson(child);
-      if (trimmed !== child) {
-        changed = true;
-        counter.trimmed++;
-      }
-      next[key] = trimmed;
-      continue;
-    }
-    const trimmed = trimToolArguments(child, counter);
-    if (trimmed !== child) changed = true;
-    next[key] = trimmed;
-  }
-  return changed ? next : value;
-}
-
-// arguments 必须是合法 JSON 字符串（provider 硬约束），所以裁剪后重新 stringify
-// 保证协议安全。解析失败说明格式异常，原样保留比整体替换安全——用户要的是
-// 「关键信息还在」，而不是把不确定的内容一并抹掉。
-function trimArgumentJson(raw: string): string {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return raw;
-  const counter = { changed: 0 };
-  const next = trimArgumentFields(parsed as Record<string, unknown>, counter);
-  if (counter.changed === 0) return raw;
-  return JSON.stringify(next);
-}
-
-// 只动正文型字段：其它字段（路径 / pattern / name / offset…）无论长短都是这次
-// 调用的指向性信息，必须原样保留。未改动时返回原对象引用。
-function isTrimmableArgumentField(key: string): boolean {
-  return TOOL_ARGUMENT_CONTENT_FIELDS.has(key) || TOOL_ARGUMENT_COMMAND_FIELDS.has(key);
-}
-
-function trimArgumentFields(record: Record<string, unknown>, counter: { changed: number }): Record<string, unknown> {
-  let changed = false;
-  const next: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (typeof value === 'string' && isTrimmableArgumentField(key) && !value.startsWith(TOOL_ARGUMENT_OMIT_PREFIX)) {
-      const limit = TOOL_ARGUMENT_COMMAND_FIELDS.has(key) ? TOOL_ARGUMENT_COMMAND_KEEP_CHARS : TOOL_ARGUMENT_KEEP_CHARS;
-      if (value.length <= limit) {
-        next[key] = value;
-        continue;
-      }
-      next[key] = summarizeArgumentContent(key, value);
-      counter.changed++;
-      changed = true;
-      continue;
-    }
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const nested = trimArgumentFields(value as Record<string, unknown>, counter);
-      if (nested !== value) changed = true;
-      next[key] = nested;
-      continue;
-    }
-    next[key] = value;
-  }
-  return changed ? next : record;
-}
-
-// 摘要只回答「这次调用做了什么」：patch 说改了哪些文件，命令说跑了哪条命令，
-// 其余正文只留尺寸。指向性信息（路径 / 命令首行）才是历史里值得留下的部分。
-function summarizeArgumentContent(field: string, value: string): string {
-  if (field === 'patch') {
-    const files = patchFiles(value);
-    if (files.length > 0) {
-      const shown = files.slice(0, 5).join(', ');
-      const more = files.length > 5 ? `, +${files.length - 5} more` : '';
-      return `${TOOL_ARGUMENT_OMIT_PREFIX}${files.length} files: ${shown}${more}]`;
-    }
-    return `${TOOL_ARGUMENT_OMIT_PREFIX}${value.length} chars]`;
-  }
-  if (TOOL_ARGUMENT_COMMAND_FIELDS.has(field)) {
-    const lines = value.split('\n');
-    const head = (lines[0] ?? '').slice(0, 80);
-    const suffix = lines.length > 1 ? ` / ${lines.length} lines` : '';
-    return `${TOOL_ARGUMENT_OMIT_PREFIX}${value.length} chars${suffix}: ${head}…]`;
-  }
-  return `${TOOL_ARGUMENT_OMIT_PREFIX}${value.length} chars]`;
-}
-
-function patchFiles(patchText: string): string[] {
-  const files: string[] = [];
-  for (const line of patchText.split('\n')) {
-    const match = PATCH_FILE_LINE.exec(line.trim());
-    const file = match?.[1]?.trim();
-    if (file) files.push(file);
-  }
-  return files;
-}
-
-// 压缩会剥掉 encrypted_content（见 pruneToolResultPayload/pruneValue），Responses 的
-// reasoning 条目随即失效。判定与 ResponsesClient 的 stripUnusableResponseInputItems
-// 同源：没有 encrypted_content 的 reasoning item 永远上不了线，因此可以整条丢弃。
-function isStaleReasoningItem(item: unknown): boolean {
-  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-  return (item as { type?: unknown }).type === 'reasoning';
-}
-
-// 未改动时返回原引用，避免无谓的深拷贝；替换数量记在 counter 上。
-function pruneToolResultPayload(value: unknown, placeholder: string, counter: { replaced: number }): unknown {
-  if (Array.isArray(value)) {
-    let changed = false;
-    const next = value.map((item) => {
-      const pruned = pruneToolResultPayload(item, placeholder, counter);
-      if (pruned !== item) changed = true;
-      return pruned;
-    });
-    return changed ? next : value;
-  }
-  if (!value || typeof value !== 'object') return value;
-
-  const record = value as Record<string, unknown>;
-  let changed = false;
-  const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(record)) {
-    // 与其它压缩路径一致：Responses 的加密推理链绑定压缩前的精确上下文，
-    // 工具结果被改写后重放会失效，去掉它让 ResponsesClient 丢弃该 item。
-    if (key === 'encrypted_content') {
-      changed = true;
-      continue;
-    }
-    if (key === 'toolUseResult' || (isToolResultRecord(record) && (key === 'content' || key === 'output'))) {
-      if (child !== placeholder) {
-        changed = true;
-        counter.replaced++;
-      }
-      next[key] = placeholder;
-      continue;
-    }
-    const pruned = pruneToolResultPayload(child, placeholder, counter);
-    if (pruned !== child) changed = true;
-    next[key] = pruned;
-  }
-  return changed ? next : value;
-}
 
 // 与 prune-only 路径共用 mediaPlaceholder()：识别到的媒体块（图片/文档/文件）
 // 整体换成一行占位文本，base64 随之从历史里消失。只替换能识别的块类型——未知

@@ -128,9 +128,9 @@ export function requestOverheadTokens(
  * 历史（不落盘、随请求结束消失），这个改的是会话文件本身——所以它能在用户还没按下
  * 发送时就把上下文降下来，下一轮请求不必再为膨胀的历史付费。
  *
- * `quick` 只做本地清理（工具结果换成占位符），不调用模型、不丢轮次、不改对话文本；
- * `model` 把用户与助手的对话交给模型写成一段 checkpoint 摘要，工具调用与结果不进摘要
- * 输入（它们只让摘要请求变长，不进结论）。
+ * `quick` 只做本地清理（工具过程聚合成一条占位调用、思考与媒体清掉），不调用模型、
+ * 不改对话正文；`model` 把用户与助手的对话交给模型写成一段 checkpoint 摘要，工具调用
+ * 与结果不进摘要输入（它们只让摘要请求变长，不进结论）。
  *
  * 调用方必须已经独占这条会话（持有 turn lease）：这里会直接覆盖会话文件。
  */
@@ -171,16 +171,9 @@ export async function compactIdleSessionHistory(input: {
           })
         : await service.compact({
             messages: snapshot.messages,
-            // 快速压缩只换工具结果：工具参数、媒体块、失效 reasoning 与轮次折叠都不动，
-            // 历史条数因此保持不变，压完还能原样重放这次对话。
-            options: {
-              toolResultsOnly: true,
-              trimToolArguments: false,
-              foldToolRounds: false,
-              replaceMedia: false,
-              dropStaleReasoning: false,
-              contextWindowSize: snapshot.contextWindowSize,
-            },
+            // 与 `/compact` 同一个实现：整段工具过程聚合成一条占位调用、丢掉思考、
+            // 替换媒体块，对话正文原样保留。
+            options: { toolResultsOnly: true, contextWindowSize: snapshot.contextWindowSize },
           });
   } catch (error) {
     // 「没有可压的内容」是常态（干净的会话每次都会走到这里），不是故障。
