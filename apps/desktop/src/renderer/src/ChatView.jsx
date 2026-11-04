@@ -61,6 +61,7 @@ import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
 import { collapseCompactToolNotes } from './chat/compact-notes'
+import { mergeCompactCheckpoints } from './chat/compact-checkpoint'
 import { findPresetForSearch } from './chat-find-preset'
 import { splitMarkdownChunks } from './chat-markdown-chunks'
 import {
@@ -2651,6 +2652,57 @@ function CompactNoteRow({ message }) {
   )
 }
 
+/**
+ * 压缩块：一次模型压缩在会话里只占一行「压了多少、保留了什么」，摘要按需展开。
+ *
+ * 摘要正文本来是给模型看的 checkpoint（含英文小节），不是用户说的话，所以既不给
+ * 用户消息的高亮，也不参与「编辑重发」。
+ */
+function CompactCheckpointRow({ message, onOpenFile }) {
+  const [open, setOpen] = useState(false)
+  const meta = message.compact || {}
+  const headline = compactHeadline(meta)
+  return (
+    <div className={`chat-compact-block${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="chat-compact-head"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="chat-compact-caret">{open ? '▾' : '▸'}</span>
+        <span className="chat-compact-title">已压缩上下文</span>
+        {headline && <span className="chat-compact-meta">{headline}</span>}
+      </button>
+      {open && (
+        <div className="chat-compact-body">
+          <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 「1.19M → 131.7K · 保留最近 9 条 · 14:36」；老记录只有边界元数据缺失时只说压缩过。 */
+function compactHeadline(meta) {
+  const parts = []
+  if (meta.beforeTokens) {
+    parts.push(
+      meta.keptTokens
+        ? `${formatTokens(meta.beforeTokens)} → ${formatTokens(meta.keptTokens)}`
+        : formatTokens(meta.beforeTokens)
+    )
+  }
+  if (meta.keptCount) parts.push(`保留最近 ${meta.keptCount} 条`)
+  const at = meta.createdAt ? new Date(meta.createdAt) : null
+  if (at && !Number.isNaN(at.getTime())) {
+    parts.push(
+      at.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
+    )
+  }
+  return parts.join(' · ')
+}
+
 function MessageRowView({
   message,
   onOpenFile,
@@ -2701,6 +2753,9 @@ function MessageRowView({
   }
   if (message.kind === 'reasoning') {
     return null
+  }
+  if (message.kind === 'compact') {
+    return <CompactCheckpointRow message={message} onOpenFile={onOpenFile} />
   }
   if (message.compactNote) {
     return <CompactNoteRow message={message} />
@@ -2885,13 +2940,21 @@ export function mergeReplayEvents(buffered = [], pending = []) {
 }
 
 export function historyMessages(rows, key) {
-  // 压缩折叠出来的那串工具调用说明在历史里是逐条助手文本，直接渲染会排成一堵墙：
-  // 连续的说明在这里并成一行「已清理 N 轮工具调用」，原文只留作悬停提示。
-  return collapseCompactToolNotes((Array.isArray(rows) ? rows : []).map((row, index) => ({
+  // 压缩留下的 boundary（内部 JSON）与 checkpoint（摘要长文）先合成一块，压缩折叠
+  // 出来的那串工具调用说明再并成一行「已清理 N 轮工具调用」。
+  return collapseCompactToolNotes(mergeCompactCheckpoints(Array.isArray(rows) ? rows : []).map((row, index) => ({
     id: `history-${key}-${index}`,
-    kind: row.kind === 'reasoning' ? 'reasoning' : row.role === 'notice' ? 'notice' : 'message',
+    kind:
+      row.kind === 'reasoning'
+        ? 'reasoning'
+        : row.kind === 'compact'
+          ? 'compact'
+          : row.role === 'notice'
+            ? 'notice'
+            : 'message',
     role: row.role,
     text: row.text || '',
+    ...(row.kind === 'compact' ? { compact: row.compact ?? {} } : {}),
     ...(row.kind === 'reasoning' ? {
       turnId: `interrupted-${key}`, resumableThinking: true,
       ...(row.activeCheckpoint ? { activeCheckpoint: true } : {})

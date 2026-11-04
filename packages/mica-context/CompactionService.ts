@@ -4,9 +4,48 @@ export const COMPACT_SUMMARY_PREFIX = '[Mica compact checkpoint]';
 export const COMPACT_BOUNDARY_PREFIX = '[Mica compact boundary]';
 
 const DEFAULT_MIN_MESSAGES = 4;
-const MAX_MESSAGE_TRANSCRIPT_CHARS = 8_000;
 const MAX_SUMMARY_TRANSCRIPT_CHARS = 16_000;
 const RETRY_DROP_RATIO = 0.2;
+// ── 摘要输入的块状呈现 ──────────────────────────────────────────────────
+// provider 历史里的「一次模型回复」是好几条消息：思考一条、正文一条、每个工具调用
+// 一条、每个工具结果一条。压缩摘要请求若按消息逐条铺开，同一件事要占几倍篇幅，摘要
+// 模型还得自己把散落的调用与结果配对。这里按「轮」重组：一轮里的正文、思考、工具
+// 调用合成一块，所有工具结果合成一块，同类工具再聚合，指向性参数（路径 / 命令 /
+// pattern）与错误信号保留。
+const TRANSCRIPT_USER_CHARS = 6_000;
+const TRANSCRIPT_MODEL_CHARS = 2_400;
+const TRANSCRIPT_THINKING_CHARS = 800;
+const TRANSCRIPT_TOOL_ARGUMENT_CHARS = 200;
+const TRANSCRIPT_TOOL_RESULT_CHARS = 900;
+/** 同类工具最多逐条列几次；长轮里同一个工具可能跑几十次。 */
+const TRANSCRIPT_SAME_TOOL_CALLS = 3;
+const TRANSCRIPT_SAME_TOOL_RESULTS = 6;
+/**
+ * 结果正文会被截断，但「这次动了哪些文件」是指向性信息，值得单独补一行：
+ * 摘要里「改了哪些文件」几乎全靠它，截断后再从正文里找就找不回来了。
+ */
+const TRANSCRIPT_RESULT_PATH_PATTERN =
+  /[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|swift|md|json|css|html|yml|yaml|sh)/g;
+const TRANSCRIPT_RESULT_PATHS = 12;
+// 调用参数里的路径是「这次动了哪些文件」的唯一线索，一个路径二三十字符，
+// 比截断后的参数正文便宜得多，所以上限给得比结果侧宽。
+const TRANSCRIPT_TOOL_CALL_FILES = 60;
+/** 依赖目录与构建产物里的路径对摘要没有意义，它们会把真有信息的那几个挤掉。 */
+const TRANSCRIPT_PATH_NOISE = /(^|\/)(node_modules|\.git|dist|out|temp|\.backups)\//;
+/** 参数里能说明「这次调用做了什么」的字段，按优先级取第一个。 */
+const TRANSCRIPT_ARGUMENT_HINTS = [
+  'command',
+  'cmd',
+  'script',
+  'path',
+  'file_path',
+  'pattern',
+  'query',
+  'url',
+  'name',
+];
+/** 只取正文的块类型：reasoning / thinking 块走思考那一路，不算正文。 */
+const TRANSCRIPT_TEXT_BLOCK_TYPES = new Set(['text', 'input_text', 'output_text']);
 const OLD_MESSAGE_STRING_CHARS = 4_000;
 const DEFAULT_MAX_RECENT_TOKENS = 12_000;
 const AGGRESSIVE_MAX_RECENT_TOKENS = 8_000;
@@ -1542,58 +1581,312 @@ function isConversationUserMessage(message: unknown): boolean {
   return !getStringContent(message).startsWith('Image output from ');
 }
 
-function buildTranscript(messages: unknown[]): string {
-  return messages
-    .map((message, index) => {
-      const normalized = normalizeMessage(message);
-      const maxChars = isCompactSummary(message) ? MAX_SUMMARY_TRANSCRIPT_CHARS : MAX_MESSAGE_TRANSCRIPT_CHARS;
-      return `## Message ${index + 1} - ${normalized.label}\n${headSignalsTail(normalized.text, maxChars)}`;
-    })
-    .join('\n\n');
-}
+type TranscriptToolCall = { id: string; name: string; detail: string; files: string[] };
+type TranscriptToolResult = { name: string; text: string };
 
-function normalizeMessage(message: unknown): { label: string; text: string } {
-  if (!message || typeof message !== 'object') {
-    return { label: 'unknown', text: String(message) };
-  }
-  const record = message as Record<string, unknown>;
-  const role = getRole(message) ?? 'unknown';
-  return {
-    label: role,
-    text: stringifyContent(record),
+/** 一轮对话：用户说了什么、模型怎么回的、调了哪些工具、结果是什么。 */
+type TranscriptTurn = {
+  user: string[];
+  model: string[];
+  thinking: string[];
+  calls: TranscriptToolCall[];
+  results: TranscriptToolResult[];
+};
+
+/** 导出给测试与压缩前后对比使用；生产路径只用 `compact()`。 */
+export function buildTranscript(messages: unknown[]): string {
+  const summaries: string[] = [];
+  const turns: TranscriptTurn[] = [];
+  // 工具结果只带 call id，名字要从对应的调用消息里找回来。
+  const callNames = new Map<string, string>();
+  let turn: TranscriptTurn | null = null;
+
+  const openTurn = (): TranscriptTurn => {
+    const next: TranscriptTurn = { user: [], model: [], thinking: [], calls: [], results: [] };
+    turns.push(next);
+    return next;
   };
+  const currentTurn = (): TranscriptTurn => turn ?? (turn = openTurn());
+  const pushResult = (id: string | null, text: string): void => {
+    const body = text.trim();
+    if (!body) return;
+    currentTurn().results.push({ name: (id && callNames.get(id)) || 'tool', text: body });
+  };
+
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    if (isCompactBoundary(message)) continue;
+    if (isCompactSummary(message)) {
+      // 上一个 checkpoint 是「已知的旧对话」，单独成块，不跟后面的轮次混在一起。
+      summaries.push(
+        headSignalsTail(stripCompactSummaryHeader(getStringContent(message)), MAX_SUMMARY_TRANSCRIPT_CHARS),
+      );
+      turn = null;
+      continue;
+    }
+    const record = message as Record<string, unknown>;
+    const calls = transcriptToolCalls(record);
+    for (const call of calls) {
+      if (call.id) callNames.set(call.id, call.name);
+    }
+
+    if (getToolResultIds(message).length > 0) {
+      const blocks = contentBlocks(record).filter((block) => block.type === 'tool_result');
+      if (blocks.length > 0) {
+        for (const block of blocks) {
+          pushResult(
+            typeof block.tool_use_id === 'string' ? block.tool_use_id : null,
+            extractText(block.content),
+          );
+        }
+      } else {
+        const id = record.role === 'tool' ? record.tool_call_id : record.call_id;
+        pushResult(typeof id === 'string' ? id : null, extractText(record.content) || extractText(record.output));
+      }
+      continue;
+    }
+
+    const thinking = transcriptThinking(record);
+    const text = transcriptText(record);
+    if (isConversationUserMessage(message)) {
+      turn = openTurn();
+      if (text.trim()) turn.user.push(headSignalsTail(text.trim(), TRANSCRIPT_USER_CHARS));
+      continue;
+    }
+    const target = currentTurn();
+    if (thinking) target.thinking.push(headSignalsTail(thinking, TRANSCRIPT_THINKING_CHARS));
+    if (text.trim()) target.model.push(headSignalsTail(text.trim(), TRANSCRIPT_MODEL_CHARS));
+    for (const call of calls) {
+      target.calls.push({ id: call.id, name: call.name, detail: call.detail, files: call.files });
+    }
+  }
+
+  return renderTranscript(summaries, turns);
 }
 
-function stringifyContent(record: Record<string, unknown>): string {
+function renderTranscript(summaries: string[], turns: TranscriptTurn[]): string {
+  const blocks: string[] = [];
+  if (summaries.length > 0) blocks.push(`## 之前的压缩摘要\n${summaries.join('\n\n')}`);
+  turns.forEach((turn, index) => {
+    const lines: string[] = [`## 轮次 ${index + 1}`];
+    for (const message of turn.user) lines.push(`用户：${message}`);
+    // 先思考再正文：这才是模型实际的动作顺序。
+    if (turn.thinking.length > 0) lines.push(`思考：\n${turn.thinking.join('\n')}`);
+    if (turn.model.length > 0) lines.push(`模型：\n${turn.model.join('\n\n')}`);
+    if (turn.calls.length > 0) lines.push(`工具调用（${turn.calls.length} 次）：\n${renderToolCalls(turn.calls)}`);
+    if (turn.results.length > 0) lines.push(`工具结果：\n${renderToolResults(turn.results)}`);
+    blocks.push(lines.join('\n\n'));
+  });
+  return blocks.join('\n\n');
+}
+
+/** 同类工具折成一行：`- read_file ×3: path: a.ts / path: b.ts …`。 */
+function renderToolCalls(calls: TranscriptToolCall[]): string {
+  const groups = groupByToolName(calls.map((call) => [call.name, call.detail] as const));
+  return [...groups.entries()]
+    .map(([name, details]) => {
+      const shown = details.slice(0, TRANSCRIPT_SAME_TOOL_CALLS);
+      const rest = details.length - shown.length;
+      // 只显示前几次调用，但每次调用的文件全部保留：摘要里「改了哪些文件」靠它。
+      const files = uniqueResultPaths(
+        calls.filter((call) => call.name === name).flatMap((call) => call.files),
+        TRANSCRIPT_TOOL_CALL_FILES,
+      );
+      return [
+        `- ${name} ×${details.length}: ${shown.join(' / ')}${rest > 0 ? ` …+${rest}` : ''}`,
+        ...(files.length > 0 ? [`    涉及文件：${files.join(', ')}`] : []),
+      ].join('\n');
+    })
+    .join('\n');
+}
+
+/** 同类工具的结果排在一起，单条结果按 head/signals/tail 限长。 */
+function renderToolResults(results: TranscriptToolResult[]): string {
+  const groups = groupByToolName(results.map((result) => [result.name, result.text] as const));
+  return [...groups.entries()]
+    .map(([name, texts]) => {
+      const shown = texts.slice(0, TRANSCRIPT_SAME_TOOL_RESULTS);
+      const body = shown
+        .map((text) => indentLines(headSignalsTail(text, TRANSCRIPT_TOOL_RESULT_CHARS), '  - ', '    '))
+        .join('\n');
+      const rest = texts.length - shown.length;
+      const files = uniqueResultPaths(texts);
+      return [
+        `- ${name} ×${texts.length}:`,
+        ...(files.length > 0 ? [`    涉及文件：${files.join(', ')}`] : []),
+        body,
+        ...(rest > 0 ? [`    另有 ${rest} 条同类结果已省略`] : []),
+      ].join('\n');
+    })
+    .join('\n');
+}
+
+/** 去重、剔掉依赖/产物目录、按出现顺序取前若干条路径。 */
+function uniqueResultPaths(texts: string[], limit = TRANSCRIPT_RESULT_PATHS): string[] {
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  for (const text of texts) {
+    if (typeof text !== 'string') continue;
+    for (const match of text.match(TRANSCRIPT_RESULT_PATH_PATTERN) ?? []) {
+      const value = match.replace(/^\.\//, '');
+      if (TRANSCRIPT_PATH_NOISE.test(value)) continue;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      paths.push(value);
+      if (paths.length >= limit) return paths;
+    }
+  }
+  return paths;
+}
+
+function groupByToolName(entries: ReadonlyArray<readonly [string, string]>): Map<string, string[]> {
+  const groups = new Map<string, string[]>();
+  for (const [name, detail] of entries) {
+    const list = groups.get(name);
+    if (list) list.push(detail);
+    else groups.set(name, [detail]);
+  }
+  return groups;
+}
+
+function indentLines(text: string, first: string, rest: string): string {
+  return text
+    .split('\n')
+    .map((line, index) => `${index === 0 ? first : rest}${line}`)
+    .join('\n');
+}
+
+/** 一条消息里的正文：只算真正的文本块，图片压成一行占位。 */
+function transcriptText(record: Record<string, unknown>): string {
+  const content = record.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
   const parts: string[] = [];
-  if ('content' in record) {
-    parts.push(`content:\n${stringifyValue(record.content)}`);
+  for (const block of content) {
+    if (typeof block === 'string') {
+      parts.push(block);
+      continue;
+    }
+    if (!block || typeof block !== 'object') continue;
+    const item = block as Record<string, unknown>;
+    const type = typeof item.type === 'string' ? item.type : '';
+    if (typeof item.text === 'string' && (type === '' || TRANSCRIPT_TEXT_BLOCK_TYPES.has(type))) {
+      parts.push(item.text);
+    } else if (type.includes('image')) {
+      parts.push('[图片]');
+    }
   }
-  if ('tool_calls' in record) {
-    parts.push(`tool_calls:\n${stringifyValue(record.tool_calls)}`);
+  return parts.join('\n');
+}
+
+function transcriptThinking(record: Record<string, unknown>): string {
+  if (typeof record.reasoning_content === 'string' && record.reasoning_content.trim()) {
+    return record.reasoning_content;
   }
-  if ('name' in record) {
-    parts.push(`name: ${String(record.name)}`);
+  if (record.type === 'reasoning') return extractText(record.summary) || extractText(record.content);
+  const parts: string[] = [];
+  for (const block of contentBlocks(record)) {
+    if (typeof block.text === 'string' && (block.type === 'reasoning_text' || block.type === 'summary_text')) {
+      parts.push(block.text);
+    } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
+      parts.push(block.thinking);
+    }
   }
-  if ('tool_call_id' in record) {
-    parts.push(`tool_call_id: ${String(record.tool_call_id)}`);
+  return parts.join('\n');
+}
+
+function transcriptToolCalls(record: Record<string, unknown>): TranscriptToolCall[] {
+  const calls: TranscriptToolCall[] = [];
+  for (const entry of Array.isArray(record.tool_calls) ? record.tool_calls : []) {
+    if (!entry || typeof entry !== 'object') continue;
+    const call = entry as Record<string, unknown>;
+    const fn = call.function && typeof call.function === 'object'
+      ? (call.function as Record<string, unknown>)
+      : {};
+    calls.push({
+      id: typeof call.id === 'string' ? call.id : '',
+      name: typeof fn.name === 'string' ? fn.name : 'tool',
+      ...summarizeToolCall(fn.arguments),
+    });
   }
-  if ('call_id' in record) {
-    parts.push(`call_id: ${String(record.call_id)}`);
+  if (record.type === 'function_call' || record.type === 'custom_tool_call') {
+    calls.push({
+      id: typeof record.call_id === 'string' ? record.call_id : '',
+      name: typeof record.name === 'string' ? record.name : 'tool',
+      ...summarizeToolCall(record.arguments ?? record.input),
+    });
   }
-  if ('arguments' in record) {
-    parts.push(`arguments:\n${stringifyValue(record.arguments)}`);
+  for (const block of contentBlocks(record)) {
+    if (block.type !== 'tool_use') continue;
+    calls.push({
+      id: typeof block.id === 'string' ? block.id : '',
+      name: typeof block.name === 'string' ? block.name : 'tool',
+      ...summarizeToolCall(block.input),
+    });
   }
-  if ('input' in record) {
-    parts.push(`input:\n${stringifyValue(record.input)}`);
+  return calls;
+}
+
+/**
+ * 参数只留指向性的一行（`path: packages/x.ts`、`command: npm test`），
+ * 同时把参数里出现的文件单独收集起来——同一工具跑十几次时，正文只显示前几次，
+ * 但「一共碰了哪些文件」必须完整。
+ */
+function summarizeToolCall(value: unknown): { detail: string; files: string[] } {
+  // 参数可能是空 / 规范化后变成 undefined（`JSON.stringify(undefined)` 返回 undefined），
+  // 那种调用只是「这个工具没传参」，正文留空即可。
+  const raw = typeof value === 'string' ? value : (stringifyValue(value) ?? '');
+  const files = uniqueResultPaths([raw]);
+  // apply_patch 的正文里第一行就是「改了哪些文件」，比截断后的前 200 字符有用得多。
+  const patched = [...raw.matchAll(/\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((match) =>
+    match[1]!.trim(),
+  );
+  if (patched.length > 0) {
+    const shown = patched.slice(0, 6);
+    return {
+      detail: `files: ${shown.join(', ')}${patched.length > shown.length ? ` …+${patched.length - shown.length}` : ''}`,
+      files: uniqueResultPaths([...patched, ...files]),
+    };
   }
-  if ('output' in record) {
-    parts.push(`output:\n${stringifyValue(record.output)}`);
+
+  const parsed = typeof value === 'string' ? parseJsonRecord(value) : value;
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const record = parsed as Record<string, unknown>;
+    for (const key of TRANSCRIPT_ARGUMENT_HINTS) {
+      const hint = record[key];
+      if (typeof hint === 'string' && hint.trim()) {
+        return { detail: `${key}: ${clipTranscriptLine(hint, TRANSCRIPT_TOOL_ARGUMENT_CHARS)}`, files };
+      }
+    }
+    for (const [key, hint] of Object.entries(record)) {
+      if (typeof hint === 'string' && hint.trim()) {
+        return { detail: `${key}: ${clipTranscriptLine(hint, TRANSCRIPT_TOOL_ARGUMENT_CHARS)}`, files };
+      }
+    }
+    return { detail: clipTranscriptLine(JSON.stringify(record), TRANSCRIPT_TOOL_ARGUMENT_CHARS), files };
   }
-  if ('type' in record && !('role' in record)) {
-    parts.unshift(`type: ${String(record.type)}`);
+  return { detail: clipTranscriptLine(raw, TRANSCRIPT_TOOL_ARGUMENT_CHARS), files };
+}
+
+function parseJsonRecord(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
   }
-  return parts.join('\n\n') || stringifyValue(record);
+}
+
+function clipTranscriptLine(text: string, maxChars: number): string {
+  const folded = text.replace(/\s+/g, ' ').trim();
+  return folded.length <= maxChars ? folded : `${folded.slice(0, maxChars)}…`;
+}
+
+/** checkpoint 正文开头的英文说明是给模型看的固定模板，摘要模型不需要再读一遍。 */
+function stripCompactSummaryHeader(text: string): string {
+  return text
+    .slice(COMPACT_SUMMARY_PREFIX.length)
+    .replace(/^\s*This session is being continued from a previous conversation\.[^\n]*\n?/i, '')
+    .trim();
 }
 
 function stringifyValue(value: unknown): string {

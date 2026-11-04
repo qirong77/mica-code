@@ -67,6 +67,50 @@ describe('CompactionService', () => {
     expect(JSON.stringify(result.messages)).toContain('assistant answer 10');
   });
 
+  it('feeds the summarizer a per-round transcript with merged tool calls and results', async () => {
+    const service = new CompactionService();
+    const transcripts: string[] = [];
+    await service.compact({
+      messages: [
+        { role: 'user', content: 'inspect the parser' },
+        { type: 'reasoning', summary: [{ type: 'summary_text', text: 'read the parser first' }] },
+        {
+          role: 'assistant',
+          content: 'reading the parser',
+          tool_calls: [
+            { id: 'c1', type: 'function', function: { name: 'read_file', arguments: '{"path":"src/parser.ts"}' } },
+            { id: 'c2', type: 'function', function: { name: 'read_file', arguments: '{"path":"src/tokens.ts"}' } },
+            { id: 'c3', type: 'function', function: { name: 'run_shell', arguments: '{"command":"npm test"}' } },
+          ],
+        },
+        { role: 'tool', tool_call_id: 'c1', content: 'parser body' },
+        { role: 'tool', tool_call_id: 'c2', content: 'tokens body' },
+        { role: 'tool', tool_call_id: 'c3', content: 'tests passed' },
+        { role: 'user', content: 'now fix the bug' },
+        { role: 'assistant', content: 'fixed' },
+      ],
+      options: { keepRecentRounds: 1, aggressive: true, force: true },
+      summarize: async (transcript) => {
+        transcripts.push(transcript);
+        return FULL_SUMMARY;
+      },
+    });
+
+    const transcript = transcripts.at(-1) ?? '';
+    // 一次模型回复在历史里是好几条消息，摘要输入里合成一块。
+    expect(transcript).not.toContain('## Message');
+    expect(transcript).toContain('## 轮次 1');
+    expect(transcript).toContain('用户：inspect the parser');
+    expect(transcript).toContain('模型：\nreading the parser');
+    expect(transcript).toContain('思考：\nread the parser first');
+    // 同类工具折成一行，参数只留指向性字段。
+    expect(transcript).toContain('- read_file ×2: path: src/parser.ts / path: src/tokens.ts');
+    expect(transcript).toContain('- run_shell ×1: command: npm test');
+    // 所有工具结果合成一块，同类结果排在一起。
+    expect(transcript).toContain('- read_file ×2:\n  - parser body\n  - tokens body');
+    expect(transcript).toContain('- run_shell ×1:\n  - tests passed');
+  });
+
   it('merges a previous compact summary instead of dropping it on repeated compact', async () => {
     const service = new CompactionService();
     const first = await service.compact({
@@ -79,7 +123,8 @@ describe('CompactionService', () => {
       messages: [...first.messages, ...makeMessages(5, 100)],
       options: { keepRecentRounds: 2, aggressive: true },
       summarize: async (transcript) => {
-        expect(transcript).toContain(COMPACT_SUMMARY_PREFIX);
+        // 上一次的 checkpoint 以「之前的压缩摘要」成块带进来，标记前缀被剥掉。
+        expect(transcript).toContain('## 之前的压缩摘要');
         expect(transcript).toContain('first compact memory');
         return FULL_SUMMARY.replace('Context compaction.', 'second compact memory including first.');
       },
