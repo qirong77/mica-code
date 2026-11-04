@@ -2618,124 +2618,173 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   -webkit-line-clamp: 2;
 }
 
-/* 插件（工具）抛出的选择题：与排队行同一个位置、同一套卡片语言，靠强调色区分——排队是
-   「等这一轮结束」，这里是「等你动手」，不答这一步就不会往下走。 */
-.chat-ask-dock {
+/* 插件（工具）抛出的一道选择题。
+   版式：扁平卡（无阴影、只有一层细边），中间选项两列，底部一条独立确认条写「已选 A ·
+   转账」并给出「确定」——「选了什么」和「提交」分成两层，误点还有反悔余地。
+   与排队行同一个位置，靠强调色区分：排队是「等这一轮结束」，这里是「等你动手」。 */
+.chat-ask-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  border-top: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 14%, transparent);
-  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-canvas));
-  padding: 7px 9px 8px;
-  font-family: var(--chat-font);
-  font-size: var(--chat-text-size);
-  line-height: 1.35;
+  overflow: hidden;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 10px;
+  background: var(--color-panel);
 }
 
 .chat-ask-head {
   display: flex;
-  min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 9px 11px 0;
 }
 
-.chat-ask-icon {
+/* 问号徽标：强调色实心圆，比图标更省一行高度 */
+.chat-ask-mark {
+  display: grid;
   flex: none;
-  color: var(--color-accent);
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #20201f;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .chat-ask-title {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  color: var(--color-fg);
+  color: var(--color-fg-max);
+  font-size: 13px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.chat-ask-hint {
-  flex: none;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
-  border-radius: 3px;
-  padding: 0 5px;
-  color: var(--color-fg-soft);
+.chat-ask-meta {
+  color: var(--color-fg-ghost);
   font-size: 10.5px;
-  line-height: 15px;
+}
+
+.chat-ask-spacer {
+  flex: 1;
+}
+
+.chat-ask-close {
+  display: grid;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-fg-ghost);
+  cursor: pointer;
+}
+
+.chat-ask-close:hover:not(:disabled) {
+  background: var(--color-overlay);
+  color: var(--color-fg-strong);
+}
+
+.chat-ask-close:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
 .chat-ask-detail {
-  max-height: 96px;
-  overflow-y: auto;
-  color: var(--color-fg-soft);
+  margin: 5px 11px 0 35px;
+  color: var(--color-fg-muted);
   font-size: 11.5px;
-  white-space: pre-wrap;
-  word-break: break-word;
+  line-height: 1.5;
 }
 
-.chat-ask-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.chat-ask-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 9px 11px 11px;
+}
+
+/* 只有一个选项时铺满整行，免得半张卡片空着 */
+.chat-ask-grid:has(> :only-child) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .chat-ask-option {
   display: flex;
-  max-width: 100%;
-  min-width: 0;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
-  padding: 4px 9px 5px;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--color-overlay-subtle);
+  color: inherit;
+  font: inherit;
   text-align: left;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease;
+  cursor: pointer;
 }
 
 .chat-ask-option:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  background: var(--color-overlay);
 }
 
 .chat-ask-option.is-selected {
-  border-color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: var(--color-accent-subtle);
 }
 
 .chat-ask-option:disabled {
+  cursor: default;
   opacity: 0.6;
 }
 
-.chat-ask-option-label {
-  color: var(--color-fg);
-  font-weight: 600;
-}
-
-.chat-ask-option-desc {
-  color: var(--color-fg-soft);
-  font-size: 11px;
-}
-
-.chat-ask-foot {
+.chat-ask-option-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
 }
 
+.chat-ask-option-key {
+  color: var(--color-fg-ghost);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.chat-ask-option.is-selected .chat-ask-option-key {
+  color: var(--color-accent);
+}
+
+.chat-ask-option-label {
+  color: var(--color-fg-strong);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.chat-ask-option.is-selected .chat-ask-option-label {
+  color: var(--color-fg-max);
+}
+
+.chat-ask-option-desc {
+  color: var(--color-fg-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.chat-ask-input-row {
+  padding: 0 11px 10px;
+}
+
 .chat-ask-input {
-  min-width: 0;
-  flex: 1 1 auto;
-  border: 1px solid var(--color-line-strong);
-  border-radius: 5px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
   background: var(--color-canvas);
-  padding: 3px 7px;
   color: var(--color-fg);
   font: inherit;
+  font-size: 12px;
 }
 
 .chat-ask-input:focus {
@@ -2743,28 +2792,74 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   outline: none;
 }
 
-.chat-ask-submit {
+/* 底部确认条：与卡片本体用一条细线分开，视觉上把「选择」和「提交」分成两层 */
+.chat-ask-bar {
   display: flex;
-  flex: none;
   align-items: center;
-  gap: 4px;
-  border: 1px solid var(--color-accent);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
-  padding: 3px 10px;
-  color: var(--color-accent);
+  gap: 8px;
+  padding: 7px 11px;
+  border-top: 1px solid var(--color-line-soft);
+  background: var(--color-overlay-subtle);
+}
+
+.chat-ask-hint {
+  overflow: hidden;
+  color: var(--color-fg-soft);
   font-size: 11.5px;
-  font-weight: 600;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.chat-ask-keycap {
+  padding: 0 4px;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 3px;
+  color: var(--color-fg-ghost);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 15px;
+}
+
+.chat-ask-submit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 13px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--color-accent);
+  color: #20201f;
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
 .chat-ask-submit:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  background: var(--color-accent-hover);
 }
 
 .chat-ask-submit:disabled {
-  border-color: var(--color-line-strong);
+  background: var(--color-overlay);
   color: var(--color-fg-dim);
+  cursor: default;
+}
+
+/* modal：铺一层遮罩居中显示，用于需要打断注意力的事情（例如「上下文快满了，压缩吗」） */
+.chat-ask-overlay {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 45%);
+}
+
+.chat-ask-card.is-modal {
+  width: min(520px, 100%);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
 }
 
 .chat-composer-images {

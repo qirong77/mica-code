@@ -90,6 +90,28 @@ export class AskUserTool extends MicaTool {
             description:
               'Very short label for the session list while waiting, e.g. "等你选入口". Defaults to `title`.',
           },
+          presentation: {
+            type: 'string',
+            enum: ['dock', 'modal'],
+            description:
+              'Where to draw it: `dock` (default) sits above the composer; `modal` is a centered dialog for something that should interrupt, e.g. "上下文快满了，现在压缩吗".',
+          },
+          ui: {
+            type: 'object',
+            description:
+              'Turn individual elements on or off. Omit to let them follow the data (e.g. the input box only appears with `allowCustom`).',
+            properties: {
+              icon: { type: 'boolean', description: 'The leading question mark badge.' },
+              meta: { type: 'boolean', description: 'The "2 options · single choice" line next to the title.' },
+              detail: { type: 'boolean', description: 'The detail paragraph.' },
+              options: { type: 'boolean', description: 'The option list.' },
+              input: { type: 'boolean', description: 'The free-text field.' },
+              confirm: { type: 'boolean', description: 'The explicit 确定 button (needed when a pick is not final).' },
+              hint: { type: 'boolean', description: 'The "已选 A" line in the footer.' },
+              dismiss: { type: 'boolean', description: 'The close button that cancels the question.' },
+            },
+            additionalProperties: false,
+          },
         },
         required: ['title', 'options'],
         additionalProperties: false,
@@ -124,6 +146,10 @@ function toQuestion(input: ToolInput): PluginAskQuestion {
     options: options as PluginAskOption[],
     multiple: input?.multiple === true,
     allowCustom: input?.allowCustom === true,
+    presentation: input?.presentation === 'modal' ? 'modal' : undefined,
+    ...(input?.ui && typeof input.ui === 'object'
+      ? { ui: input.ui as PluginAskQuestion['ui'] }
+      : {}),
     // 数字从 JSON 进来可能是字符串；非数字交给宿主按默认值处理。
     timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input?.timeoutMs) : undefined,
     summary: typeof input?.summary === 'string' ? input.summary : undefined,

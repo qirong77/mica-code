@@ -91,4 +91,52 @@ describe('createPluginAskBroker', () => {
     await expect(pending).resolves.toEqual({ optionIds: [], cancelled: true, reason: 'aborted' });
     expect(host.pending()).toBeNull();
   });
+
+  it('posts without holding the caller, and settles later when answered', async () => {
+    const { host, notifications, marks } = createHarness();
+    // 关键点：post() 是同步返回的——调用方（比如定时检查）不会因为没人点而卡住。
+    const handle = host.forPlugin('auto-compact').post(question);
+    expect(handle.id).toBe(host.pending()!.id);
+    expect(host.pending()!.passive).toBe(true);
+    // 侧栏那行用 summary（短的），没有才退回 title
+    expect(marks.at(-1)).toBe('等你选入口');
+    expect(notifications.at(-1)?.ask?.passive).toBe(true);
+
+    host.answer({ askId: handle.id, optionIds: ['a'] });
+    await expect(handle.answered).resolves.toMatchObject({ optionIds: ['a'], cancelled: false });
+    expect(host.pending()).toBeNull();
+  });
+
+  it('drops a posted question when the plugin changes its mind', async () => {
+    const { host } = createHarness();
+    const handle = host.forPlugin('auto-compact').post(question);
+    handle.dismiss();
+    await expect(handle.answered).resolves.toMatchObject({ cancelled: true, reason: 'cancelled' });
+    expect(host.pending()).toBeNull();
+  });
+
+  it('lets a blocking question take the slot from a posted one', () => {
+    const { host } = createHarness();
+    const posted = host.forPlugin('auto-compact').post(question);
+    // 被动那条没人等，被顶掉不损失任何东西；真在等的那条优先。
+    const blocking = host.forPlugin('ask').request({ ...question, title: '工具要问的' });
+    expect(host.pending()?.title).toBe('工具要问的');
+    expect(host.pending()?.passive).toBeFalsy();
+    void posted.answered.then((answer) => {
+      expect(answer).toMatchObject({ cancelled: true, reason: 'cancelled' });
+    });
+    host.dispose();
+    void blocking;
+  });
+
+  it('treats a dismiss from the page as cancelled, not as an empty choice', async () => {
+    const { host } = createHarness();
+    const pending = host.forPlugin('ask').request(question);
+    expect(host.answer({ askId: host.pending()!.id, cancelled: true })).toEqual({ ok: true });
+    await expect(pending).resolves.toEqual({
+      optionIds: [],
+      cancelled: true,
+      reason: 'cancelled',
+    });
+  });
 });

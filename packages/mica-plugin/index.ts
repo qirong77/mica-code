@@ -277,14 +277,18 @@ export {
   MAX_PLUGIN_ASK_TIMEOUT_MS,
   normalizePluginAskQuestion,
   pluginAskSummary,
+  resolvePluginAskDisplay,
 } from './PluginAsk.js';
 export type {
   PluginAskAnswer,
   PluginAskApi,
+  PluginAskHandle,
   PluginAskOption,
+  PluginAskPresentation,
   PluginAskQuestion,
   PluginAskReason,
   PluginAskRequestOptions,
+  PluginAskUi,
 } from './PluginAsk.js';
 export type { PluginBackgroundApi, PluginBackgroundState, PluginBackgroundTask } from './PluginBackground.js';
 export { createPluginBackgroundScheduler } from './PluginBackground.js';

@@ -49,6 +49,20 @@ export type PluginAskQuestion = {
   /** 除了给定选项，还允许用户自己写一句。 */
   allowCustom?: boolean;
   /**
+   * 画在哪里。默认 `dock`（输入框上方一条）；`modal` 是居中弹窗。
+   *
+   * 需要打断当前注意力的事情（例如「上下文快满了，要不要现在压缩」）用 modal；
+   * 与这一轮内容连着看更自然的选择用 dock。
+   */
+  presentation?: PluginAskPresentation;
+  /**
+   * 逐个元素开关，缺省按数据推导。
+   *
+   * 用途是让同一套组件适配很不一样的场景：自动压缩的确认弹窗只要标题 + 两个按钮，
+   * 不要自由输入框；收集一段文字的场景则反过来，只留输入框。
+   */
+  ui?: PluginAskUi;
+  /**
    * 等多久算放弃（毫秒）。默认 15 分钟，上限 1 小时。
    *
    * 超时不是错误：工具会拿到 `cancelled` + `reason: 'timeout'`，自己决定退化成什么
@@ -61,6 +75,29 @@ export type PluginAskQuestion = {
    * 侧栏一行放不下太长的句子，所以短的 summary + 长的 title 是有意义的搭配。
    */
   summary?: string;
+};
+
+export type PluginAskPresentation = 'dock' | 'modal';
+
+/**
+ * 一道题里每个元素要不要画。不传就按数据推导：
+ *
+ * - `icon` / `hint` / `dismiss` 默认画；
+ * - `meta` 只在有两个以上选项时画（「3 个方案 · 单选」）；
+ * - `detail` 看有没有 `detail`；
+ * - `input` 看 `allowCustom`；
+ * - `confirm` 看是否需要二次确认（多选、能自由输入）；
+ * - `options` 只要有选项就画。
+ */
+export type PluginAskUi = {
+  icon?: boolean;
+  meta?: boolean;
+  detail?: boolean;
+  options?: boolean;
+  input?: boolean;
+  confirm?: boolean;
+  hint?: boolean;
+  dismiss?: boolean;
 };
 
 /** 结束原因。`answered` 是唯一「用户真的选了」的情况。 */
@@ -84,8 +121,29 @@ export type PluginAskRequestOptions = {
   signal?: AbortSignal;
 };
 
+/**
+ * 被动提问的句柄。发出去了，插件继续干自己的事。
+ *
+ * 典型用法是「后台发现了一件事，问用户要不要处理」：不能因此把整轮挂住，也不需要
+ * 用户立刻回答——不点就什么都不发生。
+ */
+export type PluginAskHandle = {
+  id: string;
+  /** 用户答了 / 超时 / 被撤掉时 resolve。 */
+  answered: Promise<PluginAskAnswer>;
+  /** 主动撤掉（例如触发它的那个场景已经过去了）。 */
+  dismiss(): void;
+};
+
 export type PluginAskApi = {
+  /** 阻塞式提问：等用户点完再继续。 */
   request(question: PluginAskQuestion, options?: PluginAskRequestOptions): Promise<PluginAskAnswer>;
+  /**
+   * 非阻塞提问：把卡片发给用户就返回，不占着调用方。
+   *
+   * 用户不回答也不影响任何东西——卡片留到用户处理或超时为止。
+   */
+  post(question: PluginAskQuestion, options?: PluginAskRequestOptions): PluginAskHandle;
 };
 
 /** 一次提问最多几个选项：客户端是一列按钮，多了就没人看。 */
@@ -143,11 +201,37 @@ export function normalizePluginAskQuestion(input: PluginAskQuestion): PluginAskQ
     options,
     ...(input?.multiple === true ? { multiple: true } : {}),
     ...(input?.allowCustom === true ? { allowCustom: true } : {}),
+    ...(input?.presentation === 'modal' ? { presentation: 'modal' as const } : {}),
+    ...(input?.ui ? { ui: { ...input.ui } } : {}),
     timeoutMs,
     ...(text(input?.summary, MAX_PLUGIN_ASK_SUMMARY) ? { summary: text(input.summary, MAX_PLUGIN_ASK_SUMMARY) } : {}),
   };
 }
 
+/**
+ * 把「要不要画某个元素」定成最终结论。
+ *
+ * 放在这一侧而不是界面里：界面只有一份快照，缺字段时只能猜；插件知道这道题是干什么
+ * 的，猜错了也只是它自己的界面难看。默认值依赖数据，所以要能同时看到选项数、`multiple`、
+ * `allowCustom`。
+ */
+export function resolvePluginAskDisplay(question: PluginAskQuestion): Required<PluginAskUi> {
+  const ui = question.ui ?? {};
+  const pick = (value: boolean | undefined, fallback: boolean): boolean =>
+    typeof value === 'boolean' ? value : fallback;
+  const allowCustom = question.allowCustom === true;
+  return {
+    icon: pick(ui.icon, true),
+    meta: pick(ui.meta, question.options.length > 1),
+    detail: pick(ui.detail, true) && Boolean(question.detail),
+    options: pick(ui.options, question.options.length > 0),
+    input: pick(ui.input, allowCustom),
+    // 单选且点一下就提交时不需要「确定」；能自由输入或多选才需要二次确认。
+    confirm: pick(ui.confirm, Boolean(question.multiple) || allowCustom),
+    hint: pick(ui.hint, true),
+    dismiss: pick(ui.dismiss, true),
+  };
+}
 /** 会话列表 / 客户端标题里用的那句提示：短的 summary 优先，其次 title。 */
 export function pluginAskSummary(question: PluginAskQuestion): string {
   const short = text(question.summary, MAX_PLUGIN_ASK_SUMMARY);
