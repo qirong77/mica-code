@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_DARK_THEME, THEMES } from '@packages/mica-web-shared/theme.js';
 
 /**
  * 亮色皮肤的护栏。
@@ -41,6 +42,16 @@ const COLOR_VALUE = /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|color-mix\(/i;
 
 const darkTokens = declarations(blockAfter('\n.mica-config-ui {'));
 const lightTokens = declarations(blockAfter("html[data-theme='light'] .mica-config-ui {"));
+
+/**
+ * 注册表里每个主题的皮肤块。默认暗色的取值就在 `.mica-config-ui` 默认块里，
+ * 其余主题各有一个 `html[data-theme='<id>'] .mica-config-ui` 块。
+ */
+function themeTokens(id: string): Map<string, string> {
+  return id === DEFAULT_DARK_THEME
+    ? darkTokens
+    : declarations(blockAfter(`html[data-theme='${id}'] .mica-config-ui {`));
+}
 
 describe('config-ui 亮色皮肤 token 覆盖', () => {
   it('暗色块里的每个颜色 token 在亮色块里都有覆盖', () => {
@@ -100,6 +111,15 @@ describe('config-ui 亮色皮肤 token 覆盖', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('只引用本文件定义过的变量：配置页没有 --color-* 这套 token', () => {
+    // 从 app.css 抄色块过来时最容易漏掉这层改名（那边叫 --color-accent，这里叫 --accent）；
+    // 引用不存在的变量不会报错，只是悄悄变成空值。
+    const offenders = styles
+      .split('\n')
+      .filter((line) => !/^\s*(\*|\/\*|<!--)/.test(line) && /var\(--color-/.test(line));
+    expect(offenders).toEqual([]);
+  });
+
   it('主题卡预览色板与两个主题的 token 同值', () => {
     const previewLight = declarations(blockAfter(".theme-preview[data-preview-theme='light'] {"));
     const previewDark = declarations(blockAfter('  .theme-preview {'));
@@ -115,5 +135,35 @@ describe('config-ui 亮色皮肤 token 覆盖', () => {
     expect(previewDark.get('--preview-line')).toBe(darkTokens.get('--line'));
     expect(previewDark.get('--preview-text')).toBe(darkTokens.get('--text-soft'));
     expect(previewDark.get('--preview-accent')).toBe(darkTokens.get('--accent'));
+  });
+
+  it('注册表里的每个主题都有皮肤块，覆盖默认块的全部颜色 token', () => {
+    const colorTokens = [...darkTokens].filter(([, value]) => COLOR_VALUE.test(value)).map(([name]) => name);
+
+    for (const theme of THEMES) {
+      const tokens = themeTokens(theme.id);
+      const missing = colorTokens.filter((name) => !tokens.has(name));
+      expect(missing, `${theme.id} 在 styles.css 里漏了这些 token`).toEqual([]);
+    }
+  });
+
+  it('每个主题的主题卡预览色板与自己的 token 同值', () => {
+    for (const theme of THEMES) {
+      const tokens = themeTokens(theme.id);
+      const preview =
+        theme.id === DEFAULT_DARK_THEME
+          ? declarations(blockAfter('  .theme-preview {'))
+          : declarations(blockAfter(`.theme-preview[data-preview-theme='${theme.id}'] {`));
+
+      expect(preview.get('--preview-bg'), `${theme.id} 预览底色`).toBe(tokens.get('--bg'));
+      // 预览里那块「抬起来的面板」取 panel 或 panel-muted：哪个和自己的底色差得开就用哪个。
+      expect(
+        [tokens.get('--panel'), tokens.get('--panel-muted')],
+        `${theme.id} 预览面板色`
+      ).toContain(preview.get('--preview-panel'));
+      expect(preview.get('--preview-line'), `${theme.id} 预览分隔线`).toBe(tokens.get('--line'));
+      expect(preview.get('--preview-text'), `${theme.id} 预览正文色`).toBe(tokens.get('--text-soft'));
+      expect(preview.get('--preview-accent'), `${theme.id} 预览强调色`).toBe(tokens.get('--accent'));
+    }
   });
 });

@@ -116,6 +116,130 @@ html[data-theme='light'] .mica-config-ui {
   --shadow-modal: 0 24px 60px rgb(0 0 0 / 18%);
 }
 
+/* Catppuccin Mocha：与 app.css 同 id 块同源（内容面 canvas、卡片 panel、嵌套面 panel-hi、
+   选中行 active、强调色 accent）。 */
+html[data-theme='mocha'] .mica-config-ui {
+  --bg: #1e1e2e;
+  --panel: #181825;
+  --panel-muted: #313244;
+  --panel-hover: #313244;
+  --sidebar-bg: #181825;
+  --line: #45475a;
+  --line-soft: rgb(255 255 255 / 7%);
+  --line-strong: #585b70;
+  --text: #cdd6f4;
+  --text-soft: #a6adc8;
+  --text-faint: #6c7086;
+  --accent: #cba6f7;
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, #ffffff);
+  --blue: #89b4fa;
+  --green: #a6e3a1;
+  --red: #f38ba8;
+  --amber: #f9e2af;
+  --violet: #cba6f7;
+  --overlay-subtle: rgb(255 255 255 / 2.5%);
+  --overlay: rgb(255 255 255 / 3%);
+  --overlay-strong: rgb(255 255 255 / 6%);
+  --focus-ring: rgb(255 255 255 / 7%);
+  --selection-bg: rgb(255 255 255 / 20%);
+  --panel-inset: #1e1e2e;
+  --accent-contrast: #1e1e2e;
+  --shadow-modal: 0 24px 60px rgb(17 17 27 / 60%);
+}
+
+/* Catppuccin Latte：与 app.css 同 id 块同源（内容面 canvas、卡片 panel、嵌套面 panel-hi、
+   选中行 active、强调色 accent）。 */
+html[data-theme='latte'] .mica-config-ui {
+  --bg: #eff1f5;
+  --panel: #e6e9ef;
+  --panel-muted: #dce0e8;
+  --panel-hover: #ccd0da;
+  --sidebar-bg: #e6e9ef;
+  --line: #bcc0cc;
+  --line-soft: rgb(76 79 105 / 8%);
+  --line-strong: #acb0be;
+  --text: #4c4f69;
+  --text-soft: #5c5f77;
+  --text-faint: #8c8fa1;
+  --accent: #8839ef;
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000);
+  --blue: #1e66f5;
+  --green: #327d22;
+  --red: #d20f39;
+  --amber: #986114;
+  --violet: #8839ef;
+  --overlay-subtle: rgb(52 59 88 / 2.5%);
+  --overlay: rgb(52 59 88 / 3%);
+  --overlay-strong: rgb(52 59 88 / 6%);
+  --focus-ring: rgb(0 0 0 / 8%);
+  --selection-bg: rgb(0 0 0 / 12%);
+  --panel-inset: #e6e9ef;
+  --accent-contrast: #ffffff;
+  --shadow-modal: 0 24px 60px rgb(76 79 105 / 18%);
+}
+
+/* Tokyo Night：与 app.css 同 id 块同源（内容面 canvas、卡片 panel、嵌套面 panel-hi、
+   选中行 active、强调色 accent）。 */
+html[data-theme='tokyo-night'] .mica-config-ui {
+  --bg: #1a1b26;
+  --panel: #16161e;
+  --panel-muted: #202330;
+  --panel-hover: #202330;
+  --sidebar-bg: #16161e;
+  --line: rgb(84 92 126 / 30%);
+  --line-soft: rgb(255 255 255 / 7%);
+  --line-strong: rgb(84 92 126 / 60%);
+  --text: #c0caf5;
+  --text-soft: #9aa5ce;
+  --text-faint: #42465d;
+  --accent: #7aa2f7;
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, #ffffff);
+  --blue: #7aa2f7;
+  --green: #73daca;
+  --red: #f7768e;
+  --amber: #e0af68;
+  --violet: #bb9af7;
+  --overlay-subtle: rgb(255 255 255 / 2.5%);
+  --overlay: rgb(255 255 255 / 3%);
+  --overlay-strong: rgb(255 255 255 / 6%);
+  --focus-ring: rgb(255 255 255 / 7%);
+  --selection-bg: rgb(255 255 255 / 20%);
+  --panel-inset: #1a1b26;
+  --accent-contrast: #1a1b26;
+  --shadow-modal: 0 24px 60px rgb(16 16 20 / 60%);
+}
+
+/* Tokyo Night Light：与 app.css 同 id 块同源（内容面 canvas、卡片 panel、嵌套面 panel-hi、
+   选中行 active、强调色 accent）。 */
+html[data-theme='tokyo-night-light'] .mica-config-ui {
+  --bg: #e6e7ed;
+  --panel: #d6d8df;
+  --panel-muted: #c8cad4;
+  --panel-hover: #c1c4cf;
+  --sidebar-bg: #d6d8df;
+  --line: #c1c2c7;
+  --line-soft: rgb(52 59 88 / 8%);
+  --line-strong: #acb0bf;
+  --text: #343b58;
+  --text-soft: #40434f;
+  --text-faint: #888b94;
+  --accent: #2959aa;
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000);
+  --blue: #2959aa;
+  --green: #33635c;
+  --red: #8c4351;
+  --amber: #8f5e15;
+  --violet: #65359d;
+  --overlay-subtle: rgb(52 59 88 / 2.5%);
+  --overlay: rgb(52 59 88 / 3%);
+  --overlay-strong: rgb(52 59 88 / 6%);
+  --focus-ring: rgb(0 0 0 / 8%);
+  --selection-bg: rgb(0 0 0 / 12%);
+  --panel-inset: #d6d8df;
+  --accent-contrast: #ffffff;
+  --shadow-modal: 0 24px 60px rgb(52 59 88 / 18%);
+}
+
 /* 内嵌变体：把这份样式当成「一段内容」放进别的容器（桌面端会话设置弹窗）用。
    只保留配色、字体与控件规则，去掉整页容器自己的尺寸与底色。 */
 .mica-config-ui.is-embed {
@@ -1055,7 +1179,8 @@ html[data-theme='light'] .mica-config-ui {
   /* ---- 外观：主题单选卡 -------------------------------------------------- */
   .theme-card-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    /* 卡片数随主题数增长（跟随系统 + 6 个主题），固定三列会挤成两行半；按宽度自动排。 */
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
     gap: 10px;
     max-width: 720px;
   }
@@ -1125,6 +1250,38 @@ html[data-theme='light'] .mica-config-ui {
     --preview-line: #0000001a;
     --preview-text: #61666b;
     --preview-accent: #4176e6;
+  }
+
+  .theme-preview[data-preview-theme='mocha'] {
+    --preview-bg: #1e1e2e;
+    --preview-panel: #313244;
+    --preview-line: #45475a;
+    --preview-text: #a6adc8;
+    --preview-accent: #cba6f7;
+  }
+
+  .theme-preview[data-preview-theme='latte'] {
+    --preview-bg: #eff1f5;
+    --preview-panel: #dce0e8;
+    --preview-line: #bcc0cc;
+    --preview-text: #5c5f77;
+    --preview-accent: #8839ef;
+  }
+
+  .theme-preview[data-preview-theme='tokyo-night'] {
+    --preview-bg: #1a1b26;
+    --preview-panel: #202330;
+    --preview-line: rgb(84 92 126 / 30%);
+    --preview-text: #9aa5ce;
+    --preview-accent: #7aa2f7;
+  }
+
+  .theme-preview[data-preview-theme='tokyo-night-light'] {
+    --preview-bg: #e6e7ed;
+    --preview-panel: #c8cad4;
+    --preview-line: #c1c2c7;
+    --preview-text: #40434f;
+    --preview-accent: #2959aa;
   }
 
   .theme-preview-rail {

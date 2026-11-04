@@ -69,12 +69,18 @@ export {
   resolveLegacyWorkspace,
 } from './ui-state.js';
 export {
+  DEFAULT_DARK_THEME,
+  DEFAULT_LIGHT_THEME,
   DEFAULT_THEME_PREFERENCE,
-  THEME_COLOR_META,
+  THEMES,
   THEME_PREFERENCES,
   THEME_UI_STATE_KEY,
+  isThemeId,
   isThemePreference,
   normalizeThemePreference,
   resolveThemeName,
+  themeAppearance,
+  themeCanvasColor,
+  themeLabel,
 } from './theme.js';
-export type { ResolvedTheme, ThemePreference } from './theme.js';
+export type { ResolvedTheme, ThemeAppearance, ThemeDefinition, ThemeId, ThemePreference } from './theme.js';
