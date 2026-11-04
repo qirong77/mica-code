@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -20,6 +21,7 @@ function harness() {
   const settings: Record<string, string> = { enabled: 'true', captureContent: 'true' };
   const disposers: Array<() => void | Promise<void>> = [];
   const reports: unknown[] = [];
+  const actions = new Map<string, () => unknown>();
   const owner = {};
   const readSettings = vi.fn(() => settings);
   const describeSession = vi.fn(() => ({ id: 'session-test', title: 'Task', cwd: '/workspace/test' }));
@@ -37,6 +39,12 @@ function harness() {
       },
     },
     ui: { showMessage: vi.fn() },
+    actions: {
+      register(key: string, handler: () => unknown) {
+        actions.set(key, handler);
+        return { dispose: () => actions.delete(key) };
+      },
+    },
     health: { report: (data: unknown) => reports.push(data) },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     onDispose: (dispose: () => void | Promise<void>) => disposers.push(dispose),
@@ -69,6 +77,7 @@ function harness() {
     tools,
     settings,
     reports,
+    actions,
     emit,
     start,
     finish,
@@ -143,4 +152,62 @@ describe('harness-review plugin', () => {
     expect(h.tools[0]!.name).toBe('harness_review');
     expect(h.tools[0]!.readOnly).toBe(false);
   });
+
+  it('records which host produced the run', async () => {
+    const h = harness();
+    await h.start();
+    await h.finish();
+    const [run] = (await h.review()).runs;
+    expect(run.mode).toBe('session');
+    expect(run.host).toBe('cli');
+  });
+
+  // 复盘页面没人打开过：把「重复出现又没人处理」浮到侧栏上，否则 record 只是堆积。
+  it('raises a sidebar prompt for recurring problems nobody has reviewed yet', async () => {
+    const h = harness();
+    const failOnce = async () => {
+      await h.start();
+      await h.emit({ type: 'tool:call', id: 'c1', name: 'read_file', args: '{"file_path":"missing"}' } as never);
+      await h.emit({
+        type: 'tool:result',
+        id: 'c1',
+        name: 'read_file',
+        result: '工具 read_file 执行失败：\nENOENT: no such file',
+      } as never);
+      await h.finish();
+    };
+    await failOnce();
+    await failOnce();
+    await h.hooks.emit('turn:after', { outcome: 'completed' });
+    const data = await waitForStatus(h.home, (value) => Boolean(value.attention));
+    expect(String(data.attention!.text)).toContain('重复出现');
+    expect(data.attention!.action).toBe('open-review');
+    expect(String(data.openFindings)).toContain('项');
+  });
+
+  // 提示点必须点得动：动作只把提示词放进输入框，不替用户按发送。
+  it('opens the review through a new session without sending it', async () => {
+    const h = harness();
+    const result = h.actions.get('open-review')!() as { newSession: { prompt: string; cwd: string; send: boolean } };
+    expect(result.newSession.prompt).toContain('harness_review');
+    expect(result.newSession.cwd).toBe('/workspace/test');
+    expect(result.newSession.send).toBe(false);
+  });
 });
+
+async function waitForStatus(
+  home: string,
+  ready: (value: { attention?: { text?: string; action?: string }; openFindings?: string }) => boolean,
+): Promise<{ attention?: { text?: string; action?: string }; openFindings?: string }> {
+  const file = join(home, 'plugin-data', 'harness-review', 'data.json');
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try {
+      const parsed = JSON.parse(await readFile(file, 'utf8'));
+      if (ready(parsed)) return parsed;
+    } catch {
+      // 还没写出来
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('data.json 没有在预期时间内带着提示点写出来');
+}

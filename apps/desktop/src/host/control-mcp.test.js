@@ -212,6 +212,25 @@ describe('createControlMcpHandler over streamable http', () => {
     }
   })
 
+  // 模型常把 keys 写成 press、把 navigate 写成 goto：报错要直接给出合法名，
+  // 否则它只能靠猜再失败一次。
+  it('suggests the closest legal action when the name is only slightly off', async () => {
+    const runtime = await startRuntime()
+    const client = await connect(runtime.url)
+    try {
+      const result = await client.callTool({
+        name: CONTROL_TOOL_NAME,
+        arguments: { action: 'navgate' }
+      })
+      expect(result.isError).toBe(true)
+      expect(result.content[0].text).toContain('最接近的合法操作')
+      expect(result.content[0].text).toContain('navigate')
+    } finally {
+      await client.close()
+      runtime.close()
+    }
+  })
+
   // owner 决定窗口/终端挂到哪条会话上，MCP 这一层必须把它原样带到主进程服务
   it('forwards the caller owner header to the control service', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mica-mcp-'))

@@ -1,4 +1,5 @@
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
+import { resolvePathRepoIdentity } from './repo.js';
 import {
   MAX_OPERATIONS,
   entryText,
@@ -54,6 +55,7 @@ export class MemoryTool extends MicaTool {
         'Prefix an entry with `! ` to pin it: pinned entries are injected first and survive budget pressure.',
         'Omit `operations` to read the current entries and usage.',
         'Patches use a unique substring (`old_text`); if it matches more than one entry the call fails and lists candidates, so pass a longer excerpt or the whole entry.',
+        'Scope `project` defaults to the repository this task is actually working in (the code you are editing), not the shell directory. When the session was opened in one repository but the work belongs to another, pass `repo` with a path inside the target repository.',
       ].join(' '),
       {
         type: 'object',
@@ -62,7 +64,12 @@ export class MemoryTool extends MicaTool {
             type: 'string',
             enum: [...SCOPE_KINDS],
             description:
-              'Which memory scope to read or write. Omit for `project` (this repository). `domain` also needs `domain`.',
+              'Which memory scope to read or write. Omit for `project` (the repository this task is working in). `domain` also needs `domain`.',
+          },
+          repo: {
+            type: 'string',
+            description:
+              'scope=project: a path inside the repository the fact belongs to. Defaults to the repository this task is working in. Pass it when the work targets a different repository than the session directory.',
           },
           domain: {
             type: 'string',
@@ -154,7 +161,9 @@ export class MemoryTool extends MicaTool {
 export function parseMemoryToolInput(input: unknown, context: MemoryContext): ParsedMemoryInput {
   if (!isRecord(input)) return { ok: false, message: 'input must be an object' };
 
-  const unknownKey = Object.keys(input).find((key) => key !== 'scope' && key !== 'domain' && key !== 'operations');
+  const unknownKey = Object.keys(input).find(
+    (key) => key !== 'scope' && key !== 'repo' && key !== 'domain' && key !== 'operations',
+  );
   if (unknownKey) return { ok: false, message: `unknown input field: ${unknownKey}` };
 
   const requested = input.scope;
@@ -166,7 +175,12 @@ export function parseMemoryToolInput(input: unknown, context: MemoryContext): Pa
   }
   const kind = (requested as MemoryToolScope | undefined) ?? 'project';
 
-  const resolved = resolveScope(kind, typeof input.domain === 'string' ? input.domain : undefined, context);
+  const resolved = resolveScope(
+    kind,
+    typeof input.domain === 'string' ? input.domain : undefined,
+    typeof input.repo === 'string' ? input.repo : undefined,
+    context,
+  );
   if (!resolved.ok) return { ok: false, message: resolved.message };
 
   if (input.operations === undefined) return { ok: true, scope: resolved.scope, operations: [] };
@@ -216,16 +230,35 @@ export function parseMemoryToolInput(input: unknown, context: MemoryContext): Pa
 function resolveScope(
   kind: MemoryToolScope,
   domainName: string | undefined,
+  repoPath: string | undefined,
   context: MemoryContext,
 ): { ok: true; scope: MemoryScope } | { ok: false; message: string } {
   if (kind === 'profile') return { ok: true, scope: { kind: 'profile' } };
 
   if (kind === 'project') {
+    const requestedPath = (repoPath ?? '').trim();
+    if (requestedPath) {
+      const identity = resolvePathRepoIdentity(requestedPath);
+      if (!identity) {
+        return {
+          ok: false,
+          message: `'${requestedPath}' is not inside a recognizable repository. Pass a path inside the repository the fact belongs to (any path in it works, including a file that does not exist yet).`,
+        };
+      }
+      return {
+        ok: true,
+        scope: {
+          kind: 'project',
+          repo: identity,
+          ...(identity.slug === context.repo?.slug ? {} : { note: '本次任务目标' }),
+        },
+      };
+    }
     if (!context.project) {
       return {
         ok: false,
         message:
-          'no repository in the current working directory, so there is no project scope. Use scope=domain with an existing domain, or scope=profile for facts about the user themselves.',
+          'no repository in the current working directory, so there is no default project scope. Pass `repo` with a path inside the repository this fact belongs to, use scope=domain with an existing domain, or scope=profile for facts about the user themselves.',
       };
     }
     return { ok: true, scope: context.project };

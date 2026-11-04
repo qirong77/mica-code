@@ -15,6 +15,21 @@ const MOVE_TO_PREFIX = '*** Move to: ';
 
 const MAX_SUMMARY_CHANGES = 20;
 
+/**
+ * 报错里直接给出「照抄就能用」的最小形态：反复出现的失败是模型只写上下文行、
+ * 或压根没写首尾标记，然后再靠猜重试一次。错误文本是它唯一会读的东西，
+ * 所以要带上判定规则和下一步动作，而不只是一句「不行」。
+ */
+const PATCH_SHAPE_HINT = [
+  '最小正确形态（照抄，只替换路径与内容）：',
+  '*** Begin Patch',
+  '*** Update File: 路径',
+  '@@',
+  '-旧内容',
+  '+新内容',
+  '*** End Patch',
+].join('\n');
+
 type PatchOperation =
   | { type: 'add'; path: string; lines: string[] }
   | { type: 'delete'; path: string }
@@ -224,7 +239,16 @@ function parsePatch(patch: string): PatchOperation[] {
   while (index < lines.length && lines[index] === '') index++;
 
   if (lines[index] !== BEGIN_MARKER) {
-    throw new Error(`patch 必须以 ${BEGIN_MARKER} 开始`);
+    const firstLine = lines[index];
+    const detail = firstLine === undefined ? '补丁里没有任何内容' : `第 ${index + 1} 行是：${firstLine || '（空行）'}`;
+    throw new Error(
+      [
+        `patch 必须以 ${BEGIN_MARKER} 开始（${detail}）。`,
+        PATCH_SHAPE_HINT,
+        '常见原因：漏掉首行；首行之前还留着时间戳、`diff --git`、``` 围栏或一句说明；首行写成了 `*** Begin Patch ***` 之类的变形。',
+        '下一步：整份重写补丁，第一行就是 `*** Begin Patch`，最后一行是 `*** End Patch`，中间每条文件操作以 `*** Add File: ` / `*** Update File: ` / `*** Delete File: ` 开头。',
+      ].join('\n'),
+    );
   }
   index++;
 
@@ -338,8 +362,25 @@ function parseHunk(lines: string[], startIndex: number): { hunk: PatchHunk; next
     index++;
   }
 
-  if (hunkLines.length === 0) throw new Error(`第 ${startIndex + 1} 行的 hunk 为空`);
-  if (!hasEdit) throw new Error(`第 ${startIndex + 1} 行的 hunk 没有任何增删内容`);
+  if (hunkLines.length === 0) {
+    throw new Error(
+      [
+        `第 ${startIndex + 1} 行的 hunk 没有任何增删内容：@@ 之后没有任何内容行。`,
+        PATCH_SHAPE_HINT,
+        '下一步：先用 read_file 读原文，再把要改的那几行写成 -/+ 对。',
+      ].join('\n'),
+    );
+  }
+  if (!hasEdit) {
+    throw new Error(
+      [
+        `第 ${startIndex + 1} 行的 hunk 没有任何增删内容：以空格开头的纯上下文行不算修改。`,
+        PATCH_SHAPE_HINT,
+        '每个 hunk 至少要有一行以 - 或 + 开头；整段重写时写一行 - 旧内容 和一行 + 新内容。',
+        '下一步：先用 read_file 读原文，确认要删的那几行（- 后面照抄原文）和要换上的新内容（+ 后面写新内容）。',
+      ].join('\n'),
+    );
+  }
   return { hunk: { header, lines: hunkLines }, nextIndex: index };
 }
 
@@ -459,19 +500,35 @@ function joinLines(lines: string[], trailingNewline: boolean): string {
   return `${lines.join('\n')}${trailingNewline ? '\n' : ''}`;
 }
 
+function hunkNotFoundError(filePath: string): Error {
+  // 这里刻意不贴完整补丁骨架：harness-review 的错误分类按文本匹配，
+  // 「找不到 hunk」的报错里一旦出现补丁首行标记，就会被归成「补丁头缺失」那一类。
+  return new Error(
+    [
+      `Update File 失败：${filePath} 中找不到 hunk 对应内容（- 行与上下文行必须与文件原文逐字一致）。`,
+      '常见原因：缩进或行尾空白与原文不同；把「期望的新内容」写成了空格前缀的上下文行；- 行写的不是文件里现在的原文；文件在生成补丁之后已被改过。',
+      '下一步：先 read_file 读这段原文再照抄；上下文行越少越不容易错，只留要改的那几行即可。',
+      '最小改法：',
+      '@@',
+      '-旧内容（照抄文件里的原文）',
+      '+新内容',
+    ].join('\n'),
+  );
+}
+
 function findUniqueSequence(lines: string[], needle: string[], cursor: number, filePath: string): number {
   const forwardMatches = findSequenceMatches(lines, needle, cursor);
   if (forwardMatches.length === 1) return forwardMatches[0]!;
   if (forwardMatches.length > 1) {
-    throw new Error(`Update File 失败：${filePath} 中 hunk 匹配不唯一，请提供更多上下文`);
+    throw new Error(`Update File 失败：${filePath} 中 hunk 匹配不唯一，请在 hunk 里多加一两行上下文行`);
   }
 
   const allMatches = findSequenceMatches(lines, needle, 0);
   if (allMatches.length === 1) return allMatches[0]!;
   if (allMatches.length > 1) {
-    throw new Error(`Update File 失败：${filePath} 中 hunk 匹配不唯一，请提供更多上下文`);
+    throw new Error(`Update File 失败：${filePath} 中 hunk 匹配不唯一，请在 hunk 里多加一两行上下文行`);
   }
-  throw new Error(`Update File 失败：${filePath} 中找不到 hunk 对应内容`);
+  throw hunkNotFoundError(filePath);
 }
 
 function findSequenceMatches(lines: string[], needle: string[], startIndex: number): number[] {
@@ -506,7 +563,16 @@ function findPureInsertionIndex(lines: string[], hunk: PatchHunk, cursor: number
   if (allMatches.length > 1) {
     throw new Error(`Update File 失败：${filePath} 中插入锚点匹配不唯一：${headerText}`);
   }
-  throw new Error(`Update File 失败：${filePath} 中找不到插入锚点：${headerText}`);
+  throw new Error(
+    [
+      `Update File 失败：${filePath} 中找不到插入锚点：${headerText}（@@ 后面的文字要在文件里能找到一行包含它）。`,
+      '下一步：先 read_file 确认锚点行的原文；只想插在文件末尾就把 @@ 写成空或 `@@ EOF`。',
+      '最小改法：',
+      '@@',
+      '-旧内容（照抄文件里的原文）',
+      '+新内容',
+    ].join('\n'),
+  );
 }
 
 function extractHeaderText(header: string): string {

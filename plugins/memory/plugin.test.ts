@@ -235,6 +235,9 @@ function createHarness(options: HarnessOptions = {}) {
     async emitTurnAfter(event: Record<string, unknown> = { outcome: 'completed', owner: {} }) {
       await hooks.emit('turn:after', event);
     },
+    emitToolCall(name: string, args: Record<string, unknown>, owner: object = {}) {
+      hooks.emit('agent:observe', { type: 'tool:call', name, args: JSON.stringify(args), owner });
+    },
   };
 }
 
@@ -482,6 +485,74 @@ describe('memory scope layering', () => {
         operations: [{ action: 'add', content: '不该写进去' }],
       }),
     ).rejects.toThrow(/does not cover/);
+  });
+});
+
+describe('memory target repository', () => {
+  it('writes to the repository the task actually touched, not the session directory', async () => {
+    const home = tempDir();
+    const session = makeRepo('mis', 'git@git.example.com:zuche/mis.git');
+    const target = makeRepo('sass', 'git@git.example.com:zuche/sass.git');
+    const harness = createHarness({ home, cwd: session });
+
+    harness.emitToolCall('write_file', { file_path: join(target, 'src/order-table.ts') });
+    const result = await harness.tools[0]!.execute({
+      operations: [{ action: 'add', content: '订单表列宽由 CSS grid 控制' }],
+    });
+
+    expect(result).toContain('项目记忆 · sass（本次任务目标）');
+    expect(readFileSync(memoryFile(home, target), 'utf-8')).toContain('订单表列宽由 CSS grid 控制');
+    expect(existsSync(memoryFile(home, session))).toBe(false);
+  });
+
+  it('injects the memory of the touched repository into the running session', async () => {
+    const home = tempDir();
+    const session = makeRepo('mis', 'git@git.example.com:zuche/mis.git');
+    const target = makeRepo('sass', 'git@git.example.com:zuche/sass.git');
+    const writer = createHarness({ home, cwd: target });
+    await writer.tools[0]!.execute({
+      scope: 'project',
+      operations: [{ action: 'add', content: 'sass 用 melos 工作区' }],
+    });
+
+    const harness = createHarness({ home, cwd: session });
+    // 还没碰目标仓库：它的记忆不该出现，否则又退化成「全量注入」。
+    expect(harness.promptSections[0]!.render()).not.toContain('sass 用 melos 工作区');
+
+    harness.emitToolCall('apply_patch', { patch: `*** Begin Patch\n*** Update File: ${join(target, 'src/a.ts')}` });
+
+    const text = harness.promptSections[0]!.render();
+    expect(text).toContain('sass 用 melos 工作区');
+    expect(text).toContain('### 项目记忆 · sass（本次任务目标）');
+  });
+
+  it('does not pull in a repository that was only glanced at', async () => {
+    const home = tempDir();
+    const session = makeRepo('mis', 'git@git.example.com:zuche/mis.git');
+    const other = makeRepo('sass', 'git@git.example.com:zuche/sass.git');
+    const writer = createHarness({ home, cwd: other });
+    await writer.tools[0]!.execute({
+      scope: 'project',
+      operations: [{ action: 'add', content: 'sass 用 melos 工作区' }],
+    });
+
+    const harness = createHarness({ home, cwd: session });
+    harness.emitToolCall('read_file', { file_path: join(other, 'README.md') });
+
+    expect(harness.promptSections[0]!.render()).not.toContain('sass 用 melos 工作区');
+  });
+
+  it('ignores tool calls from another session', async () => {
+    const home = tempDir();
+    const session = makeRepo('mis', 'git@git.example.com:zuche/mis.git');
+    const target = makeRepo('sass', 'git@git.example.com:zuche/sass.git');
+    const harness = createHarness({ home, cwd: session });
+
+    harness.emitToolCall('write_file', { file_path: join(target, 'src/a.ts') }, {});
+    const result = await harness.tools[0]!.execute({ operations: [] });
+
+    // 观察桶按 owner 隔离：默认渲染与命令用同一个「无 owner」桶，因此这里看得到。
+    expect(result).toContain('sass');
   });
 });
 

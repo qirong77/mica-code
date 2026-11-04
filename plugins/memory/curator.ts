@@ -1,5 +1,5 @@
 import { MAX_OPERATIONS, type MemoryApplyResult, type MemoryOperation, type MemoryStoreSnapshot } from './store.js';
-import type { MemoryScope } from './scope.js';
+import type { MemoryContext, MemoryScope } from './scope.js';
 
 /**
  * 记忆整理器：把一段对话收敛成几条操作。
@@ -17,6 +17,13 @@ export type CuratorOperation = {
   scope: 'profile' | 'project' | 'domain';
   /** scope = domain 时必填。 */
   domain?: string;
+  /**
+   * scope = project 时的目标仓库（名字或 slug）。
+   *
+   * 会话开在 A 仓库、实际在改 B 仓库是常态，整理器必须能指明「这条事实属于 B」。
+   * 省略时落到本次任务的目标仓库（`context.project`）。
+   */
+  repo?: string;
   action: 'add' | 'patch' | 'remove';
   old_text?: string;
   content?: string;
@@ -55,6 +62,54 @@ export type CuratorApplyOutcome = {
   failures: { scope: string; message: string }[];
 };
 
+/**
+ * 把整理器的 `project|domain` 落到具体作用域。
+ *
+ * 严格：领域必须已存在且覆盖当前目录。整理器不能凭空建领域，否则「领域」会退化成
+ * 换了名字的全局记忆——那正是这次重写要解决的问题。
+ *
+ * `project` 认操作里的 `repo`：会话开在 A、实际改 B 时，整理器必须能指明 B。
+ * 认不出（或没写）时落到本次任务的目标仓库。
+ */
+export function createCuratorScopeResolver(context: MemoryContext): CuratorScopeResolver {
+  return (operation) => {
+    if (operation.scope === 'profile') {
+      return { ok: false, error: '自动整理不写用户档案（profile 只由用户在对话里明确要求时写入）' };
+    }
+    if (operation.scope === 'project') {
+      const requested = operation.repo?.trim();
+      if (requested) {
+        const match = context.repos.find((candidate) => candidate.name === requested || candidate.slug === requested);
+        if (!match) {
+          const names = context.repos.map((candidate) => candidate.name).join(', ') || '（无）';
+          return { ok: false, error: `仓库「${requested}」不属于本次会话；可用：${names}` };
+        }
+        const note = match.slug === context.repo?.slug ? {} : { note: '本次任务目标' };
+        return { ok: true, scope: { kind: 'project', repo: match, ...note } };
+      }
+      if (!context.project) {
+        return { ok: false, error: '当前目录不在任何仓库里，也没有识别到本次任务的目标仓库，无法写项目记忆' };
+      }
+      return { ok: true, scope: context.project };
+    }
+    const name = operation.domain?.trim();
+    if (!name) {
+      return {
+        ok: false,
+        error: `domain 类操作缺少 domain 字段；可用：${context.domains.map((domain) => domain.name).join(', ') || '（无）'}`,
+      };
+    }
+    const domain = context.domains.find((candidate) => candidate.name === name);
+    if (!domain) {
+      return {
+        ok: false,
+        error: `领域「${name}」不存在或不覆盖当前目录；可用：${context.domains.map((candidate) => candidate.name).join(', ') || '（无）'}`,
+      };
+    }
+    return { ok: true, scope: { kind: 'domain', domain } };
+  };
+}
+
 /** 单条消息进入整理 prompt 的上限；再长的对话对「提取长期事实」没有额外帮助。 */
 export const MAX_MESSAGE_CHARS = 4000;
 
@@ -85,6 +140,7 @@ export const CURATOR_SYSTEM_PROMPT = [
   '## 作用域：默认最窄',
   '',
   '- `project`：只在这个仓库成立。**默认选它**——大多数技术发现都属于这里。',
+  '  会话开在 A 仓库、实际改的是 B 仓库时，用 `repo` 字段指明 B（见下文的仓库列表）；写错仓库等于这条记忆以后永远不会再出现。',
   '- `domain`：跨仓库、但只在一个主题内成立（同一套后端 / 同一组小程序 / 同一个内部系统）。',
   '  只有在给定的领域列表里已经存在对应领域、且这条事实确实跨仓库成立时才用。',
   '- `profile`：你**不允许**写。用户的画像由用户在对话里明确要求时由主模型维护。',
@@ -108,7 +164,7 @@ export const CURATOR_SYSTEM_PROMPT = [
   '- 只输出 JSON，不要解释、不要 markdown 代码块。',
   '',
   '输出格式：',
-  '{"operations":[{"scope":"project|domain","domain":"仅 domain 需要","action":"add|patch|remove","old_text":"仅 patch/remove 需要","content":"add/patch 的新内容"}],"notes":"可选：不适合写进记忆、但值得告诉用户的一句话"}',
+  '{"operations":[{"scope":"project|domain","domain":"仅 domain 需要","repo":"仅 project 需要（仓库名）","action":"add|patch|remove","old_text":"仅 patch/remove 需要","content":"add/patch 的新内容"}],"notes":"可选：不适合写进记忆、但值得告诉用户的一句话"}',
 ].join('\n');
 
 export function buildCuratorUserPrompt(input: CuratorInput): string {
@@ -125,10 +181,19 @@ export function buildCuratorUserPrompt(input: CuratorInput): string {
     .map((snapshot) => (snapshot.scope.kind === 'domain' ? snapshot.scope.domain.name : ''))
     .filter(Boolean);
 
+  const repos: string[] = [];
+  for (const snapshot of input.snapshots) {
+    if (snapshot.scope.kind !== 'project') continue;
+    repos.push(`${snapshot.scope.repo.name}${snapshot.scope.note ? `（${snapshot.scope.note}）` : ''}`);
+  }
+
   return [
     '<context>',
     input.context,
     domains.length > 0 ? `可用的领域：${domains.join(' / ')}` : '当前没有可用的领域（domain 类操作会被拒绝）',
+    repos.length > 0
+      ? `本次涉及的仓库：${repos.join(' / ')}。scope=project 时用 repo 字段写仓库名；不写则落到第一个。`
+      : '本次没有可写的仓库（project 类操作会被拒绝）',
     '</context>',
     '',
     '<memory>',
@@ -142,7 +207,7 @@ export function buildCuratorUserPrompt(input: CuratorInput): string {
     // schema 紧贴生成位置再写一遍：这些模型见过太多 patch / shell 风格的结构，
     // 只在 system prompt 里说一次，落到最后一步还是会走样。
     '请严格按这个结构输出，不要用其它字段名（不要 op / path / value / target / store）：',
-    '{"operations":[{"scope":"project","action":"add","content":"..."},{"scope":"domain","domain":"<上面列出的领域名>","action":"add","content":"..."}],"notes":""}',
+    '{"operations":[{"scope":"project","repo":"<上面列出的仓库名，可省略>","action":"add","content":"..."},{"scope":"domain","domain":"<上面列出的领域名>","action":"add","content":"..."}],"notes":""}',
     '没有通过三道测试的内容就输出 {"operations":[]}。',
   ].join('\n');
 }
@@ -242,22 +307,29 @@ function normalizeOperation(input: unknown): CuratorOperation | null {
   const content = readText(record.content ?? record.value ?? record.text);
   const oldText = readText(record.old_text ?? record.oldText ?? record.match);
   const domain = readText(record.domain ?? record.area);
+  const repo = readText(record.repo ?? record.repository ?? record.project);
+  const withTarget = <T extends CuratorOperation>(operation: T): T =>
+    scope === 'project' && repo ? { ...operation, repo } : operation;
 
   if (action === 'add') {
     if (!content) return null;
-    return domain && scope === 'domain' ? { scope, domain, action, content } : { scope, action, content };
+    return withTarget(domain && scope === 'domain' ? { scope, domain, action, content } : { scope, action, content });
   }
   if (action === 'patch') {
     if (!content || !oldText) return null;
-    return domain && scope === 'domain'
-      ? { scope, domain, action, old_text: oldText, content }
-      : { scope, action, old_text: oldText, content };
+    return withTarget(
+      domain && scope === 'domain'
+        ? { scope, domain, action, old_text: oldText, content }
+        : { scope, action, old_text: oldText, content },
+    );
   }
   if (action === 'remove') {
     if (!oldText) return null;
-    return domain && scope === 'domain'
-      ? { scope, domain, action, old_text: oldText }
-      : { scope, action, old_text: oldText };
+    return withTarget(
+      domain && scope === 'domain'
+        ? { scope, domain, action, old_text: oldText }
+        : { scope, action, old_text: oldText },
+    );
   }
   return null;
 }

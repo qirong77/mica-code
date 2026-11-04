@@ -9,6 +9,30 @@ import { withPathParams } from '../shared/endpoint-params.js'
 export const BROWSER_SERVICE_APP = 'mica-code-browser'
 export const BROWSER_SERVICE_VERSION = 1
 
+/** 「未知操作」时最多列几个相近的名字：再多就退化成一整份清单。 */
+const MAX_ACTION_SUGGESTIONS = 3
+
+/**
+ * 模型最常写错的那几个同义词。它们的编辑距离与真实 action 名相距太远，算不出来；
+ * 而这类错误占了「未知操作」的绝大多数（`press` / `goto` / `evaluate` 的别名）。
+ */
+const ACTION_ALIASES = {
+  press: 'keys',
+  key: 'keys',
+  keyboard: 'keys',
+  hotkey: 'keys',
+  goto: 'navigate',
+  read: 'content',
+  readcontent: 'content',
+  getcontent: 'content',
+  text: 'content',
+  js: 'evaluate',
+  eval: 'evaluate',
+  execute: 'evaluate',
+  shot: 'screenshot',
+  capture: 'screenshot'
+}
+
 const ownerParam = {
   name: 'x-mica-owner',
   in: 'header',
@@ -168,7 +192,13 @@ const RAW_ENDPOINTS = [
     path: '/browser/tabs/:id/evaluate',
     summary: '在页面主世界执行 JS 并取回结果（读 DOM、取 localStorage 都走它）',
     params: [
-      { name: 'expression', in: 'body', required: true, description: '要执行的表达式，支持 await' },
+      {
+        name: 'expression',
+        in: 'body',
+        required: true,
+        description:
+          '要执行的表达式（必填，字符串），支持 await；如 "document.title"、"document.body.innerText.slice(0, 200)"'
+      },
       { name: 'timeoutMs', in: 'body', required: false, description: '默认 15000' }
     ],
     returns: '{ ok, value }'
@@ -209,8 +239,18 @@ const RAW_ENDPOINTS = [
     summary:
       '输入文本：可先聚焦 selector，可清空，可回车提交；窗口隐藏时临时显示出来走原生输入，输完恢复隐藏',
     params: [
-      { name: 'selector', in: 'body', required: false, description: '先聚焦的元素' },
-      { name: 'text', in: 'body', required: true, description: '要输入的内容' },
+      {
+        name: 'selector',
+        in: 'body',
+        required: false,
+        description: '先聚焦的元素，如 "#username"'
+      },
+      {
+        name: 'text',
+        in: 'body',
+        required: true,
+        description: '要输入的内容（必填，字符串），如 "hello@example.com"'
+      },
       { name: 'clear', in: 'body', required: false, description: '先清空该元素的值' },
       { name: 'submit', in: 'body', required: false, description: '输入后按 Enter' }
     ],
@@ -220,8 +260,16 @@ const RAW_ENDPOINTS = [
     id: 'keys',
     method: 'POST',
     path: '/browser/tabs/:id/keys',
-    summary: '按键：Enter / Tab / Escape / 方向键 / 单字符',
-    params: [{ name: 'keys', in: 'body', required: true, description: '数组，如 ["Enter"]' }],
+    summary: '按键：Enter / Tab / Escape / 方向键 / 单字符（一次按键请用单字符，组合键不支持）',
+    params: [
+      {
+        name: 'keys',
+        in: 'body',
+        required: true,
+        description:
+          '按键数组（必填），每项只能是：具名键 Enter / Tab / Escape / Esc / Backspace / Delete / Space / ArrowUp / ArrowDown / ArrowLeft / ArrowRight / PageUp / PageDown / Home / End，或单个可打印字符（"a" / "1" / "/"）。不要写 "KeyB"、"Meta+Shift+B"、press 这类键盘码或组合键；要发快捷键请改用 evaluate 里 dispatchEvent 一个带 ctrlKey / metaKey 的 KeyboardEvent。例：["Enter"]、["ArrowDown","ArrowDown","Enter"]'
+      }
+    ],
     returns: '{ ok }'
   },
   {
@@ -229,7 +277,14 @@ const RAW_ENDPOINTS = [
     method: 'POST',
     path: '/browser/tabs/:id/scroll',
     summary: '滚动页面（按像素，正数向下）',
-    params: [{ name: 'deltaY', in: 'body', required: true, description: '像素，可为负' }],
+    params: [
+      {
+        name: 'deltaY',
+        in: 'body',
+        required: true,
+        description: '滚动像素（必填，数字），正数向下、负数向上，如 600'
+      }
+    ],
     returns: '{ ok, scrollY }'
   },
   {
@@ -349,7 +404,16 @@ const RAW_ENDPOINTS = [
  * 漏声明时 `evaluate` / `screenshot` / `waitFor` 这些按标签页操作的 action 会打到
  * 字面量 `:id` 上，agent 根本没法用。
  */
-export const BROWSER_ENDPOINTS = withPathParams(RAW_ENDPOINTS, () => '窗口或标签页 id')
+export const BROWSER_ENDPOINTS = withPathParams(RAW_ENDPOINTS, (name, endpoint) => {
+  // 路径参数是「猜参数」的重灾区：模型手上往往只有一个地址，不知道 id 从哪来、长什么样。
+  const windowScoped = String(endpoint.path).startsWith('/browser/browsers/')
+  const kind = windowScoped ? '窗口' : '标签页'
+  const source = windowScoped
+    ? 'listBrowsers → browsers[].id'
+    : 'listTabs → tabs[].id 或 createTab 的返回'
+  const sample = windowScoped ? 'brw-1' : 'tab-1'
+  return `${name} 是${kind} id（取自 ${source}，形如 "${sample}"），不是选择器、标题或地址`
+})
 
 const byId = new Map(BROWSER_ENDPOINTS.map((endpoint) => [endpoint.id, endpoint]))
 
@@ -375,13 +439,74 @@ function paramLabel(param) {
  * 详细文档仍然由 `buildDocsMarkdown` 生成（`/browser/docs` 与设置页用）。
  */
 export const BROWSER_GUIDE = [
+  '第一次用某个动作前，先不带 action 调用 control：返回的 actions[] 里每个动作都带 params（name / 类型 / 是否必填 / 示例值），一次就能看全，比猜参数名快。',
   '先 listBrowsers 看有没有窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。',
+  'action 名必须与 actions[].action 完全一致（区分大小写），不要自己起同义词：按键是 keys（不是 press / key / keyboard），点击是 click，读页面是 content 或 evaluate。按标签页/窗口的动作都要带 id：标签页 id 形如 "tab-1"、窗口 id 形如 "brw-1"，取自 listTabs / listBrowsers / createTab 的返回。',
+  '缺必填参数会被直接回绝：evaluate 要 expression、type 要 text、keys 要 keys、scroll 要 deltaY，其余看 actions[].params 里的 required。',
+  'keys 只接受单个键：Enter / Tab / Escape / Esc / Backspace / Delete / Space / ArrowUp / ArrowDown / ArrowLeft / ArrowRight / PageUp / PageDown / Home / End，或单个可打印字符（"a"、"1"、"/"）。组合键（Cmd / Ctrl / Shift / Alt）不支持，也不要写 KeyB 这类键盘码：要按 Ctrl+S 这种快捷键，改用 evaluate 在页面里 dispatchEvent(new KeyboardEvent("keydown", { key: "s", code: "KeyS", ctrlKey: true, bubbles: true }))，或者直接点页面上那个按钮。',
   '等页面别 sleep：用 waitFor（不给条件 = 等加载完成，也可等元素/文本/地址）。',
   '读页面优先 content / evaluate；不要 hook fetch —— 要核对请求参数看 network 记录里的 body 与 headers。',
   '截图超时（页面忙、长任务）先重试；仍失败就改用 evaluate 读 DOM / content 校验收敛。',
   'evaluate 里的复杂逻辑写成 (async () => { … })()，它会等待 Promise。',
   '用户关窗口只是隐藏（页面状态保留）；hideBrowser 同理，closeBrowser 才真正销毁。'
 ].join('\n')
+
+/**
+ * 「未知操作」时给最接近的合法 action 名。
+ *
+ * 端点有 20 多条，模型凭印象写 `press` / `readContent` / `goto` 时，只回一句可用清单等于让它
+ * 在 20 个名字里再猜一次；给出编辑距离最近的几个，通常一眼就能认出该用哪个。
+ * 纯字符串计算，不做 IO，也不猜语义。
+ */
+export function suggestActionIds(input, ids = BROWSER_ENDPOINTS.map((endpoint) => endpoint.id)) {
+  const target = normalizeActionName(input)
+  if (!target) return []
+  const byNormalized = new Map(ids.map((id) => [normalizeActionName(id), id]))
+
+  // 大小写/连字符写错（`listbrowsers`、`list-tabs`）先按归一化名认回来
+  const exact = byNormalized.get(target)
+  if (exact) return [exact]
+
+  // 同义词：`press` 与 `keys` 的编辑距离太远，只能靠这张小表
+  const alias = ACTION_ALIASES[target]
+  if (alias && byNormalized.has(normalizeActionName(alias))) {
+    return [byNormalized.get(normalizeActionName(alias))]
+  }
+
+  const scored = []
+  for (const id of ids) {
+    const candidate = id.toLowerCase()
+    const distance = editDistance(target, candidate)
+    const prefix = candidate.startsWith(target) || target.startsWith(candidate)
+    // 只有「差一两个字母」才算相近：阈值放宽到 1/3 长度会让 `nope` 命中 `type`
+    const limit = Math.max(1, Math.floor(candidate.length / 3))
+    if (!prefix && distance > limit) continue
+    scored.push({ id, score: prefix ? Math.min(distance, 1) : distance })
+  }
+  scored.sort((a, b) => a.score - b.score || a.id.localeCompare(b.id))
+  return scored.slice(0, MAX_ACTION_SUGGESTIONS).map((item) => item.id)
+}
+
+function normalizeActionName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function editDistance(left, right) {
+  if (left === right) return 0
+  let previous = [...Array(right.length + 1).keys()]
+  for (let i = 1; i <= left.length; i++) {
+    const current = [i]
+    for (let j = 1; j <= right.length; j++) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost)
+    }
+    previous = current
+  }
+  return previous[right.length]
+}
 
 export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
   const lines = [
@@ -393,6 +518,12 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     `服务地址：\`${serviceUrl}\``,
     '',
     '请求头带 `x-mica-owner: $MICA_BROWSER_OWNER` 会把新建窗口归属到当前会话（不带则显示为「未归属」）。',
+    '',
+    '## 通过 MCP 的 control 工具调用',
+    '',
+    '`control({ action: "evaluate", params: { id: "tab-1", expression: "document.title" } })` ——',
+    '`action` 就是下面每个端点的 id（区分大小写），`params` 的键名与端点参数同名。',
+    '不带 `action` 调用一次会返回全部动作与参数说明（含必填标记），不知道参数时先这么读一遍。',
     '',
     '## 使用提示（踩过的坑）',
     '',
@@ -407,6 +538,13 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     lines.push(`### ${endpoint.method} ${endpoint.path}`)
     lines.push('')
     lines.push(endpoint.summary)
+    const required = (endpoint.params || [])
+      .filter((param) => param.required)
+      .map((param) => param.name)
+    if (required.length > 0) {
+      lines.push('')
+      lines.push(`必填参数：${required.join('、')}`)
+    }
     if (endpoint.params?.length) {
       lines.push('')
       for (const param of endpoint.params)

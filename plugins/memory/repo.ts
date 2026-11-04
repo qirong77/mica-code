@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /**
@@ -21,6 +22,11 @@ export type RepoIdentity = {
   key: string;
   /** 给人看的名字。 */
   name: string;
+  /**
+   * 本地目录名。同一个仓库的两个 clone 目录名可能不同，所以仓库名取远端；
+   * 但用户脑子里记的往往是目录名（`sass` 而不是 `zuche-ui-service`），两个都给人看。
+   */
+  dirName?: string;
   /** 归一化后的 origin 地址；没有远端时为 null。 */
   remote: string | null;
   /**
@@ -32,6 +38,12 @@ export type RepoIdentity = {
 
 /** 进程内缓存：同一个目录在一次会话里被问很多次（注入、工具、整理器）。 */
 const cache = new Map<string, RepoIdentity | null>();
+
+/**
+ * 缓存上界。观察器会把每一次工具调用里的路径都问一遍，长会话里可能是几千个不同文件；
+ * 到界就整份丢掉重算——一次十几毫秒的读取，比一个只涨不落的 Map 便宜。
+ */
+const MAX_CACHE_ENTRIES = 4000;
 
 export function clearRepoIdentityCache(): void {
   cache.clear();
@@ -45,8 +57,47 @@ export function resolveRepoIdentity(cwd: string | null | undefined): RepoIdentit
   const cached = cache.get(start);
   if (cached !== undefined) return cached;
   const resolved = detect(start);
+  if (cache.size >= MAX_CACHE_ENTRIES) cache.clear();
   cache.set(start, resolved);
   return resolved;
+}
+
+/**
+ * 按某个**路径**认仓库，路径本身可以还不存在。
+ *
+ * 工具调用里的路径大量指向尚未创建的文件（`write_file` 写新文件、`apply_patch` 新增文件），
+ * 而「这次任务改了哪个仓库」正是靠这些路径判断的。`realpathSync` 对不存在的路径会失败，
+ * 因此这里向上找到第一个存在的祖先再认——写 `/repo/src/new.ts` 仍然算 `/repo`。
+ */
+export function resolvePathRepoIdentity(path: string | null | undefined): RepoIdentity | null {
+  const trimmed = typeof path === 'string' ? path.trim() : '';
+  if (!trimmed) return null;
+  const absolute = resolve(expandHome(trimmed));
+  const cached = cache.get(absolute);
+  if (cached !== undefined) return cached;
+
+  let current = absolute;
+  for (let depth = 0; depth < 8; depth += 1) {
+    const real = safeRealpath(current);
+    if (real) {
+      const resolved = detect(real);
+      if (cache.size >= MAX_CACHE_ENTRIES) cache.clear();
+      cache.set(absolute, resolved);
+      return resolved;
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  if (cache.size >= MAX_CACHE_ENTRIES) cache.clear();
+  cache.set(absolute, null);
+  return null;
+}
+
+export function expandHome(path: string): string {
+  if (path === '~') return homedir();
+  if (path.startsWith('~/')) return join(homedir(), path.slice(2));
+  return path;
 }
 
 function detect(start: string): RepoIdentity | null {
@@ -71,6 +122,7 @@ function detect(start: string): RepoIdentity | null {
     root,
     key,
     name,
+    dirName: basename(root) || name,
     remote,
     source: 'git',
   };
@@ -104,6 +156,7 @@ function detectLooseProject(start: string): RepoIdentity | null {
     root: start,
     key: start,
     name,
+    dirName: basename(start) || name,
     remote: null,
     source: 'dir',
   };

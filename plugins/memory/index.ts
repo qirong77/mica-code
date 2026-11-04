@@ -3,10 +3,12 @@ import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { Disposable } from '@packages/mica-common/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { pluginLogPath } from '@packages/mica-plugin/index.js';
+import type { AgentObservationEvent } from '@packages/mica-plugin/AgentObservation.js';
 import {
   CURATOR_SYSTEM_PROMPT,
   applyCuratorOperations,
   buildCuratorUserPrompt,
+  createCuratorScopeResolver,
   parseCuratorNotes,
   parseCuratorOutput,
   type CuratorConversationMessage,
@@ -17,7 +19,9 @@ import { requestCuratorCompletion } from './providers.js';
 import { MemorySnapshotCache, formatMemorySection } from './section.js';
 import { curatorReady, describeCurator, settingsFromValues, type MemorySettings } from './settings.js';
 import { MEMORY_DIR_NAME, MemoryRepository } from './store.js';
-import { contextScopes, resolveMemoryContext, scopeKey, type MemoryContext, type MemoryScope } from './scope.js';
+import { contextScopes, resolveMemoryContext, scopeKey, type MemoryContext } from './scope.js';
+import { TouchedRepoIndex, injectionRepos } from './activity.js';
+import { resolveRepoIdentity } from './repo.js';
 import { registerMemoryCommand, type MemoryReviewOutcome } from './commands.js';
 
 /**
@@ -62,18 +66,25 @@ export default function setupMemory(ctx: PluginContext): void {
    * 仓库身份在 `repo.ts` 里有进程内缓存，这里不做第二层。
    */
   const contextFor = (owner?: unknown): MemoryContext => {
-    const cwd = ctx.session?.describe(owner)?.cwd ?? null;
-    return resolveMemoryContext(repository.root, cwd);
+    const described = ctx.session?.describe(owner);
+    const cwd = described?.cwd ?? null;
+    const key = described?.id ?? 'no-session';
+    return resolveMemoryContext(repository.root, cwd, injectionRepos(touched.list(key), resolveRepoIdentity(cwd)));
   };
 
   const snapshots = new MemorySnapshotCache();
+  const touched = new TouchedRepoIndex();
   const sessionKey = () => ctx.session?.describe()?.id ?? 'no-session';
   /**
    * 缓存签名：作用域变了才重读。只按会话缓存会在 `/cd` 之后继续注入上一个仓库的记忆；
    * 每轮都重读则会让记忆段落每轮抖动，打掉它前面所有内容的 prompt cache。
    */
   const signatureOf = (context: MemoryContext) =>
-    [context.repo?.slug ?? 'no-repo', ...context.domains.map((domain) => domain.name).sort()].join('|');
+    [
+      context.repo?.slug ?? 'no-repo',
+      ...context.taskRepos.map((repo) => repo.slug).sort(),
+      ...context.domains.map((domain) => domain.name).sort(),
+    ].join('|');
 
   // primaryAgentOnly：记忆属于这条会话/用户，子代理写它会让归属变模糊
   // （临时发现未必长期成立），与 session-notes 同一取舍。
@@ -99,6 +110,7 @@ export default function setupMemory(ctx: PluginContext): void {
     disposed = true;
     active?.abort();
     tool?.dispose();
+    touched.clear(sessionKey());
   });
 
   // order 900：记忆内容在会话内是冻结的，但仍然排在会话笔记（1000）之前，让最容易
@@ -212,7 +224,7 @@ export default function setupMemory(ctx: PluginContext): void {
         return { ok: false, message: `记忆整理失败：${requested.error}` };
       }
 
-      const outcome = applyCuratorOperations(repository, scopeResolver(source), requested.operations);
+      const outcome = applyCuratorOperations(repository, createCuratorScopeResolver(source), requested.operations);
       const error = outcome.failures.map((failure) => `${failure.scope}: ${failure.message}`).join('；');
       repository.writeState({
         lastRunAt: new Date().toISOString(),
@@ -282,6 +294,26 @@ export default function setupMemory(ctx: PluginContext): void {
     { pluginId: PLUGIN_ID },
   );
   ctx.onDispose(() => hook.dispose());
+
+  /**
+   * 「本次任务的目标仓库」靠工具调用认，而不是靠会话开窗的那条路径。
+   *
+   * 在 `mis` 里开会话去改 `sass`、在 `mica-code` 里改 `spring-cli` 都是真实用法；
+   * 只按 cwd 归项目记忆，这些会话写下的东西会落进一个谁也不读的文件里。
+   * 观察本身不落盘、不发请求，`agent:observe` 保证观察失败不会影响任务。
+   */
+  const observeHook = ctx.hooks.on<AgentObservationEvent>(
+    'agent:observe',
+    (event) => {
+      if (disposed || event.type !== 'tool:call') return;
+      if (!event.name || typeof event.args !== 'string') return;
+      const sessionId = ctx.session?.describe(event.owner)?.id;
+      if (!sessionId) return;
+      touched.observe(sessionId, event.name, event.args);
+    },
+    { pluginId: PLUGIN_ID },
+  );
+  ctx.onDispose(() => observeHook.dispose());
 
   const command = registerMemoryCommand(ctx, {
     repository,
@@ -412,39 +444,6 @@ async function runCuratorPrompt(
   return settle(result.output);
 }
 
-/**
- * 把整理器的 `project|domain` 落到具体作用域。
- *
- * 严格：领域必须已存在且覆盖当前目录。整理器不能凭空建领域，否则「领域」会退化成
- * 换了名字的全局记忆——那正是这次重写要解决的问题。
- */
-function scopeResolver(context: MemoryContext) {
-  return (operation: CuratorOperation): { ok: true; scope: MemoryScope } | { ok: false; error: string } => {
-    if (operation.scope === 'profile') {
-      return { ok: false, error: '自动整理不写用户档案（profile 只由用户在对话里明确要求时写入）' };
-    }
-    if (operation.scope === 'project') {
-      if (!context.project) return { ok: false, error: '当前目录不在任何仓库里，无法写项目记忆' };
-      return { ok: true, scope: context.project };
-    }
-    const name = operation.domain?.trim();
-    if (!name) {
-      return {
-        ok: false,
-        error: `domain 类操作缺少 domain 字段；可用：${context.domains.map((domain) => domain.name).join(', ') || '（无）'}`,
-      };
-    }
-    const domain = context.domains.find((candidate) => candidate.name === name);
-    if (!domain) {
-      return {
-        ok: false,
-        error: `领域「${name}」不存在或不覆盖当前目录；可用：${context.domains.map((candidate) => candidate.name).join(', ') || '（无）'}`,
-      };
-    }
-    return { ok: true, scope: { kind: 'domain', domain } };
-  };
-}
-
 function describeContext(context: MemoryContext): string {
   const lines: string[] = [];
   lines.push(
@@ -452,6 +451,11 @@ function describeContext(context: MemoryContext): string {
       ? `当前仓库：${context.repo.name}（${context.repo.remote ?? context.repo.root}）`
       : '当前目录不在任何 git 仓库里：只能写入已定义的领域，或什么都不写',
   );
+  if (context.taskRepos.length > 0) {
+    lines.push(
+      `本次任务实际改的仓库：${context.taskRepos.map((repo) => repo.name).join(', ')}（会话开在别处，事实属于这些仓库时写它们）`,
+    );
+  }
   lines.push(context.cwd ? `工作目录：${context.cwd}` : '工作目录：未知');
   if (context.domains.length > 0) {
     lines.push(`命中当前目录的领域：${context.domains.map((domain) => domain.name).join(', ')}`);

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -33,10 +33,20 @@ const other: DomainDefinition = {
 
 const PROJECT = { kind: 'project', repo } as const satisfies MemoryScope;
 
+function makeRepo(name: string): string {
+  const dir = mkdtempSync(join(tmpdir(), `mica-memory-tool-${name}-`));
+  tempDirs.push(dir);
+  mkdirSync(join(dir, '.git'), { recursive: true });
+  writeFileSync(join(dir, '.git', 'config'), `[remote "origin"]\n  url = git@git.example.com:team/${name}.git\n`);
+  return dir;
+}
+
 function context(overrides: Partial<MemoryContext> = {}): MemoryContext {
   return {
     cwd: '/repo/mica-code/apps/desktop',
     repo,
+    taskRepos: [],
+    repos: [repo],
     project: PROJECT,
     domains: [],
     knownDomains: [],
@@ -74,9 +84,42 @@ describe('parseMemoryToolInput', () => {
 
     expect(parsed.ok).toBe(false);
     if (!parsed.ok) {
+      expect(parsed.message).toContain('`repo`');
       expect(parsed.message).toContain('scope=profile');
       expect(parsed.message).toContain('scope=domain');
     }
+  });
+
+  it('writes to an explicitly named repository instead of the session one', () => {
+    const sass = makeRepo('sass');
+    const parsed = parseMemoryToolInput(
+      { repo: sass, operations: [{ action: 'add', content: '灰度配置在 config/gray.json' }] },
+      context(),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.scope.kind).toBe('project');
+    if (parsed.scope.kind !== 'project') return;
+    expect(parsed.scope.repo.name).toBe('sass');
+    // 仓库根是 realpath（macOS 上 /var 会解析成 /private/var）
+    expect(parsed.scope.repo.root).toBe(realpathSync(sass));
+    expect(parsed.scope.note).toBe('本次任务目标');
+  });
+
+  it('accepts a path inside the target repository that does not exist yet', () => {
+    const sass = makeRepo('sass');
+    const parsed = parseMemoryToolInput({ repo: join(sass, 'src/not-yet.ts') }, context());
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok && parsed.scope.kind === 'project') expect(parsed.scope.repo.name).toBe('sass');
+  });
+
+  it('rejects a repo path that is not inside any repository', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'mica-memory-bare-'));
+    tempDirs.push(bare);
+    const parsed = parseMemoryToolInput({ repo: bare }, context());
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.message).toContain('not inside a recognizable repository');
   });
 
   it('requires a name for domain and lists the available ones', () => {

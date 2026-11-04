@@ -18,6 +18,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { suggestActionIds } from '../main/browser/browser-docs.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { openSocketRequest } from './control-client.js'
 
@@ -335,9 +336,12 @@ export function createControlMcpHandler({
       callAction: async (action, params, options) => {
         const endpoint = options.catalog.byId.get(action)
         if (!endpoint) {
+          const ids = [...options.catalog.byId.keys()]
+          const closest = suggestActionIds(action, ids)
           throw new Error(
-            `未知操作 ${action}；可用操作：${[...options.catalog.byId.keys()].join('、')}。` +
-              '不带 action 调用可看完整文档。'
+            `未知操作 ${action}；` +
+              (closest.length > 0 ? `最接近的合法操作：${closest.join('、')}。` : '') +
+              `可用操作：${ids.join('、')}。不带 action 调用可看完整文档。`
           )
         }
         const request = buildActionRequest(endpoint, params, options)

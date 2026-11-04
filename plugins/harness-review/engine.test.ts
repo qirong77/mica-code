@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
@@ -6,7 +7,15 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test, type TestContext } from 'vitest';
 import type { AgentObservationEvent } from '@packages/mica-plugin/index.js';
-import { HarnessRecorder, type CaptureOptions, type RunSummary } from './engine.js';
+import {
+  HarnessRecorder,
+  expectedExit,
+  similarity,
+  splitPromptSections,
+  terminalProgram,
+  type CaptureOptions,
+  type RunSummary,
+} from './engine.js';
 
 const options: CaptureOptions = { captureContent: true, maxEventChars: 4000, maxEventsPerRun: 2000 };
 const config = { providerId: 'test-provider', protocol: 'openai', model: 'test-model', effort: 'medium', role: 'main' };
@@ -29,7 +38,14 @@ async function fixture(t: TestContext) {
 }
 function runner(
   recorder: HarnessRecorder,
-  settings: { owner?: object; runId?: number; cwd?: string; title?: string; capture?: CaptureOptions } = {},
+  settings: {
+    owner?: object;
+    runId?: number;
+    cwd?: string;
+    title?: string;
+    capture?: CaptureOptions;
+    timestamp?: string;
+  } = {},
 ) {
   const owner = settings.owner ?? {};
   const session = {
@@ -39,7 +55,7 @@ function runner(
   };
   const emit = (event: Input): void =>
     recorder.observe(
-      { owner, runId: settings.runId ?? 1, timestamp: at, ...event } as AgentObservationEvent,
+      { owner, runId: settings.runId ?? 1, timestamp: settings.timestamp ?? at, ...event } as AgentObservationEvent,
       session,
       settings.capture ?? options,
     );
@@ -834,7 +850,7 @@ test('evidence is available only for stored events, including after missing or c
   assert.ok(!markdown.includes(`[Run ${summary.id}, event`));
 });
 
-test('scope filtering precedes the 300-run limit and out-of-scope traces are never inspected', async (t) => {
+test('scope filtering precedes the run limit and out-of-scope traces are never inspected', async (t) => {
   const { recorder, root } = await fixture(t);
   const cwd = resolve('workspace-a');
   const run = runner(recorder, { cwd });
@@ -859,14 +875,20 @@ test('scope filtering precedes the 300-run limit and out-of-scope traces are nev
   assert.equal(report.runs[0].id, initial.id);
   assert.equal(report.scannedRuns, 302);
   assert.deepEqual(report.warnings, []);
-  for (let index = 0; index < 300; index++) await clone(cwd);
+  // The review window must be wide enough for weeks of daily work (real sets reached 493)
+  // and still keep scope filtering ahead of it.
+  for (let index = 0; index < 350; index++) await clone(cwd);
   report = await recorder.review(cwd);
-  assert.equal(report.runs.length, 300);
-  assert.ok(!report.runs.some((item) => item.id === initial.id));
-  assert.ok(
-    report.warnings.some((warning) => warning.includes('300 most recently updated runs in the selected scope')),
+  assert.equal(report.runs.length, 351);
+  // The original run is the least recently updated one, so it sorts last but stays in scope.
+  assert.equal(report.runs.at(-1)?.id, initial.id);
+  assert.equal(report.limits.runs, 2000);
+  assert.ok(!report.warnings.some((warning) => warning.includes('most recently updated runs in the selected scope')));
+  // Every clone has no trace at all; the original run still has one.
+  assert.equal(
+    report.warnings.filter((warning) => warning.includes('missing or unreadable trace')).length,
+    report.runs.length - 1,
   );
-  assert.equal(report.warnings.filter((warning) => warning.includes('missing or unreadable trace')).length, 300);
 }, 20_000);
 
 test('prune removes only old finished runs in scope and keeps active or unreadable ones', async (t) => {
@@ -1144,4 +1166,356 @@ test('tool-specific error causes are classified instead of falling into tool-err
   const final = await recorder.review();
   assert.ok(final.findings.some((finding) => finding.title === 'Tool error in read_file: not-found'));
   run.finish();
+});
+
+test('terminalProgram keeps the program that decides the exit code', () => {
+  const cases: Array<[string, string]> = [
+    ['cd x && rg foo', 'rg'],
+    ['a; b', 'b'],
+    ['rg foo | head', 'head'],
+    ['FOO=1 bun test', 'bun'],
+    ['bun test 2>&1 | tail -25', 'tail'],
+    ['time -p bun run typecheck', 'bun'],
+    ['sudo -E env FOO=1 rg -n foo src', 'rg'],
+    ['./node_modules/.bin/vitest run', 'vitest'],
+    ['rg foo\ngit status', 'git'],
+    ['rg foo || true', 'true'],
+    ['rg "a|b" src', 'rg'],
+    ['rg foo 2>/dev/null', 'rg'],
+    ['cat <<EOF\nrg nope\nEOF', 'cat'],
+    ['rg foo -- -not-a-flag', 'rg'],
+    ["rg 'unterminated", ''],
+    ['   ', ''],
+  ];
+  for (const [command, program] of cases) assert.equal(terminalProgram(command), program, command);
+});
+
+test('expectedExit only accepts the nonzero codes a command documents itself', () => {
+  assert.equal(expectedExit('rg', 1, 'rg -n needle src'), true);
+  // 2 means rg could not search at all: a real failure.
+  assert.equal(expectedExit('rg', 2, 'rg -n needle src'), false);
+  assert.equal(expectedExit('grep', 1, 'grep -q x f'), true);
+  assert.equal(expectedExit('diff', 1, 'diff a b'), true);
+  assert.equal(expectedExit('ls', 1, 'ls missing'), true);
+  assert.equal(expectedExit('test', 1, 'test -f missing'), true);
+  assert.equal(expectedExit('[', 1, '[ -f missing ]'), true);
+  assert.equal(expectedExit('git', 1, 'git diff --quiet'), true);
+  assert.equal(expectedExit('git', 1, 'git diff --exit-code HEAD'), true);
+  assert.equal(expectedExit('git', 1, 'git diff HEAD'), false);
+  assert.equal(expectedExit('bun', 1, 'bun run build'), false);
+  assert.equal(expectedExit('rg', 0, 'rg -n needle src'), false);
+});
+
+test('similarity compares normalised character bigrams', () => {
+  const task = '把压缩服务改成只在空闲时跑，并保证不占用 turn lease';
+  assert.equal(similarity(task, task), 1);
+  assert.equal(similarity(task, `  ${task.toUpperCase()}  `), 1);
+  assert.ok(similarity(task, `${task}，谢谢`) > 0.8);
+  assert.ok(similarity(task, 'Reformat the review report table so the numbers line up') < 0.3);
+  assert.equal(similarity('', task), 0);
+});
+
+test('splitPromptSections labels top-level blocks and ignores malformed markup', () => {
+  assert.deepEqual(splitPromptSections(''), []);
+  assert.deepEqual(
+    splitPromptSections('plain text only').map((section) => section.label),
+    ['text'],
+  );
+  const prompt = [
+    'Preamble text',
+    '\n\n<document source="AGENT.md">\nBase instructions\n</document>',
+    '\n\n<injection source="plugin" plugin="todo" section="plan">\nPlan discipline\n</injection>',
+    '\n\n<role name="需求开发">\nRole body\n</role>',
+    '\n\n<custom attr="1">tail</custom>',
+    '\n\n',
+  ].join('');
+  const sections = splitPromptSections(prompt);
+  assert.deepEqual(
+    sections.map((section) => section.label),
+    ['text', 'document:AGENT.md', 'injection:todo/plan', 'role:需求开发', 'custom'],
+  );
+  const document = '<document source="AGENT.md">\nBase instructions\n</document>';
+  assert.equal(sections[1].sha256, sha(document));
+  assert.equal(sections[1].chars, document.length);
+  // Malformed markup degrades to coarser sections instead of throwing.
+  assert.equal(splitPromptSections('<document source="a">\nunterminated')[0].label, 'document:a');
+  assert.equal(splitPromptSections('<b>x</i>tail')[0].label, 'b');
+  assert.equal(splitPromptSections('<div><div>nested</div></div>').length, 1);
+});
+
+test('nonzero exits a command documents itself are counted apart from real tool errors', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-shell-exits');
+  const run = runner(recorder, { cwd });
+  run.start('shell exit semantics');
+  const cases: Array<[string, string]> = [
+    // No match is how rg reports "nothing found".
+    ['rg -n needle src', '1'],
+    // 2 means rg could not even search.
+    ['rg -n needle src --unknown-flag', '2'],
+    ['test -f missing.txt', '1'],
+    // The pipeline's status is tail's, not bun's.
+    ['bun run build 2>&1 | tail -25', '1'],
+    ['diff a.txt b.txt', '1'],
+  ];
+  for (const [index, [command, code]] of cases.entries()) {
+    const id = `shell-${index}`;
+    run.call(JSON.stringify({ command }), 'run_shell', id);
+    run.result(`[command]\nexit_code: ${code}\n[/command]`, 'run_shell', id);
+  }
+  run.finish();
+  const report = await recorder.review(cwd);
+  const summary = report.runs[0];
+  assert.equal(summary.expectedExits, 3);
+  assert.equal(summary.toolErrors, 2);
+  assert.deepEqual(summary.findings.map((finding) => finding.title).sort(), [
+    'Tool error in run_shell: exit-1',
+    'Tool error in run_shell: exit-2',
+  ]);
+  const events = await trace(summary);
+  const expected = events.filter((event) => event.type === 'tool:result' && event.expectedExit === true);
+  assert.equal(expected.length, 3);
+  assert.ok(expected.every((event) => event.errorCategory === null));
+  // The same verdict has to come back out of the stored trace.
+  assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+  assert.deepEqual((await recorder.review(cwd)).findings, report.findings);
+});
+
+test('a repeated call is reported only while nothing has changed in between', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-repeat');
+  const run = runner(recorder, { cwd });
+  run.start('repetition semantics');
+  const shell = (command: string, stdout: string, id: string): void => {
+    run.call(JSON.stringify({ command }), 'run_shell', id);
+    run.result(`[command]\nexit_code: 0\n[/command]\n[stdout]\n${stdout}\n[/stdout]`, 'run_shell', id);
+  };
+  // Untouched workspace, unchanged output: no progress.
+  for (let index = 0; index < 3; index++) shell('bun run typecheck', 'Type check passed', `idle-${index}`);
+  // Same command, but a different command ran in between (the file was edited): progress.
+  shell('bun run build', 'build ok', 'edit-0');
+  shell('bun run build', 'build ok', 'edit-1');
+  run.call('{"patch":"*** Begin Patch"}', 'apply_patch', 'write-1');
+  run.result('{"success":true}', 'apply_patch', 'write-1');
+  shell('bun run build', 'build ok', 'edit-2');
+  // Repeated probing whose answers keep changing is not a loop either.
+  for (let index = 0; index < 3; index++) shell('curl -s localhost:3000/health', `status ${index}`, `poll-${index}`);
+  run.finish();
+  const report = await recorder.review(cwd);
+  const repeated = report.findings.filter((finding) => finding.kind === 'repeated-call');
+  assert.equal(repeated.length, 1);
+  assert.equal(repeated[0].occurrences, 1);
+  assert.match(repeated[0].evidence[0].detail ?? '', /across 3 calls/);
+  assert.equal(report.runs[0].toolErrors, 0);
+  assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+  assert.deepEqual((await recorder.review(cwd)).findings, report.findings);
+});
+
+test('polling tools and subagent reads never become repeated-call candidates', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder, { runId: 1 });
+  run.start('polling semantics');
+  const polls: Array<[string, string]> = [
+    ['agent', '{"operation":"await","task_id":"t1"}'],
+    ['agent', '{"operation":"join","task_ids":["t1"]}'],
+    ['agent', '{"operation":"read","task_id":"t1"}'],
+    ['agent', '{"operation":"list"}'],
+    ['background_tasks_read', '{"task_id":"t1"}'],
+    ['background_tasks_list', '{}'],
+    ['wait_for', '{"kind":"port","port":3000}'],
+    ['pty_read', '{"id":"p1"}'],
+  ];
+  for (const [index, [name, args]] of polls.entries())
+    for (let repeat = 0; repeat < 4; repeat++) {
+      run.call(args, name, `poll-${index}-${repeat}`);
+      run.result('{"status":"running"}', name, `poll-${index}-${repeat}`);
+    }
+  run.finish();
+  const report = await recorder.review();
+  assert.deepEqual(
+    report.findings.filter((finding) => finding.kind === 'repeated-call'),
+    [],
+  );
+});
+
+test('resolved prompts record which section drifted without storing its text', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const run = runner(recorder, { cwd: resolve('workspace-prompt') });
+  const prompt = [
+    'Preamble',
+    '<document source="AGENT.md">',
+    'project-canary-instructions',
+    '</document>',
+    '<injection source="plugin" plugin="todo" section="plan">',
+    'plan-canary-body',
+    '</injection>',
+  ].join('\n');
+  run.start('prompt sections');
+  run.emit({ type: 'prompt:resolved', prompt });
+  run.finish();
+  const summary = (await recorder.review()).runs[0];
+  const sections = summary.promptSections!;
+  assert.deepEqual(
+    sections.map((section) => section.label),
+    ['text', 'document:AGENT.md', 'injection:todo/plan'],
+  );
+  const document = '<document source="AGENT.md">\nproject-canary-instructions\n</document>';
+  assert.deepEqual(sections[1], { label: 'document:AGENT.md', sha256: sha(document), chars: document.length });
+  // The whole-prompt digest is unchanged, and both the summary and the trace carry sections.
+  assert.deepEqual(summary.promptHashes, [{ sha256: sha(prompt), chars: prompt.length }]);
+  const event = (await trace(summary)).find((item) => item.type === 'prompt:resolved')!;
+  assert.deepEqual(
+    (event.promptSections as Array<{ label: string }>).map((section) => section.label),
+    ['text', 'document:AGENT.md', 'injection:todo/plan'],
+  );
+  const persisted =
+    (await readFile(summary.traceFile, 'utf8')) +
+    (await readFile(join(root, 'runs', summary.id, 'summary.json'), 'utf8'));
+  assert.ok(persisted.includes('document:AGENT.md'));
+  assert.ok(!persisted.includes('project-canary-instructions'));
+  assert.ok(!persisted.includes('plan-canary-body'));
+});
+
+test('a retry of the same task after a failed run is recorded once and replayed identically', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-retry');
+  const task = 'Refactor the compaction service so idle history collapses without touching the turn lease.';
+  const other = 'Teach the review report to print expected exits per run.';
+  const runs: Array<[number, string, 'aborted' | 'completed', string]> = [
+    [1, task, 'aborted', '2026-06-01T10:00:00.000Z'],
+    [2, task, 'completed', '2026-06-01T10:05:00.000Z'],
+    [3, other, 'completed', '2026-06-01T10:10:00.000Z'],
+    // Identical input after a successful run is a rerun, not a rejected answer.
+    [4, other, 'completed', '2026-06-01T10:15:00.000Z'],
+  ];
+  for (const [runId, input, outcome, timestamp] of runs) {
+    const run = runner(recorder, { runId, cwd, timestamp });
+    run.start(input);
+    run.finish(outcome);
+  }
+  const report = await recorder.review(cwd);
+  const retries = report.findings.filter((finding) => finding.kind === 'user-retry');
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0].title, '上次运行未成功后重试了同一任务');
+  assert.equal(retries[0].module, 'session');
+  assert.equal(retries[0].occurrences, 1);
+  assert.match(retries[0].suggestion, /对比两次的运行记录/);
+  assert.match(retries[0].evidence[0].detail ?? '', /aborted/);
+  assert.equal((await recorder.rebuild({ cwd })).rebuilt, 4);
+  assert.deepEqual((await recorder.review(cwd)).findings, report.findings);
+});
+
+test('runs left behind by a dead host are reclaimed while the current process is left alone', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const cwd = resolve('workspace-zombie');
+  const live = runner(recorder, { runId: 1, cwd });
+  live.start('still running in this process');
+  await recorder.flush();
+  const runsDir = join(root, 'runs');
+  const [liveId] = await readdir(runsDir);
+  const liveFile = join(runsDir, liveId, 'summary.json');
+  // A child that has already exited: its pid cannot be alive any more.
+  const deadPid = spawnSync(process.execPath, ['-e', 'process.exit(0)']).pid;
+  assert.ok(deadPid > 0, 'the probe process must report a pid');
+  const template = JSON.parse(await readFile(liveFile, 'utf8')) as RunSummary;
+  const abandoned = async (): Promise<string> => {
+    const id = randomUUID();
+    const directory = join(runsDir, id);
+    await mkdir(directory);
+    await writeFile(
+      join(directory, 'summary.json'),
+      JSON.stringify({ ...template, id, hostPid: deadPid, traceFile: join(directory, 'events.jsonl') }),
+    );
+    return id;
+  };
+  const deadId = await abandoned();
+  assert.equal(await recorder.reclaim(), 1);
+  const reclaimed = JSON.parse(await readFile(join(runsDir, deadId, 'summary.json'), 'utf8')) as RunSummary;
+  assert.equal(reclaimed.outcome, 'interrupted');
+  assert.ok(reclaimed.reclaimedAt);
+  assert.equal((JSON.parse(await readFile(liveFile, 'utf8')) as RunSummary).outcome, 'running');
+  // Already reclaimed: nothing is rewritten twice.
+  assert.equal(await recorder.reclaim(), 0);
+  // A review reclaims on its own and says how many unfinished runs it closed.
+  const second = await abandoned();
+  const report = await recorder.review(cwd);
+  assert.ok(report.warnings.some((warning) => warning.includes('已回收 1 个宿主已退出的未完成运行')));
+  assert.equal(report.runs.length, 3);
+  assert.equal(report.runs.find((run) => run.id === deadId)?.outcome, 'interrupted');
+  assert.equal(report.runs.find((run) => run.id === second)?.outcome, 'interrupted');
+  assert.equal(report.runs.find((run) => run.id === liveId)?.outcome, 'running');
+});
+
+// 早期记录没有 hostPid：不能用 pid 判断，但也不能让它们永远挂在 running 上。
+test('reclaims a legacy running run once it stops being written, and leaves fresh ones alone', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const cwd = resolve('workspace-legacy');
+  const live = runner(recorder, { runId: 1, cwd });
+  live.start('legacy run');
+  await recorder.flush();
+  const runsDir = join(root, 'runs');
+  const [liveId] = await readdir(runsDir);
+  const liveFile = join(runsDir, liveId, 'summary.json');
+  const template = JSON.parse(await readFile(liveFile, 'utf8')) as RunSummary;
+  const legacy = async (ageMs: number): Promise<string> => {
+    const id = randomUUID();
+    const directory = join(runsDir, id);
+    await mkdir(directory);
+    const { hostPid: _hostPid, ...rest } = template;
+    const file = join(directory, 'summary.json');
+    await writeFile(file, JSON.stringify({ ...rest, id, traceFile: join(directory, 'events.jsonl') }));
+    const stamp = new Date(Date.now() - ageMs);
+    await utimes(file, stamp, stamp);
+    return id;
+  };
+  const stale = await legacy(7 * 60 * 60 * 1000);
+  const fresh = await legacy(60 * 1000);
+  assert.equal(await recorder.reclaim(), 1);
+  assert.equal(
+    (JSON.parse(await readFile(join(runsDir, stale, 'summary.json'), 'utf8')) as RunSummary).outcome,
+    'interrupted',
+  );
+  assert.equal(
+    (JSON.parse(await readFile(join(runsDir, fresh, 'summary.json'), 'utf8')) as RunSummary).outcome,
+    'running',
+  );
+  assert.equal((JSON.parse(await readFile(liveFile, 'utf8')) as RunSummary).outcome, 'running');
+});
+
+test('summaries recorded before expected exits existed still load with a zero count', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const run = runner(recorder, { cwd: resolve('workspace-legacy') });
+  run.start('legacy summary');
+  run.finish();
+  const summary = (await recorder.review()).runs[0];
+  const { expectedExits: _expected, ...legacy } = summary;
+  await writeFile(join(root, 'runs', summary.id, 'summary.json'), JSON.stringify(legacy));
+  const report = await recorder.review();
+  assert.equal(report.runs.length, 1);
+  assert.equal(report.runs[0].expectedExits, 0);
+});
+
+test('summaries record the host shape, capturing pid and update time', async (t) => {
+  const temporary = await mkdtemp(join(tmpdir(), 'mica-harness-host-'));
+  const root = join(temporary, 'capture');
+  const recorder = new HarnessRecorder(root, () => {}, { mode: 'session', host: 'desktop' });
+  t.onTestFinished(async () => {
+    await recorder.dispose();
+    await rm(temporary, { recursive: true, force: true });
+  });
+  const run = runner(recorder, { cwd: resolve('workspace-host') });
+  run.start('host metadata');
+  await recorder.flush();
+  const summary = (await recorder.review()).runs[0];
+  assert.equal(summary.mode, 'session');
+  assert.equal(summary.host, 'desktop');
+  assert.equal(summary.hostPid, process.pid);
+  assert.ok(summary.updatedAt && Number.isFinite(Date.parse(summary.updatedAt)));
+  // Without host context the fields are simply absent instead of being written as undefined.
+  const plain = await fixture(t);
+  const bare = runner(plain.recorder, { cwd: resolve('workspace-host') });
+  bare.start('host metadata');
+  const bareSummary = (await plain.recorder.review()).runs[0];
+  assert.equal('mode' in bareSummary, false);
+  assert.equal('host' in bareSummary, false);
 });

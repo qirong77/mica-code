@@ -236,6 +236,26 @@ describe('keyDescriptors', () => {
     expect(() => keyDescriptors(['F13'])).toThrow('不支持的按键：F13')
     expect(() => keyDescriptors([])).toThrow('keys 需要一个非空数组')
   })
+
+  // 真实失败样例：模型按 Playwright 的印象写 `Meta+Shift+KeyB`，报错只回一句「不支持」
+  // 它就会换个写法再猜一次。这里锁住的是报错里的取值清单与正确写法。
+  it('teaches the accepted key names and the compact modifier spelling', () => {
+    let message = ''
+    try {
+      keyDescriptors(['Meta+Shift+KeyB'])
+    } catch (error) {
+      message = error.message
+    }
+
+    expect(message).toContain('不支持的按键：Meta+Shift+KeyB')
+    expect(message).toContain('Enter')
+    expect(message).toContain('ArrowUp')
+    expect(message).toContain('单个可打印字符')
+    expect(message).toContain('"Meta+Shift+B"')
+    expect(message).toContain('"Meta+Shift+KeyB"')
+    expect(message).toContain('dispatchEvent')
+    expect(message).toContain('不带 action')
+  })
 })
 
 describe('BrowserRequestError', () => {

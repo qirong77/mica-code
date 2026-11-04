@@ -3,7 +3,8 @@ import {
   BROWSER_GUIDE,
   BROWSER_ENDPOINTS,
   buildDocsMarkdown,
-  capabilityCatalog
+  capabilityCatalog,
+  suggestActionIds
 } from './browser-docs.js'
 
 describe('BROWSER_ENDPOINTS', () => {
@@ -56,6 +57,13 @@ describe('buildDocsMarkdown', () => {
     expect(markdown).toContain('受控浏览器')
     expect(markdown).toContain('只是隐藏')
   })
+
+  // 文档要「一次说清」：每个动作的必填参数、以及 control 工具里怎么传
+  it('names the required params of each action and the control call shape', () => {
+    expect(markdown).toContain('必填参数：id、expression')
+    expect(markdown).toContain('control({ action: "evaluate"')
+    expect(markdown).toContain('不带 `action` 调用')
+  })
 })
 
 describe('BROWSER_GUIDE', () => {
@@ -66,5 +74,38 @@ describe('BROWSER_GUIDE', () => {
     for (const endpoint of BROWSER_ENDPOINTS) {
       expect(BROWSER_GUIDE).not.toContain(endpoint.path)
     }
+  })
+
+  // 高频误用：action 名靠猜（`press`）、按键写键盘码（`Meta+Shift+KeyB`）、漏必填参数。
+  // 文档侧只能提前说清，所以这几件事必须在 guide 里。
+  it('spells out the action-name, key-syntax and required-param rules', () => {
+    expect(BROWSER_GUIDE).toContain('不带 action')
+    expect(BROWSER_GUIDE).toContain('按键是 keys')
+    expect(BROWSER_GUIDE).toContain('KeyB')
+    expect(BROWSER_GUIDE).toContain('evaluate 要 expression')
+    expect(BROWSER_GUIDE).toContain('scroll 要 deltaY')
+  })
+})
+
+describe('suggestActionIds', () => {
+  const ids = BROWSER_ENDPOINTS.map((endpoint) => endpoint.id)
+
+  it('maps the synonyms models actually type onto the legal action', () => {
+    expect(suggestActionIds('press', ids)).toEqual(['keys'])
+    expect(suggestActionIds('keyboard', ids)).toEqual(['keys'])
+    expect(suggestActionIds('goto', ids)).toEqual(['navigate'])
+    expect(suggestActionIds('readContent', ids)).toEqual(['content'])
+    expect(suggestActionIds('eval', ids)).toEqual(['evaluate'])
+  })
+
+  it('repairs case and separator drift, and suggests by edit distance', () => {
+    expect(suggestActionIds('listbrowsers', ids)).toEqual(['listBrowsers'])
+    expect(suggestActionIds('list-tabs', ids)).toEqual(['listTabs'])
+    expect(suggestActionIds('evaluat', ids)).toEqual(['evaluate'])
+  })
+
+  it('stays quiet when nothing is close instead of dumping the whole catalog', () => {
+    expect(suggestActionIds('nope', ids)).toEqual([])
+    expect(suggestActionIds('', ids)).toEqual([])
   })
 })

@@ -688,7 +688,9 @@ ctx.desktop.sessionMenu({
 
 ## 日志
 
-需要观察运行的插件可以订阅只读 `agent:observe` hook（类型 `AgentObservationEvent`）：宿主提供 owner/runId、运行开始与终态、实际请求边界与工具定义、最终 prompt、工具调用与结果、用量、重试和历史改写。通过 `HookRegistry.notify()` 派发：按顺序调用但不等待异步 handler；失败或挂起不阻塞任务，观察插件自己维护 IO 队列并在 dispose 时 flush。观察者不得修改事件中的运行输入。它覆盖 `AgentRuntime.run`，直接创建的 helper 模型客户端目前不在完整观察范围内。官方 [Harness Review](harness-review/README.md) 用这个接口异步记录并生成复盘报告。
+需要观察运行的插件可以订阅只读 `agent:observe` hook（类型 `AgentObservationEvent`）：宿主提供 owner/runId、运行开始与终态、实际请求边界与工具定义、最终 prompt、工具调用与结果、用量、重试和历史改写。通过 `HookRegistry.notify()` 派发：按顺序调用但不等待异步 handler；失败或挂起不阻塞任务，观察插件自己维护 IO 队列并在 dispose 时 flush。观察者不得修改事件中的运行输入。它覆盖 `AgentRuntime.run`，直接创建的 helper 模型客户端目前不在完整观察范围内。官方 [Harness Review](harness-review/README.md) 用这个接口异步记录并生成复盘报告；它的运行状态与「待复盘」提示点走清单 `status` / `attention`，「打开复盘」是一个清单 `actions` 里的动作（回 `newSession`，只把提示词放进输入框）。
+
+观察类插件最该防的是**误报**：把工具的语义化退出码当失败、把轮询当重复调用，会让用户去修一个不存在的 bug。判定规则要写成可测的纯函数，并让实时采集与 `rebuild` 重放共用同一份逻辑，否则改一次分类就得靠人工对账。
 
 插件拿到的 `ctx.logger` 自带文件输出，和运行时日志同一个目录（`resolveLogDir()`，macOS 是
 `~/Library/Logs/mica`）。不放系统 temp：temp 每次登录被清空，重启后就查不到上一次运行了：

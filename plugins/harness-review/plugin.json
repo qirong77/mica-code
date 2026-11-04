@@ -9,7 +9,21 @@
   "assets": ["README.md"],
   "priority": 30,
   "mica": { "apiVersion": 1 },
-  "requires": ["hooks", "session", "commands", "tools", "settings", "ui"],
+  "requires": ["hooks", "session", "commands", "tools", "settings", "ui", "actions"],
+  "actions": [
+    {
+      "key": "open-review",
+      "label": "打开复盘",
+      "description": "在新会话里打开当前工作区的复盘，提示词只放进输入框、不自动发送",
+      "tone": "primary"
+    }
+  ],
+  "status": [
+    { "key": "runs", "label": "已记录运行", "type": "text" },
+    { "key": "openFindings", "label": "待复盘问题", "type": "text" },
+    { "key": "lastRun", "label": "最近运行", "type": "text" },
+    { "key": "rebuilt", "label": "上次重算", "type": "text" }
+  ],
   "settings": [
     { "key": "enabled", "label": "自动记录运行", "type": "switch", "default": "true" },
     { "key": "captureContent", "label": "记录任务与工具内容（脱敏、截断）", "type": "switch", "default": "true" },

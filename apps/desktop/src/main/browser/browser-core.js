@@ -332,8 +332,27 @@ export function keyDescriptors(input) {
       const code = name.toUpperCase()
       return { key: name, code: /[A-Za-z]/.test(name) ? `Key${code}` : '', text: name }
     }
-    throw new Error(`不支持的按键：${name}`)
+    throw new Error(unsupportedKeyMessage(name))
   })
+}
+
+/**
+ * 按键报错是最容易被模型「猜第二次」的地方：它凭 Playwright / puppeteer 的印象写
+ * `Meta+Shift+KeyB` 这类键盘码，而这里只认具名键与单字符。所以报错要把合法取值、
+ * 正确写法（`Meta+Shift+B`，不是 `Meta+Shift+KeyB`）和替代做法一次说清。
+ */
+function unsupportedKeyMessage(name) {
+  const named = Object.keys(NAMED_KEYS)
+    .filter((key) => key !== 'esc')
+    .map((key) => NAMED_KEYS[key].key.trim() || 'Space')
+  const accepted = [...new Set(named)]
+  return [
+    `不支持的按键：${name}`,
+    `keys 每项只能是具名键（${accepted.join(' / ')}，大小写不敏感）或单个可打印字符（"a" / "1" / "/"）。`,
+    '不要把键盘码当键名：要发 Meta+Shift+B 这种组合键时，紧凑写法是 "Meta+Shift+B"，不是 "Meta+Shift+KeyB" —— 但本实现不映射修饰键，组合键一律不生效。',
+    '需要快捷键时改用 evaluate 在页面里 dispatchEvent(new KeyboardEvent("keydown", { key: "b", code: "KeyB", metaKey: true, shiftKey: true, bubbles: true }))，或者直接点页面上那个按钮。',
+    '有效取值来源：不带 action 调用 control，读 keys 这条操作的 params 说明。'
+  ].join('\n')
 }
 
 export function truncateOutput(value, max = 200000) {

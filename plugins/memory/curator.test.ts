@@ -4,6 +4,7 @@ import {
   MAX_CONVERSATION_CHARS,
   applyCuratorOperations,
   buildCuratorUserPrompt,
+  createCuratorScopeResolver,
   formatConversation,
   parseCuratorNotes,
   parseCuratorOutput,
@@ -104,7 +105,28 @@ describe('buildCuratorUserPrompt', () => {
   it('repeats the schema next to the generation point', () => {
     const prompt = buildCuratorUserPrompt({ snapshots: [], context: 'x', messages: [] });
     expect(prompt).toContain('不要 op / path / value / target / store');
-    expect(prompt).toContain('{"operations":[{"scope":"project","action":"add","content":"..."}');
+    expect(prompt).toContain('{"operations":[{"scope":"project","repo":"<上面列出的仓库名，可省略>","action":"add"');
+  });
+
+  it('tells the curator which repositories the session is working in', () => {
+    const sassScope: MemoryScope = {
+      kind: 'project',
+      repo: { ...repo, name: 'sass', slug: 'sass-11111111', root: '/repo/sass' },
+      note: '本次任务目标',
+    };
+    const prompt = buildCuratorUserPrompt({
+      snapshots: [snapshot(projectScope), snapshot(sassScope)],
+      context: 'x',
+      messages: [],
+    });
+
+    expect(prompt).toContain('本次涉及的仓库：mica-code / sass（本次任务目标）');
+    expect(prompt).toContain('用 repo 字段写仓库名');
+  });
+
+  it('says so when no repository is writable', () => {
+    const prompt = buildCuratorUserPrompt({ snapshots: [snapshot(domainScope)], context: 'x', messages: [] });
+    expect(prompt).toContain('本次没有可写的仓库');
   });
 });
 
@@ -305,5 +327,65 @@ describe('applyCuratorOperations', () => {
 
     expect(outcome.applied).toBe(1);
     expect(outcome.failures).toEqual([{ scope: 'domain', message: '锁住了' }]);
+  });
+});
+
+describe('createCuratorScopeResolver', () => {
+  const sass: RepoIdentity = {
+    slug: 'sass-11111111',
+    name: 'sass',
+    root: '/repo/sass',
+    key: 'git.example.com/team/sass',
+    remote: 'git.example.com/team/sass',
+    source: 'git',
+  };
+  const base = {
+    cwd: '/repo/mis',
+    repo,
+    taskRepos: [sass],
+    repos: [repo, sass],
+    domains: [],
+    knownDomains: [],
+    project: { kind: 'project' as const, repo: sass, note: '本次任务目标' },
+  };
+
+  it('falls back to the task target when the operation names no repository', () => {
+    const resolved = createCuratorScopeResolver(base)({ scope: 'project', action: 'add', content: 'x' });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok && resolved.scope.kind === 'project') expect(resolved.scope.repo.name).toBe('sass');
+  });
+
+  it('writes to the repository named by the operation', () => {
+    const resolved = createCuratorScopeResolver(base)({
+      scope: 'project',
+      repo: 'mica-code',
+      action: 'add',
+      content: 'x',
+    });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok && resolved.scope.kind === 'project') {
+      expect(resolved.scope.repo.name).toBe('mica-code');
+      // 会话仓库，不该被标成「本次任务目标」。
+      expect(resolved.scope.note).toBeUndefined();
+    }
+  });
+
+  it('refuses a repository that this session never touched', () => {
+    const resolved = createCuratorScopeResolver(base)({
+      scope: 'project',
+      repo: 'some-other-repo',
+      action: 'add',
+      content: 'x',
+    });
+    expect(resolved.ok).toBe(false);
+    if (!resolved.ok) {
+      expect(resolved.error).toContain('some-other-repo');
+      expect(resolved.error).toContain('sass');
+    }
+  });
+
+  it('still refuses to write profile', () => {
+    const resolved = createCuratorScopeResolver(base)({ scope: 'profile', action: 'add', content: 'x' });
+    expect(resolved.ok).toBe(false);
   });
 });
