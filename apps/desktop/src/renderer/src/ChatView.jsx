@@ -2269,7 +2269,7 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
         ) : historyRounds.length > 0 ? (
           <button
             type="button"
-            className={`chat-turn-log-rounds-toggle${roundsVisible ? ' is-open' : ''}`}
+            className="chat-turn-log-rounds-toggle"
             aria-expanded={roundsVisible}
             title={roundsVisible ? '收起前面的轮次' : '展开前面的轮次'}
             onPointerDown={(event) => event.stopPropagation()}
@@ -2280,7 +2280,6 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
             }}
           >
             <span>{roundSwitchLabel(rounds.length, running)}</span>
-            <IconChevronDown size={12} />
           </button>
         ) : null}
       </header>

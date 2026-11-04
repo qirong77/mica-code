@@ -2293,18 +2293,17 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 /*
  * 标题行右上角的多轮开关：历史轮次整块默认隐藏，主体只留正在跑的这一轮，
  * 点它才把前面几轮摊开。整行是拖动把手，所以按钮自己要挡住 pointerdown。
+ * 外观只是一行字：没有箭头、没有底色，悬停只提亮，按上去不像另一颗按钮。
  */
 .chat-turn-log-rounds-toggle {
   display: flex;
   min-width: 0;
   flex: 0 0 auto;
   align-items: center;
-  gap: 3px;
   margin-left: auto;
   border: 0;
-  border-radius: 3px;
   background: none;
-  padding: 0 3px;
+  padding: 0;
   color: var(--color-fg-faint);
   font: inherit;
   white-space: nowrap;
@@ -2318,16 +2317,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-turn-log-rounds-toggle:hover {
-  background: color-mix(in srgb, var(--color-fg-max) 6%, transparent);
   color: var(--color-fg-dim);
-}
-
-.chat-turn-log-rounds-toggle svg {
-  transition: transform 120ms ease;
-}
-
-.chat-turn-log-rounds-toggle.is-open svg {
-  transform: rotate(180deg);
 }
 
 .chat-turn-log-scroll {
