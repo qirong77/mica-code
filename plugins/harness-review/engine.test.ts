@@ -1809,9 +1809,7 @@ test('helper runs never read as the user retrying the previous task', async (t) 
     });
     child.finish('error', 'max turns');
   }
-  const delegatedRetries = (await recorder.review(cwd)).findings.filter(
-    (finding) => finding.kind === 'user-retry',
-  );
+  const delegatedRetries = (await recorder.review(cwd)).findings.filter((finding) => finding.kind === 'user-retry');
   assert.equal(delegatedRetries.length, 1);
   assert.equal(delegatedRetries[0]!.occurrences, 1);
 });
@@ -1910,6 +1908,63 @@ test('plugin background failures are throttled, aggregated and exposed as a revi
   const markdown = await readFile(await recorder.exportReport(), 'utf8');
   assert.match(markdown, /## Plugin health/);
   assert.match(markdown, /\| mobile-relay \| poll \| 3 \|/);
+});
+
+test('hook failures are recorded like background tasks, with a lower-bound count', async (t) => {
+  const { recorder, root } = await fixture(t);
+  recorder.notePluginEvent({
+    pluginId: 'commit',
+    timestamp: at,
+    type: 'hook:failed',
+    hook: 'turn:after',
+    failures: 1,
+    error: 'boom',
+  });
+  await recorder.flush();
+  const file = join(root, 'plugin-events.jsonl');
+  // 钩子没有 taskId：报告里按 `hook:<名字>` 归组，与常驻任务同一条聚合路径。
+  const [line] = (await readFile(file, 'utf8')).trim().split('\n');
+  assert.equal(JSON.parse(line!).taskId, 'hook:turn:after');
+  // 限流后只剩一条，但累计数写进去了：只看行数会把「一直在炸」读成「只坏过一次」。
+  for (const failures of [2, 40])
+    await appendFile(
+      file,
+      `${JSON.stringify({ at, pluginId: 'commit', taskId: 'hook:turn:after', tick: 0, failures, error: 'boom' })}\n`,
+    );
+
+  const report = await recorder.review();
+  assert.deepEqual(report.pluginFailures, [
+    { pluginId: 'commit', taskId: 'hook:turn:after', count: 40, lastAt: at, lastError: 'boom' },
+  ]);
+  const finding = report.findings.find((item) => item.kind === 'plugin-background')!;
+  assert.equal(finding.occurrences, 40);
+  assert.match(finding.title, /commit\/hook:turn:after/);
+});
+
+test('two tasks whose names sanitize alike keep separate review items', async (t) => {
+  const { recorder, root } = await fixture(t);
+  await mkdir(root, { recursive: true });
+  const file = join(root, 'plugin-events.jsonl');
+  // `tick:a` 与 `tick_a` 清洗后都是 `tick_a`：只按清洗结果拼 id，后一条会覆盖前一条。
+  for (const taskId of ['tick:a', 'tick_a'])
+    for (const tick of [1, 2, 3])
+      await appendFile(
+        file,
+        `${JSON.stringify({ at, pluginId: 'relay', taskId, tick, failures: tick, error: 'refused' })}\n`,
+      );
+
+  const report = await recorder.review();
+  assert.deepEqual(report.pluginFailures.map((row) => row.taskId).sort(), ['tick:a', 'tick_a']);
+  const findings = report.findings.filter((item) => item.kind === 'plugin-background');
+  assert.equal(findings.length, 2);
+  // 干净的名字保持可读；被改写过的补摘要，两者不会撞在一起。
+  assert.ok(findings.some((item) => item.id === 'plugin-background:relay:tick_a'));
+  assert.ok(findings.some((item) => /^plugin-background:relay:tick_a-[a-f0-9]{8}$/.test(item.id)));
+  for (const item of findings) await recorder.decide(item.id, 'accepted', '');
+  assert.deepEqual(
+    (await recorder.review()).findings.filter((item) => item.kind === 'plugin-background').map((item) => item.status),
+    ['accepted', 'accepted'],
+  );
 });
 
 test('a delegation row omits an average it cannot compute instead of writing zero', () => {

@@ -2,10 +2,13 @@
  * 终端控制窗口的样式。
  *
  * 外壳颜色跟着 `<html data-theme>` 走（首帧由 theme-boot.js 上色，之后由
- * terminal-page.jsx 监听 theme.js 的缓存同步）：暗色沿用 Darcula（内容面 #2b2b2b、
- * 外框 #3c3f41、分界 #4b4b4b），亮色取 app.css 的亮色 token（内容面 #ffffff、
- * 外框 #f9fafb、分界 #0000001a）。xterm 自己按 options.theme 画，两份主题在
- * terminal-page.jsx 里手工同步。
+ * terminal-page.jsx 监听 theme.js 的缓存同步）：每个主题一个块，取值与 app.css 同 id 的
+ * `html[data-theme='<id>']` 块一致（内容面 = canvas、外框 = panel、分界 = line、
+ * 前景 = fg 阶梯、状态色 = success/warn、报错条 = danger）。xterm 自己按
+ * options.theme 画，那张表在 terminal-theme.js。
+ *
+ * 注意：这个窗口不加载 app.css（它是独立入口，而 app.css 带着整个对话区的样式），
+ * 所以颜色必须在这里再写一遍；`theme-tokens.test.js` 会逐个主题比对两边，漏改会被拦下。
  */
 
 :root {
@@ -41,6 +44,78 @@ html[data-theme='light'] {
   --terminal-error-bg: #fef2f2;
   --terminal-error-border: #ec131333;
   --terminal-error-fg: #ec1313;
+}
+
+/* Catppuccin Mocha：内容面 base、外框 mantle、分界 surface1，前景 subtext 阶梯。 */
+html[data-theme='mocha'] {
+  color-scheme: dark;
+  --terminal-bg: #1e1e2e;
+  --terminal-panel: #181825;
+  --terminal-line: #45475a;
+  --terminal-fg: #bac2de;
+  --terminal-fg-soft: #a6adc8;
+  --terminal-fg-dim: #7f849c;
+  --terminal-fg-faint: #6c7086;
+  --terminal-success: #a6e3a1;
+  --terminal-warn: #f9e2af;
+  --terminal-overlay-bg: rgb(30 30 46 / 82%);
+  --terminal-error-bg: rgb(75 35 52 / 92%);
+  --terminal-error-border: #f38ba833;
+  --terminal-error-fg: #f38ba8;
+}
+
+/* Catppuccin Latte：同一套映射的亮色档。 */
+html[data-theme='latte'] {
+  color-scheme: light;
+  --terminal-bg: #eff1f5;
+  --terminal-panel: #e6e9ef;
+  --terminal-line: #bcc0cc;
+  --terminal-fg: #4c4f69;
+  --terminal-fg-soft: #5c5f77;
+  --terminal-fg-dim: #7c7f93;
+  --terminal-fg-faint: #8c8fa1;
+  --terminal-success: #327d22;
+  --terminal-warn: #986114;
+  --terminal-overlay-bg: rgb(239 241 245 / 82%);
+  --terminal-error-bg: rgb(251 231 234 / 92%);
+  --terminal-error-border: #d20f3933;
+  --terminal-error-fg: #a00b2b;
+}
+
+/* Tokyo Night：内容面 editor.background、外框 #16161e、分界 #292e42。 */
+html[data-theme='tokyo-night'] {
+  color-scheme: dark;
+  --terminal-bg: #1a1b26;
+  --terminal-panel: #16161e;
+  --terminal-line: #292e42;
+  --terminal-fg: #a9b1d6;
+  --terminal-fg-soft: #9aa5ce;
+  --terminal-fg-dim: #565f89;
+  --terminal-fg-faint: #42465d;
+  --terminal-success: #9ece6a;
+  --terminal-warn: #e0af68;
+  --terminal-overlay-bg: rgb(26 27 38 / 82%);
+  --terminal-error-bg: rgb(61 33 44 / 92%);
+  --terminal-error-border: #f7768e33;
+  --terminal-error-fg: #f7768e;
+}
+
+/* Tokyo Night Light：内容面 #e6e7ed、外框 #d6d8df。 */
+html[data-theme='tokyo-night-light'] {
+  color-scheme: light;
+  --terminal-bg: #e6e7ed;
+  --terminal-panel: #d6d8df;
+  --terminal-line: #c1c2c7;
+  --terminal-fg: #363c4d;
+  --terminal-fg-soft: #40434f;
+  --terminal-fg-dim: #707280;
+  --terminal-fg-faint: #888b94;
+  --terminal-success: #33635c;
+  --terminal-warn: #8f5e15;
+  --terminal-overlay-bg: rgb(230 231 237 / 82%);
+  --terminal-error-bg: rgb(246 231 234 / 92%);
+  --terminal-error-border: #8c435133;
+  --terminal-error-fg: #792727;
 }
 
 html,

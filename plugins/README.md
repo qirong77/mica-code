@@ -563,7 +563,7 @@ ctx.desktop.panel({
     `wrap: true` 换成换行显示（长路径、长句），`link` 让这个值可点（`http(s)` / `mailto`
     交给系统浏览器，其余当普通文本）。
   - `items`：`{ key, label, value?, tone?, actions? }`，一列可逐项操作的条目。
-- `shortcuts` 是**输入框正上方那排按钮**，每个四选一：`action` 点了直接把该动作交给
+- `shortcuts` 是**输入框正上方那排按钮**，每个是以下形态之一：`action` 点了直接把该动作交给
   `action` 处理器（不打开面板，例如「立刻检查」）；`section` 点了打开面板并展开同名的那一块
   （例如「频道设置」）；`items` 是一组写死的子项（悬停或点击展开一层，例如「频道」→
   同步频道 / 频道设置）；`menu` 的**表格**由视图的 `menus[menu]` 现算（例如「PR」→
@@ -573,6 +573,11 @@ ctx.desktop.panel({
   动态菜单是一张表：`menus[menu] = { columns: [{ key, label, grow? }], rows: [{ key?, action, cells }] }`，
   `cells` 与面板里的表同一份格子（`{ text, tone? }`），整行可点、点了执行 `action`（`key` 原样回给
   插件）。缺 `action` 或缺格子的行会被丢掉；最多 6 个菜单、20 行、5 列。
+
+   想让人**悬停先看一眼正文**（而不是挑一条）时给 `menus[menu] = { text }`：宿主画一段只读文本，
+   不画表。两者互斥，同时给以 `text` 为准；正文裁到 1200 字符，超一屏的部分去面板看。
+   这时按钮可以同时声明 `section`：**点击**进面板改配置，**悬停**看现在的值——
+   清单写 `{ "label": "设置", "section": "需求描述", "menu": "description" }`。
   没有常用动作插件就别声明，一条空按钮比没有更糟。
 
 - 快捷按钮可声明稳定的 `id`，在面板视图中用 `shortcutStates` 按 id 提供动态状态：例如清单
@@ -706,7 +711,7 @@ ctx.desktop.sessionMenu({
 
 需要观察运行的插件可以订阅只读 `agent:observe` hook（类型 `AgentObservationEvent`）：宿主提供 owner/runId、运行开始与终态、实际请求边界（含耗时与首字延迟）与工具定义、最终 prompt、工具调用与结果、用量、重试、历史改写与压缩（策略 / 原因 / 前后规模 / 是否真的改了历史）；委派运行额外带 `delegation: { type, parentSessionId }`，runId 取负数与父运行分开。不在任何一轮里的工作也在观察范围内，只是带 `helper: { kind, pluginId?, purpose? }`：压缩摘要（`compaction`）、`ctx.subagents.thread` 开的旁问线程（`thread`）、桌面 BTW（`btw`）、插件经 `ctx.llm` 问模型（`plugin-llm`）。它们与主运行一样有请求边界、用量与终态，归并成本时按 `helper.kind` 分开，不要和用户轮次混在一起；helper 的输入是宿主或插件生成的文本，观察方不能拿它做「用户是不是在重试同一件事」的判断。「用户纠正」不是运行内事件，走运行时事件 `input:corrected`（`ctx.events`）：改写已发消息重跑、撤回排队消息，撤回没取回时不发。通过 `HookRegistry.notify()` 派发：按顺序调用但不等待异步 handler；失败或挂起不阻塞任务，观察插件自己维护 IO 队列并在 dispose 时 flush。观察者不得修改事件中的运行输入。
 
-插件**自身**的运行事件（不属于任何一条 run）走 `plugin:observe` hook（类型 `PluginObservationEvent`）：宿主在 `ctx.background.register()` 的常驻任务抛错时发出 `{ type: 'background:failed', taskId, tick, failures, error }`（`tick` 是这次尝试的序号、`failures` 是累计失败次数——健康状态只留最后一句话，事件才看得出「它一直在坏」），插件的钩子处理函数抛错时发出 `{ type: 'hook:failed', hook, error }`（默认 `failPolicy: 'continue'` 会吞掉异常，「每轮都在炸」与「功能没反应」只有事件流分得开；观察通道自己的 handler 失败不回灌）。订阅方式与 `agent:observe` 相同（`ctx.hooks.on<PluginObservationEvent>('plugin:observe', …)`），同样是只读通知。官方 [Harness Review](harness-review/README.md) 用这两个接口异步记录并生成复盘报告；它的运行状态与「待复盘」提示点走清单 `status` / `attention`，「打开复盘」是一个清单 `actions` 里的动作（回 `newSession`，只把提示词放进输入框）。
+插件**自身**的运行事件（不属于任何一条 run）走 `plugin:observe` hook（类型 `PluginObservationEvent`）：宿主在 `ctx.background.register()` 的常驻任务抛错时发出 `{ type: 'background:failed', taskId, tick, failures, error }`（`tick` 是这次尝试的序号、`failures` 是累计失败次数——健康状态只留最后一句话，事件才看得出「它一直在坏」），插件的钩子处理函数抛错时发出 `{ type: 'hook:failed', hook, failures, error }`（默认 `failPolicy: 'continue'` 会吞掉异常，「每轮都在炸」与「功能没反应」只有事件流分得开；观察通道自己的 handler 失败不回灌）。订阅方式与 `agent:observe` 相同（`ctx.hooks.on<PluginObservationEvent>('plugin:observe', …)`），同样是只读通知。官方 [Harness Review](harness-review/README.md) 用这两个接口异步记录并生成复盘报告；它的运行状态与「待复盘」提示点走清单 `status` / `attention`，「打开复盘」是一个清单 `actions` 里的动作（回 `newSession`，只把提示词放进输入框）。
 
 观察类插件最该防的是**误报**：把工具的语义化退出码当失败、把轮询当重复调用，会让用户去修一个不存在的 bug。判定规则要写成可测的纯函数，并让实时采集与 `rebuild` 重放共用同一份逻辑，否则改一次分类就得靠人工对账。
 

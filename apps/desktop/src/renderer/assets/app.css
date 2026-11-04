@@ -202,50 +202,341 @@ html[data-theme='light'] {
 }
 
 /*
+ * Catppuccin Mocha — 取值来自 Catppuccin 官方调色板（catppuccin/palette 的 mocha）与官方
+ * VS Code 主题的界面约定：内容面 base、chrome mantle、更暗的标签条/状态栏 crust、
+ * 选中行 surface0、强调色 mauve（官方默认 accent）。
+ * 与 Darcula 不同，这里的状态色是调色板里成套的「同族柔档」：yellow/peach、green/teal、
+ * blue/sapphire、red/maroon——soft 档就是同色相里更淡的那一个。
+ */
+html[data-theme='mocha'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --color-canvas: #1e1e2e;
+  --color-tabstrip: #11111b;
+  --color-panel: #181825;
+  --color-panel-hi: #313244;
+  --color-active: #313244;
+  --color-list-hover: #252535;
+
+  /* Hairlines */
+  --color-line: #45475a;
+  --color-line-strong: #585b70;
+
+  /* Git 装饰 */
+  --color-git-modified: #f9e2af;
+  --color-git-added: #a6e3a1;
+  --color-git-deleted: #f38ba8;
+
+  /* Foreground ramp */
+  --color-fg-max: #cdd6f4;
+  --color-fg-strong: #cdd6f4;
+  --color-fg: #bac2de;
+  --color-fg-soft: #a6adc8;
+  --color-fg-muted: #9399b2;
+  --color-fg-dim: #7f849c;
+  --color-fg-faint: #6c7086;
+  --color-fg-ghost: #585b70;
+
+  /* Accent */
+  --color-accent: #cba6f7;
+  --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, #ffffff);
+  --color-accent-subtle: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --color-accent-region: color-mix(in srgb, var(--color-accent) 24%, transparent);
+
+  /* Status */
+  --color-info: #89b4fa;
+  --color-info-soft: #74c7ec;
+  --color-info-deep: #74a8fc;
+  --color-success: #a6e3a1;
+  --color-success-soft: #94e2d5;
+  --color-warn: #f9e2af;
+  --color-warn-soft: #fab387;
+  --color-danger: #f38ba8;
+  --color-danger-soft: #eba0ac;
+  --color-purple: #cba6f7;
+  --color-teal: #94e2d5;
+
+  /* 洗色层 */
+  --color-overlay-subtle: rgb(255 255 255 / 3%);
+  --color-overlay: rgb(255 255 255 / 6%);
+  --color-overlay-strong: rgb(255 255 255 / 10%);
+  --color-overlay-heavy: rgb(255 255 255 / 15%);
+  --color-shade: rgb(0 0 0 / 10%);
+  --color-line-soft: rgb(255 255 255 / 7%);
+
+  /* 专有 token */
+  --color-heat-empty: #11111b;
+  --color-nav-fg: #a6adc8;
+  --color-bubble: #313244;
+  --color-inline-code: #cba6f7;
+  --color-inline-code-bg: transparent;
+  --color-inline-code-border: transparent;
+}
+
+/*
+ * Catppuccin Latte — 同一套映射的亮色档：内容面 base(#eff1f5)、chrome mantle、标签条
+ * crust，文字用 text/subtext 阶梯。Catppuccin 的原色对浅底偏淡（yellow #df8e1d 在画布上
+ * 只有 2.3:1），而 mica 的 warn/success/danger 既当色块也当文字，所以按亮色约定把
+ * primary/soft 逐档压深到 4.5:1 以上（与 DSH 亮色取 amber-700 同一个理由）。
+ */
+html[data-theme='latte'] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --color-canvas: #eff1f5;
+  --color-tabstrip: #dce0e8;
+  --color-panel: #e6e9ef;
+  --color-panel-hi: #dce0e8;
+  --color-active: #ccd0da;
+  --color-list-hover: #dce0e8;
+
+  /* Hairlines */
+  --color-line: #bcc0cc;
+  --color-line-strong: #acb0be;
+
+  /* Git 装饰 */
+  --color-git-modified: #986114;
+  --color-git-added: #327d22;
+  --color-git-deleted: #d20f39;
+
+  /* Foreground ramp */
+  --color-fg-max: #4c4f69;
+  --color-fg-strong: #4c4f69;
+  --color-fg: #4c4f69;
+  --color-fg-soft: #5c5f77;
+  --color-fg-muted: #6c6f85;
+  --color-fg-dim: #7c7f93;
+  --color-fg-faint: #8c8fa1;
+  --color-fg-ghost: #9ca0b0;
+
+  /* Accent */
+  --color-accent: #8839ef;
+  --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, #000000);
+  --color-accent-subtle: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --color-accent-region: color-mix(in srgb, var(--color-accent) 18%, transparent);
+
+  /* Status */
+  --color-info: #1e66f5;
+  --color-info-soft: #1954c9;
+  --color-info-deep: #1956ce;
+  --color-success: #327d22;
+  --color-success-soft: #2d701e;
+  --color-warn: #986114;
+  --color-warn-soft: #7d5010;
+  --color-danger: #d20f39;
+  --color-danger-soft: #a00b2b;
+  --color-purple: #8839ef;
+  --color-teal: #179299;
+
+  /* 洗色层 */
+  --color-overlay-subtle: rgb(76 79 105 / 4%);
+  --color-overlay: rgb(76 79 105 / 6%);
+  --color-overlay-strong: rgb(76 79 105 / 10%);
+  --color-overlay-heavy: rgb(76 79 105 / 14%);
+  --color-shade: rgb(76 79 105 / 4%);
+  --color-line-soft: rgb(76 79 105 / 8%);
+
+  /* 专有 token */
+  --color-heat-empty: #ccd0da;
+  --color-nav-fg: #4c4f69;
+  --color-bubble: #dfe3f8;
+  /* 亮底沿用浅色的药丸形态：底比画布深一档、文字回到正文色，不染紫。 */
+  --color-inline-code: #4c4f69;
+  --color-inline-code-bg: #e6e9ef;
+  --color-inline-code-border: rgb(76 79 105 / 8%);
+}
+
+/*
+ * Tokyo Night — 取值来自 enkia/tokyo-night-vscode-theme 的主题 JSON（colors 与
+ * terminal.ansi*）：内容面 editor.background #1a1b26、chrome #16161e、选中行
+ * list.activeSelectionBackground #202330、强调色 ansiBlue #7aa2f7。
+ * 这个主题的分界不是「更亮一条线」而是深色凹槽，所以 hairline 用它的 focusBorder
+ * 半透明蓝灰，压在三种面（画布 / chrome / 选中行）上都成立。
+ */
+html[data-theme='tokyo-night'] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --color-canvas: #1a1b26;
+  --color-tabstrip: #16161e;
+  --color-panel: #16161e;
+  --color-panel-hi: #202330;
+  --color-active: #202330;
+  --color-list-hover: #13131a;
+
+  /* Hairlines */
+  --color-line: rgb(84 92 126 / 30%);
+  --color-line-strong: rgb(84 92 126 / 60%);
+
+  /* Git 装饰 */
+  --color-git-modified: #e0af68;
+  --color-git-added: #9ece6a;
+  --color-git-deleted: #f7768e;
+
+  /* Foreground ramp */
+  --color-fg-max: #c0caf5;
+  --color-fg-strong: #c0caf5;
+  --color-fg: #a9b1d6;
+  --color-fg-soft: #9aa5ce;
+  --color-fg-muted: #787c99;
+  --color-fg-dim: #565f89;
+  --color-fg-faint: #42465d;
+  --color-fg-ghost: #363b54;
+
+  /* Accent */
+  --color-accent: #7aa2f7;
+  --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, #ffffff);
+  --color-accent-subtle: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --color-accent-region: color-mix(in srgb, var(--color-accent) 24%, transparent);
+
+  /* Status */
+  --color-info: #7aa2f7;
+  --color-info-soft: #7dcfff;
+  --color-info-deep: #3d59a1;
+  --color-success: #9ece6a;
+  --color-success-soft: #73daca;
+  --color-warn: #e0af68;
+  --color-warn-soft: #ff9e64;
+  --color-danger: #f7768e;
+  --color-danger-soft: #ff5370;
+  --color-purple: #bb9af7;
+  --color-teal: #73daca;
+
+  /* 洗色层 */
+  --color-overlay-subtle: rgb(255 255 255 / 3%);
+  --color-overlay: rgb(255 255 255 / 6%);
+  --color-overlay-strong: rgb(255 255 255 / 10%);
+  --color-overlay-heavy: rgb(255 255 255 / 15%);
+  --color-shade: rgb(0 0 0 / 10%);
+  --color-line-soft: rgb(255 255 255 / 7%);
+
+  /* 专有 token */
+  --color-heat-empty: #16161e;
+  --color-nav-fg: #9aa5ce;
+  --color-bubble: #202330;
+  --color-inline-code: #bb9af7;
+  --color-inline-code-bg: transparent;
+  --color-inline-code-border: transparent;
+}
+
+/*
+ * Tokyo Night Light — 同一个主题的亮色档（editor.background #e6e7ed、chrome #d6d8df）。
+ * chrome 里的嵌套面与选中行按亮度递减派生（#c8cad4 / #c1c4cf），亮色下仍然「越靠里越深」；
+ * 状态色取它的语法色阶（#8f5e15 / #33635c / #8c4351），soft 档压深到浅底可读。
+ */
+html[data-theme='tokyo-night-light'] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --color-canvas: #e6e7ed;
+  --color-tabstrip: #d6d8df;
+  --color-panel: #d6d8df;
+  --color-panel-hi: #c8cad4;
+  --color-active: #c1c4cf;
+  --color-list-hover: #c8cad4;
+
+  /* Hairlines */
+  --color-line: #c1c2c7;
+  --color-line-strong: #acb0bf;
+
+  /* Git 装饰 */
+  --color-git-modified: #8f5e15;
+  --color-git-added: #33635c;
+  --color-git-deleted: #8c4351;
+
+  /* Foreground ramp */
+  --color-fg-max: #343b58;
+  --color-fg-strong: #343b58;
+  --color-fg: #363c4d;
+  --color-fg-soft: #40434f;
+  --color-fg-muted: #6c6e75;
+  --color-fg-dim: #707280;
+  --color-fg-faint: #888b94;
+  --color-fg-ghost: #9da0ab;
+
+  /* Accent */
+  --color-accent: #2959aa;
+  --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, #000000);
+  --color-accent-subtle: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --color-accent-region: color-mix(in srgb, var(--color-accent) 18%, transparent);
+
+  /* Status */
+  --color-info: #2959aa;
+  --color-info-soft: #1d3f7a;
+  --color-info-deep: #1d3f7a;
+  --color-success: #33635c;
+  --color-success-soft: #2a514b;
+  --color-warn: #8f5e15;
+  --color-warn-soft: #754d11;
+  --color-danger: #8c4351;
+  --color-danger-soft: #792727;
+  --color-purple: #65359d;
+  --color-teal: #166775;
+
+  /* 洗色层 */
+  --color-overlay-subtle: rgb(52 59 88 / 4%);
+  --color-overlay: rgb(52 59 88 / 6%);
+  --color-overlay-strong: rgb(52 59 88 / 10%);
+  --color-overlay-heavy: rgb(52 59 88 / 14%);
+  --color-shade: rgb(52 59 88 / 4%);
+  --color-line-soft: rgb(52 59 88 / 8%);
+
+  /* 专有 token */
+  --color-heat-empty: #c1c4cf;
+  --color-nav-fg: #343b58;
+  --color-bubble: #dde1f0;
+  /* 亮底沿用浅色的药丸形态（见 Latte 同一处）。 */
+  --color-inline-code: #343b58;
+  --color-inline-code-bg: #d6d8df;
+  --color-inline-code-border: rgb(52 59 88 / 8%);
+}
+
+/*
  * 亮色主题下的浮层阴影：暗色深底需要 35%~58% 的黑影才「浮」得起来，同样的值压在亮底上
  * 会糊成一片脏灰。亮色里只把透明度降到 11%~18%，几何形状与暗色一致；暗色规则保持不动，
- * 这里按同一选择器重声明，靠 html[data-theme='light'] 前缀取胜。
+ * 这里按同一选择器重声明，靠 html[data-appearance='light'] 前缀取胜。
  */
-html[data-theme='light'] .chat-tooltip {
+html[data-appearance='light'] .chat-tooltip {
   box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
 }
-html[data-theme='light'] .chat-selection-bar {
+html[data-appearance='light'] .chat-selection-bar {
   box-shadow: 0 6px 18px rgb(0 0 0 / 14%);
 }
-html[data-theme='light'] .chat-jump {
+html[data-appearance='light'] .chat-jump {
   box-shadow: 0 4px 14px rgb(0 0 0 / 11%);
 }
-html[data-theme='light'] .chat-find {
+html[data-appearance='light'] .chat-find {
   box-shadow: 0 6px 18px rgb(0 0 0 / 13%);
 }
-html[data-theme='light'] .chat-command-palette {
+html[data-appearance='light'] .chat-command-palette {
   box-shadow: 0 10px 32px rgb(0 0 0 / 16%);
 }
-html[data-theme='light'] .chat-popover {
+html[data-appearance='light'] .chat-popover {
   box-shadow: 0 10px 32px rgb(0 0 0 / 16%);
 }
-html[data-theme='light'] .chat-image-preview img {
+html[data-appearance='light'] .chat-image-preview img {
   box-shadow: 0 20px 80px rgb(0 0 0 / 17%);
 }
-html[data-theme='light'] .chat-modal {
+html[data-appearance='light'] .chat-modal {
   box-shadow: 0 24px 64px rgb(0 0 0 / 18%);
 }
-html[data-theme='light'] .chat-btw-jump {
+html[data-appearance='light'] .chat-btw-jump {
   box-shadow: 0 2px 8px rgb(0 0 0 / 11%);
 }
-html[data-theme='light'] .quick-pick-panel {
+html[data-appearance='light'] .quick-pick-panel {
   box-shadow: 0 12px 44px rgb(0 0 0 / 17%);
 }
 
 /* 查找条里的输入框：暗色是「面板叠黑 28%」压出的内凹面，亮色底上同样的黑会变脏灰，
    改成内容区白底（描边已由 --color-line 系列跟随主题）。 */
-html[data-theme='light'] .chat-find-field {
+html[data-appearance='light'] .chat-find-field {
   background: var(--color-canvas);
 }
 
 /* 终端光标块用 screen 混合在深底上「发光」；亮底色上 screen 只会得到白色、光标消失，
    换成 multiply 让已经变深的阅读面色正常压上去。 */
-html[data-theme='light'] .chat-composer-terminal-cursor {
+html[data-appearance='light'] .chat-composer-terminal-cursor {
   mix-blend-mode: multiply;
 }
 
@@ -573,8 +864,8 @@ body.is-resizing.is-resizing-terminal {
    档位对齐 DSH 的 TurnProcessNodeView / TurnTriggerNodeView：工具行与过程行是
    label-tertiary(#81858c)，不是 label-secondary——比正文低两档才是 DeepSeek 的
    「过程文字退到背景里」的观感。 */
-html[data-theme='light'] .chat-view,
-html[data-theme='light'] .chat-modal-overlay {
+html[data-appearance='light'] .chat-view,
+html[data-appearance='light'] .chat-modal-overlay {
   --chat-muted: var(--color-fg-dim); /* #81858c — label-tertiary */
   --chat-subtle: var(--color-fg-faint); /* #979da6 — 再退一档 */
 }
@@ -1170,7 +1461,7 @@ html[data-theme='light'] .chat-modal-overlay {
 
 /* 亮色里行内代码是 DSH 的浅色药丸（markdown-inline-code 底 + border-l1 描边 +
    8px 圆角），暗色保持 VS Code 的「只染色、不加底」，所以只覆盖亮色。 */
-html[data-theme='light'] .chat-markdown code:not(pre code) {
+html[data-appearance='light'] .chat-markdown code:not(pre code) {
   border-radius: var(--radius-ui);
   background: var(--color-inline-code-bg);
   box-shadow: inset 0 0 0 1px var(--color-inline-code-border);
@@ -6238,22 +6529,54 @@ body.is-resizing-btw {
 }
 
 /* 动态菜单是一张表（项目 / 端 / 分支这类几列并列的事实）：直接用面板那份 chat-plugin-table，
-   这里只收敛掉浮层里放不下的尺寸——表格在菜单里不抢焦点、行整条可点（就是「评审这一条」）。 */
+   这里只收敛浮层里放不下的尺寸。左右内边距与下面的 .plugin-menu-item 对齐到同一根竖线——
+   一个菜单里出现两种缩进，看起来就像两张不同的组件拼起来的。 */
 .chat-plugin-quickbar-table {
   min-width: 0;
-  max-width: 420px;
-  margin: 0 -4px;
+  max-width: 460px;
+  /* 浮层里不滚：横向滚动条在三行高的菜单里比截断更难用 */
+  overflow: hidden;
+}
+
+.chat-plugin-table.is-compact th,
+.chat-plugin-table.is-compact td {
+  padding-right: 8px;
+  padding-left: 8px;
 }
 
 .chat-plugin-table.is-compact th {
-  padding: 4px 8px;
+  padding-top: 4px;
+  padding-bottom: 5px;
+  color: var(--color-fg-dim);
   font-size: 11px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
 }
 
 .chat-plugin-table.is-compact td {
-  max-width: 220px;
-  padding: 5px 8px;
+  max-width: 240px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  vertical-align: middle;
+}
+
+/* 第一列是名字（mis / sass），给它一个上限，剩下的宽度让给分支这类长文本 */
+.chat-plugin-table.is-compact td:first-child {
+  max-width: 140px;
+}
+
+/* 悬停预览：一段只读正文，滚起来像在看一条消息，而不是挤在菜单项之间 */
+.chat-plugin-quickbar-preview {
+  max-height: 220px;
+  margin: 0;
+  padding: 2px 8px 4px;
+  overflow-y: auto;
+  color: var(--color-fg-strong);
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .chat-plugin-table tbody tr[role='menuitem'] {

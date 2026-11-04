@@ -176,9 +176,19 @@ function dayStamp(now: number): string {
   return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('');
 }
 
+function safeScope(scope: string): string {
+  const cleaned = String(scope || 'app')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return (cleaned || 'app').slice(0, 32);
+}
+
 function fileFor(scope: string, now: number): string {
   const dir = logDir();
-  const key = `${scope}-${dayStamp(now)}`;
+  // scope 会拼进文件名，而它可能来自渲染层或插件（`log:report`）：只放行文件名安全的字符，
+  // 否则 `../../x` 能把日志写到目录外。
+  const key = `${safeScope(scope)}-${dayStamp(now)}`;
   const cached = activeFiles.get(key);
   if (cached) {
     try {
@@ -256,8 +266,10 @@ function writeNow(): void {
     byScope.set(entry.scope, list);
   }
   for (const [scope, entries] of byScope) {
-    const body = entries.map((entry) => JSON.stringify(entry)).join('\n');
     try {
+      // stringify 也放进 try：字段里出现 BigInt / 循环引用时不能把异常抛回调用方
+      // （队列满 100 条时 record() 会同步走到这里）。
+      const body = entries.map((entry) => JSON.stringify(entry)).join('\n');
       appendFileSync(fileFor(scope, now), `${body}\n`);
     } catch {
       dropped += entries.length;

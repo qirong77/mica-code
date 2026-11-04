@@ -7,7 +7,7 @@ import { THEME_OPTIONS, useThemePreference, type ThemeOption } from '../theme.js
 /**
  * Appearance：界面主题。
  *
- * 三张单选卡对应 `THEME_OPTIONS`（跟随系统 / 浅色 / 深色）。主题能力由宿主提供
+ * 单选卡对应 `THEME_OPTIONS`（跟随系统 + 注册表里的每个主题）。主题能力由宿主提供
  * （`web/theme.ts` 的 `ConfigWebThemeHost`）：桌面端存运行时界面状态，浏览器宿主存
  * localStorage。页面只做展示与转发——点卡片当场调 `setPreference`，宿主立刻把
  * `<html data-theme>` 换掉，所有页面跟着变，不需要保存也不用重启。
@@ -105,7 +105,7 @@ function ThemeCard({ option, selected, onSelect }: { option: ThemeOption; select
             <ThemePreview theme="dark" />
           </span>
         ) : (
-          <ThemePreview theme={option.value} />
+          <ThemePreview theme={option.preview} />
         )}
       </span>
       <span className="theme-card-copy">
@@ -123,8 +123,11 @@ function ThemeCard({ option, selected, onSelect }: { option: ThemeOption; select
   );
 }
 
-/** 设置页的缩略图：侧栏 + 标题行 + 正文行 + 一块卡片 + 主按钮色块。 */
-function ThemePreview({ theme }: { theme: 'light' | 'dark' }) {
+/**
+ * 设置页的缩略图：侧栏 + 标题行 + 正文行 + 一块卡片 + 主按钮色块。
+ * `theme` 是主题 id，局部色由 `.theme-preview[data-preview-theme='<id>']` 提供。
+ */
+function ThemePreview({ theme }: { theme: string }) {
   return (
     <span className="theme-preview" data-preview-theme={theme} aria-hidden="true">
       <span className="theme-preview-rail">

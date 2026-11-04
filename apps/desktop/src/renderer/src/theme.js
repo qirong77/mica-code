@@ -1,10 +1,13 @@
 /**
  * 渲染层的主题运行时：偏好从运行时界面状态（ui-state 的 `theme` 键）来，落到
- * `<html data-theme>` 上，再把最终主题广播给 xterm / monaco 这类读不到 CSS 变量的消费者。
+ * `<html data-theme>`（具体主题 id）与 `<html data-appearance>`（亮/暗档）上，再把最终
+ * 主题广播给 xterm / monaco 这类读不到 CSS 变量的消费者。
  *
  * 两层颜色的分工：
- * - 颜色本身在 CSS 里（`assets/app.css` 的 `@theme` 与 `[data-theme='light']` 覆盖），
- *   切换只是换一个属性，所有页面/窗口立刻跟着变，不重载、不重建组件；
+ * - 颜色本身在 CSS 里（`assets/app.css` 的 `@theme` 与每个主题的 `[data-theme='<id>']`
+ *   覆盖块），切换只是换一个属性，所有页面/窗口立刻跟着变，不重载、不重建组件；
+ * - `data-appearance` 只回答「这张底是亮的还是暗的」，给那些与具体调色板无关的规则用
+ *   （浮层阴影权重、屏幕涂层、首帧底色）；新增主题只需要补 token 块，不用碰它们；
  * - 这里只负责「现在是哪个主题」以及同步给读 options 的库。
  *
  * 首帧由 `public/theme-boot.js` 同步上色（读 localStorage 缓存，见 CACHE_KEY）；缓存只是
@@ -12,11 +15,14 @@
  * 在启动拉到界面状态后以它为准。
  */
 import {
+  DEFAULT_DARK_THEME,
   DEFAULT_THEME_PREFERENCE,
-  THEME_COLOR_META,
   THEME_UI_STATE_KEY,
+  isThemeId,
   normalizeThemePreference,
-  resolveThemeName
+  resolveThemeName,
+  themeAppearance,
+  themeCanvasColor
 } from '@packages/mica-web-shared/index.js'
 
 /** 启动脚本 `public/theme-boot.js` 也读这个键（那边是 classic script，只能各写一份常量）。 */
@@ -87,21 +93,26 @@ function bindSystemTheme() {
   else if (typeof mediaQuery.addListener === 'function') mediaQuery.addListener(onChange)
 }
 
-/** 把最终主题写到 DOM 上；返回实际生效的主题，方便调用方（启动日志/测试）读取。 */
+/** 把最终主题写到 DOM 上；返回实际生效的主题 id，方便调用方（启动日志/测试）读取。 */
 export function applyResolvedTheme(theme) {
-  const next = theme === 'light' ? 'light' : 'dark'
+  const next = isThemeId(theme) ? theme : DEFAULT_DARK_THEME
+  const appearance = themeAppearance(next)
+  const canvas = themeCanvasColor(next)
   if (typeof document !== 'undefined') {
     document.documentElement.setAttribute('data-theme', next)
-    document.documentElement.style.colorScheme = next
+    document.documentElement.setAttribute('data-appearance', appearance)
+    document.documentElement.style.colorScheme = appearance
+    // 根上的底色只在样式表还没到时露出来（启动占位），切换时跟着换掉即可。
+    document.documentElement.style.background = canvas
     const meta = document.querySelector('meta[name="theme-color"]')
-    if (meta) meta.setAttribute('content', THEME_COLOR_META[next])
+    if (meta) meta.setAttribute('content', canvas)
     // 装到 iOS 主屏后，状态栏文字颜色由这条决定：亮色页面必须用 default（深色文字），
     // 否则 black-translucent 的白字在白底上看不见。
     const iosStatusBar = document.querySelector(
       'meta[name="apple-mobile-web-app-status-bar-style"]'
     )
     if (iosStatusBar)
-      iosStatusBar.setAttribute('content', next === 'light' ? 'default' : 'black-translucent')
+      iosStatusBar.setAttribute('content', appearance === 'light' ? 'default' : 'black-translucent')
   }
   const changed = resolved !== next
   resolved = next

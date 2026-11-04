@@ -23,7 +23,7 @@ bun run format             # 全仓格式化；局部任务只格式化改动文
 ```bash
 npm install
 npm run dev                # 构建运行时后启动 Electron + Vite
-npm test                   # bun test，覆盖 host / renderer / main
+npm test                   # bun test，4 worker 并行，覆盖 host / renderer / main
 npx eslint src/
 npm run build              # 并行：根 CLI 构建 + 外壳 + Web 运行时
 npm run build:server       # 只重建 out/server
@@ -47,12 +47,13 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 ## 验证
 
-**默认只跑与改动最接近的那一两条单测 + `bun run typecheck`。** 全量 `bun run test`（约 90s）、`npx eslint src/`（desktop 全量）、`apps/cli/src/cli/app-server.flows.test.ts` 这类真实子进程 E2E 只在发布前、跨慢套件改动或用户明确要求时跑；不要用长测试兜底，也不要为「更保险」重复跑同一批。
+**默认只跑与改动最接近的那一两条单测 + `bun run typecheck`。** 全量 `bun run test`（实测 8 核、load 8–10 的机器上约 4 分钟：unit 43s + process 209s，另加 desktop `npm test` 51s）、`npx eslint src/`（desktop 全量，带缓存约 8s）、`apps/cli/src/cli/app-server.flows.test.ts` 这类真实子进程 E2E 只在发布前、跨慢套件改动或用户明确要求时跑；不要用长测试兜底，也不要为「更保险」重复跑同一批。
 
 - 局部改动跑相关测试 + `bun run typecheck` + `git diff --check`。
 - `bun run test` 走 `scripts/run-tests.mjs`：先 `scripts/prune-test-temp.mjs` 清掉 `os.tmpdir()` 下过期的 `mica*` 测试目录（保留 `mica-tasks`，`MICA_TEST_TEMP_MAX_AGE_HOURS` 默认 6h），再串行跑两个 project，unit 失败即跳过 process。`test/globalSetup.ts` 用 `MICA_TEST_ROOT` 作整轮唯一的临时根并在结束时删除；worker 是被直接杀掉的，`setupFiles` 里的 exit 钩子不会触发，清理只能放在 globalSetup。
 - 测试分两个 project（`vitest.config.ts`）：`unit` 是进程内单测、按文件并行；`process` 是真实子进程 / PTY / TUI 的 E2E，文件串行、文件内用例并发。慢的根源是每个用例 spawn 一次真实 `mica`（冷启动 1–1.5s），所以新增 E2E 用例要用 `it.concurrent` 语义（每用例自带 mock provider 与 `MICA_HOME`），不要把 `process` 项目丢回并行池：它和 unit 的 worker 抢 CPU 时会打挂 `btw.pty`、turn lease 这类时序敏感用例。
-- `testTimeout` 显式给定而不是沿用 Vitest 默认 5s：unit 里有真实 git 仓库与文件 I/O，process 的 PTY 用例内部就按 20s 等待。机器一忙（多个 worker + 开发者自己的进程）5s 会打挂与代码无关的用例。并发上限同理：`unit` 的 `maxWorkers` 固定 4、`process` 的 `maxConcurrency` 固定 3，再往上不更快，只是把时间换成偶发超时。
+- `testTimeout` 显式给定而不是沿用 Vitest 默认 5s：unit 里有真实 git 仓库与文件 I/O，process 的 PTY 用例内部就按 20s 等待。机器一忙（多个 worker + 开发者自己的进程）5s 会打挂与代码无关的用例。desktop 的 `npm test` 同理显式给 `--timeout=20000`：那里的 git 夹具用例常态就要 3–8s，沿用 bun 默认 5s 会随机报「timed out after 5000ms」。并发上限：`unit` 的 `maxWorkers` 固定 4（6 个实测有 7 个用例超时）；`process` 的 `maxConcurrency` 是 6（实测 3 → 6 把整轮 397s 压到 209s，失败数不变）。
+- desktop 的 `npm test` 用 `--parallel=4`（串行 138s → 51s）；再往上（实测 6）在这台机器上反而更慢。`apps/desktop/test-setup.js` 把测试里的 git 与这台机器装的扩展隔离：`GIT_CONFIG_GLOBAL=/dev/null` 关掉全局 `core.hooksPath` / trace2，PATH 前置一个只含 `git → /usr/bin/git` 的临时目录绕开 `~/.git-ai/bin/git` 这类包装二进制（每次 commit 实测 +170ms）。
 - 根测试用 Vitest / Node；`PtyDriver` 仅 Node/vitest 可用，Bun 用 manager + Node helper。
 - `app-server.flows.test.ts` 用本地 mock provider，无需真实 key；resume 用隔离 `MICA_HOME`。
 - 允许使用用户真实 Mica 配置中的 API 做少量、与当前改动直接相关的冒烟测试、复现和验证，无需逐次征求同意；仍使用隔离的 `MICA_HOME`，不改写原配置、不输出凭据，临时凭据副本用完清理。控制实际 API 请求总量，计入工具迭代、重试及 helper/subagent 请求；大量请求（批量评测、压力测试、长循环或大规模并发）必须先说明目的、预计请求量与成本范围，并取得用户同意，不能拆成多批少量请求绕过。

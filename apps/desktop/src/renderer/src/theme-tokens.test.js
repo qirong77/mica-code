@@ -2,16 +2,24 @@ import { describe, expect, it } from 'bun:test'
 import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DEFAULT_DARK_THEME, THEMES } from '@packages/mica-web-shared/index.js'
 
 /**
  * 颜色主题契约测试：`assets/app.css` 是渲染层唯一的颜色来源。
  *
- * 主题切换只改 `<html data-theme>`，所以两条硬约束：
- * - `@theme` 里每个语义色都要有 `html[data-theme='light']` 覆盖，否则亮色下漏成暗色值；
+ * 主题切换只改 `<html data-theme>`（具体主题）与 `<html data-appearance>`（亮/暗档），
+ * 所以三条硬约束：
+ * - 注册表（`packages/mica-web-shared/theme.ts` 的 THEMES）里的每个主题都要在 app.css 里
+ *   有 `html[data-theme='<id>']` 块，且覆盖 `@theme` 的每一个 `--color-*`——漏一个就在
+ *   该主题下漏成 Darcula 的值；
+ * - 每个主题块里的前景/状态色要在自己的画布上可读（亮色档的 soft 必须比 primary 更深）；
  * - 规则里不许再出现 `rgb(255 255 255 / N%)` 这种写死的白色 alpha——它必须写成
  *   `color-mix(in srgb, var(--color-fg-max) N%, transparent)`，亮色里才会自动变黑。
  *
- * 例外只有两类，都在下面显式放行：`@theme` / 亮色块自己的 token 定义（它们就是字面量），
+ * 「亮底要单独处理」的那些规则（阴影权重、查找条输入框、行内代码药丸、屏幕涂层）挂在
+ * `html[data-appearance='light']` 上，新增主题自动继承，不必再配一遍。
+ *
+ * 例外只有两类，都在下面显式放行：主题块自己的 token 定义（它们就是字面量），
  * 以及 `::highlight(chat-find-*)` 的命中高亮（琥珀色固定，不随主题变）。注释里的颜色说明
  * 不算残留。
  */
@@ -73,10 +81,10 @@ function shadowAlpha(body) {
   return match ? Number(match[1]) : null
 }
 
-/** 定位一条顶层规则（可选限定在亮色主题前缀下）的声明体。 */
+/** 定位一条顶层规则（`light` = 限定在「亮底」那一档的覆盖规则下）。 */
 function ruleBody(selector, { light = false } = {}) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const prefix = light ? "html\\[data-theme='light'\\] " : ''
+  const prefix = light ? "html\\[data-appearance='light'\\] " : ''
   return blockFor(stripComments(css), new RegExp(`^${prefix}${escaped} \\{`, 'm'))
 }
 
@@ -84,16 +92,42 @@ const cleanCss = stripComments(css)
 const themeBlock = blockFor(cleanCss, /^@theme\s*\{/m)
 const lightBlock = blockFor(cleanCss, /^html\[data-theme='light'\]\s*\{/m)
 
+/**
+ * 注册表里每个主题在 app.css 里的 token 块；缺块时为 null（下面的用例会因此失败）。
+ * 默认暗色（darcula）的取值写在 `@theme` 里，没有自己的 `html[data-theme]` 块。
+ */
+const themeBlocks = new Map(
+  THEMES.map((theme) => [
+    theme.id,
+    theme.id === DEFAULT_DARK_THEME
+      ? themeBlock
+      : blockFor(cleanCss, new RegExp(`^html\\[data-theme='${theme.id}'\\]\\s*\\{`, 'm'))
+  ])
+)
+
+/** `terminal-theme.js` 里每个主题对应的常量名（表是按主题手写的，名字不会自动对齐）。 */
+const TERMINAL_CONSTANTS = {
+  dark: 'DARK',
+  light: 'LIGHT',
+  mocha: 'MOCHA',
+  latte: 'LATTE',
+  'tokyo-night': 'TOKYO_NIGHT',
+  'tokyo-night-light': 'TOKYO_NIGHT_LIGHT'
+}
+
 /** 语义色 token 名（出现顺序去重）。 */
 function colorTokens(block) {
   return [...new Set([...block.matchAll(/--color-[\w-]+(?=\s*:)/g)].map((match) => match[0]))]
 }
 
-/** 亮色块里某个 token 的 hex 值；不是 hex（如 color-mix）时返回 null。 */
-function lightHexToken(name) {
-  const match = new RegExp(`--color-${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`).exec(lightBlock ?? '')
+/** 主题块里某个 token 的 hex 值；不是 hex（如 color-mix）时返回 null。 */
+function hexToken(name, block = lightBlock) {
+  const match = new RegExp(`--color-${name}:\\s*(#[0-9a-fA-F]{6})\\s*;`).exec(block ?? '')
   return match ? match[1].toLowerCase() : null
 }
+
+/** 兼容旧名字：默认读「浅色」主题那一块。 */
+const lightHexToken = (name) => hexToken(name, lightBlock)
 
 /** WCAG 相对亮度：只用来验证「白/近白底上的文字色」够不够黑。 */
 function srgbChannel(value) {
@@ -101,22 +135,36 @@ function srgbChannel(value) {
   return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
 }
 
-/** 文字色与白底（#ffffff）的对比度。 */
-function contrastOnWhite(hex) {
+/** 两色对比度（WCAG）。默认白底；深色主题传画布色。 */
+function contrastRatio(hex, background = '#ffffff') {
   const [r, g, b] = [1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16))
   const luminance = 0.2126 * srgbChannel(r) + 0.7152 * srgbChannel(g) + 0.0722 * srgbChannel(b)
-  return 1.05 / (luminance + 0.05)
+  const [br, bg2, bb] = [1, 3, 5].map((start) => parseInt(background.slice(start, start + 2), 16))
+  const back =
+    0.2126 * srgbChannel(br) + 0.7152 * srgbChannel(bg2) + 0.0722 * srgbChannel(bb)
+  const [high, low] = [luminance, back].sort((a, b) => b - a)
+  return (high + 0.05) / (low + 0.05)
 }
 
 describe('app.css 颜色 token 主题契约', () => {
-  it('@theme 的每个 --color-* 都在亮色主题块里有覆盖', () => {
+  it('注册表里的每个主题都有 token 块，且覆盖 @theme 的全部 --color-*', () => {
     expect(themeBlock).not.toBeNull()
     expect(lightBlock).not.toBeNull()
+    expect(THEMES.length).toBeGreaterThanOrEqual(2)
 
-    const darkTokens = colorTokens(themeBlock)
-    const lightTokens = new Set(colorTokens(lightBlock))
-    expect(darkTokens.length).toBeGreaterThan(30)
-    expect(darkTokens.filter((token) => !lightTokens.has(token))).toEqual([])
+    const baseTokens = colorTokens(themeBlock)
+    expect(baseTokens.length).toBeGreaterThan(30)
+    for (const theme of THEMES) {
+      const block = themeBlocks.get(theme.id)
+      expect(block, `${theme.id} 在 app.css 里缺少 html[data-theme='${theme.id}'] 块`).not.toBeNull()
+      const tokens = new Set(colorTokens(block))
+      expect(
+        baseTokens.filter((token) => !tokens.has(token)),
+        `${theme.id} 漏了这些 token`
+      ).toEqual([])
+      // 画布色必须与注册表里登记的 canvas 一致：首帧底色、<meta theme-color> 都用它。
+      expect(new RegExp(`--color-canvas:\\s*${theme.canvas};`).test(block), theme.id).toBe(true)
+    }
   })
 
   it('洗色层与 line-soft 两套主题都定义（暗色白 alpha，亮色黑 alpha）', () => {
@@ -172,7 +220,7 @@ describe('app.css 颜色 token 主题契约', () => {
     let rulesOnly = cleanCss
     for (const pattern of [
       /^@theme\s*\{/m,
-      /^html\[data-theme='light'\]\s*\{/m,
+      /^html\[data-theme='[\w-]+'\]\s*\{/m,
       /^::highlight\(chat-find-[\w-]+\)\s*\{/m
     ]) {
       rulesOnly = removeAllBlocks(rulesOnly, pattern)
@@ -202,20 +250,43 @@ describe('app.css 颜色 token 主题契约', () => {
    * 且在白底上达到 WCAG AA 的 4.5:1。A 组实测 bg-warn/25、bg-warn/8 这类淡色底上的
    * 文字对比度只有 2.7~3.0，就是 soft 太浅导致的，warn-soft 因此改取 amber-800。
    */
-  it('亮色 soft 状态色比 primary 更深且白底可读（≥4.5:1）', () => {
-    for (const family of ['warn', 'success', 'danger', 'info']) {
-      const primary = lightHexToken(family)
-      const soft = lightHexToken(`${family}-soft`)
-      expect(primary, `--color-${family}`).not.toBeNull()
-      expect(soft, `--color-${family}-soft`).not.toBeNull()
+  it('每个亮色主题的 soft 状态色都比 primary 更深，且在自己的画布上可读（≥4.5:1）', () => {
+    for (const theme of THEMES.filter((entry) => entry.appearance === 'light')) {
+      const block = themeBlocks.get(theme.id)
+      for (const family of ['warn', 'success', 'danger', 'info']) {
+        const primary = hexToken(family, block)
+        const soft = hexToken(`${family}-soft`, block)
+        expect(primary, `${theme.id} --color-${family}`).not.toBeNull()
+        expect(soft, `${theme.id} --color-${family}-soft`).not.toBeNull()
+        expect(
+          contrastRatio(soft, theme.canvas),
+          `${theme.id} --color-${family}-soft ${soft} 画布对比度`
+        ).toBeGreaterThanOrEqual(4.5)
+        expect(
+          contrastRatio(soft, theme.canvas),
+          `${theme.id} --color-${family}-soft 应比 --color-${family} 更深（亮色方向与暗色相反）`
+        ).toBeGreaterThan(contrastRatio(primary, theme.canvas))
+      }
+    }
+  })
+
+  /**
+   * 深色主题也要能读：正文（--color-fg）在自己的画布上至少到 AA 的 7:1（正文级），
+   * 次级文字（--color-fg-muted）至少 3:1。Catppuccin 的 overlay 档很淡，压深不够就会
+   * 出现「深色主题里过程文字几乎看不见」。
+   */
+  it('每个主题的前景阶梯在自己的画布上可读', () => {
+    for (const theme of THEMES) {
+      const block = themeBlocks.get(theme.id)
+      const fg = hexToken('fg', block)
+      const muted = hexToken('fg-muted', block)
+      expect(fg, `${theme.id} --color-fg`).not.toBeNull()
+      expect(muted, `${theme.id} --color-fg-muted`).not.toBeNull()
+      expect(contrastRatio(fg, theme.canvas), `${theme.id} 正文对比度`).toBeGreaterThanOrEqual(7)
       expect(
-        contrastOnWhite(soft),
-        `--color-${family}-soft ${soft} 白底对比度`
-      ).toBeGreaterThanOrEqual(4.5)
-      expect(
-        contrastOnWhite(soft),
-        `--color-${family}-soft 应比 --color-${family} 更深（亮色方向与暗色相反）`
-      ).toBeGreaterThan(contrastOnWhite(primary))
+        contrastRatio(muted, theme.canvas),
+        `${theme.id} 次级文字对比度`
+      ).toBeGreaterThanOrEqual(3)
     }
   })
 
@@ -302,7 +373,6 @@ describe('app.css 颜色 token 主题契约', () => {
 
   it('菜单文字有专属 token，侧栏不得回退成中灰的 fg-soft', () => {
     expect(themeBlock).toContain('--color-nav-fg:')
-    expect(lightBlock).toContain('--color-nav-fg:')
     for (const token of [
       '--color-bubble:',
       '--color-inline-code:',
@@ -310,7 +380,8 @@ describe('app.css 颜色 token 主题契约', () => {
       '--color-inline-code-border:'
     ]) {
       expect(themeBlock).toContain(token)
-      expect(lightBlock).toContain(token)
+      // 每个主题都自带这一组「按主题性格走」的 token（覆盖检查在第一个用例里，这里只点名）。
+      for (const [id, block] of themeBlocks) expect(block, `${id} ${token}`).toContain(token)
     }
 
     const offenders = []
@@ -329,7 +400,7 @@ describe('app.css 颜色 token 主题契约', () => {
   it('用户消息带与亮色次级文字接到各自的 token', () => {
     expect(css).toMatch(/--chat-user:\s*var\(--color-bubble\)/)
     expect(css).toMatch(
-      /html\[data-theme='light'\] \.chat-view,[\s\S]{0,120}--chat-muted:\s*var\(--color-fg-dim\)/
+      /html\[data-appearance='light'\] \.chat-view,[\s\S]{0,120}--chat-muted:\s*var\(--color-fg-dim\)/
     )
   })
 
@@ -340,7 +411,7 @@ describe('app.css 颜色 token 主题契约', () => {
   it('亮色过程文字取 label-tertiary，不跟着正文走', () => {
     const body = blockFor(
       cleanCss,
-      /^html\[data-theme='light'\] \.chat-view,\s*\nhtml\[data-theme='light'\] \.chat-modal-overlay\s*\{/m
+      /^html\[data-appearance='light'\] \.chat-view,\s*\nhtml\[data-appearance='light'\] \.chat-modal-overlay\s*\{/m
     )
     expect(body).not.toBeNull()
     expect(body).toContain('--chat-muted: var(--color-fg-dim)')
@@ -376,7 +447,7 @@ describe('app.css 颜色 token 主题契约', () => {
    */
   it('热力图空格用专属 token，不再拿 canvas 顶替', () => {
     expect(themeBlock).toContain('--color-heat-empty:')
-    expect(lightBlock).toContain('--color-heat-empty:')
+    for (const [id, block] of themeBlocks) expect(block, id).toContain('--color-heat-empty:')
     const stats = readFileSync(resolve(RENDERER_DIR, 'stats/StatsView.jsx'), 'utf8')
     expect(stats).toContain("'var(--color-heat-empty)'")
     expect(stats).not.toMatch(/CALENDAR_RAMP = \[\s*'var\(--color-canvas\)'/)
@@ -385,21 +456,73 @@ describe('app.css 颜色 token 主题契约', () => {
   /**
    * 亮底上的 ANSI bright 色不能比本色更浅：`#f25a5a` 这类亮红在白色终端上只剩 2.9:1，
    * ls / git 的强调色反而糊掉。彩色档保持本色，只有黑白两对走灰度阶梯。
+   *
+   * 表在 `terminal-theme.js`（主窗口与终端控制窗口共用一份），逐个亮色主题校验。
    */
   it('亮色终端的彩色 bright 档不比本色更浅（白底可读）', () => {
-    const source = readFileSync(resolve(RENDERER_DIR, 'TerminalHost.jsx'), 'utf8')
-    const body = blockFor(source, /const LIGHT_TERMINAL_THEME = \{/)
-    expect(body).not.toBeNull()
-    const value = (key) => {
-      const match = new RegExp(`\\b${key}: '(#[0-9a-fA-F]{6})'`).exec(body)
-      return match ? match[1].toLowerCase() : null
+    const source = readFileSync(resolve(RENDERER_DIR, 'terminal-theme.js'), 'utf8')
+    for (const theme of THEMES.filter((entry) => entry.appearance === 'light')) {
+      const constName = TERMINAL_CONSTANTS[theme.id]
+      const body = blockFor(source, new RegExp(`const ${constName} = \\{`))
+      expect(body, `${theme.id} 的终端调色板`).not.toBeNull()
+      const value = (key) => {
+        const match = new RegExp(`\\b${key}: '(#[0-9a-fA-F]{6})'`).exec(body)
+        return match ? match[1].toLowerCase() : null
+      }
+      for (const name of ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan']) {
+        const base = value(name)
+        const bright = value(`bright${name[0].toUpperCase()}${name.slice(1)}`)
+        expect(base, `${theme.id} ${name}`).not.toBeNull()
+        expect(bright, `${theme.id} bright${name}`).toBe(base)
+        expect(
+          contrastRatio(base, theme.canvas),
+          `${theme.id} ${name} 画布对比度`
+        ).toBeGreaterThanOrEqual(4.2)
+      }
     }
-    for (const name of ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan']) {
-      const base = value(name)
-      const bright = value(`bright${name[0].toUpperCase()}${name.slice(1)}`)
-      expect(base, name).not.toBeNull()
-      expect(bright, `bright${name}`).toBe(base)
-      expect(contrastOnWhite(base), `${name} 白底对比度`).toBeGreaterThanOrEqual(4.2)
+  })
+
+  /**
+   * 三处「非 CSS」的消费者必须逐主题对齐 app.css：终端的 xterm 表、终端窗口的外壳色、
+   * 以及每个主题自己的画布色。少一处就会出现「切到某主题后终端仍是上一套颜色」。
+   */
+  it('终端与终端窗口按主题对齐 app.css 的 canvas / panel / line / fg', () => {
+    const terminalSource = readFileSync(resolve(RENDERER_DIR, 'terminal-theme.js'), 'utf8')
+    const pageCss = readFileSync(resolve(RENDERER_DIR, 'terminal-page.css'), 'utf8')
+
+    for (const theme of THEMES) {
+      const block = themeBlocks.get(theme.id)
+      const token = (name) => {
+        const match = new RegExp(`--color-${name}:\\s*([^;]+);`).exec(block)
+        return match ? match[1].trim() : null
+      }
+
+      // xterm：背景与前景跟着画布和正文走。
+      const table = blockFor(terminalSource, new RegExp(`const ${TERMINAL_CONSTANTS[theme.id]} = \\{`))
+      expect(table, `${theme.id} 缺少 xterm 调色板`).not.toBeNull()
+      expect(table).toContain(`background: '${theme.canvas}'`)
+      const terminalFg = /foreground: '(#[0-9a-f]{6})'/.exec(table)
+      expect(terminalFg, `${theme.id} xterm foreground`).not.toBeNull()
+      expect(
+        contrastRatio(terminalFg[1], theme.canvas),
+        `${theme.id} xterm 前景在画布上不可读`
+      ).toBeGreaterThanOrEqual(4.5)
+
+      // 终端窗口外壳：深色主题走 :root 默认值，其余每个主题一个块。
+      const shell = blockFor(pageCss, new RegExp(`^html\\[data-theme='${theme.id}'\\] \\{`, 'm'))
+      if (theme.id === 'dark') {
+        expect(blockFor(pageCss, /^:root \{/m)).toContain(`--terminal-bg: ${theme.canvas};`)
+        continue
+      }
+      expect(shell, `${theme.id} 缺少终端窗口配色块`).not.toBeNull()
+      expect(shell).toContain(`--terminal-bg: ${theme.canvas};`)
+      expect(shell).toContain(`--terminal-panel: ${token('panel')};`)
+      const shellFg = /--terminal-fg:\s*(#[0-9a-f]{6});/.exec(shell)
+      expect(shellFg, `${theme.id} --terminal-fg`).not.toBeNull()
+      expect(
+        contrastRatio(shellFg[1], theme.canvas),
+        `${theme.id} 终端窗口正文在画布上不可读`
+      ).toBeGreaterThanOrEqual(4.5)
     }
   })
 })

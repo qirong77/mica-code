@@ -25,6 +25,7 @@ const EVENT_CHANNELS = [
   'ui-state:changed',
   'loops:changed',
   'stats:changed',
+  'git:changed',
   'browser:changed',
   'terminal:changed',
   'dev:reload',
@@ -513,6 +514,11 @@ function createWebApi(env) {
     },
 
     git: {
+      // 仓库变更订阅：页面挂载后声明关注，宿主对 `.git` 起 fs.watch，提交 / 切分支 /
+      // 暂存一发生就推 `git:changed`（见 host/git-watch.js）。页面隐藏或离开时 unwatch。
+      watch: (cwd) => invoke('git:watch', { cwd }),
+      unwatch: (cwd) => invoke('git:unwatch', { cwd }),
+      onChanged: (callback) => subscribe('git:changed', callback),
       status: (cwd) => invoke('git:status', { cwd }),
       // `refresh` 是用户主动刷新：跳过运行时那 5s 的工作区缓存，立刻重算。
       summary: (cwd, options = null) =>

@@ -30,9 +30,12 @@
 - 改配置页后跑 `bun run build:config-web` 并提交 `generatedStaticAssets.ts`。
 - 样式限定 `.mica-config-ui`；桌面 app.css 与配置页共用 Darcula 暗色 token；页面级 html/body 高度链归宿主。
 
-## 主题（浅色 / 深色 / 跟随系统）
+## 主题（6 套主题 + 跟随系统）
 
-- 主题是默认能力：桌面 UI 支持 浅色 / 深色 / 跟随系统，设置在 Settings → Appearance（偏好存运行时界面状态 `theme`，默认 `auto`，`apps/desktop/src/renderer/src/theme.js` 是渲染层唯一入口）。颜色只用 `--color-*` / `.mica-config-ui` 容器变量：暗色值在 `@theme`（Darcula），亮色值在 `html[data-theme='light']` 覆盖块；切换只改 `data-theme` 属性，不重载页面。xterm / monaco 读不到 CSS 变量，必须订阅 `theme.js` 的 `subscribeTheme` 同步 options/主题。
+- 主题是默认能力：「跟随系统 / Darcula / 浅色 / Catppuccin Mocha / Catppuccin Latte / Tokyo Night / Tokyo Night Light」，设置在 Settings → Appearance（偏好存运行时界面状态 `theme`，默认 `auto`）。注册表只有一份：`packages/mica-web-shared/theme.ts` 的 `THEMES`（id / 明暗档 / 画布色 / 同源配对的另一档）；`apps/desktop/src/renderer/src/theme.js` 是渲染层唯一入口，切换只改 `<html data-theme>` 与 `data-appearance`，不重载页面。
+- `<html data-theme='<id>'>` 选具体主题，`<html data-appearance='light|dark'>` 只表达亮/暗——所有「亮底要单独处理」的规则（阴影权重、查找条输入框、屏幕涂层）都挂在 `data-appearance` 上，新增主题自动继承，别按主题 id 再写一遍。
+- 颜色只用 `--color-*` / `.mica-config-ui` 容器变量：默认暗色（Darcula）的取值在 `@theme` 与 `.mica-config-ui` 默认块里，其余每个主题一个 `html[data-theme='<id>']` 块。**加主题 = 注册表加一项 + 各宿主补一个块**：桌面 `assets/app.css`、设置页 `packages/mica-config-ui/web/styles.css`（含主题卡预览色板）、终端窗口 `renderer/src/terminal-page.css`、xterm 表 `renderer/src/terminal-theme.js`、monaco 主题（`monaco-runtime.js` 用 `--color-*` 的镜像值）。`theme-tokens.test.js` / `appearance-tokens.test.ts` / `theme-boot.test.js` 会逐个主题拦住漏掉的那处。
+- 第三方主题的取值走**上游原始调色板**，不照着截图调：Catppuccin 取自官方 `palette.json`（`mocha` / `latte` 的 `colors` + `ansiColors`），Tokyo Night 取自 `enkia/tokyo-night-vscode-theme` 的 theme JSON。亮底主题的 ANSI 彩色若在上游画布上不够 4.5:1（Catppuccin Latte 的绿/黄/品红就是），按同一色相压暗后再落地，并在块里写一行注释说明——别直接抄上游导致终端输出糊在浅底上。
 - 亮色的取值**逐档取自 DeepSeek harness 开源仓库**（`deepseek-ai/deepseek-harness` 的 `packages/client/ui-theme/src/styles/design-platform.css`：`--dsw-static-neutral-bluish-*` 调色板 + `--dsw-alias-*` 语义层；对话各层的用法看 `packages/client/ui-chat/src/client/chat/*.module.css`），不是照着截图调出来的，要核对就 `dsh web` 起一份真界面读计算样式。改亮色前先看那份文件的语义：正文、菜单、标题都是 `label-primary`（neutral-bluish-1000 近黑，不是中灰；亮色顶端两档因此并成同一个值），过程文字（工具行/思考/时间戳）是 `label-tertiary`（neutral-bluish-600），用户消息带是 `--dsw-specific-bubble`（deepseek-50 淡蓝），行内代码是 `markdown-inline-code`（浅底 + `border-l1` 描边），面板是 `neutral-bluish-50`，选中行是 `neutral-bluish-100`（= `--color-active`，会话行/导航/文件树都用它，不要用洗色层凑），洗色层是带蓝调的 `rgba(38 49 72, α)`。
 - 因此亮色有五个专属 token 不能回退成通用灰阶：`--color-nav-fg`（侧栏/菜单行）、`--color-bubble`（用户消息带）、`--color-inline-code{,-bg,-border}`（行内代码药丸）、`--color-heat-empty`（热力图空格：亮色 canvas 是纯白，铺在 panel 卡片上等于没有网格）。`theme-tokens.test.js` 钉住了这些锚点，值要改就一起改测试并写明理由。
 

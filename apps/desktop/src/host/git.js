@@ -33,6 +33,7 @@ import {
 } from './git-ops'
 import { blameLine } from './git-blame'
 import { getCommit, getLog } from './git-log'
+import { unwatchRepository, watchRepository } from './git-watch'
 
 /** 徽标自己那一层缓存：比全树扫描的 5s 长，配合「先回旧值、后台重算」。 */
 const CHANGE_COUNTS_TTL_MS = 20_000
@@ -142,8 +143,10 @@ async function getChangeCounts(cwd, { refresh = false } = {}) {
     cached.refreshing = true
     void read()
       .then((value) => {
+        // 存读之前那份签名（与前台路径一致）：读的过程中切了分支的话，这份数字属于旧
+        // HEAD，配上新签名会被当成 fresh，之后再 20s 都不重算。
         changeCountsState.set(key, {
-          signature: `${worktreeSignature(root) || ''}|${worktreeEpochOf(root)}`,
+          signature,
           at: Date.now(),
           value,
           refreshing: false
@@ -207,6 +210,12 @@ function workspaceError(error) {
 }
 
 export function registerGitIpc() {
+  // 页面声明「我在看这个仓库」：宿主对 `.git` 起 fs.watch，提交 / 切分支 / 暂存
+  // 一发生就 `git:changed` 推过来，不必等下一轮轮询（见 host/git-watch.js）。
+  ipcMain.handle('git:watch', (_event, { cwd } = {}) => watchRepository(cwd))
+
+  ipcMain.handle('git:unwatch', (_event, { cwd } = {}) => unwatchRepository(cwd))
+
   ipcMain.handle('git:status', async (_event, { cwd } = {}) => {
     try {
       return { status: await getStatus(cwd), error: null }

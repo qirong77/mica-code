@@ -788,6 +788,9 @@ export class PluginManager {
     const hooks = baseContext.hooks as { setHandlerErrorReporter?: HookErrorReporterInstaller };
     if (typeof hooks?.setHandlerErrorReporter !== 'function') return;
     const loggers = new Map<string, ReturnType<typeof createPluginLogger>>();
+    // 每个插件在每个钩子上失败了多少次：观察方按事件数统计会因为限流而严重低估
+    // 「每轮都在炸」的钩子，累计数必须由发事件的一方给出。
+    const hookFailures = new Map<string, number>();
     const configDir = baseContext.paths?.config;
     hooks.setHandlerErrorReporter((error, hook, pluginId) => {
       const owner = pluginId ?? '(unscoped)';
@@ -801,14 +804,19 @@ export class PluginManager {
       if (pluginId)
         writePluginHealth(pluginId, { level: 'error', message: `钩子 ${hook} 执行失败：${message}` }, { configDir });
       // 观察通道自己的 handler 失败不再回灌：那会让 notify 递归调用自己。
-      if (pluginId && hook !== 'plugin:observe')
+      if (pluginId && hook !== 'plugin:observe') {
+        const key = `${pluginId}\n${hook}`;
+        const failures = (hookFailures.get(key) ?? 0) + 1;
+        hookFailures.set(key, failures);
         baseContext.hooks.notify<PluginObservationEvent>('plugin:observe', {
           pluginId,
           timestamp: new Date().toISOString(),
           type: 'hook:failed',
           hook,
+          failures,
           error: message,
         });
+      }
     });
   }
 }

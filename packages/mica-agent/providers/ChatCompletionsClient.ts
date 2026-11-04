@@ -246,7 +246,10 @@ export class ChatCompletionsClient extends BaseAgent<
         usage: NonNullable<OpenAI.Chat.Completions.ChatCompletionChunk['usage']>;
         model: string;
       }> = [];
-      await withRetry(
+      // 失败也要有一条 request:end（outcome:'error'）：重试耗尽、HTTP 错误、空闲超时
+      // 都会从这里抛出去，只留一条孤立的 request:start 会让耗时统计凭空缺一块。
+      // 这里不包 try/catch，是为了不把整段流式处理重新缩进。
+      const failed = await withRetry(
         async () => {
           attemptHadOutput = false;
           attemptHadThinking = false;
@@ -296,8 +299,10 @@ export class ChatCompletionsClient extends BaseAgent<
               }
               const delta = choice?.delta;
               if (!delta) continue;
-              if (!firstDeltaAt) firstDeltaAt = Date.now();
               if (typeof delta.content === 'string' && delta.content) {
+                // 首字口径只认正文/思考增量：SDK 首块常常只有 role，记成「首字」会让
+                // firstTokenMs 退化成 TTFB。
+                if (!firstDeltaAt) firstDeltaAt = Date.now();
                 attemptHadOutput = true;
                 const textDelta: string =
                   contentSeparator && !emittedContentSeparator ? `${contentSeparator}${delta.content}` : delta.content;
@@ -311,6 +316,7 @@ export class ChatCompletionsClient extends BaseAgent<
               }
               const reasoning = readReasoningContent(delta);
               if (typeof reasoning === 'string' && reasoning) {
+                if (!firstDeltaAt) firstDeltaAt = Date.now();
                 attemptHadOutput = true;
                 throwIfQueryStopped(options);
                 attemptHadThinking = true;
@@ -379,7 +385,19 @@ export class ChatCompletionsClient extends BaseAgent<
             options?.onRetry?.({ attempt, error, delayMs });
           },
         },
+      ).then(
+        () => null,
+        (error: unknown) => ({ error }),
       );
+
+      if (failed) {
+        options?.signal?.removeEventListener?.('abort', onAbort);
+        finishRequest({
+          outcome: options?.signal?.aborted ? 'aborted' : 'error',
+          error: failed.error,
+        });
+        throw failed.error;
+      }
 
       // The OpenAI SDK swallows AbortError raised while waiting for the next
       // chunk and ends the stream normally. Without this check the aborted

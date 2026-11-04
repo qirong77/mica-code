@@ -32,7 +32,7 @@
 - helper 运行（宿主内部工作：压缩摘要 `compaction`、旁问线程 `thread`、桌面 BTW `btw`、插件自己问模型 `plugin-llm`、兜底 `subagent`）单独成一条运行记录，带 `helper: { kind, pluginId?, purpose? }`，按来源聚合运行数、成功 / 失败 / 中止、请求数、平均请求耗时与平均输出 token。它们同样花钱、同样会失败，但不是用户的一轮：运行数、失败率与「用户重试同一任务」的推导都不把它们算进去（压缩摘要每轮喂的是同一段 transcript，按用户输入判重只会把正常机制读成「回答被拒绝」）。
 - 用户纠正（`input:corrected`）：改写已发消息重跑、撤回还没发出的排队消息。它发生在两次运行之间，所以先按会话暂存，等该会话下一次运行开始时落进摘要并生成条目（同会话同类型合并计数）。这是「上一轮没被接受」唯一确凿的信号；`rebuild` 无法从轨迹重算它，重建时保留原有记录与对应条目。
 - 每次运行开始读一次 `plugin-status.json`，记下当时的 `host`、已加载数量、加载失败与被跳过的插件 id，并算一个稳定短 hash。两次运行的 hash 不同就说明插件集合变了——排查「这轮变差是不是插件没装上」不必再翻日志。
-- 插件的常驻任务（`ctx.background.register`）失败走 `plugin:observe`，按 `pluginId + taskId` 追加进 `plugin-events.jsonl`。常驻任务不在任何一轮里，健康状态也只留最后一句话，看不出它已经坏了三百次；同一任务在本进程内每 5 分钟最多落一条（每个任务的第一条一定落盘），`tick` / `failures` 随事件一起写下，聚合时仍能看出「它一直在坏」。记录到第三次才生成条目（前两次多半是外部服务抖了一下）。
+- 插件自身的失败走 `plugin:observe`，按 `pluginId + taskId` 追加进 `plugin-events.jsonl`：常驻任务（`ctx.background.register`）与钩子处理函数抛错（任务名记作 `hook:<钩子>`）。两者都不在任何一轮里，健康状态也只留最后一句话，看不出它已经坏了三百次；同一任务在本进程内每 5 分钟最多落一条（每个任务的第一条一定落盘），`tick` / `failures` 随事件一起写下。聚合时取「记录行数」与「事件自带累计数」中大的那个，所以限流不会把「一直在坏」读成「坏过一次」；因为进程重启会让累计数重新计数，这个数是一个下界。失败次数到第三次才生成条目（前两次多半是外部服务抖了一下）。
 - 最终组装的 system prompt 记录 SHA-256 和字符数，用于识别变化，正文不落盘。
 - 工具失败、无进展的重复调用、provider 重试、运行失败与「失败后重试同一任务」形成候选，按模式聚合，附运行 ID、事件序号和轨迹文件。
 - 非零退出码按**命令语义**判定：`rg` / `grep` 无匹配、`ls` / `test` / `which` 找不到、`diff` 有差异、`git diff --quiet` 有改动都是命令自身的正常结果，不算工具错误，只计入 `expectedExits`；`rg` 的退出码 2（正则错误）仍是真实错误。判定看决定 `$?` 的那个程序：链式命令取最后一段、管道取最后一个命令，所以 `bun test … | tail -25` 按 `tail` 判。
@@ -44,7 +44,7 @@
 
 不自动修改指令、工具、loop 或记忆，不生成或执行修改 patch。第一版交付观察、聚合和人工 review 流程。
 
-Markdown 报告的 `## Runs` 只列用户的一轮：一次 turn 配一条摘要，表会翻倍而没人看。helper 运行汇在 `## Helpers`（Runs / Completed / Failed / Aborted / Requests / 平均请求耗时 / 平均输出 token，按来源一行），插件常驻任务的失败在 `## Plugin health`（插件 / 任务 / 失败次数 / 最近一次时间 / 最近错误）。`## Plugin health` 是机器级事实：常驻任务没有工作目录，所以这一段不受 `review(cwd)` 的范围过滤。这两节都只统计；`## Findings` 里由它们派生的条目（`plugin-background`）与运行派生的条目一样可以 `assess`。
+Markdown 报告的 `## Runs` 只列用户的一轮：一次 turn 配一条摘要，表会翻倍而没人看。helper 运行汇在 `## Helpers`（Runs / Completed / Failed / Aborted / Requests / 平均请求耗时 / 平均输出 token，按来源一行），插件自身的失败在 `## Plugin health`（插件 / 任务 / 失败次数 / 最近一次时间 / 最近错误，失败次数是下界）。`## Plugin health` 是机器级事实：常驻任务与钩子都没有工作目录，所以这一段不受 `review(cwd)` 的范围过滤。这两节都只统计；`## Findings` 里由它们派生的条目（`plugin-background`）与运行派生的条目一样可以 `assess`。
 
 ## 存储与设置
 
@@ -52,7 +52,7 @@ Markdown 报告的 `## Runs` 只列用户的一轮：一次 turn 配一条摘要
 
 - `runs/<uuid>/`：每次运行独立的 `events.jsonl` 与 `summary.json`。
 - `decisions/`：每个问题条目独立的人工判断记录。
-- `plugin-events.jsonl`：插件常驻任务的失败记录（超过 4 MB 滚成 `plugin-events.1.jsonl`，旧的覆盖）。
+- `plugin-events.jsonl`：插件自身（常驻任务与钩子）的失败记录（超过 4 MB 滚成 `plugin-events.1.jsonl`，旧的覆盖）。
 - 报告由 `report` 按需导出，命令和工具返回实际文件路径。
 
 问题条目是从轨迹推导出来的派生数据，轨迹才是事实来源。改进了错误分类或聚合规则后，用 `rebuild` 让历史运行按新规则重算：替换 `findings` 与派生计数 `expectedExits`，运行次数、token、耗时与 outcome 保持原值。分类规则版本（`CLASSIFIER_VERSION`）变化后，常驻宿主会在启动时自动重算一次，`mica exec` 这类一次性宿主跳过、交给下一次常驻宿主。重建复用保存的参数指纹；正文完整时重新分类错误，关闭正文采集或正文截断时复用已保存的错误分类，保留相同的问题身份与人工评估。仍在运行、轨迹损坏、超过采集上限或 id 不合法的记录会跳过并在返回值里计数；不完整轨迹不会覆盖原有问题证据。

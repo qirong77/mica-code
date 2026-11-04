@@ -13,6 +13,8 @@ const EMPTY_COMPARE_BASES = {}
 const readCompareBases = () => uiStateKeys().gitCompareBase || EMPTY_COMPARE_BASES
 const readCompareHeads = () => uiStateKeys().gitCompareHead || EMPTY_COMPARE_BASES
 const POLL_MS = 3000
+/** 宿主把 `.git` 的变化推过来，几个写操作挨在一起（checkout 会改 HEAD + index）合并一次。 */
+const CHANGE_DEBOUNCE_MS = 100
 
 const EMPTY_GIT = {
   cwd: null,
@@ -206,6 +208,37 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
       requestRef.current += 1
     }
   }, [cwd, compareBases, compareHeads, enabled, refresh, compare?.base, compare?.head])
+
+  useEffect(() => {
+    if (!enabled) return undefined
+    // 宿主侧的仓库监听（`host/git-watch.js`）：页面在看哪个目录就订阅哪个，
+    // 隐藏/离开时撤销。不是仓库时宿主回 `{ root: null }`，什么都不做。
+    void window.mica.git.watch?.(cwd || null)?.catch?.(() => {})
+    return () => {
+      void window.mica.git.unwatch?.(cwd || null)?.catch?.(() => {})
+    }
+  }, [cwd, enabled])
+
+  useEffect(() => {
+    if (!enabled) return undefined
+    let timer = null
+    const off = window.mica.git.onChanged?.((payload) => {
+      if (!enabledRef.current || !cwdRef.current) return
+      // 事件带的是仓库根：已经知道自己的根时，别的仓库的变化与自己无关。
+      const known = gitRef.current.repository?.root
+      if (known && payload?.root && payload.root !== known) return
+      if (timer) return
+      timer = window.setTimeout(() => {
+        timer = null
+        // 缓存已经在宿主侧被这次事件失效，这里走缓存也读得到新内容。
+        void refresh({ quiet: true })
+      }, CHANGE_DEBOUNCE_MS)
+    })
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      off?.()
+    }
+  }, [enabled, refresh, cwdRef, enabledRef, gitRef])
 
   useEffect(() => {
     if (!enabled) return undefined

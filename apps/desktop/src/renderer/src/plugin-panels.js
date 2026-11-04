@@ -183,6 +183,16 @@ export function quickbarMenuTable(view, menu) {
 }
 
 /**
+ * 动态菜单的另一种形态：一段只读正文（悬停先看一眼「需求描述写成什么样了」）。
+ *
+ * 与表格二选一——同一块浮层不可能既是清单又是正文。空文本当作没有，让调用方走空态。
+ */
+export function quickbarMenuText(view, menu) {
+  const raw = menu ? view?.menus?.[menu] : null
+  return typeof raw?.text === 'string' ? raw.text.trim() : ''
+}
+
+/**
  * 面板行里的值能不能当链接点。
  *
  * 只认能交给系统浏览器的地址：`javascript:` / `file:` 这类既不该成为链接，也不该被页面

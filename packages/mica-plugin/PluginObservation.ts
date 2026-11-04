@@ -36,6 +36,8 @@ export type PluginObservationEvent = Readonly<{
          */
         type: 'hook:failed';
         hook: string;
+        /** 这个插件在这个钩子上累计失败次数（本进程内）。 */
+        failures: number;
         error: string;
       }>
   );

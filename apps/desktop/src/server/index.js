@@ -90,6 +90,7 @@ import {
 } from '@packages/mica-web-shared'
 import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
+import { disposeGitWatchers, setGitWatchBroadcaster } from '../host/git-watch.js'
 import { registerStatsIpc, setStatsBroadcaster } from '../host/stats.js'
 import { registerSkillsIpc } from '../host/skills.js'
 import { registerMcpCandidatesIpc } from '../host/mcp-candidates.js'
@@ -765,6 +766,9 @@ export async function startDesktopServer(options = {}) {
   setBrowserControlBroadcaster(broadcast)
   // 终端控制同理：会话状态变化推给页面，顶栏图标与设置页据此显示
   setTerminalControlBroadcaster(broadcast)
+  // 仓库变更由宿主里的 `.git` 监听推给页面：提交 / 切分支 / 暂存之后编辑器与徽标
+  // 立刻刷新，不必等 3s / 10s 的兜底轮询（见 host/git-watch.js）
+  setGitWatchBroadcaster(broadcast)
   // 与 Electron 版 index.js 的 notify 桥一致：PTY 里的插件上报状态后推给所有页面
   const stopNotifyBridge = notifyServer.onChange((payload) => broadcast('notify:changed', payload))
 
@@ -893,6 +897,7 @@ export async function startDesktopServer(options = {}) {
     disposeAllChatRuns()
     devReload.stop()
     disposeLoops()
+    disposeGitWatchers()
     stopBrowserControl()
     stopTerminalControl()
     stopNotifyBridge()

@@ -12,6 +12,7 @@ import {
   prunePluginPanelCache,
   quickbarMenuItems,
   quickbarMenuTable,
+  quickbarMenuText,
   readMenuCache,
   readPanelView,
   writePanelView,
@@ -29,10 +30,18 @@ const plugin = (overrides = {}) => ({
 })
 
 test('只在本会话的工具完成时刷新插件视图', () => {
-  const payload = { id: 'one', event: { type: 'tool_use', part: { state: { status: 'completed' } } } }
+  const payload = {
+    id: 'one',
+    event: { type: 'tool_use', part: { state: { status: 'completed' } } }
+  }
   expect(isCompletedToolEvent(payload, 'one')).toBe(true)
   expect(isCompletedToolEvent(payload, 'two')).toBe(false)
-  expect(isCompletedToolEvent({ ...payload, event: { ...payload.event, part: { state: { status: 'pending' } } } }, 'one')).toBe(false)
+  expect(
+    isCompletedToolEvent(
+      { ...payload, event: { ...payload.event, part: { state: { status: 'pending' } } } },
+      'one'
+    )
+  ).toBe(false)
 })
 
 describe('selectPluginPanels', () => {
@@ -312,12 +321,22 @@ describe('quickbarMenuTable', () => {
     const empty = { columns: [], rows: [] }
     expect(quickbarMenuTable(undefined, 'reviews')).toEqual(empty)
     expect(quickbarMenuTable({ menus: { other: table } }, 'reviews')).toEqual(empty)
-    expect(quickbarMenuTable({ menus: { reviews: { columns: [], rows: table.rows } } }, 'reviews')).toEqual(
-      empty
-    )
-    expect(quickbarMenuTable({ menus: { reviews: { columns: table.columns, rows: [] } } }, 'reviews')).toEqual(
-      empty
-    )
+    expect(
+      quickbarMenuTable({ menus: { reviews: { columns: [], rows: table.rows } } }, 'reviews')
+    ).toEqual(empty)
+    expect(
+      quickbarMenuTable({ menus: { reviews: { columns: table.columns, rows: [] } } }, 'reviews')
+    ).toEqual(empty)
+  })
+
+  test('文本预览菜单走另一条路径，表格那边一律退化成空表', () => {
+    const preview = {
+      menus: { description: { text: '需求：违章处置线上化', columns: [], rows: [] } }
+    }
+    expect(quickbarMenuTable(preview, 'description')).toEqual({ columns: [], rows: [] })
+    expect(quickbarMenuText(preview, 'description')).toBe('需求：违章处置线上化')
+    expect(quickbarMenuText({ menus: { description: { text: '  ' } } }, 'description')).toBe('')
+    expect(quickbarMenuText(undefined, 'description')).toBe('')
   })
 })
 
