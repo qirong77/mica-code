@@ -26,6 +26,7 @@
 - `mica/session/cwd` 换本会话的工作目录（页面右下角那个项目路径）。宿主自己 `process.chdir` 并按新目录改已落盘的那份：盘上的 `cwd` 是 `process.cwd()` 的快照，页面直接改文件会被下一轮保存覆盖回去、那一轮也还在旧目录里跑。运行中拒绝（这一轮已按旧目录起了工具与 prompt）；`updatedAt` 不动（换目录不是会话活动，否则会话会被顶到 Recent 最前面）。桌面端 `chat:set-cwd` 优先交给这条会话的宿主，没人持锁才直接写文件，草稿（还没落盘的会话）不写。
 - `mica/subagentTasks/list|detail|kill|restart` 管子代理任务：`list` 与每秒一次的 `mica/subagentTasks/updated` 快照只用于列表，`detail` 才带完整 timeline；`restart` 只在任务已停下、且能确认原执行进程已退出时接受（见 `agents.md`）。桌面端详情弹窗的「重启」按钮就发这一条。
 - `mica/pluginPanel/view|action` 读一块插件面板的视图、转发一次动作（`pluginId + action/key/values`）；面板处理器活在常驻会话宿主里（插件就在那个进程），没有宿主时桌面端按需起一个。
+- `mica/ask/updated` + `mica/ask/answer` 是插件「问用户一个问题」的那一对：前者推当前待回答的选择题（`ask` 为 `null` 表示已经结束），后者回 `{ askId, optionIds, custom? }`，宿主把它 resolve 给还在 await 的那个工具。**答题不产生 turn**，也不进事件缓冲——它只是让同一次迭代继续跑；`askId` 对不上（已超时 / 已被中止）回 `ok:false`。`turn/interrupt`、`mica/host/drain` 与轮次结束都会把还在等的问题按 `aborted` 结掉，界面上的卡片跟着撤掉。等待期间宿主把会话文件顶部的 `awaitingInput` 写成 `summary`，侧栏据此在列表里提醒。
 - `mica/sessionMenu/run` 转发一次会话右键菜单动作（`pluginId + action`），插件回 `{ copyText?, message? }`；处理器与面板一样活在常驻会话宿主里，没有宿主时桌面端按需起一个。
 - 改名先找常驻 host 调 `SessionController.renameCurrent`；无 host 且无其他进程 lease 时才直接写盘。
 - 新对话（还没有会话）改名 = 这条会话此刻就要存在：桌面端按需起常驻 host 让它把空会话连同手动标题落盘，回包里的 `sessionId` 立刻绑到页签上。手动标题（`titleSource === 'manual'`）的空会话不按草稿删——`saveCurrent` 与 `discardCurrentIfEmpty` 都跳过它，否则侧栏里刚命名的会话会在换会话/落盘时凭空消失。

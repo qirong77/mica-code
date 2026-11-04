@@ -268,6 +268,14 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 `models` 是宿主代发模型请求的底层入口（`ctx.models.request`）；插件要问模型时优先声明 `llm` 并用
 `ctx.llm`（见「模型接口」一节）——**插件不要自己 `fetch` 模型接口**。
 `skills` 是内置 skill 的注册面（`ctx.skills.register`），`desktop` 只有桌面端运行时才提供（见下节）。
+`ask` 是「问用户一个问题并等回答」（`ctx.ask.request`）：把一道选择题交给客户端画出来，用户在
+页面上点一个，答案回到**同一次迭代**——不追加消息、不开新一轮。插件给的是题目与选项，等多久、
+用户点了哪个、超时怎么结束都由宿主管；选项上的 `prompt`（选中后作为指令回到工具结果）和
+`command`（选中后当场执行）由插件自己解释。等待期间宿主会在会话文件顶部写 `awaitingInput`，
+侧栏据此在会话列表里提醒「这条在等你选」，所以即使用户切到别的会话也不会漏掉。
+只有能画问题、也能收回点选的宿主才提供它（桌面端 `mica app-server`）；TUI 与 `mica exec`
+没有可点的地方，**不提供**——插件应当把它写进 `requires`，让它整插件跳过，而不是装载成功却
+永远等不到回答。
 `background` 是常驻工作的注册面（`ctx.background.register`）：周期轮询、心跳、增量同步这类
 「一直在跑」的东西交给宿主调度，插件停用或宿主退出时一起停。不要用 `setInterval` 自己起循环，
 也不要把它做成 launchd / systemd 单独安装的服务——那样插件关了它还在跑，用户根本不知道还有东西在外联。

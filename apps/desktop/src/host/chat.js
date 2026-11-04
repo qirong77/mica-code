@@ -52,6 +52,7 @@ import { isValidSessionId } from './session-delete'
 import { renameSessionFile } from './session-rename'
 import { updateSessionCwdFile } from './session-cwd'
 import { createTurnLeaseProbe } from './session-lease'
+import { notifySessionListChanged } from './stats'
 import { bindLoopSessionId } from './loops'
 import { browserOwnerEnv } from './browser-control'
 import { terminalOwnerEnv } from './terminal-control'
@@ -1418,6 +1419,18 @@ function handleHostNotification(id, run, notification) {
       })
     }
     return
+  } else if (method === 'mica/ask/updated') {
+    // 插件（工具）抛出了一道选择题，或者这道题已经有答案（ask 变成 null）。和 btw /
+    // 背景任务一样活得比一轮长、只在当下有意义，所以不进事件缓冲；但要在 run 上留一份，
+    // 页面切走再切回来时（restore 走 chat:is-running）能把卡片补回来。
+    run.ask = normalizeAsk(params.ask)
+    // 侧栏那一行的提醒也靠它立刻亮：等待期间会话文件头部带着 awaitingInput，但页面
+    // 只按 10 秒轮询读列表，不叫醒它就会晚十秒才看见。
+    notifySessionListChanged()
+    if (run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:ask', { id, sessionId: runSessionId(run), ask: run.ask })
+    }
+    return
   } else if (method === 'mica/sessionState/updated') {
     // 插件的会话级状态被改写（面板保存、插件自己写）：同一会话的其他窗口据此刷新。
     // 与能力开关同理，不占 turn。
@@ -2686,6 +2699,7 @@ export function registerChatIpc() {
             sessionId: null,
             events: [],
             snapshots: [],
+            ask: null,
             ...queuedState
           }
     }
@@ -2698,6 +2712,8 @@ export function registerChatIpc() {
         sessionId: run.sessionId,
         events: run.events.slice(),
         snapshots: runSnapshots(run),
+        // 中途附着上来的页签也要看到那道还没答的选择题（与 snapshots 同理）。
+        ask: run.ask ?? null,
         prompt: run.prompt,
         startedAt: run.startedAt
       }
@@ -2709,9 +2725,24 @@ export function registerChatIpc() {
       sessionId: run.sessionId,
       events: run.events.slice(),
       snapshots: runSnapshots(run),
+      ask: run.ask ?? null,
       prompt: run.prompt,
       startedAt: run.startedAt
     }
+  })
+
+  // 用户点了插件抛出的选择题：转成 `mica/ask/answer` 交给 host 里的 broker，
+  // 由它 resolve 掉那个还在 await 的工具。答题本身不是一轮对话的开始，也不排队。
+  ipcMain.handle('chat:answer-ask', async (_event, { id, askId, optionIds, custom } = {}) => {
+    const run = runs.get(id)
+    if (!run) return { ok: false, error: '这条会话没有在等回答' }
+    return unwrapHostResult(
+      await hostTaskRequest(run, 'mica/ask/answer', {
+        askId: typeof askId === 'string' ? askId : '',
+        optionIds: Array.isArray(optionIds) ? optionIds.filter((value) => typeof value === 'string') : [],
+        ...(typeof custom === 'string' && custom.trim() ? { custom: custom.trim() } : {})
+      })
+    )
   })
 
   ipcMain.handle('chat:models', () => listModels())
@@ -2865,6 +2896,37 @@ export function registerChatIpc() {
   })
 
   ipcMain.handle('chat:save-pasted-image', () => savePastedImage(clipboard))
+}
+
+/**
+ * `mica/ask/updated` 的快照整形。选项最终会变成页面上的按钮，所以不信任宿主传来的
+ * 形状：没有 id / title / 选项的当作「没有这道题」，让卡片直接消失而不是渲染半张。
+ */
+function normalizeAsk(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const id = typeof raw.id === 'string' ? raw.id : ''
+  const title = typeof raw.title === 'string' ? raw.title : ''
+  const options = Array.isArray(raw.options)
+    ? raw.options
+        .filter(
+          (option) => option && typeof option.id === 'string' && typeof option.label === 'string'
+        )
+        .map((option) => ({
+          id: option.id,
+          label: option.label,
+          ...(typeof option.description === 'string' ? { description: option.description } : {})
+        }))
+    : []
+  if (!id || !title || !options.length) return null
+  return {
+    id,
+    pluginId: typeof raw.pluginId === 'string' ? raw.pluginId : '',
+    title,
+    ...(typeof raw.detail === 'string' ? { detail: raw.detail } : {}),
+    options,
+    multiple: raw.multiple === true,
+    allowCustom: raw.allowCustom === true
+  }
 }
 
 export function disposeAllChatRuns() {

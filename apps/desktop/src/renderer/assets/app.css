@@ -2618,6 +2618,155 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   -webkit-line-clamp: 2;
 }
 
+/* 插件（工具）抛出的选择题：与排队行同一个位置、同一套卡片语言，靠强调色区分——排队是
+   「等这一轮结束」，这里是「等你动手」，不答这一步就不会往下走。 */
+.chat-ask-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 14%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-canvas));
+  padding: 7px 9px 8px;
+  font-family: var(--chat-font);
+  font-size: var(--chat-text-size);
+  line-height: 1.35;
+}
+
+.chat-ask-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-ask-icon {
+  flex: none;
+  color: var(--color-accent);
+}
+
+.chat-ask-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--color-fg);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-ask-hint {
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
+  border-radius: 3px;
+  padding: 0 5px;
+  color: var(--color-fg-soft);
+  font-size: 10.5px;
+  line-height: 15px;
+}
+
+.chat-ask-detail {
+  max-height: 96px;
+  overflow-y: auto;
+  color: var(--color-fg-soft);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-ask-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-ask-option {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
+  padding: 4px 9px 5px;
+  text-align: left;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.chat-ask-option:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.chat-ask-option.is-selected {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.chat-ask-option:disabled {
+  opacity: 0.6;
+}
+
+.chat-ask-option-label {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+.chat-ask-option-desc {
+  color: var(--color-fg-soft);
+  font-size: 11px;
+}
+
+.chat-ask-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-ask-input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 5px;
+  background: var(--color-canvas);
+  padding: 3px 7px;
+  color: var(--color-fg);
+  font: inherit;
+}
+
+.chat-ask-input:focus {
+  border-color: var(--color-accent);
+  outline: none;
+}
+
+.chat-ask-submit {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--color-accent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  padding: 3px 10px;
+  color: var(--color-accent);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chat-ask-submit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 28%, transparent);
+}
+
+.chat-ask-submit:disabled {
+  border-color: var(--color-line-strong);
+  color: var(--color-fg-dim);
+}
+
 .chat-composer-images {
   display: flex;
   gap: 5px;

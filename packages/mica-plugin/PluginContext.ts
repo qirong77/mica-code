@@ -23,6 +23,7 @@ import type { PluginLlmApi } from './PluginLlm.js';
 import type { PluginHealthStore } from './PluginHealth.js';
 import type { PluginSettingIssue, PluginSettingValues } from './PluginSettings.js';
 import type { PluginActionHandler } from './PluginActions.js';
+import type { PluginAskApi } from './PluginAsk.js';
 import type { PluginDesktopApi, PluginSkillsApi } from './PluginDesktop.js';
 import type React from 'react';
 
@@ -200,6 +201,18 @@ export type PluginContext = {
    * 其它宿主会整插件跳过，而不是让插件在运行期踩空。
    */
   desktop?: PluginDesktopApi;
+  /**
+   * 向用户提一个带选项的问题，等他在界面上点一下再继续。
+   *
+   * 用在模型判断不了的岔路口（两种方案都成立、要不要动线上）：宿主把问题画出来，工具
+   * 拿到答案接着跑**同一次迭代**——不改历史、不发起新的模型请求，所以「选完直接进入
+   * 下一轮」不需要任何投递机制。等待期间客户端在会话列表上标出「这条在等你选」。
+   *
+   * 只有能把问题画给人、并且收得到点选的宿主才提供（桌面端的 `mica app-server`）。
+   * 依赖它的插件用 `requires: ['ask']` 声明，其它宿主整插件跳过——装载成功却没人回答
+   * 比跳过更糟。
+   */
+  ask?: PluginAskApi;
   /**
    * 与模型请求交互的入口：在迭代边界重写「接下来要发送的历史」。
    *

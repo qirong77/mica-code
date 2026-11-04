@@ -139,6 +139,13 @@ export type PersistedSession = {
    */
   parentSessionId?: string;
   turnState: PersistedSessionTurnState;
+  /**
+   * 这条会话正在等用户做一个选择（一句话，给侧栏看）；缺省表示没有在等。
+   *
+   * 与 `resumeAfter` 一样是「这一轮还没跑完」的附属信息：宿主在插件的工具等回答时写下，
+   * 答案回来即清。侧栏据此在会话列表上提醒——即使用户正待在别的会话里。
+   */
+  awaitingInput?: string;
   /** 见 {@link PersistedSessionResumeAfter}。 */
   resumeAfter?: PersistedSessionResumeAfter;
   snapshot: PersistedRuntimeSnapshot;
@@ -173,6 +180,8 @@ export type SessionStoreLike = {
   listAllForUsage?(): PersistedSession[];
   load(id: string): PersistedSession | null;
   save(session: PersistedSession): void;
+  /** 只改「正在等你选」这一个顶层标记（见实现里的说明）；文件不存在返回 false。 */
+  patchAwaitingInput?(id: string, text: string | null): boolean;
   replaceValidated?(id: string, content: string): PersistedSession;
   delete(id: string): boolean;
 };
@@ -271,6 +280,26 @@ export class SessionStore implements SessionStoreLike {
     } catch {
       // best-effort metadata index; a rebuild reconciles it on the next list.
     }
+  }
+
+  /**
+   * 只改「正在等你选」这一个顶层标记，其余内容原样写回。
+   *
+   * 标记必须进文件才能被侧栏读到（用户正待在别的会话里，进程内外都靠这份文件提醒）。
+   * 它不能走完整保存：那次保存会先过「没有对话内容就别落盘」的保护，而提问恰好发生在
+   * 第一个答案之前。键位置也刻意固定在 `snapshot` 之前——侧栏只读文件头 4KB，排在
+   * 快照后面就永远看不到。
+   *
+   * 文件还不存在时返回 false：没有会话就没有那一行，标记留在内存里，下一次保存会带上。
+   */
+  patchAwaitingInput(id: string, text: string | null): boolean {
+    const current = this.load(id);
+    if (!current) return false;
+    const { snapshot, ...rest } = current;
+    const next: PersistedSession = { ...rest, ...(text ? { awaitingInput: text } : {}), snapshot };
+    if (!text) delete next.awaitingInput;
+    this.save(next);
+    return true;
   }
 
   replaceValidated(id: string, content: string): PersistedSession {
@@ -888,6 +917,9 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   // 下一代宿主去猜该做什么。
   const resumeAfter =
     session.resumeAfter === 'build-reload' && turnState !== 'completed' ? session.resumeAfter : undefined;
+  // 「在等你选」只属于还没跑完的那一轮：轮次结束后残留的标记会让侧栏一直亮着一个
+  // 不存在的问题。形状不对按缺省处理（同 parentSessionId），不为一个提示字段拒绝整条会话。
+  const awaitingInput = normalizeAwaitingInput(session.awaitingInput, turnState);
   let protocol = session.snapshot.protocol;
   if (!isProviderProtocol(protocol)) {
     const provider: ProviderProtocol | undefined = session.snapshot.usageHistory
@@ -906,6 +938,7 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
     // 可选的展示字段拒绝整条会话。
     parentSessionId: normalizeParentSessionId(session.parentSessionId, session.id),
     turnState,
+    ...(awaitingInput ? { awaitingInput } : { awaitingInput: undefined }),
     ...(resumeAfter ? { resumeAfter } : { resumeAfter: undefined }),
     snapshot: {
       ...session.snapshot,
@@ -997,6 +1030,23 @@ function normalizeParentSessionId(value: unknown, selfId: string): string | unde
   const id = value.trim();
   if (id === selfId) return undefined;
   return sanitizeSessionId(id) === id ? id : undefined;
+}
+
+/**
+ * 「在等你选」最多一百来个字：它要显示在侧栏一行里，长句子只会被省略号吃掉。
+ * 类型不对或那一轮已经结束就丢掉——它只是提示，不该让整条会话读不出来。
+ */
+const MAX_AWAITING_INPUT = 120;
+
+function normalizeAwaitingInput(
+  value: unknown,
+  turnState: PersistedSessionTurnState,
+): string | undefined {
+  if (turnState === 'completed') return undefined;
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim();
+  if (!text) return undefined;
+  return text.length > MAX_AWAITING_INPUT ? text.slice(0, MAX_AWAITING_INPUT) : text;
 }
 
 function normalizeDisplayUsage(value: unknown): PersistedSnapshotDisplayUsage | undefined {

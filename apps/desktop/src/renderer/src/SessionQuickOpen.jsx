@@ -202,7 +202,8 @@ export function SessionQuickOpen({
             const state = liveSessionRowState({
               notificationState: unread?.[openBySession?.[item.session.id]],
               interrupted: item.session.interrupted,
-              remoteRunning: item.session.remoteRunning
+              remoteRunning: item.session.remoteRunning,
+              awaiting: item.session.awaiting
             })
             // 目录命中时右列直接展示完整路径（能看到命中的那一段），否则只给「分组 · 目录名」。
             const pathLine = item.cwdRanges.length

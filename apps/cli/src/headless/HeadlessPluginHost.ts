@@ -48,6 +48,7 @@ import { officialPlugins } from '@packages/mica-official-plugins/index.js';
 import { createHeadlessRuntimeServices } from './headlessRuntimeServices.js';
 import { TurnNoticeLog } from '../runtime/turnNotices.js';
 import type { HeadlessTurnStartResult } from '../runtime/HeadlessTurnExecutor.js';
+import type { PluginAskHost } from './PluginAskBroker.js';
 
 export type HeadlessPluginHostOptions = {
   runtimeOverride?: import('../agent/AgentRuntimeConfig.js').AgentRuntimeConfigOverride;
@@ -93,6 +94,14 @@ export type HeadlessPluginHostOptions = {
    * 这个能力，只能自己照常执行 task。
    */
   runMaintenance?: <T>(window: PluginMaintenanceWindow, task: () => Promise<T>) => Promise<T>;
+  /**
+   * 「插件问、用户点一个选项」的通路。
+   *
+   * 由桌面端的 app-server 提供：它才有 `mica/ask/updated` 这条通知与 `mica/ask/answer`
+   * 这个请求。`mica exec` 与 TUI 不传，插件因此拿不到 `ctx.ask`，声明了
+   * `requires: ['ask']` 的插件在这些宿主里整插件跳过。
+   */
+  asks?: PluginAskHost;
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -109,6 +118,8 @@ export type HeadlessPluginHost = {
   panels: PluginPanelRegistry;
   /** 会话右键菜单动作的登记表：协议层按 pluginId 转发一次动作。 */
   sessionMenus: PluginSessionMenuRegistry;
+  /** 「插件问、用户点一个选项」的通路；宿主没提供时为 null。 */
+  asks: PluginAskHost | null;
   /** Single-slot queue shared with the HeadlessTurnExecutor. */
   queue: MessageQueueService;
   getCurrentSessionId(): string;
@@ -337,6 +348,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
         agent.setPluginSessionSettings(pluginId, value);
       },
     }),
+    ...(options.asks ? { askFor: (pluginId: string) => options.asks!.forPlugin(pluginId) } : {}),
     promptSections: agent.promptSections,
     agentRegistry: {
       mode: options.oneShot ? 'one-shot' : 'session',
@@ -468,6 +480,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     plugins,
     panels,
     sessionMenus,
+    asks: options.asks ?? null,
     queue,
     getCurrentSessionId: () => sessionController.getCurrentSessionId(),
     getConversationMessages,
@@ -484,6 +497,8 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
         await plugins.disposeAll();
       } finally {
         pluginSubagents.disposeAll();
+        // 还在等的问题按「宿主停了」结束：卡片留在页面上会永远没有人回答。
+        options.asks?.dispose();
       }
     },
   };

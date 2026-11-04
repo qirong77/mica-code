@@ -270,6 +270,22 @@ export type {
   PluginToolRegistrationOptions,
 } from './PluginContext.js';
 export type { PluginPromptSection } from './PluginPrompt.js';
+export {
+  DEFAULT_PLUGIN_ASK_TIMEOUT_MS,
+  MAX_PLUGIN_ASK_OPTIONS,
+  MAX_PLUGIN_ASK_SUMMARY,
+  MAX_PLUGIN_ASK_TIMEOUT_MS,
+  normalizePluginAskQuestion,
+  pluginAskSummary,
+} from './PluginAsk.js';
+export type {
+  PluginAskAnswer,
+  PluginAskApi,
+  PluginAskOption,
+  PluginAskQuestion,
+  PluginAskReason,
+  PluginAskRequestOptions,
+} from './PluginAsk.js';
 export type { PluginBackgroundApi, PluginBackgroundState, PluginBackgroundTask } from './PluginBackground.js';
 export { createPluginBackgroundScheduler } from './PluginBackground.js';
 export { PluginPromptSections } from './PluginPrompt.js';

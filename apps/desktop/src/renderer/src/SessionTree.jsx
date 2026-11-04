@@ -270,6 +270,7 @@ function RowTail({ label, labelTitle, relativeTime }) {
 // 主图标（终端 / 未发送文本）占状态位、turn 状态缩成右上角小圆点叠在它上面，绝不额外
 // 占位——否则这一行整体右推，与相邻行的缩进对不齐。
 function RowLeading({ state, unreadKey, terminal, draft }) {
+  const awaiting = state === 'awaiting'
   const unread = state === 'unread'
   const running = state === 'running'
   const errored = state === 'error'
@@ -278,10 +279,18 @@ function RowLeading({ state, unreadKey, terminal, draft }) {
     ? 'bg-danger'
     : unread
       ? 'bg-info chat-dot-unread'
+      : awaiting
+        ? 'bg-accent chat-dot-unread'
       : running
         ? 'bg-success chat-dot-running'
         : null
-  const cornerTitle = errored ? '上一轮没有正常运行完成' : unread ? '有未读结果' : '对话正在运行'
+  const cornerTitle = errored
+    ? '上一轮没有正常运行完成'
+    : unread
+      ? '有未读结果'
+      : awaiting
+        ? '正在等你做一个选择'
+        : '对话正在运行'
   return (
     <span className="relative grid w-4 shrink-0 place-items-center">
       {icon === 'terminal' ? (
@@ -292,6 +301,11 @@ function RowLeading({ state, unreadKey, terminal, draft }) {
         <span className="text-warn chat-draft-pending" title="输入框里还有未发送的内容">
           <IconPencil size={13} stroke={2} />
         </span>
+      ) : awaiting ? (
+        <span
+          className="size-2 shrink-0 rounded-full bg-accent chat-dot-unread"
+          title="正在等你做一个选择"
+        />
       ) : running ? (
         <span
           className="size-2 shrink-0 rounded-full bg-success chat-dot-running"
@@ -308,7 +322,7 @@ function RowLeading({ state, unreadKey, terminal, draft }) {
       ) : null}
       {icon && corner ? (
         <span
-          key={errored ? 'error' : unread ? unreadKey : 'running'}
+          key={errored ? 'error' : unread ? unreadKey : awaiting ? 'awaiting' : 'running'}
           className={`absolute -top-0.5 -right-0.5 size-1.5 rounded-full ${corner}`}
           title={cornerTitle}
         />
@@ -321,11 +335,17 @@ function RowLeading({ state, unreadKey, terminal, draft }) {
 // 它们显示状态：图标列已被文件夹/分区图标占着，所以圆点按角标叠在图标右上角——
 // 和 RowLeading 里「终端图标 + 未读」同一种做法，绝不额外占位，否则这一行的名称
 // 会错开一列。`scope` 是容器名，只用来把 tooltip 说清楚。异常中断的会话不上浮
-// （见 session-state.js 的 mergeRowStates），所以这里只有 running / unread 两种。
+// （见 session-state.js 的 mergeRowStates），所以这里只有 awaiting / running / unread 三种。
 function RowBadge({ state, scope }) {
   if (!state) return null
-  const className = state === 'running' ? 'bg-success chat-dot-running' : 'bg-info chat-dot-unread'
-  const what = state === 'running' ? '有会话正在运行' : '有未读结果'
+  const className =
+    state === 'awaiting'
+      ? 'bg-accent chat-dot-unread'
+      : state === 'running'
+        ? 'bg-success chat-dot-running'
+        : 'bg-info chat-dot-unread'
+  const what =
+    state === 'awaiting' ? '有会话在等你选择' : state === 'running' ? '有会话正在运行' : '有未读结果'
   return (
     <span
       // 状态从 running 变 unread 时要重放那一下短闪，和 RowLeading 同款
@@ -748,7 +768,8 @@ export function SessionTree({
       liveSessionRowState({
         notificationState: unread[openBySession[session.id]],
         interrupted: session.interrupted,
-        remoteRunning: session.remoteRunning
+        remoteRunning: session.remoteRunning,
+        awaiting: session.awaiting
       }),
     [openBySession, unread]
   )

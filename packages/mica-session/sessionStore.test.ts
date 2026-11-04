@@ -395,6 +395,28 @@ describe('SessionStore.replaceValidated', () => {
     );
   });
 
+  it('keeps awaitingInput only while the turn is unfinished, and trims it', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const session = makeSession('awaiting-input', '/tmp', '2026-01-01T00:00:00.000Z');
+    session.turnState = 'running';
+
+    expect(parsePersistedSession({ ...session, awaitingInput: '  等你选方案  ' })?.awaitingInput).toBe(
+      '等你选方案',
+    );
+    // 这一轮已经跑完了，还挂着「等你选」会让侧栏一直喊一个已经不存在的问题。
+    expect(
+      parsePersistedSession({ ...session, turnState: 'completed', awaitingInput: '等你选方案' })?.awaitingInput,
+    ).toBeUndefined();
+    // 空串、非字符串同样只是丢掉这个可选字段，不拒绝整条会话。
+    expect(parsePersistedSession({ ...session, awaitingInput: '   ' })?.awaitingInput).toBeUndefined();
+    expect(parsePersistedSession({ ...session, awaitingInput: 42 } as unknown as typeof session)?.awaitingInput).toBe(
+      undefined,
+    );
+    // 侧栏只放得下一行，超长截断而不是整条丢掉。
+    const long = 'x'.repeat(400);
+    expect(parsePersistedSession({ ...session, awaitingInput: long })?.awaitingInput?.length).toBe(120);
+  });
+
   it('preserves valid running inputs and drops malformed or stale recovery data', async () => {
     const { parsePersistedSession } = await import('./sessionStore.js');
     const session = makeSession('active-input', '/tmp', '2026-01-01T00:00:00.000Z');
