@@ -263,13 +263,6 @@ export type PluginPanelShortcutState = {
  * `detail` 是条目右侧的一行补充（基线分支、会话状态），纯展示，不参与匹配。
  */
 export type PluginPanelMenu = {
-  /**
-   * 一段只读文本：悬停只想「看一眼」的正文（需求描述这类），有它就不画表。
-   *
-   * 表格回答「有哪些条」，这个问题回答「写了什么」。两者互斥——同时给会让人分不清
-   * 悬停出来的是清单还是正文，所以归一化时文本优先。
-   */
-  text?: string;
   columns: PluginPanelTableColumn[];
   rows: PluginPanelMenuRow[];
 };
@@ -306,6 +299,7 @@ export type PluginPanelActionInput = {
  * - `openPath` —— 让宿主把这个文件在应用里打开（文件视图的编辑器就位）。面板只有 340px，
  *   超过一屏的正文（插件自己的配置、随包分发的 skill）在那里既看不清也改不动；编辑器是
  *   宿主已有的能力，插件只声明「打开哪个文件」。
+ * - `openExternal` —— 让系统浏览器打开一个地址（表格里整行就是「打开这一条」时用）。
  */
 export type PluginPanelActionResult = {
   message?: string;
@@ -329,6 +323,13 @@ export type PluginPanelActionResult = {
   newSession?: PluginNewSession;
   dialog?: PluginPanelDialog;
   openPath?: PluginPanelOpenPath;
+  /**
+   * 让宿主用系统浏览器打开一个地址。
+   *
+   * 表格里的链接本来就能点（格子给 `link`），但快捷菜单的行是整行一个动作：这时插件需要
+   * 「这一行 = 打开这个地址」的表达，否则要么整行点不动，要么得在菜单里再塞一个链接按钮。
+   */
+  openExternal?: string;
   openReview?: PluginPanelOpenReview;
 };
 
@@ -519,13 +520,6 @@ const MAX_MENUS = 6;
 const MAX_MENU_ITEMS = 20;
 const MAX_MENU_KEY = 200;
 const MAX_MENU_COLUMNS = 5;
-/**
- * 悬停预览正文的上限。
- *
- * 它在输入框上方的一块浮层里，超过一屏就没人读了——要读全的去面板。这里截断而不是
- * 拒绝：半段正文仍然比「什么都没有」有用。
- */
-const MAX_MENU_TEXT = 1200;
 const MAX_ACTION_ID = 64;
 const MAX_SHORTCUT_STATES = 40;
 const MAX_SHORTCUT_BADGE = 12;
@@ -881,9 +875,6 @@ function menusOf(value: unknown): Record<string, PluginPanelMenu> | undefined {
  */
 function menuOf(input: unknown): PluginPanelMenu | null {
   const raw = record(input);
-  // 文本预览优先：一块只读正文和一张表回答的是两个不同的问题，不能同一条目里混着给。
-  const preview = text(raw.text, MAX_MENU_TEXT);
-  if (preview) return { text: preview, columns: [], rows: [] };
   const columns = list(raw.columns)
     .slice(0, MAX_MENU_COLUMNS)
     .map((entry) => {
@@ -952,6 +943,7 @@ export function normalizePluginPanelActionResult(input: unknown): PluginPanelAct
   const newSession = normalizePluginNewSession(raw.newSession);
   const dialog = dialogOf(raw.dialog);
   const openPath = openPathOf(raw.openPath);
+  const openExternal = openExternalOf(raw.openExternal);
   const openReview = openReviewOf(raw.openReview);
   return {
     ...(message ? { message } : {}),
@@ -960,8 +952,18 @@ export function normalizePluginPanelActionResult(input: unknown): PluginPanelAct
     ...(newSession ? { newSession } : {}),
     ...(dialog ? { dialog } : {}),
     ...(openPath ? { openPath } : {}),
+    ...(openExternal ? { openExternal } : {}),
     ...(openReview ? { openReview } : {}),
   };
+}
+
+/**
+ * 只放行真能交给系统浏览器的地址：`javascript:` / `file:` 这类到了宿主手里就是一次导航，
+ * 且用户完全看不出发生了什么。
+ */
+function openExternalOf(value: unknown): string | undefined {
+  const url = text(value, MAX_CELL_LINK);
+  return /^(https?:|mailto:)/i.test(url) ? url : undefined;
 }
 
 function openReviewOf(value: unknown): PluginPanelOpenReview | undefined {

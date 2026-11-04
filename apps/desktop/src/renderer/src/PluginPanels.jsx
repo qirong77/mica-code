@@ -29,7 +29,6 @@ import {
   pluginPanelTabs,
   quickbarMenuItems,
   quickbarMenuTable,
-  quickbarMenuText,
   readMenuCache,
   readPanelView,
   subscribePluginPanelStatus,
@@ -230,14 +229,12 @@ export function PluginQuickBar({
       const entry = result.error
         ? {
             table: { columns: [], rows: [] },
-            text: '',
             ready: true,
             note: result.error,
             failed: true
           }
         : {
             table: quickbarMenuTable(result.view, shortcut.menu),
-            text: quickbarMenuText(result.view, shortcut.menu),
             ready: true,
             note: ''
           }
@@ -452,8 +449,7 @@ export function PluginQuickBar({
           const menuTable = shortcut.menu
             ? (menuViews[key]?.table ?? { columns: [], rows: [] })
             : { columns: [], rows: [] }
-          const menuText = shortcut.menu ? (menuViews[key]?.text ?? '') : ''
-          const menuEmpty = menuItems.length === 0 && menuTable.rows.length === 0 && !menuText
+          const menuEmpty = menuItems.length === 0 && menuTable.rows.length === 0
           return (
             <div
               key={key}
@@ -503,10 +499,7 @@ export function PluginQuickBar({
                     key={`${key}:${menuItems.length}:${menuTable.rows.length}:${menuViews[key]?.ready || false}`}
                     x={menuPos.x}
                     y={menuPos.y}
-                    minWidth={Math.max(
-                      menuPos.width,
-                      menuTable.rows.length > 0 ? 320 : menuText ? 340 : 176
-                    )}
+                    minWidth={Math.max(menuPos.width, menuTable.rows.length > 0 ? 320 : 176)}
                     /* 这一排紧贴输入框，往下开会压住输入框：整组向上开。 */
                     placement="above"
                     /* 菜单本身也要豁免：否则 pointerdown 先关菜单，click 永远到不了菜单项。 */
@@ -535,7 +528,6 @@ export function PluginQuickBar({
                         )
                       ) : (
                         <>
-                          {menuText && <p className="chat-plugin-quickbar-preview">{menuText}</p>}
                           {menuTable.rows.length > 0 && (
                             <QuickbarMenuTable
                               table={menuTable}

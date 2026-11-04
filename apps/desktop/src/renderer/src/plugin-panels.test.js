@@ -12,7 +12,6 @@ import {
   prunePluginPanelCache,
   quickbarMenuItems,
   quickbarMenuTable,
-  quickbarMenuText,
   readMenuCache,
   readPanelView,
   writePanelView,
@@ -329,14 +328,11 @@ describe('quickbarMenuTable', () => {
     ).toEqual(empty)
   })
 
-  test('文本预览菜单走另一条路径，表格那边一律退化成空表', () => {
-    const preview = {
-      menus: { description: { text: '需求：违章处置线上化', columns: [], rows: [] } }
-    }
-    expect(quickbarMenuTable(preview, 'description')).toEqual({ columns: [], rows: [] })
-    expect(quickbarMenuText(preview, 'description')).toBe('需求：违章处置线上化')
-    expect(quickbarMenuText({ menus: { description: { text: '  ' } } }, 'description')).toBe('')
-    expect(quickbarMenuText(undefined, 'description')).toBe('')
+  test('取视图里同名的那张表，缺 action 的行丢掉', () => {
+    expect(quickbarMenuTable({ menus: { environment: table } }, 'environment')).toEqual({
+      columns: table.columns,
+      rows: [table.rows[0]]
+    })
   })
 })
 

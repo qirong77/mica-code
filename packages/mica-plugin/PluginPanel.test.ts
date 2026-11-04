@@ -587,26 +587,25 @@ describe('normalizePluginPanelView menus', () => {
     ).toBeUndefined();
   });
 
-  it('keeps a text preview menu, and text wins over a half-built table', () => {
-    const view = normalizePluginPanelView({
-      title: 'x',
-      menus: {
-        description: { text: '  需求：违章处置线上化\n目标：…  ' },
-        both: { text: '只看正文', columns: [{ key: 'c', label: '列' }], rows: [] },
-        blank: { text: '   ' },
-      },
-    });
-    expect(view.menus?.description).toEqual({
-      text: '需求：违章处置线上化\n目标：…',
-      columns: [],
-      rows: [],
-    });
-    expect(view.menus?.both.text).toBe('只看正文');
-    expect(view.menus?.blank).toBeUndefined();
-  });
 });
 
 describe('normalizePluginPanelActionResult openReview', () => {
+  it('keeps a browser-openable address and drops anything else', () => {
+    expect(
+      normalizePluginPanelActionResult({ openExternal: 'https://mis.example.com/pre' }).openExternal,
+    ).toBe('https://mis.example.com/pre');
+    expect(
+      normalizePluginPanelActionResult({ openExternal: 'mailto:qa@example.com' }).openExternal,
+    ).toBe('mailto:qa@example.com');
+    // 到了宿主手里会变成一次导航，用户还看不出发生了什么
+    expect(
+      normalizePluginPanelActionResult({ openExternal: 'javascript:alert(1)' }).openExternal,
+    ).toBeUndefined();
+    expect(
+      normalizePluginPanelActionResult({ openExternal: 'file:///etc/passwd' }).openExternal,
+    ).toBeUndefined();
+  });
+
   it('keeps the repository, base, head and label', () => {
     const result = normalizePluginPanelActionResult({
       openReview: {

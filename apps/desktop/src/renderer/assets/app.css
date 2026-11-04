@@ -6701,19 +6701,6 @@ body.is-resizing-btw {
   max-width: 140px;
 }
 
-/* 悬停预览：一段只读正文，滚起来像在看一条消息，而不是挤在菜单项之间 */
-.chat-plugin-quickbar-preview {
-  max-height: 220px;
-  margin: 0;
-  padding: 2px 8px 4px;
-  overflow-y: auto;
-  color: var(--color-fg-strong);
-  font-size: 12.5px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .chat-plugin-table tbody tr[role='menuitem'] {
   cursor: pointer;
 }

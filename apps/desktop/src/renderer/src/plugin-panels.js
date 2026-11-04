@@ -144,6 +144,10 @@ export function applyPanelResult(
   if (result.openReview && typeof result.openReview.cwd === 'string' && result.openReview.cwd) {
     onOpenReview?.(result.openReview)
   }
+  // 打开地址交给系统浏览器：页面自己不做导航，也不接管用户已经开着的标签页。
+  if (typeof result.openExternal === 'string' && result.openExternal) {
+    window.mica?.terminal?.openExternal?.(result.openExternal)?.catch?.(() => {})
+  }
 }
 
 /**
@@ -180,16 +184,6 @@ export function quickbarMenuTable(view, menu) {
   )
   if (columns.length === 0 || rows.length === 0) return { columns: [], rows: [] }
   return { columns, rows }
-}
-
-/**
- * 动态菜单的另一种形态：一段只读正文（悬停先看一眼「需求描述写成什么样了」）。
- *
- * 与表格二选一——同一块浮层不可能既是清单又是正文。空文本当作没有，让调用方走空态。
- */
-export function quickbarMenuText(view, menu) {
-  const raw = menu ? view?.menus?.[menu] : null
-  return typeof raw?.text === 'string' ? raw.text.trim() : ''
 }
 
 /**
