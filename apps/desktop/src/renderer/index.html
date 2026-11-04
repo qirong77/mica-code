@@ -39,9 +39,8 @@
       html {
         background: #2b2b2b;
       }
-      html[data-theme='light'] {
-        background: #ffffff;
-      }
+      /* theme-boot.js 在样式表之前把主题自己的画布色写到根元素的内联样式上，
+         这里只需要给「脚本被拦住 / 缓存不可用」这一档兜底。 */
       html,
       body {
         margin: 0;
@@ -62,7 +61,7 @@
           sans-serif;
         color: #888888;
       }
-      html[data-theme='light'] #boot {
+      html[data-appearance='light'] #boot {
         color: #6b7280;
       }
       #boot span {

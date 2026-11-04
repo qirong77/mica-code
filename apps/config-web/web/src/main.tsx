@@ -2,9 +2,10 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   DEFAULT_THEME_PREFERENCE,
-  THEME_COLOR_META,
   normalizeThemePreference,
   resolveThemeName,
+  themeAppearance,
+  themeCanvasColor,
   type ResolvedTheme,
   type ThemePreference,
 } from '@packages/mica-web-shared/index.js';
@@ -51,9 +52,11 @@ function applyTheme(): void {
   const theme = resolvedTheme();
   const root = document.documentElement;
   root.setAttribute('data-theme', theme);
-  root.style.colorScheme = theme;
+  root.setAttribute('data-appearance', themeAppearance(theme));
+  root.style.colorScheme = themeAppearance(theme);
+  root.style.background = themeCanvasColor(theme);
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', THEME_COLOR_META[theme]);
+  if (meta) meta.setAttribute('content', themeCanvasColor(theme));
 }
 
 function notifyPreference(): void {

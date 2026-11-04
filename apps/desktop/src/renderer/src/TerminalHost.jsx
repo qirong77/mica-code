@@ -15,69 +15,12 @@ import { createFileLinkProvider, openWebLink } from './terminal-links'
 import { softKeyboardFallbackKey } from './terminal-keys'
 import { useLatest } from './hooks'
 import { currentThemeName, subscribeTheme } from './theme'
+import { terminalThemeFor } from './terminal-theme'
 
 /* xterm 6's core only ships the DOM renderer (rows are spans inside .xterm-rows;
    the single real <canvas> is the overview ruler), and it takes colors from this
-   options object instead of CSS custom properties. Either way the app.css tokens
-   have to be mirrored here by hand — both the Darcula (dark) set and the light
-   set — and kept in sync with the palette. */
-const TERMINAL_THEME = {
-  background: '#2b2b2b',
-  foreground: '#a9b7c6',
-  cursor: '#a9b7c6',
-  selectionBackground: 'rgba(33, 66, 131, 0.6)',
-  black: '#3c3f41',
-  red: '#ff6b68',
-  green: '#a8c023',
-  yellow: '#d6bf55',
-  blue: '#5394ec',
-  magenta: '#ae8abe',
-  cyan: '#299999',
-  white: '#bababa',
-  brightBlack: '#606366',
-  brightRed: '#ff8785',
-  brightGreen: '#a8c023',
-  brightYellow: '#ffff00',
-  brightBlue: '#7eaef1',
-  brightMagenta: '#ff99ff',
-  brightCyan: '#6cdada',
-  brightWhite: '#ffffff'
-}
-
-/* 亮色终端：内容面取 --color-canvas（#ffffff），正文取 --color-fg（#2c2c2e），
-   光标取 --color-fg-max（#0f1115），选中取 --color-accent 的 22%（#4176e6）；
-   ANSI 用亮色状态 token（danger/success/warn/accent/purple/teal），bright 档在浅底上
-   不再提亮主色，改用各自的 soft 档保持对比度，white/brightWhite 退到前景灰阶，
-   否则白字落在白底上直接消失。 */
-const LIGHT_TERMINAL_THEME = {
-  background: '#ffffff',
-  foreground: '#2c2c2e',
-  cursor: '#0f1115',
-  selectionBackground: 'rgba(65, 118, 230, 0.22)',
-  black: '#0f1115',
-  red: '#ec1313',
-  green: '#2b8a3e',
-  yellow: '#b45309',
-  blue: '#4176e6',
-  magenta: '#6741d9',
-  cyan: '#0f766e',
-  white: '#81858c',
-  brightBlack: '#61666b',
-  // 亮底上没有「更亮一档」的余地：bright* 若继续往浅里走，白底对比度会掉到 3:1 以下
-  // （#f25a5a 2.9、#dd8629 2.8），ls / git / npm 的强调色反而看不清。与 VS Code 的
-  // Light+ 一致：彩色档保持本色，只有黑白两对继续走灰度阶梯。
-  brightRed: '#ec1313',
-  brightGreen: '#2b8a3e',
-  brightYellow: '#b45309',
-  brightBlue: '#4176e6',
-  brightMagenta: '#6741d9',
-  brightCyan: '#0f766e',
-  brightWhite: '#979da6'
-}
-
-function terminalThemeFor(theme) {
-  return theme === 'light' ? LIGHT_TERMINAL_THEME : TERMINAL_THEME
-}
+   options object instead of CSS custom properties. Every theme's table lives in
+   terminal-theme.js — the terminal control window reads the same one. */
 
 export const SIDEBAR_TRANSITION_MS = 150
 const SIDEBAR_FIT_SETTLE_MS = SIDEBAR_TRANSITION_MS + 20

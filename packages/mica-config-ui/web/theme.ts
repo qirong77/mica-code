@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   DEFAULT_THEME_PREFERENCE,
+  THEMES,
   normalizeThemePreference,
   type ThemePreference,
 } from '@packages/mica-web-shared/index.js';
@@ -28,13 +29,27 @@ export type ThemeOption = {
   value: ThemePreference;
   label: string;
   description: string;
+  /** 主题卡的缩略图用哪一套局部色；`auto` 不画缩略图，改成亮暗并排。 */
+  preview: 'split' | string;
 };
 
-/** 单选卡的文案：页面与测试共用，避免文案散在 JSX 里。 */
+/**
+ * 单选卡：`auto` + 注册表里的每个主题（`packages/mica-web-shared/theme.ts` 的 THEMES）。
+ * 加主题只改注册表与样式块，这里不用动——页面与测试共用这份文案。
+ */
 export const THEME_OPTIONS: readonly ThemeOption[] = [
-  { value: 'auto', label: '跟随系统', description: '随 macOS / 系统的浅色与深色模式自动切换' },
-  { value: 'light', label: '浅色', description: '亮色界面，基于 DeepSeek harness 设计系统配色' },
-  { value: 'dark', label: '深色', description: '暗色界面，当前的 Darcula（VSCode）配色' },
+  {
+    value: 'auto',
+    label: '跟随系统',
+    description: '随 macOS / 系统的浅色与深色模式，在 Darcula 与浅色之间自动切换',
+    preview: 'split',
+  },
+  ...THEMES.map((theme) => ({
+    value: theme.id as ThemePreference,
+    label: theme.label,
+    description: theme.description,
+    preview: theme.id,
+  })),
 ] as const;
 
 let host: ConfigWebThemeHost | null = null;
