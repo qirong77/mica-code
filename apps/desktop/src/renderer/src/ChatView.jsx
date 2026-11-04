@@ -590,6 +590,94 @@ function QueueDock({ items, onRecall, recallingId, running }) {
   )
 }
 
+// 插件（工具）抛出的一道选择题。放在输入框上方、与排队行同一个位置：它们都是「这一轮
+// 卡在这里等一个人动手」的东西，而这道题比排队更急——不答就一直不往下走。
+//
+// 单选且不允许自由输入时点一下就走（少一次确认）；多选或可以自己说时留一个「确定」，
+// 否则点错一个选项就没有反悔的机会。
+function AskDock({ ask, submitting, onSubmit }) {
+  const [selected, setSelected] = useState([])
+  const [custom, setCustom] = useState('')
+  useEffect(() => {
+    setSelected([])
+    setCustom('')
+  }, [ask?.id])
+  if (!ask) return null
+  const multiple = Boolean(ask.multiple)
+  const canSubmit = selected.length > 0 || custom.trim().length > 0
+  const submit = (optionIds = selected, text = custom) => {
+    if (submitting) return
+    onSubmit({ optionIds, custom: String(text || '').trim() })
+  }
+  const toggle = (optionId) =>
+    setSelected((previous) => {
+      if (!multiple) return previous.includes(optionId) ? [] : [optionId]
+      return previous.includes(optionId)
+        ? previous.filter((value) => value !== optionId)
+        : [...previous, optionId]
+    })
+  return (
+    <section className="chat-ask-dock" aria-label="等你做一个选择">
+      <div className="chat-ask-head">
+        <IconInfoCircle size={13} className="chat-ask-icon" />
+        <span className="chat-ask-title">{ask.title}</span>
+        {multiple ? <span className="chat-ask-hint">可多选</span> : null}
+      </div>
+      {ask.detail ? <div className="chat-ask-detail">{ask.detail}</div> : null}
+      <div className="chat-ask-options">
+        {ask.options.map((option) => {
+          const active = selected.includes(option.id)
+          return (
+            <button
+              key={option.id}
+              type="button"
+              className={`chat-ask-option${active ? ' is-selected' : ''}`}
+              aria-pressed={active}
+              disabled={submitting}
+              onClick={() =>
+                multiple || ask.allowCustom ? toggle(option.id) : submit([option.id], '')
+              }
+            >
+              <span className="chat-ask-option-label">{option.label}</span>
+              {option.description ? (
+                <span className="chat-ask-option-desc">{option.description}</span>
+              ) : null}
+            </button>
+          )
+        })}
+      </div>
+      {multiple || ask.allowCustom ? (
+        <div className="chat-ask-foot">
+          {ask.allowCustom ? (
+            <input
+              className="chat-ask-input"
+              value={custom}
+              placeholder="或者直接说你的想法…"
+              disabled={submitting}
+              onChange={(event) => setCustom(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+                if (!canSubmit) return
+                event.preventDefault()
+                submit()
+              }}
+            />
+          ) : null}
+          <button
+            type="button"
+            className="chat-ask-submit"
+            disabled={submitting || !canSubmit}
+            onClick={() => submit()}
+          >
+            {submitting ? <IconLoader2 size={11} className="animate-spin" /> : null}
+            <span>{submitting ? '提交中' : '确定'}</span>
+          </button>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 function isLocalPath(value) {
   return /^(?:~\/|\/|[a-zA-Z]:[\\/])/.test(String(value || '')) && !String(value).startsWith('//')
 }
@@ -3138,6 +3226,10 @@ export function ChatView({
   // 页签那个 run」的概念。
   const runKey = nodeId
   const [queuedItems, setQueuedItems] = useState([])
+  // 插件（工具）抛出、还没人回答的选择题。宿主把它和队列行一样当作「这一轮卡在这里」
+  // 的输入：卡片就画在输入框上方，点了直接把答案送回还在 await 的那个工具。
+  const [pendingAsk, setPendingAsk] = useState(null)
+  const [askSubmitting, setAskSubmitting] = useState(false)
   const [recallingQueueId, setRecallingQueueId] = useState(null)
   // 跨 turn 常驻的后台任务 / subagent 状态（来自 app-server 快照通知，
   // 与 CLI TaskStatusBar 一致地展示在输入框上方）。
@@ -4661,8 +4753,19 @@ export function ChatView({
       if (restoringRef.current) pendingEventsRef.current.push({ sequence, event })
       else applyEventRef.current(event)
     })
+    // 插件（工具）抛出的选择题：像事件流一样按节点认领，`ask: null` 表示这道题已经结束
+    // （别人答了 / 超时 / 这一轮被中止），卡片要跟着消失而不是停在最后那个选项上。
+    const offAsk = window.mica.chat.onAsk((payload) => {
+      if (payload.id !== currentRunKey()) return
+      setPendingAsk(payload.ask || null)
+      setAskSubmitting(false)
+    })
     const offExit = window.mica.chat.onExit((payload) => {
       if (payload.id !== currentRunKey()) return
+      // 这一轮结束了（跑完 / 中止 / 宿主退出），那道题已经没有人等：宿主崩掉时它来不及
+      // 推 `ask: null`，卡片若留着，用户点下去只会拿到一句「没有人在等回答」。
+      setPendingAsk(null)
+      setAskSubmitting(false)
       if (restoringRef.current) pendingExitRef.current = payload
       else processExitRef.current(payload)
     })
@@ -4719,6 +4822,7 @@ export function ChatView({
     })
     return () => {
       offEvent?.()
+      offAsk?.()
       offExit?.()
       offQueueState?.()
       offQueueError?.()
@@ -4920,6 +5024,8 @@ export function ChatView({
       todoInterruptedRef.current.set(nodeId, interrupted)
       setTodoInterrupted(interrupted)
       setQueuedItems(Array.isArray(state?.queuedItems) ? state.queuedItems : [])
+      // 中途附着上来的页面同样要看到那道还没答的选择题（它不进事件缓冲）。
+      setPendingAsk(state?.ask || null)
       // host 的任务快照（后台 shell 任务 / 运行中 subagent）刻意不进事件缓冲，而是随
       // is-running 单独回传：重放前先补上，中途附着上来的窗口才不会漏掉这一轮已经推过
       // 的那次快照（dock 一直空着）。
@@ -6272,6 +6378,28 @@ export function ChatView({
     setCanPrevConversation(canPrev)
   }, [transcriptMessages.length, showJump, nodeId])
 
+  // 回答插件抛出的选择题。答案不会开一轮新对话：它只是让还在 await 的那个工具拿到结果，
+  // 同一个 run 继续往下跑。成功时卡片由宿主推来的 `ask: null` 关掉（本地不抢先关，
+  // 否则宿主那边如果没收到，界面会显示「已选」但工具一直卡着）。
+  const submitAsk = useCallback(
+    async ({ optionIds, custom }) => {
+      const ask = pendingAsk
+      if (!nodeId || !ask || askSubmitting) return
+      setAskSubmitting(true)
+      const result = await window.mica.chat
+        .answerAsk(nodeId, {
+          askId: ask.id,
+          optionIds: Array.isArray(optionIds) ? optionIds : [],
+          custom
+        })
+        .catch((error) => ({ ok: false, error: error?.message || String(error) }))
+      if (result?.ok === true) return
+      setAskSubmitting(false)
+      appendNotice(result?.error || '选择没有送达宿主', 'error')
+    },
+    [appendNotice, askSubmitting, nodeId, pendingAsk]
+  )
+
   const recallQueued = useCallback(
     async (requestedId) => {
       if (!nodeId || recallingQueueRef.current) return
@@ -7091,6 +7219,7 @@ export function ChatView({
             recallingId={recallingQueueId}
             running={running}
           />
+          <AskDock ask={pendingAsk} submitting={askSubmitting} onSubmit={submitAsk} />
           <ComposerImageStrip
             text={input}
             onPreview={(source, alt) => setImagePreview({ source, alt })}

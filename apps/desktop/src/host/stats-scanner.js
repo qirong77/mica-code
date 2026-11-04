@@ -9,7 +9,9 @@ import {
 } from './stats-core'
 
 /** 索引格式版本。形态一变就整份重建，不做迁移。 */
-const INDEX_VERSION = 3
+// v4：侧栏多了一个「在等你选」的标记（会话文件顶层 `awaitingInput`）。版本没变时旧缓存
+// 行会一直缺这个字段，表现为这条提醒怎么都不出现——所以加字段必须同时升版本。
+const INDEX_VERSION = 4
 /** 每批解析多少个会话文件就让出一次事件循环。 */
 const BATCH_FILES = 16
 /** 单批最多占用主线程多久（毫秒）；大会话文件会超过这个预算，靠批次之间让出恢复响应。 */
@@ -29,6 +31,8 @@ const LARGE_RUNNING_REPARSE_MS = 30_000
  */
 const LARGE_STATS_REPARSE_MS = 30_000
 const HEAD_BYTES = 4096
+/** 「在等你选」那句话的上限，与会话文件的 `normalizeAwaitingInput` 同一个尺度。 */
+const AWAITING_INPUT_MAX = 120
 
 function timestampPart(stat, name) {
   const nanoseconds = stat[`${name}Ns`]
@@ -80,11 +84,18 @@ function parseSessionMeta(raw) {
     typeof raw.parentSessionId === 'string' && raw.parentSessionId.trim()
       ? raw.parentSessionId.trim()
       : null
+  // 「在等你选」只是一句提示：轮次没在跑就不算（崩溃残留的 running 由调用方按租约再筛一
+  // 道），形状不对按没有处理。
+  const awaitingInput =
+    typeof raw.awaitingInput === 'string' && raw.awaitingInput.trim() && raw.turnState !== 'completed'
+      ? raw.awaitingInput.trim().slice(0, AWAITING_INPUT_MAX)
+      : null
   return {
     id: raw.id || null,
     title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null,
     cwd: typeof raw.cwd === 'string' && raw.cwd.trim() ? raw.cwd.trim() : null,
     ...(parentSessionId ? { parentSessionId } : {}),
+    ...(awaitingInput ? { awaitingInput } : {}),
     updatedAtMs,
     createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
     turnState: raw.turnState || 'completed'
@@ -102,6 +113,7 @@ function metaChanged(prev, next) {
     prev.title !== next.title ||
     prev.cwd !== next.cwd ||
     prev.parentSessionId !== next.parentSessionId ||
+    prev.awaitingInput !== next.awaitingInput ||
     prev.updatedAtMs !== next.updatedAtMs ||
     prev.createdAtMs !== next.createdAtMs ||
     prev.turnState !== next.turnState
@@ -138,11 +150,15 @@ function readHeadMeta(fileSystem, file) {
   const createdAtMs = Date.parse(createdAt)
   const parentSessionId = field('parentSessionId')
   const turnState = field('turnState')
+  const awaitingInput = field('awaitingInput')
   return {
     id,
     title: field('title'),
     cwd: field('cwd'),
     ...(parentSessionId ? { parentSessionId } : {}),
+    ...(awaitingInput && turnState !== 'completed'
+      ? { awaitingInput: awaitingInput.slice(0, AWAITING_INPUT_MAX) }
+      : {}),
     updatedAtMs,
     createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
     turnState: turnState || 'completed'

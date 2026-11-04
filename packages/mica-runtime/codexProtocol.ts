@@ -227,6 +227,54 @@ export type MicaSessionStateSnapshot = {
   value: unknown;
 };
 
+/**
+ * 插件把一个问题抛给用户、等他点一个选项（`ctx.ask.request`）。
+ *
+ * 同一时刻一条会话最多只有一个待回答的问题，所以推的是**整份快照**（`ask: null` 表示
+ * 已经没人等了），客户端整体替换即可，不必做增量合并。
+ *
+ * 它与 turn 生命周期无关、也不进 turn 事件缓冲：问题在一次迭代中间提出，答案回来之前
+ * 这一轮就停在那里。中途附着上来的页签靠 `chat:is-running` 的 `ask` 字段补上，与任务
+ * 快照是同一种做法。
+ */
+export const MICA_ASK_NOTIFICATIONS = {
+  updated: 'mica/ask/updated',
+} as const;
+
+export type MicaAskOption = {
+  id: string;
+  label: string;
+  description?: string;
+};
+
+/** 一个待回答的问题。 */
+export type MicaAskPending = {
+  /** 回答时带回来，用来核对「点的还是不是这一道」。 */
+  id: string;
+  pluginId: string;
+  title: string;
+  detail?: string;
+  options: MicaAskOption[];
+  multiple?: boolean;
+  allowCustom?: boolean;
+  /** 会话列表里那句提示（「等你选方案」）。 */
+  summary: string;
+  askedAt: string;
+};
+
+export type MicaAskSnapshot = {
+  threadId: string | null;
+  /** `null`：现在没有在等的问题（已回答 / 超时 / 被中止）。 */
+  ask: MicaAskPending | null;
+};
+
+/** `MICA_METHODS.askAnswer` 的载荷。 */
+export type MicaAskAnswerParams = {
+  askId: string;
+  optionIds?: string[];
+  custom?: string;
+};
+
 export const MICA_PLUGIN_SETTINGS_NOTIFICATIONS = {
   updated: 'mica/pluginSettings/updated',
 } as const;
@@ -539,6 +587,14 @@ export const MICA_METHODS = {
    * 落盘后其他窗口经 `mica/sessionState/updated` 同步。
    */
   sessionStateSet: 'mica/sessionState/set',
+  /**
+   * 回答一个待回答的问题（`ctx.ask.request` 抛出、经 `mica/ask/updated` 推给页面）。
+   *
+   * 请求本身立刻回包：它只是把答案交给那个正在等的工具，工具随后在同一次迭代里继续，
+   * 不发起新的 turn。`askId` 对不上（已经超时或被中止）时回 `{ ok: false }`，页面据此
+   * 把那张卡片收掉——用户点的可能是一个已经没人等的问题。
+   */
+  askAnswer: 'mica/ask/answer',
   /**
    * 读本会话的插件设置：哪些插件声明了可按会话覆盖的项、每项的字段描述、
    * 全局默认值、本会话已覆盖的值。

@@ -18,6 +18,7 @@ const EVENT_CHANNELS = [
   'chat:exit',
   'chat:queue-state',
   'chat:queue-error',
+  'chat:ask',
   'chat:run-started',
   'chat:commit-exit',
   'notify:changed',
@@ -337,6 +338,16 @@ function createWebApi(env) {
           cwd: cwd || null
         }),
       onSessionStateUpdated: (callback) => subscribe('chat:session-state-updated', callback),
+      // 插件（工具）抛出的选择题：`{ id, sessionId, ask }`，ask 为 null 表示这道题已经结束。
+      // 答案不会开启新的一轮——它只是 resolve 掉工具那边还在等的那个 promise。
+      onAsk: (callback) => subscribe('chat:ask', callback),
+      answerAsk: (id, { askId, optionIds, custom } = {}) =>
+        invoke('chat:answer-ask', {
+          id,
+          askId,
+          optionIds: Array.isArray(optionIds) ? optionIds : [],
+          ...(custom ? { custom } : {})
+        }),
       compact: (sessionId, mode = 'model') => invoke('chat:compact', { sessionId, mode }),
       checkCwd: (cwd) => invoke('chat:check-cwd', { cwd }),
       // 换工作目录：有宿主的会话由宿主 chdir + 落盘（下一轮就生效），没宿主的

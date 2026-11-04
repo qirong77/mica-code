@@ -13,7 +13,11 @@ import { childGroups } from './session-projects'
  * another window (or another runtime/terminal on this machine) is writing the
  * session right now, so the row breathes green instead of looking idle.
  */
-export function liveSessionRowState({ notificationState, interrupted, remoteRunning }) {
+export function liveSessionRowState({ notificationState, interrupted, remoteRunning, awaiting }) {
+  // 「在等你做选择」排在最前：它是唯一一个「卡住了、只有你动手才会继续」的状态，比
+  // 「正在跑」更该让用户点进去。它由宿主按「有标记 + 还在跑 + 有人持租约」判定，
+  // 所以不会是一个已经没有人等的问题（见 host/stats.js 的 scanMeta）。
+  if (awaiting) return 'awaiting'
   if (notificationState?.running) return 'running'
   if (remoteRunning) return 'running'
   if (notificationState?.lastType === 'turn.error') return 'error'
@@ -69,13 +73,13 @@ export function draftMarkers(drafts, previous = new Set()) {
 /**
  * 折叠起来的分组/分区会把里面的行从侧栏藏掉，那一层必须替它显示状态，否则
  * 「正在跑」和「有未读」在折叠状态下完全不可见。合并优先级与 RowLeading 的
- * 显示分支同源：运行中 > 未读。
+ * 显示分支同源：等你选 > 运行中 > 未读。
  *
  * 异常中断（error）刻意不参与合并：它是单个会话自己的状态——用户点进去才需要
  * 关心是哪一条没跑完，而折叠容器上挂一个红灯只会指不出对象、还让「展开找红灯」
  * 变成必然操作。所以 error 只留在会话行自身（liveSessionRowState），不上浮。
  */
-const ROW_STATE_RANK = { running: 2, unread: 1 }
+const ROW_STATE_RANK = { awaiting: 3, running: 2, unread: 1 }
 
 export function mergeRowStates(states = []) {
   let best = null
@@ -139,7 +143,10 @@ export function sameSessionSnapshot(previous, next) {
       a.cwd !== b.cwd ||
       a.parentSessionId !== b.parentSessionId ||
       a.updatedAtMs !== b.updatedAtMs ||
-      a.turnState !== b.turnState
+      a.turnState !== b.turnState ||
+      // 会话文件里只是多了一句「正在等你选」时 turnState 不会变，比较不到这个字段
+      // 侧栏就会整棵跳过重渲染，行上永远看不到那个提醒。
+      a.awaiting !== b.awaiting
     ) {
       return false
     }

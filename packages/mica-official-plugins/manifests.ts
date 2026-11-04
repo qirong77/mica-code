@@ -1,5 +1,6 @@
 import { parsePluginManifest, type PluginManifest } from '@packages/mica-plugin/PluginManifest.js';
 import autoCompactManifest from '../../plugins/auto-compact/plugin.json';
+import askManifest from '../../plugins/ask/plugin.json';
 import btwManifest from '../../plugins/btw/plugin.json';
 import commitManifest from '../../plugins/commit/plugin.json';
 import computerUseManifest from '../../plugins/computer-use/plugin.json';
@@ -31,6 +32,7 @@ export const OFFICIAL_PLUGINS_DIR = 'plugins';
 
 export const officialPluginManifests: PluginManifest[] = [
   readManifest(autoCompactManifest),
+  readManifest(askManifest),
   readManifest(btwManifest),
   readManifest(commitManifest),
   readManifest(harnessReviewManifest),

@@ -178,6 +178,7 @@ export type PluginStatusType = (typeof PLUGIN_STATUS_TYPES)[number];
 export const PLUGIN_REQUIREMENTS = [
   'actions',
   'agent',
+  'ask',
   'background',
   'commands',
   'desktop',

@@ -26,6 +26,7 @@ import {
   CODEX_ERROR_METHOD_NOT_FOUND,
   CODEX_METHODS,
   CODEX_NOTIFICATIONS,
+  MICA_ASK_NOTIFICATIONS,
   MICA_SESSION_STATE_NOTIFICATIONS,
   MICA_BTW_NOTIFICATIONS,
   MICA_HOST_NOTIFICATIONS,
@@ -83,6 +84,7 @@ import { BtwThreads, readStoredBtwThreads, writeStoredBtwThreads } from '../runt
 import { truncateHistoryBeforeUserMessage } from '../runtime/conversationHistory.js';
 import { SessionController } from '../session/SessionController.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
+import { createPluginAskBroker } from '../headless/PluginAskBroker.js';
 import { resolveRuntimeConfigOverride, type EffortAdjustment, type ResolvedRuntimeOverride } from './modelCatalog.js';
 import { applyPluginSessionSettings, listPluginSessionSettings } from './pluginSessionSettings.js';
 
@@ -606,12 +608,20 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         });
       },
     });
+    // 插件的「问用户一个问题」：只有这个宿主能把问题推给页面、并从页面收回答案。
+    // 等待期间在会话文件上标一句「在等你选」，侧栏据此提醒——即使会话没被打开。
+    const pluginAsks = createPluginAskBroker({
+      notify: (snapshot) => writeNotification(MICA_ASK_NOTIFICATIONS.updated, snapshot),
+      markWaiting: (summary) => sessionController!.setAwaitingInput(summary),
+      threadId: () => sessionId || null,
+    });
     pluginHost = createHeadlessPluginHost({
       runtimeOverride,
       hooks,
       agent,
       sessionController,
       subagentTasks,
+      asks: pluginAsks,
       // 桌面端的运行时 spawn 这个进程时会带上标记（见 apps/desktop/src/host/chat.js）。
       // 插件据此决定自己要不要提供只有桌面页面能兑现的能力。
       desktopHost: process.env.MICA_PLUGIN_DESKTOP_HOST === '1',
@@ -780,6 +790,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
         plugins: pluginHost?.plugins,
         panels: pluginHost?.panels,
         sessionMenus: pluginHost?.sessionMenus,
+        asks: pluginHost?.asks ?? undefined,
         events: pluginHost?.events,
         configDir: resolveMicaHome(),
         subagentTasks: subagentTasks!,
@@ -826,6 +837,13 @@ type HostContext = {
    * 结果里的剪贴板内容交回页面去写。
    */
   sessionMenus?: import('@packages/mica-plugin/index.js').PluginSessionMenuRegistry;
+  /**
+   * 插件的一次提问（`ctx.ask`）在这里等着被回答。
+   *
+   * 只有桌面宿主提供：`mica/ask/updated` 推给页面、`mica/ask/answer` 从页面回来，
+   * 两条腿都在这一层。
+   */
+  asks?: import('../headless/PluginAskBroker.js').PluginAskHost;
   /** 插件设置的落盘目录，读全局默认值用（缺了只能读到字段默认值）。 */
   configDir?: string;
   /**
@@ -1942,6 +1960,24 @@ async function handleCodexRequest(
     case MICA_METHODS.pluginPanelView: {
       const result = await readPluginPanel(ctx, params);
       ctx.writeResponse(result);
+      return;
+    }
+    case MICA_METHODS.askAnswer: {
+      // 只是把答案交给那个正在等的工具：工具在同一次迭代里继续，不发起新的 turn。
+      // 因此这里立刻回包，不占请求循环——`turn/interrupt` 这些必须排得进来。
+      const askHost = ctx.asks;
+      if (!askHost) {
+        ctx.writeResponse({ ok: false, error: '这个宿主不支持向用户提问' });
+        return;
+      }
+      const answer = askHost.answer({
+        askId: paramString(params, 'askId') ?? '',
+        optionIds: Array.isArray(params.optionIds)
+          ? params.optionIds.filter((id): id is string => typeof id === 'string')
+          : [],
+        ...(typeof params.custom === 'string' ? { custom: params.custom } : {}),
+      });
+      ctx.writeResponse(answer);
       return;
     }
     case MICA_METHODS.pluginPanelAction: {

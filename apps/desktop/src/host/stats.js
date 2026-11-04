@@ -63,6 +63,17 @@ export function setStatsBroadcaster(fn) {
   broadcastStats = typeof fn === 'function' ? fn : () => {}
 }
 
+/**
+ * 侧栏列表需要立刻重读时用它。
+ *
+ * 「某个会话正在等你选」这类标记既不进统计索引、也不改用量，只有会话文件变了一次；
+ * 光靠 10 秒轮询会让提醒最多晚十秒才亮。真正的重读仍走 `stats:list-sessions`，
+ * 这里只是提前叫醒页面。
+ */
+export function notifySessionListChanged() {
+  broadcastStats('stats:changed', { reason: 'sessions' })
+}
+
 let lastBroadcastAt = 0
 const BROADCAST_INTERVAL_MS = 500
 
@@ -281,20 +292,26 @@ async function scanMeta() {
   }
   const ids = []
   const runningIds = []
+  const awaitingIds = []
   for (const row of rows) {
     if (isInterruptedSession(row, probe)) ids.push(row.id)
     else if (row.turnState === 'running') runningIds.push(row.id)
+    // 「正在等你做一个选择」三个条件缺一不可：文件里有标记、这一轮还在跑、而且真有进程
+    // 持有租约。少了最后一条，宿主崩掉后残留的标记会一直亮着提醒用户去回答一个已经
+    // 没有人等的问题。
+    if (row.awaitingInput && row.turnState === 'running' && probe(row.id)) awaitingIds.push(row.id)
   }
-  const key = `${ids.join(',')}|${runningIds.join(',')}`
+  const key = `${ids.join(',')}|${runningIds.join(',')}|${awaitingIds.join(',')}`
   if (metaInterrupted.key === key && metaInterrupted.rows === rows) return metaInterrupted.value
   const interrupted = new Set(ids)
   const running = new Set(runningIds)
+  const awaiting = new Set(awaitingIds)
   const value =
-    ids.length || runningIds.length
+    ids.length || runningIds.length || awaitingIds.length
       ? rows.map((row) => {
           if (interrupted.has(row.id)) return { ...row, interrupted: true }
-          if (running.has(row.id)) return { ...row, remoteRunning: true }
-          return row
+          const next = running.has(row.id) ? { ...row, remoteRunning: true } : row
+          return awaiting.has(row.id) ? { ...next, awaiting: true } : next
         })
       : rows
   metaInterrupted = { rows, key, value }

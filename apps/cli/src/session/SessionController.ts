@@ -71,6 +71,8 @@ export class SessionController {
   private currentTurnState: PersistedSessionTurnState = 'completed';
   /** 下次宿主要不要接续这一轮，见 `PersistedSessionResumeAfter`。 */
   private currentResumeAfter: PersistedSessionResumeAfter | null = null;
+  /** 这条会话正在等用户做一个选择（插件的 `ctx.ask`）；答案回来即清。 */
+  private currentAwaitingInput: string | null = null;
   /** 这条会话派生自哪条会话；resume 时从文件读回来，新会话由调用方给。 */
   private currentParentSessionId: string | null = null;
   /**
@@ -171,6 +173,7 @@ export class SessionController {
     this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
     this.currentResumeAfter = null;
+    this.currentAwaitingInput = null;
     this.currentPersistedSignature = null;
     this.recoveredActiveThinkingSignature = null;
   }
@@ -198,6 +201,8 @@ export class SessionController {
       turnState?: PersistedSessionTurnState;
       /** 见 `PersistedSessionResumeAfter`；只有被宿主主动暂停的那个分支会传。 */
       resumeAfter?: PersistedSessionResumeAfter | null;
+      /** 「在等你选」那句话；不传就沿用内存里那份（清理由 `setAwaitingInput(null)` 负责）。 */
+      awaitingInput?: string | null;
       preserveTitle?: boolean;
       conversationMessages?: MicaUiConversationMessage[];
       /** 压缩后的上下文占用，仅供界面展示（见 resolveDisplayUsage）。 */
@@ -211,6 +216,19 @@ export class SessionController {
     // 别的保存路径不碰它，否则一次中途 checkpoint 就能把待续跑标记抹掉。
     if (options.resumeAfter !== undefined) this.currentResumeAfter = options.resumeAfter ?? null;
     else if (this.currentTurnState === 'completed' || this.currentTurnState === 'error') this.currentResumeAfter = null;
+    if (options.awaitingInput !== undefined) this.currentAwaitingInput = options.awaitingInput;
+    // 轮次真的结束了就不该还挂着「等你选」：它是那一轮停在中途的标记，进程也可能
+    // 是在别处收尾的（这一轮被中断、下一轮由另一个宿主接上）。
+    //
+    // 只清「顺手带过去」的那份：显式传 `awaitingInput` 的调用方（`setAwaitingInput`）
+    // 自己负责这件事——提问发生在工具执行期，那一刻这一轮还没写出过任何东西，
+    // `currentTurnState` 仍是上一次的 completed，照这里清就会把刚做的标记立刻抹掉。
+    if (
+      options.awaitingInput === undefined &&
+      (this.currentTurnState === 'completed' || this.currentTurnState === 'error')
+    ) {
+      this.currentAwaitingInput = null;
+    }
     if (
       !hasConversation(snapshot.messages, conversationMessages) &&
       !options.allowEmpty &&
@@ -267,6 +285,7 @@ export class SessionController {
       cwd: process.cwd(),
       ...this.parentFieldFor(existing),
       turnState: this.currentTurnState,
+      ...(this.currentAwaitingInput ? { awaitingInput: this.currentAwaitingInput } : {}),
       ...(this.currentResumeAfter ? { resumeAfter: this.currentResumeAfter } : {}),
       snapshot: {
         ...toPersistedSnapshot(snapshot, conversationMessages),
@@ -290,6 +309,25 @@ export class SessionController {
     this.currentParentSessionId = session.parentSessionId ?? null;
     this.currentPersistedSignature = sessionSignature(session);
     return true;
+  }
+
+  /**
+   * 标记 / 清除「这条会话正在等用户做一个选择」，并立刻落盘。
+   *
+   * 侧栏读的是会话文件，所以这件事必须落到盘上：「用户正待在别的会话里」正是它要提醒
+   * 的场景，进程内经不起一次切换，更经不起重启。轮次收尾时 `saveCurrent` 会按
+   * `turnState` 自行清掉，这里只负责在问题出现/消失的那一刻先把文件改对。
+   */
+  setAwaitingInput(text: string | null): void {
+    const next = typeof text === 'string' && text.trim() ? text.trim() : null;
+    if (this.currentAwaitingInput === next) return;
+    this.currentAwaitingInput = next;
+    // 直接改盘上那一份的这一个字段，不走完整保存：完整保存要先过「还没有对话内容就
+    // 别落盘」的保护，而提问恰好发生在第一个答案之前，标记会被那条保护一起挡掉。
+    // 文件被改动之后，之前记下的签名不再描述它，下一次保存据此重新写一份完整快照。
+    if (this.store.patchAwaitingInput?.(this.currentSessionId, next)) {
+      this.currentPersistedSignature = null;
+    }
   }
 
   /**
@@ -322,6 +360,8 @@ export class SessionController {
       cwd: process.cwd(),
       ...this.parentFieldFor(existing),
       turnState: existing?.turnState ?? this.currentTurnState,
+      // 改名不该顺手把「在等你选」抹掉：它描述的那一轮还在跑。
+      ...(this.currentAwaitingInput ? { awaitingInput: this.currentAwaitingInput } : {}),
       snapshot: existing?.snapshot ?? toPersistedSnapshot(snapshot, conversationMessages),
     };
     this.store.save(session);
@@ -473,6 +513,9 @@ export class SessionController {
     this.currentSessionId = session.id;
     this.currentTurnState = session.turnState ?? 'completed';
     if (session.resumeAfter !== undefined) this.currentResumeAfter = session.resumeAfter;
+    // 恢复时照原样带着：真问题可能还在等（宿主刚刚崩过），下一个 `saveCurrent` 会
+    // 按 `turnState` 决定要不要留下它。
+    this.currentAwaitingInput = session.awaitingInput ?? null;
     this.currentParentSessionId = session.parentSessionId ?? null;
     this.parentSessionOwned = false;
     this.currentPersistedSignature = sessionSignature(session);

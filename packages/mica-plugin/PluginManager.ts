@@ -8,6 +8,7 @@ import type { PluginModelsHandler } from './PluginModels.js';
 import type { PluginRequirement } from './PluginManifest.js';
 import type { PluginPromptSections } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
+import type { PluginAskApi } from './PluginAsk.js';
 import { createPluginSessionSettingsApi, type PluginSessionSettingsHostApi } from './PluginSessionSettings.js';
 import { createPluginLlmApi } from './PluginLlm.js';
 import { createPluginBackgroundScheduler } from './PluginBackground.js';
@@ -107,6 +108,12 @@ export type PluginBaseContext = Omit<
    * 需要它的插件必须在 `requires` 里声明，注册阶段就会被跳过。
    */
   sessionSettingsFor?: (pluginId: string) => PluginSessionSettingsHostApi;
+  /**
+   * 按插件 id 生成「问用户一个问题」的入口。只有能把问题画给人、并且收得到点选的宿主
+   * 才提供（桌面端的 `mica app-server`）；没提供时插件拿不到 `ask`，依赖它的插件在
+   * 注册阶段按 `requires: ['ask']` 整插件跳过。
+   */
+  askFor?: (pluginId: string) => PluginAskApi;
   /**
    * 内核持有的 prompt 段落表。manager 会为每个插件包一层只写自己段落的入口，
    * 宿主只需要把 `AgentRuntime.promptSections` 交出来。
@@ -280,6 +287,7 @@ export class PluginManager {
     const {
       sessionStateFor,
       sessionSettingsFor,
+      askFor,
       promptSections: promptRegistry,
       agentRegistry,
       subagentsFor,
@@ -373,6 +381,7 @@ export class PluginManager {
     localDisposables.push({ dispose: () => background.disposeAll() });
     const sessionState = sessionStateFor?.(plugin.id);
     if (sessionState) ctx.sessionState = sessionState;
+    if (askFor) ctx.ask = askFor(plugin.id);
     if (promptRegistry) {
       ctx.prompt = { section: (section) => promptRegistry.add(plugin.id, section) };
     }

@@ -58,6 +58,21 @@ describe('runningTerminalSessions', () => {
 })
 
 describe('liveSessionRowState', () => {
+  it('puts「等你选」above every other activity, including running', () => {
+    // 这一轮卡在等用户动手：比「正在跑」更该让人点进去。
+    expect(liveSessionRowState({ awaiting: true })).toBe('awaiting')
+    expect(
+      liveSessionRowState({ awaiting: true, notificationState: { running: true }, remoteRunning: true })
+    ).toBe('awaiting')
+    // 标记不在时一切照旧。
+    expect(liveSessionRowState({ awaiting: false, notificationState: { running: true } })).toBe(
+      'running'
+    )
+    // 折叠容器替里面的行显示状态时也要能上浮。
+    expect(mergeRowStates(['unread', 'running', 'awaiting'])).toBe('awaiting')
+    expect(mergeRowStates(['unread', 'running'])).toBe('running')
+  })
+
   it('only reports activity received from the current app process', () => {
     expect(liveSessionRowState({})).toBeNull()
     expect(liveSessionRowState({ notificationState: { unread: true, running: false } })).toBe(

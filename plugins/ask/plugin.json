@@ -1,0 +1,15 @@
+{
+  "id": "ask",
+  "name": "Ask",
+  "icon": "message-square",
+  "version": "1.0.0",
+  "description": "让 agent 把选择抛给你：给出方案 A / B，点一个就继续往下做——选项可以带一段提示词，也可以直接跑一条命令。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 20,
+  "mica": {
+    "apiVersion": 1
+  },
+  "requires": ["ask", "prompt", "tools"]
+}

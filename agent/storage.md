@@ -8,6 +8,7 @@
 - session 是 version 1 JSON；新增字段要有版本策略、默认值与 sanitize，字段类型不对按损坏拒绝。
 - `parentSessionId` 是顶层元信息（与 `cwd` 同级），记录「谁派生的这条会话」：`--parent`、`thread/start`、fork（父会话换成源会话）。非法值（非字符串、id 形状不对、自指）丢弃而不是拒绝整个会话——它只影响侧栏嵌套。`$MICA_HOME/session-index.json` 的版本号跟着升，旧索引直接重建。
 - `resumeAfter` 是顶层可选字段，只在「宿主为一个即将换掉的进程主动软停」时写（当前唯一取值 `build-reload`），一轮正常完成即清；它同时要求 `turnState === 'aborted'`，否则读盘时丢弃。用户自己按停止的会话没有它，不会被续跑。
+- `awaitingInput` 是顶层可选字符串（≤120 字符），表示「这条会话正在等用户做一个选择」（插件 `ctx.ask` 的 `summary`）；`turnState === 'completed'` 时读盘丢弃。它**不进快照、也不走完整保存**：`SessionStore.patchAwaitingInput` 只改这一个字段并原子写回，键位置固定在 `turnState` 之后、`snapshot` 之前——侧栏只读文件头 4KB，排在快照后面就永远看不到。绕开完整保存的原因是那一次保存会先过「还没有对话内容就别落盘」的保护，而提问恰好发生在第一个答案之前。轮次结束时 `saveCurrent` 清掉它，改名（`renameCurrent`）不动它。
 - 会话级状态都在快照里：`capabilitySelection` / `capabilitiesCustomized`、`pluginState`（插件自己的 JSON）、`pluginSessionSettings`（插件设置的会话覆盖，只存改过的键）、`notes`。`startNewSession` 清空，resume/fork 沿用，rewind 随 checkpoint 回滚。`turnTimings`（最近 50 轮的耗时分解）是例外：它记录这条会话跑过的轮次，`startNewSession` 与 fork 都清空，读盘时坏掉的条目丢掉而不是判整份会话损坏。
 - `snapshot.systemPrompt` 是「最近一次请求真正发出去的 system prompt」的存档（角色 + 项目说明 + skills 索引 + 环境信息 + 插件段落），只给界面看，绝不用于重建请求——下一轮仍然现场拼装。写在 `AgentRuntime` 解析 `systemPrompt` 的那一刻，随 checkpoint 落盘；旧会话没有这个字段，界面如实说「没有记录」而不重新拼一份冒充。
 - `subagentUsageHistory` 独立于主 `usageHistory`；fork 清空两类历史，只保留描述继承上下文的 `lastUsage`。
