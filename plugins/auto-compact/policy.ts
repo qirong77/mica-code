@@ -13,6 +13,12 @@ export type AutoCompactSettings = {
   modelThresholdK: number;
   modelLimit: number;
   minIntervalMs: number;
+  /** 关掉之后不再问「要不要压缩」，自动压缩本身照旧。 */
+  remindEnabled: boolean;
+  /** 距上一次请求过了这么久，提示词缓存大概率已失效：值得问一句。 */
+  idleRemindMs: number;
+  /** 上下文小于这个量时不提醒：省下的 token 还不够一次请求的零头。 */
+  remindContextTokens: number;
 };
 
 export type AutoCompactCounters = {
@@ -33,6 +39,15 @@ export type AutoCompactCounters = {
   /** Unsuccessful/no-op attempts back off without consuming successful runs. */
   lastAttemptAt: string | null;
   lastAttemptTokens: number;
+  /**
+   * 最近一次往模型发请求的时间（ISO）。
+   *
+   * 提醒要回答的是「这段历史在缓存里还热着吗」，所以记的是请求时刻而不是轮次开始：
+   * 一轮跑了半小时、期间压过两次，缓存是被最后一次请求刷新的。
+   */
+  lastRequestAt: string | null;
+  /** 最近一次发出「要不要压缩」提醒的时间（ISO）；与 `lastRequestAt` 比出「这段空闲问过没有」。 */
+  lastReminderAt: string | null;
 };
 
 export type AutoCompactStep = 'quick' | 'model';
@@ -44,6 +59,9 @@ export const DEFAULT_SETTINGS: AutoCompactSettings = {
   modelThresholdK: 200,
   modelLimit: 999,
   minIntervalMs: 30 * 60 * 1000,
+  remindEnabled: true,
+  idleRemindMs: 60 * 60 * 1000,
+  remindContextTokens: 100_000,
 };
 
 export const EMPTY_COUNTERS: AutoCompactCounters = {
@@ -55,6 +73,8 @@ export const EMPTY_COUNTERS: AutoCompactCounters = {
   lastSavedTokens: 0,
   lastAttemptAt: null,
   lastAttemptTokens: 0,
+  lastRequestAt: null,
+  lastReminderAt: null,
 };
 
 const MAX_RUNS = 1_000_000;
@@ -76,6 +96,11 @@ export function settingsFromValues(values: Record<string, string | undefined>): 
       0,
       Math.round(readNumber(values.minIntervalMinutes, DEFAULT_SETTINGS.minIntervalMs / 60_000) * 60_000),
     ),
+    remindEnabled: (values.remindEnabled ?? String(DEFAULT_SETTINGS.remindEnabled)) !== 'false',
+    idleRemindMs:
+      Math.max(1, Math.round(readNumber(values.idleRemindMinutes, DEFAULT_SETTINGS.idleRemindMs / 60_000))) * 60_000,
+    remindContextTokens:
+      Math.max(1, Math.round(readNumber(values.remindContextK, DEFAULT_SETTINGS.remindContextTokens / 1000))) * 1000,
   };
 }
 
@@ -99,6 +124,8 @@ export function normalizeCounters(input: unknown): AutoCompactCounters {
     lastSavedTokens: count(source.lastSavedTokens),
     lastAttemptAt: typeof source.lastAttemptAt === 'string' && source.lastAttemptAt ? source.lastAttemptAt : null,
     lastAttemptTokens: Math.max(0, readNumber(source.lastAttemptTokens, 0)),
+    lastRequestAt: typeof source.lastRequestAt === 'string' && source.lastRequestAt ? source.lastRequestAt : null,
+    lastReminderAt: typeof source.lastReminderAt === 'string' && source.lastReminderAt ? source.lastReminderAt : null,
   };
 }
 
@@ -176,4 +203,65 @@ export function effectiveThresholds(settings: AutoCompactSettings, contextWindow
     quick: Math.min(settings.quickThresholdK * 1000, window ? window * 0.55 : Infinity),
     model: Math.min(settings.modelThresholdK * 1000, window ? window * 0.75 : Infinity),
   };
+}
+
+export type CompactReminderKind = 'idle' | 'context';
+
+/**
+ * 轮次之外多久可以打扰用户一次：'context' 那条走容量，不等到一小时也得先等一轮落地。
+ *
+ * 刚答完的一轮里上下文本来就大，那时再补一张卡纯属噪音——真正要问的是「人走开之后」。
+ */
+const CONTEXT_REMINDER_MIN_IDLE_MS = 10 * 60 * 1000;
+
+/**
+ * 给定「现在多大、放了多久」，决定要不要问用户一句「要不要压缩」。
+ *
+ * 这里**不做压缩**，只决定要不要提醒：轮次之外的压缩会改写用户看得见的历史，那得由
+ * 他点一下。所以规则比 `decideAutoCompactStep` 保守得多，四条缺一不可：
+ *
+ * - 会话是空闲的（一轮在跑时轮内压缩本来就在动，再问一句只是打断）；
+ * - 上下文确实大（低于提醒下限时压也压不出什么）；
+ * - 这段空闲里**还没问过**（同一个「人走开了」只问一次，按 `lastReminderAt` 与
+ *   `lastRequestAt` 的先后判定：一次新请求会重新打开这个窗口）；
+ * - 压缩次数还没用尽（提醒了也压不动等于骗用户）。
+ *
+ * `context` 只在接近窗口上限时出现，`idle` 是「放太久了，缓存大概率已经失效」。
+ */
+export function decideCompactReminder(input: {
+  settings: AutoCompactSettings;
+  counters: AutoCompactCounters;
+  /** 最近一次真实请求送出去的上下文；还没请求过时是 0。 */
+  ctxTokens: number;
+  /** 这一轮是否在跑（或别的进程占着会话）。 */
+  busy?: boolean;
+  /** 当前时间（测试可注入）。 */
+  nowMs?: number;
+  contextWindowSize?: number;
+}): CompactReminderKind | null {
+  const { settings, counters, ctxTokens } = input;
+  if (!settings.enabled || !settings.remindEnabled) return null;
+  if (input.busy) return null;
+  if (!Number.isFinite(ctxTokens)) return null;
+  if (counters.quickRuns >= settings.quickLimit && counters.modelRuns >= settings.modelLimit) return null;
+
+  const window = effectiveThresholds(settings, input.contextWindowSize).window;
+  // 小窗口模型上「100k 才值得提醒」永远不成立：门槛跟着窗口一起缩。
+  const floor = window ? Math.min(settings.remindContextTokens, window * 0.5) : settings.remindContextTokens;
+  if (ctxTokens < floor) return null;
+
+  const nowMs = input.nowMs ?? Date.now();
+  const lastRequestMs = Date.parse(counters.lastRequestAt ?? '');
+  const lastReminderMs = Date.parse(counters.lastReminderAt ?? '');
+  // 这段停留已经问过：用户没回、或者回了「先不压」，都不该在一轮新请求之前再问。
+  if (Number.isFinite(lastReminderMs) && (!Number.isFinite(lastRequestMs) || lastReminderMs >= lastRequestMs)) {
+    return null;
+  }
+
+  // 时钟回拨时不猜「放了多久」：宁可这轮不提醒，也不要拿负数算出「刚请求过」再反着理解。
+  const idleMs = Number.isFinite(lastRequestMs) ? nowMs - lastRequestMs : -1;
+  const hugeAt = window ? window * 0.8 : settings.remindContextTokens * 3;
+  if (ctxTokens >= hugeAt && idleMs >= CONTEXT_REMINDER_MIN_IDLE_MS) return 'context';
+  if (idleMs >= settings.idleRemindMs) return 'idle';
+  return null;
 }

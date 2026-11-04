@@ -1,15 +1,21 @@
 import type { MicaPlugin, PluginAgentHandle, PluginContext } from '@packages/mica-plugin/index.js';
+import type { PluginAskHandle, PluginAskQuestion } from '@packages/mica-plugin/index.js';
 import { formatTokenCount } from '@packages/mica-common/format.js';
 import { isCompactionNotNeededError } from '@packages/mica-context/index.js';
-import type { RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
+import type {
+  RuntimeTurnAfterHookEvent,
+  RuntimeTurnBeforeHookEvent,
+} from '@packages/mica-runtime/index.js';
 import {
   EMPTY_COUNTERS,
   decideAutoCompactStep,
+  decideCompactReminder,
   normalizeCounters,
   settingsFromValues,
   shouldEscalateToModel,
   type AutoCompactCounters,
   type AutoCompactStep,
+  type CompactReminderKind,
 } from './policy.js';
 
 const PLUGIN_ID = 'auto-compact';
@@ -26,9 +32,12 @@ const PLUGIN_ID = 'auto-compact';
  *   反复请求时来回压。跨轮不沿用这个冷却：上一轮压过、这一轮又超阈值就该马上压。唯一
  *   的例外是同一次触发里「快速 →（清不掉）模型」的升级算一次。
  *
- * 只在请求边界动手：轮次之外（空闲、焦点回到输入框）一律不压。那两条抢跑看起来能白捡
- * 一个间隙，实际要么在上下文远未到阈值时白扫几十 MB 历史，要么趁用户还没按发送就把工具
- * 结果换成占位符。压不压交给用户手动触发：命令面板的「快速压缩（本地）」或 /compact。
+ * 只在请求边界**自动**动手：轮次之外（空闲、焦点回到输入框）不主动改历史。那两条抢跑
+ * 看起来能白捡一个间隙，实际要么在上下文远未到阈值时白扫几十 MB 历史，要么趁用户还没按
+ * 发送就把工具结果换成占位符。轮次之外只有一条路——问一句：会话空闲够久（缓存大概率
+ * 已失效）或上下文大到接近窗口时，用 `ctx.ask.post()` 发一张非阻塞的卡片，用户点「现在
+ * 压缩」才走一次本地清理（`compactIdleHistory`），不点就什么都不发生。手动入口照旧：
+ * 命令面板的「快速压缩（本地）」或 /compact。
  *
  * 计数存在**会话快照的插件状态**里（`ctx.sessionState`），不是宿主的一张全局表：
  * 一条会话压过几次，是这条会话自己的事实，resume / fork 都该跟着走。设置的默认值在
@@ -53,12 +62,25 @@ const plugin: MicaPlugin = {
     readSettings(ctx);
     const lifetime = new AbortController();
     ctx.onDispose(() => lifetime.abort());
+    /** 这条会话里「用户轮次」所属的 agent：子代理的请求不算刷新了主会话的缓存。 */
+    let mainOwner: unknown = null;
+    /** 这一轮是否在跑。轮内压缩本来就在动，提醒只在轮次之外问。 */
+    let turnRunning = false;
+    /** 撤掉当前挂着的那张提醒卡（用户已经开始下一轮时用）。 */
+    let dismissReminder: (() => void) | null = null;
     const registration = agentApi.onIterationRewrite(async (messages, agent) => {
       if (agent.mode === 'one-shot' || agent.signal?.aborted || lifetime.signal.aborted) return null;
       const settings = readSettings(ctx, agent.owner);
+      const counters = normalizeCounters(agent.getState<AutoCompactCounters>());
+      // 提醒要判断「这段历史在缓存里还热着吗」，而缓存是被每一次请求刷新的，所以这里
+      // 每个请求都记一笔（只动内存里的插件状态，随本轮 checkpoint 落盘）。
+      if (mainOwner === null || agent.owner === mainOwner) {
+        if (mainOwner === null && agent.owner) mainOwner = agent.owner;
+        counters.lastRequestAt = new Date().toISOString();
+        agent.setState({ ...counters });
+      }
       if (!settings.enabled) return null;
 
-      const counters = normalizeCounters(agent.getState<AutoCompactCounters>());
       let ctxTokens = agent.estimateTokens(messages);
       const beforeTokens = ctxTokens;
       const contextWindowSize = agent.contextWindowSize;
@@ -144,15 +166,36 @@ const plugin: MicaPlugin = {
     });
     ctx.onDispose(() => registration.dispose());
 
-    // 记录本轮起点：最小间隔只约束同一轮里的重复压缩。没有会话级状态时写不进去，
-    // 压缩本身也就没有计数可用；一次性运行整条自动压缩都不生效。
-    if (agentApi.mode !== 'one-shot' && ctx.sessionState) {
+    // 一次性运行（`mica exec`）没有下一轮：既不用记轮次起点，也不会提醒。
+    if (agentApi.mode !== 'one-shot') {
       const turnBefore = ctx.hooks.on<RuntimeTurnBeforeHookEvent>('turn:before', (event) => {
-        const counters = normalizeCounters(ctx.sessionState!.get(event?.owner));
+        turnRunning = true;
+        if (mainOwner === null && event?.owner) mainOwner = event.owner;
+        // 用户已经开始下一轮了，那张「要不要压缩」的卡片已经没有意义：撤掉它，
+        // 别让它挂在新一轮的输入框上面继续要一个答案。
+        dismissReminder?.();
+        if (!ctx.sessionState) return;
+        // 记录本轮起点：最小间隔只约束同一轮里的重复压缩。没有会话级状态时写不进去，
+        // 压缩本身也就没有计数可用。
+        const counters = normalizeCounters(ctx.sessionState.get(event?.owner));
         counters.turnStartedAt = new Date(Date.now()).toISOString();
         persistState(ctx, counters, event?.owner);
       });
       ctx.onDispose(() => turnBefore.dispose());
+
+      const turnAfter = ctx.hooks.on<RuntimeTurnAfterHookEvent>('turn:after', () => {
+        turnRunning = false;
+      });
+      ctx.onDispose(() => turnAfter.dispose());
+
+      const reminder = registerReminder(ctx, agentApi, {
+        isTurnRunning: () => turnRunning,
+        lifetime: lifetime.signal,
+      });
+      if (reminder) {
+        dismissReminder = reminder.dismiss;
+        ctx.onDispose(() => reminder.dispose());
+      }
     }
 
     if (ctx.settings.validate().length === 0) {
@@ -187,6 +230,191 @@ function readSettings(ctx: PluginContext, owner?: unknown) {
 
 function persistState(ctx: PluginContext, value: AutoCompactCounters, owner?: unknown): void {
   ctx.sessionState?.set(value, owner);
+}
+
+/**
+ * 轮次之外问一句「要不要压缩」。
+ *
+ * 为什么要有它：轮内的自动压缩只在请求边界动手，而「你走开了一小时、缓存已经失效」这种
+ * 情况根本没有下一轮可等——等到用户再发一句话时，那份大上下文已经按没缓存的价格算完了。
+ * 但轮次之外直接压是另一回事：它改写的是用户看得见的历史，得由他点一下。
+ *
+ * 所以这里只做「提醒」，而且刻意做得很轻：
+ * - 走非阻塞的 `ctx.ask.post()`：卡片挂在输入框上方，用户不点就什么都不发生，照常打字；
+ *   宿主把它当被动提问（`passive`），不会顶掉任何正在等答案的工具提问；
+ * - 只读已经算好的用量与几个时间戳，不扫历史、不起进程（每分钟一次 tick 的代价是一个
+ *   对象比较）；
+ * - 同一段空闲只问一次：`lastReminderAt` 落在 `lastRequestAt` 之后就不再问，直到有新
+ *   请求重新打开这个窗口；
+ * - 选的「现在压缩」也只在对话历史本身上做本地清理（`compactIdleHistory`），不调用模型、
+ *   不改对话文本。
+ *
+ * TUI / `mica exec` 没有可点的地方（`ctx.ask` 缺席），那边照旧只有轮内的自动压缩。
+ */
+function registerReminder(
+  ctx: PluginContext,
+  agentApi: NonNullable<PluginContext['agent']>,
+  deps: { isTurnRunning: () => boolean; lifetime: AbortSignal },
+): { dispose: () => void; dismiss: () => void } | null {
+  const ask = ctx.ask;
+  const compactIdle = agentApi.compactIdleHistory;
+  const sessionState = ctx.sessionState;
+  if (!ask || !compactIdle || !sessionState) return null;
+  /** 挂着的那张卡片：用户开始下一轮时由外面撤掉。 */
+  let shown: PluginAskHandle | null = null;
+
+  const remind = async (): Promise<void> => {
+    // 一轮在跑时轮内压缩本来就在按阈值动手，再问一句只是打断。
+    if (deps.lifetime.aborted || deps.isTurnRunning()) return;
+    const settings = readSettings(ctx);
+    if (!settings.enabled || !settings.remindEnabled) return;
+    const counters = normalizeCounters(sessionState.get());
+    const usage = agentApi.lastUsage?.() ?? null;
+    const kind = decideCompactReminder({
+      settings,
+      counters,
+      ctxTokens: usage?.inputTokens ?? 0,
+      ...(agentApi.contextWindowSize ? { contextWindowSize: agentApi.contextWindowSize } : {}),
+    });
+    if (!kind) return;
+
+    let handle;
+    try {
+      handle = ask.post(reminderQuestion(kind, { counters, inputTokens: usage?.inputTokens ?? 0 }), {
+        signal: deps.lifetime,
+      });
+    } catch (error) {
+      // 同一个会话一次只显示一个问题：别的插件正问着，这次让开，攒到下一个空闲窗口。
+      ctx.logger.info('auto-compact:remind-skipped', { reason: describeError(error) });
+      return;
+    }
+    shown = handle;
+    counters.lastReminderAt = new Date().toISOString();
+    persistState(ctx, counters);
+
+    const answer = await handle.answered;
+    shown = null;
+    if (answer.cancelled) return;
+    if (!answer.optionIds.includes('compact')) {
+      ctx.logger.info('auto-compact:remind-dismissed', { optionIds: answer.optionIds });
+      return;
+    }
+    await compactIdleNow(ctx, sessionState, compactIdle);
+  };
+
+  let task: { dispose: () => void } | null = null;
+  try {
+    task =
+      ctx.background?.register({
+        id: 'remind',
+        // 一分钟问一次「放够了没有」：读的是现成的用量与时间戳，不扫历史也不起进程。
+        // 卡片挂着的时候 `remind` 还没返回，下一次 tick 自然不会重入。
+        every: 60_000,
+        run: remind,
+      }) ?? null;
+  } catch (error) {
+    // 注册失败只该少掉提醒这一条路：轮内自动压缩照旧，别把整个插件 setup 带崩。
+    ctx.logger.warn('auto-compact:remind-register-failed', { error: describeError(error) });
+  }
+  if (!task) return null;
+  return {
+    dispose: () => {
+      task.dispose();
+      shown?.dismiss();
+      shown = null;
+    },
+    dismiss: () => {
+      shown?.dismiss();
+      shown = null;
+    },
+  };
+}
+
+/** 用户点了「现在压缩」：只做本地清理，走宿主那条独占会话的落盘通路。 */
+async function compactIdleNow(
+  ctx: PluginContext,
+  sessionState: NonNullable<PluginContext['sessionState']>,
+  compactIdle: NonNullable<NonNullable<PluginContext['agent']>['compactIdleHistory']>,
+): Promise<void> {
+  let outcome;
+  try {
+    outcome = await compactIdle({
+      afterApply: (result) => {
+        // 这个回调抛错会让宿主回滚这次压缩，所以每一步都不能把异常漏出去。
+        try {
+          const counters = normalizeCounters(sessionState.get());
+          counters.quickRuns += 1;
+          counters.lastKind = 'quick';
+          counters.lastRunAt = new Date().toISOString();
+          counters.lastSavedTokens = Math.max(0, Math.round(result.savedTokens));
+          sessionState.set(counters);
+          ctx.ui?.notice(
+            `已清理较早的工具结果：${formatCompactGain(result.beforeTokens, result.afterTokens, result.savedTokens)}，对话内容没动`,
+            { command: 'auto-compact', status: 'success', variant: 'compact', replace: true },
+          );
+        } catch (error) {
+          ctx.logger.warn('auto-compact:idle-report-failed', { error: describeError(error) });
+        }
+      },
+    });
+  } catch (error) {
+    ctx.logger.warn('auto-compact:idle-failed', { error: describeError(error) });
+    ctx.ui?.showMessage(`压缩没做成：${describeError(error)}`, 6000);
+    return;
+  }
+  if (outcome.status === 'applied') {
+    ctx.logger.info('auto-compact:idle-applied', { savedTokens: outcome.savedTokens });
+    return;
+  }
+  ctx.ui?.showMessage(
+    outcome.reason === 'busy' ? '这条会话正忙，等这一轮结束再清理' : '没有可清理的内容：最近的历史里已经没有工具结果',
+    6000,
+  );
+}
+
+function reminderQuestion(
+  kind: CompactReminderKind,
+  facts: { counters: AutoCompactCounters; inputTokens: number },
+): PluginAskQuestion {
+  const tokens = formatTokenCount(facts.inputTokens, { roundedThousands: true });
+  const title =
+    kind === 'idle'
+      ? `已经 ${describeIdle(facts.counters.lastRequestAt)}没有请求，缓存大概率已失效`
+      : `上下文已经 ${tokens}，快到窗口上限了`;
+  const detail =
+    kind === 'idle'
+      ? `最近一次请求带着约 ${tokens} 上下文。缓存过期之后，下一条消息要把整段历史按原价重算一遍——现在清理一次能把它压小（本地操作，不调模型、不改对话内容）。`
+      : `再涨下去，下一次请求要么被截断、要么被迫做摘要。现在清理一次旧工具结果（本地操作，不调模型、不改对话内容），下一条消息按压缩后的历史发送。`;
+  return {
+    title,
+    detail,
+    summary: '要不要压缩上下文',
+    options: [
+      {
+        id: 'compact',
+        label: '现在压缩',
+        description: '把旧工具结果换成占位符，不调用模型',
+      },
+      { id: 'later', label: '先不压', description: '保持现状，下一条消息照常带完整历史' },
+    ],
+    // 这是一次「顺手问一句」，不是让你做决定：去掉「2 个方案 · 单选」与底部提示行。
+    ui: { meta: false, hint: false },
+    timeoutMs: 30 * 60_000,
+  };
+}
+
+/** 「已经 1 小时没有请求」里的那段时长。 */
+function describeIdle(lastRequestAt: string | null): string {
+  const since = Date.parse(lastRequestAt ?? '');
+  if (!Number.isFinite(since)) return '一段时间';
+  const minutes = Math.max(1, Math.round((Date.now() - since) / 60_000));
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours} 小时` : `${Math.round(hours / 24)} 天`;
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
