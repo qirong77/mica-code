@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  SESSION_FILTER_DAY_MS,
+  SESSION_FILTER_HOUR_MS,
   SESSION_FILTER_MODES,
   filterSessions,
   matchesSessionFilter,
@@ -10,20 +10,35 @@ import {
 const NOW = new Date(2026, 2, 15, 15, 30).getTime()
 const ago = (hours) => NOW - hours * 60 * 60 * 1000
 const session = (id, hours, extra = {}) => ({ id, updatedAtMs: ago(hours), ...extra })
-const stateOf = (session) => session.state ?? null
 
 describe('sessionFilterMode', () => {
-  it('只有三档，默认是全部', () => {
-    expect(SESSION_FILTER_MODES.map((mode) => mode.id)).toEqual(['all', '24h', 'active'])
+  it('档位是全部 + 4/8/12/24 小时，按时间从短到长排', () => {
+    expect(SESSION_FILTER_MODES.map((mode) => mode.id)).toEqual(['all', '4h', '8h', '12h', '24h'])
+    expect(SESSION_FILTER_MODES.map((mode) => mode.label)).toEqual([
+      '全部',
+      '4 小时',
+      '8 小时',
+      '12 小时',
+      '24 小时'
+    ])
     expect(sessionFilterMode('nope').id).toBe('all')
   })
 })
 
 describe('matchesSessionFilter', () => {
-  it('24 小时是滚动窗口，跨过日界的昨天也算', () => {
-    expect(matchesSessionFilter(session('a', 1), '24h', { now: NOW })).toBe(true)
-    expect(matchesSessionFilter(session('b', 23.5), '24h', { now: NOW })).toBe(true)
-    expect(matchesSessionFilter(session('c', 24.5), '24h', { now: NOW })).toBe(false)
+  it('4 小时是滚动窗口，跨过日界的昨天也算', () => {
+    expect(matchesSessionFilter(session('a', 1), '4h', { now: NOW })).toBe(true)
+    expect(matchesSessionFilter(session('b', 3.5), '4h', { now: NOW })).toBe(true)
+    expect(matchesSessionFilter(session('c', 4.5), '4h', { now: NOW })).toBe(false)
+  })
+
+  it('每一档只看自己那个窗口', () => {
+    expect(matchesSessionFilter(session('a', 5), '4h', { now: NOW })).toBe(false)
+    expect(matchesSessionFilter(session('a', 5), '8h', { now: NOW })).toBe(true)
+    expect(matchesSessionFilter(session('a', 10), '8h', { now: NOW })).toBe(false)
+    expect(matchesSessionFilter(session('a', 10), '12h', { now: NOW })).toBe(true)
+    expect(matchesSessionFilter(session('a', 20), '12h', { now: NOW })).toBe(false)
+    expect(matchesSessionFilter(session('a', 20), '24h', { now: NOW })).toBe(true)
   })
 
   it('时间戳缺失或非法一律不算最近', () => {
@@ -31,31 +46,18 @@ describe('matchesSessionFilter', () => {
     expect(matchesSessionFilter({ id: 'x', updatedAtMs: 0 }, '24h', { now: NOW })).toBe(false)
   })
 
-  it('进行中 = 正在跑 + 等你选，两种都算', () => {
-    const running = { id: 'a', state: 'running' }
-    const awaiting = { id: 'b', state: 'awaiting' }
-    const unread = { id: 'c', state: 'unread' }
-    const idle = { id: 'd', state: null }
-    for (const item of [running, awaiting]) {
-      expect(matchesSessionFilter(item, 'active', { stateOf })).toBe(true)
-    }
-    for (const item of [unread, idle]) {
-      expect(matchesSessionFilter(item, 'active', { stateOf })).toBe(false)
-    }
-  })
-
-  it('状态判定必须走传入的 stateOf，而不是另读一份字段', () => {
-    const item = { id: 'a', state: null }
-    expect(matchesSessionFilter(item, 'active', { stateOf: () => 'running' })).toBe(true)
-  })
-
   it('全部不过滤任何一条', () => {
     expect(matchesSessionFilter({ id: 'x' }, 'all', { now: NOW })).toBe(true)
   })
 
-  it('24 小时的边界取 ≤ 一天', () => {
+  it('窗口的边界取 ≤', () => {
     expect(
-      matchesSessionFilter({ id: 'x', updatedAtMs: NOW - SESSION_FILTER_DAY_MS }, '24h', {
+      matchesSessionFilter({ id: 'x', updatedAtMs: NOW - 4 * SESSION_FILTER_HOUR_MS }, '4h', {
+        now: NOW
+      })
+    ).toBe(true)
+    expect(
+      matchesSessionFilter({ id: 'x', updatedAtMs: NOW - 24 * SESSION_FILTER_HOUR_MS }, '24h', {
         now: NOW
       })
     ).toBe(true)
@@ -65,28 +67,22 @@ describe('matchesSessionFilter', () => {
 describe('filterSessions', () => {
   const list = [
     session('recent', 2, { state: 'running' }),
+    session('morning', 6),
+    session('afternoon', 10),
     session('yesterday', 23.5),
-    session('old', 30),
-    session('awaiting', 4, { state: 'awaiting' })
+    session('old', 30)
   ]
 
   it('全部原样返回同一个数组', () => {
-    expect(filterSessions(list, 'all', { now: NOW, stateOf })).toBe(list)
+    expect(filterSessions(list, 'all', { now: NOW })).toBe(list)
   })
 
-  it('24 小时只留一天内的', () => {
-    expect(filterSessions(list, '24h', { now: NOW, stateOf }).map((item) => item.id)).toEqual([
-      'recent',
-      'yesterday',
-      'awaiting'
-    ])
-  })
-
-  it('进行中只留 running / awaiting', () => {
-    expect(filterSessions(list, 'active', { now: NOW, stateOf }).map((item) => item.id)).toEqual([
-      'recent',
-      'awaiting'
-    ])
+  it('每一档只留窗口内的会话', () => {
+    const ids = (modeId) => filterSessions(list, modeId, { now: NOW }).map((item) => item.id)
+    expect(ids('4h')).toEqual(['recent'])
+    expect(ids('8h')).toEqual(['recent', 'morning'])
+    expect(ids('12h')).toEqual(['recent', 'morning', 'afternoon'])
+    expect(ids('24h')).toEqual(['recent', 'morning', 'afternoon', 'yesterday'])
   })
 
   it('不是数组时交出空数组', () => {

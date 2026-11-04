@@ -15,7 +15,7 @@ import { ConfigWebApp } from '@mica-config-ui/web'
  * 每次打开都重新挂载（`key` 含 section / 插件 id）：入口决定了落在哪一页，残留的上一页
  * 导航状态会让人以为点错了地方（例如从插件菜单进却停在上次的 Performance）。
  */
-export function SettingsView({ section = 'config', pluginId = null, onClose, onNewSession }) {
+export function SettingsView({ section = 'config', pluginId = null, onClose, onNewSession, onOpenPluginPage }) {
   return (
     <section className="mica-config-shell" aria-label="Mica 设置">
       <ConfigWebApp
@@ -25,6 +25,7 @@ export function SettingsView({ section = 'config', pluginId = null, onClose, onN
         onClose={onClose}
         closeLabel="返回对话"
         onNewSession={onNewSession}
+        onOpenPluginPage={onOpenPluginPage}
       />
     </section>
   )

@@ -458,12 +458,11 @@ function readDesktop(
   if (!sessionMenu.ok) return sessionMenu;
   const rawEntry = input.entry;
   if (rawEntry === undefined) {
-    if (input.page !== undefined) {
-      return { ok: false, error: 'desktop.page 需要同时声明 desktop.entry：侧栏那一行是它的入口' };
-    }
+    const page = readDesktopPage(input.page, pluginName);
+    if (!page.ok) return page;
     return {
       ok: true,
-      value: { checks, entry: null, page: null, panel: panel.value, sessionMenu: sessionMenu.value },
+      value: { checks, entry: null, page: page.value, panel: panel.value, sessionMenu: sessionMenu.value },
     };
   }
   if (!isRecord(rawEntry)) return { ok: false, error: 'desktop.entry 必须是对象' };
@@ -499,7 +498,7 @@ function readDesktop(
  * `desktop.page`：把入口做成整页而不是悬停卡片。
  *
  * 只关心标题：页面长什么样是插件的事，宿主只画外面那层壳（返回、标题、拖动条）。
- * `true` 是最常见的写法，等价于「标题取侧栏那一行」。
+ * `true` 是最常见的写法，等价于「标题取侧栏那一行」；没有侧栏入口时取插件名。
  */
 function readDesktopPage(
   input: unknown,
@@ -531,6 +530,9 @@ function readDesktopPage(
  * `icon` 与清单顶层的 `icon` 同一个字符集（界面图标表里的 kebab-case 名称），但按行生效：
  * 一个插件有好几项时，共用插件图标就分不出哪一行是哪件事。不认识的名称不算清单错误——
  * 图标表是界面约定、会演进，页面回落到插件图标即可。
+ *
+ * `surface` 限定这一行出现在哪一处右键菜单（侧栏会话行 / 主会话区），省略是两处都出；
+ * 与 `position` 一样只认枚举值，写别的当清单错误。
  */
 function readSessionMenu(input: unknown): { ok: true; value: PluginSessionMenuItem[] } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: [] };
@@ -565,11 +567,20 @@ function readSessionMenu(input: unknown): { ok: true; value: PluginSessionMenuIt
       }
       position = value;
     }
+    let surface: 'sidebar' | 'chat' | undefined;
+    if (entry.surface !== undefined) {
+      const value = readString(entry.surface)?.trim();
+      if (value !== 'sidebar' && value !== 'chat') {
+        return { ok: false, error: `desktop.sessionMenu「${label}」的 surface 只能是 sidebar 或 chat` };
+      }
+      surface = value;
+    }
     items.push({
       label,
       action,
       ...(icon ? { icon } : {}),
       ...(position ? { position } : {}),
+      ...(surface ? { surface } : {}),
     });
   }
   return { ok: true, value: items };

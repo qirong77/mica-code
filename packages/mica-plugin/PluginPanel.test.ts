@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_EDITOR_TEXT,
   PluginPanelRegistry,
   normalizePluginPanelAction,
   normalizePluginPanelActionResult,
@@ -182,6 +183,91 @@ describe('normalizePluginPanelView', () => {
     expect(fields[1]).toMatchObject({ type: 'switch', value: 'true' });
     // 没有选项的 select 渲染出来是个点不动的下拉，退回普通文本框。
     expect(fields[2].type).toBe('text');
+  });
+
+  it('keeps an inline submit button on a field, drops it where it cannot work', () => {
+    const view = normalizePluginPanelView({
+      title: '需求开发',
+      sections: [
+        {
+          title: '频道',
+          fields: [
+            { key: 'target', label: '群名', action: { id: 'channel.add', label: '添加', icon: 'add' } },
+            {
+              key: 'auth',
+              label: '认证方式',
+              type: 'select',
+              options: [{ value: 'p', label: '密码' }],
+              action: { id: 'pick', label: '选' },
+            },
+            { key: 'enabled', label: '启用', type: 'switch', action: { id: 'toggle', label: '开' } },
+            { key: 'plain', label: '没有动作' },
+          ],
+        },
+      ],
+    });
+    const fields = view.sections?.[0].fields ?? [];
+    expect(fields[0].action).toEqual({ id: 'channel.add', label: '添加', icon: 'add' });
+    // 选项条与开关自己就是「改完即生效」：再挂一个提交按钮，同一个动作就有了两条路径
+    expect(fields[1].action).toBeUndefined();
+    expect(fields[2].action).toBeUndefined();
+    expect(fields[3].action).toBeUndefined();
+  });
+
+  it('keeps icon-only buttons and drops icon names it cannot draw', () => {
+    const view = normalizePluginPanelView({
+      title: '需求开发',
+      sections: [
+        {
+          title: '频道',
+          table: {
+            columns: [{ key: 'name', label: '频道' }],
+            rows: [
+              {
+                key: 'a',
+                cells: { name: { text: '群 A' } },
+                actions: [
+                  { id: 'remove', label: '移除频道', icon: 'trash', tone: 'danger' },
+                  { id: 'magic', label: '魔法', icon: 'sparkles' },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const actions = view.sections?.[0].table?.rows[0].actions ?? [];
+    expect(actions[0]).toMatchObject({ icon: 'trash', tone: 'danger' });
+    // 认不出的名字当没写：宿主退回文字按钮，而不是画一个空图标格
+    expect(actions[1].icon).toBeUndefined();
+    expect(actions[1].label).toBe('魔法');
+  });
+
+  it('keeps an in-place editor with the very text that will be written back', () => {
+    const text = '\n# 身份\n\n  缩进也要留着\n';
+    const view = normalizePluginPanelView({
+      title: '需求开发',
+      sections: [
+        { title: '角色描述', editor: { action: 'role.save', value: text, editLabel: '编辑角色描述' } },
+      ],
+    });
+    const editor = view.sections?.[0].editor;
+    // 原样保留：trim 掉首尾空白、超长补个省略号，写回磁盘就是一次静默的内容改动
+    expect(editor?.value).toBe(text);
+    expect(editor?.action).toBe('role.save');
+    expect(editor?.editLabel).toBe('编辑角色描述');
+
+    const tooLong = normalizePluginPanelView({
+      title: 'x',
+      sections: [{ title: 'a', editor: { action: 'role.save', value: 'x'.repeat(MAX_EDITOR_TEXT + 100) } }],
+    });
+    expect(tooLong.sections?.[0].editor?.value.length).toBe(MAX_EDITOR_TEXT);
+
+    // 缺正文就没有可编辑的东西，缺动作就是「改完没处交」
+    const empty = normalizePluginPanelView({ title: 'x', sections: [{ title: 'a', editor: { action: 's', value: '' } }] });
+    expect(empty.sections?.[0].editor).toBeUndefined();
+    const headless = normalizePluginPanelView({ title: 'x', sections: [{ title: 'a', editor: { value: '正文' } }] });
+    expect(headless.sections?.[0].editor).toBeUndefined();
   });
 
   it('keeps a status line with a bounded label and tone', () => {
@@ -467,6 +553,14 @@ describe('normalizePluginPanelAction', () => {
   it('rejects a missing action id', () => {
     expect(normalizePluginPanelAction({})).toBeNull();
     expect(normalizePluginPanelAction({ action: '  ' })).toBeNull();
+  });
+
+  it('carries the whole document an in-place editor submits', () => {
+    const text = '# 身份\n\n'.repeat(400);
+    const action = normalizePluginPanelAction({ action: 'role.save', text });
+    // 整篇正文走自己的通道：`values` 里每个值 2000 字上限，装不下一份文档
+    expect(action?.text).toBe(text);
+    expect(action?.text?.length).toBeGreaterThan(2000);
   });
 });
 

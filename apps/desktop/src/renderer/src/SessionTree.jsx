@@ -122,18 +122,15 @@ const RECENT_PREVIEW_LIMIT = 6
 
 const RECENT_PAGE_SIZE = 10
 
-// 快捷筛选生效时同样分页：24 小时档在忙起来的一天里也能有几十条，一次性画完既拖慢
-// 首次渲染又让「Show more」的规则和 Recent 分成两套。一次放 30 条根会话。
+// 快捷筛选生效时同样分页：最宽的 24 小时档在忙起来的一天里也能有几十条，一次性画完
+// 既拖慢首次渲染又让「Show more」的规则和 Recent 分成两套。一次放 30 条根会话。
 const FILTER_PREVIEW_LIMIT = 30
 
 const FILTER_PAGE_SIZE = 30
 
-// 档位解释只出现在悬停提示里：侧栏是 260px，按钮上再带一行说明就把三个词挤成两行。
-const FILTER_HINTS = {
-  all: '全部会话（默认）',
-  '24h': '最近 24 小时更新过的会话',
-  active: '正在运行、或卡在等你做选择的会话'
-}
+// 档位解释只出现在悬停提示里：侧栏是 260px，按钮上再带一行说明就挤成两行了。
+const filterHint = (mode) =>
+  mode.hours ? `最近 ${mode.hours} 小时更新过的会话` : '全部会话（默认）'
 
 /** 侧栏里「就是这一条」的闪烁时长：够看清位置，又不至于一直亮着抢注意力。 */
 const REVEAL_FLASH_MS = 1600
@@ -848,21 +845,15 @@ export function SessionTree({
   ])
 
   /**
-   * 快捷筛选：三档互斥，生效时整份列表平铺（按 updatedAt 倒序、沿用 Recent 的今天 /
-   * 昨天 / 近七天分桶）。分区与分组不再参与——这一档问的是「最近在动的都有哪些」，
-   * 不是「它们各自归在哪儿」；置顶会话照样会出现，只是行首多一枚图钉说明它的身份。
-   *
-   * 状态判定走 `rowStateOfSession`，与行首圆点同一份实现：圆点亮着却筛不出来，
-   * 是最难解释的那种不一致。
+   * 快捷筛选：几档时间窗口互斥，生效时整份列表平铺（按 updatedAt 倒序、沿用 Recent 的
+   * 今天 / 昨天 / 近七天分桶）。分区与分组不再参与——这一档问的是「最近在动的都有
+   * 哪些」，不是「它们各自归在哪儿」；置顶会话照样会出现，只是行首多一枚图钉说明身份。
    */
   const filtering = filterOpen && sessionFilterMode(filterMode).id !== 'all'
   const filterCandidates = useMemo(() => {
     if (!filtering) return []
-    return filterSessions(sessions, filterMode, {
-      now: Date.now(),
-      stateOf: rowStateOfSession
-    }).sort(byUpdatedDesc)
-  }, [filtering, filterMode, sessions, rowStateOfSession])
+    return filterSessions(sessions, filterMode, { now: Date.now() }).sort(byUpdatedDesc)
+  }, [filtering, filterMode, sessions])
   const filterRoots = useMemo(() => sessionRoots(filterCandidates), [filterCandidates])
   const filterPage = useMemo(
     () => paginateSessionTrees(filterCandidates, filterRoots, filterLimit),
@@ -1900,7 +1891,8 @@ export function SessionTree({
             )}
             {/* 筛选入口：不点它的时候侧栏和以前一模一样（没有任何会话被藏起来）。
                 激活态的按钮一直亮着，因为筛着的时候列表是平铺的，得让用户看得出
-                「我现在看的是一份子集」。 */}
+                「我现在看的是一份子集」——亮的是图标，不是一整块底色：侧栏本来就窄，
+                30% 的实心橙块会把眼睛从会话标题上拽走。 */}
             <button
               type="button"
               title={filterOpen ? '收起筛选' : '筛选会话'}
@@ -1908,7 +1900,7 @@ export function SessionTree({
               aria-pressed={filterOpen}
               className={`grid size-5 shrink-0 place-items-center rounded transition-colors ${
                 filterOpen
-                  ? 'bg-accent/30 text-fg-max hover:bg-accent/45'
+                  ? 'bg-accent-subtle text-accent hover:bg-accent-region'
                   : 'text-fg-muted hover:bg-overlay-strong hover:text-fg-max'
               }`}
               onClick={() => {
@@ -1921,18 +1913,25 @@ export function SessionTree({
               <IconFilter size={14} />
             </button>
           </div>
-          {/* 三档互斥，默认「全部」：它不筛任何东西，列表照旧是 Pinned / Projects /
-              Recent。选另外两档时列表整体变平铺（见下面的 filterBlocks 分支）。
-              搜索接管列表时不显示这一行——两个入口同时在屏上会分不清谁在过滤谁。 */}
+          {/* 几档互斥，默认「全部」：它不筛任何东西，列表照旧是 Pinned / Projects /
+              Recent。选其余档时列表整体变平铺（见下面的 filterBlocks 分支）。
+              按钮按内容定宽（`min-w-fit`，标签不换行不截断），侧栏宽时等分铺满、
+              窄时整行横向滚动——滚动条全局隐藏，所以看起来只是最右边那个被切掉半截，
+              这正是「右边还有」的提示。搜索接管列表时不显示这一行——两个入口同时在
+              屏上会分不清谁在过滤谁。 */}
           {filterOpen && !searching && (
-            <div role="group" aria-label="会话筛选" className="mt-1 flex items-center gap-1">
+            <div
+              role="group"
+              aria-label="会话筛选"
+              className="mt-1 flex items-center gap-1 overflow-x-auto"
+            >
               {SESSION_FILTER_MODES.map((mode) => (
                 <button
                   key={mode.id}
                   type="button"
                   aria-pressed={filterMode === mode.id}
-                  title={FILTER_HINTS[mode.id]}
-                  className={`h-6 flex-1 rounded-md text-[11.5px] font-medium transition-colors ${
+                  title={filterHint(mode)}
+                  className={`h-6 min-w-fit flex-1 whitespace-nowrap rounded-md px-1.5 text-[11.5px] font-medium transition-colors ${
                     filterMode === mode.id
                       ? 'bg-active text-fg-max ring-1 ring-line-strong'
                       : 'bg-overlay text-fg-soft hover:bg-overlay-strong hover:text-fg-max'

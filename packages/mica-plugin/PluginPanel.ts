@@ -24,6 +24,29 @@ export type PluginPanelTone = 'muted' | 'ok' | 'warn' | 'error' | 'accent';
 
 export type PluginPanelButtonTone = 'primary' | 'default' | 'ghost' | 'danger';
 
+/**
+ * 按钮上能用的图标（单一事实来源，页面与清单校验共用）。
+ *
+ * 插件写不了样式，也不该自己引一套图标库：清单里只写名字，画哪一个由宿主决定。这一组
+ * 是按「清单里常见的动作」挑的——增、删、改、刷新、打开、保存、关闭、确认。
+ */
+export const PLUGIN_PANEL_ICONS = [
+  'add',
+  'trash',
+  'edit',
+  'refresh',
+  'save',
+  'external',
+  'close',
+  'check',
+] as const;
+
+export type PluginPanelIcon = (typeof PLUGIN_PANEL_ICONS)[number];
+
+export function isPluginPanelIcon(value: unknown): value is PluginPanelIcon {
+  return typeof value === 'string' && (PLUGIN_PANEL_ICONS as readonly string[]).includes(value);
+}
+
 /** 只读的一行「标签 — 值」（上次检查时间、上次结论、运行状态…）。 */
 export type PluginPanelRow = {
   label: string;
@@ -47,7 +70,14 @@ export type PluginPanelRow = {
 /** 条目上的按钮：`key` 由宿主带上，插件据此知道点的是哪一条。 */
 export type PluginPanelItemAction = {
   id: string;
+  /**
+   * 按钮的文案，同时是它的无障碍名。
+   *
+   * 声明了 `icon` 之后按钮**只画图标**，这句话退回 `title` / `aria-label`：清单里每行都挂
+   * 一个带字的「删除」，表格就成了一列按钮墙；一个安静的图标才是行内动作该有的重量。
+   */
   label: string;
+  icon?: PluginPanelIcon;
   tone?: PluginPanelButtonTone;
   disabled?: boolean;
 };
@@ -143,6 +173,24 @@ export type PluginPanelField = {
   hint?: string;
   /** `type: 'select'` 的候选值；其它类型忽略。 */
   options?: PluginPanelFieldOption[];
+  /**
+   * 行尾的提交按钮：「填一个，加一条」这类表单。
+   *
+   * 声明它之后这一行变成 **输入框 + 按钮** 的同一行，输入框不再单独占一个带标签的
+   * 设置行（标签退成 placeholder 与无障碍名），按钮提交的就是这份字段值。清单类分区的
+   * 「添加」都该长这样：写一项、加一项，是一个动作，不是两个。
+   */
+  action?: PluginPanelFieldAction;
+};
+
+/** 字段行尾那个提交按钮。 */
+export type PluginPanelFieldAction = {
+  /** 点它时提交的动作 id；`values` 里带着同分区所有字段的当前值。 */
+  id: string;
+  label: string;
+  icon?: PluginPanelIcon;
+  tone?: PluginPanelButtonTone;
+  disabled?: boolean;
 };
 
 export type PluginPanelFieldOption = {
@@ -190,6 +238,18 @@ export type PluginPanelSection = {
    */
   markdown?: string;
   /**
+   * 一块**就地可编辑的正文**（角色文档、项目约定这类整篇文件）。
+   *
+   * 只读时按原样显示 `value`（**不做 Markdown 渲染**：编辑器里看到的就是磁盘上那份文本，
+   * 光标落在哪一行就是文件里的哪一行），点「编辑」后在同一个面板里换成文本框，保存时把
+   * 整篇正文回给 `action`。
+   *
+   * 与 `markdown` / `text` 的分工：那两块是给用户读的，这一块是给用户改的。正文上限比
+   * `markdown` 高一档（`MAX_EDITOR_TEXT`），但**超长时插件应当不提供编辑器**——截断以后
+   * 再保存就是把文件改短。
+   */
+  editor?: PluginPanelEditor;
+  /**
    * 默认收起。宿主把每个 section 画成一块可折叠的卡片（点标题展开/收起），
    * 这里只决定它**第一次**出现时是展开还是收起；之后跟随用户的操作。
    */
@@ -210,6 +270,27 @@ export type PluginPanelSection = {
   commit?: string;
   /** 按钮，成组渲染在 section 底部。 */
   actions?: PluginPanelAction[];
+};
+
+/**
+ * 就地编辑器：一块正文 + 一个「编辑 → 改 → 保存」的回路。
+ *
+ * 为什么要它而不是让插件 `openPath` 打开宿主的文件视图：面板里要改的往往只是「这一段
+ * 结论写错了」。跳到文件视图意味着离开当前上下文、丢掉面板位置，改完还得再跳回来。整篇
+ * 文件编辑器该留给真正在改代码的场景。
+ */
+export type PluginPanelEditor = {
+  /** 保存时提交的动作 id；正文通过 `PluginPanelActionInput.text` 原样回传。 */
+  action: string;
+  /** 当前正文（原样文本，不渲染 Markdown）。 */
+  value: string;
+  /** 编辑入口的文案，默认「编辑」。 */
+  editLabel?: string;
+  /** 保存按钮的文案，默认「保存」。 */
+  saveLabel?: string;
+  placeholder?: string;
+  /** 只读：只显示正文，不给编辑入口。 */
+  readOnly?: boolean;
 };
 
 export type PluginPanelView = {
@@ -289,6 +370,13 @@ export type PluginPanelActionInput = {
   key?: string;
   /** 同一次动作里，面板上所有输入框的值。 */
   values?: Record<string, string>;
+  /**
+   * 就地编辑器提交的整篇正文（`PluginPanelEditor.action`）。
+   *
+   * 单独一条通道而不是塞进 `values`：`values` 是「一行状态」，每个值 2000 字上限；整篇
+   * 文档是另一个量级的东西，混在一起会让「这条动作该带多大的正文」变成猜的。
+   */
+  text?: string;
 };
 
 /**
@@ -518,6 +606,14 @@ const MAX_SECTION_TEXT = 4000;
  * 取一次视图，这条通道不该被用来搬整个文件。
  */
 const MAX_SECTION_MARKDOWN = 80_000;
+/**
+ * 就地编辑器里的整篇正文：比 `markdown` 再宽一档。
+ *
+ * 它要能装下「一份角色文档」（实测九万多字符），而且**改完还要回传**——所以这里不是
+ * 「显示到哪算哪」的裁剪，而是「超了就甭提供编辑器」的硬门槛：插件拿到的 `value` 一旦被
+ * 截断，保存就把文件改短了。宿主截断时不会补省略号（见 `verbatim`），插件按长度自己设防。
+ */
+export const MAX_EDITOR_TEXT = 200_000;
 const MAX_ROWS = 40;
 const MAX_ITEMS = 40;
 const MAX_TABLE_COLUMNS = 8;
@@ -555,6 +651,17 @@ function text(value: unknown, max = MAX_TEXT): string {
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
+/**
+ * 整篇正文：原样保留（不 trim、不补省略号），超长直接截断。
+ *
+ * 给就地编辑器与它的回传用：这两个方向搬的都是「文件里的那份文本」，多一个省略号、少一个
+ * 首行缩进，写回磁盘就是一次静默的内容改动。
+ */
+function verbatim(value: unknown, max: number): string {
+  if (typeof value !== 'string') return '';
+  return value.length > max ? value.slice(0, max) : value;
+}
+
 function tone(value: unknown): PluginPanelTone | undefined {
   return TONES.includes(value as PluginPanelTone) ? (value as PluginPanelTone) : undefined;
 }
@@ -584,6 +691,7 @@ function actionOf(input: unknown): PluginPanelAction | null {
   return {
     id,
     label,
+    ...(isPluginPanelIcon(raw.icon) ? { icon: raw.icon } : {}),
     ...(buttonTone(raw.tone) ? { tone: buttonTone(raw.tone) } : {}),
     ...(raw.disabled === true ? { disabled: true } : {}),
     ...(hint ? { hint } : {}),
@@ -600,12 +708,7 @@ function itemOf(input: unknown): PluginPanelItem | null {
     .slice(0, MAX_ACTIONS)
     .map((entry) => actionOf(entry))
     .filter((entry): entry is PluginPanelAction => entry !== null)
-    .map(({ id, label: actionLabel, tone: actionTone, disabled }) => ({
-      id,
-      label: actionLabel,
-      ...(actionTone ? { tone: actionTone } : {}),
-      ...(disabled ? { disabled } : {}),
-    }));
+    .map(({ hint: _hint, ...action }) => action);
   return {
     key,
     label,
@@ -637,6 +740,21 @@ function fieldOf(input: unknown): PluginPanelField | null {
       : [];
   // 一个没有选项的 select 在页面上是个点不动的下拉：退回普通文本框，至少还能输。
   const type = declared === 'select' && options.length === 0 ? 'text' : declared;
+  // 行尾按钮只对单行输入有意义：选项条与开关自己就是「改完即生效」，再挂一个提交按钮
+  // 等于让同一个动作有两条路径。
+  const rawAction = record(raw.action);
+  const actionId = text(rawAction.id, 64);
+  const actionLabel = text(rawAction.label, 32);
+  const inlineAction: PluginPanelFieldAction | null =
+    (type === 'text' || type === 'number') && actionId && actionLabel
+      ? {
+          id: actionId,
+          label: actionLabel,
+          ...(isPluginPanelIcon(rawAction.icon) ? { icon: rawAction.icon } : {}),
+          ...(buttonTone(rawAction.tone) ? { tone: buttonTone(rawAction.tone) } : {}),
+          ...(rawAction.disabled === true ? { disabled: true } : {}),
+        }
+      : null;
   return {
     key,
     label,
@@ -645,6 +763,7 @@ function fieldOf(input: unknown): PluginPanelField | null {
     ...(placeholder ? { placeholder } : {}),
     ...(hint ? { hint } : {}),
     ...(options.length > 0 ? { options } : {}),
+    ...(inlineAction ? { action: inlineAction } : {}),
   };
 }
 
@@ -709,12 +828,7 @@ function tableOf(input: unknown): PluginPanelTable | null {
         .slice(0, MAX_ROW_ACTIONS)
         .map((entryAction) => actionOf(entryAction))
         .filter((entryAction): entryAction is PluginPanelAction => entryAction !== null)
-        .map(({ id, label: actionLabel, tone: actionTone, disabled }) => ({
-          id,
-          label: actionLabel,
-          ...(actionTone ? { tone: actionTone } : {}),
-          ...(disabled ? { disabled } : {}),
-        }));
+        .map(({ hint: _hint, ...action }) => action);
       if (Object.keys(cells).length === 0 && actions.length === 0) return null;
       const normalized: PluginPanelTableRow = {
         key,
@@ -768,12 +882,14 @@ function sectionOf(input: unknown): PluginPanelSection | null {
   const empty = text(raw.empty, 200);
   const body = text(raw.text, MAX_SECTION_TEXT);
   const markdown = text(raw.markdown, MAX_SECTION_MARKDOWN);
+  const editor = editorOf(raw.editor);
   // 只有真有输入框时，自动提交才有意义
   const commit = fields.length > 0 ? text(raw.commit, 60) : '';
   if (
     !title &&
     !body &&
     !markdown &&
+    !editor &&
     rows.length === 0 &&
     items.length === 0 &&
     !table &&
@@ -786,6 +902,7 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     ...(subtitle ? { subtitle } : {}),
     // 两者都是「一块正文」，同时给时按 markdown 画：一个分区的正文只有一处。
     ...(markdown ? { markdown } : body ? { text: body } : {}),
+    ...(editor ? { editor } : {}),
     ...(title && raw.collapsed === true ? { collapsed: true } : {}),
     ...(rows.length > 0 ? { rows } : {}),
     ...(items.length > 0 ? { items } : {}),
@@ -794,6 +911,29 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     ...(fields.length > 0 ? { fields } : {}),
     ...(commit ? { commit } : {}),
     ...(actions.length > 0 ? { actions } : {}),
+  };
+}
+
+/**
+ * 就地编辑器：没有正文就没有可编辑的东西，缺动作就是「改完没处交」，两种都当没声明。
+ *
+ * 不 trim、不截断补省略号（见 `verbatim`）：这份文本会被原样写回文件。
+ */
+function editorOf(input: unknown): PluginPanelEditor | undefined {
+  const raw = record(input);
+  const action = text(raw.action, MAX_ACTION_ID);
+  const value = verbatim(raw.value, MAX_EDITOR_TEXT);
+  if (!action || !value) return undefined;
+  const editLabel = text(raw.editLabel, 24);
+  const saveLabel = text(raw.saveLabel, 24);
+  const placeholder = text(raw.placeholder, 120);
+  return {
+    action,
+    value,
+    ...(editLabel ? { editLabel } : {}),
+    ...(saveLabel ? { saveLabel } : {}),
+    ...(placeholder ? { placeholder } : {}),
+    ...(raw.readOnly === true ? { readOnly: true } : {}),
   };
 }
 
@@ -941,10 +1081,13 @@ export function normalizePluginPanelAction(input: unknown): PluginPanelActionInp
   for (const [name, value] of Object.entries(record(raw.values))) {
     if (typeof value === 'string') values[name] = text(value, 2000);
   }
+  // 整篇正文（就地编辑器）：原样回传，不 trim——首行缩进、结尾换行都是文件的一部分。
+  const body = verbatim(raw.text, MAX_EDITOR_TEXT);
   return {
     action,
     ...(key ? { key } : {}),
     ...(Object.keys(values).length > 0 ? { values } : {}),
+    ...(body ? { text: body } : {}),
   };
 }
 

@@ -22,6 +22,7 @@ import { CwdPicker as CwdModal } from './CwdPicker'
 import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
 import { setConfigWebFileOpener } from './config-web'
 import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
+import { loadPluginPageEntry } from './plugin-entries'
 import { PluginPage } from './PluginPage'
 import { usePluginAttention } from './plugin-attention'
 import { invalidatePluginsDetails } from './plugins-details'
@@ -581,6 +582,16 @@ export default function App() {
     setPluginPage(entry)
   }, [])
   const closePluginPage = useCallback(() => setPluginPage(null), [])
+  /**
+   * 插件详情里的「打开整页」：那个插件可能没有侧栏入口（清单只写了 `desktop.page`），
+   * 所以按 id 现取一次入口。整页盖在配置页之上，关掉它就回到那张插件卡片。
+   */
+  const openPluginPageById = useCallback(async (pluginId) => {
+    const entry = await loadPluginPageEntry(pluginId)
+    if (!entry) return false
+    setPluginPage(entry)
+    return true
+  }, [])
   // 文件视图按需挂载：打开过一次后保持挂载（切回对话再切回来不丢已打开/未保存的文件），
   // 但没被打开过时它的 chunk（文件树、图标清单）不进启动路径。
   const [filesMounted, setFilesMounted] = useState(view === 'files')
@@ -651,12 +662,13 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(savedSidebarWidth)
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const sidebarWidthRef = useRef(sidebarWidth)
-  // 编辑器是整窗的一层：进去时把会话列表让出去（编辑器自带文件树那一栏），回对话时
-  // 按用户原来那份折叠偏好复原。这只是视图派生的临时隐藏，不写进 layout——否则在编辑器
-  // 里切一下视图就把用户的侧栏偏好改了。
-  const sidebarHidden = sidebarCollapsed || view === 'files'
-  // 移动端的会话抽屉同理：进了编辑器就收起，不再盖在上面。
-  const drawerOpen = sessionsOpen && view !== 'files'
+  // 编辑器与统计页都是整窗的一层：进去时把会话列表让出去（编辑器自带文件树那一栏，
+  // 统计页要的是整页的图表），回对话时按用户原来那份折叠偏好复原。这只是视图派生的临时
+  // 隐藏，不写进 layout——否则在这些页面里切一下视图就把用户的侧栏偏好改了。
+  const viewOwnsWindow = view === 'files' || view === 'stats'
+  const sidebarHidden = sidebarCollapsed || viewOwnsWindow
+  // 移动端的会话抽屉同理：进了这两页就收起，不再盖在上面；页面里也没有展开它的入口。
+  const drawerOpen = sessionsOpen && !viewOwnsWindow
   // 两个视图各有一套底部终端：对话的是会话终端，编辑器的是编辑器终端。同一格里只显示
   // 当前视图那一个——在编辑器里按下 Ctrl+` 却弹出会话的终端，用户分不清自己在操作谁。
   // 编辑器那套见 EditorTerminal（开关与它在同一份界面状态里）。
@@ -827,7 +839,9 @@ export default function App() {
   // 会话右键里的插件项来自清单（页面同步就能画出来），点了才去这条会话的常驻 host
   // 转发一次动作。结果里的 `copyText` 在这里写剪贴板——写的是「用户眼前这台机器」的
   // 剪贴板，运行时可能跑在另一台机器上。
-  const sessionMenuPlugins = useSessionMenuPlugins()
+  // 侧栏会话行这一处只拿「两处都出」的项：清单写了 `surface: "chat"` 的（会话压缩）
+  // 只在主会话区出现。
+  const sessionMenuPlugins = useSessionMenuPlugins('sidebar')
   // 插件上报的「有件事等人点一下」：只影响侧栏 Plugins 入口上那枚点，点进去就是那个插件。
   const { attention: pluginAttention, dismiss: dismissPluginAttention } = usePluginAttention()
   const runSessionMenuAction = useCallback(
@@ -2469,12 +2483,10 @@ export default function App() {
       event.preventDefault()
       event.stopPropagation()
       // 侧栏收着（桌面折叠 / 手机抽屉）时先把它露出来，否则聚焦的是一个看不见的输入框。
-      // 编辑器视图里会话列表整个让出去了，先回对话再聚焦。
+      // 编辑器与统计页里会话列表整个让出去了，先回对话再聚焦。
+      if (viewOwnsWindow) setView('chat')
       if (isMobile) setSessionsOpen(true)
-      else {
-        if (view === 'files') setView('chat')
-        if (sidebarCollapsed) setSidebarCollapsed(false)
-      }
+      else if (sidebarCollapsed) setSidebarCollapsed(false)
       sendSidebarIntent({ kind: 'search' })
     }
     window.addEventListener('keydown', onKey, true)
@@ -2487,7 +2499,8 @@ export default function App() {
     sendSidebarIntent,
     shareView,
     sidebarCollapsed,
-    view
+    view,
+    viewOwnsWindow
   ])
 
   return (
@@ -2708,7 +2721,7 @@ export default function App() {
           <header
             className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-fg-soft transition-[padding] ${!isMobile && !shareView && sidebarHidden ? 'pl-30' : ''}`}
           >
-            {isMobile && !shareView && view !== 'files' && (
+            {isMobile && !shareView && !viewOwnsWindow && (
               <button
                 type="button"
                 title="会话列表"
@@ -3132,8 +3145,8 @@ export default function App() {
           </footer>
         </main>
       </div>
-      {/* 编辑器视图里侧栏由视图让出，这枚开关此刻没有可切换的东西——留着只会点了没反应。 */}
-      {!isMobile && !shareView && view !== 'files' && (
+      {/* 编辑器与统计页里侧栏由视图让出，这枚开关此刻没有可切换的东西——留着只会点了没反应。 */}
+      {!isMobile && !shareView && !viewOwnsWindow && (
         <button
           type="button"
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
@@ -3214,6 +3227,7 @@ export default function App() {
                 pluginId={configPage.pluginId}
                 onClose={closeConfigPage}
                 onNewSession={launchPluginFromConfig}
+                onOpenPluginPage={openPluginPageById}
               />
             </Suspense>
           </div>

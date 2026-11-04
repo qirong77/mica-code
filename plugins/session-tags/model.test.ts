@@ -271,13 +271,13 @@ describe('用量与展示', () => {
     expect(formatTagList(store, [])).toBe('（无标签）');
   });
 
-  it('describeTagStore：有标签列全表，没标签时指路到 Tags 页面', () => {
+  it('describeTagStore：有标签列全表，没标签时指路到打开标签页面的入口', () => {
     const store = addSessionTag(addTag(emptyTagStore(), { label: '待办' }).store, 's1', 'tag-1');
     const lines = describeTagStore(store, 's1');
     expect(lines[0]).toContain('1 个');
     expect(lines[1]).toContain('待办');
     expect(lines.at(-1)).toContain('待办');
     expect(describeTagStore(store, 's2').at(-1)).toContain('无标签');
-    expect(describeTagStore(emptyTagStore()).join('\n')).toContain('Tags 页面');
+    expect(describeTagStore(emptyTagStore()).join('\n')).toContain('打开标签');
   });
 });

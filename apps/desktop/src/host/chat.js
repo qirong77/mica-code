@@ -2364,7 +2364,9 @@ export function registerChatIpc() {
     return requestPanelView(event, payload, id, pluginId, {
       action: typeof payload?.action === 'string' ? payload.action : '',
       key: typeof payload?.key === 'string' ? payload.key : '',
-      values: payload?.values && typeof payload.values === 'object' ? payload.values : {}
+      values: payload?.values && typeof payload.values === 'object' ? payload.values : {},
+      // 就地编辑器提交的整篇正文：与 `values` 分开传，那边是「一行状态」。
+      ...(typeof payload?.text === 'string' ? { text: payload.text } : {})
     })
   }
 

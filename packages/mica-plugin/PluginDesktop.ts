@@ -99,12 +99,13 @@ export function isPluginEntryPlacement(value: unknown): value is PluginEntryPlac
  *
  * 与 `entry` 的卡片是两种形态，按内容选：卡片浮在侧栏行旁边、只有 320px 宽，适合「一眼看
  * 几行状态」；整页盖住整个窗口，适合时间轴、表格这类要宽度也要高度的东西。声明了 `page`
- * 之后，点侧栏那一行打开的是整页，不再有悬停卡片。
+ * 之后，点侧栏那一行打开的是整页，不再有悬停卡片；没有 `entry` 时，整页只从配置页
+ * 插件详情的「打开」按钮进入。
  *
  * 前端模块用 `Page` 命名导出渲染，此时 `default`（卡片）可以没有——页面本身就是入口。
  */
 export type PluginDesktopPage = {
-  /** 页面顶部显示的标题；清单没写时用 `entry.label`。 */
+  /** 页面顶部显示的标题；清单没写时用 `entry.label`，没有入口时用插件名。 */
   title: string;
 };
 /**

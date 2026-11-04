@@ -7172,6 +7172,110 @@ body.is-resizing-btw {
   min-width: 112px;
 }
 
+/* 「填一项，加一条」：输入与提交是同一个动作，所以同一行。
+   写成一个带标签的设置行 + 下面一个按钮，读起来像两件事——中间那行标签的空白会让人
+   以为按钮管的是别处。左边缘与清单内容同为 16px。 */
+.chat-plugin-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 0;
+}
+
+/* 输入框吃掉剩余宽度，按钮按内容宽：一行里控件等高，按钮不跟着输入框一起伸缩。 */
+.chat-plugin-add-row > .text-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 按钮不参与收缩，也不换行：面板窄的时候「添加频道」被挤成两行，比截断还难认。 */
+.chat-plugin-add-row > .ui-button {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* 就地编辑器：只读态是一块原文，编辑态是同一块地方上的文本框。
+   两者共用同一副内边距与边框，切换时那块区域的边界不动。 */
+.chat-plugin-editor {
+  display: grid;
+  gap: 8px;
+  padding: 10px 16px 0;
+}
+
+.chat-plugin-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.chat-plugin-editor-count {
+  color: var(--text-faint);
+  font-size: var(--text-aux);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 正文：整篇原样、不渲染 Markdown。等高滚动而不是撑到天边——一份角色文档十万字符，
+   摊开就把下面的分区全推到看不见的地方了。 */
+.chat-plugin-editor-text {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  background: var(--overlay-subtle);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+  /* 中文与长路径都要能折：只留 `pre-wrap` 时，一长串没有空格的 ID 会把整块撑出面板。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  overscroll-behavior: contain;
+}
+
+.chat-plugin-editor-text:hover {
+  border-color: var(--line);
+}
+
+.chat-plugin-editor-input {
+  width: 100%;
+  /* 与只读那块同一个高度档位：切换模式时面板不该跳一下。 */
+  height: 320px;
+  max-height: 60vh;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-inset);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.7;
+  resize: vertical;
+  overscroll-behavior: contain;
+}
+
+.chat-plugin-editor-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: none;
+}
+
+.chat-plugin-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 字符数贴左，按钮贴右：这一行里的两个按钮是「改完怎么处理」，字符数是它们的注解。 */
+.chat-plugin-editor-actions > .chat-plugin-editor-count {
+  margin-right: auto;
+}
+
 /* 一张清单表：列由插件声明，宿主只负责对齐与边界。
    - 表头是「列名」，不是另一行数据：字号小一档、颜色退一档，不参与行悬停；
    - 只有声明 `grow` 的那一列吃剩余宽度，其余按内容宽，地址/名称才不会把状态列挤成两字换行；

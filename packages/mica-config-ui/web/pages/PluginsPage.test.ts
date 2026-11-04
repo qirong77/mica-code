@@ -224,6 +224,31 @@ describe('插件详情页', () => {
       setConfigWebClient(null);
     }
   });
+
+  // 有的插件没有侧栏入口（清单只写 desktop.page）：它的整页只能从这张卡打开，
+  // 所以详情里必须有那枚按钮——浏览器宿主画不出来，那时不出现。
+  it('声明了整页就去详情里给一个打开它的按钮，宿主接不了则不画', () => {
+    const openPage = () => {};
+    const withPage = (extra: Record<string, unknown>) =>
+      render(
+        createElement(PluginDetail, {
+          plugin: plugin({ desktopPage: { title: '标签' } }),
+          busy: false,
+          canToggle: true,
+          canSettings: true,
+          loading: false,
+          error: null,
+          notice: null,
+          onBack: noop,
+          onRefresh: noop,
+          onToggleEnabled: noop,
+          onSaved: noop,
+          ...extra,
+        }),
+      );
+    expect(withPage({ onOpenPluginPage: openPage })).toContain('>打开标签<');
+    expect(withPage({})).not.toContain('>打开标签<');
+  });
 });
 
 describe('运行结论', () => {

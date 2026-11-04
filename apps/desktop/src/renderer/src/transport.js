@@ -285,13 +285,15 @@ function createWebApi(env) {
             sessionId: sessionId || null,
             cwd: cwd || null
           }),
-        action: (id, { pluginId, action, key, values, sessionId, cwd } = {}) =>
+        action: (id, { pluginId, action, key, values, text, sessionId, cwd } = {}) =>
           invoke('chat:plugin-panel-action', {
             id,
             pluginId,
             action,
             ...(key ? { key } : {}),
             ...(values ? { values } : {}),
+            // 就地编辑器提交的整篇正文：单独一个字段，不混进 `values`（那是「一行状态」）。
+            ...(typeof text === 'string' ? { text } : {}),
             sessionId: sessionId || null,
             cwd: cwd || null
           })

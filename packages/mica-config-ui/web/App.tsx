@@ -32,6 +32,11 @@ export type ConfigWebAppProps = {
    * 浏览器宿主没有会话可开，不传；页面据此如实提示「在桌面端里点」，不假装已经跳过去。
    */
   onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
+  /**
+   * 打开插件自己的整页（清单 `desktop.page`）：整页是宿主画的，配置页只是那个入口。
+   * 浏览器宿主不传，插件详情里因此不出现那个按钮。
+   */
+  onOpenPluginPage?(pluginId: string): boolean | void | Promise<boolean | void>;
 };
 
 export function App({
@@ -40,6 +45,7 @@ export function App({
   onClose,
   closeLabel,
   onNewSession,
+  onOpenPluginPage,
 }: ConfigWebAppProps = {}) {
   const [section, setSection] = useState<ConfigWebAppSection>(() => initialSection ?? readInitialSection());
   // 当前打开的插件详情：宿主（插件菜单）或地址栏（浏览器深链）指定，插件页只负责呈现。
@@ -88,7 +94,12 @@ export function App({
           {section === 'skills' ? <SkillsPage /> : null}
           {section === 'capabilities' ? <CapabilitiesPage /> : null}
           {section === 'plugins' ? (
-            <PluginsPage pluginId={pluginId} onSelectPlugin={selectPlugin} onNewSession={onNewSession} />
+            <PluginsPage
+              pluginId={pluginId}
+              onSelectPlugin={selectPlugin}
+              onNewSession={onNewSession}
+              onOpenPluginPage={onOpenPluginPage}
+            />
           ) : null}
         </div>
       </main>

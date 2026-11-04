@@ -13,7 +13,6 @@
   },
   "requires": ["commands", "session", "ui"],
   "desktop": {
-    "entry": { "label": "Tags" },
     "page": { "title": "标签" }
   }
 }

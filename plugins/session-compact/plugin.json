@@ -10,8 +10,8 @@
   "requires": ["agent", "desktop", "llm"],
   "desktop": {
     "sessionMenu": [
-      { "label": "快速压缩", "action": "quick", "icon": "eraser", "position": "top" },
-      { "label": "模型压缩", "action": "model", "icon": "sparkles", "position": "top" }
+      { "label": "快速压缩", "action": "quick", "icon": "eraser", "position": "top", "surface": "chat" },
+      { "label": "模型压缩", "action": "model", "icon": "sparkles", "position": "top", "surface": "chat" }
     ]
   },
   "llm": {

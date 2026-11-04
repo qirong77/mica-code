@@ -91,6 +91,27 @@ describe('sessionMenuPluginItems', () => {
     expect(sessionMenuPluginItems(undefined)).toEqual([])
     expect(sessionMenuPluginItems([plugin({ desktopSessionMenu: undefined })])).toEqual([])
   })
+
+  // 两处右键共用一份清单：只对某一处生效的项必须在取项时就被过滤掉，否则侧栏会话行
+  // 也会出现「快速压缩」这类只在正看着对话时讲得通的项。
+  test('keeps items that do not name a surface in both menus', () => {
+    const items = [plugin()]
+    expect(sessionMenuPluginItems(items, 'sidebar').map((item) => item.pluginAction)).toEqual(['copy'])
+    expect(sessionMenuPluginItems(items, 'chat').map((item) => item.pluginAction)).toEqual(['copy'])
+  })
+
+  test('drops items declared for the other surface', () => {
+    const items = [
+      plugin({
+        desktopSessionMenu: [
+          { label: '快速压缩', action: 'quick', surface: 'chat' },
+          { label: '复制', action: 'copy' }
+        ]
+      })
+    ]
+    expect(sessionMenuPluginItems(items, 'sidebar').map((item) => item.pluginAction)).toEqual(['copy'])
+    expect(sessionMenuPluginItems(items, 'chat').map((item) => item.pluginAction)).toEqual(['quick', 'copy'])
+  })
 })
 
 describe('parseSessionMenuAction', () => {

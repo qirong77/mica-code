@@ -27,9 +27,10 @@ export type { TagOption, TagStore } from './model.js';
  * - 数据：标签表（options）与归属（assignments）；
  * - 命令：`/tags` 在 CLI / TUI 里给当前会话打标、去标。桌面端走会话行右键菜单；
  *
- * **标签本身的维护（新增、改名、换色、删除）只在桌面端的 Tags 页面里做**
- * （`desktop.jsx`，通过 `ctx` 之外的前端 api 写同一份文件）。命令只管打标，所以
- * CLI / TUI 里不会长出一套「怎么定义标签」的语法，也不会出现两边规则不一致。
+ * **标签本身的维护（新增、改名、换色、删除）只在桌面端的标签整页里做**
+ * （`desktop.jsx`，通过 `ctx` 之外的前端 api 写同一份文件；那张页不占侧栏一行，入口是
+ * 配置页插件详情里的「打开标签」）。命令只管打标，所以 CLI / TUI 里不会长出一套
+ * 「怎么定义标签」的语法，也不会出现两边规则不一致。
  *
  * **不给模型任何入口**：标签是用户自己的分类习惯，既不该由模型改，也不需要它知道。
  * 所以这里不注册 tool、也不往 system prompt 里塞东西。
@@ -123,7 +124,7 @@ export default function setup(ctx: PluginContext): void {
 
   const command = ctx.commands.register({
     name: 'tags',
-    description: '给当前会话打标签（标签在桌面端 Tags 页面里定义）',
+    description: '给当前会话打标签（标签在桌面端 Settings → Plugins → Session Tags 的「打开标签」里定义）',
     completionItems: [
       { arg: 'list', description: '列出所有标签与当前会话的标签' },
       { arg: 'add', description: 'add <标签名>：打标，可跟多个' },

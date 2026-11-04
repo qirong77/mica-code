@@ -37,6 +37,14 @@ export type PluginSessionMenuItem = {
    * 省略或 `bottom` 是宿主自己的项之后、删除之前——默认位置。
    */
   position?: 'top' | 'bottom';
+  /**
+   * 只在哪里出现。宿主有两处会话右键：侧栏那一行（`sidebar`）与主会话区（`chat`）。
+   *
+   * 省略＝两处都出——复制 Markdown、重命名这类对「这条会话」做的事在哪一处都成立。
+   * 只对这条会话本身的**内容**动刀、只有正看着对话时才讲得通的项（例如压缩历史）
+   * 写 `chat`，侧栏那行就不必被它占位。
+   */
+  surface?: 'sidebar' | 'chat';
 };
 
 /** 动作入参。 */

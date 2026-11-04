@@ -149,10 +149,13 @@ describe('parsePluginManifest desktop page', () => {
     if (result.ok) expect(result.manifest.desktopPage).toEqual({ title: 'Schedule' });
   });
 
-  it('refuses a page without an entry: nothing would open it', () => {
+  it('accepts a page without an entry and uses the plugin name as its title', () => {
     const result = parsePluginManifest(base({ desktop: { page: true } }));
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('desktop.entry');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.desktopEntry).toBeNull();
+      expect(result.manifest.desktopPage).toEqual({ title: 'Demo' });
+    }
   });
 
   it('leaves the page off by default', () => {
@@ -633,6 +636,34 @@ describe('parsePluginManifest desktop session menu', () => {
     const result = parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', icon: '' }] } }));
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.manifest.desktopSessionMenu).toEqual([{ label: '压缩', action: 'quick' }]);
+  });
+
+  // 两处右键共用一份清单，只能在一处出现的项要能自己说出来
+  it('keeps the declared surface and leaves the default out of the item', () => {
+    const result = parsePluginManifest(
+      base({
+        desktop: {
+          sessionMenu: [
+            { label: '快速压缩', action: 'quick', surface: 'chat' },
+            { label: '复制', action: 'copy' },
+          ],
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.desktopSessionMenu).toEqual([
+      { label: '快速压缩', action: 'quick', surface: 'chat' },
+      { label: '复制', action: 'copy' },
+    ]);
+  });
+
+  it('rejects an unknown surface', () => {
+    for (const surface of ['both', 'Chat', 1]) {
+      expect(
+        parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', surface }] } })).ok,
+      ).toBe(false);
+    }
   });
 });
 

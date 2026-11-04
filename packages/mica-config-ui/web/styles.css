@@ -5814,6 +5814,9 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     display: flex;
     flex: none;
     align-items: center;
+    /* 整页入口按钮与启停开关并排时不能贴在一起：两个都是「对插件的操作」，
+       一个是打开它的界面、一个是启用它。 */
+    gap: 10px;
   }
 
   /* 两列：左边是「要动的东西」（运行条件、设置），右边是「查的东西」（信息）。

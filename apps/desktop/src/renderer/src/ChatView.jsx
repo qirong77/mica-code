@@ -3589,8 +3589,9 @@ export function ChatView({
   const metaRef = useLatest(meta)
   const [todoHidden, setTodoHidden] = useState(false)
   const [todoInterrupted, setTodoInterrupted] = useState(false)
-  // 会话右键菜单里的插件项（清单 `desktop.sessionMenu`），来自缓存的插件列表。
-  const sessionMenuPlugins = useSessionMenuPlugins()
+  // 会话右键菜单里的插件项（清单 `desktop.sessionMenu`），来自缓存的插件列表。这里是
+  // 主会话区那一处，两处都出的项与只标了 `chat` 的项都进。
+  const sessionMenuPlugins = useSessionMenuPlugins('chat')
   const overridesRef = useRef(new Map()) // nodeId -> { model, variant, role }
   const forceRender = useReducer((version) => version + 1, 0)[1]
   // 生效的覆盖项：输入条能临时改角色/模型，`forceRender` 让读它的地方（补全、状态行、

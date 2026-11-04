@@ -55,6 +55,7 @@ export function PluginsPage({
   pluginId = null,
   onSelectPlugin = () => {},
   onNewSession,
+  onOpenPluginPage,
 }: {
   pluginId?: string | null;
   onSelectPlugin?(pluginId: string | null): void;
@@ -65,6 +66,13 @@ export function PluginsPage({
    * 跳过去——没有就不能假装已经跳了。
    */
   onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
+  /**
+   * 打开插件自己的整页（清单 `desktop.page`），由宿主接手：页面本身不画那些整页。
+   *
+   * 只有随包插件有模块，所以返回值同样要能说「打不开」，页面据此如实提示而不是点了没反应。
+   * 浏览器宿主不传：那时整个按钮不出现。
+   */
+  onOpenPluginPage?(pluginId: string): boolean | void | Promise<boolean | void>;
 } = {}) {
   const [details, setDetails] = useState<ConfigWebPluginsDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -124,6 +132,7 @@ export function PluginsPage({
         onToggleEnabled={(enabled) => void toggle(openPlugin, enabled)}
         onSaved={setDetails}
         onNewSession={onNewSession}
+        onOpenPluginPage={onOpenPluginPage}
       />
     );
   }
@@ -405,6 +414,7 @@ export function PluginDetail({
   onToggleEnabled,
   onSaved,
   onNewSession,
+  onOpenPluginPage,
 }: {
   plugin: ConfigWebPlugin;
   busy: boolean;
@@ -418,10 +428,19 @@ export function PluginDetail({
   onToggleEnabled(enabled: boolean): void;
   onSaved(next: ConfigWebPluginsDetails): void;
   onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
+  onOpenPluginPage?(pluginId: string): boolean | void | Promise<boolean | void>;
 }) {
   const BackIcon = appIcons.chevronLeft;
   const RefreshIcon = appIcons.refresh;
   const enabled = plugin.state !== 'disabled';
+  // 整页的开与不开由宿主说了算（模块只在随包插件里），所以打不开时要说一句。
+  const [pageError, setPageError] = useState<string | null>(null);
+  const pageTitle = plugin.desktopPage?.title || plugin.name;
+  async function openPage() {
+    setPageError(null);
+    const opened = await onOpenPluginPage?.(plugin.id);
+    if (opened === false) setPageError(`打不开「${pageTitle}」：整页只对随包插件可用`);
+  }
   // 设置草稿提到详情这一层：动作按钮（包括 attention 上那一个）发出去的值必须是
   // 用户刚在下面那半页里改的，不能是磁盘上那份旧的。
   const draft = usePluginSettingsDraft(plugin, onSaved);
@@ -462,6 +481,17 @@ export function PluginDetail({
             </p>
           </div>
           <div className="plugin-hero-actions">
+            {/* 插件自己的整页（清单 `desktop.page`）：有些插件没有侧栏入口，页面入口就
+                只剩这里——它自己的设置页里。 */}
+            {plugin.desktopPage && onOpenPluginPage ? (
+              <Button
+                size="compact"
+                title={`打开「${pageTitle}」页面`}
+                onClick={() => void openPage()}
+              >
+                {`打开${pageTitle}`}
+              </Button>
+            ) : null}
             <label
               className="plugin-toggle"
               title={
@@ -483,6 +513,7 @@ export function PluginDetail({
         </header>
 
         {error ? <Alert message={error} /> : null}
+        {pageError ? <Alert message={pageError} /> : null}
         {plugin.description ? <p className="plugin-description">{plugin.description}</p> : null}
         {plugin.error ? <Alert message={plugin.error} /> : null}
         {/* 插件上报的「点一下就能变好」：提示点已经把人引到这里，这里给的是那个按钮。

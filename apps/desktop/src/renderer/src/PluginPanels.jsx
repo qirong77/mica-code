@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, X } from 'lucide-react'
+import {
+  Check,
+  ExternalLink,
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Save,
+  Trash2,
+  X
+} from 'lucide-react'
 import { createPortal } from 'react-dom'
 // 控件全部来自设置页那同一套（见 packages/mica-config-ui）：插件面板里不另写按钮、
 // 输入框、标签，否则同一个应用里会出现三种按钮高度和两套状态色。
@@ -85,6 +95,29 @@ const TAG_TONES = {
 const BUTTON_VARIANTS = { primary: 'primary', danger: 'danger', default: 'default' }
 
 /**
+ * 协议里的图标名 → 具体图标。
+ *
+ * 清单里只有名字（`icon: 'trash'`），画哪一个由这里决定；认不出的名字当没写，退回文字
+ * 按钮。映射表与 `PLUGIN_PANEL_ICONS` 一一对应，加名字时两边一起改。
+ */
+const PANEL_ICONS = {
+  add: Plus,
+  trash: Trash2,
+  edit: Pencil,
+  refresh: RefreshCw,
+  save: Save,
+  external: ExternalLink,
+  close: X,
+  check: Check
+}
+
+const panelIcon = (name) => {
+  const Icon = PANEL_ICONS[name]
+  if (!Icon) return null
+  return <Icon size={14} strokeWidth={1.75} aria-hidden="true" />
+}
+
+/**
  * 弹窗里「去配置」要知道是哪个插件。
  *
  * 插件只声明「这里该有个跳去配置的按钮」，具体打开哪一页由页面负责——而页面要的
@@ -102,6 +135,30 @@ const tagTone = (tone) => TAG_TONES[tone] || 'default'
  * 该不该收掉边框由插件说了算（显式写 `tone: 'ghost'`），宿主不替它决定。
  */
 const buttonVariant = (tone) => BUTTON_VARIANTS[tone] || 'default'
+
+/**
+ * 面板里的一个动作按钮（分区底部、条目行尾、表行行尾共用）。
+ *
+ * 带 `icon` 的**只画图标**：`label` 退成 `title` / 无障碍名。清单里每行挂一个带字的
+ * 「删除」，表格就成了一列按钮墙；行内动作该是一颗安静的图标。没带图标的照旧画文字——
+ * 「同步频道」「连接」这类主按钮，字才是它的意思。
+ */
+function PanelActionButton({ action, variant, size, busy, busyKey, run }) {
+  const icon = action.icon ? panelIcon(action.icon) : null
+  return (
+    <Button
+      variant={variant}
+      size={size}
+      icon={icon || undefined}
+      title={action.hint || action.label}
+      disabled={action.disabled || Boolean(busy)}
+      loading={busy === busyKey}
+      onClick={() => void run(action)}
+    >
+      {icon ? null : action.label}
+    </Button>
+  )
+}
 
 /**
  * 输入框上方那排快捷按钮（悬浮在输入框之上，左对齐）。
@@ -726,6 +783,9 @@ function PluginPanelDock({
           action,
           key,
           values: { ...drafts, ...extraValues },
+          // 就地编辑器提交的是整篇正文（`section.editor`）：它不进 `values`——那一列是
+          // 「一行状态」，每个值 2000 字上限，装不下一份文件。
+          ...(typeof options.text === 'string' ? { text: options.text } : {}),
           sessionId,
           cwd
         })
@@ -744,6 +804,8 @@ function PluginPanelDock({
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
       // 动作可能改了插件状态（开关、连接、增删机器）：快捷栏的状态行与菜单要跟着变。
       notifyPluginPanelStatusChanged()
+      // 就地编辑器要据此决定「留在编辑态还是收起」：保存失败时不能把用户刚写的字丢了。
+      return result
     },
     [
       applyView,
@@ -979,14 +1041,16 @@ function PluginPanelSection({
 
 /** 一块分区的内容：只读行、条目、输入框、动作，全部落在共享 `SettingRow` 上。 */
 function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
-  const hasBody = Boolean(section.text || section.markdown)
+  const hasBody = Boolean(section.text || section.markdown || section.editor)
   const tableRows = section.table?.rows || []
   const hasRows = (section.rows?.length || 0) + (section.items?.length || 0) + tableRows.length > 0
   return (
     <div className="chat-plugin-rows">
       {/* 正文：一整段话（需求描述、结论）。行是「标签 — 一个值」，这里没有标签也不省略。
           插件说是 Markdown 就按对话区那套排版画（标题、列表、表格），否则只保留换行。 */}
-      {section.markdown ? (
+      {section.editor ? (
+        <PluginPanelEditor editor={section.editor} busy={busy} runAction={runAction} />
+      ) : section.markdown ? (
         <div className="chat-plugin-markdown">
           <Markdown text={section.markdown} />
         </div>
@@ -1030,15 +1094,13 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
             {item.actions?.length > 0 && (
               <span className="chat-plugin-item-actions">
                 {item.actions.map((action) => (
-                  <Button
+                  <PanelActionButton
                     key={action.id}
                     variant={buttonVariant(action.tone)}
-                    disabled={action.disabled || Boolean(busy)}
-                    loading={busy === `${action.id}:${item.key}`}
-                    onClick={() => void runAction(action.id, item.key)}
-                  >
-                    {action.label}
-                  </Button>
+                    busy={busy}
+                    busyKey={`${action.id}:${item.key}`}
+                    run={(entry) => runAction(entry.id, item.key)}
+                  />
                 ))}
               </span>
             )}
@@ -1051,67 +1113,180 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
       {tableRows.length > 0 && (
         <PluginPanelTable table={section.table} busy={busy} runAction={runAction} />
       )}
-      {section.fields?.map((field) => (
-        <SettingRow
-          key={field.key}
-          label={field.label}
-          hint={field.hint}
-          htmlFor={`chat-plugin-field-${field.key}`}
-        >
-          {field.type === 'switch' ? (
-            <ConfigSwitch
-              id={`chat-plugin-field-${field.key}`}
-              label={field.label}
-              checked={(drafts[field.key] ?? field.value) === 'true'}
-              disabled={Boolean(busy)}
-              onChange={(next) => changeDraft(field.key, next ? 'true' : 'false')}
-            />
-          ) : field.type === 'select' ? (
-            <Segmented
-              id={`chat-plugin-field-${field.key}`}
-              value={drafts[field.key] ?? ''}
-              options={field.options || []}
-              ariaLabel={field.label}
-              disabled={Boolean(busy)}
-              onChange={(next) => changeDraft(field.key, next)}
-            />
-          ) : field.type === 'password' ? (
-            <SecretInput
-              id={`chat-plugin-field-${field.key}`}
-              value={drafts[field.key] ?? ''}
-              placeholder={field.placeholder || ''}
-              ariaLabel={field.label}
-              onChange={(next) => changeDraft(field.key, next)}
-            />
-          ) : (
+      {section.fields?.map((field) =>
+        field.action ? (
+          // 「填一项，加一条」：输入与提交是同一个动作，所以同一行。写成「上面一个带标签的
+          // 输入行 + 下面一个按钮」，读起来像两件事，中间还隔着一列标签的空白。
+          <div className="chat-plugin-add-row" key={field.key}>
             <input
               id={`chat-plugin-field-${field.key}`}
               className="text-input"
               type="text"
-              inputMode={field.type === 'number' ? 'numeric' : undefined}
+              aria-label={field.label}
+              title={field.hint || field.label}
+              placeholder={field.placeholder || field.label}
               value={drafts[field.key] ?? ''}
-              placeholder={field.placeholder || ''}
               onChange={(event) => changeDraft(field.key, event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                void runAction(field.action.id)
+              }}
             />
-          )}
-        </SettingRow>
-      ))}
+            <PanelActionButton
+              action={field.action}
+              variant={buttonVariant(field.action.tone)}
+              busy={busy}
+              busyKey={field.action.id}
+              run={(entry) => runAction(entry.id)}
+            />
+          </div>
+        ) : (
+          <SettingRow
+            key={field.key}
+            label={field.label}
+            hint={field.hint}
+            htmlFor={`chat-plugin-field-${field.key}`}
+          >
+            {field.type === 'switch' ? (
+              <ConfigSwitch
+                id={`chat-plugin-field-${field.key}`}
+                label={field.label}
+                checked={(drafts[field.key] ?? field.value) === 'true'}
+                disabled={Boolean(busy)}
+                onChange={(next) => changeDraft(field.key, next ? 'true' : 'false')}
+              />
+            ) : field.type === 'select' ? (
+              <Segmented
+                id={`chat-plugin-field-${field.key}`}
+                value={drafts[field.key] ?? ''}
+                options={field.options || []}
+                ariaLabel={field.label}
+                disabled={Boolean(busy)}
+                onChange={(next) => changeDraft(field.key, next)}
+              />
+            ) : field.type === 'password' ? (
+              <SecretInput
+                id={`chat-plugin-field-${field.key}`}
+                value={drafts[field.key] ?? ''}
+                placeholder={field.placeholder || ''}
+                ariaLabel={field.label}
+                onChange={(next) => changeDraft(field.key, next)}
+              />
+            ) : (
+              <input
+                id={`chat-plugin-field-${field.key}`}
+                className="text-input"
+                type="text"
+                inputMode={field.type === 'number' ? 'numeric' : undefined}
+                value={drafts[field.key] ?? ''}
+                placeholder={field.placeholder || ''}
+                onChange={(event) => changeDraft(field.key, event.target.value)}
+              />
+            )}
+          </SettingRow>
+        )
+      )}
       {section.actions?.length > 0 && (
         <div className="chat-plugin-section-actions">
           {section.actions.map((action) => (
-            <Button
+            <PanelActionButton
               key={action.id}
               variant={buttonVariant(action.tone)}
-              title={action.hint || action.label}
-              disabled={action.disabled || Boolean(busy)}
-              loading={busy === action.id}
-              onClick={() => void runAction(action.id)}
-            >
-              {action.label}
-            </Button>
+              busy={busy}
+              busyKey={action.id}
+              run={(entry) => runAction(entry.id)}
+            />
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * 就地编辑器：一块正文，点一下就换成文本框，保存时整篇回给插件。
+ *
+ * 正文不做 Markdown 渲染——这里改的是文件本身，看到的就该是磁盘上那份文本，光标落在
+ * 第几行就是文件里的第几行。（「读起来好看」是分区里 `markdown` 那块的事。）
+ *
+ * 草稿只在**不在编辑时**跟随视图刷新：面板每几秒取一次视图，拿新值盖掉正在写的字是最
+ * 难受的一种丢失。保存失败同样留在编辑态——那句失败原因就是让你改完再存一次。
+ */
+function PluginPanelEditor({ editor, busy, runAction }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(editor.value)
+
+  useEffect(() => {
+    if (!editing) setDraft(editor.value)
+  }, [editor.value, editing])
+
+  const cancel = () => {
+    setDraft(editor.value)
+    setEditing(false)
+  }
+
+  const save = async () => {
+    const result = await runAction(editor.action, undefined, {}, { text: draft, keepDrafts: true })
+    if (result?.ok !== false) setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div className="chat-plugin-editor">
+        <textarea
+          className="chat-plugin-editor-input"
+          aria-label={editor.editLabel || '编辑正文'}
+          value={draft}
+          spellCheck={false}
+          placeholder={editor.placeholder || ''}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return
+            event.preventDefault()
+            void save()
+          }}
+        />
+        <div className="chat-plugin-editor-actions">
+          <span className="chat-plugin-editor-count">{draft.length.toLocaleString()} 字符</span>
+          <Button variant="default" disabled={Boolean(busy)} onClick={cancel}>
+            取消
+          </Button>
+          <Button
+            variant="primary"
+            disabled={Boolean(busy)}
+            loading={busy === editor.action}
+            onClick={() => void save()}
+          >
+            {editor.saveLabel || '保存'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // 整块正文本身就是「编辑」的入口：点一行字，比先找个按钮再点一次更直接。
+  const startEditing = editor.readOnly ? undefined : () => setEditing(true)
+  return (
+    <div className="chat-plugin-editor">
+      <div className="chat-plugin-editor-head">
+        <span className="chat-plugin-editor-count">
+          {editor.value.length.toLocaleString()} 字符
+        </span>
+        {editor.readOnly ? null : (
+          <Button
+            variant="default"
+            size="compact"
+            icon={<Pencil size={14} strokeWidth={1.75} aria-hidden="true" />}
+            onClick={startEditing}
+          >
+            {editor.editLabel || '编辑'}
+          </Button>
+        )}
+      </div>
+      <pre className="chat-plugin-editor-text" onClick={startEditing}>
+        {editor.value}
+      </pre>
     </div>
   )
 }
@@ -1260,17 +1435,15 @@ function PluginPanelTable({ table, busy, runAction }) {
 
 function PluginPanelRowActions({ row, busy, runAction }) {
   return (row.actions || []).map((action) => (
-    <Button
+    <PanelActionButton
       key={action.id}
       // 行内动作一律幽灵按钮（破坏性的挂红字）：每行都画带边框的方块，表格就成了一排按钮墙。
       variant={action.tone === 'danger' ? 'danger-ghost' : buttonVariant(action.tone)}
       size="compact"
-      disabled={action.disabled || Boolean(busy)}
-      loading={busy === `${action.id}:${row.key}`}
-      onClick={() => void runAction(action.id, row.key)}
-    >
-      {action.label}
-    </Button>
+      busy={busy}
+      busyKey={`${action.id}:${row.key}`}
+      run={(entry) => runAction(entry.id, row.key)}
+    />
   ))
 }
 

@@ -350,7 +350,10 @@ export function formatTagList(store: TagStore, ids: readonly string[]): string {
 /** `/tags` 的输出：标签全表 + 用量 + 当前会话。 */
 export function describeTagStore(store: TagStore, sessionId?: string | null): string[] {
   if (store.options.length === 0) {
-    return ['还没有任何标签。', '在桌面端侧栏的 Tags 页面里新增（名字 + 颜色都在那里设）。'];
+    return [
+      '还没有任何标签。',
+      '在桌面端 Settings → Plugins → Session Tags 里点「打开标签」新增（名字 + 颜色都在那里设）。',
+    ];
   }
   const counts = tagCounts(store);
   const lines = store.options.map((option) => `  ● ${option.label} — ${counts[option.id] ?? 0} 个会话`);

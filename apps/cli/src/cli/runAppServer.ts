@@ -1956,6 +1956,9 @@ async function handleCodexRequest(
         action: params.action,
         key: params.key,
         values: params.values,
+        // 就地编辑器提交的整篇正文（角色文档这类）。它不走 `values`：那里每个值 2000 字
+        // 上限，是「一行状态」的通道。
+        text: params.text,
       });
       if (!action) {
         ctx.writeResponse({ ok: false, error: '动作缺少 id' });

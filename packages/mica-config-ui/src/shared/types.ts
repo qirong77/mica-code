@@ -492,6 +492,8 @@ export type ConfigWebPluginSessionMenuItem = {
   icon?: string;
   /** `top` 摆在菜单最上面；省略或 `bottom` 排在宿主自己的项之后、删除之前。 */
   position?: 'top' | 'bottom';
+  /** 只在哪一处右键菜单出现（`sidebar` 侧栏会话行 / `chat` 主会话区）；省略＝两处都出。 */
+  surface?: 'sidebar' | 'chat';
 };
 
 /**

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { usePluginsDetails } from './plugins-details'
+import { readPluginsDetails, usePluginsDetails } from './plugins-details'
 
 /**
  * 插件在桌面端的入口（侧栏一行，或者顶栏的一枚图标按钮）。
@@ -83,6 +83,36 @@ export function usePluginEntries() {
 
 const CARD_MIN_WIDTH = 240
 const CARD_MAX_WIDTH = 960
+
+/**
+ * 只声明了 `desktop.page`、没有 `desktop.entry` 的插件（例如标签：它没有侧栏一行，
+ * 入口在 Plugins 页里那张卡上）也要能打开整页。
+ *
+ * 与 `usePluginEntries` 的区别是「按 id 现取」而不是「列出全部入口」：调用来自配置页
+ * 里的一次点击，等回一个入口对象就够，不必把插件模块全加载一遍。取不到（停用、没有模块、
+ * 没声明整页）返回 null——按钮那边据此如实说一句，而不是开了个空白页。
+ */
+export async function loadPluginPageEntry(pluginId) {
+  if (!pluginId) return null
+  const load = pluginEntryLoader(pluginId)
+  if (!load) return null
+  const plugins = await readPluginsDetails()
+  const plugin = plugins.find((item) => item?.id === pluginId)
+  if (plugin?.state !== 'enabled' || !plugin?.desktopPage) return null
+  try {
+    const module = await load()
+    if (!(module?.Page ?? module?.default)) return null
+    return {
+      id: plugin.id,
+      label: plugin.desktopEntry?.label || plugin.name,
+      icon: plugin.icon,
+      module,
+      page: plugin.desktopPage
+    }
+  } catch {
+    return null
+  }
+}
 
 function clampCardWidth(width) {
   const value = Number(width)

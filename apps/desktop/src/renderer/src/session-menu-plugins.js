@@ -18,8 +18,11 @@ const PREFIX = 'session-menu:'
 /**
  * 菜单项列表。与其它插件数据一样复用配置页那份 `readPluginsDetails`：它已经把官方插件
  * 与用户插件合流、带启用状态——停用的插件不该在右键里留一条点不动的项。
+ *
+ * `surface` 是**这一处**右键菜单（`sidebar` 侧栏会话行 / `chat` 主会话区）：清单里写了
+ * `surface` 的项只出现在那一处，省略的两处都出。不传不过滤，只给测试与「全都要」的调用方用。
  */
-export function sessionMenuPluginItems(plugins) {
+export function sessionMenuPluginItems(plugins, surface = null) {
   const items = []
   for (const plugin of Array.isArray(plugins) ? plugins : []) {
     if (plugin?.state !== 'enabled') continue
@@ -28,6 +31,8 @@ export function sessionMenuPluginItems(plugins) {
       const label = typeof entry?.label === 'string' ? entry.label.trim() : ''
       const action = typeof entry?.action === 'string' ? entry.action.trim() : ''
       if (!label || !action) continue
+      // 只对某一处生效的项：两处共用这份清单，过滤必须在这里做，否则同一项会在别处出现。
+      if (surface && entry?.surface && entry.surface !== surface) continue
       // 清单里声明的摆位要一路带到菜单构建那一层：`top` 进菜单最上方（会话压缩这类
       // 和当前会话直接相关的动作），省略就是宿主自己的项之后。
       const position = entry?.position === 'top' ? 'top' : entry?.position === 'bottom' ? 'bottom' : ''
@@ -49,10 +54,11 @@ export function sessionMenuPluginItems(plugins) {
   return items
 }
 
-export function useSessionMenuPlugins() {
+/** 某一处右键菜单（`sidebar` / `chat`）该有的插件项。 */
+export function useSessionMenuPlugins(surface) {
   const plugins = usePluginsDetails()
   // 插件列表是缓存的，菜单项只在它变化时重算：右键是同步交互，不能每次都摊一遍。
-  return useMemo(() => sessionMenuPluginItems(plugins), [plugins])
+  return useMemo(() => sessionMenuPluginItems(plugins, surface), [plugins, surface])
 }
 
 /** `session-menu:<pluginId>:<action>` → { pluginId, pluginAction }；不是插件项返回 null。 */
