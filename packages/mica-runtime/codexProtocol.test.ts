@@ -26,6 +26,7 @@ describe('codex protocol framing', () => {
       inputFocus: 'mica/input/focus',
       queueRecall: 'mica/queue/recall',
       queueHold: 'mica/queue/hold',
+      hostDrain: 'mica/host/drain',
       killBackgroundTask: 'mica/backgroundTasks/kill',
       backgroundTaskOutput: 'mica/backgroundTasks/output',
       subagentTaskDetail: 'mica/subagentTasks/detail',
