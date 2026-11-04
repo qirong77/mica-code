@@ -767,6 +767,24 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     browsers.clear()
   }
 
+  /**
+   * 回收没有归属的窗口。归属是顶栏图标的唯一依据，留着就等于一个用户既看不见、
+   * 也不会自己去关的浏览器进程（旧版本、或者绕开 x-mica-owner 直接打接口留下的）。
+   */
+  function pruneUnowned() {
+    const removed = []
+    for (const record of [...browsers.values()]) {
+      if (record.owner) continue
+      try {
+        destroyBrowser(record.id)
+        removed.push(record.id)
+      } catch {
+        // 单个窗口销毁失败不影响其他窗口
+      }
+    }
+    return removed
+  }
+
   function listTabs(owner) {
     const wanted = owner ? String(owner) : ''
     const tabs = []
@@ -863,12 +881,24 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
   return {
     listBrowsers: () => browserList(),
     getBrowser: (id) => browserSummary(requireBrowser(id)),
+    /** 接口参数里的 id 可能是窗口 id，也可能是标签页 id：服务报「谁刚被调用」时用它定位 */
+    locate(id) {
+      const value = String(id || '')
+      const record = browsers.get(value)
+      if (record) return { browser: browserSummary(record), tab: null }
+      for (const item of browsers.values()) {
+        const tab = item.tabs.find((entry) => entry.id === value)
+        if (tab) return { browser: browserSummary(item), tab: tabSummary(tab) }
+      }
+      return null
+    },
     getSnapshot: () => ({ browsers: browserList() }),
 
     createBrowser,
     showBrowser,
     hideBrowser,
     destroyBrowser,
+    pruneUnowned,
     closeAll,
 
     listTabs,

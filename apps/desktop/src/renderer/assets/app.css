@@ -823,6 +823,35 @@ body.is-resizing.is-resizing-terminal {
   animation: session-row-flash 1.6s ease-out 1;
 }
 
+/* 顶栏的受控浏览器 / 终端图标：会话调用对应接口时闪一下——它可能开在屏幕另一处、
+   或者干脆是隐藏的，光靠开关状态看不出「AI 正在动它」。只做亮度与轻微的缩放，
+   按钮本身的尺寸不变（顶栏只有 32px 高，图标一动不能把行撑开）。 */
+@keyframes control-icon-flash {
+  0% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 transparent);
+  }
+  42% {
+    transform: scale(1.18);
+    filter: brightness(1.5) drop-shadow(
+      0 0 6px color-mix(in srgb, var(--color-accent) 75%, transparent)
+    );
+  }
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 transparent);
+  }
+}
+.control-icon-flash {
+  animation: control-icon-flash 720ms ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .control-icon-flash {
+    animation: none;
+  }
+}
+
 /* Chat keeps Mica's terminal grammar: compact gutter rows, muted activity logs,
    and a prompt/status surface anchored at the bottom. */
 .chat-view {

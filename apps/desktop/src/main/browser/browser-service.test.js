@@ -58,6 +58,18 @@ function createFakeManager() {
     destroyBrowser: (id) => {
       if (!browsers.delete(id)) throw notFoundError(`没有这个窗口：${id}`)
     },
+    // 真实实现在列窗口前顺手销毁未归属的窗口（顶栏没有它们的入口）
+    pruneUnowned: () => {
+      const orphans = [...browsers.values()].filter((item) => !item.owner)
+      for (const orphan of orphans) browsers.delete(orphan.id)
+      return orphans.length
+    },
+    locate: (id) => {
+      const browser = [...browsers.values()].find(
+        (item) => item.id === id || item.tabs.some((tab) => tab.id === id)
+      )
+      return browser ? { browser, tab: browser.tabs.find((tab) => tab.id === id) } : null
+    },
     listTabs: () => [...browsers.values()].flatMap((item) => item.tabs),
     createTab: ({ browserId }) => {
       const browser = browsers.get(browserId)
@@ -210,12 +222,22 @@ describe('ownership', () => {
     expect(created.body.browser.label).toBe('登录页')
   })
 
-  it('falls back to the body and then to unowned', async () => {
+  it('falls back to the body, and refuses a request that carries no owner at all', async () => {
     const withBody = await call('/browser/browsers', { method: 'POST', body: { owner: 'sess-9' } })
     expect(withBody.body.browser.owner).toBe('sess-9')
 
     const orphan = await call('/browser/browsers', { method: 'POST', body: {} })
-    expect(orphan.body.browser.owner).toBeNull()
+    expect(orphan.status).toBe(400)
+    expect(orphan.body.error).toContain('x-mica-owner')
+  })
+
+  it('destroys windows that lost their owner before listing', async () => {
+    const orphan = manager.record({ owner: null })
+    const owned = manager.record({ owner: 'sess-keep' })
+    const listed = await call('/browser/browsers')
+    const ids = listed.body.browsers.map((item) => item.id)
+    expect(ids).not.toContain(orphan.id)
+    expect(ids).toContain(owned.id)
   })
 })
 
@@ -223,7 +245,7 @@ describe('browser and tab operations', () => {
   it('lists, shows, hides and destroys', async () => {
     const created = await call('/browser/browsers', {
       method: 'POST',
-      body: { url: 'example.com' }
+      body: { url: 'example.com', owner: 'sess-ops' }
     })
     const id = created.body.browser.id
 
@@ -246,7 +268,10 @@ describe('browser and tab operations', () => {
     expect(missing.status).toBe(404)
     expect(missing.body.ok).toBe(false)
 
-    const created = await call('/browser/browsers', { method: 'POST', body: {} })
+    const created = await call('/browser/browsers', {
+      method: 'POST',
+      body: { owner: 'sess-ops' }
+    })
     const tabId = created.body.browser.tabs[0].id
     const boom = await call(`/browser/tabs/${tabId}/evaluate`, {
       method: 'POST',
@@ -259,7 +284,7 @@ describe('browser and tab operations', () => {
   it('passes cookies and console flags through', async () => {
     const created = await call('/browser/browsers', {
       method: 'POST',
-      body: { url: 'example.com' }
+      body: { url: 'example.com', owner: 'sess-ops' }
     })
     const tabId = created.body.browser.tabs[0].id
 
@@ -289,7 +314,10 @@ describe('browser and tab operations', () => {
   })
 
   it('returns the png bytes directly when raw=1 is asked for', async () => {
-    const created = await call('/browser/browsers', { method: 'POST', body: {} })
+    const created = await call('/browser/browsers', {
+      method: 'POST',
+      body: { owner: 'sess-ops' }
+    })
     const tabId = created.body.browser.tabs[0].id
 
     const json = await call(`/browser/tabs/${tabId}/screenshot`)
@@ -348,6 +376,33 @@ describe('event stream', () => {
     }
     expect(text).toContain('browser:changed')
     expect(JSON.parse(text.slice(text.indexOf('data: ') + 6).trim()).payload.browsers).toBeArray()
+    controller.abort()
+  })
+
+  it('announces which window a session just touched', async () => {
+    const controller = new AbortController()
+    const response = await fetch(`${base}/browser/events`, {
+      headers: { accept: 'text/event-stream' },
+      signal: controller.signal
+    })
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    await reader.read() // `: connected`
+
+    const created = await call('/browser/browsers', {
+      method: 'POST',
+      body: { owner: 'sess-flash' }
+    })
+    const id = created.body.browser.id
+
+    let text = ''
+    for (let index = 0; index < 6 && !text.includes('browser:activity'); index += 1) {
+      const { value, done } = await reader.read()
+      if (done) break
+      text += decoder.decode(value)
+    }
+    const frame = text.split('\n').find((line) => line.includes('browser:activity'))
+    expect(JSON.parse(frame.slice(6)).payload).toMatchObject({ id, owner: 'sess-flash' })
     controller.abort()
   })
 })

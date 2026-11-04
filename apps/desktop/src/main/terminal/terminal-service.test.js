@@ -241,9 +241,12 @@ describe('service surface', () => {
   })
 
   it('returns every session-shaped response under the same envelope', async () => {
-    const created = await call('/sessions', { method: 'POST', body: { cwd: '/tmp' } })
+    const created = await call('/sessions', {
+      method: 'POST',
+      body: { cwd: '/tmp', owner: 'sess-t' }
+    })
     for (const [path, body] of [
-      ['/sessions', { cwd: '/tmp' }],
+      ['/sessions', { cwd: '/tmp', owner: 'sess-t' }],
       ['/sessions/term-1/resize', { cols: 90, rows: 30 }],
       ['/sessions/term-1/show', {}],
       ['/sessions/term-1/hide', {}]
@@ -269,7 +272,7 @@ describe('service surface', () => {
 
   it('replays buffered output when an SSE client connects', async () => {
     // 重新建一个会话，供 SSE 读取
-    await call('/sessions', { method: 'POST', body: { cwd: '/tmp' } })
+    await call('/sessions', { method: 'POST', body: { cwd: '/tmp', owner: 'sess-t' } })
     const response = await fetch(`${base}/events?session=term-1&since=0`)
     expect(response.headers.get('content-type')).toContain('text/event-stream')
     const reader = response.body.getReader()
@@ -281,8 +284,8 @@ describe('service surface', () => {
   })
 
   it('does not push state changes of one session to a page watching another', async () => {
-    await call('/sessions', { method: 'POST', body: { cwd: '/tmp' } })
-    await call('/sessions', { method: 'POST', body: { cwd: '/tmp' } })
+    await call('/sessions', { method: 'POST', body: { cwd: '/tmp', owner: 'sess-t' } })
+    await call('/sessions', { method: 'POST', body: { cwd: '/tmp', owner: 'sess-t' } })
 
     // 只订阅 term-2 的页面：term-1 的状态变化不该打扰它
     const response = await fetch(`${base}/events?session=term-2&since=0`)
@@ -396,10 +399,36 @@ describe('owner guard', () => {
 
   it('keeps the window lazy when show is not requested', async () => {
     const opened = ownedWindows.calls.filter((item) => item[0] === 'ensure').length
-    await post('/sessions', { cwd: '/tmp', label: '后台任务' })
+    await post('/sessions', { cwd: '/tmp', label: '后台任务' }, { 'x-mica-owner': 'chat-a' })
     // 只跑 PTY、不建渲染进程：一个窗口上百 MB，AI 起的终端大多只用来跑命令
     expect(ownedWindows.calls.filter((item) => item[0] === 'ensure').length).toBe(opened)
     await post('/sessions/term-1/show', {})
     expect(ownedWindows.calls.at(-1)).toEqual(['ensure', 'term-1', { show: true, focus: true }])
+  })
+
+  it('refuses to create a terminal with no owner at all', async () => {
+    const created = await post('/sessions', { cwd: '/tmp' })
+    expect(created.status).toBe(400)
+    expect(created.body.error).toContain('x-mica-owner')
+  })
+
+  it('announces which terminal a session just touched', async () => {
+    const controller = new AbortController()
+    const response = await fetch(`${ownedBase}/events`, { signal: controller.signal })
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    await reader.read()
+
+    await post('/sessions/term-1/input', { text: 'ls' }, { 'x-mica-owner': 'chat-a' })
+
+    let text = ''
+    for (let index = 0; index < 6 && !text.includes('terminal:activity'); index += 1) {
+      const { value, done } = await reader.read()
+      if (done) break
+      text += decoder.decode(value)
+    }
+    const frame = text.split('\n').find((line) => line.includes('terminal:activity'))
+    expect(JSON.parse(frame.slice(6)).payload).toMatchObject({ id: 'term-1', owner: 'chat-a' })
+    controller.abort()
   })
 })

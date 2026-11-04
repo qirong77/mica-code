@@ -140,8 +140,10 @@
 - 终端是一个会话一个后台窗口，`node-pty` 真实 pty + `@xterm/headless` 屏幕镜像；窗口按需创建，关窗只 hide。
 - 读屏前必须等已排队输出解析完，并给该等待硬预算（读屏 2s、`wait` 用剩余超时）。
 - `wait` 默认 `maskEchoedInput`（`skipEcho: false` 关闭）；`expectExitCode` 不匹配立刻返回实际退出码。
-- 会话存在进程内，最多 12 条活着 shell；`sweep()` 每分钟回收，窗口可见的不回收。
+- 会话存在进程内，最多 12 条活着 shell；`sweep()` 每分钟回收，没有归属的立刻回收，窗口可见的不回收。
+- 归属是顶栏图标的唯一依据：浏览器与终端**新建都必须带 `x-mica-owner`**（缺了返回 400），没有归属的窗口还会被回收（浏览器在列窗口前 `pruneUnowned()`，终端靠 `shouldRecycle`）——顶栏只显示当前会话自己的窗口，切会话就一起消失。
 - 写入类操作校验 `x-mica-owner`（防串台，不是权限边界）；读屏与 `wait` 不拦。
+- 带归属的接口调用会推一条 `browser:activity` / `terminal:activity`（`{ id, owner, endpoint, at }`，只发给列表订阅者、不改快照），页面收到后让对应那枚图标闪一下（`.control-icon-flash`，按计数重挂图标重播动画）。页面自己点图标不带 owner，不会触发。
 - 纯 Web 宿主无主进程，`/remote/terminal/*` 回 503。
 
 ## 日志与性能

@@ -5,25 +5,21 @@
  * 送过来（形状见 apps/desktop/src/host/browser-control-core.js 的归一化函数）。
  */
 
-/** owner 短标签：会话 id 也可能是页签 id，取尾部 6 位够区分又不至于把整栏撑开 */
-export function shortOwner(owner) {
-  const value = String(owner || '')
-  if (!value) return ''
-  return value.length > 6 ? value.slice(-6) : value
-}
-
 /**
- * 归属当前页签的窗口：owner 可能是这条会话的 sessionId（agent 调的），也可能是页签 id
- * （草稿还没绑定会话时用页签名）。没有 owner 的窗口（终端里手跑 curl、设置页新建的）
- * 仍然要能看见——否则它们开着却没有任何入口，只能靠猜。
+ * 归属当前页签的窗口：owner 是这条会话的 sessionId（agent 调的），也可能是页签 id
+ * （草稿还没绑定会话时用页签名）。
+ *
+ * **归属是唯一依据**：没有归属的窗口不在这里出现（主进程会直接销毁它们，见
+ * apps/desktop/src/main/browser/browser-service.js 的 pruneUnowned），所以留在列表里的
+ * 只可能是别人的窗口——切会话时它就该消失。
  */
 export function nodeBrowsers(browsers, node) {
   const list = Array.isArray(browsers) ? browsers : []
   const ids = new Set([node?.id, node?.sessionId].filter(Boolean).map((value) => String(value)))
-  return list.filter((item) => !item?.owner || ids.has(String(item.owner)))
+  return list.filter((item) => item?.owner && ids.has(String(item.owner)))
 }
 
-/** 这个窗口是不是「当前页签自己的」：用来区分未归属窗口的图标样式 */
+/** 这个窗口是不是「当前页签自己的」 */
 export function isOwnedByNode(browser, node) {
   const owner = String(browser?.owner || '')
   if (!owner) return false
@@ -36,8 +32,8 @@ export function browserStatusLabel(browser) {
   return browser.visible ? '已显示' : '已隐藏'
 }
 
-/** 图标 tooltip：让用户能分清是哪个窗口（标题 + 地址 + 归属 + 状态） */
-export function browserIconTitle(browser, node) {
+/** 图标 tooltip：让用户能分清是哪个窗口（标题 + 地址 + 状态） */
+export function browserIconTitle(browser) {
   if (!browser) return ''
   const parts = [browser.label || '受控浏览器']
   const title = String(browser.title || '').trim()
@@ -46,7 +42,6 @@ export function browserIconTitle(browser, node) {
   if (url && url !== 'about:blank') parts.push(url)
   const tabs = Array.isArray(browser.tabs) ? browser.tabs.length : 0
   if (tabs > 1) parts.push(`${tabs} 个标签页`)
-  if (!isOwnedByNode(browser, node)) parts.push('未归属（点击可管理）')
   parts.push(browserStatusLabel(browser))
   parts.push(browser.visible ? '点击隐藏' : '点击显示')
   parts.push('右键关闭')
@@ -60,3 +55,4 @@ export function browserIconBadge(browsers, browser) {
   const index = list.findIndex((item) => item?.id === browser?.id)
   return index >= 0 ? String(index + 1) : ''
 }
+

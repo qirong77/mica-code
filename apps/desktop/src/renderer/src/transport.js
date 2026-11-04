@@ -28,6 +28,8 @@ const EVENT_CHANNELS = [
   'git:changed',
   'browser:changed',
   'terminal:changed',
+  'browser:activity',
+  'terminal:activity',
   'dev:reload',
   'app:window-state'
 ]
@@ -605,7 +607,9 @@ function createWebApi(env) {
       hide: (id) => invoke('browser-control:hide', { id }),
       close: (id) => invoke('browser-control:close', { id }),
       create: (input = {}) => invoke('browser-control:create', input),
-      onChanged: (callback) => subscribe('browser:changed', callback)
+      onChanged: (callback) => subscribe('browser:changed', callback),
+      // 「这个会话刚调用了浏览器接口」：只用来让顶栏那一枚图标闪一下
+      onActivity: (callback) => subscribe('browser:activity', callback)
     },
 
     terminalControl: {
@@ -616,7 +620,8 @@ function createWebApi(env) {
       hide: (id) => invoke('terminal-control:hide', { id }),
       close: (id) => invoke('terminal-control:close', { id }),
       create: (input = {}) => invoke('terminal-control:create', input),
-      onChanged: (callback) => subscribe('terminal:changed', callback)
+      onChanged: (callback) => subscribe('terminal:changed', callback),
+      onActivity: (callback) => subscribe('terminal:activity', callback)
     },
 
     access: {

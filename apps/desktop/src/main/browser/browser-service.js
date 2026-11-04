@@ -65,7 +65,52 @@ export function createBrowserService({
     }
   }
 
+  /**
+   * 「这个会话刚调了一下它的窗口」：顶栏对应图标闪一下，让人看得见 AI 正在动浏览器。
+   *
+   * 只报带归属的请求——页面自己点图标（显示/隐藏）不带 owner，那是人已经知道的操作；
+   * 而不带 id 的批量调用（列窗口）也没有具体哪一枚图标可闪。
+   */
+  function broadcastActivity(activity) {
+    if (!activity?.id || !activity.owner || clients.size === 0) return
+    const payload = JSON.stringify({ channel: 'browser:activity', payload: activity })
+    for (const client of clients) {
+      try {
+        client.res.write(`data: ${payload}\n\n`)
+      } catch {
+        clients.delete(client)
+      }
+    }
+  }
+
   const handlers = buildHandlers({ getManager, address, cacheDir })
+
+  /**
+   * 这次调用落在哪个窗口上：优先看返回值（新建/切换标签页都会带回窗口），
+   * 其次按参数里的 id 在窗口与标签页里各查一次。
+   */
+  function activityTarget(ctx, result) {
+    if (result?.browser?.id) return result.browser
+    const candidates = [result?.tab?.browserId, ctx.params?.id]
+    for (const id of candidates) {
+      if (!id) continue
+      const found = getManager().locate?.(id)
+      if (found?.browser) return found.browser
+    }
+    return null
+  }
+
+  function reportActivity(endpoint, ctx, result) {
+    if (!ctx.owner) return
+    const target = activityTarget(ctx, result)
+    if (!target?.id) return
+    broadcastActivity({
+      id: target.id,
+      owner: target.owner || ctx.owner,
+      endpoint,
+      at: Date.now()
+    })
+  }
 
   // 端点目录与实现必须一一对应：少一个 handler 就在启动时报出来，而不是等调用时 404
   // （SSE 端点由 handleEvents 直接处理，不走 handler 表）
@@ -136,9 +181,11 @@ export function createBrowserService({
           'cache-control': 'no-store'
         })
         res.end(buffer)
+        reportActivity(matched.endpoint.id, context, result)
         return
       }
       sendJson(res, 200, { ok: true, ...result })
+      reportActivity(matched.endpoint.id, context, result)
     } catch (error) {
       if (error instanceof BrowserRequestError) {
         sendJson(res, error.status, { ok: false, error: error.message })
@@ -237,6 +284,14 @@ export function createBrowserService({
   }
 }
 
+/**
+ * 新窗口必须带归属：顶栏图标只按归属渲染，没有归属的窗口对谁都不显示，留着只是个
+ * 删不掉的后台进程。所以宁可直接拒掉，也不让它悄悄建出来。
+ */
+function requireOwner(ctx) {
+  if (!ctx.owner) throw new BrowserRequestError('缺少归属（x-mica-owner）：窗口必须归属到一个会话')
+}
+
 function buildHandlers({ getManager, address, cacheDir = '' }) {
   const manager = () => getManager()
 
@@ -258,18 +313,25 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
       guide: BROWSER_GUIDE
     }),
 
-    listBrowsers: () => ({ browsers: manager().listBrowsers() }),
+    // 列窗口顺手回收未归属的：那种窗口在顶栏没有任何入口，留着只是个删不掉的后台进程
+    listBrowsers: () => {
+      manager().pruneUnowned?.()
+      return { browsers: manager().listBrowsers() }
+    },
 
-    createBrowser: (ctx) => ({
-      browser: manager().getBrowser(
-        manager().createBrowser({
-          owner: ctx.owner,
-          url: ctx.body.url,
-          label: ctx.body.label,
-          show: parseBoolean(ctx.body.show) === true
-        }).id
-      )
-    }),
+    createBrowser: (ctx) => {
+      requireOwner(ctx)
+      return {
+        browser: manager().getBrowser(
+          manager().createBrowser({
+            owner: ctx.owner,
+            url: ctx.body.url,
+            label: ctx.body.label,
+            show: parseBoolean(ctx.body.show) === true
+          }).id
+        )
+      }
+    },
 
     getBrowser: (ctx) => ({ browser: manager().getBrowser(ctx.params.id) }),
 

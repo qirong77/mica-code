@@ -126,6 +126,11 @@ async function loadDocs() {
 /* ------------------------------------------------------------------ SSE 订阅 */
 
 function applyEvent(parsed) {
+  // 「这个会话刚调了一下它的终端」：只转发给页面闪一下图标，不改会话列表
+  if (parsed?.channel === 'terminal:activity') {
+    if (parsed.payload?.id) broadcaster('terminal:activity', parsed.payload)
+    return
+  }
   if (parsed?.channel !== 'terminal:changed') return
   const reason = parsed.payload?.reason || 'change'
   const session = parsed.payload?.session

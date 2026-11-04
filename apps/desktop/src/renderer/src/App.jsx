@@ -108,6 +108,9 @@ const SESSION_POLL_MS = 10000
  */
 const GIT_COUNTS_TTL_MS = 20000
 
+/** 顶栏浏览器/终端图标闪一下的时长：与 assets/app.css 的 `control-icon-flash` 动画一致 */
+const CONTROL_FLASH_MS = 720
+
 function recentChatCwd() {
   const value = uiStateKeys().chatDefaultCwd
   return typeof value === 'string' ? value : ''
@@ -494,6 +497,10 @@ export default function App() {
   const [browsers, setBrowsers] = useState([])
   // 终端控制：主进程里的真实 PTY + 后台窗口，列表同样由运行时抄送（`terminal:changed`）。
   const [terminals, setTerminals] = useState([])
+  // 顶栏图标的闪烁计数：`browser:<id>` / `terminal:<id>` → 次数。会话调用对应接口时
+  // 主进程推一条 activity，这里 +1，图标按这个号重挂一次触发一次 CSS 动画。
+  const [controlFlashes, setControlFlashes] = useState({})
+  const controlFlashTimers = useRef(new Map())
   const [rightActiveTermByChat, setRightActiveTermByChat] = useState(bootstrapRightTerms.active)
   const rightActiveTermByChatRef = useLatest(rightActiveTermByChat)
   // 终端的最近活动时间只喂给定时回收，不参与渲染：每次敲键都 setState 会
@@ -1942,12 +1949,51 @@ export default function App() {
     () => terminalNodes.find((node) => node.id === activeId) || null,
     [terminalNodes, activeId]
   )
-  // 顶栏图标按「当前这条会话」归属：AI 在当前会话里开的窗口只挂在这一条上，
-  // 没有归属的窗口（终端里手跑的 curl、设置页新建的）也要给到入口，否则开着却看不见。
+  // 顶栏图标按「当前这条会话」归属：只显示这条会话自己开的窗口，切走就一起消失。
+  // 没有归属的窗口不在这里出现——主进程会直接把它们销毁（归属是图标的唯一依据）。
   const activeBrowsers = useMemo(() => nodeBrowsers(browsers, activeNode), [browsers, activeNode])
   const activeTerminals = useMemo(
     () => nodeTerminals(terminals, activeNode),
     [terminals, activeNode]
+  )
+  // 会话调用浏览器/终端接口时对应那枚图标闪一下（`browser:activity` / `terminal:activity`）：
+  // 事件带 owner，只有本会话自己的图标会亮。计数而不是布尔：连着两次调用要各闪一次，
+  // 图标按这个号重挂，动画才会从头再播。
+  const flashControl = useCallback((kind, id) => {
+    const key = `${kind}:${id}`
+    clearTimeout(controlFlashTimers.current.get(key))
+    setControlFlashes((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }))
+    const timer = setTimeout(() => {
+      controlFlashTimers.current.delete(key)
+      setControlFlashes((prev) => {
+        if (!prev[key]) return prev
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+    }, CONTROL_FLASH_MS)
+    controlFlashTimers.current.set(key, timer)
+  }, [])
+
+  useEffect(() => {
+    const offBrowser = window.mica.browserControl.onActivity?.((activity) => {
+      if (isOwnedByNode(activity, activeNode)) flashControl('browser', activity.id)
+    })
+    const offTerminal = window.mica.terminalControl.onActivity?.((activity) => {
+      if (isTerminalOwnedByNode(activity, activeNode)) flashControl('terminal', activity.id)
+    })
+    return () => {
+      offBrowser?.()
+      offTerminal?.()
+    }
+  }, [activeNode, flashControl])
+
+  useEffect(
+    () => () => {
+      for (const timer of controlFlashTimers.current.values()) clearTimeout(timer)
+      controlFlashTimers.current.clear()
+    },
+    []
   )
 
   /**
@@ -2662,9 +2708,9 @@ export default function App() {
                 <PluginHeaderEntries onOpenPage={openPluginPage} session={pluginSession} />
               )}
               {activeTerminals.map((terminal) => {
-                const owned = isTerminalOwnedByNode(terminal, activeNode)
                 const badge = terminalIconBadge(activeTerminals, terminal)
-                const title = terminalIconTitle(terminal, activeNode)
+                const title = terminalIconTitle(terminal)
+                const flashSeq = controlFlashes[`terminal:${terminal.id}`] || 0
                 return (
                   <button
                     key={terminal.id}
@@ -2681,12 +2727,14 @@ export default function App() {
                     className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
                       terminal.windowVisible
                         ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
-                        : owned
-                          ? 'text-fg-soft hover:bg-overlay hover:text-fg-max'
-                          : 'text-fg-dim hover:bg-overlay hover:text-fg-soft'
+                        : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
                     }`}
                   >
-                    <IconTerminal size={14} />
+                    <IconTerminal
+                      key={flashSeq}
+                      size={14}
+                      className={flashSeq ? 'control-icon-flash' : undefined}
+                    />
                     {badge && (
                       <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-fg-muted">
                         {badge}
@@ -2696,9 +2744,9 @@ export default function App() {
                 )
               })}
               {activeBrowsers.map((browser) => {
-                const owned = isOwnedByNode(browser, activeNode)
                 const badge = browserIconBadge(activeBrowsers, browser)
-                const title = browserIconTitle(browser, activeNode)
+                const title = browserIconTitle(browser)
+                const flashSeq = controlFlashes[`browser:${browser.id}`] || 0
                 return (
                   <button
                     key={browser.id}
@@ -2715,14 +2763,17 @@ export default function App() {
                     className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
                       browser.visible
                         ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
-                        : owned
-                          ? 'text-fg-soft hover:bg-overlay hover:text-fg-max'
-                          : 'text-fg-dim hover:bg-overlay hover:text-fg-soft'
+                        : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
                     }`}
                   >
                     <IconWorld
+                      key={flashSeq}
                       size={14}
-                      className={browser.loading ? 'animate-pulse' : undefined}
+                      className={
+                        [browser.loading && 'animate-pulse', flashSeq && 'control-icon-flash']
+                          .filter(Boolean)
+                          .join(' ') || undefined
+                      }
                     />
                     {badge && (
                       <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-fg-muted">
