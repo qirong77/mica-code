@@ -20,6 +20,7 @@ import {
   type AgentConversationMessage,
   type AgentQueryContent,
   type AgentQueryOptions,
+  throwIfTurnPaused,
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent.js';
@@ -340,7 +341,9 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
     const systemPrompt = resolveSystemPrompt(this.systemPrompt);
     let messages: ResponseInputItem[] = [
       ...prepareHistoricalResponsesInput(this.messages),
-      { type: 'message', role: 'user', content: micaContentToResponsesContent(question) },
+      ...(options?.resume === true
+        ? []
+        : [{ type: 'message' as const, role: 'user' as const, content: micaContentToResponsesContent(question) }]),
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
       this.messages = takeNextInput
@@ -361,6 +364,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
     while (true) {
       throwIfQueryStopped(options);
+      throwIfTurnPaused(options);
       throwIfAgentMaxTurnsReached(options, requestIndex, totalContent);
       if (options?.rewriteIterationMessages) {
         const rewritten = await options.rewriteIterationMessages(messages);

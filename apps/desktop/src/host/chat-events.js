@@ -165,10 +165,14 @@ export function buildTurnStartParams({
   model,
   variant,
   role,
-  clientMessageId
+  clientMessageId,
+  resume
 }) {
   const params = { threadId: threadId || '', micaTextRollback: true, micaThinkingRollback: true }
   params.input = [{ type: 'text', text: String(prompt || '') }]
+  // 接续一条被宿主暂停、还没跑完的会话：不追加用户消息，直接对已有历史再发一次
+  // 请求（见 `mica-runtime` 的 `RuntimeInput.resume`）。
+  if (resume) params.resume = true
   if (cwd) params.cwd = cwd
   if (model) params.model = model
   if (variant) params.effort = variant
@@ -220,9 +224,21 @@ export function codexNotificationToEvent(notification) {
         part: { type: 'text', text: params.delta || '' }
       }
     case 'mica/agentMessage/textRollback':
-      return { type: 'text_rollback', timestamp, sessionID, length: params.length, attemptId: params.micaAttemptId }
+      return {
+        type: 'text_rollback',
+        timestamp,
+        sessionID,
+        length: params.length,
+        attemptId: params.micaAttemptId
+      }
     case 'mica/reasoning/textRollback':
-      return { type: 'reasoning_rollback', timestamp, sessionID, length: params.length, attemptId: params.micaAttemptId }
+      return {
+        type: 'reasoning_rollback',
+        timestamp,
+        sessionID,
+        length: params.length,
+        attemptId: params.micaAttemptId
+      }
     case 'mica/reasoning/reset':
       return { type: 'reasoning_reset', timestamp, sessionID }
     case 'item/reasoning/textDelta':

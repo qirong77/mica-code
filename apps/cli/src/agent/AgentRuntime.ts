@@ -2,6 +2,7 @@ import mitt from 'mitt';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   DEFAULT_ROLE_NAME,
+  AgentPausedError,
   micaAgent,
   type AgentQueryContent,
   type AgentSnapshot,
@@ -24,6 +25,7 @@ import {
   type TurnTimingRecord,
   type TurnTimingState,
   type TurnTimingTick,
+  type TurnTimingOutcome,
 } from '@packages/mica-common/turnTiming.js';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import { mcpToolNamePrefix, micaTools } from '@packages/mica-tools/index.js';
@@ -143,6 +145,16 @@ type AgentRunOptions = {
   onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
   maxTurns?: number;
   reservedRunId?: number;
+  /**
+   * 迭代边界上的软停，见 `AgentQueryOptions.shouldPause`。返回 true 时这一轮
+   * 以 `paused` 收尾并抛 `AgentPausedError`，历史尾部保持完整，可原地续跑。
+   */
+  shouldPause?: () => boolean;
+  /**
+   * 不追加 `question`，直接对现有历史再发一次请求。宿主重启后接续被暂停的
+   * 一轮用它，否则历史里会多出一条重复的用户消息或一条凭空出现的指令。
+   */
+  resume?: boolean;
 };
 
 type ObservationPayload = AgentObservationEvent extends infer Event
@@ -633,7 +645,7 @@ export class AgentRuntime {
       const observed: ObservedRun = { runId: -++this.childRunSeq, closed: false };
       const startedAt = Date.now();
       const usageStart = child.usageHistory?.length ?? 0;
-      let outcome: 'completed' | 'aborted' | 'error' = 'completed';
+      let outcome: 'completed' | 'aborted' | 'error' | 'paused' = 'completed';
       let observationError: string | undefined;
       this.observe(observed, {
         type: 'run:start',
@@ -1070,7 +1082,7 @@ export class AgentRuntime {
     this.activeTurnTiming = applyTurnTimingTick(createTurnTimingState(), { type: 'turn-start', at: startedAt });
     this.activeTurnTimingRunId = runId;
     const observed: ObservedRun = { runId, closed: false };
-    let outcome: 'completed' | 'aborted' | 'error' = 'completed';
+    let outcome: 'completed' | 'aborted' | 'error' | 'paused' = 'completed';
     let observationError: string | undefined;
     let abortController: AbortController | undefined;
     this.observe(observed, {
@@ -1168,6 +1180,8 @@ export class AgentRuntime {
         client.query(question, {
           signal,
           shouldContinue: () => this.isCurrent(runId),
+          shouldPause: options.shouldPause,
+          resume: options.resume,
           maxTurns: options.maxTurns,
           onRequestStart: (info) => {
             if (!this.isCurrent(runId)) return;
@@ -1244,6 +1258,10 @@ export class AgentRuntime {
         }
         throw new AgentAbortError(runId);
       }
+      if (error instanceof AgentPausedError) {
+        outcome = 'paused';
+        throw error;
+      }
       const message = error instanceof Error ? error.message : String(error);
       outcome = 'error';
       observationError = message;
@@ -1302,7 +1320,7 @@ export class AgentRuntime {
    * `runId` 并中断，被中断那一轮的 finally 随后才跑到这里，不能把上一轮的耗时记进
    * 新会话。
    */
-  private finishTurnTiming(outcome: 'completed' | 'aborted' | 'error', runId: number): void {
+  private finishTurnTiming(outcome: TurnTimingOutcome, runId: number): void {
     const state = this.activeTurnTiming;
     // 记录不属于这一轮就不要碰它：`clearSession()` 已经换上（或清掉）新的记录，被中断
     // 那一轮的 finally 是后到的，把上一轮的耗时归档进新会话就成了无主数据。

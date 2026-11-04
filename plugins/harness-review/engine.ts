@@ -12,7 +12,11 @@ export type CaptureOptions = { captureContent: boolean; maxEventChars: number; m
 export const CLASSIFIER_VERSION = 4;
 export type FindingStatus = 'open' | 'accepted' | 'dismissed' | 'validated' | 'regressed';
 type Config = { providerId: string; protocol: string; model: string; effort: string; role: string };
-type Outcome = 'running' | 'completed' | 'aborted' | 'error' | 'interrupted';
+/**
+ * `paused` 是宿主在迭代边界主动停下（开发构建重载），历史完整、随后续跑；
+ * 它既不是失败也不是用户中止，单独的取值好让复盘区分「这一轮被打断」的原因。
+ */
+type Outcome = 'running' | 'completed' | 'aborted' | 'error' | 'interrupted' | 'paused';
 export type Evidence = { runId: string; seq: number; traceFile: string; available: boolean; detail?: string };
 /** One top-level block of the resolved prompt: what it is, not what it says. */
 export type PromptSection = { label: string; sha256: string; chars: number };
@@ -2834,9 +2838,7 @@ async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<vo
     // 摘要每 25 条事件才落一次盘：宿主被杀掉的那次运行，轨迹会比摘要多出几条。
     // 多出来是正常的（摘要滞后），少掉才是真的缺事件。
     if (lines.length < summary.eventCount - summary.droppedEvents)
-      warnings.push(
-        `Run ${summary.id} trace has fewer events than its summary counts; the trace may be truncated.`,
-      );
+      warnings.push(`Run ${summary.id} trace has fewer events than its summary counts; the trace may be truncated.`);
   } catch {
     warnings.push(`Run ${summary.id} has a missing or unreadable trace: ${summary.traceFile}`);
   }

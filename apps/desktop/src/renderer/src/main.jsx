@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { setConfigWebClient, setConfigWebEditor, setConfigWebThemeHost } from '@mica-config-ui/web'
 import App from './App'
+import { DevReloadBanner } from './DevReloadBanner'
 import { ErrorBoundary } from './ErrorBoundary'
 import ShareIndex from './ShareIndex'
 import '../assets/app.css'
@@ -95,6 +96,7 @@ ensureMicaApi()
         }
         createRoot(document.getElementById('root')).render(
           <ErrorBoundary>
+            <DevReloadBanner />
             <App />
           </ErrorBoundary>
         )

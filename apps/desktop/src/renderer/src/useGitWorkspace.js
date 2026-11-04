@@ -177,7 +177,18 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
   const activeGit =
     git.cwd === (cwd || null) ? git : { ...EMPTY_GIT, cwd: cwd || null, loading: !!cwd }
   const root = activeGit.repository?.root
-  const compareBase = cwd ? (root && compareBases[root]) || compareBases[cwd] || null : null
+  // 评审那一份对比的基线由发起方（插件的 `openReview`）定，不读按仓库记下的那格——
+  // 否则面板上的「原分支」会显示上一份对比的基线，与真正发出去的 `refSummary` 对不上。
+  const reviewCompareBase = useMemo(
+    () =>
+      compare?.head
+        ? { kind: 'branch', ref: compare.base || null, name: compare.base || '' }
+        : null,
+    [compare?.head, compare?.base]
+  )
+  const compareBase = cwd
+    ? reviewCompareBase || (root && compareBases[root]) || compareBases[cwd] || null
+    : null
   // 目标分支固定成同一个对象：`FilesView` 靠它的身份认「这是不是另一份对比」。
   const urlCompareHead = useMemo(
     () => (compare?.head ? { kind: 'branch', ref: compare.head, name: compare.head } : null),

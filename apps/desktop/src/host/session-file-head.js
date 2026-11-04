@@ -58,3 +58,12 @@ export function readTopLevelParentId(file, bytes = HEAD_BYTES) {
   const head = readHeadOrNull(file, bytes)
   return head === null ? null : readTopLevelString(head, 'parentSessionId')
 }
+
+/**
+ * 顶层 `resumeAfter`：这一轮是被宿主换进程（开发构建重载）停下的，新宿主该接着跑。
+ * 用户自己按停止的会话没有这个字段，不会被续跑。
+ */
+export function readTopLevelResumeAfter(file, bytes = HEAD_BYTES) {
+  const head = readHeadOrNull(file, bytes)
+  return head === null ? null : readTopLevelString(head, 'resumeAfter')
+}

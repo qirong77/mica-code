@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { byUpdatedDesc, orderSessions, resolveDrop, rowDropPosition } from './session-dnd'
+import {
+  byUpdatedDesc,
+  groupRowDrop,
+  orderSessions,
+  resolveDrop,
+  rowDropPosition
+} from './session-dnd'
 
 const sessions = [
   { id: 'a', cwd: '/w/one', updatedAtMs: 3 },
@@ -289,5 +295,64 @@ describe('rowDropPosition', () => {
   it('拿不到行高时按中间处理', () => {
     expect(rowDropPosition({ ratio: Number.NaN })).toBe('into')
     expect(rowDropPosition({ ratio: Number.NaN, canNest: false })).toBe('after')
+  })
+})
+
+describe('groupRowDrop', () => {
+  const groups = [
+    { id: 'g1', parentId: null },
+    { id: 'g2', parentId: null },
+    { id: 'g3', parentId: 'g1' }
+  ]
+  const dragGroup = (id, parentId = null) => ({
+    kind: 'group',
+    id,
+    section: 'project',
+    groupId: parentId
+  })
+
+  it('兄弟分组整行都能落：上面排序、中间嵌套、下面排序，没有无反应的死区', () => {
+    for (const [ratio, expected] of [
+      [0.1, 'before'],
+      [0.4, 'into'],
+      [0.6, 'into'],
+      [0.9, 'after']
+    ]) {
+      expect(groupRowDrop({ ratio, drag: dragGroup('g2'), groupId: 'g1', groups })).toBe(expected)
+    }
+  })
+
+  it('嵌套不成立时中间那一半退回排序，不会再什么都不发生', () => {
+    // g4 与 g3 同级（都在 g1 下）：拖到 g4 上时 into 仍成立，所以换一个 into 被拒的落点——拖到
+    // 自己的父分组 g1 上：中间是「已经在内」，上下两头这时才走排序分支，但整行不接（见下一条用例）。
+    const nested = [...groups, { id: 'g4', name: 'g4', parentId: 'g1' }]
+    expect(rowDropPosition({ ratio: 0.5, canNest: false })).toBe('after')
+    expect(rowDropPosition({ ratio: 0.4, canNest: false })).toBe('before')
+    expect(
+      groupRowDrop({ ratio: 0.5, drag: dragGroup('g4', 'g1'), groupId: 'g1', groups: nested })
+    ).toBeNull()
+  })
+
+  it('能嵌套时中间一半是「成为子分组」，两头仍是排序', () => {
+    expect(groupRowDrop({ ratio: 0.5, drag: dragGroup('g2'), groupId: 'g1', groups })).toBe('into')
+    expect(groupRowDrop({ ratio: 0.1, drag: dragGroup('g2'), groupId: 'g1', groups })).toBe(
+      'before'
+    )
+  })
+
+  it('不成立的落点整行都不亮：自己、自己的子树、已经在内、不是分组拖拽', () => {
+    for (const ratio of [0.1, 0.5, 0.9]) {
+      expect(groupRowDrop({ ratio, drag: dragGroup('g1'), groupId: 'g1', groups })).toBeNull()
+      expect(groupRowDrop({ ratio, drag: dragGroup('g1'), groupId: 'g3', groups })).toBeNull()
+      expect(groupRowDrop({ ratio, drag: dragGroup('g3', 'g1'), groupId: 'g1', groups })).toBeNull()
+      expect(
+        groupRowDrop({
+          ratio,
+          drag: { ...dragGroup('g2'), kind: 'session' },
+          groupId: 'g1',
+          groups
+        })
+      ).toBeNull()
+    }
   })
 })

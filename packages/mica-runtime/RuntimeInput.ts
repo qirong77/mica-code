@@ -12,12 +12,23 @@ export type RuntimeInput = {
   source: RuntimeInputSource;
   createdAt: number;
   queueMode?: RuntimeQueueMode;
+  /**
+   * 接续一轮被宿主暂停、尚未跑完的对话：不追加用户消息，也不在会话记录里
+   * 多出一条，直接对现有历史再发一次请求。`text` 此时只作为日志标识。
+   */
+  resume?: boolean;
 };
 
 export function createRuntimeInput(
   text: string,
   source: RuntimeInputSource = 'ui',
-  options: { queueMode?: RuntimeQueueMode; displayText?: string; id?: string; content?: unknown } = {},
+  options: {
+    queueMode?: RuntimeQueueMode;
+    displayText?: string;
+    id?: string;
+    content?: unknown;
+    resume?: boolean;
+  } = {},
 ): RuntimeInput {
   return {
     id: options.id ?? micaCommon.createId('input'),
@@ -27,5 +38,6 @@ export function createRuntimeInput(
     source,
     createdAt: Date.now(),
     ...(options.queueMode ? { queueMode: options.queueMode } : {}),
+    ...(options.resume ? { resume: true } : {}),
   };
 }

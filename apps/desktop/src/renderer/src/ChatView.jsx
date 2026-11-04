@@ -1930,7 +1930,7 @@ function TurnLogRoundBody({ messages, now, onOpenActivity }) {
  * 收起的那一行不是空壳——它报这一轮干了什么（最近一条活动）与步数 / 耗时，
  * 所以收起来也不等于看不见。
  */
-function TurnLogRound({ round, live, expanded, onToggle, now, onOpenActivity }) {
+function TurnLogRound({ round, live, framed = true, expanded, onToggle, now, onOpenActivity }) {
   const settled = useMemo(() => turnActivitySettledAt(round.messages) ?? now, [round.messages, now])
   const head = useMemo(() => turnLogHeadSummary(round.messages, settled), [round.messages, settled])
   const steps = `${head?.steps ?? round.messages.length} 步`
@@ -1938,6 +1938,10 @@ function TurnLogRound({ round, live, expanded, onToggle, now, onOpenActivity }) 
   const meta = [steps, elapsed].filter(Boolean).join(' · ')
   // 最新一轮没有标题行：它就在最下面摊开着，再加一行「轮次N」只是噪声。
   const open = live || expanded
+  // 整场只有一轮时没有「轮次」可言：不加框、不加标签，与加这个功能之前一致。
+  if (!framed) {
+    return <TurnLogRoundBody messages={round.messages} now={now} onOpenActivity={onOpenActivity} />
+  }
 
   return (
     <div className={`chat-turn-log-round${live ? ' is-current' : ''}`}>
@@ -1985,7 +1989,15 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
     })
   }, [])
   const liveRound = rounds[rounds.length - 1] ?? null
+  const historyRounds = rounds.length > 1 ? rounds.slice(0, -1) : []
   const head = useMemo(() => turnLogHeadSummary(liveRound?.messages ?? [], now), [liveRound, now])
+  // 每次开跑都摊开：上一次收起的只是那一次的选择，不该带到新一轮。
+  const wasRunningRef = useRef(null)
+  useEffect(() => {
+    const previous = wasRunningRef.current
+    wasRunningRef.current = running
+    if (running && previous === false) setCollapsed(false)
+  }, [running, setCollapsed])
   // 只有用户停留在底部时才跟随滚动，手动上翻后不打扰。依赖要含 `rounds`：
   // 思考是逐字增长的，只盯轮次数的话流式正文会跑到可视区外面。
   useLayoutEffect(() => {
@@ -2028,7 +2040,9 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
   const resetHeight = useCallback(() => setStoredHeight(null), [setStoredHeight])
   const toggleCollapsed = useCallback(() => setCollapsed((value) => !value), [setCollapsed])
 
-  if (!rounds.length) return null
+  // 跑完就整块让位：过程是运行时才要盯的东西，停下来之后它的位置还给对话。
+  // 下一轮开始时重新出现，历史轮次仍在列表里（跑完的过程本身不进对话）。
+  if (!rounds.length || !running) return null
 
   const meta = [`${head.steps} 步`, head.elapsedMs == null ? '' : formatLogElapsed(head.elapsedMs)]
     .filter(Boolean)
@@ -2036,7 +2050,9 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
 
   return (
     <section
-      className={`chat-turn-log${collapsed ? ' is-collapsed' : ''}`}
+      className={`chat-turn-log${collapsed ? ' is-collapsed' : ''}${
+        historyRounds.length > 0 ? ' has-rounds' : ''
+      }`}
       aria-label="当前回合的思考与工具日志"
     >
       <header
@@ -2069,6 +2085,23 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
           </>
         )}
       </header>
+      {!collapsed && historyRounds.length > 0 && (
+        // 历史轮次是**固定的目录**：它不跟正文一起滚。正文一长就把它顶出视野，
+        // 看上去就只剩正在跑的这一轮，等于没留下历史。
+        <div className="chat-turn-log-rounds">
+          {historyRounds.map((round) => (
+            <TurnLogRound
+              key={round.key || `round-${round.index}`}
+              round={round}
+              live={false}
+              expanded={expandedRounds.has(round.key)}
+              onToggle={() => toggleRound(round.key)}
+              now={now}
+              onOpenActivity={onOpenActivity}
+            />
+          ))}
+        </div>
+      )}
       {!collapsed && (
         <div
           ref={scrollRef}
@@ -2081,20 +2114,18 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
               SCROLL_BOTTOM_THRESHOLD
           }}
         >
-          {rounds.map((round, index) => {
-            const live = index === rounds.length - 1
-            return (
-              <TurnLogRound
-                key={round.key || `round-${index}`}
-                round={round}
-                live={live}
-                expanded={expandedRounds.has(round.key)}
-                onToggle={() => toggleRound(round.key)}
-                now={now}
-                onOpenActivity={onOpenActivity}
-              />
-            )
-          })}
+          {liveRound ? (
+            // 只有一轮时不分块：没有历史就没有「轮次」这件事，直接平铺这一轮的过程，
+            // 多出来的边框与「轮次一」标签只是给唯一的内容套了个空壳。
+            <TurnLogRound
+              round={liveRound}
+              live
+              framed={historyRounds.length > 0}
+              expanded
+              now={now}
+              onOpenActivity={onOpenActivity}
+            />
+          ) : null}
         </div>
       )}
     </section>

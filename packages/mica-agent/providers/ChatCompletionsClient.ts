@@ -9,6 +9,7 @@ import {
   type AgentConversationMessage,
   type AgentQueryContent,
   type AgentQueryOptions,
+  throwIfTurnPaused,
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent.js';
@@ -150,10 +151,11 @@ export class ChatCompletionsClient extends BaseAgent<
       role: 'system',
       content: resolveSystemPrompt(this.systemPrompt),
     };
+    const reseedHistory = options?.resume === true;
     let messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       systemMessage,
       ...prepareHistoricalChatMessages(this.messages),
-      { role: 'user', content: micaContentToOpenAIContent(question) },
+      ...(reseedHistory ? [] : [{ role: 'user' as const, content: micaContentToOpenAIContent(question) }]),
     ];
     const commitCompleteIteration = async (takeNextInput: boolean) => {
       const sessionMessages = messages.filter((message) => message.role !== 'system');
@@ -173,6 +175,7 @@ export class ChatCompletionsClient extends BaseAgent<
 
     while (true) {
       throwIfQueryStopped(options);
+      throwIfTurnPaused(options);
       throwIfAgentMaxTurnsReached(options, requestIndex, totalContent);
       if (options?.rewriteIterationMessages) {
         const rewritten = await options.rewriteIterationMessages(messages.slice(1));
@@ -198,7 +201,11 @@ export class ChatCompletionsClient extends BaseAgent<
       let firstDeltaAt = 0;
       let requestAttempts = 1;
       let requestEndSent = false;
-      const finishRequest = (info: { outcome: 'completed' | 'error' | 'aborted'; toolCalls?: number; error?: unknown }): void => {
+      const finishRequest = (info: {
+        outcome: 'completed' | 'error' | 'aborted';
+        toolCalls?: number;
+        error?: unknown;
+      }): void => {
         if (requestEndSent || !options?.onRequestEnd) return;
         requestEndSent = true;
         try {
@@ -208,7 +215,8 @@ export class ChatCompletionsClient extends BaseAgent<
             attempts: requestAttempts,
             outcome: info.outcome,
             toolCalls: info.toolCalls,
-            error: info.error === undefined ? undefined : String((info.error as Error)?.message || info.error).slice(0, 200),
+            error:
+              info.error === undefined ? undefined : String((info.error as Error)?.message || info.error).slice(0, 200),
           });
         } catch {
           // Observation must not interrupt the model request.

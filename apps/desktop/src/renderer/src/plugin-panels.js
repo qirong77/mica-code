@@ -116,7 +116,7 @@ export function selectPluginPanels(plugins, role) {
  * 插件只声明意图（`compose` 放一段文本进输入框、`newSession` 开个会话跑提示词），
  * 真正动页面的是宿主：输入框、页签、角色、发送时机都属于页面，插件碰不到也不该碰。
  * `dialog` 也一样：表格内容由插件给，弹窗、排版、把链接交给系统浏览器是页面的事。
- * `openReview` 是「看这条分支相对主分支改了什么」——宿主盖一层整窗的评审视图，
+ * `openReview` 是「看这条分支相对主分支改了什么」——宿主把主窗口切到编辑器上的这份对比，
  * 只读提交、不切工作区，所以评审别人的分支不会改动当前会话的目录。
  */
 export function applyPanelResult(

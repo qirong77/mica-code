@@ -9,11 +9,16 @@ import { applyBrowserRenderSwitch } from './browser/browser-core.js'
 import { resolveTerminalSocketPath, startTerminalHost } from './terminal/terminal-host.js'
 import { resolveSystemSocketPath, startSystemHost } from './system/system-host.js'
 import { TERMINAL_PAGE_PATH } from '@mica-app-paths'
-import { RUNTIME_PORT_ENV, loopbackRuntimeUrl, parseRuntimePort } from '@packages/mica-web-shared'
+import {
+  RUNTIME_PORT_ENV,
+  loopbackRuntimeUrl,
+  parseRuntimePort,
+  relayTokenOf
+} from '@packages/mica-web-shared'
 // 与运行时、插件同一份探活逻辑（含「中转机链接要带 ?t=」的判定），这里只是为了与
 // 上面那个「端口上是不是我们自己的运行时」的 probeRuntime 区分而改名
 import { probeRuntime as probeRemoteRuntime } from '../host/runtime-probe-core.js'
-import { appPageKey, isAppPageTarget, relayEntryKey } from './app-page-target.js'
+import { consumeRestartMarker, resolveStampPath } from '../host/build-stamp.js'
 import { flushLogs, logger, startMemorySampler } from '@packages/mica-diagnostics/index.js'
 
 /**
@@ -402,30 +407,20 @@ function findEntryWindow(key) {
 }
 
 /**
- * 页面自己开窗口（`window.open`）：目标落在同一台运行时的应用页面上时，由外壳开一个
- * 应用窗口——顶栏的编辑器按钮就是这么把 `/files` 开成独立文件窗口的（那一页只有文件树与
- * 编辑器，没有会话列表），主窗口因此能留在对话里。同名窗口已经开着就把那个窗口端到前面
- * 并换到新地址（比如换了个目录），重复点按钮不会攒出一堆窗口。返回 `false` 表示不是这种
- * 目标，调用方仍按外链处理。
+ * 中转机入口的窗口身份：`origin + t`。
+ *
+ * 一台中转机后面可以接多台机器（每台一个访问口令），只比 origin 会让「点 B 的链接却端出
+ * A 的窗口」。同一台机器的不同 `?session=` 仍算同一个窗口，所以只取 `t`。
+ * 不是中转机入口（没有 `t`）时返回空串，调用方回落到「按服务器认窗口」。
  */
-function openAppPageWindow(state, target, frameName = '') {
-  if (!state || state.win.isDestroyed()) return false
-  const origins = [state.server, originOf(localPageUrl)]
-  if (!isAppPageTarget(target, { origins })) return false
-  const name = String(frameName || '').trim()
-  const key = appPageKey(target)
-  const existing = [...windows].find((item) => {
-    if (item.win.isDestroyed()) return false
-    if (name) return item.frameName === name
-    return appPageKey(item.win.webContents.getURL()) === key
-  })
-  if (!existing) {
-    createWindow(target, { frameName: name })
-    return true
+function relayEntryKey(value) {
+  const token = relayTokenOf(value)
+  if (!token) return ''
+  try {
+    return `${new URL(String(value)).origin}?t=${token}`
+  } catch {
+    return ''
   }
-  showWindow(existing)
-  if (appPageKey(existing.win.webContents.getURL()) !== key) void loadPage(existing, target)
-  return true
 }
 
 /**
@@ -639,7 +634,7 @@ function windowBackgroundColor() {
   }
 }
 
-function createWindow(url, { primary = false, frameName = '' } = {}) {
+function createWindow(url, { primary = false } = {}) {
   const isMac = process.platform === 'darwin'
   const win = new BrowserWindow({
     width: 1280,
@@ -667,9 +662,6 @@ function createWindow(url, { primary = false, frameName = '' } = {}) {
   const state = {
     win,
     primary,
-    // 页面自己开的窗口（`window.open(url, 'mica-files')`）记下它的名字：同名再开一次时
-    // 复用同一个窗口，重复点按钮不会攒出一堆窗口。
-    frameName,
     server: originOf(url),
     // 中转机入口的窗口身份（origin + t）；直连别的机器时为空
     entryKey: relayEntryKey(url),
@@ -730,9 +722,8 @@ function createWindow(url, { primary = false, frameName = '' } = {}) {
   })
 
   win.webContents.setWindowOpenHandler((details) => {
-    // 页面要的是一台运行时上的应用页面（顶栏文件夹的 `?view=files`）时就真开一个窗口，
-    // 其余 http(s) 目标照旧交给系统浏览器。
-    if (openAppPageWindow(state, details.url, details.frameName)) return { action: 'deny' }
+    // 页面里 `window.open` 出来的 http(s) 一律交给系统浏览器：应用内的视图（编辑器、评审）
+    // 都不再另开窗口。
     if (/^https?:/i.test(details.url)) shell.openExternal(details.url)
     return { action: 'deny' }
   })
@@ -841,6 +832,30 @@ function startMainDiagnostics() {
   })
 }
 
+/**
+ * 看交接文件：运行时空出会话宿主后写一个，这里负责真的重启应用。
+ *
+ * 启动时先清一次——上一次留下的（主进程被强杀、或重启失败）不该在新实例刚起来时
+ * 又触发一次重启，那样会变成起不来的循环。
+ */
+function startDevRestartWatch() {
+  const stampPath = resolveStampPath()
+  consumeRestartMarker(stampPath)
+  const timer = setInterval(() => {
+    const marker = consumeRestartMarker(stampPath)
+    if (!marker) return
+    console.log('[mica-code-app] 构建完成，重启应用', marker)
+    // 先让页面把「正在重启应用」画出来再退出；这里不走 app.quit()：关窗确认
+    // （终端里还跑着命令时的二次确认）会拦住自动重启，而那正是我们要跳过的那一步。
+    setTimeout(() => {
+      app.relaunch()
+      app.exit(0)
+    }, 500)
+    clearInterval(timer)
+  }, 1000)
+  timer.unref?.()
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.mica.code')
   startMainDiagnostics()
@@ -918,6 +933,11 @@ app.whenReady().then(async () => {
   localPageUrl = devPageUrl || runtime.url
   // 只开本机窗口：另一台机器上的服务器各占一个新窗口，由页面里「切换 Mica 服务器」当场开
   createWindow(localPageUrl, { primary: true })
+
+  // 构建后自动重载的最后一环：`out/main`、`out/server` 在 asar 里，进程换不掉自己，
+  // 只有外壳能 `app.relaunch()`。运行时腾空会话宿主后落一个交接文件，看到才重启——
+  // 「现在有没有一轮在跑」只有运行时知道，所以判定权不在外壳这里。
+  startDevRestartWatch()
 
   app.on('activate', () => {
     // 回到用户最后用的那个窗口（关掉的窗口还在 windows 里时就轮到本机窗口）

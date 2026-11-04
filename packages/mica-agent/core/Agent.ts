@@ -35,6 +35,20 @@ export type AgentCallbacks = {
 export type AgentQueryOptions = {
   signal?: AbortSignal;
   shouldContinue?: () => boolean;
+  /**
+   * 在「上一次请求的产物已落定、下一次请求尚未发出」的边界上返回 true 时停下，
+   * 抛 `AgentPausedError`。宿主重启前的软停用它：此刻历史尾部是完整的（工具结果
+   * 已提交），重启后重新发一次请求就能接着跑，不必重做已经做完的工具调用。
+   *
+   * 只在迭代边界求值；正在等模型或正在跑工具时不会被打断——那种情况由调用方在
+   * 自己的超时预算用尽后 abort。
+   */
+  shouldPause?: () => boolean;
+  /**
+   * 不追加 `question`，直接对现有历史发请求。宿主重启后接续一轮被暂停的运行时
+   * 用它：历史尾部已经是完整的工具批次，再补一条用户消息就等于凭空多一句话。
+   */
+  resume?: boolean;
   /** Once before each model request, excluding transport retries. Observer errors are ignored. */
   onRequestStart?: (info: { messageCount: number; tools?: unknown }) => void;
   /**
@@ -83,6 +97,18 @@ export class AgentMaxTurnsError extends Error {
     super(`Agent reached the maximum of ${maxTurns} turns before completing the task.`);
     this.name = 'AgentMaxTurnsError';
   }
+}
+
+/** 迭代边界上的软停顿，见 {@link AgentQueryOptions.shouldPause}。不是失败。 */
+export class AgentPausedError extends Error {
+  constructor() {
+    super('Agent paused at an iteration boundary before the next model request.');
+    this.name = 'AgentPausedError';
+  }
+}
+
+export function throwIfTurnPaused(options: AgentQueryOptions | undefined): void {
+  if (options?.shouldPause?.()) throw new AgentPausedError();
 }
 
 export function throwIfAgentMaxTurnsReached(

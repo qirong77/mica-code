@@ -83,7 +83,8 @@ export type AgentObservationEvent = Readonly<{
       }>
     | Readonly<{
         type: 'run:finish';
-        outcome: 'completed' | 'aborted' | 'error';
+        /** `paused`：在迭代边界被宿主主动停下，历史完整，可以原地续跑。 */
+        outcome: 'completed' | 'aborted' | 'error' | 'paused';
         elapsedMs: number;
         error?: string;
       }>

@@ -30,8 +30,7 @@ import { SessionTree } from './SessionTree'
 import { SessionQuickOpen } from './SessionQuickOpen'
 import { runSessionMenuPluginAction, useSessionMenuPlugins } from './session-menu-plugins'
 import TerminalKeyBar from './TerminalKeyBar'
-import { isElectronShell } from './shell-env'
-import { detachedFilesUrl, readAppUrl, sessionShareUrl, urlWithState } from './app-url'
+import { readAppUrl, sessionShareUrl, urlWithState } from './app-url'
 import { TextPrompt } from './text-prompt'
 import { copyText } from './transport'
 
@@ -366,13 +365,6 @@ const EMPTY_TERMINAL_OPEN = {}
 const DEFAULT_TERMINAL_HEIGHT = 320
 const MIN_TERMINAL_HEIGHT = 120
 const MAX_TERMINAL_HEIGHT_RATIO = 0.75
-// 文件窗口的 `window.open` 目标名：同名窗口由浏览器/外壳复用，重复点同一个按钮不会攒出
-// 一堆一模一样的窗口（外壳侧见 main/index.js 的 openAppPageWindow）。
-const FILES_WINDOW_NAME = 'mica-files'
-// 插件发起的分支评审单独一个窗口名：它带的是「head 相对 base」这份对比，复用文件窗口会把
-// 用户正在改的那个目录和它自己的缓冲一起换掉。同一次评审重复点只是端到前。
-const REVIEW_WINDOW_NAME = 'mica-files-review'
-
 // 侧栏切换按钮：展开时贴侧栏右端（折叠线旁），收起的侧栏宽度为 0，按钮回到左上角固定位
 // —— 86px 是 macOS 上让开交通灯后的位置。
 const SIDEBAR_TOGGLE_COLLAPSED_LEFT = 86
@@ -529,8 +521,8 @@ export default function App() {
   const handleFindRequestHandled = useCallback(() => setFindRequest(null), [])
   // 配置页的插件详情里点「打开面板」：面板活在对话里，所以这里先关掉整页设置，再把
   // 请求交给当前会话的 ChatView 去开——与上面的查找请求同一条一次性通道。
-  // 主区视图：chat | files | stats。对话里的路径链接与顶栏的编辑器按钮都落到这一层
-  // （后者另开一个独立窗口，见 openFilesWindow）；终端是主区底部可收起的下拉面板。
+  // 主区视图：chat | files | stats。对话里的路径链接、顶栏的编辑器按钮与插件评审都落到
+  // 这一层（编辑器就是这一层的 files 视图，不再另开窗口）；终端是主区底部可收起的下拉面板。
   // 设置与插件不在这套视图里：它们是盖住整个窗口的一层（见下面的 configPage）。
   const [view, setView] = useState(() => {
     // 分享页只从对话开始（布局是跨页面共享的，别把分享者那边的视图带过来）
@@ -652,7 +644,12 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(savedSidebarWidth)
   const [resizingSidebar, setResizingSidebar] = useState(false)
   const sidebarWidthRef = useRef(sidebarWidth)
-  const sidebarHidden = sidebarCollapsed
+  // 编辑器是整窗的一层：进去时把会话列表让出去（编辑器自带文件树那一栏），回对话时
+  // 按用户原来那份折叠偏好复原。这只是视图派生的临时隐藏，不写进 layout——否则在编辑器
+  // 里切一下视图就把用户的侧栏偏好改了。
+  const sidebarHidden = sidebarCollapsed || view === 'files'
+  // 移动端的会话抽屉同理：进了编辑器就收起，不再盖在上面。
+  const drawerOpen = sessionsOpen && view !== 'files'
   // 两个视图各有一套底部终端：对话的是会话终端，编辑器的是编辑器终端。同一格里只显示
   // 当前视图那一个——在编辑器里按下 Ctrl+` 却弹出会话的终端，用户分不清自己在操作谁。
   // 编辑器那套见 EditorTerminal（开关与它在同一份界面状态里）。
@@ -798,15 +795,18 @@ export default function App() {
 
   // 点菜单里的标记项：写盘的是插件目录下的数据文件（host 代写，见 host/session-annotations.js），
   // 返回的整份标记表直接替换本地状态，省一次重读。
-  const toggleAnnotation = useCallback((sessionId, { pluginId, optionId, on }) => {
-    window.mica.stats
-      .setAnnotation({ pluginId, sessionId, optionId, on })
-      .then((result) => {
-        if (Array.isArray(result?.providers)) applyAnnotations(result.providers)
-        else if (result?.error) console.error('set session annotation rejected', result.error)
-      })
-      .catch((error) => console.error('set session annotation failed', error))
-  }, [applyAnnotations])
+  const toggleAnnotation = useCallback(
+    (sessionId, { pluginId, optionId, on }) => {
+      window.mica.stats
+        .setAnnotation({ pluginId, sessionId, optionId, on })
+        .then((result) => {
+          if (Array.isArray(result?.providers)) applyAnnotations(result.providers)
+          else if (result?.error) console.error('set session annotation rejected', result.error)
+        })
+        .catch((error) => console.error('set session annotation failed', error))
+    },
+    [applyAnnotations]
+  )
 
   const applyLoops = useCallback((loops) => {
     setLoops(Array.isArray(loops) ? loops : [])
@@ -2082,32 +2082,20 @@ export default function App() {
   }, [closeConfigPage, openFileInView])
   // 插件的「评审」入口：把主区整块让给编辑器，直接停在 base...head 的对比上。
   // 自己不画 diff：文件树 + GIT 面板 + monaco 差异都在编辑器里，这里只是把对比交给它。
-  // 开成应用内的一层而不是新窗口——点一条 PR 就该像打开一个弹窗那样立刻看见，
-  // 而不是等一个新窗口起来（外壳里 window.open 恒为 null，失败了也没有任何反馈）。
+  // 和顶栏的编辑器按钮落到同一个视图：点一条 PR 就该像打开一个弹窗那样立刻看见。
   const openReviewInView = useCallback((review) => {
     if (!review?.cwd) return
-    const compare = { base: review.base || null, head: review.head || null }
-    // 评审要在**另一个窗口**里打开：复用编辑器那份界面（文件树、对比面板、只读 diff 都是
-    // 现成的），但主窗口留在对话里，评审别人的分支不会把用户手里的编辑器换掉。地址带着
-    // cwd/base/head，窗口刷新或复制给别人打开都还停在同一份对比上。
-    const url = detachedFilesUrl(window.location.href, review.cwd, compare)
-    if (url) {
-      const opened = window.open(url, REVIEW_WINDOW_NAME, 'popup=yes,width=1200,height=860')
-      if (opened) {
-        try {
-          opened.opener = null
-        } catch {
-          // 某些浏览器不让写，忽略
-        }
-        return
-      }
-      // 外壳里 window.open 恒返回 null（窗口由主进程按 frameName 开），那不是被拦截。
-      if (isElectronShell(navigator.userAgent)) return
-    }
-    // 浏览器拦了新窗口：退回当前窗口，至少让人看到这份对比（顶栏能再开窗口）。
-    setReviewTarget({ cwd: review.cwd, ...compare })
+    setReviewTarget({ cwd: review.cwd, base: review.base || null, head: review.head || null })
     setFilesMounted(true)
     setView('files')
+  }, [])
+  // 评审时改基线 / 目标分支只改这份对比的入参：目标分支选回「工作区」就是评审结束，
+  // 编辑器回到会话自己的工作目录。
+  const changeReviewBase = useCallback((value) => {
+    setReviewTarget((current) => (current ? { ...current, base: value?.ref || null } : current))
+  }, [])
+  const changeReviewHead = useCallback((value) => {
+    setReviewTarget((current) => (current && value?.ref ? { ...current, head: value.ref } : null))
   }, [])
   // 工具调用详情里的「在编辑器中打开」：内容来自内存（工具参数/输出），不是工作区文件。
   // 走同一个 FilesView 实例与 openFile 的迟挂载兜底，只是把文档本身排队带过去。
@@ -2122,29 +2110,12 @@ export default function App() {
     }
     pendingFileOpenRef.current = { document }
   }, [])
-  // 顶栏的编辑器按钮：把这台运行时上的 `/files` 页面开成独立窗口 —— 那一页只画文件树与
-  // 编辑器，没有左侧会话列表也没有「返回对话」，主窗口因此留在对话里，两者可以并排看。
-  // 外壳把同源的 `/files` 开成应用窗口（见 main/index.js 的 openAppPageWindow），浏览器里
-  // 就是一个新窗口；`FILES_WINDOW_NAME` 让它复用同一个窗口，重复点只是把它端到前面。
-  const openFilesWindow = useCallback(() => {
-    // 停在编辑器页时开它的当前目录：这一页可能已被用户换到别的项目，而会话目录没变。
-    const target = (view === 'files' ? filesRef.current?.getRoot?.() : null) || activeCwd
-    const url = detachedFilesUrl(window.location.href, target)
-    if (!url) return
-    const opened = window.open(url, FILES_WINDOW_NAME, 'popup=yes,width=1200,height=860')
-    if (opened) {
-      try {
-        opened.opener = null
-      } catch {
-        // 某些浏览器不让写，忽略
-      }
-      return
-    }
-    // 外壳里 window.open 恒返回 null（窗口由主进程开），只有浏览器才谈得上被拦截
-    if (isElectronShell(navigator.userAgent)) return
-    setView('files')
-    showToast('新窗口被浏览器拦截，已在当前窗口打开文件', true)
-  }, [activeCwd, showToast, view])
+  // 顶栏的编辑器按钮：在主窗口里把主区切成编辑器（与路径链接、插件评审同一个视图），
+  // 再点一次回到对话——顶栏左侧那个「返回对话」做的是同一件事，两者都留着。
+  const toggleFilesView = useCallback(() => {
+    setFilesMounted(true)
+    setView((current) => (current === 'files' ? 'chat' : 'files'))
+  }, [])
   // 网页端的终端文件链接由 transport 派发到应用内编辑器（Electron 走本机 VS Code）
   useEffect(() => {
     const handler = (event) => {
@@ -2395,8 +2366,12 @@ export default function App() {
       event.preventDefault()
       event.stopPropagation()
       // 侧栏收着（桌面折叠 / 手机抽屉）时先把它露出来，否则聚焦的是一个看不见的输入框。
+      // 编辑器视图里会话列表整个让出去了，先回对话再聚焦。
       if (isMobile) setSessionsOpen(true)
-      else if (sidebarCollapsed) setSidebarCollapsed(false)
+      else {
+        if (view === 'files') setView('chat')
+        if (sidebarCollapsed) setSidebarCollapsed(false)
+      }
       sendSidebarIntent({ kind: 'search' })
     }
     window.addEventListener('keydown', onKey, true)
@@ -2408,7 +2383,8 @@ export default function App() {
     prompt,
     sendSidebarIntent,
     shareView,
-    sidebarCollapsed
+    sidebarCollapsed,
+    view
   ])
 
   return (
@@ -2422,7 +2398,7 @@ export default function App() {
               { gridTemplateColumns: shareView ? '1fr' : `var(${SIDEBAR_WIDTH_VAR}) 1fr` }
         }
       >
-        {isMobile && sessionsOpen && !shareView && (
+        {isMobile && drawerOpen && !shareView && (
           <div
             className="fixed inset-0 z-[9050] bg-black/55"
             aria-hidden="true"
@@ -2434,7 +2410,7 @@ export default function App() {
             className={
               isMobile
                 ? `safe-top safe-bottom absolute inset-y-0 left-0 z-[9100] flex w-[86vw] max-w-[330px] min-w-0 flex-col overflow-hidden border-r border-line bg-panel shadow-2xl transition-transform duration-200 ${
-                    sessionsOpen ? 'translate-x-0' : '-translate-x-full'
+                    drawerOpen ? 'translate-x-0' : '-translate-x-full'
                   }`
                 : `safe-top safe-bottom relative flex min-w-0 flex-col overflow-hidden border-r border-line bg-panel ${sidebarHidden ? 'invisible pointer-events-none border-r-0' : ''}`
             }
@@ -2627,14 +2603,14 @@ export default function App() {
         )}
         <main className="relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden bg-canvas">
           <header
-            className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-fg-soft transition-[padding] ${!isMobile && !shareView && sidebarCollapsed ? 'pl-30' : ''}`}
+            className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-fg-soft transition-[padding] ${!isMobile && !shareView && sidebarHidden ? 'pl-30' : ''}`}
           >
-            {isMobile && !shareView && (
+            {isMobile && !shareView && view !== 'files' && (
               <button
                 type="button"
                 title="会话列表"
                 aria-label="会话列表"
-                aria-expanded={sessionsOpen}
+                aria-expanded={drawerOpen}
                 className="no-drag -ml-1 grid size-7 shrink-0 place-items-center rounded-md text-fg-soft hover:bg-overlay hover:text-fg-max"
                 onClick={() => setSessionsOpen((open) => !open)}
               >
@@ -2758,10 +2734,27 @@ export default function App() {
               </button>
               <button
                 type="button"
-                title={gitBadge ? `${gitBadge.title}\n打开编辑器窗口` : '打开编辑器窗口'}
-                aria-label={gitBadge ? `打开编辑器窗口（${gitBadge.title}）` : '打开编辑器窗口'}
-                className="flex h-6 items-center gap-1 rounded-md px-1 text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
-                onClick={openFilesWindow}
+                title={
+                  view === 'files'
+                    ? '返回对话'
+                    : gitBadge
+                      ? `${gitBadge.title}\n打开编辑器`
+                      : '打开编辑器'
+                }
+                aria-label={
+                  view === 'files'
+                    ? '返回对话'
+                    : gitBadge
+                      ? `打开编辑器（${gitBadge.title}）`
+                      : '打开编辑器'
+                }
+                aria-pressed={view === 'files'}
+                className={`flex h-6 items-center gap-1 rounded-md px-1 transition-colors ${
+                  view === 'files'
+                    ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
+                    : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
+                }`}
+                onClick={toggleFilesView}
               >
                 <IconBrandVscode size={14} />
                 {/* 变更量：加绿减红，千位以上缩写（见 git-badge.js）。精确行数与
@@ -2820,6 +2813,9 @@ export default function App() {
                   recentCwds={recentCwds}
                   /* 打开一条 PR：编辑器直接落在 `head 相对 base` 的对比上（只读提交）。 */
                   compare={reviewTarget}
+                  /* 两格选择框在评审时改的是这份对比本身；目标分支选回「工作区」＝评审结束。 */
+                  onCompareBaseChange={changeReviewBase}
+                  onCompareHeadChange={changeReviewHead}
                   /* 编辑器里的分支切换只刷新会话顶栏的 Git 状态，不改会话目录。 */
                   onGitChanged={() =>
                     refreshGit({ cwd: terminalCwd(activeRef.current), quiet: true })
@@ -3028,7 +3024,8 @@ export default function App() {
           </footer>
         </main>
       </div>
-      {!isMobile && !shareView && (
+      {/* 编辑器视图里侧栏由视图让出，这枚开关此刻没有可切换的东西——留着只会点了没反应。 */}
+      {!isMobile && !shareView && view !== 'files' && (
         <button
           type="button"
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}

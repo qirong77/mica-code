@@ -24,35 +24,34 @@ export function turnActivityKey(message) {
 export const MAX_TURN_LOG_ROUNDS = 6
 
 /**
- * 同一轮的思考合并成一个块：保留该轮第一段思考的位置，后续段落按顺序接在它后面
- * （工具行不参与合并，仍按原位置一行一行显示）。
+ * 同一轮里**相邻**的思考合成一块，其余顺序原样保留：模型每调一次工具，思考就断成
+ * 一段，段与段之间夹着工具行。跨工具行去合并会把后面所有思考都提到最前面，工具行
+ * 全被挤到末尾——那不是原来的排版。相邻段之间没有别的行，合起来才只是「一段很长
+ * 的思考」，顺序一点没动。
  *
  * 合并后的文本取各段的**当前**内容，所以正在流式增长的那一段每帧都在里面，块只会
  * 往后长，不会跳。
  */
 export function mergeTurnThinking(messages) {
   const rows = Array.isArray(messages) ? messages : []
-  const groups = new Map()
+  const merged = []
+  // 上一个输出行还是思考、且属于同一轮，就并进去；中间夹过任何别的行都重新起一块。
+  let open = null
   for (const message of rows) {
-    if (message?.kind !== 'reasoning') continue
-    const key = turnActivityKey(message)
-    const group = groups.get(key)
-    if (group) group.parts.push(message.text)
-    else groups.set(key, { first: message, parts: [message.text] })
+    if (message?.kind !== 'reasoning') {
+      open = null
+      merged.push({ message })
+      continue
+    }
+    const text = String(message.text ?? '').trim()
+    if (open && open.key === turnActivityKey(message)) {
+      if (text) open.message.text = open.message.text ? `${open.message.text}\n\n${text}` : text
+      continue
+    }
+    open = { key: turnActivityKey(message), message: { ...message, text } }
+    merged.push(open)
   }
-  const textById = new Map()
-  for (const group of groups.values()) {
-    const text = group.parts
-      .map((part) => String(part ?? '').trim())
-      .filter(Boolean)
-      .join('\n\n')
-    textById.set(group.first.id, text)
-  }
-  return rows.flatMap((message) => {
-    if (message?.kind !== 'reasoning') return [message]
-    const text = textById.get(message.id)
-    return text == null ? [] : [{ ...message, text }]
-  })
+  return merged.map((entry) => entry.message)
 }
 
 /**

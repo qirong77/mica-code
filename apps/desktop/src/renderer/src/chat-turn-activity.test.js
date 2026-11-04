@@ -62,7 +62,7 @@ describe('turn log rounds', () => {
 })
 
 describe('merged thinking blocks', () => {
-  it('appends every thinking of one turn into the first block', () => {
+  it('keeps the chronological order of thinking and tool calls', () => {
     const messages = [
       thinking('r1', 't1', '先看现状'),
       tool('c1', 't1'),
@@ -71,11 +71,20 @@ describe('merged thinking blocks', () => {
       thinking('r3', 't1', '结论')
     ]
     const rows = mergeTurnThinking(messages)
-    expect(rows.map((row) => row.id)).toEqual(['r1', 'c1', 'c2'])
-    expect(rows.find((row) => row.id === 'r1').text).toBe('先看现状\n\n再看调用点\n\n结论')
+    // 每段思考各自留在工具行之间，不跨工具行合并（否则工具行会被挤到末尾）。
+    expect(rows.map((row) => row.id)).toEqual(['r1', 'c1', 'r2', 'c2', 'r3'])
+    expect(rows.map((row) => row.text)).toEqual(['先看现状', undefined, '再看调用点', undefined, '结论'])
   })
 
-  it('keeps turns apart and drops empty segments', () => {
+  it('joins adjacent segments of the same turn', () => {
+    const messages = [thinking('r1', 't1', 'A'), thinking('r2', 't1', 'B'), tool('c1', 't1')]
+    expect(mergeTurnThinking(messages).map((row) => `${row.id}:${row.text}`)).toEqual([
+      'r1:A\n\nB',
+      'c1:undefined'
+    ])
+  })
+
+  it('keeps turns apart and folds an empty segment into its neighbour', () => {
     const messages = [
       thinking('r1', 't1', 'A'),
       thinking('r2', 't2', 'B'),
@@ -83,8 +92,9 @@ describe('merged thinking blocks', () => {
       thinking('r4', 't1', 'C')
     ]
     expect(mergeTurnThinking(messages).map((row) => `${row.id}:${row.text}`)).toEqual([
-      'r1:A\n\nC',
-      'r2:B'
+      'r1:A',
+      'r2:B',
+      'r3:C'
     ])
   })
 

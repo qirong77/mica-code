@@ -954,8 +954,14 @@ type CodexRuntimeInputPayload = {
 /** Convert Codex multimodal items to the content blocks understood by Mica. */
 export async function codexInputToRuntimePayload(
   input: CodexUserInput[] | undefined,
+  options: { allowEmpty?: boolean } = {},
 ): Promise<CodexRuntimeInputPayload> {
-  if (!Array.isArray(input) || input.length === 0) throw new Error('input must contain at least one item');
+  // `allowEmpty` 只给「接续一轮暂停的对话」用：那种请求不带用户输入，只对磁盘上
+  // 那份完整历史再发一次。别的入口传空输入仍然是错误。
+  if (!Array.isArray(input) || input.length === 0) {
+    if (options.allowEmpty) return { text: '', content: [] };
+    throw new Error('input must contain at least one item');
+  }
 
   const displayParts: string[] = [];
   const content: AgentContentBlockParam[] = [];
@@ -982,7 +988,9 @@ export async function codexInputToRuntimePayload(
   }
 
   const text = displayParts.join('\n').trim();
-  if (!text && !hasImage) throw new Error('input must contain at least one text or image item');
+  if (!text && !hasImage && !options.allowEmpty) {
+    throw new Error('input must contain at least one text or image item');
+  }
   return { text: text || '[Image]', ...(hasImage ? { content } : {}) };
 }
 
@@ -1238,7 +1246,11 @@ async function handleCodexRequest(
       }
       let input: CodexRuntimeInputPayload;
       try {
-        input = await codexInputToRuntimePayload(params.input as CodexUserInput[] | undefined);
+        // 接续一轮被暂停的对话时请求不带用户输入（`resume`）：只对磁盘上那份完整
+        // 历史再发一次请求，所以这里允许空输入。
+        input = await codexInputToRuntimePayload(params.input as CodexUserInput[] | undefined, {
+          allowEmpty: params.resume === true,
+        });
       } catch (error) {
         ctx.writeError(CODEX_ERROR_INVALID_PARAMS, error instanceof Error ? error.message : String(error));
         return;
@@ -1274,6 +1286,9 @@ async function handleCodexRequest(
       const runtimeInput = micaRuntime.createRuntimeInput(input.text, 'ui', {
         queueMode: 'after_iteration',
         ...(input.content ? { content: input.content } : {}),
+        // `resume`：宿主重启后接续一轮被 `mica/host/drain` 暂停的对话。不带用户
+        // 输入，只对磁盘上那份完整历史再发一次请求。
+        ...(params.resume === true ? { resume: true } : {}),
       });
       if (turnOverride) ctx.turnOverrides.set(runtimeInput, turnOverride);
       let result: HeadlessTurnStartResult;
@@ -1506,6 +1521,14 @@ async function handleCodexRequest(
         held: held && frozen,
         pending: ctx.executor.pendingInputs.map(inputToQueueItem),
       });
+      return;
+    }
+    case MICA_METHODS.hostDrain: {
+      // Mica extension: 开发构建重载前的软停。只置标志、立刻回包——请求循环是逐行
+      // await 的，在这里等 15s 会把 turn/interrupt、queue/recall 全堵在后面，而它们
+      // 正是预算用尽后要用的。
+      ctx.executor.requestPause();
+      ctx.writeResponse({ ok: true, busy: ctx.executor.isBusy });
       return;
     }
     case MICA_METHODS.killBackgroundTask: {

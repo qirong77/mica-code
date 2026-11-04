@@ -20,7 +20,13 @@ import {
 import { activeTimeLabel, relativeTimeShort } from './relative-time'
 import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './loop-command'
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
-import { byUpdatedDesc, orderSessions, resolveDrop, rowDropPosition } from './session-dnd'
+import {
+  byUpdatedDesc,
+  groupRowDrop,
+  orderSessions,
+  resolveDrop,
+  rowDropPosition
+} from './session-dnd'
 import { groupRecentRows } from './recent-buckets'
 import { orderRecentDrafts } from './recent-drafts'
 import { planSessionReveal } from './session-reveal'
@@ -88,8 +94,12 @@ const groupRowClass =
 /**
  * 落点提示不用描边：整行浅底表示「进到这里」（换分区 / 嵌套），行间一条圆角细条表示
  * 「插到这一行前后」。边框式的单边高亮会被读成「这一行被选中了」，说的是另一件事。
+ *
+ * 浅底带 `!`（important）：行自己都带 `hover:bg-*`，而拖动时光标正好停在目标行上，
+ * `:hover` 的选择器优先级更高，不加 important 浅底会被整块盖掉——看起来就是
+ * 「拖上去毫无反应」。
  */
-const dropIntoClass = 'bg-info/15 text-fg-max'
+const dropIntoClass = 'bg-info/20! text-fg-max'
 
 function DropBar({ position }) {
   if (position !== 'before' && position !== 'after') return null
@@ -1022,12 +1032,12 @@ export function SessionTree({
     [drag, sessions]
   )
 
-  const groupDropPosition = (event) => {
+  const groupDropPosition = (event, groupId) => {
     const rect = event.currentTarget.getBoundingClientRect()
     const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
-    // 中间一半 = 变成这个分组的子分组，上下两头 = 排到它前面 / 后面。
-    // 不合法的落点（自己、自己的子树、已经在那个父级下）由 resolveDrop 判掉。
-    return rowDropPosition({ ratio })
+    // 中间一半 = 变成这个分组的子分组；嵌套不成立时（兄弟分组、自己的子树…）
+    // 退回上下两半分档，整行都能落，不然拖到兄弟分组中间毫无反应。
+    return groupRowDrop({ ratio, drag, groupId, groups: projects?.groups || [] })
   }
 
   // 一次 drop 的统一出口：分组落到分组行/Projects 标题 = 换父级，会话照旧搬分区或重排。
@@ -1059,8 +1069,19 @@ export function SessionTree({
     (section, id, groupId = null, canNestInto = true) =>
     (event) => {
       if (!drag || drag.id === id) return
-      // 分组只落在分组行与 Projects 标题上，落到会话行不做任何反应
-      if (drag.kind === 'group') return
+      // 拖的是分组：落到某个分组里的会话行 = 挪进这个会话所在的分组（和落到分组行同义）。
+      // Pinned / Recent 里的会话不属于任何分组，分组没地方可去，那里不做反应。
+      if (drag.kind === 'group') {
+        if (section !== 'project' || !groupId) return
+        event.preventDefault()
+        event.stopPropagation()
+        setOver((current) =>
+          current?.section === section && current?.groupId === groupId && current?.onGroup
+            ? current
+            : { section, groupId, onGroup: true, position: 'into' }
+        )
+        return
+      }
       // 拖到会话行中间那条带子 = 成为它的子会话，上下两头 = 换分区 / 手动重排。
       // 草稿还没落盘、拖进自己的子树会成环，两种都不算嵌套。
       const nestAllowed =
@@ -1117,7 +1138,12 @@ export function SessionTree({
       const landed = over?.section === section && over?.id === targetId
       const position = landed ? (over.into ? 'into' : over.position) : null
       clearDrag()
-      if (source?.kind === 'group') return
+      // 分组落到分组内的会话行 = 挪进那个分组；这一下落到别处就当没发生
+      if (source?.kind === 'group') {
+        if (section === 'project' && groupId)
+          applyDrop(source, { section, groupId, position: 'into' })
+        return
+      }
       const items =
         (section === 'project' ? groupSessions.get(groupId) : sectionItems[section]) || []
       applyDrop(source, {
@@ -1525,34 +1551,44 @@ export function SessionTree({
           onContextMenu={(event) => openMenu(event, { group, items: groupMenuItems() })}
           onDragOver={(event) => {
             if (!drag) return
-            const position = drag.kind === 'group' ? groupDropPosition(event) : null
-            if (
-              !resolveDrop({
-                drag,
-                section: 'project',
-                groupId,
-                groups: projects?.groups || [],
-                position
-              })
-            ) {
+            const position = drag.kind === 'group' ? groupDropPosition(event, groupId) : null
+            const allowed =
+              drag.kind === 'group'
+                ? position !== null
+                : !!resolveDrop({
+                    drag,
+                    section: 'project',
+                    groupId,
+                    groups: projects?.groups || [],
+                    position
+                  })
+            if (!allowed) {
               setOver(null)
               return
             }
             event.preventDefault()
             event.stopPropagation()
-            setOver({ section: 'project', groupId, onGroup: true, position })
+            // 同一格里每次 dragover 都新建对象会让整棵树跟着重渲染，拖动时肉眼可见地卡
+            setOver((current) =>
+              current?.onGroup && current?.groupId === groupId && current?.position === position
+                ? current
+                : { section: 'project', groupId, onGroup: true, position }
+            )
           }}
           onDrop={(event) => {
             event.preventDefault()
             event.stopPropagation()
             const source = drag
+            const position = source?.kind === 'group' ? groupDropPosition(event, groupId) : null
             clearDrag()
+            // 分组落到不合法的位置（自己、自己的子树、已经在那个父级下）不做任何变更
+            if (source?.kind === 'group' && position === null) return
             // 落到分组行本身就是「移入这个分组」/「挂到这个分组下」；
             // 已经在里面的会在决策里被判为无操作
             applyDrop(source, {
               section: 'project',
               groupId,
-              position: source?.kind === 'group' ? groupDropPosition(event) : null
+              position
             })
           }}
         >

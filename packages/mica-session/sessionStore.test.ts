@@ -377,6 +377,24 @@ describe('SessionStore.replaceValidated', () => {
     }
   });
 
+  it('keeps resumeAfter only for an uncompleted turn, and drops unknown reasons', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const session = makeSession('resume-after', '/tmp', '2026-01-01T00:00:00.000Z');
+    session.turnState = 'aborted';
+
+    expect(parsePersistedSession({ ...session, resumeAfter: 'build-reload' })?.resumeAfter).toBe('build-reload');
+    // 这一轮已经跑完了，留着它会让下一代宿主凭空再发一次请求。
+    expect(
+      parsePersistedSession({ ...session, turnState: 'completed', resumeAfter: 'build-reload' })?.resumeAfter,
+    ).toBeUndefined();
+    // 认不出来的原因不该让宿主去猜要做什么。
+    expect(parsePersistedSession({ ...session, resumeAfter: 'something-else' })?.resumeAfter).toBeUndefined();
+    // 非字符串同样只是丢掉这个可选字段，不拒绝整条会话。
+    expect(parsePersistedSession({ ...session, resumeAfter: 42 } as unknown as typeof session)?.resumeAfter).toBe(
+      undefined,
+    );
+  });
+
   it('preserves valid running inputs and drops malformed or stale recovery data', async () => {
     const { parsePersistedSession } = await import('./sessionStore.js');
     const session = makeSession('active-input', '/tmp', '2026-01-01T00:00:00.000Z');

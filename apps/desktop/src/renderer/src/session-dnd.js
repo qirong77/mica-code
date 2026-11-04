@@ -114,3 +114,24 @@ export function rowDropPosition({ ratio, canNest = true } = {}) {
   if (canNest && value > 0.25 && value < 0.75) return 'into'
   return value < 0.5 ? 'before' : 'after'
 }
+
+/**
+ * 分组行上的落点。`rowDropPosition` 的「不能嵌套就按上下两半分档」在这里同样成立，
+ * 否则拖到兄弟分组的中间什么都不发生（中间那一半被判成「已经在这个父级下」），
+ * 上下两头又只有 6px，看起来就是「文件夹根本拖不动」。返回 null 表示这个落点不成立。
+ */
+export function groupRowDrop({ ratio, drag, groupId = null, groups = [] }) {
+  if (!drag || drag.kind !== 'group') return null
+  const canNest = !!resolveGroupDrop({
+    drag,
+    section: 'project',
+    groupId,
+    groups,
+    position: 'into'
+  })
+  const position = rowDropPosition({ ratio, canNest })
+  // 拖到自己当前所在的那个分组行上：中间是「已经在内」，上下两头排出去也只是把它从父级里
+  // 拽出来——「往父级上放反而离开了父级」比不动更难理解，这一行干脆整行不接。
+  if (position !== 'into' && groupId && groupId === (drag.groupId ?? null)) return null
+  return resolveGroupDrop({ drag, section: 'project', groupId, groups, position }) ? position : null
+}

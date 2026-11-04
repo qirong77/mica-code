@@ -17,18 +17,19 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     askText,
     recentCwds = [],
     // 「提交对提交」：给了 `head` 就只读提交，Git 面板变成 base...head 的对比。
-    // 由页面地址的 `?base=&head=` 带进来（插件点一条 `项目 · 分支` 时打开的那种页面）。
+    // 插件点一条 `项目 · 分支` 时由宿主传进来（`App.jsx` 的 `reviewTarget`）。
     compare = null,
     onCompareBaseChange,
     onCompareHeadChange,
     onCornerResizeStart,
-    onCwdChange,
     onGitChanged
   },
   ref
 ) {
   const [selection, setSelection] = useState(null)
-  const cwd = selection?.contextKey === contextKey ? selection.path : root
+  // 评审一条 PR 时页面目录由这次评审决定（`root` 就是那个仓库），用户在这个会话里之前
+  // 选过的目录不能把它顶掉，否则评审会落在别的仓库上。
+  const cwd = !compare?.head && selection?.contextKey === contextKey ? selection.path : root
   const current = useLatest({ contextKey, cwd, visible })
   const filesRef = useRef(null)
   const terminalRef = useRef(null)
@@ -59,15 +60,13 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     (path) => {
       const next = normalizeCwd(path)
       if (!next || next === current.current.cwd) return
+      // 评审中的页面目录由那次评审决定：换目录等于离开这份对比，否则选完什么都不会变。
+      if (compare?.head) onCompareHeadChange?.(null)
       setSelection({ contextKey: current.current.contextKey, path: next })
       setLocalRecent((previous) => [next, ...previous.filter((item) => item !== next)].slice(0, 20))
     },
-    [current]
+    [compare?.head, current, onCompareHeadChange]
   )
-
-  useEffect(() => {
-    onCwdChange?.(cwd || null)
-  }, [cwd, onCwdChange])
 
   useEffect(() => {
     selectionRequest.current += 1

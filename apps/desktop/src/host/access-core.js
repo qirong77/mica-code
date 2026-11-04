@@ -291,8 +291,8 @@ export function canonicalPathname(pathname) {
  * 2. `api`：`/api/*`——分享页和主应用共用同一份接口，收窄它等于把分享链接废掉（分享的
  *    语义就是「把这条会话连同它背后的 agent 借给对方」，见 apps/desktop/README.md）；
  * 3. `asset`：产物里的静态资源（白名单扩展名）；
- * 4. `other`：其余一切——主页面（`/`、`/mica-web`）、`/files`、`/terminal-control`、
- *    `/remote/*`（受控浏览器与终端）、`/mcp/*`、`/terminal.html`、`/files.html`。
+ * 4. `other`：其余一切——主页面（`/`、`/mica-web`）、`/terminal-control`、
+ *    `/remote/*`（受控浏览器与终端）、`/mcp/*`、`/terminal.html`。
  *
  * 白名单而不是黑名单是刻意的：以后新增一个页面入口不会自动对远程开放。漏掉某种资源
  * 扩展名的表现是分享页缺个文件（一眼可见），而不是把新界面悄悄暴露出去。

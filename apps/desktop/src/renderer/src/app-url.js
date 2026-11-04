@@ -12,45 +12,11 @@
 
 export const SESSION_PARAM = 'session'
 
-/**
- * 独立文件窗口的页面：顶栏的编辑器按钮把文件视图开成一个**只有文件树与编辑器**的窗口
- * （见 `detachedFilesUrl`），主窗口因此留在对话里。运行时上它挂在 `/files`，dev 下页面
- * 由 Vite 直接提供、走 `/files.html`；两者是同一个入口（`files-window.jsx`）。
- */
-export const FILES_PAGE_PATH = '/files'
-export const FILES_PAGE_FILE = '/files.html'
-
-/** 独立窗口要显示哪个目录。 */
-export const CWD_PARAM = 'cwd'
-
-/**
- * 编辑器直接停在「某个对比」上：`base` 是原分支（对比基线），`head` 是目标分支。
- *
- * 两者都在地址里，编辑器才知道要把 Git 面板读成「提交对提交」而不是「工作区对基线」——
- * 这是插件点一条 `项目 · 分支` 时打开的那种页面，刷新、复制地址都能回到同一份对比。
- */
-export const BASE_PARAM = 'base'
-export const HEAD_PARAM = 'head'
-
 /** 从 `window.location.search` 读出页面级状态；参数缺失或非法一律回落默认值。 */
 export function readAppUrl(search) {
   const params = new URLSearchParams(String(search || ''))
   const sessionId = (params.get(SESSION_PARAM) || '').trim()
   return { sessionId: sessionId || null }
-}
-
-/**
- * 文件窗口的地址参数：要显示的工作目录（缺省为空，由页面自己提示选一个会话），
- * 以及可选的「对比」——`base` 原分支、`head` 目标分支，两者都给才是提交对提交。
- */
-export function readFilesUrl(search) {
-  const params = new URLSearchParams(String(search || ''))
-  const base = (params.get(BASE_PARAM) || '').trim()
-  const head = (params.get(HEAD_PARAM) || '').trim()
-  return {
-    cwd: (params.get(CWD_PARAM) || '').trim() || null,
-    compare: head ? { base: base || null, head } : null
-  }
 }
 
 function parseUrl(href) {
@@ -71,32 +37,6 @@ export function urlWithState(href, { sessionId = null } = {}) {
   if (!url) return null
   if (sessionId) url.searchParams.set(SESSION_PARAM, sessionId)
   else url.searchParams.delete(SESSION_PARAM)
-  return url.toString()
-}
-
-/**
- * 独立文件窗口的地址：同一个 origin 上的文件页（dev 是 `files.html`，运行时是 `/files`），
- * 带上要显示的目录。目录放在查询串里，窗口刷新后仍然打开同一个目录；没有目录时也开得出来，
- * 页面会提示先选一个会话。
- *
- * 不能用 `location.href` 直接换参数：那是主应用页面，另开出来的窗口会连左栏一起带上。
- */
-export function detachedFilesUrl(href, cwd, compare = null) {
-  const url = parseUrl(href)
-  if (!url) return null
-  // dev 下主页面是 Vite 的 `/index.html`，独立页也得走 `/files.html`；运行时是 `/files`。
-  const dev = url.pathname.toLowerCase().endsWith('.html')
-  url.pathname = dev ? FILES_PAGE_FILE : FILES_PAGE_PATH
-  url.search = ''
-  url.hash = ''
-  const dir = String(cwd || '').trim()
-  if (dir) url.searchParams.set(CWD_PARAM, dir)
-  const head = String(compare?.head || '').trim()
-  if (head) {
-    url.searchParams.set(HEAD_PARAM, head)
-    const base = String(compare?.base || '').trim()
-    if (base) url.searchParams.set(BASE_PARAM, base)
-  }
   return url.toString()
 }
 

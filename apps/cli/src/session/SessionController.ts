@@ -14,6 +14,7 @@ import {
   type PersistedRuntimeSnapshot,
   type PersistedSession,
   type PersistedSnapshotDisplayUsage,
+  type PersistedSessionResumeAfter,
   type PersistedSessionTurnState,
   type SessionStoreLike,
   type SessionSummary,
@@ -68,6 +69,8 @@ export class SessionController {
   private currentTitleOverride: string | null = null;
   private currentTitleSource: 'derived' | 'auto' | 'manual' = 'derived';
   private currentTurnState: PersistedSessionTurnState = 'completed';
+  /** 下次宿主要不要接续这一轮，见 `PersistedSessionResumeAfter`。 */
+  private currentResumeAfter: PersistedSessionResumeAfter | null = null;
   /** 这条会话派生自哪条会话；resume 时从文件读回来，新会话由调用方给。 */
   private currentParentSessionId: string | null = null;
   /**
@@ -167,6 +170,7 @@ export class SessionController {
     this.currentTitleOverride = null;
     this.currentTitleSource = 'derived';
     this.currentTurnState = 'completed';
+    this.currentResumeAfter = null;
     this.currentPersistedSignature = null;
     this.recoveredActiveThinkingSignature = null;
   }
@@ -192,6 +196,8 @@ export class SessionController {
     options: {
       allowEmpty?: boolean;
       turnState?: PersistedSessionTurnState;
+      /** 见 `PersistedSessionResumeAfter`；只有被宿主主动暂停的那个分支会传。 */
+      resumeAfter?: PersistedSessionResumeAfter | null;
       preserveTitle?: boolean;
       conversationMessages?: MicaUiConversationMessage[];
       /** 压缩后的上下文占用，仅供界面展示（见 resolveDisplayUsage）。 */
@@ -201,6 +207,10 @@ export class SessionController {
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = options.conversationMessages ?? getPersistableConversationMessages(this.agent);
     this.currentTurnState = options.turnState ?? this.currentTurnState;
+    // 「下次宿主要不要接着跑」只在两个地方判定：宿主主动暂停时写、这一轮真正结束时清。
+    // 别的保存路径不碰它，否则一次中途 checkpoint 就能把待续跑标记抹掉。
+    if (options.resumeAfter !== undefined) this.currentResumeAfter = options.resumeAfter ?? null;
+    else if (this.currentTurnState === 'completed' || this.currentTurnState === 'error') this.currentResumeAfter = null;
     if (
       !hasConversation(snapshot.messages, conversationMessages) &&
       !options.allowEmpty &&
@@ -257,6 +267,7 @@ export class SessionController {
       cwd: process.cwd(),
       ...this.parentFieldFor(existing),
       turnState: this.currentTurnState,
+      ...(this.currentResumeAfter ? { resumeAfter: this.currentResumeAfter } : {}),
       snapshot: {
         ...toPersistedSnapshot(snapshot, conversationMessages),
         ...(this.currentTurnState === 'running' ? {} : { activeThinking: undefined, activeTurn: undefined }),
@@ -435,7 +446,12 @@ export class SessionController {
     const previousCwd = this.currentPersistedSignature
       ? (JSON.parse(this.currentPersistedSignature) as PersistedSession).cwd
       : undefined;
-    if (session.id === this.currentSessionId && previousCwd !== undefined && session.cwd !== previousCwd && session.cwd) {
+    if (
+      session.id === this.currentSessionId &&
+      previousCwd !== undefined &&
+      session.cwd !== previousCwd &&
+      session.cwd
+    ) {
       try {
         process.chdir(session.cwd);
       } catch {
@@ -448,12 +464,15 @@ export class SessionController {
     const resolvedSnapshot = this.config.apply(session.snapshot) ?? session.snapshot;
     this.agent.reloadConfig(false);
     const recoverActiveThinking =
-      leaseHeld && session.turnState === 'running' && Boolean(resolvedSnapshot.activeThinking || resolvedSnapshot.activeTurn);
+      leaseHeld &&
+      session.turnState === 'running' &&
+      Boolean(resolvedSnapshot.activeThinking || resolvedSnapshot.activeTurn);
     const runtimeSnapshot = fromPersistedSnapshot(resolvedSnapshot, restoredRole);
     if (recoverActiveThinking) this.agent.loadSnapshot(runtimeSnapshot, { recoverActiveThinking: true });
     else this.agent.loadSnapshot(runtimeSnapshot);
     this.currentSessionId = session.id;
     this.currentTurnState = session.turnState ?? 'completed';
+    if (session.resumeAfter !== undefined) this.currentResumeAfter = session.resumeAfter;
     this.currentParentSessionId = session.parentSessionId ?? null;
     this.parentSessionOwned = false;
     this.currentPersistedSignature = sessionSignature(session);
@@ -510,14 +529,22 @@ export class SessionController {
     if (!existing || existing.turnState !== 'running') return;
     const current = this.agent.getSnapshot();
     const { activeThinking, activeTurn, messages } = current;
-    if (JSON.stringify([activeThinking, activeTurn, messages]) ===
-      JSON.stringify([existing.snapshot.activeThinking, existing.snapshot.activeTurn, existing.snapshot.messages])) return;
+    if (
+      JSON.stringify([activeThinking, activeTurn, messages]) ===
+      JSON.stringify([existing.snapshot.activeThinking, existing.snapshot.activeTurn, existing.snapshot.messages])
+    )
+      return;
     const { activeThinking: _oldThinking, activeTurn: _oldTurn, ...snapshot } = existing.snapshot;
     const session: PersistedSession = {
       ...existing,
       revision: (existing.revision ?? 0) + 1,
       updatedAt: new Date().toISOString(),
-      snapshot: { ...snapshot, messages, ...(activeThinking ? { activeThinking } : {}), ...(activeTurn ? { activeTurn } : {}) },
+      snapshot: {
+        ...snapshot,
+        messages,
+        ...(activeThinking ? { activeThinking } : {}),
+        ...(activeTurn ? { activeTurn } : {}),
+      },
     };
     this.store.save(session);
     this.currentPersistedSignature = sessionSignature(session);

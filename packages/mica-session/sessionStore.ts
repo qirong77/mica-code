@@ -112,6 +112,15 @@ export type PersistedSnapshotDisplayUsage = {
 
 export type PersistedSessionTurnState = 'running' | 'completed' | 'aborted' | 'error';
 
+/**
+ * 这一轮为什么没跑完，以及下次宿主起来要不要自动接续。
+ *
+ * 目前只有一个取值：`build-reload` —— 开发构建完成后宿主主动在迭代边界停下，
+ * 进程被换掉，历史尾部完整，重启后应该不带用户消息地再发一次请求。
+ * 用户自己点停止时不会写这个字段，那种情况不该自动续跑。
+ */
+export type PersistedSessionResumeAfter = 'build-reload';
+
 export type PersistedSession = {
   version: 1;
   revision?: number;
@@ -130,6 +139,8 @@ export type PersistedSession = {
    */
   parentSessionId?: string;
   turnState: PersistedSessionTurnState;
+  /** 见 {@link PersistedSessionResumeAfter}。 */
+  resumeAfter?: PersistedSessionResumeAfter;
   snapshot: PersistedRuntimeSnapshot;
 };
 
@@ -873,6 +884,10 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
     }
   }
   const turnState = isPersistedSessionTurnState(session.turnState) ? session.turnState : 'completed';
+  // 未知的续跑原因直接丢掉：它是宿主重启时的行为开关，认不出来的值不该让
+  // 下一代宿主去猜该做什么。
+  const resumeAfter =
+    session.resumeAfter === 'build-reload' && turnState !== 'completed' ? session.resumeAfter : undefined;
   let protocol = session.snapshot.protocol;
   if (!isProviderProtocol(protocol)) {
     const provider: ProviderProtocol | undefined = session.snapshot.usageHistory
@@ -891,6 +906,7 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
     // 可选的展示字段拒绝整条会话。
     parentSessionId: normalizeParentSessionId(session.parentSessionId, session.id),
     turnState,
+    ...(resumeAfter ? { resumeAfter } : { resumeAfter: undefined }),
     snapshot: {
       ...session.snapshot,
       protocol,
