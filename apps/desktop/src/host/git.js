@@ -27,10 +27,16 @@ import {
   git,
   gitErrorMessage,
   stageFile,
-  unstageFile
+  unstageFile,
+  worktreeEpochOf,
+  worktreeSignature
 } from './git-ops'
 import { blameLine } from './git-blame'
 import { getCommit, getLog } from './git-log'
+
+/** 徽标自己那一层缓存：比全树扫描的 5s 长，配合「先回旧值、后台重算」。 */
+const CHANGE_COUNTS_TTL_MS = 20_000
+const changeCountsState = new Map()
 
 async function getSummary(cwd, { refresh = false } = {}) {
   const { root, base } = await cachedRepository(cwd)
@@ -85,20 +91,70 @@ async function readSummary(root, base) {
 /**
  * 顶栏徽标只要「多少变更」：文件数与加/删行合计。故意复用 `getSummary` 而不是另算
  * 一遍——徽标和 GIT 面板显示的是同一个工作区，数字不一致比数字不准更糟。
+ *
+ * 这一步是**整棵工作区的扫描**（`status --untracked-files=all` + `diff --numstat`），
+ * 大仓库上单次要 1–2 秒，超时的那几次能到 20 秒以上。页面每 20 秒问一次，就得让主进程
+ * 每 20 秒完整扫一遍；窗口开得多时还会互相叠。所以这里再套一层：
+ * - 20 秒内的同一仓库直接返回（多个窗口共用一次扫描）；
+ * - 过期后**先回旧值**，后台重算，下一次轮询就拿到新的——徽标是个数字，晚 20 秒
+ *   更新看不出来，把一次全树扫描挡在 IPC 之外却是实打实的；
+ * - 切分支 / 提交（HEAD 变了）、我们改过工作区（stage / discard / 保存文件）时不许
+ *   返回旧值：那时数字必须立刻对得上。
  */
 async function getChangeCounts(cwd, { refresh = false } = {}) {
-  // 与 `getSummary` 共用同一份缓存（同一次全树扫描），但只把三个数字交出去：文件列表
-  // 在几千个改动时会占掉 IPC 的绝大部分体积，徽标并不需要它。
   const { root, base } = await cachedRepository(cwd)
-  const summary = await cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base), {
-    refresh
-  })
-  return {
-    root: summary.root,
-    files: summary.files.length,
-    additions: summary.additions,
-    deletions: summary.deletions
+  const key = `${root}\u0000${base}`
+  const signature = `${worktreeSignature(root) || ''}|${worktreeEpochOf(root)}`
+  const cached = changeCountsState.get(key)
+  const fresh =
+    !refresh &&
+    cached &&
+    cached.signature === signature &&
+    Date.now() - cached.at < CHANGE_COUNTS_TTL_MS
+  if (fresh) return cached.value
+
+  const read = async () => {
+    // 与 `getSummary` 共用同一份缓存（同一次全树扫描），但只把三个数字交出去：文件列表
+    // 在几千个改动时会占掉 IPC 的绝大部分体积，徽标并不需要它。
+    const summary = await cachedWorktreeRead(
+      root,
+      `summary:${base}`,
+      () => readSummary(root, base),
+      { refresh }
+    )
+    return {
+      root: summary.root,
+      files: summary.files.length,
+      additions: summary.additions,
+      deletions: summary.deletions
+    }
   }
+
+  // 没有旧值可用（第一次问、刚切分支、我们刚改过工作区）或用户主动刷新：这次必须等。
+  if (!cached || refresh || cached.signature !== signature) {
+    const value = await read()
+    changeCountsState.set(key, { signature, at: Date.now(), value, refreshing: false })
+    return value
+  }
+
+  // 旧值还在手：立刻返回，后台补一次。
+  if (!cached.refreshing) {
+    cached.refreshing = true
+    void read()
+      .then((value) => {
+        changeCountsState.set(key, {
+          signature: `${worktreeSignature(root) || ''}|${worktreeEpochOf(root)}`,
+          at: Date.now(),
+          value,
+          refreshing: false
+        })
+      })
+      .catch(() => {
+        const current = changeCountsState.get(key)
+        if (current) current.refreshing = false
+      })
+  }
+  return cached.value
 }
 
 /**

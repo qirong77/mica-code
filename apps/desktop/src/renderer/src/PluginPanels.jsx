@@ -28,6 +28,7 @@ import {
   panelDrafts,
   pluginPanelTabs,
   quickbarMenuItems,
+  quickbarMenuTable,
   readMenuCache,
   readPanelView,
   subscribePluginPanelStatus,
@@ -106,6 +107,7 @@ export function PluginQuickBar({
   sessionId,
   cwd,
   role,
+  visible = true,
   openPlugin,
   focusSection,
   onTogglePanel,
@@ -225,8 +227,8 @@ export function PluginQuickBar({
       const result = await loadView(panel)
       if (!result || contextRef.current !== context) return
       const entry = result.error
-        ? { items: [], ready: true, note: result.error, failed: true }
-        : { items: quickbarMenuItems(shortcut, result.view), ready: true, note: '' }
+        ? { table: { columns: [], rows: [] }, ready: true, note: result.error, failed: true }
+        : { table: quickbarMenuTable(result.view, shortcut.menu), ready: true, note: '' }
       if (!result.error) writeMenuCache(cacheKey, entry)
       setMenuViews((current) => ({ ...current, [key]: entry }))
     },
@@ -241,6 +243,10 @@ export function PluginQuickBar({
   }, [context])
 
   useEffect(() => {
+    // 每个会话的 ChatView 都挂着这一排按钮（`chat-cache` 保留 5 个实例），
+    // 而其中只有一个在屏幕上。不按可见性收窄，同一份视图会被 5 个实例各问一遍：
+    // 实测 8 小时的日志里 8388 次 `chat:plugin-panel-view`、p75 3.5 秒，全部来自这里。
+    if (!visible) return undefined
     const wanted = items.filter(({ shortcut }) => shortcut.menu || shortcut.id)
     // 声明了 panel.status 的插件即使没有快捷按钮，也要为首屏取一次视图：
     // 输入框上方那条常驻状态就来自这里，不能等用户点开面板才出现。
@@ -266,9 +272,10 @@ export function PluginQuickBar({
     }
     const timer = setTimeout(refresh, PREFETCH_DELAY_MS)
     return () => clearTimeout(timer)
-  }, [items, panels, loadMenu, loadView])
+  }, [items, panels, loadMenu, loadView, visible])
 
   useEffect(() => {
+    if (!visible) return undefined
     const dynamicPanels = panels.filter(
       (panel) => panel.status || panel.shortcuts.some((shortcut) => shortcut.id)
     )
@@ -285,9 +292,10 @@ export function PluginQuickBar({
       clearInterval(timer)
       document.removeEventListener('visibilitychange', refresh)
     }
-  }, [panels, loadView])
+  }, [panels, loadView, visible])
 
   useEffect(() => {
+    if (!visible) return undefined
     if (!nodeId || !items.some(({ shortcut }) => shortcut.menu || shortcut.id)) return undefined
     let timer
     let active = true
@@ -314,7 +322,7 @@ export function PluginQuickBar({
       clearTimeout(timer)
       unsubscribe()
     }
-  }, [context, items, loadMenu, loadView, nodeId])
+  }, [context, items, loadMenu, loadView, nodeId, visible])
 
   // 状态贴在哪一块面板上也要知道：点它进的是那块面板。
   const statusOwner = panels.find((panel) => statusBars[panel.id]?.label) || null
@@ -421,11 +429,11 @@ export function PluginQuickBar({
             focusSection === shortcut.section
           const group = Boolean(shortcut.items || shortcut.menu)
           // 静态分组（清单直接给 items）不需要等面板视图；动态分组才读插件返回的那一块。
-          const menuItems = shortcut.items
-            ? quickbarMenuItems(shortcut)
-            : group
-              ? (menuViews[key]?.items ?? [])
-              : []
+          const menuItems = shortcut.items ? quickbarMenuItems(shortcut) : []
+          const menuTable = shortcut.menu
+            ? (menuViews[key]?.table ?? { columns: [], rows: [] })
+            : { columns: [], rows: [] }
+          const menuEmpty = menuItems.length === 0 && menuTable.rows.length === 0
           return (
             <div
               key={key}
@@ -472,10 +480,10 @@ export function PluginQuickBar({
                 menuPos &&
                 createPortal(
                   <FloatingMenu
-                    key={`${key}:${menuItems.length}:${menuViews[key]?.ready || false}`}
+                    key={`${key}:${menuItems.length}:${menuTable.rows.length}:${menuViews[key]?.ready || false}`}
                     x={menuPos.x}
                     y={menuPos.y}
-                    minWidth={Math.max(menuPos.width, 176)}
+                    minWidth={Math.max(menuPos.width, menuTable.rows.length > 0 ? 320 : 176)}
                     /* 这一排紧贴输入框，往下开会压住输入框：整组向上开。 */
                     placement="above"
                     /* 菜单本身也要豁免：否则 pointerdown 先关菜单，click 永远到不了菜单项。 */
@@ -483,7 +491,7 @@ export function PluginQuickBar({
                     onClose={() => setOpenMenu('')}
                   >
                     <div className="chat-plugin-quickbar-menu">
-                      {menuItems.length === 0 ? (
+                      {menuEmpty ? (
                         shortcut.menu && !menuViews[key]?.ready ? (
                           <span className="plugin-menu-skeleton" aria-hidden="true">
                             <span className="plugin-menu-skeleton-row" />
@@ -503,21 +511,34 @@ export function PluginQuickBar({
                           </span>
                         )
                       ) : (
-                        menuItems.map((item) => (
-                          <button
-                            key={`${item.label}:${item.action || item.section}`}
-                            type="button"
-                            role="menuitem"
-                            className="plugin-menu-item"
-                            onClick={() => {
-                              setOpenMenu('')
-                              runTarget(panel, item)
-                            }}
-                          >
-                            <span className="truncate">{item.label}</span>
-                            {item.detail && <span className="plugin-menu-hint">{item.detail}</span>}
-                          </button>
-                        ))
+                        <>
+                          {menuTable.rows.length > 0 && (
+                            <QuickbarMenuTable
+                              table={menuTable}
+                              onRun={(row) => {
+                                setOpenMenu('')
+                                runTarget(panel, row)
+                              }}
+                            />
+                          )}
+                          {menuItems.map((item) => (
+                            <button
+                              key={`${item.label}:${item.action || item.section}`}
+                              type="button"
+                              role="menuitem"
+                              className="plugin-menu-item"
+                              onClick={() => {
+                                setOpenMenu('')
+                                runTarget(panel, item)
+                              }}
+                            >
+                              <span className="truncate">{item.label}</span>
+                              {item.detail && (
+                                <span className="plugin-menu-hint">{item.detail}</span>
+                              )}
+                            </button>
+                          ))}
+                        </>
                       )}
                     </div>
                   </FloatingMenu>,
@@ -542,6 +563,7 @@ export function PluginPanels({
   sessionId,
   cwd,
   role,
+  visible = true,
   openPlugin,
   focusSection,
   onClose,
@@ -564,6 +586,7 @@ export function PluginPanels({
     <PluginPanelDock
       key={open.id}
       pluginId={open.id}
+      visible={visible}
       label={open.label}
       display={open.display}
       nodeId={nodeId}
@@ -582,6 +605,7 @@ export function PluginPanels({
 
 function PluginPanelDock({
   pluginId,
+  visible,
   label,
   display,
   nodeId,
@@ -649,6 +673,9 @@ function PluginPanelDock({
   }, [applyView, cwd, nodeId, pluginId, sessionId])
 
   useEffect(() => {
+    // 抽屉只在看得见时才刷新：切到别的会话后这个实例仍然挂着，继续每 4 秒叫醒一个
+    // 没人看的会话宿主，既费 IO 也让那个 host 永远「刚从活动过」而不被回收。
+    if (!visible) return undefined
     // 首次打开要带一次字段初值，之后的刷新只更新状态行/条目。已经有缓存视图时不清草稿
     // （用户可能已经在里面打字了），只把新结果换上去。
     const hadSeed = Boolean(seeded.current?.view)
@@ -662,7 +689,7 @@ function PluginPanelDock({
       void load()
     }, REFRESH_MS)
     return () => clearInterval(timer)
-  }, [applyView, cwd, load, nodeId, pluginId, sessionId])
+  }, [applyView, cwd, load, nodeId, pluginId, sessionId, visible])
 
   const runAction = useCallback(
     async (action, key, extraValues, options = {}) => {
@@ -1062,6 +1089,69 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
  * 动作与条目共用一条路径 —— 行按钮发 `action + key`（`key` 是行 key），勾选框发
  * `action + key + values.check/column`。插件因此不需要知道「这次点的是第几列」。
  */
+/**
+ * 快捷按钮悬停时展开的那张表。
+ *
+ * 行本身是一个按钮（`role="menuitem"`）：悬停出来的一层里再放「评审」小按钮，既点不准，
+ * 也让键盘走位变成两层。整行可点，列只负责排版。
+ */
+function QuickbarMenuTable({ table, onRun }) {
+  const cellText = (row) =>
+    table.columns
+      .map((column) => row.cells?.[column.key]?.text || row.cells?.[column.key]?.link || '')
+      .filter(Boolean)
+      .join(' · ')
+  // 复用插件面板那份表格（chat-plugin-table）：真正的 <table> 才会让每一行的列互相对齐，
+  // 每行各算一套栅格时列宽只能各看各的内容。
+  return (
+    <div className="chat-plugin-table-wrap chat-plugin-quickbar-table">
+      <table className="chat-plugin-table is-compact">
+        <thead>
+          <tr>
+            {table.columns.map((column) => (
+              <th key={column.key} scope="col">
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row) => (
+            <tr
+              key={row.key}
+              role="menuitem"
+              tabIndex={0}
+              title={cellText(row)}
+              onClick={() => onRun(row)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return
+                event.preventDefault()
+                onRun(row)
+              }}
+            >
+              {table.columns.map((column) => {
+                const cell = row.cells?.[column.key]
+                return (
+                  <td
+                    key={column.key}
+                    className={
+                      [column.grow ? 'is-grow' : '', cell?.tone ? `tone-${cell.tone}` : '']
+                        .filter(Boolean)
+                        .join(' ') || undefined
+                    }
+                  >
+                    {cell?.text || cell?.link || '—'}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function PluginPanelTable({ table, busy, runAction }) {
   const columns = table?.columns || []
   const rows = table?.rows || []

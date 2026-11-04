@@ -129,7 +129,10 @@ export function applyPanelResult(
     onLaunchSession?.(result.newSession)
   }
   // 弹窗可以只有一张二维码、一段话，甚至只有一个「去配置」按钮：表格不是它的前提。
-  if (result.dialog && (Array.isArray(result.dialog.rows) || result.dialog.qr || result.dialog.text))
+  if (
+    result.dialog &&
+    (Array.isArray(result.dialog.rows) || result.dialog.qr || result.dialog.text)
+  )
     onDialog?.(result.dialog)
   // 面板只有 340px：超过一屏的正文（插件自己的规则文件、随包分发的 skill）在抽屉里既看
   // 不清也改不动。插件只声明「打开哪个文件」，落到宿主的编辑器由页面负责。
@@ -144,14 +147,39 @@ export function applyPanelResult(
 }
 
 /**
- * 快捷按钮的菜单条目：静态分组（清单 `items`）直接用，动态分组（清单 `menu`）取面板视图
- * 里同名的那一块。没有动作的条目点了什么也不会发生，一律丢掉。
+ * 快捷按钮的静态子项（清单里的 `items`）：一组动作，点了就执行或打开分区。
+ *
+ * 没有动作的条目点了什么也不会发生，一律丢掉。
  */
-export function quickbarMenuItems(shortcut, view) {
-  const raw = shortcut?.items ?? (shortcut?.menu ? view?.menus?.[shortcut.menu] : null)
+export function quickbarMenuItems(shortcut) {
+  const raw = shortcut?.items
   return (Array.isArray(raw) ? raw : []).filter(
     (item) => typeof item?.label === 'string' && item.label.trim() && (item.action || item.section)
   )
+}
+
+/**
+ * 动态菜单的那一份数据：清单声明 `menu` 时，面板视图用同名表格回答「现在有哪些行」。
+ *
+ * 与 `quickbarMenuItems` 分工：清单里的 `items` 是一组**动作**（同步频道 / 频道设置），
+ * 这里是一份**数据**（这个需求涉及哪些项目、各在哪条分支）。行必须带 action，否则点不动，
+ * 直接丢掉。
+ */
+export function quickbarMenuTable(view, menu) {
+  const raw = menu ? view?.menus?.[menu] : null
+  const columns = (Array.isArray(raw?.columns) ? raw.columns : []).filter(
+    (column) =>
+      typeof column?.key === 'string' &&
+      column.key &&
+      typeof column?.label === 'string' &&
+      column.label
+  )
+  const rows = (Array.isArray(raw?.rows) ? raw.rows : []).filter(
+    (row) =>
+      typeof row?.action === 'string' && row.action && row?.cells && typeof row.cells === 'object'
+  )
+  if (columns.length === 0 || rows.length === 0) return { columns: [], rows: [] }
+  return { columns, rows }
 }
 
 /**

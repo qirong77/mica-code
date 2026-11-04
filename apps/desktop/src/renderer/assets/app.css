@@ -514,6 +514,24 @@ body.is-resizing.is-resizing-terminal {
   animation: chat-dot-breathe 2.4s ease-in-out infinite;
 }
 
+/* 从 ⌘P 快速打开 / 搜索结果点进一条会话后，侧栏里那一行闪一下：它可能刚被自动展开
+   的分组、父会话或 Recent 的第二页「捞」出来，用户要能一眼看到它落在哪儿。只动
+   背景与一圈描边，不改行高宽——行不能因为提示自己跳一下。 */
+@keyframes session-row-flash {
+  0%,
+  12% {
+    background-color: color-mix(in srgb, var(--color-accent) 26%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 65%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+.session-row-flash {
+  animation: session-row-flash 1.6s ease-out 1;
+}
+
 /* Chat keeps Mica's terminal grammar: compact gutter rows, muted activity logs,
    and a prompt/status surface anchored at the bottom. */
 .chat-view {
@@ -5319,6 +5337,12 @@ body.is-resizing-btw {
   .chat-btw {
     animation: none;
   }
+  /* 侧栏定位提示不闪，改成一段常亮的高亮：它说的是「就是这一条」，不是装饰。 */
+  .session-row-flash {
+    animation: none;
+    background-color: color-mix(in srgb, var(--color-accent) 18%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 65%, transparent);
+  }
 }
 
 /* 输入框右侧的“本会话能力”入口：面板打开时点亮。 */
@@ -5945,6 +5969,39 @@ body.is-resizing-btw {
 .chat-plugin-quickbar-menu .plugin-menu-item:focus-visible {
   background: var(--color-overlay-strong);
   color: var(--color-fg-max);
+  outline: none;
+}
+
+/* 动态菜单是一张表（项目 / 端 / 分支这类几列并列的事实）：直接用面板那份 chat-plugin-table，
+   这里只收敛掉浮层里放不下的尺寸——表格在菜单里不抢焦点、行整条可点（就是「评审这一条」）。 */
+.chat-plugin-quickbar-table {
+  min-width: 0;
+  max-width: 420px;
+  margin: 0 -4px;
+}
+
+.chat-plugin-table.is-compact th {
+  padding: 4px 8px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.chat-plugin-table.is-compact td {
+  max-width: 220px;
+  padding: 5px 8px;
+}
+
+.chat-plugin-table tbody tr[role='menuitem'] {
+  cursor: pointer;
+}
+
+.chat-plugin-table tbody tr[role='menuitem']:hover td,
+.chat-plugin-table tbody tr[role='menuitem']:focus-visible td {
+  background: var(--color-overlay-strong);
+  color: var(--color-fg-max);
+}
+
+.chat-plugin-table tbody tr[role='menuitem']:focus-visible {
   outline: none;
 }
 

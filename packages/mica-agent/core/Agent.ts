@@ -37,6 +37,21 @@ export type AgentQueryOptions = {
   shouldContinue?: () => boolean;
   /** Once before each model request, excluding transport retries. Observer errors are ignored. */
   onRequestStart?: (info: { messageCount: number; tools?: unknown }) => void;
+  /**
+   * 一次模型请求真正结束（成功或失败）时调用一次，成对的 `onRequestStart`。
+   *
+   * 用于回答「这一轮的时间花在哪」：`durationMs` 覆盖建流 + 流消费（含传输层重试），
+   * `firstTokenMs` 是首个正文/思考增量到达的时刻（排队 + 首字延迟，用户感知的「多久
+   * 才动起来」），`attempts` 含重试次数。观察方抛错不影响请求。
+   */
+  onRequestEnd?: (info: {
+    durationMs: number;
+    firstTokenMs?: number;
+    attempts: number;
+    outcome: 'completed' | 'error' | 'aborted';
+    toolCalls?: number;
+    error?: string;
+  }) => void;
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
   /**
    * Rewrites in-flight session messages immediately before each model request,

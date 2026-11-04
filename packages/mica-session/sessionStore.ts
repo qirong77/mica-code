@@ -13,6 +13,7 @@ import {
 import { basename, resolve } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { deleteBtwState } from '@packages/mica-common/btwState.js';
+import { compactRawUsage } from '@packages/mica-common/rawUsage.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
 import { readHeadString, readSessionFileHead } from './sessionFileHead.js';
 import { normalizeTurnTimings, type TurnTimingRecord } from '@packages/mica-common/turnTiming.js';
@@ -817,6 +818,26 @@ function isAlreadyExistsError(error: unknown): boolean {
   return (error as NodeJS.ErrnoException)?.code === 'EEXIST';
 }
 
+/**
+ * usage 记录里的 `rawUsage` 只保留标量与一层明细。
+ *
+ * 老会话里存着网关的逐条 token 归因（单条 200KB+，实测占整份文件的 95%）。这里在读入
+ * 时就压掉：内存占用立刻回到真实大小，下一次落盘文件也跟着瘦下来——不需要单独跑一次
+ * 迁移，也不为旧形状留运行期分支。
+ */
+function normalizeUsageHistory<T>(records: T): T {
+  if (!Array.isArray(records)) return records;
+  for (const record of records) {
+    if (!record || typeof record !== 'object') continue;
+    const entry = record as { rawUsage?: unknown };
+    if (!('rawUsage' in entry)) continue;
+    const compacted = compactRawUsage(entry.rawUsage);
+    if (compacted) entry.rawUsage = compacted;
+    else delete entry.rawUsage;
+  }
+  return records;
+}
+
 export function parsePersistedSession(value: unknown): PersistedSession | null {
   if (!value || typeof value !== 'object') return null;
   const session = value as Partial<PersistedSession>;
@@ -876,6 +897,11 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
       role,
       // 宽松解析：只认 true，其他值当作「未定制」，不因此拒绝整条会话。
       capabilitiesCustomized: session.snapshot.capabilitiesCustomized === true ? true : undefined,
+      // 老会话里存着网关回传的逐条 token 归因（单条 200KB+，能占整份文件的 95%）。
+      // 读进来就压成标量 + 一层明细：内存里先恢复到大致的真实大小，下一次落盘也就跟着
+      // 变小了——不需要为它单独跑一次迁移，用户也不用等一个 150MB 的清洗过程。
+      usageHistory: normalizeUsageHistory(session.snapshot.usageHistory),
+      subagentUsageHistory: normalizeUsageHistory(session.snapshot.subagentUsageHistory),
       displayUsage: normalizeDisplayUsage(session.snapshot.displayUsage),
       systemPrompt,
       interruptedThinking: normalizeInterruptedThinking(

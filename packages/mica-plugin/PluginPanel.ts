@@ -225,7 +225,14 @@ export type PluginPanelView = {
    * 的工作区。清单是磁盘上的静态文件，写不出这些；所以清单只声明「这个按钮是个菜单、
    * 取哪一块」，具体条目由插件在视图里给。宿主因此可以在按钮上悬停时取一次视图。
    */
-  menus?: Record<string, PluginPanelMenuItem[]>;
+  /**
+   * 快捷按钮悬停时展开的那一块：**一份数据，按列摆**。
+   *
+   * 与清单里的 `shortcut.items` 分工不同：`items` 是一组动作（同步 / 设置…），这里是
+   * 「这个会话此刻有哪些分支、哪些环境地址」这类会变的事实——一列文字里认不出哪段是项目、
+   * 哪段是分支，列对齐才读得快。行本身可点，点一行等于执行它的 `action`。
+   */
+  menus?: Record<string, PluginPanelMenu>;
   /** 按清单中快捷按钮的 id 提供当前状态。 */
   shortcutStates?: Record<string, PluginPanelShortcutState>;
 };
@@ -255,11 +262,16 @@ export type PluginPanelShortcutState = {
  *
  * `detail` 是条目右侧的一行补充（基线分支、会话状态），纯展示，不参与匹配。
  */
-export type PluginPanelMenuItem = {
-  label: string;
-  detail?: string;
+export type PluginPanelMenu = {
+  columns: PluginPanelTableColumn[];
+  rows: PluginPanelMenuRow[];
+};
+
+export type PluginPanelMenuRow = {
+  /** 一行的标识（表格里唯一即可），点击时原样回给插件的 `action`。 */
+  key: string;
   action: string;
-  key?: string;
+  cells: Record<string, PluginPanelTableCell>;
 };
 
 export type PluginPanelActionInput = {
@@ -498,8 +510,8 @@ const MAX_DIALOG_ROWS = 50;
 const MAX_DIALOG_TEXT = 4000;
 const MAX_MENUS = 6;
 const MAX_MENU_ITEMS = 20;
-const MAX_MENU_DETAIL = 120;
 const MAX_MENU_KEY = 200;
+const MAX_MENU_COLUMNS = 5;
 const MAX_ACTION_ID = 64;
 const MAX_SHORTCUT_STATES = 40;
 const MAX_SHORTCUT_BADGE = 12;
@@ -830,25 +842,67 @@ function shortcutStatesOf(value: unknown): Record<string, PluginPanelShortcutSta
  * 没有 `action` 的条目点了什么也不会发生，直接丢掉（与清单里的快捷按钮同一条规则：
  * 界面上不留点不动的项）；整块为空就当插件没给，页面回落到「按钮暂无可用条目」。
  */
-function menusOf(value: unknown): Record<string, PluginPanelMenuItem[]> | undefined {
-  const menus: Record<string, PluginPanelMenuItem[]> = {};
-  for (const [rawKey, rawItems] of Object.entries(record(value))) {
+function menusOf(value: unknown): Record<string, PluginPanelMenu> | undefined {
+  const menus: Record<string, PluginPanelMenu> = {};
+  for (const [rawKey, rawMenu] of Object.entries(record(value))) {
     const key = text(rawKey, 40);
     if (!key) continue;
-    const items: PluginPanelMenuItem[] = [];
-    for (const entry of list(rawItems).slice(0, MAX_MENU_ITEMS)) {
-      const item = record(entry);
-      const label = text(item.label, 60);
-      const action = text(item.action, MAX_ACTION_ID);
-      if (!label || !action) continue;
-      const detail = text(item.detail, MAX_MENU_DETAIL);
-      const itemKey = text(item.key, MAX_MENU_KEY);
-      items.push({ label, action, ...(detail ? { detail } : {}), ...(itemKey ? { key: itemKey } : {}) });
-    }
-    if (items.length > 0) menus[key] = items;
+    const menu = menuOf(rawMenu);
+    if (!menu) continue;
+    Object.defineProperty(menus, key, {
+      value: menu,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
     if (Object.keys(menus).length >= MAX_MENUS) break;
   }
   return Object.keys(menus).length > 0 ? menus : undefined;
+}
+
+/**
+ * 菜单表格：列与单元格和面板里的表同一份归一化，只是每行多一个必填的 `action`。
+ *
+ * 缺动作的行丢——悬停出来一行点不动的事实，比不显示更让人以为界面坏了。
+ */
+function menuOf(input: unknown): PluginPanelMenu | null {
+  const raw = record(input);
+  const columns = list(raw.columns)
+    .slice(0, MAX_MENU_COLUMNS)
+    .map((entry) => {
+      const column = record(entry);
+      const key = text(column.key, 40);
+      const label = text(column.label, 40);
+      if (!key || !label) return null;
+      const normalized: PluginPanelTableColumn = {
+        key,
+        label,
+        ...(column.grow === true ? { grow: true } : {}),
+      };
+      return normalized;
+    })
+    .filter((entry): entry is PluginPanelTableColumn => entry !== null);
+  if (columns.length === 0) return null;
+  const rows = list(raw.rows)
+    .slice(0, MAX_MENU_ITEMS)
+    .map((entry) => {
+      const row = record(entry);
+      const action = text(row.action, MAX_ACTION_ID);
+      if (!action) return null;
+      const rawCells = record(row.cells);
+      const cells: Record<string, PluginPanelTableCell> = {};
+      for (const column of columns) {
+        const cell = tableCellOf(rawCells[column.key]);
+        if (cell) cells[column.key] = cell;
+      }
+      if (Object.keys(cells).length === 0) return null;
+      const key = text(row.key, MAX_MENU_KEY) || text(cells[columns[0].key]?.text, MAX_MENU_KEY);
+      if (!key) return null;
+      return { key, action, cells } satisfies PluginPanelMenuRow;
+    })
+    .filter((entry): entry is PluginPanelMenuRow => entry !== null);
+  if (rows.length === 0) return null;
+  return { columns, rows };
 }
 
 /** 动作入参的归一化：插件拿到的一定是干净的 `{ action, key?, values? }`。 */

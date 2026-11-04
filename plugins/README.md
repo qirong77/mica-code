@@ -558,8 +558,14 @@ ctx.desktop.panel({
 - `shortcuts` 是**输入框正上方那排按钮**，每个四选一：`action` 点了直接把该动作交给
   `action` 处理器（不打开面板，例如「立刻检查」）；`section` 点了打开面板并展开同名的那一块
   （例如「频道设置」）；`items` 是一组写死的子项（悬停或点击展开一层，例如「频道」→
-  同步频道 / 频道设置）；`menu` 的子项由视图的 `menus[menu]` 现算（例如「Pull Request」→
-  当前会话认领的每个副本，条目随状态变）。没有常用动作插件就别声明，一条空按钮比没有更糟。
+  同步频道 / 频道设置）；`menu` 的**表格**由视图的 `menus[menu]` 现算（例如「PR」→
+  这个需求涉及的项目 / 端 / 分支，点一行就评审那一条）。`items` 是**一组动作**，`menu` 是
+  **一份数据**，所以两者形态不同，别把动作硬做成表格。
+
+  动态菜单是一张表：`menus[menu] = { columns: [{ key, label, grow? }], rows: [{ key?, action, cells }] }`，
+  `cells` 与面板里的表同一份格子（`{ text, tone? }`），整行可点、点了执行 `action`（`key` 原样回给
+  插件）。缺 `action` 或缺格子的行会被丢掉；最多 6 个菜单、20 行、5 列。
+  没有常用动作插件就别声明，一条空按钮比没有更糟。
 - 快捷按钮可声明稳定的 `id`，在面板视图中用 `shortcutStates` 按 id 提供动态状态：例如清单
   `{ "id": "check", "label": "检查", "action": "check" }` 对应视图
   `{ shortcutStates: { check: { badge: '运行中', disabled: true, disabledReason: '请等待检查完成' } } }`。

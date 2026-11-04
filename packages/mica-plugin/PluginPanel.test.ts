@@ -539,24 +539,52 @@ describe('normalizePluginPanelView shortcut states', () => {
 });
 
 describe('normalizePluginPanelView menus', () => {
-  it('keeps dynamic menu items with their action and key', () => {
+  it('keeps a menu table with columns and clickable rows', () => {
     const view = normalizePluginPanelView({
       title: 'x',
       menus: {
-        reviews: [
-          { label: 'sass · demand-a', detail: 'diff master', action: 'review.open', key: 'w1' },
-          { label: '没有动作' },
-        ],
+        reviews: {
+          columns: [
+            { key: 'project', label: '项目' },
+            { key: 'branch', label: '分支', grow: true },
+          ],
+          rows: [
+            {
+              action: 'review.open',
+              key: 'sass',
+              cells: { project: { text: 'sass' }, branch: { text: 'demand-a' } },
+            },
+            { action: 'review.open', cells: { branch: { text: '缺项目名' } } },
+            { key: 'no-action', cells: { project: { text: '点不动' } } },
+          ],
+        },
       },
     });
-    expect(view.menus?.reviews).toEqual([
-      { label: 'sass · demand-a', detail: 'diff master', action: 'review.open', key: 'w1' },
+    expect(view.menus?.reviews.columns).toEqual([
+      { key: 'project', label: '项目' },
+      { key: 'branch', label: '分支', grow: true },
+    ]);
+    expect(view.menus?.reviews.rows).toEqual([
+      {
+        action: 'review.open',
+        key: 'sass',
+        cells: { project: { text: 'sass' }, branch: { text: 'demand-a' } },
+      },
     ]);
   });
 
-  it('drops menus that are not an object of arrays', () => {
+  it('drops menus that are not a table with columns and rows', () => {
     expect(normalizePluginPanelView({ title: 'x', menus: 'nope' }).menus).toBeUndefined();
     expect(normalizePluginPanelView({ title: 'x', menus: { a: 'nope' } }).menus).toBeUndefined();
+    expect(
+      normalizePluginPanelView({ title: 'x', menus: { a: { columns: [], rows: [] } } }).menus,
+    ).toBeUndefined();
+    expect(
+      normalizePluginPanelView({
+        title: 'x',
+        menus: { a: { columns: [{ key: 'c', label: '列' }], rows: [] } },
+      }).menus,
+    ).toBeUndefined();
   });
 });
 

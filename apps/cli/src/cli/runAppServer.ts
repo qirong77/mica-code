@@ -63,6 +63,7 @@ import {
 } from '@packages/mica-tools/index.js';
 import type { WaitRecord } from '@packages/mica-tools/index.js';
 import { AgentRuntime } from '../agent/AgentRuntime.js';
+import { startDiagnostics, type DiagnosticsHandle } from '../diagnostics/index.js';
 import { readAgentRuntimeConfig, type AgentRuntimeConfigOverride } from '../agent/AgentRuntimeConfig.js';
 import { SubagentTaskManager, type SubagentTaskRecord } from '../agents/SubagentTaskManager.js';
 import {
@@ -315,6 +316,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   let mcpInitPromise: Promise<unknown> | null = null;
   let sessionId = '';
   let currentTurnId: string | null = null;
+  let diagnostics: DiagnosticsHandle | null = null;
   let taskSnapshotTimer: NodeJS.Timeout | null = null;
   // Assigned inside the try block once the host state exists; the request
   // handlers (kill/output) call it to push an immediate snapshot after a
@@ -349,6 +351,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
 
   const exit = async (code: number): Promise<never> => {
     await cleanup();
+    diagnostics?.stop(`exit ${code}`);
     // Flush stdout/stderr before exiting: a bare process.exit(1) right after
     // console.error can drop the buffered reason, leaving the app with only
     // "mica 进程已退出（code 1）" and no explanation.
@@ -358,6 +361,13 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     ]);
     process.exit(code);
   };
+
+  // 会话宿主的现场：和桌面运行时的诊断日志落在同一个目录、同一套 JSONL。
+  // 每个宿主自报一条内存（`--session` 就是它的会话 id），父进程那侧的运行时不重复算它。
+  diagnostics = startDiagnostics({
+    host: 'app-server',
+    describe: () => ({ session: sessionId || undefined, turn: currentTurnId || undefined }),
+  });
 
   // 档位要读模型的真实档位，而 models.dev 的磁盘缓存是异步读的：先把元数据等就位，
   // 再解析 effort。否则「只存在于缓存、不在随包种子里」的模型（刚接入的网关模型就是
@@ -703,11 +713,16 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   process.on('unhandledRejection', (reason) => {
     const message = reason instanceof Error ? reason.message : String(reason);
     console.error(`Unhandled rejection: ${message}`);
+    diagnostics?.log.error('unhandledRejection', { error: reason, session: sessionId || undefined });
     writeWarning(sessionId, `Unhandled rejection: ${message}`);
   });
   process.on('uncaughtException', (error) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Uncaught exception: ${message}`, error instanceof Error ? (error.stack ?? '') : '');
+    // 进程马上要退：这条是「为什么死的」唯一的落盘线索（stderr 由父进程兜着，但会随
+    // 进程一起丢——桌面端只保留最后 32KB 在内存里）。
+    diagnostics?.log.error('uncaughtException', { error, session: sessionId || undefined });
+    diagnostics?.stop('uncaughtException');
     try {
       writeNotification(CODEX_NOTIFICATIONS.error, {
         error: { message: `Uncaught exception: ${message}` },

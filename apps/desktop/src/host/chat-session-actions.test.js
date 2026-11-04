@@ -39,4 +39,15 @@ describe('forkSessionSnapshot', () => {
     expect(source.snapshot.usageHistory).toHaveLength(1)
     expect(fork.snapshot).not.toBe(source.snapshot)
   })
+
+  it('forks a fork without stacking the marker', () => {
+    const source = {
+      version: 1,
+      id: 'source',
+      title: '违章处置线上化 (fork)',
+      snapshot: { messages: [] }
+    }
+    const fork = forkSessionSnapshot(source, 'fork-id', '2026-02-01T00:00:00.000Z')
+    expect(fork.title).toBe('违章处置线上化 (fork)')
+  })
 })

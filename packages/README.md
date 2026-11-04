@@ -19,6 +19,7 @@
 - `mica-plugin`：插件生命周期、hooks、service container、host capability context（含委派子代理的 `ctx.subagents` 与对话右侧面板 `ctx.desktop.panel` 两个能力面），类型可选 `maxTurnContinuations` 控制同上下文续跑，以及插件包格式（`plugin.json` 清单、目录加载器、用户插件装载、`writePluginStatus()` 写全部插件的装配结论与宿主、启停状态）；启停是运行期能力：资源按插件登记，`syncPluginState()` 在每轮开始时对齐名单，改完不必重开会话。`AgentObservationEvent` 定义 `agent:observe` 的只读运行观察协议，覆盖运行、请求、工具、用量和终态。
 - `mica-official-plugins`：官方插件目录。清单来自仓库根 `plugins/<id>/plugin.json`，入口静态登记；只想列清单的宿主用 `manifests.js`，避免把插件实现拖进进程。
 - `mica-common`：跨包共享的底层工具，包括图片格式与尺寸识别、`loopArgs.ts` 的 `/loop` 参数解析、`chatQuote.ts` 的「引用对话」文本约定、`promptText.ts` 的消息定位归一化（CLI 与桌面端共用的 `comparableText`）、`capabilities.ts` 的会话能力开关、`todoState.ts` 的待办解析归一化与展示投影（TUI 面板与 desktop 计划 dock 共用）、`btwLimits.ts` 的 By The Way 线程上限（host 判定与抽屉按钮共用）。
+- `mica-diagnostics`：诊断日志的唯一写入器（node-only）。JSONL 落 `resolveLogDir()`、2s 批量 flush、7 天与 256MB 保留策略、环形缓冲与慢操作聚合；`startMemorySampler()` 让每个常驻进程每 30s 上报自己的 `memoryUsage()`，`readPerformanceSummary()` 把渲染采样、通道耗时与进程内存聚合成配置页 Performance 用的形状。桌面运行时、Electron 主进程、`mica app-server`、TUI、`mica exec` 共用这一份。
 - `mica-pty`：PTY 能力包。`PtyDriver` 是基于 node-pty 的测试驱动（Node/vitest 环境）；同时提供内置 `pty_*` 工具的运行时支持（`PtyManager` + Node helper 桥接），Bun 主进程通过 JSONL IPC 使用，node-pty 只在 Node 子进程中加载。
 - `mica-web-shared`：`apps/desktop` renderer 与其运行时共用的纯函数（端口常量与「本机」地址、单端口上的路径约定、时间/token/工具图标与展示名格式化、界面状态的补丁语义、侧栏会话搜索的匹配/高亮/片段、模型用量来源分类与无会话用量账本的解析），无 React、无运行时依赖。
 - `mica-file-mentions`：`@` 文件补全的唯一实现（触发判定、工作区扫描 + 缓存、评分排序、插入文本）。CLI 输入框/插件与 `apps/desktop` 的聊天输入框共用它，纯逻辑在 `rank.ts`，Node 侧扫描在 `search.ts`。

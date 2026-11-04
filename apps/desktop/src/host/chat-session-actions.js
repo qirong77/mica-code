@@ -5,6 +5,9 @@ export function forkSessionSnapshot(session, id, now = new Date().toISOString())
   if (!id || typeof id !== 'string') throw new Error('Invalid fork session id')
   const title =
     typeof session.title === 'string' && session.title.trim() ? session.title.trim() : 'Chat'
+  // fork 一个 fork 不该叠出一串 `(fork) (fork)`：源标题末尾的那一层先摘掉再补一层，
+  // 侧栏里永远是「同一个需求 + 一次分支」。
+  const baseTitle = title.replace(/(?:\s*\(fork\))+$/i, '').trim() || 'Chat'
   const snapshot = structuredClone(session.snapshot)
   // fork 继承对话与上下文，但不继承用量记账：新会话的 token 统计从空开始，否则同一条
   // 请求会同时算在来源会话与 fork 上。`lastUsage` 例外——它描述继承来的上下文占用，
@@ -14,7 +17,7 @@ export function forkSessionSnapshot(session, id, now = new Date().toISOString())
   return {
     ...session,
     id,
-    title: `${title} (fork)`,
+    title: `${baseTitle} (fork)`,
     titleSource: 'manual',
     // fork 是源会话的分支：父会话换成源会话，而不是继承源会话自己的父。
     parentSessionId: session.id,

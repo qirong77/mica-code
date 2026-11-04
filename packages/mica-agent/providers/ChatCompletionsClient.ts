@@ -16,6 +16,7 @@ import { providerContentToAgentContent } from '../core/Content.js';
 import { isRetryableError, withRetry } from '../core/retry.js';
 import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
+import { compactRawUsage } from '@packages/mica-common/rawUsage.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
 import { markProviderOmitsFinishReason, providerOmitsFinishReason } from './finishReasonSupport.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
@@ -25,7 +26,8 @@ import type { ModelClientOptions } from './types.js';
 
 export type ChatCompletionsUsageRecord = AgentUsageRecord & {
   provider: 'openai_chat_completions';
-  rawUsage: NonNullable<OpenAI.Chat.Completions.ChatCompletionChunk['usage']>;
+  /** 压缩后的原始 usage（只留标量与一层明细），见 `mica-common/rawUsage.ts`。 */
+  rawUsage?: Record<string, unknown>;
   promptTokens: number;
 };
 
@@ -190,11 +192,36 @@ export class ChatCompletionsClient extends BaseAgent<
       const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
       const wireMessages = stripImagesForVision(messages, this.supportsVision, this.model);
       const requestTools = this.tools ? this.openaiTools : undefined;
+      // 这一条请求的耗时口径（见 AgentQueryOptions.onRequestEnd）：从发出到流结束，
+      // 首个正文/思考增量的时刻单独记，用来区分「排队久」和「吐得慢」。
+      const requestStartedAt = Date.now();
+      let firstDeltaAt = 0;
+      let requestAttempts = 1;
+      let requestEndSent = false;
+      const finishRequest = (info: { outcome: 'completed' | 'error' | 'aborted'; toolCalls?: number; error?: unknown }): void => {
+        if (requestEndSent || !options?.onRequestEnd) return;
+        requestEndSent = true;
+        try {
+          options.onRequestEnd({
+            durationMs: Date.now() - requestStartedAt,
+            firstTokenMs: firstDeltaAt ? firstDeltaAt - requestStartedAt : undefined,
+            attempts: requestAttempts,
+            outcome: info.outcome,
+            toolCalls: info.toolCalls,
+            error: info.error === undefined ? undefined : String((info.error as Error)?.message || info.error).slice(0, 200),
+          });
+        } catch {
+          // Observation must not interrupt the model request.
+        }
+      };
       try {
         options?.onRequestStart?.({ messageCount: wireMessages.length, tools: requestTools });
       } catch {
         // Observation must not interrupt the model request.
       }
+      // 中止也要有一条 request:end：否则「开了没结束」既可能是被中断、也可能是崩了。
+      const onAbort = () => finishRequest({ outcome: 'aborted' });
+      options?.signal?.addEventListener?.('abort', onAbort, { once: true });
 
       // 与 ResponsesClient 同理：上游（如 krill）过载时返回 HTTP 200 + error JSON，
       // openai-node SDK 把它反序列化成 APIError 在流迭代首帧抛出。重试必须包住
@@ -261,6 +288,7 @@ export class ChatCompletionsClient extends BaseAgent<
               }
               const delta = choice?.delta;
               if (!delta) continue;
+              if (!firstDeltaAt) firstDeltaAt = Date.now();
               if (typeof delta.content === 'string' && delta.content) {
                 attemptHadOutput = true;
                 const textDelta: string =
@@ -329,6 +357,10 @@ export class ChatCompletionsClient extends BaseAgent<
             (canRollbackText ? !attemptHadThinking || this.canRollbackThinking : !attemptHadOutput) &&
             isRetryableError(error),
           onRetry: ({ attempt, error, delayMs }) => {
+            requestAttempts += 1;
+            // 重发之后的首字要重新计时，否则「第一次试了 40s 才失败、重试 2s 有输出」
+            // 会被记成 42s 的首字延迟。
+            firstDeltaAt = 0;
             if (canRollbackText && attemptHadOutput) this.onTextRollback?.();
             totalContent = totalCheckpoint;
             hasStreamedText = streamedCheckpoint;
@@ -346,6 +378,8 @@ export class ChatCompletionsClient extends BaseAgent<
       // request would be committed as an empty assistant message, which the
       // provider rejects on the next request with a 400.
       throwIfQueryStopped(options);
+      options?.signal?.removeEventListener?.('abort', onAbort);
+      finishRequest({ outcome: 'completed', toolCalls: toolCallsMap.size });
 
       for (const { usage, model } of pendingUsage) {
         this.recordUsage(usage, { model, turnId, requestIndex, messageCount: messages.length });
@@ -460,7 +494,7 @@ export class ChatCompletionsClient extends BaseAgent<
       outputTokens,
       totalTokens,
       paidTokenRate,
-      rawUsage: usage,
+      rawUsage: compactRawUsage(usage),
       promptTokens,
     };
 

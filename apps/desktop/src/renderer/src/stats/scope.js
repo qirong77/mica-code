@@ -51,13 +51,11 @@ export function scopeSession(session, range) {
   const modelMap = new Map()
   const sourceMap = new Map()
   let turns = 0
-  let legacyUsageRecords = 0
   let updatedAtMs = 0
   for (const day of days) {
     totals.requests += day.requests
     for (const key of TOKEN_KEYS) totals[key] += day[key]
     turns += day.turns
-    legacyUsageRecords += day.legacy
     if (day.at > updatedAtMs) updatedAtMs = day.at
     for (const model of day.models) {
       const row = modelMap.get(model.model) || { model: model.model, ...emptyTotals() }
@@ -103,8 +101,7 @@ export function scopeSession(session, range) {
     model: modelUsage[0]?.model || session.model,
     // 范围里没有带 turnId 的请求时退回会话总轮数（老记录没有 turnId）。
     turns: turns || session.turns,
-    updatedAtMs,
-    legacyUsageRecords
+    updatedAtMs
   }
 }
 

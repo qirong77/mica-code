@@ -21,6 +21,7 @@
     "packages/mica-mcp",
     "packages/mica-pty",
     "packages/mica-web-shared",
+    "packages/mica-diagnostics",
     "packages/mica-file-mentions",
     "packages/@anthropic/ink/src"
   ],

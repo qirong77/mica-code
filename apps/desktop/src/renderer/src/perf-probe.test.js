@@ -10,7 +10,15 @@ function createHarness({ fetchResult = { ok: true }, memory = true } = {}) {
   let seq = 0
   const clock = { now: 0 }
   const elements = Array.from({ length: 123 }, () => ({}))
-  const rows = Array.from({ length: 7 }, () => ({}))
+  // 页面里同时挂着多个 ChatView（只显示一个）：可见的那个 7 行，隐藏的那个 3 行。
+  // rows 只数可见的那一份，否则「这条会话多长」会被别的页签带偏。
+  const transcripts = [
+    { children: Array.from({ length: 7 }, () => ({})), closest: () => null },
+    {
+      children: Array.from({ length: 3 }, () => ({})),
+      closest: (selector) => (selector === '.hidden' ? {} : null)
+    }
+  ]
 
   const win = {
     performance: {
@@ -40,7 +48,8 @@ function createHarness({ fetchResult = { ok: true }, memory = true } = {}) {
   const doc = {
     visibilityState: 'visible',
     getElementsByTagName: () => elements,
-    querySelectorAll: () => rows
+    querySelectorAll: (selector) => (selector === '.chat-transcript' ? transcripts : []),
+    querySelector: () => ({ getAttribute: () => 'sess-1' })
   }
   return {
     win,
@@ -50,6 +59,7 @@ function createHarness({ fetchResult = { ok: true }, memory = true } = {}) {
     cleared,
     listeners,
     posted,
+    transcripts,
     advance(ms) {
       clock.now += ms
     },
@@ -70,7 +80,9 @@ describe('startPerfProbe', () => {
     const probe = startPerfProbe(harness.win, harness.doc)
     const sample = sampleOf(probe)
     expect(sample.dom).toBe(123)
+    // 隐藏的 ChatView 有 3 行，不能算进来
     expect(sample.rows).toBe(7)
+    expect(sample.sid).toBe('sess-1')
     expect(sample.heapMB).toBe(4)
     expect(sample.vis).toBe(1)
     expect(typeof sample.lag).toBe('number')

@@ -11,7 +11,6 @@ function dayRow(overrides = {}) {
     at: at(2026, 8, 2),
     requests: 2,
     turns: 2,
-    legacy: 0,
     inputTokens: 100,
     cachedInputTokens: 40,
     uncachedInputTokens: 60,
@@ -50,7 +49,6 @@ function session(overrides = {}) {
     uncachedInputTokens: 0,
     outputTokens: 0,
     totalTokens: 0,
-    legacyUsageRecords: 0,
     days: [
       dayRow(),
       dayRow({

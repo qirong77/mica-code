@@ -944,6 +944,22 @@ const HOST_TASK_REQUEST_TIMEOUT_MS = 15_000
 // 插件面板的动作可能要落盘、跑一次外部命令（导出聊天记录）再回视图，所以给它的往返
 // 留更长一点的预算；超时只影响这一次点击，面板本身照旧可用。
 const HOST_PANEL_REQUEST_TIMEOUT_MS = 60_000
+/**
+ * 同一个面板视图在这么短时间内的重复请求合并成一次。
+ *
+ * 页面里有两个消费者（输入框上方那条状态行、打开着的抽屉），抽屉刷新是 4s，比这个窗口
+ * 长，所以合并不会让视图变旧；它挡掉的是「同一秒里两个消费者各问一次」以及多开窗口时
+ * 的重复排队——host 忙时一次请求要等几秒，重复请求会直接排到 60s 超时。
+ */
+const PANEL_VIEW_REUSE_MS = 3_000
+const panelViewCache = new Map()
+
+function prunePanelViewCache() {
+  const now = Date.now()
+  for (const [key, entry] of panelViewCache) {
+    if (now - entry.at >= PANEL_VIEW_REUSE_MS) panelViewCache.delete(key)
+  }
+}
 function hostTaskRequest(run, method, params, { timeoutMs = HOST_TASK_REQUEST_TIMEOUT_MS } = {}) {
   if (!run?.child?.stdin?.writable)
     return Promise.resolve({ ok: false, error: 'chat host 不可用，请重试' })
@@ -1078,6 +1094,11 @@ function spawnChatHost(id, sender, payload) {
 
   child.on('error', (error) => {
     const message = error instanceof Error ? error.message : String(error)
+    logger('host').error('host.spawn-failed', {
+      nodeId: id,
+      sessionId: run.sessionId || run.requestedSessionId || undefined,
+      error
+    })
     if (!run.exitSent) {
       rejectUnansweredTurns(id, run, message)
       postNotify(`${id}:mica`, 'turn.error', {
@@ -1102,6 +1123,18 @@ function spawnChatHost(id, sender, payload) {
       const aborted = run.aborting || signal === 'SIGTERM' || signal === 'SIGINT'
       // stderr 常常在 close 之后才到，退而求其次用退出码，别让错误只剩一句「已退出」。
       const failure = run.stderr.trim() || `mica 进程已退出（code ${exitCode ?? 'null'}）`
+      // 异常退出的现场只留在内存里的 run.stderr 上，进程一走（崩溃、被 OOM 杀、宿主
+      // 自己 exit）就彻底没了。这里补一条落盘记录，事后能回答「它为什么死的」。
+      if (!aborted) {
+        logger('host').warn('host.exit', {
+          nodeId: id,
+          sessionId: run.sessionId || run.requestedSessionId || undefined,
+          exitCode,
+          signal,
+          running: run.running === true,
+          stderr: run.stderr.trim().slice(-2000) || undefined
+        })
+      }
       // host 在应答 turn/start 之前就退出（启动参数被拒绝、进程崩了）：这一轮从未跑过，
       // 撤回乐观气泡，别让用户以为消息已发送、历史里却查不到。
       let rejected = false
@@ -1622,6 +1655,20 @@ function startIdleReaper() {
 function idleReapMs() {
   const raw = Number(process.env.MICA_CHAT_IDLE_REAP_MS)
   return Number.isFinite(raw) && raw > 0 ? raw : IDLE_REAP_MS
+}
+
+/**
+ * 内存采样用的现场：现在挂着几个 app-server、几个在真正干活。
+ *
+ * 「runtime 自己」的 RSS 说明不了问题——占用大头在每个会话宿主的独立进程里，
+ * 每个宿主自己会上报一条（`--session` 就是它的会话 id），这里补上父进程视角的分布。
+ */
+export function describeChatHosts() {
+  let busy = 0
+  for (const run of runs.values()) {
+    if (run.running) busy += 1
+  }
+  return { hosts: runs.size, busy }
 }
 
 /**
@@ -2255,6 +2302,27 @@ export function registerChatIpc() {
     const pluginId = typeof payload?.pluginId === 'string' ? payload.pluginId.trim() : ''
     if (!id) return { ok: false, error: 'chat id 缺失' }
     if (!pluginId) return { ok: false, error: '缺少插件 id' }
+    // 读视图可以被合并：输入框上方那条状态行（30s）与打开着的抽屉（4s）问的是同一份
+    // 视图，页面里也可能同时有快捷条与抽屉两个消费者。短时间内共用一次请求，宿主不用
+    // 为「同一个问题」排几次队（host 忙时一次就要几秒）。动作会清掉它，不返回旧状态。
+    if (method === 'mica/pluginPanel/view') {
+      const key = `${id}\u0000${pluginId}\u0000${payload?.cwd || ''}`
+      const cached = panelViewCache.get(key)
+      if (cached && Date.now() - cached.at < PANEL_VIEW_REUSE_MS) return cached.promise
+      const promise = requestPanelView(event, payload, id, pluginId)
+      prunePanelViewCache()
+      panelViewCache.set(key, { at: Date.now(), promise })
+      return promise
+    }
+    panelViewCache.clear()
+    return requestPanelView(event, payload, id, pluginId, {
+      action: typeof payload?.action === 'string' ? payload.action : '',
+      key: typeof payload?.key === 'string' ? payload.key : '',
+      values: payload?.values && typeof payload.values === 'object' ? payload.values : {}
+    })
+  }
+
+  const requestPanelView = (event, payload, id, pluginId, actionFields = null) => {
     const ensured = ensureCapabilityRun(id, event, {
       sessionId: payload?.sessionId,
       cwd: payload?.cwd
@@ -2262,17 +2330,8 @@ export function registerChatIpc() {
     if (!ensured.run) return { ok: false, error: ensured.error }
     return hostTaskRequest(
       ensured.run,
-      method,
-      {
-        pluginId,
-        ...(method === 'mica/pluginPanel/action'
-          ? {
-              action: typeof payload?.action === 'string' ? payload.action : '',
-              key: typeof payload?.key === 'string' ? payload.key : '',
-              values: payload?.values && typeof payload.values === 'object' ? payload.values : {}
-            }
-          : {})
-      },
+      actionFields ? 'mica/pluginPanel/action' : 'mica/pluginPanel/view',
+      { pluginId, ...(actionFields || {}) },
       { timeoutMs: HOST_PANEL_REQUEST_TIMEOUT_MS }
       // 载荷在信封的 `result` 里；渲染层读的是 `{ ok, view }` / `{ ok, error }`。
     ).then(unwrapHostResult)

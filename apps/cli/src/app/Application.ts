@@ -40,6 +40,7 @@ import { finalizeInteractiveUi } from './finalizeInteractiveUi.js';
 import setupFilePlugins from '@packages/mica-builtin-commands/startup/file-plugins.js';
 import validateConfigPlugin from '@packages/mica-builtin-commands/startup/validate-config.js';
 import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
+import { startDiagnostics, type DiagnosticsHandle } from '../diagnostics/index.js';
 
 export class Application {
   private renderInstance: Awaited<ReturnType<typeof wrappedRender>> | null = null;
@@ -47,6 +48,7 @@ export class Application {
   private stopPromise: Promise<void> | null = null;
   private subagentTasks: SubagentTaskManager | null = null;
   private pluginSubagents: ReturnType<typeof createPluginSubagentHost> | null = null;
+  private diagnostics: DiagnosticsHandle | null = null;
 
   constructor(private readonly options: { sessionId?: string } = {}) {}
 
@@ -64,6 +66,16 @@ export class Application {
   }
 
   async start(): Promise<void> {
+    // TUI 也是常驻宿主：长跑会话的内存与启动耗时同样需要事后可查。
+    // 会话 id 在 resume/新建之后才有，这里用闭包现场取。
+    const diagnostics = startDiagnostics({
+      host: 'tui',
+      describe: () => ({
+        session: this.context?.agentSessions.current().sessionController.getCurrentSessionId() || undefined,
+        model: micaConfig.get().model || undefined,
+      }),
+    });
+    this.diagnostics = diagnostics;
     const sessionStore = micaSession.createStore();
     let startupSession = this.options.sessionId ? sessionStore.load(this.options.sessionId) : null;
     const missingStartupSessionId = this.options.sessionId && !startupSession ? this.options.sessionId : null;
@@ -393,6 +405,7 @@ export class Application {
     const sessionController = this.context?.agentSessions.current().sessionController;
     const saved = sessionController?.saveCurrent() ?? false;
     const sessionId = saved ? sessionController?.getCurrentSessionId() : undefined;
+    this.diagnostics?.stop(`exit ${exitCode}`);
     await this.stop();
     finalizeInteractiveUi(this.renderInstance);
     if (sessionId && process.stdout.isTTY) {

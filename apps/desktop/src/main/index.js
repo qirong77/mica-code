@@ -14,6 +14,7 @@ import { RUNTIME_PORT_ENV, loopbackRuntimeUrl, parseRuntimePort } from '@package
 // 上面那个「端口上是不是我们自己的运行时」的 probeRuntime 区分而改名
 import { probeRuntime as probeRemoteRuntime } from '../host/runtime-probe-core.js'
 import { appPageKey, isAppPageTarget, relayEntryKey } from './app-page-target.js'
+import { flushLogs, logger, startMemorySampler } from '@packages/mica-diagnostics/index.js'
 
 /**
  * Electron 外壳。
@@ -38,8 +39,11 @@ const RUNTIME_ENTRY = join(__dirname, '../server/index.mjs')
  */
 function publishableRendererDir() {
   const candidates = [
-    join(__dirname, '../renderer'),
-    join(process.resourcesPath || '', 'app.asar.unpacked', 'out', 'renderer')
+    // 打包后优先取解包出来的真实目录：它既是外部进程唯一读得到的一份，也不经过 asar
+    // 索引——索引在进程启动时就固定了，之后重新构建产物，旧进程只看得到旧文件名，
+    // 页面引用的新 chunk 于是全变成 404（分享链接在浏览器里打不开就是这么来的）。
+    join(process.resourcesPath || '', 'app.asar.unpacked', 'out', 'renderer'),
+    join(__dirname, '../renderer')
   ]
   return candidates.find((dir) => dir && existsSync(join(dir, 'index.html'))) || ''
 }
@@ -775,8 +779,71 @@ function createWindow(url, { primary = false, frameName = '' } = {}) {
 
 /* ---------------------------------------------------------------- 生命周期 */
 
+/**
+ * 主进程的诊断：内存分布 + 崩溃现场。
+ *
+ * 页面白屏 / 卡死（renderer OOM、GPU 崩、utility 崩）此前只会在控制台打一行，
+ * 关掉窗口就没了。这里把它们写进与运行时同一套 JSONL（`~/Library/Logs/mica`）：
+ * 一条 60s 的进程内存分布（按 Electron 的进程类型），加上三类崩溃事件。
+ */
+function startMainDiagnostics() {
+  const log = logger('main')
+  log.info('boot', {
+    pid: process.pid,
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    node: process.version
+  })
+
+  startMemorySampler({
+    host: 'main',
+    intervalMs: 60_000,
+    describe: () => {
+      // app-server 不在这份表里（它是我们自己的子进程，各自上报 mem），
+      // 所以这里是「外壳 + 页面 + GPU + utility」的分布。
+      const byType = {}
+      try {
+        for (const metric of app.getAppMetrics()) {
+          const mb = Math.round((metric.memory?.workingSetSize || 0) / 1024)
+          byType[metric.type] = (byType[metric.type] || 0) + mb
+        }
+      } catch {
+        // 指标读不到就只留主进程自己的 memoryUsage
+      }
+      return { windows: BrowserWindow.getAllWindows().length, byType }
+    }
+  })
+
+  app.on('render-process-gone', (_event, contents, details) => {
+    log.error('render-process-gone', {
+      url: (contents && contents.getURL ? contents.getURL() : '').slice(0, 200),
+      reason: details && details.reason,
+      exitCode: details && details.exitCode
+    })
+    flushLogs()
+  })
+  app.on('child-process-gone', (_event, details) => {
+    log.error('child-process-gone', {
+      type: details && details.type,
+      reason: details && details.reason,
+      exitCode: details && details.exitCode
+    })
+    flushLogs()
+  })
+  // 必须在开窗之前注册，否则第一个窗口的 webContents 漏掉。
+  app.on('web-contents-created', (_event, contents) => {
+    const url = () => (contents.getURL ? contents.getURL() : '').slice(0, 200)
+    contents.on('unresponsive', () => {
+      log.warn('unresponsive', { url: url() })
+      flushLogs()
+    })
+    contents.on('responsive', () => log.info('responsive', { url: url() }))
+  })
+}
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.mica.code')
+  startMainDiagnostics()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -876,6 +943,8 @@ app.on('before-quit', () => {
   app.setBadgeCount(0)
   if (process.platform === 'darwin' && app.dock) app.dock.setBadge('')
   for (const state of windows) stopUnreadWatcher(state)
+  logger('main').info('quit')
+  flushLogs()
 })
 
 // 服务（浏览器、终端、系统检查）只在确定退出时拆。放在 `before-quit` 里的话，一旦这次退出被取消

@@ -136,7 +136,6 @@ export function normalizeUsageEvent(usage, fallbackTime, fallbackModel) {
       typeof usage.usageId === 'string' && usage.usageId.trim() ? usage.usageId.trim() : null,
     identity: usageIdentity(usage),
     occurredAtMs: occurredAtMs ?? fallbackTime,
-    dateAccuracy: occurredAtMs == null ? 'session-created' : 'exact',
     model: usage.model || fallbackModel || 'Unknown',
     turnId: Number.isInteger(usage.turnId) ? usage.turnId : null,
     inputTokens,
@@ -203,8 +202,8 @@ export function parseSessionEvents(raw) {
   const subagentEvents = []
   for (const record of subagentRecords) {
     const recordModel = record.model || snap.model
-    // Subagent requests rarely carry occurredAt on legacy records; the task's
-    // startedAt is closer to the true request time than the session createdAt.
+    // 子代理请求缺 occurredAt（旧数据未清洗）时退回任务开始时间：它比会话创建时间
+    // 更接近真实请求时间。
     const recordStartMs = validTime(record.startedAt) ?? createdAtMs
     const source = usageSourceOf(record)
     const requests = Array.isArray(record.requests)
@@ -260,7 +259,6 @@ function dayRow(day) {
     at: 0,
     ...emptyTokenTotals(),
     turns: new Set(),
-    legacy: 0,
     models: new Map(),
     sources: new Map()
   }
@@ -285,7 +283,6 @@ export function summarizeStatsDays(usageEvents) {
     if (usage.occurredAtMs > row.at) row.at = usage.occurredAtMs
     addTokens(row, usage)
     if (Number.isInteger(usage.turnId)) row.turns.add(usage.turnId)
-    if (usage.dateAccuracy !== 'exact') row.legacy += 1
 
     let model = row.models.get(usage.model)
     if (!model) {
@@ -335,13 +332,11 @@ export function summarizeStatsDays(usageEvents) {
 export function summarizeStatsSession(session, usageEvents) {
   const days = summarizeStatsDays(usageEvents)
   const totals = emptyTokenTotals()
-  let legacyUsageRecords = 0
   for (const day of days) {
     totals.requests += day.requests
     for (const key of TOKEN_KEYS) totals[key] += day[key]
-    legacyUsageRecords += day.legacy
   }
-  return { ...session, ...totals, legacyUsageRecords, days }
+  return { ...session, ...totals, days }
 }
 
 /**

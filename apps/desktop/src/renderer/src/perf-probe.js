@@ -1,13 +1,16 @@
-// 渲染层性能探针：每秒采一个点，每 15 秒整批落到系统 temp（开机自动清空）。
+// 渲染层性能探针：每秒采一个点，每 15 秒整批交给运行时落盘
+// （`host/perf.js` → `~/Library/Logs/mica/perf-YYYYMMDD.jsonl`，保留 7 天）。
 //
 // 为什么不筛选：只记录"异常"会漏掉用户主观觉得卡、但没越过阈值的时刻，
-// 也拿不到卡顿之前的前文。全量记录的成本是每 15 秒一次本地 append，
-// 写的是 tmpdir，不用维护保留策略。
+// 也拿不到卡顿之前的前文。全量记录的成本是每 15 秒一次本地 append。
 //
 // 采的三类指标对应"卡"的三种成因：
 // - lag：定时器实际间隔 vs 预期，直接反映主线程被占住多久（卡顿最直接的证据）
 // - long：PerformanceObserver 的 longtask（>50ms 的任务块）与最长一次
 // - heap/dom/rows：堆大小、DOM 节点数、对话行数，用来判断"是不是会话太长"
+// - sid：当前可见会话的 id。页面里同时挂着多个 ChatView（`chat-cache` 保留 5 个），
+//   DOM 是它们叠起来的，不带会话 id 的 `dom`/`rows` 回答不了「哪条会话占了 3 万节点」。
+//   `rows` 只数**可见**那个对话的记录行，面板里看到的才是「这条会话多长」。
 //
 // 错误采集在 log-probe.js（scope=renderer），这里只负责计时，避免两处重复记录。
 const INVOKE = '/api/invoke'
@@ -24,11 +27,24 @@ function round(value, digits = 1) {
 }
 
 function domStats(doc) {
-  const rows = doc.querySelectorAll('.chat-transcript > *')
+  const transcripts = doc.querySelectorAll('.chat-transcript')
+  // 可见的那个对话：隐藏的 ChatView 带 `hidden` 类，它们的记录行不该算进「这条会话多长」。
+  let visibleRows = 0
+  for (const node of transcripts) {
+    if (node.closest('.hidden') || node.closest('[hidden]')) continue
+    visibleRows += node.children.length
+  }
+  const rows = transcripts.length === 1 ? transcripts[0].children.length : visibleRows
   return {
     dom: doc.getElementsByTagName('*').length,
-    rows: rows.length
+    rows
   }
+}
+
+/** 当前可见会话的 id（`ChatView` 挂在根节点的 `data-perf-session` 上）。 */
+function activeSessionId(doc) {
+  const node = doc.querySelector('.chat-view[data-perf-session]')
+  return node?.getAttribute('data-perf-session') || undefined
 }
 
 function heapStats(win) {
@@ -57,6 +73,7 @@ export function startPerfProbe(win, doc) {
   let longMax = 0
   let dropped = 0
   let domStatsCache = { dom: 0, rows: 0 }
+  let sid
   let domTick = DOM_STATS_EVERY
 
   // longtask 拿不到归属细节没关系，关键是"这一秒里主线程被占了多少次"。
@@ -98,6 +115,7 @@ export function startPerfProbe(win, doc) {
     // 只在需要时量 DOM，其余采样复用上次结果
     if (domTick >= DOM_STATS_EVERY) {
       domStatsCache = domStats(doc)
+      sid = activeSessionId(doc)
       domTick = 0
     }
     domTick += 1
@@ -107,6 +125,7 @@ export function startPerfProbe(win, doc) {
       longN: longCount,
       ...domStatsCache,
       ...(heapStats(win) || {}),
+      ...(sid ? { sid } : {}),
       vis: visible ? 1 : 0
     })
     // longtask 计数按窗口统计，别累加成全局总量

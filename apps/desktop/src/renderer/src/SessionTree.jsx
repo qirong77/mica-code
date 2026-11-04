@@ -23,6 +23,7 @@ import { collectGroupStates, liveSessionRowState, mergeRowStates } from './sessi
 import { byUpdatedDesc, orderSessions, resolveDrop, rowDropPosition } from './session-dnd'
 import { groupRecentRows } from './recent-buckets'
 import { orderRecentDrafts } from './recent-drafts'
+import { planSessionReveal } from './session-reveal'
 import {
   nestSessions,
   paginateSessionTrees,
@@ -89,6 +90,18 @@ const dropShadow = 'inset 0 0 0 1px rgba(90,167,232,.9)'
 const RECENT_PREVIEW_LIMIT = 6
 
 const RECENT_PAGE_SIZE = 10
+
+/** 侧栏里「就是这一条」的闪烁时长：够看清位置，又不至于一直亮着抢注意力。 */
+const REVEAL_FLASH_MS = 1600
+
+/** 行上的定位键 → 选择器。会话 id / 草稿节点 id 都是 ASCII，保险起见仍过一遍转义。 */
+function revealRowSelector(key) {
+  const escaped =
+    typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(key)
+      : String(key).replace(/["\\]/g, '\\$&')
+  return `[data-reveal-key="${escaped}"]`
+}
 
 /** 正文搜索的防抖：每次按键都往运行时发一趟请求太吵，慢响应还会互相覆盖。 */
 const SESSION_SEARCH_DEBOUNCE_MS = 220
@@ -383,6 +396,7 @@ export function SessionTree({
   loops,
   annotations,
   sessionMenuPlugins,
+  sidebarIntent,
   onOpenSession,
   onSelectDraft,
   onTogglePin,
@@ -431,6 +445,12 @@ export function SessionTree({
   )
   const collapsedChildren = useMemo(() => new Set(collapsedChildIds), [collapsedChildIds])
   const [recentLimit, setRecentLimit] = useState(RECENT_PREVIEW_LIMIT)
+  // 「在侧栏里定位到这条会话」：⌘P 打开的会话可能在折叠的分区/分组里、被 Recent 的
+  // 分页截掉，或者干脆滚出了视野。定位做三件事——展开、滚进视野、闪一下。
+  const [reveal, setReveal] = useState(null) // { key, nonce }
+  const pendingRevealRef = useRef(null)
+  const [revealTick, setRevealTick] = useState(0)
+  const treeScrollRef = useRef(null)
   const [drag, setDrag] = useState(null) // { kind: 'session'|'draft'|'group', id, section, groupId }
   const [over, setOver] = useState(null) // { section, id?, groupId?, position?, cross?, header? }
   const tokens = useMemo(() => tokenizeSearchQuery(query), [query])
@@ -487,6 +507,130 @@ export function SessionTree({
   )
   // 时间分桶只影响 Recent 的呈现顺序：结构（父子）不变，桶标题插在根会话之前。
   const recentBlocks = useMemo(() => groupRecentRows(recentRows), [recentRows])
+
+  /**
+   * 排队一次「定位到这条会话」。搜索结果还在占着列表时不立刻做——那时树根本没渲染，
+   * 展开什么都看不见；请求先挂着，等查询清掉再落地。
+   */
+  const queueReveal = useCallback((target) => {
+    if (!target?.sessionId && !target?.nodeId) return
+    pendingRevealRef.current = target
+    setRevealTick((value) => value + 1)
+  }, [])
+
+  // 宿主发来的侧栏意图：⌘K 聚焦搜索框 / ⌘P 打开会话后定位到它在树里的位置。
+  // 侧栏可能正处于收起（桌面）或抽屉关闭（手机）状态，所以聚焦放到下一帧：
+  // 那一帧容器已经可见，`focus()` 才不会被 `visibility: hidden` 吃掉。
+  useEffect(() => {
+    if (!sidebarIntent?.nonce) return
+    if (sidebarIntent.kind === 'reveal') {
+      queueReveal({ sessionId: sidebarIntent.sessionId })
+      return
+    }
+    const focusSearch = () => {
+      const input = searchInputRef.current
+      if (!input) return
+      input.focus()
+      input.select()
+    }
+    const frame = requestAnimationFrame(() => {
+      focusSearch()
+      // 侧栏刚展开时这一帧里容器可能还没完成布局，再补一次。
+      requestAnimationFrame(() => {
+        if (document.activeElement !== searchInputRef.current) focusSearch()
+      })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [queueReveal, sidebarIntent?.kind, sidebarIntent?.nonce, sidebarIntent?.sessionId])
+
+  // 定位的落地：把挡住它的分区 / 分组 / 父会话 / Recent 分页依次展开。
+  useEffect(() => {
+    const request = pendingRevealRef.current
+    if (!request) return
+    if (searching) return
+    pendingRevealRef.current = null
+    const plan = planSessionReveal({
+      sessionId: request.sessionId || null,
+      nodeId: request.nodeId || null,
+      draftGroupId: request.nodeId ? draftGroups?.[request.nodeId] || null : null,
+      sessions,
+      pins,
+      projects,
+      collapsedSections,
+      collapsedGroups,
+      collapsedChildren: collapsedChildIds,
+      recentCandidates,
+      recentLimit
+    })
+    if (!plan) return
+    if (plan.expandSection) {
+      setCollapsedSections((prev) =>
+        prev[plan.section] ? { ...prev, [plan.section]: false } : prev
+      )
+    }
+    if (plan.expandGroups.length) {
+      setCollapsedGroups((prev) => {
+        if (!plan.expandGroups.some((id) => prev[id])) return prev
+        const next = { ...prev }
+        for (const id of plan.expandGroups) next[id] = false
+        return next
+      })
+    }
+    if (plan.expandParents.length) {
+      setCollapsedChildIds((prev) => {
+        if (!plan.expandParents.some((id) => prev.includes(id))) return prev
+        return prev.filter((id) => !plan.expandParents.includes(id))
+      })
+    }
+    if (plan.recentLimit) setRecentLimit((value) => Math.max(value, plan.recentLimit))
+    setReveal({ key: plan.key, nonce: revealTick })
+  }, [
+    collapsedChildIds,
+    collapsedGroups,
+    collapsedSections,
+    draftGroups,
+    pins,
+    projects,
+    recentCandidates,
+    recentLimit,
+    revealTick,
+    searching,
+    sessions,
+    setCollapsedChildIds,
+    setCollapsedGroups,
+    setCollapsedSections
+  ])
+
+  // 展开是异步的（要等这一轮渲染把行画出来），所以滚进视野放在下一帧再找；
+  // 展开链路多时一帧不够，给几帧余量，行始终没出现就放弃（数据变了，别死缠）。
+  useEffect(() => {
+    if (!reveal?.key) return undefined
+    let cancelled = false
+    let frame = 0
+    let attempts = 0
+    const tick = () => {
+      if (cancelled) return
+      const row = treeScrollRef.current?.querySelector(revealRowSelector(reveal.key))
+      if (row instanceof HTMLElement) {
+        row.scrollIntoView({ block: 'nearest' })
+        return
+      }
+      attempts += 1
+      if (attempts <= 20) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(frame)
+    }
+  }, [reveal])
+
+  // 闪烁只亮一下：给一条「它在这儿」的线索，之后恢复常态。
+  useEffect(() => {
+    if (!reveal?.key) return undefined
+    const timer = setTimeout(() => setReveal(null), REVEAL_FLASH_MS)
+    return () => clearTimeout(timer)
+  }, [reveal])
 
   const groupSessions = useMemo(() => {
     const map = new Map()
@@ -746,35 +890,20 @@ export function SessionTree({
       if (!item) return
       if (item.kind === 'draft') {
         if (item.draft) onSelectDraft?.(item.draft)
+        if (item.draft) queueReveal({ nodeId: item.draft.id })
         return
       }
       // 只有「正文里真的命中」才带关键词去定位：草稿的词在输入框里，纯标题命中（snippet 为空）
       // 的会话正文里没有这串文字，两种情况带过去都只会得到一个 0 命中的查找条。
       const find = tokens.length && item.snippet ? { find: tokens } : undefined
-      if (item.session) onOpenSession?.(item.session, find)
+      if (item.session) {
+        onOpenSession?.(item.session, find)
+        // 搜索把列表换成了结果行，定位要等查询清掉（那时树才画出来），见 queueReveal。
+        queueReveal({ sessionId: item.session.id })
+      }
     },
-    [onOpenSession, onSelectDraft, tokens]
+    [onOpenSession, onSelectDraft, queueReveal, tokens]
   )
-
-  // ⌘/Ctrl+K 聚焦搜索框。终端与输入框里 Cmd+K 有自己的含义（清屏 / 删到行尾），不抢。
-  useEffect(() => {
-    const onKey = (event) => {
-      if (event.repeat || event.altKey || event.shiftKey) return
-      if (!(event.metaKey || event.ctrlKey)) return
-      if (String(event.key || '').toLowerCase() !== 'k') return
-      const target = event.target
-      if (
-        target instanceof HTMLElement &&
-        (target.tagName === 'TEXTAREA' || target.closest('.xterm'))
-      )
-        return
-      event.preventDefault()
-      searchInputRef.current?.focus()
-      searchInputRef.current?.select()
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [])
 
   const openMenu = (event, payload) => {
     event.preventDefault()
@@ -1020,10 +1149,12 @@ export function SessionTree({
     // 与「在等下一次触发」，两种状态都点亮图标。
     const loop = loopBySession.get(session.id) || null
     const loopRunning = state === 'running'
+    const flashing = reveal?.key === `s:${session.id}`
     return (
       <li key={session.id}>
         <div
-          className={`${rowClass} relative ${active ? 'bg-active text-fg-max' : 'text-nav-fg'} ${draggingThis ? 'opacity-40' : ''}`}
+          data-reveal-key={`s:${session.id}`}
+          className={`${rowClass} relative ${active ? 'bg-active text-fg-max' : 'text-nav-fg'} ${draggingThis ? 'opacity-40' : ''} ${flashing ? 'session-row-flash' : ''}`}
           style={{
             paddingLeft: rowIndent(indent) + childDepth * NEST_STEP,
             boxShadow: isOver
@@ -1161,10 +1292,12 @@ export function SessionTree({
     const dropSection = groupId ? 'project' : 'recent'
     const isOver = rowOverState(dropSection, node.id, groupId)
     const items = draftMenuItems()
+    const flashing = reveal?.key === `d:${node.id}`
     return (
       <li key={node.id}>
         <div
-          className={`${rowClass} ${active ? 'bg-active text-fg-max' : 'text-nav-fg'} ${drag?.kind === 'draft' && drag.id === node.id ? 'opacity-40' : ''}`}
+          data-reveal-key={`d:${node.id}`}
+          className={`${rowClass} ${active ? 'bg-active text-fg-max' : 'text-nav-fg'} ${drag?.kind === 'draft' && drag.id === node.id ? 'opacity-40' : ''} ${flashing ? 'session-row-flash' : ''}`}
           style={{
             paddingLeft: rowIndent(indent),
             boxShadow: isOver ? dropShadow : undefined
@@ -1562,7 +1695,7 @@ export function SessionTree({
 
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-2 no-drag">
+      <div ref={treeScrollRef} className="min-h-0 flex-1 overflow-auto px-2 pb-2 no-drag">
         {/* 搜索框钉在滚动容器顶部：会话一多就要往下滚，搜索框跟着滚出去的话，想搜索
             还得先滚回顶部。`-mx-2 px-2` 让底色铺满整条，滚过去的内容不会从两侧透出来。 */}
         <div className="sticky top-0 z-10 -mx-2 mb-1.5 bg-panel px-2 pt-0.5 pb-1.5">

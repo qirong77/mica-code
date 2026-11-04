@@ -68,7 +68,19 @@ export function SessionQuickOpen({
   const activeIndex = items.length ? Math.min(active, items.length - 1) : -1
 
   useEffect(() => {
-    inputRef.current?.focus()
+    const focus = () => {
+      const input = inputRef.current
+      if (!input) return
+      input.focus()
+      input.select()
+    }
+    focus()
+    // 挂载这一帧别处（终端、编辑器）可能刚把焦点拿回去：下一帧确认一次，
+    // 否则浮层开着、字却打在对话输入框里。
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement !== inputRef.current) focus()
+    })
+    return () => cancelAnimationFrame(frame)
   }, [])
 
   // 结果变了之后选中项可能已经不在列表里，收敛回最后一条。

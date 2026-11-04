@@ -845,6 +845,12 @@ export class AgentRuntime {
               ...(info.tools === undefined ? {} : { tools: cloneJson(info.tools) }),
             });
           },
+          onRequestEnd: (info) => {
+            if (!this.isCurrent(runId)) return;
+            // 请求级耗时：turn 级的 `run:finish` 只说整轮花了多久，回答不了「这一轮是
+            // 排队久、还是首字慢、还是重试拖的」。观察方据此算 TTFT 与重试代价。
+            this.observeActive({ type: 'request:end', ...info });
+          },
           onRetry: (info) => {
             if (!this.isCurrent(runId)) return;
             this.observeActive({

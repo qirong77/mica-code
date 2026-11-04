@@ -11,6 +11,7 @@ import {
   pluginPanelTabs,
   prunePluginPanelCache,
   quickbarMenuItems,
+  quickbarMenuTable,
   readMenuCache,
   readPanelView,
   writePanelView,
@@ -282,27 +283,41 @@ describe('quickbarMenuItems', () => {
     expect(items.map((item) => item.label)).toEqual(['同步频道', '频道设置'])
   })
 
-  test('动态分组取视图里同名的那一块，没动作的条目丢掉', () => {
-    const shortcut = { label: 'Pull Request', menu: 'reviews' }
-    const view = {
-      menus: {
-        reviews: [
-          { label: 'sass · demand-a', detail: 'diff master', action: 'review.open', key: 'w1' },
-          { label: '缺动作' }
-        ]
-      }
-    }
-    expect(quickbarMenuItems(shortcut, view)).toEqual([
-      { label: 'sass · demand-a', detail: 'diff master', action: 'review.open', key: 'w1' }
-    ])
+  test('清单里没有子项时就是空列表：动态菜单是表格，不走这一条', () => {
+    expect(quickbarMenuItems({ label: 'PR', menu: 'reviews' })).toEqual([])
+    expect(quickbarMenuItems({ label: '频道', items: 'nope' })).toEqual([])
+  })
+})
+
+describe('quickbarMenuTable', () => {
+  const table = {
+    columns: [
+      { key: 'project', label: '项目' },
+      { key: 'branch', label: '分支', grow: true }
+    ],
+    rows: [
+      { key: 'sass', action: 'review.open', cells: { project: { text: 'sass' } } },
+      { cells: { project: { text: '缺动作' } } }
+    ]
+  }
+
+  test('取视图里同名的那张表，缺 action 的行丢掉', () => {
+    expect(quickbarMenuTable({ menus: { reviews: table } }, 'reviews')).toEqual({
+      columns: table.columns,
+      rows: [table.rows[0]]
+    })
   })
 
-  test('视图还没回来、菜单名不存在、条目不是数组都退化成空列表', () => {
-    expect(quickbarMenuItems({ label: 'PR', menu: 'reviews' }, undefined)).toEqual([])
-    expect(quickbarMenuItems({ label: 'PR', menu: 'reviews' }, { menus: { other: [] } })).toEqual(
-      []
+  test('视图还没回来、菜单名不存在、形状不对都退化成空表', () => {
+    const empty = { columns: [], rows: [] }
+    expect(quickbarMenuTable(undefined, 'reviews')).toEqual(empty)
+    expect(quickbarMenuTable({ menus: { other: table } }, 'reviews')).toEqual(empty)
+    expect(quickbarMenuTable({ menus: { reviews: { columns: [], rows: table.rows } } }, 'reviews')).toEqual(
+      empty
     )
-    expect(quickbarMenuItems({ label: '频道', items: 'nope' }, {})).toEqual([])
+    expect(quickbarMenuTable({ menus: { reviews: { columns: table.columns, rows: [] } } }, 'reviews')).toEqual(
+      empty
+    )
   })
 })
 

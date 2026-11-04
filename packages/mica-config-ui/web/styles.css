@@ -6366,6 +6366,71 @@ html[data-theme='light'] .mica-config-ui {
     list-style: none;
   }
 
+  /* 进程内存：宿主名 · 条形（相对最大的那个） · 当前值与峰值。 */
+  .perf-memory {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .perf-memory-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) minmax(80px, 2fr) minmax(110px, auto);
+    gap: 10px;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .perf-memory-host {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    color: var(--text);
+    font-size: var(--text-aux);
+  }
+
+  .perf-memory-meta {
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .perf-memory-bar {
+    display: block;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--line-soft);
+    overflow: hidden;
+  }
+
+  .perf-memory-fill {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--blue);
+  }
+
+  .perf-memory-fill-bad {
+    background: var(--red);
+  }
+
+  .perf-memory-value {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    align-items: flex-end;
+    color: var(--text-soft);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+  }
+
   .perf-event-row {
     display: grid;
     grid-template-columns: 64px auto minmax(60px, 90px) minmax(0, 1.4fr) minmax(0, 1fr);
@@ -6403,6 +6468,15 @@ html[data-theme='light'] .mica-config-ui {
 
     .perf-event-row .perf-event-meta {
       grid-column: 1 / -1;
+    }
+
+    /* 窄容器：条形图退场，只留「谁 · 多少」。 */
+    .perf-memory-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .perf-memory-bar {
+      display: none;
     }
   }
 }

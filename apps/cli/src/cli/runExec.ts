@@ -14,6 +14,7 @@ import { HeadlessTurnExecutor, MAX_TURN_RETRIES, REMOTE_TURN_MESSAGE } from '../
 import { SessionController } from '../session/SessionController.js';
 import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPluginHost.js';
 import { resolveRuntimeConfigOverride } from './modelCatalog.js';
+import { startDiagnostics } from '../diagnostics/index.js';
 
 export type HeadlessExecOptions = {
   prompt: string;
@@ -57,6 +58,9 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
   let text = '';
   let errorMessage: string | undefined;
   const disposeModelEffortContext = setupModelEffortContext();
+  // 一次性命令默认只留 warn 以上、不采样内存：每次调用都建一个文件并不划算，
+  // 但失败原因必须留得下（终端里的 stderr 关了窗口就没了）。
+  const diagnostics = startDiagnostics({ host: 'exec', memory: false });
 
   const onAbort = () => executor?.abort();
   options.signal?.addEventListener('abort', onAbort, { once: true });
@@ -243,6 +247,8 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     return resultFor(status, sessionId || options.sessionId || '', text, errorMessage);
   } finally {
     options.signal?.removeEventListener('abort', onAbort);
+    diagnostics.log.info('exec.finished', { status, session: sessionId || undefined });
+    diagnostics.stop(`exec ${status}`);
     projector?.dispose();
     await cleanup('stop subagents', () => subagentTasks?.stop());
     await Promise.all([

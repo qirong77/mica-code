@@ -4,6 +4,7 @@ import btwSetup from '../../plugins/btw/index.js';
 import commitSetup from '../../plugins/commit/index.js';
 import computerUseSetup from '../../plugins/computer-use/index.js';
 import connectionsSetup from '../../plugins/connections/index.js';
+import evolutionSetup from '../../plugins/evolution/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
@@ -44,6 +45,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   subagent: subagentSetup,
   'computer-use': computerUseSetup,
   connections: connectionsSetup,
+  evolution: evolutionSetup,
   'mobile-relay': mobileRelaySetup,
   schedule: scheduleSetup,
 };

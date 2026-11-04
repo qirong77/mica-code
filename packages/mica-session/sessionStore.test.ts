@@ -292,6 +292,48 @@ describe('SessionStore.replaceValidated', () => {
     ).toBeUndefined();
   });
 
+  it('trims the raw provider usage it reads back from disk', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const session = makeSession('usage', '/tmp', '2026-01-01T00:00:00.000Z');
+    session.snapshot.usageHistory = [
+      ({
+        provider: 'openai_responses',
+        turnId: 1,
+        requestIndex: 1,
+        messageCount: 3,
+        inputTokens: 10,
+        outputTokens: 2,
+        totalTokens: 12,
+        paidTokenRate: 0.8,
+        // 老会话里存的正是这个形状：网关逐条回传的归因，单条能到 200KB。
+        rawUsage: {
+          prompt_tokens: 10,
+          prompt_tokens_details: { cached_tokens: 4 },
+          attribution: { items: [{ id: 'a', tokens: 10 }] },
+        },
+      } as unknown) as (typeof session.snapshot.usageHistory)[number],
+    ];
+    session.snapshot.subagentUsageHistory = [
+      { ...session.snapshot.usageHistory[0], taskId: 't1', subagentType: 'Explore', description: 'x', status: 'completed' },
+    ] as never;
+
+    const parsed = parsePersistedSession(session);
+    // rawUsage 是 provider adapter 写进记录的额外字段（类型上不属于 AgentUsageRecord）。
+    const rawOf = (record: unknown) => (record as { rawUsage?: unknown }).rawUsage;
+    // usage 数字一个不丢，只把没人读的归因裁掉——文件因此回到真实大小。
+    expect(parsed?.snapshot.usageHistory[0]).toMatchObject({ inputTokens: 10, outputTokens: 2, totalTokens: 12 });
+    expect(rawOf(parsed?.snapshot.usageHistory[0])).toEqual({
+      prompt_tokens: 10,
+      prompt_tokens_details: { cached_tokens: 4 },
+      truncated: true,
+    });
+    expect(rawOf(parsed?.snapshot.subagentUsageHistory?.[0])).toEqual({
+      prompt_tokens: 10,
+      prompt_tokens_details: { cached_tokens: 4 },
+      truncated: true,
+    });
+  });
+
   it('round-trips and sanitizes active thinking using the same rules as interrupted thinking', async () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-active-thinking-'));
     try {

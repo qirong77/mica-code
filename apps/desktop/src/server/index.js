@@ -34,6 +34,7 @@ import { readRemoteAccessPolicy, setRemoteAccessPort } from '../host/remote-acce
 import { createNotifyServer } from '../host/notifyServer.js'
 import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from '../host/terminals.js'
 import {
+  describeChatHosts,
   disposeAllChatRuns,
   registerChatIpc,
   runLoopTurn,
@@ -88,7 +89,7 @@ import { registerStatsIpc, setStatsBroadcaster } from '../host/stats.js'
 import { registerSkillsIpc } from '../host/skills.js'
 import { registerMcpCandidatesIpc } from '../host/mcp-candidates.js'
 import { registerPerfIpc } from '../host/perf.js'
-import { logger, flushLogs, registerDiagnosticsIpc } from '../host/log.js'
+import { flushLogs, logger, registerDiagnosticsIpc, startMemorySampler } from '../host/log.js'
 import { registerClipboardIpc } from '../host/clipboard.js'
 import { registerPluginHostIpc } from '../host/plugin-host.js'
 import { registerConfigWebIpc } from '../host/configWeb.js'
@@ -1130,6 +1131,13 @@ async function main() {
     await running.close()
     process.exit(0)
   }
+
+  // 运行时的内存采样。占用大头在每个 app-server 自己的进程里（它们各自上报一条），
+  // 这一条补的是「父进程 + 一共挂了几个宿主」，用来判断增长是宿主变多还是单个宿主在涨。
+  runtimeLog.info('boot', { pid: process.pid, port: running.port, node: process.version })
+  startMemorySampler({ host: 'runtime', describe: describeChatHosts })
+  process.on('exit', () => flushLogs())
+
   process.on('SIGINT', () => void shutdown('SIGINT'))
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
   // 未捕获异常记下来再走默认流程：进程被杀后这些是唯一线索。

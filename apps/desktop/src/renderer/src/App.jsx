@@ -549,6 +549,18 @@ export default function App() {
   // ⌘P 快速打开会话（见 SessionQuickOpen）。不写进 layout：它只是一层临时浮层，
   // 下次启动没有「上次开着」这回事。
   const [sessionQuickOpen, setSessionQuickOpen] = useState(false)
+  /**
+   * 发给侧栏的一次意图（`{ kind: 'search' | 'reveal', sessionId?, nonce }`）：
+   * - `search`：⌘K，把焦点放进侧栏搜索框（侧栏收着时先展开）；
+   * - `reveal`：⌘P 打开一条会话后，把它在树里展开、滚进视野并闪一下。
+   * 用「一次请求 + nonce」而不是布尔值：同一个目标可以反复触发，侧栏才能每次都响应。
+   */
+  const [sidebarIntent, setSidebarIntent] = useState(null)
+  const sidebarIntentSeqRef = useRef(0)
+  const sendSidebarIntent = useCallback((intent) => {
+    sidebarIntentSeqRef.current += 1
+    setSidebarIntent({ ...intent, nonce: sidebarIntentSeqRef.current })
+  }, [])
   const openConfigPage = useCallback((section = 'config', pluginId = null) => {
     setConfigPage({ section, pluginId })
   }, [])
@@ -2361,6 +2373,43 @@ export default function App() {
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [view, configPage, branchPickerOpen, prompt])
+  /**
+   * ⌘/Ctrl+K 聚焦侧栏搜索框。它必须**在任何地方**都能用——最常见的位置恰恰是对话
+   * 输入框（刚敲完一句话想翻旧会话），所以不能像以前那样见到 textarea 就放手。
+   *
+   * 不抢的只有三处：终端（⌘K 在那里是清屏）、编辑器（Monaco 自己的键位）、别的输入框
+   * （改名、设置页、插件面板里 Ctrl+K 属于正在编辑的那一格）。macOS 文本里 Ctrl+K 是
+   * 「删到行尾」，所以那里只接管 ⌘K。
+   */
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.repeat || event.altKey || event.shiftKey) return
+      if (!(event.metaKey || event.ctrlKey)) return
+      if (String(event.key || '').toLowerCase() !== 'k') return
+      if (shareView || configPage || branchPickerOpen || prompt) return
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest('.xterm, .monaco-editor')) return
+      const editable = target?.closest('input, textarea, [contenteditable="true"]')
+      if (editable && !target.closest('.chat-view')) return
+      if (editable && !event.metaKey && window.mica?.platform === 'darwin') return
+      event.preventDefault()
+      event.stopPropagation()
+      // 侧栏收着（桌面折叠 / 手机抽屉）时先把它露出来，否则聚焦的是一个看不见的输入框。
+      if (isMobile) setSessionsOpen(true)
+      else if (sidebarCollapsed) setSidebarCollapsed(false)
+      sendSidebarIntent({ kind: 'search' })
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [
+    branchPickerOpen,
+    configPage,
+    isMobile,
+    prompt,
+    sendSidebarIntent,
+    shareView,
+    sidebarCollapsed
+  ])
 
   return (
     <>
@@ -2515,6 +2564,7 @@ export default function App() {
               loops={loops}
               annotations={annotations}
               sessionMenuPlugins={sessionMenuPlugins}
+              sidebarIntent={sidebarIntent}
               onToggleAnnotation={toggleAnnotation}
               onRunSessionMenu={runSessionMenuAction}
               onOpenSession={(session, options) => {
@@ -2744,6 +2794,13 @@ export default function App() {
                 onOpenSession={(session) => {
                   setSessionQuickOpen(false)
                   closeMobileDrawer()
+                  // 打开之后把这条会话在左侧露出来：它多半躺在折叠分组或 Recent 的
+                  // 第二页里，光切过去用户还是找不到它在哪儿。手机上侧栏是抽屉、
+                  // 点开就盖住对话，定位没有落点，跳过。
+                  if (!isMobile) {
+                    if (sidebarCollapsed) setSidebarCollapsed(false)
+                    sendSidebarIntent({ kind: 'reveal', sessionId: session.id })
+                  }
                   openSession(session)
                 }}
               />

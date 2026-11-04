@@ -32,6 +32,10 @@ export type ConfigWebPerfEvent = {
   vis?: number;
   count?: number;
   error?: string;
+  /** 采样所属会话（渲染层按可见 ChatView 归到会话上）。 */
+  sid?: string;
+  /** 内存事件的 RSS（MB）：`scope: 'mem'` 的采样在这里也留一份。 */
+  rssMB?: number;
 };
 
 /** 按「功能点（scope:event）」聚合的耗时统计，用来回答「哪个功能慢」。 */
@@ -53,6 +57,35 @@ export type ConfigWebPerfTimelinePoint = {
   longN: number;
   dom: number;
   heapMB?: number;
+  /** 可见对话的记录行数（隐藏的 ChatView 不计）。 */
+  rows?: number;
+  sid?: string;
+};
+
+/** 每个进程自己上报的一条内存采样（`startMemorySampler`）。 */
+export type ConfigWebPerfMemoryPoint = {
+  at: number;
+  rssMB: number;
+  heapMB: number;
+  externalMB: number;
+  pid: number;
+  /** `runtime` / `main` / `app-server` / `tui`。 */
+  host: string;
+};
+
+/** 按进程聚合的内存窗口：最后一次、峰值、以及窗口内的增长。 */
+export type ConfigWebPerfMemoryProcess = {
+  key: string;
+  host: string;
+  pid: number;
+  session?: string;
+  samples: number;
+  lastRssMB: number;
+  peakRssMB: number;
+  lastHeapMB: number;
+  lastExternalMB: number;
+  /** 窗口内首末 RSS 之差（MB）：正数就是在涨。 */
+  growthMB: number;
 };
 
 export type ConfigWebPerformanceDetails = {
@@ -70,11 +103,18 @@ export type ConfigWebPerformanceDetails = {
     /** 隐藏窗口的采样数：这类采样没有 lag（定时器被节流），不计入 samples。 */
     hiddenSamples: number;
     spanMs: number;
+    /** 进程内存采样条数与观测到的 RSS 峰值（MB）。 */
+    memSamples: number;
+    peakRssMB: number;
   };
   /** 当前进程内还没落盘的条数。 */
   pending: number;
   buckets: ConfigWebPerfBucket[];
   timeline: ConfigWebPerfTimelinePoint[];
+  /** 内存采样时间线（所有进程混在一起，按 `host` + `pid` 区分）。 */
+  memory: ConfigWebPerfMemoryPoint[];
+  /** 按进程聚合，大的在前。 */
+  processes: ConfigWebPerfMemoryProcess[];
   events: ConfigWebPerfEvent[];
 };
 

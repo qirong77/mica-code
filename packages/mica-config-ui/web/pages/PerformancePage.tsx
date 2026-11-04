@@ -7,17 +7,19 @@ import type {
   ConfigWebPerfBucket,
   ConfigWebPerfEvent,
   ConfigWebPerformanceDetails,
+  ConfigWebPerfMemoryProcess,
   ConfigWebPerfTimelinePoint,
 } from '../../src/shared/types.js';
 
 /**
  * Performance：本机性能与诊断面板。
  *
- * 数据全部来自运行时自己写的 JSONL（`host/log.js`，落在 `~/Library/Logs/mica`，保留 7 天）：
+ * 数据全部来自各进程自己写的 JSONL（`@packages/mica-diagnostics`，落在
+ * `~/Library/Logs/mica`，保留 7 天）：
  * - 渲染层每秒一个采样点：事件循环延迟（lag）、长任务（long/longN）、DOM 规模、堆大小；
  * - 每个 host 通道的调用耗时，超阈值记为 slow；
- * - 渲染层 console.error 与未捕获异常；
- * - 进程级 ready / shutdown / uncaughtException。
+ * - 每个常驻进程（运行时 / Electron 主进程 / 每个会话宿主 / TUI）30s 一条内存采样；
+ * - 渲染层 console.error 与未捕获异常、主进程的进程崩溃与页面无响应。
  *
  * 这一页只读 + 一个「清空」动作。它回答的是「刚才卡的时候，到底慢在哪」，
  * 所以重点是**按功能聚合的耗时**和**时间线**，而不是日志全文。
@@ -87,7 +89,7 @@ export function PerformancePage() {
   if (details && !details.available) {
     return (
       <PageFrame title="Performance">
-        <Alert message="当前宿主读不到性能数据：诊断日志由桌面运行时写入本机系统临时目录，浏览器宿主（config-web）没有这份数据。" />
+        <Alert message="当前宿主读不到性能数据：诊断日志由桌面运行时写入本机日志目录，浏览器宿主（config-web）没有这份数据。" />
       </PageFrame>
     );
   }
@@ -203,6 +205,8 @@ export function PerformancePage() {
         )}
       </section>
 
+      <MemorySection processes={details?.processes ?? []} samples={totals?.memSamples ?? 0} />
+
       <section className="perf-section">
         <header className="perf-section-head">
           <h2>最近事件</h2>
@@ -241,7 +245,7 @@ export function PerformancePage() {
       <section className="perf-section">
         <header className="perf-section-head">
           <h2>日志文件</h2>
-          <span className="perf-hint">系统临时目录，开机自动清空；也可以直接 tail / jq</span>
+          <span className="perf-hint">本机日志目录（保留 7 天），也可以直接 tail / jq</span>
         </header>
         {details?.files.length ? (
           <ul className="perf-files">
@@ -259,6 +263,65 @@ export function PerformancePage() {
         )}
       </section>
     </PageFrame>
+  );
+}
+
+/**
+ * 各进程的内存占用。
+ *
+ * 占用大头不在「运行时」这一个进程里：每个会话有自己的常驻 app-server（一个能有 1GB），
+ * Electron 外壳另外还有页面、GPU、utility。它们各自上报一条（`startMemorySampler`），
+ * 这里按当前 RSS 排序列出来，条宽相对最大的那个——「谁在吃内存」一眼看得出来。
+ */
+function MemorySection({
+  processes,
+  samples,
+}: {
+  processes: ConfigWebPerfMemoryProcess[];
+  samples: number;
+}) {
+  const max = Math.max(1, ...processes.map((item) => item.lastRssMB));
+  return (
+    <section className="perf-section">
+      <header className="perf-section-head">
+        <h2>进程内存</h2>
+        <span className="perf-hint">
+          常驻进程每 30 秒自报一条（共 {samples} 条）；条宽相对最大的那个，右侧是窗口内的增长
+        </span>
+      </header>
+      {processes.length === 0 ? (
+        <Empty description="还没有内存采样。跑起一条会话后，几十秒内会陆续出现。" />
+      ) : (
+        <ul className="perf-memory">
+          {processes.map((item) => (
+            <li key={item.key} className="perf-memory-row">
+              <span className="perf-memory-host">
+                {item.host}
+                <span className="perf-memory-meta">
+                  {item.pid}
+                  {item.session ? ` · ${truncate(item.session, 28)}` : ''}
+                </span>
+              </span>
+              <span className="perf-memory-bar">
+                <span
+                  className={`perf-memory-fill${item.lastRssMB >= 800 ? ' perf-memory-fill-bad' : ''}`}
+                  style={{ width: `${Math.max(2, Math.round((item.lastRssMB / max) * 100))}%` }}
+                />
+              </span>
+              <span className="perf-memory-value">
+                {Math.round(item.lastRssMB)}MB
+                <span className="perf-memory-meta">
+                  峰值 {Math.round(item.peakRssMB)}MB
+                  {item.growthMB
+                    ? ` · ${item.growthMB > 0 ? '↑' : '↓'}${Math.abs(Math.round(item.growthMB))}MB`
+                    : ''}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

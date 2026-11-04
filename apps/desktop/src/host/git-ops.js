@@ -41,6 +41,14 @@ const LOCK_RETRY_DELAYS_MS = [100, 250, 500]
  * 工作区的 mtime 这条判据没有用：任何时刻只要有一个进程在写文件就整棵重算，等于不缓存。
  */
 const worktreeState = new Map()
+/**
+ * 每个仓库「我们改过工作区」的次数。
+ *
+ * `worktreeState` 被显式打点时会整条删掉，但徽标那份更长的缓存（`git.js` 的
+ * change-counts）要独立知道自己是不是过期了：stage / discard / 保存文件之后，
+ * 数字必须立刻变化，而不是等 TTL。
+ */
+const worktreeEpoch = new Map()
 const WORKTREE_TTL_MS = 5000
 const repositoryState = new Map()
 /**
@@ -56,7 +64,21 @@ const worktreeInFlight = new Map()
 
 /** 让某个仓库的缓存立刻失效（写操作、agent 改完文件之后调用）。 */
 export function noteWorktreeChange(root) {
-  if (typeof root === 'string' && root) worktreeState.delete(root)
+  if (typeof root !== 'string' || !root) return
+  worktreeState.delete(root)
+  worktreeEpoch.set(root, worktreeEpochOf(root) + 1)
+}
+
+export function worktreeEpochOf(root) {
+  return worktreeEpoch.get(root) || 0
+}
+
+/**
+ * 仓库当前指向哪个提交的签名。徽标这类长 TTL 的缓存拿它做失效判据：
+ * 切换分支 / 提交之后必须立刻重算。
+ */
+export function worktreeSignature(root) {
+  return headSignature(root)
 }
 
 /**

@@ -20,6 +20,17 @@ export type AgentObservationEvent = Readonly<{
       /** Snapshot of the exact tool definitions sent by the provider; absent when tools are disabled. */
       tools?: unknown;
     }>
+  | Readonly<{
+      type: 'request:end';
+      /** 建流 + 流消费（含传输层重试）的总耗时。 */
+      durationMs: number;
+      /** 首个正文/思考增量到达的时刻（排队 + 首字），无输出时缺省。 */
+      firstTokenMs?: number;
+      attempts: number;
+      outcome: 'completed' | 'error' | 'aborted';
+      toolCalls?: number;
+      error?: string;
+    }>
   | Readonly<{ type: 'prompt:resolved'; prompt: string }>
   | Readonly<{ type: 'history:rewritten'; beforeCount: number; afterCount: number }>
   | Readonly<{ type: 'tool:call'; name: string; args: string; id?: string }>

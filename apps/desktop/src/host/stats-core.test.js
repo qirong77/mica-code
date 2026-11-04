@@ -48,7 +48,6 @@ describe('Stats usage aggregation', () => {
       Date.parse('2026-08-02T02:00:00.000Z'),
       Date.parse('2026-08-01T01:00:00.000Z')
     ])
-    expect(events.filter((event) => event.dateAccuracy !== 'exact')).toHaveLength(1)
     expect(session.id).toBe('one')
   })
 
@@ -257,7 +256,6 @@ describe('Stats usage aggregation', () => {
       }
     })
     expect(events[0].occurredAtMs).toBe(Date.parse('2026-08-03T09:30:00.000Z'))
-    expect(events[0].dateAccuracy).toBe('session-created')
   })
 
   test('projects content blocks to text placeholders and truncates long strings', () => {
@@ -440,11 +438,11 @@ describe('Stats usage aggregation', () => {
     expect(compressed.session.turns).toBe(2)
   })
 
-  test('keeps legacy records counted per day and per session', () => {
+  test('files records without a request time under the session created day', () => {
     const day = new Date(2026, 7, 5, 12, 0, 0)
     const compressed = compressSessionStats({
       version: 1,
-      id: 'legacy',
+      id: 'no-request-time',
       createdAt: day.toISOString(),
       updatedAt: day.toISOString(),
       snapshot: {
@@ -456,8 +454,8 @@ describe('Stats usage aggregation', () => {
         ]
       }
     })
-    expect(compressed.session.legacyUsageRecords).toBe(1)
-    expect(compressed.session.days[0].legacy).toBe(1)
+    expect(compressed.session.days[0].requests).toBe(2)
+    expect(compressed.session.requests).toBe(2)
     expect(summarizeStatsDays([])).toEqual([])
   })
 })

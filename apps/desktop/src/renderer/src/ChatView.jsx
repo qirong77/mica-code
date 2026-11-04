@@ -6804,6 +6804,9 @@ export function ChatView({
         // 抽屉打开时让自己让出右侧那一条（内边距会把对话区与输入条一起收窄），
         // 所以它是「并排」而不是「盖住」——主流程照常看得见、发得出。
         className={`chat-view no-drag ${visible ? 'flex' : 'hidden'} ${btwOpen ? 'chat-btw-open' : ''}`}
+        // 性能探针（`perf-probe.js`）按它把采样归到具体会话：嵌在 DOM 里比让探针去问
+        // 状态更省事，也不需要在页面里维护第二份「当前会话」。
+        data-perf-session={visible && node?.sessionId ? node.sessionId : undefined}
         // 宽度是共享界面状态（拖动后写回，所有窗口一致）。变量挂在根上，抽屉与它让出的
         // 右侧内边距读的是同一个值——两边不会对不上。
         style={
@@ -7010,6 +7013,7 @@ export function ChatView({
             sessionId={node?.sessionId || sessionIdRef.current || null}
             cwd={cwd}
             role={activeRole}
+            visible={visible}
             openPlugin={pluginPanelOpen}
             focusSection={pluginPanelSection}
             onTogglePanel={(id, section) => {
@@ -7505,6 +7509,7 @@ export function ChatView({
           sessionId={node?.sessionId || sessionIdRef.current || null}
           cwd={cwd}
           role={activeRole}
+          visible={visible}
           openPlugin={pluginPanelOpen}
           focusSection={pluginPanelSection}
           onClose={closePluginPanel}

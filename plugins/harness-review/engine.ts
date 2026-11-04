@@ -9,7 +9,7 @@ export type CaptureOptions = { captureContent: boolean; maxEventChars: number; m
  * 问题推导规则的版本。改了 classify / 退出码白名单 / 重复调用判定就加一：
  * 宿主据此决定要不要把历史记录的 findings 重算一次（计数与结论不动）。
  */
-export const CLASSIFIER_VERSION = 2;
+export const CLASSIFIER_VERSION = 3;
 export type FindingStatus = 'open' | 'accepted' | 'dismissed' | 'validated' | 'regressed';
 type Config = { providerId: string; protocol: string; model: string; effort: string; role: string };
 type Outcome = 'running' | 'completed' | 'aborted' | 'error' | 'interrupted';
@@ -49,6 +49,13 @@ export type RunSummary = {
   elapsedMs?: number;
   error?: string;
   requestCount: number;
+  /** 模型请求的累计耗时（`request:end`）：整轮里有多少时间是在等模型。 */
+  requestMsTotal?: number;
+  /** 单次请求最长耗时：卡顿那次是哪一个。 */
+  requestMsMax?: number;
+  /** 首字延迟合计与次数（没有输出的请求不计入），报告里取平均。 */
+  firstTokenMsTotal?: number;
+  firstTokenMsCount?: number;
   toolCalls: number;
   toolErrors: number;
   /** Nonzero exits that the command itself documents as normal (`rg` no match, …). */
@@ -1212,6 +1219,23 @@ export class HarnessRecorder {
         if (captureTrace && tools !== undefined) stored.tools = payload(tools, state.options);
         break;
       }
+      case 'request:end': {
+        // 请求级耗时：整轮里「等模型」占了多少、首字多慢、重试了几次。没有它，
+        // 一次 4 分钟的 turn 只能看出总时长，分不清是模型慢还是工具慢。
+        const durationMs = finiteCount(event.durationMs);
+        state.summary.requestMsTotal = (state.summary.requestMsTotal ?? 0) + durationMs;
+        state.summary.requestMsMax = Math.max(state.summary.requestMsMax ?? 0, durationMs);
+        if (typeof event.firstTokenMs === 'number' && event.firstTokenMs >= 0) {
+          state.summary.firstTokenMsTotal = (state.summary.firstTokenMsTotal ?? 0) + event.firstTokenMs;
+          state.summary.firstTokenMsCount = (state.summary.firstTokenMsCount ?? 0) + 1;
+        }
+        stored.ms = durationMs;
+        stored.attempts = finiteCount(event.attempts);
+        stored.requestOutcome = event.outcome;
+        if (typeof event.firstTokenMs === 'number') stored.firstTokenMs = finiteCount(event.firstTokenMs);
+        if (event.error && captureTrace) stored.error = payload(event.error, state.options);
+        break;
+      }
       case 'prompt:resolved': {
         const fingerprint = { sha256: digest(event.prompt), chars: event.prompt.length };
         if (
@@ -1923,6 +1947,11 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
   // Added after the first runs were recorded: absent means zero, anything else must be a count.
   if (value.expectedExits !== undefined && (!Number.isInteger(value.expectedExits) || value.expectedExits < 0))
     return false;
+  // 请求级耗时是后加的：老摘要没有它，有就必须是有限的非负数。
+  for (const key of ['requestMsTotal', 'requestMsMax', 'firstTokenMsTotal', 'firstTokenMsCount'] as const) {
+    const metric = value[key];
+    if (metric !== undefined && (typeof metric !== 'number' || !Number.isFinite(metric) || metric < 0)) return false;
+  }
   if (
     !Array.isArray(value.promptHashes) ||
     value.promptHashes.length > 100 ||
@@ -2015,6 +2044,23 @@ async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<vo
 function markdownText(value: string): string {
   return value.replace(/\r?\n/g, ' ').replace(/([\\`*_{}\[\]()<>|#!])/g, '\\$1');
 }
+
+/**
+ * 「等模型」那一列：累计等待时长 + 单次最长 + 平均首字。
+ *
+ * 老摘要没有请求级耗时（`request:end` 是后加的），那时如实画 `—`，
+ * 不要用整轮时长冒充。
+ */
+function requestWaitSummary(run: RunSummary): string {
+  if (run.requestMsTotal === undefined) return '—';
+  const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
+  const firstToken =
+    run.firstTokenMsCount && run.firstTokenMsTotal !== undefined
+      ? ` · first ${seconds(run.firstTokenMsTotal / run.firstTokenMsCount)}`
+      : '';
+  return `${seconds(run.requestMsTotal)} / ${seconds(run.requestMsMax ?? 0)}${firstToken}`;
+}
+
 function markdownReport(report: ReviewReport, directory: string): string {
   const link = (file: string): string =>
     encodeURI(relative(directory, file).split('\\').join('/')).replace(/</g, '%3C').replace(/>/g, '%3E');
@@ -2031,12 +2077,12 @@ function markdownReport(report: ReviewReport, directory: string): string {
     '',
     '## Runs',
     '',
-    '| Run | Outcome | Model | Requests | Tools / errors | Retries | Tokens in / out / cached | Dropped events |',
-    '| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |',
+    '| Run | Outcome | Model | Requests | Tools / errors | Retries | Waiting / first token | Tokens in / out / cached | Dropped events |',
+    '| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
   ];
   for (const run of report.runs)
     lines.push(
-      `| [${run.id}](<${link(run.traceFile)}>) | ${run.outcome} | ${markdownText(run.config.model)} | ${run.requestCount} | ${run.toolCalls} / ${run.toolErrors} | ${run.retries} | ${run.inputTokens} / ${run.outputTokens} / ${run.cachedInputTokens} | ${run.droppedEvents} |`,
+      `| [${run.id}](<${link(run.traceFile)}>) | ${run.outcome} | ${markdownText(run.config.model)} | ${run.requestCount} | ${run.toolCalls} / ${run.toolErrors} | ${run.retries} | ${requestWaitSummary(run)} | ${run.inputTokens} / ${run.outputTokens} / ${run.cachedInputTokens} | ${run.droppedEvents} |`,
     );
   if (!report.runs.length) lines.push('', 'No runs in this scope.');
   lines.push('', '## Findings', '');

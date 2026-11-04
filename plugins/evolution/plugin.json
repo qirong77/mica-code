@@ -1,0 +1,48 @@
+{
+  "id": "evolution",
+  "name": "Evolution",
+  "icon": "sparkles",
+  "version": "1.0.0",
+  "description": "随版本自动清洗旧数据：把历史形态的会话与用量就地改成当前形态，运行时代码因此不必为旧数据保留兼容分支。每台机器各跑自己那份。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 95,
+  "mica": {
+    "apiVersion": 1
+  },
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "自动清洗旧数据",
+      "type": "switch",
+      "default": "true",
+      "description": "关掉之后只有 /evolution run 会清洗。"
+    },
+    {
+      "key": "intervalMinutes",
+      "label": "检查间隔",
+      "type": "number",
+      "default": "30",
+      "min": 5,
+      "max": 1440,
+      "step": 5,
+      "unit": "分钟",
+      "description": "两次检查之间隔多久。有新数据、插件升级或会话文件变过时，只有扫描到变化才会真正读文件。"
+    },
+    {
+      "key": "backup",
+      "label": "改动前备份会话文件",
+      "type": "switch",
+      "default": "true",
+      "description": "备份写到 plugin-data/evolution/backups，只保留首次快照与最近 7 天，迁移出错时可以从这里还原。"
+    }
+  ],
+  "status": [
+    { "key": "lastRun", "label": "最近检查" },
+    { "key": "cleaned", "label": "最近清洗" },
+    { "key": "pending", "label": "待清洗" },
+    { "key": "migrations", "label": "迁移规则" }
+  ],
+  "requires": ["agent", "background", "commands", "settings", "ui"]
+}

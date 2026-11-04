@@ -1133,10 +1133,6 @@ export function StatsView({ visible }) {
 
   const hasAny = sessions.some((session) => (Number(session.requests) || 0) > 0)
   const progress = snap?.progress
-  const legacyUsageRecords = scoped.reduce(
-    (total, session) => total + (Number(session.legacyUsageRecords) || 0),
-    0
-  )
 
   const setRangePreset = (value) => {
     setRange(value)
@@ -1212,13 +1208,6 @@ export function StatsView({ visible }) {
                 onSelectDay={onSelectDay}
                 calendar={calendar}
               />
-              {legacyUsageRecords > 0 && (
-                <div className="rounded-[5px] border border-warn/30 bg-warn/8 px-3 py-2 text-[11px] text-warn-soft">
-                  {legacyUsageRecords.toLocaleString()} 条旧 usage
-                  没有请求时间，已稳定归档到会话创建日（委派与插件的记录归档到任务开始时间）；
-                  升级后产生的数据会按实际请求时间统计。
-                </div>
-              )}
               <DailyCard sessions={sessions} range={range} />
               <ByModelCard scoped={activeScoped} />
               <BySourceCard scoped={activeScoped} />

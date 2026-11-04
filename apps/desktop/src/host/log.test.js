@@ -10,7 +10,7 @@ import {
 } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { flushLogs, logger, readPerformanceSummary, stats } from './log.js'
+import { flushLogs, logger, readPerformanceSummary, startMemorySampler, stats } from './log.js'
 
 let dir = ''
 const originalLogDir = process.env.MICA_LOG_DIR
@@ -120,5 +120,37 @@ describe('log writer', () => {
 
     const summary = readPerformanceSummary({ maxBytes: 1024 * 1024 })
     expect(summary.buckets.find((item) => item.event === 'git:status')?.fails).toBe(1)
+  })
+
+  it('samples process memory with the scene the caller provides', () => {
+    const stop = startMemorySampler({ host: 'app-server', describe: () => ({ session: 'sess-1' }) })
+    stop()
+    flushLogs()
+
+    const summary = readPerformanceSummary({ maxBytes: 1024 * 1024 })
+    // 内存单独一条线：不和耗时聚合混在一起，也不进事件流。
+    expect(summary.totals.memSamples).toBe(1)
+    expect(summary.totals.peakRssMB).toBeGreaterThan(0)
+    expect(summary.processes).toHaveLength(1)
+    expect(summary.processes[0]).toMatchObject({ host: 'app-server', session: 'sess-1', pid: process.pid })
+    expect(summary.processes[0].lastRssMB).toBeGreaterThan(0)
+    expect(summary.buckets.some((item) => item.scope === 'mem')).toBe(false)
+    expect(summary.events.some((item) => item.scope === 'mem')).toBe(false)
+  })
+
+  it('keeps sampling when describe throws', () => {
+    // 采样补现场时读会话状态可能失败，但那不该让进程少一条内存记录。
+    const stop = startMemorySampler({
+      host: 'runtime',
+      describe: () => {
+        throw new Error('nope')
+      }
+    })
+    stop()
+    flushLogs()
+
+    const summary = readPerformanceSummary({ maxBytes: 1024 * 1024 })
+    expect(summary.processes[0].host).toBe('runtime')
+    expect(summary.processes[0].samples).toBe(1)
   })
 })

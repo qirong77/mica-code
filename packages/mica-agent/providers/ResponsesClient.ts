@@ -24,6 +24,7 @@ import {
   type AgentUsageRecord,
 } from '../core/Agent.js';
 import { isRetryableError, withRetry } from '../core/retry.js';
+import { compactRawUsage } from '@packages/mica-common/rawUsage.js';
 import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
@@ -34,7 +35,8 @@ import type { ModelClientOptions } from './types.js';
 
 export type ResponsesUsageRecord = AgentUsageRecord & {
   provider: 'openai_responses';
-  rawUsage: ResponseUsage;
+  /** 压缩后的原始 usage（只留标量与一层明细），见 `mica-common/rawUsage.ts`。 */
+  rawUsage?: Record<string, unknown>;
 };
 
 type PendingToolCall = {
@@ -387,11 +389,42 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       );
 
       const requestTools = this.tools ? this.responseTools : undefined;
+      // 与 Chat Completions 同一份口径：请求耗时、首字延迟、重试次数，见 onRequestEnd。
+      const requestStartedAt = Date.now();
+      let firstDeltaAt = 0;
+      let requestAttempts = 1;
+      let requestEndSent = false;
+      const finishRequest = (info: {
+        outcome: 'completed' | 'error' | 'aborted';
+        toolCalls?: number;
+        error?: unknown;
+      }): void => {
+        if (requestEndSent || !options?.onRequestEnd) return;
+        requestEndSent = true;
+        try {
+          options.onRequestEnd({
+            durationMs: Date.now() - requestStartedAt,
+            firstTokenMs: firstDeltaAt ? firstDeltaAt - requestStartedAt : undefined,
+            attempts: requestAttempts,
+            outcome: info.outcome,
+            toolCalls: info.toolCalls,
+            error:
+              info.error === undefined
+                ? undefined
+                : String((info.error as Error)?.message || info.error).slice(0, 200),
+          });
+        } catch {
+          // Observation must not interrupt the model request.
+        }
+      };
       try {
         options?.onRequestStart?.({ messageCount: wireMessages.length, tools: requestTools });
       } catch {
         // Observation must not interrupt the model request.
       }
+      // 中止也要有一条 request:end：否则「开了没结束」既可能是被中断、也可能是崩了。
+      const onAbort = () => finishRequest({ outcome: 'aborted' });
+      options?.signal?.addEventListener?.('abort', onAbort, { once: true });
 
       // krill 等上游在过载时返回 HTTP 200 + {"error":...,"type":"error"} JSON，
       // openai-node SDK 不会在 create() 抛错，而是把错误体反序列化成 APIError
@@ -446,6 +479,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           for await (const event of withIdleTimeout(stream)) {
             throwIfQueryStopped(options);
             if (RESPONSE_TERMINAL_ERROR_TYPES.has(event.type)) throw responseEventError(event);
+            if (!firstDeltaAt) firstDeltaAt = Date.now();
 
             if (event.type === 'response.output_text.delta') {
               const textDelta: string =
@@ -534,6 +568,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           maxDelayMs: 30000,
           shouldRetry: (error) => (!hasReasoningText || (canRollbackText && this.canRollbackThinking)) && (canRollbackText || (!content && !attemptHadToolOutput)) && isRetryableError(error),
           onRetry: ({ attempt, error, delayMs }) => {
+            requestAttempts += 1;
+            firstDeltaAt = 0;
             if (canRollbackText && (content || hasReasoningText)) this.onTextRollback?.();
             console.error(
               `[mica] provider request retry ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
@@ -547,6 +583,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       // when the request is aborted while waiting for the next event, so an
       // aborted turn must not be committed as a partial/empty response.
       throwIfQueryStopped(options);
+      options?.signal?.removeEventListener?.('abort', onAbort);
+      finishRequest({ outcome: 'completed', toolCalls: toolCalls.size });
       // A terminal event alone is not enough: the stream must also end cleanly.
       // This is a display boundary only; it does not change the request history.
       if (reasoningParts?.canCheckpointRequest) this.onThinkingCheckpoint?.('request');
@@ -644,7 +682,9 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       outputTokens,
       totalTokens,
       paidTokenRate,
-      rawUsage: usage,
+      // 只留标量与一层明细：网关的逐条归因（attribution.items）没有消费方，
+      // 却能让单条会话从 1.5MB 涨到 30MB（见 mica-common/rawUsage.ts）。
+      rawUsage: compactRawUsage(usage),
     };
 
     this.lastUsage = record;
