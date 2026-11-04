@@ -342,12 +342,13 @@ function createWebApi(env) {
       // 插件（工具）抛出的选择题：`{ id, sessionId, ask }`，ask 为 null 表示这道题已经结束。
       // 答案不会开启新的一轮——它只是 resolve 掉工具那边还在等的那个 promise。
       onAsk: (callback) => subscribe('chat:ask', callback),
-      answerAsk: (id, { askId, optionIds, custom } = {}) =>
+      answerAsk: (id, { askId, optionIds, custom, cancelled } = {}) =>
         invoke('chat:answer-ask', {
           id,
           askId,
           optionIds: Array.isArray(optionIds) ? optionIds : [],
-          ...(custom ? { custom } : {})
+          ...(custom ? { custom } : {}),
+          ...(cancelled === true ? { cancelled: true } : {})
         }),
       compact: (sessionId, mode = 'model') => invoke('chat:compact', { sessionId, mode }),
       checkCwd: (cwd) => invoke('chat:check-cwd', { cwd }),

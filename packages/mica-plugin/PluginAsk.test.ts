@@ -5,6 +5,7 @@ import {
   MAX_PLUGIN_ASK_TIMEOUT_MS,
   normalizePluginAskQuestion,
   pluginAskSummary,
+  resolvePluginAskDisplay,
 } from './PluginAsk.js';
 
 const base = () => ({
@@ -79,5 +80,54 @@ describe('pluginAskSummary', () => {
     expect(pluginAskSummary({ ...base(), summary: '等你选入口' })).toBe('等你选入口');
     expect(pluginAskSummary(base())).toBe('先做哪个入口？');
     expect(pluginAskSummary({ ...base(), summary: '   ' })).toBe('先做哪个入口？');
+  });
+});
+
+describe('resolvePluginAskDisplay', () => {
+  const normalized = (input: Parameters<typeof normalizePluginAskQuestion>[0]) =>
+    normalizePluginAskQuestion(input);
+
+  it('derives a confirm bar only when the click is not final', () => {
+    // 单选：点一下就交，不需要「确定」这条
+    expect(resolvePluginAskDisplay(normalized(base())).confirm).toBe(false);
+    // 能自由输入：必须留一次确认
+    expect(resolvePluginAskDisplay(normalized({ ...base(), allowCustom: true })).confirm).toBe(true);
+    expect(
+      resolvePluginAskDisplay(normalized({ ...base(), multiple: true })).confirm,
+    ).toBe(true);
+  });
+
+  it('shows the input box only when the question accepts free text', () => {
+    expect(resolvePluginAskDisplay(normalized(base())).input).toBe(false);
+    expect(
+      resolvePluginAskDisplay(normalized({ ...base(), allowCustom: true })).input,
+    ).toBe(true);
+  });
+
+  it('drops the detail row when there is no detail, even if ui asks for it', () => {
+    expect(resolvePluginAskDisplay(normalized(base())).detail).toBe(false);
+    expect(
+      resolvePluginAskDisplay(normalized({ ...base(), ui: { detail: true } })).detail,
+    ).toBe(false);
+    expect(
+      resolvePluginAskDisplay(normalized({ ...base(), detail: '一句说明' })).detail,
+    ).toBe(true);
+  });
+
+  it('lets a plugin turn every element off for a bare confirm dialog', () => {
+    // 自动压缩那种场景：只要标题 + 两个按钮，不要输入框、不要元信息
+    const display = resolvePluginAskDisplay(
+      normalized({ ...base(), ui: { input: false, meta: false, hint: false, dismiss: false } }),
+    );
+    expect(display).toMatchObject({ input: false, meta: false, hint: false, dismiss: false });
+    expect(display.options).toBe(true);
+  });
+
+  it('defaults meta to on only when there is more than one option', () => {
+    expect(resolvePluginAskDisplay(normalized(base())).meta).toBe(true);
+    const single = resolvePluginAskDisplay(
+      normalized({ title: '现在压缩？', options: [{ id: 'ok', label: '压缩' }] }),
+    );
+    expect(single.meta).toBe(false);
   });
 });

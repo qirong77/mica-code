@@ -2733,9 +2733,19 @@ export function registerChatIpc() {
 
   // 用户点了插件抛出的选择题：转成 `mica/ask/answer` 交给 host 里的 broker，
   // 由它 resolve 掉那个还在 await 的工具。答题本身不是一轮对话的开始，也不排队。
-  ipcMain.handle('chat:answer-ask', async (_event, { id, askId, optionIds, custom } = {}) => {
+  ipcMain.handle('chat:answer-ask', async (_event, { id, askId, optionIds, custom, cancelled } = {}) => {
     const run = runs.get(id)
     if (!run) return { ok: false, error: '这条会话没有在等回答' }
+    // 关掉卡片（没选任何东西）走单独的标记：宿主据此告诉工具「用户取消了」，
+    // 而不是当成「选了空」被拒。
+    if (cancelled === true) {
+      return unwrapHostResult(
+        await hostTaskRequest(run, 'mica/ask/answer', {
+          askId: typeof askId === 'string' ? askId : '',
+          cancelled: true
+        })
+      )
+    }
     return unwrapHostResult(
       await hostTaskRequest(run, 'mica/ask/answer', {
         askId: typeof askId === 'string' ? askId : '',
@@ -2918,6 +2928,19 @@ function normalizeAsk(raw) {
         }))
     : []
   if (!id || !title || !options.length) return null
+  // 该画哪几个元素由宿主侧推导好，这里只做形状兜底：缺字段时按「该显示」处理，
+  // 免得旧宿主/新页面组合下整张卡片变空白。
+  const rawDisplay = raw.display && typeof raw.display === 'object' ? raw.display : {}
+  const display = {
+    icon: rawDisplay.icon !== false,
+    meta: rawDisplay.meta !== false,
+    detail: rawDisplay.detail !== false,
+    options: rawDisplay.options !== false,
+    input: rawDisplay.input === true,
+    confirm: rawDisplay.confirm === true,
+    hint: rawDisplay.hint !== false,
+    dismiss: rawDisplay.dismiss !== false
+  }
   return {
     id,
     pluginId: typeof raw.pluginId === 'string' ? raw.pluginId : '',
@@ -2925,7 +2948,10 @@ function normalizeAsk(raw) {
     ...(typeof raw.detail === 'string' ? { detail: raw.detail } : {}),
     options,
     multiple: raw.multiple === true,
-    allowCustom: raw.allowCustom === true
+    allowCustom: raw.allowCustom === true,
+    presentation: raw.presentation === 'modal' ? 'modal' : 'dock',
+    display,
+    passive: raw.passive === true
   }
 }
 

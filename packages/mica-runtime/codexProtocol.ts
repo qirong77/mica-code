@@ -257,9 +257,45 @@ export type MicaAskPending = {
   options: MicaAskOption[];
   multiple?: boolean;
   allowCustom?: boolean;
+  /** 画在哪里：输入框上方一条（默认），或居中弹窗。 */
+  presentation: MicaAskPresentation;
+  /**
+   * 客户端该画哪几个元素。
+   *
+   * 由宿主按插件给出的开关与数据推导好，界面照着画就行——把「有没有说明」「要不要
+   * 确认按钮」这类判断留在插件侧，界面才不会因为缺一个字段而多画一个空行。
+   */
+  display: MicaAskDisplay;
+  /**
+   * 不等答案的提问：插件发出去就继续跑，用户什么时候点都行。
+   *
+   * 界面据此换语气（「需要你确认」而不是「正在等你」），也不再宣称这一轮卡在这里。
+   */
+  passive?: boolean;
   /** 会话列表里那句提示（「等你选方案」）。 */
   summary: string;
   askedAt: string;
+};
+
+export type MicaAskPresentation = 'dock' | 'modal';
+
+export type MicaAskDisplay = {
+  /** 左侧的问号徽标。 */
+  icon: boolean;
+  /** 标题右侧的「2 个方案 · 单选」。 */
+  meta: boolean;
+  /** 补充说明那一段。 */
+  detail: boolean;
+  /** 选项列表。单独一个选项也可以只当成一个确认按钮。 */
+  options: boolean;
+  /** 自由输入框。 */
+  input: boolean;
+  /** 底部「确定」。单选且点一下就提交时不需要它。 */
+  confirm: boolean;
+  /** 底部的「已选 A · 转账」与快捷键提示。 */
+  hint: boolean;
+  /** 右上角关闭（取消）。 */
+  dismiss: boolean;
 };
 
 export type MicaAskSnapshot = {
@@ -273,6 +309,13 @@ export type MicaAskAnswerParams = {
   askId: string;
   optionIds?: string[];
   custom?: string;
+  /**
+   * 用户直接关掉这道题（没选任何东西）。
+   *
+   * 与「选了空」不同：阻塞中的工具会拿到 `cancelled` + `reason: 'cancelled'`，自己决定
+   * 是停下来还是按推荐项继续；被动提问则只是把卡片收掉。
+   */
+  cancelled?: boolean;
 };
 
 export const MICA_PLUGIN_SETTINGS_NOTIFICATIONS = {

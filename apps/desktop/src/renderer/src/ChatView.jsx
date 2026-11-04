@@ -590,12 +590,18 @@ function QueueDock({ items, onRecall, recallingId, running }) {
   )
 }
 
-// 插件（工具）抛出的一道选择题。放在输入框上方、与排队行同一个位置：它们都是「这一轮
-// 卡在这里等一个人动手」的东西，而这道题比排队更急——不答就一直不往下走。
+// 插件（工具）抛出的一道选择题。
 //
-// 单选且不允许自由输入时点一下就走（少一次确认）；多选或可以自己说时留一个「确定」，
-// 否则点错一个选项就没有反悔的机会。
-function AskDock({ ask, submitting, onSubmit }) {
+// 版式：一张扁平卡，头部是「? + 标题 + 元信息」，中间选项两列排开，底部一条独立确认条
+// 写「已选 A · 转账」并给出「确定」。把「选了什么」和「确定」收进同一条，是为了让
+// 选择与提交分成两层看得清——鼠标点一下选项不会立刻生效，误点也还有反悔的余地。
+//
+// 画哪几个元素由宿主下发（ask.display），组件不自己判断：同一套界面要同时服务
+// 「两行文字 + 输入框」和「只有一个确认按钮」这两种完全不同的场合。
+//
+// 位置有两种：默认挂在输入框上方（和排队行同一个位置，都是「这一轮卡在这里」的东西）；
+// `presentation: 'modal'` 时铺一层遮罩居中显示，用于需要打断注意力的事情。
+function AskDock({ ask, submitting, onSubmit, onCancel }) {
   const [selected, setSelected] = useState([])
   const [custom, setCustom] = useState('')
   useEffect(() => {
@@ -603,78 +609,159 @@ function AskDock({ ask, submitting, onSubmit }) {
     setCustom('')
   }, [ask?.id])
   if (!ask) return null
+  const display = {
+    icon: true,
+    meta: false,
+    detail: true,
+    options: true,
+    input: false,
+    confirm: false,
+    hint: true,
+    dismiss: true,
+    ...(ask.display || {})
+  }
   const multiple = Boolean(ask.multiple)
+  const modal = ask.presentation === 'modal'
   const canSubmit = selected.length > 0 || custom.trim().length > 0
   const submit = (optionIds = selected, text = custom) => {
     if (submitting) return
     onSubmit({ optionIds, custom: String(text || '').trim() })
   }
-  const toggle = (optionId) =>
+  const cancel = () => {
+    if (submitting) return
+    onCancel?.()
+  }
+  const toggle = (optionId) => {
+    if (submitting) return
+    // 单选且不需要二次确认时点一下就交；否则先记下来，等「确定」。
+    if (!multiple && !display.confirm) {
+      submit([optionId], '')
+      return
+    }
     setSelected((previous) => {
       if (!multiple) return previous.includes(optionId) ? [] : [optionId]
       return previous.includes(optionId)
         ? previous.filter((value) => value !== optionId)
         : [...previous, optionId]
     })
-  return (
-    <section className="chat-ask-dock" aria-label="等你做一个选择">
+  }
+  const picked = ask.options.filter((option) => selected.includes(option.id))
+  const pickedText = picked.map((option) => option.label).join('、')
+  const summaryText = pickedText || custom.trim()
+
+  const card = (
+    <section
+      className={`chat-ask-card${modal ? ' is-modal' : ''}`}
+      role="dialog"
+      aria-modal={modal ? 'true' : undefined}
+      aria-label={ask.passive ? '需要你确认' : '等你做一个选择'}
+    >
       <div className="chat-ask-head">
-        <IconInfoCircle size={13} className="chat-ask-icon" />
+        {display.icon ? (
+          <span className="chat-ask-mark" aria-hidden="true">
+            ?
+          </span>
+        ) : null}
         <span className="chat-ask-title">{ask.title}</span>
-        {multiple ? <span className="chat-ask-hint">可多选</span> : null}
-      </div>
-      {ask.detail ? <div className="chat-ask-detail">{ask.detail}</div> : null}
-      <div className="chat-ask-options">
-        {ask.options.map((option) => {
-          const active = selected.includes(option.id)
-          return (
-            <button
-              key={option.id}
-              type="button"
-              className={`chat-ask-option${active ? ' is-selected' : ''}`}
-              aria-pressed={active}
-              disabled={submitting}
-              onClick={() =>
-                multiple || ask.allowCustom ? toggle(option.id) : submit([option.id], '')
-              }
-            >
-              <span className="chat-ask-option-label">{option.label}</span>
-              {option.description ? (
-                <span className="chat-ask-option-desc">{option.description}</span>
-              ) : null}
-            </button>
-          )
-        })}
-      </div>
-      {multiple || ask.allowCustom ? (
-        <div className="chat-ask-foot">
-          {ask.allowCustom ? (
-            <input
-              className="chat-ask-input"
-              value={custom}
-              placeholder="或者直接说你的想法…"
-              disabled={submitting}
-              onChange={(event) => setCustom(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
-                if (!canSubmit) return
-                event.preventDefault()
-                submit()
-              }}
-            />
-          ) : null}
+        {display.meta ? (
+          <span className="chat-ask-meta">
+            {ask.options.length} 个方案 · {multiple ? '可多选' : '单选'}
+          </span>
+        ) : null}
+        <span className="chat-ask-spacer" aria-hidden="true" />
+        {display.dismiss ? (
           <button
             type="button"
-            className="chat-ask-submit"
-            disabled={submitting || !canSubmit}
-            onClick={() => submit()}
+            className="chat-ask-close"
+            title="不用了（Esc）"
+            aria-label="取消这个问题"
+            disabled={submitting}
+            onClick={cancel}
           >
-            {submitting ? <IconLoader2 size={11} className="animate-spin" /> : null}
-            <span>{submitting ? '提交中' : '确定'}</span>
+            <IconX size={11} />
           </button>
+        ) : null}
+      </div>
+      {display.detail && ask.detail ? <div className="chat-ask-detail">{ask.detail}</div> : null}
+      {display.options ? (
+        <div className="chat-ask-grid">
+          {ask.options.map((option, index) => {
+            const active = selected.includes(option.id)
+            return (
+              <button
+                key={option.id}
+                type="button"
+                className={`chat-ask-option${active ? ' is-selected' : ''}`}
+                aria-pressed={active}
+                disabled={submitting}
+                onClick={() => toggle(option.id)}
+              >
+                <span className="chat-ask-option-head">
+                  <span className="chat-ask-option-key">
+                    {String.fromCharCode(65 + (index % 26))}
+                  </span>
+                  <span className="chat-ask-option-label">{option.label}</span>
+                </span>
+                {option.description ? (
+                  <span className="chat-ask-option-desc">{option.description}</span>
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+      ) : null}
+      {display.input ? (
+        <div className="chat-ask-input-row">
+          <input
+            className="chat-ask-input"
+            value={custom}
+            placeholder={display.options ? '或者直接说你的想法…' : '写下来…'}
+            disabled={submitting}
+            onChange={(event) => setCustom(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+              if (!canSubmit) return
+              event.preventDefault()
+              submit()
+            }}
+          />
+        </div>
+      ) : null}
+      {display.confirm || display.hint ? (
+        <div className="chat-ask-bar">
+          {display.hint ? (
+            <span className="chat-ask-hint" title={summaryText}>
+              {summaryText ? `已选 ${summaryText}` : '选一个继续'}
+            </span>
+          ) : null}
+          <span className="chat-ask-spacer" aria-hidden="true" />
+          {display.confirm ? (
+            <>
+              <kbd className="chat-ask-keycap">↵</kbd>
+              <button
+                type="button"
+                className="chat-ask-submit"
+                disabled={submitting || !canSubmit}
+                onClick={() => submit()}
+              >
+                {submitting ? <IconLoader2 size={11} className="animate-spin" /> : null}
+                <span>{submitting ? '提交中' : '确定'}</span>
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
     </section>
+  )
+
+  if (!modal) return card
+  return (
+    <div
+      className="chat-ask-overlay"
+      onClick={(event) => event.target === event.currentTarget && cancel()}
+    >
+      {card}
+    </div>
   )
 }
 
@@ -6382,7 +6469,7 @@ export function ChatView({
   // 同一个 run 继续往下跑。成功时卡片由宿主推来的 `ask: null` 关掉（本地不抢先关，
   // 否则宿主那边如果没收到，界面会显示「已选」但工具一直卡着）。
   const submitAsk = useCallback(
-    async ({ optionIds, custom }) => {
+    async ({ optionIds, custom, cancelled }) => {
       const ask = pendingAsk
       if (!nodeId || !ask || askSubmitting) return
       setAskSubmitting(true)
@@ -6390,7 +6477,8 @@ export function ChatView({
         .answerAsk(nodeId, {
           askId: ask.id,
           optionIds: Array.isArray(optionIds) ? optionIds : [],
-          custom
+          custom,
+          cancelled: cancelled === true
         })
         .catch((error) => ({ ok: false, error: error?.message || String(error) }))
       if (result?.ok === true) return
@@ -6398,6 +6486,13 @@ export function ChatView({
       appendNotice(result?.error || '选择没有送达宿主', 'error')
     },
     [appendNotice, askSubmitting, nodeId, pendingAsk]
+  )
+
+  // 关掉卡片 = 明确「不用了」，与「选了空」不同：阻塞中的工具会收到 cancelled，
+  // 自己决定停下来还是按推荐项继续。
+  const cancelAsk = useCallback(
+    () => submitAsk({ optionIds: [], custom: '', cancelled: true }),
+    [submitAsk]
   )
 
   const recallQueued = useCallback(
@@ -7219,7 +7314,12 @@ export function ChatView({
             recallingId={recallingQueueId}
             running={running}
           />
-          <AskDock ask={pendingAsk} submitting={askSubmitting} onSubmit={submitAsk} />
+          <AskDock
+            ask={pendingAsk}
+            submitting={askSubmitting}
+            onSubmit={submitAsk}
+            onCancel={cancelAsk}
+          />
           <ComposerImageStrip
             text={input}
             onPreview={(source, alt) => setImagePreview({ source, alt })}

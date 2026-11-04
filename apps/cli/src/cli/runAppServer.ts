@@ -1976,6 +1976,9 @@ async function handleCodexRequest(
           ? params.optionIds.filter((id): id is string => typeof id === 'string')
           : [],
         ...(typeof params.custom === 'string' ? { custom: params.custom } : {}),
+        // 关掉卡片（没选任何东西）与「选了空」是两件事：前者让等在工具里的一方
+        // 明确知道用户放弃了，后者应当按参数错误拒掉。
+        ...(params.cancelled === true ? { cancelled: true } : {}),
       });
       ctx.writeResponse(answer);
       return;

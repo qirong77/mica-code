@@ -9,6 +9,9 @@ function stubAsk(answer: PluginAskAnswer) {
       seen.push(question);
       return answer;
     },
+    post: () => {
+      throw new Error('ask_user 只用阻塞提问');
+    },
   };
   return { api, seen };
 }
@@ -60,6 +63,9 @@ describe('AskUserTool', () => {
     const api: PluginAskApi = {
       request: async () => {
         throw new Error('提问缺少 title');
+      },
+      post: () => {
+        throw new Error('ask_user 只用阻塞提问');
       },
     };
     const text = await new AskUserTool(api).execute({ title: '' });
