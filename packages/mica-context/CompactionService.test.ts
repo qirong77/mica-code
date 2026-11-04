@@ -729,7 +729,7 @@ describe('CompactionService', () => {
     expect(summarize).not.toHaveBeenCalled();
   });
 
-  it('tool-results-only compact replaces tool results and media and leaves every other message untouched', async () => {
+  it('tool-results-only compact replaces tool results and media and folds cleared rounds', async () => {
     const service = new CompactionService();
     const summarize = vi.fn(async () => FULL_SUMMARY);
     const messages = [
@@ -772,20 +772,22 @@ describe('CompactionService', () => {
     expect(result.mode).toBe('pruned');
     expect(result.strategy).toBe('tool_results_only');
     expect(result.toolResultsReplaced).toBe(2);
+    // 两轮工具调用的结果都被清空，于是各自折成一条说明：6 条消息 → 4 条
+    expect(result.toolRoundsFolded).toBe(2);
     expect(result.beforeCount).toBe(messages.length);
-    expect(result.afterCount).toBe(messages.length);
+    expect(result.afterCount).toBe(4);
     expect(result.messages[0]).toEqual(messages[0]);
-    expect(result.messages[1]).toEqual(messages[1]);
-    expect(result.messages[3]).toEqual(messages[3]);
+    expect(contentOf(result.messages[1])).toContain('keep assistant text');
+    expect(contentOf(result.messages[1])).toContain('read_file(packages/example.ts)');
+    expect(JSON.stringify(result.messages[1])).not.toContain('RAW_TOOL_RESULT');
+    expect(contentOf(result.messages[2])).toContain('run_shell(ls packages)');
+    expect(JSON.stringify(result.messages)).not.toContain('RAW_RESPONSES_OUTPUT');
     // 只有媒体块被换掉，同一条消息里的文本块原样保留
-    const mediaMessageContent = (result.messages[5] as { content: unknown[] }).content;
+    const mediaMessageContent = (result.messages[3] as { content: unknown[] }).content;
     expect(mediaMessageContent[0]).toEqual((messages[5] as { content: unknown[] }).content[0]);
-    expect(contentOf(result.messages[2])).toBe('[Old tool result content cleared during compact]');
-    expect(JSON.stringify(result.messages[2])).not.toContain('RAW_TOOL_RESULT');
-    expect(JSON.stringify(result.messages[4])).not.toContain('RAW_RESPONSES_OUTPUT');
     // 粘贴的图片以 base64 常驻历史，快速压缩把它换成占位符后 base64 才真的离开上下文
     expect(result.mediaItemsReplaced).toBe(1);
-    // 没有任何 checkpoint 消息被插入，工具参数与对话文本原样保留
+    // 没有任何 checkpoint 消息被插入，用户与助手文本原样保留
     const serialized = JSON.stringify(result.messages);
     expect(serialized).not.toContain(COMPACT_BOUNDARY_PREFIX);
     expect(serialized).not.toContain(COMPACT_SUMMARY_PREFIX);
@@ -793,7 +795,7 @@ describe('CompactionService', () => {
     expect(serialized).toContain('keep user text');
     expect(serialized).toContain('keep assistant text');
     expect(serialized).toContain('keep this image');
-    expect(JSON.stringify(result.messages[5])).toContain('[image omitted during compact]');
+    expect(JSON.stringify(result.messages[3])).toContain('[image omitted during compact]');
   });
 
   it('tool-results-only compact clears pasted media without touching text or message count', async () => {
@@ -871,6 +873,49 @@ describe('CompactionService', () => {
     expect(summarize).not.toHaveBeenCalled();
   });
 
+  it('folds a cleared round into one line that still says which tools ran', async () => {
+    const service = new CompactionService();
+    const messages: unknown[] = [
+      { role: 'user', content: '把这两个文件读一下' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call-a', type: 'function', function: { name: 'read_file', arguments: '{"path":"packages/a.ts"}' } },
+          { id: 'call-b', type: 'function', function: { name: 'read_file', arguments: '{"path":"packages/b.ts"}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call-a', content: `RAW_A: ${'x'.repeat(2_000)}` },
+      { role: 'tool', tool_call_id: 'call-b', content: `RAW_B: ${'y'.repeat(2_000)}` },
+      {
+        role: 'assistant',
+        content: '再看一下测试',
+        tool_calls: [
+          { id: 'call-c', type: 'function', function: { name: 'run_shell', arguments: '{"command":"bun test"}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call-c', content: `RAW_C: ${'z'.repeat(2_000)}` },
+    ];
+
+    const result = await service.compact({
+      messages,
+      options: { toolResultsOnly: true, preserveRecentMessages: 2, contextWindowSize: 100_000 },
+      summarize: async () => FULL_SUMMARY,
+    });
+
+    // 只折保护线以外的轮次：两条并行调用合成一条，最近一轮原样留着
+    expect(result.toolRoundsFolded).toBe(1);
+    expect(result.afterCount).toBe(4);
+    const note = contentOf(result.messages[1]);
+    expect(note).toContain('tool calls cleared during compact');
+    // 折完仍看得出「读过哪两个文件」，否则模型会重新读一遍
+    expect(note).toContain('read_file(packages/a.ts)');
+    expect(note).toContain('read_file(packages/b.ts)');
+    expect(JSON.stringify(result.messages)).not.toContain('RAW_A');
+    expect(JSON.stringify(result.messages)).not.toContain('RAW_B');
+    expect((result.messages[2] as { tool_calls: unknown[] }).tool_calls).toHaveLength(1);
+  });
+
   it('tool-results-only compact preview keeps the original messages', async () => {
     const service = new CompactionService();
     const messages = makeToolMessages(2);
@@ -912,7 +957,8 @@ describe('CompactionService', () => {
     expect(result.reasoningItemsDropped).toBe(1);
     expect(result.messages.some((message) => (message as { type?: string }).type === 'reasoning')).toBe(false);
     expect(result.beforeCount).toBe(4);
-    expect(result.afterCount).toBe(3);
+    // reasoning 删掉后剩下的 function_call / function_call_output 也折成了一条
+    expect(result.afterCount).toBe(2);
     expect(result.savedTokenEstimate).toBeGreaterThan(Math.ceil(reasoningText.length / 4));
   });
 
@@ -965,7 +1011,8 @@ describe('CompactionService', () => {
 
     const result = await service.compact({
       messages,
-      options: { toolResultsOnly: true, contextWindowSize: 100_000 },
+      // 这组用例盯的是参数裁剪本身，关掉折叠才能逐条看到 arguments
+      options: { toolResultsOnly: true, foldToolRounds: false, contextWindowSize: 100_000 },
       summarize: async () => FULL_SUMMARY,
     });
 
@@ -998,7 +1045,7 @@ describe('CompactionService', () => {
 
   it('tool argument trimming is repeatable and leaves non-JSON arguments alone', async () => {
     const service = new CompactionService();
-    const options = { toolResultsOnly: true, contextWindowSize: 100_000 };
+    const options = { toolResultsOnly: true, foldToolRounds: false, contextWindowSize: 100_000 };
     const content = 'z'.repeat(600);
     const rawArguments = 'not-json '.repeat(60);
     const messages: unknown[] = [
