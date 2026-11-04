@@ -421,7 +421,7 @@ ctx.skills.register({ ...skill, name: skill.name!, description: skill.descriptio
 
 声明之后，配置页 **Settings → Plugins → 该插件** 会多出一块「运行条件」：每行显示已开启 /
 未开启 / 未知，以及「打开设置」按钮跳到对应的系统设置面板（探测与跳转都只有桌面应用做得了，
-见 AGENT.md 第 9 节）。插件不描述状态、不拼系统设置 URL、也不渲染界面——它跑在
+见 `agent/desktop.md` 的「受控浏览器与终端控制」）。插件不描述状态、不拼系统设置 URL、也不渲染界面——它跑在
 `mica app-server` 子进程里，本来就没有渲染面，权限状态也不属于它。
 
 新增一种运行条件 = 在 `mica-plugin/PluginDesktop.ts` 登记 + 桌面端实现探测器，插件侧只改清单。
