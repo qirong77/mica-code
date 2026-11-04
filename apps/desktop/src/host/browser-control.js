@@ -158,7 +158,10 @@ async function runStream(controller) {
       buffer = buffer.slice(boundary + 2)
       const line = frame.split('\n').find((item) => item.startsWith('data:'))
       const parsed = line ? parseSseData(line) : null
-      if (parsed?.channel === 'browser:changed') {
+      if (parsed?.channel === 'browser:activity' && parsed.payload?.id) {
+        // 「这个会话刚调了一下它的窗口」：只转发给页面闪一下图标，不改快照
+        broadcaster('browser:activity', parsed.payload)
+      } else if (parsed?.channel === 'browser:changed') {
         const browsers = normalizeBrowserSummaries(parsed.payload?.browsers)
         if (!sameBrowsers(state.browsers, browsers)) {
           state.browsers = browsers

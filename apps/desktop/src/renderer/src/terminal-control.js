@@ -9,16 +9,14 @@ function ownerIds(node) {
   return new Set([node?.id, node?.sessionId].filter(Boolean).map((value) => String(value)))
 }
 
-function shortOwner(owner) {
-  const value = String(owner || '')
-  if (!value) return ''
-  return value.length > 6 ? value.slice(-6) : value
-}
-
+/**
+ * 归属当前页签的终端。**归属是唯一依据**：没有归属的终端不在这里出现（主进程的
+ * 回收会把它们直接关掉），留在列表里的只可能是别人的终端——切会话时它就该消失。
+ */
 export function nodeTerminals(terminals, node) {
   const list = Array.isArray(terminals) ? terminals : []
   const ids = ownerIds(node)
-  return list.filter((item) => !item?.owner || ids.has(String(item.owner)))
+  return list.filter((item) => item?.owner && ids.has(String(item.owner)))
 }
 
 export function isTerminalOwnedByNode(terminal, node) {
@@ -33,14 +31,10 @@ export function terminalStatusLabel(terminal) {
   return terminal.windowVisible ? '已显示' : '后台运行'
 }
 
-export function terminalIconTitle(terminal, node) {
+export function terminalIconTitle(terminal) {
   if (!terminal) return ''
   const parts = [terminal.label || '终端控制']
   if (terminal.cwd) parts.push(terminal.cwd)
-  if (!isTerminalOwnedByNode(terminal, node)) {
-    const owner = shortOwner(terminal.owner)
-    parts.push(owner ? `归属 ${owner}` : '未归属')
-  }
   parts.push(`${terminal.cols}×${terminal.rows}`)
   parts.push(terminalStatusLabel(terminal))
   parts.push(terminal.windowVisible ? '点击隐藏' : '点击显示')

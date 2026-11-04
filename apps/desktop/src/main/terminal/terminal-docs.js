@@ -11,7 +11,7 @@ const ownerParam = {
   in: 'header',
   required: false,
   description:
-    '归属的会话（Mica 会话 id 或工作区页签 id）。agent 里用 $MICA_TERMINAL_OWNER，写进这个头，终端窗口就会挂到该会话下。'
+    '归属的会话（Mica 会话 id 或工作区页签 id）。agent 里用 $MICA_TERMINAL_OWNER，写进这个头，终端窗口就会挂到该会话下。新建终端必须带它。'
 }
 
 const RAW_ENDPOINTS = [
@@ -53,7 +53,7 @@ const RAW_ENDPOINTS = [
     id: 'createSession',
     method: 'POST',
     path: '/sessions',
-    summary: '开一个真实终端，返回会话 id（窗口按需打开，默认不创建）',
+    summary: '开一个真实终端，返回会话 id（必须带归属；窗口按需打开，默认不创建）',
     params: [
       { name: 'cwd', in: 'body', required: false, description: '工作目录，默认用户主目录' },
       {
@@ -252,7 +252,7 @@ export const TERMINAL_GUIDE = [
   '推荐流程：createSession → waitFor({idleMs:800}) 等登录 shell 出提示符 → writeInput → waitFor 等输出稳定 → getSession 读屏幕。',
   '屏幕文本已经过 ANSI 解析，TUI 的重绘、清屏、光标位置都按终端语义落定，不需要自己剥转义。',
   'waitFor 默认跳过「刚输入命令的回显」所在行（30 秒内写入的原文），确实要匹配回显时传 skipEcho:false；判断命令成败优先用 expectExitCode 或 idleMs。',
-  '进程退出后屏幕仍可读；用完请自己 closeSession。没有窗口在看的已退出会话 10 分钟后回收，隐藏且 6 小时没有任何活动（输出、输入、改尺寸）的活会话也会被回收。',
+  '进程退出后屏幕仍可读；用完请自己 closeSession。没有归属的终端会被立刻回收；没有窗口在看的已退出会话 10 分钟后回收，隐藏且 6 小时没有任何活动（输出、输入、改尺寸）的活会话也会被回收。',
   'idleMs 只代表「这段时间没有新输出」：刚创建的终端可能还在启动 shell，命令要等它就绪才会执行，必要时把 idleMs 调大或多读一次屏幕。'
 ].join('\n')
 
@@ -266,7 +266,7 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_TERMINAL_URL' } = {}) {
     '',
     `服务地址：\`${serviceUrl}\``,
     '',
-    '请求头带 `x-mica-owner: $MICA_TERMINAL_OWNER` 会把新终端归属到当前会话；带上之后，',
+    '请求头带 `x-mica-owner: $MICA_TERMINAL_OWNER` 会把新终端归属到当前会话，**新建终端必须带它**（缺了返回 400，没有归属的终端会被回收——顶栏只显示本会话自己的终端）；带上之后，',
     '输入、按键、resize、关闭都只对这个会话自己的终端生效（别人的终端返回 403），列表与',
     '读屏不受限制。窗口按需打开：不传 `show` 就不会创建渲染进程，需要人看时再 POST .../show。',
     '',

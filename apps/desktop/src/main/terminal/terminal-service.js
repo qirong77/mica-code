@@ -96,6 +96,32 @@ export function createTerminalService({ sessions, windows, address = () => ({ ur
 
   const handlers = buildHandlers({ sessions, windows, address })
 
+  /**
+   * 「这个会话刚调了一下它的终端」：顶栏对应图标闪一下，让人看得见 AI 正在动终端。
+   *
+   * 只报带归属的请求——页面自己开关窗口不带 owner（那是人已经知道的操作）；连会话 id
+   * 都取不到的调用（列会话）也没有具体哪一枚图标可闪。
+   */
+  function reportActivity(endpoint, ctx, result) {
+    if (!ctx.owner) return
+    const id = String(result?.session?.id || ctx.params?.id || '')
+    if (!id) return
+    let owner = result?.session?.owner || ''
+    if (!owner) {
+      try {
+        owner = sessions.summary(sessions.get(id)).owner || ''
+      } catch {
+        return
+      }
+    }
+    if (!owner) return
+    broadcast(
+      'terminal:activity',
+      { id, owner, endpoint, at: Date.now() },
+      (client) => !client.sessionId || client.sessionId === id
+    )
+  }
+
   for (const endpoint of TERMINAL_ENDPOINTS) {
     if (endpoint.method === 'SSE') continue
     if (!handlers[endpoint.id]) throw new Error(`终端服务缺少端点实现：${endpoint.id}`)
@@ -155,6 +181,7 @@ export function createTerminalService({ sessions, windows, address = () => ({ ur
     try {
       const result = await handlers[matched.endpoint.id](context)
       sendJson(res, 200, { ok: true, ...result })
+      reportActivity(matched.endpoint.id, context, result)
     } catch (error) {
       if (error instanceof TerminalRequestError) {
         sendJson(res, error.status, { ok: false, error: error.message })
@@ -335,6 +362,10 @@ function buildHandlers({ sessions, windows, address }) {
     listSessions: (ctx) => ({ sessions: sessions.list({ owner: ctx.owner }) }),
 
     createSession: (ctx) => {
+      // 归属是顶栏图标的唯一依据：没有归属的终端谁也看不见，只能等着被回收
+      if (!ctx.owner) {
+        throw new TerminalRequestError('缺少归属（x-mica-owner）：终端必须归属到一个会话', 400)
+      }
       // 窗口按需创建：只是让 AI 跑命令的会话不需要渲染进程（一个窗口约 100MB 以上），
       // 要给人看的时候 show 会补开窗口
       return sessions

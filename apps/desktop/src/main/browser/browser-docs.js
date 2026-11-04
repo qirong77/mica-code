@@ -38,7 +38,7 @@ const ownerParam = {
   in: 'header',
   required: false,
   description:
-    '归属的会话（Mica 会话 id 或工作区页签 id）。agent 里用 $MICA_BROWSER_OWNER，写进这个头，窗口就会挂到该会话的图标行上。'
+    '归属的会话（Mica 会话 id 或工作区页签 id）。agent 里用 $MICA_BROWSER_OWNER，写进这个头，窗口就会挂到该会话的图标行上。新建窗口必须带它。'
 }
 
 const RAW_ENDPOINTS = [
@@ -82,7 +82,7 @@ const RAW_ENDPOINTS = [
     summary: '新开一个受控浏览器窗口（默认不打断用户，先隐藏着建）',
     params: [
       { name: 'url', in: 'body', required: false, description: '初始地址，省略则开 about:blank' },
-      { name: 'owner', in: 'body', required: false, description: '归属会话 id' },
+      { name: 'owner', in: 'body', required: false, description: '归属会话 id（与请求头二选一，必须有一个）' },
       {
         name: 'label',
         in: 'body',
@@ -517,7 +517,7 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     '',
     `服务地址：\`${serviceUrl}\``,
     '',
-    '请求头带 `x-mica-owner: $MICA_BROWSER_OWNER` 会把新建窗口归属到当前会话（不带则显示为「未归属」）。',
+    '新建窗口**必须**带 `x-mica-owner: $MICA_BROWSER_OWNER`：顶栏只显示本会话自己的窗口，没有归属的窗口会被直接关闭（缺这个头时新建返回 400）。',
     '',
     '## 通过 MCP 的 control 工具调用',
     '',

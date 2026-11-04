@@ -462,12 +462,14 @@ export function createTerminalSessions({
   /**
    * 自动回收没人管的会话，避免 agent 建了不关的终端越积越多。
    *
-   * 两条线都以「窗口没在显示」为前提：正在看的终端一律不动。
+   * - 没有归属：立刻回收（归属是顶栏图标的唯一依据，没归属的终端在界面上没有入口）。
+   * 其余两条都以「窗口没在显示」为前提：正在看的终端一律不动。
    * - 进程已退出：留十分钟供 AI 读最后屏幕，然后回收。
    * - 进程还活着：隐藏且连续 6 小时没有任何活动才回收；只要还有输出、输入或
    *   改尺寸就重新计时，正在跑东西的 shell 不会被误杀。
    */
   function shouldRecycle(session, now) {
+    if (!session.owner) return true
     if (session.windowVisible) return false
     if (session.exited) return now - (session.exitedAt || now) >= exitedTtlMs
     return now - (session.lastActivityAt || now) >= idleTtlMs

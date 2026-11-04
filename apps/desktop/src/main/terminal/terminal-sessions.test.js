@@ -205,7 +205,7 @@ describe('terminal session reclamation', () => {
         return proc
       }
     })
-    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
+    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24, owner: 'sess-1' })
     ptys[0].exit(0, 0)
 
     expect(sessions.sweep(Date.now())).toEqual([])
@@ -228,7 +228,7 @@ describe('terminal session reclamation', () => {
         return proc
       }
     })
-    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
+    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24, owner: 'sess-1' })
     ptys[0].exit(0, 0)
     sessions.setWindowVisible(session.id, true)
 
@@ -248,7 +248,7 @@ describe('terminal session reclamation', () => {
         return proc
       }
     })
-    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
+    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24, owner: 'sess-1' })
 
     // 5 小时还在 TTL 内：这是 agent 建了暂时没用的终端，不能提前杀掉
     expect(sessions.sweep(Date.now() + 5 * 60 * 60 * 1000)).toEqual([])
@@ -267,7 +267,7 @@ describe('terminal session reclamation', () => {
       idleTtlMs: 10_000,
       spawnPty: () => createFakePty()
     })
-    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
+    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24, owner: 'sess-1' })
 
     sessions.write(session.id, { text: 'ls', submit: true })
 
@@ -282,11 +282,25 @@ describe('terminal session reclamation', () => {
       sweepIntervalMs: 0,
       spawnPty: () => createFakePty()
     })
-    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
+    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24, owner: 'sess-1' })
     sessions.setWindowVisible(session.id, true)
 
     expect(sessions.sweep(Date.now() + 24 * 60 * 60 * 1000)).toEqual([])
     expect(sessions.list()).toHaveLength(1)
+    sessions.shutdown()
+  })
+
+  test('reclaims a session that has no owner right away', async () => {
+    const sessions = createTerminalSessions({
+      onChange: () => {},
+      sweepIntervalMs: 0,
+      spawnPty: () => createFakePty()
+    })
+    const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
+
+    // 没有归属的终端在顶栏没有任何入口，留着只会越积越多
+    expect(sessions.sweep(Date.now())).toEqual([session.id])
+    expect(sessions.list()).toHaveLength(0)
     sessions.shutdown()
   })
 })
