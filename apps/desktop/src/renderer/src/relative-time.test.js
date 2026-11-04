@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { relativeTimeShort } from './relative-time'
+import { activeTimeLabel, relativeTimeShort } from './relative-time'
 
 const NOW = new Date(2026, 2, 15, 12).getTime()
 
@@ -18,5 +18,22 @@ describe('relativeTimeShort', () => {
 
   test('does not show a misleading value for a missing timestamp', () => {
     expect(relativeTimeShort(0, NOW)).toBe('')
+  })
+})
+
+describe('activeTimeLabel', () => {
+  test('keeps the relative time while the row moved within the last day', () => {
+    expect(activeTimeLabel(NOW - 20_000, NOW)).toBe('刚刚')
+    expect(activeTimeLabel(NOW - 13 * 3_600_000, NOW)).toBe('13h')
+  })
+
+  test('hides anything older than a day instead of showing 15d', () => {
+    expect(activeTimeLabel(NOW - 25 * 3_600_000, NOW)).toBe('')
+    expect(activeTimeLabel(NOW - 15 * 86_400_000, NOW)).toBe('')
+  })
+
+  test('hides a missing timestamp', () => {
+    expect(activeTimeLabel(0, NOW)).toBe('')
+    expect(activeTimeLabel(undefined, NOW)).toBe('')
   })
 })

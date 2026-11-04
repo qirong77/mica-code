@@ -17,7 +17,7 @@ import {
   IconTerminal2,
   IconX
 } from '@tabler/icons-react'
-import { relativeTimeShort } from './relative-time'
+import { activeTimeLabel, relativeTimeShort } from './relative-time'
 import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './loop-command'
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import { byUpdatedDesc, orderSessions, resolveDrop, rowDropPosition } from './session-dnd'
@@ -89,15 +89,6 @@ const dropShadow = 'inset 0 0 0 1px rgba(90,167,232,.9)'
 const RECENT_PREVIEW_LIMIT = 6
 
 const RECENT_PAGE_SIZE = 10
-
-/** 收起的分组露出几条预览：够看出「里面是什么」，又不至于把折叠变成一个假展开。 */
-const GROUP_PREVIEW_ROWS = 2
-
-// 收起的分组露出的预览行：与真实会话行同一套列栅格，只是暗一档、不带拖拽——
-// 它只是「里面有什么」的取样，真正的列表在展开之后。颜色必须整份重写，
-// 不能拼在 rowClass 后面（Tailwind 的胜负按生成顺序，不认源码顺序）。
-const previewRowClass =
-  'group relative flex min-h-5 cursor-pointer items-center gap-2 rounded-md pr-2 text-[12.5px] leading-5 text-fg-muted transition-colors hover:bg-overlay hover:text-fg-strong'
 
 /** 正文搜索的防抖：每次按键都往运行时发一趟请求太吵，慢响应还会互相覆盖。 */
 const SESSION_SEARCH_DEBOUNCE_MS = 220
@@ -539,8 +530,8 @@ export function SessionTree({
     return { rootDrafts: root, draftsByGroup: byGroup }
   }, [draftGroups, draftTabs, groupIds])
 
-  // 每个分组子树的摘要（条数 / 最近活动时间 / 按时间倒序的会话）。收起的分组靠它
-  // 在一行分组头 + 两条预览里说清「里面有什么」，不必展开才知道。
+  // 每个分组子树的摘要（条数 / 最近活动时间）。收起的分组只剩那一行，靠它说清
+  // 「里面有多少条、最近什么时候动过」，不必展开才知道。
   const groupDigests = useMemo(
     () => collectGroupDigests({ projects, sessionsByGroup: groupSessions, draftsByGroup }),
     [draftsByGroup, groupSessions, projects]
@@ -1016,9 +1007,12 @@ export function SessionTree({
     const editingThis = editing?.kind === 'session' && editing.id === session.id
     const isOver = rowOverState(section, session.id, groupId)
     const draggingThis = drag?.id === session.id && drag?.kind === 'session'
-    // 行尾统一是「最近结束时间」：Pinned 与 Projects 之前是空的，同一个侧栏里
-    // 一半行有时间一半没有，反而看不出哪些是刚聊过的。
-    const relativeTime = relativeTimeShort(session.updatedAtMs)
+    // 行尾是「最近结束时间」。Recent 里每行都给（时间就是这一列的语义）；Pinned / Projects
+    // 是长期归档，只给 24 小时内活跃过的行，否则整列都是 15d / 4d 的噪声。
+    const relativeTime =
+      section === 'recent'
+        ? relativeTimeShort(session.updatedAtMs)
+        : activeTimeLabel(session.updatedAtMs)
     // Recent 行尾显示工作目录名，方便区分同名会话。
     const cwdLabel = section === 'recent' ? baseName(session.cwd) : ''
     // 定时循环按会话认领，侧栏没有单独的「定时任务」分区，所以行**在任何分区**都带时钟标记
@@ -1338,93 +1332,6 @@ export function SessionTree({
     )
   }
 
-  /**
-   * 收起的分组不再递归渲染子行，但也不能只剩一行文件夹名：直接露出最近两条
-   * （草稿也算在内）再补一句「还有 n 条」。预览行与真实会话行同一套列栅格，
-   * 只是暗一档、不参与拖拽——真正的列表在展开之后。
-   */
-  const renderGroupPreview = (group, depth) => {
-    const digest = groupDigests.get(group.id)
-    if (!digest?.count) return null
-    const items = [
-      ...digest.drafts.map((node) => ({ key: node.id, draft: node })),
-      ...digest.sessions.map((session) => ({ key: session.id, session }))
-    ]
-    const preview = items.slice(0, GROUP_PREVIEW_ROWS)
-    const rest = items.length - preview.length
-    return (
-      <ul className="flex flex-col gap-px">
-        {preview.map((item) =>
-          item.draft ? (
-            <li key={`preview-${item.key}`}>
-              <div
-                className={previewRowClass}
-                style={{ paddingLeft: rowIndent(depth) }}
-                title="尚未关联真实会话的新对话"
-                onClick={() => onSelectDraft(item.draft)}
-                onContextMenu={(event) =>
-                  openMenu(event, { draft: item.draft, items: draftMenuItems() })
-                }
-                {...longPressHandlers((event) =>
-                  openMenu(event, { draft: item.draft, items: draftMenuItems() })
-                )}
-              >
-                <Slot />
-                <RowLeading
-                  state={rowStateOfDraft(item.draft)}
-                  draft={!!draftNodes?.has(item.draft.id)}
-                />
-                <span className="min-w-0 flex-1 truncate">{item.draft.text}</span>
-                <span className="shrink-0 text-[11px] text-fg-dim">草稿</span>
-              </div>
-            </li>
-          ) : (
-            <li key={`preview-${item.key}`}>
-              <div
-                className={previewRowClass}
-                style={{ paddingLeft: rowIndent(depth) }}
-                title={
-                  item.session.cwd
-                    ? `${item.session.title || item.session.id} — ${item.session.cwd}`
-                    : item.session.title || item.session.id
-                }
-                onClick={() => onOpenSession(item.session)}
-                onContextMenu={(event) =>
-                  openMenu(event, { session: item.session, items: menuItemsFor(item.session) })
-                }
-                {...longPressHandlers((event) =>
-                  openMenu(event, { session: item.session, items: menuItemsFor(item.session) })
-                )}
-              >
-                <Slot />
-                <RowLeading
-                  state={rowStateOfSession(item.session)}
-                  terminal={!!terminalSessions?.has(item.session.id)}
-                />
-                <span className="min-w-0 flex-1 truncate">
-                  {item.session.title || item.session.id}
-                </span>
-                <RowTail relativeTime={relativeTimeShort(item.session.updatedAtMs)} />
-              </div>
-            </li>
-          )
-        )}
-        {rest > 0 && (
-          <li>
-            <button
-              type="button"
-              className="flex h-5 w-full items-center rounded-md text-left text-[11px] text-fg-dim transition-colors hover:bg-overlay hover:text-fg-soft"
-              style={{ paddingLeft: NAME_OFFSET + depth * TREE_STEP }}
-              onClick={() => toggleGroupOpen(group.id)}
-            >
-              还有 {rest} 条
-            </button>
-          </li>
-        )}
-      </ul>
-    )
-  }
-
   const renderGroup = (group, depth = 0) => {
     const nesting = childGroups(projects, group.id)
     const groupId = group.id
@@ -1433,6 +1340,8 @@ export function SessionTree({
     const collapsed = !!collapsedGroups[groupId]
     const open = !collapsed
     const digest = groupDigests.get(groupId)
+    // 行尾只留「24 小时内醒过」的时间，具体时刻仍在 tooltip 里
+    const digestTime = activeTimeLabel(digest?.latestAt)
     const editingThis = editing?.kind === 'group' && editing.id === groupId
     const isOver = over?.section === 'project' && over?.groupId === groupId && over?.onGroup
     // 只有子分组右移一层；分组里的会话/草稿与分组名同列（和 Recent 的会话对齐）。
@@ -1568,13 +1477,11 @@ export function SessionTree({
           {digest?.count ? (
             <span className="shrink-0 text-[11px] tabular-nums text-fg-dim transition-opacity group-hover/grow:opacity-0">
               {digest.count}
-              {digest.latestAt ? ` · ${relativeTimeShort(digest.latestAt)}` : ''}
+              {digestTime ? ` · ${digestTime}` : ''}
             </span>
           ) : null}
         </div>
-        {open
-          ? childRows.length > 0 && <ul className="flex flex-col gap-px">{childRows}</ul>
-          : renderGroupPreview(group, depth)}
+        {open && childRows.length > 0 && <ul className="flex flex-col gap-px">{childRows}</ul>}
       </li>
     )
   }
@@ -1583,6 +1490,9 @@ export function SessionTree({
   const renderSectionHeader = (name, label, Icon, options = {}) => {
     const { onAdd, addTitle, dropSection, accepts, hiddenState, meta } = options
     const isOverHeader = !!dropSection && over?.header === dropSection
+    // Recent 是「最近更新」这一列的本体，一直显示；Pinned / Projects 只显示 24 小时内的。
+    const metaTime =
+      name === 'recent' ? relativeTimeShort(meta?.latestAt) : activeTimeLabel(meta?.latestAt)
     // 默认只接会话/草稿：分组换父级是 Projects 标题与分组行的事，落到别处不做任何反应
     const acceptsDrag = (source) =>
       !!source && (accepts ? accepts(source) : source.kind !== 'group')
@@ -1640,7 +1550,7 @@ export function SessionTree({
             }
           >
             {meta.count}
-            {meta.latestAt ? ` · ${relativeTimeShort(meta.latestAt)}` : ''}
+            {metaTime ? ` · ${metaTime}` : ''}
           </span>
         ) : null}
         {onAdd && (

@@ -77,21 +77,13 @@ describe('collectGroupDigests', () => {
   ])
   const draftsOf = new Map([['child', [{ id: 'd1', text: '还没发出去的话' }]]])
 
-  it('aggregates the whole subtree, most recent first', () => {
+  it('aggregates the whole subtree', () => {
     const digests = collectGroupDigests({
       projects,
       sessionsByGroup: sessionsOf,
       draftsByGroup: draftsOf
     })
-    expect(digests.get('root')).toEqual({
-      count: 3,
-      latestAt: 99,
-      sessions: [
-        { id: 's2', updatedAtMs: 99 },
-        { id: 's1', updatedAtMs: 10 }
-      ],
-      drafts: [{ id: 'd1', text: '还没发出去的话' }]
-    })
+    expect(digests.get('root')).toEqual({ count: 3, latestAt: 99 })
     // 叶子分组只算自己那一层
     expect(digests.get('child').count).toBe(2)
     // 空分组也在表里，只是什么都没有——分组头据此决定画不画摘要
@@ -104,7 +96,7 @@ describe('collectGroupDigests', () => {
       sessionsByGroup: new Map(),
       draftsByGroup: new Map()
     })
-    expect(digests.get('root')).toEqual({ count: 0, latestAt: 0, sessions: [], drafts: [] })
+    expect(digests.get('root')).toEqual({ count: 0, latestAt: 0 })
   })
 })
 
