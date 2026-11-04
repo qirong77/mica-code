@@ -27,7 +27,7 @@ npm test                   # bun test，4 worker 并行，覆盖 host / renderer
 npx eslint src/
 npm run build              # 并行：根 CLI 构建 + 外壳 + Web 运行时
 npm run build:server       # 只重建 out/server
-npm run build:app          # build + electron-builder --dir + 写产物指纹（产出 .app）
+npm run build:app          # build + electron-builder --dir + 写产物指纹（产出 .app，= build:unpack）
 npm run build:mac          # 再打 DMG + zip（发布用；打包与压缩占 20s 以上）
 npm run start:web          # 运行已构建的 Web 运行时
 ```

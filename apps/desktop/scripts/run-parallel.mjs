@@ -1,7 +1,7 @@
 /**
  * 并行执行多条构建命令。
  *
- * `build:app` 的组成部分写的是互不重叠的目录：
+ * `npm run build` 的组成部分写的是互不重叠的目录：
  * - `build:cli`（仓库根 `bun run build`）产出 `dist/mica`、`~/.local/lib/mica` 与
  *   `apps/config-web/src/server/generatedStaticAssets.ts`；
  * - `electron-vite build` 产出 `out/main` + `out/renderer`；
