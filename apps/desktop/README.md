@@ -334,11 +334,14 @@ tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridg
   request (`Origin`/`Host` guard) so a random web page cannot drive it. `browser-docs.js` is the one
   place the endpoint catalog lives: the routes, `/browser/docs` and the MCP `control` tool's doc list
   all read it, and `browser-service.js` refuses to start if a documented endpoint has no handler.
-- Screenshots go through CDP (`Page.captureScreenshot`) rather than `capturePage()` because a hidden
-  window has no display surface. Input is the trade-off: native CDP events only reach a _visible_
-  window, so `click`/`type`/`keys` fall back to in-page synthetic events while the window is hidden
-  and report which path they used (`via`). `evaluate`, `content`, `wait`, `cookies`, `console`,
-  `network` and `screenshot` work either way.
+- Everything runs with the window **hidden** — it never pops up while the agent works. Screenshots go
+  through CDP (`Page.captureScreenshot`): on a hidden window `capturePage()` hands back a stale frame
+  while CDP returns the current one (measured). Native CDP input works on hidden windows too
+  (`Input.dispatchMouseEvent` press/release, `Input.dispatchKeyEvent`, `Input.insertText`), so
+  `click`/`type`/`keys` need no fallback; `scroll` scrolls in-page (the `mouseWheel` CDP event never
+  resolves on a hidden window) and prefers the inner scroll container under the viewport centre.
+  `showBrowser` is the only method that shows the window — for demoing to the user — and the user
+  summons/hides it from the top-bar browser icon.
 - Hidden windows are _occluded_ windows as far as Chromium is concerned, so its renderer freezes
   them: `requestAnimationFrame` never fires and `document.visibilityState` stays `hidden` (measured:
   0 rAF ticks in 4s). Anything that renders on rAF (charts, canvas, virtualized lists) and any SPA
@@ -347,9 +350,10 @@ tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridg
   to turn that off — it is the only lever that works (a view-level `backgroundThrottling: false` only
   un-throttles timers, `Page.startScreencast` / `Emulation.setVirtualTimePolicy` /
   `disable-renderer-backgrounding` / `CalculateNativeWinOcclusion` all do nothing). It restores both
-  rAF and `visibilityState: visible`. The cost is that hidden windows keep rendering, so it is on by
-  default and can be turned off with `MICA_BROWSER_UNTHROTTLE=0` (it is a process-wide switch, not
-  per-window).
+  rAF and `visibilityState: visible`, which is what makes the hidden-only model above work at all.
+  The cost is that hidden windows keep rendering, so it is on by default and can be turned off with
+  `MICA_BROWSER_UNTHROTTLE=0` (it is a process-wide switch, not per-window) — with it off, rAF pages
+  freeze and screenshots stop advancing.
 - `src/host/browser-control.js` is the runtime side: it reads `MICA_BROWSER_URL`, keeps the window
   list fresh from `/browser/events`, broadcasts `browser:changed` and exposes the `browser-control:*`
   IPC channels (used by the top bar and by the settings page). The agent never calls the HTTP API

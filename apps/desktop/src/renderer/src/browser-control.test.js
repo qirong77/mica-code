@@ -71,11 +71,11 @@ describe('browserIconTitle', () => {
       tabs: [{ id: 'tab-1' }, { id: 'tab-2' }]
     })
     expect(title).toBe(
-      '订单页 · 订单详情 · https://example.com/order/1 · 2 个标签页 · 已显示 · 点击隐藏 · 右键关闭'
+      '订单页 · 订单详情 · https://example.com/order/1 · 2 个标签页 · 已显示 · 点击收起 · 右键关闭'
     )
   })
 
-  it('hides about:blank and asks for a click to show', () => {
+  it('hides about:blank and asks for a click to summon', () => {
     const title = browserIconTitle({
       label: '受控浏览器',
       title: '',
@@ -85,7 +85,7 @@ describe('browserIconTitle', () => {
       owner: 'sess-abc'
     })
     expect(title).not.toContain('about:blank')
-    expect(title).toContain('点击显示')
+    expect(title).toContain('点击唤出')
   })
 
   it('skips a title that only repeats the label', () => {
@@ -97,7 +97,7 @@ describe('browserIconTitle', () => {
       tabs: [],
       owner: 'sess-abc'
     })
-    expect(title.startsWith('订单页 · 已隐藏 · 点击显示 · 右键关闭')).toBe(true)
+    expect(title.startsWith('订单页 · 已隐藏 · 点击唤出 · 右键关闭')).toBe(true)
   })
 })
 

@@ -129,45 +129,11 @@ export function applyBrowserRenderSwitch(commandLine, env = {}) {
 }
 
 /**
- * 操作前是否需要临时把窗口显示出来，返回要恢复的现场（`null` = 窗口本来就在显示面上）。
- *
- * 隐藏窗口没有显示面：`hide()` 之后合成器不再稳定产帧，原生输入事件也会被丢掉。截图轻则
- * 拿到冻结的旧帧，整页截图甚至会一直不返回（实测 20s 超时）；点击/输入只能退回页面内合成。
- * 所以依赖显示面的操作期间先 `showInactive` 露出窗口，做完按这里记下的现场复原 ——
- * 判定与恢复都收成纯函数，好被单测锁住。
- */
-export function windowRevealPlan(state = {}) {
-  const visible = Boolean(state.visible)
-  const minimized = Boolean(state.minimized)
-  if (visible && !minimized) return null
-  return { visible, minimized }
-}
-
-/** 按现场恢复：最小化的还原成最小化，原本隐藏的 hide；原本就可见则什么都不用做 */
-export function windowRestoreAction(plan) {
-  if (!plan) return null
-  if (plan.minimized) return 'minimize'
-  return plan.visible ? null : 'hide'
-}
-
-/**
- * 临时露出期间要不要把窗口压成透明。
- *
- * 只 `showInactive` 再 `hide` 会让窗口在每次操作时闪一下（截图、点击、输入连着来就是一串闪烁）。
- * 把透明度压到 0 再显示，对 Chromium 来说它仍是「可见窗口」（合成器照常出帧、原生输入照常
- * 生效），对用户则完全看不到。给 `MICA_BROWSER_REVEAL_OPACITY=0` 留了退回开关：设成 0 时
- * 保持旧行为，窗口会真的露出来。
- */
-export function windowRevealDimmed(plan, env = {}) {
-  if (!plan) return false
-  return String(env.MICA_BROWSER_REVEAL_OPACITY ?? '1') !== '0'
-}
-
-/**
  * 逻辑可见状态是否需要广播变更。
  *
- * 临时露出会把窗口真的显示出来，但那不是用户点出来的「可见」：直接照窗口事件广播会让顶栏
- * 图标跟着每次操作闪一下。这里只在逻辑状态真的变了时才返回事件名。
+ * 「可见」只由用户点顶栏图标或显式演示改变，不跟窗口的 show/hide 事件走（用户最小化、
+ * 从 Dock 唤回都会触发那些事件，跟着广播会让顶栏图标乱闪）。这里只在逻辑状态真变了时
+ * 才返回事件名。
  */
 export function visibilityEventName(logicalVisible, physicalVisible) {
   const next = Boolean(physicalVisible)

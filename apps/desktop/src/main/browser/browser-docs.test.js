@@ -85,6 +85,14 @@ describe('BROWSER_GUIDE', () => {
     expect(BROWSER_GUIDE).toContain('evaluate 要 expression')
     expect(BROWSER_GUIDE).toContain('scroll 要 deltaY')
   })
+
+  // 窗口只在演示时显示：模型以前会把「先 show 一下」当成让操作生效的前置步骤，
+  // 结果用户眼前反复弹窗。这条规则必须写在 guide 里，端点摘要也跟着这么写。
+  it('tells the model to keep the window hidden unless demoing', () => {
+    expect(BROWSER_GUIDE).toContain('不需要先 showBrowser')
+    const show = BROWSER_ENDPOINTS.find((endpoint) => endpoint.id === 'showBrowser')
+    expect(show.summary).toContain('明确要给用户演示')
+  })
 })
 
 describe('suggestActionIds', () => {

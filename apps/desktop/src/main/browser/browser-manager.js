@@ -21,7 +21,6 @@ import {
   visibilityEventName
 } from './browser-core.js'
 import { chromeDataUrl, chromePalette, parseChromeMessage } from './browser-chrome.js'
-import { createRevealController } from './browser-reveal.js'
 
 /**
  * 受控浏览器窗口的管理器：浏览器窗口、标签页（每个标签页一个 WebContentsView）、
@@ -30,109 +29,22 @@ import { createRevealController } from './browser-reveal.js'
  * 几个刻意的设计：
  * - **窗口是隐藏式的**：用户点关闭只 `hide()`，页面与登录态原样留着；只有
  *   `POST /browser/browsers/:id/close` 才真的销毁。用户看到的关闭按钮不该等于丢掉现场。
- * - **标签页视图按需挂载**：只有当前标签页挂在窗口上，其余保持存活但不渲染；截图走 CDP
- *   而不是 `capturePage`——后者要求窗口有可见的显示面（隐藏窗口直接报错），而 agent 大多数
- *   时候面对的正是隐藏窗口。
+ * - **默认全程不显示窗口**：截图、点击、输入、按键、滚动都在隐藏窗口里完成——实测
+ *   `Page.captureScreenshot` 在隐藏窗口下拿到的就是当前帧，`Input.*` 原生输入也照常生效
+ *   （前提是主进程挂了 `disable-backgrounding-occluded-windows`，否则 rAF 冻结）。
+ *   `showBrowser` 是唯一的例外，只在明确要给用户演示时调用；用户自己则从顶栏图标唤出。
+ * - **标签页视图按需挂载**：只有当前标签页挂在窗口上（坐标与原生输入都按挂载的视图算），
+ *   其余保持存活但不渲染。截图一律走 CDP：`capturePage()` 在隐藏窗口上拿到的是旧帧。
  * - **浏览数据走独立分区**（`persist:mica-browser`）：与应用自身、与用户日常浏览器互不干扰。
  */
 
 const CLICK_SETTLE_MS = 120
 const WAIT_POLL_MS = 150
-const FRAME_SETTLE_MS = 80
 const MAX_SCREENSHOT_HEIGHT = 16000
 const MAX_CONSOLE_ENTRIES = 500
 const MAX_NETWORK_ENTRIES = 400
 const MAX_NETWORK_BODY = 4000
 const SCREENSHOT_TIMEOUT_MS = 20000
-/** 一串连续操作（点击 → 输入 → 截图）共用同一次临时露出，空闲这么久之后才真正收起来 */
-const REVEAL_IDLE_MS = 1500
-
-/**
- * 隐藏窗口里的原生输入会被丢掉：Chromium 的鼠标/键盘事件挂在有显示面的 widget 上，
- * 窗口 `hide()` 之后 `Input.dispatchMouseEvent` / `dispatchKeyEvent` 发出去没有任何效果
- * （实测 press/release 全丢，`Input.insertText` 倒是能写进已聚焦的元素）。而 agent 大多数
- * 时候面对的正是隐藏窗口（用户不想被弹窗打断），所以隐藏时改走这一份**页面内合成事件**：
- * 命中判定照 `elementFromPoint`（被弹层盖住就报错，而不是硬点），点击补上 mousedown/mouseup，
- * 输入用原生 value setter + input/change 事件（React 受控组件也认）。
- * 窗口可见时一律走原生输入（更高保真），两条路都在返回值里用 `via` 标出来。
- */
-const SYNTHETIC_INPUT = `(command) => {
-  const read = (el) => (el.isContentEditable ? el.textContent : el.value) || ''
-  const write = (el, value) => {
-    if (el.isContentEditable) {
-      el.textContent = value
-    } else {
-      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
-      const descriptor = Object.getOwnPropertyDescriptor(proto, 'value')
-      if (descriptor && descriptor.set) descriptor.set.call(el, value)
-      else el.value = value
-    }
-    el.dispatchEvent(new Event('input', { bubbles: true }))
-    el.dispatchEvent(new Event('change', { bubbles: true }))
-  }
-  const fireKey = (el, key, code, keyCode) => {
-    const init = { key: key, code: code || '', keyCode: keyCode || 0, which: keyCode || 0, bubbles: true, cancelable: true }
-    el.dispatchEvent(new KeyboardEvent('keydown', init))
-    el.dispatchEvent(new KeyboardEvent('keyup', init))
-  }
-
-  if (command.action === 'click') {
-    const el = command.selector
-      ? document.querySelector(command.selector)
-      : document.elementFromPoint(command.x, command.y)
-    if (!el) return { ok: false, reason: command.selector ? 'not-found' : 'no-element-at-point' }
-    const rect = el.getBoundingClientRect()
-    const x = rect.x + rect.width / 2
-    const y = rect.y + rect.height / 2
-    const top = document.elementFromPoint(x, y)
-    if (top && top !== el && !el.contains(top) && !top.contains(el)) {
-      return { ok: false, reason: 'covered', by: top.tagName }
-    }
-    const options = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0 }
-    el.dispatchEvent(new MouseEvent('mousedown', options))
-    el.dispatchEvent(new MouseEvent('mouseup', options))
-    el.click()
-    return { ok: true, via: 'in-page', tag: el.tagName, text: String(el.innerText || el.value || '').slice(0, 120) }
-  }
-
-  if (command.action === 'type') {
-    const el = command.selector ? document.querySelector(command.selector) : document.activeElement
-    if (!el) return { ok: false, reason: 'not-found' }
-    if (typeof el.focus === 'function') el.focus()
-    write(el, (command.clear ? '' : read(el)) + command.text)
-    let submitted = null
-    if (command.submit) {
-      if (el.form && typeof el.form.requestSubmit === 'function') {
-        el.form.requestSubmit()
-        submitted = 'form'
-      } else {
-        fireKey(el, 'Enter', 'Enter', 13)
-        submitted = 'keydown'
-      }
-    }
-    return { ok: true, via: 'in-page', value: read(el), submitted }
-  }
-
-  if (command.action === 'keys') {
-    const el = document.activeElement || document.body
-    const fired = []
-    for (const descriptor of command.descriptors) {
-      if (descriptor.text && el && ('value' in el || el.isContentEditable)) {
-        write(el, read(el) + descriptor.text)
-      }
-      fireKey(el, descriptor.key, descriptor.code, descriptor.keyCode)
-      fired.push(descriptor.key)
-    }
-    return { ok: true, via: 'in-page', fired }
-  }
-
-  if (command.action === 'scroll') {
-    window.scrollBy(0, command.deltaY)
-    return { ok: true, via: 'in-page', scrollY: window.scrollY }
-  }
-
-  return { ok: false, reason: 'unknown-action' }
-}`
 
 export function createBrowserManager({
   onChange = () => {},
@@ -144,7 +56,6 @@ export function createBrowserManager({
   const browsers = new Map()
   let sequence = 0
   let permissionsInstalled = false
-  const reveal = createRevealController({ idleMs: REVEAL_IDLE_MS })
 
   const partition = () => session.fromPartition(BROWSER_PARTITION)
 
@@ -340,7 +251,6 @@ export function createBrowserManager({
     })
 
     win.on('closed', () => {
-      reveal.flush(win)
       for (const tab of record.tabs) detachTab(tab)
       record.tabs = []
       browsers.delete(id)
@@ -348,10 +258,10 @@ export function createBrowserManager({
     })
 
     win.on('resize', () => layout(record))
-    // 露出来之前再推一次：窗口可能是在别的主题下建的，用户切主题时它正藏着
+    // 显示之前再推一次：窗口可能是在别的主题下建的，用户切主题时它正藏着
     win.on('show', () => pushChrome(record))
-    // 逻辑可见状态只由 showBrowser / hideBrowser 改：窗口的 show/hide 事件也会被临时露出
-    // 触发，跟着它广播会让顶栏图标在每次操作时闪一下
+    // 逻辑可见状态只由 showBrowser / hideBrowser 改，不跟窗口的 show/hide 事件走：
+    // 用户把窗口最小化、从 Dock 里唤回时，顶栏图标的状态也不需要跟着抖
 
     win.webContents.on('console-message', (details) => {
       const message = parseChromeMessage(details?.message)
@@ -584,6 +494,11 @@ export function createBrowserManager({
     if (!ensureDebugger(tab)) return
     tab.contents.debugger.sendCommand('Network.enable').catch(() => {})
     tab.contents.debugger.sendCommand('Page.enable').catch(() => {})
+    // 隐藏窗口里 `document.hasFocus()` 是 false，有些站点据此关掉自动聚焦/快捷键/输入校验。
+    // 焦点模拟让它以为自己在前台，而不会真的把用户正在打字的焦点抢过来。
+    tab.contents.debugger
+      .sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+      .catch(() => {})
   }
 
   function sendCommand(tab, method, params = {}) {
@@ -636,55 +551,21 @@ export function createBrowserManager({
   }
 
   /**
-   * 依赖显示面的操作前临时露出窗口，细节见 browser-reveal.js：
-   * 显示但不透明、一串操作共用一次露出、空闲后收起。
-   */
-  function beginReveal(record) {
-    return reveal.begin(record.win)
-  }
-
-  function endReveal(record) {
-    reveal.end(record.win)
-  }
-
-  function flushReveal(record) {
-    reveal.flush(record.win)
-  }
-
-  /** 窗口从隐藏变可见后渲染器要恢复出帧；不等这一帧就截，拿到的可能是空白或冻结的旧帧 */
-  async function settleFirstFrame(tab) {
-    try {
-      await evaluateInPage(
-        tab,
-        'new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))',
-        2000
-      )
-    } catch {
-      // 页面在忙或正在导航：退回固定等待，别让等待本身变成新的超时来源
-      await delay(FRAME_SETTLE_MS)
-    }
-  }
-
-  /**
-   * 在「窗口真的显示着」的前提下跑一次操作，结束后按需恢复原状态（见 beginReveal）。
+   * 在**窗口始终隐藏**的前提下跑一次页面操作：只把目标标签页挂上窗口（坐标与原生输入都按
+   * 挂载后的视图算），做完切回去。**不显示窗口**，也不需要「先显示再收起来」。
    *
-   * 受影响的操作都是同一类：没有显示面时原生输入被丢掉（只能退回页面内合成事件）、
-   * 合成器不出帧（截图拿到旧帧甚至不返回）、rAF 驱动的页面整页冻结。所以这些操作
-   * 一律先临时露出窗口、必要时把目标标签页挂上窗口，做完再收起来。
-   * `run(via)` 拿到这次该走哪条路：能显示就是 'native'，恢复不了才退回 'in-page'。
+   * 隐藏窗口能跑全流程靠两件事：主进程挂了 `disable-backgrounding-occluded-windows`（否则
+   * rAF 冻结、截图只能是旧帧），以及截图走 CDP `Page.captureScreenshot`（`capturePage()`
+   * 在隐藏窗口上拿到的是旧帧）。
    */
-  async function withShownWindow(record, tab, run) {
+  async function withTargetTab(record, tab, run) {
     const previous = activeTab(record)
     const switched = !previous || previous.id !== tab.id
-    const plan = beginReveal(record)
-    const native = Boolean(plan) || switched || inputMode(record) === 'native'
+    if (switched) activateTabIn(record, tab.id)
     try {
-      if (switched) activateTabIn(record, tab.id)
-      if (native && (plan || switched)) await settleFirstFrame(tab)
-      return await run(native ? 'native' : 'in-page')
+      return await run()
     } finally {
       if (switched && previous && record.tabs.includes(previous)) activateTabIn(record, previous.id)
-      endReveal(record)
     }
   }
 
@@ -712,36 +593,6 @@ export function createBrowserManager({
     })
   }
 
-  /**
-   * 可见窗口走原生输入，隐藏窗口走页面内合成事件（原因见 SYNTHETIC_INPUT 的说明）。
-   *
-   * 现在它只作为兜底：依赖显示面的操作会先经 withShownWindow 把窗口露出来，走原生路径；
-   * 只有窗口已销毁、恢复不了显示面时才会落到 'in-page'。
-   */
-  function inputMode(record) {
-    // 按窗口的真实状态判断，而不是逻辑上的「用户让它可见」：临时露出期间窗口是显示着的，
-    // 原生输入同样有效
-    if (record.win.isDestroyed()) return 'in-page'
-    return record.win.isVisible() && !record.win.isMinimized() ? 'native' : 'in-page'
-  }
-
-  async function synthetic(tab, command) {
-    const result = await evaluateInPage(
-      tab,
-      `(${SYNTHETIC_INPUT})(${JSON.stringify(command)})`,
-      15000
-    )
-    if (!result?.ok) {
-      if (result?.reason === 'covered') {
-        throw new BrowserRequestError(
-          `目标被 ${result.by} 盖住，点击没有下发（改用 evaluate 强制触发？）`
-        )
-      }
-      throw new BrowserRequestError(`页面内操作失败：${result?.reason || 'unknown'}`)
-    }
-    return result
-  }
-
   function pushConsoleEntry(tab, details) {
     tab.consoleEntries.push({
       level: typeof details?.level === 'string' ? details.level : 'log',
@@ -755,17 +606,22 @@ export function createBrowserManager({
 
   /* ------------------------------------------------------------------ 操作面 */
 
+  /**
+   * 把窗口显示到桌面上——**唯一**会这么做的路径。
+   *
+   * 除非明确要给用户演示，否则不要调用：截图、点击、输入、按键、滚动、读 cookie 全都在
+   * 隐藏窗口里完成，不需要先显示，也不要用它「确保操作生效」（那只会让窗口在用户眼前闪）。
+   * 用户自己想看时，会点顶栏那枚浏览器图标（页面 → IPC → 这里）。
+   */
   function showBrowser(id, { focus = true } = {}) {
     const record = requireBrowser(id)
     if (record.win.isDestroyed()) throw new BrowserRequestError('窗口已销毁')
-    // 真要露给用户看：先把临时露出收干净，否则窗口会停在上一次的透明度上
-    flushReveal(record)
     if (record.win.isMinimized()) record.win.restore()
     if (focus) {
       record.win.show()
       record.win.focus()
     } else {
-      // agent 让它「可见」不该抢走用户正在打字的焦点
+      // 演示但不抢焦点：别把用户正在打字的焦点抢走
       record.win.showInactive()
     }
     applyVisibility(record, true)
@@ -774,7 +630,6 @@ export function createBrowserManager({
 
   function hideBrowser(id) {
     const record = requireBrowser(id)
-    flushReveal(record)
     if (!record.win.isDestroyed() && record.win.isVisible()) record.win.hide()
     applyVisibility(record, false)
     return record
@@ -993,18 +848,7 @@ export function createBrowserManager({
       if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
         throw new BrowserRequestError('click 需要 selector 或 x/y 坐标')
       }
-      return withShownWindow(record, tab, async (via) => {
-        if (via === 'in-page') {
-          const result = await synthetic(tab, { action: 'click', selector, x: point.x, y: point.y })
-          await delay(CLICK_SETTLE_MS)
-          refreshTabState(tab)
-          emit('clicked')
-          return {
-            target: target || { x: result.x ?? point.x, y: result.y ?? point.y },
-            via: result.via,
-            url: tab.contents.getURL()
-          }
-        }
+      return withTargetTab(record, tab, async () => {
         await dispatchMouse(tab, { ...point, type: 'mouseMoved', clickCount: 0 })
         await dispatchMouse(tab, { ...point, type: 'mousePressed' })
         await dispatchMouse(tab, { ...point, type: 'mouseReleased' })
@@ -1013,7 +857,6 @@ export function createBrowserManager({
         emit('clicked')
         return {
           target: target || { x: point.x, y: point.y },
-          via: 'native',
           url: tab.contents.getURL()
         }
       })
@@ -1021,36 +864,7 @@ export function createBrowserManager({
 
     async type(tabId, { selector = '', text = '', clear = false, submit = false } = {}) {
       const { record, tab } = requireTab(tabId)
-      return withShownWindow(record, tab, async (via) => {
-        if (via === 'in-page') {
-          if (selector) {
-            const found = await evaluateInPage(
-              tab,
-              `Boolean(document.querySelector(${JSON.stringify(selector)}))`,
-              5000
-            )
-            if (!found) throw new BrowserRequestError(`没有找到元素：${selector}`)
-          }
-          if (!selector) {
-            // 合成路径要往「当前聚焦的元素」里写，没聚焦就明确报错（原生路径这里是隐式的）
-            const focused = await evaluateInPage(
-              tab,
-              'Boolean(document.activeElement && document.activeElement !== document.body)',
-              5000
-            )
-            if (!focused) throw new BrowserRequestError('没有聚焦任何元素，type 需要 selector')
-          }
-          const result = await synthetic(tab, {
-            action: 'type',
-            selector,
-            text: String(text || ''),
-            clear,
-            submit
-          })
-          refreshTabState(tab)
-          emit('typed')
-          return { ok: true, via: result.via, value: result.value, submitted: result.submitted }
-        }
+      return withTargetTab(record, tab, async () => {
         if (selector) {
           const script = `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return false; el.focus(); return true })()`
           const found = await evaluateInPage(tab, script, 15000)
@@ -1084,21 +898,25 @@ export function createBrowserManager({
         if (submit) await pressKeys(tab, [{ key: 'Enter', code: 'Enter', keyCode: 13 }])
         refreshTabState(tab)
         emit('typed')
-        return { ok: true, via: 'native' }
+        const value = await evaluateInPage(
+          tab,
+          `(() => {
+            const el = document.activeElement
+            if (!el) return ''
+            return el.isContentEditable ? el.textContent || '' : el.value || ''
+          })()`,
+          5000
+        )
+        return { ok: true, value: String(value || ''), submitted: submit ? 'enter' : null }
       })
     },
 
     async keys(tabId, input) {
       const { record, tab } = requireTab(tabId)
       const descriptors = keyDescriptors(input)
-      return withShownWindow(record, tab, async (via) => {
-        if (via === 'in-page') {
-          const result = await synthetic(tab, { action: 'keys', descriptors })
-          refreshTabState(tab)
-          return { ok: true, via: result.via, fired: result.fired }
-        }
+      return withTargetTab(record, tab, async () => {
         await pressKeys(tab, descriptors)
-        return { ok: true, via: 'native' }
+        return { ok: true, fired: descriptors.map((descriptor) => descriptor.key) }
       })
     },
 
@@ -1108,34 +926,44 @@ export function createBrowserManager({
       if (!Number.isFinite(amount) || amount === 0) {
         throw new BrowserRequestError('scroll 需要非零的 deltaY')
       }
-      return withShownWindow(record, tab, async (via) => {
-        if (via === 'in-page') {
-          const result = await synthetic(tab, { action: 'scroll', deltaY: amount })
-          await delay(CLICK_SETTLE_MS)
-          return { scrollY: result.scrollY }
-        }
-        const size = await evaluateInPage(
+      return withTargetTab(record, tab, async () => {
+        // 不用 Input.dispatchMouseEvent 的 mouseWheel：隐藏窗口上它永远不返回，可见窗口上
+        // 也不一定真的滚（实测视口不动）。改成页面内滚：先找视口中心下最近的可滚容器
+        // （弹层、内部列表），没有就滚整个文档；两条路在隐藏窗口里都成立。
+        const result = await evaluateInPage(
           tab,
-          '({ x: Math.floor(window.innerWidth / 2), y: Math.floor(window.innerHeight / 2) })',
+          `(() => {
+            const delta = ${amount}
+            const el = document.elementFromPoint(
+              Math.floor(window.innerWidth / 2),
+              Math.floor(window.innerHeight / 2)
+            )
+            for (let node = el; node && node !== document.documentElement; node = node.parentElement) {
+              const style = getComputedStyle(node)
+              const scrollable =
+                /(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1
+              if (scrollable) {
+                node.scrollTop += delta
+                return { scrollY: window.scrollY, container: node.tagName, containerScrollTop: Math.round(node.scrollTop) }
+              }
+            }
+            window.scrollBy(0, delta)
+            return { scrollY: window.scrollY, container: null, containerScrollTop: null }
+          })()`,
           5000
         )
-        await sendCommand(tab, 'Input.dispatchMouseEvent', {
-          type: 'mouseWheel',
-          x: size.x,
-          y: size.y,
-          deltaX: 0,
-          deltaY: amount
-        })
         await delay(CLICK_SETTLE_MS)
-        const scrollY = await evaluateInPage(tab, 'window.scrollY', 5000)
-        return { scrollY }
+        return {
+          scrollY: Number(result?.scrollY) || 0,
+          container: result?.container || null,
+          containerScrollTop: result?.containerScrollTop ?? null
+        }
       })
     },
 
     async screenshot(tabId, { fullPage = false, timeoutMs = 0 } = {}) {
       const { record, tab } = requireTab(tabId)
-      // 隐藏窗口不产帧：截图期间一定把窗口显示出来，截完恢复原状态（见 withShownWindow）
-      return withShownWindow(record, tab, async () => {
+      return withTargetTab(record, tab, async () => {
         const budget = Number(timeoutMs) > 0 ? Number(timeoutMs) : SCREENSHOT_TIMEOUT_MS
         const params = { format: 'png' }
         if (fullPage) {

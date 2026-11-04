@@ -43,7 +43,8 @@ export function browserIconTitle(browser) {
   const tabs = Array.isArray(browser.tabs) ? browser.tabs.length : 0
   if (tabs > 1) parts.push(`${tabs} 个标签页`)
   parts.push(browserStatusLabel(browser))
-  parts.push(browser.visible ? '点击隐藏' : '点击显示')
+  // 窗口默认由 agent 在后台用（全程不显示），这枚图标是用户自己唤出/收起的入口
+  parts.push(browser.visible ? '点击收起' : '点击唤出')
   parts.push('右键关闭')
   return parts.filter(Boolean).join(' · ')
 }

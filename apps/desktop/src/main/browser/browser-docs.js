@@ -79,7 +79,7 @@ const RAW_ENDPOINTS = [
     id: 'createBrowser',
     method: 'POST',
     path: '/browser/browsers',
-    summary: '新开一个受控浏览器窗口（默认不打断用户，先隐藏着建）',
+    summary: '新开一个受控浏览器窗口（默认隐藏着建，全程不打扰用户）',
     params: [
       { name: 'url', in: 'body', required: false, description: '初始地址，省略则开 about:blank' },
       { name: 'owner', in: 'body', required: false, description: '归属会话 id（与请求头二选一，必须有一个）' },
@@ -89,7 +89,12 @@ const RAW_ENDPOINTS = [
         required: false,
         description: '窗口标签，界面上用它区分多个窗口'
       },
-      { name: 'show', in: 'body', required: false, description: 'true 时立刻显示到前台' },
+      {
+        name: 'show',
+        in: 'body',
+        required: false,
+        description: '只有明确要给用户演示时才传 true：建完立刻显示到前台'
+      },
       ownerParam
     ],
     returns: '{ ok, browser }',
@@ -108,8 +113,16 @@ const RAW_ENDPOINTS = [
     id: 'showBrowser',
     method: 'POST',
     path: '/browser/browsers/:id/show',
-    summary: '显示到前台（用户点顶栏图标等价于此）',
-    params: [],
+    summary:
+      '把窗口显示到桌面（唯一会显示窗口的动作）：**只在明确要给用户演示时才调用**，其余操作都不需要它。用户自己想看会点顶栏的浏览器图标',
+    params: [
+      {
+        name: 'focus',
+        in: 'query',
+        required: false,
+        description: 'true 时同时抢焦点；默认 false（演示但不打断用户正在输入的内容）'
+      }
+    ],
     returns: '{ ok, browser }'
   },
   {
@@ -223,21 +236,19 @@ const RAW_ENDPOINTS = [
     id: 'click',
     method: 'POST',
     path: '/browser/tabs/:id/click',
-    summary:
-      '点击：给 selector 按元素中心点，或直接给坐标（窗口隐藏时临时显示出来按原生输入点，点完恢复隐藏）',
+    summary: '点击：给 selector 按元素中心点，或直接给坐标（窗口隐藏着也照常生效，不用先显示）',
     params: [
       { name: 'selector', in: 'body', required: false, description: 'CSS 选择器（与坐标二选一）' },
       { name: 'x', in: 'body', required: false, description: '视口坐标' },
       { name: 'y', in: 'body', required: false, description: '视口坐标' }
     ],
-    returns: '{ ok, target, via }（via=native 原生输入 / in-page 页面内合成）'
+    returns: '{ ok, target, url }'
   },
   {
     id: 'type',
     method: 'POST',
     path: '/browser/tabs/:id/type',
-    summary:
-      '输入文本：可先聚焦 selector，可清空，可回车提交；窗口隐藏时临时显示出来走原生输入，输完恢复隐藏',
+    summary: '输入文本：可先聚焦 selector，可清空，可回车提交（窗口隐藏着也照常生效）',
     params: [
       {
         name: 'selector',
@@ -254,7 +265,7 @@ const RAW_ENDPOINTS = [
       { name: 'clear', in: 'body', required: false, description: '先清空该元素的值' },
       { name: 'submit', in: 'body', required: false, description: '输入后按 Enter' }
     ],
-    returns: '{ ok, via, value, submitted }'
+    returns: '{ ok, value, submitted }（value 是输入后聚焦元素的当前值）'
   },
   {
     id: 'keys',
@@ -270,13 +281,14 @@ const RAW_ENDPOINTS = [
           '按键数组（必填），每项只能是：具名键 Enter / Tab / Escape / Esc / Backspace / Delete / Space / ArrowUp / ArrowDown / ArrowLeft / ArrowRight / PageUp / PageDown / Home / End，或单个可打印字符（"a" / "1" / "/"）。不要写 "KeyB"、"Meta+Shift+B"、press 这类键盘码或组合键；要发快捷键请改用 evaluate 里 dispatchEvent 一个带 ctrlKey / metaKey 的 KeyboardEvent。例：["Enter"]、["ArrowDown","ArrowDown","Enter"]'
       }
     ],
-    returns: '{ ok }'
+    returns: '{ ok, fired }'
   },
   {
     id: 'scroll',
     method: 'POST',
     path: '/browser/tabs/:id/scroll',
-    summary: '滚动页面（按像素，正数向下）',
+    summary:
+      '滚动页面（按像素，正数向下）：优先滚视口中心下的内部可滚容器（弹层、列表），没有就滚整个文档',
     params: [
       {
         name: 'deltaY',
@@ -285,14 +297,15 @@ const RAW_ENDPOINTS = [
         description: '滚动像素（必填，数字），正数向下、负数向上，如 600'
       }
     ],
-    returns: '{ ok, scrollY }'
+    returns: '{ ok, scrollY, container, containerScrollTop }（滚到内部容器时 container 是它的标签名）'
   },
   {
     id: 'screenshot',
     method: 'GET',
     path: '/browser/tabs/:id/screenshot',
-    // 隐藏窗口没有显示面：截图期间会临时把窗口显示出来（透明度 0，用户看不到），截完收起
-    summary: '截图（窗口隐藏时会临时显示出来再截，截完恢复隐藏；整页截图传 fullPage=true）',
+    // 隐藏窗口也截得到当前帧（前提是主进程挂了 disable-backgrounding-occluded-windows）：
+    // 不显示窗口、不闪一下
+    summary: '截图，窗口全程隐藏（整页截图传 fullPage=true）',
     params: [
       { name: 'fullPage', in: 'query', required: false, description: 'true 时截整页' },
       {
@@ -441,6 +454,8 @@ function paramLabel(param) {
 export const BROWSER_GUIDE = [
   '第一次用某个动作前，先不带 action 调用 control：返回的 actions[] 里每个动作都带 params（name / 类型 / 是否必填 / 示例值），一次就能看全，比猜参数名快。',
   '先 listBrowsers 看有没有窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。',
+  '窗口全程保持隐藏：截图、点击、输入、按键、滚动、读页面/cookie/console/network 都在隐藏状态下完成，**不需要先 showBrowser**。显示窗口会让用户眼前弹一个窗，只在用户明确要求「演示给我看」时才调它。',
+  '用户会自己点顶栏那枚浏览器图标唤出窗口查看（也能再点一次收起），这件事不要替用户做；你只需要保证页面状态是对的。',
   'action 名必须与 actions[].action 完全一致（区分大小写），不要自己起同义词：按键是 keys（不是 press / key / keyboard），点击是 click，读页面是 content 或 evaluate。按标签页/窗口的动作都要带 id：标签页 id 形如 "tab-1"、窗口 id 形如 "brw-1"，取自 listTabs / listBrowsers / createTab 的返回。',
   '缺必填参数会被直接回绝：evaluate 要 expression、type 要 text、keys 要 keys、scroll 要 deltaY，其余看 actions[].params 里的 required。',
   'keys 只接受单个键：Enter / Tab / Escape / Esc / Backspace / Delete / Space / ArrowUp / ArrowDown / ArrowLeft / ArrowRight / PageUp / PageDown / Home / End，或单个可打印字符（"a"、"1"、"/"）。组合键（Cmd / Ctrl / Shift / Alt）不支持，也不要写 KeyB 这类键盘码：要按 Ctrl+S 这种快捷键，改用 evaluate 在页面里 dispatchEvent(new KeyboardEvent("keydown", { key: "s", code: "KeyS", ctrlKey: true, bubbles: true }))，或者直接点页面上那个按钮。',
@@ -514,6 +529,10 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     '',
     '这是 Mica 桌面应用自己托管的浏览器：窗口由 Mica 创建、由 AI 通过 HTTP 驱动，',
     '地址栏不可编辑，用户关窗口只是隐藏（页面状态保留）。',
+    '',
+    '窗口默认**全程隐藏**：AI 的截图、点击、输入、按键、滚动都在隐藏窗口里完成，不会在用户',
+    '眼前弹窗；`showBrowser` 是唯一会显示窗口的动作，只在明确要给用户演示时使用。用户自己',
+    '点顶栏的浏览器图标就能唤出窗口查看。',
     '',
     `服务地址：\`${serviceUrl}\``,
     '',

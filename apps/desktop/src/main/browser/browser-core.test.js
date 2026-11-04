@@ -22,8 +22,7 @@ import {
   sortCookiesForHeader,
   tabSummary,
   truncateOutput,
-  windowRestoreAction,
-  windowRevealPlan
+  visibilityEventName
 } from './browser-core.js'
 
 describe('matchPath / resolveRoute', () => {
@@ -297,27 +296,12 @@ describe('applyBrowserRenderSwitch', () => {
   })
 })
 
-describe('windowRevealPlan / windowRestoreAction', () => {
-  // 依赖显示面的操作（截图、点击、输入、滚动）都要先露窗口再复原，判定不能走样
-  it('leaves an already visible window alone', () => {
-    expect(windowRevealPlan({ visible: true, minimized: false })).toBeNull()
-    expect(windowRestoreAction(null)).toBeNull()
-  })
-
-  it('reveals a hidden window and hides it again', () => {
-    const plan = windowRevealPlan({ visible: false, minimized: false })
-    expect(plan).toEqual({ visible: false, minimized: false })
-    expect(windowRestoreAction(plan)).toBe('hide')
-  })
-
-  it('restores a minimized window to minimized, not hidden', () => {
-    const plan = windowRevealPlan({ visible: true, minimized: true })
-    expect(plan).toEqual({ visible: true, minimized: true })
-    expect(windowRestoreAction(plan)).toBe('minimize')
-  })
-
-  it('keeps a hidden-but-minimized window minimized', () => {
-    const plan = windowRevealPlan({ visible: false, minimized: true })
-    expect(windowRestoreAction(plan)).toBe('minimize')
+describe('visibilityEventName', () => {
+  // 「可见」只由用户点图标或显式演示改变：窗口自己的 show/hide 不该让图标乱闪
+  it('only reports real transitions', () => {
+    expect(visibilityEventName(false, true)).toBe('shown')
+    expect(visibilityEventName(true, false)).toBe('hidden')
+    expect(visibilityEventName(true, true)).toBeNull()
+    expect(visibilityEventName(false, false)).toBeNull()
   })
 })
