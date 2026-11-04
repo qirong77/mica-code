@@ -73,6 +73,12 @@ import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed, turnLogHeadSummary } from './chat-tool-display'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
+import {
+  groupActivityRounds,
+  isActivityMessage,
+  mergeTurnThinking,
+  turnActivitySettledAt
+} from './chat-turn-activity'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
 import { TurnTimingDialog } from './TurnTimingDialog'
@@ -1687,6 +1693,16 @@ export function promptOccurrenceFromEnd(messages = [], messageId) {
   return occurrence
 }
 
+/** 编辑框的初始文本：历史行里的用户消息正文是投影（文本块照原样拼、图片块折成
+ *  「[图片]」），而桌面端发出的消息本来就在文本里带着同一张图的 `[Image](路径)`。
+ *  两个都留着，编辑框显示的是 `[Image](路径)[图片] …`，确认后还会把字面的「[图片]」
+ *  当成正文再发一次。没有引用的消息（外部写进来的历史）保留占位符，那是它唯一的痕迹。 */
+export function messageEditText(text) {
+  const value = String(text ?? '')
+  if (!/\[Image\]\(/.test(value)) return value
+  return value.replace(/[ \t]*\[图片\][ \t]*/g, (match) => (match === '[图片]' ? '' : ' '))
+}
+
 function UserMessageEditor({ text, busy, canSubmit, onChange, onCancel, onSubmit }) {
   const ref = useRef(null)
   useEffect(() => {
@@ -1852,10 +1868,6 @@ function CommandRow({ message, onCommandAction }) {
   )
 }
 
-function isActivityMessage(message) {
-  return message?.kind === 'reasoning' || message?.kind === 'tool'
-}
-
 /**
  * 当前轮次的活动行（思考 / 工具）。
  *
@@ -1900,7 +1912,57 @@ const TurnLogItem = memo(TurnLogItemView, (previous, next) => {
   return settled ? true : previous.now === next.now
 })
 
-function TurnLogDock({ messages, now = Date.now(), onOpenActivity }) {
+/** 一轮的过程行：思考合并成一块 + 工具行照旧一行行排（与运行中同一份排版）。 */
+function TurnLogRoundBody({ messages, now, onOpenActivity }) {
+  const rows = useMemo(() => mergeTurnThinking(messages), [messages])
+  return (
+    <div className="chat-turn-log-round-body">
+      {rows.map((message) => (
+        <TurnLogItem key={message.id} message={message} now={now} onOpen={onOpenActivity} />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * 停靠区里的一轮：最新一轮摊开（模型正在想什么一眼就看得见），更早的各收成一行。
+ *
+ * 收起的那一行不是空壳——它报这一轮干了什么（最近一条活动）与步数 / 耗时，
+ * 所以收起来也不等于看不见。
+ */
+function TurnLogRound({ round, live, expanded, onToggle, now, onOpenActivity }) {
+  const settled = useMemo(() => turnActivitySettledAt(round.messages) ?? now, [round.messages, now])
+  const head = useMemo(() => turnLogHeadSummary(round.messages, settled), [round.messages, settled])
+  const steps = `${head?.steps ?? round.messages.length} 步`
+  const elapsed = head?.elapsedMs == null ? '' : formatLogElapsed(head.elapsedMs)
+  const meta = [steps, elapsed].filter(Boolean).join(' · ')
+  // 最新一轮没有标题行：它就在最下面摊开着，再加一行「轮次N」只是噪声。
+  const open = live || expanded
+
+  return (
+    <div className={`chat-turn-log-round${live ? ' is-current' : ''}`}>
+      {live ? null : (
+        <button
+          type="button"
+          className="chat-turn-log-round-head"
+          aria-expanded={expanded}
+          title={expanded ? `收起${round.label}` : `展开${round.label}`}
+          onClick={onToggle}
+        >
+          {expanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+          <span className="chat-turn-log-round-label">{round.label}</span>
+          {head?.doing && <span className="chat-turn-log-round-doing">{head.doing}</span>}
+          <span className="chat-turn-log-round-meta">{meta}</span>
+        </button>
+      )}
+      {open && (
+        <TurnLogRoundBody messages={round.messages} now={now} onOpenActivity={onOpenActivity} />
+      )}
+    </div>
+  )
+}
+
+function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenActivity }) {
   const scrollRef = useRef(null)
   // 这块日志的高度也是界面状态：换个窗口打开时保持同一高度，重启后还在。
   const [storedHeight, setStoredHeight] = useSharedState('turnLogHeight', null)
@@ -1912,13 +1974,24 @@ function TurnLogDock({ messages, now = Date.now(), onOpenActivity }) {
       ? Math.min(storedHeight, window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO)
       : null
   const stickToBottomRef = useRef(true)
-  const head = useMemo(() => turnLogHeadSummary(messages, now), [messages, now])
-
-  // 只有用户停留在底部时才跟随滚动，手动上翻后不打扰。
+  // 展开的历史轮次：默认都收着，点了才摊开（最新那一轮不需要点）。
+  const [expandedRounds, setExpandedRounds] = useState(() => new Set())
+  const toggleRound = useCallback((key) => {
+    setExpandedRounds((previous) => {
+      const next = new Set(previous)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+  const liveRound = rounds[rounds.length - 1] ?? null
+  const head = useMemo(() => turnLogHeadSummary(liveRound?.messages ?? [], now), [liveRound, now])
+  // 只有用户停留在底部时才跟随滚动，手动上翻后不打扰。依赖要含 `rounds`：
+  // 思考是逐字增长的，只盯轮次数的话流式正文会跑到可视区外面。
   useLayoutEffect(() => {
     const scroll = scrollRef.current
     if (scroll && stickToBottomRef.current) scroll.scrollTop = scroll.scrollHeight
-  }, [messages, height, collapsed])
+  }, [rounds, height, collapsed])
 
   // 标题行整行就是把手：向上拖变高，夹取规则与沿用下来的高度状态一致。
   // 不 preventDefault——那会连带吞掉 click / dblclick，双击复位就再也收不到。
@@ -1955,7 +2028,7 @@ function TurnLogDock({ messages, now = Date.now(), onOpenActivity }) {
   const resetHeight = useCallback(() => setStoredHeight(null), [setStoredHeight])
   const toggleCollapsed = useCallback(() => setCollapsed((value) => !value), [setCollapsed])
 
-  if (!messages.length) return null
+  if (!rounds.length) return null
 
   const meta = [`${head.steps} 步`, head.elapsedMs == null ? '' : formatLogElapsed(head.elapsedMs)]
     .filter(Boolean)
@@ -1987,7 +2060,7 @@ function TurnLogDock({ messages, now = Date.now(), onOpenActivity }) {
         >
           {collapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
         </button>
-        <span className="chat-turn-log-head-label">本轮</span>
+        <span className="chat-turn-log-head-label">{running ? '模型思考中' : '本轮'}</span>
         {/* 摘要是收起时的替代品：展开后下面每一行都在，标题行只留把手与标签。 */}
         {collapsed && (
           <>
@@ -2008,9 +2081,20 @@ function TurnLogDock({ messages, now = Date.now(), onOpenActivity }) {
               SCROLL_BOTTOM_THRESHOLD
           }}
         >
-          {messages.map((message) => (
-            <TurnLogItem key={message.id} message={message} now={now} onOpen={onOpenActivity} />
-          ))}
+          {rounds.map((round, index) => {
+            const live = index === rounds.length - 1
+            return (
+              <TurnLogRound
+                key={round.key || `round-${index}`}
+                round={round}
+                live={live}
+                expanded={expandedRounds.has(round.key)}
+                onToggle={() => toggleRound(round.key)}
+                now={now}
+                onOpenActivity={onOpenActivity}
+              />
+            )
+          })}
         </div>
       )}
     </section>
@@ -6035,9 +6119,9 @@ export function ChatView({
 
   const startMessageEdit = useCallback((message) => {
     if (!message?.id || message.queued) return
-    const text = String(message.text ?? '')
     // prompt 留作定位依据：会话历史里没有逐条消息 id，host 只能按原文匹配。
-    setMessageEdit({ id: message.id, prompt: text, text })
+    const prompt = String(message.text ?? '')
+    setMessageEdit({ id: message.id, prompt, text: messageEditText(prompt) })
   }, [])
 
   const changeMessageEdit = useCallback((value) => {
@@ -6121,10 +6205,18 @@ export function ChatView({
   // remoteRunning（尤其是附着在别的窗口那一轮上）时不能排队：单槽队列属于那个 run 的
   // 所有者，这里只能看。输入框不再提示「可排队」，避免点下去只换来一条警告。
   const queueReady = running && !remoteRunning && input.trim().length > 0
+  const activityTurnId = activityTurnIdForDisplay(messages, turnRef.current, running)
+  const turnActivityMessages = useMemo(
+    () => currentTurnActivityMessages(messages, activityTurnId),
+    [activityTurnId, messages]
+  )
   const transcriptMessages = useMemo(
     () => messages.filter((message) => !message.queued && !isActivityMessage(message)),
     [messages]
   )
+  // 停靠区按轮次留过程：最新一轮摊开（跟着流式长），更早的收成一行，所以一轮
+  // 跑完不会连同模型的思考一起消失，也不会被下一轮顶掉。
+  const turnLogRounds = useMemo(() => groupActivityRounds(messages), [messages])
   const queuedDisplayItems = useMemo(() => {
     // 排队消息只在输入框上方的 dock 里出现（对话历史过滤掉它们）。host 确认之前
     // 那条乐观行只在 `messages` 里带 queued，这里补成一条待发送项，免得确认通知
@@ -6233,12 +6325,6 @@ export function ChatView({
     },
     [appendNotice, nodeId, nodeIdRef, queuedDisplayItems, runKey, updateMessages]
   )
-  const activityTurnId = activityTurnIdForDisplay(messages, turnRef.current, running)
-  const turnActivityMessages = useMemo(
-    () => currentTurnActivityMessages(messages, activityTurnId),
-    [activityTurnId, messages]
-  )
-  const visibleTurnLogMessages = running || phase === 'error' || todoInterrupted ? turnActivityMessages : []
   // 点开详情时按 id 取当下的那条消息：工具还在跑的时候，输出是流式长出来的。
   const activityDetailMessage = activityDetailId
     ? messages.find((message) => message.id === activityDetailId) || null
@@ -6882,8 +6968,9 @@ export function ChatView({
         {/* 回合日志是停靠区，不是对话的一部分：放在滚动区外面，它才永远贴着输入条。
             放在里面时内容一短就浮在顶上、下面留一大块空白，收起成一行尤其明显。 */}
         <TurnLogDock
-          messages={visibleTurnLogMessages}
+          rounds={turnLogRounds}
           now={Date.now()}
+          running={running}
           onOpenActivity={openActivityDetail}
         />
 

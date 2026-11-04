@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { canSubmitMessageEdit, promptOccurrenceFromEnd } from './ChatView'
+import { canSubmitMessageEdit, messageEditText, promptOccurrenceFromEnd } from './ChatView'
 
 describe('user message edit submit', () => {
   it('allows confirming while mica is idle and the edit has content', () => {
@@ -65,5 +65,21 @@ describe('edit resend target', () => {
 
     expect(promptOccurrenceFromEnd(rows, 'u1')).toBe(1)
     expect(promptOccurrenceFromEnd(rows, 'missing')).toBe(1)
+  })
+})
+
+describe('edit box text', () => {
+  it('drops the image placeholder that only repeats an [Image](path) ref', () => {
+    expect(
+      messageEditText('[Image](~/.mica/images/a.png)[图片] 现在的文件夹咋不知道拖动排序呢')
+    ).toBe('[Image](~/.mica/images/a.png) 现在的文件夹咋不知道拖动排序呢')
+    expect(messageEditText('[Image](~/.mica/images/a.png) [图片] 看这个')).toBe(
+      '[Image](~/.mica/images/a.png) 看这个'
+    )
+  })
+
+  it('keeps the placeholder when the message carries no ref', () => {
+    expect(messageEditText('看这个[图片]')).toBe('看这个[图片]')
+    expect(messageEditText(undefined)).toBe('')
   })
 })

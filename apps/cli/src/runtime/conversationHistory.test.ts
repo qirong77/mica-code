@@ -176,6 +176,25 @@ describe('conversationHistory', () => {
     expect(result.message).toContain('只有图片');
   });
 
+  it('says the message was folded into a compact summary', () => {
+    const summary = [
+      '[Mica compact checkpoint]',
+      '',
+      '## Primary Request and Intent',
+      '- User: "现在的文件夹咋不知道拖动排序和嵌套呢，fix 这个问题"',
+    ].join('\n');
+    const result = truncateHistoryBeforeUserMessage(
+      makeSnapshot([
+        { role: 'user', content: summary },
+        { role: 'assistant', content: '继续' },
+      ]),
+      { prompt: '[Image](~/.mica/images/a.png)[图片] 现在的文件夹咋不知道拖动排序和嵌套呢，fix 这个问题' },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain('进了摘要');
+  });
+
   it('keeps only the not-yet-committed tail of an aborted turn response', () => {
     expect(uncommittedResponseText('first partsecond part', 'first part')).toBe('second part');
     // A restarted retry attempt can no longer match the committed prefix.

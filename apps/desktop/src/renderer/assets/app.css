@@ -2005,6 +2005,83 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
 }
 
 /*
+ * 停靠区里的一轮：最新一轮摊开（思考还在流式增长），更早的各收成一行。
+ * 行样式与轮内过程同源（`.chat-turn-log-*`），这里只管轮次之间的分隔与标题行。
+ */
+.chat-turn-log-round + .chat-turn-log-round {
+  margin-top: 4px;
+}
+
+/* 每一轮是一张独立的框：收起时就是标题行外面一圈边框，摊开后整块仍在这圈框里，
+   「这些行属于同一轮」因此不用靠间距去猜。最新一轮还在流式长，边框淡一档。 */
+.chat-turn-log-round {
+  min-width: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+.chat-turn-log-round.is-current {
+  border-color: var(--color-line-soft);
+}
+
+.chat-turn-log-round-head {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  padding: 1px 0;
+  color: var(--color-fg-faint);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-turn-log-round-head:hover {
+  background: color-mix(in srgb, var(--color-fg-max) 4%, transparent);
+  color: var(--color-fg-dim);
+}
+
+.chat-turn-log-round-label {
+  flex: 0 0 auto;
+}
+
+.chat-turn-log-round-doing {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--color-fg-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-turn-log-round-meta {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 展开的历史轮次与最新一轮之间隔开一点，免得读成同一轮的过程。 */
+.chat-turn-log-round-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.chat-turn-log-round:not(.is-current) .chat-turn-log-round-body::before {
+  content: '';
+  display: block;
+  height: 1px;
+  margin: 3px 0 5px;
+  background: var(--color-line);
+}
+
+/*
  * 工具行：**一条一行**，点开看详情（`chat-tool-detail.jsx`）。
  *
  * 回合日志是「这一轮刚才发生了什么」的目录，不是阅读面：多行日志会把对话区挤到

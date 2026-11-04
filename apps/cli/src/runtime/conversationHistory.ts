@@ -165,5 +165,25 @@ function describeLocateFailure(messages: unknown[], prompt: string): string {
   if (findUserMessageCutIndex(messages, prompt) >= 0) {
     return '这条消息在会话里的位置已变化（可能被压缩或由另一个窗口改写），请重新打开会话后重试';
   }
+  if (appearsInCompactSummary(messages, prompt)) {
+    return '这条消息已经随自动压缩进了摘要，原文不再在会话历史里，无法编辑重发';
+  }
   return '找不到这条消息：它可能没有真正发出，或者历史已被压缩';
+}
+
+/**
+ * 待编辑的消息是不是已经被折进了压缩摘要。
+ *
+ * 一整轮跑几十分钟时自动压缩会把这轮开头（包括它自己的用户消息）摘要掉，历史里
+ * 只剩下 checkpoint 正文。这时候截断点确实不存在，跟「历史被另一个窗口改写」不同，
+ * 用户能做的只有换个说法重新提问——所以要单独说清楚，而不是含糊地讲「找不到」。
+ */
+function appearsInCompactSummary(messages: unknown[], prompt: string): boolean {
+  const target = comparableText(prompt);
+  if (!target) return false;
+  return messages.some((message) => {
+    const text = comparableMessageText(message);
+    if (!text.startsWith(micaContext.COMPACT_SUMMARY_PREFIX)) return false;
+    return text.includes(target);
+  });
 }
