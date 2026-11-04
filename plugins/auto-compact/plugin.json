@@ -2,8 +2,8 @@
   "id": "auto-compact",
   "name": "Auto Compact",
   "icon": "archive",
-  "version": "1.2.0",
-  "description": "每次模型请求前检查即将发送的历史，超过阈值先做本地清理、仍超阈值再做模型摘要，不等整个任务结束。轮次之外（空闲、焦点回到输入框）不压，要压由用户手动触发。",
+  "version": "1.3.0",
+  "description": "每次模型请求前检查即将发送的历史，超过阈值先做本地清理、仍超阈值再做模型摘要，不等整个任务结束。会话放久了或上下文快满窗口时，在输入框上方问一句要不要清理——不点就什么都不发生。",
   "main": "index.js",
   "priority": 100,
   "required": false,
@@ -75,6 +75,38 @@
       "step": 5,
       "unit": "分钟",
       "description": "同一轮运行中模型反复请求时，两次压缩至少隔这么久；新一轮不看它。0 表示不限制。",
+      "perSession": true
+    },
+    {
+      "key": "remindEnabled",
+      "label": "空闲与过大的压缩提醒",
+      "type": "switch",
+      "default": "true",
+      "description": "会话放久了、或者上下文快满窗口时，问一句要不要清理。不点就什么都不发生，不会自己改历史。",
+      "perSession": true
+    },
+    {
+      "key": "idleRemindMinutes",
+      "label": "空闲多久后提醒",
+      "type": "number",
+      "default": "60",
+      "min": 5,
+      "max": 1440,
+      "step": 5,
+      "unit": "分钟",
+      "description": "距上一次请求过了这么久，提示词缓存大概率已失效，这时问一句要不要清理。",
+      "perSession": true
+    },
+    {
+      "key": "remindContextK",
+      "label": "提醒的上下文下限",
+      "type": "number",
+      "default": "100",
+      "min": 20,
+      "max": 10000,
+      "step": 10,
+      "unit": "k tokens",
+      "description": "上下文小于这个量时不提醒：压下来省的那点 token 还不够一次请求的零头。",
       "perSession": true
     }
   ],

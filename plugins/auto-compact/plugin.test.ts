@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createPluginLlmApi } from '@packages/mica-plugin/index.js';
 import type {
   PluginAgentHandle,
+  PluginAskAnswer,
+  PluginAskQuestion,
   PluginContext,
   PluginIterationRewriter,
   PluginModelRequest,
@@ -40,7 +42,9 @@ describe('auto-compact plugin', () => {
 
     await expect(harness.rewrite()).resolves.toBeNull();
     expect(harness.compactCalls).toEqual([]);
-    expect(harness.state).toBeUndefined();
+    // 只有「上一次请求是什么时候」会跟着走：提醒要判断这段历史在缓存里还热不热。
+    expect(harness.state).toMatchObject({ lastRequestAt: expect.any(String) });
+    expect(harness.state).not.toMatchObject({ quickRuns: 1 });
   });
 
   it('escalates to the model pass when the local pass did not shrink enough', async () => {
@@ -241,6 +245,153 @@ describe('auto-compact plugin', () => {
     // 轮次之外也不该往会话状态里写东西：压了才记，没压就什么都不动。
     expect(harness.state).toEqual({ lastActivityAt });
   });
+
+  // 轮次之外只有一条路：问一句。问之前什么都不动，问完用户点了才压。
+  it('asks before touching anything when the session has been idle for an hour', async () => {
+    const harness = createHarness({
+      inputTokens: 260_000,
+      idleCompact: true,
+      reminders: true,
+      lastRequestAt: minutesAgo(65),
+    });
+
+    const pending = harness.runReminder();
+
+    expect(harness.asks).toHaveLength(1);
+    expect(harness.asks[0]?.question.title).toContain('已经 1 小时没有请求');
+    expect(harness.asks[0]?.question.options.map((option) => option.id)).toEqual(['compact', 'later']);
+    // 卡片挂着的时候什么都没压，也没改历史。
+    expect(harness.idleCompactCalls).toEqual([]);
+    expect(harness.compactCalls).toEqual([]);
+
+    harness.answerReminder(['compact']);
+    await pending;
+
+    expect(harness.idleCompactCalls).toHaveLength(1);
+    expect(harness.state).toMatchObject({ quickRuns: 1, lastKind: 'quick' });
+    expect(harness.notices.at(-1)).toContain('已清理较早的工具结果');
+  });
+
+  it('does nothing when the answer is "not now"', async () => {
+    const harness = createHarness({
+      inputTokens: 260_000,
+      idleCompact: true,
+      reminders: true,
+      lastRequestAt: minutesAgo(65),
+    });
+
+    const pending = harness.runReminder();
+    harness.answerReminder(['later']);
+    await pending;
+
+    expect(harness.idleCompactCalls).toEqual([]);
+    expect(harness.notices).toEqual([]);
+  });
+
+  // 同一段空闲只问一次：用户没回或者回了「先不压」，下一次 tick 不该再弹一张。
+  it('asks at most once per idle window', async () => {
+    const harness = createHarness({
+      inputTokens: 260_000,
+      idleCompact: true,
+      reminders: true,
+      lastRequestAt: minutesAgo(65),
+    });
+
+    const first = harness.runReminder();
+    harness.answerReminder(['later']);
+    await first;
+    await harness.runReminder();
+
+    expect(harness.asks).toHaveLength(1);
+    expect(harness.state).toMatchObject({ lastReminderAt: expect.any(String) });
+  });
+
+  it('keeps quiet while a turn is running', async () => {
+    const harness = createHarness({
+      inputTokens: 260_000,
+      idleCompact: true,
+      reminders: true,
+      lastRequestAt: minutesAgo(65),
+    });
+
+    harness.emitHook('turn:before', {});
+    await harness.runReminder();
+    expect(harness.asks).toEqual([]);
+
+    harness.emitHook('turn:after', {});
+    const pending = harness.runReminder();
+    expect(harness.asks).toHaveLength(1);
+    harness.answerReminder(['later']);
+    await pending;
+  });
+
+  it('does not ask when the reminder switch is off', async () => {
+    const harness = createHarness({
+      inputTokens: 260_000,
+      idleCompact: true,
+      reminders: true,
+      lastRequestAt: minutesAgo(65),
+      settings: { ...configured, remindEnabled: 'false' },
+    });
+
+    await harness.runReminder();
+
+    expect(harness.asks).toEqual([]);
+  });
+
+  // 用户没点卡片直接发了下一条消息：那张「要不要压缩」已经没有意义，撤掉它，
+  // 别让它挂在新一轮的输入框上面继续要一个答案。
+  it('takes the card away when the next turn starts', async () => {
+    const harness = createHarness({
+      inputTokens: 260_000,
+      idleCompact: true,
+      reminders: true,
+      lastRequestAt: minutesAgo(65),
+    });
+
+    const pending = harness.runReminder();
+    expect(harness.asks).toHaveLength(1);
+
+    harness.emitHook('turn:before', {});
+    await pending;
+
+    expect(harness.idleCompactCalls).toEqual([]);
+    expect(harness.notices).toEqual([]);
+  });
+
+  // 提醒问的是「缓存还热着吗」，所以每个请求都要把这只表重新上一次弦：
+  // 一轮里发过几次请求，缓存就被刷新过几次。
+  it('restarts the idle clock on every request', async () => {
+    const harness = createHarness({
+      inputTokens: 260_000,
+      reminders: true,
+      lastRequestAt: minutesAgo(65),
+    });
+
+    await harness.rewrite();
+
+    const recorded = Date.parse(String(harness.state?.lastRequestAt));
+    expect(Date.now() - recorded).toBeLessThan(5_000);
+  });
+
+  it('steps aside when another plugin already has a question on screen', async () => {
+    const harness = createHarness({
+      inputTokens: 260_000,
+      idleCompact: true,
+      reminders: true,
+      askBusy: true,
+      lastRequestAt: minutesAgo(65),
+    });
+
+    const pending = harness.runReminder();
+    await pending;
+
+    expect(harness.asks).toEqual([]);
+    expect(harness.logger.info).toHaveBeenCalledWith(
+      'auto-compact:remind-skipped',
+      expect.objectContaining({ reason: expect.any(String) }),
+    );
+  });
 });
 
 function minutesAgo(minutes: number): string {
@@ -264,6 +415,16 @@ function createHarness(options: {
   lastRunAt?: string;
   /** 会话状态里记的本轮开始时间（ISO）：最小间隔只在同一轮里生效。 */
   turnStartedAt?: string;
+  /** 会话状态里记的上一次请求时间（ISO）：空闲提醒的基线。 */
+  lastRequestAt?: string;
+  /**
+   * 宿主有没有「问一句」的两块能力（`ctx.ask` 与 `ctx.background`）。
+   *
+   * 不给就代表 TUI / `mica exec` 那种没有可点地方的宿主：提醒整块不生效。
+   */
+  reminders?: boolean;
+  /** 已经有别的插件在问：`post` 会抛错，插件应该让开。 */
+  askBusy?: boolean;
   /** 不提供会话级状态：用来验证插件不会因为缺能力就崩。 */
   withoutSessionState?: boolean;
   /** 宿主给的模型组件：`configured` 决定它能不能用，缺省不提供（退回内核摘要子代理）。 */
@@ -286,14 +447,55 @@ function createHarness(options: {
   if (options.lastActivityAt) seedState.lastActivityAt = options.lastActivityAt;
   if (options.lastRunAt) seedState.lastRunAt = options.lastRunAt;
   if (options.turnStartedAt) seedState.turnStartedAt = options.turnStartedAt;
+  if (options.lastRequestAt) seedState.lastRequestAt = options.lastRequestAt;
   let state: Record<string, unknown> | undefined = Object.keys(seedState).length ? seedState : undefined;
   let rewriter: PluginIterationRewriter | null = null;
   const disposeHandlers: Array<() => void> = [];
+  type PendingAsk = { question: PluginAskQuestion; answer: (answer: PluginAskAnswer) => void };
+  const asks: PendingAsk[] = [];
+  let pendingAsk: PendingAsk | null = null;
+  const askApi = options.reminders
+    ? {
+        request: async (): Promise<PluginAskAnswer> => ({ optionIds: [], cancelled: true, reason: 'cancelled' }),
+        post: (question: PluginAskQuestion) => {
+          // 宿主同一时刻只显示一个问题：撞上了插件应当让开，而不是把卡片顶掉。
+          if (options.askBusy || pendingAsk) throw new Error('已经有一个问题在等用户回答');
+          const entry: PendingAsk = { question, answer: () => {} };
+          const answered = new Promise<PluginAskAnswer>((resolve) => {
+            entry.answer = resolve;
+          });
+          pendingAsk = entry;
+          asks.push(entry);
+          return {
+            id: `ask-${asks.length}`,
+            answered,
+            dismiss: () => {
+              if (pendingAsk === entry) pendingAsk = null;
+              entry.answer({ optionIds: [], cancelled: true, reason: 'cancelled' });
+            },
+          };
+        },
+      }
+    : undefined;
+  const backgroundTasks = new Map<string, { run: (context: { signal: AbortSignal; tick: number }) => unknown }>();
+  const backgroundApi = options.reminders
+    ? {
+        register: (task: { id: string; run: (context: { signal: AbortSignal; tick: number }) => unknown }) => {
+          backgroundTasks.set(task.id, task);
+          return { dispose: () => backgroundTasks.delete(task.id) };
+        },
+        list: () => [],
+        disposeAll: () => backgroundTasks.clear(),
+      }
+    : undefined;
   // 宿主仍然提供这条能力。插件一次都不调用它，才说明轮次之外确实没压。
   const compactIdleHistory = options.idleCompact
-    ? async () => {
+    ? async (hook?: { afterApply?: (result: { savedTokens: number; beforeTokens: number; afterTokens: number }) => void }) => {
         idleCompactCalls.push(Date.now());
-        return { status: 'applied', savedTokens: 12_000, beforeTokens: 52_000, afterTokens: 40_000 } as const;
+        const result = { savedTokens: 12_000, beforeTokens: 52_000, afterTokens: 40_000 };
+        // 宿主在落盘之前回调：插件在这里写计数与 notice，它们随压缩结果一起保存。
+        hook?.afterApply?.(result);
+        return { status: 'applied', ...result } as const;
       }
     : null;
 
@@ -386,6 +588,8 @@ function createHarness(options: {
         return { dispose() {} };
       },
     },
+    ...(askApi ? { ask: askApi } : {}),
+    ...(backgroundApi ? { background: backgroundApi } : {}),
     hooks: {
       on: (name: string, handler: () => void) => {
         const list = hookHandlers.get(name) ?? [];
@@ -424,6 +628,7 @@ function createHarness(options: {
     compactCalls,
     summarizers,
     idleCompactCalls,
+    asks,
     get state() {
       return state;
     },
@@ -446,6 +651,19 @@ function createHarness(options: {
     },
     emitHook: (name: string, event?: { owner?: unknown }) => {
       for (const handler of hookHandlers.get(name) ?? []) handler(event);
+    },
+    /** 跑一轮「常驻提醒」的检查（宿主的 background tick）。 */
+    runReminder: async () => {
+      const task = backgroundTasks.get('remind');
+      if (!task) throw new Error('plugin did not register the reminder task');
+      return await task.run({ signal: new AbortController().signal, tick: 1 });
+    },
+    /** 模拟用户在卡片上点了一个选项。 */
+    answerReminder: (optionIds: string[]) => {
+      const entry = pendingAsk;
+      if (!entry) throw new Error('no reminder on screen');
+      pendingAsk = null;
+      entry.answer({ optionIds, cancelled: false, reason: 'answered' });
     },
   };
 }

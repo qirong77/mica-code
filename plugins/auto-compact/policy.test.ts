@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   EMPTY_COUNTERS,
   decideAutoCompactStep,
+  decideCompactReminder,
   normalizeCounters,
   settingsFromValues,
   shouldEscalateToModel,
@@ -43,6 +44,21 @@ describe('settingsFromValues', () => {
     expect(parsed.quickLimit).toBe(0);
     expect(parsed.modelThresholdK).toBe(DEFAULT_SETTINGS.modelThresholdK);
   });
+
+  it('reads the reminder switches and turns their units into tokens and milliseconds', () => {
+    expect(settingsFromValues({})).toMatchObject({
+      remindEnabled: true,
+      idleRemindMs: 60 * 60_000,
+      remindContextTokens: 100_000,
+    });
+    expect(settingsFromValues({ remindEnabled: 'false' }).remindEnabled).toBe(false);
+    expect(settingsFromValues({ idleRemindMinutes: '15' }).idleRemindMs).toBe(15 * 60_000);
+    expect(settingsFromValues({ remindContextK: '250' }).remindContextTokens).toBe(250_000);
+    expect(settingsFromValues({ idleRemindMinutes: '0', remindContextK: '0' })).toMatchObject({
+      idleRemindMs: 60_000,
+      remindContextTokens: 1000,
+    });
+  });
 });
 
 describe('normalizeCounters', () => {
@@ -62,6 +78,8 @@ describe('normalizeCounters', () => {
       lastSavedTokens: 4096,
       lastAttemptAt: null,
       lastAttemptTokens: 0,
+      lastRequestAt: '2026-10-01T00:05:00.000Z',
+      lastReminderAt: null,
     };
     expect(normalizeCounters(stored)).toEqual(stored);
   });
@@ -199,5 +217,111 @@ describe('shouldEscalateToModel', () => {
     expect(
       shouldEscalateToModel({ settings: settings(), counters: counters({ modelRuns: 999 }), ctxTokens: 900_000 }),
     ).toBe(false);
+  });
+});
+
+describe('decideCompactReminder', () => {
+  const nowMs = Date.parse('2026-11-01T12:00:00Z');
+  const idleReminder = (patch: Partial<AutoCompactCounters> = {}, ctxTokens = 260_000) =>
+    decideCompactReminder({
+      settings: settings(),
+      counters: counters({ lastRequestAt: new Date(nowMs - 65 * 60_000).toISOString(), ...patch }),
+      ctxTokens,
+      nowMs,
+    });
+
+  it('asks after an hour of silence when the context is worth shrinking', () => {
+    expect(idleReminder()).toBe('idle');
+  });
+
+  it('stays quiet while the user is still working', () => {
+    expect(idleReminder({ lastRequestAt: new Date(nowMs - 5 * 60_000).toISOString() })).toBeNull();
+  });
+
+  it('stays quiet when the context is too small to be worth a card', () => {
+    expect(idleReminder({}, 60_000)).toBeNull();
+  });
+
+  // 「人走开了一小时」只问一次：用户回了「先不压」，或者干脆没回，都不该每分钟再问一遍。
+  it('asks once per idle window and re-arms only after a new request', () => {
+    const asked = { lastReminderAt: new Date(nowMs - 10 * 60_000).toISOString() };
+    expect(idleReminder(asked)).toBeNull();
+
+    // 问过之后又来了一轮新请求：那段空闲结束了，新的空闲重新计时（这里又放了 65 分钟）。
+    const askedThenRequested = {
+      lastReminderAt: new Date(nowMs - 90 * 60_000).toISOString(),
+      lastRequestAt: new Date(nowMs - 65 * 60_000).toISOString(),
+    };
+    expect(
+      decideCompactReminder({ settings: settings(), counters: counters(askedThenRequested), ctxTokens: 260_000, nowMs }),
+    ).toBe('idle');
+  });
+
+  it('never interrupts a running turn', () => {
+    expect(
+      decideCompactReminder({
+        settings: settings(),
+        counters: counters({ lastRequestAt: new Date(nowMs - 65 * 60_000).toISOString() }),
+        ctxTokens: 260_000,
+        busy: true,
+        nowMs,
+      }),
+    ).toBeNull();
+  });
+
+  // 窗口快满了跟「放了多久」无关：这一轮刚答完也该问一句，但要先等它落地。
+  it('switches to the capacity reason near the window limit', () => {
+    const full = (idleMinutes: number) =>
+      decideCompactReminder({
+        settings: settings(),
+        counters: counters({ lastRequestAt: new Date(nowMs - idleMinutes * 60_000).toISOString() }),
+        ctxTokens: 170_000,
+        contextWindowSize: 200_000,
+        nowMs,
+      });
+    expect(full(1)).toBeNull();
+    expect(full(15)).toBe('context');
+  });
+
+  it('scales the "worth a card" floor down with a small window', () => {
+    const at = (ctxTokens: number) =>
+      decideCompactReminder({
+        settings: settings(),
+        counters: counters({ lastRequestAt: new Date(nowMs - 65 * 60_000).toISOString() }),
+        ctxTokens,
+        contextWindowSize: 32_000,
+        nowMs,
+      });
+    // 32K 窗口上「100K 才提醒」永远不成立：门槛按窗口减半（16K）。
+    expect(at(12_000)).toBeNull();
+    expect(at(20_000)).toBe('idle');
+  });
+
+  it('does not ask when the answers are used up or the switch is off', () => {
+    const used = counters({
+      quickRuns: 999,
+      modelRuns: 999,
+      lastRequestAt: new Date(nowMs - 65 * 60_000).toISOString(),
+    });
+    expect(decideCompactReminder({ settings: settings(), counters: used, ctxTokens: 260_000, nowMs })).toBeNull();
+    expect(
+      decideCompactReminder({
+        settings: settings({ remindEnabled: false }),
+        counters: counters({ lastRequestAt: new Date(nowMs - 65 * 60_000).toISOString() }),
+        ctxTokens: 260_000,
+        nowMs,
+      }),
+    ).toBeNull();
+  });
+
+  it('does not guess the idle time after a clock rollback', () => {
+    expect(
+      decideCompactReminder({
+        settings: settings(),
+        counters: counters({ lastRequestAt: new Date(nowMs + 60 * 60_000).toISOString() }),
+        ctxTokens: 260_000,
+        nowMs,
+      }),
+    ).toBeNull();
   });
 });
