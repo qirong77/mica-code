@@ -16,12 +16,11 @@ export const USAGE_KIND_COLORS = {
   helper: 'var(--color-fg-ghost)'
 }
 
-export const USAGE_KIND_LABELS = {
-  main: '主对话',
-  delegation: '委派子代理',
-  plugin: '插件',
-  helper: '内核后台'
-}
+// 来源的中文名只有一份（`mica-web-shared` 的 `USAGE_SOURCE_LABELS`）：统计页的图例、
+// 表格与会话详情都从这里取，不再各写一套同义词。
+import { USAGE_SOURCE_LABELS } from '@packages/mica-web-shared/usage-source.js'
+
+export const USAGE_KIND_LABELS = USAGE_SOURCE_LABELS
 
 /** token 构成的三种去向：缓存输入、未缓存输入、输出。图形与图例共用这一份配色。 */
 export const USAGE_TOKEN_PARTS = [

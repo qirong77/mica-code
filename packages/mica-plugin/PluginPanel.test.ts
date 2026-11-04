@@ -65,6 +65,25 @@ describe('normalizePluginPanelView', () => {
     expect(table?.rows[0].actions?.[0].id).toBe('edit');
   });
 
+  it('keeps a cell’s second line (address, path) next to its main text', () => {
+    const view = normalizePluginPanelView({
+      title: 'ssh',
+      sections: [
+        {
+          title: '服务器',
+          table: {
+            columns: [{ key: 'server', label: '服务器', grow: true }],
+            rows: [{ key: 'test', cells: { server: { text: 'test', sub: 'root@10.0.0.1:22' } } }],
+          },
+        },
+      ],
+    });
+    expect(view.sections?.[0].table?.rows[0].cells.server).toEqual({
+      text: 'test',
+      sub: 'root@10.0.0.1:22',
+    });
+  });
+
   it('drops a table that cannot be rendered, and unknown columns', () => {
     // 只有列没有行：画出来是个空表头，插件该用 empty 说话。
     const empty = normalizePluginPanelView({

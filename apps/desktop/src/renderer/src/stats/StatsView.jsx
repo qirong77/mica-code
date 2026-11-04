@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Button, DataTable, Segmented, SelectMenu } from '@mica-config-ui/web'
+import { Button, DataTable, Segmented, SelectMenu, Tag } from '@mica-config-ui/web'
 import { BarSeries, CalendarHeatmap } from './charts'
 import { SessionDetailModal } from './SessionDetailModal'
 import { bucketByDay, bucketByDaySource, isDayRange, rangeStart, scopeSession } from './scope'
@@ -9,7 +9,13 @@ import {
 } from './usage-series'
 import { USAGE_SOURCE_LABELS } from '@packages/mica-web-shared/usage-source.js'
 import { usePluginsDetails } from '../plugins-details'
-import { flattenSourceRows } from './source-groups'
+import {
+  SOURCE_KIND_HINTS,
+  SOURCE_KIND_LABELS,
+  flattenSourceRows,
+  normalizeSourceId,
+  sourceRowKey
+} from './source-groups'
 import {
   addDays,
   calendarGrid,
@@ -32,7 +38,7 @@ const RANGE_OPTIONS = [
 const PROJECT_BATCH = 7
 // 两张明细表一页放多少行。同一个页面上两个表用不同行数不是问题——它们回答的问题不同，
 // 来源表本来就短（十几条），会话表会长到几百条。
-const SOURCE_PAGE_SIZE = 8
+const SOURCE_PAGE_SIZE = 12
 const SESSION_PAGE_SIZE = 10
 // 载荷是「会话 × 本地日」的聚合结果（上千个会话约 1MB，见 host/stats-core），面板只看
 // 总量，半分钟一次足够；首次构建索引期间运行时另行推送 stats:changed，不靠这个间隔。
@@ -69,6 +75,7 @@ function basename(cwd) {
 }
 
 function tokensShort(n) {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}G`
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`
   return String(n)
@@ -601,23 +608,34 @@ function ByModelCard({ scoped }) {
 /**
  * 按来源列出每一条用量。**不分组**：同一个功能可能同时出现两条（自动压缩的模型摘要
  * 既可以由插件经 `ctx.llm` 发，也可以由内核起摘要子代理），分组会把它拆到两张小表里，
- * 看起来像记了两笔。摊平后按 token 排，每行的副标题写明是插件、内核还是委派。
+ * 看起来像记了两笔。摊平后按 token 排，每行给出「类型 + 具体名称 + 谁派发 + 用途」。
+ *
+ * Type 列不参与排序、也不随容器变宽退场：它是「这笔请求哪来的」的答案，退掉之后剩下的
+ * 名称与数字就又要靠副标题去猜。
  */
 const SOURCE_COLUMNS = [
-  { key: 'source', label: 'Source', width: '40%' },
-  { key: 'requests', label: 'Requests', width: '13%', align: 'right', sortable: true },
-  { key: 'input', label: 'Input', width: '14%', align: 'right', sortable: true },
+  { key: 'source', label: 'Source', width: '38%' },
+  { key: 'kind', label: 'Type', width: '11%' },
+  { key: 'requests', label: 'Requests', width: '11%', align: 'right', sortable: true },
+  {
+    key: 'input',
+    label: 'Input',
+    width: '13%',
+    align: 'right',
+    sortable: true,
+    narrow: 'tertiary'
+  },
   {
     key: 'output',
     label: 'Output',
-    width: '14%',
+    width: '12%',
     align: 'right',
     sortable: true,
-    // 这张表只有五列：先退 Output（用量的大头都在 Input 里，输出量小到可以点进会话看），
+    // 先退 Output（用量的大头都在 Input 里，输出量小到可以点进会话看），再窄才退 Input。
     // 请求数一直留着——「这个来源被调了多少次」是判断它值不值的第一眼。
     narrow: 'secondary'
   },
-  { key: 'share', label: 'Share', width: '19%', align: 'right', sortable: true }
+  { key: 'share', label: 'Share', width: '15%', align: 'right', sortable: true }
 ]
 
 const SOURCE_SORT_VALUE = {
@@ -633,17 +651,23 @@ function BySourceCard({ scoped }) {
     () => new Map(plugins.map((plugin) => [plugin.id, plugin.name])),
     [plugins]
   )
+  const pluginDescriptions = useMemo(
+    () => new Map(plugins.map((plugin) => [plugin.id, plugin.description])),
+    [plugins]
+  )
   const [sort, setSort] = useState({ key: 'share', desc: true })
 
   const rows = useMemo(() => {
     const map = new Map()
     for (const s of scoped) {
       for (const usage of s.sourceUsage || []) {
-        const key = `${usage.kind}:${usage.id}`
+        // 同一个功能只占一行：内核压缩的两种历史写法（`compact` / `auto-compact`）先归一，
+        // 否则它们看起来像两个功能各记了一笔。会话 id 仍按 Set 去重，合并不虚增会话数。
+        const key = sourceRowKey(usage)
         const row = map.get(key) || {
           key,
           kind: usage.kind,
-          id: usage.id,
+          id: normalizeSourceId(usage.kind, usage.id),
           sessions: new Set(),
           tasks: new Set(),
           purposes: new Set(),
@@ -671,7 +695,10 @@ function BySourceCard({ scoped }) {
     }))
   }, [scoped])
 
-  const flattened = useMemo(() => flattenSourceRows(rows, { pluginNames }), [rows, pluginNames])
+  const flattened = useMemo(
+    () => flattenSourceRows(rows, { pluginNames, pluginDescriptions }),
+    [rows, pluginNames, pluginDescriptions]
+  )
 
   const sorted = useMemo(() => {
     const value = SOURCE_SORT_VALUE[sort.key] || SOURCE_SORT_VALUE.share
@@ -723,6 +750,9 @@ function BySourceCard({ scoped }) {
                 {row.detail}
               </span>
             </div>,
+            <span key="kind" className="min-w-0" title={row.kindHint}>
+              <Tag>{row.kindLabel}</Tag>
+            </span>,
             <span key="requests" className="font-mono text-[11px] text-fg-muted tabular-nums">
               {row.requests.toLocaleString()}
             </span>,
@@ -749,6 +779,21 @@ function BySourceCard({ scoped }) {
           ]}
         />
       </div>
+      <ul className="mt-3 flex flex-col gap-1 border-t border-line-soft pt-2.5 text-[11px] leading-relaxed text-fg-faint">
+        {SOURCE_ORDER.map((kind) => (
+          <li key={kind} className="flex gap-1.5">
+            <span
+              aria-hidden
+              className="mt-[5px] size-1.5 shrink-0 rounded-full"
+              style={{ background: SOURCE_COLORS[kind] }}
+            />
+            <span className="min-w-0">
+              <span className="text-fg-muted">{SOURCE_KIND_LABELS[kind]}</span>
+              {` — ${SOURCE_KIND_HINTS[kind]}`}
+            </span>
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }

@@ -56,7 +56,7 @@ import {
   summarizeTodoProgress,
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
-import { PluginIcon, QrCode, SessionDetailView } from '@mica-config-ui/web'
+import { Button, PluginIcon, QrCode, SessionDetailView } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
@@ -1142,17 +1142,10 @@ function PluginTaskDialog({ task, onChange, onConfirm, onClose }) {
       className="chat-modal-prompt"
       footer={
         <>
-          <button type="button" className="session-action" onClick={onClose}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="session-action session-action-primary"
-            onClick={onConfirm}
-            disabled={!task.prompt.trim()}
-          >
+          <Button onClick={onClose}>取消</Button>
+          <Button variant="accent" onClick={onConfirm} disabled={!task.prompt.trim()}>
             开始
-          </button>
+          </Button>
         </>
       }
     >
@@ -1189,32 +1182,27 @@ function PluginTableDialog({ dialog, onClose, onOpenPluginSettings, onOpenPlugin
       footer={
         <>
           {configure ? (
-            <button
-              type="button"
-              className="session-action session-action-primary"
+            <Button
+              variant="accent"
               onClick={() => {
                 onClose()
                 onOpenPluginSettings?.(dialog.pluginId)
               }}
             >
               {configure.label || '去插件页面配置'}
-            </button>
+            </Button>
           ) : null}
           {panel ? (
-            <button
-              type="button"
-              className="session-action"
+            <Button
               onClick={() => {
                 onClose()
                 onOpenPluginPanel?.(dialog.pluginId)
               }}
             >
               {panel.label || '打开面板'}
-            </button>
+            </Button>
           ) : null}
-          <button type="button" className="session-action" onClick={onClose}>
-            关闭
-          </button>
+          <Button onClick={onClose}>关闭</Button>
         </>
       }
     >
@@ -1402,17 +1390,27 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, o
       onBodyScroll={onBodyScroll}
       actions={
         running ? (
-          <button type="button" className="chat-modal-danger" disabled={stopping} onClick={stop}>
+          <Button size="compact" variant="danger-ghost" disabled={stopping} onClick={stop}>
             停止
-          </button>
+          </Button>
         ) : (
-          <button type="button" disabled={restarting} title="创建新任务，并使用原任务和最近活动作为上下文" onClick={async () => {
-            if (restarting) return
-            setRestarting(true)
-            try { await onRestart?.(task.taskId) } finally { setRestarting(false) }
-          }}>
+          <Button
+            size="compact"
+            variant="ghost"
+            disabled={restarting}
+            title="创建新任务，并使用原任务和最近活动作为上下文"
+            onClick={async () => {
+              if (restarting) return
+              setRestarting(true)
+              try {
+                await onRestart?.(task.taskId)
+              } finally {
+                setRestarting(false)
+              }
+            }}
+          >
             {restarting ? '正在重启…' : '重启'}
-          </button>
+          </Button>
         )
       }
     >
@@ -1496,14 +1494,14 @@ function BackgroundTaskModalView({ runKey, task: initialTask, onClose, onKill })
       onBodyScroll={onBodyScroll}
       actions={
         running ? (
-          <button
-            type="button"
-            className="chat-modal-danger"
+          <Button
+            size="compact"
+            variant="danger-ghost"
             disabled={!onKill}
             onClick={() => onKill(task)}
           >
             终止
-          </button>
+          </Button>
         ) : null
       }
     >
@@ -1990,8 +1988,13 @@ function TurnLogDock({ messages, now = Date.now(), onOpenActivity }) {
           {collapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
         </button>
         <span className="chat-turn-log-head-label">本轮</span>
-        {head.doing && <span className="chat-turn-log-head-doing">{head.doing}</span>}
-        <span className="chat-turn-log-head-meta">{meta}</span>
+        {/* 摘要是收起时的替代品：展开后下面每一行都在，标题行只留把手与标签。 */}
+        {collapsed && (
+          <>
+            {head.doing && <span className="chat-turn-log-head-doing">{head.doing}</span>}
+            <span className="chat-turn-log-head-meta">{meta}</span>
+          </>
+        )}
       </header>
       {!collapsed && (
         <div

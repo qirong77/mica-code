@@ -109,7 +109,8 @@ export function ModalShell({
                 </span>
               ) : null}
             </div>
-            <div className="chat-modal-actions">
+            {/* 操作区与底栏同样套上共享控件的作用域：`Tag` 与文字按钮都来自那一套 */}
+            <div className="chat-modal-actions mica-config-ui is-embed">
               {actions}
               <button
                 type="button"
@@ -127,7 +128,11 @@ export function ModalShell({
         <div ref={bodyRef} className="chat-modal-body" onScroll={onBodyScroll}>
           {children}
         </div>
-        {footer ? <footer className="chat-modal-footer">{footer}</footer> : null}
+        {/* 底栏的动作按钮来自共享控件库：套上 `.mica-config-ui` 才拿得到它们的作用域样式，
+            否则共享 Button 在这里是一颗没有外观的原生按钮。 */}
+        {footer ? (
+          <footer className="chat-modal-footer mica-config-ui is-embed">{footer}</footer>
+        ) : null}
       </div>
     </div>,
     document.body

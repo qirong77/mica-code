@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { IconAlertCircle } from '@tabler/icons-react'
-import { SelectMenu } from '@mica-config-ui/web'
+import { Button, SelectMenu } from '@mica-config-ui/web'
 import {
   DEFAULT_LOOP_MINUTES,
   LOOP_INTERVAL_UNITS,
@@ -172,40 +172,23 @@ export function LoopPanel({
       ) : null}
 
       <div className="session-settings-actions">
-        {editing ? (
-          <button type="button" className="session-action" onClick={() => onFireNow?.()}>
-            立即执行
-          </button>
-        ) : null}
+        {editing ? <Button onClick={() => onFireNow?.()}>立即执行</Button> : null}
         {editing ? (
           loop.status === 'active' ? (
-            <button type="button" className="session-action" onClick={() => onPause?.()}>
-              暂停
-            </button>
+            <Button onClick={() => onPause?.()}>暂停</Button>
           ) : (
-            <button type="button" className="session-action" onClick={() => onResume?.()}>
-              继续
-            </button>
+            <Button onClick={() => onResume?.()}>继续</Button>
           )
         ) : null}
         {editing ? (
-          <button
-            type="button"
-            className="session-action session-action-danger"
-            onClick={() => onStop?.()}
-          >
+          <Button variant="danger-ghost" onClick={() => onStop?.()}>
             停止
-          </button>
+          </Button>
         ) : null}
         <span className="session-settings-actions-spacer" />
-        <button
-          type="button"
-          className="session-action session-action-primary"
-          disabled={!canSubmit}
-          onClick={submit}
-        >
+        <Button variant="accent" disabled={!canSubmit} onClick={submit}>
           {editing ? '保存' : '开始循环'}
-        </button>
+        </Button>
       </div>
     </>
   )

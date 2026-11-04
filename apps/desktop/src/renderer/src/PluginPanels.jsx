@@ -837,7 +837,8 @@ function PluginPanelDock({
   return (
     <aside className="chat-plugin-dock" aria-label={`${view?.title || label} 插件面板`}>
       <header className="chat-plugin-dock-head">
-        <div className="chat-plugin-dock-title">
+        {/* 标题旁的状态徽标来自共享控件库：套上作用域才拿到 Tag 自己的底色与圆角 */}
+        <div className="chat-plugin-dock-title mica-config-ui is-embed">
           <span>{view?.title || label}</span>
           {view?.status && <Tag tone={tagTone(statusTone)}>{view.status.label}</Tag>}
         </div>
@@ -1068,17 +1069,28 @@ function PluginPanelTable({ table, busy, runAction }) {
   const actionsColumn = columns.find((column) => column.actions)
   // 插件没指定按钮列时补在最右：只有编辑/删除、没有勾选框的表不必为此写一列。
   const trailingActions = hasActions && !actionsColumn
+  // 勾选列窄且居中：它是「是/否」的一格状态，不该跟着表头文字一起把行撑开。
+  const checkColumns = new Set()
+  for (const row of rows) {
+    for (const [key, cell] of Object.entries(row.cells || {})) {
+      if (cell?.check) checkColumns.add(key)
+    }
+  }
+  const columnClass = (column) =>
+    [
+      column.grow ? 'is-grow' : '',
+      column.actions ? 'is-actions' : '',
+      checkColumns.has(column.key) ? 'is-check' : ''
+    ]
+      .filter(Boolean)
+      .join(' ')
   return (
     <div className="chat-plugin-table-wrap">
       <table className="chat-plugin-table">
         <thead>
           <tr>
             {columns.map((column) => (
-              <th
-                key={column.key}
-                className={`${column.grow ? 'is-grow' : ''}${column.actions ? ' is-actions' : ''}`.trim()}
-                scope="col"
-              >
+              <th key={column.key} className={columnClass(column)} scope="col">
                 {column.label}
               </th>
             ))}
@@ -1098,7 +1110,7 @@ function PluginPanelTable({ table, busy, runAction }) {
                 }
                 const cell = row.cells?.[column.key]
                 return (
-                  <td key={column.key} className={column.grow ? 'is-grow' : ''}>
+                  <td key={column.key} className={columnClass(column)}>
                     <PluginPanelTableCell
                       cell={cell}
                       rowKey={row.key}
@@ -1127,7 +1139,8 @@ function PluginPanelRowActions({ row, busy, runAction }) {
   return (row.actions || []).map((action) => (
     <Button
       key={action.id}
-      variant={buttonVariant(action.tone)}
+      // 行内动作一律幽灵按钮（破坏性的挂红字）：每行都画带边框的方块，表格就成了一排按钮墙。
+      variant={action.tone === 'danger' ? 'danger-ghost' : buttonVariant(action.tone)}
       size="compact"
       disabled={action.disabled || Boolean(busy)}
       loading={busy === `${action.id}:${row.key}`}
@@ -1159,8 +1172,8 @@ function PluginPanelTableCell({ cell, rowKey, columnKey, label, busy, runAction 
     )
   }
   const body = cell.text || cell.link || '—'
-  if (cell.link && isOpenableLink(cell.link)) {
-    return (
+  const primary =
+    cell.link && isOpenableLink(cell.link) ? (
       <button
         type="button"
         className={`chat-plugin-link${cell.tone ? ` tone-${cell.tone}` : ''}`}
@@ -1169,14 +1182,21 @@ function PluginPanelTableCell({ cell, rowKey, columnKey, label, busy, runAction 
       >
         {body}
       </button>
+    ) : (
+      <span
+        className={`chat-plugin-cell${cell.tone ? ` tone-${cell.tone}` : ''}`}
+        title={cell.text || undefined}
+      >
+        {cell.text || ''}
+      </span>
     )
-  }
+  if (!cell.sub) return primary
   return (
-    <span
-      className={`chat-plugin-cell${cell.tone ? ` tone-${cell.tone}` : ''}`}
-      title={cell.text || undefined}
-    >
-      {cell.text || ''}
+    <span className="chat-plugin-cell-stack">
+      {primary}
+      <span className="chat-plugin-cell-sub" title={cell.sub}>
+        {cell.sub}
+      </span>
     </span>
   )
 }

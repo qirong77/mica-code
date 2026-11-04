@@ -11,11 +11,15 @@ export type UsageSource = {
   pluginId: string | null;
 };
 
+/**
+ * 四类来源的中文名，统计页的表格、图例与会话详情共用这一份：三种写法各来一套时，
+ * 同一页里会出现「主对话 / Main / 委派子代理」三个名字指同一种东西。
+ */
 export const USAGE_SOURCE_LABELS: Record<UsageSourceKind, string> = {
-  main: 'Main',
-  delegation: 'Delegated',
-  plugin: 'Plugin',
-  helper: 'Built-in',
+  main: '主对话',
+  delegation: '子代理',
+  plugin: '插件',
+  helper: '内核后台',
 };
 
 /** 主对话（provider 主循环）的请求。整条会话里只有这一份来源的 id 是固定的。 */

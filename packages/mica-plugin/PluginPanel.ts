@@ -89,6 +89,13 @@ export type PluginPanelTableColumn = {
  */
 export type PluginPanelTableCell = {
   text?: string;
+  /**
+   * 第二行说明（地址、路径、上次连接的时间）：比 `text` 小一档、退一档颜色。
+   *
+   * 一格里塞不下两件事时用它，而不是把两件事拼成一行——窄容器里拼出来的那一行会被
+   * 截断在奇怪的位置，读的人分不清哪个是名称、哪个是地址。
+   */
+  sub?: string;
   tone?: PluginPanelTone;
   link?: string;
   check?: { checked: boolean; action: string; disabled?: boolean };
@@ -623,8 +630,10 @@ function tableCellOf(input: unknown): PluginPanelTableCell | null {
   const link = text(raw.link, MAX_CELL_LINK);
   if (!body && !link) return null;
   const cellTone = tone(raw.tone);
+  const sub = text(raw.sub, MAX_TABLE_CELL);
   return {
     ...(body ? { text: body } : {}),
+    ...(sub ? { sub } : {}),
     ...(cellTone ? { tone: cellTone } : {}),
     ...(link ? { link } : {}),
   };

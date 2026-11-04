@@ -560,6 +560,20 @@ html[data-theme='light'] .mica-config-ui {
     background: var(--panel-muted);
   }
 
+  /* 实心强调：对话框的主操作（确定 / 开始 / 保存）。底色用主题自己的强调色，字色跟着
+     `--accent-contrast` 翻转——暗色的橙底配深字、亮色的蓝底配白字，两边都不用写死 #fff。 */
+  .ui-button-accent {
+    border-color: transparent;
+    background: var(--accent);
+    color: var(--accent-contrast);
+  }
+
+  .ui-button-accent:hover:not(:disabled) {
+    border-color: transparent;
+    background: var(--accent-hover);
+    color: var(--accent-contrast);
+  }
+
   .ui-button-danger {
     border-color: color-mix(in srgb, var(--red) 40%, transparent);
     color: var(--red);
@@ -583,6 +597,12 @@ html[data-theme='light'] .mica-config-ui {
     border-color: var(--line);
     background: var(--panel-hover);
     color: var(--text);
+  }
+
+  /* 幽灵 + 危险：行内的破坏性动作。常态只有红字、不占一块红框，悬停才浮出底色；
+     破坏性靠颜色与二次确认表达，不靠边框喊。 */
+  .ui-button-ghost.ui-button-danger {
+    color: var(--red);
   }
 
   .ui-button-ghost.ui-button-danger:hover:not(:disabled) {

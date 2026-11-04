@@ -376,13 +376,12 @@ describe('配置面板', () => {
     return { panel, dataFile, closed, changes, scope: () => explicit };
   }
 
-  it('服务器是一张表：名称 / 地址 / 状态 / 操作 / 两列勾选', async () => {
+  it('服务器是一张表：服务器（名称 + 地址）/ 状态 / 操作 / 两列勾选', async () => {
     const { panel } = setupPanel();
     const view = (await panel.view({ role: 'default' })) as PluginPanelView;
     const section = view.sections?.find((entry) => entry.title === '服务器');
     expect(section?.table?.columns.map((column) => column.key)).toEqual([
-      'name',
-      'address',
+      'server',
       'status',
       'actions',
       'session',
@@ -390,8 +389,7 @@ describe('配置面板', () => {
     ]);
     const row = section?.table?.rows[0];
     expect(row?.key).toBe('test');
-    expect(row?.cells.name?.text).toBe('test');
-    expect(row?.cells.address?.text).toBe('root@10.0.0.1:22');
+    expect(row?.cells.server).toMatchObject({ text: 'test', sub: 'root@10.0.0.1:22' });
     expect(row?.cells.status).toMatchObject({ text: '未测试', tone: 'muted' });
     expect(row?.actions?.map((action) => action.id)).toEqual(['edit', 'delete']);
     // 没有全局开关，也不再摊一份条目列表。

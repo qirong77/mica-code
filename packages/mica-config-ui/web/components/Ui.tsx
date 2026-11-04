@@ -9,7 +9,13 @@ type ButtonProps = {
   disabled?: boolean;
   pressed?: boolean;
   autoFocus?: boolean;
-  variant?: 'primary' | 'danger' | 'default' | 'ghost';
+  /**
+   * `accent` 是实心强调（对话框的主操作：确定 / 开始 / 保存）；`primary` 是抬起的灰底，
+   * 用于「当前项」而不是「就这么办」。两者不可互换。
+   * `danger-ghost` 是行内的破坏性动作（列表里的「删除」）：保留红色文字，但常态不画边框，
+   * 别让每一行都挂一个红框按钮。
+   */
+  variant?: 'primary' | 'accent' | 'danger' | 'default' | 'ghost' | 'danger-ghost';
   /** `compact` 是密集工具栏里的尺寸（24px 高、11px 字），与 `SelectMenu` / `DateField` 对齐。 */
   size?: 'default' | 'compact';
   /** 撑满一行：列表里的「加载更早」这类整行按钮。 */
@@ -66,9 +72,11 @@ export function Button({
 
 const BUTTON_VARIANTS: Record<NonNullable<ButtonProps['variant']>, string> = {
   primary: 'ui-button-primary',
+  accent: 'ui-button-accent',
   danger: 'ui-button-danger',
   default: '',
   ghost: 'ui-button-ghost',
+  'danger-ghost': 'ui-button-ghost ui-button-danger',
 };
 
 /**

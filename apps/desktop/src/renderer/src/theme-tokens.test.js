@@ -20,6 +20,10 @@ const css = readFileSync(CSS_PATH, 'utf8')
 
 const RENDERER_DIR = resolve(dirname(fileURLToPath(import.meta.url)))
 const PLUGINS_DIR = resolve(RENDERER_DIR, '../../../../../plugins')
+const CONFIG_UI_CSS = readFileSync(
+  resolve(RENDERER_DIR, '../../../../../packages/mica-config-ui/web/styles.css'),
+  'utf8'
+)
 
 /** 去掉块注释：注释里可以提颜色字面量（设计说明），不是残留。 */
 function stripComments(source) {
@@ -223,7 +227,11 @@ describe('app.css 颜色 token 主题契约', () => {
     expect(ruleBody('.chat-image-preview-path')).toContain(
       'color-mix(in srgb, #fff 52%, transparent)'
     )
-    expect(ruleBody('.session-action-primary')).toContain('color: #fff')
+    // 主操作按钮改由共享控件库提供（`Button variant="accent"`）：实心底上的字色跟着
+    // `--accent-contrast` 翻转，暗色橙底深字、亮色蓝底白字，同样不写死白色。
+    expect(CONFIG_UI_CSS).toContain('color: var(--accent-contrast)')
+    expect(CONFIG_UI_CSS).toContain('--accent-contrast: #1e1f22')
+    expect(CONFIG_UI_CSS).toContain('--accent-contrast: #ffffff')
   })
 
   it('快速选择选中行与会话行共用 --color-active，不再是实心蓝底白字', () => {

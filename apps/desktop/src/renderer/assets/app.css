@@ -3272,59 +3272,24 @@ html[data-theme='light'] .chat-markdown code:not(pre code) {
   gap: 6px;
 }
 
-.chat-modal-actions button {
-  height: 24px;
-  flex: none;
-  border: 1px solid var(--color-line);
-  border-radius: 5px;
-  background: var(--color-panel);
-  padding: 0 9px;
-  color: var(--color-fg-soft);
-  font-size: 11.5px;
-  transition:
-    color 0.15s,
-    background 0.15s,
-    border-color 0.15s;
-}
-
-.chat-modal-actions button:hover:not(:disabled) {
-  border-color: var(--color-line-strong);
-  background: var(--color-active);
-  color: var(--color-fg-max);
-}
-
-/* 禁用态只掉前景色：加透明度会把边框一起变淡，按钮看起来像换了形状 */
-.chat-modal-actions button:disabled {
-  color: var(--color-fg-ghost);
-  cursor: default;
-}
-
-/* 方形图标按钮（关闭）：不带文字就不给文字按钮的内边距 */
-.chat-modal-actions button.chat-modal-close {
+/* 关闭是唯一一个自绘的图标按钮：文字动作全走共享 Button（`.chat-modal-actions`
+   套了 `.mica-config-ui`），这里只给那颗「×」独立的外观。 */
+.chat-modal-actions .chat-modal-close {
   display: grid;
   width: 24px;
   height: 24px;
   flex: none;
   place-items: center;
-  border-color: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   background: none;
   padding: 0;
   color: var(--color-fg-faint);
 }
 
-.chat-modal-actions button.chat-modal-close:hover:not(:disabled) {
+.chat-modal-actions .chat-modal-close:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-fg-max) 8%, transparent);
   color: var(--color-fg-max);
-}
-
-.chat-modal-actions button.chat-modal-danger {
-  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-line));
-  color: var(--color-danger);
-}
-
-.chat-modal-actions button.chat-modal-danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-danger) 14%, var(--color-panel));
-  color: var(--color-danger-soft);
 }
 
 .chat-modal-meta {
@@ -5644,55 +5609,6 @@ body.is-resizing-btw {
   flex: 1;
 }
 
-.session-action {
-  flex: none;
-  height: 26px;
-  padding: 0 12px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: 5px;
-  background: transparent;
-  color: var(--color-fg);
-  font: inherit;
-  font-size: 11.5px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.session-action:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-fg-max) 6%, transparent);
-  color: var(--color-fg-max);
-}
-
-/* 禁用态只掉颜色，不改尺寸与边框：按钮不能因为禁用换个形状 */
-.session-action:disabled {
-  border-color: color-mix(in srgb, var(--color-fg-max) 8%, transparent);
-  color: var(--color-fg-ghost);
-  cursor: default;
-}
-
-.session-action-danger:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--color-danger) 60%, transparent);
-  background: color-mix(in srgb, var(--color-danger) 18%, transparent);
-  color: var(--color-danger);
-}
-
-.session-action-primary {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--color-accent) 82%, transparent);
-  color: #fff;
-}
-
-.session-action-primary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-  color: #fff;
-}
-
-.session-action-primary:disabled {
-  border-color: color-mix(in srgb, var(--color-fg-max) 8%, transparent);
-  background: transparent;
-  color: var(--color-fg-ghost);
-}
-
 @media (max-width: 767px) {
   /* 移动端菜单转到顶部横排，内容占满剩余高度 */
   .session-settings-modal {
@@ -6328,6 +6244,8 @@ body.is-resizing-btw {
   color: var(--color-fg-faint);
   font-weight: 500;
   font-size: 11px;
+  /* 与共享的 .data-table 表头同一套排印：小一号、微字距，读起来是「列名」而不是一行数据。 */
+  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
@@ -6353,6 +6271,13 @@ body.is-resizing-btw {
   max-width: 0;
 }
 
+/* 勾选列是「是/否」的一格状态：表头与勾选框同一条中轴、居中摆放；`width` 只是下限，
+   表头文字更长时列会跟着变宽，但两边仍然对齐。 */
+.chat-plugin-table .is-check {
+  width: 56px;
+  text-align: center;
+}
+
 .chat-plugin-table td.is-grow .chat-plugin-cell,
 .chat-plugin-table td.is-grow .chat-plugin-link {
   display: block;
@@ -6372,6 +6297,24 @@ body.is-resizing-btw {
 
 .chat-plugin-table tbody tr:hover td {
   background: var(--color-overlay-subtle);
+}
+
+/* 一格两行：主行是名称/状态，副行是地址/时间。副行永远不抢主行的语气色。 */
+.chat-plugin-cell-stack {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chat-plugin-cell-sub {
+  overflow: hidden;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 格子里的一行字：与「标签 — 值」用同一套语气色，不再发明第三种。 */

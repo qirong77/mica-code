@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
 
 /**
@@ -27,12 +28,8 @@ export function TextPrompt({ prompt, onClose }) {
       className="chat-modal-prompt"
       footer={
         <>
-          <button type="button" className="session-action" onClick={() => onClose(null)}>
-            取消
-          </button>
-          <button type="button" className="session-action session-action-primary" onClick={submit}>
-            确定
-          </button>
+          <Button onClick={() => onClose(null)}>取消</Button>
+          <Button variant="accent" onClick={submit}>确定</Button>
         </>
       }
     >

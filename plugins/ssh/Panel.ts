@@ -117,7 +117,9 @@ function draftOf(host: SshHost | null, current: PanelState): Draft {
 function statusCell(test: HostTest | undefined): PluginPanelTableCell {
   if (!test) return { text: '未测试', tone: 'muted' };
   return {
-    text: `${test.ok ? '已连接' : '连不上'} ${clockOf(test.at)}`,
+    text: test.ok ? '已连接' : '连不上',
+    // 时间退到副行：状态读一个词就够，几点测的只是补充。
+    sub: `上次 ${clockOf(test.at)}`,
     tone: test.ok ? 'ok' : 'error',
   };
 }
@@ -127,8 +129,8 @@ function hostRow(
   ctx: { inSession: boolean; pendingDelete?: string; test?: HostTest },
 ): PluginPanelTableRow {
   const cells: Record<string, PluginPanelTableCell> = {
-    name: { text: host.id, tone: 'accent' },
-    address: { text: `${host.user}@${host.host}:${host.port}` },
+    // 名称是这一行的主角，地址是它的补充：合成一格两行，别让地址单独占一列把整行撑开。
+    server: { text: host.id, sub: `${host.user}@${host.host}:${host.port}` },
     status: statusCell(ctx.test),
     session: {
       check: { checked: ctx.inSession, action: 'toggle-session' },
@@ -269,8 +271,7 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
 
       const table: PluginPanelTable = {
         columns: [
-          { key: 'name', label: '名称' },
-          { key: 'address', label: '地址', grow: true },
+          { key: 'server', label: '服务器', grow: true },
           { key: 'status', label: '状态' },
           { key: 'actions', label: '操作', actions: true },
           { key: 'session', label: '添加到会话' },
