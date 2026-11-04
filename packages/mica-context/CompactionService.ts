@@ -89,6 +89,11 @@ export type CompactOptions = {
    * 设为 false 可退回「只清工具结果、参数一字不动」的旧行为。
    */
   trimToolArguments?: boolean;
+  /**
+   * 快速压缩时把结果已全部清空的轮次折成一条说明（默认开启）。折叠会把工具名与
+   * 指向性参数收进一行，需要保留原始 tool_calls 结构的调用方可以关掉。
+   */
+  foldToolRounds?: boolean;
   maxPromptTooLongRetries?: number;
   lightweightPrune?: boolean;
   forceSummary?: boolean;
@@ -138,6 +143,8 @@ export type CompactResult = {
   toolResultsReplaced?: number;
   /** toolResultsOnly：被丢弃的失效 Responses reasoning 条目数。 */
   reasoningItemsDropped?: number;
+  /** toolResultsOnly：被折成一条消息的「整轮工具调用」轮数。 */
+  toolRoundsFolded?: number;
   /** toolResultsOnly：被裁剪掉正文的工具调用数（其 arguments 换成了指向性摘要）。 */
   toolArgumentsTrimmed?: number;
   /** toolResultsOnly：被替换为占位符的媒体块数（图片/文档）。 */
@@ -168,8 +175,8 @@ export class CompactionService {
     const originalMessages = input.messages;
     const beforeCount = originalMessages.length;
     const options = input.options ?? {};
-    // 快速压缩（/compact）：只把工具结果与媒体块替换为占位符。消息条数、顺序、
-    // 文本与工具参数都保持不变，不生成 boundary/summary、不丢轮次、不调用模型，
+    // 快速压缩（/compact）：把工具结果与媒体块替换为占位符，再把结果已全部清空的
+    // 轮次折成一条说明。用户与助手正文原样保留，不生成 boundary/summary、不调用模型，
     // 所以连续执行不会丢失对话信息（没有可替换内容时报 not needed）。
     if (options.toolResultsOnly) return compactToolResultsOnly(originalMessages, options);
     const minMessages = options.force ? 2 : DEFAULT_MIN_MESSAGES;
@@ -779,13 +786,14 @@ function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptio
   );
 }
 
-// 快速压缩（/compact）的动作只有三类：把工具结果替换为占位符、把媒体块（图片/
-// 文档）替换为占位符、把工具调用参数的正文型字段换成指向性摘要。用户与助手文本
-// 一律原样保留，也不插入 boundary/summary 消息，因此它不重写对话内容，只是把
-// 不再需要的大块内容腾出来。工具参数一并裁剪的理由：工具结果都被清掉后，保留
-// 写入正文既没有复用价值又是压缩后剩下的最大一块。媒体一并替换的理由：粘贴的
-// 截图/文档以 base64 常驻历史，是本路径下唯一能占到几十万 token 估算量级的单块
-// 内容。替换媒体不算丢信息——`[Image](路径)` 那行引用文本仍在、原文件也仍在磁盘，
+// 快速压缩（/compact）的动作有三类：把工具结果替换为占位符、把媒体块（图片/
+// 文档）替换为占位符、把工具调用参数的正文型字段换成指向性摘要；之后再把结果
+// 已全部清空的轮次折成一条说明（见 foldClearedToolRounds）。用户与助手文本一律
+// 原样保留，也不插入 boundary/summary 消息，因此它不重写对话内容，只是把不再
+// 需要的大块内容腾出来。工具参数一并裁剪的理由：工具结果都被清掉后，保留写入
+// 正文既没有复用价值又是压缩后剩下的最大一块。媒体一并替换的理由：粘贴的截图/
+// 文档以 base64 常驻历史，是本路径下唯一能占到几十万 token 估算量级的单块内容。
+// 替换媒体不算丢信息——`[Image](路径)` 那行引用文本仍在、原文件也仍在磁盘，
 // 需要重新看图时再次内联即可。
 function compactToolResultsOnly(messages: unknown[], options: CompactOptions): CompactResult {
   const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
@@ -829,19 +837,25 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
   }
 
   const beforeTokenEstimate = estimateMessagesTokens(messages);
-  const afterTokenEstimate = estimateMessagesTokens(compactedMessages);
+  const foldCounter = { folded: 0 };
+  // 折叠会把工具名与参数一并收进一行说明，等于丢掉调用细节；要求保留原始参数的
+  // 调用方（trimToolArguments: false）显然也不要这种折叠。
+  const foldedMessages = trimArguments && options.foldToolRounds !== false
+    ? foldClearedToolRounds(compactedMessages, placeholder, foldCounter)
+    : compactedMessages;
+  const afterTokenEstimate = estimateMessagesTokens(foldedMessages);
   const savedTokenEstimate = Math.max(0, beforeTokenEstimate - afterTokenEstimate);
   const contextWindowSize = positiveNumber(options.contextWindowSize);
   return {
-    messages: options.preview ? cloneJson(messages) : compactedMessages,
+    messages: options.preview ? cloneJson(messages) : foldedMessages,
     summary:
-      'Tool results and media replaced, stale Responses reasoning items dropped; no message was summarized or rewritten.',
+      'Tool results and media replaced, fully cleared tool rounds folded, stale Responses reasoning items dropped; no message was summarized.',
     mode: 'pruned',
     strategy: 'tool_results_only',
     beforeCount: messages.length,
-    afterCount: compactedMessages.length,
+    afterCount: foldedMessages.length,
     summarizedCount: 0,
-    keptCount: compactedMessages.length,
+    keptCount: foldedMessages.length,
     beforeTokenEstimate,
     afterTokenEstimate,
     savedTokenEstimate,
@@ -860,7 +874,163 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     reasoningItemsDropped: droppedReasoningItems,
     toolArgumentsTrimmed: trimmedArguments,
     mediaItemsReplaced: replacedMediaItems,
+    toolRoundsFolded: foldCounter.folded,
   };
+}
+
+/** 折叠整轮工具调用后插入的那条说明的前缀；重复压缩不会再折一次。 */
+const TOOL_ROUND_FOLD_PREFIX = '[tool calls cleared during compact:';
+/** 一条说明里最多列几次调用，剩下的折成 `+N`。 */
+const FOLD_NOTE_MAX_CALLS = 6;
+/** 指向性参数在说明里的长度上限。 */
+const FOLD_NOTE_POINTER_CHARS = 48;
+/** 「这次调用指向哪里」的参数：留着它们，模型才不会重复读同一个文件。 */
+const POINTER_ARGUMENT_KEYS = ['path', 'file_path', 'filePath', 'pattern', 'query', 'url', 'command', 'cmd'];
+
+/**
+ * 快速压缩的第二阶段：把「整轮工具调用」折成一条消息。
+ *
+ * 协议上一条 tool 消息必须紧跟发起它的 assistant `tool_calls`（Responses 是
+ * `function_call` / `function_call_output` 配对），既不能单删也不能把两条 tool 拼在
+ * 一起，只能整轮原子替换。占位符替换完成后这一轮已无任何可复用内容，留着只剩每条
+ * 消息的信封（role / tool_call_id / name / call_id）继续占上下文——几百条消息下来
+ * 信封本身就有几千 token。
+ *
+ * 折叠保留「调用过什么」：工具名 + 一个指向性参数，正是 `trimToolArguments` 认为
+ * 必须原样留下的那部分信息。只折结果已全部清空的轮次，被保护的区域（最近若干条）
+ * 与只清了一部分的轮次原样保留。
+ */
+function foldClearedToolRounds(
+  messages: unknown[],
+  placeholder: string,
+  counter: { folded: number },
+): unknown[] {
+  const folded: unknown[] = [];
+  let index = 0;
+  while (index < messages.length) {
+    const round = clearedToolRoundAt(messages, index, placeholder);
+    if (!round) {
+      folded.push(messages[index]);
+      index += 1;
+      continue;
+    }
+    folded.push(round.message);
+    counter.folded += 1;
+    index = round.end;
+  }
+  return folded;
+}
+
+/** 从 index 起识别一整轮已清空的工具调用；识别不了返回 null（原样保留）。 */
+function clearedToolRoundAt(
+  messages: unknown[],
+  index: number,
+  placeholder: string,
+): { end: number; message: unknown } | null {
+  const head = asRecord(messages[index]);
+  if (!head) return null;
+
+  // Chat Completions：一条 assistant.tool_calls 紧跟同数量的 tool 消息。
+  if (head.role === 'assistant' && Array.isArray(head.tool_calls) && head.tool_calls.length > 0) {
+    const calls = head.tool_calls.map(asRecord);
+    if (calls.some((call) => !call)) return null;
+    const ids = calls.map((call) => (typeof call!.id === 'string' ? call!.id : ''));
+    if (ids.some((id) => !id)) return null;
+    const end = index + 1 + ids.length;
+    if (end > messages.length) return null;
+    for (let offset = 0; offset < ids.length; offset += 1) {
+      const result = asRecord(messages[index + 1 + offset]);
+      if (!result || result.role !== 'tool' || result.tool_call_id !== ids[offset]) return null;
+      if (!clearedToolResult(result, placeholder)) return null;
+    }
+    return {
+      end,
+      message: foldedRoundMessage(
+        calls.map((call) => callDescription(asRecord(call!.function) ?? call!)),
+        head.content,
+        'chat',
+      ),
+    };
+  }
+
+  // Responses：连续的 function_call 紧跟同数量的 function_call_output。
+  if (head.type === 'function_call') {
+    const calls: Record<string, unknown>[] = [];
+    let cursor = index;
+    while (cursor < messages.length) {
+      const call = asRecord(messages[cursor]);
+      if (!call || call.type !== 'function_call') break;
+      calls.push(call);
+      cursor += 1;
+    }
+    const ids = calls.map((call) => (typeof call.call_id === 'string' ? call.call_id : ''));
+    if (ids.some((id) => !id)) return null;
+    const end = cursor + ids.length;
+    if (end > messages.length) return null;
+    for (let offset = 0; offset < ids.length; offset += 1) {
+      const output = asRecord(messages[cursor + offset]);
+      if (!output || output.type !== 'function_call_output' || output.call_id !== ids[offset]) return null;
+      if (!clearedToolResult(output, placeholder)) return null;
+    }
+    return { end, message: foldedRoundMessage(calls.map(callDescription), undefined, 'responses') };
+  }
+
+  return null;
+}
+
+/** 工具结果是否已经处于「已清空」状态（就是那个占位符）。 */
+function clearedToolResult(record: Record<string, unknown>, placeholder: string): boolean {
+  const value = record.content ?? record.output;
+  return typeof value === 'string' && value === placeholder;
+}
+
+/** 折叠后的那一条消息：保留原有正文，把调用清单补在后面。 */
+function foldedRoundMessage(descriptions: string[], baseContent: unknown, protocol: 'chat' | 'responses'): unknown {
+  const listed = descriptions.slice(0, FOLD_NOTE_MAX_CALLS).join(', ');
+  const rest = descriptions.length - FOLD_NOTE_MAX_CALLS;
+  const note = `${TOOL_ROUND_FOLD_PREFIX} ${listed}${rest > 0 ? `, +${rest}` : ''}]`;
+  if (protocol === 'responses') return { type: 'message', role: 'assistant', content: note };
+  if (typeof baseContent === 'string' && baseContent.trim()) {
+    return { role: 'assistant', content: `${baseContent}\n\n${note}` };
+  }
+  if (Array.isArray(baseContent) && baseContent.length > 0) {
+    return { role: 'assistant', content: [...baseContent, { type: 'text', text: note }] };
+  }
+  return { role: 'assistant', content: note };
+}
+
+/** `read_file(packages/a.ts)`：工具名 + 一个指向性参数。 */
+function callDescription(call: Record<string, unknown>): string {
+  const name = typeof call.name === 'string' ? call.name : '';
+  const pointer = pointerArgumentText(call.arguments);
+  if (!name) return pointer || 'unknown';
+  return pointer ? `${name}(${pointer})` : name;
+}
+
+function pointerArgumentText(rawArguments: unknown): string {
+  if (typeof rawArguments !== 'string' || !rawArguments.trim()) return '';
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawArguments);
+  } catch {
+    return '';
+  }
+  const args = asRecord(parsed);
+  if (!args) return '';
+  for (const key of POINTER_ARGUMENT_KEYS) {
+    const value = args[key];
+    if (typeof value === 'string' && value.trim()) {
+      const text = value.trim().replace(/\s+/g, ' ');
+      return text.length > FOLD_NOTE_POINTER_CHARS ? `${text.slice(0, FOLD_NOTE_POINTER_CHARS)}...` : text;
+    }
+  }
+  return '';
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function protectedRecentStart(messages: unknown[], options: CompactOptions): number {
