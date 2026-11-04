@@ -1340,8 +1340,9 @@ export function SessionTree({
     const collapsed = !!collapsedGroups[groupId]
     const open = !collapsed
     const digest = groupDigests.get(groupId)
-    // 行尾只留「24 小时内醒过」的时间，具体时刻仍在 tooltip 里
-    const digestTime = activeTimeLabel(digest?.latestAt)
+    // 折叠时才在行尾给一句「多久之前动过」：展开时下面的子行各自带着时间，
+    // 分组行再重复一遍就是噪声。条数不画，完整事实都留在 tooltip 里
+    const digestTime = collapsed ? activeTimeLabel(digest?.latestAt) : ''
     const editingThis = editing?.kind === 'group' && editing.id === groupId
     const isOver = over?.section === 'project' && over?.groupId === groupId && over?.onGroup
     // 只有子分组右移一层；分组里的会话/草稿与分组名同列（和 Recent 的会话对齐）。
@@ -1449,7 +1450,7 @@ export function SessionTree({
           ) : (
             <span className="min-w-0 flex-1 truncate">{group.name}</span>
           )}
-          {/* 分组操作浮在行尾：它要是占位，右侧的「条数 · 时间」就会被挤得比下面
+          {/* 分组操作浮在行尾：它要是占位，右侧的时间就会被挤得比下面
               会话行的时间靠左；悬浮时让摘要淡出、按钮出现在同一块地方。 */}
           <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-md px-0.5 opacity-0 transition-opacity group-hover/grow:pointer-events-auto group-hover/grow:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100 max-md:static max-md:pointer-events-auto max-md:opacity-100">
             <button
@@ -1474,10 +1475,9 @@ export function SessionTree({
               <IconDots size={13} />
             </button>
           </span>
-          {digest?.count ? (
+          {digestTime ? (
             <span className="shrink-0 text-[11px] tabular-nums text-fg-dim transition-opacity group-hover/grow:opacity-0">
-              {digest.count}
-              {digestTime ? ` · ${digestTime}` : ''}
+              {digestTime}
             </span>
           ) : null}
         </div>
@@ -1490,9 +1490,12 @@ export function SessionTree({
   const renderSectionHeader = (name, label, Icon, options = {}) => {
     const { onAdd, addTitle, dropSection, accepts, hiddenState, meta } = options
     const isOverHeader = !!dropSection && over?.header === dropSection
-    // Recent 是「最近更新」这一列的本体，一直显示；Pinned / Projects 只显示 24 小时内的。
-    const metaTime =
-      name === 'recent' ? relativeTimeShort(meta?.latestAt) : activeTimeLabel(meta?.latestAt)
+    // 分区标题右端不画条数和时间（一列 15d / 4d 只是噪声），事实收进标题的 tooltip
+    const metaTitle = meta?.count
+      ? meta.latestAt
+        ? `${label} 共 ${meta.count} 条，最近 ${relativeTimeShort(meta.latestAt)}`
+        : `${label} 共 ${meta.count} 条`
+      : undefined
     // 默认只接会话/草稿：分组换父级是 Projects 标题与分组行的事，落到别处不做任何反应
     const acceptsDrag = (source) =>
       !!source && (accepts ? accepts(source) : source.kind !== 'group')
@@ -1538,21 +1541,10 @@ export function SessionTree({
             <Icon size={14} className="text-fg-dim" />
             <RowBadge state={hiddenState} scope={label} />
           </Slot>
-          <span className="flex-1 truncate text-fg-dim">{label}</span>
-        </button>
-        {meta?.count ? (
-          <span
-            className="shrink-0 text-[11px] tabular-nums text-fg-dim transition-opacity group-hover/header:opacity-0"
-            title={
-              meta.latestAt
-                ? `${label} 共 ${meta.count} 条，最近 ${relativeTimeShort(meta.latestAt)}`
-                : `${label} 共 ${meta.count} 条`
-            }
-          >
-            {meta.count}
-            {metaTime ? ` · ${metaTime}` : ''}
+          <span className="flex-1 truncate text-fg-dim" title={metaTitle}>
+            {label}
           </span>
-        ) : null}
+        </button>
         {onAdd && (
           <button
             type="button"
