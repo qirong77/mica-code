@@ -1,10 +1,10 @@
 # 默认开发流程（隔离副本）
 
-**所有代码改动都走这条流程。** 目的有三个：不动用户正在用的工作区、允许同一台机器上多个会话同时开发、验证完有一条确定的路径回到 main 并让运行中的实例真的热更新。
+**所有代码改动都走这条流程。** 目的有三个：不动用户正在用的工作区、允许同一台机器上多个会话同时开发、验证完有一条确定的路径回到 main。
 
-一句话版本：**临时目录 clone → 按任务命名的分支 → 开发验证 → 分支推到远端 → 合并进 main 并推送（且校验） → 主工作区拉到合并后的 main → 在用户那份 checkout 重新构建 → 确认产物 fingerprint 等于合并后的 commit → 汇报热更新状态。**
+一句话版本：**临时目录 clone → 按任务命名的分支 → 开发验证 → 分支推到远端 → 合并进 main 并推送（且校验） → 主工作区拉到合并后的 main → 汇报分支 / 合并 / 主工作区状态。到此结束，不构建、不热更新。**
 
-后面四步是硬闸门，**一步都不许静默跳过**：分支必须在远端、main 必须真被合并并推送、主工作区必须真拉到那份合并、构建必须出自主工作区。任何一步做不到，就把卡在哪、用户执行哪条命令能补齐写进回复（第 7 步的格式），而不是悄悄只做前半段。
+后面三步是硬闸门，**一步都不许静默跳过**：分支必须在远端、main 必须真被合并并推送、主工作区必须真拉到那份合并。任何一步做不到，就把卡在哪、用户执行哪条命令能补齐写进回复（第 6 步的格式），而不是悄悄只做前半段。
 
 ## 0. 开工（一次）
 
@@ -85,7 +85,7 @@ git merge-base --is-ancestor "$(git rev-parse "agent/$TAG")" origin/main && echo
 
 ## 5. 让主工作区拿到合并后的 main（闸门 3）
 
-产物写在哪份 checkout，实例就从哪份加载——用户跑的是主工作区的 `apps/desktop/dist/mac-*/mica-code-app.app`，所以主工作区必须先有合并后的代码，第 6 步的构建才有意义。
+产物写在哪份 checkout，实例和之后的构建就都吃哪份 —— 用户跑的是主工作区里的 `apps/desktop/dist/mac-*/mica-code-app.app`，所以合并后必须让他那份 checkout 自己拿到最新的 main。
 
 ```bash
 cd "$SRC"
@@ -109,57 +109,22 @@ git -C "$SRC" merge-base --is-ancestor origin/main HEAD && echo src-up-to-date
 ```
 
 - **绝不** `git stash` / `git reset --hard` / `git checkout --` / `git checkout main` —— 那是替用户丢改动或换分支。
-- **快进失败**（校验没打印、pull 被拒、或主工作区在带自己提交的分支上）就是这条流程今天的天花板：第 6 步改为在副本里只做 CLI 那一档 `bun run build`，并按第 7 步写明「桌面产物未重建 + 原因 + 用户要执行的确切命令」。**不许**在主工作区的旧代码上构建再声称已热更新。
+- **快进失败**（校验没打印、pull 被拒、或主工作区在带自己提交的分支上）就是这条流程今天的天花板：按第 6 步写明「主工作区没拿到合并后的 main + 原因 + 用户要执行的确切命令」。**不许**替用户合并带自己提交的分支。
 
-## 6. 在主工作区重建并热更新（闸门 4）
-
-在第 5 步校验通过的前提下，按改动面选命令，**在 `$SRC` 里执行**：
-
-| 改了什么                                               | 命令（工作目录 `$SRC`）                                               | 热更新层级                                          |
-| ------------------------------------------------------ | --------------------------------------------------------------------- | --------------------------------------------------- |
-| `apps/desktop`（renderer / runtime / shell）、外壳配置 | `npm run build:app`                                                   | 产物指纹决定：只刷页面 / 换会话宿主 / 整窗 relaunch |
-| `apps/cli` / `packages` / `plugins`（CLI、插件、工具） | `bun run build`，再 `cd apps/desktop && node scripts/build-stamp.mjs` | 换掉会话宿主再刷页面                                |
-| 只有文档 / `agent/**` / `AGENT.md`                     | 不用构建                                                              | —                                                   |
-
-- `npm run build:app`（= `apps/desktop` 的 `build:unpack`）三份构建 + `electron-builder --dir` + 写产物指纹一把做完，桌面端与 CLI 一起覆盖；只改了 CLI / 包时走轻的那一档，省掉打包的十几秒。
-- 构建是唯一的共享点（`~/.local/lib/mica/mica` 与 `.app` 会被覆盖）。多个会话同时构建先争锁：
-
-```bash
-LOCK="$HOME/.mica/.build-lock"
-until mkdir "$LOCK" 2>/dev/null; do sleep 2; done
-trap 'rmdir "$LOCK" 2>/dev/null' EXIT
-```
-
-- **构建完必须校验指纹里的 revision 就是合并后的 main**，否则等于拿旧代码热更新：
-
-```bash
-node -e 'const s=require(process.env.HOME+"/.mica/dev-build-stamp.json");console.log(s.builtAt, s.revision)'
-git -C "$SRC" rev-parse --short HEAD
-```
-
-两条的 revision 要一致。不一致 → 回到第 5 步的「快进失败」，别写「已热更新」。
-
-- 再看有没有实例在跑，决定这次是真的热更新还是「下次启动生效」（`pgrep -f` 在 macOS 上看不到 Electron 主进程，用 `ps`）：
-
-```bash
-ps -eo command | grep -F "MacOS/mica-code-app" | grep -v -- "--type=" | grep -q . && echo instance-running || echo no-instance
-```
-
-- 实例按指纹自我重载（判层与节奏见 `desktop.md` 的「构建后自我重载」，`MICA_DEV_RELOAD=0` 会关掉）；正在跑的一轮走「软停 + 自动续跑」，不要因为怕打断用户就不构建。
-- 副本里构建出来的 `.app` 不在运行实例的位置，**只有 CLI 例外**（装在 `~/.local/lib/mica`，哪份 checkout 构建都生效）。
-
-## 7. 汇报（两行，第二行不许省）
+## 6. 汇报（两行，第二行不许省）
 
 - 代码行：`工作副本 <临时目录>/mica_<slug>-<后缀> · 分支 agent/<slug>-<后缀>（已推送 <短 sha>）· 合并 commit <merge 短 sha>（已在 origin/main）`
-- 热更新行，二选一，说清事实：
-  - `已热更新 · <层：页面 / 会话宿主 / 整窗重启> · 产物 revision <短 sha> = 合并后的 main · 正在跑的实例停在轮次边界后续跑`
-  - `未热更新 · 原因 <主工作区在 <分支> / 有未提交改动 / push 失败 / 构建失败> · 你需要执行 <确切命令>，之后我再构建`
+- 主工作区行，二选一，说清事实：
+  - `主工作区已快进到 origin/main <短 sha>`
+  - `主工作区未更新 · 原因 <在 <分支> / 有未提交改动 / pull 被拒 / push 失败> · 你需要执行 <确切命令>`
+
+再补一句构建状态，别让用户以为已经生效：**本次没有构建、没有热更新**，需要生效时自己跑 `npm run build:app`（桌面端）或 `bun run build`（CLI / 包 / 插件），命令见 `build.md`。
 
 补一句第 5 步的结论：主工作区已包含 `origin/main` 就不用提；没包含就写 `origin/main 已到 <短 sha>，你当前的 <分支> 还没合并`（仍**不要替用户合并**带自己提交的分支）。
 
-## 8. 收尾
+## 7. 收尾
 
-- 回复里给全：分支名、合并的 commit、临时目录路径、热更新那一行的结论。
+- 回复里给全：分支名、合并的 commit、临时目录路径、主工作区是否已快进。
 - 临时目录默认**保留**（用户可能要复现或回看），删除要先确认；确认后 `rm -rf "$WORK"`，并顺手删远端分支 `git push origin --delete "agent/$TAG"`（用户同意才删）。
 - 交付前 `git status --short` 看一眼主工作区，确认没留下自己的临时文件。
 

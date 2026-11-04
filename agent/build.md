@@ -42,6 +42,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 打包按平台取 node-pty 原生产物（`scripts/stage-node-pty.mjs`）；`spawn-helper` 只属于 macOS。
 - desktop 用 `scripts/run-parallel.mjs` 并行跑三份构建；Vite 8 需搭配 electron-vite 6。
 - `npm run build:app` = 三份构建 + `electron-builder --dir`，只产出可运行的 `.app`；DMG + zip 是发布产物，走 `npm run build:mac`。后者省不掉：`hdiutil` 单压 277MB 的 app 就要 9s，zip 与 blockmap 再加 6s，两者串行约 20s，占整个 `build:mac` 的四分之三。
+- 构建产物是唯一的共享点（`~/.local/lib/mica/mica` 与运行中的 `.app` 会被覆盖）：同一台机器上多个会话可能同时构建，动手前先争 `$HOME/.mica/.build-lock`（`mkdir` 自旋，结束 `rmdir`），并在动手前说明会覆盖哪些产物。
 - 品牌 SVG 唯一源 `apps/desktop/resources/icon.svg`，位图由 `npm run icons:generate` 生成。
 - 官网架构图只改 `apps/website/architecture/*.architecture.json`，再由 Archify 生成。
 
