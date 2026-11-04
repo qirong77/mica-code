@@ -2917,6 +2917,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   border: 1px solid color-mix(in srgb, var(--color-fg-max) 12%, transparent);
   border-radius: 3px;
   background: color-mix(in srgb, var(--color-fg-max) 4%, transparent);
+  /* 图与边框之间留一圈等宽的底，缩略图不再贴边 */
+  padding: 2px;
 }
 
 .chat-composer-images button:hover {
@@ -2926,7 +2928,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 .chat-composer-images img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  /* 完整显示：cover 会把文字截图裁掉一块，看着像左右下留白不齐 */
+  object-fit: contain;
 }
 
 /* 输入框上方的引用条：草稿里有几个引用块就列几条（与图片缩略图同源，都是从草稿反推）。 */
