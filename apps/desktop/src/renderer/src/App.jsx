@@ -1360,6 +1360,20 @@ export default function App() {
     }
     wasRunningRef.current = activeRunning
   }, [activeRunning, activeRef, refreshGit, terminalCwd])
+  // 仓库自身的变化（提交 / 切分支 / 暂存）由宿主里的 `.git` 监听推过来：底栏的分支名
+  // 与顶栏徽标立刻跟上，不用等上面那一轮 10s。Mica 之外的进程只改工作区文件时
+  // `.git` 不动，那种情形仍归轮询。
+  useEffect(() => {
+    const off = window.mica.git?.onChanged?.((payload) => {
+      const root = payload?.root
+      const known = gitRef.current.status?.root
+      if (!root || (known && root !== known)) return
+      // 徽标那 20s TTL 是给轮询用的：仓库真变了就该重算，别拿旧数字顶。
+      gitCountsAt.current = { cwd: null, at: 0 }
+      void refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
+    })
+    return () => off?.()
+  }, [activeRef, refreshGit, terminalCwd])
 
   const askText = useCallback(
     (title, initial = '', hint = '') =>
