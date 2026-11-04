@@ -2463,7 +2463,8 @@ export function registerChatIpc() {
     // 视图，页面里也可能同时有快捷条与抽屉两个消费者。短时间内共用一次请求，宿主不用
     // 为「同一个问题」排几次队（host 忙时一次就要几秒）。动作会清掉它，不返回旧状态。
     if (method === 'mica/pluginPanel/view') {
-      const key = `${id}\u0000${pluginId}\u0000${payload?.cwd || ''}`
+      // 键里带 sessionId：同一个页签换会话时面板数据跟着换，不能把上一个会话的视图复用过来。
+      const key = `${id}\u0000${payload?.sessionId || ''}\u0000${pluginId}\u0000${payload?.cwd || ''}`
       const cached = panelViewCache.get(key)
       if (cached && Date.now() - cached.at < PANEL_VIEW_REUSE_MS) return cached.promise
       const promise = requestPanelView(event, payload, id, pluginId)

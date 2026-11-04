@@ -247,7 +247,13 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     return resultFor(status, sessionId || options.sessionId || '', text, errorMessage);
   } finally {
     options.signal?.removeEventListener('abort', onAbort);
-    diagnostics.log.info('exec.finished', { status, session: sessionId || undefined });
+    // 成功走 info（默认级别是 warn，不建文件）；失败必须留一条 error，否则 doc 里
+    // 承诺的「真出错时留得下原因」在一次性命令上是空的。
+    if (status === 'error') {
+      diagnostics.log.error('exec.finished', { status, session: sessionId || undefined, error: errorMessage })
+    } else {
+      diagnostics.log.info('exec.finished', { status, session: sessionId || undefined })
+    }
     diagnostics.stop(`exec ${status}`);
     projector?.dispose();
     await cleanup('stop subagents', () => subagentTasks?.stop());

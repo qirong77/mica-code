@@ -6,7 +6,7 @@
 
 ## 1. 默认开发流程
 
-所有功能开发走 `agent/workflow.md`：在系统临时目录 clone 一份（目录 `mica_<会话 id>`）、开 `agent/<会话 id>` 分支、**开工第一条回复里写出工作副本 / 分支 / 会话 id**、开发验证、合并 main、在用户那份 checkout 里构建触发实例热更新、提醒用户当前分支还没合并。
+所有功能开发走 `agent/workflow.md`：在系统临时目录 clone 一份（目录 `mica_<slug>-<后缀>`）、开 `agent/<slug>-<后缀>` 分支（slug 从任务取名，要看出在改什么）、**副本与依赖都准备好之后才写出工作副本 / 分支 / 会话 id**、开发验证、合并 main、在用户那份 checkout 里构建触发实例热更新、提醒用户当前分支还没合并。
 
 例外只有纯文档 / 一行修复 / 只读排查——它们直接在主工作区改，仍然不 commit、不 push。
 
@@ -19,6 +19,7 @@
 - 验证只跑到「与改动最接近」为止：针对性单测 + `bun run typecheck`。不跑全量测试、全量 lint 与真实子进程 E2E，除非用户要发布或明确要求（尺度见 `agent/build.md`）。
 - 临时复现用隔离的 `MICA_HOME`；起桌面实例还要独立 `MICA_DESKTOP_USER_DATA`、`MICA_DESKTOP_PORT` 与 `--user-data-dir`。
 - 临时探针命名 `.probe-*.mjs`、放仓库内、用完即删；交付前 `git status --short` 确认无残留。
+- 只改前端（`apps/desktop/src/renderer`、配置页这类不进宿主的代码）可以放心构建与重启：热重载只刷页面，进行中的轮次停在边界后自动续跑（分层见 `agent/desktop.md`）。
 - 产品能力优先做成插件：内核里不出现具体插件名词，插件也不靠改别人的数据伪造界面。
 - 插件系统本身仍在迭代：现有 `PluginContext` 承载不了时先重构能力面，再在新机制上实现；不为单个插件在宿主里写死分支（见 `agent/plugins.md`）。
 - 不为旧形态保留兼容分支：改了数据形态、目录布局、协议字段或插件格式，就删掉旧的解析与回退，只留一句「这个形态不再支持」；同次在 `plugins/evolution/migrations.ts` 加一条迁移并更新它的 README 迁移表。

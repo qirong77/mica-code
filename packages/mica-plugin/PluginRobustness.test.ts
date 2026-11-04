@@ -305,13 +305,16 @@ describe('PluginManager robustness', () => {
 
     await manager.setupAll(baseContext(configDir, hooks));
     await hooks.emit('turn:after', {});
+    await hooks.emit('turn:after', {});
 
     const report = readPluginHealth('boom', { configDir });
     expect(report?.level).toBe('error');
     expect(report?.message).toContain('hook exploded');
-    // 健康状态只留最后一句话；「每轮都在炸」要靠事件流才看得出来。
+    // 健康状态只留最后一句话；「每轮都在炸」要靠事件流才看得出来。观察方会限流写盘，
+    // 所以累计次数必须由发事件的一方给出，否则「一直坏」会被读成「坏了一次」。
     expect(observed).toMatchObject([
-      { pluginId: 'boom', type: 'hook:failed', hook: 'turn:after', error: 'hook exploded' },
+      { pluginId: 'boom', type: 'hook:failed', hook: 'turn:after', failures: 1, error: 'hook exploded' },
+      { pluginId: 'boom', type: 'hook:failed', hook: 'turn:after', failures: 2, error: 'hook exploded' },
     ]);
   });
 

@@ -5,7 +5,7 @@
 ## 主要能力
 
 - 只读运行观察：`AgentObservationEvent` 定义 `agent:observe`，由 `HookRegistry.notify()` 按注册顺序调用，观察者抛错或返回挂起的 Promise 均不阻塞任务。异步完成顺序由观察插件负责，磁盘队列在插件 dispose 时 flush。覆盖主运行的起止、实际请求边界与工具定义、最终 prompt、工具调用/结果、用量、重试及历史改写；不在任何一轮里的工作（压缩摘要、旁问线程、插件 `ctx.llm` 请求）作为独立的 helper 运行出现，带 `helper: { kind, pluginId?, purpose? }` 与完整的请求边界。
-- 插件自身的运行事件走独立的 `plugin:observe`（`PluginObservationEvent`）：常驻任务失败（`background:failed`：`taskId` / `tick` / `failures` / `error`）与钩子处理函数抛错（`hook:failed`：`hook` / `error`）都不属于任何一条 run，挂到某条 run 上会让那条 run 的耗时与失败原因都变假。观察通道自己的 handler 失败不回报，否则 `notify` 会递归调用自己。
+- 插件自身的运行事件走独立的 `plugin:observe`（`PluginObservationEvent`）：常驻任务失败（`background:failed`：`taskId` / `tick` / `failures` / `error`）与钩子处理函数抛错（`hook:failed`：`hook` / `failures` / `error`）都不属于任何一条 run，挂到某条 run 上会让那条 run 的耗时与失败原因都变假。观察通道自己的 handler 失败不回报，否则 `notify` 会递归调用自己。
 
 - 定义插件的唯一落盘形态（目录 + `plugin.json` + `setup(ctx)`），以及宿主进程内装配时用的 `Plugin` 基类。
 - 管理插件加载、启动和销毁生命周期。正常卸载与启动失败都按资源注册的逆序释放；单项清理失败仍继续释放其余资源，正常卸载结束后以 `AggregateError` 汇总失败。

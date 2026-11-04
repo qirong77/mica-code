@@ -43,8 +43,11 @@ export function registerDiagnosticsIpc(ipcMain) {
     for (const entry of entries.slice(0, 200)) {
       if (!entry || typeof entry !== 'object') continue
       const level = ['debug', 'info', 'warn', 'error'].includes(entry.level) ? entry.level : 'info'
-      const { event, level: entryLevel, ...fields } = entry
+      // 时间/级别/来源由宿主决定，页面只补自己的字段（否则能改 `at` 伪造时间线）。
+      const { event, level: entryLevel, at, scope: entryScope, ...fields } = entry
       void entryLevel
+      void at
+      void entryScope
       log[level](String(event || 'log').slice(0, 120), fields)
     }
     return { written: entries.length }

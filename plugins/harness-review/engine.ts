@@ -172,10 +172,12 @@ export type HelperKindSummary = {
 };
 export type HelperSummary = { total: number; kinds: HelperKindSummary[] };
 /**
- * 某个插件的某个常驻任务失败过多少次。
+ * 某个插件的某个常驻任务（或某个钩子，任务名前缀 `hook:`）失败过多少次。
  *
  * 这些失败发生在任何一轮之外，所以没有 `cwd`、也没有 `runId`：它们属于这台机器，
  * 不受 `review(cwd)` 的范围过滤。
+ *
+ * `count` 是下界：落盘被限流，跨进程重启也接不上累计数。
  */
 export type PluginFailureSummary = {
   pluginId: string;
@@ -965,7 +967,14 @@ function pluginFailureId(pluginId: string, taskId: string): string {
       .replace(/[^A-Za-z0-9._-]/g, '_')
       .replace(/^[_.-]+|[_.-]+$/g, '')
       .slice(0, max) || 'unnamed';
-  return `plugin-background:${safe(pluginId, 80)}:${safe(taskId, 120)}`;
+  const safePlugin = safe(pluginId, 80);
+  const safeTask = safe(taskId, 120);
+  // 任务名里带 `:`（旁问线程就是 `plugin:<id>:thread:<uuid>`）会被换成 `_`：两个不同的
+  // 任务可能撞到同一个 id，后一条 finding 直接覆盖前一条、判断记录也串到别人身上。
+  // 只有真的改写过才补一段摘要，干净的 id 保持可读。
+  const rewritten = safePlugin !== pluginId || safeTask !== taskId;
+  const task = rewritten ? `${safe(taskId, 111)}-${digest(`${pluginId}\n${taskId}`).slice(0, 8)}` : safeTask;
+  return `plugin-background:${safePlugin}:${task}`;
 }
 
 /**
@@ -1563,9 +1572,10 @@ export class HarnessRecorder {
   }
 
   /**
-   * 记一条插件常驻任务的失败。
+   * 记一条插件自身的失败：常驻任务抛错（`background:failed`）或钩子处理函数抛错
+   * （`hook:failed`，按 `hook:<名字>` 当任务名）。
    *
-   * 它不挂在任何一条 run 上（常驻任务不在轮次里），所以单独落 `plugin-events.jsonl`：
+   * 它不挂在任何一条 run 上（两者都不在轮次里），所以单独落 `plugin-events.jsonl`：
    * 硬塞进某次运行的轨迹，会让那条运行的失败原因与耗时都变成假的。
    *
    * 限流只影响写盘频率、不丢「曾经失败」这个事实：每个任务在本进程内的第一条一定写
@@ -1575,10 +1585,17 @@ export class HarnessRecorder {
   notePluginEvent(event: PluginObservationEvent): void {
     if (this.disposed) return;
     try {
-      if (!event || event.type !== 'background:failed') return;
+      if (!event) return;
+      // 钩子失败没有 taskId：把钩子名当成任务名，报告里才能按「哪个钩子在炸」归组。
+      const taskId =
+        event.type === 'background:failed'
+          ? boundedText(event.taskId, 200).trim()
+          : event.type === 'hook:failed'
+            ? boundedText(`hook:${event.hook}`, 200).trim()
+            : '';
+      if (!taskId) return;
       const pluginId = boundedText(event.pluginId, 200).trim();
-      const taskId = boundedText(event.taskId, 200).trim();
-      if (!pluginId || !taskId) return;
+      if (!pluginId) return;
       const key = `${pluginId}\n${taskId}`;
       const now = Date.now();
       const last = this.pluginEventWrites.get(key);
@@ -1590,7 +1607,7 @@ export class HarnessRecorder {
         at: timestamp(event.timestamp),
         pluginId,
         taskId,
-        tick: finiteCount(event.tick),
+        tick: finiteCount(event.type === 'background:failed' ? event.tick : 0),
         failures: finiteCount(event.failures),
         error: boundedText(event.error, 500),
       };
@@ -1628,6 +1645,9 @@ export class HarnessRecorder {
    */
   private async readPluginFailures(warnings: string[]): Promise<PluginFailureSummary[]> {
     const groups = new Map<string, PluginFailureSummary>();
+    // 写盘被限流：一个每 30 秒失败一次的任务，一小时只留 12 行，真实失败 120 次。
+    // 事件自带累计数，最后取「行数」与「累计数最大值」中大的那个，才不会低估。
+    const reported = new Map<string, number>();
     for (const name of [PLUGIN_EVENTS_FILE, PLUGIN_EVENTS_ROTATED]) {
       let text: string;
       try {
@@ -1645,7 +1665,7 @@ export class HarnessRecorder {
       let corrupt = 0;
       for (const line of text.split('\n')) {
         if (!line.trim()) continue;
-        let item: { at?: unknown; pluginId?: unknown; taskId?: unknown; error?: unknown };
+        let item: { at?: unknown; pluginId?: unknown; taskId?: unknown; error?: unknown; failures?: unknown };
         try {
           item = JSON.parse(line) as typeof item;
         } catch {
@@ -1661,6 +1681,8 @@ export class HarnessRecorder {
         }
         const error = typeof item.error === 'string' ? boundedText(item.error, 500) : '';
         const key = `${pluginId}\n${taskId}`;
+        const failures = typeof item.failures === 'number' ? finiteCount(item.failures) : 0;
+        if (failures > (reported.get(key) ?? 0)) reported.set(key, failures);
         const existing = groups.get(key);
         if (!existing) {
           groups.set(key, { pluginId, taskId, count: 1, lastAt: at, lastError: error });
@@ -1673,6 +1695,11 @@ export class HarnessRecorder {
         }
       }
       if (corrupt > 0) warnings.push(`${name} has ${corrupt} unreadable line(s); they were ignored.`);
+    }
+    for (const [key, failures] of reported) {
+      const group = groups.get(key);
+      // 进程重启会让累计数从 1 重新数；取最大值，所以这是「至少失败了这么多次」。
+      if (group && failures > group.count) group.count = failures;
     }
     const rows = [...groups.values()].sort(
       (a, b) =>
@@ -2928,7 +2955,9 @@ function markdownReport(report: ReviewReport, directory: string): string {
   lines.push('', '## Plugin health', '');
   // 常驻任务失败是机器级事实：插件不在任何一轮里跑，也就没有 cwd 可过滤。
   lines.push(
-    'Plugin background tasks fail per machine, not per workspace: these counts ignore the reviewed working directory.',
+    'Plugin failures (background tasks and throwing hooks) are per machine, not per workspace: these counts ignore the reviewed working directory.',
+    '',
+    'Counts are a lower bound: one task leaves at most one record per five minutes, and its cumulative counter restarts with the host.',
     '',
   );
   if (!report.pluginFailures.length) lines.push('No plugin background failures recorded.', '');

@@ -30,9 +30,20 @@ export interface DiagnosticsOptions {
 
 const RESIDENT: DiagnosticsHandle['host'][] = ['app-server', 'tui'];
 
+// 进程正常退出时把队列写下去：`stop()` 只在主动退出路径上被调用，TUI 被关窗、
+// app-server 收到 SIGTERM 之外的退出方式都不经过它。只挂 exit（不接管信号），
+// 免得改变宿主对被回收进程的信号语义。
+let exitHookInstalled = false;
+function installExitFlush(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on('exit', () => flushLogs());
+}
+
 export function startDiagnostics(options: DiagnosticsOptions): DiagnosticsHandle {
   const resident = RESIDENT.includes(options.host);
   if (!process.env.MICA_LOG_LEVEL) setLogLevel(resident ? 'info' : 'warn');
+  installExitFlush();
 
   const log = logger(options.host);
   log.info('boot', {

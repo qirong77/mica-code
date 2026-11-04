@@ -437,7 +437,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       // retry after text only when the caller can restore its checkpoint.
       const canRollbackText = !!this.onTextAttemptStart && !!this.onTextRollback;
       let attemptHadToolOutput = false;
-      await withRetry(
+      // 失败也要有一条 request:end（outcome:'error'），口径与 Chat Completions 一致。
+      const failed = await withRetry(
         async () => {
           emittedContentSeparator = false;
           attemptHadToolOutput = false;
@@ -483,9 +484,10 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           for await (const event of withIdleTimeout(stream)) {
             throwIfQueryStopped(options);
             if (RESPONSE_TERMINAL_ERROR_TYPES.has(event.type)) throw responseEventError(event);
-            if (!firstDeltaAt) firstDeltaAt = Date.now();
 
             if (event.type === 'response.output_text.delta') {
+              // 首字只认正文/思考增量：response.created 之类的事件不算首字。
+              if (!firstDeltaAt) firstDeltaAt = Date.now();
               const textDelta: string =
                 contentSeparator && !emittedContentSeparator ? `${contentSeparator}${event.delta}` : event.delta;
               emittedContentSeparator = true;
@@ -500,6 +502,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
               event.type === 'response.reasoning_summary_text.done' ||
               event.type === 'response.reasoning_text.done'
             ) {
+              if (!firstDeltaAt) firstDeltaAt = Date.now();
               reasoningParts.accept(event);
               continue;
             }
@@ -581,7 +584,19 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
             options?.onRetry?.({ attempt, error, delayMs });
           },
         },
+      ).then(
+        () => null,
+        (error: unknown) => ({ error }),
       );
+
+      if (failed) {
+        options?.signal?.removeEventListener?.('abort', onAbort);
+        finishRequest({
+          outcome: options?.signal?.aborted ? 'aborted' : 'error',
+          error: failed.error,
+        });
+        throw failed.error;
+      }
 
       // Same guard as ChatCompletionsClient: the SDK ends the stream normally
       // when the request is aborted while waiting for the next event, so an

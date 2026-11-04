@@ -2,31 +2,32 @@
 
 **所有功能开发都走这条流程。** 目的有三个：不动用户正在用的工作区、允许同一台机器上多个会话同时开发、验证完有一条确定的路径回到 main 并让运行中的实例热更新。
 
-一句话版本：**临时目录 clone → 会话 id 命名的分支 → 开发验证 → 合并 main → 在主工作区构建触发热更新 → 提醒用户当前分支没合并。**
+一句话版本：**临时目录 clone → 按任务命名的分支 → 开发验证 → 合并 main → 在主工作区构建触发热更新 → 提醒用户当前分支没合并。**
 
 ## 0. 开工（一次）
 
 **取会话 id。** 形状是 `20261104T065949Z-4iqbqr`（UTC 时间戳 + 随机后缀）。当前会话的 id 就在自己的会话文件上：`session_peers` 返回的缓存文件路径 `<id>.json` 去掉扩展名即是。拿不到时自己拼一个：`date -u +%Y%m%dT%H%M%SZ` 加 6 位小写随机后缀。
 
-**命名。** 工作副本在系统的临时目录下（`os.tmpdir()`，macOS 形如 `/var/folders/…/T`），目录名 `mica_<会话 id>`；分支名 `agent/<会话 id>`。两者都带 id，事后能对上号。
-
-**开工的第一条回复里必须写出来**，让会话里看得见：
-
-```
-工作副本 <临时目录>/mica_<id> · 分支 agent/<id> · 会话 <id>
-```
+**命名要能看出在改什么。** 从任务里取 2–4 个英文小写单词当 slug（`plugin-cache-fix`、`schedule-drag-row`），连字符连接；不要用 `fix` / `update` / `wip` / 时间戳这类看不出内容的词。再拼上会话 id 尾部的随机段做唯一后缀（拿不到时 `date +%s | shasum | cut -c1-4`）。**分支 `agent/<slug>-<后缀>`，工作副本目录 `mica_<slug>-<后缀>`**（在 `os.tmpdir()` 下，macOS 形如 `/var/folders/…/T`）。
 
 克隆与装依赖：
 
 ```bash
 SRC="<主工作区绝对路径>"
 ID="<会话 id>"
-WORK="$(node -e 'process.stdout.write(require("os").tmpdir())')/mica_$ID"
+TAG="<slug>-<id 尾部随机段>"
+WORK="$(node -e 'process.stdout.write(require("os").tmpdir())')/mica_$TAG"
 git clone --quiet "$SRC" "$WORK"
 cd "$WORK"
 # 分支必须从 main 起，不能从主工作区当前检出的分支起——否则会把别人未发布的提交带进合并
-git checkout --quiet -B "agent/$ID" origin/main     # 无 origin 时先 `git checkout --quiet main`
+git checkout --quiet -B "agent/$TAG" origin/main    # 无 origin 时先 `git checkout --quiet main`
 bun install
+```
+
+- **一切都准备好了再报坐标。** 第一条回复只说这一步要做什么（「先把现有主题链路读准，再开副本」），**不要写路径与分支**：那时副本还没建，用户点开会报「打开路径失败：路径不存在」。上面三条命令都成功后，再单独发一行，发之前 `test -d "$WORK"` 确认目录真的在：
+
+```
+工作副本 <临时目录>/mica_<slug>-<后缀> · 分支 agent/<slug>-<后缀> · 会话 <id>
 ```
 
 - 本地 clone 走硬链接，通常几秒；`bun install` 只装根 workspaces（`packages/*`）。
@@ -52,9 +53,9 @@ bun install
 cd "$WORK"
 git add -A
 git commit -m "<一句话说明这个改动>"
-git push -u origin "agent/$ID"          # 有 origin 时
+git push -u origin "agent/$TAG"         # 有 origin 时
 git checkout main && git pull --ff-only
-git merge --no-ff "agent/$ID" -m "merge: <同一句话>"
+git merge --no-ff "agent/$TAG" -m "merge: <同一句话>"
 git push origin main
 ```
 
@@ -102,7 +103,7 @@ git -C "$SRC" merge-base --is-ancestor origin/main HEAD || echo "needs-merge"
 ## 6. 收尾
 
 - 回复里给全：分支名、合并的 commit、临时目录路径、是否已触发热更新、以及第 5 步的结论。
-- 临时目录默认**保留**（用户可能要复现或回看），删除要先确认；确认后 `rm -rf "$WORK"`，并顺手删远端分支 `git push origin --delete "agent/$ID"`（用户同意才删）。
+- 临时目录默认**保留**（用户可能要复现或回看），删除要先确认；确认后 `rm -rf "$WORK"`，并顺手删远端分支 `git push origin --delete "agent/$TAG"`（用户同意才删）。
 - 交付前 `git status --short` 看一眼主工作区，确认没留下自己的临时文件。
 
 ## 例外

@@ -37,6 +37,15 @@ describe('log writer', () => {
     expect(stats().dir).toBe(path.resolve(dir))
   })
 
+  it('keeps a hostile scope inside the log dir', () => {
+    logger('../../escaped').warn('boom', {})
+    flushLogs()
+    const files = readdirSync(dir)
+    expect(files).toHaveLength(1)
+    expect(files[0]).not.toContain('/')
+    expect(files[0]).not.toContain('..')
+  })
+
   it('drops log files older than the retention window', () => {
     const stale = path.join(dir, 'runtime-19700101.jsonl')
     writeFileSync(stale, '{"at":1}\n')
@@ -52,7 +61,11 @@ describe('log writer', () => {
 
   it('rotates to the next shard instead of a new file per flush', () => {
     const d = new Date()
-    const stamp = [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('')
+    const stamp = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0')
+    ].join('')
     const dayFile = path.join(dir, `perf-${stamp}.jsonl`)
     writeFileSync(dayFile, 'x'.repeat(17 * 1024 * 1024))
 
@@ -65,9 +78,11 @@ describe('log writer', () => {
     const shard = path.join(dir, `perf-${stamp}-1.jsonl`)
     // 两次 flush 都落在同一个分片里，而不是各建一个文件
     expect(readFileSync(shard, 'utf8').trim().split('\n')).toHaveLength(2)
-    expect(readdirSync(dir).filter((name) => name.startsWith(`perf-${stamp}`)).sort()).toEqual(
-      [`perf-${stamp}-1.jsonl`, `perf-${stamp}.jsonl`].sort()
-    )
+    expect(
+      readdirSync(dir)
+        .filter((name) => name.startsWith(`perf-${stamp}`))
+        .sort()
+    ).toEqual([`perf-${stamp}-1.jsonl`, `perf-${stamp}.jsonl`].sort())
   })
 
   it('reads back every sample it wrote', () => {
@@ -132,7 +147,11 @@ describe('log writer', () => {
     expect(summary.totals.memSamples).toBe(1)
     expect(summary.totals.peakRssMB).toBeGreaterThan(0)
     expect(summary.processes).toHaveLength(1)
-    expect(summary.processes[0]).toMatchObject({ host: 'app-server', session: 'sess-1', pid: process.pid })
+    expect(summary.processes[0]).toMatchObject({
+      host: 'app-server',
+      session: 'sess-1',
+      pid: process.pid
+    })
     expect(summary.processes[0].lastRssMB).toBeGreaterThan(0)
     expect(summary.buckets.some((item) => item.scope === 'mem')).toBe(false)
     expect(summary.events.some((item) => item.scope === 'mem')).toBe(false)

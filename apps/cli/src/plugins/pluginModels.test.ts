@@ -82,9 +82,7 @@ describe('createPluginModels', () => {
 
     await models('session-rename', baseRequest);
 
-    expect(infos).toMatchObject([
-      { pluginId: 'session-rename', purpose: '自动起标题', model: 'mini', input: 'user' },
-    ]);
+    expect(infos).toMatchObject([{ pluginId: 'session-rename', purpose: '自动起标题', model: 'mini', input: 'user' }]);
     // 宿主给的三个回调必须真的递给模型客户端：否则轨迹里只有起止、没有请求边界。
     expect(typeof queryOptions?.onRequestStart).toBe('function');
     expect(typeof queryOptions?.onRequestEnd).toBe('function');
@@ -118,6 +116,30 @@ describe('createPluginModels', () => {
       },
     });
     await expect(broken('commit', baseRequest)).resolves.toMatchObject({ text: 'fine' });
+  });
+
+  it('treats a caller abort as aborted even when the client throws a plain error', async () => {
+    const finished: string[] = [];
+    const controller = new AbortController();
+    const models = createPluginModels({
+      createClient: (() => ({
+        query: async () => {
+          // provider 的流被中断时 SDK 常抛一个普通 Error：只有信号本身是可靠判据。
+          controller.abort();
+          throw new Error('The operation was aborted');
+        },
+        usageHistory: [],
+      })) as never,
+      trace: () => ({
+        onRequestStart: () => {},
+        onRequestEnd: () => {},
+        onRetry: () => {},
+        finish: (outcome) => finished.push(outcome),
+      }),
+    });
+    await expect(models('commit', { ...baseRequest, signal: controller.signal })).rejects.toThrow();
+    // 与 request:end 的口径一致：同一次中断不能在轨迹里一半算 aborted、一半算 error。
+    expect(finished).toEqual(['aborted']);
   });
 
   it('returns the text and reports the usage back to the plugin', async () => {
@@ -178,9 +200,13 @@ describe('createPluginModels', () => {
   });
 
   it('does not resend or reject a successful model response when local usage persistence fails', async () => {
-    const createClient = vi.fn((options: ModelClientOptions) => fakeClient(options, { text: 'already paid result', usage }));
+    const createClient = vi.fn((options: ModelClientOptions) =>
+      fakeClient(options, { text: 'already paid result', usage }),
+    );
     const models = createPluginModels({
-      record: () => { throw new Error('local disk full'); },
+      record: () => {
+        throw new Error('local disk full');
+      },
       createClient,
     });
     const result = await models('memory', baseRequest);
@@ -190,7 +216,9 @@ describe('createPluginModels', () => {
 
   it('keeps the provider failure when recording partial usage also fails', async () => {
     const models = createPluginModels({
-      record: () => { throw new Error('local disk full'); },
+      record: () => {
+        throw new Error('local disk full');
+      },
       createClient: (options) => fakeClient(options, { error: new Error('provider failure'), usage }),
     });
     await expect(models('memory', baseRequest)).rejects.toThrow('provider failure');

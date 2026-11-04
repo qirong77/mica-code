@@ -147,7 +147,7 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
       // 失败的请求也可能已经产生了 provider 用量（例如超时的长回复）：有就记，
       // 没有就不写空记录。
       const requests = usageHistoryOf(error);
-      finishTrace(trace, isPluginAbort(error) ? 'aborted' : 'error', error, requests);
+      finishTrace(trace, isPluginAbort(error, request.signal) ? 'aborted' : 'error', error, requests);
       if (requests.length > 0) {
         safelyRecord(record, {
           pluginId,
@@ -206,8 +206,14 @@ function logTraceFailure(pluginId: string, purpose: string, error: unknown): voi
   }
 }
 
-function isPluginAbort(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
+/**
+ * 调用方中断与「请求失败」要分开：provider 的流被 abort 时可能抛一个普通的 Error
+ * （SDK 自己包装过），只有信号本身才是可靠的判据——与 provider 里定 `request:end`
+ * 的口径一致，否则同一次中断会在 request:end 记 aborted、在 run:finish 记 error。
+ */
+function isPluginAbort(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  return error instanceof Error && (error.name === 'AbortError' || error.name === 'AgentAbortError');
 }
 
 /**

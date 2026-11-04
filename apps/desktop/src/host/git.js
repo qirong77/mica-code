@@ -142,8 +142,10 @@ async function getChangeCounts(cwd, { refresh = false } = {}) {
     cached.refreshing = true
     void read()
       .then((value) => {
+        // 存读之前那份签名（与前台路径一致）：读的过程中切了分支的话，这份数字属于旧
+        // HEAD，配上新签名会被当成 fresh，之后再 20s 都不重算。
         changeCountsState.set(key, {
-          signature: `${worktreeSignature(root) || ''}|${worktreeEpochOf(root)}`,
+          signature,
           at: Date.now(),
           value,
           refreshing: false
