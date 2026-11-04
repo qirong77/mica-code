@@ -60,6 +60,7 @@ import { Button, PluginIcon, QrCode, SessionDetailView } from '@mica-config-ui/w
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
+import { collapseCompactToolNotes } from './chat/compact-notes'
 import { findPresetForSearch } from './chat-find-preset'
 import { splitMarkdownChunks } from './chat-markdown-chunks'
 import {
@@ -2629,6 +2630,28 @@ function RunElapsedLabel({ runStartedAt }) {
   )
 }
 
+/**
+ * 压缩折叠出来的工具调用说明：一行摘要，悬停看原文。
+ *
+ * 逐条渲染时每条都是一整段助手消息（`●` + 截断的绝对路径），几百条下来把对话
+ * 顶掉好几屏；摘要只回答「清掉了几轮、动了哪些工具」，原文留给悬停。
+ */
+function CompactNoteRow({ message }) {
+  const anchorRef = useRef(null)
+  const { anchorProps, tooltip } = useChatTooltip({ text: message.detail || '', anchorRef })
+  return (
+    <>
+      <div ref={anchorRef} className="chat-notice chat-notice-compact" {...anchorProps}>
+        <span>▌</span>
+        <div className="chat-notice-body">
+          <span className="chat-notice-text">{message.text}</span>
+        </div>
+      </div>
+      {tooltip}
+    </>
+  )
+}
+
 function MessageRowView({
   message,
   onOpenFile,
@@ -2679,6 +2702,9 @@ function MessageRowView({
   }
   if (message.kind === 'reasoning') {
     return null
+  }
+  if (message.compactNote) {
+    return <CompactNoteRow message={message} />
   }
   if (message.role === 'user') {
     if (edit) {
@@ -2860,7 +2886,9 @@ export function mergeReplayEvents(buffered = [], pending = []) {
 }
 
 export function historyMessages(rows, key) {
-  return (Array.isArray(rows) ? rows : []).map((row, index) => ({
+  // 压缩折叠出来的那串工具调用说明在历史里是逐条助手文本，直接渲染会排成一堵墙：
+  // 连续的说明在这里并成一行「已清理 N 轮工具调用」，原文只留作悬停提示。
+  return collapseCompactToolNotes((Array.isArray(rows) ? rows : []).map((row, index) => ({
     id: `history-${key}-${index}`,
     kind: row.kind === 'reasoning' ? 'reasoning' : row.role === 'notice' ? 'notice' : 'message',
     role: row.role,
@@ -2874,7 +2902,7 @@ export function historyMessages(rows, key) {
     status: row.status ?? undefined,
     usage: row.usage ?? null,
     done: true
-  }))
+  })), key)
 }
 
 // 模型名本身可以包含斜杠，不能通过任意后缀匹配推断 provider。
