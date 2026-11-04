@@ -15,7 +15,7 @@
     "dev": "npm run build:server && electron-vite dev --ignoreConfigWarning",
     "build": "node scripts/run-parallel.mjs \"npm run build:cli\" \"electron-vite build --ignoreConfigWarning\" \"vite build --config vite.server.config.mjs\"",
     "build:cli": "cd ../.. && bun run build",
-    "build:app": "node scripts/run-parallel.mjs \"npm run build:cli\" \"electron-vite build --ignoreConfigWarning\"",
+    "build:app": "npm run build:unpack",
     "build:server": "vite build --config vite.server.config.mjs",
     "build:web": "npm run build",
     "start:web": "node out/server/index.mjs",
