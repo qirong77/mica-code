@@ -182,6 +182,14 @@ export type PluginPanelSection = {
    */
   text?: string;
   /**
+   * 一块 **Markdown 正文**：需求描述、角色文档这类本身按 Markdown 写的整篇文章。
+   *
+   * 与 `text` 的分工：`text` 只换行、不做语法解释（模型随手写的一段中文）；`markdown`
+   * 按标题 / 列表 / 表格排版，适合插件手里本来就是 Markdown 的内容——否则面板上只能看到
+   * 一堆 `- ` 与 `|` 的原样字符。两者互斥，同时给时按 `markdown` 画。
+   */
+  markdown?: string;
+  /**
    * 默认收起。宿主把每个 section 画成一块可折叠的卡片（点标题展开/收起），
    * 这里只决定它**第一次**出现时是展开还是收起；之后跟随用户的操作。
    */
@@ -503,6 +511,13 @@ export class PluginPanelRegistry {
 const MAX_TEXT = 400;
 /** 一块正文：需求描述这类「一段话」的上限，比一行的 400 字宽。 */
 const MAX_SECTION_TEXT = 4000;
+/**
+ * 一块 Markdown 正文的上限：角色文档这种整篇 markdown 也在这一档。
+ *
+ * 比纯文本宽一个量级（按字符算，中文 role 文档四万多字符），但仍然有上限——面板每几秒
+ * 取一次视图，这条通道不该被用来搬整个文件。
+ */
+const MAX_SECTION_MARKDOWN = 80_000;
 const MAX_ROWS = 40;
 const MAX_ITEMS = 40;
 const MAX_TABLE_COLUMNS = 8;
@@ -752,11 +767,13 @@ function sectionOf(input: unknown): PluginPanelSection | null {
   const subtitle = text(raw.subtitle, 200);
   const empty = text(raw.empty, 200);
   const body = text(raw.text, MAX_SECTION_TEXT);
+  const markdown = text(raw.markdown, MAX_SECTION_MARKDOWN);
   // 只有真有输入框时，自动提交才有意义
   const commit = fields.length > 0 ? text(raw.commit, 60) : '';
   if (
     !title &&
     !body &&
+    !markdown &&
     rows.length === 0 &&
     items.length === 0 &&
     !table &&
@@ -767,7 +784,8 @@ function sectionOf(input: unknown): PluginPanelSection | null {
   return {
     ...(title ? { title } : {}),
     ...(subtitle ? { subtitle } : {}),
-    ...(body ? { text: body } : {}),
+    // 两者都是「一块正文」，同时给时按 markdown 画：一个分区的正文只有一处。
+    ...(markdown ? { markdown } : body ? { text: body } : {}),
     ...(title && raw.collapsed === true ? { collapsed: true } : {}),
     ...(rows.length > 0 ? { rows } : {}),
     ...(items.length > 0 ? { items } : {}),

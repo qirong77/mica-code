@@ -298,6 +298,9 @@ export function summarizeStatsDays(usageEvents) {
       sourceRow = {
         kind: source.kind,
         id: source.id,
+        // 谁发起的：统计页把子代理与插件后台请求挂在插件（父级）之下，缺这个字段
+        // 就只剩一串类型名。
+        pluginId: source.pluginId || null,
         tasks: new Set(),
         purposes: new Set(),
         ...emptyTokenTotals()

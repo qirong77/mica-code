@@ -474,6 +474,8 @@ export type ConfigWebPluginNewSession = {
 export type ConfigWebPluginSessionMenuItem = {
   label: string;
   action: string;
+  /** 这一行的图标名（kebab-case）；省略时回落到插件自己的 `icon`。 */
+  icon?: string;
   /** `top` 摆在菜单最上面；省略或 `bottom` 排在宿主自己的项之后、删除之前。 */
   position?: 'top' | 'bottom';
 };

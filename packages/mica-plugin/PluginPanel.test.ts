@@ -245,6 +245,29 @@ describe('normalizePluginPanelView', () => {
     expect(view.sections?.[0].text).toBe('这次改动只动了插件面板。');
   });
 
+  it('Markdown 正文与纯文本正文各走各的，同时给时按 Markdown 画', () => {
+    const view = normalizePluginPanelView({
+      title: 'x',
+      sections: [
+        { title: '角色描述', markdown: '## 身份\n\n- 一条\n- 另一条' },
+        { title: '两样都给', text: '纯文本', markdown: '**Markdown**' },
+      ],
+    });
+    expect(view.sections?.[0].markdown).toBe('## 身份\n\n- 一条\n- 另一条');
+    expect(view.sections?.[0].text).toBeUndefined();
+    // 一个分区的正文只有一处：同时给了两种，留能排版的那种
+    expect(view.sections?.[1].markdown).toBe('**Markdown**');
+    expect(view.sections?.[1].text).toBeUndefined();
+  });
+
+  it('Markdown 为空且没有别的字段的 section 被丢掉', () => {
+    const view = normalizePluginPanelView({
+      title: 'x',
+      sections: [{ markdown: '   ' }],
+    });
+    expect(view.sections).toBeUndefined();
+  });
+
   it('falls back to the plugin name and drops malformed entries', () => {
     const view = normalizePluginPanelView(
       {

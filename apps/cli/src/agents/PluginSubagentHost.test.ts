@@ -260,17 +260,18 @@ describe('PluginSubagentHost run', () => {
       caller,
     });
 
-    // 委派本身由插件提供，但这一笔是主对话派出去的活：统计页归到 Delegated，
-    // 而不是「插件后台请求」。
+    // 委派本身由插件提供，但这一笔是主对话派出去的活：统计页归到委派，
+    // 而不是「插件后台请求」；pluginId 仍记下（子代理类型的提供者），
+    // 好让界面把它挂在插件（父级）下面。
     expect(harness.recordSubagentUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: result.taskId,
         origin: 'delegation',
         initiatedByCallId: 'call-1',
         subagentType: 'Explore',
+        pluginId: 'test-plugin',
       }),
     );
-    expect(harness.recordSubagentUsage.mock.calls[0][0]).not.toHaveProperty('pluginId');
   });
 
   it('returns a failed result instead of throwing when the query fails', async () => {

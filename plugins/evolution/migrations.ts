@@ -145,4 +145,78 @@ export const dropRawUsage: Migration = {
   },
 };
 
-export const MIGRATIONS: Migration[] = [usageOccurredAt, sessionCompactRename, dropRawUsage];
+/**
+ * 一条非主对话的请求要能回答「哪个插件发起的」：Stats 的 By source 按这个字段把这些请求
+ * 挂在插件（父级）下面。老记录只写了 `subagentType`，没写 `pluginId`，于是在界面上只能
+ * 堆成一串没有归属的类型名（`Implementer`、`btw`）。
+ *
+ * 这里按当时的实现事实补上提供者，而不是让界面去猜：
+ *
+ * - 委派的子代理类型由 `subagent` 插件注册。名单只列它当时内置的那几个（见
+ *   `plugins/subagent/definitions.ts`）——用户插件自己注册的类型不在名单里，保持原样，
+ *   误标比不标更难查；
+ * - `btw` 的旁问线程、`commit` 的提交说明、`memory-curator` 的记忆整理都是各自插件的
+ *   功能，只是更早的宿主没把插件 id 写进记录；
+ * - `compact`（`/compact` 与 `mica compact`）是内核自带的命令，没有插件可归属，不动。
+ */
+const DELEGATION_PROVIDER = 'subagent';
+const BUILTIN_SUBAGENT_TYPES = new Set([
+  'general-purpose',
+  'Explore',
+  'Implementer',
+  'Reviewer',
+  'Tester',
+  'Planner',
+  'Proposal',
+]);
+/** 记录里的功能 id → 提供这个功能的插件 id。 */
+const FEATURE_PLUGINS: Record<string, string> = {
+  btw: 'btw',
+  commit: 'commit',
+  'memory-curator': 'memory',
+};
+
+export const usageSourceOwner: Migration = {
+  id: 'usage-source-owner',
+  description: '给没有归属的用量记录补上发起它的插件（委派 → subagent，btw / commit / memory-curator → 各自插件）',
+  apply(document) {
+    const snapshot = document.snapshot;
+    const records = isRecord(snapshot) ? snapshot.subagentUsageHistory : undefined;
+    if (!Array.isArray(records)) return 0;
+    let changed = 0;
+    for (const record of records) {
+      if (!isRecord(record)) continue;
+      // 旧插件 id 改名（auto-compact → session-compact，见 session-compact-rename）。
+      // 这条记录本来就有归属，只是名字过期了；不改会多出一个已经不存在的插件。
+      if (record.pluginId === 'auto-compact') {
+        record.pluginId = 'session-compact';
+        changed += 1;
+      }
+      const current = typeof record.pluginId === 'string' ? record.pluginId.trim() : '';
+      if (current) continue;
+      const type = typeof record.subagentType === 'string' ? record.subagentType.trim() : '';
+      const delegated =
+        record.origin === 'delegation' ||
+        (typeof record.initiatedByCallId === 'string' && record.initiatedByCallId.trim() !== '');
+      if (delegated) {
+        if (!BUILTIN_SUBAGENT_TYPES.has(type)) continue;
+        record.pluginId = DELEGATION_PROVIDER;
+        changed += 1;
+        continue;
+      }
+      const pluginId = FEATURE_PLUGINS[type];
+      if (!pluginId) continue;
+      record.origin = 'plugin';
+      record.pluginId = pluginId;
+      changed += 1;
+    }
+    return changed;
+  },
+};
+
+export const MIGRATIONS: Migration[] = [
+  usageOccurredAt,
+  sessionCompactRename,
+  dropRawUsage,
+  usageSourceOwner,
+];

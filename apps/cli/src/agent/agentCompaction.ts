@@ -58,11 +58,17 @@ export async function compactAgentMessages(
   return { messages: result.messages, savedTokens: Math.max(0, result.savedTokenEstimate) };
 }
 
-async function summarizeWithSubAgent(agent: AgentRuntime, transcript: string, prompt: string, signal?: AbortSignal): Promise<string> {
+async function summarizeWithSubAgent(
+  agent: AgentRuntime,
+  transcript: string,
+  prompt: string,
+  signal?: AbortSignal,
+  pluginId?: string,
+): Promise<string> {
   // 摘要必须走子代理、禁用工具：它共享父代理的工具注册表，session_* 之类的
   // 工具会去改正在被压缩的会话本身（与 /compact llm 同一条路径）。
   const subAgent = agent.createSubAgent({ systemPrompt: prompt, tools: false }, {
-    helper: { kind: 'compaction', purpose: 'summarize' },
+    helper: { kind: 'compaction', purpose: 'summarize', ...(pluginId ? { pluginId } : {}) },
   });
   const startedAt = new Date().toISOString();
   let status: 'completed' | 'failed' | 'aborted' = 'failed';
@@ -88,6 +94,10 @@ async function summarizeWithSubAgent(agent: AgentRuntime, transcript: string, pr
       description: '模型压缩摘要',
       model: agent.config.model,
       effort: 'none',
+      // 插件经 `ctx.agent.compactIdleHistory` 发起、又没配自己的摘要模型时，这笔钱是插件
+      // 花出去的：记在插件名下，统计页才看得见「谁在压」。内核自己压的（/compact、
+      // mica compact）没有插件可归属，仍落成 helper。
+      ...(pluginId ? { origin: 'plugin' as const, pluginId } : {}),
       status: signal?.aborted ? 'killed' : status,
       startedAt,
       finishedAt: new Date().toISOString(),
@@ -137,6 +147,8 @@ export function requestOverheadTokens(
 export async function compactIdleSessionHistory(input: {
   agent: AgentRuntime;
   sessionController: SessionController;
+  /** 触发这次压缩的插件 id（插件经 `ctx.agent.compactIdleHistory` 调用时由宿主传入）。 */
+  pluginId?: string;
   /** 压哪一种；缺省 `quick`。 */
   mode?: CompactMessagesMode;
   /** `mode: 'model'` 的摘要请求；不给就用宿主的摘要子代理（会话模型）。 */
@@ -166,7 +178,8 @@ export async function compactIdleSessionHistory(input: {
             // 插件给了自己的摘要请求就用它（换模型是插件的策略），否则走会话模型的摘要子代理。
             summarize:
               input.summarize ??
-              ((transcript, prompt) => summarizeWithSubAgent(agent, transcript, prompt)),
+              ((transcript, prompt) =>
+                summarizeWithSubAgent(agent, transcript, prompt, undefined, input.pluginId)),
             options: { summaryInput: 'dialogue', contextWindowSize: snapshot.contextWindowSize },
           })
         : await service.compact({

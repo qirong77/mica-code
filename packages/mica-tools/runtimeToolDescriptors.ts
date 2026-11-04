@@ -172,7 +172,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
     name: 'session_notes',
     pluginId: 'session-notes',
     description:
-      "Read or update this session's notes: a markdown scratchpad shared with the user and shown in the desktop notes panel. The notes live outside the conversation history, so they are never lost to context compaction and are re-attached to the system prompt at the start of every turn. Keep there what must survive a compact: decisions and their reasons, user constraints and preferences, paths/commands that took effort to find, and open questions. Read before a large rewrite, append instead of replacing when you are only adding, and keep it deduplicated and organized under headings rather than a chronological dump. The user edits the same document in the UI, so their edits are authoritative — do not copy the notes back into the chat, the user can already see them.",
+      "Read or update this session's notes: a markdown scratchpad shared with the user and shown in the desktop notes panel. The notes live outside the conversation history, so they are never lost to context compaction and are re-attached to the system prompt at the start of every turn. Keep there what must survive a compact: decisions and their reasons, user constraints and preferences, paths/commands that took effort to find, and open questions. Organize the notes under headings, and prefer the section-scoped actions: remove_section deletes one heading and its body, replace_section rewrites one section. Both leave the rest of the document untouched and only cost the text you actually change. When an append is refused for length, do not rewrite the whole document: delete or shrink the obsolete sections with remove_section / replace_section, then append again. The user edits the same document in the UI, so their edits are authoritative — do not copy the notes back into the chat, the user can already see them.",
     readOnly: false,
     parameters: [
       {
@@ -180,14 +180,21 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
         type: 'string',
         required: true,
         description:
-          'read returns the current notes; append adds content below what is already there; replace overwrites the whole document (use empty content to clear it).',
+          'read returns the current notes; append adds content below what is already there; replace overwrites the whole document (use empty content to clear it); replace_section rewrites the body of one heading; remove_section deletes one heading and its body.',
+      },
+      {
+        name: 'section',
+        type: 'string',
+        required: false,
+        description:
+          'Heading to target for replace_section / remove_section, e.g. "Open questions" or "## Open questions". Must match exactly one heading; the error lists the existing ones.',
       },
       {
         name: 'content',
         type: 'string',
         required: false,
         description:
-          'Markdown to write. Required for append and replace, ignored for read. At most 20000 characters in total.',
+          'Markdown to write. Required for append, replace and replace_section; ignored for read and remove_section. The whole notes document stays at most 20000 characters.',
       },
     ],
   },

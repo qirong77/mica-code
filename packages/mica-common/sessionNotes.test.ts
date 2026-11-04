@@ -3,6 +3,8 @@ import {
   MAX_SESSION_NOTES_LENGTH,
   appendSessionNotes,
   normalizeSessionNotes,
+  notesSections,
+  replaceNotesSection,
   sessionNotesSummary,
 } from './sessionNotes.js';
 
@@ -45,5 +47,24 @@ describe('sessionNotesSummary', () => {
   it('counts characters and lines of the normalized text', () => {
     expect(sessionNotesSummary('a\nb')).toEqual({ chars: 3, lines: 2 });
     expect(sessionNotesSummary('  ')).toEqual({ chars: 0, lines: 0 });
+  });
+});
+
+describe('section editing', () => {
+  it('reports the heading level and line of every section, skipping fenced code', () => {
+    const notes = ['# a', '```', '# not a heading', '```', '## b'].join('\n');
+    expect(notesSections(notes)).toEqual([
+      { heading: 'a', level: 1, line: 0 },
+      { heading: 'b', level: 2, line: 4 },
+    ]);
+  });
+
+  // 超限必须由调用方判断再决定写不写：这里若顺手截断，调用方看到的永远是「刚好等于上限」，
+  // 用户会拿到一份被砍掉尾巴的笔记。
+  it('never truncates the result of a section edit', () => {
+    const filler = 'x'.repeat(MAX_SESSION_NOTES_LENGTH - 100);
+    const result = replaceNotesSection(`# 大\n${filler}\n\n# 小\n- a`, '小', 'y'.repeat(500));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.notes.length).toBeGreaterThan(MAX_SESSION_NOTES_LENGTH);
   });
 });

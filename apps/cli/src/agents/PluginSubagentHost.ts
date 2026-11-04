@@ -266,7 +266,9 @@ export function createPluginSubagentHost(
           // 统计页要能把这份开销归到正确的来源：主对话经工具委派的那条记成 delegation
           // （插件只是它背后的实现），插件自己起的后台任务记成 plugin + pluginId。
           ...(prepared.initiatedByCallId ? { origin: 'delegation' as const } : { origin: 'plugin' as const }),
-          ...(prepared.initiatedByCallId ? {} : { pluginId }),
+          // 委派也记下提供这个子代理类型的插件：统计页把子代理挂在插件下（父级），
+          // 不写就只剩一个孤零零的类型名，看不出它从哪来。
+          pluginId,
           status,
           startedAt: prepared.startedAt,
           finishedAt: new Date().toISOString(),

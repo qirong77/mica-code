@@ -26,7 +26,11 @@ import {
   SESSION_NOTES_PLUGIN_ID,
   SESSION_NOTES_TAG,
   appendSessionNotes,
+  locateNotesSection,
   normalizeSessionNotes,
+  notesSections,
+  removeNotesSection,
+  replaceNotesSection,
   sessionNotesSummary,
 } from './sessionNotes.js';
 import { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
@@ -71,7 +75,11 @@ export const micaCommon = {
   SESSION_NOTES_TAG,
   SESSION_NOTES_PLUGIN_ID,
   appendSessionNotes,
+  locateNotesSection,
   normalizeSessionNotes,
+  notesSections,
+  removeNotesSection,
+  replaceNotesSection,
   sessionNotesSummary,
   BTW_STATE_VERSION,
   btwStatePath,
@@ -116,9 +124,14 @@ export {
   SESSION_NOTES_PLUGIN_ID,
   SESSION_NOTES_TAG,
   appendSessionNotes,
+  locateNotesSection,
   normalizeSessionNotes,
+  notesSections,
+  removeNotesSection,
+  replaceNotesSection,
   sessionNotesSummary,
 } from './sessionNotes.js';
+export type { NotesSection } from './sessionNotes.js';
 export { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 export type { StoredBtwThread } from './btwState.js';
 export { isValidSubagentSessionId, readStoredSubagentTasks, storedSubagentTasksStamp, writeStoredSubagentTasks } from './subagentState.js';

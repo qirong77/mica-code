@@ -596,6 +596,44 @@ describe('parsePluginManifest desktop session menu', () => {
       parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', position: 1 }] } })).ok,
     ).toBe(false);
   });
+
+  // 一个插件的好几项共用一个图标就分不出哪一行是哪件事，所以图标可以按行声明
+  it('keeps a per-item icon and leaves it out when the item declares none', () => {
+    const result = parsePluginManifest(
+      base({
+        desktop: {
+          sessionMenu: [
+            { label: '快速压缩', action: 'quick', icon: 'eraser' },
+            { label: '模型压缩', action: 'model', icon: 'sparkles' },
+            { label: '复制', action: 'copy' },
+          ],
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.desktopSessionMenu).toEqual([
+      { label: '快速压缩', action: 'quick', icon: 'eraser' },
+      { label: '模型压缩', action: 'model', icon: 'sparkles' },
+      { label: '复制', action: 'copy' },
+    ]);
+  });
+
+  // 与清单顶层的 icon 同一套字符集：名字要能被界面当键查，写中文或路径没有意义
+  it('rejects an icon name outside kebab-case', () => {
+    for (const icon of ['Eraser', '快速', 'a/b', 42]) {
+      expect(parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', icon }] } })).ok).toBe(
+        false,
+      );
+    }
+  });
+
+  // 与顶层 icon 一致：空字符串等于没写，回落到插件图标
+  it('treats an empty icon as not declared', () => {
+    const result = parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', icon: '' }] } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopSessionMenu).toEqual([{ label: '压缩', action: 'quick' }]);
+  });
 });
 
 describe('parsePluginManifest skills', () => {

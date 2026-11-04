@@ -68,6 +68,7 @@ export function scopeSession(session, range) {
       const row = sourceMap.get(key) || {
         kind: source.kind,
         id: source.id,
+        pluginId: source.pluginId || null,
         tasks: new Set(),
         purposes: new Set(),
         ...emptyTotals()

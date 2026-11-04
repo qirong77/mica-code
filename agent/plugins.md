@@ -54,7 +54,7 @@
 
 - 宿主形态由 `ctx.agent.mode` 回答（`session` / `one-shot`，后者是 `mica exec`），与迭代重写句柄上的同名属性一致；会改变成本或输出的策略只在 `session` 生效。
 - 影响模型请求的插件用 `ctx.agent.onIterationRewrite(handler)`：在迭代边界改写接下来要发送的历史。句柄只暴露 `sessionId`、`mode`、`lastUsage()`、`getState()` / `setState()`、`compact()`。
-- 同一能力面的另一半是 `ctx.agent.compactIdleHistory(options?)`：在轮次之外把已落盘的历史压一次，`mode: 'quick'` **只**把工具结果换成占位符（不调模型；参数、图片、reasoning 与轮次结构都不动），`mode: 'model'` 把用户与助手的对话（`summaryInput: 'dialogue'`，工具过程不进摘要输入）交给模型写 checkpoint 摘要。它由宿主提供（`HeadlessTurnExecutor.runIdleMaintenance` 取 turn lease → 对齐磁盘 → 调 `compactIdleSessionHistory` → 落盘），结果只有 `applied` / `skipped`（`busy`：会话忙或别的进程持锁；`empty`：没有可压的内容），两者都不算错误。要在压缩结果旁边一起落盘的写入（`ctx.ui.notice`）放在 `options.afterApply` 里——宿主在落盘**之前**调它，所以是同一次写；等 `await` 返回后再写，只能等下一轮（用户可能已经关掉页面）。`mica exec` 不落盘、TUI 走 `/compact`，两边都不提供，插件必须当可选能力。
+- 同一能力面的另一半是 `ctx.agent.compactIdleHistory(options?)`：在轮次之外把已落盘的历史压一次，`mode: 'quick'` **只**把工具结果换成占位符（不调模型；参数、图片、reasoning 与轮次结构都不动），`mode: 'model'` 把用户与助手的对话（`summaryInput: 'dialogue'`，工具过程不进摘要输入）交给模型写 checkpoint 摘要。它由宿主提供（`HeadlessTurnExecutor.runIdleMaintenance` 取 turn lease → 对齐磁盘 → 调 `compactIdleSessionHistory` → 落盘；宿主把调用方的 `pluginId` 一起传下去，没配自己摘要模型时那笔内核摘要记在插件名下，Stats 的 By source 才看得出来是谁在压），结果只有 `applied` / `skipped`（`busy`：会话忙或别的进程持锁；`empty`：没有可压的内容），两者都不算错误。要在压缩结果旁边一起落盘的写入（`ctx.ui.notice`）放在 `options.afterApply` 里——宿主在落盘**之前**调它，所以是同一次写；等 `await` 返回后再写，只能等下一轮（用户可能已经关掉页面）。`mica exec` 不落盘、TUI 走 `/compact`，两边都不提供，插件必须当可选能力。
 - 轮次之外判断「现在多大」用 `ctx.agent.lastUsage()` 与 `ctx.agent.contextWindowSize`（与界面上那个 ctx 徽标同源、随会话切模型变化），不要让插件自己估历史：`lastUsage` 是最近一次真实请求的输入量，压缩保留它（Stats 对账口径），所以压完再读不会立刻变小。
 - 要占住会话几秒的耗时工作（模型摘要）用 `ctx.agent.withMaintenance({ reason, label }, task)`：窗口开着时宿主通知客户端「别急着发送」，用户这段时间的发送留在客户端的排队行里（可见、可撤回），窗口结束后由客户端补发。只由能跟客户端说话的常驻宿主提供（`mica app-server`），TUI / `mica exec` 里没有，插件写 `agent.withMaintenance ? … : await task()`。`compactIdleHistory` 那条通路已经由宿主开好窗口（`label: '压缩'`），插件自己的耗时任务才需要显式用它。
 
@@ -112,9 +112,10 @@
 
 同一个 `desktop.jsx` 若在清单里另外声明 `desktop.page`（`{ "page": { "title": "排期" } }`），点这一行不进浮层而是打开整页：宿主把它渲染在 `renderer/src/PluginPage.jsx` 里（盖住整窗、顶部一条 `← 返回对话` + 标题，内容是插件模块自己的组件，props 同样是 `{ api }`），`App.jsx` 用 `pluginPage` 状态承接、清掉浮层的悬停展开——时间轴、看板这类要整屏宽高的界面走这条，浮层的 320px 放不下。
 
-**面板**由清单 `desktop.panel`（`{ "panel": { "label": "需求开发", "roles": ["需求开发"], "display": "modal", "shortcuts": [...] } }`）+ `ctx.desktop.panel({ view, action })` 组成：**插件给数据、宿主画出来**，所以用户插件也有。视图是纯数据（`title` / `status` / `statusBar` / `sections〔title, subtitle, text, rows, items, table, fields, commit, actions〕`），宿主统一归一化（长度、条目数与字段类型）后渲染，畸形视图不会让页面崩掉。四种内容各管一种事：
+**面板**由清单 `desktop.panel`（`{ "panel": { "label": "需求开发", "roles": ["需求开发"], "display": "modal", "shortcuts": [...] } }`）+ `ctx.desktop.panel({ view, action })` 组成：**插件给数据、宿主画出来**，所以用户插件也有。视图是纯数据（`title` / `status` / `statusBar` / `sections〔title, subtitle, text, markdown, rows, items, table, fields, commit, actions〕`），宿主统一归一化（长度、条目数与字段类型）后渲染，畸形视图不会让页面崩掉。几种内容各管一种事：
 
-- `text` 是一整段会换行、保留段落的正文（需求描述、结论）；
+- `text` 是一整段会换行、保留段落的正文（需求描述、结论），不解释 Markdown 语法；
+- `markdown` 是一整篇 Markdown 正文，用**对话区那套渲染**排版（标题、列表、表格、代码块）：角色文档这类本来就是 markdown 的内容用它；与 `text` 互斥、同时给按 `markdown` 画，正文上限 8 万字符。宿主不另写一套排版；
 - `rows` 是「标签 — 一个值」（`wrap` 让长句 / 长路径换行而不省略，`link` 让值可点、由宿主交给系统浏览器）；
 - `items` 是一列可带按钮的条目；
 - `table` 是几列并列的清单（`columns` 声明列，`grow` 让一列吃掉剩余宽度，`actions: true` 的那一列画 `row.actions`；格子是 `{ text, sub?, tone, link }` 或 `{ check: { checked, action } }`，`sub` 是同一格的第二行——地址、路径、上次连接的时间，主行照常染色、副行退一档，别把两件事拼成一行）；勾选列由宿主收窄居中，勾选切换带上行的 `key` 与 `values.check/column`，`keepDrafts` 保证切换不动表单里正在填的字；没有行的表整块不画，让插件用 `empty` 说话。
@@ -129,7 +130,7 @@
 
 动作的返回形态（页面负责建会话、摆页签、控制发送时机、弹窗排版，插件只声明意图）：`{ message }` 回一句话（显示在按钮旁边；常驻宿主里 `ctx.ui.notice` 用户看不到）、`{ compose }` 把文本放进当前会话输入框（不发送）、`{ newSession: { prompt, role?, cwd?, confirm?, send? } }` 开一个新会话跑这段提示词（默认先弹窗让用户看见并编辑，点开始才发；`send: false` 只把提示词放进输入框、等用户按回车，指令类动作不该由插件替人按发送）、`{ dialog: { title, subtitle?, text?, qr?, columns?, rows?, note?, configure? } }` 弹一个只读弹窗（`qr` 是一段二维码，插件只给 `{ value, caption? }`、编码与静区归宿主；`text` 是会换行的正文；`columns` + `rows` 给对齐的表格，格子 `{ text, link? }`，带 `link` 的交给系统浏览器打开；三者可以单用也可以叠；`configure: { label? }` 在底部多一个打开**这个插件自己的设置页**的按钮，「还没配好」的弹窗用它把人送过去，`panel: { label? }` 同样是个按钮但打开**面板**——弹窗只回答最常问的那件事，首次部署这类细节仍留在面板里；两者之外纯展示、编辑仍回面板 section）、`{ openPath: { path, line?, focus? } }` 让宿主把这个文件在应用里打开、`{ openReview: { cwd, base?, head?, label? } }` 让宿主盖一层**整窗评审视图**：`head`（缺省取那个目录当前检出的分支）相对 `base`（缺省按仓库主分支解析：`origin/HEAD` → `main` → `master`）在分叉点上比，左边文件、右边 diff。两边都只从提交里读（`git:ref-summary` + `git:file` 的 `refs` 模式），**不读工作区、也不改会话目录**——评审别人的分支不会把评审人自己的未提交改动混进来，那个目录被清掉也不影响，关掉就回到原来的对话。`cwd` 只提供仓库位置、不是会话工作区：评审层不加载那里的文件树；面板只有 340px，插件自己的配置、随包分发的 skill 这种超过一屏的正文在那里既看不清也改不动，编辑交给宿主已有的能力。动作改到的 `ctx.sessionState` 由宿主在动作返回后补一次会话落盘，插件不用自己触发保存。
 
-**会话右键菜单**由清单 `desktop.sessionMenu`（`[{ "label": "复制会话 Markdown", "action": "copy" }]`，可选 `position: "top"` 摆到菜单最上面、省略则排在宿主自己的项之后与删除之前）+ `ctx.desktop.sessionMenu({ run })` 组成：**菜单项来自清单、处理器来自插件注册**——右键是同步交互，不能为「有没有菜单项」去冷启动 app-server；处理器只活在插件所在进程里，页面只转发 `pluginId + action`。`run()` 只认 `copyText`（页面写系统剪贴板：插件进程里没有剪贴板，也不该为三个平台各调一次系统命令）与 `message`（回给用户的一句话）。动作要立刻返回，不要在里面等模型请求。声明它就要写 `requires: ["desktop"]`；用户插件同样有。
+**会话右键菜单**由清单 `desktop.sessionMenu`（`[{ "label": "复制会话 Markdown", "action": "copy" }]`，可选 `icon` 按行声明图标（取值见 `mica-config-ui/web/pluginIcons.tsx`，省略回落到插件图标）、`position: "top"` 摆到菜单最上面、省略则排在宿主自己的项之后与删除之前）+ `ctx.desktop.sessionMenu({ run })` 组成：**菜单项来自清单、处理器来自插件注册**——右键是同步交互，不能为「有没有菜单项」去冷启动 app-server；处理器只活在插件所在进程里，页面只转发 `pluginId + action`。`run()` 只认 `copyText`（页面写系统剪贴板：插件进程里没有剪贴板，也不该为三个平台各调一次系统命令）与 `message`（回给用户的一句话）。动作要立刻返回，不要在里面等模型请求。声明它就要写 `requires: ["desktop"]`；用户插件同样有。
 
 ### 前端模块的 api
 

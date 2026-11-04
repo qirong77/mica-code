@@ -33,12 +33,22 @@ export const MAX_SESSION_NOTES_LENGTH = 20000;
  */
 export function normalizeSessionNotes(value: unknown): string {
   if (typeof value !== 'string') return '';
-  const normalized = value
+  const normalized = tidyNotes(value);
+  return normalized.length > MAX_SESSION_NOTES_LENGTH ? normalized.slice(0, MAX_SESSION_NOTES_LENGTH) : normalized;
+}
+
+/**
+ * 只整理格式、不截断。
+ *
+ * 按节改之后要先判断有没有超限，再决定写不写：这里如果顺手截断，调用方看到的就已经是
+ * 「刚好等于上限」的文本，超限检查永远不触发，用户会拿到一份被砍掉尾巴的笔记。
+ */
+function tidyNotes(value: string): string {
+  return value
     .replace(/\r\n?/g, '\n')
     .replace(/[ \t]+$/gm, '')
     .replace(/^\n+/, '')
     .replace(/\s+$/, '');
-  return normalized.length > MAX_SESSION_NOTES_LENGTH ? normalized.slice(0, MAX_SESSION_NOTES_LENGTH) : normalized;
 }
 
 /** 追加一段笔记：中间空一行，忽略空追加。返回归一化后的完整内容。 */
@@ -55,3 +65,127 @@ export function sessionNotesSummary(notes: string): { chars: number; lines: numb
   return { chars: content.length, lines: content.split('\n').length };
 }
 
+/** 笔记里的一节：标题行本身与它管辖的正文（到下一个同级或更高级标题为止）。 */
+export type NotesSection = {
+  /** 标题文字，不含前导 `#`。 */
+  heading: string;
+  level: number;
+  /** 标题所在行（0 起）。 */
+  line: number;
+};
+
+const HEADING = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
+
+/**
+ * 列出所有标题行。
+ *
+ * 围栏代码块里的 `#` 不是标题：笔记里贴一段 shell 或 patch，里面的注释不能被当成
+ * 可删的章节——按标题删除时那会删掉正文中间的一段。
+ */
+export function notesSections(notes: string): NotesSection[] {
+  const content = normalizeSessionNotes(notes);
+  if (!content) return [];
+  const sections: NotesSection[] = [];
+  let fence: string | null = null;
+  content.split('\n').forEach((line, index) => {
+    const fenceMatch = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fenceMatch) {
+      const marker = fenceMatch[1]![0]!;
+      if (fence === null) fence = marker;
+      else if (fence === marker) fence = null;
+      return;
+    }
+    if (fence !== null) return;
+    const match = HEADING.exec(line);
+    if (match) sections.push({ heading: match[2]!.trim(), level: match[1]!.length, line: index });
+  });
+  return sections;
+}
+
+type SectionRange = { heading: string; from: number; to: number };
+
+/**
+ * 按标题定位一节的范围。标题匹配忽略前导 `#` 与大小写，但必须**唯一**：
+ * 两个同名标题时猜测要删哪一个，删错比报错更糟。
+ */
+export function locateNotesSection(
+  notes: string,
+  query: string,
+): { ok: true; range: SectionRange } | { ok: false; message: string } {
+  const wanted = query.replace(/^#+\s*/, '').trim();
+  if (!wanted) return { ok: false, message: 'section must name a heading' };
+  const content = normalizeSessionNotes(notes);
+  const lines = content ? content.split('\n') : [];
+  const sections = notesSections(content);
+  const matches = sections.filter((section) => section.heading.toLowerCase() === wanted.toLowerCase());
+  if (matches.length === 0) {
+    const available = sections.map((section) => `${'#'.repeat(section.level)} ${section.heading}`);
+    return {
+      ok: false,
+      message: available.length
+        ? `no section titled "${wanted}"; existing sections: ${available.join(' | ')}`
+        : `no section titled "${wanted}"; the notes have no headings yet`,
+    };
+  }
+  if (matches.length > 1) {
+    const where = matches.map((section) => `line ${section.line + 1}`).join(', ');
+    return {
+      ok: false,
+      message: `"${wanted}" matches ${matches.length} headings (${where}); rename one of them or use replace to rewrite the whole document`,
+    };
+  }
+  const match = matches[0]!;
+  let to = lines.length;
+  for (const section of sections) {
+    if (section.line > match.line && section.level <= match.level) {
+      to = section.line;
+      break;
+    }
+  }
+  return { ok: true, range: { heading: match.heading, from: match.line, to } };
+}
+
+/** 删掉一节（标题连同正文），并把两侧的空行收成一个分隔空行。 */
+export function removeNotesSection(
+  notes: string,
+  query: string,
+): { ok: true; notes: string; heading: string } | { ok: false; message: string } {
+  const located = locateNotesSection(notes, query);
+  if (!located.ok) return located;
+  const lines = normalizeSessionNotes(notes).split('\n');
+  const before = lines.slice(0, located.range.from);
+  const after = lines.slice(located.range.to);
+  while (before.length > 0 && before[before.length - 1]!.trim() === '') before.pop();
+  while (after.length > 0 && after[0]!.trim() === '') after.shift();
+  const joined = [...before, ...(before.length > 0 && after.length > 0 ? [''] : []), ...after].join('\n');
+  return { ok: true, notes: tidyNotes(joined), heading: located.range.heading };
+}
+
+/**
+ * 只替换一节正文，标题行保留。
+ *
+ * 这是「笔记到上限了」的正确解法：整篇重写要重新生成两万字，按节改只要生成改的那一段，
+ * 也不会顺手把别的章节弄丢。
+ */
+export function replaceNotesSection(
+  notes: string,
+  query: string,
+  content: string,
+): { ok: true; notes: string; heading: string } | { ok: false; message: string } {
+  const located = locateNotesSection(notes, query);
+  if (!located.ok) return located;
+  const lines = normalizeSessionNotes(notes).split('\n');
+  const body = normalizeSessionNotes(content);
+  const before = lines.slice(0, located.range.from + 1);
+  const after = lines.slice(located.range.to);
+  while (after.length > 0 && after[0]!.trim() === '') after.shift();
+  // 不额外插入空行：正文紧贴标题，与手写笔记的习惯一致，也避免每次按节改都让整篇
+  // 的换行形状漂移（笔记每轮都进 system prompt，无谓的变化会让 prompt 前缀失效）。
+  const joined = [
+    ...before,
+    ...(body ? body.split('\n') : []),
+    ...(body && after.length > 0 ? [''] : []),
+    ...after,
+  ].join('\n');
+  return { ok: true, notes: tidyNotes(joined), heading: located.range.heading };
+}

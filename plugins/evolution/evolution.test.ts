@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { MIGRATIONS, dropRawUsage, usageOccurredAt } from './migrations.js';
+import { MIGRATIONS, dropRawUsage, usageOccurredAt, usageSourceOwner } from './migrations.js';
 import { runEvolution } from './run.js';
 
 const homes: string[] = [];
@@ -121,6 +121,74 @@ describe('drop-raw-usage 迁移', () => {
     expect(dropRawUsage.apply({})).toBe(0);
     expect(dropRawUsage.apply({ snapshot: { usageHistory: 'nope' } })).toBe(0);
     expect(dropRawUsage.apply({ snapshot: { usageHistory: [null, 3] } })).toBe(0);
+  });
+});
+
+describe('usage-source-owner 迁移', () => {
+  function withRecords(records: unknown[]) {
+    return { snapshot: { subagentUsageHistory: records } } as Record<string, any>;
+  }
+
+  it('委派的子代理补上提供者，插件后台请求补上所属插件', () => {
+    const document = withRecords([
+      // 主对话经工具派出去的内置类型：由 subagent 插件提供。
+      { taskId: 't1', initiatedByCallId: 'call-1', subagentType: 'Explore' },
+      { taskId: 't2', origin: 'delegation', subagentType: 'Implementer' },
+      // 插件自己的后台功能：更早的宿主没写插件 id。
+      { taskId: 'btw', subagentType: 'btw' },
+      { taskId: 'commit-message', subagentType: 'commit' },
+      { taskId: 'memory', subagentType: 'memory-curator' },
+    ]);
+
+    expect(usageSourceOwner.apply(document)).toBe(5);
+    const [delegated, explicitDelegation, btw, commit, memory] =
+      document.snapshot.subagentUsageHistory;
+    expect(delegated.pluginId).toBe('subagent');
+    // 委派的 origin 不因为补了插件 id 而变化：它仍是主对话派出去的活。
+    expect(delegated.origin).toBeUndefined();
+    expect(explicitDelegation).toMatchObject({ origin: 'delegation', pluginId: 'subagent' });
+    expect(btw).toMatchObject({ origin: 'plugin', pluginId: 'btw' });
+    expect(commit).toMatchObject({ origin: 'plugin', pluginId: 'commit' });
+    expect(memory).toMatchObject({ origin: 'plugin', pluginId: 'memory' });
+  });
+
+  it('内核命令（compact）与迁移名单外的类型不动', () => {
+    const document = withRecords([
+      { taskId: 'compact-summary', subagentType: 'compact' },
+      // 用户插件注册的类型：不知道是谁提供的，就不猜。
+      { taskId: 'custom', initiatedByCallId: 'call-2', subagentType: 'my-plugin-agent' },
+    ]);
+    expect(usageSourceOwner.apply(document)).toBe(0);
+    expect(document.snapshot.subagentUsageHistory[0]).toEqual({
+      taskId: 'compact-summary',
+      subagentType: 'compact',
+    });
+  });
+
+  it('已经有 pluginId 的记录不动，重复执行没有改动', () => {
+    const document = withRecords([
+      { taskId: 't1', origin: 'delegation', pluginId: 'my-plugin', subagentType: 'Explore' },
+      { taskId: 't2', origin: 'plugin', pluginId: 'memory', subagentType: 'memory-curator' },
+    ]);
+    expect(usageSourceOwner.apply(document)).toBe(0);
+    const again = withRecords([{ taskId: 't1', initiatedByCallId: 'call-1', subagentType: 'Explore' }]);
+    expect(usageSourceOwner.apply(again)).toBe(1);
+    expect(usageSourceOwner.apply(again)).toBe(0);
+  });
+
+  it('形状不对的文档不算改动', () => {
+    expect(usageSourceOwner.apply({})).toBe(0);
+    expect(usageSourceOwner.apply({ snapshot: 'nope' })).toBe(0);
+    expect(usageSourceOwner.apply({ snapshot: { subagentUsageHistory: [null, 3] } })).toBe(0);
+  });
+
+  it('旧插件 id（auto-compact）改名成现在的 session-compact', () => {
+    const document = withRecords([
+      { taskId: 't1', origin: 'plugin', pluginId: 'auto-compact', subagentType: 'compact' },
+    ]);
+    expect(usageSourceOwner.apply(document)).toBe(1);
+    expect(document.snapshot.subagentUsageHistory[0].pluginId).toBe('session-compact');
+    expect(usageSourceOwner.apply(document)).toBe(0);
   });
 });
 

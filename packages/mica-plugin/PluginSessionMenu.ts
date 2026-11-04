@@ -26,6 +26,13 @@ export type PluginSessionMenuItem = {
    */
   action: string;
   /**
+   * 这一行的图标名（kebab-case，取值见 `mica-config-ui/web/pluginIcons.tsx`）。
+   *
+   * 一个插件常常有好几项（快速压缩 / 模型压缩），共用一个插件图标时看不出区别，
+   * 所以按行声明；省略时页面回落到插件自己的 `icon`。
+   */
+  icon?: string;
+  /**
    * 放在菜单的哪一头。`top` 是菜单最上面（与这个会话本身最相关的动作），
    * 省略或 `bottom` 是宿主自己的项之后、删除之前——默认位置。
    */

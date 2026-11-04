@@ -527,6 +527,10 @@ function readDesktopPage(
  * `position` 决定这一行摆在哪：`top` 是菜单最上方，省略（或 `bottom`）排在宿主自己的项
  * 之后、删除之前。只认这两个值，写别的一律当清单错误——静默落到默认位置会让插件作者
  * 以为它生效了。
+ *
+ * `icon` 与清单顶层的 `icon` 同一个字符集（界面图标表里的 kebab-case 名称），但按行生效：
+ * 一个插件有好几项时，共用插件图标就分不出哪一行是哪件事。不认识的名称不算清单错误——
+ * 图标表是界面约定、会演进，页面回落到插件图标即可。
  */
 function readSessionMenu(input: unknown): { ok: true; value: PluginSessionMenuItem[] } | { ok: false; error: string } {
   if (input === undefined) return { ok: true, value: [] };
@@ -541,6 +545,18 @@ function readSessionMenu(input: unknown): { ok: true; value: PluginSessionMenuIt
     if (items.some((item) => item.action === action)) {
       return { ok: false, error: `desktop.sessionMenu 有重复的 action：${action}` };
     }
+    let icon = '';
+    if (entry.icon !== undefined) {
+      const value = readString(entry.icon);
+      if (value === undefined) {
+        return { ok: false, error: `desktop.sessionMenu「${label}」的 icon 必须是字符串` };
+      }
+      // 空字符串与顶层 `icon` 一致：等于没写，回落到插件图标。
+      icon = value.trim();
+      if (icon && !PLUGIN_ICON_PATTERN.test(icon)) {
+        return { ok: false, error: `desktop.sessionMenu「${label}」的 icon 只能由小写字母、数字与 "-" 组成` };
+      }
+    }
     let position: 'top' | 'bottom' | undefined;
     if (entry.position !== undefined) {
       const value = readString(entry.position)?.trim();
@@ -549,7 +565,12 @@ function readSessionMenu(input: unknown): { ok: true; value: PluginSessionMenuIt
       }
       position = value;
     }
-    items.push(position ? { label, action, position } : { label, action });
+    items.push({
+      label,
+      action,
+      ...(icon ? { icon } : {}),
+      ...(position ? { position } : {}),
+    });
   }
   return { ok: true, value: items };
 }

@@ -18,6 +18,10 @@ import {
 } from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
 import { FloatingMenu } from './FloatingMenu'
+// 分区正文的 Markdown 直接用对话区那一套渲染：同一个应用里不该有两份 Markdown 排版，
+// 「需求描述」「角色描述」看起来才和对话里的内容一致。ChatView 也 import 本模块，
+// 但两边都只在组件渲染时取值（不在模块顶层读），ESM 的活绑定在这里是安全的。
+import { Markdown } from './ChatView'
 import {
   applyPanelResult,
   isCompletedToolEvent,
@@ -91,7 +95,13 @@ function withPluginDialog(dialog, pluginId) {
 }
 
 const tagTone = (tone) => TAG_TONES[tone] || 'default'
-const buttonVariant = (tone) => BUTTON_VARIANTS[tone] || 'ghost'
+/**
+ * 没声明 `tone` 的动作按共享 `Button` 的默认样式画（带描边与底色）。
+ *
+ * 以前落到 `ghost`：按钮常态没有边框，鼠标悬停才浮出来，看着像一段能点的文字。行内动作
+ * 该不该收掉边框由插件说了算（显式写 `tone: 'ghost'`），宿主不替它决定。
+ */
+const buttonVariant = (tone) => BUTTON_VARIANTS[tone] || 'default'
 
 /**
  * 输入框上方那排快捷按钮（悬浮在输入框之上，左对齐）。
@@ -969,13 +979,20 @@ function PluginPanelSection({
 
 /** 一块分区的内容：只读行、条目、输入框、动作，全部落在共享 `SettingRow` 上。 */
 function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
-  const hasBody = Boolean(section.text)
+  const hasBody = Boolean(section.text || section.markdown)
   const tableRows = section.table?.rows || []
   const hasRows = (section.rows?.length || 0) + (section.items?.length || 0) + tableRows.length > 0
   return (
     <div className="chat-plugin-rows">
-      {/* 正文：一整段话（需求描述、结论）。行是「标签 — 一个值」，这里没有标签也不省略。 */}
-      {hasBody && <p className="chat-plugin-text">{section.text}</p>}
+      {/* 正文：一整段话（需求描述、结论）。行是「标签 — 一个值」，这里没有标签也不省略。
+          插件说是 Markdown 就按对话区那套排版画（标题、列表、表格），否则只保留换行。 */}
+      {section.markdown ? (
+        <div className="chat-plugin-markdown">
+          <Markdown text={section.markdown} />
+        </div>
+      ) : (
+        hasBody && <p className="chat-plugin-text">{section.text}</p>
+      )}
       {section.rows?.map((row, index) => (
         // 行是位置数据，标签可能重复（一个仓库一行「位置」这类）：用序号做 key，
         // 别让 React 因为同名把两行认成同一行。

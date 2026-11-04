@@ -13,7 +13,6 @@ import {
   SOURCE_KIND_HINTS,
   SOURCE_KIND_LABELS,
   flattenSourceRows,
-  normalizeSourceId,
   sourceRowKey
 } from './source-groups'
 import {
@@ -36,9 +35,8 @@ const RANGE_OPTIONS = [
   ['all', 'All']
 ]
 const PROJECT_BATCH = 7
-// 两张明细表一页放多少行。同一个页面上两个表用不同行数不是问题——它们回答的问题不同，
-// 来源表本来就短（十几条），会话表会长到几百条。
-const SOURCE_PAGE_SIZE = 12
+// 按会话的明细表一页放多少行。它会长到几百条；来源表是两层树（插件 → 子项），
+// 分页会把父行和它的子项劈到两页上，所以那张表不分页。
 const SESSION_PAGE_SIZE = 10
 // 载荷是「会话 × 本地日」的聚合结果（上千个会话约 1MB，见 host/stats-core），面板只看
 // 总量，半分钟一次足够；首次构建索引期间运行时另行推送 stats:changed，不靠这个间隔。
@@ -638,13 +636,6 @@ const SOURCE_COLUMNS = [
   { key: 'share', label: 'Share', width: '15%', align: 'right', sortable: true }
 ]
 
-const SOURCE_SORT_VALUE = {
-  requests: (row) => row.requests,
-  input: (row) => row.inputTokens,
-  output: (row) => row.outputTokens,
-  share: (row) => row.totalTokens
-}
-
 function BySourceCard({ scoped }) {
   const plugins = usePluginsDetails()
   const pluginNames = useMemo(
@@ -661,13 +652,15 @@ function BySourceCard({ scoped }) {
     const map = new Map()
     for (const s of scoped) {
       for (const usage of s.sourceUsage || []) {
-        // 同一个功能只占一行：内核 helper 的写法先归一到功能键（记忆整理等），否则它们看起来
-        // 像两个功能各记了一笔。会话 id 仍按 Set 去重，合并不虚增会话数。
+        // 同一个功能只占一行（同 kind + 同 id）。会话 id 按 Set 去重，合并不虚增会话数。
         const key = sourceRowKey(usage)
         const row = map.get(key) || {
           key,
           kind: usage.kind,
-          id: normalizeSourceId(usage.kind, usage.id),
+          // 名字原样用记账里的 id：插件名由清单提供，类型名 / 功能名不在这里翻译。
+          id: usage.id,
+          // 父级：这笔请求是哪个插件发起的。子代理与插件后台请求都带着它。
+          pluginId: usage.pluginId || null,
           sessions: new Set(),
           tasks: new Set(),
           purposes: new Set(),
@@ -695,36 +688,31 @@ function BySourceCard({ scoped }) {
     }))
   }, [scoped])
 
+  // 排序与分组都在数据层：分组是结构（父行 = 插件），指标只决定组内顺序。
   const flattened = useMemo(
-    () => flattenSourceRows(rows, { pluginNames, pluginDescriptions }),
-    [rows, pluginNames, pluginDescriptions]
+    () => flattenSourceRows(rows, { pluginNames, pluginDescriptions, sort }),
+    [rows, pluginNames, pluginDescriptions, sort]
   )
 
-  const sorted = useMemo(() => {
-    const value = SOURCE_SORT_VALUE[sort.key] || SOURCE_SORT_VALUE.share
-    const list = flattened.rows.slice()
-    list.sort((a, b) => (sort.desc ? value(b) - value(a) : value(a) - value(b)))
-    return list
-  }, [flattened, sort])
-
   if (rows.length === 0) return null
-  const maxShare = sorted.length > 0 ? sorted.reduce((m, r) => Math.max(m, r.share), 0) : 0
+  const maxShare =
+    flattened.rows.length > 0 ? flattened.rows.reduce((m, r) => Math.max(m, r.share), 0) : 0
 
   return (
     <section className={`${CARD_CLASS} p-4`}>
       <header className="mb-2 flex items-baseline justify-between gap-2">
         <h2 className={OVERLINE_CLASS}>By source</h2>
         <span className="shrink-0 text-[11px] text-fg-faint tabular-nums">
-          {flattened.rows.length} sources · {tokensShort(flattened.total)} tokens
+          {flattened.groups} 个来源 · {tokensShort(flattened.total)} tokens
         </span>
       </header>
       <div className="mica-config-ui is-embed">
         <DataTable
           ariaLabel="按来源用量"
           columns={SOURCE_COLUMNS}
-          rows={sorted}
+          rows={flattened.rows}
           rowKey={(row) => row.key}
-          pageSize={SOURCE_PAGE_SIZE}
+          pageSize={0}
           sort={sort}
           onSortChange={(key) =>
             setSort((current) =>
@@ -732,14 +720,24 @@ function BySourceCard({ scoped }) {
             )
           }
           renderCells={(row) => [
-            <div key="source" className="min-w-0">
+            <div
+              key="source"
+              className={`min-w-0 ${
+                row.depth > 0 ? 'ml-2 border-l border-line-soft pl-2.5' : ''
+              }`}
+            >
               <div className="flex min-w-0 items-center gap-1.5">
                 <span
                   aria-hidden
                   className="size-2 shrink-0 rounded-full"
                   style={{ background: row.color }}
                 />
-                <span className="min-w-0 truncate text-xs text-fg-strong" title={row.title}>
+                <span
+                  className={`min-w-0 truncate text-xs ${
+                    row.isGroup ? 'font-medium text-fg-strong' : 'text-fg-muted'
+                  }`}
+                  title={row.title}
+                >
                   {row.title}
                 </span>
               </div>
@@ -1057,7 +1055,8 @@ function BySessionCard({ scoped, onDetail }) {
 }
 
 export function StatsView({ visible }) {
-  const [range, setRange] = useState('30d')
+  // 默认看今天：统计页打开时关心的是「刚才这一轮花了多少」，近 30 天的总量是决策时才切过去看的。
+  const [range, setRange] = useState('today')
   const [snap, setSnap] = useState(null)
   const [visibleRows, setVisibleRows] = useState(PROJECT_BATCH)
   const [calendarYear, setCalendarYear] = useState(null)
@@ -1168,7 +1167,7 @@ export function StatsView({ visible }) {
               {isDayRange(range) && (
                 <button
                   type="button"
-                  onClick={() => setRangePreset('30d')}
+                  onClick={() => setRangePreset('today')}
                   title="清除单日筛选"
                   className="flex items-center gap-1 rounded-[4px] border border-line bg-panel px-2 py-1 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
                 >

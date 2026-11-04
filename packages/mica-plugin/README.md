@@ -48,6 +48,7 @@
   `master` → 当前分支）解析，不给 `head` 取该目录当前检出的分支。两边都只从提交里读，
   不读工作区、不切分支、也不改会话目录）。建会话、发送时机、弹窗排版都属于页面，插件只声明意图。
 - 会话右键菜单：清单的 `desktop.sessionMenu` 声明菜单项（`label` + `action`，可选
+  `icon` 按行指定图标名（取值见 `mica-config-ui/web/pluginIcons.tsx`，省略回落到插件图标）、
   `position: "top"` 摆到菜单最上面，省略则排在宿主自己的项之后、删除之前），插件用
   `ctx.desktop.sessionMenu({ run })` 交出按 `action` 分派的处理器。菜单项走清单是因为右键要
   立刻画出菜单（不能为它冷启动一个 app-server），处理器留在插件所在进程里；`run()` 回

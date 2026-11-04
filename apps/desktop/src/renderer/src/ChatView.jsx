@@ -54,7 +54,7 @@ import {
   summarizeTodoProgress,
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
-import { Button, PluginIcon, QrCode, SessionDetailView } from '@mica-config-ui/web'
+import { Button, PluginIcon, QrCode, SessionDetailView, resolvePluginIcon } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
@@ -2444,7 +2444,9 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
   const pluginAction = (item) => ({
     id: item.action,
     label: item.label,
-    icon: IconPuzzle,
+    // 图标是插件按行声明的（清单里的名字），页面只负责按名字取组件；没声明任何图标时
+    // 才回落到插件系统的占位图标。
+    icon: item.icon ? resolvePluginIcon(item.icon) : IconPuzzle,
     disabled: !menu.hasSession
   })
   const declaredPlugins = Array.isArray(pluginItems) ? pluginItems : []

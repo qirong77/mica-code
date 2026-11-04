@@ -31,11 +31,17 @@ export function sessionMenuPluginItems(plugins) {
       // 清单里声明的摆位要一路带到菜单构建那一层：`top` 进菜单最上方（会话压缩这类
       // 和当前会话直接相关的动作），省略就是宿主自己的项之后。
       const position = entry?.position === 'top' ? 'top' : entry?.position === 'bottom' ? 'bottom' : ''
+      // 图标按行取：一个插件常常有好几项（快速压缩 / 模型压缩），共用插件图标就分不出
+      // 哪一行是哪件事。只传名字——名字怎么变成组件是页面的事，宿主不认识具体插件。
+      const icon =
+        (typeof entry?.icon === 'string' && entry.icon.trim()) ||
+        (typeof plugin.icon === 'string' ? plugin.icon.trim() : '')
       items.push({
         action: `${PREFIX}${plugin.id}:${action}`,
         label,
         pluginId: plugin.id,
         pluginAction: action,
+        ...(icon ? { icon } : {}),
         ...(position ? { position } : {})
       })
     }

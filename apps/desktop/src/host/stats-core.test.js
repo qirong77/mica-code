@@ -399,6 +399,7 @@ describe('Stats usage aggregation', () => {
       expect.objectContaining({
         kind: 'main',
         id: 'main',
+        pluginId: null,
         requests: 2,
         totalTokens: 165,
         tasks: [],
@@ -407,6 +408,8 @@ describe('Stats usage aggregation', () => {
       {
         kind: 'delegation',
         id: 'Explore',
+        // 老记录（这条没有 pluginId）归到内核那一组，界面按 pluginId 分父级。
+        pluginId: null,
         tasks: ['task-1'],
         purposes: [],
         requests: 1,

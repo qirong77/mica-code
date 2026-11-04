@@ -363,12 +363,15 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       // 插件只决定「什么时候值得压」。
       ...(options.runIdleTask
         ? {
-            compactIdleHistory: (_pluginId, hook) =>
+            compactIdleHistory: (pluginId, hook) =>
               options.runIdleTask!<PluginIdleCompactOutcome>(
                 async (): Promise<PluginIdleCompactOutcome> => {
                   const applied = await compactIdleSessionHistory({
                     agent,
                     sessionController,
+                    // 摘要请求要能归到发起它的插件：统计页按插件归组，缺了这个 id
+                    // 就只能显示成「内核兜底」。
+                    pluginId,
                     conversationMessages: () => getConversationMessages(),
                     ...(hook?.mode ? { mode: hook.mode } : {}),
                     ...(hook?.summarize ? { summarize: hook.summarize } : {}),

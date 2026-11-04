@@ -6745,38 +6745,40 @@ body.is-resizing-btw {
    这里只收敛浮层里放不下的尺寸。左右内边距与下面的 .plugin-menu-item 对齐到同一根竖线——
    一个菜单里出现两种缩进，看起来就像两张不同的组件拼起来的。 */
 .chat-plugin-quickbar-table {
-  min-width: 0;
-  max-width: 460px;
+  /* 内容不多就一行，但两列并排时给足宽度：列挤在一起时项目名与分支会互相推挤换行，
+     比整块浮层宽一点更难看。 */
+  min-width: 340px;
+  max-width: 620px;
   /* 浮层里不滚：横向滚动条在三行高的菜单里比截断更难用 */
   overflow: hidden;
 }
 
 .chat-plugin-table.is-compact th,
 .chat-plugin-table.is-compact td {
-  padding-right: 8px;
-  padding-left: 8px;
+  padding-right: 12px;
+  padding-left: 12px;
 }
 
 .chat-plugin-table.is-compact th {
-  padding-top: 4px;
-  padding-bottom: 5px;
+  padding-top: 6px;
+  padding-bottom: 7px;
   color: var(--color-fg-dim);
-  font-size: 11px;
+  font-size: 11.5px;
   letter-spacing: 0.04em;
 }
 
 .chat-plugin-table.is-compact td {
-  max-width: 240px;
-  padding-top: 6px;
-  padding-bottom: 6px;
-  font-size: 12.5px;
-  line-height: 1.35;
+  max-width: 300px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-size: 13px;
+  line-height: 1.4;
   vertical-align: middle;
 }
 
 /* 第一列是名字（mis / sass），给它一个上限，剩下的宽度让给分支这类长文本 */
 .chat-plugin-table.is-compact td:first-child {
-  max-width: 140px;
+  max-width: 170px;
 }
 
 .chat-plugin-table tbody tr[role='menuitem'] {
@@ -6972,7 +6974,6 @@ body.is-resizing-btw {
 
 /* 一块正文：整段话（需求描述、结论），保留段落与换行。 */
 .chat-plugin-text {
-  max-width: 78ch;
   margin: 0;
   padding: 10px 16px 4px;
   color: var(--text);
@@ -6980,6 +6981,18 @@ body.is-resizing-btw {
   line-height: 1.75;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* 一块 Markdown 正文（需求描述、角色文档）：排版交给对话区那套 .chat-markdown，
+   这里只管它在面板里的边距。不做 max-width——面板宽度本来就只有一屏，
+   再收一道会在右边留出一条没用上的空白。 */
+.chat-plugin-markdown {
+  min-width: 0;
+  padding: 12px 16px 8px;
+}
+
+.chat-plugin-markdown .chat-markdown {
+  font-size: var(--text-body);
 }
 
 /* 行里的值是一个地址：可点，交给系统浏览器。 */

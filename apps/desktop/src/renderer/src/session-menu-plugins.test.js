@@ -26,7 +26,8 @@ describe('sessionMenuPluginItems', () => {
         action: 'session-menu:session-copy:copy',
         label: '复制会话 Markdown',
         pluginId: 'session-copy',
-        pluginAction: 'copy'
+        pluginAction: 'copy',
+        icon: 'file-text'
       }
     ])
   })
@@ -57,6 +58,26 @@ describe('sessionMenuPluginItems', () => {
       })
     ])
     expect(items.map((item) => item.position)).toEqual(['top', undefined])
+  })
+
+  // 同一个插件的好几项共用插件图标就分不出哪一行是哪件事，所以按行声明优先
+  test('prefers the per-item icon and falls back to the plugin icon', () => {
+    const items = sessionMenuPluginItems([
+      plugin({
+        desktopSessionMenu: [
+          { label: '快速压缩', action: 'quick', icon: 'eraser' },
+          { label: '复制', action: 'copy' }
+        ]
+      })
+    ])
+    expect(items.map((item) => item.icon)).toEqual(['eraser', 'file-text'])
+  })
+
+  test('leaves the icon out when neither the item nor the plugin declares one', () => {
+    const items = sessionMenuPluginItems([
+      plugin({ icon: '', desktopSessionMenu: [{ label: '复制', action: 'copy' }] })
+    ])
+    expect(items[0]).not.toHaveProperty('icon')
   })
 
   test('skips malformed entries instead of rendering a dead menu row', () => {
