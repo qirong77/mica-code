@@ -4,17 +4,12 @@
 
 优先级低于系统、开发者与当前用户指令；与代码不一致时以代码为准，并在同次变更里修正对应文件。
 
-## 1. 默认开发流程
-
-所有代码改动走 `agent/workflow.md`：在系统临时目录 clone 一份（目录 `mica_<slug>-<后缀>`）、开 `agent/<slug>-<后缀>` 分支（slug 从任务取名，要看出在改什么）、**副本与依赖都准备好之后才写出工作副本 / 分支 / 会话 id**、开发验证、**把分支推到远端**、合并进 main 并推送、回到用户那份 checkout 把 main 拉下来、按固定格式汇报。这三道闸门一步都不许静默跳过：做不到就写明卡在哪、用户要执行哪条命令。**到此为止不构建、不热更新**——什么时候构建、要不要重启由用户自己决定（命令见 `agent/build.md`）。
-
-例外只有不产生运行时代码差异的改动（纯文档 / `agent/**` / `AGENT.md`、README 与站点文案）和只读排查——它们直接在主工作区改，仍然不 commit、不 push、不必构建。
-
-## 2. 硬规则
+## 1. 硬规则
 
 - 改前看 `git status --short`，保留用户已有改动；禁止 `git reset --hard`、`git checkout --`、强推、批量删除与 `--no-verify`。
 - 只改任务相关文件，不顺手格式化、重命名或重构；只格式化自己改过的文件。
-- 主工作区不自动 commit / push / 建分支 / 开 PR / 做合并提交；除了流程第 5 步的 `--ff-only` 快进，一切写操作只发生在开发流程的隔离副本里。
+- 在工作区里直接改，不建分支、不提交、不推送、不做合并提交，除非用户明确要求。工作区里别人的未提交改动一律不动：不 stash、不 discard、不格式化。
+- 改完不构建、不热更新——什么时候构建、要不要重启由用户自己决定（命令见 `agent/build.md`）。
 - 搜索用 `rg`，默认排除 `temp/`、`.backups/`、`node_modules/`、`dist/`、`out/`。
 - 验证只跑到「与改动最接近」为止：针对性单测 + `bun run typecheck`。不跑全量测试、全量 lint 与真实子进程 E2E，除非用户要发布或明确要求（尺度见 `agent/build.md`）。
 - 临时复现用隔离的 `MICA_HOME`；起桌面实例还要独立 `MICA_DESKTOP_USER_DATA`、`MICA_DESKTOP_PORT` 与 `--user-data-dir`。
@@ -26,11 +21,10 @@
 - prompt、skills 索引与工具描述参与 prompt cache 前缀，改时保持前缀稳定。
 - 文档与代码同次更新：改到 `agent/**` 的架构 / 路径 / 命令 / 配置 / 协议 / 流程 → 改对应文件；用户可见命令 → 根 `README.md`、`packages/mica-builtin-commands/README.md`、`apps/website/src/pages/docs/commands.astro`；公共 API → `packages/README.md` 与包 README；插件系统 → `plugins/README.md`。
 
-## 3. 模块路由
+## 2. 模块路由
 
 | 文件                    | 改这些之前读它                                                                                    |
 | ----------------------- | ------------------------------------------------------------------------------------------------- |
-| `agent/workflow.md`     | 任何代码改动的开工与收尾（隔离副本、分支推送、合并 main、主工作区拉取、汇报格式）                 |
 | `agent/architecture.md` | 代码地图、包职责、跨包依赖、新包或新 app                                                          |
 | `agent/cli-runtime.md`  | CLI 启动、turn 循环与队列、重试与中止、provider adapter、prompt 拼装、模型档位                    |
 | `agent/storage.md`      | 配置、会话快照字段、索引、turn lock、任何持久化形态                                               |

@@ -55,7 +55,7 @@ node "$DEMO_REPO/apps/desktop/out/server/index.mjs"
 
 当前 `apps/desktop/vite.server.config.mjs` 将 `src/server/index.js` 构建为 **`out/server/index.mjs`**，不是 `out/server/index.js`。请按实际产物扩展名启动。这个进程使用 Node 和 Electron shim，不启动 Electron。不要用 `npm run dev` 或 `electron-vite preview` 拍摄。
 
-缺少产物时，先由主工作区完成构建：CLI 是 `bun run build`，Node Web 运行时是 `npm --prefix apps/desktop run build:server`；renderer 可在 `apps/desktop` 执行 `npx electron-vite build --ignoreConfigWarning`，这是构建命令，不会启动 Electron。构建完成后重新复制 CLI 到演示 `bin/`。不要用这些构建命令替换上面的 Node 启动命令。
+缺少产物时先在仓库根目录补齐构建：CLI 是 `bun run build`，Node Web 运行时是 `npm --prefix apps/desktop run build:server`；renderer 可在 `apps/desktop` 执行 `npx electron-vite build --ignoreConfigWarning`，这是构建命令，不会启动 Electron。构建完成后重新复制 CLI 到演示 `bin/`。不要用这些构建命令替换上面的 Node 启动命令。
 
 用浏览器打开 `http://127.0.0.1:8899`。`MICA_HOME`、`MICA_DESKTOP_USER_DATA`、`MICA_DESKTOP_PORT`、`MICA_CLI_PATH`、`MICA_LOG_DIR` 必须同时设置，避免使用个人会话、已安装的旧 CLI 或默认端口。显式指定 `MICA_DESKTOP_RENDERER`，避免继承已运行桌面实例的旧资源路径。若端口已被占用，更换端口并核对启动日志中的实际地址，不要连到已有实例。
 
