@@ -6,6 +6,7 @@ import {
   IconChevronRight,
   IconClock,
   IconDots,
+  IconFilter,
   IconFolder,
   IconFolderOpen,
   IconFolders,
@@ -28,6 +29,7 @@ import {
   rowDropPosition
 } from './session-dnd'
 import { groupRecentRows } from './recent-buckets'
+import { SESSION_FILTER_MODES, filterSessions, sessionFilterMode } from './session-filter'
 import { orderRecentDrafts } from './recent-drafts'
 import { planSessionReveal } from './session-reveal'
 import {
@@ -119,6 +121,19 @@ const isIntoDrop = (over) => !!over && over.position !== 'before' && over.positi
 const RECENT_PREVIEW_LIMIT = 6
 
 const RECENT_PAGE_SIZE = 10
+
+// 快捷筛选生效时同样分页：24 小时档在忙起来的一天里也能有几十条，一次性画完既拖慢
+// 首次渲染又让「Show more」的规则和 Recent 分成两套。一次放 30 条根会话。
+const FILTER_PREVIEW_LIMIT = 30
+
+const FILTER_PAGE_SIZE = 30
+
+// 档位解释只出现在悬停提示里：侧栏是 260px，按钮上再带一行说明就把三个词挤成两行。
+const FILTER_HINTS = {
+  all: '全部会话（默认）',
+  '24h': '最近 24 小时更新过的会话',
+  active: '正在运行、或卡在等你做选择的会话'
+}
 
 /** 侧栏里「就是这一条」的闪烁时长：够看清位置，又不至于一直亮着抢注意力。 */
 const REVEAL_FLASH_MS = 1600
@@ -280,7 +295,7 @@ function RowLeading({ state, unreadKey, terminal, draft }) {
     : unread
       ? 'bg-info chat-dot-unread'
       : awaiting
-        ? 'bg-accent chat-dot-unread'
+        ? 'bg-ask chat-dot-unread'
       : running
         ? 'bg-success chat-dot-running'
         : null
@@ -303,7 +318,7 @@ function RowLeading({ state, unreadKey, terminal, draft }) {
         </span>
       ) : awaiting ? (
         <span
-          className="size-2 shrink-0 rounded-full bg-accent chat-dot-unread"
+          className="size-2 shrink-0 rounded-full bg-ask chat-dot-unread"
           title="正在等你做一个选择"
         />
       ) : running ? (
@@ -340,7 +355,7 @@ function RowBadge({ state, scope }) {
   if (!state) return null
   const className =
     state === 'awaiting'
-      ? 'bg-accent chat-dot-unread'
+      ? 'bg-ask chat-dot-unread'
       : state === 'running'
         ? 'bg-success chat-dot-running'
         : 'bg-info chat-dot-unread'
@@ -475,6 +490,12 @@ export function SessionTree({
   // 白占内存，而用户找的多半是最近聊过的东西；范围可调，选择随组件存活（与输入框里的
   // 查询串同一档：都是「这次搜索」的临时状态，不进界面状态）。
   const [rangeId, setRangeId] = useState(DEFAULT_SESSION_SEARCH_RANGE)
+  // 漏斗点开才算「进入了筛选」：没点过的时候侧栏和以前一模一样，不存在任何被藏起来的
+  // 会话（默认档就是「全部」）。收起漏斗等于退出筛选、回到「全部」，不记忆上次那一档——
+  // 记住一个看不见的筛选，下次打开侧栏会以为会话丢了。
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [filterMode, setFilterMode] = useState('all')
+  const [filterLimit, setFilterLimit] = useState(FILTER_PREVIEW_LIMIT)
   const [contentMatches, setContentMatches] = useState(() => new Map())
   const [searchingContent, setSearchingContent] = useState(false)
   const [contentTruncated, setContentTruncated] = useState(false)
@@ -825,6 +846,55 @@ export function SessionTree({
     rowStateOfDraft,
     rowStateOfSession
   ])
+
+  /**
+   * 快捷筛选：三档互斥，生效时整份列表平铺（按 updatedAt 倒序、沿用 Recent 的今天 /
+   * 昨天 / 近七天分桶）。分区与分组不再参与——这一档问的是「最近在动的都有哪些」，
+   * 不是「它们各自归在哪儿」；置顶会话照样会出现，只是行首多一枚图钉说明它的身份。
+   *
+   * 状态判定走 `rowStateOfSession`，与行首圆点同一份实现：圆点亮着却筛不出来，
+   * 是最难解释的那种不一致。
+   */
+  const filtering = filterOpen && sessionFilterMode(filterMode).id !== 'all'
+  const filterCandidates = useMemo(() => {
+    if (!filtering) return []
+    return filterSessions(sessions, filterMode, {
+      now: Date.now(),
+      stateOf: rowStateOfSession
+    }).sort(byUpdatedDesc)
+  }, [filtering, filterMode, sessions, rowStateOfSession])
+  const filterRoots = useMemo(() => sessionRoots(filterCandidates), [filterCandidates])
+  const filterPage = useMemo(
+    () => paginateSessionTrees(filterCandidates, filterRoots, filterLimit),
+    [filterCandidates, filterRoots, filterLimit]
+  )
+  const filterRows = useMemo(
+    () => nestSessions(filterPage.items, { collapsed: collapsedChildren }),
+    [filterPage.items, collapsedChildren]
+  )
+  // 分桶只影响呈现顺序：父子结构不变，桶标题插在根会话之前（与 Recent 同一份实现）。
+  const filterBlocks = useMemo(() => groupRecentRows(filterRows), [filterRows])
+  const filterOverflow = filterPage.remainingRoots
+  const filterPageSize = Math.min(FILTER_PAGE_SIZE, filterOverflow)
+  const filterOverflowState = useMemo(
+    () => mergeRowStates(filterPage.overflow.map(rowStateOfSession)),
+    [filterPage.overflow, rowStateOfSession]
+  )
+
+  const chooseFilter = (id) => {
+    setFilterMode(sessionFilterMode(id).id)
+    setFilterLimit(FILTER_PREVIEW_LIMIT)
+  }
+  // 收起漏斗＝退出筛选：不记忆上次那一档，否则下次打开侧栏会以为会话丢了。
+  const toggleFilter = () => {
+    if (!filterOpen) {
+      setFilterOpen(true)
+      return
+    }
+    setFilterOpen(false)
+    setFilterMode('all')
+    setFilterLimit(FILTER_PREVIEW_LIMIT)
+  }
 
   // 会话 → 所在分组名。搜索结果行的行尾用它说明「这条原来在哪儿」，用户不必回去翻分区。
   const groupNamesBySession = useMemo(() => {
@@ -1184,7 +1254,14 @@ export function SessionTree({
    * 一行会话。`nesting` 来自 `nestSessions`：派生会话多缩进一层、行首带分支标记；
    * 父会话在有子会话时第一列变成折叠箭头，收起后状态由父行代显（与分组同一套规则）。
    */
-  const renderSessionRow = (session, indent, section, groupId = null, nesting = null) => {
+  const renderSessionRow = (
+    session,
+    indent,
+    section,
+    groupId = null,
+    nesting = null,
+    filtered = false
+  ) => {
     const nodeId = openBySession[session.id]
     const active = !!nodeId && activeSessionId === session.id
     const ownState = rowStateOfSession(session)
@@ -1204,8 +1281,9 @@ export function SessionTree({
       section === 'recent'
         ? relativeTimeShort(session.updatedAtMs)
         : activeTimeLabel(session.updatedAtMs)
-    // Recent 行尾显示工作目录名，方便区分同名会话。
-    const cwdLabel = section === 'recent' ? baseName(session.cwd) : ''
+    // Recent 行尾显示工作目录名，方便区分同名会话。筛选结果的平铺行不给：那一列已经是
+    // 时间，再挤一个目录名就把标题截得只剩两三个字。
+    const cwdLabel = !filtered && section === 'recent' ? baseName(session.cwd) : ''
     // 定时循环按会话认领，侧栏没有单独的「定时任务」分区，所以行**在任何分区**都带时钟标记
     // 与行尾进度——这是「它挂着定时任务」的唯一提示。`running` 只用来区分「这一轮正在跑」
     // 与「在等下一次触发」，两种状态都点亮图标。
@@ -1231,7 +1309,7 @@ export function SessionTree({
                 ? `${session.title || session.id} — ${session.cwd}`
                 : session.title || session.id
           }
-          draggable={!editingThis}
+          draggable={!editingThis && !filtered}
           // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
           {...longPressHandlers((event) =>
             openMenu(event, {
@@ -1239,19 +1317,22 @@ export function SessionTree({
               items: menuItemsFor(session)
             })
           )}
-          onDragStart={(event) => {
-            startDrag(
-              event,
-              'session',
-              section,
-              session.id,
-              groupId,
-              session.parentSessionId ?? null
-            )
-          }}
-          onDragEnd={clearDrag}
-          onDragOver={hoverRow(section, session.id, groupId)}
-          onDrop={dropRow(section, session.id, groupId)}
+          onDragStart={
+            filtered
+              ? undefined
+              : (event) =>
+                  startDrag(
+                    event,
+                    'session',
+                    section,
+                    session.id,
+                    groupId,
+                    session.parentSessionId ?? null
+                  )
+          }
+          onDragEnd={filtered ? undefined : clearDrag}
+          onDragOver={filtered ? undefined : hoverRow(section, session.id, groupId)}
+          onDrop={filtered ? undefined : dropRow(section, session.id, groupId)}
           onClick={() => onOpenSession(session)}
           onDoubleClick={() => setEditing({ kind: 'session', id: session.id })}
           onContextMenu={(event) =>
@@ -1321,6 +1402,13 @@ export function SessionTree({
             />
           ) : (
             <span className="flex min-w-0 flex-1 items-center gap-1.5">
+              {/* 平铺的筛选结果里没有 Pinned 分区，置顶会话靠这枚图钉说明自己的身份；
+                  分区视图里它本来就在 Pinned 下面，不再重复画。 */}
+              {filtered && !!pins[session.id] && (
+                <span className="shrink-0 text-fg-dim" title="已置顶">
+                  <IconPin size={12} stroke={2} />
+                </span>
+              )}
               {loop && (
                 <span className="shrink-0 text-warn">
                   <IconClock size={12} stroke={2} />
@@ -1810,7 +1898,52 @@ export function SessionTree({
                 <IconX size={14} />
               </button>
             )}
+            {/* 筛选入口：不点它的时候侧栏和以前一模一样（没有任何会话被藏起来）。
+                激活态的按钮一直亮着，因为筛着的时候列表是平铺的，得让用户看得出
+                「我现在看的是一份子集」。 */}
+            <button
+              type="button"
+              title={filterOpen ? '收起筛选' : '筛选会话'}
+              aria-label={filterOpen ? '收起筛选' : '筛选会话'}
+              aria-pressed={filterOpen}
+              className={`grid size-5 shrink-0 place-items-center rounded transition-colors ${
+                filterOpen
+                  ? 'bg-accent/30 text-fg-max hover:bg-accent/45'
+                  : 'text-fg-muted hover:bg-overlay-strong hover:text-fg-max'
+              }`}
+              onClick={() => {
+                // 筛选与搜索是两条平行入口：搜索接管列表时先关掉搜索，否则筛出来的
+                // 结果会被搜索态挡住，点了像没反应。
+                if (!filterOpen && query) setQuery('')
+                toggleFilter()
+              }}
+            >
+              <IconFilter size={14} />
+            </button>
           </div>
+          {/* 三档互斥，默认「全部」：它不筛任何东西，列表照旧是 Pinned / Projects /
+              Recent。选另外两档时列表整体变平铺（见下面的 filterBlocks 分支）。
+              搜索接管列表时不显示这一行——两个入口同时在屏上会分不清谁在过滤谁。 */}
+          {filterOpen && !searching && (
+            <div role="group" aria-label="会话筛选" className="mt-1 flex items-center gap-1">
+              {SESSION_FILTER_MODES.map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  aria-pressed={filterMode === mode.id}
+                  title={FILTER_HINTS[mode.id]}
+                  className={`h-6 flex-1 rounded-md text-[11.5px] font-medium transition-colors ${
+                    filterMode === mode.id
+                      ? 'bg-active text-fg-max ring-1 ring-line-strong'
+                      : 'bg-overlay text-fg-soft hover:bg-overlay-strong hover:text-fg-max'
+                  }`}
+                  onClick={() => chooseFilter(mode.id)}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+          )}
           {searching && (
             <div
               role="group"
@@ -1871,6 +2004,58 @@ export function SessionTree({
                   </button>
                 )}
               </p>
+            )}
+          </div>
+        ) : filtering ? (
+          // 筛选生效：整份列表平铺。分区与分组在这一屏里没有意义——用户问的是
+          // 「最近在动的都有哪些」，不是「它们各自归在哪儿」。
+          <div className="flex flex-col gap-px">
+            <ul role="tree" className="flex flex-col gap-px">
+              {filterBlocks.length ? (
+                filterBlocks.map((block) =>
+                  block.kind === 'label' ? (
+                    <li
+                      key={`filter-bucket-${block.bucket}`}
+                      className="mt-1 flex h-5 items-center text-[11px] font-medium tracking-wide text-fg-dim"
+                      style={{ paddingLeft: rowIndent(0) }}
+                    >
+                      {block.label}
+                    </li>
+                  ) : (
+                    renderSessionRow(block.row.session, 0, 'recent', null, block.row, true)
+                  )
+                )
+              ) : (
+                <li>
+                  <p className="py-1 pr-2 text-xs text-fg-dim" style={{ paddingLeft: NAME_OFFSET }}>
+                    没有符合条件的会话。
+                    <button
+                      type="button"
+                      className="ml-1 text-fg-soft underline-offset-2 hover:text-fg-max hover:underline"
+                      onClick={() => chooseFilter('all')}
+                    >
+                      看全部
+                    </button>
+                  </p>
+                </li>
+              )}
+            </ul>
+            {filterOverflow > 0 && (
+              <button
+                type="button"
+                className={`${rowClass} w-full text-fg-muted hover:text-fg-strong`}
+                style={{ paddingLeft: rowIndent(0) }}
+                onClick={() => setFilterLimit((prev) => prev + FILTER_PAGE_SIZE)}
+              >
+                <Slot />
+                <Slot>
+                  <IconDots size={14} />
+                  <RowBadge state={filterOverflowState} scope="筛选结果" />
+                </Slot>
+                <span className="min-w-0 flex-1 truncate text-left text-[13px]">
+                  Show {filterPageSize} more
+                </span>
+              </button>
             )}
           </div>
         ) : (

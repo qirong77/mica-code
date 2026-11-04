@@ -9,7 +9,7 @@ const providerExample = `{
       "api_base": "https://api.deepseek.com",
       "api_key": "YOUR_API_KEY",
       "protocol": "openai_chat_completions",
-      "get_model_url": "https://api.deepseek.com/models"
+      "models": ["deepseek-chat", "deepseek-reasoner"]
     }
   ],
   "mcpServers": {}
@@ -21,7 +21,7 @@ const responsesExample = `{
       "api_base": "https://api.openai.com/v1",
       "api_key": "YOUR_API_KEY",
       "protocol": "openai_responses",
-      "get_model_url": "https://api.openai.com/v1/models"
+      "models": ["gpt-5.5"]
     }
   ],
   "mcpServers": {}
@@ -138,17 +138,9 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
         </tr>
         <tr>
           <td>
-            <code>get_model_url</code>
-          </td>
-          <td>
-            可选的模型列表接口，返回 OpenAI <code>/models</code> 格式。只为配置了该字段的 provider 动态加载模型。
-          </td>
-        </tr>
-        <tr>
-          <td>
             <code>models</code>
           </td>
-          <td>可选的模型 ID 字符串数组，适用于固定模型列表。</td>
+          <td>该服务商提供的模型 ID 字符串数组，至少填一个；模型列表全部手填，没有自动拉取。</td>
         </tr>
         <tr>
           <td>
@@ -261,7 +253,7 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
   <h2>排查连接问题</h2>
   <ul>
     <li>
-      模型列表为空：检查 <code>get_model_url</code> 是否可达、是否返回预期格式；也可以改用静态 <code>models</code>。
+      模型列表为空：在配置页的「服务商」里手动填入至少一个模型名，或直接写 <code>providers[].models</code>；保存后可用「测试连接」先确认一次。
     </li>
     <li>认证失败：检查当前 provider 的 key 与 API 地址，环境变量不会覆盖已有的带凭证配置。</li>
     <li>

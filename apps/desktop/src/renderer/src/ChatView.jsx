@@ -36,7 +36,7 @@ import {
   IconQuote,
   IconSend,
   IconShare,
-  IconSquare,
+  IconSquareFilled,
   IconStopwatch,
   IconTerminal,
   IconTrash,
@@ -58,7 +58,7 @@ import { Button, PluginIcon, QrCode, SessionDetailView, resolvePluginIcon } from
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
-import { collapseCompactToolNotes } from './chat/compact-notes'
+import { collapseCompactToolNotes, compactToolDetailLines } from './chat/compact-notes'
 import { mergeCompactCheckpoints } from './chat/compact-checkpoint'
 import { findPresetForSearch } from './chat-find-preset'
 import { splitMarkdownChunks } from './chat-markdown-chunks'
@@ -2639,7 +2639,12 @@ function RunElapsedLabel({ runStartedAt }) {
  */
 function CompactNoteRow({ message }) {
   const anchorRef = useRef(null)
-  const { anchorProps, tooltip } = useChatTooltip({ text: message.detail || '', anchorRef })
+  const detail = useMemo(() => compactToolDetailLines(message.detail), [message.detail])
+  const { anchorProps, tooltip } = useChatTooltip({
+    text: detail,
+    label: '压缩掉的工具调用',
+    anchorRef
+  })
   return (
     <>
       <div ref={anchorRef} className="chat-notice chat-notice-compact" {...anchorProps}>
@@ -7847,7 +7852,7 @@ export function ChatView({
                     {stopping ? (
                       <IconLoader2 size={13} className="animate-spin" />
                     ) : (
-                      <IconSquare size={12} />
+                      <IconSquareFilled size={12} />
                     )}
                   </button>
                 </>

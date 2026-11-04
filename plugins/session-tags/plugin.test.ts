@@ -25,7 +25,7 @@ function harness(raw?: string) {
   const messages: string[] = [];
   const reports: Array<{ level: string }> = [];
   let command: MicaCommand;
-  setup({
+  const context = {
     pluginId: 'session-tags',
     paths: { config: home },
     session: { describe: () => ({ id: 'session-1' }) },
@@ -39,35 +39,73 @@ function harness(raw?: string) {
     health: { report: (value: { level: string }) => reports.push(value) },
     logger: { info() {}, warn() {} },
     onDispose() {},
-  } as unknown as PluginContext);
+  };
+  setup(context as unknown as PluginContext);
   return {
     file,
     messages,
     reports,
-    run: (args: string) => command.handler({}, args),
+    context,
+    run: (args: string) => command!.handler({}, args),
     read: () => JSON.parse(readFileSync(file, 'utf8')),
   };
 }
 
 describe('session tags persistence', () => {
+  it('第一次装上就有一个「待 review」', () => {
+    const fixture = harness();
+    expect(fixture.read().options).toHaveLength(1);
+    expect(fixture.read().options[0]).toMatchObject({ label: '待 review' });
+  });
+
   it('refuses concurrent plugin updates and retries from the current store after release', async () => {
     const fixture = harness();
     const release = acquireProcessLock(`${fixture.file}.lock`);
     expect(release).not.toBeNull();
     try {
-      expect(await fixture.run('add red')).toMatchObject({ ok: false });
+      expect(await fixture.run('add 待 review')).toMatchObject({ ok: false });
       expect(fixture.read().assignments).toEqual({});
     } finally {
       release?.();
     }
-    expect(await fixture.run('add red')).toMatchObject({ ok: true });
-    expect(fixture.read().assignments['session-1']).toEqual(['red']);
+    expect(await fixture.run('add 待 review')).toMatchObject({ ok: true });
+    expect(fixture.read().assignments['session-1']).toEqual(['tag-1']);
   });
 
-  it('补齐缺失色槽时保留已有会话标签归属', () => {
-    const fixture = harness(JSON.stringify({ version: 1, options: [], assignments: { 'session-1': ['red', 'blue'] } }));
-    expect(fixture.read().options).toHaveLength(7);
-    expect(fixture.read().assignments).toEqual({ 'session-1': ['red', 'blue'] });
+  it('旧形态的固定色槽在启动时被清掉，用过的保留', () => {
+    const fixture = harness(
+      JSON.stringify({
+        version: 1,
+        name: 'Session Tags',
+        options: [
+          { id: 'red', label: 'Red', color: '#FF3B30' },
+          { id: 'blue', label: 'Blue', color: '#007AFF' },
+        ],
+        assignments: { 'session-1': ['blue'] },
+      }),
+    );
+    expect(fixture.read().options.map((option: { id: string }) => option.id)).toEqual(['blue']);
+    expect(fixture.read().assignments).toEqual({ 'session-1': ['blue'] });
+  });
+
+  it('标签被删空的文件不会被重新预置', () => {
+    const fixture = harness(JSON.stringify({ version: 1, name: 'Session Tags', options: [], assignments: {} }));
+    expect(fixture.read().options).toEqual([]);
+  });
+
+  it('升级上来的那台机器（只剩没用过的旧色槽）落下的是「待 review」', () => {
+    const fixture = harness(
+      JSON.stringify({
+        version: 1,
+        name: 'Session Tags',
+        options: [
+          { id: 'red', label: 'Red', color: '#FF3B30' },
+          { id: 'orange', label: 'Orange', color: '#FF9500' },
+        ],
+        assignments: {},
+      }),
+    );
+    expect(fixture.read().options.map((option: { label: string }) => option.label)).toEqual(['待 review']);
   });
 
   it('写入失败准确返回失败，不显示已打标，修复后可重试', async () => {
@@ -76,31 +114,50 @@ describe('session tags persistence', () => {
     const write = vi.spyOn(annotations, 'writeSessionAnnotations').mockImplementation(() => {
       throw new Error('mock disk full');
     });
-    expect(await fixture.run('add red')).toMatchObject({ ok: false });
+    expect(await fixture.run('add 待 review')).toMatchObject({ ok: false });
     expect(fixture.messages.at(-1)).toContain('mock disk full');
     expect(fixture.messages.at(-1)).not.toContain('已打标');
     expect(fixture.read()).toEqual(original);
     write.mockRestore();
-    expect(await fixture.run('add red')).toMatchObject({ ok: true });
-    expect(fixture.read().assignments['session-1']).toEqual(['red']);
+    expect(await fixture.run('add 待 review')).toMatchObject({ ok: true });
+    expect(fixture.read().assignments['session-1']).toEqual(['tag-1']);
     expect(fixture.reports.at(-1)?.level).toBe('ok');
   });
 
   it('损坏文件不会被初始化覆盖，并且只上报一次健康故障', async () => {
     const fixture = harness('{broken');
-    expect(await fixture.run('add red')).toMatchObject({ ok: false });
+    expect(await fixture.run('add 待 review')).toMatchObject({ ok: false });
     expect(readFileSync(fixture.file, 'utf8')).toBe('{broken');
     expect(fixture.reports).toHaveLength(1);
   });
 
-  it('重命名后的多词标签名能够打标和去标', async () => {
+  it('含空格与中文的标签名能打标、去标', async () => {
     const fixture = harness();
-    await fixture.run('rename red Needs Review');
-    await fixture.run('add Needs Review blue');
-    expect(fixture.read().assignments['session-1']).toEqual(['red', 'blue']);
+    // 标签的定义在桌面端页面里做，这里直接写文件模拟「用户已经加过」
+    const data = fixture.read();
+    data.options.push({ id: 'tag-2', label: 'Needs Review', color: '#007AFF' });
+    data.options.push({ id: 'tag-3', label: '待办', color: '#FF3B30' });
+    writeFileSync(fixture.file, JSON.stringify(data));
+
+    await fixture.run('add Needs Review 待办');
+    expect(fixture.read().assignments['session-1']).toEqual(['tag-2', 'tag-3']);
     await fixture.run('remove Needs Review');
-    expect(fixture.read().assignments['session-1']).toEqual(['blue']);
-    await fixture.run('rename Needs Review Urgent Work');
-    expect(fixture.read().options[0].label).toBe('Urgent Work');
+    expect(fixture.read().assignments['session-1']).toEqual(['tag-3']);
+    expect(fixture.messages.at(-1)).toContain('待办');
+  });
+
+  it('认不出的标签名如实说出认不出，并列出可用的', async () => {
+    const fixture = harness();
+    await fixture.run('add nope');
+    expect(fixture.read().assignments).toEqual({});
+    expect(fixture.messages.at(-1)).toContain('认不出的标签：nope');
+    expect(fixture.messages.at(-1)).toContain('待 review');
+  });
+
+  it('/tags 只保留打标相关动词，改名之类的会指回页面', async () => {
+    const fixture = harness();
+    await fixture.run('rename red 阻塞');
+    expect(fixture.read().options[0]).toMatchObject({ id: 'tag-1', label: '待 review' });
+    expect(fixture.messages.at(-1)).toContain('用法：/tags');
   });
 });

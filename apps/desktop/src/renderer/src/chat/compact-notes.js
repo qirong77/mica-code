@@ -101,6 +101,33 @@ export function summarizeCompactToolNotes(notes) {
 }
 
 /**
+ * 悬停浮层里展示的明细：一个被清掉的调用一行。
+ *
+ * `detail` 存的是原样拼接的说明（`[tool calls cleared during compact: …]`），那是给
+ * 模型看的口径；直接摆进浮层就是一坨带方括号、逗号连成一片的长串。这里只去掉外壳
+ * 与 `+N` 尾巴，参数照旧保留——悬停就是为了看「到底动了哪些路径」。
+ */
+export function compactToolDetailLines(detail) {
+  const lines = []
+  for (const raw of String(detail ?? '').split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    const note = parseCompactToolNote(line)
+    if (!note) {
+      lines.push(line)
+      continue
+    }
+    const body = line.slice(COMPACT_TOOL_NOTE_PREFIX.length, -1).trim()
+    for (const entry of noteEntries(body)) {
+      const rest = /^\+(\d+)$/.exec(entry)
+      if (rest) lines.push(`另 ${Number(rest[1]) || 0} 次未列出`)
+      else lines.push(entry)
+    }
+  }
+  return lines.join('\n')
+}
+
+/**
  * 历史消息 → 对话消息：连续的折叠说明并成一条 `compactNote`。
  *
  * 只在连续的说明之间合并：中间隔着用户消息或助手正文时各自成行，顺序不变。

@@ -79,6 +79,18 @@ export function createPluginHostApi(pluginId, session = null) {
     /** 打开另一个运行时：外壳里开新窗口，浏览器里开新标签页。 */
     open: (url) => openRuntimeTarget(url),
     /**
+     * 这个插件自己画在会话行上的标记（`session-annotations.json` 的 `options`）。
+     *
+     * 宿主不认识「标签」：它只知道某个插件声明了一组「id + 名字 + 颜色」，页面要维护这组
+     * 东西（新增、改名、换色、删除）时整份写回来。`counts` 是每个项挂在多少个会话上，
+     * 删之前得知道自己会摘掉多少。写回是整份替换，宿主管互斥与归一化，也会顺手把删掉的
+     * 项从会话归属里摘掉。
+     */
+    annotations: {
+      read: () => host.readAnnotations(pluginId),
+      writeOptions: (options) => host.writeAnnotations(pluginId, options)
+    },
+    /**
      * 执行清单里声明过的一个动作（`plugin.json` 的 `actions[].key`）。
      *
      * 结果是 `{ ok, message?, link?, error? }`：失败不抛异常，卡片上一行红字比一个没人接

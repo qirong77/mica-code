@@ -110,6 +110,14 @@ const SESSION_POLL_MS = 10000
  */
 const GIT_COUNTS_TTL_MS = 20000
 
+/**
+ * 「刚刚才读过这个目录」的窗口：这段时间内同一个目录再来一次刷新就是白跑。
+ *
+ * 最常撞上的就是切会话——同一仓库下的几条会话来回切，目录根本没变，分支和徽标都不该
+ * 变（也不该先清空再长回来）。比轮询间隔（10s）短：轮询该跑的时候不能被它吞掉。
+ */
+const GIT_REUSE_MS = 5000
+
 /** 顶栏浏览器/终端图标闪一下的时长：与 assets/app.css 的 `control-icon-flash` 动画一致 */
 const CONTROL_FLASH_MS = 720
 
@@ -699,6 +707,8 @@ export default function App() {
   const gitRef = useLatest(git)
   const gitRequest = useRef(0)
   const gitPollBusy = useRef(false)
+  // 上一次真的读到这个目录的时刻：切会话时靠它判断「手上的这份是不是还能用」。
+  const gitAt = useRef({ cwd: null, at: 0 })
   // 上一次拿到 counts 的目录与时刻：非文件视图按 TTL 决定这一轮要不要再取。
   const gitCountsAt = useRef({ cwd: null, at: 0 })
   const [sessions, setSessions] = useState([])
@@ -719,6 +729,14 @@ export default function App() {
         : next
     )
   }, [])
+  // 只重读标记：插件在自己的页面里改了色板（新增 / 改名 / 换色 / 删标签）走这里，
+  // 不必跟着把整份会话列表重新序列化一遍。
+  const refreshAnnotations = useCallback(() => {
+    window.mica.stats
+      .listAnnotations()
+      .then((result) => applyAnnotations(result?.providers))
+      .catch((error) => console.error('load session annotations failed', error))
+  }, [applyAnnotations])
   const [projects, setProjects] = useState({ version: 1, groups: [], assignments: {} })
   const projectsRef = useLatest(projects)
   const sessionsRef = useLatest(sessions)
@@ -784,11 +802,8 @@ export default function App() {
       // 失败也算「加载过了」：地址栏里的会话照旧按 id 打开，比一直等着强。
       .finally(() => setSessionsLoaded(true))
     // 插件标记由插件自己写盘（CLI 里的 /tags、模型调用工具都会改），所以每次顺带重读。
-    window.mica.stats
-      .listAnnotations()
-      .then((result) => applyAnnotations(result?.providers))
-      .catch((error) => console.error('load session annotations failed', error))
-  }, [applySessions, applyAnnotations])
+    refreshAnnotations()
+  }, [applySessions, refreshAnnotations])
 
   // 点菜单里的标记项：写盘的是插件目录下的数据文件（host 代写，见 host/session-annotations.js），
   // 返回的整份标记表直接替换本地状态，省一次重读。
@@ -1181,18 +1196,19 @@ export default function App() {
       if (payload?.partial) return
       refreshSessions()
     })
+    const offAnnotations = window.mica.stats.onAnnotationsChanged?.(() => refreshAnnotations())
     return () => {
       clearInterval(timer)
       window.removeEventListener('focus', onVisibility)
       document.removeEventListener('visibilitychange', onVisibility)
       offStats?.()
+      offAnnotations?.()
     }
-  }, [refreshPins, refreshProjects, refreshLoops, refreshSessions, refreshSort])
+  }, [refreshPins, refreshProjects, refreshLoops, refreshAnnotations, refreshSessions, refreshSort])
 
   const refreshGit = useCallback(
     async ({ quiet = false, cwd: requestedCwd = null, forceCounts = false } = {}) => {
       const id = activeRef.current
-      const request = ++gitRequest.current
       if (!id) {
         setGit({
           terminalId: null,
@@ -1205,9 +1221,8 @@ export default function App() {
         })
         return
       }
-      if (!quiet) setGit((current) => ({ ...current, loading: true }))
       let cwd = requestedCwd || terminalCwd(id) || (await terminalRef.current?.getCwd(id))
-      if (request !== gitRequest.current || id !== activeRef.current) return
+      if (id !== activeRef.current) return
       if (!cwd) {
         setGit({
           terminalId: null,
@@ -1220,6 +1235,27 @@ export default function App() {
         })
         return
       }
+      // 换会话但目录没变（同一仓库下几条会话来回切）：分支与徽标都是**目录**的属性，
+      // 刚才读过就直接沿用，只把归属换到新会话上。这里既省掉两次 IPC，也避免把徽标
+      // 清空再等它长回来——那是「右上角数字半天不出来」最常被看到的一刻。
+      const snapshot = gitRef.current
+      const read = gitAt.current
+      if (
+        !forceCounts &&
+        snapshot.cwd === cwd &&
+        read.cwd === cwd &&
+        Date.now() - read.at < GIT_REUSE_MS
+      ) {
+        // 这次不做读取，但要让还在飞的那次（上一个会话的目录）作废：否则它一会儿
+        // 回来时「会话 id 仍是当前这个」，会把界面的路径与分支写成上一个目录的。
+        gitRequest.current += 1
+        if (snapshot.terminalId !== id) {
+          setGit((state) => (state.cwd === cwd ? { ...state, terminalId: id } : state))
+        }
+        return
+      }
+      const request = ++gitRequest.current
+      if (!quiet) setGit((state) => ({ ...state, loading: true }))
       setGit((current) =>
         current.terminalId === id && current.cwd === cwd
           ? current
@@ -1274,7 +1310,10 @@ export default function App() {
         if (counts) gitCountsAt.current = { cwd: counts.cwd, at: Date.now() }
         if (request === gitRequest.current && id === activeRef.current) {
           const previous = gitRef.current
-          const sameDirectory = previous.terminalId === id && previous.cwd === cwd
+          // 「同一目录」只看路径：换了会话但还在同一个仓库时，徽标上的数字仍然成立，
+          // 不能因为 terminalId 变了就清空（那样每次切会话都要空一阵）。
+          const sameDirectory = previous.cwd === cwd
+          gitAt.current = { cwd, at: Date.now() }
           setGit({
             terminalId: id,
             cwd,
@@ -1358,9 +1397,9 @@ export default function App() {
     }
     wasRunningRef.current = activeRunning
   }, [activeRunning, activeRef, refreshGit, terminalCwd])
-  // 仓库自身的变化（提交 / 切分支 / 暂存）由宿主里的 `.git` 监听推过来：底栏的分支名
-  // 与顶栏徽标立刻跟上，不用等上面那一轮 10s。Mica 之外的进程只改工作区文件时
-  // `.git` 不动，那种情形仍归轮询。
+  // 仓库的变化由宿主推过来（见 host/git-watch.js）：`.git` 那一路管提交 / 切分支 / 暂存，
+  // 工作区那一路管「有文件被改了」（agent、终端、别的编辑器）。两者都是 `git:changed`，
+  // 底栏分支与顶栏徽标立刻跟上，不用等上面那一轮 10s。
   useEffect(() => {
     const off = window.mica.git?.onChanged?.((payload) => {
       const root = payload?.root
@@ -1368,10 +1407,23 @@ export default function App() {
       if (!root || (known && root !== known)) return
       // 徽标那 20s TTL 是给轮询用的：仓库真变了就该重算，别拿旧数字顶。
       gitCountsAt.current = { cwd: null, at: 0 }
-      void refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current) })
+      // forceCounts 同时绕过「刚读过就不重复读」那条捷径：推送说明确实变了。
+      void refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current), forceCounts: true })
     })
     return () => off?.()
   }, [activeRef, refreshGit, terminalCwd])
+  // 主窗口自己订阅当前会话的仓库。`git:watch` 以前只有编辑器页在订阅，聊天视图下没人
+  // 打开编辑器时，`.git` 变了不会有任何推送，提交 / 暂存只能等轮询。宿主按仓库引用计数，
+  // 和编辑器页看同一个仓库时共用同一份 watcher（不会多开一条）。
+  const gitWatchRoot =
+    git.terminalId && git.terminalId === activeId ? git.status?.root || null : null
+  useEffect(() => {
+    if (!gitWatchRoot) return undefined
+    void window.mica.git?.watch?.(gitWatchRoot)?.catch?.(() => {})
+    return () => {
+      void window.mica.git?.unwatch?.(gitWatchRoot)?.catch?.(() => {})
+    }
+  }, [gitWatchRoot])
 
   const askText = useCallback(
     (title, initial = '', hint = '') =>

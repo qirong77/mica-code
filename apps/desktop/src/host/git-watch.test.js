@@ -7,7 +7,9 @@ import {
   disposeGitWatchers,
   gitDirectoryOf,
   handleGitWatchEvent,
+  handleWorktreeEvent,
   isGitStatePath,
+  isWorktreePath,
   setGitWatchBroadcaster,
   unwatchRepository,
   watchRepository
@@ -93,6 +95,34 @@ describe('gitDirectoryOf', () => {
   })
 })
 
+describe('isWorktreePath', () => {
+  it('accepts ordinary source files', () => {
+    for (const name of ['src/app.js', 'README.md', 'a.txt', 'packages/x/y.ts', 'bun.lock']) {
+      expect(isWorktreePath(name)).toBe(true)
+    }
+  })
+
+  it('ignores build output, dependencies and editor junk', () => {
+    for (const name of [
+      'node_modules/react/index.js',
+      'apps/desktop/out/main/index.js',
+      'dist/index.js',
+      'temp/probe.mjs',
+      '.git/index',
+      '.DS_Store',
+      'src/app.js~',
+      'src/.app.js.swp'
+    ]) {
+      expect(isWorktreePath(name)).toBe(false)
+    }
+  })
+
+  it('treats an unknown filename as relevant', () => {
+    expect(isWorktreePath('')).toBe(true)
+    expect(isWorktreePath(null)).toBe(true)
+  })
+})
+
 describe('watchRepository', () => {
   it('reports the repository root and skips directories without one', () => {
     const dir = repo()
@@ -157,5 +187,39 @@ describe('watchRepository', () => {
     // 冷却过去之后的新变化照常推
     handleGitWatchEvent(dir, 'refs/heads/main')
     await waitForCount(events, 3)
+  })
+
+  it('broadcasts worktree writes but not the ignored ones', async () => {
+    const dir = repo()
+    const events = []
+    setGitWatchBroadcaster((channel, payload) => events.push({ channel, payload }))
+    watchRepository(dir)
+
+    // 改文件不写 `.git`，`.git` 那一路永远等不到：这条推送是徽标跟得上的唯一来源。
+    expect(handleWorktreeEvent(dir, 'a.txt')).toBe(true)
+    // 一次保存会连着来好几条事件，只算一次。
+    expect(handleWorktreeEvent(dir, 'a.txt')).toBe(false)
+    await waitForCount(events, 1)
+    expect(events).toEqual([{ channel: 'git:changed', payload: { root: dir } }])
+
+    // 依赖 / 构建产物 / `.git` 自己都不该让页面重扫。
+    expect(handleWorktreeEvent(dir, 'node_modules/react/index.js')).toBe(false)
+    expect(handleWorktreeEvent(dir, 'out/renderer/index.js')).toBe(false)
+    expect(handleWorktreeEvent(dir, '.git/index')).toBe(false)
+  })
+
+  it('keeps the worktree cadence bounded by the cooldown', async () => {
+    const dir = repo()
+    const events = []
+    setGitWatchBroadcaster((channel, payload) => events.push({ channel, payload }))
+    watchRepository(dir)
+    handleWorktreeEvent(dir, 'a.txt')
+    await waitForCount(events, 1)
+    // 冷却期内连续写文件：不立刻再推（否则每次保存都要把整棵工作区扫一遍）。
+    handleWorktreeEvent(dir, 'a.txt')
+    await sleep(800)
+    expect(events).toHaveLength(1)
+    // 但不会丢：冷却结束补一次。
+    await waitForCount(events, 2, 4000)
   })
 })

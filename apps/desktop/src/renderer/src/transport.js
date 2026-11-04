@@ -30,6 +30,7 @@ const EVENT_CHANNELS = [
   'terminal:changed',
   'browser:activity',
   'terminal:activity',
+  'annotations:changed',
   'app:window-state'
 ]
 
@@ -445,6 +446,11 @@ function createWebApi(env) {
       writeData: (pluginId, value, options) =>
         invoke('plugin-host:write-data', { pluginId, value, ...options }),
       runAction: (pluginId, action) => invoke('plugin-host:run-action', { pluginId, action }),
+      // 插件给自己在会话行上画的标记（`session-annotations.json` 的 options）：标签的颜色
+      // 与名字由用户在页面里定义，页面没有文件系统，所以整份读写都交给运行时。
+      readAnnotations: (pluginId) => invoke('plugin-host:read-annotations', { pluginId }),
+      writeAnnotations: (pluginId, options) =>
+        invoke('plugin-host:write-annotations', { pluginId, options }),
       // 运行时的远程访问策略（要不要口令、口令是什么、别人从哪个地址进来）
       access: () => invoke('plugin-host:access-get'),
       setAccess: (patch) => invoke('plugin-host:access-set', patch ?? {})
@@ -558,6 +564,9 @@ function createWebApi(env) {
       listAnnotations: () => invoke('stats:list-annotations'),
       setAnnotation: ({ pluginId, sessionId, optionId, on }) =>
         invoke('stats:set-annotation', { pluginId, sessionId, optionId, on }),
+      // 插件在自己的页面里改了色板（新增 / 改名 / 换色 / 删标签）：只重读标记，不必
+      // 跟着把整份会话列表也重序列化一遍。
+      onAnnotationsChanged: (callback) => subscribe('annotations:changed', callback),
       // 会话内容搜索：只在渲染层已经拿到的元数据之外的部分（对话正文）走这一趟，
       // 时间范围把要读的会话限制在最近若干天（见 host/stats.js 的 searchSessions）。
       searchSessions: (query, sinceMs = 0) => invoke('stats:search-sessions', { query, sinceMs }),

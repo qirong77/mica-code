@@ -34,19 +34,6 @@ export type ResolvedRuntimeOverride = AgentRuntimeConfigOverride & {
 };
 
 export async function listRuntimeModelIds(): Promise<string[]> {
-  const initial = micaConfig.get();
-  await Promise.all(
-    initial.providers.map(async (provider) => {
-      if (!provider.get_model_url || provider.models?.length) return;
-      try {
-        await micaConfig.loadProviderModels(provider.id);
-      } catch {
-        // Dynamic discovery is best-effort. Multica supports manual model entry
-        // when a runtime reports an empty or partial catalog.
-      }
-    }),
-  );
-
   const config = micaConfig.get();
   const ids: string[] = [];
   const seen = new Set<string>();

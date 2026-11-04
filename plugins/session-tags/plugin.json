@@ -2,8 +2,8 @@
   "id": "session-tags",
   "name": "Session Tags",
   "icon": "tags",
-  "version": "1.0.0",
-  "description": "照 macOS Finder 的彩色圆点给会话打标签：7 个固定色槽、可改名，跨 Pinned / Projects / Recent 检索，不改变会话归属。",
+  "version": "2.0.0",
+  "description": "给会话打自定义标签：名字和颜色都由你定，在 Tags 页面里维护，会话行右键打标。",
   "author": "Mica Code",
   "main": "index.ts",
   "assets": ["README.md"],
@@ -11,5 +11,9 @@
   "mica": {
     "apiVersion": 1
   },
-  "requires": ["commands", "session", "ui"]
+  "requires": ["commands", "session", "ui"],
+  "desktop": {
+    "entry": { "label": "Tags" },
+    "page": { "title": "标签" }
+  }
 }

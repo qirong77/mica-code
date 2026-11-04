@@ -31,7 +31,7 @@ printf 'Demo root: %s\nWorkspace: %s\n' "$DEMO_ROOT" "$DEMO_WORKSPACE"
 
 配置字段已经对照 `packages/mica-config/types.ts`：provider 是 `demo`，模型是 `mica-demo`，协议是 `openai_responses`，API 为 `http://127.0.0.1:8898/v1`，key 为明确的假值。模型和推理档位选择放在 `home/config.json` 的 `defaultModel: { "provider": "demo", "model": "mica-demo", "effort": "medium" }` 中，provider 用 `effortLevels` 声明 `low/medium/high`，默认选择 `medium`。不要向配置添加未经支持的 `reasoning_effort` 或 `autoDetect` 开关。
 
-自动探测通过明确的数据控制：provider 固定 `models`，不设置动态模型列表的 `get_model_url`，`mcpServers` 为空，并写入当天的本地 `home/cache/models-dev.json`，避免元数据联网刷新。该缓存有效期为 24 小时，跨天应重新准备。`session-rename`、`memory`、`session-compact` 和 `mobile-relay` 在独立 `plugins-state.json` 中停用，避免额外模型请求或后台行为；`todo` 保持启用。
+自动探测通过明确的数据控制：provider 固定 `models`，`mcpServers` 为空，并写入当天的本地 `home/cache/models-dev.json`，避免元数据联网刷新。该缓存有效期为 24 小时，跨天应重新准备。`session-rename`、`memory`、`session-compact` 和 `mobile-relay` 在独立 `plugins-state.json` 中停用，避免额外模型请求或后台行为；`todo` 保持启用。
 
 ## 2. 启动模拟服务与 Node Web 运行时
 

@@ -4437,6 +4437,30 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     border-top: 1px solid var(--line-soft);
   }
 
+  /* 服务商的「测试连接」：按钮后面跟一行结论，成功 / 失败只换颜色 */
+  .provider-test {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .provider-test-result {
+    min-width: 0;
+    color: var(--text-soft);
+    font-size: var(--text-micro);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+
+  .provider-test-result.is-ok {
+    color: var(--green);
+  }
+
+  .provider-test-result.is-error {
+    color: var(--red);
+  }
+
   /* 输入框右侧叠一个图标按钮（API Key 的明文开关）：外框高度由 text-input 决定 */
   .config-input-with-action {
     position: relative;

@@ -7,12 +7,93 @@
  * browser-manager.js 的 chrome 消息处理）—— 这样不必为了一个只读工具条给整个应用加
  * preload。所有来自主进程的数据都只用 textContent 落地，不做 innerHTML 拼接。
  *
- * 配色取应用主题（apps/desktop/src/renderer/assets/app.css 的 Darcula 令牌），改主题时
- * 这里要一起改：panel #3c3f41 / canvas #2b2b2b / line #4b4b4b / active #515658 /
- * fg #cccccc / dim #888888。
+ * 配色**跟随应用主题**：外壳每次推状态都带上当前主题的调色板（`chromePalette()`），
+ * 页面只需要把 `--c-*` 变量换掉。取值与 apps/desktop/src/renderer/assets/app.css 里的
+ * 主题块一一对齐，改主题时两处必须一起改（`browser-chrome.test.js` 逐档比对）。
  */
 
 export const CHROME_MESSAGE_PREFIX = '__mica_chrome__'
+
+/**
+ * 每个主题的 chrome 调色板。键与 ui-state 里的主题 id 一致，取值按下面的对应关系从
+ * app.css 抄过来：panel = --color-panel、canvas = --color-canvas（地址框）、
+ * active = --color-active（当前标签页）、line = --color-line、fg = --color-fg、
+ * fgSoft = --color-fg-soft、fgDim = --color-fg-dim（次要文案与提示）、
+ * warn = --color-warn-soft（受控徽标与加载点）、overlay = --color-overlay（悬浮层）。
+ */
+const PALETTES = {
+  dark: {
+    panel: '#3c3f41',
+    canvas: '#2b2b2b',
+    active: '#515658',
+    line: '#4b4b4b',
+    fg: '#cccccc',
+    fgSoft: '#a1a1a1',
+    fgDim: '#888888',
+    warn: '#d7ba7d',
+    overlay: 'rgb(255 255 255 / 6%)'
+  },
+  light: {
+    panel: '#f9fafb',
+    canvas: '#ffffff',
+    active: '#ebeef2',
+    line: '#0000001a',
+    fg: '#1b1b1c',
+    fgSoft: '#43454a',
+    fgDim: '#81858c',
+    warn: '#92400e',
+    overlay: 'rgb(38 49 72 / 6%)'
+  },
+  mocha: {
+    panel: '#181825',
+    canvas: '#1e1e2e',
+    active: '#313244',
+    line: '#45475a',
+    fg: '#bac2de',
+    fgSoft: '#a6adc8',
+    fgDim: '#7f849c',
+    warn: '#fab387',
+    overlay: 'rgb(255 255 255 / 6%)'
+  },
+  latte: {
+    panel: '#e6e9ef',
+    canvas: '#eff1f5',
+    active: '#ccd0da',
+    line: '#bcc0cc',
+    fg: '#4c4f69',
+    fgSoft: '#5c5f77',
+    fgDim: '#7c7f93',
+    warn: '#7d5010',
+    overlay: 'rgb(76 79 105 / 6%)'
+  },
+  'tokyo-night': {
+    panel: '#16161e',
+    canvas: '#1a1b26',
+    active: '#202330',
+    line: 'rgb(84 92 126 / 30%)',
+    fg: '#a9b1d6',
+    fgSoft: '#9aa5ce',
+    fgDim: '#565f89',
+    warn: '#ff9e64',
+    overlay: 'rgb(255 255 255 / 6%)'
+  },
+  'tokyo-night-light': {
+    panel: '#d6d8df',
+    canvas: '#e6e7ed',
+    active: '#c1c4cf',
+    line: '#c1c2c7',
+    fg: '#363c4d',
+    fgSoft: '#40434f',
+    fgDim: '#707280',
+    warn: '#754d11',
+    overlay: 'rgb(52 59 88 / 6%)'
+  }
+}
+
+/** 主题 id → chrome 调色板。未登记的主题（含 undefined）回落到默认深色。 */
+export function chromePalette(theme) {
+  return PALETTES[theme] ?? PALETTES.dark
+}
 
 export function chromeHtml() {
   return `<!doctype html>
@@ -21,48 +102,54 @@ export function chromeHtml() {
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
 <style>
+  /* 默认值 = Darcula：第一次 update 到达前的那一帧用它们，其余主题由 applyPalette 覆盖 */
+  :root {
+    --c-panel: #3c3f41; --c-canvas: #2b2b2b; --c-active: #515658; --c-line: #4b4b4b;
+    --c-fg: #cccccc; --c-fg-soft: #a1a1a1; --c-fg-dim: #888888;
+    --c-warn: #d7ba7d; --c-overlay: rgb(255 255 255 / 6%);
+  }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
     display: flex; align-items: center; gap: 8px;
     height: 38px; padding: 0 8px;
-    background: #3c3f41; color: #cccccc;
+    background: var(--c-panel); color: var(--c-fg);
     font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    border-bottom: 1px solid #4b4b4b;
+    border-bottom: 1px solid var(--c-line);
     -webkit-user-select: none; user-select: none;
     -webkit-app-region: drag;
   }
   .badge {
     display: flex; align-items: center; gap: 6px; flex: none;
-    padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.06);
-    color: #e2c08d; font-weight: 600; letter-spacing: 0.02em;
+    padding: 2px 8px; border-radius: 999px; background: var(--c-overlay);
+    color: var(--c-warn); font-weight: 600; letter-spacing: 0.02em;
   }
   .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
-  .owner { flex: none; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #888888; }
+  .owner { flex: none; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-fg-dim); }
   .tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; -webkit-app-region: no-drag; }
   .tab {
     display: flex; align-items: center; gap: 5px; max-width: 190px;
-    padding: 3px 9px; border-radius: 6px 6px 0 0; color: #888888;
+    padding: 3px 9px; border-radius: 6px 6px 0 0; color: var(--c-fg-dim);
     cursor: default; white-space: nowrap; overflow: hidden;
   }
-  .tab:hover { background: rgba(255, 255, 255, 0.05); color: #cccccc; }
-  .tab.active { background: #2b2b2b; color: #cccccc; }
+  .tab:hover { background: var(--c-overlay); color: var(--c-fg); }
+  .tab.active { background: var(--c-active); color: var(--c-fg); }
   .tab .title { overflow: hidden; text-overflow: ellipsis; }
   .grow { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
   .url {
     flex: 1 1 auto; min-width: 0; padding: 3px 10px; border-radius: 6px;
-    background: #2b2b2b; border: 1px solid #4b4b4b; color: #a1a1a1;
+    background: var(--c-canvas); border: 1px solid var(--c-line); color: var(--c-fg-soft);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
   }
-  .hint { flex: none; color: #888888; white-space: nowrap; }
-  .loading { width: 6px; height: 6px; border-radius: 999px; background: #e2c08d; flex: none; opacity: 0; }
+  .hint { flex: none; color: var(--c-fg-dim); white-space: nowrap; }
+  .loading { width: 6px; height: 6px; border-radius: 999px; background: var(--c-warn); flex: none; opacity: 0; }
   .loading.on { opacity: 1; }
   .hide {
-    flex: none; padding: 3px 10px; border-radius: 6px; border: 1px solid #4b4b4b;
-    background: transparent; color: #a1a1a1; font: inherit; cursor: default;
+    flex: none; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--c-line);
+    background: transparent; color: var(--c-fg-soft); font: inherit; cursor: default;
     -webkit-app-region: no-drag;
   }
-  .hide:hover { background: rgba(255, 255, 255, 0.06); color: #cccccc; }
+  .hide:hover { background: var(--c-overlay); color: var(--c-fg); }
 </style>
 </head>
 <body>
@@ -72,7 +159,7 @@ export function chromeHtml() {
   <span class="grow">
     <span class="loading" id="loading"></span>
     <span class="url" id="url" title=""></span>
-    <span class="hint">地址由 Mica 控制，不可手动修改</span>
+    <span class="hint" title="地址由 Mica 控制，不可手动修改">请勿手动操作</span>
   </span>
   <button class="hide" id="hide" type="button">隐藏</button>
 <script>
@@ -82,9 +169,28 @@ export function chromeHtml() {
     var tabs = document.getElementById('tabs')
     var url = document.getElementById('url')
     var loading = document.getElementById('loading')
+    var root = document.documentElement
+    var PALETTE_VARS = {
+      panel: '--c-panel',
+      canvas: '--c-canvas',
+      active: '--c-active',
+      line: '--c-line',
+      fg: '--c-fg',
+      fgSoft: '--c-fg-soft',
+      fgDim: '--c-fg-dim',
+      warn: '--c-warn',
+      overlay: '--c-overlay'
+    }
 
     function send(action, payload) {
       console.log('${CHROME_MESSAGE_PREFIX}' + JSON.stringify(Object.assign({ action: action }, payload || {})))
+    }
+
+    function applyPalette(palette) {
+      if (!palette) return
+      Object.keys(PALETTE_VARS).forEach(function (key) {
+        if (palette[key]) root.style.setProperty(PALETTE_VARS[key], palette[key])
+      })
     }
 
     document.getElementById('hide').addEventListener('click', function () { send('hide') })
@@ -92,6 +198,7 @@ export function chromeHtml() {
     window.__micaChrome = {
       update: function (state) {
         state = state || {}
+        applyPalette(state.palette)
         label.textContent = state.label || '受控浏览器'
         owner.textContent = state.owner ? '用户会话 ' + state.owner : '未归属'
         url.textContent = state.url || 'about:blank'

@@ -34,7 +34,6 @@ export interface ProviderDefinition {
    * 发出，所以必须写服务端认的取值，而不是我们习惯的叫法。
    */
   effortLevels?: EffortOption[];
-  get_model_url?: string;
 }
 
 export interface PersistedMicaConfig {

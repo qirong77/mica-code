@@ -27,6 +27,11 @@ function StateDot({ state }) {
   if (state === 'unread') {
     return <span className="size-2 shrink-0 rounded-full bg-info" title="有未读结果" />
   }
+  if (state === 'awaiting') {
+    return (
+      <span className="size-2 shrink-0 rounded-full bg-ask" title="正在等你做一个选择" />
+    )
+  }
   return <span aria-hidden="true" className="size-2 shrink-0" />
 }
 

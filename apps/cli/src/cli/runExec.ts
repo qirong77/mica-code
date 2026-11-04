@@ -79,19 +79,7 @@ export async function runExec(options: HeadlessExecOptions): Promise<HeadlessExe
     const runtimeOverride = resolveRuntimeConfigOverride(micaConfig.get(), options.model, options.variant, {
       effortPolicy: 'strict',
     });
-    let initialModel = runtimeOverride.model ?? micaConfig.get().model;
-    if (!initialModel) {
-      const config = micaConfig.get();
-      const provider = config.providers.find((item) => item.id === config.provider);
-      if (provider?.get_model_url) {
-        try {
-          await micaConfig.loadProviderModels(provider.id);
-          initialModel = runtimeOverride.model ?? micaConfig.get().model;
-        } catch {
-          // Best-effort: dynamic model discovery may fail in restricted networks.
-        }
-      }
-    }
+    const initialModel = runtimeOverride.model ?? micaConfig.get().model;
     await ensureHeadlessModelRule(initialModel, options.signal);
     micaConfig.resetSessionModelDefaults();
     throwIfAborted(options.signal);

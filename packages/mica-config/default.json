@@ -4,8 +4,8 @@
       "id": "deepseek",
       "api_base": "https://api.deepseek.com",
       "protocol": "openai_chat_completions",
-      "get_model_url": "https://api.deepseek.com/models",
-      "api_key": ""
+      "api_key": "",
+      "models": ["deepseek-chat", "deepseek-reasoner"]
     }
   ],
   "mcpServers": {

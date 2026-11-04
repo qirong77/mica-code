@@ -20,7 +20,7 @@ import {
   truncateOutput,
   visibilityEventName
 } from './browser-core.js'
-import { chromeDataUrl, parseChromeMessage } from './browser-chrome.js'
+import { chromeDataUrl, chromePalette, parseChromeMessage } from './browser-chrome.js'
 import { createRevealController } from './browser-reveal.js'
 
 /**
@@ -134,13 +134,30 @@ const SYNTHETIC_INPUT = `(command) => {
   return { ok: false, reason: 'unknown-action' }
 }`
 
-export function createBrowserManager({ onChange = () => {}, isQuitting = () => false } = {}) {
+export function createBrowserManager({
+  onChange = () => {},
+  isQuitting = () => false,
+  // 当前应用主题 id（ui-state 的 theme 解析后的结果）。外壳每次进来重新读一遍，顶栏
+  // 配色和窗口底色都跟着它走，换主题后不需要重启窗口。
+  theme = () => 'dark'
+} = {}) {
   const browsers = new Map()
   let sequence = 0
   let permissionsInstalled = false
   const reveal = createRevealController({ idleMs: REVEAL_IDLE_MS })
 
   const partition = () => session.fromPartition(BROWSER_PARTITION)
+
+  /** 顶栏调色板 + 主题 id：外壳读盘失败时按默认深色处理，不影响窗口本身 */
+  function chromeTheme() {
+    let id = 'dark'
+    try {
+      id = String(typeof theme === 'function' ? theme() || 'dark' : theme)
+    } catch {
+      id = 'dark'
+    }
+    return { id, palette: chromePalette(id) }
+  }
 
   function nextId(prefix) {
     sequence += 1
@@ -226,12 +243,24 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
   function pushChrome(record) {
     if (!record.chromeReady || record.win.isDestroyed()) return
     const current = activeTab(record)
+    const chrome = chromeTheme()
+    // 窗口底色（页面加载中、内容透明处露出来的那一层）与顶栏一起换，避免浅色主题下
+    // 先闪一片深色。只在主题真的变了时才调，setBackgroundColor 会重绘整窗。
+    if (record.themeId !== chrome.id) {
+      record.themeId = chrome.id
+      try {
+        record.win.setBackgroundColor(chrome.palette.canvas)
+      } catch {
+        // 窗口正在销毁：下一次创建会用新的底色
+      }
+    }
     const state = {
       label: record.label,
       owner: record.owner || '',
       url: current?.url || '',
       title: current?.title || '',
       loading: Boolean(current?.loading),
+      palette: chrome.palette,
       tabs: record.tabs.map((tab) => ({
         id: tab.id,
         title: tab.title || tab.url || '新标签页',
@@ -267,6 +296,7 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
 
   function createBrowser({ owner = null, url = '', label, show = false, focus = false } = {}) {
     const id = nextId('brw')
+    const chrome = chromeTheme()
     const win = new BrowserWindow({
       width: DEFAULT_BROWSER_SIZE.width,
       height: DEFAULT_BROWSER_SIZE.height,
@@ -275,7 +305,7 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       show: false,
       autoHideMenuBar: true,
       title: '受控浏览器',
-      backgroundColor: '#2b2b2b',
+      backgroundColor: chrome.palette.canvas,
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
     })
     // 多个窗口时错开一点，别叠成一摞看不出有几个
@@ -291,6 +321,7 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
       label: normalizeLabel(label),
       visible: false,
       createdAt: new Date().toISOString(),
+      themeId: chrome.id,
       win,
       chrome: win.webContents,
       chromeReady: false,
@@ -317,6 +348,8 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     })
 
     win.on('resize', () => layout(record))
+    // 露出来之前再推一次：窗口可能是在别的主题下建的，用户切主题时它正藏着
+    win.on('show', () => pushChrome(record))
     // 逻辑可见状态只由 showBrowser / hideBrowser 改：窗口的 show/hide 事件也会被临时露出
     // 触发，跟着它广播会让顶栏图标在每次操作时闪一下
 
@@ -767,6 +800,11 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     browsers.clear()
   }
 
+  /** 主题变了：把已经打开的窗口顶栏重画一遍（配色只在 pushChrome 里下发） */
+  function refreshTheme() {
+    for (const record of browsers.values()) pushChrome(record)
+  }
+
   /**
    * 回收没有归属的窗口。归属是顶栏图标的唯一依据，留着就等于一个用户既看不见、
    * 也不会自己去关的浏览器进程（旧版本、或者绕开 x-mica-owner 直接打接口留下的）。
@@ -900,6 +938,7 @@ export function createBrowserManager({ onChange = () => {}, isQuitting = () => f
     destroyBrowser,
     pruneUnowned,
     closeAll,
+    refreshTheme,
 
     listTabs,
     createTab,

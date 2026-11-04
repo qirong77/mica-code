@@ -8,6 +8,7 @@ import type {
   ConfigWebMcpDetails,
   ConfigWebPluginLlmTest,
   ConfigWebPluginActionResult,
+  ConfigWebProviderTest,
   ConfigWebPluginsDetails,
   ConfigWebRolesDetails,
   ConfigWebSessionDetails,
@@ -25,6 +26,7 @@ export function createHttpConfigWebClient(): ConfigWebClient {
     readConfigFile: () => request<ConfigWebFilePayload>('/api/files/config'),
     writeConfigFile: (content) =>
       request<ConfigWebFilePayload>('/api/files/config', { method: 'PUT', body: { content } }),
+    testProvider: (input) => request<ConfigWebProviderTest>('/api/provider-test', { method: 'POST', body: input }),
 
     readMcpDetails: () => request<ConfigWebMcpDetails>('/api/details/mcp'),
     createMcpServer: (name, content = '') =>

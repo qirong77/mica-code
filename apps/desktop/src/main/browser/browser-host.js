@@ -33,7 +33,8 @@ export function resolveBrowserSocketPath(userDataDir) {
 export async function startBrowserHost({
   socketPath,
   cacheDir = '',
-  isQuitting = () => false
+  isQuitting = () => false,
+  theme = () => 'dark'
 } = {}) {
   if (!socketPath) throw new Error('startBrowserHost 需要 socketPath')
   let manager = null
@@ -42,7 +43,8 @@ export async function startBrowserHost({
 
   manager = createBrowserManager({
     onChange: () => service.broadcast(),
-    isQuitting
+    isQuitting,
+    theme
   })
 
   await mkdir(dirname(socketPath), { recursive: true }).catch(() => {})

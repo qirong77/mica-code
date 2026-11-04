@@ -63,4 +63,4 @@
 - 解析档位之前必须先 `ensureModelRule(model)`：档位集合来自 models.dev，磁盘缓存异步读，先算会把「只在缓存里、随包种子里没有」的模型判成没有档位。
 - 档位的**字段名**跟着「谁在服务这次请求」走（`isGatewayEntry`）：厂商直连的条目（`deepseek-flash`）用 `thinking` / `reasoning_effort`，聚合网关的条目（`z-ai/glm-4.6` 这类带前缀的键）只能用 `reasoning.effort`——网关会静默忽略 `thinking`，推理照跑。两边一起发更糟，网关会先命中 `thinking` / `reasoning_effort` 而把 `none` 顶掉。
 - models.dev 的档位是社区数据，未必等于某台网关的真实枚举（`openai/gpt-6.1-terra` 在一处声明 `none`，某台 codex 网关只认 low…max）。provider 用 400/422 明确拒绝本次带上的推理参数时，客户端丢掉推理参数重发一次，并经 `markEffortLevelRejected` 记住「这台服务商的这个模型不收这一档」，`resolveEffortParams` 之后直接不发——压缩摘要、起标题、子代理这些每次新建客户端、effort 又不是用户选的路径因此不会反复撞同一个 400。
-- 只有 `get_model_url` 动态 provider 查询模型列表，结果不写回 config.json。
+- 模型列表全部来自 `config.json` 里手填的 `providers[].models`：没有任何探测 / 拉取路径，配置页也不再提供「模型列表地址」。

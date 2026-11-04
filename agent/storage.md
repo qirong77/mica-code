@@ -1,7 +1,7 @@
 # 配置、会话与存储
 
 - `MICA_HOME` 覆盖全部用户路径，默认 `~/.mica`；品牌目录经 `brand.ts` 解析。
-- `PersistedMicaConfig` 只存静态字段；运行时用 `stripRuntimeFields` 去除 provider/model/effort/contextWindowSize。新会话默认值唯一来自 `config.json.defaultModel: { provider, model, effort? }`；未配置取 `providers[0].models[0]`（动态列表取返回首项），未填 effort 用模型默认档位。`micaConfig.resetSessionModelDefaults()` 重读默认值并保留已加载的动态模型列表，TUI `/new`、`/clear` 同样调用；恢复会话与显式选择保留自己的值。`storage.json` 不再读写目录模型偏好。
+- `PersistedMicaConfig` 只存静态字段；运行时用 `stripRuntimeFields` 去除 provider/model/effort/contextWindowSize。新会话默认值唯一来自 `config.json.defaultModel: { provider, model, effort? }`；未配置取 `providers[0].models[0]`，未填 effort 用模型默认档位；`providers[].models` 是纯手填数据，没有任何运行时拉取或缓存。`micaConfig.resetSessionModelDefaults()` 重读默认值，TUI `/new`、`/clear` 同样调用；恢复会话与显式选择保留自己的值。`storage.json` 不再读写目录模型偏好。
 - 旧版本写在 `config.json` 的 `searxngUrl` 在启动时迁进 `plugin-settings/web-search.json`（已有值不覆盖）并删掉原键；搜索改成插件后只有插件设置生效。
 - 配置迁移与语义校验统一在 `startup/validate-config.js`，配置页保存复用它。
 - 仅当所有 provider 都没有 api_key 时，`envProvider.ts` 从 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 合成运行时 provider；环境 provider 永不写回 config.json。

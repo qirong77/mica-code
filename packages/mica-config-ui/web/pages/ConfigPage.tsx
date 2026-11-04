@@ -4,7 +4,7 @@ import { PageFrame } from '../components/PageFrame.js';
 import { ProviderEditor } from '../components/ProviderEditor.js';
 import { SelectMenu } from '../components/SelectMenu.js';
 import { Alert, Button, SaveStatus, SettingRow, SettingsGroup } from '../components/Ui.js';
-import { readConfigFile, writeConfigFile } from '../api.js';
+import { readConfigFile, testProvider, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
 import {
   addProviderDraft,
@@ -236,6 +236,7 @@ export function ConfigPage() {
                       })
                     }
                     onChange={(next) => applyDraft(writeProviderDraft(draft, index, next))}
+                    onTest={testProvider}
                     onRemove={() => removeProvider(index)}
                   />
                 ))

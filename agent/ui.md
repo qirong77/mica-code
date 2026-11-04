@@ -15,7 +15,7 @@
 - 三块骨架：`PageFrame`（窄页头 + 内容区）、`SettingsGroup` + `SettingRow`（一页一块面，行间分隔线）、`SplitView`（左列表 + 右详情）。
 - 折叠按容器宽度（`@container page (max-width: 860px)`），不按视口。
 - Config 页只按字段编辑 providers；`mcpServers`、`capabilityDefaults` 只读展示并跳到各自页面。
-- 服务商在分组里是一行：折叠显示 id（唯一的名称，不再另设显示名称）/协议/地址/模型数，展开接字段行；有错误强制展开并标「待修正」。
+- 服务商在分组里是一行：折叠显示 id（唯一的名称，不再另设显示名称）/协议/地址/模型数，展开接字段行；有错误强制展开并标「待修正」。模型列表全靠手填（没有「模型列表地址」），展开体最后一行是「测试连接」：它用页面上当前的地址 / Key / 协议 / 第一个模型发一次最小请求，结论就写在按钮右边。
 - Sessions 左栏的会话信息由 `src/server/sessionHead.ts` 只读文件头 8KB 解析，两个宿主共用。
 - 浏览器侧（`web/`）只能 import 纯子模块：`mica-plugin` / `mica-common` 的包入口会顺带导出读写文件的模块，dev 下整页白屏且 tsc 与单测都看不出来（`web/browserImports.test.ts` 静态挡住）。
 - 密钥类输入统一用 `web/components/SecretInput.tsx`：默认密文 + 眼睛按钮切明文，明文状态在组件内，收起或换页自动回到密文。
@@ -38,6 +38,7 @@
 - 第三方主题的取值走**上游原始调色板**，不照着截图调：Catppuccin 取自官方 `palette.json`（`mocha` / `latte` 的 `colors` + `ansiColors`），Tokyo Night 取自 `enkia/tokyo-night-vscode-theme` 的 theme JSON。亮底主题的 ANSI 彩色若在上游画布上不够 4.5:1（Catppuccin Latte 的绿/黄/品红就是），按同一色相压暗后再落地，并在块里写一行注释说明——别直接抄上游导致终端输出糊在浅底上。
 - 亮色的取值**逐档取自 DeepSeek harness 开源仓库**（`deepseek-ai/deepseek-harness` 的 `packages/client/ui-theme/src/styles/design-platform.css`：`--dsw-static-neutral-bluish-*` 调色板 + `--dsw-alias-*` 语义层；对话各层的用法看 `packages/client/ui-chat/src/client/chat/*.module.css`），不是照着截图调出来的，要核对就 `dsh web` 起一份真界面读计算样式。改亮色前先看那份文件的语义：正文、菜单、标题都是 `label-primary`（neutral-bluish-1000 近黑，不是中灰；亮色顶端两档因此并成同一个值），过程文字（工具行/思考/时间戳）是 `label-tertiary`（neutral-bluish-600），用户消息带是 `--dsw-specific-bubble`（deepseek-50 淡蓝），行内代码是 `markdown-inline-code`（浅底 + `border-l1` 描边），面板是 `neutral-bluish-50`，选中行是 `neutral-bluish-100`（= `--color-active`，会话行/导航/文件树都用它，不要用洗色层凑），洗色层是带蓝调的 `rgba(38 49 72, α)`。
 - 因此亮色有五个专属 token 不能回退成通用灰阶：`--color-nav-fg`（侧栏/菜单行）、`--color-bubble`（用户消息带）、`--color-inline-code{,-bg,-border}`（行内代码药丸）、`--color-heat-empty`（热力图空格：亮色 canvas 是纯白，铺在 panel 卡片上等于没有网格）。`theme-tokens.test.js` 钉住了这些锚点，值要改就一起改测试并写明理由。
+- 提问（`ask` 插件）有一支**自己的识别色** `--color-ask` + 压在它实心底上的字色 `--color-ask-contrast`：卡片问号徽标、选中选项、「确定」按钮、输入框聚焦边框，以及侧栏/快速打开里「等你做一个选择」的圆点全用它。**不要退回主题强调色**——强调色在浅色主题里就是蓝色，会和未读蓝点、主按钮混在一起，一笔等你点选的卡片就认不出来。六个主题各取自家调色板的青（Darcula ansiCyan / Catppuccin teal / Tokyo Night ansiCyan / DSH 深青），亮底主题要压深到白字 ≥4.5:1。`theme-tokens.test.js` 校验 token 存在、对比度、`--color-ask` 不等于 `--color-accent`，以及侧栏不再出现 `bg-accent chat-dot-unread` 组合。
 
 ## 界面审查清单（新增页面、面板、弹窗必查）
 

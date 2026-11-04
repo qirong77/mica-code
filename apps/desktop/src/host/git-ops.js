@@ -61,6 +61,19 @@ const repositoryState = new Map()
  * 任一时刻只有一次真正在跑。
  */
 const worktreeInFlight = new Map()
+/**
+ * 每个仓库「一次全树扫描」实测花了多久。
+ *
+ * 工作区文件一改就要重扫，而重扫的代价只取决于仓库大小：小仓库几十毫秒可以每 2 秒一次，
+ * 大仓库要 1–2 秒，同一个节奏会把 git 进程一直挂在那里跑。`git-watch.js` 拿它放大推送
+ * 间隔，保证扫描占用不超过主进程 CPU 的一个小份额。
+ */
+const summaryScanCost = new Map()
+
+/** 上一次全树扫描的耗时（毫秒），没扫过时是 0。 */
+export function summaryScanCostOf(root) {
+  return summaryScanCost.get(root) || 0
+}
 
 /** 让某个仓库的缓存立刻失效（写操作、agent 改完文件之后调用）。 */
 export function noteWorktreeChange(root) {
@@ -147,7 +160,11 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false } = {
     if (pending) return pending
   }
   const promise = (async () => {
+    const startedAt = Date.now()
     const value = await run()
+    // 只有全树扫描（`summary:<base>`）值得计量：`workspace-status` 是一条 rev-parse，
+    // 拿它的耗时当冷却依据会让工作区推送过于密集。
+    if (key.startsWith('summary')) summaryScanCost.set(root, Date.now() - startedAt)
     if (!signature) return value
     // 并发读取共用一份缓存；`probe` 取这次的 HEAD 签名，切换分支后自然失配。
     // 这里必须重新取一次：等 `run()` 的这段时间里，另一个不同 key 的读取可能刚写过 entries，

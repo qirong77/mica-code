@@ -1,4 +1,4 @@
-import { existsSync, chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -333,116 +333,9 @@ describe('new-session defaults', () => {
     expect(configApi.getConfig()).toEqual(configApi.readConfig());
     expect(readFileSync(configApi.CONFIG_PATH, 'utf8')).toBe(before);
   });
-
-  it('keeps cached dynamic catalogs and resets to their first model when no default is configured', async () => {
-    const provider = {
-      id: 'dynamic',
-      api_base: 'https://example.com/v1',
-      protocol: 'openai_responses' as const,
-      get_model_url: 'https://example.com/v1/models',
-    };
-    writeFileSync(
-      configApi.CONFIG_PATH,
-      JSON.stringify({
-        providers: [provider],
-        defaultModel: { provider: provider.id, model: 'outside-catalog' },
-      }),
-    );
-    configApi.resetSessionModelDefaults();
-    globalThis.fetch = vi.fn(
-      async () => new Response(JSON.stringify({ data: [{ id: 'first' }, { id: 'second' }] })),
-    ) as unknown as typeof fetch;
-    await configApi.loadProviderModels(provider.id);
-    expect(configApi.getConfig().model).toBe('outside-catalog');
-    writeFileSync(configApi.CONFIG_PATH, JSON.stringify({ providers: [provider] }));
-    expect(configApi.resetSessionModelDefaults()).toMatchObject({
-      provider: provider.id,
-      model: 'first',
-      providers: [{ ...provider, models: ['first', 'second', 'outside-catalog'] }],
-    });
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    writeFileSync(configApi.CONFIG_PATH, JSON.stringify({ providers: [{ ...provider, models: ['second'] }] }));
-    expect(configApi.resetSessionModelDefaults().model).toBe('second');
-    expect(configApi.getConfig().providers[0]?.models).toContain('first');
-    writeFileSync(
-      configApi.CONFIG_PATH,
-      JSON.stringify({ providers: [{ ...provider, get_model_url: 'https://new.example.com/models' }] }),
-    );
-    expect(configApi.resetSessionModelDefaults().model).toBe('');
-    expect(configApi.getConfig().providers[0]?.models).toBeUndefined();
-  });
-
-  it('uses the fetched first model default effort instead of the unresolved model effort', async () => {
-    const resolveRule = vi.fn(async () => ({
-      contextSize: 64000,
-      defaultEffort: 'high',
-      efforts: { none: {}, high: {} },
-    }));
-    const unregister = configApi.registerModelRuleResolver(resolveRule);
-    try {
-      writeFileSync(
-        configApi.CONFIG_PATH,
-        JSON.stringify({
-          providers: [
-            {
-              id: 'dynamic',
-              api_base: 'https://example.com/v1',
-              protocol: 'openai_responses',
-              get_model_url: 'https://example.com/v1/models',
-            },
-          ],
-        }),
-      );
-      configApi.updateConfig(() => configApi.readConfig());
-      expect(configApi.getConfig().model).toBe('');
-      globalThis.fetch = vi.fn(
-        async () => new Response(JSON.stringify({ data: [{ id: 'fetched' }] })),
-      ) as unknown as typeof fetch;
-      await configApi.loadProviderModels('dynamic');
-      expect(configApi.getConfig()).toMatchObject({ model: 'fetched', effort: 'high', contextWindowSize: 64000 });
-      expect(resolveRule).toHaveBeenCalledWith('fetched', undefined, expect.objectContaining({ id: 'dynamic' }));
-    } finally {
-      unregister();
-    }
-  });
 });
 
 describe('prepareSessionModelDefaults', () => {
-  it('loads an uncached dynamic catalog and reuses its first model on later sessions', async () => {
-    const provider = {
-      id: 'prepare-dynamic',
-      api_base: 'https://example.com/v1',
-      protocol: 'openai_responses' as const,
-      get_model_url: 'https://example.com/v1/models',
-    };
-    writeFileSync(configApi.CONFIG_PATH, JSON.stringify({ providers: [provider] }));
-    globalThis.fetch = vi.fn(
-      async () => new Response(JSON.stringify({ data: [{ id: 'first' }, { id: 'second' }] })),
-    ) as unknown as typeof fetch;
-    const resolveRule = vi.fn(async () => ({
-      contextSize: 64000,
-      defaultEffort: 'high',
-      efforts: { none: {}, high: {} },
-    }));
-    const unregister = configApi.registerModelRuleResolver(resolveRule);
-    try {
-      const before = readFileSync(configApi.CONFIG_PATH, 'utf8');
-      await expect(configApi.prepareSessionModelDefaults()).resolves.toMatchObject({
-        provider: provider.id,
-        model: 'first',
-        effort: 'high',
-        contextWindowSize: 64000,
-      });
-      expect(resolveRule).toHaveBeenCalledWith('first', undefined, expect.objectContaining({ id: provider.id }));
-      configApi.updateConfig((config) => ({ ...config, model: 'second', effort: 'none' }));
-      await expect(configApi.prepareSessionModelDefaults()).resolves.toMatchObject({ model: 'first', effort: 'high' });
-      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-      expect(readFileSync(configApi.CONFIG_PATH, 'utf8')).toBe(before);
-    } finally {
-      unregister();
-    }
-  });
-
   it('reapplies the original explicit effort after asynchronous provider metadata replaces incomplete rules', async () => {
     const provider = { ...baseConfig().providers[0]!, id: 'prepare-explicit', models: ['async-default'] };
     writeFileSync(
@@ -479,33 +372,7 @@ describe('prepareSessionModelDefaults', () => {
     }
   });
 
-  it('rejects with the provider and fetch failure instead of returning an empty model', async () => {
-    writeFileSync(
-      configApi.CONFIG_PATH,
-      JSON.stringify({
-        providers: [
-          {
-            id: 'prepare-failure',
-            api_base: 'https://example.com',
-            protocol: 'openai_responses',
-            get_model_url: 'https://example.com/models',
-          },
-        ],
-      }),
-    );
-    globalThis.fetch = vi.fn(async () => {
-      throw new Error('network unavailable');
-    }) as unknown as typeof fetch;
-    await expect(configApi.prepareSessionModelDefaults()).rejects.toThrow(
-      'provider prepare-failure: network unavailable',
-    );
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ data: [] }))) as unknown as typeof fetch;
-    await expect(configApi.prepareSessionModelDefaults()).rejects.toThrow(
-      'Invalid model list for provider prepare-failure',
-    );
-  });
-
-  it('rejects a provider with no configured model or dynamic catalog', async () => {
+  it('rejects a provider with no configured model', async () => {
     writeFileSync(
       configApi.CONFIG_PATH,
       JSON.stringify({
@@ -524,112 +391,6 @@ describe('prepareSessionModelDefaults', () => {
   });
 });
 
-describe('loadProviderModels', () => {
-  it('keeps dynamically fetched models in memory and applies the fixed model rule', async () => {
-    const provider = {
-      id: 'kimi',
-      api_base: 'https://api.moonshot.cn/v1',
-      api_key: 'test-key',
-      protocol: 'openai_chat_completions' as const,
-      get_model_url: 'https://api.moonshot.cn/v1/models',
-    };
-    configApi.updateConfig(() => ({
-      provider: provider.id,
-      model: '',
-      effort: 'medium',
-      contextWindowSize: 256000,
-      providers: [provider],
-    }));
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => {
-        return { data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }] };
-      },
-      text: async () => '',
-    })) as unknown as typeof fetch;
-
-    await expect(configApi.loadProviderModels(provider.id)).resolves.toEqual(['kimi-k2.6', 'moonshot-v1-8k']);
-
-    expect(configApi.getConfig().model).toBe('kimi-k2.6');
-    expect(configApi.getConfig().providers[0]?.models).toEqual(['kimi-k2.6', 'moonshot-v1-8k']);
-    expect(configApi.getConfig().contextWindowSize).toBe(1000000);
-
-    const persisted = JSON.parse(readFileSync(configApi.CONFIG_PATH, 'utf-8')) as {
-      providers?: Array<Record<string, unknown>>;
-    };
-    expect(persisted.providers?.[0]?.model).toBeUndefined();
-    expect(persisted.providers?.[0]?.effort).toBeUndefined();
-    expect(persisted.providers?.[0]?.contextWindowSize).toBeUndefined();
-    expect(persisted.providers?.[0]?.models).toBeUndefined();
-  });
-
-  it('does not rewrite read-only config.json after dynamic models are loaded', async () => {
-    const provider = {
-      id: 'kimi',
-      api_base: 'https://api.moonshot.cn/v1',
-      api_key: 'test-key',
-      protocol: 'openai_chat_completions' as const,
-      get_model_url: 'https://api.moonshot.cn/v1/models',
-    };
-    configApi.updateConfig(() => ({
-      provider: provider.id,
-      model: '',
-      effort: 'medium',
-      contextWindowSize: 256000,
-      providers: [provider],
-    }));
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => {
-        return { data: [{ id: 'kimi-k2.6' }, { id: 'moonshot-v1-8k' }] };
-      },
-      text: async () => '',
-    })) as unknown as typeof fetch;
-
-    await configApi.loadProviderModels(provider.id);
-    const before = readFileSync(configApi.CONFIG_PATH, 'utf-8');
-    chmodSync(configApi.CONFIG_PATH, 0o444);
-    try {
-      expect(() =>
-        configApi.updateConfig((config) => ({
-          ...config,
-          model: 'moonshot-v1-8k',
-        })),
-      ).not.toThrow();
-    } finally {
-      chmodSync(configApi.CONFIG_PATH, 0o644);
-    }
-
-    expect(readFileSync(configApi.CONFIG_PATH, 'utf-8')).toBe(before);
-  });
-
-  it('preserves a configured model that is absent from a dynamic catalog', async () => {
-    const provider = {
-      id: 'partial-catalog',
-      api_base: 'https://example.com/v1',
-      api_key: 'test-key',
-      protocol: 'openai_chat_completions' as const,
-      get_model_url: 'https://example.com/v1/models',
-    };
-    configApi.updateConfig(() => ({
-      provider: provider.id,
-      model: 'configured-model',
-      effort: 'medium',
-      contextWindowSize: 256000,
-      providers: [provider],
-    }));
-    globalThis.fetch = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ data: [{ id: 'catalog-model' }] }),
-      text: async () => '',
-    })) as unknown as typeof fetch;
-
-    await configApi.loadProviderModels(provider.id);
-
-    expect(configApi.getConfig().model).toBe('configured-model');
-    expect(configApi.getConfig().providers[0]?.models).toEqual(['catalog-model', 'configured-model']);
-  });
-});
 
 function baseConfig(): IMicaConfig {
   return {

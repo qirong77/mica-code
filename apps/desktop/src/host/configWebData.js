@@ -27,6 +27,7 @@ import {
   setPluginSettings as setPluginSettingsInStore,
   testPluginLlm as testPluginLlmInStore
 } from '@mica-config-ui/plugins'
+import { testProviderConnection } from '@mica-config-ui/provider-test'
 import { runPluginAction as runPluginActionProcess } from '@mica-config-ui/plugin-action'
 import { summarizeSessionFile } from '@mica-config-ui/session-head'
 // 内置 default role 与 CLI 同源：提示词模板就是 packages/mica-agent/prompt/system.md，
@@ -516,6 +517,14 @@ async function removeMcpServer(name) {
 export const configWebActions = {
   readConfigFile: () => readConfigFile(),
   writeConfigFile: (input) => writeConfigFile(text(input, 'content')),
+  // 服务商试连：与插件试连同一条执行器，页面上改完不用先保存再测。
+  testProvider: (input) =>
+    testProviderConnection({
+      apiBase: text(input, 'apiBase'),
+      apiKey: optionalText(input, 'apiKey'),
+      protocol: optionalText(input, 'protocol'),
+      model: text(input, 'model')
+    }),
 
   readMcpDetails: () => readMcpDetails(),
   createMcpServer: (input) => addMcpServer(text(input, 'name'), optionalText(input, 'content')),

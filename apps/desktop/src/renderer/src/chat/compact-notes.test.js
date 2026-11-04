@@ -1,6 +1,7 @@
 import { expect, it } from 'bun:test'
 import {
   collapseCompactToolNotes,
+  compactToolDetailLines,
   parseCompactToolNote,
   splitTrailingCompactNotes,
   summarizeCompactToolNotes
@@ -69,4 +70,22 @@ it('does not merge notes across a real message', () => {
     '这段是真正的回答',
     '已清理 1 轮工具调用 · run_shell'
   ])
+})
+
+it('flattens the hover detail into one call per line, without the model-facing wrapper', () => {
+  expect(
+    compactToolDetailLines(
+      [
+        note('read_file(src/a.ts)', 'run_shell(cd /x, ls)'),
+        note('apply_patch(b.ts)', '+3')
+      ].join('\n')
+    )
+  ).toBe(
+    ['read_file(src/a.ts)', 'run_shell(cd /x, ls)', 'apply_patch(b.ts)', '另 3 次未列出'].join('\n')
+  )
+})
+
+it('keeps a non-note line as-is so nothing is lost', () => {
+  expect(compactToolDetailLines('普通一行\n')).toBe('普通一行')
+  expect(compactToolDetailLines('')).toBe('')
 })

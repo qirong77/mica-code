@@ -6,6 +6,7 @@ import { isValidPluginId } from './plugin-data-core'
 import { readPluginData, writePluginData } from './plugin-data-store.js'
 import { applyRemoteAccessPatch, describeRemoteAccess } from './remote-access.js'
 import { resolveMicaExecutable } from './mica-cli'
+import { readAnnotationOptions, replaceAnnotationOptions } from './session-annotations.js'
 
 /**
  * 插件在桌面端的**能力面**（宿主只提供能力，不认识任何具体插件）。
@@ -23,6 +24,10 @@ import { resolveMicaExecutable } from './mica-cli'
  * - `plugin-host:run-action`：执行清单里声明过的一个动作（`refresh`、`register` …）。
  *   卡片能读能写数据，但「去干一件事」只能由插件自己的进程做，所以这里转给
  *   `mica plugin-action`——一次性的插件宿主，与配置页点按钮走的是同一条路。
+ * - `plugin-host:read-annotations` / `plugin-host:write-annotations`：插件自己在会话行上
+ *   画标记时用的那套色板（`session-annotations.json` 的 `options`）。标签这类「颜色和名字
+ *   都由用户定义」的东西必须在页面里维护，而页面碰不到文件系统，所以整份替换由运行时做。
+ *   宿主仍然不认识「标签」：它只搬运并归一化这份通用结构。
  *
  * 判断逻辑分别在 runtime-probe-core.js 与 plugin-data-core.js（纯函数，便于单测）。
  */
@@ -84,5 +89,17 @@ export function registerPluginHostIpc() {
     } catch (error) {
       return { ok: false, error: error?.message || String(error) }
     }
+  })
+
+  ipcMain.handle('plugin-host:read-annotations', (_event, payload) =>
+    readAnnotationOptions({ pluginId: payload?.pluginId })
+  )
+
+  // 写坏点也不抛：页面上要的是「为什么没改成功」，一个 rejected promise 只会变成
+  // 控制台里的一行字。
+  ipcMain.handle('plugin-host:write-annotations', (_event, payload) => {
+    if (!isValidPluginId(payload?.pluginId))
+      return { ok: false, error: '插件 id 非法：只能是小写字母、数字与 . _ -' }
+    return replaceAnnotationOptions({ pluginId: payload.pluginId, options: payload?.options })
   })
 }

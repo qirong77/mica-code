@@ -86,6 +86,7 @@ import { registerFilesIpc } from '../host/files.js'
 import { registerGitIpc } from '../host/git.js'
 import { disposeGitWatchers, setGitWatchBroadcaster } from '../host/git-watch.js'
 import { registerStatsIpc, setStatsBroadcaster } from '../host/stats.js'
+import { setAnnotationBroadcaster } from '../host/session-annotations.js'
 import { registerSkillsIpc } from '../host/skills.js'
 import { registerMcpCandidatesIpc } from '../host/mcp-candidates.js'
 import { registerPerfIpc } from '../host/perf.js'
@@ -754,6 +755,8 @@ export async function startDesktopServer(options = {}) {
   setLoopRunner(runLoopTurn)
   // 会话统计索引在后台构建：页面的会话列表与统计页跟着进度刷新，不用轮询等它
   setStatsBroadcaster(broadcast)
+  // 插件在自己的页面里改了会话行标记的色板（标签的增删改）：侧栏的点与右键菜单跟着变
+  setAnnotationBroadcaster(broadcast)
   // 受控浏览器窗口活在 Electron 主进程里（只有主进程能开窗口），运行时经 HTTP 访问它；
   // 浏览器状态变化要实时推给所有页面，图标才知道该不该亮
   setBrowserControlBroadcaster(broadcast)

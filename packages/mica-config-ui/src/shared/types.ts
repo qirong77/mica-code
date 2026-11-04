@@ -316,6 +316,20 @@ export type ConfigWebPluginLlmTest = {
   reply?: string;
 };
 
+/**
+ * 服务商配置试连的入参：就是配置页表单上那四项，改完不必先保存。
+ */
+export type ConfigWebProviderTestInput = {
+  apiBase: string;
+  apiKey?: string;
+  protocol?: string;
+  /** 这次要试的模型名（页面取服务商列表里的第一个）。 */
+  model: string;
+};
+
+/** 服务商试连的结果：与插件试连同形，因为执行器是同一个。 */
+export type ConfigWebProviderTest = ConfigWebPluginLlmTest;
+
 export type ConfigWebPlugin = {
   id: string;
   name: string;

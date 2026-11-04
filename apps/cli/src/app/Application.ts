@@ -26,7 +26,7 @@ import {
   SubagentTaskManager,
 } from '../agents/SubagentTaskManager.js';
 import { applySessionConfig, SessionController } from '../session/SessionController.js';
-import { reportRuntimeError, syncModelDisplay } from '../runtime/uiBridge.js';
+import { reportRuntimeError } from '../runtime/uiBridge.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 import { createPluginSubagentHost } from '../agents/PluginSubagentHost.js';
 import { capturePluginModelUsageRecorder, createPluginModels } from '../plugins/pluginModels.js';
@@ -98,15 +98,6 @@ export class Application {
         startupSession = { ...startupSession, snapshot };
         void micaConfig.ensureModelRule(snapshot.model, undefined, { id: snapshot.providerId }).catch(() => undefined);
       } else {
-        try {
-          await ensureInitialModelSelection();
-        } catch (modelError) {
-          const msg = modelError instanceof Error ? modelError.message : String(modelError);
-          micaUi.messageBar.addMessage({
-            id: 'model-load-warning',
-            text: `模型加载失败：${msg}；请使用 /model 配置可用的 provider`,
-          });
-        }
         const currentModel = micaConfig.get().model;
         if (currentModel)
           await micaConfig
@@ -362,13 +353,6 @@ export class Application {
       }
       if (startupCwdError) showPluginMessage(startupCwdError, 7000);
 
-      void micaConfig.loadMissingProviderModels().then(() => {
-        if (!agent.isRunning) {
-          agent.configureForRun({});
-          if (agentSessions.current().agent === agent) syncModelDisplay(agent);
-        }
-      });
-
       micaUi.terminalInput.setPlaceholder('Type a message to start a conversation');
       // Apple Terminal sends the same byte (\r) for Shift+Enter and Enter and
       // has no kitty keyboard protocol support, so Shift+Enter/Cmd+Backspace
@@ -512,16 +496,6 @@ function syncCommandDropdown(commands: CommandRegistry, runtime: LocalRuntimeCon
       },
     })),
   );
-}
-
-async function ensureInitialModelSelection(): Promise<void> {
-  const config = micaConfig.get();
-  if (config.model) return;
-
-  const provider = config.providers.find((item) => item.id === config.provider);
-  if (!provider?.get_model_url) return;
-
-  await micaConfig.loadProviderModels(provider.id);
 }
 
 function showPluginMessage(text: string, ttl: number): void {

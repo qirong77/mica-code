@@ -49,6 +49,11 @@ export default defineConfig({
         find: '@mica-config-ui/plugins',
         replacement: resolve('../../packages/mica-config-ui/src/server/plugins.ts')
       },
+      // 服务商试连（配置页的「测试连接」）：与插件试连同一条执行器，只在宿主里发请求。
+      {
+        find: '@mica-config-ui/provider-test',
+        replacement: resolve('../../packages/mica-config-ui/src/server/providerTest.ts')
+      },
       // 配置页的插件动作：宿主没有插件运行时，实际执行交给一次性的 `mica plugin-action`。
       {
         find: '@mica-config-ui/plugin-action',

@@ -15,8 +15,10 @@ import {
  *
  * 浮层挂到 body（消息所在的滚动容器有 overflow，留在原地会被裁掉），位置由
  * `chat-tooltip.js` 的纯函数算好；浮层自己可滚动，鼠标移进去不收起。
+ * 宽度不写死：`maxWidth` 只是上限，短内容就一小块（见 app.css 的 `width: max-content`）。
+ * `label` 是浮层顶部的一行小标题，用来说明「这坨文字是什么」，不给就不占位。
  */
-export function useChatTooltip({ text, enabled = true, anchorRef }) {
+export function useChatTooltip({ text, label, enabled = true, anchorRef }) {
   const tooltipId = useId()
   const tooltipRef = useRef(null)
   const timersRef = useRef({ open: 0, close: 0 })
@@ -126,13 +128,14 @@ export function useChatTooltip({ text, enabled = true, anchorRef }) {
           className={`chat-tooltip chat-tooltip-${layout.placement}`}
           style={{
             left: layout.left,
-            width: layout.width,
+            maxWidth: layout.maxWidth,
             maxHeight: layout.maxHeight,
             ...(layout.top != null ? { top: layout.top } : { bottom: layout.bottom })
           }}
           onPointerEnter={() => window.clearTimeout(timersRef.current.close)}
           onPointerLeave={scheduleClose}
         >
+          {label ? <div className="chat-tooltip-label">{label}</div> : null}
           <div className="chat-tooltip-body">{text}</div>
         </div>,
         document.body

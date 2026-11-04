@@ -61,6 +61,11 @@
   --color-accent-hover: #d98d4f; /* derived */
   --color-accent-subtle: rgb(204 120 50 / 14%);
   --color-accent-region: rgb(204 120 50 / 22%);
+  /* ask（提问卡片 + 侧栏「等你选」）的识别色：青。它必须是主题强调色之外的一支——
+     提问要在一屏里被一眼认出来，而不是和主按钮、未读蓝点、运行绿点糊成一片。
+     `*-contrast` 是压在这个实心底上的字色，按主题明暗翻转。 */
+  --color-ask: #6cdada;
+  --color-ask-contrast: #1e1f22;
 
   /* Status: terminal ansi palette */
   --color-info: #5394ec;
@@ -173,6 +178,9 @@ html[data-theme='light'] {
   --color-accent-hover: #2563eb;
   --color-accent-subtle: color-mix(in srgb, #4176e6 12%, transparent);
   --color-accent-region: color-mix(in srgb, #4176e6 18%, transparent);
+  /* 提问识别色：青。亮底上取可读的深青（白字 4.97:1），仍明显区别于强调蓝。 */
+  --color-ask: #0f7c82;
+  --color-ask-contrast: #ffffff;
 
   /* Status — 亮色下取可读的深色档位。
      注意 *-soft：暗色里它是比 primary 更亮的一档，但亮色 UI 里 soft 被大量当正文/状态
@@ -243,6 +251,9 @@ html[data-theme='mocha'] {
   --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, #ffffff);
   --color-accent-subtle: color-mix(in srgb, var(--color-accent) 16%, transparent);
   --color-accent-region: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  /* 提问识别色：Catppuccin 的 teal。 */
+  --color-ask: #94e2d5;
+  --color-ask-contrast: #1e1e2e;
 
   /* Status */
   --color-info: #89b4fa;
@@ -315,6 +326,9 @@ html[data-theme='latte'] {
   --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, #000000);
   --color-accent-subtle: color-mix(in srgb, var(--color-accent) 12%, transparent);
   --color-accent-region: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  /* 提问识别色：Catppuccin 的 teal 压深一档——原值 #179299 配白字只有 3.7:1。 */
+  --color-ask: #0f7c82;
+  --color-ask-contrast: #ffffff;
 
   /* Status */
   --color-info: #1e66f5;
@@ -389,6 +403,9 @@ html[data-theme='tokyo-night'] {
   --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, #ffffff);
   --color-accent-subtle: color-mix(in srgb, var(--color-accent) 16%, transparent);
   --color-accent-region: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  /* 提问识别色：Tokyo Night 的 ansiCyan。 */
+  --color-ask: #73daca;
+  --color-ask-contrast: #1a1b26;
 
   /* Status */
   --color-info: #7aa2f7;
@@ -460,6 +477,10 @@ html[data-theme='tokyo-night-light'] {
   --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, #000000);
   --color-accent-subtle: color-mix(in srgb, var(--color-accent) 12%, transparent);
   --color-accent-region: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  /* 提问识别色：同主题的深青（白字 4.8:1）。取 #0d7d94 而不是更深的青绿，
+     是为了跟这套主题的 success（#33635c，同为青绿）拉开亮度，侧栏两种圆点才不糊。 */
+  --color-ask: #0d7d94;
+  --color-ask-contrast: #ffffff;
 
   /* Status */
   --color-info: #2959aa;
@@ -498,7 +519,9 @@ html[data-theme='tokyo-night-light'] {
  * 这里按同一选择器重声明，靠 html[data-appearance='light'] 前缀取胜。
  */
 html[data-appearance='light'] .chat-tooltip {
-  box-shadow: 0 8px 24px rgb(0 0 0 / 14%);
+  box-shadow:
+    0 18px 40px rgb(0 0 0 / 16%),
+    0 2px 6px rgb(0 0 0 / 11%);
 }
 html[data-appearance='light'] .chat-selection-bar {
   box-shadow: 0 6px 18px rgb(0 0 0 / 14%);
@@ -526,6 +549,9 @@ html[data-appearance='light'] .chat-btw-jump {
 }
 html[data-appearance='light'] .quick-pick-panel {
   box-shadow: 0 12px 44px rgb(0 0 0 / 17%);
+}
+html[data-appearance='light'] .chat-ask-card.is-modal {
+  box-shadow: 0 18px 52px rgb(0 0 0 / 17%);
 }
 
 /* 查找条里的输入框：暗色是「面板叠黑 28%」压出的内凹面，亮色底上同样的黑会变脏灰，
@@ -1008,43 +1034,91 @@ html[data-appearance='light'] .chat-modal-overlay {
 }
 
 /*
- * 折叠长消息的悬停浮层（`chat-tooltip.jsx`，portal 到 body）。
+ * 折叠长消息 / 压缩说明的悬停浮层（`chat-hover-tooltip.jsx`，portal 到 body）。
  *
- * 位置由 JS 算好（视口内、优先下方），这里只管样子：比对话底色亮一档的浮起面板，
- * 自己可滚动（长文本必须能滚，这正是原生 title 做不到的事）。z-index 低于弹窗
- * （10000）与 BTW 抽屉，高于对话内容。
+ * 位置由 JS 算好（视口内、优先下方并靠左对齐锚点），这里只管样子：
+ * - 宽度跟内容走：`max-content` 让一行短说明就是一小块，长文本才撑到 JS 给的
+ *   `max-width`（560），不再像之前那样任何内容都被撑成一条与消息等宽的横板；
+ * - 比对话底色亮一档的浮起面板，圆角 + 双层阴影，出现时轻微淡入；
+ * - 自己可滚动（长文本必须能滚，这正是原生 title 做不到的事）。z-index 低于弹窗
+ *   （10000）与 BTW 抽屉，高于对话内容。
  */
 .chat-tooltip {
   position: fixed;
   z-index: 4000;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 168px;
   overflow: hidden auto;
-  border: 1px solid var(--color-line);
-  border-radius: 5px;
-  background: var(--color-panel);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  border: 1px solid color-mix(in srgb, var(--color-fg-max) 13%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-fg-max) 4%, var(--color-panel));
+  box-shadow:
+    0 18px 40px rgb(0 0 0 / 48%),
+    0 2px 6px rgb(0 0 0 / 38%);
   color: var(--color-fg);
   font-family: var(--chat-font);
-  font-size: var(--chat-text-size);
-  line-height: var(--chat-message-line-height, 1.28);
+  font-size: calc(var(--chat-text-size) - 1px);
+  line-height: 1.55;
   overscroll-behavior: contain;
-  scrollbar-width: auto;
+  scrollbar-width: thin;
+  animation: chat-tooltip-in 130ms ease-out;
+}
+
+/* 下方出现时从上往下落一点，上方出现时反过来；位移只有 2px，只是让浮层「出现」
+   而不是「弹出」。 */
+@keyframes chat-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+.chat-tooltip-above {
+  animation-name: chat-tooltip-in-above;
+}
+
+@keyframes chat-tooltip-in-above {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-tooltip {
+    animation: none;
+  }
 }
 
 .chat-tooltip::-webkit-scrollbar {
   display: block;
-  width: 10px;
+  width: 8px;
 }
 
 .chat-tooltip::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 5px;
+  border: 2px solid transparent;
+  border-radius: 6px;
   background-clip: padding-box;
-  background-color: color-mix(in srgb, var(--color-fg-max) 16%, transparent);
+  background-color: color-mix(in srgb, var(--color-fg-max) 18%, transparent);
+}
+
+/* 顶部小标题：说明「这坨文字是什么」，没传 label 时不渲染。浮层 portal 到 body，
+   `.chat-view` 上的 --chat-subtle 在这里解析不到，直接用根上的 fg 档位。 */
+.chat-tooltip-label {
+  padding: 9px 14px 0;
+  color: var(--color-fg-dim);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.chat-tooltip-label + .chat-tooltip-body {
+  padding-top: 5px;
 }
 
 .chat-tooltip-body {
-  padding: 8px 10px;
-  overflow-wrap: anywhere;
+  padding: 10px 14px;
+  overflow-wrap: break-word;
   white-space: pre-wrap;
 }
 
@@ -2736,7 +2810,9 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 /* 插件（工具）抛出的一道选择题。
    版式：扁平卡（无阴影、只有一层细边），中间选项两列，底部一条独立确认条写「已选 A ·
    转账」并给出「确定」——「选了什么」和「提交」分成两层，误点还有反悔余地。
-   与排队行同一个位置，靠强调色区分：排队是「等这一轮结束」，这里是「等你动手」。 */
+   与排队行同一个位置，靠一支专属的青（`--color-ask`）区分：排队是「等这一轮结束」，
+   这里是「等你动手」。这支青不与主题强调色、未读蓝、运行绿共用——一张等你点选的卡片
+   必须能在一屏里被一眼认出来。 */
 .chat-ask-card {
   display: flex;
   flex-direction: column;
@@ -2753,7 +2829,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   padding: 9px 11px 0;
 }
 
-/* 问号徽标：强调色实心圆，比图标更省一行高度 */
+/* 问号徽标：ask 识别色实心圆，比图标更省一行高度 */
 .chat-ask-mark {
   display: grid;
   flex: none;
@@ -2761,8 +2837,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   height: 16px;
   place-items: center;
   border-radius: 50%;
-  background: var(--color-accent);
-  color: #20201f;
+  background: var(--color-ask);
+  color: var(--color-ask-contrast);
   font-size: 10.5px;
   font-weight: 800;
   line-height: 1;
@@ -2844,8 +2920,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-ask-option.is-selected {
-  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
-  background: var(--color-accent-subtle);
+  border-color: color-mix(in srgb, var(--color-ask) 55%, transparent);
+  background: color-mix(in srgb, var(--color-ask) 14%, transparent);
 }
 
 .chat-ask-option:disabled {
@@ -2867,7 +2943,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-ask-option.is-selected .chat-ask-option-key {
-  color: var(--color-accent);
+  color: var(--color-ask);
 }
 
 .chat-ask-option-label {
@@ -2903,7 +2979,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-ask-input:focus {
-  border-color: var(--color-accent);
+  border-color: var(--color-ask);
   outline: none;
 }
 
@@ -2917,7 +2993,12 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   background: var(--color-overlay-subtle);
 }
 
+/* 提示语是这条里唯一可以被压缩的东西：写了很长的自定义答案时它先省略号收尾，
+   右侧的 ↵ 与「确定」按内容占位。否则 flex 会按内容比例压缩按钮，
+   「确定」被挤成两行、卡片高度跟着跳。 */
 .chat-ask-hint {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--color-fg-soft);
   font-size: 11.5px;
@@ -2926,6 +3007,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-ask-keycap {
+  flex: none;
   padding: 0 4px;
   border: 1px solid var(--color-line-soft);
   border-radius: 3px;
@@ -2938,20 +3020,24 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 
 .chat-ask-submit {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 4px;
   padding: 4px 13px;
   border: 0;
   border-radius: 5px;
-  background: var(--color-accent);
-  color: #20201f;
+  background: var(--color-ask);
+  color: var(--color-ask-contrast);
   font-size: 11.5px;
   font-weight: 650;
+  white-space: nowrap;
   cursor: pointer;
 }
 
+/* hover 往「前景色」方向混：暗色里 fg-max 是白（提亮），亮色里是近黑（加深），
+   一条表达式两档都对，不必为 ask 再配一组 hover 值。 */
 .chat-ask-submit:hover:not(:disabled) {
-  background: var(--color-accent-hover);
+  background: color-mix(in srgb, var(--color-ask) 88%, var(--color-fg-max));
 }
 
 .chat-ask-submit:disabled {

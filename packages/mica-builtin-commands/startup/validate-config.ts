@@ -207,14 +207,6 @@ export function validateConfig(input: unknown): ConfigValidationResult {
         `provider "${providerName}" 的 models 必须是非空字符串数组。`,
       );
     }
-    if (provider.get_model_url !== undefined && !isNonEmptyString(provider.get_model_url)) {
-      add(
-        'error',
-        'provider_get_model_url_invalid',
-        `${providerPath}.get_model_url`,
-        `provider "${providerName}" 的 get_model_url 必须是非空字符串。`,
-      );
-    }
     if (provider.supportsEffort !== undefined && typeof provider.supportsEffort !== 'boolean') {
       add(
         'error',
@@ -277,11 +269,7 @@ export function validateConfig(input: unknown): ConfigValidationResult {
       }
       if (!isNonEmptyString(defaults.model)) {
         add('error', 'default_model_name_invalid', 'defaultModel.model', '默认模型的 model 必须是非空字符串。');
-      } else if (
-        isRecord(provider) &&
-        !isNonEmptyString(provider.get_model_url) &&
-        (!Array.isArray(provider.models) || !provider.models.includes(defaults.model))
-      ) {
+      } else if (isRecord(provider) && (!Array.isArray(provider.models) || !provider.models.includes(defaults.model))) {
         add(
           'error',
           'default_model_unavailable',

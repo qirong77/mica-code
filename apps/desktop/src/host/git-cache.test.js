@@ -3,7 +3,12 @@ import { execFileSync } from 'child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
-import { cachedWorktreeRead, noteWorktreeChange, repositoryRootOf } from './git-ops'
+import {
+  cachedWorktreeRead,
+  noteWorktreeChange,
+  repositoryRootOf,
+  summaryScanCostOf
+} from './git-ops'
 
 /**
  * 工作区读取缓存只做一件事：同一仓库在几秒内复用同一份 `status + numstat`。
@@ -122,6 +127,20 @@ describe('cachedWorktreeRead', () => {
     execFileSync('git', ['checkout', '-qb', 'feature'], { cwd: dir })
     expect(await read()).toBe('feature')
     expect(runs).toBe(2)
+  })
+
+  it('records how long a full-tree scan took, ignoring the cheap ones', async () => {
+    const dir = repo()
+    const slow = () =>
+      cachedWorktreeRead(dir, 'summary', async () => {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 30))
+        return 1
+      })
+    await slow()
+    expect(summaryScanCostOf(dir)).toBeGreaterThanOrEqual(25)
+    // 分支名那种一条 rev-parse 的读取不能把耗时统计拉低，否则工作区推送会变密。
+    await cachedWorktreeRead(dir, 'workspace-status', async () => 'main', { refresh: true })
+    expect(summaryScanCostOf(dir)).toBeGreaterThanOrEqual(25)
   })
 })
 

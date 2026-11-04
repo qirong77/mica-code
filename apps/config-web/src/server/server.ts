@@ -230,6 +230,16 @@ async function resolveApiCall(
       if (method === 'PUT') return get('writeConfigFile', { content: body.content });
       return METHOD_NOT_ALLOWED;
 
+    case '/api/provider-test':
+      // 试连会真的发一次模型请求：不是幂等读、也不该被缓存，所以用 POST。
+      if (method !== 'POST') return METHOD_NOT_ALLOWED;
+      return get('testProvider', {
+        apiBase: body.apiBase,
+        apiKey: body.apiKey,
+        protocol: body.protocol,
+        model: body.model,
+      });
+
     case '/api/details/session':
       if (method !== 'GET') return METHOD_NOT_ALLOWED;
       if (query.view === 'json') return get('readSessionContent', { id: query.id });

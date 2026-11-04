@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { buildTranscript } from './transcript.js';
 import { messageText, sessionMarkdown } from '../session-copy/markdown.js';
-import { emptyTagStore, resolveTagTokens } from '../session-tags/tags.js';
+import { emptyTagStore, resolveTagTokens } from '../session-tags/model.js';
 
 // Opt in to reproducible timing samples; correctness is covered by the regular regression tests.
 describe.skipIf(process.env.MICA_PLUGIN_REVIEW_BENCH !== '1')('session plugin performance samples', () => {

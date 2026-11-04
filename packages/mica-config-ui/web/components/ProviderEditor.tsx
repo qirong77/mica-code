@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { appIcons } from '../icons.js';
 import { providerProtocolLabel } from '../labels.js';
 import { PROVIDER_PROTOCOL_VALUES, readProviderDraft, type ProviderDraft } from '../configDraft.js';
+import type { ConfigWebProviderTest, ConfigWebProviderTestInput } from '../../src/shared/types.js';
 import { Button, SettingRow } from './Ui.js';
 import { SecretInput } from './SecretInput.js';
 
@@ -15,6 +16,8 @@ type ProviderEditorProps = {
   /** 校验出错时强制展开，避免错误藏在折叠行里。 */
   hasError: boolean;
   disabled?: boolean;
+  /** 配置页才传：用当前填的值发一次真实请求，验证这套配置能不能用。 */
+  onTest?(input: ConfigWebProviderTestInput): Promise<ConfigWebProviderTest>;
   onToggleExpanded(): void;
   onChange(next: ProviderDraft): void;
   onRemove(): void;
@@ -23,8 +26,8 @@ type ProviderEditorProps = {
 /**
  * 一个服务商：折叠时是一行摘要，展开后是同一块面里的字段行。
  *
- * 所有值都来自外部 draft（受控），组件自身只留「正在输入的模型名」与折叠开关，
- * 所以父级重新加载或撤销时不会残留旧值。默认折叠——多数时候只是看看配置，
+ * 所有值都来自外部 draft（受控），组件自身只留「正在输入的模型名」、折叠开关与上一次
+ * 试连的结论，所以父级重新加载或撤销时不会残留旧值。默认折叠——多数时候只是看看配置，
  * 不需要每次把七八个输入框都铺开。
  */
 export function ProviderEditor({
@@ -35,18 +38,49 @@ export function ProviderEditor({
   expanded,
   hasError,
   disabled = false,
+  onTest,
   onToggleExpanded,
   onChange,
   onRemove,
 }: ProviderEditorProps) {
   const fields = readProviderDraft(raw);
   const [modelInput, setModelInput] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<ConfigWebProviderTest | null>(null);
   const TrashIcon = appIcons.trash;
   const ChevronIcon = appIcons.chevronRight;
   const open = expanded || hasError;
 
   function patch(next: Partial<ProviderDraft>) {
+    // 改了配置，上一次的试连结论就过期了。
+    setTestResult(null);
     onChange({ ...fields, ...next });
+  }
+
+  /**
+   * 试连用列表里的第一个模型：它是折叠摘要里的「N 个模型」中的第一个，也是新会话没有
+   * 默认模型时会选中的那个。一个模型都没有时不发请求——没有模型名就无从验证。
+   */
+  const testModel = fields.models[0] ?? '';
+
+  async function runTest() {
+    if (!onTest || !testModel) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      setTestResult(
+        await onTest({ apiBase: fields.apiBase, apiKey: fields.apiKey, protocol: fields.protocol, model: testModel }),
+      );
+    } catch (error) {
+      setTestResult({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+        latencyMs: 0,
+        model: testModel,
+      });
+    } finally {
+      setTesting(false);
+    }
   }
 
   function addModel() {
@@ -147,19 +181,6 @@ export function ProviderEditor({
             </div>
           </SettingRow>
 
-          <SettingRow label="模型列表地址" hint="可选，留空则使用下面列出的模型" error={errorFor('get_model_url')}>
-            <input
-              className={invalidClass(errorFor('get_model_url'))}
-              value={fields.getModelUrl}
-              disabled={disabled}
-              spellCheck={false}
-              placeholder="https://api.example.com/models"
-              aria-label={`服务商 ${index + 1} 模型列表地址`}
-              aria-invalid={Boolean(errorFor('get_model_url'))}
-              onChange={(event) => patch({ getModelUrl: event.target.value })}
-            />
-          </SettingRow>
-
           <SettingRow
             label={
               <>
@@ -170,11 +191,7 @@ export function ProviderEditor({
             error={errorFor('models')}
           >
             {fields.models.length === 0 ? (
-              <p className="config-field-hint">
-                {fields.getModelUrl.trim()
-                  ? '留空时会从「模型列表地址」自动拉取。'
-                  : '留空时使用运行时按模型名推断的规则。'}
-              </p>
+              <p className="config-field-hint">填上这个服务商提供的模型名，至少一个才能发消息。</p>
             ) : (
               <div className="config-chip-list">
                 {fields.models.map((model) => (
@@ -217,6 +234,28 @@ export function ProviderEditor({
               </Button>
             </form>
           </SettingRow>
+
+          {onTest ? (
+            <SettingRow
+              label="连接"
+              hint={
+                testModel
+                  ? `用上面的地址与 Key 发一次最小请求（模型 ${testModel}），不写进会话。`
+                  : '先在上面添加一个模型，才能发请求验证地址与 Key。'
+              }
+            >
+              <div className="provider-test">
+                <Button disabled={disabled || testing || !testModel} onClick={() => void runTest()}>
+                  {testing ? '测试中…' : '测试连接'}
+                </Button>
+                {testResult ? (
+                  <span className={`provider-test-result${testResult.ok ? ' is-ok' : ' is-error'}`}>
+                    {describeTestResult(testResult)}
+                  </span>
+                ) : null}
+              </div>
+            </SettingRow>
+          ) : null}
         </div>
       ) : null}
     </article>
@@ -232,4 +271,11 @@ function summaryText(fields: ProviderDraft): string {
 
 function invalidClass(message?: string): string {
   return message ? 'text-input text-input-invalid' : 'text-input';
+}
+
+/** 试连结果压成一行：成功给耗时与模型，失败给执行器说的那句话。 */
+function describeTestResult(result: ConfigWebProviderTest): string {
+  if (!result.ok) return result.message || '连接失败';
+  const latency = result.latencyMs < 1000 ? `${result.latencyMs}ms` : `${(result.latencyMs / 1000).toFixed(1)}s`;
+  return `连接成功 · ${latency} · ${result.model}${result.reply ? ` · 回复「${result.reply}」` : ''}`;
 }

@@ -176,38 +176,6 @@ describe('config switch commands', () => {
     }
   });
 
-  it('opens immediately when a dynamic provider catalog has not loaded yet', async () => {
-    const provider = {
-      id: 'dynamic',
-      api_base: 'https://example.com/v1',
-      api_key: 'test-key',
-      protocol: 'openai_chat_completions' as const,
-      get_model_url: 'https://example.com/v1/models',
-    };
-    micaConfig.update(() => ({
-      provider: provider.id,
-      model: 'current-model',
-      effort: 'low',
-      contextWindowSize: 256000,
-      providers: [provider],
-    }));
-    const services = makeServices();
-    const agent = makeAgent([], {
-      provider: { ...provider, contextWindowSize: 256000 },
-      model: 'current-model',
-      effort: 'low',
-    });
-
-    try {
-      const command = await makeConfigSwitchCommand('model', agent, makeSession(), services);
-      command.action();
-
-      expect(micaUi.panels.pluginUIs.get()[0]?.id).toBe('select-model');
-    } finally {
-      micaUi.panels.clearPluginUIs();
-    }
-  });
-
   it('shows provider models together and switches provider and model in one selection', async () => {
     const { micaConfig } = await import('@packages/mica-config/index.js');
     const openai = {

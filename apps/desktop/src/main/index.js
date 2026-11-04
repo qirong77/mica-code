@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, watch } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -10,10 +10,14 @@ import { resolveTerminalSocketPath, startTerminalHost } from './terminal/termina
 import { resolveSystemSocketPath, startSystemHost } from './system/system-host.js'
 import { TERMINAL_PAGE_PATH } from '@mica-app-paths'
 import {
+  DEFAULT_THEME_PREFERENCE,
   RUNTIME_PORT_ENV,
   loopbackRuntimeUrl,
+  normalizeThemePreference,
   parseRuntimePort,
-  relayTokenOf
+  relayTokenOf,
+  resolveThemeName,
+  themeCanvasColor
 } from '@packages/mica-web-shared'
 // 与运行时、插件同一份探活逻辑（含「中转机链接要带 ?t=」的判定），这里只是为了与
 // 上面那个「端口上是不是我们自己的运行时」的 probeRuntime 区分而改名
@@ -609,31 +613,65 @@ function applyBadge(count) {
 /* ------------------------------------------------------------------ 窗口 */
 
 /**
- * 开一个窗口装载 `url`。`primary` 是启动时那个本机窗口：关掉它只是隐藏（应用继续留在
- * dock 里），其余窗口（切过去的那几台）关掉就真的关掉，不会攒下一堆看不见的窗口。
+ * 当前主题偏好：存在渲染层界面状态（ui-state.json，与渲染层同一份）。按 mtime 缓存，
+ * 文件没变就不重复解析——浏览器顶栏每次推状态都会问一次。
  */
-/**
- * 窗口底色：页面加载出第一帧之前、以及窗口缩放露出的边，看到的是这个颜色。
- * 取值与 app.css 的 --color-canvas 对齐（深 #2b2b2b / 浅白），界面重载时从旧页面
- * 到新页面第一帧之间不会先闪一块更黑的底色。偏好存在渲染层界面状态（ui-state.json，
- * 与渲染层同一份），auto 跟系统主题——和页面自己的解析规则保持一致，避免
- * 浅色主题下先闪一块深色。读不到文件（首次启动）就按系统主题。
- */
-function windowBackgroundColor() {
-  const dark = '#2b2b2b'
-  const light = '#ffffff'
-  const systemLight = !nativeTheme.shouldUseDarkColors
+let themePreferenceCache = { mtimeMs: null, preference: DEFAULT_THEME_PREFERENCE }
+function currentThemePreference() {
+  const file = join(app.getPath('userData'), 'ui-state.json')
   try {
-    const stored = JSON.parse(readFileSync(join(app.getPath('userData'), 'ui-state.json'), 'utf8'))
-    const preference = stored?.keys?.theme
-    if (preference === 'light') return light
-    if (preference === 'dark') return dark
-    return systemLight ? light : dark
+    const { mtimeMs } = statSync(file)
+    if (mtimeMs === themePreferenceCache.mtimeMs) return themePreferenceCache.preference
+    const stored = JSON.parse(readFileSync(file, 'utf8'))
+    const preference = normalizeThemePreference(stored?.keys?.theme)
+    themePreferenceCache = { mtimeMs, preference }
+    return preference
   } catch {
-    return systemLight ? light : dark
+    // 读不到（首次启动、还没写过界面状态）就按默认偏好，与渲染层一致
+    return DEFAULT_THEME_PREFERENCE
   }
 }
 
+/**
+ * 当前生效的主题 id：`auto` 跟系统主题，其余显式选定——与渲染层 theme.js 的解析规则
+ * 同一份实现。浏览器窗口的顶栏、窗口底色、主窗口底色都用它。
+ */
+function currentThemeId() {
+  return resolveThemeName(currentThemePreference(), !nativeTheme.shouldUseDarkColors)
+}
+
+/**
+ * 窗口底色：页面加载出第一帧之前、以及窗口缩放露出的边，看到的是这个颜色。
+ * 取当前主题的 --color-canvas，界面重载时从旧页面到新页面第一帧之间不会先闪一块别的
+ * 底色。读不到界面状态（首次启动）就按系统主题。
+ */
+function windowBackgroundColor() {
+  return themeCanvasColor(currentThemeId())
+}
+
+/**
+ * 主题一变就把已经打开的浏览器窗口顶栏重画一遍。偏好由运行时的宿主进程写盘，主进程
+ * 只能从文件上看到变化，所以盯 ui-state.json 一个文件（同一批多次写只算一次）。
+ */
+function watchThemeChanges(onChange) {
+  let timer = null
+  try {
+    const watcher = watch(app.getPath('userData'), (_event, filename) => {
+      if (filename && String(filename) !== 'ui-state.json') return
+      clearTimeout(timer)
+      timer = setTimeout(onChange, 150)
+    })
+    watcher.on('error', () => {})
+    app.on('will-quit', () => watcher.close())
+  } catch {
+    // 盯不上就退回「窗口下次显示/状态变化时跟随」，不影响功能
+  }
+}
+
+/**
+ * 开一个窗口装载 `url`。`primary` 是启动时那个本机窗口：关掉它只是隐藏（应用继续留在
+ * dock 里），其余窗口（切过去的那几台）关掉就真的关掉，不会攒下一堆看不见的窗口。
+ */
 function createWindow(url, { primary = false } = {}) {
   const isMac = process.platform === 'darwin'
   const win = new BrowserWindow({
@@ -864,9 +902,13 @@ app.whenReady().then(async () => {
     browserHost = await startBrowserHost({
       socketPath: resolveBrowserSocketPath(app.getPath('userData')),
       cacheDir: join(app.getPath('userData'), 'browser-cookies'),
-      isQuitting: () => quitting
+      isQuitting: () => quitting,
+      theme: currentThemeId
     })
     console.log(`[mica-browser] 受控浏览器服务: unix:${browserHost.socketPath}`)
+    watchThemeChanges(() => browserHost?.manager.refreshTheme())
+    // 偏好是 auto 时换系统亮暗不写盘，只能靠这个事件
+    nativeTheme.on('updated', () => browserHost?.manager.refreshTheme())
   } catch (error) {
     // 起不来只影响「AI 驱动的浏览器」，不该拦住整个应用
     console.error('[mica-code-app] 受控浏览器服务启动失败', error)

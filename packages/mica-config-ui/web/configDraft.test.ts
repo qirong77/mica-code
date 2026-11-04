@@ -19,7 +19,6 @@ const SOURCE = {
       api_base: 'https://api.deepseek.com',
       api_key: 'sk-test',
       protocol: 'openai_chat_completions',
-      get_model_url: 'https://api.deepseek.com/models',
       models: ['deepseek-chat'],
     },
   ],
@@ -55,7 +54,6 @@ describe('config draft providers', () => {
       apiKey: 'sk-test',
       protocol: 'openai_chat_completions',
       models: ['deepseek-chat'],
-      getModelUrl: 'https://api.deepseek.com/models',
     });
   });
 
@@ -82,11 +80,9 @@ describe('config draft providers', () => {
     const draft = draftOf(SOURCE);
     const next = writeProviderDraft(draft, 0, {
       ...readProviderDraft(providerEntries(draft)[0]),
-      getModelUrl: '',
       models: [],
     });
     const [provider] = providerEntries(next) as Record<string, unknown>[];
-    expect('get_model_url' in provider).toBe(false);
     expect('models' in provider).toBe(false);
     // 原本就有的 api_key 保留空串表示「显式清空」，而不是删键
     expect(provider.api_key).toBe('sk-test');
@@ -106,6 +102,19 @@ describe('config draft providers', () => {
     expect(provider.supportsEffort).toBe(false);
     expect(Object.keys(provider)).toContain('supportsEffort');
     expect(provider.api_base).toBe('https://api.deepseek.com/v1');
+  });
+
+  // 模型列表地址这个功能已经删掉：旧配置里残留的键在保存时清掉，而不是继续留在文件里。
+  it('clears a legacy get_model_url on write', () => {
+    const draft = draftOf({
+      providers: [{ ...SOURCE.providers[0], get_model_url: 'https://api.deepseek.com/models' }],
+    });
+    const next = writeProviderDraft(draft, 0, {
+      ...readProviderDraft(providerEntries(draft)[0]),
+      apiBase: 'https://api.deepseek.com/v1',
+    });
+    const [provider] = providerEntries(next) as Record<string, unknown>[];
+    expect('get_model_url' in provider).toBe(false);
   });
 
   it('adds a provider with a unique id and removes by index', () => {
@@ -172,17 +181,9 @@ describe('config draft default model', () => {
     expect(validateConfigDraft(cleared)).toEqual([]);
   });
 
-  it('accepts manually entered models for providers with dynamic model lists', () => {
-    const draft = draftOf({
-      providers: [{ ...SOURCE.providers[0], models: undefined }],
-      defaultModel: { provider: 'deepseek', model: 'new-dynamic-model' },
-    });
-    expect(validateConfigDraft(draft)).toEqual([]);
-  });
-
   it('rejects a model outside a static provider list', () => {
     const draft = draftOf({
-      providers: [{ ...SOURCE.providers[0], get_model_url: undefined }],
+      providers: SOURCE.providers,
       defaultModel: { provider: 'deepseek', model: 'missing' },
     });
     expect(validateConfigDraft(draft).map((issue) => issue.key)).toEqual(['defaultModel.model']);
@@ -207,9 +208,9 @@ describe('config draft default model', () => {
     [{ provider: 1, model: false }, ['defaultModel.provider', 'defaultModel.model']],
     [{ provider: 'missing', model: 'model' }, ['defaultModel.provider']],
     [{ provider: 'deepseek', model: ' ' }, ['defaultModel.model']],
-    [{ provider: 'deepseek', model: 'model', effort: '' }, ['defaultModel.effort']],
-    [{ provider: 'deepseek', model: 'model', effort: 2 }, ['defaultModel.effort']],
-    [{ provider: 'deepseek', model: 'model', effort: 'bad effort' }, ['defaultModel.effort']],
+    [{ provider: 'deepseek', model: 'deepseek-chat', effort: '' }, ['defaultModel.effort']],
+    [{ provider: 'deepseek', model: 'deepseek-chat', effort: 2 }, ['defaultModel.effort']],
+    [{ provider: 'deepseek', model: 'deepseek-chat', effort: 'bad effort' }, ['defaultModel.effort']],
   ])('reports field-specific default model errors for %j', (defaultModel, keys) => {
     expect(validateConfigDraft(draftOf({ ...SOURCE, defaultModel })).map((issue) => issue.key)).toEqual(keys);
   });

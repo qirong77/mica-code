@@ -84,14 +84,6 @@ describe('default model validation', () => {
     ).toContainEqual(expect.objectContaining({ code: 'default_model_unavailable' }));
   });
 
-  it('allows models outside the static catalog for a dynamic provider', () => {
-    expect(
-      validateConfig({
-        providers: [{ ...provider, get_model_url: 'https://api.example.test/v1/models' }],
-        defaultModel: { provider: 'p', model: 'dynamic-model', effort: 'max' },
-      }).ok,
-    ).toBe(true);
-  });
 });
 
 describe('legacy search setting migration', () => {

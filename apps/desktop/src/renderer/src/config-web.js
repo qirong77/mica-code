@@ -32,6 +32,7 @@ export function createDesktopConfigWebClient() {
 
     readConfigFile: () => invoke('readConfigFile'),
     writeConfigFile: (content) => invoke('writeConfigFile', { content }),
+    testProvider: (input) => invoke('testProvider', input),
 
     readMcpDetails: () => invoke('readMcpDetails'),
     createMcpServer: (name, content = '') => invoke('createMcpServer', { name, content }),

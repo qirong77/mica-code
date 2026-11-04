@@ -316,6 +316,60 @@ describe('app.css 颜色 token 主题契约', () => {
     )
   })
 
+  /**
+   * 提问（ask）的识别色是主题强调色之外的一支：青色。它同时画在卡片的问号徽标、
+   * 选中选项、「确定」按钮与侧栏「等你选」圆点上——和主按钮、未读蓝点、运行绿点
+   * 混成一片，就等于「这卡没被一眼认出来」。
+   *
+   * 字色压在青底上，必须跟着主题明暗翻转（暗色主题青底压深字、亮色主题深青压白字），
+   * 写死一个近黑在 `light` / `latte` / `tokyo-night-light` 上就读不出来。
+   */
+  it('提问卡片的识别色是独立的 --color-ask，字色在每个主题上可读', () => {
+    for (const selector of ['.chat-ask-mark', '.chat-ask-submit']) {
+      const body = ruleBody(selector)
+      expect(body, `${selector} 存在`).not.toBeNull()
+      expect(body, `${selector} 底色用 --color-ask`).toContain('background: var(--color-ask)')
+      expect(body, `${selector} 字色用 --color-ask-contrast`).toContain(
+        'color: var(--color-ask-contrast)'
+      )
+    }
+
+    for (const theme of THEMES) {
+      const block = themeBlocks.get(theme.id)
+      const ask = hexToken('ask', block)
+      const contrast = hexToken('ask-contrast', block)
+      expect(ask, `${theme.id} --color-ask`).not.toBeNull()
+      expect(contrast, `${theme.id} --color-ask-contrast`).not.toBeNull()
+      expect(
+        contrastRatio(contrast, ask),
+        `${theme.id} --color-ask 实心底上的字色对比度`
+      ).toBeGreaterThanOrEqual(4.5)
+      // 与主题强调色同值就失去区分意义（Catppuccin 的 accent 本身就是紫/青系）。
+      expect(ask, `${theme.id} --color-ask 不能等于 --color-accent`).not.toBe(
+        hexToken('accent', block)
+      )
+    }
+  })
+
+  /**
+   * 侧栏会话行与快速打开里的「等你做一个选择」必须跟着用同一支青：
+   * 它原本和「未读」共用强调色，浅色主题下两个蓝点只能靠透明度分辨。
+   */
+  it('侧栏与快速打开的等待选择圆点用 bg-ask，不再借用 accent / info', () => {
+    for (const file of ['SessionTree.jsx', 'SessionQuickOpen.jsx']) {
+      const source = readFileSync(resolve(RENDERER_DIR, file), 'utf8')
+      const awaitingBlocks = [...source.matchAll(/awaiting[\s\S]{0,200}/g)].map((match) =>
+        match[0]
+      )
+      expect(awaitingBlocks.length, `${file} 里应当有 awaiting 分支`).toBeGreaterThan(0)
+      expect(
+        source.match(/bg-accent[^\n]*chat-dot-unread/g),
+        `${file} 的等待点不能再用 bg-accent`
+      ).toBeNull()
+      expect(source, `${file} 的等待点用 bg-ask`).toContain('bg-ask')
+    }
+  })
+
   it('亮色主题给每个重阴影配了同选择器的更轻阴影，暗色原值保持不动', () => {
     const shadowedRules = [
       '.chat-tooltip',
@@ -327,7 +381,8 @@ describe('app.css 颜色 token 主题契约', () => {
       '.chat-image-preview img',
       '.chat-modal',
       '.chat-btw-jump',
-      '.quick-pick-panel'
+      '.quick-pick-panel',
+      '.chat-ask-card.is-modal'
     ]
 
     for (const selector of shadowedRules) {

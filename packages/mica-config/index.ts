@@ -6,9 +6,7 @@ import {
   getConfig,
   updateConfig,
   resetSessionModelDefaults,
-  loadProviderModels,
   prepareSessionModelDefaults,
-  loadMissingProviderModels,
   ensureModelRule,
   getModelRule,
   getModelEffortOptions,
@@ -40,14 +38,10 @@ export const micaConfig = {
   get: getConfig,
   /** 通过 updater 修改配置，同时同步写回磁盘。 */
   update: updateConfig,
-  /** 从最新磁盘配置重置新会话的模型和 effort，保留已加载的动态模型列表。 */
+  /** 从最新磁盘配置重置新会话的模型和 effort。 */
   resetSessionModelDefaults,
-  /** 等待动态模型目录和服务商模型规则就绪，再重算新会话默认值。 */
+  /** 等模型规则就绪后重算新会话默认值。 */
   prepareSessionModelDefaults,
-  /** 拉取指定 provider 的模型列表并缓存到内存运行态配置，不写回 config.json。 */
-  loadProviderModels,
-  /** 为配置中尚未加载模型列表的动态 provider 批量拉取模型。 */
-  loadMissingProviderModels,
   /** 按模型名生成固定的模型规则。 */
   getModelRule,
   /** 确保模型规则已通过已注册的 resolver 加载。 */

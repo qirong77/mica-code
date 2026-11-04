@@ -10,6 +10,8 @@ import type {
   ConfigWebPerformanceDetails,
   ConfigWebPluginLlmTest,
   ConfigWebPluginActionResult,
+  ConfigWebProviderTest,
+  ConfigWebProviderTestInput,
   ConfigWebPluginsDetails,
   ConfigWebPathAction,
   ConfigWebRolesDetails,
@@ -32,6 +34,13 @@ import { unavailableTerminalControlDetails } from './terminalControl.js';
 export type ConfigWebClient = {
   readConfigFile(): Promise<ConfigWebFilePayload>;
   writeConfigFile(content: string): Promise<ConfigWebFilePayload>;
+  /**
+   * 服务商配置的试连：拿表单上那四项发一次最小模型请求。
+   *
+   * 只有页面用得到，会话级设置里不提供——它测的是全局配置，测出问题会让人误以为是
+   * 会话里的值。
+   */
+  testProvider?(input: ConfigWebProviderTestInput): Promise<ConfigWebProviderTest>;
 
   readMcpDetails(): Promise<ConfigWebMcpDetails>;
   createMcpServer(name: string, content?: string): Promise<ConfigWebMcpDetails>;
@@ -264,6 +273,17 @@ export function testPluginLlm(id: string, values?: Record<string, string>): Prom
 
 export function supportsPluginLlmTest(): boolean {
   return typeof client?.testPluginLlm === 'function';
+}
+
+/**
+ * 试连一个服务商：用页面当前填的地址 / Key / 协议 / 模型发一次真实请求。
+ *
+ * 失败原因由执行器给出（地址不通、Key 不对、协议不匹配、模型名不存在），页面直接显示。
+ */
+export async function testProvider(input: ConfigWebProviderTestInput): Promise<ConfigWebProviderTest> {
+  const current = requireClient();
+  if (typeof current.testProvider !== 'function') throw new Error('当前宿主不支持测试服务商连接');
+  return current.testProvider(input);
 }
 
 export function supportsPluginSettings(): boolean {

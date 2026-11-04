@@ -85,32 +85,4 @@ suite('mica models flows', () => {
     }
   });
 
-  it('keeps static models and exits successfully when dynamic provider discovery fails', () => {
-    const home = makeHome('dynamic-error', [
-      {
-        id: 'static',
-        api_base: 'https://example.invalid/v1',
-        protocol: 'openai_chat_completions',
-        models: ['static-model'],
-      },
-      {
-        id: 'dynamic',
-        api_base: 'https://example.invalid/v1',
-        protocol: 'openai_chat_completions',
-        // Port 1 is intentionally unavailable in the test environment. The
-        // discovery path is best-effort and must not suppress static entries.
-        get_model_url: 'http://127.0.0.1:1/models',
-      },
-    ]);
-    try {
-      const result = runCli(['models', '--json'], home);
-      expect(result.status).toBe(0);
-      expect(result.stderr).toBe('');
-      expect(JSON.parse(result.stdout.trim())).toEqual([
-        { id: 'static/static-model', efforts: expect.any(Array), defaultEffort: null },
-      ]);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
 });

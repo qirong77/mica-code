@@ -391,19 +391,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
   }
 
   try {
-    let initialModel = runtimeOverride.model ?? micaConfig.get().model;
-    if (!initialModel) {
-      const config = micaConfig.get();
-      const provider = config.providers.find((item) => item.id === config.provider);
-      if (provider?.get_model_url) {
-        try {
-          await micaConfig.loadProviderModels(provider.id);
-          initialModel = runtimeOverride.model ?? micaConfig.get().model;
-        } catch {
-          // Best-effort: dynamic model discovery may fail in restricted networks.
-        }
-      }
-    }
+    const initialModel = runtimeOverride.model ?? micaConfig.get().model;
     await ensureChatHostModelRule(initialModel, providerHintForModel(initialModel));
     micaConfig.resetSessionModelDefaults();
 

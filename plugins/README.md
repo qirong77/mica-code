@@ -470,6 +470,11 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   （外壳里开新窗口、浏览器里开新标签页）、`access`（`get()` / `set({ enabled, password })`
   读写这台机器的远程访问策略——请求分派只存在于运行时进程，页面自己改不了）、
   `action(key)`（执行清单 `actions` 里声明过的一个动作，结果是 `{ ok, message?, link?, error? }`）。
+- 会话行标记：`annotations`（`read()` / `writeOptions(options)`）。插件用
+  `session-annotations.json` 的 `options` 在自己的会话行上画点、生成右键菜单项；颜色与名字
+  要由用户在页面里定义时（标签这类），页面整份写回那份 `options`。宿主只做跨进程互斥、
+  按通用结构归一化、把删掉的项同时从会话归属里摘掉，并广播 `annotations:changed` 让所有窗口
+  重画。返回值带 `counts`（每个 option 挂着多少个会话），删之前就能说清会摘掉多少。
 - 当前会话：`session`（没有打开会话时为 `null`）——`id()` / `sessionId()` / `cwd()`、
   `state.read()` / `state.write(value)` / `state.subscribe(callback)` 读写插件自己的**会话级**
   状态（落在会话快照的 `pluginState[<插件 id>]`，与 setup 里的 `ctx.sessionState` 是同一份，

@@ -27,6 +27,7 @@ import {
   setPluginEnabled as setPluginEnabledInStore,
   testPluginLlm as testPluginLlmInStore,
   setPluginSettings as setPluginSettingsInStore,
+  testProviderConnection,
 } from './details.js';
 
 export type ConfigWebActionInput = {
@@ -47,6 +48,14 @@ export const configWebActions = {
 
   readConfigFile: (_input: ConfigWebActionInput) => readConfigWebFile(),
   writeConfigFile: (input: ConfigWebActionInput) => writeConfigWebFile(text(input, 'content')),
+  // 服务商试连会真的发一次模型请求，所以参数只认表单上那四项，不带别的东西。
+  testProvider: (input: ConfigWebActionInput) =>
+    testProviderConnection({
+      apiBase: text(input, 'apiBase'),
+      apiKey: optionalText(input, 'apiKey'),
+      protocol: optionalText(input, 'protocol'),
+      model: text(input, 'model'),
+    }),
 
   readMcpDetails: (_input: ConfigWebActionInput) => getMcpDetails(),
   createMcpServer: (input: ConfigWebActionInput) =>

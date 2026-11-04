@@ -26,7 +26,6 @@ const PROVIDER_KEY_ORDER = [
   'api_key',
   'protocol',
   'models',
-  'get_model_url',
   // 表单不再编辑这一项（effort 是否发送由模型规则按模型名判定），但保留排序位置，
   // 免得旧配置里已有的值被挪到文件末尾。
   'supportsEffort',
@@ -46,7 +45,6 @@ export type ProviderDraft = {
   apiKey: string;
   protocol: ProviderProtocolValue;
   models: string[];
-  getModelUrl: string;
 };
 
 /** `key` 是点分路径（`providers.0.id`），页面按它定位到具体输入框。 */
@@ -98,7 +96,6 @@ export function readProviderDraft(raw: unknown): ProviderDraft {
     apiKey: text(record.api_key),
     protocol: isProtocol(record.protocol) ? record.protocol : DEFAULT_PROVIDER_PROTOCOL,
     models: Array.isArray(record.models) ? record.models.filter(isNonEmptyText) : [],
-    getModelUrl: text(record.get_model_url),
   };
 }
 
@@ -117,7 +114,6 @@ export function addProviderDraft(draft: ConfigDraft): ConfigDraft {
       apiKey: '',
       protocol: DEFAULT_PROVIDER_PROTOCOL,
       models: [],
-      getModelUrl: '',
     }),
   );
   return { ...draft, providers };
@@ -164,9 +160,6 @@ export function validateConfigDraft(draft: ConfigDraft): ConfigDraftIssue[] {
       if (raw.models !== undefined && !(Array.isArray(raw.models) && raw.models.every(isNonEmptyText))) {
         issues.push({ key: `${base}.models`, message: '模型列表必须是非空字符串' });
       }
-      if (raw.get_model_url !== undefined && !isNonEmptyText(raw.get_model_url)) {
-        issues.push({ key: `${base}.get_model_url`, message: '必须是地址字符串，或留空' });
-      }
       if (raw.supportsEffort !== undefined && typeof raw.supportsEffort !== 'boolean') {
         issues.push({ key: `${base}.supportsEffort`, message: '只能是开或关' });
       }
@@ -189,11 +182,7 @@ export function validateConfigDraft(draft: ConfigDraft): ConfigDraftIssue[] {
       const provider = providerEntries(draft).find((raw) => isRecord(raw) && raw.id === defaults.provider);
       if (!isNonEmptyText(defaults.model)) {
         issues.push({ key: 'defaultModel.model', message: '默认模型名称不能为空' });
-      } else if (
-        isRecord(provider) &&
-        !isNonEmptyText(provider.get_model_url) &&
-        (!Array.isArray(provider.models) || !provider.models.includes(defaults.model))
-      ) {
+      } else if (isRecord(provider) && (!Array.isArray(provider.models) || !provider.models.includes(defaults.model))) {
         issues.push({ key: 'defaultModel.model', message: '默认模型不在该服务商的模型列表中' });
       }
       if (
@@ -217,10 +206,11 @@ function buildProviderRecord(raw: unknown, fields: ProviderDraft): ConfigDraft {
   const next: ConfigDraft = { ...(isRecord(raw) ? raw : {}) };
   const id = fields.id.trim();
   const apiBase = fields.apiBase.trim();
-  const getModelUrl = fields.getModelUrl.trim();
 
   // name 已并入 id：旧配置里残留的显示名称不再有对应字段，写盘时一并清掉。
   delete next.name;
+  // 模型列表地址已移除（模型全由用户手填）：旧配置里残留的键同样清掉。
+  delete next.get_model_url;
   if (id) next.id = id;
   else delete next.id;
   if (apiBase) next.api_base = apiBase;
@@ -231,8 +221,6 @@ function buildProviderRecord(raw: unknown, fields: ProviderDraft): ConfigDraft {
   // 空数组在 validate-config 里是错误，所以留空就删键。
   if (fields.models.length > 0) next.models = [...fields.models];
   else delete next.models;
-  if (getModelUrl) next.get_model_url = getModelUrl;
-  else delete next.get_model_url;
 
   return orderKeys(next, PROVIDER_KEY_ORDER);
 }
