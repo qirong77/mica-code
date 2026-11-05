@@ -6,7 +6,6 @@ import {
   DEFAULT_BROWSER_SIZE,
   activeTab,
   browserSummary,
-  cookieScopeUrl,
   createTabSwitcher,
   formatCookieHeader,
   keyDescriptors,
@@ -56,6 +55,7 @@ const DEFAULT_COOKIE_LIST = 2000
 
 export function createBrowserManager({
   onChange = () => {},
+  onCookieChange = () => {},
   isQuitting = () => false,
   // 当前应用主题 id（ui-state 的 theme 解析后的结果）。外壳每次进来重新读一遍，顶栏
   // 配色和窗口底色都跟着它走，换主题后不需要重启窗口。
@@ -66,6 +66,20 @@ export function createBrowserManager({
   let permissionsInstalled = false
 
   const partition = () => session.fromPartition(BROWSER_PARTITION)
+  const cookieStore = partition().cookies
+  const cookieChanged = (_event, cookie, cause, removed) => {
+    if (!cookie?.name || !cookie?.domain || cause === 'overwrite') return
+    try {
+      onCookieChange({
+        cookie: { name: cookie.name, domain: cookie.domain, path: cookie.path || '/' },
+        cause,
+        removed: Boolean(removed)
+      })
+    } catch (error) {
+      console.error('[mica-browser] 推送 cookie 变化失败:', error)
+    }
+  }
+  cookieStore.on('changed', cookieChanged)
 
   /** 顶栏调色板 + 主题 id：外壳读盘失败时按默认深色处理，不影响窗口本身 */
   function chromeTheme() {
@@ -664,6 +678,7 @@ export function createBrowserManager({
   }
 
   function closeAll() {
+    cookieStore.removeListener('changed', cookieChanged)
     for (const record of [...browsers.values()]) {
       record.destroyRequested = true
       for (const tab of record.tabs) detachTab(tab)
@@ -1108,7 +1123,7 @@ export function createBrowserManager({
       return { written, failed }
     },
 
-    /** 按 (domain, path, name) 删 cookie：url 带上这条 cookie 自己的 path，同名不同 path 的不会被一起删掉。 */
+    /** URL/name 删除会匹配父域与其它 path；用精确作用域的过期写入删除。 */
     async removeCookies(input = []) {
       const list = normalizeCookiePayload(input)
       const store = partition().cookies
@@ -1121,8 +1136,18 @@ export function createBrowserManager({
           continue
         }
         try {
-          await store.remove(cookieScopeUrl(entry), name)
-          removed += 1
+          const domain = normalizeCookieDomain(entry.domain || entry.url)
+          const hostOnly = entry.hostOnly ?? !String(entry.domain || domain).startsWith('.')
+          const matches = (await store.get({ domain, name })).filter(
+            (cookie) =>
+              normalizeCookieDomain(cookie.domain) === domain &&
+              cookie.path === (entry.path || '/') &&
+              cookie.hostOnly === hostOnly
+          )
+          for (const cookie of matches) {
+            await store.set({ ...toElectronCookie(cookie), expirationDate: 1 })
+            removed += 1
+          }
         } catch (error) {
           failed.push({
             name,

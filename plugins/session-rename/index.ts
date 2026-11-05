@@ -1,7 +1,12 @@
 import { pluginLogPath, type PluginContext } from '@packages/mica-plugin/index.js';
 import type { RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
 import { buildTranscript, formatTitleInput, messageText } from './transcript.js';
-import { requestSessionTitle, sanitizeTitle, type TitleRequestConfig } from './titleRequest.js';
+import {
+  requestSessionTitle,
+  titleRejectionReason,
+  type TitleRejectionReason,
+  type TitleRequestConfig,
+} from './titleRequest.js';
 
 /** 与 `plugin.json` 里的 `prompt.default` 保持一致（有测试对账）。 */
 export const DEFAULT_PROMPT = [
@@ -9,7 +14,7 @@ export const DEFAULT_PROMPT = [
   '输入分两段：对话记录用来理解上下文（改哪个模块、进行到哪一步），用户最新请求是标题的对象。',
   '先读对话记录，再按最新请求定标题；两者不一致时以最新请求为准，不要沿用上一轮的主题。',
   '最新请求太含糊（如「继续」「再改一下」）时，用上下文补全它真正指的事。',
-  '只输出标题本身：一行、不超过 20 个字，不要引号、句号或 markdown。',
+  '只输出标题本身：一行，中文不超过 20 字，英文不超过 40 个字符，不要引号、句号或 markdown。',
   '要具体：写清动作和对象（改哪个模块、修什么 bug），不要泛泛的类别（如「代码讨论」「修复问题」）。',
   '不要照抄用户原话里的寒暄、举例或粘贴的报错，只取其中的动作与目标。',
 ].join('\n');
@@ -25,6 +30,10 @@ type SessionRenameState = {
   /** 按输入 id 去重：不同轮次的「继续」仍然需要重新判断标题。 */
   lastInputId: string;
 };
+
+type RenameResult =
+  | { outcome: 'renamed' | 'unchanged'; title: string }
+  | { outcome: 'rejected'; reason: TitleRejectionReason };
 
 /**
  * 自动重命名会话。
@@ -109,7 +118,7 @@ export default function setup(ctx: PluginContext): void {
     return true;
   };
 
-  const renameNow = async (owner: unknown): Promise<string> => {
+  const renameNow = async (owner: unknown): Promise<RenameResult> => {
     const session = ctx.session;
     if (!session) throw new Error('插件运行环境没有提供会话接口');
     const config = readConfig(owner);
@@ -122,7 +131,7 @@ export default function setup(ctx: PluginContext): void {
     previous?.controller?.abort();
     storeState(info.id, { controller, lastAttemptAt: Date.now(), lastInputId: '' });
     try {
-      const title = await rename({
+      const result = await rename({
         ctx,
         sessionId: info.id,
         currentTitle: info.title,
@@ -133,8 +142,8 @@ export default function setup(ctx: PluginContext): void {
         signal: controller.signal,
         owner,
       });
-      if (title === null) throw new Error('这次没有生成新标题（内容不足，或会话已切换）');
-      return title;
+      if (result === null) throw new Error('这次没有生成新标题（内容不足，或会话已切换）');
+      return result;
     } finally {
       const current = states.get(info.id);
       if (current?.controller === controller) current.controller = null;
@@ -193,7 +202,7 @@ export default function setup(ctx: PluginContext): void {
       // 不 await：这里只是发起，重命名失败绝不能拖住或打断 turn。
       void (async () => {
         try {
-          const title = await rename({
+          const result = await rename({
             ctx,
             sessionId: info.id,
             currentTitle: info.title,
@@ -203,7 +212,7 @@ export default function setup(ctx: PluginContext): void {
             signal: controller.signal,
             owner,
           });
-          if (title === null && states.get(info.id)?.controller === controller) {
+          if (result === null && states.get(info.id)?.controller === controller) {
             states.get(info.id)!.lastInputId = '';
           }
         } catch (error) {
@@ -258,8 +267,14 @@ export default function setup(ctx: PluginContext): void {
       }
       if (action === 'now') {
         try {
-          const title = await renameNow(undefined);
-          ctx.ui?.showMessage(`已重命名：${title}`);
+          const result = await renameNow(undefined);
+          ctx.ui?.showMessage(
+            result.outcome === 'rejected'
+              ? '生成的标题未通过质量校验，已保留原标题'
+              : result.outcome === 'unchanged'
+                ? `标题未变化：${result.title}`
+                : `已重命名：${result.title}`,
+          );
         } catch (error) {
           const message = `手动改名失败：${errorMessage(error)}`;
           ctx.health.report({ level: 'error', message });
@@ -284,7 +299,7 @@ async function rename(input: {
   latestUserText: string;
   signal: AbortSignal;
   owner?: unknown;
-}): Promise<string | null> {
+}): Promise<RenameResult | null> {
   const { ctx, sessionId, currentTitle, config, maxMessages, latestUserText, signal, owner } = input;
   const session = ctx.session;
   if (!session) return null;
@@ -306,20 +321,37 @@ async function rename(input: {
     llm: llm.describe(owner),
   });
 
-  const { title: rawTitle, usage } = await requestSessionTitle(llm, config, formatTitleInput(entries), {
+  const { title, usage } = await requestSessionTitle(llm, config, formatTitleInput(entries), {
     signal,
     owner,
   });
   // 会话切换或插件卸载后，即使 provider 没有响应 abort，也不能提交这个旧结果。
   const current = session.describe(owner);
   if (signal.aborted || current?.id !== sessionId || current.titleSource === 'manual') return null;
-  const title = sanitizeTitle(rawTitle);
-  if (!title) {
-    throw new Error('起标题模型返回了空标题');
+  const rejection = titleRejectionReason(title);
+  if (rejection) {
+    ctx.logger.info('session-rename:rejected', {
+      sessionId,
+      reason: rejection,
+      chars: [...title].length,
+      elapsedMs: Date.now() - startedAt,
+      usage,
+    });
+    ctx.health.report({
+      level: 'warn',
+      message:
+        rejection === 'empty'
+          ? '上次未生成可用标题，已保留原标题；可调整起标题提示词'
+          : rejection === 'too-long'
+            ? '上次生成的标题过长，已保留原标题；可调整起标题提示词'
+            : '上次生成的标题像助手过程陈述，已保留原标题；可调整起标题提示词',
+    });
+    return { outcome: 'rejected', reason: rejection };
   }
   if (title === current.title) {
+    ctx.health.report({ level: 'ok', message: `最近一次标题校验通过：${title}` });
     ctx.logger.info('session-rename:unchanged', { sessionId, title });
-    return title;
+    return { outcome: 'unchanged', title };
   }
 
   const renamed = session.rename(title, { source: 'auto', ...(owner === undefined ? {} : { owner }) });
@@ -333,7 +365,7 @@ async function rename(input: {
     elapsedMs: Date.now() - startedAt,
     usage,
   });
-  return renamed ? title : null;
+  return renamed ? { outcome: 'renamed', title } : null;
 }
 
 function parseCount(value: string | undefined, fallback: number, max: number): number {

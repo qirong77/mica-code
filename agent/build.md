@@ -28,7 +28,6 @@ npx eslint src/
 npm run build              # 并行：根 CLI 构建 + 外壳 + Web 运行时
 npm run build:server       # 只重建 out/server
 npm run build:app          # build + 无签名打包 + 本机证书快速签名（约十几秒）
-npm run build:app:local    # build:app 的兼容别名
 npm run pack:app           # 只跑 electron-builder --dir 且强制不签名
 npm run sign:app           # 用本机自签证书给已打出的 .app 签名
 npm run build:mac          # 再打 DMG + zip（发布用；打包与压缩占 20s 以上）

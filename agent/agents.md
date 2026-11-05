@@ -57,7 +57,7 @@
 
 ## 运行观察
 
-- 运行观察走通用 `agent:observe` hook（`AgentObservationEvent`，owner/runId 关联）：运行开始/终态、请求边界（`request:start` / `request:end`：耗时、首字延迟、重试次数、tool 数）、最终 prompt、工具调用/结果、用量、重试、历史改写与压缩（`compaction`：策略 local/llm/idle、原因、前后条数与字符、是否真的改了历史）；委派运行带 `delegation: { type, parentSessionId }` 且 runId 取负数，与父运行分开。不在任何一轮里的工作同样在范围内：`createSubAgent` 与 `startHelperRun` 给它们补上负数 runId 的一对 run 事件、请求边界与用量。观察失败不得中断任务。
+- 运行观察走通用 `agent:observe` hook（`AgentObservationEvent`，owner/runId 关联）：运行开始/终态、请求边界（`request:start` / `request:end`：耗时、首字延迟、重试次数、tool 数）、最终 prompt、工具调用/结果、用量、重试、历史改写与压缩（`compaction`：策略 local/llm/idle、原因、前后条数与字符、是否真的改了历史）；委派运行带 `delegation: { type, parentSessionId }` 且 runId 取负数，与父运行分开。不在任何一轮里的工作同样在范围内：`createSubAgent` 给委派与 helper 子代理补上负数 runId 的一对 run 事件、请求边界、工具调用/结果与用量（每次 `query` 包裹当时的工具回调，保留宿主活动跟踪回调，不把子工具算进父运行）；`startHelperRun` 给直接模型请求补 run 事件、请求边界与用量。观察失败不得中断任务。
 - 「这次回答没被接受」只认用户动作，不认模型自评：宿主把改写重跑、撤回排队消息翻成运行时事件 `input:corrected`（`kind: edit|recall`，撤回没取回时不发），插件自己决定怎么用。
 - 不在任何一轮里的工作也算观察对象，只是分类不同：`run:start.helper: { kind, pluginId?, purpose? }` 标出压缩摘要（`compaction`）、旁问线程（`thread`，带 pluginId）、桌面 BTW（`btw`）、插件经 `ctx.llm` 问模型（`plugin-llm`）。它们与主运行一样有 `request:start` / `request:end` / `usage` / `run:finish`（`createSubAgent` 与 `startHelperRun` 都从同一条包装路径发事件），runId 取负数。归并成本必须按 `helper.kind` 分开：「一次模型压缩花了 40 秒」和「某一轮慢」不是一件事。helper 运行不参与「用户重试同一任务」的推导——它的输入是压缩用的 transcript 或插件自己的文本，拿它跟上一轮用户输入比相似度必然误报。
 - 插件自身的运行事件走 `plugin:observe` hook（`PluginObservationEvent`）：常驻任务抛错（`background:failed`）与钩子处理函数抛错（`hook:failed`，带本进程内该钩子的累计失败次数）由宿主 `hooks.notify`。它不属于任何一条 run，硬塞进去会让那条 run 的耗时与失败原因都变假。`agent:observe` 仍然只描述一次运行的起止与过程。

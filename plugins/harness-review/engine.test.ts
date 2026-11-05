@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { test, type TestContext } from 'vitest';
 import type { AgentObservationEvent } from '@packages/mica-plugin/index.js';
 import {
+  CLASSIFIER_VERSION,
   HarnessRecorder,
   expectedExit,
   similarity,
@@ -63,7 +64,7 @@ function runner(
   return {
     emit,
     start: (input = 'Task input') => emit({ type: 'run:start', config, input }),
-    finish: (outcome: 'completed' | 'aborted' | 'error' = 'completed', error?: string) =>
+    finish: (outcome: 'completed' | 'aborted' | 'error' | 'paused' = 'completed', error?: string) =>
       emit({ type: 'run:finish', outcome, elapsedMs: 125, ...(error ? { error } : {}) }),
     call: (args = '{"path":"missing.txt"}', name = 'read_file', id = 'call-1') =>
       emit({ type: 'tool:call', name, args, id }),
@@ -105,6 +106,36 @@ test('keeps child runs that use negative run IDs', async (t) => {
     report.warnings.filter((warning) => warning.includes('corrupt')),
     [],
   );
+  assert.deepEqual(errors, []);
+});
+
+test('paused finish records are valid in review and rebuild without changing their outcome', async (t) => {
+  const { recorder, errors } = await fixture(t);
+  const cwd = resolve('workspace-paused');
+  for (let index = 0; index < 32; index++) {
+    const run = runner(recorder, { runId: index + 1, cwd });
+    run.start(`paused run ${index}`);
+    if (index === 0) {
+      run.call('{"path":"missing.txt"}');
+      run.result();
+    }
+    run.finish('paused');
+  }
+  const before = await recorder.review(cwd);
+  assert.equal(before.runs.length, 32);
+  assert.ok(before.runs.every((run) => run.outcome === 'paused' && run.finishedAt === at));
+  assert.equal(before.findings.length, 1);
+  assert.ok(!before.warnings.some((warning) => /corrupt|finish event|interrupted/.test(warning)));
+  for (const run of before.runs) {
+    const events = await trace(run);
+    assert.equal(events.at(-1)?.type, 'run:finish');
+    assert.equal(events.at(-1)?.outcome, 'paused');
+  }
+  const result = await recorder.rebuild({ cwd });
+  assert.deepEqual(result, { rebuilt: 32, findings: 1, skippedRunning: 0, skippedUnreadable: 0, reclaimed: 0 });
+  const after = await recorder.review(cwd);
+  assert.ok(after.runs.every((run) => run.outcome === 'paused'));
+  assert.deepEqual(after.findings, before.findings);
   assert.deepEqual(errors, []);
 });
 
@@ -1217,6 +1248,193 @@ test('tool-specific error causes are classified instead of falling into tool-err
   const final = await recorder.review();
   assert.ok(final.findings.some((finding) => finding.title === 'Tool error in read_file: not-found'));
   run.finish();
+});
+
+test('failure lines and tool identity win over unrelated examples; rebuilt categories match live review', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-failure-lines');
+  const run = runner(recorder, { cwd });
+  run.start();
+  assert.equal(CLASSIFIER_VERSION, 6);
+  const samples = [
+    {
+      name: 'memory',
+      result: JSON.stringify({
+        isError: true,
+        content: [{ type: 'text', text: 'Error: 记忆容量超限\n已有条目: not found' }],
+      }),
+      category: 'capacity-limit',
+      advice: /容量/,
+    },
+    {
+      name: 'memory',
+      result:
+        '工具 memory 执行失败：\nError: memory write rejected: project:example would be 20605 characters, over the 20000 safety limit; consolidate it first\nCurrent entries: not found',
+      category: 'capacity-limit',
+      advice: /容量/,
+    },
+    {
+      name: 'mcp__mica-terminal__control_2f1c781e',
+      result:
+        '工具 mcp__mica-terminal__control_x 执行失败：\nError: 操作 waitFor 不认识这些参数：pattern；可用参数：id、regex、timeoutMs',
+      category: 'invalid-input',
+      advice: /schema/,
+    },
+    {
+      name: 'web_fetch',
+      result: 'Error: socket connection closed while passing argument to fetch\nUsage: invalid argument',
+      category: 'connection-closed',
+      advice: /连接/,
+    },
+    {
+      name: 'web_fetch',
+      result: 'Error: Connection error.',
+      category: 'connection-error',
+      advice: /网关/,
+    },
+    {
+      name: 'apply_patch',
+      result:
+        '工具 apply_patch 执行失败：\nError: 第 3 行的 hunk 没有任何增删内容\n最小正确形态：\n*** Begin Patch\n*** End Patch',
+      category: 'empty-hunk',
+      advice: /增删行/,
+    },
+    {
+      name: 'apply_patch',
+      result:
+        '工具 apply_patch 执行失败：\nError: Update File example：第 3 行的 hunk 只有上下文行，没有任何 + / - 改动。\n最小正确形态：\n*** Begin Patch',
+      category: 'empty-hunk',
+      advice: /增删行/,
+    },
+    {
+      name: 'apply_patch',
+      result: 'Error: hunk 匹配不唯一：在文件中匹配到多处',
+      category: 'patch-ambiguous-context',
+      advice: /唯一定位/,
+    },
+    {
+      name: 'mcp__mica-terminal__control_2f1c781e',
+      result: 'Error: timed out waiting for output\nExample: background_tasks_start',
+      category: 'timeout',
+      advice: /等待条件/,
+    },
+    {
+      name: 'run_shell',
+      result: 'Error: timed out running command',
+      category: 'timeout',
+      advice: /background_tasks_start/,
+    },
+  ];
+  for (const [index, sample] of samples.entries()) {
+    const id = `sample-${index}`;
+    run.call('{}', sample.name, id);
+    run.result(sample.result, sample.name, id);
+  }
+  run.finish();
+  const before = await recorder.review(cwd);
+  assert.equal(before.runs[0].toolErrors, samples.length);
+  assert.deepEqual(
+    (await trace(before.runs[0])).filter((event) => event.type === 'tool:result').map((event) => event.errorCategory),
+    samples.map((sample) => sample.category),
+  );
+  for (const sample of samples) {
+    const finding = before.findings.find((item) => item.title === `Tool error in ${sample.name}: ${sample.category}`);
+    assert.ok(finding, `${sample.name}: ${sample.category}`);
+    assert.match(finding.suggestion, sample.advice);
+    if (sample.name !== 'run_shell') assert.ok(!finding.suggestion.includes('background_tasks_start'));
+  }
+  assert.deepEqual(await recorder.rebuild({ cwd }), {
+    rebuilt: 1,
+    findings: before.findings.length,
+    skippedRunning: 0,
+    skippedUnreadable: 0,
+    reclaimed: 0,
+  });
+  assert.deepEqual((await recorder.review(cwd)).findings, before.findings);
+});
+
+test('network retries and helper deadlines retain their causes through rebuild', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-provider-errors');
+  const run = runner(recorder, { cwd });
+  run.start();
+  run.emit({ type: 'retry', attempt: 1, delayMs: 2000, error: 'Connection error.' });
+  run.finish('error', 'Connection error.');
+  const helper = runner(recorder, { runId: -1, cwd });
+  helper.start('Title helper');
+  helper.finish('error', '模型请求超时（60s）');
+
+  const before = await recorder.review(cwd);
+  assert.ok(before.findings.some((finding) => finding.title === 'Request retry: connection-error'));
+  assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: connection-error'));
+  assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: timeout'));
+  assert.deepEqual(await recorder.rebuild({ cwd }), {
+    rebuilt: 2,
+    findings: 3,
+    skippedRunning: 0,
+    skippedUnreadable: 0,
+    reclaimed: 0,
+  });
+  assert.deepEqual((await recorder.review(cwd)).findings, before.findings);
+});
+
+test('rebuild reclassifies a complete failure line before truncated memory entries', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-truncated-memory');
+  const run = runner(recorder, { cwd, capture: { ...options, maxEventChars: 200 } });
+  run.start();
+  run.call('{}', 'memory', 'memory-1');
+  run.result(
+    '工具 memory 执行失败：\nError: memory write rejected: would be 20605 characters, over the 20000 safety limit\n' +
+      'Current entries: not found\n' +
+      'ordinary entry\n'.repeat(600),
+    'memory',
+    'memory-1',
+  );
+  run.finish();
+  const before = await recorder.review(cwd);
+  const storedResult = (await trace(before.runs[0])).find((event) => event.type === 'tool:result')?.result as {
+    truncated: boolean;
+  };
+  assert.equal(storedResult.truncated, true);
+  const file = join(before.runs[0].traceFile, '..', 'summary.json');
+  const saved = JSON.parse(await readFile(file, 'utf8'));
+  saved.findings[0].title = 'Tool error in memory: not-found';
+  saved.findings[0].id = 'a'.repeat(64);
+  await writeFile(file, JSON.stringify(saved));
+  const events = await trace(before.runs[0]);
+  events.find((event) => event.type === 'tool:result')!.errorCategory = 'not-found';
+  await writeFile(before.runs[0].traceFile, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+
+  assert.deepEqual((await recorder.review(cwd)).toolHealth.find((row) => row.name === 'memory')?.categories, [
+    { category: 'capacity-limit', count: 1 },
+  ]);
+  assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+  const after = await recorder.review(cwd);
+  assert.equal(
+    after.findings.find((finding) => finding.title === 'Tool error in memory: capacity-limit')?.occurrences,
+    1,
+  );
+});
+
+test('rebuild keeps full sanitized result fingerprints when stored prefixes match', async (t) => {
+  const { recorder } = await fixture(t);
+  const cwd = resolve('workspace-repeated-truncation');
+  const run = runner(recorder, { cwd, capture: { ...options, maxEventChars: 40 } });
+  run.start();
+  for (let index = 0; index < 3; index++) {
+    run.call('{}', 'read_file', `read-${index}`);
+    run.result(`same prefix ${'a'.repeat(60)} tail-${index}`, 'read_file', `read-${index}`);
+  }
+  run.finish();
+  const before = await recorder.review(cwd);
+  const events = (await trace(before.runs[0])).filter((event) => event.type === 'tool:result');
+  assert.ok(events.every((event) => (event.result as { truncated: boolean }).truncated));
+  assert.equal(new Set(events.map((event) => (event.result as { content: string }).content)).size, 1);
+  assert.equal(new Set(events.map((event) => (event.result as { sha256: string }).sha256)).size, 3);
+  assert.ok(!before.findings.some((finding) => finding.kind === 'repeated-call'));
+  assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+  assert.ok(!(await recorder.review(cwd)).findings.some((finding) => finding.kind === 'repeated-call'));
 });
 
 test('terminalProgram keeps the program that decides the exit code', () => {

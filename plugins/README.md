@@ -7,6 +7,8 @@
 用户自己安装的插件放在 `$MICA_HOME/plugins/<id>/`，格式与这里完全一致（入口换成 `.js` / `.mjs`）。没有
 `plugin.json` 的目录、散落成单个 `.js` / `.mjs` 的文件都不会被当成插件。
 
+`browser-cookie-sync` 通过随包 Chrome 扩展与本机口令服务自动双向同步 cookie，不读取 Chrome 数据库；安装说明与安全边界见 [Browser Cookie Sync](browser-cookie-sync/README.md)。
+
 ## 目录结构
 
 ```

@@ -53,6 +53,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `memory-scopes`         | 把旧布局的记忆（`USER.md` / `MEMORY.md` / `projects/<cwd 哈希>/MEMORY.md`）并入 `PROFILE.md` 与同名项目记忆文件。 |
 | `session-tags-slots`    | 清掉标签表里没用过的旧固定色槽（只剩它们时换成「待 review」），并收敛指向已删标签的归属。 |
 | `config-model-discovery` | 删掉 config.json 里已无消费方的 `get_model_url` 与空的默认模型（回落到第一个服务商的模型）。 |
+| `browser-cookie-sync-extension` | 将识别出的 v1 Chrome 数据库 / 手动同步设置与状态改名归档为同目录 `*.legacy-v1.json`；已有归档保留并使用编号后缀。新版 `target` 连接对象与未知状态字段保留，token 与扩展目录不动；损坏或无法识别的文件不改，旧形态不再支持。 |
 
 新增一条迁移 = 在 `migrations.ts` 里加一个 `Migration`（`id`、`description`、纯函数 `apply`），
 然后写进 `MIGRATIONS`。账本按 id 记进度，所以追加迁移会让所有会话重新评估一次；已经洗过的

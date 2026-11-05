@@ -563,6 +563,67 @@ describe('agent:observe', () => {
     expect(finishes.slice(1)).toMatchObject([{ outcome: 'completed' }, { outcome: 'completed' }]);
   });
 
+  it('attributes delegated tools to the child while preserving host callbacks and the parent run', async () => {
+    const { runtime, client, events } = setup();
+    const child = runtime.createSubAgent(
+      { model: 'sub-model' },
+      { delegation: { type: 'Explore', parentSessionId: 'session-7' } },
+    ) as TestClient;
+    const activityCall = vi.fn();
+    const activityResult = vi.fn();
+    // PluginSubagentHost installs activity callbacks after createSubAgent, before query.
+    child.onToolCall = (name, args, id) => activityCall(name, args, id);
+    child.onToolResult = (name, result, id) => activityResult(name, result, id);
+    const hostCall = child.onToolCall;
+    const hostResult = child.onToolResult;
+    let lateCall: TestClient['onToolCall'];
+    let lateResult: TestClient['onToolResult'];
+    child.queryImpl = async (_question, options) => {
+      options?.onRequestStart?.({ messageCount: 2 });
+      lateCall = child.onToolCall;
+      lateResult = child.onToolResult;
+      child.onToolCall?.('read_file', '{"file_path":"child"}', 'child-1');
+      child.onToolResult?.('read_file', 'contents', 'child-1');
+      options?.onRequestEnd?.({ durationMs: 12, attempts: 1, outcome: 'completed', toolCalls: 1 });
+      return 'explored';
+    };
+    client.queryImpl = async () => {
+      client.onToolCall?.('agent', '{"prompt":"child task"}', 'parent-1');
+      expect(await child.query('child task')).toBe('explored');
+      client.onToolResult?.('agent', 'explored', 'parent-1');
+      return 'done';
+    };
+
+    await runtime.run('parent task');
+    expect(events.filter((event) => event.type === 'tool:call' || event.type === 'tool:result')).toMatchObject([
+      { type: 'tool:call', runId: 1, name: 'agent', id: 'parent-1' },
+      { type: 'tool:call', runId: -1, name: 'read_file', args: '{"file_path":"child"}', id: 'child-1' },
+      { type: 'tool:result', runId: -1, name: 'read_file', result: 'contents', id: 'child-1' },
+      { type: 'tool:result', runId: 1, name: 'agent', id: 'parent-1' },
+    ]);
+    expect(events.filter((event) => event.type === 'request:start' || event.type === 'request:end')).toMatchObject([
+      { type: 'request:start', runId: -1 },
+      { type: 'request:end', runId: -1, toolCalls: 1 },
+    ]);
+    expect(events.filter((event) => event.type === 'run:finish')).toMatchObject([
+      { runId: -1, outcome: 'completed' },
+      { runId: 1, outcome: 'completed' },
+    ]);
+    expect(activityCall).toHaveBeenCalledExactlyOnceWith('read_file', '{"file_path":"child"}', 'child-1');
+    expect(activityResult).toHaveBeenCalledExactlyOnceWith('read_file', 'contents', 'child-1');
+    expect(child.onToolCall).toBe(hostCall);
+    expect(child.onToolResult).toBe(hostResult);
+
+    await child.query('again');
+    expect(events.filter((event) => event.type === 'tool:call' && event.name === 'read_file')).toMatchObject([
+      { runId: -1 },
+      { runId: -2 },
+    ]);
+    lateCall?.('late', '{}', 'late-1');
+    lateResult?.('late', 'late result', 'late-1');
+    expect(events.filter((event) => event.type === 'tool:call' || event.type === 'tool:result')).toHaveLength(6);
+  });
+
   it('tags a helper subagent and forwards its request events and usage', async () => {
     const { runtime, events } = setup();
     const child = runtime.createSubAgent(
@@ -571,6 +632,8 @@ describe('agent:observe', () => {
     ) as TestClient;
     child.queryImpl = async (_question, options) => {
       options?.onRequestStart?.({ messageCount: 3 });
+      child.onToolCall?.('grep_search', '{"pattern":"needle"}', 'helper-1');
+      child.onToolResult?.('grep_search', 'match', 'helper-1');
       options?.onRequestEnd?.({ durationMs: 12, firstTokenMs: 5, attempts: 1, outcome: 'completed' });
       (child.usageHistory as AgentUsageRecord[]).push(usage);
       return 'summary';
@@ -589,6 +652,10 @@ describe('agent:observe', () => {
     expect(events.filter((event) => event.type === 'request:end')).toMatchObject([
       { durationMs: 12, firstTokenMs: 5, attempts: 1 },
     ]);
+    expect(events.filter((event) => event.type === 'tool:call' || event.type === 'tool:result')).toMatchObject([
+      { type: 'tool:call', runId: -1, name: 'grep_search', args: '{"pattern":"needle"}', id: 'helper-1' },
+      { type: 'tool:result', runId: -1, name: 'grep_search', result: 'match', id: 'helper-1' },
+    ]);
     expect(events.filter((event) => event.type === 'usage')).toMatchObject([
       { usage: { inputTokens: 12, outputTokens: 3, cachedInputTokens: 4 } },
     ]);
@@ -598,10 +665,7 @@ describe('agent:observe', () => {
   it('classifies an unannotated subagent as a generic helper next to a delegated one', async () => {
     const { runtime, events } = setup();
     const helper = runtime.createSubAgent({ model: 'sub-model' }) as TestClient;
-    const delegated = runtime.createSubAgent(
-      { model: 'sub-model' },
-      { delegation: { type: 'Explore' } },
-    ) as TestClient;
+    const delegated = runtime.createSubAgent({ model: 'sub-model' }, { delegation: { type: 'Explore' } }) as TestClient;
     helper.queryImpl = async () => 'helper';
     delegated.queryImpl = async () => 'delegated';
     await helper.query('a');
@@ -633,7 +697,12 @@ describe('agent:observe', () => {
     const start = events.find((event) => event.type === 'run:start');
     expect(start).toMatchObject({
       helper: { kind: 'plugin-llm', pluginId: 'session-rename', purpose: 'title' },
-      config: { model: 'plugin-model', providerId: 'plugin-helper', protocol: 'openai_chat_completions', effort: 'none' },
+      config: {
+        model: 'plugin-model',
+        providerId: 'plugin-helper',
+        protocol: 'openai_chat_completions',
+        effort: 'none',
+      },
       input: 'give me a title',
     });
     expect(events.filter((event) => event.type === 'request:start')).toHaveLength(1);
@@ -641,9 +710,7 @@ describe('agent:observe', () => {
       { durationMs: 40, outcome: 'error' },
     ]);
     expect(events.filter((event) => event.type === 'usage')).toHaveLength(1);
-    expect(events.filter((event) => event.type === 'run:finish')).toMatchObject([
-      { outcome: 'error', error: 'boom' },
-    ]);
+    expect(events.filter((event) => event.type === 'run:finish')).toMatchObject([{ outcome: 'error', error: 'boom' }]);
   });
 
   it('marks a helper run aborted when its client throws an abort', async () => {

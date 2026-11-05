@@ -166,7 +166,12 @@ describe('session-rename plugin', () => {
   it('aborts the previous session title request as soon as a new session starts a turn', async () => {
     const harness = createHarness();
     let finish: (title: string) => void = () => {};
-    query.mockImplementationOnce(() => new Promise<string>((resolve) => { finish = resolve; }));
+    query.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    );
     await harness.emitTurnBefore();
     harness.session.id = 'session-2';
     await harness.emitTurnBefore({ inputId: 'second', text: '新会话任务' });
@@ -234,12 +239,50 @@ describe('session-rename plugin', () => {
     await harness.emitTurnBefore();
     await vi.waitFor(() =>
       expect(harness.healthReports.at(-1)).toMatchObject({
-        level: 'error',
-        message: expect.stringContaining('空标题'),
+        level: 'warn',
+        message: expect.stringContaining('保留原标题'),
       }),
     );
 
     expect(harness.renameCalls).toEqual([]);
+    expect(harness.logger.warn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['修复登录超时后我会继续检查连接并把结果同步给你', 'too-long'],
+    ['我会先检查连接', 'process-statement'],
+  ])('keeps the previous title when the model returns %s', async (answer, reason) => {
+    const harness = createHarness();
+    query.mockResolvedValue(answer);
+
+    await harness.emitTurnBefore();
+    await vi.waitFor(() =>
+      expect(harness.logger.info).toHaveBeenCalledWith('session-rename:rejected', expect.objectContaining({ reason })),
+    );
+
+    expect(harness.session.title).toBe('旧标题');
+    expect(harness.renameCalls).toEqual([]);
+    expect(harness.healthReports.at(-1)).toMatchObject({
+      level: 'warn',
+      message: expect.stringContaining('保留原标题'),
+    });
+    expect(harness.logger.warn).not.toHaveBeenCalled();
+    await harness.emitTurnBefore();
+    await harness.flush();
+    expect(query).toHaveBeenCalledOnce();
+  });
+
+  it('accepts a different input id after a quality rejection without a retry of the rejected input', async () => {
+    const harness = createHarness();
+    query.mockResolvedValueOnce('我会先检查连接').mockResolvedValueOnce('修复登录超时');
+
+    await harness.emitTurnBefore();
+    await vi.waitFor(() => expect(harness.healthReports.at(-1)?.level).toBe('warn'));
+    await harness.emitTurnBefore({ inputId: 'input-2', text: '修复登录超时' });
+    await harness.renamed;
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(harness.healthReports.at(-1)?.level).toBe('ok');
   });
 
   it('asks once per input id when the host emits the same hook twice', async () => {

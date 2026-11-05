@@ -2002,10 +2002,9 @@ export function SessionTree({
               </span>
             </div>
           )}
-          {/* 拖动时把落点规则说清楚：中间是嵌套 / 进入，上下两头是排序。放在钉住的头部里，
-              拖到列表深处也看得见。 */}
+          {/* 提示不能挤动源行或挡住落点，否则短距离起拖会又落回源行。 */}
           {drag && !searching && (
-            <p className="mt-1 rounded-md bg-overlay px-2 py-1 text-[11px] leading-4 text-fg-dim">
+            <p className="pointer-events-none absolute inset-x-2 top-full z-10 mt-1 rounded-md bg-panel px-2 py-1 text-[11px] leading-4 text-fg-dim shadow-sm">
               {drag.kind === 'group'
                 ? '拖到上下边缘调整顺序；拖到分组中间可成为它的子分组'
                 : '拖到上下边缘换分区或调整顺序；拖到会话中间可成为它的子会话'}

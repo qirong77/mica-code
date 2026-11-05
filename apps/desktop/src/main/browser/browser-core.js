@@ -280,9 +280,8 @@ export function normalizeCookieDomain(value) {
 /**
  * 一条 cookie 的作用域地址。
  *
- * Electron 的 `cookies.set` / `cookies.remove` 都按 url 定位：`domain` 决定它是不是域
- * cookie，path 决定删除时只命中同一个 path 的那条（同名不同 path 的 cookie 在同一个站点
- * 上很常见，只给域名会一起删掉）。
+ * set 用 url 确定来源协议与主机，domain / path 确定精确作用域。
+ * remove 的 URL 匹配不等于精确身份删除，不能单凭这个地址隔离父域或同名 path。
  */
 export function cookieScopeUrl(cookie) {
   const host = normalizeCookieDomain(cookie?.domain || cookie?.url)

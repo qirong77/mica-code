@@ -610,8 +610,8 @@ export class AgentRuntime {
 
   /**
    * 在子客户端 `query` 两侧补一对 `run:start` / `run:finish`，并带上 `delegation` 或
-   * `helper` 分类；请求级事件（`request:start` / `request:end` / `retry`）也从这里转发，
-   * 否则子代理内部请求的耗时与首字延迟完全没有出处。
+   * `helper` 分类；请求与工具事件也从这里转发，否则子代理内部请求的耗时、
+   * 首字延迟与工具结果都没有出处。
    *
    * 子运行用负数 runId，且整段包在自己的 AsyncLocalStorage 作用域里：子代理内部触发
    * 的观察不会落到父运行头上，父运行的 request 计数也不会被子代理的请求污染。
@@ -649,6 +649,20 @@ export class AgentRuntime {
         ...(delegation ? { delegation } : {}),
         ...(helper ? { helper } : {}),
       });
+      // The host installs activity callbacks before query; wrap those callbacks for this run
+      // rather than replacing them when the child is created (or losing later replacements).
+      const previousOnToolCall = child.onToolCall;
+      const previousOnToolResult = child.onToolResult;
+      const onToolCall: NonNullable<typeof child.onToolCall> = (name, args, id) => {
+        if (!observed.closed) this.observe(observed, { type: 'tool:call', name, args, id });
+        previousOnToolCall?.(name, args, id);
+      };
+      const onToolResult: NonNullable<typeof child.onToolResult> = (name, result, id) => {
+        if (!observed.closed) this.observe(observed, { type: 'tool:result', name, result, id });
+        previousOnToolResult?.(name, result, id);
+      };
+      child.onToolCall = onToolCall;
+      child.onToolResult = onToolResult;
       try {
         return await this.observationScope.run(observed, () =>
           query(question, {
@@ -681,6 +695,8 @@ export class AgentRuntime {
         observationError = errorMessageOf(error);
         throw error;
       } finally {
+        if (child.onToolCall === onToolCall) child.onToolCall = previousOnToolCall;
+        if (child.onToolResult === onToolResult) child.onToolResult = previousOnToolResult;
         // `loadSnapshot` 会整份替换 usageHistory：长度比开始时还短说明记录被换过，
         // 这时宁可不报用量，也不要把前一次查询的账重复算一遍。
         const history = child.usageHistory ?? [];

@@ -43,6 +43,7 @@ export async function startBrowserHost({
 
   manager = createBrowserManager({
     onChange: () => service.broadcast(),
+    onCookieChange: (change) => service.broadcastCookieChange(change),
     isQuitting,
     theme
   })

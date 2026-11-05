@@ -228,6 +228,7 @@ describe('service surface', () => {
     expect((await call('/browser/nope')).status).toBe(404)
     expect((await call('/browser/browsers', { method: 'DELETE' })).status).toBe(404)
     expect((await call('/browser/events', { method: 'POST', body: {} })).status).toBe(404)
+    expect((await call('/browser/cookies/events', { method: 'POST', body: {} })).status).toBe(404)
   })
 
   it('requires a JSON content type for writes and a valid body', async () => {
@@ -464,10 +465,59 @@ describe('local-only guard', () => {
     const denied = await call('/browser/browsers', { headers: { origin: 'https://evil.example' } })
     expect(denied.status).toBe(403)
     expect(denied.body.error).toContain('跨站')
+
+    const deniedCookieStream = await call('/browser/cookies/events', {
+      headers: { origin: 'https://evil.example' }
+    })
+    expect(deniedCookieStream.status).toBe(403)
   })
 })
 
 describe('event stream', () => {
+  it('sends cookie identity changes only to the dedicated stream', async () => {
+    const cookieController = new AbortController()
+    const uiController = new AbortController()
+    try {
+      const cookieResponse = await fetch(`${base}/browser/cookies/events`, {
+        signal: cookieController.signal
+      })
+      const uiResponse = await fetch(`${base}/browser/events`, { signal: uiController.signal })
+      expect(cookieResponse.headers.get('content-type')).toContain('text/event-stream')
+      const cookieReader = cookieResponse.body.getReader()
+      const uiReader = uiResponse.body.getReader()
+      await cookieReader.read()
+      await uiReader.read()
+
+      const uiNext = uiReader.read()
+      service.broadcastCookieChange({
+        cookie: { name: 'sid', domain: '.example.com', path: '/account', value: 'secret' },
+        removed: true,
+        cause: 'expired'
+      })
+      const frame = new TextDecoder().decode((await cookieReader.read()).value)
+      expect(JSON.parse(frame.slice(frame.indexOf('data: ') + 6))).toEqual({
+        cookie: { name: 'sid', domain: '.example.com', path: '/account' },
+        removed: true,
+        cause: 'expired'
+      })
+      expect(frame).not.toContain('secret')
+
+      const cookieNext = cookieReader.read()
+      service.broadcast()
+      const uiFrame = new TextDecoder().decode((await uiNext).value)
+      expect(uiFrame).toContain('browser:changed')
+      expect(uiFrame).not.toContain('sid')
+      expect(uiFrame).not.toContain('secret')
+      service.broadcastCookieChange({ cookie: { name: 'next', domain: 'example.com', path: '/' } })
+      const nextCookieFrame = new TextDecoder().decode((await cookieNext).value)
+      expect(nextCookieFrame).toContain('"name":"next"')
+      expect(nextCookieFrame).not.toContain('browser:changed')
+    } finally {
+      cookieController.abort()
+      uiController.abort()
+    }
+  })
+
   it('pushes window changes to connected subscribers', async () => {
     const controller = new AbortController()
     const response = await fetch(`${base}/browser/events`, {

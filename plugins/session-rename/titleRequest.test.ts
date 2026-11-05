@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createPluginLlmApi, type PluginModelRequest } from '@packages/mica-plugin/index.js';
 import manifest from './plugin.json';
 import { DEFAULT_PROMPT } from './index.js';
-import { requestSessionTitle, sanitizeTitle } from './titleRequest.js';
+import { requestSessionTitle, sanitizeTitle, titleRejectionReason } from './titleRequest.js';
 
 describe('sanitizeTitle', () => {
   it('takes the first line and strips decoration', () => {
@@ -19,10 +19,44 @@ describe('sanitizeTitle', () => {
     expect(sanitizeTitle({ title: 'x' })).toBe('');
   });
 
-  it('caps very long titles', () => {
+  it('preserves long answers for validation rather than silently truncating them', () => {
     const title = sanitizeTitle('很'.repeat(120));
-    expect(title.length).toBe(60);
-    expect(title.endsWith('…')).toBe(true);
+    expect(title).toBe('很'.repeat(120));
+    expect(titleRejectionReason(title)).toBe('too-long');
+  });
+});
+
+describe('titleRejectionReason', () => {
+  it.each([
+    '修复登录超时',
+    '重构压缩策略',
+    '完善 session-rename 标题校验',
+    'Fix login timeout',
+    'Investigate flaky tests',
+    '会话处理器性能优化',
+    '已修复登录超时',
+    '已完成页面改版',
+    '首先加载配置失败',
+    '先检查配置',
+    '我'.repeat(20),
+    'a'.repeat(40),
+  ])('accepts a concise title: %s', (title) => {
+    expect(titleRejectionReason(title)).toBeNull();
+  });
+
+  it.each([
+    ['', 'empty'],
+    ['我'.repeat(21), 'too-long'],
+    ['a'.repeat(41), 'too-long'],
+    ['修复登录超时后我会继续检查连接并把结果同步给你', 'too-long'],
+    ['我会先检查连接', 'process-statement'],
+    ['先核对共享工作区，再分开修改和验证', 'process-statement'],
+    ['我们已经修复这个问题', 'process-statement'],
+    ['接下来我会检查测试', 'process-statement'],
+    ['I will check the code', 'process-statement'],
+    ["Let's inspect the implementation", 'process-statement'],
+  ] as const)('rejects %s as %s', (title, reason) => {
+    expect(titleRejectionReason(title)).toBe(reason);
   });
 });
 

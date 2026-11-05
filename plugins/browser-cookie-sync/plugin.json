@@ -2,94 +2,17 @@
   "id": "browser-cookie-sync",
   "name": "Browser Cookie Sync",
   "icon": "database",
-  "version": "1.0.0",
-  "description": "把本机 Chrome 与 Mica 受控浏览器的 cookie 双向同步：Chrome 里登过的站点，Mica 的浏览器直接就是登录态；反过来也一样。两边都改过的条目不动，列出来让人选。",
+  "version": "2.0.0",
+  "description": "使用 Chrome 扩展和本地服务，把 Chrome 与 Mica 受控浏览器的 cookie 自动双向同步。",
   "author": "Mica Code",
   "main": "index.ts",
-  "assets": ["README.md"],
+  "assets": ["README.md", "extension/manifest.json", "extension/service-worker.js", "extension/options.html", "extension/options.js", "extension/README.md"],
   "priority": 60,
   "mica": { "apiVersion": 1 },
-  "requires": ["settings", "actions", "background", "desktop"],
-  "settings": [
-    {
-      "key": "browser",
-      "label": "浏览器",
-      "type": "select",
-      "default": "chrome",
-      "options": [
-        { "value": "chrome", "label": "Chrome" },
-        { "value": "chrome-beta", "label": "Chrome Beta" },
-        { "value": "chrome-dev", "label": "Chrome Dev" },
-        { "value": "chrome-canary", "label": "Chrome Canary" }
-      ],
-      "description": "只支持 Chromium 系（它们的 cookie 库与钥匙串项是同一套）。"
-    },
-    {
-      "key": "profile",
-      "label": "配置文件",
-      "type": "text",
-      "default": "",
-      "placeholder": "留空 = 这个浏览器上次用的那个",
-      "description": "目录名，例如 Default 或 Profile 1。面板里可以直接选。"
-    },
-    {
-      "key": "toMica",
-      "label": "Chrome → 受控浏览器",
-      "type": "switch",
-      "default": "true",
-      "description": "把 Chrome 的登录态搬进 Mica 的浏览器。"
-    },
-    {
-      "key": "toChrome",
-      "label": "受控浏览器 → Chrome",
-      "type": "switch",
-      "default": "true",
-      "description": "反过来写回真实 Chrome。两边都变过的条目不会被覆盖，只会列进「冲突」。"
-    },
-    {
-      "key": "writeWhileRunning",
-      "label": "Chrome 开着也写",
-      "type": "switch",
-      "default": "false",
-      "description": "Chrome 把 cookie 常驻在内存里，写进库里要重启它才生效。默认关着：关掉 Chrome 再同步最稳。"
-    },
-    {
-      "key": "everyMinutes",
-      "label": "自动同步间隔",
-      "type": "number",
-      "default": "0",
-      "min": 0,
-      "max": 1440,
-      "step": 5,
-      "unit": "分钟",
-      "description": "0 = 只手动同步（面板与配置页都有按钮）。打开后每轮重新读这个值。"
-    }
-  ],
+  "requires": ["actions", "background", "desktop"],
+  "desktop": { "panel": { "label": "Cookie 同步", "display": "modal", "status": true } },
   "actions": [
-    {
-      "key": "sync",
-      "label": "立即同步",
-      "description": "读两侧、合并、写回，结束后给出四个方向的计数",
-      "tone": "primary"
-    },
-    {
-      "key": "preview",
-      "label": "试算",
-      "description": "只算差异，不写任何一侧"
-    }
+    { "key": "connection", "label": "安装 Chrome 扩展", "description": "查看扩展目录、本地服务地址和连接口令" }
   ],
-  "status": [
-    { "key": "target", "label": "同步对象", "type": "text" },
-    { "key": "lastRun", "label": "上次同步", "type": "text" },
-    { "key": "counts", "label": "两边条数", "type": "text" },
-    { "key": "access", "label": "权限", "type": "text" }
-  ],
-  "desktop": {
-    "panel": {
-      "label": "Cookie 同步",
-      "display": "modal",
-      "status": true
-    },
-    "checks": ["full-disk-access"]
-  }
+  "status": [{ "key": "target", "label": "连接状态", "type": "text" }]
 }

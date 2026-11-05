@@ -512,7 +512,7 @@ export function PluginQuickBar({
         {statusBar && (
           <button
             type="button"
-            className={`chat-plugin-statusbar tone-${statusBar.tone || 'muted'}`}
+            className={`chat-plugin-quickbar-button chat-plugin-statusbar tone-${statusBar.tone || 'muted'}`}
             title={`${statusBar.label}${statusBar.detail ? ` · ${statusBar.detail}` : ''} · 点开面板`}
             onClick={() => onTogglePanel(statusOwner.id, statusBar.section || '')}
           >

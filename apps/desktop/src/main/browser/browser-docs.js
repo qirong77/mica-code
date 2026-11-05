@@ -464,6 +464,15 @@ const RAW_ENDPOINTS = [
     summary: '窗口/标签页变化推送（桌面端运行时订阅它，再广播给页面）',
     params: [],
     returns: 'text/event-stream：{ channel: "browser:changed", payload: { browsers } }'
+  },
+  {
+    id: 'cookieEvents',
+    method: 'SSE',
+    path: '/browser/cookies/events',
+    summary: '分区 cookie 增量变化推送（仅身份键，不含 value；独立于页面状态事件流）',
+    params: [],
+    returns: 'text/event-stream：{ cookie: { name, domain, path }, removed, cause }',
+    example: 'curl -N "$MICA_BROWSER_URL/browser/cookies/events"'
   }
 ]
 

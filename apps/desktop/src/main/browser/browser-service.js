@@ -50,6 +50,7 @@ export function createBrowserService({
 }) {
   const routes = compileRoutes(BROWSER_ENDPOINTS)
   const clients = new Set()
+  const cookieClients = new Set()
 
   function broadcast() {
     if (clients.size === 0) return
@@ -80,6 +81,29 @@ export function createBrowserService({
         client.res.write(`data: ${payload}\n\n`)
       } catch {
         clients.delete(client)
+      }
+    }
+  }
+
+  function broadcastCookieChange(change) {
+    if (cookieClients.size === 0) return
+    const cookie = change?.cookie
+    if (!cookie?.name || !cookie?.domain) return
+    const payload = JSON.stringify({
+      cookie: { name: cookie.name, domain: cookie.domain, path: cookie.path || '/' },
+      removed: Boolean(change.removed),
+      cause: change.cause || ''
+    })
+    for (const client of cookieClients) {
+      try {
+        if (client.res.writableLength > 1024 * 1024) {
+          client.res.end()
+          cookieClients.delete(client)
+          continue
+        }
+        client.res.write(`data: ${payload}\n\n`)
+      } catch {
+        cookieClients.delete(client)
       }
     }
   }
@@ -140,7 +164,9 @@ export function createBrowserService({
     if (!matched) {
       return sendJson(res, 404, { ok: false, error: `未知端点：${method} ${url.pathname}` })
     }
-    if (matched.stream) return handleEvents(req, res)
+    if (matched.stream) {
+      return handleEvents(req, res, matched.endpoint.id === 'cookieEvents' ? cookieClients : clients)
+    }
 
     let body = {}
     if (method !== 'GET') {
@@ -210,7 +236,7 @@ export function createBrowserService({
     }
   }
 
-  function handleEvents(req, res) {
+  function handleEvents(req, res, subscribers) {
     res.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache, no-transform',
@@ -219,7 +245,7 @@ export function createBrowserService({
     })
     res.write(': connected\n\n')
     const client = { res }
-    clients.add(client)
+    subscribers.add(client)
     const heartbeat = setInterval(() => {
       try {
         res.write(': ping\n\n')
@@ -230,7 +256,7 @@ export function createBrowserService({
     heartbeat.unref?.()
     const cleanup = () => {
       clearInterval(heartbeat)
-      clients.delete(client)
+      subscribers.delete(client)
     }
     req.on('close', cleanup)
     res.on('error', cleanup)
@@ -248,6 +274,7 @@ export function createBrowserService({
     server,
     handle,
     broadcast,
+    broadcastCookieChange,
     /**
      * 监听 TCP——**只给测试用**：生产环境一律 `listenSocket`。留着它是因为接口测试要一个
      * 真实可连的地址，`fetch` 对 Unix socket 不友好。业务代码不要再调这个方法。
@@ -276,7 +303,7 @@ export function createBrowserService({
       return listenLocalSocket(server, socketPath)
     },
     close() {
-      for (const client of clients) {
+      for (const client of [...clients, ...cookieClients]) {
         try {
           client.res.end()
         } catch {
@@ -284,6 +311,7 @@ export function createBrowserService({
         }
       }
       clients.clear()
+      cookieClients.clear()
       return new Promise((resolve) => {
         if (!server.listening) {
           resolve()

@@ -26,8 +26,7 @@
     "build:mac": "npm run build && electron-builder --mac --config electron-builder.config.cjs",
     "build:linux": "npm run build && electron-builder --linux",
     "pack:app": "electron-builder --dir --config electron-builder.config.cjs -c.mac.identity=null",
-    "sign:app": "bash scripts/sign-app.sh",
-    "build:app:local": "npm run build:app"
+    "sign:app": "bash scripts/sign-app.sh"
   },
   "//dependencies": "只放主进程 / 运行时真正会 require 的包：electron-builder 会把 dependencies 整份装进 app.asar，而 renderer 的依赖已经由 Vite 打进 out/renderer，留在 dependencies 里等于让安装包多背 200MB。新增 src/main 直接 require 的包时必须加在这里。",
   "dependencies": {

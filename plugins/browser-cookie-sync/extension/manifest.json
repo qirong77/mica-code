@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "110",
+  "name": "Mica Cookie Sync",
+  "version": "1.0.0",
+  "description": "Synchronize Chrome cookies with the local Mica browser.",
+  "permissions": ["cookies", "storage", "alarms"],
+  "host_permissions": ["<all_urls>", "http://127.0.0.1:19387/*"],
+  "background": { "service_worker": "service-worker.js" },
+  "options_page": "options.html"
+}

@@ -9,7 +9,7 @@ export type CaptureOptions = { captureContent: boolean; maxEventChars: number; m
  * 问题推导规则的版本。改了 classify / 退出码白名单 / 重复调用判定就加一：
  * 宿主据此决定要不要把历史记录的 findings 重算一次（计数与结论不动）。
  */
-export const CLASSIFIER_VERSION = 5;
+export const CLASSIFIER_VERSION = 6;
 export type FindingStatus = 'open' | 'accepted' | 'dismissed' | 'validated' | 'regressed';
 type Config = { providerId: string; protocol: string; model: string; effort: string; role: string };
 /**
@@ -281,7 +281,7 @@ const MAX_PLUGIN_EVENTS_READ_BYTES = 8 * 1024 * 1024;
 const PLUGIN_EVENTS_FILE = 'plugin-events.jsonl';
 const PLUGIN_EVENTS_ROTATED = 'plugin-events.1.jsonl';
 const STATUSES = new Set<FindingStatus>(['open', 'accepted', 'dismissed', 'validated', 'regressed']);
-const OUTCOMES = new Set<Outcome>(['running', 'completed', 'aborted', 'error', 'interrupted']);
+const OUTCOMES = new Set<Outcome>(['running', 'completed', 'aborted', 'error', 'interrupted', 'paused']);
 const COMPACTION_STRATEGIES = new Set<CompactionStrategy>(['local', 'llm', 'idle']);
 const CORRECTION_ORDER: CorrectionKind[] = ['edit', 'recall', 'retry'];
 const CORRECTION_KINDS = new Set<CorrectionKind>(CORRECTION_ORDER);
@@ -628,6 +628,23 @@ function hasCompleteContent(value: unknown): boolean {
   return typeof item.content === 'string' && item.truncated !== true;
 }
 
+function truncatedToolCategory(value: unknown, name: string): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const item = value as Record<string, unknown>;
+  if (item.truncated !== true || typeof item.content !== 'string') return undefined;
+  const lines = item.content.split(/\r?\n/);
+  const first = lines[0]?.trim() ?? '';
+  const wrapped = /^(?:Tool (?:execution )?(?:error|failed)|工具[^\n]*(?:失败|错误))[:：]/i.test(first);
+  // A complete, explicit failure line can be reclassified even when the appended
+  // examples or previous entries were truncated. Incomplete lines keep the saved category.
+  if (
+    wrapped ? !/^Error:/i.test(lines[1]?.trim() ?? '') || lines.length < 3 : !/^Error:/i.test(first) || lines.length < 2
+  )
+    return undefined;
+  const category = errorCategory(item.content, name);
+  return category && category !== 'tool-error' ? category : undefined;
+}
+
 /** Bytes on disk for one run directory, so prune can report what it reclaimed. */
 async function directorySize(directory: string): Promise<number> {
   let total = 0;
@@ -782,6 +799,23 @@ function replayedInputText(event: StoredEvent, summary: RunSummary): string {
   return summary.input?.excerpt ?? '';
 }
 
+function failureText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return '';
+  const item = value as Record<string, unknown>;
+  if (typeof item.error === 'string') return item.error;
+  if (item.error && typeof item.error === 'object') return failureText(item.error);
+  if (typeof item.message === 'string') return item.message;
+  if (typeof item.content === 'string') return item.content;
+  if (Array.isArray(item.content)) {
+    const text = item.content.find((part) => part && typeof part === 'object' && typeof part.text === 'string') as
+      | { text: string }
+      | undefined;
+    return text?.text ?? '';
+  }
+  return '';
+}
+
 function errorCategory(raw: string, name: string): string | null {
   let parsed: unknown;
   try {
@@ -792,7 +826,7 @@ function errorCategory(raw: string, name: string): string | null {
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const item = parsed as Record<string, unknown>;
     if (item.isError === true || item.success === false || item.ok === false || item.status === 'error') {
-      return classifyError(textOf(item.error ?? item.message ?? item));
+      return classifyError(failureText(item), name);
     }
     if (SHELL_TOOL.test(name)) {
       if (item.timed_out === true) return 'timeout';
@@ -826,7 +860,7 @@ function errorCategory(raw: string, name: string): string | null {
     : null;
   if (exit && Number(exit[1]) !== 0) return `exit-${exit[1]}`;
   if (/^(?:Error:|Tool (?:execution )?(?:error|failed):|工具[^\n]*(?:失败|错误)[:：])/i.test(raw.trimStart()))
-    return classifyError(raw);
+    return classifyError(raw, name);
   return null;
 }
 /**
@@ -856,6 +890,16 @@ function errorGuidance(name: string, category: string): { suggestion: string; ev
         'patch 的上下文与文件当前内容不一致：改动前没重读文件，或文件已被其他会话改写。改前重新 read_file 定位目标行。',
       evaluation: '重放同一处修改，确认读取发生在最后一次写入之后，patch 一次即成功。',
     };
+  if (category === 'patch-ambiguous-context')
+    return {
+      suggestion: 'hunk 的上下文在文件中匹配到多处。重读目标文件，补足能唯一定位的相邻行或 @@ 锚点后再提交。',
+      evaluation: '确认 patch 只命中预期位置，且同一处编辑重放后不再报匹配不唯一。',
+    };
+  if (category === 'capacity-limit')
+    return {
+      suggestion: '记忆容量已满。先检查适用范围与现有条目，合并或缩短冗余内容；删除已有记忆前先征得用户同意。',
+      evaluation: '在容量内重放同一条记忆写入，确认内容被保存且已有条目未意外丢失。',
+    };
   if (category === 'not-found')
     return {
       suggestion: '目标路径不存在。确认路径按当前 cwd 解析，大小写与扩展名和仓库实际一致。',
@@ -868,9 +912,23 @@ function errorGuidance(name: string, category: string): { suggestion: string; ev
     };
   if (category === 'timeout')
     return {
+      suggestion: SHELL_TOOL.test(name)
+        ? '命令超时。耗时命令改用 background_tasks_start 启动，再用 wait_for / background_tasks_read 取结果，不要靠调大前台超时。'
+        : '工具等待超时。确认等待条件、目标服务和连接是否仍能推进，再按该工具的超时设置重试。',
+      evaluation: SHELL_TOOL.test(name)
+        ? '把同一命令改为后台启动，确认它能正常结束且输出可取回。'
+        : '在相同条件下重放该工具调用，确认目标状态可达且不再超时。',
+    };
+  if (category === 'connection-closed')
+    return {
       suggestion:
-        '调用超时。耗时命令改用 background_tasks_start 启动，再用 wait_for / background_tasks_read 取结果，不要靠调大前台超时。',
-      evaluation: '把同一命令改为后台启动，确认它能正常结束且输出可取回。',
+        '连接被远端或中间层关闭。检查目标服务、代理和连接生命周期，再看请求边界的错误日志；不要按参数错误修改输入。',
+      evaluation: '在相同服务与网络条件下重放请求，确认连接不再提前关闭。',
+    };
+  if (category === 'connection-error')
+    return {
+      suggestion: '连接失败。核对目标服务和本地网关的可达性与同时间段日志，无法仅凭报错判断故障在哪一端。',
+      evaluation: '在同一接口上重放少量请求，确认成功率和重试次数恢复正常。',
     };
   if (category === 'invalid-input')
     return {
@@ -901,30 +959,57 @@ function errorGuidance(name: string, category: string): { suggestion: string; ev
   };
 }
 
-function classifyError(text: string): string {
-  // Tool-specific causes first: the generic rules below would swallow these
-  // ("context not found" looks like a missing file) and every occurrence would
-  // collapse into one uninformative `tool-error`.
-  if (/hunk 没有任何增删内容|hunk (?:has|contains) no (?:changes|additions|removals)/i.test(text)) {
-    return 'empty-hunk';
-  }
-  if (/\*\*\* Begin Patch|必须以.*Begin Patch|must (?:start|begin) with \*\*\* Begin Patch/i.test(text)) {
-    return 'invalid-patch-header';
-  }
-  if (
-    // Real runs also produced `Update File 失败：<path> 中找不到 hunk 对应内容`,
-    // which means the same thing as the English forms.
-    /context not found|old_string[^\n]*not found|invalid context|hunk failed|patch (?:does not apply|failed)|找不到 ?hunk|找不到要替换的内容/i.test(
-      text,
+function classifyError(text: string, name = ''): string {
+  // A tool may append previous entries, usage text or a sample patch after its
+  // failure. Only its explicit failure line (or the first line) identifies the cause.
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const first = lines[0] ?? '';
+  const wrapper = /^(?:Tool (?:execution )?(?:error|failed)|工具[^\n]*(?:失败|错误))[:：]\s*/i;
+  const wrapped = wrapper.test(first) ? first.replace(wrapper, '') : first;
+  const cause = (wrapped || (wrapper.test(first) ? (lines[1] ?? '') : '')).replace(/^Error:\s*/i, '');
+  const patch = baseName(name) === 'apply_patch';
+  if (patch) {
+    if (/hunk (?:没有任何增删内容|只有上下文行)|hunk (?:has|contains) no (?:changes|additions|removals)/i.test(cause))
+      return 'empty-hunk';
+    if (
+      /hunk[^\n]*(?:匹配不唯一|匹配到多处|not unique|multiple matches|(?:found|matches?) (?:multiple|more than one))|(?:匹配不唯一|匹配到多处)[^\n]*hunk/i.test(
+        cause,
+      )
     )
-  ) {
-    return 'patch-context-mismatch';
+      return 'patch-ambiguous-context';
+    if (
+      /必须以\s*\*\*\* Begin Patch\s*开始|must (?:start|begin) with\s*\*\* Begin Patch|(?:invalid|missing|malformed) (?:patch )?header/i.test(
+        cause,
+      )
+    )
+      return 'invalid-patch-header';
+    if (
+      /context not found|old_string[^\n]*not found|invalid context|hunk failed|patch (?:does not apply|failed)|找不到 ?hunk|找不到要替换的内容/i.test(
+        cause,
+      )
+    )
+      return 'patch-context-mismatch';
   }
-  if (/ENOENT|not found|no such file/i.test(text)) return 'not-found';
-  if (/EACCES|EPERM|permission denied|unauthorized|forbidden/i.test(text)) return 'permission';
-  if (/timeout|timed out|ETIMEDOUT/i.test(text)) return 'timeout';
-  if (/invalid|validation|schema|argument/i.test(text)) return 'invalid-input';
-  if (/rate.?limit|\b429\b/i.test(text)) return 'rate-limit';
+  if (baseName(name) === 'memory' && /(?:capacity|容量|上限|超限|空间不足|存储已满|safety limit)/i.test(cause))
+    return 'capacity-limit';
+  if (
+    /(?:socket|connection|transport|stream)[^\n]{0,80}(?:closed|reset|terminated)|\b(?:ECONNRESET|EPIPE)\b/i.test(cause)
+  )
+    return 'connection-closed';
+  if (/^(?:APIConnectionError:\s*)?Connection error\.?$/i.test(cause)) return 'connection-error';
+  if (/ENOENT|not found|no such file/i.test(cause)) return 'not-found';
+  if (/EACCES|EPERM|permission denied|unauthorized|forbidden/i.test(cause)) return 'permission';
+  if (/\b(?:timeout|timed out|ETIMEDOUT)\b|超时/i.test(cause)) return 'timeout';
+  if (
+    /\b(?:invalid|validation|schema)\b|(?:unknown|unexpected|unrecognized|unsupported|missing|required) (?:parameter|argument|field|key)|(?:未知|不支持|未识别|非法)(?:的)?(?:参数|字段)|不认识这些参数/i.test(
+      cause,
+    )
+  )
+    return 'invalid-input';
+  if (/rate.?limit|\b429\b/i.test(cause)) return 'rate-limit';
   return 'tool-error';
 }
 function timestamp(value: string): string {
@@ -1370,13 +1455,19 @@ export class HarnessRecorder {
     correlation?: string,
     recordedCategory?: string | null,
     recordedExpected?: boolean,
+    recordedResultHash?: string | null,
   ): { category: string | null; expectedExit: boolean } {
     const pendingKey = correlation ?? `name:${name}`;
     const call = state.pending.get(pendingKey);
     state.pending.delete(pendingKey);
     // Only a result that is byte-identical to the previous ones counts as "no progress",
     // so the digest is recorded before any classification decision.
-    this.noteResultHash(state, seq, call, result);
+    this.noteResultHash(
+      state,
+      seq,
+      call,
+      recordedResultHash === undefined ? digest(textOf(result)) : recordedResultHash,
+    );
     const category = recordedCategory === undefined ? errorCategory(result, name) : recordedCategory;
     const expected = recordedExpected ?? isExpectedExit(call, name, category);
     if (expected) {
@@ -1410,12 +1501,17 @@ export class HarnessRecorder {
    * `typecheck` runs after three different edits are progress; three identical runs against
    * an untouched workspace are not.
    */
-  private noteResultHash(state: RunState, seq: number, call: Call | undefined, result: string): void {
+  private noteResultHash(state: RunState, seq: number, call: Call | undefined, resultHash: string | null): void {
     if (!call) return;
     const key = `${call.name}\n${call.argsHash}`;
     const record = state.calls.get(key);
     if (!record) return;
-    if (record.resultHashes.size < MAX_RESULT_HASHES) record.resultHashes.add(digest(result));
+    if (!resultHash) {
+      record.count = 0;
+      record.resultHashes.clear();
+      return;
+    }
+    if (record.resultHashes.size < MAX_RESULT_HASHES) record.resultHashes.add(resultHash);
     if (record.count < 3 || record.emitted || record.resultHashes.size !== 1) return;
     record.emitted = true;
     this.addFinding(
@@ -2623,9 +2719,19 @@ export class HarnessRecorder {
       this.noteToolCall(state, seq, name, storedText(event.args), correlation, argsHash);
     } else if (event.type === 'tool:result') {
       const category =
-        !hasCompleteContent(event.result) && (typeof event.errorCategory === 'string' || event.errorCategory === null)
+        truncatedToolCategory(event.result, name) ??
+        (!hasCompleteContent(event.result) && (typeof event.errorCategory === 'string' || event.errorCategory === null)
           ? event.errorCategory
-          : undefined;
+          : undefined);
+      const resultHash =
+        event.result &&
+        typeof event.result === 'object' &&
+        typeof (event.result as Record<string, unknown>).sha256 === 'string' &&
+        /^[a-f0-9]{64}$/.test((event.result as Record<string, unknown>).sha256 as string)
+          ? ((event.result as Record<string, unknown>).sha256 as string)
+          : typeof event.result === 'string'
+            ? digest(textOf(event.result))
+            : null;
       this.noteToolResult(
         state,
         seq,
@@ -2634,6 +2740,7 @@ export class HarnessRecorder {
         correlation,
         category,
         event.expectedExit === true ? true : undefined,
+        resultHash,
       );
     } else if (event.type === 'compaction') {
       // 与实时写入同一条推导：轨迹里有 strategy 的老事件才算得上一次压缩。
@@ -2919,7 +3026,8 @@ function countToolEvent(tally: ToolTally, event: StoredEvent): void {
   const entry = tally.get(name) ?? { calls: 0, errors: new Map<string, number>() };
   if (event.type === 'tool:call') entry.calls++;
   else if (event.type === 'tool:result' && typeof event.errorCategory === 'string' && event.errorCategory) {
-    entry.errors.set(event.errorCategory, (entry.errors.get(event.errorCategory) ?? 0) + 1);
+    const category = truncatedToolCategory(event.result, name) ?? event.errorCategory;
+    entry.errors.set(category, (entry.errors.get(category) ?? 0) + 1);
   } else if (event.type !== 'tool:result') return;
   tally.set(name, entry);
 }
