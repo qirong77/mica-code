@@ -114,7 +114,10 @@ export async function prepareSessionModelDefaults(): Promise<IMicaConfig> {
     throw new Error('Cannot prepare session model defaults: no default provider is configured.');
   }
   if (!config.model.trim()) {
-    throw new Error(`Cannot prepare session model defaults: provider ${provider.id} has no available model.`);
+    throw new Error(
+      `Cannot prepare session model defaults: provider ${provider.id} has no model configured. ` +
+        `Add one to its "models" list in config.json — the dynamic model discovery (get_model_url) was removed.`,
+    );
   }
   await ensureModelRule(config.model, undefined, provider);
   // Recover the original configured effort after loading metadata: the first reset may

@@ -20,7 +20,8 @@ beforeAll(async () => {
         commandLineTools: {
           xcodePath: '/Library/Developer/CommandLineTools',
           clangVersion: '16.0.0'
-        }
+        },
+        fullDiskAccess: true
       }),
     openSettings: async (pane) => {
       opened.push(pane)
@@ -53,6 +54,7 @@ describe('system service', () => {
     expect(result.body.checks.map((check) => check.status)).toEqual([
       'granted',
       'denied',
+      'granted',
       'granted'
     ])
   })

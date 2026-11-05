@@ -3,7 +3,7 @@
   "name": "Evolution",
   "icon": "sparkles",
   "version": "1.0.0",
-  "description": "随版本自动清洗旧数据：把历史形态的会话与用量就地改成当前形态，运行时代码因此不必为旧数据保留兼容分支。每台机器各跑自己那份。",
+  "description": "随版本自动清洗旧数据：每次启动把历史形态的会话快照与插件数据就地改成当前形态，运行时代码因此不必为旧数据保留兼容分支。每台机器各跑自己那份。",
   "author": "Mica Code",
   "main": "index.ts",
   "assets": ["README.md"],
@@ -18,17 +18,6 @@
       "type": "switch",
       "default": "true",
       "description": "关掉之后只有 /evolution run 会清洗。"
-    },
-    {
-      "key": "intervalMinutes",
-      "label": "检查间隔",
-      "type": "number",
-      "default": "30",
-      "min": 5,
-      "max": 1440,
-      "step": 5,
-      "unit": "分钟",
-      "description": "两次检查之间隔多久。有新数据、插件升级或会话文件变过时，只有扫描到变化才会真正读文件。"
     },
     {
       "key": "backup",

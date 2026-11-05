@@ -3,6 +3,7 @@ import {
   buildSystemChecks,
   describeAccessibility,
   describeCommandLineTools,
+  describeFullDiskAccess,
   describeScreenRecording,
   isAllowedPane,
   normalizeCheckStatus,
@@ -41,6 +42,13 @@ describe('system check status mapping', () => {
     expect(restricted.status).toBe('denied')
     expect(restricted.detail).toContain('管理员')
     expect(describeScreenRecording('')).toEqual({ status: 'unknown', detail: '' })
+  })
+
+  it('reads full disk access as granted only when it truly is', () => {
+    expect(describeFullDiskAccess(true)).toEqual({ status: 'granted', detail: '' })
+    expect(describeFullDiskAccess(false).status).toBe('denied')
+    expect(describeFullDiskAccess(false).detail).toContain('全磁盘访问')
+    expect(describeFullDiskAccess('unknown')).toEqual({ status: 'unknown', detail: '' })
   })
 
   it('needs both xcode-select and a working clang for command line tools', () => {
@@ -114,20 +122,28 @@ describe('buildSystemChecks', () => {
       platform: 'darwin',
       accessibility: 'granted',
       screenRecording: 'denied',
-      commandLineTools: { xcodePath: '/Library/Developer/CommandLineTools', clangVersion: '16.0.0' }
+      commandLineTools: { xcodePath: '/Library/Developer/CommandLineTools', clangVersion: '16.0.0' },
+      fullDiskAccess: 'denied'
     })
 
     expect(report.platform).toBe('darwin')
     expect(report.checks.map((check) => check.id)).toEqual([
       'accessibility',
       'screen-recording',
-      'command-line-tools'
+      'command-line-tools',
+      'full-disk-access'
     ])
-    expect(report.checks.map((check) => check.status)).toEqual(['granted', 'denied', 'granted'])
+    expect(report.checks.map((check) => check.status)).toEqual([
+      'granted',
+      'denied',
+      'granted',
+      'denied'
+    ])
     // 每一项都带着清单里的文案与「去哪里修」的入口
     expect(report.checks[0].label).toBe('辅助功能')
     expect(report.checks[0].pane).toContain('Privacy_Accessibility')
     expect(report.checks[2].pane).toBeUndefined()
+    expect(report.checks[3].pane).toContain('Privacy_AllFiles')
   })
 
   it('explains that a non-macOS host cannot answer', () => {

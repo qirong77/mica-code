@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import { readPluginsDetails, subscribePluginsDetails } from './plugins-details'
 
 /**
@@ -43,40 +43,143 @@ export async function loadPluginPanels(role, options = {}) {
   return panels
 }
 
-export function usePluginPanels(role) {
-  const [panels, setPanels] = useState([])
+const EMPTY_PANELS = []
 
-  useEffect(() => {
-    let alive = true
-    let timer = 0
-    let tries = 0
-    const run = async () => {
-      const next = await loadPluginPanels(role, { isAlive: () => alive })
-      if (!alive) return
-      setPanels(next)
-      // 空结果有两种：这个会话没有面板，或者运行时还没起来 / 刚重启过。后者不该让这排按钮
-      // 与状态行整页空着等到用户切角色，所以隔一会儿再读几次（有上限，不会一直轮询）。
-      if (next.length === 0 && tries < 5) {
-        tries += 1
-        timer = setTimeout(run, 15_000)
+/** 角色是这份缓存的键：「没写」与 `default` 是同一件事（`selectPluginPanels` 也这么归一）。 */
+const panelsRoleKey = (role) => String(role || 'default').trim() || 'default'
+
+/**
+ * 同一份清单在一棵树里有好几个消费方：输入框上方的快捷条、状态行、右侧抽屉的入口。
+ * 各存一份 `useState`、各自挂订阅、各自跑退避重试，等于把「这份清单现在是什么」读两遍。
+ *
+ * 所以收成一份共享状态：按角色一只条目，**第一份订阅才开始读**，最后一份走了才停（退订 +
+ * 清掉计时器）。停掉之后 panels 留着——重新挂载时先画这一份、再后台对齐（与菜单缓存同一个
+ * 取舍：宁可先显示旧的一秒，也不要闪一下空白）。
+ *
+ * 读、退避、计时都能注入：测试里直接驱动这个 store，不必为了验证「只读一次」去搭一个 DOM。
+ */
+export function createPluginPanelsStore(options = {}) {
+  const {
+    read = readPluginsDetails,
+    delays = PANEL_RETRY_DELAYS,
+    idleDelayMs = 15_000,
+    idleTries = 5,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    subscribeSource = subscribePluginsDetails,
+    schedule = (callback, ms) => setTimeout(callback, ms),
+    cancel = (timer) => clearTimeout(timer)
+  } = options
+  const entries = new Map()
+
+  const entryOf = (role) => {
+    const key = panelsRoleKey(role)
+    let entry = entries.get(key)
+    if (!entry) {
+      entry = {
+        role: key,
+        panels: EMPTY_PANELS,
+        listeners: new Set(),
+        unsubscribeSource: null,
+        // 每换一条链就加一：旧链回来时既不能写状态，也不能发通知。
+        generation: 0,
+        tries: 0,
+        timer: 0
+      }
+      entries.set(key, entry)
+    }
+    return entry
+  }
+
+  const notify = (entry) => {
+    for (const listener of [...entry.listeners]) {
+      try {
+        listener()
+      } catch {
+        // 消费方是页面组件：它出错只影响自己，不能连带让别的挂载点收不到更新。
       }
     }
-    void run()
-    // 启停之后立刻重算：停用插件的按钮与状态行跟着消失，不必等重挂载。
-    const unsubscribe = subscribePluginsDetails(() => {
-      tries = 0
-      if (timer) clearTimeout(timer)
-      timer = 0
-      void run()
-    })
-    return () => {
-      alive = false
-      unsubscribe()
-      if (timer) clearTimeout(timer)
-    }
-  }, [role])
+  }
 
-  return panels
+  const publish = (entry, panels) => {
+    // 每次读取都是新数组：内容没变就别换引用，否则所有挂载点每分钟白重渲染一次。
+    if (JSON.stringify(entry.panels) === JSON.stringify(panels)) return
+    entry.panels = panels
+    notify(entry)
+  }
+
+  /** 停掉在途的那条链：退避重试、空结果的续读、还没回来的读取结果都作废。 */
+  const stopChain = (entry) => {
+    entry.generation += 1
+    entry.tries = 0
+    if (entry.timer) {
+      cancel(entry.timer)
+      entry.timer = 0
+    }
+  }
+
+  const run = async (entry, generation) => {
+    const alive = () => generation === entry.generation && entry.listeners.size > 0
+    const panels = await loadPluginPanels(entry.role, { read, delays, sleep, isAlive: alive })
+    if (!alive()) return
+    publish(entry, panels)
+    // 空结果有两种：这个角色没有面板，或者运行时还没起来 / 刚重启过。后者不该让这排按钮
+    // 与状态行整页空着等到用户切角色，所以隔一会儿再读几次（有上限，不会一直轮询）。
+    if (panels.length > 0 || entry.tries >= idleTries) return
+    entry.tries += 1
+    entry.timer = schedule(() => {
+      entry.timer = 0
+      if (!alive()) return
+      void run(entry, generation)
+    }, idleDelayMs)
+  }
+
+  const restart = (entry) => {
+    stopChain(entry)
+    void run(entry, entry.generation)
+  }
+
+  const release = (entry, listener) => {
+    // 同一个 listener 只收尾一次：重复取消不该再动别人的订阅。
+    if (!entry.listeners.delete(listener)) return
+    if (entry.listeners.size > 0) return
+    // 最后一份走了：停链、退订清单变化。panels 留着，下一次挂载先画它。
+    stopChain(entry)
+    const unsubscribe = entry.unsubscribeSource
+    entry.unsubscribeSource = null
+    unsubscribe?.()
+  }
+
+  return {
+    /** 挂上一份消费方：第一份才开始读，此后共用同一条重试链与同一个清单订阅。 */
+    subscribe(role, listener) {
+      const entry = entryOf(role)
+      entry.listeners.add(listener)
+      if (!entry.unsubscribeSource) {
+        entry.unsubscribeSource = subscribeSource(() => restart(entry))
+        restart(entry)
+      }
+      return () => release(entry, listener)
+    },
+    /** 当前快照：引用只在内容变化时才换（`useSyncExternalStore` 要求它稳定）。 */
+    get(role) {
+      return entries.get(panelsRoleKey(role))?.panels ?? EMPTY_PANELS
+    }
+  }
+}
+
+/** 模块级一份：快捷条、状态行与抽屉入口共用它。 */
+const sharedPanels = createPluginPanelsStore()
+
+export function usePluginPanels(role) {
+  // 订阅与快照按 role 各绑一次：换角色时 useSyncExternalStore 会先退订旧的再订新的，
+  // 没人看的那个角色自然停下。
+  const subscribe = useMemo(
+    () => (onStoreChange) => sharedPanels.subscribe(role, onStoreChange),
+    [role]
+  )
+  const getSnapshot = useMemo(() => () => sharedPanels.get(role), [role])
+  // 服务端渲染没有订阅：给一份稳定的空清单即可（store 里没有条目时也是它）。
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /**
@@ -256,12 +359,32 @@ export function writePanelView(nodeId, pluginId, view, now = Date.now()) {
 }
 
 /** 视图里每个输入框的初值：首次打开与动作之后对齐草稿用（定时刷新不能碰，会清掉正在输的字）。 */
+/**
+ * 草稿的键带上分区位置：插件可以有两块分区都叫「地址」「端口」（一个连生产、一个连测试），
+ * 扁平按 `field.key` 存会让两处的字互相串。位置是这块分区在视图里的下标——与页签 key 用的是
+ * 同一个序号，视图结构不变时不会跳。
+ */
+export function panelDraftKey(sectionIndex, fieldKey) {
+  return `${sectionIndex}:${fieldKey}`
+}
+
 export function panelDrafts(view) {
   const drafts = {}
-  for (const section of Array.isArray(view?.sections) ? view.sections : []) {
-    for (const field of section?.fields || []) drafts[field.key] = field.value ?? ''
+  const sections = Array.isArray(view?.sections) ? view.sections : []
+  for (const [index, section] of sections.entries()) {
+    for (const field of section?.fields || []) drafts[panelDraftKey(index, field.key)] = field.value ?? ''
   }
   return drafts
+}
+
+/** 某一块分区的草稿还原成插件看到的那份扁平 `values`（动作只属于发起它的那块分区）。 */
+export function sectionDrafts(drafts, sectionIndex) {
+  const prefix = `${sectionIndex}:`
+  const values = {}
+  for (const [key, value] of Object.entries(drafts || {})) {
+    if (key.startsWith(prefix)) values[key.slice(prefix.length)] = value
+  }
+  return values
 }
 
 /**

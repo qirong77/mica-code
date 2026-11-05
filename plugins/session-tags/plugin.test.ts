@@ -72,40 +72,9 @@ describe('session tags persistence', () => {
     expect(fixture.read().assignments['session-1']).toEqual(['tag-1']);
   });
 
-  it('旧形态的固定色槽在启动时被清掉，用过的保留', () => {
-    const fixture = harness(
-      JSON.stringify({
-        version: 1,
-        name: 'Session Tags',
-        options: [
-          { id: 'red', label: 'Red', color: '#FF3B30' },
-          { id: 'blue', label: 'Blue', color: '#007AFF' },
-        ],
-        assignments: { 'session-1': ['blue'] },
-      }),
-    );
-    expect(fixture.read().options.map((option: { id: string }) => option.id)).toEqual(['blue']);
-    expect(fixture.read().assignments).toEqual({ 'session-1': ['blue'] });
-  });
-
   it('标签被删空的文件不会被重新预置', () => {
     const fixture = harness(JSON.stringify({ version: 1, name: 'Session Tags', options: [], assignments: {} }));
     expect(fixture.read().options).toEqual([]);
-  });
-
-  it('升级上来的那台机器（只剩没用过的旧色槽）落下的是「待 review」', () => {
-    const fixture = harness(
-      JSON.stringify({
-        version: 1,
-        name: 'Session Tags',
-        options: [
-          { id: 'red', label: 'Red', color: '#FF3B30' },
-          { id: 'orange', label: 'Orange', color: '#FF9500' },
-        ],
-        assignments: {},
-      }),
-    );
-    expect(fixture.read().options.map((option: { label: string }) => option.label)).toEqual(['待 review']);
   });
 
   it('写入失败准确返回失败，不显示已打标，修复后可重试', async () => {

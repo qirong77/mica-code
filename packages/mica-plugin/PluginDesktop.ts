@@ -39,6 +39,13 @@ export const DESKTOP_CHECKS = [
     description: '辅助功能助手需要 clang 编译一次；缺 Xcode Command Line Tools 时执行 xcode-select --install。',
     pane: undefined,
   },
+  {
+    id: 'full-disk-access',
+    label: '全磁盘访问',
+    description:
+      '读别的应用自己的数据（Chrome 的 cookie 库、别的浏览器的配置）需要它；没开时那些文件一律「Operation not permitted」。改完权限要重启 Mica。',
+    pane: 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles',
+  },
 ] as const;
 
 export type DesktopCheckId = (typeof DESKTOP_CHECKS)[number]['id'];

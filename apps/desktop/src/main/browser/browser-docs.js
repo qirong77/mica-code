@@ -385,6 +385,61 @@ const RAW_ENDPOINTS = [
       'curl -s "$MICA_BROWSER_URL/browser/cookies?format=header&url=https%3A%2F%2Fexample.com%2F"'
   },
   {
+    id: 'allCookies',
+    method: 'GET',
+    path: '/browser/cookies/all',
+    summary:
+      '列分区里的全部 cookie（可只取一个域及其子域）：把浏览器里的登录态搬到别处，或者核对某条 cookie 到底在不在',
+    params: [
+      {
+        name: 'domain',
+        in: 'query',
+        required: false,
+        description: '只列这个域及其子域，例如 xiaojukeji.com；省略则整个分区'
+      },
+      {
+        name: 'limit',
+        in: 'query',
+        required: false,
+        description: '最多返回多少条，默认 2000、上限 20000（超出时 truncated 为 true）'
+      }
+    ],
+    returns: '{ ok, domain, total, count, truncated, cookies }',
+    example: 'curl -s "$MICA_BROWSER_URL/browser/cookies/all?domain=xiaojukeji.com"'
+  },
+  {
+    id: 'setCookies',
+    method: 'POST',
+    path: '/browser/cookies/set',
+    summary:
+      '批量写入 cookie（按 domain/url 定作用域，写完立刻落盘）：把别处的登录态灌进这个浏览器',
+    params: [
+      {
+        name: 'cookies',
+        in: 'body',
+        required: true,
+        description:
+          '数组，每条 { name, value, domain 或 url, path, secure, httpOnly, sameSite, hostOnly, expirationDate }；不带 expirationDate 即会话 cookie'
+      }
+    ],
+    returns: '{ ok, written, failed: [{ name, domain, reason }] }'
+  },
+  {
+    id: 'removeCookies',
+    method: 'POST',
+    path: '/browser/cookies/remove',
+    summary: '按 (domain, path, name) 删 cookie；同名不同 path 的不会被一起删掉',
+    params: [
+      {
+        name: 'cookies',
+        in: 'body',
+        required: true,
+        description: '数组，每条 { name, domain 或 url, path }'
+      }
+    ],
+    returns: '{ ok, removed, failed: [{ name, domain, reason }] }'
+  },
+  {
     id: 'console',
     method: 'GET',
     path: '/browser/tabs/:id/console',

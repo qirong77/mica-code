@@ -1,6 +1,7 @@
 import { parsePluginManifest, type PluginManifest } from '@packages/mica-plugin/PluginManifest.js';
 import askManifest from '../../plugins/ask/plugin.json';
 import btwManifest from '../../plugins/btw/plugin.json';
+import browserCookieSyncManifest from '../../plugins/browser-cookie-sync/plugin.json';
 import commitManifest from '../../plugins/commit/plugin.json';
 import computerUseManifest from '../../plugins/computer-use/plugin.json';
 import connectionsManifest from '../../plugins/connections/plugin.json';
@@ -34,6 +35,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(sessionCompactManifest),
   readManifest(askManifest),
   readManifest(btwManifest),
+  readManifest(browserCookieSyncManifest),
   readManifest(commitManifest),
   readManifest(harnessReviewManifest),
   readManifest(memoryManifest),

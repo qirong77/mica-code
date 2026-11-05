@@ -386,7 +386,7 @@ describe('prepareSessionModelDefaults', () => {
       }),
     );
     await expect(configApi.prepareSessionModelDefaults()).rejects.toThrow(
-      'provider prepare-empty has no available model',
+      'provider prepare-empty has no model configured',
     );
   });
 });

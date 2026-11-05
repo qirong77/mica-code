@@ -6,6 +6,7 @@ import {
   BrowserRequestError,
   cookieCachePaths,
   compileRoutes,
+  normalizeCookiePayload,
   parseBoolean,
   resolveOwner,
   resolveRoute,
@@ -455,6 +456,21 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
       if (parseBoolean(ctx.query.save) === false || !cacheDir) return result
       const saved = await saveCookieCache(cacheDir, full)
       return { ...result, saved }
+    },
+
+    allCookies: (ctx) =>
+      manager().allCookies({ domain: ctx.query.domain, limit: ctx.query.limit }),
+
+    setCookies: async (ctx) => {
+      const list = normalizeCookiePayload(ctx.body.cookies)
+      if (list.length === 0) throw new BrowserRequestError('cookies 里没有可写入的条目')
+      return manager().setCookies(list)
+    },
+
+    removeCookies: async (ctx) => {
+      const list = normalizeCookiePayload(ctx.body.cookies)
+      if (list.length === 0) throw new BrowserRequestError('cookies 里没有可删除的条目')
+      return manager().removeCookies(list)
     },
 
     console: (ctx) => ({

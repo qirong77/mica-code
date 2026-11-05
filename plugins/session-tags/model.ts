@@ -64,27 +64,6 @@ export type TagStore = {
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
-/**
- * 旧形态：7 个固定色槽（id 是颜色名、名字是默认英文名）。
- *
- * 标签改成自由定义之后这些槽位没有意义了。只丢「没改过名、也没挂过任何会话」的那几个：
- * 改过名的说明用户真的用过它表达某个分类，统一清掉等于删他的数据。
- */
-const LEGACY_SLOTS: Record<string, string> = {
-  red: 'Red',
-  orange: 'Orange',
-  yellow: 'Yellow',
-  green: 'Green',
-  blue: 'Blue',
-  purple: 'Purple',
-  gray: 'Gray',
-};
-
-/** 这一项是不是 v1 的固定色槽（id 与默认英文名都没被动过）。 */
-export function isLegacySlotOption(option: { id: string; label: string }): boolean {
-  return LEGACY_SLOTS[option.id] !== undefined && option.label === LEGACY_SLOTS[option.id];
-}
-
 export function emptyTagStore(): TagStore {
   return { version: 1, name: STORE_NAME, options: [], assignments: {} };
 }
@@ -116,10 +95,6 @@ export function labelKey(label: string): string {
   return label.trim().toLowerCase();
 }
 
-function isUnusedLegacySlot(option: TagOption, used: Set<string>): boolean {
-  return isLegacySlotOption(option) && !used.has(option.id);
-}
-
 /**
  * 把任意读到的 JSON 收敛成一份能用的标签表。
  *
@@ -132,13 +107,6 @@ export function normalizeTagStore(raw: unknown): TagStore {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return store;
   const record = raw as Record<string, unknown>;
 
-  const used = new Set<string>();
-  if (record.assignments && typeof record.assignments === 'object' && !Array.isArray(record.assignments)) {
-    for (const ids of Object.values(record.assignments as Record<string, unknown>)) {
-      if (Array.isArray(ids)) for (const id of ids) if (typeof id === 'string') used.add(id.trim());
-    }
-  }
-
   const seen = new Set<string>();
   if (Array.isArray(record.options)) {
     for (const entry of record.options.slice(0, MAX_TAGS)) {
@@ -148,7 +116,6 @@ export function normalizeTagStore(raw: unknown): TagStore {
       const label = cleanTagLabel(option.label);
       if (!id || !label || seen.has(id)) continue;
       const tag: TagOption = { id, label, color: cleanTagColor(option.color) };
-      if (isUnusedLegacySlot(tag, used)) continue;
       seen.add(id);
       store.options.push(tag);
     }

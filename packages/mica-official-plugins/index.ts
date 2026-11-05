@@ -1,6 +1,7 @@
 import type { MicaPlugin } from '@packages/mica-plugin/index.js';
 import askSetup from '../../plugins/ask/index.js';
 import btwSetup from '../../plugins/btw/index.js';
+import browserCookieSyncSetup from '../../plugins/browser-cookie-sync/index.js';
 import commitSetup from '../../plugins/commit/index.js';
 import computerUseSetup from '../../plugins/computer-use/index.js';
 import connectionsSetup from '../../plugins/connections/index.js';
@@ -34,6 +35,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   'session-compact': sessionCompactSetup,
   ask: askSetup,
   btw: btwSetup,
+  'browser-cookie-sync': browserCookieSyncSetup,
   commit: commitSetup,
   'harness-review': harnessReviewSetup,
   memory: memorySetup,

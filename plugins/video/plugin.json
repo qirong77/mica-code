@@ -31,19 +31,19 @@
     },
     {
       "key": "cacheLimitMb",
-      "label": "帧缓存上限",
+      "label": "缓存上限",
       "type": "number",
       "default": "512",
       "min": 64,
       "max": 4096,
       "step": 64,
       "unit": "MB",
-      "description": "抽出来的帧按视频缓存在本机，同一个视频追问第二次不再重新解码。超过上限时从最旧的开始删。"
+      "description": "抽出来的帧与下载的远程视频都缓存在本机，同一个视频追问第二次不再重新解码或下载。超过上限时从最旧的开始删（一小时内下载的视频不动）。"
     }
   ],
   "actions": [{ "key": "check", "label": "检查 ffmpeg", "description": "重新探测本机的 ffmpeg 与 ffprobe" }],
   "status": [
     { "key": "ffmpeg", "label": "ffmpeg", "type": "text" },
-    { "key": "cache", "label": "帧缓存", "type": "text" }
+    { "key": "cache", "label": "缓存", "type": "text" }
   ]
 }

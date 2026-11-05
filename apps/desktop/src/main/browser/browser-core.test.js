@@ -6,9 +6,13 @@ import {
   browserUnthrottleEnabled,
   browserSummary,
   compileRoutes,
+  createTabSwitcher,
+  cookieScopeUrl,
   formatCookieHeader,
   keyDescriptors,
   matchPath,
+  normalizeCookieDomain,
+  normalizeCookiePayload,
   normalizeOwner,
   normalizeUrl,
   normalizeWaitCondition,
@@ -21,6 +25,7 @@ import {
   serializeEvaluation,
   sortCookiesForHeader,
   tabSummary,
+  toElectronCookie,
   truncateOutput,
   visibilityEventName
 } from './browser-core.js'
@@ -151,6 +156,52 @@ describe('cookies', () => {
       session: false,
       sameSite: 'unspecified'
     })
+  })
+})
+
+describe('cookie writes', () => {
+  it('builds the scope url from domain + path so a delete only hits that path', () => {
+    expect(cookieScopeUrl({ domain: '.example.com', path: '/admin', secure: true })).toBe(
+      'https://example.com/admin'
+    )
+    expect(cookieScopeUrl({ domain: 'example.com' })).toBe('https://example.com/')
+    expect(cookieScopeUrl({ url: 'http://example.com/x', domain: '' })).toBe('https://example.com/')
+    expect(cookieScopeUrl({ url: 'http://example.com/x', secure: false })).toBe('http://example.com/')
+    expect(() => cookieScopeUrl({})).toThrow(BrowserRequestError)
+  })
+
+  it('keeps host-only cookies host-only and drops an unknown sameSite', () => {
+    const hostOnly = toElectronCookie({ name: 's', value: 'v', domain: 'example.com', hostOnly: true })
+    expect(hostOnly).toMatchObject({ name: 's', url: 'https://example.com/', sameSite: 'unspecified' })
+    expect(hostOnly.domain).toBeUndefined()
+    expect(toElectronCookie({ name: 's', value: 'v', domain: '.example.com' }).domain).toBe(
+      '.example.com'
+    )
+    expect(toElectronCookie({ name: 's', value: 'v', domain: 'example.com', sameSite: 'lax' })).toMatchObject(
+      { sameSite: 'lax' }
+    )
+    expect(() => toElectronCookie({ value: 'v', domain: 'example.com' })).toThrow(BrowserRequestError)
+  })
+
+  it('treats a missing expirationDate as a session cookie, not the epoch', () => {
+    expect(toElectronCookie({ name: 's', domain: 'example.com' }).expirationDate).toBeUndefined()
+    expect(toElectronCookie({ name: 's', domain: 'example.com', expirationDate: 0 }).expirationDate).toBeUndefined()
+    expect(
+      toElectronCookie({ name: 's', domain: 'example.com', expirationDate: 1767225600 }).expirationDate
+    ).toBe(1767225600)
+  })
+
+  it('normalizes the domain filter the way cookies.get wants it', () => {
+    expect(normalizeCookieDomain('https://a.example.com/x')).toBe('a.example.com')
+    expect(normalizeCookieDomain('.example.com')).toBe('example.com')
+    expect(normalizeCookieDomain('')).toBe('')
+    expect(normalizeCookieDomain('::::')).toBe('')
+  })
+
+  it('rejects a payload that is not an array of cookies', () => {
+    expect(normalizeCookiePayload([{ name: 'a' }, null])).toEqual([{ name: 'a' }])
+    expect(() => normalizeCookiePayload('nope')).toThrow(BrowserRequestError)
+    expect(() => normalizeCookiePayload([{ name: 'a' }], { limit: 0 })).toThrow(BrowserRequestError)
   })
 })
 
@@ -303,5 +354,97 @@ describe('visibilityEventName', () => {
     expect(visibilityEventName(true, false)).toBe('hidden')
     expect(visibilityEventName(true, true)).toBeNull()
     expect(visibilityEventName(false, false)).toBeNull()
+  })
+})
+
+describe('createTabSwitcher', () => {
+  // 假窗口：只保留临界区真正依赖的 activeTabId / tabs，切换只改 activeTabId 并记账
+  // （真实实现还动静 WebContentsView，那部分要 Electron，见 browser-manager.js）
+  const makeSwitcher = () => {
+    const events = []
+    const activate = (record, tabId) => {
+      record.activeTabId = tabId
+      events.push(`activate:${tabId}`)
+    }
+    return { withTargetTab: createTabSwitcher(activate), events }
+  }
+  const makeRecord = (tabIds, activeId = tabIds[0]) => ({
+    id: `brw-${tabIds.join('-')}`,
+    activeTabId: activeId,
+    tabs: tabIds.map((id) => ({ id }))
+  })
+  const deferred = () => {
+    let resolve
+    const promise = new Promise((done) => {
+      resolve = done
+    })
+    return { promise, resolve }
+  }
+  // 等一段宏任务：此时该进的微任务都进完了，能看清「第二个 run 有没有开始」
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('runs one temporary tab switch at a time on the same window', async () => {
+    const { withTargetTab, events } = makeSwitcher()
+    const record = makeRecord(['tab-1', 'tab-2', 'tab-3'], 'tab-3')
+    const gate = deferred()
+    const first = withTargetTab(record, record.tabs[0], async () => {
+      events.push(`first:${record.activeTabId}`)
+      await gate.promise
+      return 'first'
+    })
+    const second = withTargetTab(record, record.tabs[1], async () => {
+      events.push(`second:${record.activeTabId}`)
+      return 'second'
+    })
+
+    await flush()
+    // 第一个还卡在 run 里时，第二个连临界区都没进（否则这里会多一条 activate:tab-2）
+    expect(events).toEqual(['activate:tab-1', 'first:tab-1'])
+    expect(record.activeTabId).toBe('tab-1')
+
+    gate.resolve()
+    expect(await Promise.all([first, second])).toEqual(['first', 'second'])
+    // 第二个进来之前，第一个已经把自己切回了 tab-3；第二个恢复的也是它进临界区时看到的 tab-3
+    expect(events).toEqual([
+      'activate:tab-1',
+      'first:tab-1',
+      'activate:tab-3',
+      'activate:tab-2',
+      'second:tab-2',
+      'activate:tab-3'
+    ])
+    expect(record.activeTabId).toBe('tab-3')
+  })
+
+  it('releases the queue and restores the tab when a run throws', async () => {
+    const { withTargetTab, events } = makeSwitcher()
+    const record = makeRecord(['tab-1', 'tab-2'])
+    const failed = withTargetTab(record, record.tabs[1], async () => {
+      throw new Error('页面里炸了')
+    })
+    // 排队在后面：前一个失败也必须能进临界区，且不重试
+    const next = withTargetTab(record, record.tabs[0], async () => record.activeTabId)
+
+    await expect(failed).rejects.toThrow('页面里炸了')
+    expect(await next).toBe('tab-1')
+    expect(record.activeTabId).toBe('tab-1')
+    expect(events).toEqual(['activate:tab-2', 'activate:tab-1'])
+  })
+
+  it('does not serialize across windows', async () => {
+    const { withTargetTab } = makeSwitcher()
+    const slowRecord = makeRecord(['a-1', 'a-2'])
+    const otherRecord = makeRecord(['b-1', 'b-2'])
+    const gate = deferred()
+    const held = withTargetTab(slowRecord, slowRecord.tabs[0], () => gate.promise)
+
+    // 另一个窗口不等前一个：这条能直接跑完就说明队列是按 record 分的
+    await expect(withTargetTab(otherRecord, otherRecord.tabs[1], async () => 'ok')).resolves.toBe(
+      'ok'
+    )
+    expect(otherRecord.activeTabId).toBe('b-1')
+
+    gate.resolve()
+    await held
   })
 })

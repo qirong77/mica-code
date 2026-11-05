@@ -186,6 +186,47 @@ export function activeTab(record) {
 }
 
 /**
+ * 「临时把目标标签页挂上窗口 → 跑一次页面操作 → 切回原来那个」的临界区。
+ *
+ * 同一窗口上必须串行：窗口同时只挂一个标签页，坐标点击、原生输入、截图与读页面全都按挂载中
+ * 的那个算。两段临界区交错时（同一窗口两个标签页并发，或 agent 操作撞上用户点标签栏），后
+ * 进去的 run 会落回别人切过去的页面，点歪、截错页。队列按 record 身份分开（WeakMap），不同
+ * 窗口照旧并行。
+ *
+ * 队列尾存的是「已消化错误」的 promise：run 抛错也会先切回再放行下一段，一次失败不卡死整条
+ * 队列；错误照原样抛给调用方，不重试。
+ *
+ * `activate` 是真正切换标签页那一步（主进程里是 activateTabIn，要动 WebContentsView）。这里
+ * 只依赖 record 的 activeTabId / tabs，好在 bun test 里直接覆盖并发交错。
+ */
+export function createTabSwitcher(activate) {
+  const tails = new WeakMap()
+
+  return function withTargetTab(record, tab, run) {
+    const result = (tails.get(record) || Promise.resolve()).then(async () => {
+      // previous 只能在临界区里读：排队期间前一段会把 activeTabId 切回它自己的 previous，
+      // 在外面读到的是过期值（切回去就切错了页面）。
+      const previous = activeTab(record)
+      const switched = !previous || previous.id !== tab.id
+      if (switched) activate(record, tab.id)
+      try {
+        return await run()
+      } finally {
+        if (switched && previous && record.tabs.includes(previous)) activate(record, previous.id)
+      }
+    })
+    tails.set(
+      record,
+      result.then(
+        () => {},
+        () => {}
+      )
+    )
+    return result
+  }
+}
+
+/**
  * Cookie 头按浏览器自己的顺序拼：path 长的在前，这样同名 cookie 不会取到宽 path 那一个
  * （与 Chromium 的发送顺序一致）。`session` 项的过期时间缺省，按创建时间兜底排序。
  */
@@ -216,6 +257,78 @@ export function publicCookie(cookie) {
     hostOnly: Boolean(cookie.hostOnly),
     expirationDate: cookie.expirationDate ?? null
   }
+}
+
+/** Electron 认的 sameSite 取值；别的值一律当 unspecified，写库时不会因为一个陌生词整条失败。 */
+export const COOKIE_SAME_SITE = ['unspecified', 'no_restriction', 'lax', 'strict']
+
+/**
+ * 域 / url → 规范域名：`cookies.get({ domain })` 只认裸域名（`example.com`），
+ * 传 URL 或带前导点都匹配不到子域。
+ */
+export function normalizeCookieDomain(value) {
+  const stripped = String(value || '').trim()
+  const raw = stripped.replace(/^\.+/, '')
+  if (!raw) return ''
+  try {
+    return new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`).hostname
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * 一条 cookie 的作用域地址。
+ *
+ * Electron 的 `cookies.set` / `cookies.remove` 都按 url 定位：`domain` 决定它是不是域
+ * cookie，path 决定删除时只命中同一个 path 的那条（同名不同 path 的 cookie 在同一个站点
+ * 上很常见，只给域名会一起删掉）。
+ */
+export function cookieScopeUrl(cookie) {
+  const host = normalizeCookieDomain(cookie?.domain || cookie?.url)
+  if (!host) throw new BrowserRequestError('cookie 缺少可用的 domain（或 url）')
+  const path = String(cookie?.path || '/').trim() || '/'
+  const scheme = cookie?.secure === false ? 'http' : 'https'
+  return `${scheme}://${host}${path.startsWith('/') ? path : `/${path}`}`
+}
+
+/**
+ * 外部写进来的那一条 cookie → Electron `cookies.set` 的参数。
+ *
+ * 只认已知字段：多传的键会被 Electron 忽略，但把 `value` 之外的字符串原样透传会让
+ * 「写进去的到底是什么」变得不可读。`expirationDate` 缺省即会话 cookie。
+ */
+export function toElectronCookie(input) {
+  const cookie = input && typeof input === 'object' ? input : {}
+  const name = String(cookie.name ?? '').trim()
+  if (!name) throw new BrowserRequestError('cookie 缺少 name')
+  const url = cookie.url ? normalizeUrl(cookie.url) : cookieScopeUrl(cookie)
+  if (!url) throw new BrowserRequestError(`cookie 的 url 不可用：${cookie.url}`)
+  const sameSite = COOKIE_SAME_SITE.includes(cookie.sameSite) ? cookie.sameSite : 'unspecified'
+  const expiration =
+    Number.isFinite(Number(cookie.expirationDate)) && Number(cookie.expirationDate) > 0
+      ? { expirationDate: Number(cookie.expirationDate) }
+      : {}
+  return {
+    url,
+    name,
+    value: String(cookie.value ?? ''),
+    path: String(cookie.path || '/') || '/',
+    secure: cookie.secure !== false,
+    httpOnly: Boolean(cookie.httpOnly),
+    sameSite,
+    ...expiration,
+    // 只有明确是域 cookie 时才给 domain：给了它 Electron 会写成一个对子域都有效的 cookie，
+    // host-only 的那条（登录态里绝大多数）会被悄悄放宽作用域。
+    ...(cookie.hostOnly || !cookie.domain ? {} : { domain: String(cookie.domain) })
+  }
+}
+
+/** 批量写入 / 删除的入参：数组、上限内、每条都带 name。 */
+export function normalizeCookiePayload(value, { limit = 2000 } = {}) {
+  if (!Array.isArray(value)) throw new BrowserRequestError('cookies 必须是数组')
+  if (value.length > limit) throw new BrowserRequestError(`一次最多 ${limit} 条 cookie`)
+  return value.map((entry) => (entry && typeof entry === 'object' ? entry : null)).filter(Boolean)
 }
 
 /**

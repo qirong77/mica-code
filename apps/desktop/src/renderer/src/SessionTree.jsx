@@ -128,6 +128,13 @@ const FILTER_PREVIEW_LIMIT = 30
 
 const FILTER_PAGE_SIZE = 30
 
+/**
+ * 筛选窗口是**滚动**的（最近 4/8/12/24 小时），「现在」得自己往前走：`Date.now()` 写在
+ * `useMemo` 里等于冻在列表上一次变化的那一刻。一分钟足够——最细的档位是 4 小时，这点偏差
+ * 看不出来，而侧栏不该为了一个筛选项长期每秒醒来。
+ */
+const FILTER_NOW_TICK_MS = 60_000
+
 // 档位解释只出现在悬停提示里：侧栏是 260px，按钮上再带一行说明就挤成两行了。
 const filterHint = (mode) =>
   mode.hours ? `最近 ${mode.hours} 小时更新过的会话` : '全部会话（默认）'
@@ -850,10 +857,19 @@ export function SessionTree({
    * 哪些」，不是「它们各自归在哪儿」；置顶会话照样会出现，只是行首多一枚图钉说明身份。
    */
   const filtering = filterOpen && sessionFilterMode(filterMode).id !== 'all'
+  // 只有真的在筛（漏斗打开、档位不是「全部」）才挂这个计时器，收起即停。
+  const [filterNow, setFilterNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!filtering) return undefined
+    // 打开漏斗、换档位都立刻对齐一次，不必等第一个一分钟。
+    setFilterNow(Date.now())
+    const timer = setInterval(() => setFilterNow(Date.now()), FILTER_NOW_TICK_MS)
+    return () => clearInterval(timer)
+  }, [filtering, filterMode])
   const filterCandidates = useMemo(() => {
     if (!filtering) return []
-    return filterSessions(sessions, filterMode, { now: Date.now() }).sort(byUpdatedDesc)
-  }, [filtering, filterMode, sessions])
+    return filterSessions(sessions, filterMode, { now: filterNow }).sort(byUpdatedDesc)
+  }, [filtering, filterMode, filterNow, sessions])
   const filterRoots = useMemo(() => sessionRoots(filterCandidates), [filterCandidates])
   const filterPage = useMemo(
     () => paginateSessionTrees(filterCandidates, filterRoots, filterLimit),

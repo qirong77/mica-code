@@ -1,15 +1,15 @@
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
+import { DATA_MIGRATIONS } from './data/index.js';
 import { MIGRATIONS } from './migrations.js';
 import { runEvolution, type EvolutionRunResult } from './run.js';
 import { formatStatusTime, writeEvolutionStatus } from './state.js';
 
-/** 默认 30 分钟查一次；有剩余待处理时 5 秒后续跑。 */
-const DEFAULT_INTERVAL_MINUTES = 30;
-const MIN_INTERVAL_MINUTES = 5;
-const MAX_INTERVAL_MINUTES = 1440;
+/** 启动那一轮还有没洗完的会话时（有宿主正在跑轮次 / 超过单轮上限），5 秒后续跑。 */
 const CONTINUE_SOON_MS = 5_000;
+/** 续跑轮数上限（约一分钟）：够把一个正常大小的会话目录洗完，又不会变成常驻轮询。 */
+const MAX_STARTUP_ROUNDS = 12;
 
 /**
  * `evolution`：随版本自动清洗旧数据。
@@ -23,6 +23,9 @@ const CONTINUE_SOON_MS = 5_000;
  *   所以另一台装着 mica 的机器升级后不会因为这边已经清洗过而被跳过。
  * - **只读变过的文件**：账本按文件签名（size+mtime）记，日常一轮只是 stat 几百个文件。
  * - **拿到 turn lease 才动文件**：正在跑轮次的会话留给下一轮，绝不和正在写它的进程抢。
+ * - **每个进程只洗一次（启动时）**：清洗是「升级之后把旧数据改成当前形态」，不是常驻
+ *   轮询。启动后洗完就停——否则一个开着好几天的窗口会定期重扫会话目录，而这些会话早已
+ *   由宿主按当前形态写过；更糟的是它会在别的宿主读着同一条会话时改写文件。
  * - **迁移是纯函数**：`migrations.ts` 不碰 IO，因此可以对着固定样本单测；执行、备份、
  *   原子写、分批让出事件循环都在 `run.ts`。
  */
@@ -41,13 +44,6 @@ export default function setup(ctx: PluginContext): void {
 
   const enabled = () => readSwitch(ctx.settings.get().enabled, true);
   const backup = () => readSwitch(ctx.settings.get().backup, true);
-  const intervalMs = () => {
-    const minutes = Number(ctx.settings.get().intervalMinutes);
-    if (!Number.isFinite(minutes)) return DEFAULT_INTERVAL_MINUTES * 60_000;
-    const clamped = Math.min(MAX_INTERVAL_MINUTES, Math.max(MIN_INTERVAL_MINUTES, minutes));
-    return clamped * 60_000;
-  };
-
   const clean = async (reason: string): Promise<EvolutionRunResult | null> => {
     if (running) return null;
     running = true;
@@ -62,14 +58,20 @@ export default function setup(ctx: PluginContext): void {
         return null;
       }
       lastResult = result;
+      const dataChanged = result.dataFiles.reduce((sum, item) => sum + item.changed, 0);
       writeEvolutionStatus(statusPath, {
         lastRun: formatStatusTime(result.finishedAt),
         cleaned:
-          result.migratedFiles > 0
-            ? `${result.migratedFiles} 个会话 · ${result.migratedRecords} 条记录`
+          result.migratedFiles > 0 || dataChanged > 0
+            ? [
+                result.migratedFiles > 0 ? `${result.migratedFiles} 个会话 · ${result.migratedRecords} 条记录` : '',
+                dataChanged > 0 ? `${dataChanged} 份数据` : '',
+              ]
+                .filter(Boolean)
+                .join(' · ')
             : '没有需要改写的旧数据',
         pending: `${result.pending} 个会话`,
-        migrations: `${MIGRATIONS.length} 条规则`,
+        migrations: `会话 ${MIGRATIONS.length} 条 · 数据 ${DATA_MIGRATIONS.length} 条`,
       });
       if (result.brokenFiles > 0) {
         ctx.logger.warn('evolution:broken', { reason, count: result.brokenFiles });
@@ -103,14 +105,22 @@ export default function setup(ctx: PluginContext): void {
     }
   };
 
-  ctx.background?.register({
-    id: 'clean',
-    // 上一轮还有没处理完的会话时快速续跑，否则按用户的检查间隔。
-    every: () => (lastResult && lastResult.pending > 0 ? CONTINUE_SOON_MS : intervalMs()),
+  let attempts = 0;
+  let task: { dispose(): void } | undefined;
+  task = ctx.background?.register({
+    id: 'startup',
+    // 只有「上一轮还没处理完」时才会被再次调度；洗完 / 到达轮数上限就 dispose，
+    // 这个进程里不再有第二次定时扫描。
+    every: CONTINUE_SOON_MS,
     immediate: true,
     run: async () => {
-      if (!enabled()) return;
-      await clean('background');
+      if (!enabled()) {
+        task?.dispose();
+        return;
+      }
+      attempts += 1;
+      const result = await clean('startup');
+      if (result?.pending === 0 || attempts >= MAX_STARTUP_ROUNDS) task?.dispose();
     },
   });
 
@@ -127,7 +137,7 @@ export default function setup(ctx: PluginContext): void {
     handler: async (_commandCtx, args) => {
       const action = args.trim().toLowerCase();
       if (!action || action === 'status') {
-        ctx.ui?.showMessage(describeStatus(lastResult, intervalMs()), 8000);
+        ctx.ui?.showMessage(describeStatus(lastResult), 8000);
         return { ok: true };
       }
       if (action === 'run') {
@@ -136,12 +146,16 @@ export default function setup(ctx: PluginContext): void {
           ctx.ui?.showMessage('清洗没有开始：上一轮还在跑，或另一个 mica 进程正在处理。');
           return { ok: false, error: new Error('evolution run skipped') };
         }
-        ctx.ui?.showMessage(
+        const dataChanged = result.dataFiles.reduce((sum, item) => sum + item.changed, 0);
+        const parts = [
           result.migratedFiles > 0
-            ? `已清洗 ${result.migratedFiles} 个会话，补上 ${result.migratedRecords} 条记录${
-                result.pending > 0 ? `；还有 ${result.pending} 个会话等下一轮` : ''
-              }。`
-            : `没有需要改写的旧数据（检查了 ${result.scanned} 个会话）。`,
+            ? `已清洗 ${result.migratedFiles} 个会话，补上 ${result.migratedRecords} 条记录`
+            : '',
+          dataChanged > 0 ? `改写 ${dataChanged} 份插件数据` : '',
+          result.pending > 0 ? `还有 ${result.pending} 个会话等下一轮` : '',
+        ].filter(Boolean);
+        ctx.ui?.showMessage(
+          parts.length > 0 ? `${parts.join('；')}。` : `没有需要改写的旧数据（检查了 ${result.scanned} 个会话）。`,
           8000,
         );
         return { ok: true };
@@ -158,17 +172,20 @@ function readSwitch(value: string | undefined, fallback: boolean): boolean {
   return value !== 'false';
 }
 
-function describeStatus(result: EvolutionRunResult | null, interval: number): string {
+function describeStatus(result: EvolutionRunResult | null): string {
   const lines = [
-    `迁移规则：${MIGRATIONS.map((migration) => `${migration.id}（${migration.description}）`).join('\n')}`,
-    `检查间隔：${Math.round(interval / 60_000)} 分钟`,
+    '会话迁移：',
+    ...MIGRATIONS.map((migration) => `  ${migration.id}：${migration.description}`),
+    '数据迁移（每次启动跑一遍）：',
+    ...DATA_MIGRATIONS.map((migration) => `  ${migration.id}：${migration.description}`),
   ];
   if (!result) {
     lines.push('本轮进程还没跑过清洗');
   } else {
+    const dataChanged = result.dataFiles.reduce((sum, item) => sum + item.changed, 0);
     lines.push(
       `最近检查：${formatStatusTime(result.finishedAt)}（${result.scanned} 个会话）`,
-      `最近清洗：${result.migratedFiles} 个会话 · ${result.migratedRecords} 条记录`,
+      `最近清洗：${result.migratedFiles} 个会话 · ${result.migratedRecords} 条记录 · ${dataChanged} 份数据`,
       `待清洗：${result.pending} 个会话${result.busyFiles > 0 ? `（${result.busyFiles} 个正在跑轮次）` : ''}`,
       `解析不了：${result.brokenFiles} 个会话`,
     );

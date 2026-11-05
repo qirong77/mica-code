@@ -106,6 +106,23 @@ export function describeCommandLineTools({ platform, xcodePath = '', clangVersio
 }
 
 /**
+ * 全磁盘访问：读得到别的应用自己的数据才算开。
+ *
+ * 探测方式是「真去开一个受 TCC 保护的文件」——TCC 数据库只有拿到全磁盘访问的进程读得开，
+ * 而且每台 macOS 上都有。没有它时系统返回 EPERM/EACCES（不弹窗，也不需要额外授权）。
+ */
+export function describeFullDiskAccess(value) {
+  if (value === true || value === 'granted') return { status: 'granted', detail: '' }
+  if (value === false || value === 'denied') {
+    return {
+      status: 'denied',
+      detail: '读不到别的应用的数据：在系统设置里给 Mica 勾上「全磁盘访问」后重启应用'
+    }
+  }
+  return { status: 'unknown', detail: '' }
+}
+
+/**
  * 组装成页面与运行时都能直接吃的形状：顺序、文案、pane 全部来自 `DESKTOP_CHECKS`，
  * 新增一项检查只需要在主进程补一个探测器。
  */
@@ -113,12 +130,14 @@ export function buildSystemChecks({
   platform = process.platform,
   accessibility,
   screenRecording,
-  commandLineTools
+  commandLineTools,
+  fullDiskAccess
 } = {}) {
   const resolved = {
     accessibility: describeAccessibility(accessibility),
     'screen-recording': describeScreenRecording(screenRecording),
-    'command-line-tools': describeCommandLineTools({ platform, ...commandLineTools })
+    'command-line-tools': describeCommandLineTools({ platform, ...commandLineTools }),
+    'full-disk-access': describeFullDiskAccess(fullDiskAccess)
   }
 
   return {

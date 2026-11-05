@@ -99,10 +99,16 @@ async function refreshAvailability(ctx: PluginContext, configuredPath: string | 
       ? { text: tools.version.slice(0, 40), tone: 'ok' }
       : { text: '未找到 ffmpeg', tone: 'error' },
     cache: {
-      text: stats.files > 0 ? `${stats.files} 张 · ${formatBytes(stats.bytes)}` : '暂无缓存',
+      text: describeCache(stats),
     },
   });
   return tools;
+}
+
+/** 只有下载的远程视频、还没抽出帧时也占着磁盘，不能显示「暂无缓存」。 */
+function describeCache(stats: { bytes: number; files: number }): string {
+  if (stats.files > 0) return `${stats.files} 张 · ${formatBytes(stats.bytes)}`;
+  return stats.bytes > 0 ? `视频源 · ${formatBytes(stats.bytes)}` : '暂无缓存';
 }
 
 function reportMissing(ctx: PluginContext): void {

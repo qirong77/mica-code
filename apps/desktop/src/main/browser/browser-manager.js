@@ -6,8 +6,12 @@ import {
   DEFAULT_BROWSER_SIZE,
   activeTab,
   browserSummary,
+  cookieScopeUrl,
+  createTabSwitcher,
   formatCookieHeader,
   keyDescriptors,
+  normalizeCookieDomain,
+  normalizeCookiePayload,
   normalizeLabel,
   normalizeUrl,
   normalizeWaitCondition,
@@ -16,6 +20,7 @@ import {
   publicCookie,
   serializeEvaluation,
   tabSummary,
+  toElectronCookie,
   timeoutError,
   truncateOutput,
   visibilityEventName
@@ -45,6 +50,9 @@ const MAX_CONSOLE_ENTRIES = 500
 const MAX_NETWORK_ENTRIES = 400
 const MAX_NETWORK_BODY = 4000
 const SCREENSHOT_TIMEOUT_MS = 20000
+/** `allCookies` 一次最多回多少条：分区里可能有上万条，整份 JSON 会把调用方和 IPC 一起拖住。 */
+const MAX_COOKIE_LIST = 20000
+const DEFAULT_COOKIE_LIST = 2000
 
 export function createBrowserManager({
   onChange = () => {},
@@ -573,17 +581,11 @@ export function createBrowserManager({
    * 隐藏窗口能跑全流程靠两件事：主进程挂了 `disable-backgrounding-occluded-windows`（否则
    * rAF 冻结、截图只能是旧帧），以及截图走 CDP `Page.captureScreenshot`（`capturePage()`
    * 在隐藏窗口上拿到的是旧帧）。
+   *
+   * 「切过去 → run → 切回」这段在同一窗口上串行（见 createTabSwitcher）：并发交错会让
+   * 后来者的坐标点击 / 截图落到别人切过去的标签页上。
    */
-  async function withTargetTab(record, tab, run) {
-    const previous = activeTab(record)
-    const switched = !previous || previous.id !== tab.id
-    if (switched) activateTabIn(record, tab.id)
-    try {
-      return await run()
-    } finally {
-      if (switched && previous && record.tabs.includes(previous)) activateTabIn(record, previous.id)
-    }
-  }
+  const withTargetTab = createTabSwitcher(activateTabIn)
 
   async function elementCenter(tab, selector) {
     const script = `(() => {
@@ -1050,6 +1052,87 @@ export function createBrowserManager({
      */
     async cookiesForScope({ url = '', format = 'json' } = {}) {
       return readCookies(normalizeUrl(url), format)
+    },
+
+    /**
+     * 分区里的全部 cookie，可按域收窄。
+     *
+     * 与 `cookiesForScope` 的分工：那个按一个地址取「这个站点会发出去的」cookie（含父域），
+     * 这个按域列举整份登录态——把浏览器里的会话搬到别处、或者反过来灌进来时用。
+     */
+    async allCookies({ domain = '', limit = DEFAULT_COOKIE_LIST } = {}) {
+      const host = normalizeCookieDomain(domain)
+      const max = Math.min(Math.max(Number(limit) || DEFAULT_COOKIE_LIST, 1), MAX_COOKIE_LIST)
+      const filter = host ? { domain: host } : {}
+      const list = await partition().cookies.get(filter)
+      const sorted = [...list].sort(
+        (left, right) =>
+          String(left.domain).localeCompare(String(right.domain)) ||
+          String(left.name).localeCompare(String(right.name)) ||
+          String(right.path).localeCompare(String(left.path))
+      )
+      return {
+        domain: host,
+        total: sorted.length,
+        count: Math.min(sorted.length, max),
+        truncated: sorted.length > max,
+        cookies: sorted.slice(0, max).map(publicCookie)
+      }
+    },
+
+    /**
+     * 批量写入 cookie。
+     *
+     * 单条失败不中断整批：一个域写不进去（Secure 与 http 冲突这类）不该让另外几百条白跑，
+     * 失败原因原样回给调用方，由它决定要不要重试或提示用户。写完立刻 `flushStore()`：
+     * 分区是磁盘上的库，应用被关掉时还没落盘的 cookie 就没了。
+     */
+    async setCookies(input = []) {
+      const list = normalizeCookiePayload(input)
+      const store = partition().cookies
+      const failed = []
+      let written = 0
+      for (const entry of list) {
+        try {
+          await store.set(toElectronCookie(entry))
+          written += 1
+        } catch (error) {
+          failed.push({
+            name: String(entry?.name || ''),
+            domain: String(entry?.domain || ''),
+            reason: error instanceof Error ? error.message : String(error)
+          })
+        }
+      }
+      if (written > 0) await store.flushStore().catch(() => {})
+      return { written, failed }
+    },
+
+    /** 按 (domain, path, name) 删 cookie：url 带上这条 cookie 自己的 path，同名不同 path 的不会被一起删掉。 */
+    async removeCookies(input = []) {
+      const list = normalizeCookiePayload(input)
+      const store = partition().cookies
+      const failed = []
+      let removed = 0
+      for (const entry of list) {
+        const name = String(entry?.name || '').trim()
+        if (!name) {
+          failed.push({ name: '', domain: String(entry?.domain || ''), reason: 'cookie 缺少 name' })
+          continue
+        }
+        try {
+          await store.remove(cookieScopeUrl(entry), name)
+          removed += 1
+        } catch (error) {
+          failed.push({
+            name,
+            domain: String(entry?.domain || ''),
+            reason: error instanceof Error ? error.message : String(error)
+          })
+        }
+      }
+      if (removed > 0) await store.flushStore().catch(() => {})
+      return { removed, failed }
     },
 
     ownerOf,

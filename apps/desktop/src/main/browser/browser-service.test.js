@@ -126,6 +126,29 @@ function createFakeManager() {
         { name: 'b', value: '2' }
       ]
     }),
+    allCookies: ({ domain, limit } = {}) => {
+      const cookies = [
+        { name: 'a', value: '1', domain: '.example.com', path: '/', hostOnly: false },
+        { name: 'b', value: '2', domain: 'other.test', path: '/', hostOnly: true }
+      ].filter((cookie) => !domain || cookie.domain.endsWith(domain))
+      const max = Number(limit) || 2000
+      return {
+        domain: domain || '',
+        total: cookies.length,
+        count: Math.min(cookies.length, max),
+        truncated: cookies.length > max,
+        cookies: cookies.slice(0, max)
+      }
+    },
+    setCookies: (list) => ({ written: list.length, failed: [] }),
+    removeCookies: (list) => ({
+      removed: list.length,
+      failed: list.filter((entry) => entry.name === 'boom').map((entry) => ({
+        name: entry.name,
+        domain: entry.domain,
+        reason: '写不进去'
+      }))
+    }),
     consoleEntries: (_id, { clear } = {}) => [{ level: 'info', message: clear ? 'cleared' : 'hi' }],
     networkEntries: () => [{ method: 'GET', url: 'https://example.com', status: 200 }],
     calls: { type: 0 },
@@ -359,6 +382,53 @@ describe('browser and tab operations', () => {
     expect(cached.trim()).toBe('a=1; b=2')
     const detail = JSON.parse(await readFile(read.body.saved.jsonPath, 'utf8'))
     expect(detail.cookies).toHaveLength(2)
+  })
+
+  it('enumerates, writes and removes cookies for a whole partition', async () => {
+    const all = await call('/browser/cookies/all')
+    expect(all.body.total).toBe(2)
+    expect(all.body.truncated).toBe(false)
+
+    const one = await call('/browser/cookies/all?domain=example.com&limit=1')
+    expect(one.body.domain).toBe('example.com')
+    expect(one.body.count).toBe(1)
+    expect(one.body.total).toBe(1)
+
+    const capped = await call('/browser/cookies/all?limit=1')
+    expect(capped.body.count).toBe(1)
+    expect(capped.body.truncated).toBe(true)
+
+    const written = await call('/browser/cookies/set', {
+      method: 'POST',
+      body: {
+        cookies: [
+          { name: 's', value: 'v', domain: '.example.com', path: '/', secure: true },
+          { name: 'b', value: '2', domain: 'other.test', path: '/', secure: true, hostOnly: true }
+        ]
+      }
+    })
+    expect(written.body).toMatchObject({ ok: true, written: 2, failed: [] })
+
+    const removed = await call('/browser/cookies/remove', {
+      method: 'POST',
+      body: { cookies: [{ name: 's', domain: '.example.com', path: '/' }] }
+    })
+    expect(removed.body).toMatchObject({ ok: true, removed: 1 })
+
+    // 单条写不进去不该中断整批：失败原因原样回给调用方
+    const partial = await call('/browser/cookies/remove', {
+      method: 'POST',
+      body: { cookies: [{ name: 'boom', domain: 'other.test' }, { name: 'ok', domain: 'other.test' }] }
+    })
+    expect(partial.body.removed).toBe(2)
+    expect(partial.body.failed).toHaveLength(1)
+  })
+
+  it('refuses an empty or malformed cookie batch', async () => {
+    const empty = await call('/browser/cookies/set', { method: 'POST', body: { cookies: [] } })
+    expect(empty.status).toBe(400)
+    const notArray = await call('/browser/cookies/remove', { method: 'POST', body: { cookies: 'x' } })
+    expect(notArray.status).toBe(400)
   })
 
   it('returns the png bytes directly when raw=1 is asked for', async () => {

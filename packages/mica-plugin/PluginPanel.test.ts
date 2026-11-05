@@ -263,11 +263,48 @@ describe('normalizePluginPanelView', () => {
     });
     expect(tooLong.sections?.[0].editor?.value.length).toBe(MAX_EDITOR_TEXT);
 
-    // 缺正文就没有可编辑的东西，缺动作就是「改完没处交」
+    // 空正文是合法的：新建一个还没写内容的文件时，编辑器就是一张白纸。
     const empty = normalizePluginPanelView({ title: 'x', sections: [{ title: 'a', editor: { action: 's', value: '' } }] });
-    expect(empty.sections?.[0].editor).toBeUndefined();
+    expect(empty.sections?.[0].editor).toMatchObject({ action: 's', value: '' });
+    // 缺动作就是「改完没处交」：当没声明。
     const headless = normalizePluginPanelView({ title: 'x', sections: [{ title: 'a', editor: { value: '正文' } }] });
     expect(headless.sections?.[0].editor).toBeUndefined();
+  });
+
+  it('drops duplicate row / action keys instead of drawing two nodes with the same key', () => {
+    const view = normalizePluginPanelView({
+      title: 'x',
+      sections: [
+        {
+          title: 'a',
+          items: [
+            { key: 'same', label: '第一条' },
+            { key: 'same', label: '第二条' },
+          ],
+          fields: [
+            { key: 'host', label: '地址' },
+            { key: 'host', label: '另一个地址' },
+          ],
+          actions: [
+            { id: 'save', label: '保存' },
+            { id: 'save', label: '再保存' },
+          ],
+          table: {
+            columns: [{ key: 'name', label: '名字' }, { key: 'name', label: '重复列' }],
+            rows: [
+              { key: 'r1', cells: { name: { text: 'A' } } },
+              { key: 'r1', cells: { name: { text: 'B' } } },
+            ],
+          },
+        },
+      ],
+    });
+    const section = view.sections?.[0];
+    expect(section?.items?.map((item) => item.label)).toEqual(['第一条']);
+    expect(section?.fields?.map((field) => field.label)).toEqual(['地址']);
+    expect(section?.actions?.map((action) => action.label)).toEqual(['保存']);
+    expect(section?.table?.columns.map((column) => column.label)).toEqual(['名字']);
+    expect(section?.table?.rows.map((row) => row.cells.name?.text)).toEqual(['A']);
   });
 
   it('keeps a status line with a bounded label and tone', () => {

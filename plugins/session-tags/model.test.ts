@@ -62,25 +62,6 @@ describe('normalizeTagStore', () => {
     const store = normalizeTagStore({ options: [{ id: 'tag-1', label: 'x'.repeat(60), color: '#FF3B30' }] });
     expect(store.options[0]!.label.length).toBe(24);
   });
-
-  it('旧形态的固定色槽：没改过名、没挂过会话的丢掉，用过的保留', () => {
-    const store = normalizeTagStore({
-      options: [
-        { id: 'red', label: 'Red', color: '#FF3B30' },
-        { id: 'orange', label: 'Orange', color: '#FF9500' },
-        { id: 'blue', label: 'Blue', color: '#007AFF' },
-      ],
-      assignments: { s1: ['blue'] },
-    });
-    // blue 有会话挂着 → 留着；red / orange 是没动过的旧槽位 → 收敛时清掉。
-    expect(store.options.map((option) => option.id)).toEqual(['blue']);
-    expect(store.assignments).toEqual({ s1: ['blue'] });
-  });
-
-  it('改过名字的旧槽位算用户真的用过，不会被清掉', () => {
-    const store = normalizeTagStore({ options: [{ id: 'red', label: '阻塞', color: '#FF3B30' }] });
-    expect(store.options).toEqual([{ id: 'red', label: '阻塞', color: '#FF3B30' }]);
-  });
 });
 
 describe('启动时的那一份', () => {
@@ -94,21 +75,6 @@ describe('启动时的那一份', () => {
   it('把标签删空的文件不会再长出默认标签', () => {
     const empty = { version: 1, name: 'Session Tags', options: [], assignments: {} };
     expect(resolveStore(empty)).toMatchObject({ dirty: false, store: { options: [] } });
-  });
-
-  it('只剩 v1 那堆没用过的固定色槽时，换成默认的「待 review」', () => {
-    const legacy = {
-      version: 1,
-      name: 'Session Tags',
-      options: [
-        { id: 'red', label: 'Red', color: '#FF3B30' },
-        { id: 'gray', label: 'Gray', color: '#8E8E93' },
-      ],
-      assignments: {},
-    };
-    const { store, dirty } = resolveStore(legacy);
-    expect(dirty).toBe(true);
-    expect(store.options.map((option) => option.label)).toEqual(['待 review']);
   });
 
   it('文件里有需要收敛的东西时才写回', () => {

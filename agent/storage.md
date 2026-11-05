@@ -17,4 +17,4 @@
 - `$MICA_HOME/session-index.json` 是可重建缓存，不进 `sessions/`；索引 v3 记录读不出摘要的 `rejects`（id + size/mtime），避免每次全量重扫，并带上侧栏嵌套要用的 `parentSessionId`（v2 没有它，版本对不上就整份重建）。
 - `sessions/.turn-locks/<id>.lock` 是跨进程写入的唯一事实来源（`wx` + owner pid 存活判定）；孤儿锁在 acquire 时回收。
 - 垃圾占位须同时满足：默认占位标题、无对话、无 usage；`turnState === 'running'` 永不隐藏或删除。
-- 只读会话顶层字段（cwd、标题等）用 `host/session-file-head.js` 读文件头，不要为单个字段整份 `JSON.parse`：最大的一份会话 52MB。
+- 只读会话顶层字段（cwd、标题等）用 `host/session-file-head.js` 读文件头，不要为单个字段整份 `JSON.parse`：最大的一份会话 19MB（清掉 `rawUsage` 之前是 153MB，随对话长度这笔开销还会再涨）。

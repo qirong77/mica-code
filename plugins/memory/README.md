@@ -150,7 +150,6 @@ $MICA_HOME/memory/
   domains/<名字>.md            # 领域记忆（头部有 match）
   state.json                  # 上次整理时间 / 模式 / 结果，节流基线
   curator.lock                # 跨进程整理锁
-  archive/<时间戳>/            # 手动归档的旧版文件（/memory archive）
 ```
 
 ## 命令
@@ -164,10 +163,19 @@ $MICA_HOME/memory/
 | `/memory review`                                 | 立即整理一次                                                            |
 | `/memory refresh`                                | 丢弃本会话快照，下一轮重读文件                                          |
 | `/memory path`                                   | 显示各层文件路径                                                        |
-| `/memory archive`                                | 把旧版 `USER.md` / `MEMORY.md` / `projects/<cwd-hash>/` 移入 `archive/` |
 
-旧版布局（按 cwd 哈希归档的三块记忆）**不再被读取**，也**不会被自动删除**：
-`/memory archive` 是显式动作，因为「用户以为记忆还在、其实被搬走了」比留着更糟。
+## 旧布局
+
+旧版是三块按「有没有项目」分开的文件：`USER.md`、`MEMORY.md`、`projects/<cwd 哈希>/MEMORY.md`。
+运行时不认识这个形态；升级后由 `evolution` 插件在启动时迁到当前布局：
+
+- `USER.md` 与 `MEMORY.md` 的条目并进 `PROFILE.md`（旧设计里两者都是「每个会话都注入」的
+  全局层，对应现在的 profile）；
+- `projects/<cwd 哈希>/MEMORY.md` 按目录名里的仓库名并入同名的 `projects/<仓库>.md`。
+
+同名仓库找不到唯一目标（仓库已经不用了、或同名 clone 有多个）时，旧目录**原样留着**并在
+插件日志里记一条 `evolution:memory-project-unmatched`——旧哈希是 cwd 的 sha1，推不出仓库
+身份，写进别处只会把项目事实注入到错误的会话里。
 
 ## 边界
 

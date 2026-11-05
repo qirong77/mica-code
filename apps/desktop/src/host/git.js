@@ -33,7 +33,7 @@ import {
 } from './git-ops'
 import { blameLine } from './git-blame'
 import { getCommit, getLog } from './git-log'
-import { unwatchRepository, watchRepository } from './git-watch'
+import { releaseWatchers, unwatchRepository, watchRepository } from './git-watch'
 
 /** 徽标自己那一层缓存：比全树扫描的 5s 长，配合「先回旧值、后台重算」。 */
 const CHANGE_COUNTS_TTL_MS = 20_000
@@ -212,12 +212,40 @@ function workspaceError(error) {
   return NOT_A_REPOSITORY.test(message) ? null : message
 }
 
+/**
+ * 已经挂过生命周期监听的 webContents。页面刷新 / 崩溃时旧页面来不及发 `git:unwatch`，
+ * 它留下的订阅只能由宿主代撤（见 host/git-watch.js 的 `releaseWatchers`）。
+ * 同一 webContents 只挂一次：每次 watch 都挂 `once` 会让 listener 一直堆着。
+ */
+const sendersWithLifecycle = new WeakSet()
+
+function trackSenderLifecycle(sender) {
+  if (!sender || typeof sender !== 'object' || sendersWithLifecycle.has(sender)) return
+  sendersWithLifecycle.add(sender)
+  // 服务端模式（server/electron-shim.js）的 sender 是进程内单例，没有 webContents 生命周期。
+  if (typeof sender.on !== 'function' || typeof sender.once !== 'function') return
+  const id = sender.id
+  // 重新加载一开头就触发（⌘R / 崩溃后的 reload）：此时旧页面的订阅还在，新页面还没开始
+  // watch，按 id 清掉正合适；晚到的 unwatch 删的是集合里不存在的成员，不会误伤别的页面。
+  sender.on('did-start-loading', () => releaseWatchers(id))
+  // 渲染进程崩掉、又没有自动重载时，不会再触发 did-start-loading：这里也撤一次。
+  sender.on('render-process-gone', () => releaseWatchers(id))
+  // 窗口关掉之后这个 id 不会再用，监听留 `once` 就够。
+  sender.once('destroyed', () => releaseWatchers(id))
+}
+
 export function registerGitIpc() {
   // 页面声明「我在看这个仓库」：宿主对 `.git` 起 fs.watch，提交 / 切分支 / 暂存
   // 一发生就 `git:changed` 推过来，不必等下一轮轮询（见 host/git-watch.js）。
-  ipcMain.handle('git:watch', (_event, { cwd } = {}) => watchRepository(cwd))
+  // 订阅者记成发送方 webContents 的 id，页面被换掉时宿主能代它撤销。
+  ipcMain.handle('git:watch', (event, { cwd } = {}) => {
+    trackSenderLifecycle(event.sender)
+    return watchRepository(cwd, event.sender?.id)
+  })
 
-  ipcMain.handle('git:unwatch', (_event, { cwd } = {}) => unwatchRepository(cwd))
+  ipcMain.handle('git:unwatch', (event, { cwd } = {}) =>
+    unwatchRepository(cwd, event.sender?.id)
+  )
 
   ipcMain.handle('git:status', async (_event, { cwd } = {}) => {
     try {

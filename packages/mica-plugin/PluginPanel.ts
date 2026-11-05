@@ -676,6 +676,25 @@ function list(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+/**
+ * 同一块里出现重复 key 时只留第一个。
+ *
+ * 插件是自己写的代码，拼一份列表时带上重复 key（两次 `map` 拼起来、循环里没换 id）很常见。
+ * 重复 key 会让 React 复用错节点，也让「动作回包里 key 指哪一行」变得没定义——在归一化
+ * 这一层挡掉，页面就不必自己防。
+ */
+function uniqueBy<T>(entries: T[], keyOf: (entry: T) => string): T[] {
+  const seen = new Set<string>();
+  const kept: T[] = [];
+  for (const entry of entries) {
+    const key = keyOf(entry);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(entry);
+  }
+  return kept;
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -811,7 +830,8 @@ function tableOf(input: unknown): PluginPanelTable | null {
       return normalized;
     })
     .filter((entry): entry is PluginPanelTableColumn => entry !== null);
-  if (columns.length === 0) return null;
+  const uniqueColumns = uniqueBy(columns, (column) => column.key);
+  if (uniqueColumns.length === 0) return null;
   const rows = list(raw.rows)
     .slice(0, MAX_TABLE_ROWS)
     .map((entry) => {
@@ -820,7 +840,7 @@ function tableOf(input: unknown): PluginPanelTable | null {
       if (!key) return null;
       const rawCells = record(row.cells);
       const cells: Record<string, PluginPanelTableCell> = {};
-      for (const column of columns) {
+      for (const column of uniqueColumns) {
         const cell = tableCellOf(rawCells[column.key]);
         if (cell) cells[column.key] = cell;
       }
@@ -829,18 +849,20 @@ function tableOf(input: unknown): PluginPanelTable | null {
         .map((entryAction) => actionOf(entryAction))
         .filter((entryAction): entryAction is PluginPanelAction => entryAction !== null)
         .map(({ hint: _hint, ...action }) => action);
-      if (Object.keys(cells).length === 0 && actions.length === 0) return null;
+      const uniqueActions = uniqueBy(actions, (action) => action.id);
+      if (Object.keys(cells).length === 0 && uniqueActions.length === 0) return null;
       const normalized: PluginPanelTableRow = {
         key,
         cells,
-        ...(actions.length > 0 ? { actions } : {}),
+        ...(uniqueActions.length > 0 ? { actions: uniqueActions } : {}),
       };
       return normalized;
     })
     .filter((entry): entry is PluginPanelTableRow => entry !== null);
   // 只有列没有行不画表：空表头比一句「还没有」占地方，插件该用 `empty` 说话。
-  if (rows.length === 0) return null;
-  return { columns, rows };
+  const uniqueRows = uniqueBy(rows, (row) => row.key);
+  if (uniqueRows.length === 0) return null;
+  return { columns: uniqueColumns, rows: uniqueRows };
 }
 
 function sectionOf(input: unknown): PluginPanelSection | null {
@@ -869,32 +891,35 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     .slice(0, MAX_ITEMS)
     .map((entry) => itemOf(entry))
     .filter((entry): entry is PluginPanelItem => entry !== null);
+  const uniqueItems = uniqueBy(items, (item) => item.key);
   const table = tableOf(raw.table);
   const fields = list(raw.fields)
     .slice(0, MAX_FIELDS)
     .map((entry) => fieldOf(entry))
     .filter((entry): entry is PluginPanelField => entry !== null);
+  const uniqueFields = uniqueBy(fields, (field) => field.key);
   const actions = list(raw.actions)
     .slice(0, MAX_ACTIONS)
     .map((entry) => actionOf(entry))
     .filter((entry): entry is PluginPanelAction => entry !== null);
+  const uniqueActions = uniqueBy(actions, (action) => action.id);
   const subtitle = text(raw.subtitle, 200);
   const empty = text(raw.empty, 200);
   const body = text(raw.text, MAX_SECTION_TEXT);
   const markdown = text(raw.markdown, MAX_SECTION_MARKDOWN);
   const editor = editorOf(raw.editor);
   // 只有真有输入框时，自动提交才有意义
-  const commit = fields.length > 0 ? text(raw.commit, 60) : '';
+  const commit = uniqueFields.length > 0 ? text(raw.commit, 60) : '';
   if (
     !title &&
     !body &&
     !markdown &&
     !editor &&
     rows.length === 0 &&
-    items.length === 0 &&
+    uniqueItems.length === 0 &&
     !table &&
-    fields.length === 0 &&
-    actions.length === 0
+    uniqueFields.length === 0 &&
+    uniqueActions.length === 0
   )
     return null;
   return {
@@ -905,17 +930,20 @@ function sectionOf(input: unknown): PluginPanelSection | null {
     ...(editor ? { editor } : {}),
     ...(title && raw.collapsed === true ? { collapsed: true } : {}),
     ...(rows.length > 0 ? { rows } : {}),
-    ...(items.length > 0 ? { items } : {}),
+    ...(uniqueItems.length > 0 ? { items: uniqueItems } : {}),
     ...(table ? { table } : {}),
     ...(empty ? { empty } : {}),
-    ...(fields.length > 0 ? { fields } : {}),
+    ...(uniqueFields.length > 0 ? { fields: uniqueFields } : {}),
     ...(commit ? { commit } : {}),
-    ...(actions.length > 0 ? { actions } : {}),
+    ...(uniqueActions.length > 0 ? { actions: uniqueActions } : {}),
   };
 }
 
 /**
- * 就地编辑器：没有正文就没有可编辑的东西，缺动作就是「改完没处交」，两种都当没声明。
+ * 就地编辑器：缺动作就是「改完没处交」，当没声明。
+ *
+ * 正文**可以是空串**：新建一个还没写内容的文件时，编辑器就是一张白纸，空正文不是
+ * 「没声明」。以前这里把空值当没声明，于是「给新文件写第一条」的入口永远画不出来。
  *
  * 不 trim、不截断补省略号（见 `verbatim`）：这份文本会被原样写回文件。
  */
@@ -923,7 +951,7 @@ function editorOf(input: unknown): PluginPanelEditor | undefined {
   const raw = record(input);
   const action = text(raw.action, MAX_ACTION_ID);
   const value = verbatim(raw.value, MAX_EDITOR_TEXT);
-  if (!action || !value) return undefined;
+  if (!action) return undefined;
   const editLabel = text(raw.editLabel, 24);
   const saveLabel = text(raw.saveLabel, 24);
   const placeholder = text(raw.placeholder, 120);
@@ -1048,7 +1076,8 @@ function menuOf(input: unknown): PluginPanelMenu | null {
       return normalized;
     })
     .filter((entry): entry is PluginPanelTableColumn => entry !== null);
-  if (columns.length === 0) return null;
+  const uniqueColumns = uniqueBy(columns, (column) => column.key);
+  if (uniqueColumns.length === 0) return null;
   const rows = list(raw.rows)
     .slice(0, MAX_MENU_ITEMS)
     .map((entry) => {
@@ -1057,18 +1086,19 @@ function menuOf(input: unknown): PluginPanelMenu | null {
       if (!action) return null;
       const rawCells = record(row.cells);
       const cells: Record<string, PluginPanelTableCell> = {};
-      for (const column of columns) {
+      for (const column of uniqueColumns) {
         const cell = tableCellOf(rawCells[column.key]);
         if (cell) cells[column.key] = cell;
       }
       if (Object.keys(cells).length === 0) return null;
-      const key = text(row.key, MAX_MENU_KEY) || text(cells[columns[0].key]?.text, MAX_MENU_KEY);
+      const key = text(row.key, MAX_MENU_KEY) || text(cells[uniqueColumns[0].key]?.text, MAX_MENU_KEY);
       if (!key) return null;
       return { key, action, cells } satisfies PluginPanelMenuRow;
     })
     .filter((entry): entry is PluginPanelMenuRow => entry !== null);
-  if (rows.length === 0) return null;
-  return { columns, rows };
+  const uniqueRows = uniqueBy(rows, (row) => row.key);
+  if (uniqueRows.length === 0) return null;
+  return { columns: uniqueColumns, rows: uniqueRows };
 }
 
 /** 动作入参的归一化：插件拿到的一定是干净的 `{ action, key?, values? }`。 */

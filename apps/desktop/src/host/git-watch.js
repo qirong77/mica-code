@@ -91,7 +91,13 @@ export function setGitWatchBroadcaster(fn) {
   broadcast = typeof fn === 'function' ? fn : () => {}
 }
 
-/** root → { root, watchers, count, timer, pending, idle, lastAt } */
+/**
+ * 没传订阅者时的公共身份：不传 id 的多次 watch 仍算同一个订阅。用 Symbol 而不是字符串，
+ * 免得和真实 id（webContents id 是数字）撞上。服务端模式的 sender 没有 id，走的也是这里。
+ */
+const ANONYMOUS = Symbol('anonymous')
+
+/** root → { root, watchers, subscribers, timer, pending, idle, lastAt } */
 const watching = new Map()
 
 function openWatchers(dir) {
@@ -224,7 +230,7 @@ function create(root, dir) {
   const entry = {
     root,
     watchers: [],
-    count: 0,
+    subscribers: new Set(),
     timer: null,
     pending: null,
     worktree: null,
@@ -281,11 +287,24 @@ function close(root) {
   }
 }
 
+/** 订阅者集合空了：先留着 watcher（页面切回来不必重建），一直没人再来才关掉。 */
+function closeWhenIdle(entry) {
+  if (entry.subscribers.size || entry.idle) return
+  entry.idle = setTimeout(() => {
+    entry.idle = null
+    if (!entry.subscribers.size) close(entry.root)
+  }, IDLE_CLOSE_MS)
+  entry.idle.unref?.()
+}
+
 /**
  * 页面声明「我在看这个目录的仓库」。同一仓库被多个窗口/多次挂载订阅只开一份
- * watcher，引用计数归零后延迟关闭。不是仓库时回 `{ root: null }`。
+ * watcher，订阅者集合空了以后延迟关闭。不是仓库时回 `{ root: null }`。
+ *
+ * 要记住订阅者是谁（宿主传 webContents id）：页面刷新 / 崩溃时它来不及发 `unwatch`，
+ * 由 `releaseWatchers` 按 id 一次清掉，否则那份引用会留到进程退出。
  */
-export function watchRepository(directory) {
+export function watchRepository(directory, subscriber = ANONYMOUS) {
   const root = repositoryRootOf(directory)
   if (!root) return { root: null }
   let entry = watching.get(root)
@@ -299,24 +318,30 @@ export function watchRepository(directory) {
     clearTimeout(entry.idle)
     entry.idle = null
   }
-  entry.count += 1
+  entry.subscribers.add(subscriber)
   return { root }
 }
 
-/** 页面卸载时撤销订阅。不认识的目录什么都不做。 */
-export function unwatchRepository(directory) {
+/** 页面卸载时撤销订阅。不认识的目录、没订阅过的订阅者什么都不做。 */
+export function unwatchRepository(directory, subscriber = ANONYMOUS) {
   const root = repositoryRootOf(directory)
   const entry = root ? watching.get(root) : null
   if (!entry) return { root: root || null }
-  entry.count = Math.max(0, entry.count - 1)
-  if (entry.count === 0 && !entry.idle) {
-    entry.idle = setTimeout(() => {
-      entry.idle = null
-      if (entry.count === 0) close(entry.root)
-    }, IDLE_CLOSE_MS)
-    entry.idle.unref?.()
-  }
+  entry.subscribers.delete(subscriber)
+  closeWhenIdle(entry)
   return { root }
+}
+
+/**
+ * 丢掉某个订阅者在所有仓库上的引用：页面刷新（⌘R）、重新加载、崩溃时旧页面的
+ * `git:unwatch` 永远不会发出来，只能由宿主按 webContents 身份代它撤销。
+ * 重复调用安全：集合里没有这个订阅者时什么都不做，也不会把别人的引用减掉。
+ */
+export function releaseWatchers(subscriber = ANONYMOUS) {
+  for (const entry of [...watching.values()]) {
+    if (!entry.subscribers.delete(subscriber)) continue
+    closeWhenIdle(entry)
+  }
 }
 
 /** 运行时退出（测试、重载）时把所有 watcher 收掉。 */

@@ -22,6 +22,8 @@ const PRUNE_EVERY_N_WRITES = 25;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 /** 远程视频的大小上限。理解视频是一次看几帧，没有理由为它拉一个几 GB 的文件。 */
 const MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+/** 下载完的 source 马上会被 ffmpeg 读着抽帧，可能持续几分钟，这段时间内不许淘汰。 */
+const SOURCE_MIN_AGE_MS = 60 * 60 * 1000;
 
 export type ExtractedFrame = {
   requested?: string;
@@ -198,7 +200,6 @@ export async function readFrameBase64(frame: ExtractedFrame): Promise<string> {
 
 export async function cacheStats(root: string): Promise<{ bytes: number; files: number }> {
   const dir = join(root, 'frames');
-  if (!existsSync(dir)) return { bytes: 0, files: 0 };
   let bytes = 0;
   let files = 0;
   for (const key of await readdir(dir).catch(() => [] as string[])) {
@@ -210,14 +211,32 @@ export async function cacheStats(root: string): Promise<{ bytes: number; files: 
       files += 1;
     }
   }
+  // 下载的远程视频同样占着磁盘，体积算进 bytes；但 files 只数帧图——状态页说的是能直接取用的画面。
+  for (const source of await listSources(root)) bytes += source.bytes;
   return { bytes, files };
+}
+
+type CacheFile = { path: string; bytes: number; mtimeMs: number };
+
+/** `sources/` 下的成品文件。`.part` 是下载中的半成品，由下载失败路径自己清理，这里一概不碰。 */
+async function listSources(root: string): Promise<CacheFile[]> {
+  const dir = join(root, 'sources');
+  const files: CacheFile[] = [];
+  for (const name of await readdir(dir).catch(() => [] as string[])) {
+    if (name.endsWith('.part')) continue;
+    const path = join(dir, name);
+    const info = await stat(path).catch(() => null);
+    if (!info?.isFile()) continue;
+    files.push({ path, bytes: info.size, mtimeMs: info.mtimeMs });
+  }
+  return files;
 }
 
 let writesSinceLastPrune = 0;
 let pruning = false;
 
 /**
- * 超过上限就从最旧的帧目录开始删。
+ * 超过上限就从最旧的开始删（帧目录与下载的远程视频共用同一个上限）。
  *
  * 不是每次写入都扫目录（几百个文件 stat 一遍没必要），攒够几十次写才检查一次；
  * 同时用一个 in-process 标志避免两轮抽取同时清理同一份目录。
@@ -234,11 +253,34 @@ function maybePrune(root: string, limitBytes: number): void {
     });
 }
 
-async function pruneCache(root: string, limitBytes: number): Promise<void> {
+/**
+ * 淘汰一轮：帧目录按目录算一份，source 按文件算一份，一起从最旧的开始删。
+ *
+ * 刚下载的 source 不进候选、也不计入总量：它可能正被 ffmpeg 读着，把它算进总量只会让帧图白删一遍。
+ */
+export async function pruneCache(root: string, limitBytes: number): Promise<void> {
+  const now = Date.now();
+  const entries: CacheFile[] = [
+    ...(await listFrameDirs(root)),
+    ...(await listSources(root)).filter((source) => now - source.mtimeMs >= SOURCE_MIN_AGE_MS),
+  ];
+
+  let total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
+  if (total <= limitBytes) return;
+
+  entries.sort((left, right) => left.mtimeMs - right.mtimeMs);
+  for (const entry of entries) {
+    if (total <= limitBytes) break;
+    await rm(entry.path, { recursive: true, force: true }).catch(() => undefined);
+    total -= entry.bytes;
+  }
+}
+
+/** 每个视频的帧目录算一项，mtime 取目录内最新的那张图。 */
+async function listFrameDirs(root: string): Promise<CacheFile[]> {
   const dir = join(root, 'frames');
-  if (!existsSync(dir)) return;
   const keys = await readdir(dir).catch(() => [] as string[]);
-  const entries: { dir: string; mtimeMs: number; bytes: number }[] = [];
+  const entries: CacheFile[] = [];
 
   for (const key of keys) {
     const frameDir = join(dir, key);
@@ -251,18 +293,9 @@ async function pruneCache(root: string, limitBytes: number): Promise<void> {
       bytes += info.size;
       mtimeMs = Math.max(mtimeMs, info.mtimeMs);
     }
-    if (bytes > 0) entries.push({ dir: frameDir, mtimeMs, bytes });
+    if (bytes > 0) entries.push({ path: frameDir, bytes, mtimeMs });
   }
-
-  let total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
-  if (total <= limitBytes) return;
-
-  entries.sort((left, right) => left.mtimeMs - right.mtimeMs);
-  for (const entry of entries) {
-    if (total <= limitBytes) break;
-    await rm(entry.dir, { recursive: true, force: true }).catch(() => undefined);
-    total -= entry.bytes;
-  }
+  return entries;
 }
 
 export function defaultCacheRoot(): string {

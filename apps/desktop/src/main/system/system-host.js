@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process'
+import { closeSync, openSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { shell, systemPreferences } from 'electron'
 import { buildSystemChecks, parseClangVersion, parseXcodeSelectPath } from './system-core.js'
@@ -38,11 +39,36 @@ function runCommand(command, args, { run = spawnSync } = {}) {
   }
 }
 
+/** 全磁盘访问探测用的那个文件：TCC 的数据库，只有拿到权限的进程读得开，且每台 macOS 上都有。 */
+export function fullDiskAccessProbePath(home = homedir()) {
+  return join(home, 'Library', 'Application Support', 'com.apple.TCC', 'TCC.db')
+}
+
+/**
+ * 真去开一次受保护的文件：开得起来 = 有全磁盘访问。
+ *
+ * 不用 `accessSync` 的返回值凑：「文件在不在」与「读不读得到」是两件事，这里要的是后者。
+ * 打不开时按 errno 分：EPERM/EACCES 是权限没给，ENOENT 之类问不出来。
+ */
+export function probeFullDiskAccess({ platform = process.platform, path = '', open = openSync, close = closeSync } = {}) {
+  if (platform !== 'darwin') return 'unknown'
+  try {
+    const fd = open(path || fullDiskAccessProbePath(), 'r')
+    close(fd)
+    return 'granted'
+  } catch (error) {
+    const code = String(error?.code || '')
+    if (code === 'EPERM' || code === 'EACCES') return 'denied'
+    return 'unknown'
+  }
+}
+
 /** 读一次系统状态。`preferences`/`run` 可注入，方便单测替身。 */
 export function probeSystemChecks({
   platform = process.platform,
   preferences = systemPreferences,
-  run = runCommand
+  run = runCommand,
+  probeDisk = probeFullDiskAccess
 } = {}) {
   if (platform !== 'darwin') return buildSystemChecks({ platform })
 
@@ -54,7 +80,8 @@ export function probeSystemChecks({
     commandLineTools: {
       xcodePath: parseXcodeSelectPath(run('xcode-select', ['-p'])),
       clangVersion: parseClangVersion(run('clang', ['--version']))
-    }
+    },
+    fullDiskAccess: probeDisk({ platform })
   })
 }
 

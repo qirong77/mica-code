@@ -340,9 +340,6 @@ function normalizeScope(value: unknown): CuratorOperation['scope'] | null {
   if (normalized === 'profile' || normalized === 'user') return 'profile';
   if (normalized === 'project' || normalized === 'repo' || normalized === 'repository') return 'project';
   if (normalized === 'domain') return 'domain';
-  // 旧版本的 `memory` 是「跨项目的经验」——语义上最接近领域，但领域必须显式指定
-  // 才合法，这里不做猜测，交给调用方按「缺 domain」拒绝。
-  if (normalized === 'memory') return 'domain';
   return null;
 }
 

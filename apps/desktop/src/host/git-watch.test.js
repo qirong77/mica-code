@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import os from 'os'
@@ -11,6 +11,7 @@ import {
   isGitStatePath,
   isWorktreePath,
   nestedWatchPath,
+  releaseWatchers,
   setGitWatchBroadcaster,
   unwatchRepository,
   watchRepository
@@ -34,6 +35,17 @@ function repo() {
   writeFileSync(path.join(dir, 'a.txt'), 'one\n')
   execFileSync('git', ['add', '.'], { cwd: dir })
   execFileSync('git', ['commit', '-qm', 'init'], { cwd: dir })
+  return dir
+}
+
+/**
+ * 只要「另一个仓库根」时用这个：`repositoryRootOf` 只看 `.git` 在不在，而 `repo()` 的
+ * 提交会跑仓库里的钩子（本机上每条几秒），一个用例建两个会撞上 bun 的单测超时。
+ */
+function bareRepo() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'mica-git-empty-'))
+  dirs.push(dir)
+  execFileSync('git', ['init', '-q'], { cwd: dir })
   return dir
 }
 
@@ -238,5 +250,76 @@ describe('watchRepository', () => {
     expect(events).toHaveLength(1)
     // 但不会丢：冷却结束补一次。
     await waitForCount(events, 2, 4000)
+  })
+})
+
+describe('watcher subscribers', () => {
+  // 订阅空了以后是 IDLE_CLOSE_MS 的延迟关闭：用假时钟直接推过去，不真等一分钟，
+  // 也不必为了测试去改那个生产常量。被推过去的关闭是可观察的——entry 没了就不再推。
+  afterEach(() => vi.useRealTimers())
+
+  it('counts a repeated subscription from the same page once', () => {
+    vi.useFakeTimers()
+    const dir = repo()
+    watchRepository(dir, 1)
+    watchRepository(dir, 1)
+    // 同一页面重复 watch 只留一个引用：撤一次就归零，随后走延迟关闭。
+    unwatchRepository(dir, 1)
+    expect(handleGitWatchEvent(dir, 'HEAD')).toBe(true)
+    vi.advanceTimersByTime(200)
+    vi.advanceTimersByTime(120_000)
+    expect(handleGitWatchEvent(dir, 'HEAD')).toBe(false)
+  })
+
+  it('treats subscriptions without an id as one anonymous subscriber', () => {
+    vi.useFakeTimers()
+    const dir = repo()
+    watchRepository(dir)
+    watchRepository(dir)
+    unwatchRepository(dir)
+    vi.advanceTimersByTime(120_000)
+    expect(handleGitWatchEvent(dir, 'HEAD')).toBe(false)
+  })
+
+  it('releases one page on every repository without touching the others', () => {
+    vi.useFakeTimers()
+    const dir = repo()
+    const other = bareRepo()
+    const events = []
+    setGitWatchBroadcaster((channel, payload) => events.push({ channel, payload }))
+    watchRepository(dir, 1)
+    watchRepository(other, 1)
+    watchRepository(dir, 2)
+
+    // 刷新 / 崩溃的页面来不及 unwatch：宿主按 id 一次清掉它在所有仓库上的引用。
+    releaseWatchers(1)
+    vi.advanceTimersByTime(120_000)
+    // 订阅者 2 还订着 dir：它没被连带清掉，事件照旧推。
+    expect(handleGitWatchEvent(dir, 'HEAD')).toBe(true)
+    vi.advanceTimersByTime(200)
+    expect(events).toEqual([{ channel: 'git:changed', payload: { root: dir } }])
+    // other 上只有订阅者 1，已经放掉并关掉了。
+    expect(handleGitWatchEvent(other, 'HEAD')).toBe(false)
+  })
+
+  it('keeps the watcher until the last subscriber leaves', () => {
+    vi.useFakeTimers()
+    const dir = repo()
+    const events = []
+    setGitWatchBroadcaster((channel, payload) => events.push({ channel, payload }))
+    watchRepository(dir, 1)
+    watchRepository(dir, 2)
+
+    unwatchRepository(dir, 1)
+    vi.advanceTimersByTime(120_000)
+    expect(handleGitWatchEvent(dir, 'refs/heads/main')).toBe(true)
+    vi.advanceTimersByTime(200)
+    expect(events).toEqual([{ channel: 'git:changed', payload: { root: dir } }])
+
+    // 都撤掉之后不立刻关（页面切回来不必重建），过 IDLE_CLOSE_MS 才关。
+    unwatchRepository(dir, 2)
+    expect(handleGitWatchEvent(dir, 'HEAD')).toBe(true)
+    vi.advanceTimersByTime(120_000)
+    expect(handleGitWatchEvent(dir, 'HEAD')).toBe(false)
   })
 })

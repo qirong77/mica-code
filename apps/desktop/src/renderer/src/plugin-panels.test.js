@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   applyPanelResult,
   clearMenuCache,
+  createPluginPanelsStore,
   isCompletedToolEvent,
   isOpenableLink,
   loadPluginPanels,
@@ -12,6 +13,7 @@ import {
   quickbarMenuTable,
   readMenuCache,
   readPanelView,
+  sectionDrafts,
   writePanelView,
   writeMenuCache,
   selectPluginPanels
@@ -382,15 +384,29 @@ describe('面板视图缓存', () => {
     expect(readPanelView('node-9', 'user.demand-dev', 1000 + 60_000)?.stale).toBe(true)
   })
 
-  test('草稿取每个输入框的初值，缺省为空串', () => {
+  test('草稿取每个输入框的初值，按分区隔离，缺省为空串', () => {
     const drafts = panelDrafts({
       sections: [
         { fields: [{ key: 'url', value: 'http://x' }, { key: 'target' }] },
         { rows: [{ label: 'a', value: 'b' }] }
       ]
     })
-    expect(drafts).toEqual({ url: 'http://x', target: '' })
+    expect(drafts).toEqual({ '0:url': 'http://x', '0:target': '' })
     expect(panelDrafts(null)).toEqual({})
+  })
+
+  test('两块分区都叫「地址」时各存各的，动作只带自己那块的字段', () => {
+    const drafts = panelDrafts({
+      sections: [
+        { fields: [{ key: 'host', value: 'prod' }] },
+        { fields: [{ key: 'host', value: 'test' }] }
+      ]
+    })
+    expect(drafts).toEqual({ '0:host': 'prod', '1:host': 'test' })
+    expect(sectionDrafts(drafts, 0)).toEqual({ host: 'prod' })
+    expect(sectionDrafts({ ...drafts, '1:host': 'edited' }, 1)).toEqual({ host: 'edited' })
+    // 没有作用域时不把带序号的内部键交给插件。
+    expect(sectionDrafts(drafts, 2)).toEqual({})
   })
 })
 
@@ -473,5 +489,91 @@ describe('loadPluginPanels', () => {
     })
     expect(panels).toEqual([])
     expect(calls).toBe(1)
+  })
+})
+
+/**
+ * 快捷条、状态行、抽屉入口是同一棵树里的三个消费方：底层那份清单只该读一次、
+ * 退避重试只该跑一条，最后一个挂载点走了才收尾。store 不碰 DOM，所以直接驱动它。
+ */
+describe('插件面板清单在挂载点之间共享', () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  test('两个消费方共用一次读取，最后一份卸载才停', async () => {
+    let reads = 0
+    let fire = null
+    const sources = new Set()
+    const store = createPluginPanelsStore({
+      // 每读一次换一个标题：内容变了才该发通知，也才看得出第二次读取真的落到了还挂着的人。
+      read: async () => {
+        reads += 1
+        return [plugin({ desktopPanel: { label: `需求开发 ${reads}`, roles: ['需求开发'] } })]
+      },
+      delays: [],
+      subscribeSource: (listener) => {
+        sources.add(listener)
+        fire = listener
+        return () => {
+          sources.delete(listener)
+          if (fire === listener) fire = null
+        }
+      },
+      // 空清单的 15 秒续读不参与这个用例。
+      schedule: () => 0,
+      cancel: () => {}
+    })
+
+    let firstViewed = 0
+    let secondViewed = 0
+    const leaveFirst = store.subscribe('需求开发', () => {
+      firstViewed += 1
+    })
+    const leaveSecond = store.subscribe('需求开发', () => {
+      secondViewed += 1
+    })
+
+    await flush()
+    expect(reads).toBe(1)
+    expect(sources.size).toBe(1)
+    expect(store.get('需求开发').map((panel) => panel.id)).toEqual(['user.demand-dev'])
+    expect(firstViewed).toBe(1)
+    expect(secondViewed).toBe(1)
+
+    // 一份卸载：另一份照样收得到更新，清单订阅也不必重订。
+    leaveFirst()
+    expect(sources.size).toBe(1)
+    fire()
+    await flush()
+    expect(reads).toBe(2)
+    expect(firstViewed).toBe(1)
+    expect(secondViewed).toBe(2)
+    expect(store.get('需求开发')[0].label).toBe('需求开发 2')
+
+    // 最后一份走了：清单订阅收掉，不再有人读。
+    leaveSecond()
+    expect(sources.size).toBe(0)
+    expect(fire).toBeNull()
+    await flush()
+    expect(reads).toBe(2)
+  })
+
+  test('按角色分开缓存：换角色不会串面板', async () => {
+    let reads = 0
+    const store = createPluginPanelsStore({
+      read: async () => {
+        reads += 1
+        return [plugin()]
+      },
+      delays: [],
+      subscribeSource: () => () => {},
+      schedule: () => 0,
+      cancel: () => {}
+    })
+    store.subscribe('default', () => {})
+    store.subscribe('需求开发', () => {})
+    await flush()
+    expect(reads).toBe(2)
+    expect(store.get('default')).toEqual([])
+    expect(store.get('需求开发').map((panel) => panel.id)).toEqual(['user.demand-dev'])
   })
 })

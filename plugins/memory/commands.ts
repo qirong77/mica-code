@@ -1,5 +1,3 @@
-import { existsSync, mkdirSync, renameSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import type { Disposable } from '@packages/mica-common/index.js';
 import type { CommandResult } from '@packages/mica-commands/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
@@ -44,7 +42,6 @@ export function registerMemoryCommand(ctx: PluginContext, deps: MemoryCommandDep
       { arg: 'review', description: '立即整理一次当前会话' },
       { arg: 'refresh', description: '重新读取记忆文件（本会话的系统提示快照）' },
       { arg: 'path', description: '显示记忆文件所在目录' },
-      { arg: 'archive', description: '把旧版记忆文件（USER.md / MEMORY.md 等）移入 archive/' },
     ],
     scope: 'local-only',
     allowDuringTurn: false,
@@ -140,19 +137,9 @@ export function registerMemoryCommand(ctx: PluginContext, deps: MemoryCommandDep
           ctx.ui?.showMessage([`记忆目录：${deps.repository.root}`, ...lines].join('\n'), 10_000);
           return { ok: true };
         }
-        case 'archive': {
-          const moved = archiveLegacyFiles(deps.repository.root);
-          ctx.ui?.showMessage(
-            moved.length > 0
-              ? `已把 ${moved.length} 个旧版记忆文件移入 archive/：\n${moved.join('\n')}\n\n新架构不再读取它们；需要时从该目录取回。`
-              : '没有需要归档的旧版记忆文件。',
-            10_000,
-          );
-          return { ok: true };
-        }
         default: {
           ctx.ui?.showMessage(
-            `未知子命令：${verb}。可用：status / list / domain / review / refresh / path / archive。`,
+            `未知子命令：${verb}。可用：status / list / domain / review / refresh / path。`,
             8000,
           );
           return { ok: true };
@@ -247,33 +234,3 @@ function describeContextLine(context: MemoryContext): string {
   return parts.join(' · ');
 }
 
-/**
- * 旧版布局（`USER.md` / `MEMORY.md` / `projects/<cwd-hash>/MEMORY.md`）不再被读取。
- * 归档是显式的：不自动搬，因为「用户以为记忆还在、其实被移走了」比留着更糟。
- */
-export function archiveLegacyFiles(root: string): string[] {
-  const legacy = ['USER.md', 'MEMORY.md'].filter((name) => existsSync(join(root, name)));
-  const projectsDir = join(root, 'projects');
-  // 只认旧布局的 `projects/<cwd 哈希>/MEMORY.md`。新布局的 `projects/<仓库>.md`
-  // 是同目录下的文件，按前缀一刀切会把用户正在用的项目记忆也搬走。
-  const projectStores = existsSync(projectsDir)
-    ? readdirSync(projectsDir)
-        .filter((name) => existsSync(join(projectsDir, name, 'MEMORY.md')))
-        .map((name) => `projects/${name}`)
-    : [];
-  const targets = [...legacy, ...projectStores];
-  if (targets.length === 0) return [];
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dest = join(root, 'archive', stamp);
-  mkdirSync(dest, { recursive: true, mode: 0o700 });
-  const moved: string[] = [];
-  for (const target of targets) {
-    try {
-      renameSync(join(root, target), join(dest, target.replace(/\//g, '__')));
-      moved.push(target);
-    } catch {
-      // 单个文件搬不动（权限、跨设备）不影响其余文件。
-    }
-  }
-  return moved;
-}

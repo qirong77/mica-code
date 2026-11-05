@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { sessionAnnotationsPath, writeSessionAnnotations } from '@packages/mica-plugin/sessionAnnotations.js';
-import { cleanTagLabel, isLegacySlotOption, normalizeTagStore, seedTagStore, type TagStore } from './model.js';
+import { normalizeTagStore, seedTagStore, type TagStore } from './model.js';
 
 /**
  * 标签表的落盘。
@@ -36,34 +36,20 @@ export function writeStore(home: string | undefined, pluginId: string, store: Ta
 /**
  * 启动时要落盘的那一份，`dirty` 表示文件需要重写。
  *
- * 两件必须在启动时定下来的事：
+ * 两件事在启动时定下来：
  * - **文件不存在**（第一次跑这个插件）就预置一个「待 review」。文件存在但标签被删空
  *   则什么都不做——再长一个出来，用户会以为删不掉。
- * - 文件里有收敛时会丢掉的东西（旧形态的固定色槽、指向已删标签的死 id、乱序的归属）
- *   就写回收敛版本。宿主读的是文件本身、不走这里的归一化，不写回的话界面上还会显示
- *   那些本该消失的标签。
+ * - 文件里有归一化会丢掉的东西（指向已删标签的死 id、乱序的归属、非法颜色）就写回
+ *   收敛版本。宿主读的是文件本身、不走这里的归一化，不写回的话界面上还会显示那些
+ *   本该消失的标签。
+ *
+ * 旧版本的固定色槽不在这里处理：那是数据形态的变化，由 `evolution` 插件在启动时
+ * 一次性迁走（见 `plugins/evolution/data/session-tags.ts`）。
  */
 export function resolveStore(raw: unknown): { store: TagStore; dirty: boolean } {
   if (raw === undefined) return { store: seedTagStore(), dirty: true };
   const store = normalizeTagStore(raw);
-  // 文件里只剩一堆从没用过的 v1 固定色槽：算「还没定义过标签」，给一个默认的。
-  // 反过来，用户自己把标签删空时文件里是 `options: []`，不走这条，也就不会长回来。
-  if (store.options.length === 0 && onlyLegacyDefaults(raw)) return { store: seedTagStore(), dirty: true };
   return { store, dirty: !sameTable(raw, store) };
-}
-
-function onlyLegacyDefaults(raw: unknown): boolean {
-  const record = (raw ?? {}) as Record<string, unknown>;
-  const options = Array.isArray(record.options) ? record.options : [];
-  if (options.length === 0) return false;
-  return options.every((entry) => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
-    const option = entry as Record<string, unknown>;
-    return isLegacySlotOption({
-      id: typeof option.id === 'string' ? option.id.trim() : '',
-      label: cleanTagLabel(option.label),
-    });
-  });
 }
 
 /** 文件里描述出来的标签集与归属，是否已经就是收敛后的样子。 */

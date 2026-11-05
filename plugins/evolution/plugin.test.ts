@@ -68,9 +68,9 @@ function readUsage(path: string) {
 }
 
 describe('evolution 插件装配', () => {
-  it('注册后台清洗与 /evolution 命令，两者都能驱动同一份迁移', async () => {
+  it('注册启动清洗与 /evolution 命令，两者都能驱动同一份迁移', async () => {
     const { home, sessionPath, messages, command, task } = harness();
-    expect(task?.id).toBe('clean');
+    expect(task?.id).toBe('startup');
     expect(command?.name).toBe('evolution');
 
     await task?.run({ signal: new AbortController().signal, tick: 1 });

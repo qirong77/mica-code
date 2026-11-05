@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import { micaSession } from '@packages/mica-session/index.js';
 import { writeTextFileAtomic } from '@packages/mica-config/atomicWrite.js';
+import { DATA_MIGRATIONS, runDataMigrations, type DataMigration, type DataMigrationOutcome } from './data/index.js';
 import { MIGRATIONS, type Migration } from './migrations.js';
 import { fileSignature, readEvolutionState, writeEvolutionState, type EvolutionFileState } from './state.js';
 
@@ -20,6 +21,8 @@ export type EvolutionRunResult = {
   migratedFiles: number;
   /** 补上的字段总数（例如补上的 occurredAt 条数）。 */
   migratedRecords: number;
+  /** 本次非会话数据的迁移结果（记忆 / 标签 / config.json）。 */
+  dataFiles: DataMigrationOutcome[];
   /** 正在跑轮次、拿不到 turn lease 而跳过的会话数。 */
   busyFiles: number;
   /** 解析不了的会话数（坏文件，签名不变就不再重试）。 */
@@ -34,6 +37,7 @@ export type EvolutionRunOptions = {
   /** `$MICA_HOME`；会话目录与插件数据都在它下面。 */
   home: string;
   migrations?: Migration[];
+  dataMigrations?: DataMigration[];
   /** 改动前把会话文件原样备份到 `plugin-data/evolution/backups/`。 */
   backup?: boolean;
   /** 单轮最多读多少个文件；默认 400。 */
@@ -64,6 +68,12 @@ export async function runEvolution(options: EvolutionRunOptions): Promise<Evolut
   const releaseLock = acquireProcessLock(statePath);
   if (!releaseLock) return emptyResult('busy', now() - startedAt, now());
   try {
+    // 非会话数据先洗：它们决定界面第一帧（记忆注入、标签色点、新会话默认模型），
+    // 而且每个文件都很小，不必等会话那一轮扫完。
+    const dataFiles = runDataMigrations(
+      { home: options.home, log: (event, detail) => options.log?.(event, detail) },
+      options.dataMigrations ?? DATA_MIGRATIONS,
+    );
     const state = readEvolutionState(statePath);
     const sessions = listSessionFiles(join(options.home, 'sessions'));
     // 已删除的会话不必继续占着账本；顺带按时间清理过期备份。
@@ -141,6 +151,7 @@ export async function runEvolution(options: EvolutionRunOptions): Promise<Evolut
       evaluated,
       migratedFiles,
       migratedRecords,
+      dataFiles,
       busyFiles,
       brokenFiles,
       pending,
@@ -257,6 +268,7 @@ function emptyResult(outcome: 'busy', elapsedMs: number, finishedAt: number): Ev
     evaluated: 0,
     migratedFiles: 0,
     migratedRecords: 0,
+    dataFiles: [],
     busyFiles: 0,
     brokenFiles: 0,
     pending: 0,

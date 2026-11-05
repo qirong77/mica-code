@@ -39,12 +39,14 @@ import {
   menuCacheKey,
   notifyPluginPanelStatusChanged,
   PANEL_RETRY_DELAYS,
+  panelDraftKey,
   panelDrafts,
   pluginPanelTabs,
   quickbarMenuItems,
   quickbarMenuTable,
   readMenuCache,
   readPanelView,
+  sectionDrafts,
   subscribePluginPanelStatus,
   writePanelView,
   writeMenuCache,
@@ -785,7 +787,11 @@ function PluginPanelDock({
           pluginId,
           action,
           key,
-          values: { ...drafts, ...extraValues },
+          // 动作只属于发起它的那块分区：草稿按分区存，交出去时还原成插件认识的扁平字段表。
+          values: {
+            ...(options.draftScope === undefined ? {} : sectionDrafts(drafts, options.draftScope)),
+            ...extraValues
+          },
           // 就地编辑器提交的是整篇正文（`section.editor`）：它不进 `values`——那一列是
           // 「一行状态」，每个值 2000 字上限，装不下一份文件。
           ...(typeof options.text === 'string' ? { text: options.text } : {}),
@@ -855,10 +861,12 @@ function PluginPanelDock({
     else setActiveTab((previous) => (sectionKeys.includes(previous) ? previous : sectionKeys[0]))
   }, [focusSection, focusTab, pluginId, sectionKeys, sections])
 
-  const renderSection = (section, key, { tabbed = false } = {}) => (
+  const renderSection = (section, index, key, { tabbed = false } = {}) => (
     <PluginPanelSection
       key={key}
       section={section}
+      // 草稿与动作都按分区隔离：两块都叫「地址」的输入框不能共用一个字符串。
+      draftScope={index}
       tabbed={tabbed}
       // 抽屉里的折叠由 <details> 自己管（用户点开就是点开，4 秒刷新不会把它翻回去）；
       // 快捷按钮点名的那一块靠 key 变化重挂载来强制展开。
@@ -867,7 +875,11 @@ function PluginPanelDock({
       setDrafts={setDrafts}
       // 输入停顿后的自动提交不能让整块草稿跟着服务端视图归位：请求在途时用户还在打字，
       // 那几笔没提交过的字符会被直接抹掉（下一拍才又被当成新改动）。
-      commit={section.commit ? () => runAction(section.commit, undefined, undefined, { keepDrafts: true }) : null}
+      commit={
+        section.commit
+          ? () => runAction(section.commit, undefined, undefined, { keepDrafts: true, draftScope: index })
+          : null
+      }
       busy={busy}
       runAction={runAction}
     />
@@ -943,7 +955,7 @@ function PluginPanelDock({
                 <div className="chat-plugin-detail-body">
                   {placeholder}
                   {activeSection &&
-                    renderSection(activeSection, sectionKeys[tabIndex], { tabbed: true })}
+                    renderSection(activeSection, tabIndex, sectionKeys[tabIndex], { tabbed: true })}
                 </div>
               </div>
             </SplitView>
@@ -957,7 +969,7 @@ function PluginPanelDock({
   const body = (
     <>
       {placeholder}
-      {sections.map((section, index) => renderSection(section, sectionKeys[index]))}
+      {sections.map((section, index) => renderSection(section, index, sectionKeys[index]))}
     </>
   )
 
@@ -1002,6 +1014,7 @@ export function PluginPanelSection({
   focused,
   drafts,
   setDrafts,
+  draftScope = 0,
   commit,
   busy,
   runAction
@@ -1028,13 +1041,19 @@ export function PluginPanelSection({
     }, COMMIT_DELAY_MS)
   }
 
+  // 这块分区里的所有动作（字段、行尾按钮、表格、编辑器）都带上同一个作用域：
+  // 提交给插件的 `values` 只装这一块自己的字段，别处同名输入框的字不会串进来。
+  const act = (action, key, extraValues, options = {}) =>
+    runAction(action, key, extraValues, { ...options, draftScope })
+
   const body = (
     <PluginPanelRows
       section={section}
       drafts={drafts}
+      draftScope={draftScope}
       changeDraft={changeDraft}
       busy={busy}
-      runAction={runAction}
+      runAction={act}
     />
   )
 
@@ -1057,10 +1076,13 @@ export function PluginPanelSection({
 }
 
 /** 一块分区的内容：只读行、条目、输入框、动作，全部落在共享 `SettingRow` 上。 */
-function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
+function PluginPanelRows({ section, drafts, draftScope = 0, changeDraft, busy, runAction }) {
   const hasBody = Boolean(section.text || section.markdown || section.editor)
   const tableRows = section.table?.rows || []
   const hasRows = (section.rows?.length || 0) + (section.items?.length || 0) + tableRows.length > 0
+  // 草稿按分区存：同名 `key` 出现在两块分区里时，输入的字不会互相串。
+  const draftOf = (key) => drafts[panelDraftKey(draftScope, key)]
+  const changeField = (key, value) => changeDraft(panelDraftKey(draftScope, key), value)
   return (
     <div className="chat-plugin-rows">
       {/* 正文：一整段话（需求描述、结论）。行是「标签 — 一个值」，这里没有标签也不省略。
@@ -1143,8 +1165,8 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
               aria-label={field.label}
               title={field.hint || field.label}
               placeholder={field.placeholder || field.label}
-              value={drafts[field.key] ?? ''}
-              onChange={(event) => changeDraft(field.key, event.target.value)}
+              value={draftOf(field.key) ?? ''}
+              onChange={(event) => changeField(field.key, event.target.value)}
               onKeyDown={(event) => {
                 if (event.key !== 'Enter') return
                 event.preventDefault()
@@ -1170,26 +1192,26 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
               <ConfigSwitch
                 id={`chat-plugin-field-${field.key}`}
                 label={field.label}
-                checked={(drafts[field.key] ?? field.value) === 'true'}
+                checked={(draftOf(field.key) ?? field.value) === 'true'}
                 disabled={Boolean(busy)}
-                onChange={(next) => changeDraft(field.key, next ? 'true' : 'false')}
+                onChange={(next) => changeField(field.key, next ? 'true' : 'false')}
               />
             ) : field.type === 'select' ? (
               <Segmented
                 id={`chat-plugin-field-${field.key}`}
-                value={drafts[field.key] ?? ''}
+                value={draftOf(field.key) ?? ''}
                 options={field.options || []}
                 ariaLabel={field.label}
                 disabled={Boolean(busy)}
-                onChange={(next) => changeDraft(field.key, next)}
+                onChange={(next) => changeField(field.key, next)}
               />
             ) : field.type === 'password' ? (
               <SecretInput
                 id={`chat-plugin-field-${field.key}`}
-                value={drafts[field.key] ?? ''}
+                value={draftOf(field.key) ?? ''}
                 placeholder={field.placeholder || ''}
                 ariaLabel={field.label}
-                onChange={(next) => changeDraft(field.key, next)}
+                onChange={(next) => changeField(field.key, next)}
               />
             ) : (
               <input
@@ -1197,9 +1219,9 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
                 className="text-input"
                 type="text"
                 inputMode={field.type === 'number' ? 'numeric' : undefined}
-                value={drafts[field.key] ?? ''}
+                value={draftOf(field.key) ?? ''}
                 placeholder={field.placeholder || ''}
-                onChange={(event) => changeDraft(field.key, event.target.value)}
+                onChange={(event) => changeField(field.key, event.target.value)}
               />
             )}
           </SettingRow>
