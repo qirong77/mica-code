@@ -11,6 +11,13 @@ const searchable = (item) =>
 const detailOf = (item) =>
   [item.author, item.hash, item.subject].filter(Boolean).join(' · ') || item.ref
 
+const kindLabel = (item) => {
+  if (item.current) return '当前'
+  if (item.kind === 'tag') return '标签'
+  if (item.kind === 'remote') return '远程分支'
+  return '分支'
+}
+
 function RefRowBody({ item }) {
   return (
     <>
@@ -23,9 +30,7 @@ function RefRowBody({ item }) {
         {item.date && <span className="quick-pick-row-meta">{relativeDateZh(item.date)}</span>}
         {item.subject && <span className="quick-pick-row-path">{item.subject}</span>}
       </span>
-      <span className="quick-pick-row-tail">
-        {item.current ? '当前' : item.kind === 'tag' ? '标签' : '分支'}
-      </span>
+      <span className="quick-pick-row-tail">{kindLabel(item)}</span>
     </>
   )
 }
@@ -53,8 +58,13 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anc
       const response = await window.mica.git.refs(cwd)
       if (request !== requestRef.current) return
       if (response?.error) throw new Error(response.error)
+      const branches = response?.refs?.branches || []
+      // 远端分支常常几十上百条：本地分支排在前面，免得常签的那几条被挤到列表底部。
       setRefs({
-        branches: (response?.refs?.branches || []).filter((item) => item.kind !== 'remote'),
+        branches: [
+          ...branches.filter((item) => item.kind !== 'remote'),
+          ...branches.filter((item) => item.kind === 'remote')
+        ],
         tags: response?.refs?.tags || []
       })
     } catch (loadError) {

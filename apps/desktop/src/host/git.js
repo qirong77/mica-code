@@ -2,6 +2,7 @@ import { readFile } from 'fs/promises'
 import path from 'path'
 import { ipcMain } from 'electron'
 import {
+  baseBranchLabel,
   compareChangePaths,
   parseNumstat,
   parseStatusCode,
@@ -196,11 +197,29 @@ async function createBranch(cwd, name) {
 }
 
 async function checkoutBranch(cwd, ref) {
-  const { root, match } = await resolveRef(cwd, ref, ['branch'])
-  if (match.name.startsWith('-')) throw new Error('不支持签出以连字符开头的分支')
-  await git(root, ['check-ref-format', '--branch', match.name])
-  await git(root, ['checkout', match.name])
+  const { root, match } = await resolveRef(cwd, ref, ['branch', 'remote'])
+  // 远端分支不能直接签出（那会停在游离 HEAD 上）：本地没有同名分支时建一个跟踪它的
+  // 新分支，已经有就直接签出本地那条——与 VS Code 的分支选择器一致。
+  const fromRemote = match.kind === 'remote'
+  const name = fromRemote ? baseBranchLabel(match.name) : match.name
+  if (!name) throw new Error('所选 Git 引用已不存在，请刷新后重试')
+  if (name.startsWith('-')) throw new Error('不支持签出以连字符开头的分支')
+  await git(root, ['check-ref-format', '--branch', name])
+  if (fromRemote && !(await hasLocalBranch(root, name))) {
+    await git(root, ['checkout', '--track', match.name])
+  } else {
+    await git(root, ['checkout', name])
+  }
   return getStatus(root)
+}
+
+async function hasLocalBranch(root, name) {
+  try {
+    await git(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`])
+    return true
+  } catch {
+    return false
+  }
 }
 
 // 目录不是仓库是常态（主目录、临时目录、还没 init 的项目），不是失败：回 `error: null`
