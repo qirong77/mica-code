@@ -29,7 +29,7 @@ import {
   rowDropPosition
 } from './session-dnd'
 import { groupRecentRows } from './recent-buckets'
-import { SESSION_FILTER_MODES, filterSessions, sessionFilterMode } from './session-filter'
+import { SESSION_FILTER_MODES, filterDrafts, filterSessions, sessionFilterMode } from './session-filter'
 import { orderRecentDrafts } from './recent-drafts'
 import { planSessionReveal } from './session-reveal'
 import {
@@ -870,6 +870,12 @@ export function SessionTree({
     if (!filtering) return []
     return filterSessions(sessions, filterMode, { now: filterNow }).sort(byUpdatedDesc)
   }, [filtering, filterMode, filterNow, sessions])
+  // 新对话（还没落盘的草稿）没有时间戳，进不了 filterSessions，但它们是「刚刚开的」，
+  // 和 Recent 一样排在这一屏最前面——否则刚点完「新对话」一切档位就找不到它了。
+  const filterDraftRows = useMemo(
+    () => (filtering ? orderRecentDrafts(filterDrafts(draftTabs, filterMode)) : []),
+    [filtering, filterMode, draftTabs]
+  )
   const filterRoots = useMemo(() => sessionRoots(filterCandidates), [filterCandidates])
   const filterPage = useMemo(
     () => paginateSessionTrees(filterCandidates, filterRoots, filterLimit),
@@ -1439,7 +1445,7 @@ export function SessionTree({
    * 草稿行。`loop` 传入时表示这条草稿已经挂着定时循环：标题前加时钟、行尾换成循环进度与
    * 状态（与挂着循环的会话行一致）。循环本身只在输入框的时钟面板里改。
    */
-  const renderDraftRow = (node, indent = 0, groupId = null, loop = null) => {
+  const renderDraftRow = (node, indent = 0, groupId = null, loop = null, filtered = false) => {
     const active = node.id === activeSessionId || node.id === selectedId
     const state = rowStateOfDraft(node)
     const loopRunning = state === 'running'
@@ -1465,7 +1471,7 @@ export function SessionTree({
               ? `尚未关联真实会话的新对话\n${loopTooltip(loop, Date.now(), loopRunning)}`
               : '尚未关联真实会话的新对话'
           }
-          draggable={!editingThis}
+          draggable={!editingThis && !filtered}
           {...longPressHandlers((event) => openMenu(event, { draft: node, items }))}
           onDragStart={(event) => startDrag(event, 'draft', 'draft', node.id, groupId)}
           onDragEnd={clearDrag}
@@ -1907,8 +1913,8 @@ export function SessionTree({
             )}
             {/* 筛选入口：不点它的时候侧栏和以前一模一样（没有任何会话被藏起来）。
                 激活态的按钮一直亮着，因为筛着的时候列表是平铺的，得让用户看得出
-                「我现在看的是一份子集」——亮的是图标，不是一整块底色：侧栏本来就窄，
-                30% 的实心橙块会把眼睛从会话标题上拽走。 */}
+                「我现在看的是一份子集」——亮的是图标本身，连一层底色都不铺：侧栏本来就窄，
+                任何一块色块都会把眼睛从会话标题上拽走。 */}
             <button
               type="button"
               title={filterOpen ? '收起筛选' : '筛选会话'}
@@ -1916,7 +1922,7 @@ export function SessionTree({
               aria-pressed={filterOpen}
               className={`grid size-5 shrink-0 place-items-center rounded transition-colors ${
                 filterOpen
-                  ? 'bg-accent-subtle text-accent hover:bg-accent-region'
+                  ? 'text-accent hover:bg-overlay'
                   : 'text-fg-muted hover:bg-overlay-strong hover:text-fg-max'
               }`}
               onClick={() => {
@@ -1949,7 +1955,7 @@ export function SessionTree({
                   title={filterHint(mode)}
                   className={`h-6 min-w-fit flex-1 whitespace-nowrap rounded-md px-1.5 text-[11.5px] font-medium transition-colors ${
                     filterMode === mode.id
-                      ? 'bg-active text-fg-max ring-1 ring-line-strong'
+                      ? 'bg-overlay-heavy text-fg-max'
                       : 'bg-overlay text-fg-soft hover:bg-overlay-strong hover:text-fg-max'
                   }`}
                   onClick={() => chooseFilter(mode.id)}
@@ -2026,6 +2032,11 @@ export function SessionTree({
           // 「最近在动的都有哪些」，不是「它们各自归在哪儿」。
           <div className="flex flex-col gap-px">
             <ul role="tree" className="flex flex-col gap-px">
+              {/* 新对话（草稿）排在最前，和 Recent 里同一套规则：它们没有时间戳，
+                  但「刚刚开的」本来就该在每个窗口里都算一条。 */}
+              {filterDraftRows.map((node) =>
+                renderDraftRow(node, 0, null, loopForNode(loops, node.id), true)
+              )}
               {filterBlocks.length ? (
                 filterBlocks.map((block) =>
                   block.kind === 'label' ? (
@@ -2040,7 +2051,7 @@ export function SessionTree({
                     renderSessionRow(block.row.session, 0, 'recent', null, block.row, true)
                   )
                 )
-              ) : (
+              ) : filterDraftRows.length ? null : (
                 <li>
                   <p className="py-1 pr-2 text-xs text-fg-dim" style={{ paddingLeft: NAME_OFFSET }}>
                     没有符合条件的会话。

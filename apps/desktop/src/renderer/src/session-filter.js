@@ -40,3 +40,14 @@ export function filterSessions(sessions, modeId, options) {
   if (!sessionFilterMode(modeId).hours) return list
   return list.filter((session) => matchesSessionFilter(session, modeId, options))
 }
+
+/**
+ * 草稿（新建但还没落盘的新对话）没有 updatedAt 可比，所以不能进 `filterSessions`。
+ * 但它们只可能是「刚刚开的」：窗口一生效就全都算在里面——否则刚点完「新对话」再切到
+ * 4 小时档，这一条会从侧栏里凭空消失，看起来像会话丢了。「全部」档不用它们，那时列表
+ * 还是分区树，草稿本来就在 Recent 顶上。
+ */
+export function filterDrafts(drafts, modeId) {
+  const list = Array.isArray(drafts) ? drafts : []
+  return sessionFilterMode(modeId).hours ? list : []
+}

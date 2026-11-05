@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   SESSION_FILTER_HOUR_MS,
   SESSION_FILTER_MODES,
+  filterDrafts,
   filterSessions,
   matchesSessionFilter,
   sessionFilterMode
@@ -87,5 +88,23 @@ describe('filterSessions', () => {
 
   it('不是数组时交出空数组', () => {
     expect(filterSessions(null, '24h', { now: NOW })).toEqual([])
+  })
+})
+
+describe('filterDrafts', () => {
+  const drafts = [{ id: 'd1', text: '新对话' }, { id: 'd2', text: '新对话 2' }]
+
+  it('新对话没有时间戳，任何时间窗口里都留着', () => {
+    for (const modeId of ['4h', '8h', '12h', '24h']) {
+      expect(filterDrafts(drafts, modeId).map((node) => node.id)).toEqual(['d1', 'd2'])
+    }
+  })
+
+  it('「全部」档不重复交出来（那时列表是分区树，草稿在 Recent 里）', () => {
+    expect(filterDrafts(drafts, 'all')).toEqual([])
+  })
+
+  it('不是数组时交出空数组', () => {
+    expect(filterDrafts(null, '4h')).toEqual([])
   })
 })
