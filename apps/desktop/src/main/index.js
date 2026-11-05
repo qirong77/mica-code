@@ -74,8 +74,7 @@ let quitting = false
  * `false`）表示「先别关」。外壳不知道页面里有什么，也不该知道——编辑器窗口里的终端就是
  * 靠它问一句「还有程序在跑，确定关闭吗」。
  *
- * 页面没挂这个函数（`true`）、抛错、或者 10 秒都没答上来，一律放行：问不出来就把窗口
- * 关不上，比少问一句糟得多。
+ * 页面没挂这个函数或抛错时放行；等待用户答复期间不能自动关闭窗口。
  */
 const CLOSE_GUARD_PROBE = `(() => {
   const guard = window.__micaConfirmClose
@@ -93,20 +92,12 @@ const CLOSE_GUARD_PROBE = `(() => {
 async function confirmWindowClose(state) {
   const contents = state.win.webContents
   if (state.win.isDestroyed() || contents.isDestroyed()) return true
-  let timer = null
   try {
-    const answer = await Promise.race([
-      contents.executeJavaScript(CLOSE_GUARD_PROBE),
-      new Promise((resolvePromise) => {
-        timer = setTimeout(() => resolvePromise(true), 10000)
-      })
-    ])
+    const answer = await contents.executeJavaScript(CLOSE_GUARD_PROBE)
     return answer !== false
   } catch {
     // 页面还没加载完 / 已经崩了：没有可问的东西
     return true
-  } finally {
-    if (timer) clearTimeout(timer)
   }
 }
 

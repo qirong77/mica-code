@@ -1,3 +1,4 @@
+import { confirmAction, alertAction } from './desktop-dialog'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { IconCopy, IconExternalLink, IconLink, IconRefresh, IconTrash } from '@tabler/icons-react'
 import { copyText } from './transport'
@@ -57,12 +58,12 @@ export default function ShareIndex() {
 
   const remove = useCallback(
     async (row) => {
-      if (!window.confirm(`把「${row.title}」从分享列表中移除？已发出去的链接仍然可以打开。`))
+      if (!await confirmAction(`把「${row.title}」从分享列表中移除？已发出去的链接仍然可以打开。`))
         return
       try {
         await window.mica.share.remove(row.sessionId)
       } catch (error) {
-        window.alert(`移除失败：${error?.message || error}`)
+        await alertAction(`移除失败：${error?.message || error}`)
         return
       }
       void load()

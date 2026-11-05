@@ -1,3 +1,4 @@
+import { confirmAction } from './desktop-dialog'
 import { lazyView } from './lazy-view'
 import {
   Suspense,
@@ -614,7 +615,7 @@ export const FilesView = forwardRef(function FilesView(
         const undo = list.some((file) => file.status === 'added' || file.untracked)
           ? '未跟踪的文件会被删除，已跟踪的文件会恢复成上次保存的版本'
           : '文件会恢复成上次保存的版本'
-        const ok = window.confirm(`${question}\n${undo}，且无法撤销。`)
+        const ok = await confirmAction(`${question}\n${undo}，且无法撤销。`)
         if (!ok) return
       }
       let failure = null
@@ -968,14 +969,14 @@ export const FilesView = forwardRef(function FilesView(
     saveActive().catch((error) => console.error('save file failed', error))
 
   const closeFile = useCallback(
-    (path) => {
+    async (path) => {
       const tab = tabsRef.current.find((item) => item.path === path)
       if (!tab) return false
       if (tab.saving) {
         showMessage('文件正在保存，请稍后再关闭', true, true)
         return false
       }
-      if (tab.dirty && !window.confirm(`“${tab.name}” 的更改尚未保存。是否放弃更改并关闭？`))
+      if (tab.dirty && !await confirmAction(`“${tab.name}” 的更改尚未保存。是否放弃更改并关闭？`))
         return false
       const paths = tabsRef.current.map((item) => item.path)
       const index = paths.indexOf(path)
@@ -1174,7 +1175,7 @@ export const FilesView = forwardRef(function FilesView(
       const target = typeof folder === 'string' ? folder : folder?.path
       if (!root || !target) return
       const relative = target.startsWith(root) ? target.slice(root.length) || '.' : target
-      const ok = window.confirm(
+      const ok = await confirmAction(
         `确定回退“${relative}”吗？\n文件夹里已跟踪的文件会恢复成已暂存（或上次提交）的版本，未跟踪的文件会被删除，且无法撤销。`
       )
       if (!ok) return
@@ -1197,13 +1198,15 @@ export const FilesView = forwardRef(function FilesView(
   )
 
   const closeTabsUnder = useCallback(
-    (path) => {
+    async (path) => {
       const affected = tabsRef.current.filter((tab) => isSameOrChildPath(tab.path, path))
       if (affected.some((tab) => tab.dirty || tab.saving)) {
         showMessage('请先保存或关闭此项目中已修改的文件', true, true)
         return false
       }
-      for (const tab of affected) closeFile(tab.path)
+      for (const tab of affected) {
+        if (!(await closeFile(tab.path))) return false
+      }
       return true
     },
     [closeFile, showMessage]
@@ -1254,7 +1257,7 @@ export const FilesView = forwardRef(function FilesView(
         if (action === 'rename') {
           const name = await askText('重命名', node.name, '请输入新名称')
           if (!name?.trim() || name.trim() === node.name) return
-          if (!closeTabsUnder(node.path)) return
+          if (!await closeTabsUnder(node.path)) return
           await window.mica.files.rename(node.path, name)
           await refreshAfterFileChange([dirOf(node.path)])
           showMessage('已重命名', true)
@@ -1267,8 +1270,8 @@ export const FilesView = forwardRef(function FilesView(
           return
         }
         if (action === 'delete') {
-          if (!window.confirm(`确定要将“${node.name}”移到回收站吗？`)) return
-          if (!closeTabsUnder(node.path)) return
+          if (!await confirmAction(`确定要将“${node.name}”移到回收站吗？`)) return
+          if (!await closeTabsUnder(node.path)) return
           await window.mica.files.delete(node.path)
           await refreshAfterFileChange([dirOf(node.path)])
           showMessage('已删除', true)
@@ -1459,7 +1462,7 @@ export const FilesView = forwardRef(function FilesView(
       }
       setDropPath(null)
       setDragPath(null)
-      if (!closeTabsUnder(dragPath)) return
+      if (!await closeTabsUnder(dragPath)) return
       try {
         await window.mica.files.move(dragPath, directory.path)
         await refreshAfterFileChange([dirOf(dragPath), directory.path], directory.path)

@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import { setConfigWebClient, setConfigWebEditor, setConfigWebThemeHost } from '@mica-config-ui/web'
 import App from './App'
+import { DesktopDialogHost } from './desktop-dialog'
 import { NotificationHost } from './NotificationHost'
 import { ErrorBoundary } from './ErrorBoundary'
 import ShareIndex from './ShareIndex'
@@ -90,6 +91,7 @@ ensureMicaApi()
           createRoot(document.getElementById('root')).render(
             <ErrorBoundary>
               <ShareIndex />
+              <DesktopDialogHost />
             </ErrorBoundary>
           )
           dismissBootPlaceholder()
@@ -99,6 +101,7 @@ ensureMicaApi()
           <ErrorBoundary>
             <NotificationHost />
             <App />
+            <DesktopDialogHost />
           </ErrorBoundary>
         )
         dismissBootPlaceholder()

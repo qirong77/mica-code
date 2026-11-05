@@ -1,3 +1,4 @@
+import { confirmAction } from './desktop-dialog'
 import {
   Suspense,
   useCallback,
@@ -172,7 +173,7 @@ import { canGoToPreviousConversation, conversationNavTarget } from './chat-conve
 import { readScrollEntry, resolveScrollRestore, writeScrollEntry } from './chat-scroll'
 import { mergeRecalledDraft, resolveQueueRecall } from './chat-recall'
 import { uid } from './workspace'
-import { setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState } from './ui-state'
+import { setUiState, setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState, useUiStateValue } from './ui-state'
 import {
   findQuoteBlocks,
   quoteIntoDraft,
@@ -3500,7 +3501,11 @@ export function ChatView({
   const [btwThreads, setBtwThreads] = useState({})
   const [btwActiveId, setBtwActiveId] = useState('')
   const btwThread = btwThreads[btwActiveId] || { id: btwActiveId, entries: [] }
-  const [btwOpen, setBtwOpen] = useState(false)
+  const btwOpenKey = node?.sessionId ? `btwOpen:${node.sessionId}` : ''
+  const btwOpen = useUiStateValue(btwOpenKey, false) === true
+  const setBtwOpen = useCallback((open) => {
+    if (btwOpenKey) setUiState(btwOpenKey, open ? true : null)
+  }, [btwOpenKey])
   const [btwDraft, setBtwDraft] = useState('')
   const [btwSending, setBtwSending] = useState(false)
   const [btwCompacting, setBtwCompacting] = useState(false)
@@ -3542,7 +3547,7 @@ export function ChatView({
     const targetNodeId = nodeIdRef.current
     void (async () => {
       try {
-        const res = await window.mica.chat.btwThreads(targetNodeId, sessionIdRef.current || '')
+        const res = await window.mica.chat.btwThreads(targetNodeId, node?.sessionId || '')
         if (cancelled || nodeIdRef.current !== targetNodeId) return
         const list = Array.isArray(res?.threads) ? res.threads : []
         if (list.length === 0) return
@@ -3942,7 +3947,7 @@ export function ChatView({
     setBtwOpen(true)
     setBtwUnread(false)
     setBtwNotice(null)
-  }, [])
+  }, [setBtwOpen])
 
   /**
    * By The Way（CLI 的 `/btw`）。**不占队列、不改 run 状态**：host 收下问题立刻回，
@@ -4245,7 +4250,7 @@ export function ChatView({
   const killBackgroundTask = useCallback(
     async (task) => {
       if (
-        !window.confirm(`确定要终止后台任务 ${task.id} 吗？\n\n${compactLine(task.command, 160)}`)
+        !await confirmAction(`确定要终止后台任务 ${task.id} 吗？\n\n${compactLine(task.command, 160)}`)
       ) {
         return
       }
@@ -4268,7 +4273,7 @@ export function ChatView({
 
   const stopSubagent = useCallback(
     async (taskId) => {
-      if (!window.confirm('确定要停止这个 subagent 任务吗？')) return
+      if (!await confirmAction('确定要停止这个 subagent 任务吗？')) return
       try {
         const res = await window.mica.chat.killSubagent(runKey, taskId)
         if (!res?.ok || res.result?.ok === false) {
@@ -7143,10 +7148,9 @@ export function ChatView({
           : 'By The Way：不打扰主流程地问一句（回答不进入本会话上下文，Cmd/Ctrl+Shift+B）'
   // 抽屉宽度是界面状态（所有窗口一致、重启还在）；拖动期间只改 DOM，松手才写回。
   const [btwWidth, setBtwWidth] = useSharedState('btwWidth', null)
-  // 切到别的对话时收起定时任务与 btw 面板：两者描述的都是上一个会话。
+  // 切到别的对话时清除属于上一个会话的临时提示。
   useEffect(() => {
     setSettingsSection(null)
-    setBtwOpen(false)
     setBtwUnread(false)
     setBtwNotice(null)
   }, [nodeId])
@@ -7167,7 +7171,7 @@ export function ChatView({
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [visible, hasSession, remoteRunning, openBtw])
+  }, [visible, hasSession, remoteRunning, openBtw, setBtwOpen])
 
   // 输入框行首标记（与 CLI 的 prompt 同款）：非默认角色时在标记前显示角色名。
   // 内容与 tooltip 在「可点 / 只读」两种形态之间共用，只有外层元素不同——分享范围里

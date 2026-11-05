@@ -1,3 +1,4 @@
+import { confirmAction } from './desktop-dialog'
 import {
   forwardRef,
   useCallback,
@@ -203,7 +204,7 @@ export const EditorTerminal = forwardRef(function EditorTerminal({ cwd, hidden =
       const tab = list.find((item) => item.id === tabId)
       if (!tab) return
       const running = await runningEntries([tab])
-      if (running.length && !window.confirm(closeTabConfirmText(running[0]))) return
+      if (running.length && !await confirmAction(closeTabConfirmText(running[0]))) return
       await disposeTabs([tab])
       const rest = tabsRef.current.filter((item) => item.id !== tabId)
       commitTabs(rest)
@@ -223,7 +224,7 @@ export const EditorTerminal = forwardRef(function EditorTerminal({ cwd, hidden =
       const list = tabsRef.current
       if (!list.length) return true
       const running = await runningEntries(list)
-      if (running.length && !window.confirm(closeWindowConfirmText(running))) return false
+      if (running.length && !await confirmAction(closeWindowConfirmText(running))) return false
       commitTabs([])
       setActiveId(null)
       await disposeTabs(list)

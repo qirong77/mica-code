@@ -1,3 +1,4 @@
+import { confirmAction, alertAction } from './desktop-dialog'
 import { lazyView } from './lazy-view'
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -902,9 +903,9 @@ export default function App() {
   )
 
   const closeBrowser = useCallback(
-    (browser) => {
+    async (browser) => {
       const label = browser.label || '受控浏览器'
-      if (!window.confirm(`关闭「${label}」？窗口里的登录状态页会一起关掉，AI 需要时会重新打开。`))
+      if (!await confirmAction(`关闭「${label}」？窗口里的登录状态页会一起关掉，AI 需要时会重新打开。`))
         return
       window.mica.browserControl
         .close(browser.id)
@@ -1784,10 +1785,10 @@ export default function App() {
   }, [])
 
   const deleteGroup = useCallback(
-    (groupId) => {
+    async (groupId) => {
       const group = projectsRef.current?.groups?.find((item) => item.id === groupId)
       if (
-        !window.confirm(`确定删除分组「${group?.name || ''}」及其子分组吗？组内会话会回到 Recent。`)
+        !await confirmAction(`确定删除分组「${group?.name || ''}」及其子分组吗？组内会话会回到 Recent。`)
       )
         return
       window.mica.stats
@@ -1944,14 +1945,14 @@ export default function App() {
     async (sessionId) => {
       const title = sessionsRef.current.find((item) => item.id === sessionId)?.title
       if (
-        !window.confirm(`确定删除对话「${title || sessionId}」？会话记录会从磁盘删除，无法恢复。`)
+        !await confirmAction(`确定删除对话「${title || sessionId}」？会话记录会从磁盘删除，无法恢复。`)
       )
         return
       let result
       try {
         result = await window.mica.stats.deleteSession(sessionId)
       } catch (error) {
-        window.alert(`删除对话失败：${error?.message || error}`)
+        await alertAction(`删除对话失败：${error?.message || error}`)
         return
       }
       if (result?.pins) setPins(result.pins)
@@ -1973,8 +1974,8 @@ export default function App() {
 
   /** 草稿（还没绑定真实会话）只活在进程内，删除就是丢掉这个标签页。 */
   const deleteDraft = useCallback(
-    (nodeId) => {
-      if (!window.confirm('确定删除这个新对话？')) return
+    async (nodeId) => {
+      if (!await confirmAction('确定删除这个新对话？')) return
       closeTerminal(nodeId)
     },
     [closeTerminal]
@@ -2071,10 +2072,10 @@ export default function App() {
   )
 
   const closeTerminalControl = useCallback(
-    (terminal) => {
+    async (terminal) => {
       if (!terminal) return
       const label = terminal.label || '终端控制'
-      if (!window.confirm(`关闭「${label}」？终端里正在运行的命令会被结束，无法恢复。`)) return
+      if (!await confirmAction(`关闭「${label}」？终端里正在运行的命令会被结束，无法恢复。`)) return
       window.mica.terminalControl
         .close(terminal.id)
         .then((result) => applyTerminals(result?.sessions))

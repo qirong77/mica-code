@@ -34,6 +34,16 @@ function broadcast(keys) {
 }
 
 describe('ui-state 回声认领', () => {
+  it('按会话独立保存并同步 By The Way 抽屉状态', async () => {
+    await ensureUiState()
+    setUiState('btwOpen:session-a', true)
+    setUiState('btwOpen:session-b', true)
+    await flushUiState()
+    broadcast({ 'btwOpen:session-a': null })
+    expect(uiStateKeys()['btwOpen:session-a']).toBeUndefined()
+    expect(uiStateKeys()['btwOpen:session-b']).toBe(true)
+  })
+
   it('丢掉自己的回声，不让它把本地值拽回去', async () => {
     await ensureUiState()
     setUiState('drafts', { a: '1' })
