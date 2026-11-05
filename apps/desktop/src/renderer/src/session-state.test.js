@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   collectGroupStates,
+  dismissSessionInterruptions,
   draftMarkers,
   liveSessionRowState,
   mergeRowStates,
@@ -93,12 +94,11 @@ describe('liveSessionRowState', () => {
         notificationState: { unread: true, running: false, lastType: 'turn.error' }
       })
     ).toBe('error')
-    // 读过之后红点仍在：它是会话状态，不是未读徽标。
     expect(
       liveSessionRowState({
         notificationState: { unread: false, running: false, lastType: 'turn.error' }
       })
-    ).toBe('error')
+    ).toBeNull()
   })
 
   it('keeps a user-requested abort on the unread dot', () => {
@@ -131,6 +131,20 @@ describe('liveSessionRowState', () => {
       'running'
     )
     expect(liveSessionRowState({ remoteRunning: false })).toBe(null)
+  })
+})
+
+describe('dismissSessionInterruptions', () => {
+  it('dismisses only the acknowledged interruption and shows a later one', () => {
+    const sessions = [
+      { id: 'a', interrupted: true, updatedAtMs: 10 },
+      { id: 'b', interrupted: true, updatedAtMs: 20 },
+      { id: 'c', interrupted: true, updatedAtMs: 30 }
+    ]
+    const displayed = dismissSessionInterruptions(sessions, { a: 10, b: 19 })
+    expect(displayed.map((row) => row.interrupted)).toEqual([false, true, true])
+    expect(sessions[0].interrupted).toBe(true)
+    expect(liveSessionRowState({ interrupted: displayed[0].interrupted })).toBeNull()
   })
 })
 

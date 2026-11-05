@@ -216,6 +216,66 @@ export function selectPluginPanels(plugins, role) {
     }))
 }
 
+/** 只聚合当前清单里的卡片；插件之间允许相同 id，版本变化后重新挂载。 */
+export function pluginPanelCards(panels, cardsByPlugin) {
+  return (Array.isArray(panels) ? panels : []).flatMap((panel) => {
+    const cards = cardsByPlugin?.[panel.id]
+    if (!Array.isArray(cards)) return []
+    const seen = new Set()
+    return cards.slice(0, 3).flatMap((card) => {
+      if (!card?.id || !card.title || !card.revision || seen.has(card.id)) return []
+      seen.add(card.id)
+      return [{ panel, card, key: JSON.stringify([panel.id, card.id, card.revision]) }]
+    })
+  })
+}
+
+/** 不含角色、目录或轮询次数：同一会话里同一版本只计一次。 */
+export function panelCardImpressionKey(nodeId, sessionId, pluginId, card) {
+  return JSON.stringify([nodeId, sessionId, pluginId, card.id, card.revision])
+}
+
+/**
+ * 只有浏览器能确认「没有被遮挡」时才报告曝光。无 IntersectionObserver v2 的宿主宁可
+ * 不记；DOM 挂载、视图轮询、后台页签都不是曝光。依赖可注入以测试可见性边界。
+ */
+export function observePanelCardImpression(element, onVisible, options = {}) {
+  const doc = options.document ?? globalThis.document
+  const Observer = options.Observer ?? globalThis.IntersectionObserver
+  const supportsVisibility = options.supportsVisibility ??
+    (typeof globalThis.IntersectionObserverEntry !== 'undefined' &&
+      'isVisible' in globalThis.IntersectionObserverEntry.prototype)
+  if (!element || !doc || !Observer || !supportsVisibility) return () => {}
+  let active = true
+  let observer
+  const receive = (entries) => {
+    if (!active || doc.hidden) return
+    if (entries.some((entry) => entry.target === element && entry.isIntersecting &&
+      entry.intersectionRatio >= 0.5 && entry.isVisible === true)) {
+      active = false
+      observer.disconnect()
+      doc.removeEventListener('visibilitychange', observe)
+      onVisible()
+    }
+  }
+  try {
+    observer = new Observer(receive, { threshold: 0.5, trackVisibility: true, delay: 100 })
+  } catch {
+    return () => {}
+  }
+  const observe = () => {
+    observer.disconnect()
+    if (active && !doc.hidden) observer.observe(element)
+  }
+  observe()
+  doc.addEventListener('visibilitychange', observe)
+  return () => {
+    active = false
+    observer.disconnect()
+    doc.removeEventListener('visibilitychange', observe)
+  }
+}
+
 /**
  * 输入框上方那排按钮的最终清单：清单里声明的 + 视图在运行期给的。
  *
@@ -223,6 +283,10 @@ export function selectPluginPanels(plugins, role) {
  * 稳定的入口不该被一次会话的内容挤到后面去。运行期的 key 带 `view:` 前缀，免得和清单里
  * 同 id 的按钮撞成同一个 React key。
  */
+export function panelNeedsQuickbarView(panel) {
+  return Boolean(panel?.status || panel?.dynamicShortcuts || panel?.shortcuts?.some((shortcut) => shortcut.id || shortcut.menu))
+}
+
 export function pluginQuickbarItems(panels, runtimeShortcuts) {
   const list = []
   for (const panel of Array.isArray(panels) ? panels : []) {

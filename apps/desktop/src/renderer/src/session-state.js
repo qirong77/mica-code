@@ -20,10 +20,18 @@ export function liveSessionRowState({ notificationState, interrupted, remoteRunn
   if (awaiting) return 'awaiting'
   if (notificationState?.running) return 'running'
   if (remoteRunning) return 'running'
-  if (notificationState?.lastType === 'turn.error') return 'error'
+  if (notificationState?.unread && notificationState?.lastType === 'turn.error') return 'error'
   if (interrupted) return 'error'
   if (notificationState?.unread) return 'unread'
   return null
+}
+
+export function dismissSessionInterruptions(sessions, acknowledged) {
+  return sessions.map((session) =>
+    session.interrupted && Object.hasOwn(acknowledged, session.id) && acknowledged[session.id] === session.updatedAtMs
+      ? { ...session, interrupted: false }
+      : session
+  )
 }
 
 /**

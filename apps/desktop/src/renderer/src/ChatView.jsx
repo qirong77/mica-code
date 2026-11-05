@@ -28,6 +28,8 @@ import {
   IconGitCommit,
   IconGitFork,
   IconInfoCircle,
+  IconLayoutBottombar,
+  IconLayoutSidebarRight,
   IconLoader2,
   IconClock,
   IconMessageChatbot,
@@ -172,6 +174,7 @@ import {
 import { longPressHandlers, useLatest } from './hooks'
 import { canGoToPreviousConversation, conversationNavTarget } from './chat-conversation-nav'
 import { readScrollEntry, resolveScrollRestore, writeScrollEntry } from './chat-scroll'
+import { useProcessLayout } from './chat-process-layout'
 import { mergeRecalledDraft, resolveQueueRecall } from './chat-recall'
 import { uid } from './workspace'
 import { setUiState, setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState, useUiStateValue } from './ui-state'
@@ -2152,7 +2155,8 @@ function TurnLogRoundBody({ messages, now, onOpenActivity }) {
 }
 
 /**
- * 停靠区里的一轮：最新一轮摊开（模型正在想什么一眼就看得见），更早的各收成一行。
+ * 停靠区里的一轮：同一时刻只摊开一轮。看历史轮次时正在跑的那一轮先收成一行，
+ * 两块正文不会接连摊在一起。
  *
  * 收起的那一行不是空壳——它报这一轮干了什么（最近一条活动）与步数 / 耗时，
  * 所以收起来也不等于看不见。
@@ -2163,8 +2167,9 @@ function TurnLogRound({ round, live, framed = true, expanded, onToggle, now, onO
   const steps = `${head?.steps ?? round.messages.length} 步`
   const elapsed = head?.elapsedMs == null ? '' : formatLogElapsed(head.elapsedMs)
   const meta = [steps, elapsed].filter(Boolean).join(' · ')
-  // 最新一轮没有标题行：它就在最下面摊开着，再加一行「轮次N」只是噪声。
-  const open = live || expanded
+  // 摊开的那一轮没有标题行：它就在下面摊着，再加一行「轮次N」只是噪声；收起时才有一行
+  // （正在跑的也一样）。
+  const open = expanded
   // 整场只有一轮时没有「轮次」可言：不加框、不加标签，与加这个功能之前一致。
   if (!framed) {
     return <TurnLogRoundBody messages={round.messages} now={now} onOpenActivity={onOpenActivity} />
@@ -2172,15 +2177,15 @@ function TurnLogRound({ round, live, framed = true, expanded, onToggle, now, onO
 
   return (
     <div className={`chat-turn-log-round${live ? ' is-current' : ''}`}>
-      {live ? null : (
+      {open ? null : (
         <button
           type="button"
           className="chat-turn-log-round-head"
-          aria-expanded={expanded}
-          title={expanded ? `收起${round.label}` : `展开${round.label}`}
+          aria-expanded={open}
+          title={`展开${round.label}`}
           onClick={onToggle}
         >
-          {expanded ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+          <IconChevronRight size={12} />
           <span className="chat-turn-log-round-label">{round.label}</span>
           {head?.doing && <span className="chat-turn-log-round-doing">{head.doing}</span>}
           <span className="chat-turn-log-round-meta">{meta}</span>
@@ -2193,8 +2198,18 @@ function TurnLogRound({ round, live, framed = true, expanded, onToggle, now, onO
   )
 }
 
-function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenActivity }) {
+function TurnLogDock({
+  rounds = [],
+  now = Date.now(),
+  running = false,
+  onOpenActivity,
+  sidebar = false,
+  canSidebar = false,
+  onTogglePlacement,
+  todoPanel
+}) {
   const scrollRef = useRef(null)
+  const roundsRef = useRef(null)
   // 这块日志的高度也是界面状态：换个窗口打开时保持同一高度，重启后还在。
   const [storedHeight, setStoredHeight] = useSharedState('turnLogHeight', null)
   // 收起是使用者的选择，也跨窗口保留。收起后那一行照旧报「刚才干了什么」，
@@ -2204,25 +2219,46 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
     Number.isFinite(storedHeight) && storedHeight >= MIN_TURN_LOG_HEIGHT
       ? Math.min(storedHeight, window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO)
       : null
+  // 拖出来的高度跟着「正在看的那一块」走：看历史轮次时落在目录上，回到最新一轮时落回
+  // 正文，切换时停靠区整体高度不会跳一下。
+  const paneStyle = !sidebar && height != null ? { height, maxHeight: 'none' } : undefined
+  // 侧栏用满可用高度，不继承底部日志的收起状态与手动高度。
+  const contentCollapsed = !sidebar && collapsed
+  const dockVisible = (rounds.length > 0 || running || todoPanel?.visible) && (running || canSidebar)
   const stickToBottomRef = useRef(true)
-  // 展开的历史轮次：默认都收着，点了才摊开（最新那一轮不需要点）。
-  const [expandedRounds, setExpandedRounds] = useState(() => new Set())
+  // 展开的历史轮次：同一时刻只摊开一轮（`null` = 看正在跑的这一轮）。两块长正文接连
+  // 摊开时分不清哪一段属于哪一轮，所以点开历史轮次时最新一轮先让位。
+  const [openRoundKey, setOpenRoundKey] = useState(null)
   // 历史轮次整块默认隐藏：停靠区的主体只留正在跑的这一轮，前面几轮由右上角的
   // 开关按需摊开。这是看日志时的临时选择，所以不跨窗口保留。
   const [showRounds, setShowRounds] = useState(false)
   const toggleRounds = useCallback(() => setShowRounds((value) => !value), [])
   const toggleRound = useCallback((key) => {
-    setExpandedRounds((previous) => {
-      const next = new Set(previous)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
+    setOpenRoundKey((previous) => (previous === key ? null : key))
   }, [])
+  // 收起正在跑的那一轮就回到它摊开的样子（看历史时点它，等于把位置还给它）。
+  const showLiveRound = useCallback(() => setOpenRoundKey(null), [])
   const liveRound = rounds[rounds.length - 1] ?? null
   const historyRounds = rounds.length > 1 ? rounds.slice(0, -1) : []
   const roundsVisible = showRounds && historyRounds.length > 0
-  const head = useMemo(() => turnLogHeadSummary(liveRound?.messages ?? [], now), [liveRound, now])
+  // 目录收起、或展开的那一轮已被挤出保留窗口时，都算没在看历史：最新一轮自然摊开。
+  const viewingRound =
+    roundsVisible && openRoundKey != null
+      ? (historyRounds.find((round) => round.key === openRoundKey) ?? null)
+      : null
+  const liveExpanded = viewingRound == null
+  const liveKey = liveRound?.key ?? null
+  const head = useMemo(() => {
+    const messages = liveRound?.messages ?? []
+    return turnLogHeadSummary(messages, running ? now : turnActivitySettledAt(messages) ?? now)
+  }, [liveRound, now, running])
+  // 新一轮开跑就回到最新那一轮：正在想什么才是这时候该看的，上一轮的选择只在那一刻成立。
+  useEffect(() => {
+    setOpenRoundKey(null)
+  }, [liveKey])
+  useLayoutEffect(() => {
+    stickToBottomRef.current = true
+  }, [liveKey, liveExpanded])
   // 每次开跑都摊开：上一次收起的只是那一次的选择，不该带到新一轮。
   const wasRunningRef = useRef(null)
   useEffect(() => {
@@ -2235,7 +2271,16 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
   useLayoutEffect(() => {
     const scroll = scrollRef.current
     if (scroll && stickToBottomRef.current) scroll.scrollTop = scroll.scrollHeight
-  }, [rounds, height, collapsed, roundsVisible])
+  }, [rounds, height, contentCollapsed, roundsVisible, liveExpanded, sidebar])
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current
+    if (!scroll || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current && scroll.clientHeight > 0) scroll.scrollTop = scroll.scrollHeight
+    })
+    observer.observe(scroll)
+    return () => observer.disconnect()
+  }, [contentCollapsed, dockVisible])
 
   // 标题行整行就是把手：向上拖变高，夹取规则与沿用下来的高度状态一致。
   // 不 preventDefault——那会连带吞掉 click / dblclick，双击复位就再也收不到。
@@ -2244,7 +2289,9 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
       if (event.button !== 0) return
       document.body.classList.add('is-resizing-terminal')
       const startY = event.clientY
-      const startHeight = scrollRef.current?.getBoundingClientRect().height || 0
+      // 从正在看的那一块量起：看历史轮次时这里是目录，不是收起来的正文。
+      const startHeight =
+        (viewingRound ? roundsRef.current : scrollRef.current)?.getBoundingClientRect().height || 0
       const onMove = (moveEvent) => {
         const delta = startY - moveEvent.clientY
         const next = Math.round(
@@ -2265,55 +2312,65 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
       window.addEventListener('pointerup', finish)
       window.addEventListener('pointercancel', finish)
     },
-    [setStoredHeight]
+    [setStoredHeight, viewingRound]
   )
 
   // 双击回到「跟着内容走」：默认高度由 CSS 的 max-height 决定，不拖过就不会有空白。
   const resetHeight = useCallback(() => setStoredHeight(null), [setStoredHeight])
   const toggleCollapsed = useCallback(() => setCollapsed((value) => !value), [setCollapsed])
 
-  // 跑完就整块让位：过程是运行时才要盯的东西，停下来之后它的位置还给对话。
-  // 下一轮开始时重新出现，历史轮次仍在列表里（跑完的过程本身不进对话）。
-  if (!rounds.length || !running) return null
+  // 窄屏沿用运行时停靠；宽屏结束后仍可回看过程。尚无活动时也能显示当前计划。
+  if (!dockVisible) return null
 
-  const meta = [`${head.steps} 步`, head.elapsedMs == null ? '' : formatLogElapsed(head.elapsedMs)]
+  const meta = [`${head?.steps ?? 0} 步`, head?.elapsedMs == null ? '' : formatLogElapsed(head.elapsedMs)]
     .filter(Boolean)
     .join(' · ')
 
   return (
     <section
-      className={`chat-turn-log${collapsed ? ' is-collapsed' : ''}${
+      className={`chat-turn-log${contentCollapsed ? ' is-collapsed' : ''}${sidebar ? ' is-sidebar' : ''}${
         roundsVisible ? ' has-rounds' : ''
-      }`}
-      aria-label="当前回合的思考与工具日志"
+      }${viewingRound ? ' is-reading-history' : ''}`}
+      aria-label={sidebar ? '本轮过程' : '当前回合的思考与工具日志'}
     >
       <header
         className="chat-turn-log-head"
-        onPointerDown={collapsed ? undefined : startResize}
-        onDoubleClick={collapsed ? undefined : resetHeight}
-        onClick={collapsed ? toggleCollapsed : undefined}
-        title={collapsed ? '点击展开这一轮的思考与工具日志' : '拖动调整日志高度，双击复位'}
+        onPointerDown={sidebar || contentCollapsed ? undefined : startResize}
+        onDoubleClick={sidebar || contentCollapsed ? undefined : resetHeight}
+        onClick={contentCollapsed ? toggleCollapsed : undefined}
+        title={
+          sidebar ? undefined : contentCollapsed
+            ? '点击展开这一轮的思考与工具日志'
+            : '拖动调整日志高度，双击复位'
+        }
       >
-        <button
-          type="button"
-          className="chat-turn-log-toggle"
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? '展开回合日志' : '收起回合日志'}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => {
-            event.stopPropagation()
-            toggleCollapsed()
-          }}
-          onDoubleClick={(event) => event.stopPropagation()}
-        >
-          {collapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
-        </button>
-        <span className="chat-turn-log-head-label">{running ? '模型思考中' : '本轮'}</span>
-        {collapsed ? (
+        {!sidebar && (
+          <button
+            type="button"
+            className="chat-turn-log-toggle"
+            aria-expanded={!contentCollapsed}
+            aria-label={contentCollapsed ? '展开回合日志' : '收起回合日志'}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              toggleCollapsed()
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            {contentCollapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
+          </button>
+        )}
+        <span className="chat-turn-log-head-label">
+          {sidebar || !running ? '本轮过程' : '模型思考中'}
+        </span>
+        {sidebar && (
+          <span className="chat-process-state">{running ? '进行中' : '已结束'}</span>
+        )}
+        {contentCollapsed ? (
           // 摘要是收起时的替代品：展开后下面每一行都在，标题行只留把手与标签。
           // 收起时也没有列表可切，所以这个位置不放假开关。
           <>
-            {head.doing && <span className="chat-turn-log-head-doing">{head.doing}</span>}
+            {head?.doing && <span className="chat-turn-log-head-doing">{head.doing}</span>}
             <span className="chat-turn-log-head-meta">{meta}</span>
           </>
         ) : historyRounds.length > 0 ? (
@@ -2332,17 +2389,40 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
             <span>{roundSwitchLabel(rounds.length, running)}</span>
           </button>
         ) : null}
+        {canSidebar && (
+          <span
+            className="chat-process-placement"
+            onPointerDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Button
+              variant="ghost"
+              size="compact"
+              icon={sidebar ? <IconLayoutBottombar size={13} /> : <IconLayoutSidebarRight size={13} />}
+              title={sidebar ? '将过程移到底部' : '将过程移到右侧'}
+              onClick={onTogglePlacement}
+            />
+          </span>
+        )}
       </header>
-      {!collapsed && roundsVisible && (
+      {sidebar && !viewingRound && todoPanel && (
+        <div className="chat-process-plan"><TodoDock panel={todoPanel} /></div>
+      )}
+      {!contentCollapsed && roundsVisible && (
         // 历史轮次是**固定的目录**：它不跟正文一起滚。正文一长就把它顶出视野，
         // 看上去就只剩正在跑的这一轮，等于没留下历史。
-        <div className="chat-turn-log-rounds">
+        <div
+          ref={roundsRef}
+          className="chat-turn-log-rounds"
+          style={viewingRound ? paneStyle : undefined}
+        >
           {historyRounds.map((round) => (
             <TurnLogRound
               key={round.key || `round-${round.index}`}
               round={round}
               live={false}
-              expanded={expandedRounds.has(round.key)}
+              expanded={viewingRound === round}
               onToggle={() => toggleRound(round.key)}
               now={now}
               onOpenActivity={onOpenActivity}
@@ -2350,13 +2430,15 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
           ))}
         </div>
       )}
-      {!collapsed && (
+      {!contentCollapsed && (
         <div
           ref={scrollRef}
           className="chat-turn-log-scroll"
-          style={height != null ? { height, maxHeight: 'none' } : undefined}
+          // 看历史轮次时这里只剩收起来的一行，拖出来的高度不落在一个空盒子上。
+          style={liveExpanded ? paneStyle : undefined}
           onScroll={(event) => {
             const element = event.currentTarget
+            if (element.clientHeight === 0 || !liveExpanded) return
             stickToBottomRef.current =
               element.scrollHeight - element.scrollTop - element.clientHeight <
               SCROLL_BOTTOM_THRESHOLD
@@ -2369,10 +2451,13 @@ function TurnLogDock({ rounds = [], now = Date.now(), running = false, onOpenAct
               round={liveRound}
               live
               framed={roundsVisible}
-              expanded
+              expanded={liveExpanded}
+              onToggle={showLiveRound}
               now={now}
               onOpenActivity={onOpenActivity}
             />
+          ) : running ? (
+            <div className="chat-process-empty">等待思考与工具活动…</div>
           ) : null}
         </div>
       )}
@@ -7098,7 +7183,7 @@ export function ChatView({
         x: event.clientX,
         y: event.clientY,
         moved: false,
-        inTranscript: Boolean(target.closest('.chat-scroll, .chat-transcript'))
+        inTranscript: Boolean(target.closest('.chat-scroll, .chat-transcript, .chat-turn-log'))
       }
       if (shellPointerRef.current.inTranscript) return
       textareaRef.current?.focus({ preventScroll: true })
@@ -7342,6 +7427,12 @@ export function ChatView({
     list.scrollTo({ top: target.top, behavior: 'smooth' })
   }, [])
 
+  const { layoutRef, processRoom, processSidebar, toggleProcessPlacement } = useProcessLayout({
+    running,
+    hasActivity: turnLogRounds.length > 0,
+    hasPlan: todoPanel.visible
+  })
+
   return (
     <ChatPathContext.Provider value={pathActions}>
       <div
@@ -7370,6 +7461,7 @@ export function ChatView({
         onContextMenu={openChatContextMenu}
         {...longPressHandlers(openChatContextMenu)}
       >
+        <div ref={layoutRef} className={`chat-conversation-layout${processSidebar ? ' has-process-sidebar' : ''}`}>
         <div
           ref={listRef}
           className="chat-scroll"
@@ -7430,6 +7522,10 @@ export function ChatView({
           now={Date.now()}
           running={running}
           onOpenActivity={openActivityDetail}
+          sidebar={processSidebar}
+          canSidebar={processRoom}
+          onTogglePlacement={toggleProcessPlacement}
+          todoPanel={todoPanel}
         />
 
         <ChatFind
@@ -7499,7 +7595,7 @@ export function ChatView({
               emptyText={completionEmptyText(completion.kind, completionLoading, completionFailed)}
             />
           )}
-          <TodoDock panel={todoPanel} />
+          {!processSidebar && <TodoDock panel={todoPanel} />}
           <SubagentStatusDock
             tasks={subagentTasks.filter((task) => keepsSubagentTaskRow(task))}
             now={taskNow}
@@ -7960,6 +8056,7 @@ export function ChatView({
             />
           )}
           {statusLine}
+        </div>
         </div>
         {contextDetail && (
           <ContextDetailPopover

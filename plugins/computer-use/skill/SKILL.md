@@ -1,7 +1,7 @@
 ---
 name: computer-use
 description: 用 Node + Objective-C helper 在本地操作 macOS 桌面 —— 移动/点击鼠标、输入文字、按快捷键、截图，并自带 AX 元素树（按控件名字点击、读界面文本、驱动浏览器网页）。纯本地实现（CGEvent + AX，无 npm 依赖），不依赖任何云服务或外部 app。
-when_to_use: Use when a task needs macOS desktop input/output — e.g. "在这个位置上点一下", "帮我按 cmd+s", "把这段字打进去", "截个图看看", "拖动这个窗口", "点一下那个按钮", "读一下界面上的文字", "帮我在浏览器里点开/填表单/读页面内容", "自动点一系列坐标".
+when_to_use: Use only when the user asks for something on this Mac's desktop in the current turn — e.g. "在这个位置上点一下", "帮我按 cmd+s", "把这段字打进去", "截个图看看", "拖动这个窗口", "点一下那个按钮", "读一下界面上的文字", "帮我在浏览器里点开/填表单/读页面内容", "自动点一系列坐标". 不要自作主张调用它（查资料、看日志、验证自己改的东西都不算用户的请求）；文件、shell 或 web_fetch 能答的事不要用它。
 argument_hint: [要做的键鼠/截图/元素树操作]
 ---
 
@@ -12,6 +12,45 @@ argument_hint: [要做的键鼠/截图/元素树操作]
 
 > 自带元素树（AXUIElement），所以「按控件名字点」「读界面文本」「驱动浏览器」都能做，而且比坐标点击更稳。
 > **优先用 AX，坐标只是兜底。**
+
+## 怎么动手（先读这一段）
+
+两类命令，走两条路：
+
+| 类别 | 有哪些 | 怎么调 |
+| --- | --- | --- |
+| **只读** | `apps` `front` `screens` `size` `pos` `els` `find` `text` `wait-el` `windows` `winlist` `webtext` `enable-ax` `shot` `winshot` `check` | shell 直接跑 `$D <命令>` |
+| **写** | `tap` `setval` `type` `paste` `key` `press` `move` `click` `dclick` `rclick` `drag` `scroll` `focus` `launch` `clip` | **只能**经 `computer_use` 工具 |
+
+写命令会改用户的鼠标、键盘、焦点或剪贴板，所以桌面端会在执行前弹一张确认卡：用户点「允许」才跑，
+点「不要执行」或超时就一步都不执行。**直接用 shell 调这些命令会被拒绝（退出码 6）**——那不是权限坏了，
+是提醒你换成工具。
+
+```jsonc
+// computer_use 的一次调用 = 一个操作 = 一次确认
+{
+  "goal": "在计算器里算 123×456",          // 用户看到的标题，一句话说清要做什么
+  "commands": [
+    { "cmd": "tap",  "args": ["Calculator", "1"] },
+    { "cmd": "tap",  "args": ["Calculator", "2"] },
+    { "cmd": "tap",  "args": ["Calculator", "3"] },
+    { "cmd": "tap",  "args": ["Calculator", "乘"] },
+    { "cmd": "tap",  "args": ["Calculator", "等于"] },
+    { "cmd": "wait-el", "args": ["Calculator", "56,088", "5000"] }
+  ]
+}
+```
+
+规则：
+
+- **一个操作用一次调用**：把「点开 → 输入 → 提交 → 校验」放进同一个 `commands`，用户只被打断一次；
+  每一步都会真实执行，遇到第一步失败就停下并报出退出码，后面的步骤不再执行。
+- **别把整轮任务塞进去**：最多 20 步；需要看中间结果再决定下一步时，先跑一批只读命令（不需要确认），
+  想清楚再发下一批写命令。
+- **失败不重试**：`tap` 没命中、`type` 打不进去，先读回状态（`find` / `text` / `webtext`）再改方案，
+  而不是把同一条命令再发一遍。
+- **一次许可只够这一批**：用户在卡上批准的是这几条具体命令，不能拿它去跑别的命令或再来一遍。
+- 读的步骤同样放进 `commands`（`wait-el`、`text`、`webtext` 都是只读），这样一次调用里就能验完。
 
 ## 构建与运行
 
@@ -63,6 +102,7 @@ $D help        # 完整列表
 ```bash
 $D apps                              # 列出有窗口的 app
 $D front                             # 当前前台 app
+$D screens                           # ★ 所有显示器 + 前台窗口落在哪块屏（多屏先跑这个）
 $D els  <app> [--depth N]            # 元素树（JSON，含 role/title/value/desc/坐标/可点性）
 $D find <app> <query>                # 找元素（query 匹配 role/title/value/desc）
 $D tap  <app> <query>                # ★ AXPress 点击（后台，不抢焦点）
@@ -70,19 +110,26 @@ $D setval <app> <query> <value>      # 写 AX value（注意：见下面的"陷�
 $D text <app> [query]                # 读元素文本值（验证结果用）
 $D wait-el <app> <query> [ms]        # 等元素出现（默认 10s）—— 替代死等 sleep
 $D windows <app>                     # 窗口列表
+$D winlist <app>                     # 可见窗口的 CGWindowID（winshot 用）
 $D webtext <app>                     # ★ 网页区域纯文本（浏览器任务）
 $D enable-ax <app>                   # 运行时开启 Chrome/Electron 网页可访问性
+$D commands                          # 哪些命令需要用户确认（write / read）
 ```
 
 `<app>` 接受本地化名（计算器）、英文可执行名（Calculator）、或 pid。
 所有命令加 `--json` 出机器可读结果（此时 stdout 只有 JSON，诊断走 stderr）。
 
+注意：`tap` / `setval` 这类会改动界面状态的命令必须经 `computer_use` 工具执行（见上文「怎么动手」）；
+`screens` / `webtext` 只是读，shell 直接跑。
+
 ### 坐标级键鼠（兜底）
 
 ```bash
-$D size / pos                        # 屏幕逻辑尺寸（同时报物理像素）/ 当前鼠标位置
-$D shot <path> [x,y,w,h]             # 截图（PNG）
-$D winshot <path> <windowId>         # 截指定窗口
+$D size / pos                        # 主屏逻辑尺寸（同时报真实物理像素）/ 当前鼠标位置
+$D shot <path> [x,y,w,h]             # 截图（PNG）：给区域就截区域；多屏默认「前台窗口所在屏 + 其余各屏」
+$D shot <path> --display <n|id>      # 只截某一块屏（n 是 screens 里的 index）
+$D shot <path> --all                 # 每块屏各一张（第一张用给的路径，其余加 -d<index+1>）
+$D winshot <path> <windowId|app>     # 截单个窗口（给 app 名就取它最靠前的可见窗口，--index 换下一个）
 $D move <x> <y>                      # 移动（移动后读回校验，失败退出码 4）
 $D click [x y] / dclick [x y] / rclick [x y]
 $D drag <x1> <y1> <x2> <y2> [ms]     # 拖拽，默认 300ms，带中间态拖拽事件
@@ -94,6 +141,30 @@ $D press <mod+key>                   # 组合键：cmd+s、shift+cmd+4、ctrl+al
 $D focus <app> / launch <app> / wait <ms>
 $D highlight <x> <y> <w> <h>         # 把该区域截成临时 PNG（坐标校对用，不画浮动窗口）
 ```
+
+## 多显示器（用户可能有两块屏，别假设只有一块）
+
+`$D screens` 是唯一的事实来源：
+
+```bash
+$D screens
+# #0 id=1 main 1512x982pt @0,0 (3024x1964px, 2.0x)
+# #1 id=30 front 1366x1024pt @1512,161 (2732x2048px, 2.0x)
+# 前台窗口: Safari "Mica" 1208x825 @1600,255 → 屏幕 #1 (windowId 48988)
+```
+
+- **坐标是一张连续画布上的全局逻辑点**：`@1512,161` 表示副屏从主屏右侧 1512 点开始、再往下 161 点。
+  副屏在主屏左边时 `x` 是**负数**，在上方时 `y` 是负数。`move` / `click` / `drag` / `shot` 的区域
+  都用这套坐标，可以直接指向任意一块屏。
+- **截图默认覆盖所有屏**：`shot <path>` 第一张给「前台窗口所在的那块屏」（`front` 标记那块，没有窗口时
+  是主屏），其余屏各一张，文件名加 `-d<index+1>` 后缀（`/tmp/a.png`、`/tmp/a-d1.png`…）。所以**不要**
+  假设 `path` 里就是你想要的内容——先看返回的每一行都写了是哪块屏。
+- 只想看一块屏：`shot <path> --display 1`（`screens` 里的 index 或 id）；只要窗口：`winshot <path> <app>`，
+  它按 CGWindowID 截，窗口跨屏、被别的窗口挡住都不影响。
+- `pixelWidth/pixelHeight` 是这块屏的真实像素（Retina 通常是逻辑点的 2 倍），`scale` 就是倍数。
+  **坐标用点，截图像素不是坐标**，换算时除以 `scale`。
+- `front` 只是「窗口列表里第一个正常窗口的落屏」的近似：多窗口 / 多屏时它不等于「键盘焦点所在」，需要
+  确定就用 `focus <app>` 显式激活。
 
 ## 浏览器任务（实测可用）
 
@@ -118,26 +189,29 @@ $D els "Google Chrome" | grep -c WebArea   # 确认已生效
 
 ### 套路
 
+只读的步骤（等页面进树、读文本）shell 直接跑；点击与打字放进同一个 `computer_use` 调用。
+
 ```bash
 D="node {{RUNTIME_DIR}}/scripts/desktop.mjs"
 
 # 1) 打开页面（open -a 比 AppleScript 可靠）
 open -a Safari "http://127.0.0.1:8899/"
-$D focus Safari
 $D wait-el Safari AXWebArea 8000         # 等网页内容进树，而不是 sleep
+```
 
-# 2) 按链接/按钮名字点击（后台 AXPress）
-$D tap Safari "Go to Page Two"
-
-# 3) 等目标内容出现，再读页面文本
-$D wait-el Safari "PAGE2-MARKER-7741" 8000
-$D webtext Safari
-
-# 4) 填表单：先 AX 聚焦输入框，再键盘输入
-$D tap Safari "Search query"
-$D type "hello"
-$D tap Safari "Search Now"
-$D webtext Safari                        # 读回显验证
+```jsonc
+// 2) 点链接 / 填表单：一次调用，用户确认一次
+{
+  "goal": "在 Safari 里填搜索框并提交",
+  "commands": [
+    { "cmd": "focus", "args": ["Safari"] },
+    { "cmd": "tap", "args": ["Safari", "Search query"] },
+    { "cmd": "type", "args": ["hello"] },
+    { "cmd": "tap", "args": ["Safari", "Search Now"] },
+    { "cmd": "wait-el", "args": ["Safari", "个结果", "10000"] },
+    { "cmd": "webtext", "args": ["Safari"] }   // 读回显验证
+  ]
+}
 ```
 
 浏览器任务里**不要**用 AppleScript 读 URL（见陷阱 12），地址栏本身就是 AX 元素。
@@ -151,6 +225,7 @@ $D webtext Safari                        # 读回显验证
 
 2. **`focus` 是先决条件（只对键盘/坐标操作）**
    `type`/`key`/`press`/`click` 都发给**当前前台 app**，先 `$D focus <app>`（必要时再点一下输入框）再操作。
+   `focus` 本身就是写命令（会抢焦点），所以它和后面的打字要放进同一个 `computer_use` 批次里。
    **`tap` 不需要**，它走 AX，天生后台。
    注意：点击非前台 app 时，第一次点击只是激活窗口；Electron 类应用激活后输入焦点也可能还没进输入框，
    这时先 `tap`/`click` 那个输入框再打字。
@@ -172,9 +247,9 @@ $D webtext Safari                        # 读回显验证
    计算器按钮 `title` 是空的、标签在 `desc`（'乘'、'等于'）。本 skill 的匹配和 `find` 都覆盖 title/desc/value/role。
 
 7. **Retina 2x：截图是物理像素，坐标是逻辑点**
-   `size` 同时给出逻辑尺寸与物理像素（例如逻辑 1512×982 / 物理 3024×1964）。
+   `size` / `screens` 同时给出逻辑尺寸与真实物理像素（例如逻辑 1512×982 / 物理 3024×1964，`scale=2`）。
    `move`/`click`/`drag` 用的是**逻辑点**。**不要把截图像素直接当坐标用**——
-   先换算（除以缩放倍数），或按逻辑尺寸缩放截图：`sips -Z <逻辑宽> shot.png`。
+   先换算（除以 `scale`），或按逻辑尺寸缩放截图：`sips -Z <逻辑宽> shot.png`。
 
 8. **`key space` 单独发空格键不可靠**
    整串 `type "a b c"` 是好的；**单独发空格键**在某些 app 会丢。
@@ -206,37 +281,63 @@ $D webtext Safari                        # 读回显验证
     它取 CGWindowList 里第一个 layer 0 窗口，多显示器 / 多窗口时不一定等于「当前键盘焦点所在的 app」。
     判断「键盘输入会去哪」不要只信 `front`，需要确定就用 `focus <app>` 显式激活。
     桌面元素被排除在列表外，所以只显示桌面时 `front` 可能报出别的 app。
+    「内容在哪块屏」要用 `screens` 的 `front` 标记 / `frontWindow.displayIndex`，别自己猜。
 
 15. **`highlight` 不是闪烁高亮**
     macOS 上画浮动窗口需要 AppKit，helper 只链了 ApplicationServices/CoreGraphics/Foundation，
     所以 `highlight` 改成「把这块区域截成临时 PNG」——坐标校对看这张图最直接。
 
+16. **写命令被拒绝（退出码 6）不是权限问题**
+    那是用户还没确认这一步：改用 `computer_use` 工具，把这几步放进同一个 `commands` 数组。
+    `check` 只看辅助功能 / 屏幕录制 / clang，和这个门禁无关。
+
 ## 推荐套路
+
+先看清再说，看清不需要确认：
 
 ```bash
 D="node {{RUNTIME_DIR}}/scripts/desktop.mjs"
 
-# 1) 先看权限/前台/有没有挡路的弹窗
+# 1) 权限 / 前台 / 有没有挡路的弹窗 / 屏幕是怎么排的
 $D check
 $D front
-
-# 2) 用 AX 定位并点击（后台，不抢焦点）
+$D screens
 $D find Calculator "乘"          # 确认匹配到的确实是要点的那个元素
-$D tap  Calculator "乘"
-
-# 3) 等状态变化（不要 sleep 固定秒数）
-$D wait-el Calculator "56,088" 5000
-
-# 4) 读回结果校验，而不是靠"看起来成功了"
-$D text Calculator
 ```
 
-需要键盘输入时：
+要动手时把整段操作交给 `computer_use`（一次确认做完，别一步一确认）：
 
-```bash
-$D focus TextEdit && $D wait 800
-$D type "Mica desktop test OK"      # 整串打字，空格不会丢
-$D key enter
+```jsonc
+{
+  "goal": "用计算器算 123×456",
+  "commands": [
+    { "cmd": "tap", "args": ["Calculator", "1"] },
+    { "cmd": "tap", "args": ["Calculator", "2"] },
+    { "cmd": "tap", "args": ["Calculator", "3"] },
+    { "cmd": "tap", "args": ["Calculator", "乘"] },
+    { "cmd": "tap", "args": ["Calculator", "4"] },
+    { "cmd": "tap", "args": ["Calculator", "5"] },
+    { "cmd": "tap", "args": ["Calculator", "6"] },
+    { "cmd": "tap", "args": ["Calculator", "等于"] },
+    // 等状态变化（不要 sleep 固定秒数），再读回校验
+    { "cmd": "wait-el", "args": ["Calculator", "56,088", "5000"] },
+    { "cmd": "text", "args": ["Calculator"] }
+  ]
+}
+```
+
+需要键盘输入时（`focus` 会抢焦点，所以和打字放在同一批里）：
+
+```jsonc
+{
+  "goal": "在 TextEdit 里输入一行测试文本",
+  "commands": [
+    { "cmd": "focus", "args": ["TextEdit"] },
+    { "cmd": "wait", "args": ["800"] },
+    { "cmd": "type", "args": ["Mica desktop test OK"] },  // 整串打字，空格不会丢
+    { "cmd": "key", "args": ["enter"] }
+  ]
+}
 ```
 
 ## 真实页面 / 真实站点（与模拟页面的关键差别）

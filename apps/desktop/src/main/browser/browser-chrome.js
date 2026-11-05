@@ -140,8 +140,10 @@ export function chromeHtml() {
     flex: 1 1 auto; min-width: 0; padding: 3px 10px; border-radius: 6px;
     background: var(--c-canvas); border: 1px solid var(--c-line); color: var(--c-fg-soft);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+    /* 地址要能选中复制：它落在窗口的拖动区里，所以两样都得单独放开 */
+    cursor: text; -webkit-user-select: text; user-select: text; -webkit-app-region: no-drag;
   }
-  .hint { flex: none; color: var(--c-fg-dim); white-space: nowrap; }
+  .hint { flex: none; min-width: 60px; text-align: right; color: var(--c-fg-dim); white-space: nowrap; }
   .loading { width: 6px; height: 6px; border-radius: 999px; background: var(--c-warn); flex: none; opacity: 0; }
   .loading.on { opacity: 1; }
   .hide {
@@ -159,7 +161,7 @@ export function chromeHtml() {
   <span class="grow">
     <span class="loading" id="loading"></span>
     <span class="url" id="url" title=""></span>
-    <span class="hint" title="地址由 Mica 控制，不可手动修改">请勿手动操作</span>
+    <span class="hint" id="hint" title="地址由 Mica 控制，不可编辑；可选中复制">可选中复制</span>
   </span>
   <button class="hide" id="hide" type="button">隐藏</button>
 <script>
@@ -169,6 +171,9 @@ export function chromeHtml() {
     var tabs = document.getElementById('tabs')
     var url = document.getElementById('url')
     var loading = document.getElementById('loading')
+    var hint = document.getElementById('hint')
+    var hintText = hint.textContent
+    var hintTimer = 0
     var root = document.documentElement
     var PALETTE_VARS = {
       panel: '--c-panel',
@@ -186,6 +191,17 @@ export function chromeHtml() {
       console.log('${CHROME_MESSAGE_PREFIX}' + JSON.stringify(Object.assign({ action: action }, payload || {})))
     }
 
+    function selectionText() {
+      var selection = window.getSelection && window.getSelection()
+      return selection ? String(selection) : ''
+    }
+
+    function flashHint(text) {
+      hint.textContent = text
+      clearTimeout(hintTimer)
+      hintTimer = setTimeout(function () { hint.textContent = hintText }, 1200)
+    }
+
     function applyPalette(palette) {
       if (!palette) return
       Object.keys(PALETTE_VARS).forEach(function (key) {
@@ -194,6 +210,37 @@ export function chromeHtml() {
     }
 
     document.getElementById('hide').addEventListener('click', function () { send('hide') })
+
+    // 点一下选整条地址（已经手动选过就不动它），再 ⌘C / Ctrl+C 复制。复制走主进程的
+    // 剪贴板：这条顶栏是 data: URL，不指望渲染进程自己的复制权限。
+    url.addEventListener('click', function () {
+      if (selectionText()) return
+      var selection = window.getSelection && window.getSelection()
+      if (!selection) return
+      var range = document.createRange()
+      range.selectNodeContents(url)
+      selection.removeAllRanges()
+      selection.addRange(range)
+    })
+
+    document.addEventListener('keydown', function (event) {
+      if (!(event.metaKey || event.ctrlKey) || String(event.key).toLowerCase() !== 'c') return
+      var text = selectionText()
+      if (!text) return
+      event.preventDefault()
+      send('copy', { text: text })
+      flashHint('已复制')
+    })
+
+    // Electron 默认不给页面右键菜单，所以右键不弹「复制」：有选中就复制选中的，没有就
+    // 直接复制整条地址
+    document.addEventListener('contextmenu', function (event) {
+      var text = selectionText() || (event.target === url ? url.textContent : '')
+      if (!text) return
+      event.preventDefault()
+      send('copy', { text: text })
+      flashHint('已复制')
+    })
 
     window.__micaChrome = {
       update: function (state) {

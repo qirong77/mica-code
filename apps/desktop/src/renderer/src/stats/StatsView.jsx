@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Button, DataTable, Segmented, SelectMenu, Tag } from '@mica-config-ui/web'
 import { BarSeries, CalendarHeatmap } from './charts'
 import { SpeedTrend } from './SpeedTrend'
+import { OverviewVisuals } from './OverviewVisuals'
 import { SessionDetailModal } from './SessionDetailModal'
 import {
   bucketByDay,
@@ -267,7 +268,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
           label="Cache hit rate"
           className={cellBorder(3)}
           title={`${totals.cachedInputTokens.toLocaleString()} / ${totals.inputTokens.toLocaleString()} input tokens`}
-          value={`${(totals.cacheRate * 100).toFixed(1)}%`}
+          value={totals.inputTokens > 0 ? `${(totals.cacheRate * 100).toFixed(1)}%` : '—'}
         />
         <KpiTile
           label="Cached input"
@@ -294,6 +295,7 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
           value={topModel?.model || '—'}
         />
       </div>
+      <OverviewVisuals scoped={scoped} totals={totals} />
       {sourceSplit.length > 1 && (
         <>
           <div aria-hidden className="h-px bg-panel-hi" />
@@ -610,6 +612,7 @@ function ModelPerformanceCard({ scoped }) {
   const shown = series.filter((item) => !hidden.includes(item.id))
   const formatValue = (value) =>
     metric === 'responseWait' ? `${(value / 1000).toFixed(2)} s` : `${value.toFixed(1)} tokens/s`
+  const unitText = metric === 'responseWait' ? '秒 · 越低越快' : 'tokens/s · 估算 · 越高越快'
   const toggle = (id) =>
     setHidden((previous) =>
       previous.includes(id) ? previous.filter((key) => key !== id) : [...previous, id]
@@ -636,6 +639,7 @@ function ModelPerformanceCard({ scoped }) {
           ? '请求开始到首次内容的平均等待，包含重试。'
           : '输出 tokens ÷ 首末内容增量间隔的估算速率，可能包含推理 tokens。'}{' '}
         仅统计有计时的成功请求。
+        {series.length > 1 ? ' 点击图例可显示或隐藏模型。' : ''}
       </p>
       {series.length === 0 ? (
         <p className="py-6 text-center text-xs text-fg-faint">当前区间没有可用的请求计时数据。</p>
@@ -656,6 +660,45 @@ function ModelPerformanceCard({ scoped }) {
               显示全部
             </button>
           </div>
+          {/* 图例按图表惯例贴在图的右上角：单位在左，模型色块在右，点一下显示或隐藏。 */}
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+            <span className="text-[10px] text-fg-dim">{unitText}</span>
+            <div
+              className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-1"
+              aria-label="模型图例"
+            >
+              {series.map((item) => {
+                const isHidden = hidden.includes(item.id)
+                return (
+                  <button
+                    type="button"
+                    key={item.id}
+                    aria-pressed={!isHidden}
+                    onClick={() => toggle(item.id)}
+                    title={`${item.label} · ${formatValue(item.value)}（区间汇总，${item.samples} 个样本）· 点击显示或隐藏`}
+                    className={`inline-flex max-w-[15rem] min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 leading-5 transition-colors hover:bg-panel-hi focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg-soft ${isHidden ? 'opacity-40' : ''}`}
+                  >
+                    <svg width="14" height="8" className="shrink-0" aria-hidden="true">
+                      <line
+                        x1="0"
+                        y1="4"
+                        x2="14"
+                        y2="4"
+                        stroke={item.color}
+                        strokeWidth="2"
+                        strokeDasharray={item.dash}
+                      />
+                      <circle cx="7" cy="4" r="3" fill={item.color} />
+                    </svg>
+                    <span className="min-w-0 truncate text-[11px] text-fg-muted">{item.model}</span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-fg-dim">
+                      {formatValue(item.value)}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           <SpeedTrend
             key={metric}
             series={shown}
@@ -665,48 +708,8 @@ function ModelPerformanceCard({ scoped }) {
                 ? (value / 1000).toFixed(1)
                 : Number(value.toFixed(1)).toString()
             }
-            unit={metric === 'responseWait' ? '秒 · 越低越快' : 'tokens/s · 估算 · 越高越快'}
+            unit={unitText}
           />
-          <div
-            className="mt-5 grid grid-cols-1 gap-x-6 gap-y-1 border-t border-line pt-3 sm:grid-cols-2"
-            aria-label="模型图例"
-          >
-            {series.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                aria-pressed={!hidden.includes(item.id)}
-                onClick={() => toggle(item.id)}
-                title={`${item.label} · 点击显示或隐藏`}
-                className={`flex min-w-0 items-center gap-2 rounded px-2 py-2 text-left transition-colors hover:bg-panel-hi focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg-soft ${hidden.includes(item.id) ? 'opacity-40' : ''}`}
-              >
-                <svg width="20" height="8" className="shrink-0" aria-hidden="true">
-                  <line
-                    x1="0"
-                    y1="4"
-                    x2="20"
-                    y2="4"
-                    stroke={item.color}
-                    strokeWidth="2"
-                    strokeDasharray={item.dash}
-                  />
-                  <circle cx="10" cy="4" r="3" fill={item.color} />
-                </svg>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-xs text-fg-strong">{item.model}</span>
-                  <span className="block truncate text-[10px] text-fg-dim">
-                    {item.provider} · {item.samples} 个样本
-                  </span>
-                </span>
-                <span className="shrink-0 text-xs tabular-nums text-fg-muted">
-                  {formatValue(item.value)}
-                </span>
-              </button>
-            ))}
-          </div>
-          <p className="mt-2 text-[10px] text-fg-dim">
-            图例数值为区间汇总 · 点击图例显示或隐藏 · 悬停比较同一天 · 缺失日期不连线
-          </p>
         </>
       )}
     </section>

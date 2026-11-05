@@ -75,7 +75,12 @@ import {
   resolveDefaultCwd,
   uid
 } from './workspace'
-import { draftMarkers, runningTerminalSessions, sameSessionSnapshot } from './session-state'
+import {
+  dismissSessionInterruptions,
+  draftMarkers,
+  runningTerminalSessions,
+  sameSessionSnapshot
+} from './session-state'
 import { browserIconBadge, browserIconTitle, isOwnedByNode, nodeBrowsers } from './browser-control'
 import {
   isTerminalOwnedByNode,
@@ -725,6 +730,11 @@ export default function App() {
   // 上一次拿到 counts 的目录与时刻：非文件视图按 TTL 决定这一轮要不要再取。
   const gitCountsAt = useRef({ cwd: null, at: 0 })
   const [sessions, setSessions] = useState([])
+  const [acknowledgedInterruptions, setAcknowledgedInterruptions] = useState({})
+  const displayedSessions = useMemo(
+    () => dismissSessionInterruptions(sessions, acknowledgedInterruptions),
+    [sessions, acknowledgedInterruptions]
+  )
   // 会话清单是否至少加载回来过一次：地址栏里的 session 要等它到位才换成带标题/工作目录的
   // 标签页（否则只能按 id 开一个无名页签）。列表为空也是「加载过了」。
   const [sessionsLoaded, setSessionsLoaded] = useState(false)
@@ -1822,6 +1832,12 @@ export default function App() {
   const openSession = useCallback(
     (session, options) => {
       if (!session?.id) return null
+      if (session.interrupted) {
+        setAcknowledgedInterruptions((previous) => ({
+          ...previous,
+          [session.id]: session.updatedAtMs
+        }))
+      }
       setView('chat')
       const existing = nodesRef.current.find(
         (node) => node.type === 'terminal' && node.sessionId === session.id
@@ -2642,7 +2658,7 @@ export default function App() {
               </button>
             </nav>
             <SessionTree
-              sessions={sessions}
+              sessions={displayedSessions}
               pins={pins}
               sortOrder={sortOrder}
               projects={projects}
@@ -2901,7 +2917,7 @@ export default function App() {
             {/* ⌘P 快速打开会话：主区顶部的一层浮层，盖住对话区但不盖侧栏。 */}
             {sessionQuickOpen && (
               <SessionQuickOpen
-                sessions={sessions}
+                sessions={displayedSessions}
                 projects={projects}
                 openBySession={openBySession}
                 unread={notifications.states}

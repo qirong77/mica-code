@@ -925,6 +925,34 @@ html[data-appearance='light'] .chat-modal-overlay {
   --chat-subtle: var(--color-fg-faint); /* #979da6 — 再退一档 */
 }
 
+.chat-conversation-layout {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0%;
+  flex-direction: column;
+}
+
+/* 按实际对话区域宽度启用（ChatView 的 ResizeObserver），抽屉打开后也会重新判断。 */
+.chat-conversation-layout.has-process-sidebar {
+  --chat-process-width: clamp(340px, 32%, 440px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--chat-process-width);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: 'transcript process' 'composer process';
+}
+
+.has-process-sidebar > .chat-scroll {
+  grid-area: transcript;
+  min-width: 0;
+}
+
+.has-process-sidebar > .chat-composer-dock {
+  grid-area: composer;
+  min-width: 0;
+}
+
 .chat-scroll {
   min-height: 0;
   flex: 1 1 0%;
@@ -2192,6 +2220,15 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   right: calc(var(--chat-btw-width) + 22px);
 }
 
+/* 查找条现在相对内部布局定位，BTW 的空间已由外层扣除。 */
+.chat-view .chat-conversation-layout > .chat-find {
+  right: 22px;
+}
+
+.chat-view .chat-conversation-layout.has-process-sidebar > .chat-find {
+  right: calc(var(--chat-process-width) + 22px);
+}
+
 .chat-find-field {
   display: flex;
   min-width: 240px;
@@ -2505,6 +2542,14 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 /*
+ * 同一时刻只摊开一轮：看历史轮次时正在跑的那一轮先收成一行，空出来的高度让给目录，
+ * 展开的长轮次因此不必挤在 12 行的小窗口里滚。
+ */
+.chat-turn-log.is-reading-history .chat-turn-log-rounds {
+  max-height: calc(1.45em * 22 + 14px);
+}
+
+/*
  * 最新一轮的正文单独成一块：框画在**滚动视口**上，不画在里面的内容上——框因此
  * 不跟着内容滚走，滚的也只是这一块。没有这道框时，正文与上面的轮次目录连成一片，
  * 看不出滚的是哪一段。
@@ -2609,6 +2654,96 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
  *
  * 思考是例外：它不是日志行，而是这一轮在想的什么，照旧整段折行。
  */
+.chat-turn-log.is-sidebar {
+  grid-area: process;
+  overflow: hidden;
+  border-left: 1px solid var(--color-line);
+  border-bottom: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.chat-turn-log.is-sidebar .chat-turn-log-head {
+  height: 38px;
+  min-height: 38px;
+  flex: none;
+  gap: 8px;
+  border-top: 0;
+  border-bottom: 1px solid var(--color-line-soft);
+  padding: 0 12px;
+  cursor: default;
+  touch-action: auto;
+}
+
+.chat-process-state,
+.chat-process-empty {
+  color: var(--color-fg-faint);
+  font-size: 11px;
+}
+
+.chat-process-placement {
+  display: inline-flex;
+  flex: none;
+  margin-left: auto;
+}
+
+.chat-turn-log-rounds-toggle + .chat-process-placement {
+  margin-left: 0;
+}
+
+.chat-process-plan {
+  min-height: 0;
+  max-height: 35%;
+  flex: 0 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chat-process-plan:has(.chat-todo-dock) {
+  border-bottom: 1px solid var(--color-line-soft);
+  padding: 8px 0;
+}
+
+.chat-process-plan .chat-task-description {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * 侧栏里计划区自己滚（上限 35%）：列表不必再压成 126px 的小窗，
+ * 否则计划一长就缩成几行，下面空着也看不见后面的条目。
+ */
+.chat-process-plan .chat-task-children {
+  max-height: none;
+}
+
+.chat-turn-log.is-sidebar .chat-turn-log-scroll {
+  flex: 1 1 0%;
+  max-height: none;
+  padding: 12px;
+}
+
+.chat-turn-log.is-sidebar .chat-turn-log-rounds {
+  max-height: min(28%, 180px);
+  flex: 0 1 auto;
+  padding: 8px 12px 0;
+}
+
+.chat-turn-log.is-sidebar.is-reading-history .chat-turn-log-rounds {
+  max-height: none;
+  flex: 1 1 0%;
+  padding-bottom: 8px;
+}
+
+.chat-turn-log.is-sidebar.is-reading-history .chat-turn-log-scroll {
+  flex: 0 0 auto;
+}
+
+.chat-turn-log.is-sidebar.has-rounds .chat-turn-log-scroll {
+  margin: 8px 12px 12px;
+  padding: 8px;
+}
+
 .chat-turn-log-thinking {
   min-width: 0;
   margin: 1px 0 7px;

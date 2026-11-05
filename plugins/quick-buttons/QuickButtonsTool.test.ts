@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { QUICK_BUTTON_LIMIT, readQuickButtons, type QuickButton } from './buttons.js';
+import { describe, expect, it, vi } from 'vitest';
+import { QUICK_BUTTON_LIMIT, QUICK_BUTTON_STALE_MS, readQuickButtons, type QuickButton } from './buttons.js';
 import { QUICK_BUTTONS_TOOL_NAME, QuickButtonsTool } from './QuickButtonsTool.js';
 
 function harness(initial: QuickButton[] = [], options: { desktop?: boolean } = {}) {
@@ -17,6 +17,45 @@ function harness(initial: QuickButton[] = [], options: { desktop?: boolean } = {
 }
 
 describe('quick_buttons 工具', () => {
+  it('timestamps model writes and preserves creation time on updates', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    try {
+      const { tool, buttons } = harness();
+      await tool.execute({ operation: 'set', buttons: [{ id: 'a', label: 'A', kind: 'compose', text: 'a' }] });
+      expect(buttons()[0]).toMatchObject({ source: 'model', createdAt: 1000, updatedAt: 1000 });
+      clock.mockReturnValue(2000);
+      await tool.execute({ operation: 'add', buttons: [{ id: 'a', label: 'B', kind: 'compose', text: 'b' }] });
+      expect(buttons()[0]).toMatchObject({ source: 'model', createdAt: 1000, updatedAt: 2000 });
+      clock.mockReturnValue(3000);
+      await tool.execute({ operation: 'set', buttons: [{ id: 'a', label: 'C', kind: 'compose', text: 'c' }] });
+      expect(buttons()[0]).toMatchObject({ source: 'model', createdAt: 1000, updatedAt: 3000 });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('lists and explicitly clears only stale model buttons', async () => {
+    const now = 2 * QUICK_BUTTON_STALE_MS;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    try {
+      const base = { label: 'A', kind: 'compose' as const, text: 'a' };
+      const { tool, buttons } = harness([
+        { ...base, id: 'old', source: 'model', updatedAt: now - QUICK_BUTTON_STALE_MS - 1 },
+        { ...base, id: 'recent', source: 'model', updatedAt: now - QUICK_BUTTON_STALE_MS },
+        { ...base, id: 'unknown', source: 'model' },
+        { ...base, id: 'manual', updatedAt: 0 },
+        { ...base, id: 'legacy' },
+      ]);
+      expect((await tool.execute({ operation: 'list' })).match(/可能过时/g)).toHaveLength(1);
+      expect(buttons()).toHaveLength(5);
+      expect(await tool.execute({ operation: 'clear_stale' })).toContain('已清理 1 个');
+      expect(buttons().map((button) => button.id)).toEqual(['recent', 'unknown', 'manual', 'legacy']);
+      expect(await tool.execute({ operation: 'clear_stale' })).toContain('已清理 0 个');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('is a session-scoped tool with the expected name', () => {
     const { tool } = harness();
     expect(tool.name).toBe(QUICK_BUTTONS_TOOL_NAME);

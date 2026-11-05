@@ -55,6 +55,14 @@ export function getConfig() {
   return configAtom.get();
 }
 
+export function refreshProviders(): IMicaConfig {
+  const current = getConfig();
+  const providers = synthesizeEnvProviders(readPersistedConfig(CONFIG_PATH).providers ?? []);
+  const next = { ...current, providers };
+  configAtom.set(next);
+  return next;
+}
+
 export function updateConfig(updater: (config: IMicaConfig) => IMicaConfig): IMicaConfig {
   const next = updater(getConfig());
   configAtom.set(next);

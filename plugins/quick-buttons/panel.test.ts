@@ -10,6 +10,7 @@ import { replaceQuickButtons, type QuickButton } from './buttons.js';
 import {
   ADD_ACTION,
   CLEAR_ACTION,
+  CLEAR_STALE_ACTION,
   DIALOG_ACTION,
   REMOVE_ACTION,
   RUN_ACTION,
@@ -40,7 +41,23 @@ function harness(initial: QuickButton[] = [], options: { cwd?: string; browser?:
     view: (input) => raw.view(input) as PluginPanelView,
     action: async (input) => (await raw.action(input)) || {},
   };
-  return { handler, openBrowser, buttons: () => buttons };
+  return {
+    handler,
+    openBrowser,
+    buttons: () => buttons,
+    setButtons: (next: QuickButton[]) => {
+      buttons = next;
+    },
+  };
+}
+
+function shortcutKey(handler: Handler, id: string): string {
+  return handler.view({ role: 'default' }).shortcuts!.find((shortcut) => shortcut.id === id)!.key!;
+}
+
+async function dialogKeys(handler: Handler, id: string): Promise<string[]> {
+  const result = await handler.action({ action: RUN_ACTION, key: shortcutKey(handler, id) });
+  return result.dialog!.actions!.map((action) => action.key!);
 }
 
 /** 动作的回包里可能有那句话，也可能什么都没回。 */
@@ -49,6 +66,24 @@ function messageOf(result: PluginPanelActionResult): string {
 }
 
 describe('快捷按钮面板 view', () => {
+  it('marks old model buttons and only clears those from the panel', async () => {
+    const old = {
+      id: 'old',
+      label: '旧',
+      kind: 'compose' as const,
+      text: 'a',
+      source: 'model' as const,
+      updatedAt: Date.now() - 8 * 86400000,
+    };
+    const manual = { id: 'manual', label: '手动', kind: 'compose' as const, text: 'b' };
+    const { handler, buttons } = harness([old, manual]);
+    const view = handler.view({ role: 'default' });
+    expect(view.shortcutStates?.old?.badge).toBe('可能过时');
+    expect(view.sections?.[0].items?.[0].value).toContain('可能过时');
+    expect(view.sections?.[0].actions?.some((action) => action.id === CLEAR_STALE_ACTION)).toBe(true);
+    await handler.action({ action: CLEAR_STALE_ACTION });
+    expect(buttons()).toEqual([manual]);
+  });
   it('hands the row to the quick bar and lists it for editing', () => {
     const { handler } = harness(
       replaceQuickButtons([
@@ -60,8 +95,8 @@ describe('快捷按钮面板 view', () => {
 
     // 输入框上方那一排：id 同时是点击时回传的 key
     expect(view.shortcuts).toEqual([
-      { id: 'doc', label: '打开需求单', action: RUN_ACTION, key: 'doc' },
-      { id: 'ask', label: '追问', action: RUN_ACTION, key: 'ask' },
+      { id: 'doc', label: '打开需求单', action: RUN_ACTION, key: expect.stringMatching(/^doc:/) },
+      { id: 'ask', label: '追问', action: RUN_ACTION, key: expect.stringMatching(/^ask:/) },
     ]);
     expect(view.subtitle).toContain('2 个按钮');
     const list = view.sections?.[0];
@@ -86,6 +121,7 @@ describe('快捷按钮面板 view', () => {
     expect(form?.fields?.map((field) => field.key)).toEqual(['label', 'kind', 'value']);
     expect(form?.fields?.[2].action?.id).toBe(ADD_ACTION);
     expect(form?.fields?.[2].hint).toContain('/Users/me/project');
+    expect(form?.fields?.[1].options?.map((option) => option.value)).not.toContain('dialog');
   });
 });
 
@@ -94,7 +130,7 @@ describe('快捷按钮面板动作', () => {
     const { handler, openBrowser } = harness(
       replaceQuickButtons([{ id: 'doc', label: '打开需求单', kind: 'open', url: 'https://example.com/1' }]),
     );
-    const result = await handler.action({ action: RUN_ACTION, key: 'doc' });
+    const result = await handler.action({ action: RUN_ACTION, key: shortcutKey(handler, 'doc') });
     expect(openBrowser).toHaveBeenCalledWith(
       expect.objectContaining({ url: 'https://example.com/1', label: '打开需求单' }),
     );
@@ -106,7 +142,7 @@ describe('快捷按钮面板动作', () => {
       replaceQuickButtons([{ id: 'doc', label: '打开需求单', kind: 'open', url: 'https://example.com/1' }]),
       { browser: 'fail' },
     );
-    const result = await handler.action({ action: RUN_ACTION, key: 'doc' });
+    const result = await handler.action({ action: RUN_ACTION, key: shortcutKey(handler, 'doc') });
     expect(result).toMatchObject({ openExternal: 'https://example.com/1' });
     expect(result.message).toContain('系统浏览器');
   });
@@ -117,7 +153,7 @@ describe('快捷按钮面板动作', () => {
         { id: 'ext', label: '在 Chrome 里看', kind: 'open', url: 'https://a.com', target: 'external' },
       ]),
     );
-    expect(await handler.action({ action: RUN_ACTION, key: 'ext' })).toEqual({
+    expect(await handler.action({ action: RUN_ACTION, key: shortcutKey(handler, 'ext') })).toEqual({
       openExternal: 'https://a.com',
     });
     expect(openBrowser).not.toHaveBeenCalled();
@@ -131,13 +167,13 @@ describe('快捷按钮面板动作', () => {
         { id: 'file', label: '看日志', kind: 'path', path: '/tmp/a.log' },
       ]),
     );
-    expect(await handler.action({ action: RUN_ACTION, key: 'ask' })).toMatchObject({
+    expect(await handler.action({ action: RUN_ACTION, key: shortcutKey(handler, 'ask') })).toMatchObject({
       compose: '再查一下日志',
     });
-    expect(await handler.action({ action: RUN_ACTION, key: 'job' })).toEqual({
+    expect(await handler.action({ action: RUN_ACTION, key: shortcutKey(handler, 'job') })).toEqual({
       newSession: { prompt: '跑一遍单测', role: '需求开发' },
     });
-    expect(await handler.action({ action: RUN_ACTION, key: 'file' })).toEqual({
+    expect(await handler.action({ action: RUN_ACTION, key: shortcutKey(handler, 'file') })).toEqual({
       openPath: { path: '/tmp/a.log' },
     });
   });
@@ -200,6 +236,48 @@ describe('absolutePath', () => {
 });
 
 describe('按钮外观与弹窗', () => {
+  it('rejects stale shortcuts after replacement or deletion', async () => {
+    const original = { id: 'a'.repeat(40), label: '打开', kind: 'open', url: 'https://example.com/a' };
+    const h = harness(replaceQuickButtons([original]));
+    const key = shortcutKey(h.handler, original.id);
+    expect(key.length).toBeLessThanOrEqual(64);
+    h.setButtons(replaceQuickButtons([{ ...original, url: 'https://example.com/b' }]));
+    expect(await h.handler.action({ action: RUN_ACTION, key })).toEqual({ message: '按钮内容已更新，请重新打开' });
+    expect(h.openBrowser).not.toHaveBeenCalled();
+    expect(await h.handler.action({ action: RUN_ACTION, key: original.id })).toEqual({
+      message: '按钮内容已更新，请重新打开',
+    });
+    h.setButtons([]);
+    expect(await h.handler.action({ action: RUN_ACTION, key })).toEqual({ message: '这个按钮已经删掉了' });
+  });
+
+  it('rejects old dialogs after actions reorder, content changes, or deletion', async () => {
+    const id = 'a'.repeat(40);
+    const actions = [
+      { label: 'A', kind: 'compose', text: 'A' },
+      { label: 'B', kind: 'compose', text: 'B' },
+    ];
+    const original = { id, label: '候选', kind: 'dialog', dialog: { title: '候选', text: '说明', actions } };
+    const h = harness(replaceQuickButtons([original]));
+    const [key] = await dialogKeys(h.handler, id);
+    expect(key.length).toBeLessThanOrEqual(64);
+    h.setButtons(
+      replaceQuickButtons([{ ...original, dialog: { ...original.dialog, actions: [...actions].reverse() } }]),
+    );
+    expect(await h.handler.action({ action: DIALOG_ACTION, key })).toEqual({ message: '弹窗内容已更新，请重新打开' });
+    h.setButtons(replaceQuickButtons([{ ...original, dialog: { ...original.dialog, text: '新说明' } }]));
+    expect(await h.handler.action({ action: DIALOG_ACTION, key })).toEqual({ message: '弹窗内容已更新，请重新打开' });
+    const [current] = await dialogKeys(h.handler, id);
+    expect(await h.handler.action({ action: DIALOG_ACTION, key: `${current}:extra` })).toEqual({
+      message: '弹窗内容已更新，请重新打开',
+    });
+    expect(await h.handler.action({ action: DIALOG_ACTION, key: current.replace(/:0$/, ':9') })).toEqual({
+      message: '这个做法已经不在弹窗里了',
+    });
+    h.setButtons([]);
+    expect(await h.handler.action({ action: DIALOG_ACTION, key })).toEqual({ message: '这个按钮已经删掉了' });
+  });
+
   it('把外观规格原样交给快捷条（颜色 / 图标由宿主按主题画）', () => {
     const { handler } = harness(
       replaceQuickButtons([
@@ -216,7 +294,7 @@ describe('按钮外观与弹窗', () => {
       id: 'doc',
       label: '打开',
       action: RUN_ACTION,
-      key: 'doc',
+      key: expect.stringMatching(/^doc:/),
       style: { icon: 'globe', color: 'accent', shape: 'soft' },
     });
   });
@@ -242,7 +320,7 @@ describe('按钮外观与弹窗', () => {
         },
       ]),
     );
-    const result = await handler.action({ action: RUN_ACTION, key: 'pick' });
+    const result = await handler.action({ action: RUN_ACTION, key: shortcutKey(handler, 'pick') });
     expect(result.dialog).toEqual({
       title: '两条候选',
       subtitle: '按修改时间',
@@ -251,8 +329,8 @@ describe('按钮外观与弹窗', () => {
       rows: [[{ text: '需求单 A' }, { text: '昨天', link: 'https://example.com/a' }]],
       note: '选一个继续',
       actions: [
-        { id: DIALOG_ACTION, key: 'pick:0', label: '打开 A', tone: 'primary' },
-        { id: DIALOG_ACTION, key: 'pick:1', label: '追问' },
+        { id: DIALOG_ACTION, key: expect.stringMatching(/^pick:.*:0$/), label: '打开 A', tone: 'primary' },
+        { id: DIALOG_ACTION, key: expect.stringMatching(/^pick:.*:1$/), label: '追问' },
       ],
     });
   });
@@ -275,10 +353,11 @@ describe('按钮外观与弹窗', () => {
         },
       ]),
     );
-    expect(await harnessed.handler.action({ action: DIALOG_ACTION, key: 'pick:0' })).toEqual({
+    const keys = await dialogKeys(harnessed.handler, 'pick');
+    expect(await harnessed.handler.action({ action: DIALOG_ACTION, key: keys[0] })).toEqual({
       openExternal: 'https://example.com/a',
     });
-    expect(await harnessed.handler.action({ action: DIALOG_ACTION, key: 'pick:1' })).toMatchObject({
+    expect(await harnessed.handler.action({ action: DIALOG_ACTION, key: keys[1] })).toMatchObject({
       compose: '按 A 继续说',
     });
   });
@@ -298,14 +377,14 @@ describe('按钮外观与弹窗', () => {
         },
       ]),
     );
-    await harnessed.handler.action({ action: DIALOG_ACTION, key: 'pick:0' });
+    await harnessed.handler.action({ action: DIALOG_ACTION, key: (await dialogKeys(harnessed.handler, 'pick'))[0] });
     expect(harnessed.openBrowser).toHaveBeenCalledWith(expect.objectContaining({ url: 'https://example.com/b' }));
   });
 
   it('坐标过期时说清楚，而不是默默什么都不做', async () => {
     const { handler } = harness();
     expect(await handler.action({ action: DIALOG_ACTION, key: 'gone:0' })).toMatchObject({
-      message: expect.stringContaining('不在弹窗里'),
+      message: expect.stringContaining('删掉'),
     });
   });
 });

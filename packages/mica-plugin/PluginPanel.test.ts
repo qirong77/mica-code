@@ -8,6 +8,64 @@ import {
 } from './PluginPanel.js';
 
 describe('normalizePluginPanelView', () => {
+  it('normalizes compact cards and preserves guarded action keys', () => {
+    const card = {
+      id: 'delivery', title: ' 已交付 ', summary: ' 三项完成 ', detail: '第一行\n第二行',
+      tone: 'ok', revision: 'v2', impressionAction: 'seen',
+      actions: [{ id: 'open', label: '查看', key: 'delivery:v2', tone: 'primary' }],
+    };
+    expect(normalizePluginPanelView({ cards: [card] }).cards).toEqual([{
+      ...card, title: '已交付', summary: '三项完成',
+    }]);
+  });
+
+  it('bounds card count, copy and actions without inventing identifiers', () => {
+    const card = {
+      id: 'one', title: 't'.repeat(100), summary: 's'.repeat(300), detail: 'd'.repeat(800),
+      revision: 'v1', actions: Array.from({ length: 5 }, (_, index) => ({
+        id: `a${index}`, label: 'l'.repeat(50), key: `v1:${index}`,
+      })),
+    };
+    const cards = normalizePluginPanelView({ cards: [card, { ...card, id: 'two' },
+      { ...card, id: 'three' }, { ...card, id: 'four' }] }).cards!;
+    expect(cards.map((entry) => entry.id)).toEqual(['one', 'two', 'three']);
+    expect(cards[0].title).toHaveLength(80);
+    expect(cards[0].summary).toHaveLength(240);
+    expect(cards[0].detail).toHaveLength(600);
+    expect(cards[0].actions).toHaveLength(3);
+    expect(cards[0].actions?.[0].label).toHaveLength(32);
+    expect(cards[0].actions?.[0].key).toBe('v1:0');
+  });
+
+  it('drops missing, duplicate and overlong card identities and revisions', () => {
+    const valid = { id: 'one', title: 'One', revision: 'v1' };
+    expect(normalizePluginPanelView({ cards: [valid, { ...valid, title: 'duplicate' }, null] }).cards)
+      .toEqual([valid]);
+    for (const malformed of [null, [], {}, { ...valid, id: '' }, { ...valid, title: '' },
+      { ...valid, revision: undefined }, { ...valid, revision: 1 },
+      { ...valid, revision: 'x'.repeat(201) }, { ...valid, id: 'x'.repeat(65) }]) {
+      expect(normalizePluginPanelView({ cards: [malformed] }).cards).toBeUndefined();
+    }
+    expect(normalizePluginPanelView({ cards: {} }).cards).toBeUndefined();
+    expect(normalizePluginPanelView({ cards: [] }).cards).toBeUndefined();
+  });
+
+  it('drops invalid action targets instead of truncating a guard or running without it', () => {
+    const base = { id: 'one', title: 'One', revision: 'v1' };
+    const cards = normalizePluginPanelView({ cards: [{ ...base, tone: 'pink',
+      impressionAction: 'x'.repeat(65), actions: [
+        { id: 'bad-key', label: 'Wrong', key: 'x'.repeat(201) },
+        { id: 'open', label: 'Open', tone: 'pink' },
+        { id: 'open', label: 'Duplicate', key: 'v1' },
+      ] }] }).cards;
+    expect(cards).toEqual([{ ...base, actions: [{ id: 'open', label: 'Open' }] }]);
+    for (const key of ['', null, 2, {}]) {
+      expect(normalizePluginPanelView({ cards: [{ ...base,
+        actions: [{ id: 'open', label: 'Open', key }],
+      }] }).cards?.[0].actions).toBeUndefined();
+    }
+  });
+
   it('keeps rows, items, fields and actions', () => {
     const view = normalizePluginPanelView({
       title: '需求开发',

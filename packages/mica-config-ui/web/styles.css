@@ -5354,6 +5354,16 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     gap: 12px;
   }
 
+  .plugin-catalog-tabs {
+    padding: 0;
+  }
+
+  .plugin-tab-count {
+    margin-left: 3px;
+    color: var(--text-faint);
+    font-size: var(--text-aux);
+  }
+
   .plugin-catalog-summary {
     color: var(--text-faint);
     font-size: var(--text-aux);

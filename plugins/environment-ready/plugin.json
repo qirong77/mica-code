@@ -1,0 +1,34 @@
+{
+  "id": "environment-ready",
+  "name": "Environment Ready",
+  "icon": "server",
+  "version": "1.0.0",
+  "description": "检查当前任务明确登记的本机 HTTP/TCP 服务，以一张摘要卡显示环境状态；不扫描、不自动启停服务。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 48,
+  "mica": { "apiVersion": 1 },
+  "requires": ["desktop", "session", "sessionState", "tools", "background", "settings"],
+  "settings": [
+    {
+      "key": "intervalSeconds",
+      "label": "检查间隔",
+      "type": "number",
+      "default": "30",
+      "min": 10,
+      "max": 300,
+      "step": 1,
+      "unit": "秒",
+      "hint": "只检查当前会话已经登记的服务。超过 60 秒的结果会显示为未知。"
+    },
+    {
+      "key": "telemetry",
+      "label": "本地使用统计",
+      "type": "switch",
+      "default": "true",
+      "hint": "仅记录交互、结果数量与耗时，不记录地址、路径或错误正文；不会上传。"
+    }
+  ],
+  "desktop": { "panel": { "label": "Environment Ready", "dynamicShortcuts": true, "open": "reopen" } }
+}

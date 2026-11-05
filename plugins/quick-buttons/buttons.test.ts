@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   QUICK_BUTTON_LIMIT,
+  QUICK_BUTTON_STALE_MS,
   formatQuickButtons,
+  isStaleQuickButton,
   newButtonId,
   normalizeQuickButton,
   normalizeQuickButtonsState,
@@ -15,6 +17,34 @@ const open = (label = '打开需求单'): Record<string, unknown> => ({
   label,
   kind: 'open',
   url: 'https://example.com/demand/1',
+});
+
+describe('stale buttons', () => {
+  const button: QuickButton = { id: 'a', label: 'A', kind: 'compose', text: 'a' };
+  const now = 2 * QUICK_BUTTON_STALE_MS;
+
+  it('requires model provenance and a valid update time beyond seven days', () => {
+    expect(isStaleQuickButton({ ...button, source: 'model', updatedAt: now - QUICK_BUTTON_STALE_MS - 1 }, now)).toBe(
+      true,
+    );
+    expect(isStaleQuickButton({ ...button, source: 'model', updatedAt: now - QUICK_BUTTON_STALE_MS }, now)).toBe(false);
+    expect(isStaleQuickButton({ ...button, source: 'model' }, now)).toBe(false);
+    expect(isStaleQuickButton({ ...button, updatedAt: 0 }, now)).toBe(false);
+    expect(isStaleQuickButton({ ...button, source: 'model', updatedAt: NaN }, now)).toBe(false);
+    expect(isStaleQuickButton({ ...button, source: 'model', updatedAt: now + 1 }, now)).toBe(false);
+  });
+
+  it('retains valid metadata and drops invalid timestamps', () => {
+    expect(normalizeQuickButton({ ...button, source: 'model', createdAt: 1, updatedAt: 2 })).toMatchObject({
+      source: 'model',
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    expect(normalizeQuickButton({ ...button, source: 'model', createdAt: -1, updatedAt: 'bad' })).toEqual({
+      ...button,
+      source: 'model',
+    });
+  });
 });
 
 describe('normalizeQuickButton', () => {

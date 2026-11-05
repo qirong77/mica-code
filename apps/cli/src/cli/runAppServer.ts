@@ -1255,7 +1255,7 @@ async function handleCodexRequest(
       const model = paramString(params, 'model');
       const effort = paramString(params, 'effort');
       let turnOverride: AgentRuntimeConfigOverride | undefined;
-      if (model || effort) {
+      {
         try {
           // params.model carries the app's full id (`krill/gpt-5.6-luna`), not
           // a bare model name. Resolve provider + model like the CLI does,
@@ -2275,15 +2275,33 @@ function validateTurnOverride(agent: AgentRuntime, override: AgentRuntimeConfigO
  * 元数据必须先 await 再算档位：档位集合来自 models.dev（可能只存在于磁盘缓存，随包
  * 种子没有），缓存是异步读的，先算等于把这类模型判成「没有档位」。
  */
+const removedProviderIds = new Set<string>();
+
 async function resolveClientOverride(
   ctx: HostContext,
   model: string | undefined,
   effort: string | undefined,
 ): Promise<ResolvedRuntimeOverride> {
+  const previousProviders = micaConfig.get().providers;
+  const refreshed = micaConfig.refreshProviders();
+  for (const provider of previousProviders) {
+    if (!refreshed.providers.some((item) => item.id === provider.id)) removedProviderIds.add(provider.id);
+  }
+  for (const provider of refreshed.providers) removedProviderIds.delete(provider.id);
+  const matchedPrefix = model && refreshed.providers.some((provider) => model.startsWith(`${provider.id}/`));
+  const removedPrefix = !matchedPrefix && model && [...removedProviderIds].find((id) => model.startsWith(`${id}/`));
+  if (removedPrefix) throw new Error(`Provider not found: ${removedPrefix}`);
   const fallbackProviderId = ctx.agent.config.provider.id;
-  const probe = resolveRuntimeConfigOverride(micaConfig.get(), model, undefined, { fallbackProviderId });
+  const probe = resolveRuntimeConfigOverride(refreshed, model, undefined, { fallbackProviderId });
+  const targetProvider = refreshed.providers.find((provider) => provider.id === (probe.providerId ?? fallbackProviderId));
+  if (!targetProvider) throw new Error(`Provider not found: ${probe.providerId ?? fallbackProviderId}`);
+  if (targetProvider.protocol !== ctx.agent.config.provider.protocol && ctx.agent.captureClientSnapshot()) {
+    throw new Error(
+      `Cannot resume a ${ctx.agent.config.provider.protocol} session with ${targetProvider.protocol}; start a fresh session instead.`,
+    );
+  }
   const targetModel = probe.model ?? ctx.agent.config.model;
-  await ensureChatHostModelRule(targetModel, providerHintForModel(targetModel));
+  await ensureChatHostModelRule(targetModel, targetProvider);
   // 只给了 effort 时用「会话当前模型」解析，而不是全局默认模型：两者可以不同（切换过
   // 模型、或恢复的会话用的是别的 provider），拿默认模型的档位去收敛会算出另一个值。
   return resolveRuntimeConfigOverride(micaConfig.get(), model ?? targetModel, effort, {

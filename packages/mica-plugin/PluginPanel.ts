@@ -26,6 +26,33 @@ export type PluginPanelTone = 'muted' | 'ok' | 'warn' | 'error' | 'accent';
 export type PluginPanelButtonTone = 'primary' | 'default' | 'ghost' | 'danger';
 
 /**
+ * 输入框上方的紧凑摘要；每个插件最多三张，正文是纯文本。
+ * id ≤64、title ≤80、summary ≤240、detail ≤600 字；每张最多三个动作。
+ * id / revision / 动作 key 超长时丢弃相应条目，不截断身份或版本。
+ */
+export type PluginPanelCard = {
+  id: string;
+  title: string;
+  summary?: string;
+  detail?: string;
+  tone?: PluginPanelTone;
+  /** 内容版本（必填，最多 200 字）；内容变化时更新，用于曝光去重与动作校验。 */
+  revision: string;
+  actions?: PluginPanelCardAction[];
+  /** 实际可见后执行一次，key 为 revision，values 带 cardId / revision。视图读取不触发。 */
+  impressionAction?: string;
+};
+
+export type PluginPanelCardAction = {
+  /** 处理器收到 { action: id, key?, values: { cardId, revision } }，随后宿主刷新视图。 */
+  id: string;
+  label: string;
+  /** 原样回传（最多 200 字）；插件应编码目标与版本并在执行前校验。 */
+  key?: string;
+  tone?: PluginPanelButtonTone;
+};
+
+/**
  * 按钮上能用的图标（单一事实来源，页面与清单校验共用）。
  *
  * 插件写不了样式，也不该自己引一套图标库：清单里只写名字，画哪一个由宿主决定。这一组
@@ -307,6 +334,8 @@ export type PluginPanelView = {
    * 快捷按钮那一行，所以插件停用或功能关闭时应当不返回它，而不是返回一条空字符串。
    */
   statusBar?: PluginPanelStatusBar;
+  /** 常驻在快捷按钮上方的摘要卡片，无需额外清单开关。 */
+  cards?: PluginPanelCard[];
   sections?: PluginPanelSection[];
   /**
    * 给快捷按钮用的悬浮菜单内容，按 key 取（`desktop.panel.shortcuts[].menu` 指向这里）。
@@ -712,6 +741,8 @@ const MAX_SHORTCUT_DISABLED_REASON = 200;
 /** 视图给出的快捷按钮：一排按钮的上限（再多就把输入框上方的空间吃完了）。 */
 const MAX_VIEW_SHORTCUTS = 8;
 const MAX_VIEW_SHORTCUT_LABEL = 24;
+const MAX_CARDS = 3;
+const MAX_CARD_ACTIONS = 3;
 /** 弹窗里的一格：链接地址可以很长（带查询串的分享链接），但仍然有上限。 */
 const MAX_CELL_LINK = 2000;
 /** 提示词整段回传的上限：它是一段给模型看的正文，不是一行状态。 */
@@ -1061,6 +1092,7 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
   const menus = menusOf(raw.menus);
   const shortcutStates = shortcutStatesOf(raw.shortcutStates);
   const shortcuts = viewShortcutsOf(raw.shortcuts);
+  const cards = cardsOf(raw.cards);
   const statusBarRaw = record(raw.statusBar);
   const statusBarLabel = text(statusBarRaw.label, 40);
   const statusBarDetail = text(statusBarRaw.detail, 120);
@@ -1086,7 +1118,56 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
     ...(menus ? { menus } : {}),
     ...(shortcutStates ? { shortcutStates } : {}),
     ...(shortcuts ? { shortcuts } : {}),
+    ...(cards ? { cards } : {}),
   };
+}
+
+/** 标识与版本不能截断后继续执行，否则两个不同目标会悄悄变成同一个。 */
+function cardToken(value: unknown, max = MAX_ACTION_ID): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  return trimmed.length <= max ? trimmed : '';
+}
+
+function cardsOf(value: unknown): PluginPanelCard[] | undefined {
+  const cards: PluginPanelCard[] = [];
+  const ids = new Set<string>();
+  for (const entry of list(value).slice(0, MAX_CARDS)) {
+    const raw = record(entry);
+    const id = cardToken(raw.id);
+    const revision = cardToken(raw.revision, 200);
+    const title = text(raw.title, 80);
+    if (!id || ids.has(id)) continue;
+    ids.add(id);
+    if (!revision || !title) continue;
+    const actions: PluginPanelCardAction[] = [];
+    const actionIds = new Set<string>();
+    for (const input of list(raw.actions).slice(0, MAX_CARD_ACTIONS)) {
+      const action = record(input);
+      const actionId = cardToken(action.id);
+      const label = text(action.label, 32);
+      if (!actionId || actionIds.has(actionId)) continue;
+      actionIds.add(actionId);
+      const key = cardToken(action.key, 200);
+      // 有意提供的无效 key 不能退化成一次无目标动作。
+      if (!label || (action.key !== undefined && !key)) continue;
+      const actionTone = buttonTone(action.tone);
+      actions.push({ id: actionId, label, ...(key ? { key } : {}), ...(actionTone ? { tone: actionTone } : {}) });
+    }
+    const summary = text(raw.summary, 240);
+    const detail = text(raw.detail, 600);
+    const cardTone = tone(raw.tone);
+    const impressionAction = cardToken(raw.impressionAction);
+    cards.push({
+      id, title, revision,
+      ...(summary ? { summary } : {}),
+      ...(detail ? { detail } : {}),
+      ...(cardTone ? { tone: cardTone } : {}),
+      ...(actions.length ? { actions } : {}),
+      ...(impressionAction ? { impressionAction } : {}),
+    });
+  }
+  return cards.length ? cards : undefined;
 }
 
 /**

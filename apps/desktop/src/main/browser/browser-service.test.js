@@ -80,8 +80,14 @@ function createFakeManager() {
       }
       return null
     },
-    listTabs: () => [...browsers.values()].flatMap((item) => item.tabs),
-    createTab: ({ browserId }) => {
+    listTabs: (owner) => [...browsers.values()]
+      .filter((item) => !owner || item.owner === owner)
+      .flatMap((item) => item.tabs.map((tab) => ({ ...tab, owner: item.owner }))),
+    createTab: ({ browserId, owner, url }) => {
+      if (!browserId) {
+        const browser = record({ owner, url })
+        return { browser, tab: browser.tabs[0] }
+      }
       const browser = browsers.get(browserId)
       if (!browser) throw notFoundError(`没有这个窗口：${browserId}`)
       const tab = { id: 'tab-new', browserId, url: '', title: '', loading: false, active: false }
@@ -274,6 +280,46 @@ describe('ownership', () => {
     expect(ids).toContain(owned.id)
   })
 
+  it('filters lists by owner even when the query requests another owner', async () => {
+    const own = manager.record({ owner: 'list-own' })
+    const foreign = manager.record({ owner: 'list-foreign' })
+    const headers = { 'x-mica-owner': 'list-own' }
+    const browsers = await call('/browser/browsers?owner=list-foreign', { headers })
+    expect(browsers.body.browsers.map((item) => item.id)).toEqual([own.id])
+    const tabs = await call('/browser/tabs?owner=list-foreign', { headers })
+    expect(tabs.body.tabs.map((item) => item.browserId)).toEqual([own.id])
+    expect((await call('/browser/browsers')).body.browsers.map((item) => item.id)).toContain(foreign.id)
+    expect((await call('/browser/tabs')).body.tabs.map((item) => item.browserId)).toContain(foreign.id)
+  })
+
+  it('checks tab creation ownership and permits the desktop to use an existing window', async () => {
+    const browser = manager.record({ owner: 'tab-owner' })
+    const foreign = await call('/browser/tabs', {
+      method: 'POST', body: { browserId: browser.id }, headers: { 'x-mica-owner': 'tab-other' }
+    })
+    expect(foreign.status).toBe(403)
+    expect(browser.tabs).toHaveLength(1)
+    expect((await call('/browser/tabs', {
+      method: 'POST', body: { browserId: browser.id }, headers: { 'x-mica-owner': 'tab-owner' }
+    })).status).toBe(200)
+    expect((await call('/browser/tabs', { method: 'POST', body: { browserId: browser.id } })).status).toBe(200)
+    expect(browser.tabs).toHaveLength(3)
+    expect((await call('/browser/tabs', { method: 'POST', body: {} })).status).toBe(400)
+  })
+
+  it('limits both window creation paths to one per owner without closing the original', async () => {
+    const first = await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-a' } })
+    expect(first.status).toBe(200)
+    const id = first.body.browser.id
+    const second = await call('/browser/browsers', { method: 'POST', body: { owner: 'limit-a' } })
+    expect(second.status).toBe(409)
+    expect(second.body.error).toContain('复用')
+    expect((await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-a' } })).status).toBe(409)
+    expect((await call(`/browser/browsers/${id}`)).status).toBe(200)
+    expect((await call('/browser/browsers', { method: 'POST', body: { owner: 'limit-b' } })).status).toBe(200)
+    expect((await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-b' } })).status).toBe(409)
+  })
+
   // 与终端同一套语义：带归属的调用只能碰自己名下的窗口 / 标签页，不带归属的是「人」
   // （页面要能唤出 agent 开出来的窗口）。少了这一层，两个会话的 agent 可以互相往对方
   // 已经登录的页面里打字。
@@ -356,7 +402,7 @@ describe('browser and tab operations', () => {
   it('passes cookies and console flags through', async () => {
     const created = await call('/browser/browsers', {
       method: 'POST',
-      body: { url: 'example.com', owner: 'sess-ops' }
+      body: { url: 'example.com', owner: 'sess-cookies-ops' }
     })
     const tabId = created.body.browser.tabs[0].id
 
@@ -435,7 +481,7 @@ describe('browser and tab operations', () => {
   it('returns the png bytes directly when raw=1 is asked for', async () => {
     const created = await call('/browser/browsers', {
       method: 'POST',
-      body: { owner: 'sess-ops' }
+      body: { owner: 'sess-screenshot-ops' }
     })
     const tabId = created.body.browser.tabs[0].id
 

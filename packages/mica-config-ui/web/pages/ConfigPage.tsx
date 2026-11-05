@@ -165,6 +165,9 @@ export function ConfigPage() {
   const providers = draft ? providerEntries(draft) : [];
   const defaultModel = readDefaultModelDraft(draft ?? {});
   const providerOptions = providers.map(readProviderDraft).filter((provider) => provider.id);
+  const modelOptions = (providerOptions.find((provider) => provider.id === defaultModel.provider)?.models ?? []).map(
+    (model) => ({ value: model, label: model }),
+  );
   const providerSelectOptions = [
     { value: '', label: '跟随配置列表第一项' },
     ...providerOptions.map((provider) => ({ value: provider.id, label: provider.id })),
@@ -275,19 +278,22 @@ export function ConfigPage() {
               <SettingRow
                 label="模型"
                 htmlFor="default-model-name"
-                hint="填写该服务商下的模型名称。"
+                hint="选择该服务商下的模型。"
                 error={errors.get('defaultModel.model')}
               >
-                <input
+                <SelectMenu
                   id="default-model-name"
-                  className={`text-input${errors.has('defaultModel.model') ? ' text-input-invalid' : ''}`}
                   value={defaultModel.model}
-                  disabled={!defaultModel.provider}
-                  spellCheck={false}
-                  placeholder="输入模型名称"
-                  aria-invalid={errors.has('defaultModel.model')}
-                  onChange={(event) =>
-                    applyDraft(writeDefaultModelDraft(draft, { ...defaultModel, model: event.target.value }))
+                  options={modelOptions}
+                  disabled={!defaultModel.provider || modelOptions.length === 0}
+                  placeholder={defaultModel.provider ? '暂无可选模型' : '请先选择服务商'}
+                  fallbackLabel={defaultModel.model ? `${defaultModel.model}（已不存在）` : undefined}
+                  invalid={errors.has('defaultModel.model')}
+                  ariaLabel="默认模型"
+                  filterable
+                  filterPlaceholder="搜索模型"
+                  onChange={(model) =>
+                    applyDraft(writeDefaultModelDraft(draft, { ...defaultModel, model }))
                   }
                 />
               </SettingRow>

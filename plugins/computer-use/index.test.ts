@@ -70,6 +70,7 @@ describe('materializeRuntime', () => {
 function harness(pluginId = 'computer-use') {
   const skills: PluginSkillDefinition[] = [];
   const health: { level: string; message: string }[] = [];
+  const tools: Array<{ name: string }> = [];
   const ctx = {
     pluginId,
     paths: { home: tempHome(), config: '', plugins: '' },
@@ -79,22 +80,30 @@ function harness(pluginId = 'computer-use') {
         return { dispose() {}, skipped: [] };
       },
     },
+    tools: {
+      register: (tool: { name: string }) => {
+        tools.push(tool);
+        return { dispose() {} };
+      },
+    },
     health: { report: (report: { level: string; message: string }) => health.push(report) },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     onDispose: vi.fn(),
   } as unknown as PluginContext;
   ctx.paths = { home: '/tmp', config: tempHome(), plugins: '/tmp/plugins' };
-  return { ctx, skills, health };
+  return { ctx, skills, tools, health };
 }
 
 describe('setup', () => {
   it.skipIf(process.platform !== 'darwin')('materializes the runtime and registers the skill with a real path', () => {
-    const { ctx, skills, health } = harness();
+    const { ctx, skills, tools, health } = harness();
     setup(ctx);
 
     const runtimeDir = resolveRuntimeDir(ctx.paths?.config);
     expect(runtimeDir.endsWith(RUNTIME_DIR_NAME)).toBe(true);
     expect(skills).toHaveLength(1);
+    // 工具是模型动桌面的唯一入口，缺了它写操作就只剩 prompt 约束
+    expect(tools.map((tool) => tool.name)).toEqual(['computer_use']);
     const skill = skills[0]!;
     expect(skill.name).toBe(SKILL_NAME);
     expect(skill.baseDir).toBe(runtimeDir);

@@ -414,6 +414,9 @@ export function createControlMcpHandler({
               `可用操作：${ids.join('、')}。不带 action 调用可看完整文档。`
           )
         }
+        if (kind === 'mica-browser' && !options.owner) {
+          throw new Error('缺少会话归属，无法调用浏览器操作')
+        }
         const request = buildActionRequest(endpoint, params, options)
         return callControlService(socketPath, request, { label })
       }

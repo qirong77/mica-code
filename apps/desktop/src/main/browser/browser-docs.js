@@ -70,7 +70,7 @@ const RAW_ENDPOINTS = [
     id: 'listBrowsers',
     method: 'GET',
     path: '/browser/browsers',
-    summary: '列出所有受控浏览器窗口（含标签页摘要）',
+    summary: '列出本会话的受控浏览器窗口（含标签页摘要）',
     params: [],
     returns: '{ ok, browsers: [Browser] }',
     example: 'curl -s "$MICA_BROWSER_URL/browser/browsers"'
@@ -79,7 +79,7 @@ const RAW_ENDPOINTS = [
     id: 'createBrowser',
     method: 'POST',
     path: '/browser/browsers',
-    summary: '新开一个受控浏览器窗口（默认隐藏着建，全程不打扰用户）',
+    summary: '新开一个受控浏览器窗口（默认隐藏；每个会话最多一个）',
     params: [
       { name: 'url', in: 'body', required: false, description: '初始地址，省略则开 about:blank' },
       { name: 'owner', in: 'body', required: false, description: '归属会话 id（与请求头二选一，必须有一个）' },
@@ -145,15 +145,15 @@ const RAW_ENDPOINTS = [
     id: 'listTabs',
     method: 'GET',
     path: '/browser/tabs',
-    summary: '列出所有标签页（可只取某个归属的）',
-    params: [{ name: 'owner', in: 'query', required: false, description: '只看这个会话的窗口' }],
+    summary: '列出本会话的标签页',
+    params: [{ name: 'owner', in: 'query', required: false, description: '页面管理调用可按会话筛选；会话调用只返回自己的标签页' }],
     returns: '{ ok, tabs: [Tab] }'
   },
   {
     id: 'createTab',
     method: 'POST',
     path: '/browser/tabs',
-    summary: '在已有窗口里新开标签页（不给 browserId 就新开一个窗口）',
+    summary: '在已有窗口里新开标签页（不给 browserId 就新开一个窗口，受单窗口限制）',
     params: [
       { name: 'browserId', in: 'body', required: false, description: '目标窗口' },
       { name: 'url', in: 'body', required: false, description: '初始地址' }
@@ -517,7 +517,7 @@ function paramLabel(param) {
  */
 export const BROWSER_GUIDE = [
   '第一次用某个动作前，先不带 action 调用 control：返回的 actions[] 里每个动作都带 params（name / 类型 / 是否必填 / 示例值），一次就能看全，比猜参数名快。',
-  '先 listBrowsers 看有没有窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。',
+  '先 listBrowsers 看本会话有没有窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。每个会话最多一个窗口，需要多个页面时在已有窗口用 createTab。',
   '窗口全程保持隐藏：截图、点击、输入、按键、滚动、读页面/cookie/console/network 都在隐藏状态下完成，**不需要先 showBrowser**。显示窗口会让用户眼前弹一个窗，只在用户明确要求「演示给我看」时才调它。',
   '用户会自己点顶栏那枚浏览器图标唤出窗口查看（也能再点一次收起），这件事不要替用户做；你只需要保证页面状态是对的。',
   'action 名必须与 actions[].action 完全一致（区分大小写），不要自己起同义词：按键是 keys（不是 press / key / keyboard），点击是 click，读页面是 content 或 evaluate。按标签页/窗口的动作都要带 id：标签页 id 形如 "tab-1"、窗口 id 形如 "brw-1"，取自 listTabs / listBrowsers / createTab 的返回。',
@@ -601,6 +601,7 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     `服务地址：\`${serviceUrl}\``,
     '',
     '新建窗口**必须**带 `x-mica-owner: $MICA_BROWSER_OWNER`：顶栏只显示本会话自己的窗口，没有归属的窗口会被直接关闭（缺这个头时新建返回 400）。',
+    '每个会话最多创建一个窗口；重复创建返回 409，请复用已有窗口或在其中新建标签页。窗口和标签页按会话隔离，但网站 Cookie 分区仍然共享。',
     '',
     '## 通过 MCP 的 control 工具调用',
     '',

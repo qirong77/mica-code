@@ -9,6 +9,10 @@
 
 `browser-cookie-sync` 通过随包 Chrome 扩展与本机口令服务自动双向同步 cookie，不读取 Chrome 数据库；安装说明与安全边界见 [Browser Cookie Sync](browser-cookie-sync/README.md)。
 
+会话体验卡：[Task Delivery](task-delivery/README.md) 保存任务交付结果与验证证据，[Context Handoff](context-handoff/README.md) 保存历史检查点，[Environment Ready](environment-ready/README.md) 探测本次任务登记的本机服务。三者共用宿主摘要卡片，不各自绘制界面；本地埋点格式及分析导出见 [会话体验卡与埋点](../docs/plugin-experience.md)。
+
+面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
+
 ## 目录结构
 
 ```

@@ -1,4 +1,4 @@
-import { BrowserWindow, WebContentsView, session } from 'electron'
+import { BrowserWindow, WebContentsView, clipboard, session } from 'electron'
 import {
   BROWSER_PARTITION,
   BrowserRequestError,
@@ -341,6 +341,11 @@ export function createBrowserManager({
       } catch {
         // 标签页可能在点击与处理之间被关掉
       }
+      return
+    }
+    if (message.action === 'copy') {
+      // 顶栏没有 preload，复制统一交给主进程：页面自己复制要过渲染进程的权限判定
+      if (typeof message.text === 'string' && message.text) clipboard.writeText(message.text)
     }
   }
 

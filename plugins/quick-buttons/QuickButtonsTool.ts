@@ -7,6 +7,7 @@ import {
   QUICK_BUTTON_SHAPES,
   QUICK_BUTTON_TARGETS,
   formatQuickButtons,
+  isStaleQuickButton,
   removeQuickButton,
   replaceQuickButtons,
   upsertQuickButton,
@@ -25,7 +26,7 @@ import {
  * 这几件事」，逐条建会让用户看到按钮一个一个往下掉。
  */
 
-const OPERATIONS = ['list', 'set', 'add', 'remove', 'clear'] as const;
+const OPERATIONS = ['list', 'set', 'add', 'remove', 'clear', 'clear_stale'] as const;
 
 type Operation = (typeof OPERATIONS)[number];
 
@@ -35,10 +36,11 @@ const DESCRIPTION = [
   "Put buttons above the user's message box for the current session (desktop app); in the CLI the same buttons are returned as plain links.",
   'A button is one click the user would otherwise do by hand — open a page, drop a draft into the composer, hand a whole job to a new session, or open a file. They are for the user, never a way for you to run something yourself, so do not encode destructive or hidden work into one.',
   `Kinds: ${QUICK_BUTTON_KINDS.map((kind) => `${kind} (${QUICK_BUTTON_KIND_LABELS[kind]})`).join(' / ')}. \`open\` defaults to the controlled browser the agent can keep driving; pass target:"external" for the system browser.`,
-  'Use `dialog` when one click should first show something: a short result, a list of candidates with links, or one explanation with two or three ways to continue (its own buttons). The host renders it with the app\'s own dialog components — you only describe the content, never markup or styles.',
+  "Use `dialog` when one click should first show something: a short result, a list of candidates with links, or one explanation with two or three ways to continue (its own buttons). The host renders it with the app's own dialog components — you only describe the content, never markup or styles.",
   'Looks: `style` takes an icon name from the app icon set (`globe`, `external`, `search`, `sparkles`, `zap`, `file-text`, `git-branch`, `notebook-pen`, `list-checks`, `terminal`, `video`, `calendar`, `tags`, `settings-2` …), a color (`accent` / `danger` / `success` / `warn`), a shape (`pill` / `soft` / `plain`) and `iconOnly`. Colors come from the app theme, so they follow light and dark mode; never try to express a color yourself. Use at most one or two styled buttons per row — the rest stay plain.',
   `At most ${QUICK_BUTTON_LIMIT} buttons; pass the whole row with operation:"set" when the task changes what the user needs next, operation:"add" to append, "remove" (by id) or "clear" to take them away.`,
   'Buttons belong to this session only — they disappear when the user switches conversations, so do not use them as a place to store anything.',
+  'List marks model-created buttons older than seven days as possibly stale. clear_stale explicitly removes only those buttons; manual buttons and older buttons without known timestamps are kept.',
   'After writing, do not dump the whole list back at the user; mention what you added in one short sentence.',
 ].join(' ');
 
@@ -75,7 +77,11 @@ const BUTTON_SCHEMA = {
       description: 'Optional look: how the host draws this button.',
       properties: {
         icon: { type: 'string', description: 'Icon name from the app icon set, e.g. globe / external / search / zap.' },
-        color: { type: 'string', enum: [...QUICK_BUTTON_COLORS], description: 'Accent color; omit for a plain button.' },
+        color: {
+          type: 'string',
+          enum: [...QUICK_BUTTON_COLORS],
+          description: 'Accent color; omit for a plain button.',
+        },
         shape: {
           type: 'string',
           enum: [...QUICK_BUTTON_SHAPES],
@@ -92,7 +98,10 @@ const BUTTON_SCHEMA = {
         title: { type: 'string', description: 'Dialog title (required).' },
         subtitle: { type: 'string', description: 'One line under the title.' },
         text: { type: 'string', description: 'A plain paragraph (line breaks are kept).' },
-        markdown: { type: 'string', description: 'Markdown body instead of plain text; use it for a list or a small table.' },
+        markdown: {
+          type: 'string',
+          description: 'Markdown body instead of plain text; use it for a list or a small table.',
+        },
         items: {
           type: 'array',
           description: 'A two-column list (name / content). Give `url` when the row should be clickable.',
@@ -151,7 +160,7 @@ export class QuickButtonsTool extends MicaTool {
           type: 'string',
           enum: [...OPERATIONS],
           description:
-            'list = read the current row, set = replace the whole row, add = append (same id replaces), remove = drop one by id, clear = remove all.',
+            'list = read the current row, set = replace the whole row, add = append (same id replaces), remove = drop one by id, clear = remove all, clear_stale = remove only model buttons last updated over seven days ago.',
         },
         buttons: {
           type: 'array',
@@ -171,6 +180,13 @@ export class QuickButtonsTool extends MicaTool {
 
     const current = this.store.read();
     switch (operation) {
+      case 'clear_stale': {
+        const now = Date.now();
+        const next = current.filter((button) => !isStaleQuickButton(button, now));
+        const count = current.length - next.length;
+        if (count > 0) this.store.write(next);
+        return `已清理 ${count} 个可能过时的模型快捷按钮。\n\n${formatQuickButtons(next, this.options)}`;
+      }
       case 'clear': {
         if (current.length === 0) return formatQuickButtons(current, this.options);
         this.store.write([]);
@@ -186,17 +202,20 @@ export class QuickButtonsTool extends MicaTool {
       }
       case 'set': {
         const buttons = readButtons(input);
-        const next = replaceQuickButtons(buttons);
+        const now = Date.now();
+        const next = replaceQuickButtons(buttons).map((button) => stampModelButton(button, current, now));
         this.store.write(next);
         return `${changedLine('已换成', next)}\n\n${formatQuickButtons(next, this.options)}`;
       }
       case 'add': {
         const buttons = readButtons(input);
+        const now = Date.now();
         let next = current;
         const created: string[] = [];
         for (const button of buttons) {
           const result = upsertQuickButton(next, button);
-          next = result.buttons;
+          const stamped = stampModelButton(result.button, next, now);
+          next = result.buttons.map((entry) => (entry.id === stamped.id ? stamped : entry));
           created.push(result.created ? result.button.label : `${result.button.label}（更新）`);
         }
         this.store.write(next);
@@ -214,11 +233,17 @@ export class QuickButtonsTool extends MicaTool {
         return 'Placing quick buttons';
       case 'remove':
       case 'clear':
+      case 'clear_stale':
         return 'Removing quick buttons';
       default:
         return 'Updating quick buttons';
     }
   }
+}
+
+function stampModelButton(button: QuickButton, current: QuickButton[], now: number): QuickButton {
+  const previous = current.find((entry) => entry.id === button.id && entry.source === 'model');
+  return { ...button, source: 'model', createdAt: previous?.createdAt ?? now, updatedAt: now };
 }
 
 function changedLine(prefix: string, buttons: QuickButton[], labels?: string[]): string {

@@ -35,7 +35,7 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
   )
   const days = useMemo(() => calendarDays(clean), [clean])
   const sampledDays = new Set(clean.flatMap((item) => item.points.map((point) => point.day)))
-  const canPlot = sampledDays.size > 1
+  const canPlot = sampledDays.size > 0
 
   useEffect(() => {
     const element = elementRef.current
@@ -102,7 +102,7 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
           aria: {
             enabled: true,
             label: {
-              description: `多模型每日速度对比。${unit}。使用左右方向键查看日期，下方图例可显示或隐藏模型。`
+              description: `多模型每日速度对比。${unit}。使用左右方向键查看日期，上方图例可显示或隐藏模型。`
             }
           },
           grid: { left: 44, right: 16, top: 12, bottom: 28 },
@@ -186,16 +186,9 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
     })
   }
   if (!sampledDays.size)
-    return <p className="py-10 text-center text-xs text-fg-dim">选择下方模型以显示趋势。</p>
-  if (!canPlot)
-    return (
-      <p className="mt-4 rounded bg-panel-hi px-3 py-4 text-xs text-fg-muted">
-        {days[0]} · 仅有一天数据，下方显示各模型数值。选择更长区间查看对比趋势。
-      </p>
-    )
+    return <p className="py-10 text-center text-xs text-fg-dim">选择上方图例里的模型以显示趋势。</p>
   return (
-    <div className="mt-4">
-      <p className="mb-2 text-[10px] text-fg-dim">{unit}</p>
+    <div className="mt-1 min-w-0">
       <div
         ref={elementRef}
         data-chart="model-speed"

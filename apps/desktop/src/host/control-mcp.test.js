@@ -289,4 +289,20 @@ describe('createControlMcpHandler over streamable http', () => {
       service.close()
     }
   })
+
+  it('rejects browser actions without a session owner', async () => {
+    const runtime = await startRuntime()
+    const client = await connect(runtime.url)
+    try {
+      const result = await client.callTool({
+        name: CONTROL_TOOL_NAME,
+        arguments: { action: 'listBrowsers' }
+      })
+      expect(result.isError).toBe(true)
+      expect(result.content[0].text).toContain('缺少会话归属')
+    } finally {
+      await client.close()
+      runtime.close()
+    }
+  })
 })

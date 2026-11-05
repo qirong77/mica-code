@@ -10,6 +10,9 @@ import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
 import quickButtonsSetup from '../../plugins/quick-buttons/index.js';
+import taskDeliverySetup from '../../plugins/task-delivery/index.js';
+import contextHandoffSetup from '../../plugins/context-handoff/index.js';
+import environmentReadySetup from '../../plugins/environment-ready/index.js';
 import scheduleSetup from '../../plugins/schedule/index.js';
 import sessionCompactSetup from '../../plugins/session-compact/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
@@ -54,6 +57,9 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   evolution: evolutionSetup,
   'mobile-relay': mobileRelaySetup,
   'quick-buttons': quickButtonsSetup,
+  'task-delivery': taskDeliverySetup,
+  'context-handoff': contextHandoffSetup,
+  'environment-ready': environmentReadySetup,
   schedule: scheduleSetup,
   video: videoSetup,
 };

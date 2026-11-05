@@ -1,0 +1,30 @@
+{
+  "id": "task-delivery",
+  "name": "Task Delivery",
+  "version": "1.0.0",
+  "description": "整理任务交付摘要、模型报告的状态与本轮实际观察到的工具结果引用。",
+  "icon": "list-checks",
+  "main": "index.ts",
+  "mica": {
+    "apiVersion": 1
+  },
+  "requires": ["desktop", "session", "sessionState", "tools", "prompt", "hooks", "settings"],
+  "settings": [
+    {
+      "key": "telemetry",
+      "label": "本地使用统计",
+      "type": "switch",
+      "default": "true",
+      "hint": "仅记录交互事件与计数，不记录正文、路径、URL 或错误文本；不会上传。"
+    }
+  ],
+  "desktop": {
+    "panel": {
+      "label": "Task Delivery",
+      "display": "modal",
+      "dynamicShortcuts": true
+    }
+  },
+  "author": "Mica Code",
+  "assets": ["README.md"]
+}

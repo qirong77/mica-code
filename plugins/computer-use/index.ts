@@ -5,13 +5,15 @@ import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { COMPUTER_USE_RUNTIME_FILES } from './runtimeSources.js';
+import { createComputerUseTool } from './Tool.js';
 
 /**
  * Computer Use：把 macOS 桌面自动化做成一个随产品分发的内置能力。
  *
- * 三块组成，各自的落点不同：
+ * 四块组成，各自的落点不同：
  * - **skill**（`skill/SKILL.md`）：模型的操作手册，注册进运行期 skill 表，与用户自己的
  *   skill 完全同权（进 system prompt 索引、`skill` 工具能加载、能力开关能关掉）；
+ * - **tool**（`Tool.ts` 的 `computer_use`）：模型动键鼠的唯一入口，写操作先向用户确认；
  * - **runtime**（`runtime/`）：`scripts/desktop.mjs` + `src/helper.m`，零 npm 依赖，
  *   AX 元素树与 CGEvent 键鼠都在 helper 里，首次用到时 clang 编译一次；
  * - **运行条件**：清单里的 `desktop.checks` 声明依赖哪几项权限/工具，桌面端探测后在
@@ -120,6 +122,18 @@ const plugin: MicaPlugin = {
       baseDir: runtimeDir,
     });
 
+    // 工具是模型动桌面的**唯一**入口：写操作（改键鼠/焦点/剪贴板）由它先向用户确认，
+    // 直接 shell 调 desktop.mjs 的那些命令会被 runtime 拒绝。没有 `ctx.ask` 的宿主
+    // （TUI / `mica exec`）里只读命令照旧可用，写操作直接拒绝——不是静默降级。
+    const tool = ctx.tools?.register(createComputerUseTool({ runtimeDir, ask: ctx.ask }));
+    if (!tool) {
+      ctx.health.report({
+        level: 'warn',
+        message: '当前宿主没有工具能力面，桌面操作只能靠 skill 里的只读命令',
+        hint: '在 Mica 桌面端里开会话才有 computer_use 工具。',
+      });
+    }
+
     if (registration.skipped.length > 0) {
       // 磁盘上有同名 skill（用户自己装的 mac-desktop-node 之类）时优先用磁盘那份：
       // 不静默——用户在能力页看到的开关得对得上实际生效的那一份。
@@ -136,7 +150,8 @@ const plugin: MicaPlugin = {
     ctx.health.report({
       level: 'ok',
       message: '桌面自动化可用',
-      hint: '权限没开时到 Settings → Plugins → Computer Use 的「运行条件」里查看状态并跳到系统设置。',
+      hint:
+        '键鼠类操作执行前会先弹确认卡；权限没开时到 Settings → Plugins → Computer Use 的「运行条件」里查看状态并跳到系统设置。',
     });
   },
 };

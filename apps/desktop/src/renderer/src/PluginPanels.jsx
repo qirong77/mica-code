@@ -28,6 +28,7 @@ import {
   Tag
 } from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
+import '../assets/plugin-cards.css'
 import { FloatingMenu } from './FloatingMenu'
 // 分区正文的 Markdown 直接用对话区那一套渲染：同一个应用里不该有两份 Markdown 排版，
 // 「需求描述」「角色描述」看起来才和对话里的内容一致。ChatView 也 import 本模块，
@@ -39,9 +40,13 @@ import {
   isOpenableLink,
   menuCacheKey,
   notifyPluginPanelStatusChanged,
+  observePanelCardImpression,
   PANEL_RETRY_DELAYS,
   panelDraftKey,
   panelDrafts,
+  panelCardImpressionKey,
+  panelNeedsQuickbarView,
+  pluginPanelCards,
   pluginPanelTabs,
   pluginQuickbarItems,
   quickbarButtonLook,
@@ -98,6 +103,9 @@ const TAG_TONES = {
 
 /** 动作的 `tone` → 共享 `Button` 的变体；没声明的一律是行内次要动作。 */
 const BUTTON_VARIANTS = { primary: 'primary', danger: 'danger', default: 'default' }
+const CARD_BUTTON_VARIANTS = {
+  primary: 'accent', default: 'default', ghost: 'ghost', danger: 'danger-ghost'
+}
 
 /**
  * 协议里的图标名 → 具体图标。
@@ -165,6 +173,51 @@ function PanelActionButton({ action, variant, size, busy, busyKey, run }) {
   )
 }
 
+/** 纯数据摘要用宿主控件排版；只有挂载后的可见性观察能触发曝光。 */
+function PluginSummaryCard({ card, panel, busy, onRun, onImpression }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!onImpression || !card.impressionAction) return undefined
+    return observePanelCardImpression(ref.current, onImpression)
+  }, [card.impressionAction, onImpression])
+  return (
+    <article
+      ref={ref}
+      className={`plugin-summary-card tone-${card.tone || 'muted'}`}
+      aria-label={`${panel.label} · ${card.title}`}
+    >
+      <div className="plugin-summary-card-heading">
+        <span className="plugin-summary-card-owner" title={panel.label}>{panel.label}</span>
+        <strong className="plugin-summary-card-title" title={card.title}>{card.title}</strong>
+      </div>
+      {card.summary && <p className="plugin-summary-card-summary">{card.summary}</p>}
+      {card.detail && (
+        <details className="plugin-summary-card-detail">
+          <summary>详情<span className="sr-only">：{card.title}</span></summary>
+          <p>{card.detail}</p>
+        </details>
+      )}
+      {card.actions?.length > 0 && (
+        <div className="plugin-summary-card-actions" role="group" aria-label={`${card.title}操作`}>
+          {card.actions.map((action) => (
+            <Button
+              key={action.id}
+              size="compact"
+              variant={CARD_BUTTON_VARIANTS[action.tone] || 'ghost'}
+              title={action.label}
+              disabled={Boolean(busy)}
+              loading={busy === action.id}
+              onClick={() => onRun(action)}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      )}
+    </article>
+  )
+}
+
 /**
  * 输入框上方那排快捷按钮（悬浮在输入框之上，左对齐）。
  *
@@ -207,9 +260,23 @@ export function PluginQuickBar({
   // 面板视图里的常驻状态（`statusBar`）：关着面板也要看得见的事实（某个能力是否生效、
   // 连着哪台机器）。按插件 id 存，和 shortcutStates 一起随视图刷新。
   const [statusBars, setStatusBars] = useState({})
+  const [cardViews, setCardViews] = useState(null)
+  // 去重集合贯穿组件生命周期；切角色、轮询、卡片重新挂载都不会重复记同一版本。
+  const impressions = useRef(new Set())
   const context = JSON.stringify([nodeId, sessionId, cwd, role])
-  const contextRef = useRef(context)
-  contextRef.current = context
+  // 身份对象还区分 A → B → A：第一次 A 的请求不能回填第二次 A。
+  const scope = useMemo(() => ({ active: true, pending: '', inflight: new Map() }), [context])
+  const contextRef = useRef(scope)
+  contextRef.current = scope
+  inflight.current = scope.inflight
+  const panelsRef = useRef(panels)
+  panelsRef.current = panels
+  const isCurrent = useCallback((panel) => scope.active && contextRef.current === scope &&
+    panelsRef.current.some((entry) => entry.id === panel.id), [scope])
+  useEffect(() => {
+    scope.active = true
+    return () => { scope.active = false }
+  }, [scope])
   const hoverTimer = useRef(0)
   const barRef = useRef(null)
   useEffect(() => {
@@ -244,7 +311,8 @@ export function PluginQuickBar({
   const loadView = useCallback(
     async (panel) => {
       const requestKey = `${context}\u0000${panel.id}`
-      if (inflight.current.has(requestKey)) return inflight.current.get(requestKey)
+      if (!isCurrent(panel)) return null
+      if (scope.inflight.has(requestKey)) return scope.inflight.get(requestKey)
       const request = (async () => {
         let result = null
         // 冷启动时会话宿主还在拉起（`view` 要现 spawn 一个进程），一次失败不代表插件不可用：
@@ -256,14 +324,19 @@ export function PluginQuickBar({
           if (result && result.ok !== false) break
           if (attempt < PANEL_RETRY_DELAYS.length) {
             await new Promise((resolve) => setTimeout(resolve, PANEL_RETRY_DELAYS[attempt]))
-            if (contextRef.current !== context) return null
+            if (!isCurrent(panel)) return null
           }
         }
-        if (contextRef.current !== context) return null
+        if (!isCurrent(panel)) return null
         if (result?.ok !== false && result) {
           const view = result.view || result
           setShortcutViews((current) => ({ ...current, [requestKey]: view.shortcutStates || {} }))
           setStatusBars((current) => ({ ...current, [panel.id]: view.statusBar || null }))
+          setCardViews((current) => {
+            const cards = view.cards || []
+            if (current?.scope === scope && JSON.stringify(current.cards[panel.id] || []) === JSON.stringify(cards)) return current
+            return { scope, cards: { ...(current?.scope === scope ? current.cards : {}), [panel.id]: cards } }
+          })
           // 没有按钮时清成空数组：视图不再给那几个按钮，这一排就该收起来。内容没变就不换
           // 引用——这一份直接决定 `items` 要不要重算，30 秒一次的轮询不该让整排重渲染。
           setRuntimeShortcuts((current) => {
@@ -275,19 +348,19 @@ export function PluginQuickBar({
         }
         return { error: result?.error || '读取失败，请重试' }
       })()
-      inflight.current.set(requestKey, request)
+      scope.inflight.set(requestKey, request)
       try {
         return await request
       } finally {
-        inflight.current.delete(requestKey)
+        scope.inflight.delete(requestKey)
       }
     },
-    [context, cwd, nodeId, sessionId]
+    [context, cwd, nodeId, sessionId, scope, isCurrent]
   )
 
   const loadMenu = useCallback(
     async (panel, shortcut, key, { force = false } = {}) => {
-      if (!shortcut?.menu) return
+      if (!shortcut?.menu || !isCurrent(panel)) return
       const cacheKey = menuCacheKey(context, panel.id, shortcut.menu)
       if (!force) {
         const cached = readMenuCache(cacheKey)
@@ -297,7 +370,7 @@ export function PluginQuickBar({
         }
       }
       const result = await loadView(panel)
-      if (!result || contextRef.current !== context) return
+      if (!result || !isCurrent(panel)) return
       const entry = result.error
         ? {
             table: { columns: [], rows: [] },
@@ -313,16 +386,20 @@ export function PluginQuickBar({
       if (!result.error) writeMenuCache(cacheKey, entry)
       setMenuViews((current) => ({ ...current, [key]: entry }))
     },
-    [context, loadView]
+    [context, loadView, isCurrent]
   )
 
   useEffect(() => {
+    clearHover()
     setMenuViews({})
     setOpenMenu('')
     setShortcutViews({})
     setStatusBars({})
     setRuntimeShortcuts({})
-  }, [context])
+    setCardViews(null)
+    setPending('')
+    setFeedback('')
+  }, [context, clearHover])
 
   useEffect(() => {
     // 每个会话的 ChatView 都挂着这一排按钮（`chat-cache` 保留 5 个实例），
@@ -333,18 +410,16 @@ export function PluginQuickBar({
     // 声明了 panel.status 的插件即使没有快捷按钮，也要为首屏取一次视图：输入框上方那条
     // 常驻状态就来自这里，不能等用户点开面板才出现。按钮由视图给的面板同理——不问就没有那
     // 一排按钮，而它正是这个面板存在的全部理由。
-    const statusOnly = panels.filter(
-      (panel) =>
-        (panel.status || panel.dynamicShortcuts) &&
-        !wanted.some((entry) => entry.panel.id === panel.id)
-    )
+    // 摘要卡复用 dynamicShortcuts 的动态视图声明，静态面板不参与后台轮询。
+    const statusOnly = panels.filter((panel) =>
+      panelNeedsQuickbarView(panel) && !wanted.some((entry) => entry.panel.id === panel.id))
     if (!wanted.length && !statusOnly.length) return undefined
     const refresh = () => {
       if (document.hidden) return
       const statusPanels = new Set()
       for (const { panel, shortcut, key } of wanted) {
         if (shortcut.menu) void loadMenu(panel, shortcut, key)
-        if (shortcut.id && !statusPanels.has(panel.id)) {
+        if (!statusPanels.has(panel.id)) {
           statusPanels.add(panel.id)
           void loadView(panel)
         }
@@ -361,10 +436,7 @@ export function PluginQuickBar({
 
   useEffect(() => {
     if (!visible) return undefined
-    const dynamicPanels = panels.filter(
-      (panel) =>
-        panel.status || panel.dynamicShortcuts || panel.shortcuts.some((shortcut) => shortcut.id)
-    )
+    const dynamicPanels = panels.filter(panelNeedsQuickbarView)
     if (!dynamicPanels.length) return undefined
     const refresh = () => {
       if (!document.hidden) for (const panel of dynamicPanels) void loadView(panel)
@@ -384,7 +456,7 @@ export function PluginQuickBar({
     if (!visible) return undefined
     // 视图给按钮的面板即使此刻一个按钮都没有也要接工具事件：模型刚建的那一排就是在
     // 一次工具调用之后出现的，等 30 秒轮询等于让用户以为没做成。
-    const viewPanels = panels.filter((panel) => panel.dynamicShortcuts)
+    const viewPanels = panels.filter(panelNeedsQuickbarView)
     if (!nodeId) return undefined
     if (!items.some(({ shortcut }) => shortcut.menu || shortcut.id) && viewPanels.length === 0)
       return undefined
@@ -393,7 +465,7 @@ export function PluginQuickBar({
     const refreshAfterTool = async () => {
       // 工具完成时旧的视图请求可能仍在途；先等它结束，再读取工具写入后的数据。
       await Promise.allSettled([...inflight.current.values()])
-      if (!active || contextRef.current !== context || document.hidden) return
+      if (!active || contextRef.current !== scope || !scope.active || document.hidden) return
       const dynamic = new Set()
       for (const { panel, shortcut, key } of items) {
         if (shortcut.menu) void loadMenu(panel, shortcut, key, { force: true })
@@ -418,43 +490,53 @@ export function PluginQuickBar({
       clearTimeout(timer)
       unsubscribe()
     }
-  }, [context, items, loadMenu, loadView, nodeId, panels, visible])
+  }, [context, items, loadMenu, loadView, nodeId, panels, visible, scope])
 
   // 状态贴在哪一块面板上也要知道：点它进的是那块面板。
   const statusOwner = panels.find((panel) => statusBars[panel.id]?.label) || null
   const statusBar = statusOwner ? statusBars[statusOwner.id] : null
+  const cards = pluginPanelCards(panels, cardViews?.scope === scope ? cardViews.cards : {})
   // 只有状态栏没有按钮时也要画：那正是「功能开着、但不需要一个动作按钮」的形态。
-  if (items.length === 0 && !statusBar) return null
+  if (items.length === 0 && !statusBar && cards.length === 0 && !feedback) return null
 
   const openSection = (panel, section) => {
     const active = openPlugin === panel.id && focusSection === section
     onTogglePanel(active ? '' : panel.id, active ? '' : section)
   }
 
-  const runAction = async (panel, action, key, buttonKey) => {
-    if (pending) return
-    setPending(buttonKey || `${panel.id}:${action}`)
+  const runAction = async (panel, action, key, buttonKey, { impression = false, values } = {}) => {
+    if (!isCurrent(panel) || (!impression && scope.pending)) return
+    if (!impression) {
+      scope.pending = buttonKey || `${panel.id}:${action}`
+      setPending(scope.pending)
+    }
     try {
       const result = await window.mica.chat.pluginPanels
-        .action(nodeId, { pluginId: panel.id, action, key, sessionId, cwd })
+        .action(nodeId, { pluginId: panel.id, action, key, sessionId, cwd, ...(values ? { values } : {}) })
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
-      applyPanelResult(result, {
+      if (!isCurrent(panel)) return
+      if (!impression) applyPanelResult(result, {
         onCompose,
         onLaunchSession,
         onDialog: (dialog) => onDialog?.(withPluginDialog(dialog, panel.id)),
         onOpenPath,
         onOpenReview
       })
-      setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
-      if (panel.dynamicShortcuts || panel.shortcuts.some((shortcut) => shortcut.id))
-        void loadView(panel)
+      if (!impression) setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
+      // 等旧读请求结束再刷新，不能把动作前的在途视图当作动作后的结果。
+      await scope.inflight.get(`${context}\u0000${panel.id}`)
+      if (!isCurrent(panel)) return
+      void loadView(panel)
       for (const entry of items.filter(
         (item) => item.panel.id === panel.id && item.shortcut.menu
       )) {
         void loadMenu(panel, entry.shortcut, entry.key, { force: true })
       }
     } finally {
-      setPending('')
+      if (!impression) {
+        scope.pending = ''
+        if (contextRef.current === scope && scope.active) setPending('')
+      }
     }
   }
 
@@ -506,7 +588,31 @@ export function PluginQuickBar({
 
   return (
     <div className="chat-plugin-quickbar-stack">
-      <div className="chat-plugin-quickbar" role="toolbar" aria-label="插件快捷操作" ref={barRef}>
+      {cards.length > 0 && (
+        <div className="mica-config-ui plugin-summary-cards" role="region" aria-label="插件摘要">
+          {cards.map(({ panel, card, key }) => (
+            <PluginSummaryCard
+              key={key}
+              card={card}
+              panel={panel}
+              busy={pending ? (pending.startsWith(`${key}:`) ? pending.slice(key.length + 1) : true) : ''}
+              onRun={(action) => void runAction(panel, action.id, action.key, `${key}:${action.id}`, {
+                values: { cardId: card.id, revision: card.revision }
+              })}
+              onImpression={visible && card.impressionAction ? () => {
+                if (!isCurrent(panel) || document.hidden) return
+                const impressionKey = panelCardImpressionKey(nodeId, sessionId, panel.id, card)
+                if (impressions.current.has(impressionKey)) return
+                impressions.current.add(impressionKey)
+                void runAction(panel, card.impressionAction, card.revision, '', {
+                  impression: true, values: { cardId: card.id, revision: card.revision }
+                })
+              } : undefined}
+            />
+          ))}
+        </div>
+      )}
+      {(items.length > 0 || statusBar || feedback) && <div className="chat-plugin-quickbar" role="toolbar" aria-label="插件快捷操作" ref={barRef}>
         {/* 状态与快捷键同排：输入框上方已经有附件缩略图、引用条，再为一行状态单开一层，
             三行叠起来就把对话挤没了。它是一颗按钮——点开面板看详情。 */}
         {statusBar && (
@@ -656,7 +762,7 @@ export function PluginQuickBar({
             {feedback}
           </span>
         )}
-      </div>
+      </div>}
     </div>
   )
 }

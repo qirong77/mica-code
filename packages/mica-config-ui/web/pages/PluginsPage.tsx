@@ -79,6 +79,7 @@ export function PluginsPage({
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [category, setCategory] = useState<PluginCategory>('desktop');
   const [notice, setNotice] = useState<string | null>(null);
   const canToggle = supportsPluginToggle();
   const canSettings = supportsPluginSettings();
@@ -145,6 +146,8 @@ export function PluginsPage({
       error={error}
       notice={notice}
       filter={filter}
+      category={category}
+      onCategoryChange={setCategory}
       canToggle={canToggle}
       busyId={pendingId}
       onFilterChange={setFilter}
@@ -155,7 +158,25 @@ export function PluginsPage({
   );
 }
 
-/** 目录页：按来源分组的卡片网格，一眼看全「装了哪些、谁不健康」。 */
+type PluginCategory = 'desktop' | 'configurable' | 'tools' | 'user';
+
+export function pluginCategory(plugin: ConfigWebPlugin): PluginCategory {
+  if (plugin.source === 'user') return 'user';
+  if (plugin.desktopEntry || plugin.desktopPage || plugin.desktopPanel || plugin.desktopSessionMenu.length > 0)
+    return 'desktop';
+  if (plugin.settings.fields.length > 0 || plugin.llm || plugin.desktopChecks.length > 0 || plugin.actions.length > 0)
+    return 'configurable';
+  return 'tools';
+}
+
+const PLUGIN_CATEGORIES: { id: PluginCategory; label: string; description: string }[] = [
+  { id: 'desktop', label: '桌面功能', description: '在桌面界面提供入口、面板或会话操作的官方插件' },
+  { id: 'configurable', label: '可配置', description: '有设置、运行条件或操作的其他官方插件' },
+  { id: 'tools', label: '其他工具', description: '为模型和运行时提供能力的其他官方插件' },
+  { id: 'user', label: '用户插件', description: '安装在本地插件目录的插件' },
+];
+
+/** 目录页按能力与来源切换，避免一次展示全部插件。 */
 function PluginCatalog({
   details,
   plugins,
@@ -163,9 +184,11 @@ function PluginCatalog({
   error,
   notice,
   filter,
+  category,
   canToggle,
   busyId,
   onFilterChange,
+  onCategoryChange,
   onOpen,
   onRefresh,
   onToggle,
@@ -176,20 +199,22 @@ function PluginCatalog({
   error: string | null;
   notice: string | null;
   filter: string;
+  category: PluginCategory;
   canToggle: boolean;
   busyId: string | null;
   onFilterChange(value: string): void;
+  onCategoryChange(value: PluginCategory): void;
   onOpen(id: string): void;
   onRefresh(): void;
   onToggle(plugin: ConfigWebPlugin, enabled: boolean): void;
 }) {
   const RefreshIcon = appIcons.refresh;
   const SearchIcon = appIcons.search;
-  const official = plugins.filter((plugin) => plugin.source === 'official');
-  const user = plugins.filter((plugin) => plugin.source === 'user');
   const enabledCount = plugins.filter((plugin) => plugin.state === 'enabled').length;
-  const visibleOfficial = useMemo(() => filterPlugins(official, filter), [official, filter]);
-  const visibleUser = useMemo(() => filterPlugins(user, filter), [user, filter]);
+  const matching = filterPlugins(plugins, filter);
+  const selected = PLUGIN_CATEGORIES.find((item) => item.id === category)!;
+  const categoryPlugins = plugins.filter((plugin) => pluginCategory(plugin) === category);
+  const visible = matching.filter((plugin) => pluginCategory(plugin) === category);
 
   return (
     <PageFrame
@@ -223,24 +248,31 @@ function PluginCatalog({
               />
             </label>
           </div>
+          <div className="session-tabs plugin-catalog-tabs" aria-label="插件分类">
+            {PLUGIN_CATEGORIES.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`session-tab${category === item.id ? ' session-tab-active' : ''}`}
+                aria-pressed={category === item.id}
+                onClick={() => onCategoryChange(item.id)}
+              >
+                {item.label}{' '}
+                <span className="plugin-tab-count">
+                  {matching.filter((plugin) => pluginCategory(plugin) === item.id).length}
+                </span>
+              </button>
+            ))}
+          </div>
           <PluginSection
-            title="官方插件"
-            description="随 Mica 分发，只能启用或停用"
-            plugins={visibleOfficial}
-            total={official.length}
-            emptyText="没有匹配的官方插件"
-            canToggle={canToggle}
-            busyId={busyId}
-            onOpen={onOpen}
-            onToggle={onToggle}
-          />
-          <PluginSection
-            title="用户插件"
-            description={`装在 ${details?.root ?? '$MICA_HOME/plugins'} 下的插件目录`}
-            plugins={visibleUser}
-            total={user.length}
-            emptyText={filter ? '没有匹配的用户插件' : '还没有安装用户插件'}
-            hint={filter ? undefined : '把插件目录放进去后点右上角重新加载'}
+            title={selected.label}
+            description={
+              category === 'user' ? `装在 ${details?.root ?? '$MICA_HOME/plugins'} 下的插件目录` : selected.description
+            }
+            plugins={visible}
+            total={categoryPlugins.length}
+            emptyText={filter ? '此分类没有匹配的插件' : category === 'user' ? '还没有安装用户插件' : '此分类暂无插件'}
+            hint={!filter && category === 'user' ? '把插件目录放进去后点右上角重新加载' : undefined}
             canToggle={canToggle}
             busyId={busyId}
             onOpen={onOpen}
@@ -484,11 +516,7 @@ export function PluginDetail({
             {/* 插件自己的整页（清单 `desktop.page`）：有些插件没有侧栏入口，页面入口就
                 只剩这里——它自己的设置页里。 */}
             {plugin.desktopPage && onOpenPluginPage ? (
-              <Button
-                size="compact"
-                title={`打开「${pageTitle}」页面`}
-                onClick={() => void openPage()}
-              >
+              <Button size="compact" title={`打开「${pageTitle}」页面`} onClick={() => void openPage()}>
                 {`打开${pageTitle}`}
               </Button>
             ) : null}

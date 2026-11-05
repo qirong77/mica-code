@@ -68,8 +68,17 @@ describe('chromePalette', () => {
 describe('chromeHtml', () => {
   it('keeps the address-bar hint short and the full sentence in the tooltip', () => {
     const html = chromeHtml()
-    expect(html).toContain('title="地址由 Mica 控制，不可手动修改">请勿手动操作</span>')
-    expect(html).not.toContain('>地址由 Mica 控制，不可手动修改<')
+    expect(html).toContain('title="地址由 Mica 控制，不可编辑；可选中复制">可选中复制</span>')
+    expect(html).not.toContain('>地址由 Mica 控制，不可编辑；可选中复制<')
+  })
+
+  it('makes the address selectable and copies it through the host', () => {
+    const html = chromeHtml()
+    // 地址在窗口拖动区里：不 no-drag + 放开选择，选中就失效
+    expect(html).toContain('-webkit-user-select: text; user-select: text; -webkit-app-region: no-drag;')
+    expect(html).toContain("send('copy', { text: text })")
+    expect(html).toContain("addEventListener('contextmenu'")
+    expect(html).toContain('range.selectNodeContents(url)')
   })
 
   it('paints every themed surface through the injected variables', () => {

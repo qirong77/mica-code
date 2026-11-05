@@ -18,4 +18,16 @@ describe('official plugin manifests', () => {
   it('ships at least the todo plugin', () => {
     expect([...officialPluginIds]).toContain('todo');
   });
+  it('registers session experience plugins with desktop panels and optional local telemetry', () => {
+    for (const id of ['task-delivery', 'context-handoff', 'environment-ready']) {
+      const manifest = officialPluginManifests.find((entry) => entry.id === id)!;
+      expect(manifest).toBeDefined();
+      expect(manifest.requires).toContain('desktop');
+      expect(manifest.desktopPanel?.dynamicShortcuts).toBe(true);
+      expect(manifest.settings.find((setting) => setting.key === 'telemetry')).toMatchObject({
+        type: 'switch',
+        default: 'true',
+      });
+    }
+  });
 });

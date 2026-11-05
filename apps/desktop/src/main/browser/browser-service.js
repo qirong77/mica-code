@@ -333,6 +333,12 @@ function requireOwner(ctx) {
 
 function buildHandlers({ getManager, address, cacheDir = '' }) {
   const manager = () => getManager()
+  const requireNewBrowser = (ctx) => {
+    requireOwner(ctx)
+    if (manager().listBrowsers().some((browser) => browser.owner === ctx.owner)) {
+      throw new BrowserRequestError('当前会话已有浏览器窗口，请复用该窗口或在其中打开新标签页', 409)
+    }
+  }
 
   return {
     health: () => ({ app: BROWSER_SERVICE_APP, version: BROWSER_SERVICE_VERSION }),
@@ -353,13 +359,14 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
     }),
 
     // 列窗口顺手回收未归属的：那种窗口在顶栏没有任何入口，留着只是个删不掉的后台进程
-    listBrowsers: () => {
+    listBrowsers: (ctx) => {
       manager().pruneUnowned?.()
-      return { browsers: manager().listBrowsers() }
+      const browsers = manager().listBrowsers()
+      return { browsers: ctx.owner ? browsers.filter((browser) => browser.owner === ctx.owner) : browsers }
     },
 
     createBrowser: (ctx) => {
-      requireOwner(ctx)
+      requireNewBrowser(ctx)
       return {
         browser: manager().getBrowser(
           manager().createBrowser({
@@ -391,9 +398,17 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
       return { closed: ctx.params.id }
     },
 
-    listTabs: (ctx) => ({ tabs: manager().listTabs(ctx.query.owner) }),
+    listTabs: (ctx) => ({ tabs: manager().listTabs(ctx.owner || ctx.query.owner) }),
 
     createTab: (ctx) => {
+      if (ctx.body.browserId) {
+        const browser = manager().getBrowser(ctx.body.browserId)
+        if (ctx.owner && browser.owner !== ctx.owner) {
+          throw new BrowserRequestError('这个浏览器属于另一个会话，不能直接操作', 403)
+        }
+      } else {
+        requireNewBrowser(ctx)
+      }
       const { browser, tab } = manager().createTab({
         browserId: ctx.body.browserId,
         url: ctx.body.url,

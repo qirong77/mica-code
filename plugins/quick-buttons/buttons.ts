@@ -17,6 +17,7 @@ export const QUICK_BUTTONS_STATE_VERSION = 1;
  * 做还慢。超出的部分由插件拒绝，让模型自己挑最常用的那几个。
  */
 export const QUICK_BUTTON_LIMIT = 6;
+export const QUICK_BUTTON_STALE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const QUICK_BUTTON_LABEL_MAX = 12;
 export const QUICK_BUTTON_HINT_MAX = 60;
@@ -74,7 +75,14 @@ export type QuickButton = {
   style?: QuickButtonStyle;
   /** 悬停时的一句话解释。 */
   hint?: string;
+  source?: 'model';
+  createdAt?: number;
+  updatedAt?: number;
 };
+
+export function isStaleQuickButton(button: QuickButton, now = Date.now()): boolean {
+  return button.source === 'model' && isTimestamp(button.updatedAt) && now - button.updatedAt > QUICK_BUTTON_STALE_MS;
+}
 
 /**
  * 外观规格：**不写样式，只说意图**。
@@ -198,7 +206,16 @@ export function normalizeQuickButton(input: unknown): QuickButton | null {
   if (!isValidQuickButtonId(id) || !label || !isQuickButtonKind(kind)) return null;
   const hint = trimTo(raw.hint, QUICK_BUTTON_HINT_MAX);
   const style = normalizeQuickButtonStyle(raw.style);
-  const base = { id, label, kind, ...(style ? { style } : {}), ...(hint ? { hint } : {}) };
+  const base = {
+    id,
+    label,
+    kind,
+    ...(style ? { style } : {}),
+    ...(hint ? { hint } : {}),
+    ...(raw.source === 'model' ? { source: 'model' as const } : {}),
+    ...(isTimestamp(raw.createdAt) ? { createdAt: raw.createdAt } : {}),
+    ...(isTimestamp(raw.updatedAt) ? { updatedAt: raw.updatedAt } : {}),
+  };
   switch (kind) {
     case 'open': {
       const url = trimTo(raw.url, QUICK_BUTTON_URL_MAX);
@@ -391,7 +408,10 @@ export function formatQuickButtons(buttons: QuickButton[], { desktop }: { deskto
   const head = desktop
     ? `当前会话有 ${list.length} 个快捷按钮，显示在输入框上方：`
     : `当前会话有 ${list.length} 个快捷按钮。这个宿主里没有输入框上方的按钮，直接用下面的内容：`;
-  return [head, ...list.map((button) => `- ${buttonLine(button)}`)].join('\n');
+  return [
+    head,
+    ...list.map((button) => `- ${buttonLine(button)}${isStaleQuickButton(button) ? '（可能过时）' : ''}`),
+  ].join('\n');
 }
 
 /** 面板里的一行：种类 + 落点，不带按钮名——条目左边那一列就是名字。 */
@@ -488,4 +508,8 @@ export function oneLine(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isTimestamp(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }

@@ -15,6 +15,7 @@
 ## 协议
 
 - `mica app-server` 是每会话常驻进程；stdin/stdout 使用 Codex v2 JSONL。framing 在 `mica-runtime/codexProtocol.ts`，事件投影在 `runtime/CodexProjector.ts`。
+- 客户端模型解析前重读磁盘 providers（不重置会话 model/effort）；删除的服务商及非空会话协议变更报错，不能把旧选择静默发往其他服务商。turn 即使没有模型参数也刷新并验证当前服务商。
 - `--parent <sessionId>` 标记这条会话由谁派生（子会话、fork 分支），写进会话文件的 `parentSessionId`。只对新建会话生效：resume 时以文件里记的那条为准。`thread/start` 的 `parentSessionId` 同样只被尚未落盘的会话采纳，且已有值时幂等——重复 startNewSession 会换掉会话 id，客户端手里那份 thread 就对不上落盘文件名了。
 - `mica/*` 扩展通知直接送 renderer，不进 turn 重放缓冲：queue、tasks、BTW、history、capabilities、turn retrying、host maintenance。
 - `mica/capabilities/get|set` 读写会话能力；运行中 set 返回 `ok:false`。

@@ -4,6 +4,7 @@ import {
   providerForModel,
   readConfig,
   getConfig,
+  refreshProviders,
   updateConfig,
   resetSessionModelDefaults,
   prepareSessionModelDefaults,
@@ -36,6 +37,8 @@ export const micaConfig = {
   read: readConfig,
   /** 读取内存中的当前配置快照。 */
   get: getConfig,
+  /** 刷新服务商目录，不改变会话模型或其他运行时设置。 */
+  refreshProviders,
   /** 通过 updater 修改配置，同时同步写回磁盘。 */
   update: updateConfig,
   /** 从最新磁盘配置重置新会话的模型和 effort。 */

@@ -10,7 +10,7 @@
  * Run `node desktop.mjs help` for the command list.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -34,10 +34,135 @@ const fail = (msg, code = 1) => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// --------------------------------------------------------------- write commands
+//
+// 会改屏幕/键盘/焦点/剪贴板的命令：它们可能打断用户手上的事，所以**必须**先经用户确认。
+// 确认只能由插件里的 `computer_use` 工具拿到（它问完用户才下发一次性许可文件），
+// 所以这里做的是运行时门禁——模型绕过工具直接 shell 调这些命令会失败。
+//
+// 只读命令（元素树、读文本、截图、列屏幕…）不挡：它们不改任何东西，挡了只会拖慢排查。
+const WRITE_COMMANDS = [
+  'tap',
+  'move',
+  'click',
+  'dclick',
+  'rclick',
+  'drag',
+  'scroll',
+  'type',
+  'paste',
+  'key',
+  'press',
+  'focus',
+  'launch',
+  'setval',
+  'clip',
+];
+
+const READ_COMMANDS = [
+  'help',
+  'check',
+  'apps',
+  'front',
+  'screens',
+  'size',
+  'pos',
+  'els',
+  'tree',
+  'find',
+  'text',
+  'wait-el',
+  'windows',
+  'winlist',
+  'webtext',
+  'enable-ax',
+  'shot',
+  'winshot',
+  'highlight',
+  'wait',
+  'commands',
+];
+
+const APPROVAL_ENV = 'MICA_COMPUTER_USE_APPROVAL';
+
+/** 一次命令的许可键：用户批准的是「这条命令 + 这些参数」，不是「随便什么命令」。 */
+function approvalKey() {
+  return JSON.stringify([cmd, ...args.slice(1).map(String)]);
+}
+
+/**
+ * 写操作的运行时门禁。
+ *
+ * 许可文件由 `computer_use` 工具在用户点「允许」之后写入，内容是这次批准的**具体命令
+ * 列表**（每条只能消费一次），所以「批准一个点击」不等于「批准之后随便点」。
+ * 这不是安全边界（模型能自己造文件），而是防误用：让「没问过用户就动手」变成一条
+ * 立刻失败的路径，而不是悄悄发生。
+ */
+function guardWriteCommand() {
+  if (!WRITE_COMMANDS.includes(cmd)) return;
+
+  const deny = (why) => {
+    note(
+      `desktop.mjs: \`${cmd}\` 会改动屏幕或键盘状态，需要用户先确认（${why}）。\n` +
+        '模型侧：改用 `computer_use` 工具，把这次要执行的步骤放进同一个 commands 数组——' +
+        '用户点「允许」之后，这些命令会带着许可自动执行。',
+    );
+    process.exit(6);
+  };
+
+  const permitPath = String(process.env[APPROVAL_ENV] || '').trim();
+  if (!permitPath) deny('没有许可文件');
+
+  let permit;
+  try {
+    permit = JSON.parse(readFileSync(permitPath, 'utf8'));
+  } catch {
+    deny('许可文件读不到');
+    return;
+  }
+  if (!permit || permit.v !== 1 || !Array.isArray(permit.entries)) deny('许可文件格式不对');
+  if (typeof permit.expiresAt === 'number' && Date.now() > permit.expiresAt) deny('许可已过期');
+
+  const key = approvalKey();
+  const entry = permit.entries.find((item) => item && item.used !== true && item.key === key);
+  if (!entry) deny('这一步不在用户批准的范围内');
+
+  // 先消费再执行：同一条命令不能靠同一个许可跑第二次
+  entry.used = true;
+  entry.usedAt = Date.now();
+  try {
+    writeFileSync(permitPath, JSON.stringify(permit), { encoding: 'utf8', mode: 0o600 });
+  } catch {
+    deny('许可文件无法标记为已用');
+  }
+}
+
 function coordinates(count, usage) {
   const raw = args.slice(1, count + 1);
   if (raw.length !== count || raw.some((value) => !value.trim() || !Number.isFinite(Number(value)))) fail(usage);
   return raw.map(Number);
+}
+
+/** `--flag value` 的取值：缺值或下一个就是另一个 flag 时返回 undefined。 */
+function argValue(flag) {
+  const index = args.indexOf(flag);
+  if (index < 0) return undefined;
+  const value = args[index + 1];
+  return value === undefined || value.startsWith('--') ? undefined : value;
+}
+
+/** 位置参数里跳过 `--flag value` 组合后剩下的部分。 */
+function positionals() {
+  const out = [];
+  for (let i = 1; i < args.length; i++) {
+    const current = args[i];
+    if (current.startsWith('--')) {
+      if (['--display', '--index'].includes(current)) i += 1;
+      continue;
+    }
+    out.push(current);
+  }
+  return out;
 }
 
 // --------------------------------------------------------------- helper binary
@@ -183,6 +308,37 @@ function shotFile(path, { region, windowId } = {}) {
   return { path: target, bytes: statSync(target).size };
 }
 
+// 多屏：screencapture 不带参数只截主屏，而内容可能在别的屏上——所以先问 screens。
+function displayTargets(info, { display } = {}) {
+  const displays = Array.isArray(info?.displays) ? info.displays : [];
+  if (displays.length === 0) return [];
+  if (display !== undefined) {
+    const wanted = String(display).trim();
+    const picked =
+      displays.find((d) => String(d.index) === wanted) || displays.find((d) => String(d.id) === wanted);
+    if (!picked) fail(`unknown display "${wanted}" — run \`screens\` to list index/id`, 2);
+    return [picked];
+  }
+  // 多屏默认「前台窗口所在那块 + 其余每块各一张」：只给主屏会让模型看不到另一块上的内容
+  const focus = displays.find((d) => d.front) || displays.find((d) => d.main) || displays[0];
+  return [focus, ...displays.filter((d) => d !== focus)];
+}
+
+function siblingPath(path, suffix) {
+  return /\.png$/i.test(path) ? `${path.slice(0, -4)}${suffix}.png` : `${path}${suffix}.png`;
+}
+
+const displayRegion = (d) =>
+  `${Math.round(d.x)},${Math.round(d.y)},${Math.round(d.w)},${Math.round(d.h)}`;
+
+function describeDisplay(d, count) {
+  return (
+    `屏幕 ${d.index + 1}/${count}` +
+    `${d.main ? ' 主屏' : ''}${d.front ? '（前台窗口在这块）' : ''}` +
+    ` ${Math.round(d.w)}x${Math.round(d.h)}pt @${Math.round(d.x)},${Math.round(d.y)}`
+  );
+}
+
 // ------------------------------------------------------------------ clipboard
 function pbcopy(text) {
   const r = spawnSync('/usr/bin/pbcopy', [], { input: text, encoding: 'utf8' });
@@ -222,6 +378,7 @@ function cmdCheck() {
 }
 
 async function main() {
+  guardWriteCommand();
   switch (cmd) {
     case 'help':
     case '--help':
@@ -246,7 +403,8 @@ async function main() {
                                    （Chrome 默认不暴露网页内容，必须先调它）
 
   --- 坐标级键鼠（兜底）---
-  size                             屏幕逻辑尺寸（另报物理像素，Retina 是 2x）
+  screens                          所有显示器的几何 + 前台窗口落在哪块屏（多屏必看）
+  size                             主屏逻辑尺寸（另报物理像素，Retina 是 2x）
   pos                              当前鼠标位置
   move <x> <y>                     移动鼠标（移动后读回校验）
   click [x y]                      左键点击（给坐标则先移动）
@@ -260,13 +418,19 @@ async function main() {
 
   --- 其他 ---
   check                            权限 + 构建环境自检
-  shot <path> [x,y,w,h]            全屏或区域截图（PNG）
-  winshot <path> <windowId>        截指定窗口
+  commands                         哪些命令需要用户确认（write / read）
+  shot <path> [x,y,w,h]            截图（PNG）：给区域就截区域；多屏默认截「前台窗口所在屏 + 其余各屏」
+  shot <path> --display <n|id>     只截某一块屏（n 是 screens 里的 index）
+  shot <path> --all                每块屏各截一张（第一张用给的路径，其余加 -d<index+1> 后缀）
+  winshot <path> <windowId|app>    截单个窗口（给 app 名就取它最靠前的窗口，--index 换下一个）
   highlight <x> <y> <w> <h>        把该区域截成临时 PNG（坐标校对用）
   clip <text>                      只写剪贴板
   focus <app>                      激活 app（AX，失败退回 osascript）
   launch <app>                     open -a 启动 app
   wait <ms>
+
+会改动屏幕/键盘的命令（move/click/type/key/press/focus/launch/setval/clip …）需要用户先
+确认：由 computer_use 工具取得许可后经 $${APPROVAL_ENV} 传进来，直接 shell 调会被拒绝（退出码 6）。
 
 Add --json for machine-readable output.`);
       break;
@@ -275,9 +439,36 @@ Add --json for machine-readable output.`);
       cmdCheck();
       break;
 
+    case 'commands':
+      out(
+        { write: WRITE_COMMANDS, read: READ_COMMANDS },
+        `write (需要用户确认): ${WRITE_COMMANDS.join(' ')}\nread (直接可用): ${READ_COMMANDS.join(' ')}`,
+      );
+      break;
+
     case 'size': {
       const s = helper('size');
       out(s, `${s.width}x${s.height} (logical points, ${s.pixelWidth}x${s.pixelHeight} px)`);
+      break;
+    }
+
+    case 'screens': {
+      const info = helper('screens');
+      const lines = (info.displays || []).map(
+        (d) =>
+          `#${d.index} id=${d.id}${d.main ? ' main' : ''}${d.front ? ' front' : ''}` +
+          ` ${Math.round(d.w)}x${Math.round(d.h)}pt @${Math.round(d.x)},${Math.round(d.y)}` +
+          ` (${d.pixelWidth}x${d.pixelHeight}px, ${Number(d.scale).toFixed(1)}x)`,
+      );
+      const fw = info.frontWindow;
+      lines.push(
+        fw
+          ? `前台窗口: ${fw.app || '(unknown)'}${fw.title ? ` "${fw.title}"` : ''}` +
+              ` ${Math.round(fw.w)}x${Math.round(fw.h)} @${Math.round(fw.x)},${Math.round(fw.y)}` +
+              ` → 屏幕 #${fw.displayIndex} (windowId ${fw.id})`
+          : '前台窗口: (没有可见窗口)',
+      );
+      out(info, lines.join('\n'));
       break;
     }
 
@@ -288,16 +479,54 @@ Add --json for machine-readable output.`);
     }
 
     case 'shot': {
-      if (!args[1]) fail('shot requires a path');
-      const r = shotFile(args[1], { region: args[2] });
-      out(r, `${r.path} (${r.bytes} bytes)`);
+      const [path, region] = positionals();
+      if (!path) fail('shot requires a path');
+      if (region) {
+        // 显式区域：坐标是全局逻辑点，可以跨越任意一块屏
+        const r = shotFile(path, { region });
+        out(r, `${r.path} (${r.bytes} bytes)`);
+        break;
+      }
+      const info = helper('screens');
+      // `--all` 只是把「每块屏各一张」说清楚；默认行为本来就是这样
+      const targets = displayTargets(info, { display: argValue('--display') });
+      if (targets.length === 0) fail('screens reported no display');
+      const shots = targets.map((d, i) => {
+        const target = i === 0 ? resolve(path) : siblingPath(resolve(path), `-d${d.index + 1}`);
+        const shot = shotFile(target, { region: displayRegion(d) });
+        return { ...shot, display: d };
+      });
+      const primary = shots[0];
+      out(
+        { path: primary.path, bytes: primary.bytes, shots, frontWindow: info.frontWindow ?? null, union: info.union },
+        shots
+          .map((s) => `${s.path} (${s.bytes} bytes) — ${describeDisplay(s.display, info.count)}`)
+          .join('\n'),
+      );
       break;
     }
 
     case 'winshot': {
-      if (!args[1] || !args[2]) fail('winshot requires <path> <windowId>');
-      const r = shotFile(args[1], { windowId: args[2] });
-      out(r, `${r.path} (${r.bytes} bytes)`);
+      const [path, target] = positionals();
+      if (!path || !target) fail('winshot requires <path> <windowId|app>');
+      let windowId = /^\d+$/.test(target) ? target : null;
+      let window = null;
+      if (!windowId) {
+        // 按 app 截：取它最靠前的那个可见窗口；--index 换下一个
+        const list = helper('winlist', target);
+        if (!Array.isArray(list) || list.length === 0) {
+          fail(`no on-screen window for ${target} — run \`apps\` to see what is open`, 1);
+        }
+        const asked = Number(argValue('--index') ?? 0);
+        const index = Number.isFinite(asked) ? Math.min(Math.max(Math.trunc(asked), 0), list.length - 1) : 0;
+        window = list[index];
+        windowId = String(window.id);
+      }
+      const r = shotFile(path, { windowId });
+      out(
+        { ...r, windowId, window },
+        `${r.path} (${r.bytes} bytes) — window ${windowId}${window?.title ? ` "${window.title}"` : ''}`,
+      );
       break;
     }
 

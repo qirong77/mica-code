@@ -5,14 +5,16 @@ import { describe, expect, it } from 'vitest';
 import type { ConfigWebPlugin } from '../../src/shared/types.js';
 import { setConfigWebClient } from '../api.js';
 import type { ConfigWebClient } from '../api.js';
-import { PluginActionsGroup, PluginCard, PluginDetail, pluginRunningStatus } from './PluginsPage.js';
+import { PluginActionsGroup, PluginCard, PluginDetail, pluginCategory, pluginRunningStatus } from './PluginsPage.js';
 
 it('插件详情建立窄屏布局所需的页面容器', () => {
   const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
   const detail = styles.match(/\.plugin-detail\s*\{([^}]*)\}/)?.[1] ?? '';
   expect(detail).toMatch(/container-type:\s*inline-size/);
   expect(detail).toMatch(/container-name:\s*page/);
-  expect(styles).toMatch(/@container page \(max-width: 980px\)\s*\{\s*\.plugin-columns\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  expect(styles).toMatch(
+    /@container page \(max-width: 980px\)\s*\{\s*\.plugin-columns\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/,
+  );
 });
 
 function plugin(overrides: Partial<ConfigWebPlugin> = {}): ConfigWebPlugin {
@@ -45,6 +47,19 @@ function plugin(overrides: Partial<ConfigWebPlugin> = {}): ConfigWebPlugin {
 function render(node: React.ReactElement): string {
   return renderToStaticMarkup(node);
 }
+
+describe('插件目录分类', () => {
+  it('按声明能力分类，用户来源优先且每个插件只有一个分类', () => {
+    expect(pluginCategory(plugin())).toBe('tools');
+    expect(pluginCategory(plugin({ desktopPanel: {} as never }))).toBe('desktop');
+    expect(pluginCategory(plugin({ desktopSessionMenu: [{}] as never }))).toBe('desktop');
+    expect(pluginCategory(plugin({ desktopChecks: [{}] as never }))).toBe('configurable');
+    expect(pluginCategory(plugin({ actions: [{}] as never }))).toBe('configurable');
+    expect(pluginCategory(plugin({ settings: { fields: [{}] as never, values: {}, issues: [] } }))).toBe('configurable');
+    expect(pluginCategory(plugin({ source: 'user', desktopPanel: {} as never }))).toBe('user');
+    expect(pluginCategory(plugin({ desktopPanel: {} as never, actions: [{}] as never }))).toBe('desktop');
+  });
+});
 
 describe('插件目录卡片', () => {
   const noop = () => {};

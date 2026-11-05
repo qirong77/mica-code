@@ -334,6 +334,10 @@ tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridg
   request (`Origin`/`Host` guard) so a random web page cannot drive it. `browser-docs.js` is the one
   place the endpoint catalog lives: the routes, `/browser/docs` and the MCP `control` tool's doc list
   all read it, and `browser-service.js` refuses to start if a documented endpoint has no handler.
+  Owner-scoped calls list and operate only on their own windows and tabs. Each session can create one
+  window; further pages use tabs, and duplicate window creation returns 409 rather than destroying
+  an existing page. Windows do not expire on idle. The cookie partition remains shared across sessions;
+  owner is a routing guard, not an authentication boundary.
 - Everything runs with the window **hidden** — it never pops up while the agent works. Screenshots go
   through CDP (`Page.captureScreenshot`): on a hidden window `capturePage()` hands back a stale frame
   while CDP returns the current one (measured). Native CDP input works on hidden windows too

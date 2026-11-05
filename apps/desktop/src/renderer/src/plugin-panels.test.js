@@ -7,7 +7,11 @@ import {
   isOpenableLink,
   loadPluginPanels,
   menuCacheKey,
+  observePanelCardImpression,
+  panelCardImpressionKey,
+  panelNeedsQuickbarView,
   panelDrafts,
+  pluginPanelCards,
   pluginPanelTabs,
   pluginQuickbarItems,
   quickbarButtonLook,
@@ -21,6 +25,14 @@ import {
   selectPluginPanels
 } from './plugin-panels'
 
+test('only declared dynamic/status/shortcut panels participate in quickbar polling', () => {
+  expect(panelNeedsQuickbarView({ shortcuts: [] })).toBe(false)
+  expect(panelNeedsQuickbarView({ shortcuts: [{ label: '打开', action: 'open' }] })).toBe(false)
+  expect(panelNeedsQuickbarView({ dynamicShortcuts: true, shortcuts: [] })).toBe(true)
+  expect(panelNeedsQuickbarView({ status: true })).toBe(true)
+  expect(panelNeedsQuickbarView({ shortcuts: [{ menu: 'services' }] })).toBe(true)
+})
+
 const plugin = (overrides = {}) => ({
   id: 'user.demand-dev',
   name: '需求开发',
@@ -28,6 +40,118 @@ const plugin = (overrides = {}) => ({
   state: 'enabled',
   desktopPanel: { label: '需求开发', roles: ['需求开发'], shortcuts: [] },
   ...overrides
+})
+
+describe('compact panel cards', () => {
+  const card = (overrides = {}) => ({ id: 'summary', title: 'Summary', revision: 'v1', ...overrides })
+
+  test('merges only current plugins, with separate identities per plugin and revision', () => {
+    const panels = [{ id: 'one' }, { id: 'two' }]
+    const views = { one: [card(), card({ id: 'second' })], two: [card()], disabled: [card()] }
+    const entries = pluginPanelCards(panels, views)
+    expect(entries.map((entry) => entry.panel.id)).toEqual(['one', 'one', 'two'])
+    expect(new Set(entries.map((entry) => entry.key)).size).toBe(3)
+    const newer = pluginPanelCards(panels, { ...views, one: [card({ revision: 'v2' })] })
+    expect(newer[0].key).not.toBe(entries[0].key)
+    expect(newer[1].key).toBe(entries[2].key)
+    expect(pluginPanelCards([], views)).toEqual([])
+  })
+
+  test('caps each plugin independently and drops duplicate or malformed cards', () => {
+    const panels = [{ id: 'one' }, { id: 'two' }]
+    const many = Array.from({ length: 6 }, (_, index) => card({ id: `c${index}` }))
+    expect(pluginPanelCards(panels, { one: many, two: many })).toHaveLength(6)
+    expect(pluginPanelCards(panels, { one: [card(), card(), null], two: {} })).toHaveLength(1)
+  })
+
+  test('impression identity varies with session, plugin, card and revision only', () => {
+    const identity = panelCardImpressionKey('node', 'session', 'one', card())
+    expect(panelCardImpressionKey('node', 'session', 'one', card({ title: 'polled again' }))).toBe(identity)
+    for (const next of [
+      panelCardImpressionKey('other-node', 'session', 'one', card()),
+      panelCardImpressionKey('node', 'other-session', 'one', card()),
+      panelCardImpressionKey('node', 'session', 'two', card()),
+      panelCardImpressionKey('node', 'session', 'one', card({ id: 'other' })),
+      panelCardImpressionKey('node', 'session', 'one', card({ revision: 'v2' }))
+    ]) expect(next).not.toBe(identity)
+  })
+
+  const visibilityHarness = () => {
+    const element = {}
+    const listeners = new Set()
+    const doc = {
+      hidden: false,
+      addEventListener: (_, callback) => listeners.add(callback),
+      removeEventListener: (_, callback) => listeners.delete(callback)
+    }
+    let deliver
+    let observed = 0
+    let observerOptions
+    class Observer {
+      constructor(callback, options) { deliver = callback; observerOptions = options }
+      observe() { observed += 1 }
+      disconnect() {}
+    }
+    let impressions = 0
+    const stop = observePanelCardImpression(element, () => { impressions += 1 }, {
+      document: doc, Observer, supportsVisibility: true
+    })
+    return { doc, stop, listeners,
+      get observed() { return observed },
+      get impressions() { return impressions },
+      get observerOptions() { return observerOptions },
+      deliver: (overrides = {}) => deliver([{
+        target: element, isIntersecting: true, intersectionRatio: 1, isVisible: true, ...overrides
+      }])
+    }
+  }
+
+  test('mount does not count; intersection, foreground and unoccluded visibility are required', () => {
+    const view = visibilityHarness()
+    expect(view.impressions).toBe(0)
+    expect(view.observerOptions).toEqual({ threshold: 0.5, trackVisibility: true, delay: 100 })
+    view.deliver({ isIntersecting: false })
+    view.deliver({ intersectionRatio: 0.1 })
+    view.deliver({ isVisible: false })
+    view.deliver({ isVisible: undefined })
+    view.doc.hidden = true
+    view.deliver()
+    expect(view.impressions).toBe(0)
+    view.doc.hidden = false
+    view.deliver()
+    view.deliver()
+    expect(view.impressions).toBe(1)
+    expect(view.listeners.size).toBe(0)
+    view.stop()
+  })
+
+  test('foregrounding re-observes and unmount prevents queued visibility callbacks', () => {
+    const view = visibilityHarness()
+    view.doc.hidden = true
+    for (const listener of view.listeners) listener()
+    expect(view.observed).toBe(1)
+    view.doc.hidden = false
+    for (const listener of view.listeners) listener()
+    expect(view.observed).toBe(2)
+    view.stop()
+    view.deliver()
+    expect(view.impressions).toBe(0)
+    expect(view.listeners.size).toBe(0)
+  })
+
+  test('omits impressions when actual visibility cannot be determined', () => {
+    let constructed = false
+    const stop = observePanelCardImpression({}, () => { throw new Error('must not emit') }, {
+      document: {}, supportsVisibility: false,
+      Observer: class { constructor() { constructed = true } }
+    })
+    expect(constructed).toBe(false)
+    stop()
+    expect(() => observePanelCardImpression({}, () => {}, {
+      document: {}, supportsVisibility: true,
+      Observer: class { constructor() { throw new Error('visibility tracking unavailable') } }
+    })()).not.toThrow()
+  })
 })
 
 test('只在本会话的工具完成时刷新插件视图', () => {

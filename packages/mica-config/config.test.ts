@@ -255,6 +255,35 @@ describe('model configuration', () => {
 });
 
 describe('new-session defaults', () => {
+  it('refreshes provider definitions from disk without resetting the current session settings', async () => {
+    configApi.updateConfig(() => baseConfig());
+    configApi.updateConfig((config) => ({ ...config, provider: 'krill-codex', model: 'gpt-5.4', effort: 'xhigh' }));
+    const before = configApi.getConfig();
+    const persisted = JSON.parse(readFileSync(configApi.CONFIG_PATH, 'utf8'));
+    persisted.providers.push({
+      id: 'us-relay', api_base: 'https://relay.example/v1', api_key: 'test',
+      protocol: 'openai_chat_completions', models: ['gpt-6.1-sol'],
+    });
+    writeFileSync(configApi.CONFIG_PATH, JSON.stringify(persisted));
+
+    const refreshed = configApi.refreshProviders();
+    expect(refreshed).toMatchObject({ provider: before.provider, model: before.model, effort: before.effort });
+    expect(refreshed.providers.find((provider) => provider.id === 'us-relay')).toMatchObject({
+      api_base: 'https://relay.example/v1', models: ['gpt-6.1-sol'],
+    });
+    const { resolveRuntimeConfigOverride } = await import('@apps/cli/src/cli/modelCatalog.js');
+    const { readAgentRuntimeConfig, createAgentClientOptions } = await import('@apps/cli/src/agent/AgentRuntimeConfig.js');
+    const override = resolveRuntimeConfigOverride(refreshed, 'us-relay/gpt-6.1-sol');
+    expect(override).toMatchObject({ providerId: 'us-relay', model: 'gpt-6.1-sol' });
+    expect(createAgentClientOptions(readAgentRuntimeConfig(override))).toMatchObject({
+      baseURL: 'https://relay.example/v1', model: 'gpt-6.1-sol',
+    });
+    persisted.providers.at(-1).api_base = 'https://updated.example/v1';
+    writeFileSync(configApi.CONFIG_PATH, JSON.stringify(persisted));
+    expect(configApi.refreshProviders().providers.find((provider) => provider.id === 'us-relay')?.api_base)
+      .toBe('https://updated.example/v1');
+  });
+
   it('selects the first configured provider and model regardless of prior runtime choices', () => {
     configApi.updateConfig(() => baseConfig());
     configApi.updateConfig((config) => ({ ...config, provider: 'krill-codex', model: 'gpt-5.4', effort: 'xhigh' }));

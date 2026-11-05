@@ -826,6 +826,37 @@ async function stopMockContext(context: MockContext): Promise<void> {
 const hostReady = (m: HostMessage) => m.method === 'mica/backgroundTasks/updated' || m.method === 'error';
 
 suite('mica app-server real-user flows (mock provider)', () => {
+  itE2E('refreshes providers added after the host started and uses their updated endpoint', async () => {
+    const host = spawnHost('refresh-providers');
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready', 30_000);
+    const second = createMockProvider();
+    await new Promise<void>((resolve) => second.server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = second.server.address() as AddressInfo;
+      const path = join(host.home, 'config.json');
+      const config = JSON.parse(readFileSync(path, 'utf8'));
+      config.providers.push({ ...config.providers[0], id: 'relay', models: ['vendor/model'], api_base: `http://127.0.0.1:${port}/v1` });
+      writeFileSync(path, JSON.stringify(config));
+      await send(host, 1, 'turn/start', { input: [{ type: 'text', text: 'hello' }], model: 'relay/vendor/model' });
+      const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn started');
+      const turnId = (started.params?.turn as { id: string }).id;
+      const completed = await waitFor(host, turnCompleted(turnId), 'turn completed');
+      expect(completed.params?.turn).toMatchObject({ status: 'completed' });
+      expect(second.state.requests[0]?.model).toBe('vendor/model');
+      expect(mock.state.requests).toHaveLength(0);
+      config.providers[1].api_base = currentMock().baseUrl;
+      writeFileSync(path, JSON.stringify(config));
+      await send(host, 2, 'turn/start', { input: [{ type: 'text', text: 'again' }], model: 'relay/vendor/model' });
+      const next = await waitFor(host, (m) => m.method === 'turn/started' && (m.params?.turn as { id?: string })?.id !== turnId, 'second turn started');
+      await waitFor(host, turnCompleted((next.params?.turn as { id: string }).id), 'second turn completed');
+      expect(mock.state.requests[0]?.model).toBe('vendor/model');
+      expect(second.state.requests).toHaveLength(1);
+    } finally {
+      await new Promise<void>((resolve) => second.server.close(() => resolve()));
+    }
+  });
+
   for (const configuredDefault of [false, true]) {
     itE2E(
       `new session uses ${configuredDefault ? 'defaultModel and effort' : 'first configured model'} despite old directory preferences`,

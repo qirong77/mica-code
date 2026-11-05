@@ -564,6 +564,182 @@ static void cmdFrontmost(void) {
     printf("{\"pid\":0,\"name\":\"\"}\n");
 }
 
+// MARK: - 显示器（多屏）
+//
+// 坐标口径：CGEvent 与 AX 都用**全局逻辑点**，所有屏放在一张连续画布上——
+// 副屏在主屏左边时那块的 x 是负数，在上方时 y 是负数。所以「屏幕多大」不能只问
+// CGMainDisplayID：截图、区域、窗口位置都可能落在这张画布的另一块里。
+
+static uint32_t activeDisplayIds(CGDirectDisplayID *out, uint32_t cap) {
+    uint32_t n = 0;
+    if (CGGetActiveDisplayList(cap, out, &n) != kCGErrorSuccess) return 0;
+    return n;
+}
+
+// CGDisplayPixelsWide 在本机实测返回的是点（1512），不是 Retina 像素（3024）；
+// 真实像素要从 display mode 取，否则「物理像素」这个数会骗人。
+static void displayPixelSize(CGDirectDisplayID id, size_t *pw, size_t *ph) {
+    CGDisplayModeRef mode = CGDisplayCopyDisplayMode(id);
+    if (mode) {
+        *pw = CGDisplayModeGetPixelWidth(mode);
+        *ph = CGDisplayModeGetPixelHeight(mode);
+        CGDisplayModeRelease(mode);
+        return;
+    }
+    *pw = CGDisplayPixelsWide(id);
+    *ph = CGDisplayPixelsHigh(id);
+}
+
+// 前台窗口 = 窗口列表里第一个 layer 0 的正常窗口（CGWindowList 的顺序就是前后序）。
+// 它的 CGWindowID 也一并给出去：winshot 拿它截单个窗口，比按屏幕截更准。
+typedef struct {
+    int found;
+    long windowId;
+    int pid;
+    CGRect rect;
+    char app[SBUF];
+    char title[LBUF];
+} FrontWindow;
+
+static void readFrontWindow(FrontWindow *fw) {
+    memset(fw, 0, sizeof(FrontWindow));
+    CFArrayRef wins = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+    if (!wins) return;
+    for (CFIndex i = 0; i < CFArrayGetCount(wins); i++) {
+        CFDictionaryRef w = (CFDictionaryRef)CFArrayGetValueAtIndex(wins, i);
+        CFNumberRef layer = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowLayer);
+        int lv = 0;
+        if (layer) CFNumberGetValue(layer, kCFNumberIntType, &lv);
+        if (lv != 0) continue;
+        CFDictionaryRef bd = (CFDictionaryRef)CFDictionaryGetValue(w, kCGWindowBounds);
+        CGRect r = CGRectZero;
+        if (!bd || !CGRectMakeWithDictionaryRepresentation(bd, &r)) continue;
+        // 0 面积的窗口（隐藏的工具窗 / 悬浮条）不能代表「内容在哪块屏」
+        if (r.size.width < 2 || r.size.height < 2) continue;
+
+        CFNumberRef num = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowNumber);
+        long wid = 0;
+        if (num) CFNumberGetValue(num, kCFNumberLongType, &wid);
+        CFNumberRef pidv = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowOwnerPID);
+        int pid = 0;
+        if (pidv) CFNumberGetValue(pidv, kCFNumberIntType, &pid);
+        CFStringRef owner = (CFStringRef)CFDictionaryGetValue(w, kCGWindowOwnerName);
+        CFStringRef name = (CFStringRef)CFDictionaryGetValue(w, kCGWindowName);
+        if (owner) cstr((CFTypeRef)owner, fw->app, SBUF);
+        if (name) cstr((CFTypeRef)name, fw->title, LBUF);
+        fw->found = 1;
+        fw->windowId = wid;
+        fw->pid = pid;
+        fw->rect = r;
+        break;
+    }
+    CFRelease(wins);
+}
+
+static int cmdScreens(void) {
+    CGDirectDisplayID ids[16];
+    uint32_t n = activeDisplayIds(ids, 16);
+    if (n == 0) return failJson("没有可用的显示器");
+
+    CGRect bounds[16];
+    CGRect unionRect = CGRectNull;
+    for (uint32_t i = 0; i < n; i++) {
+        bounds[i] = CGDisplayBounds(ids[i]);
+        unionRect = CGRectIsNull(unionRect) ? bounds[i] : CGRectUnion(unionRect, bounds[i]);
+    }
+
+    FrontWindow fw;
+    readFrontWindow(&fw);
+    int frontIndex = -1;
+    if (fw.found) {
+        CGPoint c = CGPointMake(CGRectGetMidX(fw.rect), CGRectGetMidY(fw.rect));
+        for (uint32_t i = 0; i < n; i++) {
+            if (CGRectContainsPoint(bounds[i], c)) { frontIndex = (int)i; break; }
+        }
+    }
+    if (frontIndex < 0) {
+        for (uint32_t i = 0; i < n; i++) {
+            if (CGDisplayIsMain(ids[i])) { frontIndex = (int)i; break; }
+        }
+    }
+
+    printf("{\"ok\":true,\"count\":%u,\"union\":{\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f},\"displays\":[",
+           n, unionRect.origin.x, unionRect.origin.y, unionRect.size.width, unionRect.size.height);
+    for (uint32_t i = 0; i < n; i++) {
+        size_t pw = 0, ph = 0;
+        displayPixelSize(ids[i], &pw, &ph);
+        double scale = bounds[i].size.width > 0 ? (double)pw / bounds[i].size.width : 1.0;
+        printf("%s{\"index\":%u,\"id\":%u,\"main\":%s,\"front\":%s,"
+               "\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f,"
+               "\"pixelWidth\":%zu,\"pixelHeight\":%zu,\"scale\":%.2f}",
+               i == 0 ? "" : ",", i, (unsigned)ids[i],
+               CGDisplayIsMain(ids[i]) ? "true" : "false",
+               (int)i == frontIndex ? "true" : "false",
+               bounds[i].origin.x, bounds[i].origin.y, bounds[i].size.width, bounds[i].size.height,
+               pw, ph, scale);
+    }
+    printf("],\"frontWindow\":");
+    if (fw.found) {
+        char appEsc[SBUF * 2], titleEsc[LBUF * 2];
+        jsonEscape(fw.app, appEsc, sizeof(appEsc));
+        jsonEscape(fw.title, titleEsc, sizeof(titleEsc));
+        printf("{\"id\":%ld,\"pid\":%d,\"app\":\"%s\",\"title\":\"%s\","
+               "\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f,\"displayIndex\":%d}",
+               fw.windowId, fw.pid, appEsc, titleEsc,
+               fw.rect.origin.x, fw.rect.origin.y, fw.rect.size.width, fw.rect.size.height,
+               frontIndex);
+    } else {
+        printf("null");
+    }
+    printf("}\n");
+    return 0;
+}
+
+// 某个 app 在屏幕上的窗口（layer 0、有面积），带 CGWindowID：winshot 用它按窗口截，
+// 不受「窗口在哪块屏、被别的屏挡住」影响。
+static int cmdWinList(const char *spec) {
+    pid_t pid = resolvePid(spec);
+    if (pid <= 0) return failJson("找不到 app: %s", spec);
+    CFArrayRef wins = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+    printf("[");
+    int first = 1;
+    if (wins) {
+        for (CFIndex i = 0; i < CFArrayGetCount(wins); i++) {
+            CFDictionaryRef w = (CFDictionaryRef)CFArrayGetValueAtIndex(wins, i);
+            CFNumberRef pidv = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowOwnerPID);
+            int owner = 0;
+            if (!pidv) continue;
+            CFNumberGetValue(pidv, kCFNumberIntType, &owner);
+            if (owner != (int)pid) continue;
+            CFNumberRef layer = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowLayer);
+            int lv = 0;
+            if (layer) CFNumberGetValue(layer, kCFNumberIntType, &lv);
+            if (lv != 0) continue;
+            CFDictionaryRef bd = (CFDictionaryRef)CFDictionaryGetValue(w, kCGWindowBounds);
+            CGRect r = CGRectZero;
+            if (!bd || !CGRectMakeWithDictionaryRepresentation(bd, &r)) continue;
+            if (r.size.width < 2 || r.size.height < 2) continue;
+
+            CFNumberRef num = (CFNumberRef)CFDictionaryGetValue(w, kCGWindowNumber);
+            long wid = 0;
+            if (num) CFNumberGetValue(num, kCFNumberLongType, &wid);
+            char title[LBUF], esc[LBUF * 2];
+            title[0] = 0;
+            CFStringRef name = (CFStringRef)CFDictionaryGetValue(w, kCGWindowName);
+            if (name) cstr((CFTypeRef)name, title, LBUF);
+            jsonEscape(title, esc, sizeof(esc));
+            printf("%s{\"id\":%ld,\"title\":\"%s\",\"x\":%.0f,\"y\":%.0f,\"w\":%.0f,\"h\":%.0f}",
+                   first ? "" : ",", wid, esc, r.origin.x, r.origin.y, r.size.width, r.size.height);
+            first = 0;
+        }
+        CFRelease(wins);
+    }
+    printf("]\n");
+    return 0;
+}
+
 static int cmdWindows(const char *spec) {
     pid_t pid = resolvePid(spec);
     if (pid <= 0) return failJson("找不到 app: %s", spec);
@@ -1002,8 +1178,8 @@ static int cmdPos(void) {
 // 逻辑点（CGEvent 坐标口径）；pixel* 才是截图 / Retina 2x 口径
 static int cmdSize(void) {
     CGRect b = CGDisplayBounds(CGMainDisplayID());
-    size_t pw = CGDisplayPixelsWide(CGMainDisplayID());
-    size_t ph = CGDisplayPixelsHigh(CGMainDisplayID());
+    size_t pw = 0, ph = 0;
+    displayPixelSize(CGMainDisplayID(), &pw, &ph);
     printf("{\"ok\":true,\"width\":%.0f,\"height\":%.0f,\"pixelWidth\":%zu,\"pixelHeight\":%zu}\n",
            b.size.width, b.size.height, pw, ph);
     return 0;
@@ -1238,7 +1414,7 @@ static Opts parseArgs(int argc, char **argv) {
 
 static void usage(void) {
     printf("{\"usage\":\"helper <command> [args]\",\"commands\":["
-           "\"apps\",\"frontmost\",\"windows <app>\","
+           "\"apps\",\"frontmost\",\"screens\",\"windows <app>\",\"winlist <app>\","
            "\"tree <app> [--depth N] [--limit N] [--menus]\","
            "\"find <app> <query> [--menus]\","
            "\"press <app> <query> [--menus] | press <mod+key>\","
@@ -1272,6 +1448,9 @@ int main(int argc, char **argv) {
         }
         if (strcmp(cmd, "size") == 0) {
             return cmdSize();
+        }
+        if (strcmp(cmd, "screens") == 0) {
+            return cmdScreens();
         }
         if (strcmp(cmd, "move") == 0) {
             if (o.npos < 2) return failJson("用法 move <x> <y>");
@@ -1319,6 +1498,10 @@ int main(int argc, char **argv) {
         if (strcmp(cmd, "windows") == 0) {
             if (o.npos < 1) return failJson("需要 app|pid");
             return cmdWindows(o.pos[0]);
+        }
+        if (strcmp(cmd, "winlist") == 0) {
+            if (o.npos < 1) return failJson("需要 app|pid");
+            return cmdWinList(o.pos[0]);
         }
         if (strcmp(cmd, "tree") == 0) {
             if (o.npos < 1) return failJson("需要 app|pid");
