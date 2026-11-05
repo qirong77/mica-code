@@ -50,7 +50,7 @@ describe('AgentTool', () => {
     for (const type of BUILTIN_SUBAGENTS) expect(tool.description).toContain(type.name);
     expect(tool.description).toContain('shell 后台任务用 wait_for(kind=task)');
     expect(tool.input_schema.properties?.operation).toMatchObject({
-      enum: ['run', 'list', 'read', 'kill', 'await', 'run_many', 'join'],
+      enum: ['run', 'list', 'read', 'kill', 'restart', 'await', 'run_many', 'join'],
     });
   });
 
@@ -58,7 +58,7 @@ describe('AgentTool', () => {
     const tool = new AgentTool(createApi().api);
 
     for (const operation of ['await', 'join']) expect(tool.canOverlap({ operation })).toBe(true);
-    for (const operation of [undefined, 'run', 'run_many', 'read', 'list', 'kill']) {
+    for (const operation of [undefined, 'run', 'run_many', 'read', 'list', 'kill', 'restart']) {
       expect(tool.canOverlap({ operation })).toBe(false);
     }
   });
@@ -440,15 +440,37 @@ describe('AgentTool', () => {
     expect(output).toContain('Status: skipped');
   });
 
-  it('scopes read, kill, await and join to the calling owner just like list', async () => {
+  it('creates a replacement task that can be read and awaited', async () => {
+    const { api } = createApi({ tasks: [snapshot({ id: 'old', status: 'failed' })] });
+    const tool = new AgentTool(api);
+    const output = await tool.execute({ operation: 'restart', task_id: ' old ' });
+    expect(output).toContain('已创建替代任务');
+    expect(output).toContain('task_id: replacement-old');
+    expect(output).toContain('不是断点续跑');
+    expect(await tool.execute({ operation: 'read', task_id: 'replacement-old' })).toContain('status: running');
+    expect(await tool.execute({ operation: 'await', task_id: 'replacement-old', timeout_ms: 0 })).toContain('replacement-old');
+    expect(tool.onToolUseDisplayText({ operation: 'restart', task_id: 'old' })).toContain('restart: old');
+  });
+
+  it('handles missing task ids and restart errors without creating a task', async () => {
+    const { api } = createApi();
+    const restart = vi.spyOn(api.tasks, 'restart').mockImplementation(() => { throw new Error('lease conflict'); });
+    const tool = new AgentTool(api);
+    expect(await tool.execute({ operation: 'restart', task_id: '  ' })).toContain('需要 task_id');
+    expect(restart).not.toHaveBeenCalled();
+    expect(await tool.execute({ operation: 'restart', task_id: 'missing' })).toContain('lease conflict');
+  });
+
+  it('scopes read, kill, restart, await and join to the calling owner just like list', async () => {
     const owner = {};
     const { api } = createApi({ caller: { owner }, tasks: [snapshot({ id: 'other-owner-task' })] });
     api.tasks.list = vi.fn(() => []);
     const get = vi.spyOn(api.tasks, 'get');
     const kill = vi.spyOn(api.tasks, 'kill');
     const wait = vi.spyOn(api.tasks, 'wait');
+    const restart = vi.spyOn(api.tasks, 'restart');
     const tool = new AgentTool(api);
-    for (const operation of ['read', 'kill', 'await', 'join'] as const) {
+    for (const operation of ['read', 'kill', 'restart', 'await', 'join'] as const) {
       const output = await tool.execute({ operation, task_id: 'other-owner-task' }, { context: {} });
       expect(output).toBe('Subagent task not found: other-owner-task');
     }
@@ -456,6 +478,7 @@ describe('AgentTool', () => {
     expect(get).not.toHaveBeenCalled();
     expect(kill).not.toHaveBeenCalled();
     expect(wait).not.toHaveBeenCalled();
+    expect(restart).not.toHaveBeenCalled();
   });
 });
 
@@ -521,6 +544,13 @@ function createApi(
         if (!task || task.status === 'killed') return false;
         snapshots.set(taskId, { ...task, status: 'killed' });
         return true;
+      },
+      restart: (taskId) => {
+        const task = snapshots.get(taskId);
+        if (!task) throw new Error(`Subagent task not found: ${taskId}`);
+        const id = `replacement-${taskId}`;
+        snapshots.set(id, { ...task, id, status: 'running' });
+        return id;
       },
       wait: async (taskIds) =>
         taskIds.flatMap((taskId) => {

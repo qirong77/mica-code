@@ -62,6 +62,7 @@ export type PluginModelTrace = {
 
 /** 主配置的接口信息：插件声明「跟随主配置」时由宿主解析出来。 */
 export type MainProviderConfig = {
+  providerId?: string;
   baseUrl: string;
   apiKey: string;
   protocol?: PluginModelRequest['protocol'];
@@ -89,6 +90,8 @@ export type CreatePluginModelsOptions = {
     pluginId: string;
     purpose: string;
     model: string;
+    providerId: string;
+    protocol: NonNullable<PluginModelRequest['protocol']>;
     input: string;
     owner?: unknown;
   }) => PluginModelTrace | undefined;
@@ -104,6 +107,8 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
       pluginId,
       purpose: request.purpose,
       model,
+      providerId: resolved.providerId ?? 'plugin-helper',
+      protocol: resolved.protocol ?? 'openai_chat_completions',
       input: request.user,
       owner: request.owner,
     });
@@ -112,6 +117,7 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
         baseUrl: resolved.baseUrl,
         apiKey: resolved.apiKey,
         protocol: resolved.protocol,
+        providerId: resolved.providerId,
         model,
         system: wrapPromptXml('injection', request.system, {
           source: 'plugin',
@@ -170,7 +176,7 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
  */
 function openTrace(
   trace: CreatePluginModelsOptions['trace'],
-  info: { pluginId: string; purpose: string; model: string; input: string; owner?: unknown },
+  info: { pluginId: string; purpose: string; model: string; providerId: string; protocol: NonNullable<PluginModelRequest['protocol']>; input: string; owner?: unknown },
 ): PluginModelTrace | undefined {
   if (!trace) return undefined;
   try {
@@ -225,7 +231,7 @@ function isPluginAbort(error: unknown, signal?: AbortSignal): boolean {
 function applyMainProvider(
   request: PluginModelRequest,
   resolve: CreatePluginModelsOptions['resolveMainProvider'],
-): { baseUrl: string; apiKey: string; protocol: PluginModelRequest['protocol']; model: string } {
+): { baseUrl: string; apiKey: string; protocol: PluginModelRequest['protocol']; model: string; providerId?: string } {
   if (!request.useMainProvider) {
     return { baseUrl: request.baseUrl, apiKey: request.apiKey ?? '', protocol: request.protocol, model: request.model };
   }
@@ -235,6 +241,7 @@ function applyMainProvider(
   return {
     baseUrl: main.baseUrl,
     apiKey: main.apiKey,
+    providerId: main.providerId,
     // 协议也归主配置：插件自己那四项在「跟随」时整体不生效，混用会出现
     // 「地址是 Responses 的、协议按 Chat Completions 拼端点」这种 404。
     protocol: main.protocol,

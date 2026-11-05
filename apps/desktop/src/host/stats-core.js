@@ -137,6 +137,10 @@ export function normalizeUsageEvent(usage, fallbackTime, fallbackModel) {
     identity: usageIdentity(usage),
     occurredAtMs: occurredAtMs ?? fallbackTime,
     model: usage.model || fallbackModel || 'Unknown',
+    provider: usage.providerId || null,
+    durationMs: typeof usage.durationMs === 'number' && Number.isFinite(usage.durationMs) && usage.durationMs > 0 ? usage.durationMs : null,
+    firstTokenMs: typeof usage.firstTokenMs === 'number' && Number.isFinite(usage.firstTokenMs) && usage.firstTokenMs >= 0 ? usage.firstTokenMs : null,
+    hasOutputTokens: typeof usage.outputTokens === 'number' && Number.isFinite(usage.outputTokens) && usage.outputTokens >= 0,
     turnId: Number.isInteger(usage.turnId) ? usage.turnId : null,
     inputTokens,
     cachedInputTokens,
@@ -260,6 +264,7 @@ function dayRow(day) {
     ...emptyTokenTotals(),
     turns: new Set(),
     models: new Map(),
+    speedModels: new Map(),
     sources: new Map()
   }
 }
@@ -291,6 +296,22 @@ export function summarizeStatsDays(usageEvents) {
     }
     addTokens(model, usage)
 
+    const speedKey = JSON.stringify([usage.provider, usage.model])
+    let speed = row.speedModels.get(speedKey)
+    if (!speed) {
+      speed = { provider: usage.provider, model: usage.model, outputTokens: 0, durationMs: 0, throughputSamples: 0, firstTokenMs: 0, firstTokenSamples: 0 }
+      row.speedModels.set(speedKey, speed)
+    }
+    if (usage.durationMs != null && usage.hasOutputTokens) {
+      speed.outputTokens += usage.outputTokens
+      speed.durationMs += usage.durationMs
+      speed.throughputSamples++
+    }
+    if (usage.firstTokenMs != null) {
+      speed.firstTokenMs += usage.firstTokenMs
+      speed.firstTokenSamples++
+    }
+
     const source = usage.source || MAIN_USAGE_SOURCE
     const sourceKey = `${source.kind}:${source.id}`
     let sourceRow = row.sources.get(sourceKey)
@@ -317,6 +338,7 @@ export function summarizeStatsDays(usageEvents) {
       ...row,
       turns: row.turns.size,
       models: [...row.models.values()],
+      speedModels: [...row.speedModels.values()],
       sources: [...row.sources.values()].map((source) => ({
         ...source,
         tasks: [...source.tasks],
@@ -391,6 +413,9 @@ export function summarizeLedgerEntries(entries) {
             usageId: entry.id,
             occurredAt: entry.occurredAt,
             model: entry.model,
+            providerId: entry.providerId,
+            durationMs: entry.durationMs,
+            firstTokenMs: entry.firstTokenMs,
             inputTokens: entry.inputTokens,
             cachedInputTokens: entry.cachedInputTokens,
             outputTokens: entry.outputTokens

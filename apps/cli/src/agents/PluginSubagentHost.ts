@@ -290,7 +290,11 @@ export function createPluginSubagentHost(
 
     const metaOf = (taskId: string): SpawnMeta | null => {
       const meta = spawnMeta.get(taskId);
-      return meta && meta.pluginId === pluginId ? meta : null;
+      if (meta) return meta.pluginId === pluginId ? meta : null;
+      const owner = resolveCurrentAgent();
+      const record = taskManager.get(taskId, owner);
+      if (!record || record.pluginId !== pluginId) return null;
+      return { owner, pluginId, providerId: record.provider_id ?? '', protocol: record.protocol ?? '' };
     };
 
     const snapshotOf = (taskId: string, meta: SpawnMeta): PluginSubagentTaskSnapshot | null => {
@@ -478,11 +482,18 @@ export function createPluginSubagentHost(
           forgetSettledTasks();
           const scoped = owner && isAgentRuntime(owner) ? owner : null;
           const snapshots: PluginSubagentTaskSnapshot[] = [];
+          const seen = new Set<string>();
           for (const [taskId, meta] of spawnMeta) {
             if (meta.pluginId !== pluginId) continue;
             if (scoped && meta.owner !== scoped) continue;
             const record = taskManager.get(taskId, meta.owner);
-            if (record) snapshots.push(toTaskSnapshot(record, meta.initiatedByCallId));
+            if (record) {
+              snapshots.push(toTaskSnapshot(record, meta.initiatedByCallId));
+              seen.add(taskId);
+            }
+          }
+          for (const record of taskManager.list(scoped ?? resolveCurrentAgent())) {
+            if (record.pluginId === pluginId && !seen.has(record.id)) snapshots.push(toTaskSnapshot(record));
           }
           return snapshots.sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt));
         },
@@ -490,6 +501,12 @@ export function createPluginSubagentHost(
         get(taskId) {
           const meta = metaOf(taskId);
           return meta ? snapshotOf(taskId, meta) : null;
+        },
+
+        restart(taskId) {
+          const meta = metaOf(taskId);
+          if (!meta || !snapshotOf(taskId, meta)) throw new Error(`Subagent task not found: ${taskId}`);
+          return taskManager.restart(taskId, meta.owner);
         },
 
         kill(taskId) {

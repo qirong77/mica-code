@@ -6,6 +6,7 @@ export type AgentUsageRecord = {
   /** UTC wall-clock time when the provider reported this usage. */
   occurredAt?: string;
   provider: string;
+  providerId?: string;
   turnId: number;
   requestIndex: number;
   messageCount: number;
@@ -15,6 +16,10 @@ export type AgentUsageRecord = {
   outputTokens: number;
   totalTokens: number;
   paidTokenRate: number;
+  /** End-to-end request duration, including retries. */
+  durationMs?: number;
+  /** Time to first text or reasoning delta in the final attempt. */
+  firstTokenMs?: number;
 };
 
 export type AgentCallbacks = {

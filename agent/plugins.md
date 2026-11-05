@@ -60,7 +60,7 @@
 
 ### subagents
 
-- 委派子代理用 `ctx.subagents`：`registerType()` 注册类型（工具白/黑名单、写策略、`maxTurns`）、`run` / `background` 跑一个、`tasks.list|get|kill|wait` 管后台任务、`caller(context)` 解出本次调用所属的委派来源。机制（建子代理、用量记账、路径租约、完成回注）在宿主，策略（有哪些类型、工具形状、什么时候委派）在插件；子代理类型挂在注册它的插件名下，插件停用即消失。
+- 委派子代理用 `ctx.subagents`：`registerType()` 注册类型（工具白/黑名单、写策略、`maxTurns`）、`run` / `background` 跑一个、`tasks.list|get|kill|wait|restart` 管后台任务、`caller(context)` 解出本次调用所属的委派来源。`restart(taskId)` 使用与 `get` 相同的插件及原 owner 归属检查，返回新任务 ID；它带原任务与最近活动创建替代任务，不是断点续跑，运行中、无权访问或无法重启时抛错。机制（建子代理、用量记账、路径租约、完成回注）在宿主，策略（有哪些类型、工具形状、什么时候委派）在插件；子代理类型挂在注册它的插件名下，插件停用即消失。
 - 需要「可复用的隔离子代理」（旁问、连续追问）用 `ctx.subagents.thread({ type, systemPrompt, tools, allowedTools, disallowedTools, model, maxTurns })`：一次建线程、多次 `ask()`，同一线程串行（并发 ask 直接报错）、可用 `usage()` 读请求数与最近用量、`dispose()` 收尾。线程不占 `tasks`、不拿路径租约、绑定 `ask` 当时的当前会话；每次 ask 的用量由宿主以 `origin: 'plugin'` 记进会话 `subagentUsageHistory`。system prompt 是整体替换，插件要自己带上它需要的上下文。
 - 插件异步回写先通过 `ctx.session.captureOwner?.(callbacks.context)` 捕获发起者（命令不传上下文则取当前会话），notice 显式传回 owner；`turn:before` / `turn:after` 与会话生命周期按 owner 隔离临时状态，`primaryAgentOnly` 不代表整个 TUI 只有一条主会话。
 

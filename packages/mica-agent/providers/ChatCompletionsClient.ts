@@ -248,6 +248,8 @@ export class ChatCompletionsClient extends BaseAgent<
       // 这里不包 try/catch，是为了不把整段流式处理重新缩进。
       const failed = await withRetry(
         async () => {
+          attemptStartedAt = Date.now();
+          firstDeltaAt = 0;
           attemptHadOutput = false;
           attemptHadThinking = false;
           content = '';
@@ -371,8 +373,6 @@ export class ChatCompletionsClient extends BaseAgent<
             requestAttempts += 1;
             // 重发之后的首字要重新计时，否则「第一次试了 40s 才失败、重试 2s 有输出」
             // 会被记成 42s 的首字延迟。
-            firstDeltaAt = 0;
-            attemptStartedAt = Date.now();
             if (canRollbackText && attemptHadOutput) this.onTextRollback?.();
             totalContent = totalCheckpoint;
             hasStreamedText = streamedCheckpoint;
@@ -403,10 +403,15 @@ export class ChatCompletionsClient extends BaseAgent<
       // provider rejects on the next request with a 400.
       throwIfQueryStopped(options);
       options?.signal?.removeEventListener?.('abort', onAbort);
+      const durationMs = Date.now() - requestStartedAt;
+      const firstTokenMs = firstDeltaAt ? firstDeltaAt - attemptStartedAt : undefined;
       finishRequest({ outcome: 'completed', toolCalls: toolCallsMap.size });
 
       for (const { usage, model } of pendingUsage) {
-        this.recordUsage(usage, { model, turnId, requestIndex, messageCount: messages.length });
+        this.recordUsage(usage, {
+          model, turnId, requestIndex, messageCount: messages.length,
+          ...(pendingUsage.length === 1 ? { durationMs, firstTokenMs } : {}),
+        });
       }
 
       const toolCalls =
@@ -498,6 +503,8 @@ export class ChatCompletionsClient extends BaseAgent<
       turnId: number;
       requestIndex: number;
       messageCount: number;
+      durationMs?: number;
+      firstTokenMs?: number;
     },
   ): void {
     const promptTokens = usage.prompt_tokens ?? 0;
@@ -509,6 +516,7 @@ export class ChatCompletionsClient extends BaseAgent<
       usageId: randomUUID(),
       occurredAt: new Date().toISOString(),
       provider: 'openai_chat_completions',
+      providerId: this.provider.id,
       turnId: metadata.turnId,
       requestIndex: metadata.requestIndex,
       messageCount: metadata.messageCount,
@@ -518,6 +526,8 @@ export class ChatCompletionsClient extends BaseAgent<
       outputTokens,
       totalTokens,
       paidTokenRate,
+      durationMs: metadata.durationMs,
+      firstTokenMs: metadata.firstTokenMs,
       promptTokens,
     };
 

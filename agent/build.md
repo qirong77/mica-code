@@ -28,11 +28,22 @@ npx eslint src/
 npm run build              # 并行：根 CLI 构建 + 外壳 + Web 运行时
 npm run build:server       # 只重建 out/server
 npm run build:app          # build + electron-builder --dir + 写产物指纹（产出 .app，= build:unpack）
+npm run build:app:local    # 同上但跳过 electron-builder 签名、改用本机证书快速签（见下）
+npm run pack:app           # 只跑 electron-builder --dir 且强制不签名
+npm run sign:app           # 用本机自签证书给已打出的 .app 签名
 npm run build:mac          # 再打 DMG + zip（发布用；打包与压缩占 20s 以上）
 npm run start:web          # 运行已构建的 Web 运行时
 ```
 
 `build:app` 之前会执行根 `bun run build`：桌面端经 `resolveMicaExecutable()` 使用 `~/.local/bin/mica`，不刷新 CLI 就会连到旧二进制。
+
+### macOS 签名
+
+`electron-builder.yml` 里 `mac.identity: mica-codesign` 指向一个**本机自签证书**（`~/.mica/codesign/` + 名为 `mica-codesign` 的钥匙串，密码在 login keychain 的通用密码项里）。这样做的原因是 adhoc 签名的 designated requirement 绑 cdhash，每次重建都变，macOS 的「本地网络」授权会随之失效——表现为进程内访问 `172.x`/`10.x` 4ms 内 `EHOSTUNREACH`，而 launchd 拉起的独立进程同时刻一切正常。
+
+- **`electron-builder` 自己的签名不要用**：它带 `--timestamp` 向 Apple 时间戳服务器请求，只能走代理的机器上每个二进制都要等超时，整包卡 5–8 分钟。`CSC_IDENTITY_AUTO_DISCOVERY=false` 压不住 yml 里显式写的 identity，要跳过必须用 `-c.mac.identity=null`（`pack:app` 已经这么做）。
+- `sign-app.sh` 不请求时间戳，几秒签完。它只签 Mach-O（node-pty 的 prebuilds 混着 win32 的 `.node`），顺序是 `.node/.dylib/.so` → framework/嵌套 app（按深度倒序）→ 主 app。
+- **跨机器安全**：没有 `mica-codesign` 证书的机器（同事、CI、Linux/Windows）`sign-app.sh` 打印一行说明后退出 0，`electron-builder` 找不到该身份也只是 `skipped macOS application code signing` 并以 0 退出，产物保持 adhoc 签名、可运行。想让缺证书变成硬失败（发布流水线）设 `MICA_SIGN_REQUIRED=1`。
 
 ## 构建
 

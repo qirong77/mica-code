@@ -436,6 +436,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       // 失败也要有一条 request:end（outcome:'error'），口径与 Chat Completions 一致。
       const failed = await withRetry(
         async () => {
+          attemptStartedAt = Date.now();
+          firstDeltaAt = 0;
           emittedContentSeparator = false;
           attemptHadToolOutput = false;
           content = '';
@@ -483,7 +485,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
             if (event.type === 'response.output_text.delta') {
               // 首字只认正文/思考增量：response.created 之类的事件不算首字。
-              if (!firstDeltaAt) firstDeltaAt = Date.now();
+              if (event.delta && !firstDeltaAt) firstDeltaAt = Date.now();
               const textDelta: string =
                 contentSeparator && !emittedContentSeparator ? `${contentSeparator}${event.delta}` : event.delta;
               emittedContentSeparator = true;
@@ -498,7 +500,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
               event.type === 'response.reasoning_summary_text.done' ||
               event.type === 'response.reasoning_text.done'
             ) {
-              if (!firstDeltaAt) firstDeltaAt = Date.now();
+              if ('delta' in event && event.delta && !firstDeltaAt) firstDeltaAt = Date.now();
               reasoningParts.accept(event);
               continue;
             }
@@ -572,8 +574,6 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           shouldRetry: (error) => (!hasReasoningText || (canRollbackText && this.canRollbackThinking)) && (canRollbackText || (!content && !attemptHadToolOutput)) && isRetryableError(error),
           onRetry: ({ attempt, error, delayMs }) => {
             requestAttempts += 1;
-            firstDeltaAt = 0;
-            attemptStartedAt = Date.now();
             if (canRollbackText && (content || hasReasoningText)) this.onTextRollback?.();
             console.error(
               `[mica] provider request retry ${attempt}: ${error instanceof Error ? error.message : String(error)}`,
@@ -600,6 +600,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       // aborted turn must not be committed as a partial/empty response.
       throwIfQueryStopped(options);
       options?.signal?.removeEventListener?.('abort', onAbort);
+      const durationMs = Date.now() - requestStartedAt;
+      const firstTokenMs = firstDeltaAt ? firstDeltaAt - attemptStartedAt : undefined;
       finishRequest({ outcome: 'completed', toolCalls: toolCalls.size });
       // A terminal event alone is not enough: the stream must also end cleanly.
       // This is a display boundary only; it does not change the request history.
@@ -617,6 +619,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           turnId,
           requestIndex,
           messageCount: messages.length,
+          durationMs,
+          firstTokenMs,
         });
       }
 
@@ -678,6 +682,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       turnId: number;
       requestIndex: number;
       messageCount: number;
+      durationMs?: number;
+      firstTokenMs?: number;
     },
   ): void {
     const inputTokens = usage.input_tokens ?? 0;
@@ -689,6 +695,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       usageId: randomUUID(),
       occurredAt: new Date().toISOString(),
       provider: 'openai_responses',
+      providerId: this.provider.id,
       turnId: metadata.turnId,
       requestIndex: metadata.requestIndex,
       messageCount: metadata.messageCount,
@@ -698,6 +705,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       outputTokens,
       totalTokens,
       paidTokenRate,
+      durationMs: metadata.durationMs,
+      firstTokenMs: metadata.firstTokenMs,
     };
 
     this.lastUsage = record;

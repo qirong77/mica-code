@@ -47,6 +47,34 @@ describe('parseUsageLedger', () => {
     expect(entries.map((entry) => entry.id)).toEqual(['u1']);
   });
 
+  test('preserves valid optional providerId and timing values', () => {
+    const entry = parseUsageLedger(line({
+      id: 'u1', occurredAt: '2026-10-01T10:00:00.000Z', model: 'm', pluginId: 'commit',
+      providerId: ' example ', durationMs: 1250.5, firstTokenMs: 0,
+    }))[0];
+    expect(entry.providerId).toBe('example');
+    expect(entry.durationMs).toBe(1250.5);
+    expect(entry.firstTokenMs).toBe(0);
+  });
+
+  test('omits invalid optional fields without dropping the entry', () => {
+    const invalid = [-1, '123', null, true, {}, [], Infinity];
+    for (const value of invalid) {
+      const entry = parseUsageLedger(line({
+        id: 'u1', occurredAt: '2026-10-01T10:00:00.000Z', model: 'm', pluginId: 'commit',
+        providerId: '  ', durationMs: value, firstTokenMs: value,
+      }))[0];
+      expect(entry).toBeDefined();
+      expect(entry).not.toHaveProperty('providerId');
+      expect(entry).not.toHaveProperty('durationMs');
+      expect(entry).not.toHaveProperty('firstTokenMs');
+    }
+    const overflow = parseUsageLedger(
+      '{"id":"u2","occurredAt":"2026-10-01","model":"m","pluginId":"commit","durationMs":1e999}',
+    )[0];
+    expect(overflow).not.toHaveProperty('durationMs');
+  });
+
   test('drops entries without an identity, time, model or plugin', () => {
     expect(
       parseUsageLedger(

@@ -406,8 +406,8 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       },
       // 插件自己的模型请求同样要进轨迹：app-server 是常驻会话，漏了这一笔，
       // 「起标题为什么慢」「哪个插件在反复失败」在复盘里就永远没有出处。
-      trace: ({ pluginId, purpose, model, input }) => {
-        const run = agent.startHelperRun({ kind: 'plugin-llm', pluginId, purpose, model, input });
+      trace: ({ pluginId, purpose, model, providerId, protocol, input }) => {
+        const run = agent.startHelperRun({ kind: 'plugin-llm', pluginId, purpose, model, providerId, protocol, input });
         return { ...run.callbacks, finish: run.finish };
       },
     }),

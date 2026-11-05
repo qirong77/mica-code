@@ -1,10 +1,19 @@
 import { createElement } from 'react';
+import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { ConfigWebPlugin } from '../../src/shared/types.js';
 import { setConfigWebClient } from '../api.js';
 import type { ConfigWebClient } from '../api.js';
 import { PluginActionsGroup, PluginCard, PluginDetail, pluginRunningStatus } from './PluginsPage.js';
+
+it('插件详情建立窄屏布局所需的页面容器', () => {
+  const styles = readFileSync(new URL('../styles.css', import.meta.url), 'utf8');
+  const detail = styles.match(/\.plugin-detail\s*\{([^}]*)\}/)?.[1] ?? '';
+  expect(detail).toMatch(/container-type:\s*inline-size/);
+  expect(detail).toMatch(/container-name:\s*page/);
+  expect(styles).toMatch(/@container page \(max-width: 980px\)\s*\{\s*\.plugin-columns\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});
 
 function plugin(overrides: Partial<ConfigWebPlugin> = {}): ConfigWebPlugin {
   return {

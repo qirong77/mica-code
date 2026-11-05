@@ -8,7 +8,7 @@
   `Implementer` / `Reviewer` / `Tester` / `Planner` / `Proposal`），声明工具白黑名单、
   默认上下文模式、写策略（`none` / `owned_paths` / `proposal` / `unrestricted`）与迭代上限。
 - **工具**（`ctx.tools.register`，`primaryAgentOnly`）：`agent`，支持
-  `run` / `list` / `read` / `kill` / `await` / `run_many` / `join`，参数与文案在本目录。
+  `run` / `list` / `read` / `kill` / `restart` / `await` / `run_many` / `join`，参数与文案在本目录。
 - **prompt**（`ctx.prompt.section`，id `delegation`）：只说什么时候该委派、怎么划分
   所有权、结果怎么验收；`context_mode`、`owned_paths`、后台与等待的用法留给工具描述。
 
@@ -21,7 +21,7 @@
 路径租约、完成后回注通知；插件只描述「有哪些类型、工具长什么样、什么情况下委派」。
 停用本插件，`agent` 工具、这些类型与这段 prompt 一起消失。
 
-`list` / `read` / `kill` / `await` / `join` 都按调用所属的主代理隔离任务。
+`list` / `read` / `kill` / `restart` / `await` / `join` 都按调用所属的主代理隔离任务。
 `run_many` 先校验整批任务再启动；依赖只有在宿主报告 `completed` 后才放行，失败、
 被中止或未完成的依赖会使下游任务显示 `skipped`。父请求中止后不再派发后续任务。
 等待后台依赖的完成确认同样能立即取消，不必等子代理处理完中断才释放父调用。
@@ -34,7 +34,7 @@
 - 前台 `run` 在整轮失败后由本插件再补一次：只有不落盘的类型（`write_mode` 为 `none` /
   `proposal`）、未被中止、且宿主报告的原因是**可重试**的（429 / 5xx / 超时 / 网络）才重跑；
   可写类型失败后不自动重跑，避免把已经做过一半的写入再执行一遍。重跑过的结果带 `attempts: 2`。
-- 后台任务的重试由父代理决定：失败会以 `failed` 结算并回注通知，可以按需重新提交。
+- 任务的重试由父代理决定：先 `read` 查看错误与活动，判断原因，不盲目重试用户主动停止的任务。`restart` 携带原任务与最近活动创建新任务 ID，不是断点续跑；可写任务先确认旧任务已结束并检查已有改动，再用新 ID `await` / `read`。
 - `run_many` 中某条任务启动失败（租约冲突、并发已满、宿主拒绝）只把这一条结算成 `failed`，
   同批其余任务继续执行，批次末尾给出 `completed / partial / failed / skipped / running` 统计；
   父请求中止时整批立即停止，不再派发后续任务。

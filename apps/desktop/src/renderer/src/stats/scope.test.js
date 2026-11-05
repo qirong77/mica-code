@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { localDayKey } from '@packages/mica-web-shared/stats-day.js'
-import { bucketByDay, bucketByDaySource, scopeSession } from './scope.js'
+import { bucketByDay, bucketByDaySource, modelPerformance, scopeSession } from './scope.js'
 
 const at = (y, m, d, h = 12) => new Date(y, m - 1, d, h).getTime()
 const day = (y, m, d) => localDayKey(at(y, m, d))
@@ -75,6 +75,33 @@ function session(overrides = {}) {
 }
 
 describe('Stats range scoping', () => {
+  test('compares weighted performance only for selected days and separates providers', () => {
+    const sample = (provider, outputTokens, durationMs, firstTokenMs) => ({
+      provider, model: 'm', outputTokens, durationMs, throughputSamples: 1, firstTokenMs, firstTokenSamples: 1
+    })
+    const input = session({ days: [
+      dayRow({ day: day(2026, 8, 2), speedModels: [sample('a', 100, 1000, 200), sample('b', 10, 1000, 400)] }),
+      dayRow({ day: day(2026, 8, 3), speedModels: [sample('a', 100, 3000, 600)] })
+    ] })
+    const all = modelPerformance([scopeSession(input, 'all')])
+    expect(all.map((row) => [row.provider, row.tokensPerSecond, row.averageFirstTokenMs, row.throughputSamples])).toEqual([
+      ['a', 50, 400, 2], ['b', 10, 400, 1]
+    ])
+    expect(modelPerformance([scopeSession(input, { day: day(2026, 8, 3) })])[0].tokensPerSecond).toBeCloseTo(100 / 3)
+    expect(modelPerformance([session()])).toEqual([])
+  })
+
+  test('sorts each metric independently and keeps missing samples last', () => {
+    const samples = [
+      { provider: 'a', model: 'a', outputTokens: 100, durationMs: 1000, throughputSamples: 1, firstTokenMs: 900, firstTokenSamples: 1 },
+      { provider: 'b', model: 'b', outputTokens: 10, durationMs: 1000, throughputSamples: 1, firstTokenMs: 100, firstTokenSamples: 1 },
+      { provider: 'c', model: 'c', outputTokens: 0, durationMs: 0, throughputSamples: 0, firstTokenMs: 200, firstTokenSamples: 1 }
+    ]
+    const scoped = [session({ days: [dayRow({ speedModels: samples })] })]
+    expect(modelPerformance(scoped, 'throughput').map((row) => row.model)).toEqual(['a', 'b', 'c'])
+    expect(modelPerformance(scoped, 'firstToken').map((row) => row.model)).toEqual(['b', 'c', 'a'])
+  })
+
   test('sums only the day rows inside the range', () => {
     const scoped = scopeSession(session(), 'all')
     expect(scoped.requests).toBe(12)

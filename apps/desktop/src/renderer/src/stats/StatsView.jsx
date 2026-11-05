@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Button, DataTable, Segmented, SelectMenu, Tag } from '@mica-config-ui/web'
 import { BarSeries, CalendarHeatmap } from './charts'
 import { SessionDetailModal } from './SessionDetailModal'
-import { bucketByDay, bucketByDaySource, isDayRange, rangeStart, scopeSession } from './scope'
+import { bucketByDay, bucketByDaySource, isDayRange, modelPerformance, rangeStart, scopeSession } from './scope'
 import {
   USAGE_KIND_COLORS as SOURCE_COLORS,
   USAGE_KIND_ORDER as SOURCE_ORDER
@@ -529,6 +529,43 @@ function DailyCard({ sessions, range }) {
           ))}
         </div>
       ) : null}
+    </section>
+  )
+}
+
+function ModelPerformanceCard({ scoped }) {
+  const [metric, setMetric] = useState('throughput')
+  const rows = useMemo(() => modelPerformance(scoped, metric), [scoped, metric])
+  const valueOf = (row) => metric === 'firstToken' ? row.averageFirstTokenMs : row.tokensPerSecond
+  const max = Math.max(0, ...rows.map((row) => valueOf(row) || 0))
+  return (
+    <section className={`${CARD_CLASS} p-4`}>
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className={OVERLINE_CLASS}>Model performance</h2>
+        <span className="mica-config-ui is-embed"><Segmented size="compact" value={metric} options={[{ value: 'throughput', label: '吞吐' }, { value: 'firstToken', label: '首字等待' }]} ariaLabel="模型性能指标" onChange={setMetric} /></span>
+      </header>
+      <p className="mt-1 text-[11px] text-fg-faint">吞吐为输出 tokens / 总请求耗时（含重试）；首字等待为最终尝试到首个正文或思考增量的平均时间，不含之前的重试等待。仅统计有对应计时的请求。</p>
+      {rows.length === 0 ? (
+        <p className="py-6 text-center text-xs text-fg-faint">当前区间没有可用的请求计时数据。</p>
+      ) : (
+        <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+          {rows.map((row) => (
+            <div key={JSON.stringify([row.provider, row.model])} className="min-w-0">
+              <div className="truncate font-mono text-xs text-fg-strong" title={[row.provider, row.model].filter(Boolean).join(' / ')}>
+                {[row.provider, row.model].filter(Boolean).join(' / ')}
+              </div>
+              <div className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-panel-hi">
+                <div className="h-full rounded-full bg-fg" style={{ width: `${max > 0 ? (valueOf(row) || 0) / max * 100 : 0}%` }} />
+              </div>
+              <div className="mt-1 text-[11px] text-fg-muted tabular-nums">
+                {metric === 'throughput'
+                  ? <>{row.tokensPerSecond == null ? '—' : `${row.tokensPerSecond.toFixed(1)} tokens/s`} · {row.throughputSamples} 个样本</>
+                  : <>{row.averageFirstTokenMs == null ? '—' : `${(row.averageFirstTokenMs / 1000).toFixed(2)} s`} · {row.firstTokenSamples} 个样本</>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   )
 }
@@ -1207,6 +1244,7 @@ export function StatsView({ visible }) {
                 calendar={calendar}
               />
               <DailyCard sessions={sessions} range={range} />
+              <ModelPerformanceCard scoped={activeScoped} />
               <ByModelCard scoped={activeScoped} />
               <BySourceCard scoped={activeScoped} />
               <ByProjectCard

@@ -1152,6 +1152,8 @@ describe('SessionController', () => {
       outputTokens: 100,
       totalTokens: 200_100,
       paidTokenRate: 0,
+      durationMs: 1234,
+      firstTokenMs: 321,
       occurredAt: '2026-08-01T09:00:00.000Z',
     };
     let lastUsage = usage;
@@ -1192,6 +1194,7 @@ describe('SessionController', () => {
     expect(saved.at(-1)?.snapshot.displayUsage).toEqual({ totalTokens: 20_000, compactedAt });
     // 压缩不改变对账口径：真实用量记录原样保留
     expect(saved.at(-1)?.snapshot.lastUsage).toEqual(usage);
+    expect(saved.at(-1)?.snapshot.usageHistory).toEqual([usage]);
 
     // 之后再存（没有新的真实请求）：压缩后的展示值继续生效
     controller.saveCurrent();

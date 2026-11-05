@@ -501,6 +501,33 @@ describe('PluginSubagentHost path leases', () => {
 });
 
 describe('desktop subagent restart', () => {
+  it('restarts only the calling plugin’s task under its original owner', async () => {
+    const pending = createPendingQuery();
+    const harness = createHarness({ query: pending.query });
+    const otherOwner = createRuntimeStub({ query: pending.query, taskOwnerId: 'other-owner' }).runtime;
+    const otherPlugin = harness.host.forPlugin('other-plugin');
+    harness.api.registerType(exploreType());
+    const first = harness.api.background({ description: 'work', prompt: 'original', caller: { owner: otherOwner } });
+    await flushAsyncWork();
+    expect(() => harness.api.tasks.restart(first.taskId)).toThrow(/running/);
+    pending.fail(new Error('original failure'));
+    await first.done;
+    await flushAsyncWork();
+
+    expect(() => otherPlugin.tasks.restart(first.taskId)).toThrow(/not found/);
+    expect(() => harness.api.tasks.restart('missing')).toThrow(/not found/);
+    const replacement = harness.api.tasks.restart(first.taskId);
+    await flushAsyncWork();
+    expect(replacement).not.toBe(first.taskId);
+    expect(harness.api.tasks.get(replacement)?.status).toBe('running');
+    expect(harness.taskManager.get(replacement, harness.runtime)).toBeNull();
+    expect(harness.taskManager.get(replacement, otherOwner)).toBeTruthy();
+    expect(pending.prompts.at(-1)).toContain('original failure');
+    expect(pending.prompts.at(-1)).toContain('verify the current state');
+    harness.api.tasks.kill(replacement);
+    await flushAsyncWork();
+  });
+
   it('holds leases and blocks restart until delayed abort exits', async () => {
     let rejectQuery: (error: Error) => void = () => undefined;
     let aborted = false;

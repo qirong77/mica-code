@@ -23,6 +23,7 @@ export type ModelTextRequest = {
   baseUrl: string;
   apiKey?: string;
   protocol?: 'openai_chat_completions' | 'openai_responses';
+  providerId?: string;
   model: string;
   system: string;
   user: string;
@@ -94,7 +95,7 @@ export async function runModelTextRequest(request: ModelTextRequest): Promise<Mo
 function buildProvider(
   baseUrl: string,
   model: string,
-  request: Pick<ModelTextRequest, 'apiKey' | 'protocol'>,
+  request: Pick<ModelTextRequest, 'apiKey' | 'protocol' | 'providerId'>,
 ): {
   id: string;
   name: string;
@@ -105,7 +106,7 @@ function buildProvider(
   supportsEffort: boolean;
 } {
   return {
-    id: 'plugin-helper',
+    id: request.providerId ?? 'plugin-helper',
     name: 'Plugin helper',
     api_base: baseUrl,
     api_key: request.apiKey ?? '',

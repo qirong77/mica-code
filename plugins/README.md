@@ -263,6 +263,8 @@ checkpoint 摘要（工具过程不进摘要输入）。它只在能独占写会
 提供它，TUI 的输入队列本来就拦着、`mica exec` 没有第二轮，插件写 `agent.withMaintenance ? … : await task()`。
 `compactIdleHistory` 那条通路已经由宿主开好窗口（`reason: 'compaction'`、`label: '压缩'`），插件自己的耗时任务才需要显式用它。
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。类型可用 `maxTurnContinuations` 指定达到默认 `maxTurns` 后的同上下文续跑次数（最多 2）；请求显式指定 `maxTurns` 时始终是硬上限。
+
+`ctx.subagents.tasks.restart(taskId)` 在原 owner 下创建带原任务和最近活动的替代任务，返回新任务 ID；这是新执行，不是断点续跑。它与 `tasks.get` 一样只能访问本插件的任务，任务不存在、仍在运行或无法重启时抛错；路径租约和跨进程防重复检查仍由宿主执行。
 机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定有哪些类型、`agent` 工具长什么样。
 需要一条能反复追问的隔离上下文（旁问、连续修订）时用 `ctx.subagents.thread()`：一次建线程、多次
 `ask()`，同一线程串行、`usage()` 读请求数、`dispose()` 收尾；它不进任务列表、不拿路径租约，每次 ask

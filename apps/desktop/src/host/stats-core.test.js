@@ -10,11 +10,45 @@ import {
   projectContent,
   projectSubagentRecords,
   projectUsage,
+  summarizeLedgerEntries,
   summarizeStatsDays,
   usageIdentity
 } from './stats-core'
 
 describe('Stats usage aggregation', () => {
+  test('aggregates only valid request timing samples by day and provider', () => {
+    const time = new Date(2026, 7, 2, 12).getTime()
+    const events = [
+      { providerId: 'a', model: 'm', outputTokens: 100, durationMs: 1000, firstTokenMs: 0 },
+      { providerId: 'a', model: 'm', outputTokens: 50, durationMs: 2000, firstTokenMs: 300 },
+      { providerId: 'a', model: 'm', outputTokens: 50 },
+      { providerId: 'a', model: 'm', durationMs: 1000, firstTokenMs: -1 },
+      { providerId: 'b', model: 'm', outputTokens: 10, durationMs: 0, firstTokenMs: 200 }
+    ].map((usage) => normalizeUsageEvent(usage, time, 'm'))
+    const [day] = summarizeStatsDays(events)
+    expect(day.speedModels).toEqual([
+      { provider: 'a', model: 'm', outputTokens: 150, durationMs: 3000, throughputSamples: 2, firstTokenMs: 300, firstTokenSamples: 2 },
+      { provider: 'b', model: 'm', outputTokens: 0, durationMs: 0, throughputSamples: 0, firstTokenMs: 200, firstTokenSamples: 1 }
+    ])
+  })
+
+  test('uses request provider IDs without inferring from protocol or parent session', () => {
+    const { events } = parseSessionEvents({
+      createdAt: '2026-08-01T01:00:00.000Z', updatedAt: '2026-08-01T02:00:00.000Z',
+      snapshot: {
+        providerId: 'parent', model: 'm',
+        usageHistory: [{ provider: 'openai', providerId: 'actual' }, { provider: 'openai' }],
+        subagentUsageHistory: [{ provider: 'other', requests: [{ provider: 'openai' }, { providerId: 'child' }] }]
+      }
+    })
+    expect(events.map((event) => event.provider)).toEqual(['actual', null, null, 'child'])
+    const [ledger] = summarizeLedgerEntries([
+      { id: '1', occurredAt: '2026-08-01T01:00:00.000Z', pluginId: 'p', model: 'm', provider: 'openai', providerId: 'ledger-provider', durationMs: 1000, outputTokens: 10 },
+      { id: '2', occurredAt: '2026-08-01T01:00:00.000Z', pluginId: 'p', model: 'm', provider: 'openai', durationMs: 1000, outputTokens: 10 }
+    ])
+    expect(ledger.days[0].speedModels.map((row) => row.provider)).toEqual(['ledger-provider', null])
+  })
+
   test('separates cached and uncached input and derives a reconcilable total', () => {
     const event = normalizeUsageEvent(
       { inputTokens: 100, cachedInputTokens: 40, outputTokens: 20, totalTokens: 999 },

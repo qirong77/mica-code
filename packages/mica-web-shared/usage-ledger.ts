@@ -7,6 +7,9 @@ export type UsageLedgerEntry = {
   id: string;
   occurredAt: string;
   model: string;
+  providerId?: string;
+  durationMs?: number;
+  firstTokenMs?: number;
   pluginId: string;
   /** 这笔请求是干什么的（插件自己给的 purpose）。 */
   purpose: string | null;
@@ -26,6 +29,10 @@ function text(value: unknown): string | null {
 function count(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function timing(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 /** 解析账本文本：坏行跳过（写一半的追加、手改过的文件都不能让统计整份失败）。 */
@@ -49,10 +56,16 @@ export function parseUsageLedger(content: string): UsageLedgerEntry[] {
     if (!id || !occurredAt || !model || !pluginId) continue;
     if (seen.has(id)) continue;
     seen.add(id);
+    const providerId = text(parsed.providerId);
+    const durationMs = timing(parsed.durationMs);
+    const firstTokenMs = timing(parsed.firstTokenMs);
     entries.push({
       id,
       occurredAt,
       model,
+      ...(providerId ? { providerId } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
       pluginId,
       purpose: text(parsed.purpose),
       cwd: text(parsed.cwd),

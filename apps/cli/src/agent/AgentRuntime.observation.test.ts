@@ -617,6 +617,8 @@ describe('agent:observe', () => {
       pluginId: 'session-rename',
       purpose: 'title',
       model: 'plugin-model',
+      providerId: 'plugin-helper',
+      protocol: 'openai_chat_completions',
       input: 'give me a title',
     });
     run.callbacks.onRequestStart({ messageCount: 2 });
@@ -631,7 +633,7 @@ describe('agent:observe', () => {
     const start = events.find((event) => event.type === 'run:start');
     expect(start).toMatchObject({
       helper: { kind: 'plugin-llm', pluginId: 'session-rename', purpose: 'title' },
-      config: { model: 'plugin-model', effort: 'none' },
+      config: { model: 'plugin-model', providerId: 'plugin-helper', protocol: 'openai_chat_completions', effort: 'none' },
       input: 'give me a title',
     });
     expect(events.filter((event) => event.type === 'request:start')).toHaveLength(1);

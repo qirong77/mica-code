@@ -5693,6 +5693,9 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     grid-template-rows: auto minmax(0, 1fr);
     height: 100%;
     min-height: 0;
+    min-width: 0;
+    container-type: inline-size;
+    container-name: page;
   }
 
   /* 详情页自己的页头：返回目录在左，路径居中偏左，重新加载在右。与全局页头同一高度，

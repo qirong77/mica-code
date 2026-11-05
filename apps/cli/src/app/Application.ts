@@ -268,10 +268,10 @@ export class Application {
           },
           // 插件自己问模型也是一次真实的请求：进运行轨迹，复盘时才看得到
           // 「起标题/写提交说明等了多久、失败在哪一步」，而不只是 Stats 里的一笔 token。
-          trace: ({ pluginId, purpose, model, input, owner }) => {
+          trace: ({ pluginId, purpose, model, providerId, protocol, input, owner }) => {
             const session = resolvePluginSession(agentSessions, owner);
             if (!session) return undefined;
-            const run = session.agent.startHelperRun({ kind: 'plugin-llm', pluginId, purpose, model, input });
+            const run = session.agent.startHelperRun({ kind: 'plugin-llm', pluginId, purpose, model, providerId, protocol, input });
             return { ...run.callbacks, finish: run.finish };
           },
         }),

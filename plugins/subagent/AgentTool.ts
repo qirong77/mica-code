@@ -18,7 +18,7 @@ import { getBuiltinSubagent } from './definitions.js';
 import { parseRunManySpecs, planSubagentRuns, type PlannedSubagentRun } from './orchestration.js';
 import { formatStructuredSubagentResult, type StructuredSubagentResult } from './result.js';
 
-type AgentToolOperation = 'run' | 'list' | 'read' | 'kill' | 'await' | 'run_many' | 'join';
+type AgentToolOperation = 'run' | 'list' | 'read' | 'kill' | 'restart' | 'await' | 'run_many' | 'join';
 
 type AgentToolInput = ToolInput & {
   operation?: AgentToolOperation;
@@ -83,7 +83,7 @@ export class AgentTool extends MicaTool {
         properties: {
           operation: {
             type: 'string',
-            enum: ['run', 'list', 'read', 'kill', 'await', 'run_many', 'join'],
+            enum: ['run', 'list', 'read', 'kill', 'restart', 'await', 'run_many', 'join'],
             description: '操作类型，默认 run。',
           },
           description: { type: 'string', description: '给父 agent 和 UI 看的简短任务描述；run 时必填。' },
@@ -98,7 +98,7 @@ export class AgentTool extends MicaTool {
             description:
               'subagent reasoning effort，取子代理模型自己声明的档位名（见 /effort 列表，如 low/medium/high/max）；省略时继承主 agent 当前 effort。',
           },
-          task_id: { type: 'string', description: 'read/kill/await/join 操作的后台 subagent task ID。' },
+          task_id: { type: 'string', description: 'read/kill/restart/await/join 操作的 subagent task ID。' },
           task_ids: {
             type: 'array',
             items: { type: 'string' },
@@ -150,6 +150,7 @@ export class AgentTool extends MicaTool {
     if (operation === 'list') return this.listTasks(callbacks);
     if (operation === 'read') return this.readTask(input.task_id, callbacks);
     if (operation === 'kill') return this.killTask(input.task_id, callbacks);
+    if (operation === 'restart') return this.restartTask(input.task_id, callbacks);
     if (operation === 'await') return this.awaitTasks(input, callbacks);
     if (operation === 'join') return this.joinTasks(input, callbacks);
     if (operation === 'run_many') return this.runMany(input, callbacks);
@@ -180,7 +181,7 @@ export class AgentTool extends MicaTool {
       const ids = collectTaskIds(input as AgentToolInput);
       return `Agent task ${operation}: ${ids.join(', ') || '(missing task_ids)'}`;
     }
-    if (operation === 'read' || operation === 'kill') {
+    if (operation === 'read' || operation === 'kill' || operation === 'restart') {
       const taskId = typeof input.task_id === 'string' ? input.task_id : '(missing task_id)';
       return `Agent task ${operation}: ${taskId}`;
     }
@@ -412,6 +413,22 @@ export class AgentTool extends MicaTool {
     return `Subagent task ${taskId} is already finished (status: ${existing.status}).`;
   }
 
+  private async restartTask(taskIdInput: string | undefined, callbacks?: ToolExecuteCallbacks): Promise<string> {
+    const taskId = typeof taskIdInput === 'string' ? taskIdInput.trim() : '';
+    if (!taskId) return '错误：Agent restart 操作需要 task_id。';
+    if (!this.canAccessTask(taskId, callbacks)) return `Subagent task not found: ${taskId}`;
+    try {
+      const newTaskId = await this.subagents.tasks.restart(taskId);
+      return [
+        `已创建替代任务，原任务 ID: ${taskId}`,
+        `task_id: ${newTaskId}`,
+        '这是携带原任务和最近活动上下文的新任务，不是断点续跑。可用 operation=await 或 read 查看新任务。',
+      ].join('\n');
+    } catch (error) {
+      return `错误：无法创建替代任务：${formatErrorMessage(error)}`;
+    }
+  }
+
   private canAccessTask(taskId: string, callbacks?: ToolExecuteCallbacks): boolean {
     return this.findInaccessibleTask([taskId], callbacks) === undefined;
   }
@@ -482,12 +499,13 @@ export class AgentTool extends MicaTool {
  */
 function buildDescription(types: PluginSubagentType[]): string {
   return [
-    '启动和管理 subagent。operation 默认为 run；支持 list/read/kill/await/run_many/join。',
+    '启动和管理 subagent。operation 默认为 run；支持 list/read/kill/restart/await/run_many/join。',
     'subagent 默认注入 brief 任务上下文；可用 context_mode=none|brief|recent|files 控制。',
     '可写 subagent 使用 owned_paths 路径租约；Implementer/Tester/Proposal 必填。',
     'Proposal 模式不落盘，只返回 patch 提案；run_many 支持 depends_on 与 max_parallel。',
     '前台 run 会阻塞当前 turn 直到子代理返回；同一条消息里的多个前台调用会并行执行。需要主流程继续推进时用 run_in_background: true，完成后经 operation=read/join 取结果。',
     'await/join 等待已有子任务，可与同一条消息里的其他工具重叠执行，全部结果一起返回；仍有独立工作时先继续做，或把等待和工作放在同一条消息，别单独等待。shell 后台任务用 wait_for(kind=task)。',
+    'restart 用原任务和最近活动创建新任务，不是断点续跑；先 read 判断原因，不盲目重试用户主动停止的任务。',
     `可用 subagent_type: ${types.map((type) => `${type.name} (${type.description})`).join('; ')}。`,
     'effort 取子代理模型自己声明的档位名（模型不同档位集合也不同），省略时继承主 agent 当前 effort。',
     '只读与提案类子代理（write_mode none/proposal）遇到可重试的 provider 错误会自动整轮重试一次；可写子代理失败后不会自动重跑，需要重新提交。',
@@ -631,6 +649,7 @@ function normalizeOperation(value: unknown): AgentToolOperation {
     value === 'list' ||
     value === 'read' ||
     value === 'kill' ||
+    value === 'restart' ||
     value === 'run' ||
     value === 'await' ||
     value === 'run_many' ||

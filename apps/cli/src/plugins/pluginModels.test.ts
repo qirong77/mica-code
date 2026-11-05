@@ -81,7 +81,7 @@ describe('createPluginModels', () => {
 
     await models('session-rename', baseRequest);
 
-    expect(infos).toMatchObject([{ pluginId: 'session-rename', purpose: '自动起标题', model: 'mini', input: 'user' }]);
+    expect(infos).toMatchObject([{ pluginId: 'session-rename', purpose: '自动起标题', model: 'mini', providerId: 'plugin-helper', protocol: 'openai_chat_completions', input: 'user' }]);
     // 宿主给的三个回调必须真的递给模型客户端：否则轨迹里只有起止、没有请求边界。
     expect(typeof queryOptions?.onRequestStart).toBe('function');
     expect(typeof queryOptions?.onRequestEnd).toBe('function');
@@ -318,6 +318,25 @@ describe('capturePluginModelUsageRecorder', () => {
 });
 
 describe('createPluginModels follow-main', () => {
+  it('uses the resolved provider identity in both the client and trace', async () => {
+    const clients: ModelClientOptions[] = [];
+    const traces: unknown[] = [];
+    const models = createPluginModels({
+      resolveMainProvider: () => ({ providerId: 'gateway', baseUrl: 'https://main.test/v1', apiKey: 'k', protocol: 'openai_responses', model: 'm' }),
+      createClient: (options) => {
+        clients.push(options);
+        return fakeClient(options, { text: 'ok' });
+      },
+      trace: (info) => {
+        traces.push(info);
+        return undefined;
+      },
+    });
+    await models('commit', { ...baseRequest, useMainProvider: true, model: '' });
+    expect(clients[0]?.provider).toMatchObject({ id: 'gateway', protocol: 'openai_responses' });
+    expect(traces).toMatchObject([{ providerId: 'gateway', protocol: 'openai_responses' }]);
+  });
+
   it('resolves the endpoint from the host instead of the plugin', async () => {
     const built: { baseURL?: string; apiKey?: string; model?: string } = {};
     const models = createPluginModels({

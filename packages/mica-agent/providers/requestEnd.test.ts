@@ -19,6 +19,7 @@ vi.mock('openai', () => ({
 afterEach(() => {
   openaiMocks.chatCreate.mockReset();
   openaiMocks.responsesCreate.mockReset();
+  vi.useRealTimers();
 });
 
 /**
@@ -77,6 +78,51 @@ describe('request end outcome', () => {
 });
 
 describe('first token timing', () => {
+  it.each(['chat', 'responses'] as const)('%s associates final-attempt first token and total retry duration with usage', async (protocol) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const advanceClock = (ms: number) => vi.setSystemTime(Date.now() + ms);
+    const create = protocol === 'chat' ? openaiMocks.chatCreate : openaiMocks.responsesCreate;
+    create.mockResolvedValueOnce((async function* () {
+      advanceClock(100);
+      throw Object.assign(new Error('overloaded'), { status: 503 });
+    })()).mockResolvedValueOnce((async function* () {
+      advanceClock(70);
+      if (protocol === 'chat') {
+        yield { model: 'test-model', choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] };
+        advanceClock(30);
+        yield { model: 'test-model', choices: [], usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 } };
+      } else {
+        yield { type: 'response.output_text.delta', delta: 'ok' };
+        advanceClock(30);
+        yield { type: 'response.completed', response: { model: 'test-model', usage: { input_tokens: 2, output_tokens: 1, total_tokens: 3 } } };
+      }
+    })());
+    const client = protocol === 'chat'
+      ? new ChatCompletionsClient(options('openai_chat_completions'))
+      : new ResponsesClient(options('openai_responses'));
+    const promise = client.query('hello');
+    await vi.advanceTimersByTimeAsync(2100);
+    await expect(promise).resolves.toBe('ok');
+    expect(client.usageHistory).toHaveLength(1);
+    expect(client.usageHistory[0]).toMatchObject({
+      provider: protocol === 'chat' ? 'openai_chat_completions' : 'openai_responses',
+      providerId: 'test', firstTokenMs: 70, durationMs: 2200, outputTokens: 1,
+    });
+  });
+
+  it('does not associate ambiguous chat usage chunks with a duration', async () => {
+    openaiMocks.chatCreate.mockResolvedValueOnce((async function* () {
+      yield { model: 'test-model', choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] };
+      yield { model: 'test-model', choices: [], usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 } };
+      yield { model: 'test-model', choices: [], usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 } };
+    })());
+    const client = new ChatCompletionsClient(options('openai_chat_completions'));
+    await client.query('hello');
+    expect(client.usageHistory).toHaveLength(2);
+    expect(client.usageHistory.every((usage) => usage.durationMs === undefined && usage.firstTokenMs === undefined)).toBe(true);
+  });
+
   it('Chat Completions does not count a role-only chunk as the first token', async () => {
     openaiMocks.chatCreate.mockResolvedValueOnce(
       (async function* () {

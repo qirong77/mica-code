@@ -147,3 +147,36 @@ export function bucketByDaySource(sessions) {
   }
   return map
 }
+
+export function modelPerformance(sessions, metric = 'throughput') {
+  const models = new Map()
+  for (const session of sessions) {
+    for (const day of session.days || []) {
+      for (const sample of day.speedModels || []) {
+        const key = JSON.stringify([sample.provider, sample.model])
+        const row = models.get(key) || {
+          provider: sample.provider, model: sample.model, outputTokens: 0, durationMs: 0,
+          throughputSamples: 0, firstTokenMs: 0, firstTokenSamples: 0
+        }
+        for (const field of ['outputTokens', 'durationMs', 'throughputSamples', 'firstTokenMs', 'firstTokenSamples']) {
+          row[field] += sample[field]
+        }
+        models.set(key, row)
+      }
+    }
+  }
+  return [...models.values()]
+    .filter((row) => row.throughputSamples || row.firstTokenSamples)
+    .map((row) => ({
+      ...row,
+      tokensPerSecond: row.throughputSamples ? row.outputTokens * 1000 / row.durationMs : null,
+      averageFirstTokenMs: row.firstTokenSamples ? row.firstTokenMs / row.firstTokenSamples : null
+    }))
+    .sort((a, b) => {
+      const field = metric === 'firstToken' ? 'averageFirstTokenMs' : 'tokensPerSecond'
+      const av = a[field]
+      const bv = b[field]
+      if (av == null || bv == null) return (av == null ? 1 : 0) - (bv == null ? 1 : 0) || a.model.localeCompare(b.model)
+      return (metric === 'firstToken' ? av - bv : bv - av) || a.model.localeCompare(b.model)
+    })
+}
