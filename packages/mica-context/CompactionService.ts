@@ -101,8 +101,9 @@ export type CompactOptions = {
   preview?: boolean;
   pruneOnly?: boolean;
   /**
-   * 只把工具结果与媒体块（图片/文档）替换为占位符：不生成 checkpoint、不丢轮次、
-   * 不调用模型（可重复执行）。
+   * 只清理工具过程：把压缩区里的全部工具调用与结果聚合成一条占位调用、丢掉思考、
+   * 把媒体块（图片/文档）换成占位符。用户与助手的正文原样保留，不生成 checkpoint、
+   * 不丢轮次、不调用模型（可重复执行）。
    */
   toolResultsOnly?: boolean;
   /**

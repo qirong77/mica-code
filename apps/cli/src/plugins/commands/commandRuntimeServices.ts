@@ -1,4 +1,4 @@
-import { calculateCachedTokenRate, recordSubagentTaskUsage } from '@packages/mica-agent/index.js';
+import { calculateCachedTokenRate } from '@packages/mica-agent/index.js';
 import {
   micaBuiltinCommands,
   type CommandNoticeOptions,
@@ -27,6 +27,7 @@ import type { SessionController } from '../../session/SessionController.js';
 import { clearUI, showMessage as showGlobalMessage, syncModelDisplay } from '../../runtime/uiBridge.js';
 import { resolveCommandAgent } from './activeCommandProxies.js';
 import { toCompactedConversationDisplay } from './compactConversation.js';
+import { summarizeWithSubAgent } from '../../agent/agentCompaction.js';
 
 function currentContext(): ApplicationContext | null {
   return getActiveContext<ApplicationContext>();
@@ -664,41 +665,9 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
             command: '/compact',
             variant: 'compact',
           });
-          const subAgent = concreteAgent.createSubAgent(
-            {
-              systemPrompt: prompt,
-              // The summary subagent must not run any tools: it shares the
-              // parent's tool registry and session tools would mutate the very
-              // session being compacted. Disable tools entirely.
-              tools: false,
-            },
-            { helper: { kind: 'compaction', purpose: 'summarize' } },
-          );
-          const startedAt = new Date().toISOString();
-          try {
-            return await subAgent.query(
-              [
-                'Summarize this conversation into a compact checkpoint for the next coding agent.',
-                'Preserve concrete paths, commands, validation results, user constraints, and pending work.',
-                'Return only the requested <analysis> and <summary> blocks.',
-                '',
-                transcript,
-              ].join('\n'),
-            );
-          } finally {
-            // 摘要请求走子代理，不会进主 usageHistory；它同样是本会话的模型开销，
-            // 记进 subagentUsageHistory，否则 compact 的那次调用在 Stats 里不可见。
-            recordSubagentTaskUsage(concreteAgent, subAgent, {
-              taskId: 'compact-summary',
-              subagentType: 'compact',
-              description: '生成 compact 摘要',
-              model: concreteAgent.config.model,
-              effort: 'none',
-              status: 'completed',
-              startedAt,
-              finishedAt: new Date().toISOString(),
-            });
-          }
+          // 与插件触发的模型压缩共用一份实现：提示词、禁工具与用量记账都在那里，
+          // 各写一份的话「摘要请求算不算用量」这种问题迟早分叉（这里曾经把失败也记成完成）。
+          return summarizeWithSubAgent(concreteAgent, transcript, prompt);
         },
       });
 

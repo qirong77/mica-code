@@ -10,6 +10,7 @@ import {
   handleWorktreeEvent,
   isGitStatePath,
   isWorktreePath,
+  nestedWatchPath,
   setGitWatchBroadcaster,
   unwatchRepository,
   watchRepository
@@ -70,6 +71,22 @@ describe('isGitStatePath', () => {
     // 系统给不出文件名时宁可多刷一次，也别漏掉一次真正的提交。
     expect(isGitStatePath('')).toBe(true)
     expect(isGitStatePath(null)).toBe(true)
+  })
+})
+
+describe('nestedWatchPath', () => {
+  // 不支持递归 watch 时会给 refs / refs/heads 各开一个 watcher，它们给的 filename 是
+  // 相对各自目录的；不补前缀的话「提交」在过滤那一关就被丢掉，页面永远等不到推送。
+  it('prefixes a nested watcher filename back to the .git-relative path', () => {
+    expect(nestedWatchPath('refs/heads', 'main')).toBe(path.join('refs/heads', 'main'))
+    expect(isGitStatePath(nestedWatchPath('refs/heads', 'main'))).toBe(true)
+    expect(isGitStatePath(nestedWatchPath('refs', path.join('heads', 'main')))).toBe(true)
+  })
+
+  it('leaves the root watcher paths and empty filenames alone', () => {
+    expect(nestedWatchPath('', 'HEAD')).toBe('HEAD')
+    expect(nestedWatchPath('refs', '')).toBe('')
+    expect(nestedWatchPath('refs', undefined)).toBeUndefined()
   })
 })
 

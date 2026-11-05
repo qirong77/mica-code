@@ -432,6 +432,8 @@ export type ConfigWebPlugin = {
 /** 桌面端侧栏入口的静态描述：清单只给文案，卡片内容是插件自己的模块。 */
 export type ConfigWebPluginDesktopEntry = {
   label: string;
+  /** 摆在哪：`header` 是顶栏，其余按侧栏一行画（清单 `desktop.entry.placement`）。 */
+  placement?: 'header' | 'sidebar';
 };
 
 /** 侧栏入口打开的整页视图（清单 `desktop.page`）：宿主只画标题，内容来自插件模块。 */
@@ -536,6 +538,10 @@ export type ConfigWebPluginStatusField = {
 export type ConfigWebPluginDesktopPanel = {
   label: string;
   roles: string[];
+  /** 面板外壳：抽屉（默认）或整窗弹窗（清单 `desktop.panel.display`）。 */
+  display?: 'drawer' | 'modal';
+  /** 输入框上方那行状态（「这个能力现在生效没有」）是否来自这块面板。 */
+  status?: boolean;
   /**
    * 点入口时执行哪个动作（清单 `desktop.panel.open`）。
    *
@@ -550,6 +556,8 @@ export type ConfigWebPluginDesktopPanel = {
 };
 
 export type ConfigWebPluginPanelShortcut = {
+  /** 快捷按钮的稳定 id：面板视图按它在 `shortcutStates` 里给动态状态（徽标 / 禁用）。 */
+  id?: string;
   label: string;
   action?: string;
   section?: string;

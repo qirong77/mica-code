@@ -37,11 +37,12 @@
   `ctx.desktop.panel({ view, action })` 交出纯数据的视图与动作分派。宿主负责归一化与渲染，
   所以用户插件（没有前端模块）也有界面；`PluginPanel.ts` 里是类型、进程内登记表
   （`PluginPanelRegistry`）与视图/动作的归一化函数。只在清单声明了面板时才提供这个入口。
-  动作回包除了 `message`，还可以声明四种「跨出面板一步」的效果：`compose`（把文本放进当前
+  动作回包除了 `message`，还可以声明这几种「跨出面板一步」的效果：`compose`（把文本放进当前
   会话的输入框、不发送）、`newSession`（开一个新会话跑这段提示词，`confirm` 默认 `true`
   表示页面先弹窗让用户看见并编辑）、`dialog`（只读弹窗：`text` 是会换行的正文，
   `columns` + `rows` 是对齐的表格，格子带 `link`
-  就交给系统浏览器打开）、`openPath`（让宿主在应用里打开这个文件；`focus: true` 只画编辑器、
+  就交给系统浏览器打开）、`openExternal`（让系统浏览器打开一个地址，只放行 `http(s)` /
+  `mailto`，其余 scheme 丢掉）、`openPath`（让宿主在应用里打开这个文件；`focus: true` 只画编辑器、
   收起活动栏与文件树 Git 面板，改一份长文件时用它）与 `openReview`（把主窗口切到编辑器、打开一份对比：
   编辑器停在 Git 面板的 `head` 相对 `base` 上，复用
   它自己的文件列表与 monaco 差异视图；不给 `base` 就按仓库主分支（`origin/HEAD` → `main` →
@@ -126,8 +127,9 @@ context.onDispose(() => registration.dispose());
 ### 轮次之外的压缩
 
 `context.agent.compactIdleHistory()` 把**已经落盘的**会话历史压一次，`mode: 'quick'` 只把工具
-结果换成占位符（不调用模型），`mode: 'model'` 把用户与助手的对话（工具调用与结果不进摘要输入）
-交给模型写 checkpoint 摘要。与上面那个句柄里的 `compact()` 的区别是改哪一份：那里改的是一次
+调用与结果聚合成一条占位调用、丢掉思考、把图片与文档换成占位符（不调用模型，对话正文不动）；
+`mode: 'model'` 把用户与助手的对话（工具调用与结果不进摘要输入）交给模型写 checkpoint 摘要。
+与上面那个句柄里的 `compact()` 的区别是改哪一份：那里改的是一次
 请求即将发送的历史，这里改的是会话文件本身——所以重开这条会话看到的也是压缩后的样子。
 
 它只在能独占写会话文件的常驻宿主里提供（`mica app-server`）：没有 turn 在跑、没有别的进程

@@ -15,8 +15,8 @@ export type CompactCliOptions = {
   force?: boolean;
   pruneOnly?: boolean;
   /**
-   * 与交互式 `/compact` 同源：只把工具结果与媒体块替换为占位符，不改动对话
-   * 文本、不丢轮次、不调用模型（可重复执行）。
+   * 与交互式 `/compact` 同源：把工具调用与结果聚合成一条占位调用、丢掉思考、把媒体块
+   * 换成占位符；不改动对话正文、不丢轮次、不调用模型（可重复执行）。
    */
   toolResultsOnly?: boolean;
   signal?: AbortSignal;

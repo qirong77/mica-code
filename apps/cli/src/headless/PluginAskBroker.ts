@@ -28,8 +28,6 @@ export type PluginAskHost = {
    * 可能有好几个插件都会问，界面上说清楚来源比猜强。
    */
   forPlugin(pluginId: string): PluginAskApi;
-  /** 当前待回答的问题；页面中途附着上来时用它补上已经推过的那一张卡片。 */
-  pending(): MicaAskPending | null;
   /**
    * 页面点了选项（或关掉）。`askId` 对不上（超时 / 已被中止 / 已被抢占）返回失败，
    * 页面据此收掉卡片。
@@ -59,6 +57,8 @@ type Pending = {
   timer: NodeJS.Timeout | null;
   /** 已经结束（回答 / 超时 / 被撤掉 / 被抢占）时不再接受新的回答。 */
   settled: boolean;
+  /** 结束时要摘掉的 abort 监听：不摘的话一轮里问几次就在同一个 signal 上累积几个闭包。 */
+  detach?: () => void;
 };
 
 /**
@@ -94,11 +94,21 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
     if (pending.timer) clearTimeout(pending.timer);
     pending.timer = null;
     current = null;
+    pending.detach?.();
     // 先撤掉界面再叫醒工具：反过来的话，工具（可能是插件自己跑一段脚本）跑完之前，
     // 用户会对着一个已经没人等的问题继续点。
-    options.markWaiting(null);
-    publish();
-    pending.resolve(answer);
+    //
+    // 两个宿主回调都可能抛（会话文件写失败、客户端管道已断），但它们是这段等待唯一的出口
+    // 之前的两步：抛出去会让下面的 resolve 永不执行，工具永远 await，而 settled 已经置位、
+    // 定时器也已清掉，没有人能再叫醒它。所以无论如何都要 resolve。
+    try {
+      options.markWaiting(null);
+      publish();
+    } catch (error) {
+      console.error('[mica-ask] 收尾时通知宿主失败:', error);
+    } finally {
+      pending.resolve(answer);
+    }
   };
 
   /** 把提问挂到当前槽位上并起超时。调用方保证槽位是空的，并且已经校验过形状。 */
@@ -145,8 +155,18 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
     pending.timer.unref?.();
 
     // 侧栏信号先落盘再推界面：用户在别的会话里看到「等你选」点进来时，卡片应该已经在了。
-    options.markWaiting(ask.summary);
-    publish();
+    // 这两步失败时槽位必须退回去：留下来就是一个「占着位置、界面上却什么都没有」的问题，
+    // 之后每一次提问都会撞上「一次只能问一个」直到超时。
+    try {
+      options.markWaiting(ask.summary);
+      publish();
+    } catch (error) {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.timer = null;
+      pending.settled = true;
+      if (current === pending) current = null;
+      throw error;
+    }
     return pending;
   };
 
@@ -180,13 +200,7 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
     });
     const pending = open(pluginId, normalized, true, settle);
     const askId = pending.ask.id;
-    requestOptions.signal?.addEventListener(
-      'abort',
-      () => {
-        if (current === pending) finish({ optionIds: [], cancelled: true, reason: 'aborted' });
-      },
-      { once: true },
-    );
+    attachAbort(pending, requestOptions.signal);
 
     return {
       id: askId,
@@ -223,14 +237,26 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
       settle = resolve;
     });
     const pending = open(pluginId, normalized, false, settle);
-    requestOptions.signal?.addEventListener(
-      'abort',
-      () => {
-        if (current === pending) finish({ optionIds: [], cancelled: true, reason: 'aborted' });
-      },
-      { once: true },
-    );
+    attachAbort(pending, requestOptions.signal);
     return answered;
+  }
+
+  /**
+   * 中止信号 → 撤掉这次提问。
+   *
+   * 监听要在结束时摘掉：一轮里问几次用的是同一个 turn signal，`{ once: true }` 只在真的
+   * 中止时才自动摘，正常回答的那几次会一直挂到这一轮结束（十次以上就报
+   * MaxListenersExceededWarning，闭包里还攥着已经结束的 pending）。
+   */
+  function attachAbort(pending: Pending, signal: AbortSignal | undefined): void {
+    if (!signal) return;
+    const onAbort = () => {
+      if (current === pending) finish({ optionIds: [], cancelled: true, reason: 'aborted' });
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    pending.detach = () => signal.removeEventListener('abort', onAbort);
+    // 挂监听之前就已经中止：没人会再触发事件，这里补一次。
+    if (signal.aborted) onAbort();
   }
 
   return {
@@ -240,7 +266,6 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
         post: (question, requestOptions) => post(pluginId, question, requestOptions),
       };
     },
-    pending: () => current?.ask ?? null,
     answer(params) {
       const pending = current;
       if (!pending || pending.settled) {

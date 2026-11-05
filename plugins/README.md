@@ -248,7 +248,8 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 写进所有宿主共享的 `plugin-health` 会让桌面端显示一条别的宿主留下的「待配置」。
 `agent` 是模型请求的迭代改写入口（`ctx.agent.onIterationRewrite`）。
 `ctx.agent.compactIdleHistory()` 是同一个能力面的另一半：在轮次之外把**已经落盘的**历史压一次，
-`mode: 'quick'` **只**把工具结果换成占位符（不调模型；参数、图片、reasoning 与轮次结构都不动），`mode: 'model'` 把用户与助手的对话交给模型写
+`mode: 'quick'` 只在本地清理工具过程（压缩区里的调用与结果聚合成一条占位调用、思考丢掉、图片与文档换占位符，
+对话正文与轮次结构不动，不调模型），`mode: 'model'` 把用户与助手的对话交给模型写
 checkpoint 摘要（工具过程不进摘要输入）。它只在能独占写会话文件的常驻宿主里提供——`mica exec`
 不落盘、TUI 走 `/compact`，两边都没有它，插件要当成可选能力。要不要在轮次之外动手由插件自己决定，
 会话压缩插件把它挂在会话右键菜单上；可订阅的客户端信号是 `input:activity`（用户在输入框敲字）与
@@ -663,6 +664,9 @@ ctx.desktop.panel({
     纯展示，不放输入框与按钮——要编辑就回到面板的 section 里改，那里有 `commit` 自动保存。
 
   - `return { openPath: { path, line?, focus? } }` 让宿主把这个文件在应用里**打开编辑**。
+  - `return { openExternal: 'https://…' }` 让系统浏览器打开一个地址。只放行 `http(s)` 与
+    `mailto`，其余 scheme（`file:`、`javascript:`、自定义协议）整条丢掉——插件不能拿它绕过
+    页面的跳转白名单。
   - `return { openReview: { cwd, base?, head?, label? } }` 让宿主**在编辑器里打开一份对比**：
     宿主把 `cwd` / `base` / `head` 交给主区那个编辑器视图（`App.jsx` 的 `reviewTarget`），
     主窗口因此直接切到编辑器并停在 Git 面板上，比较 `head`（不给就取该目录当前检出的分支）相对

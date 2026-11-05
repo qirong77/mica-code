@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PLUGIN_ASK_TIMEOUT_MS,
   MAX_PLUGIN_ASK_OPTIONS,
@@ -72,6 +72,14 @@ describe('normalizePluginAskQuestion', () => {
     expect(normalizePluginAskQuestion({ ...base(), timeoutMs: Number.NaN }).timeoutMs).toBe(
       DEFAULT_PLUGIN_ASK_TIMEOUT_MS,
     );
+    // `null` / `''` / `0` 是「没给」，不是「等 1 秒」：按 0 收下来卡片刚画出来就超时。
+    expect(normalizePluginAskQuestion({ ...base(), timeoutMs: null as unknown as number }).timeoutMs).toBe(
+      DEFAULT_PLUGIN_ASK_TIMEOUT_MS,
+    );
+    expect(normalizePluginAskQuestion({ ...base(), timeoutMs: '' as unknown as number }).timeoutMs).toBe(
+      DEFAULT_PLUGIN_ASK_TIMEOUT_MS,
+    );
+    expect(normalizePluginAskQuestion({ ...base(), timeoutMs: 0 }).timeoutMs).toBe(DEFAULT_PLUGIN_ASK_TIMEOUT_MS);
   });
 });
 

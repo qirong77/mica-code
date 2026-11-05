@@ -647,7 +647,10 @@ function readHeadSummary(path: string): SessionSummary | null {
     ...(parentSessionId ? { parentSessionId } : {}),
     providerId,
     model,
-    uncompleted: turnState !== 'completed',
+    // 头里没有这个字段是「这个字段出现之前写的会话」，不是「上一轮没跑完」：整份解析
+    // （toSessionSummary）对同样的文件缺省成 completed，两边必须一致，否则大会话在
+    // 侧栏被标成未完成、点进去又显示已完成。
+    uncompleted: turnState ? turnState !== 'completed' : false,
     ...(isTurnState(turnState) ? { turnState } : {}),
     ...(effort ? { effort } : {}),
     ...(role ? { role } : {}),

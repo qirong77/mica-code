@@ -383,6 +383,10 @@ async function enterWindow(state) {
   showWindow(state)
   if (state.win.webContents.isLoading()) return
   if ((await pageState(state)) !== 'blank') return
+  // `pageState` 最多等 1 秒：这段时间里用户可能已经把窗口关掉了，之后碰 webContents
+  // 会抛 "Object has been destroyed"——调用方是 `void enterWindow(...)`，那就是一条
+  // 没人捕获的 rejection。
+  if (state.win.isDestroyed() || state.win.webContents.isDestroyed()) return
   // 优先用页面自己的地址：中转机入口的 `?t=` 只在地址里，退回 state.server 会把入口丢掉
   const target = state.win.webContents.getURL() || state.server
   if (!target) return
@@ -760,9 +764,10 @@ function createWindow(url, { primary = false } = {}) {
   })
 
   win.webContents.setWindowOpenHandler((details) => {
-    // 页面里 `window.open` 出来的 http(s) 一律交给系统浏览器：应用内的视图（编辑器、评审）
-    // 都不再另开窗口。
-    if (/^https?:/i.test(details.url)) shell.openExternal(details.url)
+    // 页面里 `window.open` 出来的 http(s) / mailto 一律交给系统（浏览器 / 邮件客户端）：
+    // 应用内的视图（编辑器、评审）都不再另开窗口。`mailto:` 是面板表格 `link` 与
+    // `openExternal` 都放行的 scheme，这里不认就等于点了没反应。
+    if (/^(https?:|mailto:)/i.test(details.url)) shell.openExternal(details.url)
     return { action: 'deny' }
   })
 

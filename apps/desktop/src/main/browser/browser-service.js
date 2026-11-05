@@ -171,6 +171,16 @@ export function createBrowserService({
     }
 
     try {
+      // 归属护栏（与终端同一套语义）：带 owner 的请求只能操作自己名下的窗口 / 标签页。
+      // 不带 owner 的是「人」——页面要能唤出 agent 开出来的窗口。没有这一层，两个会话的
+      // agent 可以互相往对方的已登录页面里打字，而这层隔离是文档承诺过的。
+      const targetId = matched.params?.id
+      if (context.owner && typeof targetId === 'string' && targetId) {
+        const owner = getManager().ownerOf(targetId)
+        if (owner && owner !== context.owner) {
+          throw new BrowserRequestError('这个浏览器属于另一个会话，不能直接操作', 403)
+        }
+      }
       const result = await handlers[matched.endpoint.id](context)
       // 截图可以直接要字节，省掉一层 base64（agent 存文件时更省事）
       if (matched.endpoint.id === 'screenshot' && result.raw) {

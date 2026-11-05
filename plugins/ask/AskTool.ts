@@ -142,6 +142,11 @@ export class AskUserTool extends MicaTool {
 
 function toQuestion(input: ToolInput): PluginAskQuestion {
   const options = Array.isArray(input?.options) ? input.options : [];
+  // 数字从 JSON 进来可能是字符串；`null` / `''` / `0` 这类「非正数」一律当没给，
+  // 交给宿主按默认 15 分钟处理——`Number(null)` 是 0，照收就变成 1 秒超时，用户还没看到
+  // 卡片它就没了。
+  const asked = Number(input?.timeoutMs);
+  const timeoutMs = Number.isFinite(asked) && asked > 0 ? asked : undefined;
   return {
     title: String(input?.title ?? ''),
     detail: typeof input?.detail === 'string' ? input.detail : undefined,
@@ -152,8 +157,7 @@ function toQuestion(input: ToolInput): PluginAskQuestion {
     ...(input?.ui && typeof input.ui === 'object'
       ? { ui: input.ui as PluginAskQuestion['ui'] }
       : {}),
-    // 数字从 JSON 进来可能是字符串；非数字交给宿主按默认值处理。
-    timeoutMs: Number.isFinite(Number(input?.timeoutMs)) ? Number(input?.timeoutMs) : undefined,
+    timeoutMs,
     summary: typeof input?.summary === 'string' ? input.summary : undefined,
   };
 }

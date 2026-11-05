@@ -367,8 +367,9 @@ tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridg
 - The page (`App.jsx`) renders one icon per window of the active chat, immediately left of the
   terminal toggle: click toggles the native window, right-click (or a touch long press) destroys it
   after a confirmation, and the count badge distinguishes several windows of the same session.
-  Browsers whose owner is unknown are shown dimmed rather than hidden, so a window opened by hand
-  with `curl` is still manageable. The settings page has a _Browser Control_ section (its sidebar
+  A window must belong to a session: creating one without `x-mica-owner` is rejected, and listing
+  windows prunes any ownerless leftovers, so there is no "unknown owner" state left to render. The
+  settings page has a _Browser Control_ section (its sidebar
   entry is always there; the data only exists inside the desktop runtime) that shows the service
   status, the MCP endpoint and tool name, and the whole endpoint catalog. The
   skill body itself is not shown — it is a single line (the service address), and copying the

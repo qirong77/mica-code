@@ -70,6 +70,16 @@ function createFakeManager() {
       )
       return browser ? { browser, tab: browser.tabs.find((tab) => tab.id === id) } : null
     },
+    // 真实实现按浏览器 / 标签页 id 反查归属，服务层拿它挡「别的会话的操作」。
+    ownerOf: (id) => {
+      const key = String(id || '')
+      const browser = browsers.get(key)
+      if (browser) return browser.owner || null
+      for (const item of browsers.values()) {
+        if (item.tabs.some((tab) => tab.id === key)) return item.owner || null
+      }
+      return null
+    },
     listTabs: () => [...browsers.values()].flatMap((item) => item.tabs),
     createTab: ({ browserId }) => {
       const browser = browsers.get(browserId)
@@ -238,6 +248,44 @@ describe('ownership', () => {
     const ids = listed.body.browsers.map((item) => item.id)
     expect(ids).not.toContain(orphan.id)
     expect(ids).toContain(owned.id)
+  })
+
+  // 与终端同一套语义：带归属的调用只能碰自己名下的窗口 / 标签页，不带归属的是「人」
+  // （页面要能唤出 agent 开出来的窗口）。少了这一层，两个会话的 agent 可以互相往对方
+  // 已经登录的页面里打字。
+  it('refuses to drive another session’s browser or tab', async () => {
+    const created = await call('/browser/browsers', {
+      method: 'POST',
+      body: { url: 'example.com', owner: 'sess-a' }
+    })
+    const browserId = created.body.browser.id
+    const tabId = created.body.browser.tabs[0].id
+
+    const foreignType = await call(`/browser/tabs/${tabId}/type`, {
+      method: 'POST',
+      body: { text: 'hello' },
+      headers: { 'x-mica-owner': 'sess-b' }
+    })
+    expect(foreignType.status).toBe(403)
+    expect(foreignType.body.error).toContain('另一个会话')
+
+    const foreignClose = await call(`/browser/browsers/${browserId}/close`, {
+      method: 'POST',
+      headers: { 'x-mica-owner': 'sess-b' }
+    })
+    expect(foreignClose.status).toBe(403)
+
+    // 自己的窗口、以及不带归属的页面调用都照常。
+    expect(
+      (
+        await call(`/browser/tabs/${tabId}/type`, {
+          method: 'POST',
+          body: { text: 'hello' },
+          headers: { 'x-mica-owner': 'sess-a' }
+        })
+      ).status
+    ).toBe(200)
+    expect((await call(`/browser/tabs/${tabId}/type`, { method: 'POST', body: { text: 'hi' } })).status).toBe(200)
   })
 })
 

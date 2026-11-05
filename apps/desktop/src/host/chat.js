@@ -1959,9 +1959,9 @@ function runCompactSession(sessionId, mode = 'model') {
           sessionId,
           '--dir',
           compactCwd,
-          // 「快速压缩（本地）」与交互式 /compact 同源：只把工具结果与媒体块
-          // 换成占位符，不改对话文本、不丢轮次。--prune-only 是 lossy 的（无
-          // 内容可清理时会丢弃最早轮次），不要在这里使用。
+          // 「快速压缩（本地）」与交互式 /compact 同源：工具调用与结果聚合成一条占位
+          // 调用、思考丢掉、媒体块换占位符；对话正文不动、不丢轮次。--prune-only 是
+          // lossy 的（无内容可清理时会丢弃最早轮次），不要在这里使用。
           ...(mode === 'local' ? ['--tool-results-only'] : [])
         ],
         {

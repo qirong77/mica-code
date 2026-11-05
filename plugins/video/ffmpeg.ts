@@ -244,6 +244,7 @@ export async function scanFrameDiffs(options: {
     );
 
     const chunks: Buffer[] = [];
+    const errors: Buffer[] = [];
     let bytes = 0;
     let settled = false;
     const finish = (error?: Error) => {
@@ -260,9 +261,18 @@ export async function scanFrameDiffs(options: {
       }
     });
     child.on('error', (error) => finish(error));
-    child.on('close', () => finish());
-    child.stderr.on('data', () => {
-      // 差异扫描失败不该让整次调用失败，调用方会退回均匀采样。
+    // 退出码要带上：解不出来时 stdout 是空的或只有前几帧，按成功返回会让调用方把
+    // 「扫不动」当成「画面没变化」，还会把这份半截结果写进缓存。
+    child.on('close', (code) => {
+      if (code === 0) {
+        finish();
+        return;
+      }
+      finish(new Error(`ffmpeg 扫描画面差异失败（退出码 ${code}）：${errors.join('').trim().slice(-400)}`));
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      // 差异扫描失败不该让整次调用失败，调用方会退回均匀采样；错误文本只用来解释原因。
+      if (errors.length < 16) errors.push(chunk);
     });
   });
 

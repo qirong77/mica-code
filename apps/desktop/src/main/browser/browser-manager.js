@@ -110,6 +110,22 @@ export function createBrowserManager({
     throw notFoundError(`标签页不存在：${tabId}`)
   }
 
+  /**
+   * 浏览器 id 或标签页 id → 归属（没有归属返回 null，找不到也返回 null）。
+   *
+   * 服务层拿它在派发前挡「别的会话的操作」：归属是顶栏图标的依据，也是防串台的依据。
+   */
+  function ownerOf(id) {
+    const key = String(id || '')
+    if (!key) return null
+    const record = browsers.get(key)
+    if (record) return record.owner || null
+    for (const item of browsers.values()) {
+      if (item.tabs.some((tab) => tab.id === key)) return item.owner || null
+    }
+    return null
+  }
+
   /** cookie 作用域 → 统一形状；页面不是 http(s) 时给空结果而不是报错（未登录也是合法状态） */
   async function readCookies(scope, format) {
     if (!/^https?:/i.test(scope)) {
@@ -1036,6 +1052,7 @@ export function createBrowserManager({
       return readCookies(normalizeUrl(url), format)
     },
 
+    ownerOf,
     consoleEntries,
     networkEntries
   }

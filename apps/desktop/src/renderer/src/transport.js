@@ -193,7 +193,8 @@ function createWebApi(env) {
       resolveFileLinks: (id, paths) => invoke('terminal:resolve-file-links', { id, paths }),
       // 浏览器自己打开链接；服务端只负责把文件交给它所在机器上的 VS Code
       openExternal: async (url) => {
-        if (typeof url !== 'string' || !/^https?:/i.test(url)) throw new Error('Invalid URL')
+        // 与面板动作、表格 `link` 的白名单一致：`mailto:` 也要能交给系统（邮件客户端）。
+        if (typeof url !== 'string' || !/^(https?:|mailto:)/i.test(url)) throw new Error('Invalid URL')
         window.open(url, '_blank', 'noopener,noreferrer')
         return true
       },
@@ -609,7 +610,6 @@ function createWebApi(env) {
       show: (id, focus = true) => invoke('browser-control:show', { id, focus }),
       hide: (id) => invoke('browser-control:hide', { id }),
       close: (id) => invoke('browser-control:close', { id }),
-      create: (input = {}) => invoke('browser-control:create', input),
       onChanged: (callback) => subscribe('browser:changed', callback),
       // 「这个会话刚调用了浏览器接口」：只用来让顶栏那一枚图标闪一下
       onActivity: (callback) => subscribe('browser:activity', callback)

@@ -603,16 +603,20 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       markWaiting: (summary) => sessionController!.setAwaitingInput(summary),
       threadId: () => sessionId || null,
     });
+    // 只有桌面端的页面会回 `mica/ask/answer`（见 apps/desktop/src/host/chat.js）：侧车、
+    // Multica 这类客户端没有可点的地方，把 ask 能力给出去只会让 `ask_user` 挂满 15 分钟，
+    // 还顺手把会话标成「等你选」。没有这一面时 ask 插件按 requires 整块跳过。
+    const desktopHost = process.env.MICA_PLUGIN_DESKTOP_HOST === '1';
     pluginHost = createHeadlessPluginHost({
       runtimeOverride,
       hooks,
       agent,
       sessionController,
       subagentTasks,
-      asks: pluginAsks,
+      asks: desktopHost ? pluginAsks : undefined,
       // 桌面端的运行时 spawn 这个进程时会带上标记（见 apps/desktop/src/host/chat.js）。
       // 插件据此决定自己要不要提供只有桌面页面能兑现的能力。
-      desktopHost: process.env.MICA_PLUGIN_DESKTOP_HOST === '1',
+      desktopHost,
       // 桌面端常驻宿主：装上 `$MICA_HOME/plugins` 里的用户插件（面板、桌面入口都靠它）。
       loadUserPlugins: true,
       isBusy: () => executor!.isBusy,

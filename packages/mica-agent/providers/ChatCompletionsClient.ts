@@ -192,6 +192,9 @@ export class ChatCompletionsClient extends BaseAgent<
       // 这一条请求的耗时口径（见 AgentQueryOptions.onRequestEnd）：从发出到流结束，
       // 首个正文/思考增量的时刻单独记，用来区分「排队久」和「吐得慢」。
       const requestStartedAt = Date.now();
+      // 首字延迟按「这一次尝试」算：重试后 `requestStartedAt` 不动，直接拿它减会把
+      // 前几次失败的时间也算进 TTFT（注释里说要重新计时，之前只清零了 firstDeltaAt）。
+      let attemptStartedAt = requestStartedAt;
       let firstDeltaAt = 0;
       let requestAttempts = 1;
       let requestEndSent = false;
@@ -205,7 +208,7 @@ export class ChatCompletionsClient extends BaseAgent<
         try {
           options.onRequestEnd({
             durationMs: Date.now() - requestStartedAt,
-            firstTokenMs: firstDeltaAt ? firstDeltaAt - requestStartedAt : undefined,
+            firstTokenMs: firstDeltaAt ? firstDeltaAt - attemptStartedAt : undefined,
             attempts: requestAttempts,
             outcome: info.outcome,
             toolCalls: info.toolCalls,
@@ -369,6 +372,7 @@ export class ChatCompletionsClient extends BaseAgent<
             // 重发之后的首字要重新计时，否则「第一次试了 40s 才失败、重试 2s 有输出」
             // 会被记成 42s 的首字延迟。
             firstDeltaAt = 0;
+            attemptStartedAt = Date.now();
             if (canRollbackText && attemptHadOutput) this.onTextRollback?.();
             totalContent = totalCheckpoint;
             hasStreamedText = streamedCheckpoint;

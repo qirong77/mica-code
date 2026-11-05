@@ -604,9 +604,9 @@ function ByModelCard({ scoped }) {
 }
 
 /**
- * 按来源列出每一条用量。**不分组**：同一个功能可能同时出现两条（自动压缩的模型摘要
- * 既可以由插件经 `ctx.llm` 发，也可以由内核起摘要子代理），分组会把它拆到两张小表里，
- * 看起来像记了两笔。摊平后按 token 排，每行给出「类型 + 具体名称 + 谁派发 + 用途」。
+ * 按来源列出每一条用量：父行是插件（同一个功能的两条记录——例如模型摘要既可以由插件经
+ * `ctx.llm` 发，也可以由内核起摘要子代理——都挂在同一个父级下面），子行是具体请求，
+ * 按 token 排。每行给出「类型 + 具体名称 + 谁派发 + 用途」。
  *
  * Type 列不参与排序、也不随容器变宽退场：它是「这笔请求哪来的」的答案，退掉之后剩下的
  * 名称与数字就又要靠副标题去猜。
@@ -1085,11 +1085,10 @@ export function StatsView({ visible }) {
     window.addEventListener('focus', onFocus)
     // 首次构建索引要遍历全部会话文件：运行时按进度推送，这里跟着刷新，页面因此是
     // 逐个填充而不是先空着等一次全量扫描。
-    // 页签没显示时照样在跑（`visible` 为假）：这时只为「有数据变」刷新，索引补齐的
-    // 进度推送不跟，少一次几千行的全量装配。
-    const offChanged = window.mica.stats.onChanged?.((payload) => {
+    // 页签没显示时整段都不挂（上面的 early return）：可见时索引补齐的进度推送直接跟着刷，
+    // 页面因此是逐个填充而不是先空着等一次全量扫描。
+    const offChanged = window.mica.stats.onChanged?.(() => {
       if (!alive) return
-      if (payload?.partial && !visible) return
       read()
     })
     return () => {

@@ -6675,6 +6675,18 @@ body.is-resizing-btw {
   background: var(--accent);
 }
 
+/* 面板动作的一句话回执（成功/失败原因，4 秒后消失）。弹窗标题行与抽屉顶部都用它：
+   不占正文的版面，也不能按正文的颜色与字号画——那会读成内容的一部分。 */
+.chat-plugin-feedback {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-fg-soft);
+  font-size: 11px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-plugin-statusbar-label {
   flex: none;
   font-weight: 500;

@@ -150,6 +150,9 @@ function isProbablyBinary(buffer) {
 async function readSearchFile(filePath, remainingBytes) {
   let handle
   try {
+    // 链接本身不是「仓库里的一个文件」：`open` 会跟随它读到仓库外的内容（`git ls-files`
+    // 是包含符号链接的），搜索结果就等于把仓库外的文件回显到了面板上。
+    if ((await lstat(filePath)).isSymbolicLink()) return null
     handle = await open(filePath, 'r')
     const openedInfo = await handle.stat()
     if (!openedInfo.isFile()) return null

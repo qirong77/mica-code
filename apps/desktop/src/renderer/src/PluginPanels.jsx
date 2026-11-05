@@ -729,7 +729,7 @@ function PluginPanelDock({
   }, [])
 
   const applyView = useCallback(
-    (result, { resetDrafts = false } = {}) => {
+    (result, { resetDrafts = false, mergeDrafts = false } = {}) => {
       if (!aliveRef.current) return
       if (result?.ok && result.view) {
         // 每 4 秒拉一次视图：没有变化就别换引用，否则整块面板连同滚动位置一起白重渲染。
@@ -739,8 +739,11 @@ function PluginPanelDock({
         if (!same) setView(result.view)
         setError('')
         writePanelView(nodeId, pluginId, result.view)
-        // 只在动作之后把草稿对齐到视图：定时刷新若也重置，用户正在输入的字会被清掉
+        // 只在动作之后把草稿对齐到视图：定时刷新若也重置，用户正在输入的字会被清掉。
+        // `mergeDrafts` 是「别动用户已经敲的字，但新出现的字段要有初值」：自动提交会把
+        // 认证方式这类字段集合换掉，整份保留会让新字段空着，整份重置会吞掉在途输入。
         if (resetDrafts) setDrafts(panelDrafts(result.view))
+        else if (mergeDrafts) setDrafts((previous) => ({ ...panelDrafts(result.view), ...previous }))
       } else {
         setError(result?.error || '插件面板不可用')
       }
@@ -793,7 +796,12 @@ function PluginPanelDock({
       setBusy('')
       // 表格里的勾选是一次状态切换，不是提交表单：换视图时不能让用户正在填的表单归位。
       // 插件也可以用 `keepDrafts` 说同一件事（输入停顿后的自动提交、提交失败）。
-      applyView(result, { resetDrafts: options.keepDrafts !== true && result?.keepDrafts !== true })
+      applyView(
+        result,
+        options.keepDrafts === true || result?.keepDrafts === true
+          ? { mergeDrafts: true }
+          : { resetDrafts: true }
+      )
       applyPanelResult(result, {
         onCompose,
         onLaunchSession,
@@ -830,6 +838,8 @@ function PluginPanelDock({
     [sections, focusSection]
   )
   const sectionKeys = useMemo(() => tabs.map((tab) => tab.key), [tabs])
+  // 快捷按钮点名的是分区标题，页签的 key 里带着位置（同名分区不能共用一个 key）。
+  const focusTab = focusSection ? tabs.find((tab) => tab.title === focusSection) : undefined
 
   // `focusSection` 只在它变化时生效一次：否则每 4 秒刷新都会把用户刚点开的其它块重新收起。
   const appliedFocusRef = useRef(null)
@@ -841,9 +851,9 @@ function PluginPanelDock({
     appliedFocusRef.current = focusKey
     // 弹窗形态：快捷按钮点名的那一块直接切到它；没点名就停在当前页签，
     // 页签被删掉（插件改了分区）才回落到第一块。
-    if (focusSection && sectionKeys.includes(focusSection)) setActiveTab(focusSection)
+    if (focusTab) setActiveTab(focusTab.key)
     else setActiveTab((previous) => (sectionKeys.includes(previous) ? previous : sectionKeys[0]))
-  }, [focusSection, pluginId, sectionKeys, sections])
+  }, [focusSection, focusTab, pluginId, sectionKeys, sections])
 
   const renderSection = (section, key, { tabbed = false } = {}) => (
     <PluginPanelSection
@@ -852,10 +862,12 @@ function PluginPanelDock({
       tabbed={tabbed}
       // 抽屉里的折叠由 <details> 自己管（用户点开就是点开，4 秒刷新不会把它翻回去）；
       // 快捷按钮点名的那一块靠 key 变化重挂载来强制展开。
-      focused={Boolean(focusSection) && key === focusSection}
+      focused={focusTab?.key === key}
       drafts={drafts}
       setDrafts={setDrafts}
-      commit={section.commit ? () => runAction(section.commit) : null}
+      // 输入停顿后的自动提交不能让整块草稿跟着服务端视图归位：请求在途时用户还在打字，
+      // 那几笔没提交过的字符会被直接抹掉（下一拍才又被当成新改动）。
+      commit={section.commit ? () => runAction(section.commit, undefined, undefined, { keepDrafts: true }) : null}
       busy={busy}
       runAction={runAction}
     />
@@ -978,8 +990,13 @@ function PluginPanelDock({
  */
 const COMMIT_DELAY_MS = 500
 
-/** 一块折叠卡片：标题行可点，内容只在展开时渲染。 */
-function PluginPanelSection({
+/**
+ * 一块折叠卡片：标题行可点，内容只在展开时渲染。
+ *
+ * 导出是为了让渲染冒烟测试能真的把一块分区画出来：分区里的每个动作按钮都必须拿到
+ * 自己的 `action`，漏传时整块面板会崩（React 的错误边界兜不住运行时异常）。
+ */
+export function PluginPanelSection({
   section,
   tabbed = false,
   focused,
@@ -1096,6 +1113,7 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
                 {item.actions.map((action) => (
                   <PanelActionButton
                     key={action.id}
+                    action={action}
                     variant={buttonVariant(action.tone)}
                     busy={busy}
                     busyKey={`${action.id}:${item.key}`}
@@ -1192,6 +1210,7 @@ function PluginPanelRows({ section, drafts, changeDraft, busy, runAction }) {
           {section.actions.map((action) => (
             <PanelActionButton
               key={action.id}
+              action={action}
               variant={buttonVariant(action.tone)}
               busy={busy}
               busyKey={action.id}
@@ -1437,6 +1456,7 @@ function PluginPanelRowActions({ row, busy, runAction }) {
   return (row.actions || []).map((action) => (
     <PanelActionButton
       key={action.id}
+      action={action}
       // 行内动作一律幽灵按钮（破坏性的挂红字）：每行都画带边框的方块，表格就成了一排按钮墙。
       variant={action.tone === 'danger' ? 'danger-ghost' : buttonVariant(action.tone)}
       size="compact"

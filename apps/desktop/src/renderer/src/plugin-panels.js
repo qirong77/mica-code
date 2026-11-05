@@ -264,32 +264,6 @@ export function panelDrafts(view) {
   return drafts
 }
 
-/** 换会话时丢掉上一个会话的菜单与视图：分支属于这个会话，串过去就是别人的分支。 */
-export function prunePluginPanelCache(keepNodeId) {
-  const prefix = `${keepNodeId || ''}\u0000`
-  for (const key of [...menuCache.keys()]) {
-    if (!key.startsWith(prefix)) menuCache.delete(key)
-  }
-  for (const key of [...viewCache.keys()]) {
-    if (!key.startsWith(prefix)) viewCache.delete(key)
-  }
-}
-
-/**
- * 一次面板视图请求里哪些菜单需要条目：清单声明了 `menu` 的那些。
- *
- * 面板挂在哪个按钮上由页面决定，这里只回答「为了这组按钮要问几次视图」。
- */
-export function menuShortcutsOf(panels) {
-  const wanted = []
-  for (const panel of Array.isArray(panels) ? panels : []) {
-    for (const shortcut of panel?.shortcuts || []) {
-      if (shortcut?.menu) wanted.push({ panel, shortcut })
-    }
-  }
-  return wanted
-}
-
 /**
  * 弹窗形态的页签：一块分区一个页签，标题就是页签名。
  *
@@ -298,11 +272,18 @@ export function menuShortcutsOf(panels) {
  * 就落回第一块——不能因为一个失效的名字把弹窗开成空白。
  */
 export function pluginPanelTabs(sections, focusSection) {
-  const tabs = (Array.isArray(sections) ? sections : []).map((section, index) => ({
-    key: section?.title || `section-${index}`,
-    label: section?.title || `第 ${index + 1} 项`
-  }))
-  const focused = tabs.findIndex((tab) => tab.key === focusSection)
+  const tabs = (Array.isArray(sections) ? sections : []).map((section, index) => {
+    const title = typeof section?.title === 'string' ? section.title.trim() : ''
+    return {
+      // 页签名可以重复（两块都叫「设置」），key 不行：共用 key 时 React 复用节点，
+      // 按 key 找块也只能找到第一块，第二块永远打不开。
+      key: title ? `${title}#${index}` : `section-${index}`,
+      title,
+      label: title || `第 ${index + 1} 项`
+    }
+  })
+  // 清单里的 `section` 是分区标题，同名时取第一块。
+  const focused = focusSection ? tabs.findIndex((tab) => tab.title === focusSection) : -1
   return { tabs, activeIndex: focused >= 0 ? focused : 0 }
 }
 

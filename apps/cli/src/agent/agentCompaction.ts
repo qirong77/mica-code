@@ -58,15 +58,20 @@ export async function compactAgentMessages(
   return { messages: result.messages, savedTokens: Math.max(0, result.savedTokenEstimate) };
 }
 
-async function summarizeWithSubAgent(
+/**
+ * 用子代理写一段压缩摘要。
+ *
+ * 摘要请求走子代理、禁用工具：它共享父代理的工具注册表，`session_*` 之类的工具会去改
+ * 正在被压缩的会话本身。所有压缩入口（`/compact llm`、插件触发的模型压缩）共用这一份，
+ * 用量记账与失败状态才不会各写各的。
+ */
+export async function summarizeWithSubAgent(
   agent: AgentRuntime,
   transcript: string,
   prompt: string,
   signal?: AbortSignal,
   pluginId?: string,
 ): Promise<string> {
-  // 摘要必须走子代理、禁用工具：它共享父代理的工具注册表，session_* 之类的
-  // 工具会去改正在被压缩的会话本身（与 /compact llm 同一条路径）。
   const subAgent = agent.createSubAgent({ systemPrompt: prompt, tools: false }, {
     helper: { kind: 'compaction', purpose: 'summarize', ...(pluginId ? { pluginId } : {}) },
   });

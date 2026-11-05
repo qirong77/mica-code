@@ -220,7 +220,9 @@ describe('runEvolution', () => {
     const result = await runEvolution({ home, lockSession: () => null });
     expect(result.busyFiles).toBe(1);
     expect(result.migratedFiles).toBe(0);
-    expect(result.pending).toBe(1);
+    // 忙碌的会话不算「待清洗」：账本里没有它的签名，下一轮照样会重看一次；算进来会让
+    // 宿主在整轮（可能几十分钟）里每 5 秒重扫一遍会话目录。
+    expect(result.pending).toBe(0);
     expect(readSession(path).snapshot.usageHistory[0].occurredAt).toBeUndefined();
   });
 

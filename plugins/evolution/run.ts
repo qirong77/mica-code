@@ -132,7 +132,9 @@ export async function runEvolution(options: EvolutionRunOptions): Promise<Evolut
     const finishedAt = now();
     state.lastRunAt = new Date(finishedAt).toISOString();
     writeEvolutionState(statePath, state);
-    const pending = sessions.length - settled.size;
+    // 正在跑轮次的会话不算「待清洗」：它们的签名没进账本，下一轮自然会重看一次；算进来
+    // 会让宿主在整轮（可能是几十分钟）里每 5 秒重扫一遍会话目录。
+    const pending = sessions.length - settled.size - busyFiles;
     const result: EvolutionRunResult = {
       outcome: 'ok',
       scanned: sessions.length,

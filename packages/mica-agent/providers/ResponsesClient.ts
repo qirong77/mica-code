@@ -388,6 +388,9 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       const requestTools = this.tools ? this.responseTools : undefined;
       // 与 Chat Completions 同一份口径：请求耗时、首字延迟、重试次数，见 onRequestEnd。
       const requestStartedAt = Date.now();
+      // 首字延迟按「这一次尝试」算：重试后 requestStartedAt 不动，拿它减会把前几次
+      // 失败的时间也算进 TTFT（与 ChatCompletionsClient 同一份口径）。
+      let attemptStartedAt = requestStartedAt;
       let firstDeltaAt = 0;
       let requestAttempts = 1;
       let requestEndSent = false;
@@ -401,7 +404,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
         try {
           options.onRequestEnd({
             durationMs: Date.now() - requestStartedAt,
-            firstTokenMs: firstDeltaAt ? firstDeltaAt - requestStartedAt : undefined,
+            firstTokenMs: firstDeltaAt ? firstDeltaAt - attemptStartedAt : undefined,
             attempts: requestAttempts,
             outcome: info.outcome,
             toolCalls: info.toolCalls,
@@ -570,6 +573,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           onRetry: ({ attempt, error, delayMs }) => {
             requestAttempts += 1;
             firstDeltaAt = 0;
+            attemptStartedAt = Date.now();
             if (canRollbackText && (content || hasReasoningText)) this.onTextRollback?.();
             console.error(
               `[mica] provider request retry ${attempt}: ${error instanceof Error ? error.message : String(error)}`,

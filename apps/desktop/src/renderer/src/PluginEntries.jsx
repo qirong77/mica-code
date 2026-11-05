@@ -263,13 +263,21 @@ function EntryPopover({ anchorRef, placement = 'side', onPointerEnter, onPointer
       left = Math.max(4, window.innerWidth - wrap.width - 4)
     if (top + wrap.height > window.innerHeight - 4)
       top = Math.max(4, window.innerHeight - wrap.height - 4)
-    setPos({ left, top })
+    // 滚动时每帧都会重算：位置没变就别换对象，否则整张卡片跟着重渲染。
+    setPos((previous) =>
+      previous && previous.left === left && previous.top === top ? previous : { left, top }
+    )
   }, [anchorRef, placement])
 
   useLayoutEffect(() => {
     place()
     window.addEventListener('resize', place)
-    return () => window.removeEventListener('resize', place)
+    // 侧栏滚动时入口行会移走：卡片必须跟着走，否则它会脱离那一行飘在半空。
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
   }, [place])
 
   return createPortal(

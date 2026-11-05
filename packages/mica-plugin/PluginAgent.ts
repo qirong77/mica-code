@@ -75,8 +75,8 @@ export type PluginIdleCompactOutcome =
   | { status: 'skipped'; reason: 'busy' | 'empty' };
 
 /**
- * 压缩哪一种：`quick` 只把工具结果换成占位符（本地、不调模型），`model` 把用户与
- * 助手的对话交给模型写一段 checkpoint 摘要。
+ * 压缩哪一种：`quick` 只在本地清理工具过程（调用与结果聚合成一条占位调用、思考丢掉、
+ * 媒体块换占位符），`model` 把用户与助手的对话交给模型写一段 checkpoint 摘要。
  */
 export type PluginCompactKind = 'quick' | 'model';
 

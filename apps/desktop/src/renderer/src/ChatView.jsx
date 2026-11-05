@@ -609,6 +609,21 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
     setSelected([])
     setCustom('')
   }, [ask?.id])
+  // 元素开关要在提前 return 之前算出来（下面那个 effect 依赖它），否则 ask 从无到有时
+  // 两次渲染的 hook 数量不同，React 会直接抛错。
+  const dismiss = ask?.display?.dismiss !== false
+  // 关闭按钮的 title 写着「不用了（Esc）」：键盘用户按 Esc 就该和点它一样。
+  useEffect(() => {
+    if (!ask || !dismiss) return undefined
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return
+      if (submitting) return
+      event.preventDefault()
+      onCancel?.()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [ask?.id, dismiss, submitting, onCancel])
   if (!ask) return null
   const display = {
     icon: true,
@@ -765,7 +780,8 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
   return (
     <div
       className="chat-ask-overlay"
-      onClick={(event) => event.target === event.currentTarget && cancel()}
+      // `display.dismiss: false` 是「必须先答」：关掉按钮、点遮罩、按 Esc 都不该取消它。
+      onClick={(event) => event.target === event.currentTarget && display.dismiss && cancel()}
     >
       {card}
     </div>

@@ -66,6 +66,8 @@ export async function readScanCache(root: string, key: string): Promise<number[]
   try {
     const parsed = JSON.parse(raw) as { diffs?: unknown };
     if (!Array.isArray(parsed.diffs) || !parsed.diffs.every((value) => typeof value === 'number')) return null;
+    // 空数组等于「没扫到东西」，不是有效结果：当成命中会让这条视频永远不再重新扫描。
+    if (parsed.diffs.length === 0) return null;
     return parsed.diffs as number[];
   } catch {
     return null;
@@ -73,6 +75,8 @@ export async function readScanCache(root: string, key: string): Promise<number[]
 }
 
 export async function writeScanCache(root: string, key: string, diffs: number[]): Promise<void> {
+  // 失败与空结果不落盘：一次解码错误不该把「没有画面差异」永久钉在这条视频上。
+  if (diffs.length === 0) return;
   const target = scenesFile(root, key);
   await mkdir(dirname(target), { recursive: true });
   // 差异值量化到 5 位小数：只是用来找峰，再精确也没意义，压缩后体积小一个量级。

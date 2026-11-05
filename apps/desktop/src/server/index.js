@@ -982,7 +982,9 @@ function createRequestHandler({
           const origin = verifyRequestOrigin(req)
           if (!origin.ok) return sendJson(res, origin.status, { ok: false, error: origin.error })
           const kind = url.pathname.slice(CONTROL_MCP_PREFIX.length + 1)
-          const handler = controlMcp[kind]
+          // 只认自己挂上去的端点：`controlMcp` 是普通对象，`/mcp/toString` 会摸到原型链上的
+          // 方法，把它当处理器调用既不回包也不报错，请求就挂在那里。
+          const handler = Object.hasOwn(controlMcp, kind) ? controlMcp[kind] : null
           if (!handler) {
             return sendJson(res, 404, {
               ok: false,

@@ -3,7 +3,7 @@
   "name": "会话压缩",
   "icon": "archive",
   "version": "3.2.0",
-  "description": "右键会话手动压缩：快速压缩只把历史里的工具结果换成占位符，模型压缩把用户与助手的对话交给模型写摘要。",
+  "description": "右键会话手动压缩：快速压缩把历史里的工具过程聚合成一条占位调用，模型压缩把用户与助手的对话交给模型写摘要。",
   "main": "index.js",
   "priority": 100,
   "required": false,

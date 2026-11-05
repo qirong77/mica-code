@@ -16,7 +16,7 @@ import { controlMcpUrl } from './control-mcp-config.js'
 /**
  * 受控浏览器在运行时的门面：页面（顶栏图标、设置页）与 agent 各自从这一层进出。
  *
- * - **页面**通过 `browser-control:*` IPC 读列表、显示/隐藏/关闭、新建窗口；
+ * - **页面**通过 `browser-control:*` IPC 读列表、显示/隐藏/关闭窗口；
  * - **agent** 不经过这里：它通过运行时同源端口上的 MCP 端点 `/mcp/browser` 使用这个能力
  *   （见 control-mcp.js），配置由 control-mcp-config.js 按会话生成。
  *
@@ -235,34 +235,15 @@ export function registerBrowserControlIpc() {
     closeBrowserControlWindow(input)
   )
 
-  ipcMain.handle('browser-control:create', async (_event, input = {}) =>
-    createBrowserControlWindow(input)
-  )
-
   ipcMain.handle('browser-control:details', () => readBrowserControlDetails())
 }
 
 /**
- * 窗口的四个命令（新建 / 显示 / 隐藏 / 销毁）：顶栏图标入口与设置页都走这里。
+ * 窗口的三个命令（显示 / 隐藏 / 销毁）：顶栏图标入口与设置页都走这里。
  *
  * 没有服务时返回 `available: false` 的快照而不是抛错——设置页据此显示「不可用」，
  * 顶栏图标则根本不会出现，两边都不需要自己判空。
  */
-export async function createBrowserControlWindow(input = {}) {
-  if (!hasService()) return getBrowserControlSnapshot()
-  await request('/browser/browsers', {
-    method: 'POST',
-    body: {
-      url: typeof input.url === 'string' ? input.url : '',
-      label: typeof input.label === 'string' ? input.label : '',
-      owner: typeof input.owner === 'string' && input.owner ? input.owner : undefined,
-      show: input.show === true
-    }
-  })
-  await refresh('created')
-  return getBrowserControlSnapshot()
-}
-
 export async function closeBrowserControlWindow({ id } = {}) {
   if (!hasService()) return getBrowserControlSnapshot()
   await mutate(`/browser/browsers/${encodeURIComponent(id)}/close`)

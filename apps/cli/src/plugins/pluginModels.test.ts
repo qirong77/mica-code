@@ -4,7 +4,6 @@ import { createPluginLlmApi } from '@packages/mica-plugin/index.js';
 import {
   capturePluginModelUsageRecorder,
   createPluginModels,
-  recordPluginModelUsage,
   type PluginModelClient,
 } from './pluginModels.js';
 
@@ -295,7 +294,7 @@ describe('createPluginModels', () => {
   });
 });
 
-describe('recordPluginModelUsage', () => {
+describe('capturePluginModelUsageRecorder', () => {
   it('captures the session id even when a controller later resumes another session', () => {
     let sessionId = 'original';
     const recordSubagentUsageForSession = vi.fn();
@@ -315,38 +314,6 @@ describe('recordPluginModelUsage', () => {
         requests: [usage],
       }),
     );
-  });
-
-  it('writes a plugin-tagged record and saves when the turn is idle', () => {
-    const recordSubagentUsage = vi.fn();
-    const save = vi.fn();
-
-    recordPluginModelUsage(entry, { agent: { recordSubagentUsage, isRunning: false }, save });
-
-    expect(recordSubagentUsage).toHaveBeenCalledTimes(1);
-    expect(recordSubagentUsage.mock.calls[0]![0]).toMatchObject({
-      origin: 'plugin',
-      pluginId: 'session-rename',
-      subagentType: 'plugin:session-rename',
-      description: '自动起标题',
-      status: 'completed',
-      requests: [usage],
-    });
-    expect(save).toHaveBeenCalled();
-  });
-
-  it('stays in memory while the turn keeps running', () => {
-    const save = vi.fn();
-
-    recordPluginModelUsage(entry, { agent: { recordSubagentUsage: vi.fn(), isRunning: true }, save });
-
-    expect(save).not.toHaveBeenCalled();
-  });
-
-  it('does nothing when the host has no session (mica commit)', () => {
-    const save = vi.fn();
-    recordPluginModelUsage(entry, { agent: null, save });
-    expect(save).not.toHaveBeenCalled();
   });
 });
 

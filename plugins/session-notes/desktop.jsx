@@ -63,6 +63,18 @@ export default function SessionNotesCard({ api, onClose }) {
         setError(result.error || '保存失败');
         return;
       }
+      // 这次写的是 `text`，不是「当下这一格」。保存飞行期间用户又敲了字的话，脏标记必须
+      // 留着：清掉它会让那一次防抖回调直接跳过，新敲的内容再也不落盘，界面还写着「已保存」。
+      if (valueRef.current !== text) {
+        setState('dirty');
+        if (!saveTimerRef.current) {
+          saveTimerRef.current = setTimeout(() => {
+            saveTimerRef.current = null;
+            if (dirtyRef.current) void saveRef.current();
+          }, SAVE_DELAY_MS);
+        }
+        return;
+      }
       dirtyRef.current = false;
       setState('saved');
     } catch (err) {

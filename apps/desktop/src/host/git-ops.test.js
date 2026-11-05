@@ -121,6 +121,17 @@ describe('discardFile', () => {
     expect(existsSync(path.join(dir, 'b.txt'))).toBe(false)
     expect(await status(dir)).toBe('')
   })
+
+  // 删的必须是列表里那一行：符号链接的 realpath 是它指向的文件，按 realpath 删会连带
+  // 删掉另一个文件，链接本身还留成悬空。
+  it('未跟踪的符号链接只删链接，不动它指向的文件', async () => {
+    await symlink('a.txt', path.join(dir, 'link.txt'))
+    expect(await status(dir)).toBe('?? link.txt\n')
+    await discardFile(dir, 'link.txt')
+    expect(existsSync(path.join(dir, 'a.txt'))).toBe(true)
+    expect(await readFile(path.join(dir, 'a.txt'), 'utf8')).toBe('one\n')
+    expect(await status(dir)).toBe('')
+  })
 })
 
 describe('discardDirectory', () => {

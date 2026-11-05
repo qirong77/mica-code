@@ -2,7 +2,7 @@
 // 这里不 import electron，好处是单测能对着临时仓库跑真实 git。
 import { execFile } from 'child_process'
 import { rm, rmdir } from 'fs/promises'
-import { readFileSync, realpathSync, statSync } from 'fs'
+import { lstatSync, readFileSync, realpathSync, statSync } from 'fs'
 import path from 'path'
 import { promisify } from 'util'
 
@@ -359,7 +359,22 @@ export async function unstageFile(cwd, filePath) {
  */
 export async function discardFile(cwd, filePath) {
   const { root } = await getRepository(cwd)
-  const absolutePath = safeFilePath(root, filePath)
+  // 校验按真实路径做（防 `../` 与仓库外），删除必须落在用户点的那一项上：符号链接的
+  // realpath 是它指向的文件，按 realpath 删等于删掉仓库里另一个文件、把链接留成悬空。
+  const absolutePath = path.resolve(root, filePath)
+  try {
+    safeFilePath(root, filePath)
+  } catch (error) {
+    // 链接指向仓库外时 realpath 会越界，但删掉链接本身是安全的：只校验它所在的目录。
+    let link = false
+    try {
+      link = lstatSync(absolutePath).isSymbolicLink()
+    } catch {
+      link = false
+    }
+    if (!link) throw error
+    safeFilePath(root, path.dirname(filePath))
+  }
   if (await isTracked(root, filePath)) {
     await git(root, ['restore', '--worktree', '--', filePath])
     noteWorktreeChange(root)

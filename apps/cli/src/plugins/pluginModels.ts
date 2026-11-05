@@ -275,12 +275,6 @@ function toPluginUsage(usage: AgentUsageRecord | undefined): PluginModelUsage | 
   };
 }
 
-/** 记账目标：会话的 agent。命令上下文里可能没有（`mica commit`），那就只发请求不入账。 */
-export type PluginUsageOwner = {
-  recordSubagentUsage?(record: ReturnType<typeof buildSubagentUsageRecord>): void;
-  readonly isRunning?: boolean;
-};
-
 /** 每次请求开始时捕获会话 id；同一个 agent/controller 可以在等待期间 resume 别的会话。 */
 export function capturePluginModelUsageRecorder(
   controller: Pick<SessionController, 'getCurrentSessionId' | 'recordSubagentUsageForSession'>,
@@ -291,26 +285,6 @@ export function capturePluginModelUsageRecorder(
       controller.recordSubagentUsageForSession(sessionId, pluginUsageRecord(entry));
     }
   };
-}
-
-/**
- * 把一次插件模型请求写进会话的 `subagentUsageHistory`。
- *
- * turn 正在跑时不要插一次保存：那一轮自己的 checkpoint 会带上刚追加的用量。turn
- * 之外（`turn:before` 的自动起标题、命令里手动触发）不会有别的保存时机，只留在内存里
- * 就等于没记，所以空闲时立刻落盘。
- */
-export function recordPluginModelUsage(
-  entry: PluginModelUsageEntry,
-  owner: {
-    agent?: PluginUsageOwner | null;
-    save?: () => void;
-  },
-): void {
-  const agent = owner.agent;
-  if (!agent?.recordSubagentUsage || entry.requests.length === 0) return;
-  agent.recordSubagentUsage(pluginUsageRecord(entry));
-  if (!agent.isRunning) owner.save?.();
 }
 
 function pluginUsageRecord(entry: PluginModelUsageEntry): ReturnType<typeof buildSubagentUsageRecord> {

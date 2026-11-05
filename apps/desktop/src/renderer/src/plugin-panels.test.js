@@ -6,10 +6,8 @@ import {
   isOpenableLink,
   loadPluginPanels,
   menuCacheKey,
-  menuShortcutsOf,
   panelDrafts,
   pluginPanelTabs,
-  prunePluginPanelCache,
   quickbarMenuItems,
   quickbarMenuTable,
   readMenuCache,
@@ -260,6 +258,15 @@ describe('pluginPanelTabs', () => {
     expect(pluginPanelTabs(view, '已经删掉的分区').activeIndex).toBe(0)
     expect(pluginPanelTabs([], '技能文件').activeIndex).toBe(0)
   })
+
+  // 两块分区可以同名（「设置」「环境」各一份很常见），页签必须各点得到。
+  test('同名分区各有自己的 key，不会只打开第一块', () => {
+    const view = [{ title: '设置' }, { title: '设置' }, { title: '环境' }]
+    const { tabs, activeIndex } = pluginPanelTabs(view, '设置')
+    expect(new Set(tabs.map((tab) => tab.key)).size).toBe(3)
+    expect(tabs.map((tab) => tab.label)).toEqual(['设置', '设置', '环境'])
+    expect(activeIndex).toBe(0)
+  })
 })
 
 describe('isOpenableLink', () => {
@@ -359,16 +366,13 @@ describe('菜单缓存', () => {
     const other = menuCacheKey('node-2', 'user.demand-dev', 'reviews')
     writeMenuCache(key, { items: [{ label: 'mis · a' }], ready: true })
     writeMenuCache(other, { items: [{ label: 'sass · b' }], ready: true })
-    prunePluginPanelCache('node-2')
-    expect(readMenuCache(key)).toBeNull()
+    expect(readMenuCache(key)?.entry.items[0].label).toBe('mis · a')
     expect(readMenuCache(other)?.entry.items[0].label).toBe('sass · b')
   })
 })
 
 describe('面板视图缓存', () => {
   test('抽屉打开时先画缓存的那一份，过期的也照画', () => {
-    // prune 的参数是「留在页面上的那个会话」，其余会话的缓存都丢掉。
-    prunePluginPanelCache('node-9')
     expect(readPanelView('node-9', 'user.demand-dev')).toBeNull()
     writePanelView('node-9', 'user.demand-dev', { title: '需求开发', sections: [] }, 1000)
     expect(readPanelView('node-9', 'user.demand-dev', 2000)).toEqual({
@@ -376,8 +380,6 @@ describe('面板视图缓存', () => {
       stale: false
     })
     expect(readPanelView('node-9', 'user.demand-dev', 1000 + 60_000)?.stale).toBe(true)
-    prunePluginPanelCache('node-other')
-    expect(readPanelView('node-9', 'user.demand-dev')).toBeNull()
   })
 
   test('草稿取每个输入框的初值，缺省为空串', () => {
@@ -389,22 +391,6 @@ describe('面板视图缓存', () => {
     })
     expect(drafts).toEqual({ url: 'http://x', target: '' })
     expect(panelDrafts(null)).toEqual({})
-  })
-})
-
-describe('menuShortcutsOf', () => {
-  test('只挑清单里声明了 menu 的按钮：静态分组不需要问插件', () => {
-    const panel = {
-      id: 'user.demand-dev',
-      shortcuts: [
-        { label: '需求描述', section: '需求描述' },
-        { label: 'Pull Request', menu: 'reviews' },
-        { label: '频道', items: [{ label: '同步频道', action: 'check.now' }] }
-      ]
-    }
-    expect(menuShortcutsOf([panel]).map((item) => item.shortcut.label)).toEqual(['Pull Request'])
-    expect(menuShortcutsOf([panel, null]).length).toBe(1)
-    expect(menuShortcutsOf(undefined)).toEqual([])
   })
 })
 

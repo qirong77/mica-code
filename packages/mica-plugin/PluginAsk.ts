@@ -141,7 +141,13 @@ export type PluginAskHandle = {
 };
 
 export type PluginAskApi = {
-  /** 阻塞式提问：等用户点完再继续。 */
+  /**
+   * 阻塞式提问：等用户点完再继续。
+   *
+   * 只在**一轮对话里**（工具执行期间）可靠：宿主是逐行读请求的，答案要等当前这一行处理完
+   * 才轮得到。在面板动作、维护窗口这类「宿主正在 await 你的回调」的位置上调用它，答案会
+   * 排在回调之后，只能等到超时——那种场景用 `post()`。
+   */
   request(question: PluginAskQuestion, options?: PluginAskRequestOptions): Promise<PluginAskAnswer>;
   /**
    * 非阻塞提问：把卡片发给用户就返回，不占着调用方。
@@ -195,10 +201,13 @@ export function normalizePluginAskQuestion(input: PluginAskQuestion): PluginAskQ
     };
   });
 
+  // `null` / `''` / `0` 都是「没给」：`Number(null)` 是 0，按 0 收下来就成了 1 秒超时，
+  // 卡片刚画出来就消失。只有正数才算指定了时长。
   const asked = Number(input?.timeoutMs);
-  const timeoutMs = Number.isFinite(asked)
-    ? Math.min(Math.max(asked, 1000), MAX_PLUGIN_ASK_TIMEOUT_MS)
-    : DEFAULT_PLUGIN_ASK_TIMEOUT_MS;
+  const timeoutMs =
+    Number.isFinite(asked) && asked > 0
+      ? Math.min(Math.max(asked, 1000), MAX_PLUGIN_ASK_TIMEOUT_MS)
+      : DEFAULT_PLUGIN_ASK_TIMEOUT_MS;
 
   return {
     title,

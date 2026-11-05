@@ -105,14 +105,30 @@ function openWatchers(dir) {
     // 不支持递归 watch 的运行时：退一步，把「refs 再往下两层」也各自盯上，够覆盖
     // 分支提交与远端分支更新；更深的 refs 层级交给轮询兜底。
   }
-  for (const target of [dir, path.join(dir, 'refs'), path.join(dir, 'refs', 'heads')]) {
+  // 非递归 watch 给的 filename 是**相对被监听目录**的（盯 `refs/heads` 时提交给出的是
+  // `main`），要补回相对 `.git` 的前缀再判断，否则这些 watcher 一个事件都命中不了。
+  for (const relative of ['', 'refs', path.join('refs', 'heads')]) {
+    const target = relative ? path.join(dir, relative) : dir;
+    const onNestedEvent = (_event, filename) =>
+      handleGitWatchEventFor(dir, nestedWatchPath(relative, filename));
     try {
-      opened.push(watch(target, { persistent: false }, onEvent))
+      opened.push(watch(target, { persistent: false }, onNestedEvent))
     } catch {
       // 目录还不存在（空仓库没有 refs/heads）：跳过
     }
   }
   return opened
+}
+
+/**
+ * 非递归 watcher 给的相对文件名 → 相对 `.git` 的路径。
+ *
+ * `fs.watch` 的 filename 永远相对**被监听的那个目录**：盯 `refs/heads` 时一次提交给的是
+ * `main`，而 `isGitStatePath` 只认 `refs/...`。导出来是为了能直接单测这段换算。
+ */
+export function nestedWatchPath(relative, filename) {
+  if (typeof filename !== 'string' || !filename) return filename
+  return relative ? path.join(relative, filename) : filename
 }
 
 /**
