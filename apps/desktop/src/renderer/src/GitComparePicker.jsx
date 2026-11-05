@@ -13,7 +13,8 @@ import { comparePickerItems } from './git-compare-model'
 
 /**
  * A read-only quick pick for one side of the comparison. The panel owns comparison mode; choosing a
- * ref preserves it. `mode: 'head'` picks the target side, so it offers the working tree on top.
+ * ref preserves it. `mode: 'head'` picks the source side (the branch being reviewed), so it offers
+ * the working tree on top.
  */
 export function GitComparePicker({ cwd, current, mode = 'base', onPick, onClose }) {
   const target = mode === 'head'
@@ -91,7 +92,7 @@ export function GitComparePicker({ cwd, current, mode = 'base', onPick, onClose 
     if (resolving) return
     if (items[index]) {
       const { kind, ref, name } = items[index]
-      onPick({ kind, ref, name, direct: Boolean(current?.direct) })
+      onPick({ kind, ref, name })
       return
     }
     if (!commitQuery) return
@@ -106,8 +107,7 @@ export function GitComparePicker({ cwd, current, mode = 'base', onPick, onClose 
       onPick({
         kind: 'commit',
         ref: result.ref.hash,
-        name: result.ref.name || commitQuery,
-        direct: Boolean(current?.direct)
+        name: result.ref.name || commitQuery
       })
     } catch (failure) {
       if (request === requestRef.current) setError(failure?.message || String(failure))
@@ -146,7 +146,7 @@ export function GitComparePicker({ cwd, current, mode = 'base', onPick, onClose 
     }
   }
 
-  const title = target ? '选择目标分支' : '选择比较基线'
+  const title = target ? '选择当前分支' : '选择目标分支'
   return createPortal(
     <div
       className="fixed inset-0 z-[11000] bg-black/25"
@@ -174,7 +174,7 @@ export function GitComparePicker({ cwd, current, mode = 'base', onPick, onClose 
           <button
             type="button"
             title="关闭"
-            aria-label={target ? '关闭目标分支选择器' : '关闭基线选择器'}
+            aria-label={target ? '关闭当前分支选择器' : '关闭目标分支选择器'}
             onClick={onClose}
             className="grid size-6 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
           >

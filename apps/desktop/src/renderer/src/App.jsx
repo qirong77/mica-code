@@ -2206,7 +2206,7 @@ export default function App() {
     setFilesMounted(true)
     setView('files')
   }, [])
-  // 评审时改基线 / 目标分支只改这份对比的入参：目标分支选回「工作区」就是评审结束，
+  // 评审时改目标分支 / 当前分支只改这份对比的入参：当前分支选回「工作区」就是评审结束，
   // 编辑器回到会话自己的工作目录。
   const changeReviewBase = useCallback((value) => {
     setReviewTarget((current) => (current ? { ...current, base: value?.ref || null } : current))
@@ -2934,7 +2934,7 @@ export default function App() {
                   recentCwds={recentCwds}
                   /* 打开一条 PR：编辑器直接落在 `head 相对 base` 的对比上（只读提交）。 */
                   compare={reviewTarget}
-                  /* 两格选择框在评审时改的是这份对比本身；目标分支选回「工作区」＝评审结束。 */
+                  /* 两格选择框在评审时改的是这份对比本身；当前分支选回「工作区」＝评审结束。 */
                   onCompareBaseChange={changeReviewBase}
                   onCompareHeadChange={changeReviewHead}
                   /* 编辑器里的分支切换只刷新会话顶栏的 Git 状态，不改会话目录。 */

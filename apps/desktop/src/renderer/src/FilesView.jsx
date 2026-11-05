@@ -531,8 +531,8 @@ export const FilesView = forwardRef(function FilesView(
     compareBase: gitCompareBase
   })
 
-  // 目标分支不是工作区时，这一页就是一份「提交对提交」的对比：切到 Git 比较面板，并把第一个
-  // 改动文件摊开——否则用户看到的是一棵文件树，还得自己找面板、找文件。目标分支来自页面地址
+  // 当前分支不是工作区时，这一页就是一份「提交对提交」的对比：切到 Git 比较面板，并把第一个
+  // 改动文件摊开——否则用户看到的是一棵文件树，还得自己找面板、找文件。当前分支来自页面地址
   // 的 `?head=`，或面板上方那个选择框（按仓库记住）。
   const compareHeadKey = gitCompareHead?.ref || gitCompareHead?.name || ''
   const autoCompareRef = useRef('')

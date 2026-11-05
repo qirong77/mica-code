@@ -118,7 +118,7 @@ async function comparison(root, head, requested, direct, { headName = '', review
     try {
       base = { name: requested.trim(), hash: await commitHash(root, requested) }
     } catch {
-      warning = `无法解析比较基线“${requested.trim()}”，已退回自动基线或 HEAD。`
+      warning = `无法解析目标分支“${requested.trim()}”，已退回自动基线或 HEAD。`
     }
   }
   // 评审模式（提交对提交）没点名基线就是「按仓库默认主分支比」：工作区正好停在主分支上

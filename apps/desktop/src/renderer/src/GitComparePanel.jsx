@@ -242,7 +242,7 @@ export function GitComparePanel({
   error,
   branch,
   compareBase,
-  // 比较的右侧（目标分支）：给了它就是「提交对提交」的评审，没给就是当前工作区。
+  // 当前分支（我在开发的一侧）：给了它就是「提交对提交」的评审，没给就是当前工作区。
   // 它来自页面地址的 `?head=`，或面板上方第二个选择框（按仓库记住，不碰会话）。
   compareHead = null,
   onCompareBaseChange,
@@ -269,7 +269,7 @@ export function GitComparePanel({
   const [rootCollapsed, setRootCollapsed] = useState(false)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
-  // `null` | 'base'（原分支）| 'head'（目标分支）
+  // `null` | 'base'（目标分支）| 'head'（当前分支）
   const [pickerOpen, setPickerOpen] = useState(null)
   const [menu, setMenu] = useState(null)
   const [focusedId, setFocusedId] = useState(null)
@@ -310,7 +310,7 @@ export function GitComparePanel({
         ? compareBase.name || compareBase.ref || repository?.baseLabel || '选择基线'
         : repository?.baseLabel || '自动基线'
   const failure = error || repository?.error
-  // 评审模式：目标分支不是当前工作区，`direct/合并` 那一组开关与「工作区」文案都不适用。
+  // 评审模式：当前分支不是当前工作区，所以「工作区」那套文案不适用。
   const reviewMode = Boolean(compareHead)
   const headComparison =
     !reviewMode && (compareBase?.kind === 'head' || repository?.base === 'HEAD')
@@ -551,61 +551,38 @@ export function GitComparePanel({
         </button>
       </header>
 
-      {/* 比较的两头各一格：上「原分支」（旧的一侧），下「目标分支」（右侧，缺省工作区）。
-          两格随时可换，改的只是这一页的对比，不碰会话。 */}
+      {/* 比较的两头各一格：上「当前分支」（我在开发的一侧，缺省工作区），下「目标分支」
+          （合入的去处，通常是默认分支）。两格随时可换，改的只是这一页的对比，不碰会话。 */}
       <div className="mx-2 mb-1 shrink-0 overflow-hidden rounded-sm border border-line-soft bg-overlay-subtle">
-        <div className="flex h-8 min-w-0 items-center">
-          <button
-            type="button"
-            className="flex min-w-0 flex-1 items-center gap-2 self-stretch px-2 text-left hover:bg-overlay focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
-            disabled={!cwd || !onCompareBaseChange}
-            title={`原分支：${baseName} · 点击选择分支、标签或提交`}
-            aria-label={`原分支：${baseName}`}
-            aria-haspopup="dialog"
-            aria-expanded={pickerOpen === 'base'}
-            onClick={() => setPickerOpen('base')}
-          >
-            <IconGitCompare size={15} className="shrink-0 text-info-soft" />
-            <span className="shrink-0 text-[11px] text-fg-muted">原分支</span>
-            <span className="min-w-0 flex-1 truncate text-[12px] text-fg-strong">{baseName}</span>
-            <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
-          </button>
-          <button
-            type="button"
-            disabled={!cwd || !onCompareBaseChange || headComparison || reviewMode}
-            aria-pressed={Boolean(compareBase?.direct)}
-            title={
-              headComparison
-                ? 'HEAD 比较只包含未提交更改'
-                : compareBase?.direct
-                  ? '完整比较：直接与基线比较，点击切换到合并基点'
-                  : '合并比较：从共同祖先计算更改，点击切换到完整比较'
-            }
-            className="mr-1 shrink-0 rounded-sm border-l border-line-soft px-1.5 py-0.5 text-[10px] text-fg-muted hover:bg-overlay-strong hover:text-fg-max disabled:opacity-35"
-            onClick={() =>
-              onCompareBaseChange?.({
-                ...(compareBase || { kind: 'auto', ref: null, name: '自动基线' }),
-                direct: !compareBase?.direct
-              })
-            }
-          >
-            {headComparison ? '工作区' : compareBase?.direct ? '完整' : '合并'}
-          </button>
-        </div>
-        <div className="h-px bg-line-soft" />
         <button
           type="button"
           className="flex h-8 w-full min-w-0 items-center gap-2 px-2 text-left hover:bg-overlay focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
           disabled={!cwd || !onCompareHeadChange}
-          title={`目标分支：${headName} · 点击选择分支、标签或提交`}
-          aria-label={`目标分支：${headName}`}
+          title={`当前分支：${headName} · 点击选择分支、标签或提交`}
+          aria-label={`当前分支：${headName}`}
           aria-haspopup="dialog"
           aria-expanded={pickerOpen === 'head'}
           onClick={() => setPickerOpen('head')}
         >
           <IconFileDiff size={15} className="shrink-0 text-fg-soft" />
-          <span className="shrink-0 text-[11px] text-fg-muted">目标分支</span>
+          <span className="shrink-0 text-[11px] text-fg-muted">当前分支</span>
           <span className="min-w-0 flex-1 truncate text-[12px] text-fg-strong">{headName}</span>
+          <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
+        </button>
+        <div className="h-px bg-line-soft" />
+        <button
+          type="button"
+          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 text-left hover:bg-overlay focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
+          disabled={!cwd || !onCompareBaseChange}
+          title={`目标分支：${baseName} · 点击选择分支、标签或提交`}
+          aria-label={`目标分支：${baseName}`}
+          aria-haspopup="dialog"
+          aria-expanded={pickerOpen === 'base'}
+          onClick={() => setPickerOpen('base')}
+        >
+          <IconGitCompare size={15} className="shrink-0 text-info-soft" />
+          <span className="shrink-0 text-[11px] text-fg-muted">目标分支</span>
+          <span className="min-w-0 flex-1 truncate text-[12px] text-fg-strong">{baseName}</span>
           <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
         </button>
       </div>
@@ -726,7 +703,7 @@ export function GitComparePanel({
               className="mt-2 text-info-soft hover:underline"
               onClick={() => setPickerOpen('base')}
             >
-              选择其他比较基线
+              选择其他目标分支
             </button>
           </div>
         ) : !visibleFiles.length ? (
@@ -933,7 +910,7 @@ export function GitComparePanel({
               <>
                 <MenuItem
                   icon={IconGitCompare}
-                  label="选择比较基线…"
+                  label="选择目标分支…"
                   disabled={!cwd || !onCompareBaseChange}
                   onClick={() => menuAction(() => setPickerOpen(true))}
                 />

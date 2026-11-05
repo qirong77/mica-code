@@ -118,7 +118,7 @@ export function GitCompareWelcome({ repository, branch, reviewed, onOpen, loadin
         <p className="break-all">
           {repository
             ? `${branch || 'HEAD'} · 相对 ${repository.baseLabel || 'HEAD'}`
-            : '从左侧选择比较基线，查看当前工作区的完整差异。'}
+            : '从左侧选择目标分支，查看当前工作区的完整差异。'}
         </p>
         {!!files.length && (
           <>

@@ -194,11 +194,12 @@ export function compareTreeKey(rows, focusedId, key, collapsed = new Set()) {
 }
 
 /**
- * 比较两头各有一个选择框：`mode: 'base'` 是原分支（左侧），`mode: 'head'` 是目标分支（右侧）。
+ * 比较两头各有一个选择框：`mode: 'base'` 是目标分支（合入的去处），`mode: 'head'` 是当前分支
+ * （我在开发的一侧，缺省工作区）。
  *
- * 原分支可以选择「自动基线 / HEAD」这类比较方式；目标分支那边「工作区」就是比较方式本身——
+ * 目标分支可以选择「自动基线 / HEAD」这类比较方式；当前分支那边「工作区」就是比较方式本身——
  * 它代表当前检出的文件（也就是以前唯一的那种比较），再往下才是可以挑的分支与标签。
- * 目标分支会把当前检出的分支也列出来：拿它跟别的分支对比正是这一格最常见的用法。
+ * 当前分支会把当前检出的分支也列出来：拿它跟别的分支对比正是这一格最常见的用法。
  */
 export function comparePickerItems(refs, current, query = '', { mode = 'base' } = {}) {
   const target = mode === 'head'

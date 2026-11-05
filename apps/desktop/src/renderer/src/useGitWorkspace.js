@@ -6,8 +6,8 @@ import { useLatest } from './hooks'
  * Git data for an editor page's own directory. Comparison preferences are shared by repository,
  * while the directory and request lifecycle belong to this page, independently of its session.
  *
- * 比较的两头都按仓库记住：`gitCompareBase` 是原分支（旧的一侧），`gitCompareHead` 是目标分支
- * （右侧），后者缺省为工作区。换掉目标分支只是把这一页切成「提交对提交」，不碰会话。
+ * 比较的两头都按仓库记住：`gitCompareBase` 是目标分支（合入的去处），`gitCompareHead` 是当前
+ * 分支（我在开发的一侧），后者缺省为工作区。换掉当前分支只是把这一页切成「提交对提交」，不碰会话。
  */
 const EMPTY_COMPARE_BASES = {}
 const readCompareBases = () => uiStateKeys().gitCompareBase || EMPTY_COMPARE_BASES
@@ -79,7 +79,7 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
         // Keep the polling guard until both reads finish, even if either one rejects.
         // 评审模式不抓 status：两边都在提交里，未提交改动与「当前检出哪条分支」都不相关。
         // 只有页面地址带来的评审窗口才省掉它——那一页的目录可能是别处的副本，甚至已经不在了；
-        // 本页自己选的目标分支仍要读 status，否则底部那条「当前分支」会凭空消失。
+        // 本页自己选的当前分支仍要读 status，否则底部那条「当前分支」会凭空消失。
         const results = await Promise.allSettled([
           review
             ? window.mica.git.refSummary(target, {
@@ -88,7 +88,7 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
               })
             : window.mica.git.branchSummary(
                 target,
-                chosen ? { base: chosen.ref || null, direct: !!chosen.direct } : undefined
+                chosen ? { base: chosen.ref || null } : undefined
               ),
           compareRef.current?.head
             ? Promise.resolve({ status: null })
@@ -130,8 +130,7 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
           ? {
               kind: value.kind,
               ref: value.ref || null,
-              name: value.name || '',
-              direct: !!value.direct
+              name: value.name || ''
             }
           : null,
         ...(root !== target ? { [target]: null } : {})
@@ -149,7 +148,7 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
     [cwdRef, gitRef]
   )
 
-  // 目标分支：`null`（或选择器里的「工作区」）就是把右侧放回工作区。
+  // 当前分支：`null`（或选择器里的「工作区」）就是把这一侧放回工作区。
   const setCompareHead = useCallback(
     (value) => {
       const target = cwdRef.current || null
@@ -180,7 +179,7 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
     git.cwd === (cwd || null) ? git : { ...EMPTY_GIT, cwd: cwd || null, loading: !!cwd }
   const root = activeGit.repository?.root
   // 评审那一份对比的基线由发起方（插件的 `openReview`）定，不读按仓库记下的那格——
-  // 否则面板上的「原分支」会显示上一份对比的基线，与真正发出去的 `refSummary` 对不上。
+  // 否则面板上的「目标分支」会显示上一份对比的基线，与真正发出去的 `refSummary` 对不上。
   const reviewCompareBase = useMemo(
     () =>
       compare?.head
@@ -191,7 +190,7 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
   const compareBase = cwd
     ? reviewCompareBase || (root && compareBases[root]) || compareBases[cwd] || null
     : null
-  // 目标分支固定成同一个对象：`FilesView` 靠它的身份认「这是不是另一份对比」。
+  // 当前分支固定成同一个对象：`FilesView` 靠它的身份认「这是不是另一份对比」。
   const urlCompareHead = useMemo(
     () => (compare?.head ? { kind: 'branch', ref: compare.head, name: compare.head } : null),
     [compare?.head]
