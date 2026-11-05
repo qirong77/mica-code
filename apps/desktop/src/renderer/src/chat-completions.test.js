@@ -5,6 +5,7 @@ import {
   applyCompletion,
   completionInsertText,
   fileCompletionOptions,
+  filterSlashCompletionOptions,
   matchIndexes,
   rankCompletions,
   skillCompletionOptions,
@@ -189,6 +190,22 @@ describe('composer completions', () => {
       'mcp:mica-browser',
       'mcp:mica-terminal'
     ])
+  })
+
+  it('filters slash types before truncation and combines filtering with search', () => {
+    const candidates = {
+      skills: Array.from({ length: 205 }, (_, index) => ({ name: `skill-${index}` })),
+      mcpServers: [{ name: 'browser' }],
+      completions: [{ name: 'quick', description: 'browser helper', insert: 'use tool' }]
+    }
+    const all = slashCompletionOptions(candidates, '', Infinity)
+    expect(filterSlashCompletionOptions(all, null)).toHaveLength(200)
+    expect(filterSlashCompletionOptions(all, 'mcp').map((item) => item.name)).toEqual(['browser'])
+    expect(filterSlashCompletionOptions(all, 'prompt').map((item) => item.name)).toEqual(['quick'])
+    const searched = slashCompletionOptions(candidates, 'browser', Infinity)
+    expect(filterSlashCompletionOptions(searched, 'prompt').map((item) => item.name)).toEqual(['quick'])
+    expect(filterSlashCompletionOptions(searched, 'skill')).toEqual([])
+    expect(filterSlashCompletionOptions(searched, null).map((item) => item.kind)).toEqual(['mcp', 'prompt'])
   })
 
   it('narrows the merged list to the query and marks MCP labels after the prefix', () => {

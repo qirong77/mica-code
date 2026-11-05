@@ -503,10 +503,10 @@ export function createPluginSubagentHost(
           return meta ? snapshotOf(taskId, meta) : null;
         },
 
-        restart(taskId) {
+        restart(taskId, caller) {
           const meta = metaOf(taskId);
           if (!meta || !snapshotOf(taskId, meta)) throw new Error(`Subagent task not found: ${taskId}`);
-          return taskManager.restart(taskId, meta.owner);
+          return taskManager.restart(taskId, meta.owner, caller);
         },
 
         kill(taskId) {
@@ -574,7 +574,7 @@ export function createPluginSubagentHost(
     return api;
   };
 
-  taskManager.setRestartHandler((task, owner) => {
+  taskManager.setRestartHandler((task, owner, caller) => {
     if (!task.pluginId || !task.prompt)
       throw new Error('This task cannot be restarted: original task details are unavailable.');
     const history = JSON.stringify({
@@ -612,7 +612,7 @@ export function createPluginSubagentHost(
       contextMode: task.context_mode,
       contextFiles: task.context_files,
       ownedPaths: task.owned_paths,
-      caller: { owner, ...(task.parent_task_id ? { taskId: task.parent_task_id } : {}) },
+      caller: caller ?? { owner, ...(task.parent_task_id ? { taskId: task.parent_task_id } : {}) },
     };
     return api.background(request).taskId;
   });

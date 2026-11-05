@@ -10,6 +10,8 @@ export type UsageLedgerEntry = {
   providerId?: string;
   durationMs?: number;
   firstTokenMs?: number;
+  responseWaitMs?: number;
+  generationDurationMs?: number;
   pluginId: string;
   /** 这笔请求是干什么的（插件自己给的 purpose）。 */
   purpose: string | null;
@@ -59,6 +61,8 @@ export function parseUsageLedger(content: string): UsageLedgerEntry[] {
     const providerId = text(parsed.providerId);
     const durationMs = timing(parsed.durationMs);
     const firstTokenMs = timing(parsed.firstTokenMs);
+    const responseWaitMs = timing(parsed.responseWaitMs);
+    const generationDurationMs = timing(parsed.generationDurationMs);
     entries.push({
       id,
       occurredAt,
@@ -66,6 +70,8 @@ export function parseUsageLedger(content: string): UsageLedgerEntry[] {
       ...(providerId ? { providerId } : {}),
       ...(durationMs !== undefined ? { durationMs } : {}),
       ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
+      ...(responseWaitMs !== undefined ? { responseWaitMs } : {}),
+      ...(generationDurationMs !== undefined && generationDurationMs > 0 ? { generationDurationMs } : {}),
       pluginId,
       purpose: text(parsed.purpose),
       cwd: text(parsed.cwd),

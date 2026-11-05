@@ -40,6 +40,14 @@ afterEach(() => {
 })
 
 describe('插件补全候选', () => {
+  it('官方快捷按钮入口插入工具提示词', () => {
+    const entry = listPluginCompletions('').find((item) => item.name === 'quick-buttons')
+    expect(entry).toMatchObject({
+      pluginId: 'quick-buttons',
+      insert: '请使用 quick_buttons 工具，帮我：'
+    })
+  })
+
   it('读用户插件清单里的条目，来源标出插件 id', () => {
     writePlugin('demand-dev', {
       completions: [

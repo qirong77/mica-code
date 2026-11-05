@@ -27,8 +27,8 @@ npm test                   # bun test，4 worker 并行，覆盖 host / renderer
 npx eslint src/
 npm run build              # 并行：根 CLI 构建 + 外壳 + Web 运行时
 npm run build:server       # 只重建 out/server
-npm run build:app          # build + electron-builder --dir + 写产物指纹（产出 .app，= build:unpack）
-npm run build:app:local    # 同上但跳过 electron-builder 签名、改用本机证书快速签（见下）
+npm run build:app          # build + 无签名打包 + 本机证书快速签名（约十几秒）
+npm run build:app:local    # build:app 的兼容别名
 npm run pack:app           # 只跑 electron-builder --dir 且强制不签名
 npm run sign:app           # 用本机自签证书给已打出的 .app 签名
 npm run build:mac          # 再打 DMG + zip（发布用；打包与压缩占 20s 以上）
@@ -52,7 +52,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 发布链路 `build-binaries.yml`：checks / desktop-checks 任一失败，build 与 publish 整段跳过。
 - 打包按平台取 node-pty 原生产物（`scripts/stage-node-pty.mjs`）；`spawn-helper` 只属于 macOS。
 - desktop 用 `scripts/run-parallel.mjs` 并行跑三份构建；Vite 8 需搭配 electron-vite 6。
-- `npm run build:app` = 三份构建 + `electron-builder --dir`，只产出可运行的 `.app`；DMG + zip 是发布产物，走 `npm run build:mac`。后者省不掉：`hdiutil` 单压 277MB 的 app 就要 9s，zip 与 blockmap 再加 6s，两者串行约 20s，占整个 `build:mac` 的四分之三。
+- `npm run build:app` = 三份构建 + 强制跳过 electron-builder 签名的 `--dir` 打包 + 本机快速签名，只产出可运行的 `.app`；没有本机证书时签名步骤安全跳过。DMG + zip 是发布产物，走 `npm run build:mac`。后者省不掉：`hdiutil` 单压 277MB 的 app 就要 9s，zip 与 blockmap 再加 6s，两者串行约 20s，占整个 `build:mac` 的四分之三。
 - 构建产物是唯一的共享点（`~/.local/lib/mica/mica` 与运行中的 `.app` 会被覆盖）：同一台机器上多个会话可能同时构建，动手前先争 `$HOME/.mica/.build-lock`（`mkdir` 自旋，结束 `rmdir`），并在动手前说明会覆盖哪些产物。
 - 品牌 SVG 唯一源 `apps/desktop/resources/icon.svg`，位图由 `npm run icons:generate` 生成。
 - 官网架构图只改 `apps/website/architecture/*.architecture.json`，再由 Archify 生成。

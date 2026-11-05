@@ -107,8 +107,35 @@ describe('first token timing', () => {
     expect(client.usageHistory).toHaveLength(1);
     expect(client.usageHistory[0]).toMatchObject({
       provider: protocol === 'chat' ? 'openai_chat_completions' : 'openai_responses',
-      providerId: 'test', firstTokenMs: 70, durationMs: 2200, outputTokens: 1,
+      providerId: 'test', firstTokenMs: 70, responseWaitMs: 2170, durationMs: 2200, outputTokens: 1,
     });
+    expect(client.usageHistory[0]?.generationDurationMs).toBeUndefined();
+  });
+
+  it.each(['chat', 'responses'] as const)('%s records generation only for attributable positive output usage', async (protocol) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const create = protocol === 'chat' ? openaiMocks.chatCreate : openaiMocks.responsesCreate;
+    for (const output of [2, 0]) {
+      create.mockResolvedValueOnce((async function* () {
+        vi.setSystemTime(Date.now() + 20);
+        if (protocol === 'chat') {
+          yield { model: 'test-model', choices: [{ delta: { reasoning_content: 'think' } }] };
+          vi.setSystemTime(Date.now() + 50);
+          yield { model: 'test-model', choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] };
+          yield { model: 'test-model', choices: [], usage: { prompt_tokens: 2, completion_tokens: output, total_tokens: 2 + output } };
+        } else {
+          yield { type: 'response.reasoning_text.delta', delta: 'think', item_id: 'r', output_index: 0, content_index: 0 };
+          vi.setSystemTime(Date.now() + 50);
+          yield { type: 'response.output_text.delta', delta: 'ok' };
+          yield { type: 'response.completed', response: { model: 'test-model', usage: { input_tokens: 2, output_tokens: output, total_tokens: 2 + output } } };
+        }
+      })());
+      const client = protocol === 'chat' ? new ChatCompletionsClient(options('openai_chat_completions')) : new ResponsesClient(options('openai_responses'));
+      await client.query('hello');
+      expect(client.usageHistory[0]?.responseWaitMs).toBe(20);
+      expect(client.usageHistory[0]?.generationDurationMs).toBe(output ? 50 : undefined);
+    }
   });
 
   it('does not associate ambiguous chat usage chunks with a duration', async () => {

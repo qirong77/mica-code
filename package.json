@@ -13,7 +13,7 @@
     "typecheck": "bunx tsc --noEmit",
     "dev:app": "cd apps/desktop && bun run dev",
     "prebuild:app": "cd apps/desktop && [ -x node_modules/.bin/electron-vite ] || npm install",
-    "build:app": "cd apps/desktop && bun run build:unpack",
+    "build:app": "cd apps/desktop && bun run build:app",
     "build:release": "cd apps/desktop && bun run build:mac",
     "test": "node scripts/run-tests.mjs",
     "test:unit": "vitest run --project unit",

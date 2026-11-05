@@ -1,6 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentMaxTurnsError } from '@packages/mica-agent/index.js';
 import type { PluginSubagentApi, PluginSubagentType } from '@packages/mica-plugin/index.js';
@@ -501,6 +501,24 @@ describe('PluginSubagentHost path leases', () => {
 });
 
 describe('desktop subagent restart', () => {
+  it('associates a tool restart with its caller and rejects a different owner', async () => {
+    const harness = createHarness();
+    harness.api.registerType(exploreType());
+    const original = await harness.api.run({ description: 'work', prompt: 'original' });
+    const otherOwner = createRuntimeStub({ taskOwnerId: 'other-owner' }).runtime;
+    expect(() => harness.api.tasks.restart(original.taskId, { owner: otherOwner, toolCallId: 'wrong-call' })).toThrow(/not found/);
+    expect(() => harness.api.tasks.restart(original.taskId, { toolCallId: 'missing-owner' })).toThrow(/not found/);
+
+    const caller = { owner: harness.runtime, taskId: 'current-parent', toolCallId: 'restart-call' };
+    const replacement = harness.api.tasks.restart(original.taskId, caller);
+    expect(harness.api.tasks.get(replacement)).toMatchObject({ initiatedByCallId: 'restart-call' });
+    expect(harness.taskManager.get(replacement, harness.runtime)).toMatchObject({ parent_task_id: 'current-parent' });
+    await harness.api.tasks.wait([replacement]);
+    expect(harness.recordSubagentUsage).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: replacement, origin: 'delegation', initiatedByCallId: 'restart-call', pluginId: 'test-plugin',
+    }));
+  });
+
   it('restarts only the calling plugin’s task under its original owner', async () => {
     const pending = createPendingQuery();
     const harness = createHarness({ query: pending.query });
@@ -520,10 +538,46 @@ describe('desktop subagent restart', () => {
     await flushAsyncWork();
     expect(replacement).not.toBe(first.taskId);
     expect(harness.api.tasks.get(replacement)?.status).toBe('running');
-    expect(harness.taskManager.get(replacement, harness.runtime)).toBeNull();
+    expect(harness.taskManager.get(replacement, harness.runtime)).toBeUndefined();
     expect(harness.taskManager.get(replacement, otherOwner)).toBeTruthy();
     expect(pending.prompts.at(-1)).toContain('original failure');
     expect(pending.prompts.at(-1)).toContain('verify the current state');
+    harness.api.tasks.kill(replacement);
+    await flushAsyncWork();
+  });
+
+  it('accesses restored tasks only for their owner and plugin', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mica-subagent-restart-'));
+    temporaryHomes.push({ path: home, previous: process.env.MICA_HOME });
+    process.env.MICA_HOME = home;
+    const pending = createPendingQuery();
+    const harness = createHarness({ query: pending.query });
+    const otherOwner = createRuntimeStub({ taskOwnerId: 'other-owner' }).runtime;
+    const record = {
+      id: 'restored-task', description: 'work', prompt: 'original', subagent_type: 'Explore',
+      model: 'test-model', effort: 'medium' as const, status: 'failed' as const,
+      pluginId: 'test-plugin', provider_id: 'test-provider', protocol: 'chat',
+      started_at: new Date().toISOString(), error: 'failed before restore', execution_pending: false,
+    };
+    harness.taskManager.restore([record], harness.runtime);
+    harness.taskManager.restore([{ ...record, id: 'other-owner-task' }], otherOwner);
+    harness.api.registerType(exploreType());
+    const otherPlugin = harness.host.forPlugin('other-plugin');
+
+    expect(harness.api.tasks.list().map((task) => task.id)).toEqual([record.id]);
+    expect(harness.api.tasks.list(otherOwner).map((task) => task.id)).toEqual(['other-owner-task']);
+    expect(harness.api.tasks.get(record.id)?.status).toBe('failed');
+    expect(harness.api.tasks.get('other-owner-task')).toBeNull();
+    expect(() => harness.api.tasks.restart('other-owner-task')).toThrow(/not found/);
+    expect(otherPlugin.tasks.list()).toEqual([]);
+    expect(otherPlugin.tasks.get(record.id)).toBeNull();
+    expect(() => otherPlugin.tasks.restart(record.id)).toThrow(/not found/);
+    await expect(harness.api.tasks.wait([record.id])).resolves.toEqual([expect.objectContaining({ id: record.id })]);
+
+    const replacement = harness.api.tasks.restart(record.id);
+    await flushAsyncWork();
+    expect(harness.api.tasks.get(replacement)?.status).toBe('running');
+    expect(pending.prompts.at(-1)).toContain('failed before restore');
     harness.api.tasks.kill(replacement);
     await flushAsyncWork();
   });

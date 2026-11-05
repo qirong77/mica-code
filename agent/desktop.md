@@ -48,7 +48,8 @@
 - 阶段文案与计时读 `statusLinePhase`；`mica/turn/retrying` 让状态行显示 `retrying n/5`。
 - 文件补全 CLI / desktop 共用 `mica-file-mentions`；`@` 与 `/` skill 补全只在词首触发，选中只插文本（文件插 `@路径`，skill 插 `[skill:name](SKILL.md 绝对路径)`）。
 - `/` 浮层混排 skill、MCP server 与插件清单声明的条目（`completions`，类型标记「指令」）；前两类插入的是一枚 markdown 链接：`[skill:name](SKILL.md 绝对路径)`、`[mcp:name](接口地址)`（http 的 server 才有地址，stdio 退回 `config.json`），第三类插入清单里写好的那段提示词（`insert`）。目标含空白或括号时整条包进 `<…>`（CommonMark 允许），**不**做百分号编码——那会让模型读到一个要再解一次才成路径的东西。消息体里这类引用由 `splitTextByCapabilityRefs` 收成 `skill:name` 一枚短标签，点开仍是完整目标（原文一个字不改，编辑重发靠它定位）。两边都包含**内置能力**，不需要用户配置：skill 来自磁盘扫描 + 插件发布的 `$MICA_HOME/plugin-skills` 索引 + **插件清单声明的 skill 目录**（后者只解析 `plugin.json`、不导入插件代码，所以第一次打开就看得见随包 skill，不用等插件 setup 过一次；`skills-core.js`；索引里声明了角色的条目按会话当前角色过滤，`skills:list` 的 `role` 参数就是它，取输入条上还未发送的 `activeRole`），MCP 来自 `config.json` + 运行时按 socket 能力算出的 `mica-browser` / `mica-terminal`（`mcp-candidates-core.js`）；插入文本与普通条目一致。
-- 每行是「名称 | 说明 | 类型 | 来源」四列，列数必须与行内子元素一一对应（多出来的子元素会掉到第二行，浮层看起来就是歪的）。类型标记写 `skill` / `MCP`（`@` 文件补全的 `file` 不画，一整屏都是文件时标一排只是噪声）；来源标记是 `source: { kind, label, detail? }`，kind 取 `builtin` / `plugin` / `project` / `user` / `config`：插件带的写「插件 <id>」、项目目录写 `.mica/skills` 这样的相对路径、用户目录写 `$MICA_HOME/skills` / `~/.agents/skills`、MCP 写「内置」或 `config.json`；`detail`（SKILL.md 路径、`config.json` 路径、插件 id）放悬停提示。来源由 host 两个扫描器给，渲染层只做白名单校验（不认识的 kind 整条丢掉），`label` 同时参与查询匹配但没有高亮——说明列只讲「这东西干什么」。
+- `/` 浮层顶部的 skill / MCP / plugins 是可取消的单选类型筛选，默认显示全部；plugins 对应清单的 prompt 条目而不是插件来源的 skill。搜索与类型筛选叠加，先筛选再截断，键盘操作使用同一份可见列表；关闭浮层重置筛选，`@` 文件补全不显示筛选。
+- 每行是「名称 | 说明 | 类型 | 来源」四列，列数必须与行内子元素一一对应（多出来的子元素会掉到第二行，浮层看起来就是歪的）。类型标记写 `skill` / `MCP` / `plugins`（`@` 文件补全的 `file` 不画，一整屏都是文件时标一排只是噪声）；来源标记是 `source: { kind, label, detail? }`，kind 取 `builtin` / `plugin` / `project` / `user` / `config`：插件带的写「插件 <id>」、项目目录写 `.mica/skills` 这样的相对路径、用户目录写 `$MICA_HOME/skills` / `~/.agents/skills`、MCP 写「内置」或 `config.json`；`detail`（SKILL.md 路径、`config.json` 路径、插件 id）放悬停提示。来源由 host 两个扫描器给，渲染层只做白名单校验（不认识的 kind 整条丢掉），`label` 同时参与查询匹配但没有高亮——说明列只讲「这东西干什么」。
 - desktop composer 不分派斜杠命令；输入历史只由 Alt+↑/↓（CLI 另支持 Ctrl+P/N）翻。
 - ⌘/Ctrl+P 在主区顶部打开会话快速搜索（`SessionQuickOpen`，VS Code quick open 那种：标题 / 路径 / 分组匹配，不搜对话正文）；文件视图里同一组合归编辑器的文件快速搜索（`QuickSearch`），两处由 `disabled` 按视图分工，不要同时抢这个键。
 - ⌘/Ctrl+K 聚焦侧栏搜索：焦点在对话输入框里也要能用（「刚敲完一句想翻旧会话」是最常见的入口），终端、编辑器与别处的输入框不抢，macOS 上只接管 ⌘K（Ctrl+K 在文本里是「删到行尾」）。侧栏收着（桌面折叠 / 手机抽屉）时先露出来再聚焦——快捷键与焦点规则在 `App.jsx`，输入框在 `SessionTree`。
@@ -79,8 +80,8 @@
 
 - 统计页和编辑器一样是**整窗的一层**（`App.jsx` 的 `viewOwnsWindow`）：进页面时会话列表整个让出（侧栏宽度归 0、左上留出红绿灯的位置、侧栏开关不画、手机抽屉收起），返回只走主区顶栏最左的「返回对话」，⌘K 在这两页里也是先回对话再聚焦搜索框。视图本身不写进 layout 的折叠偏好，退出后按用户原来那份复原。
 
-- Stats 页（`renderer/src/stats/StatsView.jsx`）默认区间是**今天**（打开页面关心的是刚才这一轮花了多少，近 30 天是决策时才切过去看的），图表都画在 `charts.jsx`（`CalendarHeatmap` / `BarSeries`）之上：每日柱可在 Tokens / 请求数 / 按来源三种维度间切换（按来源是堆叠柱，取 `scope.js` 的 `bucketByDaySource`），模型排行带占比条，项目排行是按来源堆叠的条，会话表在 tokens 格背后铺一条相对最大值的条。日聚合、区间裁剪的唯一实现在 `scope.js`，颜色与顺序只认 `stats/usage-series.js` 的 `USAGE_KIND_COLORS` / `USAGE_KIND_ORDER`（与「Usage by source」卡同一份），不要再写第二套配色或聚合。
-- 模型速度按请求的 `providerId` 与模型分组，吞吐是有效样本的输出 tokens 总数除以请求总耗时（含重试），首字等待是最终尝试首个正文或思考增量的平均时间；两者各自显示样本数。旧记录没有计时的不参与统计，缺少服务商身份不从协议或父会话推断。统计索引版本变更时重建日聚合。
+- Stats 页（`renderer/src/stats/StatsView.jsx`）默认区间是**今天**（打开页面关心的是刚才这一轮花了多少，近 30 天是决策时才切过去看的），图表都画在 `charts.jsx` 之上：每日用量单日显示数字，多日可在 Tokens / 请求数 / 按来源三种维度间切换（按来源是堆叠柱，取 `scope.js` 的 `bucketByDaySource`），模型排行带占比条，项目排行是按来源堆叠的条，会话表在 tokens 格背后铺一条相对最大值的条。日聚合、区间裁剪的唯一实现在 `scope.js`，颜色与顺序只认 `stats/usage-series.js` 的 `USAGE_KIND_COLORS` / `USAGE_KIND_ORDER`（与「Usage by source」卡同一份），不要再写第二套配色或聚合。
+- 模型速度按请求的 `providerId` 与模型分组，响应等待是从原请求开始到最终成功尝试首个正文或思考增量的平均时间，包含 provider 内重试；生成速率是有效样本输出 tokens 总数除以首末内容增量间隔，仅为估算。排行与按日趋势显示样本数，缺失日期不连线；旧记录没有新计时的不参与统计，缺少服务商身份不从协议或父会话推断。统计索引版本变更时重建日聚合。
 - 「By source」是**两层树**（`stats/source-groups.js`）：父行是「谁发起的」——主对话（App 自己）、某个插件；子行是它底下的具体请求，缩进一层挂在父行后面。所有请求都要经过 App，只摊成一串 `Implementer` / `compact` 时看不出这笔钱是谁花的，所以父级优先：组间顺序固定为「主对话 → 各插件（按组总量）→ 内核」，指标排序只作用在组内子项（分组是结构，不是排序）。父行数字是整组之和（插件自身请求、以及功能 id 就等于插件 id 的后台请求都并进父行，不单列成子项），卡片总量只累父行，展开时不重复计数；卡片因此不分页（分页会把父行与子项劈到两页）。
 - **名字一律用插件自己的**：父行取清单里的 `name`（`By The Way`，不是「旁问」），子行用记账里原样的 id / 类型名（`Explore`、`btw`）。统计页不翻译、不起别名——同一个东西在插件页、日志与统计页叫三个名字时，用户对不上账。父级靠记账里的 `pluginId`（委派记录写类型提供者 `subagent`、插件触发的摘要写触发它的插件），老记录由 `evolution` 的 `usage-source-owner` 迁移一次性补齐（含 `auto-compact` → `session-compact` 改名），所以运行时不需要「没有归属」的回退分支；真正没有插件的只剩内核自带命令（`/compact`、`mica compact`），它按功能 id 自成一组，Type 写「内核」。来源的类别名只有一份（`mica-web-shared/usage-source` 的 `USAGE_SOURCE_LABELS`），表格、图例与会话详情共用；卡片底部图例解释四类各自是什么（`SOURCE_KIND_HINTS`）。
 - 表格统一用 `@mica-config-ui/web` 的 `DataTable`（列定义、受控排序、内置翻页、窄容器退列）：统计页的 By source 与 By session 都用它，宿主负责包一层 `.mica-config-ui`。**不横向滚动**——卡片变窄时先让次要列退场（`narrow: 'secondary'` 在 ≤720px 退，`'tertiary'` 在 ≤540px 再退），表头在窄容器换 `narrowLabel`。规则按容器宽度写在 `styles.css` 的 `.data-table-scope` 下，不看视口；分页的页码夹紧与区间文案在 `dataTableModel.ts`（有单测）。
@@ -103,6 +104,8 @@
 - 「在编辑器中打开」把内容作为只读虚拟文档放进应用里唯一的 monaco 实例。
 - 轻量浮层统一用 `Popover`；会话级设置是弹窗而不是浮层。
 - 电脑隐藏发送/排队按钮，移动端保留；后台任务/子代理 dock 只列运行项与需要看一眼的结束（判定唯一实现在 `mica-common/backgroundTaskVisibility.ts`：`killed` 是模型 kill 或宿主退出时的统一收尾，不占位置；失败、非零退出码、进程失踪才留着）。子代理同理走 `mica-common/subagentVisibility.ts`：`completed`、模型自己 kill 的、上一轮正常结束统一收尾的都不占位置；只有 `failed` / `partial` / **被中断**的留着——记录带 `interrupted`（点停止、宿主关闭、上一轮以中止收尾）的还能看最近活动、还能重启。
+
+- 一轮成功结束时桌面宿主清空当前展示的子代理条目（含此前失败或停止项），并过滤后续快照中已清除的任务及明确在成功前结束的迟到任务；运行中、结束时间缺失或与界限相同的任务保留。界限仅在当前桌面宿主进程内有效，失败、中断保留，持久任务历史不变。详情的「创建替代任务」是新任务，不是断点续跑。
 
 ## 文件、Git 与侧栏
 

@@ -197,6 +197,11 @@ export function slashCompletionOptions(
   })
 }
 
+export function filterSlashCompletionOptions(items, kind, limit = SKILL_COMPLETION_LIMIT) {
+  const list = Array.isArray(items) ? items : []
+  return (kind ? list.filter((item) => item.kind === kind) : list).slice(0, limit)
+}
+
 /**
  * 一条候选的来源标记。
  *

@@ -196,6 +196,8 @@ export class ChatCompletionsClient extends BaseAgent<
       // 前几次失败的时间也算进 TTFT（注释里说要重新计时，之前只清零了 firstDeltaAt）。
       let attemptStartedAt = requestStartedAt;
       let firstDeltaAt = 0;
+      let lastDeltaAt = 0;
+      let deltaCount = 0;
       let requestAttempts = 1;
       let requestEndSent = false;
       const finishRequest = (info: {
@@ -250,6 +252,8 @@ export class ChatCompletionsClient extends BaseAgent<
         async () => {
           attemptStartedAt = Date.now();
           firstDeltaAt = 0;
+          lastDeltaAt = 0;
+          deltaCount = 0;
           attemptHadOutput = false;
           attemptHadThinking = false;
           content = '';
@@ -302,6 +306,8 @@ export class ChatCompletionsClient extends BaseAgent<
                 // 首字口径只认正文/思考增量：SDK 首块常常只有 role，记成「首字」会让
                 // firstTokenMs 退化成 TTFB。
                 if (!firstDeltaAt) firstDeltaAt = Date.now();
+                lastDeltaAt = Date.now();
+                deltaCount++;
                 attemptHadOutput = true;
                 const textDelta: string =
                   contentSeparator && !emittedContentSeparator ? `${contentSeparator}${delta.content}` : delta.content;
@@ -316,6 +322,8 @@ export class ChatCompletionsClient extends BaseAgent<
               const reasoning = readReasoningContent(delta);
               if (typeof reasoning === 'string' && reasoning) {
                 if (!firstDeltaAt) firstDeltaAt = Date.now();
+                lastDeltaAt = Date.now();
+                deltaCount++;
                 attemptHadOutput = true;
                 throwIfQueryStopped(options);
                 attemptHadThinking = true;
@@ -410,7 +418,12 @@ export class ChatCompletionsClient extends BaseAgent<
       for (const { usage, model } of pendingUsage) {
         this.recordUsage(usage, {
           model, turnId, requestIndex, messageCount: messages.length,
-          ...(pendingUsage.length === 1 ? { durationMs, firstTokenMs } : {}),
+          ...(pendingUsage.length === 1 ? {
+            durationMs, firstTokenMs,
+            responseWaitMs: firstDeltaAt ? firstDeltaAt - requestStartedAt : undefined,
+            generationDurationMs: toolCallsMap.size === 0 && Number.isFinite(usage.completion_tokens) && usage.completion_tokens > 0 && deltaCount >= 2 && lastDeltaAt > firstDeltaAt
+              ? lastDeltaAt - firstDeltaAt : undefined,
+          } : {}),
         });
       }
 
@@ -505,6 +518,8 @@ export class ChatCompletionsClient extends BaseAgent<
       messageCount: number;
       durationMs?: number;
       firstTokenMs?: number;
+      responseWaitMs?: number;
+      generationDurationMs?: number;
     },
   ): void {
     const promptTokens = usage.prompt_tokens ?? 0;
@@ -528,6 +543,8 @@ export class ChatCompletionsClient extends BaseAgent<
       paidTokenRate,
       durationMs: metadata.durationMs,
       firstTokenMs: metadata.firstTokenMs,
+      ...(metadata.responseWaitMs !== undefined ? { responseWaitMs: metadata.responseWaitMs } : {}),
+      ...(metadata.generationDurationMs !== undefined ? { generationDurationMs: metadata.generationDurationMs } : {}),
       promptTokens,
     };
 

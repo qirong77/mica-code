@@ -1,7 +1,7 @@
 {
   "id": "browser-cookie-sync",
   "name": "Browser Cookie Sync",
-  "icon": "cable",
+  "icon": "database",
   "version": "1.0.0",
   "description": "把本机 Chrome 与 Mica 受控浏览器的 cookie 双向同步：Chrome 里登过的站点，Mica 的浏览器直接就是登录态；反过来也一样。两边都改过的条目不动，列出来让人选。",
   "author": "Mica Code",

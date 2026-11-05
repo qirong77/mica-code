@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { localDayKey } from '@packages/mica-web-shared/stats-day.js'
-import { bucketByDay, bucketByDaySource, modelPerformance, scopeSession } from './scope.js'
+import { bucketByDay, bucketByDaySource, modelPerformance, modelSpeed, modelSpeedPerformance, modelSpeedTrend, scopeSession, speedTrendByDay } from './scope.js'
 
 const at = (y, m, d, h = 12) => new Date(y, m - 1, d, h).getTime()
 const day = (y, m, d) => localDayKey(at(y, m, d))
@@ -75,6 +75,25 @@ function session(overrides = {}) {
 }
 
 describe('Stats range scoping', () => {
+  test('aggregates new speed samples and leaves absent trend samples missing', () => {
+    const sample = (tokens, duration, wait) => ({ provider: 'p', model: 'm', generationOutputTokens: tokens, generationDurationMs: duration, generationSamples: 1, responseWaitMs: wait, responseWaitSamples: 1 })
+    const input = [session({ days: [
+      dayRow({ day: day(2026, 8, 2), speedModels: [sample(100, 1000, 0)] }),
+      dayRow({ day: day(2026, 8, 3), speedModels: [sample(100, 3000, 400)] }),
+      dayRow({ day: day(2026, 8, 4), speedModels: [{ provider: 'p', model: 'm', outputTokens: 100, durationMs: 500, throughputSamples: 1 }] })
+    ] })]
+    expect(modelSpeedPerformance(input)[0]).toMatchObject({ estimatedTokensPerSecond: 50, averageResponseWaitMs: 200, generationSamples: 2 })
+    const trend = speedTrendByDay(input)
+    expect(trend.get(day(2026, 8, 2))[0].averageResponseWaitMs).toBe(0)
+    expect(trend.get(day(2026, 8, 4))).toEqual([])
+    expect(modelSpeed(input, 'generation')).toEqual([{ provider: 'p', model: 'm', value: 50, samples: 2 }])
+    expect(modelSpeedTrend(input, 'p', 'm', 'responseWait')).toEqual([
+      { day: day(2026, 8, 2), value: 0, samples: 1 },
+      { day: day(2026, 8, 3), value: 400, samples: 1 }
+    ])
+    expect(modelSpeedPerformance([scopeSession(input[0], { day: day(2026, 8, 4) })])).toEqual([])
+  })
+
   test('compares weighted performance only for selected days and separates providers', () => {
     const sample = (provider, outputTokens, durationMs, firstTokenMs) => ({
       provider, model: 'm', outputTokens, durationMs, throughputSamples: 1, firstTokenMs, firstTokenSamples: 1

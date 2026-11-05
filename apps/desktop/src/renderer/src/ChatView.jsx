@@ -130,7 +130,7 @@ function btwDraftKey(nodeId, threadId) {
 function completionEmptyText(kind, loading, failed) {
   if (kind === 'skill') {
     if (loading) return '正在加载…'
-    return failed ? '加载 skill / MCP / 指令失败' : '没有匹配的 skill、MCP 或指令'
+    return failed ? '加载 skill / MCP / plugins 失败' : '没有匹配的结果'
   }
   if (loading) return '正在搜索文件…'
   return failed ? '文件搜索失败' : '没有找到匹配文件'
@@ -142,6 +142,7 @@ import {
   applyCompletion,
   completionInsertText,
   fileCompletionOptions,
+  filterSlashCompletionOptions,
   slashCompletionOptions
 } from './chat-completions'
 import ComposerCompletionPalette from './ComposerCompletionPalette'
@@ -1630,7 +1631,7 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, o
             size="compact"
             variant="ghost"
             disabled={restarting}
-            title="创建新任务，并使用原任务和最近活动作为上下文"
+            title="创建新任务，使用原任务和最近活动作为上下文；不是从断点继续"
             onClick={async () => {
               if (restarting) return
               setRestarting(true)
@@ -1641,7 +1642,7 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, o
               }
             }}
           >
-            {restarting ? '正在重启…' : '重启'}
+            {restarting ? '正在创建…' : '创建替代任务'}
           </Button>
         )
       }
@@ -3654,6 +3655,7 @@ export function ChatView({
   const [completion, setCompletion] = useState(null) // { kind: 'file' | 'skill', start, query }
   const [completionItems, setCompletionItems] = useState([])
   const [completionIndex, setCompletionIndex] = useState(0)
+  const [completionFilter, setCompletionFilter] = useState(null)
   const [completionLoading, setCompletionLoading] = useState(false)
   const [completionFailed, setCompletionFailed] = useState(false)
   // 当前候选列表属于哪一类触发字符（`@` 文件 / `/` skill），换类时先清空旧结果
@@ -4290,12 +4292,12 @@ export function ChatView({
     try {
       const res = await window.mica.chat.restartSubagent(runKey, taskId)
       if (!res?.ok || res.result?.ok === false) {
-        appendNotice(res?.error || res?.result?.message || '重启 subagent 失败', 'error')
+        appendNotice(res?.error || res?.result?.message || '创建替代任务失败', 'error')
         return
       }
       setTaskDetail(null)
     } catch (error) {
-      appendNotice(`重启 subagent 失败：${error?.message || error}`, 'error')
+      appendNotice(`创建替代任务失败：${error?.message || error}`, 'error')
     }
   }, [appendNotice, runKey])
 
@@ -4378,6 +4380,7 @@ export function ChatView({
   // 工作区缓存），这里只做「有查询挡 100ms 击键、空查询立即出列表」的防抖。
   useEffect(() => {
     if (!completion) {
+      setCompletionFilter(null)
       completionKindRef.current = null
       setCompletionItems((items) => (items.length === 0 ? items : []))
       setCompletionLoading(false)
@@ -4387,6 +4390,7 @@ export function ChatView({
     // 换了触发字符（`/` ↔ `@`）就先清空：文件候选要等防抖，期间不能继续挂着 skill 的行
     if (completionKindRef.current !== completion.kind) {
       completionKindRef.current = completion.kind
+      setCompletionFilter(null)
       setCompletionItems((items) => (items.length === 0 ? items : []))
       setCompletionLoading(true)
       setCompletionFailed(false)
@@ -4431,7 +4435,8 @@ export function ChatView({
               mcpServers: mcpServers.status === 'fulfilled' ? mcpServers.value : [],
               completions: completions.status === 'fulfilled' ? completions.value : []
             },
-            completion.query
+            completion.query,
+            Infinity
           )
         )
       })
@@ -4463,7 +4468,11 @@ export function ChatView({
 
   useEffect(() => {
     setCompletionIndex(0)
-  }, [completion])
+  }, [completion, completionFilter])
+
+  const visibleCompletionItems = completion?.kind === 'skill'
+    ? filterSlashCompletionOptions(completionItems, completionFilter)
+    : completionItems
 
   // 把光标前那段触发文本整体换成候选的插入文本（`@src/a.ts ` / `/ask `），只改输入框。
   const selectCompletion = useCallback(
@@ -7477,11 +7486,16 @@ export function ChatView({
           )}
           {completion && !picker && (
             <ComposerCompletionPalette
-              title={completion.kind === 'skill' ? '选择 skill / MCP / 指令' : '引用文件'}
-              options={completionItems}
-              activeIndex={Math.min(completionIndex, Math.max(0, completionItems.length - 1))}
+              title={completion.kind === 'skill' ? '选择能力' : '引用文件'}
+              options={visibleCompletionItems}
+              activeIndex={Math.min(completionIndex, Math.max(0, visibleCompletionItems.length - 1))}
               onActiveIndex={setCompletionIndex}
               onSelect={selectCompletion}
+              filter={completionFilter}
+              onFilter={completion.kind === 'skill' ? (kind) => {
+                setCompletionFilter(kind)
+                setCompletionIndex(0)
+              } : undefined}
               emptyText={completionEmptyText(completion.kind, completionLoading, completionFailed)}
             />
           )}
@@ -7650,16 +7664,21 @@ export function ChatView({
               }}
               onKeyDown={(event) => {
                 // 补全打开时优先吃掉方向键/Enter/Tab/Esc，避免直接发送或移动光标
-                if (completion && completionItems.length > 0) {
+                if (completion && event.key === 'Escape') {
+                  event.preventDefault()
+                  setCompletion(null)
+                  return
+                }
+                if (completion && visibleCompletionItems.length > 0) {
                   if (event.key === 'ArrowDown') {
                     event.preventDefault()
-                    setCompletionIndex((value) => (value + 1) % completionItems.length)
+                    setCompletionIndex((value) => (Math.min(value, visibleCompletionItems.length - 1) + 1) % visibleCompletionItems.length)
                     return
                   }
                   if (event.key === 'ArrowUp') {
                     event.preventDefault()
                     setCompletionIndex(
-                      (value) => (value - 1 + completionItems.length) % completionItems.length
+                      (value) => (Math.min(value, visibleCompletionItems.length - 1) - 1 + visibleCompletionItems.length) % visibleCompletionItems.length
                     )
                     return
                   }
@@ -7670,13 +7689,8 @@ export function ChatView({
                   ) {
                     event.preventDefault()
                     selectCompletion(
-                      completionItems[Math.min(completionIndex, completionItems.length - 1)]
+                      visibleCompletionItems[Math.min(completionIndex, visibleCompletionItems.length - 1)]
                     )
-                    return
-                  }
-                  if (event.key === 'Escape') {
-                    event.preventDefault()
-                    setCompletion(null)
                     return
                   }
                 }

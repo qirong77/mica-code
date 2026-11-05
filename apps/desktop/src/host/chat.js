@@ -45,6 +45,7 @@ import {
 } from './chat-queue'
 import { resolveWarmAction } from './chat-warm'
 import { settlePendingHostRequests } from './chat-host-requests'
+import { createSubagentDisplay } from './chat-subagent-display'
 import { unwrapHostResult } from './chat-capabilities'
 import { getShellEnvSnapshot } from './shell-env'
 import { appendInputHistory, readInputHistory } from './input-history'
@@ -1078,6 +1079,7 @@ function spawnChatHost(id, sender, payload) {
     viewers: new Map(),
     // 最近一次后台任务 / subagent 快照（随 is-running 回给中途附着的客户端）
     lastSnapshots: {},
+    subagentDisplay: createSubagentDisplay(),
     // 正在回答的 By The Way 线程 id（抽屉的多个 tab 各自在跑，任一条在跑就点亮侧栏）
     btwBusyThreads: new Set()
   }
@@ -1308,12 +1310,21 @@ function handleHostNotification(id, run, notification) {
       pushRunStarted(id, run)
     }
   } else if (method === 'turn/completed') {
+    if (run.currentTurnId && params.turn?.id && run.currentTurnId !== params.turn.id) return
+    const reason = event?.part?.reason || 'completed'
+    const clearedTasks = run.subagentDisplay.finish(run.currentTurnId, params.turn?.id, reason)
+    if (clearedTasks) {
+      const snapshot = { type: 'subagent_tasks', timestamp: Date.now(), sessionID: runSessionId(run), tasks: clearedTasks }
+      run.lastSnapshots = { ...run.lastSnapshots, subagent_tasks: snapshot }
+      if (run.sender && !run.sender.isDestroyed()) {
+        run.sender.send('chat:event', { id, sessionId: runSessionId(run), sequence: ++run.sequence, event: snapshot })
+      }
+    }
     run.running = false
     run.currentTurnId = null
     // hostPending 只由 host 的 mica/queue/* 通知改写。turn 结束时清掉它会让
     // 还在 executor 队列里的输入在界面上凭空消失（只剩一条发不出去的占位），
     // 而 executor 每轮收尾都会推一次 queue:changed，那里才是队列的真实状态。
-    const reason = event?.part?.reason || 'completed'
     const currentSessionId = run.sessionId || run.requestedSessionId
     const extra = currentSessionId ? { sessionId: currentSessionId } : {}
     if (reason === 'completed') {
@@ -1414,6 +1425,9 @@ function handleHostNotification(id, run, notification) {
     // lists on restore). Deliver directly; the renderer replaces the whole
     // list each time, so the latest snapshot always wins.
     const snapshotEvent = codexNotificationToEvent(notification)
+    if (method === 'mica/subagentTasks/updated' && snapshotEvent) {
+      snapshotEvent.tasks = run.subagentDisplay.update(snapshotEvent.tasks)
+    }
     if (method === 'mica/btw/updated') applyBtwRunning(id, snapshotEvent)
     if (snapshotEvent && run.sender && !run.sender.isDestroyed()) {
       run.lastSnapshots = { ...(run.lastSnapshots || {}), [snapshotEvent.type]: snapshotEvent }

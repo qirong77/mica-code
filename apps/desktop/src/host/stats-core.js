@@ -140,6 +140,8 @@ export function normalizeUsageEvent(usage, fallbackTime, fallbackModel) {
     provider: usage.providerId || null,
     durationMs: typeof usage.durationMs === 'number' && Number.isFinite(usage.durationMs) && usage.durationMs > 0 ? usage.durationMs : null,
     firstTokenMs: typeof usage.firstTokenMs === 'number' && Number.isFinite(usage.firstTokenMs) && usage.firstTokenMs >= 0 ? usage.firstTokenMs : null,
+    responseWaitMs: typeof usage.responseWaitMs === 'number' && Number.isFinite(usage.responseWaitMs) && usage.responseWaitMs >= 0 ? usage.responseWaitMs : null,
+    generationDurationMs: typeof usage.generationDurationMs === 'number' && Number.isFinite(usage.generationDurationMs) && usage.generationDurationMs > 0 ? usage.generationDurationMs : null,
     hasOutputTokens: typeof usage.outputTokens === 'number' && Number.isFinite(usage.outputTokens) && usage.outputTokens >= 0,
     turnId: Number.isInteger(usage.turnId) ? usage.turnId : null,
     inputTokens,
@@ -311,6 +313,15 @@ export function summarizeStatsDays(usageEvents) {
       speed.firstTokenMs += usage.firstTokenMs
       speed.firstTokenSamples++
     }
+    if (usage.responseWaitMs != null) {
+      speed.responseWaitMs = (speed.responseWaitMs || 0) + usage.responseWaitMs
+      speed.responseWaitSamples = (speed.responseWaitSamples || 0) + 1
+    }
+    if (usage.generationDurationMs != null && usage.hasOutputTokens) {
+      speed.generationOutputTokens = (speed.generationOutputTokens || 0) + usage.outputTokens
+      speed.generationDurationMs = (speed.generationDurationMs || 0) + usage.generationDurationMs
+      speed.generationSamples = (speed.generationSamples || 0) + 1
+    }
 
     const source = usage.source || MAIN_USAGE_SOURCE
     const sourceKey = `${source.kind}:${source.id}`
@@ -416,6 +427,8 @@ export function summarizeLedgerEntries(entries) {
             providerId: entry.providerId,
             durationMs: entry.durationMs,
             firstTokenMs: entry.firstTokenMs,
+            responseWaitMs: entry.responseWaitMs,
+            generationDurationMs: entry.generationDurationMs,
             inputTokens: entry.inputTokens,
             cachedInputTokens: entry.cachedInputTokens,
             outputTokens: entry.outputTokens

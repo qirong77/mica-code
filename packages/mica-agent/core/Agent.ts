@@ -20,6 +20,10 @@ export type AgentUsageRecord = {
   durationMs?: number;
   /** Time to first text or reasoning delta in the final attempt. */
   firstTokenMs?: number;
+  /** Request start to the final successful attempt’s first text or reasoning delta, including retries. */
+  responseWaitMs?: number;
+  /** First to last nonempty text or reasoning delta, when output usage is attributable. */
+  generationDurationMs?: number;
 };
 
 export type AgentCallbacks = {

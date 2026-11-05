@@ -9,7 +9,7 @@
 - `AgentQueryOptions.onRequestStart` 在实际发起每轮请求前提供消息数量与本轮工具定义；包括首个失败请求，transport 重试另走 `onRetry`，观察回调抛错不影响请求。
 - 提供子 agent 创建入口：`createSubAgent`。
 - 提供 usage 汇总与 subagent usage 记录类型：`summarizeUsageHistory`、`SubagentUsageRecord`。
-- `AgentUsageRecord` 可携带请求的 `providerId`、含重试的 `durationMs` 和最终尝试的 `firstTokenMs`；旧记录或缺少对应观测时字段缺省。`ModelTextRequest.providerId` 可传入实际服务商标识。
+- `AgentUsageRecord` 可携带请求的 `providerId`、含重试的 `durationMs` 和最终尝试的 `firstTokenMs`；`responseWaitMs` 从原请求开始计至最终成功尝试首个非空正文或思考增量，包含 provider 内重试。`generationDurationMs` 为最终成功尝试首尾非空正文或思考增量的时间差，仅在至少两个增量、耗时为正、有有效正数输出用量且无工具调用时记录；多个无法匹配的用量记录不关联计时。用总输出 token 除以生成耗时只能得到估算速度。旧记录或缺少对应观测时字段缺省。`ModelTextRequest.providerId` 可传入实际服务商标识。
 - 提供 subagent 用量记账原语：`buildSubagentUsageRecord`、`recordSubagentTaskUsage`（helper 子代理的请求记进 owner 的 `subagentUsageHistory`，支持 `fromIndex` 只记新增部分）。`origin` 标出这笔开销的来源——`delegation`（主对话经工具委派）、`plugin` + `pluginId`（插件自己的请求与它起的后台任务）、`helper`（内核后台助手）；统计页按它归到「主对话 / 委派 / 插件 / 内核后台」。
 - 提供按 `provider.protocol` 分流的模型 client 创建入口：`createModelClient`。
 - 构建运行时系统提示词：`buildSystemPrompt`。

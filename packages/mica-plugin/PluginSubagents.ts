@@ -204,7 +204,7 @@ export type PluginSubagentApi = {
     list(owner?: unknown): PluginSubagentTaskSnapshot[];
     get(taskId: string): PluginSubagentTaskSnapshot | null;
     /** 创建保留原任务上下文的新任务，返回新 ID；不存在、无权访问或无法重启时抛错。 */
-    restart(taskId: string): string;
+    restart(taskId: string, caller?: PluginSubagentCaller): string;
     /** 返回 false 表示任务不存在或已经结束。 */
     kill(taskId: string): boolean;
     /** 等到这些任务全部结束或超时；超时的任务仍以 `running` 返回。 */

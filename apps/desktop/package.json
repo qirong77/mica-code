@@ -15,7 +15,7 @@
     "dev": "npm run build:server && electron-vite dev --ignoreConfigWarning",
     "build": "node scripts/run-parallel.mjs \"npm run build:cli\" \"electron-vite build --ignoreConfigWarning\" \"vite build --config vite.server.config.mjs\"",
     "build:cli": "cd ../.. && bun run build",
-    "build:app": "npm run build:unpack",
+    "build:app": "npm run build && npm run pack:app && npm run sign:app",
     "build:server": "vite build --config vite.server.config.mjs",
     "build:web": "npm run build",
     "start:web": "node out/server/index.mjs",
@@ -27,7 +27,7 @@
     "build:linux": "npm run build && electron-builder --linux",
     "pack:app": "electron-builder --dir --config electron-builder.config.cjs -c.mac.identity=null",
     "sign:app": "bash scripts/sign-app.sh",
-    "build:app:local": "npm run build && npm run pack:app && npm run sign:app"
+    "build:app:local": "npm run build:app"
   },
   "//dependencies": "只放主进程 / 运行时真正会 require 的包：electron-builder 会把 dependencies 整份装进 app.asar，而 renderer 的依赖已经由 Vite 打进 out/renderer，留在 dependencies 里等于让安装包多背 200MB。新增 src/main 直接 require 的包时必须加在这里。",
   "dependencies": {
@@ -52,6 +52,7 @@
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.0.5",
+    "echarts": "^6.1.0",
     "electron": "^39.2.6",
     "electron-builder": "^26.0.12",
     "electron-rebuild": "^3.2.9",

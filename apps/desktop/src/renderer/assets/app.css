@@ -3190,6 +3190,24 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: color-mix(in srgb, var(--color-fg-max) 26%, transparent);
 }
 
+.chat-completion-filters {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.chat-completion-filters button {
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--color-fg-muted);
+}
+
+.chat-completion-filters button:hover,
+.chat-completion-filters button.is-active {
+  background: var(--color-overlay-strong);
+  color: var(--color-fg-strong);
+}
+
 .chat-command-palette-body {
   min-height: 0;
   flex: 1 1 auto;
@@ -3392,6 +3410,10 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   padding: 3px;
   /* 浮层跟着输入框宽度走，窄的时候要能按自己的宽度降级（见下面的容器查询） */
   container-type: inline-size;
+}
+
+.chat-completion-palette:has(.chat-completion-filters) {
+  height: min(330px, 46vh);
 }
 
 .chat-completion-palette .chat-command-palette-body > button {

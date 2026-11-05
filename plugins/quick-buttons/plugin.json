@@ -1,7 +1,7 @@
 {
   "id": "quick-buttons",
   "name": "Quick Buttons",
-  "icon": "mouse-pointer-click",
+  "icon": "zap",
   "version": "1.0.0",
   "description": "让模型在输入框上方放一排按钮：打开页面、把话说进输入框、开个新会话、打开文件。点一下就到位，不用复制粘贴。按钮只属于当前会话。",
   "author": "Mica Code",
@@ -12,6 +12,13 @@
     "apiVersion": 1
   },
   "requires": ["prompt", "sessionState", "tools"],
+  "completions": [
+    {
+      "name": "quick-buttons",
+      "description": "在输入框上方添加快捷按钮",
+      "insert": "请使用 quick_buttons 工具，帮我："
+    }
+  ],
   "desktop": {
     "panel": {
       "label": "快捷按钮",

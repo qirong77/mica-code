@@ -4,8 +4,28 @@ import {
   groupRowDrop,
   orderSessions,
   resolveDrop,
-  rowDropPosition
+  rowDropPosition,
+  sessionRowDropPosition
 } from './session-dnd'
+
+describe('sessionRowDropPosition', () => {
+  const drag = { kind: 'session', id: 'a', parentSessionId: 'parent' }
+  const position = (ratio, extra = {}) =>
+    sessionRowDropPosition({ ratio, drag, targetId: 'b', descendantIds: new Set(), ...extra })
+
+  it('uses the current pointer position for nesting and ordering', () => {
+    expect(position(0.1)).toBe('before')
+    expect(position(0.5)).toBe('into')
+    expect(position(0.9)).toBe('after')
+  })
+
+  it('uses the entire row for ordering when nesting is not allowed', () => {
+    expect(position(0.4, { targetId: 'parent' })).toBe('before')
+    expect(position(0.6, { descendantIds: new Set(['b']) })).toBe('after')
+    expect(position(0.4, { canNestInto: false })).toBe('before')
+    expect(position(0.6, { drag: { kind: 'draft', id: 'a' } })).toBe('after')
+  })
+})
 
 const sessions = [
   { id: 'a', cwd: '/w/one', updatedAtMs: 3 },

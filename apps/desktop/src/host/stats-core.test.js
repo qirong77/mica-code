@@ -16,6 +16,24 @@ import {
 } from './stats-core'
 
 describe('Stats usage aggregation', () => {
+  test('aggregates new timing independently for session and ledger records', () => {
+    const time = new Date(2026, 7, 2, 12).getTime()
+    const records = [
+      { outputTokens: 100, generationDurationMs: 2000, responseWaitMs: 0 },
+      { outputTokens: 50, generationDurationMs: 1000, responseWaitMs: 300 },
+      { outputTokens: 40, durationMs: 100, firstTokenMs: 10 },
+      { outputTokens: 10, generationDurationMs: 0, responseWaitMs: -1 },
+      { generationDurationMs: 1000, responseWaitMs: Infinity }
+    ]
+    const [row] = summarizeStatsDays(records.map((record) => normalizeUsageEvent(record, time, 'm')))
+    expect(row.speedModels[0]).toMatchObject({ generationOutputTokens: 150, generationDurationMs: 3000, generationSamples: 2, responseWaitMs: 300, responseWaitSamples: 2 })
+    const [ledger] = summarizeLedgerEntries([{ ...records[0], occurredAt: new Date(time).toISOString(), pluginId: 'p', model: 'm' }])
+    expect(ledger.days[0].speedModels[0]).toMatchObject({ generationOutputTokens: 100, generationDurationMs: 2000, generationSamples: 1, responseWaitMs: 0, responseWaitSamples: 1 })
+    const legacy = normalizeUsageEvent(records[2], time, 'm')
+    expect(legacy.responseWaitMs).toBeNull()
+    expect(legacy.generationDurationMs).toBeNull()
+  })
+
   test('aggregates only valid request timing samples by day and provider', () => {
     const time = new Date(2026, 7, 2, 12).getTime()
     const events = [

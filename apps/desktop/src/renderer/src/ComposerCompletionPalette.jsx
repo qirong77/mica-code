@@ -20,7 +20,9 @@ export default function ComposerCompletionPalette({
   activeIndex,
   onActiveIndex,
   onSelect,
-  emptyText
+  emptyText,
+  filter,
+  onFilter
 }) {
   const bodyRef = useRef(null)
   const items = options || []
@@ -42,6 +44,20 @@ export default function ComposerCompletionPalette({
       <div className="chat-command-palette-title">
         <IconCommand size={12} /> {title}
         {items.length > 0 && <span className="chat-command-palette-count">{items.length} 项</span>}
+        {onFilter && <div className="chat-completion-filters" aria-label="补全类型筛选">
+          {[['skill', 'skill'], ['mcp', 'MCP'], ['prompt', 'plugins']].map(([kind, label]) => (
+            <button
+              key={kind}
+              type="button"
+              aria-pressed={filter === kind}
+              className={filter === kind ? 'is-active' : ''}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onFilter(filter === kind ? null : kind)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>}
         <span>↑↓ 选择 · Enter/Tab 插入 · Esc 关闭</span>
       </div>
       <div ref={bodyRef} className="chat-command-palette-body" role="listbox" aria-label={title}>
@@ -89,7 +105,7 @@ export default function ComposerCompletionPalette({
  * 只认 `/` 浮层里的三类：skill、MCP server 与插件声明的条目（`prompt`）。`@` 文件补全的
  * `file` 不画标记——那里一整屏都是文件，标一排「file」只是噪声。
  */
-const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP', prompt: '指令' }
+const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP', prompt: 'plugins' }
 
 function CompletionKindTag({ kind }) {
   const label = COMPLETION_KIND_LABELS[kind]

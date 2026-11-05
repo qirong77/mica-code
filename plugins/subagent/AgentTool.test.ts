@@ -452,6 +452,15 @@ describe('AgentTool', () => {
     expect(tool.onToolUseDisplayText({ operation: 'restart', task_id: 'old' })).toContain('restart: old');
   });
 
+  it('passes the current tool caller to restart', async () => {
+    const caller = { owner: {}, taskId: 'parent', toolCallId: 'restart-call' };
+    const { api } = createApi({ caller, tasks: [snapshot({ id: 'old', status: 'failed' })] });
+    const restart = vi.spyOn(api.tasks, 'restart');
+    const context = { agent: caller.owner, toolCallId: caller.toolCallId };
+    await new AgentTool(api).execute({ operation: 'restart', task_id: 'old' }, { context });
+    expect(restart).toHaveBeenCalledWith('old', caller);
+  });
+
   it('handles missing task ids and restart errors without creating a task', async () => {
     const { api } = createApi();
     const restart = vi.spyOn(api.tasks, 'restart').mockImplementation(() => { throw new Error('lease conflict'); });

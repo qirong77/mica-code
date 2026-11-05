@@ -115,6 +115,15 @@ export function rowDropPosition({ ratio, canNest = true } = {}) {
   return value < 0.5 ? 'before' : 'after'
 }
 
+export function sessionRowDropPosition({ ratio, drag, targetId, descendantIds, canNestInto = true }) {
+  const canNest =
+    canNestInto &&
+    drag?.kind === 'session' &&
+    (drag.parentSessionId ?? null) !== targetId &&
+    !descendantIds?.has(targetId)
+  return rowDropPosition({ ratio, canNest })
+}
+
 /**
  * 分组行上的落点。`rowDropPosition` 的「不能嵌套就按上下两半分档」在这里同样成立，
  * 否则拖到兄弟分组的中间什么都不发生（中间那一半被判成「已经在这个父级下」），

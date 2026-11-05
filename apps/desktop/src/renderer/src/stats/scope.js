@@ -180,3 +180,70 @@ export function modelPerformance(sessions, metric = 'throughput') {
       return (metric === 'firstToken' ? av - bv : bv - av) || a.model.localeCompare(b.model)
     })
 }
+
+function aggregateSpeedModels(sessions) {
+  const models = new Map()
+  for (const session of sessions) {
+    for (const day of session.days || []) {
+      for (const sample of day.speedModels || []) {
+        const key = JSON.stringify([sample.provider, sample.model])
+        const row = models.get(key) || {
+          provider: sample.provider, model: sample.model,
+          generationOutputTokens: 0, generationDurationMs: 0, generationSamples: 0,
+          responseWaitMs: 0, responseWaitSamples: 0
+        }
+        for (const field of ['generationOutputTokens', 'generationDurationMs', 'generationSamples', 'responseWaitMs', 'responseWaitSamples']) {
+          row[field] += sample[field] || 0
+        }
+        models.set(key, row)
+      }
+    }
+  }
+  return [...models.values()]
+    .filter((row) => row.generationSamples || row.responseWaitSamples)
+    .map((row) => ({
+      ...row,
+      estimatedTokensPerSecond: row.generationSamples ? row.generationOutputTokens * 1000 / row.generationDurationMs : null,
+      averageResponseWaitMs: row.responseWaitSamples ? row.responseWaitMs / row.responseWaitSamples : null
+    }))
+}
+
+export function modelSpeedPerformance(sessions, metric = 'generation') {
+  const field = metric === 'responseWait' ? 'averageResponseWaitMs' : 'estimatedTokensPerSecond'
+  return aggregateSpeedModels(sessions).sort((a, b) => {
+    const av = a[field]
+    const bv = b[field]
+    if (av == null || bv == null) return (av == null ? 1 : 0) - (bv == null ? 1 : 0) || a.model.localeCompare(b.model)
+    return (metric === 'responseWait' ? av - bv : bv - av) || a.model.localeCompare(b.model)
+  })
+}
+
+export function speedTrendByDay(sessions) {
+  const days = new Map()
+  for (const session of sessions) {
+    for (const day of session.days || []) {
+      const rows = days.get(day.day) || []
+      rows.push({ days: [day] })
+      days.set(day.day, rows)
+    }
+  }
+  return new Map([...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, rows]) => [day, aggregateSpeedModels(rows)]))
+}
+
+export function modelSpeed(sessions, metric) {
+  return modelSpeedPerformance(sessions, metric).map((row) => ({
+    provider: row.provider,
+    model: row.model,
+    value: metric === 'responseWait' ? row.averageResponseWaitMs : row.estimatedTokensPerSecond,
+    samples: metric === 'responseWait' ? row.responseWaitSamples : row.generationSamples
+  })).filter((row) => row.samples > 0)
+}
+
+export function modelSpeedTrend(sessions, provider, model, metric) {
+  return [...speedTrendByDay(sessions)].flatMap(([day, rows]) => {
+    const row = rows.find((item) => item.provider === provider && item.model === model)
+    const samples = metric === 'responseWait' ? row?.responseWaitSamples : row?.generationSamples
+    const value = metric === 'responseWait' ? row?.averageResponseWaitMs : row?.estimatedTokensPerSecond
+    return samples > 0 && value != null ? [{ day, value, samples }] : []
+  })
+}

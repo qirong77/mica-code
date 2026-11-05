@@ -418,7 +418,7 @@ export class AgentTool extends MicaTool {
     if (!taskId) return '错误：Agent restart 操作需要 task_id。';
     if (!this.canAccessTask(taskId, callbacks)) return `Subagent task not found: ${taskId}`;
     try {
-      const newTaskId = await this.subagents.tasks.restart(taskId);
+      const newTaskId = await this.subagents.tasks.restart(taskId, this.subagents.caller(callbacks?.context) ?? undefined);
       return [
         `已创建替代任务，原任务 ID: ${taskId}`,
         `task_id: ${newTaskId}`,

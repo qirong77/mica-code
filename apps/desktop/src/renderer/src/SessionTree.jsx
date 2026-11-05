@@ -26,7 +26,7 @@ import {
   groupRowDrop,
   orderSessions,
   resolveDrop,
-  rowDropPosition
+  sessionRowDropPosition
 } from './session-dnd'
 import { groupRecentRows } from './recent-buckets'
 import { SESSION_FILTER_MODES, filterDrafts, filterSessions, sessionFilterMode } from './session-filter'
@@ -1136,6 +1136,17 @@ export function SessionTree({
     [drag, sessions]
   )
 
+  const rowPosition = (event, source, id, canNestInto = true) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    return sessionRowDropPosition({
+      ratio: rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5,
+      drag: source,
+      targetId: id,
+      descendantIds: dragSubtree,
+      canNestInto
+    })
+  }
+
   const groupDropPosition = (event, groupId) => {
     const rect = event.currentTarget.getBoundingClientRect()
     const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
@@ -1188,14 +1199,7 @@ export function SessionTree({
       }
       // 拖到会话行中间那条带子 = 成为它的子会话，上下两头 = 换分区 / 手动重排。
       // 草稿还没落盘、拖进自己的子树会成环，两种都不算嵌套。
-      const nestAllowed =
-        canNestInto &&
-        drag.kind === 'session' &&
-        (drag.parentSessionId ?? null) !== id &&
-        !dragSubtree.has(id)
-      const rect = event.currentTarget.getBoundingClientRect()
-      const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
-      const position = rowDropPosition({ ratio, canNest: nestAllowed })
+      const position = rowPosition(event, drag, id, canNestInto)
       if (position === 'into') {
         event.preventDefault()
         event.stopPropagation()
@@ -1234,13 +1238,12 @@ export function SessionTree({
     }
 
   const dropRow =
-    (section, targetId, groupId = null) =>
+    (section, targetId, groupId = null, canNestInto = true) =>
     (event) => {
       event.preventDefault()
       event.stopPropagation()
       const source = drag
-      const landed = over?.section === section && over?.id === targetId
-      const position = landed ? (over.into ? 'into' : over.position) : null
+      const position = rowPosition(event, source, targetId, canNestInto)
       clearDrag()
       // 分组落到分组内的会话行 = 挪进那个分组；这一下落到别处就当没发生
       if (source?.kind === 'group') {
@@ -1303,6 +1306,9 @@ export function SessionTree({
     const loop = loopBySession.get(session.id) || null
     const loopRunning = state === 'running'
     const flashing = reveal?.key === `s:${session.id}`
+    const longPress = longPressHandlers((event) =>
+      openMenu(event, { session, items: menuItemsFor(session) })
+    )
     return (
       <li key={session.id}>
         <div
@@ -1323,17 +1329,12 @@ export function SessionTree({
                 : session.title || session.id
           }
           draggable={!editingThis && !filtered}
-          // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
-          {...longPressHandlers((event) =>
-            openMenu(event, {
-              session,
-              items: menuItemsFor(session)
-            })
-          )}
+          {...longPress}
           onDragStart={
             filtered
               ? undefined
-              : (event) =>
+              : (event) => {
+                  longPress.onDragStart?.(event)
                   startDrag(
                     event,
                     'session',
@@ -1342,6 +1343,7 @@ export function SessionTree({
                     groupId,
                     session.parentSessionId ?? null
                   )
+                }
           }
           onDragEnd={filtered ? undefined : clearDrag}
           onDragOver={filtered ? undefined : hoverRow(section, session.id, groupId)}
@@ -1454,6 +1456,7 @@ export function SessionTree({
     const isOver = rowOverState(dropSection, node.id, groupId)
     const items = draftMenuItems()
     const flashing = reveal?.key === `d:${node.id}`
+    const longPress = longPressHandlers((event) => openMenu(event, { draft: node, items }))
     return (
       <li key={node.id}>
         <div
@@ -1472,11 +1475,14 @@ export function SessionTree({
               : '尚未关联真实会话的新对话'
           }
           draggable={!editingThis && !filtered}
-          {...longPressHandlers((event) => openMenu(event, { draft: node, items }))}
-          onDragStart={(event) => startDrag(event, 'draft', 'draft', node.id, groupId)}
+          {...longPress}
+          onDragStart={(event) => {
+            longPress.onDragStart?.(event)
+            startDrag(event, 'draft', 'draft', node.id, groupId)
+          }}
           onDragEnd={clearDrag}
           onDragOver={hoverRow(dropSection, node.id, groupId, false)}
-          onDrop={dropRow(dropSection, node.id, groupId)}
+          onDrop={dropRow(dropSection, node.id, groupId, false)}
           onClick={() => onSelectDraft(node)}
           onDoubleClick={() => setEditing({ kind: 'draft', id: node.id })}
           onContextMenu={(event) => openMenu(event, { draft: node, items })}
@@ -1650,6 +1656,7 @@ export function SessionTree({
       ...sessionsHere.map((row) => renderSessionRow(row.session, depth, 'project', groupId, row))
     ]
     const toggleOpen = () => toggleGroupOpen(groupId)
+    const longPress = longPressHandlers((event) => openMenu(event, { group, items: groupMenuItems() }))
     return (
       <li key={groupId}>
         <div
@@ -1663,11 +1670,11 @@ export function SessionTree({
               : group.name
           }
           draggable={!editingThis}
-          // 长按手势必须排在拖拽回调之前：它会带回自己的 onDragStart，排在后面会把 startDrag 顶掉
-          {...longPressHandlers((event) => openMenu(event, { group, items: groupMenuItems() }))}
-          onDragStart={(event) =>
+          {...longPress}
+          onDragStart={(event) => {
+            longPress.onDragStart?.(event)
             startDrag(event, 'group', 'project', groupId, group.parentId ?? null)
-          }
+          }}
           onDragEnd={clearDrag}
           onClick={toggleOpen}
           onContextMenu={(event) => openMenu(event, { group, items: groupMenuItems() })}

@@ -7,7 +7,7 @@ import {
 } from '@packages/mica-agent/index.js';
 import { micaCommon } from '@packages/mica-common/index.js';
 import type { EffortOption } from '@packages/mica-config/index.js';
-import type { PluginSubagentContextMode, PluginSubagentWriteMode } from '@packages/mica-plugin/index.js';
+import type { PluginSubagentCaller, PluginSubagentContextMode, PluginSubagentWriteMode } from '@packages/mica-plugin/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 
 const DEFAULT_MAX_CONCURRENT_TASKS = 4;
@@ -164,16 +164,17 @@ export class SubagentTaskManager {
   private readonly readRestoredStamp: SubagentTaskManagerOptions['readRestoredStamp'];
   private readonly restoredStamps = new WeakMap<AgentRuntime, string>();
   private stopping = false;
-  private restartHandler?: (task: SubagentTaskRecord, owner: AgentRuntime) => string;
+  private restartHandler?: (task: SubagentTaskRecord, owner: AgentRuntime, caller?: PluginSubagentCaller) => string;
   private restartAttempt?: RestartAttempt;
 
-  setRestartHandler(handler: (task: SubagentTaskRecord, owner: AgentRuntime) => string): void {
+  setRestartHandler(handler: (task: SubagentTaskRecord, owner: AgentRuntime, caller?: PluginSubagentCaller) => string): void {
     this.restartHandler = handler;
   }
 
-  restart(id: string, owner: AgentRuntime): string {
+  restart(id: string, owner: AgentRuntime, caller?: PluginSubagentCaller): string {
     const task = this.get(id, owner);
     if (!task) throw new Error(`Subagent task not found: ${id}`);
+    if (caller && caller.owner !== owner) throw new Error(`Subagent task not found: ${id}`);
     if (task.status === 'running') throw new Error('A running subagent cannot be restarted.');
     if (this.tasks.get(id)?.executionPending) throw new Error('Subagent execution is still stopping; retry after it exits.');
     if (!subagentExecutionEnded(task)) throw new Error('Cannot confirm that the subagent execution has exited.');
@@ -190,7 +191,7 @@ export class SubagentTaskManager {
     const attempt: RestartAttempt = { claim, committed: false, tasks: [] };
     this.restartAttempt = attempt;
     try {
-      const replacement = this.restartHandler(task, owner);
+      const replacement = this.restartHandler(task, owner, caller);
       if (attempt.tasks.length !== 1 || attempt.tasks[0]?.record.id !== replacement || attempt.tasks[0].owner !== owner) {
         throw new Error('A subagent restart must schedule exactly one replacement for the same owner.');
       }

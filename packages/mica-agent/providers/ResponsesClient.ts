@@ -392,6 +392,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       // 失败的时间也算进 TTFT（与 ChatCompletionsClient 同一份口径）。
       let attemptStartedAt = requestStartedAt;
       let firstDeltaAt = 0;
+      let lastDeltaAt = 0;
+      let deltaCount = 0;
       let requestAttempts = 1;
       let requestEndSent = false;
       const finishRequest = (info: {
@@ -438,6 +440,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
         async () => {
           attemptStartedAt = Date.now();
           firstDeltaAt = 0;
+          lastDeltaAt = 0;
+          deltaCount = 0;
           emittedContentSeparator = false;
           attemptHadToolOutput = false;
           content = '';
@@ -486,6 +490,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
             if (event.type === 'response.output_text.delta') {
               // 首字只认正文/思考增量：response.created 之类的事件不算首字。
               if (event.delta && !firstDeltaAt) firstDeltaAt = Date.now();
+              if (event.delta) { lastDeltaAt = Date.now(); deltaCount++; }
               const textDelta: string =
                 contentSeparator && !emittedContentSeparator ? `${contentSeparator}${event.delta}` : event.delta;
               emittedContentSeparator = true;
@@ -501,6 +506,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
               event.type === 'response.reasoning_text.done'
             ) {
               if ('delta' in event && event.delta && !firstDeltaAt) firstDeltaAt = Date.now();
+              if ('delta' in event && event.delta) { lastDeltaAt = Date.now(); deltaCount++; }
               reasoningParts.accept(event);
               continue;
             }
@@ -621,6 +627,9 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           messageCount: messages.length,
           durationMs,
           firstTokenMs,
+          responseWaitMs: firstDeltaAt ? firstDeltaAt - requestStartedAt : undefined,
+          generationDurationMs: toolCalls.size === 0 && !attemptHadToolOutput && Number.isFinite(completedResponse.usage.output_tokens) && completedResponse.usage.output_tokens > 0 && deltaCount >= 2 && lastDeltaAt > firstDeltaAt
+            ? lastDeltaAt - firstDeltaAt : undefined,
         });
       }
 
@@ -684,6 +693,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       messageCount: number;
       durationMs?: number;
       firstTokenMs?: number;
+      responseWaitMs?: number;
+      generationDurationMs?: number;
     },
   ): void {
     const inputTokens = usage.input_tokens ?? 0;
@@ -707,6 +718,8 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       paidTokenRate,
       durationMs: metadata.durationMs,
       firstTokenMs: metadata.firstTokenMs,
+      ...(metadata.responseWaitMs !== undefined ? { responseWaitMs: metadata.responseWaitMs } : {}),
+      ...(metadata.generationDurationMs !== undefined ? { generationDurationMs: metadata.generationDurationMs } : {}),
     };
 
     this.lastUsage = record;
