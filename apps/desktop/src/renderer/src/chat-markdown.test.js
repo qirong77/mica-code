@@ -245,11 +245,11 @@ describe('visual transcript cache', () => {
 })
 
 describe('visual transcript identity', () => {
-  it('does not reuse visual thinking after model or endpoint identity changes', () => {
+  it('reuses visual thinking after a model change but not an endpoint identity change', () => {
     const messages = [{ kind: 'message', role: 'user', text: 'inspect' }]
     const identity = { providerId: 'p', protocol: 'openai_responses', model: 'm', apiBase: 'https://one' }
     expect(canReuseVisualTranscript(messages, messages, identity, { ...identity })).toBe(true)
-    expect(canReuseVisualTranscript(messages, messages, identity, { ...identity, model: 'other' })).toBe(false)
+    expect(canReuseVisualTranscript(messages, messages, identity, { ...identity, model: 'other' })).toBe(true)
     expect(canReuseVisualTranscript(messages, messages, identity, { ...identity, providerId: 'other' })).toBe(false)
     expect(canReuseVisualTranscript(messages, messages, identity, { ...identity, apiBase: 'https://two' })).toBe(false)
   })
@@ -381,13 +381,13 @@ describe('structured activity state', () => {
     expect(thinkingAfterUnexpectedExit(messages, [], 'turn-1').map((message) => message.text)).toEqual(['question', 'tool call'])
   })
 
-  it('does not restore thinking from the previous model while a different model is selected', () => {
+  it('retains display thinking when a different model is selected', () => {
     const rows = [{ kind: 'message', text: 'question' }, { kind: 'reasoning', text: 'old thinking' }]
-    expect(thinkingForSelectedModel(rows, 'new', 'old')).toEqual([rows[0]])
+    expect(thinkingForSelectedModel(rows, 'new', 'old')).toEqual(rows)
     expect(thinkingForSelectedModel(rows, 'old', 'old')).toEqual(rows)
     expect(thinkingForSelectedModel(rows, undefined, 'old')).toEqual(rows)
     expect(thinkingForSelectedModel(rows, 'provider/family/model', 'family/model', 'provider')).toEqual(rows)
-    expect(thinkingForSelectedModel(rows, 'other/family/model', 'family/model', 'provider')).toEqual([rows[0]])
+    expect(thinkingForSelectedModel(rows, 'other/family/model', 'family/model', 'provider')).toEqual(rows)
     expect(sameSelectedModel('family/model', 'provider/family/model', 'family/model', 'provider')).toBe(true)
     expect(sameSelectedModel('family/model', 'other/family/model', 'family/model', 'provider')).toBe(false)
   })

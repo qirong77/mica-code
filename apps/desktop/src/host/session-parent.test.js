@@ -81,13 +81,13 @@ describe('session parent writer', () => {
     expect(readSession('child').parentSessionId).toBeUndefined()
   })
 
-  it('会话正在跑（持有 turn lease）时照样能调整层级，其余内容不动', () => {
+  it('会话持有 turn lease 时不写文件，父会话运行不影响空闲子会话', () => {
     busy.add('child')
-    expect(setParent({ sessionId: 'child', parentId: 'parent' })).toEqual({
-      parentSessionId: 'parent'
-    })
+    const before = readFileSync(join(directory, 'child.json'), 'utf8')
+    expect(() => setParent({ sessionId: 'child', parentId: 'parent' })).toThrow('会话正在运行')
+    expect(readFileSync(join(directory, 'child.json'), 'utf8')).toBe(before)
     const stored = readSession('child')
-    expect(stored.parentSessionId).toBe('parent')
+    expect(stored.parentSessionId).toBeUndefined()
     expect(stored.title).toBe('子会话')
     expect(stored.snapshot).toEqual({ history: [] })
     // 父会话在跑同样不影响挂到它下面
@@ -96,7 +96,7 @@ describe('session parent writer', () => {
     expect(setParent({ sessionId: 'child', parentId: 'parent' }).parentSessionId).toBe('parent')
   })
 
-  it('自己的 lease 用完即释放，别人持有时直接写文件', () => {
+  it('自己的 lease 用完即释放，别人持有时不覆盖其快照', () => {
     const lockDir = join(root, 'sessions', '.turn-locks')
     const leased = createSessionParentWriter({
       sessionsDir: () => directory,
@@ -107,8 +107,10 @@ describe('session parent writer', () => {
 
     mkdirSync(lockDir, { recursive: true })
     writeFileSync(join(lockDir, 'grandchild.lock'), JSON.stringify({ pid: process.pid, token: 'other' }))
-    expect(leased({ sessionId: 'grandchild', parentId: 'parent' }).parentSessionId).toBe('parent')
-    expect(readSession('grandchild').parentSessionId).toBe('parent')
+    const before = readFileSync(join(directory, 'grandchild.json'), 'utf8')
+    expect(() => leased({ sessionId: 'grandchild', parentId: 'parent' })).toThrow('会话正在运行')
+    expect(readFileSync(join(directory, 'grandchild.json'), 'utf8')).toBe(before)
+    expect(readSession('grandchild').parentSessionId).toBe('child')
     // 别人的锁绝不能被这次写删掉
     expect(existsSync(join(lockDir, 'grandchild.lock'))).toBe(true)
   })

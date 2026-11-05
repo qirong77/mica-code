@@ -16,6 +16,7 @@ import {
   splitConversationRuns,
 } from '../conversationView.js';
 import { Button, Segmented } from './Ui.js';
+import { Modal } from './Modal.js';
 import { appIcons } from '../icons.js';
 import { formatCharCount } from '../format.js';
 import type { ConfigWebConversationItem } from '../../src/shared/types.js';
@@ -33,6 +34,11 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<ConversationFilter>('all');
   const [query, setQuery] = useState('');
+  const [activeSequences, setActiveSequences] = useState<number[]>([]);
+  const openRecords = (records: ConfigWebConversationItem[]) =>
+    setActiveSequences(records.map((item) => item.sequence));
+  const selected = new Set(activeSequences);
+  const activeRecords = items.filter((item) => selected.has(item.sequence));
   const inFlight = useRef(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -176,8 +182,7 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
   }, [blocks, filter, searched]);
 
   const hasMore = items.length < total;
-  /** 主动要看细节时（筛到工具 / 思考，或搜了关键词）不用再点开每一段。 */
-  const expandRuns = filter !== 'all' || query.trim().length > 0;
+  const showIndividualRecords = filter !== 'all' || query.trim().length > 0;
 
   if (loading && items.length === 0) {
     // 首帧就把结构画出来（工具栏 + 滚动区），只是正文还没到：等第一条记录到达时
@@ -278,132 +283,172 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
               className={`conversation-turn${block.turn ? '' : ' is-continuation'}`}
               aria-label={block.turn ? '一轮对话' : '上一轮未完的记录'}
             >
-              {block.turn ? <TurnHead item={block.turn} stats={block.stats} /> : null}
-              {splitConversationRuns(block.records).map((run) =>
-                run.kind === 'group' ? (
-                  <RunRow key={run.key} records={run.records} expanded={expandRuns} />
-                ) : (
-                  <RecordRow key={run.key} item={run.record} />
-                ),
-              )}
+              {block.turn ? <TurnHead item={block.turn} stats={block.stats} onOpen={openRecords} /> : null}
+              {showIndividualRecords
+                ? block.records.map((item) => <RecordRow key={item.sequence} item={item} onOpen={openRecords} />)
+                : splitConversationRuns(block.records).map((run) =>
+                    run.kind === 'group' ? (
+                      <RunRow key={run.key} records={run.records} onOpen={openRecords} />
+                    ) : (
+                      <RecordRow key={run.key} item={run.record} onOpen={openRecords} />
+                    ),
+                  )}
             </section>
           ))}
 
           {hasMore ? null : <div className="conversation-pane-end">— 已到最早记录 —</div>}
         </div>
       </div>
+      {activeRecords.length > 0 ? (
+        <ConversationDetailModal records={activeRecords} onClose={() => setActiveSequences([])} />
+      ) : null}
     </div>
   );
 }
 
-/** 一轮的开头：用户那句话本身就是这一段的小标题，下面一行是这轮的体积与动作量。 */
-function TurnHead({ item, stats }: { item: ConfigWebConversationItem; stats: TurnStats }) {
-  const [expanded, setExpanded] = useState(false);
+type OpenRecords = (records: ConfigWebConversationItem[]) => void;
+
+export function TurnHead({
+  item,
+  stats,
+  onOpen,
+}: {
+  item: ConfigWebConversationItem;
+  stats: TurnStats;
+  onOpen: OpenRecords;
+}) {
   const ChevronIcon = appIcons.chevronRight;
   const text = conversationPreview(item.content, 4000) || '(空)';
 
   return (
-    <details
-      className="conversation-turn-head"
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
-    >
-      <summary className="conversation-row-head">
+    <div className="conversation-turn-head">
+      <button type="button" className="conversation-row-head" aria-haspopup="dialog" onClick={() => onOpen([item])}>
         <span className="conversation-seq">{item.sequence}</span>
         <span className="conversation-kind conversation-kind-user">你</span>
         <span className="conversation-turn-main">
-          <span className="conversation-turn-text">{text}</span>
-          <span className="conversation-turn-stats">{formatTurnStats(stats)}</span>
+          <span className="conversation-turn-text" title={text}>
+            {text}
+          </span>
+          <span className="conversation-turn-stats" title={formatTurnStats(stats)}>
+            {formatTurnStats(stats)}
+          </span>
         </span>
         <span className="conversation-size" />
         <ChevronIcon className="conversation-chevron" size={14} aria-hidden="true" />
-      </summary>
-      {expanded ? (
-        <div className="conversation-detail">
-          <pre className="conversation-content">{item.content || '(空)'}</pre>
-        </div>
-      ) : null}
-    </details>
+      </button>
+    </div>
   );
 }
 
-function RecordRow({ item }: { item: ConfigWebConversationItem }) {
-  const [expanded, setExpanded] = useState(false);
+export function RecordRow({ item, onOpen }: { item: ConfigWebConversationItem; onOpen: OpenRecords }) {
   const ChevronIcon = appIcons.chevronRight;
   const prose = item.type === 'assistant' || item.type === 'reasoning';
   const preview = conversationPreview(item.content, prose ? 400 : 600);
   const chars = conversationItemSize(item);
 
   return (
-    <details
-      className={`conversation-row conversation-row-${item.type}`}
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
-    >
-      <summary className="conversation-row-head">
+    <div className={`conversation-row conversation-row-${item.type}`}>
+      <button type="button" className="conversation-row-head" aria-haspopup="dialog" onClick={() => onOpen([item])}>
         <span className="conversation-seq">{item.sequence}</span>
-        <span className={`conversation-kind conversation-kind-${conversationKindClass(item.type)}`}>{conversationItemLabel(item)}</span>
+        <span className={`conversation-kind conversation-kind-${conversationKindClass(item.type)}`}>
+          {conversationItemLabel(item)}
+        </span>
         <span className="conversation-main">
-          {item.toolName ? <span className="conversation-tool">{item.toolName}</span> : null}
-          <span className={`conversation-preview${prose ? ' is-prose' : ' is-code'}`}>{preview}</span>
+          {item.toolName ? (
+            <span className="conversation-tool" title={item.toolName}>
+              {item.toolName}
+            </span>
+          ) : null}
+          <span className={`conversation-preview${prose ? ' is-prose' : ' is-code'}`} title={preview}>
+            {preview}
+          </span>
         </span>
         <span className="conversation-size" title={`${chars.toLocaleString()} 字符`}>
           {formatCharCount(chars)}
           <span className="conversation-size-unit"> 字符</span>
         </span>
         <ChevronIcon className="conversation-chevron" size={14} aria-hidden="true" />
-      </summary>
-      {expanded ? (
-        <div className="conversation-detail">
-          {item.callId ? (
-            <div className="conversation-detail-meta" title={item.callId}>
-              调用 <code>{item.callId}</code>
-            </div>
-          ) : null}
-          <pre className="conversation-content">{item.content || '(空)'}</pre>
-        </div>
-      ) : null}
-    </details>
+      </button>
+    </div>
   );
 }
 
-
-
-/** 折叠的连续动作段。展开后是原来那些逐条记录，样式与作用完全一样。 */
-function RunRow({ records, expanded }: { records: ConfigWebConversationItem[]; expanded: boolean }) {
+export function RunRow({ records, onOpen }: { records: ConfigWebConversationItem[]; onOpen: OpenRecords }) {
   const ChevronIcon = appIcons.chevronRight;
   const first = records[0]!;
   const last = records[records.length - 1]!;
   const chars = records.reduce((sum, record) => sum + (record.sizeHint ?? record.content.length), 0);
 
   return (
-    <details className="conversation-row conversation-run" open={expanded}>
-      <summary className="conversation-row-head">
+    <div className="conversation-row conversation-run">
+      <button type="button" className="conversation-row-head" aria-haspopup="dialog" onClick={() => onOpen(records)}>
         <span className="conversation-seq">
           {first.sequence}–{last.sequence}
         </span>
         <span className="conversation-kind conversation-kind-run">{conversationRunLabel(records)}</span>
         <span className="conversation-main">
-          <span className="conversation-preview is-summary">{describeConversationRun(records)}</span>
+          <span className="conversation-preview is-summary" title={describeConversationRun(records)}>
+            {describeConversationRun(records)}
+          </span>
         </span>
         <span className="conversation-size" title={`${chars.toLocaleString()} 字符`}>
           {formatCharCount(chars)}
           <span className="conversation-size-unit"> 字符</span>
         </span>
         <ChevronIcon className="conversation-chevron" size={14} aria-hidden="true" />
-      </summary>
-      <div className="conversation-run-body">
-        {records.map((record) => (
-          <RecordRow key={`${record.sequence}-${record.callId ?? ''}`} item={record} />
-        ))}
-      </div>
-    </details>
+      </button>
+    </div>
   );
 }
 
+export function ConversationDetailModal({
+  records,
+  onClose,
+}: {
+  records: ConfigWebConversationItem[];
+  onClose(): void;
+}) {
+  const first = records[0]!;
+  const last = records[records.length - 1]!;
+  const grouped = records.length > 1;
+  const chars = records.reduce((sum, item) => sum + conversationItemSize(item), 0);
 
-
-
-
-
+  return (
+    <Modal
+      portal
+      wide
+      title={`${grouped ? conversationRunLabel(records) : conversationItemLabel(first)} · #${first.sequence}${grouped ? `–${last.sequence}` : ''}`}
+      onClose={onClose}
+    >
+      <div className="conversation-detail-summary">
+        {grouped ? `${records.length} 条记录 · ` : ''}
+        {chars.toLocaleString()} 字符
+      </div>
+      <div className="conversation-detail-records">
+        {records.map((item) => (
+          <section className="conversation-detail-record" key={item.sequence}>
+            {grouped || item.toolName || item.callId ? (
+              <div className="conversation-detail-meta">
+                {grouped ? (
+                  <span>
+                    #{item.sequence} · {conversationItemLabel(item)}
+                  </span>
+                ) : null}
+                {item.toolName ? <code>{item.toolName}</code> : null}
+                {item.callId ? (
+                  <span>
+                    调用 <code>{item.callId}</code>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <pre className="conversation-content">{item.content || '(空)'}</pre>
+          </section>
+        ))}
+      </div>
+    </Modal>
+  );
+}
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

@@ -5,7 +5,7 @@ import { createPluginExperience } from '@packages/mica-plugin/PluginExperience.j
 import manifest from './plugin.json';
 import { TaskDeliveryTool } from './Tool.js';
 import { DeliveryEvidence } from './evidence.js';
-import { deliveryView } from './panel.js';
+import { deliveryDialog, deliveryView } from './panel.js';
 import { createDelivery, identifier, sanitizeDelivery } from './state.js';
 
 export default function setup(ctx: PluginContext): void {
@@ -53,7 +53,12 @@ export default function setup(ctx: PluginContext): void {
   );
   ctx.onDispose(() => tool.dispose());
   const before = ctx.hooks.on<RuntimeTurnBeforeHookEvent>('turn:before', (event) => {
-    if (event.owner) evidence.begin(event.owner);
+    if (event.owner) {
+      evidence.begin(event.owner);
+      const current = read(event.owner);
+      if (current && current.dismissedRevision !== current.revision)
+        state.set({ ...current, dismissedRevision: current.revision }, event.owner);
+    }
   });
   const observation = ctx.hooks.on<AgentObservationEvent>('agent:observe', (event) => evidence.observe(event));
   ctx.onDispose(() => before.dispose());
@@ -96,14 +101,7 @@ export default function setup(ctx: PluginContext): void {
         experience.track('clear', { surface: 'panel', revision: current.revision, outcome: 'success' });
         return { message: '交付记录已清除。' };
       }
-      return {
-        dialog: {
-          title: '任务交付 · 模型报告',
-          text: current.summary,
-          note: '工具引用与验证边界见交付面板。',
-          panel: { label: '查看交付详情' },
-        },
-      };
+      return { dialog: deliveryDialog(current) };
     },
   });
   ctx.onDispose(() => panel.dispose());
@@ -111,7 +109,7 @@ export default function setup(ctx: PluginContext): void {
     id: 'task-delivery',
     order: 920,
     render: () =>
-      'For a substantive completed task, use task_delivery set to record a concise delivery summary, changed files and separate model-reported code/validation/build/deploy statuses. Validation claims remain unverified; only actual observed tool call IDs can be evidence references. Never claim VERIFIED from a model report or infer semantic success merely from a returned tool result. Do not invent evidence or run extra builds/deployments to fill this card.',
+      'Use task_delivery set only when completing substantive multi-step work with a deliverable that benefits from a separate handoff, such as implementation, debugging or deployment. Do not use it for simple questions, explanations, casual conversation, or a single read-only lookup/inspection; respond normally instead. Record a concise delivery summary, changed files and separate model-reported code/validation/build/deploy statuses. Validation claims remain unverified; only actual observed tool call IDs can be evidence references. Never claim VERIFIED from a model report or infer semantic success merely from a returned tool result. Do not invent evidence or run extra builds/deployments to fill this card.',
   });
   ctx.onDispose(() => prompt.dispose());
 }

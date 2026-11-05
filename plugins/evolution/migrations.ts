@@ -1,3 +1,5 @@
+import { isFindingAssessment } from '../harness-review/assessments.js';
+
 /**
  * 旧数据迁移：把 mica 某个历史形态的持久化数据就地改成当前形态。
  *
@@ -211,6 +213,20 @@ export const usageSourceOwner: Migration = {
       changed += 1;
     }
     return changed;
+  },
+};
+
+export const harnessReviewAssessmentV1: Migration = {
+  id: 'harness-review-assessment-v1',
+  description: 'Version legacy harness-review decisions without inventing an observed baseline',
+  apply(document) {
+    const keys = ['id', 'status', 'note', 'updatedAt'];
+    if (!isRecord(document)) return 0;
+    if (Object.keys(document).length !== keys.length || !keys.every((key) => Object.hasOwn(document, key))) return 0;
+    if (!isFindingAssessment({ ...document, version: 1, baseline: null })) return 0;
+    document.version = 1;
+    document.baseline = null;
+    return 1;
   },
 };
 

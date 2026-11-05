@@ -2,7 +2,7 @@
 
 ## Turn 执行
 
-- `HeadlessTurnExecutor` 不触碰 Ink/UI；每轮顺序：取 lease → `refreshFromStore()` → `reserveRunId()`；取锁失败返回 `busy-remote`。排队输入只在上一轮**完成**后才接着跑，中止/失败把它留在队列里可撤回（与 `message-queue` 插件的 `turn:after` 同一条规则）——否则点了停止会先停、再把排队的话发出去、再停一次。桌面宿主的 abort 强杀兜底只针对发起中止的那一轮（`run.aborting` + turn id），不能杀中止之后新起的轮次。
+- `HeadlessTurnExecutor` 不触碰 Ink/UI；每轮顺序：取 lease → `refreshFromStore()` → 应用输入配置 → await `turn:prepare` → `reserveRunId()` → 保存用户输入；取锁失败返回 `busy-remote`。`turn:prepare` 给插件受当前 lease 保护的 `compactHistory` 能力，将当前压缩结果落盘并同步展示记录；只在持久会话触发。排队输入只在上一轮**完成**后才接着跑，中止/失败把它留在队列里可撤回（与 `message-queue` 插件的 `turn:after` 同一条规则）——否则点了停止会先停、再把排队的话发出去、再停一次。桌面宿主的 abort 强杀兜底只针对发起中止的那一轮（`run.aborting` + turn id），不能杀中止之后新起的轮次。
 - 桌面端点停止是「撤回排队 + 中断」一次动作：`chat:abort` 先经 `mica/queue/recall`（和本地 after_turn 槽）把排队消息取出来，随结果回给页面放回输入框，再发中断。取不到（已注入 / host 不响应）就留在队列里，中止后仍可按 Shift+← 撤回。
 - 每轮都发 `turn:finish`，结果只有 completed / aborted / error；排队轮次同样逐轮取 lease。
 

@@ -44,7 +44,6 @@ export function createEnvironmentPanel(controller: EnvironmentController): Plugi
                   id: 'environment',
                   title: '任务环境',
                   summary,
-                  detail: 'HTTP 仅按 2xx 判断；TCP 仅验证连接。超过 60 秒或恢复的结果需重新检查。',
                   tone: (unknown ? 'muted' : ready === state.targets.length ? 'ok' : 'warn') as PluginPanelTone,
                   revision: key,
                   impressionAction: 'impression',
@@ -82,7 +81,7 @@ export function createEnvironmentPanel(controller: EnvironmentController): Plugi
                 ],
               })),
             },
-            empty: '让模型使用 environment_ready 的 set 登记本次任务已知的服务（最多 6 个）。',
+            empty: '当前没有需要持续检查的服务。仅在任务确需持续探测已知本机服务时登记（最多 6 个）。',
             actions: state.targets.length
               ? [
                   { id: 'check-all', label: '检查全部', tone: 'primary' as const },
@@ -205,7 +204,10 @@ function checkMessage(outcome: string): string {
 }
 function summaryText(controller: EnvironmentController, owner: Owner, state: EnvironmentState): string {
   return (
-    state.targets.map((target) => `${target.label}：${resultOf(controller, owner, state, target).text}`).join('\n') ||
+    state.targets.map((target) => {
+      const result = resultOf(controller, owner, state, target);
+      return `${target.label}（${address(target)}）\n${result.text}\n${result.sub}`;
+    }).join('\n\n') ||
     '尚未登记本次任务的本机服务。'
   );
 }

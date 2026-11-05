@@ -58,6 +58,8 @@ export class EnvironmentController {
   replace(value: unknown, owner: Owner, surface: Surface = 'tool'): EnvironmentState {
     this.assertActive();
     const targets = parseTargets(value);
+    const current = this.read(owner);
+    if (fingerprint(current.targets) === fingerprint(targets)) return current;
     if (this.active?.ownerId === owner.id) this.active.controller.abort();
     const next: EnvironmentState = {
       version: 1,

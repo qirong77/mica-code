@@ -11,6 +11,7 @@ import {
   X
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
+import { MAX_EDITOR_TEXT } from '../../../../../packages/mica-plugin/PluginPanel.ts'
 // 控件全部来自设置页那同一套（见 packages/mica-config-ui）：插件面板里不另写按钮、
 // 输入框、标签，否则同一个应用里会出现三种按钮高度和两套状态色。
 import {
@@ -30,12 +31,14 @@ import {
 import { ModalShell } from './chat-modal'
 import '../assets/plugin-cards.css'
 import { FloatingMenu } from './FloatingMenu'
+import { notify } from './notify'
 // 分区正文的 Markdown 直接用对话区那一套渲染：同一个应用里不该有两份 Markdown 排版，
 // 「需求描述」「角色描述」看起来才和对话里的内容一致。ChatView 也 import 本模块，
 // 但两边都只在组件渲染时取值（不在模块顶层读），ESM 的活绑定在这里是安全的。
 import { Markdown } from './ChatView'
 import {
   applyPanelResult,
+  createPanelActionQueue,
   isCompletedToolEvent,
   isOpenableLink,
   menuCacheKey,
@@ -44,6 +47,7 @@ import {
   PANEL_RETRY_DELAYS,
   panelDraftKey,
   panelDrafts,
+  panelViewContext,
   panelCardImpressionKey,
   panelNeedsQuickbarView,
   pluginPanelCards,
@@ -54,6 +58,8 @@ import {
   quickbarMenuTable,
   readMenuCache,
   readPanelView,
+  reconcilePanelActionDrafts,
+  reconcilePanelDrafts,
   sectionDrafts,
   subscribePluginPanelStatus,
   writePanelView,
@@ -263,7 +269,7 @@ export function PluginQuickBar({
   const [cardViews, setCardViews] = useState(null)
   // 去重集合贯穿组件生命周期；切角色、轮询、卡片重新挂载都不会重复记同一版本。
   const impressions = useRef(new Set())
-  const context = JSON.stringify([nodeId, sessionId, cwd, role])
+  const context = panelViewContext(nodeId, sessionId, cwd, role)
   // 身份对象还区分 A → B → A：第一次 A 的请求不能回填第二次 A。
   const scope = useMemo(() => ({ active: true, pending: '', inflight: new Map() }), [context])
   const contextRef = useRef(scope)
@@ -330,6 +336,7 @@ export function PluginQuickBar({
         if (!isCurrent(panel)) return null
         if (result?.ok !== false && result) {
           const view = result.view || result
+          writePanelView(context, panel.id, view)
           setShortcutViews((current) => ({ ...current, [requestKey]: view.shortcutStates || {} }))
           setStatusBars((current) => ({ ...current, [panel.id]: view.statusBar || null }))
           setCardViews((current) => {
@@ -794,7 +801,7 @@ export function PluginPanels({
   if (!open) return null
   return (
     <PluginPanelDock
-      key={open.id}
+      key={`${panelViewContext(nodeId, sessionId, cwd, role)}:${open.id}`}
       pluginId={open.id}
       visible={visible}
       label={open.label}
@@ -802,6 +809,7 @@ export function PluginPanels({
       nodeId={nodeId}
       sessionId={sessionId}
       cwd={cwd}
+      role={role}
       focusSection={focusSection}
       onClose={onClose}
       onCompose={onCompose}
@@ -821,6 +829,7 @@ function PluginPanelDock({
   nodeId,
   sessionId,
   cwd,
+  role,
   focusSection,
   onClose,
   onCompose,
@@ -830,12 +839,18 @@ function PluginPanelDock({
   onOpenReview
 }) {
   // 菜单那边刚问过同一份视图时直接拿它开局：点开抽屉不该先看到一句「正在读取」。
-  const seeded = useRef(readPanelView(nodeId, pluginId))
+  const context = panelViewContext(nodeId, sessionId, cwd, role)
+  const seeded = useRef(readPanelView(context, pluginId))
   const [view, setView] = useState(() => seeded.current?.view || null)
   const viewRef = useRef(seeded.current?.view || null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState('')
   const [drafts, setDrafts] = useState(() => panelDrafts(seeded.current?.view))
+  const draftsRef = useRef(drafts)
+  const updateDrafts = useCallback((update) => {
+    draftsRef.current = typeof update === 'function' ? update(draftsRef.current) : update
+    setDrafts(draftsRef.current)
+  }, [])
   // 弹窗形态下的当前页签（存 section 标题）。抽屉形态不用它。
   const [activeTab, setActiveTab] = useState('')
   const aliveRef = useRef(true)
@@ -856,26 +871,30 @@ function PluginPanelDock({
   }, [])
 
   const applyView = useCallback(
-    (result, { resetDrafts = false, mergeDrafts = false } = {}) => {
+    (result, { resetDrafts = false, mergeDrafts = false, submitted, draftScope } = {}) => {
       if (!aliveRef.current) return
       if (result?.ok && result.view) {
         // 每 4 秒拉一次视图：没有变化就别换引用，否则整块面板连同滚动位置一起白重渲染。
         const same =
           viewRef.current && JSON.stringify(viewRef.current) === JSON.stringify(result.view)
+        const baseline = panelDrafts(viewRef.current)
         viewRef.current = result.view
         if (!same) setView(result.view)
         setError('')
-        writePanelView(nodeId, pluginId, result.view)
-        // 只在动作之后把草稿对齐到视图：定时刷新若也重置，用户正在输入的字会被清掉。
-        // `mergeDrafts` 是「别动用户已经敲的字，但新出现的字段要有初值」：自动提交会把
-        // 认证方式这类字段集合换掉，整份保留会让新字段空着，整份重置会吞掉在途输入。
-        if (resetDrafts) setDrafts(panelDrafts(result.view))
-        else if (mergeDrafts) setDrafts((previous) => ({ ...panelDrafts(result.view), ...previous }))
+        writePanelView(context, pluginId, result.view)
+        const next = panelDrafts(result.view)
+        updateDrafts((previous) => {
+          if (mergeDrafts) return { ...next, ...previous }
+          if (resetDrafts && submitted) {
+            return reconcilePanelActionDrafts(previous, baseline, next, submitted, draftScope)
+          }
+          return reconcilePanelDrafts(previous, baseline, next)
+        })
       } else {
         setError(result?.error || '插件面板不可用')
       }
     },
-    [nodeId, pluginId]
+    [context, pluginId, updateDrafts]
   )
 
   const load = useCallback(async () => {
@@ -889,13 +908,10 @@ function PluginPanelDock({
     // 抽屉只在看得见时才刷新：切到别的会话后这个实例仍然挂着，继续每 4 秒叫醒一个
     // 没人看的会话宿主，既费 IO 也让那个 host 永远「刚从活动过」而不被回收。
     if (!visible) return undefined
-    // 首次打开要带一次字段初值，之后的刷新只更新状态行/条目。已经有缓存视图时不清草稿
-    // （用户可能已经在里面打字了），只把新结果换上去。
-    const hadSeed = Boolean(seeded.current?.view)
     void window.mica.chat.pluginPanels
       .view(nodeId, { pluginId, sessionId, cwd })
       .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
-      .then((result) => applyView(result, { resetDrafts: !hadSeed }))
+      .then((result) => applyView(result))
     const timer = setInterval(() => {
       // 抽屉开着才刷新：关掉之后没有任何人看它，不该每 4 秒叫醒一次会话 host
       if (typeof document !== 'undefined' && document.hidden) return
@@ -904,9 +920,9 @@ function PluginPanelDock({
     return () => clearInterval(timer)
   }, [applyView, cwd, load, nodeId, pluginId, sessionId, visible])
 
-  const runAction = useCallback(
-    async (action, key, extraValues, options = {}) => {
-      setBusy(key ? `${action}:${key}` : action)
+  const performAction = useCallback(
+    async ({ action, key, extraValues, options, submitted }) => {
+      if (aliveRef.current) setBusy(key ? `${action}:${key}` : action)
       const result = await window.mica.chat.pluginPanels
         .action(nodeId, {
           pluginId,
@@ -914,7 +930,7 @@ function PluginPanelDock({
           key,
           // 动作只属于发起它的那块分区：草稿按分区存，交出去时还原成插件认识的扁平字段表。
           values: {
-            ...(options.draftScope === undefined ? {} : sectionDrafts(drafts, options.draftScope)),
+            ...(options.draftScope === undefined ? {} : sectionDrafts(submitted, options.draftScope)),
             ...extraValues
           },
           // 就地编辑器提交的是整篇正文（`section.editor`）：它不进 `values`——那一列是
@@ -924,14 +940,23 @@ function PluginPanelDock({
           cwd
         })
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
+      if (!aliveRef.current) {
+        if (result?.ok === false) notify({
+          key: `plugin-panel-save:${context}:${pluginId}`,
+          text: `${label}：自动保存失败`,
+          detail: result.error || '动作失败，请重新打开面板重试',
+          level: 'error'
+        })
+        return result
+      }
       setBusy('')
       // 表格里的勾选是一次状态切换，不是提交表单：换视图时不能让用户正在填的表单归位。
       // 插件也可以用 `keepDrafts` 说同一件事（输入停顿后的自动提交、提交失败）。
       applyView(
         result,
-        options.keepDrafts === true || result?.keepDrafts === true
+        options.keepDrafts === true || result?.keepDrafts === true || result?.ok === false
           ? { mergeDrafts: true }
-          : { resetDrafts: true }
+          : { resetDrafts: true, submitted, draftScope: options.draftScope }
       )
       applyPanelResult(result, {
         onCompose,
@@ -948,8 +973,9 @@ function PluginPanelDock({
     },
     [
       applyView,
+      context,
       cwd,
-      drafts,
+      label,
       nodeId,
       onCompose,
       onDialog,
@@ -960,6 +986,18 @@ function PluginPanelDock({
       sessionId
     ]
   )
+
+  const performRef = useRef(performAction)
+  performRef.current = performAction
+  const queue = useMemo(() => createPanelActionQueue((task) => performRef.current(task)), [])
+  useEffect(() => () => queue.flush(), [queue])
+  const runAction = useCallback((action, key, extraValues, options = {}) =>
+    queue.action(options.draftScope, {
+      action, key, extraValues, options, submitted: { ...draftsRef.current }
+    }), [queue])
+  const commitDrafts = useCallback((action, draftScope) => queue.commit(draftScope, {
+    action, options: { keepDrafts: true, draftScope }, submitted: { ...draftsRef.current }
+  }), [queue])
 
   const sections = useMemo(() => view?.sections || [], [view])
   const statusTone = view?.status?.tone || 'muted'
@@ -997,14 +1035,15 @@ function PluginPanelDock({
       // 快捷按钮点名的那一块靠 key 变化重挂载来强制展开。
       focused={focusTab?.key === key}
       drafts={drafts}
-      setDrafts={setDrafts}
+      setDrafts={updateDrafts}
       // 输入停顿后的自动提交不能让整块草稿跟着服务端视图归位：请求在途时用户还在打字，
       // 那几笔没提交过的字符会被直接抹掉（下一拍才又被当成新改动）。
       commit={
         section.commit
-          ? () => runAction(section.commit, undefined, undefined, { keepDrafts: true, draftScope: index })
+          ? () => commitDrafts(section.commit, index)
           : null
       }
+      flushCommit={() => queue.flush(index)}
       busy={busy}
       runAction={runAction}
     />
@@ -1122,12 +1161,6 @@ function PluginPanelDock({
 }
 
 /**
- * 声明了 `commit` 的 section（设置类）在输入停顿后自己提交，用户不用再点按钮；
- * 没声明的仍靠 section 底部的动作按钮带上 `values`。
- */
-const COMMIT_DELAY_MS = 500
-
-/**
  * 一块折叠卡片：标题行可点，内容只在展开时渲染。
  *
  * 导出是为了让渲染冒烟测试能真的把一块分区画出来：分区里的每个动作按钮都必须拿到
@@ -1141,29 +1174,17 @@ export function PluginPanelSection({
   setDrafts,
   draftScope = 0,
   commit,
+  flushCommit,
   busy,
   runAction
 }) {
-  const commitTimer = useRef(null)
-  // 计时器要调「最新一次渲染」的提交回调：它闭包里带着最新的字段值，
-  // 直接用 onChange 那一刻的回调会把改动前的 drafts 提交上去。
-  const commitRef = useRef(commit)
-  commitRef.current = commit
-  // 动作还在跑（点「连接」之后那几秒）时不要再补一次草稿提交：那会把插件刚清掉的
-  // 草稿写回去，下一次取视图看到的就还是刚才那台机器。
-  const busyRef = useRef(busy)
-  busyRef.current = Boolean(busy)
-
-  useEffect(() => () => clearTimeout(commitTimer.current), [])
+  const flushRef = useRef(flushCommit)
+  flushRef.current = flushCommit
+  useEffect(() => () => flushRef.current?.(), [])
 
   const changeDraft = (key, value) => {
     setDrafts((previous) => ({ ...previous, [key]: value }))
-    if (!commit) return
-    clearTimeout(commitTimer.current)
-    commitTimer.current = setTimeout(() => {
-      if (busyRef.current) return
-      void commitRef.current?.()
-    }, COMMIT_DELAY_MS)
+    commit?.()
   }
 
   // 这块分区里的所有动作（字段、行尾按钮、表格、编辑器）都带上同一个作用域：
@@ -1382,6 +1403,7 @@ function PluginPanelRows({ section, drafts, draftScope = 0, changeDraft, busy, r
 function PluginPanelEditor({ editor, busy, runAction }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(editor.value)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     if (!editing) setDraft(editor.value)
@@ -1393,6 +1415,12 @@ function PluginPanelEditor({ editor, busy, runAction }) {
   }
 
   const save = async () => {
+    if (busy) return
+    if (draft.length > MAX_EDITOR_TEXT) {
+      setError(`正文超过 ${MAX_EDITOR_TEXT} 字符，未保存；请缩短正文或使用文件编辑器`)
+      return
+    }
+    setError('')
     const result = await runAction(editor.action, undefined, {}, { text: draft, keepDrafts: true })
     if (result?.ok !== false) setEditing(false)
   }
@@ -1400,6 +1428,7 @@ function PluginPanelEditor({ editor, busy, runAction }) {
   if (editing) {
     return (
       <div className="chat-plugin-editor">
+        {error && <Alert message={error} />}
         <textarea
           className="chat-plugin-editor-input"
           aria-label={editor.editLabel || '编辑正文'}

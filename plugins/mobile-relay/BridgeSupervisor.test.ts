@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
+import { resolveLogDir } from '@packages/mica-config/brand.js';
 import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
 import type { PluginBackgroundTask } from '@packages/mica-plugin/PluginBackground.js';
 import {
@@ -13,6 +14,7 @@ import {
   registerBridgeSupervisor,
 } from './BridgeSupervisor.js';
 import { BRIDGE_SOURCE } from './bridgeSource.js';
+import { REQUEST_LOG_SOURCE } from './requestLogSource.js';
 
 vi.mock('node:child_process', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:child_process')>()),
@@ -58,12 +60,16 @@ describe('mobile-relay bridge supervisor', () => {
   it('materializes the embedded bridge script and keeps it stable', () => {
     const first = materializeBridge(dir);
     expect(readFileSync(first, 'utf8')).toBe(BRIDGE_SOURCE);
+    const logger = join(dir, 'request-log.mjs');
+    expect(readFileSync(logger, 'utf8')).toBe(REQUEST_LOG_SOURCE);
     const before = statSync(first).mtimeMs;
+    const loggerBefore = statSync(logger).mtimeMs;
 
     const second = materializeBridge(dir);
     expect(second).toBe(first);
     // 内容没变就不重写：否则每次启动都换 mtime，白折腾
     expect(statSync(second).mtimeMs).toBe(before);
+    expect(statSync(logger).mtimeMs).toBe(loggerBefore);
   });
 
   it('rewrites the script when the embedded copy changes', () => {
@@ -71,6 +77,27 @@ describe('mobile-relay bridge supervisor', () => {
     writeFileSync(target, '// stale', 'utf8');
     materializeBridge(dir);
     expect(readFileSync(target, 'utf8')).toBe(BRIDGE_SOURCE);
+  });
+
+  it('repairs the request logger even when the bridge script is unchanged', () => {
+    const target = materializeBridge(dir);
+    const logger = join(dir, 'request-log.mjs');
+    writeFileSync(logger, '// stale', 'utf8');
+    materializeBridge(dir);
+    expect(readFileSync(target, 'utf8')).toBe(BRIDGE_SOURCE);
+    expect(readFileSync(logger, 'utf8')).toBe(REQUEST_LOG_SOURCE);
+    rmSync(logger);
+    materializeBridge(dir);
+    expect(readFileSync(logger, 'utf8')).toBe(REQUEST_LOG_SOURCE);
+  });
+
+  it('passes the resolved log directory to the bridge child', () => {
+    const child = { pid: 44002, on: vi.fn(), unref: vi.fn(), kill: vi.fn() };
+    vi.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
+    const supervisor = createBridgeSupervisor(fakeContext(), { dataDir: dir });
+    supervisor.ensure();
+    expect(vi.mocked(spawn).mock.calls[0]?.[2]?.env).toMatchObject({ MICA_RELAY_LOG_DIR: resolveLogDir() });
+    supervisor.stop({ ownedOnly: true });
   });
 
   it('does not start anything when the switch is off', () => {
@@ -372,7 +399,9 @@ describe('buildStatus', () => {
     expect(
       buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, 'abc123').attention,
     ).toBeNull();
-    expect(buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, 'abc123').pageKey).toBe('');
+    expect(
+      buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, 'abc123').pageKey,
+    ).toBe('');
     // 本机找不到产物（打包版没有解包目录）：没有可上传的东西，不提示
     expect(
       buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'abc123' }, 9, 1, null).attention,
@@ -390,13 +419,7 @@ describe('buildStatus', () => {
       number | null,
       number,
       string | null,
-    ] = [
-      { relayUrl: 'https://x.test', token: 'a' },
-      { pageVersion: 'old123' },
-      9,
-      1,
-      'new456',
-    ];
+    ] = [{ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'old123' }, 9, 1, 'new456'];
     const first = buildStatus(...args, ['other->pair']);
     expect(first.attention).not.toBeNull();
 
@@ -406,14 +429,9 @@ describe('buildStatus', () => {
     expect(seen.page).toEqual({ text: '落后 · 手机端 old123，本机 new456', tone: 'warn' });
 
     // 本机重新构建：对比变了，是另一条提示
-    const rebuilt = buildStatus(
-      { relayUrl: 'https://x.test', token: 'a' },
-      { pageVersion: 'old123' },
-      9,
-      1,
-      'new789',
-      ['new456->old123'],
-    );
+    const rebuilt = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, { pageVersion: 'old123' }, 9, 1, 'new789', [
+      'new456->old123',
+    ]);
     expect(rebuilt.attention?.text).toContain('new789');
     // 中转机换成另一份也一样
     const republished = buildStatus(

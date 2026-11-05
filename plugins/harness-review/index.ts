@@ -106,8 +106,7 @@ export default function setup(ctx: PluginContext): void {
   ctx.onDispose(() => pluginHook.dispose());
   ctx.onDispose(() => recorder.dispose());
 
-  // 用户纠正（改写重跑 / 撤回排队 / 原样重发）是「这次回答没被接受」唯一确凿的信号。
-  // 它出现在两轮之间，所以只交给 recorder 按会话暂存，下一次该会话的 run:start 才落盘。
+  // 用户动作是纠正证据，不单凭它判定回答质量；先落盘，再由下一次主运行消费。
   const events: PluginContext['events'] | undefined = ctx.events;
   if (events) {
     try {
@@ -185,6 +184,12 @@ export default function setup(ctx: PluginContext): void {
         findings: report.findings.slice(0, 20).map((finding) => ({
           ...finding,
           evidence: finding.evidence.slice(0, 5),
+          ...(finding.assessments
+            ? {
+                assessmentCount: finding.assessments.length,
+                assessments: finding.assessments.slice(-3),
+              }
+            : {}),
         })),
         displayLimit: '最多显示最近 20 次运行与 20 项问题，每项 5 条证据；report 导出完整复盘。',
       };
@@ -204,12 +209,11 @@ export default function setup(ctx: PluginContext): void {
       };
     }
     if (action === 'rebuild') {
-      // Findings are derived from traces, so a classification fix can be applied
-      // to runs recorded before it. Counters and outcomes stay untouched.
+      // Only derived error counts change; usage, timing and outcomes stay untouched.
       const result = await recorder.rebuild({ cwd });
       return {
         ...result,
-        displayLimit: '已按当前规则从轨迹重算历史运行的问题条目；运行指标与人工评估结论不变。',
+        displayLimit: '已按当前规则重算问题条目与工具错误/预期退出计数；用量、耗时、终态与人工评估历史不变。',
       };
     }
     if (action === 'assess') {
@@ -220,7 +224,8 @@ export default function setup(ctx: PluginContext): void {
       const report = await recorder.review(cwd);
       if (!report.findings.some((finding) => finding.id === input.id))
         throw new Error('当前工作区没有这个 review 条目');
-      await recorder.decide(input.id, input.status as ReviewStatus, input.note);
+      await recorder.decide(input.id, input.status as ReviewStatus, input.note, cwd);
+      await refreshStatus();
       return { id: input.id, status: input.status, recorded: true };
     }
     throw new Error('action 必须是 list / report / prune / rebuild / assess');
@@ -332,6 +337,7 @@ function writeStatus(root: string, report: ReviewReport, state: PluginState): vo
   const recurring = open.filter(
     (finding) => finding.occurrences >= 2 || new Set(finding.evidence.map((item) => item.runId)).size >= 2,
   );
+  const followups = report.findings.filter((finding) => finding.reviewNeeded || finding.status === 'regressed');
   // 「已记录运行」与「最近运行」只数用户的一轮：helper（起标题、压缩摘要）跟着每一轮
   // 都会发生、委派子代理也是同一次请求派出去的，算进去会把「跑了 100 次」说成 200 次。
   const userRuns = report.runs.filter((run) => !run.helper && !run.delegation);
@@ -341,13 +347,16 @@ function writeStatus(root: string, report: ReviewReport, state: PluginState): vo
   );
   const data: Record<string, unknown> = {
     runs: `${userRuns.length} 次`,
-    openFindings: open.length === 0 ? '没有待复盘的问题' : `${open.length} 项`,
+    openFindings: open.length + followups.length === 0 ? '没有待复盘的问题' : `${open.length + followups.length} 项`,
     lastRun: lastRun ? `${lastRun} 起` : '尚未记录',
     rebuilt: state.lastRebuildAt ? state.lastRebuildAt : '尚未重算',
   };
-  if (recurring.length > 0) {
+  if (recurring.length > 0 || followups.length > 0) {
     data.attention = {
-      text: `${recurring.length} 项问题在多轮里重复出现、还没有人复盘`,
+      text:
+        followups.length > 0
+          ? `${followups.length} 项已有评估的问题待复核（新证据、历史基线缺失或人工标记回归）`
+          : `${recurring.length} 项问题重复出现、还没有人复盘`,
       tone: 'warn',
       action: 'open-review',
     };

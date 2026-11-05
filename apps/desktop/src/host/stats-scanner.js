@@ -13,7 +13,7 @@ import {
 // 行会一直缺这个字段，表现为这条提醒怎么都不出现——所以加字段必须同时升版本。
 // 5：来源行带上 `pluginId`（统计页按插件归组的父级）。版本不提会让旧缓存行一直缺这个
 // 字段，界面上子代理就只能是一串没有归属的类型名。
-const INDEX_VERSION = 8
+const INDEX_VERSION = 9
 /** 每批解析多少个会话文件就让出一次事件循环。 */
 const BATCH_FILES = 16
 /** 单批最多占用主线程多久（毫秒）；大会话文件会超过这个预算，靠批次之间让出恢复响应。 */
@@ -89,7 +89,9 @@ function parseSessionMeta(raw) {
   // 「在等你选」只是一句提示：轮次没在跑就不算（崩溃残留的 running 由调用方按租约再筛一
   // 道），形状不对按没有处理。
   const awaitingInput =
-    typeof raw.awaitingInput === 'string' && raw.awaitingInput.trim() && raw.turnState !== 'completed'
+    typeof raw.awaitingInput === 'string' &&
+    raw.awaitingInput.trim() &&
+    raw.turnState !== 'completed'
       ? raw.awaitingInput.trim().slice(0, AWAITING_INPUT_MAX)
       : null
   return {

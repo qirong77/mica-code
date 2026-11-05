@@ -35,6 +35,7 @@ function emit(file, constant, sourcePath, note) {
 }
 
 emit('bridgeSource.ts', 'BRIDGE_SOURCE', join(pluginDir, 'agent', 'bridge.mjs'));
+emit('requestLogSource.ts', 'REQUEST_LOG_SOURCE', join(pluginDir, 'agent', 'request-log.mjs'));
 
 /** 部署用到的文件，键是落到 bundle 目录里的相对路径。 */
 const DEPLOY_FILES = [

@@ -99,6 +99,7 @@ export function ageMinutes(value: unknown): number {
 }
 export function showCard(checkpoint: Checkpoint, thresholdMinutes = 30, now = Date.now()): boolean {
   return (
+    checkpoint.pending.length > 0 &&
     checkpoint.dismissedRevision !== checkpoint.revision &&
     now - Date.parse(checkpoint.savedAt) >= ageMinutes(thresholdMinutes) * 60000
   );

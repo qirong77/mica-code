@@ -1,4 +1,4 @@
-import type { PluginPanelView } from '@packages/mica-plugin/PluginPanel.js';
+import type { PluginPanelDialog, PluginPanelView } from '@packages/mica-plugin/PluginPanel.js';
 import type { Delivery, ReportStatus } from './state.js';
 const labels: Record<ReportStatus, string> = {
   unknown: '未报告',
@@ -7,6 +7,26 @@ const labels: Record<ReportStatus, string> = {
   failed: '失败',
   skipped: '未执行',
 };
+const escape = (value: string) => value.replace(/[\\`*_{}\[\]()#+.!|>~-]/g, '\\$&');
+const list = (values: string[], empty: string) => values.length ? values.map((value) => `- ${escape(value)}`).join('\n') : empty;
+
+export function deliveryDialog(d: Delivery): PluginPanelDialog {
+  const evidence = d.evidence.map((item) =>
+    `${item.tool} · ${item.id} · ${item.observedAt} · run ${item.runId} · ${item.kind === 'command-exit' ? `命令已结束，退出码 ${item.exitCode}` : '观察到工具返回，结果含义未验证'}`,
+  );
+  return {
+    title: '任务交付 · 模型报告',
+    markdown: [
+      `## 交付摘要\n${escape(d.summary)}`,
+      `## 模型报告的状态\n代码：${labels[d.reports.code]} · 验证：${labels[d.reports.validation]} · 构建：${labels[d.reports.build]} · 部署：${labels[d.reports.deploy]}`,
+      `## 变更文件 · 模型报告\n${list(d.changedFiles, '未报告文件')}`,
+      `## 验证声明 · 未独立验证\n${list(d.validationClaims, '未报告验证声明')}`,
+      `## 部署 · 模型报告\n${escape(d.deploymentReport || '未报告部署来源或结果。')}`,
+      `## 历史工具返回引用\n${list(evidence, '无可用工具证据')}\n\n工具返回或退出码 0 不证明测试覆盖、验证或部署成功。`,
+      `来源会话：${escape(d.sourceSessionId)} · 保存时间：${escape(d.savedAt)}；历史模型报告，未重新验证工作区。`,
+    ].join('\n\n'),
+  };
+}
 export function deliveryView(delivery?: Delivery): PluginPanelView {
   if (!delivery)
     return { title: 'Task Delivery', sections: [{ title: '交付记录', text: '尚无交付记录。' }], cards: [] };
@@ -21,9 +41,6 @@ export function deliveryView(delivery?: Delivery): PluginPanelView {
               id: 'delivery',
               title: '任务交付 · 模型报告',
               summary: `${d.summary.slice(0, 130)}\n代码${labels[d.reports.code]} · 验证${labels[d.reports.validation]} · 构建${labels[d.reports.build]} · 部署${labels[d.reports.deploy]}`,
-              detail: d.evidence.length
-                ? `${d.evidence.length} 条历史工具返回引用；不代表独立验证通过`
-                : '无可用工具证据',
               tone: 'muted',
               revision: d.revision,
               impressionAction: `impression:${d.revision}`,

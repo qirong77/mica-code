@@ -55,6 +55,8 @@ export function ModalShell({
     modalStack.push(entry)
     const onKeyDown = (event) => {
       if (event.key !== 'Escape') return
+      // 配置页的详情浮层位于宿主弹窗之上，Esc 留给它自己处理。
+      if (document.querySelector('[data-mica-config-modal]')) return
       if (modalStack[modalStack.length - 1] !== entry) return
       event.stopPropagation()
       entry.close()

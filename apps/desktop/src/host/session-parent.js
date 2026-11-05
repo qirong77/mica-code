@@ -1,7 +1,6 @@
 import {
   constants,
   existsSync,
-  lstatSync,
   readFileSync,
   renameSync,
   writeFileSync
@@ -16,9 +15,9 @@ import { readTopLevelParentId } from './session-file-head'
  * 侧栏里把一个会话拖到另一个会话上写的就是这个字段——它只决定会话树怎么排，
  * 和「谁派生了谁」（sidecar 子会话、fork 分支）共用同一份数据，语义上不再区分。
  *
- * 运行中的会话照样能改：活着的宿主每次保存都从盘上读回这个字段（`SessionController`
- * 的 `parentFieldFor`），不会用内存里的旧值把它顶回去。空闲时独占 turn lease 写，
- * 有 lease 时改成「比对文件身份再写、写完回读校验」，撞上宿主的一次保存就重来。
+ * 活着的宿主每次保存都从盘上读回这个字段（`SessionController` 的 `parentFieldFor`），
+ * 不会用内存里的旧值把它顶回去。空闲时独占 turn lease 写，
+ * 有 lease 时拒绝修改，避免跨进程整文件替换覆盖正在保存的对话。
  * `updatedAt` 故意不动——侧栏按它排 Recent，调整层级不是「有新消息」，不该把会话顶到
  * 最前面。
  */
@@ -44,12 +43,12 @@ export function createSessionParentWriter({ sessionsDir, hasLiveTurnLease, withT
         return withTurnLease(sessionId, () => writeFile(file, next))
       } catch (error) {
         if (error?.code !== 'TURN_LEASE_BUSY') throw error
+        throw busyError()
       }
     } else if (typeof hasLiveTurnLease !== 'function' || !hasLiveTurnLease(sessionId)) {
       return writeFile(file, next)
     }
-    // 有人握着 lease（这一轮正在跑）：不独占文件，只保证不盖掉别人刚写的那一版。
-    return writeAlongsideRunningTurn(file, next)
+    throw busyError()
   }
 
   /** 读一个会话文件顶层的父会话 id；读不到（不存在 / 坏文件）当作没有父会话。 */
@@ -60,16 +59,7 @@ export function createSessionParentWriter({ sessionsDir, hasLiveTurnLease, withT
 }
 
 function busyError() {
-  return new Error('会话文件正在被反复改写，请稍后再调整会话层级')
-}
-
-function identityOf(file) {
-  try {
-    const stat = lstatSync(file)
-    return `${stat.ino}:${stat.size}:${stat.mtimeMs}`
-  } catch {
-    return null
-  }
+  return new Error('会话正在运行，请在本轮结束后调整会话层级')
 }
 
 function writeFile(file, next) {
@@ -83,26 +73,6 @@ function writeSessionFile(file, session) {
   const temporary = `${file}.${process.pid}.tmp`
   writeFileSync(temporary, `${JSON.stringify(session, null, 2)}\n`, 'utf8')
   renameSync(temporary, file)
-}
-
-/**
- * 这一轮由别人跑着时的写。
- *
- * 宿主每次保存都是 `tmp + rename` 整份覆盖，撞上就会把它那次内容盖掉。所以读前读后比一次
- * 文件身份（inode / size / mtime），写完再回读确认字段还在；对不上说明中间有人写过，重来。
- */
-function writeAlongsideRunningTurn(file, next) {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const before = identityOf(file)
-    if (!before) throw new Error('Session not found')
-    const session = readSession(file)
-    if (!session) throw new Error('Session not found')
-    // 读的过程中宿主写过一版：手上这份已经过时，拿它覆盖会吞掉那一次保存。
-    if (before !== identityOf(file)) continue
-    writeSessionFile(file, withParent(session, next))
-    if (readTopLevelParentId(file) === next) return { parentSessionId: next }
-  }
-  throw busyError()
 }
 
 function normalizeParentId(parentId) {

@@ -11,7 +11,7 @@ export class TaskDeliveryTool extends MicaTool {
   constructor(private readonly access: DeliveryAccess) {
     super(
       'task_delivery',
-      'Read, set or clear a compact task delivery report. All code/validation/build/deploy statuses and validationClaims are MODEL REPORTS, never independently verified. evidenceIds may reference actual tool call IDs observed in this primary runtime owner and current run; unavailable IDs provide no evidence. A returned tool result is not proof that tests passed or deployment succeeded. set replaces the entire report. Do not include secrets or raw tool output.',
+      'Read, set or clear a task delivery report. Use set only for substantive multi-step work with a deliverable needing a handoff, not simple questions, explanations, casual conversation or a single read-only lookup/inspection. All code/validation/build/deploy statuses and validationClaims are MODEL REPORTS, never independently verified. evidenceIds may reference actual tool call IDs observed in this primary runtime owner and current run; unavailable IDs provide no evidence. A returned tool result is not proof that tests passed or deployment succeeded. set replaces the entire report. Do not include secrets or raw tool output.',
       {
         type: 'object',
         additionalProperties: false,

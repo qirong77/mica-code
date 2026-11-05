@@ -18,7 +18,7 @@ import type { PluginPanelShortcutStyle } from './PluginDesktop.js';
  * 约定：
  * - 动作只回 `{ action, key?, values? }`，插件按 id 自己分派；
  * - 每次动作之后宿主重新取一次视图，所以插件不需要回传「新视图」；
- * - 视图里所有文本都由宿主裁剪长度，插件不必考虑超长字符串。
+ * - 展示文本由宿主裁剪；编辑器正文超限时只读告知，不能截断后写回文件。
  */
 
 export type PluginPanelTone = 'muted' | 'ok' | 'warn' | 'error' | 'accent';
@@ -273,8 +273,7 @@ export type PluginPanelSection = {
    * 整篇正文回给 `action`。
    *
    * 与 `markdown` / `text` 的分工：那两块是给用户读的，这一块是给用户改的。正文上限比
-   * `markdown` 高一档（`MAX_EDITOR_TEXT`），但**超长时插件应当不提供编辑器**——截断以后
-   * 再保存就是把文件改短。
+   * `markdown` 高一档（`MAX_EDITOR_TEXT`），超长时宿主只读告知，不提供截断后的编辑内容。
    */
   editor?: PluginPanelEditor;
   /**
@@ -712,7 +711,7 @@ const MAX_SECTION_MARKDOWN = 80_000;
  *
  * 它要能装下「一份角色文档」（实测九万多字符），而且**改完还要回传**——所以这里不是
  * 「显示到哪算哪」的裁剪，而是「超了就甭提供编辑器」的硬门槛：插件拿到的 `value` 一旦被
- * 截断，保存就把文件改短了。宿主截断时不会补省略号（见 `verbatim`），插件按长度自己设防。
+ * 截断，保存就把文件改短了。读取超限时只读告知，提交超限时显式拒绝。
  */
 export const MAX_EDITOR_TEXT = 200_000;
 const MAX_ROWS = 40;
@@ -762,8 +761,7 @@ function text(value: unknown, max = MAX_TEXT): string {
 /**
  * 整篇正文：原样保留（不 trim、不补省略号），超长直接截断。
  *
- * 给就地编辑器与它的回传用：这两个方向搬的都是「文件里的那份文本」，多一个省略号、少一个
- * 首行缩进，写回磁盘就是一次静默的内容改动。
+ * 仅用于只读展示；会写回文件的编辑器正文另行校验，不能使用裁剪后的内容。
  */
 function verbatim(value: unknown, max: number): string {
   if (typeof value !== 'string') return '';
@@ -1053,13 +1051,16 @@ function sectionOf(input: unknown): PluginPanelSection | null {
  * 正文**可以是空串**：新建一个还没写内容的文件时，编辑器就是一张白纸，空正文不是
  * 「没声明」。以前这里把空值当没声明，于是「给新文件写第一条」的入口永远画不出来。
  *
- * 不 trim、不截断补省略号（见 `verbatim`）：这份文本会被原样写回文件。
+ * 不 trim，超限只读告知：这份文本会被原样写回文件。
  */
 function editorOf(input: unknown): PluginPanelEditor | undefined {
   const raw = record(input);
   const action = text(raw.action, MAX_ACTION_ID);
-  const value = verbatim(raw.value, MAX_EDITOR_TEXT);
   if (!action) return undefined;
+  const value = typeof raw.value === 'string' ? raw.value : '';
+  if (value.length > MAX_EDITOR_TEXT) {
+    return { action, value: `正文超过 ${MAX_EDITOR_TEXT} 字符，无法在面板中编辑，请使用文件编辑器`, readOnly: true };
+  }
   const editLabel = text(raw.editLabel, 24);
   const saveLabel = text(raw.saveLabel, 24);
   const placeholder = text(raw.placeholder, 120);
@@ -1309,12 +1310,14 @@ export function normalizePluginPanelAction(input: unknown): PluginPanelActionInp
     if (typeof value === 'string') values[name] = text(value, 2000);
   }
   // 整篇正文（就地编辑器）：原样回传，不 trim——首行缩进、结尾换行都是文件的一部分。
-  const body = verbatim(raw.text, MAX_EDITOR_TEXT);
+  if (typeof raw.text === 'string' && raw.text.length > MAX_EDITOR_TEXT) {
+    throw new RangeError(`正文超过 ${MAX_EDITOR_TEXT} 字符，未保存；请缩短正文或使用文件编辑器`);
+  }
   return {
     action,
     ...(key ? { key } : {}),
     ...(Object.keys(values).length > 0 ? { values } : {}),
-    ...(body ? { text: body } : {}),
+    ...(typeof raw.text === 'string' ? { text: raw.text } : {}),
   };
 }
 

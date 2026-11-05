@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -27,6 +27,8 @@ export const COMPUTER_USE_TOOL_NAME = 'computer_use';
 const MAX_STEPS = 20;
 const MAX_OUTPUT = 8000;
 const STEP_TIMEOUT_MS = 120_000;
+const MAX_PROCESS_OUTPUT = 1024 * 1024;
+const KILL_GRACE_MS = 500;
 /** 许可只在「刚批准的这一批」内有效，过期就重新问。 */
 const PERMIT_TTL_MS = 120_000;
 /** 确认卡不等人太久：等不到回答就当作没批准。 */
@@ -58,10 +60,10 @@ function scriptPath(deps: ComputerUseToolDeps): string {
  * 哪些命令会改动用户环境：单一事实来源是 runtime 自己的 `commands`（同一份表也用于门禁）。
  * 读不到就返回 null——那说明 runtime 缺文件或 node 不可用，比按猜测分类安全。
  */
-function commandSets(deps: ComputerUseToolDeps): CommandSets | null {
+async function commandSets(deps: ComputerUseToolDeps, signal?: AbortSignal): Promise<CommandSets | null> {
   const script = scriptPath(deps);
   if (commandSetCache.has(script)) return commandSetCache.get(script)!;
-  const r = spawnSync(nodeBin(deps), [script, 'commands', '--json'], { encoding: 'utf8', timeout: 20_000 });
+  const r = await runRuntime(deps, ['commands', '--json'], null, signal, 20_000);
   let sets: CommandSets | null = null;
   if (r.status === 0) {
     try {
@@ -189,21 +191,76 @@ function writePermit(steps: Step[]): { dir: string; path: string } {
 
 type StepRun = { status: number; stdout: string; stderr: string };
 
-function runStep(deps: ComputerUseToolDeps, step: Step, permitPath: string | null): StepRun {
+function runRuntime(
+  deps: ComputerUseToolDeps,
+  args: string[],
+  permitPath: string | null,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<StepRun> {
+  if (signal?.aborted) return Promise.resolve({ status: 1, stdout: '', stderr: '操作已中止' });
   const env = { ...process.env };
   if (permitPath) env.MICA_COMPUTER_USE_APPROVAL = permitPath;
   else delete env.MICA_COMPUTER_USE_APPROVAL;
-  const r = spawnSync(nodeBin(deps), [scriptPath(deps), step.cmd, ...step.args], {
-    encoding: 'utf8',
-    env,
-    timeout: STEP_TIMEOUT_MS,
-    maxBuffer: 32 * 1024 * 1024,
+  return new Promise((resolve) => {
+    const grouped = process.platform !== 'win32';
+    const child = spawn(nodeBin(deps), [scriptPath(deps), ...args], {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: grouped,
+    });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    let outputBytes = 0;
+    let failure = '';
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const kill = (kind: NodeJS.Signals) => {
+      try {
+        if (grouped && child.pid) process.kill(-child.pid, kind);
+        else child.kill(kind);
+      } catch {
+        child.kill(kind);
+      }
+    };
+    const stop = (reason: string) => {
+      if (failure) return;
+      failure = reason;
+      kill('SIGTERM');
+      killTimer = setTimeout(() => kill('SIGKILL'), KILL_GRACE_MS);
+    };
+    const collect = (target: Buffer[], chunk: Buffer) => {
+      const remaining = MAX_PROCESS_OUTPUT - outputBytes;
+      if (remaining > 0) target.push(chunk.subarray(0, remaining));
+      outputBytes += chunk.length;
+      if (outputBytes > MAX_PROCESS_OUTPUT) stop('运行时输出超过 1 MiB，已停止');
+    };
+    child.stdout.on('data', (chunk: Buffer) => collect(stdout, chunk));
+    child.stderr.on('data', (chunk: Buffer) => collect(stderr, chunk));
+    child.on('error', (error) => {
+      failure ||= error.message;
+    });
+    const onAbort = () => stop('操作已中止');
+    const timer = setTimeout(() => stop(`操作超时（${timeoutMs}ms）`), timeoutMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      if (failure && grouped && child.pid) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // The runtime may exit before helpers that ignored SIGTERM.
+        }
+      }
+      signal?.removeEventListener('abort', onAbort);
+      resolve({
+        status: failure ? 1 : code ?? 1,
+        stdout: Buffer.concat(stdout).toString('utf8').trim(),
+        stderr: [failure, Buffer.concat(stderr).toString('utf8').trim()].filter(Boolean).join('\n'),
+      });
+    });
   });
-  return {
-    status: typeof r.status === 'number' ? r.status : 1,
-    stdout: String(r.stdout || '').trim(),
-    stderr: String(r.stderr || '').trim(),
-  };
 }
 
 function truncate(text: string): string {
@@ -263,7 +320,8 @@ export function createComputerUseTool(deps: ComputerUseToolDeps): PluginToolDesc
       if (parsed.error) return parsed.error;
       const { steps } = parsed;
 
-      const sets = commandSets(deps);
+      const sets = await commandSets(deps, callbacks?.signal);
+      if (callbacks?.signal?.aborted) return '桌面操作已中止，后面的命令没有执行。';
       if (!sets) {
         return (
           `桌面运行时不可用：\`${scriptPath(deps)} commands --json\` 没跑起来。\n` +
@@ -297,6 +355,7 @@ export function createComputerUseTool(deps: ComputerUseToolDeps): PluginToolDesc
         }
       }
 
+      if (callbacks?.signal?.aborted) return '桌面操作已中止，后面的命令没有执行。';
       const permit = needsApproval ? writePermit(steps) : null;
       const lines: string[] = [];
       try {
@@ -305,7 +364,13 @@ export function createComputerUseTool(deps: ComputerUseToolDeps): PluginToolDesc
             lines.push(`第 ${index + 1} 步之前被中止（后面的命令没有执行）。`);
             break;
           }
-          const result = runStep(deps, step, permit?.path ?? null);
+          const result = await runRuntime(
+            deps,
+            [step.cmd, ...step.args],
+            permit?.path ?? null,
+            callbacks?.signal,
+            STEP_TIMEOUT_MS,
+          );
           const head = `[${index + 1}/${steps.length}] ${step.cmd}${step.args.length ? ` ${step.args.join(' ')}` : ''}`;
           const body = [result.stdout, result.stderr ? `stderr: ${result.stderr}` : ''].filter(Boolean).join('\n');
           if (result.status !== 0) {

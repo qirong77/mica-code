@@ -37,6 +37,7 @@ import {
   IconPlus,
   IconPuzzle,
   IconQuote,
+  IconRefresh,
   IconSend,
   IconShare,
   IconSquareFilled,
@@ -174,7 +175,7 @@ import {
 import { longPressHandlers, useLatest } from './hooks'
 import { canGoToPreviousConversation, conversationNavTarget } from './chat-conversation-nav'
 import { readScrollEntry, resolveScrollRestore, writeScrollEntry } from './chat-scroll'
-import { useProcessLayout } from './chat-process-layout'
+import { turnLogVisible, useProcessLayout } from './chat-process-layout'
 import { mergeRecalledDraft, resolveQueueRecall } from './chat-recall'
 import { uid } from './workspace'
 import { setUiState, setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState, useUiStateValue } from './ui-state'
@@ -1933,6 +1934,13 @@ export function messageEditText(text) {
   return value.replace(/[ \t]*\[图片\][ \t]*/g, (match) => (match === '[图片]' ? '' : ' '))
 }
 
+export function retryPrompt(messages = []) {
+  const message = messages.findLast((item) => item?.role === 'user' && !item.queued)
+  const text = messageEditText(message?.text).trim()
+  if (!text || text.includes('[图片]')) return ''
+  return text
+}
+
 function UserMessageEditor({ text, busy, canSubmit, onChange, onCancel, onSubmit }) {
   const ref = useRef(null)
   useEffect(() => {
@@ -2206,7 +2214,8 @@ function TurnLogDock({
   sidebar = false,
   canSidebar = false,
   onTogglePlacement,
-  todoPanel
+  todoPanel,
+  interrupted = false
 }) {
   const scrollRef = useRef(null)
   const roundsRef = useRef(null)
@@ -2223,8 +2232,8 @@ function TurnLogDock({
   // 正文，切换时停靠区整体高度不会跳一下。
   const paneStyle = !sidebar && height != null ? { height, maxHeight: 'none' } : undefined
   // 侧栏用满可用高度，不继承底部日志的收起状态与手动高度。
-  const contentCollapsed = !sidebar && collapsed
-  const dockVisible = (rounds.length > 0 || running || todoPanel?.visible) && (running || canSidebar)
+  const contentCollapsed = (!sidebar || interrupted) && collapsed
+  const dockVisible = turnLogVisible({ roundCount: rounds.length, running, hasPlan: todoPanel?.visible, canSidebar, interrupted })
   const stickToBottomRef = useRef(true)
   // 展开的历史轮次：同一时刻只摊开一轮（`null` = 看正在跑的这一轮）。两块长正文接连
   // 摊开时分不清哪一段属于哪一轮，所以点开历史轮次时最新一轮先让位。
@@ -2266,6 +2275,11 @@ function TurnLogDock({
     wasRunningRef.current = running
     if (running && previous === false) setCollapsed(false)
   }, [running, setCollapsed])
+  useEffect(() => {
+    if (interrupted && !running && liveRound?.messages.some((message) => message.kind === 'reasoning')) {
+      setCollapsed(true)
+    }
+  }, [interrupted, running, liveKey, setCollapsed])
   // 只有用户停留在底部时才跟随滚动，手动上翻后不打扰。依赖要含 `rounds`：
   // 思考是逐字增长的，只盯轮次数的话流式正文会跑到可视区外面。
   useLayoutEffect(() => {
@@ -2344,7 +2358,7 @@ function TurnLogDock({
             : '拖动调整日志高度，双击复位'
         }
       >
-        {!sidebar && (
+        {(!sidebar || interrupted) && (
           <button
             type="button"
             className="chat-turn-log-toggle"
@@ -2364,7 +2378,7 @@ function TurnLogDock({
           {sidebar || !running ? '本轮过程' : '模型思考中'}
         </span>
         {sidebar && (
-          <span className="chat-process-state">{running ? '进行中' : '已结束'}</span>
+          <span className="chat-process-state">{running ? '进行中' : interrupted ? '已中断' : '已结束'}</span>
         )}
         {contentCollapsed ? (
           // 摘要是收起时的替代品：展开后下面每一行都在，标题行只留把手与标签。
@@ -2406,7 +2420,7 @@ function TurnLogDock({
           </span>
         )}
       </header>
-      {sidebar && !viewingRound && todoPanel && (
+      {sidebar && !contentCollapsed && !viewingRound && todoPanel && (
         <div className="chat-process-plan"><TodoDock panel={todoPanel} /></div>
       )}
       {!contentCollapsed && roundsVisible && (
@@ -2590,6 +2604,13 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
   const allItems = [
     ...topPluginActions,
     ...(topPluginActions.length ? [{ separator: true }] : []),
+    {
+      id: 'retry',
+      label: '重试',
+      title: '保留已有对话，重新发送最近一条用户消息；模型可能再次执行工具',
+      icon: IconRefresh,
+      disabled: menu.running || !menu.canRetry
+    },
     {
       id: 'commit',
       label: 'Commit',
@@ -3113,8 +3134,7 @@ export function sameSelectedModel(first, second, sessionModel, providerId) {
 }
 
 export function thinkingForSelectedModel(messages, selectedModel, sessionModel, providerId) {
-  if (!selectedModel || !sessionModel || sameSelectedModel(selectedModel, sessionModel, sessionModel, providerId)) return messages
-  return messages?.filter((message) => message.kind !== 'reasoning') ?? messages
+  return messages
 }
 
 // 会话里的用户文本把图片块渲染成 [图片] 占位符，输入框原文是 [Image](路径)，
@@ -3315,7 +3335,7 @@ function persistedTranscript(messages) {
 
 export function canReuseVisualTranscript(cached, persisted, cachedMeta, persistedMeta) {
   if (cachedMeta !== undefined || persistedMeta !== undefined) {
-    const key = (meta) => [meta?.providerId || '', meta?.protocol || '', meta?.model || '', meta?.apiBase || '']
+    const key = (meta) => [meta?.providerId || '', meta?.protocol || '', meta?.apiBase || '']
     if (JSON.stringify(key(cachedMeta)) !== JSON.stringify(key(persistedMeta))) return false
   }
   return (
@@ -5692,15 +5712,12 @@ export function ChatView({
       const next = { ...current }
       if (kind === 'model') {
         next.model = value || undefined
-        if (!sameSelectedModel(current.model || meta?.model || '', next.model || meta?.model || '', meta?.model, meta?.providerId)) {
-          updateMessages((previous) => previous.filter((message) => message.kind !== 'reasoning'))
-        }
       } else if (kind === 'variant') next.variant = value || undefined
       else if (kind === 'role') next.role = value || undefined
       overridesRef.current.set(nodeId, next)
       forceRender()
     },
-    [forceRender, meta?.model, meta?.providerId, nodeId, updateMessages]
+    [forceRender, nodeId]
   )
 
   const canSwitchModelProtocol = useCallback(
@@ -7027,6 +7044,7 @@ export function ChatView({
         x: event.clientX,
         y: event.clientY,
         hasSession: Boolean(sessionIdRef.current),
+        canRetry: Boolean(retryPrompt(messagesRef.current)),
         running
       })
     },
@@ -7099,6 +7117,11 @@ export function ChatView({
         appendNotice(message, ok ? 'info' : 'error')
         return
       }
+      if (action === 'retry') {
+        const prompt = retryPrompt(messagesRef.current)
+        if (!running && prompt) send(prompt, { preserveDraft: true })
+        return
+      }
       if (action === 'clear') {
         await runSlashCommand({
           name: 'clear',
@@ -7161,6 +7184,8 @@ export function ChatView({
       onSessionRenamedRef,
       onShareSessionRef,
       runSlashCommand,
+      running,
+      send,
       startCommitTask
     ]
   )
@@ -7526,6 +7551,7 @@ export function ChatView({
           canSidebar={processRoom}
           onTogglePlacement={toggleProcessPlacement}
           todoPanel={todoPanel}
+          interrupted={todoInterrupted}
         />
 
         <ChatFind

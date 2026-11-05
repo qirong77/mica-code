@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { resolveComposerSelection } from './chat-composer-caret'
+import { composerMirrorParts, resolveComposerSelection } from './chat-composer-caret'
 
 describe('composer caret during IME composition', () => {
   it('collapses the composition range to its end while composing', () => {
@@ -35,5 +35,25 @@ describe('composer caret during IME composition', () => {
     expect(
       resolveComposerSelection({ selectionStart: 3, selectionEnd: 3, composing: false })
     ).toEqual({ start: 3, end: 3 })
+  })
+})
+
+describe('composer caret mirror', () => {
+  it('keeps the suffix in the mirror so a word wraps the same way before and after the caret', () => {
+    const value = `${'pasted text '.repeat(1000)}narrow-column-word`
+    const index = value.indexOf('column')
+    const parts = composerMirrorParts(value, index)
+    expect(parts.before + parts.marker + parts.after).toBe(value)
+    expect(parts.after).toBe('olumn-word')
+  })
+
+  it('preserves a newline and measures the next grapheme as one character', () => {
+    expect(composerMirrorParts('first\nsecond', 5)).toEqual({
+      before: 'first',
+      marker: '\u200b',
+      after: '\nsecond'
+    })
+    expect(composerMirrorParts('a👩‍💻b', 1)).toEqual({ before: 'a', marker: '👩‍💻', after: 'b' })
+    expect(composerMirrorParts('end', 3)).toEqual({ before: 'end', marker: '\u200b', after: '' })
   })
 })

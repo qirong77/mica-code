@@ -11,6 +11,8 @@
 
 会话体验卡：[Task Delivery](task-delivery/README.md) 保存任务交付结果与验证证据，[Context Handoff](context-handoff/README.md) 保存历史检查点，[Environment Ready](environment-ready/README.md) 探测本次任务登记的本机服务。三者共用宿主摘要卡片，不各自绘制界面；本地埋点格式及分析导出见 [会话体验卡与埋点](../docs/plugin-experience.md)。
 
+[Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
+
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
 
 ## 目录结构
@@ -263,6 +265,9 @@ checkpoint 摘要（工具过程不进摘要输入）。它只在能独占写会
 判断「现在要不要压」时用 `ctx.agent.lastUsage()` 与 `ctx.agent.contextWindowSize`：前者是最近一次
 真实请求的输入量（与界面 ctx 徽标同源，压缩保留它），后者随会话切模型变化。插件不要自己估历史——
 估出来会和用户看到的数不一致。
+持久 headless 会话还在取得 turn lease、应用配置后和保存输入前 await `turn:prepare`：
+事件的 `previous` / `current` 表示模型配置，`compactHistory()` 使用已持有的 lease，
+避免轮次中重新抢锁。会话压缩插件在配置变化时用它快速压缩，展示历史保留；仅下一次发送时触发。
 要占住会话几秒的耗时工作（模型摘要）用 `ctx.agent.withMaintenance({ reason, label }, task)`：窗口开着时
 宿主通知客户端「别急着发」，用户这段时间的发送留在客户端的排队行里（可见、可撤回），窗口结束后由客户端
 补发——不会被塞进正在重写的历史，也不会混进正在写的摘要。只有能跟客户端说话的常驻宿主（`mica app-server`）
@@ -588,8 +593,8 @@ ctx.desktop.panel({
     **就地可编辑的正文**（角色文档这类整篇文件）。只读时按原样显示 `value`，**不做 Markdown
     渲染**——用户改的是文件本身，光标落在哪一行就该是文件里的哪一行；点「编辑」在同一个面板里
     换成文本框，保存时整篇回给 `action` 的 `text` 字段。它是「给用户改的」，`markdown` 是
-    「给用户读的」，同一块正文按需要二选一。上限 20 万字符；**正文可能超长时插件不要提供
-    编辑器**（被截断过一次的正文再存回去，就是把文件改短）。
+    「给用户读的」，同一块正文按需要二选一。上限 20 万字符；读取超限时宿主只给明确的只读提示，不返回裁剪正文；
+    提交超限时显式拒绝、不调用 handler 并保留草稿。空字符串 `text` 是合法的清空操作。
   - `rows`：`{ label, value, tone?, wrap?, link? }`，一行「标签 — 一个值」。默认单行省略；
     `wrap: true` 换成换行显示（长路径、长句），`link` 让这个值可点（`http(s)` / `mailto`
     交给系统浏览器，其余当普通文本）。

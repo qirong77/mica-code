@@ -5,8 +5,8 @@
 // - 光标位置通过 ref 直接操作 DOM，不触发 React 重渲染
 // - 光标宽度 = 光标下字素宽度（行尾用 fallback），高度 = 当前字号，行盒内垂直居中
 // - 闪烁由 JS 控制（530ms 间隔），输入时暂停 800ms 保持常亮，失焦/有选区隐藏光标
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { resolveComposerSelection } from './chat-composer-caret'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { composerMirrorParts, resolveComposerSelection } from './chat-composer-caret'
 
 const BLINK_INTERVAL = 530
 const PAUSE_DURATION = 800
@@ -36,18 +36,6 @@ const TEXTAREA_CURSOR_STYLE_PROPS = [
   'tabSize'
 ]
 
-const GRAPHEME_SEGMENTER =
-  typeof Intl !== 'undefined' && Intl.Segmenter
-    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-    : null
-
-function getGraphemeAt(value, index) {
-  // 终端文本通常以 ASCII 为主，走常量时间快路径；复杂 Unicode 才调用分词器。
-  const code = value.charCodeAt(index)
-  if (code < 0x80) return value[index]
-  return GRAPHEME_SEGMENTER?.segment(value).containing(index)?.segment
-}
-
 export default function TerminalComposer({
   value,
   placeholder,
@@ -62,6 +50,7 @@ export default function TerminalComposer({
   const cursorRef = useRef(null)
   const mirrorTextRef = useRef(null)
   const measureMarkerRef = useRef(null)
+  const mirrorAfterRef = useRef(null)
   const fallbackCharWRef = useRef(FALLBACK_CHAR_WIDTH)
   const syncFrameRef = useRef(null)
   const blinkTimerRef = useRef(null)
@@ -143,11 +132,15 @@ export default function TerminalComposer({
       composing: composingRef.current
     }).start
     // 复用 Text 和 span，避免每次光标移动都创建、回收 DOM 节点。
-    if (!mirrorTextRef.current || !measureMarkerRef.current) {
+    if (!mirrorTextRef.current || !measureMarkerRef.current || !mirrorAfterRef.current) {
       mirrorTextRef.current = document.createTextNode('')
       measureMarkerRef.current = document.createElement('span')
-      measureMarkerRef.current.style.display = 'inline-block'
-      mirror.replaceChildren(mirrorTextRef.current, measureMarkerRef.current)
+      mirrorAfterRef.current = document.createTextNode('')
+      mirror.replaceChildren(
+        mirrorTextRef.current,
+        measureMarkerRef.current,
+        mirrorAfterRef.current
+      )
     }
 
     // mirror 复制 textarea 计算样式，保证换行与光标测量和输入区一致。
@@ -157,14 +150,13 @@ export default function TerminalComposer({
     for (const property of TEXTAREA_CURSOR_STYLE_PROPS) mirror.style[property] = styles[property]
     mirror.style.width = `${ta.clientWidth}px`
 
-    mirrorTextRef.current.data = ta.value.slice(0, pos)
-
-    // 用光标下的实际字素作为 marker，使块状光标与该字符同宽；
-    // 字素分割可避免拆开组合字符、代理对或 ZWJ emoji。
-    const currentChar = getGraphemeAt(ta.value, pos)
-    const measurableChar = currentChar && currentChar !== '\n' ? currentChar : '\u200b'
+    // 镜像必须包含光标之后的文本：只放前缀会改变整词的换行位置。
+    // marker 保持 inline，不能以 inline-block 把光标下的字符变成不可拆的换行单元。
+    const { before, marker: measurableChar, after } = composerMirrorParts(ta.value, pos)
+    mirrorTextRef.current.data = before
     const marker = measureMarkerRef.current
     marker.textContent = measurableChar
+    mirrorAfterRef.current.data = after
 
     const fontSize = Number.parseFloat(styles.fontSize) || 13
     const lineHeight = Number.parseFloat(styles.lineHeight) || 20
@@ -210,6 +202,11 @@ export default function TerminalComposer({
       composing: composingRef.current
     })
     syncMirrorSize()
+    const layer = preRef.current
+    if (layer) {
+      layer.scrollTop = ta.scrollTop
+      layer.scrollLeft = ta.scrollLeft
+    }
     updateCursorPos()
     setSelection((current) =>
       current.start === next.start && current.end === next.end ? current : next
@@ -230,15 +227,18 @@ export default function TerminalComposer({
     syncMirrorSize()
     const ta = textareaRef.current
     if (!ta || typeof ResizeObserver === 'undefined') return undefined
-    const ro = new ResizeObserver(() => syncMirrorSize())
+    const ro = new ResizeObserver(() => {
+      syncMirrorSize()
+      scheduleSync()
+    })
     ro.observe(ta)
     return () => ro.disconnect()
-  }, [syncMirrorSize, textareaRef])
+  }, [scheduleSync, syncMirrorSize, textareaRef])
 
-  // ---- 输入变化时刷新光标与选区 ----
-  useEffect(() => {
-    scheduleSync()
-  }, [value, scheduleSync])
+  // DOM 文本已提交、布局更新后再同步滚动，避免大段粘贴时旧显示层钳住 scrollTop。
+  useLayoutEffect(() => {
+    sync()
+  }, [value, sync])
 
   // ---- 文本域聚焦期间跟随选区变化（含程序化 setSelectionRange） ----
   useEffect(() => {

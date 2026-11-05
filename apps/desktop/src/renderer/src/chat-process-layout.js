@@ -3,6 +3,10 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 // 主阅读列至少约 760px，右侧过程栏至少 340px，再留出分隔与边距。
 const PROCESS_SIDEBAR_MIN_WIDTH = 1120
 
+export function turnLogVisible({ roundCount, running, hasPlan, canSidebar, interrupted }) {
+  return Boolean((roundCount > 0 || running || hasPlan) && (running || canSidebar || (interrupted && roundCount > 0)))
+}
+
 export function useProcessLayout({ running, hasActivity, hasPlan }) {
   const layoutRef = useRef(null)
   const [processRoom, setProcessRoom] = useState(false)

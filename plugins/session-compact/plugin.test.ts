@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { PluginContext, PluginIdleCompactOptions, PluginIdleCompactOutcome } from '@packages/mica-plugin/index.js';
+import type { PluginContext, PluginIdleCompactOptions, PluginIdleCompactOutcome, PluginTurnPrepareEvent } from '@packages/mica-plugin/index.js';
 import setup from './index.js';
 
 type Harness = {
   run: (action: string) => Promise<{ message?: string } | void>;
   calls: PluginIdleCompactOptions[];
   requests: Array<{ purpose: string; system: string; user: string }>;
+  prepare: (event: PluginTurnPrepareEvent) => Promise<void>;
 };
 
 const applied = (beforeTokens = 806_000, afterTokens = 46_000): PluginIdleCompactOutcome => ({
@@ -21,12 +22,15 @@ function createHarness(
 ): Harness {
   const calls: PluginIdleCompactOptions[] = [];
   const requests: Harness['requests'] = [];
+  let prepare: Harness['prepare'] = async () => {};
   let handler: { run: (input: { action: string }) => ReturnType<Harness['run']> } = {
     run: async () => ({ message: '未注册' }),
   };
   setup({
     pluginId: 'session-compact',
     health: { report: () => undefined },
+    hooks: { on: (_name: string, handler: Harness['prepare']) => { prepare = handler; return { dispose() {} }; } },
+    onDispose: () => {},
     desktop: {
       sessionMenu: (value: typeof handler) => {
         handler = value;
@@ -47,10 +51,26 @@ function createHarness(
       },
     },
   } as unknown as PluginContext);
-  return { run: (action) => handler.run({ action }), calls, requests };
+  return { run: (action) => handler.run({ action }), calls, requests, prepare: (event) => prepare(event) };
 }
 
 describe('session compaction menu', () => {
+  it('quickly compacts only after an effective model configuration change', async () => {
+    const harness = createHarness(applied());
+    const calls: PluginIdleCompactOptions[] = [];
+    const config = { providerId: 'p', model: 'a', effort: 'low' };
+    const compactHistory = async (options?: { mode?: 'quick' }) => {
+      calls.push(options ?? {});
+      return applied();
+    };
+    await harness.prepare({ previous: config, current: { ...config }, compactHistory });
+    expect(calls).toEqual([]);
+    await harness.prepare({ previous: config, current: { ...config, effort: 'high' }, compactHistory });
+    for (const current of [{ ...config, model: 'b' }, { ...config, providerId: 'q' }]) {
+      await harness.prepare({ previous: config, current, compactHistory });
+    }
+    expect(calls).toEqual([{ mode: 'quick' }, { mode: 'quick' }]);
+  });
   it('quick compaction only replaces tool results', async () => {
     const harness = createHarness(applied());
 

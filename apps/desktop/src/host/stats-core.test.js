@@ -25,13 +25,67 @@ describe('Stats usage aggregation', () => {
       { outputTokens: 10, generationDurationMs: 0, responseWaitMs: -1 },
       { generationDurationMs: 1000, responseWaitMs: Infinity }
     ]
-    const [row] = summarizeStatsDays(records.map((record) => normalizeUsageEvent(record, time, 'm')))
-    expect(row.speedModels[0]).toMatchObject({ generationOutputTokens: 150, generationDurationMs: 3000, generationSamples: 2, responseWaitMs: 300, responseWaitSamples: 2 })
-    const [ledger] = summarizeLedgerEntries([{ ...records[0], occurredAt: new Date(time).toISOString(), pluginId: 'p', model: 'm' }])
-    expect(ledger.days[0].speedModels[0]).toMatchObject({ generationOutputTokens: 100, generationDurationMs: 2000, generationSamples: 1, responseWaitMs: 0, responseWaitSamples: 1 })
+    const [row] = summarizeStatsDays(
+      records.map((record) => normalizeUsageEvent(record, time, 'm'))
+    )
+    expect(row.speedModels[0]).toMatchObject({
+      generationOutputTokens: 150,
+      generationDurationMs: 3000,
+      generationSamples: 2,
+      responseWaitMs: 300,
+      responseWaitSamples: 2
+    })
+    const [ledger] = summarizeLedgerEntries([
+      { ...records[0], occurredAt: new Date(time).toISOString(), pluginId: 'p', model: 'm' }
+    ])
+    expect(ledger.days[0].speedModels[0]).toMatchObject({
+      generationOutputTokens: 100,
+      generationDurationMs: 2000,
+      generationSamples: 1,
+      responseWaitMs: 0,
+      responseWaitSamples: 1
+    })
     const legacy = normalizeUsageEvent(records[2], time, 'm')
     expect(legacy.responseWaitMs).toBeNull()
     expect(legacy.generationDurationMs).toBeNull()
+  })
+
+  test('groups timestamped speed requests by minute without inventing times for old records', () => {
+    const base = new Date(2026, 7, 2, 12, 15).getTime()
+    const events = [
+      {
+        occurredAt: new Date(base + 4000).toISOString(),
+        responseWaitMs: 100,
+        generationDurationMs: 1000,
+        outputTokens: 50
+      },
+      {
+        occurredAt: new Date(base + 21000).toISOString(),
+        responseWaitMs: 300,
+        generationDurationMs: 1000,
+        outputTokens: 150
+      },
+      { occurredAt: new Date(base + 61000).toISOString(), responseWaitMs: 600 },
+      { responseWaitMs: 1000 }
+    ].map((entry) => normalizeUsageEvent({ providerId: 'p', model: 'm', ...entry }, base, 'm'))
+    const [day] = summarizeStatsDays(events)
+    expect(day.speedModels[0].responseWaitSamples).toBe(4)
+    expect(day.speedMinutes).toHaveLength(2)
+    expect(day.speedMinutes[0]).toMatchObject({
+      at: base,
+      models: [
+        {
+          responseWaitMs: 400,
+          responseWaitSamples: 2,
+          generationOutputTokens: 200,
+          generationSamples: 2
+        }
+      ]
+    })
+    expect(day.speedMinutes[1]).toMatchObject({
+      at: base + 60000,
+      models: [{ responseWaitMs: 600, responseWaitSamples: 1 }]
+    })
   })
 
   test('aggregates only valid request timing samples by day and provider', () => {
@@ -45,24 +99,61 @@ describe('Stats usage aggregation', () => {
     ].map((usage) => normalizeUsageEvent(usage, time, 'm'))
     const [day] = summarizeStatsDays(events)
     expect(day.speedModels).toEqual([
-      { provider: 'a', model: 'm', outputTokens: 150, durationMs: 3000, throughputSamples: 2, firstTokenMs: 300, firstTokenSamples: 2 },
-      { provider: 'b', model: 'm', outputTokens: 0, durationMs: 0, throughputSamples: 0, firstTokenMs: 200, firstTokenSamples: 1 }
+      {
+        provider: 'a',
+        model: 'm',
+        outputTokens: 150,
+        durationMs: 3000,
+        throughputSamples: 2,
+        firstTokenMs: 300,
+        firstTokenSamples: 2
+      },
+      {
+        provider: 'b',
+        model: 'm',
+        outputTokens: 0,
+        durationMs: 0,
+        throughputSamples: 0,
+        firstTokenMs: 200,
+        firstTokenSamples: 1
+      }
     ])
   })
 
   test('uses request provider IDs without inferring from protocol or parent session', () => {
     const { events } = parseSessionEvents({
-      createdAt: '2026-08-01T01:00:00.000Z', updatedAt: '2026-08-01T02:00:00.000Z',
+      createdAt: '2026-08-01T01:00:00.000Z',
+      updatedAt: '2026-08-01T02:00:00.000Z',
       snapshot: {
-        providerId: 'parent', model: 'm',
+        providerId: 'parent',
+        model: 'm',
         usageHistory: [{ provider: 'openai', providerId: 'actual' }, { provider: 'openai' }],
-        subagentUsageHistory: [{ provider: 'other', requests: [{ provider: 'openai' }, { providerId: 'child' }] }]
+        subagentUsageHistory: [
+          { provider: 'other', requests: [{ provider: 'openai' }, { providerId: 'child' }] }
+        ]
       }
     })
     expect(events.map((event) => event.provider)).toEqual(['actual', null, null, 'child'])
     const [ledger] = summarizeLedgerEntries([
-      { id: '1', occurredAt: '2026-08-01T01:00:00.000Z', pluginId: 'p', model: 'm', provider: 'openai', providerId: 'ledger-provider', durationMs: 1000, outputTokens: 10 },
-      { id: '2', occurredAt: '2026-08-01T01:00:00.000Z', pluginId: 'p', model: 'm', provider: 'openai', durationMs: 1000, outputTokens: 10 }
+      {
+        id: '1',
+        occurredAt: '2026-08-01T01:00:00.000Z',
+        pluginId: 'p',
+        model: 'm',
+        provider: 'openai',
+        providerId: 'ledger-provider',
+        durationMs: 1000,
+        outputTokens: 10
+      },
+      {
+        id: '2',
+        occurredAt: '2026-08-01T01:00:00.000Z',
+        pluginId: 'p',
+        model: 'm',
+        provider: 'openai',
+        durationMs: 1000,
+        outputTokens: 10
+      }
     ])
     expect(ledger.days[0].speedModels.map((row) => row.provider)).toEqual(['ledger-provider', null])
   })

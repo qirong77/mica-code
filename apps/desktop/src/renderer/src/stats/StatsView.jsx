@@ -10,6 +10,7 @@ import {
   isDayRange,
   modelSpeed,
   speedTrendByDay,
+  speedTrendByMinute,
   rangeStart,
   scopeSession
 } from './scope'
@@ -589,15 +590,24 @@ function ModelPerformanceCard({ scoped }) {
   const [hidden, setHidden] = useState([])
   const rows = useMemo(() => modelSpeed(scoped, metric), [scoped, metric])
   const daily = useMemo(() => speedTrendByDay(scoped), [scoped])
+  const singleDay = daily.size === 1
+  const minutes = useMemo(() => speedTrendByMinute(scoped), [scoped])
+  const intraday =
+    singleDay &&
+    [...minutes.values()].some((samples) =>
+      samples.some((sample) =>
+        metric === 'responseWait' ? sample.responseWaitSamples > 0 : sample.generationSamples > 0
+      )
+    )
   const series = useMemo(() => {
     const keys = [...new Set([...daily.values()].flatMap((rows) => rows.map(speedKey)))].sort()
     return rows.map((row) => ({
       ...row,
       id: speedKey(row),
-      label: [row.provider, row.model].filter(Boolean).join(' / '),
+      label: `${row.provider || '未记录供应商'} / ${row.model}`,
       color: SPEED_COLORS[keys.indexOf(speedKey(row)) % SPEED_COLORS.length],
       dash: keys.indexOf(speedKey(row)) >= SPEED_COLORS.length ? '5 4' : undefined,
-      points: [...daily].flatMap(([day, samples]) => {
+      points: [...(intraday ? minutes : daily)].flatMap(([time, samples]) => {
         const sample = samples.find((item) => speedKey(item) === speedKey(row))
         const value =
           metric === 'responseWait'
@@ -605,11 +615,18 @@ function ModelPerformanceCard({ scoped }) {
             : sample?.estimatedTokensPerSecond
         const count =
           metric === 'responseWait' ? sample?.responseWaitSamples : sample?.generationSamples
-        return count > 0 && Number.isFinite(value) ? [{ day, value, samples: count }] : []
+        return count > 0 && Number.isFinite(value)
+          ? [{ ...(intraday ? { at: time } : { day: time }), value, samples: count }]
+          : []
       })
     }))
-  }, [rows, daily, metric])
+  }, [rows, daily, minutes, metric, intraday])
   const shown = series.filter((item) => !hidden.includes(item.id))
+  const missingTimedSamples =
+    intraday &&
+    series.some(
+      (item) => item.samples > item.points.reduce((total, point) => total + point.samples, 0)
+    )
   const formatValue = (value) =>
     metric === 'responseWait' ? `${(value / 1000).toFixed(2)} s` : `${value.toFixed(1)} tokens/s`
   const unitText = metric === 'responseWait' ? '秒 · 越低越快' : 'tokens/s · 估算 · 越高越快'
@@ -647,7 +664,7 @@ function ModelPerformanceCard({ scoped }) {
         <>
           <div className="mt-5 flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="text-xs font-medium text-fg-strong">
-              每日趋势{' '}
+              {singleDay ? '当日时间线' : '每日趋势'}{' '}
               <span className="ml-1 text-[11px] font-normal text-fg-dim">
                 {shown.length} / {series.length} 个模型
               </span>
@@ -690,7 +707,7 @@ function ModelPerformanceCard({ scoped }) {
                       />
                       <circle cx="7" cy="4" r="3" fill={item.color} />
                     </svg>
-                    <span className="min-w-0 truncate text-[11px] text-fg-muted">{item.model}</span>
+                    <span className="min-w-0 truncate text-[11px] text-fg-muted">{item.label}</span>
                     <span className="shrink-0 text-[11px] tabular-nums text-fg-dim">
                       {formatValue(item.value)}
                     </span>
@@ -699,9 +716,20 @@ function ModelPerformanceCard({ scoped }) {
               })}
             </div>
           </div>
+          {singleDay && !intraday && (
+            <p className="mt-2 text-[11px] text-fg-dim">
+              当前指标没有带请求时间的样本，只能显示当日汇总点。
+            </p>
+          )}
+          {missingTimedSamples && (
+            <p className="mt-2 text-[11px] text-fg-dim">
+              部分旧样本没有请求时间，仅计入图例汇总，不绘制在时间轴上。
+            </p>
+          )}
           <SpeedTrend
             key={metric}
             series={shown}
+            intraday={intraday}
             formatValue={formatValue}
             formatTick={(value) =>
               metric === 'responseWait'

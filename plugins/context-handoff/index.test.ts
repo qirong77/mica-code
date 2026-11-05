@@ -15,6 +15,7 @@ function harness(initial?: unknown) {
   const disposers: Array<() => void> = [];
   let tool!: ContextHandoffTool;
   let panel!: PluginPanelHandler;
+  let prompt!: { render: () => string };
   const settings = { telemetry: 'true', ageMinutes: '30' };
   const register = vi.fn((value: ContextHandoffTool, _options?: unknown) => {
     tool = value;
@@ -44,7 +45,12 @@ function harness(initial?: unknown) {
       },
     },
     tools: { register },
-    prompt: { section: () => ({ dispose: vi.fn() }) },
+    prompt: {
+      section: (value: typeof prompt) => {
+        prompt = value;
+        return { dispose: vi.fn() };
+      },
+    },
     onDispose: (fn: () => void) => disposers.push(fn),
   } as unknown as PluginContext;
   setup(ctx);
@@ -57,6 +63,7 @@ function harness(initial?: unknown) {
     disposers,
     tool,
     panel,
+    prompt,
     select: (index: number) => {
       active = owners[index];
     },
@@ -110,7 +117,7 @@ describe('Context Handoff', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
     const h = harness();
-    await h.tool.execute({ action: 'set', checkpoint: 'first' });
+    await h.tool.execute({ action: 'set', checkpoint: 'first', pending: ['next'] });
     const first = sanitizeCheckpoint(h.states.get(h.owners[0]))!;
     vi.advanceTimersByTime(31 * 60000);
     await h.panel.action({ action: 'dismiss', key: first.revision });
@@ -151,7 +158,7 @@ describe('Context Handoff', () => {
   });
   it('sanitizes restored state, bounds bytes, uses configured threshold and hides future timestamps', () => {
     const c = createCheckpoint(
-      { checkpoint: 'x', completed: [], pending: [], cautions: [] },
+      { checkpoint: 'x', completed: [], pending: ['next'], cautions: [] },
       'source',
       new Date('2026-04-01T00:00:00.000Z'),
     );
@@ -163,6 +170,31 @@ describe('Context Handoff', () => {
     expect(sanitizeCheckpoint({ ...c, savedAt: 'invalid' })).toBeUndefined();
     expect(sanitizeCheckpoint({ ...c, junk: 'x'.repeat(70000) })).toBeUndefined();
     expect(sanitizeCheckpoint({ ...c, junk: 'ignored' })).not.toHaveProperty('junk');
+  });
+  it('keeps manually saved history without pending items readable but never shows its card', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-01T00:00:00.000Z'));
+    const h = harness();
+    await h.tool.execute({ action: 'set', checkpoint: 'finished', completed: ['done'] });
+    vi.advanceTimersByTime(31 * 60000);
+    expect((await h.panel.view({ role: '' })).cards).toEqual([]);
+    expect(JSON.parse(await h.tool.execute({ action: 'read' })).checkpoint.checkpoint).toBe('finished');
+    expect(JSON.stringify((await h.panel.view({ role: '' })).sections)).toContain('finished');
+  });
+  it('shows all key historical content directly in the details dialog', async () => {
+    const h = harness();
+    await h.tool.execute({
+      action: 'set', checkpoint: 'summary', completed: ['done'], pending: ['next'], cautions: ['careful'],
+    });
+    const saved = sanitizeCheckpoint(h.states.get(h.owners[0]))!;
+    const result = await h.panel.action({ action: 'details', key: saved.revision });
+    if (!result) throw new Error('Expected a details dialog');
+    expect(result.dialog?.markdown).toContain('summary');
+    expect(result.dialog?.markdown).toContain('done');
+    expect(result.dialog?.markdown).toContain('next');
+    expect(result.dialog?.markdown).toContain('careful');
+    expect(result.dialog?.panel).toBeUndefined();
+    expect(h.prompt.render()).toContain('Do not save for ordinary completed tasks or simple questions and answers');
   });
 });
 

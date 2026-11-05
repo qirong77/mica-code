@@ -17,3 +17,24 @@ export function resolveComposerSelection({ selectionStart, selectionEnd, composi
   if (composing) return { start: selectionEnd, end: selectionEnd }
   return { start: selectionStart, end: selectionEnd }
 }
+
+const GRAPHEME_SEGMENTER =
+  typeof Intl !== 'undefined' && Intl.Segmenter
+    ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+    : null
+
+export function composerMirrorParts(value, index) {
+  const code = value.charCodeAt(index)
+  const char =
+    code < 0x80
+      ? value[index]
+      : GRAPHEME_SEGMENTER?.segment(value.slice(index))[Symbol.iterator]().next().value?.segment
+  if (!char || char === '\n') {
+    return { before: value.slice(0, index), marker: '\u200b', after: value.slice(index) }
+  }
+  return {
+    before: value.slice(0, index),
+    marker: char,
+    after: value.slice(index + char.length)
+  }
+}

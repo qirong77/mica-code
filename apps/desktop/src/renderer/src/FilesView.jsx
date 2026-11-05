@@ -931,7 +931,7 @@ export const FilesView = forwardRef(function FilesView(
         // 编辑器区空着，看起来就像什么都没打开。
         setFocusMode(false)
         // eslint-disable-next-line no-use-before-define -- 回调执行时 setter 早已定义
-        setMobileTreeVisible(false)
+        setMobileTreeVisible(true)
         // 设完覆盖值就会触发下面那个 loadRoot effect（它自己接管「正在读取…」状态）
         setRootOverride({ base: root, path: info.path })
         return

@@ -1,4 +1,14 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +17,7 @@ import { createPluginLogger, pluginLogPath } from './PluginLog.js';
 const tempDirectories: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   delete process.env.MICA_PLUGIN_LOG;
   for (const directory of tempDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
@@ -80,8 +91,83 @@ describe('createPluginLogger', () => {
 });
 
 describe('pluginLogPath', () => {
-  it('describes today’s file before anything was written', () => {
-    const path = pluginLogPath('user.my-plugin', { dir: mkTempDir() });
-    expect(path).toMatch(/plugin-user\.my-plugin-\d{8}\.jsonl$/);
+  it('returns the latest existing log across days when today has no log', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 18, 12));
+    const dir = mkTempDir();
+    writeFileSync(join(dir, 'plugin-demo-20261116-10.jsonl'), '{}\n');
+    const latest = join(dir, 'plugin-demo-20261117.jsonl');
+    writeFileSync(latest, '{}\n');
+
+    expect(pluginLogPath('demo', { dir })).toBe(latest);
+  });
+
+  it('returns today’s existing log instead of an older day’s shard', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 18, 12));
+    const dir = mkTempDir();
+    writeFileSync(join(dir, 'plugin-user.my-plugin-20261117-10.jsonl'), '{}\n');
+    const latest = join(dir, 'plugin-user.my-plugin-20261118.jsonl');
+    writeFileSync(latest, '{}\n');
+
+    expect(pluginLogPath('user.my-plugin', { dir })).toBe(latest);
+  });
+
+  it('sorts shards numerically so shard 10 follows shard 2', () => {
+    const dir = mkTempDir();
+    for (const shard of ['', '-1', '-2', '-10']) {
+      writeFileSync(join(dir, `plugin-demo-20261118${shard}.jsonl`), '{}\n');
+    }
+
+    expect(pluginLogPath('demo', { dir })).toBe(join(dir, 'plugin-demo-20261118-10.jsonl'));
+  });
+
+  it('returns a full existing shard rather than a nonexistent next write path', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 18, 12));
+    const dir = mkTempDir();
+    const latest = join(dir, 'plugin-demo-20261118.jsonl');
+    writeFileSync(latest, 'x'.repeat(2 * 1024 * 1024));
+
+    expect(pluginLogPath('demo', { dir })).toBe(latest);
+    expect(readdirSync(dir)).toEqual(['plugin-demo-20261118.jsonl']);
+  });
+
+  it('ignores other plugins, non-files, and malformed names', () => {
+    const dir = mkTempDir();
+    const latest = join(dir, 'plugin-demo-20261118.jsonl');
+    writeFileSync(latest, '{}\n');
+    for (const name of [
+      'plugin-other-20261119.jsonl',
+      'plugin-demo-extra-20261119.jsonl',
+      'plugin-demo-20261119-0.jsonl',
+      'plugin-demo-20261119-02.jsonl',
+      'plugin-demo-20261119-x.jsonl',
+      'plugin-demo-20261119-9007199254740992.jsonl',
+      'plugin-demo-20261119.jsonl.bak',
+      'plugin-demo-2026111.jsonl',
+      'plugin-demo-20261301.jsonl',
+      'plugin-demo-20260230.jsonl',
+    ])
+      writeFileSync(join(dir, name), '{}\n');
+    mkdirSync(join(dir, 'plugin-demo-20261120.jsonl'));
+    symlinkSync(latest, join(dir, 'plugin-demo-20261121.jsonl'));
+
+    expect(pluginLogPath('demo', { dir })).toBe(latest);
+  });
+
+  it('returns the existing directory without creating an empty log', () => {
+    const dir = mkTempDir();
+
+    expect(pluginLogPath('demo', { dir })).toBe(dir);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('creates a missing log directory without creating an empty log', () => {
+    const dir = join(mkTempDir(), 'logs');
+
+    expect(pluginLogPath('demo', { dir })).toBe(dir);
+    expect(statSync(dir).isDirectory()).toBe(true);
+    expect(readdirSync(dir)).toEqual([]);
   });
 });

@@ -103,6 +103,41 @@ describe('Task Delivery integration', () => {
     await h.panel.action({ action: `clear:${next.revision}` });
     expect((await h.panel.view({ role: '' })).cards).toEqual([]);
   });
+  it('hides the previous card at the next turn without losing its report or affecting another owner', async () => {
+    const h = harness();
+    await h.tool.execute({ action: 'set', summary: 'first' });
+    h.select(1);
+    await h.tool.execute({ action: 'set', summary: 'other' });
+    await h.hooks.emit('turn:before', { owner: h.owners[0] });
+    expect((await h.panel.view({ role: '' })).cards).toHaveLength(1);
+    h.select(0);
+    expect((await h.panel.view({ role: '' })).cards).toEqual([]);
+    expect(JSON.parse(await h.tool.execute({ action: 'read' })).delivery.summary).toBe('first');
+    await h.tool.execute({ action: 'set', summary: 'new' });
+    expect((await h.panel.view({ role: '' })).cards).toHaveLength(1);
+  });
+  it('shows complete key report fields and evidence in the first details dialog', async () => {
+    const h = harness();
+    const owner = h.owners[0]!;
+    await h.hooks.emit('turn:before', { owner });
+    await h.hooks.emit('agent:observe', event(owner, 'run:start'));
+    await h.hooks.emit('agent:observe', event(owner, 'tool:call', { id: 'actual', name: 'run_shell' }));
+    await h.hooks.emit('agent:observe', event(owner, 'tool:result', { id: 'actual', name: 'run_shell', result: output }));
+    await h.tool.execute({ action: 'set', summary: 'result', changedFiles: ['src/test.ts'], validationClaims: ['tests pass'], deploymentReport: 'not deployed', evidenceIds: ['actual'], reports: { code: 'done', validation: 'done', build: 'skipped', deploy: 'skipped' } });
+    const revision = sanitizeDelivery(h.states.get(owner))!.revision;
+    const result = await h.panel.action({ action: 'details', key: revision });
+    expect(result).toBeTruthy();
+    if (!result) throw new Error('Expected details dialog');
+    const dialog = result.dialog!;
+    expect(dialog.markdown).toContain('result');
+    expect(dialog.markdown).toContain('src/test');
+    expect(dialog.markdown).toContain('tests pass');
+    expect(dialog.markdown).toContain('not deployed');
+    expect(dialog.markdown).toContain('actual');
+    expect(dialog.markdown).toContain('退出码 0');
+    expect(dialog.markdown).toContain('未独立验证');
+    expect(dialog.panel).toBeUndefined();
+  });
   it('accepts only observed current-run primary results, never raw output or model proof', async () => {
     const h = harness();
     const owner = h.owners[0]!;

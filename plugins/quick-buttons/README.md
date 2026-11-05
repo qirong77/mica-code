@@ -16,7 +16,7 @@
   | `path`    | 在应用里打开一个文件或目录       | `openPath`                  |
   | `dialog`  | 弹出一个说明 / 清单 / 几个做法   | `dialog`                    |
 
-- `open` 默认走**受控浏览器**（桌面端主进程里那个 agent 还能继续操作的窗口），窗口归属当前会话，所以顶栏的浏览器图标上看得到它；`target: "external"` 才交给系统浏览器。受控浏览器不可用时自动退回系统浏览器，并在按钮旁边说明。
+- `open` 默认走**受控浏览器**（桌面端主进程里那个 agent 还能继续操作的窗口），窗口归属当前会话，所以顶栏的浏览器图标上看得到它；已有窗口时在其中新建标签页并显示窗口，并发创建遇到 409 会重查并复用。`target: "external"` 才交给系统浏览器。受控浏览器不可用时自动退回系统浏览器，并在按钮旁边说明。
 - **一排最多 6 个**：输入框上方的位置有限，按钮多了用户得先读一排字才找得到要点的那个，比自己做还慢。超出的由工具明确拒绝，让模型自己挑。
 - **外观只声明意图**：`style: { icon, color, shape, iconOnly }`——图标取应用那张 lucide 表
   （`globe` / `external` / `search` / `zap` / `list-checks` …），颜色取 `accent`（点这个）/
@@ -85,5 +85,5 @@
 | `buttons.ts`          | 数据模型：校验、归一化、限额、给模型看的那几行                                      |
 | `QuickButtonsTool.ts` | `quick_buttons` 工具（`list` / `set` / `add` / `remove` / `clear` / `clear_stale`） |
 | `panel.ts`            | 面板视图与动作：点按钮、手动增删                                                    |
-| `browser.ts`          | 受控浏览器：`POST $MICA_BROWSER_URL/browser/browsers`                               |
+| `browser.ts`          | 受控浏览器：按 owner 查找并复用窗口、创建标签页、显示窗口                            |
 | `prompt.ts`           | 什么时候该建按钮（只在桌面宿主里渲染）                                              |

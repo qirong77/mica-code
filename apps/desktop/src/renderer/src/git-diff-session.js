@@ -8,6 +8,7 @@ export function gitDiffKey(cwd, file) {
     file.path,
     options.mode || 'head',
     options.ref || null,
+    options.head || null,
     !!options.direct,
     options.label || null
   ])
@@ -139,8 +140,10 @@ export function createGitDiffSession({
         const binary = !!(content.binary || file.binary)
         const original = content.original ?? ''
         const modified = content.modified ?? ''
+        const blameIdentity = JSON.stringify(content.blame || null)
         const unchanged =
           entry &&
+          entry.blameIdentity === blameIdentity &&
           binary === (entry.phase === 'binary') &&
           (binary || (entry.original === original && entry.modified === modified))
         if (unchanged) {
@@ -183,6 +186,7 @@ export function createGitDiffSession({
             characters: binary ? 0 : original.length + modified.length,
             fingerprint: file.fingerprint,
             phase: binary ? 'binary' : 'ready',
+            blameIdentity,
             originalLabel: content.originalLabel,
             modifiedLabel: content.modifiedLabel
           }

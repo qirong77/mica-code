@@ -2,8 +2,10 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
+import { resolveLogDir } from '@packages/mica-config/brand.js';
 import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
 import { BRIDGE_SOURCE } from './bridgeSource.js';
+import { REQUEST_LOG_SOURCE } from './requestLogSource.js';
 import { pageVersionOf } from './PageSync';
 import { rendererDirFor } from './PageSyncAction';
 import { pageNoticeKey, readPageNotice } from './PageNotice.js';
@@ -44,16 +46,21 @@ function isAlive(pid: number): boolean {
 /** 落盘桥脚本；内容没变就不重写，免得每次启动都产生一次 mtime 变化。 */
 export function materializeBridge(dir: string): string {
   mkdirSync(dir, { recursive: true });
-  const target = join(dir, SCRIPT_NAME);
-  if (existsSync(target)) {
-    try {
-      if (readFileSync(target, 'utf8') === BRIDGE_SOURCE) return target;
-    } catch {
-      // 读不了就当需要重写：写失败会抛出来，比留一个坏文件好
+  for (const [name, source] of [
+    [SCRIPT_NAME, BRIDGE_SOURCE],
+    ['request-log.mjs', REQUEST_LOG_SOURCE],
+  ]) {
+    const target = join(dir, name);
+    if (existsSync(target)) {
+      try {
+        if (readFileSync(target, 'utf8') === source) continue;
+      } catch {
+        // 读不了就当需要重写：写失败会抛出来，比留一个坏文件好
+      }
     }
+    writeFileSync(target, source, 'utf8');
   }
-  writeFileSync(target, BRIDGE_SOURCE, 'utf8');
-  return target;
+  return join(dir, SCRIPT_NAME);
 }
 
 export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: string | null }) {
@@ -142,7 +149,7 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
       child = spawn(nodeBin, [script], {
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, MICA_RELAY_PARENT_PID: String(process.pid) },
+        env: { ...process.env, MICA_RELAY_PARENT_PID: String(process.pid), MICA_RELAY_LOG_DIR: resolveLogDir() },
       });
     } catch (error) {
       clearLock();

@@ -1999,7 +1999,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   /* ── 对话记录 ────────────────────────────────────────────────────────────
      一条会话的 provider 历史是扁平的：用户问一句，后面跟着几十条工具调用与思考。
      所以这里按「轮」分段（每条用户消息开头），段内再按类型决定长相：
-     人与模型的正文排成正文，工具与思考压成一行等宽文本。
+     所有条目统一行高，完整正文在弹窗中查看。
      序号留在最左的窄列里——它是排查时的坐标，不该抢正文的视线。 */
 
   .conversation-timeline {
@@ -2043,24 +2043,26 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     grid-template-columns: 40px 58px minmax(0, 1fr) 74px 14px;
     align-items: center;
     gap: 10px;
-    min-height: 26px;
-    padding: 3px 10px 3px 0;
+    width: 100%;
+    height: 44px;
+    min-height: 44px;
+    padding: 0 10px 0 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
     border-radius: var(--radius-md);
     cursor: pointer;
-    list-style: none;
     user-select: none;
-  }
-
-  .conversation-row-head::-webkit-details-marker {
-    display: none;
   }
 
   .conversation-row-head:hover {
     background: var(--overlay-subtle);
   }
 
-  .conversation-row[open] > .conversation-row-head {
-    background: var(--overlay-subtle);
+  .conversation-row-head:focus-visible {
+    outline: 1px solid var(--blue);
+    outline-offset: -1px;
   }
 
   .conversation-seq {
@@ -2110,16 +2112,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   .conversation-run > .conversation-row-head {
     background: color-mix(in srgb, var(--text-faint) 6%, transparent);
     border-radius: var(--radius-md);
-  }
-
-  .conversation-run[open] > .conversation-row-head {
-    background: color-mix(in srgb, var(--text-faint) 10%, transparent);
-  }
-
-  .conversation-run-body {
-    display: grid;
-    gap: 1px;
-    padding: 2px 0 4px 16px;
   }
 
   .conversation-kind-result,
@@ -2194,18 +2186,10 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
   .conversation-chevron {
     color: var(--text-faint);
-    transition: transform 160ms ease;
   }
 
-  .conversation-row[open] .conversation-chevron,
-  .conversation-turn-head[open] .conversation-chevron {
-    transform: rotate(90deg);
-  }
-
-  /* 用户消息是整条会话的骨架：淡蓝底 + 正文 13px，最多三行，点开看原文。 */
+  /* 用户消息保留轮次摘要，但不因正文长度改变行高。 */
   .conversation-turn-head > .conversation-row-head {
-    align-items: start;
-    padding: 8px 10px 8px 0;
     background: color-mix(in srgb, var(--blue) 7%, transparent);
   }
 
@@ -2216,34 +2200,32 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   .conversation-turn-main {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 0;
     min-width: 0;
   }
 
   .conversation-turn-text {
-    display: -webkit-box;
+    display: block;
     overflow: hidden;
     color: var(--text);
     font-size: 13px;
     line-height: 1.55;
-    overflow-wrap: anywhere;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* 这一轮引发的动作量：几个工具、想了多久、吃掉多少字符。 */
   .conversation-turn-stats {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--text-faint);
     font-family: var(--font-mono);
     font-size: 10.5px;
     font-variant-numeric: tabular-nums;
   }
 
-  /* 模型的回答同样是正文（以前只给一行省略预览，等于让人去猜它说了什么）。 */
   .conversation-row-assistant > .conversation-row-head {
-    align-items: start;
-    padding-top: 6px;
-    padding-bottom: 6px;
     background: color-mix(in srgb, var(--green) 6%, transparent);
   }
 
@@ -2252,13 +2234,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   .conversation-row-assistant .conversation-preview.is-prose {
-    display: -webkit-box;
-    overflow: hidden;
     color: var(--text);
-    overflow-wrap: anywhere;
-    white-space: normal;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 4;
   }
 
   .conversation-row-reasoning .conversation-preview.is-prose {
@@ -2266,13 +2242,25 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     font-size: 12px;
   }
 
-  /* 展开后的正文缩到「正文列」下面，和上面那行的预览同一竖线。 */
-  .conversation-detail {
-    padding: 2px 10px 12px 102px;
+  .conversation-detail-summary {
+    margin-bottom: 12px;
+    color: var(--text-faint);
+    font-size: 12px;
+  }
+
+  .conversation-detail-records {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  .conversation-detail-record {
+    min-width: 0;
   }
 
   .conversation-detail-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     gap: 6px;
     margin-bottom: 6px;
@@ -2287,10 +2275,8 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   .conversation-content {
-    max-height: 640px;
     margin: 0;
     padding: 10px 12px;
-    overflow: auto;
     border: 1px solid var(--line-soft);
     border-radius: var(--radius-md);
     background: var(--panel-inset);
@@ -2315,7 +2301,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     margin: 0;
   }
 
-  /* 窄容器（桌面弹窗 / 分屏）：撤掉体积列、收起展开缩进，把宽度还给正文。 */
+  /* 窄容器（桌面弹窗 / 分屏）：撤掉体积列，把宽度还给正文。 */
   @container session-detail (max-width: 720px) {
     .conversation-row-head {
       grid-template-columns: 28px 52px minmax(0, 1fr) 14px;
@@ -2324,10 +2310,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
     .conversation-size {
       display: none;
-    }
-
-    .conversation-detail {
-      padding-left: 44px;
     }
   }
 
@@ -3897,6 +3879,15 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   /* Modal */
+
+  &.modal-portal {
+    position: fixed;
+    z-index: 10001;
+    inset: 0;
+    width: auto;
+    height: auto;
+    background: transparent;
+  }
 
   .modal-backdrop {
     position: fixed;
@@ -7004,7 +6995,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
 /* ---------------------------------------------------------------- 耗时分析
 
-   一轮的时间去向：三类合计条 + 图例 + 按发生顺序的明细。桌面端的耗时弹窗与
+   一轮的时间去向：三类合计条 + 图例 + 可按时间或耗时排序的明细。桌面端的耗时弹窗与
    会话详情的「耗时」页签是同一个组件（`TurnTimingView`），样式因此只有这一份。 */
 .timing-view {
   display: flex;
@@ -7196,6 +7187,11 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   white-space: nowrap;
 }
 
+.timing-sort {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .timing-columns {
   display: grid;
   grid-template-columns: 76px 1fr 68px;
@@ -7272,6 +7268,10 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
 .timing-item:last-child .timing-marker::before {
   bottom: 50%;
+}
+
+.timing-list.is-duration .timing-marker::before {
+  display: none;
 }
 
 .timing-content {

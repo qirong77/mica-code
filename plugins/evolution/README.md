@@ -39,21 +39,22 @@ mica 选后者，这个插件就是「洗」的地方。
 
 ### 会话
 
-| id                      | 内容                                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- |
-| `usage-occurred-at`     | 给没有请求时间的用量记录补上 `occurredAt`：主对话取会话创建时间，子代理 / 插件请求取任务开始时间。 |
-| `session-compact-rename` | 清掉旧压缩插件（`auto-compact`）留下的会话状态，并把摘要子代理的旧写法 `subagentType: 'auto-compact'` 归一为 `compact`。 |
-| `drop-raw-usage`        | 删掉会话里存着的 provider 原始 usage（`rawUsage`，含 `attribution.items` 逐条 token 归因）：没有消费方，单条可达 247KB、实测占会话文件总量的 22%。 |
-| `usage-source-owner`    | 给没有归属的用量记录补上发起它的插件：委派（内置子代理类型）→ `subagent`，`btw` / `commit` / `memory-curator` → 各自插件；`compact` 是内核命令，不动。 |
+| id                       | 内容                                                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `usage-occurred-at`      | 给没有请求时间的用量记录补上 `occurredAt`：主对话取会话创建时间，子代理 / 插件请求取任务开始时间。                                                     |
+| `session-compact-rename` | 清掉旧压缩插件（`auto-compact`）留下的会话状态，并把摘要子代理的旧写法 `subagentType: 'auto-compact'` 归一为 `compact`。                               |
+| `drop-raw-usage`         | 删掉会话里存着的 provider 原始 usage（`rawUsage`，含 `attribution.items` 逐条 token 归因）：没有消费方，单条可达 247KB、实测占会话文件总量的 22%。     |
+| `usage-source-owner`     | 给没有归属的用量记录补上发起它的插件：委派（内置子代理类型）→ `subagent`，`btw` / `commit` / `memory-curator` → 各自插件；`compact` 是内核命令，不动。 |
 
 ### 其它数据
 
-| id                      | 内容                                                                                                 |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- |
-| `memory-scopes`         | 把旧布局的记忆（`USER.md` / `MEMORY.md` / `projects/<cwd 哈希>/MEMORY.md`）并入 `PROFILE.md` 与同名项目记忆文件。 |
-| `session-tags-slots`    | 清掉标签表里没用过的旧固定色槽（只剩它们时换成「待 review」），并收敛指向已删标签的归属。 |
-| `config-model-discovery` | 删掉 config.json 里已无消费方的 `get_model_url` 与空的默认模型（回落到第一个服务商的模型）。 |
-| `browser-cookie-sync-extension` | 将识别出的 v1 Chrome 数据库 / 手动同步设置与状态改名归档为同目录 `*.legacy-v1.json`；已有归档保留并使用编号后缀。新版 `target` 连接对象与未知状态字段保留，token 与扩展目录不动；损坏或无法识别的文件不改，旧形态不再支持。 |
+| id                              | 内容                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `memory-scopes`                 | 把旧布局的记忆（`USER.md` / `MEMORY.md` / `projects/<cwd 哈希>/MEMORY.md`）并入 `PROFILE.md` 与同名项目记忆文件。                                                                                                                                                                                                                                                               |
+| `session-tags-slots`            | 清掉标签表里没用过的旧固定色槽（只剩它们时换成「待 review」），并收敛指向已删标签的归属。                                                                                                                                                                                                                                                                                       |
+| `config-model-discovery`        | 删掉 config.json 里已无消费方的 `get_model_url` 与空的默认模型（回落到第一个服务商的模型）。                                                                                                                                                                                                                                                                                    |
+| `browser-cookie-sync-extension` | 将识别出的 v1 Chrome 数据库 / 手动同步设置与状态改名归档为同目录 `*.legacy-v1.json`；已有归档保留并使用编号后缀。新版 `target` 连接对象与未知状态字段保留，token 与扩展目录不动；损坏或无法识别的文件不改，旧形态不再支持。                                                                                                                                                     |
+| `harness-review-assessments`    | 将 `plugin-data/harness-review/decisions/<key>.json` 的合法旧人工决策迁入 `<key>/legacy-<digest>.json`，补 `version: 1` 与 `baseline: null`（观测范围未知），保留 id、status、note、updatedAt；已有同内容历史不重复。原文件改名归档为 `*.legacy-v1.json`，已有归档保留并使用编号后缀；未知、损坏、键不匹配或非法路径不动。运行期不再支持旧单文件形态，需运行 `/evolution run`。 |
 
 新增一条迁移 = 在 `migrations.ts` 里加一个 `Migration`（`id`、`description`、纯函数 `apply`），
 然后写进 `MIGRATIONS`。账本按 id 记进度，所以追加迁移会让所有会话重新评估一次；已经洗过的
@@ -62,6 +63,10 @@ mica 选后者，这个插件就是「洗」的地方。
 非会话数据放 `data/`：一条 `DataMigration`（`id`、`description`、`run({ home, log })`，返回改动的
 对象数），然后写进 `data/index.ts` 的 `DATA_MIGRATIONS`。它们没有签名账本，所以必须**幂等**，
 并把「已经是当前形态」判成 0。
+
+Harness Review 的纯转换 `harnessReviewAssessmentV1` 放在 `migrations.ts`，但不登记到
+会话 `MIGRATIONS`：决策是非会话插件数据，只由 `DATA_MIGRATIONS` 扫描，避免让全部会话
+为无关数据重跑。旧决策没有记录观测范围，所以迁移只写 `baseline: null`，不从现有运行回填。
 
 规则只有三条，违反任何一条都会让「删除运行时兼容分支」变成一次数据事故：
 
@@ -73,17 +78,17 @@ mica 选后者，这个插件就是「洗」的地方。
 
 ## 命令
 
-| 命令             | 作用                                   |
-| ---------------- | -------------------------------------- |
-| `/evolution`     | 上次检查时间、待清洗会话、迁移规则     |
-| `/evolution run` | 立刻把所有会话的旧数据清洗一遍         |
+| 命令             | 作用                               |
+| ---------------- | ---------------------------------- |
+| `/evolution`     | 上次检查时间、待清洗会话、迁移规则 |
+| `/evolution run` | 立刻把所有会话的旧数据清洗一遍     |
 
 ## 设置
 
-| 项             | 默认 | 作用                                                         |
-| -------------- | ---- | ------------------------------------------------------------ |
-| `enabled`      | 开   | 关掉之后只有 `/evolution run` 会清洗                         |
-| `backup`       | 关   | 改动前把会话文件整份拷到 `backups/`；会翻倍占用，只在需要回滚时打开 |
+| 项        | 默认 | 作用                                                                |
+| --------- | ---- | ------------------------------------------------------------------- |
+| `enabled` | 开   | 关掉之后只有 `/evolution run` 会清洗                                |
+| `backup`  | 关   | 改动前把会话文件整份拷到 `backups/`；会翻倍占用，只在需要回滚时打开 |
 
 运行状态写在 `plugin-data/evolution/data.json`，配置页插件详情按清单 `status` 显示；
 排查问题时插件日志在 `$MICA_HOME` 之外（见 `pluginLogPath`）。
