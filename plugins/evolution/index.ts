@@ -43,7 +43,9 @@ export default function setup(ctx: PluginContext): void {
   let failureReported = false;
 
   const enabled = () => readSwitch(ctx.settings.get().enabled, true);
-  const backup = () => readSwitch(ctx.settings.get().backup, true);
+  // 默认不备份：整份拷贝会让会话目录翻一倍（实测 713MB 备份 / 599MB 会话），而迁移是
+  // 幂等的纯函数且有单测。要回滚某次改动时再在设置里临时打开。
+  const backup = () => readSwitch(ctx.settings.get().backup, false);
   const clean = async (reason: string): Promise<EvolutionRunResult | null> => {
     if (running) return null;
     running = true;

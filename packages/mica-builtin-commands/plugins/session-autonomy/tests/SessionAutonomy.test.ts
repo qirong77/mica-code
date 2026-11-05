@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CommandAgent, CommandRuntimeServices } from '@packages/mica-builtin-commands/index.js';
 import type { ToolExecuteCallbacks } from '@packages/mica-tools/index.js';
 import { ToolSessionPeers } from '../SessionAutonomyTools.js';
+import { buildConcurrencyNotice } from '../SessionAutonomyPlugin.js';
 import type { SessionTurnLock } from '@packages/mica-session/index.js';
 
 function mockAgent(taskOwnerId = 'agent-1'): CommandAgent {
@@ -127,6 +128,35 @@ describe('session_peers tool', () => {
     expect(output).not.toContain('sess-other（与本会话同一工作目录）');
   });
 
+  it('names the files a same-cwd peer wrote this turn, so ownership is never guessed from git status', async () => {
+    const deps = makeDeps();
+    const startedAt = '2026-11-05T02:00:00.000Z';
+    const output = await new ToolSessionPeers({
+      ...deps,
+      listTurnLocks: () => [
+        lock({ sessionId: 'sess-1', pid: 111, cwd: '/repo/mica-code' }),
+        lock({ sessionId: 'sess-same', pid: 222, cwd: '/repo/mica-code', startedAt }),
+        lock({ sessionId: 'sess-other', pid: 333, cwd: '/repo/other', startedAt }),
+      ],
+      listSessionWrites: (sessionId) =>
+        sessionId === 'sess-same'
+          ? [
+              { path: '/repo/mica-code/src/before.ts', at: '2026-11-05T01:00:00.000Z' },
+              { path: '/repo/mica-code/src/session-filter.js', at: '2026-11-05T02:30:00.000Z' },
+              { path: '/repo/elsewhere/x.ts', at: '2026-11-05T02:30:00.000Z' },
+            ]
+          : [{ path: '/repo/other/ignored.ts', at: '2026-11-05T02:30:00.000Z' }],
+      describeProcess: () => undefined,
+    }).execute({}, withAgent(deps));
+
+    expect(output).toContain('本轮写过的文件: src/session-filter.js, /repo/elsewhere/x.ts');
+    // Entries from before the peer's current turn belong to its previous work.
+    expect(output).not.toContain('src/before.ts');
+    // A different working directory is not the caller's problem.
+    expect(output).not.toContain('ignored.ts');
+    expect(output).toContain('不属于本会话的改动只能报告，不能回滚或还原');
+  });
+
   it('is rejected outside the active primary agent', async () => {
     const deps = makeDeps();
     deps.setCurrentAgent(undefined);
@@ -218,5 +248,53 @@ describe('session_peers tool', () => {
     }).execute({ hours: 6 }, withAgent(deps));
 
     expect(output).toContain('最近 6 小时内没有已结束的其他会话');
+  });
+});
+
+describe('concurrency prompt section', () => {
+  it('stays empty while this session owns the working directory', () => {
+    const deps = makeDeps();
+    const notice = buildConcurrencyNotice({
+      services: deps.services,
+      listTurnLocks: () => [
+        lock({ sessionId: 'sess-1', pid: 111, cwd: '/repo/mica-code' }),
+        lock({ sessionId: 'sess-other', pid: 333, cwd: '/repo/other' }),
+      ],
+    });
+
+    // A section that renders nothing costs no prompt tokens in the normal case.
+    expect(notice).toBe('');
+  });
+
+  it('states the facts and the rule as soon as a same-cwd session is alive', () => {
+    const deps = makeDeps();
+    const startedAt = new Date(Date.now() - 42 * 60_000).toISOString();
+    const notice = buildConcurrencyNotice({
+      services: deps.services,
+      listTurnLocks: () => [
+        lock({ sessionId: 'sess-1', pid: 111, cwd: '/repo/mica-code' }),
+        lock({ sessionId: 'sess-peer', pid: 222, cwd: '/repo/mica-code', title: '改筛选列表', startedAt }),
+      ],
+    });
+
+    expect(notice).toContain('还有 1 个 Mica 会话正在跑');
+    expect(notice).toContain('sess-peer · 改筛选列表 · 本轮已跑 42 分钟');
+    expect(notice).toContain('`git status` / `git diff` 不记录作者');
+    expect(notice).toContain('不能回滚、还原、重排或格式化整份文件');
+    // The dead-lease case must not be reported as a live writer.
+    expect(notice).not.toContain('sess-1');
+  });
+
+  it('ignores leases whose holder process is gone', () => {
+    const deps = makeDeps();
+    const notice = buildConcurrencyNotice({
+      services: deps.services,
+      listTurnLocks: () => [
+        lock({ sessionId: 'sess-1', pid: 111, cwd: '/repo/mica-code' }),
+        lock({ sessionId: 'sess-dead', pid: 999, cwd: '/repo/mica-code', alive: false }),
+      ],
+    });
+
+    expect(notice).toBe('');
   });
 });

@@ -1,26 +1,29 @@
 import { spawnSync } from 'node:child_process';
+import { relative } from 'node:path';
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 import type { CommandAgent, CommandRuntimeServices } from '@packages/mica-builtin-commands/index.js';
 import {
   listRecentSessionFiles,
-  listSessionTurnLocks,
+  readSessionWrites,
   type RecentSessionFile,
   type SessionTurnLock,
 } from '@packages/mica-session/index.js';
+import { readPeerSnapshot, type SessionPeerDeps } from './sessionPeers.js';
 
-export type SessionToolDeps = {
-  services: CommandRuntimeServices;
-  /** 运行中会话枚举；测试注入用，默认读 `$MICA_HOME/sessions/.turn-locks`。 */
-  listTurnLocks?: () => SessionTurnLock[];
+export type SessionToolDeps = SessionPeerDeps & {
   /** 最近结束的会话枚举；测试注入用，默认读 `$MICA_HOME/sessions/*.json` 的文件头。 */
   listRecentSessions?: (sinceMs: number) => RecentSessionFile[];
   /** 进程描述；测试注入用，默认 `ps -o command=`。 */
   describeProcess?: (pid: number) => string | undefined;
+  /** 某个会话本轮写过的文件；测试注入用，默认读 `.turn-locks/<id>.writes`。 */
+  listSessionWrites?: (sessionId: string) => { path: string; at: string }[];
 };
 
 /** `hours` 的上限：超过一个月的窗口对排查「谁动过工作区」没有意义。 */
 const MAX_HOURS = 24 * 30;
 const HOUR_MS = 60 * 60 * 1000;
+/** 一行里最多列几个文件；再多对判断归属没用，只是噪音。 */
+const MAX_WRITES_SHOWN = 8;
 
 type CallerAgent = Pick<CommandAgent, 'taskOwnerId' | 'getSnapshot' | 'config' | 'role'>;
 
@@ -101,7 +104,8 @@ export class ToolSessionPeers extends MicaTool {
       'session_peers',
       [
         '列出当前正在运行的 Mica 实例（其他窗口/终端里的 TUI、mica exec、desktop 的 app-server 进程），返回各自 session 缓存文件路径与读取方法。',
-        '当怀疑工作区被另一个 Mica 会话改动、文件内容与预期不符、或想确认是否有别的会话在同一个项目/仓库工作时使用。',
+        '同一工作目录的并发会话还会列出它本轮写过的文件——`git status` / `git diff` 不记录作者，判断一批未提交改动属于谁只能靠这里。',
+        '文件内容与预期不符、改动突然消失、或要确认有没有别的会话在同一个仓库工作时，先调用它再动手，不要凭「本轮开始时工作区是干净的」推断归属。',
         '只读，不修改任何东西。注意：只列出正在执行 turn 的实例，空闲实例不会改动文件，因此不在列表中。',
         '默认只列正在运行的实例；传 hours 后额外列出最近 N 小时内结束的会话（已释放 turn 锁，仍可能刚改过工作区），0 表示不列。',
       ].join(' '),
@@ -122,17 +126,14 @@ export class ToolSessionPeers extends MicaTool {
   async execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const agent = callerAgent(callbacks);
     if (!isActiveAgent(this.deps.services, agent)) return notAvailable('未找到当前 agent');
-    const currentSessionId = this.deps.services.getCurrentAgentSessionId?.() ?? '';
-    const locks = (this.deps.listTurnLocks ?? listSessionTurnLocks)();
+    const snapshot = readPeerSnapshot(this.deps);
+    const { currentSessionId, running, stale } = snapshot;
     const describe = this.deps.describeProcess ?? describeProcessCommand;
     const hours = readHours(input);
-    const running = locks.filter((lock) => lock.alive);
-    const stale = locks.filter((lock) => !lock.alive);
     // Same working directory is the interesting case: that is the instance most
     // likely to touch the files this session is editing.
-    const selfLock = running.find((lock) => Boolean(currentSessionId) && lock.sessionId === currentSessionId);
     const sameCwd = (lock: SessionTurnLock): boolean =>
-      Boolean(selfLock?.cwd) && lock.sessionId !== selfLock?.sessionId && lock.cwd === selfLock?.cwd;
+      snapshot.sameCwd.some((peer) => peer.sessionId === lock.sessionId);
 
     const header =
       running.length === 0
@@ -155,11 +156,22 @@ export class ToolSessionPeers extends MicaTool {
       ].filter(Boolean);
       lines.push(`   ${meta.join(' · ')}`);
       lines.push(`   session 文件: ${lock.sessionPath}`);
+      if (!isSelf && sameCwd(lock)) {
+        const written = this.peerWrites(lock);
+        if (written) lines.push(`   ${written}`);
+      }
     });
 
     if (running.length > 0) {
       const others = running.filter((lock) => lock.sessionId !== currentSessionId);
       if (others.length === 0) lines.push('', '除本会话外，没有其他 Mica 会话在运行。');
+    }
+    if (snapshot.sameCwd.length > 0) {
+      lines.push(
+        '',
+        '注意：上面标了「与本会话同一工作目录」的会话会改同一批文件。`git status` / `git diff` 不记录作者，' +
+          '因此「本轮开始时工作区是干净的」推不出「现在的改动都是我的」；不属于本会话的改动只能报告，不能回滚或还原。',
+      );
     }
     if (stale.length > 0) {
       lines.push(
@@ -200,6 +212,38 @@ export class ToolSessionPeers extends MicaTool {
 
     lines.push('', SESSION_READ_GUIDANCE);
     return lines.join('\n');
+  }
+
+  /**
+   * 这个会话本轮写过哪些文件。
+   *
+   * 只对同一工作目录的并发会话有用：那正是「同一批文件被另一只手改过」的场景。
+   * 台账来自工具层的写入记录，`run_shell` 里的重定向不在其中，所以它只当证据之一。
+   */
+  private peerWrites(lock: SessionTurnLock): string | undefined {
+    const read = this.deps.listSessionWrites ?? ((sessionId: string) => readSessionWrites(sessionId));
+    let records: { path: string; at: string }[];
+    try {
+      records = read(lock.sessionId);
+    } catch {
+      return undefined;
+    }
+    const since = Date.parse(lock.startedAt);
+    const seen = new Set<string>();
+    const files: string[] = [];
+    for (const record of records) {
+      const at = Date.parse(record.at);
+      if (Number.isFinite(since) && Number.isFinite(at) && at < since) continue;
+      const rel = lock.cwd ? relative(lock.cwd, record.path) : record.path;
+      const label = rel && !rel.startsWith('..') ? rel : record.path;
+      if (seen.has(label)) continue;
+      seen.add(label);
+      files.push(label);
+    }
+    if (files.length === 0) return undefined;
+    const head = files.slice(0, MAX_WRITES_SHOWN);
+    const rest = files.length - head.length;
+    return `本轮写过的文件: ${head.join(', ')}${rest > 0 ? ` (+${rest})` : ''}`;
   }
 
   onToolUseDisplayText(): string {

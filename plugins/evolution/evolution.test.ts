@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -231,14 +231,22 @@ describe('runEvolution', () => {
     writeSession(home, 'session-1', legacySession());
     writeFileSync(join(home, 'sessions', 'broken.json'), '{ not json');
 
-    const first = await runEvolution({ home, lockSession: () => ({ release() {} }) });
+    const first = await runEvolution({ home, lockSession: () => ({ release() {} }), backup: true });
     expect(first.migratedFiles).toBe(1);
     expect(first.brokenFiles).toBe(1);
     const backup = readSession(join(home, 'plugin-data', 'evolution', 'backups', 'session-1.json'));
     expect(backup.snapshot.usageHistory[0].occurredAt).toBeUndefined();
 
-    const second = await runEvolution({ home, lockSession: () => ({ release() {} }) });
+    const second = await runEvolution({ home, lockSession: () => ({ release() {} }), backup: true });
     expect(second.evaluated).toBe(0);
     expect(second.brokenFiles).toBe(0);
+  });
+
+  it('默认不备份：迁移不再把会话目录整份拷一遍', async () => {
+    const home = createHome();
+    writeSession(home, 'session-1', legacySession());
+    const result = await runEvolution({ home, lockSession: () => ({ release() {} }) });
+    expect(result.migratedFiles).toBe(1);
+    expect(existsSync(join(home, 'plugin-data', 'evolution', 'backups'))).toBe(false);
   });
 });

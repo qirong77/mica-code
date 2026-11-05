@@ -64,3 +64,5 @@ packages/mica-builtin-commands/
 - `index.ts`：稳定公共导出入口；应用层只应从这里引用。
 
 System prompt 指引统一注册到 `ctx.prompt.section()`，对应插件清单需声明 `requires: ["prompt"]`。会话记忆、会话自治、Loop 使用 -300、-200、-100 的 order 保持原有相对顺序；宿主统一生成带插件与 section 来源的 XML injection 边界。
+
+`session-autonomy` 另外有一条 order 1100 的 `concurrency` 段落：同一工作目录上还有活着的会话租约时才渲染（没有并发就返回空串、不占 token），内容是同 cwd 会话清单 +「`git status` 不记录作者，不要据此推断归属」。它排在最末，因为内容随别的会话起落变化，放进前缀会连累前面稳定的段落一起让 prompt cache 失效。同一个插件的 `session_peers` 会列出这些会话本轮写过的文件——写入路径由 `observeToolExecution`（`mica-tools`）在工具执行后记进 `$MICA_HOME/sessions/.turn-locks/<id>.writes`，`run_shell` 里的重定向不在其中。

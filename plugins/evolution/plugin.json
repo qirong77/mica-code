@@ -23,8 +23,8 @@
       "key": "backup",
       "label": "改动前备份会话文件",
       "type": "switch",
-      "default": "true",
-      "description": "备份写到 plugin-data/evolution/backups，只保留首次快照与最近 7 天，迁移出错时可以从这里还原。"
+      "default": "false",
+      "description": "整份拷贝到 plugin-data/evolution/backups（保留 7 天）。默认关闭：会话动辄上百 MB，迁移又是幂等的纯函数，长期开着等于把会话目录翻一倍。要拿旧形态回滚时再临时打开。"
     }
   ],
   "status": [

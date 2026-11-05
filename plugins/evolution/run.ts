@@ -38,7 +38,10 @@ export type EvolutionRunOptions = {
   home: string;
   migrations?: Migration[];
   dataMigrations?: DataMigration[];
-  /** 改动前把会话文件原样备份到 `plugin-data/evolution/backups/`。 */
+  /**
+   * 改动前把会话文件原样备份到 `plugin-data/evolution/backups/`。默认关：整份拷贝会让
+   * 会话目录翻倍，而迁移是幂等的纯函数。需要回滚某次改动时显式打开。
+   */
   backup?: boolean;
   /** 单轮最多读多少个文件；默认 400。 */
   maxFiles?: number;
@@ -108,7 +111,7 @@ export async function runEvolution(options: EvolutionRunOptions): Promise<Evolut
       }
       try {
         const outcome = migrateSessionFile(session, migrations, {
-          backup: options.backup !== false,
+          backup: options.backup === true,
           dataDir,
         });
         if (outcome.broken) {

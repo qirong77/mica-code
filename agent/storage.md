@@ -16,5 +16,6 @@
 - 无手动标题时取最后一条真实用户消息（最长 60 字符）；自动改名不得覆盖 `titleSource === 'manual'`。
 - `$MICA_HOME/session-index.json` 是可重建缓存，不进 `sessions/`；索引 v3 记录读不出摘要的 `rejects`（id + size/mtime），避免每次全量重扫，并带上侧栏嵌套要用的 `parentSessionId`（v2 没有它，版本对不上就整份重建）。
 - `sessions/.turn-locks/<id>.lock` 是跨进程写入的唯一事实来源（`wx` + owner pid 存活判定）；孤儿锁在 acquire 时回收。
+- `sessions/.turn-locks/<id>.writes` 是这条会话「本轮写过哪些文件」的台账（JSONL，`{path, at}`，`sessionWrites.ts`）。它只服务一个判断：一批未提交改动属于哪个会话——`git status` 不记录作者，并发同 cwd 的会话之间只能靠它分辨。写入方是工具层的 `observeToolExecution`（`write_file` / `apply_patch` 的路径），`run_shell` 里的重定向看不见，所以它只是证据之一；读方是 `session_peers`，按对方 turn 的开始时间过滤。台账按行追加、超 128KB 压成最近 200 行，坏行跳过，任何读写失败都吞掉（辅助信息不该让工具报错）。
 - 垃圾占位须同时满足：默认占位标题、无对话、无 usage；`turnState === 'running'` 永不隐藏或删除。
 - 只读会话顶层字段（cwd、标题等）用 `host/session-file-head.js` 读文件头，不要为单个字段整份 `JSON.parse`：最大的一份会话 19MB（清掉 `rawUsage` 之前是 153MB，随对话长度这笔开销还会再涨）。

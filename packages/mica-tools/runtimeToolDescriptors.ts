@@ -142,7 +142,7 @@ export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
     name: 'session_peers',
     pluginId: 'builtin.session-autonomy',
     description:
-      '列出当前正在运行的 Mica 实例（其他窗口/终端里的 TUI、mica exec、desktop 的 app-server 进程），返回各自 session 缓存文件路径与读取方法。 当怀疑工作区被另一个 Mica 会话改动、文件内容与预期不符、或想确认是否有别的会话在同一个项目/仓库工作时使用。 只读，不修改任何东西。注意：只列出正在执行 turn 的实例，空闲实例不会改动文件，因此不在列表中。 默认只列正在运行的实例；传 hours 后额外列出最近 N 小时内结束的会话（已释放 turn 锁，仍可能刚改过工作区），0 表示不列。',
+      '列出当前正在运行的 Mica 实例（其他窗口/终端里的 TUI、mica exec、desktop 的 app-server 进程），返回各自 session 缓存文件路径与读取方法。 同一工作目录的并发会话还会列出它本轮写过的文件——`git status` / `git diff` 不记录作者，判断一批未提交改动属于谁只能靠这里。 文件内容与预期不符、改动突然消失、或要确认有没有别的会话在同一个仓库工作时，先调用它再动手，不要凭「本轮开始时工作区是干净的」推断归属。 只读，不修改任何东西。注意：只列出正在执行 turn 的实例，空闲实例不会改动文件，因此不在列表中。 默认只列正在运行的实例；传 hours 后额外列出最近 N 小时内结束的会话（已释放 turn 锁，仍可能刚改过工作区），0 表示不列。',
     readOnly: true,
     parameters: [
       {

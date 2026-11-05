@@ -6,9 +6,10 @@
 
 ## 1. 硬规则
 
-- 改前看 `git status --short`，保留用户已有改动；禁止 `git reset --hard`、`git checkout --`、强推、批量删除与 `--no-verify`。
+- 改前看 `git status --short`，保留工作区里已有的改动。禁止**任何把工作区文件换成 HEAD / 索引版本**的手段（`git checkout -- <path>`、`git restore`、`git show HEAD:<path> > <path>`、`git stash` 及其 pop/apply），以及 `git reset --hard`、强推、批量删除与 `--no-verify`。
+- 工作区不是本会话独占：同一目录可能还有别的 Mica 会话、别处起的 agent、用户自己的手改。`git status` / `git diff` 不记录作者，「本轮开始时工作区是干净的」推不出「现在的改动都是我的」；归属不清时先查 `session_peers`（同 cwd 的会话 + 它们本轮写过的文件）。不属于本次任务的改动只能报告，不能回滚、还原、stash、discard 或格式化。
 - 只改任务相关文件，不顺手格式化、重命名或重构；只格式化自己改过的文件。
-- 在工作区里直接改，不建分支、不提交、不推送、不做合并提交，除非用户明确要求。工作区里别人的未提交改动一律不动：不 stash、不 discard、不格式化。
+- 在工作区里直接改，不建分支、不提交、不推送、不做合并提交，除非用户明确要求。
 - 改完不构建、不重启——什么时候构建、要不要重启由用户自己决定（命令见 `agent/build.md`）。
 - 搜索用 `rg`，默认排除 `temp/`、`.backups/`、`node_modules/`、`dist/`、`out/`。
 - 验证只跑到「与改动最接近」为止：针对性单测 + `bun run typecheck`。不跑全量测试、全量 lint 与真实子进程 E2E，除非用户要发布或明确要求（尺度见 `agent/build.md`）。

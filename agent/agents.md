@@ -10,6 +10,7 @@
 - 前台委派默认阻塞，同消息多个调用可并行；需要主流程继续时用 `run_in_background: true`；每 owner 合计并发上限 4。
 - turn 结束即收尾它起的后台子代理（`killRunningForOwner(owner, 'Parent turn finished.')`）：这一轮已经交付，结果只能经 `agent operation=read` 取回，而下一轮的模型不会去读上个 turn 的 `task_id`。留着它们只会在状态栏挂一条永远 running 的条目并继续烧 token。收尾在 `turn:after` 之前（TUI 在 `LocalRuntimeController.runTurn` 的 finally，headless 在 `HeadlessTurnExecutor.emitTurnAfter`），且不发完成通知。
 - `context_mode` 为 none/brief/recent/files，默认 brief；Implementer / Tester / Proposal 必填 `owned_paths`，写工具与 shell cwd 校验租约（判定唯一实现在 `mica-tools/utils/pathOwnership.ts`）。
+- **租约只说明「允许写哪里」，不说明「这些 diff 是谁写的」**。评审子代理改动时，租约外的文件不等于「我的子代理越界」——同 cwd 可能还有别的会话或用户自己在改，`git status` / `git diff` 都不带作者。看到不认识的改动先查 `session_peers`（同 cwd 会话 + 它们本轮写过的文件），判断不了就报告给用户，不要整文件还原；租约内的文件同理，一个文件里可能混着几方的改动，整文件覆盖会连带删掉别人的工作。
 - 委派倾向由插件设置 `delegationMode` 决定（`proactive` 默认 / `on-request`），prompt 段落每轮按设置重新渲染。
 - 失败重试分两层：单次请求由 provider 的 `withRetry` 处理；整轮子代理失败只有不落盘的类型（`write_mode` 为 `none` / `proposal`）且错误可重试时由插件自动重跑一次，可写类型不自动重跑。`run_many` 中单条任务启动失败（租约冲突、并发已满）只结算该任务，批次末尾给出 completed/partial/failed/skipped/running 统计。宿主报告的失败原因单独成段，不跟着 `Raw result` 一起被截断。
 - 内置子代理达到默认 `maxTurns` 后复用原实例和工具历史续跑最多两次，保留任务、租约与累计用量；显式请求的 `maxTurns` 是硬上限，其他类型通过 `maxTurnContinuations` 选择续跑。续跑不重放工具调用，但模型仍可能自行重复调用。
