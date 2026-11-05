@@ -15,10 +15,12 @@
 // `process.memoryUsage()`，配置页 Performance 据此画「谁在涨」。
 import {
   appendFileSync,
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
-  readFileSync,
+  readSync,
   statSync,
   unlinkSync,
 } from 'node:fs';
@@ -351,14 +353,12 @@ export function logger(scope: string): Logger {
         result = await fn();
       } catch (error) {
         const ms = Date.now() - started;
-        noteSlow(scope, event, ms, limit, false);
-        record('error', scope, event, { ms, ...errorFields(error) });
+        noteSlow(scope, event, ms, limit, false, { level: 'error', fields: errorFields(error) });
         throw error;
       }
       const ms = Date.now() - started;
       const failure = resultFailure(result);
-      noteSlow(scope, event, ms, limit, !failure);
-      if (failure) record('warn', scope, event, { ms, kind: 'failed', error: failure });
+      noteSlow(scope, event, ms, limit, !failure, failure ? { level: 'warn', fields: { error: failure } } : undefined);
       return result;
     },
   };
@@ -370,13 +370,18 @@ function resultFailure(result: unknown): string | null {
   const value = result as { ok?: unknown; error?: unknown };
   if (value.ok !== false && !value.error) return null;
   const message =
-    typeof value.error === 'string'
-      ? value.error
-      : (value.error as { message?: unknown } | null | undefined)?.message;
+    typeof value.error === 'string' ? value.error : (value.error as { message?: unknown } | null | undefined)?.message;
   return String(message || 'unknown error').slice(0, 200);
 }
 
-function noteSlow(scope: string, event: string, ms: number, limit: number, ok: boolean): void {
+function noteSlow(
+  scope: string,
+  event: string,
+  ms: number,
+  limit: number,
+  ok: boolean,
+  failure?: { level: 'warn' | 'error'; fields: Record<string, unknown> },
+): void {
   const key = `${scope}:${event}`;
   const stat = slowStats.get(key) || { count: 0, totalMs: 0, maxMs: 0, slow: 0, fails: 0 };
   stat.count += 1;
@@ -386,7 +391,13 @@ function noteSlow(scope: string, event: string, ms: number, limit: number, ok: b
   if (ms >= limit) {
     stat.slow += 1;
     // 慢调用单独记一条 warn：这是「卡在哪」最直接的线索。
-    record('warn', scope, event, { ms, kind: 'slow' });
+    record(failure?.level || 'warn', scope, event, {
+      ms,
+      kind: 'slow',
+      ...(failure ? { failed: true, ...failure.fields } : {}),
+    });
+  } else if (failure) {
+    record(failure.level, scope, event, { ms, kind: 'failed', ...failure.fields });
   } else if (ok) {
     // 常态调用也记，否则 Performance 面板看不到各功能的基线耗时。
     // 用 kind:'call' 与应用事件区分，页面的事件流不展示它们（耗时时看聚合表）。
@@ -498,7 +509,7 @@ export function stats(): {
 /**
  * 读日志文件并聚合，供配置页的 Performance 面板使用。
  *
- * 只读最近 `maxBytes` 字节（从尾部取），避免一个 16MB 的文件把页面拖死；
+ * 每个 scope 只读最近 `maxBytes` 字节（从尾部取），避免一个 scope 挤掉别的指标；
  * 聚合在宿主做完再交出去，页面只负责渲染。
  */
 export function readPerformanceSummary(options: Record<string, unknown> = {}): PerfMetrics {
@@ -523,23 +534,35 @@ export function readPerformanceSummary(options: Record<string, unknown> = {}): P
         }
       })
       .filter((item): item is { name: string; path: string; bytes: number; modifiedAt: number } => item !== null)
-      .sort((a, b) => b.modifiedAt - a.modifiedAt)
-      .slice(0, 20);
+      .sort((a, b) => b.modifiedAt - a.modifiedAt || b.name.localeCompare(a.name));
   } catch {
     return emptySummary(dir);
   }
 
-  const files = names.map(({ name, bytes, modifiedAt }) => ({ name, bytes, modifiedAt }));
+  const files = names.slice(0, 20).map(({ name, bytes, modifiedAt }) => ({ name, bytes, modifiedAt }));
   const entries: LogEntry[] = [];
-  let budget = maxBytes;
-  // 新的文件优先，直到预算用完
+  const budgets = new Map<string, number>();
+  // 每个 scope 的新文件优先；按字节读尾部，不把整个分片加载到内存。
   for (const file of names) {
-    if (budget <= 0) break;
+    const scope = file.name.match(/^(.+)-\d{8}(?:-\d+)?\.jsonl$/)?.[1] || file.name;
+    const budget = budgets.get(scope) ?? maxBytes;
+    if (budget <= 0) continue;
+    let fd: number | undefined;
     try {
-      const raw = readFileSync(file.path, 'utf8');
-      const text = raw.length > budget ? raw.slice(raw.length - budget) : raw;
-      budget -= text.length;
-      // 截断后第一行可能不完整，丢掉
+      const size = Math.min(file.bytes, budget);
+      const buffer = Buffer.alloc(size);
+      fd = openSync(file.path, 'r');
+      let read = 0;
+      while (read < size) {
+        const n = readSync(fd, buffer, read, size - read, file.bytes - size + read);
+        if (n === 0) break;
+        read += n;
+      }
+      budgets.set(scope, budget - read);
+      const bytes = buffer.subarray(0, read);
+      // 尾部落在行中间时丢掉残缺的首行（也避开半个 UTF-8 字符）。
+      const start = file.bytes > size ? bytes.indexOf(10) + 1 : 0;
+      const text = start > 0 ? bytes.subarray(start).toString('utf8') : file.bytes > size ? '' : bytes.toString('utf8');
       for (const line of text.split('\n')) {
         if (!line) continue;
         try {
@@ -550,11 +573,16 @@ export function readPerformanceSummary(options: Record<string, unknown> = {}): P
       }
     } catch {
       // 读不了就跳过这个文件
+    } finally {
+      if (fd !== undefined) closeSync(fd);
     }
   }
   entries.sort((a, b) => (a.at || 0) - (b.at || 0));
 
-  const buckets = new Map<string, { scope: string; event: string; count: number; slow: number; fails: number; totalMs: number; maxMs: number }>();
+  const buckets = new Map<
+    string,
+    { scope: string; event: string; count: number; slow: number; fails: number; totalMs: number; maxMs: number }
+  >();
   const timeline: PerfTimelinePoint[] = [];
   const memory: PerfMemoryPoint[] = [];
   const processes = new Map<string, PerfMemoryProcess>();
@@ -659,12 +687,12 @@ export function readPerformanceSummary(options: Record<string, unknown> = {}): P
       bucket.count += 1;
       bucket.totalMs += entry.ms;
       bucket.maxMs = Math.max(bucket.maxMs, entry.ms);
-      if (entry.level === 'warn' && entry.kind === 'slow') {
+      if (entry.kind === 'slow') {
         bucket.slow += 1;
         slowCalls += 1;
       }
       // `kind:'failed'` 是「调用成功返回、但返回体里带着错误」的那些（见 timedResult）。
-      if (entry.level === 'error' || entry.kind === 'failed') bucket.fails += 1;
+      if (entry.level === 'error' || entry.kind === 'failed' || entry.failed === true) bucket.fails += 1;
       buckets.set(key, bucket);
     }
   }

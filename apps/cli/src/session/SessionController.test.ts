@@ -65,7 +65,7 @@ function persistedSession(id: string, extra: Partial<PersistedSession> = {}): Pe
   };
 }
 
-async function sessionController(store: Pick<SessionStoreLike, 'load' | 'save'>) {
+async function sessionController(store: Pick<SessionStoreLike, 'load' | 'save'> & Pick<Partial<SessionStoreLike>, 'statSignature'>) {
   const { SessionController } = await import('./SessionController.js');
   const agent: SessionAgentAdapter = {
     getSnapshot: () => baseSnapshot,
@@ -1138,6 +1138,55 @@ describe('SessionController', () => {
 
     expect(save).not.toHaveBeenCalled();
     expect(persisted.updatedAt).toBe('2026-07-20T02:00:00.000Z');
+  });
+
+  it('stats idle sessions without loading them, but checks contents after a metadata change', async () => {
+    const initial = persistedSession('polled');
+    let disk = initial;
+    let identity = 'inode-1';
+    const load = vi.fn(() => disk);
+    const controller = await sessionController({ load, save: vi.fn(), statSignature: () => identity });
+    expect(controller.resume('polled').ok).toBe(true);
+
+    expect(controller.peekExternalChange()).toMatchObject({ changed: false });
+    load.mockClear();
+    expect(controller.peekExternalChange()).toBeNull();
+    expect(load).not.toHaveBeenCalled();
+
+    identity = 'inode-2';
+    expect(controller.peekExternalChange()).toMatchObject({ changed: false });
+    expect(load).toHaveBeenCalledOnce();
+    load.mockClear();
+    expect(controller.peekExternalChange()).toBeNull();
+
+    disk = { ...initial, title: 'changed in another process' };
+    identity = 'inode-3';
+    expect(controller.peekExternalChange()).toMatchObject({ changed: true, session: disk });
+    expect(load).toHaveBeenCalledOnce();
+  });
+
+  it('does not cache a file identity if an atomic replacement happens during the load', async () => {
+    const initial = persistedSession('racing');
+    let identity = 'inode-1';
+    let disk = initial;
+    let replaceDuringRead = false;
+    const load = vi.fn(() => {
+      const loaded = disk;
+      if (replaceDuringRead) {
+        identity = 'inode-3';
+        disk = { ...initial, title: 'newer' };
+        replaceDuringRead = false;
+      }
+      return loaded;
+    });
+    const controller = await sessionController({ load, save: vi.fn(), statSignature: () => identity });
+    expect(controller.resume('racing').ok).toBe(true);
+    expect(controller.peekExternalChange()?.changed).toBe(false);
+
+    identity = 'inode-2';
+    replaceDuringRead = true;
+    expect(controller.peekExternalChange()).toBeNull();
+    expect(controller.peekExternalChange()).toMatchObject({ changed: true, session: disk });
   });
 
   it('keeps the post-compact context figure until a newer usage record replaces it', async () => {

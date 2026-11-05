@@ -167,6 +167,7 @@ export type SessionStoreLike = {
   listRecent(limit?: number): SessionSummary[];
   listAllForUsage?(): PersistedSession[];
   load(id: string): PersistedSession | null;
+  statSignature?(id: string): string | null;
   save(session: PersistedSession): void;
   /** 只改「正在等你选」这一个顶层标记（见实现里的说明）；文件不存在返回 false。 */
   patchAwaitingInput?(id: string, text: string | null): boolean;
@@ -253,6 +254,17 @@ export class SessionStore implements SessionStoreLike {
     const safeId = sanitizeSessionId(id);
     if (!safeId) return null;
     return this.read(sessionPath(safeId));
+  }
+
+  statSignature(id: string): string | null {
+    const safeId = sanitizeSessionId(id);
+    if (!safeId) return null;
+    try {
+      const stat = statSync(sessionPath(safeId), { bigint: true });
+      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    } catch {
+      return null;
+    }
   }
 
   save(session: PersistedSession): void {

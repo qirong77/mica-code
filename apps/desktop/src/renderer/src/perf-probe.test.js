@@ -85,6 +85,7 @@ describe('startPerfProbe', () => {
     expect(sample.sid).toBe('sess-1')
     expect(sample.heapMB).toBe(4)
     expect(sample.vis).toBe(1)
+    expect(sample.at).toBeGreaterThan(0)
     expect(typeof sample.lag).toBe('number')
     probe.stop()
   })

@@ -22,6 +22,7 @@ import { getActiveContext } from '../app/activeContext.js';
 import { micaContext } from '@packages/mica-context/index.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
 import { bindTodoSessionOwner } from '@packages/mica-common/todoState.js';
+import { createHash } from 'node:crypto';
 import type { ApplicationContext } from '../app/ApplicationContext.js';
 
 export type ResumeSessionResult =
@@ -81,6 +82,8 @@ export class SessionController {
    */
   private parentSessionOwned = false;
   private currentPersistedSignature: string | null = null;
+  private currentFileSignature: string | null = null;
+  private currentPersistedCwd: string | null = null;
   private recoveredActiveThinkingSignature: string | null = null;
   private todoPersistenceEnabled = true;
   private readonly agent: SessionAgentAdapter;
@@ -172,6 +175,8 @@ export class SessionController {
     this.currentAwaitingInput = null;
     this.currentPersistedSignature = null;
     this.recoveredActiveThinkingSignature = null;
+    this.currentFileSignature = null;
+    this.currentPersistedCwd = null;
   }
 
   /** 当前会话的父会话 id（没有则为 null）。 */
@@ -229,6 +234,7 @@ export class SessionController {
       // anything on disk. Clearing it keeps the next save (this session is
       // still the live one) from being treated as "another writer owns it".
       this.currentPersistedSignature = null;
+      this.currentFileSignature = null;
       return false;
     }
 
@@ -252,6 +258,7 @@ export class SessionController {
       // lose the whole conversation at the next unexpected termination, so
       // forget the stale signature and write again.
       this.currentPersistedSignature = null;
+      this.currentFileSignature = null;
     }
     // A signature mismatch against an existing file means another process
     // persisted the session since our last save (a second app-server host or a
@@ -287,8 +294,11 @@ export class SessionController {
     // (which stringifies both sides) and go straight to the write. This keeps a
     // large active session from being serialized several times per turn.
     const stateChanged = existing?.turnState !== this.currentTurnState;
-    if (existing && !stateChanged && sessionsEqual(existing, session)) {
-      this.currentPersistedSignature = sessionSignature(existing);
+    const unchangedSignature = existing && !stateChanged ? matchingSessionSignature(existing, session) : null;
+    if (existing && unchangedSignature !== null) {
+      this.currentPersistedSignature = unchangedSignature;
+      this.currentPersistedCwd = existing.cwd;
+      this.currentFileSignature = null;
       return true;
     }
     session.revision = (existing?.revision ?? 0) + 1;
@@ -297,6 +307,8 @@ export class SessionController {
     this.parentSessionOwned = false;
     this.currentParentSessionId = session.parentSessionId ?? null;
     this.currentPersistedSignature = sessionSignature(session);
+    this.currentPersistedCwd = session.cwd;
+    this.currentFileSignature = null;
     return true;
   }
 
@@ -316,6 +328,7 @@ export class SessionController {
     // 文件被改动之后，之前记下的签名不再描述它，下一次保存据此重新写一份完整快照。
     if (this.store.patchAwaitingInput?.(this.currentSessionId, next)) {
       this.currentPersistedSignature = null;
+      this.currentFileSignature = null;
     }
   }
 
@@ -357,6 +370,8 @@ export class SessionController {
     this.parentSessionOwned = false;
     this.currentParentSessionId = session.parentSessionId ?? null;
     this.currentPersistedSignature = sessionSignature(session);
+    this.currentPersistedCwd = session.cwd;
+    this.currentFileSignature = null;
     return true;
   }
 
@@ -390,6 +405,8 @@ export class SessionController {
       };
       this.store.save(saved);
       this.currentPersistedSignature = sessionSignature(saved);
+      this.currentPersistedCwd = saved.cwd;
+      this.currentFileSignature = null;
       return true;
     } catch (error) {
       process.chdir(previousCwd);
@@ -472,9 +489,7 @@ export class SessionController {
   private applyLoadedSession(session: PersistedSession, leaseHeld: boolean): ResumeSessionResult {
     // Follow a cwd changed by another writer when reloading the current
     // session. A first resume may deliberately use an explicit startup cwd.
-    const previousCwd = this.currentPersistedSignature
-      ? (JSON.parse(this.currentPersistedSignature) as PersistedSession).cwd
-      : undefined;
+    const previousCwd = this.currentPersistedCwd ?? undefined;
     if (
       session.id === this.currentSessionId &&
       previousCwd !== undefined &&
@@ -507,6 +522,8 @@ export class SessionController {
     this.currentParentSessionId = session.parentSessionId ?? null;
     this.parentSessionOwned = false;
     this.currentPersistedSignature = sessionSignature(session);
+    this.currentPersistedCwd = session.cwd;
+    this.currentFileSignature = null;
     this.recoveredActiveThinkingSignature = recoverActiveThinking ? this.currentPersistedSignature : null;
     const conversationMessages = getPersistedConversationMessages(session.snapshot);
     const derivedTitle = deriveTitle(getTitleConversationMessages(this.agent, conversationMessages));
@@ -579,18 +596,31 @@ export class SessionController {
     };
     this.store.save(session);
     this.currentPersistedSignature = sessionSignature(session);
+    this.currentPersistedCwd = session.cwd;
+    this.currentFileSignature = null;
   }
 
   /**
-   * Loads the current session once and reports whether another process changed
-   * it, without resuming. Used by the idle external-session poller so it can
-   * skip the expensive full load on every tick; only a real external change is
-   * resumed via {@link resumeLoaded}.
+   * Stable idle polls only stat the file. On metadata changes, compare its
+   * contents before asking the caller to resume it.
    */
   peekExternalChange(): { session: PersistedSession; changed: boolean } | null {
+    const before = this.store.statSignature?.(this.currentSessionId) ?? null;
+    if (before && before === this.currentFileSignature) return null;
     const session = this.store.load(this.currentSessionId);
-    if (!session) return null;
-    return { session, changed: sessionSignature(session) !== this.currentPersistedSignature };
+    if (!session) {
+      this.currentFileSignature = null;
+      return null;
+    }
+    const after = this.store.statSignature?.(this.currentSessionId) ?? null;
+    // A replacement during the read may have supplied an older inode.
+    if (before !== after) {
+      this.currentFileSignature = null;
+      return null;
+    }
+    const changed = sessionSignature(session) !== this.currentPersistedSignature;
+    this.currentFileSignature = changed ? null : after;
+    return { session, changed };
   }
 
   private discardCurrentIfEmpty(): boolean {
@@ -604,8 +634,11 @@ export class SessionController {
   }
 }
 
-function sessionsEqual(left: PersistedSession, right: PersistedSession): boolean {
-  return JSON.stringify(stripDerivedContextWindow(left)) === JSON.stringify(stripDerivedContextWindow(right));
+function matchingSessionSignature(left: PersistedSession, right: PersistedSession): string | null {
+  const comparable = JSON.stringify(stripDerivedContextWindow(left));
+  if (comparable !== JSON.stringify(stripDerivedContextWindow(right))) return null;
+  const json = left.snapshot.contextWindowSize === undefined ? comparable : JSON.stringify(left);
+  return createHash('sha256').update(json).digest('hex');
 }
 
 /**
@@ -620,7 +653,7 @@ function stripDerivedContextWindow(session: PersistedSession): PersistedSession 
 }
 
 function sessionSignature(session: PersistedSession): string {
-  return JSON.stringify(session);
+  return createHash('sha256').update(JSON.stringify(session)).digest('hex');
 }
 
 function hasConversation(providerMessages: unknown[], conversationMessages: MicaUiConversationMessage[]): boolean {

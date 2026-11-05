@@ -127,6 +127,7 @@ export function startPerfProbe(win, doc) {
     }
     domTick += 1
     push({
+      at: Date.now(),
       lag: lag == null ? null : round(lag),
       long: round(longMax),
       longN: longCount,

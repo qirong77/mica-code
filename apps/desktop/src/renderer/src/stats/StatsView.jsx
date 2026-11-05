@@ -1267,7 +1267,7 @@ export function StatsView({ visible }) {
     // 页面因此是逐个填充而不是先空着等一次全量扫描。
     const offChanged = window.mica.stats.onChanged?.(() => {
       if (!alive) return
-      read()
+      tick()
     })
     return () => {
       alive = false

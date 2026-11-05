@@ -163,11 +163,12 @@
 - **诊断日志只有一份实现**：`@packages/mica-diagnostics`（桌面 `host/log.js` 只是转发 + Electron 两个通道）。运行时、Electron 主进程、`mica app-server`、TUI、`mica exec` 都写同一套 JSONL：落 `resolveLogDir()`（macOS `~/Library/Logs/mica`，与插件日志同目录），2s 批量 flush，留 1000 条环形缓冲；保留 7 天、总容量 256 MB，超了从最旧的删。日志**不放系统 temp**：temp 每次登录被系统清空，重启后就只剩当次运行，跨天的问题无法回头查。`MICA_LOG_DIR` 覆盖目录（测试与隔离实例用），`MICA_LOG_LEVEL` 调级别（常驻宿主默认 info，一次性命令默认 warn）。
 - **每个常驻进程自报内存**：`startMemorySampler({ host, describe })` 每 30s 一条 `scope: 'mem'`（`rss` / `heap` / `ext` / `ab`，附会话 id 或宿主数）。运行时报 `host: 'runtime'` + `hosts/busy`，每个 app-server 报自己的会话 id（那才是占用大头，一个能有 1GB），主进程额外带 Electron 各进程类型的分布（`app.getAppMetrics()`），TUI 报当前会话与模型。配置页 Performance 的「进程内存」按进程列出当前 / 峰值 / 窗口内增长；`mem` 不进耗时聚合、也不进事件流。
 - 崩溃现场必须有落盘的一行：会话宿主非正常退出记 `host.exit`（退出码、信号、stderr 尾部 2KB），spawn 失败记 `host.spawn-failed`，主进程听 `render-process-gone` / `child-process-gone` / `unresponsive`，app-server 的 `uncaughtException` 先写日志再通知客户端。
-- 通道耗时只在 `handleInvoke` 用 `logger('invoke').timedResult()` 量一次；超过 `SLOW_MS`（默认 300ms）记 warn。它还会把「调用成功、返回体里带 `error` / `ok:false`」的那些记成 `kind:'failed'` 并在聚合表计入 `fails`——大量通道（git/stats/plugin-host）把失败包在返回值里而不抛，不这么做日志里就只剩一条耗时，分不清是超时、被取消还是真报错。新增功能不要自己再包一层计时。
+- 通道耗时只在 `handleInvoke` 用 `logger('invoke').timedResult()` 量一次；超过 `SLOW_MS`（默认 300ms）记 slow。它还会把「调用成功、返回体里带 `error` / `ok:false`」的那些记为失败并在聚合表计入 `fails`——大量通道（git/stats/plugin-host）把失败包在返回值里而不抛。慢且失败的调用只写一条带 `failed` 标记的 slow 记录，不能把同一次调用算两次。新增功能不要自己再包一层计时。
 - `chat:compact` 额外记一条 `compact.finished`（请求模式、子进程回报的 strategy、前后 token 估算）——只按通道计时分不出本地清理与模型摘要。
-- 渲染层 `perf-probe.js` 只采样、`log-probe.js` 只记错误，两者交给同一写入器。
+- 渲染层 `perf-probe.js` 只采样、`log-probe.js` 只记错误，两者交给同一写入器。每个采样自带采集时刻 `at`，15s 批送时不能用批次落盘时间代替；Performance 汇总按日志 scope 各从文件尾部读取最多 4MB，避免 `perf` / `mem` / `invoke` 互相挤掉，不整文件读入内存。
 - 采样全量记录，不做「异常才写」；隐藏窗口的 `lag` 记 null。
 - 面板轮询跟可见性走（Stats 30s + 可见且聚焦；会话列表 10s，回到窗口立即补一次）；配置页 Performance 的聚合在 host 侧做完。
+- Stats 的 `stats:changed` 推送与定时轮询共用可见和焦点门控；窗口失焦后不要因为后台索引进度持续重读整份统计。
 - **插件面板只在看得见时轮询**：`chat-cache` 保留 5 个 ChatView，每个都挂着快捷条；`PluginQuickBar` / `PluginPanels` 必须带 `visible`（`ChatView` 的 `visible` 直传），隐藏实例不轮询状态行（30s）、不预热菜单、不刷新抽屉（4s）——否则一天几千次 `chat:plugin-panel-view`，还会把没人看的会话宿主一直喂活而不被回收。host 侧再按 `id + pluginId + cwd` 合并 3 秒内的重复读（`PANEL_VIEW_REUSE_MS`），动作不做合并。
 - 顶栏 Git 徽标（`git:change-counts`）是整棵工作区扫描，自己一层 20s 缓存 + **先回旧值、后台重算**；`worktreeSignature`（HEAD）变了或 `worktreeEpochOf` 变了（stage / discard / 保存文件）时不许回旧值。
 - 会话列表整份返回，但内容没变时按字段指纹（`session-state.js` 的 `sameSessionSnapshot`）跳过 setState，空闲轮询不触发重渲染。

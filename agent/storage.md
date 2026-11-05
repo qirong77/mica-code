@@ -20,3 +20,4 @@
 - `sessions/.turn-locks/<id>.writes` 是这条会话「本轮写过哪些文件」的台账（JSONL，`{path, at}`，`sessionWrites.ts`）。它只服务一个判断：一批未提交改动属于哪个会话——`git status` 不记录作者，并发同 cwd 的会话之间只能靠它分辨。写入方是工具层的 `observeToolExecution`（`write_file` / `apply_patch` 的路径），`run_shell` 里的重定向看不见，所以它只是证据之一；读方是 `session_peers`，按对方 turn 的开始时间过滤。台账按行追加、超 128KB 压成最近 200 行，坏行跳过，任何读写失败都吞掉（辅助信息不该让工具报错）。
 - 垃圾占位须同时满足：默认占位标题、无对话、无 usage；`turnState === 'running'` 永不隐藏或删除。
 - 只读会话顶层字段（cwd、标题等）用 `host/session-file-head.js` 读文件头，不要为单个字段整份 `JSON.parse`：最大的一份会话 19MB（清掉 `rawUsage` 之前是 153MB，随对话长度这笔开销还会再涨）。
+- TUI 空闲检测会话外部改动先看文件身份（设备/inode/大小/纳秒 mtime/ctime），稳定时不读正文；元信息变动才加载并核对内容，读取期间身份又变化则下次重试。`SessionController` 只保留快照 JSON 的短哈希与 cwd，不长期持有整份序列化 JSON；这不改变会话文件格式，也不替代跨进程 turn lease。

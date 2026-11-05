@@ -10,7 +10,7 @@ node-only（写文件），不要从浏览器侧的代码里 import。
 - **节流**：内存排队 + 2s 批量 flush，高频事件（流式输出、每秒采样）不会把调用方拖慢；单文件 16MB 分片、保留 7 天、目录总容量 256MB。
 - **慢操作**：`logger(scope).timed()` / `timedResult()` 包一次调用，超过 `SLOW_MS`（默认 300ms）记一条 warn，并累计到 `slowReport()`——「哪个功能慢」看这张表。`timedResult` 额外识别「调用成功但返回体里带 `error` / `ok:false`」的失败。
 - **进程内存**：`startMemorySampler({ host, describe })` 每 30s 记一条 `scope: 'mem'`。
-- **聚合**：`readPerformanceSummary()` 把上面几类合成配置页 Performance 用的形状（渲染层时间线、按功能聚合、进程内存、最近事件）。
+- **聚合**：`readPerformanceSummary()` 按 scope 各自从文件尾部读取最多 4MB，避免高频 `perf` 日志挤掉 `mem` / `invoke`；把渲染层时间线、按功能聚合、进程内存和最近事件交给 Performance 页。慢且失败的 `timedResult()` 只写一条带 `failed` 标记的 slow 记录。
 
 ## 谁在写
 

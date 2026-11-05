@@ -21,7 +21,13 @@ export function registerPerfIpc() {
     })
     for (const sample of samples) {
       if (!sample || typeof sample !== 'object') continue
-      perfLog.info('sample', sample)
+      const { at, ...fields } = sample
+      perfLog.info('sample', {
+        ...fields,
+        ...(typeof at === 'number' && Number.isFinite(at) && at > 0 && at <= Date.now()
+          ? { at }
+          : {})
+      })
     }
     return { written: samples.length }
   })

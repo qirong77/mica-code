@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,32 @@ afterEach(() => {
 });
 
 describe('SessionStore path', () => {
+  it('distinguishes an atomic replacement even with identical size and mtime', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-stat-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      store.save(makeSession('polled', '/tmp', '2026-01-01T00:00:00.000Z'));
+      const path = join(SESSION_DIR, 'polled.json');
+      const before = statSync(path);
+      const signature = store.statSignature('polled');
+      expect(signature).not.toBeNull();
+      expect(store.statSignature('polled')).toBe(signature);
+
+      const replacement = `${path}.replacement`;
+      writeFileSync(replacement, readFileSync(path));
+      utimesSync(replacement, before.atime, before.mtime);
+      renameSync(replacement, path);
+      expect(statSync(path).size).toBe(before.size);
+      expect(Math.floor(statSync(path).mtimeMs / 1000)).toBe(Math.floor(before.mtimeMs / 1000));
+      expect(store.statSignature('polled')).not.toBe(signature);
+      expect(store.statSignature('missing')).toBeNull();
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
   it('keeps headless sessions inside MICA_HOME when it is set', async () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-home-'));
     try {
