@@ -10,7 +10,6 @@
   "priority": 60,
   "mica": { "apiVersion": 1 },
   "requires": ["actions", "background", "desktop"],
-  "desktop": { "panel": { "label": "Cookie 同步", "display": "modal", "status": true } },
   "actions": [
     { "key": "connection", "label": "安装 Chrome 扩展", "description": "查看扩展目录、本地服务地址和连接口令" }
   ],

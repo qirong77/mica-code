@@ -1,6 +1,6 @@
 # Browser Cookie Sync
 
-让 Chrome 和 Mica 受控浏览器（`persist:mica-browser`）自动双向同步 cookie。无需全磁盘访问、钥匙串授权，也没有「立即同步」按钮。
+让 Chrome 和 Mica 受控浏览器（`persist:mica-browser`）自动双向同步 cookie。无需全磁盘访问、钥匙串授权；后台自动同步，不在对话区显示按钮或面板，安装入口与连接状态只在插件设置页。
 
 ## 安装
 

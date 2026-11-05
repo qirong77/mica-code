@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { startCookieService } from './service.js';
-import { readPluginData, updatePluginData } from './status.js';
+import { updatePluginData } from './status.js';
 import { extensionFiles } from './extensionSources.js';
 
 const PORT = 19387;
@@ -45,36 +45,6 @@ export default function setup(ctx: PluginContext): void {
   ctx.actions?.register('connection', async () => ({
     message: `Chrome 扩展目录：${installExtension(dataDir)}（chrome://extensions → 加载已解压的扩展程序）。在扩展选项中粘贴连接口令：${serviceToken(dataDir)}。服务地址：http://127.0.0.1:${PORT}。口令只填到本机扩展，不要发给网站。`,
   }));
-
-  const panel = ctx.desktop?.panel?.({
-    async view() {
-      const detail = readPluginData(dataDir).target?.text || '等待连接';
-      return {
-        title: 'Cookie 同步',
-        statusBar: { label: 'Cookie 同步', detail, tone: detail === '已连接' ? 'ok' : 'muted', section: '连接' },
-        sections: [
-          {
-            title: '连接',
-            subtitle: '安装 Chrome 扩展后自动双向同步，无需手动操作',
-            rows: [
-              { label: '本地服务', value: `127.0.0.1:${PORT}` },
-              { label: '状态', value: detail },
-              {
-                label: '安装',
-                value:
-                  '在插件配置页点「安装 Chrome 扩展」获取目录和口令，再去 chrome://extensions 加载已解压的扩展程序',
-                wrap: true,
-              },
-            ],
-          },
-        ],
-      };
-    },
-    async action() {
-      return { message: '安装 Chrome 扩展后自动同步，无需手动按钮' };
-    },
-  });
-  if (panel) ctx.onDispose(() => panel.dispose());
 
   if (!process.env.MICA_BROWSER_URL || !ctx.desktop) return;
   let service: Awaited<ReturnType<typeof startCookieService>> | null = null;

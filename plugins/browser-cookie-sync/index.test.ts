@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import setup from './index.js';
 import { extensionFiles } from './extensionSources.js';
+import manifest from './plugin.json';
 
 const homes: string[] = [];
 afterEach(() => {
@@ -36,7 +37,8 @@ it('installs the embedded extension and keeps one private token across actions',
   for (const [name, content] of Object.entries(extensionFiles)) {
     expect(readFileSync(join(data, 'extension-v2', name), 'utf8')).toBe(content);
   }
-  expect(panel).toHaveBeenCalledOnce();
+  expect(panel).not.toHaveBeenCalled();
+  expect(manifest).not.toHaveProperty('desktop.panel');
 });
 
 it('keeps embedded assets in sync with the distributable extension', () => {
