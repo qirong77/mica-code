@@ -1,6 +1,7 @@
 import type { Disposable } from '@packages/mica-common/index.js';
 import { normalizePluginNewSession, type PluginNewSession } from './PluginNewSession.js';
-import { isValidPluginPanelShortcutId } from './PluginDesktop.js';
+import { isValidPluginPanelShortcutId, shortcutStyleOf } from './PluginDesktop.js';
+import type { PluginPanelShortcutStyle } from './PluginDesktop.js';
 
 /**
  * 插件在桌面端对话右侧的**面板**（视图数据 + 动作回传）。
@@ -322,8 +323,47 @@ export type PluginPanelView = {
    * 哪段是分支，列对齐才读得快。行本身可点，点一行等于执行它的 `action`。
    */
   menus?: Record<string, PluginPanelMenu>;
+  /**
+   * 运行期给出的快捷按钮，追加在清单 `desktop.panel.shortcuts` 之后。
+   *
+   * 清单是磁盘上的静态文件，写不出「这一轮需要哪几个按钮」——模型刚给用户准备好的入口、
+   * 刚认领的开发副本、刚连上的机器都属于这类。清单只声明 `dynamicShortcuts: true`
+   * （「这个面板会给按钮，数量不定」），具体是哪几个由视图现说。宿主把它们与清单里的
+   * 按钮画在同一排，所以两者共用一套形状，只有两点额外约定：`id` 必填（视图按 id 给
+   * `shortcutStates`，宿主也靠它去重），`key` 是点它时随动作回传的 `key`。
+   *
+   * 与 `menus` 的分工：`menus` 是清单里某个按钮悬停展开的**一层菜单**，这里是**按钮本身**。
+   * 一个按钮是一条最常用的动作时才配站在这一排；更多动作收进 `menus`。
+   */
+  shortcuts?: PluginPanelViewShortcut[];
   /** 按清单中快捷按钮的 id 提供当前状态。 */
   shortcutStates?: Record<string, PluginPanelShortcutState>;
+};
+
+/**
+ * 视图给出的一枚快捷按钮：比清单里那份窄，只有「点了做什么」两种落点。
+ *
+ * `id` 在视图里必填（清单里可选）：同一块面板的按钮会随视图刷新反复下发，宿主按 id 认
+ * 「还是那一个按钮」，否则每一次刷新都等于换了一批按钮，点击中的那颗会闪。
+ *
+ * 不给菜单：要「一个按钮展开一层」就写进清单（`shortcuts[].menu`，条目仍由视图现给），
+ * 那本来就是静态入口 + 动态内容的分工，不必让运行期也能造入口。
+ */
+export type PluginPanelViewShortcut = {
+  id: string;
+  label: string;
+  /** 点了执行哪个动作（`PluginPanelActionInput.action`）；与 `section` 二选一。 */
+  action?: string;
+  /** 点了打开面板并展开同名分区；与 `action` 二选一。 */
+  section?: string;
+  /**
+   * 点它时随动作一起回传的 `key`（`PluginPanelActionInput.key`）。
+   *
+   * 一个处理器服务一排按钮时动作 id 会重复（都是 `run`），靠这个 key 分辨点的是哪个。
+   */
+  key?: string;
+  /** 外观（图标 / 强调色 / 形状 / 纯图标）。与清单按钮共用同一份规格。 */
+  style?: PluginPanelShortcutStyle;
 };
 
 export type PluginPanelStatusBar = {
@@ -514,6 +554,28 @@ export type PluginPanelDialogPanel = {
 };
 
 /**
+ * 弹窗底部的一颗按钮。
+ *
+ * 只给「点它做什么」，不写样式：`tone` 与面板里的动作按钮同一套（`primary` / `default` /
+ * `danger`），`icon` 取清单图标表那张 lucide 名字表。点了宿主把 `action` + `key` 交回插件
+ * 的 `action` 处理器——和面板里的按钮同一条通路，所以插件不需要为弹窗另写一套分发。
+ *
+ * 为什么需要它：弹窗常常是「一段说明 + 几个可选做法」（这个页面要看 / 这段放回输入框 /
+ * 干脆开个会话）。只有只读内容时用户得关掉弹窗再去找另一颗按钮，而那一步正是插件已经
+ * 知道答案的事。
+ */
+export type PluginPanelDialogAction = {
+  /** 交给插件动作处理的 id（`PluginPanelActionInput.action`）。 */
+  id: string;
+  /** 同一次点击的定位键（`PluginPanelActionInput.key`）：一排同类按钮靠它分辨。 */
+  key?: string;
+  label: string;
+  icon?: string;
+  tone?: PluginPanelButtonTone;
+  disabled?: boolean;
+};
+
+/**
  * 一张插件声明的只读表格弹窗。
  *
  * 为什么是表格而不是「更多行」：链接清单要的是对齐的列（类型 / 地址 / 备注），一行
@@ -541,6 +603,16 @@ export type PluginPanelDialog = {
   configure?: PluginPanelDialogConfigure;
   /** 底部多一个「打开面板」按钮，打开这个插件自己的面板。 */
   panel?: PluginPanelDialogPanel;
+  /** 底部的动作按钮（最多 3 颗）：点了回到插件自己的 `action` 处理器。 */
+  actions?: PluginPanelDialogAction[];
+  /**
+   * 正文按 Markdown 排版（标题、列表、表格）。
+   *
+   * 与 `text` 分工：`text` 是「一段话」，只换行、不解释语法（模型随手写的中文）；模型手里
+   * 本来就是 Markdown（一轮检查结论、一份清单）时用 `markdown`，宿主用对话区那套渲染。
+   * 两者互斥，同时给时按 `markdown` 画。
+   */
+  markdown?: string;
 };
 
 export type PluginPanelViewInput = {
@@ -627,6 +699,8 @@ const MAX_SECTIONS = 12;
 const MAX_DIALOG_COLUMNS = 6;
 const MAX_DIALOG_ROWS = 50;
 const MAX_DIALOG_TEXT = 4000;
+/** 弹窗底部的动作按钮：一个「说明 + 几个做法」的弹窗给到三颗就够，再多该开面板。 */
+const MAX_DIALOG_ACTIONS = 3;
 const MAX_MENUS = 6;
 const MAX_MENU_ITEMS = 20;
 const MAX_MENU_KEY = 200;
@@ -635,6 +709,9 @@ const MAX_ACTION_ID = 64;
 const MAX_SHORTCUT_STATES = 40;
 const MAX_SHORTCUT_BADGE = 12;
 const MAX_SHORTCUT_DISABLED_REASON = 200;
+/** 视图给出的快捷按钮：一排按钮的上限（再多就把输入框上方的空间吃完了）。 */
+const MAX_VIEW_SHORTCUTS = 8;
+const MAX_VIEW_SHORTCUT_LABEL = 24;
 /** 弹窗里的一格：链接地址可以很长（带查询串的分享链接），但仍然有上限。 */
 const MAX_CELL_LINK = 2000;
 /** 提示词整段回传的上限：它是一段给模型看的正文，不是一行状态。 */
@@ -983,6 +1060,7 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
     .filter((entry): entry is PluginPanelSection => entry !== null);
   const menus = menusOf(raw.menus);
   const shortcutStates = shortcutStatesOf(raw.shortcutStates);
+  const shortcuts = viewShortcutsOf(raw.shortcuts);
   const statusBarRaw = record(raw.statusBar);
   const statusBarLabel = text(statusBarRaw.label, 40);
   const statusBarDetail = text(statusBarRaw.detail, 120);
@@ -1007,7 +1085,45 @@ export function normalizePluginPanelView(input: unknown, fallbackTitle = '插件
     ...(sections.length > 0 ? { sections } : {}),
     ...(menus ? { menus } : {}),
     ...(shortcutStates ? { shortcutStates } : {}),
+    ...(shortcuts ? { shortcuts } : {}),
   };
+}
+
+/**
+ * 视图里的快捷按钮：缺 `id` / `label`、或者点了什么也不会发生的，一律丢掉。
+ *
+ * 与列表类的归一化同一条规则：界面上不留点不动的按钮。`id` 必须符合快捷按钮的 id 约定，
+ * 因为它同时是页面上的 key 与 `shortcutStates` 的键。
+ */
+function viewShortcutsOf(value: unknown): PluginPanelViewShortcut[] | undefined {
+  const shortcuts: PluginPanelViewShortcut[] = [];
+  const ids = new Set<string>();
+  for (const entry of list(value).slice(0, MAX_VIEW_SHORTCUTS)) {
+    const raw = record(entry);
+    const id = text(raw.id, MAX_ACTION_ID);
+    if (!id || !isValidPluginPanelShortcutId(id) || ids.has(id)) continue;
+    // id 先占住再判其它字段：页面上 id 同时是 React key 与 `shortcutStates` 的键，
+    // 两条同 id 的按钮会让状态串到另一颗上去。前一条不可用也照样占位。
+    ids.add(id);
+    const label = text(raw.label, MAX_VIEW_SHORTCUT_LABEL);
+    if (!label) continue;
+    const action = text(raw.action, MAX_ACTION_ID);
+    const section = text(raw.section, 60);
+    // `action` 与 `section` 同时给时按 `action` 画（与清单里的那条规则一致：点击做什么
+    // 只有一件事），两个都没有就没有落点。
+    if (!action && !section) continue;
+    const key = text(raw.key, MAX_ACTION_ID);
+    const style = shortcutStyleOf(raw.style);
+    shortcuts.push({
+      id,
+      label,
+      ...(action ? { action } : {}),
+      ...(!action && section ? { section } : {}),
+      ...(key ? { key } : {}),
+      ...(style ? { style } : {}),
+    });
+  }
+  return shortcuts.length > 0 ? shortcuts : undefined;
 }
 
 function shortcutStatesOf(value: unknown): Record<string, PluginPanelShortcutState> | undefined {
@@ -1222,12 +1338,18 @@ function dialogOf(value: unknown): PluginPanelDialog | undefined {
     .map((column) => text(column, 30))
     .filter(Boolean);
   const body = text(raw.text, MAX_DIALOG_TEXT);
+  // Markdown 正文比纯文本宽一档（和面板分区里的 `markdown` 同一个上限）：
+  // 它装的是整篇说明，不是「一句话」。
+  const markdown = verbatim(raw.markdown, MAX_SECTION_MARKDOWN).trim();
   const qr = dialogQrOf(raw.qr);
-  if (columns.length === 0 && !body && !qr) return undefined;
+  const actions = dialogActionsOf(raw.actions);
+  if (columns.length === 0 && !body && !markdown && !qr && !actions) return undefined;
   const rows = list(raw.rows)
     .slice(0, MAX_DIALOG_ROWS)
     .map((row) => {
-      const cells = list(row).slice(0, columns.length).map((cell) => dialogCellOf(cell));
+      const cells = list(row)
+        .slice(0, columns.length)
+        .map((cell) => dialogCellOf(cell));
       if (!cells.some((cell) => cell !== null)) return null;
       // 补齐到列数：宿主按列画格子，短行不该让后面的列错位
       return columns.map((_, index) => cells[index] ?? { text: '' });
@@ -1242,12 +1364,43 @@ function dialogOf(value: unknown): PluginPanelDialog | undefined {
     columns,
     rows,
     ...(body ? { text: body } : {}),
+    ...(markdown ? { markdown } : {}),
     ...(qr ? { qr } : {}),
     ...(subtitle ? { subtitle } : {}),
     ...(note ? { note } : {}),
     ...(configure ? { configure } : {}),
     ...(panel ? { panel } : {}),
+    ...(actions ? { actions } : {}),
   };
+}
+
+/**
+ * 弹窗底部的动作按钮：缺 `id` / `label` 的丢掉，最多 3 颗。
+ *
+ * 三颗是弹窗底部的上限：再多的选择已经不适合放在一个「说明」里，那应该是一块面板或
+ * 一排快捷按钮。`id` 必须是合法的动作 id——它就是点下去交给插件的那一个 id。
+ */
+function dialogActionsOf(value: unknown): PluginPanelDialogAction[] | undefined {
+  const actions: PluginPanelDialogAction[] = [];
+  for (const entry of list(value)) {
+    const raw = record(entry);
+    const id = text(raw.id, MAX_ACTION_ID);
+    const label = text(raw.label, 24);
+    if (!id || !label) continue;
+    const key = text(raw.key, MAX_ACTION_ID);
+    const icon = text(raw.icon, 40);
+    const actionTone = buttonTone(raw.tone);
+    actions.push({
+      id,
+      label,
+      ...(key ? { key } : {}),
+      ...(icon ? { icon } : {}),
+      ...(actionTone ? { tone: actionTone } : {}),
+      ...(raw.disabled === true ? { disabled: true } : {}),
+    });
+    if (actions.length >= MAX_DIALOG_ACTIONS) break;
+  }
+  return actions.length > 0 ? actions : undefined;
 }
 
 /** 二维码：`value` 是唯一的硬条件，没内容就没有码可画。 */

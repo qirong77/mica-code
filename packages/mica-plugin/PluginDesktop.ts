@@ -156,6 +156,14 @@ export type PluginDesktopPanel = {
    */
   status: boolean;
   /**
+   * 视图会给出快捷按钮（`PluginPanelView.shortcuts`），数量不定。
+   *
+   * 声明它是因为「有没有按钮」决定了宿主要不要为了这一排去取视图：快捷条是输入框上方
+   * 常驻的一行，页面不能在每次挂载时对每块面板都问一遍（那会拉起会话进程）。写死在
+   * 清单里的按钮不需要它——那份清单页面自己就有。
+   */
+  dynamicShortcuts: boolean;
+  /**
    * 输入框上方那排快捷按钮，按声明顺序渲染。
    *
    * 声明它是因为「一个面板」通常承载两类不同的东西：**马上要做的一件事**（立刻检查）
@@ -169,6 +177,77 @@ export type PluginDesktopPanel = {
 export const PLUGIN_PANEL_DISPLAYS = ['drawer', 'modal'] as const;
 
 export type PluginPanelDisplay = (typeof PLUGIN_PANEL_DISPLAYS)[number];
+
+/**
+ * 快捷按钮的外观规格（清单 `shortcuts[].style` 与视图 `shortcuts[].style` 同一份）。
+ *
+ * 插件**不写样式**：这里给的是几个可枚举的选择，画出来是什么样由宿主用自己那套控件与主题
+ * 令牌决定。所以要它而不是让插件传 CSS / 内联颜色：暗色与亮色是两套变量（`--color-accent`
+ * 在两边是不同色值），插件写死的颜色总有一边读不清；而「打开」「危险操作」「只画图标」这些
+ * 意图本来就该由宿主翻译成它自己的视觉语言。
+ */
+export type PluginPanelShortcutStyle = {
+  /**
+   * 图标名，取自 `@mica-config-ui/web` 的 `PLUGIN_ICONS`（与插件清单 `icon` 同一张表，
+   * lucide 的 kebab-case 名：`globe` / `external` / `search` / `sparkles` / `zap` …）。
+   *
+   * 认不出的名字当没写：宿主宁可画一颗纯文字按钮，也不去猜一个差不多的符号。
+   */
+  icon?: string;
+  /**
+   * 强调色。默认（不写）沿用普通按钮的描边胶囊，只在这颗按钮要表达态度时才给：
+   * `accent` 是「点这个」，`danger` 是「这一步会改东西」，`success` / `warn` 是结果与提醒。
+   * 色值来自主题令牌，暗色与亮色各有一份。
+   */
+  color?: PluginPanelShortcutColor;
+  /** 形状：`pill`（默认，描边胶囊）/ `soft`（无边框、压在面板色上）/ `plain`（纯文字）。 */
+  shape?: PluginPanelShortcutShape;
+  /**
+   * 只画图标，`label` 退成 `title` 与无障碍名。
+   *
+   * 一排按钮里最多一两颗这样：图标没有文字那么容易被读懂，只在「打开」「刷新」这类
+   * 一眼认得出的动作上省地方。
+   */
+  iconOnly?: boolean;
+};
+
+export const PLUGIN_SHORTCUT_COLORS = ['accent', 'danger', 'success', 'warn'] as const;
+export type PluginPanelShortcutColor = (typeof PLUGIN_SHORTCUT_COLORS)[number];
+
+export const PLUGIN_SHORTCUT_SHAPES = ['pill', 'soft', 'plain'] as const;
+export type PluginPanelShortcutShape = (typeof PLUGIN_SHORTCUT_SHAPES)[number];
+
+export function isPluginShortcutColor(value: unknown): value is PluginPanelShortcutColor {
+  return typeof value === 'string' && (PLUGIN_SHORTCUT_COLORS as readonly string[]).includes(value);
+}
+
+export function isPluginShortcutShape(value: unknown): value is PluginPanelShortcutShape {
+  return typeof value === 'string' && (PLUGIN_SHORTCUT_SHAPES as readonly string[]).includes(value);
+}
+
+/**
+ * 归一化一颗按钮的外观规格：只放行枚举里的那几个值，认不出的当没写。
+ *
+ * 清单与视图两条路径共用这一份（放在这个模块而不是 `PluginPanel.ts`：后者已经在 import
+ * 本模块，反过来再引一圈会让两个模块互相等）。宁可画一颗默认按钮，也不要让一个拼错的
+ * 颜色名变成「没有颜色的强调按钮」——那种按钮看起来和普通按钮一样，用户点下去才发现
+ * 它不是主操作。
+ */
+export function shortcutStyleOf(value: unknown): PluginPanelShortcutStyle | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const icon = typeof raw.icon === 'string' ? raw.icon.trim().slice(0, 40) : '';
+  const color = isPluginShortcutColor(raw.color) ? raw.color : undefined;
+  const shape = isPluginShortcutShape(raw.shape) ? raw.shape : undefined;
+  const iconOnly = raw.iconOnly === true;
+  if (!icon && !color && !shape && !iconOnly) return undefined;
+  return {
+    ...(icon ? { icon } : {}),
+    ...(color ? { color } : {}),
+    ...(shape ? { shape } : {}),
+    ...(iconOnly ? { iconOnly } : {}),
+  };
+}
 
 /**
  * 一个快捷按钮，四种形态里选一种：
@@ -191,6 +270,13 @@ export type PluginPanelShortcut = {
   section?: string;
   menu?: string;
   items?: PluginPanelShortcutItem[];
+  /**
+   * 外观规格（图标 / 强调色 / 形状 / 纯图标）。不写就是宿主默认的描边胶囊。
+   *
+   * 清单里的按钮与视图在运行期给的按钮共用同一份规格：两端都只有这一种「怎么画」的表达，
+   * 插件不写样式（见 `PluginPanelShortcutStyle` 的说明）。
+   */
+  style?: PluginPanelShortcutStyle;
 };
 
 /** 快捷按钮标识同时用作视图字典的键。 */

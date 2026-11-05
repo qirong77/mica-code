@@ -175,6 +175,7 @@ describe('parsePluginManifest desktop panel', () => {
         roles: ['需求开发', '辅助'],
         display: 'drawer',
         status: false,
+        dynamicShortcuts: false,
         shortcuts: [],
       });
     }
@@ -189,6 +190,7 @@ describe('parsePluginManifest desktop panel', () => {
         roles: [],
         display: 'drawer',
         status: false,
+        dynamicShortcuts: false,
         shortcuts: [],
       });
   });
@@ -221,6 +223,20 @@ describe('parsePluginManifest desktop panel', () => {
     const result = parsePluginManifest(base({ desktop: { panel: { roles: ['需求开发', '需求开发'] } } }));
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.manifest.desktopPanel?.roles).toEqual(['需求开发']);
+  });
+
+  it('reads dynamicShortcuts so the page knows it has to ask the view for buttons', () => {
+    const result = parsePluginManifest(base({ desktop: { panel: { dynamicShortcuts: true } } }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPanel?.dynamicShortcuts).toBe(true);
+
+    const off = parsePluginManifest(base({ desktop: { panel: { label: 'x' } } }));
+    expect(off.ok).toBe(true);
+    if (off.ok) expect(off.manifest.desktopPanel?.dynamicShortcuts).toBe(false);
+
+    const bad = parsePluginManifest(base({ desktop: { panel: { dynamicShortcuts: 'yes' } } }));
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toContain('dynamicShortcuts');
   });
 
   it('rejects a malformed panel instead of silently hiding the entry', () => {
@@ -260,6 +276,36 @@ describe('parsePluginManifest desktop panel', () => {
         { label: '频道设置', section: '频道设置' },
       ]);
     }
+  });
+
+  it('reads a shortcut look so the host can draw it with its own theme', () => {
+    const result = parsePluginManifest(
+      base({
+        desktop: {
+          panel: {
+            shortcuts: [
+              { label: '打开', action: 'open', style: { icon: 'globe', color: 'accent', iconOnly: true } },
+            ],
+          },
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.desktopPanel?.shortcuts[0].style).toEqual({
+        icon: 'globe',
+        color: 'accent',
+        iconOnly: true,
+      });
+    }
+  });
+
+  it('drops an unknown color or shape instead of drawing something else', () => {
+    const result = parsePluginManifest(
+      base({ desktop: { panel: { shortcuts: [{ label: '打开', action: 'open', style: { color: 'purple' } }] } } }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopPanel?.shortcuts[0].style).toBeUndefined();
   });
 
   it('rejects a shortcut that could not do anything when clicked', () => {

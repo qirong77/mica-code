@@ -20,6 +20,7 @@ import {
   CollapsiblePanel,
   ConfigSwitch,
   Empty,
+  PluginIcon,
   SecretInput,
   Segmented,
   SettingRow,
@@ -42,6 +43,8 @@ import {
   panelDraftKey,
   panelDrafts,
   pluginPanelTabs,
+  pluginQuickbarItems,
+  quickbarButtonLook,
   quickbarMenuItems,
   quickbarMenuTable,
   readMenuCache,
@@ -198,6 +201,9 @@ export function PluginQuickBar({
   const [menuViews, setMenuViews] = useState({})
   const inflight = useRef(new Map())
   const [shortcutViews, setShortcutViews] = useState({})
+  // 视图在运行期给的按钮（清单 `dynamicShortcuts`）：模型在会话里刚建的那一排。
+  // 按插件 id 存，跟着 `loadView` 一起换成最新的一份。
+  const [runtimeShortcuts, setRuntimeShortcuts] = useState({})
   // 面板视图里的常驻状态（`statusBar`）：关着面板也要看得见的事实（某个能力是否生效、
   // 连着哪台机器）。按插件 id 存，和 shortcutStates 一起随视图刷新。
   const [statusBars, setStatusBars] = useState({})
@@ -222,20 +228,10 @@ export function PluginQuickBar({
       window.removeEventListener('scroll', onViewport, true)
     }
   }, [openMenu])
-  const items = useMemo(() => {
-    const list = []
-    for (const panel of panels) {
-      for (const [index, shortcut] of panel.shortcuts.entries()) {
-        list.push({
-          panel,
-          shortcut,
-          key: `${panel.id}:${shortcut.id || `legacy-${index}`}`,
-          first: index === 0
-        })
-      }
-    }
-    return list
-  }, [panels])
+  const items = useMemo(
+    () => pluginQuickbarItems(panels, runtimeShortcuts),
+    [panels, runtimeShortcuts]
+  )
 
   const clearHover = useCallback(() => {
     if (!hoverTimer.current) return
@@ -268,6 +264,13 @@ export function PluginQuickBar({
           const view = result.view || result
           setShortcutViews((current) => ({ ...current, [requestKey]: view.shortcutStates || {} }))
           setStatusBars((current) => ({ ...current, [panel.id]: view.statusBar || null }))
+          // 没有按钮时清成空数组：视图不再给那几个按钮，这一排就该收起来。内容没变就不换
+          // 引用——这一份直接决定 `items` 要不要重算，30 秒一次的轮询不该让整排重渲染。
+          setRuntimeShortcuts((current) => {
+            const next = view.shortcuts || []
+            if (JSON.stringify(current[panel.id] || []) === JSON.stringify(next)) return current
+            return { ...current, [panel.id]: next }
+          })
           return { view }
         }
         return { error: result?.error || '读取失败，请重试' }
@@ -318,6 +321,7 @@ export function PluginQuickBar({
     setOpenMenu('')
     setShortcutViews({})
     setStatusBars({})
+    setRuntimeShortcuts({})
   }, [context])
 
   useEffect(() => {
@@ -326,10 +330,13 @@ export function PluginQuickBar({
     // 实测 8 小时的日志里 8388 次 `chat:plugin-panel-view`、p75 3.5 秒，全部来自这里。
     if (!visible) return undefined
     const wanted = items.filter(({ shortcut }) => shortcut.menu || shortcut.id)
-    // 声明了 panel.status 的插件即使没有快捷按钮，也要为首屏取一次视图：
-    // 输入框上方那条常驻状态就来自这里，不能等用户点开面板才出现。
+    // 声明了 panel.status 的插件即使没有快捷按钮，也要为首屏取一次视图：输入框上方那条
+    // 常驻状态就来自这里，不能等用户点开面板才出现。按钮由视图给的面板同理——不问就没有那
+    // 一排按钮，而它正是这个面板存在的全部理由。
     const statusOnly = panels.filter(
-      (panel) => panel.status && !wanted.some((entry) => entry.panel.id === panel.id)
+      (panel) =>
+        (panel.status || panel.dynamicShortcuts) &&
+        !wanted.some((entry) => entry.panel.id === panel.id)
     )
     if (!wanted.length && !statusOnly.length) return undefined
     const refresh = () => {
@@ -355,7 +362,8 @@ export function PluginQuickBar({
   useEffect(() => {
     if (!visible) return undefined
     const dynamicPanels = panels.filter(
-      (panel) => panel.status || panel.shortcuts.some((shortcut) => shortcut.id)
+      (panel) =>
+        panel.status || panel.dynamicShortcuts || panel.shortcuts.some((shortcut) => shortcut.id)
     )
     if (!dynamicPanels.length) return undefined
     const refresh = () => {
@@ -374,7 +382,12 @@ export function PluginQuickBar({
 
   useEffect(() => {
     if (!visible) return undefined
-    if (!nodeId || !items.some(({ shortcut }) => shortcut.menu || shortcut.id)) return undefined
+    // 视图给按钮的面板即使此刻一个按钮都没有也要接工具事件：模型刚建的那一排就是在
+    // 一次工具调用之后出现的，等 30 秒轮询等于让用户以为没做成。
+    const viewPanels = panels.filter((panel) => panel.dynamicShortcuts)
+    if (!nodeId) return undefined
+    if (!items.some(({ shortcut }) => shortcut.menu || shortcut.id) && viewPanels.length === 0)
+      return undefined
     let timer
     let active = true
     const refreshAfterTool = async () => {
@@ -389,6 +402,11 @@ export function PluginQuickBar({
           void loadView(panel)
         }
       }
+      for (const panel of viewPanels) {
+        if (dynamic.has(panel.id)) continue
+        dynamic.add(panel.id)
+        void loadView(panel)
+      }
     }
     const unsubscribe = window.mica.chat.onEvent((payload) => {
       if (!isCompletedToolEvent(payload, nodeId)) return
@@ -400,7 +418,7 @@ export function PluginQuickBar({
       clearTimeout(timer)
       unsubscribe()
     }
-  }, [context, items, loadMenu, loadView, nodeId, visible])
+  }, [context, items, loadMenu, loadView, nodeId, panels, visible])
 
   // 状态贴在哪一块面板上也要知道：点它进的是那块面板。
   const statusOwner = panels.find((panel) => statusBars[panel.id]?.label) || null
@@ -428,7 +446,8 @@ export function PluginQuickBar({
         onOpenReview
       })
       setFeedback(result?.ok === false ? result.error || '动作失败' : result?.message || '')
-      if (panel.shortcuts.some((shortcut) => shortcut.id)) void loadView(panel)
+      if (panel.dynamicShortcuts || panel.shortcuts.some((shortcut) => shortcut.id))
+        void loadView(panel)
       for (const entry of items.filter(
         (item) => item.panel.id === panel.id && item.shortcut.menu
       )) {
@@ -476,7 +495,8 @@ export function PluginQuickBar({
       return
     }
     if (shortcut.action) {
-      await runAction(panel, shortcut.action, undefined, key)
+      // `key` 是「点的是哪一个」：一排运行期按钮共用同一个动作 id，靠它分辨。
+      await runAction(panel, shortcut.action, shortcut.key, key)
       return
     }
     clearHover()
@@ -519,6 +539,15 @@ export function PluginQuickBar({
             ? (menuViews[key]?.table ?? { columns: [], rows: [] })
             : { columns: [], rows: [] }
           const menuEmpty = menuItems.length === 0 && menuTable.rows.length === 0
+          // 外观规格由插件给（图标 / 强调色 / 形状），画成什么样由宿主决定：色值走主题
+          // 令牌（暗色与亮色各一套），图标走 app 那套 `PluginIcon`——插件不该自带图标库，
+          // 也不该写死颜色。没有规格时就是原来那颗描边胶囊。
+          const look = quickbarButtonLook(shortcut, {
+            active,
+            busy: pending === key,
+            hasMenu: group,
+            panelLabel: panel.label
+          })
           return (
             <div
               key={key}
@@ -530,27 +559,17 @@ export function PluginQuickBar({
             >
               <button
                 type="button"
-                title={
-                  state?.disabledReason ||
-                  (shortcut.section
-                    ? `${active ? '收起' : '打开'}「${shortcut.label}」`
-                    : `${panel.label} · ${shortcut.label}`)
-                }
+                title={state?.disabledReason || look.title}
+                aria-label={look.ariaLabel}
                 aria-pressed={shortcut.section ? active : undefined}
                 aria-haspopup={group ? 'menu' : undefined}
                 aria-expanded={group ? openMenu === key : undefined}
                 disabled={Boolean(pending) || disabled}
-                className={[
-                  'chat-plugin-quickbar-button',
-                  shortcut.action ? 'is-primary' : '',
-                  active ? 'is-active' : '',
-                  pending === key ? 'is-busy' : ''
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
+                className={look.className}
                 onClick={(event) => void runShortcut(event, panel, shortcut, key)}
               >
-                {shortcut.label}
+                {look.icon && <PluginIcon name={look.icon} size={13} />}
+                {!look.iconOnly && shortcut.label}
                 {pending === key && <span aria-label="执行中">…</span>}
                 {state?.badge && <span className="chat-plugin-quickbar-badge">{state.badge}</span>}
                 {group && (

@@ -9,6 +9,7 @@ import evolutionSetup from '../../plugins/evolution/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
+import quickButtonsSetup from '../../plugins/quick-buttons/index.js';
 import scheduleSetup from '../../plugins/schedule/index.js';
 import sessionCompactSetup from '../../plugins/session-compact/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
@@ -52,6 +53,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   connections: connectionsSetup,
   evolution: evolutionSetup,
   'mobile-relay': mobileRelaySetup,
+  'quick-buttons': quickButtonsSetup,
   schedule: scheduleSetup,
   video: videoSetup,
 };

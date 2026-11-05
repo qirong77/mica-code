@@ -209,8 +209,79 @@ export function selectPluginPanels(plugins, role) {
       // 声明了 `status` 的面板即使没有任何快捷按钮也要问一次视图：输入框上方那行状态
       // （「这个能力现在生效没有」）就来自它，丢了这一位状态行永远不会出现。
       status: plugin.desktopPanel.status === true,
+      // 声明了 `dynamicShortcuts` 的面板，按钮本身在视图里（模型刚建的那一排）。没有这一位
+      // 页面就不知道该去问，按钮永远不出现。
+      dynamicShortcuts: plugin.desktopPanel.dynamicShortcuts === true,
       shortcuts: Array.isArray(plugin.desktopPanel.shortcuts) ? plugin.desktopPanel.shortcuts : []
     }))
+}
+
+/**
+ * 输入框上方那排按钮的最终清单：清单里声明的 + 视图在运行期给的。
+ *
+ * 清单里的按钮在前（插件写死的常用入口），视图现给的在后（这一轮才有的那几个）——位置
+ * 稳定的入口不该被一次会话的内容挤到后面去。运行期的 key 带 `view:` 前缀，免得和清单里
+ * 同 id 的按钮撞成同一个 React key。
+ */
+export function pluginQuickbarItems(panels, runtimeShortcuts) {
+  const list = []
+  for (const panel of Array.isArray(panels) ? panels : []) {
+    const statics = Array.isArray(panel?.shortcuts) ? panel.shortcuts : []
+    const dynamic = runtimeShortcuts?.[panel?.id]
+    const shortcuts = [
+      ...statics.map((shortcut, index) => ({
+        shortcut,
+        key: `${panel.id}:${shortcut.id || `legacy-${index}`}`
+      })),
+      ...(Array.isArray(dynamic) ? dynamic : []).map((shortcut) => ({
+        shortcut,
+        key: `${panel.id}:view:${shortcut.id}`
+      }))
+    ]
+    shortcuts.forEach(({ shortcut, key }, index) => {
+      list.push({ panel, shortcut, key, first: index === 0 })
+    })
+  }
+  return list
+}
+
+/**
+ * 一颗快捷按钮「怎么画」：插件只声明意图（图标 / 颜色 / 形状 / 纯图标），
+ * 这里翻成宿主那套类名与无障碍属性。
+ *
+ * 抽成纯函数是因为这几条规则必须两端一致：清单里的按钮与视图在运行期给的按钮走同一个
+ * 判定，颜色与形状的取值也来自同一份（`PLUGIN_SHORTCUT_COLORS` / `PLUGIN_SHORTCUT_SHAPES`
+ * 那边的校验已经过滤过，这里只管画）。
+ */
+export function quickbarButtonLook(shortcut, { active = false, busy = false, hasMenu = false, panelLabel = '' } = {}) {
+  const style = shortcut?.style || {}
+  const icon = typeof style.icon === 'string' ? style.icon.trim() : ''
+  // 没有图标时「只画图标」只会得到一颗空按钮：退回带文字的那一种。
+  const iconOnly = style.iconOnly === true && Boolean(icon)
+  const className = [
+    'chat-plugin-quickbar-button',
+    shortcut?.action ? 'is-primary' : '',
+    style.color ? `color-${style.color}` : '',
+    style.shape && style.shape !== 'pill' ? `shape-${style.shape}` : '',
+    iconOnly ? 'is-icon-only' : '',
+    active ? 'is-active' : '',
+    busy ? 'is-busy' : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return {
+    icon,
+    iconOnly,
+    className,
+    hasMenu: Boolean(hasMenu),
+    label: shortcut?.label || '',
+    // 只画图标时文字退回无障碍名与悬停提示
+    ariaLabel: iconOnly ? shortcut?.label || '' : undefined,
+    title:
+      shortcut?.section
+        ? `${active ? '收起' : '打开'}「${shortcut?.label || ''}」`
+        : `${panelLabel} · ${shortcut?.label || ''}`
+  }
 }
 
 /**

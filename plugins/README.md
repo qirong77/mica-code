@@ -608,6 +608,34 @@ ctx.desktop.panel({
   `id` 在同一插件内唯一，长度 1–64，只能含小写字母、数字、`.`、`_`、`-`，并以字母或数字开头；
   旧清单可以不写。状态字段均可选：`badge` 是短文本，`disabled` 是布尔值，`disabledReason` 是
   禁用原因。宿主最多保留 40 条状态，徽标和原因分别裁到 12 和 200 字符，无效字段会被忽略。
+- 按钮也可以**由视图在运行期给出**：清单写 `"dynamicShortcuts": true`，视图返回
+  `shortcuts: [{ id, label, action?, section?, key? }]`，宿主把它们画在同一排、排在清单声明的
+  按钮之后（位置稳定的入口不该被一次会话的内容挤到前面）。这条路径给的是「按钮本身运行期才
+  知道」的插件——模型在会话里现建的一排、刚认领的那几个副本；静态入口仍然写清单。声明了它
+  之后，即使清单里一枚按钮都没有，宿主也会为首屏取一次视图：不问就永远没有那一排。
+
+  视图按钮的 `id` **必填**：页面按它认「还是那一个按钮」（也是 `shortcutStates` 的键），
+  运行期按钮在页面上的 key 带 `view:` 前缀，不会和清单里同 id 的按钮撞成同一个。`key` 是点击
+  时随动作回传的那个 `key`——一排按钮共用一个动作 id（都是 `run`）时靠它分辨点的是哪一枚。
+  最多 8 枚；缺落点（既无 `action` 也无 `section`）或 `id` 不合法的会被丢掉，界面上不留点不动
+  的按钮。
+
+- **外观只声明意图**：清单与视图的按钮都可以带 `style`，`{ icon, color, shape, iconOnly }`
+  ——`icon` 取 `@mica-config-ui/web` 那张 lucide 图标表的名字（`globe` / `external` / `search` /
+  `zap` …，与清单 `icon` 同一张表），`color` 取 `accent | danger | success | warn`，`shape` 取
+  `pill | soft | plain`，`iconOnly` 只画图标（`label` 退回 `title` 与无障碍名）。画成什么样由
+  宿主决定：颜色来自主题令牌（`--color-accent` 在明暗两套里是不同色值），图标走 app 的
+  `PluginIcon`，插件既不该自带图标库，也不该写死颜色——写死的颜色总有一边读不清。认不出的
+  取值当没写（不猜一个差不多的颜色），`iconOnly` 没有 `icon` 时退回带文字，免得画出一颗空按钮。
+- **弹窗也是按钮的一种落点**：插件从 `action` 里回 `dialog`（而不是把一整页界面画出来），宿主
+  用已有的 `ModalShell` / 表格 / `Button` 渲染它。`dialog` 除了原有的 `title` / `subtitle` /
+  `text` / `qr` / `columns` + `rows` / `note` / `configure` / `panel`，还有两样：
+  `markdown`（正文按对话区那套 Markdown 排版，与 `text` 互斥、同时给时按 `markdown` 画）与
+  `actions`（底部最多 3 颗按钮：`{ id, key?, label, icon?, tone?, disabled? }`）。点弹窗按钮
+  时宿主把 `{ action: id, key }` 交给插件自己的 `action` 处理器——和面板里的按钮同一条通路，
+  插件不必为弹窗另写一套分发；回了新的 `dialog` 就换掉内容，回了 `compose` / `openExternal`
+  之类的落点就直接发生。用它来表达「一段说明 + 几个可选做法」，比让用户关掉弹窗再去找另一颗
+  按钮省事。
 - 面板只表达「几行只读状态 + 一列条目 + 几个输入框 + 几个按钮」。宿主会裁剪长度、条目数与
   字段类型，畸形视图不会让页面崩掉；它拿到的动作是 `{ action, key?, values?, text? }`
   （`text` 只由 `editor` 提交，装的是整篇文档；`values` 里每个值上限 2000 字符，是「一行

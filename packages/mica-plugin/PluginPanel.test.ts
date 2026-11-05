@@ -119,7 +119,10 @@ describe('normalizePluginPanelView', () => {
       sections: [
         {
           title: 't',
-          table: { columns: [{ key: 'c', label: 'C' }], rows: [{ key: 'r', cells: { c: { check: { checked: true } } } }] },
+          table: {
+            columns: [{ key: 'c', label: 'C' }],
+            rows: [{ key: 'r', cells: { c: { check: { checked: true } } } }],
+          },
         },
       ],
     });
@@ -247,9 +250,7 @@ describe('normalizePluginPanelView', () => {
     const text = '\n# 身份\n\n  缩进也要留着\n';
     const view = normalizePluginPanelView({
       title: '需求开发',
-      sections: [
-        { title: '角色描述', editor: { action: 'role.save', value: text, editLabel: '编辑角色描述' } },
-      ],
+      sections: [{ title: '角色描述', editor: { action: 'role.save', value: text, editLabel: '编辑角色描述' } }],
     });
     const editor = view.sections?.[0].editor;
     // 原样保留：trim 掉首尾空白、超长补个省略号，写回磁盘就是一次静默的内容改动
@@ -264,7 +265,10 @@ describe('normalizePluginPanelView', () => {
     expect(tooLong.sections?.[0].editor?.value.length).toBe(MAX_EDITOR_TEXT);
 
     // 空正文是合法的：新建一个还没写内容的文件时，编辑器就是一张白纸。
-    const empty = normalizePluginPanelView({ title: 'x', sections: [{ title: 'a', editor: { action: 's', value: '' } }] });
+    const empty = normalizePluginPanelView({
+      title: 'x',
+      sections: [{ title: 'a', editor: { action: 's', value: '' } }],
+    });
     expect(empty.sections?.[0].editor).toMatchObject({ action: 's', value: '' });
     // 缺动作就是「改完没处交」：当没声明。
     const headless = normalizePluginPanelView({ title: 'x', sections: [{ title: 'a', editor: { value: '正文' } }] });
@@ -290,7 +294,10 @@ describe('normalizePluginPanelView', () => {
             { id: 'save', label: '再保存' },
           ],
           table: {
-            columns: [{ key: 'name', label: '名字' }, { key: 'name', label: '重复列' }],
+            columns: [
+              { key: 'name', label: '名字' },
+              { key: 'name', label: '重复列' },
+            ],
             rows: [
               { key: 'r1', cells: { name: { text: 'A' } } },
               { key: 'r1', cells: { name: { text: 'B' } } },
@@ -477,9 +484,9 @@ describe('normalizePluginPanelAction', () => {
   });
 
   it('carries "只放进输入框" only when it is explicitly false', () => {
-    expect(
-      normalizePluginPanelActionResult({ newSession: { prompt: '去更新页面', send: false } }),
-    ).toEqual({ newSession: { prompt: '去更新页面', send: false } });
+    expect(normalizePluginPanelActionResult({ newSession: { prompt: '去更新页面', send: false } })).toEqual({
+      newSession: { prompt: '去更新页面', send: false },
+    });
     // 认不出的值退回默认（发送）：插件笔误不该让一段话默默躺在输入框里没人发现。
     expect(normalizePluginPanelActionResult({ newSession: { prompt: '复盘', send: 'no' } })).toEqual({
       newSession: { prompt: '复盘' },
@@ -534,8 +541,8 @@ describe('normalizePluginPanelAction', () => {
     });
     // `configure: true` 与 `{}` 一样，只是没写自定义文案
     expect(
-      normalizePluginPanelActionResult({ dialog: { title: '手机访问', text: '还没接入', configure: true } })
-        ?.dialog?.configure
+      normalizePluginPanelActionResult({ dialog: { title: '手机访问', text: '还没接入', configure: true } })?.dialog
+        ?.configure,
     ).toEqual({});
   });
 
@@ -629,16 +636,17 @@ describe('plugin panel openPath', () => {
   });
 
   it('carries focus only when the plugin explicitly asks for it', () => {
-    expect(
-      normalizePluginPanelActionResult({ openPath: { path: '/tmp/a.md', focus: true } }).openPath
-    ).toEqual({ path: '/tmp/a.md', focus: true });
+    expect(normalizePluginPanelActionResult({ openPath: { path: '/tmp/a.md', focus: true } }).openPath).toEqual({
+      path: '/tmp/a.md',
+      focus: true,
+    });
     // 只认真正的 true：字符串 "true"、1 这类都不能让宿主悄悄切到「只开编辑器」
-    expect(
-      normalizePluginPanelActionResult({ openPath: { path: '/tmp/a.md', focus: 'true' } }).openPath
-    ).toEqual({ path: '/tmp/a.md' });
-    expect(
-      normalizePluginPanelActionResult({ openPath: { path: '/tmp/a.md', focus: false } }).openPath
-    ).toEqual({ path: '/tmp/a.md' });
+    expect(normalizePluginPanelActionResult({ openPath: { path: '/tmp/a.md', focus: 'true' } }).openPath).toEqual({
+      path: '/tmp/a.md',
+    });
+    expect(normalizePluginPanelActionResult({ openPath: { path: '/tmp/a.md', focus: false } }).openPath).toEqual({
+      path: '/tmp/a.md',
+    });
   });
 });
 
@@ -666,13 +674,15 @@ describe('PluginPanelRegistry', () => {
 
 describe('normalizePluginPanelView shortcut states', () => {
   it('normalizes optional fields and rejects malformed entries', () => {
-    const view = normalizePluginPanelView({ shortcutStates: {
-      check: { badge: ' 运行中 ', disabled: true, disabledReason: ' 等待完成 ', extra: 1 },
-      enabled: { disabled: false },
-      invalid: { badge: 3, disabled: 'true', disabledReason: false },
-      'bad key': { badge: 'x' },
-      array: [],
-    } });
+    const view = normalizePluginPanelView({
+      shortcutStates: {
+        check: { badge: ' 运行中 ', disabled: true, disabledReason: ' 等待完成 ', extra: 1 },
+        enabled: { disabled: false },
+        invalid: { badge: 3, disabled: 'true', disabledReason: false },
+        'bad key': { badge: 'x' },
+        array: [],
+      },
+    });
     expect(view.shortcutStates).toEqual({
       check: { badge: '运行中', disabled: true, disabledReason: '等待完成' },
       enabled: { disabled: false },
@@ -681,12 +691,16 @@ describe('normalizePluginPanelView shortcut states', () => {
   });
 
   it('limits state count and text length and handles special object keys', () => {
-    const entries = Object.fromEntries(Array.from({ length: 45 }, (_, i) => [`id${i}`, { badge: 'x'.repeat(20), disabledReason: 'y'.repeat(210) }]));
+    const entries = Object.fromEntries(
+      Array.from({ length: 45 }, (_, i) => [`id${i}`, { badge: 'x'.repeat(20), disabledReason: 'y'.repeat(210) }]),
+    );
     const states = normalizePluginPanelView({ shortcutStates: entries }).shortcutStates!;
     expect(Object.keys(states)).toHaveLength(40);
     expect(states.id0.badge).toBe(`${'x'.repeat(11)}…`);
     expect(states.id0.disabledReason).toBe(`${'y'.repeat(199)}…`);
-    const special = normalizePluginPanelView({ shortcutStates: JSON.parse('{"__proto__":{"badge":"x"},"constructor":{"disabled":true}}') }).shortcutStates!;
+    const special = normalizePluginPanelView({
+      shortcutStates: JSON.parse('{"__proto__":{"badge":"x"},"constructor":{"disabled":true}}'),
+    }).shortcutStates!;
     expect(Object.keys(special)).toEqual(['constructor']);
     expect(special.constructor).toEqual({ disabled: true });
   });
@@ -730,9 +744,7 @@ describe('normalizePluginPanelView menus', () => {
   it('drops menus that are not a table with columns and rows', () => {
     expect(normalizePluginPanelView({ title: 'x', menus: 'nope' }).menus).toBeUndefined();
     expect(normalizePluginPanelView({ title: 'x', menus: { a: 'nope' } }).menus).toBeUndefined();
-    expect(
-      normalizePluginPanelView({ title: 'x', menus: { a: { columns: [], rows: [] } } }).menus,
-    ).toBeUndefined();
+    expect(normalizePluginPanelView({ title: 'x', menus: { a: { columns: [], rows: [] } } }).menus).toBeUndefined();
     expect(
       normalizePluginPanelView({
         title: 'x',
@@ -740,24 +752,56 @@ describe('normalizePluginPanelView menus', () => {
       }).menus,
     ).toBeUndefined();
   });
+});
 
+describe('normalizePluginPanelView shortcuts', () => {
+  it('keeps the shortcuts the view hands over, with their action key', () => {
+    const view = normalizePluginPanelView({
+      title: '快捷按钮',
+      shortcuts: [
+        { id: 'open-doc', label: ' 打开需求单 ', action: 'run', key: 'open-doc' },
+        { id: 'settings', label: '设置', section: '按钮' },
+      ],
+    });
+    expect(view.shortcuts).toEqual([
+      { id: 'open-doc', label: '打开需求单', action: 'run', key: 'open-doc' },
+      { id: 'settings', label: '设置', section: '按钮' },
+    ]);
+  });
+
+  it('drops buttons that could not do anything when clicked', () => {
+    const view = normalizePluginPanelView({
+      title: 'x',
+      shortcuts: [
+        // 没有 id：宿主没法认「还是那一个按钮」
+        { label: '空的', action: 'run' },
+        // id 不符合约定（会当成 key 与 shortcutStates 的键）
+        { id: 'Bad Id', label: '大写', action: 'run' },
+        { id: 'ok', label: '没有落点' },
+        { id: 'ok', label: '重复的 id', action: 'run' },
+        { id: 'fine', label: '好的', action: 'run' },
+      ],
+    });
+    expect(view.shortcuts).toEqual([{ id: 'fine', label: '好的', action: 'run' }]);
+  });
+
+  it('leaves the field out when the view gives no usable button', () => {
+    expect(normalizePluginPanelView({ title: 'x', shortcuts: [] }).shortcuts).toBeUndefined();
+    expect(normalizePluginPanelView({ title: 'x', shortcuts: 'nope' }).shortcuts).toBeUndefined();
+  });
 });
 
 describe('normalizePluginPanelActionResult openReview', () => {
   it('keeps a browser-openable address and drops anything else', () => {
-    expect(
-      normalizePluginPanelActionResult({ openExternal: 'https://mis.example.com/pre' }).openExternal,
-    ).toBe('https://mis.example.com/pre');
-    expect(
-      normalizePluginPanelActionResult({ openExternal: 'mailto:qa@example.com' }).openExternal,
-    ).toBe('mailto:qa@example.com');
+    expect(normalizePluginPanelActionResult({ openExternal: 'https://mis.example.com/pre' }).openExternal).toBe(
+      'https://mis.example.com/pre',
+    );
+    expect(normalizePluginPanelActionResult({ openExternal: 'mailto:qa@example.com' }).openExternal).toBe(
+      'mailto:qa@example.com',
+    );
     // 到了宿主手里会变成一次导航，用户还看不出发生了什么
-    expect(
-      normalizePluginPanelActionResult({ openExternal: 'javascript:alert(1)' }).openExternal,
-    ).toBeUndefined();
-    expect(
-      normalizePluginPanelActionResult({ openExternal: 'file:///etc/passwd' }).openExternal,
-    ).toBeUndefined();
+    expect(normalizePluginPanelActionResult({ openExternal: 'javascript:alert(1)' }).openExternal).toBeUndefined();
+    expect(normalizePluginPanelActionResult({ openExternal: 'file:///etc/passwd' }).openExternal).toBeUndefined();
   });
 
   it('keeps the repository, base, head and label', () => {
@@ -783,5 +827,95 @@ describe('normalizePluginPanelActionResult openReview', () => {
       cwd: '/tmp/a',
     });
     expect(normalizePluginPanelActionResult({ openReview: { base: 'master' } }).openReview).toBeUndefined();
+  });
+});
+
+describe('normalizePluginPanelView shortcut style', () => {
+  it('keeps the look the plugin asked for', () => {
+    const view = normalizePluginPanelView({
+      title: 'x',
+      shortcuts: [
+        {
+          id: 'open',
+          label: '打开',
+          action: 'run',
+          style: { icon: 'globe', color: 'accent', shape: 'soft', iconOnly: true },
+        },
+      ],
+    });
+    expect(view.shortcuts?.[0].style).toEqual({
+      icon: 'globe',
+      color: 'accent',
+      shape: 'soft',
+      iconOnly: true,
+    });
+  });
+
+  it('drops a look it cannot draw instead of guessing', () => {
+    // 拼错的颜色名不该变成「没有颜色的强调按钮」
+    expect(
+      normalizePluginPanelView({
+        title: 'x',
+        shortcuts: [{ id: 'a', label: 'A', action: 'run', style: { color: 'purple' } }],
+      }).shortcuts?.[0].style,
+    ).toBeUndefined();
+    expect(
+      normalizePluginPanelView({
+        title: 'x',
+        shortcuts: [{ id: 'a', label: 'A', action: 'run', style: { shape: 'round' } }],
+      }).shortcuts?.[0].style,
+    ).toBeUndefined();
+    expect(
+      normalizePluginPanelView({ title: 'x', shortcuts: [{ id: 'a', label: 'A', action: 'run', style: 'big' }] })
+        .shortcuts?.[0].style,
+    ).toBeUndefined();
+  });
+});
+
+describe('normalizePluginPanelActionResult dialog', () => {
+  it('carries markdown and the dialog buttons back to the page', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: {
+        title: '两条候选',
+        markdown: '- A\n- B',
+        text: '会被 markdown 顶掉的一段话',
+        actions: [
+          { id: 'dialog', key: 'pick:0', label: '打开 A', tone: 'primary' },
+          { id: 'dialog', key: 'pick:1', label: '追问', tone: 'ghost' },
+        ],
+      },
+    });
+    expect(result.dialog?.markdown).toBe('- A\n- B');
+    expect(result.dialog?.text).toBe('会被 markdown 顶掉的一段话');
+    expect(result.dialog?.actions).toEqual([
+      { id: 'dialog', key: 'pick:0', label: '打开 A', tone: 'primary' },
+      { id: 'dialog', key: 'pick:1', label: '追问', tone: 'ghost' },
+    ]);
+  });
+
+  it('caps the dialog buttons and drops ones with no id or label', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: {
+        title: 'x',
+        text: 'y',
+        actions: [
+          { id: 'a', label: '1' },
+          { id: '', label: '没好 id' },
+          { id: 'b', label: '' },
+          { id: 'c', label: '3' },
+          { id: 'd', label: '4' },
+          { id: 'e', label: '5' },
+        ],
+      },
+    });
+    expect(result.dialog?.actions?.map((action) => action.label)).toEqual(['1', '3', '4']);
+  });
+
+  it('keeps a dialog that only has buttons (an explanation can be the title)', () => {
+    const result = normalizePluginPanelActionResult({
+      dialog: { title: '选一个', actions: [{ id: 'pick', label: 'A' }] },
+    });
+    expect(result.dialog?.title).toBe('选一个');
+    expect(result.dialog?.rows).toEqual([]);
   });
 });

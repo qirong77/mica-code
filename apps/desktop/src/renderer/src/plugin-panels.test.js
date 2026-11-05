@@ -9,6 +9,8 @@ import {
   menuCacheKey,
   panelDrafts,
   pluginPanelTabs,
+  pluginQuickbarItems,
+  quickbarButtonLook,
   quickbarMenuItems,
   quickbarMenuTable,
   readMenuCache,
@@ -99,9 +101,19 @@ describe('selectPluginPanels', () => {
         icon: 'messages-square',
         display: 'drawer',
         status: false,
+        dynamicShortcuts: false,
         shortcuts: []
       }
     ])
+  })
+
+  test('carries dynamicShortcuts through so the bar knows it has to ask the view', () => {
+    const panels = selectPluginPanels(
+      [plugin({ desktopPanel: { label: '快捷按钮', roles: [], dynamicShortcuts: true } })],
+      'default'
+    )
+    expect(panels[0].dynamicShortcuts).toBe(true)
+    expect(panels[0].shortcuts).toEqual([])
   })
 
   test('carries the declared quick-bar shortcuts through', () => {
@@ -575,5 +587,87 @@ describe('插件面板清单在挂载点之间共享', () => {
     expect(reads).toBe(2)
     expect(store.get('default')).toEqual([])
     expect(store.get('需求开发').map((panel) => panel.id)).toEqual(['user.demand-dev'])
+  })
+})
+
+describe('pluginQuickbarItems', () => {
+  const panel = (overrides = {}) => ({
+    id: 'quick-buttons',
+    label: '快捷按钮',
+    shortcuts: [],
+    ...overrides
+  })
+
+  test('清单里的按钮在前，视图给的按钮在后', () => {
+    const items = pluginQuickbarItems(
+      [panel({ shortcuts: [{ label: '管理', section: '按钮' }] })],
+      { 'quick-buttons': [{ id: 'open-doc', label: '打开需求单', action: 'run' }] }
+    )
+    expect(items.map((item) => item.shortcut.label)).toEqual(['管理', '打开需求单'])
+    // 每个面板的第一颗带分隔标记，换到另一个插件的按钮时才画竖线
+    expect(items.map((item) => item.first)).toEqual([true, false])
+  })
+
+  test('运行期的按钮 key 带 view: 前缀，不会和清单里同 id 的按钮撞成同一个 key', () => {
+    const items = pluginQuickbarItems(
+      [panel({ shortcuts: [{ id: 'open-doc', label: '清单', action: 'run' }] })],
+      { 'quick-buttons': [{ id: 'open-doc', label: '视图', action: 'run' }] }
+    )
+    expect(items.map((item) => item.key)).toEqual([
+      'quick-buttons:open-doc',
+      'quick-buttons:view:open-doc'
+    ])
+  })
+
+  test('没有视图按钮时原样返回清单里的那些', () => {
+    expect(pluginQuickbarItems([panel({ shortcuts: [{ label: '检查', action: 'check' }] })], {})).toHaveLength(1)
+    expect(pluginQuickbarItems([], null)).toEqual([])
+  })
+})
+
+describe('quickbarButtonLook', () => {
+  test('没有外观规格时就是原来那颗描边胶囊', () => {
+    const look = quickbarButtonLook({ label: '检查', action: 'check' }, { panelLabel: 'SSH' })
+    expect(look.className).toBe('chat-plugin-quickbar-button is-primary')
+    expect(look.icon).toBe('')
+    expect(look.iconOnly).toBe(false)
+    expect(look.title).toBe('SSH · 检查')
+    expect(look.ariaLabel).toBeUndefined()
+  })
+
+  test('颜色与形状翻成主题类名（色值由 CSS 变量决定，暗色亮色各一套）', () => {
+    const look = quickbarButtonLook(
+      { label: '打开', action: 'run', style: { color: 'accent', shape: 'soft' } },
+      { panelLabel: '快捷按钮' }
+    )
+    expect(look.className).toContain('color-accent')
+    expect(look.className).toContain('shape-soft')
+    // 默认形状 pill 不另加类：默认样式就是描边胶囊
+    expect(
+      quickbarButtonLook({ label: 'x', action: 'run', style: { shape: 'pill' } }).className
+    ).not.toContain('shape-')
+  })
+
+  test('纯图标时把文字退回无障碍名，没有图标就退回带文字', () => {
+    const iconOnly = quickbarButtonLook({
+      label: '打开',
+      action: 'run',
+      style: { icon: 'globe', iconOnly: true }
+    })
+    expect(iconOnly.iconOnly).toBe(true)
+    expect(iconOnly.className).toContain('is-icon-only')
+    expect(iconOnly.ariaLabel).toBe('打开')
+
+    const noIcon = quickbarButtonLook({ label: '打开', action: 'run', style: { iconOnly: true } })
+    expect(noIcon.iconOnly).toBe(false)
+    expect(noIcon.className).not.toContain('is-icon-only')
+  })
+
+  test('状态类跟着运行态走，分区按钮的提示写「打开 / 收起」', () => {
+    const busy = quickbarButtonLook({ label: '检查', action: 'check' }, { busy: true })
+    expect(busy.className).toContain('is-busy')
+    const section = quickbarButtonLook({ label: '设置', section: '按钮' }, { active: true })
+    expect(section.className).toContain('is-active')
+    expect(section.title).toBe('收起「设置」')
   })
 })

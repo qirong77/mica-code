@@ -222,7 +222,14 @@ describe('PluginManager robustness', () => {
       name: 'desktop-demo',
       manifest: {
         ...manifest([]),
-        desktopPanel: { label: 'demo', roles: [], display: 'drawer', status: false, shortcuts: [] },
+        desktopPanel: {
+          label: 'demo',
+          roles: [],
+          display: 'drawer',
+          status: false,
+          dynamicShortcuts: false,
+          shortcuts: [],
+        },
         desktopSessionMenu: [{ action: 'copy', label: 'copy' }],
         actions: [{ key: 'refresh', label: 'refresh', description: '', tone: 'neutral' }],
       },

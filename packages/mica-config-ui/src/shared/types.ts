@@ -542,6 +542,8 @@ export type ConfigWebPluginDesktopPanel = {
   display?: 'drawer' | 'modal';
   /** 输入框上方那行状态（「这个能力现在生效没有」）是否来自这块面板。 */
   status?: boolean;
+  /** 快捷按钮由面板视图在运行期给出（清单 `desktop.panel.dynamicShortcuts`）。 */
+  dynamicShortcuts?: boolean;
   /**
    * 点入口时执行哪个动作（清单 `desktop.panel.open`）。
    *

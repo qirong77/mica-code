@@ -4038,6 +4038,18 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   margin-top: 12px;
 }
 
+/* 弹窗里的 Markdown 正文：与面板分区里那份同一套排版（`.chat-plugin-markdown`
+   收的是对话区渲染器的边距），这里只补弹窗自身的相邻间距。 */
+.chat-plugin-dialog-markdown .chat-markdown {
+  color: var(--color-fg-max);
+  font-size: 13px;
+}
+
+.chat-plugin-dialog-markdown + .chat-plugin-table-wrap,
+.chat-plugin-dialog-markdown + .chat-plugin-table-note {
+  margin-top: 12px;
+}
+
 /* 二维码弹窗（手机访问）：码本身是黑码白底，不跟主题走——反色码不少手机扫不出来，
    这一块唯一要做对的事就是「扫得动」，所以底色写死白、留出静区。 */
 .chat-plugin-dialog-qr {
@@ -6738,6 +6750,84 @@ body.is-resizing-btw {
   border-color: var(--color-line-strong);
   background: var(--color-panel-hi);
   color: var(--color-fg-max);
+}
+
+/* 插件声明的强调色（清单 / 视图 `shortcuts[].style.color`）：只换前景与描边，
+   底色与尺寸不动——一排按钮里能不能看出「这颗是主操作」靠色相，不靠变大。
+   色值全部来自主题令牌，暗色与亮色各有一份，插件写死颜色必然在另一边读不清。 */
+.chat-plugin-quickbar-button.color-accent {
+  border-color: var(--color-accent-region);
+  color: var(--color-accent);
+}
+
+.chat-plugin-quickbar-button.color-accent:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+  color: var(--color-accent-hover);
+}
+
+.chat-plugin-quickbar-button.color-danger {
+  border-color: color-mix(in srgb, var(--color-danger) 32%, var(--color-line));
+  color: var(--color-danger);
+}
+
+.chat-plugin-quickbar-button.color-danger:hover {
+  border-color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  color: var(--color-danger-soft);
+}
+
+.chat-plugin-quickbar-button.color-success {
+  border-color: color-mix(in srgb, var(--color-success) 32%, var(--color-line));
+  color: var(--color-success);
+}
+
+.chat-plugin-quickbar-button.color-success:hover {
+  border-color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  color: var(--color-success-soft);
+}
+
+.chat-plugin-quickbar-button.color-warn {
+  border-color: color-mix(in srgb, var(--color-warn) 32%, var(--color-line));
+  color: var(--color-warn);
+}
+
+.chat-plugin-quickbar-button.color-warn:hover {
+  border-color: var(--color-warn);
+  background: color-mix(in srgb, var(--color-warn) 12%, transparent);
+  color: var(--color-warn-soft);
+}
+
+/* 形状：`soft` 去掉描边（一排里只用文字与图标说话），`plain` 连底色也不占。 */
+.chat-plugin-quickbar-button.shape-soft {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--color-panel) 60%, transparent);
+}
+
+.chat-plugin-quickbar-button.shape-soft:hover {
+  border-color: transparent;
+  background: var(--color-panel-hi);
+}
+
+.chat-plugin-quickbar-button.shape-plain {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-fg-muted);
+}
+
+.chat-plugin-quickbar-button.shape-plain:hover {
+  border-color: transparent;
+  background: var(--color-panel-hi);
+  color: var(--color-fg-max);
+}
+
+/* 只画图标（`style.iconOnly`）：收成正方形，文字退回 `title` 与无障碍名。
+   宽度与高度一致，一排按钮的基线才不会因为这一颗而高低不齐。 */
+.chat-plugin-quickbar-button.is-icon-only {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
 }
 
 /* 打开着的那一块：底色 + 描边，与页签的「当前」是同一层意思，不另造一种强调。 */

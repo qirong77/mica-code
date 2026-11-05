@@ -1372,10 +1372,20 @@ function PluginTaskDialog({ task, onChange, onConfirm, onClose }) {
  * 两种内容各管一件事：`qr` 是「扫一下就走」的一段地址（手机访问那种），`configure`
  * 是「还没配好」时的下一步——弹窗把话说清楚，按钮负责把人送到插件自己的设置页。
  */
-function PluginTableDialog({ dialog, onClose, onOpenPluginSettings, onOpenPluginPanel }) {
+function PluginTableDialog({
+  dialog,
+  onClose,
+  onOpenPluginSettings,
+  onOpenPluginPanel,
+  onAction
+}) {
   const configure = dialog.configure && dialog.pluginId ? dialog.configure : null
   const panel = dialog.panel && dialog.pluginId ? dialog.panel : null
   const hasTable = Boolean(dialog.columns && dialog.columns.length > 0)
+  // 弹窗里的动作按钮（`dialog.actions`）：点了把它交回插件自己的 `action` 处理器，
+  // 和面板里的按钮同一条通路，所以这里只负责画与转发。插件可以回一段话、开个会话、
+  // 打开文件，也可以换一个弹窗内容（例如「查看详情」二级说明）。
+  const actions = dialog.pluginId && Array.isArray(dialog.actions) ? dialog.actions : []
   return (
     <ModalShell
       title={dialog.title}
@@ -1385,6 +1395,18 @@ function PluginTableDialog({ dialog, onClose, onOpenPluginSettings, onOpenPlugin
       className={hasTable ? 'chat-modal-table' : 'chat-modal-qr'}
       footer={
         <>
+          {actions.map((action) => (
+            <Button
+              key={`${action.id}:${action.key || ''}`}
+              variant={action.tone === 'primary' ? 'accent' : action.tone === 'danger' ? 'danger' : 'default'}
+              icon={action.icon ? <PluginIcon name={action.icon} size={13} /> : undefined}
+              disabled={action.disabled === true}
+              title={action.label}
+              onClick={() => onAction?.(action)}
+            >
+              {action.label}
+            </Button>
+          ))}
           {configure ? (
             <Button
               variant="accent"
@@ -1419,6 +1441,11 @@ function PluginTableDialog({ dialog, onClose, onOpenPluginSettings, onOpenPlugin
         </div>
       ) : null}
       {dialog.text ? <p className="chat-plugin-dialog-text">{dialog.text}</p> : null}
+      {dialog.markdown ? (
+        <div className="chat-plugin-dialog-markdown">
+          <Markdown text={dialog.markdown} />
+        </div>
+      ) : null}
       {hasTable ? (
         <div className="chat-plugin-table-wrap">
           <table className="chat-plugin-table">
@@ -6431,21 +6458,27 @@ export function ChatView({
   )
 
   /**
-   * 面板入口本身就是动作（清单 `desktop.panel.open`）。
+   * 不打开面板也能做的动作：入口本身就是动作（清单 `desktop.panel.open`），以及插件弹窗
+   * 底部的按钮（`dialog.actions`）。
    *
    * 「手机访问」这类面板要的只是一个二维码弹窗，为它打开一整块 340px 抽屉、再让插件在
-   * 抽屉里排版，两边都白费力气。声明了 `open` 的入口点了直接把那个动作交给插件，结果
-   * 与面板里的按钮走同一套落点（`applyPanelResult`）。
+   * 抽屉里排版，两边都白费力气。声明了 `open` 的入口点了直接把那个动作交给插件；弹窗里的
+   * 按钮同理——用户已经在弹窗里看过说明了，点下去就该发生，不该先关弹窗再找另一颗按钮。
+   * 两者的结果都与面板里的按钮走同一套落点（`applyPanelResult`）。
    */
   const runPanelEntryAction = useCallback(
-    async (panel) => {
-      const action = panel?.openAction
+    async (panel, actionId = panel?.openAction, key = undefined, { closeDialog = false } = {}) => {
+      const action = actionId
       if (!action) return
+      // 弹窗里的按钮：这一下已经发生了，弹窗先收起；插件若回了新弹窗（二级说明）
+      // 会被下面的 `applyPanelResult` 重新摆出来，不会闪空。
+      if (closeDialog) setPluginDialog(null)
       let result
       try {
         result = await window.mica.chat.pluginPanels.action(nodeIdRef.current, {
           pluginId: panel.id,
           action,
+          ...(key ? { key } : {}),
           sessionId: sessionIdRef.current || null,
           cwd: cwdRef.current || null
         })
@@ -8048,6 +8081,14 @@ export function ChatView({
               setPluginPanelOpen(pluginId)
               setPluginPanelSection('')
             }}
+            onAction={(action) =>
+              void runPanelEntryAction(
+                { id: pluginDialog.pluginId, label: pluginDialog.title },
+                action.id,
+                action.key,
+                { closeDialog: true }
+              )
+            }
           />
         )}
         {btwOpen && (

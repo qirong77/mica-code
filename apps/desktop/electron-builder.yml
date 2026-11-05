@@ -31,12 +31,17 @@ nsis:
 mac:
   entitlementsInherit: build/entitlements.mac.plist
   icon: build/icon.icns
+  # 固定签名身份，不用 adhoc：adhoc 的 designated requirement 绑 cdhash，每次重建都变，
+  # macOS「本地网络」授权会随之失效（访问 172.x/10.x 直接 EHOSTUNREACH，且不弹授权框）。
+  # 用证书后 requirement 绑证书 leaf，跨构建稳定。证书见 ~/.mica/codesign/。
+  identity: mica-codesign
   extendInfo:
     NSCameraUsageDescription: Application requests access to the device's camera.
     NSMicrophoneUsageDescription: Application requests access to the device's microphone.
     NSDocumentsFolderUsageDescription: Mica Code needs Documents access only if you open project folders there.
     NSDownloadsFolderUsageDescription: Mica Code needs Downloads access only if you open project folders there.
     NSDesktopFolderUsageDescription: Mica Code needs Desktop access to open terminal sessions in your Desktop project folders.
+    NSLocalNetworkUsageDescription: Mica Code needs local network access to reach model gateways and other services on your LAN.
   notarize: false
 dmg:
   # Electron 39 requires macOS 12+, which supports LZFSE-compressed images.

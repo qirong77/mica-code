@@ -1,0 +1,21 @@
+{
+  "id": "quick-buttons",
+  "name": "Quick Buttons",
+  "icon": "mouse-pointer-click",
+  "version": "1.0.0",
+  "description": "让模型在输入框上方放一排按钮：打开页面、把话说进输入框、开个新会话、打开文件。点一下就到位，不用复制粘贴。按钮只属于当前会话。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 45,
+  "mica": {
+    "apiVersion": 1
+  },
+  "requires": ["prompt", "sessionState", "tools"],
+  "desktop": {
+    "panel": {
+      "label": "快捷按钮",
+      "dynamicShortcuts": true
+    }
+  }
+}

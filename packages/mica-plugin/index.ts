@@ -175,6 +175,8 @@ export {
   normalizePluginPanelView,
 } from './PluginPanel.js';
 export { PLUGIN_ACTION_TONES, PluginActionRegistry } from './PluginActions.js';
+export { PLUGIN_SHORTCUT_COLORS, PLUGIN_SHORTCUT_SHAPES, shortcutStyleOf } from './PluginDesktop.js';
+export type { PluginPanelShortcutColor, PluginPanelShortcutShape, PluginPanelShortcutStyle } from './PluginDesktop.js';
 export { MAX_NEW_SESSION_PROMPT, normalizePluginNewSession } from './PluginNewSession.js';
 export type { PluginNewSession } from './PluginNewSession.js';
 export type {
@@ -388,6 +390,9 @@ export type {
   PluginPanelActionInput,
   PluginPanelActionResult,
   PluginPanelButtonTone,
+  PluginPanelDialog,
+  PluginPanelDialogAction,
+  PluginPanelDialogCell,
   PluginPanelField,
   PluginPanelFieldOption,
   PluginPanelFieldType,
@@ -408,6 +413,7 @@ export type {
   PluginPanelTone,
   PluginPanelView,
   PluginPanelViewInput,
+  PluginPanelViewShortcut,
   PluginPanelOpenPath,
 } from './PluginPanel.js';
 export { PLUGIN_PANEL_FIELD_TYPES } from './PluginPanel.js';

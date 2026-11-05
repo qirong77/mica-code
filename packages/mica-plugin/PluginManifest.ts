@@ -13,6 +13,7 @@ import {
   isDesktopCheckId,
   isPluginEntryPlacement,
   isValidPluginPanelShortcutId,
+  shortcutStyleOf,
   type DesktopCheckId,
   type PluginDesktopEntry,
   type PluginDesktopPage,
@@ -600,7 +601,17 @@ function readDesktopPanel(
   if (typeof input === 'boolean') {
     // `"panel": true` 是最常见的写法，语义就是「一块面板，任何角色都显示」。
     return input
-      ? { ok: true, value: { label: pluginName, roles: [], display: 'drawer', status: false, shortcuts: [] } }
+      ? {
+          ok: true,
+          value: {
+            label: pluginName,
+            roles: [],
+            display: 'drawer',
+            status: false,
+            dynamicShortcuts: false,
+            shortcuts: [],
+          },
+        }
       : { ok: true, value: null };
   }
   if (!isRecord(input)) return { ok: false, error: 'desktop.panel 必须是对象或 true' };
@@ -632,6 +643,9 @@ function readDesktopPanel(
   if (input.status !== undefined && typeof input.status !== 'boolean') {
     return { ok: false, error: 'desktop.panel.status 必须是布尔值' };
   }
+  if (input.dynamicShortcuts !== undefined && typeof input.dynamicShortcuts !== 'boolean') {
+    return { ok: false, error: 'desktop.panel.dynamicShortcuts 必须是布尔值' };
+  }
   const shortcuts = readPanelShortcuts(input.shortcuts);
   if (!shortcuts.ok) return shortcuts;
   return {
@@ -642,6 +656,7 @@ function readDesktopPanel(
       ...(typeof open === 'string' ? { open } : {}),
       display: display.value,
       status: input.status === true,
+      dynamicShortcuts: input.dynamicShortcuts === true,
       shortcuts: shortcuts.value,
     },
   };
@@ -703,6 +718,7 @@ function readPanelShortcuts(input: unknown): { ok: true; value: PluginPanelShort
         error: `desktop.panel.shortcuts「${label}」只能给 action、section、items、menu 中的一种（menu 可额外配 section）`,
       };
     }
+    const style = shortcutStyleOf(entry.style);
     shortcuts.push({
       label,
       ...(typeof id === 'string' ? { id } : {}),
@@ -710,6 +726,7 @@ function readPanelShortcuts(input: unknown): { ok: true; value: PluginPanelShort
       ...(section ? { section } : {}),
       ...(menu ? { menu } : {}),
       ...(items.value ? { items: items.value } : {}),
+      ...(style ? { style } : {}),
     });
   }
   return { ok: true, value: shortcuts };
