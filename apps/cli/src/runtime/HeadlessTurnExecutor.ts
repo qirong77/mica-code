@@ -431,10 +431,15 @@ export class HeadlessTurnExecutor {
         });
         if (promptBuildEvent?.content !== undefined) runContent = promptBuildEvent.content;
       }
-      const preTurnSnapshot = agent.captureClientSnapshot();
+      const maxRetries = this.options.maxTurnRetries ?? MAX_TURN_RETRIES;
+      let preTurnSnapshot = maxRetries > 0 ? agent.captureClientSnapshot() : null;
       let hadNonRetryableToolCall = false;
       const markToolCall = (toolCall: { name: string }) => {
-        if (!micaTools.isReadOnly(toolCall.name)) hadNonRetryableToolCall = true;
+        if (!micaTools.isReadOnly(toolCall.name)) {
+          hadNonRetryableToolCall = true;
+          // 有写操作之后不再允许整轮重试，尽早释放整份历史回滚副本。
+          preTurnSnapshot = null;
+        }
       };
       let attemptStartBuffer = this.responseBuffer;
       const text = (chunk: string) => {
@@ -457,7 +462,6 @@ export class HeadlessTurnExecutor {
         // at the next attempt's first iteration boundary so a retry never
         // swallows a queued user input.
         const replayInputs: AgentQueryContent[] = [];
-        const maxRetries = this.options.maxTurnRetries ?? MAX_TURN_RETRIES;
         const retryDelayMs = this.options.retryDelayMs ?? TURN_RETRY_DELAY_MS;
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
           const attemptInputs: AgentQueryContent[] = [];

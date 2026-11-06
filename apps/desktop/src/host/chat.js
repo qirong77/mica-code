@@ -36,7 +36,13 @@ import { stripControlSockets } from './control-env'
 import { resolveDefaultChatMeta } from './chat-meta'
 import { resolveModelProtocol, resolveProviderProtocol } from './chat-protocol'
 import { forkSessionSnapshot } from './chat-session-actions'
-import { IDLE_MAX_KEEP, IDLE_REAP_MS, resolveIdleReap } from './chat-idle'
+import {
+  IDLE_MAX_KEEP,
+  IDLE_REAP_MS,
+  isHostActivityRequest,
+  noteHostMessageActivity,
+  resolveIdleReap
+} from './chat-idle'
 import {
   createChatQueue,
   mergeQueuedItems,
@@ -44,7 +50,9 @@ import {
   resolveMaintenanceDispatch
 } from './chat-queue'
 import { resolveWarmAction } from './chat-warm'
-import { settlePendingHostRequests } from './chat-host-requests'
+import { requestHostTask, settlePendingHostRequests } from './chat-host-requests'
+import { createPanelViewCache } from './chat-panel-cache'
+import { createCompletedRunCache } from './chat-replay-cache'
 import { createSubagentDisplay } from './chat-subagent-display'
 import { unwrapHostResult } from './chat-capabilities'
 import { getShellEnvSnapshot } from './shell-env'
@@ -87,7 +95,6 @@ const ABORT_FORCE_KILL_MS = 5000
 /** 停止时取回排队消息的等待上限：这是交互动作，不该为一条可能不存在的队列陪等。 */
 const ABORT_RECALL_TIMEOUT_MS = 1500
 const MAX_STDERR_CHARS = 32 * 1024
-const MAX_COMPLETED_RUNS = 40
 const MAX_QUEUED_RUNS = 50
 
 // Merge the login-shell environment captured at startup (e.g. exports from
@@ -128,7 +135,7 @@ const commitRuns = new Map() // commitId -> { child, buffer, stderr }
 // now carries after_iteration and is forwarded to the host as turn/steer
 // instead (fastest path), so this local queue is no longer the default.
 const queuedRuns = createChatQueue(MAX_QUEUED_RUNS)
-const completedRuns = new Map() // nodeId -> recently finished replay state
+const completedRuns = createCompletedRunCache() // nodeId -> recently finished replay state
 let notifyServer = null
 
 /** 这个 run 属于哪个 session（还没绑定会话时是请求里带的那一个）。 */
@@ -814,6 +821,7 @@ function sendCodexRequest(run, method, params, options = {}) {
   run.pendingRequests = run.pendingRequests || new Map()
   run.pendingRequests.set(id, { method, params, resolve: options.resolve })
   run.child.stdin.write(`${JSON.stringify({ id, method, params })}\n`)
+  if (isHostActivityRequest(method)) run.lastActivityAt = Date.now()
   return true
 }
 
@@ -924,18 +932,8 @@ function editRunMessage(sender, id, payload = {}) {
   run.clientMessageId = null
   run.events = []
 
-  return new Promise((resolve) => {
-    const timer = setTimeout(
-      () => resolve({ ok: false, error: '编辑重发超时，请重试' }),
-      EDIT_MESSAGE_TIMEOUT_MS
-    )
-    const settle = (result) => {
-      clearTimeout(timer)
-      resolve(result)
-    }
-    if (!sendCodexRequest(run, 'mica/turn/editMessage', params, { resolve: settle })) {
-      settle({ ok: false, error: 'chat host 不可用，请重试' })
-    }
+  return hostTaskRequest(run, 'mica/turn/editMessage', params, {
+    timeoutMs: EDIT_MESSAGE_TIMEOUT_MS
   })
 }
 
@@ -957,30 +955,9 @@ const HOST_SESSION_MENU_TIMEOUT_MS = 180_000
  * 的重复排队——host 忙时一次请求要等几秒，重复请求会直接排到 60s 超时。
  */
 const PANEL_VIEW_REUSE_MS = 3_000
-const panelViewCache = new Map()
-
-function prunePanelViewCache() {
-  const now = Date.now()
-  for (const [key, entry] of panelViewCache) {
-    if (now - entry.at >= PANEL_VIEW_REUSE_MS) panelViewCache.delete(key)
-  }
-}
+const panelViewCache = createPanelViewCache({ reuseMs: PANEL_VIEW_REUSE_MS })
 function hostTaskRequest(run, method, params, { timeoutMs = HOST_TASK_REQUEST_TIMEOUT_MS } = {}) {
-  if (!run?.child?.stdin?.writable)
-    return Promise.resolve({ ok: false, error: 'chat host 不可用，请重试' })
-  return new Promise((resolve) => {
-    const timer = setTimeout(
-      () => resolve({ ok: false, error: 'chat host 请求超时，请重试' }),
-      timeoutMs
-    )
-    const settle = (result) => {
-      clearTimeout(timer)
-      resolve(result)
-    }
-    if (!sendCodexRequest(run, method, params, { resolve: settle })) {
-      settle({ ok: false, error: 'chat host 不可用，请重试' })
-    }
-  })
+  return requestHostTask(run, method, params, { timeoutMs, send: sendCodexRequest })
 }
 
 function spawnChatHost(id, sender, payload) {
@@ -1164,6 +1141,7 @@ function spawnChatHost(id, sender, payload) {
         ...(exitCode && !rejected ? { error: failure } : {})
       })
     }
+    settlePendingHostRequests(run, 'chat host 已退出，请重试')
   })
 
   return { ok: true }
@@ -1192,7 +1170,6 @@ function rejectUnansweredTurns(id, run, message, { silent = false } = {}) {
 }
 
 function handleHostOutput(id, run, chunk) {
-  run.lastActivityAt = Date.now()
   run.buffer += chunk.toString()
   let newline
   while ((newline = run.buffer.indexOf('\n')) >= 0) {
@@ -1205,6 +1182,7 @@ function handleHostOutput(id, run, chunk) {
     } catch {
       continue
     }
+    noteHostMessageActivity(run, message)
     if ('method' in message) {
       handleHostNotification(id, run, message)
       continue
@@ -1314,10 +1292,20 @@ function handleHostNotification(id, run, notification) {
     const reason = event?.part?.reason || 'completed'
     const clearedTasks = run.subagentDisplay.finish(run.currentTurnId, params.turn?.id, reason)
     if (clearedTasks) {
-      const snapshot = { type: 'subagent_tasks', timestamp: Date.now(), sessionID: runSessionId(run), tasks: clearedTasks }
+      const snapshot = {
+        type: 'subagent_tasks',
+        timestamp: Date.now(),
+        sessionID: runSessionId(run),
+        tasks: clearedTasks
+      }
       run.lastSnapshots = { ...run.lastSnapshots, subagent_tasks: snapshot }
       if (run.sender && !run.sender.isDestroyed()) {
-        run.sender.send('chat:event', { id, sessionId: runSessionId(run), sequence: ++run.sequence, event: snapshot })
+        run.sender.send('chat:event', {
+          id,
+          sessionId: runSessionId(run),
+          sequence: ++run.sequence,
+          event: snapshot
+        })
       }
     }
     run.running = false
@@ -1614,9 +1602,6 @@ function sendChatExit(id, run, payload) {
     startedAt: run.startedAt,
     exit: { ...payload, aborted: run.aborting }
   })
-  while (completedRuns.size > MAX_COMPLETED_RUNS) {
-    completedRuns.delete(completedRuns.keys().next().value)
-  }
   if (run.sender && !run.sender.isDestroyed()) {
     const items = allQueuedItems(id, run)
     run.sender.send('chat:exit', {
@@ -1634,6 +1619,7 @@ function disposeHost(id) {
   const run = runs.get(id)
   if (!run) return
   runs.delete(id)
+  settlePendingHostRequests(run, 'chat host 已关闭，请重试')
   queuedRuns.clear(id)
   // host 一走 btw 就没有执行者了：不熄灭这盏灯，侧栏会永远显示「在跑」。
   run.btwBusyThreads?.clear()
@@ -2353,26 +2339,7 @@ export function registerChatIpc() {
     if (method === 'mica/pluginPanel/view') {
       // 键里带 sessionId：同一个页签换会话时面板数据跟着换，不能把上一个会话的视图复用过来。
       const key = `${id}\u0000${payload?.sessionId || ''}\u0000${pluginId}\u0000${payload?.cwd || ''}`
-      const cached = panelViewCache.get(key)
-      if (cached && Date.now() - cached.at < PANEL_VIEW_REUSE_MS) return cached.promise
-      const promise = requestPanelView(event, payload, id, pluginId)
-      prunePanelViewCache()
-      const entry = { at: Date.now(), promise }
-      panelViewCache.set(key, entry)
-      // 失败不进缓存，否则一次超时会被放大成 3 秒内所有消费者一起失败；有效期改从结果
-      // 返回起算，慢请求完成时本来也该让下一个消费者自己再问一次。
-      // `requestPanelView` 有一条同步返回的失败路径（没起成宿主），所以统一包一层。
-      void Promise.resolve(promise).then(
-        (result) => {
-          if (panelViewCache.get(key) !== entry) return
-          if (result?.ok === false) panelViewCache.delete(key)
-          else entry.at = Date.now()
-        },
-        () => {
-          if (panelViewCache.get(key) === entry) panelViewCache.delete(key)
-        }
-      )
-      return promise
+      return panelViewCache.read(key, () => requestPanelView(event, payload, id, pluginId))
     }
     panelViewCache.clear()
     return requestPanelView(event, payload, id, pluginId, {
@@ -2624,27 +2591,32 @@ export function registerChatIpc() {
 
   // 用户点了插件抛出的选择题：转成 `mica/ask/answer` 交给 host 里的 broker，
   // 由它 resolve 掉那个还在 await 的工具。答题本身不是一轮对话的开始，也不排队。
-  ipcMain.handle('chat:answer-ask', async (_event, { id, askId, optionIds, custom, cancelled } = {}) => {
-    const run = runs.get(id)
-    if (!run) return { ok: false, error: '这条会话没有在等回答' }
-    // 关掉卡片（没选任何东西）走单独的标记：宿主据此告诉工具「用户取消了」，
-    // 而不是当成「选了空」被拒。
-    if (cancelled === true) {
+  ipcMain.handle(
+    'chat:answer-ask',
+    async (_event, { id, askId, optionIds, custom, cancelled } = {}) => {
+      const run = runs.get(id)
+      if (!run) return { ok: false, error: '这条会话没有在等回答' }
+      // 关掉卡片（没选任何东西）走单独的标记：宿主据此告诉工具「用户取消了」，
+      // 而不是当成「选了空」被拒。
+      if (cancelled === true) {
+        return unwrapHostResult(
+          await hostTaskRequest(run, 'mica/ask/answer', {
+            askId: typeof askId === 'string' ? askId : '',
+            cancelled: true
+          })
+        )
+      }
       return unwrapHostResult(
         await hostTaskRequest(run, 'mica/ask/answer', {
           askId: typeof askId === 'string' ? askId : '',
-          cancelled: true
+          optionIds: Array.isArray(optionIds)
+            ? optionIds.filter((value) => typeof value === 'string')
+            : [],
+          ...(typeof custom === 'string' && custom.trim() ? { custom: custom.trim() } : {})
         })
       )
     }
-    return unwrapHostResult(
-      await hostTaskRequest(run, 'mica/ask/answer', {
-        askId: typeof askId === 'string' ? askId : '',
-        optionIds: Array.isArray(optionIds) ? optionIds.filter((value) => typeof value === 'string') : [],
-        ...(typeof custom === 'string' && custom.trim() ? { custom: custom.trim() } : {})
-      })
-    )
-  })
+  )
 
   ipcMain.handle('chat:models', () => listModels())
 
@@ -2859,6 +2831,7 @@ export function disposeAllChatRuns() {
       // ignore
     }
     runs.delete(id)
+    settlePendingHostRequests(run, 'chat host 正在关闭')
   }
   for (const [commitId, run] of [...commitRuns.entries()]) {
     try {
@@ -2870,4 +2843,5 @@ export function disposeAllChatRuns() {
   }
   queuedRuns.clearAll()
   completedRuns.clear()
+  panelViewCache.clear()
 }

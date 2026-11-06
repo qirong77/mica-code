@@ -29,3 +29,33 @@ export function settlePendingHostRequests(run, message) {
   }
   return { rejectedTurns }
 }
+
+/** 等待一个带回包的查询。超时/写入失败/宿主关闭后立即释放 Map 中的参数与闭包。 */
+export function requestHostTask(run, method, params, { timeoutMs, send }) {
+  if (!run?.child?.stdin?.writable)
+    return Promise.resolve({ ok: false, error: 'chat host 不可用，请重试' })
+  return new Promise((resolve) => {
+    let requestId
+    let settled = false
+    const settle = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (requestId !== undefined) run.pendingRequests?.delete(requestId)
+      resolve(result)
+    }
+    const timer = setTimeout(
+      () => settle({ ok: false, error: 'chat host 请求超时，请重试' }),
+      timeoutMs
+    )
+    try {
+      const sent = send(run, method, params, { resolve: settle })
+      requestId = run.requestSeq
+      if (settled) run.pendingRequests?.delete(requestId)
+      else if (!sent) settle({ ok: false, error: 'chat host 不可用，请重试' })
+    } catch {
+      requestId = run.requestSeq
+      settle({ ok: false, error: 'chat host 不可用，请重试' })
+    }
+  })
+}

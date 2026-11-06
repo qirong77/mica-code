@@ -10,7 +10,7 @@ import {
 } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
-import { flushLogs, logger, readPerformanceSummary, startMemorySampler, stats } from './log.js'
+import { flushLogs, logger, readPerformanceSummary, readPerformanceSummaryAsync, startMemorySampler, stats } from './log.js'
 
 let dir = ''
 const originalLogDir = process.env.MICA_LOG_DIR
@@ -99,6 +99,12 @@ describe('log writer', () => {
     expect(summary.totals.samples).toBe(2)
     expect(summary.totals.hiddenSamples).toBe(0)
     expect(summary.timeline.map((point) => point.lag)).toEqual([4, 8])
+  })
+
+  it('forwards the async performance reader with the same sample data', async () => {
+    logger('perf').info('sample', { lag: 4, dom: 900, vis: 1 })
+    flushLogs()
+    expect(await readPerformanceSummaryAsync()).toEqual(readPerformanceSummary())
   })
 
   it('counts hidden-window samples apart from measurable ones', () => {

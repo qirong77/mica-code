@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
 import { clearPerformanceLogs, readPerformanceDetails } from '../api.js';
+import { rendererTimeline } from '../performanceTimeline.js';
 import type {
   ConfigWebPerfBucket,
   ConfigWebPerfEvent,
@@ -36,39 +37,69 @@ export function PerformancePage() {
   const [auto, setAuto] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('cost');
   const [levelFilter, setLevelFilter] = useState<'all' | 'error' | 'warn'>('all');
+  const mounted = useRef(false);
+  const pending = useRef<Promise<void> | null>(null);
+  const clearing = useRef(false);
   const RefreshIcon = appIcons.refresh;
   const TrashIcon = appIcons.trash;
 
-  const load = useCallback(async () => {
+  const load = useCallback((allowClearing = false): Promise<void> => {
+    if (clearing.current && !allowClearing) return Promise.resolve();
+    if (pending.current) return pending.current;
     setError(null);
-    try {
-      setDetails(await readPerformanceDetails({ limit: 200, buckets: 40, timeline: 180 }));
-    } catch (loadError) {
-      setError(formatError(loadError));
-    } finally {
-      setLoading(false);
-    }
+    const request = (async () => {
+      try {
+        const next = await readPerformanceDetails({ limit: 200, buckets: 40, timeline: 180 });
+        if (mounted.current) setDetails(next);
+      } catch (loadError) {
+        if (mounted.current) setError(formatError(loadError));
+      } finally {
+        if (mounted.current) setLoading(false);
+      }
+    })();
+    pending.current = request;
+    void request.finally(() => {
+      if (pending.current === request) pending.current = null;
+    });
+    return request;
   }, []);
 
   useEffect(() => {
-    void load();
+    mounted.current = true;
+    if (document.visibilityState === 'visible' && document.hasFocus()) void load();
+    return () => {
+      mounted.current = false;
+    };
   }, [load]);
 
-  // 自动刷新只在页面可见时跑：后台标签页不该继续拉数据。
+  // 自动刷新要求可见且聚焦；回到窗口时补一次，慢读取与手动刷新共用同一请求。
   useEffect(() => {
     if (!auto) return;
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void load();
-    }, REFRESH_MS);
-    return () => window.clearInterval(timer);
+    const refresh = () => {
+      if (document.visibilityState === 'visible' && document.hasFocus()) void load();
+    };
+    refresh();
+    const timer = window.setInterval(refresh, REFRESH_MS);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [auto, load]);
 
   async function handleClear() {
+    if (clearing.current) return;
+    clearing.current = true;
     try {
+      await pending.current;
       await clearPerformanceLogs();
-      await load();
+      await load(true);
     } catch (clearError) {
-      setError(formatError(clearError));
+      if (mounted.current) setError(formatError(clearError));
+    } finally {
+      clearing.current = false;
     }
   }
 
@@ -95,12 +126,12 @@ export function PerformancePage() {
   }
 
   const totals = details?.totals;
-  const timeline = details?.timeline ?? [];
+  const timeline = rendererTimeline(details?.timeline ?? []);
 
   return (
     <PageFrame
       title="Performance"
-      description="桌面运行时写在本机临时目录的耗时与渲染采样，用于确认卡顿出在哪一段"
+      description="桌面运行时写在本机日志目录的耗时与渲染采样，用于确认卡顿出在哪一段"
       path={details?.dir}
       actions={
         <div className="toolbar">
@@ -144,7 +175,7 @@ export function PerformancePage() {
       <section className="perf-section">
         <header className="perf-section-head">
           <h2>渲染时间线</h2>
-          <span className="perf-hint">每秒一个采样点；柱高 = 主线程被占用的毫秒数</span>
+          <span className="perf-hint">最近活跃页面，每秒一个采样点；柱高 = 主线程被占用的毫秒数</span>
         </header>
         {timeline.length === 0 ? (
           <Empty description="还没有采样数据。打开任意对话页，几秒后就会开始记录。" />
@@ -273,13 +304,7 @@ export function PerformancePage() {
  * Electron 外壳另外还有页面、GPU、utility。它们各自上报一条（`startMemorySampler`），
  * 这里按当前 RSS 排序列出来，条宽相对最大的那个——「谁在吃内存」一眼看得出来。
  */
-function MemorySection({
-  processes,
-  samples,
-}: {
-  processes: ConfigWebPerfMemoryProcess[];
-  samples: number;
-}) {
+function MemorySection({ processes, samples }: { processes: ConfigWebPerfMemoryProcess[]; samples: number }) {
   // 基准取「本轮最后一条采样」，不用 now：这里读的是历史日志，昨天那份里的进程不该
   // 全被判成已退出。采样间隔 30 秒，落后 4 个周期说明这个进程已经不在了。
   const latest = processes.reduce((newest, item) => Math.max(newest, item.lastAt || 0), 0);
@@ -321,9 +346,7 @@ function MemorySection({
                   {Math.round(item.lastRssMB)}MB
                   <span className="perf-memory-meta">
                     {exited ? '已退出 · ' : ''}峰值 {Math.round(item.peakRssMB)}MB
-                    {item.growthMB
-                      ? ` · ${item.growthMB > 0 ? '↑' : '↓'}${Math.abs(Math.round(item.growthMB))}MB`
-                      : ''}
+                    {item.growthMB ? ` · ${item.growthMB > 0 ? '↑' : '↓'}${Math.abs(Math.round(item.growthMB))}MB` : ''}
                   </span>
                 </span>
               </li>

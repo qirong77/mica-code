@@ -15,7 +15,9 @@ class MockAgent {
   readonly consumers = new Set<{ text: (text: string) => void; start: () => void; rollback: () => void }>();
   registerTextRollbackConsumer(consumer: { text: (text: string) => void; start: () => void; rollback: () => void }) {
     this.consumers.add(consumer);
-    return () => { this.consumers.delete(consumer); };
+    return () => {
+      this.consumers.delete(consumer);
+    };
   }
   runId = 0;
   aborted = false;
@@ -97,11 +99,14 @@ class MockAgent {
 
 let harnessSeq = 0;
 
-function createHarness(options: {
-  withPluginLayer?: boolean;
-  retryDelayMs?: number;
-  applyInputSettings?: (input: RuntimeInput) => void;
-} = {}) {
+function createHarness(
+  options: {
+    withPluginLayer?: boolean;
+    maxTurnRetries?: number;
+    retryDelayMs?: number;
+    applyInputSettings?: (input: RuntimeInput) => void;
+  } = {},
+) {
   const agent = new MockAgent();
   const events: HeadlessTurnEvent[] = [];
   const savedStates: string[] = [];
@@ -120,15 +125,13 @@ function createHarness(options: {
     refreshFromStore: () => null,
   };
   let idleCount = 0;
-  const noticeLog = new TurnNoticeLog(
-    () => agent.toConversationMessages() as unknown as MicaUiConversationMessage[],
-  );
+  const noticeLog = new TurnNoticeLog(() => agent.toConversationMessages() as unknown as MicaUiConversationMessage[]);
   const executor = new HeadlessTurnExecutor({
     agent: agent as unknown as never,
     sessionController: sessionController as never,
     onEvent: (event) => events.push(event),
     applyInputSettings: options.applyInputSettings,
-    maxTurnRetries: 2,
+    maxTurnRetries: options.maxTurnRetries ?? 2,
     retryDelayMs: options.retryDelayMs ?? 5,
     subagentTasks: {
       killRunningForOwner: (owner: unknown, reason: string) => {
@@ -181,11 +184,17 @@ describe('HeadlessTurnExecutor', () => {
   it('rolls back completed responses before a turn retry and aborts the wait without saving their text', async () => {
     const { agent, executor, events } = createHarness({ retryDelayMs: 5000 });
     const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
-    const projector = attachCodexProjector(agent as never, (method, params) => {
-      notifications.push({ method, params: params as Record<string, unknown> });
-    }, { threadId: 'thread', turnId: 'turn', cwd: '/', textRollback: true, thinkingRollback: true, thinking: true });
+    const projector = attachCodexProjector(
+      agent as never,
+      (method, params) => {
+        notifications.push({ method, params: params as Record<string, unknown> });
+      },
+      { threadId: 'thread', turnId: 'turn', cwd: '/', textRollback: true, thinkingRollback: true, thinking: true },
+    );
     let rollbackBeforeRestore = false;
-    agent.events.on('thinkingTurnAttemptRollback', () => { rollbackBeforeRestore = agent.restoreCalls === 0; });
+    agent.events.on('thinkingTurnAttemptRollback', () => {
+      rollbackBeforeRestore = agent.restoreCalls === 0;
+    });
     agent.run = async (_content, options = {}) => {
       agent.events.emit('textAttemptStart');
       agent.events.emit('thinking', 'first thought');
@@ -205,23 +214,31 @@ describe('HeadlessTurnExecutor', () => {
     await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'turn:retrying' })));
     expect(rollbackBeforeRestore).toBe(true);
     expect(agent.restoreCalls).toBe(1);
-    expect(notifications.filter(({ method }) => method === 'mica/reasoning/textRollback').map(({ params }) => params))
-      .toEqual([
-        expect.objectContaining({ length: 14, micaAttemptId: 'turn:2' }),
-        expect.objectContaining({ length: 13, micaAttemptId: 'turn:1' }),
-      ]);
-    expect(notifications.filter(({ method }) => method === 'mica/agentMessage/textRollback').map(({ params }) => params))
-      .toEqual([
-        expect.objectContaining({ length: 15, micaAttemptId: 'turn:2' }),
-        expect.objectContaining({ length: 14, micaAttemptId: 'turn:1' }),
-      ]);
+    expect(
+      notifications.filter(({ method }) => method === 'mica/reasoning/textRollback').map(({ params }) => params),
+    ).toEqual([
+      expect.objectContaining({ length: 14, micaAttemptId: 'turn:2' }),
+      expect.objectContaining({ length: 13, micaAttemptId: 'turn:1' }),
+    ]);
+    expect(
+      notifications.filter(({ method }) => method === 'mica/agentMessage/textRollback').map(({ params }) => params),
+    ).toEqual([
+      expect.objectContaining({ length: 15, micaAttemptId: 'turn:2' }),
+      expect.objectContaining({ length: 14, micaAttemptId: 'turn:1' }),
+    ]);
 
     executor.abort();
-    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'turn:finish', status: 'aborted' })));
+    await vi.waitFor(() =>
+      expect(events).toContainEqual(expect.objectContaining({ type: 'turn:finish', status: 'aborted' })),
+    );
     expect(agent.abortedTurnCalls).toEqual([{ content: 'retry and abort', partialAnswer: undefined }]);
     projector.completeTurn('interrupted');
-    expect(notifications.findLast(({ method, params }) => method === 'item/completed' && (params.item as { type: string }).type === 'agentMessage')?.params.item)
-      .toMatchObject({ text: '' });
+    expect(
+      notifications.findLast(
+        ({ method, params }) =>
+          method === 'item/completed' && (params.item as { type: string }).type === 'agentMessage',
+      )?.params.item,
+    ).toMatchObject({ text: '' });
     projector.dispose();
   });
 
@@ -229,12 +246,17 @@ describe('HeadlessTurnExecutor', () => {
     const { agent, executor } = createHarness();
     const notifications: Array<{ method: string; params: unknown }> = [];
     const projector = attachCodexProjector(agent as never, (method, params) => notifications.push({ method, params }), {
-      threadId: 'thread', turnId: 'turn', cwd: '/', textRollback: true,
+      threadId: 'thread',
+      turnId: 'turn',
+      cwd: '/',
+      textRollback: true,
     });
     agent.run = async () => {
       const handlers = agent.events.all.get('text') ?? [];
       expect(agent.consumers.size).toBe(2);
-      expect(handlers.every((handler) => [...agent.consumers].some((consumer) => consumer.text === (handler as unknown)))).toBe(true);
+      expect(
+        handlers.every((handler) => [...agent.consumers].some((consumer) => consumer.text === (handler as unknown))),
+      ).toBe(true);
       agent.events.emit('text', 'earlier ');
       agent.events.emit('textAttemptStart');
       agent.events.emit('text', 'discarded');
@@ -254,7 +276,9 @@ describe('HeadlessTurnExecutor', () => {
   it('leaves the legacy projector unregistered so rollback remains disabled', async () => {
     const { agent, executor } = createHarness();
     const projector = attachCodexProjector(agent as never, () => {}, {
-      threadId: 'thread', turnId: 'turn', cwd: '/',
+      threadId: 'thread',
+      turnId: 'turn',
+      cwd: '/',
     });
     agent.run = async () => {
       expect(agent.events.all.get('text')).toHaveLength(2);
@@ -340,7 +364,10 @@ describe('HeadlessTurnExecutor', () => {
     expect(steps.slice(0, 4)).toEqual(['refresh', 'apply:system:none:true', 'reserve', 'save']);
     const secondRefresh = steps.indexOf('refresh', 1);
     expect(steps.slice(secondRefresh, secondRefresh + 4)).toEqual([
-      'refresh', 'apply:ui:new-model:true', 'reserve', 'save',
+      'refresh',
+      'apply:ui:new-model:true',
+      'reserve',
+      'save',
     ]);
     expect(overrides.has(explicit)).toBe(false);
   });
@@ -522,6 +549,15 @@ describe('HeadlessTurnExecutor', () => {
     expect(finish).toMatchObject({ status: 'completed' });
     expect(savedStates).toContain('running');
     expect(savedStates).toContain('completed');
+  });
+
+  it('does not copy history when turn retries are disabled', async () => {
+    const { agent, executor, events } = createHarness({ maxTurnRetries: 0 });
+    const capture = vi.spyOn(agent, 'captureClientSnapshot');
+    await executor.start(input('no retries'));
+    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'turn:finish' })));
+    expect(capture).not.toHaveBeenCalled();
+    expect(agent.runCalls).toHaveLength(1);
   });
 
   it('retries transient provider errors and reports turn:retrying', async () => {

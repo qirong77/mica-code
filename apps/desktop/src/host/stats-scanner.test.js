@@ -372,6 +372,65 @@ describe('incremental session scanner', () => {
     expect(stats.map((row) => [row.id, row.totalTokens])).toEqual([['fork', 110]])
   })
 
+  test('uses the async JSON reader for scans, ownership changes and body searches', async () => {
+    const reads = []
+    const harness = createHarness({
+      scanner: {
+        async readJson(file, options) {
+          reads.push({ file, options })
+          await new Promise((resolve) => setImmediate(resolve))
+          return JSON.parse(readFileSync(file, 'utf8'))
+        }
+      }
+    })
+    const shared = { inputTokens: 20, outputTokens: 2, extra: { legacyIdentity: true } }
+    const snapshot = {
+      ...fixture('source').snapshot,
+      conversationMessages: [{ role: 'user', content: 'searchable body' }],
+      usageHistory: [shared]
+    }
+    harness.files.write('source', fixture('source', { snapshot }))
+    harness.files.write('fork', fixture('fork', {
+      createdAt: '2025-01-02T00:00:00.000Z', snapshot
+    }))
+    expect((await harness.scanner.scanStats()).map((row) => row.totalTokens)).toEqual([22, 0])
+    expect(reads).toHaveLength(2)
+    expect(harness.reads).toHaveLength(0)
+
+    harness.files.remove('source')
+    expect((await harness.scanner.scanStats()).map((row) => row.totalTokens)).toEqual([22])
+    expect(reads).toHaveLength(3)
+    const file = join(harness.dir, 'fork.json')
+    expect(await harness.scanner.readText(file)).toEqual({ id: 'fork', text: 'searchable body', truncated: false })
+    expect(reads.at(-1)).toEqual({ file, options: { mode: 'text' } })
+  })
+
+  test('does not cache data replaced while awaiting the JSON reader', async () => {
+    let notifyStarted
+    let finishRead
+    const started = new Promise((resolve) => { notifyStarted = resolve })
+    const waiting = new Promise((resolve) => { finishRead = resolve })
+    const harness = createHarness({
+      scanner: {
+        async readJson(file) {
+          const raw = JSON.parse(readFileSync(file, 'utf8'))
+          notifyStarted()
+          await waiting
+          return raw
+        }
+      }
+    })
+    harness.files.write('one', fixture('one'))
+    const first = harness.scanner.scanMeta()
+    await started
+    harness.files.write('one', fixture('one', { title: 'updated during read' }))
+    finishRead()
+    expect(await first).toEqual([])
+    expect(await harness.scanner.scanMeta()).toEqual([
+      expect.objectContaining({ id: 'one', title: 'updated during read' })
+    ])
+  })
+
   test('reuses the on-disk index instead of parsing every session again', async () => {
     const harness = createHarness()
     harness.files.write('one', fixture('one'))

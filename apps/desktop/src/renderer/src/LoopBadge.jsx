@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { loopBadgeText } from './loop-command'
+import { usePageVisible } from './use-page-visible'
 
 /**
  * 输入框边框右上角的定时循环徽标，形状与 CLI `PromptFrame` 的 loop 徽标一致：
@@ -8,9 +9,10 @@ import { loopBadgeText } from './loop-command'
  * 倒计时按秒自走，但**只有这一个组件**每秒重渲染——挂在 ChatView 里会让整篇对话跟着
  * 一秒一刷（长会话里那是几十毫秒一次的全量重排）。一轮正在跑时不需要倒计时，直接停表。
  */
-export function LoopBadge({ loop, running = false }) {
+export function LoopBadge({ loop, running = false, visible = true }) {
+  const pageVisible = usePageVisible(visible)
   const [now, setNow] = useState(() => Date.now())
-  const ticking = loop?.status === 'active' && !running
+  const ticking = pageVisible && loop?.status === 'active' && !running
 
   useEffect(() => {
     if (!ticking) return undefined

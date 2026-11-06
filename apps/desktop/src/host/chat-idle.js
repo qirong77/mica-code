@@ -17,6 +17,29 @@ export const IDLE_REAP_MS = 30 * 60 * 1000
 /** 硬上限：闲置再久也至少留这么多宿主（见下方 `maxKeep` 的取舍）。 */
 export const IDLE_MAX_KEEP = 3
 
+/** 状态轮询和后台快照不代表用户还在使用这条会话，不能用来续闲置计时。 */
+export function isHostActivityRequest(method) {
+  return !/\/(?:get|list|detail|view|output|threads)$/.test(method || '')
+}
+
+const PASSIVE_NOTIFICATIONS = new Set([
+  'mica/backgroundTasks/updated',
+  'mica/subagentTasks/updated',
+  'mica/waitTasks/updated',
+  'mica/capabilities/updated',
+  'mica/pluginSettings/updated',
+  'mica/sessionState/updated'
+])
+
+export function noteHostMessageActivity(run, message, now = Date.now()) {
+  if (typeof message?.method === 'string') {
+    if (!PASSIVE_NOTIFICATIONS.has(message.method)) run.lastActivityAt = now
+  } else {
+    const method = run.pendingRequests?.get(message?.id)?.method
+    if (method && isHostActivityRequest(method)) run.lastActivityAt = now
+  }
+}
+
 export function resolveIdleReap(
   entries,
   now,
@@ -56,6 +79,7 @@ function isBusy(entry) {
   // 正在改写即将发送的历史，收掉它等于把用户排队的那条消息一起丢掉。
   if (run.running || run.maintenance || run.aborting) return true
   if (run.currentTurnId) return true
+  if (run.pendingRequests?.size) return true
   if (run.hostPending?.length) return true
   if (run.btwBusyThreads?.size) return true
   if ((entry.queuedCount || 0) > 0) return true

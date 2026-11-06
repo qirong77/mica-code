@@ -23,6 +23,7 @@ import { ComposerImageStrip } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed } from './chat-tool-display'
 import { isModalOpen } from './chat-modal'
+import { usePageVisible } from './use-page-visible'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import { ToolDetailDialog } from './chat-tool-detail'
 import {
@@ -125,6 +126,7 @@ function BtwContextMenu({
  */
 export function BtwDrawer({
   thread,
+  visible = true,
   tabs = [],
   width = null,
   onResizeWidth,
@@ -148,6 +150,7 @@ export function BtwDrawer({
   onOpenDocument,
   onClose
 }) {
+  const pageVisible = usePageVisible(visible)
   const bodyRef = useRef(null)
   const inputRef = useRef(null)
   const imageInputRef = useRef(null)
@@ -360,10 +363,11 @@ export function BtwDrawer({
 
   // 只在回答期间走表：阶段文案与耗时每秒都要动，但不该让抽屉常驻一个定时器。
   useEffect(() => {
-    if (!running) return undefined
+    if (!pageVisible || !running) return undefined
+    setNow(Date.now())
     const timer = setInterval(() => setNow(Date.now()), 250)
     return () => clearInterval(timer)
-  }, [running])
+  }, [running, pageVisible])
 
   // 流式正文每来一个合并窗口就追加一截，贴着底部时才跟着滚。
   useEffect(() => {

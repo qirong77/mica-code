@@ -18,6 +18,39 @@ afterEach(() => {
 });
 
 describe('Responses input normalization', () => {
+  it('can capture provider history without building an unused conversation projection', () => {
+    const client = new ResponsesClient(options('openai_responses'));
+    client.messages = [{ type: 'message', role: 'user', content: 'hello' }];
+    const project = vi.spyOn(client, 'toConversationMessages');
+    const state = client.getSnapshot({ includeConversation: false });
+    expect(state.messages).toBe(client.messages);
+    expect(state.conversationMessages).toEqual([]);
+    expect(project).not.toHaveBeenCalled();
+    expect(client.getSnapshot().conversationMessages).toHaveLength(1);
+    expect(project).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['plain text 中文', 'plain text 中文'],
+    ['emoji 😀', 'emoji 😀'],
+    ['high\ud800tail', 'high\ufffdtail'],
+    ['low\udffftail', 'low\ufffdtail'],
+    ['x'.repeat(1024 * 1024), 'x'.repeat(1024 * 1024)],
+  ])('normalizes UTF-16 in historical text without changing valid content (%#)', async (text, expected) => {
+    const client = new ResponsesClient(options('openai_responses'));
+    client.loadSnapshot({
+      model: 'test-model',
+      messages: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text }] }],
+      usageHistory: [], lastUsage: undefined, conversationMessages: [],
+    });
+    openaiMocks.responsesCreate.mockResolvedValueOnce(streamOf({ type: 'response.output_text.delta', delta: 'ok' }));
+    await client.query('next');
+    const request = openaiMocks.responsesCreate.mock.calls[0]![0] as {
+      input: Array<{ content: Array<{ text: string }> }>;
+    };
+    expect(request.input[0]!.content[0]!.text).toBe(expected);
+  });
+
   it('strips server-side-only fields from output items replayed into the next request', async () => {
     openaiMocks.responsesCreate
       .mockResolvedValueOnce(

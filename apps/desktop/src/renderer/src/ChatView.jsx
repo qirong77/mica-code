@@ -60,6 +60,11 @@ import {
 import { Button, PluginIcon, QrCode, SessionDetailView, resolvePluginIcon } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
+import { readCachedTranscript, takeCachedTranscript, writeCachedTranscript } from './chat-cache'
+import { createReadQueue } from './read-queue'
+import { usePageVisible } from './use-page-visible'
+import { transcriptMessagesForDisplay, updateStreamMessage } from './chat-stream'
+export { resetTranscriptCache } from './chat-cache'
 import { rollbackAttemptReasoning, rollbackAttemptText } from './chat/text-rollback'
 import { collapseCompactToolNotes, compactToolDetailLines } from './chat/compact-notes'
 import { mergeCompactCheckpoints } from './chat/compact-checkpoint'
@@ -1269,6 +1274,7 @@ function useTaskPolling({ task, isRunning, intervalMs, load }) {
  * 计时收进这个组件后，父级不再跟着跳。
  */
 function ElapsedText({ task, running }) {
+  const pageVisible = usePageVisible()
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -1276,9 +1282,11 @@ function ElapsedText({ task, running }) {
       setNow(Date.now())
       return undefined
     }
+    if (!pageVisible) return undefined
+    setNow(Date.now())
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [running])
+  }, [running, pageVisible])
 
   const elapsed = taskElapsedMs(task, now)
   if (elapsed == null) return null
@@ -2724,36 +2732,40 @@ export function shortPath(path, max = 46) {
   return `${head}…/${tail}`.slice(0, max)
 }
 
-function PhaseElapsedLabel({ startedAt }) {
+function PhaseElapsedLabel({ startedAt, visible = true }) {
+  const pageVisible = usePageVisible(visible)
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
     if (!startedAt) {
       setElapsed(0)
       return undefined
     }
+    if (!pageVisible) return undefined
     const update = () => setElapsed(Math.max(0, Date.now() - startedAt))
     update()
     const timer = window.setInterval(update, 250)
     return () => clearInterval(timer)
-  }, [startedAt])
+  }, [startedAt, pageVisible])
   if (elapsed <= 0) return null
   return <span className="chat-status-phase-elapsed">{formatLogElapsed(elapsed)}</span>
 }
 
 // 运行耗时单独成一个组件：它每 250ms 刷新一次，留在 ChatView 里会让整个会话面板
 // （含全部消息行）每秒重渲染 4 次。这里只重渲染这一个 span。
-function RunElapsedLabel({ runStartedAt }) {
+function RunElapsedLabel({ runStartedAt, visible = true }) {
+  const pageVisible = usePageVisible(visible)
   const [elapsed, setElapsed] = useState(0)
   useEffect(() => {
     if (!runStartedAt) {
       setElapsed(0)
       return undefined
     }
+    if (!pageVisible) return undefined
     const update = () => setElapsed(Math.max(0, Date.now() - runStartedAt))
     update()
     const timer = window.setInterval(update, 250)
     return () => clearInterval(timer)
-  }, [runStartedAt])
+  }, [runStartedAt, pageVisible])
   return (
     <span className="chat-status-elapsed" title="本次任务总运行时间">
       {formatLogElapsed(elapsed)}
@@ -3324,19 +3336,6 @@ export function canReuseVisualTranscript(cached, persisted, cachedMeta, persiste
 }
 
 /**
- * 会话的**渲染结果**缓存（模块级，按节点 id，有界 LRU）。
- *
- * 磁盘上的会话历史只有 role/text：思考、工具调用、TODO 都只存在于事件流里。所以离开一个
- * 会话再回来时，如果只能从磁盘重建，那些内容就没了（而 host 的事件缓冲本身有上限，长 turn
- * 里早期的思考与 TODO 也早被挤掉）。把上一次的渲染结果留着，切回来先用它渲染，再用事件流
- * 补差量，界面就不会「状态在跑但思考是空的、TODO 卡住」。
- *
- * 放在模块级而不是组件内的 ref：组件被淘汰（切过的会话超过保留上限）后重建时也还能命中。
- */
-const TRANSCRIPT_CACHE_LIMIT = 8
-const transcriptCache = new Map()
-
-/**
  * 滚动位置按节点记。缓存实例切走时只是被加上 `hidden`（display:none），而 display:none 会把
  * 滚动容器的 `scrollTop` 清成 0，再显示回来也不会自己恢复；显示回来那一下 React 还可能重建
  * 这段 DOM。所以位置只能自己记、自己放回去。判定见 chat-scroll.js。
@@ -3361,32 +3360,6 @@ const ACCUMULATING_EVENT_TYPES = new Set([
   'step_finish',
   'session_history_replaced'
 ])
-
-function readCachedTranscript(nodeId) {
-  if (!nodeId) return null
-  const cached = transcriptCache.get(nodeId)
-  if (cached === undefined) return null
-  // 命中即刷新到 LRU 末尾
-  transcriptCache.delete(nodeId)
-  transcriptCache.set(nodeId, cached)
-  return cached
-}
-
-function writeCachedTranscript(nodeId, messages, meta) {
-  if (!nodeId || !Array.isArray(messages) || messages.length === 0) return
-  transcriptCache.delete(nodeId)
-  transcriptCache.set(nodeId, { messages, meta })
-  while (transcriptCache.size > TRANSCRIPT_CACHE_LIMIT) {
-    const oldest = transcriptCache.keys().next().value
-    if (oldest === undefined) break
-    transcriptCache.delete(oldest)
-  }
-}
-
-/** 只给测试用：清掉跨实例的缓存。 */
-export function resetTranscriptCache() {
-  transcriptCache.clear()
-}
 
 export function activateQueuedMessage(messages, queuedMessageId) {
   if (!queuedMessageId) return messages
@@ -3483,6 +3456,8 @@ export function ChatView({
   onSessionRenamed,
   onShareSession
 }) {
+  const pageVisible = usePageVisible(visible)
+  const visibleRef = useLatest(visible)
   const nodeId = node?.id || null
   const nodeIdRef = useLatest(nodeId)
   const cwdRef = useLatest(cwd)
@@ -3550,6 +3525,7 @@ export function ChatView({
   // 事件流本来就会广播到这里。这种情况本页拿不到事件流，只能显示状态并挡下发送。
   const [remoteRunning, setRemoteRunning] = useState(false)
   const remoteRunningRef = useLatest(remoteRunning)
+  const remoteReadsRef = useRef(null)
   // 焦点回到输入框、且这一轮没在跑：告诉常驻 host「人回来了」。自动压缩据此在用户还没
   // 敲字时就把落盘的历史压小，下一轮请求不必为膨胀的上下文付费。运行中不发——那时宿主
   // 正持着 turn lease，压缩没有间隙。
@@ -3687,7 +3663,10 @@ export function ChatView({
   const [turnTimingOpen, setTurnTimingOpen] = useState(false)
   const [sessionDetailOpen, setSessionDetailOpen] = useState(false)
   const [turnTimingNow, setTurnTimingNow] = useState(() => Date.now())
-  const turnTiming = summarizeTurnTiming(turnTimingState, turnTimingNow)
+  const turnTiming = useMemo(
+    () => summarizeTurnTiming(turnTimingState, turnTimingNow),
+    [turnTimingState, turnTimingNow]
+  )
   // 运行中的这一轮还没落盘（宿主在轮末才写），所以由界面现场传给弹窗；已结束的轮次
   // 一律读会话里的记录，两边不会重复出现同一轮。
   const liveTimingRound = useMemo(
@@ -3697,10 +3676,11 @@ export function ChatView({
   // 运行中打开时才每秒走表：这一轮还在跑，总耗时与仍打开的那一段要跟着长。
   const turnTimingRunning = Boolean(turnTiming?.running)
   useEffect(() => {
-    if (!turnTimingOpen || !turnTimingRunning) return undefined
+    if (!pageVisible || !turnTimingOpen || !turnTimingRunning) return undefined
+    setTurnTimingNow(Date.now())
     const timer = window.setInterval(() => setTurnTimingNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [turnTimingOpen, turnTimingRunning])
+  }, [pageVisible, turnTimingOpen, turnTimingRunning])
   // 当前阶段/工具的实时耗时（对齐 CLI WorkingStatus：状态文本带 elapsed，
   // working 阶段从最早 running 工具 startedAt 起算，其余阶段从阶段切换起算）。
   // 起算点在 statusLinePhase 换算之后的那一段：见下方 displayPhase 的 effect。
@@ -3709,10 +3689,11 @@ export function ChatView({
   const hasLiveTasks =
     backgroundTasks.some((task) => task.status === 'starting' || task.status === 'running') || subagentTasks.some((task) => task.status === 'running') || waitTasks.length > 0
   useEffect(() => {
-    if (!hasLiveTasks) return undefined
+    if (!pageVisible || !hasLiveTasks) return undefined
+    setTaskNow(Date.now())
     const timer = window.setInterval(() => setTaskNow(Date.now()), 1000)
     return () => clearInterval(timer)
-  }, [hasLiveTasks])
+  }, [hasLiveTasks, pageVisible])
 
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [showJump, setShowJump] = useState(false)
@@ -3762,6 +3743,7 @@ export function ChatView({
   // 输入框区域手动设定的最小高度（px）；null 表示跟随默认 30px
   const [composerMinHeight, setComposerMinHeight] = useState(null)
   const messagesRef = useRef([])
+  const transcriptMessagesRef = useRef([])
   const modelProtocolsRef = useRef(null) // { map: { [modelId]: { protocol, efforts } }, currentProtocol }
   // 模型档位表：状态行要按它判断当前模型有没有推理强度。等选择面板打开才拉不够——首屏会
   // 显示上一次会话留下的档位，看起来像这一轮会带着它发出去。
@@ -3851,9 +3833,11 @@ export function ChatView({
       const activeId = streamRef.current.id
       if (!activeId) return
       updateMessages((previous) =>
-        previous.map((message) =>
-          message.id === activeId ? { ...message, done: true, finishedAt } : message
-        )
+        updateStreamMessage(previous, activeId, (message) => ({
+          ...message,
+          done: true,
+          finishedAt
+        }))
       )
       streamRef.current = { id: null, kind: null, turnId: streamRef.current.turnId }
     },
@@ -3893,17 +3877,19 @@ export function ChatView({
       updateMessages((previous) => {
         const active = streamRef.current
         if (active.id && active.kind === kind && active.attemptId === attemptId) {
-          return previous.map((message) =>
-            message.id === active.id
-              ? { ...message, text: `${message.text}${text}`, updatedAt: timestamp }
-              : message
-          )
+          return updateStreamMessage(previous, active.id, (message) => ({
+            ...message,
+            text: `${message.text}${text}`,
+            updatedAt: timestamp
+          }))
         }
 
         const finalized = active.id
-          ? previous.map((message) =>
-              message.id === active.id ? { ...message, done: true, finishedAt: timestamp } : message
-            )
+          ? updateStreamMessage(previous, active.id, (message) => ({
+              ...message,
+              done: true,
+              finishedAt: timestamp
+            }))
           : previous
         const id = uid(kind === 'reasoning' ? 'thought' : 'msg')
         streamRef.current = { id, kind, turnId: turnRef.current, attemptId }
@@ -5253,7 +5239,7 @@ export function ChatView({
     const nextInput = switchChatDraft(draftsRef.current, previousNodeId, nodeId, inputRef.current)
     draftReportRef.current = { nodeId, text: nextInput || '' }
     loadedNodeRef.current = nodeId
-    const cachedEntry = readCachedTranscript(nodeId)
+    let cachedEntry = readCachedTranscript(nodeId)
     let cachedTranscript = cachedEntry?.messages ?? null
     const generation = ++restoreGenerationRef.current
     restoringRef.current = true
@@ -5501,8 +5487,18 @@ export function ChatView({
         pendingExitRef.current = null
       }
     }
-    void restore()
-    return undefined
+    void restore().then(() => {
+      // The mounted view now owns the restored rows. Release the previous full snapshot,
+      // but leave it available while restore is pending or its effect is being retried.
+      if (generation === restoreGenerationRef.current && nodeIdRef.current === nodeId) {
+        takeCachedTranscript(nodeId)
+      }
+      cachedEntry = null
+      cachedTranscript = null
+    })
+    return () => {
+      if (generation === restoreGenerationRef.current) restoreGenerationRef.current += 1
+    }
   }, [
     appendNotice,
     applyEventRef,
@@ -5521,21 +5517,25 @@ export function ChatView({
   // 情况本页完全没有事件流，只能隔几秒问一次，等它跑完再把会话文件读回来。
   useEffect(() => {
     if (!remoteRunning) return undefined
-    const timer = window.setInterval(async () => {
+    const reads = createReadQueue(async (isCurrent) => {
       const state = await window.mica.chat
         .isRunning(nodeIdRef.current, sessionIdRef.current || null)
         .catch(() => null)
-      if (!state) return
+      if (!isCurrent() || !state || !visibleRef.current || document.hidden) return
       if (state.running) return
       if (state.remoteRunning) return
-      setRemoteRunning(false)
       const finalSessionId = state.sessionId || sessionIdRef.current
-      if (!finalSessionId) return
+      if (!finalSessionId) {
+        setRemoteRunning(false)
+        return
+      }
       const [rows, finalMeta] = await Promise.all([
         window.mica.chat.history(finalSessionId).catch(() => null),
         window.mica.chat.meta(finalSessionId).catch(() => null)
       ])
+      if (!isCurrent()) return
       if (nodeIdRef.current !== nodeId || sessionIdRef.current !== finalSessionId) return
+      setRemoteRunning(false)
       if (!Array.isArray(rows)) return
       updateMessages(
         thinkingForSelectedModel(
@@ -5549,9 +5549,21 @@ export function ChatView({
         setTodoInterrupted(interrupted)
       }
       refreshMetaSoon(finalSessionId)
-    }, 3000)
+    }, { canRead: () => visibleRef.current && !document.hidden })
+    remoteReadsRef.current = reads
+    return () => {
+      reads.dispose()
+      remoteReadsRef.current = null
+    }
+  }, [remoteRunning, nodeId, nodeIdRef, refreshMetaSoon, updateMessages, visibleRef])
+
+  useEffect(() => {
+    if (!remoteRunning || !pageVisible) return undefined
+    const reads = remoteReadsRef.current
+    void reads?.refresh({ trailing: true })
+    const timer = window.setInterval(() => void reads?.refresh(), 3000)
     return () => window.clearInterval(timer)
-  }, [remoteRunning, nodeId, nodeIdRef, refreshMetaSoon, updateMessages])
+  }, [nodeId, pageVisible, remoteRunning])
 
   useLayoutEffect(() => {
     const list = listRef.current
@@ -6688,13 +6700,21 @@ export function ChatView({
   // remoteRunning（尤其是附着在别的窗口那一轮上）时不能排队：单槽队列属于那个 run 的
   // 所有者，这里只能看。输入框不再提示「可排队」，避免点下去只换来一条警告。
   const queueReady = running && !remoteRunning && input.trim().length > 0
-  const activityTurnId = activityTurnIdForDisplay(messages, turnRef.current, running)
+  const currentTurnId = turnRef.current
+  const activityTurnId = useMemo(
+    () => activityTurnIdForDisplay(messages, currentTurnId, running),
+    [messages, currentTurnId, running]
+  )
   const turnActivityMessages = useMemo(
     () => currentTurnActivityMessages(messages, activityTurnId),
     [activityTurnId, messages]
   )
   const transcriptMessages = useMemo(
-    () => messages.filter((message) => !message.queued && !isActivityMessage(message)),
+    () => {
+      const next = transcriptMessagesForDisplay(messages, transcriptMessagesRef.current)
+      transcriptMessagesRef.current = next
+      return next
+    },
     [messages]
   )
   // 停靠区按轮次留过程：最新一轮摊开（跟着流式长），更早的收成一行，所以一轮
@@ -6883,11 +6903,12 @@ export function ChatView({
       ? activeToolStartedAt
       : phaseStartedAtRef.current
     : 0
-  const activeStreamText =
-    streamRef.current.id && ['thinking', 'streaming'].includes(phase)
-      ? messages.find((message) => message.id === streamRef.current.id)?.text || ''
-      : ''
-  const activeStreamTokenEstimate = activeStreamText ? estimateTokens(activeStreamText) : 0
+  const activeStreamId = streamRef.current.id
+  const activeStreamTokenEstimate = useMemo(() => {
+    if (!activeStreamId || !['thinking', 'streaming'].includes(phase)) return 0
+    const text = messages.findLast((message) => message.id === activeStreamId)?.text || ''
+    return text ? estimateTokens(text) : 0
+  }, [activeStreamId, messages, phase])
   const todoPanel = useMemo(() => {
     return todoPanelForTurn(messages, activityTurnId, running, todoHidden, todoInterrupted, meta?.todoInput)
   }, [activityTurnId, messages, running, todoHidden, todoInterrupted, meta?.todoInput])
@@ -7295,7 +7316,7 @@ export function ChatView({
             ) : (
               <span>{statusLabel(displayPhase, runningToolNames)}</span>
             )}
-            <PhaseElapsedLabel startedAt={phaseElapsedStartedAt} />
+            <PhaseElapsedLabel startedAt={phaseElapsedStartedAt} visible={visible} />
             {activeStreamTokenEstimate > 0 && (
               <span className="chat-status-token-delta">↓{activeStreamTokenEstimate} tokens</span>
             )}
@@ -7360,7 +7381,7 @@ export function ChatView({
             <span className="chat-status-cached">)</span>
           </span>
         )}
-        {running && <RunElapsedLabel runStartedAt={runStartedAt} />}
+        {running && <RunElapsedLabel runStartedAt={runStartedAt} visible={visible} />}
       </div>
     </div>
   )
@@ -7433,6 +7454,33 @@ export function ChatView({
     hasPlan: todoPanel.visible
   })
 
+  // Composer input and task clocks don't change the transcript. Keep the element list as well
+  // as MessageRow's memo stable, so those updates don't walk/reconcile the whole history.
+  const transcriptRows = useMemo(
+    () => transcriptMessages.map((message) => (
+      <MessageRow
+        key={message.id}
+        message={message}
+        onOpenFile={transcriptOpenFile}
+        onCommandAction={handleCommandAction}
+        edit={messageEdit?.id === message.id ? {
+          text: messageEdit.text,
+          busy: running,
+          canSubmit: canSubmitMessageEdit({ running, text: messageEdit.text })
+        } : null}
+        onEditStart={startMessageEdit}
+        onEditChange={changeMessageEdit}
+        onEditCancel={cancelMessageEdit}
+        onEditSubmit={submitMessageEdit}
+        onQuote={quoteMessage}
+      />
+    )),
+    [
+      transcriptMessages, transcriptOpenFile, handleCommandAction, messageEdit, running,
+      startMessageEdit, changeMessageEdit, cancelMessageEdit, submitMessageEdit, quoteMessage
+    ]
+  )
+
   return (
     <ChatPathContext.Provider value={pathActions}>
       <div
@@ -7488,30 +7536,7 @@ export function ChatView({
           <div ref={transcriptRef} className="chat-transcript">
             {!historyLoaded && <div className="chat-loading">正在加载会话…</div>}
             {showEmpty && <WelcomeHint cwd={cwd} />}
-            {transcriptMessages.map((message) => {
-              return (
-                <MessageRow
-                  key={message.id}
-                  message={message}
-                  onOpenFile={transcriptOpenFile}
-                  onCommandAction={handleCommandAction}
-                  edit={
-                    messageEdit?.id === message.id
-                      ? {
-                          text: messageEdit.text,
-                          busy: running,
-                          canSubmit: canSubmitMessageEdit({ running, text: messageEdit.text })
-                        }
-                      : null
-                  }
-                  onEditStart={startMessageEdit}
-                  onEditChange={changeMessageEdit}
-                  onEditCancel={cancelMessageEdit}
-                  onEditSubmit={submitMessageEdit}
-                  onQuote={quoteMessage}
-                />
-              )
-            })}
+            {transcriptRows}
           </div>
         </div>
 
@@ -7707,7 +7732,7 @@ export function ChatView({
             {/* 边框右上角只留一条标签：定时循环徽标优先（它描述的是常驻状态，与 CLI 一致），
                 排队提示只在没有循环时出现。 */}
             {activeLoop ? (
-              <LoopBadge loop={activeLoop} running={loopRunning} />
+              <LoopBadge loop={activeLoop} running={loopRunning} visible={visible} />
             ) : queueReady ? (
               <span className="chat-composer-frame-label">
                 Enter/Tab 在下一个工具调用迭代后发送
@@ -8209,6 +8234,7 @@ export function ChatView({
         {btwOpen && (
           <BtwDrawer
             thread={btwThread}
+            visible={visible}
             tabs={btwTabList}
             width={btwWidth}
             onResizeWidth={setBtwWidth}

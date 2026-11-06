@@ -13,19 +13,10 @@
 //
 // 内存单独一条线（`scope: 'mem'`，见 `startMemorySampler()`）：每个常驻进程自己上报
 // `process.memoryUsage()`，配置页 Performance 据此画「谁在涨」。
-import {
-  appendFileSync,
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readSync,
-  statSync,
-  unlinkSync,
-} from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveLogDir } from '@packages/mica-config/brand.js';
+import { clearPerformanceCache, readSummary, readSummaryAsync } from './performance-summary.js';
 
 const MAX_BYTES = 16 * 1024 * 1024;
 const KEEP_DAYS = 7;
@@ -74,6 +65,7 @@ export interface PerfTimelinePoint {
   heapMB?: number;
   rows?: number;
   sid?: string;
+  pageId?: string;
 }
 
 export interface PerfMemoryPoint {
@@ -335,8 +327,7 @@ export function logger(scope: string): Logger {
         return result;
       } catch (error) {
         const ms = Date.now() - started;
-        noteSlow(scope, event, ms, limit, false);
-        record('error', scope, event, { ms, ...errorFields(error) });
+        noteSlow(scope, event, ms, limit, false, { level: 'error', fields: errorFields(error) });
         throw error;
       }
     },
@@ -419,6 +410,8 @@ export function collectMemory(extra: Record<string, unknown> = {}): Record<strin
     ext: toMB(mem.external),
     ab: toMB(mem.arrayBuffers),
     pid: process.pid,
+    runtime: process.versions.bun ? 'bun' : 'node',
+    engine: process.versions.bun ? 'jsc' : 'v8',
     ...extra,
   };
 }
@@ -506,286 +499,19 @@ export function stats(): {
   };
 }
 
-/**
- * 读日志文件并聚合，供配置页的 Performance 面板使用。
- *
- * 每个 scope 只读最近 `maxBytes` 字节（从尾部取），避免一个 scope 挤掉别的指标；
- * 聚合在宿主做完再交出去，页面只负责渲染。
- */
+/** 同步诊断入口；文件未变化时复用有界的精简聚合缓存。 */
 export function readPerformanceSummary(options: Record<string, unknown> = {}): PerfMetrics {
-  const dir = logDir();
-  const num = (value: unknown, fallback: number): number => Number(value) || fallback;
-  const maxBytes = Math.min(num(options.maxBytes, 4 * 1024 * 1024), 16 * 1024 * 1024);
-  const eventLimit = Math.min(num(options.limit, 300), 2000);
-  const bucketLimit = Math.min(num(options.buckets, 40), 200);
-  const timelineLimit = Math.min(num(options.timeline, 300), 2000);
-
-  let names: Array<{ name: string; path: string; bytes: number; modifiedAt: number }> = [];
-  try {
-    names = readdirSync(dir)
-      .filter((name) => name.endsWith('.jsonl'))
-      .map((name) => {
-        const path = join(dir, name);
-        try {
-          const info = statSync(path);
-          return { name, path, bytes: info.size, modifiedAt: info.mtimeMs };
-        } catch {
-          return null;
-        }
-      })
-      .filter((item): item is { name: string; path: string; bytes: number; modifiedAt: number } => item !== null)
-      .sort((a, b) => b.modifiedAt - a.modifiedAt || b.name.localeCompare(a.name));
-  } catch {
-    return emptySummary(dir);
-  }
-
-  const files = names.slice(0, 20).map(({ name, bytes, modifiedAt }) => ({ name, bytes, modifiedAt }));
-  const entries: LogEntry[] = [];
-  const budgets = new Map<string, number>();
-  // 每个 scope 的新文件优先；按字节读尾部，不把整个分片加载到内存。
-  for (const file of names) {
-    const scope = file.name.match(/^(.+)-\d{8}(?:-\d+)?\.jsonl$/)?.[1] || file.name;
-    const budget = budgets.get(scope) ?? maxBytes;
-    if (budget <= 0) continue;
-    let fd: number | undefined;
-    try {
-      const size = Math.min(file.bytes, budget);
-      const buffer = Buffer.alloc(size);
-      fd = openSync(file.path, 'r');
-      let read = 0;
-      while (read < size) {
-        const n = readSync(fd, buffer, read, size - read, file.bytes - size + read);
-        if (n === 0) break;
-        read += n;
-      }
-      budgets.set(scope, budget - read);
-      const bytes = buffer.subarray(0, read);
-      // 尾部落在行中间时丢掉残缺的首行（也避开半个 UTF-8 字符）。
-      const start = file.bytes > size ? bytes.indexOf(10) + 1 : 0;
-      const text = start > 0 ? bytes.subarray(start).toString('utf8') : file.bytes > size ? '' : bytes.toString('utf8');
-      for (const line of text.split('\n')) {
-        if (!line) continue;
-        try {
-          entries.push(JSON.parse(line) as LogEntry);
-        } catch {
-          // 半行 / 非法行跳过
-        }
-      }
-    } catch {
-      // 读不了就跳过这个文件
-    } finally {
-      if (fd !== undefined) closeSync(fd);
-    }
-  }
-  entries.sort((a, b) => (a.at || 0) - (b.at || 0));
-
-  const buckets = new Map<
-    string,
-    { scope: string; event: string; count: number; slow: number; fails: number; totalMs: number; maxMs: number }
-  >();
-  const timeline: PerfTimelinePoint[] = [];
-  const memory: PerfMemoryPoint[] = [];
-  const processes = new Map<string, PerfMemoryProcess>();
-  let errors = 0;
-  let warns = 0;
-  let slowCalls = 0;
-  let samples = 0;
-  let hiddenSamples = 0;
-  let memSamples = 0;
-  let peakRssMB = 0;
-  let first = 0;
-  let last = 0;
-
-  for (const entry of entries) {
-    const at = entry.at || 0;
-    if (at) {
-      if (!first) first = at;
-      last = at;
-    }
-    if (entry.level === 'error') errors += 1;
-    if (entry.level === 'warn') warns += 1;
-
-    // 渲染层采样点单独抽成时间线
-    if (entry.scope === 'perf' && entry.event === 'sample') {
-      // 隐藏窗口的采样没有 lag（定时器被节流，算出来全是假冻结），只留 DOM/堆，
-      // 别让 Number(null) || 0 把它们混进「流畅」的那一档。
-      if (entry.vis !== 1 || typeof entry.lag !== 'number') {
-        hiddenSamples += 1;
-        continue;
-      }
-      samples += 1;
-      timeline.push({
-        at,
-        lag: Number(entry.lag) || 0,
-        long: Number(entry.long) || 0,
-        longN: Number(entry.longN) || 0,
-        dom: Number(entry.dom) || 0,
-        heapMB: typeof entry.heapMB === 'number' ? entry.heapMB : undefined,
-        rows: typeof entry.rows === 'number' ? entry.rows : undefined,
-        sid: typeof entry.sid === 'string' ? entry.sid : undefined,
-      });
-      continue;
-    }
-
-    // 进程内存采样单独一条线（`startMemorySampler`），不进耗时聚合
-    if (entry.scope === 'mem' && entry.event === 'sample') {
-      const rssMB = Number(entry.rss) || 0;
-      const pid = Number(entry.pid) || 0;
-      const host = typeof entry.host === 'string' ? entry.host : 'unknown';
-      const session = typeof entry.session === 'string' ? entry.session : undefined;
-      memSamples += 1;
-      peakRssMB = Math.max(peakRssMB, rssMB);
-      memory.push({
-        at,
-        rssMB,
-        heapMB: Number(entry.heap) || 0,
-        externalMB: Number(entry.ext) || 0,
-        pid,
-        host,
-      });
-      const key = `${host}#${pid}`;
-      const known = processes.get(key);
-      if (!known) {
-        processes.set(key, {
-          key,
-          host,
-          pid,
-          session,
-          samples: 1,
-          lastAt: at,
-          lastRssMB: rssMB,
-          peakRssMB: rssMB,
-          firstRssMB: rssMB,
-          lastHeapMB: Number(entry.heap) || 0,
-          lastExternalMB: Number(entry.ext) || 0,
-          growthMB: 0,
-        });
-      } else {
-        known.samples += 1;
-        known.lastAt = at;
-        known.lastRssMB = rssMB;
-        known.peakRssMB = Math.max(known.peakRssMB, rssMB);
-        known.lastHeapMB = Number(entry.heap) || 0;
-        known.lastExternalMB = Number(entry.ext) || 0;
-        if (session) known.session = session;
-        known.growthMB = Math.round((known.lastRssMB - known.firstRssMB) * 10) / 10;
-      }
-      continue;
-    }
-
-    if (typeof entry.ms === 'number' && entry.scope !== 'perf') {
-      const key = `${entry.scope}:${entry.event}`;
-      const bucket = buckets.get(key) || {
-        scope: entry.scope,
-        event: entry.event,
-        count: 0,
-        slow: 0,
-        fails: 0,
-        totalMs: 0,
-        maxMs: 0,
-      };
-      bucket.count += 1;
-      bucket.totalMs += entry.ms;
-      bucket.maxMs = Math.max(bucket.maxMs, entry.ms);
-      if (entry.kind === 'slow') {
-        bucket.slow += 1;
-        slowCalls += 1;
-      }
-      // `kind:'failed'` 是「调用成功返回、但返回体里带着错误」的那些（见 timedResult）。
-      if (entry.level === 'error' || entry.kind === 'failed' || entry.failed === true) bucket.fails += 1;
-      buckets.set(key, bucket);
-    }
-  }
-
-  return {
-    available: true,
-    dir,
-    files,
-    totals: {
-      events: entries.length,
-      errors,
-      warns,
-      slowCalls,
-      samples,
-      hiddenSamples,
-      spanMs: first && last ? last - first : 0,
-      memSamples,
-      peakRssMB,
-    },
-    pending: queue.length,
-    buckets: [...buckets.values()]
-      .map((bucket) => ({
-        scope: bucket.scope,
-        event: bucket.event,
-        count: bucket.count,
-        slow: bucket.slow,
-        fails: bucket.fails,
-        avgMs: Math.round(bucket.totalMs / Math.max(1, bucket.count)),
-        maxMs: Math.round(bucket.maxMs),
-      }))
-      .sort((a, b) => b.avgMs * b.count - a.avgMs * a.count)
-      .slice(0, bucketLimit),
-    timeline: timeline.slice(-timelineLimit),
-    memory: memory.slice(-timelineLimit),
-    processes: [...processes.values()]
-      // 只剩最后一次采样的进程（已退出）没有趋势可看，但仍要留在表里：
-      // 一个 1.2GB 的宿主挂在那儿，正是最需要被看见的东西。
-      .map((item) => ({ ...item, growthMB: Math.round((item.lastRssMB - item.firstRssMB) * 10) / 10 }))
-      .sort((a, b) => b.lastRssMB - a.lastRssMB),
-    events: entries
-      // kind:'call' 是常态调用的耗时记录，已由聚合表呈现，事件流里不重复刷屏。
-      // 内存采样也已单独成一条线，同样不混进事件流。
-      .filter((entry) => entry.level !== 'debug' && entry.kind !== 'call' && entry.scope !== 'mem')
-      .slice(-eventLimit)
-      .reverse()
-      .map((entry) => ({
-        at: entry.at || 0,
-        level: entry.level || 'info',
-        scope: entry.scope || 'unknown',
-        event: entry.event || '',
-        ms: entry.ms as number | undefined,
-        lag: entry.lag as number | null | undefined,
-        long: entry.long as number | undefined,
-        longN: entry.longN as number | undefined,
-        dom: entry.dom as number | undefined,
-        rows: entry.rows as number | undefined,
-        heapMB: entry.heapMB as number | undefined,
-        vis: entry.vis as number | undefined,
-        count: entry.count as number | undefined,
-        error: entry.message || entry.error,
-        sid: entry.sid as string | undefined,
-        rssMB: entry.rss as number | undefined,
-      })),
-  };
+  return { ...readSummary(options), pending: queue.length };
 }
 
-function emptySummary(dir: string): PerfMetrics {
-  return {
-    available: true,
-    dir,
-    files: [],
-    totals: {
-      events: 0,
-      errors: 0,
-      warns: 0,
-      slowCalls: 0,
-      samples: 0,
-      hiddenSamples: 0,
-      spanMs: 0,
-      memSamples: 0,
-      peakRssMB: 0,
-    },
-    pending: queue.length,
-    buckets: [],
-    timeline: [],
-    memory: [],
-    processes: [],
-    events: [],
-  };
+/** 生产刷新入口：异步分块读盘与解析，同参数的并发刷新合并成一次读取。 */
+export async function readPerformanceSummaryAsync(options: Record<string, unknown> = {}): Promise<PerfMetrics> {
+  return { ...(await readSummaryAsync(options)), pending: queue.length };
 }
 
 /** 清空当前日志目录（配置页上的「清空」按钮）。 */
 export function clearLogs(): { removed: number } {
+  clearPerformanceCache();
   writeNow();
   const dir = logDir();
   let names: string[] = [];

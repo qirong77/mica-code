@@ -88,6 +88,47 @@ describe('AgentRuntime tool status', () => {
     expect(statuses).toEqual(['connecting', 'calling_tool', 'connecting', 'completed']);
   });
 
+  it('captures only provider state and keeps a retry checkpoint independent across repeated restores', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const message = { role: 'user', content: [{ type: 'text', text: 'original' }] };
+    const usage: AgentUsageRecord = {
+      provider: 'openai_chat_completions',
+      model: 'test-model',
+      turnId: 1,
+      requestIndex: 1,
+      messageCount: 1,
+      inputTokens: 10,
+      outputTokens: 2,
+      totalTokens: 12,
+      paidTokenRate: 1,
+    };
+    modelClient.messages = [message];
+    modelClient.usageHistory = [usage];
+    modelClient.lastUsage = usage;
+    vi.mocked(modelClient.getSnapshot).mockClear();
+    vi.mocked(modelClient.toConversationMessages).mockClear();
+
+    const checkpoint = agent.captureClientSnapshot()!;
+    expect(modelClient.getSnapshot).not.toHaveBeenCalled();
+    expect(modelClient.toConversationMessages).not.toHaveBeenCalled();
+    expect(checkpoint).not.toHaveProperty('conversationMessages');
+    expect(checkpoint.lastUsage).toBe(checkpoint.usageHistory[0]);
+    message.content[0]!.text = 'changed';
+    modelClient.usageHistory.push({ ...usage, requestIndex: 2 });
+    expect(checkpoint.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'original' }] }]);
+    expect(checkpoint.usageHistory).toHaveLength(1);
+
+    agent.restoreClientSnapshot(checkpoint);
+    const restored = vi.mocked(modelClient.loadSnapshot).mock.calls.at(-1)![0];
+    restored.usageHistory.push({ ...usage, requestIndex: 3 });
+    (restored.messages[0] as typeof message).content[0]!.text = 'retry mutation';
+    agent.restoreClientSnapshot(checkpoint);
+    const next = vi.mocked(modelClient.loadSnapshot).mock.calls.at(-1)![0];
+    expect(next.usageHistory).toHaveLength(1);
+    expect(next.messages).toEqual(checkpoint.messages);
+  });
+
   it('forwards provider retry info to the run onRetry callback', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();
@@ -121,11 +162,17 @@ describe('AgentRuntime tool status', () => {
     agent.events.on('textAttemptStart', consumer.start);
     agent.events.on('textRollback', consumer.rollback);
     agent.registerTextRollbackConsumer(consumer);
-    modelClient.queryImpl = async () => { expect(modelClient.canRollbackThinking).toBe(true); return 'ok'; };
+    modelClient.queryImpl = async () => {
+      expect(modelClient.canRollbackThinking).toBe(true);
+      return 'ok';
+    };
     await agent.run('one');
     const legacy = vi.fn();
     agent.events.on('thinking', legacy);
-    modelClient.queryImpl = async () => { expect(modelClient.canRollbackThinking).toBe(false); return 'ok'; };
+    modelClient.queryImpl = async () => {
+      expect(modelClient.canRollbackThinking).toBe(false);
+      return 'ok';
+    };
     await agent.run('two');
   });
 
@@ -139,9 +186,13 @@ describe('AgentRuntime tool status', () => {
     const events: string[] = [];
     agent.events.on('thinkingCheckpoint', () => events.push('checkpoint'));
     agent.events.on('thinkingRollback', () => events.push('rollback'));
-    agent.events.on('status', (status) => { if (status.type === 'idle') events.push('idle'); });
+    agent.events.on('status', (status) => {
+      if (status.type === 'idle') events.push('idle');
+    });
     let ready!: () => void;
-    const started = new Promise<void>((resolve) => { ready = resolve; });
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
     modelClient.queryImpl = async (_question, options) => {
       modelClient.onThinking?.('first');
       modelClient.onThinkingCheckpoint?.('part');
@@ -153,7 +204,9 @@ describe('AgentRuntime tool status', () => {
       modelClient.onThinkingCheckpoint?.('request');
       modelClient.onThinking?.('unfinished');
       ready();
-      await new Promise<void>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+      await new Promise<void>((_resolve, reject) =>
+        options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+      );
       return '';
     };
     const run = agent.run('hello');
@@ -164,19 +217,26 @@ describe('AgentRuntime tool status', () => {
     expect(events).toEqual(['checkpoint', 'checkpoint', 'checkpoint', 'checkpoint', 'rollback', 'idle']);
     const snapshot = agent.getSnapshot();
     expect(snapshot.interruptedThinking).toEqual({
-      providerId: 'test-provider', protocol: 'openai_responses', model: 'test-model',
-      apiBase: 'https://example.com/v1', text: 'first\n\nsecond\n\nthird',
+      providerId: 'test-provider',
+      protocol: 'openai_responses',
+      model: 'test-model',
+      apiBase: 'https://example.com/v1',
+      text: 'first\n\nsecond\n\nthird',
     });
     const restored = new AgentRuntime();
     restored.loadSnapshot(snapshot);
     expect(restored.getSnapshot().interruptedThinking?.text).toBe('first\n\nsecond\n\nthird');
-    const resumedStarted = new Promise<void>((resolve) => { ready = resolve; });
+    const resumedStarted = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
     modelClient.queryImpl = async (_question, options) => {
       modelClient.onThinking?.('fourth');
       modelClient.onThinkingCheckpoint?.('request');
       modelClient.onThinking?.('unfinished again');
       ready();
-      await new Promise<void>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+      await new Promise<void>((_resolve, reject) =>
+        options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+      );
       return '';
     };
     const resumedRun = restored.run('continue');
@@ -228,9 +288,15 @@ describe('AgentRuntime tool status', () => {
     let attemptVisible = '';
     const consumer = {
       text: vi.fn(),
-      thinking: (chunk: string) => { visible += chunk; },
-      start: () => { attemptVisible = visible; },
-      rollback: () => { visible = attemptVisible; },
+      thinking: (chunk: string) => {
+        visible += chunk;
+      },
+      start: () => {
+        attemptVisible = visible;
+      },
+      rollback: () => {
+        visible = attemptVisible;
+      },
     };
     agent.events.on('text', consumer.text);
     agent.events.on('thinking', consumer.thinking);
@@ -238,7 +304,9 @@ describe('AgentRuntime tool status', () => {
     agent.events.on('textRollback', consumer.rollback);
     agent.registerTextRollbackConsumer(consumer);
     let ready!: () => void;
-    const started = new Promise<void>((resolve) => { ready = resolve; });
+    const started = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
     modelClient.queryImpl = async (_question, options) => {
       modelClient.onTextAttemptStart?.();
       modelClient.onThinking?.('first');
@@ -253,7 +321,9 @@ describe('AgentRuntime tool status', () => {
       modelClient.onTextAttemptStart?.();
       modelClient.onThinking?.('unfinished retry');
       ready();
-      await new Promise<void>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+      await new Promise<void>((_resolve, reject) =>
+        options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+      );
       return '';
     };
     const run = agent.run('hello');
@@ -263,35 +333,47 @@ describe('AgentRuntime tool status', () => {
     expect(agent.getSnapshot().interruptedThinking?.text).toBe('first');
   });
 
-  it.each([true, false])('keeps only completed Responses thinking after a terminal error (checkpoint: %s)', async (hasCheckpoint) => {
-    configState = {
-      ...testConfig,
-      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses' }],
-    };
-    const { AgentRuntime } = await import('./AgentRuntime.js');
-    const agent = new AgentRuntime();
-    let visible = '';
-    let checkpoint = '';
-    const events: string[] = [];
-    agent.events.on('thinking', (chunk) => { visible += chunk; });
-    agent.events.on('thinkingCheckpoint', () => { checkpoint = visible; });
-    agent.events.on('thinkingRollback', () => { visible = checkpoint; events.push('rollback'); });
-    agent.events.on('status', (status) => { if (status.type === 'error') events.push('error'); });
-    modelClient.queryImpl = async () => {
-      if (hasCheckpoint) {
-        modelClient.onThinking?.('completed');
-        modelClient.onThinkingCheckpoint?.('part');
-        modelClient.onThinking?.('\n\n');
-      }
-      modelClient.onThinking?.('unfinished');
-      throw new Error('terminal failure');
-    };
-    await expect(agent.run('work')).rejects.toThrow('terminal failure');
-    expect(events).toEqual(['rollback', 'error']);
-    expect(visible).toBe(hasCheckpoint ? 'completed' : '');
-    expect(agent.getSnapshot().interruptedThinking?.text).toBe(hasCheckpoint ? 'completed' : undefined);
-    expect(agent.getSnapshot().activeThinking).toBeUndefined();
-  });
+  it.each([true, false])(
+    'keeps only completed Responses thinking after a terminal error (checkpoint: %s)',
+    async (hasCheckpoint) => {
+      configState = {
+        ...testConfig,
+        providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses' }],
+      };
+      const { AgentRuntime } = await import('./AgentRuntime.js');
+      const agent = new AgentRuntime();
+      let visible = '';
+      let checkpoint = '';
+      const events: string[] = [];
+      agent.events.on('thinking', (chunk) => {
+        visible += chunk;
+      });
+      agent.events.on('thinkingCheckpoint', () => {
+        checkpoint = visible;
+      });
+      agent.events.on('thinkingRollback', () => {
+        visible = checkpoint;
+        events.push('rollback');
+      });
+      agent.events.on('status', (status) => {
+        if (status.type === 'error') events.push('error');
+      });
+      modelClient.queryImpl = async () => {
+        if (hasCheckpoint) {
+          modelClient.onThinking?.('completed');
+          modelClient.onThinkingCheckpoint?.('part');
+          modelClient.onThinking?.('\n\n');
+        }
+        modelClient.onThinking?.('unfinished');
+        throw new Error('terminal failure');
+      };
+      await expect(agent.run('work')).rejects.toThrow('terminal failure');
+      expect(events).toEqual(['rollback', 'error']);
+      expect(visible).toBe(hasCheckpoint ? 'completed' : '');
+      expect(agent.getSnapshot().interruptedThinking?.text).toBe(hasCheckpoint ? 'completed' : undefined);
+      expect(agent.getSnapshot().activeThinking).toBeUndefined();
+    },
+  );
 
   it('restores the original interrupted thinking when aborting during a whole-turn retry delay', async () => {
     configState = {
@@ -301,8 +383,11 @@ describe('AgentRuntime tool status', () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();
     const original = {
-      providerId: 'test-provider', protocol: 'openai_responses' as const, model: 'test-model',
-      apiBase: 'https://example.com/v1', text: 'earlier interruption',
+      providerId: 'test-provider',
+      protocol: 'openai_responses' as const,
+      model: 'test-model',
+      apiBase: 'https://example.com/v1',
+      text: 'earlier interruption',
     };
     agent.loadSnapshot({ ...agent.getSnapshot(), interruptedThinking: original });
     agent.events.emit('thinkingTurnAttemptStart', undefined);
@@ -325,8 +410,11 @@ describe('AgentRuntime tool status', () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();
     const active = {
-      providerId: 'test-provider', protocol: 'openai_responses' as const, model: 'test-model',
-      apiBase: 'https://example.com/v1', text: 'completed progress',
+      providerId: 'test-provider',
+      protocol: 'openai_responses' as const,
+      model: 'test-model',
+      apiBase: 'https://example.com/v1',
+      text: 'completed progress',
     };
     const snapshot = { ...agent.getSnapshot(), activeThinking: active };
     agent.loadSnapshot(snapshot);
@@ -334,8 +422,11 @@ describe('AgentRuntime tool status', () => {
     agent.loadSnapshot(snapshot, { recoverActiveThinking: true });
     expect(agent.getSnapshot().interruptedThinking).toEqual(active);
     for (const mismatch of [
-      { providerId: 'other' }, { model: 'other' }, { apiBase: 'https://other' },
-      { protocol: 'openai_chat_completions' as const }, { text: '' },
+      { providerId: 'other' },
+      { model: 'other' },
+      { apiBase: 'https://other' },
+      { protocol: 'openai_chat_completions' as const },
+      { text: '' },
     ]) {
       agent.loadSnapshot({ ...snapshot, activeThinking: { ...active, ...mismatch } }, { recoverActiveThinking: true });
       expect(agent.getSnapshot().interruptedThinking).toBeUndefined();
@@ -348,9 +439,15 @@ describe('AgentRuntime tool status', () => {
     let text = 'earlier';
     let checkpoint = '';
     const consumer = {
-      text: (chunk: string) => { text += chunk; },
-      start: () => { checkpoint = text; },
-      rollback: () => { text = checkpoint; },
+      text: (chunk: string) => {
+        text += chunk;
+      },
+      start: () => {
+        checkpoint = text;
+      },
+      rollback: () => {
+        text = checkpoint;
+      },
     };
     agent.events.on('text', consumer.text);
     agent.events.on('textAttemptStart', consumer.start);

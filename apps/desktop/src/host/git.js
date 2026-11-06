@@ -39,13 +39,17 @@ import { releaseWatchers, unwatchRepository, watchRepository } from './git-watch
 /** 徽标自己那一层缓存：比全树扫描的 5s 长，配合「先回旧值、后台重算」。 */
 const CHANGE_COUNTS_TTL_MS = 20_000
 const changeCountsState = new Map()
+const changeCountsInFlight = new Map()
 
-async function getSummary(cwd, { refresh = false } = {}) {
+async function getSummary(cwd, { refresh = false, invalidate = false } = {}) {
   const { root, base } = await cachedRepository(cwd)
   // 顶栏徽标（change-counts）与 Git 面板（summary）要的是同一份全树扫描，10s 的 Git
   // 轮询 + 3s 的文件视图轮询又会各自来一次：同一仓库在几秒内复用结果，切换分支或
   // 我们自己写过工作区（stage/unstage/discard）时缓存自动失效。
-  return cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base), { refresh })
+  return cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base), {
+    refresh,
+    invalidate
+  })
 }
 
 async function readSummary(root, base) {
@@ -103,63 +107,62 @@ async function readSummary(root, base) {
  * - 切分支 / 提交（HEAD 变了）、我们改过工作区（stage / discard / 保存文件）时不许
  *   返回旧值：那时数字必须立刻对得上。
  */
-async function getChangeCounts(cwd, { refresh = false } = {}) {
+async function getChangeCounts(cwd, { refresh = false, invalidate = false } = {}) {
   const { root, base } = await cachedRepository(cwd)
   const key = `${root}\u0000${base}`
-  const signature = `${worktreeSignature(root) || ''}|${worktreeEpochOf(root)}`
+  const head = worktreeSignature(root)
+  const epoch = worktreeEpochOf(root)
+  const signature = head ? `${head}|${epoch}` : null
   const cached = changeCountsState.get(key)
-  const fresh =
-    !refresh &&
-    cached &&
-    cached.signature === signature &&
-    Date.now() - cached.at < CHANGE_COUNTS_TTL_MS
-  if (fresh) return cached.value
 
   const read = async () => {
-    // 与 `getSummary` 共用同一份缓存（同一次全树扫描），但只把三个数字交出去：文件列表
-    // 在几千个改动时会占掉 IPC 的绝大部分体积，徽标并不需要它。
-    const summary = await cachedWorktreeRead(
-      root,
-      `summary:${base}`,
-      () => readSummary(root, base),
-      { refresh }
-    )
-    return {
-      root: summary.root,
-      files: summary.files.length,
-      additions: summary.additions,
-      deletions: summary.deletions
+    const previous = changeCountsInFlight.get(key)
+    if (!refresh && previous?.signature === signature && previous.epoch === epoch) {
+      return previous.promise
+    }
+    const pending = { signature, epoch, promise: null }
+    pending.promise = (async () => {
+      // 与 `getSummary` 共用全树扫描，只把三个数字交出去；自动变化仍合并在途扫描。
+      const summary = await cachedWorktreeRead(
+        root,
+        `summary:${base}`,
+        () => readSummary(root, base),
+        { refresh, invalidate }
+      )
+      const value = {
+        root: summary.root,
+        files: summary.files.length,
+        additions: summary.additions,
+        deletions: summary.deletions
+      }
+      // 旧 generation 的读取、被手动刷新取代的后台读取，都不能回填最新的徽标缓存。
+      if (
+        signature &&
+        changeCountsInFlight.get(key) === pending &&
+        worktreeEpochOf(root) === epoch &&
+        worktreeSignature(root) === head
+      ) {
+        changeCountsState.set(key, { signature, at: Date.now(), value })
+      }
+      return value
+    })()
+    changeCountsInFlight.set(key, pending)
+    try {
+      return await pending.promise
+    } finally {
+      if (changeCountsInFlight.get(key) === pending) changeCountsInFlight.delete(key)
     }
   }
 
   // 没有旧值可用（第一次问、刚切分支、我们刚改过工作区）或用户主动刷新：这次必须等。
-  if (!cached || refresh || cached.signature !== signature) {
-    const value = await read()
-    changeCountsState.set(key, { signature, at: Date.now(), value, refreshing: false })
-    return value
+  // invalidate 是 git:changed / turn 结束的自动刷新，等新结果但允许多个窗口共用扫描。
+  if (!signature || !cached || refresh || invalidate || cached.signature !== signature) {
+    return read()
   }
 
-  // 旧值还在手：立刻返回，后台补一次。
-  if (!cached.refreshing) {
-    cached.refreshing = true
-    void read()
-      .then((value) => {
-        // 读的过程中可能有一轮 `refresh` 已经写入更新的数字（一轮对话刚结束、用户主动
-        // 刷新）：那份比这次后台重算新，用它顶掉会重新计时 20 秒，徽标反而停在过去。
-        if (changeCountsState.get(key) !== cached) return
-        // 存读之前那份签名（与前台路径一致）：读的过程中切了分支的话，这份数字属于旧
-        // HEAD，配上新签名会被当成 fresh，之后再 20s 都不重算。
-        changeCountsState.set(key, {
-          signature,
-          at: Date.now(),
-          value,
-          refreshing: false
-        })
-      })
-      .catch(() => {
-        const current = changeCountsState.get(key)
-        if (current) current.refreshing = false
-      })
+  if (Date.now() - cached.at >= CHANGE_COUNTS_TTL_MS) {
+    // 同一签名的旧值仍可用：立刻返回，后台补一次；失败后下次轮询可以重试。
+    void read().catch(() => {})
   }
   return cached.value
 }
@@ -274,18 +277,27 @@ export function registerGitIpc() {
     }
   })
 
-  ipcMain.handle('git:summary', async (_event, { cwd, refresh } = {}) => {
+  ipcMain.handle('git:summary', async (_event, { cwd, refresh, invalidate } = {}) => {
     try {
-      return { repository: await getSummary(cwd, { refresh: refresh === true }), error: null }
+      return {
+        repository: await getSummary(cwd, {
+          refresh: refresh === true,
+          invalidate: invalidate === true
+        }),
+        error: null
+      }
     } catch (error) {
       return { repository: null, error: workspaceError(error) }
     }
   })
 
-  ipcMain.handle('git:change-counts', async (_event, { cwd, refresh } = {}) => {
+  ipcMain.handle('git:change-counts', async (_event, { cwd, refresh, invalidate } = {}) => {
     try {
       return {
-        counts: await getChangeCounts(cwd, { refresh: refresh === true }),
+        counts: await getChangeCounts(cwd, {
+          refresh: refresh === true,
+          invalidate: invalidate === true
+        }),
         error: null
       }
     } catch (error) {

@@ -52,13 +52,13 @@ const worktreeEpoch = new Map()
 const WORKTREE_TTL_MS = 5000
 const repositoryState = new Map()
 /**
- * 正在跑的那一次读取，键是 `<root>|<key>`。
+ * 正在跑的那一次读取，键是 `<真实 root>\0<key>`，记录起读时的 HEAD 与 epoch。
  *
  * 只缓存「跑完的结果」不够：轮询间隔（3s / 10s）比一次读取慢时不打紧，一旦机器被别的东西
  * 拖慢、一次全树扫描变成几秒，下一个 tick 会再发一次、再下一个再发一次，几个窗口叠起来
  * 就是七次全树扫描同时在跑，彼此抢 CPU 又让每一次都更慢（实测 09:23 十分钟内峰值并发 4、
  * 全天峰值 7，其中 8.8% 的调用超过 1s）。共用同一个 promise 之后，同一仓库同一份数据在
- * 任一时刻只有一次真正在跑。
+ * 同一代（HEAD / epoch）只复用一次读取；手动刷新仍可独立起读。
  */
 const worktreeInFlight = new Map()
 /**
@@ -72,18 +72,24 @@ const summaryScanCost = new Map()
 
 /** 上一次全树扫描的耗时（毫秒），没扫过时是 0。 */
 export function summaryScanCostOf(root) {
-  return summaryScanCost.get(root) || 0
+  return summaryScanCost.get(worktreeRoot(root)) || 0
 }
 
 /** 让某个仓库的缓存立刻失效（写操作、agent 改完文件之后调用）。 */
 export function noteWorktreeChange(root) {
   if (typeof root !== 'string' || !root) return
+  root = worktreeRoot(root)
   worktreeState.delete(root)
   worktreeEpoch.set(root, worktreeEpochOf(root) + 1)
 }
 
 export function worktreeEpochOf(root) {
-  return worktreeEpoch.get(root) || 0
+  return worktreeEpoch.get(worktreeRoot(root)) || 0
+}
+
+/** Git 返回真实路径；watch / 保存文件也可能从符号链接进来，必须共用同一个身份。 */
+function worktreeRoot(root) {
+  return realish(path.resolve(typeof root === 'string' && root ? root : '.'))
 }
 
 /**
@@ -101,6 +107,7 @@ export function worktreeSignature(root) {
 export function repositoryRootOf(directory) {
   let current = typeof directory === 'string' ? directory : ''
   if (!current) return null
+  current = path.resolve(current)
   for (;;) {
     try {
       statSync(path.join(current, '.git'))
@@ -117,75 +124,134 @@ export function repositoryRootOf(directory) {
  * 仓库「指向哪个提交」的签名：读几个字节比跑一条 git 命令便宜两个数量级。
  *
  * 注意 `.git/HEAD` 在分支上提交时是不变的（内容一直是 `ref: refs/heads/<branch>`），
- * 所以还要读它指向的那个 ref 文件；游离 HEAD 时 HEAD 里就是提交号，一次就够。
+ * 所以还要读它指向的 ref；worktree 从 commondir 读共享分支，打包后的 ref 看 packed-refs。
+ * 身份带真实工作区及 Git 目录，不能把共用一个 commondir 的两个 worktree 合在一起。
  */
 function headSignature(root) {
-  const gitDir = path.join(root, '.git')
   try {
-    const head = readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim()
-    const parts = [`head:${head}`]
-    const ref = /^ref:\s*(.+)$/.exec(head)
-    if (ref) {
-      const info = statSync(path.join(gitDir, ref[1]))
-      parts.push(`${info.mtimeMs}:${info.size}`)
+    root = worktreeRoot(root)
+    const dotGit = path.join(root, '.git')
+    let gitDir = dotGit
+    if (!statSync(dotGit).isDirectory()) {
+      const match = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'))
+      if (!match) return null
+      gitDir = path.resolve(root, match[1].trim())
     }
-    return parts.join('|')
-  } catch {
-    // 子模块 / worktree 的 `.git` 是文件，或者 ref 还没生成：当「不知道」——不缓存。
+    gitDir = realpathSync.native(gitDir)
+    const commonPath = optionalFile(path.join(gitDir, 'commondir'))
+    const commonDir = commonPath
+      ? realpathSync.native(path.resolve(gitDir, commonPath))
+      : gitDir
+    const identity = (dir) => {
+      const info = statSync(dir)
+      return `${dir}:${info.dev}:${info.ino}`
+    }
+    const head = readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim()
+    const parts = [identity(root), identity(gitDir), identity(commonDir), `head:${head}`]
+    let reference = head
+    for (let depth = 0; depth < 8; depth += 1) {
+      const ref = /^ref:\s*(.+)$/.exec(reference)
+      if (!ref) return JSON.stringify(parts)
+      const name = ref[1]
+      reference = optionalFile(path.join(gitDir, name))
+      if (reference === null && commonDir !== gitDir) {
+        reference = optionalFile(path.join(commonDir, name))
+      }
+      if (reference !== null) {
+        parts.push(`${name}:${reference}`)
+        continue
+      }
+      // packed-refs 可以很大，签名只需文件身份，不必每次轮询解析整个文件。
+      // ref 和 packed-refs 都不存在也是有效状态：仓库可能还没有第一个提交。
+      try {
+        const info = statSync(path.join(commonDir, 'packed-refs'))
+        parts.push(`packed:${info.dev}:${info.ino}:${info.mtimeMs}:${info.ctimeMs}:${info.size}`)
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+        parts.push(`missing:${name}`)
+      }
+      return JSON.stringify(parts)
+    }
     return null
+  } catch {
+    // 仓库已移走、元数据不可读或引用成环时，不把未知身份当成可缓存的结果。
+    return null
+  }
+}
+
+function optionalFile(file) {
+  try {
+    return readFileSync(file, 'utf8').trim()
+  } catch (error) {
+    if (error.code === 'ENOENT') return null
+    throw error
   }
 }
 
 /**
  * 跑一次真正的读取，但同一仓库在 TTL 内复用结果（除非 HEAD 变了或被显式打点）。
- * `refresh: true` 用于用户主动点刷新：跳过缓存。
+ * `refresh: true` 用于用户主动点刷新：跳过缓存和在途读取。
+ * `invalidate: true` 用于自动变化通知：跳过缓存，但仍合并同一代的在途读取。
  */
-export async function cachedWorktreeRead(root, key, run, { refresh = false } = {}) {
+export async function cachedWorktreeRead(root, key, run, { refresh = false, invalidate = false } = {}) {
+  root = worktreeRoot(root)
   const signature = headSignature(root)
+  const epoch = worktreeEpochOf(root)
   const cached = worktreeState.get(root)
   if (
     !refresh &&
+    !invalidate &&
     signature &&
     cached &&
     cached.signature === signature &&
+    cached.epoch === epoch &&
     Date.now() - cached.at < WORKTREE_TTL_MS
   ) {
-    const hit = cached.values.get(key)
-    if (hit) return hit
+    if (cached.values.has(key)) return cached.values.get(key)
   }
   // `refresh: true` 是用户主动点刷新：既不读缓存，也不搭别人那次还没跑完的顺风车。
-  const inFlightKey = `${root}|${key}`
+  const inFlightKey = `${root}\u0000${key}`
   if (!refresh) {
     const pending = worktreeInFlight.get(inFlightKey)
-    if (pending) return pending
+    if (pending && pending.signature === signature && pending.epoch === epoch) return pending.promise
   }
-  const promise = (async () => {
+  const pending = { signature, epoch, promise: null }
+  pending.promise = (async () => {
     const startedAt = Date.now()
     const value = await run()
     // 只有全树扫描（`summary:<base>`）值得计量：`workspace-status` 是一条 rev-parse，
     // 拿它的耗时当冷却依据会让工作区推送过于密集。
     if (key.startsWith('summary')) summaryScanCost.set(root, Date.now() - startedAt)
-    if (!signature) return value
+    if (
+      !signature ||
+      worktreeInFlight.get(inFlightKey) !== pending ||
+      worktreeEpochOf(root) !== epoch ||
+      headSignature(root) !== signature
+    ) {
+      return value
+    }
     // 并发读取共用一份缓存；`probe` 取这次的 HEAD 签名，切换分支后自然失配。
     // 这里必须重新取一次：等 `run()` 的这段时间里，另一个不同 key 的读取可能刚写过 entries，
     // 沿用上面捕获的 `cached` 会把它的结果覆盖掉。
     const current = worktreeState.get(root)
     const entry =
-      current && Date.now() - current.at < WORKTREE_TTL_MS
+      current &&
+      current.signature === signature &&
+      current.epoch === epoch &&
+      Date.now() - current.at < WORKTREE_TTL_MS
         ? current
-        : { signature, at: Date.now(), values: new Map() }
-    entry.signature = signature
+        : { signature, epoch, at: Date.now(), values: new Map() }
     entry.at = Date.now()
     entry.values.set(key, value)
     worktreeState.set(root, entry)
     return value
   })()
-  if (refresh) return promise
-  worktreeInFlight.set(inFlightKey, promise)
+  // 手动刷新也登记为最新读取，防止它完成后被更早开始的慢请求覆盖。
+  worktreeInFlight.set(inFlightKey, pending)
   try {
-    return await promise
+    return await pending.promise
   } finally {
-    worktreeInFlight.delete(inFlightKey)
+    if (worktreeInFlight.get(inFlightKey) === pending) worktreeInFlight.delete(inFlightKey)
   }
 }
 
@@ -246,18 +312,34 @@ export async function getRepository(cwd) {
 /**
  * `getRepository` 每次要跑两个 `rev-parse`（实测约 140ms，是整条链路里最贵的一段），
  * 而它的结果只在 `HEAD` 变化时才会变：目录到仓库根的关系不会变，`base` 就是 HEAD
- * 指向的那个提交。所以按 cwd 缓存，用与工作区缓存同一份 `headSignature` 判定失效
+ * 指向的那个提交。所以按真实仓库根缓存，用与工作区缓存同一份 `headSignature` 判定失效
  * ——切换分支、提交、rebase 会重跑，别的读取直接复用。
  * 目录还在但已不是仓库（`.git` 被删）时 signature 为 null，当作不可缓存。
  */
 export async function cachedRepository(cwd) {
+  cwd = worktreeRoot(cwd)
   const root = repositoryRootOf(cwd)
   const signature = root ? headSignature(root) : null
-  const cached = repositoryState.get(cwd)
-  if (signature && cached && cached.signature === signature) return cached.value
-  const value = await getRepository(cwd)
-  if (signature) repositoryState.set(cwd, { value, signature })
-  return value
+  if (!signature) return getRepository(cwd)
+  const cached = repositoryState.get(root)
+  if (cached && cached.signature === signature) return cached.promise
+  const entry = { signature, promise: null }
+  entry.promise = (async () => {
+    try {
+      const value = await getRepository(cwd)
+      if (headSignature(root) !== signature) {
+        if (repositoryState.get(root) === entry) repositoryState.delete(root)
+        // 两次 rev-parse 之间切换了 HEAD 时，不能给 summary 搭配旧的 base 与新的签名。
+        return cachedRepository(cwd)
+      }
+      return value
+    } catch (error) {
+      if (repositoryState.get(root) === entry) repositoryState.delete(root)
+      throw error
+    }
+  })()
+  repositoryState.set(root, entry)
+  return entry.promise
 }
 
 /**

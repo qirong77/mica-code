@@ -60,6 +60,7 @@ export type ConfigWebPerfTimelinePoint = {
   /** 可见对话的记录行数（隐藏的 ChatView 不计）。 */
   rows?: number;
   sid?: string;
+  pageId?: string;
 };
 
 /** 每个进程自己上报的一条内存采样（`startMemorySampler`）。 */

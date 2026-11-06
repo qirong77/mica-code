@@ -64,6 +64,8 @@ function heapStats(win) {
 export function startPerfProbe(win, doc) {
   if (!win || !doc || win.__micaPerf) return win?.__micaPerf || null
 
+  // 同一会话可以在多个窗口打开。页面身份独立于 sid，也随刷新重建。
+  const pageId = win.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
   const pending = []
   let stopLongTask = null
   let timer = null
@@ -128,6 +130,7 @@ export function startPerfProbe(win, doc) {
     domTick += 1
     push({
       at: Date.now(),
+      pageId,
       lag: lag == null ? null : round(lag),
       long: round(longMax),
       longN: longCount,
@@ -174,6 +177,7 @@ export function startPerfProbe(win, doc) {
 
   const api = {
     version: 'perf-2',
+    pageId,
     report: () => pending.slice(),
     /** 立刻落盘当前缓存（人工排查时用，比如"刚才卡了一下"马上取现场）。 */
     snapshot: flush,

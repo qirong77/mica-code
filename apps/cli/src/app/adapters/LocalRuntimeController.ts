@@ -547,11 +547,13 @@ export class LocalRuntimeController implements RuntimeController {
     let wasAborted = false;
     let rewindCheckpointId: string | null = null;
     // Capture pre-turn client state so we can restore it before each retry.
-    const preTurnSnapshot = agent.captureClientSnapshot();
+    let preTurnSnapshot = agent.captureClientSnapshot();
     let hadNonRetryableToolCall = false;
     const markToolCall = (toolCall: { name: string }) => {
       if (!micaTools.isReadOnly(toolCall.name)) {
         hadNonRetryableToolCall = true;
+        // 后面不再允许整轮重试，长会话的回滚副本也不必保留到本轮结束。
+        preTurnSnapshot = null;
       }
     };
     agent.events.on('toolCall', markToolCall);

@@ -1,6 +1,6 @@
 import { app, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { isChatSessionRunning } from './chat'
 import {
@@ -26,6 +26,8 @@ import { dropLoopsForSession } from './loops'
 import { listSessionAnnotations, setSessionAnnotation } from './session-annotations'
 import { createSessionMover } from './session-move'
 import { createSessionParentWriter } from './session-parent'
+import { HEAD_BYTES, readTopLevelString } from './session-file-head'
+import { readSessionUsageJson } from './session-usage-reader'
 
 /**
  * mica 的对话 session 快照统计：直接扫描 ~/.mica/sessions/*.json（真实 AI 会话），
@@ -118,8 +120,14 @@ function sessionTitle(sessionId) {
   const file = sessionFile(sessionId)
   if (!file) return null
   try {
-    const raw = JSON.parse(readFileSync(file, 'utf8'))
-    return typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null
+    const fd = openSync(file, 'r')
+    try {
+      const head = Buffer.alloc(HEAD_BYTES)
+      const bytes = readSync(fd, head, 0, HEAD_BYTES, 0)
+      return readTopLevelString(head.toString('utf8', 0, bytes), 'title')
+    } finally {
+      closeSync(fd)
+    }
   } catch {
     return null
   }
@@ -379,7 +387,7 @@ export function registerStatsIpc() {
   ipcMain.handle('stats:session-detail', async (_event, { sessionId } = {}) => {
     const file = sessionFile(sessionId)
     if (!file || !existsSync(file)) throw new Error('Session not found')
-    const raw = JSON.parse(readFileSync(file, 'utf8'))
+    const raw = await readSessionUsageJson(file)
     const snap = raw.snapshot || {}
     const usageHistory = Array.isArray(snap.usageHistory) ? snap.usageHistory : []
     const subagentRecords = Array.isArray(snap.subagentUsageHistory)

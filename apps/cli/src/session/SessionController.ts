@@ -23,6 +23,7 @@ import { micaContext } from '@packages/mica-context/index.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
 import { bindTodoSessionOwner } from '@packages/mica-common/todoState.js';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { ApplicationContext } from '../app/ApplicationContext.js';
 
 export type ResumeSessionResult =
@@ -224,11 +225,8 @@ export class SessionController {
     ) {
       this.currentAwaitingInput = null;
     }
-    if (
-      !hasConversation(snapshot.messages, conversationMessages) &&
-      !options.allowEmpty &&
-      this.currentTitleSource !== 'manual'
-    ) {
+    const hasContent = hasConversation(snapshot.messages, conversationMessages);
+    if (!hasContent && !options.allowEmpty && this.currentTitleSource !== 'manual') {
       this.store.delete(this.currentSessionId);
       // The file is gone, so the recorded signature no longer describes
       // anything on disk. Clearing it keeps the next save (this session is
@@ -241,16 +239,17 @@ export class SessionController {
     // `allowEmpty` 是「草稿也存一份」，不是「允许把已有历史写空」：resume 没把历史装进
     // agent 的进程（插件面板动作、能力开关这类不跑 turn 的入口）如果照原样存，
     // 用户几百条对话会被一次点击抹掉。宁可这次不落盘。
+    const existing = this.store.load(this.currentSessionId);
     if (
       options.allowEmpty &&
-      !hasConversation(snapshot.messages, conversationMessages) &&
-      this.persistedConversationCount() > 0
+      !hasContent &&
+      existing &&
+      getPersistedConversationMessages(existing.snapshot).length > 0
     ) {
       return false;
     }
 
     const now = new Date().toISOString();
-    const existing = this.store.load(this.currentSessionId);
     if (this.currentPersistedSignature !== null && !existing) {
       // The file was removed underneath us (another process, or our own empty
       // save above) while this session stayed the live one. Returning early
@@ -289,12 +288,7 @@ export class SessionController {
         displayUsage: resolveDisplayUsage(options.displayUsage, existing?.snapshot.displayUsage, snapshot.lastUsage),
       },
     };
-    // If the turn-state already changed, the persisted document is definitely
-    // different, so skip the expensive full-session equality JSON comparison
-    // (which stringifies both sides) and go straight to the write. This keeps a
-    // large active session from being serialized several times per turn.
-    const stateChanged = existing?.turnState !== this.currentTurnState;
-    const unchangedSignature = existing && !stateChanged ? matchingSessionSignature(existing, session) : null;
+    const unchangedSignature = existing ? matchingSessionSignature(existing, session) : null;
     if (existing && unchangedSignature !== null) {
       this.currentPersistedSignature = unchangedSignature;
       this.currentPersistedCwd = existing.cwd;
@@ -577,9 +571,13 @@ export class SessionController {
     if (!existing || existing.turnState !== 'running') return;
     const current = this.agent.getSnapshot();
     const { activeThinking, activeTurn, messages } = current;
+    // Thinking changes much more often than the provider history. Compare the
+    // small checkpoint fields first so a new part does not serialize all prior
+    // messages merely to establish that it needs saving.
     if (
-      JSON.stringify([activeThinking, activeTurn, messages]) ===
-      JSON.stringify([existing.snapshot.activeThinking, existing.snapshot.activeTurn, existing.snapshot.messages])
+      jsonValuesEqual(activeThinking, existing.snapshot.activeThinking) &&
+      jsonValuesEqual(activeTurn, existing.snapshot.activeTurn) &&
+      jsonValuesEqual(messages, existing.snapshot.messages)
     )
       return;
     const { activeThinking: _oldThinking, activeTurn: _oldTurn, ...snapshot } = existing.snapshot;
@@ -635,10 +633,49 @@ export class SessionController {
 }
 
 function matchingSessionSignature(left: PersistedSession, right: PersistedSession): string | null {
-  const comparable = JSON.stringify(stripDerivedContextWindow(left));
-  if (comparable !== JSON.stringify(stripDerivedContextWindow(right))) return null;
+  // A new iteration normally appends messages or usage. These cheap, definite
+  // differences avoid serializing two complete long sessions before the write.
+  if (
+    left.turnState !== right.turnState ||
+    left.title !== right.title ||
+    left.titleSource !== right.titleSource ||
+    left.cwd !== right.cwd ||
+    left.parentSessionId !== right.parentSessionId ||
+    left.awaitingInput !== right.awaitingInput ||
+    left.snapshot.messages.length !== right.snapshot.messages.length ||
+    left.snapshot.conversationMessages.length !== right.snapshot.conversationMessages.length ||
+    left.snapshot.usageHistory.length !== right.snapshot.usageHistory.length ||
+    left.snapshot.subagentUsageHistory?.length !== right.snapshot.subagentUsageHistory?.length
+  )
+    return null;
+
+  const comparableLeft = stripDerivedContextWindow(left);
+  const comparableRight = stripDerivedContextWindow(right);
+  // Parsed sessions and runtime snapshots use different sets of optional keys.
+  // Ignore undefined keys at these two schema levels, just as JSON does. Native
+  // structural equality avoids allocating full JSON strings in the common no-op
+  // case; the fallback retains JSON semantics for nested optional values.
+  const normalizedLeft = omitUndefinedFields({
+    ...comparableLeft,
+    snapshot: omitUndefinedFields(comparableLeft.snapshot),
+  });
+  const normalizedRight = omitUndefinedFields({
+    ...comparableRight,
+    snapshot: omitUndefinedFields(comparableRight.snapshot),
+  });
+  if (isDeepStrictEqual(normalizedLeft, normalizedRight)) return sessionSignature(left);
+  const comparable = JSON.stringify(comparableLeft);
+  if (comparable !== JSON.stringify(comparableRight)) return null;
   const json = left.snapshot.contextWindowSize === undefined ? comparable : JSON.stringify(left);
   return createHash('sha256').update(json).digest('hex');
+}
+
+function omitUndefinedFields<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, field]) => field !== undefined)) as T;
+}
+
+function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  return isDeepStrictEqual(left, right) || JSON.stringify(left) === JSON.stringify(right);
 }
 
 /**
@@ -814,11 +851,12 @@ function getTitleConversationMessages(
   agent: SessionAgentAdapter,
   fallbackMessages: MicaUiConversationMessage[],
 ): MicaUiConversationMessage[] {
-  const historyMessages = sanitizeConversationMessages(agent.toConversationMessages());
   // Compact rewrites model history so that it starts with synthetic user
   // messages. The UI conversation still contains the original prompt and is
   // therefore the authoritative title source when one is available.
-  return fallbackMessages.some(isTitleUserMessage) ? fallbackMessages : historyMessages;
+  return fallbackMessages.some(isTitleUserMessage)
+    ? fallbackMessages
+    : sanitizeConversationMessages(agent.toConversationMessages());
 }
 
 function sanitizeConversationMessages(value: unknown): MicaUiConversationMessage[] {

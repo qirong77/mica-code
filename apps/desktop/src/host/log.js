@@ -11,6 +11,7 @@ export {
   flushLogs,
   logger,
   readPerformanceSummary,
+  readPerformanceSummaryAsync,
   setLogLevel,
   slowReport,
   snapshot,

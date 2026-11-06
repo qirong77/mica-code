@@ -929,7 +929,8 @@ export class AgentRuntime {
   }
 
   getSnapshot(): AgentRuntimeSnapshot {
-    const snapshot = this.client?.getSnapshot();
+    // 持久化使用已有的展示记录，不必再把完整 provider 历史投影为展示消息。
+    const snapshot = this.client?.getSnapshot({ includeConversation: false });
     return {
       providerId: this.currentConfig.provider.id,
       protocol: this.currentConfig.provider.protocol,
@@ -1002,19 +1003,20 @@ export class AgentRuntime {
   }
 
   captureClientSnapshot() {
-    const snapshot = this.client?.getSnapshot();
-    if (!snapshot) return null;
-    return {
-      ...snapshot,
-      messages: cloneJson(snapshot.messages),
-      usageHistory: cloneJson(snapshot.usageHistory),
-      lastUsage: cloneJson(snapshot.lastUsage),
-      conversationMessages: cloneJson(snapshot.conversationMessages),
-    };
+    if (!this.client) return null;
+    // 回滚只使用 provider 状态。跳过展示投影与 JSON 文本中间副本；一次 clone 也会
+    // 保留 lastUsage 与 usageHistory 尾项的共享引用，而不是复制两遍。
+    return structuredClone({
+      model: this.client.model,
+      messages: this.client.messages,
+      usageHistory: this.client.usageHistory,
+      lastUsage: this.client.lastUsage,
+    });
   }
 
-  restoreClientSnapshot(snapshot: AgentSnapshot<unknown, AgentUsageRecord>) {
-    this.client?.loadSnapshot(snapshot);
+  restoreClientSnapshot(snapshot: Omit<AgentSnapshot<unknown, AgentUsageRecord>, 'conversationMessages'>) {
+    // 只有真正回滚时才再复制。provider 会追加 usage，不能污染下一次重试的原始基线。
+    this.client?.loadSnapshot({ ...structuredClone(snapshot), conversationMessages: [] });
   }
 
   loadSnapshot(snapshot: AgentRuntimeSnapshot, options: { recoverActiveThinking?: boolean } = {}) {

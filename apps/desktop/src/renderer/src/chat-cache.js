@@ -52,3 +52,41 @@ export function cachedChatNodes(cache, nodes) {
   if (!wanted.size) return []
   return (nodes || []).filter((node) => wanted.has(node.id))
 }
+
+// Unmounted views hand off their visual history, including reasoning/tools that are absent
+// from persisted chat messages and may have fallen out of the host's bounded event replay.
+const TRANSCRIPT_CACHE_LIMIT = 8
+const transcriptCache = new Map()
+
+/** Keep the handoff available until async restore succeeds, including effect setup retries. */
+export function readCachedTranscript(nodeId) {
+  return transcriptCache.get(nodeId) || null
+}
+
+/** Once mounted, the component owns the transcript; don't retain its old snapshot as well. */
+export function takeCachedTranscript(nodeId) {
+  const entry = transcriptCache.get(nodeId) || null
+  transcriptCache.delete(nodeId)
+  return entry
+}
+
+export function writeCachedTranscript(nodeId, messages, meta) {
+  if (!nodeId || !Array.isArray(messages) || messages.length === 0) return
+  transcriptCache.delete(nodeId)
+  transcriptCache.set(nodeId, { messages, meta })
+  while (transcriptCache.size > TRANSCRIPT_CACHE_LIMIT) {
+    transcriptCache.delete(transcriptCache.keys().next().value)
+  }
+}
+
+/** Closed nodes have no mounted owner and shouldn't retain a whole conversation. */
+export function pruneCachedTranscripts(aliveIds) {
+  const alive = new Set(aliveIds)
+  for (const id of transcriptCache.keys()) {
+    if (!alive.has(id)) transcriptCache.delete(id)
+  }
+}
+
+export function resetTranscriptCache() {
+  transcriptCache.clear()
+}

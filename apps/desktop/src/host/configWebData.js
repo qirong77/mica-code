@@ -38,7 +38,7 @@ import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from '
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
 import { openSystemSettings, readSystemChecks } from './system-checks.js'
 import { probeMcpServers } from './mcp-probe.js'
-import { clearLogs, readPerformanceSummary } from './log.js'
+import { clearLogs, readPerformanceSummaryAsync } from './log.js'
 
 /**
  * 配置页在桌面运行时的数据层。
@@ -578,7 +578,7 @@ export const configWebActions = {
   readTerminalControlDetails: () => readTerminalControlDetailsFromHost(),
 
   // 性能与诊断：读的是 host/log.js 写在日志目录下的 JSONL，聚合在 host 侧做完。
-  readPerformanceDetails: (input) => readPerformanceSummary(input ?? {}),
+  readPerformanceDetails: (input) => readPerformanceSummaryAsync(input ?? {}),
   clearPerformanceLogs: () => clearLogs(),
 
   readSessionConversationPage: (input) =>

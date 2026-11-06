@@ -1,6 +1,7 @@
 import * as nodeFs from 'node:fs'
 import { join } from 'node:path'
 import { parseUsageLedger } from '@packages/mica-web-shared/usage-ledger.js'
+import { readSessionUsageJson } from './session-usage-reader'
 import {
   parseSessionEvents,
   parseSessionText,
@@ -16,7 +17,7 @@ import {
 const INDEX_VERSION = 8
 /** 每批解析多少个会话文件就让出一次事件循环。 */
 const BATCH_FILES = 16
-/** 单批最多占用主线程多久（毫秒）；大会话文件会超过这个预算，靠批次之间让出恢复响应。 */
+/** 小文件解析及统计计算每批的主线程预算（毫秒）；大会话 JSON 在 worker 内解析。 */
 const BATCH_BUDGET_MS = 12
 /**
  * 大会话文件（会话跑久了会到几百 MB）每轮 checkpoint 都会变。侧栏 10s 轮询一次，
@@ -221,6 +222,9 @@ export function createStatsScanner({
   indexFile = null,
   ledgerFile = null,
   fileSystem = nodeFs,
+  readJson = fileSystem === nodeFs
+    ? readSessionUsageJson
+    : async (file) => JSON.parse(fileSystem.readFileSync(file, 'utf8')),
   parseEvents = parseSessionEvents,
   summarize = summarizeStatsSession,
   summarizeLedger = summarizeLedgerEntries,
@@ -336,11 +340,12 @@ export function createStatsScanner({
     writeTimer.unref?.()
   }
 
-  function parseFile(file, signature) {
+  async function parseFile(file, signature) {
     let raw
     try {
-      raw = JSON.parse(fileSystem.readFileSync(file, 'utf8'))
+      raw = await readJson(file)
     } catch {
+      if (signatureOf(file) !== signature) return null
       // 结构损坏的文件按「没有投影」缓存，修好后签名变化会重新解析。
       return { meta: null, stats: null, identities: [], events: [] }
     }
@@ -517,8 +522,7 @@ export function createStatsScanner({
     progress.done = 0
     let index = 0
     while (index < pending.length) {
-      // 大会话文件单次 JSON.parse 就要几百毫秒，所以按时间切批：一批最多占用主线程
-      // BATCH_BUDGET_MS，让出事件循环后再继续，IPC 不会被按住。
+      // 大文件在 worker 内读取；小文件解析和事件聚合仍按时间切批，避免连续占用主线程。
       const startedAt = Date.now()
       let taken = 0
       while (index < pending.length && taken < BATCH_FILES) {
@@ -526,7 +530,7 @@ export function createStatsScanner({
         const { file, signature } = pending[index]
         index += 1
         taken += 1
-        const result = parseFile(file, signature)
+        const result = await parseFile(file, signature)
         // 读到一半被改写：下一次扫描重新读，这次不写缓存。
         if (!result) continue
         parsed.set(file, result)
@@ -566,7 +570,7 @@ export function createStatsScanner({
     for (const file of stale) {
       const entry = entries.get(file)
       if (!entry) continue
-      const result = parseFile(file, entry.signature)
+      const result = await parseFile(file, entry.signature)
       if (!result) continue
       entry.identities = result.identities
       entry.owned = 0
@@ -697,7 +701,7 @@ export function createStatsScanner({
       if (cached?.signature === signature) return cached.value
       let raw
       try {
-        raw = JSON.parse(fileSystem.readFileSync(file, 'utf8'))
+        raw = await readJson(file, { mode: 'text' })
       } catch {
         return null
       }

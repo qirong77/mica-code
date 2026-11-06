@@ -86,6 +86,7 @@ describe('startPerfProbe', () => {
     expect(sample.heapMB).toBe(4)
     expect(sample.vis).toBe(1)
     expect(sample.at).toBeGreaterThan(0)
+    expect(sample.pageId).toBe(probe.pageId)
     expect(typeof sample.lag).toBe('number')
     probe.stop()
   })
@@ -98,6 +99,19 @@ describe('startPerfProbe', () => {
     expect(second).toBe(first)
     expect(harness.intervals.size).toBe(size)
     first.stop()
+  })
+
+  it('不同页面的采样身份不混在一起', () => {
+    const a = createHarness()
+    const b = createHarness()
+    const first = startPerfProbe(a.win, a.doc)
+    const second = startPerfProbe(b.win, b.doc)
+    expect(sampleOf(first).pageId).not.toBe(sampleOf(second).pageId)
+    a.advance(1000)
+    a.tick(1000)
+    expect(sampleOf(first).pageId).toBe(first.pageId)
+    first.stop()
+    second.stop()
   })
 
   it('空闲时也全量落盘，不做筛选', async () => {

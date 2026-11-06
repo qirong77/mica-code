@@ -19,6 +19,7 @@ import {
 } from './usage-series'
 import { USAGE_SOURCE_LABELS } from '@packages/mica-web-shared/usage-source.js'
 import { usePluginsDetails } from '../plugins-details'
+import { createReadQueue } from '../read-queue'
 import {
   SOURCE_KIND_HINTS,
   SOURCE_KIND_LABELS,
@@ -1245,37 +1246,41 @@ export function StatsView({ visible }) {
 
   useEffect(() => {
     if (!visible) return undefined
-    let alive = true
-    const read = () => {
-      window.mica.stats
-        .read()
-        .then((data) => {
-          if (alive) setSnap(data)
-        })
-        .catch((error) => console.error('read stats failed', error))
-    }
+    const reads = createReadQueue(
+      async (isCurrent) => {
+        const data = await window.mica.stats.read()
+        if (isCurrent()) setSnap(data)
+      },
+      {
+        // 会话统计索引由运行时按文件签名增量维护；隐藏窗口里刷新纯属白烧 CPU。
+        canRead: () => document.visibilityState === 'visible' && document.hasFocus(),
+        onError: (error) => console.error('read stats failed', error)
+      }
+    )
     const tick = () => {
-      // 会话统计索引由运行时按文件签名增量维护；隐藏窗口里刷新纯属白烧 CPU。
-      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
-      read()
+      void reads.refresh()
     }
     tick()
     const timer = window.setInterval(tick, STATS_REFRESH_MS)
     // 回到窗口时立刻补一次，免得刚打开就看到几十秒前的数字。
-    const onFocus = () => tick()
+    const onFocus = () => {
+      void reads.refresh({ trailing: true })
+    }
     window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
     // 首次构建索引要遍历全部会话文件：运行时按进度推送，这里跟着刷新，页面因此是
     // 逐个填充而不是先空着等一次全量扫描。
     // 页签没显示时整段都不挂（上面的 early return）：可见时索引补齐的进度推送直接跟着刷，
     // 页面因此是逐个填充而不是先空着等一次全量扫描。
     const offChanged = window.mica.stats.onChanged?.(() => {
-      if (!alive) return
-      tick()
+      // 扫描进度可能比读取更快：在途时只补一次最新结果，避免整份统计叠着传输/解析。
+      void reads.refresh({ trailing: true })
     })
     return () => {
-      alive = false
+      reads.dispose()
       window.clearInterval(timer)
       window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
       offChanged?.()
     }
   }, [visible])

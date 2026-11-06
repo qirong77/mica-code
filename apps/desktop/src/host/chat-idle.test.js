@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { IDLE_MAX_KEEP, IDLE_REAP_MS, resolveIdleReap } from './chat-idle'
+import {
+  IDLE_MAX_KEEP,
+  IDLE_REAP_MS,
+  isHostActivityRequest,
+  noteHostMessageActivity,
+  resolveIdleReap
+} from './chat-idle'
 
 const NOW = 1_000_000_000
 
@@ -16,6 +22,32 @@ function entry(id, run, queuedCount = 0) {
 }
 
 describe('resolveIdleReap', () => {
+  it('does not keep idle hosts alive through view polls or periodic task snapshots', () => {
+    const run = host(NOW - IDLE_REAP_MS * 2, {
+      pendingRequests: new Map([[1, { method: 'mica/pluginPanel/view' }]])
+    })
+    noteHostMessageActivity(run, { id: 1, result: {} }, NOW)
+    run.pendingRequests.delete(1)
+    noteHostMessageActivity(
+      run,
+      { method: 'mica/subagentTasks/updated', params: { tasks: [] } },
+      NOW
+    )
+    expect(run.lastActivityAt).toBe(NOW - IDLE_REAP_MS * 2)
+    expect(resolveIdleReap([entry('current', host(NOW)), entry('old', run)], NOW)).toEqual(['old'])
+    noteHostMessageActivity(run, { method: 'turn/completed' }, NOW)
+    expect(run.lastActivityAt).toBe(NOW)
+    expect(isHostActivityRequest('mica/pluginPanel/action')).toBe(true)
+    expect(isHostActivityRequest('mica/subagentTasks/detail')).toBe(false)
+  })
+
+  it('does not recycle a host while an awaited query or action is in flight', () => {
+    const run = host(NOW - IDLE_REAP_MS * 2, {
+      pendingRequests: new Map([[1, { method: 'mica/pluginPanel/action' }]])
+    })
+    expect(resolveIdleReap([entry('current', host(NOW)), entry('old', run)], NOW)).toEqual([])
+  })
+
   it('keeps the only host alive even when it has been idle for a day', () => {
     // 手机桥、定时循环只活在会话宿主里：全收干净它们就凭空停摆。
     expect(resolveIdleReap([entry('a', host(NOW - IDLE_REAP_MS * 48))], NOW)).toEqual([])
@@ -63,7 +95,10 @@ describe('resolveIdleReap', () => {
     const entries = [
       entry('keep', host(NOW)),
       entry('turning', host(stale, { running: true })),
-      entry('maintaining', host(stale, { maintenance: { reason: 'compaction', label: '自动压缩' } })),
+      entry(
+        'maintaining',
+        host(stale, { maintenance: { reason: 'compaction', label: '自动压缩' } })
+      ),
       entry('aborting', host(stale, { aborting: true })),
       entry('turn-id', host(stale, { currentTurnId: 't-1' }))
     ]

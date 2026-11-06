@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'bun:test'
-import { CHAT_CACHE_LIMIT, cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache.js'
+import { beforeEach, describe, expect, it } from 'bun:test'
+import {
+  CHAT_CACHE_LIMIT,
+  cachedChatNodes,
+  nextChatCache,
+  pruneChatCache,
+  pruneCachedTranscripts,
+  readCachedTranscript,
+  resetTranscriptCache,
+  takeCachedTranscript,
+  writeCachedTranscript
+} from './chat-cache.js'
 
 describe('nextChatCache', () => {
   it('records the active id as most recent', () => {
@@ -64,5 +74,42 @@ describe('cachedChatNodes', () => {
     expect(cachedChatNodes(null, nodes)).toEqual([])
     expect(cachedChatNodes(['a'], null)).toEqual([])
     expect(cachedChatNodes([], nodes)).toEqual([])
+  })
+})
+
+describe('unmounted transcript cache', () => {
+  beforeEach(resetTranscriptCache)
+
+  it('hands the original visual transcript to one owner without retaining an old snapshot', () => {
+    const messages = [{ kind: 'reasoning', text: 'Only available in the event stream' }]
+    const meta = { model: 'test' }
+    writeCachedTranscript('a', messages, meta)
+    const entry = takeCachedTranscript('a')
+    expect(entry.messages).toBe(messages)
+    expect(entry.meta).toBe(meta)
+    expect(takeCachedTranscript('a')).toBeNull()
+    writeCachedTranscript('a', messages, meta)
+    expect(takeCachedTranscript('a').messages).toBe(messages)
+  })
+
+  it('releases closed nodes while preserving evicted views that still have a workspace node', () => {
+    writeCachedTranscript('closed', [{ text: 'large history' }], null)
+    writeCachedTranscript('open', [{ text: 'visual history' }], null)
+    pruneCachedTranscripts(['open', 'mounted'])
+    expect(takeCachedTranscript('closed')).toBeNull()
+    expect(takeCachedTranscript('open').messages[0].text).toBe('visual history')
+  })
+
+  it('keeps eight unmounted transcripts and preserves handoffs during async restore retries', () => {
+    for (let index = 0; index < 9; index += 1) {
+      writeCachedTranscript(String(index), [{ text: `history ${index}` }], null)
+    }
+    expect(takeCachedTranscript('0')).toBeNull()
+    expect(takeCachedTranscript('1')).not.toBeNull()
+    const pending = readCachedTranscript('8')
+    writeCachedTranscript('8', [], null)
+    expect(readCachedTranscript('8')).toBe(pending)
+    expect(takeCachedTranscript('8')).toBe(pending)
+    expect(readCachedTranscript('8')).toBeNull()
   })
 })

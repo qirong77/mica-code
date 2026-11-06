@@ -30,6 +30,8 @@ import {
 import { ModalShell } from './chat-modal'
 import '../assets/plugin-cards.css'
 import { FloatingMenu } from './FloatingMenu'
+import { createReadQueue } from './read-queue'
+import { pageIsActive, usePageVisible } from './use-page-visible'
 // 分区正文的 Markdown 直接用对话区那一套渲染：同一个应用里不该有两份 Markdown 排版，
 // 「需求描述」「角色描述」看起来才和对话里的内容一致。ChatView 也 import 本模块，
 // 但两边都只在组件渲染时取值（不在模块顶层读），ESM 的活绑定在这里是安全的。
@@ -242,6 +244,9 @@ export function PluginQuickBar({
   onOpenPath,
   onOpenReview
 }) {
+  const pageVisible = usePageVisible(visible, true)
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
   const panels = usePluginPanels(role)
   const [pending, setPending] = useState('')
   // 动作可以回一句话（「先添加频道」这类）：显示在按钮旁边，几秒后自己消失。
@@ -273,6 +278,10 @@ export function PluginQuickBar({
   panelsRef.current = panels
   const isCurrent = useCallback((panel) => scope.active && contextRef.current === scope &&
     panelsRef.current.some((entry) => entry.id === panel.id), [scope])
+  const canReadPanel = useCallback(
+    (panel) => isCurrent(panel) && visibleRef.current && pageIsActive(),
+    [isCurrent]
+  )
   useEffect(() => {
     scope.active = true
     return () => { scope.active = false }
@@ -311,7 +320,7 @@ export function PluginQuickBar({
   const loadView = useCallback(
     async (panel) => {
       const requestKey = `${context}\u0000${panel.id}`
-      if (!isCurrent(panel)) return null
+      if (!canReadPanel(panel)) return null
       if (scope.inflight.has(requestKey)) return scope.inflight.get(requestKey)
       const request = (async () => {
         let result = null
@@ -324,7 +333,7 @@ export function PluginQuickBar({
           if (result && result.ok !== false) break
           if (attempt < PANEL_RETRY_DELAYS.length) {
             await new Promise((resolve) => setTimeout(resolve, PANEL_RETRY_DELAYS[attempt]))
-            if (!isCurrent(panel)) return null
+            if (!canReadPanel(panel)) return null
           }
         }
         if (!isCurrent(panel)) return null
@@ -355,7 +364,7 @@ export function PluginQuickBar({
         scope.inflight.delete(requestKey)
       }
     },
-    [context, cwd, nodeId, sessionId, scope, isCurrent]
+    [context, cwd, nodeId, sessionId, scope, isCurrent, canReadPanel]
   )
 
   const loadMenu = useCallback(
@@ -405,7 +414,7 @@ export function PluginQuickBar({
     // 每个会话的 ChatView 都挂着这一排按钮（`chat-cache` 保留 5 个实例），
     // 而其中只有一个在屏幕上。不按可见性收窄，同一份视图会被 5 个实例各问一遍：
     // 实测 8 小时的日志里 8388 次 `chat:plugin-panel-view`、p75 3.5 秒，全部来自这里。
-    if (!visible) return undefined
+    if (!pageVisible) return undefined
     const wanted = items.filter(({ shortcut }) => shortcut.menu || shortcut.id)
     // 声明了 panel.status 的插件即使没有快捷按钮，也要为首屏取一次视图：输入框上方那条
     // 常驻状态就来自这里，不能等用户点开面板才出现。按钮由视图给的面板同理——不问就没有那
@@ -415,7 +424,7 @@ export function PluginQuickBar({
       panelNeedsQuickbarView(panel) && !wanted.some((entry) => entry.panel.id === panel.id))
     if (!wanted.length && !statusOnly.length) return undefined
     const refresh = () => {
-      if (document.hidden) return
+      if (!pageIsActive()) return
       const statusPanels = new Set()
       for (const { panel, shortcut, key } of wanted) {
         if (shortcut.menu) void loadMenu(panel, shortcut, key)
@@ -432,14 +441,14 @@ export function PluginQuickBar({
     }
     const timer = setTimeout(refresh, PREFETCH_DELAY_MS)
     return () => clearTimeout(timer)
-  }, [items, panels, loadMenu, loadView, visible])
+  }, [items, panels, loadMenu, loadView, pageVisible])
 
   useEffect(() => {
-    if (!visible) return undefined
+    if (!pageVisible) return undefined
     const dynamicPanels = panels.filter(panelNeedsQuickbarView)
     if (!dynamicPanels.length) return undefined
     const refresh = () => {
-      if (!document.hidden) for (const panel of dynamicPanels) void loadView(panel)
+      if (pageIsActive()) for (const panel of dynamicPanels) void loadView(panel)
     }
     // 抽屉里的动作改的是同一份插件状态：开关一拨，这条状态行要立刻变，不能等下一轮轮询。
     const unsubscribe = subscribePluginPanelStatus(refresh)
@@ -450,10 +459,10 @@ export function PluginQuickBar({
       clearInterval(timer)
       document.removeEventListener('visibilitychange', refresh)
     }
-  }, [panels, loadView, visible])
+  }, [panels, loadView, pageVisible])
 
   useEffect(() => {
-    if (!visible) return undefined
+    if (!pageVisible) return undefined
     // 视图给按钮的面板即使此刻一个按钮都没有也要接工具事件：模型刚建的那一排就是在
     // 一次工具调用之后出现的，等 30 秒轮询等于让用户以为没做成。
     const viewPanels = panels.filter(panelNeedsQuickbarView)
@@ -465,7 +474,7 @@ export function PluginQuickBar({
     const refreshAfterTool = async () => {
       // 工具完成时旧的视图请求可能仍在途；先等它结束，再读取工具写入后的数据。
       await Promise.allSettled([...inflight.current.values()])
-      if (!active || contextRef.current !== scope || !scope.active || document.hidden) return
+      if (!active || contextRef.current !== scope || !scope.active || !pageIsActive()) return
       const dynamic = new Set()
       for (const { panel, shortcut, key } of items) {
         if (shortcut.menu) void loadMenu(panel, shortcut, key, { force: true })
@@ -490,7 +499,7 @@ export function PluginQuickBar({
       clearTimeout(timer)
       unsubscribe()
     }
-  }, [context, items, loadMenu, loadView, nodeId, panels, visible, scope])
+  }, [context, items, loadMenu, loadView, nodeId, panels, pageVisible, scope])
 
   // 状态贴在哪一块面板上也要知道：点它进的是那块面板。
   const statusOwner = panels.find((panel) => statusBars[panel.id]?.label) || null
@@ -600,7 +609,7 @@ export function PluginQuickBar({
                 values: { cardId: card.id, revision: card.revision }
               })}
               onImpression={visible && card.impressionAction ? () => {
-                if (!isCurrent(panel) || document.hidden) return
+                if (!isCurrent(panel) || !pageIsActive()) return
                 const impressionKey = panelCardImpressionKey(nodeId, sessionId, panel.id, card)
                 if (impressions.current.has(impressionKey)) return
                 impressions.current.add(impressionKey)
@@ -829,6 +838,9 @@ function PluginPanelDock({
   onOpenPath,
   onOpenReview
 }) {
+  const pageVisible = usePageVisible(visible, true)
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
   // 菜单那边刚问过同一份视图时直接拿它开局：点开抽屉不该先看到一句「正在读取」。
   const seeded = useRef(readPanelView(nodeId, pluginId))
   const [view, setView] = useState(() => seeded.current?.view || null)
@@ -839,6 +851,9 @@ function PluginPanelDock({
   // 弹窗形态下的当前页签（存 section 标题）。抽屉形态不用它。
   const [activeTab, setActiveTab] = useState('')
   const aliveRef = useRef(true)
+  const readsRef = useRef(null)
+  const actionsRef = useRef(0)
+  const needsInitialDraftsRef = useRef(!seeded.current?.view)
 
   // 分区动作也能回一句话（注册成功/失败原因）：显示在面板顶部，几秒后自己消失。
   const [feedback, setFeedback] = useState('')
@@ -878,34 +893,46 @@ function PluginPanelDock({
     [nodeId, pluginId]
   )
 
-  const load = useCallback(async () => {
-    const result = await window.mica.chat.pluginPanels
-      .view(nodeId, { pluginId, sessionId, cwd })
-      .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
-    applyView(result)
+  useEffect(() => {
+    const reads = createReadQueue(
+      async (isCurrent) => {
+        const result = await window.mica.chat.pluginPanels
+          .view(nodeId, { pluginId, sessionId, cwd })
+          .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
+        if (!isCurrent()) return
+        applyView(result, { resetDrafts: needsInitialDraftsRef.current })
+        if (result?.ok && result.view) needsInitialDraftsRef.current = false
+      },
+      {
+        canRead: () => visibleRef.current && pageIsActive() && actionsRef.current === 0
+      }
+    )
+    readsRef.current = reads
+    void reads.refresh()
+    return () => {
+      reads.dispose()
+      readsRef.current = null
+    }
   }, [applyView, cwd, nodeId, pluginId, sessionId])
+
+  const load = useCallback(() => readsRef.current?.refresh(), [])
 
   useEffect(() => {
     // 抽屉只在看得见时才刷新：切到别的会话后这个实例仍然挂着，继续每 4 秒叫醒一个
     // 没人看的会话宿主，既费 IO 也让那个 host 永远「刚从活动过」而不被回收。
-    if (!visible) return undefined
-    // 首次打开要带一次字段初值，之后的刷新只更新状态行/条目。已经有缓存视图时不清草稿
-    // （用户可能已经在里面打字了），只把新结果换上去。
-    const hadSeed = Boolean(seeded.current?.view)
-    void window.mica.chat.pluginPanels
-      .view(nodeId, { pluginId, sessionId, cwd })
-      .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
-      .then((result) => applyView(result, { resetDrafts: !hadSeed }))
-    const timer = setInterval(() => {
-      // 抽屉开着才刷新：关掉之后没有任何人看它，不该每 4 秒叫醒一次会话 host
-      if (typeof document !== 'undefined' && document.hidden) return
-      void load()
-    }, REFRESH_MS)
+    if (!pageVisible) return undefined
+    // 恢复可见时立刻补读。慢于 4 秒的读取与首屏读取共用队列，不叠请求，也不重置草稿。
+    void load()
+    const timer = setInterval(() => void load(), REFRESH_MS)
     return () => clearInterval(timer)
-  }, [applyView, cwd, load, nodeId, pluginId, sessionId, visible])
+  }, [load, pageVisible])
 
   const runAction = useCallback(
     async (action, key, extraValues, options = {}) => {
+      const reads = readsRef.current
+      // 动作返回的视图更新，不能被动作之前发出的慢轮询覆盖。
+      reads?.invalidate()
+      actionsRef.current += 1
       setBusy(key ? `${action}:${key}` : action)
       const result = await window.mica.chat.pluginPanels
         .action(nodeId, {
@@ -924,6 +951,8 @@ function PluginPanelDock({
           cwd
         })
         .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
+      actionsRef.current -= 1
+      if (!aliveRef.current || reads !== readsRef.current) return result
       setBusy('')
       // 表格里的勾选是一次状态切换，不是提交表单：换视图时不能让用户正在填的表单归位。
       // 插件也可以用 `keepDrafts` 说同一件事（输入停顿后的自动提交、提交失败）。
@@ -933,6 +962,7 @@ function PluginPanelDock({
           ? { mergeDrafts: true }
           : { resetDrafts: true }
       )
+      if (result?.ok && result.view) needsInitialDraftsRef.current = false
       applyPanelResult(result, {
         onCompose,
         onLaunchSession,

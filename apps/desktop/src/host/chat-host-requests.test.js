@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { settlePendingHostRequests } from './chat-host-requests.js'
+import { requestHostTask, settlePendingHostRequests } from './chat-host-requests.js'
 
 function makeRun(pendingEntries) {
   return { pendingRequests: new Map(pendingEntries) }
@@ -59,5 +59,55 @@ describe('settlePendingHostRequests', () => {
     ])
     expect(settlePendingHostRequests({}, 'boom').rejectedTurns).toEqual([])
     expect(settlePendingHostRequests(undefined, 'boom').rejectedTurns).toEqual([])
+  })
+})
+
+describe('requestHostTask', () => {
+  function pendingRun() {
+    return { child: { stdin: { writable: true } }, requestSeq: 0, pendingRequests: new Map() }
+  }
+  const send = (run, method, params, options) => {
+    run.pendingRequests.set(++run.requestSeq, { method, params, ...options })
+    return true
+  }
+
+  it('releases timed-out entries and their retained parameters', async () => {
+    const run = pendingRun()
+    const result = await requestHostTask(
+      run,
+      'mica/pluginPanel/view',
+      { pluginId: 'test' },
+      { timeoutMs: 1, send }
+    )
+    expect(result.ok).toBe(false)
+    expect(run.pendingRequests.size).toBe(0)
+  })
+
+  it('settles on shutdown and ignores a late reply', async () => {
+    const run = pendingRun()
+    const result = requestHostTask(run, 'query', {}, { timeoutMs: 10_000, send })
+    const pending = run.pendingRequests.get(run.requestSeq)
+    settlePendingHostRequests(run, 'closed')
+    pending.resolve({ ok: true })
+    expect(await result).toEqual({ ok: false, error: 'closed' })
+    expect(run.pendingRequests.size).toBe(0)
+  })
+
+  it('cleans up after a synchronous write failure', async () => {
+    const run = pendingRun()
+    const result = await requestHostTask(
+      run,
+      'query',
+      {},
+      {
+        timeoutMs: 10_000,
+        send: (...args) => {
+          send(...args)
+          throw new Error('EPIPE')
+        }
+      }
+    )
+    expect(result.ok).toBe(false)
+    expect(run.pendingRequests.size).toBe(0)
   })
 })

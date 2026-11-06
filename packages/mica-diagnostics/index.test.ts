@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { flushLogs, logger, readPerformanceSummary } from './index.js';
+import { flushLogs, logger, readPerformanceSummary, slowReport } from './index.js';
 
 const originalDir = process.env.MICA_LOG_DIR;
 let dir: string;
@@ -79,5 +79,33 @@ describe('Performance summary', () => {
     }
     expect(summary.events.find((entry) => entry.event === 'failed-result')?.error).toBe('timeout');
     expect(summary.events.find((entry) => entry.event === 'thrown')?.error).toBe('broken');
+  });
+
+  it('counts thrown timed calls once, whether slow or fast', async () => {
+    for (const [event, limit] of [
+      ['timed-slow', 0],
+      ['timed-fast', Infinity],
+    ] as const) {
+      await expect(
+        logger('invoke').timed(
+          event,
+          async () => {
+            throw new Error(event);
+          },
+          limit,
+        ),
+      ).rejects.toThrow(event);
+    }
+    flushLogs();
+    const summary = readPerformanceSummary();
+    for (const [event, slow] of [
+      ['timed-slow', 1],
+      ['timed-fast', 0],
+    ] as const) {
+      expect(summary.buckets.find((bucket) => bucket.event === event)).toMatchObject({ count: 1, fails: 1, slow });
+      expect(summary.events.filter((entry) => entry.event === event)).toHaveLength(1);
+      expect(summary.events.find((entry) => entry.event === event)).toMatchObject({ level: 'error', error: event });
+      expect(slowReport().find((item) => item.key === `invoke:${event}`)).toMatchObject({ count: 1, fails: 1, slow });
+    }
   });
 });

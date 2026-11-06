@@ -20,7 +20,13 @@ import {
 import { BranchPicker } from './BranchPicker'
 import { ChatView } from './ChatView'
 import { CwdPicker as CwdModal } from './CwdPicker'
-import { cachedChatNodes, nextChatCache, pruneChatCache } from './chat-cache'
+import {
+  cachedChatNodes,
+  nextChatCache,
+  pruneChatCache,
+  pruneCachedTranscripts
+} from './chat-cache'
+import { createReadQueue } from './read-queue'
 import { setConfigWebFileOpener } from './config-web'
 import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
 import { loadPluginPageEntry } from './plugin-entries'
@@ -755,7 +761,7 @@ export default function App() {
   // 只重读标记：插件在自己的页面里改了色板（新增 / 改名 / 换色 / 删标签）走这里，
   // 不必跟着把整份会话列表重新序列化一遍。
   const refreshAnnotations = useCallback(() => {
-    window.mica.stats
+    return window.mica.stats
       .listAnnotations()
       .then((result) => applyAnnotations(result?.providers))
       .catch((error) => console.error('load session annotations failed', error))
@@ -817,16 +823,33 @@ export default function App() {
     })
   }, [])
 
-  const refreshSessions = useCallback(() => {
-    window.mica.stats
-      .listSessions()
-      .then((result) => applySessions(result?.sessions))
-      .catch((error) => console.error('load sessions failed', error))
-      // 失败也算「加载过了」：地址栏里的会话照旧按 id 打开，比一直等着强。
-      .finally(() => setSessionsLoaded(true))
-    // 插件标记由插件自己写盘（CLI 里的 /tags、模型调用工具都会改），所以每次顺带重读。
-    refreshAnnotations()
+  const sessionReads = useRef(null)
+  useEffect(() => {
+    const reads = createReadQueue(async (isCurrent) => {
+      await Promise.all([
+        window.mica.stats
+          .listSessions()
+          .then((result) => {
+            if (isCurrent()) applySessions(result?.sessions)
+          })
+          .catch((error) => console.error('load sessions failed', error))
+          // 失败也算「加载过了」：地址栏里的会话照旧按 id 打开，比一直等着强。
+          .finally(() => {
+            if (isCurrent()) setSessionsLoaded(true)
+          }),
+        // 插件标记由插件自己写盘（CLI 里的 /tags、模型调用工具都会改），所以每次顺带重读。
+        refreshAnnotations()
+      ])
+    })
+    sessionReads.current = reads
+    return () => {
+      reads.dispose()
+      sessionReads.current = null
+    }
   }, [applySessions, refreshAnnotations])
+  const refreshSessions = useCallback((options) => {
+    void sessionReads.current?.refresh({ trailing: options?.trailing !== false })
+  }, [])
 
   // 点菜单里的标记项：写盘的是插件目录下的数据文件（host 代写，见 host/session-annotations.js），
   // 返回的整份标记表直接替换本地状态，省一次重读。
@@ -1203,12 +1226,13 @@ export default function App() {
     refreshProjects()
     refreshLoops()
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible' && document.hasFocus()) refreshSessions()
+      if (document.visibilityState === 'visible' && document.hasFocus())
+        refreshSessions({ trailing: false })
     }, SESSION_POLL_MS)
     // 定时器在后台页签会被节流，回到前台可能要等到下一个周期；重新可见时立刻补一次，
     // 这样间隔放宽之后也不会有「回来先看到旧状态」的观感损失。
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') refreshSessions()
+      if (document.visibilityState === 'visible' && document.hasFocus()) refreshSessions()
     }
     window.addEventListener('focus', onVisibility)
     document.addEventListener('visibilitychange', onVisibility)
@@ -1219,6 +1243,7 @@ export default function App() {
     // （`built`）仍然立刻刷新。
     const offStats = window.mica.stats.onChanged?.((payload) => {
       if (payload?.partial) return
+      if (document.visibilityState !== 'visible' || !document.hasFocus()) return
       refreshSessions()
     })
     const offAnnotations = window.mica.stats.onAnnotationsChanged?.(() => refreshAnnotations())
@@ -2004,6 +2029,7 @@ export default function App() {
   // 上一轮的节点列表跑，把刚切过去的 activeId 一起剔掉，于是缓存里只剩一个会话、
   // 切走再切回又变成卸载重建（状态照样丢）。
   useEffect(() => {
+    pruneCachedTranscripts(terminalNodes.map((node) => node.id))
     setChatCache((previous) =>
       nextChatCache(
         pruneChatCache(

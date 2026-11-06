@@ -132,7 +132,7 @@ export interface IAgent<
   query(question: AgentQueryContent, options?: AgentQueryOptions): Promise<string>;
   preserveAbortedTurn(question: AgentQueryContent, partialAnswer?: string): boolean;
   toConversationMessages(): AgentConversationMessage[];
-  getSnapshot(): AgentSnapshot<TMessage, TUsage>;
+  getSnapshot(options?: { includeConversation?: boolean }): AgentSnapshot<TMessage, TUsage>;
   loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
 }
 
@@ -163,13 +163,13 @@ export abstract class BaseAgent<
   abstract toConversationMessages(): AgentConversationMessage[];
   abstract loadSnapshot(snapshot: AgentSnapshot<TMessage, TUsage>): void;
 
-  getSnapshot(): AgentSnapshot<TMessage, TUsage> {
+  getSnapshot(options: { includeConversation?: boolean } = {}): AgentSnapshot<TMessage, TUsage> {
     return {
       model: this.model,
       messages: this.messages,
       usageHistory: this.usageHistory,
       lastUsage: this.lastUsage,
-      conversationMessages: this.toConversationMessages(),
+      conversationMessages: options.includeConversation === false ? [] : this.toConversationMessages(),
     };
   }
 
