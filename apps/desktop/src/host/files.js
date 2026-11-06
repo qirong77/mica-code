@@ -6,7 +6,6 @@ import {
   copyFile,
   cp,
   lstat,
-  mkdir,
   open,
   readFile,
   readdir,
@@ -17,6 +16,7 @@ import {
 } from 'fs/promises'
 import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
+import { createFileEntry, renameFileEntry } from './file-entry-operations'
 import { ignoredEntries } from './git-ignore'
 import { noteWorktreeChange, repositoryRootOf } from './git-ops'
 import { listSearchFiles } from './search-files'
@@ -61,21 +61,6 @@ function versionOf(buffer) {
 function normalizeRoot(value) {
   if (typeof value !== 'string' || !value.trim()) throw new Error('root is required')
   return path.resolve(value)
-}
-
-function normalizeName(value) {
-  if (typeof value !== 'string' || !value.trim()) throw new Error('名称不能为空')
-  const name = value.trim()
-  if (
-    name === '.' ||
-    name === '..' ||
-    name.includes('/') ||
-    name.includes('\\') ||
-    name.includes('\0')
-  ) {
-    throw new Error('名称不能包含路径分隔符')
-  }
-  return name
 }
 
 /** 文件树手动拖拽排序：userData/file-order.json，{ [directoryPath]: [name, ...] } */
@@ -306,18 +291,14 @@ export function registerFilesIpc() {
 
   ipcMain.handle('files:create', async (_event, payload = {}) => {
     const directory = normalizeDirectory(payload.directory)
-    const target = path.join(directory, normalizeName(payload.name))
-    if (payload.type === 'directory') await mkdir(target)
-    else if (payload.type === 'file') await writeFile(target, '', { flag: 'wx' })
-    else throw new Error('type must be file or directory')
+    const target = await createFileEntry(directory, payload.name, payload.type)
     noteWorktreeMutations(directory)
     return { path: target }
   })
 
   ipcMain.handle('files:rename', async (_event, payload = {}) => {
     const source = normalizeDirectory(payload.path)
-    const target = path.join(path.dirname(source), normalizeName(payload.name))
-    if (source !== target) await rename(source, target)
+    const target = await renameFileEntry(source, payload.name)
     if (source !== target) noteWorktreeMutations(path.dirname(source))
     return { path: target }
   })

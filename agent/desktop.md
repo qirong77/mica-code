@@ -57,6 +57,7 @@
 - 输入框内容变化会节流 2s 发一次 `chat:input-activity` → `mica/input/activity`（空输入不发）：它只服务「这个人回来了」这类提前量，当前没有插件消费（会话压缩只在右键时动手），没有常驻进程时直接丢弃，不回包也不影响输入。
 - 输入框获得焦点发一次 `chat:input-focus` → `mica/input/focus`（只在会话没在跑时发）：同样是提前量。两条都只在已有常驻 host 时转发，不为一次焦点去 spawn。
 - 粘贴共用 `composer-paste.js`：图片转 `[Image](路径)`，文件插绝对路径。
+- 主对话与 By The Way 共用 `ChatComposer`：文字与选区由原生 textarea 显示，`composer-cursor.js` 只测量插入点并叠加 1.8px 竖线（CSS 闪烁，无定时器或文字显示层）；选区、失焦与组合输入时恢复原生光标。组合输入期间不分发发送与补全快捷键。
 - 角色入口在输入条箭头，随下一次发送/编辑的 role 参数持久化。
 - 对话右键菜单里的「耗时分析」（`TurnTimingDialog`，入口**不在**「+」里：它是一份只读报告，不是往对话里加东西的动作）：一轮按「等模型 / 输出 / 跑工具」首尾相接切成区间，界面先给三类合计条 + 图例（占比、次数、累计耗时）与工具耗时排行，明细默认按发生时间排列，可切换「按耗时」从长到短排序（同耗时按发生时间）；两种排序均保留原始开始偏移、内容、耗时与最慢标记，耗时排序不画时间线连线。切分、聚合与落盘形态的唯一实现在 `packages/mica-common/turnTiming.ts`；`AppRuntime` 每轮跑完把记录写进会话快照（`snapshot.turnTimings`，最近 50 轮，新的在后；fork / 新会话清空），所以重开应用、换进程也看得到历史轮次。桌面端的弹窗读这份记录 + 正在跑的那一轮（它还没落盘，由 `ChatView` 现场传进来，`renderer/src/turn-timing.js` 只做 Codex 事件 → 通用事件的适配），视图本身（`@mica-config-ui/web` 的 `TurnTimingView`）与会话详情的「耗时」页签共用一份。没有记录时如实说「还没有记录」，不要用当前事件流空跑一份冒充。
 - 输入条齿轮与时钟打开 `SessionSettingsDialog`：会话能力（Tools / Skills / MCP 三页签）/ 定时任务 / 插件。声明了 `perSession` 的插件是左侧导航「插件」下面的子项，内容区只画选中的那一个；按会话可调的项就在这里，默认值仍在配置页 Plugins。插件声明 `llm` 的字段由 `LlmSettingsSection` 按会话渲染（与配置页同一组件，摘要写会话当前模型、逐字段可「跟随默认」），不要在会话设置里另写一套模型表单。
@@ -116,6 +117,7 @@
 - Files / TerminalHost 按需挂载后保留实例；ref 未就绪的打开请求暂存，挂载后补开。
 - shell 由 `shell-path.js.resolveDefaultShell` 按平台与存在性解析。
 - 文件树尺寸沿用 VS Code：活动栏 48px、树行 22px、缩进 8px。
+- 资源管理器由 `FileExplorerTree.jsx` 渲染，选择/排序/导航规则在 `files-explorer.js`；树内新建与重命名按 Enter 提交、Esc 取消，失焦提交不抢回用户焦点，错误保留输入。顶栏新建按所选目录（选中文件则取父目录，未选择则根目录）落点；支持相对嵌套路径并逐级展开。方向键、Home/End、F2、字母定位与平台回收站快捷键只作用于树焦点，删除仍确认。创建/改名校验在 `host/file-entry-operations.js`：不接受绝对路径或 `.`/`..`，新建中间目录不跟随符号链接、已有同名叶节点拒绝，重命名先检查目标冲突。
 - 文件操作只重读受影响的父目录；目录结果合并到最新树状态，保留未变节点、子树与展开状态。手动刷新/恢复可见时保留已有树，目录请求按根与目录校验，过期结果不能恢复已删除或折叠的分支（`renderer/src/files-tree.js`）。
 - 编辑器工作区由 `EditorWorkspace.jsx` 持有自己的目录与 Git 状态，底栏目录选择只更新该页面，不写 session cwd、聊天默认目录或 workspace 节点；顶栏的编辑器图标（`toggleFilesView`）与对话里的路径链接、插件评审都落到主窗口这同一个 files 视图，再点一次图标或顶栏左侧的「返回对话」回到对话。文件树向上导航、打开目录也通过 `onRootChange` 同步页面目录，文件搜索读取编辑器 `getRoot()`。
 - 编辑器底部终端 `EditorTerminal.jsx` 复用 `TerminalHost`（`pane: 'terminal'`，一个标签页就是它的一个节点，PTY id 为 `<标签 id>:terminal`），不另写一套 xterm/PTY 装配：回放、失败重试、文件链接与对话底部终端完全同一份行为。开关与高度存 ui-state 的 `editorTerminal`，标签与 PTY 只属于页面。Ctrl+`与顶栏终端图标按视图分工——对话视图管会话终端、编辑器视图管编辑器终端，两处各装各的监听，不在同一处判断该切谁；右键文件树 / 资源管理器根节点的「在终端中打开」把目录递给面板，一个标签一个目录。关闭标签与关闭窗口前都用`terminal:foreground` 问一次前台在跑什么（`processRunning`是轮询出来的滞后标记，实时`ps`才拦得住刚起的命令），命中就二次确认。窗口关闭由外壳问页面：页面挂`window.\_\_micaConfirmClose`（`main/index.js`的`confirmWindowClose`经`executeJavaScript`调用，返回`false`或 resolve 成`false` 就不关）；外壳不认具体页面，退出应用时不问。页面卸载 / 刷新时把 PTY 一并 dispose——PTY 活在运行时里，页面没了它不会自己结束。

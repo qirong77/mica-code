@@ -185,7 +185,7 @@ import {
   removeQuoteBlock,
   splitQuoteSegments
 } from './quote-message'
-import TerminalComposer from './TerminalComposer'
+import ChatComposer from './ChatComposer'
 
 const MAX_INPUT_ROWS = 10
 const SCROLL_BOTTOM_THRESHOLD = 72
@@ -7765,7 +7765,7 @@ export function ChatView({
                 void attachFiles(files)
               }}
             />
-            <TerminalComposer
+            <ChatComposer
               value={input}
               placeholder={
                 running ? '消息会在下一个工具调用迭代后发送' : 'Type something and press Enter...'

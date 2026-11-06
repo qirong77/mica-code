@@ -41,7 +41,7 @@ import {
 import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
 import { longPressHandlers, useLatest } from './hooks'
 import { copyText } from './transport'
-import TerminalComposer from './TerminalComposer'
+import ChatComposer from './ChatComposer'
 
 /** 抽屉宽度的上下限：太窄塞不下一行代码，太宽会把主对话挤成一条缝。 */
 export const BTW_MIN_WIDTH = 320
@@ -742,9 +742,6 @@ export function BtwDrawer({
         ) : null}
       </div>
       <div className="chat-btw-foot">
-        {/* 输入条与主对话**同一套实现**：`TerminalComposer` 负责自绘光标、选区高亮与
-            中英文组合，动作区是 `.chat-composer-actions`。抽屉是另一条对话，输入框不该
-            长出第二种样子（裸 textarea 既没有终端光标，也不显示选区）。 */}
         <ComposerImageStrip text={draft} onPreview={onPreviewImage} />
         {/* 排队中的那一问：单槽位（与主对话的 message-queue 同款），答完自动接上；
             这里的 ✕ 就是撤回，撤回后问题回到输入框，不丢字。 */}
@@ -785,7 +782,7 @@ export function BtwDrawer({
               void attachImages(files)
             }}
           />
-          <TerminalComposer
+          <ChatComposer
             value={draft}
             textareaRef={inputRef}
             placeholder={

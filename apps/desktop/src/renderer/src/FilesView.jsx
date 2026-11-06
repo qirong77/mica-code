@@ -14,7 +14,6 @@ import {
   IconArrowBackUp,
   IconArrowLeft,
   IconArrowUp,
-  IconChevronRight,
   IconClipboard,
   IconCopy,
   IconDots,
@@ -33,22 +32,17 @@ import {
   IconTrash,
   IconX
 } from '@tabler/icons-react'
-import { FileIcon, FileSystemIcon } from './FileIcon'
+import { FileIcon } from './FileIcon'
+import { FileExplorerTree } from './FileExplorerTree'
+import { creationDirectory, entryNameError } from './files-explorer'
 import { GitPanel, SearchPanel } from './FileSidePanels'
 import { GitComparePanel } from './GitComparePanel'
 import { GitCompareWelcome, GitReviewTabs } from './GitReviewTabs'
 import { isFileReviewed } from './git-review'
 import { useGitReview } from './useGitReview'
 import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
-import {
-  buildGitDecorations,
-  relativeToRoot,
-  stagedCode,
-  statusColor,
-  statusLabel,
-  worktreeCode
-} from './git-decorations'
-import { longPressHandlers, useIsMobile, usePaneWidth } from './hooks'
+import { buildGitDecorations, stagedCode, worktreeCode } from './git-decorations'
+import { useIsMobile, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, loadMonaco } from './monaco'
 import {
   editorOptionsForTab,
@@ -72,13 +66,6 @@ import brandMark from '../../../resources/icon.svg?url&no-inline'
 const GitDiffEditor = lazyView(() => import('./GitDiffEditor'), 'GitDiffEditor')
 // 图谱页自带提交详情与内嵌 diff（同样依赖 monaco），同样按需下载。
 const GitGraphView = lazyView(() => import('./GitGraphView'), 'GitGraphView')
-
-// 资源管理器的横向栅格，取自 VS Code 实测值：每层只缩进 8px，行内是
-// 「16px 箭头格 + 16px 图标格 + 5px 间隙」——所以文件名的左边距就是 57 + 8 * depth，
-// 缩进参考线落在父级箭头中心（28 + 8 * depth）。行高同样是 VS Code 的 22px。
-const TREE_INDENT = 8
-const TREE_LABEL_INSET = 57
-const TREE_LABEL_OFFSET = 37
 
 function relativeParts(rootPath, filePath) {
   const root = String(rootPath || '')
@@ -113,8 +100,6 @@ const isSameOrChildPath = (candidate, parent) => {
   return caseLeft === caseRight || caseLeft.startsWith(`${caseRight}/`)
 }
 
-const isSibling = (a, b) => dirOf(a) === dirOf(b)
-
 function findDirChildren(nodes, dirPath) {
   for (const node of nodes) {
     if (node.path === dirPath) return node.children
@@ -131,16 +116,6 @@ function updateDirChildren(nodes, dirPath, update) {
     const children = update(node.children)
     return children === node.children ? node : { ...node, children }
   })
-}
-
-function applyOrder(children, directory, orderMap) {
-  const order = orderMap?.[directory]
-  if (!order?.length) return children
-  const byName = new Map(children.map((node) => [node.name, node]))
-  const known = order.map((name) => byName.get(name)).filter(Boolean)
-  const seen = new Set(known.map((node) => node.name))
-  const rest = children.filter((node) => !seen.has(node.name))
-  return [...known, ...rest]
 }
 
 // 空编辑器水印：对齐 VS Code 的 editor placeholder（品牌标记 + 常用快捷键）。
@@ -193,19 +168,35 @@ function FileContextMenu({ menu, onAction, onClose, gitRoot }) {
           { separator: true }
         ]
       : []),
-    { id: 'rename', label: '重命名', icon: IconPencil },
-    { id: 'duplicate', label: '创建副本', icon: IconCopy },
-    { separator: true },
+    ...(!menu.isRoot
+      ? [
+          { id: 'rename', label: '重命名', icon: IconPencil, hint: 'F2' },
+          { id: 'duplicate', label: '创建副本', icon: IconCopy },
+          { separator: true }
+        ]
+      : []),
     { id: 'copy-path', label: '复制路径', icon: IconClipboard },
-    { id: 'copy-relative-path', label: '复制相对路径', icon: IconClipboard },
+    ...(!menu.isRoot
+      ? [{ id: 'copy-relative-path', label: '复制相对路径', icon: IconClipboard }]
+      : []),
     { id: 'reveal', label: '在文件管理器中显示', icon: IconFolderOpen },
     {
       id: 'open-terminal',
       label: directory ? '在终端中打开' : '在终端中打开所在文件夹',
       icon: IconTerminal2
     },
-    { separator: true },
-    { id: 'delete', label: '删除', icon: IconTrash, danger: true }
+    ...(!menu.isRoot
+      ? [
+          { separator: true },
+          {
+            id: 'delete',
+            label: '移到回收站',
+            icon: IconTrash,
+            danger: true,
+            hint: window.mica.platform === 'darwin' ? '⌘⌫' : 'Delete'
+          }
+        ]
+      : [])
   ]
   return (
     <FloatingMenu x={menu.x} y={menu.y} minWidth={220} onClose={onClose}>
@@ -218,6 +209,7 @@ function FileContextMenu({ menu, onAction, onClose, gitRoot }) {
             icon={item.icon}
             label={item.label}
             danger={item.danger}
+            hint={item.hint}
             onClick={() => onAction(item.id, menu.node)}
           />
         )
@@ -264,184 +256,6 @@ function ExplorerMenu({ menu, onAction, onClose }) {
   )
 }
 
-function FileTreeRows({
-  nodes,
-  depth = 0,
-  activePath,
-  dragPath,
-  dropPath,
-  siblingDrop,
-  orderMap,
-  gitRoot,
-  gitDecorations,
-  onToggle,
-  onOpen,
-  onContextMenu,
-  onDragStart,
-  onDragEnd,
-  onDrop,
-  onSiblingHover,
-  onSiblingDrop
-}) {
-  return nodes.map((node) => {
-    const directory = node.type === 'directory'
-    const relative = relativeToRoot(gitRoot, node.path)
-    const fileStatus = !directory && relative ? gitDecorations.files.get(relative) : null
-    const folderStatus = directory && relative ? gitDecorations.folders.get(relative) : null
-    const decoration = fileStatus || folderStatus
-    const siblingOver =
-      siblingDrop?.path === node.path
-        ? siblingDrop.position === 'before'
-          ? 'before'
-          : 'after'
-        : null
-    const ignored = !!node.ignored
-    // 被 .gitignore 忽略的条目整体置灰（图标一并脱色），但仍然可以打开/展开
-    const tone =
-      node.path === activePath
-        ? 'bg-overlay-strong text-fg-max'
-        : ignored
-          ? 'text-fg-dim hover:text-fg-muted'
-          : 'text-fg-soft hover:text-fg-max'
-    return (
-      <div key={node.path}>
-        <button
-          type="button"
-          role="treeitem"
-          aria-expanded={directory ? node.expanded : undefined}
-          draggable
-          title={ignored ? `${node.path}（已被 .gitignore 忽略）` : node.path}
-          className={`flex h-[22px] w-full items-center rounded pr-1.5 text-left text-[13px] hover:bg-list-hover ${tone} ${
-            dragPath === node.path ? 'opacity-40' : ''
-          } ${dropPath === node.path ? 'ring-1 ring-inset ring-info/70 bg-info/10' : ''}`}
-          style={{
-            // 与 VS Code 的资源管理器一致：16px 箭头格 + 16px 图标格 + 5px 间隙，
-            // 每层只缩进 8px（不是 13px），所以深层级不会早早把标题挤出面板。
-            paddingLeft: TREE_LABEL_INSET - TREE_LABEL_OFFSET + depth * TREE_INDENT,
-            boxShadow:
-              siblingOver === 'before'
-                ? 'inset 0 2px 0 rgba(90,167,232,.9)'
-                : siblingOver === 'after'
-                  ? 'inset 0 -2px 0 rgba(90,167,232,.9)'
-                  : undefined
-          }}
-          onClick={() => (directory ? onToggle(node) : onOpen(node.path))}
-          onContextMenu={(event) => onContextMenu(event, node)}
-          {...longPressHandlers((event) => onContextMenu(event, node))}
-          onDragStart={(event) => onDragStart(event, node)}
-          onDragEnd={onDragEnd}
-          onDragOver={(event) => {
-            if (!dragPath || dragPath === node.path) return
-            if (isSibling(dragPath, node.path)) {
-              event.preventDefault()
-              event.dataTransfer.dropEffect = 'move'
-              const rect = event.currentTarget.getBoundingClientRect()
-              const position = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
-              onSiblingHover(node.path, position)
-              return
-            }
-            if (!directory) return
-            event.preventDefault()
-            event.dataTransfer.dropEffect = 'move'
-          }}
-          onDragEnter={(event) => {
-            if (!directory || (dragPath && isSibling(dragPath, node.path))) return
-            onDrop(event, node, false)
-          }}
-          onDrop={(event) => {
-            if (dragPath && isSibling(dragPath, node.path)) {
-              onSiblingDrop(node.path, siblingDrop?.position || 'after')
-              return
-            }
-            if (directory) onDrop(event, node, true)
-          }}
-        >
-          <span
-            className={`grid size-4 shrink-0 place-items-center text-fg-muted ${node.expanded ? 'rotate-90' : ''}`}
-          >
-            {directory && <IconChevronRight size={14} />}
-          </span>
-          <span className="grid size-4 shrink-0 place-items-center text-fg-muted">
-            <FileSystemIcon
-              name={node.name}
-              type={node.type}
-              expanded={node.expanded}
-              className={`size-4 ${ignored ? 'opacity-45 grayscale' : ''}`}
-            />
-          </span>
-          <span
-            className="ml-[5px] min-w-0 flex-1 truncate"
-            style={decoration ? { color: statusColor(decoration) } : undefined}
-          >
-            {node.name}
-          </span>
-          {node.loading && <span className="text-fg-dim">…</span>}
-          {fileStatus && (
-            <span
-              className="ml-1.5 shrink-0 font-mono text-[11px] font-semibold"
-              style={{ color: statusColor(fileStatus) }}
-            >
-              {statusLabel(fileStatus)}
-            </span>
-          )}
-          {folderStatus && (
-            <span
-              aria-hidden="true"
-              className="ml-1.5 size-1.5 shrink-0 rounded-full"
-              style={{ backgroundColor: statusColor(folderStatus), opacity: 0.75 }}
-            />
-          )}
-        </button>
-        {directory &&
-          node.expanded &&
-          (node.error ? (
-            <div
-              className="py-1 pr-2 text-[11px] text-danger/85"
-              style={{ paddingLeft: TREE_LABEL_INSET + (depth + 1) * TREE_INDENT }}
-            >
-              无法读取：{node.error}
-            </div>
-          ) : node.loaded && !node.children.length ? (
-            <div
-              className="py-1 pr-2 text-[11px] text-fg-dim"
-              style={{ paddingLeft: TREE_LABEL_INSET + (depth + 1) * TREE_INDENT }}
-            >
-              空文件夹
-            </div>
-          ) : (
-            <div className="relative">
-              {/* 缩进参考线：与 VS Code 一样落在父级箭头的中心线上（只有展开的分支才画）。 */}
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-y-0 w-px bg-overlay-strong"
-                style={{ left: TREE_LABEL_INSET - TREE_LABEL_OFFSET + 8 + depth * TREE_INDENT }}
-              />
-              <FileTreeRows
-                nodes={applyOrder(node.children, node.path, orderMap)}
-                depth={depth + 1}
-                activePath={activePath}
-                dragPath={dragPath}
-                dropPath={dropPath}
-                siblingDrop={siblingDrop}
-                orderMap={orderMap}
-                gitRoot={gitRoot}
-                gitDecorations={gitDecorations}
-                onToggle={onToggle}
-                onOpen={onOpen}
-                onContextMenu={onContextMenu}
-                onDragStart={onDragStart}
-                onDragEnd={onDragEnd}
-                onDrop={onDrop}
-                onSiblingHover={onSiblingHover}
-                onSiblingDrop={onSiblingDrop}
-              />
-            </div>
-          ))}
-      </div>
-    )
-  })
-}
-
 /** 标签条底部的 1px 分隔线：VS Code 只在非活动标签下画线，活动标签与编辑器连成一片，
     所以线画成内阴影而不是容器边框（边框没法被活动标签盖掉）。 */
 const TAB_UNDERLINE = 'shadow-[inset_0_-1px_0_0_var(--color-line)]'
@@ -450,7 +264,6 @@ export const FilesView = forwardRef(function FilesView(
   {
     root,
     visible,
-    askText,
     onRootChange,
     onCornerResizeStart,
     gitCwd,
@@ -512,6 +325,13 @@ export const FilesView = forwardRef(function FilesView(
   const activeRef = useRef(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [explorerMenu, setExplorerMenu] = useState(null)
+  const [selectedTreePath, setSelectedTreePath] = useState(null)
+  const [entryEdit, setEntryEditState] = useState(null)
+  const entryEditRef = useRef(null)
+  const setEntryEdit = useCallback((edit) => {
+    entryEditRef.current = edit
+    setEntryEditState(edit)
+  }, [])
   const [dragPath, setDragPath] = useState(null)
   const [dropPath, setDropPath] = useState(null)
   const [siblingDrop, setSiblingDrop] = useState(null) // { path, position: 'before'|'after' }
@@ -976,7 +796,7 @@ export const FilesView = forwardRef(function FilesView(
         showMessage('文件正在保存，请稍后再关闭', true, true)
         return false
       }
-      if (tab.dirty && !await confirmAction(`“${tab.name}” 的更改尚未保存。是否放弃更改并关闭？`))
+      if (tab.dirty && !(await confirmAction(`“${tab.name}” 的更改尚未保存。是否放弃更改并关闭？`)))
         return false
       const paths = tabsRef.current.map((item) => item.path)
       const index = paths.indexOf(path)
@@ -1105,6 +925,8 @@ export const FilesView = forwardRef(function FilesView(
       rootTargetRef.current = target
       if (target) onRootChange?.(target)
       treeRequests.reset()
+      setEntryEdit(null)
+      setSelectedTreePath(null)
       setTree({
         root: target || null,
         parent: null,
@@ -1114,7 +936,7 @@ export const FilesView = forwardRef(function FilesView(
       })
       if (target) await readDirectory(target)
     },
-    [onRootChange, readDirectory, refresh, setTree, treeRequests]
+    [onRootChange, readDirectory, refresh, setEntryEdit, setTree, treeRequests]
   )
 
   useEffect(() => {
@@ -1145,9 +967,12 @@ export const FilesView = forwardRef(function FilesView(
   }, [visible])
 
   const collapseAll = useCallback(() => {
+    if (entryEditRef.current?.busy) return
+    setEntryEdit(null)
+    setSelectedTreePath(null)
     treeRequests.collapse(treeRef.current.root)
     setTree((value) => ({ ...value, children: collapseNodes(value.children) }))
-  }, [setTree, treeRequests])
+  }, [setEntryEdit, setTree, treeRequests])
 
   const refreshAfterFileChange = useCallback(
     async (directories, expand = null) => {
@@ -1212,6 +1037,140 @@ export const FilesView = forwardRef(function FilesView(
     [closeFile, showMessage]
   )
 
+  const focusTreePath = useCallback((path) => {
+    requestAnimationFrame(() => {
+      const items = viewRef.current?.querySelectorAll('[data-tree-path]') || []
+      const element = [...items].find((item) => item.dataset.treePath === path)
+      element?.focus()
+      element?.scrollIntoView({ block: 'nearest' })
+    })
+  }, [])
+
+  const cancelEntryEdit = useCallback(
+    (restoreFocus = true) => {
+      const edit = entryEditRef.current
+      if (!edit || edit.busy) return
+      setEntryEdit(null)
+      if (restoreFocus) focusTreePath(edit.path || edit.directory)
+    },
+    [focusTreePath, setEntryEdit]
+  )
+
+  const beginEntryEdit = useCallback(
+    (action, node) => {
+      if (!treeRef.current.root || entryEditRef.current?.busy) return
+      setActivePanel('explorer')
+      const rename = action === 'rename'
+      const directory = rename
+        ? dirOf(node.path)
+        : node.type === 'directory'
+          ? node.path
+          : dirOf(node.path)
+      setEntryEdit({
+        id: {},
+        action,
+        directory,
+        path: rename ? node.path : null,
+        type: rename ? node.type : action === 'new-file' ? 'file' : 'directory',
+        value: rename ? node.name : '',
+        error: '',
+        busy: false
+      })
+      if (directory !== treeRef.current.root) {
+        setTree((value) => ({
+          ...value,
+          children: updateTree(value.children, directory, (item) => ({ ...item, expanded: true }))
+        }))
+        void readDirectory(directory, { expand: true })
+      }
+    },
+    [readDirectory, setEntryEdit, setTree]
+  )
+
+  const changeEntryName = useCallback(
+    (value) => {
+      const edit = entryEditRef.current
+      if (edit && !edit.busy) setEntryEdit({ ...edit, value, error: '' })
+    },
+    [setEntryEdit]
+  )
+
+  const submitEntryEdit = useCallback(
+    async (blur = false) => {
+      const edit = entryEditRef.current
+      if (!edit || edit.busy) return
+      const name = edit.value.trim()
+      if (!name && blur) return cancelEntryEdit(false)
+      const rename = edit.action === 'rename'
+      const error = entryNameError(name, rename)
+      if (error) {
+        setEntryEdit({ ...edit, error, focusError: !blur })
+        return
+      }
+      if (rename && name === fileName(edit.path)) return cancelEntryEdit(!blur)
+      const rootPath = treeRef.current.root
+      const openRequest = openRequestRef.current
+      const current = () =>
+        entryEditRef.current?.id === edit.id && treeRef.current.root === rootPath
+      setEntryEdit({ ...edit, busy: true, error: '' })
+      try {
+        if (rename && !(await closeTabsUnder(edit.path)))
+          throw new Error('请先保存或关闭此项目中已修改的文件')
+        const result = rename
+          ? await window.mica.files.rename(edit.path, name)
+          : await window.mica.files.create(edit.directory, name, edit.type)
+        if (!current()) return
+        await refreshAfterFileChange([edit.directory], edit.directory)
+        if (!current()) return
+        if (!rename) {
+          const parents = []
+          let directory = dirOf(result.path)
+          while (directory !== edit.directory && isSameOrChildPath(directory, edit.directory)) {
+            parents.unshift(directory)
+            const parent = dirOf(directory)
+            if (parent === directory) break
+            directory = parent
+          }
+          for (const parent of parents) {
+            if (!current()) return
+            await readDirectory(parent, { expand: true })
+          }
+        }
+        if (!current()) return
+        setEntryEdit(null)
+        if (blur || openRequestRef.current !== openRequest) return
+        setSelectedTreePath(result.path)
+        if (!rename && edit.type === 'file') void openFile(result.path)
+        else focusTreePath(result.path)
+      } catch (error) {
+        if (current())
+          setEntryEdit({
+            ...edit,
+            error: error?.message || String(error),
+            busy: false,
+            focusError: !blur && openRequestRef.current === openRequest
+          })
+      }
+    },
+    [
+      cancelEntryEdit,
+      closeTabsUnder,
+      focusTreePath,
+      openFile,
+      readDirectory,
+      refreshAfterFileChange,
+      setEntryEdit
+    ]
+  )
+
+  const newEntryInSelection = useCallback(
+    (action) => {
+      const directory = creationDirectory(treeRef.current, selectedTreePath)
+      if (directory) beginEntryEdit(action, { path: directory, type: 'directory' })
+    },
+    [beginEntryEdit, selectedTreePath]
+  )
+
   const runFileAction = useCallback(
     async (action, node) => {
       setContextMenu(null)
@@ -1240,27 +1199,8 @@ export const FilesView = forwardRef(function FilesView(
           onOpenTerminal?.(node.type === 'directory' ? node.path : dirOf(node.path))
           return
         }
-        if (action === 'new-file' || action === 'new-directory') {
-          const kind = action === 'new-file' ? '文件' : '文件夹'
-          const name = await askText(`新建${kind}`, '', `请输入${kind}名称`)
-          if (!name?.trim()) return
-          const result = await window.mica.files.create(
-            node.path,
-            name,
-            action === 'new-file' ? 'file' : 'directory'
-          )
-          if (action === 'new-file') void openFile(result.path)
-          await refreshAfterFileChange([node.path], node.path)
-          showMessage(`${kind}已创建`, true)
-          return
-        }
-        if (action === 'rename') {
-          const name = await askText('重命名', node.name, '请输入新名称')
-          if (!name?.trim() || name.trim() === node.name) return
-          if (!await closeTabsUnder(node.path)) return
-          await window.mica.files.rename(node.path, name)
-          await refreshAfterFileChange([dirOf(node.path)])
-          showMessage('已重命名', true)
+        if (['new-file', 'new-directory', 'rename'].includes(action)) {
+          beginEntryEdit(action, node)
           return
         }
         if (action === 'duplicate') {
@@ -1270,8 +1210,8 @@ export const FilesView = forwardRef(function FilesView(
           return
         }
         if (action === 'delete') {
-          if (!await confirmAction(`确定要将“${node.name}”移到回收站吗？`)) return
-          if (!await closeTabsUnder(node.path)) return
+          if (!(await confirmAction(`确定要将“${node.name}”移到回收站吗？`))) return
+          if (!(await closeTabsUnder(node.path))) return
           await window.mica.files.delete(node.path)
           await refreshAfterFileChange([dirOf(node.path)])
           showMessage('已删除', true)
@@ -1281,9 +1221,8 @@ export const FilesView = forwardRef(function FilesView(
       }
     },
     [
-      askText,
+      beginEntryEdit,
       closeTabsUnder,
-      openFile,
       onOpenTerminal,
       refreshAfterFileChange,
       revertGitFolder,
@@ -1295,10 +1234,23 @@ export const FilesView = forwardRef(function FilesView(
   const openContextMenu = useCallback((event, node) => {
     event.preventDefault()
     event.stopPropagation()
+    setSelectedTreePath(node.path)
     setContextMenu({
       node,
       x: event.clientX,
       y: event.clientY
+    })
+  }, [])
+
+  const openBlankContextMenu = useCallback((event) => {
+    event.preventDefault()
+    if (!treeRef.current.root) return
+    setSelectedTreePath(null)
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      isRoot: true,
+      node: { path: treeRef.current.root, type: 'directory', name: fileName(treeRef.current.root) }
     })
   }, [])
 
@@ -1375,6 +1327,7 @@ export const FilesView = forwardRef(function FilesView(
       if (action === 'refresh') return refresh()
       if (action === 'collapse-all') return collapseAll()
       if (action === 'open-parent') return loadRoot(menu.parent)
+      if (action === 'new-file' || action === 'new-directory') return newEntryInSelection(action)
       // 根目录当普通目录节点复用文件操作（新建、显示、复制路径）
       return runFileAction(action, {
         path: menu.root,
@@ -1382,7 +1335,7 @@ export const FilesView = forwardRef(function FilesView(
         name: fileName(menu.root)
       })
     },
-    [collapseAll, loadRoot, refresh, runFileAction]
+    [collapseAll, loadRoot, newEntryInSelection, refresh, runFileAction]
   )
 
   const startFileDrag = useCallback((event, node) => {
@@ -1462,7 +1415,7 @@ export const FilesView = forwardRef(function FilesView(
       }
       setDropPath(null)
       setDragPath(null)
-      if (!await closeTabsUnder(dragPath)) return
+      if (!(await closeTabsUnder(dragPath))) return
       try {
         await window.mica.files.move(dragPath, directory.path)
         await refreshAfterFileChange([dirOf(dragPath), directory.path], directory.path)
@@ -1839,13 +1792,7 @@ export const FilesView = forwardRef(function FilesView(
                 title="新建文件"
                 aria-label="新建文件"
                 className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
-                onClick={() =>
-                  runFileAction('new-file', {
-                    path: tree.root,
-                    type: 'directory',
-                    name: fileName(tree.root)
-                  })
-                }
+                onClick={() => newEntryInSelection('new-file')}
               >
                 <IconFilePlus size={16} />
               </button>
@@ -1855,13 +1802,7 @@ export const FilesView = forwardRef(function FilesView(
                 title="新建文件夹"
                 aria-label="新建文件夹"
                 className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
-                onClick={() =>
-                  runFileAction('new-directory', {
-                    path: tree.root,
-                    type: 'directory',
-                    name: fileName(tree.root)
-                  })
-                }
+                onClick={() => newEntryInSelection('new-directory')}
               >
                 <IconFolderPlus size={16} />
               </button>
@@ -1901,41 +1842,39 @@ export const FilesView = forwardRef(function FilesView(
               </button>
             </header>
             <div className="relative min-h-0 flex-1">
-              <div
-                className="h-full overflow-auto select-none"
-                role="tree"
-                aria-label="文件目录"
-                aria-busy={tree.refreshing}
-              >
-                <FileTreeRows
-                  nodes={applyOrder(tree.children, tree.root, orderMap)}
-                  activePath={activePath}
-                  dragPath={dragPath}
-                  dropPath={dropPath}
-                  siblingDrop={siblingDrop}
-                  orderMap={orderMap}
-                  gitRoot={gitRoot}
-                  gitDecorations={gitDecorations}
-                  onToggle={toggleDirectory}
-                  onOpen={(path) => {
-                    setMobileTreeVisible(false)
-                    openFile(path)
-                  }}
-                  onContextMenu={openContextMenu}
-                  onDragStart={startFileDrag}
-                  onDragEnd={finishFileDrag}
-                  onDrop={handleFileDrop}
-                  onSiblingHover={handleSiblingHover}
-                  onSiblingDrop={handleSiblingDrop}
-                />
-              </div>
-              {tree.status && (
+              <FileExplorerTree
+                tree={tree}
+                selectedPath={selectedTreePath}
+                activePath={activePath}
+                edit={entryEdit}
+                dragPath={dragPath}
+                dropPath={dropPath}
+                siblingDrop={siblingDrop}
+                orderMap={orderMap}
+                gitRoot={gitRoot}
+                gitDecorations={gitDecorations}
+                onSelect={setSelectedTreePath}
+                onEditChange={changeEntryName}
+                onEditSubmit={submitEntryEdit}
+                onEditCancel={cancelEntryEdit}
+                onAction={runFileAction}
+                onToggle={toggleDirectory}
+                onOpen={openFile}
+                onContextMenu={openContextMenu}
+                onBlankContextMenu={openBlankContextMenu}
+                onDragStart={startFileDrag}
+                onDragEnd={finishFileDrag}
+                onDrop={handleFileDrop}
+                onSiblingHover={handleSiblingHover}
+                onSiblingDrop={handleSiblingDrop}
+              />
+              {tree.status && !entryEdit && (
                 <div
                   role="status"
                   className={`absolute bg-panel px-4 text-center text-[11px] text-fg-dim ${
                     tree.children.length
                       ? 'pointer-events-none inset-x-0 bottom-0 py-2'
-                      : 'inset-0 grid place-items-center'
+                      : 'pointer-events-none inset-0 grid place-items-center'
                   }`}
                 >
                   {tree.status}
