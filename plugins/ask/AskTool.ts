@@ -1,10 +1,5 @@
 import { execFile } from 'node:child_process';
-import type {
-  PluginAskAnswer,
-  PluginAskApi,
-  PluginAskOption,
-  PluginAskQuestion,
-} from '@packages/mica-plugin/index.js';
+import type { PluginAskAnswer, PluginAskApi, PluginAskOption, PluginAskQuestion } from '@packages/mica-plugin/index.js';
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 
 export const ASK_TOOL_NAME = 'ask_user';
@@ -12,6 +7,13 @@ export const ASK_TOOL_NAME = 'ask_user';
 /** 命令输出进工具结果的上限：让模型看到够判断的上下文，又不至于吞掉整段上下文。 */
 const MAX_COMMAND_OUTPUT = 4000;
 const COMMAND_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = 5 * 60_000;
+
+type AskUserToolOptions = {
+  getTimeoutMs?: () => number;
+  captureOwner?: (context?: unknown) => unknown;
+  onTimeout?: (message: string, owner?: unknown) => void;
+};
 
 /**
  * `ask_user`：把「这一步有几种做法，你来定」变成一次真正的点选。
@@ -24,7 +26,10 @@ const COMMAND_TIMEOUT_MS = 120_000;
  * `command` 当场执行并把输出并进结果。两者都不给时，结果就是一句「用户选了 A」。
  */
 export class AskUserTool extends MicaTool {
-  constructor(private readonly ask: PluginAskApi) {
+  constructor(
+    private readonly ask: PluginAskApi,
+    private readonly options: AskUserToolOptions = {},
+  ) {
     super(
       ASK_TOOL_NAME,
       [
@@ -63,8 +68,7 @@ export class AskUserTool extends MicaTool {
                 },
                 prompt: {
                   type: 'string',
-                  description:
-                    'Optional instruction you will receive in the tool result when this option is picked.',
+                  description: 'Optional instruction you will receive in the tool result when this option is picked.',
                 },
                 command: {
                   type: 'string',
@@ -85,12 +89,11 @@ export class AskUserTool extends MicaTool {
           timeoutMs: {
             type: 'number',
             description:
-              'How long to wait before giving up (default 15 minutes, max 1 hour). The result is `cancelled` on timeout.',
+              'How long to wait before giving up (defaults to the Ask plugin setting: 5 minutes unless configured, max 1 hour). On timeout, notify the user and continue with a conservative first version; timeout is not approval for commands or risky actions.',
           },
           summary: {
             type: 'string',
-            description:
-              'Very short label for the session list while waiting, e.g. "等你选入口". Defaults to `title`.',
+            description: 'Very short label for the session list while waiting, e.g. "等你选入口". Defaults to `title`.',
           },
           presentation: {
             type: 'string',
@@ -123,14 +126,26 @@ export class AskUserTool extends MicaTool {
   }
 
   async execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
-    const question = toQuestion(input);
+    const configured = this.options.getTimeoutMs?.();
+    const defaultTimeoutMs =
+      typeof configured === 'number' && Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_TIMEOUT_MS;
+    const question = toQuestion(input, defaultTimeoutMs);
+    const owner = this.options.captureOwner?.(callbacks?.context);
     let answer: PluginAskAnswer;
     try {
       answer = await this.ask.request(question, { signal: callbacks?.signal });
     } catch (error) {
       return `没能把问题交给用户：${error instanceof Error ? error.message : String(error)}`;
     }
-    if (answer.cancelled) return cancelledText(answer);
+    if (answer.cancelled) {
+      if (answer.reason === 'timeout') {
+        this.options.onTimeout?.(
+          `「${question.title}」等待回复已超时。将先按保守方案实现第一版，你可以稍后补充想法；需要明确授权的操作会保留待确认。`,
+          owner,
+        );
+      }
+      return cancelledText(answer);
+    }
     return await answeredText(question, answer);
   }
 
@@ -140,13 +155,13 @@ export class AskUserTool extends MicaTool {
   }
 }
 
-function toQuestion(input: ToolInput): PluginAskQuestion {
+function toQuestion(input: ToolInput, defaultTimeoutMs: number): PluginAskQuestion {
   const options = Array.isArray(input?.options) ? input.options : [];
   // 数字从 JSON 进来可能是字符串；`null` / `''` / `0` 这类「非正数」一律当没给，
-  // 交给宿主按默认 15 分钟处理——`Number(null)` 是 0，照收就变成 1 秒超时，用户还没看到
+  // 使用插件设置的默认值——`Number(null)` 是 0，照收就变成 1 秒超时，用户还没看到
   // 卡片它就没了。
   const asked = Number(input?.timeoutMs);
-  const timeoutMs = Number.isFinite(asked) && asked > 0 ? asked : undefined;
+  const timeoutMs = Number.isFinite(asked) && asked > 0 ? asked : defaultTimeoutMs;
   return {
     title: String(input?.title ?? ''),
     detail: typeof input?.detail === 'string' ? input.detail : undefined,
@@ -154,21 +169,17 @@ function toQuestion(input: ToolInput): PluginAskQuestion {
     multiple: input?.multiple === true,
     ...(typeof input?.allowCustom === 'boolean' ? { allowCustom: input.allowCustom } : {}),
     presentation: input?.presentation === 'modal' ? 'modal' : undefined,
-    ...(input?.ui && typeof input.ui === 'object'
-      ? { ui: input.ui as PluginAskQuestion['ui'] }
-      : {}),
+    ...(input?.ui && typeof input.ui === 'object' ? { ui: input.ui as PluginAskQuestion['ui'] } : {}),
     timeoutMs,
     summary: typeof input?.summary === 'string' ? input.summary : undefined,
   };
 }
 
 function cancelledText(answer: PluginAskAnswer): string {
-  const why =
-    answer.reason === 'timeout'
-      ? '等了一会儿没有回应'
-      : answer.reason === 'aborted'
-        ? '用户中止了这一轮'
-        : '用户没有选';
+  if (answer.reason === 'timeout') {
+    return '等待用户回复已超时，没有回应。不代表用户选择了任何选项或批准了任何操作。告知用户：“等待回复已超时，我先按保守方案实现第一版，你可以稍后补充想法。”不要重复问同一个问题，也不要停在等待确认：说明采用的假设，继续完成安全、可逆的部分。不要自动执行选项里的 command，也不要把超时当成删除、覆盖、发布、改凭据或操作生产数据的授权；这些部分保留待确认。';
+  }
+  const why = answer.reason === 'aborted' ? '用户中止了这一轮' : '用户没有选';
   return `${why}。不要重复问同一个问题：按最保守的方案继续，并在回复里说明你选了哪个、为什么。`;
 }
 

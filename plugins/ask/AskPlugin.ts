@@ -24,7 +24,11 @@ export class AskPlugin implements MicaPlugin {
     if (!ask) throw new Error('ask 插件需要宿主提供 ask 能力');
     if (!tools) throw new Error('ask 插件需要宿主提供 tools 能力');
 
-    const tool = new AskUserTool(ask);
+    const tool = new AskUserTool(ask, {
+      getTimeoutMs: () => Number(ctx.settings.get().timeoutMinutes) * 60_000,
+      captureOwner: (context) => ctx.session?.captureOwner?.(context),
+      onTimeout: (message, owner) => ctx.ui?.notice(message, { status: 'warning', owner }),
+    });
     const toolRegistration = tools.register(tool, { icon: '❓' });
     ctx.onDispose(() => toolRegistration.dispose());
 
