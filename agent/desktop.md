@@ -2,6 +2,12 @@
 
 ## 三层边界与装配
 
+- 清单声明的 `desktop.launcher` 是外壳提供的系统入口：`main/plugin-launchers.js` 管快捷键
+  和独立浮窗；`host/plugin-launcher-runtime.js` 按目录挂载随包插件自己的后端，
+  `renderer/src/PluginLauncher.jsx` 挂载插件 `Launcher`，不启动聊天。原生动作复用
+  私有系统 socket `/plugin-launcher`；打开文件/目录经主窗口 `__micaDesktopAction`
+  进入 `openFileInView`，设置进入插件详情。插件停用后释放快捷键、销毁浮窗并 dispose 后端。
+
 | 层                    | 职责                                                                    |
 | --------------------- | ----------------------------------------------------------------------- |
 | `src/host/`           | chat、terminal、files、git、stats、配置、loop、共享状态等业务           |

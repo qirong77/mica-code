@@ -447,6 +447,8 @@ function createWebApi(env) {
     // 读写插件自己的数据文件（页面没有文件系统）、执行一个清单里声明过的动作（页面跑不了
     // 插件自己的代码）。
     pluginHost: {
+      launcherRequest: (pluginId, action, input) => invoke('plugin-host:launcher-request', { pluginId, action, input }),
+      launcherControl: (pluginId, action, path) => invoke('plugin-host:launcher-control', { pluginId, action, path }),
       probe: (address) => invoke('plugin-host:probe', { address }),
       readData: (pluginId) => invoke('plugin-host:read-data', { pluginId }),
       writeData: (pluginId, value, options) =>

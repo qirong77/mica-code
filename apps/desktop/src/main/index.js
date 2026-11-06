@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, nativeTheme, screen, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { join } from 'node:path'
@@ -24,6 +24,9 @@ import {
 import { probeRuntime as probeRemoteRuntime } from '../host/runtime-probe-core.js'
 import { flushLogs, logger, startMemorySampler } from '@packages/mica-diagnostics/index.js'
 import { resolveLogDir } from '@packages/mica-config/brand.js'
+import { officialPluginManifests } from '@packages/mica-official-plugins/manifests.js'
+import { readDisabledPluginIds, resolvePluginStatePath } from '@packages/mica-plugin/PluginState.js'
+import { createPluginLaunchers } from './plugin-launchers.js'
 
 /**
  * Electron 外壳。
@@ -69,6 +72,30 @@ applyBrowserRenderSwitch(app.commandLine, process.env)
 
 let runtime = null
 let quitting = false
+let pluginLaunchers = null
+
+/** Deliver native intents to the local editor, including when its window was hidden. */
+async function deliverDesktopIntent(intent) {
+  const state =
+    (lastFocusedWindow?.local && !lastFocusedWindow.win.isDestroyed() && lastFocusedWindow) ||
+    [...windows].find((item) => item.local && !item.win.isDestroyed()) ||
+    (primaryWindow && !primaryWindow.win.isDestroyed() && primaryWindow.server === originOf(localPageUrl) && primaryWindow) ||
+    createWindow(localPageUrl, { primary: true })
+  showWindow(state)
+  const script = `(() => typeof window.__micaDesktopAction === 'function' ? window.__micaDesktopAction(${JSON.stringify(intent)}) : false)()`
+  const deadline = Date.now() + 6000
+  while (Date.now() < deadline && !state.win.isDestroyed()) {
+    let timer
+    const accepted = await Promise.race([
+      state.win.webContents.executeJavaScript(script).catch(() => false),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now())) })
+    ])
+    clearTimeout(timer)
+    if (accepted) return
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  throw new Error('主窗口尚未就绪，请稍后重试')
+}
 
 /**
  * 关窗前的二次确认：页面可以挂 `window.__micaConfirmClose`，返回 `false`（或 resolve 成
@@ -974,7 +1001,11 @@ app.whenReady().then(async () => {
   try {
     systemHost = await startSystemHost({
       socketPath: resolveSystemSocketPath(app.getPath('userData')),
-      snapshotHeap: takeWindowHeapSnapshot
+      snapshotHeap: takeWindowHeapSnapshot,
+      launcherControl: (payload) => {
+        if (!pluginLaunchers) throw new Error('桌面启动器尚未就绪')
+        return pluginLaunchers.control(payload)
+      }
     })
     console.log(`[mica-system] 系统检查服务: unix:${systemHost.socketPath}`)
   } catch (error) {
@@ -1004,6 +1035,16 @@ app.whenReady().then(async () => {
   localPageUrl = devPageUrl || runtime.url
   // 只开本机窗口：另一台机器上的服务器各占一个新窗口，由页面里「切换 Mica 服务器」当场开
   createWindow(localPageUrl, { primary: true })
+  pluginLaunchers = createPluginLaunchers({
+    manifests: officialPluginManifests,
+    readDisabled: readDisabledPluginIds,
+    statePath: resolvePluginStatePath(),
+    BrowserWindow, globalShortcut, screen,
+    pageUrl: localPageUrl,
+    backgroundColor: windowBackgroundColor,
+    deliver: deliverDesktopIntent,
+    onError: (message) => logger('main').warn('plugin-launcher', { message })
+  })
 
   app.on('activate', () => {
     // 回到用户最后用的那个窗口（关掉的窗口还在 windows 里时就轮到本机窗口）
@@ -1037,6 +1078,8 @@ app.on('before-quit', () => {
 // （系统打断、别处 preventDefault），socket 已经被 unlink，进程却还活着——运行时之后
 // 每条 `/remote/*` 都只能 503，只有重启应用能恢复。
 app.on('will-quit', () => {
+  pluginLaunchers?.close()
+  pluginLaunchers = null
   // 受控浏览器窗口是「关闭即隐藏」的，退出时必须显式销毁，否则 app 退不掉
   if (browserHost) void browserHost.close().catch(() => {})
   browserHost = null

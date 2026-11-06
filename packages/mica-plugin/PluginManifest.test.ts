@@ -130,6 +130,90 @@ describe('parsePluginManifest desktop composer', () => {
   );
 });
 
+describe('parsePluginManifest desktop launcher', () => {
+  const parse = (launcher: unknown) => parsePluginManifest(base({ desktop: { launcher } }));
+
+  it.each([undefined, {}, { entry: {} }, { composer: true }])(
+    'defaults launcher to null when omitted: %j',
+    (desktop) => {
+      const result = parsePluginManifest(base({ desktop }));
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.manifest.desktopLauncher).toBeNull();
+    },
+  );
+
+  it('accepts a launcher without an entry and applies defaults', () => {
+    const result = parse({ title: '  全局搜索  ' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.desktopLauncher).toEqual({
+      title: '全局搜索', shortcut: 'Alt+Space', width: 720, height: 480,
+    });
+    expect(result.manifest.desktopEntry).toBeNull();
+  });
+
+  it('preserves custom options alongside other desktop capabilities', () => {
+    const result = parsePluginManifest(base({ desktop: {
+      launcher: { title: ' Search ', shortcut: ' CommandOrControl+K ', width: 900, height: 600 },
+      entry: { label: 'Tools' }, page: true, composer: true,
+      checks: ['accessibility'], panel: true,
+      sessionMenu: [{ label: 'Copy', action: 'copy' }],
+    } }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest).toMatchObject({
+      desktopLauncher: { title: 'Search', shortcut: 'CommandOrControl+K', width: 900, height: 600 },
+      desktopEntry: { label: 'Tools', placement: 'sidebar' },
+      desktopPage: { title: 'Tools' }, desktopComposer: true,
+      desktopChecks: ['accessibility'], desktopPanel: { label: 'Demo' },
+      desktopSessionMenu: [{ label: 'Copy', action: 'copy' }],
+    });
+  });
+
+  it.each([
+    { width: -1, height: 0, expectedWidth: 400, expectedHeight: 160 },
+    { width: 400, height: 160, expectedWidth: 400, expectedHeight: 160 },
+    { width: 1000, height: 800, expectedWidth: 1000, expectedHeight: 800 },
+    { width: 2000, height: 1600, expectedWidth: 1000, expectedHeight: 800 },
+  ])('clamps dimensions to supported bounds: %j', ({ width, height, expectedWidth, expectedHeight }) => {
+    const result = parse({ title: 'Search', width, height });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopLauncher).toMatchObject({
+      width: expectedWidth, height: expectedHeight,
+    });
+  });
+
+  it.each([null, true, false, 'Search', 0, []].map((launcher) => ({ launcher })))(
+    'rejects nonobject launcher declarations: %j', ({ launcher }) => {
+      expect(parse(launcher)).toEqual({ ok: false, error: 'desktop.launcher 必须是对象' });
+    },
+  );
+
+  it.each([undefined, null, '', '  ', true, 1, [], {}].map((title) => ({ title })))(
+    'requires a nonempty title: %j', ({ title }) => {
+      expect(parse({ title })).toEqual({ ok: false, error: 'desktop.launcher.title 必须是非空字符串' });
+    },
+  );
+
+  it.each([null, '', '  ', true, 1, [], {}].map((shortcut) => ({ shortcut })))(
+    'rejects invalid shortcuts: %j', ({ shortcut }) => {
+      expect(parse({ title: 'Search', shortcut })).toEqual({
+        ok: false, error: 'desktop.launcher.shortcut 必须是非空字符串',
+      });
+    },
+  );
+
+  for (const field of ['width', 'height'] as const) {
+    it.each([null, '720', true, [], {}, NaN, Infinity, -Infinity].map((value) => ({ value })))(
+      `rejects invalid ${field}: %j`, ({ value }) => {
+        expect(parse({ title: 'Search', [field]: value })).toEqual({
+          ok: false, error: `desktop.launcher.${field} 必须是有限数字`,
+        });
+      },
+    );
+  }
+});
+
 describe('parsePluginManifest desktop entry', () => {
   it('reads the sidebar label a plugin asks for', () => {
     const result = parsePluginManifest(base({ desktop: { entry: { label: '连接' } } }));

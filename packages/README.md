@@ -4,6 +4,10 @@
 
 ## 包说明
 
+`mica-plugin` 的 `PluginDesktopLauncher` 与 `PluginLauncherContext` 描述随包系统启动器：
+清单声明全局快捷键，桌面运行时按插件承载独立浮窗与 `launcher.js` 后端，不依赖聊天会话。
+后端可读插件设置并读写版本化插件数据；停用时回收。完整约定见 [插件文档](../plugins/README.md)。
+
 `mica-plugin` 的 `PluginTurnPrepareEvent` 描述持久 headless 会话的异步轮前维护钩子：
 在 lease 内、用户输入落盘前读取前后模型配置并可压缩历史。
 

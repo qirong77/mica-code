@@ -9,6 +9,11 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
 
 ## 主要能力
 
+- 随包系统启动器：清单 `desktop.launcher` 声明全局快捷键和独立浮窗，界面为插件
+  `desktop.jsx` 的 `Launcher`，后端为 `launcher.js` 的 `createLauncher(context)`，
+  类型见 `PluginLauncher.ts`。桌面运行时按插件持有唯一实例，不依赖会话；context 提供
+  插件设置与版本化插件数据，停用释放资源。完整约定见根 `plugins/README.md`。
+
 - 只读运行观察：`AgentObservationEvent` 定义 `agent:observe`，由 `HookRegistry.notify()` 按注册顺序调用，观察者抛错或返回挂起的 Promise 均不阻塞任务。异步完成顺序由观察插件负责，磁盘队列在插件 dispose 时 flush。覆盖主运行的起止、实际请求边界与工具定义、最终 prompt、工具调用/结果、用量、重试及历史改写；不在任何一轮里的工作（压缩摘要、旁问线程、插件 `ctx.llm` 请求）作为独立的 helper 运行出现，带 `helper: { kind, pluginId?, purpose? }` 与完整的请求边界。
 - 插件自身的运行事件走独立的 `plugin:observe`（`PluginObservationEvent`）：常驻任务失败（`background:failed`：`taskId` / `tick` / `failures` / `error`）与钩子处理函数抛错（`hook:failed`：`hook` / `failures` / `error`）都不属于任何一条 run，挂到某条 run 上会让那条 run 的耗时与失败原因都变假。观察通道自己的 handler 失败不回报，否则 `notify` 会递归调用自己。
 

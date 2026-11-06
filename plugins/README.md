@@ -467,6 +467,35 @@ CLI / TUI / `mica exec` 里整插件跳过（而不是装上了却永远显示�
 
 ## 桌面入口
 
+### 系统启动器（`launcher`）
+
+随包插件可以声明 `desktop.launcher`，通过系统级快捷键打开独立的轻量浮窗：
+
+```json
+"desktop": {
+  "launcher": { "title": "Global Search", "shortcut": "Alt+Space", "width": 720, "height": 480 }
+}
+```
+
+外壳负责全局快捷键、鼠标所在屏幕的浮窗位置、失焦与 Esc 隐藏，以及停用/退出时释放资源。
+插件设置页也有「打开」入口，快捷键被占用时仍能打开并看到原因。只有桌面应用运行期间
+快捷键才生效；关闭主窗口仍保留，退出应用则释放。界面来自 `desktop.jsx` 的 `Launcher`
+命名导出，props 为 `{ api }`。浏览器宿主可以从插件设置打开同一份界面，系统快捷键需要桌面应用。
+
+不依赖会话的后端来自同目录 `launcher.js` 的 default `createLauncher(context)`，返回
+`{ request(action, input), dispose?() }`。宿主按插件只创建一个实例，并在停用时调用 `dispose`。
+`context` 提供 `pluginId`、`settings.get()`、`readData()` 和 `writeData(value, { expectedVersion })`，
+数据版本与现有插件数据 API 相同。插件前端通过 `api.launcher.request(action, input)` 调它；
+`status()` 读取快捷键注册状态，`retry()` 重试注册，`openPath(path)` 把文件/目录交给主窗口
+现有编辑器，`configure()` 打开本插件设置，`close()` 收起浮窗。后端模块、界面模块和清单
+按目录发现，宿主不登记具体插件的业务代码。与 `desktop.jsx` 一样，运行时安装的用户插件
+不支持这一构建期入口。
+
+[Global Search](global-search/README.md) 使用这个入口迁移 VsGo 的文件启动能力：
+Option + 空格唤起，搜索插件设置中配置的多个目录，文件和文件夹都在 Mica 编辑器打开。
+
+### 侧栏入口（`entry`）
+
 插件想让自己的能力出现在**桌面端侧栏**（一行入口 + 点开的卡片）时，在同一段里声明入口，
 再把卡片写成插件目录里的 `desktop.jsx`：
 

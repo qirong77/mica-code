@@ -30,9 +30,9 @@ const MAX_BODY_BYTES = 64 * 1024
  * @param requestAccess 主动登记当前构建（主进程里是 `isTrustedAccessibilityClient(true)`）
  * @param snapshotHeap 给一个窗口拍堆快照（只有主进程拿得到 `webContents`）
  */
-export function createSystemService({ probe, openSettings, requestAccess, snapshotHeap }) {
+export function createSystemService({ probe, openSettings, requestAccess, snapshotHeap, launcherControl }) {
   const routes = compileRoutes(SYSTEM_ENDPOINTS)
-  const handlers = buildHandlers({ probe, openSettings, requestAccess, snapshotHeap })
+  const handlers = buildHandlers({ probe, openSettings, requestAccess, snapshotHeap, launcherControl })
 
   async function handle(req, res) {
     const guard = verifyLocalRequest(req)
@@ -130,8 +130,12 @@ export function createSystemService({ probe, openSettings, requestAccess, snapsh
   }
 }
 
-function buildHandlers({ probe, openSettings, requestAccess, snapshotHeap }) {
+function buildHandlers({ probe, openSettings, requestAccess, snapshotHeap, launcherControl }) {
   return {
+    launcherControl: async (ctx) => {
+      if (typeof launcherControl !== 'function') throw new SystemRequestError('当前外壳不支持桌面启动器', 501)
+      return launcherControl(ctx.body)
+    },
     checks: () => probe(),
     openSettings: async (ctx) => {
       const pane = requireAllowedPane(ctx.body?.pane)

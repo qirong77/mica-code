@@ -33,6 +33,7 @@ function plugin(overrides: Partial<ConfigWebPlugin> = {}): ConfigWebPlugin {
     desktopChecks: [],
     desktopEntry: null,
     desktopPage: null,
+    desktopLauncher: null,
     status: [],
     attention: null,
     actions: [],
@@ -53,6 +54,7 @@ describe('插件目录分类', () => {
     expect(pluginCategory(plugin())).toBe('tools');
     expect(pluginCategory(plugin({ desktopPanel: {} as never }))).toBe('desktop');
     expect(pluginCategory(plugin({ desktopSessionMenu: [{}] as never }))).toBe('desktop');
+    expect(pluginCategory(plugin({ desktopLauncher: { title: 'Search', shortcut: 'Alt+Space', width: 720, height: 480 } }))).toBe('desktop');
     expect(pluginCategory(plugin({ desktopChecks: [{}] as never }))).toBe('configurable');
     expect(pluginCategory(plugin({ actions: [{}] as never }))).toBe('configurable');
     expect(pluginCategory(plugin({ settings: { fields: [{}] as never, values: {}, issues: [] } }))).toBe('configurable');

@@ -10,6 +10,16 @@ import { allowedPanels, promptableChecks } from './system-core.js'
 
 const RAW_ENDPOINTS = [
   {
+    id: 'launcherControl', method: 'POST', path: '/plugin-launcher',
+    summary: '控制清单声明的桌面启动器；启停由外壳校验',
+    params: [
+      { name: 'pluginId', in: 'body', required: true, description: '随包插件 id' },
+      { name: 'action', in: 'body', required: true, description: 'status / show / close / retry / configure / openPath' },
+      { name: 'path', in: 'body', required: false, description: 'openPath 要打开的绝对路径' }
+    ],
+    returns: 'status 返回 { shortcut, registered, error }；其它动作返回 {}'
+  },
+  {
     id: 'checks',
     method: 'GET',
     path: '/checks',

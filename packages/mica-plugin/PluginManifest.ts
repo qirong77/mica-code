@@ -16,6 +16,7 @@ import {
   shortcutStyleOf,
   type DesktopCheckId,
   type PluginDesktopEntry,
+  type PluginDesktopLauncher,
   type PluginDesktopPage,
   type PluginDesktopPanel,
   type PluginEntryPlacement,
@@ -114,6 +115,8 @@ export type PluginManifest = {
    * 控件来自插件目录 `desktop.jsx` 的 `Composer` 命名导出；默认不加载。
    */
   desktopComposer: boolean;
+  /** 独立桌面浮窗（清单 `desktop.launcher`），只有随包插件可提供模块。 */
+  desktopLauncher: PluginDesktopLauncher | null;
   /**
    * 页面要展示的运行状态字段（清单 `status`）。
    *
@@ -326,6 +329,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       desktopEntry: desktop.value.entry,
       desktopPage: desktop.value.page,
       desktopComposer: desktop.value.composer,
+      desktopLauncher: desktop.value.launcher,
       status: status.value,
       actions: actions.value,
       desktopPanel: desktop.value.panel,
@@ -438,13 +442,14 @@ function readDesktop(
         entry: PluginDesktopEntry | null;
         page: PluginDesktopPage | null;
         composer: boolean;
+        launcher: PluginDesktopLauncher | null;
         panel: PluginDesktopPanel | null;
         sessionMenu: PluginSessionMenuItem[];
       };
     }
   | { ok: false; error: string } {
   if (input === undefined) {
-    return { ok: true, value: { checks: [], entry: null, page: null, composer: false, panel: null, sessionMenu: [] } };
+    return { ok: true, value: { checks: [], entry: null, page: null, composer: false, launcher: null, panel: null, sessionMenu: [] } };
   }
   if (!isRecord(input)) return { ok: false, error: 'desktop 必须是对象' };
 
@@ -452,6 +457,8 @@ function readDesktop(
     return { ok: false, error: 'desktop.composer 必须是布尔值' };
   }
   const composer = input.composer === true;
+  const launcher = readDesktopLauncher(input.launcher);
+  if (!launcher.ok) return launcher;
 
   const rawChecks = input.checks;
   const checks: DesktopCheckId[] = [];
@@ -475,7 +482,7 @@ function readDesktop(
     if (!page.ok) return page;
     return {
       ok: true,
-      value: { checks, entry: null, page: page.value, composer, panel: panel.value, sessionMenu: sessionMenu.value },
+      value: { checks, entry: null, page: page.value, composer, launcher: launcher.value, panel: panel.value, sessionMenu: sessionMenu.value },
     };
   }
   if (!isRecord(rawEntry)) return { ok: false, error: 'desktop.entry 必须是对象' };
@@ -502,6 +509,7 @@ function readDesktop(
       entry: { label, placement },
       page: page.value,
       composer,
+      launcher: launcher.value,
       panel: panel.value,
       sessionMenu: sessionMenu.value,
     },
@@ -529,6 +537,34 @@ function readDesktopPage(
   }
   const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : entryLabel;
   return { ok: true, value: { title } };
+}
+
+/** Launcher 必须声明标题；尺寸只接受有限数字，再限制到宿主支持的窗口范围。 */
+function readDesktopLauncher(
+  input: unknown,
+): { ok: true; value: PluginDesktopLauncher | null } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: null };
+  if (!isRecord(input)) return { ok: false, error: 'desktop.launcher 必须是对象' };
+  if (typeof input.title !== 'string' || !input.title.trim()) {
+    return { ok: false, error: 'desktop.launcher.title 必须是非空字符串' };
+  }
+  if (input.shortcut !== undefined && (typeof input.shortcut !== 'string' || !input.shortcut.trim())) {
+    return { ok: false, error: 'desktop.launcher.shortcut 必须是非空字符串' };
+  }
+  for (const key of ['width', 'height'] as const) {
+    if (input[key] !== undefined && (typeof input[key] !== 'number' || !Number.isFinite(input[key]))) {
+      return { ok: false, error: `desktop.launcher.${key} 必须是有限数字` };
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      title: input.title.trim(),
+      shortcut: typeof input.shortcut === 'string' ? input.shortcut.trim() : 'Alt+Space',
+      width: typeof input.width === 'number' ? Math.min(1000, Math.max(400, input.width)) : 720,
+      height: typeof input.height === 'number' ? Math.min(800, Math.max(160, input.height)) : 480,
+    },
+  };
 }
 
 /**

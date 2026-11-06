@@ -163,7 +163,7 @@ type PluginCategory = 'all' | 'desktop' | 'configurable' | 'tools' | 'user';
 
 export function pluginCategory(plugin: ConfigWebPlugin): PluginCategory {
   if (plugin.source === 'user') return 'user';
-  if (plugin.desktopEntry || plugin.desktopPage || plugin.desktopPanel || plugin.desktopSessionMenu.length > 0)
+  if (plugin.desktopEntry || plugin.desktopPage || plugin.desktopLauncher || plugin.desktopPanel || plugin.desktopSessionMenu.length > 0)
     return 'desktop';
   if (plugin.settings.fields.length > 0 || plugin.llm || plugin.desktopChecks.length > 0 || plugin.actions.length > 0)
     return 'configurable';
@@ -469,11 +469,15 @@ export function PluginDetail({
   const enabled = plugin.state !== 'disabled';
   // 整页的开与不开由宿主说了算（模块只在随包插件里），所以打不开时要说一句。
   const [pageError, setPageError] = useState<string | null>(null);
-  const pageTitle = plugin.desktopPage?.title || plugin.name;
+  const pageTitle = plugin.desktopPage?.title || plugin.desktopLauncher?.title || plugin.name;
   async function openPage() {
     setPageError(null);
-    const opened = await onOpenPluginPage?.(plugin.id);
-    if (opened === false) setPageError(`打不开「${pageTitle}」：整页只对随包插件可用`);
+    try {
+      const opened = await onOpenPluginPage?.(plugin.id);
+      if (opened === false) setPageError(`打不开「${pageTitle}」：界面只对随包插件可用`);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : String(error));
+    }
   }
   // 设置草稿提到详情这一层：动作按钮（包括 attention 上那一个）发出去的值必须是
   // 用户刚在下面那半页里改的，不能是磁盘上那份旧的。
@@ -517,7 +521,7 @@ export function PluginDetail({
           <div className="plugin-hero-actions">
             {/* 插件自己的整页（清单 `desktop.page`）：有些插件没有侧栏入口，页面入口就
                 只剩这里——它自己的设置页里。 */}
-            {plugin.desktopPage && onOpenPluginPage ? (
+            {(plugin.desktopPage || plugin.desktopLauncher) && onOpenPluginPage ? (
               <Button size="compact" title={`打开「${pageTitle}」页面`} onClick={() => void openPage()}>
                 {`打开${pageTitle}`}
               </Button>

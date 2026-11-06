@@ -1,0 +1,51 @@
+/* Shared config controls and theme variables work in both launcher hosts. */
+.mica-config-ui.global-search {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100dvh;
+  min-height: 0;
+}
+
+.global-search .text-input.global-search-input {
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 16px;
+}
+
+.global-search .text-input.global-search-input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.global-search-results .ui-button {
+  min-width: 0;
+  height: 54px;
+  justify-content: flex-start;
+  gap: 12px;
+  text-align: left;
+}
+
+.global-search-results .ui-button > span:last-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.global-search-results .ui-button .ui-button-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.global-search-results .ui-button-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.global-search-warnings {
+  max-height: 100px;
+}

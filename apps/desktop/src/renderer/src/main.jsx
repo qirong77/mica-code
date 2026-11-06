@@ -5,6 +5,7 @@ import { DesktopDialogHost } from './desktop-dialog'
 import { NotificationHost } from './NotificationHost'
 import { ErrorBoundary } from './ErrorBoundary'
 import ShareIndex from './ShareIndex'
+import { PluginLauncher } from './PluginLauncher'
 import '../assets/app.css'
 import { LocalJsonEditor } from './config-web-editor'
 import { ensureMicaApi } from './transport'
@@ -100,6 +101,15 @@ if (!quickButtonsDemo) ensureMicaApi()
         // （ui-state 广播）继续跟随。分享页也走这条路径，看到的是同一套配色。
         syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY])
         subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
+
+        const launcherId = new URLSearchParams(window.location.search).get('pluginLauncher')
+        if (launcherId && !api.shareView) {
+          createRoot(document.getElementById('root')).render(
+            <ErrorBoundary><PluginLauncher pluginId={launcherId} /></ErrorBoundary>
+          )
+          dismissBootPlaceholder()
+          return
+        }
 
         // `/share` 本身是「分享链接列表」：这一页不需要工作区/草稿那些界面状态，也不该按
         // 「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。带 `?session=<id>`

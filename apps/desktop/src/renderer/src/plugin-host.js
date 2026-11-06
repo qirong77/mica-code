@@ -59,8 +59,26 @@ export function createPluginHostApi(pluginId, session = null) {
   const host = window.mica?.pluginHost
   const chat = window.mica?.chat
   const target = session ? { sessionId: session.sessionId || null, cwd: session.cwd || null } : null
+  const launcherControl = (action, path) => {
+    if (isElectronShell(navigator.userAgent)) return host.launcherControl(pluginId, action, path)
+    if (action === 'status') return Promise.resolve({ native: false, registered: false })
+    const intent = action === 'openPath' ? { type: 'openPath', path }
+      : action === 'configure' ? { type: 'configurePlugin', pluginId }
+      : action === 'close' ? { type: 'closePluginPage' } : null
+    if (intent && window.__micaDesktopAction?.(intent)) return Promise.resolve({ ok: true })
+    return Promise.reject(new Error('系统快捷键和独立浮窗需要 Mica 桌面应用'))
+  }
   return {
     pluginId,
+    launcher: {
+      request: (action, input = {}) => host.launcherRequest(pluginId, action, input),
+      status: () => launcherControl('status'),
+      retry: () => launcherControl('retry'),
+      show: () => launcherControl('show'),
+      close: () => launcherControl('close'),
+      configure: () => launcherControl('configure'),
+      openPath: (path) => launcherControl('openPath', path)
+    },
     currentHost: () => currentRuntimeAddress(),
     /** 这个地址上是不是一台 Mica 运行时：跨源探测页面做不了，由运行时代查。 */
     probe: (address) => host.probe(String(address ?? '')),

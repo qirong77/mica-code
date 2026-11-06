@@ -811,7 +811,7 @@ export async function startDesktopServer(options = {}) {
   registerPerfIpc()
   registerDiagnosticsIpc(ipcMain)
   registerClipboardIpc()
-  registerPluginHostIpc()
+  const disposePluginHost = registerPluginHostIpc()
   registerConfigWebIpc()
   registerAccessIpc()
   registerSharedSessionIpc()
@@ -888,6 +888,7 @@ export async function startDesktopServer(options = {}) {
     stopBrowserControl()
     stopTerminalControl()
     stopNotifyBridge()
+    await disposePluginHost()
     // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
     flushUiState()
     await notifyServer.close()

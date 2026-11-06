@@ -377,6 +377,8 @@ export type ConfigWebPlugin = {
    * 悬停卡片。只对随包插件有效，理由与 `desktopEntry` 相同。
    */
   desktopPage: ConfigWebPluginDesktopPage | null;
+  /** Manifest-declared system shortcut and standalone palette (bundled desktop plugins). */
+  desktopLauncher?: { title: string; shortcut: string; width: number; height: number } | null;
   /** 清单 `desktop.composer`：加载随包 `desktop.jsx` 的 `Composer` 控件，用户插件始终为 false。 */
   desktopComposer?: boolean;
   /**

@@ -98,7 +98,7 @@ export async function loadPluginPageEntry(pluginId) {
   if (!load) return null
   const plugins = await readPluginsDetails()
   const plugin = plugins.find((item) => item?.id === pluginId)
-  if (plugin?.state !== 'enabled' || !plugin?.desktopPage) return null
+  if (plugin?.state !== 'enabled' || !(plugin?.desktopPage || plugin?.desktopLauncher)) return null
   try {
     const module = await load()
     if (!(module?.Page ?? module?.default)) return null
@@ -107,7 +107,8 @@ export async function loadPluginPageEntry(pluginId) {
       label: plugin.desktopEntry?.label || plugin.name,
       icon: plugin.icon,
       module,
-      page: plugin.desktopPage
+      launcher: plugin.desktopLauncher ?? null,
+      page: plugin.desktopPage ?? { title: plugin.desktopLauncher.title }
     }
   } catch {
     return null

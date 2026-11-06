@@ -33,6 +33,7 @@ import { loadPluginPageEntry } from './plugin-entries'
 import { PluginPage } from './PluginPage'
 import { usePluginAttention } from './plugin-attention'
 import { invalidatePluginsDetails } from './plugins-details'
+import { isElectronShell } from './shell-env'
 import { queuePluginLaunch } from './plugin-launch'
 import { notify } from './notify'
 import { playNotification, unlockAudio } from './notification-sound'
@@ -602,6 +603,10 @@ export default function App() {
   const openPluginPageById = useCallback(async (pluginId) => {
     const entry = await loadPluginPageEntry(pluginId)
     if (!entry) return false
+    if (entry.launcher && isElectronShell(navigator.userAgent)) {
+      await window.mica.pluginHost.launcherControl(pluginId, 'show')
+      return true
+    }
     setPluginPage(entry)
     return true
   }, [])
@@ -610,6 +615,7 @@ export default function App() {
   const [filesMounted, setFilesMounted] = useState(view === 'files')
   // 插件点开的一条 PR：主区整块切到编辑器并停在这份 `base...head` 对比上。
   const [reviewTarget, setReviewTarget] = useState(null)
+  const [desktopFileOpen, setDesktopFileOpen] = useState(null)
   // 换会话就把评审放下：编辑器回到新会话自己的目录，别让上一条 PR 的仓库留在页面上。
   useEffect(() => {
     setReviewTarget(null)
@@ -2251,6 +2257,34 @@ export default function App() {
   }, [])
   const openSearchFile = openFileInView
   const openChatFile = openFileInView
+  // Wait for the new non-review root and the current imperative handle to commit first.
+  useEffect(() => {
+    if (!desktopFileOpen || reviewTarget || !filesReady || view !== 'files') return
+    filesRef.current?.openPath(desktopFileOpen.path)
+    setDesktopFileOpen(null)
+  }, [desktopFileOpen, reviewTarget, filesReady, view])
+  useEffect(() => {
+    const handle = (intent) => {
+      if (intent?.type === 'closePluginPage') { setPluginPage(null); return true }
+      if (intent?.type === 'openPath' && typeof intent.path === 'string') {
+        closeConfigPage()
+        setPluginPage(null)
+        setReviewTarget(null)
+        setFilesMounted(true)
+        setView('files')
+        setDesktopFileOpen({ path: intent.path })
+        return true
+      }
+      if (intent?.type === 'configurePlugin' && typeof intent.pluginId === 'string') {
+        setPluginPage(null)
+        openConfigPage('plugins', intent.pluginId)
+        return true
+      }
+      return false
+    }
+    window.__micaDesktopAction = handle
+    return () => { if (window.__micaDesktopAction === handle) delete window.__micaDesktopAction }
+  }, [closeConfigPage, openConfigPage, openFileInView])
   // 配置页里的路径（插件日志等）点「在 Mica 中打开」时落到这里：先收起设置那一层，
   // 再把文件交给主区编辑器——不收起的话文件在设置背后被打开，看着像没反应。
   useEffect(() => {

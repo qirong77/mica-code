@@ -7,6 +7,12 @@ import { readPluginData, writePluginData } from './plugin-data-store.js'
 import { applyRemoteAccessPatch, describeRemoteAccess } from './remote-access.js'
 import { resolveMicaExecutable } from './mica-cli'
 import { readAnnotationOptions, replaceAnnotationOptions } from './session-annotations.js'
+import { watchFile, unwatchFile } from 'node:fs'
+import { join } from 'node:path'
+import { officialPluginManifests } from '@packages/mica-official-plugins/manifests.js'
+import { readDisabledPluginIds } from '@packages/mica-plugin/PluginState.js'
+import { createPluginLauncherRuntime } from './plugin-launcher-runtime.js'
+import { controlPluginLauncher } from './system-checks.js'
 
 /**
  * 插件在桌面端的**能力面**（宿主只提供能力，不认识任何具体插件）。
@@ -43,6 +49,28 @@ function micaHome() {
 }
 
 export function registerPluginHostIpc() {
+  const home = micaHome()
+  const statePath = join(home, 'plugins-state.json')
+  const loaders = new Map()
+  for (const [file, load] of Object.entries(import.meta.glob('../../../../plugins/*/launcher.js'))) {
+    const match = /\/([^/]+)\/launcher\.js$/.exec(file)
+    if (match) loaders.set(match[1], load)
+  }
+  const launchers = createPluginLauncherRuntime({
+    manifests: officialPluginManifests, loaders, home,
+    readDisabled: () => readDisabledPluginIds({ path: statePath })
+  })
+  const syncLaunchers = () => {
+    void launchers.sync().catch((error) => console.error('[plugin-launcher]', error))
+  }
+  watchFile(statePath, { interval: 400, persistent: false }, syncLaunchers)
+  ipcMain.handle('plugin-host:launcher-request', (_event, payload = {}) =>
+    launchers.request(payload.pluginId, payload.action, payload.input)
+  )
+  ipcMain.handle('plugin-host:launcher-control', (_event, payload = {}) => {
+    launchers.manifestOf(payload.pluginId)
+    return controlPluginLauncher(payload)
+  })
   ipcMain.handle('plugin-host:probe', (_event, payload) => probeRuntime(payload?.address))
 
   ipcMain.handle('plugin-host:read-data', (_event, payload) =>
@@ -102,4 +130,8 @@ export function registerPluginHostIpc() {
       return { ok: false, error: '插件 id 非法：只能是小写字母、数字与 . _ -' }
     return replaceAnnotationOptions({ pluginId: payload.pluginId, options: payload?.options })
   })
+  return async () => {
+    unwatchFile(statePath, syncLaunchers)
+    await launchers.close()
+  }
 }

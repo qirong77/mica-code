@@ -265,6 +265,7 @@ export {
 } from './PluginRoles.js';
 export type { PublishedPluginRole } from './PluginRoles.js';
 export type { PluginContext } from './PluginContext.js';
+export type { PluginLauncherContext, PluginLauncherHandler } from './PluginLauncher.js';
 export type {
   PluginFileMentionItem,
   PluginFileMentionProvider,
@@ -313,6 +314,7 @@ export type {
   DesktopCheckId,
   PluginDesktopApi,
   PluginDesktopEntry,
+  PluginDesktopLauncher,
   PluginDesktopRequirements,
   PluginEntryPlacement,
   PluginSkillDefinition,

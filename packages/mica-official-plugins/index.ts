@@ -7,6 +7,7 @@ import computerUseSetup from '../../plugins/computer-use/index.js';
 import connectionsSetup from '../../plugins/connections/index.js';
 import deepseekHarnessSetup from '../../plugins/deepseek-harness/index.js';
 import evolutionSetup from '../../plugins/evolution/index.js';
+import globalSearchSetup from '../../plugins/global-search/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
@@ -57,6 +58,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   connections: connectionsSetup,
   'deepseek-harness': deepseekHarnessSetup,
   evolution: evolutionSetup,
+  'global-search': globalSearchSetup,
   'mobile-relay': mobileRelaySetup,
   'quick-buttons': quickButtonsSetup,
   'reply-digest': replyDigestSetup,

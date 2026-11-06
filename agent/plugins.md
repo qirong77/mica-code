@@ -111,6 +111,17 @@
 
 ### desktop（入口、整页、面板、会话菜单）
 
+**系统启动器**由随包清单 `desktop.launcher`（`title` / `shortcut` / `width` / `height`）声明。
+Electron 外壳 `main/plugin-launchers.js` 管理系统快捷键与独立浮窗；页面 `PluginLauncher.jsx`
+只挂载插件 `desktop.jsx` 的 `Launcher`，不挂聊天。后端通过 `host/plugin-launcher-runtime.js`
+按目录加载插件 `launcher.js` 的 default `createLauncher(context)`，不依赖会话 app-server。
+接口类型在 `mica-plugin/PluginLauncher.ts`；context 只有插件设置与版本化插件数据，返回
+`request(action,input)` 和可选 `dispose`。停用时两端一起释放；宿主不认识搜索等业务逻辑。
+前端 `api.launcher` 提供 `request` / `status` / `retry` / `show` / `close` / `configure` / `openPath`；
+原生动作走已有私有系统 socket 的 `/plugin-launcher`，路径交给主窗口唯一的编辑器入口。
+插件设置页可打开启动器；浏览器宿主用整页显示同一组件，系统快捷键与浮窗仅桌面应用可用。
+这类模块同 `desktop.jsx` 一样只支持随包插件，无用户插件运行期代码加载。
+
 `desktop` 能力只有桌面端 spawn 的 app-server 提供：`buildSpawnEnv` 注入 `MICA_PLUGIN_DESKTOP_HOST=1`（别用 `MICA_DESKTOP_HOST`，那是运行时的绑定地址），`runAppServer` 据此传 `desktopHost` 给 `HeadlessPluginHost`。CLI / TUI / `mica exec` 里没有它，依赖插件整块跳过。
 
 **入口**由清单 `desktop.entry`（`{ "entry": { "label": "Connections" } }`，可选 `placement`：`sidebar`（默认）是侧栏一行、`header` 是主区顶栏右侧的一枚图标按钮，文案进 tooltip）+ 插件目录里的 `desktop.jsx` 组成：`default` 导出卡片组件（props `{ api, onClose }`），可选命名导出 `summary(api)` 给入口行右侧那一行字。宿主只画一行与卡片容器（悬停/点击、浮层定位、Esc 与点外部收起都在 `renderer/src/PluginEntries.jsx`），按 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里登记**。只对随包插件生效：页面是构建期打的包，`$MICA_HOME/plugins` 里没有它的模块，用户插件声明了也渲染不出入口。

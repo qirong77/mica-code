@@ -21,6 +21,19 @@ const NO_DESKTOP_DETAIL = '需要桌面应用'
 
 const STATUSES = new Set(['granted', 'denied', 'unknown'])
 
+/** Native launcher actions stay on the private system socket, never a remote control proxy. */
+export async function controlPluginLauncher(payload) {
+  const path = socketPath()
+  if (!path) throw new Error(NO_DESKTOP_DETAIL)
+  const response = await openSocketRequest(path, '/plugin-launcher', {
+    method: 'POST', body: payload, timeoutMs: 10_000, label: '桌面启动器'
+  })
+  const text = await readAllText(response)
+  const result = text ? JSON.parse(text) : null
+  if (response.statusCode >= 400 || result?.ok !== true) throw new Error(result?.error || '桌面启动器请求失败')
+  return result
+}
+
 function socketPath() {
   return String(process.env[SYSTEM_SOCKET_ENV] || '').trim()
 }

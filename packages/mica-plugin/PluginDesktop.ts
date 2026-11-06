@@ -130,6 +130,23 @@ export type PluginDesktopPage = {
   /** 页面顶部显示的标题；清单没写时用 `entry.label`，没有入口时用插件名。 */
   title: string;
 };
+
+/**
+ * 独立桌面浮窗（清单 `desktop.launcher`），由全局快捷键唤起。
+ *
+ * 与 `desktop.jsx` 一样只对随包插件生效；后端模块是
+ * `plugins/<id>/launcher.js`，default 导出 `createLauncher(context)`。
+ */
+export type PluginDesktopLauncher = {
+  title: string;
+  /** 省略时为 Alt+Space。 */
+  shortcut: string;
+  /** 窗口宽度，默认 720，范围 400–1000。 */
+  width: number;
+  /** 窗口高度，默认 480，范围 160–800。 */
+  height: number;
+};
+
 /**
  * 对话右侧的面板（清单 `desktop.panel`）。
  *

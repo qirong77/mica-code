@@ -30,7 +30,8 @@ beforeAll(async () => {
     requestAccess: (id) => {
       requested.push(id)
       return { id, granted: false }
-    }
+    },
+    launcherControl: ({ pluginId, action }) => ({ pluginId, action, registered: true })
   })
   const port = await service.listen(0)
   base = `http://127.0.0.1:${port}`
@@ -51,6 +52,10 @@ async function call(path, { method = 'GET', body } = {}) {
 }
 
 describe('system service', () => {
+  it('forwards launcher controls over the private system endpoint', async () => {
+    const result = await call('/plugin-launcher', { method: 'POST', body: { pluginId: 'sample', action: 'status' } })
+    expect(result.body).toMatchObject({ ok: true, pluginId: 'sample', action: 'status', registered: true })
+  })
   it('reports the checks the probe returned', async () => {
     const result = await call('/checks')
     expect(result.status).toBe(200)
