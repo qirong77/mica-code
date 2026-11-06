@@ -1,0 +1,40 @@
+{
+  "id": "voice-input",
+  "name": "Voice Input",
+  "icon": "mic",
+  "version": "1.0.0",
+  "description": "将短录音交给 OpenAI 兼容的语音转写服务，识别结果放入输入框供编辑。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "mica": { "apiVersion": 1 },
+  "requires": ["desktop", "settings"],
+  "desktop": {
+    "composer": true,
+    "panel": { "label": "Voice Input" }
+  },
+  "settings": [
+    {
+      "key": "baseUrl",
+      "label": "语音转写服务地址",
+      "type": "text",
+      "default": "https://api.openai.com/v1",
+      "description": "OpenAI 兼容地址，可填 /v1 基址或完整的 /audio/transcriptions 地址。"
+    },
+    {
+      "key": "apiKey",
+      "label": "API Key",
+      "type": "password",
+      "default": "",
+      "description": "OpenAI 服务需要填写；无需鉴权的本地服务可以留空。"
+    },
+    { "key": "model", "label": "语音识别模型", "type": "text", "default": "whisper-1" },
+    {
+      "key": "language",
+      "label": "语言",
+      "type": "text",
+      "default": "zh",
+      "description": "例如 zh、en；留空由服务自动识别。"
+    }
+  ]
+}

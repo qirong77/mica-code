@@ -4,8 +4,13 @@ import { createHash } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { shell, systemPreferences } from 'electron'
-import { buildSystemChecks, parseClangVersion, parseXcodeSelectPath } from './system-core.js'
+import { app, shell, systemPreferences } from 'electron'
+import {
+  buildSystemChecks,
+  parseClangVersion,
+  parseXcodeSelectPath,
+  requirePromptableCheck
+} from './system-core.js'
 import { createSystemService } from './system-service.js'
 
 /**
@@ -68,12 +73,15 @@ export function probeSystemChecks({
   platform = process.platform,
   preferences = systemPreferences,
   run = runCommand,
-  probeDisk = probeFullDiskAccess
+  probeDisk = probeFullDiskAccess,
+  execPath = process.execPath,
+  packaged = false
 } = {}) {
   if (platform !== 'darwin') return buildSystemChecks({ platform })
 
   return buildSystemChecks({
     platform,
+    app: { path: execPath, packaged },
     // false = 不弹授权窗，只问当前状态
     accessibility: preferences.isTrustedAccessibilityClient(false) === true ? 'granted' : 'denied',
     screenRecording: preferences.getMediaAccessStatus('screen'),
@@ -85,12 +93,32 @@ export function probeSystemChecks({
   })
 }
 
+/**
+ * 主动让系统登记**当前这个构建**：`isTrustedAccessibilityClient(true)` 会弹系统授权窗，
+ * 并把正在运行的这个进程加进「辅助功能」列表。
+ *
+ * 这是本文件存在的核心理由之一。只查不登记（传 false）时，重新打包后的新构建根本不在
+ * 列表里——用户在系统设置里勾的是上一次构建留下的那一行，勾了也不会生效。
+ *
+ * 返回值是「调用之后的当前状态」，通常仍是 false：申请只是把行加进列表，勾选还得用户做。
+ */
+export function requestCheckAccess(id, { platform = process.platform, preferences = systemPreferences } = {}) {
+  const check = requirePromptableCheck(id)
+  // 这个 API 只有 macOS 实现：别的平台上不调，如实回到「没有授权」而不是赌它不抛
+  if (platform !== 'darwin') return { id: check, granted: false }
+  if (check === 'accessibility') {
+    return { id: check, granted: preferences.isTrustedAccessibilityClient(true) === true }
+  }
+  return { id: check, granted: false }
+}
+
 export async function startSystemHost({ socketPath } = {}) {
   if (!socketPath) throw new Error('startSystemHost 需要 socketPath')
 
   const service = createSystemService({
-    probe: () => probeSystemChecks(),
-    openSettings: (pane) => shell.openExternal(pane)
+    probe: () => probeSystemChecks({ execPath: app.getPath('exe'), packaged: app.isPackaged }),
+    openSettings: (pane) => shell.openExternal(pane),
+    requestAccess: (id) => requestCheckAccess(id)
   })
 
   await mkdir(dirname(socketPath), { recursive: true }).catch(() => {})
@@ -98,7 +126,7 @@ export async function startSystemHost({ socketPath } = {}) {
 
   return {
     socketPath,
-    probe: () => probeSystemChecks(),
+    probe: () => probeSystemChecks({ execPath: app.getPath('exe'), packaged: app.isPackaged }),
     async close() {
       await service.close().catch(() => {})
     }

@@ -10,7 +10,7 @@ import type {
   PluginSettingField,
   PluginStatusField,
 } from '@packages/mica-plugin/index.js';
-import { DESKTOP_CHECKS } from '@packages/mica-plugin/index.js';
+import { DESKTOP_CHECKS, isPromptableDesktopCheck } from '@packages/mica-plugin/index.js';
 import { OFFICIAL_PLUGINS_DIR, officialPluginManifests } from '@packages/mica-official-plugins/manifests.js';
 import { getConfigRootPath, getPluginsRootPath, getPluginStatePath, getPluginStatusPath } from './paths.js';
 import type {
@@ -63,6 +63,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         desktopChecks: resolveDesktopChecks(manifest.desktopChecks),
         desktopEntry: manifest.desktopEntry,
         desktopPage: manifest.desktopPage,
+        desktopComposer: manifest.desktopComposer,
         status: readStatus(manifest.status, data),
         attention: readAttention(data, manifest.actions),
         actions: manifest.actions,
@@ -102,6 +103,7 @@ export function getPluginsDetails(): ConfigWebPluginsDetails {
         // 用户插件没有打包进页面的前端模块，声明了 `desktop.entry` 也渲染不出入口。
         desktopEntry: null,
         desktopPage: null,
+        desktopComposer: false,
         status: readStatus(plugin.status ?? [], data),
         attention: readAttention(data, plugin.actions ?? []),
         actions: plugin.actions ?? [],
@@ -336,6 +338,8 @@ function resolveDesktopChecks(ids: readonly string[]): ConfigWebPluginCheck[] {
         label: definition.label,
         description: definition.description,
         pane: definition.pane,
+        // 只有宿主真能主动登记的那几项才给按钮：点了没反应的按钮比没有更糟
+        requestAccess: isPromptableDesktopCheck(definition.id) ? true : undefined,
       },
     ];
   });

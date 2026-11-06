@@ -52,6 +52,30 @@ describe('getPluginsDetails', () => {
     expect(hello?.manifestFile).toBe(join(pluginDir, 'plugin.json'));
   });
 
+  it('exposes composer controls only for bundled plugins that declare them', () => {
+    const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'composer');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
+      id: 'composer',
+      name: 'Composer',
+      version: '1.0.0',
+      desktop: { composer: true },
+    }));
+    writeFileSync(join(pluginDir, 'index.js'), 'export default function setup() {}');
+
+    const details = getPluginsDetails();
+    expect(details.plugins.find((plugin) => plugin.id === 'voice-input')).toMatchObject({
+      source: 'official',
+      desktopComposer: true,
+    });
+    expect(details.plugins.find((plugin) => plugin.id === 'todo')?.desktopComposer).toBe(false);
+    expect(details.plugins.find((plugin) => plugin.id === 'user.composer')).toMatchObject({
+      source: 'user',
+      state: 'enabled',
+      desktopComposer: false,
+    });
+  });
+
   it('marks broken plugins as failed with the manifest error', () => {
     const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'broken');
     mkdirSync(pluginDir, { recursive: true });
@@ -160,6 +184,28 @@ describe('getPluginsDetails', () => {
     expect(plugin?.desktopChecks[0]?.pane).toContain('Privacy_ScreenCapture');
     // 没有可打开的面板时不编一个出来
     expect(plugin?.desktopChecks[1]?.pane).toBeUndefined();
+    // 屏幕录制没有公开的「主动登记」接口：页面不该给一个点了没反应的按钮
+    expect(plugin?.desktopChecks[0]?.requestAccess).toBeUndefined();
+  });
+
+  it('marks only the checks the host can register on demand', () => {
+    const pluginDir = join(process.env.MICA_HOME!, 'plugins', 'needs-accessibility');
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(
+      join(pluginDir, 'plugin.json'),
+      JSON.stringify({
+        id: 'needs-accessibility',
+        name: 'Needs Accessibility',
+        version: '1.0.0',
+        main: 'index.js',
+        desktop: { checks: ['accessibility', 'screen-recording'] },
+      }),
+    );
+    writeFileSync(join(pluginDir, 'index.js'), 'export default function setup() {}');
+
+    const plugin = getPluginsDetails().plugins.find((entry) => entry.id === 'user.needs-accessibility');
+    expect(plugin?.desktopChecks[0]?.requestAccess).toBe(true);
+    expect(plugin?.desktopChecks[1]?.requestAccess).toBeUndefined();
   });
 
   it('reports no desktop checks for a plugin that declares none', () => {

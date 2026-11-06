@@ -191,6 +191,7 @@ import {
   splitQuoteSegments
 } from './quote-message'
 import ChatComposer from './ChatComposer'
+import { PluginComposerControls } from './PluginComposerControls'
 
 const MAX_INPUT_ROWS = 10
 const SCROLL_BOTTOM_THRESHOLD = 72
@@ -4394,16 +4395,19 @@ export function ChatView({
 
   // 把文本插到光标处（粘贴图片与移动端「上传照片」共用）。以 textarea 当前的值为准，
   // 因为选照片/上传是异步的，回调执行时闭包里的 input 可能已经过期。
+  // `at` 用来固定在某个位置插入（插件回填的整段文字要落在末尾，而不是用户此刻的光标处）；
+  // `focus` 给异步回填用，别在手机上把输入法弹到刚识别出的那段话上面。
   const insertComposerText = useCallback(
-    (text) => {
+    (text, at, focus = true) => {
       if (!text) return
       const element = textareaRef.current
       const current = element?.value ?? inputRef.current ?? ''
-      const start = element?.selectionStart ?? current.length
-      const end = element?.selectionEnd ?? current.length
+      const start = at ?? element?.selectionStart ?? current.length
+      const end = at ?? element?.selectionEnd ?? current.length
       const next = current.slice(0, start) + text + current.slice(end)
       draftsRef.current.set(nodeId, next)
       setInput(next)
+      if (!focus) return
       requestAnimationFrame(() => {
         const el = textareaRef.current
         if (!el) return
@@ -4412,6 +4416,18 @@ export function ChatView({
       })
     },
     [inputRef, nodeId]
+  )
+
+  // Async plugin input appends to the latest draft, preserving typing and selections.
+  const appendComposerText = useCallback(
+    (text) => {
+      if (!text || !visibleRef.current) return
+      const current = textareaRef.current?.value ?? inputRef.current ?? ''
+      // 识别出的是一段话，和已有草稿之间只补一个换行，不吞掉用户正在写的内容。
+      insertComposerText((current && !/\s$/.test(current) ? '\n' : '') + text, current.length, false)
+      historyCursorRef.current = -1
+    },
+    [inputRef, insertComposerText, visibleRef]
   )
 
   // 把一条消息引用进草稿（对话流里消息右侧的「引用」按钮）。和 insertComposerText
@@ -7923,6 +7939,13 @@ export function ChatView({
               }}
             />
             <div className="chat-composer-actions">
+              <PluginComposerControls
+                session={{ id: nodeId, sessionId: node?.sessionId || null, cwd }}
+                visible={pageVisible}
+                isMobile={isMobile}
+                appendText={appendComposerText}
+                onOpenPluginSettings={onOpenPluginSettings}
+              />
               {/* 附件、By The Way、定时任务、SSH、耗时以前是五个常驻图标，把输入框右侧
                   挤满；现在收进一个「+」：悬停展开（触屏点击也能开），菜单项写全名字，
                   比五个只有 tooltip 的图标好认。 */}

@@ -6,7 +6,7 @@
  * 进程），这里只做映射与解析，bun test 可以直接覆盖。
  */
 
-import { DESKTOP_CHECKS } from '@packages/mica-plugin/index.js'
+import { DESKTOP_CHECKS, PROMPTABLE_DESKTOP_CHECKS } from '@packages/mica-plugin/index.js'
 
 export const SYSTEM_SERVICE_APP = 'mica-code-system'
 export const SYSTEM_SERVICE_VERSION = 1
@@ -47,6 +47,25 @@ export function requireAllowedPane(pane) {
   const value = typeof pane === 'string' ? pane.trim() : ''
   if (!value) throw new SystemRequestError('缺少 pane（要打开的系统设置面板）')
   if (!ALLOWED_PANES.has(value)) throw new SystemRequestError(`不认识的系统设置面板：${value}`)
+  return value
+}
+
+/**
+ * 能主动登记权限的检查项：同样只认目录里声明过的那几个。
+ *
+ * 与 pane 白名单同理——这个 id 最终会决定主进程去调哪一个授权 API，放任意取值进来
+ * 等于把「请求授权」变成「随便触发一次系统弹窗」。
+ */
+const PROMPTABLE = new Set(PROMPTABLE_DESKTOP_CHECKS)
+
+export function promptableChecks() {
+  return [...PROMPTABLE]
+}
+
+export function requirePromptableCheck(id) {
+  const value = typeof id === 'string' ? id.trim() : ''
+  if (!value) throw new SystemRequestError('缺少 id（要请求授权的检查项）')
+  if (!PROMPTABLE.has(value)) throw new SystemRequestError(`这一项不能主动请求授权：${value}`)
   return value
 }
 
@@ -131,7 +150,8 @@ export function buildSystemChecks({
   accessibility,
   screenRecording,
   commandLineTools,
-  fullDiskAccess
+  fullDiskAccess,
+  app
 } = {}) {
   const resolved = {
     accessibility: describeAccessibility(accessibility),
@@ -142,6 +162,11 @@ export function buildSystemChecks({
 
   return {
     platform,
+    // 这次运行的是哪一份构建：权限按「路径 + 签名」记，用户要能拿它去系统设置里对行
+    app: {
+      path: typeof app?.path === 'string' ? app.path : '',
+      packaged: app?.packaged === true
+    },
     checks: DESKTOP_CHECKS.map((check) => {
       const state = resolved[check.id] || { status: 'unknown', detail: '' }
       const entry = {

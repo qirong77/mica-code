@@ -54,6 +54,21 @@ export type DesktopCheckDefinition = (typeof DESKTOP_CHECKS)[number];
 
 export const DESKTOP_CHECK_IDS: DesktopCheckId[] = DESKTOP_CHECKS.map((check) => check.id);
 
+/**
+ * 宿主能替用户**主动把当前这个构建登记进系统设置**的检查项。
+ *
+ * macOS 的权限条目按「路径 + 代码签名」记录：重新打包（或换目录）之后，系统设置里勾着的
+ * 那一行是上一次构建的，对正在运行的这一份无效。此时光有「打开设置」没用——用户会去勾
+ * 一行早就过时的条目。辅助功能有公开 API（`isTrustedAccessibilityClient(true)`）能让系统
+ * 就地把当前进程登记进列表并弹窗，所以它在这里；屏幕录制没有对应 API，那个提示由第一次
+ * 截屏触发，不列入。
+ */
+export const PROMPTABLE_DESKTOP_CHECKS: DesktopCheckId[] = ['accessibility'];
+
+export function isPromptableDesktopCheck(value: unknown): value is DesktopCheckId {
+  return typeof value === 'string' && (PROMPTABLE_DESKTOP_CHECKS as string[]).includes(value);
+}
+
 export function isDesktopCheckId(value: unknown): value is DesktopCheckId {
   return typeof value === 'string' && (DESKTOP_CHECK_IDS as string[]).includes(value);
 }

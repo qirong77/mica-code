@@ -9,7 +9,8 @@ import {
   normalizeCheckStatus,
   parseClangVersion,
   parseXcodeSelectPath,
-  requireAllowedPane
+  requireAllowedPane,
+  requirePromptableCheck
 } from './system-core.js'
 
 /**
@@ -152,5 +153,30 @@ describe('buildSystemChecks', () => {
       expect(check.status).toBe('unknown')
       expect(check.detail).toBe('仅支持 macOS')
     }
+  })
+
+  it('carries the running build so a stale system-settings row can be told apart', () => {
+    const report = buildSystemChecks({ platform: 'darwin', app: { path: '/Applications/Mica.app', packaged: true } })
+    expect(report.app).toEqual({ path: '/Applications/Mica.app', packaged: true })
+    // 没传就明确空着，而不是瞎填一个路径
+    expect(buildSystemChecks({ platform: 'darwin' }).app).toEqual({ path: '', packaged: false })
+  })
+})
+
+/**
+ * 主动登记只对清单里声明过的项开放：这个 id 决定主进程去调哪个授权 API，放任意取值
+ * 进来等于把「请求授权」变成「随便触发一次系统弹窗」。
+ */
+describe('promptable checks', () => {
+  it('accepts the accessibility check and trims it', () => {
+    expect(requirePromptableCheck('accessibility')).toBe('accessibility')
+    expect(requirePromptableCheck('  accessibility  ')).toBe('accessibility')
+  })
+
+  it('refuses checks without a programmatic prompt and unreadable ids', () => {
+    expect(() => requirePromptableCheck('screen-recording')).toThrow('不能主动请求授权')
+    expect(() => requirePromptableCheck('nope')).toThrow('不能主动请求授权')
+    expect(() => requirePromptableCheck('')).toThrow('缺少 id')
+    expect(() => requirePromptableCheck(null)).toThrow('缺少 id')
   })
 })

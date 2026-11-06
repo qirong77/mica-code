@@ -33,6 +33,7 @@ function normalizeStatus(value) {
 function emptyChecks() {
   return {
     platform: process.platform,
+    app: { path: '', packaged: false },
     checks: DESKTOP_CHECKS.map((check) => ({
       id: check.id,
       label: check.label,
@@ -77,6 +78,10 @@ export async function readSystemChecks() {
     if (response.statusCode >= 400 || payload?.ok === false) return emptyChecks()
     return {
       platform: payload?.platform || process.platform,
+      app: {
+        path: typeof payload?.app?.path === 'string' ? payload.app.path : '',
+        packaged: payload?.app?.packaged === true
+      },
       checks: mergeChecks(payload?.checks)
     }
   } catch {
@@ -107,6 +112,39 @@ export async function openSystemSettings(pane) {
       }
     }
     return { ok: true }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * 让系统登记**这次运行的构建**（辅助功能），而不是只把用户送去面板。
+ *
+ * 权限条目按「路径 + 代码签名」记：重新打包之后，系统设置里那一行是上一次构建的，
+ * 勾了也不会作用到正在运行的这一份。这个动作会让 macOS 就地把当前进程加进列表并弹窗。
+ */
+export async function requestSystemAccess(id) {
+  const target = typeof id === 'string' ? id.trim() : ''
+  if (!target) return { ok: false, error: '缺少要请求授权的检查项' }
+  const path = socketPath()
+  if (!path) return { ok: false, error: NO_DESKTOP_DETAIL }
+
+  try {
+    const response = await openSocketRequest(path, '/request-access', {
+      method: 'POST',
+      body: { id: target },
+      timeoutMs: REQUEST_TIMEOUT_MS,
+      label: SERVICE_LABEL
+    })
+    const text = await readAllText(response)
+    const payload = text ? JSON.parse(text) : null
+    if (response.statusCode >= 400 || payload?.ok === false) {
+      return {
+        ok: false,
+        error: payload?.error || `${SERVICE_LABEL}返回 HTTP ${response.statusCode}`
+      }
+    }
+    return { ok: true, granted: payload?.granted === true }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }

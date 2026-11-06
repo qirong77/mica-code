@@ -97,6 +97,13 @@ export function createPluginHostApi(pluginId, session = null) {
      * 的 rejected promise 有用。没声明的 key 会被拒绝——页面上本来就没有那个按钮。
      */
     action: (key) => host.runAction(pluginId, String(key ?? '')),
+    /** Session-bound actions shared by panels and bundled composer controls. */
+    panelAction: (action, values = {}) => {
+      if (!session) return Promise.reject(new Error('请先打开一条会话'))
+      return chat.pluginPanels.action(session.id, { pluginId, action, values, ...target })
+    },
+    /** Upload a browser File without inserting its path into the draft. */
+    uploadAttachment: (file) => chat.saveAttachment({ file }),
     /**
      * 页面正在看的那条会话。内核不知道插件拿它做什么——这里只提供「会话级」的三件事：
      * 身份、插件自己的会话状态、以及这一轮什么时候跑完。

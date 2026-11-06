@@ -110,6 +110,11 @@ export type PluginManifest = {
    */
   desktopPage: PluginDesktopPage | null;
   /**
+   * 输入框内的插件控件（清单 `desktop.composer`）。只有随包插件可以提供前端模块，
+   * 控件来自插件目录 `desktop.jsx` 的 `Composer` 命名导出；默认不加载。
+   */
+  desktopComposer: boolean;
+  /**
    * 页面要展示的运行状态字段（清单 `status`）。
    *
    * 只声明「显示什么」，值由插件自己写进 `$MICA_HOME/plugin-data/<id>/data.json`——配置页
@@ -320,6 +325,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       desktopChecks: desktop.value.checks,
       desktopEntry: desktop.value.entry,
       desktopPage: desktop.value.page,
+      desktopComposer: desktop.value.composer,
       status: status.value,
       actions: actions.value,
       desktopPanel: desktop.value.panel,
@@ -431,15 +437,21 @@ function readDesktop(
         checks: DesktopCheckId[];
         entry: PluginDesktopEntry | null;
         page: PluginDesktopPage | null;
+        composer: boolean;
         panel: PluginDesktopPanel | null;
         sessionMenu: PluginSessionMenuItem[];
       };
     }
   | { ok: false; error: string } {
   if (input === undefined) {
-    return { ok: true, value: { checks: [], entry: null, page: null, panel: null, sessionMenu: [] } };
+    return { ok: true, value: { checks: [], entry: null, page: null, composer: false, panel: null, sessionMenu: [] } };
   }
   if (!isRecord(input)) return { ok: false, error: 'desktop 必须是对象' };
+
+  if (input.composer !== undefined && typeof input.composer !== 'boolean') {
+    return { ok: false, error: 'desktop.composer 必须是布尔值' };
+  }
+  const composer = input.composer === true;
 
   const rawChecks = input.checks;
   const checks: DesktopCheckId[] = [];
@@ -463,7 +475,7 @@ function readDesktop(
     if (!page.ok) return page;
     return {
       ok: true,
-      value: { checks, entry: null, page: page.value, panel: panel.value, sessionMenu: sessionMenu.value },
+      value: { checks, entry: null, page: page.value, composer, panel: panel.value, sessionMenu: sessionMenu.value },
     };
   }
   if (!isRecord(rawEntry)) return { ok: false, error: 'desktop.entry 必须是对象' };
@@ -489,6 +501,7 @@ function readDesktop(
       checks,
       entry: { label, placement },
       page: page.value,
+      composer,
       panel: panel.value,
       sessionMenu: sessionMenu.value,
     },

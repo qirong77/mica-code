@@ -6,7 +6,7 @@
  * 读状态、打开设置面板。面板取值只认清单里声明过的 `pane`，服务不接受别的 URL。
  */
 
-import { allowedPanels } from './system-core.js'
+import { allowedPanels, promptableChecks } from './system-core.js'
 
 const RAW_ENDPOINTS = [
   {
@@ -32,6 +32,21 @@ const RAW_ENDPOINTS = [
       }
     ],
     returns: '{ pane }'
+  },
+  {
+    id: 'requestAccess',
+    method: 'POST',
+    path: '/request-access',
+    summary: '让系统把当前这个构建登记进权限列表（辅助功能），然后等用户勾选',
+    params: [
+      {
+        name: 'id',
+        in: 'body',
+        required: true,
+        description: `可主动请求的检查项：${promptableChecks().join(' / ')}`
+      }
+    ],
+    returns: '{ id, granted }，granted 是调用那一刻的状态（通常仍是 false，勾选要用户做）'
   }
 ]
 

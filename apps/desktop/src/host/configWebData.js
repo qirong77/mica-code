@@ -36,7 +36,7 @@ import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?r
 import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js'
 import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from './browser-control.js'
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
-import { openSystemSettings, readSystemChecks } from './system-checks.js'
+import { openSystemSettings, readSystemChecks, requestSystemAccess } from './system-checks.js'
 import { probeMcpServers } from './mcp-probe.js'
 import { clearLogs, readPerformanceSummaryAsync } from './log.js'
 
@@ -569,6 +569,9 @@ export const configWebActions = {
   // 探测在 Electron 主进程（TCC 权限属于有 app 身份的那个进程），见 system-checks.js。
   readDesktopChecks: () => readSystemChecks(),
   openDesktopSettings: (input) => openSystemSettings(text(input, 'pane')),
+  // 「请求授权」：让系统就地把**这次运行的构建**登记进辅助功能列表。只「打开设置」时，
+  // 用户很可能去勾上次打包留下的旧条目，勾了也不生效。
+  requestDesktopAccess: (input) => requestSystemAccess(text(input, 'id')),
 
   readSessionsDetails: () => readSessionsDetails(),
   readSessionDetails: (input) => readSessionDetails(text(input, 'id')),

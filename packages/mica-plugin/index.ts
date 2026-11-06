@@ -303,8 +303,10 @@ export {
   DESKTOP_CHECKS,
   DESKTOP_CHECK_IDS,
   PLUGIN_ENTRY_PLACEMENTS,
+  PROMPTABLE_DESKTOP_CHECKS,
   isDesktopCheckId,
   isPluginEntryPlacement,
+  isPromptableDesktopCheck,
 } from './PluginDesktop.js';
 export type {
   DesktopCheckDefinition,

@@ -376,6 +376,8 @@ export type ConfigWebPlugin = {
    * 悬停卡片。只对随包插件有效，理由与 `desktopEntry` 相同。
    */
   desktopPage: ConfigWebPluginDesktopPage | null;
+  /** 清单 `desktop.composer`：加载随包 `desktop.jsx` 的 `Composer` 控件，用户插件始终为 false。 */
+  desktopComposer?: boolean;
   /**
    * 清单声明的运行状态行（清单 `status`）。值来自插件自己写的
    * `plugin-data/<id>/data.json`，宿主管不到插件的运行态，也就不替它编造；
@@ -583,6 +585,13 @@ export type ConfigWebPluginCheck = {
   description: string;
   /** 系统设置面板地址；没有可打开的面板时为空（例如要用户自己装命令行工具）。 */
   pane?: string;
+  /**
+   * 宿主能不能替用户主动把这个构建登记进系统设置（目前只有辅助功能有公开 API）。
+   *
+   * 为真时页面除了「打开设置」还该给一个「请求授权」：ad-hoc / 重新打包过的构建在
+   * 系统设置里根本没有对应行，只让用户去勾会勾到上一次构建留下的旧条目。
+   */
+  requestAccess?: boolean;
 };
 
 export type ConfigWebDesktopCheckStatus = {
@@ -596,6 +605,8 @@ export type ConfigWebDesktopChecks = {
   /** 当前宿主能不能真的探测：浏览器宿主不能（TCC 权限属于桌面应用进程）。 */
   supported: boolean;
   platform: string;
+  /** 这次运行的是哪一份构建：权限按「路径 + 签名」记，用户要能拿它去系统设置里对行。 */
+  app?: { path: string; packaged: boolean };
   checks: ConfigWebDesktopCheckStatus[];
 };
 

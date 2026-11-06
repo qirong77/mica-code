@@ -61,6 +61,9 @@ export function createDesktopConfigWebClient() {
     // 插件详情页的运行条件（辅助功能 / 屏幕录制等）：探测在 Electron 主进程
     readDesktopChecks: () => invoke('readDesktopChecks'),
     openDesktopSettings: (pane) => invoke('openDesktopSettings', { pane }),
+    // 请求系统登记当前这个构建（辅助功能）：与「打开设置」不同，它让系统把正在运行的
+    // 进程加进列表，用户勾的才是这一份。
+    requestDesktopAccess: (id) => invoke('requestDesktopAccess', { id }),
 
     readBrowserControlDetails: () => invoke('readBrowserControlDetails'),
     readTerminalControlDetails: () => invoke('readTerminalControlDetails'),

@@ -17,7 +17,8 @@ import {
   SYSTEM_SERVICE_APP,
   SYSTEM_SERVICE_VERSION,
   SystemRequestError,
-  requireAllowedPane
+  requireAllowedPane,
+  requirePromptableCheck
 } from './system-core.js'
 import { SYSTEM_ENDPOINTS } from './system-docs.js'
 
@@ -26,10 +27,11 @@ const MAX_BODY_BYTES = 64 * 1024
 /**
  * @param probe 读一次系统状态，返回 `buildSystemChecks()` 的形状
  * @param openSettings 真的去打开面板（主进程里是 `shell.openExternal`）
+ * @param requestAccess 主动登记当前构建（主进程里是 `isTrustedAccessibilityClient(true)`）
  */
-export function createSystemService({ probe, openSettings }) {
+export function createSystemService({ probe, openSettings, requestAccess }) {
   const routes = compileRoutes(SYSTEM_ENDPOINTS)
-  const handlers = buildHandlers({ probe, openSettings })
+  const handlers = buildHandlers({ probe, openSettings, requestAccess })
 
   async function handle(req, res) {
     const guard = verifyLocalRequest(req)
@@ -127,13 +129,17 @@ export function createSystemService({ probe, openSettings }) {
   }
 }
 
-function buildHandlers({ probe, openSettings }) {
+function buildHandlers({ probe, openSettings, requestAccess }) {
   return {
     checks: () => probe(),
     openSettings: async (ctx) => {
       const pane = requireAllowedPane(ctx.body?.pane)
       await openSettings(pane)
       return { pane }
+    },
+    requestAccess: async (ctx) => {
+      const id = requirePromptableCheck(ctx.body?.id)
+      return requestAccess(id)
     }
   }
 }

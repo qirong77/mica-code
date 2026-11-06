@@ -8,6 +8,7 @@ import { PluginIcon } from '../pluginIcons.js';
 import {
   openDesktopSettings,
   readDesktopChecks,
+  requestDesktopAccess,
   readPluginsDetails,
   runPluginAction,
   setPluginEnabled,
@@ -892,6 +893,9 @@ function PluginChecksGroup({ plugin }: { plugin: ConfigWebPlugin }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [requesting, setRequesting] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [appPath, setAppPath] = useState('');
   const inFlight = useRef(false);
   const RefreshIcon = appIcons.refresh;
 
@@ -904,6 +908,7 @@ function PluginChecksGroup({ plugin }: { plugin: ConfigWebPlugin }) {
       const next: Record<string, ConfigWebDesktopCheckStatus> = {};
       for (const check of result.checks) next[check.id] = check;
       setStatuses(next);
+      setAppPath(result.app?.path ?? '');
       setSupported(result.supported);
       setError(null);
     } catch (readError) {
@@ -943,6 +948,39 @@ function PluginChecksGroup({ plugin }: { plugin: ConfigWebPlugin }) {
     }
   }
 
+  /**
+   * 请求系统登记当前这个构建。
+   *
+   * 为什么不是「打开设置」就够了：权限条目按「路径 + 代码签名」记，重新打包之后系统设置
+   * 里那一行是上一次构建的。只把用户送过去，他勾的是旧条目，回来依旧未开启。这个动作让
+   * macOS 就地把正在运行的进程加进列表并弹窗，勾完这次才对得上。
+   */
+  async function requestAccess(id: string, label: string) {
+    setRequesting(id);
+    setNotice(null);
+    try {
+      const result = await requestDesktopAccess(id);
+      if (!result.ok) {
+        setError(result.error || `请求${label}授权失败`);
+        return;
+      }
+      setError(null);
+      setNotice(
+        result.granted
+          ? `${label}已授权，重启 Mica 后生效。`
+          : `已在系统里登记这次运行的构建：到「${label}」里勾选后重启 Mica。`,
+      );
+      await refresh();
+    } finally {
+      setRequesting(null);
+    }
+  }
+
+  // 只在真有未开启的项时提这件事：全部开启时这行只是噪音
+  const hasMissing = plugin.desktopChecks.some(
+    (check) => (statuses[check.id]?.status ?? 'unknown') !== 'granted',
+  );
+
   return (
     <SettingsGroup
       title="运行条件"
@@ -958,15 +996,27 @@ function PluginChecksGroup({ plugin }: { plugin: ConfigWebPlugin }) {
       }
     >
       {error ? <Alert message={error} /> : null}
+      {notice ? (
+        <div className="plugin-health">
+          <span className="plugin-health-note">{notice}</span>
+        </div>
+      ) : null}
       {!supported ? (
         <div className="plugin-health">
           <span className="plugin-health-note">需要在桌面应用的设置页里查看这些条件。</span>
         </div>
       ) : null}
+      {supported && appPath && hasMissing ? (
+        <p className="plugin-check-detail">
+          这次运行的构建：{appPath}
+          {` · 权限按「路径 + 签名」记录，重新打包或换位置会变成新的身份，旧条目对新的构建无效。`}
+        </p>
+      ) : null}
       {plugin.desktopChecks.map((check) => {
         const status = statuses[check.id]?.status ?? 'unknown';
         const detail = statuses[check.id]?.detail ?? '';
         const canOpen = Boolean(check.pane) && status !== 'granted';
+        const canRequest = Boolean(check.requestAccess) && status !== 'granted' && supported;
         return (
           <SettingRow key={check.id} label={check.label} hint={check.description}>
             <div className="plugin-check">
@@ -974,6 +1024,15 @@ function PluginChecksGroup({ plugin }: { plugin: ConfigWebPlugin }) {
                 {desktopCheckStatusLabel(status)}
               </Tag>
               {detail ? <span className="plugin-check-detail">{detail}</span> : null}
+              {canRequest ? (
+                <Button
+                  title={`让系统登记这次运行的构建，再在「${check.label}」里勾选`}
+                  loading={requesting === check.id}
+                  onClick={() => void requestAccess(check.id, check.label)}
+                >
+                  请求授权
+                </Button>
+              ) : null}
               {canOpen && supported ? (
                 <Button
                   variant="ghost"

@@ -1,0 +1,65 @@
+{
+  "id": "reply-digest",
+  "name": "Long Reply Digest",
+  "icon": "message-square",
+  "version": "1.0.0",
+  "description": "回合结束后识别过长的 Agent 回复，自动生成并展示简短摘要。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 30,
+  "mica": {
+    "apiVersion": 1
+  },
+  "settings": [
+    {
+      "key": "charThreshold",
+      "label": "字符数阈值",
+      "type": "number",
+      "default": "1800",
+      "min": 200,
+      "max": 100000,
+      "description": "回复达到这个字符数就生成摘要。"
+    },
+    {
+      "key": "lineThreshold",
+      "label": "非空行阈值",
+      "type": "number",
+      "default": "36",
+      "min": 5,
+      "max": 10000,
+      "description": "回复非空行达到这个数量也会触发，适合代码和清单较多的回复。"
+    },
+    {
+      "key": "inputLimit",
+      "label": "摘要输入上限",
+      "type": "number",
+      "default": "12000",
+      "min": 1000,
+      "max": 100000,
+      "description": "送给摘要模型的原回复最大字符数，避免重复发送超长内容。"
+    },
+    {
+      "key": "summaryLimit",
+      "label": "摘要长度上限",
+      "type": "number",
+      "default": "600",
+      "min": 100,
+      "max": 2000,
+      "description": "展示的摘要最大字符数。"
+    },
+    {
+      "key": "prompt",
+      "label": "摘要提示词",
+      "type": "textarea",
+      "default": "请把下面 Agent 的最终回复压缩成一段简短摘要。\n保留做了什么、关键结论、重要文件或验证结果；不要复述过程，不要编造原文没有的信息。\n使用原回复的语言，最多 4 个要点或 600 个字符，只输出摘要正文，不要加“摘要：”标题。",
+      "description": "留空时使用内置提示词。"
+    }
+  ],
+  "requires": ["agent", "hooks", "llm", "session", "settings", "ui"],
+  "llm": {
+    "label": "摘要模型",
+    "description": "只有检测到较长的 Agent 回复时才调用；默认复用当前会话模型。",
+    "modelPlaceholder": "gpt-4.1-mini"
+  }
+}

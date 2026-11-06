@@ -3,10 +3,11 @@ import { buildSystemChecks } from './system-core.js'
 import { createSystemService } from './system-service.js'
 
 /**
- * 服务的两条端点：读状态、打开面板。这里给假的探测器与假的 openExternal —— 真探测要
- * Electron 的 app 身份（system-host.js），真打开会弹系统设置。
+ * 服务的三条端点：读状态、打开面板、请求登记当前构建。这里给假的探测器、假的 openExternal
+ * 与假的授权调用 —— 真探测要 Electron 的 app 身份（system-host.js），真调用会弹系统授权窗。
  */
 const opened = []
+const requested = []
 let service = null
 let base = ''
 
@@ -25,6 +26,10 @@ beforeAll(async () => {
       }),
     openSettings: async (pane) => {
       opened.push(pane)
+    },
+    requestAccess: (id) => {
+      requested.push(id)
+      return { id, granted: false }
     }
   })
   const port = await service.listen(0)
@@ -83,5 +88,25 @@ describe('system service', () => {
     const result = await call('/docs')
     expect(result.status).toBe(404)
     expect(result.body.ok).toBe(false)
+  })
+
+  it('lets the host register the running build for a promptable check', async () => {
+    const before = requested.length
+    const result = await call('/request-access', { method: 'POST', body: { id: 'accessibility' } })
+    expect(result.status).toBe(200)
+    expect(result.body.ok).toBe(true)
+    // 申请只是把行加进列表：脚本里没人去点那个开关，所以这一刻仍是未授权
+    expect(result.body.granted).toBe(false)
+    expect(requested).toEqual(['accessibility'])
+    expect(requested.length).toBe(before + 1)
+  })
+
+  it('refuses to prompt for a check without a programmatic API', async () => {
+    const before = requested.length
+    const result = await call('/request-access', { method: 'POST', body: { id: 'screen-recording' } })
+    expect(result.status).toBe(400)
+    expect(result.body.ok).toBe(false)
+    expect(result.body.error).toContain('不能主动请求授权')
+    expect(requested.length).toBe(before)
   })
 })

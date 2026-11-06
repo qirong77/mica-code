@@ -72,6 +72,64 @@ describe('parsePluginManifest desktop checks', () => {
   });
 });
 
+describe('parsePluginManifest desktop composer', () => {
+  it.each([
+    undefined,
+    {},
+    { entry: {} },
+    { page: true },
+    { composer: false },
+    { entry: {}, composer: false },
+  ])('defaults composer to false unless explicitly enabled: %j', (desktop) => {
+    const result = parsePluginManifest(base({ desktop }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopComposer).toBe(false);
+  });
+
+  it.each([
+    { composer: true },
+    { composer: true, entry: { label: 'Controls' } },
+    { composer: true, page: true },
+  ])('accepts composer independently of desktop entries and pages: %j', (desktop) => {
+    const result = parsePluginManifest(base({ desktop }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopComposer).toBe(true);
+  });
+
+  it('preserves other desktop capabilities alongside composer', () => {
+    const result = parsePluginManifest(base({
+      desktop: {
+        composer: true,
+        checks: ['accessibility'],
+        entry: { label: 'Controls', placement: 'header' },
+        page: true,
+        panel: { label: 'Panel' },
+        sessionMenu: [{ label: 'Copy', action: 'copy' }],
+      },
+    }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest).toMatchObject({
+      desktopComposer: true,
+      desktopChecks: ['accessibility'],
+      desktopEntry: { label: 'Controls', placement: 'header' },
+      desktopPage: { title: 'Controls' },
+      desktopPanel: { label: 'Panel' },
+      desktopSessionMenu: [{ label: 'Copy', action: 'copy' }],
+    });
+  });
+
+  it.each([null, 'true', 'false', '', 0, 1, [], {}].map((composer) => ({ composer })))(
+    'rejects nonboolean composer values: %j',
+    ({ composer }) => {
+      expect(parsePluginManifest(base({ desktop: { composer } }))).toEqual({
+        ok: false,
+        error: 'desktop.composer 必须是布尔值',
+      });
+    },
+  );
+});
+
 describe('parsePluginManifest desktop entry', () => {
   it('reads the sidebar label a plugin asks for', () => {
     const result = parsePluginManifest(base({ desktop: { entry: { label: '连接' } } }));

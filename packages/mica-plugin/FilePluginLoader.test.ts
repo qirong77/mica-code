@@ -173,6 +173,7 @@ describe('parsePluginManifest', () => {
         desktopChecks: [],
         desktopEntry: null,
     desktopPage: null,
+        desktopComposer: false,
         status: [],
         actions: [],
         desktopPanel: null,

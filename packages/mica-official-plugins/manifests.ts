@@ -11,6 +11,7 @@ import harnessReviewManifest from '../../plugins/harness-review/plugin.json';
 import memoryManifest from '../../plugins/memory/plugin.json';
 import mobileRelayManifest from '../../plugins/mobile-relay/plugin.json';
 import quickButtonsManifest from '../../plugins/quick-buttons/plugin.json';
+import replyDigestManifest from '../../plugins/reply-digest/plugin.json';
 import contextHandoffManifest from '../../plugins/context-handoff/plugin.json';
 import environmentReadyManifest from '../../plugins/environment-ready/plugin.json';
 import scheduleManifest from '../../plugins/schedule/plugin.json';
@@ -24,6 +25,7 @@ import sshManifest from '../../plugins/ssh/plugin.json';
 import subagentManifest from '../../plugins/subagent/plugin.json';
 import todoManifest from '../../plugins/todo/plugin.json';
 import videoManifest from '../../plugins/video/plugin.json';
+import voiceInputManifest from '../../plugins/voice-input/plugin.json';
 import webSearchManifest from '../../plugins/web-search/plugin.json';
 
 /**
@@ -58,10 +60,12 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(evolutionManifest),
   readManifest(mobileRelayManifest),
   readManifest(quickButtonsManifest),
+  readManifest(replyDigestManifest),
   readManifest(contextHandoffManifest),
   readManifest(environmentReadyManifest),
   readManifest(scheduleManifest),
   readManifest(videoManifest),
+  readManifest(voiceInputManifest),
 ];
 
 export const officialPluginIds = new Set(officialPluginManifests.map((manifest) => manifest.id));

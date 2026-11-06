@@ -85,6 +85,8 @@ export type ConfigWebClient = {
   readDesktopChecks?(): Promise<ConfigWebDesktopChecks>;
   /** 打开某一项对应的系统设置面板。 */
   openDesktopSettings?(pane: string): Promise<{ ok: boolean; error?: string }>;
+  /** 请求系统把当前这个构建登记进权限列表（辅助功能）。 */
+  requestDesktopAccess?(id: string): Promise<{ ok: boolean; granted?: boolean; error?: string }>;
 
   /**
    * 页面上显示的一个路径（插件日志、以后别处也用它）怎么打开。
@@ -321,6 +323,22 @@ export async function openDesktopSettings(pane: string): Promise<{ ok: boolean; 
     return { ok: false, error: '当前宿主不支持打开系统设置' };
   }
   return current.openDesktopSettings(pane);
+}
+
+/**
+ * 请求系统登记当前这个构建（辅助功能）。
+ *
+ * 与 `openDesktopSettings` 的区别：它让 macOS 把正在运行的进程加进列表并弹窗，用户勾的
+ * 才是这一份；只打开面板时，用户勾到的往往是上次打包留下的旧条目。
+ */
+export async function requestDesktopAccess(
+  id: string,
+): Promise<{ ok: boolean; granted?: boolean; error?: string }> {
+  const current = client;
+  if (typeof current?.requestDesktopAccess !== 'function') {
+    return { ok: false, error: '当前宿主不支持请求系统授权' };
+  }
+  return current.requestDesktopAccess(id);
 }
 
 /** 宿主能不能在系统文件管理器里显示一个路径。 */

@@ -13,6 +13,10 @@
 
 会话体验卡：[Context Handoff](context-handoff/README.md) 保存历史检查点，[Environment Ready](environment-ready/README.md) 探测本次任务登记的本机服务。两者共用宿主摘要卡片，不各自绘制界面；本地埋点格式及分析导出见 [会话体验卡与埋点](../docs/plugin-experience.md)。
 
+[Long Reply Digest](reply-digest/README.md) 在成功回合结束后识别过长的 Agent 回复，调用摘要模型并以会话 notice 展示简短摘要；短回复不会额外调用模型。
+
+[Voice Input](voice-input/README.md) 在手机端输入框旁加一枚麦克风：录音经本机上传通道落到 `$MICA_HOME/attachments/`，再由插件调 OpenAI 兼容的转写服务，识别文字只追加进草稿，由用户确认后发送。
+
 [Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
 
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
@@ -454,6 +458,8 @@ ctx.skills.register({ ...skill, name: skill.name!, description: skill.descriptio
 见 `agent/desktop.md` 的「受控浏览器与终端控制」）。插件不描述状态、不拼系统设置 URL、也不渲染界面——它跑在
 `mica app-server` 子进程里，本来就没有渲染面，权限状态也不属于它。
 
+权限按「路径 + 代码签名」记：重新打包或换位置之后，系统设置里留着的是上一次构建的条目，勾它不会作用到正在运行的那一份。所以能主动登记的检查项（`PROMPTABLE_DESKTOP_CHECKS`，目前只有 `accessibility`）未开启时还会多一个「请求授权」按钮——它让系统就地把当前进程加进列表并弹窗；同一块里还显示这次运行的构建路径，方便对上系统设置里到底是哪一行。
+
 新增一种运行条件 = 在 `mica-plugin/PluginDesktop.ts` 登记 + 桌面端实现探测器，插件侧只改清单。
 
 依赖这个能力的插件用 `requires: ["desktop"]` 声明：只有桌面端 spawn 的 app-server 才提供它，
@@ -530,6 +536,33 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 照旧。什么时候用整页、什么时候用浮层只看一件事：这块界面需不需要房间。侧栏入口的顺序与
 `icon` 不受影响。没有 `entry` 的整页插件没有那一行可点，入口只有配置页插件详情里那枚
 「打开…」按钮（由宿主打开，所以只对随包插件出现）。
+
+### 输入框控件（`composer`）
+
+插件想把一个控件放进**对话输入框的动作区**（录音、扫码这类「往草稿里加东西」的动作）时，
+在同一个 `desktop.jsx` 里再导出一个 `Composer`：
+
+```json
+"desktop": { "composer": true }
+```
+
+```jsx
+// desktop.jsx
+export function Composer({ api, isMobile, appendText, onOpenSettings }) { … }
+```
+
+- 宿主按插件 id 从 `renderer/src/PluginComposerControls.jsx` 挂载，位置在输入框右侧的动作区、
+  排在「+」之前；只有插件**启用**且清单声明 `desktop.composer: true` 时渲染，与 `entry` / `page`
+  一样**只对随包插件生效**（原因同上：页面是构建期打的包）。
+- 分组件的 props 由宿主给：`isMobile`（当前是不是手机布局，同一份页面两端共用）、
+  `appendText(text)`（把文字追加到**当前草稿**末尾，不覆盖用户已经敲的内容、不发送）、
+  `onOpenSettings()`（把用户送到配置页这个插件的设置），以及 `api`。
+- 控件能用 `api.panelAction(action, values)`：它和 `desktop.panel` 的 `action` 是同一条会话级通路
+  （`<pluginId>` + 动作名 + 值），所以插件只需要在 `index.ts` 里写一次 `ctx.desktop.panel(...)`，
+  面板按钮与输入框控件共用同一批动作。`api.uploadAttachment(file)` 把页面里的 `File` 交给运行时的
+  `/api/attachment`（与「添加附件」同一条通道、同一个目录），**不**往草稿里插路径——上传的是临时
+  素材而不是用户想引用的文件，用哪个由插件自己决定。
+- 控件只在**启用期间**存在：停用插件后按钮立刻消失，不需要它的 `dispose` 去补界面。
 
 ## 对话右侧面板
 
