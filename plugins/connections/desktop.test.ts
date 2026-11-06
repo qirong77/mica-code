@@ -72,7 +72,7 @@ async function fixture() {
       return { ok: true };
     }),
     probe: vi.fn(
-      async (): Promise<{ ok: boolean; url?: string; access?: string; error?: string }> => ({
+      async (): Promise<{ ok: boolean; kind?: string; url?: string; access?: string; error?: string }> => ({
         ok: true,
         url: 'http://10.0.0.2:8787',
         access: 'password',
@@ -128,6 +128,25 @@ describe('connection card callbacks', () => {
     probe.resolve({ ok: false, error: 'offline' });
     await vi.waitFor(() => expect(JSON.stringify(render())).toContain('offline'));
     expect(calls).toBe(1);
+  });
+
+  it('opens an ordinary webpage without adding it to the connection list', async () => {
+    const { api, render } = await fixture();
+    const tree = render();
+    const input = elements(tree).find((element) => element.type === 'input' && element.props.placeholder?.includes('网页地址'))!;
+    const connect = elements(tree).find(
+      (element) => typeof element.type !== 'string' && element.type?.name === 'Button' && element.props.children === '连接',
+    )!;
+
+    input.props.onChange({ target: { value: 'https://www.zhihu.com/' } });
+    const updatedTree = render();
+    const updatedConnect = elements(updatedTree).find(
+      (element) => typeof element.type !== 'string' && element.type?.name === 'Button' && element.props.children === '连接',
+    )!;
+    updatedConnect.props.onClick();
+
+    await vi.waitFor(() => expect(api.open).toHaveBeenCalledWith('https://www.zhihu.com/'));
+    expect(api.writeData).not.toHaveBeenCalled();
   });
 
   it('keeps a failed note edit available for retry and only clears it after saving', async () => {

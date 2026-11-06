@@ -1,7 +1,7 @@
 import * as nodeFs from 'node:fs'
 import { join } from 'node:path'
 import { parseUsageLedger } from '@packages/mica-web-shared/usage-ledger.js'
-import { readSessionUsageJson } from './session-usage-reader'
+import { readSessionUsageJson, sessionFileIdentity } from './session-usage-reader'
 import {
   parseSessionEvents,
   parseSessionText,
@@ -14,7 +14,8 @@ import {
 // 行会一直缺这个字段，表现为这条提醒怎么都不出现——所以加字段必须同时升版本。
 // 5：来源行带上 `pluginId`（统计页按插件归组的父级）。版本不提会让旧缓存行一直缺这个
 // 字段，界面上子代理就只能是一串没有归属的类型名。
-const INDEX_VERSION = 9
+// v10：丢弃旧 reader 可能把 A 版投影记到 B 版签名下的缓存。
+const INDEX_VERSION = 10
 /** 每批解析多少个会话文件就让出一次事件循环。 */
 const BATCH_FILES = 16
 /** 小文件解析及统计计算每批的主线程预算（毫秒）；大会话 JSON 在 worker 内解析。 */
@@ -37,13 +38,6 @@ const HEAD_BYTES = 4096
 /** 「在等你选」那句话的上限，与会话文件的 `normalizeAwaitingInput` 同一个尺度。 */
 const AWAITING_INPUT_MAX = 120
 
-function timestampPart(stat, name) {
-  const nanoseconds = stat[`${name}Ns`]
-  if (typeof nanoseconds === 'bigint') return nanoseconds.toString()
-  const milliseconds = stat[`${name}Ms`]
-  return typeof milliseconds === 'bigint' ? milliseconds.toString() : String(milliseconds)
-}
-
 /** Use all identity/content fields available from stat. */
 function fileSignature(fileSystem, file) {
   let stat
@@ -54,13 +48,7 @@ function fileSignature(fileSystem, file) {
     if (!(error instanceof TypeError)) throw error
     stat = fileSystem.statSync(file)
   }
-  return [
-    String(stat.dev),
-    String(stat.ino),
-    String(stat.size),
-    timestampPart(stat, 'mtime'),
-    timestampPart(stat, 'ctime')
-  ].join(':')
+  return sessionFileIdentity(stat)
 }
 
 /** Keep this projection aligned with the session-list behavior in stats.js. */
@@ -345,10 +333,10 @@ export function createStatsScanner({
   async function parseFile(file, signature) {
     let raw
     try {
-      raw = await readJson(file)
-    } catch {
-      if (signatureOf(file) !== signature) return null
-      // 结构损坏的文件按「没有投影」缓存，修好后签名变化会重新解析。
+      raw = await readJson(file, { expectedIdentity: signature })
+    } catch (error) {
+      if (error?.name !== 'SyntaxError' || signatureOf(file) !== signature) return null
+      // 仅稳定版本的坏 JSON 按「没有投影」缓存；版本变化、IO/worker 等瞬时失败下次重试。
       return { meta: null, stats: null, identities: [], events: [] }
     }
     const after = signatureOf(file)
@@ -703,7 +691,7 @@ export function createStatsScanner({
       if (cached?.signature === signature) return cached.value
       let raw
       try {
-        raw = await readJson(file, { mode: 'text' })
+        raw = await readJson(file, { mode: 'text', expectedIdentity: signature })
       } catch {
         return null
       }

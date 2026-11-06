@@ -5,3 +5,13 @@ export function rendererTimeline(points: ConfigWebPerfTimelinePoint[]): ConfigWe
   const pageId = points.at(-1)?.pageId;
   return pageId ? points.filter((point) => point.pageId === pageId) : points;
 }
+
+/** 定时器延迟可能与 longtask 重叠，只取较大值，避免把同一次阻塞叠加两遍。 */
+export function timelineDelay(point: ConfigWebPerfTimelinePoint): number {
+  return Math.max(point.lag, point.long);
+}
+
+export function recentTimeline(points: ConfigWebPerfTimelinePoint[], spanMs = 30_000): ConfigWebPerfTimelinePoint[] {
+  const end = points.at(-1)?.at;
+  return end === undefined ? [] : points.filter((point) => point.at > end - spanMs);
+}

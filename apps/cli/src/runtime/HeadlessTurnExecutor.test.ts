@@ -84,8 +84,8 @@ class MockAgent {
     // Text streamed before an iteration boundary is committed to the provider
     // history by that boundary; whatever streams after the last one is not.
     if (this.committedText) this.events.emit('text', this.committedText);
-    // Two iteration boundaries: the first starts the wait, the second proves a
-    // full iteration ran (mirrors MessageQueueService.dequeueAfterCompletedIteration).
+    // Two completed tool iterations: a queued input is consumed at the first
+    // boundary, and must not be injected again at the second.
     const first = options.onIterationComplete ? await options.onIterationComplete() : null;
     const second = options.onIterationComplete ? await options.onIterationComplete() : null;
     this.iterationBoundaryResults = [first, second];
@@ -458,15 +458,14 @@ describe('HeadlessTurnExecutor', () => {
     expect(result).toBe('rejected');
   });
 
-  it('injects after_iteration input at a completed iteration boundary', async () => {
+  it('injects after_iteration input at the first completed iteration boundary', async () => {
     const { agent, executor } = createHarness();
     await executor.start(input('first'));
     await executor.start(input('queued', 'after_iteration'));
     // Wait for the drain loop to run the injected content.
     await new Promise((resolve) => setTimeout(resolve, 50));
-    // The injected input is returned to the provider loop at the second
-    // iteration boundary (mirrors CLI after_iteration semantics).
-    expect(agent.iterationBoundaryResults[1]).toBe('queued');
+    expect(agent.iterationBoundaryResults).toEqual(['queued', null]);
+    expect(agent.runCalls).toHaveLength(1);
   });
 
   it('persists the in-flight prompt on the turn-start save so a killed turn is recoverable', async () => {
@@ -615,7 +614,6 @@ describe('HeadlessTurnExecutor', () => {
         for (const text of ['A', 'B']) {
           expect(await executor.start(input(text, 'after_iteration'))).toBe('queued');
           results.push(await options.onIterationComplete?.());
-          results.push(await options.onIterationComplete?.());
         }
       } else {
         results.push(await options.onIterationComplete?.());
@@ -631,7 +629,7 @@ describe('HeadlessTurnExecutor', () => {
     await vi.waitFor(() => expect(getIdleCount()).toBe(1));
 
     expect(run).toHaveBeenCalledTimes(3);
-    expect(attemptResults).toEqual([[null, 'A', null, 'B'], ['A'], ['A', 'B']]);
+    expect(attemptResults).toEqual([['A', 'B'], ['A'], ['A', 'B']]);
     expect(agent.restoreCalls).toBe(2);
     expect(events.filter((event) => event.type === 'turn:retrying')).toHaveLength(2);
     expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });

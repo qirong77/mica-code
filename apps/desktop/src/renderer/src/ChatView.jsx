@@ -61,7 +61,7 @@ import {
 import { Button, PluginIcon, QrCode, SessionDetailView, resolvePluginIcon } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
-import { readCachedTranscript, takeCachedTranscript, writeCachedTranscript } from './chat-cache'
+import { readRestoreTranscript, takeCachedTranscript, writeCachedTranscript } from './chat-cache'
 import { createReadQueue } from './read-queue'
 import { usePageVisible } from './use-page-visible'
 import { transcriptMessagesForDisplay, updateStreamMessage } from './chat-stream'
@@ -5275,7 +5275,7 @@ export function ChatView({
     const nextInput = switchChatDraft(draftsRef.current, previousNodeId, nodeId, inputRef.current)
     draftReportRef.current = { nodeId, text: nextInput || '' }
     loadedNodeRef.current = nodeId
-    let cachedEntry = readCachedTranscript(nodeId)
+    let cachedEntry = readRestoreTranscript(nodeId, previousNodeId, messagesRef.current, metaRef.current)
     let cachedTranscript = cachedEntry?.messages ?? null
     const generation = ++restoreGenerationRef.current
     restoringRef.current = true

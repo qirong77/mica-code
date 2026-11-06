@@ -5,6 +5,7 @@
 ## 主要能力
 
 - 提供 `IAgent`、conversation message 等公共 agent 类型。
+- `IAgent.getSnapshot({ includeConversation: false })` 只取 provider 状态，省去展示消息投影；默认仍包含 `conversationMessages`。保存和回滚热路径可按需关闭投影。
 - 提供 OpenAI Chat Completions 与 OpenAI Responses 两类协议 client。
 - `AgentQueryOptions.onRequestStart` 在实际发起每轮请求前提供消息数量与本轮工具定义；包括首个失败请求，transport 重试另走 `onRetry`，观察回调抛错不影响请求。
 - 提供子 agent 创建入口：`createSubAgent`。

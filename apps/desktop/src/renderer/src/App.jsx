@@ -1351,8 +1351,8 @@ export default function App() {
         const counts =
           status?.status && (forceCounts || countsStale)
             ? await window.mica.git
-                // 一轮刚跑完（或用户主动刷新）时不能拿运行时那 5s 缓存里的旧数字。
-                .changeCounts(cwd, { refresh: forceCounts })
+                // turn 结束或工作区推送后跳过旧数字，多个窗口仍共用同一代扫描。
+                .changeCounts(cwd, { invalidate: forceCounts })
                 .then((result) => (result?.counts ? { cwd, counts: result.counts } : null))
                 // 徽标是锦上添花：取不到（非仓库、目录被删）就不画，别打断整次刷新。
                 .catch(() => null)

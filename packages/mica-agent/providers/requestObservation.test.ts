@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MicaTool, micaTools } from '@packages/mica-tools/index.js';
+import { createRuntimeInput } from '@packages/mica-runtime/RuntimeInput.js';
+import { MessageQueueService } from '@packages/mica-runtime/MessageQueueService.js';
 import type { AgentQueryOptions } from '../core/Agent.js';
 import { ChatCompletionsClient } from './ChatCompletionsClient.js';
 import { ResponsesClient } from './ResponsesClient.js';
@@ -78,22 +80,37 @@ for (const protocol of protocols) {
     );
   }
   function toolStream() {
+    return toolStreamWithCount();
+  }
+  function toolStreamWithCount(count = 1) {
     return streamOf(
-      isChat
-        ? {
-            choices: [
-              {
-                delta: {
-                  tool_calls: [{ index: 0, id: 'call-1', function: { name: allowedTool.name, arguments: '{}' } }],
+      ...(isChat
+        ? [
+            {
+              choices: [
+                {
+                  delta: {
+                    tool_calls: Array.from({ length: count }, (_, index) => ({
+                      index,
+                      id: `call-${index + 1}`,
+                      function: { name: allowedTool.name, arguments: '{}' },
+                    })),
+                  },
                 },
-              },
-            ],
-          }
-        : {
+              ],
+            },
+          ]
+        : Array.from({ length: count }, (_, index) => ({
             type: 'response.output_item.done',
-            output_index: 0,
-            item: { type: 'function_call', id: 'fc-1', call_id: 'call-1', name: allowedTool.name, arguments: '{}' },
-          },
+            output_index: index,
+            item: {
+              type: 'function_call',
+              id: `fc-${index + 1}`,
+              call_id: `call-${index + 1}`,
+              name: allowedTool.name,
+              arguments: '{}',
+            },
+          }))),
     );
   }
   function expectedTools() {
@@ -137,6 +154,59 @@ for (const protocol of protocols) {
       expect(seen[1]).toContain('new requirement after the tool');
       expect(seen[1]).toContain('probe result');
       expect(queued).toHaveBeenCalledTimes(1);
+    });
+
+    it('sends queued input after the current tool batch with the entire baseline wire prefix intact', async () => {
+      const requests: WireRequest[] = [];
+      for (let run = 0; run < 2; run++) {
+        create
+          .mockImplementationOnce((request: WireRequest) => {
+            requests.push(structuredClone(request));
+            return toolStreamWithCount(2);
+          })
+          .mockImplementationOnce((request: WireRequest) => {
+            requests.push(structuredClone(request));
+            return textStream();
+          });
+      }
+      await client().query('hello');
+
+      const queue = new MessageQueueService();
+      const input = createRuntimeInput('follow up during tools', 'ui', { queueMode: 'after_iteration' });
+      const agent = client();
+      let completedTools = 0;
+      agent.onToolCall = () => {
+        if (!queue.count()) queue.enqueue(input);
+      };
+      agent.onToolResult = () => {
+        completedTools++;
+      };
+      const boundary = vi.fn(() => {
+        expect(completedTools).toBe(2);
+        return queue.dequeueAfterCompletedIteration()?.text;
+      });
+      await agent.query('hello', { onIterationComplete: boundary });
+
+      expect(boundary).toHaveBeenCalledTimes(1);
+      expect(queue.count()).toBe(0);
+      expect(requests[2]).toEqual(requests[0]);
+      const baseline = requests[1]!;
+      const sent = requests[3]!;
+      const messageKey = isChat ? 'messages' : 'input';
+      expect(sent).toEqual({
+        ...baseline,
+        [messageKey]: [
+          ...baseline[messageKey]!,
+          isChat
+            ? { role: 'user', content: input.text }
+            : { type: 'message', role: 'user', content: [{ type: 'input_text', text: input.text }] },
+        ],
+      });
+      const results = baseline[messageKey]!.filter((message) => {
+        const item = message as { role?: string; type?: string };
+        return isChat ? item.role === 'tool' : item.type === 'function_call_output';
+      });
+      expect(results).toHaveLength(2);
     });
 
     it('starts before the first request and before output, and reports the filtered wire tools', async () => {

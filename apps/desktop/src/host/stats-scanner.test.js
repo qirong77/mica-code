@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { EventEmitter } from 'node:events'
 import {
   closeSync,
   mkdtempSync,
@@ -6,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   readSync,
+  renameSync,
   rmSync,
   statSync,
   unlinkSync,
@@ -14,6 +16,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createStatsScanner } from './stats-scanner'
+import { createSessionUsageReader } from './session-usage-reader'
 
 const temporaryDirectories = []
 
@@ -61,6 +64,52 @@ function flushIndex() {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+const flushReads = () => new Promise((resolve) => setImmediate(resolve))
+
+function checkpoint(version, inputTokens) {
+  return fixture('one', {
+    title: `Checkpoint ${version}`,
+    snapshot: {
+      ...fixture('one').snapshot,
+      conversationMessages: [{ role: 'user', content: `body ${version}` }],
+      usageHistory: [{ usageId: `usage-${version}`, inputTokens, outputTokens: 1 }]
+    }
+  })
+}
+
+function controlledReader() {
+  const jobs = []
+  const read = createSessionUsageReader({
+    // 每次 stat 同步取样、异步返回，竞争顺序由 worker 回包控制。
+    stat: async (file, options) => statSync(file, options),
+    largeFileBytes: 0,
+    startWorker(file, mode) {
+      const worker = new EventEmitter()
+      const value = JSON.parse(readFileSync(file, 'utf8'))
+      worker.terminate = async () => {}
+      jobs.push({
+        file,
+        mode,
+        finish(reply = { ok: true, value }) { worker.emit('message', reply) }
+      })
+      return worker
+    }
+  })
+  return { read, jobs }
+}
+
+function readProjection(scanner, file, mode) {
+  return mode === 'usage' ? scanner.scanStats() : scanner.readText(file)
+}
+
+function expectCheckpointB(value, mode) {
+  if (mode === 'usage') {
+    expect(value).toEqual([expect.objectContaining({ id: 'one', title: 'Checkpoint B', totalTokens: 21 })])
+  } else {
+    expect(value).toEqual({ id: 'one', text: 'body B', truncated: false })
+  }
+}
+
 function createHarness(options = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'mica-stats-scanner-'))
   temporaryDirectories.push(dir)
@@ -94,6 +143,11 @@ function createHarness(options = {}) {
     files: {
       write(name, value) {
         writeFileSync(join(dir, `${name}.json`), JSON.stringify(value), 'utf8')
+      },
+      replace(name, value) {
+        const file = join(dir, `${name}.json`)
+        writeFileSync(`${file}.next`, JSON.stringify(value), 'utf8')
+        renameSync(`${file}.next`, file)
       },
       remove(name) {
         unlinkSync(join(dir, `${name}.json`))
@@ -402,7 +456,83 @@ describe('incremental session scanner', () => {
     expect(reads).toHaveLength(3)
     const file = join(harness.dir, 'fork.json')
     expect(await harness.scanner.readText(file)).toEqual({ id: 'fork', text: 'searchable body', truncated: false })
-    expect(reads.at(-1)).toEqual({ file, options: { mode: 'text' } })
+    expect(reads.at(-1)).toEqual({ file, options: { mode: 'text', expectedIdentity: expect.any(String) } })
+  })
+
+  test.each(['usage', 'text'])('does not cache an older pending %s projection under a replacement signature', async (mode) => {
+    const workers = controlledReader()
+    const harness = createHarness({ scanner: { readJson: workers.read } })
+    harness.files.write('one', checkpoint('A', 10))
+    const file = join(harness.dir, 'one.json')
+    // 详情/另一处搜索已经拿到 A，worker 尚未回包。
+    const detail = workers.read(file, { mode }).then((value) => ({ value }), (error) => ({ error }))
+    await flushReads()
+    harness.files.replace('one', checkpoint('B', 20))
+
+    const scan = readProjection(harness.scanner, file, mode)
+    await flushReads()
+    for (const job of workers.jobs) job.finish()
+    const value = await scan
+    expectCheckpointB(value, mode)
+    expect(await detail).toMatchObject({ error: { code: 'ERR_SESSION_FILE_CHANGED' } })
+    expect(workers.jobs).toHaveLength(2)
+    expect(await readProjection(harness.scanner, file, mode)).toBe(value)
+    expect(workers.jobs).toHaveLength(2)
+
+    if (mode === 'usage') {
+      await flushIndex()
+      const restarted = createStatsScanner({
+        directory: () => harness.dir,
+        fileSystem: { readdirSync, statSync, readFileSync },
+        indexStore: harness.store,
+        readJson() { throw new Error('The persisted B projection must be reused') }
+      })
+      expectCheckpointB(await restarted.scanStats(), mode)
+    }
+  })
+
+  test.each(['usage', 'text'])('retries %s on the next scan when replacement happens during its worker read', async (mode) => {
+    const workers = controlledReader()
+    const harness = createHarness({ scanner: { readJson: workers.read } })
+    harness.files.write('one', checkpoint('A', 10))
+    const file = join(harness.dir, 'one.json')
+    const first = readProjection(harness.scanner, file, mode)
+    await flushReads()
+    harness.files.replace('one', checkpoint('B', 20))
+    workers.jobs[0].finish()
+    expect(await first).toEqual(mode === 'usage' ? [] : null)
+
+    const retry = readProjection(harness.scanner, file, mode)
+    await flushReads()
+    workers.jobs[1].finish()
+    const value = await retry
+    expectCheckpointB(value, mode)
+    expect(await readProjection(harness.scanner, file, mode)).toBe(value)
+    expect(workers.jobs).toHaveLength(2)
+  })
+
+  test.each(['ERR_SESSION_FILE_CHANGED', 'EIO', 'EMFILE'])('does not cache a worker %s failure as a damaged file', async (code) => {
+    const workers = controlledReader()
+    const harness = createHarness({ scanner: { readJson: workers.read } })
+    harness.files.write('one', checkpoint('A', 10))
+    const initial = harness.scanner.scanStats()
+    await flushReads()
+    workers.jobs[0].finish()
+    const stable = await initial
+
+    harness.files.replace('one', checkpoint('B', 20))
+    const failed = harness.scanner.scanStats()
+    await flushReads()
+    workers.jobs[1].finish({ ok: false, error: { name: 'Error', message: 'Transient read failure', code } })
+    expect(await failed).toBe(stable)
+
+    const retry = harness.scanner.scanStats()
+    await flushReads()
+    workers.jobs[2].finish()
+    const value = await retry
+    expectCheckpointB(value, 'usage')
+    expect(await harness.scanner.scanStats()).toBe(value)
+    expect(workers.jobs).toHaveLength(3)
   })
 
   test('does not cache data replaced while awaiting the JSON reader', async () => {

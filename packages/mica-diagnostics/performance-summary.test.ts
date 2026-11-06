@@ -32,6 +32,20 @@ const line = (at: number, scope: string, event: string, fields: Record<string, u
   `${JSON.stringify({ at, level: 'info', scope, event, ...fields })}\n`;
 
 describe('Performance summary cache', () => {
+  it('isolates mutable output between concurrent readers while sharing the parse work', async () => {
+    writeFileSync(join(dir, 'invoke-20261104.jsonl'), line(1, 'invoke', 'query', { ms: 10 }));
+    const parse = vi.spyOn(JSON, 'parse');
+    const [first, second] = await Promise.all([readPerformanceSummaryAsync(), readPerformanceSummaryAsync()]);
+    expect(parse).toHaveBeenCalledTimes(1);
+    first.totals.events = 999;
+    first.events[0]!.event = 'mutated';
+    first.buckets[0]!.count = 999;
+    expect(second.totals.events).toBe(1);
+    expect(second.events[0]!.event).toBe('query');
+    expect(second.buckets[0]!.count).toBe(1);
+    expect(readPerformanceSummary()).toEqual(second);
+  });
+
   it('reuses unchanged projections in both APIs without parsing again or sharing mutable output', async () => {
     writeFileSync(join(dir, 'perf-20261104.jsonl'), line(1, 'perf', 'sample', { vis: 1, lag: 7 }));
     writeFileSync(join(dir, 'mem-20261104.jsonl'), line(2, 'mem', 'sample', { host: 'runtime', pid: 12, rss: 80 }));

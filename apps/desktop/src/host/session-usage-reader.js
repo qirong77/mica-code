@@ -3,6 +3,28 @@ import { Worker } from 'node:worker_threads'
 
 const LARGE_FILE_BYTES = 4 * 1024 * 1024
 
+/** 同时标识文件版本和内容；原子替换即使保留大小/mtime 也必须失效。 */
+export function sessionFileIdentity(info) {
+  const timestamp = (name) => {
+    const nanoseconds = info[`${name}Ns`]
+    if (typeof nanoseconds === 'bigint') return nanoseconds.toString()
+    return String(info[`${name}Ms`])
+  }
+  return [
+    String(info.dev),
+    String(info.ino),
+    String(info.size),
+    timestamp('mtime'),
+    timestamp('ctime')
+  ].join(':')
+}
+
+function fileChangedError() {
+  return Object.assign(new Error('Session file changed while reading'), {
+    code: 'ERR_SESSION_FILE_CHANGED'
+  })
+}
+
 // 只做字段投影；统计、来源与旧 usage 的身份仍由 stats-core 计算。usage 记录不能裁字段：
 // 没有 usageId 的旧记录用整条 JSON 的摘要去重，改动形状就会让 fork 的副本重新计入。
 function projectSession(raw, mode) {
@@ -92,7 +114,7 @@ try {
 
 /**
  * 大文件的读取、解析和裁剪在 worker 内完成，只回传统计或搜索要用的字段。
- * 扫描器维护签名缓存；这里仅合并正在读取的同文件请求，并限制并行读盘 / worker 数。
+ * 扫描器维护签名缓存；这里仅合并同文件版本的在途请求，并限制并行读盘 / worker 数。
  */
 export function createSessionUsageReader({
   readFile = nodeReadFile,
@@ -113,6 +135,15 @@ export function createSessionUsageReader({
   const pending = new Map()
   const queue = []
   let active = 0
+
+  async function statFile(file) {
+    try {
+      return await stat(file, { bigint: true })
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error
+      return stat(file)
+    }
+  }
 
   async function readInProcess(file, mode, checkSize = false) {
     let data = await readFile(file)
@@ -189,12 +220,25 @@ export function createSessionUsageReader({
 
   async function run(job) {
     try {
-      const info = await stat(job.file)
-      job.resolve(
-        await (info.size >= largeFileBytes
+      // 排队期间可能已经换成另一个 checkpoint，不能把新文件交给旧版本的请求。
+      const info = await statFile(job.file)
+      if (sessionFileIdentity(info) !== job.identity) throw fileChangedError()
+      let value
+      let failure
+      let failed = false
+      try {
+        value = await (info.size >= largeFileBytes
           ? readInWorker(job.file, job.mode)
           : readInProcess(job.file, job.mode, true))
-      )
+      } catch (error) {
+        failed = true
+        failure = error
+      }
+      // worker 已经读完旧 inode 但还没回包时也可能发生替换；解析失败同样要复核。
+      const after = await statFile(job.file)
+      if (sessionFileIdentity(after) !== job.identity) throw fileChangedError()
+      if (failed) throw failure
+      job.resolve(value)
     } catch (error) {
       job.reject(error)
     } finally {
@@ -210,12 +254,15 @@ export function createSessionUsageReader({
     }
   }
 
-  return function readSessionJson(file, { mode = 'usage' } = {}) {
+  return async function readSessionJson(file, { mode = 'usage', expectedIdentity } = {}) {
     if (mode !== 'usage' && mode !== 'text')
-      return Promise.reject(new TypeError('Invalid session projection mode'))
-    const key = `${mode}\0${file}`
+      throw new TypeError('Invalid session projection mode')
+    // 每个调用都先 stat：详情请求可能仍在读 A，扫描器此时已看到原子替换后的 B。
+    const identity = sessionFileIdentity(await statFile(file))
+    if (expectedIdentity !== undefined && identity !== expectedIdentity) throw fileChangedError()
+    const key = `${mode}\0${file}\0${identity}`
     if (pending.has(key)) return pending.get(key)
-    const task = new Promise((resolve, reject) => queue.push({ file, mode, resolve, reject }))
+    const task = new Promise((resolve, reject) => queue.push({ file, mode, identity, resolve, reject }))
     pending.set(key, task)
     const clear = () => {
       if (pending.get(key) === task) pending.delete(key)

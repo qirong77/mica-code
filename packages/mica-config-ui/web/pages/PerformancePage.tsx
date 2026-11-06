@@ -3,7 +3,7 @@ import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
 import { clearPerformanceLogs, readPerformanceDetails } from '../api.js';
-import { rendererTimeline } from '../performanceTimeline.js';
+import { recentTimeline, rendererTimeline, timelineDelay } from '../performanceTimeline.js';
 import type {
   ConfigWebPerfBucket,
   ConfigWebPerfEvent,
@@ -175,7 +175,7 @@ export function PerformancePage() {
       <section className="perf-section">
         <header className="perf-section-head">
           <h2>渲染时间线</h2>
-          <span className="perf-hint">最近活跃页面，每秒一个采样点；柱高 = 主线程被占用的毫秒数</span>
+          <span className="perf-hint">最近活跃页面，每秒一个采样点；柱高取事件循环延迟与最长任务的较大值</span>
         </header>
         {timeline.length === 0 ? (
           <Empty description="还没有采样数据。打开任意对话页，几秒后就会开始记录。" />
@@ -400,11 +400,11 @@ function PerfStat({
  * 超过 100ms 标红（人开始能感觉到卡），超过 500ms 标橙。
  */
 function TimelineChart({ points }: { points: ConfigWebPerfTimelinePoint[] }) {
-  const max = Math.max(100, ...points.map((point) => point.lag + point.long));
+  const max = Math.max(100, ...points.map(timelineDelay));
   return (
     <div className="perf-chart">
       {points.map((point, index) => {
-        const value = point.lag + point.long;
+        const value = timelineDelay(point);
         const height = Math.max(1, Math.round((value / max) * 100));
         const tone = value >= 500 ? 'bad' : value >= 100 ? 'warn' : 'ok';
         return (
@@ -421,10 +421,10 @@ function TimelineChart({ points }: { points: ConfigWebPerfTimelinePoint[] }) {
 }
 
 function TimelineLegend({ points }: { points: ConfigWebPerfTimelinePoint[] }) {
-  const worst = points.reduce((acc, point) => Math.max(acc, point.lag + point.long), 0);
-  const recent = points.slice(-30);
+  const worst = points.reduce((acc, point) => Math.max(acc, timelineDelay(point)), 0);
+  const recent = recentTimeline(points);
   const avg = recent.length
-    ? Math.round(recent.reduce((sum, point) => sum + point.lag + point.long, 0) / recent.length)
+    ? Math.round(recent.reduce((sum, point) => sum + timelineDelay(point), 0) / recent.length)
     : 0;
   const dom = points.at(-1)?.dom ?? 0;
   const heap = points.at(-1)?.heapMB;

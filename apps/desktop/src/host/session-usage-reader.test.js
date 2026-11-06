@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseSessionEvents, parseSessionText } from './stats-core'
-import { createSessionUsageReader } from './session-usage-reader'
+import { createSessionUsageReader, sessionFileIdentity } from './session-usage-reader'
 
 const directories = []
 
@@ -66,6 +66,34 @@ function sessionFile(raw) {
   writeFileSync(file, typeof raw === 'string' ? raw : JSON.stringify(raw))
   return file
 }
+
+function replaceFile(file, raw) {
+  const next = `${file}.next`
+  writeFileSync(next, JSON.stringify(raw))
+  renameSync(next, file)
+}
+
+function controlledWorkers() {
+  const jobs = []
+  return {
+    jobs,
+    startWorker(file, mode) {
+      const worker = new EventEmitter()
+      const value = JSON.parse(readFileSync(file, 'utf8'))
+      worker.terminate = async () => {}
+      jobs.push({
+        file,
+        mode,
+        finish(reply = { ok: true, value }) { worker.emit('message', reply) }
+      })
+      return worker
+    }
+  }
+}
+
+// 注入同步取样的 async stat，让当前宏任务结束前所有请求都确定入队/起读。
+const asyncStat = async (file, options) => statSync(file, options)
+const flushReads = () => new Promise((resolve) => setImmediate(resolve))
 
 describe('session usage reader', () => {
   test('large files are parsed in a worker without returning bodies or changing usage identities', async () => {
@@ -174,9 +202,9 @@ describe('session usage reader', () => {
       }
     })
     const first = read('one')
-    expect(read('one')).toBe(first)
-    expect(await Promise.all([first, read('two'), read('one', { mode: 'text' }), read('three')])).toEqual([
-      { file: 'one', mode: 'usage' }, { file: 'two', mode: 'usage' },
+    const duplicate = read('one')
+    expect(await Promise.all([first, duplicate, read('two'), read('one', { mode: 'text' }), read('three')])).toEqual([
+      { file: 'one', mode: 'usage' }, { file: 'one', mode: 'usage' }, { file: 'two', mode: 'usage' },
       { file: 'one', mode: 'text' }, { file: 'three', mode: 'usage' }
     ])
     expect(starts).toBe(4)
@@ -184,6 +212,96 @@ describe('session usage reader', () => {
     expect(alive).toBe(0)
     expect(terminations).toBe(4)
     for (const worker of workers) expect(worker.eventNames()).toEqual([])
+  })
+
+  test.each(['usage', 'text'])('does not coalesce %s requests across atomic replacements', async (mode) => {
+    const file = sessionFile(fixture())
+    const workers = controlledWorkers()
+    const read = createSessionUsageReader({
+      // A/B 的大小和时间戳相同，仍要按 inode 区分原子替换。
+      stat: async (path, options) => ({ ...statSync(path, options), mtimeNs: 1n, ctimeNs: 1n }),
+      largeFileBytes: 0,
+      startWorker: workers.startWorker
+    })
+    const first = read(file, { mode }).then((value) => ({ value }), (error) => ({ error }))
+    await flushReads()
+
+    const replacement = fixture()
+    replacement.title = 'Newer title'
+    replaceFile(file, replacement)
+    const second = read(file, { mode })
+    const duplicate = read(file, { mode })
+    await flushReads()
+    for (const job of workers.jobs) job.finish()
+
+    expect(await first).toMatchObject({ error: { code: 'ERR_SESSION_FILE_CHANGED' } })
+    const values = await Promise.all([second, duplicate])
+    expect(values.map((value) => value.title)).toEqual(['Newer title', 'Newer title'])
+    expect(workers.jobs).toHaveLength(2)
+  })
+
+  test('accepts a stable expected identity and rejects one replaced before the reader stat', async () => {
+    const file = sessionFile(fixture())
+    const expectedIdentity = sessionFileIdentity(statSync(file, { bigint: true }))
+    const workers = controlledWorkers()
+    const read = createSessionUsageReader({ startWorker: workers.startWorker })
+    expect((await read(file, { expectedIdentity })).id).toBe('session-1')
+    replaceFile(file, fixture())
+
+    await expect(read(file, { expectedIdentity })).rejects.toMatchObject({ code: 'ERR_SESSION_FILE_CHANGED' })
+    expect(workers.jobs).toHaveLength(0)
+  })
+
+  test('rejects a queued version replaced before its worker starts and retries the new version', async () => {
+    const blocker = sessionFile(fixture())
+    const file = sessionFile(fixture())
+    const workers = controlledWorkers()
+    const read = createSessionUsageReader({
+      stat: asyncStat, largeFileBytes: 0, maxConcurrentReads: 1, startWorker: workers.startWorker
+    })
+    const blockingRead = read(blocker)
+    await flushReads()
+    const queuedRead = read(file).then((value) => ({ value }), (error) => ({ error }))
+    await flushReads()
+    replaceFile(file, { ...fixture(), title: 'Replaced while queued' })
+    workers.jobs[0].finish()
+
+    await blockingRead
+    expect(await queuedRead).toMatchObject({ error: { code: 'ERR_SESSION_FILE_CHANGED' } })
+    expect(workers.jobs).toHaveLength(1)
+
+    const retry = read(file)
+    await flushReads()
+    workers.jobs[1].finish()
+    expect((await retry).title).toBe('Replaced while queued')
+    expect(workers.jobs).toHaveLength(2)
+  })
+
+  test.each(['usage', 'text'])('rejects an atomic replacement during a small asynchronous %s read', async (mode) => {
+    const file = sessionFile(fixture())
+    let finishRead
+    let reads = 0
+    const read = createSessionUsageReader({
+      stat: asyncStat,
+      readFile(path) {
+        reads += 1
+        const value = readFileSync(path)
+        if (reads === 1) return new Promise((resolve) => { finishRead = () => resolve(value) })
+        return Promise.resolve(value)
+      }
+    })
+    const first = read(file, { mode }).then((value) => ({ value }), (error) => ({ error }))
+    await flushReads()
+    const replacement = fixture()
+    replacement.title = 'Replaced during async read'
+    replacement.snapshot.conversationMessages = [{ role: 'user', content: replacement.title }]
+    replaceFile(file, replacement)
+    finishRead()
+
+    expect(await first).toMatchObject({ error: { code: 'ERR_SESSION_FILE_CHANGED' } })
+    const value = await read(file, { mode })
+    expect(mode === 'usage' ? value.title : parseSessionText(value).text).toBe(replacement.title)
+    expect(reads).toBe(2)
   })
 
   test.each(['throw', 'error', 'exit', 'timeout'])('terminates and falls back after worker %s, then allows a fresh read', async (kind) => {
