@@ -112,7 +112,7 @@ export function chromeHtml() {
   html, body { margin: 0; height: 100%; }
   body {
     display: flex; align-items: center; gap: 8px;
-    height: 38px; padding: 0 8px;
+    height: 38px; padding: 0 10px;
     background: var(--c-panel); color: var(--c-fg);
     font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     border-bottom: 1px solid var(--c-line);
@@ -120,60 +120,45 @@ export function chromeHtml() {
     -webkit-app-region: drag;
   }
   .badge {
-    display: flex; align-items: center; gap: 6px; flex: none;
-    padding: 2px 8px; border-radius: 999px; background: var(--c-overlay);
-    color: var(--c-warn); font-weight: 600; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: 24%;
+    padding: 3px 8px; border-radius: 6px; background: var(--c-overlay);
+    color: var(--c-fg-soft); font-weight: 500;
   }
-  .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
-  .owner { flex: none; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-fg-dim); }
-  .tabs { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; -webkit-app-region: no-drag; }
+  #label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { flex: none; width: 5px; height: 5px; border-radius: 999px; background: var(--c-fg-dim); }
+  .dot.loading { background: var(--c-warn); }
+  .tabs { display: flex; align-items: center; gap: 3px; min-width: 0; max-width: 40%; overflow-x: auto; scrollbar-width: none; -webkit-app-region: no-drag; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .page-title { flex: 0 1 auto; min-width: 0; max-width: 190px; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tab {
-    display: flex; align-items: center; gap: 5px; max-width: 190px;
-    padding: 3px 9px; border-radius: 6px 6px 0 0; color: var(--c-fg-dim);
+    display: flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 26px; max-width: 190px;
+    padding: 4px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--c-fg-dim); font: inherit;
     cursor: default; white-space: nowrap; overflow: hidden;
   }
   .tab:hover { background: var(--c-overlay); color: var(--c-fg); }
   .tab.active { background: var(--c-active); color: var(--c-fg); }
+  .tab:focus-visible { outline: 1px solid var(--c-fg-soft); outline-offset: -1px; }
   .tab .title { overflow: hidden; text-overflow: ellipsis; }
-  .grow { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
   .url {
     flex: 1 1 auto; min-width: 0; padding: 3px 10px; border-radius: 6px;
     background: var(--c-canvas); border: 1px solid var(--c-line); color: var(--c-fg-soft);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr; text-align: left;
     /* 地址要能选中复制：它落在窗口的拖动区里，所以两样都得单独放开 */
     cursor: text; -webkit-user-select: text; user-select: text; -webkit-app-region: no-drag;
   }
-  .hint { flex: none; min-width: 60px; text-align: right; color: var(--c-fg-dim); white-space: nowrap; }
-  .loading { width: 6px; height: 6px; border-radius: 999px; background: var(--c-warn); flex: none; opacity: 0; }
-  .loading.on { opacity: 1; }
-  .hide {
-    flex: none; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--c-line);
-    background: transparent; color: var(--c-fg-soft); font: inherit; cursor: default;
-    -webkit-app-region: no-drag;
-  }
-  .hide:hover { background: var(--c-overlay); color: var(--c-fg); }
 </style>
 </head>
 <body>
-  <span class="badge"><span class="dot"></span><span id="label">受控浏览器</span></span>
-  <span class="owner" id="owner"></span>
+  <span class="badge" id="badge"><span class="dot" id="loading"></span><span id="label">受控浏览器</span></span>
   <span class="tabs" id="tabs"></span>
-  <span class="grow">
-    <span class="loading" id="loading"></span>
-    <span class="url" id="url" title=""></span>
-    <span class="hint" id="hint" title="地址由 Mica 控制，不可编辑；可选中复制">可选中复制</span>
-  </span>
-  <button class="hide" id="hide" type="button">隐藏</button>
+  <span class="url" id="url" title=""></span>
 <script>
   (function () {
     var label = document.getElementById('label')
-    var owner = document.getElementById('owner')
+    var badge = document.getElementById('badge')
     var tabs = document.getElementById('tabs')
     var url = document.getElementById('url')
     var loading = document.getElementById('loading')
-    var hint = document.getElementById('hint')
-    var hintText = hint.textContent
-    var hintTimer = 0
     var root = document.documentElement
     var PALETTE_VARS = {
       panel: '--c-panel',
@@ -196,20 +181,12 @@ export function chromeHtml() {
       return selection ? String(selection) : ''
     }
 
-    function flashHint(text) {
-      hint.textContent = text
-      clearTimeout(hintTimer)
-      hintTimer = setTimeout(function () { hint.textContent = hintText }, 1200)
-    }
-
     function applyPalette(palette) {
       if (!palette) return
       Object.keys(PALETTE_VARS).forEach(function (key) {
         if (palette[key]) root.style.setProperty(PALETTE_VARS[key], palette[key])
       })
     }
-
-    document.getElementById('hide').addEventListener('click', function () { send('hide') })
 
     // 点一下选整条地址（已经手动选过就不动它），再 ⌘C / Ctrl+C 复制。复制走主进程的
     // 剪贴板：这条顶栏是 data: URL，不指望渲染进程自己的复制权限。
@@ -229,7 +206,6 @@ export function chromeHtml() {
       if (!text) return
       event.preventDefault()
       send('copy', { text: text })
-      flashHint('已复制')
     })
 
     // Electron 默认不给页面右键菜单，所以右键不弹「复制」：有选中就复制选中的，没有就
@@ -239,7 +215,6 @@ export function chromeHtml() {
       if (!text) return
       event.preventDefault()
       send('copy', { text: text })
-      flashHint('已复制')
     })
 
     window.__micaChrome = {
@@ -247,19 +222,31 @@ export function chromeHtml() {
         state = state || {}
         applyPalette(state.palette)
         label.textContent = state.label || '受控浏览器'
-        owner.textContent = state.owner ? '用户会话 ' + state.owner : '未归属'
+        badge.title = label.textContent + (state.owner ? '\\n用户会话 ' + state.owner : '\\n未归属')
         url.textContent = state.url || 'about:blank'
-        url.title = state.url || ''
-        loading.className = state.loading ? 'loading on' : 'loading'
+        url.title = url.textContent + '\\n地址由 Mica 控制，不可编辑；可选中复制'
+        loading.className = state.loading ? 'dot loading' : 'dot'
         tabs.textContent = ''
         var list = state.tabs || []
+        var sharedTitle = list.length > 1 && list[0].title && list.every(function (tab) { return tab.title === list[0].title })
+        if (sharedTitle) {
+          var heading = document.createElement('span')
+          heading.className = 'page-title'
+          heading.textContent = list[0].title
+          heading.title = list[0].title
+          tabs.appendChild(heading)
+        }
         if (list.length > 1) {
-          list.forEach(function (tab) {
-            var node = document.createElement('span')
+          list.forEach(function (tab, index) {
+            var node = document.createElement('button')
+            node.type = 'button'
             node.className = tab.active ? 'tab active' : 'tab'
+            node.title = (tab.title || '新标签页') + '\\n' + (tab.url || '')
+            node.setAttribute('aria-label', '标签页 ' + (index + 1) + '：' + (tab.title || '新标签页'))
+            node.setAttribute('aria-pressed', String(Boolean(tab.active)))
             var title = document.createElement('span')
             title.className = 'title'
-            title.textContent = tab.title || '新标签页'
+            title.textContent = sharedTitle ? String(index + 1) : (tab.title || '新标签页')
             node.appendChild(title)
             node.addEventListener('click', function () { send('activateTab', { tabId: tab.id }) })
             tabs.appendChild(node)
@@ -269,7 +256,8 @@ export function chromeHtml() {
         // 单标签页时标签条没有信息量，把标题放在左边就够
         if (list.length === 1) {
           var single = document.createElement('span')
-          single.className = 'tab active'
+          single.className = 'page-title'
+          single.title = list[0].title || '新标签页'
           var text = document.createElement('span')
           text.className = 'title'
           text.textContent = list[0].title || '新标签页'
