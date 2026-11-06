@@ -195,6 +195,27 @@ describe('normalizePluginPanelView', () => {
     expect(view.statusBar).toEqual({ label: 'prod', tone: 'ok', detail: '已连接', section: '服务器' });
   });
 
+  it('normalizes shortcut previews only when they have a title and content', () => {
+    const view = normalizePluginPanelView({
+      shortcuts: [
+        { id: 'open', label: '打开', action: 'run', preview: {
+          title: '结果', text: '摘要', markdown: '# 被 Markdown 优先', note: '说明',
+          actions: [{ id: 'run', key: 'open:v1', label: '打开' }],
+        } },
+        { id: 'empty', label: '空', action: 'run', preview: { title: '只有标题' } },
+        { id: 'no-title', label: '无标题', action: 'run', preview: { text: '摘要' } },
+      ],
+    });
+    expect(view.shortcuts).toEqual([
+      {
+        id: 'open', label: '打开', action: 'run',
+        preview: { title: '结果', markdown: '# 被 Markdown 优先', note: '说明', actions: [{ id: 'run', key: 'open:v1', label: '打开' }] },
+      },
+      { id: 'empty', label: '空', action: 'run' },
+      { id: 'no-title', label: '无标题', action: 'run' },
+    ]);
+  });
+
   it('accepts a password field and drops unknown field types', () => {
     const view = normalizePluginPanelView({
       title: 'ssh',

@@ -94,15 +94,30 @@ describe('快捷按钮面板 view', () => {
     const view = handler.view({ role: 'default' });
 
     // 输入框上方那一排：id 同时是点击时回传的 key
-    expect(view.shortcuts).toEqual([
-      { id: 'doc', label: '打开需求单', action: RUN_ACTION, key: expect.stringMatching(/^doc:/) },
-      { id: 'ask', label: '追问', action: RUN_ACTION, key: expect.stringMatching(/^ask:/) },
-    ]);
+    expect(view.shortcuts).toHaveLength(2);
+    expect(view.shortcuts?.[0]).toMatchObject({ id: 'doc', label: '打开需求单', action: RUN_ACTION, key: expect.stringMatching(/^doc:/) });
+    expect(view.shortcuts?.[1]).toMatchObject({ id: 'ask', label: '追问', action: RUN_ACTION, key: expect.stringMatching(/^ask:/) });
     expect(view.subtitle).toContain('2 个按钮');
     const list = view.sections?.[0];
     expect(list?.items?.map((item) => item.label)).toEqual(['打开需求单', '追问']);
     expect(list?.items?.[0].value).toBe('打开网页 · https://example.com/1（受控浏览器）');
     expect(list?.items?.[0].actions?.[0].id).toBe(REMOVE_ACTION);
+  });
+
+  it('gives useful hover previews and preserves the fingerprinted run action', () => {
+    const { handler } = harness(replaceQuickButtons([
+      { id: 'doc', label: '报告', kind: 'path', path: '/tmp/report.md' },
+      { id: 'custom', label: '自定义', kind: 'compose', text: '追问', preview: { title: '结果', text: '已完成' } },
+    ]));
+    const shortcuts = handler.view({ role: 'default' }).shortcuts!;
+    expect(shortcuts[0].preview).toMatchObject({ title: '报告', text: '/tmp/report.md' });
+    expect(shortcuts[1].preview).toMatchObject({ title: '结果', text: '已完成' });
+    expect(shortcuts[0].preview?.actions).toEqual([
+      { id: RUN_ACTION, key: shortcuts[0].key, label: '在 Mica 中打开', tone: 'primary' },
+    ]);
+    expect(shortcuts[1].preview?.actions).toEqual([
+      { id: RUN_ACTION, key: shortcuts[1].key, label: '继续追问', tone: 'primary' },
+    ]);
   });
 
   it('gives an empty state and no buttons when the session has none', () => {
@@ -290,7 +305,7 @@ describe('按钮外观与弹窗', () => {
         },
       ]),
     );
-    expect(handler.view({ role: 'default' }).shortcuts?.[0]).toEqual({
+    expect(handler.view({ role: 'default' }).shortcuts?.[0]).toMatchObject({
       id: 'doc',
       label: '打开',
       action: RUN_ACTION,

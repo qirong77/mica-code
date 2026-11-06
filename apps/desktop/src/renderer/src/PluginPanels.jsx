@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ExternalLink,
@@ -113,6 +113,127 @@ const TAG_TONES = {
 const BUTTON_VARIANTS = { primary: 'primary', danger: 'danger', default: 'default' }
 const CARD_BUTTON_VARIANTS = {
   primary: 'accent', default: 'default', ghost: 'ghost', danger: 'danger-ghost'
+}
+
+const PREVIEW_HOVER_DELAY_MS = 180
+
+function previewActionId(action) {
+  if (typeof action?.action === 'string' && action.action.trim()) return action.action.trim()
+  if (typeof action?.id === 'string' && action.id.trim()) return action.id.trim()
+  return ''
+}
+
+function QuickbarPreview({ preview, anchor, onClose, onRun }) {
+  const ref = useRef(null)
+  const [position, setPosition] = useState({ left: anchor.left, top: anchor.top })
+  const markdown = typeof preview?.markdown === 'string' ? preview.markdown : ''
+  const text = typeof preview?.text === 'string' ? preview.text : ''
+  const columns = Array.isArray(preview?.columns) ? preview.columns : []
+  const rows = Array.isArray(preview?.rows) ? preview.rows : []
+  const actions = Array.isArray(preview?.actions)
+    ? preview.actions.filter((action) => previewActionId(action) && action?.label)
+    : []
+
+  useEffect(() => {
+    const close = (event) => {
+      if (event.target?.closest?.('.chat-plugin-quickbar-group, .chat-plugin-quickbar-preview')) return
+      onClose()
+    }
+    const keydown = (event) => {
+      if (event.key === 'Escape') onClose()
+    }
+    const focus = (event) => {
+      if (event.target?.closest?.('.chat-plugin-quickbar-group, .chat-plugin-quickbar-preview')) return
+      onClose()
+    }
+    const viewport = () => onClose()
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', keydown)
+    window.addEventListener('focusin', focus)
+    window.addEventListener('resize', viewport)
+    window.addEventListener('scroll', viewport, true)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', keydown)
+      window.removeEventListener('focusin', focus)
+      window.removeEventListener('resize', viewport)
+      window.removeEventListener('scroll', viewport, true)
+    }
+  }, [onClose])
+
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    const width = ref.current.offsetWidth
+    const height = ref.current.offsetHeight
+    let left = Math.min(anchor.left, window.innerWidth - width - 8)
+    let top = anchor.top - height - 8
+    if (top < 8) top = anchor.bottom + 8
+    if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8)
+    left = Math.max(8, left)
+    setPosition({ left, top })
+  }, [anchor, columns.length, markdown, preview, rows.length, text])
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="chat-plugin-quickbar-preview"
+      role="dialog"
+      aria-label={preview?.title || '快捷按钮预览'}
+      style={{ left: position.left, top: position.top }}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {(preview?.title || preview?.subtitle) && (
+        <header className="chat-plugin-quickbar-preview-head">
+          {preview.title && <strong className="chat-plugin-quickbar-preview-title">{preview.title}</strong>}
+          {preview.subtitle && <span className="chat-plugin-quickbar-preview-subtitle">{preview.subtitle}</span>}
+        </header>
+      )}
+      {(markdown || text) && (
+        <div className="chat-plugin-quickbar-preview-body">
+          {markdown ? <Markdown text={markdown} /> : <p>{text}</p>}
+        </div>
+      )}
+      {columns.length > 0 && rows.length > 0 && (
+        <div className="chat-plugin-quickbar-preview-table-wrap">
+          <table className="chat-plugin-table is-compact chat-plugin-quickbar-preview-table">
+            <thead>
+              <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} className={cell?.tone ? `tone-${cell.tone}` : undefined}>
+                      <span title={cell?.text || ''}>{cell?.text || ''}</span>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {preview?.note && <p className="chat-plugin-quickbar-preview-note">{preview.note}</p>}
+      {actions.length > 0 && (
+        <footer className="chat-plugin-quickbar-preview-actions" role="group" aria-label="预览操作">
+          {actions.map((action) => (
+            <Button
+              key={`${previewActionId(action)}:${action.key || ''}`}
+              size="compact"
+              variant={CARD_BUTTON_VARIANTS[action.tone] || 'default'}
+              onClick={() => {
+                onClose()
+                onRun(action)
+              }}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </footer>
+      )}
+    </div>,
+    document.body
+  )
 }
 
 /**
@@ -258,6 +379,7 @@ export function PluginQuickBar({
   // 动作可以回一句话（「先添加频道」这类）：显示在按钮旁边，几秒后自己消失。
   const [feedback, setFeedback] = useState('')
   const [openMenu, setOpenMenu] = useState('')
+  const [previewState, setPreviewState] = useState(null)
   // 子项菜单的落点按触发按钮的矩形现算（菜单本体是共享的 FloatingMenu，自己会收敛视口）。
   const [menuPos, setMenuPos] = useState(null)
   // 动态菜单要问插件要条目（分支是会话事实，清单里写不出来）。条目在页面层按会话缓存
@@ -409,6 +531,7 @@ export function PluginQuickBar({
     clearHover()
     setMenuViews({})
     setOpenMenu('')
+    setPreviewState(null)
     setShortcutViews({})
     setStatusBars({})
     setRuntimeShortcuts({})
@@ -584,10 +707,11 @@ export function PluginQuickBar({
   }
 
   const runShortcut = async (event, panel, shortcut, key) => {
+    clearHover()
+    setPreviewState(null)
     // `menu` 说的是悬停看到什么，`section` / `action` 说的是点击做什么：两者共存时点击
     // 应该真的进面板改配置，而不是停在预览上。
     if (shortcut.section) {
-      clearHover()
       setOpenMenu('')
       openSection(panel, shortcut.section)
       return
@@ -597,10 +721,39 @@ export function PluginQuickBar({
       await runAction(panel, shortcut.action, shortcut.key, key)
       return
     }
-    clearHover()
     if (openMenu === key) setOpenMenu('')
     else showMenu(event?.currentTarget?.getBoundingClientRect?.() || null, panel, shortcut, key)
   }
+
+  const showPreview = useCallback((eventOrRect, panel, shortcut, key) => {
+    if (!shortcut?.preview) return
+    const rect = eventOrRect?.currentTarget?.getBoundingClientRect?.() || eventOrRect
+    if (!rect) return
+    clearHover()
+    setOpenMenu('')
+    setPreviewState({
+      key,
+      panel,
+      shortcut,
+      anchor: {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        bottom: Math.round(rect.bottom),
+        right: Math.round(rect.right)
+      }
+    })
+  }, [clearHover])
+
+  const hoverPreview = useCallback((event, panel, shortcut, key) => {
+    if (!shortcut?.preview) return
+    clearHover()
+    const rect = event?.currentTarget?.getBoundingClientRect?.()
+    if (!rect) return
+    hoverTimer.current = window.setTimeout(() => {
+      hoverTimer.current = 0
+      showPreview(rect, panel, shortcut, key)
+    }, PREVIEW_HOVER_DELAY_MS)
+  }, [clearHover, showPreview])
 
   return (
     <div className="chat-plugin-quickbar-stack">
@@ -674,10 +827,11 @@ export function PluginQuickBar({
             <div
               key={key}
               className={`chat-plugin-quickbar-group${first && panels.length > 1 ? ' is-plugin-start' : ''}`}
-              onMouseEnter={
-                group && !disabled ? (event) => hoverMenu(event, panel, shortcut, key) : undefined
-              }
-              onMouseLeave={group ? clearHover : undefined}
+              onMouseEnter={!disabled ? (event) => {
+                if (shortcut.preview) hoverPreview(event, panel, shortcut, key)
+                else if (group) hoverMenu(event, panel, shortcut, key)
+              } : undefined}
+              onMouseLeave={clearHover}
             >
               <button
                 type="button"
@@ -688,6 +842,7 @@ export function PluginQuickBar({
                 aria-expanded={group ? openMenu === key : undefined}
                 disabled={Boolean(pending) || disabled}
                 className={look.className}
+                onFocus={(event) => showPreview(event, panel, shortcut, key)}
                 onClick={(event) => void runShortcut(event, panel, shortcut, key)}
               >
                 {look.icon && <PluginIcon name={look.icon} size={13} />}
@@ -779,6 +934,22 @@ export function PluginQuickBar({
           </span>
         )}
       </div>}
+      {previewState?.shortcut?.preview && (
+        <QuickbarPreview
+          preview={previewState.shortcut.preview}
+          anchor={previewState.anchor}
+          onClose={() => setPreviewState(null)}
+          onRun={(action) => {
+            const id = previewActionId(action)
+            if (id) void runAction(
+              previewState.panel,
+              id,
+              typeof action.key === 'string' ? action.key : undefined,
+              `${previewState.key}:preview:${id}`
+            )
+          }}
+        />
+      )}
     </div>
   )
 }

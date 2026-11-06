@@ -24,7 +24,7 @@ export interface MicaUiMessageParam {
   role: 'user' | 'assistant' | 'notice';
   content: string | MicaUiContentBlockParam[];
   displayContent?: string | MicaUiContentBlockParam[];
-  variant?: 'commit' | 'config' | 'compact' | 'error';
+  variant?: 'commit' | 'config' | 'compact' | 'digest' | 'error';
   command?: string;
   status?: MicaUiCommandStatus;
 }
@@ -124,7 +124,7 @@ export type MicaUiConversationMessage =
       role: 'notice';
       content: string | MicaUiContentBlockParam[];
       displayContent?: string | MicaUiContentBlockParam[];
-      variant?: 'commit' | 'config' | 'compact' | 'error';
+      variant?: 'commit' | 'config' | 'compact' | 'digest' | 'error';
       command?: string;
       status?: MicaUiCommandStatus;
     };

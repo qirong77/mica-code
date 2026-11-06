@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Button, DataTable, Segmented, SelectMenu, Tag } from '@mica-config-ui/web'
 import { BarSeries, CalendarHeatmap } from './charts'
-import { SpeedTrend } from './SpeedTrend'
+import { shouldUseLogScale, SpeedTrend } from './SpeedTrend'
 import { OverviewVisuals } from './OverviewVisuals'
 import { SessionDetailModal } from './SessionDetailModal'
 import {
@@ -623,6 +623,7 @@ function ModelPerformanceCard({ scoped }) {
     }))
   }, [rows, daily, minutes, metric, intraday])
   const shown = series.filter((item) => !hidden.includes(item.id))
+  const logScale = shouldUseLogScale(shown)
   const missingTimedSamples =
     intraday &&
     series.some(
@@ -638,7 +639,10 @@ function ModelPerformanceCard({ scoped }) {
   return (
     <section className={`${CARD_CLASS} p-4`}>
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className={OVERLINE_CLASS}>模型速度</h2>
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className={OVERLINE_CLASS}>模型速度</h2>
+          {logScale && <Tag>对数刻度</Tag>}
+        </div>
         <span className="mica-config-ui is-embed">
           <Segmented
             size="compact"
@@ -657,6 +661,7 @@ function ModelPerformanceCard({ scoped }) {
           ? '请求开始到首次内容的平均等待，包含重试。'
           : '输出 tokens ÷ 首末内容增量间隔的估算速率，可能包含推理 tokens。'}{' '}
         仅统计有计时的成功请求。
+        {logScale ? ' 数据跨度较大，图表使用对数刻度以保留正常请求的可读性。' : ''}
         {series.length > 1 ? ' 点击图例可显示或隐藏模型。' : ''}
       </p>
       {series.length === 0 ? (
@@ -679,10 +684,13 @@ function ModelPerformanceCard({ scoped }) {
             </button>
           </div>
           {/* 图例按图表惯例贴在图的右上角：单位在左，模型色块在右，点一下显示或隐藏。 */}
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
-            <span className="text-[10px] text-fg-dim">{unitText}</span>
+          <div className="mt-3 rounded-[4px] border border-line bg-canvas/40 p-1.5">
+            <div className="mb-1 flex items-center justify-between px-1 text-[10px] text-fg-dim">
+              <span>{unitText}</span>
+              <span>{series.reduce((total, item) => total + item.samples, 0).toLocaleString()} 个样本</span>
+            </div>
             <div
-              className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-1"
+              className="grid min-w-0 grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3"
               aria-label="模型图例"
             >
               {series.map((item) => {
@@ -694,7 +702,7 @@ function ModelPerformanceCard({ scoped }) {
                     aria-pressed={!isHidden}
                     onClick={() => toggle(item.id)}
                     title={`${item.label} · ${formatValue(item.value)}（区间汇总，${item.samples} 个样本）· 点击显示或隐藏`}
-                    className={`inline-flex max-w-[15rem] min-w-0 items-center gap-1.5 rounded px-1.5 py-0.5 leading-5 transition-colors hover:bg-panel-hi focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg-soft ${isHidden ? 'opacity-40' : ''}`}
+                    className={`inline-flex min-w-0 items-center gap-1.5 rounded px-2 py-1 text-left leading-5 transition-colors hover:bg-panel-hi focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg-soft ${isHidden ? 'opacity-40' : ''}`}
                   >
                     <svg width="14" height="8" className="shrink-0" aria-hidden="true">
                       <line
@@ -708,7 +716,7 @@ function ModelPerformanceCard({ scoped }) {
                       />
                       <circle cx="7" cy="4" r="3" fill={item.color} />
                     </svg>
-                    <span className="min-w-0 truncate text-[11px] text-fg-muted">{item.label}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">{item.label}</span>
                     <span className="shrink-0 text-[11px] tabular-nums text-fg-dim">
                       {formatValue(item.value)}
                     </span>
@@ -731,10 +739,11 @@ function ModelPerformanceCard({ scoped }) {
             key={metric}
             series={shown}
             intraday={intraday}
+            logScale={logScale}
             formatValue={formatValue}
             formatTick={(value) =>
               metric === 'responseWait'
-                ? (value / 1000).toFixed(1)
+                ? `${(value / 1000).toFixed(value < 1000 ? 2 : 1)}s`
                 : Number(value.toFixed(1)).toString()
             }
             unit={unitText}

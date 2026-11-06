@@ -800,6 +800,21 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
   )
 }
 
+function DigestNotice({ message, onOpenFile }) {
+  return (
+    <section className="chat-digest-card" aria-label="长回复摘要">
+      <div className="chat-digest-head">
+        <span className="chat-digest-mark" aria-hidden="true">✦</span>
+        <span className="chat-digest-title">长回复摘要</span>
+        <span className="chat-digest-meta">自动整理</span>
+      </div>
+      <div className="chat-digest-body">
+        <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
+      </div>
+    </section>
+  )
+}
+
 function isLocalPath(value) {
   return /^(?:~\/|\/|[a-zA-Z]:[\\/])/.test(String(value || '')) && !String(value).startsWith('//')
 }
@@ -2888,6 +2903,9 @@ function MessageRowView({
     return <CommandRow message={message} onCommandAction={onCommandAction} />
   }
   if (message.kind === 'notice') {
+    if (message.variant === 'digest') {
+      return <DigestNotice message={message} onOpenFile={onOpenFile} />
+    }
     const title =
       message.command ||
       (message.variant === 'compact' ? '/compact' : message.variant === 'error' ? '/error' : '')

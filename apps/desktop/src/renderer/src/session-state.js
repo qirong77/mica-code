@@ -78,6 +78,25 @@ export function draftMarkers(drafts, previous = new Set()) {
   return next
 }
 
+// Only unbound conversations use their unsent text as a provisional title.
+export function draftTitles(nodes, drafts, previous = {}) {
+  const next = {}
+  for (const node of nodes || []) {
+    if (node.type !== 'terminal' || node.sessionId) continue
+    const text = typeof drafts?.[node.id] === 'string' ? drafts[node.id] : ''
+    const title = text.trim().replace(/\s+/g, ' ').slice(0, 120)
+    if (title) next[node.id] = title
+  }
+  const keys = Object.keys(next)
+  if (
+    keys.length === Object.keys(previous).length &&
+    keys.every((id) => next[id] === previous[id])
+  ) {
+    return previous
+  }
+  return next
+}
+
 /**
  * 折叠起来的分组/分区会把里面的行从侧栏藏掉，那一层必须替它显示状态，否则
  * 「正在跑」和「有未读」在折叠状态下完全不可见。合并优先级与 RowLeading 的

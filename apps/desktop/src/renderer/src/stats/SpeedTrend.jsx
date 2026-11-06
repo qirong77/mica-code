@@ -18,12 +18,21 @@ function calendarDays(series) {
   return result
 }
 
+export function shouldUseLogScale(series) {
+  const values = series
+    .flatMap((item) => item.points.map((point) => point.value))
+    .filter((value) => Number.isFinite(value) && value > 0)
+  if (values.length < 2) return false
+  return Math.max(...values) / Math.min(...values) >= 20
+}
+
 export function SpeedTrend({
   series,
   formatValue,
   formatTick = formatValue,
   unit,
-  intraday = false
+  intraday = false,
+  logScale = false
 }) {
   const elementRef = useRef(null)
   const chartRef = useRef(null)
@@ -167,9 +176,9 @@ export function SpeedTrend({
             }
           },
           yAxis: {
-            type: 'value',
-            min: 0,
-            splitNumber: 3,
+            type: logScale ? 'log' : 'value',
+            ...(logScale ? {} : { min: 0 }),
+            splitNumber: logScale ? 4 : 3,
             axisLabel: { color: color('--color-fg-dim'), fontSize: 11, formatter: formatTick },
             splitLine: { lineStyle: { color: color('--color-line') } }
           },

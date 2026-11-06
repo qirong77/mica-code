@@ -67,7 +67,7 @@
 
   清单里按钮的数量是静态的；**运行期的按钮**（模型在会话里现建的一排）走 `desktop.panel.dynamicShortcuts: true` + 视图的 `shortcuts`：合并与 key 在 `renderer/src/plugin-panels.js` 的 `pluginQuickbarItems`（清单的在前、运行期的 key 带 `view:` 前缀），拉视图的时机与 `status` 同一套（首屏预热、工具完成后刷新、30s 与可见性变化轮询），点击时把按钮的 `key` 一起交给插件动作。声明了 `dynamicShortcuts` 的面板即使此刻一枚按钮都没有也要接工具完成事件——那一排就是工具跑完才出现的。
 
-  按钮外观只由插件声明**意图**（`style: { icon, color, shape, iconOnly }`），画法收在 `quickbarButtonLook()` 一处：`color-accent/danger/success/warn` 与 `shape-soft/plain`、`is-icon-only` 都是 `app.css` 里对着主题令牌写的类（`.chat-plugin-quickbar-button.*`），图标走 `@mica-config-ui/web` 的 `PluginIcon`。改视觉只改这些类，不要在插件或 JSX 里写色值。
+  按钮外观只由插件声明**意图**（`style: { icon, color, shape, iconOnly }`），画法收在 `quickbarButtonLook()` 一处：`color-accent/danger/success/warn` 与 `shape-soft/plain`、`is-icon-only` 都是 `app.css` 里对着主题令牌写的类（`.chat-plugin-quickbar-button.*`），图标走 `@mica-config-ui/web` 的 `PluginIcon`。运行期按钮还可带通用 `preview`（标题、纯文本或 Markdown、表格、说明、动作），宿主用 portal 画非打断式预览卡片，hover 延迟约 180ms、键盘聚焦也可打开，点外 / Esc / 滚动关闭；卡片动作仍回到插件原 action，不在渲染层写死插件名词。大内容只滚正文，底部动作固定；强制用户做选择才用 `dialog` Modal。改视觉只改这些类，不要在插件或 JSX 里写色值。
 
   插件弹窗（`dialog`）由 `ChatView` 的 `PluginTableDialog` 画：ModalShell + 表格 + `Button`，正文支持 `markdown`（与面板分区同一套渲染），底部的 `actions` 用共享 `Button` 画、点了经 `runPanelEntryAction` 交回插件自己的 `action`（与 `desktop.panel.open` 同一条通路，先收起旧弹窗，插件回新弹窗就替换）。
 - 清单 `desktop.panel.status: true` 的插件额外给一行**常驻状态行**（视图返回 `statusBar`，画在输入框正上方、面板关着也在），用来说「这个能力此刻生效没有」。宿主里快捷栏与抽屉各存一份视图，抽屉的动作改完要经 `plugin-panels.js` 的 `notifyPluginPanelStatusChanged()` 广播一次，状态行立刻跟着变，不要等 30 秒轮询。

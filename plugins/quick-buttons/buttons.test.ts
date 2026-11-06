@@ -298,6 +298,14 @@ describe('弹窗按钮（kind: dialog）', () => {
     expect(button?.dialog?.text).toBeUndefined();
   });
 
+  it('normalizes optional hover previews and keeps text / markdown mutually exclusive', () => {
+    expect(normalizeQuickButton({ id: 'open', ...open(), preview: {
+      title: '结果', text: '文本', markdown: '# Markdown', note: '说明',
+    } })).toMatchObject({ preview: { title: '结果', markdown: '# Markdown', note: '说明' } });
+    expect(normalizeQuickButton({ id: 'open', ...open(), preview: { title: '只有标题' } })?.preview).toBeUndefined();
+    expect(normalizeQuickButton({ id: 'open', ...open(), preview: { text: '无标题' } })?.preview).toBeUndefined();
+  });
+
   it('summarises the popup in one line for the tool result', () => {
     const buttons = replaceQuickButtons([
       {

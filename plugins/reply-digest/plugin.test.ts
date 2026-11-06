@@ -27,8 +27,8 @@ describe('reply-digest plugin', () => {
     expect(harness.request.owner).toBe(harness.owner);
     expect(harness.notices).toEqual([
       {
-        content: '长回复摘要\n\n已完成实现并通过验证。',
-        options: expect.objectContaining({ owner: harness.owner, variant: 'compact' }),
+        content: '**已完成实现**\n\n- 通过验证。',
+        options: expect.objectContaining({ owner: harness.owner, variant: 'digest' }),
       },
     ]);
   });
@@ -100,7 +100,7 @@ function createHarness(options: { fail?: boolean } = {}) {
     ? vi.fn(async () => {
         throw new Error('provider unavailable');
       })
-    : vi.fn(async () => ({ text: '已完成实现并通过验证。', usage: null }));
+    : vi.fn(async () => ({ text: '**已完成实现**\n\n- 通过验证。', usage: null }));
   const settings: PluginSettingValues = {
     charThreshold: '1800',
     lineThreshold: '36',

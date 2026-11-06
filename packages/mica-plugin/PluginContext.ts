@@ -99,7 +99,7 @@ export type PluginNoticeOptions = {
    * surface 的同 `command` notice 就把它撤掉并落进对话。
    */
   surface?: 'conversation' | 'command_panel';
-  variant?: 'commit' | 'config' | 'compact' | 'error';
+  variant?: 'commit' | 'config' | 'compact' | 'digest' | 'error';
   /** 写进哪条会话；不传就是当前会话。句柄来自 `ctx.session` 的 owner。 */
   owner?: unknown;
   /**

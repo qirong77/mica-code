@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { BrowserWindow, WebContentsView, clipboard, session } from 'electron'
+import { BrowserWindow, Menu, WebContentsView, clipboard, session } from 'electron'
 import {
   BROWSER_PARTITION,
   BrowserRequestError,
@@ -228,6 +228,7 @@ export function createBrowserManager({
       label: record.label,
       incognito: record.incognito,
       owner: record.owner || '',
+      windowCount: browsers.size,
       url: current?.url || '',
       title: current?.title || '',
       loading: Boolean(current?.loading),
@@ -243,6 +244,10 @@ export function createBrowserManager({
       .catch(() => {
         // chrome 还在加载或窗口已销毁：下一次状态变化会再推一遍
       })
+  }
+
+  function refreshWindowCounts() {
+    for (const record of browsers.values()) pushChrome(record)
   }
 
   function syncWindowTitle(record) {
@@ -319,6 +324,7 @@ export function createBrowserManager({
       destroyRequested: false
     }
     browsers.set(id, record)
+    refreshWindowCounts()
 
     win.on('close', (event) => {
       // 用户点关闭 = 隐藏；应用退出或显式 close 才真的销毁（否则关一次就丢现场）
@@ -331,6 +337,7 @@ export function createBrowserManager({
       for (const tab of record.tabs) detachTab(tab)
       record.tabs = []
       browsers.delete(id)
+      refreshWindowCounts()
       // 只清理本窗口的临时分区，绝不清理共享的普通浏览器数据。
       if (record.incognito) {
         void Promise.all([browserSession.clearStorageData(), browserSession.clearCache()]).catch(
@@ -378,6 +385,24 @@ export function createBrowserManager({
   }
 
   function handleChromeMessage(record, message) {
+    if (message.action === 'showWindows') {
+      const entries = [...browsers.values()].filter((item) => !item.win.isDestroyed())
+      if (entries.length < 2) return
+      const menu = Menu.buildFromTemplate(
+        entries.map((item, index) => {
+          const current = activeTab(item)
+          const title = current?.title || current?.url || item.label || '受控浏览器'
+          return {
+            label: `${index + 1}. ${item.incognito ? '无痕 · ' : ''}${title}${item.id === record.id ? '（当前窗口）' : !item.visible ? '（已隐藏）' : ''}`,
+            click: () => {
+              if (browsers.has(item.id)) showBrowser(item.id)
+            }
+          }
+        })
+      )
+      menu.popup({ window: record.win })
+      return
+    }
     if (message.action === 'hide') {
       hideBrowser(record.id)
       return

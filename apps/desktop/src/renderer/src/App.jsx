@@ -84,6 +84,7 @@ import {
 import {
   dismissSessionInterruptions,
   draftMarkers,
+  draftTitles,
   runningTerminalSessions,
   sameSessionSnapshot
 } from './session-state'
@@ -2137,7 +2138,20 @@ export default function App() {
     for (const node of terminalNodes) if (node.sessionId) map[node.sessionId] = node.id
     return map
   }, [terminalNodes])
-  const draftTabs = useMemo(() => terminalNodes.filter((node) => !node.sessionId), [terminalNodes])
+  const [draftTitleMap, setDraftTitleMap] = useState({})
+  useEffect(() => {
+    const sync = () =>
+      setDraftTitleMap((previous) => draftTitles(terminalNodes, uiStateKeys().drafts, previous))
+    sync()
+    return subscribeUiState(sync)
+  }, [terminalNodes])
+  const draftTabs = useMemo(
+    () =>
+      terminalNodes
+        .filter((node) => !node.sessionId)
+        .map((node) => (draftTitleMap[node.id] ? { ...node, text: draftTitleMap[node.id] } : node)),
+    [terminalNodes, draftTitleMap]
+  )
   // 右侧终端不在 nodes 里，靠它们创建时记下的归属会话，把「这个终端有前台进程在跑」
   // 映射回左侧会话行（notify 状态按 PTY id 保存，折成终端节点 id 后即可对齐）。
   const sessionsWithRunningTerminal = useMemo(

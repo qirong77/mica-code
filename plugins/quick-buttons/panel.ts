@@ -9,6 +9,7 @@ import type {
   PluginPanelItem,
   PluginPanelView,
 } from '@packages/mica-plugin/index.js';
+import type { PluginPanelShortcutPreview } from '@packages/mica-plugin/index.js';
 import { openInControlledBrowser, type FetchLike } from './browser.js';
 import {
   QUICK_BUTTON_KINDS,
@@ -76,6 +77,7 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
           label: button.label,
           action: RUN_ACTION,
           key: buttonKey(button),
+          preview: previewOf(button, buttonKey(button)),
           ...(button.style ? { style: button.style } : {}),
         })),
         shortcutStates: Object.fromEntries(
@@ -237,6 +239,54 @@ async function runDialogAction(deps: PanelDeps, key: string): Promise<PluginPane
  * 「模型写的内容」（清单 / 做法）。翻译放在这里，页面只认识宿主那一份——插件因此不需要
  * 自带任何组件，弹窗仍是宿主那套 ModalShell / 表格 / 按钮。
  */
+/** 快捷条的预览只提供一个「按钮本身」动作；模型不能从 preview 注入动作。 */
+function previewOf(button: QuickButton, key: string): PluginPanelShortcutPreview {
+  const action = { id: RUN_ACTION, key, label: previewActionLabel(button), tone: 'primary' as const };
+  if (button.preview) return { ...button.preview, actions: [action] };
+  if (button.kind === 'dialog' && button.dialog) {
+    const dialog = toPanelDialog(button.dialog, key);
+    return {
+      title: dialog.title,
+      ...(dialog.subtitle ? { subtitle: dialog.subtitle } : {}),
+      ...(dialog.text ? { text: dialog.text } : {}),
+      ...(dialog.markdown ? { markdown: dialog.markdown } : {}),
+      ...(dialog.columns && dialog.rows ? { columns: dialog.columns, rows: dialog.rows } : {}),
+      ...(dialog.note ? { note: dialog.note } : {}),
+      ...(dialog.actions?.length ? { actions: dialog.actions } : { actions: [action] }),
+    };
+  }
+  return { title: button.label, text: previewTextOf(button), actions: [action] };
+}
+
+function previewActionLabel(button: QuickButton): string {
+  switch (button.kind) {
+    case 'open':
+      return button.target === 'external' ? '打开系统浏览器' : '打开预览';
+    case 'path':
+      return '在 Mica 中打开';
+    case 'compose':
+      return '继续追问';
+    case 'session':
+      return '开新会话';
+    case 'dialog':
+      return '查看选项';
+  }
+}
+
+function previewTextOf(button: QuickButton): string {
+  switch (button.kind) {
+    case 'open':
+      return `${button.url}${button.target === 'external' ? '（系统浏览器）' : '（内置浏览器）'}`;
+    case 'path':
+      return button.path || '';
+    case 'compose':
+    case 'session':
+      return button.role ? `${button.text || ''}\n\n角色：${button.role}` : button.text || '';
+    case 'dialog':
+      return button.dialog?.title || '';
+  }
+}
+
 export function toPanelDialog(dialog: QuickDialog, key: string): PluginPanelDialog {
   const items = dialog.items || [];
   const actions = dialog.actions || [];

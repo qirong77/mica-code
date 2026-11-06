@@ -140,7 +140,7 @@ function showCommandPanelNoticeForSession(
   updateCommandPanelItemForSession(context, ownerSessionId, id, (existing) => ({
     id,
     command,
-    variant: options.variant,
+    variant: options.variant === 'digest' ? undefined : options.variant,
     status: options.status ?? 'success',
     text,
     lines: existing?.lines ?? [],

@@ -183,7 +183,7 @@ export type ExclusiveTaskOptions = PluginStatusOptions & {
 };
 
 export type CommandNoticeOptions = {
-  variant?: 'commit' | 'config' | 'compact' | 'error';
+  variant?: 'commit' | 'config' | 'compact' | 'digest' | 'error';
   command?: string;
   surface?: 'conversation' | 'command_panel';
   status?: 'running' | 'success' | 'warning' | 'error' | 'info';

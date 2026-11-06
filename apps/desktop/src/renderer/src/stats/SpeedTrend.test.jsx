@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { SpeedTrend } from './SpeedTrend.jsx'
+import { shouldUseLogScale, SpeedTrend } from './SpeedTrend.jsx'
 
 const render = (series, intraday = false) =>
   renderToStaticMarkup(
@@ -9,6 +9,16 @@ const render = (series, intraday = false) =>
   )
 
 describe('SpeedTrend', () => {
+  it('uses a logarithmic scale when samples span several orders of magnitude', () => {
+    expect(
+      shouldUseLogScale([
+        { points: [{ value: 0.8 }, { value: 2 }] },
+        { points: [{ value: 210 }] }
+      ])
+    ).toBe(true)
+    expect(shouldUseLogScale([{ points: [{ value: 1 }, { value: 10 }] }])).toBe(false)
+  })
+
   it('renders a timeline for minute samples', () => {
     const html = render(
       [

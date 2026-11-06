@@ -89,6 +89,12 @@ const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> 
     backgroundColor: themeColors.surfaceUser,
     title: '/compact',
   },
+  digest: {
+    tone: 'notice',
+    color: themeColors.messageNotice,
+    backgroundColor: themeColors.surfaceNotice,
+    title: 'digest',
+  },
   error: {
     tone: 'retry_error',
     color: themeColors.messageError,

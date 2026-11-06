@@ -3,6 +3,7 @@ import {
   collectGroupStates,
   dismissSessionInterruptions,
   draftMarkers,
+  draftTitles,
   liveSessionRowState,
   mergeRowStates,
   runningTerminalSessions,
@@ -23,6 +24,20 @@ describe('draftMarkers', () => {
     expect(draftMarkers({ a: 'yy' }, markers)).toBe(markers)
     expect(draftMarkers({ a: 'x', b: '' }, markers)).toBe(markers)
     expect(draftMarkers({ a: 'x', b: 'y' }, markers)).not.toBe(markers)
+  })
+})
+
+describe('draftTitles', () => {
+  it('updates only unbound conversations and restores the default when cleared', () => {
+    const nodes = [
+      { id: 'new', type: 'terminal' },
+      { id: 'existing', type: 'terminal', sessionId: 's1' }
+    ]
+    const titles = draftTitles(nodes, { new: '  hello\n world ', existing: 'reply' })
+    expect(titles).toEqual({ new: 'hello world' })
+    expect(draftTitles(nodes, { new: 'hello world', existing: 'changed' }, titles)).toBe(titles)
+    expect(draftTitles(nodes, { new: '   ' }, titles)).toEqual({})
+    expect(draftTitles([{ ...nodes[0], sessionId: 's2' }], { new: 'hello' }, titles)).toEqual({})
   })
 })
 

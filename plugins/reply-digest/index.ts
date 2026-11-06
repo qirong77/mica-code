@@ -15,7 +15,7 @@ import {
 const DEFAULT_PROMPT = [
   '请把下面 Agent 的最终回复压缩成一段简短摘要。',
   '保留做了什么、关键结论、重要文件或验证结果；不要复述过程，不要编造原文没有的信息。',
-  '使用原回复的语言，最多 4 个要点或 600 个字符，只输出摘要正文，不要加“摘要：”标题。',
+  '使用原回复的语言，最多 4 个要点或 600 个字符，可使用简洁 Markdown，只输出摘要正文，不要加“摘要：”标题。',
 ].join('\n');
 
 export { DEFAULT_PROMPT };
@@ -126,10 +126,10 @@ async function summarize(
   });
   const summary = cleanSummary(result.text, summaryLimit);
   if (!summary || signal.aborted) throw new Error('摘要模型返回了空内容');
-  ctx.ui!.notice(`长回复摘要\n\n${summary}`, {
+  ctx.ui!.notice(summary, {
     owner: event.owner,
     status: 'info',
-    variant: 'compact',
+    variant: 'digest',
   });
   ctx.health.report({ level: 'ok', message: '长回复摘要已生成' });
 }

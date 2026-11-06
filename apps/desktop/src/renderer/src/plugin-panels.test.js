@@ -267,9 +267,33 @@ describe('selectPluginPanels', () => {
     expect(panels[0].shortcuts).toEqual(shortcuts)
   })
 
+  test('keeps preview data on declared shortcuts', () => {
+    const preview = {
+      title: '报告已生成',
+      markdown: '- 3 个文件\n- 测试通过',
+      actions: [{ id: 'open-report', label: '在 Mica 中打开' }]
+    }
+    const shortcut = { label: '生成报告', action: 'report', preview }
+    const panels = selectPluginPanels(
+      [plugin({ desktopPanel: { label: '报告', roles: [], shortcuts: [shortcut] } })],
+      'default'
+    )
+    expect(panels[0].shortcuts).toEqual([shortcut])
+    expect(panels[0].shortcuts[0].preview).toEqual(preview)
+  })
+
   test('treats a panel without shortcuts as having none', () => {
     const panels = selectPluginPanels([plugin({ desktopPanel: { label: '巡检' } })], '需求开发')
     expect(panels[0].shortcuts).toEqual([])
+  })
+
+  test('keeps the original shortcut shape when preview is absent', () => {
+    const shortcut = { label: '检查', action: 'check' }
+    const panels = selectPluginPanels(
+      [plugin({ desktopPanel: { label: '巡检', roles: [], shortcuts: [shortcut] } })],
+      'default'
+    )
+    expect(panels[0].shortcuts).toEqual([shortcut])
   })
 
   test('falls back to the plugin name, then the id, for the label', () => {

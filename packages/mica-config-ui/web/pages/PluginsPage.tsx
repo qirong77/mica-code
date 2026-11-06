@@ -80,7 +80,7 @@ export function PluginsPage({
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
-  const [category, setCategory] = useState<PluginCategory>('desktop');
+  const [category, setCategory] = useState<PluginCategory>('all');
   const [notice, setNotice] = useState<string | null>(null);
   const canToggle = supportsPluginToggle();
   const canSettings = supportsPluginSettings();
@@ -159,7 +159,7 @@ export function PluginsPage({
   );
 }
 
-type PluginCategory = 'desktop' | 'configurable' | 'tools' | 'user';
+type PluginCategory = 'all' | 'desktop' | 'configurable' | 'tools' | 'user';
 
 export function pluginCategory(plugin: ConfigWebPlugin): PluginCategory {
   if (plugin.source === 'user') return 'user';
@@ -171,6 +171,7 @@ export function pluginCategory(plugin: ConfigWebPlugin): PluginCategory {
 }
 
 const PLUGIN_CATEGORIES: { id: PluginCategory; label: string; description: string }[] = [
+  { id: 'all', label: '全部', description: '显示所有已安装的插件' },
   { id: 'desktop', label: '桌面功能', description: '在桌面界面提供入口、面板或会话操作的官方插件' },
   { id: 'configurable', label: '可配置', description: '有设置、运行条件或操作的其他官方插件' },
   { id: 'tools', label: '其他工具', description: '为模型和运行时提供能力的其他官方插件' },
@@ -214,8 +215,8 @@ function PluginCatalog({
   const enabledCount = plugins.filter((plugin) => plugin.state === 'enabled').length;
   const matching = filterPlugins(plugins, filter);
   const selected = PLUGIN_CATEGORIES.find((item) => item.id === category)!;
-  const categoryPlugins = plugins.filter((plugin) => pluginCategory(plugin) === category);
-  const visible = matching.filter((plugin) => pluginCategory(plugin) === category);
+  const categoryPlugins = category === 'all' ? plugins : plugins.filter((plugin) => pluginCategory(plugin) === category);
+  const visible = category === 'all' ? matching : matching.filter((plugin) => pluginCategory(plugin) === category);
 
   return (
     <PageFrame
@@ -260,7 +261,7 @@ function PluginCatalog({
               >
                 {item.label}{' '}
                 <span className="plugin-tab-count">
-                  {matching.filter((plugin) => pluginCategory(plugin) === item.id).length}
+                  {item.id === 'all' ? matching.length : matching.filter((plugin) => pluginCategory(plugin) === item.id).length}
                 </span>
               </button>
             ))}

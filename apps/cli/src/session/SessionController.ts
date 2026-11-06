@@ -893,6 +893,7 @@ function sanitizeConversationMessage(value: unknown): MicaUiConversationMessage 
       ...(record.variant === 'commit' ||
       record.variant === 'config' ||
       record.variant === 'compact' ||
+      record.variant === 'digest' ||
       record.variant === 'error'
         ? { variant: record.variant }
         : {}),

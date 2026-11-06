@@ -392,6 +392,8 @@ export type PluginPanelViewShortcut = {
   key?: string;
   /** 外观（图标 / 强调色 / 形状 / 纯图标）。与清单按钮共用同一份规格。 */
   style?: PluginPanelShortcutStyle;
+  /** 悬停时显示的轻量预览；底部动作仍回到这个快捷按钮自己的 action。 */
+  preview?: PluginPanelShortcutPreview;
 };
 
 export type PluginPanelStatusBar = {
@@ -643,6 +645,12 @@ export type PluginPanelDialog = {
   markdown?: string;
 };
 
+/** 快捷按钮悬停时的轻量预览，复用弹窗的只读内容结构。 */
+export type PluginPanelShortcutPreview = Pick<
+  PluginPanelDialog,
+  'title' | 'subtitle' | 'text' | 'markdown' | 'columns' | 'rows' | 'note' | 'actions'
+>;
+
 export type PluginPanelViewInput = {
   /** 当前会话的角色名（`$MICA_HOME/role/<name>.md`；内置默认是 `default`）。 */
   role: string;
@@ -727,6 +735,7 @@ const MAX_SECTIONS = 12;
 const MAX_DIALOG_COLUMNS = 6;
 const MAX_DIALOG_ROWS = 50;
 const MAX_DIALOG_TEXT = 4000;
+const MAX_SHORTCUT_PREVIEW_MARKDOWN = 8000;
 /** 弹窗底部的动作按钮：一个「说明 + 几个做法」的弹窗给到三颗就够，再多该开面板。 */
 const MAX_DIALOG_ACTIONS = 3;
 const MAX_MENUS = 6;
@@ -1196,6 +1205,7 @@ function viewShortcutsOf(value: unknown): PluginPanelViewShortcut[] | undefined 
     if (!action && !section) continue;
     const key = text(raw.key, MAX_ACTION_ID);
     const style = shortcutStyleOf(raw.style);
+    const preview = shortcutPreviewOf(raw.preview);
     shortcuts.push({
       id,
       label,
@@ -1203,9 +1213,40 @@ function viewShortcutsOf(value: unknown): PluginPanelViewShortcut[] | undefined 
       ...(!action && section ? { section } : {}),
       ...(key ? { key } : {}),
       ...(style ? { style } : {}),
+      ...(preview ? { preview } : {}),
     });
   }
   return shortcuts.length > 0 ? shortcuts : undefined;
+}
+
+/** 预览必须同时有标题和至少一块可读内容；畸形预览不影响按钮本身。 */
+function shortcutPreviewOf(value: unknown): PluginPanelShortcutPreview | undefined {
+  const raw = record(value);
+  const title = text(raw.title, 80);
+  if (!title) return undefined;
+  const subtitle = text(raw.subtitle, 120);
+  const body = text(raw.text, MAX_DIALOG_TEXT);
+  const markdown = verbatim(raw.markdown, MAX_SHORTCUT_PREVIEW_MARKDOWN).trim();
+  const columns = list(raw.columns).slice(0, MAX_DIALOG_COLUMNS).map((column) => text(column, 30)).filter(Boolean);
+  const actions = dialogActionsOf(raw.actions);
+  const rows = list(raw.rows)
+    .slice(0, MAX_DIALOG_ROWS)
+    .map((row) => {
+      const cells = list(row).slice(0, columns.length).map((cell) => dialogCellOf(cell));
+      if (!cells.some((cell) => cell !== null)) return null;
+      return columns.map((_, index) => cells[index] ?? { text: '' });
+    })
+    .filter((row): row is PluginPanelDialogCell[] => row !== null);
+  const note = text(raw.note, 400);
+  if (!body && !markdown && rows.length === 0 && !note && !actions) return undefined;
+  return {
+    title,
+    ...(subtitle ? { subtitle } : {}),
+    ...(markdown ? { markdown } : body ? { text: body } : {}),
+    ...(columns.length && rows.length ? { columns, rows } : {}),
+    ...(note ? { note } : {}),
+    ...(actions ? { actions } : {}),
+  };
 }
 
 function shortcutStatesOf(value: unknown): Record<string, PluginPanelShortcutState> | undefined {

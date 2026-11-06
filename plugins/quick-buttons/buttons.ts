@@ -29,6 +29,11 @@ export const QUICK_DIALOG_TEXT_MAX = 2000;
 export const QUICK_DIALOG_MARKDOWN_MAX = 8000;
 export const QUICK_DIALOG_ITEMS_MAX = 12;
 export const QUICK_DIALOG_ACTIONS_MAX = 3;
+export const QUICK_PREVIEW_TITLE_MAX = 60;
+export const QUICK_PREVIEW_SUBTITLE_MAX = 120;
+export const QUICK_PREVIEW_TEXT_MAX = 1200;
+export const QUICK_PREVIEW_MARKDOWN_MAX = 4000;
+export const QUICK_PREVIEW_NOTE_MAX = 240;
 
 /**
  * 点了之后会发生什么。
@@ -71,6 +76,8 @@ export type QuickButton = {
   path?: string;
   /** `dialog`：点开后那个弹窗的内容（宿主用已有组件画，插件只给数据）。 */
   dialog?: QuickDialog;
+  /** 悬停时显示的轻量预览；动作由插件按按钮自身内容生成。 */
+  preview?: QuickButtonPreview;
   /** 外观规格：图标 / 强调色 / 形状 / 纯图标。宿主用自己的主题令牌画。 */
   style?: QuickButtonStyle;
   /** 悬停时的一句话解释。 */
@@ -126,6 +133,14 @@ export type QuickDialog = {
   note?: string;
   /** 底部按钮（最多 3 颗）：每颗点了就执行它自己的那件事。 */
   actions?: QuickDialogAction[];
+};
+
+export type QuickButtonPreview = {
+  title: string;
+  subtitle?: string;
+  text?: string;
+  markdown?: string;
+  note?: string;
 };
 
 export type QuickDialogItem = {
@@ -206,12 +221,14 @@ export function normalizeQuickButton(input: unknown): QuickButton | null {
   if (!isValidQuickButtonId(id) || !label || !isQuickButtonKind(kind)) return null;
   const hint = trimTo(raw.hint, QUICK_BUTTON_HINT_MAX);
   const style = normalizeQuickButtonStyle(raw.style);
+  const preview = normalizeQuickButtonPreview(raw.preview);
   const base = {
     id,
     label,
     kind,
     ...(style ? { style } : {}),
     ...(hint ? { hint } : {}),
+    ...(preview ? { preview } : {}),
     ...(raw.source === 'model' ? { source: 'model' as const } : {}),
     ...(isTimestamp(raw.createdAt) ? { createdAt: raw.createdAt } : {}),
     ...(isTimestamp(raw.updatedAt) ? { updatedAt: raw.updatedAt } : {}),
@@ -380,6 +397,23 @@ export function replaceQuickButtons(buttons: QuickButtonInput[]): QuickButton[] 
   return next;
 }
 
+export function normalizeQuickButtonPreview(input: unknown): QuickButtonPreview | undefined {
+  if (!isRecord(input)) return undefined;
+  const title = trimTo(input.title, QUICK_PREVIEW_TITLE_MAX);
+  if (!title) return undefined;
+  const markdown = trimTo(input.markdown, QUICK_PREVIEW_MARKDOWN_MAX);
+  const text = markdown ? '' : trimTo(input.text, QUICK_PREVIEW_TEXT_MAX);
+  const subtitle = trimTo(input.subtitle, QUICK_PREVIEW_SUBTITLE_MAX);
+  const note = trimTo(input.note, QUICK_PREVIEW_NOTE_MAX);
+  if (!text && !markdown && !note) return undefined;
+  return {
+    title,
+    ...(subtitle ? { subtitle } : {}),
+    ...(markdown ? { markdown } : text ? { text } : {}),
+    ...(note ? { note } : {}),
+  };
+}
+
 export type QuickButtonInput = {
   id?: string;
   label?: unknown;
@@ -390,6 +424,7 @@ export type QuickButtonInput = {
   role?: unknown;
   path?: unknown;
   dialog?: unknown;
+  preview?: unknown;
   style?: unknown;
   hint?: unknown;
 };

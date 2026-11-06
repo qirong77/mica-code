@@ -414,6 +414,7 @@ export type {
   PluginPanelRegistration,
   PluginPanelRow,
   PluginPanelSection,
+  PluginPanelShortcutPreview,
   PluginPanelStatusBar,
   PluginPanelTable,
   PluginPanelTableCell,

@@ -215,7 +215,7 @@ function toNotice(value: Record<string, unknown>): TurnNotice | null {
 }
 
 function isNoticeVariant(value: unknown): value is NonNullable<TurnNotice['variant']> {
-  return value === 'commit' || value === 'config' || value === 'compact' || value === 'error';
+  return value === 'commit' || value === 'config' || value === 'compact' || value === 'digest' || value === 'error';
 }
 
 function isNoticeStatus(value: unknown): value is MicaUiCommandStatus {

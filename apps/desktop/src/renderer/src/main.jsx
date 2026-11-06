@@ -84,6 +84,20 @@ ensureMicaApi()
         syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY])
         subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
 
+        if (new URLSearchParams(window.location.search).get('quick-buttons-demo') === '1') {
+          void import('./QuickButtonsPreviewDemo')
+            .then(({ default: Demo }) => {
+              createRoot(document.getElementById('root')).render(
+                <ErrorBoundary>
+                  <Demo />
+                </ErrorBoundary>
+              )
+              dismissBootPlaceholder()
+            })
+            .catch((error) => renderBootError(error))
+          return
+        }
+
         // `/share` 本身是「分享链接列表」：这一页不需要工作区/草稿那些界面状态，也不该按
         // 「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。带 `?session=<id>`
         // 时仍旧渲染 App（只是不画左侧会话列表，见 App.jsx 的 shareView）。
