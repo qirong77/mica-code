@@ -213,9 +213,31 @@ const UNTITLED_SESSION_TITLE = 'Untitled session';
  */
 const PRETTY_SESSION_MAX_BYTES = 2 * 1024 * 1024;
 
-function serializeSession(session: PersistedSession): string {
+function serializeSession(session: PersistedSession): { text: string; compact: string } {
   const compact = JSON.stringify(session);
-  return compact.length <= PRETTY_SESSION_MAX_BYTES ? JSON.stringify(session, null, 2) : compact;
+  // 小时会话顺手美化一份（读的人多）；超过阈值就直接存紧凑版，不再多序列化一遍。
+  const text = compact.length <= PRETTY_SESSION_MAX_BYTES ? JSON.stringify(session, null, 2) : compact;
+  return { text, compact };
+}
+
+/**
+ * 最近一次 `save()` 写出去的紧凑 JSON，一次性交回给调用方。
+ *
+ * `SessionController` 每次保存完都要算一个内容签名，而签名就是
+ * `sha256(JSON.stringify(session))`——也就是 `save` 刚刚算过的那份字符串。长会话
+ * （实测最大的 20MB）每次 checkpoint 因此要多序列化一整份，约 16–20ms 的纯分配，
+ * 而且每个模型请求边界都会走一次。这里把刚写出去的那份交回去，省掉第二次。
+ *
+ * 只对**同一个对象**、**紧接着**的那一次调用有效，拿走即清：对象之后被改动
+ * 也不会再拿到过期文本。
+ */
+let lastSerialized: { session: PersistedSession; text: string } | null = null;
+
+export function takeLastSerializedSession(session: PersistedSession): string | null {
+  if (!lastSerialized || lastSerialized.session !== session) return null;
+  const text = lastSerialized.text;
+  lastSerialized = null;
+  return text;
 }
 
 export class SessionStore implements SessionStoreLike {
@@ -273,8 +295,10 @@ export class SessionStore implements SessionStoreLike {
     if (!safeId || safeId !== session.id) throw new Error(`Invalid session id: ${session.id}`);
     const path = sessionPath(safeId);
     const tmpPath = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmpPath, `${serializeSession(session)}\n`, 'utf-8');
+    const { text, compact } = serializeSession(session);
+    writeFileSync(tmpPath, `${text}\n`, 'utf-8');
     renameSync(tmpPath, path);
+    lastSerialized = { session, text: compact };
     try {
       this.updateIndexForSave(session);
     } catch {

@@ -67,8 +67,9 @@ export type ConfigWebPerfTimelinePoint = {
 export type ConfigWebPerfMemoryPoint = {
   at: number;
   rssMB: number;
-  heapMB: number;
-  externalMB: number;
+  /** Bun/JSC 不上报（那套 heap 数字不可信），只有 Node/V8 进程有。 */
+  heapMB?: number;
+  externalMB?: number;
   pid: number;
   /** `runtime` / `main` / `app-server` / `tui`。 */
   host: string;
@@ -85,8 +86,8 @@ export type ConfigWebPerfMemoryProcess = {
   lastAt: number;
   lastRssMB: number;
   peakRssMB: number;
-  lastHeapMB: number;
-  lastExternalMB: number;
+  lastHeapMB?: number;
+  lastExternalMB?: number;
   /** 窗口内首末 RSS 之差（MB）：正数就是在涨。 */
   growthMB: number;
 };

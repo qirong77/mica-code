@@ -13,7 +13,6 @@ import mobileRelayManifest from '../../plugins/mobile-relay/plugin.json';
 import quickButtonsManifest from '../../plugins/quick-buttons/plugin.json';
 import replyDigestManifest from '../../plugins/reply-digest/plugin.json';
 import contextHandoffManifest from '../../plugins/context-handoff/plugin.json';
-import environmentReadyManifest from '../../plugins/environment-ready/plugin.json';
 import scheduleManifest from '../../plugins/schedule/plugin.json';
 import sessionCompactManifest from '../../plugins/session-compact/plugin.json';
 import sessionRenameManifest from '../../plugins/session-rename/plugin.json';
@@ -62,7 +61,6 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(quickButtonsManifest),
   readManifest(replyDigestManifest),
   readManifest(contextHandoffManifest),
-  readManifest(environmentReadyManifest),
   readManifest(scheduleManifest),
   readManifest(videoManifest),
   readManifest(voiceInputManifest),

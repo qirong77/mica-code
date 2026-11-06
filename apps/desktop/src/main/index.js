@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, statSync, watch } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { join } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -23,6 +23,7 @@ import {
 // 上面那个「端口上是不是我们自己的运行时」的 probeRuntime 区分而改名
 import { probeRuntime as probeRemoteRuntime } from '../host/runtime-probe-core.js'
 import { flushLogs, logger, startMemorySampler } from '@packages/mica-diagnostics/index.js'
+import { resolveLogDir } from '@packages/mica-config/brand.js'
 
 /**
  * Electron 外壳。
@@ -805,6 +806,46 @@ function createWindow(url, { primary = false } = {}) {
 /* ---------------------------------------------------------------- 生命周期 */
 
 /**
+ * 给一个窗口拍 V8 堆快照，写到日志目录。
+ *
+ * 渲染层的内存只能从外面看（`app.getAppMetrics()` 给 RSS），要回答「这 40MB/h 是
+ * 什么东西涨起来的」必须有一份堆快照。快照文件是 Chromium 的 `.heapsnapshot`，用
+ * Chrome DevTools 的 Memory 面板（或在 DevTools 里 Load）打开就能按构造函数看保留大小。
+ *
+ * 由用户从 Performance 页触发：快照期间目标页面会停住几秒，文件可能上百 MB，
+ * 不适合自动跑。
+ */
+async function takeWindowHeapSnapshot({ windowId } = {}) {
+  const id = Number(windowId)
+  const win =
+    (Number.isFinite(id) && BrowserWindow.fromId(id)) ||
+    BrowserWindow.getFocusedWindow() ||
+    BrowserWindow.getAllWindows().find((item) => !item.isDestroyed())
+  if (!win || win.isDestroyed()) throw new Error('没有可用的窗口')
+
+  const contents = win.webContents
+  if (contents.isDestroyed() || contents.isCrashed()) throw new Error('目标页面已崩溃或已关闭')
+
+  const dir = resolveLogDir()
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const path = join(dir, `heap-${contents.id}-${stamp}.heapsnapshot`)
+  mkdirSync(dir, { recursive: true })
+
+  const startedAt = Date.now()
+  await contents.takeHeapSnapshot(path)
+  let bytes = 0
+  try {
+    bytes = statSync(path).size
+  } catch {
+    // 拍完拿不到大小不影响结果，路径本身就是给用户用的
+  }
+  const result = { path, bytes, windowId: win.id, title: win.getTitle().slice(0, 120) }
+  logger('main').info('heap-snapshot', { ...result, ms: Date.now() - startedAt })
+  flushLogs()
+  return result
+}
+
+/**
  * 主进程的诊断：内存分布 + 崩溃现场。
  *
  * 页面白屏 / 卡死（renderer OOM、GPU 崩、utility 崩）此前只会在控制台打一行，
@@ -932,7 +973,8 @@ app.whenReady().then(async () => {
   // 系统检查（权限 / 命令行工具）同样先起：页面与插件页面读它，起不来只是全报「未知」
   try {
     systemHost = await startSystemHost({
-      socketPath: resolveSystemSocketPath(app.getPath('userData'))
+      socketPath: resolveSystemSocketPath(app.getPath('userData')),
+      snapshotHeap: takeWindowHeapSnapshot
     })
     console.log(`[mica-system] 系统检查服务: unix:${systemHost.socketPath}`)
   } catch (error) {

@@ -150,3 +150,41 @@ export async function requestSystemAccess(id) {
   }
 }
 
+/**
+ * 让主进程给一个页面拍堆快照。
+ *
+ * 只有主进程拿得到 `webContents`（运行时是另一个进程），所以同样走这条 socket。
+ * 超时单独放宽：快照本身就要几秒，拍一个大页面时 4 秒会直接判超时——那会把「正在拍」
+ * 误报成失败，而文件其实已经写出来了。
+ */
+const HEAP_SNAPSHOT_TIMEOUT_MS = 120_000
+
+export async function takeHeapSnapshot({ windowId } = {}) {
+  const path = socketPath()
+  if (!path) return { ok: false, error: NO_DESKTOP_DETAIL }
+  try {
+    const response = await openSocketRequest(path, '/heap-snapshot', {
+      method: 'POST',
+      body: Number.isFinite(Number(windowId)) ? { windowId: Number(windowId) } : {},
+      timeoutMs: HEAP_SNAPSHOT_TIMEOUT_MS,
+      label: SERVICE_LABEL
+    })
+    const text = await readAllText(response)
+    const payload = text ? JSON.parse(text) : null
+    if (response.statusCode >= 400 || payload?.ok === false) {
+      return {
+        ok: false,
+        error: payload?.error || `${SERVICE_LABEL}返回 HTTP ${response.statusCode}`
+      }
+    }
+    return {
+      ok: true,
+      path: typeof payload?.path === 'string' ? payload.path : '',
+      bytes: Number(payload?.bytes) || 0,
+      windowId: payload?.windowId,
+      title: typeof payload?.title === 'string' ? payload.title : ''
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}

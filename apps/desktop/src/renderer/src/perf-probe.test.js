@@ -49,7 +49,15 @@ function createHarness({ fetchResult = { ok: true }, memory = true } = {}) {
     visibilityState: 'visible',
     getElementsByTagName: () => elements,
     querySelectorAll: (selector) => (selector === '.chat-transcript' ? transcripts : []),
-    querySelector: () => ({ getAttribute: () => 'sess-1' })
+    querySelector: () => ({ getAttribute: () => 'sess-1' }),
+    // 真 DOM 一定有这两个：探针靠 `visibilitychange` 把 lag 基准点挪到「重新可见」那一刻。
+    // 早期 harness 缺了它们，于是「事件没来得及派发」的那条路径一直没被覆盖。
+    addEventListener: (type, fn) => listeners.set(type, [...(listeners.get(type) || []), fn]),
+    removeEventListener: (type, fn) =>
+      listeners.set(
+        type,
+        (listeners.get(type) || []).filter((item) => item !== fn)
+      )
   }
   return {
     win,
@@ -166,6 +174,29 @@ describe('startPerfProbe', () => {
     const last = sampleOf(probe)
     expect(last.vis).toBe(1)
     expect(last.lag).toBe(0)
+    probe.stop()
+  })
+
+  // 真实现场：恢复可见那一帧和 `visibilitychange` 是同一次事件循环里的两个任务，
+  // 谁先跑不保证。日志里出现过 lag=11744ms 而 longN=0（那一秒没有任何长任务）。
+  it('恢复可见但事件还没派发时，这一帧不记 lag', () => {
+    const harness = createHarness()
+    const probe = startPerfProbe(harness.win, harness.doc)
+    harness.doc.visibilityState = 'hidden'
+    harness.advance(12_744)
+    harness.tick(1000)
+    expect(sampleOf(probe).lag).toBe(null)
+    // 页面已经可见，但 visibilitychange 还没跑到：这一帧的间隔是「隐藏了多久」。
+    harness.doc.visibilityState = 'visible'
+    harness.advance(12_744)
+    harness.tick(1000)
+    const resumed = sampleOf(probe)
+    expect(resumed.vis).toBe(1)
+    expect(resumed.lag).toBe(null)
+    // 下一帧起恢复计量（基准点已经由这一帧接管）。
+    harness.advance(1000)
+    harness.tick(1000)
+    expect(sampleOf(probe).lag).toBe(0)
     probe.stop()
   })
 

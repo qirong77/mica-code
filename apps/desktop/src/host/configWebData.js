@@ -36,7 +36,12 @@ import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?r
 import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js'
 import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from './browser-control.js'
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
-import { openSystemSettings, readSystemChecks, requestSystemAccess } from './system-checks.js'
+import {
+  openSystemSettings,
+  readSystemChecks,
+  requestSystemAccess,
+  takeHeapSnapshot
+} from './system-checks.js'
 import { probeMcpServers } from './mcp-probe.js'
 import { clearLogs, readPerformanceSummaryAsync } from './log.js'
 
@@ -583,6 +588,8 @@ export const configWebActions = {
   // 性能与诊断：读的是 host/log.js 写在日志目录下的 JSONL，聚合在 host 侧做完。
   readPerformanceDetails: (input) => readPerformanceSummaryAsync(input ?? {}),
   clearPerformanceLogs: () => clearLogs(),
+  // 渲染层的内存只有主进程拍得到（`webContents.takeHeapSnapshot`），结果落在日志目录。
+  takeHeapSnapshot: (input) => takeHeapSnapshot({ windowId: input?.windowId }),
 
   readSessionConversationPage: (input) =>
     readSessionConversationPage(

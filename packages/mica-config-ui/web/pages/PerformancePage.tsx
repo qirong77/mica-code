@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
-import { clearPerformanceLogs, readPerformanceDetails } from '../api.js';
+import {
+  clearPerformanceLogs,
+  readPerformanceDetails,
+  supportsHeapSnapshot,
+  takeHeapSnapshot,
+} from '../api.js';
 import { recentTimeline, rendererTimeline, timelineDelay } from '../performanceTimeline.js';
 import type {
   ConfigWebPerfBucket,
@@ -40,8 +45,11 @@ export function PerformancePage() {
   const mounted = useRef(false);
   const pending = useRef<Promise<void> | null>(null);
   const clearing = useRef(false);
+  const [snapshotting, setSnapshotting] = useState(false);
+  const [snapshotNote, setSnapshotNote] = useState('');
   const RefreshIcon = appIcons.refresh;
   const TrashIcon = appIcons.trash;
+  const MemoryIcon = appIcons.memory;
 
   const load = useCallback((allowClearing = false): Promise<void> => {
     if (clearing.current && !allowClearing) return Promise.resolve();
@@ -103,6 +111,28 @@ export function PerformancePage() {
     }
   }
 
+  async function handleHeapSnapshot() {
+    if (snapshotting) return;
+    setSnapshotting(true);
+    setSnapshotNote('');
+    try {
+      // 快照期间页面会停住几秒，先把「正在拍」画出来再发请求。
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const result = await takeHeapSnapshot();
+      if (!mounted.current) return;
+      if (result.ok) {
+        const mb = Math.round((result.bytes ?? 0) / 1024 / 1024);
+        setSnapshotNote(`已写入 ${result.path}${mb ? `（${mb}MB）` : ''}，用 Chrome DevTools 的 Memory 面板打开`);
+      } else {
+        setError(result.error || '堆快照失败');
+      }
+    } catch (snapshotError) {
+      if (mounted.current) setError(formatError(snapshotError));
+    } finally {
+      if (mounted.current) setSnapshotting(false);
+    }
+  }
+
   const buckets = useMemo(() => sortBuckets(details?.buckets ?? [], sortKey), [details, sortKey]);
   const events = useMemo(
     () => (details?.events ?? []).filter((item) => levelFilter === 'all' || item.level === levelFilter),
@@ -154,10 +184,21 @@ export function PerformancePage() {
           >
             清空
           </Button>
+          {supportsHeapSnapshot() ? (
+            <Button
+              icon={<MemoryIcon size={14} />}
+              title="给当前页面拍一份 V8 堆快照（会停住几秒，文件可能上百 MB，落在日志目录）"
+              disabled={snapshotting}
+              onClick={() => void handleHeapSnapshot()}
+            >
+              {snapshotting ? '正在拍…' : '抓堆快照'}
+            </Button>
+          ) : null}
         </div>
       }
     >
       {error ? <Alert message={error} /> : null}
+      {snapshotNote ? <Alert message={snapshotNote} /> : null}
 
       <div className="perf-summary">
         <PerfStat label="事件" value={totals?.events ?? 0} />

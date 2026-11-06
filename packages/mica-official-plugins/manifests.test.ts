@@ -21,8 +21,8 @@ describe('official plugin manifests', () => {
   it('does not register the removed task delivery plugin', () => {
     expect(officialPluginIds.has('task-delivery')).toBe(false);
   });
-  it('registers session experience plugins with desktop panels and optional local telemetry', () => {
-    for (const id of ['context-handoff', 'environment-ready']) {
+  it('registers the session experience plugin with a desktop panel and optional local telemetry', () => {
+    for (const id of ['context-handoff']) {
       const manifest = officialPluginManifests.find((entry) => entry.id === id)!;
       expect(manifest).toBeDefined();
       expect(manifest.requires).toContain('desktop');

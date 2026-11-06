@@ -10,6 +10,7 @@ import { AgentRuntime, type AgentRuntimeSnapshot } from '../agent/AgentRuntime.j
 import { micaConfig, providerSupportsModel } from '@packages/mica-config/index.js';
 import {
   micaSession,
+  takeLastSerializedSession,
   type PersistedRuntimeSnapshot,
   type PersistedSession,
   type PersistedSnapshotDisplayUsage,
@@ -689,7 +690,11 @@ function stripDerivedContextWindow(session: PersistedSession): PersistedSession 
 }
 
 function sessionSignature(session: PersistedSession): string {
-  return createHash('sha256').update(JSON.stringify(session)).digest('hex');
+  // 刚 `save()` 过的那个对象，写出去的那份紧凑 JSON 就是 `JSON.stringify(session)`：
+  // 直接拿它算签名，省掉一次整份序列化（20MB 会话约 16–20ms，每个请求边界都走一次）。
+  // 从磁盘读回来的会话没有这份交接，退回正常路径。
+  const json = takeLastSerializedSession(session) ?? JSON.stringify(session);
+  return createHash('sha256').update(json).digest('hex');
 }
 
 function hasConversation(providerMessages: unknown[], conversationMessages: MicaUiConversationMessage[]): boolean {

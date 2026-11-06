@@ -3,6 +3,7 @@ import {
   draftMenuItems,
   renameTargetOf,
   sessionMenuItems,
+  sessionDragText,
   withExtraMenuItems
 } from './session-menu'
 
@@ -15,6 +16,7 @@ describe('sessionMenuItems', () => {
       'detail',
       'fork',
       'share',
+      'copy-id',
       'rename',
       'separator',
       'delete'
@@ -29,6 +31,7 @@ describe('sessionMenuItems', () => {
       'detail',
       'fork',
       'share',
+      'copy-id',
       'rename',
       'separator',
       'delete'
@@ -106,6 +109,7 @@ describe('withExtraMenuItems', () => {
       '查看详情',
       'Fork',
       '分享链接',
+      '复制会话 ID',
       '重命名',
       '---',
       '复制会话 Markdown',
@@ -139,6 +143,7 @@ describe('withExtraMenuItems', () => {
       '查看详情',
       'Fork',
       '分享链接',
+      '复制会话 ID',
       '重命名',
       '---',
       '复制会话 Markdown',
@@ -158,6 +163,7 @@ describe('withExtraMenuItems', () => {
       '查看详情',
       'Fork',
       '分享链接',
+      '复制会话 ID',
       '重命名',
       '---',
       '删除对话'
@@ -170,6 +176,6 @@ describe('derived session menu', () => {
     const actions = sessionMenuItems({ pinned: true, inProject: true, isChild: true })
       .filter(Array.isArray)
       .map((item) => item[0])
-    expect(actions).toEqual(['detail', 'fork', 'share', 'rename', 'delete'])
+    expect(actions).toEqual(['detail', 'fork', 'share', 'copy-id', 'rename', 'delete'])
   })
 })

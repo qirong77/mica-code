@@ -137,4 +137,21 @@ describe('unmounted transcript cache', () => {
     expect(takeCachedTranscript('8')).toBe(pending)
     expect(readCachedTranscript('8')).toBeNull()
   })
+
+  /**
+   * 只按「最多 8 份」限制时，8 × 一条长会话就是几十 MB 堆——而这些快照只是给
+   * 「切回来先用旧内容顶着」用的。再加一道行数预算，超了从最旧的开始丢。
+   */
+  it('按行数预算淘汰长会话快照，不只看份数', () => {
+    const rows = (count) => Array.from({ length: count }, (_, index) => ({ text: `row ${index}` }))
+    // 4 份各 2000 行：份数只有 4（远小于 8），但总量已经超过 4000 行的预算。
+    for (const id of ['a', 'b', 'c', 'd']) writeCachedTranscript(id, rows(2000), null)
+    expect(readCachedTranscript('a')).toBeNull()
+    expect(readCachedTranscript('b')).toBeNull()
+    expect(readCachedTranscript('d')).not.toBeNull()
+    // 被淘汰的槽位仍然可以重新写入，不会因为计数漂移而误删。
+    writeCachedTranscript('e', rows(10), null)
+    expect(readCachedTranscript('e')).not.toBeNull()
+    expect(readCachedTranscript('d')).not.toBeNull()
+  })
 })

@@ -72,6 +72,9 @@ export function startPerfProbe(win, doc) {
   let flushTimer = null
   let stopped = false
   let lastAt = win.performance.now()
+  // 上一次采样时页面是否可见。lag 量的是「两次采样之间主线程被占住多久」，
+  // 两次都可见时这个差才有意义。
+  let lastVisible = doc.visibilityState === 'visible'
   let longCount = 0
   let longMax = 0
   let dropped = 0
@@ -111,10 +114,16 @@ export function startPerfProbe(win, doc) {
     // 隐藏窗口不能这样算：Chromium 会把定时器节流到 1 次/分钟，于是每条都是
     // ~59s 的「冻结」，掩盖真实数据（整天的窗口就这样全成了噪声）。这时不记 lag，
     // 返回 null 让分析端直接跳过这一维。
+    // 从隐藏恢复的那一帧同样不能算：定时器被节流期间根本没跑，恢复后第一跳的间隔是
+    // 「隐藏了多久」而不是「卡了多久」。下面的 `visibilitychange` 虽然也把基准点挪到
+    // 当下，但它和恢复后的第一跳是同一次事件循环里的两个任务，先后顺序不保证——
+    // 实测出现过 `lag=11744ms` 而 `longN=0`（那一秒没有任何长任务）的假数据。
+    // 所以再按「上一次采样是否可见」判一次：两重保险都只影响 lag，其他维度照常记录。
     // 定时器有时会比 SAMPLE_MS 早零点几毫秒触发，直减会得到负值（实测占 47%），
     // 均值被拉负、分位数失真。提前触发就是「没有延迟」，下限取 0。
-    const lag = visible ? Math.max(0, now - lastAt - SAMPLE_MS) : null
+    const lag = visible && lastVisible ? Math.max(0, now - lastAt - SAMPLE_MS) : null
     lastAt = now
+    lastVisible = visible
     // sid 每秒都读：一次 querySelector，比每 5 秒一次的 getElementsByTagName('*') 便宜。
     // 切会话时立刻重量 DOM，否则切换后的几个采样会把上一条会话的规模记到新会话名下。
     const currentSid = activeSessionId(doc)
@@ -170,8 +179,11 @@ export function startPerfProbe(win, doc) {
   timer = win.setInterval(sample, SAMPLE_MS)
   flushTimer = win.setInterval(flush, FLUSH_MS)
   // 重新可见时把基准点挪到当下：否则隐藏期间积累的时间会被算进第一帧的 lag。
+  // 隐藏时也要清掉：`lastVisible` 只在同一个可见区间内才允许量 lag。
   const onVisibility = () => {
-    if (doc.visibilityState === 'visible') lastAt = win.performance.now()
+    const showing = doc.visibilityState === 'visible'
+    if (showing) lastAt = win.performance.now()
+    lastVisible = showing
   }
   doc.addEventListener?.('visibilitychange', onVisibility)
 

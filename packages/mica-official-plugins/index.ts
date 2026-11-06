@@ -13,7 +13,6 @@ import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
 import quickButtonsSetup from '../../plugins/quick-buttons/index.js';
 import replyDigestSetup from '../../plugins/reply-digest/index.js';
 import contextHandoffSetup from '../../plugins/context-handoff/index.js';
-import environmentReadySetup from '../../plugins/environment-ready/index.js';
 import scheduleSetup from '../../plugins/schedule/index.js';
 import sessionCompactSetup from '../../plugins/session-compact/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
@@ -62,7 +61,6 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   'quick-buttons': quickButtonsSetup,
   'reply-digest': replyDigestSetup,
   'context-handoff': contextHandoffSetup,
-  'environment-ready': environmentReadySetup,
   schedule: scheduleSetup,
   video: videoSetup,
   'voice-input': voiceInputSetup,

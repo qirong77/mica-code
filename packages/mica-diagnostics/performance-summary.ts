@@ -149,8 +149,10 @@ class Aggregate {
       const pid = Number(entry.pid) || 0;
       const host = typeof entry.host === 'string' ? entry.host : 'unknown';
       const session = typeof entry.session === 'string' && entry.session ? entry.session : undefined;
-      const heapMB = Number(entry.heap) || 0;
-      const externalMB = Number(entry.ext) || 0;
+      // Bun 进程的 heap / ext 不可信，采样时就不写（见 collectMemory）。这里保持
+      // 「没有就是没有」：写成 0 会让页面显示「堆 0MB」，比不显示更误导。
+      const heapMB = typeof entry.heap === 'number' ? entry.heap : undefined;
+      const externalMB = typeof entry.ext === 'number' ? entry.ext : undefined;
       totals.memSamples += 1;
       totals.peakRssMB = Math.max(totals.peakRssMB, rssMB);
       this.memory.add({ at, order, value: { at, rssMB, heapMB, externalMB, pid, host } });
@@ -201,7 +203,9 @@ class Aggregate {
       this.buckets.set(key, bucket);
     }
 
-    if (entry.level !== 'debug' && entry.kind !== 'call' && entry.scope !== 'mem') {
+    // `mem` 的 info 采样只进内存聚合（每进程一行），但它的 warn / error（内存尖峰、
+    // 采样失败）必须出现在事件流里——那正是「刚才那一下是什么」要找的东西。
+    if (entry.level !== 'debug' && entry.kind !== 'call' && !(entry.scope === 'mem' && entry.level === 'info')) {
       // 仅投影页面会展示的标量；错误对象不把任意嵌套 payload 带进缓存。
       const error = entry.message || entry.error;
       this.events.add({
@@ -224,6 +228,10 @@ class Aggregate {
           error: error ? errorText(error) : undefined,
           sid: typeof entry.sid === 'string' ? entry.sid : undefined,
           rssMB: scalar(entry.rss),
+          // 调用方归因（见 logger.timedResult 的 meta）。同一通道被多个调用方打时，
+          // 「这 600 次是谁发的」只能靠它们回答；聚合表仍按 scope:event 一行。
+          plugin: typeof entry.plugin === 'string' ? entry.plugin : undefined,
+          hidden: entry.hidden === true ? true : undefined,
         },
       });
     }

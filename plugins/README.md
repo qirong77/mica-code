@@ -11,7 +11,7 @@
 
 `deepseek-harness` 监管独立的 DeepSeek Harness `dsh web` 进程；它不启动 Electron GUI，也不把 Harness 页面嵌入 Mica，地址和进程状态只通过插件设置展示。实现与生命周期边界见 [DeepSeek Harness](deepseek-harness/README.md)。
 
-会话体验卡：[Context Handoff](context-handoff/README.md) 保存历史检查点，[Environment Ready](environment-ready/README.md) 探测本次任务登记的本机服务。两者共用宿主摘要卡片，不各自绘制界面；本地埋点格式及分析导出见 [会话体验卡与埋点](../docs/plugin-experience.md)。
+会话体验卡：[Context Handoff](context-handoff/README.md) 保存历史检查点，共用宿主摘要卡片，不各自绘制界面；本地埋点格式及分析导出见 [会话体验卡与埋点](../docs/plugin-experience.md)。
 
 [Long Reply Digest](reply-digest/README.md) 在成功回合结束后识别过长的 Agent 回复，调用摘要模型并以会话 notice 展示简短摘要；短回复不会额外调用模型。
 

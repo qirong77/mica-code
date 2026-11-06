@@ -8,6 +8,7 @@
 | `apps/desktop/`    | Web 运行时、renderer、Electron 容器           |
 | `apps/config-web/` | 配置页浏览器宿主：Bun HTTP 服务与内嵌静态资源 |
 | `apps/website/`    | Astro 官网                                    |
+| `apps/perf-monitor/` | 独立本机性能 Web 监控台：只读日志 API、React + Vite + TS + ECharts + Ant Design；不依赖桌面运行时 |
 
 仓库根的 `plugins/` 是官方插件源码，由 `packages/mica-official-plugins` 静态登记后编译进产物；用户插件装在 `$MICA_HOME/plugins`，格式相同。
 

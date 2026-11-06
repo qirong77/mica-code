@@ -20,6 +20,10 @@ let booted = null
 let pending = {}
 let flushTimer = null
 const outbound = new Map() // key -> Map<值的序列化, 尚未认领的回声数>
+// 每个键最后一次写入的时刻：广播丢失时（页面重载、运行时重启、连接断开那一瞬），
+// 未认领的计数就永远留在这里。键里含会话 id 与输入框草稿文本，切会话越多留得越多。
+const outboundAt = new Map()
+const OUTBOUND_TTL_MS = 60_000
 
 const FLUSH_DEBOUNCE_MS = 80
 
@@ -65,6 +69,18 @@ function rememberOutbound(key, value) {
   let counts = outbound.get(key)
   if (!counts) outbound.set(key, (counts = new Map()))
   counts.set(json, (counts.get(json) || 0) + 1)
+  outboundAt.set(key, Date.now())
+  pruneOutbound()
+}
+
+/** 丢掉久未认领的计数：正常回声在几十毫秒内就到，留一分钟已经非常宽松。 */
+function pruneOutbound(now = Date.now()) {
+  if (outboundAt.size <= 64) return
+  for (const [key, at] of outboundAt) {
+    if (now - at < OUTBOUND_TTL_MS) continue
+    outboundAt.delete(key)
+    outbound.delete(key)
+  }
 }
 
 /**
@@ -84,6 +100,11 @@ export function claimUiStateEcho(key, value) {
   if (!count) return false
   if (count === 1) counts.delete(json)
   else counts.set(json, count - 1)
+  // 计数清空后把键本身也删掉：否则 Map 只会因为「出现过新的键」而增长。
+  if (counts.size === 0) {
+    outbound.delete(key)
+    outboundAt.delete(key)
+  }
   return true
 }
 

@@ -67,7 +67,7 @@
 
 ### ui / logger / health
 
-- 输入框上方的会话摘要用 `PluginPanelView.cards`（每插件最多 3 张，`id/title/summary/detail/tone/revision/actions/impressionAction`），由宿主复用主题和共享控件；清单 `dynamicShortcuts: true` 使快捷区获取视图。动作带版本 key，插件拒绝旧内容点击。`impressionAction` 只记录实际可见展示，不能在 `view()` 中记录曝光或执行副作用。官方插件 `context-handoff` / `environment-ready` 分别负责历史检查点与本机服务探测。
+- 输入框上方的会话摘要用 `PluginPanelView.cards`（每插件最多 3 张，`id/title/summary/detail/tone/revision/actions/impressionAction`），由宿主复用主题和共享控件；清单 `dynamicShortcuts: true` 使快捷区获取视图。动作带版本 key，插件拒绝旧内容点击。`impressionAction` 只记录实际可见展示，不能在 `view()` 中记录曝光或执行副作用。官方插件 `context-handoff` 负责历史检查点。
 - 插件行为埋点用 `createPluginExperience(ctx)`（`PluginExperience.ts`），事件 `plugin:experience`、schemaVersion 1；仅固定动作与结果等元数据，禁放正文、路径、命令与服务地址。`telemetry` 开关即时停记，日志沿用现有轮转。导出：`bun scripts/plugin-experience-report.ts`，口径见 `docs/plugin-experience.md`。
 
 - 命令结果给用户看走 `ctx.ui.notice(content, { command, status, surface, variant })`：`surface: 'command_panel'` 是输入框上方的运行中面板（被同一 `command` 的下一条 notice 收尾），默认进对话的 notice；headless 宿主直接落进 turn notice 日志。

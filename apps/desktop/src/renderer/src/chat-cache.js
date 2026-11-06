@@ -56,7 +56,15 @@ export function cachedChatNodes(cache, nodes) {
 // Unmounted views hand off their visual history, including reasoning/tools that are absent
 // from persisted chat messages and may have fallen out of the host's bounded event replay.
 const TRANSCRIPT_CACHE_LIMIT = 8
+/**
+ * 这些快照是**整段消息数组**（含思考与工具行），不是索引。长会话一份就上千行，
+ * 只按「最多 8 份」限制时，8 × 一条长会话足以占掉几十 MB 堆——而它们只是给
+ * 「切回来时先用旧内容顶着」用的，留着 8 份长会话没有意义。
+ * 再加一道行数预算：超了就从最旧的开始丢。
+ */
+const TRANSCRIPT_ROW_BUDGET = 4000
 const transcriptCache = new Map()
+let transcriptRows = 0
 
 /** Keep the handoff available until async restore succeeds, including effect setup retries. */
 export function readCachedTranscript(nodeId) {
@@ -74,16 +82,24 @@ export function readRestoreTranscript(nodeId, previousNodeId, messages, meta) {
 /** Once mounted, the component owns the transcript; don't retain its old snapshot as well. */
 export function takeCachedTranscript(nodeId) {
   const entry = transcriptCache.get(nodeId) || null
+  if (entry) transcriptRows -= entry.messages.length
   transcriptCache.delete(nodeId)
   return entry
 }
 
 export function writeCachedTranscript(nodeId, messages, meta) {
   if (!nodeId || !Array.isArray(messages) || messages.length === 0) return
+  const previous = transcriptCache.get(nodeId)
+  if (previous) transcriptRows -= previous.messages.length
   transcriptCache.delete(nodeId)
   transcriptCache.set(nodeId, { messages, meta })
-  while (transcriptCache.size > TRANSCRIPT_CACHE_LIMIT) {
-    transcriptCache.delete(transcriptCache.keys().next().value)
+  transcriptRows += messages.length
+  while (transcriptCache.size > TRANSCRIPT_CACHE_LIMIT || transcriptRows > TRANSCRIPT_ROW_BUDGET) {
+    const oldest = transcriptCache.keys().next().value
+    if (oldest === undefined) break
+    const dropped = transcriptCache.get(oldest)
+    transcriptRows -= dropped ? dropped.messages.length : 0
+    transcriptCache.delete(oldest)
   }
 }
 
@@ -91,10 +107,14 @@ export function writeCachedTranscript(nodeId, messages, meta) {
 export function pruneCachedTranscripts(aliveIds) {
   const alive = new Set(aliveIds)
   for (const id of transcriptCache.keys()) {
-    if (!alive.has(id)) transcriptCache.delete(id)
+    if (alive.has(id)) continue
+    const dropped = transcriptCache.get(id)
+    transcriptRows -= dropped ? dropped.messages.length : 0
+    transcriptCache.delete(id)
   }
 }
 
 export function resetTranscriptCache() {
   transcriptCache.clear()
+  transcriptRows = 0
 }

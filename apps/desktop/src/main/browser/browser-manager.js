@@ -26,6 +26,14 @@ import {
   visibilityEventName
 } from './browser-core.js'
 import { chromeDataUrl, chromePalette, parseChromeMessage } from './browser-chrome.js'
+import {
+  BROWSER_IDLE_REAP_MS,
+  WINDOW_IDLE_SWEEP_MS,
+  describeReap,
+  resolveMs,
+  selectIdleWindows,
+  startIdleReaper
+} from '../window-idle.js'
 
 /**
  * 受控浏览器窗口的管理器：浏览器窗口、标签页（每个标签页一个 WebContentsView）、
@@ -61,9 +69,14 @@ export function createBrowserManager({
   isQuitting = () => false,
   // 当前应用主题 id（ui-state 的 theme 解析后的结果）。外壳每次进来重新读一遍，顶栏
   // 配色和窗口底色都跟着它走，换主题后不需要重启窗口。
-  theme = () => 'dark'
+  theme = () => 'dark',
+  // 隐藏多久之后真正销毁窗口（标签页随之重建）；0 关掉这条回收
+  idleReapMs = resolveMs(process.env.MICA_BROWSER_IDLE_REAP_MS, BROWSER_IDLE_REAP_MS),
+  idleSweepMs = WINDOW_IDLE_SWEEP_MS
 } = {}) {
   const browsers = new Map()
+  // 每个窗口在跑的页面操作数：导航、截图这类一次可能几十秒，期间不能被当成闲置
+  const busyOps = new Map()
   let sequence = 0
   const permissionSessions = new WeakSet()
 
@@ -110,8 +123,10 @@ export function createBrowserManager({
   /** 逻辑可见状态（顶栏图标看的就是它）：只在真的变化时广播，避免多余的界面刷新 */
   function applyVisibility(record, visible) {
     const event = visibilityEventName(record.visible, visible)
-    if (!event) return
     record.visible = Boolean(visible)
+    // 隐藏的那一刻开始计闲置：隐藏窗口的 renderer 与合成缓存都还在，收的是这个
+    record.hiddenAt = record.visible ? null : Date.now()
+    if (!event) return
     emit(event)
   }
 
@@ -122,6 +137,7 @@ export function createBrowserManager({
   function requireBrowser(id) {
     const record = browsers.get(String(id || ''))
     if (!record) throw notFoundError(`浏览器窗口不存在：${id}`)
+    record.lastUsedAt = Date.now()
     return record
   }
 
@@ -129,7 +145,10 @@ export function createBrowserManager({
     const id = String(tabId || '')
     for (const record of browsers.values()) {
       const tab = record.tabs.find((item) => item.id === id)
-      if (tab) return { record, tab }
+      if (tab) {
+        record.lastUsedAt = Date.now()
+        return { record, tab }
+      }
     }
     throw notFoundError(`标签页不存在：${tabId}`)
   }
@@ -287,6 +306,9 @@ export function createBrowserManager({
       browserSession,
       label: normalizeLabel(label),
       visible: false,
+      // 新建的窗口默认隐藏，从这一刻起算闲置；`lastUsedAt` 跟着每次接口调用走
+      hiddenAt: Date.now(),
+      lastUsedAt: Date.now(),
       createdAt: new Date().toISOString(),
       themeId: chrome.id,
       win,
@@ -629,7 +651,20 @@ export function createBrowserManager({
    * 「切过去 → run → 切回」这段在同一窗口上串行（见 createTabSwitcher）：并发交错会让
    * 后来者的坐标点击 / 截图落到别人切过去的标签页上。
    */
-  const withTargetTab = createTabSwitcher(activateTabIn)
+  const switchToTab = createTabSwitcher(activateTabIn)
+
+  /** 页面操作进行中不算闲置：一次导航等加载、一张截图可能跑几十秒。 */
+  async function withTargetTab(record, tab, run) {
+    const key = String(record?.id || '')
+    busyOps.set(key, (busyOps.get(key) || 0) + 1)
+    try {
+      return await switchToTab(record, tab, run)
+    } finally {
+      const left = (busyOps.get(key) || 1) - 1
+      if (left > 0) busyOps.set(key, left)
+      else busyOps.delete(key)
+    }
+  }
 
   async function elementCenter(tab, selector) {
     const script = `(() => {
@@ -708,6 +743,7 @@ export function createBrowserManager({
   }
 
   function closeAll() {
+    stopIdleReaper()
     cookieStore.removeListener('changed', cookieChanged)
     for (const record of [...browsers.values()]) {
       record.destroyRequested = true
@@ -717,6 +753,41 @@ export function createBrowserManager({
     }
     browsers.clear()
   }
+
+  /**
+   * 收掉闲置太久的隐藏窗口：窗口、标签页和它们的 renderer 一起回收。
+   *
+   * 浏览器窗口按设计就是隐藏着用的（截图、点击都在隐藏窗口里完成），所以闲置要从
+   * **最后一次接口调用**算起，不能只看隐藏时刻——否则代理一开着窗口就被算成闲置。
+   */
+  function reapIdleBrowsers(now = Date.now()) {
+    if (isQuitting()) return []
+    const entries = [...browsers.values()]
+      .filter((record) => !record.win.isDestroyed())
+      .map((record) => ({
+        id: record.id,
+        visible: record.visible || record.destroyRequested,
+        idleSince:
+          record.hiddenAt == null ? null : Math.max(record.hiddenAt, record.lastUsedAt || 0),
+        busy: (busyOps.get(String(record.id)) || 0) > 0
+      }))
+    const ids = selectIdleWindows(entries, now, { idleMs: idleReapMs })
+    for (const id of ids) {
+      const idleSince = entries.find((entry) => entry.id === id)?.idleSince || now
+      console.log(describeReap('browser', id, now - idleSince))
+      try {
+        destroyBrowser(id)
+      } catch (error) {
+        console.error('[mica-browser] 回收隐藏窗口失败:', error)
+      }
+    }
+    return ids
+  }
+
+  const stopIdleReaper = startIdleReaper(reapIdleBrowsers, {
+    sweepMs: idleSweepMs,
+    label: 'browser'
+  })
 
   /** 主题变了：把已经打开的窗口顶栏重画一遍（配色只在 pushChrome 里下发） */
   function refreshTheme() {
@@ -858,6 +929,7 @@ export function createBrowserManager({
     hideBrowser,
     destroyBrowser,
     pruneUnowned,
+    reapIdleBrowsers,
     closeAll,
     refreshTheme,
 

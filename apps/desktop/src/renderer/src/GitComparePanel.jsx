@@ -565,8 +565,10 @@ export function GitComparePanel({
           onClick={() => setPickerOpen('head')}
         >
           <IconFileDiff size={15} className="shrink-0 text-fg-soft" />
-          <span className="shrink-0 text-[11px] text-fg-muted">当前分支</span>
-          <span className="min-w-0 flex-1 truncate text-[12px] text-fg-strong">{headName}</span>
+          <span className="shrink-0 select-text text-[11px] text-fg-muted">当前分支</span>
+          <span className="min-w-0 flex-1 select-text truncate text-[12px] text-fg-strong">
+            {headName}
+          </span>
           <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
         </button>
         <div className="h-px bg-line-soft" />
@@ -581,8 +583,10 @@ export function GitComparePanel({
           onClick={() => setPickerOpen('base')}
         >
           <IconGitCompare size={15} className="shrink-0 text-info-soft" />
-          <span className="shrink-0 text-[11px] text-fg-muted">目标分支</span>
-          <span className="min-w-0 flex-1 truncate text-[12px] text-fg-strong">{baseName}</span>
+          <span className="shrink-0 select-text text-[11px] text-fg-muted">目标分支</span>
+          <span className="min-w-0 flex-1 select-text truncate text-[12px] text-fg-strong">
+            {baseName}
+          </span>
           <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
         </button>
       </div>

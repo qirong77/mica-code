@@ -7825,6 +7825,18 @@ export function ChatView({
                   notify: appendNotice
                 })
               }}
+              onDragOver={(event) => {
+                if (event.dataTransfer.types.includes('application/x-mica-session')) {
+                  event.preventDefault()
+                  event.dataTransfer.dropEffect = 'copy'
+                }
+              }}
+              onDrop={(event) => {
+                const text = event.dataTransfer.getData('application/x-mica-session')
+                if (!text) return
+                event.preventDefault()
+                insertComposerText(text)
+              }}
               onKeyDown={(event) => {
                 // 补全打开时优先吃掉方向键/Enter/Tab/Esc，避免直接发送或移动光标
                 if (completion && event.key === 'Escape') {

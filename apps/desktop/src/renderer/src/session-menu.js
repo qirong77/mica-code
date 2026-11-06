@@ -15,11 +15,20 @@ export function sessionMenuItems({ pinned, inProject, isChild = false }) {
     ['detail', '查看详情'],
     ['fork', 'Fork'],
     ['share', '分享链接'],
+    ['copy-id', '复制会话 ID'],
     ['rename', '重命名'],
     'separator'
   )
   items.push(['delete', '删除对话', true])
   return items
+}
+
+/** 侧栏会话拖入输入框时使用的可读文本。 */
+export function sessionDragText(session) {
+  const id = String(session?.id || '').trim()
+  if (!id) return ''
+  const title = String(session?.title || '').trim()
+  return title && title !== id ? `${title} (${id})` : id
 }
 
 /** 草稿（还没绑定真实会话的新对话）只有重命名和删除。 */

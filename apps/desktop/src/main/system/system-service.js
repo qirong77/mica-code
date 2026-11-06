@@ -28,10 +28,11 @@ const MAX_BODY_BYTES = 64 * 1024
  * @param probe 读一次系统状态，返回 `buildSystemChecks()` 的形状
  * @param openSettings 真的去打开面板（主进程里是 `shell.openExternal`）
  * @param requestAccess 主动登记当前构建（主进程里是 `isTrustedAccessibilityClient(true)`）
+ * @param snapshotHeap 给一个窗口拍堆快照（只有主进程拿得到 `webContents`）
  */
-export function createSystemService({ probe, openSettings, requestAccess }) {
+export function createSystemService({ probe, openSettings, requestAccess, snapshotHeap }) {
   const routes = compileRoutes(SYSTEM_ENDPOINTS)
-  const handlers = buildHandlers({ probe, openSettings, requestAccess })
+  const handlers = buildHandlers({ probe, openSettings, requestAccess, snapshotHeap })
 
   async function handle(req, res) {
     const guard = verifyLocalRequest(req)
@@ -129,7 +130,7 @@ export function createSystemService({ probe, openSettings, requestAccess }) {
   }
 }
 
-function buildHandlers({ probe, openSettings, requestAccess }) {
+function buildHandlers({ probe, openSettings, requestAccess, snapshotHeap }) {
   return {
     checks: () => probe(),
     openSettings: async (ctx) => {
@@ -140,6 +141,12 @@ function buildHandlers({ probe, openSettings, requestAccess }) {
     requestAccess: async (ctx) => {
       const id = requirePromptableCheck(ctx.body?.id)
       return requestAccess(id)
+    },
+    heapSnapshot: async (ctx) => {
+      if (typeof snapshotHeap !== 'function') {
+        throw new SystemRequestError('当前外壳不支持堆快照', 501)
+      }
+      return snapshotHeap({ windowId: ctx.body?.windowId })
     }
   }
 }

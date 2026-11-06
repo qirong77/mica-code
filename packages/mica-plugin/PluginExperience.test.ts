@@ -104,7 +104,7 @@ describe('experience analysis', () => {
   });
   it('supports time and plugin filters', () => {
     expect(summarizePluginExperience([line('one')], { since: Date.parse('2026-11-06') })).toEqual([]);
-    expect(summarizePluginExperience([line('one')], { plugin: 'environment-ready' })).toEqual([]);
+    expect(summarizePluginExperience([line('one')], { plugin: 'other-plugin' })).toEqual([]);
     const malformedTime = JSON.parse(line('malformed'));
     malformedTime.time = { toString: 1, valueOf: 1 };
     expect(summarizePluginExperience([JSON.stringify(malformedTime)], { since: 0 })).toEqual([]);

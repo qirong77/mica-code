@@ -824,13 +824,19 @@ export default function App() {
   }, [])
 
   const sessionReads = useRef(null)
+  // 上一次拿到的会话列表版本号：轮询时带上它，宿主在列表没变时只回一个标记，
+  // 省掉「1273 条 × 每 10 秒 × 每个窗口」的序列化与 IPC。
+  const sessionsEtag = useRef('')
   useEffect(() => {
     const reads = createReadQueue(async (isCurrent) => {
       await Promise.all([
         window.mica.stats
-          .listSessions()
+          .listSessions({ since: sessionsEtag.current })
           .then((result) => {
-            if (isCurrent()) applySessions(result?.sessions)
+            if (!isCurrent()) return
+            if (result?.unchanged) return
+            if (typeof result?.etag === 'string') sessionsEtag.current = result.etag
+            applySessions(result?.sessions)
           })
           .catch((error) => console.error('load sessions failed', error))
           // 失败也算「加载过了」：地址栏里的会话照旧按 id 打开，比一直等着强。

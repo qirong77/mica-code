@@ -135,6 +135,16 @@ export type ConfigWebClient = {
     maxBytes?: number;
   }): Promise<ConfigWebPerformanceDetails>;
   clearPerformanceLogs?(): Promise<{ removed: number }>;
+  /**
+   * 给页面拍一份 V8 堆快照（只有桌面外壳做得到：需要 `webContents`）。
+   * 浏览器宿主没有这个方法，按钮据此隐藏。
+   */
+  takeHeapSnapshot?(options?: { windowId?: number }): Promise<{
+    ok: boolean;
+    path?: string;
+    bytes?: number;
+    error?: string;
+  }>;
 
   readSessionsDetails(): Promise<ConfigWebSessionsDetails>;
   readSessionDetails(id: string): Promise<ConfigWebSessionDetails>;
@@ -445,6 +455,23 @@ export function readPerformanceDetails(options?: {
 export function clearPerformanceLogs(): Promise<{ removed: number }> {
   if (!supportsPerformance()) return Promise.resolve({ removed: 0 });
   return requirePerformance().clearPerformanceLogs();
+}
+
+/** 这个宿主能不能拍堆快照（桌面外壳能，浏览器宿主不能）。 */
+export function supportsHeapSnapshot(): boolean {
+  return typeof client?.takeHeapSnapshot === 'function';
+}
+
+export function takeHeapSnapshot(options?: { windowId?: number }): Promise<{
+  ok: boolean;
+  path?: string;
+  bytes?: number;
+  error?: string;
+}> {
+  if (!supportsHeapSnapshot()) {
+    return Promise.resolve({ ok: false, error: '只有桌面应用能拍堆快照' });
+  }
+  return client!.takeHeapSnapshot!(options);
 }
 
 function requirePerformance(): PerformanceClient {

@@ -49,7 +49,20 @@ const worktreeState = new Map()
  * 数字必须立刻变化，而不是等 TTL。
  */
 const worktreeEpoch = new Map()
+/**
+ * 缓存有效期按 key 区分，因为「多久会变」差得很远：
+ *
+ * - `summary:<base>` 是一次全树 `status` + `diff --numstat`，内容随工作区任何一次保存变化，
+ *   所以只有 5 秒；
+ * - `workspace-status` 只有仓库根和分支名，只随 HEAD 变化，而 `headSignature` 已经把
+ *   「切分支 / 提交 / rebase」算进失效判据，`noteWorktreeChange` 还会整条删掉缓存。
+ *   给它 5 秒的唯一后果是：轮询间隔 10 秒永远比 TTL 长，于是**每次轮询都必然 miss**、
+ *   每次都 spawn 一个 git 进程（实测一天 3000 次、274 秒，占 host 通道总耗时的 32%）。
+ *   拉到 60 秒，切分支仍然立刻可见（签名变了），只是少掉那些必然落空的 spawn。
+ */
 const WORKTREE_TTL_MS = 5000
+const WORKSPACE_STATUS_TTL_MS = 60_000
+const ttlOf = (key) => (key === 'workspace-status' ? WORKSPACE_STATUS_TTL_MS : WORKTREE_TTL_MS)
 const repositoryState = new Map()
 /**
  * 正在跑的那一次读取，键是 `<真实 root>\0<key>`，记录起读时的 HEAD 与 epoch。
@@ -205,9 +218,9 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false, inva
     cached &&
     cached.signature === signature &&
     cached.epoch === epoch &&
-    Date.now() - cached.at < WORKTREE_TTL_MS
+    Date.now() - (cached.values.get(key)?.at ?? 0) < ttlOf(key)
   ) {
-    if (cached.values.has(key)) return cached.values.get(key)
+    if (cached.values.has(key)) return cached.values.get(key).value
   }
   // `refresh: true` 是用户主动点刷新：既不读缓存，也不搭别人那次还没跑完的顺风车。
   const inFlightKey = `${root}\u0000${key}`
@@ -234,15 +247,13 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false, inva
     // 这里必须重新取一次：等 `run()` 的这段时间里，另一个不同 key 的读取可能刚写过 entries，
     // 沿用上面捕获的 `cached` 会把它的结果覆盖掉。
     const current = worktreeState.get(root)
+    // 每个 key 各记各的时间：两个 key 的有效期不同（见 `ttlOf`），共用一个 `at` 时
+    // 频繁刷新的 `summary` 会把 `workspace-status` 一起「续期」，长 TTL 就没意义了。
     const entry =
-      current &&
-      current.signature === signature &&
-      current.epoch === epoch &&
-      Date.now() - current.at < WORKTREE_TTL_MS
+      current && current.signature === signature && current.epoch === epoch
         ? current
-        : { signature, epoch, at: Date.now(), values: new Map() }
-    entry.at = Date.now()
-    entry.values.set(key, value)
+        : { signature, epoch, values: new Map() }
+    entry.values.set(key, { at: Date.now(), value })
     worktreeState.set(root, entry)
     return value
   })()

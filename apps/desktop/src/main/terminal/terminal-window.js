@@ -5,9 +5,20 @@
  * （用户点关闭也只是隐藏，PTY 与滚动内容都还在）。窗口里加载的是运行时托管的终端页面
  * ——页面和 AI 一样通过 HTTP + SSE 访问终端服务，所以不需要 preload、也不注册外壳业务
  * IPC。外壳在这里只做「开窗口」这一件只有主进程能做的事。
+ *
+ * 隐藏窗口按 `idleReapMs` 回收：收掉的是壳子（renderer + 它的合成缓存），PTY 会话与
+ * 滚动内容在运行时那边不受影响，下次 `ensure` 重新开一个、页面自己接上。
  */
 
 import { BrowserWindow } from 'electron'
+import {
+  TERMINAL_IDLE_REAP_MS,
+  WINDOW_IDLE_SWEEP_MS,
+  describeReap,
+  resolveMs,
+  selectIdleWindows,
+  startIdleReaper
+} from '../window-idle.js'
 
 const DEFAULT_SIZE = { width: 1000, height: 680 }
 const MIN_SIZE = { width: 420, height: 240 }
@@ -15,7 +26,10 @@ const MIN_SIZE = { width: 420, height: 240 }
 export function createTerminalWindows({
   getPageUrl,
   isQuitting = () => false,
-  onVisibleChange = () => {}
+  onVisibleChange = () => {},
+  // 隐藏多久之后真正销毁窗口；0 关掉这条回收
+  idleReapMs = resolveMs(process.env.MICA_TERMINAL_IDLE_REAP_MS, TERMINAL_IDLE_REAP_MS),
+  idleSweepMs = WINDOW_IDLE_SWEEP_MS
 } = {}) {
   const windows = new Map()
 
@@ -62,6 +76,8 @@ export function createTerminalWindows({
       sessionId: session.id,
       win,
       visible: false,
+      // 从这一刻起没人看得见它；`show` 清空、`hide` 重新计时
+      hiddenAt: Date.now(),
       destroyRequested: false
     }
     windows.set(session.id, record)
@@ -83,11 +99,13 @@ export function createTerminalWindows({
 
     win.on('show', () => {
       record.visible = true
+      record.hiddenAt = null
       onVisibleChange(session.id, true)
     })
 
     win.on('hide', () => {
       record.visible = false
+      record.hiddenAt = Date.now()
       onVisibleChange(session.id, false)
     })
 
@@ -131,6 +149,7 @@ export function createTerminalWindows({
   }
 
   function destroyAll() {
+    stopReaper()
     for (const [sessionId, record] of [...windows.entries()]) {
       windows.delete(sessionId)
       if (record.win.isDestroyed()) continue
@@ -139,5 +158,30 @@ export function createTerminalWindows({
     }
   }
 
-  return { ensure, show, hide, destroy, destroyAll }
+  /** 收掉闲置太久的隐藏窗口。返回被收的会话 id，供日志与测试确认收了哪几个。 */
+  function reapIdle(now = Date.now()) {
+    if (isQuitting()) return []
+    const entries = [...windows.entries()]
+      .filter(([, record]) => !record.win.isDestroyed())
+      .map(([id, record]) => ({
+        id,
+        // 窗口还没显示过也算隐藏：`hiddenAt` 在创建时就给了
+        visible: record.visible,
+        idleSince: record.hiddenAt
+      }))
+    const ids = selectIdleWindows(entries, now, { idleMs: idleReapMs })
+    for (const id of ids) {
+      console.log(describeReap('terminal', id, now - (windows.get(id)?.hiddenAt || now)))
+      try {
+        destroy(id)
+      } catch (error) {
+        console.error('[mica-terminal] 回收隐藏窗口失败:', error)
+      }
+    }
+    return ids
+  }
+
+  const stopReaper = startIdleReaper(reapIdle, { sweepMs: idleSweepMs, label: 'terminal' })
+
+  return { ensure, show, hide, destroy, destroyAll, reapIdle }
 }

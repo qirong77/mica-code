@@ -47,6 +47,21 @@ const RAW_ENDPOINTS = [
       }
     ],
     returns: '{ id, granted }，granted 是调用那一刻的状态（通常仍是 false，勾选要用户做）'
+  },
+  {
+    id: 'heapSnapshot',
+    method: 'POST',
+    path: '/heap-snapshot',
+    summary: '给某个页面拍一份 V8 堆快照并落到日志目录（Performance 页「抓堆快照」用）',
+    params: [
+      {
+        name: 'windowId',
+        in: 'body',
+        required: false,
+        description: '目标窗口 id；不给就取聚焦的那个，再不行取第一个应用窗口'
+      }
+    ],
+    returns: '{ path, bytes, windowId, title }。快照期间目标页面会停住几秒，文件可能上百 MB'
   }
 ]
 

@@ -13,6 +13,36 @@ afterEach(() => {
 });
 
 describe('SessionStore path', () => {
+  /**
+   * 保存后紧接着算内容签名时用的那份文本：`shadow` 就是 `JSON.stringify(session)`，
+   * 也就是 `SessionController.sessionSignature` 本来要自己再算一遍的东西。
+   * 长会话（实测最大 20MB）每个请求边界都多序列化一次，约 16–20ms 的纯分配。
+   */
+  it('save 之后把刚写出去的紧凑 JSON 交回一次，且只对同一个对象有效', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-handoff-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, takeLastSerializedSession } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      const session = makeSession('handoff', '/tmp', '2026-01-01T00:00:00.000Z');
+      store.save(session);
+      expect(takeLastSerializedSession(session)).toBe(JSON.stringify(session));
+      // 一次性：拿走即清，对象之后被改动也不会再拿到过期文本。
+      expect(takeLastSerializedSession(session)).toBeNull();
+      session.title = 'changed after save';
+      store.save(session);
+      expect(JSON.parse(takeLastSerializedSession(session) || '{}').title).toBe('changed after save');
+      // 别的对象不搭这次交接。
+      const other = makeSession('other', '/tmp', '2026-01-01T00:00:00.000Z');
+      store.save(other);
+      expect(takeLastSerializedSession(session)).toBeNull();
+      expect(takeLastSerializedSession(other)).toBe(JSON.stringify(other));
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
   it('distinguishes an atomic replacement even with identical size and mtime', async () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-stat-'));
     try {

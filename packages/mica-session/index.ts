@@ -16,6 +16,8 @@ export const micaSession = {
 
 export { isProcessAlive, listRecentSessionFiles, listSessionTurnLocks, readFileHead } from './liveSessions.js';
 export { readSessionWrites, recordSessionWrite, sessionWritesPath } from './sessionWrites.js';
+// 保存后紧接着算内容签名时用：省掉一次整份序列化（见 sessionStore 里的说明）。
+export { takeLastSerializedSession } from './sessionStore.js';
 
 export type {
   PersistedRuntimeSnapshot,

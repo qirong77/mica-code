@@ -334,7 +334,7 @@ export function PluginQuickBar({
         // 状态行是「这个能力现在生效没有」的唯一提示，值得多试几次再放弃。
         for (let attempt = 0; attempt < PANEL_RETRY_DELAYS.length + 1; attempt += 1) {
           result = await window.mica.chat.pluginPanels
-            .view(nodeId, { pluginId: panel.id, sessionId, cwd })
+            .view(nodeId, { pluginId: panel.id, sessionId, cwd, hidden: !visibleRef.current })
             .catch(() => null)
           if (result && result.ok !== false) break
           if (attempt < PANEL_RETRY_DELAYS.length) {
@@ -915,7 +915,7 @@ function PluginPanelDock({
     const reads = createReadQueue(
       async (isCurrent) => {
         const result = await window.mica.chat.pluginPanels
-          .view(nodeId, { pluginId, sessionId, cwd })
+          .view(nodeId, { pluginId, sessionId, cwd, hidden: !visibleRef.current })
           .catch((cause) => ({ ok: false, error: String(cause?.message || cause) }))
         if (!isCurrent()) return
         applyView(result)

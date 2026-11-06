@@ -467,4 +467,54 @@ describe('cachedWorktreeRead', () => {
     await cachedWorktreeRead(dir, 'status', probe.run)
     expect(probe.runs).toBe(2)
   })
+
+  /**
+   * `workspace-status` 只有仓库根与分支名，只随 HEAD 变化（`headSignature` 判据），
+   * 给它 5 秒 TTL 的唯一后果是：页面 10 秒轮询一次，每次轮询都必然 miss、每次 spawn
+   * 一个 git 进程（实测一天 3000 次、274 秒）。所以它单独用 60 秒。
+   */
+  it('workspace-status 的 TTL 比全树扫描长：10 秒后的轮询不再重新 spawn', async () => {
+    const probe = counter(0)
+    const realNow = Date.now
+    let clock = realNow.call(Date)
+    Date.now = () => clock
+    try {
+      await cachedWorktreeRead(dir, 'workspace-status', probe.run)
+      // 页面的轮询间隔是 10 秒，远大于全树扫描的 5 秒 TTL。
+      clock += 10_000
+      await cachedWorktreeRead(dir, 'workspace-status', probe.run)
+      expect(probe.runs).toBe(1)
+      // 全树扫描仍是 5 秒：同一个时间点上它必须重算，否则徽标会停在旧数字。
+      await cachedWorktreeRead(dir, 'summary:main', probe.run)
+      const afterFirst = probe.runs
+      clock += 10_000
+      await cachedWorktreeRead(dir, 'summary:main', probe.run)
+      expect(probe.runs).toBe(afterFirst + 1)
+    } finally {
+      Date.now = realNow
+    }
+  })
+
+  it('两个 key 各自记时间：频繁刷新的 summary 不会给 workspace-status 续期', async () => {
+    const probe = counter(0)
+    const realNow = Date.now
+    let clock = realNow.call(Date)
+    Date.now = () => clock
+    try {
+      await cachedWorktreeRead(dir, 'workspace-status', probe.run)
+      // 10 秒后 summary 重算一次（它自己的 5 秒 TTL 早过了），同一时刻
+      // workspace-status 仍在自己的 60 秒窗口内。
+      clock += 10_000
+      await cachedWorktreeRead(dir, 'summary:main', probe.run)
+      const runs = probe.runs
+      await cachedWorktreeRead(dir, 'workspace-status', probe.run)
+      expect(probe.runs).toBe(runs)
+      // 60 秒之后它才需要重算。
+      clock += 51_000
+      await cachedWorktreeRead(dir, 'workspace-status', probe.run)
+      expect(probe.runs).toBe(runs + 1)
+    } finally {
+      Date.now = realNow
+    }
+  })
 })

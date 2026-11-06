@@ -30,7 +30,9 @@ export default function ChatComposer({
   onChange,
   onKeyDown,
   onPaste,
-  onFocus
+  onFocus,
+  onDrop,
+  onDragOver
 }) {
   return (
     <div className="chat-composer-input">
@@ -51,6 +53,8 @@ export default function ChatComposer({
         }}
         onFocus={onFocus}
         onPaste={onPaste}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
       />
       <ComposerCursor textareaRef={textareaRef} value={value} />
     </div>

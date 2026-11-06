@@ -106,7 +106,11 @@ export function usePluginAttention() {
     let alive = true
     const tick = async () => {
       if (document.visibilityState === 'hidden') return
-      const plugins = await readPluginsDetails({ force: true })
+      // 不走 `force`：那会绕过 `plugins-details.js` 的 60 秒缓存，每个窗口每 30 秒
+      // 重读一遍全部插件清单（实测一天 2800 多次 `config-web:invoke`、167 秒）。
+      // 这里的轮询本来就是「兜底」——启停插件会派发 `mica:plugins-changed`，
+      // 窗口重新聚焦也会让缓存立刻失效，两条都比 30 秒轮询更及时。
+      const plugins = await readPluginsDetails()
       if (alive) setAttention(pickPluginAttention(plugins, readSeen()))
     }
     void tick()

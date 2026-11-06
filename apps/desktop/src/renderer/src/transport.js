@@ -279,12 +279,15 @@ function createWebApi(env) {
       // 对话右侧的插件面板（清单 `desktop.panel`）：视图与动作都由插件给，宿主只转发。
       // 走 chat 是因为插件活在会话的常驻 host 里——面板要有状态，就得在同一个进程。
       pluginPanels: {
-        view: (id, { pluginId, sessionId, cwd } = {}) =>
+        // `hidden` 只是给日志用的（调用方按自己那块 ChatView 是否可见传）：它让 Performance
+        // 页能看出「这条会话是隐藏的却还在轮询」，可见性门控有没有生效靠这一条验证。
+        view: (id, { pluginId, sessionId, cwd, hidden } = {}) =>
           invoke('chat:plugin-panel-view', {
             id,
             pluginId,
             sessionId: sessionId || null,
-            cwd: cwd || null
+            cwd: cwd || null,
+            ...(hidden ? { hidden: true } : {})
           }),
         action: (id, { pluginId, action, key, values, text, sessionId, cwd } = {}) =>
           invoke('chat:plugin-panel-action', {
@@ -571,7 +574,9 @@ function createWebApi(env) {
     stats: {
       read: () => invoke('stats:read'),
       sessionDetail: (sessionId) => invoke('stats:session-detail', { sessionId }),
-      listSessions: () => invoke('stats:list-sessions'),
+      // 带上 `since` 时宿主会在列表没变的情况下只回一个标记（见 host/stats.js）：
+      // 页面每 10 秒轮一次，不必每次把上千条会话重新序列化一遍。
+      listSessions: (options) => invoke('stats:list-sessions', options),
       // 会话行上的插件标记（标签色点等）：宿主不认识具体插件，只转交这份通用结构。
       listAnnotations: () => invoke('stats:list-annotations'),
       setAnnotation: ({ pluginId, sessionId, optionId, on }) =>

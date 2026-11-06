@@ -112,13 +112,14 @@ export function requestCheckAccess(id, { platform = process.platform, preference
   return { id: check, granted: false }
 }
 
-export async function startSystemHost({ socketPath } = {}) {
+export async function startSystemHost({ socketPath, snapshotHeap } = {}) {
   if (!socketPath) throw new Error('startSystemHost 需要 socketPath')
 
   const service = createSystemService({
     probe: () => probeSystemChecks({ execPath: app.getPath('exe'), packaged: app.isPackaged }),
     openSettings: (pane) => shell.openExternal(pane),
-    requestAccess: (id) => requestCheckAccess(id)
+    requestAccess: (id) => requestCheckAccess(id),
+    snapshotHeap
   })
 
   await mkdir(dirname(socketPath), { recursive: true }).catch(() => {})

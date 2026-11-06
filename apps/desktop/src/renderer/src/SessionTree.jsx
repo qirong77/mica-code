@@ -41,9 +41,11 @@ import {
 import {
   draftMenuItems,
   renameTargetOf,
+  sessionDragText,
   sessionMenuItems,
   withExtraMenuItems
 } from './session-menu'
+import { copyText } from './transport'
 import { parseSessionMenuAction } from './session-menu-plugins'
 import {
   annotationBadges,
@@ -1073,6 +1075,7 @@ export function SessionTree({
     else if (action === 'detail') setDetailSessionId(menuPayload.session.id)
     else if (action === 'fork') onForkSession?.(menuPayload.session.id)
     else if (action === 'share') onShareSession?.(menuPayload.session.id)
+    else if (action === 'copy-id') void copyText(menuPayload.session.id)
     // 会话行带 session，草稿行（新对话）只有 draft：两者都要认，否则草稿的重命名抛错、
     // 编辑态进不去，表现成「点了没反应」。
     else if (action === 'rename') {
@@ -1120,6 +1123,10 @@ export function SessionTree({
     event.dataTransfer.effectAllowed = 'move'
     // Firefox 不设置 data 就不会真的开始拖拽
     event.dataTransfer.setData('text/plain', id)
+    if (kind === 'session') {
+      const session = sessions.find((item) => item.id === id)
+      event.dataTransfer.setData('application/x-mica-session', sessionDragText(session))
+    }
   }
   const clearDrag = () => {
     setDrag(null)

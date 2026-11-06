@@ -70,6 +70,8 @@ export function createDesktopConfigWebClient() {
 
     readPerformanceDetails: (options) => invoke('readPerformanceDetails', options),
     clearPerformanceLogs: () => invoke('clearPerformanceLogs'),
+    // 渲染层堆快照：由主进程对目标窗口的 webContents 拍，落在日志目录。
+    takeHeapSnapshot: (options) => invoke('takeHeapSnapshot', options ?? {}),
 
     readSessionsDetails: () => invoke('readSessionsDetails'),
     readSessionDetails: (id) => invoke('readSessionDetails', { id }),

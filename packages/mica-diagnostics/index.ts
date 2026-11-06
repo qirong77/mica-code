@@ -52,8 +52,13 @@ export interface Logger {
   info(event: string, fields?: Record<string, unknown>): void;
   warn(event: string, fields?: Record<string, unknown>): void;
   error(event: string, fields?: Record<string, unknown>): void;
-  timed<T>(event: string, fn: () => Promise<T>, threshold?: number): Promise<T>;
-  timedResult<T>(event: string, fn: () => Promise<T>, threshold?: number): Promise<T>;
+  timed<T>(event: string, fn: () => Promise<T>, threshold?: number, meta?: Record<string, unknown>): Promise<T>;
+  timedResult<T>(
+    event: string,
+    fn: () => Promise<T>,
+    threshold?: number,
+    meta?: Record<string, unknown>,
+  ): Promise<T>;
 }
 
 export interface PerfTimelinePoint {
@@ -71,8 +76,9 @@ export interface PerfTimelinePoint {
 export interface PerfMemoryPoint {
   at: number;
   rssMB: number;
-  heapMB: number;
-  externalMB: number;
+  /** Bun/JSC 不上报（那套 heap 数字不可信），只有 Node/V8 进程有。 */
+  heapMB?: number;
+  externalMB?: number;
   pid: number;
   host: string;
 }
@@ -88,8 +94,8 @@ export interface PerfMemoryProcess {
   lastRssMB: number;
   peakRssMB: number;
   firstRssMB: number;
-  lastHeapMB: number;
-  lastExternalMB: number;
+  lastHeapMB?: number;
+  lastExternalMB?: number;
   /** 窗口内第一条与最后一条 RSS 的差（MB）：正数就是在涨。 */
   growthMB: number;
 }
@@ -121,6 +127,9 @@ export interface PerfEvent {
   error?: unknown;
   sid?: string;
   rssMB?: number;
+  /** 调用方归因（`logger.timedResult` 的 meta）：哪个插件、是否来自隐藏页面。 */
+  plugin?: string;
+  hidden?: boolean;
 }
 
 export interface PerfMetrics {
@@ -318,16 +327,22 @@ export function logger(scope: string): Logger {
     warn: log('warn'),
     error: (event: string, fields: Record<string, unknown> = {}) =>
       record('error', scope, event, { ...errorFields(fields.error), ...fields, error: undefined }),
-    /** 执行并计时；超阈值记 slow。返回 fn 的结果，异常照常抛出并记录。 */
-    async timed<T>(event: string, fn: () => Promise<T>, limit = SLOW_MS): Promise<T> {
+    /**
+     * 执行并计时；超阈值记 slow。返回 fn 的结果，异常照常抛出并记录。
+     *
+     * `meta` 是调用方现场（哪个插件、哪条会话、哪个工作目录）：同一个通道可能被十几个
+     * 调用方打，只按通道名聚合回答不了「这 600 次是谁发的」。它只进事件行，不进
+     * `slowReport()` 的聚合键，避免聚合表被高基数键撑开。
+     */
+    async timed<T>(event: string, fn: () => Promise<T>, limit = SLOW_MS, meta?: Record<string, unknown>): Promise<T> {
       const started = Date.now();
       try {
         const result = await fn();
-        noteSlow(scope, event, Date.now() - started, limit, true);
+        noteSlow(scope, event, Date.now() - started, limit, true, undefined, meta);
         return result;
       } catch (error) {
         const ms = Date.now() - started;
-        noteSlow(scope, event, ms, limit, false, { level: 'error', fields: errorFields(error) });
+        noteSlow(scope, event, ms, limit, false, { level: 'error', fields: errorFields(error) }, meta);
         throw error;
       }
     },
@@ -337,19 +352,32 @@ export function logger(scope: string): Logger {
      * 用这个：否则日志里只有一条慢调用，看不出它到底是超时、被取消还是真的报错。
      * 只抄回一条短消息，不记录 payload。
      */
-    async timedResult<T>(event: string, fn: () => Promise<T>, limit = SLOW_MS): Promise<T> {
+    async timedResult<T>(
+      event: string,
+      fn: () => Promise<T>,
+      limit = SLOW_MS,
+      meta?: Record<string, unknown>,
+    ): Promise<T> {
       const started = Date.now();
       let result: T;
       try {
         result = await fn();
       } catch (error) {
         const ms = Date.now() - started;
-        noteSlow(scope, event, ms, limit, false, { level: 'error', fields: errorFields(error) });
+        noteSlow(scope, event, ms, limit, false, { level: 'error', fields: errorFields(error) }, meta);
         throw error;
       }
       const ms = Date.now() - started;
       const failure = resultFailure(result);
-      noteSlow(scope, event, ms, limit, !failure, failure ? { level: 'warn', fields: { error: failure } } : undefined);
+      noteSlow(
+        scope,
+        event,
+        ms,
+        limit,
+        !failure,
+        failure ? { level: 'warn', fields: { error: failure } } : undefined,
+        meta,
+      );
       return result;
     },
   };
@@ -372,6 +400,7 @@ function noteSlow(
   limit: number,
   ok: boolean,
   failure?: { level: 'warn' | 'error'; fields: Record<string, unknown> },
+  meta?: Record<string, unknown>,
 ): void {
   const key = `${scope}:${event}`;
   const stat = slowStats.get(key) || { count: 0, totalMs: 0, maxMs: 0, slow: 0, fails: 0 };
@@ -379,20 +408,28 @@ function noteSlow(
   stat.totalMs += ms;
   stat.maxMs = Math.max(stat.maxMs, ms);
   if (!ok) stat.fails += 1;
+  // 调用方现场只跟在事件行上；`undefined` 值不落盘（否则每行都是 `pluginId: null`）。
+  const who: Record<string, unknown> = {};
+  if (meta) {
+    for (const [name, value] of Object.entries(meta)) {
+      if (value !== undefined && value !== null && value !== '') who[name] = value;
+    }
+  }
   if (ms >= limit) {
     stat.slow += 1;
     // 慢调用单独记一条 warn：这是「卡在哪」最直接的线索。
     record(failure?.level || 'warn', scope, event, {
       ms,
       kind: 'slow',
+      ...who,
       ...(failure ? { failed: true, ...failure.fields } : {}),
     });
   } else if (failure) {
-    record(failure.level, scope, event, { ms, kind: 'failed', ...failure.fields });
+    record(failure.level, scope, event, { ms, kind: 'failed', ...who, ...failure.fields });
   } else if (ok) {
     // 常态调用也记，否则 Performance 面板看不到各功能的基线耗时。
     // 用 kind:'call' 与应用事件区分，页面的事件流不展示它们（耗时时看聚合表）。
-    record('info', scope, event, { ms, kind: 'call' });
+    record('info', scope, event, { ms, kind: 'call', ...who });
   }
   slowStats.set(key, stat);
 }
@@ -400,21 +437,48 @@ function noteSlow(
 const MB = 1024 * 1024;
 const toMB = (bytes: number): number => Math.round((bytes / MB) * 10) / 10;
 
-/** 当前进程的内存快照（MB）。额外字段（会话 id、子进程数…）由调用方补充。 */
+/**
+ * 当前进程的内存快照（MB）。额外字段（会话 id、子进程数…）由调用方补充。
+ *
+ * Bun（JSC）下 `process.memoryUsage()` 的 heap / external / arrayBuffers 三项不可信：
+ * 实测 `heapUsed 524MB > heapTotal 374MB`，日志里还出现过 `heap 5014MB / heapT 161MB`、
+ * `rss 95MB / ext 430MB` 这种不可能的组合。写进去会让任何按日志判断内存的人得出错误
+ * 结论（第一版排查就被它带偏过），所以 Bun 下只留 RSS，并显式标 `heapReliable: false`。
+ * 判断「谁在涨」用 RSS；要看 JS 堆得去 CPU profile / heap snapshot。
+ */
 export function collectMemory(extra: Record<string, unknown> = {}): Record<string, unknown> {
   const mem = process.memoryUsage();
+  const bun = Boolean(process.versions.bun);
   return {
     rss: toMB(mem.rss),
-    heap: toMB(mem.heapUsed),
-    heapT: toMB(mem.heapTotal),
-    ext: toMB(mem.external),
-    ab: toMB(mem.arrayBuffers),
+    ...(bun
+      ? { heapReliable: false }
+      : {
+          heap: toMB(mem.heapUsed),
+          heapT: toMB(mem.heapTotal),
+          ext: toMB(mem.external),
+          ab: toMB(mem.arrayBuffers),
+        }),
     pid: process.pid,
-    runtime: process.versions.bun ? 'bun' : 'node',
-    engine: process.versions.bun ? 'jsc' : 'v8',
+    runtime: bun ? 'bun' : 'node',
+    engine: bun ? 'jsc' : 'v8',
     ...extra,
   };
 }
+
+/**
+ * 内存尖峰阈值：RSS 越过它就从 info 升成一条 warn，并带上 `describe()` 的现场。
+ *
+ * 采样每 30s 一条，一个回合把宿主顶到 2GB 再还回去只会在日志里留下两三个点，
+ * 事后翻的时候看不出「那一刻在跑什么」。越阈值时单独记一条，把现场固定下来。
+ */
+const spikeRssMb = (override?: number): number => {
+  if (typeof override === 'number' && Number.isFinite(override) && override > 0) return override;
+  const configured = Number(process.env.MICA_LOG_SPIKE_MB);
+  return Number.isFinite(configured) && configured > 0 ? configured : 1024;
+};
+// 掉回阈值以下之后要隔这么久才允许再报一次，否则在阈值上下抖动时会连续刷屏。
+const SPIKE_COOLDOWN_MS = 10 * 60 * 1000;
 
 export interface MemorySamplerOptions {
   /** 进程身份（`runtime` / `main` / `app-server` / `tui`），Performance 页按它分组。 */
@@ -424,6 +488,8 @@ export interface MemorySamplerOptions {
   describe?: () => Record<string, unknown> | null | undefined;
   /** 立刻采一条（默认 true），否则第一份数据要等一个间隔。 */
   immediate?: boolean;
+  /** 内存尖峰阈值（MB），默认取 `MICA_LOG_SPIKE_MB`，再不行 1024。 */
+  spikeRssMB?: number;
 }
 
 /**
@@ -433,6 +499,9 @@ export interface MemorySamplerOptions {
 export function startMemorySampler(options: MemorySamplerOptions): () => void {
   const intervalMs = Math.max(5_000, Math.floor(Number(options.intervalMs) || MEM_INTERVAL_MS));
   const log = logger('mem');
+  const spikeLimit = spikeRssMb(options.spikeRssMB);
+  let spiking = false;
+  let lastSpikeAt = 0;
   const tick = (): void => {
     let extra: Record<string, unknown> = {};
     if (options.describe) {
@@ -443,7 +512,19 @@ export function startMemorySampler(options: MemorySamplerOptions): () => void {
       }
     }
     try {
-      log.info('sample', { host: options.host, ...collectMemory(extra) });
+      const memory = collectMemory(extra);
+      log.info('sample', { host: options.host, ...memory });
+      // 尖峰只在「刚越过阈值、且过了冷却」时报一次：持续处于高位不该每 30 秒刷一条。
+      const rss = Number(memory.rss) || 0;
+      if (rss >= spikeLimit) {
+        if (!spiking && Date.now() - lastSpikeAt >= SPIKE_COOLDOWN_MS) {
+          lastSpikeAt = Date.now();
+          log.warn('spike', { host: options.host, ...memory });
+        }
+        spiking = true;
+      } else {
+        spiking = false;
+      }
     } catch {
       // 采样失败绝不能影响宿主
     }

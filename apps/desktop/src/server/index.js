@@ -575,6 +575,30 @@ function pipeFile(res, file, transform) {
 
 /* -------------------------------------------------------------------- 路由 */
 
+/**
+ * 一次宿主调用的「调用方」标签，只挑能回答「这 14933 次是谁发的」的几个字段。
+ *
+ * 同一个通道会被十几个调用方打（5 个缓存中的 ChatView、多个窗口、侧栏、分享页…），
+ * 只按通道名聚合时，面板上只会看到「chat:plugin-panel-view 14933 次」，
+ * 分不出其中多少来自隐藏会话。字段来自 payload，缺了就不写。
+ */
+function callerTags(channel, payload) {
+  if (!payload || typeof payload !== 'object') return undefined
+  const tags = {}
+  if (typeof payload.pluginId === 'string' && payload.pluginId) tags.plugin = payload.pluginId
+  // `nodeId` 是页签身份，`sessionId` 才是会话身份：两者都有时以会话为准。
+  if (typeof payload.sessionId === 'string' && payload.sessionId) tags.sid = payload.sessionId
+  else if (typeof payload.nodeId === 'string' && payload.nodeId) tags.node = payload.nodeId
+  // 目录只看最后一段：完整路径对定位没帮助，还会把日志撑长。
+  if (typeof payload.cwd === 'string' && payload.cwd) {
+    tags.cwd = payload.cwd.split('/').filter(Boolean).pop()
+  }
+  // 渲染层自己声明「这个调用来自看不见的页面」时照实记：可见性门控有没有生效，
+  // 只能靠这个字段验证。
+  if (payload.hidden === true) tags.hidden = true
+  return Object.keys(tags).length ? tags : undefined
+}
+
 async function handleInvoke(req, res) {
   let body
   try {
@@ -592,7 +616,12 @@ async function handleInvoke(req, res) {
   try {
     // 大量通道把失败包在返回值里（`{ error }` / `{ ok:false }`）而不抛：记下原因，
     // 否则日志只剩一条慢调用，分不清是超时、被取消还是真报错。
-    const result = await invokeLog.timedResult(channel, () => invokeChannel(channel, body.payload))
+    const result = await invokeLog.timedResult(
+      channel,
+      () => invokeChannel(channel, body.payload),
+      undefined,
+      callerTags(channel, body.payload)
+    )
     sendJson(res, 200, { ok: true, result })
   } catch (error) {
     sendJson(res, 200, { ok: false, error: errorMessage(error) })
