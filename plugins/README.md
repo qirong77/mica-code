@@ -9,7 +9,7 @@
 
 `browser-cookie-sync` 通过随包 Chrome 扩展与本机口令服务自动双向同步 cookie，不读取 Chrome 数据库；安装说明与安全边界见 [Browser Cookie Sync](browser-cookie-sync/README.md)。
 
-会话体验卡：[Task Delivery](task-delivery/README.md) 保存任务交付结果与验证证据，[Context Handoff](context-handoff/README.md) 保存历史检查点，[Environment Ready](environment-ready/README.md) 探测本次任务登记的本机服务。三者共用宿主摘要卡片，不各自绘制界面；本地埋点格式及分析导出见 [会话体验卡与埋点](../docs/plugin-experience.md)。
+会话体验卡：[Context Handoff](context-handoff/README.md) 保存历史检查点，[Environment Ready](environment-ready/README.md) 探测本次任务登记的本机服务。两者共用宿主摘要卡片，不各自绘制界面；本地埋点格式及分析导出见 [会话体验卡与埋点](../docs/plugin-experience.md)。
 
 [Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
 

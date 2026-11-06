@@ -1,14 +1,13 @@
 # 会话体验卡与本地埋点
 
-三个插件使用宿主统一的摘要卡片与详情面板，复用主题令牌和共享 Button。卡片只在有内容时出现，支持收起；完整信息仍可从插件面板查看。
+两个插件使用宿主统一的摘要卡片与详情面板，复用主题令牌和共享 Button。卡片只在有内容时出现，支持收起；完整信息仍可从插件面板查看。
 
 | 插件 | 用途 | 信息来源 |
 | --- | --- | --- |
-| Task Delivery | 任务结果、文件与验证/构建/部署状态 | 模型提供摘要；实际观察到的工具结果单独作为证据 |
 | Context Handoff | 回到旧会话时查看已完成、待完成和注意事项 | 保存的历史检查点；继续前核实当前工作区 |
 | Environment Ready | 当前任务登记的本机 HTTP/TCP 服务 | 有超时、检查时间与过期标记的实际探测 |
 
-这三个插件不额外调用模型。交付与交接需要主代理调用工具保存内容，不会从每条聊天消息自动猜测任务状态。环境卡只探测已登记的本机服务，不会自动启动、停止或重启服务。
+这两个插件不额外调用模型。交接需要主代理调用工具保存内容，不会从每条聊天消息自动猜测任务状态。环境卡只探测已登记的本机服务，不会自动启动、停止或重启服务。
 
 ## 统一事件
 
@@ -38,7 +37,7 @@
 
 ```sh
 bun scripts/plugin-experience-report.ts
-bun scripts/plugin-experience-report.ts --plugin task-delivery --since 2026-11-01T00:00:00Z
+bun scripts/plugin-experience-report.ts --plugin context-handoff --since 2026-11-01T00:00:00Z
 bun scripts/plugin-experience-report.ts --dir /path/to/copied-logs > experience-report.json
 ```
 
