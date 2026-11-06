@@ -221,7 +221,7 @@ export function chromeHtml() {
       update: function (state) {
         state = state || {}
         applyPalette(state.palette)
-        label.textContent = state.label || '受控浏览器'
+        label.textContent = (state.incognito ? '无痕 · ' : '') + (state.label || '受控浏览器')
         badge.title = label.textContent + (state.owner ? '\\n用户会话 ' + state.owner : '\\n未归属')
         url.textContent = state.url || 'about:blank'
         url.title = url.textContent + '\\n地址由 Mica 控制，不可编辑；可选中复制'

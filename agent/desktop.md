@@ -155,7 +155,7 @@
 - 两者都走 Unix socket，由运行时在既有端口上代理；agent 侧各暴露一个 MCP tool `control`。
 - 浏览器窗口默认全程隐藏：截图、点击、输入、按键、滚动都在隐藏窗口里完成（截图走 CDP `Page.captureScreenshot`，`capturePage()` 在隐藏窗口上是旧帧；原生输入在隐藏窗口上有效，前提是主进程挂了 `disable-backgrounding-occluded-windows`，否则 rAF 冻结、页面不动）。滚动用页面内 `scrollBy` / 内部容器 `scrollTop`——CDP 的 `mouseWheel` 在隐藏窗口上永不返回，可见时也不一定真滚；`Emulation.setFocusEmulationEnabled` 让隐藏页面 `document.hasFocus()` 为 true，否则部分站点会关掉自动聚焦与快捷键。`showBrowser` 是唯一会显示窗口的方法，只在明确要给用户演示时调用；用户自己点顶栏的浏览器图标唤出/收起。一次页面操作（导航 / 点击 / 输入 / 按键 / 滚动 / 截图 / 读内容）的「切到目标标签页 → 执行 → 切回」在同一窗口上按 record 串行（`browser-core.js` 的 `createTabSwitcher`）：窗口同时只挂一个标签页，并发交错会让后来者的坐标与截图落到别人切过去的页面上。
 - 浏览器顶栏（标签条 + 只读地址）是一条独立页面（`src/main/browser/browser-chrome.js`：data: URL、无 preload），配色**跟随应用主题**：外壳从 `ui-state.json` 读偏好（`auto` 跟系统，主进程按 mtime 缓存），把 `chromePalette()` 下发给页面，窗口底色也用同主题的 `--color-canvas`；主题变或系统亮暗变时重推已打开的窗口。调色板取值与 `app.css` 的主题块逐项对齐，`browser-chrome.test.js` 会比对，改主题必须同改。地址框不可编辑但**可选中复制**（点一下选整条，⌘C / Ctrl+C 经 `copy` 消息交给主进程剪贴板，不依赖渲染进程的复制权限），说明只放地址 tooltip，不放右侧提示或隐藏按钮，显隐仍走主窗口浏览器图标。会话归属收在窗口标签 tooltip，加载状态复用标签圆点；多个标签页全部同名时标题只显示一次，用编号按钮切换，各页完整标题与地址在 tooltip，标签条超宽横向滚动。
-- 同一 `persist:mica-browser` 分区共享 Cookie；服务保持 Origin/Host 守卫。
+- 普通窗口默认使用 `persist:mica-browser` 分区共享 Cookie；`createBrowser` / 不带 browserId 的 `createTab` 可显式传 `incognito: true`，每个无痕窗口分配唯一内存分区，标签页与弹出页面继承该分区。隐藏仍保留，销毁窗口或关闭最后一个标签页后仅清理该临时分区的存储与缓存。窗口摘要返回 `incognito`，顶栏标注无痕；不能通过新标签页切换已有窗口模式。无标签页的 Cookie 读写、文件缓存与变化推送仅作用于普通分区；按标签页读 Cookie 使用目标窗口的分区。服务保持 Origin/Host 守卫。
 - cookie 的读写分两组：`GET /browser/cookies` 按 url 取「这个站点会发出去的」（含父域）并缓存成文件，`GET /browser/tabs/:id/cookies` 取当前页；`GET /browser/cookies/all` + `POST /browser/cookies/set` + `POST /browser/cookies/remove` 是**分区级**的枚举 / 批量写 / 按 (domain, path, name) 删。`GET /browser/cookies/events` 是独立 SSE：Electron 分区的 `cookies.changed` 只推身份键与增删状态，不向页面状态事件流泄露 cookie 值；`browser-cookie-sync` 插件按作用域回读具体值给 Chrome 扩展。写进去要 `cookies.flushStore()`，否则应用退出时还没落盘的那些就丢了；单条写失败不中断整批，失败原因随 `failed[]` 回给调用方。作用域由 `browser-core.js` 的 `cookieScopeUrl` / `toElectronCookie` 定：删除先按域、path、name 与 hostOnly 找精确条目，再过期写入（URL/name 的 remove 会误匹配父域及其它 path）；`hostOnly` 的条目**不传** `domain`（传了就等于把它放宽到子域）。
 - 终端是一个会话一个后台窗口，`node-pty` 真实 pty + `@xterm/headless` 屏幕镜像；窗口按需创建，关窗只 hide。
 - 读屏前必须等已排队输出解析完，并给该等待硬预算（读屏 2s、`wait` 用剩余超时）。
@@ -163,7 +163,7 @@
 - 会话存在进程内，最多 12 条活着 shell；`sweep()` 每分钟回收，没有归属的立刻回收，窗口可见的不回收。
 - 归属是顶栏图标的唯一依据：浏览器与终端**新建都必须带 `x-mica-owner`**（缺了返回 400），没有归属的窗口还会被回收（浏览器在列窗口前 `pruneUnowned()`，终端靠 `shouldRecycle`）——顶栏只显示当前会话自己的窗口，切会话就一起消失。
 - 写入类操作校验 `x-mica-owner`（防串台，不是权限边界）；终端的读屏与 `wait` 不拦。浏览器侧同一套校验覆盖所有带 id 的端点（写与读都在内）——别的会话连它页面的内容与 cookie 都读不到；不带 owner 的页面调用照常放行。
-- 浏览器列表按请求 owner 过滤，`createTab` 的目标窗口也校验归属；每个 owner 最多创建一个窗口，重复创建返回 409，多个页面用标签页。窗口不会因闲置自动销毁，Cookie 分区仍跨会话共享；owner 是防串台标识而非安全凭据。
+- 浏览器列表按请求 owner 过滤，`createTab` 的目标窗口也校验归属；每个 owner 普通、无痕窗口各最多一个，同模式重复创建返回 409，多个页面用对应窗口的标签页。窗口不会因闲置自动销毁，普通 Cookie 分区跨会话共享；owner 是防串台标识而非安全凭据。
 - 带归属的接口调用会推一条 `browser:activity` / `terminal:activity`（`{ id, owner, endpoint, at }`，只发给列表订阅者、不改快照），页面收到后让对应那枚图标闪一下（`.control-icon-flash`，按计数重挂图标重播动画）。页面自己点图标不带 owner，不会触发。
 - 纯 Web 宿主无主进程，`/remote/terminal/*` 回 503。
 

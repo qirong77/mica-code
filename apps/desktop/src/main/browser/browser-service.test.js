@@ -15,6 +15,7 @@ function createFakeManager() {
     const browser = {
       id: `brw-${sequence}`,
       owner: input.owner || null,
+      incognito: input.incognito === true,
       label: input.label || '受控浏览器',
       visible: Boolean(input.show),
       createdAt: '2026-01-01T00:00:00.000Z',
@@ -80,12 +81,13 @@ function createFakeManager() {
       }
       return null
     },
-    listTabs: (owner) => [...browsers.values()]
-      .filter((item) => !owner || item.owner === owner)
-      .flatMap((item) => item.tabs.map((tab) => ({ ...tab, owner: item.owner }))),
-    createTab: ({ browserId, owner, url }) => {
+    listTabs: (owner) =>
+      [...browsers.values()]
+        .filter((item) => !owner || item.owner === owner)
+        .flatMap((item) => item.tabs.map((tab) => ({ ...tab, owner: item.owner }))),
+    createTab: ({ browserId, owner, url, incognito }) => {
       if (!browserId) {
-        const browser = record({ owner, url })
+        const browser = record({ owner, url, incognito })
         return { browser, tab: browser.tabs[0] }
       }
       const browser = browsers.get(browserId)
@@ -149,11 +151,13 @@ function createFakeManager() {
     setCookies: (list) => ({ written: list.length, failed: [] }),
     removeCookies: (list) => ({
       removed: list.length,
-      failed: list.filter((entry) => entry.name === 'boom').map((entry) => ({
-        name: entry.name,
-        domain: entry.domain,
-        reason: '写不进去'
-      }))
+      failed: list
+        .filter((entry) => entry.name === 'boom')
+        .map((entry) => ({
+          name: entry.name,
+          domain: entry.domain,
+          reason: '写不进去'
+        }))
     }),
     consoleEntries: (_id, { clear } = {}) => [{ level: 'info', message: clear ? 'cleared' : 'hi' }],
     networkEntries: () => [{ method: 'GET', url: 'https://example.com', status: 200 }],
@@ -288,21 +292,35 @@ describe('ownership', () => {
     expect(browsers.body.browsers.map((item) => item.id)).toEqual([own.id])
     const tabs = await call('/browser/tabs?owner=list-foreign', { headers })
     expect(tabs.body.tabs.map((item) => item.browserId)).toEqual([own.id])
-    expect((await call('/browser/browsers')).body.browsers.map((item) => item.id)).toContain(foreign.id)
-    expect((await call('/browser/tabs')).body.tabs.map((item) => item.browserId)).toContain(foreign.id)
+    expect((await call('/browser/browsers')).body.browsers.map((item) => item.id)).toContain(
+      foreign.id
+    )
+    expect((await call('/browser/tabs')).body.tabs.map((item) => item.browserId)).toContain(
+      foreign.id
+    )
   })
 
   it('checks tab creation ownership and permits the desktop to use an existing window', async () => {
     const browser = manager.record({ owner: 'tab-owner' })
     const foreign = await call('/browser/tabs', {
-      method: 'POST', body: { browserId: browser.id }, headers: { 'x-mica-owner': 'tab-other' }
+      method: 'POST',
+      body: { browserId: browser.id },
+      headers: { 'x-mica-owner': 'tab-other' }
     })
     expect(foreign.status).toBe(403)
     expect(browser.tabs).toHaveLength(1)
-    expect((await call('/browser/tabs', {
-      method: 'POST', body: { browserId: browser.id }, headers: { 'x-mica-owner': 'tab-owner' }
-    })).status).toBe(200)
-    expect((await call('/browser/tabs', { method: 'POST', body: { browserId: browser.id } })).status).toBe(200)
+    expect(
+      (
+        await call('/browser/tabs', {
+          method: 'POST',
+          body: { browserId: browser.id },
+          headers: { 'x-mica-owner': 'tab-owner' }
+        })
+      ).status
+    ).toBe(200)
+    expect(
+      (await call('/browser/tabs', { method: 'POST', body: { browserId: browser.id } })).status
+    ).toBe(200)
     expect(browser.tabs).toHaveLength(3)
     expect((await call('/browser/tabs', { method: 'POST', body: {} })).status).toBe(400)
   })
@@ -314,10 +332,62 @@ describe('ownership', () => {
     const second = await call('/browser/browsers', { method: 'POST', body: { owner: 'limit-a' } })
     expect(second.status).toBe(409)
     expect(second.body.error).toContain('复用')
-    expect((await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-a' } })).status).toBe(409)
+    expect(
+      (await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-a' } })).status
+    ).toBe(409)
     expect((await call(`/browser/browsers/${id}`)).status).toBe(200)
-    expect((await call('/browser/browsers', { method: 'POST', body: { owner: 'limit-b' } })).status).toBe(200)
-    expect((await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-b' } })).status).toBe(409)
+    expect(
+      (await call('/browser/browsers', { method: 'POST', body: { owner: 'limit-b' } })).status
+    ).toBe(200)
+    expect(
+      (await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-b' } })).status
+    ).toBe(409)
+  })
+
+  it('keeps normal and private windows side by side and inherits the target mode', async () => {
+    const owner = 'private-owner'
+    const normal = await call('/browser/browsers', { method: 'POST', body: { owner } })
+    expect(normal.body.browser.incognito).toBe(false)
+    const privateWindow = await call('/browser/tabs', {
+      method: 'POST',
+      body: { owner, incognito: true }
+    })
+    expect(privateWindow.body.browser.incognito).toBe(true)
+    const browserId = privateWindow.body.browser.id
+    expect(
+      (
+        await call('/browser/browsers', {
+          method: 'POST',
+          body: { owner, incognito: true }
+        })
+      ).status
+    ).toBe(409)
+    const inherited = await call('/browser/tabs', { method: 'POST', body: { owner, browserId } })
+    expect(inherited.body.browser.incognito).toBe(true)
+    expect(
+      (
+        await call('/browser/tabs', {
+          method: 'POST',
+          body: { owner, browserId, incognito: false }
+        })
+      ).status
+    ).toBe(400)
+    expect(
+      (
+        await call('/browser/tabs', {
+          method: 'POST',
+          body: { owner, browserId: normal.body.browser.id, incognito: true }
+        })
+      ).status
+    ).toBe(400)
+    expect((await call(`/browser/browsers/${normal.body.browser.id}`)).body.browser.incognito).toBe(
+      false
+    )
+    const explicitFalse = await call('/browser/browsers', {
+      method: 'POST',
+      body: { owner: 'explicit-normal', incognito: 'false' }
+    })
+    expect(explicitFalse.body.browser.incognito).toBe(false)
   })
 
   // 与终端同一套语义：带归属的调用只能碰自己名下的窗口 / 标签页，不带归属的是「人」
@@ -355,7 +425,9 @@ describe('ownership', () => {
         })
       ).status
     ).toBe(200)
-    expect((await call(`/browser/tabs/${tabId}/type`, { method: 'POST', body: { text: 'hi' } })).status).toBe(200)
+    expect(
+      (await call(`/browser/tabs/${tabId}/type`, { method: 'POST', body: { text: 'hi' } })).status
+    ).toBe(200)
   })
 })
 
@@ -465,7 +537,12 @@ describe('browser and tab operations', () => {
     // 单条写不进去不该中断整批：失败原因原样回给调用方
     const partial = await call('/browser/cookies/remove', {
       method: 'POST',
-      body: { cookies: [{ name: 'boom', domain: 'other.test' }, { name: 'ok', domain: 'other.test' }] }
+      body: {
+        cookies: [
+          { name: 'boom', domain: 'other.test' },
+          { name: 'ok', domain: 'other.test' }
+        ]
+      }
     })
     expect(partial.body.removed).toBe(2)
     expect(partial.body.failed).toHaveLength(1)
@@ -474,7 +551,10 @@ describe('browser and tab operations', () => {
   it('refuses an empty or malformed cookie batch', async () => {
     const empty = await call('/browser/cookies/set', { method: 'POST', body: { cookies: [] } })
     expect(empty.status).toBe(400)
-    const notArray = await call('/browser/cookies/remove', { method: 'POST', body: { cookies: 'x' } })
+    const notArray = await call('/browser/cookies/remove', {
+      method: 'POST',
+      body: { cookies: 'x' }
+    })
     expect(notArray.status).toBe(400)
   })
 

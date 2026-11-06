@@ -15,7 +15,7 @@ const cookie = {
 };
 const token = 'test-token';
 
-async function fixture() {
+async function fixture(extensionInfo?: () => { version: string; fingerprint: string; updatedAt: number }) {
   const calls: Array<{ path: string; body: any }> = [];
   const streams = new Set<ServerResponse>();
   let snapshot: Record<string, unknown> = { ok: true, cookies: [{ ...cookie }], total: 1, truncated: false };
@@ -39,7 +39,12 @@ async function fixture() {
   });
   await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
   const browserPort = (upstream.address() as { port: number }).port;
-  const service = await startCookieService({ token, micaBrowserUrl: `http://127.0.0.1:${browserPort}`, port: 0 });
+  const service = await startCookieService({
+    token,
+    micaBrowserUrl: `http://127.0.0.1:${browserPort}`,
+    port: 0,
+    ...(extensionInfo ? { extensionInfo } : {}),
+  });
   const url = `http://127.0.0.1:${service.port}`;
   const request = (path: string, init: RequestInit = {}) =>
     fetch(`${url}${path}`, {
@@ -67,8 +72,8 @@ async function fixture() {
 }
 
 const active: Array<Awaited<ReturnType<typeof fixture>>> = [];
-async function setup() {
-  const value = await fixture();
+async function setup(extensionInfo?: () => { version: string; fingerprint: string; updatedAt: number }) {
+  const value = await fixture(extensionInfo);
   active.push(value);
   return value;
 }
@@ -89,6 +94,19 @@ async function waitFor(predicate: () => boolean) {
 }
 
 describe('cookie loopback service', () => {
+  it('reports the on-disk extension version so the extension can self-update', async () => {
+    const info = { version: '1.2.0', fingerprint: 'abc123', updatedAt: 1_700_000_000_000 };
+    const withInfo = await setup(() => info);
+    expect(await (await withInfo.request('/health')).json()).toEqual({
+      ok: true,
+      connected: false,
+      extension: info,
+    });
+    // 老服务（没有版本信息）也不能让扩展报错：字段直接省略。
+    const plain = await setup();
+    expect(await (await plain.request('/health')).json()).toEqual({ ok: true, connected: false });
+  });
+
   it('rejects unauthenticated, webpage-origin and partitioned events without CORS', async () => {
     const service = await setup();
     const noAuth = await fetch(`${service.url}/snapshot`);

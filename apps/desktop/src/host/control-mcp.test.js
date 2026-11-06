@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { BROWSER_ENDPOINTS as browserCatalog } from '../main/browser/browser-docs.js'
 import {
   CONTROL_TOOL_NAME,
   buildActionRequest,
@@ -94,6 +95,15 @@ describe('buildActionRequest', () => {
   const navigate = BROWSER_ENDPOINTS.find((item) => item.id === 'navigate')
   const waitFor = BROWSER_ENDPOINTS.find((item) => item.id === 'waitFor')
 
+  it('forwards opt-in incognito from the real browser catalog without adding it by default', () => {
+    for (const action of ['createBrowser', 'createTab']) {
+      const endpoint = browserCatalog.find((item) => item.id === action)
+      expect(buildActionRequest(endpoint, { incognito: true }).body).toEqual({ incognito: true })
+      expect(buildActionRequest(endpoint, { incognito: false }).body).toEqual({ incognito: false })
+      expect(buildActionRequest(endpoint, {}).body).toBeUndefined()
+    }
+  })
+
   it('splits params into path, query and body and injects the owner header', () => {
     const request = buildActionRequest(
       navigate,
@@ -128,7 +138,9 @@ describe('buildActionRequest', () => {
       /缺路径参数 id/
     )
     // 报错里要直接给可照抄的形状，模型一次往返就能改对
-    expect(() => buildActionRequest(navigate, { url: 'https://example.com' })).toThrow(/"id":"tab-1"/)
+    expect(() => buildActionRequest(navigate, { url: 'https://example.com' })).toThrow(
+      /"id":"tab-1"/
+    )
   })
 
   // 文档里的路径参数叫 id，模型更常写 tabId / browserId：真实轨迹里这类不匹配 60+ 次
@@ -145,8 +157,15 @@ describe('buildActionRequest', () => {
 
   it('keeps a real browserId param when the endpoint declares one', () => {
     // createTab 的 browserId 是 body 里的目标窗口，不是路径 id
-    const createTab = { id: 'createTab', method: 'POST', path: '/browser/tabs', params: [{ name: 'browserId', in: 'body' }] }
-    expect(buildActionRequest(createTab, { browserId: 'brw-1' }).body).toEqual({ browserId: 'brw-1' })
+    const createTab = {
+      id: 'createTab',
+      method: 'POST',
+      path: '/browser/tabs',
+      params: [{ name: 'browserId', in: 'body' }]
+    }
+    expect(buildActionRequest(createTab, { browserId: 'brw-1' }).body).toEqual({
+      browserId: 'brw-1'
+    })
   })
 
   it('lists the path param in the action docs so the model knows it is required', () => {

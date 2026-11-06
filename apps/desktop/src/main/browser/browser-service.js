@@ -165,7 +165,11 @@ export function createBrowserService({
       return sendJson(res, 404, { ok: false, error: `未知端点：${method} ${url.pathname}` })
     }
     if (matched.stream) {
-      return handleEvents(req, res, matched.endpoint.id === 'cookieEvents' ? cookieClients : clients)
+      return handleEvents(
+        req,
+        res,
+        matched.endpoint.id === 'cookieEvents' ? cookieClients : clients
+      )
     }
 
     let body = {}
@@ -335,8 +339,19 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
   const manager = () => getManager()
   const requireNewBrowser = (ctx) => {
     requireOwner(ctx)
-    if (manager().listBrowsers().some((browser) => browser.owner === ctx.owner)) {
-      throw new BrowserRequestError('当前会话已有浏览器窗口，请复用该窗口或在其中打开新标签页', 409)
+    if (
+      manager()
+        .listBrowsers()
+        .some(
+          (browser) =>
+            browser.owner === ctx.owner &&
+            Boolean(browser.incognito) === (parseBoolean(ctx.body.incognito) === true)
+        )
+    ) {
+      throw new BrowserRequestError(
+        '当前会话已有相同模式的浏览器窗口，请复用该窗口或在其中打开新标签页',
+        409
+      )
     }
   }
 
@@ -362,7 +377,9 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
     listBrowsers: (ctx) => {
       manager().pruneUnowned?.()
       const browsers = manager().listBrowsers()
-      return { browsers: ctx.owner ? browsers.filter((browser) => browser.owner === ctx.owner) : browsers }
+      return {
+        browsers: ctx.owner ? browsers.filter((browser) => browser.owner === ctx.owner) : browsers
+      }
     },
 
     createBrowser: (ctx) => {
@@ -373,7 +390,8 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
             owner: ctx.owner,
             url: ctx.body.url,
             label: ctx.body.label,
-            show: parseBoolean(ctx.body.show) === true
+            show: parseBoolean(ctx.body.show) === true,
+            incognito: parseBoolean(ctx.body.incognito) === true
           }).id
         )
       }
@@ -406,13 +424,23 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
         if (ctx.owner && browser.owner !== ctx.owner) {
           throw new BrowserRequestError('这个浏览器属于另一个会话，不能直接操作', 403)
         }
+        if (
+          ctx.body.incognito !== undefined &&
+          (parseBoolean(ctx.body.incognito) === true) !== Boolean(browser.incognito)
+        ) {
+          throw new BrowserRequestError(
+            '标签页必须沿用目标窗口的无痕模式，不能切换已有窗口的数据分区'
+          )
+        }
       } else {
         requireNewBrowser(ctx)
       }
       const { browser, tab } = manager().createTab({
         browserId: ctx.body.browserId,
         url: ctx.body.url,
-        owner: ctx.owner
+        owner: ctx.owner,
+        incognito:
+          ctx.body.incognito === undefined ? undefined : parseBoolean(ctx.body.incognito) === true
       })
       return { tab: tabSummary(tab), browser: browserSummary(browser) }
     },
@@ -501,8 +529,7 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
       return { ...result, saved }
     },
 
-    allCookies: (ctx) =>
-      manager().allCookies({ domain: ctx.query.domain, limit: ctx.query.limit }),
+    allCookies: (ctx) => manager().allCookies({ domain: ctx.query.domain, limit: ctx.query.limit }),
 
     setCookies: async (ctx) => {
       const list = normalizeCookiePayload(ctx.body.cookies)

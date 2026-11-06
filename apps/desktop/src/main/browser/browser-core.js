@@ -154,6 +154,7 @@ export function browserSummary(record) {
     id: record.id,
     owner: record.owner || null,
     label: record.label,
+    incognito: Boolean(record.incognito),
     visible: Boolean(record.visible),
     createdAt: record.createdAt || null,
     title: text(active?.title || record.title || '', TITLE_MAX) || '新标签页',

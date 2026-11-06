@@ -18,6 +18,7 @@ import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText, MAX_HISTORICAL_TOOL_RESULT_CHARS } from './historyCompaction.js';
 import { markProviderOmitsFinishReason, providerOmitsFinishReason } from './finishReasonSupport.js';
+import { fetchWithReadableErrors } from './providerErrorBody.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import { sendWithEffortFallback } from './effortFallback.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
@@ -36,6 +37,7 @@ function getClient(options: ModelClientOptions) {
   return new OpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseURL,
+    fetch: fetchWithReadableErrors(),
   });
 }
 

@@ -1,10 +1,15 @@
 const BASE = 'http://127.0.0.1:19387';
 const ALARM = 'mica-cookie-reconnect';
 const ECHO_MS = 5000;
+const RECONNECT = 'mica-cookie-sync/reconnect';
+const SYNC_NOW = 'mica-cookie-sync/sync-now';
+/** 同一个目标指纹被重载过一次后，在这段时间内不再重试，防止版本对不上时来回重载。 */
+const RELOAD_BACKOFF_MS = 10 * 60_000;
 let connection;
 let controller;
 let chain = Promise.resolve();
 let snapshotRevision = -1;
+let ownBuild;
 const localRevisions = new Map();
 const echoes = new Map();
 
@@ -91,8 +96,8 @@ function consumeEcho(cookie, removed) {
   return index >= 0;
 }
 
-async function request(path, token, init = {}) {
-  const timeout = AbortSignal.timeout(15000);
+async function request(path, token, init = {}, timeoutMs = 15000) {
+  const timeout = AbortSignal.timeout(timeoutMs);
   const response = await fetch(`${BASE}${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, ...init.headers },
@@ -106,6 +111,59 @@ async function request(path, token, init = {}) {
 async function currentToken() {
   const { token } = await chrome.storage.local.get('token');
   return typeof token === 'string' ? token.trim() : '';
+}
+
+/** 自己这份代码的版本与指纹（由生成脚本写进 version.json）。 */
+async function ownVersion() {
+  if (ownBuild) return ownBuild;
+  try {
+    const response = await fetch(chrome.runtime.getURL('version.json'), { cache: 'no-store' });
+    if (!response.ok) return null;
+    const build = await response.json();
+    if (typeof build?.fingerprint !== 'string') return null;
+    ownBuild = build;
+    return build;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 自动更新：Mica 升级后会把新的扩展文件写到磁盘并记下新指纹。这里比对一下，
+ * 不一致就重载扩展本身（chrome.runtime.reload 会重新从目录读取 manifest 与代码），
+ * 用户不需要再去 chrome://extensions 手动「重新加载」。
+ */
+async function checkVersion(token) {
+  let health;
+  try {
+    const response = await fetch(`${BASE}/health`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) return;
+    health = await response.json();
+  } catch {
+    return;
+  }
+  const remote = health?.extension;
+  if (!remote || typeof remote.fingerprint !== 'string' || typeof remote.updatedAt !== 'number') return;
+  const own = await ownVersion();
+  // 服务端还没升级到带版本信息的那版：只记录，不据此重载。
+  await chrome.storage.local.set({ extensionInfo: { ...remote, checkedAt: Date.now(), current: own?.version ?? null } });
+  if (!own || own.fingerprint === remote.fingerprint) return;
+  // 同一个目标指纹连续重载仍对不上（例如用户加载的是手工拷贝的目录），退避时间翻倍，
+  // 上限一天——不能因为一次误判就每分钟重载一次。
+  const { reloadGuard } = await chrome.storage.local.get('reloadGuard');
+  const attempts = reloadGuard?.fingerprint === remote.fingerprint ? (reloadGuard.attempts ?? 1) : 0;
+  const wait = Math.min(RELOAD_BACKOFF_MS * 2 ** Math.max(0, attempts - 1), 24 * 3600_000);
+  if (attempts > 0 && typeof reloadGuard.at === 'number' && Date.now() - reloadGuard.at < wait) return;
+  await chrome.storage.local.set({
+    reloadGuard: { fingerprint: remote.fingerprint, at: Date.now(), attempts: attempts + 1 },
+  });
+  await chrome.storage.local.set({ lastUpdate: { from: own.version, to: remote.version, at: Date.now() } });
+  console.info('Mica cookie sync: reloading extension to', remote.version);
+  chrome.runtime.reload();
 }
 
 async function post(cookie, removed, token) {
@@ -185,7 +243,7 @@ async function updateBaseline(cookie, removed) {
 }
 
 async function reconcile(token) {
-  const response = await request('/snapshot', token);
+  const response = await request('/snapshot', token, {}, 60000);
   const snapshot = await response.json();
   snapshotRevision = Number.isSafeInteger(snapshot.revision) ? snapshot.revision : -1;
   localRevisions.clear();
@@ -200,31 +258,49 @@ async function reconcile(token) {
   );
   const { baseline: stored = {} } = await chrome.storage.local.get('baseline');
   const baseline = { ...stored };
+  const stats = { compared: 0, toChrome: 0, toMica: 0, skipped: 0, failed: 0 };
   for (const id of new Set([...chromeMap.keys(), ...micaMap.keys(), ...Object.keys(baseline)])) {
-    const local = chromeMap.get(id);
-    const remote = micaMap.get(id);
-    const localHash = await fingerprint(local);
-    const remoteHash = await fingerprint(remote);
-    if (localHash === remoteHash) {
-      if (local) baseline[id] = localHash;
-      else delete baseline[id];
-      continue;
-    }
-    const previous = baseline[id];
-    if (!previous && local && remote) continue;
-    if (previous && localHash !== previous && remoteHash !== previous && localHash !== remoteHash) continue;
-    const micaWins = (!local && !previous) || (previous && localHash === previous && remoteHash !== previous);
-    if (micaWins) {
-      await applyToChrome(remote || local, !remote);
-      if (remote) baseline[id] = remoteHash;
-      else delete baseline[id];
-    } else {
-      await post(local || remote, !local, token);
-      if (local) baseline[id] = localHash;
-      else delete baseline[id];
+    stats.compared += 1;
+    // 单条写失败（例如 Mica 侧拒绝某条 cookie）不能中断整轮：否则它后面所有 cookie
+    // 都不会再同步，而下一轮又在同一条上失败，永久卡住。
+    try {
+      const local = chromeMap.get(id);
+      const remote = micaMap.get(id);
+      const localHash = await fingerprint(local);
+      const remoteHash = await fingerprint(remote);
+      if (localHash === remoteHash) {
+        if (local) baseline[id] = localHash;
+        else delete baseline[id];
+        continue;
+      }
+      const previous = baseline[id];
+      if (!previous && local && remote) {
+        stats.skipped += 1;
+        continue;
+      }
+      if (previous && localHash !== previous && remoteHash !== previous && localHash !== remoteHash) {
+        stats.skipped += 1;
+        continue;
+      }
+      const micaWins = (!local && !previous) || (previous && localHash === previous && remoteHash !== previous);
+      if (micaWins) {
+        await applyToChrome(remote || local, !remote);
+        if (remote) baseline[id] = remoteHash;
+        else delete baseline[id];
+        stats.toChrome += 1;
+      } else {
+        await post(local || remote, !local, token);
+        if (local) baseline[id] = localHash;
+        else delete baseline[id];
+        stats.toMica += 1;
+      }
+    } catch (error) {
+      stats.failed += 1;
+      console.warn('Mica cookie sync:', error.message);
     }
   }
-  await chrome.storage.local.set({ baseline });
+  await chrome.storage.local.set({ baseline, lastSync: { at: Date.now(), ...stats } });
+  return stats;
 }
 
 async function incoming(event) {
@@ -325,20 +401,57 @@ chrome.cookies.onChanged.addListener(({ cookie, removed, cause }) => {
 
 chrome.alarms.create(ALARM, { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === ALARM) void connect();
+  if (alarm.name !== ALARM) return;
+  void connect();
+  void checkVersionWithCurrentToken();
 });
 chrome.runtime.onStartup.addListener(() => {
   void connect();
+  void checkVersionWithCurrentToken();
 });
 chrome.runtime.onInstalled.addListener(() => {
   void connect();
+  void checkVersionWithCurrentToken();
 });
+
+async function checkVersionWithCurrentToken() {
+  const token = await currentToken();
+  if (token) await checkVersion(token);
+}
+
+function restart() {
+  controller?.abort();
+  if (connection) connection.finally(() => connect());
+  else void connect();
+}
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes.token) return;
-  controller?.abort();
-  connection?.finally(() => {
-    void connect();
-  });
-  if (!connection) void connect();
+  restart();
+});
+chrome.runtime.onMessage.addListener((message, _sender, respond) => {
+  if (!message) return;
+  if (message.type === RECONNECT) {
+    restart();
+    void checkVersionWithCurrentToken();
+    respond({ ok: true });
+    return;
+  }
+  if (message.type !== SYNC_NOW) return;
+  // 返回 true 表示这个通道要异步回复。
+  (async () => {
+    const token = await currentToken();
+    if (!token) {
+      respond({ ok: false, reason: 'no-token' });
+      return;
+    }
+    try {
+      // 走同一条串行链，避免和定时重连的比对交错写。
+      respond({ ok: true, stats: await serialize(() => reconcile(token)) });
+    } catch (error) {
+      respond({ ok: false, reason: 'error', message: error.message });
+    }
+  })();
+  return true;
 });
 void connect();

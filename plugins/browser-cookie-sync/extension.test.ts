@@ -22,11 +22,13 @@ type RawCookie = Omit<Cookie, 'host' | 'expiresAt'> & {
   partitionKey?: object;
 };
 type Event = { cookie: Cookie; removed: boolean; revision?: number };
+type SyncStats = { compared: number; toChrome: number; toMica: number; skipped: number; failed: number };
 type Worker = {
   normalize(cookie: object): Cookie | null;
   key(cookie: Cookie): string;
   fingerprint(cookie: Cookie): Promise<string>;
-  reconcile(token: string): Promise<void>;
+  reconcile(token: string): Promise<SyncStats>;
+  checkVersion(token: string): Promise<void>;
   incoming(event: Event): Promise<void>;
   readEvents(response: Response): Promise<void>;
   connect(): Promise<void>;
@@ -61,7 +63,14 @@ const raw = (value: Cookie): RawCookie => ({
 });
 
 async function harness(initial: Cookie[] = []) {
-  const state: { token: string; baseline: Record<string, string> } = { token: '', baseline: {} };
+  const state: {
+    token: string;
+    baseline: Record<string, string>;
+    extensionInfo?: { version: string; fingerprint: string; updatedAt: number; checkedAt: number; current: string | null };
+    lastUpdate?: { from: string; to: string; at: number };
+    reloadGuard?: { fingerprint: string; at: number; attempts: number };
+    lastSync?: SyncStats & { at: number };
+  } = { token: '', baseline: {} };
   let jar = initial.map(raw);
   let snapshot: Cookie[] = [];
   let revision = 0;
@@ -69,6 +78,12 @@ async function harness(initial: Cookie[] = []) {
   const cookieListeners: Array<(event: { cookie: RawCookie; removed: boolean; cause: string }) => void> = [];
   const storageListeners: Array<(changes: object, area: string) => void> = [];
   const alarmListeners: Array<(alarm: { name: string }) => void> = [];
+  const messageListeners: Array<
+    (message: unknown, sender: object, respond: (value: unknown) => void) => boolean | void
+  > = [];
+  const build = { version: '1.2.0', fingerprint: 'own-fingerprint' };
+  let health = (): object | undefined => undefined;
+  const reload = vi.fn();
   const storage = {
     get: vi.fn(async (name: keyof typeof state) => structuredClone({ [name]: state[name] })),
     set: vi.fn(async (values: Partial<typeof state>) => {
@@ -135,6 +150,8 @@ async function harness(initial: Cookie[] = []) {
     onChanged: { addListener: (listener: (typeof cookieListeners)[number]) => cookieListeners.push(listener) },
   };
   const fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+    if (url.startsWith('chrome-extension://')) return Response.json(build);
+    if (url.endsWith('/health')) return Response.json({ ok: true, connected: false, extension: health() });
     if (url.endsWith('/snapshot')) return Response.json({ cookies: snapshot, revision });
     if (url.endsWith('/events') && init?.method === 'POST') {
       posts.push(JSON.parse(String(init.body)) as Event);
@@ -150,7 +167,7 @@ async function harness(initial: Cookie[] = []) {
     AbortController,
     AbortSignal,
     fetch,
-    console: { warn },
+    console: { warn, info: vi.fn() },
     chrome: {
       cookies,
       storage: {
@@ -161,11 +178,19 @@ async function harness(initial: Cookie[] = []) {
         create: vi.fn(),
         onAlarm: { addListener: (listener: (typeof alarmListeners)[number]) => alarmListeners.push(listener) },
       },
-      runtime: { onStartup: { addListener: vi.fn() }, onInstalled: { addListener: vi.fn() } },
+      runtime: {
+        onStartup: { addListener: vi.fn() },
+        onInstalled: { addListener: vi.fn() },
+        onMessage: {
+          addListener: (listener: (typeof messageListeners)[number]) => messageListeners.push(listener),
+        },
+        getURL: (path: string) => `chrome-extension://testid/${path}`,
+        reload,
+      },
     },
   });
   runInContext(
-    `${source}\nglobalThis.worker = { normalize, key, fingerprint, reconcile, incoming, readEvents, connect, settle: () => chain };`,
+    `${source}\nglobalThis.worker = { normalize, key, fingerprint, reconcile, checkVersion, incoming, readEvents, connect, settle: () => chain };`,
     context,
   );
   const worker = context.worker as Worker;
@@ -197,6 +222,17 @@ async function harness(initial: Cookie[] = []) {
     },
     alarm() {
       for (const listener of alarmListeners) listener({ name: 'mica-cookie-reconnect' });
+    },
+    /** 设置 /health 里回报的磁盘版本；不传表示服务端还是不报版本的老版本。 */
+    serverExtension(info?: { version: string; fingerprint: string; updatedAt: number }) {
+      health = () => info;
+    },
+    reload,
+    /** 发给 service worker 一条 runtime 消息，等它的 respond。 */
+    message(payload: object) {
+      return new Promise<unknown>((resolve) => {
+        for (const listener of messageListeners) listener(payload, {}, resolve);
+      });
     },
   };
 }
@@ -422,5 +458,54 @@ describe('cookie sync extension service worker', () => {
     streams[1]!.close();
     await h.worker.connect();
     expect(signals[1]?.aborted).toBe(true);
+  });
+
+  it('reports and continues past a failed cookie when asked to sync now', async () => {
+    const broken = cookie('mica-a', { name: 'a' });
+    const healthy = cookie('mica-b', { name: 'b' });
+    const h = await harness();
+    h.snapshot([broken, healthy]);
+    // 第一条从 Mica 写回 Chrome 时失败：后面的 cookie 仍要同步，统计要反映出来。
+    h.cookies.set.mockImplementationOnce(async () => {
+      throw new Error('write failed');
+    });
+    const response = (await h.message({ type: 'mica-cookie-sync/sync-now' })) as {
+      ok: boolean;
+      stats: SyncStats;
+    };
+    expect(response.ok).toBe(true);
+    expect(response.stats).toMatchObject({ compared: 2, toChrome: 1, failed: 1 });
+    expect(h.jar.map((entry) => entry.name)).toEqual(['b']);
+    expect(h.warn).toHaveBeenCalled();
+  });
+
+  it('reloads itself once when the on-disk extension is newer', async () => {
+    const h = await harness();
+    const updatedAt = Date.UTC(2026, 10, 6, 4, 45);
+    h.serverExtension({ version: '1.3.0', fingerprint: 'newer-fingerprint', updatedAt });
+    await h.worker.checkVersion('test-token');
+    expect(h.reload).toHaveBeenCalledTimes(1);
+    // 记下服务端的更新时间，弹窗用它显示「上次更新」。
+    expect(h.state.extensionInfo).toMatchObject({ version: '1.3.0', updatedAt });
+    expect(h.state.lastUpdate).toMatchObject({ from: '1.2.0', to: '1.3.0' });
+
+    // 同一个目标指纹不会反复重载——否则版本对不上时会来回刷。
+    await h.worker.checkVersion('test-token');
+    expect(h.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet when the running extension already matches the disk', async () => {
+    const h = await harness();
+    h.serverExtension({ version: '1.2.0', fingerprint: 'own-fingerprint', updatedAt: Date.now() });
+    await h.worker.checkVersion('test-token');
+    expect(h.reload).not.toHaveBeenCalled();
+    expect(h.state.lastUpdate).toBeUndefined();
+  });
+
+  it('ignores a service that does not report an extension version', async () => {
+    const h = await harness();
+    await h.worker.checkVersion('test-token');
+    expect(h.reload).not.toHaveBeenCalled();
+    expect(h.state.extensionInfo).toBeUndefined();
   });
 });

@@ -79,10 +79,15 @@ const RAW_ENDPOINTS = [
     id: 'createBrowser',
     method: 'POST',
     path: '/browser/browsers',
-    summary: '新开一个受控浏览器窗口（默认隐藏；每个会话最多一个）',
+    summary: '新开一个受控浏览器窗口（默认隐藏；普通与无痕各最多一个）',
     params: [
       { name: 'url', in: 'body', required: false, description: '初始地址，省略则开 about:blank' },
-      { name: 'owner', in: 'body', required: false, description: '归属会话 id（与请求头二选一，必须有一个）' },
+      {
+        name: 'owner',
+        in: 'body',
+        required: false,
+        description: '归属会话 id（与请求头二选一，必须有一个）'
+      },
       {
         name: 'label',
         in: 'body',
@@ -94,6 +99,13 @@ const RAW_ENDPOINTS = [
         in: 'body',
         required: false,
         description: '只有明确要给用户演示时才传 true：建完立刻显示到前台'
+      },
+      {
+        name: 'incognito',
+        in: 'body',
+        required: false,
+        description:
+          '默认 false；true 使用独立内存分区，与普通窗口及其他无痕窗口隔离。真正销毁窗口后清理临时数据，隐藏仍保留'
       },
       ownerParam
     ],
@@ -146,16 +158,35 @@ const RAW_ENDPOINTS = [
     method: 'GET',
     path: '/browser/tabs',
     summary: '列出本会话的标签页',
-    params: [{ name: 'owner', in: 'query', required: false, description: '页面管理调用可按会话筛选；会话调用只返回自己的标签页' }],
+    params: [
+      {
+        name: 'owner',
+        in: 'query',
+        required: false,
+        description: '页面管理调用可按会话筛选；会话调用只返回自己的标签页'
+      }
+    ],
     returns: '{ ok, tabs: [Tab] }'
   },
   {
     id: 'createTab',
     method: 'POST',
     path: '/browser/tabs',
-    summary: '在已有窗口里新开标签页（不给 browserId 就新开一个窗口，受单窗口限制）',
+    summary: '在已有窗口里新开标签页（不给 browserId 就新开一个窗口，同模式每会话最多一个）',
     params: [
-      { name: 'browserId', in: 'body', required: false, description: '目标窗口' },
+      {
+        name: 'browserId',
+        in: 'body',
+        required: false,
+        description: '目标窗口；新标签页继承该窗口的分区与无痕模式'
+      },
+      {
+        name: 'incognito',
+        in: 'body',
+        required: false,
+        description:
+          '不带 browserId 时选择新窗口模式，默认 false；带 browserId 时省略即继承，显式传值必须与目标窗口一致'
+      },
       { name: 'url', in: 'body', required: false, description: '初始地址' }
     ],
     returns: '{ ok, tab, browser }'
@@ -297,7 +328,8 @@ const RAW_ENDPOINTS = [
         description: '滚动像素（必填，数字），正数向下、负数向上，如 600'
       }
     ],
-    returns: '{ ok, scrollY, container, containerScrollTop }（滚到内部容器时 container 是它的标签名）'
+    returns:
+      '{ ok, scrollY, container, containerScrollTop }（滚到内部容器时 container 是它的标签名）'
   },
   {
     id: 'screenshot',
@@ -517,7 +549,8 @@ function paramLabel(param) {
  */
 export const BROWSER_GUIDE = [
   '第一次用某个动作前，先不带 action 调用 control：返回的 actions[] 里每个动作都带 params（name / 类型 / 是否必填 / 示例值），一次就能看全，比猜参数名快。',
-  '先 listBrowsers 看本会话有没有窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。每个会话最多一个窗口，需要多个页面时在已有窗口用 createTab。',
+  '先 listBrowsers 看本会话有没有对应模式的窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。普通与无痕窗口每个会话各最多一个，需要多个页面时在对应窗口用 createTab。',
+  '无痕模式默认关闭，createBrowser 或不带 browserId 的 createTab 传 incognito: true 才开启。无痕窗口有独立内存分区，不继承普通窗口登录态，也不影响其他标签页的数据；同窗口标签页共享临时数据。新标签页继承目标窗口模式，不能原地切换。隐藏仍保留临时数据，closeBrowser 或关闭最后一个标签页才清理。cookies 按目标标签页分区读取；无标签页的 Cookie 读写、缓存文件与变化推送仅作用于普通分区。',
   '窗口全程保持隐藏：截图、点击、输入、按键、滚动、读页面/cookie/console/network 都在隐藏状态下完成，**不需要先 showBrowser**。显示窗口会让用户眼前弹一个窗，只在用户明确要求「演示给我看」时才调它。',
   '用户会自己点顶栏那枚浏览器图标唤出窗口查看（也能再点一次收起），这件事不要替用户做；你只需要保证页面状态是对的。',
   'action 名必须与 actions[].action 完全一致（区分大小写），不要自己起同义词：按键是 keys（不是 press / key / keyboard），点击是 click，读页面是 content 或 evaluate。按标签页/窗口的动作都要带 id：标签页 id 形如 "tab-1"、窗口 id 形如 "brw-1"，取自 listTabs / listBrowsers / createTab 的返回。',
@@ -601,7 +634,7 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     `服务地址：\`${serviceUrl}\``,
     '',
     '新建窗口**必须**带 `x-mica-owner: $MICA_BROWSER_OWNER`：顶栏只显示本会话自己的窗口，没有归属的窗口会被直接关闭（缺这个头时新建返回 400）。',
-    '每个会话最多创建一个窗口；重复创建返回 409，请复用已有窗口或在其中新建标签页。窗口和标签页按会话隔离，但网站 Cookie 分区仍然共享。',
+    '每个会话普通、无痕窗口各最多一个；同模式重复创建返回 409，请复用对应窗口或在其中新建标签页。普通窗口共享持久化分区，无痕窗口各自使用独立内存分区，返回的 Browser.incognito 标识窗口模式。',
     '',
     '## 通过 MCP 的 control 工具调用',
     '',

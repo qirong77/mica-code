@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <title>Mica Cookie 同步</title>
+    <style>
+      /*
+        Chrome 扩展弹窗跑在 Mica 之外，读不到应用的 CSS 变量，所以这里按 app.css 的
+        @theme token 原值写一份。亮色取 app.css 里 DSH 那套取值，跟随系统外观——
+        Mica 的默认主题偏好是 auto，两边取值一致。改这里前先看 app.css 的同名 token。
+      */
+      :root {
+        color-scheme: dark;
+        --panel: #3c3f41;
+        --canvas: #2b2b2b;
+        --line: #4b4b4b;
+        --line-soft: rgb(255 255 255 / 7%);
+        --overlay: rgb(255 255 255 / 6%);
+        --overlay-strong: rgb(255 255 255 / 10%);
+        --fg-strong: #d4d4d4;
+        --fg-soft: #a1a1a1;
+        --fg-faint: #707070;
+        --accent: #cc7832;
+        --accent-hover: #d98d4f;
+        --accent-contrast: #1e1f22;
+        --success: #a8c023;
+        --warn: #d6bf55;
+        --danger: #ff6b68;
+        --radius: 6px;
+        --control-h: 30px;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          color-scheme: light;
+          --panel: #f9fafb;
+          --canvas: #ffffff;
+          --line: rgb(0 0 0 / 10%);
+          --line-soft: rgb(0 0 0 / 4%);
+          --overlay: rgb(38 49 72 / 6%);
+          --overlay-strong: rgb(38 49 72 / 10%);
+          --fg-strong: #0f1115;
+          --fg-soft: #61666b;
+          --fg-faint: #979da6;
+          --accent: #4176e6;
+          --accent-hover: #2563eb;
+          --accent-contrast: #ffffff;
+          --success: #2b8a3e;
+          --warn: #b45309;
+          --danger: #ec1313;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        width: 320px;
+        margin: 0;
+        background: var(--panel);
+        color: var(--fg-strong);
+        font:
+          13px/1.5 'Segoe WPC', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      button,
+      input {
+        font: inherit;
+      }
+      button:focus-visible,
+      input:focus-visible {
+        outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+        outline-offset: 1px;
+      }
+
+      /* 顶栏：品牌 + 标题，右侧只放一个环境状态灯（与 Mica 的 status-lamp 同形）。 */
+      .head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .head img {
+        width: 16px;
+        height: 16px;
+        flex: none;
+        display: block;
+      }
+      .head h1 {
+        flex: 1 1 auto;
+        min-width: 0;
+        margin: 0;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+      .lamp {
+        width: 7px;
+        height: 7px;
+        flex: none;
+        border-radius: 999px;
+        background: var(--fg-faint);
+      }
+      .lamp[data-tone='ok'] {
+        background: var(--success);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 15%, transparent);
+      }
+      .lamp[data-tone='warn'] {
+        background: var(--warn);
+      }
+      .lamp[data-tone='error'] {
+        background: var(--danger);
+      }
+
+      .body {
+        padding: 12px;
+      }
+      .status {
+        margin: 0 0 12px;
+        color: var(--fg-soft);
+        font-size: 12px;
+        min-height: 2.6em;
+      }
+      .status b {
+        color: var(--fg-strong);
+        font-weight: 600;
+      }
+
+      /* 版本与更新时间：常驻一行，比状态弱一档；有新版时那一个词变成可点的动作。 */
+      .meta {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+        margin: -6px 0 10px;
+        color: var(--fg-faint);
+        font-size: 11px;
+        min-height: 1.5em;
+      }
+      .meta button {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        font-size: inherit;
+        font-weight: 500;
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      .meta button:hover {
+        color: var(--accent-hover);
+      }
+
+      /* 主次两级动作：同步是主动作（实心强调），保存口令是配置动作（描边）。 */
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+      .btn {
+        height: var(--control-h);
+        display: inline-flex;
+        flex: 1 1 auto;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 0 11px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: transparent;
+        color: var(--fg-soft);
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        transition:
+          background 100ms ease,
+          border-color 100ms ease,
+          color 100ms ease;
+      }
+      .btn:hover:not(:disabled) {
+        background: var(--overlay);
+        color: var(--fg-strong);
+      }
+      .btn:disabled {
+        cursor: default;
+        opacity: 0.55;
+      }
+      .btn-primary {
+        border-color: transparent;
+        background: var(--accent);
+        color: var(--accent-contrast);
+        font-weight: 600;
+      }
+      .btn-primary:hover:not(:disabled) {
+        border-color: transparent;
+        background: var(--accent-hover);
+        color: var(--accent-contrast);
+      }
+      .spinner {
+        width: 11px;
+        height: 11px;
+        flex: none;
+        border: 1.5px solid currentColor;
+        border-right-color: transparent;
+        border-radius: 999px;
+        animation: spin 900ms linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* 口令区折叠起来：填好之后它不再是每天要看的控件，只留一行入口。 */
+      .section {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line-soft);
+      }
+      .disclosure {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: var(--fg-soft);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .disclosure:hover {
+        color: var(--fg-strong);
+      }
+      .disclosure[aria-expanded='true'] .chevron {
+        transform: rotate(90deg);
+      }
+      .chevron {
+        transition: transform 120ms ease;
+      }
+      .token-form {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .token-form[hidden] {
+        display: none;
+      }
+      label {
+        color: var(--fg-soft);
+        font-size: 12px;
+      }
+      input {
+        width: 100%;
+        height: var(--control-h);
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        /* 输入框是凹进去的：底色比面板暗一档（与 .text-input 同一处理）。 */
+        background: var(--canvas);
+        color: var(--fg-strong);
+        font-size: 13px;
+        outline: none;
+      }
+      input::placeholder {
+        color: var(--fg-faint);
+      }
+      input:hover:not(:disabled) {
+        border-color: color-mix(in srgb, var(--fg-strong) 28%, var(--line));
+      }
+      input:focus {
+        border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+        box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+      }
+
+      .foot {
+        margin-top: 10px;
+        color: var(--fg-faint);
+        font-size: 11px;
+      }
+      .foot.is-danger {
+        color: var(--danger);
+      }
+      .foot a {
+        color: inherit;
+        text-decoration: none;
+        border-bottom: 1px solid var(--line);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <img src="icons/icon32.png" alt="">
+      <h1>Mica Cookie 同步</h1>
+      <span class="lamp" id="lamp" data-tone="idle" aria-hidden="true"></span>
+    </div>
+    <div class="body">
+      <p class="status" id="status">检查中…</p>
+      <p class="meta" id="meta"></p>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="sync">立即同步</button>
+        <button type="button" class="btn" id="retry">重新连接</button>
+      </div>
+      <div class="section">
+        <button type="button" class="disclosure" id="toggle" aria-expanded="false" aria-controls="token-form">
+          <span id="toggle-label">修改连接口令</span>
+          <span class="chevron">›</span>
+        </button>
+        <form class="token-form" id="token-form" hidden>
+          <label for="token">连接口令</label>
+          <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="从 Mica 插件设置页复制">
+          <button type="submit" class="btn" id="save">保存口令</button>
+        </form>
+      </div>
+      <p class="foot" id="foot"></p>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>

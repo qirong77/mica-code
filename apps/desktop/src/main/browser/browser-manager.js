@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { BrowserWindow, WebContentsView, clipboard, session } from 'electron'
 import {
   BROWSER_PARTITION,
@@ -39,7 +40,8 @@ import { chromeDataUrl, chromePalette, parseChromeMessage } from './browser-chro
  *   `showBrowser` 是唯一的例外，只在明确要给用户演示时调用；用户自己则从顶栏图标唤出。
  * - **标签页视图按需挂载**：只有当前标签页挂在窗口上（坐标与原生输入都按挂载的视图算），
  *   其余保持存活但不渲染。截图一律走 CDP：`capturePage()` 在隐藏窗口上拿到的是旧帧。
- * - **浏览数据走独立分区**（`persist:mica-browser`）：与应用自身、与用户日常浏览器互不干扰。
+ * - **浏览数据走独立分区**：普通窗口共享 `persist:mica-browser`，无痕窗口各用唯一内存分区，
+ *   与应用自身、与用户日常浏览器互不干扰。
  */
 
 const CLICK_SETTLE_MS = 120
@@ -63,7 +65,7 @@ export function createBrowserManager({
 } = {}) {
   const browsers = new Map()
   let sequence = 0
-  let permissionsInstalled = false
+  const permissionSessions = new WeakSet()
 
   const partition = () => session.fromPartition(BROWSER_PARTITION)
   const cookieStore = partition().cookies
@@ -149,7 +151,7 @@ export function createBrowserManager({
   }
 
   /** cookie 作用域 → 统一形状；页面不是 http(s) 时给空结果而不是报错（未登录也是合法状态） */
-  async function readCookies(scope, format) {
+  async function readCookies(scope, format, browserSession = partition()) {
     if (!/^https?:/i.test(scope)) {
       return {
         url: scope,
@@ -159,7 +161,7 @@ export function createBrowserManager({
         note: '当前页不是 http(s)，没有 cookie 作用域'
       }
     }
-    const list = await partition().cookies.get({ url: scope })
+    const list = await browserSession.cookies.get({ url: scope })
     const mode = String(format || 'json').toLowerCase()
     if (mode === 'header') {
       return { url: scope, count: list.length, cookieHeader: formatCookieHeader(list) }
@@ -176,14 +178,14 @@ export function createBrowserManager({
   /* --------------------------------------------------------------- 窗口装配 */
 
   /** 一个分区只装一次权限策略：这些窗口是给 agent 用的，不该悄悄拿到摄像头/定位/通知 */
-  function installPermissionPolicy() {
-    if (permissionsInstalled) return
-    permissionsInstalled = true
+  function installPermissionPolicy(browserSession) {
+    if (permissionSessions.has(browserSession)) return
+    permissionSessions.add(browserSession)
     try {
-      partition().setPermissionRequestHandler((_contents, permission, callback) => {
+      browserSession.setPermissionRequestHandler((_contents, permission, callback) => {
         callback(['clipboard-sanitized-write', 'fullscreen'].includes(permission))
       })
-      partition().setPermissionCheckHandler(() => false)
+      browserSession.setPermissionCheckHandler(() => false)
     } catch (error) {
       console.error('[mica-browser] 设置权限策略失败:', error)
     }
@@ -205,6 +207,7 @@ export function createBrowserManager({
     }
     const state = {
       label: record.label,
+      incognito: record.incognito,
       owner: record.owner || '',
       url: current?.url || '',
       title: current?.title || '',
@@ -227,7 +230,7 @@ export function createBrowserManager({
     if (record.win.isDestroyed()) return
     const current = activeTab(record)
     const title = current?.title || current?.url || '受控浏览器'
-    record.win.setTitle(`${title} — 受控浏览器`)
+    record.win.setTitle(`${title} — ${record.incognito ? '无痕受控浏览器' : '受控浏览器'}`)
   }
 
   function layout(record) {
@@ -243,8 +246,20 @@ export function createBrowserManager({
     })
   }
 
-  function createBrowser({ owner = null, url = '', label, show = false, focus = false } = {}) {
+  function createBrowser({
+    owner = null,
+    url = '',
+    label,
+    show = false,
+    focus = false,
+    incognito = false
+  } = {}) {
     const id = nextId('brw')
+    // 不带 persist: 的唯一分区仅驻留内存；每个无痕窗口独立，普通窗口继续用原分区。
+    const privateMode = incognito === true
+    const partitionName = privateMode ? `mica-browser-private-${randomUUID()}` : BROWSER_PARTITION
+    const browserSession = session.fromPartition(partitionName)
+    installPermissionPolicy(browserSession)
     const chrome = chromeTheme()
     const win = new BrowserWindow({
       width: DEFAULT_BROWSER_SIZE.width,
@@ -267,6 +282,9 @@ export function createBrowserManager({
     const record = {
       id,
       owner,
+      incognito: privateMode,
+      partitionName,
+      browserSession,
       label: normalizeLabel(label),
       visible: false,
       createdAt: new Date().toISOString(),
@@ -279,7 +297,6 @@ export function createBrowserManager({
       destroyRequested: false
     }
     browsers.set(id, record)
-    installPermissionPolicy()
 
     win.on('close', (event) => {
       // 用户点关闭 = 隐藏；应用退出或显式 close 才真的销毁（否则关一次就丢现场）
@@ -292,6 +309,14 @@ export function createBrowserManager({
       for (const tab of record.tabs) detachTab(tab)
       record.tabs = []
       browsers.delete(id)
+      // 只清理本窗口的临时分区，绝不清理共享的普通浏览器数据。
+      if (record.incognito) {
+        void Promise.all([browserSession.clearStorageData(), browserSession.clearCache()]).catch(
+          (error) => {
+            console.error('[mica-browser] 清理无痕分区失败:', error)
+          }
+        )
+      }
       emit('closed')
     })
 
@@ -424,7 +449,7 @@ export function createBrowserManager({
     }
     tab.view = new WebContentsView({
       webPreferences: {
-        partition: BROWSER_PARTITION,
+        partition: record.partitionName,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true
@@ -726,12 +751,15 @@ export function createBrowserManager({
     return tabs
   }
 
-  function createTab({ browserId = '', url = '', owner = null } = {}) {
+  function createTab({ browserId = '', url = '', owner = null, incognito } = {}) {
     if (!browserId) {
-      const record = createBrowser({ owner, url, show: false })
+      const record = createBrowser({ owner, url, show: false, incognito })
       return { browser: record, tab: activeTab(record) }
     }
     const record = requireBrowser(browserId)
+    if (incognito !== undefined && incognito !== record.incognito) {
+      throw new BrowserRequestError('标签页必须沿用目标窗口的无痕模式，不能切换已有窗口的数据分区')
+    }
     const tab = addTab(record, url, { activate: true })
     emit('tab')
     return { browser: record, tab }
@@ -1061,9 +1089,9 @@ export function createBrowserManager({
     },
 
     async cookies(tabId, { format = 'json', url = '' } = {}) {
-      const { tab } = requireTab(tabId)
+      const { record, tab } = requireTab(tabId)
       const scope = normalizeUrl(url) || tab.contents.getURL() || ''
-      return readCookies(scope, format)
+      return readCookies(scope, format, record.browserSession)
     },
 
     /**

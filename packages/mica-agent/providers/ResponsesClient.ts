@@ -27,6 +27,7 @@ import { isRetryableError, withRetry } from '../core/retry.js';
 import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
+import { fetchWithReadableErrors } from './providerErrorBody.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import { sendWithEffortFallback } from './effortFallback.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
@@ -49,6 +50,7 @@ function getClient(options: ModelClientOptions) {
   return new OpenAI({
     apiKey: options.apiKey,
     baseURL: options.baseURL,
+    fetch: fetchWithReadableErrors(),
   });
 }
 

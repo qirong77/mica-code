@@ -135,11 +135,14 @@ export async function startCookieService({
   micaBrowserUrl,
   port = 19387,
   onClientCount = () => {},
+  extensionInfo,
 }: {
   token: string;
   micaBrowserUrl: string;
   port?: number;
   onClientCount?: (count: number) => void;
+  /** 磁盘上那份扩展的版本与最近更新时间，扩展据此判断自己要不要重载。 */
+  extensionInfo?: () => { version: string; fingerprint: string; updatedAt: number };
 }): Promise<{ port: number; close(): Promise<void> }> {
   if (!token || !micaBrowserUrl) throw new Error('cookie service requires token and browser URL');
   const upstream = new URL(micaBrowserUrl);
@@ -183,7 +186,12 @@ export async function startCookieService({
     }
     const path = new URL(req.url || '/', `http://${host}`).pathname;
     if (req.method === 'GET' && path === '/health') {
-      send(res, 200, { ok: true, connected: clients.size > 0 });
+      const info = extensionInfo?.();
+      send(res, 200, {
+        ok: true,
+        connected: clients.size > 0,
+        ...(info ? { extension: { version: info.version, fingerprint: info.fingerprint, updatedAt: info.updatedAt } } : {}),
+      });
       return;
     }
     if (req.method === 'GET' && path === '/events') {
