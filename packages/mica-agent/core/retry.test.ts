@@ -29,6 +29,32 @@ describe('isRetryableError', () => {
     expect(isRetryableError(error)).toBe(false);
   });
 
+  it('retries a gateway that failed to parse our request body', () => {
+    // Go 网关读包抖动时把「合法 JSON」判成非法：重发通常就过。
+    expect(
+      isRetryableError(
+        Object.assign(new Error("400 invalid json: invalid character '\\x00' in string literal"), { status: 400 }),
+      ),
+    ).toBe(true);
+    expect(
+      isRetryableError(
+        Object.assign(
+          new Error("invalid json: invalid character '\\x00' looking for beginning of object key string"),
+          { status: 400 },
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('leaves other 400s alone', () => {
+    expect(isRetryableError(Object.assign(new Error('invalid request'), { status: 400 }))).toBe(false);
+    expect(
+      isRetryableError(
+        Object.assign(new Error("Invalid 'max_output_tokens': integer below minimum value"), { status: 400 }),
+      ),
+    ).toBe(false);
+  });
+
   it('treats timeout errors as retryable', () => {
     // Bun 下 AbortSignal.timeout() 触发的 fetch 超时：name=TimeoutError、
     // code=23（数字，不匹配 code 白名单）、无 status。

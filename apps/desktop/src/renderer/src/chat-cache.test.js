@@ -6,6 +6,7 @@ import {
   pruneChatCache,
   pruneCachedTranscripts,
   readCachedTranscript,
+  readRestoreTranscript,
   resetTranscriptCache,
   takeCachedTranscript,
   writeCachedTranscript
@@ -79,6 +80,30 @@ describe('cachedChatNodes', () => {
 
 describe('unmounted transcript cache', () => {
   beforeEach(resetTranscriptCache)
+
+  it('hands mounted visual history to a same-node restore after the module cache was released', () => {
+    const messages = [
+      { kind: 'message', role: 'user', text: 'question' },
+      { kind: 'reasoning', role: 'assistant', text: 'only in event history' },
+      { kind: 'tool', text: 'tool result' },
+      { kind: 'message', role: 'assistant', text: 'answer' }
+    ]
+    const meta = { cwd: '/original', model: 'test' }
+    writeCachedTranscript('a', messages, meta)
+    const mounted = takeCachedTranscript('a')
+    expect(readCachedTranscript('a')).toBeNull()
+    const nextRestore = readRestoreTranscript('a', 'a', mounted.messages, mounted.meta)
+    expect(nextRestore.messages).toBe(messages)
+    expect(nextRestore.meta).toBe(meta)
+    expect(readCachedTranscript('a')).toBeNull()
+  })
+
+  it('does not reuse mounted rows from another node and keeps a pending restore handoff', () => {
+    const cached = [{ kind: 'reasoning', text: 'node b' }]
+    writeCachedTranscript('b', cached, null)
+    expect(readRestoreTranscript('b', 'a', [{ text: 'node a' }], null).messages).toBe(cached)
+    expect(readRestoreTranscript('b', 'b', [], null).messages).toBe(cached)
+  })
 
   it('hands the original visual transcript to one owner without retaining an old snapshot', () => {
     const messages = [{ kind: 'reasoning', text: 'Only available in the event stream' }]

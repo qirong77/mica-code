@@ -23,13 +23,16 @@
 - turn 启动即保存本轮用户输入；headless 对**非 `system`** 的输入都写入（插件 `ctx.runtime.submit` 的一轮在客户端没有乐观气泡，不写就只剩回答），内容取 `displayText`，缺省用真正发给模型的输入。本轮跑完后原文进了 provider 历史，保存时用展示文本**就地替换**那一条（`mergeInFlightUserMessage`），不追加第二条；定位那条消息要按共享归一化（`comparableText`，纯媒体退回图片引用）比，不能按原文——compact 会把图片块换成 `[image omitted during compact]`，原文比对必然落空，那条副本就留在会话末尾（重开 APP 时表现为同一条用户消息渲染两遍）。
 - `MessageQueueService` 的每个操作都带 owner；pending input 只放 `pendingInputs`，不提前追加对话或 provider history。
 - TUI 与 desktop 的 Enter / Tab / Shift+Tab 统一 `after_iteration`；`after_turn` 仅供 `/loop` 等显式请求。
+- `after_iteration` 在排队后的第一个完整工具迭代边界消费，不额外等待一轮；provider 先追加本批全部工具结果，再把输入作为 user 消息追加到末尾，保持已有 prompt cache 前缀。冻结撤回期间不消费，释放后等下一个边界；system 输入仍优先。
 - 当前 turn 没有后续迭代时由 message-queue 的 `turn:after` 兜底；仅 `completed` 自动发送，失败/中止保留输入供撤回。
 - 两端都支持 Shift+← 撤回；desktop 的 host 槽走 `mica/queue/recall`。
 
 ## 重试与中止
 
 - turn 级重试最多 5 次、间隔 10s；仅在错误可重试且本轮没有非只读工具调用时自动重试，先恢复 pre-turn snapshot。
+- 回滚快照只复制 provider 状态，不构建展示消息；每次恢复复制基线，避免失败尝试污染下一次回滚。禁用 turn 重试时不建立副本，发生非只读工具调用后尽早释放副本。持久化快照使用 `getSnapshot({ includeConversation: false })`，展示消息由运行时自己的展示记录提供。
 - provider 的 `withRetry` 只在尚无文本/工具输出时重发（thinking 不算输出），退避 2/4/8/16/30s。
+- 4xx 一律不重试，唯一例外是网关自己解析请求体失败的 400（`invalid json: invalid character ...`）：那份请求体是本地 `JSON.stringify` 出来的合法 JSON，重发通常就过，当成确定性错误会让一次网关抖动把整个长会话打成 error 态。判定在 `core/retry.ts` 的 `isUpstreamBodyParseFailure`。
 - 流空闲超过 60s 视为超时（`core/streamIdleTimeout.ts`）：SDK 的超时只覆盖到响应头，网关握手成功却不再吐事件时由看门狗关流并抛 `TimeoutError`，交给上面的重试判定。
 - 重试清空 responseBuffer，按顺序重放已消费的 `after_iteration` 输入；再次失败时保留尚未重放的尾部，不能只恢复本次已消费项。等待能被 abort 立即打断。
 - `turn:retrying` 不得投影为 Codex `error`，否则 desktop 会提前结束 run。

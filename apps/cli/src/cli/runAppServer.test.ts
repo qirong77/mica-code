@@ -232,7 +232,7 @@ describe('task snapshot projection (mica task extension)', () => {
     });
   });
 
-  it('projects running and recent completed subagents with nested activities', () => {
+  it('projects running subagents with nested activities', () => {
     const record = (partial: Partial<SubagentTaskRecord>): SubagentTaskRecord => ({
       id: 'task-1',
       description: 'find usages',
@@ -274,20 +274,10 @@ describe('task snapshot projection (mica task extension)', () => {
           { id: 'a1', summary: 'searching', toolName: 'grep_search', startedAt: '2026-08-06T00:00:01.000Z' },
         ],
       },
-      {
-        taskId: 'task-4',
-        subagentType: 'Explore',
-        description: 'find usages',
-        status: 'killed',
-        interrupted: true,
-        startedAt: '2026-08-06T00:00:00.000Z',
-        finishedAt: '2026-08-06T00:03:00.000Z',
-        activities: [],
-      },
     ]);
   });
 
-  it('retains all running subagents and only the 20 most recent finished ones worth a look', () => {
+  it('projects all running subagents and no finished ones', () => {
     const base: SubagentTaskRecord = {
       id: 'running', description: 'find usages', subagent_type: 'Explore', model: 'gpt-5',
       effort: 'medium', status: 'running', started_at: '2026-08-06T00:00:00.000Z',
@@ -299,9 +289,9 @@ describe('task snapshot projection (mica task extension)', () => {
       finished_at: new Date(Date.UTC(2026, 7, 6, 0, index)).toISOString(),
     }));
     const result = projectSubagentTasks([...failed, base]);
-    expect(result).toHaveLength(21);
+    expect(result).toHaveLength(1);
     expect(result.map((item) => item.taskId)).not.toContain('failed-0');
-    expect(result.map((item) => item.taskId)).toContain('failed-20');
+    expect(result.map((item) => item.taskId)).not.toContain('failed-20');
     expect(result.map((item) => item.taskId)).toContain('running');
   });
 });

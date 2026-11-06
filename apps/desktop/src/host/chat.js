@@ -1417,8 +1417,11 @@ function handleHostNotification(id, run, notification) {
       snapshotEvent.tasks = run.subagentDisplay.update(snapshotEvent.tasks)
     }
     if (method === 'mica/btw/updated') applyBtwRunning(id, snapshotEvent)
-    if (snapshotEvent && run.sender && !run.sender.isDestroyed()) {
+    // 任务状态也是闲置回收的依据：即使页面已关，仍须保护活着的后台任务。
+    if (snapshotEvent) {
       run.lastSnapshots = { ...(run.lastSnapshots || {}), [snapshotEvent.type]: snapshotEvent }
+    }
+    if (snapshotEvent && run.sender && !run.sender.isDestroyed()) {
       run.sender.send('chat:event', {
         id,
         sessionId: runSessionId(run),

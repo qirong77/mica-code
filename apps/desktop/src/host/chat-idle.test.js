@@ -22,6 +22,25 @@ function entry(id, run, queuedCount = 0) {
 }
 
 describe('resolveIdleReap', () => {
+  it.each([
+    ['background_tasks', 'starting'],
+    ['background_tasks', 'running'],
+    ['subagent_tasks', 'running'],
+    ['wait_tasks', 'waiting']
+  ])(
+    'protects %s with status %s even after the parent turn and page have closed',
+    (type, status) => {
+      const run = host(NOW - IDLE_REAP_MS * 5, {
+        lastSnapshots: { [type]: { tasks: [{ status }] } },
+        sender: { isDestroyed: () => true }
+      })
+      const entries = [entry('current', host(NOW)), entry('tasks', run)]
+      expect(resolveIdleReap(entries, NOW, { maxKeep: 1 })).toEqual([])
+      run.lastSnapshots[type].tasks[0].status = 'completed'
+      expect(resolveIdleReap(entries, NOW, { maxKeep: 1 })).toEqual(['tasks'])
+    }
+  )
+
   it('does not keep idle hosts alive through view polls or periodic task snapshots', () => {
     const run = host(NOW - IDLE_REAP_MS * 2, {
       pendingRequests: new Map([[1, { method: 'mica/pluginPanel/view' }]])

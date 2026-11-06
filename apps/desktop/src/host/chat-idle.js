@@ -82,6 +82,16 @@ function isBusy(entry) {
   if (run.pendingRequests?.size) return true
   if (run.hostPending?.length) return true
   if (run.btwBusyThreads?.size) return true
+  // 后台任务可比父 turn 更长寿。停止被动快照续期之后，要显式保护仍在执行的任务；
+  // 已结束的任务行只供查看，不阻止回收。
+  for (const type of ['background_tasks', 'subagent_tasks', 'wait_tasks']) {
+    const tasks = run.lastSnapshots?.[type]?.tasks
+    if (
+      Array.isArray(tasks) &&
+      tasks.some((task) => ['starting', 'running', 'waiting'].includes(task?.status))
+    )
+      return true
+  }
   if ((entry.queuedCount || 0) > 0) return true
   return false
 }

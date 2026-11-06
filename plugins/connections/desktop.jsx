@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Pencil, Trash2 } from 'lucide-react';
 import { Alert, Button, ConfigSwitch as Switch, Tag } from '@mica-config-ui/web';
-import { DEFAULT_RUNTIME_URL, isLoopbackRuntime, relayTokenOf, runtimeLabel } from '@packages/mica-web-shared/index.js';
+import { DEFAULT_RUNTIME_URL, isLoopbackRuntime, normalizeEntryAddress, relayTokenOf, runtimeLabel } from '@packages/mica-web-shared/index.js';
 import { MAX_PEER_NOTE_LENGTH, emptyPeerStore, findPeer, peerRows, rememberPeer, samePeer, setPeerNote } from './peers';
 import { createPeerPersistence } from './persistence';
 
@@ -12,6 +12,20 @@ import { createPeerPersistence } from './persistence';
 function displayAddress(url) {
   const text = String(url ?? '');
   return relayTokenOf(text) ? text.replace(/([?&])t=[^&]*/, '$1t=…') : text;
+}
+
+function isOrdinaryWebAddress(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || relayTokenOf(raw)) return false;
+  const normalized = normalizeEntryAddress(raw);
+  if (!normalized) return false;
+  try {
+    const url = new URL(normalized);
+    if (url.port || ['localhost', '127.0.0.1', '::1'].includes(url.hostname)) return false;
+    return !/^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname) && !url.hostname.endsWith('.local');
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -141,7 +155,18 @@ export default function ConnectionsCard({ api, onClose }) {
     setBusy(target);
     setNoteTarget('');
     try {
+      if (isOrdinaryWebAddress(target)) {
+        api.open(normalizeEntryAddress(target));
+        onClose?.();
+        return;
+      }
       const result = await api.probe(target);
+      // 普通网页也可以从这里打开：探活收到的不是 Mica 响应时，不写入 Connections 清单。
+      if (result?.kind === 'web' && result.url) {
+        api.open(result.url);
+        onClose?.();
+        return;
+      }
       if (!result?.ok) {
         setError(result?.error || '连接失败');
         return;
@@ -267,7 +292,7 @@ export default function ConnectionsCard({ api, onClose }) {
         <input
           value={value}
           spellCheck={false}
-          placeholder="192.168.1.5:8787 或 https://…/?t=…"
+          placeholder="Mica 地址或 https://… 网页地址"
           className="text-input min-w-0 flex-1"
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {

@@ -640,7 +640,8 @@ const yieldToLoop = (): Promise<void> => new Promise((resolve) => setImmediate(r
 
 /** 生产入口：文件 I/O 异步，解析限于 64KB 一批，合并也分批让出事件循环。 */
 export function readSummaryAsync(options: Record<string, unknown>): Promise<PerfMetrics> {
-  return readAsyncAt(resolveLogDir(), limitsFor(options));
+  // 内部共用读取工作，外部每个调用方各拿一份结果，不能共享可变数组或计数对象。
+  return readAsyncAt(resolveLogDir(), limitsFor(options)).then(copySummary);
 }
 
 function readAsyncAt(dir: string, limits: Limits): Promise<PerfMetrics> {

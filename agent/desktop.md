@@ -172,15 +172,21 @@
 - 崩溃现场必须有落盘的一行：会话宿主非正常退出记 `host.exit`（退出码、信号、stderr 尾部 2KB），spawn 失败记 `host.spawn-failed`，主进程听 `render-process-gone` / `child-process-gone` / `unresponsive`，app-server 的 `uncaughtException` 先写日志再通知客户端。
 - 通道耗时只在 `handleInvoke` 用 `logger('invoke').timedResult()` 量一次；超过 `SLOW_MS`（默认 300ms）记 slow。它还会把「调用成功、返回体里带 `error` / `ok:false`」的那些记为失败并在聚合表计入 `fails`——大量通道（git/stats/plugin-host）把失败包在返回值里而不抛。慢且失败的调用只写一条带 `failed` 标记的 slow 记录，不能把同一次调用算两次。新增功能不要自己再包一层计时。
 - `chat:compact` 额外记一条 `compact.finished`（请求模式、子进程回报的 strategy、前后 token 估算）——只按通道计时分不出本地清理与模型摘要。
-- 渲染层 `perf-probe.js` 只采样、`log-probe.js` 只记错误，两者交给同一写入器。每个采样自带采集时刻 `at`，15s 批送时不能用批次落盘时间代替；Performance 汇总按日志 scope 各从文件尾部读取最多 4MB，避免 `perf` / `mem` / `invoke` 互相挤掉，不整文件读入内存。
+- 渲染层 `perf-probe.js` 只采样、`log-probe.js` 只记错误，两者交给同一写入器。每个采样自带采集时刻 `at` 和独立页面 `pageId`，15s 批送时不能用批次落盘时间代替；曲线按最近活跃页面筛选，lag 与最长任务取较大值，不叠加同一阻塞。内存原始样本带 `runtime` / `engine`，跨 V8/JSC 不直接比较 heap 数值，进程趋势优先看 RSS。
+- Performance 生产入口用 `readPerformanceSummaryAsync()`：按 scope 各取最多 4MB 尾部，64KB 分批读取/聚合；未变化的文件复用精简投影，不缓存原始 payload。文件投影最多 256 份、估算 32MB，最终结果另限 2MB；文件身份、窗口范围或目录变化时失效。页面刷新不重叠，只在可见且聚焦时自动读取。
 - 采样全量记录，不做「异常才写」；隐藏窗口的 `lag` 记 null。
 - 面板轮询跟可见性走（Stats 30s + 可见且聚焦；会话列表 10s，回到窗口立即补一次）；配置页 Performance 的聚合在 host 侧做完。
+- 读取队列（`renderer/src/read-queue.js`）合并在途轮询，连续推送最多补读一次；插件动作使更早的读取结果失效。隐藏 ChatView 暂停状态查询和计时，恢复可见时补读；正文流式更新从尾部定位活动行，活动事件不改主对话列表引用。transcript 缓存只负责卸载/恢复交接，恢复完释放旧快照，关闭节点也释放对应缓存；同节点因 cwd 等参数重跑恢复时，清空状态前先把组件自己的消息作为恢复候选，避免丢掉仅在事件流中的思考/工具行。
 - Stats 的 `stats:changed` 推送与定时轮询共用可见和焦点门控；窗口失焦后不要因为后台索引进度持续重读整份统计。
-- **插件面板只在看得见时轮询**：`chat-cache` 保留 5 个 ChatView，每个都挂着快捷条；`PluginQuickBar` / `PluginPanels` 必须带 `visible`（`ChatView` 的 `visible` 直传），隐藏实例不轮询状态行（30s）、不预热菜单、不刷新抽屉（4s）——否则一天几千次 `chat:plugin-panel-view`，还会把没人看的会话宿主一直喂活而不被回收。host 侧再按 `id + pluginId + cwd` 合并 3 秒内的重复读（`PANEL_VIEW_REUSE_MS`），动作不做合并。
+- **插件面板只在可见且聚焦时轮询**：`chat-cache` 保留 5 个 ChatView，`PluginQuickBar` / `PluginPanels` 必须带 `visible`；隐藏实例不轮询状态行（30s）、不预热菜单、不刷新抽屉（4s），恢复焦点补读。host 缓存键包含 node/session/plugin/cwd，在途请求始终合并，成功后才开始 3 秒复用（`PANEL_VIEW_REUSE_MS`），失败不缓存，动作不合并。等待回包的请求在超时或宿主关闭后立即从 `pendingRequests` 移除。只读查询回包和周期任务快照不刷新闲置计时，有在途请求的宿主仍受回收保护。
+- 后台 shell、子代理与 wait 的最新快照在页面关闭后仍需跟踪；`starting/running/waiting` 状态阻止宿主回收，已结束的任务行不阻止。已完成轮次重放最多留 40 份、总文本预算 `16 * 1024 * 1024` 字符；超预算回落到磁盘历史，不截断会话内容。
 - 顶栏 Git 徽标（`git:change-counts`）是整棵工作区扫描，自己一层 20s 缓存 + **先回旧值、后台重算**；`worktreeSignature`（HEAD）变了或 `worktreeEpochOf` 变了（stage / discard / 保存文件）时不许回旧值。
+- Git 自动刷新（`git:changed` / turn 结束）传 `invalidate: true`：跳过旧值但共享同代在途扫描；用户手动 `refresh: true` 仍强制独立读取。完成时复核起读的 HEAD/epoch 与请求身份，过时代不能回填或清掉替代请求。仓库根使用 realpath，支持 worktree/submodule 的 `.git` 文件、`commondir` 与 packed refs。
 - 会话列表整份返回，但内容没变时按字段指纹（`session-state.js` 的 `sameSessionSnapshot`）跳过 setState，空闲轮询不触发重渲染。
 - `stats:changed` 只在**真有变化**时让页面重读：收尾那一帧由扫描器带上 `parsedFiles` / `added`，两者都是 0（这一轮没读任何文件、没有新会话）就不广播；索引补齐过程中的进度帧带 `partial: true`，侧栏（`App.jsx`）直接忽略它，统计页只在可见时跟。之前每批进度都推、页面每批都重读千人列表，一天能攒出上千次多余的全量序列化。
 - 会话统计走磁盘索引：`host/stats-scanner.js` 按文件签名把每个会话的投影缓存在 `$MICA_HOME/desktop-stats-index.json`（与 `sessions/` 同级，不是会话文件），进程重启只解析变过的文件。首次构建（升级后第一次）分批让出事件循环，并经 `stats:changed` 推送进度，界面「逐渐填充」而不是空白几秒。**改 `parseSessionMeta` 的投影字段必须同一步提升 `INDEX_VERSION`**：版本没变时旧缓存行会一直缺这个字段，表现为「界面功能突然失效」。
+- 统计扫描、详情与正文搜索共用 `session-usage-reader.js`：小文件异步读取，≥4MB 的读取/解析/字段投影在 worker 内完成，只把用量或文本投影交回；同文件同身份去重、最多 2 个并行读取，worker 失败或超时先终止再降级。扫描器传入期望身份，排队及读取前后均复核；版本变化或瞬时 IO 失败跳过并重试，只缓存稳定版本的坏 JSON。统计口径和 usage 身份计算只在 `stats-core.js`。
+- 统计索引 v10 清除早期 reader 跨版本合并可能产生的旧投影；升级后后台重建一次，不改会话文件。
 - `stats:read` 的载荷是「会话 × 本地日」聚合行（上千会话约 1 MB），不是逐条 usage 事件；区间切换只是对日行做加法（`renderer/src/stats/scope.js`），不要再把事件级明细塞回载荷。跨会话的用量去重靠扫描器的「身份归属表」（最早创建的会话拥有），`stats:session-detail` 与列表共用同一份归属。
 - 每一次模型请求都要能在统计页上看到，所以来源只有一个口径（`mica-web-shared/usage-source` 的 `usageSourceOf`）：`main` 主对话、`delegation` 委派、`plugin`（+`pluginId`）插件、`helper` 内核后台。判定顺序是 `origin: 'delegation'` / `initiatedByCallId` → 委派、`origin: 'plugin'` / `pluginId` → 插件、其余 → 内核 helper；host 的日行聚合与会话详情都调这一份，不各算一套。插件起的子代理由宿主写 `pluginId`（`ctx.subagents.run/background` 记到插件名下，委派带 `initiatedByCallId` 记成 `delegation`）。
 - 没有会话可写的请求（`mica commit` 这类一次性插件命令，含桌面右键 commit；以及 `mica plugin-action` 里真的问了一次模型的插件动作）追加进 `$MICA_HOME/usage-ledger.jsonl`（形状与解析唯一实现在 `mica-web-shared/usage-ledger`，写入在 `apps/cli/src/plugins/usageLedger.ts`）。扫描器把它读成「按 cwd 分组的无会话行」（`ledger: true`、`id: null`），并进概览 / By model / By source / By project，但不冒充会话：不进 `scanMeta`、不算进「Active sessions」、不进 By session。不要为此跨进程改写会话快照——那会绕过 turn lock。配置页的「测试连接」（插件与主配置的服务商）仍不入账（`probeModelConnection` 只是一次连通性探测，没有回答）。

@@ -3,41 +3,36 @@ import { createRuntimeInput } from './RuntimeInput.js';
 import { MessageQueueService, QUEUE_HOLD_TTL_MS } from './MessageQueueService.js';
 
 describe('MessageQueueService', () => {
-  it('waits for one complete iteration after observing an after-iteration input', () => {
+  it('takes an after-iteration input at the first completed iteration', () => {
     const queue = new MessageQueueService();
     const input = createRuntimeInput('follow up', 'ui', { queueMode: 'after_iteration' });
 
     expect(queue.enqueue(input)).toBe(true);
-    expect(queue.dequeueAfterCompletedIteration()).toBeNull();
     expect(queue.list()).toEqual([input]);
     expect(queue.dequeueAfterCompletedIteration()).toBe(input);
     expect(queue.list()).toEqual([]);
   });
 
-  it('does not age a replacement input using the removed input boundary', () => {
+  it('takes the replacement input at the next completed iteration', () => {
     const queue = new MessageQueueService();
     const first = createRuntimeInput('first', 'ui', { queueMode: 'after_iteration' });
     const replacement = createRuntimeInput('replacement', 'ui', { queueMode: 'after_iteration' });
 
     queue.enqueue(first);
-    expect(queue.dequeueAfterCompletedIteration()).toBeNull();
     expect(queue.removeLast()).toBe(first);
     queue.enqueue(replacement);
 
-    expect(queue.dequeueAfterCompletedIteration()).toBeNull();
     expect(queue.dequeueAfterCompletedIteration()).toBe(replacement);
   });
 
-  it('resets the observed boundary when the queue is cleared', () => {
+  it('takes a newly enqueued input after the queue is cleared', () => {
     const queue = new MessageQueueService();
     const input = createRuntimeInput('follow up', 'ui', { queueMode: 'after_iteration' });
 
     queue.enqueue(input);
-    expect(queue.dequeueAfterCompletedIteration()).toBeNull();
     queue.clear();
     queue.enqueue(input);
 
-    expect(queue.dequeueAfterCompletedIteration()).toBeNull();
     expect(queue.dequeueAfterCompletedIteration()).toBe(input);
   });
 
@@ -65,7 +60,7 @@ describe('MessageQueueService', () => {
   // 客户端把排队消息撤回输入框重新编辑时先冻结它：边界恰好在同一瞬间到来也不能
   // 把用户正在改的文本发出去。
   describe('hold', () => {
-    it('never injects a held input, and resumes the wait after release', () => {
+    it('never injects a held input, and takes it at the next boundary after release', () => {
       const queue = new MessageQueueService();
       const input = createRuntimeInput('edit me', 'ui', { queueMode: 'after_iteration' });
 
@@ -76,8 +71,8 @@ describe('MessageQueueService', () => {
       expect(queue.list()).toEqual([input]);
 
       expect(queue.releaseQueued(input.id)).toBe(true);
-      // 释放后重新计时：还得再等一次完整迭代，不会立刻发出去。
-      expect(queue.dequeueAfterCompletedIteration()).toBeNull();
+      // 释放本身不发送；下一次完整工具迭代结束才消费。
+      expect(queue.list()).toEqual([input]);
       expect(queue.dequeueAfterCompletedIteration()).toBe(input);
     });
 
@@ -116,7 +111,6 @@ describe('MessageQueueService', () => {
       Date.now = () => now + QUEUE_HOLD_TTL_MS;
       try {
         expect(queue.isHeld()).toBe(false);
-        expect(queue.dequeueAfterCompletedIteration()).toBeNull();
         expect(queue.dequeueAfterCompletedIteration()).toBe(input);
       } finally {
         Date.now = realNow;

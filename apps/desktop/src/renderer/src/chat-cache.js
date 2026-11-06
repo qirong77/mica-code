@@ -63,6 +63,14 @@ export function readCachedTranscript(nodeId) {
   return transcriptCache.get(nodeId) || null
 }
 
+/** 同一节点因目录等参数重新恢复时，组件已是历史的所有者，清空状态前先交接它的候选。 */
+export function readRestoreTranscript(nodeId, previousNodeId, messages, meta) {
+  if (nodeId === previousNodeId && Array.isArray(messages) && messages.length) {
+    return { messages, meta }
+  }
+  return readCachedTranscript(nodeId)
+}
+
 /** Once mounted, the component owns the transcript; don't retain its old snapshot as well. */
 export function takeCachedTranscript(nodeId) {
   const entry = transcriptCache.get(nodeId) || null

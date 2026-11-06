@@ -10,7 +10,6 @@ export const QUEUE_HOLD_TTL_MS = 60_000;
 
 export class MessageQueueService {
   private item: RuntimeInput | null = null;
-  private iterationBoundaryInputId: string | null = null;
   private hold: { id: string; until: number } | null = null;
 
   enqueue(input: RuntimeInput): boolean {
@@ -22,7 +21,6 @@ export class MessageQueueService {
   dequeue(): RuntimeInput | null {
     const item = this.item;
     this.item = null;
-    this.iterationBoundaryInputId = null;
     this.hold = null;
     return item;
   }
@@ -33,19 +31,15 @@ export class MessageQueueService {
   }
 
   /**
-   * The first boundary only starts the wait. A second boundary proves that a
-   * complete provider/tool iteration ran after this input was queued.
+   * Take the input at the next completed provider/tool iteration. Providers
+   * call this only after appending every tool result, so the new user message
+   * extends the existing prompt prefix without interrupting an in-flight request.
    */
   dequeueAfterCompletedIteration(allowDequeue = true): RuntimeInput | null {
     if (!this.item || this.item.queueMode !== 'after_iteration') return null;
     // A held input must not be injected: the user is pulling it back into the
     // composer and would otherwise watch the text they are editing get sent.
-    // The boundary marker is left untouched so the wait restarts after release.
     if (this.isHeld()) return null;
-    if (this.iterationBoundaryInputId !== this.item.id) {
-      this.iterationBoundaryInputId = this.item.id;
-      return null;
-    }
     if (!allowDequeue) return null;
     return this.dequeue();
   }
@@ -56,7 +50,6 @@ export class MessageQueueService {
 
   clear(): void {
     this.item = null;
-    this.iterationBoundaryInputId = null;
     this.hold = null;
   }
 
