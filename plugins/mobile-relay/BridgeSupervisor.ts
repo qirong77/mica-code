@@ -29,7 +29,7 @@ const LOCK_NAME = 'bridge.lock';
 const SCRIPT_NAME = 'bridge.mjs';
 const DATA_NAME = 'data.json';
 /** 随包 skill 的源码位置；正文内嵌在二进制里，这一条只是给人点开看的地方。 */
-const SKILL_URL = 'https://github.com/qironglin77/mica-code/tree/main/plugins/mobile-relay/skill';
+const SKILL_URL = 'https://github.com/qirong77/mica-code/tree/main/plugins/mobile-relay/skill';
 
 type LockRecord = { pid: number; startedAt: number; ownerPid?: number };
 

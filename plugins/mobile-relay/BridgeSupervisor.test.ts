@@ -320,6 +320,11 @@ describe('buildStatus', () => {
     expect(buildStatus({ relayUrl: 'https://x.test', token: 'dd' }, null, null, 1).phoneUrl).toBe('');
   });
 
+  it('links the config page deployment skill to the official repository', () => {
+    const status = buildStatus({}, null, null, 1);
+    expect(status.skill).toBe('https://github.com/qirong77/mica-code/tree/main/plugins/mobile-relay/skill');
+  });
+
   it('marks the relay unreachable without inventing liveness', () => {
     const status = buildStatus({ relayUrl: 'https://x.test', token: 'a' }, null, 42, 7);
     expect(status).toMatchObject({
