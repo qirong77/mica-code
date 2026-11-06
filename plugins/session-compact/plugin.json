@@ -7,7 +7,7 @@
   "main": "index.js",
   "priority": 100,
   "required": false,
-  "requires": ["agent", "desktop", "llm"],
+  "requires": ["agent", "desktop", "hooks", "llm"],
   "desktop": {
     "sessionMenu": [
       { "label": "快速压缩", "action": "quick", "icon": "eraser", "position": "top", "surface": "chat" },

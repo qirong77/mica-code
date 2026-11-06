@@ -38,34 +38,50 @@ export async function openInControlledBrowser(input: {
   if (!fetchImpl) return { ok: false, error: '这个运行时没有 fetch' };
 
   try {
-    const response = await fetchImpl(`${base}/browser/browsers`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-mica-owner': owner },
-      body: JSON.stringify({
-        url: input.url,
-        label: labelOf(input.label),
-        // 用户点的是「打开」，窗口就该出现在眼前；agent 自己在后台用的时候才不显示。
-        show: true,
-      }),
-      signal: AbortSignal.timeout(input.timeoutMs ?? BROWSER_OPEN_TIMEOUT_MS),
-    });
-    const text = await response.text();
-    let payload: { ok?: boolean; error?: string } | null = null;
-    try {
-      payload = text ? (JSON.parse(text) as { ok?: boolean; error?: string }) : null;
-    } catch {
-      return { ok: false, error: `受控浏览器返回了非 JSON：${text.slice(0, 120)}` };
+    const signal = AbortSignal.timeout(input.timeoutMs ?? BROWSER_OPEN_TIMEOUT_MS);
+    const request = async (path: string, body?: unknown, allowConflict = false) => {
+      const response = await fetchImpl(`${base}${path}`, {
+        method: body === undefined ? 'GET' : 'POST',
+        headers: { 'content-type': 'application/json', 'x-mica-owner': owner },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal,
+      });
+      const text = await response.text();
+      let payload: { ok?: boolean; error?: string; browsers?: Array<{ id: string }> } | null;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        throw new Error(`受控浏览器返回了非 JSON：${text.slice(0, 120)}`);
+      }
+      if ((!response.ok || payload?.ok === false) && !(allowConflict && response.status === 409)) {
+        throw new Error(payload?.error || `受控浏览器返回 HTTP ${response.status}`);
+      }
+      return { response, payload };
+    };
+    const existingBrowser = async () => {
+      const { payload } = await request('/browser/browsers');
+      return payload?.browsers?.find((browser) => typeof browser.id === 'string' && browser.id)?.id;
+    };
+    let browserId = await existingBrowser();
+    if (!browserId) {
+      const created = await request(
+        '/browser/browsers',
+        { url: input.url, label: labelOf(input.label), show: true },
+        true,
+      );
+      if (created.response.status !== 409) return { ok: true };
+      browserId = await existingBrowser();
+      if (!browserId) throw new Error(created.payload?.error || '受控浏览器窗口冲突，重新查询后仍未找到窗口');
     }
-    if (!response.ok || payload?.ok === false) {
-      return { ok: false, error: payload?.error || `受控浏览器返回 HTTP ${response.status}` };
-    }
+    await request('/browser/tabs', { browserId, url: input.url });
+    await request(`/browser/browsers/${encodeURIComponent(browserId)}/show`, {});
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
-/** 窗口标题：顶栏图标要靠它区分同一个会话里的几个窗口。 */
+/** 首次创建窗口时的顶栏标签。 */
 function labelOf(value: unknown): string {
   const text = typeof value === 'string' ? value.trim() : '';
   return text ? text.slice(0, 24) : '快捷按钮';

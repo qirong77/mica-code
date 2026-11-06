@@ -127,6 +127,23 @@ describe('task-owned checks and persistence races', () => {
     expect(h.controller.read(h.ownerA).dismissedRevision).toBeUndefined();
     h.controller.dismiss(h.ownerA);
     h.controller.replace([web], h.ownerA);
+    expect(h.controller.read(h.ownerA).dismissedRevision).toBe(dismissed.revision);
+    h.controller.replace([{ ...web, label: 'New Web' }], h.ownerA);
     expect(h.controller.read(h.ownerA).dismissedRevision).toBeUndefined();
+  });
+  it('does not cancel an in-flight check or rewrite state when setting the same normalized targets', async () => {
+    const pending = deferred<ProbeStatus>();
+    let signal: AbortSignal | undefined;
+    const h = harness({ probe: (_target, s) => { signal = s; return pending.promise; } });
+    h.controller.replace([web], h.ownerA);
+    h.controller.dismiss(h.ownerA);
+    const before = h.controller.read(h.ownerA);
+    const check = h.controller.check(h.ownerA);
+    h.controller.replace([{ ...web, url: 'http://localhost:3000/health' }], h.ownerA);
+    expect(signal?.aborted).toBe(false);
+    expect(h.writes).toHaveBeenCalledTimes(2);
+    pending.resolve({ checkedAt: 1000, reachable: true, healthy: true, statusCode: 200 });
+    expect((await check).outcome).toBe('success');
+    expect(h.controller.read(h.ownerA)).toMatchObject({ revision: before.revision, dismissedRevision: before.revision });
   });
 });

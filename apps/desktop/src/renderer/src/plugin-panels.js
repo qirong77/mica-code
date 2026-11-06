@@ -475,17 +475,20 @@ export function clearMenuCache() {
 const VIEW_CACHE_MS = 30_000
 const viewCache = new Map()
 
-const viewKey = (nodeId, pluginId) => `${nodeId || ''}\u0000${pluginId || ''}`
+export const panelViewContext = (nodeId, sessionId, cwd, role) =>
+  JSON.stringify([nodeId || '', sessionId || '', cwd || '', panelsRoleKey(role)])
 
-export function readPanelView(nodeId, pluginId, now = Date.now(), ttl = VIEW_CACHE_MS) {
-  const hit = viewCache.get(viewKey(nodeId, pluginId))
+const viewKey = (context, pluginId) => `${context}\u0000${pluginId || ''}`
+
+export function readPanelView(context, pluginId, now = Date.now(), ttl = VIEW_CACHE_MS) {
+  const hit = viewCache.get(viewKey(context, pluginId))
   if (!hit) return null
   return { view: hit.view, stale: now - hit.at >= ttl }
 }
 
-export function writePanelView(nodeId, pluginId, view, now = Date.now()) {
+export function writePanelView(context, pluginId, view, now = Date.now()) {
   if (!view) return null
-  viewCache.set(viewKey(nodeId, pluginId), { at: now, view })
+  viewCache.set(viewKey(context, pluginId), { at: now, view })
   if (viewCache.size > 16) {
     const [oldest] = viewCache.keys()
     viewCache.delete(oldest)
@@ -493,7 +496,6 @@ export function writePanelView(nodeId, pluginId, view, now = Date.now()) {
   return view
 }
 
-/** 视图里每个输入框的初值：首次打开与动作之后对齐草稿用（定时刷新不能碰，会清掉正在输的字）。 */
 /**
  * 草稿的键带上分区位置：插件可以有两块分区都叫「地址」「端口」（一个连生产、一个连测试），
  * 扁平按 `field.key` 存会让两处的字互相串。位置是这块分区在视图里的下标——与页签 key 用的是
@@ -510,6 +512,87 @@ export function panelDrafts(view) {
     for (const field of section?.fields || []) drafts[panelDraftKey(index, field.key)] = field.value ?? ''
   }
   return drafts
+}
+
+export function reconcilePanelDrafts(drafts, baseline, next) {
+  const merged = { ...next }
+  for (const [key, value] of Object.entries(drafts)) {
+    if (value !== baseline[key]) merged[key] = value
+  }
+  return merged
+}
+
+export function reconcilePanelActionDrafts(drafts, baseline, next, submitted, scope) {
+  const merged = reconcilePanelDrafts(drafts, baseline, next)
+  if (scope === undefined) return merged
+  const prefix = `${scope}:`
+  for (const key of new Set([...Object.keys(drafts), ...Object.keys(next)])) {
+    if (!key.startsWith(prefix)) continue
+    if (drafts[key] !== submitted[key]) merged[key] = drafts[key]
+    else if (Object.hasOwn(next, key)) merged[key] = next[key]
+    else delete merged[key]
+  }
+  return merged
+}
+
+export function createPanelActionQueue(run, options = {}) {
+  const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay))
+  const cancel = options.cancel || clearTimeout
+  const pending = new Map()
+  const actions = []
+  let running = false
+  const discard = (scope) => {
+    const entry = pending.get(scope)
+    if (entry) cancel(entry.timer)
+    pending.delete(scope)
+  }
+  const drain = async () => {
+    if (running) return
+    running = true
+    try {
+      while (true) {
+        const entry = actions.shift() || [...pending.values()].find((item) => item.ready)
+        if (!entry) break
+        if (entry.auto) pending.delete(entry.scope)
+        let result
+        try {
+          result = await run(entry.task)
+        } catch (cause) {
+          result = { ok: false, error: String(cause?.message || cause) }
+        }
+        entry.resolve?.(result)
+      }
+    } finally {
+      running = false
+    }
+  }
+  return {
+    commit(scope, task) {
+      discard(scope)
+      const entry = { scope, task, auto: true, ready: false, timer: null }
+      pending.set(scope, entry)
+      entry.timer = schedule(() => {
+        entry.ready = true
+        void drain()
+      }, options.delay ?? 500)
+    },
+    action(scope, task) {
+      // Explicit actions consume or discard the form; never replay its older pending draft afterwards.
+      discard(scope)
+      return new Promise((resolve) => {
+        actions.push({ task, resolve })
+        void drain()
+      })
+    },
+    flush(scope) {
+      for (const entry of pending.values()) {
+        if (scope !== undefined && entry.scope !== scope) continue
+        cancel(entry.timer)
+        entry.ready = true
+      }
+      void drain()
+    }
+  }
 }
 
 /** 某一块分区的草稿还原成插件看到的那份扁平 `values`（动作只属于发起它的那块分区）。 */

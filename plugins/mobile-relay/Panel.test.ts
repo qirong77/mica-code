@@ -65,7 +65,27 @@ describe('mobile-relay panel', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('opens the latest actual request log without replacing connection drafts', async () => {
+    vi.stubEnv('MICA_LOG_DIR', dir);
+    writeFileSync(join(dir, 'relay-requests-20261105-2.jsonl'), '{}\n');
+    const latest = join(dir, 'relay-requests-20261105-10.jsonl');
+    writeFileSync(latest, '{}\n');
+    writeFileSync(join(dir, 'plugin-mobile-relay-20261106.jsonl'), '{}\n');
+    writeFileSync(join(dir, 'panel.json'), JSON.stringify({ relayUrl: 'https://draft.example' }));
+    const result = await createPanelHandler(fakeContext(), dir).action({ action: 'request-logs' });
+    expect(result).toEqual({ openPath: { path: latest } });
+    expect(readDrafts(dir).relayUrl).toBe('https://draft.example');
+  });
+
+  it('opens the log directory before the first request rather than inventing a file', async () => {
+    vi.stubEnv('MICA_LOG_DIR', dir);
+    expect(await createPanelHandler(fakeContext(), dir).action({ action: 'request-logs' })).toEqual({
+      openPath: { path: dir },
+    });
   });
 
   it('offers the first-deploy section with the ssh field and an apply button', () => {
@@ -82,16 +102,16 @@ describe('mobile-relay panel', () => {
   it('remembers what the user typed', async () => {
     const handler = createPanelHandler(fakeContext(), dir);
     // 没有中转地址时这个动作会 reject，先把预期的失败吞掉，只验草稿落盘
-    const attempt = handler.action({ action: 'test', values: { sshHost: 'root@1.2.3.4', sshPort: '2222', label: '台式机' } });
+    const attempt = handler.action({
+      action: 'test',
+      values: { sshHost: 'root@1.2.3.4', sshPort: '2222', label: '台式机' },
+    });
     await expect(attempt).rejects.toThrow(/中转地址/);
     expect(readDrafts(dir)).toMatchObject({ sshHost: 'root@1.2.3.4', sshPort: '2222', label: '台式机' });
   });
 
   it('shows the phone link once there is a relay and a token', () => {
-    const view = buildPanelView(
-      fakeContext({ relayUrl: 'https://mica.example.com', token: '0123456789abcdef' }),
-      dir
-    );
+    const view = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com', token: '0123456789abcdef' }), dir);
     const row = view.sections?.[0]?.rows?.find((item) => item.label === '手机链接');
     expect(row?.value).toBe('https://mica.example.com/?t=0123456789abcdef');
   });
@@ -112,11 +132,11 @@ describe('mobile-relay panel', () => {
     writeFileSync(
       join(dir, 'panel.json'),
       JSON.stringify({ sshHost: 'root@1.2.3.4', relayUrl: 'https://draft.example' }),
-      'utf8'
+      'utf8',
     );
     const handler = createPanelHandler(
       fakeContext({ relayUrl: 'https://mica.example.com', token: '0123456789abcdef' }),
-      dir
+      dir,
     );
     const outcome = (await handler.action({ action: 'show', values: {} })) as PluginPanelActionResult;
     expect(outcome.dialog?.qr?.value).toBe('https://mica.example.com/?t=0123456789abcdef');
@@ -187,10 +207,10 @@ describe('mobile-relay panel', () => {
         page: { text: '落后（中转机 4d32，本机 bcc7）', tone: 'warn' },
         pageKey: 'bcc7->4d32',
       }),
-      'utf8'
+      'utf8',
     );
     const section = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com' }), dir).sections?.find(
-      (item) => item.title === '概览'
+      (item) => item.title === '概览',
     );
     expect(section?.rows?.find((item) => item.label === '页面版本')).toEqual({
       label: '页面版本',
@@ -219,10 +239,10 @@ describe('mobile-relay panel', () => {
         pageKey: 'bcc7->4d32',
         attention: null,
       }),
-      'utf8'
+      'utf8',
     );
     const section = buildPanelView(fakeContext({ relayUrl: 'https://mica.example.com' }), dir).sections?.find(
-      (item) => item.title === '概览'
+      (item) => item.title === '概览',
     );
     expect(section?.rows?.find((item) => item.label === '页面版本')?.tone).toBe('warn');
     expect(section?.actions?.find((item) => item.id === 'sync-page')?.tone).toBe('primary');

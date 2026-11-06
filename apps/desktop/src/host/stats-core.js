@@ -136,13 +136,37 @@ export function normalizeUsageEvent(usage, fallbackTime, fallbackModel) {
       typeof usage.usageId === 'string' && usage.usageId.trim() ? usage.usageId.trim() : null,
     identity: usageIdentity(usage),
     occurredAtMs: occurredAtMs ?? fallbackTime,
+    hasOccurredAt: occurredAtMs != null,
     model: usage.model || fallbackModel || 'Unknown',
     provider: usage.providerId || null,
-    durationMs: typeof usage.durationMs === 'number' && Number.isFinite(usage.durationMs) && usage.durationMs > 0 ? usage.durationMs : null,
-    firstTokenMs: typeof usage.firstTokenMs === 'number' && Number.isFinite(usage.firstTokenMs) && usage.firstTokenMs >= 0 ? usage.firstTokenMs : null,
-    responseWaitMs: typeof usage.responseWaitMs === 'number' && Number.isFinite(usage.responseWaitMs) && usage.responseWaitMs >= 0 ? usage.responseWaitMs : null,
-    generationDurationMs: typeof usage.generationDurationMs === 'number' && Number.isFinite(usage.generationDurationMs) && usage.generationDurationMs > 0 ? usage.generationDurationMs : null,
-    hasOutputTokens: typeof usage.outputTokens === 'number' && Number.isFinite(usage.outputTokens) && usage.outputTokens >= 0,
+    durationMs:
+      typeof usage.durationMs === 'number' &&
+      Number.isFinite(usage.durationMs) &&
+      usage.durationMs > 0
+        ? usage.durationMs
+        : null,
+    firstTokenMs:
+      typeof usage.firstTokenMs === 'number' &&
+      Number.isFinite(usage.firstTokenMs) &&
+      usage.firstTokenMs >= 0
+        ? usage.firstTokenMs
+        : null,
+    responseWaitMs:
+      typeof usage.responseWaitMs === 'number' &&
+      Number.isFinite(usage.responseWaitMs) &&
+      usage.responseWaitMs >= 0
+        ? usage.responseWaitMs
+        : null,
+    generationDurationMs:
+      typeof usage.generationDurationMs === 'number' &&
+      Number.isFinite(usage.generationDurationMs) &&
+      usage.generationDurationMs > 0
+        ? usage.generationDurationMs
+        : null,
+    hasOutputTokens:
+      typeof usage.outputTokens === 'number' &&
+      Number.isFinite(usage.outputTokens) &&
+      usage.outputTokens >= 0,
     turnId: Number.isInteger(usage.turnId) ? usage.turnId : null,
     inputTokens,
     cachedInputTokens,
@@ -267,13 +291,49 @@ function dayRow(day) {
     turns: new Set(),
     models: new Map(),
     speedModels: new Map(),
+    speedMinutes: new Map(),
     sources: new Map()
+  }
+}
+
+function addSpeedSample(models, usage) {
+  const key = JSON.stringify([usage.provider, usage.model])
+  let speed = models.get(key)
+  if (!speed) {
+    speed = {
+      provider: usage.provider,
+      model: usage.model,
+      outputTokens: 0,
+      durationMs: 0,
+      throughputSamples: 0,
+      firstTokenMs: 0,
+      firstTokenSamples: 0
+    }
+    models.set(key, speed)
+  }
+  if (usage.durationMs != null && usage.hasOutputTokens) {
+    speed.outputTokens += usage.outputTokens
+    speed.durationMs += usage.durationMs
+    speed.throughputSamples++
+  }
+  if (usage.firstTokenMs != null) {
+    speed.firstTokenMs += usage.firstTokenMs
+    speed.firstTokenSamples++
+  }
+  if (usage.responseWaitMs != null) {
+    speed.responseWaitMs = (speed.responseWaitMs || 0) + usage.responseWaitMs
+    speed.responseWaitSamples = (speed.responseWaitSamples || 0) + 1
+  }
+  if (usage.generationDurationMs != null && usage.hasOutputTokens) {
+    speed.generationOutputTokens = (speed.generationOutputTokens || 0) + usage.outputTokens
+    speed.generationDurationMs = (speed.generationDurationMs || 0) + usage.generationDurationMs
+    speed.generationSamples = (speed.generationSamples || 0) + 1
   }
 }
 
 /**
  * 把用量事件聚合成「本地日」行。统计页的所有范围都是整天边界（今天 / 近 N 天 / 单日 /
- * 全部），日粒度足够表达，所以逐条事件没有传出去的必要。
+ * 全部）；速度趋势额外保留有实际请求时间的分钟聚合，不传逐条事件。
  *
  * 每个维度行保留自己的 requests 与 token，renderer 只做加法就能得到任一范围的结果：
  * 模型占比、来源占比（主对话 / 委派 / 插件 / 内核后台）、每日柱状图都从这几层聚出来。
@@ -298,29 +358,19 @@ export function summarizeStatsDays(usageEvents) {
     }
     addTokens(model, usage)
 
-    const speedKey = JSON.stringify([usage.provider, usage.model])
-    let speed = row.speedModels.get(speedKey)
-    if (!speed) {
-      speed = { provider: usage.provider, model: usage.model, outputTokens: 0, durationMs: 0, throughputSamples: 0, firstTokenMs: 0, firstTokenSamples: 0 }
-      row.speedModels.set(speedKey, speed)
-    }
-    if (usage.durationMs != null && usage.hasOutputTokens) {
-      speed.outputTokens += usage.outputTokens
-      speed.durationMs += usage.durationMs
-      speed.throughputSamples++
-    }
-    if (usage.firstTokenMs != null) {
-      speed.firstTokenMs += usage.firstTokenMs
-      speed.firstTokenSamples++
-    }
-    if (usage.responseWaitMs != null) {
-      speed.responseWaitMs = (speed.responseWaitMs || 0) + usage.responseWaitMs
-      speed.responseWaitSamples = (speed.responseWaitSamples || 0) + 1
-    }
-    if (usage.generationDurationMs != null && usage.hasOutputTokens) {
-      speed.generationOutputTokens = (speed.generationOutputTokens || 0) + usage.outputTokens
-      speed.generationDurationMs = (speed.generationDurationMs || 0) + usage.generationDurationMs
-      speed.generationSamples = (speed.generationSamples || 0) + 1
+    addSpeedSample(row.speedModels, usage)
+    if (
+      usage.hasOccurredAt &&
+      (usage.responseWaitMs != null ||
+        (usage.generationDurationMs != null && usage.hasOutputTokens))
+    ) {
+      const minute = Math.floor(usage.occurredAtMs / 60000) * 60000
+      let bucket = row.speedMinutes.get(minute)
+      if (!bucket) {
+        bucket = { at: minute, models: new Map() }
+        row.speedMinutes.set(minute, bucket)
+      }
+      addSpeedSample(bucket.models, usage)
     }
 
     const source = usage.source || MAIN_USAGE_SOURCE
@@ -350,6 +400,9 @@ export function summarizeStatsDays(usageEvents) {
       turns: row.turns.size,
       models: [...row.models.values()],
       speedModels: [...row.speedModels.values()],
+      speedMinutes: [...row.speedMinutes.values()]
+        .sort((a, b) => a.at - b.at)
+        .map((bucket) => ({ at: bucket.at, models: [...bucket.models.values()] })),
       sources: [...row.sources.values()].map((source) => ({
         ...source,
         tasks: [...source.tasks],

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { PluginPanelSection } from './PluginPanels'
+import { MAX_EDITOR_TEXT, normalizePluginPanelView } from '../../../../../packages/mica-plugin/PluginPanel.ts'
 
 const render = (section) =>
   renderToStaticMarkup(
@@ -22,6 +23,16 @@ const render = (section) =>
  * 插件的数据问题，是渲染路径自己的 bug，所以在这里把四种挂动作的位置都画一遍。
  */
 describe('插件面板分区渲染', () => {
+  test('oversized editor reads are visibly read-only, with no edit or save affordance', () => {
+    const view = normalizePluginPanelView({ sections: [{
+      editor: { action: 'save', value: 'x'.repeat(MAX_EDITOR_TEXT + 1) }
+    }] })
+    const html = render(view.sections[0])
+    expect(html).toContain('正文超过')
+    expect(html).not.toContain('<textarea')
+    expect(html).not.toContain('<button')
+  })
+
   test('条目行尾的图标动作画出图标而不是崩溃', () => {
     const html = render({
       title: '频道',

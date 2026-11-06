@@ -29,6 +29,7 @@ function mockAgent(overrides: Record<string, unknown> = {}): AgentRuntime {
     toConversationMessages: () => [],
     captureClientSnapshot: () => null,
     restoreClientSnapshot: () => {},
+    registerTextRollbackConsumer: () => () => {},
     clearSession: () => {},
     reserveRunId: () => 1,
     isCurrent: () => true,
@@ -53,6 +54,7 @@ function mockSessionController(saveSpy: ReturnType<typeof vi.fn>): SessionContro
     // describe() 会读它：桩缺了这个方法，插件 setup 里的 describe() 直接抛，
     // 整批插件注册中断（表现为「memory 工具不见了」）。
     getParentSessionId: () => null,
+    getConversationMessages: () => [],
     saveCurrent: saveSpy,
     refreshFromStore: () => null,
     startNewSession: () => {},
@@ -98,6 +100,7 @@ async function mount(
     host,
     queue: host.queue,
     getConversationMessages: host.getConversationMessages,
+    notices: host.notices,
   });
   await host.emitRuntimeStart();
   return { agent, executor, host, hooks };

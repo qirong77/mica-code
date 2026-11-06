@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginAskAnswer, PluginAskApi, PluginAskQuestion } from '@packages/mica-plugin/index.js';
 import { COMPUTER_USE_TOOL_NAME, createComputerUseTool, describeStep } from './Tool.js';
 
@@ -13,16 +13,29 @@ import { COMPUTER_USE_TOOL_NAME, createComputerUseTool, describeStep } from './T
 const STUB_RUNTIME = `
 import { appendFileSync, readFileSync } from 'node:fs';
 const [cmd, ...args] = process.argv.slice(2);
+if (process.env.CU_HOLD_ON === cmd) {
+  process.on('SIGTERM', () => {
+    appendFileSync(process.env.CU_LOG, JSON.stringify({ cmd: 'terminated' }) + '\\n');
+    setTimeout(() => process.exit(0), 20);
+  });
+  setInterval(() => {}, 1000);
+}
 if (cmd === 'commands') {
+  if (process.env.CU_HOLD_ON === cmd) {
+    appendFileSync(process.env.CU_LOG, JSON.stringify({ cmd }) + '\\n');
+    await new Promise(() => {});
+  }
   process.stdout.write(JSON.stringify({ write: ['tap', 'move', 'type'], read: ['screens', 'pos', 'text'] }));
   process.exit(0);
 }
 const permit = process.env.MICA_COMPUTER_USE_APPROVAL || '';
 appendFileSync(process.env.CU_LOG, JSON.stringify({
-  cmd, args, permit,
+  cmd, args, permit, pid: process.pid,
   permitBody: permit ? JSON.parse(readFileSync(permit, 'utf8')) : null,
 }) + '\\n');
 if (process.env.CU_FAIL_ON === cmd) { process.stderr.write('boom'); process.exit(3); }
+if (process.env.CU_HOLD_ON === cmd) await new Promise(() => {});
+if (process.env.CU_OUTPUT_BYTES) process.stdout.write('x'.repeat(Number(process.env.CU_OUTPUT_BYTES)));
 process.stdout.write('ok ' + cmd);
 `;
 
@@ -39,6 +52,8 @@ function workspace(): { runtimeDir: string; logFile: string } {
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   delete process.env.CU_LOG;
+  delete process.env.CU_HOLD_ON;
+  delete process.env.CU_OUTPUT_BYTES;
 });
 
 type AskStub = PluginAskApi & { calls: PluginAskQuestion[] };
@@ -61,7 +76,7 @@ function tool(deps: { runtimeDir: string; ask?: PluginAskApi }) {
   return createComputerUseTool({ ...deps, nodeBin: process.execPath });
 }
 
-function calls(logFile: string): Array<{ cmd: string; args: string[]; permit: string; permitBody: unknown }> {
+function calls(logFile: string): Array<{ cmd: string; args: string[]; permit: string; permitBody: unknown; pid: number }> {
   try {
     return readFileSync(logFile, 'utf-8')
       .split('\n')
@@ -124,6 +139,7 @@ describe('computer_use tool', () => {
       JSON.stringify(['tap', 'Calculator', '1']),
       JSON.stringify(['type', '123']),
     ]);
+    expect(existsSync(logged[0]!.permit)).toBe(false);
   });
 
   it('runs nothing when the user declines', async () => {
@@ -197,6 +213,64 @@ describe('computer_use tool', () => {
     const { runtimeDir } = workspace();
     const result = await tool({ runtimeDir }).execute!({});
     expect(result).toContain('缺少 commands');
+  });
+
+  it('keeps the event loop responsive, waits for an aborted runtime and removes its permit', async () => {
+    const { runtimeDir, logFile } = workspace();
+    process.env.CU_LOG = logFile;
+    process.env.CU_HOLD_ON = 'tap';
+    const controller = new AbortController();
+    let heartbeats = 0;
+    const heartbeat = setInterval(() => {
+      heartbeats += 1;
+    }, 5);
+    const pending = tool({ runtimeDir, ask: askStub({}) }).execute!({
+      commands: [{ cmd: 'tap' }, { cmd: 'type', args: ['must not run'] }],
+    }, { signal: controller.signal });
+    let result;
+    try {
+      await vi.waitFor(() => expect(calls(logFile).map((entry) => entry.cmd)).toContain('tap'));
+      expect(heartbeats).toBeGreaterThan(0);
+    } finally {
+      controller.abort();
+      result = await pending;
+      clearInterval(heartbeat);
+    }
+    expect(result).toContain('中止');
+    expect(result).toContain('后面的 1 步没有执行');
+    const logged = calls(logFile);
+    expect(logged.map((entry) => entry.cmd)).toEqual(['tap', 'terminated']);
+    expect(existsSync(logged[0]!.permit)).toBe(false);
+    expect(() => process.kill(logged[0]!.pid, 0)).toThrow();
+  });
+
+  it('can abort command discovery before asking or running any steps', async () => {
+    const { runtimeDir, logFile } = workspace();
+    process.env.CU_LOG = logFile;
+    process.env.CU_HOLD_ON = 'commands';
+    const controller = new AbortController();
+    const ask = askStub({});
+    const pending = tool({ runtimeDir, ask }).execute!({ commands: [{ cmd: 'tap' }] }, { signal: controller.signal });
+    let result;
+    try {
+      await vi.waitFor(() => expect(calls(logFile).map((entry) => entry.cmd)).toContain('commands'));
+    } finally {
+      controller.abort();
+      result = await pending;
+    }
+    expect(result).toContain('中止');
+    expect(ask.calls).toHaveLength(0);
+    expect(calls(logFile).map((entry) => entry.cmd)).toEqual(['commands', 'terminated']);
+  });
+
+  it('stops a runtime with excessive output before executing subsequent writes', async () => {
+    const { runtimeDir, logFile } = workspace();
+    process.env.CU_LOG = logFile;
+    process.env.CU_OUTPUT_BYTES = String(2 * 1024 * 1024);
+    const result = await tool({ runtimeDir, ask: askStub({}) }).execute!({ commands: [{ cmd: 'tap' }, { cmd: 'type' }] });
+    expect(result).toContain('失败');
+    expect(calls(logFile).map((entry) => entry.cmd)).toEqual(['tap']);
+    expect(existsSync(calls(logFile)[0]!.permit)).toBe(false);
   });
 
   it('describes each step in a way the user can judge', () => {

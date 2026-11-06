@@ -2,15 +2,25 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { appendFile, chmod, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
+import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import type { AgentObservationEvent, PluginObservationEvent } from '@packages/mica-plugin/index.js';
+import {
+  readAssessments,
+  writeAssessment,
+  type AssessmentBaseline,
+  type FindingAssessment,
+  type FindingStatus,
+} from './assessments.js';
+import { CorrectionQueue, type StoredCorrection } from './corrections.js';
+
+export type { FindingStatus } from './assessments.js';
 
 export type CaptureOptions = { captureContent: boolean; maxEventChars: number; maxEventsPerRun: number };
 /**
  * 问题推导规则的版本。改了 classify / 退出码白名单 / 重复调用判定就加一：
- * 宿主据此决定要不要把历史记录的 findings 重算一次（计数与结论不动）。
+ * 宿主据此重算 findings 与派生错误计数，不动用量、耗时和人工结论。
  */
-export const CLASSIFIER_VERSION = 6;
-export type FindingStatus = 'open' | 'accepted' | 'dismissed' | 'validated' | 'regressed';
+export const CLASSIFIER_VERSION = 7;
 type Config = { providerId: string; protocol: string; model: string; effort: string; role: string };
 /**
  * `paused` 是宿主在迭代边界主动停下（开发构建重载），历史完整、随后续跑；
@@ -32,6 +42,8 @@ export type ReviewFinding = {
   status: FindingStatus;
   note?: string;
   updatedAt?: string;
+  assessments?: Pick<FindingAssessment, 'status' | 'note' | 'updatedAt'>[];
+  reviewNeeded?: { reason: 'new-evidence' | 'baseline-unavailable'; occurrences: number; runs: number };
   occurrences: number;
   /** Workspace this aggregation belongs to. Findings are keyed per workspace, so
    *  a global review shows the same cause once per project — without this the
@@ -106,6 +118,7 @@ export type RunSummary = {
   lastCompaction?: RecordedCompaction;
   /** 本轮运行开始前攒下的用户纠正：用户推翻上一轮输入的唯一确凿记录。 */
   corrections?: CorrectionCounts;
+  correctionIds?: string[];
   /** 委派来源。有它才能按父会话拼出委派树。 */
   delegation?: RunDelegation;
   /** 有它说明这条运行是宿主内部工作，不是用户的一轮。 */
@@ -214,13 +227,14 @@ export type ReviewReport = {
   pluginFailures: PluginFailureSummary[];
   /** 每个工具的调用量与失败率：这张表才看得出「哪个工具的失败率高到该修」。 */
   toolHealth: ToolHealthRow[];
+  toolHealthCoverage: { includedRuns: number; excludedRuns: number; unknownResults: number };
   warnings: string[];
   scannedRuns: number;
   limits: { runs: number; findingsPerRun: number; evidencePerFinding: number };
   interpretation: string;
 };
 type StoredEvent = { seq: number; type: string; timestamp: string; [key: string]: unknown };
-type Call = { name: string; argsHash: string; command?: string };
+type Call = { name: string; argsHash: string; command?: string; argsComplete?: boolean };
 type CallRecord = {
   count: number;
   first: number;
@@ -233,8 +247,6 @@ type CallRecord = {
 };
 type WriteMark = { seq: number; key: string };
 type InputMemory = Map<string, { runSummaryId: string; sha256: string; text: string; outcome: Outcome }>;
-/** 已收到、还没归属到某次运行的用户纠正（纠正通常发生在两轮之间）。 */
-type PendingCorrection = { sessionId: string; kind: CorrectionKind; chars?: number };
 type RunState = {
   summary: RunSummary;
   options: CaptureOptions;
@@ -245,6 +257,8 @@ type RunState = {
   writeMarks: WriteMark[];
   pending: Map<string, Call>;
   candidates: Map<string, ReviewFinding>;
+  toolTally?: ToolTally;
+  unknownResults?: number;
 };
 const MAX_RUNS = 2000;
 /** 没有 hostPid 的旧记录：summary 超过这么久没被写过，就当宿主已经退出。 */
@@ -258,8 +272,6 @@ const MAX_RESULT_HASHES = 4;
 const MAX_PROMPT_SECTIONS = 60;
 const MAX_INPUT_MEMORY = 500;
 const MAX_PENDING_TRACE_BYTES = 4 * 1024 * 1024;
-/** 已收到、还没归属到某次运行的用户纠正。纠正落在两轮之间，先按会话暂存在内存里。 */
-const MAX_PENDING_CORRECTIONS = 200;
 const MAX_PLUGIN_IDS = 50;
 const PLUGIN_HASH_CHARS = 12;
 const MAX_DELEGATION_PARENTS = 50;
@@ -1060,7 +1072,7 @@ function helperSource(helper: RunHelper): string {
 
 /**
  * 插件失败条目的 id：既看得出是哪个插件的哪个任务，又足够稳定（文件名由
- * `decisionFile()` 决定：带 `:` 的 id 会先哈希，Windows 上 `:` 不是合法文件名字符）。
+ * 评估存储模块决定：带 `:` 的 id 会先哈希，Windows 上 `:` 不是合法文件名字符）。
  *
  * 任务名由插件自己定，可能带 `/`、`:` 这类路径或协议字符——原样拼进文件名会写进别的目录。
  */
@@ -1081,19 +1093,7 @@ function pluginFailureId(pluginId: string, taskId: string): string {
 }
 
 /**
- * 判断记录的文件名。运行派生条目的 id 本身就是 64 位十六进制，直接用；
- * 插件失败条目带 `:`，Windows 上不是合法文件名字符，创建会直接失败。这里哈希成稳定短名
- * 而不是替换字符：`a:b` 与 `a_b` 换完会撞在一起，判断就挂到别人的条目上了。
- */
-function decisionFile(id: string): string {
-  return /^[a-f0-9]{64}$/.test(id) ? id : `h-${digest(id).slice(0, 32)}`;
-}
-
-/**
- * 用户纠正 → 复盘条目的文案。
- *
- * 这三种都是「这次回答没被接受」的确凿信号，比模型自评可靠；所以条目的落点不是
- * 「哪里报错了」，而是「回去看哪一轮、改哪一层」。
+ * 用户纠正只证明用户动作发生过，是否源于回答质量仍需复盘。
  */
 const CORRECTION_GUIDANCE: Record<CorrectionKind, { title: string; suggestion: string; evaluation: string }> = {
   edit: {
@@ -1295,8 +1295,7 @@ export class HarnessRecorder {
   private drainScheduled = false;
   /** Last input per session, so a retry after a failed run can be recognised. */
   private readonly lastInputs: InputMemory = new Map();
-  /** 已经收到、还没归属到某次运行的用户纠正；下一次同会话 run:start 取走即清空。 */
-  private readonly corrections: PendingCorrection[] = [];
+  private readonly correctionQueue: CorrectionQueue;
   /** 归属不明被丢弃的纠正次数，进 review 的 warnings。 */
   private droppedCorrections = 0;
   /** `pluginId/taskId` → 上次写插件失败记录的时间，只用于限流。 */
@@ -1308,6 +1307,7 @@ export class HarnessRecorder {
     private readonly context: { mode?: string; host?: string; pluginStatusPath?: string } = {},
   ) {
     this.root = resolve(root);
+    this.correctionQueue = new CorrectionQueue(this.root, (error) => this.persistenceError(error));
   }
 
   private enqueue(work: () => Promise<void>): void {
@@ -1336,6 +1336,22 @@ export class HarnessRecorder {
       throw error;
     }
   }
+  private async withSummaryLock(directory: string, work: () => Promise<void>): Promise<void> {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const release = acquireProcessLock(join(directory, 'summary.lock'));
+      if (release) {
+        try {
+          await work();
+          return;
+        } finally {
+          release();
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('Run summary is busy; write was not applied.');
+  }
+
   private async runDirectory(state: RunState): Promise<string> {
     const directory = join(this.root, 'runs', state.summary.id);
     if (state.prepared) return directory;
@@ -1383,7 +1399,9 @@ export class HarnessRecorder {
                   if (pending.sequences.has(evidence.seq)) evidence.available = true;
             }
             if (pending.checkpoint)
-              await this.atomic(join(directory, 'summary.json'), JSON.stringify(current.summary, null, 2));
+              await this.withSummaryLock(directory, () =>
+                this.atomic(join(directory, 'summary.json'), JSON.stringify(current.summary, null, 2)),
+              );
           } catch (error) {
             // A failed run directory must not block persistence for other owners.
             this.persistenceError(error);
@@ -1413,7 +1431,11 @@ export class HarnessRecorder {
   ): string {
     const argsHash = recordedHash ?? digest(canonicalArgs(args));
     const pendingKey = correlation ?? `name:${name}`;
-    if (state.pending.size >= 200) state.pending.delete(state.pending.keys().next().value!);
+    if (state.pending.has(pendingKey)) state.unknownResults = (state.unknownResults ?? 0) + 1;
+    if (state.pending.size >= 200) {
+      state.pending.delete(state.pending.keys().next().value!);
+      state.unknownResults = (state.unknownResults ?? 0) + 1;
+    }
     // The command decides whether a nonzero exit is expected, and replay only has the
     // stored event — so it travels with the pending call instead of being re-derived.
     const command = SHELL_TOOL.test(name) ? argText(args, 'command') : undefined;
@@ -1470,6 +1492,11 @@ export class HarnessRecorder {
     );
     const category = recordedCategory === undefined ? errorCategory(result, name) : recordedCategory;
     const expected = recordedExpected ?? isExpectedExit(call, name, category);
+    if (state.toolTally) {
+      const entry = state.toolTally.get(name) ?? { calls: 0, errors: new Map<string, number>() };
+      if (category && !expected) entry.errors.set(category, (entry.errors.get(category) ?? 0) + 1);
+      state.toolTally.set(name, entry);
+    }
     if (expected) {
       // `rg` with no match and `diff` with differences are not tool errors.
       state.summary.expectedExits++;
@@ -1606,16 +1633,6 @@ export class HarnessRecorder {
     );
   }
 
-  /**
-   * 记一次用户纠正：就地改写重跑 / 撤回还没发出的排队输入 / 原样重发。
-   *
-   * 纠正发生在两轮之间，那时通常没有正在跑的 run 可以挂，所以**收到时不落盘**——
-   * 每条纠正都造一个 run 目录只会把「运行记录」变成噪声。先按会话暂存在内存里
-   * （上限 `MAX_PENDING_CORRECTIONS`，先进先出），下一次该会话的 `run:start` 取走
-   * （取走即清空）并写进那次运行。
-   *
-   * 归属不明的纠正直接丢弃并计数：把别人的纠正挂到这条运行上，比不记更糟。
-   */
   noteCorrection(correction: { sessionId?: string; kind: CorrectionKind; chars?: number }): void {
     if (this.disposed) return;
     try {
@@ -1625,14 +1642,14 @@ export class HarnessRecorder {
         this.droppedCorrections++;
         return;
       }
-      if (this.corrections.length >= MAX_PENDING_CORRECTIONS) this.corrections.shift();
-      this.corrections.push({
+      const item = {
         sessionId,
         kind: correction.kind,
         ...(typeof correction.chars === 'number' && Number.isFinite(correction.chars) && correction.chars >= 0
           ? { chars: Math.floor(correction.chars) }
           : {}),
-      });
+      };
+      this.enqueue(() => this.correctionQueue.append(item));
     } catch (error) {
       try {
         this.onError(error);
@@ -1647,7 +1664,8 @@ export class HarnessRecorder {
     const explicit = typeof sessionId === 'string' ? boundedText(sessionId, 300).trim() : '';
     if (explicit) return explicit;
     const active = new Set<string>();
-    for (const state of this.active) if (state.summary.sessionId) active.add(state.summary.sessionId);
+    for (const { summary } of this.active)
+      if (summary.sessionId && !summary.helper && !summary.delegation) active.add(summary.sessionId);
     return active.size === 1 ? [...active][0]! : null;
   }
 
@@ -1655,20 +1673,9 @@ export class HarnessRecorder {
    * 把攒下的纠正挂到这次运行上：计数进 `summary.corrections`，并生成 `user-correction`
    * 问题条目（同会话同 kind 合并成一条，`occurrences` 就是纠正次数）。
    */
-  private takeCorrections(state: RunState, seq: number): void {
+  private takeCorrections(state: RunState, seq: number, taken: StoredCorrection[]): void {
     const sessionId = state.summary.sessionId;
-    if (!sessionId || this.corrections.length === 0) return;
-    const taken: PendingCorrection[] = [];
-    for (let index = 0; index < this.corrections.length; ) {
-      const item = this.corrections[index]!;
-      if (item.sessionId === sessionId) {
-        taken.push(item);
-        this.corrections.splice(index, 1);
-        continue;
-      }
-      index++;
-    }
-    if (taken.length === 0) return;
+    if (!sessionId || taken.length === 0 || state.summary.helper || state.summary.delegation) return;
     const counts: CorrectionCounts = { edit: 0, recall: 0, retry: 0 };
     const chars: CorrectionCounts = { edit: 0, recall: 0, retry: 0 };
     for (const item of taken) {
@@ -1676,6 +1683,7 @@ export class HarnessRecorder {
       chars[item.kind] += item.chars ?? 0;
     }
     state.summary.corrections = counts;
+    state.summary.correctionIds = taken.map((item) => item.id);
     for (const kind of CORRECTION_ORDER) {
       const count = counts[kind];
       if (count === 0) continue;
@@ -1990,7 +1998,6 @@ export class HarnessRecorder {
       };
       runs.set(event.runId, state);
       this.active.add(state);
-      this.save(state);
     }
     if (!state) return;
     const seq = ++state.seq;
@@ -2014,7 +2021,6 @@ export class HarnessRecorder {
           state.summary.helper = helper;
           stored.helper = helper;
         }
-        this.noteRunInput(state, seq, inputText, this.lastInputs);
         // 委派来源：有了它才能把子代理的运行挂回父会话，并按类型比成败。
         if (event.delegation) {
           const type = boundedText(event.delegation.type, 80).trim();
@@ -2027,10 +2033,24 @@ export class HarnessRecorder {
             stored.delegation = state.summary.delegation;
           }
         }
+        this.noteRunInput(state, seq, inputText, this.lastInputs);
         // 插件装配结论只在 run:start 读一次：文件缺失或损坏就整块省略。
         const plugins = readPluginSnapshot(this.context.pluginStatusPath);
         if (plugins) state.summary.plugins = plugins;
-        this.takeCorrections(state, seq);
+        if (!state.summary.helper && !state.summary.delegation && state.summary.sessionId) {
+          const current = state;
+          this.enqueue(async () => {
+            const taken = await this.correctionQueue.take(current.summary.sessionId!, current.summary.id);
+            if (taken.length === 0) return;
+            this.takeCorrections(current, seq, taken);
+            const directory = await this.runDirectory(current);
+            await this.withSummaryLock(directory, () =>
+              this.atomic(join(directory, 'summary.json'), JSON.stringify(current.summary, null, 2)),
+            );
+            await this.correctionQueue.ack(current.summary.id);
+          });
+        }
+        this.save(state);
         break;
       }
       case 'request:start': {
@@ -2176,7 +2196,11 @@ export class HarnessRecorder {
 
   async flush(): Promise<void> {
     for (const state of this.active) this.save(state);
-    await this.tail;
+    let pending: Promise<void>;
+    do {
+      pending = this.tail;
+      await pending;
+    } while (pending !== this.tail);
   }
   async dispose(): Promise<void> {
     if (!this.disposed) {
@@ -2193,7 +2217,7 @@ export class HarnessRecorder {
       }
       this.active.clear();
     }
-    await this.tail;
+    await this.flush();
   }
 
   /**
@@ -2252,7 +2276,7 @@ export class HarnessRecorder {
     await this.flush();
     const reclaimed = await this.reclaim();
     const filter = cwd ? canonicalCwd(cwd) : undefined;
-    const warnings = [...this.writeWarnings];
+    const warnings = [...this.writeWarnings, ...this.correctionQueue.warnings];
     if (reclaimed > 0) warnings.push(`已回收 ${reclaimed} 个宿主已退出的未完成运行，标记为 interrupted。`);
     // 归属不明的纠正没有落点：如实说出来，而不是悄悄丢掉。
     if (this.droppedCorrections > 0)
@@ -2321,10 +2345,47 @@ export class HarnessRecorder {
         );
       }
     }
-    // 工具健康顺带在同一次轨迹扫描里数出来：review 本来就要逐行解析每条轨迹，
-    // 再单独读一遍 300MB 只为了统计调用量不值得。
     const toolTally: ToolTally = new Map();
-    for (const summary of runs) await inspectTrace(summary, warnings, toolTally);
+    const toolHealthCoverage = { includedRuns: 0, excludedRuns: 0, unknownResults: 0 };
+    const memory: InputMemory = new Map();
+    for (const summary of [...runs].sort(
+      (a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id),
+    )) {
+      const events = await inspectTrace(summary, warnings);
+      if (
+        !events ||
+        summary.outcome === 'running' ||
+        summary.droppedEvents > 0 ||
+        events.length !== summary.eventCount
+      ) {
+        toolHealthCoverage.excludedRuns++;
+        continue;
+      }
+      const state = derivationState(summary, events.length);
+      state.toolTally = new Map();
+      for (const event of events)
+        if (event.type === 'tool:call' || event.type === 'tool:result') this.replay(state, event, memory);
+      const unknown = (state.unknownResults ?? 0) + state.pending.size;
+      toolHealthCoverage.unknownResults += unknown;
+      if (unknown > 0) {
+        toolHealthCoverage.excludedRuns++;
+        warnings.push(
+          `Run ${summary.id} has ${unknown} unpaired or unclassifiable tool result(s); excluded from tool health.`,
+        );
+        continue;
+      }
+      toolHealthCoverage.includedRuns++;
+      mergeToolTally(toolTally, state.toolTally);
+      summary.toolErrors = state.summary.toolErrors;
+      summary.expectedExits = state.summary.expectedExits;
+      summary.findings = [
+        ...state.candidates.values(),
+        ...summary.findings.filter((finding) => finding.kind !== 'tool-error' && finding.kind !== 'repeated-call'),
+      ];
+      for (const finding of summary.findings)
+        for (const evidence of finding.evidence)
+          evidence.available = events.some((event) => event.seq === evidence.seq);
+    }
     runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
     const delegation = summarizeDelegation(runs, warnings);
     const helpers = summarizeHelpers(runs, warnings);
@@ -2360,31 +2421,47 @@ export class HarnessRecorder {
       });
     }
     for (const finding of merged.values()) {
-      try {
-        const file = join(this.root, 'decisions', `${decisionFile(finding.id)}.json`);
-        if ((await stat(file)).size > 20_000) throw new Error('decision exceeds size limit');
-        const decision = JSON.parse(await readFile(file, 'utf8')) as {
-          id: string;
-          status: FindingStatus;
-          note: string;
-          updatedAt?: string;
-        };
-        if (
-          !decision ||
-          decision.id !== finding.id ||
-          !STATUSES.has(decision.status) ||
-          typeof decision.note !== 'string' ||
-          typeof decision.updatedAt !== 'string' ||
-          !Number.isFinite(Date.parse(decision.updatedAt))
-        )
-          throw new Error('invalid decision schema');
-        finding.status = decision.status;
-        finding.note = boundedText(decision.note, 8000);
-        finding.updatedAt = decision.updatedAt;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-          warnings.push(`Unreadable decision ${finding.id}: ${boundedText(String(error))}`);
+      const assessments = await readAssessments(this.root, finding.id, warnings);
+      const decision = assessments.at(-1);
+      if (!decision) continue;
+      finding.status = decision.status;
+      finding.note = boundedText(decision.note, 8000);
+      finding.updatedAt = decision.updatedAt;
+      finding.assessments = assessments.map(({ status, note, updatedAt }) => ({
+        status,
+        note: boundedText(note, 8000),
+        updatedAt,
+      }));
+      if (decision.status !== 'validated' && decision.status !== 'dismissed') continue;
+      if (!decision.baseline) {
+        finding.reviewNeeded = { reason: 'baseline-unavailable', occurrences: 0, runs: 0 };
+        continue;
       }
+      const baseline = decision.baseline;
+      if ('plugin' in baseline) {
+        const failure = pluginFailures.find((item) => pluginFailureId(item.pluginId, item.taskId) === finding.id);
+        if (failure && Date.parse(failure.lastAt) > Date.parse(baseline.plugin.lastAt))
+          finding.reviewNeeded = {
+            reason: 'new-evidence',
+            occurrences: Math.max(1, failure.count - baseline.plugin.count),
+            runs: 0,
+          };
+        continue;
+      }
+      let occurrences = 0;
+      let affectedRuns = 0;
+      for (const run of runs) {
+        const candidate = run.findings.find((item) => item.id === finding.id);
+        if (!candidate) continue;
+        const previous = baseline.runs[run.id];
+        if (previous === undefined && Date.parse(run.startedAt) < Date.parse(decision.updatedAt)) continue;
+        const added = candidate.occurrences - (previous ?? 0);
+        if (added > 0) {
+          occurrences += added;
+          affectedRuns++;
+        }
+      }
+      if (occurrences > 0) finding.reviewNeeded = { reason: 'new-evidence', occurrences, runs: affectedRuns };
     }
     return {
       version: 1,
@@ -2392,11 +2469,18 @@ export class HarnessRecorder {
       root: this.root,
       ...(filter ? { cwd: filter } : {}),
       runs,
-      findings: [...merged.values()].sort((a, b) => b.occurrences - a.occurrences || a.id.localeCompare(b.id)),
+      findings: [...merged.values()].sort(
+        (a, b) =>
+          Number(Boolean(b.reviewNeeded) || b.status === 'regressed') -
+            Number(Boolean(a.reviewNeeded) || a.status === 'regressed') ||
+          b.occurrences - a.occurrences ||
+          a.id.localeCompare(b.id),
+      ),
       delegation,
       helpers,
       pluginFailures,
       toolHealth: toolHealthRows(toolTally),
+      toolHealthCoverage,
       warnings,
       scannedRuns,
       limits: { runs: MAX_RUNS, findingsPerRun: MAX_FINDINGS, evidencePerFinding: MAX_EVIDENCE },
@@ -2405,24 +2489,39 @@ export class HarnessRecorder {
     };
   }
 
-  async decide(id: string, status: FindingStatus, note: string): Promise<void> {
+  async decide(id: string, status: FindingStatus, note: string, cwd?: string): Promise<void> {
     // 运行派生条目的 id 是内容摘要；插件失败条目的 id 是可读的 `plugin-background:<plugin>:<task>`。
     // 两者都必须能直接当文件名，所以只放行这一份白名单字符。
     if (!/^[a-f0-9]{64}$/.test(id) && !/^plugin-background:[A-Za-z0-9._-]{1,80}:[A-Za-z0-9._-]{1,120}$/.test(id))
       throw new Error('Invalid finding ID');
     if (!STATUSES.has(status)) throw new Error('Invalid finding status');
-    const data = JSON.stringify(
-      { id, status, note: boundedText(note, 8000), updatedAt: new Date().toISOString() },
-      null,
-      2,
-    );
+    if (typeof note !== 'string' || !note.trim()) throw new Error('Assessment note is required');
+    const observedAt = new Date().toISOString();
+    const report = await this.review(cwd);
+    const plugin = report.pluginFailures.find((item) => pluginFailureId(item.pluginId, item.taskId) === id);
+    const baseline: AssessmentBaseline = plugin
+      ? { plugin: { count: plugin.count, lastAt: plugin.lastAt } }
+      : {
+          runs: Object.fromEntries(
+            report.runs.map((run) => {
+              const finding = run.findings.find((item) => item.id === id);
+              return [run.id, finding?.occurrences ?? 0];
+            }),
+          ),
+        };
+    const assessment: FindingAssessment = {
+      version: 1,
+      id,
+      status,
+      note: boundedText(note, 8000),
+      updatedAt: observedAt,
+      baseline,
+    };
     // Explicit user actions report write failures to the caller as well as onError.
     let failure: unknown;
     this.enqueue(async () => {
       try {
-        await this.directory(this.root);
-        await this.directory(join(this.root, 'decisions'));
-        await this.atomic(join(this.root, 'decisions', `${decisionFile(id)}.json`), data);
+        await writeAssessment(this.root, assessment);
       } catch (error) {
         failure = error;
         throw error;
@@ -2603,16 +2702,7 @@ export class HarnessRecorder {
         skippedUnreadable++;
         continue;
       }
-      const state: RunState = {
-        summary: { ...summary, expectedExits: finiteCount(summary.expectedExits), findings: [] },
-        options: { captureContent: false, maxEventChars: 4000, maxEventsPerRun: 2000 },
-        seq: 0,
-        written: lines.length,
-        calls: new Map(),
-        writeMarks: [],
-        pending: new Map(),
-        candidates: new Map(),
-      };
+      const state = derivationState(summary, lines.length);
       let expected = 0;
       let usable = true;
       for (const line of lines) {
@@ -2648,16 +2738,13 @@ export class HarnessRecorder {
         }
         this.replay(state, event, memory);
       }
-      if (!usable || expected !== summary.eventCount) {
+      if (!usable || expected !== summary.eventCount || (state.unknownResults ?? 0) > 0 || state.pending.size > 0) {
         skippedUnreadable++;
         continue;
       }
       // Every replayed event exists on disk, so re-derived evidence is traceable.
       for (const finding of state.candidates.values())
         for (const evidence of finding.evidence) evidence.available = true;
-      // 用户纠正重算不出来，已有的条目与计数原样留下，不能跟着重算一起消失。
-      const preserved = summary.findings.filter((finding) => finding.kind === 'user-correction');
-      const replaced = [...state.candidates.values(), ...preserved];
       // 压缩次数是采集时记下的事实（和 requestCount 一样）：摘要有就照原样留下，只在
       // 老摘要没有这一块时，用同一条推导重放出来的结果补上。
       const recordedCompactions = (summary.compactions as Partial<CompactionCounts> | undefined)
@@ -2665,32 +2752,40 @@ export class HarnessRecorder {
         : state.summary.compactions;
       const recordedLastCompaction = summary.lastCompaction ?? state.summary.lastCompaction;
       try {
-        // Another mica process (desktop app-server, CLI) may be writing this run
-        // right now. Re-read before replacing so a run that went back to
-        // `running` keeps its live findings instead of ours.
-        const latest = JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8')) as RunSummary;
-        if (latest.outcome === 'running' || latest.finishedAt !== summary.finishedAt) {
-          skippedRunning++;
-          continue;
-        }
-        // findings 与 expectedExits 都是派生值：这条运行能重放（droppedEvents === 0），
-        // 重算出来的「预期非零退出」才是准的，沿用旧值会把它算成 0。
-        await this.atomic(
-          join(directory, 'summary.json'),
-          JSON.stringify(
-            {
-              ...summary,
-              expectedExits: state.summary.expectedExits,
-              compactions: recordedCompactions,
-              ...(recordedLastCompaction ? { lastCompaction: recordedLastCompaction } : {}),
-              findings: replaced,
-            },
-            null,
-            2,
-          ),
-        );
-        rebuilt++;
-        findings += replaced.length;
+        await this.withSummaryLock(directory, async () => {
+          const latest = JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8')) as RunSummary;
+          if (
+            latest.outcome === 'running' ||
+            latest.finishedAt !== summary.finishedAt ||
+            latest.eventCount !== summary.eventCount
+          ) {
+            skippedRunning++;
+            return;
+          }
+          const replaced = [
+            ...state.candidates.values(),
+            ...latest.findings.filter((finding) => finding.kind === 'user-correction'),
+          ];
+          await this.atomic(
+            join(directory, 'summary.json'),
+            JSON.stringify(
+              {
+                ...latest,
+                toolErrors: state.summary.toolErrors,
+                expectedExits: state.summary.expectedExits,
+                compactions: latest.compactions ?? recordedCompactions,
+                ...((latest.lastCompaction ?? recordedLastCompaction)
+                  ? { lastCompaction: latest.lastCompaction ?? recordedLastCompaction }
+                  : {}),
+                findings: replaced,
+              },
+              null,
+              2,
+            ),
+          );
+          rebuilt++;
+          findings += replaced.length;
+        });
       } catch (error) {
         this.onError(error);
         skippedUnreadable++;
@@ -2714,15 +2809,25 @@ export class HarnessRecorder {
       this.noteRunOutcome(state.summary, outcome, memory);
     }
     if (event.type === 'tool:call') {
+      if (state.toolTally) {
+        const entry = state.toolTally.get(name) ?? { calls: 0, errors: new Map<string, number>() };
+        entry.calls++;
+        state.toolTally.set(name, entry);
+      }
       const argsHash =
         typeof event.argsHash === 'string' && /^[a-f0-9]{64}$/.test(event.argsHash) ? event.argsHash : undefined;
       this.noteToolCall(state, seq, name, storedText(event.args), correlation, argsHash);
+      const call = state.pending.get(correlation ?? `name:${name}`);
+      if (call) call.argsComplete = hasCompleteContent(event.args);
     } else if (event.type === 'tool:result') {
+      const complete = hasCompleteContent(event.result);
       const category =
         truncatedToolCategory(event.result, name) ??
-        (!hasCompleteContent(event.result) && (typeof event.errorCategory === 'string' || event.errorCategory === null)
+        (!complete && (typeof event.errorCategory === 'string' || event.errorCategory === null)
           ? event.errorCategory
           : undefined);
+      if ((!complete && category === undefined) || state.pending.get(correlation ?? `name:${name}`)?.name !== name)
+        state.unknownResults = (state.unknownResults ?? 0) + 1;
       const resultHash =
         event.result &&
         typeof event.result === 'object' &&
@@ -2739,7 +2844,10 @@ export class HarnessRecorder {
         storedText(event.result),
         correlation,
         category,
-        event.expectedExit === true ? true : undefined,
+        (!complete || state.pending.get(correlation ?? `name:${name}`)?.argsComplete === false) &&
+          event.expectedExit === true
+          ? true
+          : undefined,
         resultHash,
       );
     } else if (event.type === 'compaction') {
@@ -2891,6 +2999,16 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
   const corrections = value.corrections as Partial<CorrectionCounts> | undefined;
   if (corrections !== undefined && (!corrections || !CORRECTION_ORDER.every((key) => isCount(corrections[key]))))
     return false;
+  if (
+    value.correctionIds !== undefined &&
+    (!Array.isArray(value.correctionIds) ||
+      value.correctionIds.length > 2000 ||
+      !value.correctionIds.every(
+        (id) =>
+          typeof id === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(id),
+      ))
+  )
+    return false;
   const delegation = value.delegation as Partial<RunDelegation> | undefined;
   if (
     delegation !== undefined &&
@@ -2967,7 +3085,20 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
 /** 一次轨迹巡检的副产品：按工具统计的调用量、失败数与错误类别。 */
 type ToolTally = Map<string, { calls: number; errors: Map<string, number> }>;
 
-async function inspectTrace(summary: RunSummary, warnings: string[], tally?: ToolTally): Promise<void> {
+function derivationState(summary: RunSummary, written: number): RunState {
+  return {
+    summary: { ...summary, toolErrors: 0, expectedExits: 0, findings: [] },
+    options: { captureContent: false, maxEventChars: 4000, maxEventsPerRun: 2000 },
+    seq: 0,
+    written,
+    calls: new Map(),
+    writeMarks: [],
+    pending: new Map(),
+    candidates: new Map(),
+  };
+}
+
+async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<StoredEvent[] | null> {
   const evidence = summary.findings.flatMap((finding) => finding.evidence);
   const bySeq = new Map<number, Evidence[]>();
   for (const item of evidence) {
@@ -2980,12 +3111,13 @@ async function inspectTrace(summary: RunSummary, warnings: string[], tally?: Too
     const info = await stat(summary.traceFile);
     if (info.size > 20_000_000) {
       warnings.push(`Run ${summary.id} trace exceeds the 20 MB inspection limit; integrity was not checked.`);
-      return;
+      return null;
     }
     const text = await readFile(summary.traceFile, 'utf8');
     const lines = text.split('\n');
     if (lines.at(-1) === '') lines.pop();
     let previous = 0;
+    const events: StoredEvent[] = [];
     for (let index = 0; index < lines.length; index++) {
       try {
         const event = JSON.parse(lines[index]) as StoredEvent;
@@ -3000,36 +3132,33 @@ async function inspectTrace(summary: RunSummary, warnings: string[], tally?: Too
         )
           throw new Error('invalid event');
         previous = event.seq;
+        events.push(event);
         for (const item of bySeq.get(event.seq) ?? []) item.available = true;
-        if (tally) countToolEvent(tally, event);
       } catch {
         warnings.push(`Run ${summary.id} has a corrupt trace at line ${index + 1}.`);
-        return;
+        return null;
       }
     }
     // 摘要每 25 条事件才落一次盘：宿主被杀掉的那次运行，轨迹会比摘要多出几条。
     // 多出来是正常的（摘要滞后），少掉才是真的缺事件。
-    if (lines.length < summary.eventCount - summary.droppedEvents)
+    if (lines.length < summary.eventCount - summary.droppedEvents) {
       warnings.push(`Run ${summary.id} trace has fewer events than its summary counts; the trace may be truncated.`);
+      return null;
+    }
+    return events;
   } catch {
     warnings.push(`Run ${summary.id} has a missing or unreadable trace: ${summary.traceFile}`);
+    return null;
   }
 }
 
-/**
- * 工具健康计数。只认 `tool:call` 的调用量与 `tool:result` 的错误类别：
- * 结果条目本身不保证有对应的调用（轨迹被截断时只剩一半），所以两边分开数。
- */
-function countToolEvent(tally: ToolTally, event: StoredEvent): void {
-  const name = typeof event.name === 'string' ? event.name.trim() : '';
-  if (!name) return;
-  const entry = tally.get(name) ?? { calls: 0, errors: new Map<string, number>() };
-  if (event.type === 'tool:call') entry.calls++;
-  else if (event.type === 'tool:result' && typeof event.errorCategory === 'string' && event.errorCategory) {
-    const category = truncatedToolCategory(event.result, name) ?? event.errorCategory;
-    entry.errors.set(category, (entry.errors.get(category) ?? 0) + 1);
-  } else if (event.type !== 'tool:result') return;
-  tally.set(name, entry);
+function mergeToolTally(target: ToolTally, source: ToolTally): void {
+  for (const [name, row] of source) {
+    const entry = target.get(name) ?? { calls: 0, errors: new Map<string, number>() };
+    entry.calls += row.calls;
+    for (const [category, count] of row.errors) entry.errors.set(category, (entry.errors.get(category) ?? 0) + count);
+    target.set(name, entry);
+  }
 }
 
 /** 把按工具累计的原始计数整理成报告行：失败率降序，没有调用的结果条目不计。 */
@@ -3136,6 +3265,10 @@ function markdownReport(report: ReviewReport, directory: string): string {
     lines.push('');
   }
   lines.push('', '## Tool health', '');
+  lines.push(
+    `Coverage: ${report.toolHealthCoverage.includedRuns} runs included; ${report.toolHealthCoverage.excludedRuns} excluded; ${report.toolHealthCoverage.unknownResults} unpaired or unclassifiable tool results. Excluded data is unknown, not zero failures.`,
+    '',
+  );
   if (!report.toolHealth.length) lines.push('No tool calls in this scope.', '');
   else {
     lines.push(
@@ -3185,6 +3318,19 @@ function markdownReport(report: ReviewReport, directory: string): string {
     );
     if (finding.note) lines.push(`Decision note: ${markdownText(finding.note)}`, '');
     if (finding.updatedAt) lines.push(`Decision updated: ${markdownText(finding.updatedAt)}`, '');
+    if (finding.reviewNeeded)
+      lines.push(
+        finding.reviewNeeded.reason === 'new-evidence'
+          ? `Review needed: ${finding.reviewNeeded.occurrences} new occurrence(s) in ${finding.reviewNeeded.runs} run(s) since the assessment baseline. The manual status is unchanged; this is not an automatic regression verdict.`
+          : 'Review needed: the historical assessment has no recorded baseline; later failures cannot be separated reliably. Reassess to establish a baseline.',
+        '',
+      );
+    if (finding.assessments?.length) {
+      lines.push('Assessment history (manual reports):', '');
+      for (const assessment of finding.assessments)
+        lines.push(`- ${markdownText(assessment.updatedAt)} · ${assessment.status}: ${markdownText(assessment.note)}`);
+      lines.push('');
+    }
     for (const evidence of finding.evidence) {
       const label = `Run ${evidence.runId}, event ${evidence.seq}`;
       lines.push(

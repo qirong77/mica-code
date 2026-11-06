@@ -65,6 +65,8 @@ describe('aggregate card and detail actions', () => {
     expect((await panel.view(viewInput)).cards).toHaveLength(1);
     h.controller.dismiss(h.ownerA);
     h.controller.replace([web], h.ownerA);
+    expect((await panel.view(viewInput)).cards).toEqual([]);
+    h.controller.replace([{ ...web, label: 'New Web' }], h.ownerA);
     expect((await panel.view(viewInput)).cards).toHaveLength(1);
   });
   it('renders stale history as unknown, exact HTTP status and nonsemantic health language', async () => {
@@ -87,9 +89,16 @@ describe('aggregate card and detail actions', () => {
     const view = (await panel.view(viewInput)) as PluginPanelView;
     const details = await panel.action({ action: 'details', key: view.cards![0]!.actions![1]!.key });
     expect(details).toMatchObject({ dialog: { title: '任务环境', panel: { label: '管理服务' } } });
+    expect(details?.dialog?.text).toContain('Web（http://127.0.0.1:3000/health）\n未知 · 尚未检查\n尚未检查');
+    expect(details?.dialog?.text).toContain('API（http://127.0.0.1:3000/health）');
     expect(h.probe).not.toHaveBeenCalled();
     await panel.action({ action: 'check', key: view.sections![0]!.table!.rows[0]!.key });
     expect(h.probe).toHaveBeenCalledTimes(1);
     expect(h.probe).toHaveBeenCalledWith(expect.objectContaining({ id: 'web' }), expect.any(AbortSignal));
+    const checked = await panel.action({ action: 'details', key: view.cards![0]!.revision });
+    expect(checked?.dialog?.text).toContain('可达 · HTTP 200\n上次检查');
+    h.setNow(61_001);
+    const stale = await panel.action({ action: 'details', key: view.cards![0]!.revision });
+    expect(stale?.dialog?.text).toContain('未知 · 历史结果待重新检查\n上次检查');
   });
 });

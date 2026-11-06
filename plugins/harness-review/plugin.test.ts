@@ -201,6 +201,44 @@ describe('harness-review plugin', () => {
     expect(String(data.openFindings)).toContain('项');
   });
 
+  it('surfaces new evidence after validation and explicitly regressed findings without changing the verdict', async () => {
+    const h = harness();
+    const fail = async () => {
+      await h.start();
+      await h.emit({ type: 'tool:call', id: 'read', name: 'read_file', args: '{}' } as never);
+      await h.emit({ type: 'tool:result', id: 'read', name: 'read_file', result: 'Error: ENOENT' } as never);
+      await h.finish();
+    };
+    await fail();
+    const id = (await h.review()).findings[0].id;
+    const assess = async (status: string) =>
+      JSON.parse(
+        toolResultToText(
+          await h.tools[0].execute({
+            action: 'assess',
+            id,
+            status,
+            note: `External review: ${status}`,
+          }),
+        ),
+      );
+    expect((await assess('validated')).recorded).toBe(true);
+    await fail();
+    await h.hooks.emit('turn:after', { outcome: 'completed' });
+    const data = await waitForStatus(h.home, (value) => String(value.attention?.text).includes('待复核'));
+    expect(data.attention?.action).toBe('open-review');
+    expect((await h.review()).findings[0]).toMatchObject({
+      status: 'validated',
+      reviewNeeded: { reason: 'new-evidence', occurrences: 1, runs: 1 },
+    });
+    await assess('regressed');
+    expect(
+      String(
+        (await waitForStatus(h.home, (value) => String(value.attention?.text).includes('待复核'))).attention?.text,
+      ),
+    ).toContain('待复核');
+  });
+
   // 提示点必须点得动：动作只把提示词放进输入框，不替用户按发送。
   it('opens the review through a new session without sending it', async () => {
     const h = harness();

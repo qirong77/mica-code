@@ -3,16 +3,46 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { SpeedTrend } from './SpeedTrend.jsx'
 
-const render = (series) =>
-  renderToStaticMarkup(createElement(SpeedTrend, { series, formatValue: String, unit: '秒' }))
+const render = (series, intraday = false) =>
+  renderToStaticMarkup(
+    createElement(SpeedTrend, { series, formatValue: String, unit: '秒', intraday })
+  )
 
 describe('SpeedTrend', () => {
-  it('renders the chart for a single day of samples', () => {
+  it('renders a timeline for minute samples', () => {
+    const html = render(
+      [
+        {
+          id: 'model',
+          label: 'provider / model',
+          color: 'red',
+          points: [{ at: 1793880000000, value: 1, samples: 3 }]
+        },
+        {
+          id: 'other',
+          label: 'provider / other',
+          color: 'blue',
+          points: [{ at: 1793880060000, value: 2, samples: 4 }]
+        }
+      ],
+      true
+    )
+    expect(html).toContain('data-chart="model-speed"')
+    expect(html).not.toContain('data-chart="model-speed-day"')
+  })
+
+  it('keeps the trend chart for multiple sampled days', () => {
     const html = render([
-      { id: 'model', points: [{ day: '2026-11-05', value: 1, samples: 1 }] }
+      {
+        id: 'model',
+        points: [
+          { day: '2026-11-05', value: 1, samples: 1 },
+          { day: '2026-11-06', value: 2, samples: 1 }
+        ]
+      }
     ])
     expect(html).toContain('data-chart="model-speed"')
-    expect(html).not.toContain('仅有一天数据')
+    expect(html).not.toContain('data-chart="model-speed-day"')
   })
 
   it('shows the selection hint when no model has a valid sample', () => {

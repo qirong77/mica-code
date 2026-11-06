@@ -1,5 +1,10 @@
 # mica-plugin
 
+持久 headless 会话提供 `turn:prepare` 异步 hook（`PluginTurnPrepareEvent`）：取得 turn
+lease 并应用配置后、保存用户输入前执行，可通过事件上的 `compactHistory()` 复用当前 lease。
+插件应自行比较 `previous` 和 `current` 决定策略；`compactHistory()` 将当前压缩结果落盘，
+并同步展示记录，界面完整展示当前持久化历史。
+
 `mica-plugin` 是 Mica Code 的插件基础设施包。它提供插件基类、生命周期管理、hook 注册和服务容器，用于把可扩展能力与核心运行时解耦。
 
 ## 主要能力
@@ -16,7 +21,7 @@
 - 定义插件包格式：`plugin.json` 清单（id / name / version / main / assets / dependencies / required / priority / settings / requires / `mica.apiVersion`）、目录加载器与只读扫描（配置页用）。
 - 维护启停状态（`$MICA_HOME/plugins-state.json`）：停用的插件照常注册、装配阶段跳过；常驻宿主经 `pluginStateSync` 在每轮开始时对齐名单，卸载 / 重新装配单个插件而不必重开会话。
 - 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。字段标 `perSession: true` 表示「这条会话可以不一样」：会话覆盖存在快照的 `pluginSessionSettings`（只存改过的键），插件改用 `ctx.sessionSettings.get()` 读合并后的生效值，`overrides()` / `set()` / `clear()` 改本会话，需要 `requires` 里有 `sessionSettings`。
-- 插件日志：`ctx.logger` 自带文件输出，落在 `resolveLogDir()`（与运行时日志同目录），按天分片、按大小轮转。
+- 插件日志：`ctx.logger` 自带文件输出，落在 `resolveLogDir()`（与运行时日志同目录），按天分片、按大小轮转。 `pluginLogPath()` 返回该插件实际存在的最新日志；没有记录时返回日志目录，不创建空日志。
 - 本地使用统计：`createPluginExperience(ctx)` 输出版本化的 `plugin:experience` 元数据事件，白名单限制字段、哈希化会话键，不记录正文、路径和地址；插件设置 `telemetry: "false"` 可立即停记。`summarizePluginExperience(lines, { since?, plugin? })` 只读聚合 JSONL，按插件版本分组、按 eventId 去重。导出脚本和口径见 [会话体验卡与埋点](../../docs/plugin-experience.md)。
 - 面板摘要卡：`PluginPanelView.cards` 在输入框上方展示紧凑摘要（每插件最多 3 张），动作走既有面板通道；`revision` 和动作 `key` 由插件配合校验。可选 `impressionAction` 由宿主在可见展示时触发，轮询视图不算曝光。卡片样式和控件由宿主统一提供。
 - 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 运行出错」。只有插件自己的状态写这里；缺宿主能力由 manager 记 `plugin-status.json` 的 `skipped`（见 `PluginManager.setupAll`），不进健康文件。记录带插件版本，读的一方传 `version` 就只认这一版写的（升级后旧结论自动失效）。
@@ -39,6 +44,10 @@
   `ctx.desktop.panel({ view, action })` 交出纯数据的视图与动作分派。宿主负责归一化与渲染，
   所以用户插件（没有前端模块）也有界面；`PluginPanel.ts` 里是类型、进程内登记表
   （`PluginPanelRegistry`）与视图/动作的归一化函数。只在清单声明了面板时才提供这个入口。
+  section 的 `editor` 用 `action` 声明保存动作、`value` 提供原样正文，保存时通过
+  `PluginPanelActionInput.text` 回传。空字符串是有效正文，可用于新建或清空内容；读取的正文
+  超过 200000 字符时，宿主只返回明确的只读提示，不返回裁剪后的正文供编辑。提交的 `text`
+  超过同一上限时直接拒绝，插件 action handler 不会运行，不会静默截断后保存。
   动作回包除了 `message`，还可以声明这几种「跨出面板一步」的效果：`compose`（把文本放进当前
   会话的输入框、不发送）、`newSession`（开一个新会话跑这段提示词，`confirm` 默认 `true`
   表示页面先弹窗让用户看见并编辑）、`dialog`（只读弹窗：`text` 是会换行的正文，
@@ -131,8 +140,9 @@ context.onDispose(() => registration.dispose());
 `context.agent.compactIdleHistory()` 把**已经落盘的**会话历史压一次，`mode: 'quick'` 只把工具
 调用与结果聚合成一条占位调用、丢掉思考、把图片与文档换成占位符（不调用模型，对话正文不动）；
 `mode: 'model'` 把用户与助手的对话（工具调用与结果不进摘要输入）交给模型写 checkpoint 摘要。
-与上面那个句柄里的 `compact()` 的区别是改哪一份：那里改的是一次
-请求即将发送的历史，这里改的是会话文件本身——所以重开这条会话看到的也是压缩后的样子。
+与上面那个句柄里的 `compact()` 的区别是改哪一份：那里改的是一次请求即将发送的历史，
+这里把当前压缩结果写回会话文件，并据此同步 `conversationMessages`；对话区完整展示当前
+持久化记录，模型压缩后旧历史随之变为摘要加最近几轮，重开会话也读取这份记录。
 
 它只在能独占写会话文件的常驻宿主里提供（`mica app-server`）：没有 turn 在跑、没有别的进程
 持有 turn lease 时才会执行，否则回 `{ status: 'skipped', reason: 'busy' }`；历史里没有可

@@ -5,8 +5,9 @@ import { realpathSync } from 'node:fs';
 import { appendFile, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { test, type TestContext } from 'vitest';
+import { test, vi, type TestContext } from 'vitest';
 import type { AgentObservationEvent } from '@packages/mica-plugin/index.js';
+import { assessmentKey, writeAssessment } from './assessments.js';
 import {
   CLASSIFIER_VERSION,
   HarnessRecorder,
@@ -520,14 +521,15 @@ test('corrupt summaries, traces, and decisions generate warnings and do not hide
   await writeFile(join(corrupt, 'summary.json'), '{broken');
   await writeFile(run.traceFile, '{invalid event\n');
   await rm(other.traceFile);
-  await mkdir(join(root, 'decisions'), { recursive: true });
-  await writeFile(join(root, 'decisions', `${run.findings[0].id}.json`), '{broken');
+  const decisionDirectory = join(root, 'decisions', assessmentKey(run.findings[0].id));
+  await mkdir(decisionDirectory, { recursive: true });
+  await writeFile(join(decisionDirectory, `${randomUUID()}.json`), '{broken');
   report = await recorder.review();
   assert.equal(report.runs.length, 2);
   assert.ok(report.warnings.some((warning) => warning.includes('corrupt run broken-run')));
   assert.ok(report.warnings.some((warning) => warning.includes('corrupt trace at line 1')));
   assert.ok(report.warnings.some((warning) => warning.includes('missing or unreadable trace')));
-  assert.ok(report.warnings.some((warning) => warning.includes('Unreadable decision')));
+  assert.ok(report.warnings.some((warning) => warning.includes('Unreadable assessment')));
   assert.equal(report.findings[0].status, 'open');
 });
 
@@ -594,7 +596,10 @@ test('all recorder directories and files have private permissions', async (t) =>
   for (const file of [
     report.runs[0].traceFile,
     join(root, 'runs', report.runs[0].id, 'summary.json'),
-    join(root, 'decisions', `${report.findings[0].id}.json`),
+    ...(await (async () => {
+      const directory = join(root, 'decisions', assessmentKey(report.findings[0].id));
+      return (await readdir(directory)).map((name) => join(directory, name));
+    })()),
     exported,
   ])
     assert.equal((await stat(file)).mode & 0o777, 0o600, file);
@@ -762,6 +767,111 @@ test('accepted findings stay within their workspace while all finding kinds aggr
     assert.ok(!a.findings.some((item) => item.id === finding.id));
   }
   assert.equal((await recorder.review()).findings.length, 8);
+});
+
+test('assessments preserve history and flag new evidence without changing a manual verdict', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder);
+  run.start();
+  run.call();
+  run.result();
+  const finding = (await recorder.review()).findings.find((item) => item.kind === 'tool-error')!;
+  await recorder.decide(finding.id, 'accepted', 'Proposed a fix.');
+  await recorder.decide(finding.id, 'validated', 'Isolated acceptance replay passed.');
+  assert.equal((await recorder.review()).findings.find((item) => item.id === finding.id)?.reviewNeeded, undefined);
+  run.call();
+  run.result();
+  run.finish();
+  const updated = (await recorder.review()).findings.find((item) => item.id === finding.id)!;
+  assert.equal(updated.status, 'validated');
+  assert.equal(updated.assessments?.length, 2);
+  assert.deepEqual(
+    updated.assessments?.map((item) => item.status),
+    ['accepted', 'validated'],
+  );
+  assert.deepEqual(updated.reviewNeeded, { reason: 'new-evidence', occurrences: 1, runs: 1 });
+  const markdown = await readFile(await recorder.exportReport(), 'utf8');
+  assert.match(markdown, /not an automatic regression verdict/);
+  assert.match(markdown, /Assessment history \(manual reports\)/);
+  await recorder.decide(finding.id, 'dismissed', 'Reviewed the new evidence as expected.');
+  const reviewed = (await recorder.review()).findings.find((item) => item.id === finding.id)!;
+  assert.equal(reviewed.reviewNeeded, undefined);
+  assert.equal(reviewed.assessments?.length, 3);
+});
+
+test('unseen old runs do not become new failures after an assessment', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const older = runner(recorder, { runId: 1, timestamp: '2020-01-01T00:00:00Z' });
+  older.start();
+  older.call();
+  older.result();
+  older.finish();
+  const current = runner(recorder, { runId: 2, timestamp: '2020-02-01T00:00:00Z' });
+  current.start();
+  current.call();
+  current.result();
+  current.finish();
+  const report = await recorder.review();
+  const hidden = report.runs.find((run) => run.sourceRunId === 1)!;
+  const path = join(root, 'runs', hidden.id, 'summary.json');
+  const content = await readFile(path, 'utf8');
+  await writeFile(path, '{broken');
+  const id = report.findings.find((finding) => finding.kind === 'tool-error')!.id;
+  await recorder.decide(id, 'validated', 'Only currently available runs are in the baseline.');
+  await writeFile(path, content);
+  assert.equal((await recorder.review()).findings.find((finding) => finding.id === id)?.reviewNeeded, undefined);
+});
+
+test('a run created during the assessment scan is not hidden by its later write time', async (t) => {
+  const { recorder } = await fixture(t);
+  const fail = (runId: number, timestamp: string) => {
+    const run = runner(recorder, { runId, timestamp });
+    run.start();
+    run.call();
+    run.result();
+    run.finish();
+  };
+  fail(1, '2026-06-01T10:00:00.000Z');
+  const id = (await recorder.review()).findings[0].id;
+  const review = recorder.review.bind(recorder);
+  const spy = vi.spyOn(recorder, 'review').mockImplementationOnce(async (cwd) => {
+    const snapshot = await review(cwd);
+    vi.setSystemTime('2026-06-01T10:00:00.010Z');
+    fail(2, '2026-06-01T10:00:00.005Z');
+    return snapshot;
+  });
+  try {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime('2026-06-01T10:00:00.001Z');
+    await recorder.decide(id, 'validated', 'External acceptance test.');
+  } finally {
+    spy.mockRestore();
+    vi.useRealTimers();
+  }
+  const finding = (await recorder.review()).findings.find((item) => item.id === id)!;
+  assert.equal(finding.status, 'validated');
+  assert.deepEqual(finding.reviewNeeded, { reason: 'new-evidence', occurrences: 1, runs: 1 });
+});
+
+test('a migrated assessment without a baseline explicitly requires a new review', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const run = runner(recorder);
+  run.start();
+  run.call();
+  run.result();
+  run.finish();
+  const id = (await recorder.review()).findings[0].id;
+  await writeAssessment(root, {
+    version: 1,
+    id,
+    status: 'validated',
+    note: 'Historical acceptance report.',
+    updatedAt: at,
+    baseline: null,
+  });
+  const finding = (await recorder.review()).findings.find((item) => item.id === id)!;
+  assert.equal(finding.status, 'validated');
+  assert.deepEqual(finding.reviewNeeded, { reason: 'baseline-unavailable', occurrences: 0, runs: 0 });
 });
 
 test('capture and review canonicalize symlinked cwd and loaded summaries while nonexistent paths use resolve', async (t) => {
@@ -1033,7 +1143,7 @@ test('suggestions change with the failure cause instead of repeating one paragra
   assert.ok(hunk.evaluation.length > 0 && shell.evaluation.length > 0);
 });
 
-test('rebuild re-derives findings from stored traces and leaves counters intact', async (t) => {
+test('rebuild re-derives findings and preserves unrelated counters', async (t) => {
   const { recorder, root } = await fixture(t);
   const cwd = resolve('workspace-a');
   const run = runner(recorder, { runId: 1, cwd });
@@ -1072,8 +1182,7 @@ test('rebuild re-derives findings from stored traces and leaves counters intact'
   );
   assert.match(after.findings[0].suggestion, /hunk/);
   assert.equal(after.findings[0].evidence[0].available, true);
-  // Traces are weaker than the live counters (they may have dropped events), so
-  // rebuild must not touch anything except findings.
+  // Only complete traces can replace derived error counts; other run facts stay intact.
   for (const key of ['requestCount', 'toolCalls', 'toolErrors', 'inputTokens', 'outputTokens', 'outcome', 'startedAt'])
     assert.deepEqual(after[key], before[key], key);
 }, 20_000);
@@ -1255,7 +1364,7 @@ test('failure lines and tool identity win over unrelated examples; rebuilt categ
   const cwd = resolve('workspace-failure-lines');
   const run = runner(recorder, { cwd });
   run.start();
-  assert.equal(CLASSIFIER_VERSION, 6);
+  assert.equal(CLASSIFIER_VERSION, 7);
   const samples = [
     {
       name: 'memory',
@@ -2125,6 +2234,158 @@ test('tool health ranks by failure rate, not by absolute error count', async (t)
   assert.match(markdown, /\| apply\\_patch \| 2 \| 2 \| 100\.0% \| empty-hunk ×2 \|/);
 });
 
+test('legacy expected exits use the same current verdict in findings, counters and tool health', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const run = runner(recorder);
+  run.start();
+  run.call('{"command":"rg absent fixture.txt"}', 'run_shell');
+  run.result('{"exit_code":1}', 'run_shell');
+  run.finish();
+  const summary = (await recorder.review()).runs[0];
+  const events = await trace(summary);
+  const result = events.find((event) => event.type === 'tool:result')!;
+  result.errorCategory = 'exit-1';
+  delete result.expectedExit;
+  await writeFile(summary.traceFile, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+  const path = join(root, 'runs', summary.id, 'summary.json');
+  await writeFile(path, JSON.stringify({ ...summary, toolErrors: 1, expectedExits: 0 }));
+  for (const report of [
+    await recorder.review(),
+    await (async () => {
+      assert.equal((await recorder.rebuild()).rebuilt, 1);
+      return recorder.review();
+    })(),
+  ]) {
+    assert.equal(report.runs[0].toolErrors, 0);
+    assert.equal(report.runs[0].expectedExits, 1);
+    assert.equal(report.findings.length, 0);
+    assert.equal(report.toolHealth[0].errors, 0);
+    assert.equal(report.toolHealth[0].errorRate, 0);
+    assert.deepEqual(report.toolHealthCoverage, { includedRuns: 1, excludedRuns: 0, unknownResults: 0 });
+  }
+  assert.equal(JSON.parse(await readFile(path, 'utf8')).toolErrors, 0);
+});
+
+test('a truncated command keeps its captured expected exit when the result body is complete', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder, { capture: { ...options, maxEventChars: 30 } });
+  run.start();
+  run.call(JSON.stringify({ command: `rg absent ${'x'.repeat(100)}.txt` }), 'run_shell');
+  run.result('{"exit_code":1}', 'run_shell');
+  run.finish();
+  const summary = (await recorder.review()).runs[0];
+  const events = await trace(summary);
+  assert.equal((events.find((event) => event.type === 'tool:call')!.args as { truncated: boolean }).truncated, true);
+  assert.equal(
+    (events.find((event) => event.type === 'tool:result')!.result as { truncated: boolean }).truncated,
+    false,
+  );
+  for (const report of [
+    await recorder.review(),
+    await (async () => {
+      await recorder.rebuild();
+      return recorder.review();
+    })(),
+  ]) {
+    assert.equal(report.runs[0].toolErrors, 0);
+    assert.equal(report.runs[0].expectedExits, 1);
+    assert.equal(report.toolHealth[0].errors, 0);
+  }
+});
+
+test('duplicate call identifiers invalidate both review health and rebuilding', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder);
+  run.start();
+  run.call('{}', 'read_file', 'duplicate');
+  run.call('{}', 'read_file', 'duplicate');
+  run.result('contents', 'read_file', 'duplicate');
+  run.finish();
+  const report = await recorder.review();
+  assert.deepEqual(report.toolHealth, []);
+  assert.equal(report.toolHealthCoverage.excludedRuns, 1);
+  assert.equal((await recorder.rebuild()).skippedUnreadable, 1);
+});
+
+test('rebuild preserves a correction receipt written after it loaded the completed summary', async (t) => {
+  const { recorder, root } = await fixture(t);
+  recorder.noteCorrection({ sessionId: 'session', kind: 'edit' });
+  const run = runner(recorder);
+  run.start();
+  run.finish();
+  const summary = (await recorder.review()).runs[0];
+  const path = join(root, 'runs', summary.id, 'summary.json');
+  const full = JSON.parse(await readFile(path, 'utf8')) as RunSummary;
+  const stale = { ...full, findings: [] as RunSummary['findings'] };
+  delete stale.corrections;
+  delete stale.correctionIds;
+  await writeFile(path, JSON.stringify(stale));
+  const locking = recorder as unknown as {
+    withSummaryLock(directory: string, work: () => Promise<void>): Promise<void>;
+  };
+  const original = locking.withSummaryLock.bind(recorder);
+  const spy = vi.spyOn(locking, 'withSummaryLock').mockImplementationOnce(async (directory, work) => {
+    await writeFile(path, JSON.stringify(full));
+    return original(directory, work);
+  });
+  try {
+    assert.equal((await recorder.rebuild()).rebuilt, 1);
+  } finally {
+    spy.mockRestore();
+  }
+  const saved = JSON.parse(await readFile(path, 'utf8')) as RunSummary;
+  assert.deepEqual(saved.corrections, full.corrections);
+  assert.deepEqual(saved.correctionIds, full.correctionIds);
+  assert.equal(saved.findings.find((finding) => finding.kind === 'user-correction')?.occurrences, 1);
+});
+
+test('tool health excludes corrupt, incomplete and unpaired traces instead of counting their prefixes', async (t) => {
+  const { recorder } = await fixture(t);
+  for (let runId = 1; runId <= 4; runId++) {
+    const run = runner(recorder, { runId });
+    run.start();
+    run.call('{}', 'read_file', `read-${runId}`);
+    run.result('file contents', 'read_file', `read-${runId}`);
+    run.finish();
+  }
+  const before = await recorder.review();
+  const byId = (id: number) => before.runs.find((run) => run.sourceRunId === id)!;
+  await appendFile(byId(2).traceFile, 'not-json\n');
+  const missing = await trace(byId(3));
+  await writeFile(
+    byId(3).traceFile,
+    missing
+      .slice(0, -1)
+      .map((event) => JSON.stringify(event))
+      .join('\n') + '\n',
+  );
+  const unpaired = await trace(byId(4));
+  unpaired.find((event) => event.type === 'tool:result')!.idHash = sha('wrong-call');
+  await writeFile(byId(4).traceFile, unpaired.map((event) => JSON.stringify(event)).join('\n') + '\n');
+  const report = await recorder.review();
+  assert.equal(report.toolHealth[0].calls, 1);
+  assert.equal(report.toolHealth[0].errors, 0);
+  assert.deepEqual(report.toolHealthCoverage, { includedRuns: 1, excludedRuns: 3, unknownResults: 2 });
+  assert.ok(report.warnings.some((warning) => warning.includes('excluded from tool health')));
+});
+
+test('metadata without a verdict is unknown rather than a successful tool result', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder, { capture: { ...options, captureContent: false } });
+  run.start();
+  run.call();
+  run.result();
+  run.finish();
+  const summary = (await recorder.review()).runs[0];
+  const events = await trace(summary);
+  delete events.find((event) => event.type === 'tool:result')!.errorCategory;
+  await writeFile(summary.traceFile, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+  const report = await recorder.review();
+  assert.deepEqual(report.toolHealth, []);
+  assert.deepEqual(report.toolHealthCoverage, { includedRuns: 0, excludedRuns: 1, unknownResults: 1 });
+  assert.equal(report.runs[0].toolErrors, 1);
+});
+
 test('plugin background failures are throttled, aggregated and exposed as a review item', async (t) => {
   const { recorder, root } = await fixture(t);
   const failure = (tick: number, timestamp: string) => ({
@@ -2245,7 +2506,7 @@ test('two tasks whose names sanitize alike keep separate review items', async (t
   // 干净的名字保持可读；被改写过的补摘要，两者不会撞在一起。
   assert.ok(findings.some((item) => item.id === 'plugin-background:relay:tick_a'));
   assert.ok(findings.some((item) => /^plugin-background:relay:tick_a-[a-f0-9]{8}$/.test(item.id)));
-  for (const item of findings) await recorder.decide(item.id, 'accepted', '');
+  for (const item of findings) await recorder.decide(item.id, 'accepted', 'Reviewed distinct plugin tasks.');
   assert.deepEqual(
     (await recorder.review()).findings.filter((item) => item.kind === 'plugin-background').map((item) => item.status),
     ['accepted', 'accepted'],
@@ -2379,6 +2640,66 @@ test('rebuild keeps recorded corrections and the findings derived from them', as
   );
   const stored = JSON.parse(await readFile(join(root, 'runs', after.runs[0].id, 'summary.json'), 'utf8'));
   assert.deepEqual(stored.corrections, { edit: 1, recall: 0, retry: 1 });
+});
+
+test('persisted corrections survive a recorder restart and only the next primary run consumes them', async (t) => {
+  const { recorder, root } = await fixture(t);
+  recorder.noteCorrection({ sessionId: 'session', kind: 'edit', chars: 50 });
+  await recorder.dispose();
+  const resumed = new HarnessRecorder(root);
+  t.onTestFinished(() => resumed.dispose());
+  const helper = runner(resumed, { runId: -1 });
+  helper.emit({
+    type: 'run:start',
+    config,
+    input: 'title',
+    helper: { kind: 'plugin-llm', pluginId: 'session-rename' },
+  });
+  helper.finish();
+  const delegated = runner(resumed, { runId: -2 });
+  delegated.emit({ type: 'run:start', config, input: 'delegated', delegation: { type: 'Explore' } });
+  delegated.finish();
+  const primary = runner(resumed, { runId: 1 });
+  primary.start();
+  primary.finish();
+  const report = await resumed.review();
+  assert.equal(report.runs.find((run) => run.sourceRunId === -1)?.corrections, undefined);
+  assert.equal(report.runs.find((run) => run.sourceRunId === -2)?.corrections, undefined);
+  const main = report.runs.find((run) => run.sourceRunId === 1)!;
+  assert.deepEqual(main.corrections, { edit: 1, recall: 0, retry: 0 });
+  assert.equal(main.correctionIds?.length, 1);
+  assert.equal(report.findings.filter((finding) => finding.kind === 'user-correction')[0].evidence[0].available, true);
+  const next = runner(resumed, { runId: 2 });
+  next.start();
+  next.finish();
+  assert.equal((await resumed.review()).runs.find((run) => run.sourceRunId === 2)?.corrections, undefined);
+});
+
+test('delegation cannot replace the previous primary input or inherit its failed outcome', async (t) => {
+  const { recorder } = await fixture(t);
+  const task = 'Investigate the full correction pipeline and keep every helper separate from the main user turn.';
+  const first = runner(recorder, { runId: 1, timestamp: '2026-06-01T10:00:00.000Z' });
+  first.start(task);
+  first.finish('aborted');
+  const child = runner(recorder, { runId: -1, timestamp: '2026-06-01T10:01:00.000Z' });
+  child.emit({ type: 'run:start', config, input: task, delegation: { type: 'Explore' } });
+  child.finish('error', 'timed out');
+  const retry = runner(recorder, { runId: 2, timestamp: '2026-06-01T10:02:00.000Z' });
+  retry.start(task);
+  retry.finish();
+  const report = await recorder.review();
+  const findings = report.findings.filter((finding) => finding.kind === 'user-retry');
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].occurrences, 1);
+  assert.equal(findings[0].evidence[0].runId, report.runs.find((run) => run.sourceRunId === 2)!.id);
+  const before = findings.map((finding) => [finding.id, finding.occurrences]);
+  await recorder.rebuild();
+  assert.deepEqual(
+    (await recorder.review()).findings
+      .filter((finding) => finding.kind === 'user-retry')
+      .map((finding) => [finding.id, finding.occurrences]),
+    before,
+  );
 });
 
 test('plugin install state is captured with a stable hash and dropped when unreadable', async (t) => {

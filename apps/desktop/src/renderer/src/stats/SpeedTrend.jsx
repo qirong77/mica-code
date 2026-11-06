@@ -18,7 +18,13 @@ function calendarDays(series) {
   return result
 }
 
-export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit }) {
+export function SpeedTrend({
+  series,
+  formatValue,
+  formatTick = formatValue,
+  unit,
+  intraday = false
+}) {
   const elementRef = useRef(null)
   const chartRef = useRef(null)
   const activeIndex = useRef(-1)
@@ -28,13 +34,26 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
         ...item,
         points: item.points.filter(
           (point) =>
-            Number.isFinite(point.value) && Number.isFinite(Date.parse(`${point.day}T00:00:00Z`))
+            Number.isFinite(point.value) &&
+            (intraday
+              ? Number.isFinite(point.at)
+              : Number.isFinite(Date.parse(`${point.day}T00:00:00Z`)))
         )
       })),
-    [series]
+    [series, intraday]
   )
-  const days = useMemo(() => calendarDays(clean), [clean])
-  const sampledDays = new Set(clean.flatMap((item) => item.points.map((point) => point.day)))
+  const days = useMemo(
+    () =>
+      intraday
+        ? [...new Set(clean.flatMap((item) => item.points.map((point) => point.at)))].sort(
+            (a, b) => a - b
+          )
+        : calendarDays(clean),
+    [clean, intraday]
+  )
+  const sampledDays = new Set(
+    clean.flatMap((item) => item.points.map((point) => (intraday ? point.at : point.day)))
+  )
   const canPlot = sampledDays.size > 0
 
   useEffect(() => {
@@ -61,15 +80,25 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
       const resolveColor = (value) => (value.startsWith('var(') ? color(value.slice(4, -1)) : value)
       const font = style.fontFamily
       const palette = clean.map((item) => resolveColor(item.color))
-      const byDay = clean.map((item) => new Map(item.points.map((point) => [point.day, point])))
+      const byDay = clean.map(
+        (item) => new Map(item.points.map((point) => [intraday ? point.at : point.day, point]))
+      )
+      const timeLabel = (at) =>
+        new Date(Number(at)).toLocaleTimeString('zh-CN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        })
       const tooltip = (params) => {
         const entries = Array.isArray(params) ? params : [params]
-        const day = String(entries[0]?.axisValue ?? '')
+        const day = intraday ? Number(entries[0]?.axisValue) : String(entries[0]?.axisValue ?? '')
         if (!day) return ''
         const root = document.createElement('div')
         root.style.cssText = 'max-width:min(300px,70vw);font-size:11px;line-height:1.5'
         const title = document.createElement('div')
-        title.textContent = day
+        title.textContent = intraday
+          ? `${new Date(day).toLocaleDateString('zh-CN')} ${timeLabel(day)}`
+          : day
         title.style.cssText = 'margin-bottom:8px;opacity:.7'
         root.append(title)
         clean.forEach((item, index) => {
@@ -102,7 +131,7 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
           aria: {
             enabled: true,
             label: {
-              description: `多模型每日速度对比。${unit}。使用左右方向键查看日期，上方图例可显示或隐藏模型。`
+              description: `多模型${intraday ? '当日' : '每日'}速度对比。${unit}。使用左右方向键查看时间，上方图例可显示或隐藏模型。`
             }
           },
           grid: { left: 44, right: 16, top: 12, bottom: 28 },
@@ -124,16 +153,17 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
             formatter: tooltip
           },
           xAxis: {
-            type: 'category',
-            data: days,
-            boundaryGap: true,
+            type: intraday ? 'time' : 'category',
+            data: intraday ? undefined : days,
+            boundaryGap: intraday ? ['4%', '4%'] : true,
             axisLine: { show: false },
             axisTick: { show: false },
             axisLabel: {
               color: color('--color-fg-dim'),
               fontSize: 11,
               hideOverlap: true,
-              formatter: (day) => `${Number(day.slice(5, 7))}/${Number(day.slice(8))}`
+              formatter: (day) =>
+                intraday ? timeLabel(day) : `${Number(day.slice(5, 7))}/${Number(day.slice(8))}`
             }
           },
           yAxis: {
@@ -147,12 +177,14 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
             id: item.id,
             name: item.label,
             type: 'line',
-            data: days.map((day) => byDay[index].get(day)?.value ?? null),
+            data: intraday
+              ? item.points.map((point) => [point.at, point.value])
+              : days.map((day) => byDay[index].get(day)?.value ?? null),
             connectNulls: false,
             smooth: false,
             symbol: 'circle',
-            symbolSize: 5,
-            showSymbol: days.length <= 31,
+            symbolSize: days.length === 1 ? 9 : 7,
+            showSymbol: intraday || days.length <= 31,
             itemStyle: {
               color: palette[index],
               borderColor: color('--color-panel'),
@@ -173,7 +205,7 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
       attributeFilter: ['data-theme', 'data-appearance', 'style', 'class']
     })
     return () => theme.disconnect()
-  }, [clean, days, formatValue, formatTick, unit, canPlot])
+  }, [clean, days, formatValue, formatTick, unit, canPlot, intraday])
 
   const showDay = (index) => {
     const chart = chartRef.current
@@ -181,7 +213,7 @@ export function SpeedTrend({ series, formatValue, formatTick = formatValue, unit
     activeIndex.current = index
     chart.dispatchAction({
       type: 'showTip',
-      x: chart.convertToPixel({ xAxisIndex: 0 }, index),
+      x: chart.convertToPixel({ xAxisIndex: 0 }, intraday ? days[index] : index),
       y: 80
     })
   }

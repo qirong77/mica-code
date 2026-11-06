@@ -16,6 +16,7 @@ import { request as httpsRequest } from 'node:https'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
+import { createRequestLogger } from './request-log.mjs'
 
 const CHANNEL_KEY_INFO = 'poll-channel'
 const REPLAY_WINDOW_MS = 120_000
@@ -68,6 +69,45 @@ if (!settings.relayUrl || !settings.token) {
 let CHANNEL_KEY = deriveKey(settings.token)
 /** 机器名只在启动后第一轮上报一次，之后以中转机上存的名字为准。 */
 let labelPending = hostname()
+const requestLog = createRequestLogger({ dir: process.env.MICA_RELAY_LOG_DIR })
+
+function channelCounts(items) {
+  const counts = Object.create(null)
+  for (const item of items || []) {
+    const channel = String(item?.channel || '')
+    if (/^[a-zA-Z0-9:_-]{1,96}$/.test(channel)) counts[channel] = (counts[channel] || 0) + 1
+  }
+  return counts
+}
+
+async function sendRelay(endpoint, body) {
+  const started = Date.now()
+  const packed = seal({ ...body, ts: Date.now() })
+  let response
+  try {
+    response = await postBinary(`${settings.relayUrl}${endpoint}`, packed)
+    const result = response.status === 200 && endpoint === '/api/poll' ? open(response.body) : response
+    if (wanted || body.events?.length || body.results?.length || result?.commands?.length || response.status !== 200) {
+      requestLog.record({
+        endpoint, status: response.status, outcome: response.status === 200 ? 'ok' : 'http-error',
+        durationMs: Date.now() - started, requestBytes: packed.length, responseBytes: response.body.length,
+        eventCount: body.events?.length || 0, resultCount: body.results?.length || 0,
+        commandCount: result?.commands?.length || 0,
+        channels: channelCounts([...(body.results || []), ...(result?.commands || [])])
+      })
+    }
+    if (response.status === 401) throw new Error('口令不匹配，或被中间设备改写')
+    if (response.status !== 200) throw new Error(`relay HTTP ${response.status}`)
+    return result
+  } catch (error) {
+    if (!response || response.status === 200) requestLog.record({
+      endpoint, outcome: 'network-error', durationMs: Date.now() - started,
+      requestBytes: packed.length, responseBytes: response?.body?.length || 0,
+      eventCount: body.events?.length || 0, resultCount: body.results?.length || 0
+    })
+    throw error
+  }
+}
 
 function deriveKey(token) {
   return Buffer.from(
@@ -151,10 +191,7 @@ function postBinary(target, body) {
 const MAX_POLL_RESPONSE_BYTES = 24 * 1024 * 1024
 
 async function relayPoll(body) {
-  const response = await postBinary(`${settings.relayUrl}/api/poll`, seal({ ...body, ts: Date.now() }))
-  if (response.status === 401) throw new Error('口令不匹配，或被中间设备改写')
-  if (response.status !== 200) throw new Error(`relay HTTP ${response.status}`)
-  return open(response.body)
+  return sendRelay('/api/poll', body)
 }
 
 /**
@@ -168,10 +205,7 @@ async function relayPoll(body) {
  * 所以改成单独一条上行：事件一有就发，轮询继续挂着等命令，两边互不干扰。
  */
 async function relayPush(body) {
-  const response = await postBinary(`${settings.relayUrl}/api/push`, seal({ ...body, ts: Date.now() }))
-  if (response.status === 401) throw new Error('口令不匹配，或被中间设备改写')
-  if (response.status !== 200) throw new Error(`relay HTTP ${response.status}`)
-  return response
+  return sendRelay('/api/push', body)
 }
 
 /* ---------------------------------------------------------------- 通道 */
@@ -191,6 +225,11 @@ const MAX_EVENT_BYTES = 1_500_000
 
 let eventBuffer = []
 let eventBytes = 0
+const eventBatchPrefix = randomBytes(12).toString('hex')
+let eventBatchSeq = 0
+let pendingEventBatch = null
+let eventBatchFlight = null
+let eventBatchPollOnly = false
 let relayParams = { intervalMs: 15_000, watch: null }
 /** 中转机是否有人在看。没人看时不攒事件、不催轮询。 */
 let wanted = false
@@ -198,7 +237,12 @@ const resultHashes = { entries: new Map(), bytes: 0 }
 // 与中转机 resultCache 的上限一致：对方淘汰后必须重新传完整结果。
 const RESULT_CACHE_LIMIT = 200
 const RESULT_CACHE_BYTES = 4 * 1024 * 1024
+const RESULT_BATCH_BYTES = 18 * 1024 * 1024
 let pendingResults = []
+const MAX_ACTIVE_COMMANDS = 32
+const activeCommands = new Set()
+let generation = 0
+let pendingWake = false
 let envPayload = null
 let stopping = false
 let pollFailures = 0
@@ -256,6 +300,18 @@ async function pasteImage(dataUrl) {
   return { ok: true, result: { ref: String(body.ref || '') } }
 }
 
+async function saveAttachment(payload) {
+  const res = await fetch(`${settings.localUrl}/api/attachment`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ dataUrl: payload?.dataUrl, name: payload?.name }),
+    signal: AbortSignal.timeout(60_000)
+  })
+  const body = await res.json().catch(() => null)
+  if (!res.ok || body?.ok !== true) return { ok: false, error: body?.error || `附件保存失败（HTTP ${res.status}）` }
+  return { ok: true, result: { path: body.path, name: body.name } }
+}
+
 async function readLocalEnv() {
   try {
     const res = await fetch(`${settings.localUrl}/api/env`, { signal: AbortSignal.timeout(5_000) })
@@ -303,14 +359,15 @@ async function subscribeLocalEvents() {
 }
 
 function pushEvent(frame) {
+  if (stopping) return
   if (!frame || typeof frame.channel !== 'string') return
   if (!wanted) return
   eventBuffer.push(frame)
-  eventBytes += JSON.stringify(frame).length
+  eventBytes += Buffer.byteLength(JSON.stringify(frame))
   while (eventBuffer.length > MAX_EVENT_FRAMES || eventBytes > MAX_EVENT_BYTES) {
     const dropped = eventBuffer.shift()
     if (!dropped) break
-    eventBytes -= JSON.stringify(dropped).length
+    eventBytes -= Buffer.byteLength(JSON.stringify(dropped))
   }
   // 任何上行事件都该尽快送到手机：终端回显、文件树、Git 状态都不是 chat:event，
   // 让它们等下一轮轮询就是把延迟押在那次挂起超时上。
@@ -323,7 +380,7 @@ let pushTimer = null
 let pushRunning = false
 
 function schedulePush() {
-  if (pushTimer || pushRunning) return
+  if (stopping || pushTimer || pushRunning) return
   pushTimer = setTimeout(() => {
     pushTimer = null
     void flushPush()
@@ -332,34 +389,56 @@ function schedulePush() {
 }
 
 async function flushPush() {
-  if (pushRunning) return
-  const events = takeEvents()
-  if (!events.length) return
+  if (stopping || pushRunning) return
+  const flight = claimEventBatch('push')
+  const events = flight?.batch.events || []
+  const wake = pendingWake
+  pendingWake = false
+  if (!events.length && !wake) return
+  const startedGeneration = generation
   pushRunning = true
   let failed = false
   try {
-    await relayPush({ events })
+    await relayPush({ events, ...(flight ? { eventBatchId: flight.batch.id } : {}), ...(wake ? { wake: true } : {}) })
+    if (startedGeneration === generation) finishEventBatch(flight, true)
   } catch (error) {
-    // 送不出去就放回队首：下一轮轮询会捎带它们。事件重复到达只是重画一次，无害。
     failed = true
-    requeueEvents(events)
+    if (startedGeneration === generation) {
+      finishEventBatch(flight, false)
+      pendingWake ||= wake && pendingResults.length > 0
+    }
     log('[push] failed:', String(error?.message || error))
   } finally {
-    pushRunning = false
-    // 失败后不立刻重排：那会变成没有退避的紧循环，交给下一轮轮询或下一条事件。
-    if (!failed && eventBuffer.length) schedulePush()
+    if (startedGeneration === generation) {
+      pushRunning = false
+      // 失败后不立刻重排：那会变成没有退避的紧循环，交给下一轮轮询或下一条事件。
+      if (!failed && (canPushEvents() || pendingWake)) schedulePush()
+    }
   }
 }
 
-function requeueEvents(frames) {
-  if (!frames.length) return
-  eventBuffer.unshift(...frames)
-  for (const frame of frames) eventBytes += JSON.stringify(frame).length
-  while (eventBuffer.length > MAX_EVENT_FRAMES || eventBytes > MAX_EVENT_BYTES) {
-    const dropped = eventBuffer.pop()
-    if (!dropped) break
-    eventBytes -= JSON.stringify(dropped).length
+function canPushEvents() {
+  return !eventBatchFlight && !eventBatchPollOnly && (pendingEventBatch || eventBuffer.length)
+}
+
+function claimEventBatch(transport) {
+  if (eventBatchFlight || (transport === 'push' && eventBatchPollOnly)) return null
+  if (!pendingEventBatch && eventBuffer.length) {
+    pendingEventBatch = Object.freeze({
+      id: `${eventBatchPrefix}-${++eventBatchSeq}`,
+      events: Object.freeze(takeEvents())
+    })
   }
+  if (!pendingEventBatch) return null
+  eventBatchFlight = { batch: pendingEventBatch }
+  return eventBatchFlight
+}
+
+function finishEventBatch(flight, acknowledged) {
+  if (!flight || eventBatchFlight !== flight) return
+  eventBatchFlight = null
+  if (acknowledged) pendingEventBatch = null
+  eventBatchPollOnly = !acknowledged
 }
 
 function takeEvents() {
@@ -386,6 +465,26 @@ function takeEvents() {
 
 /* ---------------------------------------------------------------- 命令 */
 
+function queueResult(result, startedGeneration) {
+  if (stopping || startedGeneration !== generation) return
+  pendingResults.push(result)
+  pendingWake = true
+  schedulePush()
+}
+
+function startCommand(command) {
+  const startedGeneration = generation
+  if (activeCommands.size >= MAX_ACTIVE_COMMANDS) {
+    queueResult({ id: command?.id, ok: false, status: 429, error: 'Bridge busy: too many active commands; retry later' }, startedGeneration)
+    return
+  }
+  const task = runCommand(command).then((result) => {
+    activeCommands.delete(task)
+    queueResult(result, startedGeneration)
+  })
+  activeCommands.add(task)
+}
+
 async function runCommand(command) {
   const channel = String(command?.channel || '')
   const payload = command?.payload ?? {}
@@ -398,6 +497,9 @@ async function runCommand(command) {
       const result = await pasteImage(String(payload?.dataUrl || ''))
       return { id: command.id, ...result }
     }
+    if (channel === '__attachment') {
+      return { id: command.id, ...await saveAttachment(payload) }
+    }
     const result = await localInvoke(channel, payload)
     if (!result.ok) {
       return { id: command.id, channel, payload, ok: false, error: explainError(channel, result.error) }
@@ -407,7 +509,7 @@ async function runCommand(command) {
     const hash = createHashOf(json)
     return { id: command.id, channel, payload, ok: true, hash, result: result.result }
   } catch (error) {
-    return { id: command.id, ok: false, error: String(error?.message || error) }
+    return { id: command?.id, ok: false, error: String(error?.message || error) }
   }
 }
 
@@ -468,14 +570,23 @@ function resultsForPoll(results) {
 /* ---------------------------------------------------------------- 主循环 */
 
 async function tick() {
+  if (stopping) return
   const nextSettings = readSettings()
   if (nextSettings.relayUrl !== settings.relayUrl || nextSettings.token !== settings.token) {
     // 切换机器身份时，旧调用的结果、缓存和事件都只属于原来的中转机。
+    generation++
     CHANNEL_KEY = deriveKey(nextSettings.token)
     pendingResults = []
+    pendingWake = false
     clearResultCache(resultHashes)
     eventBuffer = []
     eventBytes = 0
+    pendingEventBatch = null
+    eventBatchFlight = null
+    eventBatchPollOnly = false
+    clearTimeout(pushTimer)
+    pushTimer = null
+    pushRunning = false
     wanted = false
     relayParams = { intervalMs: 15_000, watch: null }
     labelPending = hostname()
@@ -484,19 +595,38 @@ async function tick() {
   settings = nextSettings
 
   let intervalMs = relayParams.intervalMs
-  const events = takeEvents()
-  const results = pendingResults
-  pendingResults = []
+  const startedGeneration = generation
+  const flight = claimEventBatch('poll')
+  const events = flight?.batch.events || []
+  let resultBytes = 2
+  let resultCount = 0
+  for (let index = 0; index < pendingResults.length; index++) {
+    let item = pendingResults[index]
+    let bytes = Buffer.byteLength(JSON.stringify(item))
+    if (bytes + 2 > RESULT_BATCH_BYTES) {
+      item = { id: item.id, ok: false, status: 413, error: 'Bridge result too large: exceeds 18 MiB JSON limit' }
+      pendingResults[index] = item
+      bytes = Buffer.byteLength(JSON.stringify(item))
+    }
+    if (resultBytes + bytes + (resultCount ? 1 : 0) > RESULT_BATCH_BYTES) break
+    resultBytes += bytes + (resultCount ? 1 : 0)
+    resultCount++
+  }
+  const results = pendingResults.splice(0, resultCount)
+  pendingWake = false
   const env = envPayload
 
   try {
     const sentResults = resultsForPoll(results)
-    const body = { events, results: sentResults, watch: relayParams.watch }
+    const body = { events, ...(flight ? { eventBatchId: flight.batch.id } : {}), results: sentResults, watch: relayParams.watch }
     if (env) body.env = env
     if (labelPending) body.label = labelPending
     const started = Date.now()
     const rawBytes = Buffer.byteLength(JSON.stringify(body))
     const response = await relayPoll(body)
+    if (stopping || startedGeneration !== generation) return
+    finishEventBatch(flight, true)
+    if (canPushEvents() || pendingWake) schedulePush()
     pollFailures = 0
     if (envPayload === env) envPayload = null
     labelPending = ''
@@ -505,8 +635,10 @@ async function tick() {
     intervalMs = relayParams.intervalMs
 
     wanted = response?.wanted === true
-    if (response?.resetCache) clearResultCache(resultHashes)
+    const retryResultIds = new Set(Array.isArray(response?.retryResultIds) ? response.retryResultIds : [])
+    if (response?.resetCache || retryResultIds.size) clearResultCache(resultHashes)
     else for (const item of sentResults) rememberResult(resultHashes, item)
+    if (retryResultIds.size) pendingResults.unshift(...results.filter((item) => retryResultIds.has(item.id)))
     if (!wanted) {
       eventBuffer = []
       eventBytes = 0
@@ -519,11 +651,13 @@ async function tick() {
 
     const commands = Array.isArray(response?.commands) ? response.commands : []
     if (commands.length) {
-      const finished = await Promise.all(commands.map((command) => runCommand(command)))
-      pendingResults.push(...finished)
+      for (const command of commands) startCommand(command)
       intervalMs = 0
     }
+    if (pendingResults.length) intervalMs = 0
   } catch (error) {
+    if (stopping || startedGeneration !== generation) return
+    finishEventBatch(flight, false)
     // 结果按 id 结算，重复回传是幂等的；丢掉它们会让已经执行完的操作等到超时。
     pendingResults.unshift(...results)
     clearResultCache(resultHashes)
@@ -539,12 +673,14 @@ async function tick() {
 
 async function main() {
   envPayload = await readLocalEnv()
+  if (stopping) return
   if (state_ok()) void subscribeLocalEvents()
   log(`[relay-agent] ${settings.localUrl} -> ${settings.relayUrl}`)
   while (!stopping) {
     if (!parentAlive()) {
       log('[relay-agent] 父进程已退出，桥自行结束')
-      process.exit(0)
+      await stopBridge()
+      return
     }
     await tick()
   }
@@ -567,13 +703,20 @@ function state_ok() {
   return true
 }
 
-process.on('SIGTERM', () => {
+async function stopBridge() {
+  if (stopping) return
   stopping = true
-  process.exit(0)
-})
-process.on('SIGINT', () => {
-  stopping = true
-  process.exit(0)
-})
+  clearTimeout(pushTimer)
+  const deadline = setTimeout(() => process.exit(0), 1000)
+  try {
+    await requestLog.close()
+  } finally {
+    clearTimeout(deadline)
+    process.exit(0)
+  }
+}
+
+process.on('SIGTERM', () => { void stopBridge() })
+process.on('SIGINT', () => { void stopBridge() })
 
 void main()

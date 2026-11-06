@@ -6,15 +6,15 @@ import {
   type TurnTimingSummary,
 } from '@packages/mica-common/turnTiming.js';
 import { formatElapsed } from '@packages/mica-web-shared/index.js';
+import { TIMING_SORT_OPTIONS } from '../labels.js';
 import { SelectMenu } from './SelectMenu.js';
+import { Segmented } from './Ui.js';
 
 /**
  * 一轮的时间去哪了。
  *
- * 明细必须按发生顺序（用户要能复述「先等首字、再跑工具、再等首字」），但顺序列表读不出
- * 「谁占大头」——十几次短工具和一次长等待在列表里一样高。所以上面先给一份聚合：三类的
- * 合计条 + 图例（占比、次数、累计耗时）与工具耗时排行；明细每一行再按占整轮的份额铺一条
- * 底色，与合计条同一刻度，最长的那段单独标出来。
+ * 明细默认按发生顺序，也可按耗时从长到短排。上面给三类的合计条、图例与工具耗时排行；
+ * 明细每一行按占整轮的份额铺底色，与合计条同一刻度，最长的那段单独标出来。
  *
  * 唯一实现：桌面端的「耗时」弹窗与配置页 / 会话详情的「耗时」页签都渲染这里，前者传的
  * 是磁盘上的记录 + 正在跑的那一轮，后者只有磁盘上的记录。
@@ -50,6 +50,19 @@ const KIND_HINT: Record<TurnTimingKind, string> = {
 
 /** 工具排行只列前三，其余折成「另有 N 种」，完整清单在悬停提示里。 */
 const TOOL_BREAKDOWN_LIMIT = 3;
+
+type TimingSort = 'time' | 'duration';
+
+export function sortTimingItems(timing: TurnTimingSummary, order: TimingSort) {
+  const rows = timing.timeline.map((item, index) => ({ item, index }));
+  return rows.sort((a, b) => {
+    if (order === 'duration') {
+      const delta = b.item.durationMs - a.item.durationMs;
+      if (delta) return delta;
+    }
+    return a.item.offsetMs - b.item.offsetMs || a.index - b.index;
+  });
+}
 
 function statusText(timing: TurnTimingSummary): string {
   if (timing.running) return '进行中';
@@ -200,6 +213,7 @@ export function TurnTimingView({
 }) {
   const sorted = useMemo(() => [...rounds].sort((a, b) => a.state.startedAt - b.state.startedAt), [rounds]);
   const [selectedId, setSelectedId] = useState<string>('');
+  const [sortOrder, setSortOrder] = useState<TimingSort>('time');
   const newestId = sorted.length ? sorted[sorted.length - 1]!.id : '';
 
   // 默认停在最新一轮；选中的那一轮被裁掉（超过保留上限）时同样落回最新一轮，而不是空白。
@@ -219,6 +233,8 @@ export function TurnTimingView({
   const timing = summarizeTurnTiming(selected.state, now);
   if (!timing) return <div className="timing-empty">{emptyLabel}</div>;
   const options = roundOptions(sorted);
+  const rows = sortTimingItems(timing, sortOrder);
+  const byDuration = sortOrder === 'duration';
 
   return (
     <div className="timing-view">
@@ -253,13 +269,25 @@ export function TurnTimingView({
         <ToolBreakdown timing={timing} />
       </div>
 
+      <div className="timing-sort">
+        <Segmented
+          value={sortOrder}
+          options={TIMING_SORT_OPTIONS}
+          onChange={(next) => setSortOrder(next === 'duration' ? 'duration' : 'time')}
+          ariaLabel="执行过程排序"
+          size="compact"
+        />
+      </div>
       <div className="timing-columns" aria-hidden="true">
         <span>开始于</span>
-        <span>执行过程 · 从上到下</span>
+        <span>{byDuration ? '执行过程 · 耗时从长到短' : '执行过程 · 按发生顺序'}</span>
         <span>耗时</span>
       </div>
-      <ol className="timing-list" aria-label="按时间顺序的执行过程">
-        {timing.timeline.map((item, index) => {
+      <ol
+        className={`timing-list${byDuration ? ' is-duration' : ''}`}
+        aria-label={byDuration ? '按耗时从长到短的执行过程' : '按时间顺序的执行过程'}
+      >
+        {rows.map(({ item, index }) => {
           const badge = itemStatusLabel(item);
           const detail = itemLabel(item.kind, item);
           const slowest = index === timing.slowestIndex && timing.timeline.length > 1;

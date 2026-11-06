@@ -5,6 +5,11 @@
  * 像没做完；翻译只发生在展示层，数据与判断逻辑仍然用原始枚举值。
  */
 
+export const TIMING_SORT_OPTIONS = [
+  { value: 'time', label: '按时间' },
+  { value: 'duration', label: '按耗时' },
+];
+
 const MCP_STATUS_LABEL: Record<string, string> = {
   connected: '已连接',
   connecting: '连接中',

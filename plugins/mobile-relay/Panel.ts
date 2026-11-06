@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { resolveLogDir } from '@packages/mica-config/brand.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import type {
   PluginPanelAction,
@@ -48,7 +49,7 @@ const EMPTY_DRAFTS: Drafts = {
   label: '',
   renderer: '',
   relayUrl: '',
-  enrollKey: ''
+  enrollKey: '',
 };
 
 export function readDrafts(dataDir: string | null): Drafts {
@@ -162,6 +163,7 @@ function overviewSection(ctx: PluginContext, dataDir: string | null): PluginPane
         disabled: !configured,
         hint: '手机打开的是中转机上那份页面；本机升级后版本会落后',
       },
+      { id: 'request-logs', label: '查看请求日志', hint: '只记录请求元数据，不包含口令和正文' },
     ],
   };
 }
@@ -294,13 +296,7 @@ export function buildPanelView(ctx: PluginContext, dataDir: string | null): Plug
   ];
 
   const tone =
-    deploy.phase === 'running'
-      ? 'accent'
-      : deploy.phase === 'failed'
-        ? 'error'
-        : configured
-          ? 'ok'
-          : 'muted';
+    deploy.phase === 'running' ? 'accent' : deploy.phase === 'failed' ? 'error' : configured ? 'ok' : 'muted';
 
   return {
     title: '手机访问',
@@ -367,6 +363,22 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
       // 中转地址与 SSH 全部清空。
       if (action === 'show') return phoneDialog(ctx);
 
+      if (action === 'request-logs') {
+        const dir = resolveLogDir();
+        mkdirSync(dir, { recursive: true });
+        const files = readdirSync(dir, { withFileTypes: true })
+          .filter((entry) => entry.isFile())
+          .map((entry) => ({
+            name: entry.name,
+            match: /^relay-requests-(\d{8})(?:-([1-9]\d{0,8}))?\.jsonl$/.exec(entry.name),
+          }))
+          .filter((entry) => entry.match)
+          .sort(
+            (a, b) => a.match![1]!.localeCompare(b.match![1]!) || Number(a.match![2] || 0) - Number(b.match![2] || 0),
+          );
+        return { openPath: { path: files.length ? join(dir, files.at(-1)!.name) : dir } };
+      }
+
       const drafts = saveDrafts(dataDir, values ?? {});
 
       if (action === 'ask-agent') {
@@ -375,13 +387,15 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
         const host = drafts.sshHost || '中转机';
         await runtime.submit(
           `用 mobile-relay-setup skill 帮我把手机访问配好：中转机是 ${host}。` +
-            '仓库里没有页面产物就先构建，再跑 setup.mjs 完成部署，并把地址与口令写回插件设置。'
+            '仓库里没有页面产物就先构建，再跑 setup.mjs 完成部署，并把地址与口令写回插件设置。',
         );
         return { message: '已交给 agent，进展看对话' };
       }
 
       if (action === 'test') {
-        const url = String(ctx.settings.get().relayUrl ?? '').trim().replace(/\/+$/, '');
+        const url = String(ctx.settings.get().relayUrl ?? '')
+          .trim()
+          .replace(/\/+$/, '');
         if (!url) throw new Error('还没配置中转地址');
         try {
           const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(5_000) });
@@ -394,11 +408,7 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
 
       if (action === 'register') {
         const relayUrl = drafts.relayUrl || String(ctx.settings.get().relayUrl ?? '').trim();
-        return registerMachine(
-          ctx,
-          { relayUrl, enrollKey: drafts.enrollKey, label: drafts.label },
-          dataDir
-        );
+        return registerMachine(ctx, { relayUrl, enrollKey: drafts.enrollKey, label: drafts.label }, dataDir);
       }
 
       if (action === 'sync-page') {
@@ -419,7 +429,7 @@ export function createPanelHandler(ctx: PluginContext, dataDir: string | null): 
           },
           () => {
             // 进度落盘在 deploy.json，宿主下一次取视图就会读到
-          }
+          },
         );
         if (state.phase === 'ok') return { message: '完成，手机链接见「状态」一节' };
         throw new Error(state.lines[state.lines.length - 1] || '部署失败，看「过程」一节');

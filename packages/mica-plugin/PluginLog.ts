@@ -41,16 +41,30 @@ export function pluginLogDir(options: PluginLogOptions = {}): string {
   return options.dir ?? resolveLogDir();
 }
 
-/**
- * 这个插件今天正在写的日志文件。
- *
- * 目录还不存在（进程还没产生任何日志）时也返回路径：配置页要展示「日志在哪」，
- * 不能因为暂时没有文件就显示空。
- */
+/** 插件最新的实际日志文件；还没有日志时返回日志目录，不创建空日志。 */
 export function pluginLogPath(pluginId: string, options: PluginLogOptions = {}): string {
-  const base = join(pluginLogDir(options), `${PLUGIN_FILE_PREFIX}${safeFileName(pluginId)}-${dayStamp(Date.now())}`);
-  const existing = nextFreePath(base);
-  return `${existing}.jsonl`;
+  const dir = pluginLogDir(options);
+  const prefix = `${PLUGIN_FILE_PREFIX}${safeFileName(pluginId)}-`;
+  let latest: { name: string; day: string; shard: number } | undefined;
+  try {
+    mkdirSync(dir, { recursive: true });
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.startsWith(prefix)) continue;
+      const match = /^(\d{8})(?:-([1-9]\d*))?\.jsonl$/.exec(entry.name.slice(prefix.length));
+      if (!match) continue;
+      const day = match[1]!;
+      const date = new Date(`${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}T00:00:00Z`);
+      if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10).replace(/-/g, '') !== day) continue;
+      const shard = Number(match[2] ?? 0);
+      if (!Number.isSafeInteger(shard)) continue;
+      if (!latest || day > latest.day || (day === latest.day && shard > latest.shard)) {
+        latest = { name: entry.name, day, shard };
+      }
+    }
+  } catch {
+    // 日志目录不可读写时仍展示目录位置，不影响配置页。
+  }
+  return latest ? join(dir, latest.name) : dir;
 }
 
 /**

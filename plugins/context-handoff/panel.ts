@@ -1,5 +1,16 @@
 import type { PluginPanelView } from '@packages/mica-plugin/PluginPanel.js';
 import { showCard, type Checkpoint } from './state.js';
+export function handoffDetails(c: Checkpoint): string {
+  const escape = (value: string) => value.replace(/[\\`*_{}\[\]()#+.!|<>~-]/g, '\\$&');
+  const list = (items: string[]) => (items.length ? items.map((item) => `- ${escape(item)}`).join('\n') : '未记录');
+  return [
+    `### 历史检查点\n\n${escape(c.checkpoint)}`,
+    `### 待继续\n\n${list(c.pending)}`,
+    `### 已完成 · 模型报告\n\n${list(c.completed)}`,
+    `### 约束与注意事项\n\n${list(c.cautions)}`,
+    `保存时间：${escape(c.savedAt)}  \n来源会话：${escape(c.sourceSessionId)}`,
+  ].join('\n\n');
+}
 export function handoffView(checkpoint?: Checkpoint, threshold = 30, now = Date.now()): PluginPanelView {
   if (!checkpoint)
     return { title: 'Context Handoff', sections: [{ title: '历史检查点', text: '尚无历史检查点。' }], cards: [] };
@@ -12,7 +23,6 @@ export function handoffView(checkpoint?: Checkpoint, threshold = 30, now = Date.
             id: 'handoff',
             title: '历史上下文交接',
             summary: `${c.checkpoint.slice(0, 120)}\n${c.pending.length ? `待继续：${c.pending[0]!.slice(0, 80)}${c.pending.length > 1 ? `（共 ${c.pending.length} 项）` : ''}` : '无待办记录'}`,
-            detail: `保存于 ${c.savedAt} · 继续前需重新核对工作区`,
             tone: 'muted',
             revision: c.revision,
             impressionAction: `impression:${c.revision}`,

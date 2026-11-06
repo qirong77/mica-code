@@ -320,7 +320,11 @@ describe('normalizePluginPanelView', () => {
       title: 'x',
       sections: [{ title: 'a', editor: { action: 'role.save', value: 'x'.repeat(MAX_EDITOR_TEXT + 100) } }],
     });
-    expect(tooLong.sections?.[0].editor?.value.length).toBe(MAX_EDITOR_TEXT);
+    expect(tooLong.sections?.[0].editor?.readOnly).toBe(true);
+    expect(tooLong.sections?.[0].editor?.value).toMatch(/超过.*字符.*文件编辑器/);
+    expect(normalizePluginPanelView({ sections: [{ editor: {
+      action: 'save', value: 'x'.repeat(MAX_EDITOR_TEXT),
+    } }] }).sections?.[0].editor?.value).toHaveLength(MAX_EDITOR_TEXT);
 
     // 空正文是合法的：新建一个还没写内容的文件时，编辑器就是一张白纸。
     const empty = normalizePluginPanelView({
@@ -663,6 +667,18 @@ describe('normalizePluginPanelAction', () => {
     // 整篇正文走自己的通道：`values` 里每个值 2000 字上限，装不下一份文档
     expect(action?.text).toBe(text);
     expect(action?.text?.length).toBeGreaterThan(2000);
+  });
+
+  it('preserves empty documents and rejects oversized writes before dispatch', () => {
+    expect(normalizePluginPanelAction({ action: 'save', text: '' })).toEqual({ action: 'save', text: '' });
+    expect(normalizePluginPanelAction({ action: 'save', text: 'x'.repeat(MAX_EDITOR_TEXT) })?.text)
+      .toHaveLength(MAX_EDITOR_TEXT);
+    let dispatched = false;
+    expect(() => {
+      const action = normalizePluginPanelAction({ action: 'save', text: 'x'.repeat(MAX_EDITOR_TEXT + 1) });
+      if (action) dispatched = true;
+    }).toThrow(/未保存/);
+    expect(dispatched).toBe(false);
   });
 });
 

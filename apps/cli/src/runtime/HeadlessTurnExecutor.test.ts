@@ -21,6 +21,9 @@ class MockAgent {
   }
   runId = 0;
   aborted = false;
+  getSnapshot() {
+    return { providerId: 'test', model: 'test', effort: 'none', lastUsage: undefined };
+  }
   runCalls: Array<{ content: unknown; options: unknown }> = [];
   iterationBoundaryResults: Array<unknown> = [];
   /** Errors to throw from run(), in order; when exhausted the run succeeds. */
@@ -332,6 +335,36 @@ describe('HeadlessTurnExecutor', () => {
     expect(events[0]).toMatchObject({ type: 'turn:start' });
   });
 
+  it('saves the current provider projection instead of a stale display prefix', async () => {
+    const harness = createHarness({ withPluginLayer: true });
+    const previous = [{ role: 'assistant' as const, content: 'old display process' }];
+    Object.assign(harness.sessionController, { getConversationMessages: () => previous });
+    harness.agent.conversationHistory = [{ role: 'assistant', content: 'compacted projection' }];
+    await harness.executor.start(input('new input'));
+    await vi.waitFor(() => expect(harness.getIdleCount()).toBe(1));
+    expect(harness.savedConversations[0]).toEqual([
+      { role: 'assistant', content: 'compacted projection' },
+      expect.objectContaining({ role: 'user', content: 'new input' }),
+    ]);
+  });
+
+  it('awaits preparation under the lease before saving the user input', async () => {
+    const steps: string[] = [];
+    const harness = createHarness({ withPluginLayer: true, applyInputSettings: () => { steps.push('settings'); } });
+    const hooks = (harness.executor as unknown as { options: { hooks: InstanceType<typeof micaPlugin.HookRegistry> } }).options.hooks;
+    hooks.on('turn:prepare', async () => {
+      const lock = join(process.env.MICA_HOME!, 'sessions', '.turn-locks', `${harness.sessionId}.lock`);
+      steps.push(`prepare:${existsSync(lock)}`);
+      await Promise.resolve();
+      steps.push('prepared');
+    });
+    vi.spyOn(harness.agent, 'reserveRunId').mockImplementation(() => { steps.push('reserve'); return ++harness.agent.runId; });
+    vi.spyOn(harness.sessionController, 'saveCurrent').mockImplementation(() => { steps.push('save'); return true; });
+    await harness.executor.start(input('hello'));
+    await vi.waitFor(() => expect(harness.getIdleCount()).toBe(1));
+    expect(steps.slice(0, 5)).toEqual(['settings', 'prepare:true', 'prepared', 'reserve', 'save']);
+  });
+
   it('applies settings to the matching input after each leased refresh and before the first save', async () => {
     const steps: string[] = [];
     const automatic = { ...input('same text'), source: 'system' as const };
@@ -570,6 +603,39 @@ describe('HeadlessTurnExecutor', () => {
     const retrying = events.find((event) => event.type === 'turn:retrying');
     expect(retrying).toMatchObject({ type: 'turn:retrying', attempt: 1 });
     expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
+  });
+
+  it('keeps unconsumed replay inputs when a retry fails before replaying them all', async () => {
+    const { agent, executor, events, getIdleCount } = createHarness();
+    const attemptResults: unknown[][] = [];
+    const run = vi.spyOn(agent, 'run').mockImplementation(async (_content, options = {}) => {
+      const results: unknown[] = [];
+      attemptResults.push(results);
+      if (attemptResults.length === 1) {
+        for (const text of ['A', 'B']) {
+          expect(await executor.start(input(text, 'after_iteration'))).toBe('queued');
+          results.push(await options.onIterationComplete?.());
+          results.push(await options.onIterationComplete?.());
+        }
+      } else {
+        results.push(await options.onIterationComplete?.());
+        if (attemptResults.length === 3) {
+          results.push(await options.onIterationComplete?.());
+          return { runId: agent.runId, text: 'done' };
+        }
+      }
+      throw Object.assign(new Error('server is busy'), { status: 503 });
+    });
+
+    await expect(executor.start(input('hello'))).resolves.toBe('started');
+    await vi.waitFor(() => expect(getIdleCount()).toBe(1));
+
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(attemptResults).toEqual([[null, 'A', null, 'B'], ['A'], ['A', 'B']]);
+    expect(agent.restoreCalls).toBe(2);
+    expect(events.filter((event) => event.type === 'turn:retrying')).toHaveLength(2);
+    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
+    expect(executor.pendingInputs).toEqual([]);
   });
 
   it('does not retry non-transient errors', async () => {

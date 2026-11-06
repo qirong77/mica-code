@@ -560,12 +560,6 @@ html[data-appearance='light'] .chat-find-field {
   background: var(--color-canvas);
 }
 
-/* 终端光标块用 screen 混合在深底上「发光」；亮底色上 screen 只会得到白色、光标消失，
-   换成 multiply 让已经变深的阅读面色正常压上去。 */
-html[data-appearance='light'] .chat-composer-terminal-cursor {
-  mix-blend-mode: multiply;
-}
-
 @layer base {
   :root {
     color-scheme: dark;
@@ -4783,12 +4777,49 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 .chat-composer-input {
   position: relative;
   min-width: 0;
-  min-height: var(--chat-composer-min-h, 30px);
-  max-height: var(--chat-composer-max-h, 180px);
   overflow: hidden;
 }
 
-.chat-composer-markdown-layer,
+.chat-composer-cursor-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.chat-composer-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1.8px;
+  border-radius: 1px;
+  background: var(--color-fg-max);
+  pointer-events: none;
+  animation: chat-composer-cursor-blink 1.06s step-end infinite;
+}
+
+.chat-composer-cursor[hidden] {
+  display: none;
+}
+
+@keyframes chat-composer-cursor-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer-cursor {
+    animation: none;
+  }
+}
+
 .chat-composer-input textarea {
   width: 100%;
   font-family: var(--chat-font);
@@ -4799,46 +4830,9 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   word-break: break-word;
 }
 
-.chat-composer-markdown-layer {
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  overflow: hidden;
-  padding: 5px 5px 5px 0;
-  color: var(--color-fg);
-  pointer-events: none;
-}
-
-.chat-composer-placeholder {
+.chat-composer-input textarea::placeholder {
   color: color-mix(in srgb, var(--color-fg-max) 48%, transparent);
-}
-
-.chat-composer-cursor-mirror {
-  position: absolute;
-  top: 0;
-  left: 0;
-  margin: 0;
-  border: 0;
-  overflow: hidden;
-  visibility: hidden;
-  pointer-events: none;
-  z-index: -1;
-}
-
-.chat-composer-selection {
-  background: var(--color-active);
-  border-radius: 2px;
-}
-
-.chat-composer-terminal-cursor {
-  position: absolute;
-  z-index: 2;
-  display: block;
-  border-radius: 1px;
-  /* 光标块取阅读面前景色：亮色主题里自动变深，白底上仍看得见。 */
-  background: color-mix(in srgb, var(--color-fg) 72%, transparent);
-  pointer-events: none;
-  mix-blend-mode: screen;
+  opacity: 1;
 }
 
 .chat-composer-running {
@@ -4938,12 +4932,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-composer textarea {
-  position: relative;
-  z-index: 1;
   width: 100%;
-  /* 高度范围必须和 .chat-composer-input 用同一组变量：渲染层（markdown-layer）和
-     textarea 是两个独立的滚动视口，视口高度不一致时 layer.scrollTop = ta.scrollTop
-     会被钳到不同的最大值，拖高输入框后可见文字与选区高亮、自绘光标、点击落点全部错位。 */
   min-height: var(--chat-composer-min-h, 30px);
   max-height: var(--chat-composer-max-h, 180px);
   field-sizing: content;
@@ -4954,9 +4943,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   outline: 0 !important;
   background: transparent;
   padding: 5px 5px 5px 0;
-  color: transparent;
-  caret-color: transparent;
-  -webkit-text-fill-color: transparent;
+  color: var(--color-fg);
+  caret-color: var(--color-fg-max);
 }
 
 .chat-composer-actions {
@@ -5606,10 +5594,6 @@ body.is-resizing-btw {
   line-height: 1.55;
 }
 
-/* 输入条：**主对话那套 `TerminalComposer` + `.chat-composer-actions`**（自绘光标、选区
-   高亮、图片粘贴全在主输入条里实现，抽屉不该长出第二种输入框）。所以这里只做两件事：
-   一是把抽屉的 foot 收成边框，二是让 `.chat-composer` 在抽屉里是一块有边框的输入框
-   ——主输入条是整屏宽的一条，抽屉里如果也铺满整宽就没有「这里可以打字」的边界。 */
 .chat-btw-foot {
   display: flex;
   flex: none;
@@ -6250,13 +6234,6 @@ body.is-resizing-btw {
   #root select,
   #root textarea:not(.inputarea) {
     font-size: 16px;
-  }
-
-  /* 上面的规则只覆盖到了 textarea 本身。composer 显示文字的是 .chat-composer-markdown-layer
-     （textarea 是透明的），两者必须同字号，否则自绘光标和选区会和文字错开；它们本来就
-     共用 --chat-text-size，所以在 composer 上改这一个变量即可（.chat-view 是它的祖先）。 */
-  .chat-composer {
-    --chat-text-size: 16px;
   }
 
   /* 发送/上传按钮 25px 在触屏上太小，动作区整体加高 */

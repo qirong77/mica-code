@@ -2,7 +2,7 @@
 
 ## Turn 执行
 
-- `HeadlessTurnExecutor` 不触碰 Ink/UI；每轮顺序：取 lease → `refreshFromStore()` → `reserveRunId()`；取锁失败返回 `busy-remote`。排队输入只在上一轮**完成**后才接着跑，中止/失败把它留在队列里可撤回（与 `message-queue` 插件的 `turn:after` 同一条规则）——否则点了停止会先停、再把排队的话发出去、再停一次。桌面宿主的 abort 强杀兜底只针对发起中止的那一轮（`run.aborting` + turn id），不能杀中止之后新起的轮次。
+- `HeadlessTurnExecutor` 不触碰 Ink/UI；每轮顺序：取 lease → `refreshFromStore()` → 应用输入配置 → await `turn:prepare` → `reserveRunId()` → 保存用户输入；取锁失败返回 `busy-remote`。`turn:prepare` 给插件受当前 lease 保护的 `compactHistory` 能力，将当前压缩结果落盘并同步展示记录；只在持久会话触发。排队输入只在上一轮**完成**后才接着跑，中止/失败把它留在队列里可撤回（与 `message-queue` 插件的 `turn:after` 同一条规则）——否则点了停止会先停、再把排队的话发出去、再停一次。桌面宿主的 abort 强杀兜底只针对发起中止的那一轮（`run.aborting` + turn id），不能杀中止之后新起的轮次。
 - 桌面端点停止是「撤回排队 + 中断」一次动作：`chat:abort` 先经 `mica/queue/recall`（和本地 after_turn 槽）把排队消息取出来，随结果回给页面放回输入框，再发中断。取不到（已注入 / host 不响应）就留在队列里，中止后仍可按 Shift+← 撤回。
 - 每轮都发 `turn:finish`，结果只有 completed / aborted / error；排队轮次同样逐轮取 lease。
 
@@ -20,7 +20,7 @@
 - `mica/*` 扩展通知直接送 renderer，不进 turn 重放缓冲：queue、tasks、BTW、history、capabilities、turn retrying、host maintenance。
 - `mica/capabilities/get|set` 读写会话能力；运行中 set 返回 `ok:false`。
 - `mica/input/activity` 是「用户在输入框敲了字」（不是提交）：宿主只把它翻成运行期事件 `input:activity`，由插件决定要不要动作。桌面端在 `ChatView` 里节流 2s 发出，没有常驻进程时 host 直接吞掉（绝不为几个按键 spawn 一个）；TUI 与 `mica exec` 不发。自动压缩不订阅它——轮次之外不压，只当「人在不在」的通用信号。
-- `mica/input/focus` 是「焦点回到了输入框」（还没敲字）：同样只翻成运行期事件 `input:focus`。桌面端在 `TerminalComposer` 获得焦点时发，并且只在会话没在跑（本页或其他进程都没在跑）时发。与 `input/activity` 一样，当前没有插件消费它。
+- `mica/input/focus` 是「焦点回到了输入框」（还没敲字）：同样只翻成运行期事件 `input:focus`。桌面端在 `ChatComposer` 获得焦点时发，并且只在会话没在跑（本页或其他进程都没在跑）时发。与 `input/activity` 一样，当前没有插件消费它。
 - `turn/start` / `mica/turn/editMessage` 可传 role，由 host 在启动 turn 前应用；edit 时必须在 `loadSnapshot()` 之后应用。角色缺失只 warning 并保留原角色，不为切角色重建 host。
 - `mica/sessionState/get|set` 读写**某个插件的会话级状态**（`pluginState[pluginId]`）。内核不解析那份 JSON：笔记这类形状由插件自己定义，桌面卡片与插件自己的 `ctx.sessionState` 读写同一份。落盘跟随本轮 checkpoint，不在 handler 里抢占 lease。
 - `mica/session/cwd` 换本会话的工作目录（页面右下角那个项目路径）。宿主自己 `process.chdir` 并按新目录改已落盘的那份：盘上的 `cwd` 是 `process.cwd()` 的快照，页面直接改文件会被下一轮保存覆盖回去、那一轮也还在旧目录里跑。运行中拒绝（这一轮已按旧目录起了工具与 prompt）；`updatedAt` 不动（换目录不是会话活动，否则会话会被顶到 Recent 最前面）。桌面端 `chat:set-cwd` 优先交给这条会话的宿主，没人持锁才直接写文件，草稿（还没落盘的会话）不写。

@@ -27,12 +27,12 @@
 | `--prune-only`、loop 轮前压缩                                | 本地清理，无可清理内容时可丢最早轮次       |
 
 - 快速压缩（`toolResultsOnly`）只动「压缩区」（受保护区之前的历史）：工具调用与结果聚合成一对 `call_id: mica_compact` 的占位消息，参数为 `{}`，说明文本形如 `[Mica compact] Placeholder for 42 collapsed tool calls (not a real result): read_file × 18, bash × 12, …; re-run or re-read if needed.`；压缩区的思考（Responses `reasoning` 条目、Chat `reasoning_content`）一律丢弃——call_id 全变了，留着就是无效引用。
-- 会话压缩是官方插件 `plugins/session-compact/`，**只有两个手动入口**（会话右键菜单），没有阈值、次数与自动触发：
+- 会话压缩是官方插件 `plugins/session-compact/`，有两个手动入口（会话右键菜单）；模型配置变更后下一次发送前自动快速压缩，没有阈值、次数与定时触发：
   - 快速压缩 → `agent.compactIdleHistory({ mode: 'quick' })`，与 `/compact` 同一条实现（`toolResultsOnly`）：工具过程聚合成一条占位调用、思考与媒体清掉，用户与助手的正文原样保留、顺序不变。不调模型；压完这一区的工具过程不再能原样重放（只剩工具名与次数），要细节就重新读文件、重跑命令。
   - 模型压缩 → `agent.compactIdleHistory({ mode: 'model', summarize })`，历史折成 checkpoint 摘要 + 最近几轮。摘要请求只带用户与助手的对话（`summaryInput: 'dialogue'`：工具调用、工具结果、思考都不进摘要输入，它们占九成篇幅却不进结论），走清单 `llm`（「压缩摘要模型」面板）：默认复用当前会话模型，也能换成更便宜的独立接口，失败自动降级；插件只决定「谁写这段摘要」，分段、预算与截断仍归内核的 `CompactionService`。
-- 轮次之外的压缩改的是**已经落盘的那份历史**（`compactIdleSessionHistory`：拿到 turn lease → 压内存里的快照 → 连同 `historyReplaced` 一起落盘），所以压完重开这条会话看到的也是压缩后的样子。会话正忙（这一轮在跑、另一个进程持有 lease）时宿主回 `busy`，插件只提示「等这一轮结束再压」，不排队、不插进正在跑的请求。
-- 这条通路整段跑在宿主的**维护窗口**里（`runAppServer` 的 `runIdleTask` → `runMaintenance({ reason: 'compaction', label: '压缩' })`）：客户端把这几秒的发送留在排队行里（`waitingFor: 'maintenance'`），压完再补发；窗口在 `active: false` **之前**补一条 `historyReplaced`，页面先换上压缩后的记录再收排队那条，顺序不能反。
-- 压缩只改发给模型的历史，不改 `conversationMessages`；压缩失败只回一句可读的提示，不中断任何 turn。
+- 轮次之外的压缩会改写已落盘的会话历史（`compactIdleSessionHistory`：拿到 turn lease → 压内存里的快照 → 根据当前压缩结果生成 `conversationMessages`，连同 notice 落盘）。界面完整展示当前持久化记录，模型压缩后旧历史会随之变为摘要加最近几轮，不另外保留永不变化的原始展示历史。会话正忙（这一轮在跑、另一个进程持有 lease）时宿主回 `busy`，插件只提示「等这一轮结束再压」，不排队、不插进正在跑的请求。
+- 这条通路整段跑在宿主的**维护窗口**里（`runAppServer` 的 `runIdleTask` → `runMaintenance({ reason: 'compaction', label: '压缩' })`）：客户端把这几秒的发送留在排队行里（`waitingFor: 'maintenance'`），压完再补发；窗口在 `active: false` **之前**补一条 `historyReplaced`，页面先同步当前落盘的压缩记录再收排队那条，顺序不能反。
+- 迭代重写句柄的 `compact(messages, options)` 只压传入的请求历史副本；`compactIdleHistory` 与 `turn:prepare` 的 `compactHistory` 则将当前压缩结果落盘并同步 `conversationMessages`，展示与持久化记录一致。压缩失败只回一句可读的提示，不中断任何 turn。
 - 所有压缩保留 usage 记账；需要模型的 compact / review 走 subagent 或 exclusive task，不污染运行中的主 turn。插件自带摘要请求时（`compact(..., { summarize })`）走 `ctx.llm`，用量以 `origin: 'plugin'` 记进同一份 `subagentUsageHistory`。
 - 会话笔记存在快照里，compact 改不到它，每轮由 `buildSystemPrompt()` 追加；rewind 随 checkpoint 回滚。
 
@@ -63,3 +63,4 @@
 - 插件自身的运行事件走 `plugin:observe` hook（`PluginObservationEvent`）：常驻任务抛错（`background:failed`）与钩子处理函数抛错（`hook:failed`，带本进程内该钩子的累计失败次数）由宿主 `hooks.notify`。它不属于任何一条 run，硬塞进去会让那条 run 的耗时与失败原因都变假。`agent:observe` 仍然只描述一次运行的起止与过程。
 - 仍然**不覆盖**：插件装配结果（读 `plugin-status.json` 快照；装配失败与跳过是宿主事实，不是运行事件）。官方 `harness-review` 插件异步写 `$MICA_HOME/plugin-data/harness-review`，通过 `/harness-review list|report|prune|rebuild|assess` 和 `harness_review` 查看、导出、清理、重算、记录人工评估；按 cwd 复盘（helper 运行不进 Runs 表与 `harness_review` 的最近运行列表、单独按来源汇总；报告另有 `## Tool health` 按失败率列每个工具（判该修哪个工具看比率不看绝对次数）；插件自身的失败是机器级事实、不随 cwd 过滤（失败次数因限流是下界）），不自动修改 harness。报告的「Waiting / first token」列读 `request:end`——老摘要没有它，如实显示 `—`，不要用整轮时长冒充。
 - 问题信号的精度是这类插件的核心，宁可少报也不要误报：非零退出码按**命令语义**判定（`rg` 无匹配、`ls`/`test` 找不到、`diff` 有差异不算工具错误，计入 `expectedExits`；`rg` 退出 2、`bun test` 退出 1 仍是真错误），决定 `$?` 的是链式命令的最后一段与管道的最后一个命令；重复调用只在结果逐字节相同且中间没有写操作时报，轮询类工具整个排除。findings 是派生数据，实时写入与 `rebuild` 重放必须共用同一份推导逻辑，`CLASSIFIER_VERSION` 变化后常驻宿主自动重算一次；摘要记 `hostPid`，复盘前按进程存活（早期记录按摘要静默时长）把僵尸运行回收成 `interrupted`。
+- Harness 的复盘、健康表与重建共用工具分类：完整配对轨迹派生 `findings`、`toolErrors`、`expectedExits`；坏文件前缀、未结束、丢事件、缺少类别或调用配对的运行不参与健康率，`toolHealthCoverage` 说明覆盖缺口，不把未知算成成功。用户纠正收到即持久化，只有主运行能原子认领；摘要落盘后确认消费，helper / 委派也不能覆盖用户输入槽位。人工评估追加进 `decisions/<key>/<uuid>.json`，记录可见证据基线；`validated` / `dismissed` 后的新证据只产生 `reviewNeeded`，不改人工状态，`regressed` 和基线缺失同样提示复核。旧评估单文件由 Evolution 迁移，不保留运行期旧格式回退。

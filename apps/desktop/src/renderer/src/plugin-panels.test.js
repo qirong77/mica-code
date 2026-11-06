@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   applyPanelResult,
   clearMenuCache,
+  createPanelActionQueue,
   createPluginPanelsStore,
   isCompletedToolEvent,
   isOpenableLink,
@@ -11,6 +12,7 @@ import {
   panelCardImpressionKey,
   panelNeedsQuickbarView,
   panelDrafts,
+  panelViewContext,
   pluginPanelCards,
   pluginPanelTabs,
   pluginQuickbarItems,
@@ -19,11 +21,24 @@ import {
   quickbarMenuTable,
   readMenuCache,
   readPanelView,
+  reconcilePanelActionDrafts,
+  reconcilePanelDrafts,
   sectionDrafts,
   writePanelView,
   writeMenuCache,
   selectPluginPanels
 } from './plugin-panels'
+
+test('action refresh updates untouched fields in other sections while preserving real edits', () => {
+  const baseline = { '0:search': '', '1:host': 'old', '1:user': 'root' }
+  const submitted = { ...baseline, '0:search': 'submitted' }
+  const drafts = { ...submitted, '0:search': 'typed during request', '1:user': 'custom' }
+  const next = { '0:search': '', '1:host': 'target-host', '1:user': 'target-user' }
+  expect(reconcilePanelActionDrafts(drafts, baseline, next, submitted, 0)).toEqual({
+    '0:search': 'typed during request', '1:host': 'target-host', '1:user': 'custom'
+  })
+  expect(reconcilePanelActionDrafts(submitted, baseline, next, submitted, 0)).toEqual(next)
+})
 
 test('only declared dynamic/status/shortcut panels participate in quickbar polling', () => {
   expect(panelNeedsQuickbarView({ shortcuts: [] })).toBe(false)
@@ -510,14 +525,39 @@ describe('菜单缓存', () => {
 })
 
 describe('面板视图缓存', () => {
+  test('view identity includes node, session, cwd and role', () => {
+    const context = panelViewContext('node', 'session', '/repo', 'role')
+    writePanelView(context, 'plugin', { title: 'Current' })
+    expect(readPanelView(context, 'plugin')?.view.title).toBe('Current')
+    for (const identity of [
+      panelViewContext('other', 'session', '/repo', 'role'),
+      panelViewContext('node', 'other', '/repo', 'role'),
+      panelViewContext('node', 'session', '/other', 'role'),
+      panelViewContext('node', 'session', '/repo', 'other')
+    ]) expect(readPanelView(identity, 'plugin')).toBeNull()
+    expect(panelViewContext('node', 'session', '/repo', '')).toBe(
+      panelViewContext('node', 'session', '/repo', 'default'))
+  })
+
+  test('fresh data replaces seeded values but preserves typing, including cleared fields', () => {
+    const baseline = { '0:name': 'seed', '0:password': '', '1:host': 'old' }
+    const fresh = { '0:name': 'fresh', '0:password': '', '1:host': 'new', '1:port': '22' }
+    expect(reconcilePanelDrafts(baseline, baseline, fresh)).toEqual(fresh)
+    expect(reconcilePanelDrafts({ ...baseline, '0:name': '', '0:password': 'typed' }, baseline, fresh))
+      .toEqual({ ...fresh, '0:name': '', '0:password': 'typed' })
+    expect(reconcilePanelDrafts({ '0:name': 'typed before first read' }, {}, fresh)['0:name'])
+      .toBe('typed before first read')
+  })
+
   test('抽屉打开时先画缓存的那一份，过期的也照画', () => {
-    expect(readPanelView('node-9', 'user.demand-dev')).toBeNull()
-    writePanelView('node-9', 'user.demand-dev', { title: '需求开发', sections: [] }, 1000)
-    expect(readPanelView('node-9', 'user.demand-dev', 2000)).toEqual({
+    const context = panelViewContext('node-9', 'session-9', '/repo', 'default')
+    expect(readPanelView(context, 'user.demand-dev')).toBeNull()
+    writePanelView(context, 'user.demand-dev', { title: '需求开发', sections: [] }, 1000)
+    expect(readPanelView(context, 'user.demand-dev', 2000)).toEqual({
       view: { title: '需求开发', sections: [] },
       stale: false
     })
-    expect(readPanelView('node-9', 'user.demand-dev', 1000 + 60_000)?.stale).toBe(true)
+    expect(readPanelView(context, 'user.demand-dev', 1000 + 60_000)?.stale).toBe(true)
   })
 
   test('草稿取每个输入框的初值，按分区隔离，缺省为空串', () => {
@@ -543,6 +583,93 @@ describe('面板视图缓存', () => {
     expect(sectionDrafts({ ...drafts, '1:host': 'edited' }, 1)).toEqual({ host: 'edited' })
     // 没有作用域时不把带序号的内部键交给插件。
     expect(sectionDrafts(drafts, 2)).toEqual({})
+  })
+})
+
+describe('panel auto-commit queue', () => {
+  const harness = () => {
+    const timers = new Map()
+    const calls = []
+    const releases = []
+    let next = 0
+    const queue = createPanelActionQueue((task) => {
+      calls.push(task)
+      return new Promise((resolve) => releases.push(resolve))
+    }, {
+      schedule: (callback) => { timers.set(++next, callback); return next },
+      cancel: (timer) => timers.delete(timer)
+    })
+    return {
+      queue, calls, releases,
+      tick() {
+        const callbacks = [...timers.values()]
+        timers.clear()
+        for (const callback of callbacks) callback()
+      },
+      async complete(result = { ok: true }) {
+        releases.shift()(result)
+        await Promise.resolve()
+        await Promise.resolve()
+      }
+    }
+  }
+
+  test('serializes requests and commits only the latest pending value after a busy save', async () => {
+    const h = harness()
+    h.queue.commit(0, 'first')
+    h.tick()
+    h.queue.commit(0, 'second')
+    h.tick()
+    h.queue.commit(0, 'latest')
+    h.tick()
+    expect(h.calls).toEqual(['first'])
+    await h.complete()
+    expect(h.calls).toEqual(['first', 'latest'])
+    await h.complete()
+  })
+
+  test('flush on section switch or close submits debounced tail and keeps other sections', async () => {
+    const h = harness()
+    h.queue.commit(0, 'section zero')
+    h.queue.commit(1, 'section one')
+    h.queue.flush(0)
+    expect(h.calls).toEqual(['section zero'])
+    h.queue.flush()
+    await h.complete()
+    expect(h.calls).toEqual(['section zero', 'section one'])
+    await h.complete()
+    h.tick()
+    expect(h.calls).toHaveLength(2)
+  })
+
+  test('connect or cancel discards that section pending draft rather than replaying it afterwards', async () => {
+    const h = harness()
+    h.queue.commit(0, 'in-flight draft')
+    h.tick()
+    h.queue.commit(0, 'obsolete pending draft')
+    h.tick()
+    const action = h.queue.action(0, 'connect')
+    h.queue.flush()
+    await h.complete()
+    expect(h.calls).toEqual(['in-flight draft', 'connect'])
+    await h.complete()
+    expect(await action).toEqual({ ok: true })
+    h.tick()
+    expect(h.calls).toHaveLength(2)
+  })
+
+  test('a failed save does not swallow newer edits or block later explicit actions', async () => {
+    const h = harness()
+    h.queue.commit(0, 'first')
+    h.tick()
+    h.queue.commit(0, 'new input')
+    h.tick()
+    await h.complete({ ok: false })
+    expect(h.calls).toEqual(['first', 'new input'])
+    await h.complete()
+    const action = h.queue.action(0, 'cancel')
+    await h.complete()
+    expect(await action).toEqual({ ok: true })
   })
 })
 

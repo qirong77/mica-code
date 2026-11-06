@@ -11,6 +11,8 @@ import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { uncommittedResponseText } from './conversationHistory.js';
 import { TurnNoticeLog, createRetryNotice, createTurnErrorNotice, mergeInFlightUserMessage } from './turnNotices.js';
+import { compactIdleSessionHistory } from '../agent/agentCompaction.js';
+import type { PluginTurnPrepareEvent } from '@packages/mica-plugin/index.js';
 
 export type HeadlessTurnStatus = 'completed' | 'aborted' | 'error';
 
@@ -418,7 +420,30 @@ export class HeadlessTurnExecutor {
       // Must run before reserveRunId(): loadSnapshot inside the refresh bumps
       // the run id, and reserving first would make this turn look aborted.
       this.options.sessionController.refreshFromStore();
+      const before = this.persistsSession && this.options.hooks ? agent.getSnapshot() : null;
       this.options.applyInputSettings?.(input);
+      if (before && this.options.hooks) {
+        const current = agent.getSnapshot();
+        const usage = before.lastUsage;
+        const event: PluginTurnPrepareEvent = {
+          previous: {
+            providerId: usage?.providerId ?? before.providerId,
+            model: usage?.model ?? before.model,
+            effort: before.effort,
+          },
+          current: { providerId: current.providerId, model: current.model, effort: current.effort },
+          compactHistory: async (options) => {
+            const result = await compactIdleSessionHistory({
+              agent,
+              sessionController: this.options.sessionController,
+              conversationMessages: () => agent.toConversationMessages(),
+              ...options,
+            });
+            return result ? { status: 'applied', ...result } : { status: 'skipped', reason: 'empty' };
+          },
+        };
+        await this.options.hooks.emit('turn:prepare', event);
+      }
       const reservedRunId = agent.reserveRunId();
       this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
       let runContent = content;
@@ -487,8 +512,7 @@ export class HeadlessTurnExecutor {
             });
             break;
           } catch (error) {
-            replayInputs.length = 0;
-            replayInputs.push(...attemptInputs);
+            replayInputs.unshift(...attemptInputs);
             // An abort that lands between reserveRunId() and the agent.run()
             // check is surfaced as an AgentAbortError here; never retry it.
             if (error instanceof AgentAbortError) throw error;

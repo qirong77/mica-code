@@ -82,6 +82,45 @@ async function sessionController(store: Pick<SessionStoreLike, 'load' | 'save'> 
 }
 
 describe('SessionController', () => {
+  it('preserves an unpublished plugin role through resume, refresh and save', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    const { micaAgent } = await import('@packages/mica-agent/index.js');
+    const role = 'unpublished-review-plugin-role';
+    expect(micaAgent.roles.get(role)).toBeUndefined();
+    let disk = persistedSession('plugin-role', {
+      snapshot: { ...baseSnapshot, role, conversationMessages: [{ role: 'user', content: 'work' }] },
+    });
+    let snapshot: AgentRuntimeSnapshot = { ...baseSnapshot };
+    const controller = new SessionController({
+      agent: {
+        getSnapshot: () => snapshot,
+        loadSnapshot: (value) => {
+          snapshot = value;
+        },
+        reloadConfig: vi.fn(),
+        toConversationMessages: () => [{ role: 'user', content: 'work' }],
+      },
+      store: {
+        list: () => [],
+        listRecent: () => [],
+        delete: () => false,
+        load: () => disk,
+        save: (value) => {
+          disk = value;
+        },
+      },
+      config: { apply: () => undefined },
+      ui: { restore: vi.fn() },
+    });
+    expect(controller.resume(disk.id)).toMatchObject({ ok: true });
+    expect(snapshot.role).toBe(role);
+    disk = { ...disk, revision: 2 };
+    expect(controller.refreshFromStore()).toMatchObject({ ok: true });
+    controller.saveCurrent();
+    expect(snapshot.role).toBe(role);
+    expect(disk.snapshot.role).toBe(role);
+  });
+
   it('rolls back the process directory when persisting a cwd change fails', async () => {
     const original = process.cwd();
     const next = mkdtempSync(join(tmpdir(), 'mica-cwd-fail-'));

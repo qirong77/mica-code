@@ -18,8 +18,11 @@ describe('official plugin manifests', () => {
   it('ships at least the todo plugin', () => {
     expect([...officialPluginIds]).toContain('todo');
   });
+  it('does not register the removed task delivery plugin', () => {
+    expect(officialPluginIds.has('task-delivery')).toBe(false);
+  });
   it('registers session experience plugins with desktop panels and optional local telemetry', () => {
-    for (const id of ['task-delivery', 'context-handoff', 'environment-ready']) {
+    for (const id of ['context-handoff', 'environment-ready']) {
       const manifest = officialPluginManifests.find((entry) => entry.id === id)!;
       expect(manifest).toBeDefined();
       expect(manifest.requires).toContain('desktop');

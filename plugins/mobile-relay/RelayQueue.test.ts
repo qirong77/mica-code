@@ -78,6 +78,7 @@ it('keeps commands queued after a settings reload and a completed parked poll', 
     token: 'a'.repeat(32),
     label: 'test',
     phones: new Set(),
+    retryResultIds: new Set(),
     commands: [] as Array<{ id: string }>,
     awakeUntil: 0,
   };

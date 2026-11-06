@@ -10,7 +10,7 @@ export class ContextHandoffTool extends MicaTool {
   constructor(private readonly access: HandoffAccess) {
     super(
       'context_handoff',
-      'Read, set or clear a historical handoff checkpoint for this primary session. Save the checkpoint, completed work, pending work and cautions before pausing or handing off. set replaces the whole checkpoint. These are historical model reports, not proof of the current workspace. Do not include secrets or raw outputs. The Continue button only drafts a request to reverify cwd/Git before proceeding; it does not send or run commands.',
+      'Read, set or clear a historical handoff checkpoint for this primary session. Save only when unfinished work genuinely needs a later handoff, or when the user explicitly requests a save. Do not save for completed work or simple questions and answers. set replaces the whole checkpoint. These are historical model reports, not proof of the current workspace. Do not include secrets or raw outputs. The Continue button only drafts a request to reverify cwd/Git before proceeding; it does not send or run commands.',
       {
         type: 'object',
         additionalProperties: false,

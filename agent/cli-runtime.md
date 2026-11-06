@@ -31,7 +31,7 @@
 - turn 级重试最多 5 次、间隔 10s；仅在错误可重试且本轮没有非只读工具调用时自动重试，先恢复 pre-turn snapshot。
 - provider 的 `withRetry` 只在尚无文本/工具输出时重发（thinking 不算输出），退避 2/4/8/16/30s。
 - 流空闲超过 60s 视为超时（`core/streamIdleTimeout.ts`）：SDK 的超时只覆盖到响应头，网关握手成功却不再吐事件时由看门狗关流并抛 `TimeoutError`，交给上面的重试判定。
-- 重试清空 responseBuffer，重放已消费的 `after_iteration` 输入，等待能被 abort 立即打断。
+- 重试清空 responseBuffer，按顺序重放已消费的 `after_iteration` 输入；再次失败时保留尚未重放的尾部，不能只恢复本次已消费项。等待能被 abort 立即打断。
 - `turn:retrying` 不得投影为 Codex `error`，否则 desktop 会提前结束 run。
 - 重试与失败写成 notice 存进 `conversationMessages`（`runtime/turnNotices.ts`），不进 provider history。
 - `AgentRuntime.abort()` 递增 runId 并中止 controller；补写只传 `uncommittedResponseText`。

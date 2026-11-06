@@ -171,6 +171,7 @@ export class PluginManager {
   /** 常驻宿主传的装配选项（`backgroundTasks` 等）：重新启用时沿用它。 */
   private residentOptions: { ignoreRequirements?: boolean; backgroundTasks?: boolean } = {};
   private stateSyncHook: Disposable | null = null;
+  private prepareStateSyncHook: Disposable | null = null;
   /** 轮次结束时兜底对齐一次（名单在轮次中途变过、或 watcher 漏了事件）。 */
   private stateSettledHook: Disposable | null = null;
   /** 名单变化后等一小段再对齐：一次写盘会连发几个 mtime 事件。 */
@@ -628,6 +629,8 @@ export class PluginManager {
     }
     this.stateSyncHook?.dispose();
     this.stateSyncHook = null;
+    this.prepareStateSyncHook?.dispose();
+    this.prepareStateSyncHook = null;
     this.stateSettledHook?.dispose();
     this.stateSettledHook = null;
     if (this.stateSyncTimer) clearTimeout(this.stateSyncTimer);
@@ -672,6 +675,10 @@ export class PluginManager {
     this.stateSyncHook = baseContext.hooks.beforeEmit('turn:before', async () => {
       // 轮次边界本来就不安全，名单必须先对齐：到这里时 executor 可能已经标了 busy，
       // 但这一轮还没开始跑，工具与钩子换掉不影响任何在途调用。
+      await this.runStateSync(baseContext, { force: true });
+    });
+    this.prepareStateSyncHook?.dispose();
+    this.prepareStateSyncHook = baseContext.hooks.beforeEmit('turn:prepare', async () => {
       await this.runStateSync(baseContext, { force: true });
     });
     this.stateSettledHook?.dispose();

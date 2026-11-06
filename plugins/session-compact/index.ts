@@ -1,18 +1,18 @@
-import type { PluginContext } from '@packages/mica-plugin/index.js';
+import type { PluginContext, PluginTurnPrepareEvent } from '@packages/mica-plugin/index.js';
 import { formatTokenCount } from '@packages/mica-common/format.js';
 
 type CompactHistory = NonNullable<NonNullable<PluginContext['agent']>['compactIdleHistory']>;
 
 /**
- * 会话压缩：会话右键菜单里的两条手动入口，没有别的触发方式。
+ * 会话压缩：右键菜单手动压缩，模型配置变更后下一轮快速压缩。
  *
  * - 快速压缩：把历史里的工具过程聚合成一条占位调用（思考丢掉、图片换占位符）。
  *   不调模型、不丢轮次、不改对话正文，所以随手就能点一次。
  * - 模型压缩：把用户与助手的对话（不带工具调用与结果）交给模型写一段 checkpoint
  *   摘要，旧历史折成这段摘要加最近几轮。
  *
- * 两条改的都是会话**已经落盘的那份历史**（`agent.compactIdleHistory`），所以压完重开
- * 这条会话看到的也是压缩后的样子。没有阈值、次数与自动触发：不点就什么都不发生。
+ * 手动两条入口与轮前 compactHistory 都将当前压缩结果落盘，展示记录同步变化；
+ * 对话区完整展示当前持久化记录，不额外保留压缩前的原始展示历史。
  *
  * 摘要走清单里的 `llm`（默认可复用当前会话模型）：换模型是插件的事，分段、预算与
  * 截断仍归内核的 `CompactionService`。
@@ -29,6 +29,12 @@ export default function setup(ctx: PluginContext): void {
     return;
   }
   ctx.health.report({ level: 'ok', message: '会话压缩已就绪：右键会话可快速压缩或模型压缩' });
+
+  const prepare = ctx.hooks.on<PluginTurnPrepareEvent>('turn:prepare', async ({ previous, current, compactHistory }) => {
+    if (previous.providerId === current.providerId && previous.model === current.model) return;
+    await compactHistory({ mode: 'quick' });
+  });
+  ctx.onDispose(() => prepare.dispose());
 
   menu({
     run({ action }) {

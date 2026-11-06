@@ -2,7 +2,6 @@ import { micaUi } from '@packages/mica-ui/index.js';
 import {
   DEFAULT_ROLE_NAME,
   calculateCachedTokenRate,
-  micaAgent,
   type AgentUsageRecord,
   type SubagentUsageRecord,
 } from '@packages/mica-agent/index.js';
@@ -832,7 +831,7 @@ function fromPersistedSnapshot(
 }
 
 function resolveSnapshotRole(roleName?: string): string {
-  return roleName ? (micaAgent.roles.get(roleName)?.name ?? DEFAULT_ROLE_NAME) : DEFAULT_ROLE_NAME;
+  return typeof roleName === 'string' && roleName.trim() ? roleName.trim() : DEFAULT_ROLE_NAME;
 }
 
 function getPersistableConversationMessages(agent: SessionAgentAdapter): MicaUiConversationMessage[] {

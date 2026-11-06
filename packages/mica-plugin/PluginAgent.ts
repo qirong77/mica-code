@@ -98,6 +98,13 @@ export type PluginIdleCompactOptions = {
   afterApply?: (result: { savedTokens: number; beforeTokens: number; afterTokens: number }) => void;
 };
 
+/** Emitted under a turn lease after refresh and before saving its input. */
+export type PluginTurnPrepareEvent = {
+  previous: { providerId: string; model: string; effort: string };
+  current: { providerId: string; model: string; effort: string };
+  compactHistory(options?: { mode?: 'quick' }): Promise<PluginIdleCompactOutcome>;
+};
+
 /** 一次模型请求所属 agent 的句柄。 */
 export type PluginAgentHandle = {
   readonly sessionId: string | null;

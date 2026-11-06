@@ -118,6 +118,9 @@ function createState(entry) {
     commands: [],
     resultCache: new Map(),
     resultCacheBytes: 0,
+    retryResultIds: new Set(),
+    resultWakePending: false,
+    seenEventBatches: new Set(),
     phones: new Set(),
     imageCache: new Map()
   }
@@ -733,7 +736,7 @@ function resolveResult(state, item) {
   if (item.unchanged) {
     const cached = state.resultCache.get(key)
     if (cached && cached.hash === item.hash) return { ok: true, result: cached.value }
-    return { ok: false, error: '结果缓存已失效，请刷新后确认操作结果' }
+    return null
   }
   const value = item.result ?? null
   if (typeof item.hash === 'string') {
@@ -769,8 +772,21 @@ function broadcastEvents(state, events) {
   }
 }
 
+function acceptEvents(state, body) {
+  const id = body.eventBatchId
+  if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,96}$/.test(id)) return false
+  if (!Array.isArray(body.events) || !body.events.length) return false
+  if (state.seenEventBatches.has(id)) return false
+  state.seenEventBatches.add(id)
+  if (state.seenEventBatches.size > 256) {
+    state.seenEventBatches.delete(state.seenEventBatches.values().next().value)
+  }
+  broadcastEvents(state, body.events)
+  return true
+}
+
 async function handlePoll(req, res) {
-  const opened = openAny(await readRaw(req))
+  const opened = openAny(await readRaw(req, 24 * 1024 * 1024))
   // 解不开就是没密钥 / 被篡改 / 被替换 / 不是这台中转机的机器。不区分原因，统一 401。
   if (!opened) return sendJson(res, 401, { ok: false, error: 'bad envelope' })
   const hinted = opened.state
@@ -799,18 +815,25 @@ async function handlePoll(req, res) {
     if (!item || typeof item !== 'object') continue
     // 迟到结果也同步缓存：桥收到本轮响应后会认为这些完整结果已经送达。
     const result = resolveResult(hinted, item)
+    if (!result) {
+      hinted.retryResultIds.add(item.id)
+      continue
+    }
+    hinted.retryResultIds.delete(item.id)
     const entry = hinted.pending.get(item?.id)
     if (!entry) continue
     hinted.pending.delete(item.id)
     entry.resolve(result)
   }
 
-  const events = Array.isArray(body.events) ? body.events : []
-  if (events.length) broadcastEvents(hinted, events)
+  const acceptedEvents = acceptEvents(hinted, body)
 
   const batch = hinted.commands.splice(0, hinted.commands.length)
-  if (batch.length || events.length) {
-    respondPoll(res, hinted, batch, 300, servedFreshly)
+  const wake = hinted.resultWakePending
+  hinted.resultWakePending = false
+  const hasResults = Array.isArray(body.results) && body.results.length > 0
+  if (batch.length || acceptedEvents || wake || hasResults || hinted.retryResultIds.size || hinted.seenEventBatches.has(body.eventBatchId)) {
+    respondPoll(res, hinted, batch, wake || hasResults || hinted.retryResultIds.size ? 0 : 300, servedFreshly)
     return
   }
   // 没活干时把这次轮询挂起，而不是立刻回一个空响应：页面上的按键/提交一到
@@ -836,8 +859,10 @@ function respondPoll(res, state, batch, intervalMs, resetCache) {
     watch: state.watch,
     // 没有手机连着就别让公司机往外送事件：那是纯浪费的上行
     wanted: phoneOnline(state),
-    resetCache
+    resetCache,
+    retryResultIds: [...state.retryResultIds]
   })
+  state.retryResultIds.clear()
   res.writeHead(200, {
     'content-type': 'application/octet-stream',
     'content-length': payload.length,
@@ -873,6 +898,7 @@ function parkPoll(res, state, resetCache) {
 /** 有命令要下发了：提前结束挂起的轮询。 */
 function wakePoll(state) {
   if (!state.parked) return
+  state.resultWakePending = false
   const batch = state.commands.splice(0, state.commands.length)
   state.parked.done(batch)
 }
@@ -900,8 +926,11 @@ async function handlePush(req, res) {
   // 推事件也是一次存活证明，别让手机端因为「只有事件没有轮询」判机器离线。
   state.lastPollAt = now
 
-  const events = Array.isArray(body.events) ? body.events : []
-  if (events.length) broadcastEvents(state, events)
+  acceptEvents(state, body)
+  if (body.wake === true) {
+    state.resultWakePending = true
+    wakePoll(state)
+  }
   return sendJson(res, 200, { ok: true })
 }
 
@@ -1002,6 +1031,29 @@ async function handlePasteImage(req, res, state) {
   if (res.destroyed) return
   if (!result.ok) return sendJson(res, result.status || 200, { ok: false, error: result.error })
   return sendJson(res, 200, { ok: true, ref: result.result?.ref ?? '' })
+}
+
+async function handleAttachment(req, res, state) {
+  let body
+  try {
+    body = await readJsonBody(req, MAX_PASTE_IMAGE_BYTES)
+  } catch (error) {
+    const tooLarge = String(error?.message || error).includes('payload too large')
+    return sendJson(res, tooLarge ? 413 : 400, {
+      ok: false,
+      error: tooLarge ? '附件太大（超过 24MB），请缩小后再发' : 'bad json'
+    })
+  }
+  const dataUrl = typeof body?.dataUrl === 'string' ? body.dataUrl : ''
+  const match = /^data:[^;,]*;base64,/i.exec(dataUrl)
+  if (!match || !Buffer.from(dataUrl.slice(match[0].length), 'base64').length) {
+    return sendJson(res, 400, { ok: false, error: '缺少文件数据' })
+  }
+
+  const result = await invokeForResponse(state, '__attachment', { dataUrl, name: body?.name }, res)
+  if (res.destroyed) return
+  if (!result.ok) return sendJson(res, result.status || 200, { ok: false, error: result.error })
+  return sendJson(res, 200, { ok: true, ...result.result })
 }
 
 function handleEnv(req, res, state) {
@@ -1248,6 +1300,7 @@ async function route(req, res) {
     if (path === '/api/env') return handleEnv(req, res, state)
     if (path === '/api/image') return handleImage(req, res, state, url)
     if (path === '/api/paste-image' && req.method === 'POST') return handlePasteImage(req, res, state)
+    if (path === '/api/attachment' && req.method === 'POST') return handleAttachment(req, res, state)
     if (path === '/api/paste') return sendJson(res, 501, { ok: false, error: '手机上不支持粘贴文件' })
     return sendJson(res, 404, { ok: false, error: 'not found' })
   }

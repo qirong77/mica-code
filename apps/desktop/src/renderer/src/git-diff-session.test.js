@@ -51,10 +51,11 @@ function harness(read, options = {}) {
       requests.push(args)
       return read(...args)
     },
-    createModel(value) {
+    createModel(value, _path, metadata) {
       // Monaco excludes BOM and normalizes line endings; it is not a source-byte snapshot.
       const normalized = value.replace(/^\uFEFF/, '').replace(/\r\n|\r/g, '\n')
       const model = {
+        metadata,
         getValue: () => normalized,
         disposed: 0,
         dispose() {
@@ -90,6 +91,15 @@ describe('Git diff session', () => {
     )
     expect(gitDiffKey('/repo', { path: 'a', base: 'staged' })).not.toBe(
       gitDiffKey('/repo', { path: 'a', base: 'worktree' })
+    )
+  })
+
+  test('refs comparisons with different heads have separate keys', () => {
+    const first = { path: 'a.js', base: { mode: 'refs', ref: 'base', head: 'first' } }
+    const second = { ...first, base: { ...first.base, head: 'second' } }
+    expect(gitDiffKey('/repo', first)).not.toBe(gitDiffKey('/repo', second))
+    expect(gitDiffKey('/repo', first)).toBe(
+      gitDiffKey('/repo', { ...first, base: { ...first.base } })
     )
   })
 
@@ -186,6 +196,55 @@ describe('Git diff session', () => {
     await h.session.select('/repo', file('a', 'v2'), { force: true })
     expect(h.requests).toHaveLength(3)
     expect(h.editor.getModel()).toBe(previous)
+    h.session.dispose()
+  })
+
+  test.each(['original', 'modified'])(
+    'byte-identical refreshes rebuild models when %s blame ref changes',
+    async (side) => {
+      let blame = {
+        original: { kind: 'commit', ref: 'base' },
+        modified: { kind: 'commit', ref: 'head' }
+      }
+      const h = harness(() => ({ ...text(), blame }))
+      await h.session.select('/repo', file('a'))
+      const previous = h.editor.getModel()
+      blame = { ...blame, [side]: { ...blame[side], ref: 'new-commit' } }
+      await h.session.select('/repo', file('a'), { force: true })
+      const current = h.editor.getModel()
+      expect(current).not.toBe(previous)
+      expect(h.models).toHaveLength(4)
+      expect(previous.original.disposed).toBe(1)
+      expect(previous.modified.disposed).toBe(1)
+      for (const modelSide of ['original', 'modified']) {
+        expect(current[modelSide].metadata).toEqual({
+          cwd: '/repo',
+          side: modelSide,
+          blame: blame[modelSide]
+        })
+      }
+      h.session.dispose()
+    }
+  )
+
+  test('byte-identical refreshes reuse models with unchanged blame metadata', async () => {
+    const h = harness(() => ({
+      ...text(),
+      blame: {
+        original: { kind: 'commit', ref: 'base' },
+        modified: { kind: 'commit', ref: 'head' }
+      }
+    }))
+    await h.session.select('/repo', file('a'))
+    const previous = h.editor.getModel()
+    const count = h.attachments.length
+    await h.session.select('/repo', file('a'), { force: true })
+    expect(h.requests).toHaveLength(2)
+    expect(h.editor.getModel()).toBe(previous)
+    expect(h.models).toHaveLength(2)
+    expect(h.attachments).toHaveLength(count)
+    expect(previous.original.disposed).toBe(0)
+    expect(previous.modified.disposed).toBe(0)
     h.session.dispose()
   })
 

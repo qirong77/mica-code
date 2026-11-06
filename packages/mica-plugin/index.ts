@@ -341,6 +341,7 @@ export type {
   PluginAgentHandle,
   PluginAgentRegistry,
   PluginAgentUsage,
+  PluginTurnPrepareEvent,
   PluginCompactKind,
   PluginCompactMode,
   PluginCompactOptions,
