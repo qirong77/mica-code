@@ -9,9 +9,13 @@
 - **五个落点**：不直接运行命令，但打开网页或启动新会话仍可能产生后续操作，具体权限由宿主控制。
 
 - **悬停预览 `preview`**：按钮可声明一个非阻断的轻量卡片，必须有 `title`，并至少提供
-  `text`、`markdown` 或 `note` 之一；`text` 与 `markdown` 互斥。宿主会按按钮自身内容在底部
-  加上动作，不接受模型从 `preview` 注入动作。`path`、`open`、`compose`、`session` 默认都有
-  有用摘要，模型生成文件、Markdown、网页 / 本地服务或构建测试成功时应主动补充更具体的预览。
+  `text`、`markdown`、`columns` + `rows` 表格或 `note` 之一；`text` 与 `markdown` 互斥。
+  表格最多 6 列 / 8 行，每行按列序给格，一格写成 `{ "text" }`，要表达「这是合计 / 这格失败」
+  再加 `tone`（`muted` / `ok` / `warn` / `error` / `accent`）——Excel / CSV 这类产物用它列前几行
+  与合计（归一化也接受直接给字符串的格子）。宿主会按
+  按钮自身内容在底部加上动作，不接受模型从 `preview` 注入动作。`path`、`open`、`compose`、
+  `session` 默认都有有用摘要，模型生成文件、Markdown、网页 / 本地服务或构建测试成功时应
+  主动补充更具体的预览。
 
   ```json
   {
@@ -22,6 +26,25 @@
       "title": "测试报告",
       "markdown": "## 结果\n\n- 12 项通过\n- 0 项失败",
       "note": "悬停查看，点击底部动作在 Mica 中打开"
+    }
+  }
+  ```
+
+  表格产物不必先打开文件：
+
+  ```json
+  {
+    "label": "sales.xlsx",
+    "kind": "path",
+    "path": "/tmp/sales.xlsx",
+    "preview": {
+      "title": "导出完成",
+      "subtitle": "456 行 · 6 列",
+      "columns": ["月份", "订单"],
+      "rows": [
+        [{ "text": "10 月" }, { "text": "128" }],
+        [{ "text": "合计", "tone": "muted" }, { "text": "128" }]
+      ]
     }
   }
   ```

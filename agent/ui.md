@@ -45,6 +45,10 @@
 - 顶部临时提示走 `renderer/src/notify.js` + `NotificationHost.jsx`：`notify({ key, text, detail, level, timeout, actions })`，同 key 原地更新，最多三条，`sticky` 置顶；需要「页面刷完再提示」用 `queueAfterReload`。不要另外写浮层。
 
 - 控件只用 `@mica-config-ui/web` 那一套（`Button` / `Tag` / `Alert` / `Empty` / `Switch` / `Checkbox` / `SelectMenu` / `DateField` / `Segmented` / `text-input`），原生 `<select>`、`type="date"`、`type="checkbox"` 一律不用——`web/noNativeControls.test.ts` 按源码挡住，插件页面同样在范围内。
+- 这些控件的样式限定在 `@scope (.mica-config-ui)` 里：Portal 到 `body` 的浮层（预览卡片、菜单、对话框）里用共享控件，装控件的那一块必须自己套 `mica-config-ui is-embed`，否则全落不到样式，按钮退化成裸文字。整层套会把配色切成 Darcula 那套，所以只套控件区。
+- 快捷按钮的外观验收页是 `?quick-buttons-demo=1`（`renderer/src/QuickButtonsPreviewDemo.jsx`），按钮走 `quickbarButtonLook`、卡片用 `PluginPanels.jsx` 的 `QuickbarPreview`——演示页只提供「模拟对话 + 模拟输入条」的壳，不复制任何按钮或卡片样式，否则两边迟早长得不一样。它是纯静态页，在 `ensureMicaApi()` 之前渲染，可以挂在任意静态服务下看。
+- Portal 到 `body` 的浮层要自己声明 `font-size` / `line-height`：不声明就继承 `body` 的 16px，正文会比它自己的标题还大。浮层的排版按 `.chat-tooltip` 那一档来（`calc(var(--chat-text-size) - 1px)`、1.55、圆角 10px、130ms 位移 2px 入场），并给 `prefers-reduced-motion` 关掉动画；纯文本分支保留换行（`white-space: pre-line`），Markdown 分支要抹平 `.chat-markdown` 自带的字号行高，否则同一张卡片换个写法就换一套排版。
+- `app.css` 认识的状态色是 `--color-success` / `--color-warn` / `--color-danger` / `--color-accent`（明暗各一套）；`--green` / `--amber` / `--red` / `--blue` 只在组件库 `web/styles.css` 的 `.mica-config-ui` 作用域内定义，在 `app.css` 里引用它们等于没写，`color` 会静默落回继承——写状态色时先确认变量属于哪份表。
 - 选中态不要用 `border-left` 或 `inset ... 0 0` 造竖直亮条，用背景、圆角边框与字重区分。
 - 一行里的控件必须等高：原生 select / checkbox 要么 `appearance: none` 自绘，要么用共享组件。
 - 禁用态只掉颜色，尺寸、边框与位置不变。

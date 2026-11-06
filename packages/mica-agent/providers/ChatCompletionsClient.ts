@@ -22,6 +22,7 @@ import { fetchWithReadableErrors } from './providerErrorBody.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import { sendWithEffortFallback } from './effortFallback.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
+import { applyImageBudget, describeImageBudget } from './imageBudget.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ChatCompletionsUsageRecord = AgentUsageRecord & {
@@ -189,7 +190,10 @@ export class ChatCompletionsClient extends BaseAgent<
         requestIndex > 1 && hasStreamedText && !streamTextEndsWithBlankLine ? '\n\n' : '';
       let emittedContentSeparator = false;
       const toolCallsMap = new Map<number, { id: string; function: { name: string; arguments: string } }>();
-      const wireMessages = stripImagesForVision(messages, this.supportsVision, this.model);
+      const budgeted = applyImageBudget(stripImagesForVision(messages, this.supportsVision, this.model));
+      const budgetNote = describeImageBudget(budgeted.report);
+      if (budgetNote) console.error(budgetNote);
+      const wireMessages = budgeted.value;
       const requestTools = this.tools ? this.openaiTools : undefined;
       // 这一条请求的耗时口径（见 AgentQueryOptions.onRequestEnd）：从发出到流结束，
       // 首个正文/思考增量的时刻单独记，用来区分「排队久」和「吐得慢」。

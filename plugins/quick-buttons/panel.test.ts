@@ -120,6 +120,27 @@ describe('快捷按钮面板 view', () => {
     ]);
   });
 
+  it('hands a preview table to the host so a spreadsheet summary needs no opened file', () => {
+    const { handler } = harness(replaceQuickButtons([
+      {
+        id: 'sheet',
+        label: 'sales.xlsx',
+        kind: 'path',
+        path: '/tmp/sales.xlsx',
+        preview: {
+          title: '导出完成',
+          columns: ['月份', '订单'],
+          rows: [['10 月', '128'], [{ text: '合计', tone: 'muted' }, '128']],
+        },
+      },
+    ]));
+    const preview = handler.view({ role: 'default' }).shortcuts![0].preview!;
+    expect(preview.columns).toEqual(['月份', '订单']);
+    expect(preview.rows?.[1]).toEqual([{ text: '合计', tone: 'muted' }, { text: '128' }]);
+    // 表格只加内容，动作仍只有那一个「按钮本身」的落点。
+    expect(preview.actions?.map((action) => action.label)).toEqual(['在 Mica 中打开']);
+  });
+
   it('gives an empty state and no buttons when the session has none', () => {
     const { handler } = harness();
     const view = handler.view({ role: 'default' });

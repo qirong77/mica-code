@@ -139,6 +139,8 @@
 
 按钮也可以是**运行期**的：清单写 `desktop.panel.dynamicShortcuts: true`，视图返回 `shortcuts`（`{ id, label, action?, section?, key? }`，最多 8 枚），宿主把它们画在同一排、排在清单声明的那些之后。这条路径给的是「按钮本身运行期才知道」的插件（模型在会话里现建的一排按钮）；静态入口仍写清单，运行期不给菜单。视图按钮的 `id` 必填（页面靠它认「还是那一个按钮」，也是 `shortcutStates` 的键，页面 key 带 `view:` 前缀与清单按钮分开），`key` 是点击时随动作回传的那个 `key`——一排按钮共用一个动作 id 时靠它分辨。声明了它，即使清单里一枚按钮都没有，页面也会为首屏取一次视图；没有落点或 id 不合法的按钮在归一化里丢掉。
 
+视图按钮还能带 `preview`（`{ title, subtitle?, text?, markdown?, columns?, rows?, note? }`，与弹窗共用同一份只读内容块，表格最多 6 列 / 8 行）：悬停出那张**不打断对话**的轻量卡片，底部动作由宿主按这枚按钮自己的落点生成，插件不能从 `preview` 注入动作。与 `menu` 分工——`menu` 是「点行就动手」的数据表，`preview` 是「只看不动手」的摘要（产物对不对 / 服务通不通 / 构建成没成）。
+
 按钮的外观只声明**意图**：清单与视图的 `shortcuts[].style = { icon, color, shape, iconOnly }`，`icon` 取 `PluginIcon` 那张 lucide 表、`color` 取 `accent|danger|success|warn`、`shape` 取 `pill|soft|plain`。宿主在 `renderer/src/plugin-panels.js` 的 `quickbarButtonLook()` 里翻成类名，色值全走主题令牌（明暗两套），因此插件写不出「只在一套主题里读得清」的颜色；认不出的取值当没写。
 
 需要「点开先看一眼」的入口不要另开一套界面：插件从 `action` 回 `dialog`（`title` / `subtitle` / `text` 与 `markdown` 二选一 / `columns` + `rows` / `note`，另加 `actions` 最多 3 颗底部按钮），宿主用已共享的 ModalShell、表格与 Button 渲染（`ChatView` 的 `PluginTableDialog`）。弹窗按钮点了把 `{ action: id, key }` 交回同一个 `action` 处理器，回新的 `dialog` 就换内容——所以「一段说明 + 几个做法」是一条链，不需要插件自己画页面。

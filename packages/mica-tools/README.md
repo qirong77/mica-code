@@ -15,7 +15,7 @@
 ## 内置工具
 
 - `read_file`：读取文件内容。
-- `read_image`：读取本地图片或网络图片 URL，并嵌入模型对话。
+- `read_image`：读取本地图片或网络图片 URL，并嵌入模型对话。图片在回来时就走 `prepareImageForApi` 的压缩策略（PNG 长边超 1568 按面积平均缩小后无损重编码），结果里的 `Dimensions:` 会标出 `(downscaled from WxH)`，模型据此知道自己看到的不是原始分辨率。
 - `write_file`：写入或覆盖文件。
 - `apply_patch`：应用文件补丁。
 - `list_files`：按 glob 模式列出文件。

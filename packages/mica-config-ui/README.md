@@ -39,6 +39,7 @@ setConfigWebEditor(MyEditor)   // value/language/readOnly/reveal/onChange，见 
 render(<ConfigWebApp />)
 ```
 
+- 宿主里要开一块「整页」时用 `PageFrame`（`title` / `description` / `path` / `actions` + 可滚内容区）：设置页九个页签都用它，别自己再拼页头与滚动区，否则同一个应用会出现两种页头高度。
 - 宿主可以带 `initialSection` / `initialPluginId` 决定打开时落在哪一页（桌面端设置按钮进 config、插件菜单进 plugins 的某个插件详情），带 `onClose`（`closeLabel` 改文案）时侧栏顶部出现「返回对话」；浏览器宿主不传，导航完全由地址栏 `?section=` / `?plugin=` 驱动。
 - **Appearance**（主题：跟随系统 / 浅色 / 深色）由宿主注册的主题能力提供（`setConfigWebThemeHost`，见 `web/theme.ts`）：桌面宿主存运行时 ui-state，浏览器宿主存 localStorage；页面（`web/pages/AppearancePage.tsx`）只展示与转发，点卡片立即生效。没注册时侧栏不出现这一页。
 - 插件目录的图标来自清单的 `icon` 字段，映射表在 `web/pluginIcons.tsx`（未登记的名字回落 `puzzle`）。同一张表也用来画会话右键菜单里插件项的图标（清单 `desktop.sessionMenu` 每项可写 `icon`）。桌面端插件菜单只取图标，经 `@mica-config-ui/pluginIcons` alias 引入，不把整份页面拉进主 bundle。

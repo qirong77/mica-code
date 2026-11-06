@@ -34,6 +34,12 @@ export const QUICK_PREVIEW_SUBTITLE_MAX = 120;
 export const QUICK_PREVIEW_TEXT_MAX = 1200;
 export const QUICK_PREVIEW_MARKDOWN_MAX = 4000;
 export const QUICK_PREVIEW_NOTE_MAX = 240;
+/** 预览里的小表格：只放「前几行 + 合计」这种摘要，完整数据留在产物文件里。 */
+export const QUICK_PREVIEW_COLUMNS_MAX = 6;
+export const QUICK_PREVIEW_ROWS_MAX = 8;
+export const QUICK_PREVIEW_CELL_MAX = 40;
+/** 与宿主面板表格同一套色调：只表达「这格重要 / 这格是合计」，不表达颜色。 */
+export const QUICK_PREVIEW_CELL_TONES = ['muted', 'ok', 'warn', 'error', 'accent'] as const;
 
 /**
  * 点了之后会发生什么。
@@ -140,7 +146,17 @@ export type QuickButtonPreview = {
   subtitle?: string;
   text?: string;
   markdown?: string;
+  /** 表格的列名（最多 6 列）：适合 Excel / CSV 这类「先看前几行对不对」。 */
+  columns?: string[];
+  /** 表格的行，每行按 `columns` 的顺序给格；只有列名没有行时整张表不画。 */
+  rows?: QuickPreviewCell[][];
   note?: string;
+};
+
+/** 预览表格的一格：`muted` 用于「合计 / 待定」这种不该抢前面几行的内容。 */
+export type QuickPreviewCell = {
+  text: string;
+  tone?: (typeof QUICK_PREVIEW_CELL_TONES)[number];
 };
 
 export type QuickDialogItem = {
@@ -405,13 +421,51 @@ export function normalizeQuickButtonPreview(input: unknown): QuickButtonPreview 
   const text = markdown ? '' : trimTo(input.text, QUICK_PREVIEW_TEXT_MAX);
   const subtitle = trimTo(input.subtitle, QUICK_PREVIEW_SUBTITLE_MAX);
   const note = trimTo(input.note, QUICK_PREVIEW_NOTE_MAX);
-  if (!text && !markdown && !note) return undefined;
+  const table = normalizeQuickPreviewTable(input.columns, input.rows);
+  if (!text && !markdown && !note && !table) return undefined;
   return {
     title,
     ...(subtitle ? { subtitle } : {}),
     ...(markdown ? { markdown } : text ? { text } : {}),
+    ...(table ? { columns: table.columns, rows: table.rows } : {}),
     ...(note ? { note } : {}),
   };
+}
+
+/**
+ * 预览里的表格：**要么完整，要么整个不画**。
+ *
+ * 只有列名的空表、或者某一格比列名还多出一列，都是「模型自己也说不清要展示什么」，
+ * 画出来只会让人以为数据缺了。少于列数的行补齐空串，保证每一行都能对齐。
+ */
+function normalizeQuickPreviewTable(
+  columnsInput: unknown,
+  rowsInput: unknown,
+): { columns: string[]; rows: QuickPreviewCell[][] } | undefined {
+  if (!Array.isArray(columnsInput) || !Array.isArray(rowsInput)) return undefined;
+  const columns = columnsInput
+    .slice(0, QUICK_PREVIEW_COLUMNS_MAX)
+    .map((column) => trimTo(column, 20))
+    .filter(Boolean);
+  if (columns.length === 0) return undefined;
+  const rows: QuickPreviewCell[][] = [];
+  for (const input of rowsInput.slice(0, QUICK_PREVIEW_ROWS_MAX)) {
+    if (!Array.isArray(input)) continue;
+    const cells = input.slice(0, columns.length).map((cell) => normalizeQuickPreviewCell(cell));
+    if (!cells.some((cell) => cell.text)) continue;
+    rows.push(columns.map((_, index) => cells[index] ?? { text: '' }));
+  }
+  return rows.length > 0 ? { columns, rows } : undefined;
+}
+
+function normalizeQuickPreviewCell(input: unknown): QuickPreviewCell {
+  if (typeof input === 'string') return { text: trimTo(input, QUICK_PREVIEW_CELL_MAX) };
+  if (!isRecord(input)) return { text: '' };
+  const text = trimTo(input.text, QUICK_PREVIEW_CELL_MAX);
+  const tone = (QUICK_PREVIEW_CELL_TONES as readonly string[]).includes(String(input.tone))
+    ? (input.tone as QuickPreviewCell['tone'])
+    : undefined;
+  return { text, ...(tone ? { tone } : {}) };
 }
 
 export type QuickButtonInput = {

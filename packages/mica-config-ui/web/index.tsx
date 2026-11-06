@@ -42,6 +42,12 @@ export { applyGroupEnabled, buildCapabilitySections } from './capabilityGroups.j
 export type { CapabilityGroupRef, CapabilitySection } from './capabilityGroups.js';
 export { Switch, Switch as ConfigSwitch } from './components/Ui.js';
 export { SettingRow, SettingsGroup } from './components/Ui.js';
+/**
+ * 整页骨架：页头（标题 / 一句话说明 / 位置 / 操作）+ 一条分隔线 + 可滚内容区。
+ * 设置页的九个页签都用它，宿主里要开一块「整页」时也该用它——否则同一个应用会
+ * 出现两种页头高度与两套滚动区。
+ */
+export { PageFrame } from './components/PageFrame.js';
 /** 密钥输入（默认密文 + 眼睛切明文）：服务商 Key、插件设置与插件面板共用一份。 */
 export { SecretInput } from './components/SecretInput.js';
 /**

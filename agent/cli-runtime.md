@@ -49,6 +49,7 @@
 - 两种运行模式的 `[Image](路径)` 都先经 `parseImageRefs` 转成多模态块；headless 直接导入 `mica-ui/utils/imagePaste.js`，避免引入 React/Ink。
 - 运行中改写只能经 `rewriteIterationMessages` 改 provider loop 的本地数组；钩子输入不含 system prompt，Chat Completions 重写后须补回 system。
 - 无视觉模型经 `stripImagesForVision` 替换发送副本中的图片；持久化历史保留原图。
+- 图片体积有两道闸：**准备阶段** `prepareImageForApi`（`mica-common/image.ts`）把 PNG 的长边压到 1568 并无损重编码（够小的图原样透传，其它格式不重编码）；**发送阶段** `applyImageBudget`（`mica-agent/providers/imageBudget.ts`）按字节而不是 token 算账——一次请求的正文（文本 + 内联图片载荷）上限 20MB、单张 6MB，超了就把最旧的图换成 `[图片已省略]…` 占位文本，最新的图优先保留。两道都要有：token 口径看不出 53MB 的请求体，实测 DeepSeek 网关 32MB 能过、48MB 回 413（openresty 的 HTML 错误页），而压缩只覆盖能解码的 PNG。
 - Responses 带 reasoning 参数时保留 `summary: 'auto'`；历史 reasoning 经 `dropReplayedReasoningItems` 从发送副本移除。
 - `buildSystemPrompt()` 默认读 `mica-agent/prompt/system.md`；磁盘 role 只替换 `<system>`，插件 role（清单 `roles` → `$MICA_HOME/plugin-roles/`）**追加**在末尾并带 `append: true`；cwd 的 `AGENT.md` / `AGENTS.md` 合并注入，路径按 live cwd 解析。会话角色名是**配置**：`loadSnapshot` 与 `resolveCurrentRole` 解析不到它时用默认角色的正文，但绝不把名字改写成 `default`（插件 role 由插件 setup 之后才发布，那一刻查不到很正常；改写会让下一次保存真的把角色丢掉）。`agent.role` 因此报配置里的名字。
 - base prompt 只放「换宿主也不变」的东西：身份、指令层级、能力与插件的判断方式、工作方式、编辑约束、验证与交付。计划、委派、笔记、记忆这类策略由对应插件注册 `ctx.prompt.section()` 注入，随插件停用一起消失——不要为了「提示词完整」把工具用法抄回 base。

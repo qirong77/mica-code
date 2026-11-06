@@ -6,6 +6,9 @@ import {
   QUICK_BUTTON_LIMIT,
   QUICK_BUTTON_SHAPES,
   QUICK_BUTTON_TARGETS,
+  QUICK_PREVIEW_CELL_TONES,
+  QUICK_PREVIEW_COLUMNS_MAX,
+  QUICK_PREVIEW_ROWS_MAX,
   formatQuickButtons,
   isStaleQuickButton,
   removeQuickButton,
@@ -37,7 +40,7 @@ const DESCRIPTION = [
   'A button is one click the user would otherwise do by hand — open a page, drop a draft into the composer, hand a whole job to a new session, or open a file. They are for the user, never a way for you to run something yourself, so do not encode destructive or hidden work into one.',
   `Kinds: ${QUICK_BUTTON_KINDS.map((kind) => `${kind} (${QUICK_BUTTON_KIND_LABELS[kind]})`).join(' / ')}. \`open\` defaults to the controlled browser the agent can keep driving; pass target:"external" for the system browser.`,
   "Use `dialog` when one click should first show something: a short result, a list of candidates with links, or one explanation with two or three ways to continue (its own buttons). The host renders it with the app's own dialog components — you only describe the content, never markup or styles.",
-  'Optional `preview` is a non-blocking hover card: give it a title and one of text, markdown, or note. Use it for a useful summary of a generated file, page, build result, or follow-up; text and markdown are mutually exclusive. The host adds the button action itself, so preview never accepts actions.',
+  'Optional `preview` is a non-blocking hover card: give it a title plus at least one readable block — text, markdown, a `columns` + `rows` table, or a note. Use it for a useful summary of a generated file, page, build result, or follow-up; a spreadsheet gets `columns` + a few `rows` (first rows and totals) instead of a wall of text. Text and markdown are mutually exclusive. The host adds the button action itself, so preview never accepts actions.',
   'Looks: `style` takes an icon name from the app icon set (`globe`, `external`, `search`, `sparkles`, `zap`, `file-text`, `git-branch`, `notebook-pen`, `list-checks`, `terminal`, `video`, `calendar`, `tags`, `settings-2` …), a color (`accent` / `danger` / `success` / `warn`), a shape (`pill` / `soft` / `plain`) and `iconOnly`. Colors come from the app theme, so they follow light and dark mode; never try to express a color yourself. Use at most one or two styled buttons per row — the rest stay plain.',
   `At most ${QUICK_BUTTON_LIMIT} buttons; pass the whole row with operation:"set" when the task changes what the user needs next, operation:"add" to append, "remove" (by id) or "clear" to take them away.`,
   'Buttons belong to this session only — they disappear when the user switches conversations, so do not use them as a place to store anything.',
@@ -75,12 +78,34 @@ const BUTTON_SCHEMA = {
     path: { type: 'string', description: 'kind=path: absolute path to the file or folder.' },
     preview: {
       type: 'object',
-      description: 'Optional non-blocking hover preview. Required: title plus text, markdown, or note; text and markdown are mutually exclusive.',
+      description:
+        'Optional non-blocking hover preview. Required: title plus at least one readable block (text, markdown, table, or note); text and markdown are mutually exclusive. The host draws it, so give content, never markup or styles.',
       properties: {
         title: { type: 'string', description: 'Preview title.' },
         subtitle: { type: 'string', description: 'One line under the title.' },
         text: { type: 'string', description: 'Plain text summary; mutually exclusive with markdown.' },
         markdown: { type: 'string', description: 'Markdown summary; mutually exclusive with text.' },
+        columns: {
+          type: 'array',
+          items: { type: 'string' },
+          description: `Table headers, at most ${QUICK_PREVIEW_COLUMNS_MAX} — for a spreadsheet or CSV summary (first rows + totals).`,
+        },
+        rows: {
+          type: 'array',
+          description: `Table rows, at most ${QUICK_PREVIEW_ROWS_MAX}; each row follows the columns order. Give every cell as {"text":"…"} — add "tone" (muted / ok / warn / error / accent) only when a cell should read as a total or a failure.`,
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                text: { type: 'string' },
+                tone: { type: 'string', enum: [...QUICK_PREVIEW_CELL_TONES] },
+              },
+              required: ['text'],
+              additionalProperties: false,
+            },
+          },
+        },
         note: { type: 'string', description: 'Short note at the bottom.' },
       },
       required: ['title'],

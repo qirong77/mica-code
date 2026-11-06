@@ -41,12 +41,14 @@ describe('ToolReadImage', () => {
     expect(JSON.stringify(result)).toContain('Dimensions: 3x2');
   });
 
-  it('preserves an original image larger than the previous API payload limit', async () => {
+  it('keeps a huge image instead of rejecting it: same pixels, repacked bytes', async () => {
     const original = Buffer.concat([pngBuffer, Buffer.alloc(6 * 1024 * 1024)]);
     const result = await prepareImageForApi(original);
 
-    expect(result.buffer).toBe(original);
+    // 体积不再是拒绝的理由：像素原样保留，只是把 PNG 重新打包（顺带丢掉尾部垃圾）。
+    expect([result.width, result.height]).toEqual([3, 2]);
     expect(result.resized).toBe(false);
+    expect(result.buffer.length).toBeLessThan(original.length);
   });
 
   it('resolves relative paths against the tool context cwd', async () => {

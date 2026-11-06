@@ -306,6 +306,34 @@ describe('弹窗按钮（kind: dialog）', () => {
     expect(normalizeQuickButton({ id: 'open', ...open(), preview: { text: '无标题' } })?.preview).toBeUndefined();
   });
 
+  it('accepts a small preview table and drops half-built ones', () => {
+    const table = normalizeQuickButton({
+      id: 'open', ...open(),
+      preview: {
+        title: '导出完成',
+        columns: ['月份', '订单'],
+        rows: [['10 月', '128'], [{ text: '合计', tone: 'muted' }]],
+      },
+    })?.preview;
+    // 少一格的行补空串，保证每行都对齐到列数；不带 tone 的格子就是普通格。
+    expect(table?.columns).toEqual(['月份', '订单']);
+    expect(table?.rows).toEqual([
+      [{ text: '10 月' }, { text: '128' }],
+      [{ text: '合计', tone: 'muted' }, { text: '' }],
+    ]);
+
+    // 只有列名没有行、只有行没有列名、空行：整张表都不画，但标题还能撑起一张纯文字卡片。
+    const noRows = normalizeQuickButton({ id: 'open', ...open(), preview: {
+      title: '导出完成', text: '见文件', columns: ['月份'], rows: [],
+    } })?.preview;
+    expect(noRows).toMatchObject({ text: '见文件' });
+    expect(noRows?.columns).toBeUndefined();
+    const onlyTable = normalizeQuickButton({ id: 'open', ...open(), preview: {
+      title: '导出完成', columns: ['月份'], rows: [['', '']],
+    } });
+    expect(onlyTable?.preview).toBeUndefined();
+  });
+
   it('summarises the popup in one line for the tool result', () => {
     const buttons = replaceQuickButtons([
       {

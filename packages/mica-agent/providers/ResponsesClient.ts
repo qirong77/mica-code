@@ -31,6 +31,7 @@ import { fetchWithReadableErrors } from './providerErrorBody.js';
 import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } from './providerHelpers.js';
 import { sendWithEffortFallback } from './effortFallback.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
+import { applyImageBudget, describeImageBudget } from './imageBudget.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ResponsesUsageRecord = AgentUsageRecord & {
@@ -381,11 +382,16 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       let toolCalls = new Map<number, PendingToolCall>();
       let hasReasoningText = false;
       let reasoningParts: ResponsesReasoningParts | undefined;
-      const wireMessages = stripImagesForVision(
-        dropReplayedReasoningItems(toWireResponsesInput(messages)),
-        this.supportsVision,
-        this.model,
+      const budgeted = applyImageBudget(
+        stripImagesForVision(
+          dropReplayedReasoningItems(toWireResponsesInput(messages)),
+          this.supportsVision,
+          this.model,
+        ),
       );
+      const budgetNote = describeImageBudget(budgeted.report);
+      if (budgetNote) console.error(budgetNote);
+      const wireMessages = budgeted.value;
 
       const requestTools = this.tools ? this.responseTools : undefined;
       // 与 Chat Completions 同一份口径：请求耗时、首字延迟、重试次数，见 onRequestEnd。

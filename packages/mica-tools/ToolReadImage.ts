@@ -50,11 +50,17 @@ export class ToolReadImage extends MicaTool {
     const dimensions = processed.width && processed.height ? `${processed.width}x${processed.height}` : 'unknown';
     const sourceDescription =
       loaded.resolvedSource === source ? source : `${source} (resolved to ${loaded.resolvedSource})`;
+    // 缩小过就在结果里说一声：模型据此知道自己看到的不是原始分辨率，
+    // 读小字失败时应该去要更精确的信息，而不是猜。
+    const resizeNote =
+      processed.resized && processed.sourceWidth && processed.sourceHeight
+        ? ` (downscaled from ${processed.sourceWidth}x${processed.sourceHeight})`
+        : '';
     const summary = [
       `Image loaded from ${sourceDescription}`,
       `Format: ${processed.mediaType}`,
-      `Dimensions: ${dimensions}`,
-      `API payload size: ${formatSize(processed.buffer.length)} (original)`,
+      `Dimensions: ${dimensions}${resizeNote}`,
+      `API payload size: ${formatSize(processed.buffer.length)}`,
     ].join('\n');
 
     return [

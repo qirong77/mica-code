@@ -1,145 +1,21 @@
-.quick-buttons-demo-page {
-  min-height: 100%;
-  padding: 48px clamp(20px, 6vw, 88px);
-  color: var(--color-fg-strong);
-  background: var(--color-canvas);
+/* 这一页是「真的整页」：PageFrame 管页头与滚动区，SettingsGroup / SettingRow 管分块，
+   按钮与卡片来自 app.css 与组件库。所以这里只剩两件宿主自己的事，别的都不要往这儿写：
+   1. 根高度链（`#root` 是固定高度的盒子，`.content-shell` 默认高度自适应）；
+   2. 「模型回复」那条上下文正文的换行（消息里的 \n 是排版的一部分）。 */
+
+.quick-buttons-demo-shell {
+  height: 100%;
 }
 
-.quick-buttons-demo-header {
-  max-width: 760px;
-  margin: 0 auto 30px;
-}
-
-.quick-buttons-demo-eyebrow {
-  color: var(--color-accent);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-
-.quick-buttons-demo-header h1 {
-  margin: 8px 0 6px;
-  color: var(--color-fg-max);
-  font-size: 26px;
-}
-
-.quick-buttons-demo-header p,
-.quick-buttons-demo-hint {
+.quick-buttons-demo-context {
   margin: 0;
-  color: var(--color-fg-dim);
-  font-size: 13px;
-  line-height: 1.5;
+  color: var(--text-soft);
+  line-height: 1.6;
+  white-space: pre-line;
 }
 
-.quick-buttons-demo-stage {
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 20px;
-  border: 1px solid var(--color-line);
-  border-radius: 10px;
-  background: var(--color-panel);
-}
-
-.quick-buttons-demo-composer {
-  border: 1px solid var(--color-line-strong);
-  border-radius: 8px;
-  background: var(--color-canvas);
-  overflow: hidden;
-}
-
-.quick-buttons-demo-input {
-  min-height: 96px;
-  padding: 14px;
-  color: var(--color-fg-faint);
-  font-size: 13px;
-}
-
-.quick-buttons-demo-bar {
-  display: flex;
-  gap: 6px;
-  padding: 8px 10px;
-  overflow-x: auto;
-  border-top: 1px solid var(--color-line);
-  scrollbar-width: thin;
-}
-
-.quick-buttons-demo-button {
-  display: inline-flex;
-  height: 26px;
-  flex: none;
-  align-items: center;
-  gap: 5px;
-  padding: 0 11px;
-  border: 1px solid var(--color-line);
-  border-radius: 7px;
-  background: var(--color-panel);
-  color: var(--color-fg-strong);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.quick-buttons-demo-button:hover,
-.quick-buttons-demo-button:focus-visible {
-  border-color: var(--color-line-strong);
-  background: var(--color-panel-hi);
-  color: var(--color-fg-max);
-  outline: none;
-}
-
-.quick-buttons-demo-button.color-accent { color: var(--color-accent); }
-.quick-buttons-demo-button.color-danger { color: var(--color-danger); }
-.quick-buttons-demo-button.color-success { color: var(--color-success); }
-.quick-buttons-demo-button.color-warn { color: var(--color-warn); }
-.quick-buttons-demo-button.shape-soft { border-color: transparent; background: color-mix(in srgb, var(--color-panel) 60%, transparent); }
-.quick-buttons-demo-button.shape-plain { border-color: transparent; background: transparent; color: var(--color-fg-muted); }
-.quick-buttons-demo-button.is-icon-only { width: 26px; padding: 0; justify-content: center; }
-
-.quick-buttons-demo-feedback {
-  margin: 0;
-  padding: 0 10px 8px;
-  color: var(--color-warn);
-  font-size: 11.5px;
-}
-
-.quick-buttons-demo-hint {
-  margin-top: 14px;
-}
-
-.quick-buttons-demo-preview {
-  position: fixed;
-  z-index: 10000;
-  display: flex;
-  width: min(420px, calc(100vw - 24px));
-  max-height: min(520px, calc(100vh - 24px));
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--color-line-strong);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-panel) 98%, transparent);
-  box-shadow: 0 14px 34px color-mix(in srgb, var(--color-canvas) 48%, transparent);
-  backdrop-filter: blur(14px);
-}
-
-.quick-buttons-demo-preview-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px 14px 8px;
-}
-
-.quick-buttons-demo-preview-head strong { color: var(--color-fg-max); font-size: 13px; }
-.quick-buttons-demo-preview-head span,
-.quick-buttons-demo-preview-note { color: var(--color-fg-dim); font-size: 11.5px; }
-.quick-buttons-demo-preview-body { min-height: 0; overflow: auto; padding: 2px 14px 10px; }
-.quick-buttons-demo-preview-body p { margin: 0; white-space: pre-line; line-height: 1.5; }
-.quick-buttons-demo-preview-note { margin: 0; padding: 0 14px 10px; line-height: 1.4; }
-.quick-buttons-demo-preview-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 14px 12px; border-top: 1px solid var(--color-line); }
-
-@media (max-width: 560px) {
-  .quick-buttons-demo-page { padding: 28px 14px; }
-  .quick-buttons-demo-stage { padding: 12px; }
+/* 快捷条贴着自己的那一行：直接落在输入框上方时它自带内边距，这里补回来一点上下不贴边。 */
+.quick-buttons-demo-shell .chat-plugin-quickbar {
+  padding-left: 0;
+  padding-right: 0;
 }

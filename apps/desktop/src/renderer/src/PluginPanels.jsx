@@ -115,7 +115,9 @@ const CARD_BUTTON_VARIANTS = {
   primary: 'accent', default: 'default', ghost: 'ghost', danger: 'danger-ghost'
 }
 
-const PREVIEW_HOVER_DELAY_MS = 180
+export const PREVIEW_HOVER_DELAY_MS = 180
+/** 指针离开按钮后多久收起悬停卡片：够从按钮挪进卡片，又不至于让卡片一直挂着。 */
+const PREVIEW_LEAVE_GRACE_MS = 160
 
 function previewActionId(action) {
   if (typeof action?.action === 'string' && action.action.trim()) return action.action.trim()
@@ -123,9 +125,16 @@ function previewActionId(action) {
   return ''
 }
 
-function QuickbarPreview({ preview, anchor, onClose, onRun }) {
+export function QuickbarPreview({
+  preview,
+  anchor,
+  onClose,
+  onRun,
+  onPointerEnter,
+  onPointerLeave
+}) {
   const ref = useRef(null)
-  const [position, setPosition] = useState({ left: anchor.left, top: anchor.top })
+  const [position, setPosition] = useState({ left: anchor.left, top: anchor.top, above: true })
   const markdown = typeof preview?.markdown === 'string' ? preview.markdown : ''
   const text = typeof preview?.text === 'string' ? preview.text : ''
   const columns = Array.isArray(preview?.columns) ? preview.columns : []
@@ -167,20 +176,26 @@ function QuickbarPreview({ preview, anchor, onClose, onRun }) {
     const height = ref.current.offsetHeight
     let left = Math.min(anchor.left, window.innerWidth - width - 8)
     let top = anchor.top - height - 8
-    if (top < 8) top = anchor.bottom + 8
+    let above = true
+    if (top < 8) {
+      top = anchor.bottom + 8
+      above = false
+    }
     if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8)
     left = Math.max(8, left)
-    setPosition({ left, top })
+    setPosition({ left, top, above })
   }, [anchor, columns.length, markdown, preview, rows.length, text])
 
   return createPortal(
     <div
       ref={ref}
-      className="chat-plugin-quickbar-preview"
+      className={`chat-plugin-quickbar-preview${position.above ? '' : ' is-below'}`}
       role="dialog"
       aria-label={preview?.title || '快捷按钮预览'}
       style={{ left: position.left, top: position.top }}
       onPointerDown={(event) => event.stopPropagation()}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
     >
       {(preview?.title || preview?.subtitle) && (
         <header className="chat-plugin-quickbar-preview-head">
@@ -213,22 +228,35 @@ function QuickbarPreview({ preview, anchor, onClose, onRun }) {
           </table>
         </div>
       )}
-      {preview?.note && <p className="chat-plugin-quickbar-preview-note">{preview.note}</p>}
-      {actions.length > 0 && (
-        <footer className="chat-plugin-quickbar-preview-actions" role="group" aria-label="预览操作">
-          {actions.map((action) => (
-            <Button
-              key={`${previewActionId(action)}:${action.key || ''}`}
-              size="compact"
-              variant={CARD_BUTTON_VARIANTS[action.tone] || 'default'}
-              onClick={() => {
-                onClose()
-                onRun(action)
-              }}
+      {(preview?.note || actions.length > 0) && (
+        /* 说明和动作是同一件事（「这几个按钮是干什么的」），收在一块页脚里：中间不再夹
+           一条飘在正文下面的灰字，页脚也只有一条分隔线。 */
+        <footer className="chat-plugin-quickbar-preview-foot">
+          {preview?.note && <p className="chat-plugin-quickbar-preview-note">{preview.note}</p>}
+          {actions.length > 0 && (
+            /* `Button` 的样式限定在 `.mica-config-ui` 作用域内（见 packages/mica-config-ui），
+               而这张卡片是 Portal 到 body 的，外面没有那层壳——不套 `is-embed` 的话动作会退化成
+               裸文字。只套动作区：整卡套会把卡片颜色切成 Darcula 一套，暗色/亮色都对不上。 */
+            <div
+              className="chat-plugin-quickbar-preview-actions mica-config-ui is-embed"
+              role="group"
+              aria-label="预览操作"
             >
-              {action.label}
-            </Button>
-          ))}
+              {actions.map((action) => (
+                <Button
+                  key={`${previewActionId(action)}:${action.key || ''}`}
+                  size="compact"
+                  variant={CARD_BUTTON_VARIANTS[action.tone] || 'default'}
+                  onClick={() => {
+                    onClose()
+                    onRun(action)
+                  }}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          )}
         </footer>
       )}
     </div>,
@@ -380,6 +408,7 @@ export function PluginQuickBar({
   const [feedback, setFeedback] = useState('')
   const [openMenu, setOpenMenu] = useState('')
   const [previewState, setPreviewState] = useState(null)
+  const previewCloseTimer = useRef(0)
   // 子项菜单的落点按触发按钮的矩形现算（菜单本体是共享的 FloatingMenu，自己会收敛视口）。
   const [menuPos, setMenuPos] = useState(null)
   // 动态菜单要问插件要条目（分支是会话事实，清单里写不出来）。条目在页面层按会话缓存
@@ -443,6 +472,8 @@ export function PluginQuickBar({
     hoverTimer.current = 0
   }, [])
   useEffect(() => clearHover, [clearHover])
+  // 收起卡片的定时器同样不能活过卸载：会话一关，它还会对着已卸掉的组件 setState。
+  useEffect(() => () => clearTimeout(previewCloseTimer.current), [])
 
   // 同一插件的菜单和状态共用一次视图请求。上下文包含会话与目录，旧请求不能回填新会话。
   const loadView = useCallback(
@@ -635,8 +666,6 @@ export function PluginQuickBar({
   const statusOwner = panels.find((panel) => statusBars[panel.id]?.label) || null
   const statusBar = statusOwner ? statusBars[statusOwner.id] : null
   const cards = pluginPanelCards(panels, cardViews?.scope === scope ? cardViews.cards : {})
-  // 只有状态栏没有按钮时也要画：那正是「功能开着、但不需要一个动作按钮」的形态。
-  if (items.length === 0 && !statusBar && cards.length === 0 && !feedback) return null
 
   const openSection = (panel, section) => {
     const active = openPlugin === panel.id && focusSection === section
@@ -725,16 +754,18 @@ export function PluginQuickBar({
     else showMenu(event?.currentTarget?.getBoundingClientRect?.() || null, panel, shortcut, key)
   }
 
-  const showPreview = useCallback((eventOrRect, panel, shortcut, key) => {
+  const showPreview = useCallback((eventOrRect, panel, shortcut, key, source = 'focus') => {
     if (!shortcut?.preview) return
     const rect = eventOrRect?.currentTarget?.getBoundingClientRect?.() || eventOrRect
     if (!rect) return
     clearHover()
+    clearTimeout(previewCloseTimer.current)
     setOpenMenu('')
     setPreviewState({
       key,
       panel,
       shortcut,
+      source,
       anchor: {
         left: Math.round(rect.left),
         top: Math.round(rect.top),
@@ -751,9 +782,28 @@ export function PluginQuickBar({
     if (!rect) return
     hoverTimer.current = window.setTimeout(() => {
       hoverTimer.current = 0
-      showPreview(rect, panel, shortcut, key)
+      showPreview(rect, panel, shortcut, key, 'hover')
     }, PREVIEW_HOVER_DELAY_MS)
   }, [clearHover, showPreview])
+
+  // 悬停打开的卡片跟着鼠标走：离开按钮一小会儿就收起，但这点时间足够把指针移到卡片
+  // 上——移上去就取消收起，于是「瞄一眼」和「认真读并点里面按钮」都不会被打断。
+  // 点击/键盘打开的不受这条规则管，那种卡片本来就该等用户处理完。
+  const schedulePreviewClose = useCallback(() => {
+    if (previewState?.source !== 'hover') return
+    clearTimeout(previewCloseTimer.current)
+    previewCloseTimer.current = window.setTimeout(() => {
+      previewCloseTimer.current = 0
+      setPreviewState(null)
+    }, PREVIEW_LEAVE_GRACE_MS)
+  }, [previewState])
+
+  const cancelPreviewClose = useCallback(() => clearTimeout(previewCloseTimer.current), [])
+
+  // 提前返回必须排在所有 hook 之后：视图回来之前这一排是空的，先返回一次再渲染出按钮
+  // 会让这次的 hook 数比上一次多（React #310）。只有状态栏没有按钮时也要画——那正是
+  // 「功能开着、但不需要一个动作按钮」的形态。
+  if (items.length === 0 && !statusBar && cards.length === 0 && !feedback) return null
 
   return (
     <div className="chat-plugin-quickbar-stack">
@@ -828,10 +878,15 @@ export function PluginQuickBar({
               key={key}
               className={`chat-plugin-quickbar-group${first && panels.length > 1 ? ' is-plugin-start' : ''}`}
               onMouseEnter={!disabled ? (event) => {
+                // 从隔壁按钮直接挪过来时，别让上一颗按钮的收起定时器把卡片闪掉。
+                cancelPreviewClose()
                 if (shortcut.preview) hoverPreview(event, panel, shortcut, key)
                 else if (group) hoverMenu(event, panel, shortcut, key)
               } : undefined}
-              onMouseLeave={clearHover}
+              onMouseLeave={() => {
+                clearHover()
+                schedulePreviewClose()
+              }}
             >
               <button
                 type="button"
@@ -939,6 +994,8 @@ export function PluginQuickBar({
           preview={previewState.shortcut.preview}
           anchor={previewState.anchor}
           onClose={() => setPreviewState(null)}
+          onPointerEnter={cancelPreviewClose}
+          onPointerLeave={schedulePreviewClose}
           onRun={(action) => {
             const id = previewActionId(action)
             if (id) void runAction(

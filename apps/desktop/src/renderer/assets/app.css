@@ -523,6 +523,11 @@ html[data-appearance='light'] .chat-tooltip {
     0 18px 40px rgb(0 0 0 / 16%),
     0 2px 6px rgb(0 0 0 / 11%);
 }
+html[data-appearance='light'] .chat-plugin-quickbar-preview {
+  box-shadow:
+    0 18px 40px rgb(0 0 0 / 16%),
+    0 2px 6px rgb(0 0 0 / 11%);
+}
 html[data-appearance='light'] .chat-selection-bar {
   box-shadow: 0 6px 18px rgb(0 0 0 / 14%);
 }
@@ -4306,6 +4311,24 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: var(--color-fg-dim);
 }
 
+/* 表格里的状态色：插件只能声明「这格是合计 / 这格失败」，色值由主题令牌决定，明暗各一套。
+   少了这几条，模型写了 `tone:"error"` 的格子会和普通格长得一样。 */
+.chat-plugin-table td.tone-ok {
+  color: var(--color-success);
+}
+
+.chat-plugin-table td.tone-warn {
+  color: var(--color-warn);
+}
+
+.chat-plugin-table td.tone-error {
+  color: var(--color-danger);
+}
+
+.chat-plugin-table td.tone-accent {
+  color: var(--color-accent);
+}
+
 .chat-plugin-table-link {
   color: var(--color-accent);
   text-decoration: none;
@@ -6920,6 +6943,15 @@ body.is-resizing-btw {
   color: var(--color-fg-max);
 }
 
+/* 主操作（真要干点什么）比配置入口亮一档：文字最实、字重加半档，尺寸与边框不动，
+   所以一排里不会有一颗按钮比别的更大。
+   这一条必须排在下面的 `color-*` 之前：两者都是两个类，同优先级时「带动作」的按钮
+   会盖掉插件声明的强调色，一排五颗全变成同一个前景色。 */
+.chat-plugin-quickbar-button.is-primary {
+  color: var(--color-fg-max);
+  font-weight: 600;
+}
+
 /* 插件声明的强调色（清单 / 视图 `shortcuts[].style.color`）：只换前景与描边，
    底色与尺寸不动——一排按钮里能不能看出「这颗是主操作」靠色相，不靠变大。
    色值全部来自主题令牌，暗色与亮色各有一份，插件写死颜色必然在另一边读不清。 */
@@ -7005,13 +7037,6 @@ body.is-resizing-btw {
   color: var(--color-fg-max);
 }
 
-/* 主操作（真要干点什么）比配置入口亮一档：文字最实、字重加半档，尺寸与边框不动，
-   所以一排里不会有一颗按钮比别的更大。 */
-.chat-plugin-quickbar-button.is-primary {
-  color: var(--color-fg-max);
-  font-weight: 600;
-}
-
 .chat-plugin-quickbar-button:disabled {
   cursor: default;
   opacity: 0.5;
@@ -7072,63 +7097,139 @@ body.is-resizing-btw {
   white-space: nowrap;
 }
 
+/* 预览卡片：本质是「悬停看一眼」的浮层，所以视觉上直接沿用 `.chat-tooltip` 那一档——
+   同样的圆角、阴影、字体与行高，出现时也只位移 2px 而不「弹」出来。
+
+   字号必须自己声明：这张卡片 portal 到 body，不声明就继承 body 的 16px，正文会比
+   标题还大，卡片里最扎眼的错位就是这么来的。 */
 .chat-plugin-quickbar-preview {
+  /* 卡片表面：表头这类需要盖住下层内容的元素要跟它同色，不能各自取 panel。 */
+  --preview-surface: color-mix(in srgb, var(--color-fg-max) 4%, var(--color-panel));
   position: fixed;
   z-index: 10000;
   display: flex;
-  width: min(420px, calc(100vw - 16px));
-  max-height: min(520px, calc(100vh - 16px));
+  box-sizing: border-box;
+  /* 按内容定宽：一句话就能说完的产物摘要不该撑成一张 400px 的大白板；长内容
+     （Markdown、表格）到 400px 为止再换行/滚动。 */
+  width: max-content;
+  min-width: 240px;
+  max-width: min(400px, calc(100vw - 16px));
+  max-height: min(480px, calc(100vh - 16px));
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--color-line-strong);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-panel) 98%, transparent);
-  box-shadow: 0 14px 34px color-mix(in srgb, var(--color-canvas) 48%, transparent);
-  color: var(--color-fg-strong);
-  backdrop-filter: blur(14px);
+  border: 1px solid color-mix(in srgb, var(--color-fg-max) 13%, transparent);
+  border-radius: 10px;
+  background: var(--preview-surface);
+  box-shadow:
+    0 18px 40px rgb(0 0 0 / 48%),
+    0 2px 6px rgb(0 0 0 / 38%);
+  color: var(--color-fg);
+  font-family: var(--chat-font);
+  font-size: calc(var(--chat-text-size) - 1px);
+  line-height: 1.55;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  /* 卡片默认开在按钮上方（放不下才翻到下方），方向和 `.chat-tooltip-above` 一致：
+     从更靠下的位置往上浮 2px。 */
+  animation: chat-tooltip-in-above 130ms ease-out;
+}
+
+/* 翻到按钮下方时，落下来的方向反过来。 */
+.chat-plugin-quickbar-preview.is-below {
+  animation-name: chat-tooltip-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-plugin-quickbar-preview {
+    animation: none;
+  }
 }
 
 .chat-plugin-quickbar-preview-head {
   display: flex;
   min-width: 0;
+  flex: none;
   flex-direction: column;
-  gap: 2px;
-  padding: 12px 14px 8px;
+  gap: 3px;
+  padding: 12px 14px 9px;
 }
 
 .chat-plugin-quickbar-preview-title {
   color: var(--color-fg-max);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
+  line-height: 1.4;
 }
 
-.chat-plugin-quickbar-preview-subtitle,
-.chat-plugin-quickbar-preview-note {
+.chat-plugin-quickbar-preview-subtitle {
+  overflow-wrap: anywhere;
   color: var(--color-fg-dim);
-  font-size: 11.5px;
-  line-height: 1.4;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .chat-plugin-quickbar-preview-body {
   min-height: 0;
   overflow: auto;
-  padding: 2px 14px 10px;
+  padding: 0 14px 12px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
-.chat-plugin-quickbar-preview-body > p,
-.chat-plugin-quickbar-preview-note {
+/* 纯文本保留换行：插件给的 `A：…\nB：…` 是两条并列项，挤成一段就不成话了。 */
+.chat-plugin-quickbar-preview-body > p {
   margin: 0;
+  white-space: pre-line;
+}
+
+/* Markdown 分支自带一套对话区排版（`.chat-markdown` 按 `--chat-text-size` 与对话区行高
+   算），不抹平的话同一张卡片里换个写法字号就变一次。间距也在卡片里收紧一档。 */
+.chat-plugin-quickbar-preview-body .chat-markdown {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.chat-plugin-quickbar-preview-body .chat-markdown h1,
+.chat-plugin-quickbar-preview-body .chat-markdown h2,
+.chat-plugin-quickbar-preview-body .chat-markdown h3,
+.chat-plugin-quickbar-preview-body .chat-markdown h4,
+.chat-plugin-quickbar-preview-body .chat-markdown h5,
+.chat-plugin-quickbar-preview-body .chat-markdown h6 {
+  margin: 9px 0 5px;
+}
+
+.chat-plugin-quickbar-preview-body .chat-markdown p {
+  margin-bottom: 6px;
+}
+
+.chat-plugin-quickbar-preview-body .chat-markdown ul,
+.chat-plugin-quickbar-preview-body .chat-markdown ol {
+  margin: 4px 0 7px;
+  padding-left: 18px;
+}
+
+.chat-plugin-quickbar-preview-body .chat-markdown pre {
+  margin: 6px 0;
+}
+
+.chat-plugin-quickbar-preview-body .chat-markdown code,
+.chat-plugin-quickbar-preview-body .chat-markdown pre {
+  font-size: 11px;
 }
 
 .chat-plugin-quickbar-preview-table-wrap {
   min-height: 0;
-  max-height: 220px;
+  max-height: 200px;
   overflow: auto;
-  padding: 0 8px 8px;
+  padding: 0 8px 10px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .chat-plugin-quickbar-preview-table {
   min-width: 100%;
+  font-size: 11.5px;
 }
 
 .chat-plugin-quickbar-preview-table th,
@@ -7137,18 +7238,37 @@ body.is-resizing-btw {
   padding-bottom: 6px;
 }
 
+/* 行多的时候表头得跟着滚：卡片的表格区只有 200px 高。 */
+.chat-plugin-quickbar-preview-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--preview-surface);
+}
+
+/* 说明与动作是一件事（「这些按钮是干什么的」），收进同一块页脚，中间不再夹一条
+   飘在正文下面的灰字。 */
+.chat-plugin-quickbar-preview-foot {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px 14px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--color-fg-max) 8%, transparent);
+  background: color-mix(in srgb, var(--color-panel-hi) 45%, transparent);
+}
+
 .chat-plugin-quickbar-preview-note {
-  padding: 0 14px 10px;
+  margin: 0;
+  color: var(--color-fg-dim);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .chat-plugin-quickbar-preview-actions {
   display: flex;
-  flex: none;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 9px 14px 12px;
-  border-top: 1px solid var(--color-line);
-  background: color-mix(in srgb, var(--color-panel-hi) 45%, transparent);
 }
 
 /* 菜单：这一排紧贴输入框，往下开会压住输入框，所以整组向上开（FloatingMenu 的

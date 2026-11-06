@@ -671,6 +671,15 @@ ctx.desktop.panel({
   最多 8 枚；缺落点（既无 `action` 也无 `section`）或 `id` 不合法的会被丢掉，界面上不留点不动
   的按钮。
 
+  视图按钮可以再带一个 `preview`：悬停时出现的那张**不打断对话**的轻量卡片。内容结构与弹窗
+  共用同一份只读块——`{ title, subtitle?, text?, markdown?, columns?, rows?, note? }`，其中
+  `columns` / `rows` 是表格（每格 `{ text, tone? }`，最多 6 列 / 8 行，适合列一份表格产物的前几行
+  与合计）。卡片底部的动作由宿主按这枚按钮自己的落点生成，插件**不能**从 `preview` 注入动作。
+
+  与 `menu` 的分工：`menu` 是「可以点行执行动作的数据表」（选一条就动手），`preview` 是「只看、
+  不点也能放心的摘要」（这份产物对不对、这个服务通不通、这次构建成没成）。两者都表现为悬停
+  出现一块东西，但前者要人做选择、后者只要人确认。
+
 - **外观只声明意图**：清单与视图的按钮都可以带 `style`，`{ icon, color, shape, iconOnly }`
   ——`icon` 取 `@mica-config-ui/web` 那张 lucide 图标表的名字（`globe` / `external` / `search` /
   `zap` …，与清单 `icon` 同一张表），`color` 取 `accent | danger | success | warn`，`shape` 取

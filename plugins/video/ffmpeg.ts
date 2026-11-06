@@ -158,8 +158,8 @@ function describeProbeFailure(raw: string, filePath: string): string {
  *
  * `-ss` 放在 `-i` 之前：ffmpeg 会从最近的关键帧开始解码，长视频里这是数量级的差别；
  * 转码模式下默认 `accurate_seek`，落点误差在毫秒级，理解视频用不上更精确。
- * 缩放必须在这一步做完——`prepareImageForApi` 只校验不缩（`mica-common/image.ts`），
- * 原尺寸的一帧 4K 图进 API 就是几十倍的 token。
+ * 缩放必须在这一步做完——`prepareImageForApi` 只重编码 PNG，ffmpeg 抽出来的 JPEG
+ * 帧会原样上行（`mica-common/image.ts`），原尺寸的一帧 4K 图进 API 就是几十倍体积。
  */
 export async function extractFrame(options: {
   ffmpegPath: string;

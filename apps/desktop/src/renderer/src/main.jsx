@@ -65,7 +65,24 @@ void import('./log-probe')
 
 // 页面在任何容器里都是同一份代码：window.mica 由 transport 适配层通过 HTTP + SSE
 // 建立（Electron 外壳只是装载同一个地址）。连不上运行时时给出可读提示，不要白屏。
-ensureMicaApi()
+const quickButtonsDemo = new URLSearchParams(window.location.search).get('quick-buttons-demo') === '1'
+
+// 外观验收页（`?quick-buttons-demo=1`）是纯静态的：只画按钮与预览卡片，不读会话、不发请求。
+// 它在 `ensureMicaApi()` 之前渲染，才能在静态服务下打开，也不会先闪一屏连不上运行时的提示。
+if (quickButtonsDemo) {
+  void import('./QuickButtonsPreviewDemo')
+    .then(({ default: Demo }) => {
+      createRoot(document.getElementById('root')).render(
+        <ErrorBoundary>
+          <Demo />
+        </ErrorBoundary>
+      )
+      dismissBootPlaceholder()
+    })
+    .catch((error) => renderBootError(error))
+}
+
+if (!quickButtonsDemo) ensureMicaApi()
   .catch((error) => {
     console.error('初始化 mica 接口失败', error)
     renderBootError(error)
@@ -83,20 +100,6 @@ ensureMicaApi()
         // （ui-state 广播）继续跟随。分享页也走这条路径，看到的是同一套配色。
         syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY])
         subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
-
-        if (new URLSearchParams(window.location.search).get('quick-buttons-demo') === '1') {
-          void import('./QuickButtonsPreviewDemo')
-            .then(({ default: Demo }) => {
-              createRoot(document.getElementById('root')).render(
-                <ErrorBoundary>
-                  <Demo />
-                </ErrorBoundary>
-              )
-              dismissBootPlaceholder()
-            })
-            .catch((error) => renderBootError(error))
-          return
-        }
 
         // `/share` 本身是「分享链接列表」：这一页不需要工作区/草稿那些界面状态，也不该按
         // 「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。带 `?session=<id>`
