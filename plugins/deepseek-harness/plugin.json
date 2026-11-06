@@ -1,0 +1,44 @@
+{
+  "id": "deepseek-harness",
+  "name": "DeepSeek Harness",
+  "icon": "cpu",
+  "version": "1.0.0",
+  "description": "独立启动并监管 DeepSeek Harness Web 服务，不嵌入 Mica。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "priority": 45,
+  "mica": { "apiVersion": 1 },
+  "requires": ["settings", "background", "desktop"],
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "启用 DeepSeek Harness",
+      "type": "switch",
+      "default": "true"
+    },
+    {
+      "key": "executable",
+      "label": "可执行文件",
+      "type": "text",
+      "default": "",
+      "placeholder": "留空自动查找官方 App 或 PATH"
+    },
+    {
+      "key": "port",
+      "label": "端口",
+      "type": "number",
+      "default": "0",
+      "min": 0,
+      "max": 65535,
+      "step": 1,
+      "description": "0 表示随机端口"
+    }
+  ],
+  "status": [
+    { "key": "address", "label": "地址", "type": "link" },
+    { "key": "state", "label": "状态", "type": "text" },
+    { "key": "process", "label": "进程", "type": "text" },
+    { "key": "executable", "label": "可执行文件", "type": "text" }
+  ]
+}

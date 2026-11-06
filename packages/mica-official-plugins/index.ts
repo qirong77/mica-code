@@ -5,6 +5,7 @@ import browserCookieSyncSetup from '../../plugins/browser-cookie-sync/index.js';
 import commitSetup from '../../plugins/commit/index.js';
 import computerUseSetup from '../../plugins/computer-use/index.js';
 import connectionsSetup from '../../plugins/connections/index.js';
+import deepseekHarnessSetup from '../../plugins/deepseek-harness/index.js';
 import evolutionSetup from '../../plugins/evolution/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
@@ -53,6 +54,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   subagent: subagentSetup,
   'computer-use': computerUseSetup,
   connections: connectionsSetup,
+  'deepseek-harness': deepseekHarnessSetup,
   evolution: evolutionSetup,
   'mobile-relay': mobileRelaySetup,
   'quick-buttons': quickButtonsSetup,

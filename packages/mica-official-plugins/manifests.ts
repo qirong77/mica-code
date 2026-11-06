@@ -5,6 +5,7 @@ import browserCookieSyncManifest from '../../plugins/browser-cookie-sync/plugin.
 import commitManifest from '../../plugins/commit/plugin.json';
 import computerUseManifest from '../../plugins/computer-use/plugin.json';
 import connectionsManifest from '../../plugins/connections/plugin.json';
+import deepseekHarnessManifest from '../../plugins/deepseek-harness/plugin.json';
 import evolutionManifest from '../../plugins/evolution/plugin.json';
 import harnessReviewManifest from '../../plugins/harness-review/plugin.json';
 import memoryManifest from '../../plugins/memory/plugin.json';
@@ -53,6 +54,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(subagentManifest),
   readManifest(computerUseManifest),
   readManifest(connectionsManifest),
+  readManifest(deepseekHarnessManifest),
   readManifest(evolutionManifest),
   readManifest(mobileRelayManifest),
   readManifest(quickButtonsManifest),
