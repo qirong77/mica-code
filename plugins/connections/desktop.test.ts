@@ -134,9 +134,6 @@ describe('connection card callbacks', () => {
     const { api, render } = await fixture();
     const tree = render();
     const input = elements(tree).find((element) => element.type === 'input' && element.props.placeholder?.includes('网页地址'))!;
-    const connect = elements(tree).find(
-      (element) => typeof element.type !== 'string' && element.type?.name === 'Button' && element.props.children === '连接',
-    )!;
 
     input.props.onChange({ target: { value: 'https://www.zhihu.com/' } });
     const updatedTree = render();
