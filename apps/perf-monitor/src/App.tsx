@@ -5,13 +5,14 @@ import type { GroupSummary, IncidentSummary, Overview, ProcessRecord, Range } fr
 import { TimelineChart } from './Charts';
 import { Coverage } from './Coverage';
 import { IncidentDrawer, IncidentList } from './Incidents';
+import { MicaPage } from './Mica';
 import { ProcessDrawer, ProcessTable } from './Processes';
 import { dateTime, duration, memory, number, percent } from './format';
 import { useMonitor } from './hooks';
 import { ErrorNotice, FootprintInfo, HealthBadge, Icon, Panel, type IconName } from './UI';
 import './styles.css';
 
-type Page = 'overview' | 'processes' | 'incidents' | 'coverage';
+type Page = 'overview' | 'mica' | 'processes' | 'incidents' | 'coverage';
 const navigation: { key: Page; label: string; icon: IconName; eyebrow: string; description: string }[] = [
   {
     key: 'overview',
@@ -19,6 +20,13 @@ const navigation: { key: Page; label: string; icon: IconName; eyebrow: string; d
     icon: 'overview',
     eyebrow: 'SYSTEM OVERVIEW',
     description: '沿着时间线，了解这台机器正在经历什么。',
+  },
+  {
+    key: 'mica',
+    label: '米卡',
+    icon: 'mica',
+    eyebrow: 'MICA RUNTIME',
+    description: '把 Mica 自己的内存、宿主与调用耗时放到同一条时间线上。',
   },
   {
     key: 'processes',
@@ -583,6 +591,7 @@ function Cockpit() {
                   navigate={navigate}
                 />
               )}
+              {page === 'mica' && <MicaPage day={monitor.day} range={monitor.range} />}
               {page === 'processes' && (
                 <>
                   <div className="process-summary">

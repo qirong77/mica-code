@@ -194,5 +194,5 @@ macOS / Linux 支持发布安装器；Windows 请使用源码运行入口。应�
 | [设计文档](./docs/README.md) · [共享包索引](./packages/README.md) | 协议、运行时与包的公开入口 |
 | [开发记录](./blogs/README.md) | 设计取舍与实现过程 |
 | [演示素材复现](./docs/demo-assets.md) | 生成 README 与官网截图的方法 |
-| [本机性能监控台](./apps/perf-monitor/README.md) | React Web 页面查看系统资源、进程增长、历史曲线与异常现场 |
+| [本机性能监控台](./apps/perf-monitor/README.md) | React Web 页面查看系统资源、进程增长、历史曲线、异常现场，以及 Mica 自身的进程、宿主内存与调用耗时 |
 | [问题反馈](https://github.com/qirong77/mica-code/issues) | Bug 报告、使用问题与改进建议 |

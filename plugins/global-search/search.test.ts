@@ -4,7 +4,14 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import createLauncher from './launcher.js';
-import { createSearchEngine, normalizeSettings, rankItems, scanDirectories, validateRecentPath } from './search.js';
+import {
+  createSearchEngine,
+  DEFAULT_SETTINGS,
+  normalizeSettings,
+  rankItems,
+  scanDirectories,
+  validateRecentPath,
+} from './search.js';
 
 async function fixture(t: any) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mica-search-中文 空格-'));
@@ -68,7 +75,9 @@ test('normalizes newline roots, home expansion, duplicates, and depth bounds wit
   assert.equal(config.maxDepth, 16);
   assert.equal(config.warnings.length, 1);
   assert.equal(normalizeSettings({ maxDepth: -3 }).maxDepth, 1);
-  assert.equal(normalizeSettings({ maxDepth: 'invalid' }).maxDepth, 6);
+  assert.equal(normalizeSettings({ maxDepth: 'invalid' }).maxDepth, 1);
+  assert.equal(DEFAULT_SETTINGS.maxDepth, 1);
+  assert.deepEqual(normalizeSettings({}, '/home/person').roots, ['/home/person/Desktop', '/home/person/Downloads']);
 });
 
 test('indexes roots, Chinese and spaced files, folders, and nested paths; excludes artifacts and symlinks', async (t) => {
@@ -106,7 +115,6 @@ test('depth includes boundary folders and marks deeper traversal as truncated', 
   assert(index.items.some((item: any) => item.path === path.join(root, '一级/二级')));
   assert(!index.items.some((item: any) => item.path === deepFile));
   assert.equal(index.truncated, true);
-  assert(index.warnings.some((warning: string) => warning.includes('最大搜索深度 2')));
 });
 
 test('overlapping roots are deduplicated while each root gets its own depth allowance', async (t) => {

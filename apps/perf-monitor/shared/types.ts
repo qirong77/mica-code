@@ -154,3 +154,129 @@ export interface ArtifactContent {
   truncated: boolean;
   size: number;
 }
+
+/** Mica 自身监控：进程构成、宿主内存、渲染与调用耗时（数据来自 Mica 诊断日志与资源采集）。 */
+export interface MicaProcessInfo {
+  pid: number;
+  ppid: number;
+  kind: string;
+  name: string;
+  footprintMb: number;
+  rssMb: number;
+  growthMb: number | null;
+  cpuPct: number | null;
+  threads: number | null;
+  command: string | null;
+  session: string | null;
+  orphan: boolean;
+}
+export interface MicaProcessKind {
+  kind: string;
+  count: number;
+  footprintMb: number;
+  rssMb: number;
+  cpuPct: number | null;
+  processes: MicaProcessInfo[];
+}
+export interface MicaHostUsage {
+  pid: number;
+  host: string;
+  rssMb: number;
+  lastAt: string;
+  firstRssMb: number | null;
+  growthMb: number | null;
+  session: string | null;
+  turn: string | null;
+  model: string | null;
+  windows: number | null;
+  hosts: number | null;
+  busy: number | null;
+  byType: Record<string, number> | null;
+  samples: number;
+}
+export interface MicaMemoryPoint {
+  ts: number;
+  main: number | null;
+  runtime: number | null;
+  appServer: number | null;
+  tui: number | null;
+  gpu: number | null;
+  tab: number | null;
+  utility: number | null;
+}
+export interface MicaPageStat {
+  pageId: string;
+  sid: string | null;
+  samples: number;
+  lastAt: string;
+  heapMb: number | null;
+  heapMaxMb: number | null;
+  heapFirstMb: number | null;
+  dom: number | null;
+  rows: number | null;
+}
+export interface MicaChannelStat {
+  channel: string;
+  calls: number;
+  slow: number;
+  failed: number;
+  p95Ms: number | null;
+  maxMs: number | null;
+  lastAt: string | null;
+}
+export interface MicaScopeFreshness {
+  id: string;
+  scope: string;
+  file: string | null;
+  lastAt: string | null;
+  bytes: number;
+  samples: number;
+  state: 'running' | 'stale' | 'unavailable';
+  note: string;
+}
+export interface MicaSessionVolume {
+  id: string;
+  sizeMb: number;
+  updatedAt: string;
+}
+export interface MicaOverview {
+  generatedAt: string;
+  day: string;
+  range: Range;
+  paths: { logs: string; sessions: string; desktopApp: string | null };
+  hosts: MicaHostUsage[];
+  hostSummary: {
+    activeHosts: number;
+    windowHosts: number;
+    peakHostRssMb: number | null;
+    peakHostLabel: string | null;
+    shortLived: number;
+  };
+  memory: MicaMemoryPoint[];
+  memoryNote: string;
+  kinds: MicaProcessKind[];
+  processAt: string | null;
+  totals: { processes: number; footprintMb: number; rssMb: number; cpuPct: number | null; appServers: number };
+  renderer: {
+    samples: number;
+    lagP50: number | null;
+    lagP95: number | null;
+    lagP99: number | null;
+    over32: number;
+    over100: number;
+    over1000: number;
+    worst: number | null;
+    worstAt: string | null;
+    dropped: number;
+    pages: MicaPageStat[];
+    heap: { ts: number; heapMb: number | null; heapMaxMb: number | null; dom: number | null }[];
+  };
+  channels: MicaChannelStat[];
+  invoke: { calls: number; slow: number; failed: number };
+  lifecycle: { boots: number; shutdowns: number; sessions: string[]; lastBootAt: string | null; openPids: number };
+  chat: { reaped: number; maxIdleSeconds: number | null; lastAt: string | null };
+  sessions: { count: number; totalMb: number; largest: MicaSessionVolume[]; error: string | null };
+  scopes: MicaScopeFreshness[];
+  findings: { level: Health; title: string; detail: string }[];
+  warnings: string[];
+}

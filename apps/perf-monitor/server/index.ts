@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { realpath } from 'node:fs/promises';
 import { TelemetryStore, localDay, validDay } from './store';
+import { MicaStore, micaProcessRows } from './mica';
 import type { CollectorStatus, Health, Overview, Range } from '../shared/types';
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -11,6 +12,7 @@ const root = process.env.MICA_PERF_LOG_DIR || join(homedir(), 'Library/Logs/cpu-
 const port = Number(process.env.MICA_PERF_PORT || 9316);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('MICA_PERF_PORT 必须是 1024–65535');
 const store = new TelemetryStore(root);
+const mica = new MicaStore();
 const cores = cpus();
 const host = {
   name: hostname(),
@@ -49,6 +51,17 @@ function getDay(url: URL, fallback: string) {
   const v = url.searchParams.get('day') || fallback;
   if (!validDay(v)) throw new Error('日期格式无效，使用 YYYY-MM-DD');
   return v;
+}
+function getRange(url: URL): Range {
+  const range = (url.searchParams.get('range') ?? '6h') as Range;
+  if (!['1h', '6h', '24h', '7d'].includes(range)) throw new Error('不支持的时间范围');
+  return range;
+}
+/** 从资源采集的最后一份快照里挑出 Mica 进程，并补上完整命令行用于归属。 */
+async function micaProcessContext(day: string) {
+  const snapshot = await store.latestSnapshot(day);
+  const procs = snapshot?.procs ?? [];
+  return micaProcessRows(procs, snapshot?.commands ?? new Map(), snapshot?.at ?? null);
 }
 const launchCache = new Map<string, { ts: number; state: string | null }>();
 async function launchState(label: string): Promise<string | null> {
@@ -118,8 +131,7 @@ async function collectorStatuses(latest: string | null): Promise<CollectorStatus
 async function overview(url: URL): Promise<Overview> {
   const days = await store.days();
   const day = getDay(url, days[0] ?? localDay());
-  const range = (url.searchParams.get('range') ?? '6h') as Range;
-  if (!['1h', '6h', '24h', '7d'].includes(range)) throw new Error('不支持的时间范围');
+  const range = getRange(url);
   const v = await store.view(day, range);
   const latest = v.latest;
   const ageSeconds = latest ? Math.max(0, (Date.now() - latest.epoch) / 1000) : null;
@@ -226,6 +238,13 @@ export const server = Bun.serve({
         return json({ days, latestDay: days[0] ?? null });
       }
       if (url.pathname === '/api/overview') return json(await overview(url));
+      if (url.pathname === '/api/mica') {
+        // 没有显式日期时才去扫资源日志目录；否则每次请求都会触发一次全历史解析。
+        const day = url.searchParams.get('day')
+          ? getDay(url, localDay())
+          : ((await store.days())[0] ?? localDay());
+        return json(await mica.overview(day, getRange(url), await micaProcessContext(day)));
+      }
       const procMatch = /^\/api\/processes\/(\d+)$/.exec(url.pathname);
       if (procMatch) {
         const day = getDay(url, localDay());

@@ -2439,3 +2439,222 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Mica 自身监控页 */
+.monitor-app .mica-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.monitor-app .mica-metric {
+  min-height: 176px;
+}
+.monitor-app .mica-kind-bar {
+  display: flex;
+  height: 4px;
+  gap: 2px;
+  margin: 12px 0 9px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: #26333c;
+}
+.monitor-app .mica-kind-bar i {
+  display: block;
+  height: 100%;
+  opacity: 0.75;
+}
+.monitor-app .mica-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.monitor-app .mica-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid #2a3b45;
+  background: #16222a;
+  color: #8ba3b1;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.monitor-app .mica-chip b {
+  color: #c3d7e1;
+  font-weight: 500;
+}
+.monitor-app .mica-chip i {
+  color: #ed9697;
+  font-style: normal;
+}
+.monitor-app .mica-chip-alert {
+  border-color: #6d4144;
+  background: #2a1d20;
+}
+.monitor-app .mica-kind-name {
+  color: #c9dde7;
+}
+.monitor-app .mica-host-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.monitor-app .mica-host-cell b {
+  font-weight: 400;
+  color: #9db3c0;
+  font-size: 10px;
+}
+.monitor-app .mica-session-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.monitor-app .mica-session-cell span {
+  color: #c0d4df;
+  font-size: 11px;
+}
+.monitor-app .mica-session-cell small {
+  color: #67828f;
+  font-size: 9px;
+}
+.monitor-app .mica-bytype {
+  color: #8299a6;
+  font-size: 10px;
+}
+.monitor-app .mica-channel {
+  color: #b9cfda;
+  font-family: 'SF Mono', ui-monospace, monospace;
+  font-size: 10px;
+}
+.monitor-app .mica-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.monitor-app .mica-stat-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0 22px 16px;
+}
+.monitor-app .mica-stat-row .eyebrow {
+  display: block;
+  font-size: 8px;
+  margin-bottom: 5px;
+}
+.monitor-app .mica-stat-row strong {
+  font-size: 16px;
+  font-weight: 400;
+  color: #cfe2ec;
+  font-variant-numeric: tabular-nums;
+}
+.monitor-app .mica-chart {
+  height: 236px;
+  margin: 0 10px 6px;
+}
+.monitor-app .mica-scope-list {
+  padding: 0 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.monitor-app .mica-scope {
+  border: 1px solid #24333c;
+  border-radius: 7px;
+  padding: 10px 12px;
+  background: #16212a;
+}
+.monitor-app .mica-scope-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.monitor-app .mica-scope-head strong {
+  font-size: 11px;
+  font-weight: 500;
+  color: #c6dae4;
+}
+.monitor-app .mica-scope-meta {
+  display: flex;
+  gap: 14px;
+  color: #6d8896;
+  font-size: 9px;
+  margin-top: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.monitor-app .mica-scope p {
+  color: #647f8d;
+  font-size: 9px;
+  margin-top: 5px;
+  line-height: 1.6;
+}
+.monitor-app .mica-largest {
+  padding: 0 22px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.monitor-app .mica-largest > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 10px;
+  color: #93aab7;
+}
+.monitor-app .mica-largest b {
+  color: #cfdfe8;
+  font-weight: 500;
+  margin-left: auto;
+}
+.monitor-app .mica-largest small {
+  color: #647f8d;
+  font-size: 9px;
+}
+.monitor-app .mica-paths {
+  padding: 0 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.monitor-app .mica-paths div {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+}
+.monitor-app .mica-paths span {
+  color: #6d8896;
+  flex-shrink: 0;
+  width: 72px;
+}
+.monitor-app .mica-paths code {
+  color: #a9c1cd;
+  font-size: 10px;
+  word-break: break-all;
+  font-family: 'SF Mono', ui-monospace, monospace;
+}
+.monitor-app .mica-path-note {
+  padding: 0 22px 12px;
+  color: #c9986f;
+  font-size: 10px;
+}
+@media (max-width: 1180px) {
+  .monitor-app .mica-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .monitor-app .mica-stat-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 14px;
+  }
+}
+@media (max-width: 760px) {
+  .monitor-app .mica-stat-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .monitor-app .mica-chart {
+    height: 200px;
+  }
+}

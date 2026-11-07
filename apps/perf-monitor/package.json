@@ -9,7 +9,7 @@
     "start": "bun server/index.ts",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
-    "test": "bun test server/store.test.ts",
+    "test": "bun test server/store.test.ts server/mica.test.ts",
     "service:install": "bun scripts/install-service.ts",
     "collector:check": "PYTHONDONTWRITEBYTECODE=1 python3 collectors/check.py",
     "collector:install": "bun scripts/install-collector.ts"

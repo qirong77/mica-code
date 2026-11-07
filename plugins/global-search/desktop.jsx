@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   AlertCircle,
-  ArrowDown,
-  ArrowUp,
-  CornerDownLeft,
   File,
   Folder,
   Loader2,
@@ -11,7 +8,6 @@ import {
   Settings2,
   X,
 } from 'lucide-react';
-import { Button } from '@mica-config-ui/web';
 import './desktop.css';
 
 export const card = { width: 640 };
@@ -27,9 +23,19 @@ function checkResult(result) {
   return result;
 }
 
-function shortPath(path) {
-  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
-  return parts.length > 4 ? `…/${parts.slice(-4).join('/')}` : path;
+const HOME_PREFIX = /^(?:\/Users|\/home)\/[^/]+/;
+
+/**
+ * 行右侧的位置列：家目录下的路径显示成 `~/Desktop/…`，超出四段就只留末四段并以
+ * `…/` 开头。截断后不再缀 `~/`——`~/…/a/b` 读起来像是路径里真有个省略号目录。
+ */
+function displayPath(value, { parent = false, keep = 4 } = {}) {
+  let target = String(value || '').replace(/\\/g, '/');
+  if (parent) target = target.replace(/\/[^/]+\/?$/, '') || '/';
+  const home = target.replace(HOME_PREFIX, '~');
+  const parts = home.split('/').filter(Boolean);
+  if (parts.length <= keep) return home;
+  return `…/${parts.slice(-keep).join('/')}`;
 }
 
 export function Launcher({ api, onClose }) {
@@ -100,7 +106,6 @@ export function Launcher({ api, onClose }) {
             ...value,
             items: Array.isArray(value?.items) ? value.items : [],
             roots: Array.isArray(value?.roots) ? value.roots : [],
-            warnings: Array.isArray(value?.warnings) ? value.warnings : [],
           });
         } catch (cause) {
           if (mounted.current && requestId === sequence.current) setError(errorText(cause));
@@ -208,7 +213,7 @@ export function Launcher({ api, onClose }) {
   };
 
   const roots = result?.roots ?? [];
-  const scope = roots.length ? roots.map(shortPath).join(' · ') : '尚未设置搜索目录';
+  const scope = roots.length ? roots.map((root) => displayPath(root)).join(' · ') : '尚未设置搜索目录';
   const statusMessage =
     status?.native === false
       ? '当前环境不提供系统快捷键，仍可使用搜索列表并在 Mica 中打开。'
@@ -218,11 +223,11 @@ export function Launcher({ api, onClose }) {
 
   return (
     <section className="mica-config-ui global-search" aria-label="全局文件搜索" onKeyDown={handleKeyDown}>
-      <header className="flex shrink-0 items-center gap-3 border-b border-[var(--line-soft)] px-4 py-3">
-        <Search size={20} className="shrink-0 text-[var(--text-soft)]" aria-hidden="true" />
+      <header className="global-search-head">
+        <Search size={15} aria-hidden="true" />
         <input
           ref={inputRef}
-          className="text-input global-search-input min-w-0 flex-1"
+          className="global-search-input"
           autoFocus
           value={query}
           disabled={opening}
@@ -251,29 +256,38 @@ export function Launcher({ api, onClose }) {
           }}
         />
         {loading || opening ? (
-          <Loader2 size={16} className="shrink-0 animate-spin text-[var(--text-soft)]" aria-hidden="true" />
+          <Loader2 size={14} className="global-search-spin" aria-hidden="true" />
         ) : null}
-        <Button
-          variant="ghost"
-          icon={<Settings2 />}
+        <button
+          type="button"
+          className="global-search-icon"
           title="设置搜索目录"
+          aria-label="设置搜索目录"
           disabled={opening}
           onClick={() => void configure()}
-        />
-        <Button variant="ghost" icon={<X />} title="关闭（Esc）" disabled={opening} onClick={() => void close()} />
+        >
+          <Settings2 size={15} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="global-search-icon"
+          title="关闭（Esc）"
+          aria-label="关闭"
+          disabled={opening}
+          onClick={() => void close()}
+        >
+          <X size={15} aria-hidden="true" />
+        </button>
       </header>
 
       {statusMessage ? (
-        <div
-          className="flex shrink-0 items-center gap-2 border-b border-[var(--line-soft)] px-4 py-2 text-xs text-[var(--text-soft)]"
-          title={status?.error}
-        >
-          <AlertCircle size={14} className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1">{statusMessage}</span>
+        <div className="global-search-notice" title={status?.error}>
+          <AlertCircle size={13} aria-hidden="true" />
+          <span>{statusMessage}</span>
           {status?.native && !status.registered ? (
-            <Button
-              variant="ghost"
-              size="compact"
+            <button
+              type="button"
+              className="global-search-link"
               disabled={opening}
               onClick={() => {
                 void launcher
@@ -282,33 +296,34 @@ export function Launcher({ api, onClose }) {
                   .catch((cause) => setError(errorText(cause)));
               }}
             >
-              重试快捷键
-            </Button>
+              重试
+            </button>
           ) : null}
-          <Button variant="ghost" size="compact" disabled={opening} onClick={() => void configure()}>
+          <button
+            type="button"
+            className="global-search-link"
+            disabled={opening}
+            onClick={() => void configure()}
+          >
             设置
-          </Button>
+          </button>
         </div>
       ) : null}
 
       {error ? (
-        <div
-          role="alert"
-          className="shrink-0 break-words border-b border-[var(--line-soft)] px-4 py-2 text-xs text-[var(--red)]"
-        >
-          {error}
+        <div role="alert" className="global-search-notice is-error">
+          <span>{error}</span>
         </div>
       ) : null}
 
-      <div ref={listRef} className="global-search-results min-h-0 flex-1 overflow-y-auto p-2" aria-busy={loading}>
-        <p className="px-2 pb-1 pt-1 text-xs text-[var(--text-soft)]">
-          {query.trim() ? '搜索结果' : '最近打开与搜索目录'}
-        </p>
+      <div className="global-search-body">
         <ul
+          ref={listRef}
           id={listId}
           role="listbox"
           aria-label={query.trim() ? '搜索结果' : '最近打开'}
-          className="m-0 list-none p-0"
+          aria-busy={loading}
+          className="global-search-list"
         >
           {items.map((item, index) => (
             <li
@@ -316,111 +331,85 @@ export function Launcher({ api, onClose }) {
               id={`${listId}-${index}`}
               role="option"
               aria-selected={active === index}
+              aria-disabled={blocked || undefined}
               data-result-index={index}
+              title={item.path}
+              className="global-search-row"
+              onMouseMove={() => setActive(index)}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setActive(index);
+                void openItem(item);
+              }}
             >
-              <Button
-                fullWidth
-                variant="ghost"
-                pressed={active === index}
-                disabled={blocked}
-                title={item.path}
-                icon={item.type === 'directory' ? <Folder /> : <File />}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  setActive(index);
-                  void openItem(item);
-                }}
-              >
-                <span className="block truncate text-sm font-medium" title={item.name}>
-                  {item.name}
-                </span>
-                <span className="block truncate text-xs text-[var(--text-soft)]" title={item.path}>
-                  {shortPath(item.path)}
-                </span>
-              </Button>
+              <span className="global-search-row-icon" aria-hidden="true">
+                {item.type === 'directory' ? <Folder size={14} /> : <File size={14} />}
+              </span>
+              <span className="global-search-row-name">{item.name}</span>
+              <span className="global-search-row-path">{displayPath(item.path, { parent: true })}</span>
             </li>
           ))}
         </ul>
-        {loading ? (
-          <p role="status" className="px-3 py-10 text-center text-sm text-[var(--text-soft)]">
+
+        {loading && !items.length ? (
+          <p role="status" className="global-search-empty">
             正在搜索…
           </p>
         ) : null}
         {!loading && !items.length && !error ? (
-          <div className="flex flex-col items-center gap-3 px-4 py-8 text-center">
-            <Folder size={28} className="text-[var(--text-faint)]" aria-hidden="true" />
-            <p className="m-0 text-sm">
+          <div className="global-search-empty">
+            <Folder size={20} className="global-search-empty-icon" aria-hidden="true" />
+            <span className="global-search-empty-title">
               {!roots.length
                 ? '先添加要搜索的目录'
                 : query.trim()
                   ? '没有找到匹配的文件或文件夹'
                   : '还没有最近打开的文件'}
-            </p>
-            <p className="m-0 text-xs text-[var(--text-soft)]">
+            </span>
+            <span>
               {!roots.length
-                ? '选择目录后，即可跨项目搜索文件和文件夹。'
+                ? '添加目录后即可跨项目搜索文件与文件夹。'
                 : query.trim()
-                  ? '试试更短的关键词，或在设置中检查搜索范围。'
-                  : '输入关键词开始搜索，打开成功的项目会出现在这里。'}
-            </p>
-            <Button
-              variant="ghost"
-              size="compact"
-              icon={<Settings2 />}
+                  ? '试试更短的关键词。'
+                  : '输入关键词开始搜索。'}
+            </span>
+            <button
+              type="button"
+              className="global-search-link"
               disabled={opening}
               onClick={() => void configure()}
             >
               设置搜索目录
-            </Button>
+            </button>
           </div>
         ) : null}
       </div>
 
-      {result?.warnings.length || result?.truncated ? (
-        <div
-          className="global-search-warnings shrink-0 overflow-y-auto border-t border-[var(--line-soft)] px-4 py-2 text-xs text-[var(--amber)]"
-          role="status"
-        >
-          {result.warnings.length ? <p className="m-0 mb-1 font-medium">部分目录扫描未完成，结果可能不完整。</p> : null}
-          {result.warnings.map((warning, index) => (
-            <p className="m-0 break-words" key={index}>
-              {typeof warning === 'string' ? warning : warning.message || warning.error || JSON.stringify(warning)}
-            </p>
-          ))}
-          {result.truncated ? <p className="m-0">结果已截断，请缩小关键词或调整搜索目录。</p> : null}
-          <Button variant="ghost" size="compact" disabled={opening} onClick={() => void configure()}>
-            检查搜索设置
-          </Button>
-        </div>
-      ) : null}
-
-      <footer className="flex shrink-0 flex-col gap-1 border-t border-[var(--line-soft)] px-4 py-2 text-xs text-[var(--text-soft)]">
-        <div className="flex min-w-0 items-center gap-2">
-          <span role="status" className="shrink-0">
-            {opening ? '正在 Mica 中打开…' : loading ? '搜索中' : `${items.length} 个${query.trim() ? '结果' : '条目'}`}
+      <footer className="global-search-foot">
+        <span className="global-search-hints">
+          <span>
+            <kbd>↑</kbd> <kbd>↓</kbd> 选择
           </span>
-          {Number.isFinite(result?.indexed) ? <span className="shrink-0">· 已索引 {result.indexed} 项</span> : null}
-          <span className="min-w-0 flex-1 truncate text-right" title={roots.join('\n') || scope}>
-            范围：{loading ? '读取中…' : result ? scope : '读取失败'}
+          <span>
+            <kbd>↵</kbd> 打开
           </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="inline-flex items-center gap-1">
-            <ArrowUp size={11} />
-            <ArrowDown size={11} />
-            选择
+          <span>
+            <kbd>Esc</kbd> 关闭
           </span>
-          <span>Home / End 首尾</span>
-          <span className="inline-flex items-center gap-1">
-            <CornerDownLeft size={12} />在 Mica 打开
+        </span>
+        <span className="global-search-foot-meta">
+          <span className="global-search-count" role="status">
+            {opening
+              ? '正在打开…'
+              : loading
+                ? '搜索中…'
+                : `${items.length} 个${query.trim() ? '结果' : '条目'}`}
           </span>
-          <span>Esc 关闭</span>
-          {status?.registered && status.shortcut ? (
-            <span className="ml-auto" title="系统快捷键">
-              {status.shortcut}
-            </span>
-          ) : null}
-        </div>
+          <span className="global-search-scope" title={roots.join('\n') || scope}>
+            {result ? scope : ''}
+          </span>
+          {status?.registered && status.shortcut ? <kbd>{status.shortcut}</kbd> : null}
+        </span>
       </footer>
     </section>
   );

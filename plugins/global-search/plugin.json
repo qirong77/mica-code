@@ -18,14 +18,14 @@
       "type": "textarea",
       "label": "搜索目录",
       "description": "一行一个目录，支持 ~/。搜索独立于当前会话和编辑器工作区。",
-      "default": "~/Desktop\n~/Documents\n~/Downloads"
+      "default": "~/Desktop\n~/Downloads"
     },
     {
       "key": "maxDepth",
       "type": "number",
       "label": "最大搜索深度",
-      "description": "1 表示只搜索根目录及其直接子项。达到深度上限时会提示结果不完整。",
-      "default": "6",
+      "description": "1 表示只搜索根目录及其直接子项。",
+      "default": "1",
       "min": 1,
       "max": 16
     }

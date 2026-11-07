@@ -10,7 +10,7 @@ import {
   DataZoomComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import type { ProcessDetail, TrendPoint } from '../shared/types';
+import type { MicaMemoryPoint, ProcessDetail, TrendPoint } from '../shared/types';
 import { clock, dateTime, escapeHtml, number, timestampMs } from './format';
 
 use([
@@ -302,4 +302,107 @@ export function ProcessHistoryChart({ history }: { history: ProcessDetail['histo
     [history],
   );
   return <Chart option={option} className="process-history-chart" label="该进程实例的 Footprint、RSS 与 CPU 历史" />;
+}
+
+export interface SimpleSeries {
+  name: string;
+  color: string;
+  values: (number | null)[];
+}
+
+/** 单一数值轴的多序列折线图；用于 Mica 宿主内存与渲染堆走势。缺失点保留为空，不连线。 */
+export function SimpleLineChart({
+  points,
+  series,
+  unit = 'MB',
+  className = 'mica-chart',
+  label,
+}: {
+  points: number[];
+  series: SimpleSeries[];
+  unit?: string;
+  className?: string;
+  label: string;
+}) {
+  const option = useMemo<EChartsCoreOption>(() => {
+    const spansDays = points.length > 1 && points[points.length - 1] - points[0] >= 86_400_000;
+    return {
+      ...base,
+      grid: { left: 48, right: 18, top: 34, bottom: 28 },
+      legend: {
+        top: 0,
+        left: 0,
+        itemWidth: 12,
+        itemHeight: 6,
+        textStyle: { color: '#8c9ca9', fontSize: 11 },
+      },
+      xAxis: {
+        ...axisStyle,
+        type: 'time',
+        splitLine: { show: false },
+        axisLabel: {
+          ...axisStyle.axisLabel,
+          formatter: (value: number) => (spansDays ? dateTime(value, true) : clock(value)),
+          hideOverlap: true,
+        },
+      },
+      yAxis: {
+        ...axisStyle,
+        type: 'value',
+        min: 0,
+        splitNumber: 3,
+        name: unit,
+        nameTextStyle: { color: '#7b8f9b', fontSize: 10 },
+      },
+      tooltip: {
+        ...base.tooltip,
+        formatter: (params: { seriesName: string; value: [number, number | null]; color: string; axisValue: number }[]) => {
+          if (!Array.isArray(params) || !params.length) return '';
+          const rows = params
+            .filter((param) => param.value?.[1] != null)
+            .map(
+              (param) =>
+                `<div style="display:flex;gap:20px;justify-content:space-between;margin-top:5px"><span><span style="color:${escapeHtml(String(param.color))}">●</span> ${escapeHtml(param.seriesName)}</span><b>${number(param.value[1], 1)} ${unit}</b></div>`,
+            );
+          return `<div style="color:#8ca5b2;margin-bottom:8px">${dateTime(params[0].axisValue)}</div>${rows.join('') || '该时刻无有效读数'}`;
+        },
+      },
+      series: series.map((item) => ({
+        name: item.name,
+        type: 'line',
+        showSymbol: points.length <= 1,
+        connectNulls: false,
+        lineStyle: { width: 1.5, color: item.color },
+        itemStyle: { color: item.color },
+        data: points.map((ts, index) => [ts, item.values[index] ?? null]),
+      })),
+    };
+  }, [points, series, unit]);
+  return <Chart option={option} className={className} label={label} />;
+}
+
+export function MicaMemoryChart({ points }: { points: MicaMemoryPoint[] }) {
+  const series: SimpleSeries[] = [
+    { name: '桌面主进程', color: colors.cyan, values: points.map((p) => p.main) },
+    { name: '桌面运行时', color: colors.purple, values: points.map((p) => p.runtime) },
+    { name: '会话宿主合计', color: colors.green, values: points.map((p) => p.appServer) },
+    { name: 'TUI', color: colors.amber, values: points.map((p) => p.tui) },
+    { name: 'Electron GPU', color: colors.blue, values: points.map((p) => p.gpu) },
+    { name: 'Electron 标签页', color: colors.muted, values: points.map((p) => p.tab) },
+  ];
+  return (
+    <SimpleLineChart
+      points={points.map((p) => p.ts)}
+      series={series}
+      label="Mica 各宿主与 Electron 进程的 RSS 走势"
+    />
+  );
+}
+
+export function MicaHeapChart({ points }: { points: { ts: number; heapMb: number | null; heapMaxMb: number | null }[] }) {
+  const series: SimpleSeries[] = [
+    { name: 'JS 堆', color: colors.cyan, values: points.map((p) => p.heapMb) },
+    { name: '分钟内峰值', color: colors.amber, values: points.map((p) => p.heapMaxMb) },
+  ];
+  return <SimpleLineChart points={points.map((p) => p.ts)} series={series} label="主窗口渲染进程的 JS 堆走势" />;
 }

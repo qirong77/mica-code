@@ -35,8 +35,11 @@ rm ~/Library/LaunchAgents/com.qirong.mica-perf-web.plist
 - 概览：系统内存压力、swap 当前用量、换入/换出速率、磁盘吞吐、load、GPU、当前整机 CPU。
 - 历史：按日期和 1h / 6h / 24h / 7d 选择范围；重启、采样断档标记；历史日期以当天最后采样为范围终点。降采样保留各信号峰值。
 - 进程：footprint、RSS、内存增长、CPU、线程、文件句柄、nice；应用分组；PID 详情中的父进程、脱敏命令行和历史曲线。
+- 米卡（`#mica`）：Mica 自身的进程构成（主进程 / 渲染 / GPU / 会话宿主 / 插件 / CLI）、活跃宿主 RSS 与窗口内增长、渲染帧间隔与 JS 堆、IPC 通道耗时、宿主生命周期与窗口回收、会话快照体积，以及诊断日志各作用域的新鲜度。数据来自 `~/Library/Logs/mica` 的真实诊断日志。
 - 异常：当时的系统状态、增长/内存/CPU 排行、进程树，以及 lsof / fs_usage / sample / vmmap 附件的受限文本预览。
 - 采集覆盖：资源与 CPU 日志新鲜度、root 捕获器安装/运行状态、LCA 守护进程状态和明确的数据缺口。
+
+环境路径、launchd 标签、日志作用域与历史结论整理在 [MICA-MONITORING.md](./MICA-MONITORING.md)。
 
 ## 数据来源与解释
 
@@ -68,6 +71,7 @@ root 文件路径抓取沿用 `~/.mica/tools/install-perf-capture.sh`；本应�
 | `GET /api/health`                                   | 服务存活（不代表采集正常）             |
 | `GET /api/days`                                     | 可用日期                               |
 | `GET /api/overview?day=YYYY-MM-DD&range=6h`         | 主机、最后采样、趋势、排行、现场和覆盖 |
+| `GET /api/mica?day=YYYY-MM-DD&range=6h`             | Mica 进程构成、宿主内存与增长、渲染/调用耗时、生命周期、会话体积、诊断日志新鲜度 |
 | `GET /api/processes/:pid?day=YYYY-MM-DD&identity=…` | 该代 PID 的历史与登记                  |
 | `GET /api/incidents/:id`                            | 异常详情                               |
 | `GET /api/incidents/:id/artifacts/:name`            | 脱敏文本预览，最多 256 KiB             |
@@ -82,4 +86,4 @@ npm run typecheck
 npm run build
 ```
 
-针对性测试覆盖追加写、残缺行、损坏行、轮转、PID 代次、重启/断档、旧 MEM 日志、峰值保留、路径限制与输出截断。
+针对性测试覆盖追加写、残缺行、损坏行、轮转、PID 代次、重启/断档、旧 MEM 日志、峰值保留、路径限制与输出截断；`server/mica.test.ts` 覆盖 Mica 进程归类、孤儿标记、宿主内存按分钟汇总、渲染分位数、慢调用计数、生命周期与增量读取。

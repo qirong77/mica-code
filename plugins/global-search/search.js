@@ -3,8 +3,8 @@ import path from 'node:path';
 import { homedir } from 'node:os';
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  searchDirectories: '~/Desktop\n~/Documents\n~/Downloads',
-  maxDepth: 6,
+  searchDirectories: '~/Desktop\n~/Downloads',
+  maxDepth: 1,
 });
 export const DEFAULT_LIMITS = Object.freeze({ entries: 50_000, directories: 10_000, milliseconds: 8_000 });
 const CACHE_MILLISECONDS = 30_000;
@@ -41,8 +41,8 @@ export function normalizeSettings(settings = {}, home = homedir()) {
     const normalized = path.resolve(expanded);
     if (!roots.includes(normalized)) roots.push(normalized);
   }
-  const depth = settings.maxDepth === '' || settings.maxDepth == null ? 6 : Number(settings.maxDepth);
-  const maxDepth = Number.isFinite(depth) ? Math.max(1, Math.min(16, Math.trunc(depth))) : 6;
+  const depth = settings.maxDepth === '' || settings.maxDepth == null ? 1 : Number(settings.maxDepth);
+  const maxDepth = Number.isFinite(depth) ? Math.max(1, Math.min(16, Math.trunc(depth))) : 1;
   return { roots, maxDepth, warnings };
 }
 
@@ -193,9 +193,6 @@ export async function scanDirectories(config, options = {}) {
     );
   } finally {
     clearTimeout(timer);
-  }
-  if (truncated && !warnings.some((message) => message.includes('预算限制'))) {
-    warn(`已达到最大搜索深度 ${config.maxDepth}，更深层目录未扫描`);
   }
   return { items, topLevel, warnings, truncated };
 }

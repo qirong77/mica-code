@@ -4,6 +4,7 @@ import type { Health } from '../shared/types';
 
 export type IconName =
   | 'overview'
+  | 'mica'
   | 'processes'
   | 'incidents'
   | 'coverage'
@@ -22,6 +23,12 @@ const paths: Record<IconName, ReactNode> = {
       <rect x="14" y="3" width="7" height="7" rx="1.5" />
       <rect x="3" y="14" width="7" height="7" rx="1.5" />
       <rect x="14" y="14" width="7" height="7" rx="1.5" />
+    </>
+  ),
+  mica: (
+    <>
+      <path d="M3 19V7l4.5 7L12 7v12" />
+      <path d="M16 19V9h3.5a2.5 2.5 0 0 1 0 5H16" />
     </>
   ),
   processes: (

@@ -61,7 +61,7 @@ interface RegistryEntry {
   argv: string;
   name: string;
 }
-interface Cursor {
+export interface Cursor {
   ino: number;
   offset: number;
   errors: number;
@@ -158,7 +158,13 @@ export function parseCpuMemory(line: string, day: string): Sample | null {
 }
 
 /** Only complete newline-terminated records are consumed. Readers can run during append/rotation. */
-async function tail(path: string, cursor: Cursor, consume: (obj: any) => void, reset: () => void, rawLines = false) {
+export async function tail(
+  path: string,
+  cursor: Cursor,
+  consume: (obj: any) => void,
+  reset: () => void,
+  rawLines = false,
+) {
   const st = await stat(path);
   if (st.size > MAX_FILE) throw new Error(`日志超过单文件读取上限：${basename(path)}`);
   if (st.ino !== cursor.ino || st.size < cursor.offset) {
@@ -198,6 +204,19 @@ async function tail(path: string, cursor: Cursor, consume: (obj: any) => void, r
     }
   } finally {
     await file.close();
+  }
+}
+
+async function readTail(path: string, bytes: number): Promise<string> {
+  const handle = await open(path, 'r');
+  try {
+    const st = await handle.stat();
+    const size = Math.min(st.size, bytes);
+    const buffer = Buffer.alloc(size);
+    if (size > 0) await handle.read(buffer, 0, size, st.size - size);
+    return buffer.toString('utf8');
+  } finally {
+    await handle.close();
   }
 }
 
@@ -689,6 +708,45 @@ export class TelemetryStore {
       if (p.cpu !== null) row.cpuPct = (row.cpuPct ?? 0) + p.cpu;
     }
     return [...map.values()].sort((a, b) => b.footprintMb - a.footprintMb);
+  }
+  /**
+   * 只要某天的最后一份资源快照与对应命令行：Mica 进程构成不需要为整段历史建索引。
+   * 进程名在日志里是截断的 comm，归属必须看登记表里的完整 argv。
+   */
+  async latestSnapshot(day: string): Promise<{
+    at: string;
+    procs: ProcessRecord[];
+    commands: Map<number, { name: string; argv: string }>;
+  } | null> {
+    const names = await readdir(this.root).catch(() => [] as string[]);
+    this.names = names;
+    const date = day.replaceAll('-', '');
+    const files = names.filter((name) => RESOURCE_RE.exec(name)?.[1] === date).sort();
+    const last = files.at(-1);
+    if (!last) return null;
+    await this.loadRegistry(day, names);
+    const text = await readTail(join(this.root, last), 512 * 1024);
+    const lines = text.split('\n');
+    // 最后一段可能正在写、第一段可能被截断；只认完整的行。
+    for (let index = lines.length - 1; index > 0; index--) {
+      const line = lines[index].trim();
+      if (!line) continue;
+      try {
+        const raw = JSON.parse(line);
+        if (raw.k !== 'sample' || !Array.isArray(raw.procs)) continue;
+        const sample = this.sample(raw, day);
+        if (!sample) continue;
+        const commands = new Map<number, { name: string; argv: string }>();
+        for (const process of sample.procs) {
+          const reg = this.registry(day, process.pid, sample.epoch, process.identity);
+          if (reg) commands.set(process.pid, { name: reg.name, argv: reg.argv });
+        }
+        return { at: sample.ts, procs: sample.procs, commands };
+      } catch {
+        /* 残缺行：继续向前找 */
+      }
+    }
+    return null;
   }
   async incidents(day?: string, window?: { start: number; end: number }): Promise<IncidentSummary[]> {
     const root = join(this.root, 'incidents');
