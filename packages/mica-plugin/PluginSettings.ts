@@ -10,7 +10,18 @@ import { join } from 'node:path';
  */
 export const PLUGIN_SETTINGS_DIR = 'plugin-settings';
 
-export type PluginSettingType = 'text' | 'password' | 'textarea' | 'select' | 'number' | 'switch';
+/**
+ * 字段类型。`directories` 是「一组目录」：值仍按字符串存（一行一个，空行忽略），
+ * 页面把它渲染成目录列表 + 系统文件夹选择器，插件读到的还是那份换行文本。
+ */
+export type PluginSettingType =
+  | 'text'
+  | 'password'
+  | 'textarea'
+  | 'select'
+  | 'number'
+  | 'switch'
+  | 'directories';
 
 export type PluginSettingOption = {
   value: string;
@@ -113,7 +124,8 @@ export function isPluginSettingType(value: unknown): value is PluginSettingType 
     value === 'textarea' ||
     value === 'select' ||
     value === 'number' ||
-    value === 'switch'
+    value === 'switch' ||
+    value === 'directories'
   );
 }
 

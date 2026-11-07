@@ -626,8 +626,13 @@ The container owns the navigation policy and one window per server (`src/main/in
 
 ### What the page does differently from a native app
 
-- **Folder pickers become in-app.** `dialog:select-directory` has no browser equivalent, so
-  `CwdModal` opens `DirectoryPicker`, which browses the _server's_ filesystem through `files:list`.
+- **Folder pickers become in-app unless the shell can open a real one.** The working-directory
+  picker (`CwdModal`) opens `DirectoryPicker` and browses the _server's_ filesystem through
+  `files:list`, because a LAN page has no `dialog:select-directory`. Settings fields declared as
+  `type: "directories"` (Global Search's 搜索目录) instead call the desktop-only `pickDirectory`
+  config action, which the runtime forwards over `MICA_SYSTEM_SOCKET` to `dialog.showOpenDialog` in
+  the Electron main process (`/pick-directory` in `system-docs.js`); the browser host does not
+  implement it, so those fields fall back to plain path inputs.
 - **Clipboard writes happen in the browser.** `files.copyPath` / `copyRelativePath` copy locally via
   `navigator.clipboard` with an `execCommand` fallback (a plain-HTTP LAN page is not a secure
   context). `files.reveal` still opens the containing folder on the server machine.

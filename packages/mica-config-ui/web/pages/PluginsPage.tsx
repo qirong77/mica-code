@@ -1162,7 +1162,8 @@ function PluginSettingsForm({
               }
               hint={field.description}
               error={fieldErrors[field.key]}
-              wide={field.type === 'textarea'}
+              // 目录列表与多行文本都占满整行：和标签挤在同一行时列表会把标签压成两行字。
+              wide={field.type === 'textarea' || field.type === 'directories'}
             >
               <PluginSettingInput
                 field={field}

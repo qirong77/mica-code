@@ -8,6 +8,8 @@ import type {
   ConfigWebFilePayload,
   ConfigWebMcpDetails,
   ConfigWebPerformanceDetails,
+  ConfigWebPickDirectory,
+  ConfigWebPickDirectoryOptions,
   ConfigWebPluginLlmTest,
   ConfigWebPluginActionResult,
   ConfigWebProviderTest,
@@ -98,6 +100,15 @@ export type ConfigWebClient = {
    */
   revealPath?(path: string): Promise<ConfigWebPathAction>;
   openPathInEditor?(path: string): Promise<ConfigWebPathAction>;
+
+  /**
+   * 打开系统的文件夹选择器（macOS 的打开面板）挑一个目录。
+   *
+   * 只有桌面宿主做得到：面板属于有 app 身份的那个进程，页面是通过运行时的主进程
+   * socket 转过去的。浏览器宿主（apps/config-web）没有这个方法，缺了就由字段自己在
+   * 页面上留手动输入的路，而不是给一个点了没反应的按钮。
+   */
+  pickDirectory?(options?: ConfigWebPickDirectoryOptions): Promise<ConfigWebPickDirectory>;
 
   /**
    * 自动压缩（输入框上方那个齿轮曾经管的东西）现在只在这台机器的运行时里：设置与按会话
@@ -359,6 +370,30 @@ export function supportsPathReveal(): boolean {
 /** 宿主能不能在自己的编辑器里打开一个路径。 */
 export function supportsPathEditor(): boolean {
   return typeof client?.openPathInEditor === 'function';
+}
+
+/**
+ * 这个宿主有没有系统的文件夹选择器。
+ *
+ * 桌面宿主有（主进程开面板），浏览器宿主没有——字段据此决定是画「选择文件夹…」
+ * 还是只留手动输入的「添加目录」。
+ */
+export function supportsDirectoryPicker(): boolean {
+  return typeof client?.pickDirectory === 'function';
+}
+
+/**
+ * 打开系统文件夹选择器。用户取消时返回 `{ canceled: true }`，不算错误；
+ * 宿主根本没有这个能力时也只回一条错误文案，由调用方决定要不要显示。
+ */
+export async function pickDirectory(
+  options: ConfigWebPickDirectoryOptions = {},
+): Promise<ConfigWebPickDirectory> {
+  const current = client;
+  if (typeof current?.pickDirectory !== 'function') {
+    return { canceled: true, error: '当前宿主没有系统的文件夹选择器' };
+  }
+  return current.pickDirectory(options);
 }
 
 /**

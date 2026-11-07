@@ -256,7 +256,11 @@ export type ConfigWebPluginState = 'enabled' | 'disabled' | 'failed';
 export type ConfigWebPluginSetting = {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'textarea' | 'select' | 'number' | 'switch';
+  /**
+   * `directories` 是一组目录：值仍是一行一个的文本，页面渲染成目录列表 +
+   * 系统文件夹选择器（`pickDirectory`）。
+   */
+  type: 'text' | 'password' | 'textarea' | 'select' | 'number' | 'switch' | 'directories';
   description?: string;
   placeholder?: string;
   options?: { value: string; label: string }[];
@@ -467,6 +471,25 @@ export type ConfigWebPathAction = {
   kind?: 'file' | 'directory';
   path?: string;
   error?: string;
+};
+
+/**
+ * 系统文件夹选择器的结果。
+ *
+ * 取消是正常结果（用户点了取消），不是错误，所以与 `ConfigWebPathAction` 分开：
+ * 后者只有成功/失败两种，把「没选」混进去就会在界面上冒出一句红色错误。
+ */
+export type ConfigWebPickDirectory = {
+  canceled: boolean;
+  path?: string;
+  /** 面板打不开时的原因（宿主没有这个能力 / 主进程请求失败）。 */
+  error?: string;
+};
+
+/** `pickDirectory` 的参数：面板标题与打开时定位到的目录。 */
+export type ConfigWebPickDirectoryOptions = {
+  title?: string;
+  defaultPath?: string;
 };
 
 /** 插件动作的返回：一句给人看的结果，外加一条可以直接点开/复制的地址。 */

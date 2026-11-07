@@ -4489,6 +4489,35 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     color: var(--text);
   }
 
+  /* 目录列表字段（插件设置里的「搜索目录」这类）：一行一个目录，右侧是移除。
+     容器跟着行内输入框一起收窄——收满整行时 × 会飘到半个屏幕之外，看不出它属于哪一行。 */
+  .config-directories {
+    display: grid;
+    gap: 6px;
+    max-width: 430px;
+  }
+
+  .config-directories-empty {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+
+  .config-directory-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .config-directories-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
   /* 自绘下拉：触发器外观就是 .text-input，弹层用页面自己的配色画。
      原生 select 的弹层由系统窗口绘制，圆角、勾选、位置都不受页面控制。 */
   .ui-select {

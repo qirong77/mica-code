@@ -11,11 +11,13 @@
  */
 
 import { DESKTOP_CHECKS } from '@packages/mica-plugin/index.js'
-import { openSocketRequest, readAllText } from './control-client.js'
+import { openSocketRequest, readAllText, requestJson } from './control-client.js'
 
 export const SYSTEM_SOCKET_ENV = 'MICA_SYSTEM_SOCKET'
 
 const REQUEST_TIMEOUT_MS = 4000
+/** 文件夹选择器等的是人在面板里点选，默认 4 秒不够：面板还开着请求就先断了。 */
+const PICKER_TIMEOUT_MS = 10 * 60 * 1000
 const SERVICE_LABEL = '系统检查服务'
 const NO_DESKTOP_DETAIL = '需要桌面应用'
 
@@ -127,6 +129,34 @@ export async function openSystemSettings(pane) {
     return { ok: true }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+/**
+ * 打开系统的文件夹选择器。面板只有主进程开得了（app 身份在那里），所以这条路和系统
+ * 检查共用一条私有 socket；`canceled: true` 表示用户点了取消，照原样回给页面。
+ *
+ * 超时按「用户要看一会儿文件夹」给：默认那 4 秒会在面板还开着的时候就断掉。
+ */
+export async function pickDirectoryNative({ title, defaultPath } = {}) {
+  const path = socketPath()
+  if (!path) return { canceled: true, error: NO_DESKTOP_DETAIL }
+
+  try {
+    const payload = await requestJson(path, '/pick-directory', {
+      method: 'POST',
+      body: {
+        ...(typeof title === 'string' && title.trim() ? { title: title.trim() } : {}),
+        ...(typeof defaultPath === 'string' && defaultPath.trim() ? { defaultPath: defaultPath.trim() } : {})
+      },
+      timeoutMs: PICKER_TIMEOUT_MS,
+      label: '文件夹选择器'
+    })
+    if (payload?.canceled === true) return { canceled: true }
+    if (typeof payload?.path !== 'string' || !payload.path) return { canceled: true }
+    return { canceled: false, path: payload.path }
+  } catch (error) {
+    return { canceled: true, error: error instanceof Error ? error.message : String(error) }
   }
 }
 

@@ -14,7 +14,7 @@
 - 搜索用 `rg`，默认排除 `temp/`、`.backups/`、`node_modules/`、`dist/`、`out/`。
 - 验证只跑到「与改动最接近」为止：针对性单测 + `bun run typecheck`。不跑全量测试、全量 lint 与真实子进程 E2E，除非用户要发布或明确要求（尺度见 `agent/build.md`）。
 - 临时复现用隔离的 `MICA_HOME`；起桌面实例还要独立 `MICA_DESKTOP_USER_DATA`、`MICA_DESKTOP_PORT` 与 `--user-data-dir`。
-- 界面探针要反复看就放 `apps/desktop/.probe/<名字>/`，纳入 git、附运行方式；一次性 `.probe-*.mjs` 脚本用完即删，交付前 `git status --short` 确认无残留。
+- 界面探针要反复看就放 `apps/desktop/.probe/<名字>/`，纳入 git、附运行方式；一次性的探针、复现脚本与临时测试统一放 gitignore 的 `temp/` 下，不落到仓库其它位置，用完即删，交付前 `git status --short` 确认无残留。
 - 用户要求构建时按 `agent/build.md` 的命令做：构建只产出新产物，不会让运行中的实例自我重载；什么时候重启由用户自己决定。
 - 产品能力优先做成插件：内核里不出现具体插件名词，插件也不靠改别人的数据伪造界面。
 - 插件系统本身仍在迭代：现有 `PluginContext` 承载不了时先重构能力面，再在新机制上实现；不为单个插件在宿主里写死分支（见 `agent/plugins.md`）。

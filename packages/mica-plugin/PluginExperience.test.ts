@@ -63,7 +63,7 @@ describe('plugin experience metadata', () => {
 });
 
 describe('experience analysis', () => {
-  const line = (id: string, data: Record<string, unknown> = {}, plugin = 'context-handoff') =>
+  const line = (id: string, data: Record<string, unknown> = {}, plugin = 'sample-plugin') =>
     JSON.stringify({
       plugin,
       time: '2026-11-05T00:00:00Z',

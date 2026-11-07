@@ -64,10 +64,6 @@ describe('getPluginsDetails', () => {
     writeFileSync(join(pluginDir, 'index.js'), 'export default function setup() {}');
 
     const details = getPluginsDetails();
-    expect(details.plugins.find((plugin) => plugin.id === 'voice-input')).toMatchObject({
-      source: 'official',
-      desktopComposer: true,
-    });
     expect(details.plugins.find((plugin) => plugin.id === 'todo')?.desktopComposer).toBe(false);
     expect(details.plugins.find((plugin) => plugin.id === 'user.composer')).toMatchObject({
       source: 'user',

@@ -72,6 +72,22 @@ const RAW_ENDPOINTS = [
       }
     ],
     returns: '{ path, bytes, windowId, title }。快照期间目标页面会停住几秒，文件可能上百 MB'
+  },
+  {
+    id: 'pickDirectory',
+    method: 'POST',
+    path: '/pick-directory',
+    summary: '打开系统的文件夹选择器挑一个目录（设置页里「选择文件夹…」用）',
+    params: [
+      { name: 'title', in: 'body', required: false, description: '面板标题，缺省「选择文件夹」' },
+      {
+        name: 'defaultPath',
+        in: 'body',
+        required: false,
+        description: '打开时定位到的目录，缺省用户主目录'
+      }
+    ],
+    returns: '{ canceled, path? }。canceled 为 true 表示用户点了取消，不是错误'
   }
 ]
 

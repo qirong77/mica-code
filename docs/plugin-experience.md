@@ -1,12 +1,8 @@
 # 会话体验卡与本地埋点
 
-会话体验插件使用宿主统一的摘要卡片与详情面板，复用主题令牌和共享 Button。卡片只在有内容时出现，支持收起；完整信息仍可从插件面板查看。
+会话体验插件使用宿主统一的摘要卡片与详情面板，复用主题令牌和共享 Button。卡片只在有内容时出现，支持收起；完整信息仍可从插件面板查看。能力面由 `mica-plugin` 提供（`PluginPanelView.cards` 与 `createPluginExperience()`），官方插件目录里当前没有使用者。
 
-| 插件 | 用途 | 信息来源 |
-| --- | --- | --- |
-| Context Handoff | 回到旧会话时查看已完成、待完成和注意事项 | 保存的历史检查点；继续前核实当前工作区 |
-
-Context Handoff 不额外调用模型。交接需要主代理调用工具保存内容，不会从每条聊天消息自动猜测任务状态。
+卡片不额外调用模型：展示内容由插件自己持久化，不会从每条聊天消息自动猜测任务状态。
 
 ## 统一事件
 
@@ -36,7 +32,7 @@ Context Handoff 不额外调用模型。交接需要主代理调用工具保存�
 
 ```sh
 bun scripts/plugin-experience-report.ts
-bun scripts/plugin-experience-report.ts --plugin context-handoff --since 2026-11-01T00:00:00Z
+bun scripts/plugin-experience-report.ts --plugin <plugin-id> --since 2026-11-01T00:00:00Z
 bun scripts/plugin-experience-report.ts --dir /path/to/copied-logs > experience-report.json
 ```
 
@@ -47,6 +43,6 @@ bun scripts/plugin-experience-report.ts --dir /path/to/copied-logs > experience-
 - 展示后是否有人查看详情、选择继续，或立即关闭；按版本和 surface 分开比较。
 - 旧版本点击的 `stale` 比例：过高可能意味着卡片刷新太频繁或操作链太长。
 - 环境检查耗时与失败比例：区分服务确实不可用和插件自身故障，不能把 HTTP 成功状态直接当作业务健康。
-- 工具更新频率与实际展示次数：过度更新可能引起干扰；交接卡没有使用可能是检查点未保存，也可能是显示时机不合适。
+- 工具更新频率与实际展示次数：过度更新可能引起干扰；卡片没有被使用可能是内容根本没有保存，也可能是显示时机不合适。
 
 事件只提供分析证据，不会自动修改插件设置、清理按钮、部署或触发任务。自动优化系统应先输出可审核的建议，结合样本量和用户反馈判断。

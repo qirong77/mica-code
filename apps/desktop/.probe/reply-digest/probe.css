@@ -1,0 +1,299 @@
+/*
+ * 探针外壳：只负责把「对话区」和「插件视角」摆在一起。
+ * 对话区里的每一个消息行、每一张摘要卡都用 app.css 的真实类名，
+ * 所以这里不要给 .chat-* 加任何样式——那会让探针说明不了真实版式。
+ */
+html,
+body,
+#root {
+  height: auto;
+  min-height: 100%;
+  overflow: auto;
+}
+
+body {
+  background: var(--color-tabstrip);
+}
+
+.probe-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 760px) 336px;
+  align-items: start;
+  justify-content: center;
+  gap: 16px;
+  padding: 18px;
+}
+
+.probe-pane {
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-canvas);
+}
+
+.probe-chat {
+  padding: 0 10px 6px;
+}
+
+.probe-chat-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -10px 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--color-line);
+  border-radius: 10px 10px 0 0;
+  background: var(--color-panel);
+  color: var(--color-fg-muted);
+  font-size: 11.5px;
+}
+
+.probe-chat-tab strong {
+  color: var(--color-fg-strong);
+  font-weight: 600;
+}
+
+.probe-chat-tab .probe-tab-hint {
+  margin-left: auto;
+  color: var(--color-fg-faint);
+  font-size: 10.5px;
+}
+
+/* 不触发时的说明：不进消息流，避免被误认成产品里的卡片。 */
+.probe-absent {
+  margin: 14px 4px 4px;
+  padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, var(--color-warn) 45%, var(--color-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-warn) 6%, transparent);
+  color: var(--color-fg-muted);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.probe-absent strong {
+  color: var(--color-warn);
+  font-weight: 600;
+}
+
+.probe-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px 14px;
+  background: var(--color-panel);
+  font-size: 12px;
+}
+
+.probe-side-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-fg-strong);
+  font-weight: 600;
+}
+
+.probe-side-head .probe-side-id {
+  color: var(--color-fg-faint);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.probe-side-head .probe-side-version {
+  margin-left: auto;
+  color: var(--color-fg-faint);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.probe-side p {
+  margin: 0;
+  color: var(--color-fg-muted);
+  line-height: 1.6;
+}
+
+.probe-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-line);
+}
+
+.probe-section-title {
+  color: var(--color-fg-dim);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.probe-verdict {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 40%, var(--color-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  color: var(--color-success);
+  font-weight: 600;
+}
+
+.probe-verdict.is-off {
+  border-color: var(--color-line-strong);
+  background: color-mix(in srgb, var(--color-fg-max) 4%, transparent);
+  color: var(--color-fg-muted);
+}
+
+.probe-verdict-glyph {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  place-items: center;
+  border-radius: 6px;
+  background: currentColor;
+  color: var(--color-canvas);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.probe-side p.probe-hint {
+  margin: -2px 0 2px;
+  color: var(--color-fg-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.probe-meter {
+  display: grid;
+  gap: 4px;
+}
+
+.probe-meter-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-fg-soft);
+  font-size: 11.5px;
+}
+
+.probe-meter-head b {
+  color: var(--color-fg-strong);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.probe-meter-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-fg-max) 10%, transparent);
+}
+
+.probe-meter-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-ask) 78%, transparent);
+}
+
+.probe-meter-fill.is-hot {
+  background: var(--color-ask);
+}
+
+.probe-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.probe-facts li {
+  display: flex;
+  gap: 8px;
+  color: var(--color-fg-muted);
+  line-height: 1.55;
+}
+
+.probe-facts b {
+  flex: none;
+  min-width: 62px;
+  color: var(--color-fg-soft);
+  font-weight: 500;
+}
+
+.probe-facts span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.probe-textarea {
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  max-height: 260px;
+  resize: vertical;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 6px;
+  background: var(--color-canvas);
+  padding: 7px 9px;
+  color: var(--color-fg);
+  font-family: var(--chat-font);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.probe-textarea:focus {
+  border-color: var(--color-ask);
+  outline: none;
+}
+
+.probe-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.probe-buttons button {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-fg-soft);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.probe-buttons button:hover {
+  border-color: var(--color-ask);
+  color: var(--color-fg-max);
+}
+
+.probe-buttons button.is-active {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--color-ask) 16%, transparent);
+  color: var(--color-fg-max);
+}
+
+.probe-note {
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-fg-max) 4%, transparent);
+  color: var(--color-fg-dim);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.probe-note code {
+  color: var(--color-fg-soft);
+}
+
+@media (max-width: 1120px) {
+  .probe-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

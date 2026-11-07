@@ -15,9 +15,9 @@
   "settings": [
     {
       "key": "searchDirectories",
-      "type": "textarea",
+      "type": "directories",
       "label": "搜索目录",
-      "description": "一行一个目录，支持 ~/。搜索独立于当前会话和编辑器工作区。",
+      "description": "点「选择文件夹」添加目录，也可以直接改路径。搜索独立于当前会话和编辑器工作区。",
       "default": "~/Desktop\n~/Downloads"
     },
     {

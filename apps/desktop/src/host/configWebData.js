@@ -38,6 +38,7 @@ import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from '
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
 import {
   openSystemSettings,
+  pickDirectoryNative,
   readSystemChecks,
   requestSystemAccess,
   takeHeapSnapshot
@@ -577,6 +578,9 @@ export const configWebActions = {
   // 「请求授权」：让系统就地把**这次运行的构建**登记进辅助功能列表。只「打开设置」时，
   // 用户很可能去勾上次打包留下的旧条目，勾了也不生效。
   requestDesktopAccess: (input) => requestSystemAccess(text(input, 'id')),
+  // 系统的文件夹选择器：插件设置里的「选择文件夹…」用它挑目录。取消照原样回 canceled。
+  pickDirectory: (input) =>
+    pickDirectoryNative({ title: optionalText(input, 'title'), defaultPath: optionalText(input, 'defaultPath') }),
 
   readSessionsDetails: () => readSessionsDetails(),
   readSessionDetails: (input) => readSessionDetails(text(input, 'id')),

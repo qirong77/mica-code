@@ -6,10 +6,11 @@
 
 每套探针一个子目录，自成一体（自己的 `index.html` + `main.jsx` + `vite.config.mjs`，必要时加一个替身模块）：
 
-| 目录             | 看什么                                                                      |
-| ---------------- | --------------------------------------------------------------------------- |
-| `config-ui/`     | 会话设置弹窗的「插件」一节；`config-ui-shim.tsx` 替身 `@mica-config-ui/web` |
-| `global-search/` | 全局搜索启动器的输入框、结果列表与焦点样式；右下 `#probe-out` 打出计算样式  |
+| 目录             | 看什么                                                                             |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| `config-ui/`     | 会话设置弹窗的「插件」一节；`config-ui-shim.tsx` 替身 `@mica-config-ui/web`        |
+| `global-search/` | 全局搜索启动器的输入框、结果列表与焦点样式；右下 `#probe-out` 打出计算样式         |
+| `reply-digest/`  | 长回复摘要插件的产出：真实对话行 + `digest` notice 卡，右侧按 `digest.ts` 实时判定 |
 
 ## 运行
 
@@ -17,6 +18,7 @@
 cd apps/desktop
 npx vite --config .probe/global-search/vite.config.mjs   # http://127.0.0.1:5231
 npx vite --config .probe/config-ui/vite.config.mjs       # http://127.0.0.1:5199
+npx vite --config .probe/reply-digest/vite.config.mjs    # http://127.0.0.1:5232
 ```
 
 `vite.config.mjs` 里已固定 `root`，所以在哪个目录执行都能跑；端口按上面两行分配，新增探针另取一个。
@@ -24,6 +26,11 @@ npx vite --config .probe/config-ui/vite.config.mjs       # http://127.0.0.1:5199
 `global-search/` 按 `index.html` 的真实顺序加载样式（配置页样式 → `app.css` → 插件
 chunk），所以能复现「外层样式把插件控件盖住」这类问题；加 `?theme=light` 看亮色主题
 下的样子。
+
+`reply-digest/` 的对话区故意留着 `chat-view` 类名：`--chat-user`、`--chat-row-marker-width`
+这组排版变量挂在它上面，去掉之后用户消息带和 gutter 宽度都是假的。判定用插件的
+`digest.ts`（`shouldDigest` / `digestInput` / `cleanSummary`），只有卡片里的摘要正文是
+一次固定的模型样例输出——页面不联网，所以它不随文本变化。
 
 ## 约定
 

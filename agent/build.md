@@ -77,7 +77,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 浏览器与终端控制必须真窗口验证，单测不能替代。
 - 起测试实例要同时给 `MICA_HOME` / `MICA_DESKTOP_USER_DATA` / `MICA_DESKTOP_PORT` 与独立 `--user-data-dir`。
 - 长进程放后台任务，用 `wait_for`（http / port / 文件）等就绪，不用大数字 `sleep` 硬等。
-- 要反复看的界面探针放 `apps/desktop/.probe/<名字>/` 并纳入 git（每套一个子目录，运行方式见 `apps/desktop/.probe/README.md`）；只看一次的 `.probe-*.mjs` 脚本仍放仓库内、用完立即删除，交付前 `git status --short` 确认无残留。
+- 要反复看的界面探针放 `apps/desktop/.probe/<名字>/` 并纳入 git（每套一个子目录，运行方式见 `apps/desktop/.probe/README.md`）；一次性的探针、复现脚本与临时测试一律放在 gitignore 的 `temp/` 下，用完即删，交付前 `git status --short` 确认无残留。
 - 判断服务不可用先看证据（curl、lsof、日志 ready 行）；整页空白先查渲染期异常。
 
 ## 对外文档与演示素材

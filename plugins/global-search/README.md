@@ -6,7 +6,7 @@
 
 ## 使用
 
-1. 打开 **Settings → Plugins → Global Search**，在「搜索目录」中一行填写一个目录，自动保存。
+1. 打开 **Settings → Plugins → Global Search**，在「搜索目录」里点「选择文件夹」挑目录（也可以直接改路径），自动保存。
 2. 桌面应用运行时，在任意应用按 **Option + 空格** 唤出；也可以点插件详情的「打开 Global Search」。
 3. 输入关键词，↑/↓ 选择，Enter 在 Mica 编辑器打开文件或目录；Esc 或点击其他窗口收起。
 
@@ -16,7 +16,7 @@
 
 ## 设置与范围
 
-- `searchDirectories`：一行一个绝对目录，支持 `~` 和 `~/`，默认值为 `~/Desktop`、`~/Downloads`。空配置表示不搜索任何目录；相对路径会给出警告，不会相对于会话解析。
+- `searchDirectories`：一行一个绝对目录，支持 `~` 和 `~/`，默认值为 `~/Desktop`、`~/Downloads`。设置页用系统文件夹选择器添加（`type: directories`），存的仍是这份换行文本。空配置表示不搜索任何目录；相对路径会给出警告，不会相对于会话解析。
 - `maxDepth`：默认 1，范围 1–16。根目录深度为 0；值为 1 时包含根目录及直接子项，不读取子目录的内容。遇到深度边界上的目录会保守地标记 `truncated`，即便该目录实际为空。
 - 返回配置根目录本身及递归文件、文件夹。重叠根目录去重，每个显式根目录独立获得完整深度额度。
 - 忽略符号链接、隐藏目录，以及 `node_modules`、`dist`、`out`、`build`、`coverage`、`Library`、`__pycache__`、`venv`、`Pods`、`bower_components` 等常见产物目录。显式配置的根目录本身不按目录名过滤。隐藏文件仍可搜索。

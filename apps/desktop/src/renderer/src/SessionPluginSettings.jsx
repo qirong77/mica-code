@@ -144,7 +144,7 @@ function renderField({ plugin, field, running, savingKey, onSave }) {
         </>
       }
       htmlFor={`session-plugin-setting-${plugin.id}-${field.key}`}
-      wide={field.type === 'textarea'}
+      wide={field.type === 'textarea' || field.type === 'directories'}
       // 说明讲「这一项是什么」，覆盖状态由标签与「跟随默认」按钮表达：
       // 每行都写一遍「跟随默认值」只会把有用的说明挤掉。
       hint={field.description}

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { app, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, dialog, shell, systemPreferences } from 'electron'
 import {
   buildSystemChecks,
   parseClangVersion,
@@ -112,6 +112,28 @@ export function requestCheckAccess(id, { platform = process.platform, preference
   return { id: check, granted: false }
 }
 
+/**
+ * 打开系统的文件夹选择器。
+ *
+ * 挂在当前聚焦的窗口上：macOS 会把它画成贴着那张窗口的 sheet，别的平台是模态框。
+ * 不给父窗口时面板会飘在应用之外，可能被别的窗口盖住，用户以为按钮没反应。
+ *
+ * 取消不是错误（`{ canceled: true }`）：设置里「点了取消」与「选择器坏了」必须分开。
+ */
+export async function pickDirectoryDialog({ title, defaultPath } = {}) {
+  const options = {
+    title: typeof title === 'string' && title.trim() ? title.trim() : '选择文件夹',
+    // 默认落在用户主目录：`~/Desktop` 这类展开过的路径由调用方给，这里不再猜。
+    defaultPath:
+      typeof defaultPath === 'string' && defaultPath.trim() ? defaultPath.trim() : app.getPath('home'),
+    properties: ['openDirectory', 'createDirectory']
+  }
+  const parent = BrowserWindow.getFocusedWindow()
+  const result = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options)
+  if (!result || result.canceled || !result.filePaths?.length) return { canceled: true }
+  return { canceled: false, path: result.filePaths[0] }
+}
+
 export async function startSystemHost({ socketPath, snapshotHeap, launcherControl } = {}) {
   if (!socketPath) throw new Error('startSystemHost 需要 socketPath')
 
@@ -120,7 +142,8 @@ export async function startSystemHost({ socketPath, snapshotHeap, launcherContro
     openSettings: (pane) => shell.openExternal(pane),
     requestAccess: (id) => requestCheckAccess(id),
     snapshotHeap,
-    launcherControl
+    launcherControl,
+    pickDirectory: (payload) => pickDirectoryDialog(payload)
   })
 
   await mkdir(dirname(socketPath), { recursive: true }).catch(() => {})

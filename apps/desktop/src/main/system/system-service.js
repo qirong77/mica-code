@@ -30,9 +30,16 @@ const MAX_BODY_BYTES = 64 * 1024
  * @param requestAccess 主动登记当前构建（主进程里是 `isTrustedAccessibilityClient(true)`）
  * @param snapshotHeap 给一个窗口拍堆快照（只有主进程拿得到 `webContents`）
  */
-export function createSystemService({ probe, openSettings, requestAccess, snapshotHeap, launcherControl }) {
+export function createSystemService({
+  probe,
+  openSettings,
+  requestAccess,
+  snapshotHeap,
+  launcherControl,
+  pickDirectory
+}) {
   const routes = compileRoutes(SYSTEM_ENDPOINTS)
-  const handlers = buildHandlers({ probe, openSettings, requestAccess, snapshotHeap, launcherControl })
+  const handlers = buildHandlers({ probe, openSettings, requestAccess, snapshotHeap, launcherControl, pickDirectory })
 
   async function handle(req, res) {
     const guard = verifyLocalRequest(req)
@@ -130,7 +137,7 @@ export function createSystemService({ probe, openSettings, requestAccess, snapsh
   }
 }
 
-function buildHandlers({ probe, openSettings, requestAccess, snapshotHeap, launcherControl }) {
+function buildHandlers({ probe, openSettings, requestAccess, snapshotHeap, launcherControl, pickDirectory }) {
   return {
     launcherControl: async (ctx) => {
       if (typeof launcherControl !== 'function') throw new SystemRequestError('当前外壳不支持桌面启动器', 501)
@@ -151,6 +158,13 @@ function buildHandlers({ probe, openSettings, requestAccess, snapshotHeap, launc
         throw new SystemRequestError('当前外壳不支持堆快照', 501)
       }
       return snapshotHeap({ windowId: ctx.body?.windowId })
+    },
+    // 系统面板属于有 app 身份的进程，页面拿不到；取消是正常结果，照原样回给调用方。
+    pickDirectory: async (ctx) => {
+      if (typeof pickDirectory !== 'function') {
+        throw new SystemRequestError('当前外壳不支持文件夹选择器', 501)
+      }
+      return pickDirectory({ title: ctx.body?.title, defaultPath: ctx.body?.defaultPath })
     }
   }
 }

@@ -11,11 +11,7 @@
 
 `deepseek-harness` 监管独立的 DeepSeek Harness `dsh web` 进程；它不启动 Electron GUI，也不把 Harness 页面嵌入 Mica，地址和进程状态只通过插件设置展示。实现与生命周期边界见 [DeepSeek Harness](deepseek-harness/README.md)。
 
-会话体验卡：[Context Handoff](context-handoff/README.md) 保存历史检查点，共用宿主摘要卡片，不各自绘制界面；本地埋点格式及分析导出见 [会话体验卡与埋点](../docs/plugin-experience.md)。
-
 [Long Reply Digest](reply-digest/README.md) 在成功回合结束后识别过长的 Agent 回复，调用摘要模型并以会话 notice 展示简短摘要；短回复不会额外调用模型。
-
-[Voice Input](voice-input/README.md) 在手机端输入框旁加一枚麦克风：录音经本机上传通道落到 `$MICA_HOME/attachments/`，再由插件调 OpenAI 兼容的转写服务，识别文字只追加进草稿，由用户确认后发送。
 
 [Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
 
@@ -83,9 +79,13 @@ plugins/<id>/
 }
 ```
 
-`type` 支持 `text` / `password` / `textarea` / `select` / `number` / `switch`。值统一按字符串存进
+`type` 支持 `text` / `password` / `textarea` / `select` / `number` / `switch` / `directories`。值统一按字符串存进
 `$MICA_HOME/plugin-settings/<id>.json`，未声明的键不会被写入；`select` 必须带 `options`，
 `switch` 存 `"true"` / `"false"`。插件每轮读取时会比对文件 mtime，用户改完不需要重启。
+
+`directories` 用来声明「一组目录」：存的仍是换行分隔的路径（`ctx.settings.get()` 读到的就是
+它），设置页渲染成目录列表，并在桌面外壳里带一个「选择文件夹…」按钮打开系统面板——插件不必
+自己拼目录选择界面，也不要把它改成 JSON 数组，那会绕开同一份校验与控件。
 
 插件自己拿到了值（注册换回的口令、探测到的地址）用 `ctx.settings.set({ token })` 写回去：
 只改传入的键，其余保持原样，写盘前过同一份校验。**不要让用户复制粘贴插件本该自己拿到的东西**——

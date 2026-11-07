@@ -1,4 +1,6 @@
-import { Segmented, Switch } from './Ui.js';
+import { useEffect, useRef, useState } from 'react';
+import { Button, Segmented, Switch } from './Ui.js';
+import { pickDirectory, supportsDirectoryPicker } from '../api.js';
 import { SecretInput } from './SecretInput.js';
 import type { ConfigWebPluginSetting } from '../../src/shared/types.js';
 
@@ -95,6 +97,10 @@ export function PluginSettingInput({
     );
   }
 
+  if (field.type === 'directories') {
+    return <DirectoriesInput field={field} inputId={inputId} value={value} disabled={disabled} onChange={onChange} />;
+  }
+
   // 密钥行统一走 SecretInput：眼睛按钮切明文，与配置页服务商的 API Key 同一个控件。
   if (field.type === 'password') {
     return (
@@ -140,4 +146,129 @@ export function nudgeSettingValue(field: ConfigWebPluginSetting, current: string
   const lifted = field.min === undefined ? next : Math.max(field.min, next);
   const clamped = field.max === undefined ? lifted : Math.min(field.max, lifted);
   return String(Number(clamped.toFixed(4)));
+}
+
+/**
+ * `directories` 字段的取值 ↔ 行列表。
+ *
+ * 存储形态没有变成数组：插件的 `ctx.settings.get()` 读到的还是那份「一行一个目录」的
+ * 文本，所以这一项只是**换个控件**，存档与校验规则都没动。空行不占位——用户加了一行却
+ * 没填内容时，磁盘上不该多出一条空目录。
+ */
+export function splitDirectorySetting(value: string): string[] {
+  return String(value ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+export function joinDirectorySetting(rows: readonly string[]): string {
+  return rows
+    .map((row) => row.trim())
+    .filter((row) => row !== '')
+    .join('\n');
+}
+
+/**
+ * 一组目录的控件：一行一个目录，行内的路径仍可手改。
+ *
+ * 行列表是本地状态：值里没有空行，而「点了『手动添加』还没填」的那一行必须是空行，
+ * 只从 value 推出来就画不出来。所以只在这份值被**外部**改掉（切插件、保存后回填）时
+ * 跟随重排，自己发出去的那份不重排。
+ */
+function DirectoriesInput({
+  field,
+  inputId,
+  value,
+  disabled,
+  onChange,
+}: {
+  field: ConfigWebPluginSetting;
+  inputId: string;
+  value: string;
+  disabled: boolean;
+  onChange(next: string): void;
+}) {
+  const [rows, setRows] = useState(() => splitDirectorySetting(value));
+  const [picking, setPicking] = useState(false);
+  const [error, setError] = useState('');
+  const emitted = useRef(value);
+
+  useEffect(() => {
+    if (value === emitted.current) return;
+    emitted.current = value;
+    setRows(splitDirectorySetting(value));
+  }, [value]);
+
+  const apply = (next: string[]) => {
+    setRows(next);
+    const text = joinDirectorySetting(next);
+    emitted.current = text;
+    if (text !== value) onChange(text);
+  };
+
+  // 面板定位到已经填过的最后一个目录，连着加几个同级的文件夹时不用每次都翻回去。
+  const addFromPicker = async () => {
+    if (disabled || picking) return;
+    setPicking(true);
+    setError('');
+    try {
+      const last = [...rows].reverse().find((row) => row.trim() !== '') || '';
+      const result = await pickDirectory({ title: field.label, defaultPath: last });
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      if (result.canceled || !result.path) return;
+      if (rows.includes(result.path)) return;
+      apply([...rows, result.path]);
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  return (
+    <div className="config-directories">
+      {rows.length === 0 ? <p className="config-directories-empty">还没有添加目录</p> : null}
+      {rows.map((row, index) => (
+        <div className="config-directory-row" key={index}>
+          <input
+            id={index === 0 ? inputId : undefined}
+            className="text-input"
+            value={row}
+            spellCheck={false}
+            disabled={disabled}
+            placeholder={field.placeholder || '~/Desktop'}
+            aria-label={`第 ${index + 1} 个目录`}
+            onChange={(event) => {
+              const next = [...rows];
+              next[index] = event.target.value;
+              apply(next);
+            }}
+          />
+          <Button
+            size="compact"
+            variant="ghost"
+            disabled={disabled || picking}
+            title="移除这个目录"
+            ariaLabel={`移除 ${row.trim() || `第 ${index + 1} 个目录`}`}
+            onClick={() => apply(rows.filter((_, at) => at !== index))}
+          >
+            ×
+          </Button>
+        </div>
+      ))}
+      <div className="config-directories-actions">
+        {supportsDirectoryPicker() ? (
+          <Button size="compact" disabled={disabled} loading={picking} onClick={() => void addFromPicker()}>
+            选择文件夹…
+          </Button>
+        ) : null}
+        <Button size="compact" variant="ghost" disabled={disabled || picking} onClick={() => apply([...rows, ''])}>
+          手动添加
+        </Button>
+      </div>
+      {error ? <span className="setting-row-error">{error}</span> : null}
+    </div>
+  );
 }

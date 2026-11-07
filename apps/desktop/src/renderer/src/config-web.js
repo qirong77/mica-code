@@ -64,6 +64,8 @@ export function createDesktopConfigWebClient() {
     // 请求系统登记当前这个构建（辅助功能）：与「打开设置」不同，它让系统把正在运行的
     // 进程加进列表，用户勾的才是这一份。
     requestDesktopAccess: (id) => invoke('requestDesktopAccess', { id }),
+    // 系统的文件夹选择器（设置项要挑目录时用）：面板由主进程开，取消不是错误。
+    pickDirectory: (options) => invoke('pickDirectory', options ?? {}),
 
     readBrowserControlDetails: () => invoke('readBrowserControlDetails'),
     readTerminalControlDetails: () => invoke('readTerminalControlDetails'),

@@ -21,16 +21,10 @@ describe('official plugin manifests', () => {
   it('does not register the removed task delivery plugin', () => {
     expect(officialPluginIds.has('task-delivery')).toBe(false);
   });
-  it('registers the session experience plugin with a desktop panel and optional local telemetry', () => {
-    for (const id of ['context-handoff']) {
-      const manifest = officialPluginManifests.find((entry) => entry.id === id)!;
-      expect(manifest).toBeDefined();
-      expect(manifest.requires).toContain('desktop');
-      expect(manifest.desktopPanel?.dynamicShortcuts).toBe(true);
-      expect(manifest.settings.find((setting) => setting.key === 'telemetry')).toMatchObject({
-        type: 'switch',
-        default: 'true',
-      });
-    }
+  it('does not register the removed voice input plugin', () => {
+    expect(officialPluginIds.has('voice-input')).toBe(false);
+  });
+  it('does not register the removed context handoff plugin', () => {
+    expect(officialPluginIds.has('context-handoff')).toBe(false);
   });
 });

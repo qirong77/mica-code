@@ -336,7 +336,7 @@ export type MicaPluginSessionSettings = {
   fields: {
     key: string;
     label: string;
-    type: 'text' | 'password' | 'textarea' | 'select' | 'number' | 'switch';
+    type: 'text' | 'password' | 'textarea' | 'select' | 'number' | 'switch' | 'directories';
     description?: string;
     placeholder?: string;
     options?: { value: string; label: string }[];

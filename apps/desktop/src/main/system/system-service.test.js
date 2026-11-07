@@ -8,6 +8,7 @@ import { createSystemService } from './system-service.js'
  */
 const opened = []
 const requested = []
+const picked = []
 let service = null
 let base = ''
 
@@ -31,7 +32,12 @@ beforeAll(async () => {
       requested.push(id)
       return { id, granted: false }
     },
-    launcherControl: ({ pluginId, action }) => ({ pluginId, action, registered: true })
+    launcherControl: ({ pluginId, action }) => ({ pluginId, action, registered: true }),
+    // 真面板要 Electron 的 app 身份；这里只记下调用方传了什么，并回一个定好的选择结果。
+    pickDirectory: ({ title, defaultPath }) => {
+      picked.push({ title, defaultPath })
+      return { canceled: false, path: '/Users/name/Downloads' }
+    }
   })
   const port = await service.listen(0)
   base = `http://127.0.0.1:${port}`
@@ -113,5 +119,31 @@ describe('system service', () => {
     expect(result.body.ok).toBe(false)
     expect(result.body.error).toContain('不能主动请求授权')
     expect(requested.length).toBe(before)
+  })
+
+  it('hands the folder picker request to the host and answers with the chosen path', async () => {
+    const result = await call('/pick-directory', {
+      method: 'POST',
+      body: { title: '搜索目录', defaultPath: '/Users/name/Desktop' }
+    })
+    expect(result.status).toBe(200)
+    expect(result.body).toMatchObject({ ok: true, canceled: false, path: '/Users/name/Downloads' })
+    expect(picked).toEqual([{ title: '搜索目录', defaultPath: '/Users/name/Desktop' }])
+  })
+
+  it('says so explicitly when the shell has no folder picker', async () => {
+    const bare = createSystemService({ probe: () => ({ platform: 'darwin', checks: [] }) })
+    const port = await bare.listen(0)
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/pick-directory`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}'
+      })
+      expect(response.status).toBe(501)
+      expect((await response.json()).error).toContain('不支持文件夹选择器')
+    } finally {
+      await bare.close()
+    }
   })
 })
