@@ -23,7 +23,7 @@ const navigation: { key: Page; label: string; icon: IconName; eyebrow: string; d
   },
   {
     key: 'mica',
-    label: '米卡',
+    label: 'mica',
     icon: 'mica',
     eyebrow: 'MICA RUNTIME',
     description: '把 Mica 自己的内存、宿主与调用耗时放到同一条时间线上。',
