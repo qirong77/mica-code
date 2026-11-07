@@ -2,14 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { localDayKey } from '@packages/mica-web-shared/stats-day.js'
 import {
   bucketByDay,
-  bucketByDaySource,
   modelPerformance,
   modelSpeed,
   modelSpeedPerformance,
-  modelSpeedTrend,
-  scopeSession,
-  speedTrendByDay,
-  speedTrendByMinute
+  scopeSession
 } from './scope.js'
 
 const at = (y, m, d, h = 12) => new Date(y, m - 1, d, h).getTime()
@@ -85,31 +81,7 @@ function session(overrides = {}) {
 }
 
 describe('Stats range scoping', () => {
-  test('combines minute samples across sessions without losing provider identity', () => {
-    const minute = at(2026, 8, 2, 12)
-    const speed = (provider, wait, samples) => ({
-      provider,
-      model: 'm',
-      responseWaitMs: wait,
-      responseWaitSamples: samples
-    })
-    const input = [
-      session({ days: [dayRow({ speedMinutes: [{ at: minute, models: [speed('p', 100, 1)] }] })] }),
-      session({
-        days: [
-          dayRow({
-            speedMinutes: [{ at: minute, models: [speed('p', 300, 1), speed('q', 500, 1)] }]
-          })
-        ]
-      })
-    ]
-    expect(speedTrendByMinute(input).get(minute)).toMatchObject([
-      { provider: 'p', averageResponseWaitMs: 200, responseWaitSamples: 2 },
-      { provider: 'q', averageResponseWaitMs: 500, responseWaitSamples: 1 }
-    ])
-  })
-  test('keeps identical model names from different providers separate across summaries and minutes', () => {
-    const minute = at(2026, 8, 2, 12)
+  test('keeps identical model names from different providers separate', () => {
     const speed = (provider, wait) => ({
       provider,
       model: 'shared-model',
@@ -117,26 +89,16 @@ describe('Stats range scoping', () => {
       responseWaitSamples: 1
     })
     const input = [
-      session({
-        days: [
-          dayRow({
-            speedModels: [speed('krill', 100), speed('us-relay', 600)],
-            speedMinutes: [{ at: minute, models: [speed('krill', 100), speed('us-relay', 600)] }]
-          })
-        ]
-      })
+      session({ days: [dayRow({ speedModels: [speed('krill', 100)] })] }),
+      session({ days: [dayRow({ speedModels: [speed('us-relay', 600)] })] })
     ]
     expect(modelSpeed(input, 'responseWait')).toEqual([
       { provider: 'krill', model: 'shared-model', value: 100, samples: 1 },
       { provider: 'us-relay', model: 'shared-model', value: 600, samples: 1 }
     ])
-    expect(speedTrendByMinute(input).get(minute)).toMatchObject([
-      { provider: 'krill', model: 'shared-model', averageResponseWaitMs: 100 },
-      { provider: 'us-relay', model: 'shared-model', averageResponseWaitMs: 600 }
-    ])
   })
 
-  test('aggregates new speed samples and leaves absent trend samples missing', () => {
+  test('aggregates new speed samples into one row per provider and model', () => {
     const sample = (tokens, duration, wait) => ({
       provider: 'p',
       model: 'm',
@@ -171,15 +133,11 @@ describe('Stats range scoping', () => {
       averageResponseWaitMs: 200,
       generationSamples: 2
     })
-    const trend = speedTrendByDay(input)
-    expect(trend.get(day(2026, 8, 2))[0].averageResponseWaitMs).toBe(0)
-    expect(trend.get(day(2026, 8, 4))).toEqual([])
     expect(modelSpeed(input, 'generation')).toEqual([
       { provider: 'p', model: 'm', value: 50, samples: 2 }
     ])
-    expect(modelSpeedTrend(input, 'p', 'm', 'responseWait')).toEqual([
-      { day: day(2026, 8, 2), value: 0, samples: 1 },
-      { day: day(2026, 8, 3), value: 400, samples: 1 }
+    expect(modelSpeed(input, 'responseWait')).toEqual([
+      { provider: 'p', model: 'm', value: 200, samples: 2 }
     ])
     expect(modelSpeedPerformance([scopeSession(input[0], { day: day(2026, 8, 4) })])).toEqual([])
   })
@@ -370,31 +328,4 @@ describe('Stats day buckets', () => {
     expect(first.tokens).toBe(140)
   })
 
-  test('splits tokens per day by usage source', () => {
-    const source = (kind, totalTokens) => ({
-      kind,
-      id: kind,
-      tasks: [],
-      purposes: [],
-      requests: 1,
-      inputTokens: totalTokens,
-      cachedInputTokens: 0,
-      uncachedInputTokens: totalTokens,
-      outputTokens: 0,
-      totalTokens
-    })
-    const buckets = bucketByDaySource([
-      session({ days: [dayRow({ sources: [source('delegation', 30), source('plugin', 10)] })] }),
-      session({
-        id: 's2',
-        days: [dayRow({ sources: [source('delegation', 5), source('helper', 1)] })]
-      })
-    ])
-    expect(buckets.get(day(2026, 8, 2))).toEqual({
-      main: 0,
-      delegation: 35,
-      plugin: 10,
-      helper: 1
-    })
-  })
 })

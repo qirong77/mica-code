@@ -1,17 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Button, DataTable, Segmented, SelectMenu, Tag } from '@mica-config-ui/web'
-import { BarSeries, CalendarHeatmap } from './charts'
-import { shouldUseLogScale, SpeedTrend } from './SpeedTrend'
+import { CalendarHeatmap } from './charts'
+import { SpeedBars } from './SpeedBars'
 import { OverviewVisuals } from './OverviewVisuals'
 import { SessionDetailModal } from './SessionDetailModal'
 import {
   bucketByDay,
-  bucketByDaySource,
   isDayRange,
   modelSpeed,
-  speedTrendByDay,
-  speedTrendByMinute,
-  rangeStart,
   scopeSession
 } from './scope'
 import {
@@ -31,7 +27,6 @@ import {
   addDays,
   calendarGrid,
   currentStreak,
-  daysBetween,
   intensityLevel,
   intensityThresholds,
   localDayKey,
@@ -405,244 +400,16 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
   )
 }
 
-const DAILY_MODES = [
-  { value: 'tokens', label: 'Tokens' },
-  { value: 'requests', label: '请求数' },
-  { value: 'source', label: '按来源' }
-]
-
-/**
- * 每日柱状图（按日行的 `at` 聚合）。
- *
- * 三个视角共用一根时间轴：总量（tokens）看波动，请求数看「跑了多少轮」，按来源看
- * 「这段花费里有多少是委派和插件带来的」——只给一个总量时，后者永远要靠 By source 的表格去对。
- */
-function DailyCard({ sessions, range }) {
-  const [mode, setMode] = useState('tokens')
-  const byDay = useMemo(() => bucketByDay(sessions), [sessions])
-  const bySource = useMemo(() => bucketByDaySource(sessions), [sessions])
-  const now = Date.now()
-  const today = localDayKey(now)
-  const since = rangeStart(range)
-  const allDays = [...byDay.keys()].sort()
-  const startDay = isDayRange(range)
-    ? range.day
-    : range === 'all'
-      ? allDays.length > 90
-        ? addDays(today, -89)
-        : allDays[0] || today
-      : localDayKey(since)
-  const endDay = isDayRange(range) ? range.day : today
-  const totalDays = Math.max(1, daysBetween(startDay, endDay))
-
-  const days = useMemo(() => {
-    const out = []
-    let day = startDay
-    for (let i = 0; i < Math.min(totalDays, 90) && day <= endDay; i++) {
-      const row = byDay.get(day)
-      out.push({
-        day,
-        requests: row?.requests || 0,
-        tokens: row?.tokens || 0,
-        sources: bySource.get(day) || null
-      })
-      day = addDays(day, 1)
-    }
-    return out
-  }, [startDay, endDay, byDay, bySource, totalDays])
-
-  const stride = Math.max(1, Math.ceil(days.length / 8))
-  const lastPhase = (days.length - 1) % stride
-  const xLabels = days
-    .map((d, i) => ({
-      index: i,
-      label: d.day === today ? '今天' : dayShort(d.day)
-    }))
-    .filter(({ index }) => index % stride === lastPhase)
-
-  if (days.length === 0) return null
-  const usedKinds = SOURCE_ORDER.filter((kind) => days.some((d) => (d.sources?.[kind] || 0) > 0))
-
-  return (
-    <section className={`${CARD_CLASS} p-4`}>
-      <header className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-baseline gap-2">
-          <h2 className={OVERLINE_CLASS}>Per day</h2>
-          <span className="text-[11px] text-fg-faint">
-            {isDayRange(range)
-              ? dayShort(range.day)
-              : range === 'all'
-                ? '最多展示 90 天'
-                : range === 'today'
-                  ? '今天'
-                  : `近 ${range}`}
-          </span>
-        </div>
-        <span className="mica-config-ui is-embed">
-          <Segmented
-            size="compact"
-            value={mode}
-            options={DAILY_MODES}
-            ariaLabel="每日指标"
-            onChange={setMode}
-          />
-        </span>
-      </header>
-      {days.length === 1 ? (
-        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2 py-3">
-          <div>
-            <span className="text-2xl font-semibold tabular-nums text-fg-strong">
-              {tokensShort(days[0].tokens)}
-            </span>
-            <span className="ml-2 text-xs text-fg-muted">tokens</span>
-          </div>
-          <div>
-            <span className="text-2xl font-semibold tabular-nums text-fg-strong">
-              {days[0].requests}
-            </span>
-            <span className="ml-2 text-xs text-fg-muted">次请求</span>
-          </div>
-          {mode === 'source' &&
-            usedKinds.map((kind) => (
-              <div key={kind} className="text-xs text-fg-muted">
-                <span
-                  className="mr-1.5 inline-block size-2 rounded-[2px]"
-                  style={{ background: SOURCE_COLORS[kind] }}
-                />
-                {USAGE_SOURCE_LABELS[kind]} · {tokensShort(days[0].sources?.[kind] || 0)}
-              </div>
-            ))}
-        </div>
-      ) : (
-        <BarSeries
-          columns={days.map((d) =>
-            mode === 'source'
-              ? {
-                  key: d.day,
-                  segments: usedKinds.map((kind) => ({
-                    key: kind,
-                    value: d.sources?.[kind] || 0,
-                    color: SOURCE_COLORS[kind]
-                  }))
-                }
-              : { key: d.day, value: mode === 'requests' ? d.requests : d.tokens }
-          )}
-          formatTick={mode === 'requests' ? (value) => String(value) : tokensShort}
-          xLabels={xLabels}
-          renderTooltip={(i) => {
-            const d = days[i]
-            return (
-              <div className="flex flex-col gap-0.5">
-                <div className="font-medium text-fg-strong">{d.day === today ? '今天' : d.day}</div>
-                <div className="text-fg-muted">
-                  {d.requests} requests · {tokensShort(d.tokens)} tokens
-                </div>
-                {mode === 'source' && usedKinds.length > 1
-                  ? usedKinds.map((kind) => (
-                      <div
-                        key={kind}
-                        className="flex items-center gap-1.5 text-[11px] text-fg-muted"
-                      >
-                        <span
-                          aria-hidden
-                          className="size-1.5 rounded-[1px]"
-                          style={{ background: SOURCE_COLORS[kind] }}
-                        />
-                        {USAGE_SOURCE_LABELS[kind]}
-                        <span className="tabular-nums">{tokensShort(d.sources?.[kind] || 0)}</span>
-                      </div>
-                    ))
-                  : null}
-              </div>
-            )
-          }}
-        />
-      )}
-      {days.length > 1 && mode === 'source' && usedKinds.length > 1 ? (
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fg-faint">
-          {usedKinds.map((kind) => (
-            <span key={kind} className="inline-flex items-center gap-1.5">
-              <span
-                aria-hidden
-                className="size-2 shrink-0 rounded-[2px]"
-                style={{ background: SOURCE_COLORS[kind] }}
-              />
-              {USAGE_SOURCE_LABELS[kind]}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </section>
-  )
-}
-
-const SPEED_COLORS = [
-  'var(--color-info)',
-  'var(--color-purple)',
-  'var(--color-teal)',
-  'var(--color-warn)',
-  'var(--color-success)',
-  'var(--color-danger)'
-]
-const speedKey = (row) => JSON.stringify([row.provider, row.model])
-
 function ModelPerformanceCard({ scoped }) {
   const [metric, setMetric] = useState('responseWait')
-  const [hidden, setHidden] = useState([])
   const rows = useMemo(() => modelSpeed(scoped, metric), [scoped, metric])
-  const daily = useMemo(() => speedTrendByDay(scoped), [scoped])
-  const singleDay = daily.size === 1
-  const minutes = useMemo(() => speedTrendByMinute(scoped), [scoped])
-  const intraday =
-    singleDay &&
-    [...minutes.values()].some((samples) =>
-      samples.some((sample) =>
-        metric === 'responseWait' ? sample.responseWaitSamples > 0 : sample.generationSamples > 0
-      )
-    )
-  const series = useMemo(() => {
-    const keys = [...new Set([...daily.values()].flatMap((rows) => rows.map(speedKey)))].sort()
-    return rows.map((row) => ({
-      ...row,
-      id: speedKey(row),
-      label: `${row.provider || '未记录供应商'} / ${row.model}`,
-      color: SPEED_COLORS[keys.indexOf(speedKey(row)) % SPEED_COLORS.length],
-      dash: keys.indexOf(speedKey(row)) >= SPEED_COLORS.length ? '5 4' : undefined,
-      points: [...(intraday ? minutes : daily)].flatMap(([time, samples]) => {
-        const sample = samples.find((item) => speedKey(item) === speedKey(row))
-        const value =
-          metric === 'responseWait'
-            ? sample?.averageResponseWaitMs
-            : sample?.estimatedTokensPerSecond
-        const count =
-          metric === 'responseWait' ? sample?.responseWaitSamples : sample?.generationSamples
-        return count > 0 && Number.isFinite(value)
-          ? [{ ...(intraday ? { at: time } : { day: time }), value, samples: count }]
-          : []
-      })
-    }))
-  }, [rows, daily, minutes, metric, intraday])
-  const shown = series.filter((item) => !hidden.includes(item.id))
-  const logScale = shouldUseLogScale(shown)
-  const missingTimedSamples =
-    intraday &&
-    series.some(
-      (item) => item.samples > item.points.reduce((total, point) => total + point.samples, 0)
-    )
   const formatValue = (value) =>
     metric === 'responseWait' ? `${(value / 1000).toFixed(2)} s` : `${value.toFixed(1)} tokens/s`
   const unitText = metric === 'responseWait' ? '秒 · 越低越快' : 'tokens/s · 估算 · 越高越快'
-  const toggle = (id) =>
-    setHidden((previous) =>
-      previous.includes(id) ? previous.filter((key) => key !== id) : [...previous, id]
-    )
   return (
     <section className={`${CARD_CLASS} p-4`}>
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <h2 className={OVERLINE_CLASS}>模型速度</h2>
-          {logScale && <Tag>对数刻度</Tag>}
-        </div>
+        <h2 className={OVERLINE_CLASS}>模型速度</h2>
         <span className="mica-config-ui is-embed">
           <Segmented
             size="compact"
@@ -660,95 +427,12 @@ function ModelPerformanceCard({ scoped }) {
         {metric === 'responseWait'
           ? '请求开始到首次内容的平均等待，包含重试。'
           : '输出 tokens ÷ 首末内容增量间隔的估算速率，可能包含推理 tokens。'}{' '}
-        仅统计有计时的成功请求。
-        {logScale ? ' 数据跨度较大，图表使用对数刻度以保留正常请求的可读性。' : ''}
-        {series.length > 1 ? ' 点击图例可显示或隐藏模型。' : ''}
+        仅统计有计时的成功请求，按区间平均值逐行对比。
       </p>
-      {series.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="py-6 text-center text-xs text-fg-faint">当前区间没有可用的请求计时数据。</p>
       ) : (
-        <>
-          <div className="mt-5 flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="text-xs font-medium text-fg-strong">
-              {singleDay ? '当日时间线' : '每日趋势'}{' '}
-              <span className="ml-1 text-[11px] font-normal text-fg-dim">
-                {shown.length} / {series.length} 个模型
-              </span>
-            </h3>
-            <button
-              type="button"
-              className="text-[11px] text-fg-muted hover:text-fg-strong"
-              onClick={() => setHidden([])}
-            >
-              显示全部
-            </button>
-          </div>
-          {/* 图例按图表惯例贴在图的右上角：单位在左，模型色块在右，点一下显示或隐藏。 */}
-          <div className="mt-3 rounded-[4px] border border-line bg-canvas/40 p-1.5">
-            <div className="mb-1 flex items-center justify-between px-1 text-[10px] text-fg-dim">
-              <span>{unitText}</span>
-              <span>{series.reduce((total, item) => total + item.samples, 0).toLocaleString()} 个样本</span>
-            </div>
-            <div
-              className="grid min-w-0 grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3"
-              aria-label="模型图例"
-            >
-              {series.map((item) => {
-                const isHidden = hidden.includes(item.id)
-                return (
-                  <button
-                    type="button"
-                    key={item.id}
-                    aria-pressed={!isHidden}
-                    onClick={() => toggle(item.id)}
-                    title={`${item.label} · ${formatValue(item.value)}（区间汇总，${item.samples} 个样本）· 点击显示或隐藏`}
-                    className={`inline-flex min-w-0 items-center gap-1.5 rounded px-2 py-1 text-left leading-5 transition-colors hover:bg-panel-hi focus-visible:outline focus-visible:outline-1 focus-visible:outline-fg-soft ${isHidden ? 'opacity-40' : ''}`}
-                  >
-                    <svg width="14" height="8" className="shrink-0" aria-hidden="true">
-                      <line
-                        x1="0"
-                        y1="4"
-                        x2="14"
-                        y2="4"
-                        stroke={item.color}
-                        strokeWidth="2"
-                        strokeDasharray={item.dash}
-                      />
-                      <circle cx="7" cy="4" r="3" fill={item.color} />
-                    </svg>
-                    <span className="min-w-0 flex-1 truncate text-[11px] text-fg-muted">{item.label}</span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-fg-dim">
-                      {formatValue(item.value)}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-          {singleDay && !intraday && (
-            <p className="mt-2 text-[11px] text-fg-dim">
-              当前指标没有带请求时间的样本，只能显示当日汇总点。
-            </p>
-          )}
-          {missingTimedSamples && (
-            <p className="mt-2 text-[11px] text-fg-dim">
-              部分旧样本没有请求时间，仅计入图例汇总，不绘制在时间轴上。
-            </p>
-          )}
-          <SpeedTrend
-            key={metric}
-            series={shown}
-            intraday={intraday}
-            logScale={logScale}
-            formatValue={formatValue}
-            formatTick={(value) =>
-              metric === 'responseWait'
-                ? `${(value / 1000).toFixed(value < 1000 ? 2 : 1)}s`
-                : Number(value.toFixed(1)).toString()
-            }
-            unit={unitText}
-          />
-        </>
+        <SpeedBars rows={rows} metric={metric} formatValue={formatValue} unit={unitText} />
       )}
     </section>
   )
@@ -1429,7 +1113,6 @@ export function StatsView({ visible }) {
                 onSelectDay={onSelectDay}
                 calendar={calendar}
               />
-              <DailyCard sessions={sessions} range={range} />
               <ModelPerformanceCard scoped={activeScoped} />
               <ByModelCard scoped={activeScoped} />
               <BySourceCard scoped={activeScoped} />

@@ -129,25 +129,6 @@ export function bucketByDay(sessions) {
   return new Map([...map].map(([day, row]) => [day, { ...row, sessions: row.sessionIds.size }]))
 }
 
-/**
- * 同一批日行，但按「日 × 来源」摊开：每天的柱要能拆成主对话 / 委派 / 插件 / 内核后台。
- * 只累 token，其它 kind 直接忽略（来源判定收窄在 `usage-source.ts`）。
- */
-export function bucketByDaySource(sessions) {
-  const map = new Map()
-  for (const s of sessions) {
-    for (const day of s.days || []) {
-      const row = map.get(day.day) || { main: 0, delegation: 0, plugin: 0, helper: 0 }
-      for (const source of day.sources || []) {
-        if (!(source.kind in row)) continue
-        row[source.kind] += Number(source.totalTokens) || 0
-      }
-      map.set(day.day, row)
-    }
-  }
-  return map
-}
-
 export function modelPerformance(sessions, metric = 'throughput') {
   const models = new Map()
   for (const session of sessions) {
@@ -245,38 +226,6 @@ export function modelSpeedPerformance(sessions, metric = 'generation') {
   })
 }
 
-export function speedTrendByDay(sessions) {
-  const days = new Map()
-  for (const session of sessions) {
-    for (const day of session.days || []) {
-      const rows = days.get(day.day) || []
-      rows.push({ days: [day] })
-      days.set(day.day, rows)
-    }
-  }
-  return new Map(
-    [...days]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([day, rows]) => [day, aggregateSpeedModels(rows)])
-  )
-}
-
-export function speedTrendByMinute(sessions) {
-  const minutes = new Map()
-  for (const session of sessions) {
-    for (const day of session.days || []) {
-      for (const bucket of day.speedMinutes || []) {
-        const rows = minutes.get(bucket.at) || []
-        rows.push({ days: [{ speedModels: bucket.models }] })
-        minutes.set(bucket.at, rows)
-      }
-    }
-  }
-  return new Map(
-    [...minutes].sort(([a], [b]) => a - b).map(([at, rows]) => [at, aggregateSpeedModels(rows)])
-  )
-}
-
 export function modelSpeed(sessions, metric) {
   return modelSpeedPerformance(sessions, metric)
     .map((row) => ({
@@ -286,14 +235,4 @@ export function modelSpeed(sessions, metric) {
       samples: metric === 'responseWait' ? row.responseWaitSamples : row.generationSamples
     }))
     .filter((row) => row.samples > 0)
-}
-
-export function modelSpeedTrend(sessions, provider, model, metric) {
-  return [...speedTrendByDay(sessions)].flatMap(([day, rows]) => {
-    const row = rows.find((item) => item.provider === provider && item.model === model)
-    const samples = metric === 'responseWait' ? row?.responseWaitSamples : row?.generationSamples
-    const value =
-      metric === 'responseWait' ? row?.averageResponseWaitMs : row?.estimatedTokensPerSecond
-    return samples > 0 && value != null ? [{ day, value, samples }] : []
-  })
 }
