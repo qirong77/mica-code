@@ -1,10 +1,10 @@
 import { createRoot } from 'react-dom/client'
-import '../src/renderer/assets/app.css'
-import { SessionSettingsDialog } from '../src/renderer/src/SessionSettingsDialog'
+import '../../src/renderer/assets/app.css'
+import { SessionSettingsDialog } from '../../src/renderer/src/SessionSettingsDialog'
 
 /**
- * 临时探针：真实组件 + 假 host。
- * 只为了看「会话设置 → 插件」这一节的版式，跑完即删。
+ * 探针「会话设置弹窗」：真实组件 + 假 host，只看「会话设置 → 插件」这一节的版式。
+ * 需要新增假数据就改这里的 `api`，别去改真实组件。
  */
 const AUTO_COMPACT_FIELDS = [
   {

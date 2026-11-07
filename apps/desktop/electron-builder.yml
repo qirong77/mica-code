@@ -6,6 +6,8 @@ files:
   # The output folder can be configured outside the project. Exclude the
   # default output explicitly so previous packages are never embedded in asar.
   - '!dist{,/**}'
+  # 界面探针是开发用的（见 .probe/README.md），不进安装包
+  - '!.probe{,/**}'
   - '!**/.vscode/*'
   - '!src/*'
   - '!electron.vite.config.{js,ts,mjs,cjs}'

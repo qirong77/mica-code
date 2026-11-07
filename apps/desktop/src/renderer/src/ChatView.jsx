@@ -1885,17 +1885,6 @@ function tokenCount(value) {
   return `${(number / 1000).toFixed(number < 10_000 ? 1 : 0)}K`
 }
 
-function UsageLine({ usage }) {
-  const values = usageValues(usage)
-  if (!values) return null
-  const parts = []
-  if (values.total != null) parts.push(`${tokenCount(values.total)} tokens`)
-  if (values.input != null) parts.push(`in ${tokenCount(values.input)}`)
-  if (values.output != null) parts.push(`out ${tokenCount(values.output)}`)
-  if (values.cached) parts.push(`cached ${tokenCount(values.cached)}`)
-  return <div className="chat-usage">{parts.join(' · ')}</div>
-}
-
 function MessageActions({ text, role, onQuote }) {
   const [copied, copy] = useCopied()
   return (
@@ -2993,7 +2982,6 @@ function MessageRowView({
       <div className="chat-message-marker">●</div>
       <div className="chat-message-body">
         <Markdown text={message.text || ''} onOpenFile={onOpenFile} streaming={!message.done} />
-        <UsageLine usage={message.usage} />
       </div>
       {message.done && <MessageActions text={message.text} role="assistant" onQuote={onQuote} />}
     </div>

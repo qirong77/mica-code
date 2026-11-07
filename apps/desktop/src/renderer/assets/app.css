@@ -2202,13 +2202,6 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   word-break: break-word;
 }
 
-.chat-usage {
-  margin-top: 6px;
-  color: color-mix(in srgb, var(--color-fg-max) 20%, transparent);
-  font-family: var(--chat-font);
-  font-size: 9.5px;
-}
-
 /* 悬浮 tip：不在底部时出现，两枚按钮在相邻两轮对话之间跳转（分段按钮共用一条外壳）。 */
 .chat-jump {
   position: absolute;

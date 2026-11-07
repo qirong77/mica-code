@@ -53,6 +53,13 @@
   outline: none;
 }
 
+/* 整个浮窗就是一个搜索框，输入框不再单独描边。配置页样式里的全局 `:focus-visible`
+   会给它套一圈 1px 外框（outline-offset: 1px），权重与上面的单类名相同，只靠加载
+   顺序是压不住的——这里带上 :focus-visible 把权重提到两档。 */
+.global-search-input:focus-visible {
+  outline: none;
+}
+
 .global-search-input::placeholder {
   color: var(--color-fg-faint, var(--text-faint));
 }
