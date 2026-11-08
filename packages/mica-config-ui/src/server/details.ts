@@ -57,6 +57,7 @@ export async function getMcpDetails(): Promise<ConfigWebMcpDetails> {
 
   return {
     path: micaMcp.configPath,
+    content: readMcpServersText(),
     servers: Object.entries(configured).map(([name, config]) => {
       const status = statusByName.get(name);
       return {
@@ -70,39 +71,30 @@ export async function getMcpDetails(): Promise<ConfigWebMcpDetails> {
   };
 }
 
-export async function writeMcpServer(name: string, content: string): Promise<ConfigWebMcpDetails> {
-  const normalizedName = normalizeMcpName(name);
-  const servers = await micaMcp.loadConfig();
-  if (!(normalizedName in servers)) throw new Error(`MCP server not found: ${normalizedName}`);
-  servers[normalizedName] = parseMcpServerConfig(content, normalizedName);
-  await persistMcpServers(servers);
-  return getMcpDetails();
-}
+/**
+ * 整份写回 `mcpServers`。
+ *
+ * 页面上是一列卡片，保存时一次写完整份：逐条写会把「改个名字」「删掉一个」拆成两次请求，
+ * 中间那份半成品也可能被别的读者看到。名称与每段配置都过一遍与单条写回相同的解析，
+ * 出错时页面按卡片提示。
+ */
+export async function writeMcpServers(content: string): Promise<ConfigWebMcpDetails> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'mcpServers 不是有效的 JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('mcpServers must be a JSON object');
+  }
 
-export async function createMcpServer(name: string, content = ''): Promise<ConfigWebMcpDetails> {
-  const normalizedName = normalizeMcpName(name);
-  const servers = await micaMcp.loadConfig();
-  if (normalizedName in servers) throw new Error(`MCP server already exists: ${normalizedName}`);
-  const configText =
-    content.trim() ||
-    JSON.stringify(
-      {
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
-      },
-      null,
-      2,
-    );
-  servers[normalizedName] = parseMcpServerConfig(configText, normalizedName);
-  await persistMcpServers(servers);
-  return getMcpDetails();
-}
-
-export async function deleteMcpServer(name: string): Promise<ConfigWebMcpDetails> {
-  const normalizedName = normalizeMcpName(name);
-  const servers = await micaMcp.loadConfig();
-  if (!(normalizedName in servers)) throw new Error(`MCP server not found: ${normalizedName}`);
-  delete servers[normalizedName];
+  const servers: Record<string, McpServerConfig> = {};
+  for (const [name, config] of Object.entries(parsed as Record<string, unknown>)) {
+    const normalizedName = normalizeMcpName(name);
+    if (normalizedName in servers) throw new Error(`Duplicate MCP server: ${normalizedName}`);
+    servers[normalizedName] = parseMcpServerConfig(JSON.stringify(config), normalizedName);
+  }
   await persistMcpServers(servers);
   return getMcpDetails();
 }
@@ -431,7 +423,6 @@ function describeMcpConfig(
       type: 'http',
       target: config.url,
       configPath: micaMcp.configPath,
-      config: JSON.stringify(config, null, 2),
       envKeys: config.headers ? Object.keys(config.headers) : [],
     };
   }
@@ -441,10 +432,26 @@ function describeMcpConfig(
     type: 'stdio',
     target: `${config.command} ${(config.args ?? []).join(' ')}`.trim(),
     configPath: micaMcp.configPath,
-    config: JSON.stringify(config, null, 2),
     cwd: config.cwd,
     envKeys: config.env ? Object.keys(config.env) : [],
   };
+}
+
+/**
+ * 文件里的 `mcpServers` 原文。
+ *
+ * 不能用 `micaMcp.loadConfig()` 拼：它在读取时会把 url / headers 里的 `${VAR}` 展开成当前
+ * 运行时端口，页面照着它写回去就把占位符永久换成了这一台机器的端口。
+ */
+function readMcpServersText(): string {
+  try {
+    const current: unknown = JSON.parse(readFileSync(micaConfig.path, 'utf-8'));
+    const servers = isRecord(current) ? current.mcpServers : undefined;
+    if (!isRecord(servers)) return '{}\n';
+    return `${JSON.stringify(servers, null, 2)}\n`;
+  } catch {
+    return '{}\n';
+  }
 }
 
 async function persistMcpServers(servers: Record<string, McpServerConfig>): Promise<void> {
@@ -548,4 +555,8 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

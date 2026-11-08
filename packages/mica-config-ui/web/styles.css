@@ -1955,6 +1955,54 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     border-radius: 0;
   }
 
+  /* 参数：已有的一排 chip + 底下一行新增，两段之间留一点缝 */
+  .mcp-args {
+    display: grid;
+    gap: 8px;
+    max-width: 620px;
+  }
+
+  /* 卡片里的一条错误（连不上 / 解析失败）：不占满分组，也不挤到字段中间 */
+  .mcp-card-alert {
+    padding: 10px 14px 0;
+  }
+
+  /* 键值行（env / headers）：名称、值、删除三列，新增行是同一套网格。 */
+  .mcp-kv {
+    display: grid;
+    gap: 6px;
+    max-width: 620px;
+  }
+
+  .mcp-kv-rows {
+    display: grid;
+    gap: 6px;
+  }
+
+  .mcp-kv-row {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) auto;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* 设置行默认把单行输入收在 420px，键值行的两列得铺满自己的网格。 */
+  .setting-row-control .mcp-kv-row .text-input {
+    min-width: 0;
+    max-width: none;
+  }
+
+  .mcp-kv-row > .ui-button {
+    height: var(--control-h);
+  }
+
+  /* 窄容器：三个控件竖排，名称与值各占一整行。 */
+  @container page (max-width: 460px) {
+    .mcp-kv-row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
   .ui-empty-wrap {
     display: grid;
     place-items: center;
@@ -4319,24 +4367,24 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   /*
-   * 服务商行：分组里的一个条目，不是卡片里的卡片。
+   * 条目行：分组里的一个条目（服务商、MCP server），不是卡片里的卡片。
    *
-   * 折叠态就是分组里的一行（名称 / 协议 / 地址摘要）；展开后在同一个分组里接上字段行。
+   * 折叠态就是分组里的一行（名称 / 类型 / 地址摘要）；展开后在同一个分组里接上字段行。
    * 以前它在卡片里再套一层带边框的方块，展开后又是一层边框，读起来像框套框。
    */
-  .provider-row {
+  .entry-row {
     display: grid;
   }
 
-  .provider-row + .provider-row {
+  .entry-row + .entry-row {
     border-top: 1px solid var(--line-soft);
   }
 
-  .provider-row.is-open {
+  .entry-row.is-open {
     background: color-mix(in srgb, var(--panel-muted) 45%, transparent);
   }
 
-  .provider-row-head {
+  .entry-row-head {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -4345,7 +4393,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   /* 整条标题栏都是折叠热区；删除按钮留在外面，避免误触收起 */
-  .provider-row-toggle {
+  .entry-row-toggle {
     display: flex;
     flex: 1 1 auto;
     align-items: center;
@@ -4361,7 +4409,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     cursor: pointer;
   }
 
-  .provider-row-chevron {
+  .entry-row-chevron {
     flex: none;
     color: var(--text-faint);
     transition:
@@ -4369,15 +4417,15 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
       color 100ms ease;
   }
 
-  .provider-row-toggle:hover .provider-row-chevron {
+  .entry-row-toggle:hover .entry-row-chevron {
     color: var(--text-soft);
   }
 
-  .provider-row.is-open .provider-row-chevron {
+  .entry-row.is-open .entry-row-chevron {
     transform: rotate(90deg);
   }
 
-  .provider-row-name {
+  .entry-row-name {
     flex: none;
     min-width: 0;
     max-width: 40%;
@@ -4389,7 +4437,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     text-overflow: ellipsis;
   }
 
-  .provider-row-protocol {
+  .entry-row-protocol {
     flex: none;
     padding: 0 5px;
     border: 1px solid color-mix(in srgb, var(--text-faint) 32%, transparent);
@@ -4401,7 +4449,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   /* 折叠时的摘要：地址可能很长，只能在这里省略 */
-  .provider-row-meta {
+  .entry-row-meta {
     min-width: 0;
     flex: 1 1 auto;
     overflow: hidden;
@@ -4412,7 +4460,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     text-overflow: ellipsis;
   }
 
-  .provider-row-flag {
+  .entry-row-flag {
     flex: none;
     padding: 0 6px;
     border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
@@ -4423,7 +4471,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   /* 展开体：字段行与上面的标题行左边对齐（多让出 14px 给标题的箭头位） */
-  .provider-row-body {
+  .entry-row-body {
     padding-left: 14px;
     border-top: 1px solid var(--line-soft);
   }
@@ -5094,11 +5142,11 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
   /* 窄屏：标题行只留名称和协议，地址摘要没地方放，挤一起会两边都被裁掉 */
   @media (max-width: 720px) {
-    .provider-row-meta {
+    .entry-row-meta {
       display: none;
     }
 
-    .provider-row-name {
+    .entry-row-name {
       max-width: none;
     }
   }

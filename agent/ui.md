@@ -14,13 +14,15 @@
 - 新页面只用既有积木：`PageFrame`、`Button`、`Tag`、`Switch`、`CollapsiblePanel`、`SettingsGroup`、`SettingRow`、`SplitView`、`ControlEndpointList`；文案走 `labels.ts`。
 - 三块骨架：`PageFrame`（窄页头 + 内容区）、`SettingsGroup` + `SettingRow`（一页一块面，行间分隔线）、`SplitView`（左列表 + 右详情）。
 - 折叠按容器宽度（`@container page (max-width: 860px)`），不按视口。
-- Config 页只按字段编辑 providers；`mcpServers`、`capabilityDefaults` 只读展示并跳到各自页面。
+- Config 页只按字段编辑 providers；`mcpServers` 与 `capabilityDefaults` 不在这页编辑——前者在 MCP 页按字段填，后者跳到 Capabilities 页。
+- MCP 页没有左列表：`mcpServers` 的协议与字段是固定的，一页就一个 `SettingsGroup`，一个 server 一张可折叠的 `entry-row`（与服务商同一套行），折叠行显示名称 / 连接方式 / 命令或地址 / 连接状态，展开接字段行。类型用 `Segmented`，本地进程填命令 / 参数 / 环境变量 / 工作目录 / 标准错误，HTTP 填地址 / 请求头；切类型会删掉另一侧的已知键（文件里同时留着 `command` 与 `url` 的条目说不清是哪种）。连接状态与工具列表只属于磁盘上那份配置，类型换掉后不再显示。右上角「编辑 JSON」是**整份** `mcpServers`（也接受文档里抄来的 `{ "mcpServers": { … } }`），与表单是同一份内容的两种形态；转换唯一实现是 `web/mcpDraft.ts`。
+- MCP 的读写都走整份：`readMcpDetails` 返回文件里的 `mcpServers` 原文（`content`，不展开 `${VAR}`——按展开后的值写回去会把占位符换成这一台机器的端口），保存是 `writeMcpServers(content)` 一次写整份。逐条写会把改名 / 删除拆成两次请求。
 - 服务商在分组里是一行：折叠显示 id（唯一的名称，不再另设显示名称）/协议/地址/模型数，展开接字段行；有错误强制展开并标「待修正」。模型列表全靠手填（没有「模型列表地址」），展开体最后一行是「测试连接」：它用页面上当前的地址 / Key / 协议 / 第一个模型发一次最小请求，结论就写在按钮右边。
 - Sessions 左栏的会话信息由 `src/server/sessionHead.ts` 只读文件头 8KB 解析，两个宿主共用。
 - 浏览器侧（`web/`）只能 import 纯子模块：`mica-plugin` / `mica-common` 的包入口会顺带导出读写文件的模块，dev 下整页白屏且 tsc 与单测都看不出来（`web/browserImports.test.ts` 静态挡住）。
 - 密钥类输入统一用 `web/components/SecretInput.tsx`：默认密文 + 眼睛按钮切明文，明文状态在组件内，收起或换页自动回到密文。
 - 配置页不提供 effort 开关：由模型规则按模型名决定。
-- 表单转换唯一实现 `web/configDraft.ts`；写入保留未知键，已知键固定顺序，可选字段留空即删键。
+- 表单转换唯一实现 `web/configDraft.ts`；写入保留未知键，已知键固定顺序，可选字段留空即删键。MCP 页同理（`web/mcpDraft.ts`）。
 - Capabilities 页改 `config.capabilityDefaults`，读写实现在 `src/server/capabilityDefaults.ts`。
 - 插件页是「目录 + 整页详情」：目录首个页签是「全部」，其后按已声明的桌面能力 / 可配置能力 / 其他工具 / 用户来源切换卡片网格（停用的卡片压暗），每张卡显示清单 `icon`（`web/pluginIcons.tsx` 的映射表，未登记回落 `puzzle`）与一枚启停开关（卡片是「外壳 + 打开详情的按钮 + 右上角的开关」，开关不能塞进按钮里）；点开进入单插件详情页，返回走详情页自己的返回行。**开关是唯一的启停控件**：卡片脚注与详情页信息表的「加载」行只说装配结论（已加载 / 已跳过 / 加载失败 / 尚未加载，停用时是「已停用」），不要再放一枚「已启用」标签去重复开关的语义（唯一实现在 `pluginRunningStatus()`）。清单 icon 不参与内核逻辑，只在配置页呈现。
 - 详情页右侧信息表只有标识 / 加载 / 目录 / 日志四行、单行省略；「日志」是路径链接（单击选「在 Finder 中打开 / 在 Mica 中打开」，⌘ 点击直接进编辑器，用的是 `PathLink` + 宿主的 `revealPath` / `openPathInEditor`），目录那行不是——官方插件的目录是仓库里的相对路径。插件里的文件清单不进界面（`PluginInspection` 不读目录），用户要的是「装没装上」而不是文件浏览器。

@@ -95,25 +95,25 @@ export function ProviderEditor({
   }
 
   return (
-    <article className={`provider-row${open ? ' is-open' : ''}`}>
-      <header className="provider-row-head">
+    <article className={`entry-row${open ? ' is-open' : ''}`}>
+      <header className="entry-row-head">
         <button
           type="button"
-          className="provider-row-toggle"
+          className="entry-row-toggle"
           aria-expanded={open}
           title={open ? '收起' : '展开编辑'}
           onClick={onToggleExpanded}
         >
-          <ChevronIcon size={13} className="provider-row-chevron" aria-hidden="true" />
-          <span className="provider-row-name" title={fields.id}>
+          <ChevronIcon size={13} className="entry-row-chevron" aria-hidden="true" />
+          <span className="entry-row-name" title={fields.id}>
             {fields.id.trim() || '新的服务商'}
           </span>
-          <span className="provider-row-protocol">{providerProtocolLabel(fields.protocol)}</span>
-          <span className="provider-row-meta" title={fields.apiBase}>
+          <span className="entry-row-protocol">{providerProtocolLabel(fields.protocol)}</span>
+          <span className="entry-row-meta" title={fields.apiBase}>
             {summaryText(fields)}
           </span>
         </button>
-        {hasError ? <span className="provider-row-flag">待修正</span> : null}
+        {hasError ? <span className="entry-row-flag">待修正</span> : null}
         <Button
           icon={<TrashIcon size={14} />}
           variant="ghost"
@@ -125,7 +125,7 @@ export function ProviderEditor({
       </header>
 
       {open ? (
-        <div className="provider-row-body">
+        <div className="entry-row-body">
           <SettingRow label="名称" hint="会话里按这个名字引用" error={errorFor('id')}>
             <input
               className={invalidClass(errorFor('id'))}

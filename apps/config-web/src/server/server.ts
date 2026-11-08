@@ -254,7 +254,10 @@ async function resolveApiCall(
       return get('writeSession', { id: body.id, content: body.content });
 
     case '/api/details/mcp':
-      return method === 'GET' ? get('readMcpDetails') : METHOD_NOT_ALLOWED;
+      if (method === 'GET') return get('readMcpDetails');
+      // 整份 mcpServers 一起写：卡片列表的改名 / 删除都落成同一份内容。
+      if (method === 'PUT') return get('writeMcpServers', { content: body.content });
+      return METHOD_NOT_ALLOWED;
     case '/api/details/capabilities':
       if (method === 'GET') return get('readCapabilityDefaults');
       if (method === 'PUT')
@@ -286,7 +289,6 @@ async function resolveApiCall(
     case '/api/details/sessions':
       return method === 'GET' ? get('readSessionsDetails') : METHOD_NOT_ALLOWED;
 
-    case '/api/files/mcp':
     case '/api/files/skill':
     case '/api/files/role':
       return resolveFileCall(url.pathname, method, body, get);
@@ -296,7 +298,7 @@ async function resolveApiCall(
   }
 }
 
-/** role / skill / mcp 三个文件接口的形状一致：POST 新建、PUT 保存、DELETE 删除 */
+/** role / skill 两个文件接口的形状一致：POST 新建、PUT 保存、DELETE 删除 */
 function resolveFileCall(
   pathname: string,
   method: string,
@@ -307,7 +309,6 @@ function resolveFileCall(
   const names = {
     role: { read: 'readRolesDetails', create: 'createRole', write: 'writeRole', remove: 'deleteRole' },
     skill: { read: 'readSkillsDetails', create: 'createSkill', write: 'writeSkill', remove: 'deleteSkill' },
-    mcp: { read: 'readMcpDetails', create: 'createMcpServer', write: 'writeMcpServer', remove: 'deleteMcpServer' },
   }[kind] as
     | {
         read: ConfigWebActionName;

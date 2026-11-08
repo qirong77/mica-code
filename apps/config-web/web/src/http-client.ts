@@ -29,11 +29,8 @@ export function createHttpConfigWebClient(): ConfigWebClient {
     testProvider: (input) => request<ConfigWebProviderTest>('/api/provider-test', { method: 'POST', body: input }),
 
     readMcpDetails: () => request<ConfigWebMcpDetails>('/api/details/mcp'),
-    createMcpServer: (name, content = '') =>
-      request<ConfigWebMcpDetails>('/api/files/mcp', { method: 'POST', body: { name, content } }),
-    writeMcpServer: (name, content) =>
-      request<ConfigWebMcpDetails>('/api/files/mcp', { method: 'PUT', body: { name, content } }),
-    deleteMcpServer: (name) => request<ConfigWebMcpDetails>('/api/files/mcp', { method: 'DELETE', body: { name } }),
+    writeMcpServers: (content) =>
+      request<ConfigWebMcpDetails>('/api/details/mcp', { method: 'PUT', body: { content } }),
 
     readCapabilityDefaults: () => request<ConfigWebCapabilityDefaults>('/api/details/capabilities'),
     writeCapabilityDefaults: (input) =>

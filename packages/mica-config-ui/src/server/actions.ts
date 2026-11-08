@@ -1,10 +1,8 @@
 import { readConfigWebFile, writeConfigWebFile } from './configFiles.js';
 import { runPluginAction as runPluginActionProcess } from './pluginAction.js';
 import {
-  createMcpServer,
   createRole,
   createSkill,
-  deleteMcpServer,
   deleteRole,
   deleteSkill,
   getCapabilityDefaultsDetails,
@@ -19,7 +17,7 @@ import {
   getSessionsDetails,
   getSessionSystemPrompt,
   getSkillsDetails,
-  writeMcpServer,
+  writeMcpServers,
   writeRole,
   writeSessionDetails,
   writeSkill,
@@ -58,10 +56,7 @@ export const configWebActions = {
     }),
 
   readMcpDetails: (_input: ConfigWebActionInput) => getMcpDetails(),
-  createMcpServer: (input: ConfigWebActionInput) =>
-    createMcpServer(text(input, 'name'), optionalText(input, 'content')),
-  writeMcpServer: (input: ConfigWebActionInput) => writeMcpServer(text(input, 'name'), text(input, 'content')),
-  deleteMcpServer: (input: ConfigWebActionInput) => deleteMcpServer(text(input, 'name')),
+  writeMcpServers: (input: ConfigWebActionInput) => writeMcpServers(text(input, 'content')),
 
   readSkillsDetails: (_input: ConfigWebActionInput) => getSkillsDetails(),
   createSkill: (input: ConfigWebActionInput) => createSkill(text(input, 'name'), optionalText(input, 'content')),

@@ -144,6 +144,8 @@ async function readMcpDetails() {
   const probes = await probeMcpServers(configured)
   return {
     path: configPath(),
+    // 卡片与 JSON 视图按文件原文重建：读进来的那份已经展开过 ${VAR}，写回去会把占位符换成端口。
+    content: `${JSON.stringify(configured, null, 2)}\n`,
     servers: Object.entries(configured).map(([name, config]) => ({
       ...describeMcpConfig(name, config),
       ...(probes.get(name) ?? { status: 'configured', toolCount: 0, tools: [] })
@@ -158,7 +160,6 @@ function describeMcpConfig(name, config) {
       type: 'http',
       target: config.url,
       configPath: configPath(),
-      config: JSON.stringify(config, null, 2),
       envKeys: config.headers ? Object.keys(config.headers) : []
     }
   }
@@ -167,7 +168,6 @@ function describeMcpConfig(name, config) {
     type: 'stdio',
     target: `${config.command} ${(config.args ?? []).join(' ')}`.trim(),
     configPath: configPath(),
-    config: JSON.stringify(config, null, 2),
     cwd: config.cwd,
     envKeys: config.env ? Object.keys(config.env) : []
   }
@@ -481,37 +481,26 @@ function readSessionSystemPrompt(id) {
 
 /* ------------------------------------------------------------------ 动作表 */
 
-async function addMcpServer(name, content) {
-  const normalized = normalizeMcpName(name)
-  updateMcpServers((servers) => {
-    if (normalized in servers) throw new Error(`MCP server 已存在：${normalized}`)
-    servers[normalized] = parseMcpServerConfig(
-      String(content ?? '').trim() ||
-        JSON.stringify(
-          { command: 'npx', args: ['-y', '@modelcontextprotocol/server-sequential-thinking'] },
-          null,
-          2
-        ),
-      normalized
-    )
-  })
-  return readMcpDetails()
-}
-
-async function saveMcpServer(name, content) {
-  const normalized = normalizeMcpName(name)
-  updateMcpServers((servers) => {
-    if (!(normalized in servers)) throw new Error(`MCP server 不存在：${normalized}`)
-    servers[normalized] = parseMcpServerConfig(content, normalized)
-  })
-  return readMcpDetails()
-}
-
-async function removeMcpServer(name) {
-  const normalized = normalizeMcpName(name)
-  updateMcpServers((servers) => {
-    if (!(normalized in servers)) throw new Error(`MCP server 不存在：${normalized}`)
-    delete servers[normalized]
+/** 整份 mcpServers 一起写：卡片的改名、增删都落成同一份内容。 */
+async function saveMcpServers(content) {
+  let parsed
+  try {
+    parsed = JSON.parse(content)
+  } catch {
+    throw new Error('mcpServers 不是有效的 JSON')
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('mcpServers 必须是「名称 → 配置」的 JSON 对象')
+  }
+  const servers = {}
+  for (const [name, config] of Object.entries(parsed)) {
+    const normalized = normalizeMcpName(name)
+    if (normalized in servers) throw new Error(`MCP server 重名：${normalized}`)
+    servers[normalized] = parseMcpServerConfig(JSON.stringify(config), normalized)
+  }
+  updateMcpServers((current) => {
+    for (const name of Object.keys(current)) delete current[name]
+    Object.assign(current, servers)
   })
   return readMcpDetails()
 }
@@ -533,9 +522,7 @@ export const configWebActions = {
     }),
 
   readMcpDetails: () => readMcpDetails(),
-  createMcpServer: (input) => addMcpServer(text(input, 'name'), optionalText(input, 'content')),
-  writeMcpServer: (input) => saveMcpServer(text(input, 'name'), text(input, 'content')),
-  deleteMcpServer: (input) => removeMcpServer(text(input, 'name')),
+  writeMcpServers: (input) => saveMcpServers(text(input, 'content')),
 
   readRolesDetails: () => readRolesDetails(),
   createRole: (input) => createRole(text(input, 'name'), optionalText(input, 'content')),

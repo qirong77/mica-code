@@ -192,7 +192,6 @@ export type ConfigWebMcpServer = {
   target: string;
   status: 'configured' | 'connecting' | 'connected' | 'failed';
   configPath: string;
-  config: string;
   toolCount: number;
   tools: ConfigWebMcpTool[];
   error?: string;
@@ -202,6 +201,9 @@ export type ConfigWebMcpServer = {
 
 export type ConfigWebMcpDetails = {
   path: string;
+  /** 整份 `mcpServers` 的原文（没有展开 `${VAR}`），页面按它生成卡片与 JSON 视图。 */
+  content: string;
+  /** 每个 server 的运行状态：从文件读出条目之后，由探测补上连接与工具信息。 */
   servers: ConfigWebMcpServer[];
 };
 

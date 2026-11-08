@@ -35,9 +35,7 @@ export function createDesktopConfigWebClient() {
     testProvider: (input) => invoke('testProvider', input),
 
     readMcpDetails: () => invoke('readMcpDetails'),
-    createMcpServer: (name, content = '') => invoke('createMcpServer', { name, content }),
-    writeMcpServer: (name, content) => invoke('writeMcpServer', { name, content }),
-    deleteMcpServer: (name) => invoke('deleteMcpServer', { name }),
+    writeMcpServers: (content) => invoke('writeMcpServers', { content }),
 
     readCapabilityDefaults: () => invoke('readCapabilityDefaults'),
     writeCapabilityDefaults: (input) => invoke('writeCapabilityDefaults', input),

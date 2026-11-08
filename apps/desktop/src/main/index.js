@@ -27,6 +27,7 @@ import { resolveLogDir } from '@packages/mica-config/brand.js'
 import { officialPluginManifests } from '@packages/mica-official-plugins/manifests.js'
 import { readDisabledPluginIds, resolvePluginStatePath } from '@packages/mica-plugin/PluginState.js'
 import { createPluginLaunchers } from './plugin-launchers.js'
+import { isDevToolsShortcut } from './devtools-shortcut.js'
 
 /**
  * Electron 外壳。
@@ -692,6 +693,21 @@ function watchThemeChanges(onChange) {
 }
 
 /**
+ * 开发者工具开在独立窗口里（⌥⌘I，判定见 devtools-shortcut.js）。
+ *
+ * 不用内嵌在右侧/底部：主窗口装的就是整套界面，嵌进去会挤压布局，排查问题时看到的
+ * 已经不是用户那一屏了。再按一次关掉。
+ */
+function toggleDevTools(contents) {
+  if (contents.isDestroyed()) return
+  if (contents.isDevToolsOpened()) {
+    contents.closeDevTools()
+    return
+  }
+  contents.openDevTools({ mode: 'detach', activate: true })
+}
+
+/**
  * 开一个窗口装载 `url`。`primary` 是启动时那个本机窗口：关掉它只是隐藏（应用继续留在
  * dock 里），其余窗口（切过去的那几台）关掉就真的关掉，不会攒下一堆看不见的窗口。
  */
@@ -814,6 +830,11 @@ function createWindow(url, { primary = false } = {}) {
 
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return
+    if (isDevToolsShortcut(input)) {
+      event.preventDefault()
+      toggleDevTools(win.webContents)
+      return
+    }
     const modifier = process.platform === 'darwin' ? input.meta : input.control
     if (!modifier || !input.shift || input.key.toLowerCase() !== 'm') return
     event.preventDefault()

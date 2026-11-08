@@ -45,9 +45,8 @@ export type ConfigWebClient = {
   testProvider?(input: ConfigWebProviderTestInput): Promise<ConfigWebProviderTest>;
 
   readMcpDetails(): Promise<ConfigWebMcpDetails>;
-  createMcpServer(name: string, content?: string): Promise<ConfigWebMcpDetails>;
-  writeMcpServer(name: string, content: string): Promise<ConfigWebMcpDetails>;
-  deleteMcpServer(name: string): Promise<ConfigWebMcpDetails>;
+  /** 整份 `mcpServers` 一起写：卡片的改名、增删都落成同一份内容。 */
+  writeMcpServers(content: string): Promise<ConfigWebMcpDetails>;
 
   readSkillsDetails(): Promise<ConfigWebSkillsDetails>;
   createSkill(name: string, content?: string): Promise<ConfigWebSkillsDetails>;
@@ -203,16 +202,8 @@ export function readMcpDetails(): Promise<ConfigWebMcpDetails> {
   return requireClient().readMcpDetails();
 }
 
-export function writeMcpServer(name: string, content: string): Promise<ConfigWebMcpDetails> {
-  return requireClient().writeMcpServer(name, content);
-}
-
-export function createMcpServer(name: string, content = ''): Promise<ConfigWebMcpDetails> {
-  return requireClient().createMcpServer(name, content);
-}
-
-export function deleteMcpServer(name: string): Promise<ConfigWebMcpDetails> {
-  return requireClient().deleteMcpServer(name);
+export function writeMcpServers(content: string): Promise<ConfigWebMcpDetails> {
+  return requireClient().writeMcpServers(content);
 }
 
 export function readCapabilityDefaults(): Promise<ConfigWebCapabilityDefaults> {
