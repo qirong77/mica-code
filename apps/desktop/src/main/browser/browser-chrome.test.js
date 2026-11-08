@@ -76,7 +76,8 @@ describe('chromePalette', () => {
 describe('chromeHtml', () => {
   it('removes visible ownership, copy guidance, and hide controls', () => {
     const html = chromeHtml()
-    for (const id of ['owner', 'hint', 'hide']) expect(html).not.toContain('id="' + id + '"')
+    for (const id of ['owner', 'hint', 'hide', 'label', 'badge'])
+      expect(html).not.toContain('id="' + id + '"')
   })
 
   it('deduplicates matching titles without losing tab switching or address copying', () => {
@@ -104,7 +105,7 @@ describe('chromeHtml', () => {
       }
     }
     const elements = Object.fromEntries(
-      ['label', 'badge', 'windows', 'tabs', 'url', 'loading'].map((id) => [id, element()])
+      ['windows', 'tabs', 'url', 'loading'].map((id) => [id, element()])
     )
     const messages = []
     const document = {
@@ -131,7 +132,7 @@ describe('chromeHtml', () => {
         { id: 'two', title: 'Qirong Entry', url: 'https://example.com/two', active: true }
       ]
     })
-    expect(elements.badge.title).toBe('Entry\n用户会话 session-123')
+    expect(elements.loading.title).toBe('Entry\n用户会话 session-123')
     expect(elements.url.title).toContain('地址由 Mica 控制，不可编辑；可选中复制')
     expect(elements.loading.className).toBe('dot loading')
     expect(elements.windows.hidden).toBe(false)

@@ -119,12 +119,8 @@ export function chromeHtml() {
     -webkit-user-select: none; user-select: none;
     -webkit-app-region: drag;
   }
-  .badge {
-    display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: 24%;
-    padding: 3px 8px; border-radius: 6px; background: var(--c-overlay);
-    color: var(--c-fg-soft); font-weight: 500;
-  }
-  #label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 窗口身份（受控浏览器 / 无痕）只由窗口标题栏说一遍：这条顶栏不再重复那段文案，
+     左侧只留一个状态圆点，悬停能看到归属的会话。 */
   .dot { flex: none; width: 5px; height: 5px; border-radius: 999px; background: var(--c-fg-dim); }
   .dot.loading { background: var(--c-warn); }
   .windows {
@@ -157,14 +153,12 @@ export function chromeHtml() {
 </style>
 </head>
 <body>
-  <span class="badge" id="badge"><span class="dot" id="loading"></span><span id="label">受控浏览器</span></span>
+  <span class="dot" id="loading"></span>
   <button class="windows" id="windows" type="button" hidden></button>
   <span class="tabs" id="tabs"></span>
   <span class="url" id="url" title=""></span>
 <script>
   (function () {
-    var label = document.getElementById('label')
-    var badge = document.getElementById('badge')
     var windows = document.getElementById('windows')
     var tabs = document.getElementById('tabs')
     var url = document.getElementById('url')
@@ -233,8 +227,8 @@ export function chromeHtml() {
       update: function (state) {
         state = state || {}
         applyPalette(state.palette)
-        label.textContent = (state.incognito ? '无痕 · ' : '') + (state.label || '受控浏览器')
-        badge.title = label.textContent + (state.owner ? '\\n用户会话 ' + state.owner : '\\n未归属')
+        var who = (state.incognito ? '无痕 · ' : '') + (state.label || '受控浏览器')
+        loading.title = who + (state.owner ? '\\n用户会话 ' + state.owner : '\\n未归属')
         var count = Number(state.windowCount) || 0
         windows.hidden = count < 2
         windows.textContent = '窗口 ' + count + ' ▾'

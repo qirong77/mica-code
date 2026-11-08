@@ -253,8 +253,10 @@ export function createBrowserManager({
   function syncWindowTitle(record) {
     if (record.win.isDestroyed()) return
     const current = activeTab(record)
-    const title = current?.title || current?.url || '受控浏览器'
-    record.win.setTitle(`${title} — ${record.incognito ? '无痕受控浏览器' : '受控浏览器'}`)
+    const kind = record.incognito ? '无痕受控浏览器' : '受控浏览器'
+    // 页面还没有标题时不要拼成「受控浏览器 — 受控浏览器」：窗口种类只说一遍
+    const title = current?.title || current?.url || ''
+    record.win.setTitle(title ? `${title} — ${kind}` : kind)
   }
 
   function layout(record) {
